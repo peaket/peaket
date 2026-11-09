@@ -1,19 +1,26 @@
 Error: Invariant q_inv is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -25,7 +32,8 @@ State 1: <Initial predicate>
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -40,35 +48,49 @@ State 1: <Initial predicate>
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 539, col 3 to line 569, col 72 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 770, col 3 to line 800, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -80,7 +102,8 @@ State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 539, col 3 to line 569
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -99,35 +122,49 @@ State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 539, col 3 to line 569
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 539, col 3 to line 569, col 72 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 770, col 3 to line 800, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -139,7 +176,8 @@ State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 539, col 3 to line 569
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -162,35 +200,49 @@ State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 539, col 3 to line 569
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 4: <queue_no_rb05_wait_queue_windowEnds line 1079, col 3 to line 1086, col 72 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+State 4: <queue_no_rb05_wait_queue_windowEnds line 1421, col 3 to line 1428, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -202,7 +254,8 @@ State 4: <queue_no_rb05_wait_queue_windowEnds line 1079, col 3 to line 1086, col
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -225,35 +278,49 @@ State 4: <queue_no_rb05_wait_queue_windowEnds line 1079, col 3 to line 1086, col
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1116, col 3 to line 1172, col 68 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1458, col 3 to line 1514, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -265,7 +332,8 @@ State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1116, col 3 to line 117
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -288,47 +356,68 @@ State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1116, col 3 to line 117
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_rb05_wait_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 
-State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1190, col 3 to line 1229, col 68 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1532, col 3 to line 1571, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -340,7 +429,8 @@ State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1190, col 3 to line 122
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -359,47 +449,68 @@ State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1190, col 3 to line 122
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_rb05_wait_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 
-State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1053, col 3 to line 1073, col 72 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1395, col 3 to line 1415, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -411,7 +522,8 @@ State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1053, col 3 to line 1073, 
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -430,35 +542,49 @@ State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1053, col 3 to line 1073, 
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1116, col 3 to line 1172, col 68 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1458, col 3 to line 1514, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -470,7 +596,8 @@ State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1116, col 3 to line 117
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -489,47 +616,68 @@ State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1116, col 3 to line 117
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_rb05_wait_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 
-State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1190, col 3 to line 1229, col 68 of module queue_no_rb05_wait>
-/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1532, col 3 to line 1571, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
@@ -543,7 +691,8 @@ State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1190, col 3 to line 122
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -558,29 +707,43 @@ State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1190, col 3 to line 122
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+/\ queue_no_rb05_wait_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_rb05_wait_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>

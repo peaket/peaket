@@ -220,6 +220,14 @@ module payment {
     pay' = pay, env' = env, ghost' = ghost, keepOrderSide,
   }
 
+  // 결제사가 승인한 결제를 결제사 쪽에서 전액 취소함(환경, PRF-182가 넘긴 것). 승인을 기록하지 못해 결과 모름으로 남은 결제만 본다(승인을 기록한 뒤의 취소는 취소 단계 몫이라 뺀다).
+  // 조회가 CANCELED로 끝내고(대사가 닫는 행, payment §8) 주문은 과금 없이 실패로 끝난다(T15, BUILD_ORDER HOT-153)
+  action pgCancel(o: int, p: int): bool = all {
+    pgs.get((p, o)) == "APPROVED", pay.get((o, p)) == "UNKNOWN",
+    pgs' = pgs.set((p, o), "CANCELED"),
+    req' = req, pay' = pay, env' = env, ghost' = ghost, keepOrderSide,
+  }
+
   // 결제사의 인증 만료: 승인 기한이 지났고 처리할 승인 요청이 없는 인증(토스 EXPIRED)
   action pgExpire(o: int, p: int): bool = all {
     pgs.get((p, o)) == "AUTH", late.get(o), not(req.get((p, o))),
@@ -280,9 +288,10 @@ module payment {
   }
 
   // ---- purchase-svc: 결과 반영(사건 또는 당기기, 사건과 같은 처리기) ----
-  // 승인: seat_sale SOLD + 주문 APPROVED + 발권 재시도 큐 행 + Outbox(한 트랜잭션, ADR-0106). 실패: PENDING 삭제·좌석 해제·주문 FAILED
+  // 승인: seat_sale SOLD + 주문 APPROVED + 발권 재시도 큐 행 + Outbox(한 트랜잭션, ADR-0106). 실패: PENDING 삭제·좌석 해제·주문 FAILED.
+  // 결제사 전액 취소로 닫힌 결제(CANCELED, 주문은 T12의 결과 모름을 비춘 RESERVED)도 실패와 같이 끝난다(T15, BUILD_ORDER HOT-153)
   action applyResult(o: int, p: int): bool = all {
-    o_(o).st == "RESERVED", Set("APPROVED", "FAILED").contains(pay.get((o, p))),
+    o_(o).st == "RESERVED", Set("APPROVED", "FAILED", "CANCELED").contains(pay.get((o, p))),
     ord' = ord.set(o, if (pay.get((o, p)) == "APPROVED") o_(o).with("st", "APPROVED").with("job", true) else o_(o).with("st", "FAILED")),
     att' = att, pgs' = pgs, req' = req, pay' = pay, late' = late, tks' = tks, env' = env, ghost' = ghost,
   }
@@ -422,7 +431,7 @@ module payment {
     nondet b = Set("APPROVED", "FAILED").oneOf()
     any {
       newAttempt(o), auth(o, k), accept(o, k), expireAttempt(o, k), expireOrder(o),
-      reserve(o), command(o), send(o, p), expireCommand(o, p), pgProcess(o, p), pgExpire(o, p), respond(o, p), timeout(o, p), query(o, p),
+      reserve(o), command(o), send(o, p), expireCommand(o, p), pgProcess(o, p), pgExpire(o, p), pgCancel(o, p), respond(o, p), timeout(o, p), query(o, p),
       webhook(o, p, b), deadlinePasses(o), applyResult(o, p),
       issue(o), ticketSvc(o), issueAck(o), ticketBreaks(o), overdue(o), csConfirm(o), compStart(o), compFence(o), compCancel(o), eventRefund(o),
       restart, eventCancel, toggleSwitch,
@@ -449,9 +458,9 @@ module payment {
   // ---- 결국 일어남(docs/verification.md §2.1 `payment`): 공정성 가정 아래에서 ----
   val vars = (ord, att, pgs, req, pay, late, tks, env, ghost)
   def pgApproved(o: int): bool = PGS.exists(p => pgs.get((p, o)) == "APPROVED")
-  // 끝: 유효 티켓이 있는 발권 완료, 또는 결제사 승인이 남지 않은 보상·환불
+  // 끝: 유효 티켓이 있는 발권 완료, 또는 결제사 승인이 남지 않은 보상·환불·실패(결제사 전액 취소로 끝난 FAILED)
   def settled(o: int): bool =
-    (o_(o).st == "CONFIRMED" and t_(o).tk == "ISSUED") or (Set("COMPENSATED", "REFUNDED").contains(o_(o).st) and not(pgApproved(o)))
+    (o_(o).st == "CONFIRMED" and t_(o).tk == "ISSUED") or (Set("COMPENSATED", "REFUNDED", "FAILED").contains(o_(o).st) and not(pgApproved(o)))
   def unknown(o: int): bool = PGS.exists(p => pay.get((o, p)) == "UNKNOWN")
   // 승인된 주문은 결국 발권되거나 보상·환불로 끝나고, 결과 모름은 결국 풀리고, 접수하지 않은 주문은 결국 CREATED를 벗어나고(만료 또는 접수),
   // 접수한 주문은 결국 접수·판매 예약 상태를 벗어난다(승인 반영 또는 과금 없는 실패로 좌석을 풂, T9·T11·T15. 코드 리뷰 2026-11-02)

@@ -4,6 +4,7 @@
 //   [.state-icon 40px(기기 아이콘 20px)] [.li-title grow 기기 이름] [지금 이 기기: .badge.badge-primary | 다른 기기: .btn.btn-outline.btn-sm 로그아웃].
 //   스태프 세션(현장 스캐너)은 이름 아래(휴대폰) 또는 옆(md 이상)에 .badge.badge-outline 꼬리표를 붙인다.
 // - 각 로그아웃 버튼의 이름에 대상 기기 이름을 잇는다('Safari · iPhone 로그아웃', d2 CMP-052 접근성).
+// - 이름 아래 보조 줄(detail, 예: '마지막 활동 2026.11.03')을 둘 수 있다(.li-sub, d5 §5.17, 2026-11-05 ADR-0209).
 // - 원격 로그아웃 전 재인증(CMP-064)은 부르는 화면이 onLogout에서 연다. 목록을 불러오는 중이면 스피너와 상태 글을 보인다(d5 §5.17 상태 '기기 목록 로딩').
 // - 버튼이 함수 props를 받으므로 클라이언트 부품이다. 문구는 앱이 props로 넘긴다.
 import type { ReactNode } from 'react';
@@ -20,6 +21,8 @@ export interface DeviceSession {
   current?: boolean;
   /** 이름 옆 꼬리표(예: '스태프 세션') */
   tag?: ReactNode;
+  /** 이름 아래 보조 줄(예: '마지막 활동 2026.11.03') */
+  detail?: ReactNode;
 }
 
 export interface DeviceSessionListProps {
@@ -69,12 +72,27 @@ export function DeviceSessionList({
             <span className="state-icon" style={{ width: 40, height: 40 }} aria-hidden="true">
               <Icon name={s.icon} style={{ width: 20, height: 20 }} />
             </span>
-            {s.tag ? (
+            {s.tag && s.detail ? (
+              <span className="col grow gap-1">
+                <span className="col gap-1 md:flex-row md:items-center md:gap-2">
+                  <span className="li-title">{s.name}</span>
+                  <span className="row">
+                    <span className="badge badge-outline">{s.tag}</span>
+                  </span>
+                </span>
+                <span className="li-sub">{s.detail}</span>
+              </span>
+            ) : s.tag ? (
               <span className="col grow gap-1 md:flex-row md:items-center md:gap-2">
                 <span className="li-title">{s.name}</span>
                 <span className="row">
                   <span className="badge badge-outline">{s.tag}</span>
                 </span>
+              </span>
+            ) : s.detail ? (
+              <span className="col grow" style={{ gap: 2 }}>
+                <span className="li-title">{s.name}</span>
+                <span className="li-sub">{s.detail}</span>
               </span>
             ) : (
               <span className="li-title grow">{s.name}</span>

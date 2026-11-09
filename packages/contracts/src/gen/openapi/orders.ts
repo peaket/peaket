@@ -20,29 +20,29 @@ import * as zod from 'zod';
 
 
 
-export const PostV1OrdersHeader = zod.object({
+export const CreateOrderHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const postV1OrdersBodyConsentsConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
+export const createOrderBodyConsentsConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
 
 
-export const PostV1OrdersBody = zod.object({
+export const CreateOrderBody = zod.object({
   "holdId": zod.string(),
   "buyer": zod.object({
   "name": zod.string().optional(),
   "phone": zod.string().optional()
-}),
+}).strict(),
   "consents": zod.object({
   "provisionToSeller": zod.boolean().optional().describe('판매자에게 개인정보 제공 동의(필수, 문안 docs/planning/04 SCR-011 ③, 추천 적용 2026-10-14, ADR-0062)'),
   "salesTerms": zod.boolean().optional().describe('판매 조건(정렬 방식·1인 1순번·매수 한도·취소 규정) 결제 직전 동의(필수, POL-004)'),
-  "consentVersion": zod.string().regex(postV1OrdersBodyConsentsConsentVersionRegExp).optional().describe('주문서에 보인 두 고지 문안의 판. purchase_order.consent_version에 넣는다(문안은 판마다 따로 보관한다, docs/security/data-classification.md \'법적 동의 기록\'). 서버가 지금 쓰는 판이 아니면 422 consent-version-outdated이고, 화면은 지금 문안을 다시 보이고 다시 동의받는다. 32자 상한은 [가정](추천 적용 2026-10-30, docs/data.md purchase_order.consent_version)')
+  "consentVersion": zod.string().regex(createOrderBodyConsentsConsentVersionRegExp).optional().describe('주문서에 보인 두 고지 문안의 판. purchase_order.consent_version에 넣는다(문안은 판마다 따로 보관한다, docs/security/data-classification.md \'법적 동의 기록\'). 서버가 지금 쓰는 판이 아니면 422 consent-version-outdated이고, 화면은 지금 문안을 다시 보이고 다시 동의받는다. 32자 상한은 [가정](추천 적용 2026-10-30, docs/data.md purchase_order.consent_version)')
 }).strict().optional().describe('두 동의와 고지 문안의 판. 없거나, 두 동의 가운데 하나라도 true가 아니거나, consentVersion이 없으면 422 consent-required다(동의 누락은 형식 오류가 아니라 업무 규칙이다, guidelines §12). 동의 일시는 주문의 created_at이다(추천 적용 2026-10-30, 굿즈 주문 본문 MerchOrderCreateDelivery.consents와 같은 방식, ADR-0089·0160)')
-})
+}).strict()
 
-export const PostV1OrdersResponse = zod.object({
+export const CreateOrderResponse = zod.object({
   "orderId": zod.string().optional(),
   "amount": zod.int().optional(),
   "status": zod.enum(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED']).optional().describe('주문 상태(docs/planning/03 §2.4). 결제 시도 상태와 결제 원장 상태는 따로다(payment §3). EXPIRED는 결제를 접수하지 않고 끝난 주문이다(과금 없음, 추천 적용 2026-10-28, ADR-0107)'),
@@ -52,59 +52,108 @@ export const PostV1OrdersResponse = zod.object({
 })
 
 /**
+ * FR-047, FR-053, POL-032, docs/design/d5 §1.6 2번·§5.29. 세션 계정의 계정 묶음의 티켓 주문을 최근 순으로 커서로 준다(guidelines §3). 결제를 접수하지 않아 만료된 EXPIRED 주문은 빼고(d5 §5.29, ADR-0107), 티켓이 없는 주문(실패·결과 불명·입금 대기)은 넣는다. '전체' 탭은 이 목록과 GET /v1/shop/orders를 createdAt으로 섞어 그린다 [가정]. 티켓 주문은 purchase-svc, 굿즈 주문은 core-svc가 맡아 한 커서로 묶지 않는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 목록(SCR-055 예매 탭)
+ */
+export const listOrdersQueryLimitMax = 100;
+
+
+
+export const ListOrdersQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listOrdersQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listOrdersResponseItemsItemTiersMax = 20;
+
+
+
+export const ListOrdersResponse = zod.object({
+  "items": zod.array(zod.object({
+  "orderId": zod.string(),
+  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "eventId": zod.string(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "tiers": zod.array(zod.object({
+  "tierName": zod.string().optional(),
+  "quantity": zod.int().optional()
+})).max(listOrdersResponseItemsItemTiersMax).optional().describe('등급별 매수(예 R석 2매). 20개 상한은 [가정]'),
+  "amount": zod.int().describe('결제 금액(원, 서버 계산)'),
+  "status": zod.enum(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED']).describe('Order.status와 같은 값. 목록에는 EXPIRED가 나오지 않고 단건에는 나올 수 있다'),
+  "issueDelayed": zod.boolean().optional().describe('PaymentStatus.issueDelayed와 같은 뜻(결제 완료·티켓 발급 중, ADR-0106)'),
+  "failureReason": zod.string().nullish().describe('FAILED일 때 사유 코드(purchase_order.failure_reason). 입금 기한이 지나 끝난 주문도 FAILED이고(T17) 화면은 <주문 취소됨>을 보인다'),
+  "refundPending": zod.boolean().optional().describe('환급을 보류 중인 취소가 있다(<환급 보류>)'),
+  "virtualAccount": zod.object({
+  "bank": zod.string().optional(),
+  "dueAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('입금 대기일 때 은행과 입금 기한만. 입금처 번호는 GET /v1/orders/{orderId}/payment-status로 읽는다'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('예매 주문 한 줄(SCR-055 목록). 공연명·등급 표시 값은 주문 때 복사한 값으로 답한다 [가정]')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
  * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 구매 세션 요청 서명 필수
  * @summary 결제 시도 시작(결제사 선택, 결제창 값 발급)
  */
-export const PostV1OrdersOrderIdPaymentsParams = zod.object({
+export const CreateOrderPaymentParams = zod.object({
   "orderId": zod.string()
 })
 
 
 
 
-export const PostV1OrdersOrderIdPaymentsHeader = zod.object({
+export const CreateOrderPaymentHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorWindowMsMin = 0;
-export const postV1OrdersOrderIdPaymentsBodyBehaviorWindowMsMax = 3600000;
+export const createOrderPaymentBodyBehaviorWindowMsMin = 0;
+export const createOrderPaymentBodyBehaviorWindowMsMax = 3600000;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorPointerMovesMin = 0;
+export const createOrderPaymentBodyBehaviorPointerMovesMin = 0;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorPointerEntropyMin = 0;
+export const createOrderPaymentBodyBehaviorPointerEntropyMin = 0;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorInputIntervalMeanMsMin = 0;
+export const createOrderPaymentBodyBehaviorInputIntervalMeanMsMin = 0;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorInputIntervalStdMsMin = 0;
+export const createOrderPaymentBodyBehaviorInputIntervalStdMsMin = 0;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorScrollEventsMin = 0;
+export const createOrderPaymentBodyBehaviorScrollEventsMin = 0;
 
-export const postV1OrdersOrderIdPaymentsBodyBehaviorScrollDistancePxMin = 0;
+export const createOrderPaymentBodyBehaviorScrollDistancePxMin = 0;
 
 
 
-export const PostV1OrdersOrderIdPaymentsBody = zod.object({
+export const CreateOrderPaymentBody = zod.object({
   "payMethod": zod.string().optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
-  "windowMs": zod.int().min(postV1OrdersOrderIdPaymentsBodyBehaviorWindowMsMin).max(postV1OrdersOrderIdPaymentsBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),
-  "pointerMoves": zod.int().min(postV1OrdersOrderIdPaymentsBodyBehaviorPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
-  "pointerEntropy": zod.number().min(postV1OrdersOrderIdPaymentsBodyBehaviorPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
-  "inputIntervalMeanMs": zod.number().min(postV1OrdersOrderIdPaymentsBodyBehaviorInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
-  "inputIntervalStdMs": zod.number().min(postV1OrdersOrderIdPaymentsBodyBehaviorInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
-  "scrollEvents": zod.int().min(postV1OrdersOrderIdPaymentsBodyBehaviorScrollEventsMin).optional().describe('스크롤 이벤트 수'),
-  "scrollDistancePx": zod.int().min(postV1OrdersOrderIdPaymentsBodyBehaviorScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
+  "windowMs": zod.int().min(createOrderPaymentBodyBehaviorWindowMsMin).max(createOrderPaymentBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),
+  "pointerMoves": zod.int().min(createOrderPaymentBodyBehaviorPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
+  "pointerEntropy": zod.number().min(createOrderPaymentBodyBehaviorPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
+  "inputIntervalMeanMs": zod.number().min(createOrderPaymentBodyBehaviorInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
+  "inputIntervalStdMs": zod.number().min(createOrderPaymentBodyBehaviorInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
+  "scrollEvents": zod.int().min(createOrderPaymentBodyBehaviorScrollEventsMin).optional().describe('스크롤 이벤트 수'),
+  "scrollDistancePx": zod.int().min(createOrderPaymentBodyBehaviorScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
 }).strict().optional().describe('결제 화면에서 잰 행동 요약(선택). purchase-svc가 BehaviorSignal(screen PAYMENT)로 내고 실시간 판정에는 쓰지 않는다. 같은 주문의 두 번째 시도부터는 싣지 않는다(추천 적용 2026-10-31, ADR-0171 결정 4)')
-})
+}).strict()
 
-export const PostV1OrdersOrderIdPaymentsResponse = zod.object({
+export const CreateOrderPaymentResponse = zod.object({
   "attemptId": zod.string(),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).describe('결제사 선택기가 고른 결제사. SIMULATOR는 부하·시험 환경 전용'),
   "switched": zod.boolean().optional().describe('결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다(CMP-027 pg-switched)'),
   "holdExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085)'),
   "checkout": zod.union([zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
   "clientKey": zod.string(),
   "customerKey": zod.string(),
   "orderId": zod.string(),
@@ -112,7 +161,7 @@ export const PostV1OrdersOrderIdPaymentsResponse = zod.object({
   "amount": zod.int().describe('원 단위'),
   "successUrl": zod.url(),
   "failUrl": zod.url()
-}).strict(),zod.object({
+}),zod.object({
   "storeId": zod.string(),
   "channelKey": zod.string(),
   "paymentId": zod.string().describe('pay-{orderId}'),
@@ -121,56 +170,138 @@ export const PostV1OrdersOrderIdPaymentsResponse = zod.object({
   "currency": zod.string().describe('결제 통화. SDK에 넘기는 값의 표기는 연동 때 포트원 문서로 확인한다'),
   "redirectUrl": zod.url(),
   "customer": zod.record(zod.string(), zod.string()).optional().describe('채널이 요구하는 구매자 항목만(이메일·휴대폰. SDK 필드 이름은 연동 때 확인)')
-}).strict()]).describe('결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028)')
+})]).describe('결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028)')
 }).describe('결제 시도(POL-036, ADR-0044). 결제창을 열기 직전에 만든다. 주문당 활성 시도는 1건이고 새 시도는 결제 접수 전의 이전 시도를 대체한다')
 
 /**
  * FR-011, NFR-005 p99 150ms. pg와 활성 결제 시도의 결제사 대조(다르면 409) → 토스는 amount 대조, 포트원은 paymentId 대조 → 결제 참조 저장 → Saga 시작. 결제사 호출은 응답 밖(ADR-0015). 접수 뒤 주문은 그 결제사에 고정(ADR-0044). 구매 세션 요청 서명 필수
  * @summary 결제 접수(202). 결제사별 본문(토스 paymentKey·amount, 포트원 paymentId·paymentToken·txId)
  */
-export const PostV1OrdersOrderIdPaymentAcceptanceParams = zod.object({
+export const CreateOrderPaymentAcceptanceParams = zod.object({
   "orderId": zod.string()
 })
 
 
 
 
-export const PostV1OrdersOrderIdPaymentAcceptanceHeader = zod.object({
+export const CreateOrderPaymentAcceptanceHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const PostV1OrdersOrderIdPaymentAcceptanceBody = zod.union([zod.object({
+export const CreateOrderPaymentAcceptanceBody = zod.union([zod.object({
   "pg": zod.enum(['TOSS', 'SIMULATOR']),
-  "paymentKey": zod.string().describe('토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식)'),
+  "paymentKey": zod.string().describe('토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식). 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
   "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조')
 }).strict(),zod.object({
   "pg": zod.enum(['PORTONE']),
-  "paymentId": zod.string().describe('결제 시도 응답의 paymentId와 같아야 한다'),
+  "paymentId": zod.string().describe('결제 시도 응답의 paymentId와 같아야 한다. 세 칸 모두 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
   "paymentToken": zod.string().describe('수동 승인 API용 결제 토큰. 승인 결과가 정해지면 서버에서 지운다'),
   "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다')
 }).strict()]).describe('결제 접수 본문. pg 값으로 갈린다(ADR-0044 결정 7). 허용 필드 밖의 값은 400')
 
-export const PostV1OrdersOrderIdPaymentAcceptanceResponse = zod.void()
+export const CreateOrderPaymentAcceptanceResponse = zod.void()
 
 /**
  * FR-011, NFR-006 확정 p99 3초(Degraded 60초). UNKNOWN은 조회 API로 확정 후 알림. 서버는 결과가 정해지면 바로, 아니면 25초 [가정]에 그때의 상태로 답한다. api 배포의 CloudFront 원본 응답 시간 초과(기본 30초)보다 짧게 두어, CloudFront가 같은 GET을 원본에 다시 보내지 않게 한다. gw-fan 경로 시간 초과 27초 [가정], 브라우저 시간 초과 30초 [가정](docs/infra.md §4.1). 처음 상한 30초는 추천 적용 2026-10-09
  * @summary 결제 결과 long polling(최대 25초 [가정] 대기, 추천 적용 2026-10-28, 기술 검토 중간-047)
  */
-export const GetV1OrdersOrderIdPaymentStatusParams = zod.object({
+export const GetOrderPaymentStatusParams = zod.object({
   "orderId": zod.string()
 })
 
-export const GetV1OrdersOrderIdPaymentStatusResponse = zod.object({
+export const GetOrderPaymentStatusResponse = zod.object({
   "status": zod.enum(['ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'CONFIRMED', 'FAILED', 'UNKNOWN', 'COMPENSATED']).optional(),
-  "issueDelayed": zod.boolean().optional().describe('APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중. 화면은 \'결제 완료, 티켓 발급 중\'(payment §3, 추천 적용 2026-10-28, ADR-0106)'),
+  "issueDelayed": zod.boolean().optional().describe('APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중이거나(발권 재시도 큐 행의 시도 수 1 이상이고 마지막 오류 있음), 그 큐 행을 만든 지(purchase가 승인을 반영한 때부터) 60초 [가정]가 지났을 때 참. 60초 조건은 trade.orders ISSUE_DELAYED를 내는 기준과 같다. 화면은 \'결제 완료, 티켓 발급 중\'(payment §2·§3, 추천 적용 2026-10-28, ADR-0106. 60초 조건은 BUILD_ORDER PRF-166, 그 뜻은 추천 적용 2026-11-05, BUILD_ORDER PRF-170)'),
   "virtualAccount": zod.object({
   "bank": zod.string().optional(),
   "accountNumber": zod.string().optional(),
   "dueAt": zod.iso.datetime({"offset":true}).optional()
-}).optional().describe('가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062)'),
+}).optional().describe('가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062). 입금처 번호라 구매자의 계좌가 아니다. payment-svc에서 읽어 응답에만 싣고, 안내가 없으면 칸이 없다. 일시적으로 읽지 못하면 입금 대기 대신 처리 중인 RESERVED로 답한다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151, 코드 리뷰)'),
   "reason": zod.string().optional(),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional().describe('결제 접수에서 고정된 결제사(ADR-0044)')
 })
+
+/**
+ * FR-011, FR-053, POL-032, POL-037, SCR-012, SCR-055, docs/design/d5 §1.6 2번. 결제 결과 화면과 예매 확인서가 읽는다. 주문 계정이 세션 계정의 계정 묶음에 들어야 한다(authz-matrix §3.2). 결제 상태의 긴 기다림은 GET /v1/orders/{orderId}/payment-status가 맡고 이 경로는 바로 답한다. 카드번호와 계좌 전체는 싣지 않는다. 가상계좌 입금 번호는 입금 대기일 때 payment-status로 읽는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 상세(예매 확인서, 결제 결과 화면의 예매번호·결제 금액)
+ */
+export const GetOrderParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const getOrderResponseOneTiersMax = 20;
+
+export const getOrderResponseTwoSeatsMax = 20;
+
+export const getOrderResponseTwoPaymentCardLast4RegExp = new RegExp('^[0-9]{4}$');
+
+
+export const GetOrderResponse = zod.object({
+  "orderId": zod.string(),
+  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "eventId": zod.string(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "tiers": zod.array(zod.object({
+  "tierName": zod.string().optional(),
+  "quantity": zod.int().optional()
+})).max(getOrderResponseOneTiersMax).optional().describe('등급별 매수(예 R석 2매). 20개 상한은 [가정]'),
+  "amount": zod.int().describe('결제 금액(원, 서버 계산)'),
+  "status": zod.enum(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED']).describe('Order.status와 같은 값. 목록에는 EXPIRED가 나오지 않고 단건에는 나올 수 있다'),
+  "issueDelayed": zod.boolean().optional().describe('PaymentStatus.issueDelayed와 같은 뜻(결제 완료·티켓 발급 중, ADR-0106)'),
+  "failureReason": zod.string().nullish().describe('FAILED일 때 사유 코드(purchase_order.failure_reason). 입금 기한이 지나 끝난 주문도 FAILED이고(T17) 화면은 <주문 취소됨>을 보인다'),
+  "refundPending": zod.boolean().optional().describe('환급을 보류 중인 취소가 있다(<환급 보류>)'),
+  "virtualAccount": zod.object({
+  "bank": zod.string().optional(),
+  "dueAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('입금 대기일 때 은행과 입금 기한만. 입금처 번호는 GET /v1/orders/{orderId}/payment-status로 읽는다'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('예매 주문 한 줄(SCR-055 목록). 공연명·등급 표시 값은 주문 때 복사한 값으로 답한다 [가정]').and(zod.object({
+  "placeName": zod.string().optional(),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작'),
+  "seats": zod.array(zod.object({
+  "seatLabel": zod.string().optional(),
+  "tierName": zod.string().optional(),
+  "unitPrice": zod.int().optional().describe('주문 때 가격(원)'),
+  "gateZone": zod.string().nullish().describe('입장 게이트 구역'),
+  "ticketId": zod.string().nullish()
+})).max(getOrderResponseTwoSeatsMax).optional().describe('좌석별 줄(order_item). ticketId는 발권 뒤에만 있다. 20개 상한은 [가정]'),
+  "payment": zod.object({
+  "method": zod.string().optional().describe('결제 수단 이름 코드 [가정]'),
+  "cardLast4": zod.string().regex(getOrderResponseTwoPaymentCardLast4RegExp).nullish().describe('카드 끝 4자리(d5 §5.29). 카드가 아니면 null. docs/data.md payment에 칸이 아직 없다 [가정]'),
+  "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional()
+}).nullish().describe('결제 수단 표시. 접수 전이면 null. 카드번호 전체는 어떤 칸에도 없다'),
+  "cancellations": zod.array(zod.object({
+  "cancellationId": zod.string().optional(),
+  "ticketId": zod.string().nullish(),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "deductionAmount": zod.int().optional().describe('공제액(원)'),
+  "refundAmount": zod.int().optional().describe('환급액(원)'),
+  "refundDueAt": zod.iso.datetime({"offset":true}).nullish().describe('환급 예정일(3영업일)'),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('환불 계좌를 기다리는 건(POST /v1/cancellations/{cancellationId}/account, SCR-060)')
+})).optional().describe('취소·환급 이력(order_cancellation)'),
+  "compensation": zod.union([zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)'),zod.null()]).optional().describe('배상 건(SCR-043으로 잇는다). 없으면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 정보(CMP-058 receipt, 전자상거래법 §20②)')
+})).describe('예매 주문 상세(GET /v1/orders/{orderId}, 예매 확인서). 예매자 성명·휴대폰 번호는 화면이 쓰지 않아 싣지 않는다')
 

@@ -1,0 +1,5 @@
+/* Storybook 미리보기의 첫 CSS. 앱과 같은 층 순서와 싣는 차례다(packages/ds/README.md 'CSS 싣기', d2 §1) */
+@layer theme, base, seed-base, seed-components, components, utilities;
+@import "tailwindcss";
+@import "../../../packages/ds/src/styles/index.css";
+@source "../../../packages/ds/src";

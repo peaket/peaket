@@ -13,10 +13,13 @@ export const EventSaleChanged = zod.object({
   "available": zod.int().describe('판정 때 가용 좌석(비트맵에서 비어 있는 판매 대상 좌석)'),
   "held": zod.int().describe('판정 때 홀드 수'),
   "paying": zod.int().describe('판정 때 결제 중인 판매 예약(승인 결과를 기다리는 PENDING) 수'),
-  "version": zod.int().describe('판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다'),
+  "soldOutTiers": zod.array(zod.string()).describe('판정 때 매진인 등급 ID(좌석맵 판의 tierId) 전체. 없으면 빈 배열. 등급의 가용·홀드·결제 중이 모두 0이면 그 등급은 매진이다. 등급 매진은 회차 판매 상태가 아니라 덧씌우는 표시라, status가 그대로여도 이 목록이 바뀌면 판 번호를 올려 다시 낸다. queue-svc가 대기 상태 파일의 soldOutTiers·TIER_SOLD_OUT으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)'),
+  "version": zod.int().describe('판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다. 매진 등급만 바뀌어도 오른다'),
   "changedAt": zod.iso.datetime({"offset":true}),
-  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값')
-}).describe('회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다')
+  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값'),
+  "countedAt": zod.iso.datetime({"offset":true}).optional().describe('available·held·paying·avgTicketsPerOrder를 센 시각. 셈을 실은 사건(판이 바뀔 때와 같은 판의 다시 내기)에만 싣는다. queue-svc는 이 칸이 없거나 자기 시계보다 5초 [가정] 넘게 앞서면 셈을 대기 상태 파일에 쓰지 않는다. 이 칸이나 avgTicketsPerOrder의 모양만 틀리면 셈 칸만 버리고 판매 상태는 받는다(추천 적용 2026-11-06, ADR-0219 결정 5)'),
+  "avgTicketsPerOrder": zod.number().optional().describe('그 회차의 이번 판매에서 결제가 끝난 주문의 평균 좌석 수(좌석 수 ÷ 주문 수, 소수 둘째 자리). 그런 주문이 100건 [가정] 이상일 때만 싣는다. queue-svc는 없거나 1~10 밖이면 기본값 2 [가정]를 쓴다(POL-015, 추천 적용 2026-11-06, ADR-0219 결정 6)')
+}).describe('회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다. 다시 내기(추천 적용 2026-11-06, ADR-0219 결정 5): ON_SALE·ALL_HELD·SOLD_OUT 회차는 같은 판(version·eventKey 그대로)을 5초 [가정]마다 그때의 셈(available·held·paying·countedAt·avgTicketsPerOrder)으로 다시 낸다. 받는 쪽은 판 번호로 거르고, queue-svc는 같은 판의 더 늦은 셈으로 대기 상태 파일의 남은 좌석 수를 고치고 엣지 매진 표시를 다시 맞춘다')
 
 export type EventSaleChanged = zod.input<typeof EventSaleChanged>;
 export type EventSaleChangedOutput = zod.output<typeof EventSaleChanged>;

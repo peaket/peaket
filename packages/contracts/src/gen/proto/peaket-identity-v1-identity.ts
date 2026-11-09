@@ -49,6 +49,18 @@ export const identityV1Identity: Record<string, unknown> = {
                       "requestType": "CreateSessionRequest",
                       "responseType": "CreateSessionResponse"
                     },
+                    "GetLinkProposal": {
+                      "requestType": "GetLinkProposalRequest",
+                      "responseType": "GetLinkProposalResponse"
+                    },
+                    "SeparateAccount": {
+                      "requestType": "SeparateAccountRequest",
+                      "responseType": "CreateSessionResponse"
+                    },
+                    "AddProvider": {
+                      "requestType": "AddProviderRequest",
+                      "responseType": "AddProviderResponse"
+                    },
                     "EndSession": {
                       "requestType": "EndSessionRequest",
                       "responseType": "EndSessionResponse"
@@ -110,6 +122,10 @@ export const identityV1Identity: Record<string, unknown> = {
                       "type": "string",
                       "id": 10
                     },
+                    "link_binding": {
+                      "type": "string",
+                      "id": 12
+                    },
                     "asn": {
                       "type": "int64",
                       "id": 11
@@ -121,7 +137,8 @@ export const identityV1Identity: Record<string, unknown> = {
                     "outcome": {
                       "oneof": [
                         "session",
-                        "link_proposal_id"
+                        "link_proposal_id",
+                        "link_mismatch"
                       ]
                     }
                   },
@@ -134,9 +151,136 @@ export const identityV1Identity: Record<string, unknown> = {
                       "type": "string",
                       "id": 2
                     },
+                    "link_mismatch": {
+                      "type": "LinkMismatch",
+                      "id": 5
+                    },
                     "new_account": {
                       "type": "bool",
                       "id": 3
+                    },
+                    "link_binding": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "linked_provider": {
+                      "type": "Provider",
+                      "id": 6
+                    }
+                  }
+                },
+                "LinkMismatch": {
+                  "fields": {
+                    "attempts_left": {
+                      "type": "int32",
+                      "id": 1
+                    }
+                  }
+                },
+                "GetLinkProposalRequest": {
+                  "fields": {
+                    "link_proposal_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "link_binding": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "GetLinkProposalResponse": {
+                  "fields": {
+                    "existing_provider": {
+                      "type": "Provider",
+                      "id": 1
+                    },
+                    "new_provider": {
+                      "type": "Provider",
+                      "id": 2
+                    },
+                    "expires_at_ms": {
+                      "type": "int64",
+                      "id": 3
+                    },
+                    "attempts_left": {
+                      "type": "int32",
+                      "id": 4
+                    }
+                  }
+                },
+                "AddProviderRequest": {
+                  "fields": {
+                    "session_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "reauth_token": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "provider": {
+                      "type": "Provider",
+                      "id": 4
+                    },
+                    "provider_user_id": {
+                      "type": "string",
+                      "id": 5
+                    }
+                  }
+                },
+                "AddProviderResult": {
+                  "values": {
+                    "ADD_PROVIDER_RESULT_UNSPECIFIED": 0,
+                    "ADD_PROVIDER_RESULT_LINKED": 1,
+                    "ADD_PROVIDER_RESULT_ALREADY_LINKED": 2,
+                    "ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN": 3,
+                    "ADD_PROVIDER_RESULT_OTHER_ACCOUNT": 4,
+                    "ADD_PROVIDER_RESULT_REAUTH_REQUIRED": 5
+                  }
+                },
+                "AddProviderResponse": {
+                  "fields": {
+                    "result": {
+                      "type": "AddProviderResult",
+                      "id": 1
+                    },
+                    "merge_proposal_id": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "SeparateAccountRequest": {
+                  "fields": {
+                    "link_proposal_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "link_binding": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "idempotency_key": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "device_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "user_agent": {
+                      "type": "string",
+                      "id": 5
+                    },
+                    "auth_methods": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 6
                     }
                   }
                 },

@@ -1,0 +1,102 @@
+// purchase-svc가 제공하는 부정 예매 운영자 취소 계약. 초안(추천 적용 2026-11-05, BUILD_ORDER BAS-042), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/transfer-refund.md §7.4(부정 예매 조치)·§12, docs/features/forensic-replay.md §6.7(조치 실행), POL-032·POL-038 ⑪·POL-046, ADR-0171·ADR-0173.
+// 통신 표(docs/architecture.md §3.2)에는 2026-11-05에 더했다(ADR-0197).
+syntax = "proto3";
+
+package peaket.purchase.v1;
+
+import "google/protobuf/timestamp.proto";
+import "peaket/common/v1/common.proto";
+
+// 부르는 쪽: ops-svc뿐(승인 업무 FRAUD_ACTION의 fraudAction CANCEL_TICKETS가 2인 승인된 뒤, 실행 직전 재인증을 마친 실행 단계).
+service FraudCancellationService {
+  // 대상 티켓을 운영자 취소하고 공제·위약금 없이 전액을 원래 결제 수단으로 돌려준다(POL-032 환급 절차, 취소 Saga). 보유자·결제자와 무관하다
+  // (docs/planning/03 §2.5 T10·T11). 표마다: ticket-svc OperatorCancelTickets가 행 잠금 안에서 진행 중 양도 요청을 FRAUD_LOCK으로 철회하고,
+  // 이미 환급·무효로 끝난 표·입장 기록이 있는 표·지금 보유자가 기대 보유자와 다른 표(잠금이 풀린 뒤 넘어가 소명 기회를 받지 못한 받은 사람)는
+  // 건너뛰며, 나머지는 키를 폐기한다. 그 표마다 order_cancellation(사유 FRAUD, fraud_case_id, approval_id)을 만들고 취소 Saga를 시작한다.
+  // 환급 결과(3영업일 [가정] 안)는 기다리지 않는다. 좌석은 정가 재판매(취소표)로 돌린다.
+  // 멱등: (approval_id, ticket_id) 단위다. 같은 승인으로 다시 부르면 끝난 표(받음·건너뜀)는 저장한 결과를 그대로 돌려주고 실패한 표만 다시 한다.
+  // 다시 부른 요청의 확인을 취소 마감 검사보다 먼저 한다(마감 뒤에 다시 불러도 저장한 결과를 받는다). 같은 approval_id에 다른 대상이 오면 ALREADY_EXISTS다.
+  // 처음 부를 때 취소 마감 시각(판매 종료 − 2시간 [가정] = 공연 시작 26시간 전)이 지난 회차면 FAILED_PRECONDITION이다(그 뒤에는 이용 제한만).
+  rpc CancelFraudTickets(CancelFraudTicketsRequest) returns (CancelFraudTicketsResponse);
+
+  // 한 승인 업무의 취소 진행(티켓마다 환급 상태). 관제 사건 작업대(SCR-071)와 승인 업무 실행 결과가 읽는다.
+  rpc GetFraudCancellation(GetFraudCancellationRequest) returns (GetFraudCancellationResponse);
+}
+
+// 대상 표 하나. 기대 보유자는 ops-svc가 사건 기록에서 정한다(잠금을 건 때의 보유 계정). 지금 보유자가 다르면 건너뛴다
+message FraudCancelTarget {
+  string ticket_id = 1;
+  string expected_holder_account_id = 2;
+}
+
+message CancelFraudTicketsRequest {
+  // 승인 업무 ID(멱등키, approval_request.approval_id)
+  string approval_id = 1;
+  // 부정 거래 사건 ID(order_cancellation.fraud_case_id). 사건은 회차 하나 단위다
+  string fraud_case_id = 2;
+  // 그 사건의 회차. 대상 표는 모두 이 회차의 표다(아니면 INVALID_ARGUMENT)
+  string event_id = 3;
+  // 대상 표(1~500 [가정])
+  repeated FraudCancelTarget targets = 4;
+  // 요청한 조사관과 승인한 commander(감사 기록). 서로 달라야 한다
+  string requested_by = 5;
+  string approved_by = 6;
+  google.protobuf.Timestamp approved_at = 7;
+}
+
+// 티켓 하나의 결과
+enum FraudCancellationOutcome {
+  FRAUD_CANCELLATION_OUTCOME_UNSPECIFIED = 0;
+  // 취소를 받아 환급 Saga를 시작했다
+  FRAUD_CANCELLATION_OUTCOME_ACCEPTED = 1;
+  // 이미 환급·무효로 끝난 표(결제자가 스스로 취소한 표 등)라 건너뜀
+  FRAUD_CANCELLATION_OUTCOME_SKIPPED_ALREADY_ENDED = 2;
+  // 입장 기록이 있거나 입장이 시작되어 건너뜀(이용 제한과 신고만 남는다)
+  FRAUD_CANCELLATION_OUTCOME_SKIPPED_ENTRY_STARTED = 3;
+  // 지금 보유자가 기대 보유자와 달라 건너뜀(잠금이 풀린 뒤 넘어가 소명 기회를 받지 못한 받은 사람의 표, ADR-0173)
+  FRAUD_CANCELLATION_OUTCOME_SKIPPED_HOLDER_CHANGED = 4;
+  // 이 표는 이번에 끝내지 못했다(ticket-svc·DB 오류 등). 같은 승인으로 다시 부르면 이 표만 다시 한다. 취소 마감 전까지 실행 단계가 다시 부른다
+  FRAUD_CANCELLATION_OUTCOME_FAILED = 5;
+}
+
+message FraudTicketResult {
+  string ticket_id = 1;
+  FraudCancellationOutcome outcome = 2;
+  // ACCEPTED일 때만: 만든 취소 ID(order_cancellation)와 돌려줄 금액(공제 없음)
+  string cancellation_id = 3;
+  peaket.common.v1.Money refund_amount = 4;
+  // 그 표에서 시스템이 철회한 양도 요청 ID(없으면 빈 값)
+  string withdrawn_transfer_offer_id = 5;
+  // FAILED일 때만: 실패 까닭(로그·사건 기록용 코드, 개인정보 없음)
+  string failure_code = 6;
+}
+
+message CancelFraudTicketsResponse {
+  repeated FraudTicketResult results = 1;
+}
+
+message GetFraudCancellationRequest {
+  string approval_id = 1;
+}
+
+// 환급 진행 상태(취소 Saga와 결제사 취소)
+enum FraudRefundState {
+  FRAUD_REFUND_STATE_UNSPECIFIED = 0;
+  FRAUD_REFUND_STATE_PENDING = 1;
+  FRAUD_REFUND_STATE_REFUNDED = 2;
+  // 결제사 취소가 실패해 CS 처리함으로 간 건(REFUND_FAILED, 가상계좌는 계좌 입력 대기 포함)
+  FRAUD_REFUND_STATE_NEEDS_CS = 3;
+}
+
+message FraudRefundProgress {
+  string ticket_id = 1;
+  string cancellation_id = 2;
+  FraudRefundState state = 3;
+  google.protobuf.Timestamp refunded_at = 4;
+}
+
+message GetFraudCancellationResponse {
+  repeated FraudTicketResult results = 1;
+  repeated FraudRefundProgress refunds = 2;
+}

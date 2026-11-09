@@ -8,7 +8,9 @@ export type AdmissionErrorCode =
   | 'SALE_ENDED'
   | 'SOLD_OUT'
   | 'EXPIRED'
-  | 'REMOVED';
+  | 'REMOVED'
+  /** 셔플 결과 키를 잃은 참가자: repair:lobby를 썼고 다시 쓰기를 기다린다(503) */
+  | 'LOBBY_REPAIRING';
 
 export class AdmissionError extends Error {
   constructor(

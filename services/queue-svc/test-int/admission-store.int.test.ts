@@ -5,8 +5,10 @@ import { admissionKeys as k, RedisAdmissionStore } from '../src/modules/admissio
 import { ConfirmAdmission } from '../src/modules/admission/application/confirm-admission.js';
 import { RedisEntryStore } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
+import { LeaveQueue } from '../src/modules/entry/application/leave-queue.js';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
 import { admissionCases, recordingSignals, signer } from '../test/admission-cases.js';
+import { pidTransitionAdmissionCases } from '../test/pid-transition-cases.js';
 import { ACCOUNT, DEVICE, JNY, newEvent, openSchedule, PID, tokens } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -29,6 +31,7 @@ const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
   const key = k.cfg(eventId);
   await cmd(key, ['HSET', key, 'opensAtMs', String(s.opensAtMs), 'startsAtMs', String(s.startsAtMs), 'lobbyShuffle', s.lobbyShuffle ? '1' : '0', 'openBatch', s.openBatch ? '1' : '0', 'rev', '1']);
+  if (s.layoutVersion !== undefined) await cmd(key, ['HSET', key, 'layoutVersion', String(s.layoutVersion)]);
 }
 
 function harness() {
@@ -70,13 +73,91 @@ function harness() {
     },
     admitted: async (e: string) => Number((await cmd(k.admitted(e), ['GET', k.admitted(e)])) ?? 0),
     setDup: async (p: string, e: string, v: string) => void (await cmd(k.dup(p, e), ['SET', k.dup(p, e), v])),
+    setLobbyResult: async (h: string, seq: number, gen: number, expireAtMs: number) => void (await cmd(k.lobbyResult(h), ['SET', k.lobbyResult(h), `${seq}:${gen}`, 'PXAT', String(expireAtMs)])),
+    addLobbyMember: async (e: string, h: string) => void (await cmd(k.lobbyMembers(e), ['SADD', k.lobbyMembers(e), h])),
+    setLobbyPublished: async (e: string, at: number) => void (await cmd(k.batchDone(e), ['HSET', k.batchDone(e), 'pub:lobby', String(at)])),
+    lobbyRepair: async (e: string) => (await cmd(k.batchDone(e), ['HGET', k.batchDone(e), 'repair:lobby'])) as string | null,
     dup: async (p: string, e: string) => str(await cmd(k.dup(p, e), ['GET', k.dup(p, e)])),
     adm: async (p: string, e: string) => str(await cmd(k.adm(p, e), ['GET', k.adm(p, e)])),
     setAdm: async (p: string, e: string, v: string) => void (await cmd(k.adm(p, e), ['SET', k.adm(p, e), v])),
+    setIssuedAt: async (e: string, h: string, at: number) => void (await cmd(k.slotOf(e), ['HSET', k.slotOf(e), `${h}:at`, String(at)])),
   };
 }
 
 admissionCases('Valkey Lua', async () => harness());
+pidTransitionAdmissionCases('Valkey Lua', async () => harness());
+
+test('[Valkey Lua] Q-T35② Q-T68③ 취소한 대기표의 입장 확정은 410 REMOVED이고 곧 입장 대기열에서 빠져 있다', async () => {
+  const h = harness();
+  const eventId = newEvent();
+  const now = Date.now();
+  await writeSchedule(eventId, openSchedule(now));
+  await h.setServing(eventId, 200);
+  await h.logServing(eventId, now - 60_000, 200);
+  await h.setTarget(eventId, 0);
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, recordingSignals(), systemClock);
+  const t = tokens.ticket({ e: eventId, a: ACCOUNT, d: DEVICE, s: 150, g: 1, seg: 0, rq: 'rq-1', jny: JNY });
+  const hash = tokens.hash(t);
+  await h.setDup(PID, eventId, `150:1:rq-1:${JNY}::${hash}`);
+  expect((await app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).status).toBe('SOON');
+  expect(await h.soon(eventId)).toEqual([hash]);
+  await new LeaveQueue(new RedisEntryStore(redis), h.schedules).entry({ eventId, pid: PID });
+  expect(await h.soon(eventId)).toEqual([]);
+  expect(await h.soonFirst(eventId, hash)).toBeNull();
+  await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).rejects.toMatchObject({ code: 'REMOVED' });
+});
+
+test('[Valkey Lua] Q-T34⑦ 추가 검증 중인 대기표도 취소하면 입장 확정이 VERIFYING이 아니라 410 REMOVED다', async () => {
+  const h = harness();
+  const eventId = newEvent();
+  const now = Date.now();
+  await writeSchedule(eventId, openSchedule(now));
+  await h.setServing(eventId, 200);
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, recordingSignals(), systemClock);
+  const t = tokens.ticket({ e: eventId, a: ACCOUNT, d: DEVICE, s: 150, g: 1, seg: 0, rq: 'rq-1', jny: JNY, vr: 'NETWORK' });
+  const hash = tokens.hash(t);
+  await h.setDup(PID, eventId, `150:1:rq-1:${JNY}:NETWORK:${hash}`);
+  await h.setRemoved(eventId, 150);
+  await h.setVerify(eventId, hash, `VERIFYING:${now}:NETWORK`);
+  expect((await app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).status).toBe('VERIFYING');
+  await new LeaveQueue(new RedisEntryStore(redis), h.schedules).entry({ eventId, pid: PID });
+  await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).rejects.toMatchObject({ code: 'REMOVED' });
+});
+
+test('[Valkey Lua] Q-T68① 목록을 고정하기 전에 취소한 참가 토큰은 게시 뒤 입장 확정이 403이다', async () => {
+  const h = harness();
+  const eventId = newEvent();
+  const now = Date.now();
+  await writeSchedule(eventId, { ...openSchedule(now), opensAtMs: now + 60_000 });
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, recordingSignals(), systemClock);
+  const lobbyToken = tokens.lobby({ e: eventId, a: ACCOUNT, d: DEVICE, iat: now, jny: JNY });
+  const hash = tokens.hash(lobbyToken);
+  await h.addLobbyMember(eventId, hash);
+  await h.setDup(PID, eventId, `LOBBY:${hash}:rq-1`);
+  await new LeaveQueue(new RedisEntryStore(redis), h.schedules).lobby({ eventId, pid: PID });
+  await h.setLobbyPublished(eventId, now);
+  await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { lobbyToken } })).rejects.toMatchObject({ code: 'TICKET_INVALID' });
+});
+
+test('[Valkey Lua] Q-T68② 목록을 고정한 뒤 취소한 참가 토큰은 게시 뒤 입장 확정이 410 REMOVED다', async () => {
+  const h = harness();
+  const eventId = newEvent();
+  const now = Date.now();
+  const s = openSchedule(now);
+  await writeSchedule(eventId, s);
+  await h.setServing(eventId, 200);
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, recordingSignals(), systemClock);
+  const lobbyToken = tokens.lobby({ e: eventId, a: ACCOUNT, d: DEVICE, iat: now - 600_000, jny: JNY });
+  const hash = tokens.hash(lobbyToken);
+  await h.addLobbyMember(eventId, hash);
+  await h.setDup(PID, eventId, `LOBBY:${hash}:rq-1`);
+  await cmd(k.batchDone(eventId), ['HSET', k.batchDone(eventId), 'lobby', '150:1:1']);
+  await h.setLobbyResult(hash, 150, 1, s.startsAtMs);
+  await h.setLobbyPublished(eventId, now);
+  await new LeaveQueue(new RedisEntryStore(redis), h.schedules).entry({ eventId, pid: PID });
+  expect(await h.isRemoved(eventId, 150)).toBe(true);
+  await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { lobbyToken } })).rejects.toMatchObject({ code: 'REMOVED' });
+});
 
 test('[Valkey Lua] 입장한 사람은 진입 ①이 ADMITTED로 막고, 키 수명이 판매 종료·회차 키 수명을 따른다(Q-T35 ③)', async () => {
   const h = harness();

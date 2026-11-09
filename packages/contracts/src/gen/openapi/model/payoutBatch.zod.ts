@@ -28,7 +28,8 @@ export const PayoutBatch = zod.object({
   "observedAt": zod.iso.datetime({"offset":true}).optional(),
   "observedBy": zod.string().optional().describe('OPERATOR_CONSOLE일 때 입력한 operator')
 }).optional().describe('묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)'),
-  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional()
+  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional(),
+  "approvalDueAt": zod.iso.datetime({"offset":true}).nullish().describe('승인 기한(지급일 전 영업일 15시, POL-039)')
 }).describe('지급 묶음(지급일·결제사·결제 상점, 2인 승인)')
 
 export type PayoutBatch = zod.input<typeof PayoutBatch>;

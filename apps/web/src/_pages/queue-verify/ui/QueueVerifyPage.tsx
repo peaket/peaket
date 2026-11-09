@@ -10,6 +10,7 @@ import { previewHref, resolvePreviewState, resolvePreviewTheme } from '@peaket/d
 import { getPerformance } from '@/entities/performance';
 import { getProduction } from '@/entities/production';
 import { getVenue } from '@/entities/venue';
+import { VerifyIdentityButton } from '@/features/identity-verify';
 import { SCR009_STATES, type Scr009State } from '@/shared/config/screens.booking';
 import { cx } from '@/shared/lib/cx';
 import type { PageProps } from '@/shared/lib/page-props';
@@ -150,15 +151,11 @@ export async function QueueVerifyPage({ params, searchParams }: Props) {
               <p className="t-sm" id="iv-purpose">
                 같은 분인지 다시 확인합니다
               </p>
-              {/* 실제로는 이 화면 위에 기관 창(SCR-006 재확인 목적)이 열린다. 퍼블리싱에서는 account 담당이 그린 그 상태로 잇는다 */}
-              <Link
-                className={buttonClass({ variant: 'primary', size: 'lg', block: true })}
-                href={`/verify/return?state=${encodeURIComponent('재확인 목적')}`}
-                aria-describedby="iv-purpose"
-              >
+              {/* 이 화면 위에 기관 창(SCR-006 재확인 목적)이 열린다. 복귀 화면의 상태 미리보기를 걷어(HOT-323) 링크 대신 흐름 버튼으로 잇는다 */}
+              <VerifyIdentityButton purpose="reverify" className={buttonClass({ variant: 'primary', size: 'lg', block: true })} describedBy="iv-purpose">
                 <i className="ic ic-phone" aria-hidden="true" />
                 휴대폰 본인확인 다시 하기
-              </Link>
+              </VerifyIdentityButton>
             </div>
           ) : null}
 

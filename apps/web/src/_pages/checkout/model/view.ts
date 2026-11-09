@@ -4,7 +4,7 @@ import type { SortMode } from '@/entities/production';
 import type { Scr011State } from '@/shared/config/screens.booking';
 
 /** 결제 버튼 자리: consent(필수 동의 둘이 다 체크돼야 켜짐) · 그 밖은 이유 있는 비활성이거나 본인확인 버튼 */
-export type PayMode = 'consent' | 'sale-paused' | 'pay-paused' | 'no-id' | 'exceeded' | 'expired';
+export type PayMode = 'consent' | 'sale-paused' | 'sale-ended' | 'pay-paused' | 'no-id' | 'exceeded' | 'expired' | 'ordered';
 /** 머리·패널의 홀드 타이머 모양 */
 export type HoldLook = 'live' | 'paused' | 'expired' | 'none';
 /** 결제 프레임: 토스 위젯(준비됨·준비 중) · 포트원 결제창(결제사 전환) */

@@ -40,7 +40,7 @@ server { listen 8080; location / { proxy_pass http://host.docker.internal:${port
   );
   const name = `peaket-nginx-expiry-${mode}`;
   try {
-    docker('rm', '-f', name);
+    docker('rm', '-f', '-v', name);
   } catch {
     // 없다
   }
@@ -60,7 +60,7 @@ server { listen 8080; location / { proxy_pass http://host.docker.internal:${port
     cache[c] = (cache[c] ?? 0) + 1;
     await sleep(100);
   }
-  docker('rm', '-f', name);
+  docker('rm', '-f', '-v', name);
   srv.close();
   const xs = [...ages].sort((a, b) => a - b);
   return { mode, samples: xs.length, originHitsPerS: Math.round((originHits / SECONDS) * 10) / 10, ageP50Ms: xs[Math.floor(xs.length / 2)]!, ageMaxMs: xs[xs.length - 1]!, over1s: xs.filter((a) => a >= 1000).length, cache };

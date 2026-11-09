@@ -1,8 +1,18 @@
 // 리더 지표(docs/observability.md §8, ADR-0104 결정 6, ADR-0182 결정 8). 회차 이름표는 진행 중인 회차만큼만 생긴다.
 import { Counter, Gauge, Histogram, LATENCY_BUCKETS_SECONDS, type Registry } from '@peaket/platform';
+import { type Decrease, INPUT_KINDS, type Journey } from '../domain/aimd.js';
 import type { TickResult } from '../domain/ports.js';
 
 export const LEADER_METRICS = Symbol('admission.LeaderMetrics');
+
+/** 한 주기의 자동 제어 결과(ADR-0226) */
+export interface ControlEvent {
+  target: number;
+  decreases: Decrease[];
+  suppressed: number;
+  ignored: Journey[];
+  staleKinds: string[];
+}
 
 export class LeaderMetrics {
   readonly #inFlight = new Gauge({ name: 'admission_in_flight', help: '오는 중(불렀지만 아직 입장 확정을 보내지 않은 것으로 보는 인원)', labelNames: ['event_id'] as const, registers: [] });
@@ -13,15 +23,64 @@ export class LeaderMetrics {
   readonly #leader = new Gauge({ name: 'admission_leader', help: '이 파드가 Lease 리더인가(1/0)', registers: [] });
   readonly #fenced = new Counter({ name: 'admission_fenced_total', help: '더 새 리더 세대가 있어 거절된 리더 쓰기 수', registers: [] });
   readonly #leaseFailures = new Counter({ name: 'admission_lease_renew_failures_total', help: 'Lease 읽기·만들기·고치기 실패 수', registers: [] });
+  readonly #beaconStopped = new Counter({ name: 'queue_shuffle_beacon_stopped_total', help: '셔플 게시를 멈춘 수(reason: beacon 비콘 대기 상한 넘김, stale_round 공시 라운드 어긋남, late_commit 고정 뒤 커밋, no_commit 공시 기록 없음, unauthorized 서명 없는 RB-35 표시, seed_unavailable 시드를 풀지 못하고 상한을 넘김, late_root 라운드 뒤에 쓴 머클 루트, members_changed 공시와 다른 참가자, unknown). 1건이면 SEV1(RB-35)', labelNames: ['reason'] as const, registers: [] });
+  readonly #rb35 = new Counter({ name: 'queue_shuffle_rb35_total', help: 'RB-35 명령 처리(command: wait·emergency-shuffle·recommit, result: applied·rejected, reason: 거절 사유, ADR-0239)', labelNames: ['command', 'result', 'reason'] as const, registers: [] });
+  readonly #seedReveal = new Counter({ name: 'queue_shuffle_seed_reveal_total', help: '시드 공개 호출 결과(POL-005, status: REVEALED·ALREADY·NOT_YET·NOT_PUBLISHED·STOPPED·NO_RECORD·ERROR)', labelNames: ['status'] as const, registers: [] });
   readonly #publish = new Counter({ name: 'admission_batch_publish_total', help: '묶음 게시 호출 결과(PUBLISHED·REPAIRED·ALREADY·NOT_CLOSED·WAITING_BEACON·WAITING_REPLICA·NO_SCHEDULE)', labelNames: ['status'] as const, registers: [] });
 
+  readonly #arrivalSlots = new Counter({ name: 'admission_arrival_slots_closed_total', help: '진입 Degraded의 도착 시각 칸을 닫은 수', registers: [] });
+  readonly #arrivalNumbers = new Counter({ name: 'admission_arrival_numbers_returned_total', help: '닫은 도착 시각 칸에서 빠진 번호로 돌린 번호 수', registers: [] });
+
+  readonly #slots = new Gauge({ name: 'admission_slots_used', help: '예매 단계 지금 인원(입장 자리 수, 지난 자리를 뺀 값)', labelNames: ['event_id'] as const, registers: [] });
+  readonly #target = new Gauge({ name: 'admission_target', help: '지금 쓰는 동시 입장 목표(결제사·합산 나누기 뒤, targetNow와 같다)', labelNames: ['event_id'] as const, registers: [] });
+  readonly #stale = new Gauge({ name: 'admission_control_input_stale', help: '제어 입력 없음(입력별 1/0)', labelNames: ['event_id', 'input'] as const, registers: [] });
+  readonly #decrease = new Counter({ name: 'admission_target_decrease_total', help: '동시 입장 목표 감축 수(사유별, 예산 감축은 여정 포함)', labelNames: ['reason', 'journey'] as const, registers: [] });
+  readonly #suppressed = new Counter({ name: 'admission_decrease_suppressed_total', help: '감축 확인 시간 동안 막은 AIMD 감축 수', registers: [] });
+  readonly #ignored = new Counter({ name: 'admission_budget_signal_ignored_total', help: '연동 여정이 아니라 감축하지 않은 예산 신호 수', labelNames: ['journey'] as const, registers: [] });
+  readonly #openGaps = new Gauge({ name: 'admission_open_gap_violations', help: '진행 중인 회차끼리 오픈 시각이 5분 [가정]보다 가까운 쌍의 수', registers: [] });
+
   register(registry: Registry): this {
-    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish]) registry.registerMetric(m);
+    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#seedReveal, this.#beaconStopped, this.#rb35, this.#arrivalSlots, this.#arrivalNumbers, this.#slots, this.#target, this.#stale, this.#decrease, this.#suppressed, this.#ignored, this.#openGaps]) registry.registerMetric(m);
     return this;
+  }
+
+  /** 한 주기의 자동 제어 결과(입력 없음·감축·막은 감축·무시한 예산 신호) */
+  control(eventId: string, e: ControlEvent): void {
+    this.#target.set({ event_id: eventId }, e.target);
+    const stale = new Set(e.staleKinds);
+    for (const input of INPUT_KINDS) this.#stale.set({ event_id: eventId, input }, stale.has(input) ? 1 : 0);
+    for (const d of e.decreases) this.#decrease.inc({ reason: d.reason, journey: d.journey ?? '' });
+    if (e.suppressed > 0) this.#suppressed.inc(e.suppressed);
+    for (const journey of e.ignored) this.#ignored.inc({ journey });
+  }
+
+  /** 시드 공개 결과(REVEALED·ALREADY·NOT_YET·NOT_PUBLISHED·STOPPED·NO_RECORD·ERROR, ADR-0232 결정 7). ERROR가 이어지면 공개 약속을 지키지 못한다 */
+  seedReveal(status: string): void {
+    this.#seedReveal.inc({ status });
+  }
+
+  /** 비콘 대기 상한을 넘겨 셔플을 멈춘 수(reason은 beacon·stale_round·late_commit·no_commit·unknown, ADR-0231 결정 12). 1건이면 SEV1(RB-35) */
+  beaconStopped(reason: string): void {
+    this.#beaconStopped.inc({ reason });
+  }
+
+  /** RB-35 명령 처리(ADR-0239 결정 14). command는 rb35.를 뗀 이름이다 */
+  rb35(command: string, result: 'applied' | 'rejected', reason = ''): void {
+    this.#rb35.inc({ command: command.replace(/^rb35\./, ''), result, reason });
+  }
+
+  openGaps(n: number): void {
+    this.#openGaps.set(n);
+  }
+
+  arrival(slots: number, returned: number): void {
+    if (slots > 0) this.#arrivalSlots.inc(slots);
+    if (returned > 0) this.#arrivalNumbers.inc(returned);
   }
 
   event(eventId: string, r: Extract<TickResult, { kind: 'OK' }>): void {
     this.#inFlight.set({ event_id: eventId }, r.inFlight);
+    this.#slots.set({ event_id: eventId }, r.slots);
     this.#soon.set({ event_id: eventId }, r.soon);
     this.#ratio.set({ event_id: eventId }, r.ratio);
     if (r.dropped > 0) this.#dropped.inc(r.dropped);
@@ -52,5 +111,8 @@ export class LeaderMetrics {
     this.#inFlight.remove({ event_id: eventId });
     this.#soon.remove({ event_id: eventId });
     this.#ratio.remove({ event_id: eventId });
+    this.#slots.remove({ event_id: eventId });
+    this.#target.remove({ event_id: eventId });
+    for (const input of INPUT_KINDS) this.#stale.remove({ event_id: eventId, input });
   }
 }

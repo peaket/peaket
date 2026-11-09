@@ -12,7 +12,8 @@ State 1: <Initial predicate>
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_serving_check_queue_evPend = <<>>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
@@ -24,38 +25,52 @@ State 1: <Initial predicate>
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 0,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 545, col 3 to line 576, col 80 of module queue_no_serving_check>
+State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 792, col 3 to line 823, col 80 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -67,7 +82,8 @@ State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 545, col 3 to line
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_serving_check_queue_evPend = <<>>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
@@ -83,53 +99,68 @@ State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 545, col 3 to line
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 0,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 3: <queue_no_serving_check_queue_windowEnds line 1133, col 3 to line 1140, col 80 of module queue_no_serving_check>
+State 3: <queue_no_serving_check_queue_enterPreempt(1,1) line 792, col 3 to line 823, col 80 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_serving_check_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_serving_check_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_serving_check_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_serving_check_queue_evPend = <<>>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+      [seq |-> 0, gen |-> 0, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
       [ seq |-> 0,
         gen |-> 0,
@@ -142,38 +173,52 @@ State 3: <queue_no_serving_check_queue_windowEnds line 1133, col 3 to line 1140,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 0,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1172, col 3 to line 1231, col 76 of module queue_no_serving_check>
+State 4: <queue_no_serving_check_queue_windowEnds line 1499, col 3 to line 1506, col 80 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -185,22 +230,104 @@ State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1172, col 3 to line
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_no_serving_check_queue_evPend = << [ seq |-> 1,
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_no_serving_check_queue_evPend = <<>>
+/\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
+  <<1, 2>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
+/\ queue_no_serving_check_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+
+State 5: <queue_no_serving_check_queue_enterNumber(1,2) line 1538, col 3 to line 1597, col 76 of module queue_no_serving_check>
+/\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_serving_check_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_serving_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_no_serving_check_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+      [seq |-> 0, gen |-> 0, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
       [ seq |-> 1,
         gen |-> 1,
@@ -213,38 +340,52 @@ State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1172, col 3 to line
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 1,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1249, col 3 to line 1296, col 76 of module queue_no_serving_check>
+State 6: <queue_no_serving_check_queue_enterRecord(1,2) line 1615, col 3 to line 1662, col 76 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -256,22 +397,30 @@ State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1249, col 3 to line
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_no_serving_check_queue_evPend = << [ seq |-> 1,
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_no_serving_check_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+      [seq |-> 0, gen |-> 0, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
       [seq |-> 1, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] @@
   <<2, 1>> :>
@@ -280,38 +429,52 @@ State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1249, col 3 to line
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 1,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 6: <queue_no_serving_check_queue_admit(1,2) line 1359, col 3 to line 1408, col 76 of module queue_no_serving_check>
+State 7: <queue_no_serving_check_queue_admit(1,2) line 1725, col 3 to line 1774, col 76 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 2, seq |-> 1, gen |-> 1] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -323,22 +486,30 @@ State 6: <queue_no_serving_check_queue_admit(1,2) line 1359, col 3 to line 1408,
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_no_serving_check_queue_evPend = << [ seq |-> 1,
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_no_serving_check_queue_evPend = << [ size |-> 0,
+     seq |-> 1,
+     first |-> 1,
      serving |-> 0,
      leader |-> 0,
      skips |-> {},
      removed |-> {},
      closed |-> TRUE,
-     first |-> 1,
-     size |-> 0,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+      [seq |-> 0, gen |-> 0, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
       [ seq |-> 1,
         gen |-> 1,
@@ -351,32 +522,46 @@ State 6: <queue_no_serving_check_queue_admit(1,2) line 1359, col 3 to line 1408,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_serving_check_queue_ev = [ seq |-> 1,
+/\ queue_no_serving_check_queue_ev = [ size |-> 0,
+  seq |-> 1,
+  first |-> 1,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
-  first |-> 1,
-  size |-> 0,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_serving_check_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],

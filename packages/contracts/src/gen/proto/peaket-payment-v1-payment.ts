@@ -228,6 +228,18 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "amount": {
                       "type": "peaket.common.v1.Money",
                       "id": 6
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 7
+                    },
+                    "authenticated_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 8
+                    },
+                    "attempt_no": {
+                      "type": "int32",
+                      "id": 9
                     }
                   }
                 },
@@ -274,7 +286,8 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "FAILURE_CATEGORY_VALIDATION": 3,
                     "FAILURE_CATEGORY_EXPIRED": 4,
                     "FAILURE_CATEGORY_PG_ERROR": 5,
-                    "FAILURE_CATEGORY_THROTTLED": 6
+                    "FAILURE_CATEGORY_THROTTLED": 6,
+                    "FAILURE_CATEGORY_DEPOSIT_CANCELED": 7
                   }
                 },
                 "ConfirmPaymentResponse": {
@@ -358,6 +371,26 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "approved_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 7
+                    },
+                    "virtual_account": {
+                      "type": "VirtualAccountInfo",
+                      "id": 8
+                    }
+                  }
+                },
+                "VirtualAccountInfo": {
+                  "fields": {
+                    "bank": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_number": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "due_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 3
                     }
                   }
                 },
@@ -416,6 +449,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "event_seq": {
                       "type": "int64",
                       "id": 9
+                    },
+                    "deposit_due_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 10
                     }
                   }
                 },

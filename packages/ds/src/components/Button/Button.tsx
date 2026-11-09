@@ -4,6 +4,7 @@
 // - loading: 앞에 .spinner를 두고 aria-busy="true", 누르기를 막는다.
 // - 이유 있는 비활성(d2 §3.6): disabled 대신 disabledReason을 주면 aria-disabled="true"로 초점은 받고
 //   누르기·Enter·Space·폼 제출은 막으며, 버튼 바로 뒤에 늘 보이는 이유 글(<p class="t-sm">)을 두고 aria-describedby로 잇는다.
+//   SEED의 비활성 표시 data-disabled도 단다(ADR-0192 결정 4).
 //   이유 글을 화면의 다른 곳(배너 등)에 둘 때는 그 요소의 id를 disabledReasonId로 준다(이 부품은 글을 그리지 않는다).
 // - 제공자 버튼(kakao·naver·google)은 앞에 제공자 로고(.prov)를 둔다. 로고는 자리 그림이고 구현 때 제공자 배포 파일로 바꾼다.
 import { forwardRef, useId, type ButtonHTMLAttributes, type MouseEvent, type ReactNode } from 'react';
@@ -69,6 +70,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       className={cx(buttonClass({ variant, size, block }), className)}
       aria-disabled={reasoned ? true : undefined}
+      // SEED의 비활성 표시(d2 §3.6). SEED 부품의 recipe와 키트 .btn[aria-disabled]가 같은 비활성 모양을 쓴다
+      data-disabled={reasoned ? '' : undefined}
       aria-busy={loading ? true : undefined}
       aria-describedby={joinIds(describedBy, disabledReasonId, ownReason && reasonId)}
       onClick={handleClick}

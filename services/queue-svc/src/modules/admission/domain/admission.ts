@@ -31,6 +31,11 @@ export type Precheck =
   /** 차례가 왔고 15분 안(또는 곧 입장 대기열에 있음). turnAtMs는 serving_log 칸(없으면 undefined), skipped는 건너뛴 구간 안의 옛 세대 번호 */
   | { kind: 'OK'; serving: number; turnAtMs?: number; inSoon: boolean; skipped: boolean };
 
+/** 로비 셔플 결과 읽기(HOT-040, ADR-0231 결정 10) */
+export type LobbySeat = { kind: 'SEAT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'GONE' };
+/** 셔플 결과 게시 전 입장 확정의 NOT_YET 다시 시도 2초 [가정](ADR-0231 결정 10) */
+export const LOBBY_PENDING_RETRY_MS = 2_000;
+
 /** 사람 슬롯 q:adm: 비어 채움(NEW), 같은 대기표(SAME), 다른 대기표(DUP) */
 export type Claim = { kind: 'NEW' } | { kind: 'SAME' } | { kind: 'DUP' };
 
@@ -38,8 +43,11 @@ export type Claim = { kind: 'NEW' } | { kind: 'SAME' } | { kind: 'DUP' };
 export type AdmitResult =
   /** again: 이 대기표의 살아 있는 자리를 같은 jti로 다시 준 것(입장 수·처음 요청을 다시 세지 않음). firstSlot: 이 대기표가 처음 잡은 자리(회수 뒤 다시 잡은 것이 아님).
    * serving은 Lua가 본 값 */
-  | { kind: 'ADMITTED'; jti: string; again: boolean; firstSlot: boolean; serving: number; arrivalDelayMs?: number; soonWaitMs?: number }
+  /** issuedAtMs: 이 자리를 처음 잡은 시각(같은 jti를 다시 줄 때 입장 토큰의 만료를 첫 발급과 같게 한다. 모르면 없음) */
+  | { kind: 'ADMITTED'; jti: string; again: boolean; firstSlot: boolean; serving: number; arrivalDelayMs?: number; soonWaitMs?: number; issuedAtMs?: number }
   | { kind: 'SOON'; retryAfterSeconds: number; arrivalDelayMs?: number }
   /** 확인 뒤 빠진 번호가 됐거나(REMOVED) serving이 모자라다(NOT_YET, 장애 전환으로 serving이 되돌아감). 확인과 입장 사이의 경합 */
   | { kind: 'REMOVED' }
-  | { kind: 'NOT_YET' };
+  | { kind: 'NOT_YET' }
+  /** 같은 jti를 다시 줄 자리지만 첫 발급 + 최대 체류가 지났다(다시 주지 않고 만료로 본다, HOT-010 리뷰) */
+  | { kind: 'EXPIRED' };

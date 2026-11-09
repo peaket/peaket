@@ -3,12 +3,12 @@
 // 토스·포트원은 wbs 2.7.1에서 붙인다(실제 샌드박스는 1일 1회 스모크).
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { CheckoutValues, PaymentGatewayPort } from '../src/modules/payment/domain/payment-gateway.js';
+import type { CancelResult, CheckoutValues, ConfirmCard, ConfirmResult, PaymentGatewayPort } from '../src/modules/payment/domain/payment-gateway.js';
 
 export interface PgContractHarness {
   gateway: PaymentGatewayPort;
-  /** 구매자가 결제창 인증을 마친 것. 성공 주소로 받을 결제 참조를 돌려준다 */
-  authenticate(orderId: string, amount: number): Promise<string>;
+  /** 구매자가 결제창 인증을 마친 것. 성공 주소로 받을 결제 참조를 돌려준다. instrument는 시험 카드·결제 수단을 고른다(시뮬레이터 결제창이 받는 값, HOT-145) */
+  authenticate(orderId: string, amount: number, instrument?: PgTestInstrument): Promise<string>;
   /** 다음 승인을 결제사가 한도 초과로 거절한다 */
   declineNextConfirm(): Promise<void>;
   /** 다음 승인을 처리하되 응답을 잃는다(시간 초과와 같다) */
@@ -22,7 +22,25 @@ export interface PgContractHarness {
   /** 결제사 원장에서 그 주문의 승인 수 */
   approvals(orderId: string): Promise<number>;
   close(): Promise<void>;
+  /** 승인에 결제 토큰이 드는 결제사(포트원)의 토큰. 없으면 승인에 토큰을 싣지 않는다 */
+  confirmTokenOf?(paymentRef: string): string;
+  /**
+   * 결제사에 그 뜻의 전용 코드가 없어 결과가 다른 항목의 기대값(없으면 묶음의 기본값). 항목을 건너뛰지 않고 값만 바꾼다(승인 0건은 그대로 본다, BUILD_ORDER HOT-140).
+   * 포트원 공식 스키마의 승인 오류에는 카드 거절·승인 기한 만료 코드가 없고, 취소 답에는 남은 금액 칸이 없다(docs/features/payment.md §2.1 '포트원 어댑터의 첫 구현').
+   * cancelled는 취소 답의 기대값이고, 남은 금액은 이어지는 조회로 그대로 본다. card는 시험 카드가 그 결제사에서 공통 값으로 바뀐 모습이다(기본은 토스 표)
+   */
+  expectations?: { declined?: Partial<ConfirmResult>; expired?: Partial<ConfirmResult>; cancelled?: Partial<CancelResult>; card?: ConfirmCard };
 }
+
+/** 시뮬레이터 결제창이 받는 시험 결제 수단(HOT-145) */
+export interface PgTestInstrument {
+  method?: '카드' | '계좌이체' | '가상계좌';
+  card?: { number: string; issuerCode?: string | null; cardType?: string; bin?: string | null } | null;
+}
+
+/** 대응표 항목의 시험 카드와 토스 표의 공통 값 */
+const CONTRACT_CARD = { number: '43301234****123*', issuerCode: '61', cardType: '신용' };
+const CONTRACT_CARD_EXPECTED: ConfirmCard = { maskedNumber: '43301234****123*', bin: '433012', issuerCode: 'HYUNDAI', cardType: 'CREDIT' };
 
 const checkoutOrder = (v: CheckoutValues): { orderRef: string; amount: number } => {
   if ('portone' in v) return { orderRef: v.portone.paymentId, amount: v.portone.totalAmount };
@@ -40,10 +58,13 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       await h?.close();
     });
 
+    /** 승인 호출. 토큰이 드는 결제사면 토큰을 함께 싣는다 */
+    const confirm = (c: { orderId: string; paymentRef: string; amount: number; idemKey: string }) => h.gateway.confirm({ ...c, ...(h.confirmTokenOf ? { confirmToken: h.confirmTokenOf(c.paymentRef) } : {}) });
+
     const approved = async (amount = 10_000) => {
       const orderId = randomUUID();
       const paymentRef = await h.authenticate(orderId, amount);
-      const r = await h.gateway.confirm({ orderId, paymentRef, amount, idemKey: `confirm-${orderId}` });
+      const r = await confirm({ orderId, paymentRef, amount, idemKey: `confirm-${orderId}` });
       expect(r.outcome).toBe('APPROVED');
       return { orderId, paymentRef, amount };
     };
@@ -72,8 +93,8 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const orderId = randomUUID();
       const paymentRef = await h.authenticate(orderId, 10_000);
       await h.declineNextConfirm();
-      const r = await h.gateway.confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
-      expect(r).toMatchObject({ outcome: 'DECLINED', failureCategory: 'CARD_DECLINED' });
+      const r = await confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
+      expect(r).toMatchObject(h.expectations?.declined ?? { outcome: 'DECLINED', failureCategory: 'CARD_DECLINED' });
       expect(await h.approvals(orderId)).toBe(0);
     });
 
@@ -82,7 +103,7 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const paymentRef = await h.authenticate(orderId, 10_000);
       await h.delayNextConfirm(300);
       const c = { orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` };
-      const rs = await Promise.all([h.gateway.confirm(c), new Promise((r) => setTimeout(r, 50)).then(() => h.gateway.confirm(c))]);
+      const rs = await Promise.all([confirm(c), new Promise((r) => setTimeout(r, 50)).then(() => confirm(c))]);
       expect(rs.map((r) => r.outcome).sort()).toEqual(['APPROVED', 'IN_PROGRESS']);
       expect(await h.approvals(orderId)).toBe(1);
     });
@@ -90,7 +111,7 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
     it('이미 승인된 건 재요청: 멱등 보관이 지난 뒤 다시 승인하면 조회로 맞춰 ALREADY_APPROVED, 승인 1건', async () => {
       const { orderId, paymentRef, amount } = await approved();
       h.advance(h.gateway.capabilities().idempotencyRetentionMs + 1);
-      const r = await h.gateway.confirm({ orderId, paymentRef, amount, idemKey: `confirm-${orderId}` });
+      const r = await confirm({ orderId, paymentRef, amount, idemKey: `confirm-${orderId}` });
       expect(r).toMatchObject({ outcome: 'ALREADY_APPROVED', amount, paymentRef });
       expect(await h.approvals(orderId)).toBe(1);
     });
@@ -99,7 +120,7 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const orderId = randomUUID();
       const paymentRef = await h.authenticate(orderId, 10_000);
       await h.dropNextConfirmAfterApply();
-      const r = await h.gateway.confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
+      const r = await confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
       expect(r.outcome).toBe('UNKNOWN');
       expect(await h.gateway.query(paymentRef)).toMatchObject({ kind: 'FOUND', status: 'APPROVED' });
       expect(await h.approvals(orderId)).toBe(1);
@@ -109,21 +130,21 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const orderId = randomUUID();
       const paymentRef = await h.authenticate(orderId, 10_000);
       h.advance(h.gateway.capabilities().confirmDeadlineMs + 1_000);
-      const r = await h.gateway.confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
-      expect(r).toMatchObject({ outcome: 'DECLINED', failureCategory: 'EXPIRED' });
+      const r = await confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
+      expect(r).toMatchObject(h.expectations?.expired ?? { outcome: 'DECLINED', failureCategory: 'EXPIRED' });
       expect(await h.approvals(orderId)).toBe(0);
     });
 
     it('부분 취소: CANCELLED이고 남은 금액이 준다', async () => {
       const { paymentRef } = await approved(10_000);
       const r = await h.gateway.cancel({ paymentRef, amount: 3_000, reason: '고객 요청', idemKey: `cancel-${randomUUID()}` });
-      expect(r).toMatchObject({ outcome: 'CANCELLED', balanceAmount: 7_000 });
+      expect(r).toMatchObject(h.expectations?.cancelled ?? { outcome: 'CANCELLED', balanceAmount: 7_000 });
       expect(await h.gateway.query(paymentRef)).toMatchObject({ kind: 'FOUND', status: 'PARTIAL_CANCELED', balanceAmount: 7_000 });
     });
 
     it('전액 환불: CANCELLED, 남은 금액 0, 다시 전액 취소해도 CANCELLED', async () => {
       const { paymentRef } = await approved(10_000);
-      expect(await h.gateway.cancel({ paymentRef, amount: 'ALL', reason: '회차 취소', idemKey: `cancel-${randomUUID()}` })).toMatchObject({ outcome: 'CANCELLED', balanceAmount: 0 });
+      expect(await h.gateway.cancel({ paymentRef, amount: 'ALL', reason: '회차 취소', idemKey: `cancel-${randomUUID()}` })).toMatchObject(h.expectations?.cancelled ?? { outcome: 'CANCELLED', balanceAmount: 0 });
       expect(await h.gateway.query(paymentRef)).toMatchObject({ kind: 'FOUND', status: 'CANCELED', balanceAmount: 0 });
       expect((await h.gateway.cancel({ paymentRef, amount: 'ALL', reason: '회차 취소', idemKey: `cancel-${randomUUID()}` })).outcome).toBe('CANCELLED');
     });
@@ -133,11 +154,20 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const w = await h.lastWebhook(paymentRef);
       const a = h.gateway.parseWebhook(w.headers, w.body);
       const b = h.gateway.parseWebhook(w.headers, w.body);
-      expect(a).not.toBeNull();
+      if (a.kind !== 'TRIGGER') throw new Error(`조회 신호여야 한다: ${a.kind}`);
       expect(a).toEqual(b);
-      expect(a!.dedupKey.length).toBeGreaterThan(0);
-      expect(a!.paymentRef).toBe(paymentRef);
+      expect(a.dedupKey.length).toBeGreaterThan(0);
+      expect(a.paymentRef).toBe(paymentRef);
       expect(a).not.toHaveProperty('status');
+    });
+
+    it('P-T16_카드 칸 대응표: 시험 카드의 승인 답과 조회 답이 같은 공통 값이다(열한째 항목, HOT-145) [ASVS v5.0.0-2.2.1]', async () => {
+      const orderId = randomUUID();
+      const paymentRef = await h.authenticate(orderId, 10_000, { card: CONTRACT_CARD });
+      const r = await confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
+      const expected = h.expectations?.card ?? CONTRACT_CARD_EXPECTED;
+      expect(r).toMatchObject({ outcome: 'APPROVED', card: expected });
+      expect(await h.gateway.query(paymentRef)).toMatchObject({ kind: 'FOUND', status: 'APPROVED', method: 'CARD', card: expected });
     });
   });
 }

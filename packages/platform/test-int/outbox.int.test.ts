@@ -124,7 +124,7 @@ describe('쓰기와 릴레이', () => {
     expect(await relay.relayOnce()).toBe(0);
   });
 
-  test('ASVS_16_5_2_FND080_보내기에실패하면_행이남아_다음묶음에서다시나간다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('FND080_보내기에실패하면_행이남아_다음묶음에서다시나간다 [ASVS v5.0.0-16.5.2]', async () => {
     await relayDb.transaction((tx) => writeOutbox(tx, clock, [msg('k-1'), msg('k-2')]));
     let down = true;
     const r = recorder({ fail: () => down });
@@ -223,7 +223,7 @@ describe('일 파티션', () => {
     expect(idx.map((x) => x.indexdef).join('\n')).toMatch(/UNIQUE INDEX .* \(id\)[\s\S]*\(seq\) WHERE \(sent_at IS NULL\)/);
   });
 
-  test('ASVS_16_5_2_FND080_정비시간에3일지난파티션을지우되_보내지않은행이남은파티션은남긴다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('FND080_정비시간에3일지난파티션을지우되_보내지않은행이남은파티션은남긴다 [ASVS v5.0.0-16.5.2]', async () => {
     await partsDb.transaction((tx) => writeOutbox(tx, fakeClock({ now: KST('2026-11-02T10:00:00') }), [msg('unsent')]));
     await partsDb.transaction((tx) => writeOutbox(tx, fakeClock({ now: KST('2026-11-03T10:00:00') }), [msg('sent')]));
     await partsDb.db.execute(sql`update outbox set sent_at = now() where msg_key = 'sent'`);

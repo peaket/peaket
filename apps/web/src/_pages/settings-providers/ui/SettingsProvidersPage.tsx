@@ -2,11 +2,13 @@
 // ① 연결된 로그인 수단 목록(연결 해제) → ② [로그인 수단 추가] → ④~⑥ 계정 합치기 카드(MergePanel: ds MergeSummary + 확인 창).
 // 휴대폰은 바탕 위에 쌓고(합치기 카드만 카드), md 768부터 두 구역 모두 카드, lg 1280은 왼쪽 계정 설정 메뉴(3칸) + 오른쪽 본문(9칸).
 // 흡수된 세션 안내는 세션이 끝난 뒤라 셸을 로그인 전 모양으로 그린다(추천안). 상태는 ?state=, 다크는 ?theme=dark.
+// API 출처가 있고 미리보기 상태가 '목록'이면 ①②③은 실제 흐름(LiveLoginMethods, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041)이고,
+// ?mergeProposal=(앱 서버가 붙인다)이 있으면 ④~⑥ 합치기도 실제 흐름(LiveMergeCard, 같은 절 '계정 병합의 첫 구현', BUILD_ORDER BOT-043)이다. 미리보기 상태의 합치기는 목업(MergePanel)이다.
 import Link from 'next/link';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { ME } from '@/entities/me';
-import { LINKED_PROVIDERS, MERGE_PROPOSAL, PROVIDER_NAME, type LinkedProvider } from '@/entities/provider';
+import { LINKED_PROVIDERS, PROVIDER_NAME, type LinkedProvider } from '@/entities/provider';
 import { SCR040_STATES } from '@/shared/config/screens.account';
 import { cx } from '@/shared/lib/cx';
 import type { PageProps } from '@/shared/lib/page-props';
@@ -14,6 +16,10 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { mergeContent, SETTINGS_MENU, SURVIVOR_PROVIDER } from '../model/content';
 import { providersView } from '../model/state';
+import { isLiveLoginMethods } from '@/features/login-methods';
+import { Absorbed } from './Absorbed';
+import { LiveLoginMethods } from './LiveLoginMethods';
+import { MergedAwayNotice } from './MergedAwayNotice';
 import { MergePanel } from './MergePanel';
 
 const LAST_ONE_ID = 'last-w';
@@ -26,12 +32,21 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = providersView(state);
   const providers = v.onlyOne ? LINKED_PROVIDERS.filter((p) => p.id === SURVIVOR_PROVIDER) : LINKED_PROVIDERS;
+  const live = isLiveLoginMethods() && state === '목록';
+  const loginMethod = typeof sp.loginMethod === 'string' ? sp.loginMethod : undefined;
+  const mergeProposal = typeof sp.mergeProposal === 'string' ? sp.mergeProposal : undefined;
+  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 본문은 흡수 안내다(셸은 아래).
+  // 안내는 방금 흡수 확정을 받은 탭의 표시가 있을 때만 보인다(MergedAwayNotice, 없으면 로그인 수단 화면으로 간다, BOT-043이 넘긴 것)
+  const endedMerged = sp.ended === 'MERGED';
+  const absorbed = v.absorbed || endedMerged;
 
   return (
+    // ?ended=MERGED는 셸을 로그인 전으로 고정하지 않는다: 셸이 팬 계정 요약으로 고른다(흡수된 계정은 세션이 끝나 401 → 로그인 전, ADR-0202 결정 2).
+    // 로그인한 사람이 이 주소를 열어도 로그인 전 셸이 잠깐 보이지 않는다(BOT-043이 넘긴 것, HOT-321). 상태 미리보기 '흡수됨'만 고정한다
     <AppShell dark={dark} guest={v.absorbed}>
       <main className="page-main pb-10 md:pb-12 lg:pb-16" id="main" tabIndex={-1}>
-        {v.absorbed ? (
-          <Absorbed />
+        {absorbed ? (
+          endedMerged ? <MergedAwayNotice /> : <Absorbed live={false} />
         ) : (
           <div className="mx-auto w-full lg:grid lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8">
             <SettingsSideNav />
@@ -50,7 +65,8 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
                 <h1 className="t-xl md:text-[32px] md:leading-[42px]">로그인 수단·계정 합치기</h1>
               </div>
 
-              <section className={cx('col gap-2 px-4 pt-4', CARD_FROM_MD)} aria-labelledby="h-list">
+              {live ? <LiveLoginMethods loginMethod={loginMethod} mergeProposal={mergeProposal} /> : null}
+              {live ? null : <section className={cx('col gap-2 px-4 pt-4', CARD_FROM_MD)} aria-labelledby="h-list">
                 <div className="section-title">
                   <h2 id="h-list">연결된 로그인 수단</h2>
                 </div>
@@ -71,9 +87,9 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
                     로그인 수단 추가
                   </button>
                 </div>
-              </section>
+              </section>}
 
-              {v.merge ? <MergePanel initialStatus={v.merge} confirmOpen={v.confirm} content={mergeContent()} provider={SURVIVOR_PROVIDER} /> : null}
+              {v.merge && !live ? <MergePanel initialStatus={v.merge} confirmOpen={v.confirm} content={mergeContent()} provider={SURVIVOR_PROVIDER} /> : null}
             </div>
           </div>
         )}
@@ -145,27 +161,6 @@ function SettingsSideNav() {
           );
         })}
       </nav>
-    </div>
-  );
-}
-
-/** 지금 계정이 대표 계정으로 흡수되어 세션이 끝났다(세션 종료 MERGED, 휴대폰 보드) */
-function Absorbed() {
-  return (
-    <div className="col mx-auto w-full max-w-[400px] gap-5 px-4 pt-14 pb-6">
-      <div className="state" role="alert" style={{ padding: 0 }}>
-        <span className="state-icon is-warning">
-          <i className="ic ic-logout" aria-hidden="true" />
-        </span>
-        <h1 className="t-xl">이 계정은 대표 계정으로 합쳐졌습니다</h1>
-        <p className="t-md muted">대표 계정으로 다시 로그인해 주세요</p>
-      </div>
-      <p className="t-sm muted" style={{ textAlign: 'center' }}>
-        {PROVIDER_NAME[MERGE_PROPOSAL.incoming]}로 로그인해도 대표 계정으로 들어갑니다.
-      </p>
-      <Link className="btn btn-primary btn-lg btn-block" href="/login">
-        로그인 화면으로 가기
-      </Link>
     </div>
   );
 }

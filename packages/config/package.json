@@ -6,13 +6,18 @@
   "type": "module",
   "exports": {
     "./tsconfig/*": "./tsconfig/*",
-    "./eslint/*": "./eslint/*"
+    "./eslint/*": "./eslint/*",
+    "./headers/*": "./headers/*",
+    "./next/*": "./next/*"
   },
   "scripts": {
-    "test": "node --test \"eslint/*.test.mjs\""
+    "test": "node --test \"eslint/*.test.mjs\" \"headers/*.test.mjs\" \"next/*.test.mjs\" \"vitest/*.test.mjs\""
   },
   "dependencies": {
+    "@mdn/browser-compat-data": "^8.1.7",
     "@typescript-eslint/parser": "8.72.1",
+    "browserslist": "^4.29.5",
+    "eslint-plugin-compat": "^7.0.2",
     "typescript": "6.0.3"
   },
   "devDependencies": {

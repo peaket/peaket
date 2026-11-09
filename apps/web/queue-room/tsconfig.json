@@ -2,7 +2,9 @@
   "extends": "@peaket/config/tsconfig/vite.json",
   "compilerOptions": {
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    // src/live/의 모듈은 node --test가 바로 가져오도록 서로를 .ts 확장자로 부른다(ADR-0207, 빌드는 Vite가 한다)
+    "allowImportingTsExtensions": true
   },
   "include": ["src"]
 }

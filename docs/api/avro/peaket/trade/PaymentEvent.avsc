@@ -92,7 +92,7 @@
     },
     {
       "name": "refMissing",
-      "doc": "조사용 가명 칸을 계산하지 못해 비웠으면 true(조사용 가명 라벨 키를 KMS에서 받지 못함·한도 초과). 업무 처리는 막지 않았고, 조사 적재는 이 값을 나중에 채우지 않는다. 생산자는 inv_ref_missing_total로 센다(docs/security/secrets-and-keys.md 'inv-ref-key', 추천 적용 2026-10-31, ADR-0171)",
+      "doc": "조사용 가명 칸을 계산하지 못해 비웠으면 true(조사용 가명 라벨 키가 없음·KMS에서 받지 못함·한도 초과, 또는 결제사 응답의 카드 정보 모양이 틀림). 업무 처리는 막지 않았고, 조사 적재는 이 값을 나중에 채우지 않는다. 생산자는 inv_ref_missing_total로 센다(docs/security/secrets-and-keys.md 'inv-ref-key', 추천 적용 2026-10-31, ADR-0171. 카드 정보 모양은 추천 적용 2026-11-09, BUILD_ORDER HOT-145, 코드 리뷰)",
       "type": "boolean",
       "default": false
     },
@@ -120,7 +120,7 @@
     },
     {
       "name": "failureCategory",
-      "doc": "실패일 때만. 결제 어댑터가 정한다(payment §2.1)",
+      "doc": "실패일 때만. 결제 어댑터가 정한다(payment §2.1). DEPOSIT_CANCELED는 입금 대기 결제의 입금 전 취소다(추천 적용 2026-11-09, BUILD_ORDER HOT-152)",
       "type": [
         "null",
         {
@@ -134,7 +134,8 @@
             "VALIDATION",
             "EXPIRED",
             "PG_ERROR",
-            "THROTTLED"
+            "THROTTLED",
+            "DEPOSIT_CANCELED"
           ]
         }
       ],
@@ -180,6 +181,26 @@
         "type": "string",
         "logicalType": "uuid"
       }
+    },
+    {
+      "name": "depositDueAt",
+      "doc": "입금 대기 사건(AWAITING_DEPOSIT)과 입금 오류 되돌림 사건(DEPOSIT_REVERSED, 새 입금 기한)에만 싣는 입금 기한. 결제사가 답에 주지 않은 입금 대기는 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151·HOT-152)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "AWAITING_DEPOSIT",
+            "DEPOSIT_REVERSED"
+          ]
+        }
+      ]
     }
   ]
 }

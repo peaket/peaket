@@ -186,17 +186,50 @@ def upload_raw(run_dir, raw_uri):
     return len(raws), []
 
 
-def k6_inputs(a):
+def k6_inputs(a, root):
     """K6 입력을 측정 폴더를 만들기 전에 읽고 서로 맞는지 확인한다. 어긋나면 폴더를 만들지 않고 실행을 거부한다.
 
-    돌려주는 값: (k6_plan, k6_eval, 사람 단위 집계, 봇 끝 결과 집계). human_sessions.csv는 여기서 읽기만 하고
-    측정 폴더에 복사하지 않는다(개인 단위 자료, ADR-0112).
+    돌려주는 값: (k6_plan, k6_eval, 사람 단위 집계, 봇 끝 결과 집계). human_sessions.csv와 fp_review.csv는 여기서 읽기만 하고
+    측정 폴더에 복사하지 않는다(개인 단위 자료, ADR-0112·0174).
     """
-    k6_plan = L.k6_plan_parse(a.k6_plan) if getattr(a, 'k6_plan', None) else None
-    conf = getattr(a, 'confusion', None)
+    source = getattr(a, 'k6_source', None)
+    plan_text, conf = getattr(a, 'k6_plan', None), getattr(a, 'confusion', None)
     hs, bo = getattr(a, 'human_sessions', None), getattr(a, 'bot_outcomes', None)
+    reg_path, launch = getattr(a, 'k6_registration', None), getattr(a, 'confusion_launch', None)
+    fp_review, r2_deadline = getattr(a, 'fp_review', None), getattr(a, 'r2_deadline', None)
+    start = getattr(a, 'start', None)
+    k6_plan = k6_eval = units = outcomes = None
     try:
-        for opt, path in (('--human-sessions', hs), ('--bot-outcomes', bo)):
+        if source == 'live':
+            for opt, given in (('--k6-plan', plan_text), ('--human-sessions', hs), ('--confusion', conf), ('--k6-registration', reg_path),
+                               ('--bot-outcomes', bo), ('--confusion-launch', launch)):
+                if given:
+                    raise L.K6InputError(f'원천 live는 {opt}를 받지 않는다(fp_review.csv만 넣는다)')
+            if not fp_review or not os.path.exists(fp_review):
+                raise L.K6InputError('원천 live는 --fp-review 파일이 있어야 한다')
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', r2_deadline or ''):
+                raise L.K6InputError('원천 live는 --r2-deadline YYYY-MM-DD가 있어야 한다(docs/perf-ledger.md §10.6)')
+            live_fp = L.k6_live_fp(fp_review, r2_deadline)
+            k6_eval = {'human_source': 'live', 'human_label': L.K6_SOURCE_LABELS['live'], 'plan_verdict': None, 'live_fp': live_fp}
+            return None, k6_eval, None, None
+        if fp_review:
+            raise L.K6InputError('--fp-review는 원천 live에만 쓴다')
+        if not source and (plan_text or hs or reg_path):
+            raise L.K6InputError('--k6-plan·--human-sessions·--k6-registration은 --k6-source(public·mock)와 함께 쓴다')
+        if source and not (plan_text and hs and reg_path):
+            raise L.K6InputError(f'원천 {source}는 --k6-plan·--human-sessions·--k6-registration이 모두 있어야 한다')
+        if source == 'public':
+            if not start:
+                raise L.K6InputError('원천 public은 --start가 있어야 한다(등록이 측정 시작보다 앞서는지 본다)')
+            if L.required_time(start, '--start') > time.time() + L.K6_START_FUTURE_SKEW_S:
+                raise L.K6InputError('--start가 지금보다 뒤다(미래 시각으로 커밋 순서 확인을 지나갈 수 없다)')
+        k6_plan = L.k6_plan_parse(plan_text) if plan_text else None
+        reg = rule = reg_hash = None
+        if source:
+            L.require_outside_git(hs, '--human-sessions')
+            reg, rule, reg_hash = L.k6_registration(reg_path, source, k6_plan, start)
+            k6_plan.update(L.k6_plan_fields(reg, rule, reg_hash))
+        for opt, path in (('--human-sessions', hs), ('--bot-outcomes', bo), ('--confusion-launch', launch)):
             if not path:
                 continue
             if not conf or not os.path.exists(conf):
@@ -204,11 +237,45 @@ def k6_inputs(a):
             if not os.path.exists(path):
                 raise L.K6InputError(f'{opt} 파일이 없다: {path}')
         k6_eval = L.k6_eval_from_confusion(conf, k6_plan) if conf and os.path.exists(conf) else None
-        units = L.k6_human_units(hs, k6_eval, k6_plan) if hs else None
+        if k6_eval and not source and (k6_eval['humans'] or k6_eval['human_strata']):
+            raise L.K6InputError('confusion.csv에 사람 행이 있으면 --k6-source가 있어야 한다(꼬리표 없는 숫자를 남기지 않는다, ADR-0174)')
+        units = L.k6_human_units(hs, k6_eval, k6_plan, source, rule, reg) if hs else None
         outcomes = L.k6_bot_outcomes(bo, k6_eval) if bo else None
-    except L.K6InputError as e:
+        if launch:
+            k6_eval['launch_detection'] = L.k6_launch_detection(launch, k6_eval)
+        if source:
+            pin = None
+            if source == 'public':
+                L.k6_check_registration_commit(root, reg, reg_hash, start)
+                prior = L.k6_prior_runs(root, reg, a.run_id)
+                judged = rule['strength'] == L.K6_JUDGED_STRENGTH
+                earlier_judged = [p for p in prior if p['strength'] == L.K6_JUDGED_STRENGTH]
+                remeasure = judged and bool(earlier_judged)
+                reason = getattr(a, 'remeasure_reason', None)
+                if remeasure and not reason:
+                    names = ', '.join(p['run_id'] for p in earlier_judged)
+                    raise L.K6InputError(f'같은 자료의 기본 강도 측정이 이미 있다({names}). 합격은 첫 기본 판정만 그대로 인정한다. 다시 재려면 --remeasure-reason으로 사유를 적는다')
+                k6_plan.update(prior_runs=prior, remeasure=remeasure, sensitivity_before=judged and len(earlier_judged) < len(prior))
+                if remeasure:
+                    k6_plan['remeasure_reason'] = reason
+                pin = L.k6_dataset_pin(root, reg, getattr(a, 'dataset_pin', None))
+                k6_plan['dataset_pin'] = pin
+            k6_plan['verify'] = L.k6_verify_receipt(reg_path, reg_hash, required=source == 'public')
+            L.k6_apply_source(k6_eval, reg, rule, units, pin)
+    except ValueError as e:   # K6InputError와 계획 형식 오류(k6_plan_parse)
         raise SystemExit(f'실행 거부(판정하지 않음, docs/perf-ledger.md §10.5): {e}')
     return k6_plan, k6_eval, units, outcomes
+
+
+def k6_verdict_gate(verdict, k6_eval):
+    """최종 판정을 정한 뒤 건다. k6 평가가 있으면 pass는 plan_verdict가 PASS일 때만, live는 meets_target이 참일 때만 받는다(ADR-0174·0245)."""
+    if verdict != 'pass' or k6_eval is None:
+        return
+    if k6_eval.get('human_source') == 'live':
+        if not k6_eval['live_fp']['meets_target']:
+            raise SystemExit('실행 거부: 판정 pass(--verdict pass 또는 --checks 통과)를 줄 수 없다: 실제 사람 기준 오탐 상한이 목표를 넘는다(docs/perf-ledger.md §10.6)')
+    elif k6_eval.get('plan_verdict') != 'PASS':
+        raise SystemExit(f'실행 거부: 판정 pass(--verdict pass 또는 --checks 통과)를 줄 수 없다: plan_verdict가 {k6_eval.get("plan_verdict")}다(ADR-0174·0245)')
 
 
 def prom_instant(prom_url, query, t):
@@ -304,8 +371,9 @@ def collect(a, root):
     run_dir = os.path.join(root, L.RUNS, a.run_id)
     if os.path.exists(run_dir) and not a.force:
         raise SystemExit(f'이미 있는 측정 폴더입니다: {run_dir} (--force로 덮어쓰기)')
-    k6_plan, k6_eval_pre, k6_units, k6_outcomes = k6_inputs(a)
+    k6_plan, k6_eval_pre, k6_units, k6_outcomes = k6_inputs(a, root)
     checks, crosscheck, verdict, check_notes = evaluate_checks(a)
+    k6_verdict_gate(verdict, k6_eval_pre)
     os.makedirs(run_dir, exist_ok=True)
     log(lines, f'측정 폴더: {run_dir}')
 
@@ -353,12 +421,19 @@ def collect(a, root):
             attachments['confusion'] = rel
             k6_eval = k6_eval_pre
             log(lines, f'K6 평가: {L.k6_summary(k6_eval)}')
+            if getattr(a, 'confusion_launch', None):
+                launch_rel = copy_into(a.confusion_launch, run_dir, 'confusion-launch.csv', lines)
+                if launch_rel:
+                    attachments['confusion_launch'] = launch_rel
+    elif getattr(a, 'k6_source', None) == 'live':
+        k6_eval = k6_eval_pre
+        log(lines, f'K6 평가: {L.k6_summary(k6_eval)}. fp_review.csv는 복사하지 않음')
     if k6_eval is not None and k6_units:
         k6_eval.update(k6_units)
         u, icc = k6_units['human_units'], k6_units['human_icc']
-        icc_s = f'ICC {icc["icc"]}(단측 95% 상한 {icc["upper95_one_sided"]}, {icc["people"]}명)' if icc else '사람 안 상관 계산 불가(세션 2개 이상인 사람 2명 미만)'
-        log(lines, f'K6 사람 단위(ADR-0112): 참가자 {u["participants"]}명, 판정 세션 {u["judge_sessions"]}개, '
-                   f'참고 세션 {u["ref_sessions"]}개, 사람당 세션 수 {k6_units["sessions_per_person"]}, {icc_s}. '
+        icc_s = f'ICC {icc["icc"]}(단측 95% 상한 {icc["upper95_one_sided"]}, {icc["people"]}명)' if icc else '사람 안 상관 계산 불가(기록 2개 이상인 사람 2명 미만)'
+        log(lines, f'K6 사람 단위(ADR-0112): 사람 {u["people"]}명, 판정 기록 {u["judge_records"]}개, '
+                   f'참고 기록 {u["ref_records"]}개, 사람당 기록 수 {k6_units["sessions_per_person"]}, {icc_s}. '
                    f'human_sessions.csv는 복사하지 않음')
     if k6_eval is not None and k6_outcomes:
         rel = copy_into(a.bot_outcomes, run_dir, 'bot_outcomes.csv', lines)
@@ -369,6 +444,9 @@ def collect(a, root):
         if note:
             notes = f'{notes}; {note}' if notes else note
             log(lines, f'K6 {note}')
+    if k6_plan and k6_plan.get('remeasure_reason'):
+        note = f'다시 잰 사유: {k6_plan["remeasure_reason"]}(이전 측정 {", ".join(p["run_id"] for p in k6_plan["prior_runs"])})'
+        notes = f'{notes}; {note}' if notes else note
     k6_cost = None
     if getattr(a, 'bot_cost', None) and getattr(a, 'bot_prices', None):
         rel = copy_into(a.bot_cost, run_dir, 'bot_cost.csv', lines)
@@ -481,10 +559,10 @@ def upload_raw_again(root, run_id):
 
 
 def selftest_human_sessions(path, n=947, extra_judge=None, drop=(), ref_only=None):
-    """V-T25용 합성 human_sessions.csv. 1~400번 참가자는 참고 세션을 0~4개 더 낸다(5번은 2개, 판정 세션이 오탐).
+    """V-T25용 합성 human_sessions.csv(원천 public). 1~400번 사람은 참고 기록을 0~4개 더 낸다(5번은 2개, 판정 기록이 오탐).
 
-    위험 점수 = 0.3 + 0.1 × 사람 효과 + 0.1 × 세션 잡음이라 참값 ICC는 0.5다.
-    extra_judge: 판정 세션을 하나 더 주는 참가자, drop: 빼는 참가자, ref_only: 참고 세션만 내는 참가자.
+    위험 기여 = 0.3 + 0.1 × 사람 효과 + 0.1 × 기록 잡음이라 참값 ICC는 0.5다. 5번은 기준(1.0)을 넘는 값을 받는다.
+    extra_judge: 판정 기록을 하나 더 주는 사람, drop: 빼는 사람, ref_only: 참고 기록만 내는 사람.
     """
     import random
     rng = random.Random(20261028)
@@ -495,19 +573,20 @@ def selftest_human_sessions(path, n=947, extra_judge=None, drop=(), ref_only=Non
             code = f'P{i:04d}'
             u = rng.gauss(0, 1)
             nref = 2 if i == 5 else (i % 5 if i <= 400 else 0)
-            site = f'S{i % 40:02d}' if i % 10 == 0 else ''
             stratum = 'assistive' if i <= 41 else ('device-ios' if i % 3 == 0 else '')
             scores = [round(0.3 + 0.1 * u + 0.1 * rng.gauss(0, 1), 4) for _ in range(nref + 1)]
+            if i == 5:
+                scores = [1.1, 1.1, scores[2]]
             if code == ref_only:
-                w.writerow([code, site, 'ref', 'device-android', 1, 'human', scores[0]])
+                w.writerow(['public', code, 'ref', 'device-android', 3, 'human', scores[0]])
             if code in drop:
                 continue
-            w.writerow([code, site, 'judge', stratum, 3, 'bot' if i == 5 else 'human', scores[0]])
+            w.writerow(['public', code, 'judge', stratum, 3, 'bot' if i == 5 else 'human', scores[0]])
             for j in range(nref):
-                w.writerow([code, site, 'ref', 'network-mobile' if j % 2 else 'device-android', 1 + j % 3,
+                w.writerow(['public', code, 'ref', 'network-mobile' if j % 2 else 'device-android', 3,
                             'bot' if (i == 5 and j == 0) else 'human', scores[j + 1]])
             if code == extra_judge:
-                w.writerow([code, site, 'judge', '', 3, 'human', 0.3])
+                w.writerow(['public', code, 'judge', '', 3, 'human', 0.3])
 
 
 def selftest_bot_outcomes(conf, path):
@@ -691,8 +770,33 @@ def selftest():
     with io.open(bot_prices, 'w', encoding='utf-8') as f:
         json.dump({'id_krw': 50000, 'proxy_usd_per_gb': 7.0, 'solve_usd_per_1k': 1.45, 'hour_krw': 10000, 'usd_krw': 1400,
                    'face_krw': 150000, 'premiums_krw': [200000, 900000], 'catch_probs': [0.01, 0.05]}, f)
-    hs = os.path.join(tmp, 'human_sessions.csv')
+    # 사람별 입력과 비공개 등록 파일은 저장소(임시 루트) 밖에 둔다
+    inputs = tempfile.mkdtemp(prefix='perf-ledger-selftest-inputs-')
+    hs = os.path.join(inputs, 'human_sessions.csv')
     selftest_human_sessions(hs)
+    salt, registration = 'c' * 64, os.path.join(inputs, 'registration.json')
+    reg = {'id': 'selftest', 'source': 'public', 'registered_at': '2026-09-01T00:00:00Z', 'salt': salt, 'plan': {'n': 947, 'c': 1},
+           'dataset': {'name': 'selftest', 'version': '1', 'sha256': 'a' * 64, 'readme_sha256': 'b' * 64, 'attribution': 'selftest'},
+           'seeds': {'split': 1, 'draw': 2}, 'conversion_rule': 'selftest', 'tune_n': 200, 'max_missing_ratio': 0.01,
+           'behavior_rule': {'strength': '기본', 'sort_mode': 'shuffle', 'decision_threshold': 2.0, 'weight': 2.0, 'max_risk': 1.0, 'public_max_risk': 1.0},
+           'judge_people_sha256': L.people_hash(salt, [f'P{i:04d}' for i in range(1, 948)]), 'judge_records_sha256': 'd' * 64, 'tune_people_sha256': L.people_hash(salt, ['T1']),
+           'tool_commit': 'selftest', 'tool_sha256': L.tool_sha256()}
+    with io.open(registration, 'w', encoding='utf-8') as f:
+        json.dump(reg, f, ensure_ascii=False)
+    # 공개 등록 파일과 자료 고정 파일을 측정 시작(2026-10-01)보다 앞선 날짜로 커밋한다(ADR-0246)
+    rule = L.behavior_rule(reg['behavior_rule'], 'public')
+    pub = os.path.join(tmp, *L.K6_REGISTRATIONS_DIR.split('/'), 'selftest.json')
+    os.makedirs(os.path.dirname(pub))
+    with io.open(pub, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(L.public_registration(reg, rule), f, ensure_ascii=False)
+    with io.open(os.path.join(tmp, *L.K6_DATASET_PINS.split('/')), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump({'datasets': {'selftest': {'sha256': 'a' * 64, 'readme_sha256': 'b' * 64}}}, f)
+    with io.open(os.path.join(inputs, L.K6_VERIFY_RESULT), 'w', encoding='utf-8') as f:
+        json.dump({'registration_hash': L.registration_hash(reg), 'result': 'ok', 'source_file_checked': True, 'verified_at': '2026-09-02T00:00:00Z', 'reason': None}, f)
+    env = dict(os.environ, GIT_AUTHOR_DATE='2026-09-20T00:00:00Z', GIT_COMMITTER_DATE='2026-09-20T00:00:00Z')
+    for git_args in (['init', '-q'], ['add', L.K6_REGISTRATIONS_DIR, L.K6_DATASET_PINS],
+                     ['-c', 'user.name=selftest', '-c', 'user.email=selftest@example.test', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'register']):
+        subprocess.run(['git', '-C', tmp, *git_args], check=True, capture_output=True, env=env)
     outcomes = os.path.join(tmp, 'bot_outcomes.csv')
     selftest_bot_outcomes(conf, outcomes)
 
@@ -701,40 +805,41 @@ def selftest():
                     duration=None, warmup=0, scenario='k6-bot-tiers.js', scenario_args=None, closed_model=False,
                     # 실행 날을 ID의 날로 둔다. 비우면 collected_at(오늘)이 실행 날이 되어, 오늘이 다른 고정 날과 같을 때
                     # 하루 해시 묶음 시험에 섞인다(2026-11-02에 실제로 깨짐)
-                    k6_summary=None, prom_url=None, start='2026-12-01T00:00:00Z', end='2026-12-01T00:10:00Z', step=1, queries=None, infra_file=None,
+                    k6_summary=None, prom_url=None, start='2026-10-01T00:00:00Z', end='2026-10-01T00:10:00Z', step=1, queries=None, infra_file=None,
                     invariants=None, cost_file=None, timeline=None, extra=None, confusion=conf, commit='selftest',
                     generator='selftest', region='local', cost_krw=0, exchange_rate=1400, verdict='pass',
-                    notes='selftest', invalid_reason=None, force=False, k6_plan='947:1', bot_cost=bot_cost,
-                    bot_prices=bot_prices, human_sessions=hs, bot_outcomes=outcomes)
+                    notes='selftest', invalid_reason=None, force=False, k6_plan='947:1', k6_source='public',
+                    k6_registration=registration, bot_cost=bot_cost, bot_prices=bot_prices,
+                    human_sessions=hs, bot_outcomes=outcomes)
         base.update(kw)
         return argparse.Namespace(**base)
 
-    # V-T25 ①: 참가자 947명이 판정 세션 하나씩(참고 세션 포함) → 판정하고 사람 단위 집계를 남긴다
+    # V-T25 ①: 사람 947명이 판정 기록 하나씩(참고 기록 포함) → 판정하고 사람 단위 집계를 남긴다
     man = collect(k6_args('2026-12-01-k6-v1-local-bot'), tmp)
     ev, kc = man['k6_eval'], man['k6_cost']
     run_dir = os.path.join(tmp, L.RUNS, '2026-12-01-k6-v1-local-bot')
-    assert ev['human_units']['participants'] == 947 and ev['human_units']['judge_sessions'] == 947, ('사람 단위 오류', ev['human_units'])
+    assert ev['human_units']['people'] == 947 and ev['human_units']['judge_records'] == 947, ('사람 단위 오류', ev['human_units'])
     assert ev['sessions_per_person'] == {'1': 626, '2': 80, '3': 81, '4': 80, '5': 80}, ('사람당 세션 수 오류', ev['sessions_per_person'])
     icc = ev['human_icc']
     assert icc['people'] == 321 and 0.35 < icc['icc'] < icc['upper95_one_sided'] < 0.75, ('사람 안 상관 오류', icc)
-    assert ev['judged_fp_refs'] == {'people': 1, 'ref_sessions': 2, 'ref_false_pos': 1}, ('오탐 사람의 참고 세션 오류', ev['judged_fp_refs'])
-    assert {'round': 1, 'stratum': 'device-android', 'n': 321, 'false_pos': 1} in ev['ref_strata'], ('참고 층별 오류', ev['ref_strata'])
+    assert ev['judged_fp_refs'] == {'people': 1, 'ref_records': 2, 'ref_false_pos': 1}, ('오탐 사람의 참고 기록 오류', ev['judged_fp_refs'])
+    assert {'round': 3, 'stratum': 'device-android', 'n': 481, 'false_pos': 1} in ev['ref_strata'], ('참고 층별 오류', ev['ref_strata'])
     assert not os.path.exists(os.path.join(run_dir, 'human_sessions.csv')), '사람 세션 파일이 측정 폴더에 복사됐다'
     for base, _, files in os.walk(run_dir):
         for fn in files:
             text = io.open(os.path.join(base, fn), encoding='utf-8', errors='replace').read()
             assert 'human_sessions.csv  ' not in text and 'P0005' not in text, ('가명 코드나 사람 세션 파일이 남았다', fn)
-    # V-T25 ②·③과 판정 세션이 없는 참가자: 판정하지 않고 실행을 거부한다(측정 폴더도 만들지 않는다)
+    # V-T25 ②·③과 판정 기록이 없는 사람: 판정하지 않고 실행을 거부한다(측정 폴더도 만들지 않는다)
     conf946 = os.path.join(tmp, 'confusion-946.csv')
     with io.open(conf, encoding='utf-8') as f:
         body = f.read().replace('-,3,human,human,946,', '-,3,human,human,945,')
     with io.open(conf946, 'w', encoding='utf-8', newline='') as f:
         f.write(body)
-    cases = [('two-judges', dict(extra_judge='P0001', drop={'P0947'}), conf, '판정 세션이 둘 이상'),
+    cases = [('two-judges', dict(extra_judge='P0001', drop={'P0947'}), conf, '판정 기록이 둘 이상'),
              ('946-judges', dict(drop={'P0947'}), conf946, 'N=947'),
-             ('no-judge', dict(drop={'P0947'}, ref_only='P0947'), conf, '판정 세션이 없는')]
+             ('no-judge', dict(drop={'P0947'}, ref_only='P0947'), conf, '판정 기록이 없는')]
     for name, opts, cpath, expect in cases:
-        bad = os.path.join(tmp, f'human_sessions-{name}.csv')
+        bad = os.path.join(inputs, f'human_sessions-{name}.csv')
         selftest_human_sessions(bad, **opts)
         rid = f'2026-12-01-k6-v1-local-bot-{name}'
         try:
@@ -844,9 +949,16 @@ def main():
     p.add_argument('--k6-summary'); p.add_argument('--bench-summary', help='k6가 아닌 측정 도구의 결과 JSON(bench 칸: p99_ms·error_rate·requests·dropped)'); p.add_argument('--prom-url'); p.add_argument('--start'); p.add_argument('--end'); p.add_argument('--step', type=int, default=1); p.add_argument('--queries')
     p.add_argument('--infra-file'); p.add_argument('--invariants'); p.add_argument('--cost-file'); p.add_argument('--timeline'); p.add_argument('--extra', action='append')
     p.add_argument('--confusion', help='K6: tier,round,label,predicted,count[,stratum] 형식의 혼동 행렬 CSV(ADR-0039·0048)')
-    p.add_argument('--k6-plan', help='K6: 사전 등록 계획 N:C. N은 판정 세션을 낸 사람 수, C는 합격 오탐 수(예: 947:1, ADR-0048·0112)')
-    p.add_argument('--human-sessions', help='K6: participant,site,role,stratum,round,predicted,score 형식의 사람 세션 CSV. '
-                                            '확인과 집계에만 쓰고 측정 폴더에 복사하지 않는다(ADR-0112)')
+    p.add_argument('--k6-plan', help='K6: 사전 등록 계획 N:C. N은 판정 기록을 낸 사람 수, C는 합격 오탐 수(예: 947:1, ADR-0048·0112)')
+    p.add_argument('--k6-source', choices=L.K6_SOURCES, help='K6 사람 쪽 원천: public(공개 자료 기준), mock(모의 사람 리허설), live(출시 뒤, ADR-0174 결정 6)')
+    p.add_argument('--k6-registration', help='K6: human_data.py가 쓴 비공개 등록 파일(public·mock). 저장소 밖에 둔다(docs/perf-ledger.md §10.5, ADR-0246)')
+    p.add_argument('--remeasure-reason', help='K6 public: 같은 자료의 기본 강도 측정이 이미 있을 때 다시 재는 사유. 장부에 남고 표에 재측정으로 보인다')
+    p.add_argument('--dataset-pin', help='K6 public: 자료 고정 파일 경로(기본은 HEAD의 docs/perf-ledger/datasets.json). 시험 전용이고 환경 변수 없이 주면 합격이 될 수 없다')
+    p.add_argument('--confusion-launch', help='K6: 출시 첫 판(BehaviorScore 적용 가중치 0)의 혼동 행렬 CSV. k6_eval.launch_detection에 적는다(ADR-0174 결정 5)')
+    p.add_argument('--fp-review', help='K6 live: batch,sampled,human,bot,unsure,population 형식의 표본 검토 집계 CSV. 측정 폴더에 복사하지 않는다(docs/perf-ledger.md §10.5·§10.6)')
+    p.add_argument('--r2-deadline', help='K6 live: 마감 단계 R2 날짜 YYYY-MM-DD(docs/perf-ledger.md §10.6)')
+    p.add_argument('--human-sessions', help='K6: source,person,role,stratum,round,predicted,score[,behavior_score] 형식의 사람 기록 CSV. '
+                                            '확인과 집계에만 쓰고 측정 폴더에 복사하지 않는다(ADR-0112·0174)')
     p.add_argument('--bot-outcomes', help='K6: tier,round,solve_rate,sessions,detected,blocked,verify_passed,admitted 형식의 '
                                           '봇 끝 결과 CSV(docs/perf-ledger.md §10.5, 기술 검토 중간-104)')
     p.add_argument('--bot-cost', help='K6: tier,round,ids,proxy_gb,solves,ops_hours,infra_krw,tickets 형식의 CSV(ADR-0048)')
@@ -863,6 +975,11 @@ def main():
     a = p.parse_args()
     if a.selftest:
         selftest(); return
+    for opt, value in (('--start', a.start), ('--end', a.end)):
+        try:
+            L.parse_time(value)
+        except (ValueError, OverflowError) as e:
+            p.error(f'{opt}가 시각이 아니다: {e}')
     global RAW_OUTBOX
     if a.raw_outbox is not None:
         if not a.raw_outbox:

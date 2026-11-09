@@ -1,0 +1,151 @@
+/*
+ * 대기실 화면 규칙(키트에 없는 배치·움직임). 색은 키트의 의미 변수만 쓴다. 대기실 경량 페이지(apps/web/queue-room)가 키트(queue-room.css)와
+ * 페이지 규칙(대기실 src/styles/page.css) 뒤에 싣고, React 대기 패널(CMP-015 QueuePanel)을 그리는 곳도 키트 위에 이 파일을 싣는다
+ * (한 곳, ADR-0220 결정 2. 2026-11-06 apps/web/queue-room/src/styles/app.css에서 옮김). 페이지 전체에 걸리는 규칙(body·스피너 움직임 등)은 여기 두지 않는다.
+ * 보드의 인라인 style 값을 클래스로 옮겼다(CSP 묶음 A′는 인라인 스타일을 막는다, docs/frontend.md §5.1).
+ * 중단점: md 768(태블릿 보드), lg 1280(데스크톱 보드). 휴대폰(360)이 먼저다.
+ */
+@layer utilities {
+  /* 배치 도우미(보드 인라인 값) */
+  .q-g4 { gap: 4px; } .q-g6 { gap: 6px; } .q-g8 { gap: 8px; } .q-g10 { gap: 10px; } .q-g12 { gap: 12px; } .q-g16 { gap: 16px; } .q-g20 { gap: 20px; }
+  .q-self-start { align-self: flex-start; } .q-self-center { align-self: center; } .q-ai-center { align-items: center; }
+  .q-jc { justify-content: center; } .q-center { text-align: center; } .q-top { align-items: flex-start; }
+  .q-mt4 { margin-top: 4px; } .q-mt8 { margin-top: 8px; } .q-mh32 { min-height: 32px; } .q-indent { padding-left: 34px; }
+  .q-btn-flush { padding: 0; }
+  /* 버튼 모양의 상태 표시(누를 것이 없다): SCR-018 '알림 신청됨' */
+  .q-btn-static { cursor: default; pointer-events: none; margin: 0; }
+  .q-btn-wrap { height: auto; min-height: 52px; padding-top: 12px; padding-bottom: 12px; white-space: normal; }
+  .q-icon-56 { width: 56px; height: 56px; }
+  .q-w136 { width: 136px; } .q-w160 { width: 160px; } .q-w-full { width: 100%; }
+  .spinner.q-spin-lg { width: 32px; height: 32px; }
+  .q-center-block { align-items: center; text-align: center; padding: 8px; }
+
+  /* 집중 셸 머리(휴대폰 → 태블릿 → 데스크톱 보드) */
+  .q-fh-in { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; }
+  .q-lg { display: none; }
+  .q-acct { position: relative; }
+  .q-acct-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; }
+  .q-fh-div { height: 24px; align-self: center; }
+
+  /* 시트·대화상자: 화면에 고정하고 넘치면 상자 안에서 스크롤 */
+  .q-scrim { position: fixed; }
+  .q-scrim > .sheet { max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .q-scrim > .dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+  .q-dlg-480 { max-width: 480px; } .q-dlg-560 { max-width: 560px; }
+  .q-menu-link { display: flex; align-items: center; gap: 8px; min-height: 48px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 15px; font-weight: 500; }
+
+  /* 공통 본문 틀: 휴대폰은 화면 전체, 태블릿은 가운데 열, 데스크톱은 바탕 위 가운데 카드 */
+  .q-frame { width: 100%; }
+  .q-state-page { padding: 96px 8px 24px; }
+
+  /* SCR-007 로비 */
+  .q-lobby { padding: 24px 16px 40px; }
+  .q-lobby-frame { flex: 1; gap: 24px; }
+  .q-cd { gap: 6px; padding: 16px 0 12px; }
+  .q-hero { align-items: center; text-align: center; }
+  .q-hero-wait { gap: 16px; padding: 24px 0 16px; }
+  .q-hero-delayed { gap: 14px; padding: 16px 0 8px; }
+  .q-guide { align-items: flex-start; gap: 8px; padding: 0 2px; }
+  .q-guide .ic { margin-top: 2px; }
+  .q-hc { gap: 10px; padding: 14px 16px; }
+  .q-pref { gap: 14px; padding: 16px; }
+  .q-seed { gap: 4px 10px; }
+  .q-lobby-cta { gap: 10px; padding-top: 4px; }
+
+  /* SCR-008 대기열 */
+  .q-queue { padding: 16px 16px 24px; }
+  .q-queue-frame { flex: 1; }
+  .q-inqueue { flex: 1; gap: 12px; }
+  .q-pref-row { gap: 12px; padding: 10px 12px 10px 16px; }
+  .q-region { gap: 24px; margin: auto 0; padding: 40px 0 24px; }
+  .q-count { gap: 24px; }
+  .q-ahead { justify-content: center; align-items: baseline; gap: 8px; }
+  .q-eta { align-items: center; gap: 2px; }
+  .q-queue-foot { gap: 4px; align-items: center; margin-top: auto; }
+
+  /* 진행 막대(CMP-016 queue): 채움·'나' 표시는 transform으로만 옮긴다(d5 §5.8, 낮음-103) */
+  .q-barwrap { position: relative; padding-top: 30px; overflow-x: clip; }
+  .q-bar { position: relative; }
+  .q-bar > .q-fill { position: absolute; inset: 0; overflow: hidden; transform: translateX(calc(var(--p, 0%) - 100%)); transition: transform .9s linear; }
+  .q-fill.q-dim { opacity: .45; }
+  .q-flow::before { content: ""; position: absolute; top: 0; bottom: 0; left: -29px; right: 0; background: repeating-linear-gradient(-45deg, var(--primary) 0 10px, var(--primary-hover) 10px 20px); animation: q-flow 1.2s linear infinite; }
+  .q-fill-next { position: absolute; top: 0; bottom: 0; left: var(--from); width: var(--w); border-radius: 0 999px 999px 0; background: var(--primary); opacity: .45; }
+  .q-me { position: absolute; top: 0; left: 0; width: 100%; height: 30px; transform: translateX(var(--p, 0%)); transition: transform .9s linear; pointer-events: none; }
+  .q-me-ghost { opacity: .3; }
+  .q-me-badge { position: absolute; top: 0; left: 0; transform: translateX(-50%); }
+  .q-me-tick { position: absolute; top: 22px; left: -1px; width: 2px; height: 8px; background: var(--primary); }
+
+  /* 앞 인원 숫자가 굴러가듯 바뀌는 모션(base: d2 토큰 --peaket-duration-base 200ms, --peaket-easing-enter). 바뀐 자리만 위에서 내려온다 */
+  .q-roll { display: inline-flex; }
+  .q-digit { display: inline-block; height: 60px; overflow: hidden; }
+  .q-digit-stack { display: block; animation: q-roll 200ms cubic-bezier(0, 0, .15, 1) both; }
+  .q-digit-stack > span { display: block; height: 60px; }
+  .q-digit-old { opacity: .3; }
+
+  /* SCR-018 매진 */
+  .q-soldout { justify-content: center; padding: 32px 16px 40px; }
+  .q-soldout-frame { gap: 24px; }
+  .q-toast { position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 50; max-width: 480px; margin: 0 auto; }
+
+  /* SCR-015 굿즈 대기 */
+  .q-goods-main { padding-bottom: 40px; }
+  .q-goods { gap: 20px; width: 100%; padding: 12px 16px 32px; }
+  .q-back { gap: 2px; align-self: flex-start; }
+  .q-goods-card { gap: 12px; padding: 24px 20px; }
+  .q-langs { gap: 4px 12px; }
+
+  /* 태블릿(md 768) */
+  @media (min-width: 768px) {
+    .q-fh { padding: 0 16px 0 12px; }
+    .q-cta { max-width: 360px; }
+    .q-state-page { padding: 120px 8px 24px; }
+    .q-lobby { align-items: center; padding: 40px 24px 48px; }
+    .q-lobby-frame { max-width: 520px; }
+    .q-cd { gap: 8px; padding: 24px 0 16px; }
+    .q-lobby-cta { margin-top: auto; align-items: center; }
+    .q-queue { align-items: center; padding: 32px 24px 40px; }
+    .q-queue-frame { max-width: 480px; }
+    .q-inqueue { gap: 16px; }
+    .q-pref-text { font-size: 16px; line-height: 22px; }
+    .q-region { gap: 28px; padding: 56px 0 32px; }
+    .q-count { gap: 28px; }
+    .q-ahead { gap: 10px; }
+    .q-ahead-l { font-size: 24px; line-height: 32px; letter-spacing: -.005em; }
+    .q-soldout { align-items: center; padding: 48px 24px 64px; }
+    .q-soldout-frame { max-width: 480px; gap: 28px; }
+    .q-goods { max-width: 480px; margin: 0 auto; padding-top: 24px; }
+  }
+
+  /* 데스크톱(lg 1280): 로고·이름 버튼이 있는 머리, 바탕 위 가운데 480px 카드 */
+  @media (min-width: 1280px) {
+    .q-lg { display: inline-flex; }
+    .q-lt-lg { display: none; }
+    .q-fh { height: 64px; padding: 0; }
+    .q-fh-in { max-width: 1280px; margin: 0 auto; padding: 0 32px; gap: 12px; }
+    .q-state-page { padding: 56px 8px 16px; }
+    .q-lobby, .q-queue, .q-soldout { padding: 48px 32px 64px; background: var(--surface-basement); }
+    .q-queue { padding: 40px 32px 56px; }
+    .q-lobby-frame, .q-queue-frame, .q-soldout-frame { flex: none; max-width: 480px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xl); }
+    .q-lobby-frame { padding: 32px 28px; }
+    .q-queue-frame { min-height: 600px; padding: 28px 28px 20px; }
+    .q-soldout-frame { padding: 40px 32px; }
+    .q-cd { padding: 12px 0 8px; }
+    .q-lobby-frame .q-hc { border-color: transparent; background: var(--surface-muted); }
+    .q-lobby-cta { margin-top: 0; align-items: stretch; }
+    .q-lobby-cta .q-cta { max-width: none; }
+    .q-region { gap: 24px; padding: 32px 0 20px; }
+    .q-count { gap: 24px; }
+    .q-queue-foot { padding-top: 12px; border-top: 1px solid var(--border); }
+  }
+
+  /* 움직임 줄이기·저전력: 효과 없이 값만 바꾼다(d5 §5.8, d3 SCR-007) */
+  @media (prefers-reduced-motion: reduce) {
+    .q-flow::before, .q-digit-stack { animation: none; }
+    .q-bar > .q-fill, .q-me { transition: none; }
+  }
+  .q-still .q-flow::before, .q-still .q-digit-stack { animation: none; }
+  .q-still .q-bar > .q-fill, .q-still .q-me { transition: none; }
+}
+
+@keyframes q-flow { to { transform: translateX(28.28px); } }
+@keyframes q-roll { from { transform: translateY(-60px); } to { transform: translateY(0); } }

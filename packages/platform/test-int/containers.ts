@@ -38,6 +38,8 @@ export interface KafkaContainer {
    * 네이티브 오류로 죽었다(2026-11-01, ST-T18)
    */
   groupOffsets(group: string, topic: string): Promise<Map<number, number>>;
+  /** 지금 파티션을 가진 소비자(파티션 → CLIENT-ID). 재조정 중이거나 주인이 없으면 그 파티션은 빠진다 */
+  groupOwners(group: string, topic: string): Promise<Map<number, string>>;
   stop(): void;
   /** startKafka({ oauth: true })일 때만: TLS + OAUTHBEARER(서명 없는 JWT를 믿는 시험 검증기) 리스너 주소와 그 CA 파일 */
   auth?: { brokers: string[]; caFile: string };
@@ -114,7 +116,7 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
   const brokers = [`127.0.0.1:${port}`];
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }
@@ -156,6 +158,21 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
       }
       return out;
     },
+    async groupOwners(group, topic) {
+      const out = new Map<number, string>();
+      let text = '';
+      try {
+        text = (await promisify(execFile)('docker', ['exec', id, '/opt/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'localhost:9094', '--describe', '--group', group], { encoding: 'utf8' })).stdout;
+      } catch {
+        return out;
+      }
+      for (const line of text.split(/\r?\n/)) {
+        const f = line.trim().split(/\s+/);
+        // GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID
+        if (f[1] === topic && /^\d+$/.test(f[2] ?? '') && f[6] && f[6] !== '-' && f[8]) out.set(Number(f[2]), f[8]);
+      }
+      return out;
+    },
     stop,
     auth: certs ? { brokers: [`127.0.0.1:${authPort}`], caFile: certs.caFile } : undefined,
   };
@@ -174,7 +191,7 @@ export async function startValkey(): Promise<ValkeyContainer> {
     url: `redis://127.0.0.1:${port}`,
     stop: () => {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }
@@ -197,7 +214,7 @@ export async function startPasswordCluster(password: string): Promise<PasswordCl
   const id = docker(['run', '-d', '--rm', '-p', `127.0.0.1:${port}:${port}`, VALKEY_IMAGE, 'valkey-server', '--port', String(port), '--cluster-enabled', 'yes', '--cluster-port', '16379', '--cluster-announce-ip', '127.0.0.1', '--requirepass', password, '--masterauth', password, '--save', '', '--appendonly', 'no']);
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }

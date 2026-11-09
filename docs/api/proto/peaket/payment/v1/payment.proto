@@ -30,11 +30,13 @@ service PaymentService {
   // 부르는 쪽은 사건으로 받은 것과 같은 처리기로 반영하고, 이미 반영한 event_seq 이하는 건너뛴다. 읽기만 하므로 멱등 키가 없다.
   rpc BatchGetPayments(BatchGetPaymentsRequest) returns (BatchGetPaymentsResponse);
 
-  // 결제 상태 조회. 결과를 모르는 건의 정리와 대사가 쓴다.
+  // 결제 상태 조회. 결과를 모르는 건의 정리와 대사가 쓰고, 입금 대기의 결제 상태 응답이 은행·계좌번호·입금 기한을 읽는다(추천 적용 2026-11-09, BUILD_ORDER HOT-151).
+  // 원장이 없으면 NOT_FOUND다. 결제사는 부르지 않는다.
   rpc GetPayment(GetPaymentRequest) returns (GetPaymentResponse);
 
   // 취소(전액·부분). 결제사 멱등키는 cancel-{cancellation_id}다.
   // 예매 취소, 회차 취소 일괄 환불, 발권 불가 보상(회차 취소 확정·CS 확인 뒤, ADR-0106)이 쓴다. 실패 건의 재시도는 payment-svc 워커가 맡는다.
+  // 첫 구현은 입금 대기 결제의 입금 전 취소만이고 그 밖의 상태는 FAILED_PRECONDITION이다(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
   rpc CancelPayment(CancelPaymentRequest) returns (CancelPaymentResponse);
 
   // 지급대행 판매자 등록(판매 승인 때 core-svc가 부른다).
@@ -132,6 +134,12 @@ message ConfirmPaymentRequest {
   }
   // 서버 금액. 토스는 복귀 금액과 대조하고, 포트원은 승인 API의 totalAmount로 넘겨 포트원이 대조한다.
   peaket.common.v1.Money amount = 6;
+  // 회차 ID. 결제 원장 payment.event_id와 결제 사건의 eventId가 이 값이다(추천 적용 2026-11-09, BUILD_ORDER PRF-180).
+  string event_id = 7;
+  // 결제창 인증 시각(결제 시도의 authenticated_at). 승인 기한(인증 + 10분)의 기준이다.
+  google.protobuf.Timestamp authenticated_at = 8;
+  // 같은 주문의 결제 시도 순번(1부터). 결제 사건의 필수 칸 attemptNo가 이 값이다.
+  int32 attempt_no = 9;
 }
 
 message TossPaymentRef {
@@ -172,6 +180,8 @@ enum FailureCategory {
   FAILURE_CATEGORY_EXPIRED = 4;
   FAILURE_CATEGORY_PG_ERROR = 5;
   FAILURE_CATEGORY_THROTTLED = 6;
+  // 입금 대기 결제의 입금 전 취소(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
+  FAILURE_CATEGORY_DEPOSIT_CANCELED = 7;
 }
 
 message ConfirmPaymentResponse {
@@ -207,8 +217,20 @@ message GetPaymentResponse {
   peaket.common.v1.PgProvider pg = 3;
   PaymentStatus status = 4;
   peaket.common.v1.Money amount = 5;
+  // 취소한 금액의 합. 취소를 만드는 단계 전에는 0원이다(추천 적용 2026-11-09, BUILD_ORDER HOT-151).
   peaket.common.v1.Money cancelled_amount = 6;
   google.protobuf.Timestamp approved_at = 7;
+  // 입금 대기일 때만 채운다. 입금이 확정되거나 입금 기한이 지나면 칸이 없다(추천 적용 2026-11-09, BUILD_ORDER HOT-151).
+  VirtualAccountInfo virtual_account = 8;
+}
+
+// 가상계좌 입금 안내(docs/features/payment.md §6). 입금처 번호라 구매자의 계좌가 아니다.
+message VirtualAccountInfo {
+  string bank = 1;
+  // 평문. 저장소에는 필드 암호화로만 있고, 복호하지 못했거나 저장하지 않았으면 비어 있다. 로그에 싣지 않는다.
+  string account_number = 2;
+  // 입금 기한. 결제사가 주지 않았으면 비어 있다.
+  google.protobuf.Timestamp due_at = 3;
 }
 
 message BatchGetPaymentsRequest {
@@ -232,10 +254,13 @@ message OrderPaymentState {
   google.protobuf.Timestamp approved_at = 6;
   // 실패일 때만 채운다. trade.payments 사건의 failureCategory와 같은 값이다.
   FailureCategory failure_category = 7;
-  // 마지막 결제 사건(payment_event 행)의 eventKey. 같은 사건이 trade.payments로 늦게 와도 이 값으로 거른다.
+  // 마지막 수출 사건(payment_event 행 가운데 exported = true이고 RESOLVED가 아닌 것의 순번 최대)의 eventKey. 같은 사건이 trade.payments로 늦게 와도 이 값으로 거른다.
+  // 수출 사건이 없으면(아직 ACCEPTED) event_key와 event_seq를 비운다(추천 적용 2026-11-09, BUILD_ORDER PRF-180).
   string event_key = 8;
   // 마지막 결제 사건의 순번(주문마다 늘어나기만 한다). 부르는 쪽은 이미 반영한 순번 이하를 건너뛴다.
   int64 event_seq = 9;
+  // 입금 대기일 때만 채운다(결제 사건의 depositDueAt과 같은 값, 추천 적용 2026-11-09, BUILD_ORDER HOT-151).
+  google.protobuf.Timestamp deposit_due_at = 10;
 }
 
 message CancelPaymentRequest {

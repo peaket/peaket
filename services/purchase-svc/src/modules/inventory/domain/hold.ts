@@ -6,6 +6,8 @@ import { createHash } from 'node:crypto';
 export const HOLD_TTL_MS = 7 * 60_000;
 /** 샤드 Pub/Sub 델타의 좌석 상태 값(docs/data.md §3 s:{event:E}:sec:{section}, docs/frontend.md §4.4.1): 1 = 다른 분 선택(홀드) */
 export const SEAT_STATE_HELD = 1;
+/** 샤드 Pub/Sub 델타의 좌석 상태 값 0 = 가능(해제·만료 Lua가 보낸다, docs/frontend.md §4.4.1) */
+export const SEAT_STATE_AVAILABLE = 0;
 /** 같은 계정이 방금 놓은 좌석을 다시 잡을 수 있을 때까지 30초 [가정](ADR-0161 결정 2). 해제·만료 Lua가 rel 점수로 쓴다(PRF-130 ①의 홀드 Lua는 읽기만) */
 export const REHOLD_WAIT_MS = 30_000;
 /** 요청 하나의 좌석 수 상한(openapi HoldRequest.seatIds maxItems) */
@@ -14,8 +16,22 @@ export const MAX_SEATS = 10;
 export const IDEM_TTL_MS = HOLD_TTL_MS;
 /** 회차 키(비트맵·홀드·보유 수·fence·expiry·epoch)의 수명 = 판매 종료 + 1일 [가정](docs/data.md §3) */
 export const KEEP_AFTER_SALE_END_MS = 24 * 3600_000;
+/** 좌석 저장소 503의 problem 이름과 제목. 홀드 응답 대응표(HOLD_PROBLEMS의 NOT_READY·STORE_UNAVAILABLE)와 구매 세션 확인 경로(StoredPurchaseSessions)가 같이 쓴다 */
+export const SEAT_STORE_UNAVAILABLE_PROBLEM = { type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다' } as const;
 /** 좌석 저장소 503(seat-store-unavailable)의 Retry-After 2초 [가정](ADR-0121) */
 export const SEAT_STORE_RETRY_AFTER_SEC = 2;
+/**
+ * 요청 처리 중 좌석 Redis 호출 하나에 주는 마감의 상한(ms, guidelines §5, BUILD_ORDER PRF-135). 부를 때 마감 = min(남은 시간, 이 값).
+ * 플랫폼 REDIS_CALL_DEADLINE_MS(100)와 같은 값이다
+ */
+export const SEAT_CALL_CAP_MS = 100;
+/**
+ * 새 홀드를 구매 세션 상태에 기록하는 호출(recordHold)의 마감 상한 20ms [가정](BUILD_ORDER PRF-137 리뷰). 홀드는 이미 좌석 Redis에 확정된 뒤라 보조 기록이 느려도
+ * 응답을 100ms까지 붙들지 않게 한다. 부를 때 마감 = min(남은 시간, 이 값)이고, 남은 시간이 SEAT_CALL_MIN_REMAINING_MS 미만이면 부르지 않는다
+ */
+export const SESSION_RECORD_CAP_MS = 20;
+/** 좌석 Redis를 부르기 전 남은 시간이 이보다 작으면 부르지 않고 504 deadline-exceeded로 끝낸다(5ms [가정], guidelines §5, BUILD_ORDER PRF-135) */
+export const SEAT_CALL_MIN_REMAINING_MS = 5;
 
 /** Redis 키의 해시 태그·구분자 안에 들어가는 값(회차 ID·계정 ID)의 모양. 받는 층이 이 모양만 넘긴다 */
 export const KEY_PART = /^[A-Za-z0-9_-]{1,64}$/;
@@ -94,9 +110,14 @@ export interface HeldHold {
  * 7. OK: 썼다(쓰는 것은 SeatStore.hold의 설명)
  *
  * 5와 6 사이에서 쓰기 전 지킴을 본다(추천 적용 2026-11-04). 걸리면 결과가 아니라 일시 장애가 아닌 Error를 던지고 아무것도 쓰지 않는다:
- * keepUntilMs가 저장소 시각(Lua는 TIME, 메모리는 Clock) 이하, 보유 수·fence 값이 10진 정수 글(^%d+$)이 아님('-1'·'1e3'·' 5'·'0x10'·'1.5' 모두 거절),
+ * keepUntilMs가 저장소 시각(Lua는 TIME, 메모리는 Clock) 이하, 보유 수 값이 표준 10진 정수(isStandardInt: '0' 또는 첫 자리 1~9에 18자리 이하.
+ * INCRBY가 받는 값이라 '007'·20자리·'-1'·'1e3'·' 5'·'0x10'·'1.5'·'' 모두 거절, A1)가 아님, fence 값이 10진 정수 글(^%d+$)이 아님(SET만 하는 값이라 앞 0은 받는다),
  * expiry(zset)·stream(stream)·secver(hash)·hold:{색인}(hash) 키의 형이 틀림(키가 없으면 통과). 오류 글은 keepUntil이 PEAKET_KEEP_UNTIL_PAST, 값·형이 PEAKET_CORRUPT_KEY다.
- * 토큰이 2^53 − 1을 넘는 것(PEAKET_FENCE_OVERFLOW)도 같은 방식이다
+ * 토큰이 2^53 − 1을 넘는 것(PEAKET_FENCE_OVERFLOW)도 같은 방식이다.
+ *
+ * 덧붙인 지킴(PRF-130 리뷰 낮음 3, BUILD_ORDER PRF-135): 같은 자리(5와 6 사이)에서
+ * secver의 바뀔 구역(요청 좌석의 구역 색인) 칸 값이 있는데 표준 10진 정수(HINCRBY가 받는 값, A1)가 아니면 PEAKET_CORRUPT_KEY {secver 키}다(칸이 없으면 통과, 0으로 본다).
+ * 바뀌지 않을 구역의 칸은 보지 않는다. 메모리 구현은 secver 값의 String이 표준 10진 정수가 아니면(1.5·−1·NaN·'007') 같은 오류다
  */
 export type HoldResult =
   | ({ kind: 'OK' } & HeldHold)
@@ -122,9 +143,24 @@ export interface ReplayInput {
  */
 export type ReplayResult = ({ kind: 'IDEM_REPLAY' } & HeldHold) | { kind: 'IDEM_REUSED' } | null;
 
-/** 좌석 Redis 일시 장애(마감 초과·끊김·클러스터 재구성, platform isRedisUnavailable). 받는 층이 503 seat-store-unavailable + Retry-After로 바꾼다 */
+/**
+ * SeatStoreUnavailable의 까닭. 응답(503 본문·머리)은 같고 지표(seat_lua_errors_total code OOM)·정규 로그 줄(seatStoreReason)에만 쓴다.
+ * - unavailable: 일시 장애(platform isRedisUnavailable가 참: 마감 초과·끊김·클러스터 재구성)
+ * - oom: 좌석 Redis 메모리 부족(platform isRedisOutOfMemory가 참, BUILD_ORDER PRF-135)
+ */
+export type SeatStoreUnavailableReason = 'unavailable' | 'oom';
+
+/**
+ * 좌석 Redis를 지금 쓸 수 없다(일시 장애 또는 메모리 부족). 받는 층이 503 seat-store-unavailable + Retry-After로 바꾼다.
+ * 이때 쓰였는지는 모른다(일시 장애) 또는 아무것도 쓰지 않았다(메모리 부족은 스크립트를 시작하기 전에 거절된다).
+ * @param cause 원래 오류
+ * @param reason 까닭(기본 'unavailable')
+ */
 export class SeatStoreUnavailable extends Error {
-  constructor(cause?: unknown) {
+  constructor(
+    cause?: unknown,
+    readonly reason: SeatStoreUnavailableReason = 'unavailable',
+  ) {
     super('좌석 Redis를 잠시 쓸 수 없다', { cause });
     this.name = 'SeatStoreUnavailable';
   }

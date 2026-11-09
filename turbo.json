@@ -13,7 +13,8 @@
         "dist/**"
       ],
       "env": [
-        "PEAKET_NEXT_DIST"
+        "PEAKET_NEXT_DIST",
+        "PEAKET_POC"
       ]
     },
     "typecheck": {
@@ -31,12 +32,28 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/docs/api/**",
         "$TURBO_ROOT$/docs/observability.md",
-        "$TURBO_ROOT$/tools/ci/service-openapi.mjs"
+        "$TURBO_ROOT$/tools/ci/service-openapi.mjs",
+        "$TURBO_ROOT$/docs/design/tokens.json",
+        "$TURBO_ROOT$/docs/design/d2-design-system.md",
+        "$TURBO_ROOT$/docs/frontend.md"
       ],
-      "outputs": [],
+      "outputs": [
+        "test-report.json",
+        "test-report.xml"
+      ],
+      "env": [
+        "PEAKET_TEST_REPORT",
+        "NODE_OPTIONS"
+      ],
       "dependsOn": [
         "^build"
       ]
+    },
+    "size": {
+      "dependsOn": [
+        "build"
+      ],
+      "outputs": []
     }
   }
 }

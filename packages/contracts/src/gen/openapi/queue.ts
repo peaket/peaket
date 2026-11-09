@@ -17,16 +17,16 @@ import * as zod from 'zod';
  * FR-005. 본인확인 완료(`ticket:buy`) + 사람 확인(Cloudflare Turnstile) 결과 + 위험 점수. pid당 1장. 위험 점수가 높으면 201 참가 토큰에 verification: REQUIRED를 실어 추가 검증(FR-020)으로 보낸다(303 대신, ADR-0079 결정 4). POL-001·002·030
  * @summary 로비 입장(참가 토큰 발급)
  */
-export const PostV1QueuesEventIdLobbyParticipantsParams = zod.object({
-  "eventId": zod.string()
+export const CreateQueueLobbyParticipantParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const PostV1QueuesEventIdLobbyParticipantsBody = zod.object({
+export const CreateQueueLobbyParticipantBody = zod.object({
   "humanCheckToken": zod.string().optional(),
   "deviceId": zod.string().optional()
-})
+}).strict()
 
-export const PostV1QueuesEventIdLobbyParticipantsResponse = zod.object({
+export const CreateQueueLobbyParticipantResponse = zod.object({
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "lobbyToken": zod.string().optional(),
   "verification": zod.enum(['REQUIRED']).optional().describe('위험 점수가 높아 추가 검증이 필요하면 REQUIRED(참가 토큰은 그대로 준다). 화면은 SCR-009로 간다. 브라우저 스크립트가 303 응답을 읽지 못해 303 대신 이 필드를 쓴다(추천 적용 2026-10-21, ADR-0079 결정 4)'),
@@ -44,54 +44,54 @@ export const PostV1QueuesEventIdLobbyParticipantsResponse = zod.object({
  * FR-007, POL-002. 팬 쿠키로 부르므로 처음 기기가 없어도 된다. 이 사람(pid)의 참가 토큰을 무효로 하고 1인 1순번 중복 확인 키를 지운다. 셔플 전이라 다시 참가해도 불리하지 않다. 처음 기기는 다음 요청에서 취소를 안내받는다. 로비가 닫힌 뒤(T=0)에는 409이고 대기 취소(DELETE …/entries/me)를 쓴다
  * @summary 로비 참가 취소(다른 기기에서 다시 참가하기 전, ADR-0060)
  */
-export const DeleteV1QueuesEventIdLobbyParticipantsMeParams = zod.object({
-  "eventId": zod.string()
+export const DeleteMyQueueLobbyParticipantParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const DeleteV1QueuesEventIdLobbyParticipantsMeResponse = zod.void()
+export const DeleteMyQueueLobbyParticipantResponse = zod.void()
 
 /**
  * FR-006, FR-039, POL-003. 공연 상세에서 미리 호출. 만료가 가까우면 조용히 갱신. 본문에 사람 확인 토큰과 행동 신호 요약을 함께 보내고 trust-svc가 위험 점수를 낸다(행동 신호 요약을 보내는 경로, 추천 적용 2026-10-15, ADR-0065 결정 9). 교차 출처 JSON이라 사전 요청이 붙는다
  * @summary 사전 검증 토큰 발급(오픈 후 도착 경로의 사람 확인 통과 표시, 15분. 최초 발급 시각 유지, ADR-0041)
  */
-export const PostV1QueuesEventIdPreVerificationsParams = zod.object({
-  "eventId": zod.string()
+export const CreateQueuePreVerificationParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMin = 0;
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMax = 3600000;
+export const createQueuePreVerificationBodyBehaviorSummaryWindowMsMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryWindowMsMax = 3600000;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryPointerMovesMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryPointerMovesMin = 0;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryPointerEntropyMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryPointerEntropyMin = 0;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryInputIntervalMeanMsMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryInputIntervalMeanMsMin = 0;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryInputIntervalStdMsMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryInputIntervalStdMsMin = 0;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryScrollEventsMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryScrollEventsMin = 0;
 
-export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryScrollDistancePxMin = 0;
+export const createQueuePreVerificationBodyBehaviorSummaryScrollDistancePxMin = 0;
 
 
 
-export const PostV1QueuesEventIdPreVerificationsBody = zod.object({
+export const CreateQueuePreVerificationBody = zod.object({
   "humanCheckToken": zod.string().optional().describe('Cloudflare Turnstile 응답 토큰(300초 1회용, trust-svc가 서버 검증)'),
   "deviceId": zod.string().optional(),
   "preverifyToken": zod.string().optional().describe('갱신할 때 지금 가진 사전 검증 토큰. 서명이 맞고 회차·계정·기기가 같고 만료 전이면 최초 발급 시각과 여정 ID(jny)를 그대로 옮긴다. 없거나 맞지 않으면 새 여정(추천 적용 2026-11-03, queue-admission §3 \'첫 구현의 세부\')'),
   "behaviorSummary": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
-  "windowMs": zod.int().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMin).max(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMax).describe('요약한 구간 길이(밀리초)'),
-  "pointerMoves": zod.int().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
-  "pointerEntropy": zod.number().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
-  "inputIntervalMeanMs": zod.number().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
-  "inputIntervalStdMs": zod.number().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
-  "scrollEvents": zod.int().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryScrollEventsMin).optional().describe('스크롤 이벤트 수'),
-  "scrollDistancePx": zod.int().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
+  "windowMs": zod.int().min(createQueuePreVerificationBodyBehaviorSummaryWindowMsMin).max(createQueuePreVerificationBodyBehaviorSummaryWindowMsMax).describe('요약한 구간 길이(밀리초)'),
+  "pointerMoves": zod.int().min(createQueuePreVerificationBodyBehaviorSummaryPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
+  "pointerEntropy": zod.number().min(createQueuePreVerificationBodyBehaviorSummaryPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
+  "inputIntervalMeanMs": zod.number().min(createQueuePreVerificationBodyBehaviorSummaryInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
+  "inputIntervalStdMs": zod.number().min(createQueuePreVerificationBodyBehaviorSummaryInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
+  "scrollEvents": zod.int().min(createQueuePreVerificationBodyBehaviorSummaryScrollEventsMin).optional().describe('스크롤 이벤트 수'),
+  "scrollDistancePx": zod.int().min(createQueuePreVerificationBodyBehaviorSummaryScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
 }).strict().optional().describe('행동 신호 요약(사전 검증 본문, 추천 적용 2026-10-15, ADR-0065 결정 9). 화면에서 잰 요약값만 보내고 원시 좌표·키 값·입력한 글자는 보내지 않는다. 재는 화면은 공연 상세(사전 검증 본문)와, 2026-10-31에 더한 좌석 화면(구매 세션의 첫 직접 선택 홀드 요청 HoldRequest.behavior)·결제 화면(결제 시도 시작 본문 behavior)이다. 좌석·결제 화면의 요약은 실시간 봇 판정에 쓰지 않고 부정 예매 사후 조사의 기록(asyncapi BehaviorSignal screen SEAT·PAYMENT)에만 쓴다(추천 적용 2026-10-31, ADR-0171 결정 4). 필드 구성과 범위는 [가정, wbs 3.2.1에서 확정]. 보조기기 사용자는 고유 패턴이 있어 단독 판정 근거로 쓰지 않는다(queue-admission §7)')
-})
+}).strict()
 
-export const PostV1QueuesEventIdPreVerificationsResponse = zod.object({
+export const CreateQueuePreVerificationResponse = zod.object({
   "preverifyToken": zod.string().describe('사전 검증 토큰(15분). 진입 본문에 그대로 싣는다'),
   "expiresAt": zod.iso.datetime({"offset":true}).describe('만료 시각. 화면은 그 전에 조용히 갱신한다'),
   "serverTimeMs": zod.int().describe('서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)')
@@ -101,17 +101,17 @@ export const PostV1QueuesEventIdPreVerificationsResponse = zod.object({
  * FR-006. 사전 검증 토큰 + 구매 권한 + pid 중복 확인 → INCR 순번. 오픈 직후 동시 도착 구간(2초 [가정])에 오픈 전 발급 토큰으로 도착하면 202 BATCHING + 결과 파일 경로(묶음 무작위, ADR-0041). T=0 피크 20만 RPS(NFR-001). PREQUEUE_SHUFFLE 공연(로비 셔플 켬·오픈 직후 묶음 끔, ADR-0118)도 오픈 뒤 진입을 받고 동시 도착 묶음 없이 로비 참가자 전원 뒤에 도착 순으로 번호를 준다(오픈 뒤 410 거절을 없앰, 소유자 결정 2026-10-14, ADR-0064). 202 BATCHING은 openBatch를 켠 회차에서만 나온다. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 모든 정렬 방식에서 410 sale-ended
  * @summary 대기열 진입(오픈 후, 대기표 발급)
  */
-export const PostV1QueuesEventIdEntriesParams = zod.object({
-  "eventId": zod.string()
+export const CreateQueueEntryParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const PostV1QueuesEventIdEntriesBody = zod.object({
+export const CreateQueueEntryBody = zod.object({
   "preverifyToken": zod.string(),
   "deviceId": zod.string().optional(),
   "entryRequestId": zod.uuid().optional().describe('진입 시도 하나에 브라우저가 만든 UUID. 응답을 못 받아 다시 보낼 때 같은 값을 쓰면 이어서 처리하고, 이미 번호를 기록했으면 같은 번호의 대기표를 다시 준다. 1인 1순번 선점 값 PENDING:{요청 ID}에 쓴다(헤더가 아니라 본문이라 사전 요청이 없다, 추천 적용 2026-10-28, 기술 검토 중간-035)')
-})
+}).strict().describe('대기열 진입 본문(POST /v1/queues/{eventId}/entries). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)')
 
-export const PostV1QueuesEventIdEntriesResponse = zod.object({
+export const CreateQueueEntryResponse = zod.object({
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "queueTicket": zod.string().optional(),
   "seq": zod.int().optional(),
@@ -122,32 +122,40 @@ export const PostV1QueuesEventIdEntriesResponse = zod.object({
 })
 
 /**
- * FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번
+ * FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번. 묶음·로비 참가자는 목록을 고정하기 전이면 목록에서 빼고, 고정한 뒤면 게시 때(게시 뒤면 바로) 그 번호를 빠진 번호로 돌린다(ADR-0233). 줄에 없어도 204이고, 입장 이력은 지우지 않는다
  * @summary 대기 취소
  */
-export const DeleteV1QueuesEventIdEntriesMeParams = zod.object({
-  "eventId": zod.string()
+export const DeleteMyQueueEntryParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const DeleteV1QueuesEventIdEntriesMeResponse = zod.void()
+export const DeleteMyQueueEntryResponse = zod.void()
 
 /**
  * FR-007, POL-007. NFR-002. 같은 구간 1,000명이 같은 파일. 매진 시 saleStatus=SOLD_OUT으로 폴링 중단(POL-015). 입장 임박 구간(그 구간의 첫 번호까지 예상 대기 60초 이내) 파일은 Expires = 생성 시각 + 1초, Cache-Control: public(max-age·stale-while-revalidate 없음)으로 내고, 그 밖 구간은 max-age=1, stale-while-revalidate=2다. 브라우저는 cache: no-store로 묻는다. 캐시 응답의 Date는 노출하지 않는다(Access-Control-Expose-Headers: Retry-After, 추천 적용 2026-10-28, ADR-0110)
  * @summary 구간별 대기 상태 파일(인증 없음, 쿠키 없음, CDN 1초 캐시. 입장 임박 구간은 다음 생성 시각까지)
  */
-export const GetV1QueuesEventIdSegmentStatesSegmentJsonParams = zod.object({
-  "eventId": zod.string(),
+export const GetQueueSegmentStateParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "segment": zod.int()
 })
 
-export const getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMin = 2;
-export const getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMax = 2;
+export const getQueueSegmentStateResponseRemainingSeatsMin = 0;
 
-export const getV1QueuesEventIdSegmentStatesSegmentJsonResponsePollHintMsMin = 0;
+export const getQueueSegmentStateResponseAvgTicketsPerOrderMin = 0;
+
+export const getQueueSegmentStateResponseServingStepsItemMin = 2;
+export const getQueueSegmentStateResponseServingStepsItemMax = 2;
+
+export const getQueueSegmentStateResponsePollHintMsMin = 0;
 
 
 
-export const GetV1QueuesEventIdSegmentStatesSegmentJsonResponse = zod.object({
+export const GetQueueSegmentStateResponse = zod.object({
+  "admissionPaused": zod.boolean().optional().describe('입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042)'),
+  "seatmapLayoutPath": zod.string().optional().describe('그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042). 회차 일정 사본(q:{event:E}:cfg)의 layoutVersion으로 만들고, 그 값이 없으면 이 칸을 싣지 않는다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 7)'),
+  "remainingSeats": zod.int().min(getQueueSegmentStateResponseRemainingSeatsMin).optional().describe('그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 \'현재 순번으로는 구매가 어려울 수 있습니다\'를 띄운다(POL-015, queue-admission §4, BAS-042). 값은 purchase-svc가 판매 상태 사건(EventSaleChanged)의 다시 내기에 싣는 가용 좌석(available)이다. 그 셈이 파일 생성 시각에서 30초 [가정] 안일 때만 avgTicketsPerOrder와 함께 싣고, 아니면 두 칸 모두 싣지 않는다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 5)'),
+  "avgTicketsPerOrder": zod.number().min(getQueueSegmentStateResponseAvgTicketsPerOrderMin).optional().describe('공연 평균 구매 매수(POL-015, queue-admission §4의 \'공연 평균 구매 매수\', BAS-042). 그 회차의 이번 판매에서 결제가 끝난 주문이 100건 [가정] 이상이면 그 주문들의 좌석 수 ÷ 주문 수(purchase-svc가 판매 상태 사건에 싣는다)이고, 그 전이나 값이 1~10 밖이면 2 [가정]다. remainingSeats와 함께 싣거나 함께 뺀다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 6)'),
   "serving": zod.int().optional(),
   "servingRate": zod.number().optional().describe('차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)'),
   "saleStatus": zod.enum(['ON_SALE', 'PAUSED', 'ALL_HELD', 'TIER_SOLD_OUT', 'SOLD_OUT', 'ENDED']).optional().describe('회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)'),
@@ -157,59 +165,182 @@ export const GetV1QueuesEventIdSegmentStatesSegmentJsonResponse = zod.object({
   "removedBitmap": zod.string().optional().describe('base64 125바이트. k번째 비트(0부터, 바이트 안에서는 높은 비트부터)가 이 구간의 번호 s×1,000+1+k이고, 켜져 있으면 빠진 번호(장애 전환 때 건너뛴 구간 포함, 추천 적용 2026-11-03)'),
   "banner": zod.string().optional(),
   "generatedAtMs": zod.int().optional().describe('파일을 만든 서버 시각(유닉스 밀리초). 생성은 매초 경계에 한다(추천 적용 2026-10-28, ADR-0110)'),
-  "servingSteps": zod.array(zod.array(zod.int()).min(getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMin).max(getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMax)).optional().describe('입장 임박 구간 파일에만. 최근 5초 [가정]의 serving 전진 기록([전진 시각(유닉스 밀리초), 그때의 serving]). 브라우저는 serving이 내 번호를 넘은 전진의 시각으로 차례 반영 지연(queue_reflect_ms, NFR-002)을 잰다(ADR-0110)'),
-  "pollHintMs": zod.int().min(getV1QueuesEventIdSegmentStatesSegmentJsonResponsePollHintMsMin).optional().describe('다음 폴링까지의 최소 간격(밀리초). 정상 때 0(브라우저가 거리별 주기를 쓴다). 상태 조회 Degraded 때 queue-svc 파일 생성 작업과 S3 사본이 같은 값(그 구간 거리별 주기의 2배)을 싣는다. S3 객체로는 Retry-After 헤더를 줄 수 없어 본문에 둔다. 브라우저는 max(거리별 주기, 이 값)을 하한으로 위쪽으로만 0~20% 지터를 더한다. 이 값이 응답 헤더보다 늘 앞선다(추천 적용 2026-10-28, 기술 검토 중간-032·038)')
+  "servingSteps": zod.array(zod.array(zod.int()).min(getQueueSegmentStateResponseServingStepsItemMin).max(getQueueSegmentStateResponseServingStepsItemMax)).optional().describe('입장 임박 구간 파일에만. 최근 5초 [가정]의 serving 전진 기록([전진 시각(유닉스 밀리초), 그때의 serving]). 브라우저는 serving이 내 번호를 넘은 전진의 시각으로 차례 반영 지연(queue_reflect_ms, NFR-002)을 잰다(ADR-0110)'),
+  "pollHintMs": zod.int().min(getQueueSegmentStateResponsePollHintMsMin).optional().describe('다음 폴링까지의 최소 간격(밀리초). 정상 때 0(브라우저가 거리별 주기를 쓴다). 상태 조회 Degraded 때 queue-svc 파일 생성 작업과 S3 사본이 같은 값(그 구간 거리별 주기의 2배)을 싣는다. S3 객체로는 Retry-After 헤더를 줄 수 없어 본문에 둔다. 브라우저는 max(거리별 주기, 이 값)을 하한으로 위쪽으로만 0~20% 지터를 더한다. 이 값이 응답 헤더보다 늘 앞선다(추천 적용 2026-10-28, 기술 검토 중간-032·038)')
 }).describe('구간별 대기 상태 파일(CDN 1초 캐시. 입장 임박 구간 파일은 다음 생성 시각까지만 캐시한다(Expires, 낡은 값 허용 없음, ADR-0110). 차례에서 먼 구간의 수명을 늘리는 방식은 Phase 2에서 정함, queue-admission §4). 사용자별 값 없음. 대기 화면 진행 막대의 \'처음 받은 앞 인원\'은 브라우저가 처음 계산한 앞 인원을 세션 저장소에 두고 쓰므로 이 파일에 새 값이 없다(추천 적용 2026-10-14, ADR-0063)')
 
 /**
- * FR-038, POL-005. 약 1,000개 파일, 각 '해시 → 순번' 약 1,000건
+ * FR-038, POL-005. 파일 4,096개 [가정](참가 토큰 해시 16진 앞 세 자리), 각 '해시 → 순번'(100만 명이면 파일마다 약 250건). 본문 형식은 QueueResultFile(BAS-042)
  * @summary 셔플 결과 파일(참가 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 공개 예정 시각 뒤 토큰 해시로 정한 0~8초에 받음, ADR-0058)
  */
-export const GetV1QueuesEventIdShuffleResultsHashPrefixJsonParams = zod.object({
-  "eventId": zod.string(),
+export const GetQueueShuffleResultParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "hashPrefix": zod.string()
 })
 
-export const GetV1QueuesEventIdShuffleResultsHashPrefixJsonResponse = zod.unknown()
+
+
+
+export const GetQueueShuffleResultResponse = zod.record(zod.string(), zod.int().min(1)).describe('셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 \'결과 게시\', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다')
 
 /**
  * FR-006, ADR-0041. 각 '사전 검증 토큰 해시 → 순번'. 받는 규칙은 셔플 결과 파일과 같다
  * @summary 동시 도착 묶음 결과 파일(사전 검증 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 결과 공개 예정 시각 뒤 토큰 해시로 정한 분산 창 안에 받음, ADR-0041·0058)
  */
-export const GetV1QueuesEventIdBatchResultsHashPrefixJsonParams = zod.object({
-  "eventId": zod.string(),
+export const GetQueueBatchResultParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "hashPrefix": zod.string()
 })
 
-export const GetV1QueuesEventIdBatchResultsHashPrefixJsonResponse = zod.unknown()
+
+
+
+export const GetQueueBatchResultResponse = zod.record(zod.string(), zod.int().min(1)).describe('셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 \'결과 게시\', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다')
 
 /**
  * FR-038, POL-005, SCR-019
  * @summary 셔플 검증 정보(커밋, drand 체인·라운드와 값, 알고리즘 버전, 머클 루트, 비상 처리 여부와 사유, 온세일 윈도우 종료 뒤 시드 원본)
  */
-export const GetV1QueuesEventIdShuffleProofParams = zod.object({
-  "eventId": zod.string()
+export const GetQueueShuffleProofParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const GetV1QueuesEventIdShuffleProofResponse = zod.unknown()
+export const getQueueShuffleProofResponseLobbyOneCommitRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseLobbyOneMerkleRootRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseLobbyOneParticipantCountMin = 0;
+
+export const getQueueShuffleProofResponseLobbyOneBeaconRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseLobbyOneBeaconSignatureRegExp = new RegExp('^[0-9a-f]+$');
+export const getQueueShuffleProofResponseLobbyOneFileCountMin = 0;
+
+export const getQueueShuffleProofResponseLobbyOneSeedRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseLobbyOneEmergencyReasonMax = 200;
+
+
+
+export const getQueueShuffleProofResponseLobbyOneRedisclosuresItemReasonMax = 200;
+
+export const getQueueShuffleProofResponseBatchOneCommitRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseBatchOneMerkleRootRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseBatchOneParticipantCountMin = 0;
+
+export const getQueueShuffleProofResponseBatchOneBeaconRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseBatchOneBeaconSignatureRegExp = new RegExp('^[0-9a-f]+$');
+export const getQueueShuffleProofResponseBatchOneFileCountMin = 0;
+
+export const getQueueShuffleProofResponseBatchOneSeedRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseBatchOneEmergencyReasonMax = 200;
+
+
+
+export const getQueueShuffleProofResponseBatchOneRedisclosuresItemReasonMax = 200;
+
+
+
+export const GetQueueShuffleProofResponse = zod.object({
+  "eventId": zod.string(),
+  "opensAt": zod.iso.datetime({"offset":true}).describe('판매 오픈 시각'),
+  "seedRevealAt": zod.iso.datetime({"offset":true}).describe('시드 공개 예정 시각(오픈 60분 뒤)'),
+  "lobby": zod.union([zod.object({
+  "chain": zod.string().describe('drand 체인 이름(quicknet)'),
+  "algorithm": zod.string().describe('알고리즘 판(v1)'),
+  "commit": zod.string().regex(getQueueShuffleProofResponseLobbyOneCommitRegExp).optional().describe('시드 해시(커밋)'),
+  "committedAt": zod.iso.datetime({"offset":true}).optional().describe('커밋을 공시한 시각'),
+  "fixedAt": zod.iso.datetime({"offset":true}).optional().describe('참가자 목록을 고정하는 시각(로비는 오픈, 묶음은 구간 끝)'),
+  "round": zod.int().min(1).optional().describe('공시한 drand 라운드'),
+  "roundAt": zod.iso.datetime({"offset":true}).optional().describe('그 라운드의 예정 시각'),
+  "merkleRoot": zod.string().regex(getQueueShuffleProofResponseLobbyOneMerkleRootRegExp).optional().describe('참가자 머클 루트. 목록을 고정한 뒤 비콘을 받기 전에 공시한다'),
+  "rootAt": zod.iso.datetime({"offset":true}).optional().describe('머클 루트를 공시한 시각'),
+  "firstSeq": zod.int().min(1).optional().describe('이 구간의 첫 번호'),
+  "participantCount": zod.int().min(getQueueShuffleProofResponseLobbyOneParticipantCountMin).optional().describe('참가자 수(목록을 고정한 때의 값)'),
+  "beacon": zod.string().regex(getQueueShuffleProofResponseLobbyOneBeaconRegExp).optional().describe('drand 라운드 값'),
+  "beaconSignature": zod.string().regex(getQueueShuffleProofResponseLobbyOneBeaconSignatureRegExp).optional().describe('drand 서명'),
+  "publishedAt": zod.iso.datetime({"offset":true}).optional().describe('결과를 게시한 시각'),
+  "resultPathPrefix": zod.string().describe('결과 파일 경로의 앞부분. 뒤에 \'{앞 세 자리}.json\'을 붙이면 파일 경로다(queue-files 배포)'),
+  "fileCount": zod.int().min(getQueueShuffleProofResponseLobbyOneFileCountMin).describe('결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다'),
+  "seed": zod.string().regex(getQueueShuffleProofResponseLobbyOneSeedRegExp).optional().describe('공개한 시드'),
+  "seedRevealedAt": zod.iso.datetime({"offset":true}).optional().describe('시드를 공개한 시각'),
+  "stopped": zod.object({
+  "reason": zod.enum(['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unknown']),
+  "at": zod.iso.datetime({"offset":true}),
+  "detail": zod.string().optional().describe('reason이 unknown일 때의 자세한 이유(unauthorized: 서명 없는 RB-35 표시, seed_unavailable: 시드를 풀지 못하고 상한을 넘김, ADR-0239)')
+}).optional().describe('셔플을 멈춤(RB-35)'),
+  "emergency": zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('비상 셔플을 허가한 시각'),
+  "reason": zod.string().max(getQueueShuffleProofResponseLobbyOneEmergencyReasonMax).describe('commander 두 명이 서명한 공개 사유'),
+  "stopReason": zod.enum(['beacon']).describe('멈췄던 이유. 비상 셔플은 비콘 지연에서만 받는다(ADR-0050 결정 7)'),
+  "limitation": zod.string().describe('이 처리의 한계(고정 문장)')
+}).optional().describe('시드만 쓰는 비상 셔플을 실행함(RB-35, ADR-0239). 비콘 값이 없고, 다시 계산할 때 비콘 자리에 SHA-256("PEAKET-shuffle-v1-no-beacon")을 넣는다'),
+  "redisclosures": zod.array(zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('다시 공시한 시각'),
+  "previousRound": zod.int().min(1).describe('이전에 공시한 라운드'),
+  "round": zod.int().min(1).describe('새로 공시한 라운드'),
+  "reason": zod.string().max(getQueueShuffleProofResponseLobbyOneRedisclosuresItemReasonMax).describe('commander 두 명이 서명한 공개 사유')
+})).optional().describe('공시 뒤 오픈 시각이 바뀌어 라운드를 다시 공시한 이력(시드와 커밋은 그대로, RB-35, ADR-0239)'),
+  "invalidDisclosures": zod.array(zod.enum(['emergency', 'redisclosures'])).optional().describe('비상 셔플·다시 공시 기록이 있는데 읽지 못한 칸(위조나 손상일 수 있다, ADR-0239 결정 15). 있으면 그 구간의 공시를 믿지 않는다')
+}).describe('셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)'),zod.null()]).describe('로비 셔플. 끈 회차는 null'),
+  "batch": zod.union([zod.object({
+  "chain": zod.string().describe('drand 체인 이름(quicknet)'),
+  "algorithm": zod.string().describe('알고리즘 판(v1)'),
+  "commit": zod.string().regex(getQueueShuffleProofResponseBatchOneCommitRegExp).optional().describe('시드 해시(커밋)'),
+  "committedAt": zod.iso.datetime({"offset":true}).optional().describe('커밋을 공시한 시각'),
+  "fixedAt": zod.iso.datetime({"offset":true}).optional().describe('참가자 목록을 고정하는 시각(로비는 오픈, 묶음은 구간 끝)'),
+  "round": zod.int().min(1).optional().describe('공시한 drand 라운드'),
+  "roundAt": zod.iso.datetime({"offset":true}).optional().describe('그 라운드의 예정 시각'),
+  "merkleRoot": zod.string().regex(getQueueShuffleProofResponseBatchOneMerkleRootRegExp).optional().describe('참가자 머클 루트. 목록을 고정한 뒤 비콘을 받기 전에 공시한다'),
+  "rootAt": zod.iso.datetime({"offset":true}).optional().describe('머클 루트를 공시한 시각'),
+  "firstSeq": zod.int().min(1).optional().describe('이 구간의 첫 번호'),
+  "participantCount": zod.int().min(getQueueShuffleProofResponseBatchOneParticipantCountMin).optional().describe('참가자 수(목록을 고정한 때의 값)'),
+  "beacon": zod.string().regex(getQueueShuffleProofResponseBatchOneBeaconRegExp).optional().describe('drand 라운드 값'),
+  "beaconSignature": zod.string().regex(getQueueShuffleProofResponseBatchOneBeaconSignatureRegExp).optional().describe('drand 서명'),
+  "publishedAt": zod.iso.datetime({"offset":true}).optional().describe('결과를 게시한 시각'),
+  "resultPathPrefix": zod.string().describe('결과 파일 경로의 앞부분. 뒤에 \'{앞 세 자리}.json\'을 붙이면 파일 경로다(queue-files 배포)'),
+  "fileCount": zod.int().min(getQueueShuffleProofResponseBatchOneFileCountMin).describe('결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다'),
+  "seed": zod.string().regex(getQueueShuffleProofResponseBatchOneSeedRegExp).optional().describe('공개한 시드'),
+  "seedRevealedAt": zod.iso.datetime({"offset":true}).optional().describe('시드를 공개한 시각'),
+  "stopped": zod.object({
+  "reason": zod.enum(['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unknown']),
+  "at": zod.iso.datetime({"offset":true}),
+  "detail": zod.string().optional().describe('reason이 unknown일 때의 자세한 이유(unauthorized: 서명 없는 RB-35 표시, seed_unavailable: 시드를 풀지 못하고 상한을 넘김, ADR-0239)')
+}).optional().describe('셔플을 멈춤(RB-35)'),
+  "emergency": zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('비상 셔플을 허가한 시각'),
+  "reason": zod.string().max(getQueueShuffleProofResponseBatchOneEmergencyReasonMax).describe('commander 두 명이 서명한 공개 사유'),
+  "stopReason": zod.enum(['beacon']).describe('멈췄던 이유. 비상 셔플은 비콘 지연에서만 받는다(ADR-0050 결정 7)'),
+  "limitation": zod.string().describe('이 처리의 한계(고정 문장)')
+}).optional().describe('시드만 쓰는 비상 셔플을 실행함(RB-35, ADR-0239). 비콘 값이 없고, 다시 계산할 때 비콘 자리에 SHA-256("PEAKET-shuffle-v1-no-beacon")을 넣는다'),
+  "redisclosures": zod.array(zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('다시 공시한 시각'),
+  "previousRound": zod.int().min(1).describe('이전에 공시한 라운드'),
+  "round": zod.int().min(1).describe('새로 공시한 라운드'),
+  "reason": zod.string().max(getQueueShuffleProofResponseBatchOneRedisclosuresItemReasonMax).describe('commander 두 명이 서명한 공개 사유')
+})).optional().describe('공시 뒤 오픈 시각이 바뀌어 라운드를 다시 공시한 이력(시드와 커밋은 그대로, RB-35, ADR-0239)'),
+  "invalidDisclosures": zod.array(zod.enum(['emergency', 'redisclosures'])).optional().describe('비상 셔플·다시 공시 기록이 있는데 읽지 못한 칸(위조나 손상일 수 있다, ADR-0239 결정 15). 있으면 그 구간의 공시를 믿지 않는다')
+}).describe('셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)'),zod.null()]).describe('동시 도착 묶음. 끈 회차는 null')
+}).describe('셔플 검증 정보(SCR-019, POL-005, ADR-0232)')
 
 /**
  * FR-008, POL-008·009. 대기표(또는 참가 토큰) 서명, 내 번호 ≤ serving, 빠진 번호(추가 검증 통과로 복귀한 대기표는 예외)·15분 만료 확인(복귀한 대기표는 차례와 통과 중 늦은 때부터, ADR-0062), 1인 1순번 재확인(사람별 입장 키, ADR-0056). 자리 없으면 SOON + retryAfterSeconds이고, 그 번호를 곧 입장 대기열에 넣는다. 자리는 '빈자리 수 > 곧 입장 대기열에서 내 번호보다 작은 번호의 수'일 때만 주므로 낮은 번호부터 들어간다. 곧 입장 대기열에 있는 동안은 15분 만료를 세지 않는다(추천 적용 2026-10-28, ADR-0104). 입장 자리 점수 = 첫 사용 기한 5분. 좌석 자동 배정 공연의 차례 직전 직접 확인(ADR-0043)에서 내 번호 > serving이면 NOT_YET + retryAfterMs(게이트웨이 레이트 리밋 적용)
  * @summary 입장 확정(첫 예매 요청, 입장 토큰 발급)
  */
-export const PostV1QueuesEventIdAdmissionParams = zod.object({
-  "eventId": zod.string()
+export const CreateQueueAdmissionParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const PostV1QueuesEventIdAdmissionBody = zod.object({
+export const CreateQueueAdmissionBody = zod.object({
   "queueTicket": zod.string().optional(),
   "lobbyToken": zod.string().optional(),
   "priorityGrantId": zod.uuid().optional().describe('우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)'),
   "firstEtaSec": zod.number().optional().describe('선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)'),
   "firstEtaAtMs": zod.number().optional().describe('선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다')
-})
+}).strict().describe('입장 확정 본문(POST /v1/queues/{eventId}/admission). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)')
 
-export const PostV1QueuesEventIdAdmissionResponse = zod.object({
+export const CreateQueueAdmissionResponse = zod.object({
+  "purchaseSessionExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('ADMITTED일 때만: 입장 토큰의 만료 시각(exp, 구매 세션이 끝나는 가장 늦은 때). 화면은 남은 구매 시간 표시에만 쓰고(serverTimeMs로 시계를 맞춘다) 판단은 서버가 한다. 토큰 본문을 화면이 읽지 않게 응답에 싣는다(docs/frontend.md §6.2 22번, BUILD_ORDER BAS-042)'),
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "status": zod.enum(['NOT_YET', 'ADMITTED', 'SOON', 'VERIFYING']).optional().describe('만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104)'),
   "admissionToken": zod.string().optional().describe('ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183)'),
@@ -230,18 +361,18 @@ export const PostV1QueuesEventIdAdmissionResponse = zod.object({
  * FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. challengeToken은 queue-svc가 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡기고, 휴대폰 본인확인 재통과는 identity-svc 결과로 따로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14)
  * @summary 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
  */
-export const PostV1QueuesEventIdVerificationParams = zod.object({
-  "eventId": zod.string()
+export const CreateQueueVerificationParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const postV1QueuesEventIdVerificationBodyAppealMax = 4000;
+export const createQueueVerificationBodyAppealMax = 4000;
 
 
 
-export const PostV1QueuesEventIdVerificationBody = zod.object({
+export const CreateQueueVerificationBody = zod.object({
   "challengeToken": zod.string().optional(),
-  "appeal": zod.string().max(postV1QueuesEventIdVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)')
-})
+  "appeal": zod.string().max(createQueueVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)')
+}).strict()
 
-export const PostV1QueuesEventIdVerificationResponse = zod.unknown()
+export const CreateQueueVerificationResponse = zod.unknown()
 

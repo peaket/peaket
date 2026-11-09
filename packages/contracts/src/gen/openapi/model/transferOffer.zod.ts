@@ -18,7 +18,11 @@ export const TransferOffer = zod.object({
   "counterpartNickname": zod.string().optional(),
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
-  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구')
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
 }).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')
 
 export type TransferOffer = zod.input<typeof TransferOffer>;

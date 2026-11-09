@@ -39,6 +39,18 @@ describe('사전 검증', () => {
     expect(risk.seen[0]).toMatchObject({ context: 'PREVERIFY', journeyId: c.jny, eventId, accountId: ACCOUNT, pid: PID, deviceId: DEVICE, lobbyShuffle: false, humanCheckToken: 'turnstile-1' });
   });
 
+  test('[Q-T45] pid키전환기간의위험판정에넘기는pid는_옛pid이고_옛값이없으면새pid다', async () => {
+    const risk = recordingRisk();
+    const { clock, eventId } = await setup(risk);
+    const schedules = new MemoryEventSchedules();
+    await schedules.set(eventId, openSchedule(clock.now(), { lobbyShuffle: false }));
+    const run = (who: { pid: string; pidPrev?: string }) =>
+      new IssuePreverification(schedules, tokens, risk, clock).run({ accountId: ACCOUNT, eventId, body: { deviceId: DEVICE, humanCheckToken: 'turnstile-1' }, ...who });
+    await run({ pid: 'pid-new', pidPrev: 'pid-old' });
+    await run({ pid: 'pid-new' });
+    expect(risk.seen.map((r) => r.pid)).toEqual(['pid-old', 'pid-new']);
+  });
+
   test('Q-T60③_만료전갱신은_최초발급시각과jny를그대로옮긴다', async () => {
     const { clock, run } = await setup();
     const first = tokens.readPreverify((await run()).preverifyToken)!;

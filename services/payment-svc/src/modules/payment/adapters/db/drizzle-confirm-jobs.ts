@@ -1,0 +1,520 @@
+// 승인 명령 저장소의 payment DB 쪽(docs/data.md §5 '승인 실행기'·§5.1, docs/features/payment.md §2 '승인 실행기의 첫 구현', BUILD_ORDER PRF-181)과 단독 조회 저장소('UNKNOWN 해소의 첫 구현', BUILD_ORDER PRF-182, 입금 대기 행은 §6 '입금 확인의 첫 구현', BUILD_ORDER HOT-151).
+// drizzle-ticket-issue.ts(purchase-svc)와 같은 꼴이다. 메서드의 약속은 domain/ports.ts PaymentConfirmJobs·PaymentUnknownQueries에 있다.
+// 잠금 차례는 payment 행 → payment_confirm_job 행이다(잡기는 명령 행만 잠근다). Outbox는 업무 문장의 마지막에 쓴다(ADR-0116 결정 3).
+// 운영은 핫패스 풀이 아니라 실행기 전용 일반 풀(confirmRunnerDatabaseOptions)을 넘긴다.
+// 임대·occurred_at·status_changed_at의 '지금'은 앱 시계(DrizzleConfirmJobsOptions.clock)다. SQL now()를 쓰지 않는다.
+// 구현에서 정한 것(정본·설계에 없다):
+// - read는 트랜잭션 없이 한 문장이다(잠금이 없어 기다릴 일이 없다. 쓰기만 문장 시간 한도를 건다).
+// - 잡기의 '임대가 지났다'는 lease_until < 지금이다(같은 시각은 아직 임대 중이다, drizzle-ticket-issue.ts와 같다).
+import { type Clock, type Database, type DatabaseOptions, type DbTransaction, writeOutbox } from '@peaket/platform';
+import { sql } from 'drizzle-orm';
+import type { PaymentLedgerStatus } from '../../domain/confirm-command.js';
+import {
+  buildPaymentEvent,
+  type BuildPaymentEventInput,
+  CONFIRM_EXPIRED_SCAN,
+  CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS,
+  CONFIRM_SENT_EVENT_TYPE,
+  type ConfirmFinish,
+  type ConfirmJob,
+  type ConfirmTarget,
+  DEPOSIT_REVERSED_EVENT_TYPE,
+  paymentEventKey,
+  type PaymentEventMessage,
+} from '../../domain/confirm-runner.js';
+import type { PgName } from '../../domain/payment-gateway.js';
+import { depositNextQueryAtMs } from '../../domain/virtual-account.js';
+import { DEPOSIT_CANCEL_SENT_EVENT_TYPE, type DepositCancelBegin, depositCancelEventKey, type DepositCancelTarget } from '../../domain/deposit-cancel.js';
+import type { CallBudget, FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentDepositCancels, PaymentEventCodec, PaymentUnknownQueries, ResolveUnknownResult } from '../../domain/ports.js';
+import { buildResolvedEvent, RESOLVED_EVENT_TYPE, type ResolvedFinish, UNKNOWN_OVERDUE_MS, UNKNOWN_QUERY_BASE_MS, unknownQueryClaimHoldMs, type UnknownQueryJob } from '../../domain/unknown-resolver.js';
+import { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from '../payment-events.js';
+
+/** 승인 실행기 전용 DB 풀의 연결 수 8개 [가정](docs/verification.md §4.1 '승인 실행기') */
+export const CONFIRM_RUNNER_DB_MAX = 8;
+
+/** 모든 쓰기 트랜잭션의 격리 수준(서버·역할 기본값에 기대지 않는다)과 문장 시간 한도(요청 밖이라 요청의 남은 시간이 없다) */
+const TX = { isolationLevel: 'read committed', statementTimeoutMs: CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS } as const;
+
+const isPositiveInt = (v: number): boolean => Number.isSafeInteger(v) && v >= 1;
+
+/**
+ * 승인 실행기의 payment DB(PEAKET_DATABASE_URL) 풀 설정: 일반 풀(연결을 기다린다)·연결 CONFIRM_RUNNER_DB_MAX개·이름 payment-svc-confirm.
+ * 결제사가 느려도 승인 명령 접수(핫패스 풀)가 풀 대기 초과를 받지 않게 나눈다(main.ts가 createDatabase에 넘기고 종료 때 닫는다)
+ */
+export function confirmRunnerDatabaseOptions(url: string): DatabaseOptions {
+  return { url, profile: 'general', max: CONFIRM_RUNNER_DB_MAX, applicationName: 'payment-svc-confirm' };
+}
+
+export interface DrizzleConfirmJobsOptions {
+  /** 운영은 실행기 전용 일반 풀(confirmRunnerDatabaseOptions) */
+  readonly database: Database;
+  /** 임대·occurred_at·status_changed_at·Outbox ID의 '지금' */
+  readonly clock: Clock;
+  /** trade.payments 값의 바이트(기본 JSON 대역 jsonPaymentEventCodec) */
+  readonly codec?: PaymentEventCodec;
+}
+
+type ClaimRow = { payment_id: string; attempts: number | string; next_attempt_at: Date | string; previous_owner: string | null };
+
+type TargetRow = {
+  id: string;
+  order_id: string;
+  event_id: string;
+  attempt_no: number | string;
+  pg: string;
+  pg_payment_ref: string;
+  pg_confirm_token: string | null;
+  pg_tx_id: string | null;
+  amount: number | string;
+  status: string;
+  authenticated_at: Date | string;
+  confirm_sent: boolean;
+};
+
+type QueryRow = {
+  id: string;
+  order_id: string;
+  event_id: string;
+  attempt_no: number | string;
+  pg: string;
+  pg_payment_ref: string;
+  pg_tx_id: string | null;
+  amount: number | string;
+  anomaly_logged_at: Date | string | null;
+  query_attempts: number | string;
+  status: string;
+  deposit_due_at: Date | string | null;
+  deposit_notified_at: Date | string | null;
+  reversed_at: Date | string | null;
+};
+
+const msOf = (v: Date | string): number => new Date(v).getTime();
+
+/** 잡은 행의 원장 상태(잡을 때 본 상태. 답 반영과 간격 쓰기의 조건이다) */
+const sourceOf = (job: UnknownQueryJob): 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'FAILED' | 'APPROVED' => (job.lateDepositCheck ? 'FAILED' : job.reversalCheck !== undefined ? 'APPROVED' : job.deposit === undefined ? 'UNKNOWN' : 'AWAITING_DEPOSIT');
+
+/** 단독 조회 대상의 조건(부분 인덱스 payment_query_due_idx와 같은 글이다. 값 자리가 아니라 문장에 그대로 적어야 인덱스를 쓴다). FAILED 행은 늦은 입금 확인을, APPROVED 행은 입금 오류 확인을 건 행만이다(BUILD_ORDER HOT-152) */
+const QUERY_DUE_STATUS = sql.raw(`(status in ('UNKNOWN', 'AWAITING_DEPOSIT') or (status in ('FAILED', 'APPROVED') and next_query_at is not null))`);
+
+/** 자기 임대 조건 SQL 조각(lease_owner·lease_until이 잡을 때 쓴 값과 같다) */
+const ownLease = (job: ConfirmJob) => sql`lease_owner = ${job.owner} and lease_until = ${new Date(job.leaseUntilMs)}::timestamptz`;
+
+/** payment 행을 잠그고 상태를 읽는다(잠금 차례의 첫째). 행이 없으면 undefined */
+async function lockStatus(tx: DbTransaction, paymentId: string): Promise<PaymentLedgerStatus | undefined> {
+  const r = await tx.execute(sql`select status from payment where id = ${paymentId}::uuid for update`);
+  return (r.rows[0] as { status: PaymentLedgerStatus } | undefined)?.status;
+}
+
+/** 다음 순번(max(seq) + 1). payment 행 잠금을 쥔 뒤에 부른다 */
+async function nextSeq(tx: DbTransaction, paymentId: string): Promise<number> {
+  const r = await tx.execute(sql`select coalesce(max(seq), 0) + 1 as next from payment_event where payment_id = ${paymentId}::uuid`);
+  return Number((r.rows[0] as { next: number | string }).next);
+}
+
+/** 승인 명령 저장소의 payment DB 구현 */
+export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQueries, PaymentDepositCancels {
+  readonly #codec: PaymentEventCodec;
+
+  constructor(private readonly o: DrizzleConfirmJobsOptions) {
+    this.#codec = o.codec ?? jsonPaymentEventCodec;
+  }
+
+  async claimDue(pg: PgName, limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]> {
+    if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
+    if (!isPositiveInt(leaseMs)) throw new RangeError(`leaseMs는 1 이상의 정수다: ${String(leaseMs)}`);
+    if (owner === '') throw new RangeError('owner가 빈 글이다');
+    const now = this.o.clock.now();
+    const at = new Date(now);
+    const leaseUntilMs = now + leaseMs;
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        with picked as (
+          select payment_id, lease_owner from payment_confirm_job
+          where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          order by next_attempt_at, payment_id
+          limit ${limit}::int
+          for update skip locked)
+        update payment_confirm_job j
+        set lease_owner = ${owner}, lease_until = ${new Date(leaseUntilMs)}::timestamptz
+        from picked p
+        where j.payment_id = p.payment_id
+        returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner`),
+    );
+    return this.#jobsOf(r.rows as ClaimRow[], pg, owner, leaseUntilMs);
+  }
+
+  async claimExpired(pg: PgName, limit: number, owner: string, leaseMs: number, deadlineMs: number): Promise<ConfirmJob[]> {
+    if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
+    if (!isPositiveInt(leaseMs)) throw new RangeError(`leaseMs는 1 이상의 정수다: ${String(leaseMs)}`);
+    if (!isPositiveInt(deadlineMs)) throw new RangeError(`deadlineMs는 1 이상의 정수다: ${String(deadlineMs)}`);
+    if (owner === '') throw new RangeError('owner가 빈 글이다');
+    const now = this.o.clock.now();
+    const at = new Date(now);
+    const leaseUntilMs = now + leaseMs;
+    const r = await this.#tx((tx) =>
+      // 앞쪽 CONFIRM_EXPIRED_SCAN행만 원장과 대조한다(밀린 표에서 틱마다 표 전체를 조인하지 않게). 기한은 next_attempt_at과 거의 같은 차례로 지나므로 기한 지난 행은 앞쪽에 있다
+      tx.execute(sql`
+        with head as (
+          select payment_id from payment_confirm_job
+          where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          order by next_attempt_at, payment_id
+          limit ${CONFIRM_EXPIRED_SCAN}::int),
+        picked as (
+          select j.payment_id, j.lease_owner from head h
+          join payment_confirm_job j on j.payment_id = h.payment_id
+          join payment p on p.id = h.payment_id
+          where p.authenticated_at <= ${new Date(now - deadlineMs)}::timestamptz
+            and j.next_attempt_at <= ${at}::timestamptz and (j.lease_until is null or j.lease_until < ${at}::timestamptz)
+          order by j.next_attempt_at, j.payment_id
+          limit ${limit}::int
+          for update of j skip locked)
+        update payment_confirm_job j
+        set lease_owner = ${owner}, lease_until = ${new Date(leaseUntilMs)}::timestamptz
+        from picked p
+        where j.payment_id = p.payment_id
+        returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner`),
+    );
+    return this.#jobsOf(r.rows as ClaimRow[], pg, owner, leaseUntilMs);
+  }
+
+  async hasDue(pg: PgName): Promise<boolean> {
+    const at = new Date(this.o.clock.now());
+    const r = await this.o.database.db.execute(sql`
+      select exists (select 1 from payment_confirm_job where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)) as due`);
+    return (r.rows[0] as { due: boolean }).due;
+  }
+
+  /** RETURNING의 차례는 정해지지 않아 고른 차례(next_attempt_at, 같으면 payment_id)로 다시 맞춘다 */
+  #jobsOf(rows: ClaimRow[], pg: PgName, owner: string, leaseUntilMs: number): ConfirmJob[] {
+    return rows
+      .sort((a, b) => msOf(a.next_attempt_at) - msOf(b.next_attempt_at) || (a.payment_id < b.payment_id ? -1 : a.payment_id > b.payment_id ? 1 : 0))
+      .map((row) => ({ paymentId: row.payment_id, pg, attempts: Number(row.attempts), owner, leaseUntilMs, hadPreviousOwner: row.previous_owner !== null }));
+  }
+
+  async read(paymentId: string): Promise<ConfirmTarget | undefined> {
+    const r = await this.o.database.db.execute(sql`
+      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at,
+             exists (select 1 from payment_event e where e.payment_id = p.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent
+      from payment p where p.id = ${paymentId}::uuid`);
+    const row = r.rows[0] as TargetRow | undefined;
+    if (!row) return undefined;
+    return {
+      paymentId: row.id,
+      orderId: row.order_id,
+      eventId: row.event_id,
+      attemptNo: Number(row.attempt_no),
+      pg: row.pg as PgName,
+      paymentRef: row.pg_payment_ref,
+      ...(row.pg_confirm_token ? { confirmToken: row.pg_confirm_token } : {}),
+      ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
+      amount: Number(row.amount),
+      status: row.status as PaymentLedgerStatus,
+      authenticatedAtMs: msOf(row.authenticated_at),
+      confirmSent: row.confirm_sent,
+    };
+  }
+
+  async markSent(job: ConfirmJob): Promise<MarkConfirmSentResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, job.paymentId)) !== 'ACCEPTED') return 'STALE';
+      const own = await tx.execute(sql`select payment_id from payment_confirm_job where payment_id = ${job.paymentId}::uuid and ${ownLease(job)} for update`);
+      if (own.rows.length === 0) return 'LEASE_LOST';
+      const sent = await tx.execute(sql`select 1 from payment_event where payment_id = ${job.paymentId}::uuid and type = ${CONFIRM_SENT_EVENT_TYPE} limit 1`);
+      if (sent.rows.length > 0) return 'ALREADY';
+      const seq = await nextSeq(tx, job.paymentId);
+      await tx.execute(sql`
+        insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
+        values (${job.paymentId}::uuid, ${seq}, ${paymentEventKey(job.paymentId, seq)}::uuid, ${CONFIRM_SENT_EVENT_TYPE}, false, ${new Date(this.o.clock.now())}::timestamptz)`);
+      return 'MARKED';
+    });
+  }
+
+  async finish(target: ConfirmTarget, finish: ConfirmFinish): Promise<FinishConfirmResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, target.paymentId)) !== 'ACCEPTED') {
+        await tx.execute(sql`delete from payment_confirm_job where payment_id = ${target.paymentId}::uuid`);
+        return 'STALE';
+      }
+      const message = await this.#recordResult(tx, target, finish, this.o.clock.now());
+      await tx.execute(sql`delete from payment_confirm_job where payment_id = ${target.paymentId}::uuid`);
+      // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: target.eventId, payload: this.#codec.encode(message) }]);
+      return 'APPLIED';
+    });
+  }
+
+  /**
+   * 답 반영의 공통 몫(payment 행 잠금을 쥔 뒤): 다음 순번으로 수출 사건을 쓰고 원장을 바꾼다. 승인 실행기의 finish와 UNKNOWN 해소의 resolve가 함께 쓴다.
+   * @returns trade.payments 값(Outbox는 부른 쪽이 트랜잭션의 마지막 문장으로 쓴다)
+   */
+  async #recordResult(tx: DbTransaction, target: BuildPaymentEventInput['target'], finish: ConfirmFinish, now: number): Promise<PaymentEventMessage> {
+    const seq = await nextSeq(tx, target.paymentId);
+    const message = buildPaymentEvent({ target, finish, seq, nowMs: now });
+    await tx.execute(sql`
+      insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
+      values (${target.paymentId}::uuid, ${seq}, ${message.eventKey}::uuid, ${message.type}, true, ${new Date(message.occurredAt)}::timestamptz)`);
+    const approvedAt = finish.status === 'APPROVED' ? new Date(finish.approvedAtMs) : null;
+    const failureCategory = finish.status === 'FAILED' ? finish.failureCategory : null;
+    // 결과가 정해졌을 때만 포트원 토큰을 지운다(UNKNOWN은 조회·재확인이 끝날 때까지 남긴다)
+    const clearToken = finish.status !== 'UNKNOWN';
+    // 입금 대기만 가상계좌 칸을 쓰고 그 밖의 결과는 모두 비운다(입금 확정·실패 때 지운다, BUILD_ORDER HOT-151)
+    const awaiting = finish.status === 'AWAITING_DEPOSIT';
+    // 입금 오류 통보를 대조하려고 입금 확정(T16)과 되돌림(T21)은 저장한 해시를 지우지 않는다(BUILD_ORDER HOT-152)
+    const keepHash = finish.status === 'APPROVED' || (awaiting && finish.reversed === true);
+    const deposit = awaiting ? finish.deposit : undefined;
+    // UNKNOWN으로 쓰는 전이가 첫 단독 조회 시각을 함께 쓰고, 입금 대기는 입금 기한 + 10분으로 쓰며, 이 둘을 떠나는 전이가 비운다(BUILD_ORDER PRF-182·HOT-151)
+    const nextQueryAt = finish.status === 'UNKNOWN' ? new Date(now + UNKNOWN_QUERY_BASE_MS) : awaiting ? new Date(depositNextQueryAtMs(deposit?.dueAtMs, now)) : null;
+    const depositDueAt = deposit?.dueAtMs === undefined ? null : new Date(deposit.dueAtMs);
+    // 결제 수단 연결값은 승인을 쓸 때만 채운다(둘은 함께 있거나 함께 빈다, CHECK. BUILD_ORDER HOT-145)
+    const paymentMethodRef = message.paymentMethodRef ?? null;
+    const cardBin = message.cardBin ?? null;
+    await tx.execute(sql`
+      update payment
+      set status = ${finish.status}, status_changed_at = ${new Date(now)}::timestamptz,
+          approved_at = ${approvedAt}::timestamptz, failure_category = ${failureCategory},
+          payment_method_ref = ${paymentMethodRef}, card_bin = ${cardBin},
+          pg_confirm_token = case when ${clearToken}::boolean then null else pg_confirm_token end,
+          next_query_at = ${nextQueryAt}::timestamptz,
+          deposit_due_at = ${depositDueAt}::timestamptz,
+          deposit_notified_at = null,
+          virtual_account_no = ${deposit?.accountNoSealed ?? null},
+          virtual_account_bank = ${deposit?.bank ?? null},
+          deposit_secret_hash = case when ${keepHash}::boolean then coalesce(${deposit?.secretHash ?? null}::bytea, deposit_secret_hash) else ${deposit?.secretHash ?? null}::bytea end,
+          query_attempts = case when ${awaiting}::boolean then 0 else query_attempts end
+      where id = ${target.paymentId}::uuid`);
+    return message;
+  }
+
+  async reschedule(job: ConfirmJob, nextAtMs: number, o: { readonly countRetry: boolean }): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment_confirm_job set next_attempt_at = ${new Date(nextAtMs)}::timestamptz, lease_owner = null, lease_until = null, attempts = attempts + ${o.countRetry ? 1 : 0}::int
+        where payment_id = ${job.paymentId}::uuid and ${ownLease(job)}
+        returning payment_id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async dropJob(job: ConfirmJob): Promise<boolean> {
+    const r = await this.#tx((tx) => tx.execute(sql`delete from payment_confirm_job where payment_id = ${job.paymentId}::uuid and ${ownLease(job)} returning payment_id`));
+    return r.rows.length > 0;
+  }
+
+  async release(job: ConfirmJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`update payment_confirm_job set lease_owner = null, lease_until = null where payment_id = ${job.paymentId}::uuid and ${ownLease(job)} returning payment_id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async hasDueQueries(pg: PgName): Promise<boolean> {
+    const r = await this.o.database.db.execute(sql`
+      select exists (select 1 from payment where ${QUERY_DUE_STATUS} and pg = ${pg} and next_query_at <= ${new Date(this.o.clock.now())}::timestamptz) as due`);
+    return (r.rows[0] as { due: boolean }).due;
+  }
+
+  async claimDueQueries(pg: PgName, limit: number): Promise<UnknownQueryJob[]> {
+    if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
+    const now = this.o.clock.now();
+    return this.#tx(async (tx) => {
+      // 상태 목록은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. RETURNING 차례가 정해지지 않아 고르기와 밀기를 나눈다(고른 차례를 지키고 간격 식은 도메인 하나다)
+      const r = await tx.execute(sql`
+        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at,
+               case when status = 'AWAITING_DEPOSIT' then (select max(e.occurred_at) from payment_event e where e.payment_id = payment.id and e.type = ${DEPOSIT_REVERSED_EVENT_TYPE}) end as reversed_at
+        from payment
+        where ${QUERY_DUE_STATUS} and pg = ${pg} and next_query_at <= ${new Date(now)}::timestamptz
+        order by next_query_at
+        limit ${limit}::int
+        for update skip locked`);
+      const rows = r.rows as QueryRow[];
+      if (rows.length === 0) return [];
+      const jobs = rows.map((row): UnknownQueryJob => {
+        const queryAttempts = Number(row.query_attempts) + 1;
+        return {
+          paymentId: row.id,
+          orderId: row.order_id,
+          eventId: row.event_id,
+          attemptNo: Number(row.attempt_no),
+          pg: row.pg as PgName,
+          paymentRef: row.pg_payment_ref,
+          ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
+          amount: Number(row.amount),
+          queryAttempts,
+          claimedNextQueryAtMs: now + unknownQueryClaimHoldMs(queryAttempts),
+          anomalyLogged: row.anomaly_logged_at !== null,
+          ...(row.status === 'AWAITING_DEPOSIT'
+            ? { deposit: { ...(row.deposit_due_at === null ? {} : { dueAtMs: msOf(row.deposit_due_at) }), ...(row.deposit_notified_at === null ? {} : { notifiedAtMs: msOf(row.deposit_notified_at) }), ...(row.reversed_at === null ? {} : { reversedAtMs: msOf(row.reversed_at) }) } }
+            : {}),
+          ...(row.status === 'FAILED' ? { lateDepositCheck: true as const } : {}),
+          ...(row.status === 'APPROVED' ? { reversalCheck: row.deposit_notified_at === null ? {} : { notifiedAtMs: msOf(row.deposit_notified_at) } } : {}),
+        };
+      });
+      const ids = jobs.map((j) => j.paymentId);
+      const nextAts = jobs.map((j) => new Date(j.claimedNextQueryAtMs).toISOString());
+      await tx.execute(sql`
+        update payment p
+        set next_query_at = v.next_at, query_attempts = p.query_attempts + 1, query_touched_at = ${new Date(now)}::timestamptz
+        from unnest(${sql.param(ids)}::uuid[], ${sql.param(nextAts)}::timestamptz[]) as v(id, next_at)
+        where p.id = v.id`);
+      return jobs;
+    });
+  }
+
+  async rescheduleQuery(job: UnknownQueryJob, nextAtMs: number, o?: { readonly refundAttempt?: boolean; readonly resetAttempts?: boolean }): Promise<boolean> {
+    const attempts = o?.resetAttempts ? sql`0` : sql`query_attempts - ${o?.refundAttempt ? 1 : 0}::int`;
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment set next_query_at = ${new Date(nextAtMs)}::timestamptz, query_attempts = ${attempts}
+        where id = ${job.paymentId}::uuid and status = ${sourceOf(job)} and next_query_at = ${new Date(job.claimedNextQueryAtMs)}::timestamptz
+        returning id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async markAnomalyLogged(job: UnknownQueryJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment set anomaly_logged_at = ${new Date(this.o.clock.now())}::timestamptz
+        where id = ${job.paymentId}::uuid and status = ${sourceOf(job)} and anomaly_logged_at is null
+        returning id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async finishLateDepositCheck(job: UnknownQueryJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment set next_query_at = null
+        where id = ${job.paymentId}::uuid and status = 'FAILED' and next_query_at = ${new Date(job.claimedNextQueryAtMs)}::timestamptz
+        returning id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async markReversalOverdue(job: UnknownQueryJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment set overdue_at = ${new Date(this.o.clock.now())}::timestamptz
+        where id = ${job.paymentId}::uuid and status = 'APPROVED' and overdue_at is null
+        returning id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async finishReversalCheck(job: UnknownQueryJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(sql`
+        update payment set next_query_at = null, deposit_notified_at = null
+        where id = ${job.paymentId}::uuid and status = 'APPROVED' and next_query_at = ${new Date(job.claimedNextQueryAtMs)}::timestamptz
+        returning id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async reverseDeposit(job: UnknownQueryJob, finish: Extract<ConfirmFinish, { status: 'AWAITING_DEPOSIT' }>): Promise<ResolveUnknownResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, job.paymentId)) !== 'APPROVED') return 'STALE';
+      const message = await this.#recordResult(tx, job, finish, this.o.clock.now());
+      // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(message) }]);
+      return 'APPLIED';
+    });
+  }
+
+  async readCancelTarget(paymentId: string, budget?: CallBudget): Promise<DepositCancelTarget | undefined> {
+    const r = await this.#tx(
+      (tx) =>
+        tx.execute(sql`
+      select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount
+      from payment where id = ${paymentId}::uuid`),
+      budget,
+    );
+    const row = r.rows[0] as Omit<QueryRow, 'anomaly_logged_at' | 'query_attempts' | 'status' | 'deposit_due_at' | 'deposit_notified_at' | 'reversed_at'> | undefined;
+    if (!row) return undefined;
+    return { paymentId: row.id, orderId: row.order_id, eventId: row.event_id, attemptNo: Number(row.attempt_no), pg: row.pg as PgName, paymentRef: row.pg_payment_ref, amount: Number(row.amount), ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}) };
+  }
+
+  async readCancelStatus(paymentId: string, budget?: CallBudget): Promise<PaymentLedgerStatus | undefined> {
+    const r = await this.#tx((tx) => tx.execute(sql`select status from payment where id = ${paymentId}::uuid`), budget);
+    return (r.rows[0] as { status: PaymentLedgerStatus } | undefined)?.status;
+  }
+
+  async beginDepositCancel(target: DepositCancelTarget, cancellationId: string, budget?: CallBudget): Promise<DepositCancelBegin> {
+    const key = depositCancelEventKey(target.paymentId, cancellationId);
+    return this.#tx(async (tx) => {
+      const status = await lockStatus(tx, target.paymentId);
+      const r = await tx.execute(sql`select 1 from payment_event where payment_id = ${target.paymentId}::uuid and type = ${DEPOSIT_CANCEL_SENT_EVENT_TYPE} and event_key = ${key}::uuid limit 1`);
+      const sent = r.rows.length > 0;
+      if (status === 'FAILED' && sent) return 'DONE';
+      if (status !== 'AWAITING_DEPOSIT') return 'NOT_WAITING';
+      if (!sent) {
+        const seq = await nextSeq(tx, target.paymentId);
+        await tx.execute(sql`
+          insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
+          values (${target.paymentId}::uuid, ${seq}, ${key}::uuid, ${DEPOSIT_CANCEL_SENT_EVENT_TYPE}, false, ${new Date(this.o.clock.now())}::timestamptz)`);
+      }
+      return 'BEGUN';
+    }, budget);
+  }
+
+  async finishDepositCancel(target: DepositCancelTarget, budget?: CallBudget): Promise<ResolveUnknownResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, target.paymentId)) !== 'AWAITING_DEPOSIT') return 'STALE';
+      const message = await this.#recordResult(tx, target, { status: 'FAILED', result: 'DECLINED', failureCategory: 'DEPOSIT_CANCELED' }, this.o.clock.now());
+      // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: target.eventId, payload: this.#codec.encode(message) }]);
+      return 'APPLIED';
+    }, budget);
+  }
+
+  async markOverdueBatch(limit: number): Promise<string[]> {
+    if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
+    const now = this.o.clock.now();
+    const r = await this.#tx((tx) =>
+      // 'UNKNOWN'은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. 잠긴 행을 건너뛰고 overdue_at IS NULL을 보므로 두 파드가 겹쳐도 행마다 한 번이다
+      tx.execute(sql`
+        with picked as (
+          select id from payment
+          where status = 'UNKNOWN' and status_changed_at < ${new Date(now - UNKNOWN_OVERDUE_MS)}::timestamptz and overdue_at is null
+          order by status_changed_at
+          limit ${limit}::int
+          for update skip locked)
+        update payment p set overdue_at = ${new Date(now)}::timestamptz
+        from picked
+        where p.id = picked.id
+        returning p.order_id::text as order_id`),
+    );
+    return (r.rows as { order_id: string }[]).map((row) => row.order_id);
+  }
+
+  async resolve(job: UnknownQueryJob, finish: ResolvedFinish): Promise<ResolveUnknownResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, job.paymentId)) !== sourceOf(job)) return 'STALE';
+      const now = this.o.clock.now();
+      const message = await this.#recordResult(tx, job, finish, now);
+      if (job.deposit !== undefined) {
+        // 입금 대기의 끝(T16·T17)은 UNKNOWN 해소가 아니라 해소 기록을 내지 않는다. Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+        await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(message) }]);
+        return 'APPLIED';
+      }
+      // 결과 사건 뒤의 순번으로 해소 기록을 남긴다(ADR-0073. 결과 당기기와 주문 쪽 처리기는 RESOLVED를 결과로 보지 않는다)
+      const resolved = buildResolvedEvent(job.paymentId, message, message.eventSeq + 1, now);
+      await tx.execute(sql`
+        insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
+        values (${job.paymentId}::uuid, ${resolved.eventSeq}, ${resolved.eventKey}::uuid, ${RESOLVED_EVENT_TYPE}, true, ${new Date(now)}::timestamptz)`);
+      // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+      await writeOutbox(
+        tx,
+        this.o.clock,
+        [message, resolved].map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(m) })),
+      );
+      return 'APPLIED';
+    });
+  }
+
+  /** 트랜잭션 하나(READ COMMITTED, 문장 시간 한도 5초 [가정]. budget을 주면 그 남은 시간을 넘지 않는다) */
+  #tx<T>(fn: (tx: DbTransaction) => Promise<T>, budget?: CallBudget): Promise<T> {
+    if (budget === undefined) return this.o.database.transaction(fn, TX);
+    return this.o.database.transaction(fn, { ...TX, statementTimeoutMs: Math.max(1, Math.min(TX.statementTimeoutMs, Math.floor(budget.remainingMs))) });
+  }
+}

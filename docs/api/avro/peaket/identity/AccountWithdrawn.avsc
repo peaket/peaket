@@ -1,0 +1,48 @@
+{
+  "type": "record",
+  "name": "AccountWithdrawn",
+  "namespace": "peaket.identity",
+  "doc": "탈퇴 사건. 토픽 identity.accounts-withdrawn, 키 accountId. identity-svc가 계정을 탈퇴 처리하는 트랜잭션에서 낸다(BUILD_ORDER BOT-037).",
+  "fields": [
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "accountId",
+      "doc": "탈퇴한 계정",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "pids",
+      "doc": "그 계정의 pid(액세스 토큰의 pid와 같은 base64url 글자). 1~2개(asyncapi minItems·maxItems, Avro에는 없어 받는 쪽이 본다)이고 지금 pid가 먼저, pid 키 전환 기간이면 옛 pid가 뒤다(docs/features/identity.md §5 'pid 키 전환의 첫 구현')",
+      "type": {
+        "type": "array",
+        "items": "string"
+      }
+    },
+    {
+      "name": "withdrawnAt",
+      "doc": "계정을 탈퇴 처리한 시각(account.deleted_at)",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "purgeBy",
+      "doc": "이 시각까지 사람 단위 대기열 키를 남기고 이 시각에 지운다. withdrawnAt + 5일(그 순간 만료되어 읽히지 않으므로 '5일 안에는 같은 회차에 다시 줄 서지 못한다'와 '5일 안에 지운다'를 함께 지킨다, docs/features/identity.md §8 '탈퇴 계정의 대기열 키 지우기'). 받는 쪽은 withdrawnAt ~ withdrawnAt + 5일 밖이면 보류한다",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

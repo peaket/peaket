@@ -41,7 +41,7 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       expect(again.newAccount).toBe(false);
       expect(again.accountId).toBe(first.accountId);
       expect(again.sessionId).not.toBe(first.sessionId);
-      // 다른 제공자의 같은 sub는 다른 계정이다(ASVS v5.0.0-6.8.1, (제공자, sub) 복합 키)
+      // 다른 제공자의 같은 sub는 다른 계정이다([ASVS v5.0.0-6.8.1], (제공자, sub) 복합 키)
       const naver = await login(k, { provider: 'naver', email: null });
       expect(naver.accountId).not.toBe(first.accountId);
       expect(k.signals.seen).toEqual(['created:kakao:true', 'created:kakao:false', 'created:naver:true']);

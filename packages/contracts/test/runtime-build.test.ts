@@ -65,7 +65,7 @@ describe('Node로 읽기', () => {
       'console.log(JSON.stringify({',
       '  dup: m.MerchOrderItems.safeParse([item, { ...item }]).success,',
       '  one: m.MerchOrderItems.safeParse([item]).success,',
-      "  entry: q.PostV1QueuesEventIdEntriesBody.safeParse({ preverifyToken: 't' }).success,",
+      "  entry: q.CreateQueueEntryBody.safeParse({ preverifyToken: 't' }).success,",
       "  event: typeof e.SessionTerminated.safeParse,",
       "  from: import.meta.resolve('@peaket/contracts/openapi/queue').includes('/dist/'),",
       '}));',

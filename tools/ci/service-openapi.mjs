@@ -217,6 +217,11 @@ export function shapeOf(schema, resolve, stack = [], dir = undefined) {
   if (union.length) out.anyOf = sorted(union);
   if (Array.isArray(s.allOf)) out.allOf = sorted(s.allOf);
   if (isObj(s.additionalProperties)) out.additionalProperties = shapeOf(s.additionalProperties, resolve, st, dir);
+  // 요청 본문 객체의 닫힘(additionalProperties: false). 계약은 요청을 닫고 응답은 열며(docs/api/guidelines.md §1, BAS-040),
+  // 서비스의 응답 직렬화 스키마는 정의 밖 칸을 버리려고 닫을 수 있어 응답 쪽은 견주지 않는다
+  // { not: {} }(Zod never, 예: 빈 객체만 받는 record(string, never))도 닫힘이다
+  const never = (x) => x === false || (isObj(x) && Object.keys(x).length === 1 && isObj(x.not) && Object.keys(x.not).length === 0);
+  if (dir === 'request' && (out.type?.includes('object') || s.properties)) out.closed = never(s.additionalProperties);
   return out;
 }
 
@@ -240,6 +245,9 @@ function diffShape(c, v, path, out) {
     else out.push(`${path}: ${key}가 다르다(계약 ${c[key]?.length ?? 0}개, 서비스 ${v[key]?.length ?? 0}개)`);
   }
   if (c.additionalProperties || v.additionalProperties) diffShape(c.additionalProperties ?? {}, v.additionalProperties ?? {}, `${path}{*}`, out);
+  if ((c.closed !== undefined || v.closed !== undefined) && !!c.closed !== !!v.closed) {
+    out.push(`${path}: 닫힘이 다르다(계약 ${c.closed ? '닫힘' : '열림'}, 서비스 ${v.closed ? '닫힘' : '열림'})`);
+  }
   for (const flag of ['any', 'never', 'recursive']) if (j(c[flag]) !== j(v[flag])) out.push(`${path}: 모양이 다르다(${flag})`);
 }
 

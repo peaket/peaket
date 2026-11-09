@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // run.mjs가 남긴 측정(.cache/peaket-poc/out/plan.jsonl)을 성능 장부(docs/perf-ledger/runs/)로 옮긴다. 손으로 옮기지 않는다(perf-ledger §3의 8).
 // 측정 환경 사양(infra.txt)을 만들어 실행마다 붙이고, 장부 표는 index.py로 다시 만든다.
-// 쓰는 법: node loadtest/poc/record.mjs [--force]
+// 쓰는 법: node loadtest/poc/record.mjs [--force] [--only <측정 ID>[,<측정 ID>…] [--note <글>]]
+//   --only: 그 측정만 옮긴다(이미 장부에 있는 다른 측정은 건드리지 않는다. 없는 ID면 아무것도 옮기지 않고 멈춘다)
+//   --note: --only로 옮기는 측정의 notes 앞에 붙인다(예: '고치기 전 운영 Lua'). --only 없이는 쓰지 않는다
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -11,6 +13,16 @@ import { IMAGES } from './stack.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, '.cache', 'peaket-poc', 'out');
 const force = process.argv.includes('--force');
+const argAfter = (name) => {
+  const i = process.argv.indexOf(name);
+  if (i < 0) return undefined;
+  const v = process.argv[i + 1];
+  if (v === undefined || v.startsWith('--')) throw new Error(`${name} 뒤에 값이 없다`);
+  return v;
+};
+const only = argAfter('--only')?.split(',').filter(Boolean);
+const note = argAfter('--note');
+if (note !== undefined && !only) throw new Error('--note는 --only와 함께만 쓴다(옮기는 모든 측정에 붙지 않게)');
 const sh = (cmd, args) => {
   try {
     return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).replace(/\0/g, '').trim();
@@ -58,6 +70,10 @@ const last = new Map(all.map((p) => [p.id, p]));
 const rerun = new Set(all.filter((p, i) => all.findIndex((q) => q.id === p.id) !== i).map((p) => p.id));
 const plan = [...last.values()];
 const ids = new Set(plan.map((p) => p.id));
+if (only) {
+  const missing = only.filter((id) => !ids.has(id));
+  if (missing.length) throw new Error(`plan.jsonl에 없는 측정 ID: ${missing.join(', ')}`);
+}
 /**
  * 측정 도구가 예열 뒤 요청 수(measured)를 따로 내기 전(2026-11-01 08:30~09:20 측정, 코드 리뷰 2026-11-01)의 결과는 요청 수에 예열이 들어 있다.
  * 오픈 모델이면 '보낸 수 - 도착률 x 예열'로 고쳐 bench 칸에 적는다(오류는 원래 예열 뒤만 셌다)
@@ -77,11 +93,12 @@ function fixRequests(path) {
 let n = 0;
 for (const p of plan) {
   if (!p.kpi) continue;
+  if (only && !only.includes(p.id)) continue;
   const runId = `${p.id}-local-poc`;
   const args = ['-I', 'tools/perf-ledger/collect.py', '--run-id', runId, '--kpi', p.kpi, '--version', 'v1', '--profile', 'local-poc',
     '--scenario', p.scenario, '--scenario-args', p.scenarioArgs ?? '', '--infra-file', infra, '--start', p.startedAt, '--end', p.endedAt,
     '--generator', `PoC 측정 도구(${p.k6 ? 'k6 1.4.2' : 'Node 24 loadtest/poc/bench'}) 컨테이너, CPU 한도 ${p.cpus}`, '--region', 'local', '--cost-krw', '0',
-    '--notes', `${p.notes}. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표`];
+    '--notes', `${note ? `${note}. ` : ''}${p.notes}. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표`];
   if (p.rps) args.push('--rps', String(p.rps));
   if (p.duration) args.push('--duration', String(p.duration));
   if (p.warmup) args.push('--warmup', String(p.warmup));
@@ -97,12 +114,16 @@ for (const p of plan) {
   if (!p.k6 && /-st27-/.test(p.id)) {
     const r = JSON.parse(readFileSync(join(OUT, `${p.id}.json`), 'utf8'));
     const over = r.invariants.reduce((n, i) => n + i.oversell, 0);
-    const holdErr = r.load.filter((l) => l.kind === 'hold').reduce((n, l) => n + Object.values(l.error_kinds).reduce((a, b) => a + b, 0), 0);
+    // 만료 Lua 오류(2026-11-04 운영 Lua로 다시 재기부터 칸이 있다)도 기록에 빠진 놓기가 있을 수 있어 판정 불가로 센다
+    const holdErr = r.load.filter((l) => l.kind === 'hold').reduce((n, l) => n + Object.values(l.error_kinds).reduce((a, b) => a + b, 0), 0) + r.invariants.reduce((n, i) => n + (i.expire_errors ?? 0), 0);
     const unknown = r.invariants.reduce((n, i) => n + i.unknown_release, 0);
-    const bitBad = r.invariants.filter((i) => !i.bit_equals_index).length;
+    // 좌석마다 비트맵·만료 인덱스와 기록을 견준 칸(seats_match)은 2026-11-04 리뷰 뒤 도구부터 있다
+    const bitBad = r.invariants.filter((i) => !i.bit_equals_index || i.log_equals_bits === false || i.seats_match === false).length;
+    // 운영 Lua로 잰 S-T27(2026-11-04부터)은 어느 원문으로 쟀는지 sha1을 notes에 남긴다
+    if (r.lua?.hold_sha1) args[args.indexOf('--notes') + 1] += `. 측정한 운영 Lua sha1: 홀드 ${r.lua.hold_sha1}, 만료 ${r.lua.expire_sha1 ?? '없음(만료 끔)'}`;
     if (over > 0) args.push('--invalid-reason', `불변식 위반: 오버셀 ${over}건`);
-    else if (holdErr === 0 && (unknown > 0 || bitBad > 0)) args.push('--invalid-reason', `불변식 위반: 짝이 맞지 않는 놓기 ${unknown}건, 켜진 비트 수와 만료 인덱스 수가 다른 회차 ${bitBad}개`);
-    else if (holdErr > 0) args[args.indexOf('--notes') + 1] += `. 오버셀 판정 불가(홀드 오류 ${holdErr}건이 기록에 빠짐)`;
+    else if (holdErr === 0 && (unknown > 0 || bitBad > 0)) args.push('--invalid-reason', `불변식 위반: 짝이 맞지 않는 놓기 ${unknown}건, 켜진 비트 수가 만료 인덱스 수나 기록과 다른(좌석마다 견줌 포함) 회차 ${bitBad}개`);
+    else if (holdErr > 0) args[args.indexOf('--notes') + 1] += `. 오버셀 판정 불가(홀드·만료 오류 ${holdErr}건이 기록에 빠짐)`;
     else args[args.indexOf('--notes') + 1] += `. 오버셀 0(좌석마다 잡기·놓기 순서 확인, 켜진 비트 수 = 만료 인덱스 수)`;
   }
   if (!p.k6) fixRequests(join(OUT, `${p.id}.json`));

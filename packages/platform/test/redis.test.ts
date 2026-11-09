@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { ClientOfflineError, ClientClosedError, ConnectionTimeoutError, DisconnectsClientError, MaxCommandRedirectionsError, ReconnectStrategyError, RootNodesUnavailableError, SocketClosedUnexpectedlyError, SocketTimeoutError } from 'redis';
 import { describe, expect, test } from 'vitest';
-import { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, hotRedisOver, isRedisUnavailable, redisClusterOptions, redisScript, type RawRedis } from '../src/redis.js';
+import { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, hotRedisOver, isRedisOutOfMemory, isRedisUnavailable, redisClusterOptions, redisScript, type RawRedis } from '../src/redis.js';
 
 function raw(send: RawRedis['send']): RawRedis & { calls: { key: string | undefined; args: string[]; binary?: boolean }[] } {
   const calls: { key: string | undefined; args: string[]; binary?: boolean }[] = [];
@@ -179,5 +179,37 @@ describe('일시 장애 가르기', () => {
     expect(isRedisUnavailable(new MaxCommandRedirectionsError())).toBe(true);
     // 그 밖의 시스템 오류 코드(버그일 수 있다)는 아니다
     expect(isRedisUnavailable(sys('EACCES'))).toBe(false);
+  });
+});
+
+describe('메모리 부족 가르기(isRedisOutOfMemory, ADR-0109, BUILD_ORDER PRF-135)', () => {
+  const OOM = "OOM command not allowed when used memory > 'maxmemory'.";
+
+  test("NFR015_ 오류 글이 OOM으로 시작하면(Valkey의 'OOM command not allowed …', 스크립트 거절도 같은 글) 메모리 부족이다 [ASVS v5.0.0-16.3.4]", () => {
+    expect(isRedisOutOfMemory(new Error(OOM))).toBe(true);
+    expect(isRedisOutOfMemory(new Error('OOM'))).toBe(true);
+    expect(isRedisOutOfMemory(new Error('OOM: out of memory'))).toBe(true);
+  });
+
+  test('NFR015_ OOM이 글 앞이 아니거나 낱말로 끝나지 않거나 소문자면, 그리고 Error가 아닌 값은 메모리 부족이 아니고 던지지 않는다', () => {
+    for (const e of [
+      new Error(` ${OOM}`),
+      new Error('oom command not allowed'),
+      new Error('ERR Error running script: OOM inside'),
+      new Error('OOMKILLED'),
+      new Error('CLUSTERDOWN The cluster is down'),
+      new RedisDeadlineError(100),
+      new Error(''),
+    ]) {
+      expect({ m: e.message, oom: isRedisOutOfMemory(e) }).toEqual({ m: e.message, oom: false });
+    }
+    for (const v of [OOM, null, undefined, 1, { message: OOM }]) expect({ v, oom: isRedisOutOfMemory(v) }).toEqual({ v, oom: false });
+  });
+
+  test('NFR015_ 메모리 부족은 일시 장애가 아니다(isRedisUnavailable은 OOM에 거짓 그대로. 다시 시도하는 반복이 메모리 부족에 돌지 않게)', () => {
+    expect(isRedisUnavailable(new Error(OOM))).toBe(false);
+    for (const e of [new RedisDeadlineError(100), new RedisConnectError(), new Error('CLUSTERDOWN The cluster is down'), new Error('TRYAGAIN rehashing')]) {
+      expect({ m: e.message, unavailable: isRedisUnavailable(e), oom: isRedisOutOfMemory(e) }).toEqual({ m: e.message, unavailable: true, oom: false });
+    }
   });
 });

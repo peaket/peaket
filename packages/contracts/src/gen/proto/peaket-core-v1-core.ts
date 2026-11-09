@@ -337,6 +337,18 @@ export const coreV1Core: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "MergeBlock",
                       "id": 1
+                    },
+                    "absorbed_wishes": {
+                      "type": "int32",
+                      "id": 2
+                    },
+                    "absorbed_subscriptions": {
+                      "type": "int32",
+                      "id": 3
+                    },
+                    "absorbed_addresses": {
+                      "type": "int32",
+                      "id": 4
                     }
                   }
                 },

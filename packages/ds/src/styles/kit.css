@@ -28,9 +28,9 @@
   font-family:var(--font); color:var(--text); background:var(--surface);
   font-size:16px; line-height:1.375; -webkit-font-smoothing:antialiased;
   word-break:keep-all; overflow-wrap:break-word;
-  color-scheme:light; /* 다크는 .pk.dark가 dark로 바꾼다. 운영체제가 다크여도 밝은 화면의 입력 칸·스크롤바가 어둡게 그려지지 않게 한다 */
+  color-scheme:light; /* 다크는 .pk.dark와 운영체제 다크(SEED 색 모드 스크립트를 싣는 앱, HOT-291)가 dark로 바꾼다. 그 밖에는 운영체제가 다크여도 밝은 화면의 입력 칸·스크롤바가 어둡게 그려지지 않게 한다 */
 }
-.pk.dark{
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk){
   color-scheme:dark;
 }
 
@@ -213,7 +213,7 @@
 /* ---------- 6. 로고 (티켓 절취선 위로 솟은 봉우리, d1 §3) ---------- */
 .logo{display:inline-flex;align-items:center;gap:6px;font-size:19px;line-height:24px;font-weight:800;letter-spacing:.03em;color:var(--text);white-space:nowrap;text-decoration:none}
 .logo-mark{display:inline-block;flex:none;width:28px;height:28px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%234338CA' d='M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z'/%3E%3Cpath d='M7.5 21h3M14.5 21h3M21.5 21h3' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat}
-.pk.dark .logo-mark,.logo-mark.on-dark{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%235B5BE8' d='M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z'/%3E%3Cpath d='M7.5 21h3M14.5 21h3M21.5 21h3' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .logo-mark,.logo-mark.on-dark{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%235B5BE8' d='M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z'/%3E%3Cpath d='M7.5 21h3M14.5 21h3M21.5 21h3' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
 .logo-mark.neg{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='white' d='M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z'/%3E%3Cpath d='M7.5 21h3M14.5 21h3M21.5 21h3' stroke='%234338CA' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
 .logo-sm{font-size:16px;gap:5px}.logo-sm .logo-mark{width:22px;height:22px}
 .logo-lg{font-size:28px;line-height:34px;gap:10px}.logo-lg .logo-mark{width:44px;height:44px}
@@ -347,10 +347,10 @@
 /* 2026-10-28 인증 앱 코드는 입력 칸 하나(maxlength 6)를 여섯 칸처럼 그린다(d2 CMP-007, d4 #25, 중간-098). 칸 무늬(46×56 여섯 칸, 사이 8)는 배경 그림, 글자는 고정폭 24px(0.6em = 14.4px)에
    글자 간격 39.6px(칸 간격 54 − 14.4)과 왼쪽 여백 15.8px로 칸 가운데에 놓는다. 포커스는 입력 전체에 포커스 링. 마크업: <input class="otp-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" aria-label="인증 앱 코드 6자리"> */
 .otp-input{display:block;flex:none;box-sizing:border-box;width:316px;min-height:56px;margin:0;padding:0 0 0 15.8px;border:0;border-radius:var(--r-md);background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%23ffffff' stroke='%23555d6d'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E") 0 0/316px 56px no-repeat;font-family:var(--mono);font-size:24px;line-height:56px;font-weight:700;letter-spacing:39.6px;font-variant-numeric:tabular-nums;color:var(--text);text-align:left;outline:0;caret-color:var(--primary)}
-.pk.dark .otp-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%2316171b' stroke='%23dcdee3'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E")}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .otp-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%2316171b' stroke='%23dcdee3'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E")}
 .otp-input:focus-visible,.otp-input.is-focus{outline:2px solid var(--focus-ring);outline-offset:2px}
 .otp-input[aria-invalid="true"],.otp-input.is-error{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%23ffffff' stroke='%23ca1d13'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E")}
-.pk.dark .otp-input[aria-invalid="true"],.pk.dark .otp-input.is-error{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%2316171b' stroke='%23ff6e60'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E")}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .otp-input[aria-invalid="true"],:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .otp-input.is-error{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='316' height='56' viewBox='0 0 316 56'%3E%3Cg fill='%2316171b' stroke='%23ff6e60'%3E%3Crect x='0.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='54.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='108.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='162.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='216.5' y='.5' width='45' height='55' rx='7.5'/%3E%3Crect x='270.5' y='.5' width='45' height='55' rx='7.5'/%3E%3C/g%3E%3C/svg%3E")}
 .otp-input::placeholder{color:var(--text-disabled);letter-spacing:39.6px}
 .stepper-num{display:inline-flex;align-items:center;border:1px solid var(--border-input);border-radius:var(--r-md);height:40px;overflow:hidden}
 .stepper-num button{width:40px;height:100%;border:0;background:transparent;display:grid;place-items:center;cursor:pointer}
@@ -374,7 +374,7 @@
 .step.is-current{color:var(--text);font-weight:700}
 .step.is-current .step-num{background:var(--primary);border-color:var(--primary);color:var(--text-on-primary)}
 .step.is-done .step-num{background:var(--success);border-color:var(--success);color:#ffffff}
-.pk.dark .step.is-done .step-num{color:#16171b}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .step.is-done .step-num{color:#16171b}
 .step-line{flex:1 1 16px;min-width:12px;height:2px;background:var(--border)}
 .step-line.is-done{background:var(--success)}
 .progress{height:8px;border-radius:999px;background:var(--fill-weak);overflow:hidden;width:100%}
@@ -471,9 +471,9 @@
 .seat.gap{background:transparent;box-shadow:none}
 .seat.held{background-color:var(--seat-held);background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.38) 0 1.5px,transparent 1.5px 4px)}
 .seat.sold{background-color:var(--seat-sold);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 1px,transparent 1px 4px),repeating-linear-gradient(-45deg,rgba(255,255,255,.55) 0 1px,transparent 1px 4px)}
-.pk.dark .seat.sold{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.4) 0 1px,transparent 1px 4px),repeating-linear-gradient(-45deg,rgba(255,255,255,.4) 0 1px,transparent 1px 4px)}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .seat.sold{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.4) 0 1px,transparent 1px 4px),repeating-linear-gradient(-45deg,rgba(255,255,255,.4) 0 1px,transparent 1px 4px)}
 .seat.unav{background-color:var(--seat-unavailable);background-image:radial-gradient(circle,rgba(0,0,0,.4) .9px,transparent 1.3px);background-size:4px 4px;box-shadow:inset 0 0 0 1px var(--border)}
-.pk.dark .seat.unav{background-image:radial-gradient(circle,rgba(255,255,255,.4) .9px,transparent 1.3px)}
+:is(.pk.dark, :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk) .seat.unav{background-image:radial-gradient(circle,rgba(255,255,255,.4) .9px,transparent 1.3px)}
 .seat.mine{background-color:var(--seat-mine)}
 .seat.wc{background-color:var(--seat-wheelchair)}
 .seat.mine::after,.seat.wc::after{content:"";position:absolute;inset:1px;background:var(--seat-glyph);-webkit-mask:var(--g) center/contain no-repeat;mask:var(--g) center/contain no-repeat}

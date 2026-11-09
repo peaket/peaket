@@ -67,8 +67,8 @@ export const MERGE_PROPOSAL = {
   blockedHeld: { mine: 2, absorbed: 3 },
 } as const;
 
-/** 합치기 전에 확인하는 다섯 가지(openapi MergeProposal.blockers 코드 순서, d5 §5.22 blocked) */
-export type MergeBlockerCode = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED';
+/** 합치기 전에 확인하는 여섯 가지(openapi MergeProposal.blockers 코드 순서, d5 §5.22 blocked. 여섯째는 소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
+export type MergeBlockerCode = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED' | 'SAME_PROVIDER_KIND';
 
 export const MERGE_CHECK_TITLES: Record<MergeBlockerCode, string> = {
   ACTIVE_PURCHASE: '진행 중인 홀드·구매 세션·결제 대기',
@@ -76,10 +76,17 @@ export const MERGE_CHECK_TITLES: Record<MergeBlockerCode, string> = {
   BOTH_VERIFIED: '두 계정 모두 본인확인',
   WITHDRAWAL_OR_APPEAL: '흡수될 계정의 탈퇴·이의 제기 처리 중',
   ENTRY_STARTED: '입장 중인 회차의 티켓',
+  SAME_PROVIDER_KIND: '두 계정에 같은 종류의 로그인 수단',
 };
 
-/** 세션 종료 사유(asyncapi SessionTerminated, d5 §3.5 표의 팬 문구) */
-export type SessionEndReason = 'LOGOUT' | 'ADMIN_FORCE' | 'REFRESH_REUSE' | 'DEVICE_LIMIT' | 'MERGED' | 'DELETE';
+/** 로그인 수단이 바뀐 뒤 함께 알리는 말: 그 일을 한 세션 말고 그 계정의 세션을 모두 끝냈다(ASVS 7.4.3, d5 §5.21·§5.22, ADR-0209) */
+export const OTHER_DEVICES_LOGGED_OUT = '다른 기기에서는 모두 로그아웃했습니다';
+
+/** 가입 때 연결 제안의 연결 성공 토스트(d5 §5.21 SCR-039 '연결 성공'). name: 새로 이은 제공자 이름 */
+export const linkedText = (name: string): string => `${name} 계정을 연결했습니다. ${OTHER_DEVICES_LOGGED_OUT}`;
+
+/** 세션 종료 사유(asyncapi SessionTerminated, d5 §3.5 표의 팬 문구). LOGIN_METHOD_CHANGED는 2026-11-05(BOT-044, ADR-0209) */
+export type SessionEndReason = 'LOGOUT' | 'ADMIN_FORCE' | 'REFRESH_REUSE' | 'DEVICE_LIMIT' | 'MERGED' | 'DELETE' | 'LOGIN_METHOD_CHANGED';
 
 export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
   LOGOUT: '다른 기기에서 이 기기를 로그아웃했습니다',
@@ -88,4 +95,5 @@ export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
   DEVICE_LIMIT: '로그인한 기기가 5대를 넘어 가장 오래 쓰지 않은 이 기기에서 로그아웃했습니다',
   MERGED: '이 계정은 대표 계정으로 합쳐졌습니다. 대표 계정으로 다시 로그인해 주세요',
   DELETE: '탈퇴가 완료되었습니다',
+  LOGIN_METHOD_CHANGED: '로그인 수단이 바뀌어 이 기기에서 로그아웃되었습니다. 다시 로그인해 주세요',
 };

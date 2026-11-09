@@ -1,6 +1,7 @@
 // 대기 상태 파일의 규칙 값과 만들기(docs/features/queue-admission.md §4 '대기 상태 파일의 첫 구현', openapi QueueState, ADR-0110).
 // 파일 하나가 구간 하나(번호 1,000개)다. 같은 구간의 대기자가 같은 파일을 받으므로 사람별 값은 없다.
-import { type EventSchedule, saleEndOf, SEGMENT_SIZE, segmentOf } from '../../entry/index.js';
+import { type EventSchedule, saleEndOf, SEGMENT_SIZE, segmentOf, seatmapLayoutPathOf } from '../../entry/index.js';
+import { AVG_TICKETS_MAX, AVG_TICKETS_MIN, SEAT_COUNT_CLOCK_SKEW_MS } from '../../sale/index.js';
 
 /** 차례 진행 속도를 내는 창(1초 칸 수) [가정] */
 export const RATE_SLOTS = 10;
@@ -8,6 +9,10 @@ export const RATE_SLOTS = 10;
 export const STEPS_WINDOW_MS = 5_000;
 /** 입장 임박 구간: 그 구간의 첫 번호까지 예상 대기가 이 초 이내(ADR-0110) */
 export const IMMINENT_WAIT_S = 60;
+/** 남은 좌석 수 칸을 싣는 셈의 신선도 [가정]: 셈 시각이 생성 시각에서 이 안일 때만 싣는다(ADR-0219 결정 5) */
+export const SEAT_COUNT_FRESH_MS = 30_000;
+/** 평균 구매 매수가 없거나 1~10 밖일 때의 기본값 [가정](ADR-0219 결정 6) */
+export const DEFAULT_AVG_TICKETS_PER_ORDER = 2;
 /** 마지막 요청 뒤 회차를 켜 두는 시간 [가정] */
 export const ACTIVE_FOR_MS = 60_000;
 /** 파드 하나가 켜 두는 회차 수의 상한 [가정] */
@@ -36,9 +41,49 @@ export interface StateSnapshot {
   servingLog: { slot: number; serving: number }[];
   /** calls의 끝: 전진 시각(밀리초)과 그 전진의 마지막 번호 */
   calls: { atMs: number; last: number }[];
+  /** q:{event:E}:notice의 판매 상태 칸(HOT-010, ADR-0214). 없으면 판매 중이고 일시정지·공지가 없다 */
+  notice?: NoticeFields;
+  /** q:{event:E}:ctl의 입장 일시정지(admitPaused가 1)와 그 만료(admitPausedUntil, 없으면 null). 리더와 같은 규칙으로 읽는다 */
+  admit?: { paused: boolean; untilMs: number | null };
 }
 
-export type SaleStatus = 'ON_SALE' | 'ENDED';
+/** notice의 칸 가운데 파일이 쓰는 것(docs/data.md §3) */
+export interface NoticeFields {
+  /** 회차 판매 상태(ON_SALE·ALL_HELD·SOLD_OUT·ENDED, EventSaleChanged 처리기가 쓴다) */
+  saleState?: string;
+  /** 매진 등급(등급 ID) */
+  soldOutTiers?: string[];
+  /** 판매 일시정지(명령 3)·판매 중지(제어 받는 쪽이 쓴다) */
+  paused?: boolean;
+  suspended?: boolean;
+  /** 공지 배너 글(명령 7) */
+  banner?: string;
+  /** 남은 좌석 수와 그 셈 시각(유닉스 밀리초), 평균 구매 매수(판매 상태 사건의 셈, HOT-011, ADR-0219) */
+  remainingSeats?: number;
+  seatsAtMs?: number;
+  avgTicketsPerOrder?: number;
+  /** 상태 조회 Degraded 표시(명령 6이 쓴다, ADR-0223 결정 8). 켜지면 pollHintMs가 거리별 주기의 2배다 */
+  stateDegraded?: boolean;
+}
+
+/** 전체 범위 q:{event:PLATFORM}:notice(일시정지·판매 중지·공지 배너·상태 조회 Degraded) */
+export type PlatformNotice = Pick<NoticeFields, 'paused' | 'suspended' | 'banner' | 'stateDegraded'>;
+
+export type SaleStatus = 'ON_SALE' | 'PAUSED' | 'ALL_HELD' | 'TIER_SOLD_OUT' | 'SOLD_OUT' | 'ENDED';
+
+/**
+ * 파일의 판매 상태: 판매 종료(생성 시각이나 saleState) > SOLD_OUT > PAUSED(회차·전체 범위의 paused·suspended) > ALL_HELD > TIER_SOLD_OUT(매진 등급이 있음) > ON_SALE
+ * (ADR-0122·0214 결정 4). 모르는 saleState는 판매 중으로 본다(리더는 전진하지 않는다)
+ */
+export function saleStatusOf(o: { saleEnded: boolean; notice: NoticeFields; platform: PlatformNotice }): SaleStatus {
+  const n = o.notice;
+  if (o.saleEnded || n.saleState === 'ENDED') return 'ENDED';
+  if (n.saleState === 'SOLD_OUT') return 'SOLD_OUT';
+  if (n.paused || n.suspended || o.platform.paused || o.platform.suspended) return 'PAUSED';
+  if (n.saleState === 'ALL_HELD') return 'ALL_HELD';
+  if ((n.soldOutTiers?.length ?? 0) > 0) return 'TIER_SOLD_OUT';
+  return 'ON_SALE';
+}
 
 /** openapi QueueState */
 export interface QueueStateBody {
@@ -46,6 +91,15 @@ export interface QueueStateBody {
   servingRate: number;
   saleStatus: SaleStatus;
   soldOutTiers: string[];
+  /** 입장 일시정지(명령 2, BAS-042) */
+  admissionPaused: boolean;
+  /** 그 회차 좌석맵 파일의 경로(일정 사본에 좌석맵 판이 있을 때만, BAS-042·HOT-011) */
+  seatmapLayoutPath?: string;
+  /** 남은 좌석 수와 평균 구매 매수(셈이 30초 [가정] 안일 때만 함께, POL-015) */
+  remainingSeats?: number;
+  avgTicketsPerOrder?: number;
+  /** 공지 배너 글(있을 때만) */
+  banner?: string;
   removedUpToServing: number;
   removedBeforeSegment: number;
   removedBitmap: string;
@@ -59,7 +113,16 @@ export interface StateFile {
   body: string;
   imminent: boolean;
   generatedAtMs: number;
+  /** S3 사본을 쓰는 주기(거리별 캐시 수명): 입장 임박 1초, 1~5분 5초, 그 밖 10초 [가정](ADR-0223 결정 9) */
+  mirrorEveryMs: number;
 }
+
+/** 거리별 구간: 입장 임박(1분 이내), 1~5분, 그 밖(queue-admission §4 표) */
+type Distance = 'near' | 'mid' | 'far';
+const MID_WAIT_S = 300;
+/** 상태 조회 Degraded의 pollHintMs: 거리별 주기의 2배(§4 '폴링 힌트') */
+const POLL_HINT_MS: Record<Distance, number> = { near: 1_000, mid: 10_000, far: 40_000 };
+const MIRROR_EVERY_MS: Record<Distance, number> = { near: 1_000, mid: 5_000, far: 10_000 };
 
 /** 파일을 만드는 초 경계(밀리초) */
 export const boundaryOf = (ms: number): number => Math.floor(ms / 1000) * 1000;
@@ -144,8 +207,21 @@ function rateOf(s: StateSnapshot, removed: Removed, generatedAtMs: number): numb
   return Math.round(rate * 1000) / 1000;
 }
 
-/** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지 */
-export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number): StateFile[] {
+/**
+ * 남은 좌석 수 칸: 셈이 생성 시각에서 30초 [가정] 안이면 남은 좌석 수와 평균 구매 매수(없거나 1~10 밖이면 2 [가정])를 함께, 아니면 둘 다 뺀다.
+ * 셈 시각이 생성 시각보다 5초 [가정] 넘게 앞서면(시계가 어긋난 셈) 뺀다. 앞선 시각이 신선도를 늘리지 않게 한다
+ */
+function seatCountsOf(n: NoticeFields, generatedAtMs: number): Pick<QueueStateBody, 'remainingSeats' | 'avgTicketsPerOrder'> {
+  const { remainingSeats: left, seatsAtMs: at, avgTicketsPerOrder: avg } = n;
+  if (left === undefined || at === undefined || !Number.isSafeInteger(left) || left < 0) return {};
+  const age = generatedAtMs - at;
+  if (age > SEAT_COUNT_FRESH_MS || age < -SEAT_COUNT_CLOCK_SKEW_MS) return {};
+  const ok = avg !== undefined && Number.isFinite(avg) && avg >= AVG_TICKETS_MIN && avg <= AVG_TICKETS_MAX;
+  return { remainingSeats: left, avgTicketsPerOrder: ok ? avg : DEFAULT_AVG_TICKETS_PER_ORDER };
+}
+
+/** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지. eventId는 좌석맵 경로에 쓴다(없으면 그 칸을 뺀다) */
+export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number, platform: PlatformNotice = {}, eventId?: string): StateFile[] {
   const lastSegment = s.seq >= 1 ? segmentOf(s.seq) : 0;
   const maxSegment = lastSegment + AHEAD_SEGMENTS;
   const removed = new Removed(s, lastSegment);
@@ -154,7 +230,13 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
   // 다음에 부를 번호(serving + 1)의 구간. serving이 구간 끝이면 그다음 구간이다
   const nextSegment = Math.min(segmentOf(s.serving + 1), maxSegment);
   const removedUpToServing = removed.upTo(s.serving);
-  const saleStatus: SaleStatus = generatedAtMs >= saleEndOf(schedule) ? 'ENDED' : 'ON_SALE';
+  const notice = s.notice ?? {};
+  const saleStatus = saleStatusOf({ saleEnded: generatedAtMs >= saleEndOf(schedule), notice, platform });
+  const soldOutTiers = [...(notice.soldOutTiers ?? [])];
+  const banner = notice.banner || platform.banner;
+  const admissionPaused = s.admit?.paused === true && (s.admit.untilMs === null || generatedAtMs < s.admit.untilMs);
+  const seatmapLayoutPath = eventId === undefined ? undefined : seatmapLayoutPathOf(eventId, schedule);
+  const seatCounts = seatCountsOf(notice, generatedAtMs);
   const steps = s.calls
     // 경계 뒤 읽기 전에 일어난 전진도 serving에 들어 있으므로 위쪽은 자르지 않는다
     .filter((c) => c.atMs >= generatedAtMs - STEPS_WINDOW_MS)
@@ -172,22 +254,38 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
     }
   }
 
+  const degraded = notice.stateDegraded === true || platform.stateDegraded === true;
+  // 화면(queue-file.ts nextDelayMs)과 같은 잣대: 속도가 0이면 serving 구간 + 1까지가 임박이다. 속도가 있으면 그 구간 첫 번호까지 예상 대기로 가른다
+  const screenServingSegment = segmentOf(Math.max(1, s.serving));
+  const distanceOf = (seg: number, near: boolean): Distance => {
+    if (near) return 'near';
+    if (rate <= 0) return seg <= screenServingSegment + 1 ? 'near' : 'far';
+    const first = seg * SEGMENT_SIZE + 1;
+    const ahead = Math.max(0, first - s.serving - 1 - (removed.upTo(first - 1) - removed.upTo(s.serving)));
+    return ahead / rate <= MID_WAIT_S ? 'mid' : 'far';
+  };
+
   const files: StateFile[] = [];
   for (let seg = 0; seg <= maxSegment; seg++) {
     const near = imminent.has(seg);
+    const distance = distanceOf(seg, near);
     const body: QueueStateBody = {
       serving: s.serving,
       servingRate: rate,
       saleStatus,
-      soldOutTiers: [],
+      soldOutTiers,
+      admissionPaused,
+      ...(seatmapLayoutPath ? { seatmapLayoutPath } : {}),
+      ...seatCounts,
+      ...(banner ? { banner } : {}),
       removedUpToServing,
       removedBeforeSegment: removed.before(seg),
       removedBitmap: Buffer.from(removed.bitsOf(seg)).toString('base64'),
       generatedAtMs,
-      pollHintMs: 0,
+      pollHintMs: degraded ? POLL_HINT_MS[distance] : 0,
       ...(near ? { servingSteps: steps } : {}),
     };
-    files.push({ body: JSON.stringify(body), imminent: near, generatedAtMs });
+    files.push({ body: JSON.stringify(body), imminent: near, generatedAtMs, mirrorEveryMs: MIRROR_EVERY_MS[distance] });
   }
   return files;
 }

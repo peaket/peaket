@@ -1,5 +1,5 @@
 // 입장 확정 컨텍스트의 포트: 입장 저장소(대기열 Redis), 입장 토큰 서명, 지표.
-import type { AdmitResult, Claim, Precheck } from './admission.js';
+import type { AdmitResult, Claim, LobbySeat, Precheck } from './admission.js';
 
 export const ADMISSION_STORE = Symbol('queue.AdmissionStore');
 /**
@@ -30,8 +30,10 @@ export interface AdmissionStore {
   }): Promise<AdmitResult>;
   /** ④ ADMITTED: q:adm이 없거나 같은 대기표면 이 요청의 표지로 다시 쓰고(없으면 수명 = 판매 종료) q:dup을 지운다. RELEASE: 값이 이 요청이 채운 그대로일 때만 지운다 */
   settle(i: { pid: string; eventId: string; ticketHash: string; outcome: 'ADMITTED' | 'RELEASE'; nonce: string; expireAtMs: number }): Promise<void>;
-  /** 15분 만료: q:dup 값이 이 대기표의 {번호}:{세대}:로 시작하면 지운다. 이 회차에 입장한 적이 있는지(q:adm이 있는지)를 준다 */
-  expire(i: { pid: string; eventId: string; seq: number; gen: number }): Promise<{ admittedBefore: boolean }>;
+  /** 15분 만료: q:dup 값이 이 대기표의 {번호}:{세대}:로 시작하면 지운다(참가 토큰이면 dupPrefix로 준 LOBBY:{토큰 해시}:로). 이 회차에 입장한 적이 있는지(q:adm이 있는지)를 준다 */
+  expire(i: { pid: string; eventId: string; seq: number; gen: number; dupPrefix?: string }): Promise<{ admittedBefore: boolean }>;
+  /** 로비 셔플 결과 q:lobby:{토큰 해시}. 없으면 회차 슬롯의 pub:lobby와 참가자 목록을 본다. 게시 전 PENDING, 참가자인데 결과가 없으면 repair:lobby를 쓰고 REPAIRING, 참가자가 아니면 GONE */
+  lobbySeat(i: { eventId: string; tokenHash: string; nowMs: number }): Promise<LobbySeat>;
   /** 1인 1순번 위반으로 거절한 번호를 빠진 번호 비트맵에 켠다 */
   markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void>;
   /** 구매 세션 시작: jti 자리가 남아 있을 때만 점수를 최대 체류 시각으로 올린다(ZADD XX GT). 바꿨으면 true */
@@ -43,7 +45,8 @@ export interface AdmissionStore {
 export const ADMISSION_TOKENS = Symbol('queue.AdmissionTokens');
 /** 입장 토큰 서명(ES256, typ admission+jwt, aud purchase). exp = iat + 최대 체류 */
 export interface AdmissionTokens {
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number }): { token: string; expiresAtMs: number };
+  /** firstIssuedAtMs: 같은 jti를 다시 줄 때 첫 발급 시각. exp를 그 시각 + 최대 체류로 둔다(없으면 nowMs 기준). iat는 늘 nowMs다 */
+  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number }): { token: string; expiresAtMs: number };
   /** 입장 확정 응답의 서버 ECDH 공개키(설정이 없으면 undefined, BOT-100) */
   serverEcdhPublicKey(): Record<string, string> | undefined;
 }

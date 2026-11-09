@@ -9,10 +9,11 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "paths": {
-      "@peaket/platform": ["../../packages/platform/src/index.ts"]
+      "@peaket/platform": ["../../packages/platform/src/index.ts"],
+      "@peaket/platform/stream-worker": ["../../packages/platform/src/stream-worker.ts"]
     },
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src", "test", "test-int"]
+  "include": ["src", "test", "test-int", "scripts", "drizzle.config.ts"]
 }

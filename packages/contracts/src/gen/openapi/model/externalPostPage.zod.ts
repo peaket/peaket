@@ -40,7 +40,7 @@ export const ExternalPostPage = zod.object({
   "y": zod.number().min(externalPostPageItemsItemMaskRegionsItemYMin).max(externalPostPageItemsItemMaskRegionsItemYMax),
   "w": zod.number().gt(externalPostPageItemsItemMaskRegionsItemWExclusiveMin).max(externalPostPageItemsItemMaskRegionsItemWMax),
   "h": zod.number().gt(externalPostPageItemsItemMaskRegionsItemHExclusiveMin).max(externalPostPageItemsItemMaskRegionsItemHMax)
-}).strict().describe('캡처 위의 가릴 상자 하나(왼쪽 위 기준, 캡처 너비·높이에 대한 비율(추천 적용 2026-10-31, ADR-0173))')).optional().describe('보기용 사본에서 칠한 자리(추천 적용 2026-10-31, ADR-0173)'),
+}).describe('캡처 위의 가릴 상자 하나(왼쪽 위 기준, 캡처 너비·높이에 대한 비율(추천 적용 2026-10-31, ADR-0173))')).optional().describe('보기용 사본에서 칠한 자리(추천 적용 2026-10-31, ADR-0173)'),
   "source": zod.enum(['REPORT', 'MANUAL']).optional(),
   "captureSha256": zod.string().regex(externalPostPageItemsItemCaptureSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional(),

@@ -15,7 +15,7 @@ export const PayoutAccountChange = zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
+}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
 
 export type PayoutAccountChange = zod.input<typeof PayoutAccountChange>;
 export type PayoutAccountChangeOutput = zod.output<typeof PayoutAccountChange>;

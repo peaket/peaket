@@ -1,7 +1,7 @@
 // identity DB의 계정·로그인 수단·기기·세션 표(docs/data.md §2 identity, docs/features/identity.md §11).
 // 이 단계(BUILD_ORDER PRF-020)가 쓰는 표만 둔다. 본인확인·병합·관리 계정 표는 그 단계가 더한다.
 import { sql } from 'drizzle-orm';
-import { boolean, check, customType, index, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -13,13 +13,21 @@ export const account = pgTable(
     status: text('status').notNull(),
     mergedIntoAccountId: uuid('merged_into_account_id'),
     nickname: text('nickname'),
+    // 닉네임을 NFKC·대소문자 접기로 맞춘 중복 판정 키(ADR-0203 결정 2). 닉네임을 지울 때 함께 지운다
+    nicknameKey: text('nickname_key'),
     email: text('email'),
+    // 계정을 만들 때 제공자가 준 이메일 검증 여부. 가입 때 연결 제안의 대상은 true인 계정뿐이다(identity §2.1, BUILD_ORDER BOT-040)
+    emailVerified: boolean('email_verified').notNull().default(false),
     phone: text('phone'),
     // 회원 코드는 가입 완료(SCR-005)에서 매긴다. 형식은 그 단계가 정한다
     memberCode: text('member_code').unique(),
     savedBookerName: text('saved_booker_name'),
     savedBookerPhone: text('saved_booker_phone'),
     ageVerified: boolean('age_verified').notNull().default(false),
+    // WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만(docs/features/identity.md §5, BUILD_ORDER BOT-020)
+    closureReason: text('closure_reason'),
+    // 정리를 시작한 시각. 만 14세 미만 정리는 10분 [가정] 뒤 정비가 끝낸다(identity §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
+    closureStartedAt: at('closure_started_at'),
     locale: text('locale').notNull().default('ko'),
     createdAt: at('created_at').notNull(),
     deletedAt: at('deleted_at'),
@@ -28,6 +36,27 @@ export const account = pgTable(
     check('account_status_check', sql`${t.status} in ('ACTIVE', 'WITHDRAWAL_PENDING', 'MERGED', 'DELETED')`),
     check('account_locale_check', sql`${t.locale} in ('ko', 'en', 'ja', 'zh')`),
     check('account_merged_check', sql`(${t.status} = 'MERGED') = (${t.mergedIntoAccountId} is not null)`),
+    check('account_closure_reason_check', sql`${t.closureReason} is null or ${t.closureReason} in ('UNDER_14')`),
+    uniqueIndex('account_nickname_key_key').on(t.nicknameKey).where(sql`${t.nicknameKey} is not null`),
+  ],
+);
+
+// 가입 때 동의 기록(docs/data.md consent, ADR-0203, ADR-0235). 탈퇴·병합되면 그 계정의 행을 지운다
+export const consent = pgTable(
+  'consent',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
+    kind: text('kind').notNull(),
+    noticeVersion: text('notice_version').notNull(),
+    channels: text('channels'),
+    agreedAt: at('agreed_at').notNull(),
+  },
+  (t) => [
+    unique('consent_account_kind_version_key').on(t.accountId, t.kind, t.noticeVersion),
+    check('consent_kind_check', sql`${t.kind} in ('TERMS', 'PRIVACY_REQUIRED', 'PRIVACY_PHONE', 'MARKETING')`),
   ],
 );
 
@@ -40,6 +69,8 @@ export const accountProvider = pgTable(
     provider: text('provider').notNull(),
     providerUserId: text('provider_user_id').notNull(),
     linkedAt: at('linked_at').notNull(),
+    // 이 (제공자, sub)로 로그인 세션을 만든 마지막 시각(SCR-040 '최근 로그인', BUILD_ORDER BOT-041)
+    lastLoginAt: at('last_login_at'),
   },
   (t) => [
     // (제공자, 제공자 사용자 ID) 복합 키(ASVS v5.0.0-6.8.1·10.5.2)
@@ -80,12 +111,21 @@ export const session = pgTable(
     absoluteExpiresAt: at('absolute_expires_at').notNull(),
     idleExpiresAt: at('idle_expires_at').notNull(),
     terminatedAt: at('terminated_at'),
+    // 끝난 까닭(asyncapi SessionTerminated.reason, 갱신 401의 ended, ADR-0235 결정 1)
+    terminatedReason: text('terminated_reason'),
     loginVerdict: text('login_verdict').notNull(),
     loginVerdictReason: text('login_verdict_reason'),
     loginVerdictAt: at('login_verdict_at'),
+    // 화면용 기기 이름 '브라우저 · 운영체제'(로그인한 기기 목록, ADR-0209 결정 1). User-Agent 원문은 두지 않는다. 세션이 끝나면 비운다
+    deviceLabel: text('device_label'),
+    // 마지막 활동: 로그인과 토큰 갱신(회전) 때(ADR-0209 결정 2). 마이그레이션 0028 전의 세션은 비어 있어 rotated_at·login_verdict_at으로 대신한다
+    lastActiveAt: at('last_active_at'),
   },
   (t) => [
     index('session_account_active_idx').on(t.accountId).where(sql`${t.terminatedAt} is null`),
+    // 정비 session-label-expired: 절대 만료가 지났는데 기기 이름이 남은 세션을 앞에서부터 찾는다(이름이 있는 세션만 담는다)
+    index('session_device_label_expiry_idx').on(t.absoluteExpiresAt).where(sql`${t.deviceLabel} is not null`),
+    check('session_device_label_length_check', sql`${t.deviceLabel} is null or char_length(${t.deviceLabel}) between 1 and 40`),
     // 리프레시 토큰은 256비트 난수의 해시라 겹치지 않는다. 겹치면 쓰기가 실패해 다른 세션으로 잘못 이어지지 않는다
     uniqueIndex('session_refresh_hash_key').on(t.refreshHash),
     index('session_prev_refresh_hash_idx').on(t.prevRefreshHash).where(sql`${t.prevRefreshHash} is not null`),
@@ -123,4 +163,76 @@ export const sessionCreateKey = pgTable(
     createdAt: at('created_at').notNull(),
   },
   (t) => [index('session_create_key_created_idx').on(t.createdAt)],
+);
+
+// 한 번 쓴 재인증 토큰(docs/data.md reauth_token_use, identity §8 '탈퇴의 첫 구현'). 토큰 만료가 지나면 정비가 지운다
+export const reauthTokenUse = pgTable(
+  'reauth_token_use',
+  {
+    jti: uuid('jti').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    usedAt: at('used_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+  },
+  (t) => [index('reauth_token_use_expires_idx').on(t.expiresAt)],
+);
+
+// 이의 제기·소명 계류(ops-svc가 SetAccountHold로 알린다, docs/data.md account_hold, ADR-0148 결정 5, BUILD_ORDER BOT-042). 병합의 APPEAL_PENDING을 본다
+export const accountHold = pgTable(
+  'account_hold',
+  {
+    sourceRef: uuid('source_ref').primaryKey(),
+    // 계정 행은 지우지 않으므로(탈퇴도 DELETED로 남긴다, docs/data.md §6) ON DELETE는 기본(NO ACTION)이다(마이그레이션 0025·0026, BOT-042가 넘긴 것)
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    sourceVersion: bigint('source_version', { mode: 'number' }).notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    index('account_hold_account_idx').on(t.accountId, t.state),
+    check('account_hold_kind_check', sql`${t.kind} in ('VERIFICATION_APPEAL', 'DISPUTE', 'APPEAL')`),
+    check('account_hold_state_check', sql`${t.state} in ('OPEN', 'CLOSED')`),
+  ],
+);
+
+// 계정 병합 감사 이력(docs/data.md account_merge, POL-034, I-T34). 대표 계정이 탈퇴할 때까지 남는다(docs/security/data-classification.md '계정 연결 및 병합 감사 원장')
+export const accountMerge = pgTable(
+  'account_merge',
+  {
+    id: uuid('id').primaryKey(),
+    // 두 계정 모두 account를 가리킨다(ON DELETE 기본, account_hold와 같은 까닭, 마이그레이션 0025·0026)
+    primaryAccountId: uuid('primary_account_id')
+      .notNull()
+      .references(() => account.id),
+    mergedAccountId: uuid('merged_account_id')
+      .notNull()
+      .unique()
+      .references(() => account.id),
+    mergedProvider: text('merged_provider').notNull(),
+    movedSummary: jsonb('moved_summary').notNull(),
+    requestedAt: at('requested_at').notNull(),
+    confirmedAt: at('confirmed_at').notNull(),
+    completedAt: at('completed_at'),
+  },
+  (t) => [index('account_merge_primary_idx').on(t.primaryAccountId)],
+);
+
+// 조사용 연락처 가명(docs/data.md account_contact_ref, identity §9.1 '조사용 값의 첫 구현', ADR-0171, BUILD_ORDER BOT-045). 원문 번호·이메일은 두지 않는다.
+export const accountContactRef = pgTable(
+  'account_contact_ref',
+  {
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
+    kind: text('kind').notNull(),
+    // invRef("contact", 맞춘 값). 키 판 접두어 포함
+    ref: text('ref').notNull(),
+    // 키 회전의 이음 기간에만: 같은 원문을 옛 판으로 구한 값(BOT-046)
+    refPrev: text('ref_prev'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.kind] }), check('account_contact_ref_kind_check', sql`${t.kind} in ('PHONE', 'EMAIL')`)],
 );

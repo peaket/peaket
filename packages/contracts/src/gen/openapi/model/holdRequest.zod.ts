@@ -41,7 +41,7 @@ export const HoldRequest = zod.object({
   "count": zod.int().min(1).describe('1인 매수 한도 이하'),
   "wheelchair": zod.boolean().default(holdRequestAutoWheelchairDefault),
   "allowSplit": zod.boolean().default(holdRequestAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
-}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
+}).strict().optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
   "clientEphemeralPublicKey": zod.string().optional().describe('좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
@@ -53,7 +53,7 @@ export const HoldRequest = zod.object({
   "scrollEvents": zod.int().min(holdRequestBehaviorScrollEventsMin).optional().describe('스크롤 이벤트 수'),
   "scrollDistancePx": zod.int().min(holdRequestBehaviorScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
 }).strict().optional().describe('좌석 화면에서 잰 행동 요약. 직접 선택 공연에서 그 구매 세션의 첫 홀드 요청에만 싣는다(다시 보내도 첫 요청의 것만 쓴다). 없어도 홀드는 그대로 처리한다. purchase-svc가 홀드 응답과 따로 BehaviorSignal(screen SEAT)로 낸다(추천 적용 2026-10-31, ADR-0171 결정 4, docs/features/seat-hold.md)')
-}).describe('직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)')
+}).strict().describe('직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)')
 
 export type HoldRequest = zod.input<typeof HoldRequest>;
 export type HoldRequestOutput = zod.output<typeof HoldRequest>;

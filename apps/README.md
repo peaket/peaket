@@ -18,6 +18,30 @@
 | 대기실 경량 페이지 | `pnpm --filter @peaket/queue-room dev` | http://localhost:3004/preview |
 | 포렌식 데모 | `pnpm --filter @peaket/forensics dev` | http://localhost:3005/ |
 
+## 계약 모양 가짜 API로 화면 띄워 보기(ADR-0199, BUILD_ORDER HOT-300)
+
+서버가 아직 없는 화면(홈 등)은 고정 자료를 내는 가짜 API로 띄운다. 운영·CI에서는 쓰지 않는다.
+
+1. 가짜 API: `PEAKET_WEB_ORIGIN=http://localhost:3000 pnpm --filter @peaket/web mock-api`(127.0.0.1:4010).
+2. 소비자 웹: `PEAKET_API_ORIGIN=http://127.0.0.1:4010 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:4010 PEAKET_DEV_STATIC_ORIGIN=http://127.0.0.1:4010 PEAKET_CSP_ORIGINS='{"api":"http://127.0.0.1:4010","img":"http://127.0.0.1:4010"}' pnpm --filter @peaket/web dev`.
+3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|unverified|pending|closing|guest&detail=normal|suspended&verify=popup|redirect|down`. `fan`은 팬 계정 요약(`GET /v1/identity/me`, ADR-0202)과 팬 경로를 바꾼다: member 본인확인 완료, unverified 본인확인 전, pending 가입 완료 화면 전, guest 비로그인(401). 셸 머리와 공연 상세 예매 버튼이 이것을 따른다. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다. 공연 상세(`/v1/events/{eventId}`)는 고정 자료 카드의 모든 회차를 답하고, `detail=suspended`면 410 `event-suspended`다(ADR-0200). 찜 목록은 `productionIds`로 고를 수 있고 찜 저장·해제가 띄운 동안 남는다. 후기 요약(`…/review-summary`)도 낸다(HOT-311). 공연 상세 화면은 `http://localhost:3000/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01`처럼 고정 자료의 회차 ID로 연다. 개발 서버는 앞 서버가 없어 404·410 화면도 200으로 나간다(ADR-0201 결정 4).
+4. 휴대폰 본인확인 기관 창(SCR-006): 정본의 모의 기관을 `PEAKET_ENV=local PEAKET_TEST_VERIFICATION_RETURN_URL=http://localhost:3000/verify/return node services/identity-svc/scripts/mock-idv.mjs 4020`으로 띄운다. 가짜 API의 본인확인 경로(`/v1/identity/verifications*`)가 그 창 주소(`PEAKET_TEST_VERIFICATION_URL`, 기본 `http://127.0.0.1:4020/verify`)를 주고, 돌아온 결과 값을 identity-svc 시험 어댑터와 같은 규칙(서명·건 ID·10분)으로 읽어 계정 요약을 바꾼다. `verify=popup|redirect`는 기관 창 방식, `down`은 시작부터 기관 장애(503)다. 모의 기관에서 이름표를 `duplicate`로 하면 '다른 계정의 본인'(409)이다(가짜 API만의 흉내). 나머지는 identity-svc와 같다: 생년월일이 만 14세 미만이면 403 `under-14`이고 계정은 정리 중(`fan=closing`, 세션은 살아 있고 다시 시작하면 403)이 된다. `fan=member`의 기록 이름표는 `tester-1`이라 다시 본인확인(REVERIFY)은 그 이름표일 때만 VERIFIED다. 확정한 건은 1일 동안 같은 결과를 준다. 개발 서버 CSP는 보고 모드라 `PEAKET_CSP_ORIGINS`에 `"identity":"http://127.0.0.1:4020"`을 더하면 기관 양식 보고가 쌓이지 않는다.
+5. 대기실(SCR-007·008·018, ADR-0207·0208): 대기실 개발 서버(`pnpm --filter @peaket/queue-room dev`, localhost:3004)는 가짜 API를 대기열·대기열 파일·팬 API 출처로 쓴다(빌드 때는 `VITE_PEAKET_QUEUE_ORIGIN`·`VITE_PEAKET_QUEUE_FILES_ORIGIN`·`VITE_PEAKET_API_ORIGIN`). 사전 검증 토큰은 공연 상세가 쓴다(HOT-342 ①, 아래 '공연 상세 → 대기실'). 대기실만 따로 볼 때는 대기실 출처에서 `localStorage.setItem('peaket.queue.<회차 ID>', JSON.stringify({preverifyToken: 'pv-local', preverifyIssuedAt: Date.now(), savedAt: Date.now()}))`로 두고 `/queue/<회차 ID>`를 연다(시각 칸은 정수). 대기열 상태는 `queue=on-sale|paused|all-held|sold-out|ended`, 진입은 `queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sold-out|ended|verify`, 입장 확정은 `queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down`, 처음 앞 인원 `queueAhead`, 1초에 지나는 번호 `queueRate`, 빠진 번호 `queueRemoved`, 운영 공지 `queueBanner`, 남은 좌석 `queueSeats`(구매 어려움), 처음부터 다시 `queueReset=1`이다.
+   - 로비(SCR-007, ADR-0208): `queueOpenIn=<초>`가 그 순간부터 센 오픈 시각으로 공연 공개 요약의 `openAt`을 바꾼다(로비 개방은 10분 전, 빈 값이면 고정 자료 일정). 저장소에 값 없이 `/queue/<회차 ID>`를 열면 로비 참가로 간다. 참가는 `queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized`, 셔플 결과 파일은 `queueShuffle=normal|late|never|missing`(missing은 내 참가 토큰이 목록에 없다)이다. 사람 확인은 개발용 시뮬레이터이고 주소에 `?hc=fail`이면 실패한다.
+   - 공연 공개 요약은 브라우저가 300초 캐시한다. `queueOpenIn`을 바꾼 뒤에는 대기실 출처에서 `fetch('http://127.0.0.1:4010/v1/events/<회차 ID>', {cache: 'reload', credentials: 'omit'})`로 캐시를 바꾸거나 5분 기다린다.
+   - 로그아웃은 대기실 개발 서버가 `/logout`을 흉내 낸다(같은 출처 POST만 303으로 웹 홈).
+   - 공연 상세 → 대기실(ADR-0211): 소비자 웹 개발 서버가 대기실 경로(`/queue/{id}`·`/shop/{id}/queue`)와 `/_q/*`를 대기실 개발 서버로 넘겨 같은 출처로 흉내 낸다(넘길 곳 `PEAKET_DEV_QUEUE_ROOM_ORIGIN`, 기본 `http://localhost:3004`). 그래서 두 서버를 함께 띄우고 `http://localhost:3000/events/<회차 ID>`에서 [대기열 들어가기]를 누르면 사전 사람 확인(개발 시뮬레이터) 뒤 3000의 `/queue/<회차 ID>`로 간다. 소비자 웹은 위 2번 환경값에 `NEXT_PUBLIC_QUEUE_ORIGIN=http://127.0.0.1:4010 NEXT_PUBLIC_QUEUE_FILES_ORIGIN=http://127.0.0.1:4010`을 더하고, `PEAKET_CSP_ORIGINS`에 `"queue":"http://127.0.0.1:4010","queueFiles":"http://127.0.0.1:4010"`을 더한다. 사전 검증은 `queuePreverify=normal|identity|not-found|down|unauthorized`(down은 회차마다 한 번 503), 주소에 `?hc=fail`이면 사람 확인 실패, `?hc=interactive`면 조용한 갱신이 조작을 요구한다.
+6. 고정 자료(`apps/web/scripts/mock-api/cards.json`)가 계약 Zod를 지나는지는 `pnpm --filter @peaket/web test`가 본다. 계약을 바꾸면 고정 자료도 고친다.
+
+| 환경값 | 뜻 |
+| --- | --- |
+| `PEAKET_API_ORIGIN` | 앱 서버가 공개 API(홈 피드 등)를 빌드·ISR 때 부르는 주소. 없으면 부르지 않고 빈 피드로 그린다 |
+| `NEXT_PUBLIC_API_ORIGIN` | 브라우저가 개인 값(로그인·본인확인 상태, 찜·알림)을 부르는 팬 API 주소. 개발 서버에서 없으면 비로그인처럼 둔다 |
+| `PEAKET_DEV_STATIC_ORIGIN` | 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 넘길 곳 |
+| `NEXT_PUBLIC_PARTNER_API_ORIGIN` | 파트너 콘솔이 공연 등록·공연장과 아티스트 찾기를 부르는 파트너 API 주소(개발 서버에서 없으면 비워 둔다, 가짜 API 주소를 넣으면 위저드를 끝까지 볼 수 있다, ADR-0245) |
+| `NEXT_PUBLIC_QUEUE_ORIGIN`·`NEXT_PUBLIC_QUEUE_FILES_ORIGIN` | 브라우저 api-client가 함께 담는 대기열 API·파일 출처(개발 서버에서 없으면 비워 둔다) |
+| `PEAKET_CSP_ORIGINS` | CSP 자리 출처 바꾸기(JSON). 이미지 파생본 출처는 `img`(운영 기본 `https://img.peaket.example` [가정]) |
+
 ## 소셜 로그인을 로컬에서 돌려 보기(BUILD_ORDER PRF-020)
 
 실제 제공자 앱 등록 없이 모의 OIDC 제공자로 한다(docs/features/identity.md §2 '웹 앱 서버 경로', §12.1 '대역').
@@ -40,3 +64,14 @@
 | `PEAKET_COOKIE_DOMAIN` | 비운다(운영은 `peaket.example`) |
 
 로그인 화면은 `/login`(SCR-004)이다. 기본 상태(`?state=` 없음)에서 버튼이 로그인 시작 폼이다.
+
+## 휴대폰 본인확인을 로컬에서 돌려 보기(BUILD_ORDER BOT-010)
+
+실제 본인확인기관 없이 모의 기관으로 기관 창 흐름 전체(팝업·페이지 이동·POST 본문 복귀·쿼리 복귀)를 돌린다(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', I-T45). 위 '소셜 로그인을 로컬에서 돌려 보기'의 스택에 셋을 더한다.
+
+1. 모의 기관: `PEAKET_ENV=local PEAKET_TEST_VERIFICATION_RETURN_URL=<웹 출처>/verify/return node services/identity-svc/scripts/mock-idv.mjs 18920`. 비밀은 identity-svc와 같은 `PEAKET_TEST_VERIFICATION_SECRET`(base64)이고, 없으면 둘 다 개발용 값을 쓴다. demo(로컬 kind 데모 오버레이)도 같은 모의 기관을 `PEAKET_ENV=demo`로 띄운다. demo는 비밀이 없으면 둘 다 시작하지 않는다(2026-11-05, BOT-010이 넘긴 것).
+2. identity-svc에 더하는 값: `PEAKET_VERIFICATION_PROVIDER=test`, `PEAKET_TEST_VERIFICATION_URL=http://127.0.0.1:18920/verify`, `PEAKET_CI_HMAC_KEY`(판 1, 판이 여럿이면 `PEAKET_CI_HMAC_KEYS`에 JSON `{"판": base64}`)·`PEAKET_PID_HMAC_KEY`(base64 32바이트. KMS로 하려면 `PEAKET_CI_HMAC_KMS_KEYS`·`PEAKET_PID_HMAC_KMS_KEY`와 moto 주소 `PEAKET_KMS_ENDPOINT`), 페이지 이동 방식 기관을 흉내 내려면 `PEAKET_TEST_VERIFICATION_MODE=REDIRECT`.
+3. 게이트웨이 대역(로컬에는 gw-fan이 없다): `PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=<웹 출처> PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=<발급자> node apps/web/scripts/local-fan-gateway.mjs 18930`.
+4. 소비자 웹은 빌드할 때 `NEXT_PUBLIC_API_ORIGIN=http://localhost:18930`을 준다. 쿠키가 `localhost` 이름에 붙으므로 `127.0.0.1`이 아니라 `localhost`로 적는다. 이 값이 없으면 개발 서버의 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
+
+로그인한 뒤 공연 상세(`/events/evt-lumen-1025`)에서 [휴대폰 본인확인]을 누르면 모의 기관 창이 열린다. 이름표가 같으면 같은 사람이라, 다른 계정에서 같은 이름표로 하면 '다른 계정의 본인'이 나온다.

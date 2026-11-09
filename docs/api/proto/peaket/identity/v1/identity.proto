@@ -51,6 +51,12 @@ service SessionService {
   // 같은 idempotency_key로 다시 오면 새 세션을 만들지 않고 같은 세션을 가리킨다.
   // identity에는 리프레시 토큰의 해시만 있어 같은 값을 다시 줄 수 없으므로, 토큰을 다시 발급하고 앞서 발급한 리프레시 토큰은 무효로 한다.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  // 가입 때 연결 제안 조회(GET /v1/identity/link-proposals/{proposalId}). 없음·만료·묶음 값이 다르면 NOT_FOUND(추천 적용 2026-11-04, BUILD_ORDER BOT-040)
+  rpc GetLinkProposal(GetLinkProposalRequest) returns (GetLinkProposalResponse);
+  // 연결하지 않고 새 계정 만들기(POST …/separate-account). 새 제공자 계정과 세션을 만들고 제안을 그 멱등 키로 쓴 것으로 적는다(같은 키의 다시 보내기는 같은 세션). 없음·만료·묶음 값이 다름·다른 키로 쓴 제안이면 NOT_FOUND
+  rpc SeparateAccount(SeparateAccountRequest) returns (CreateSessionResponse);
+  // 계정 설정의 로그인 수단 추가(SCR-040 ②): 재인증 토큰을 확인하고 새 제공자 (제공자, sub)를 이 계정에 잇는다. 결과는 응답의 result다(추천 적용 2026-11-04, BUILD_ORDER BOT-041)
+  rpc AddProvider(AddProviderRequest) returns (AddProviderResponse);
   // 로그아웃. 세션을 끝내고 세션 종료 이벤트를 낸다. 이미 끝난 세션이면 그대로 성공이다(멱등).
   rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
   // 팬 민감 작업 전 재인증(docs/features/identity.md §7.1). 앱 서버가 제공자 재인증과 강도 판정을 마친 뒤 부른다.
@@ -77,14 +83,19 @@ message CreateSessionRequest {
   string email = 4;
   bool email_verified = 5;
   // 같은 이메일 계정 연결 제안을 따라 다시 로그인할 때만 채운다(ADR-0038).
+  // 제안이 없거나 만료됐거나 link_binding이 다르면 NOT_FOUND다(docs/features/identity.md §2.1 '가입 때 연결 제안의 첫 구현').
   string link_proposal_id = 6;
   // 기기 바인딩 값. 저장할 때는 가명으로 바꾼다.
   string device_id = 7;
   // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보. 일반 로그에는 남기지 않는다(docs/observability.md §7).
+  // identity는 user_agent에서 정해진 낱말의 '브라우저 · 운영체제'만 뽑아 세션의 화면용 기기 이름으로 두고 원문은 저장하지 않는다
+  // (로그인한 기기 목록, docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', 추천 적용 2026-11-05, ADR-0209).
   string client_ip = 8;
   string user_agent = 9;
   // 제공자가 준 acr·amr. 없으면 단일 요소 인증으로 본다(ASVS 6.8.4, ADR-0001).
   repeated string auth_methods = 10;
+  // link_proposal_id와 함께: 제안을 받을 때 준 브라우저 묶음 값(앱 서버가 연결 제안 쿠키에 봉인해 둔 원문, 추천 적용 2026-11-04)
+  string link_binding = 12;
   // CloudFront가 붙인 CloudFront-Viewer-ASN 값. 앱 서버는 원본 확인 헤더가 맞는 요청에서만 읽고, 없으면 0이다.
   // identity-svc가 로그인 판정(trust.proto ScoreRisk LOGIN)의 ClientSignals.asn으로 넘긴다
   // (추천 적용 2026-10-30, docs/infra.md §4.1 'ASN 헤더와 분류표', docs/features/bot-defense.md §3.1).
@@ -97,9 +108,75 @@ message CreateSessionResponse {
     SessionTokens session = 1;
     // 같은 이메일의 활성 계정이 하나 있어 연결 제안으로 간다. 세션은 만들지 않는다(§2.1).
     string link_proposal_id = 2;
+    // 연결 제안을 따라 로그인했는데 제안의 대상 계정이 아니었다. 세션도 계정도 만들지 않는다(추천 적용 2026-11-04)
+    LinkMismatch link_mismatch = 5;
   }
   // 처음 로그인이라 가입·약관 동의 화면(SCR-005)으로 보내야 하면 true.
   bool new_account = 3;
+  // link_proposal_id와 함께: 브라우저 묶음 값(256비트 base64url). 이 응답에서 한 번만 준다. identity에는 SHA-256만 남는다
+  string link_binding = 4;
+  // 연결 제안을 따라 연결을 맺었으면 새로 이은 제공자(화면의 '{제공자} 계정을 연결했습니다'). 아니면 UNSPECIFIED
+  Provider linked_provider = 6;
+}
+
+message LinkMismatch {
+  // 남은 시도. 0이면 제안을 지웠다(3회 실패, SCR-039 만료)
+  int32 attempts_left = 1;
+}
+
+message GetLinkProposalRequest {
+  string link_proposal_id = 1;
+  string link_binding = 2;
+}
+
+message GetLinkProposalResponse {
+  // 대상 계정에 처음 연결한 제공자. 닉네임·이메일은 주지 않는다
+  Provider existing_provider = 1;
+  Provider new_provider = 2;
+  int64 expires_at_ms = 3;
+  int32 attempts_left = 4;
+}
+
+message AddProviderRequest {
+  // 액세스 토큰에서 앱 서버가 확인한 세션과 계정
+  string session_id = 1;
+  string account_id = 2;
+  // 화면이 먼저 받은 재인증 토큰(typ reauth+jwt, 5분 한 번). 이 호출이 쓴다
+  string reauth_token = 3;
+  Provider provider = 4;
+  // 새 제공자 ID 토큰의 sub
+  string provider_user_id = 5;
+}
+
+enum AddProviderResult {
+  ADD_PROVIDER_RESULT_UNSPECIFIED = 0;
+  // 이 계정에 이었다
+  ADD_PROVIDER_RESULT_LINKED = 1;
+  // 이미 이 계정의 로그인 수단이다
+  ADD_PROVIDER_RESULT_ALREADY_LINKED = 2;
+  // 이 계정에 같은 종류 제공자가 다른 sub로 있다(종류마다 하나 [가정])
+  ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN = 3;
+  // 다른 PEAKET 계정의 로그인 수단이다(병합 제안은 BUILD_ORDER BOT-042)
+  ADD_PROVIDER_RESULT_OTHER_ACCOUNT = 4;
+  // 재인증 토큰이 없거나 만료·재사용이거나 세션·계정이 맞지 않는다
+  ADD_PROVIDER_RESULT_REAUTH_REQUIRED = 5;
+}
+
+message AddProviderResponse {
+  AddProviderResult result = 1;
+  // OTHER_ACCOUNT이고 병합 제안을 만들었으면 그 ID(id:merge, 10분, docs/features/identity.md §2.1 '계정 병합의 첫 구현'). 세 서비스 확인이 답하지 않으면 비운다
+  string merge_proposal_id = 2;
+}
+
+message SeparateAccountRequest {
+  string link_proposal_id = 1;
+  string link_binding = 2;
+  // CreateSession과 같은 규칙의 멱등 키(앱 서버가 이 요청마다 만든다)
+  string idempotency_key = 3;
+  string device_id = 4;
+  // CreateSession의 user_agent와 같다(화면용 기기 이름만 뽑아 세션에 둔다, ADR-0209)
+  string user_agent = 5;
+  repeated string auth_methods = 6;
 }
 
 message SessionTokens {
@@ -182,6 +259,7 @@ service AccountHoldService {
   // source_version이 저장한 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않는다.
   // 닫힌 건도 행을 CLOSED로 30일 [가정] 남겨, 재시도로 늦게 온 '열림'이 닫힌 건을 다시 열지 않게 한다. 30일이 지나면 지운다.
   // 같은 source_ref에 다른 account_id·kind가 오면 ALREADY_EXISTS다.
+  // account_id가 identity에 없는 계정이면 쓰지 않고 NOT_FOUND다(account_hold.account_id는 account를 가리키는 외래키다). 다시 보내도 같은 답이라 작업 워커는 다시 보내지 않고 기록만 한다(2026-11-05, BOT-042가 넘긴 것).
   // identity-svc는 계정 병합 제안·확정 때 OPEN 행을 자기 데이터처럼 보고, 흡수 계정에 있으면 병합을 막는다(POL-034 '이의 제기 계류').
   rpc SetAccountHold(SetAccountHoldRequest) returns (SetAccountHoldResponse);
 }
@@ -467,7 +545,7 @@ service AdminAccountService {
   // 초대(docs/planning/03 §2.7 A1). 32바이트 난수 토큰의 SHA-256만 저장하고, 24시간 1회용 링크를 업무 이메일로 보낸다.
   rpc InviteAdminAccount(InviteAdminAccountRequest) returns (AdminAccountChangeResponse);
   // 역할 변경. 바꾸면 그 계정의 모든 세션을 끝내고 control.sessions-terminated(reason ROLE_CHANGED)를 낸다.
-  // commander가 아니게 되면 살아 있는 지정(admin_designation)을 같은 트랜잭션에서 거둔다.
+  // 새 역할이 받을 수 없는 살아 있는 지정(admin_designation)을 같은 트랜잭션에서 거둔다(commander가 아니게 되면 접속기록 점검자·가명정보 취급자, commander·cs_lead가 아니게 되면 부정 거래 조사관).
   rpc ChangeAdminRole(ChangeAdminRoleRequest) returns (AdminAccountChangeResponse);
   // 재초대(A4·A8, 분실). 옛 초대 토큰을 무효로 한다. PROTECT_LOCK·CREDENTIAL_LOST면 비밀번호 해시·TOTP 시드·패스키·복구 코드를 지우고
   // 실패 수·비밀번호 연속 실패 누계·잠금을 되돌리며 상태를 INVITED로 바꾸고 모든 세션을 끝낸다(reason ADMIN_FORCE).
@@ -809,7 +887,7 @@ enum RestrictedCiHoldResult {
   RESTRICTED_CI_HOLD_RESULT_OK = 1;
   // 그 계정에 본인확인 기록이 없다(본인확인 전 계정은 예매를 못 하므로 둘 것이 없다)
   RESTRICTED_CI_HOLD_RESULT_NO_VERIFICATION = 2;
-  // 저장한 판보다 작거나 같아 반영하지 않았다
+  // 저장한 판보다 작거나, 같은 판인데 내용(상태·until)이 달라 반영하지 않았다. 같은 판·같은 내용의 재전송은 OK다(추천 적용 2026-11-04, BUILD_ORDER BOT-035)
   RESTRICTED_CI_HOLD_RESULT_STALE = 3;
 }
 

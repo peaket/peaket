@@ -1,7 +1,7 @@
 // 정상 표본 문턱과 브라우저 계열(ADR-0125 결정 3, ADR-0069 결정 11, openspec 변경 add-service-logging 결정 2·3).
 import { randomBytes } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { clientFamily, sampleKeep } from '../src/index.js';
+import { browserFamily, clientFamily, sampleKeep } from '../src/index.js';
 
 const TWO56 = 2n ** 56n;
 /** 앞 18자리는 아무 값, 끝 14자리(56비트)가 r인 trace ID */
@@ -60,6 +60,13 @@ describe('브라우저 계열(client)', () => {
     ['node', 'other'],
   ])('ADR0069_client는_계열과주판만(%#)', (ua, want) => {
     expect(clientFamily(ua)).toBe(want);
+  });
+
+  test('ADR0209_browserFamily는_client와같은판별로계열만준다(로그인한기기이름, BOT-044)', () => {
+    expect(browserFamily('Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36')).toBe('samsung');
+    expect(browserFamily('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.2849.68')).toBe('edge');
+    expect(browserFamily('curl/8.10.1')).toBeUndefined();
+    expect(browserFamily(null)).toBeUndefined();
   });
 
   test('ADR0069_User_Agent가없으면_칸을뺀다', () => {

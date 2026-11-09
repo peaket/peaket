@@ -7,10 +7,14 @@ export type PaymentReturnKind = 'accepting' | 'reload' | 'mismatch' | 'other-tab
 
 export interface PaymentReturnCardProps {
   kind: PaymentReturnKind;
-  /** 좌석 요약(복귀 뒤 새로고침, 데스크톱에서는 숨김) */
-  seatText: string;
-  /** 합계 '₩308,000' */
-  totalText: string;
+  /** 좌석 요약(복귀 뒤 새로고침, 데스크톱에서는 숨김). 모르면 줄을 뺀다 */
+  seatText?: string;
+  /** 합계 '₩308,000'. 모르면 줄을 뺀다 */
+  totalText?: string;
+  /** 복귀 뒤 카드의 설명 글을 바꾼다(결제창 취소·승인 거절) */
+  note?: string;
+  /** 복귀 뒤 카드의 버튼 글(기본 '다시 결제하기') */
+  retryLabel?: string;
   /** [다시 결제하기]·[다시 시도] → 주문·결제(결제 위젯) */
   retryHref: string;
   /** [소명하기] → SCR-042 */
@@ -20,7 +24,7 @@ export interface PaymentReturnCardProps {
 const CARD = 'card pad-lg col mt-10 md:mt-12 lg:mt-16';
 const ICON = { width: 56, height: 56 } as const;
 
-export function PaymentReturnCard({ kind, seatText, totalText, retryHref, appealHref }: PaymentReturnCardProps) {
+export function PaymentReturnCard({ kind, seatText, totalText, note, retryLabel = '다시 결제하기', retryHref, appealHref }: PaymentReturnCardProps) {
   if (kind === 'reload') {
     return (
       <section className={CARD} style={{ gap: 16 }} aria-labelledby="rl-h">
@@ -31,16 +35,26 @@ export function PaymentReturnCard({ kind, seatText, totalText, retryHref, appeal
           <h1 className="t-xl" id="rl-h">
             결제가 끝나지 않았습니다
           </h1>
-          <p className="t-md">요금은 청구되지 않습니다. 고른 좌석은 홀드 시간 동안 그대로 있습니다</p>
+          <p className="t-md">{note ?? '요금은 청구되지 않습니다. 고른 좌석은 홀드 시간 동안 그대로 있습니다'}</p>
         </div>
-        <dl className="kv">
-          <dt className="lg:hidden">좌석</dt>
-          <dd className="lg:hidden">{seatText}</dd>
-          <dt className="kv-total">합계</dt>
-          <dd className="kv-total num">{totalText}</dd>
-        </dl>
+        {seatText || totalText ? (
+          <dl className="kv">
+            {seatText ? (
+              <>
+                <dt className="lg:hidden">좌석</dt>
+                <dd className="lg:hidden">{seatText}</dd>
+              </>
+            ) : null}
+            {totalText ? (
+              <>
+                <dt className="kv-total">합계</dt>
+                <dd className="kv-total num">{totalText}</dd>
+              </>
+            ) : null}
+          </dl>
+        ) : null}
         <Link className="btn btn-primary btn-lg btn-block" href={retryHref}>
-          다시 결제하기
+          {retryLabel}
         </Link>
       </section>
     );

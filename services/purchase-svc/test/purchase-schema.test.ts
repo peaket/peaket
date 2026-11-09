@@ -1,0 +1,1165 @@
+// purchase DB의 좌석 표 넷(seat_sale·purchase_quota·seat_hold·seat_rebuild)의 모양을 DB 없이 본다(docs/data.md §4 'purchase DB의 좌석 표 마이그레이션'·
+// '다시 만들기 표와 원장 칸'(BUILD_ORDER PRF-143), §2 ERD, BUILD_ORDER PRF-140 ①).
+// ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 표·열·기본 키·부분 유일 인덱스·check 제약 이름과 식이 정본과 같은지 보고,
+// ② 마이그레이션 SQL 파일(0000 좌석 표, 0002 다시 만들기 표·원장 칸)을 글로 읽어 파티션 선언(seat_hold만, DEFAULT 파티션 없음)과 표 정의 ↔ SQL 일치를 보고,
+// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160), 다섯 번째(0004 주문의 홀드·구매 세션 칸과
+// hold_id 유일 인덱스, BUILD_ORDER PRF-161), 여섯 번째(0005 결제 접수의 결제 참조 칸·seat_gen·order_saga_job, BUILD_ORDER PRF-162),
+// 일곱 번째(0006 Saga 1단계의 purchase_order.failure_reason·order_saga_job.confirm_sent_at·step CHECK, BUILD_ORDER PRF-165),
+// 여덟 번째(0007 발권 재시도 큐 ticket_issue_job, BUILD_ORDER PRF-163), 아홉 번째(0008 주문의 묶은 시각 purchase_order.pinned_at, BUILD_ORDER PRF-167),
+// 열 번째(0009 발권 재시도 큐의 임대·알림 시각 ticket_issue_job.lease_until·delayed_at·overdue_at, BUILD_ORDER PRF-170),
+// 열한 번째(0010 결제 결과 당기기의 order_saga_job.step AWAIT·pull_next_at, BUILD_ORDER PRF-171, ADR-0140)도 기록·파일 목록에 있고,
+// 마지막 스냅샷(0010)의 주문 표 일곱(booking schema.ts)이 표 정의와 같은지 본다.
+// ④ 0004 SQL의 칸(hold_id·purchase_session_id)과 유일 인덱스(purchase_order_hold_key)가 schema.ts와 같은지 본다.
+// ⑤ 0005 SQL의 칸(payment_attempt 다섯·purchase_order.seat_gen)과 order_saga_job 표·외래 키·색인이 schema.ts와 같은지 본다.
+// ⑥ 0006 SQL의 칸(purchase_order.failure_reason·order_saga_job.confirm_sent_at)과 order_saga_job_step_check가 schema.ts·도메인 SAGA_STEPS와 같은지 본다.
+// ⑦ 0007 SQL의 ticket_issue_job 표(칸·기본 키·기본값)·외래 키·쓸기 색인이 schema.ts와 같은지 본다(data.md §2 ERD ticket_issue_job·§4 여덟 번째 마이그레이션).
+// ⑧ 0008 SQL의 칸(purchase_order.pinned_at)이 schema.ts와 같은지 본다(data.md §4 아홉 번째 마이그레이션).
+// ⑨ 0009 SQL의 칸 셋(ticket_issue_job.lease_until·delayed_at·overdue_at, 모두 timestamptz·널 허용, 새 인덱스 없음)이 schema.ts와 같은지 본다(data.md §4 열 번째 마이그레이션).
+// ⑩ 0010 SQL이 order_saga_job_step_check를 지우고 pull_next_at(timestamptz·널 허용)을 더한 뒤 AWAIT를 더한 step CHECK를 다시 만드는지,
+//    schema.ts·도메인 SAGA_STEPS와 같은지, 새 인덱스가 없는지 본다(data.md §4 열한 번째 마이그레이션·§5.1, docs/features/payment.md §2 '결제 결과 당기기의 첫 구현').
+// ⑪ 0011 SQL이 구매 세션 인덱스(purchase_order_session_idx, 조건 없음) 하나만 만드는지, schema.ts·0011 스냅샷과 같은지 본다(data.md §4·§5.1, BUILD_ORDER PRF-172, ADR-0107).
+//    purchase_order 인덱스의 단정은 그 마이그레이션 시점의 스냅샷으로 본다(0011 앞까지는 hold_id 유일 인덱스 하나다).
+// ⑫ 0012 SQL이 회차 판매 상태 표 event_sale과 결제 중 셈 부분 인덱스 seat_sale_pending_idx만 만드는지, schema.ts·0012 스냅샷·도메인 SALE_STATUSES와 같은지 본다(data.md §2·§4·§5.1, BUILD_ORDER PRF-144, ADR-0122).
+//    seat_sale 인덱스의 단정도 그 시점의 스냅샷으로 본다(0012 앞까지는 활성 유일 인덱스 하나다).
+// 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { SQL } from 'drizzle-orm';
+import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
+import { describe, expect, test } from 'vitest';
+import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
+import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
+import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
+import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
+
+const MIGRATIONS = join(fileURLToPath(new URL('..', import.meta.url)), 'migrations');
+const TAG = '0000_purchase_seat_tables';
+/** 보류 표 held_event·정비 통계 stat_snapshot(platform 템플릿 0003을 옮김, BUILD_ORDER PRF-141) */
+const HELD_TAG = '0001_held_event_and_stat_snapshot';
+/** 다시 만들기 표 seat_rebuild와 원장 칸 seat_hold.hold_id·purchase_session_id(BUILD_ORDER PRF-143) */
+const REBUILD_TAG = '0002_seat_rebuild_and_hold_ids';
+/** 주문 표 다섯과 Outbox 부모 표(BUILD_ORDER PRF-160) */
+const ORDER_TAG = '0003_order_tables';
+/** 주문을 만든 홀드·구매 세션 칸과 hold_id 유일 인덱스(BUILD_ORDER PRF-161) */
+const ORDER_HOLD_TAG = '0004_order_hold_and_session';
+/** 결제 접수의 결제 참조 칸 다섯·주문의 판 번호 seat_gen·Saga 작업 표 order_saga_job(BUILD_ORDER PRF-162) */
+const PAY_TAG = '0005_payment_acceptance';
+/** Saga 1단계의 주문 실패 사유 칸과 작업 단계 CHECK(BUILD_ORDER PRF-165) */
+const SAGA_TAG = '0006_saga_step_one';
+/** 발권 재시도 큐 ticket_issue_job(BUILD_ORDER PRF-163) */
+const TICKET_TAG = '0007_ticket_issue_job';
+/** 주문의 묶은 시각 purchase_order.pinned_at(BUILD_ORDER PRF-167) */
+const PINNED_TAG = '0008_order_pinned_at';
+/** 발권 재시도 큐의 임대·알림 시각 ticket_issue_job.lease_until·delayed_at·overdue_at(BUILD_ORDER PRF-170) */
+const LEASE_TAG = '0009_ticket_issue_lease';
+/** 0009가 ticket_issue_job에 더한 칸 셋(이 차례로 표 끝에 붙는다) */
+const LEASE_COLUMNS = ['lease_until', 'delayed_at', 'overdue_at'];
+/** 결제 결과 당기기의 작업 단계 AWAIT와 다음 점검 시각 order_saga_job.pull_next_at(BUILD_ORDER PRF-171, ADR-0140) */
+const AWAIT_TAG = '0010_saga_await_pull';
+/** 구매 세션이 끝날 때 그 세션의 주문을 찾는 조건 없는 인덱스(BUILD_ORDER PRF-172, ADR-0107, docs/data.md §5.1 '만료 고리의 열린 주문 찾기') */
+const SESSION_TAG = '0011_order_session_idx';
+const SESSION_INDEX = 'purchase_order_session_idx';
+/** 회차 판매 상태 표 event_sale과 결제 중 셈 부분 인덱스(BUILD_ORDER PRF-144, ADR-0122) */
+const EVENT_SALE_TAG = '0012_event_sale';
+/** 티켓 무효 큐 ticket_void_job과 발권 세대 ticket_issue_job.issue_generation(BUILD_ORDER HOT-152) */
+const VOID_TAG = '0013_ticket_void_job';
+const PENDING_INDEX = 'seat_sale_pending_idx';
+const BREAKPOINT = '--> statement-breakpoint';
+const dialect = new PgDialect();
+
+/** 그 마이그레이션 시점(스냅샷)의 표 인덱스 이름들. 지금 schema.ts가 아니라 그때의 모양을 본다 */
+const indexesAt = (idx: string, table: string): string[] => {
+  const snap = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', `${idx}_snapshot.json`), 'utf8')) as { tables: Record<string, { indexes?: Record<string, unknown> }> };
+  return Object.keys(snap.tables[`public.${table}`]!.indexes ?? {});
+};
+/** 그 마이그레이션 시점의 purchase_order 인덱스 이름들 */
+const orderIndexesAt = (idx: string): string[] => indexesAt(idx, 'purchase_order');
+
+/**
+ * SQL 글을 견주기 좋게 줄인다: 표 이름 한정자("t".)와 따옴표를 지우고, 따옴표 밖 글만 소문자로, 공백을 접고, 괄호·쉼표 둘레 공백을 없앤다.
+ * 작은따옴표 안의 값('PENDING' 등)은 대소문자까지 그대로 둔다
+ */
+function canon(s: string): string {
+  return s
+    .split("'")
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/"[a-z_]+"\./g, '').replace(/"/g, '').replace(/\s+/g, ' ').toLowerCase().replace(/ ?([(),]) ?/g, '$1')))
+    .join("'")
+    .trim();
+}
+const sqlText = (s: SQL): string => dialect.sqlToQuery(s).sql;
+/** 작은따옴표로 싼 값들(in 목록) */
+const literalsOf = (s: string): string[] => [...s.matchAll(/'([^']*)'/g)].map((m) => m[1]!);
+
+interface Shape {
+  name: string;
+  columns: { name: string; type: string; notNull: boolean; hasDefault: boolean; primary: boolean }[];
+  primaryKeys: { name: string; columns: string[] }[];
+  indexes: { name: string; unique: boolean; columns: string[]; where: string | undefined }[];
+  checks: { name: string; expr: string }[];
+}
+function shapeOf(table: PgTable): Shape {
+  const c = getTableConfig(table);
+  return {
+    name: c.name,
+    columns: c.columns.map((col) => ({ name: col.name, type: col.getSQLType(), notNull: col.notNull, hasDefault: col.hasDefault, primary: col.primary })),
+    primaryKeys: c.primaryKeys.map((p) => ({ name: p.getName(), columns: p.columns.map((x) => x.name) })),
+    indexes: c.indexes.map((i) => ({
+      name: i.config.name ?? '(이름 없음)',
+      unique: i.config.unique,
+      columns: i.config.columns.map((x) => (x as { name: string }).name),
+      where: i.config.where ? canon(sqlText(i.config.where)) : undefined,
+    })),
+    checks: c.checks.map((k) => ({ name: k.name, expr: canon(sqlText(k.value)) })),
+  };
+}
+const sale = shapeOf(seatSale);
+const quota = shapeOf(purchaseQuota);
+const hold = shapeOf(seatHold);
+const rebuild = shapeOf(seatRebuild);
+/** 0000·0002가 만든 좌석 표 넷. 0012의 event_sale은 따로 본다(아래 eventSaleShape) */
+const SHAPES = [sale, quota, hold, rebuild];
+const eventSaleShape = shapeOf(eventSale);
+
+const TZ = 'timestamp with time zone';
+/** [열 이름, 종류, 널 불허] */
+const cols = (s: Shape): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
+
+describe('표 정의(schema.ts)', () => {
+  test('표는 seat_sale·purchase_quota·seat_hold·seat_rebuild 넷이고 모두 기본 스키마(public)에 있다', () => {
+    expect(SHAPES.map((s) => s.name)).toEqual(['seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild']);
+    for (const t of [seatSale, purchaseQuota, seatHold, seatRebuild]) expect(getTableConfig(t).schema).toBeUndefined();
+  });
+
+  test('모든 열 이름은 소문자 snake_case다', () => {
+    for (const s of SHAPES) for (const c of s.columns) expect(c.name, `${s.name}.${c.name}`).toMatch(/^[a-z]+(_[a-z]+)*$/);
+  });
+
+  test('seat_sale의 열 이름·종류·널 허용이 정본과 같다(pending_until만 비울 수 있다)', () => {
+    expect(cols(sale)).toEqual([
+      ['event_id', 'uuid', true],
+      ['seat_id', 'uuid', true],
+      ['order_id', 'uuid', true],
+      ['account_id', 'uuid', true],
+      ['status', 'text', true],
+      ['reserved_at', TZ, true],
+      ['pending_until', TZ, false],
+    ]);
+  });
+
+  test('purchase_quota의 열 이름·종류·널 허용이 정본과 같다(모두 널 불허, used·limit_count는 int)', () => {
+    expect(cols(quota)).toEqual([
+      ['account_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['used', 'integer', true],
+      ['limit_count', 'integer', true],
+    ]);
+  });
+
+  test('seat_hold의 열 이름·종류·널 허용이 정본과 같다(priority_grant_id·held_at·hold_id·purchase_session_id만 비울 수 있다. hold_id uuid·purchase_session_id text는 PRF-143) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(hold)).toEqual([
+      ['event_id', 'uuid', true],
+      ['seat_id', 'uuid', true],
+      ['account_id', 'uuid', true],
+      ['fencing_token', 'bigint', true],
+      ['status', 'text', true],
+      ['kind', 'text', true],
+      ['priority_grant_id', 'uuid', false],
+      ['held_at', TZ, false],
+      ['expires_at', TZ, true],
+      // 0002의 ADD COLUMN이 표 끝에 붙이므로 DB 칸 차례와 같게 expires_at 뒤다(PRF-143)
+      ['hold_id', 'uuid', false],
+      ['purchase_session_id', 'text', false],
+    ]);
+  });
+
+  test('seat_rebuild의 열 이름·종류·널 허용이 정본과 같다(event_id uuid·gen int는 널 불허, holder·lease_until은 비울 수 있다, PRF-143)', () => {
+    expect(cols(rebuild)).toEqual([
+      ['event_id', 'uuid', true],
+      ['gen', 'integer', true],
+      ['holder', 'text', false],
+      ['lease_until', TZ, false],
+    ]);
+  });
+
+  test('기본값은 seat_sale.reserved_at(now())·seat_hold.kind(\'FAN\')·seat_rebuild.gen(1, 판매 열기의 판 번호) 셋뿐이다', () => {
+    const defaults = SHAPES.flatMap((s) => s.columns.filter((c) => c.hasDefault).map((c) => `${s.name}.${c.name}`));
+    expect(defaults).toEqual(['seat_sale.reserved_at', 'seat_hold.kind', 'seat_rebuild.gen']);
+    expect(getTableConfig(seatRebuild).columns.find((c) => c.name === 'gen')!.default).toBe(1);
+    const reservedAt = getTableConfig(seatSale).columns.find((c) => c.name === 'reserved_at')!;
+    expect(canon(sqlText(reservedAt.default as SQL))).toBe('now()');
+    const kind = getTableConfig(seatHold).columns.find((c) => c.name === 'kind')!;
+    expect(kind.default).toBe('FAN');
+  });
+
+  test('기본 키의 이름과 열 차례가 정본과 같다(seat_rebuild는 회차마다 한 행: event_id 열 하나의 기본 키) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.primaryKeys).toEqual([{ name: 'seat_sale_pkey', columns: ['event_id', 'seat_id', 'order_id'] }]);
+    expect(quota.primaryKeys).toEqual([{ name: 'purchase_quota_pkey', columns: ['account_id', 'event_id'] }]);
+    expect(hold.primaryKeys).toEqual([{ name: 'seat_hold_pkey', columns: ['event_id', 'seat_id', 'fencing_token'] }]);
+    expect(rebuild.primaryKeys).toEqual([]);
+    expect(rebuild.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['event_id']);
+    for (const s of [sale, quota, hold]) expect(s.columns.filter((c) => c.primary), s.name).toEqual([]);
+  });
+
+  test('활성 판매 유일 부분 인덱스: seat_sale_active_key는 (event_id, seat_id) WHERE status IN (PENDING, SOLD)이고 0011까지 seat_sale의 인덱스는 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.find((i) => i.name === 'seat_sale_active_key')).toEqual({ name: 'seat_sale_active_key', unique: true, columns: ['event_id', 'seat_id'], where: canon("status IN ('PENDING','SOLD')") });
+    expect(indexesAt('0011', 'seat_sale')).toEqual(['seat_sale_active_key']);
+  });
+
+  test('활성 홀드 유일 부분 인덱스: seat_hold_active_key는 (event_id, seat_id) WHERE status = HELD다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(hold.indexes).toEqual([{ name: 'seat_hold_active_key', unique: true, columns: ['event_id', 'seat_id'], where: canon("status = 'HELD'") }]);
+  });
+
+  test('인덱스는 활성 유일 둘과 0012의 결제 중 셈 인덱스뿐이다: 주문 ID만으로 찾는 인덱스 같은 것을 더 두지 않는다(쓰기가 많은 표는 인덱스를 아낀다. 원장의 hold_id·seat_rebuild에도 두지 않는다) (ADR0122) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.map((i) => i.name)).toEqual(['seat_sale_active_key', PENDING_INDEX]);
+    expect(quota.indexes).toEqual([]);
+    expect(hold.indexes.map((i) => i.name)).toEqual(['seat_hold_active_key']);
+    expect(rebuild.indexes).toEqual([]);
+  });
+
+  test('파티션 표 seat_hold의 기본 키와 유일 인덱스는 파티션 키 열(event_id)을 담는다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(hold.primaryKeys[0]!.columns).toContain('event_id');
+    for (const i of hold.indexes.filter((x) => x.unique)) expect(i.columns, i.name).toContain('event_id');
+  });
+
+  test('check 제약의 이름과 식이 정본과 같다: 상태·종류 목록, 한도(used >= 0, limit_count >= 0, used <= limit_count), 판 번호(gen >= 1) [ASVS v5.0.0-2.3.2]', () => {
+    expect(sale.checks).toEqual([{ name: 'seat_sale_status_check', expr: canon("status IN ('PENDING','SOLD','RETURNED')") }]);
+    expect(quota.checks).toEqual([{ name: 'purchase_quota_used_within_limit', expr: canon('used >= 0 AND limit_count >= 0 AND used <= limit_count') }]);
+    expect(hold.checks).toEqual([
+      { name: 'seat_hold_status_check', expr: canon("status IN ('HELD','RELEASED','EXPIRED')") },
+      { name: 'seat_hold_kind_check', expr: canon("kind IN ('FAN','PRIORITY')") },
+    ]);
+    expect(rebuild.checks).toEqual([{ name: 'seat_rebuild_gen_check', expr: canon('gen >= 1') }]);
+  });
+
+  test('seat_sale의 status check는 도메인 상수 SEAT_SALE_STATUSES와 같은 목록이다 [ASVS v5.0.0-2.3.2]', () => {
+    expect(literalsOf(sale.checks[0]!.expr)).toEqual([...SEAT_SALE_STATUSES]);
+    expect(literalsOf(sale.indexes[0]!.where!)).toEqual(['PENDING', 'SOLD']);
+  });
+});
+
+/** 주석 줄(`-- …`)을 빼고, drizzle의 문 사이 표시로 나눈 문들 */
+function statementsOf(sql: string): string[] {
+  return sql
+    .split('\n')
+    .filter((l) => !/^\s*--(?!>)/.test(l))
+    .join('\n')
+    .split(BREAKPOINT)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+const sqlFile = readFileSync(join(MIGRATIONS, `${TAG}.sql`), 'utf8');
+const sqlBody = sqlFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const statements = statementsOf(sqlFile);
+const rebuildFile = readFileSync(join(MIGRATIONS, `${REBUILD_TAG}.sql`), 'utf8');
+const rebuildBody = rebuildFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const rebuildStatements = statementsOf(rebuildFile);
+const eventSaleFile = readFileSync(join(MIGRATIONS, `${EVENT_SALE_TAG}.sql`), 'utf8');
+const eventSaleBody = eventSaleFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const eventSaleStatements = statementsOf(eventSaleFile);
+/** schema.ts의 표를 만들고 바꾸는 문 모두(0000 → 0002 → 0012 차례. 0001은 보류·통계 표다) */
+const seatStatements = [...statements, ...rebuildStatements, ...eventSaleStatements];
+const createTable = (name: string): string => {
+  const s = seatStatements.find((x) => new RegExp(`^CREATE TABLE "${name}" `).test(x));
+  expect(s, `${name}을 만드는 문이 있어야 한다`).toBeDefined();
+  return s!;
+};
+/** ALTER TABLE … ADD COLUMN으로 더한 열: [표, 열, 그 문] */
+const addedColumns = (): [string, string, string][] =>
+  seatStatements.flatMap((x) => {
+    const m = /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(x);
+    return m ? [[m[1]!, m[2]!, x] as [string, string, string]] : [];
+  });
+
+describe('마이그레이션 SQL 파일(0000_purchase_seat_tables.sql)', () => {
+  test('표 셋을 만들고 유일 인덱스 둘을 더하는 문 다섯뿐이다(다른 문이 끼지 않는다)', () => {
+    expect(statements).toHaveLength(5);
+    expect(statements.filter((s) => /^CREATE TABLE /.test(s))).toHaveLength(3);
+    expect(statements.filter((s) => /^CREATE UNIQUE INDEX /.test(s))).toHaveLength(2);
+    expect(sqlBody).not.toMatch(/\b(ALTER|DROP|TRUNCATE|DELETE|INSERT|UPDATE)\b/i);
+    // 문 사이마다 표시가 있어야 마이그레이터가 문 하나씩 실행한다
+    expect(sqlBody.split(BREAKPOINT)).toHaveLength(5);
+  });
+
+  test('0000은 seat_sale·purchase_quota·seat_hold를 만들고, 0002가 만드는 seat_rebuild와 합치면 schema.ts의 좌석 표 넷과 같다(event_sale은 0012가 만든다)', () => {
+    const created = [...sqlBody.matchAll(/CREATE TABLE "([a-z_]+)"/g)].map((m) => m[1]).sort();
+    expect(created).toEqual(['purchase_quota', 'seat_hold', 'seat_sale']);
+    const all = [...`${sqlBody}\n${rebuildBody}`.matchAll(/CREATE TABLE "([a-z_]+)"/g)].map((m) => m[1]).sort();
+    expect(all).toEqual(SHAPES.map((s) => s.name).sort());
+  });
+
+  test('seat_hold만 PARTITION BY RANGE ("event_id")로 만든다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(createTable('seat_hold')).toMatch(/\)\s*PARTITION\s+BY\s+RANGE\s*\(\s*"event_id"\s*\)\s*;?\s*$/i);
+  });
+
+  test('seat_sale·purchase_quota는 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(createTable('seat_sale')).not.toMatch(/PARTITION/i);
+    expect(createTable('purchase_quota')).not.toMatch(/PARTITION/i);
+  });
+
+  test('DEFAULT 파티션도 날짜를 박은 파티션도 만들지 않는다(첫 월 파티션은 migrate.mjs가 만든다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sqlBody).not.toMatch(/PARTITION\s+OF/i);
+    expect(sqlBody).not.toMatch(/ATTACH\s+PARTITION/i);
+    expect(sqlBody).not.toMatch(/FOR\s+VALUES/i);
+    expect(sqlBody).not.toMatch(/seat_hold_p\d{6}/);
+    expect(sqlBody).not.toMatch(/seat_hold_default/i);
+    // 열 기본값 DEFAULT 'FAN'·DEFAULT now()만 있고, 문장 끝의 DEFAULT(= 기본 파티션 선언)는 없다
+    expect(sqlBody).not.toMatch(/\bDEFAULT\s*[;)]/i);
+    expect([...sqlBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(2);
+  });
+
+  test('schema.ts의 인덱스가 같은 이름·같은 표·같은 열·같은 WHERE 조건으로 SQL에 있다(유일 인덱스는 UNIQUE로, 0012의 seat_sale_pending_idx는 일반 인덱스로) [ASVS v5.0.0-2.3.4]', () => {
+    for (const s of SHAPES) {
+      for (const i of s.indexes) {
+        const stmt = seatStatements.find((x) => x.includes(`INDEX "${i.name}"`));
+        expect(stmt, `인덱스 ${i.name}`).toBeDefined();
+        const c = canon(stmt!);
+        expect(c.startsWith(`create ${i.unique ? 'unique ' : ''}index ${i.name} on ${s.name} using btree(${i.columns.join(',')})`), `${i.name}: ${c}`).toBe(true);
+        expect(c.replace(/;$/, '').endsWith(`where ${i.where}`), `${i.name} WHERE: ${c}`).toBe(true);
+      }
+    }
+  });
+
+  test('schema.ts의 기본 키가 같은 이름·같은 열 차례로 SQL에 있다(열 하나의 기본 키는 그 열 정의의 PRIMARY KEY)', () => {
+    for (const s of SHAPES) {
+      const c = canon(createTable(s.name));
+      for (const p of s.primaryKeys) expect(c, p.name).toContain(`constraint ${p.name} primary key(${p.columns.join(',')})`);
+      for (const col of s.columns.filter((x) => x.primary)) expect(c, `${s.name}.${col.name}`).toContain(`${col.name} ${col.type} primary key not null`);
+      expect((c.match(/primary key/g) ?? []).length, s.name).toBe(s.primaryKeys.length + s.columns.filter((x) => x.primary).length);
+    }
+  });
+
+  test('schema.ts의 check 제약이 같은 이름·같은 식으로 SQL에 있다 [ASVS v5.0.0-2.3.2]', () => {
+    for (const s of SHAPES) {
+      const c = canon(createTable(s.name));
+      for (const k of s.checks) expect(c, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    }
+  });
+
+  test('schema.ts의 열이 모두 SQL에 있고 그 밖의 열은 없다(만드는 문의 열 + 0002가 ADD COLUMN으로 더한 열)', () => {
+    const added = addedColumns();
+    for (const s of SHAPES) {
+      const body = createTable(s.name);
+      const inSql = [...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1]!);
+      const more = added.filter(([t]) => t === s.name).map(([, c]) => c);
+      expect([...inSql, ...more].sort(), s.name).toEqual(s.columns.map((c) => c.name).sort());
+      expect(new Set([...inSql, ...more]).size, `${s.name} 열이 겹친다`).toBe(inSql.length + more.length);
+    }
+  });
+});
+
+describe('마이그레이션 SQL 파일(0002_seat_rebuild_and_hold_ids.sql, PRF-143)', () => {
+  test('문 셋뿐이다: seat_rebuild를 만들고 seat_hold에 hold_id·purchase_session_id를 더한다(지우거나 바꾸는 문이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(rebuildStatements).toHaveLength(3);
+    expect(rebuildStatements[0]).toMatch(/^CREATE TABLE "seat_rebuild" /);
+    expect(addedColumns().map(([t, c]) => `${t}.${c}`)).toEqual(['seat_hold.hold_id', 'seat_hold.purchase_session_id']);
+    expect(rebuildBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(rebuildBody).not.toMatch(/ALTER\s+COLUMN|SET\s+NOT\s+NULL|USING\b/i);
+    expect(rebuildBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('seat_hold에 더한 두 열은 hold_id uuid·purchase_session_id text이고 널 허용·기본값 없음이다(옛 원장 행은 비어 있고, 파티션 표를 다시 쓰지 않는다) [ASVS v5.0.0-2.3.4]', () => {
+    for (const [, col, stmt] of addedColumns()) {
+      const c = hold.columns.find((x) => x.name === col)!;
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table seat_hold add column ${col} ${c.type}`);
+      expect(stmt, col).not.toMatch(/NOT\s+NULL|DEFAULT/i);
+    }
+  });
+
+  test('seat_rebuild는 파티션 표가 아니고, 기본값은 gen의 DEFAULT 1 하나다', () => {
+    const c = createTable('seat_rebuild');
+    expect(c).not.toMatch(/PARTITION/i);
+    expect(canon(c)).toContain('gen integer default 1 not null');
+    expect([...rebuildBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
+  });
+});
+
+describe('마이그레이션 기록(migrations/meta)', () => {
+  const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as {
+    version: string;
+    dialect: string;
+    entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
+  };
+
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162)·0006(Saga 1단계, PRF-165)·0007(발권 재시도 큐, PRF-163)·0008(주문의 묶은 시각, PRF-167)·0009(발권 큐의 임대·알림 시각, PRF-170)·0010(결제 결과 당기기의 AWAIT·pull_next_at, PRF-171)·0011(열린 주문 부분 인덱스, PRF-172)·0012(회차 판매 상태, PRF-144) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 (ADR0140) (ADR0107) (ADR0122) [ASVS v5.0.0-2.3.4]', () => {
+    expect(journal.dialect).toBe('postgresql');
+    expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
+      [0, TAG],
+      [1, HELD_TAG],
+      [2, REBUILD_TAG],
+      [3, ORDER_TAG],
+      [4, ORDER_HOLD_TAG],
+      [5, PAY_TAG],
+      [6, SAGA_TAG],
+      [7, TICKET_TAG],
+      [8, PINNED_TAG],
+      [9, LEASE_TAG],
+      [10, AWAIT_TAG],
+      [11, SESSION_TAG],
+      [12, EVENT_SALE_TAG],
+      [13, VOID_TAG],
+    ]);
+    // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
+    for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
+    for (const e of journal.entries) {
+      expect(e.breakpoints).toBe(true);
+      expect(Number.isSafeInteger(e.when) && e.when > 0).toBe(true);
+      expect(existsSync(join(MIGRATIONS, `${e.tag}.sql`))).toBe(true);
+    }
+  });
+
+  test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([
+      `${TAG}.sql`,
+      `${HELD_TAG}.sql`,
+      `${REBUILD_TAG}.sql`,
+      `${ORDER_TAG}.sql`,
+      `${ORDER_HOLD_TAG}.sql`,
+      `${PAY_TAG}.sql`,
+      `${SAGA_TAG}.sql`,
+      `${TICKET_TAG}.sql`,
+      `${PINNED_TAG}.sql`,
+      `${LEASE_TAG}.sql`,
+      `${AWAIT_TAG}.sql`,
+      `${SESSION_TAG}.sql`,
+      `${EVENT_SALE_TAG}.sql`,
+      `${VOID_TAG}.sql`,
+    ]);
+  });
+
+  type Snapshot = {
+    id: string;
+    prevId: string;
+    tables: Record<
+      string,
+      {
+        columns: Record<string, { type: string; notNull: boolean; primaryKey: boolean }>;
+        checkConstraints?: Record<string, unknown>;
+        compositePrimaryKeys?: Record<string, { name: string; columns: string[] }>;
+        foreignKeys?: Record<string, unknown>;
+        indexes?: Record<string, { isUnique: boolean }>;
+      }
+    >;
+  };
+  const snapshotFiles = readdirSync(join(MIGRATIONS, 'meta'))
+    .filter((f) => /^\d{4}_snapshot\.json$/.test(f))
+    .sort();
+  const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
+
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013)', () => {
+    expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
+    let prev = '00000000-0000-0000-0000-000000000000';
+    for (const f of snapshotFiles) {
+      const s = snapshotOf(f);
+      expect(s.prevId, f).toBe(prev);
+      prev = s.id;
+    }
+  });
+
+  /** booking schema.ts의 주문 표 일곱(PRF-160 다섯 + PRF-162 order_saga_job + PRF-163 ticket_issue_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
+  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob, ticketVoidJob];
+  const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
+
+  test('마지막 스냅샷(0013_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 여덟)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0013_snapshot.json');
+    const snap = snapshotOf(snapshotFiles.at(-1)!);
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES]) {
+      const t = snap.tables[`public.${s.name}`]!;
+      expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
+      expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
+      expect(Object.keys(t.checkConstraints ?? {}), `${s.name} check`).toEqual(s.checks.map((k) => k.name));
+    }
+  });
+
+  test('마지막 스냅샷의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163, 0009·0010은 인덱스를 더하지 않는다 PRF-170·PRF-171, 0011의 purchase_order_session_idx는 PRF-172) [ASVS v5.0.0-2.3.4]', () => {
+    const snap = snapshotOf(snapshotFiles.at(-1)!);
+    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job', 'ticket_issue_job', 'ticket_void_job']);
+    ORDER_TABLES.forEach((table, i) => {
+      const s = ORDER_SHAPES[i]!;
+      const t = snap.tables[`public.${s.name}`]!;
+      expect(Object.values(t.compositePrimaryKeys ?? {}).map((p) => [p.name, p.columns]), `${s.name} 기본 키`).toEqual(s.primaryKeys.map((p) => [p.name, p.columns]));
+      expect(Object.keys(t.foreignKeys ?? {}), `${s.name} 외래 키`).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
+      expect(Object.entries(t.indexes ?? {}).map(([n, x]) => [n, x.isUnique]), `${s.name} 인덱스`).toEqual(s.indexes.map((x) => [x.name, x.unique]));
+    });
+  });
+
+  test('0003 스냅샷에는 0004가 더한 칸·인덱스가 없다: 0004 스냅샷의 purchase_order만 hold_id·purchase_session_id 두 칸과 purchase_order_hold_key 하나가 늘었다(다른 표는 같다) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0003_snapshot.json');
+    const after = snapshotOf('0004_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(after.tables)) {
+      if (name === 'public.purchase_order') continue;
+      expect(after.tables[name], name).toEqual(before.tables[name]);
+    }
+    const b = before.tables['public.purchase_order']!;
+    const a = after.tables['public.purchase_order']!;
+    expect(Object.keys(a.columns).filter((c) => !(c in b.columns))).toEqual(['hold_id', 'purchase_session_id']);
+    expect(Object.keys(a.indexes ?? {}).filter((i) => !(i in (b.indexes ?? {})))).toEqual(['purchase_order_hold_key']);
+  });
+
+  test('0004 → 0005 스냅샷: order_saga_job이 새로 생기고, payment_attempt에 결제 참조 칸 다섯, purchase_order에 seat_gen 하나가 늘었다. 인덱스·외래 키·check는 그대로이고 다른 표는 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0004_snapshot.json');
+    const after = snapshotOf('0005_snapshot.json');
+    expect(Object.keys(after.tables).filter((n) => !(n in before.tables))).toEqual(['public.order_saga_job']);
+    expect(Object.keys(before.tables).filter((n) => !(n in after.tables))).toEqual([]);
+    const changed: Record<string, string[]> = { 'public.payment_attempt': ['pg_payment_key', 'pg_tx_id', 'pg_payment_token', 'authenticated_at', 'accepted_at'], 'public.purchase_order': ['seat_gen'] };
+    for (const name of Object.keys(before.tables)) {
+      const b = before.tables[name]!;
+      const a = after.tables[name]!;
+      if (!(name in changed)) {
+        expect(a, name).toEqual(b);
+        continue;
+      }
+      expect(Object.keys(a.columns).filter((c) => !(c in b.columns)), name).toEqual(changed[name]);
+      // 앞에 있던 칸은 그대로다(바꾸거나 지우지 않는다)
+      for (const [c, col] of Object.entries(b.columns)) expect(a.columns[c], `${name}.${c}`).toEqual(col);
+      expect(a.indexes, `${name} 인덱스`).toEqual(b.indexes);
+      expect(a.foreignKeys, `${name} 외래 키`).toEqual(b.foreignKeys);
+      expect(a.checkConstraints, `${name} check`).toEqual(b.checkConstraints);
+      // 더한 칸은 모두 널 허용(접수 전에는 비어 있다)
+      for (const c of changed[name]!) expect({ c, notNull: a.columns[c]!.notNull }).toEqual({ c, notNull: false });
+    }
+  });
+
+  test('0005 → 0006 스냅샷(PRF-165): 표는 같고, purchase_order에 failure_reason 한 칸(text·널 허용), order_saga_job에 confirm_sent_at 한 칸(timestamptz·널 허용, 리뷰 H1)과 order_saga_job_step_check 하나만 늘었다. 인덱스·외래 키는 그대로이고 다른 표는 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0005_snapshot.json');
+    const after = snapshotOf('0006_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(after.tables)) {
+      const b = before.tables[name]!;
+      const a = after.tables[name]!;
+      if (name !== 'public.purchase_order' && name !== 'public.order_saga_job') {
+        expect(a, name).toEqual(b);
+        continue;
+      }
+      for (const [c, col] of Object.entries(b.columns)) expect(a.columns[c], `${name}.${c}`).toEqual(col);
+      expect(a.indexes, `${name} 인덱스`).toEqual(b.indexes);
+      expect(a.foreignKeys, `${name} 외래 키`).toEqual(b.foreignKeys);
+    }
+    const po = { b: before.tables['public.purchase_order']!, a: after.tables['public.purchase_order']! };
+    expect(Object.keys(po.a.columns).filter((c) => !(c in po.b.columns))).toEqual(['failure_reason']);
+    expect(po.a.columns['failure_reason']).toMatchObject({ type: 'text', notNull: false });
+    // 실패 사유는 값 목록이 PRF-163에서 늘어나므로 CHECK를 두지 않는다
+    expect(po.a.checkConstraints).toEqual(po.b.checkConstraints);
+    const job = { b: before.tables['public.order_saga_job']!, a: after.tables['public.order_saga_job']! };
+    expect(Object.keys(job.a.columns).filter((c) => !(c in job.b.columns))).toEqual(['confirm_sent_at']);
+    expect(job.a.columns['confirm_sent_at']).toMatchObject({ type: TZ, notNull: false });
+    expect(Object.keys(job.a.checkConstraints ?? {}).filter((k) => !(k in (job.b.checkConstraints ?? {})))).toEqual(['order_saga_job_step_check']);
+  });
+
+  test('0006 → 0007 스냅샷(PRF-163): ticket_issue_job 표 하나만 새로 생기고 다른 표는 모두 같다(purchase_order.failure_reason은 0006 칸 그대로, CHECK 없음) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0006_snapshot.json');
+    const after = snapshotOf('0007_snapshot.json');
+    expect(Object.keys(after.tables).filter((n) => !(n in before.tables))).toEqual(['public.ticket_issue_job']);
+    expect(Object.keys(before.tables).filter((n) => !(n in after.tables))).toEqual([]);
+    for (const name of Object.keys(before.tables)) expect(after.tables[name], name).toEqual(before.tables[name]);
+    const t = after.tables['public.ticket_issue_job']!;
+    expect(Object.keys(t.foreignKeys ?? {})).toEqual(['ticket_issue_job_order_id_purchase_order_id_fk']);
+    expect(Object.entries(t.indexes ?? {}).map(([n, x]) => [n, x.isUnique])).toEqual([['ticket_issue_job_next_attempt_idx', false]]);
+    expect(t.checkConstraints ?? {}).toEqual({});
+    expect(Object.values(t.compositePrimaryKeys ?? {})).toEqual([]);
+  });
+
+  test('0008 → 0009 스냅샷(PRF-170): 표는 같고 ticket_issue_job에만 lease_until·delayed_at·overdue_at 세 칸(timestamptz·널 허용)이 이 차례로 늘었다. 앞 칸·인덱스·외래 키·check는 그대로이고 다른 표는 같다 (ADR0106) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0008_snapshot.json');
+    const after = snapshotOf('0009_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(before.tables)) {
+      if (name === 'public.ticket_issue_job') continue;
+      expect(after.tables[name], name).toEqual(before.tables[name]);
+    }
+    const b = before.tables['public.ticket_issue_job']!;
+    const a = after.tables['public.ticket_issue_job']!;
+    expect(Object.keys(a.columns).filter((c) => !(c in b.columns))).toEqual(LEASE_COLUMNS);
+    for (const [c, col] of Object.entries(b.columns)) expect(a.columns[c], c).toEqual(col);
+    for (const c of LEASE_COLUMNS) expect({ c, type: a.columns[c]!.type, notNull: a.columns[c]!.notNull, primaryKey: a.columns[c]!.primaryKey }).toEqual({ c, type: TZ, notNull: false, primaryKey: false });
+    expect(a.indexes, '인덱스').toEqual(b.indexes);
+    expect(a.foreignKeys, '외래 키').toEqual(b.foreignKeys);
+    expect(a.checkConstraints, 'check').toEqual(b.checkConstraints);
+  });
+
+  test('0009 → 0010 스냅샷(PRF-171): 표는 같고 order_saga_job에만 pull_next_at 한 칸(timestamptz·널 허용)이 늘었으며 step CHECK의 값 목록에 AWAIT가 끝에 더해졌다. 앞 칸·인덱스·외래 키·check 이름은 그대로이고 다른 표는 같다 (ADR0140) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0009_snapshot.json');
+    const after = snapshotOf('0010_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(before.tables)) {
+      if (name === 'public.order_saga_job') continue;
+      expect(after.tables[name], name).toEqual(before.tables[name]);
+    }
+    const b = before.tables['public.order_saga_job']!;
+    const a = after.tables['public.order_saga_job']!;
+    expect(Object.keys(a.columns).filter((c) => !(c in b.columns))).toEqual(['pull_next_at']);
+    for (const [c, col] of Object.entries(b.columns)) expect(a.columns[c], c).toEqual(col);
+    const pull = a.columns['pull_next_at']!;
+    expect({ type: pull.type, notNull: pull.notNull, primaryKey: pull.primaryKey }).toEqual({ type: TZ, notNull: false, primaryKey: false });
+    // 작업 표는 진행 중 주문만 남아 작아 새 인덱스를 두지 않는다(data.md §5.1)
+    expect(a.indexes, '인덱스').toEqual(b.indexes);
+    expect(a.foreignKeys, '외래 키').toEqual(b.foreignKeys);
+    expect(Object.keys(a.checkConstraints ?? {}), 'check 이름').toEqual(Object.keys(b.checkConstraints ?? {}));
+    const valueOf = (t: typeof a) => canon((t.checkConstraints!['order_saga_job_step_check'] as { value: string }).value);
+    expect(literalsOf(valueOf(b))).toEqual(['RESERVE', 'CONFIRM', 'RELEASE']);
+    expect(literalsOf(valueOf(a))).toEqual(['RESERVE', 'CONFIRM', 'RELEASE', 'AWAIT']);
+  });
+
+  test('리뷰 고침 M1_0010 → 0011 스냅샷(PRF-172): 표는 같고 purchase_order에 조건 없는 비유일 인덱스 purchase_order_session_idx 하나만 늘었다(열·기본 키·외래 키·check와 hold_id 유일 인덱스는 그대로이고 다른 표는 같다) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0010_snapshot.json');
+    const after = snapshotOf('0011_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(before.tables)) {
+      if (name === 'public.purchase_order') continue;
+      expect(after.tables[name], name).toEqual(before.tables[name]);
+    }
+    const b = before.tables['public.purchase_order']!;
+    const a = after.tables['public.purchase_order']!;
+    expect(a.columns, '열').toEqual(b.columns);
+    expect(a.foreignKeys, '외래 키').toEqual(b.foreignKeys);
+    expect(a.compositePrimaryKeys, '여러 열 기본 키').toEqual(b.compositePrimaryKeys);
+    expect(a.checkConstraints, 'check').toEqual(b.checkConstraints);
+    expect(Object.keys(a.indexes ?? {}).filter((i) => !(i in (b.indexes ?? {})))).toEqual([SESSION_INDEX]);
+    expect(a.indexes!['purchase_order_hold_key'], 'hold_id 유일 인덱스').toEqual(b.indexes!['purchase_order_hold_key']);
+    const added = a.indexes![SESSION_INDEX] as unknown as { isUnique: boolean; where?: string; columns: { expression: string }[]; concurrently: boolean; method: string };
+    expect({ unique: added.isUnique, columns: added.columns.map((c) => c.expression), where: added.where, concurrently: added.concurrently, method: added.method }).toEqual({
+      unique: false,
+      columns: ['purchase_session_id'],
+      where: undefined,
+      concurrently: false,
+      method: 'btree',
+    });
+  });
+});
+
+/** booking schema.ts의 purchase_order(0004가 칸 둘·유일 인덱스 하나를 더한다, PRF-161) */
+const orderShape = shapeOf(purchaseOrder);
+const holdFile = readFileSync(join(MIGRATIONS, `${ORDER_HOLD_TAG}.sql`), 'utf8');
+const holdBody = holdFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const holdStatements = statementsOf(holdFile);
+
+describe('마이그레이션 SQL 파일(0004_order_hold_and_session.sql, PRF-161)', () => {
+  test('문 셋뿐이다: purchase_order에 hold_id·purchase_session_id를 더하고 유일 인덱스 하나를 만든다(지우거나 바꾸는 문이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(holdStatements).toHaveLength(3);
+    expect(holdStatements.map((s) => /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(s)?.slice(1).join('.'))).toEqual(['purchase_order.hold_id', 'purchase_order.purchase_session_id', undefined]);
+    expect(holdStatements[2]).toMatch(/^CREATE UNIQUE INDEX "purchase_order_hold_key" /);
+    expect(holdBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(holdBody).not.toMatch(/ALTER\s+COLUMN|USING\s+\(|\bDEFAULT\b/i);
+    expect(holdBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('더한 두 칸은 schema.ts purchase_order의 같은 이름·종류이고 둘 다 널 불허·기본값 없음이다(hold_id uuid, purchase_session_id text) [ASVS v5.0.0-2.3.4]', () => {
+    const added = holdStatements.flatMap((x) => {
+      const m = /^ALTER TABLE "purchase_order" ADD COLUMN "([a-z_]+)" /.exec(x);
+      return m ? [[m[1]!, x] as [string, string]] : [];
+    });
+    expect(added.map(([c]) => c)).toEqual(['hold_id', 'purchase_session_id']);
+    for (const [col, stmt] of added) {
+      const c = orderShape.columns.find((x) => x.name === col);
+      expect(c, `schema.ts purchase_order.${col}`).toBeDefined();
+      expect({ col, notNull: c!.notNull, hasDefault: c!.hasDefault }).toEqual({ col, notNull: true, hasDefault: false });
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table purchase_order add column ${col} ${c!.type} not null`);
+    }
+    expect(orderShape.columns.find((c) => c.name === 'hold_id')!.type).toBe('uuid');
+    expect(orderShape.columns.find((c) => c.name === 'purchase_session_id')!.type).toBe('text');
+  });
+
+  test('ADD COLUMN이 표 끝에 붙으므로 schema.ts purchase_order에서 0004 앞 칸 뒤의 두 칸이 hold_id·purchase_session_id이고, 그 뒤는 0005의 seat_gen, 0006의 failure_reason, 0008의 pinned_at 차례다(DB 칸 차례와 같다)', () => {
+    expect(orderShape.columns.slice(-5).map((c) => c.name)).toEqual(['hold_id', 'purchase_session_id', 'seat_gen', 'failure_reason', 'pinned_at']);
+  });
+
+  test('한 홀드에 주문 하나: purchase_order_hold_key는 purchase_order (hold_id)의 btree 유일 인덱스이고 WHERE가 없다. 0004 시점의 purchase_order 인덱스는 이것 하나이고, schema.ts의 유일 인덱스도 이것 하나다(0011의 부분 인덱스는 유일이 아니다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(orderShape.indexes.filter((i) => i.unique)).toEqual([{ name: 'purchase_order_hold_key', unique: true, columns: ['hold_id'], where: undefined }]);
+    expect(orderIndexesAt('0004')).toEqual(['purchase_order_hold_key']);
+    const c = canon(holdStatements[2]!).replace(/;$/, '');
+    expect(c).toBe('create unique index purchase_order_hold_key on purchase_order using btree(hold_id)');
+  });
+});
+
+/** booking schema.ts의 payment_attempt·order_saga_job(0005가 칸 다섯·표 하나를 더한다, PRF-162) */
+const attemptShape = shapeOf(paymentAttempt);
+const sagaShape = shapeOf(orderSagaJob);
+const payFile = readFileSync(join(MIGRATIONS, `${PAY_TAG}.sql`), 'utf8');
+const payBody = payFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const payStatements = statementsOf(payFile);
+/** 0005의 ALTER TABLE … ADD COLUMN: [표, 열, 그 문] */
+const payAdded = (): [string, string, string][] =>
+  payStatements.flatMap((x) => {
+    const m = /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(x);
+    return m ? [[m[1]!, m[2]!, x] as [string, string, string]] : [];
+  });
+const ATTEMPT_REF_COLUMNS = ['pg_payment_key', 'pg_tx_id', 'pg_payment_token', 'authenticated_at', 'accepted_at'];
+
+describe('마이그레이션 SQL 파일(0005_payment_acceptance.sql, PRF-162)', () => {
+  test('문 아홉뿐이다: order_saga_job을 만들고, payment_attempt에 다섯·purchase_order에 하나를 더하고, 외래 키 하나와 색인 하나(지우거나 바꾸는 문이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(payStatements).toHaveLength(9);
+    expect(payStatements[0]).toMatch(/^CREATE TABLE "order_saga_job" /);
+    expect(payAdded().map(([t, c]) => `${t}.${c}`)).toEqual([...ATTEMPT_REF_COLUMNS.map((c) => `payment_attempt.${c}`), 'purchase_order.seat_gen']);
+    expect(payStatements.filter((s) => /^ALTER TABLE "order_saga_job" ADD CONSTRAINT /.test(s))).toHaveLength(1);
+    expect(payStatements.filter((s) => /^CREATE (UNIQUE )?INDEX /.test(s))).toHaveLength(1);
+    expect(payBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b(?! no action)/i);
+    expect(payBody).not.toMatch(/ALTER\s+COLUMN|SET\s+NOT\s+NULL|USING\s+\(/i);
+    expect(payBody.split(BREAKPOINT)).toHaveLength(9);
+  });
+
+  test('payment_attempt에 더한 다섯 칸은 schema.ts의 같은 이름·종류이고 널 허용·기본값 없음이며, 표 끝 다섯 칸이 이 차례다(ADD COLUMN이 끝에 붙는다) [ASVS v5.0.0-2.3.4]', () => {
+    for (const [table, col, stmt] of payAdded().filter(([t]) => t === 'payment_attempt')) {
+      const c = attemptShape.columns.find((x) => x.name === col);
+      expect(c, `schema.ts ${table}.${col}`).toBeDefined();
+      expect({ col, notNull: c!.notNull, hasDefault: c!.hasDefault }).toEqual({ col, notNull: false, hasDefault: false });
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table payment_attempt add column ${col} ${c!.type}`);
+    }
+    expect(attemptShape.columns.slice(-5).map((c) => [c.name, c.type])).toEqual([
+      ['pg_payment_key', 'text'],
+      ['pg_tx_id', 'text'],
+      ['pg_payment_token', 'text'],
+      ['authenticated_at', TZ],
+      ['accepted_at', TZ],
+    ]);
+  });
+
+  test('purchase_order.seat_gen은 integer·널 허용·기본값 없음이고 0006의 failure_reason 바로 앞 칸이다(접수 전에는 비어 있다) [ASVS v5.0.0-2.3.4]', () => {
+    const [, , stmt] = payAdded().find(([t]) => t === 'purchase_order')!;
+    expect(canon(stmt).replace(/;$/, '')).toBe('alter table purchase_order add column seat_gen integer');
+    const c = orderShape.columns.at(-3)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault }).toEqual({ name: 'seat_gen', type: 'integer', notNull: false, hasDefault: false });
+    // 쓰기가 많은 purchase_order에 새 인덱스를 두지 않는다(data.md §5.1): 0005는 인덱스를 더하지 않았다
+    expect(orderIndexesAt('0005')).toEqual(['purchase_order_hold_key']);
+  });
+
+  test('order_saga_job의 열 이름·종류·널 허용이 schema.ts와 같고 0005 SQL의 만드는 문에는 0006이 더한 confirm_sent_at과 0010이 더한 pull_next_at을 뺀 열뿐이다(lease_until·confirm_sent_at·pull_next_at만 비울 수 있다, PRF-171) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(sagaShape)).toEqual([
+      ['order_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['step', 'text', true],
+      ['attempts', 'integer', true],
+      ['next_attempt_at', TZ, true],
+      ['lease_until', TZ, false],
+      ['created_at', TZ, true],
+      ['confirm_sent_at', TZ, false],
+      // 0010의 ADD COLUMN이 표 끝에 붙는다(DB 칸 차례와 같다, data.md order_saga_job)
+      ['pull_next_at', TZ, false],
+    ]);
+    const in0005 = sagaShape.columns.filter((c) => c.name !== 'confirm_sent_at' && c.name !== 'pull_next_at');
+    const body = payStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(in0005.map((c) => c.name));
+    const c = canon(body);
+    for (const col of in0005) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+  });
+
+  test('order_saga_job은 order_id 하나의 기본 키(한 주문에 작업 행 하나)이고, 기본값은 attempts의 0 하나이며 0005 SQL에는 step CHECK가 없다(값 목록은 0006이 더한다, PRF-165) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaShape.columns.filter((x) => x.primary).map((x) => x.name)).toEqual(['order_id']);
+    expect(sagaShape.primaryKeys).toEqual([]);
+    const c = canon(payStatements[0]!);
+    expect(c).toContain('order_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect(sagaShape.columns.filter((x) => x.hasDefault).map((x) => x.name)).toEqual(['attempts']);
+    expect(getTableConfig(orderSagaJob).columns.find((x) => x.name === 'attempts')!.default).toBe(0);
+    expect(c).toContain('attempts integer default 0 not null');
+    expect([...payBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
+    // schema.ts의 check는 0006이 더한 step CHECK 하나뿐이다(아래 0006 절)
+    expect(sagaShape.checks.map((k) => k.name)).toEqual(['order_saga_job_step_check']);
+    expect(payBody).not.toMatch(/\bCHECK\b/i);
+    expect(c).not.toMatch(/partition/);
+  });
+
+  test('order_saga_job.order_id는 purchase_order.id를 가리키는 외래 키 하나이고, 이름이 schema.ts와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const fks = getTableConfig(orderSagaJob).foreignKeys;
+    expect(fks.map((f) => f.getName())).toEqual(['order_saga_job_order_id_purchase_order_id_fk']);
+    const ref = fks[0]!.reference();
+    expect({ from: ref.columns.map((x) => x.name), to: getTableConfig(ref.foreignTable).name, toCols: ref.foreignColumns.map((x) => x.name) }).toEqual({
+      from: ['order_id'],
+      to: 'purchase_order',
+      toCols: ['id'],
+    });
+    const stmt = payStatements.find((s) => s.includes('ADD CONSTRAINT'))!;
+    // canon은 "public". 한정자와 괄호 둘레 공백을 지운다
+    expect(canon(stmt).replace(/;$/, '')).toBe(
+      'alter table order_saga_job add constraint order_saga_job_order_id_purchase_order_id_fk foreign key(order_id)references purchase_order(id)on delete no action on update no action',
+    );
+    expect(stmt).toContain('REFERENCES "public"."purchase_order"("id")');
+  });
+
+  test('쓸기 색인: order_saga_job_next_attempt_idx는 order_saga_job (next_attempt_at)의 btree 일반 색인이고 WHERE가 없다. 이 표의 색인은 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaShape.indexes).toEqual([{ name: 'order_saga_job_next_attempt_idx', unique: false, columns: ['next_attempt_at'], where: undefined }]);
+    const stmt = payStatements.find((s) => /^CREATE INDEX /.test(s))!;
+    expect(canon(stmt).replace(/;$/, '')).toBe('create index order_saga_job_next_attempt_idx on order_saga_job using btree(next_attempt_at)');
+  });
+});
+
+/** 0006(Saga 1단계, PRF-165): purchase_order.failure_reason과 order_saga_job_step_check */
+const sagaFile = readFileSync(join(MIGRATIONS, `${SAGA_TAG}.sql`), 'utf8');
+const sagaBody = sagaFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const sagaStatements = statementsOf(sagaFile);
+
+describe('마이그레이션 SQL 파일(0006_saga_step_one.sql, PRF-165)', () => {
+  test('문 셋뿐이다: order_saga_job에 confirm_sent_at을 더하고(리뷰 H1), purchase_order에 failure_reason을 더하고, order_saga_job에 step CHECK를 더한다(지우거나 바꾸는 문·기본값·색인이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaStatements).toHaveLength(3);
+    expect(sagaStatements[0]).toMatch(/^ALTER TABLE "order_saga_job" ADD COLUMN "confirm_sent_at" /);
+    expect(sagaStatements[1]).toMatch(/^ALTER TABLE "purchase_order" ADD COLUMN "failure_reason" /);
+    expect(sagaStatements[2]).toMatch(/^ALTER TABLE "order_saga_job" ADD CONSTRAINT "order_saga_job_step_check" CHECK /);
+    expect(sagaBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(sagaBody).not.toMatch(/ALTER\s+COLUMN|SET\s+NOT\s+NULL|USING\s+\(|\bDEFAULT\b|\bINDEX\b/i);
+    expect(sagaBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('order_saga_job.confirm_sent_at은 timestamptz·널 허용·기본값 없음이고 0010의 pull_next_at 바로 앞 칸이다(승인 명령을 처음 보내기 바로 전에 적는다, 리뷰 H1) [ASVS v5.0.0-2.3.4]', () => {
+    expect(canon(sagaStatements[0]!).replace(/;$/, '')).toBe('alter table order_saga_job add column confirm_sent_at timestamp with time zone');
+    const c = sagaShape.columns.at(-2)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault }).toEqual({ name: 'confirm_sent_at', type: TZ, notNull: false, hasDefault: false });
+  });
+
+  test('purchase_order.failure_reason은 text·널 허용·기본값 없음이고 0008의 pinned_at 바로 앞 칸이며, 값 목록 CHECK를 두지 않는다(결제 쪽 사유가 PRF-163에서 늘어난다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(canon(sagaStatements[1]!).replace(/;$/, '')).toBe('alter table purchase_order add column failure_reason text');
+    const c = orderShape.columns.at(-2)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault }).toEqual({ name: 'failure_reason', type: 'text', notNull: false, hasDefault: false });
+    expect(orderShape.checks.map((k) => k.expr).join(' ')).not.toContain('failure_reason');
+    expect(orderIndexesAt('0006')).toEqual(['purchase_order_hold_key']);
+  });
+
+  test('0006의 order_saga_job_step_check는 그때의 값 셋(step in RESERVE·CONFIRM·RELEASE, RELEASE는 리뷰 M4)이고, 0010이 같은 이름으로 다시 만들어 AWAIT를 끝에 더한다(지금 schema.ts의 식은 아래 0010 절) [ASVS v5.0.0-2.3.2]', () => {
+    // canon은 표 한정자("order_saga_job".)와 따옴표를 지운다
+    expect(canon(sagaStatements[2]!).replace(/;$/, '')).toBe(`alter table order_saga_job add constraint order_saga_job_step_check check(${canon("step in ('RESERVE','CONFIRM','RELEASE')")})`);
+    // 0006의 값은 SAGA_STEPS 앞 셋과 같은 차례다(0010이 끝에 하나만 더한다)
+    expect(literalsOf(canon(sagaStatements[2]!))).toEqual([...SAGA_STEPS].slice(0, 3));
+  });
+});
+
+/** 0007(결제 결과 반영, PRF-163): 발권 재시도 큐 ticket_issue_job */
+const ticketShape = shapeOf(ticketIssueJob);
+/** schema.ts ticket_issue_job 가운데 0007이 만든 칸(0009가 더한 칸 셋을 뺀 것) */
+const ticket0007Columns = ticketShape.columns.filter((c) => !LEASE_COLUMNS.includes(c.name) && c.name !== 'issue_generation');
+const ticketFile = readFileSync(join(MIGRATIONS, `${TICKET_TAG}.sql`), 'utf8');
+const ticketBody = ticketFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const ticketStatements = statementsOf(ticketFile);
+
+describe('마이그레이션 SQL 파일(0007_ticket_issue_job.sql, PRF-163)', () => {
+  test('문 셋뿐이다: ticket_issue_job을 만들고, 외래 키 하나와 쓸기 색인 하나를 더한다(다른 표를 바꾸거나 지우는 문·CHECK가 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketStatements).toHaveLength(3);
+    expect(ticketStatements[0]).toMatch(/^CREATE TABLE "ticket_issue_job" /);
+    expect(ticketStatements[1]).toMatch(/^ALTER TABLE "ticket_issue_job" ADD CONSTRAINT "ticket_issue_job_order_id_purchase_order_id_fk" FOREIGN KEY /);
+    expect(ticketStatements[2]).toMatch(/^CREATE INDEX "ticket_issue_job_next_attempt_idx" /);
+    expect(ticketBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b(?! no action)/i);
+    expect(ticketBody).not.toMatch(/ALTER\s+COLUMN|ADD\s+COLUMN|SET\s+NOT\s+NULL|USING\s+\(|\bCHECK\b|PARTITION/i);
+    expect(ticketBody).not.toMatch(/ALTER TABLE "(?!ticket_issue_job")/);
+    expect(ticketBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('ticket_issue_job의 0007 칸(표 앞 일곱 칸)의 이름·종류·널 허용이 정본 ERD(data.md §2)·schema.ts와 같고 0007 SQL의 만드는 문도 이 칸만 같은 차례로 담는다(next_attempt_at·last_error만 비울 수 있다. 0009의 세 칸은 아래 절) [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticket0007Columns.map((c) => [c.name, c.type, c.notNull])).toEqual([
+      ['order_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['attempts', 'integer', true],
+      ['next_attempt_at', TZ, false],
+      ['issue_due_at', TZ, true],
+      ['last_error', 'text', false],
+      ['created_at', TZ, true],
+    ]);
+    // 0009의 ADD COLUMN이 표 끝에 붙으므로 0007 칸이 schema.ts의 앞 일곱 칸이다(DB 칸 차례와 같다)
+    expect(ticketShape.columns.slice(0, ticket0007Columns.length).map((c) => c.name)).toEqual(ticket0007Columns.map((c) => c.name));
+    const body = ticketStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(ticket0007Columns.map((c) => c.name));
+    const c = canon(body);
+    for (const col of ticket0007Columns) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+    for (const col of ticket0007Columns.filter((x) => x.notNull && !x.primary)) expect(c, `${col.name} not null`).toMatch(new RegExp(`${col.name} ${col.type}( default \\d+)? not null`));
+    for (const col of ticket0007Columns.filter((x) => !x.notNull)) expect(c, `${col.name} 널 허용`).not.toMatch(new RegExp(`${col.name} ${col.type}[^,]*not null`));
+    for (const col of LEASE_COLUMNS) expect(c, `0007에 ${col}이 없다`).not.toContain(col);
+  });
+
+  test('ticket_issue_job은 order_id 하나의 기본 키(한 주문에 행 하나)이고, 기본값은 attempts의 0 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketShape.columns.filter((x) => x.primary).map((x) => x.name)).toEqual(['order_id']);
+    expect(ticketShape.primaryKeys).toEqual([]);
+    const c = canon(ticketStatements[0]!);
+    expect(c).toContain('order_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect(ticketShape.columns.filter((x) => x.hasDefault && x.name !== 'issue_generation').map((x) => x.name)).toEqual(['attempts']);
+    expect(getTableConfig(ticketIssueJob).columns.find((x) => x.name === 'attempts')!.default).toBe(0);
+    expect(c).toContain('attempts integer default 0 not null');
+    expect([...ticketBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
+    expect(ticketShape.checks).toEqual([]);
+  });
+
+  test('ticket_issue_job.order_id는 purchase_order.id를 가리키는 외래 키 하나이고, 이름·SQL이 schema.ts와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const fks = getTableConfig(ticketIssueJob).foreignKeys;
+    expect(fks.map((f) => f.getName())).toEqual(['ticket_issue_job_order_id_purchase_order_id_fk']);
+    const ref = fks[0]!.reference();
+    expect({ from: ref.columns.map((x) => x.name), to: getTableConfig(ref.foreignTable).name, toCols: ref.foreignColumns.map((x) => x.name) }).toEqual({
+      from: ['order_id'],
+      to: 'purchase_order',
+      toCols: ['id'],
+    });
+    expect(canon(ticketStatements[1]!).replace(/;$/, '')).toBe(
+      'alter table ticket_issue_job add constraint ticket_issue_job_order_id_purchase_order_id_fk foreign key(order_id)references purchase_order(id)on delete no action on update no action',
+    );
+    expect(ticketStatements[1]).toContain('REFERENCES "public"."purchase_order"("id")');
+  });
+
+  test('쓸기 색인: ticket_issue_job_next_attempt_idx는 ticket_issue_job (next_attempt_at)의 btree 일반 색인이고 WHERE가 없다. 이 표의 색인은 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketShape.indexes).toEqual([{ name: 'ticket_issue_job_next_attempt_idx', unique: false, columns: ['next_attempt_at'], where: undefined }]);
+    expect(canon(ticketStatements[2]!).replace(/;$/, '')).toBe('create index ticket_issue_job_next_attempt_idx on ticket_issue_job using btree(next_attempt_at)');
+  });
+});
+
+/** 0008(주문 기준 되살리기, PRF-167): purchase_order.pinned_at */
+const pinnedFile = readFileSync(join(MIGRATIONS, `${PINNED_TAG}.sql`), 'utf8');
+const pinnedBody = pinnedFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const pinnedStatements = statementsOf(pinnedFile);
+
+describe('마이그레이션 SQL 파일(0008_order_pinned_at.sql, PRF-167)', () => {
+  test('문 하나뿐이다: purchase_order에 pinned_at을 더한다(다른 표를 바꾸거나 지우는 문·CHECK·색인·기본값이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(pinnedStatements).toHaveLength(1);
+    expect(pinnedStatements[0]).toMatch(/^ALTER TABLE "purchase_order" ADD COLUMN "pinned_at" /);
+    expect(pinnedBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(pinnedBody).not.toMatch(/ALTER\s+COLUMN|SET\s+NOT\s+NULL|NOT\s+NULL|USING\s+\(|\bDEFAULT\b|\bINDEX\b|\bCHECK\b|PARTITION/i);
+    expect(pinnedBody.split(BREAKPOINT)).toHaveLength(1);
+  });
+
+  test('purchase_order.pinned_at은 timestamptz·널 허용·기본값 없음이고 표 끝 칸이다(Saga 묶기가 OK인 뒤 적는다, 묶기 전이면 비어 있다). purchase_order의 인덱스는 그대로 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(canon(pinnedStatements[0]!).replace(/;$/, '')).toBe('alter table purchase_order add column pinned_at timestamp with time zone');
+    const c = orderShape.columns.at(-1)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault }).toEqual({ name: 'pinned_at', type: TZ, notNull: false, hasDefault: false });
+    expect(orderShape.checks.map((k) => k.expr).join(' ')).not.toContain('pinned_at');
+    expect(orderIndexesAt('0008')).toEqual(['purchase_order_hold_key']);
+  });
+});
+
+/** 0009(발권 호출과 재시도 큐, PRF-170): ticket_issue_job.lease_until·delayed_at·overdue_at */
+const leaseFile = readFileSync(join(MIGRATIONS, `${LEASE_TAG}.sql`), 'utf8');
+const leaseBody = leaseFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const leaseStatements = statementsOf(leaseFile);
+
+describe('마이그레이션 SQL 파일(0009_ticket_issue_lease.sql, PRF-170)', () => {
+  test('문 셋뿐이다: ticket_issue_job에 lease_until·delayed_at·overdue_at을 이 차례로 더한다(다른 표를 바꾸거나 지우는 문·NOT NULL·기본값·색인·CHECK가 없다) (ADR0106) [ASVS v5.0.0-2.3.4]', () => {
+    expect(leaseStatements).toHaveLength(3);
+    expect(leaseStatements.map((s) => /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(s)?.slice(1).join('.'))).toEqual(LEASE_COLUMNS.map((c) => `ticket_issue_job.${c}`));
+    expect(leaseBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(leaseBody).not.toMatch(/ALTER\s+COLUMN|NOT\s+NULL|USING\s+\(|\bDEFAULT\b|\bINDEX\b|\bCHECK\b|PARTITION|ADD\s+CONSTRAINT/i);
+    expect(leaseBody).not.toMatch(/ALTER TABLE "(?!ticket_issue_job")/);
+    expect(leaseBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('더한 세 칸은 schema.ts ticket_issue_job의 같은 이름이고 timestamptz·널 허용·기본값 없음이며 표 끝 세 칸이다(잡지 않았거나 아직 신호를 내지 않았으면 비어 있다) [ASVS v5.0.0-2.3.4]', () => {
+    leaseStatements.forEach((stmt, i) => {
+      const col = LEASE_COLUMNS[i]!;
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table ticket_issue_job add column ${col} timestamp with time zone`);
+    });
+    expect(ticketShape.columns.filter((c) => c.name !== 'issue_generation').slice(-3).map((c) => ({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault, primary: c.primary }))).toEqual(
+      LEASE_COLUMNS.map((name) => ({ name, type: TZ, notNull: false, hasDefault: false, primary: false })),
+    );
+  });
+
+  test('큐 행은 승인 뒤 발권까지만 남아 적어 새 인덱스를 두지 않는다: ticket_issue_job의 색인은 0007의 쓸기 색인 하나 그대로이고 check도 없다 (ADR0106) [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketShape.indexes.map((i) => i.name)).toEqual(['ticket_issue_job_next_attempt_idx']);
+    expect(ticketShape.checks).toEqual([]);
+    expect(getTableConfig(ticketIssueJob).foreignKeys.map((f) => f.getName())).toEqual(['ticket_issue_job_order_id_purchase_order_id_fk']);
+  });
+});
+
+/** 0010(결제 결과 당기기, PRF-171, ADR-0140): order_saga_job.step CHECK에 AWAIT, order_saga_job.pull_next_at */
+const awaitFile = readFileSync(join(MIGRATIONS, `${AWAIT_TAG}.sql`), 'utf8');
+const awaitBody = awaitFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const awaitStatements = statementsOf(awaitFile);
+
+describe('마이그레이션 SQL 파일(0010_saga_await_pull.sql, PRF-171)', () => {
+  test('문 셋뿐이다: order_saga_job_step_check를 지우고, order_saga_job에 pull_next_at을 더하고, 같은 이름의 step CHECK를 다시 만든다(drizzle-kit 차례. 다른 표·행을 바꾸거나 지우는 문·NOT NULL·기본값·색인이 없다) (ADR0140) [ASVS v5.0.0-2.3.4]', () => {
+    expect(awaitStatements).toHaveLength(3);
+    expect(canon(awaitStatements[0]!).replace(/;$/, '')).toBe('alter table order_saga_job drop constraint order_saga_job_step_check');
+    expect(awaitStatements[1]).toMatch(/^ALTER TABLE "order_saga_job" ADD COLUMN "pull_next_at" /);
+    expect(awaitStatements[2]).toMatch(/^ALTER TABLE "order_saga_job" ADD CONSTRAINT "order_saga_job_step_check" CHECK /);
+    // 지우는 것은 제약 하나뿐이다(표·칸·행을 지우거나 바꾸지 않는다)
+    expect(awaitBody.replace(/DROP CONSTRAINT "order_saga_job_step_check"/, '')).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(awaitBody).not.toMatch(/ALTER\s+COLUMN|NOT\s+NULL|USING\s+\(|\bDEFAULT\b|\bINDEX\b|PARTITION/i);
+    expect(awaitBody).not.toMatch(/ALTER TABLE "(?!order_saga_job")/);
+    expect(awaitBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('order_saga_job.pull_next_at은 timestamptz·널 허용·기본값 없음이고 표 끝 칸이다(비었으면 아직 한 번도 묻지 않았다. 당기기가 잡을 때 지금 + 5초 [가정]을 쓴다) (ADR0140) [ASVS v5.0.0-2.3.4]', () => {
+    expect(canon(awaitStatements[1]!).replace(/;$/, '')).toBe('alter table order_saga_job add column pull_next_at timestamp with time zone');
+    const c = sagaShape.columns.at(-1)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault, primary: c.primary }).toEqual({ name: 'pull_next_at', type: TZ, notNull: false, hasDefault: false, primary: false });
+  });
+
+  test('order_saga_job_step_check는 schema.ts와 같은 이름·식(step in RESERVE·CONFIRM·RELEASE·AWAIT)이고 값 목록이 도메인 SAGA_STEPS와 같은 값·차례다: 0006의 셋은 그대로 두고 AWAIT 하나만 끝에 더한다 (ADR0140) [ASVS v5.0.0-2.3.2]', () => {
+    expect(sagaShape.checks).toEqual([{ name: 'order_saga_job_step_check', expr: canon("step in ('RESERVE','CONFIRM','RELEASE','AWAIT')") }]);
+    expect(canon(awaitStatements[2]!).replace(/;$/, '')).toBe(`alter table order_saga_job add constraint order_saga_job_step_check check(${sagaShape.checks[0]!.expr})`);
+    expect(literalsOf(sagaShape.checks[0]!.expr)).toEqual([...SAGA_STEPS]);
+    expect([...SAGA_STEPS]).toEqual(['RESERVE', 'CONFIRM', 'RELEASE', 'AWAIT']);
+    expect(literalsOf(canon(awaitStatements[2]!)).slice(0, 3)).toEqual(literalsOf(canon(sagaStatements[2]!)));
+  });
+
+  test('작업 표는 진행 중 주문만 남아 작아 새 인덱스를 두지 않는다: order_saga_job의 색인은 0005의 쓸기 색인 하나 그대로다(주문 표에도 색인을 더하지 않는다, data.md §5.1) (ADR0140) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaShape.indexes.map((i) => i.name)).toEqual(['order_saga_job_next_attempt_idx']);
+    expect(orderIndexesAt('0010')).toEqual(['purchase_order_hold_key']);
+    expect(getTableConfig(orderSagaJob).foreignKeys.map((f) => f.getName())).toEqual(['order_saga_job_order_id_purchase_order_id_fk']);
+  });
+});
+
+/** 0011(결제하지 않은 주문의 만료, PRF-172, ADR-0107): 구매 세션의 열린 주문을 찾는 부분 인덱스 */
+const sessionFile = readFileSync(join(MIGRATIONS, `${SESSION_TAG}.sql`), 'utf8');
+const sessionBody = sessionFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const sessionStatements = statementsOf(sessionFile);
+
+describe('마이그레이션 SQL 파일(0011_order_session_idx.sql, PRF-172)', () => {
+  test('리뷰 고침 M1_문 하나뿐이다: purchase_order에 조건 없는 비유일 인덱스를 만든다(칸·표를 바꾸거나 지우는 문·기본값·CHECK·WHERE·CONCURRENTLY가 없다. 운영에 나가기 전이라 트랜잭션 안에서 만든다) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sessionStatements).toHaveLength(1);
+    expect(sessionStatements[0]).toMatch(/^CREATE INDEX "purchase_order_session_idx" ON "purchase_order" /);
+    expect(sessionBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME|ALTER)\b/i);
+    expect(sessionBody).not.toMatch(/\bUNIQUE\b|\bDEFAULT\b|\bCHECK\b|\bWHERE\b|ADD\s+COLUMN|CONCURRENTLY|PARTITION/i);
+    expect(sessionFile).not.toMatch(/^--\s*peaket:no-transaction\s*$/m);
+    expect(sessionBody.split(BREAKPOINT)).toHaveLength(1);
+  });
+
+  test('리뷰 고침 M1_조건을 두지 않는다(status를 조건에 넣으면 상태를 바꾸는 UPDATE가 모두 HOT 갱신에서 빠진다): SQL과 schema.ts의 인덱스가 같은 이름·열(purchase_session_id)이고 유일 인덱스가 아니다 (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+    expect(orderShape.indexes.find((i) => i.name === SESSION_INDEX)).toEqual({ name: SESSION_INDEX, unique: false, columns: ['purchase_session_id'], where: undefined });
+    expect(canon(sessionStatements[0]!).replace(/;$/, '')).toBe(`create index ${SESSION_INDEX} on purchase_order using btree(purchase_session_id)`);
+  });
+
+  test('리뷰 고침 M1_옛 이름의 파일·저널 항목이 남지 않는다(커밋 전이라 파일을 고쳤다) (ADR0107)', () => {
+    expect(existsSync(join(MIGRATIONS, '0011_order_open_session_idx.sql'))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] };
+    expect(journal.entries[11]!.tag).toBe(SESSION_TAG);
+    expect(journal.entries.map((e) => e.tag)).not.toContain('0011_order_open_session_idx');
+  });
+
+  test('쓰기가 많은 주문 표의 인덱스는 0004의 유일 인덱스와 0011의 구매 세션 인덱스 둘뿐이다(예외를 더 늘리지 않는다, data.md §5.1) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+    expect(orderShape.indexes.map((i) => i.name)).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
+    expect(orderIndexesAt('0011')).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
+  });
+});
+
+/** 0012(회차 판매 상태 판정, PRF-144, ADR-0122): event_sale 표와 seat_sale_pending_idx */
+describe('마이그레이션 SQL 파일(0012_event_sale.sql, PRF-144)', () => {
+  const STATUS_LIST = "'UPCOMING','ON_SALE','ALL_HELD','SOLD_OUT','ENDED'";
+  type SnapTable = { columns: Record<string, unknown>; indexes?: Record<string, { isUnique: boolean; where?: string; columns: { expression: string }[]; concurrently: boolean; method: string }>; foreignKeys?: Record<string, unknown>; checkConstraints?: Record<string, unknown> };
+  const snap = (idx: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', `${idx}_snapshot.json`), 'utf8')) as { tables: Record<string, SnapTable> };
+
+  test('ST25_ADR0122_ 문 둘뿐이다: event_sale을 만들고 seat_sale에 일반 부분 인덱스 하나를 만든다(다른 표를 바꾸거나 지우는 문·UNIQUE·CONCURRENTLY가 없고 트랜잭션 안에서 돈다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(eventSaleStatements).toHaveLength(2);
+    expect(eventSaleStatements[0]).toMatch(/^CREATE TABLE "event_sale" /);
+    expect(eventSaleStatements[1]).toMatch(/^CREATE INDEX "seat_sale_pending_idx" ON "seat_sale" /);
+    expect(eventSaleBody).not.toMatch(/\b(ALTER|DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(eventSaleBody).not.toMatch(/\bUNIQUE\b|CONCURRENTLY|PARTITION/i);
+    expect(eventSaleFile).not.toMatch(/^--\s*peaket:no-transaction\s*$/m);
+    expect(eventSaleBody.split(BREAKPOINT)).toHaveLength(2);
+  });
+
+  test('ST25_ADR0122_ event_sale의 열 이름·종류·널 허용이 정본과 같다(previous_status·open_at·first_sold_out_at만 비울 수 있다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(eventSaleShape)).toEqual([
+      ['event_id', 'uuid', true],
+      ['status', 'text', true],
+      ['previous_status', 'text', false],
+      ['version', 'bigint', true],
+      ['sellable_seats', 'integer', true],
+      ['available', 'integer', true],
+      ['held', 'integer', true],
+      ['paying', 'integer', true],
+      ['sold_out_tiers', 'text[]', true],
+      ['open_at', TZ, false],
+      ['first_sold_out_at', TZ, false],
+      ['reopen_count', 'integer', true],
+      ['changed_at', TZ, true],
+      ['counted_at', TZ, true],
+    ]);
+    expect(getTableConfig(eventSale).schema).toBeUndefined();
+  });
+
+  test('ST25_ADR0122_ 기본 키는 회차 하나이고(회차마다 한 행), 기본값은 sold_out_tiers(빈 배열)·reopen_count(0) 둘이며 인덱스·외래 키는 없다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(eventSaleShape.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['event_id']);
+    expect(eventSaleShape.primaryKeys).toEqual([]);
+    expect(eventSaleShape.columns.filter((c) => c.hasDefault).map((c) => c.name)).toEqual(['sold_out_tiers', 'reopen_count']);
+    expect(eventSaleShape.indexes).toEqual([]);
+    expect(getTableConfig(eventSale).foreignKeys).toEqual([]);
+    const c = canon(eventSaleStatements[0]!);
+    expect(c).toContain('event_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect([...eventSaleBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(2);
+    expect(c).toContain("sold_out_tiers text[] default '{}'::text[] not null");
+    expect(c).toContain('reopen_count integer default 0 not null');
+  });
+
+  test('ST25_ADR0122_ CHECK 넷의 이름·식이 정본과 같다: 상태 다섯(지금·앞 상태), 판 번호 1 이상, 셈과 reopen_count 0 이상 [ASVS v5.0.0-2.3.2]', () => {
+    expect(eventSaleShape.checks).toEqual([
+      { name: 'event_sale_status_check', expr: canon(`status in (${STATUS_LIST})`) },
+      { name: 'event_sale_previous_status_check', expr: canon(`previous_status in (${STATUS_LIST})`) },
+      { name: 'event_sale_version_check', expr: canon('version >= 1') },
+      { name: 'event_sale_counts_check', expr: canon('sellable_seats >= 0 and available >= 0 and held >= 0 and paying >= 0 and reopen_count >= 0') },
+    ]);
+  });
+
+  test('ST25_ADR0122_ 상태 CHECK의 값 목록은 도메인 SALE_STATUSES와 같은 값·차례다 [ASVS v5.0.0-2.3.2]', () => {
+    for (const i of [0, 1]) expect(literalsOf(eventSaleShape.checks[i]!.expr)).toEqual([...SALE_STATUSES]);
+  });
+
+  test('ST25_ADR0122_ SQL의 만드는 문이 schema.ts의 열·CHECK와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const body = eventSaleStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(eventSaleShape.columns.map((c) => c.name));
+    const c = canon(body);
+    for (const col of eventSaleShape.columns) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+    for (const k of eventSaleShape.checks) expect(c, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    expect((c.match(/constraint /g) ?? []).length).toBe(eventSaleShape.checks.length);
+  });
+
+  test('ST25_ADR0122_ 리뷰 고침 L11: 결제 중 셈 인덱스 seat_sale_pending_idx는 seat_sale (event_id, reserved_at) WHERE status = PENDING의 btree 일반 인덱스다(승인 기한 조건까지 인덱스로 거른다, SQL·schema.ts) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.find((i) => i.name === PENDING_INDEX)).toEqual({ name: PENDING_INDEX, unique: false, columns: ['event_id', 'reserved_at'], where: canon("status = 'PENDING'") });
+    expect(canon(eventSaleStatements[1]!).replace(/;$/, '')).toBe(`create index ${PENDING_INDEX} on seat_sale using btree(event_id,reserved_at)where ${canon("status = 'PENDING'")}`);
+  });
+
+  test('ST25_ADR0122_ 0011 → 0012 스냅샷: event_sale 표 하나가 새로 생기고 seat_sale에 그 인덱스 하나만 늘었다(seat_sale의 열·활성 유일 인덱스·외래 키·check와 다른 표는 같다) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snap('0011').tables;
+    const after = snap('0012').tables;
+    expect(Object.keys(after).filter((n) => !(n in before))).toEqual(['public.event_sale']);
+    expect(Object.keys(before).filter((n) => !(n in after))).toEqual([]);
+    for (const name of Object.keys(before)) {
+      if (name === 'public.seat_sale') continue;
+      expect(after[name], name).toEqual(before[name]);
+    }
+    const b = before['public.seat_sale']!;
+    const a = after['public.seat_sale']!;
+    expect(a.columns, '열').toEqual(b.columns);
+    expect(a.foreignKeys, '외래 키').toEqual(b.foreignKeys);
+    expect(a.checkConstraints, 'check').toEqual(b.checkConstraints);
+    expect(Object.keys(a.indexes ?? {})).toEqual(['seat_sale_active_key', PENDING_INDEX]);
+    expect(a.indexes!['seat_sale_active_key'], '활성 유일 인덱스').toEqual(b.indexes!['seat_sale_active_key']);
+    const added = a.indexes![PENDING_INDEX]!;
+    expect({ unique: added.isUnique, columns: added.columns.map((c) => c.expression), where: canon(added.where!), concurrently: added.concurrently, method: added.method }).toEqual({
+      unique: false,
+      columns: ['event_id', 'reserved_at'],
+      where: canon("status = 'PENDING'"),
+      concurrently: false,
+      method: 'btree',
+    });
+    expect(Object.keys(after['public.event_sale']!.checkConstraints ?? {})).toEqual(eventSaleShape.checks.map((k) => k.name));
+    expect(after['public.event_sale']!.indexes ?? {}).toEqual({});
+  });
+});

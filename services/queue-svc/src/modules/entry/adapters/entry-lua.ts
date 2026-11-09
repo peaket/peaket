@@ -1,6 +1,14 @@
 // 진입 3단계와 묶음의 Lua 원문(docs/features/queue-admission.md §3·'묶음의 첫 구현', docs/data.md §3). 문자열만 두고 아무것도 가져오지 않는다.
 // 운영 어댑터(redis-entry-store.ts)와 성능 측정 도구(loadtest/poc/run.mjs가 이 파일을 읽어 측정 이미지의 lua/ 폴더에 쓴다)가 같은 원문을 쓰게 하려는 것이다.
 // 이름은 명세 specs/queue.qnt의 동작 이름이다.
+// 측정 도구가 이 파일을 그대로 읽으므로 값은 domain/queue.ts를 가져오지 않고 아래에 옮겨 둔다(시험이 견준다).
+export const ARRIVAL_SLOT_MS = 100;
+export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
+export const ARRIVAL_FUTURE_MS = 5_000;
+export const ARRIVAL_WINDOW_SLOTS = 100;
+export const ARRIVAL_CARVE_MAX = 100_000;
+export const ARRIVAL_CARVE_WINDOW_MS = 300;
+export const ARRIVAL_CARVE_WINDOW_MAX = 150_000;
 
 // 회차 키의 수명은 부를 때마다 더 늦은 쪽으로만 늘린다(회차 연기로 판매 종료가 늦춰져도 옛 일정에 사라지지 않게. 당기지는 않는다).
 // 수명이 없는 키(-1, 예: RB-05의 INCRBY로 먼저 생긴 카운터)에도 건다. 없는 키(-2)는 PEXPIREAT이 아무 일도 하지 않는다
@@ -30,14 +38,30 @@ local function nodeId()
   return valueOf(myId())
 end
 `;
-// 사람 슬롯 값 읽기: 번호 기록 {번호}:{세대}:{요청 ID}:{jny}:{vr}, 묶음 기록 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}
-const RECORDED = `'^(%d+):(%d+):([^:]+):([^:]*):([^:]*)$'`;
+// 사람 슬롯 값 읽기: 번호 기록 {번호}:{세대}:{요청 ID}:{jny}:{vr}:{대기표 해시}, 묶음 기록 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}.
+// 맨 뒤 대기표 해시는 대기 취소가 soon·verify의 칸을 찾는 값이다(ADR-0233). 해시가 없는 옛 값도 같은 패턴으로 읽는다
+const RECORDED = `'^(%d+):(%d+):([^:]+):([^:]*):([^:]*):?[0-9a-f]*$'`;
 const BATCHED = `'^BATCH:1:([0-9a-f]+):([^:]+):([^:]*):([^:]*)$'`;
+// 다른 요청의 취소 끝 표지(LEFT:{요청 ID})는 빈 키와 같다(ADR-0233). 같은 요청의 표지는 그대로 두어 늦게 온 기록이 취소를 되살리지 못하게 한다
+const OTHER_LEFT_IS_EMPTY = (rq: string) => `
+if v and string.sub(v, 1, 5) == 'LEFT:' and v ~= 'LEFT:' .. ${rq} then v = nil end`;
 
-// ① enterPreempt: 입장 키가 있으면 거절, 없으면 PENDING:{요청 ID}로 선점(같은 요청은 이어서, 기록이 끝났으면 그 기록)
+// ① enterPreempt: 입장 키가 있으면 거절, 없으면 PENDING:{요청 ID}로 선점(같은 요청은 이어서, 기록이 끝났으면 그 기록).
+// 대기 취소 표지(ADR-0233): LEFT:{요청 ID}·LEAVING:{요청 ID}:…가 이 요청의 것이면 LEFT(새 번호를 주지 않는다). LEFT가 다른 요청의 것이면 빈 키로 본다(다시 참가). LEAVING이 다른 요청의 것이면 BUSY
 export const PREEMPT_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
 local v = redis.call('GET', KEYS[1])
+if v then
+  local gone = string.match(v, '^LEFT:([^:]+)$')
+  if gone then
+    if gone == ARGV[1] then return {'LEFT'} end
+    v = nil
+  else
+    local leaving = string.match(v, '^LEAVING:([^:]+):')
+    if leaving == ARGV[1] then return {'LEFT'} end
+    if leaving then return {'BUSY'} end
+  end
+end
 if not v then
   redis.call('SET', KEYS[1], 'PENDING:' .. ARGV[1], 'PX', ARGV[2])
   return {'PROCEED'}
@@ -64,8 +88,15 @@ return 0
 // 몫마다 한 번만 전진한다(중간-028). 참가자 목록(토큰 해시)은 판매 종료까지만 둔다.
 // 맨 앞에서 세대 키(KEYS[6])의 주 노드 ID를 지금 노드 ID와 견준다. 없으면 쓰고, 다르면 장애 전환 뒤 RB-05 전이라 아무것도 쓰지 않는다(ADR-0181).
 // RB-05가 건너뛰었지만 복제 확인 전(pend)이어도 쓰지 않는다(ADR-0186).
+// 오픈 뒤 번호를 내기 전에 notice의 회차 판매 상태를 본다: SOLD_OUT·ENDED면 아무것도 쓰지 않는다(확인과 번호 내기가 한 Lua라 매진 판이 선 뒤에는 번호가 나가지 않는다, HOT-010, ADR-0214).
+// KEYS: 1 seq, 2 skipped, 3 batch_done, 4 batch_members:1, 5 lobby_members, 6 epoch, 7 notice
 // ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
-// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
+// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
+// 진입 Degraded(ADR-0223 결정 6): KEYS[8] = arr_slots이고, 요청 인수 뒤에 ARGV[8 + 2n] = 칸의 첫 크기, 그 뒤 요청마다 칸 번호(없으면 빈 글). 둘 다 없으면(측정 도구, 쿠키 없는 묶음) 예전과 같다.
+// 쿠키가 있는 요청의 종류: S = 칸 안의 번호, L = 칸이 닫혔거나 없어 카운터 끝, O = 구간이 차서 카운터 끝(값은 모두 번호).
+// 세대가 바뀌면(장애 전환) lost_upto를 적어 옛 칸을 쓰지 않는다. 칸의 used를 잃었을 수 있어 그 칸에서 번호를 다시 주면 이미 나간 번호를 새 세대로 다시 내게 되고, 그 번호가 빠진 번호가 되면 다른 사람의 번호까지 빠진 번호가 된다.
+// 한 Lua에서 떼는 양은 ARRIVAL_CARVE_MAX까지이고, 서버 시각을 ARRIVAL_CARVE_WINDOW_MS로 나눈 시간 창 하나에서 떼는 양은 ARRIVAL_CARVE_WINDOW_MAX까지다(ADR-0243. 복제 지연 안에 잃는 번호가 RB-05의 건너뛰기 안에 들게 한다).
+// 창의 몫이 남았으면 한 호출의 첫 칸은 남은 몫까지 줄여서라도 뗀다. 몫이 없으면 떼지 않고 그 쿠키는 카운터 끝의 번호를 받는다(L). 다음 창에서 이어 뗀다
 export const NUMBER_BATCH_LUA = `${EXTEND}${NODE_ID}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -84,6 +115,8 @@ elseif not (id ~= 'standalone' and ep[2] == sec and string.sub(held, 1, #id + 1)
   if id ~= 'standalone' then redis.call('HSET', KEYS[6], 'chk', sec) end
 end
 if now < tonumber(ARGV[2]) then return {'EARLY'} end
+local sale = redis.call('HGET', KEYS[7], 'saleState')
+if sale == 'SOLD_OUT' or sale == 'ENDED' then return {sale} end
 local gen = redis.call('LLEN', KEYS[2]) + 1
 local n = tonumber(ARGV[7])
 local out = {'OK', gen}
@@ -122,14 +155,121 @@ if ARGV[5] == '1' then
     if size > 0 then redis.call('INCRBY', KEYS[1], size) end
   end
 end
-local last = redis.call('INCRBY', KEYS[1], n)
+local arr = KEYS[8]
+local initial = arr and tonumber(ARGV[8 + 2 * n])
+local kinds = {}
+local values = {}
+local tail = n
+if initial then
+  tail = 0
+  local a = redis.call('HMGET', arr, 'next', 'gen', 'closed_upto', 'first', 'lost_upto', 'cw', 'cn')
+  local nxt, agen, closed, first, lost = tonumber(a[1]), tonumber(a[2]), tonumber(a[3]) or -1, tonumber(a[4]), tonumber(a[5]) or -1
+  -- 칸 떼기 시간 창(ADR-0243): cw = 창 번호, cn = 그 창에서 지금까지 뗀 번호 수. 창이 바뀌면 0부터 센다
+  local cw = math.floor(now / ${ARRIVAL_CARVE_WINDOW_MS})
+  local cn = 0
+  if tonumber(a[6]) == cw then cn = tonumber(a[7]) or 0 end
+  if nxt and not first then first = nxt end
+  if agen and agen ~= gen then
+    if nxt and nxt - 1 > lost then lost = nxt - 1 end
+    redis.call('HSET', arr, 'gen', gen, 'lost_upto', lost)
+  end
+  local carved = 0
+  -- k칸까지 차례로 뗀다. 처음 100칸은 첫 크기, 그 뒤는 직전 100칸이 쓴 번호 최댓값 × 1.5. 직전 칸이 모두 비면 빈 칸을 건너뛰고 k를 새 첫 칸으로 삼아 첫 크기로 다시 뗀다
+  local function carve(k)
+    if not nxt then
+      nxt = k
+      first = k
+      redis.call('HSET', arr, 'next', nxt, 'first', first, 'gen', gen)
+    end
+    if k < nxt then return end
+    local j = nxt
+    while j <= k and carved < ${ARRIVAL_CARVE_MAX} and cn < ${ARRIVAL_CARVE_WINDOW_MAX} do
+      local desired = initial
+      if j - first >= ${ARRIVAL_WINDOW_SLOTS} then
+        local flds = {}
+        for m = j - ${ARRIVAL_WINDOW_SLOTS}, j - 1 do flds[#flds + 1] = m .. ':used' end
+        local used = redis.call('HMGET', arr, unpack(flds))
+        local mx = 0
+        for m = 1, #used do
+          local x = tonumber(used[m])
+          if x and x > mx then mx = x end
+        end
+        desired = math.ceil(mx * 1.5)
+        if desired == 0 then
+          -- 건너뛰는 빈 칸의 범위를 적는다. 이 범위에는 칸 기록이 없어 리더가 훑지 않는다(그 앞 칸의 기록은 남아 있을 수 있다)
+          if k > j then redis.call('HSET', arr, 'gap_from', j, 'gap_to', k - 1) end
+          -- 첫 칸을 옮기기 전에 닫힘 표시가 없으면 옛 첫 칸 앞으로 적는다. 리더의 닫기는 표시가 없으면 first - 1부터 닫으므로, 옮긴 뒤에는 옛 칸을 영영 닫지 못한다
+          redis.call('HSETNX', arr, 'closed_upto', first - 1)
+          j = k
+          first = k
+          desired = initial
+          redis.call('HSET', arr, 'first', first)
+        end
+      end
+      -- 이 호출과 이 시간 창의 남은 몫. 이 창에서 이미 뗐는데 남은 몫보다 크면 칸을 자르지 않고 멈춘다(작게 잘린 칸은 일찍 차서 넘침이 는다). 다음 호출이나 다음 창이 온전한 크기로 뗀다. 새 창의 첫 칸만 호출 상한까지 줄인다
+      local room = math.min(${ARRIVAL_CARVE_MAX} - carved, ${ARRIVAL_CARVE_WINDOW_MAX} - cn)
+      if cn > 0 and desired > room then break end
+      local size = math.min(desired, room)
+      local s = tonumber(redis.call('GET', KEYS[1]) or '0')
+      redis.call('HSET', arr, j .. ':base', s + 1, j .. ':size', size, j .. ':used', 0)
+      redis.call('INCRBY', KEYS[1], size)
+      carved = carved + size
+      cn = cn + size
+      j = j + 1
+    end
+    nxt = j
+    redis.call('HSET', arr, 'next', nxt)
+  end
+  for i = 1, n do
+    local slot = tonumber(ARGV[8 + 2 * n + i])
+    if not slot then
+      tail = tail + 1
+      kinds[i] = 'N'
+    elseif slot <= closed or slot <= lost or slot * ${ARRIVAL_SLOT_MS} > now + ${ARRIVAL_FUTURE_MS} or (slot + 1) * ${ARRIVAL_SLOT_MS} + ${ARRIVAL_CLOSE_AFTER_MS} <= now then
+      tail = tail + 1
+      kinds[i] = 'L'
+    else
+      carve(slot)
+      local f = redis.call('HMGET', arr, slot .. ':base', slot .. ':size', slot .. ':used')
+      if not f[1] then
+        tail = tail + 1
+        kinds[i] = 'L'
+      elseif tonumber(f[3]) >= tonumber(f[2]) then
+        tail = tail + 1
+        kinds[i] = 'O'
+      else
+        kinds[i] = 'S'
+        values[i] = tonumber(f[1]) + tonumber(f[3])
+        redis.call('HINCRBY', arr, slot .. ':used', 1)
+      end
+    end
+  end
+  if carved > 0 then redis.call('HSET', arr, 'cw', cw, 'cn', cn) end
+  extend(arr, ARGV[6])
+end
+local last = 0
+if tail > 0 then last = redis.call('INCRBY', KEYS[1], tail) end
+local at = last - tail
 for i = 1, n do
-  out[#out + 1] = 'N'
-  out[#out + 1] = last - n + i
+  if kinds[i] == 'S' then
+    out[#out + 1] = 'S'
+    out[#out + 1] = values[i]
+  else
+    at = at + 1
+    out[#out + 1] = kinds[i] or 'N'
+    out[#out + 1] = at
+  end
 end
 extend(KEYS[1], ARGV[1])
 extend(KEYS[3], ARGV[1])
 return out
+`;
+
+// 도착 시각 쿠키의 요청 ID를 잡는다(ADR-0223 결정 5). 비었으면 진입 요청 ID로 잡고, 이미 같은 진입 요청이면 받아 준다. 돌려주는 값: 1 받음, 0 다른 진입 요청이 썼다. KEYS: 1 q:arr:{요청 ID}:E, ARGV: 1 진입 요청 ID, 2 수명 밀리초
+export const CLAIM_ARRIVAL_LUA = `
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then return 1 end
+if redis.call('GET', KEYS[1]) == ARGV[1] then return 1 end
+return 0
 `;
 
 // RB-05(docs/infra.md, ADR-0181): 세대 키가 지금 노드 표지와 같으면(다른 파드가 먼저 했다) 아무것도 하지 않는다. 다르면 서버 시각으로 오픈 전이고
@@ -214,7 +354,7 @@ return cfg
 // 같은 요청의 다른 기록이 있으면(같은 요청이 동시에 두 번) 먼저 기록된 값을, 같은 요청이 구간 안에서 먼저 묶음에 들었으면 그 토큰 해시를 돌려준다
 export const RECORD_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[1]')}
 if v and v ~= 'PENDING:' .. ARGV[1] then
   local s, g, rq, jny, vr = string.match(v, ${RECORDED})
   if s and rq == ARGV[1] then return {'SAME', s, g, jny, vr} end
@@ -222,7 +362,9 @@ if v and v ~= 'PENDING:' .. ARGV[1] then
   if bh and brq == ARGV[1] then return {'BATCH', bh} end
   return {'TAKEN'}
 end
-redis.call('SET', KEYS[1], ARGV[2] .. ':' .. ARGV[3] .. ':' .. ARGV[1] .. ':' .. ARGV[5] .. ':' .. ARGV[6], 'PXAT', ARGV[4])
+local tail = ''
+if ARGV[7] and ARGV[7] ~= '' then tail = ':' .. ARGV[7] end
+redis.call('SET', KEYS[1], ARGV[2] .. ':' .. ARGV[3] .. ':' .. ARGV[1] .. ':' .. ARGV[5] .. ':' .. ARGV[6] .. tail, 'PXAT', ARGV[4])
 return {'RECORDED'}
 `;
 
@@ -231,7 +373,7 @@ return {'RECORDED'}
 // 와서 먼저 번호를 기록했으면 그 기록을 돌려준다(SAME)
 export const BATCH_RECORD_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[1]')}
 if v and v ~= 'PENDING:' .. ARGV[1] then
   local bh, brq = string.match(v, ${BATCHED})
   if bh and brq == ARGV[1] then return {'BATCHED', bh} end
@@ -263,7 +405,9 @@ local v = redis.call('GET', KEYS[1])
 if not v then return {'GONE'} end
 local bh, brq, bjny, bvr = string.match(v, ${BATCHED})
 if bh and brq == ARGV[1] and bh == ARGV[2] then
-  redis.call('SET', KEYS[1], ARGV[3] .. ':' .. ARGV[4] .. ':' .. ARGV[1] .. ':' .. bjny .. ':' .. bvr, 'PXAT', ARGV[5])
+  local tail = ''
+  if ARGV[6] and ARGV[6] ~= '' then tail = ':' .. ARGV[6] end
+  redis.call('SET', KEYS[1], ARGV[3] .. ':' .. ARGV[4] .. ':' .. ARGV[1] .. ':' .. bjny .. ':' .. bvr .. tail, 'PXAT', ARGV[5])
   return {'RECORDED', ARGV[3], ARGV[4], bjny, bvr}
 end
 local s, g, rq, jny, vr = string.match(v, ${RECORDED})
@@ -280,6 +424,47 @@ if bh and brq == ARGV[1] and bh == ARGV[2] then redis.call('DEL', KEYS[1]) retur
 return 0
 `;
 
+// pid 키 전환(docs/features/queue-admission.md §3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025): 두 pid의 사람 키는 해시 슬롯이 달라
+// 한 Lua로 묶지 못한다. 앞 키에서 이 요청의 값(번호 기록·묶음 기록)과 수명을 읽고(READ_OWN), 다른 키가 비었거나 이 요청의 값일 때만 옮겨 쓴다(MIRROR).
+// 다른 요청의 값이 있으면 TAKEN, 입장 키가 있으면 ADMITTED다. 옮기지 못하면 앞 키의 이 요청 값을 지운다(DROP_OWN, 선점도 지운다)
+export const READ_OWN_LUA = `
+local v = redis.call('GET', KEYS[1])
+if not v then return {} end
+local s, g, rq = string.match(v, ${RECORDED})
+local bh, brq = string.match(v, ${BATCHED})
+if (s and rq == ARGV[1]) or (bh and brq == ARGV[1]) then return {v, redis.call('PEXPIRETIME', KEYS[1])} end
+return {}
+`;
+
+export const MIRROR_LUA = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[3]')}
+if v and v ~= 'PENDING:' .. ARGV[3] then
+  local s, g, rq = string.match(v, ${RECORDED})
+  local bh, brq = string.match(v, ${BATCHED})
+  if not ((s and rq == ARGV[3]) or (bh and brq == ARGV[3])) then return 'TAKEN' end
+end
+if tonumber(ARGV[2]) > 0 then
+  redis.call('SET', KEYS[1], ARGV[1], 'PXAT', ARGV[2])
+else
+  redis.call('SET', KEYS[1], ARGV[1])
+end
+return 'COPIED'
+`;
+
+export const DROP_OWN_LUA = `
+local v = redis.call('GET', KEYS[1])
+if not v then return 0 end
+local own = v == 'PENDING:' .. ARGV[1]
+if not own then
+  local s, g, rq = string.match(v, ${RECORDED})
+  local bh, brq = string.match(v, ${BATCHED})
+  own = (s and rq == ARGV[1]) or (bh and brq == ARGV[1])
+end
+if own then redis.call('DEL', KEYS[1]) return 1 end
+return 0
+`;
+
 export const MARK_REMOVED_LUA = `${EXTEND}
 redis.call('SETBIT', KEYS[1], ARGV[1], 1)
 extend(KEYS[1], ARGV[2])
@@ -287,10 +472,128 @@ return 1
 `;
 
 // 빠진 번호 비트맵은 회차 일정 사본처럼(판매 종료 + 1일), q:{event:E}:verify는 q:dup처럼(판매 종료) 지운다(docs/data.md §3)
+// 로비 참가 ③(ADR-0231 결정 3): 서버 시각과 로비 표시를 같은 Lua에서 본 뒤 참가자에 넣는다. 표시가 선 뒤에는 넣지 않아 고정한 목록이 바뀌지 않는다(Q-T52⑤).
+// 추가 검증이면 verify에 VERIFYING 값을 쓴다(이미 있으면 그대로).
+// KEYS: 1 batch_done, 2 lobby_members, 3 verify. ARGV: 1 오픈 시각, 2 로비 개방 시각, 3 토큰 해시, 4 참가자 목록 수명, 5 verify 값(없으면 빈 글자), 6 verify 수명
+export const ADD_LOBBY_MEMBER_LUA = `${EXTEND}
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return 'CLOSED' end
+if now < tonumber(ARGV[2]) then return 'NOT_OPEN' end
+redis.call('SADD', KEYS[2], ARGV[3])
+extend(KEYS[2], ARGV[4])
+if ARGV[5] ~= '' then
+  redis.call('HSETNX', KEYS[3], ARGV[3], ARGV[5])
+  extend(KEYS[3], ARGV[6])
+end
+return 'ADDED'
+`;
+// 로비 창 보기(읽기만, ADR-0231 결정 3): 공시 기록을 만들거나 위험 판정을 부르기 전에 서버 시각으로 창을 본다. KEYS: 1 batch_done. ARGV: 1 오픈 시각, 2 로비 개방 시각
+export const LOBBY_WINDOW_LUA = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return 'CLOSED' end
+if now < tonumber(ARGV[2]) then return 'NOT_OPEN' end
+return 'OPEN'
+`;
+// 되돌리기: 표시가 선 뒤에는 고정한 목록을 바꾸지 않는다(§3 '표시가 선 뒤에는'). 대신 주인 없는 자리임을 verify에 ORPHAN으로 적어 게시 때 빠진 번호가 되게 한다(추가 검증 값이 있으면 그대로 둔다. 그 값도 게시 때 빠진 번호가 된다).
+// KEYS: 1 batch_done, 2 lobby_members, 3 verify. ARGV: 1 토큰 해시, 2 verify 수명(판매 종료)
+export const REMOVE_LOBBY_MEMBER_LUA = `${EXTEND}
+if redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then
+  local t = redis.call('TIME')
+  redis.call('HSETNX', KEYS[3], ARGV[1], 'ORPHAN:' .. string.format('%.0f', tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)))
+  extend(KEYS[3], ARGV[2])
+  return 0
+end
+redis.call('SREM', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+return 1
+`;
+// 로비 참가 ④: q:dup이 내 PENDING이거나 비었을 때만 LOBBY 기록으로 바꾼다. KEYS: 1 q:dup, 2 q:adm. ARGV: 1 새 값, 2 요청 ID, 3 수명(판매 종료)
+export const RECORD_LOBBY_LUA = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[2]')}
+if v and v ~= 'PENDING:' .. ARGV[2] then return 'TAKEN' end
+redis.call('SET', KEYS[1], ARGV[1], 'PXAT', ARGV[3])
+return 'RECORDED'
+`;
+export const DROP_LOBBY_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) return 1 end
+return 0
+`;
+// 대기 취소의 번호 돌리기(명세 leave, ADR-0233): 빠진 번호 비트 켜기와 곧 입장 대기열에서 빼기가 한 Lua다. 입장 Lua는 비트를 먼저 보므로 이 뒤에는 곧 입장에 다시 들지 않는다.
+// VERIFYING·PASSED를 지워 취소한 대기표가 입장 확정에서 추가 검증 중이나 통과로 읽히지 않게 한다(BLOCKED·ORPHAN은 둔다).
+// KEYS: 1 removed, 2 verify, 3 soon, 4 soon_at, 5 soon_first. ARGV: 1 번호, 2 해시(없으면 빈 글자), 3 비트맵 수명
+export const LEAVE_NUMBER_LUA = `${EXTEND}
+redis.call('SETBIT', KEYS[1], ARGV[1], 1)
+extend(KEYS[1], ARGV[3])
+if ARGV[2] ~= '' then
+  local v = redis.call('HGET', KEYS[2], ARGV[2])
+  if v and (string.sub(v, 1, 10) == 'VERIFYING:' or string.sub(v, 1, 7) == 'PASSED:') then redis.call('HDEL', KEYS[2], ARGV[2]) end
+  redis.call('ZREM', KEYS[3], ARGV[2])
+  redis.call('ZREM', KEYS[4], ARGV[2])
+  redis.call('HDEL', KEYS[5], ARGV[2])
+end
+return 1
+`;
+// 로비·묶음 참가의 취소(ADR-0233): 표시가 서기 전이면 목록에서 빼고, 선 뒤면 목록을 바꾸지 않고 ORPHAN을 적는다. 게시는 결과 키를 쓴 뒤 ORPHAN을 읽고, 취소는 ORPHAN을 쓴 뒤 결과 키를 읽는다.
+// BLOCKED는 §7의 차단 사유라 덮지 않는다(게시가 BLOCKED도 돌린다). ORPHAN을 적으면 batch_done의 orphan:{구간}을 함께 써서, 게시가 묶음의 해시를 다 읽지 않고도 ORPHAN이 있는지 안다.
+// KEYS: 1 batch_done, 2 목록, 3 verify. ARGV: 1 표시 칸(lobby·1), 2 토큰 해시, 3 verify 수명, 4 창 끝(0이면 보지 않는다). 돌려주는 값: REMOVED·FIXED·CLOSED
+export const LEAVE_MEMBER_LUA = `${EXTEND}
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local fixed = redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1
+if tonumber(ARGV[4]) > 0 and (fixed or now >= tonumber(ARGV[4])) then return 'CLOSED' end
+if not fixed then
+  redis.call('SREM', KEYS[2], ARGV[2])
+  redis.call('HDEL', KEYS[3], ARGV[2])
+  return 'REMOVED'
+end
+local v = redis.call('HGET', KEYS[3], ARGV[2])
+if not v or (string.sub(v, 1, 7) ~= 'ORPHAN:' and string.sub(v, 1, 8) ~= 'BLOCKED:') then
+  redis.call('HSET', KEYS[3], ARGV[2], 'ORPHAN:' .. string.format('%.0f', now))
+  extend(KEYS[3], ARGV[3])
+end
+redis.call('HSET', KEYS[1], 'orphan:' .. ARGV[1], '1')
+return 'FIXED'
+`;
+// 사람 키 바꾸기(ADR-0233): 값이 ARGV[1]일 때만 ARGV[2]로 바꾸고 수명은 그대로 둔다. KEYS: 1 q:dup
+export const SWAP_HELD_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  return 1
+end
+return 0
+`;
+// 셔플 공시 기록 쓰기(ADR-0231 결정 6): 구간의 칸이 비어 있을 때만 쓰고 수명을 늘린다. 공시 시각은 파드 시계가 아니라 Redis 시각이다. 지금 값을 돌려준다.
+// KEYS: 1 shuffle. ARGV: 1 구간, 2 커밋, 3 라운드, 4 봉인 시드, 5 체인, 6 알고리즘 판, 7 수명
+export const WRITE_COMMIT_LUA = `${EXTEND}
+local g = ARGV[1]
+if redis.call('HEXISTS', KEYS[1], 'commit:' .. g) == 0 then
+  local t = redis.call('TIME')
+  local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+  redis.call('HSET', KEYS[1], 'commit:' .. g, ARGV[2], 'round:' .. g, ARGV[3], 'sealed:' .. g, ARGV[4], 'at:' .. g, string.format('%.0f', now), 'chain', ARGV[5], 'algo', ARGV[6])
+  extend(KEYS[1], ARGV[7])
+end
+return redis.call('HMGET', KEYS[1], 'commit:' .. g, 'round:' .. g, 'sealed:' .. g, 'at:' .. g)
+`;
 export const MARK_VERIFYING_LUA = `${EXTEND}
 redis.call('SETBIT', KEYS[1], ARGV[1], 1)
 redis.call('HSETNX', KEYS[2], ARGV[2], ARGV[3])
 extend(KEYS[1], ARGV[4])
 extend(KEYS[2], ARGV[5])
 return 1
+`;
+
+/**
+ * 탈퇴 계정의 사람 키 만료 당기기(docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키', BUILD_ORDER BOT-037).
+ * KEYS = 한 pid의 q:dup·q:adm(회차마다, 해시 태그가 pid라 한 슬롯), ARGV[1] = 기한(밀리초 Unix 시각).
+ * LT라 이미 더 일찍 지워질 키는 그대로이고, 없는 키는 만들지 않는다. 기한이 지났으면 바로 지워진다. 만료를 건 키 수를 돌려준다
+ */
+export const EXPIRE_BY_LUA = `
+local n = 0
+for i = 1, #KEYS do
+  n = n + redis.call('PEXPIREAT', KEYS[i], ARGV[1], 'LT')
+end
+return n
 `;

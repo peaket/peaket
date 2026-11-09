@@ -1,4 +1,4 @@
-// 받는 층: 구간별 대기 상태 파일 경로(openapi GET /v1/queues/{eventId}/segment-states/{segment}.json, ADR-0110, ASVS v5.0.0-3.4.2·14.3.2)
+// 받는 층: 구간별 대기 상태 파일 경로(openapi GET /v1/queues/{eventId}/segment-states/{segment}.json, ADR-0110, [ASVS v5.0.0-3.4.2]·[ASVS v5.0.0-14.3.2])
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { QueueState } from '@peaket/contracts/openapi/model';

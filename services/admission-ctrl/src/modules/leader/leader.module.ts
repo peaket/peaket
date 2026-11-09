@@ -1,11 +1,11 @@
 // 모듈 조립 파일: 리더 루프 포트에 어댑터를 묶는다. 묶음 게시(BatchModule)를 리더가 부른다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotRedis } from '@peaket/platform';
-import { ADMISSION_REDIS, BatchModule, type BatchModuleOptions, PublishBatchResults, WAIT_REDIS } from '../batch/index.js';
+import { ADMISSION_REDIS, BatchModule, type BatchModuleOptions, PublishBatchResults, RevealShuffleSeeds, WAIT_REDIS } from '../batch/index.js';
 import { RedisLeaderStore } from './adapters/redis-leader-store.js';
 import { AdmissionLeader } from './application/admission-leader.js';
 import { LEADER_METRICS, type LeaderMetrics } from './application/leader-metrics.js';
-import { ELECTOR, type Elector, LEADER_STORE, PUBLISHER } from './domain/ports.js';
+import { CONTROL_INPUTS, type ControlInputsReader, ELECTOR, type Elector, LEADER_STORE, PUBLISHER, SEED_REVEALER } from './domain/ports.js';
 
 export interface LeaderModuleOptions {
   redis: HotRedis;
@@ -13,6 +13,8 @@ export interface LeaderModuleOptions {
   elector: Elector;
   batch: Omit<BatchModuleOptions, 'redis'>;
   metrics?: LeaderMetrics;
+  /** 자동 제어 입력(없으면 자동 제어를 끈다, ADR-0226 결정 13) */
+  controlInputs?: ControlInputsReader;
 }
 
 @Module({})
@@ -29,7 +31,9 @@ export class LeaderModule {
         { provide: LEADER_STORE, useClass: RedisLeaderStore },
         { provide: ELECTOR, useValue: o.elector },
         { provide: PUBLISHER, useExisting: PublishBatchResults },
+        { provide: SEED_REVEALER, useExisting: RevealShuffleSeeds },
         ...(o.metrics ? [{ provide: LEADER_METRICS, useValue: o.metrics }] : []),
+        ...(o.controlInputs ? [{ provide: CONTROL_INPUTS, useValue: o.controlInputs }] : []),
       ],
       exports: [AdmissionLeader],
     };

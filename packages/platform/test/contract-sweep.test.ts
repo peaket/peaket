@@ -12,13 +12,11 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 type Doc = { paths: Record<string, Record<string, any>>; components: Record<string, Record<string, any>> };
 
 /**
- * 생성 Zod가 계약과 실제로 다른 곳(이 시험이 찾은 것, 계약 패키지에서 고친다, BUILD_ORDER BAS-040). 비교기가 이것을 잡는 것도 함께 지킨다.
- * orval 8.45는 allOf 안의 읽기 전용 칸(HomeLayout.updatedAt·updatedBy)을 요청 본문 Zod에서 빼지 않는다
+ * 생성 Zod가 계약과 실제로 다른 곳(이 시험이 찾은 것, 계약 패키지에서 고친다). 비교기가 이것을 잡는 것도 함께 지킨다.
+ * BAS-040에서 비웠다: orval 8.45가 allOf 안의 읽기 전용 칸(HomeLayout.updatedAt·updatedBy)을 요청 본문 Zod에서 빼지 않던 것은
+ * 홈 구성 저장 본문을 요청용 HomeLayoutInput 하나로 바꿔 없앴다(요청 본문은 allOf로 잇지 않는다, docs/api/guidelines.md §1)
  */
-const KNOWN: string[] = [
-  'PUT /v1/ops/home-layout 요청 본문 application/json: $.allOf[0].updatedAt: 계약에 없는 칸',
-  'PUT /v1/ops/home-layout 요청 본문 application/json: $.allOf[0].updatedBy: 계약에 없는 칸',
-];
+const KNOWN: string[] = [];
 
 test('DT38_계약의모든작업을_계약Zod로만든문서는_비교기에서계약과같다', { timeout: 60_000 }, async () => {
   const { compareService, readContract } = await import(`${ROOT}tools/ci/service-openapi.mjs`);
@@ -33,7 +31,8 @@ test('DT38_계약의모든작업을_계약Zod로만든문서는_비교기에서�
     for (const m of ['get', 'put', 'post', 'delete', 'patch']) {
       if (!item[m]) continue;
       const key = `${m.toUpperCase()} ${path}`;
-      const prefix = norm(m + path);
+      // 생성 이름은 작업 이름(operationId)에서 온다(CreateEventHoldBody, docs/api/guidelines.md §10 '작업 이름')
+      const prefix = norm(String(item[m].operationId));
       const emitted: Doc = JSON.parse(JSON.stringify(contract));
       const op = emitted.paths[path][m];
       let did = false;

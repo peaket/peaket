@@ -1,8 +1,9 @@
 // 계약에서 만든 스키마가 계약대로 받고 거르는지 본다(바깥 행동, docs/api/guidelines.md §1, 기술 검토 중간-085)
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { OrderEvent, RumSample } from '@peaket/contracts/asyncapi';
+import { OrderEvent, PaymentEvent, RumSample } from '@peaket/contracts/asyncapi';
 import { BehaviorSummary, PaymentAcceptToss, Problem } from '@peaket/contracts/openapi/model';
-import { PostV1QueuesEventIdLobbyParticipantsResponse } from '@peaket/contracts/openapi/queue';
+import { CreateQueueLobbyParticipantResponse } from '@peaket/contracts/openapi/queue';
 
 describe('OpenAPI 구성 요소 스키마', () => {
   test('중간085_Problem본문을받고_상태코드가숫자가아니면_거른다', () => {
@@ -29,9 +30,9 @@ describe('OpenAPI 구성 요소 스키마', () => {
 
 describe('OpenAPI 작업별 스키마', () => {
   test('중간085_로비입장응답_추가검증사유는_열거값이나null만받는다', () => {
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: null }).success).toBe(true);
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: 'RAPID_REQUESTS' }).success).toBe(true);
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: 'UNKNOWN' }).success).toBe(false);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: null }).success).toBe(true);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: 'RAPID_REQUESTS' }).success).toBe(true);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: 'UNKNOWN' }).success).toBe(false);
   });
 });
 
@@ -51,6 +52,12 @@ describe('AsyncAPI 메시지 본문 스키마', () => {
 
   test('중간085_주문사건_가명칸계산실패표시는_기본값false다', () => {
     expect(OrderEvent.parse(order).refMissing).toBe(false);
+  });
+
+  test('P-T50_리뷰 고침 L8: 결제 사건의 refMissing 설명에 카드 모양 오류가 있다(asyncapi·Avro 함께)', () => {
+    expect(PaymentEvent.shape.refMissing.description).toContain('카드 정보 모양');
+    const avsc = JSON.parse(readFileSync(new URL('../../../docs/api/avro/peaket/trade/PaymentEvent.avsc', import.meta.url), 'utf8')) as { fields: { name: string; doc?: string }[] };
+    expect(avsc.fields.find((f) => f.name === 'refMissing')?.doc).toContain('카드 정보 모양');
   });
 
   test('중간085_브라우저지표묶음_형식판은2만받는다', () => {

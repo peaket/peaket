@@ -17,31 +17,31 @@ import * as zod from 'zod';
  * FR-065, ADR-0051, RFC 9449, 추천 적용 2026-10-14, ADR-0062. 기기 자격 전이라 인증 없음. 스캐너 PWA가 ECDSA P-256 키(extractable=false)를 만들고 DPoP 증명(헤더 jwk에 공개키)과 함께 보낸다. 서버는 코드 해시와 DPoP 서명을 확인하고 공개키의 JWK SHA-256 지문(RFC 7638, jkt)을 scanner_device.credential_thumbprint(credential_type=DEVICE_KEY)에 넣는다. 코드 입력은 대소문자·하이픈·공백을 무시한다. 코드별로 실패를 셀 수 없어 출발지 IP당 실패 10분 10회 [가정]로 막는다(성공한 등록은 세지 않는다). 전체 실패가 10분 100회 [가정]를 넘어도 등록 경로는 닫지 않고 SEV3로 알린다(추천 적용 2026-10-28, 기술 검토 낮음-157)
  * @summary 스캐너 기기 등록. 등록 코드와 DPoP 증명으로 기기 안에서 만든 키를 기기 기록에 묶는다
  */
-export const PostV1ScannerDeviceEnrollmentsHeader = zod.object({
+export const CreateScannerDeviceEnrollmentHeader = zod.object({
   "DPoP": zod.string().describe('DPoP 증명(RFC 9449)')
 })
 
-export const PostV1ScannerDeviceEnrollmentsBody = zod.object({
+export const CreateScannerDeviceEnrollmentBody = zod.object({
   "code": zod.string()
-})
+}).strict()
 
-export const PostV1ScannerDeviceEnrollmentsResponse = zod.void()
+export const CreateScannerDeviceEnrollmentResponse = zod.void()
 
 /**
  * FR-046, POL-031, SCR-036, ADR-0051. 등록되고 ACTIVE인 기기만. 확인 코드 8자, 5분, 기기당 시간당 10회 [가정]. 기기 인증만 요구하는 쓰기라 쿠키 경로처럼 위조 요청을 막는다(기본안의 DPoP 증명은 저절로 실리지 않지만 심층 방어로 두고, mTLS 선택지의 인증서는 브라우저가 알아서 싣는다): Content-Type: application/json만 받고(그 밖 415) 빈 객체도 JSON 본문으로 보내며, Origin이 스캐너 PWA 출처(https://scanner.peaket.example)가 아니거나 없으면 거절한다(추천 적용 2026-10-15, ADR-0065 결정 10)
  * @summary 스캐너 로그인 시작(RFC 8628 방식 기기 승인 코드 발급)
  */
-export const PostV1ScannerDeviceAuthorizationsBody = zod.record(zod.string(), zod.never()).refine((() => {
+export const CreateScannerDeviceAuthorizationBody = zod.record(zod.string(), zod.never()).refine((() => {
   const maxProperties = 0;
   return ((v) => Object.keys(v).length <= maxProperties);
 })()).meta({ "maxProperties": 0 }).describe('지금은 빈 객체 {}. 사전 요청 없는 양식 POST로 확인 코드를 발급시키지 못하게 JSON 본문을 요구한다')
 
-export const postV1ScannerDeviceAuthorizationsResponseUserCodeRegExp = new RegExp('^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$');
+export const createScannerDeviceAuthorizationResponseUserCodeRegExp = new RegExp('^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$');
 
 
-export const PostV1ScannerDeviceAuthorizationsResponse = zod.object({
+export const CreateScannerDeviceAuthorizationResponse = zod.object({
   "deviceCode": zod.string().optional().describe('CSPRNG 256비트'),
-  "userCode": zod.string().regex(postV1ScannerDeviceAuthorizationsResponseUserCodeRegExp).optional().describe('스캐너·휴대폰 두 화면에서 같은지 확인하는 8자 코드(RFC 8628 §6.1 문자 집합, ADR-0051)'),
+  "userCode": zod.string().regex(createScannerDeviceAuthorizationResponseUserCodeRegExp).optional().describe('스캐너·휴대폰 두 화면에서 같은지 확인하는 8자 코드(RFC 8628 §6.1 문자 집합, ADR-0051)'),
   "verificationUriComplete": zod.url().optional().describe('QR로 보여 줌. 확인 코드는 URL 조각(#code=)에만 담는다'),
   "expiresIn": zod.int().optional().describe('300초'),
   "interval": zod.int().optional().describe('폴링 최소 간격(초), 기본 5')
@@ -51,17 +51,17 @@ export const PostV1ScannerDeviceAuthorizationsResponse = zod.object({
  * FR-046, ADR-0051. 기기 인증 필수. 대기 중 400 authorization_pending, 너무 잦으면 slow_down, 거부 access_denied, 만료 expired_token(RFC 8628 §3.5). 기기 인증만 요구하는 쓰기라 Content-Type: application/json만 받고(그 밖 415) Origin이 스캐너 PWA 출처가 아니거나 없으면 거절한다(추천 적용 2026-10-15, ADR-0065 결정 10)
  * @summary 승인 확인 폴링 → 현장 스태프 세션 토큰(cnf.jkt = 기기 키 지문, mTLS 선택지는 인증서 지문)
  */
-export const PostV1ScannerTokenBody = zod.object({
+export const CreateScannerTokenBody = zod.object({
   "deviceCode": zod.string()
-})
+}).strict()
 
-export const PostV1ScannerTokenResponse = zod.unknown()
+export const CreateScannerTokenResponse = zod.unknown()
 
 /**
  * FR-035, FR-046, ADR-0051. 기기 키 DPoP + 현장 스태프 토큰(mTLS 선택지는 인증서 + 토큰). 서버가 요청마다 세션·기기 상태 확인. 배치가 없으면 409 NO_PLACEMENT. 서버 시각을 실으므로 Cache-Control: no-store. 읽기라 GET이고 준비 완료 보고는 PUT /v1/scanner/shift/readiness로 나눴다(추천 적용 2026-10-21, ADR-0081)
  * @summary 근무 준비 정보(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호
  */
-export const GetV1ScannerShiftResponse = zod.object({
+export const GetScannerShiftResponse = zod.object({
   "serverTime": zod.iso.datetime({"offset":true}).optional(),
   "eventId": zod.string().optional(),
   "reentryAllowed": zod.boolean().optional(),
@@ -78,23 +78,23 @@ export const GetV1ScannerShiftResponse = zod.object({
  * FR-035, FR-046, ADR-0051. 마지막 보고로 바꾼다(같은 보고를 다시 보내도 결과가 같다). 파트너 현장 운영 현황(gate-status)의 기기 준비 표시가 이 보고를 쓴다(추천 적용 2026-10-21, ADR-0081)
  * @summary 근무 준비 완료 보고(SCR-033). 받은 목록 일련번호·시계 차이·올리지 못한 기록 수
  */
-export const PutV1ScannerShiftReadinessBody = zod.object({
+export const PutScannerShiftReadinessBody = zod.object({
   "packageSeq": zod.int(),
   "clockOffsetMs": zod.int(),
   "pendingUploads": zod.int()
-})
+}).strict()
 
-export const PutV1ScannerShiftReadinessResponse = zod.void()
+export const PutScannerShiftReadinessResponse = zod.void()
 
 /**
  * FR-035, POL-018, ADR-0051. 회차마다 미리 만들어 둔 압축 응답, 기기당 분당 3회 [가정], Cache-Control no-store
  * @summary 회차 목록 전체(티켓별 구역·좌석 표시·상태·유효 키·입장 상태, 폐기 keyId, 마지막 seq). 개인정보 없음
  */
-export const GetV1ScannerEventsEventIdPackageParams = zod.object({
-  "eventId": zod.string()
+export const GetScannerEventPackageParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const GetV1ScannerEventsEventIdPackageResponse = zod.object({
+export const GetScannerEventPackageResponse = zod.object({
   "eventId": zod.string().optional(),
   "reentryAllowed": zod.boolean().optional(),
   "gateZones": zod.array(zod.string()).optional(),
@@ -124,20 +124,20 @@ export const GetV1ScannerEventsEventIdPackageResponse = zod.object({
  * FR-036, ADR-0051. 화면이 켜진 동안 60초마다. 시각이 아니라 일련번호로 이어 받아 빠짐이 없다
  * @summary 변경분(after 다음 서버 일련번호부터: 키 등록·폐기, 티켓 상태, 다른 스캐너 입장 상태, 입장 정책, 기기 배치, 이상 표시, 이 기기 세션 종료)
  */
-export const GetV1ScannerEventsEventIdChangesParams = zod.object({
-  "eventId": zod.string()
+export const GetScannerEventChangesParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const getV1ScannerEventsEventIdChangesQueryLimitMax = 5000;
+export const getScannerEventChangesQueryLimitMax = 5000;
 
 
 
-export const GetV1ScannerEventsEventIdChangesQueryParams = zod.object({
+export const GetScannerEventChangesQueryParams = zod.object({
   "after": zod.int(),
-  "limit": zod.int().max(getV1ScannerEventsEventIdChangesQueryLimitMax).optional()
+  "limit": zod.int().max(getScannerEventChangesQueryLimitMax).optional()
 })
 
-export const GetV1ScannerEventsEventIdChangesResponse = zod.object({
+export const GetScannerEventChangesResponse = zod.object({
   "changes": zod.array(zod.object({
   "seq": zod.int().optional(),
   "kind": zod.enum(['KEY_REGISTERED', 'KEY_REVOKED', 'TICKET_STATUS', 'SCAN_STATE', 'POLICY', 'PLACEMENT', 'FLAG', 'SESSION_TERMINATED']).optional(),
@@ -154,11 +154,11 @@ export const GetV1ScannerEventsEventIdChangesResponse = zod.object({
  * FR-036, FR-067, NFR-025, POL-032, ADR-0051. 서버가 판정 표로 다시 판정해 이상 표시를 만들고 변경 기록에 입장 상태를 남긴다. 기록 시각에 세션이 유효하지 않으면 '세션 밖 기록'으로 표시하고 버리지 않는다. 기기 인증만으로도 되는 쓰기라 Content-Type: application/json만 받고(그 밖 415) Origin이 스캐너 PWA 출처가 아니거나 없으면 거절한다. 기본안은 기기 키 DPoP라 교차 출처 사전 요청에 자격 증명이 필요 없다. mTLS 선택지에서 교차 출처 요청에 기기 인증서가 실리는지는 선택 PoC 5.4.3에서 확인한다(추천 적용 2026-10-15, ADR-0065 결정 10, 기술 검토 중간-057). 스태프 토큰은 선택이지만, 붙였는데 무효(해제·교대·로그아웃으로 세션이 끝남)거나 만료면 토큰만 빼고 기기 인증으로 받아 주지 않는다. 401 invalid_token으로 돌려주고, 앱은 그 토큰을 지운 뒤 같은 묶음을 기기 인증만으로 다시 보낸다(클라이언트 ID 멱등, RFC 9449 §7.1, 추천 적용 2026-10-28, 기술 검토 낮음-074)
  * @summary 스캔 기록 일괄 업로드(클라이언트 ID 멱등, 최대 500건 [가정]). 기기 인증만으로도 된다(로그아웃·해제·만료 뒤 남은 기록)
  */
-export const postV1ScannerScansBodyOverrideNoteMax = 100;
+export const createScannerScanBodyOverrideNoteMax = 100;
 
 
 
-export const PostV1ScannerScansBodyItem = zod.object({
+export const CreateScannerScanBodyItem = zod.object({
   "id": zod.uuid().describe('클라이언트 생성 멱등 ID(UUIDv7)'),
   "eventId": zod.string(),
   "ticketId": zod.string(),
@@ -167,7 +167,7 @@ export const PostV1ScannerScansBodyItem = zod.object({
   "method": zod.enum(['QR', 'OVERRIDE', 'VERIFY']),
   "result": zod.enum(['PASS', 'REJECT', 'CHECK']),
   "reason": zod.enum(['INVALID_QR', 'UNSUPPORTED_VERSION', 'UNKNOWN_TICKET', 'TICKET_CANCELLED', 'KEY_REVOKED', 'KEY_UNKNOWN', 'BAD_SIGNATURE', 'QR_EXPIRED', 'WRONG_ZONE', 'ALREADY_IN', 'NO_EXIT_RECORD', 'NO_ENTRY_RECORD', 'VERIFY_ONLY', 'OVERRIDE_CAMERA', 'OVERRIDE_PHONE_DEAD', 'OVERRIDE_KEY_UNKNOWN', 'OVERRIDE_BOOTH_OFFLINE', 'OVERRIDE_OTHER']).optional(),
-  "overrideNote": zod.string().max(postV1ScannerScansBodyOverrideNoteMax).optional().describe('예외 통과 메모(개인정보 금지)'),
+  "overrideNote": zod.string().max(createScannerScanBodyOverrideNoteMax).optional().describe('예외 통과 메모(개인정보 금지)'),
   "gateZone": zod.string().optional(),
   "keyId": zod.string().optional(),
   "qrTimestamp": zod.iso.datetime({"offset":true}).optional(),
@@ -175,10 +175,10 @@ export const PostV1ScannerScansBodyItem = zod.object({
   "clockOffsetMs": zod.int().optional(),
   "knownSeq": zod.int().describe('판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸)'),
   "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)')
-}).describe('스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)')
-export const PostV1ScannerScansBody = zod.array(PostV1ScannerScansBodyItem).max(500)
+}).strict().describe('스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)')
+export const CreateScannerScanBody = zod.array(CreateScannerScanBodyItem).max(500)
 
-export const PostV1ScannerScansResponse = zod.object({
+export const CreateScannerScanResponse = zod.object({
   "acceptedIds": zod.array(zod.string()).optional(),
   "flags": zod.array(zod.object({
   "flagId": zod.string().optional(),
@@ -196,11 +196,11 @@ export const PostV1ScannerScansResponse = zod.object({
  * FR-066, SCR-052
  * @summary 이 회차 같은 파트너 기기 목록과 준비 상태(현장 책임자)
  */
-export const GetV1ScannerEventsEventIdDevicesParams = zod.object({
-  "eventId": zod.string()
+export const GetScannerEventDevicesParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const GetV1ScannerEventsEventIdDevicesResponse = zod.object({
+export const GetScannerEventDevicesResponse = zod.object({
   "devices": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -211,7 +211,8 @@ export const GetV1ScannerEventsEventIdDevicesResponse = zod.object({
   "ready": zod.boolean().optional(),
   "packageSeq": zod.int().optional(),
   "lastSyncAt": zod.iso.datetime({"offset":true}).optional(),
-  "pendingUploads": zod.int().optional()
+  "pendingUploads": zod.int().optional(),
+  "staffLoggedIn": zod.boolean().optional().describe('그 기기에 지금 현장 스태프가 로그인해 있는지(SCR-037 ⑦ \'로그인\', docs/design/d5 §1.6 16번). 끝나지 않고 만료되지 않은 스캐너 세션이 있으면 참이다. 사람을 가리키는 값은 싣지 않는다 [가정]')
 })).optional(),
   "entriesByZone": zod.record(zod.string(), zod.int()).optional(),
   "rejectsByReason": zod.record(zod.string(), zod.int()).optional(),
@@ -225,40 +226,40 @@ export const GetV1ScannerEventsEventIdDevicesResponse = zod.object({
  * FR-066, ADR-0051. gate_staff·대리 승인 세션은 403
  * @summary 기기 배치(현장 책임자). 같은 파트너 기기만, 온라인에서만
  */
-export const PutV1ScannerEventsEventIdDevicePlacementsDeviceIdParams = zod.object({
-  "eventId": zod.string(),
+export const PutScannerEventDevicePlacementParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "deviceId": zod.string()
 })
 
-export const PutV1ScannerEventsEventIdDevicePlacementsDeviceIdHeader = zod.object({
+export const PutScannerEventDevicePlacementHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const PutV1ScannerEventsEventIdDevicePlacementsDeviceIdBody = zod.object({
+export const PutScannerEventDevicePlacementBody = zod.object({
   "gateZone": zod.string(),
   "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
-})
+}).strict().describe('ScannerPlacement의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(ScannerPlacement)와 같고 응답은 ScannerPlacement(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')
 
-export const PutV1ScannerEventsEventIdDevicePlacementsDeviceIdResponse = zod.unknown()
+export const PutScannerEventDevicePlacementResponse = zod.unknown()
 
 /**
  * FR-066, FR-067. 목록은 커서로 나눈다(파트너 목록과 같은 GateFlagPage, 추천 적용 2026-10-21, ADR-0081)
  * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역 우선)
  */
-export const GetV1ScannerEventsEventIdFlagsParams = zod.object({
-  "eventId": zod.string()
+export const ListScannerEventFlagsParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const getV1ScannerEventsEventIdFlagsQueryLimitMax = 100;
+export const listScannerEventFlagsQueryLimitMax = 100;
 
 
 
-export const GetV1ScannerEventsEventIdFlagsQueryParams = zod.object({
+export const ListScannerEventFlagsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1ScannerEventsEventIdFlagsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listScannerEventFlagsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1ScannerEventsEventIdFlagsResponse = zod.object({
+export const ListScannerEventFlagsResponse = zod.object({
   "items": zod.array(zod.object({
   "flagId": zod.string().optional(),
   "ticketId": zod.string().optional(),
@@ -276,28 +277,28 @@ export const GetV1ScannerEventsEventIdFlagsResponse = zod.object({
  * FR-066, ADR-0051. 부정 의심·판단 불가는 CS 처리함으로 간다. 이상 표시 ID만으로 찾고 서버가 그 표시가 스캐너 토큰의 회차 것인지 확인한다(다르면 403)(추천 적용 2026-10-21, ADR-0081)
  * @summary 이상 표시 현장 확인 결과 기록(정상 확인·부정 의심·판단 불가)
  */
-export const PostV1ScannerFlagsFlagIdResolutionParams = zod.object({
+export const CreateScannerFlagResolutionParams = zod.object({
   "flagId": zod.string()
 })
 
-export const postV1ScannerFlagsFlagIdResolutionBodyNoteMax = 100;
+export const createScannerFlagResolutionBodyNoteMax = 100;
 
 
 
-export const PostV1ScannerFlagsFlagIdResolutionBody = zod.object({
+export const CreateScannerFlagResolutionBody = zod.object({
   "status": zod.enum(['OK', 'SUSPECT', 'UNDETERMINED']),
-  "note": zod.string().max(postV1ScannerFlagsFlagIdResolutionBodyNoteMax).optional().describe('개인정보 금지')
-})
+  "note": zod.string().max(createScannerFlagResolutionBodyNoteMax).optional().describe('개인정보 금지')
+}).strict()
 
-export const PostV1ScannerFlagsFlagIdResolutionResponse = zod.unknown()
+export const CreateScannerFlagResolutionResponse = zod.unknown()
 
 /**
  * FR-066, ADR-0050 결정 2, ADR-0051 결정 11. 코드는 8자·10분·한 번. 책임자당 10분 5회 실패 제한 [가정]
  * @summary 부스 재발급 허용(현장 책임자가 관객 화면의 부스 코드를 찍음). 그 티켓의 BOOTH 등록을 10분 허용
  */
-export const PostV1ScannerBoothAuthorizationsBody = zod.object({
+export const CreateScannerBoothAuthorizationBody = zod.object({
   "boothCode": zod.string()
-})
+}).strict()
 
-export const PostV1ScannerBoothAuthorizationsResponse = zod.unknown()
+export const CreateScannerBoothAuthorizationResponse = zod.unknown()
 

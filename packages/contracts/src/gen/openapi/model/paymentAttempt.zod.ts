@@ -17,6 +17,13 @@ export const PaymentAttempt = zod.object({
   "switched": zod.boolean().optional().describe('결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다(CMP-027 pg-switched)'),
   "holdExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085)'),
   "checkout": zod.union([zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
   "clientKey": zod.string(),
   "customerKey": zod.string(),
   "orderId": zod.string(),
@@ -24,7 +31,7 @@ export const PaymentAttempt = zod.object({
   "amount": zod.int().describe('원 단위'),
   "successUrl": zod.url(),
   "failUrl": zod.url()
-}).strict(),zod.object({
+}),zod.object({
   "storeId": zod.string(),
   "channelKey": zod.string(),
   "paymentId": zod.string().describe('pay-{orderId}'),
@@ -33,7 +40,7 @@ export const PaymentAttempt = zod.object({
   "currency": zod.string().describe('결제 통화. SDK에 넘기는 값의 표기는 연동 때 포트원 문서로 확인한다'),
   "redirectUrl": zod.url(),
   "customer": zod.record(zod.string(), zod.string()).optional().describe('채널이 요구하는 구매자 항목만(이메일·휴대폰. SDK 필드 이름은 연동 때 확인)')
-}).strict()]).describe('결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028)')
+})]).describe('결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028)')
 }).describe('결제 시도(POL-036, ADR-0044). 결제창을 열기 직전에 만든다. 주문당 활성 시도는 1건이고 새 시도는 결제 접수 전의 이전 시도를 대체한다')
 
 export type PaymentAttempt = zod.input<typeof PaymentAttempt>;

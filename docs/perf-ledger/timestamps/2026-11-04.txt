@@ -1,0 +1,7 @@
+f974dcb7f81846659d2fa0eb7ab35dad30923f97f5fa308668fc137d0e309df2  runs/2026-11-04-st27-prod-b-five-same-notls-r1-local-poc/SHA256SUMS
+37a2066f399b91bbb5b21ea428f1bb707dbc77bdbd763f75d2c2ae46d6b07683  runs/2026-11-04-st27-prod-b-five-same-tls-r1-local-poc/SHA256SUMS
+c24d7e239c13d10ade14a55edd884e91dafa8209520d8d7a00aa98f014f07d26  runs/2026-11-04-st27-prod-b-five-same-tls-r2-local-poc/SHA256SUMS
+47124c416777a06d80fe7dccd186ace081232b2abb3d0b0ee8195197c543b2a7  runs/2026-11-04-st27-prod-b-five-same-tls-r3-local-poc/SHA256SUMS
+5cc652ea39a385c0908d9f4e0f4a41c83381e3c4588937dead6c247e7421b71a  runs/2026-11-04-st27-prod-b-five-spread-tls-r1-local-poc/SHA256SUMS
+5f18d85900fcfe69be688a281c9c2eeb82de76104957d2fc3c61b821fff6da96  runs/2026-11-04-st27-prod-b-one-same-notls-r1-local-poc/SHA256SUMS
+762efde7c34be88863249397771a63cbbf71da6db74e92898370acd49ff96329  runs/2026-11-04-st27-prod-b-one-same-tls-r1-local-poc/SHA256SUMS

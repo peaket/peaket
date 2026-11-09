@@ -1,4 +1,4 @@
-// 리프레시 토큰 회전·재시도 유예·재사용 탐지와 세션 종료 사건(docs/features/identity.md §3 '토큰 수명주기 구현', I-T4, I-T3의 발행 쪽, ASVS v5.0.0-7.2.4·7.4.1).
+// 리프레시 토큰 회전·재시도 유예·재사용 탐지와 세션 종료 사건(docs/features/identity.md §3 '토큰 수명주기 구현', I-T4, I-T3의 발행 쪽, [ASVS v5.0.0-7.2.4]·[ASVS v5.0.0-7.4.1]).
 // 메모리 저장소(단위)와 PostgreSQL 저장소(통합)에 같은 시험을 돌린다.
 import { describe, expect, test } from 'vitest';
 import type { CreateSessionInput } from '../src/modules/session/application/create-session.js';
@@ -36,6 +36,23 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(k.signals.seen.at(-1)).toBe('refresh:fan:rotated');
     });
 
+    test('I-T4_서명이실패하면_회전을쓰지않아_30초가지나도옛토큰으로다시갱신되고_탈취로보지않는다(BOT-130이넘긴것) [ASVS v5.0.0-7.2.4]', async () => {
+      const t = await make();
+      const k = await kit(t.store);
+      const s = await login(k);
+      const access = k.signer.access.bind(k.signer);
+      k.signer.access = async () => {
+        throw new Error('서명 키를 읽지 못했다');
+      };
+      await expect(k.refresh.run({ refreshToken: s.refreshToken })).rejects.toThrow('서명 키');
+      k.signer.access = access;
+      k.clock.advance(31_000);
+      const r = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
+      expect(r.sessionId).toBe(s.sessionId);
+      expect(k.signals.seen.at(-1)).toBe('refresh:fan:rotated');
+      expect(await t.isTerminated(s.sessionId)).toBe(false);
+    });
+
     test('I-T4_②_응답을잃고30초안에바로앞토큰으로다시갱신하면_새쌍을한번더주고세션이이어진다', async () => {
       const t = await make();
       const k = await kit(t.store);
@@ -56,7 +73,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       const lost = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       ok(await k.refresh.run({ refreshToken: s.refreshToken }));
-      expect(await k.refresh.run({ refreshToken: lost.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: lost.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
       expect(await t.terminations(s.accountId)).toEqual([[s.sessionId, 'REFRESH_REUSE']]);
       expect(k.signals.seen.at(-1)).toBe('refresh:fan:reused');
@@ -68,7 +85,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       k.clock.advance(31_000);
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
     });
 
@@ -78,7 +95,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       const r1 = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       ok(await k.refresh.run({ refreshToken: r1.refreshToken }));
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
     });
 
     test('I-T4_⑤_새토큰을한번쓴뒤바로앞토큰을유예안에쓰면_탈취다', async () => {
@@ -91,7 +108,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       ok(await k.refresh.run({ refreshToken: r1.refreshToken }));
       k.clock.advance(5_000);
       // 그 앞 토큰(s)은 첫 회전에서 10초 안이지만 이제 두 대 앞이다
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
     });
 
@@ -101,7 +118,8 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(await k.refresh.run({ refreshToken: 'x'.repeat(43) })).toEqual({ result: 'INVALID' });
       const s = await login(k);
       await k.end.run({ sessionId: s.sessionId, accountId: s.accountId });
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'INVALID' });
+      // 끝난 세션의 토큰에는 끝난 까닭이 실린다(ADR-0235, I-T78)
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'INVALID', ended: 'LOGOUT' });
       const s2 = await login(k);
       k.clock.advance(14 * 24 * 3_600_000 + 1);
       expect(await k.refresh.run({ refreshToken: s2.refreshToken })).toEqual({ result: 'INVALID' });

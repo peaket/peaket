@@ -1,6 +1,6 @@
 // 로그인 경로 시험 도구: identity-svc SessionService 대역(gRPC, 계약 설명자로 띄운다), 쿠키 모음을 가진 브라우저 흉내.
 // identity 쪽 규칙(멱등·기기 한도·연결 확인)의 정본 시험은 services/identity-svc에 있고, 이 대역은 웹 앱 서버가 보내고 받는 값만 흉내 낸다.
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
@@ -16,7 +16,7 @@ export async function startIdentityStub() {
   const sessions = new Map(); // sessionId → { accountId, ended }
   const keys = new Map(); // 멱등 키 → { provider, sub, sessionId }
   const calls = [];
-  const mode = { endFails: false, createFails: false };
+  const mode = { endFails: false, createFails: false, proposeFor: null, addResult: null, addFails: false };
   const sign = (sub, sid, typ = 'at+jwt', expSec = 900, at = Date.now()) =>
     new SignJWT({ sid })
       .setProtectedHeader({ alg: 'ES256', typ, kid: 'fan-test' })
@@ -27,6 +27,18 @@ export async function startIdentityStub() {
       .setExpirationTime(Math.floor(at / 1000) + expSec)
       .sign(privateKey);
   const fail = (cb, code, details) => cb({ code: grpc.status[code], details });
+  const proposals = new Map();
+  const sessionOf = async (accountId, sessionId) => {
+    const now = Date.now();
+    return {
+      account_id: accountId,
+      session_id: sessionId,
+      access_token: await sign(accountId, sessionId),
+      access_token_expires_at_ms: now + 900_000,
+      refresh_token: `rt-${randomUUID()}`,
+      refresh_token_expires_at_ms: now + 14 * 86_400_000,
+    };
+  };
 
   const def = protoLoader.fromJSON(identityV1Identity, OPTS);
   const pkg = grpc.loadPackageDefinition(def).peaket.identity.v1;
@@ -39,24 +51,67 @@ export async function startIdentityStub() {
       const seen = keys.get(r.idempotency_key);
       if (seen && (seen.provider !== r.provider || seen.sub !== r.provider_user_id)) return fail(cb, 'ALREADY_EXISTS', '다른 내용');
       const k = `${r.provider}|${r.provider_user_id}`;
+      let linked = 'PROVIDER_UNSPECIFIED';
+      if (r.link_proposal_id) {
+        // 연결 제안을 따라 온 로그인(identity §2.1): 묶음 값이 맞고, 이 계정이 제안의 대상이면 새 제공자를 잇는다
+        const p = proposals.get(r.link_proposal_id);
+        if (!p || p.binding !== r.link_binding) return fail(cb, 'NOT_FOUND', '연결 제안 없음');
+        if (accounts.get(k) === undefined || accounts.get(k) !== accounts.get(p.target)) {
+          p.attempts += 1;
+          if (p.attempts >= 3) proposals.delete(r.link_proposal_id);
+          return cb(null, { link_mismatch: { attempts_left: Math.max(0, 3 - p.attempts) }, new_account: false });
+        }
+        if (!accounts.has(p.newKey)) {
+          accounts.set(p.newKey, accounts.get(k));
+          linked = p.newProvider;
+        }
+        proposals.delete(r.link_proposal_id);
+      } else if (!accounts.has(k) && r.email_verified && mode.proposeFor && r.email === mode.proposeFor.email) {
+        // 같은 이메일의 계정이 있다고 흉내 낸다(mode.proposeFor.target = 'PROVIDER_KAKAO|4000001')
+        const id = randomBytes(16).toString('base64url');
+        const binding = randomBytes(32).toString('base64url');
+        proposals.set(id, { binding, target: mode.proposeFor.target, newKey: k, newProvider: r.provider, email: r.email, attempts: 0, expiresAt: Date.now() + 600_000 });
+        return cb(null, { link_proposal_id: id, link_binding: binding, new_account: false });
+      }
       const newAccount = !accounts.has(k);
       if (newAccount) accounts.set(k, randomUUID());
       const accountId = accounts.get(k);
       const sessionId = seen?.sessionId ?? randomUUID();
       sessions.set(sessionId, { accountId, ended: false });
       keys.set(r.idempotency_key, { provider: r.provider, sub: r.provider_user_id, sessionId });
-      const now = Date.now();
-      cb(null, {
-        session: {
-          account_id: accountId,
-          session_id: sessionId,
-          access_token: await sign(accountId, sessionId),
-          access_token_expires_at_ms: now + 900_000,
-          refresh_token: `rt-${randomUUID()}`,
-          refresh_token_expires_at_ms: now + 14 * 86_400_000,
-        },
-        new_account: newAccount,
-      });
+      cb(null, { session: await sessionOf(accountId, sessionId), new_account: newAccount, linked_provider: linked });
+    },
+    AddProvider(call, cb) {
+      const r = call.request;
+      calls.push({ method: 'AddProvider', request: r });
+      if (mode.addFails) return fail(cb, 'UNAVAILABLE', '대역 장애');
+      const s = sessions.get(r.session_id);
+      if (!s || s.ended || s.accountId !== r.account_id || !r.reauth_token) return cb(null, { result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
+      if (mode.addResult) return cb(null, { result: mode.addResult, merge_proposal_id: mode.addResult === 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT' ? (mode.mergeProposalId ?? '') : '' });
+      const k = `${r.provider}|${r.provider_user_id}`;
+      if (accounts.has(k)) return cb(null, { result: accounts.get(k) === r.account_id ? 'ADD_PROVIDER_RESULT_ALREADY_LINKED' : 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT' });
+      accounts.set(k, r.account_id);
+      cb(null, { result: 'ADD_PROVIDER_RESULT_LINKED' });
+    },
+    GetLinkProposal(call, cb) {
+      const r = call.request;
+      calls.push({ method: 'GetLinkProposal', request: r });
+      const p = proposals.get(r.link_proposal_id);
+      if (!p || p.binding !== r.link_binding) return fail(cb, 'NOT_FOUND', '연결 제안 없음');
+      cb(null, { existing_provider: p.target.split('|')[0], new_provider: p.newProvider, expires_at_ms: p.expiresAt, attempts_left: 3 - p.attempts });
+    },
+    async SeparateAccount(call, cb) {
+      const r = call.request;
+      calls.push({ method: 'SeparateAccount', request: r });
+      const p = proposals.get(r.link_proposal_id);
+      if (!p || p.binding !== r.link_binding) return fail(cb, 'NOT_FOUND', '연결 제안 없음');
+      proposals.delete(r.link_proposal_id);
+      const newAccount = !accounts.has(p.newKey);
+      if (newAccount) accounts.set(p.newKey, randomUUID());
+      const accountId = accounts.get(p.newKey);
+      const sessionId = randomUUID();
+      sessions.set(sessionId, { accountId, ended: false });
+      cb(null, { session: await sessionOf(accountId, sessionId), new_account: newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' });
     },
     EndSession(call, cb) {
       calls.push({ method: 'EndSession', request: call.request });
@@ -86,6 +141,8 @@ export async function startIdentityStub() {
     calls,
     mode,
     sessions,
+    accounts,
+    proposals,
     /** 시험이 직접 만든 액세스 토큰(만료된 것 등) */
     sign,
     close: () => new Promise((r) => server.tryShutdown(() => r())),

@@ -22,7 +22,24 @@ export const Ticket = zod.object({
   "transferLocked": zod.boolean().default(ticketTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
   "transferLockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(소명 요청 + 14일 [가정], 연장 없음). 잠겼을 때만 싣고 아니면 null이다. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료가 먼저 오면 그때 풀린다(추천 적용 2026-10-31, ADR-0173)'),
   "transferDeadline": zod.iso.datetime({"offset":true}).optional(),
-  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)')
+  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)'),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "placeName": zod.string().optional().describe('장소'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
+  "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
+  "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt)')
 })
 
 export type Ticket = zod.input<typeof Ticket>;

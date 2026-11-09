@@ -17,6 +17,7 @@ const AT = '__Secure-peaket_at';
 const RT = '__Secure-peaket_rt';
 const OIDC = '__Host-peaket_oidc';
 const REAUTH = '__Host-peaket_reauth';
+const LINK = '__Host-peaket_link';
 const PROVIDER = { kakao: 'PROVIDER_KAKAO', naver: 'PROVIDER_NAVER', google: 'PROVIDER_GOOGLE' };
 
 const config = (origin) => ({
@@ -44,8 +45,8 @@ after(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(op.mode, { wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true });
-  Object.assign(identity.mode, { endFails: false, createFails: false });
+  Object.assign(op.mode, { tokenStatus: 0, tokenDelayMs: 0, onToken: null, kakaoUnverified: false, kakaoUserinfoFails: false, wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true });
+  Object.assign(identity.mode, { endFails: false, createFails: false, proposeFor: null, addResult: null, addFails: false });
   op.users.kakao.sub = '4000001';
   clock.offset = 0;
   logs.length = 0;
@@ -56,7 +57,18 @@ const login = (b, provider = 'kakao', fields = {}, origin = web.url) => b.go(`${
 /** 실패 사건만(성공 사건 login.completed 등은 뺀다) */
 const failures = () => logs.filter((l) => l.event.endsWith('.failed'));
 const lastCall = (method) => identity.calls.filter((c) => c.method === method).at(-1)?.request;
-const GENERIC = '로그인하지 못했습니다. 처음부터 다시 시도해 주세요';
+/**
+ * 로그인 목적의 실패는 로그인 화면(SCR-004)의 상태로 303이다(ADR-0202 결정 4): '에러'는 error=failed, 끊긴 공급자는 error=down&provider=.
+ * 이유 범주는 서버 로그에만 남고 주소에는 싣지 않는다. 그 이동 한 번을 돌려준다
+ */
+function toLoginScreen(r, { error = 'failed', provider, next = '/' } = {}, m = '') {
+  const trail = r.trail ?? [{ status: r.status, location: r.headers.get('location'), setCookie: r.headers.getSetCookie() }];
+  const hop = trail.find((t) => t.location?.startsWith('/login?'));
+  assert.ok(hop, `로그인 화면으로 가지 않았다 ${m} ${JSON.stringify(trail.map((t) => [t.status, t.location]))}`);
+  assert.equal(hop.status, 303, m);
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(hop.location.slice('/login?'.length))), { next, error, ...(provider ? { provider } : {}) }, m);
+  return hop;
+}
 
 /** 콜백 직전에서 멈춘 로그인(코드·state를 손에 쥔다) */
 async function stopAtCallback(b, provider = 'kakao') {
@@ -118,8 +130,7 @@ test('I-T71_② 진행 쿠키 없는 다른 브라우저의 콜백은 거절한�
   const cb = await stopAtCallback(new Browser());
   const other = new Browser();
   const r = await other.go(cb.toString());
-  assert.equal(r.res.status, 400);
-  assert.equal(r.text, GENERIC);
+  toLoginScreen(r);
   assert.deepEqual(other.names(), []);
   assert.equal(lastCall('CreateSession'), undefined);
   assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'progress']]);
@@ -132,14 +143,14 @@ test('I-T71_③ state를 바꾸거나 진행 쿠키를 고치거나 다시 쓴 �
   changed.searchParams.set('state', 'other-state');
   const saved = b.get(OIDC).value;
   const r1 = await b.go(changed.toString());
-  assert.equal(r1.res.status, 400);
+  toLoginScreen(r1);
   // 실패해도 진행 쿠키는 지운다(한 번만 쓴다)
   assert.equal(b.get(OIDC), undefined);
 
   // 떠 둔 쿠키를 한 글자 바꿔 다시 넣는다
   const tampered = new Browser();
   tampered.store(web.url, [`${OIDC}=${saved.slice(0, -2)}${saved.at(-2) === 'A' ? 'B' : 'A'}${saved.at(-1)}; Path=/`]);
-  assert.equal((await tampered.go(cb.toString())).res.status, 400);
+  toLoginScreen(await tampered.go(cb.toString()));
 
   // 정상 콜백 뒤 떠 둔 쿠키로 같은 콜백을 다시 보낸다(코드는 이미 쓰였다)
   const ok = new Browser();
@@ -148,16 +159,16 @@ test('I-T71_③ state를 바꾸거나 진행 쿠키를 고치거나 다시 쓴 �
   assert.equal((await ok.go(cb2.toString())).trail[0].status, 303);
   const replay = new Browser();
   replay.store(web.url, [`${OIDC}=${kept}; Path=/`]);
-  assert.equal((await replay.go(cb2.toString())).res.status, 400);
+  toLoginScreen(await replay.go(cb2.toString()));
   assert.deepEqual(failures().map((l) => l.reason), ['state', 'progress', 'id_token']);
 });
 
-test('I-T71_③ 다른 제공자의 콜백 주소로 보낸 콜백은 코드를 교환하지 않고 거절한다(혼동 공격, ASVS v5.0.0-10.2.2)', async () => {
+test('I-T71_③ 다른 제공자의 콜백 주소로 보낸 콜백은 코드를 교환하지 않고 거절한다(혼동 공격, [ASVS v5.0.0-10.2.2])', async () => {
   const b = new Browser();
   const cb = await stopAtCallback(b, 'kakao');
   const mixed = new URL(`/login/callback/google${cb.search}`, web.url);
   const r = await b.go(mixed.toString());
-  assert.equal(r.res.status, 400);
+  toLoginScreen(r);
   assert.deepEqual(failures().map((l) => [l.provider, l.reason]), [['google', 'progress']]);
   assert.equal(b.get(OIDC), undefined);
 });
@@ -168,8 +179,7 @@ test('I-T71_③④ 다른 nonce·만료·다른 issuer·다른 aud·JWKS에 없�
     const b = new Browser();
     const r = await login(b);
     op.mode[m] = false;
-    assert.equal(r.res.status, 400, m);
-    assert.equal(r.text, GENERIC, m);
+    toLoginScreen(r, { next: '/my/tickets' }, m);
     assert.deepEqual(b.names(), [], m);
   }
   assert.equal(lastCall('CreateSession'), undefined);
@@ -183,12 +193,13 @@ test('I-T71_④ 발견 문서의 issuer가 다르면 로그인 시작에서 막�
   try {
     op.mode.discoveryIssuer = true;
     const r = await start();
-    assert.equal(r.status, 503);
+    // 공급자를 쓸 수 없다: 그 버튼 아래 '제공자 장애' 상태
+    toLoginScreen(r, { error: 'down', provider: 'google' });
     assert.deepEqual(r.headers.getSetCookie(), []);
     assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'discovery']]);
     // 실패한 발견 문서는 기억하지 않는다: 고쳐지면 바로 된다
     op.mode.discoveryIssuer = false;
-    assert.equal((await start()).status, 303);
+    assert.match((await start()).headers.get('location') ?? '', /^http:\/\/127\.0\.0\.1:\d+\/google\/authorize\?/);
   } finally {
     fresh.close();
   }
@@ -231,7 +242,7 @@ test('I-T71_⑥ 네이버 사용자 정보 id가 ID 토큰 sub와 다르면 막�
   op.mode.naverIdMismatch = true;
   const b = new Browser();
   const r = await login(b, 'naver');
-  assert.equal(r.res.status, 400);
+  toLoginScreen(r, { next: '/my/tickets' });
   assert.deepEqual(b.names(), []);
   assert.deepEqual(logs.map((l) => l.reason), ['userinfo']);
 });
@@ -269,9 +280,9 @@ test('I-T71_identity 세션 생성이 실패하면 이유 없이 실패하고 �
   identity.mode.createFails = true;
   const b = new Browser();
   const r = await login(b);
-  assert.equal(r.res.status, 503);
+  // 이유를 싣지 않는다(주소는 next·error뿐)
+  toLoginScreen(r, { next: '/my/tickets' });
   assert.deepEqual(b.names(), []);
-  assert.ok(!r.text.includes('대역'));
   assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'identity']]);
 });
 
@@ -504,8 +515,8 @@ test('secrets-and-keys_앱 서버 비밀을 바꾸면 옛 비밀로 봉인한 �
   const rotated = createSocialLogin({ ...config(web.url), secret: Buffer.alloc(32, 1), previousSecret: SECRET }, { log: () => {} });
   const forgot = createSocialLogin({ ...config(web.url), secret: Buffer.alloc(32, 1) }, { log: () => {} });
   try {
-    assert.equal((await forgot.dispatch(req())).status, 400);
-    assert.equal((await rotated.dispatch(req())).status, 303);
+    toLoginScreen(await forgot.dispatch(req()));
+    assert.equal((await rotated.dispatch(req())).headers.get('location'), '/');
   } finally {
     rotated.close();
     forgot.close();
@@ -525,5 +536,359 @@ test('I-T20_웹앱서버는_공개키묶음주소(identity GET /internal/jwks/fa
   } finally {
     remote.close();
     await jwks.close();
+  }
+});
+
+// ---- 가입 때 계정 연결 제안(identity §2.1 '가입 때 연결 제안의 첫 구현', BUILD_ORDER BOT-040, I-T29·I-T30) ----
+
+/** 카카오 계정을 먼저 만들고, 구글 로그인이 그 이메일로 연결 제안을 받게 한다 */
+async function proposed(b) {
+  await login(new Browser(), 'kakao');
+  identity.mode.proposeFor = { email: 'fan@gmail.test', target: 'PROVIDER_KAKAO|4000001' };
+  // 앞 시험이 만든 구글 계정과 겹치지 않게 처음 보는 구글 계정으로 한다
+  const sub = op.users.google.sub;
+  op.users.google.sub = 'g-' + Math.random().toString(36).slice(2);
+  const r = await login(b, 'google', { returnTo: '/events/evt-1' });
+  op.users.google.sub = sub;
+  const at = new URL(r.trail.at(-1).url);
+  return { r, at, id: at.searchParams.get('proposal') };
+}
+
+test('I-T29 같은 이메일 계정이 있으면 세션 쿠키 없이 연결 제안 쿠키만 주고 연결 화면(SCR-039)으로 보낸다 [ASVS v5.0.0-3.3.3] [ASVS v5.0.0-6.8.1]', async () => {
+  const b = new Browser();
+  const { at, id } = await proposed(b);
+  assert.equal(at.pathname, '/login/link');
+  assert.match(id, /^[A-Za-z0-9_-]{22}$/);
+  assert.deepEqual(b.names(), [LINK]);
+  const c = b.get(LINK).attrs;
+  assert.equal(c.path, '/');
+  assert.equal(c.samesite, 'Lax');
+  assert.ok(c.httponly && c.secure);
+  assert.equal(Number(c['max-age']), 600);
+  // 묶음 값 원문은 주소에도 쿠키 원문에도 없다(봉인)
+  const p = identity.proposals.get(id);
+  assert.ok(!at.href.includes(p.binding) && !b.get(LINK).value.includes(p.binding));
+  // 제안 조회는 쿠키가 있을 때만
+  const view = await b.go(`${web.url}/v1/identity/link-proposals/${id}`);
+  assert.equal(view.res.status, 200);
+  assert.equal(view.res.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(JSON.parse(view.text), { proposalId: id, existingProvider: 'kakao', newProvider: 'google', expiresAt: new Date(p.expiresAt).toISOString(), attemptsLeft: 3 });
+  assert.equal(lastCall('GetLinkProposal').link_binding, p.binding);
+  assert.equal((await fetch(`${web.url}/v1/identity/link-proposals/${id}`)).status, 404);
+  assert.equal((await b.go(`${web.url}/v1/identity/link-proposals/${'B'.repeat(22)}`)).res.status, 404);
+});
+
+test('I-T30 연결 화면의 기존 제공자 로그인은 제안 ID와 쿠키의 묶음 값을 싣고, 연결되면 세션 쿠키를 주고 연결 성공 화면을 거쳐 처음 주소로 간다', async () => {
+  const b = new Browser();
+  const { id } = await proposed(b);
+  const binding = identity.proposals.get(id).binding;
+  const r = await login(b, 'kakao', { linkProposal: id, returnTo: '/ignored' });
+  const req = lastCall('CreateSession');
+  assert.equal(req.link_proposal_id, id);
+  assert.equal(req.link_binding, binding);
+  const to = new URL(r.trail.find((t) => t.url.includes('/login/link?linked')).url);
+  assert.equal(to.searchParams.get('linked'), 'google');
+  assert.equal(to.searchParams.get('next'), '/events/evt-1');
+  assert.deepEqual(b.names(), [AT, RT]);
+});
+
+test('I-T30 다른 계정으로 로그인하면 세션 없이 남은 시도를 보이고, 세 번째에는 쿠키를 지우고 만료 화면이다', async () => {
+  const b = new Browser();
+  const { id } = await proposed(b);
+  op.users.kakao.sub = '4000999';
+  for (const left of [2, 1]) {
+    const r = await login(b, 'kakao', { linkProposal: id });
+    const at = new URL(r.trail.at(-1).url);
+    assert.equal(at.pathname + at.search, `/login/link?proposal=${id}&mismatch=${left}`);
+    assert.deepEqual(b.names(), [LINK]);
+  }
+  const last = await login(b, 'kakao', { linkProposal: id });
+  assert.equal(new URL(last.trail.at(-1).url).search, '?link=expired');
+  assert.deepEqual(b.names(), []);
+});
+
+test('I-T30 연결 제안 쿠키가 없거나 다른 제안이면 identity를 부르지 않고 만료 화면이다', async () => {
+  const b = new Browser();
+  const { id } = await proposed(b);
+  const other = new Browser();
+  identity.calls.length = 0;
+  const r = await login(other, 'kakao', { linkProposal: id });
+  assert.equal(new URL(r.trail.at(-1).url).search, '?link=expired');
+  assert.equal(identity.calls.filter((c) => c.method === 'CreateSession').length, 0);
+  assert.ok(logs.some((l) => l.event === 'link.expired' && l.reason === 'cookie'));
+});
+
+test('FR-048 새 계정 만들기는 같은 출처 POST만 받고, 새 계정 세션 쿠키와 가입 화면 주소를 주며 다시 누르면 404다 [ASVS v5.0.0-3.5.1]', async () => {
+  const b = new Browser();
+  const { id } = await proposed(b);
+  const url = `${web.url}/v1/identity/link-proposals/${id}/separate-account`;
+  assert.equal((await b.go(url, formPost('https://evil.test', {}))).res.status, 403);
+  const r = await b.go(url, formPost(web.url, {}));
+  assert.equal(r.res.status, 201);
+  assert.deepEqual(JSON.parse(r.text), { next: '/signup/consent?next=%2Fevents%2Fevt-1' });
+  assert.deepEqual(b.names(), [AT, RT]);
+  assert.equal(lastCall('SeparateAccount').link_proposal_id, id);
+  assert.equal((await b.go(url, formPost(web.url, {}))).res.status, 404);
+});
+
+// ---- 리뷰 재현(2026-11-04) ----
+
+test('I-T30 연결 화면에서 시작한 기존 제공자 로그인은 계정을 다시 고르게 한다(카카오 prompt=login, 구글 select_account)', async () => {
+  const b = new Browser();
+  const { id } = await proposed(b);
+  op.users.kakao.sub = '4000999';
+  await login(b, 'kakao', { linkProposal: id });
+  assert.equal(op.lastAuthorize.kakao.prompt, 'login');
+  // 연결 제안 없이 시작한 보통 로그인은 그대로 묻지 않는다
+  await login(new Browser(), 'kakao');
+  assert.equal(op.lastAuthorize.kakao.prompt, undefined);
+});
+
+test('I-T29 카카오는 ID 토큰에 이메일 검증 여부가 없어 사용자 정보로 읽는다(검증 안 됨이면 false)', async () => {
+  await login(new Browser(), 'kakao');
+  assert.equal(lastCall('CreateSession').email_verified, true);
+  op.mode.kakaoUnverified = true;
+  try {
+    op.users.kakao.sub = '4000777';
+    await login(new Browser(), 'kakao');
+    assert.equal(lastCall('CreateSession').email_verified, false);
+  } finally {
+    op.mode.kakaoUnverified = false;
+  }
+});
+
+test('카카오 사용자 정보가 실패해도 로그인은 되고 이메일 검증 여부만 false다(제안 없음), 연결 화면의 로그인은 사용자 정보를 부르지 않는다', async () => {
+  op.mode.kakaoUserinfoFails = true;
+  try {
+    const b = new Browser();
+    const r = await login(b, 'kakao');
+    assert.ok(b.names().includes(AT), '세션 쿠키가 있다');
+    assert.ok(!r.trail.at(-1).url.includes('/login/callback'), '콜백에서 멈추지 않고 돌아갈 주소로 갔다');
+    const req = lastCall('CreateSession');
+    assert.deepEqual([req.email, req.email_verified], [op.users.kakao.email, false]);
+    assert.ok(logs.some((l) => l.event === 'login.userinfo-fallback'));
+  } finally {
+    op.mode.kakaoUserinfoFails = false;
+  }
+  const b2 = new Browser();
+  const { id } = await proposed(b2);
+  op.mode.kakaoUserinfoFails = true;
+  try {
+    const r = await login(b2, 'kakao', { linkProposal: id });
+    assert.ok(r.trail.some((t) => t.url.includes('/login/link?linked=google')));
+  } finally {
+    op.mode.kakaoUserinfoFails = false;
+  }
+});
+
+// ---- 계정 설정의 로그인 수단 추가(identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041, I-T34) ----
+
+/** 카카오로 로그인한 브라우저(팬 세션 쿠키가 있다) */
+async function signedIn() {
+  const b = new Browser();
+  op.users.kakao.sub = `k-${Math.random().toString(36).slice(2)}`;
+  await login(b, 'kakao');
+  return b;
+}
+const addProvider = (b, provider, fields = {}, origin = web.url) => b.go(`${web.url}/link/${provider}`, formPost(origin, { returnTo: '/my/settings/providers', reauthToken: 'reauth.verified.kakao.x', ...fields }));
+
+test('I-T34 로그인 수단 추가는 팬 세션·재인증 토큰을 받아 새 제공자 인증(계정 다시 고르기) 뒤 AddProvider를 부르고 돌아갈 주소에 결과를 싣는다', async () => {
+  const b = await signedIn();
+  const sid = identity.calls.filter((c) => c.method === 'CreateSession').length;
+  op.users.google.sub = `g-${Math.random().toString(36).slice(2)}`;
+  const r = await addProvider(b, 'google');
+  assert.equal(op.lastAuthorize.google.prompt, 'select_account');
+  const req = lastCall('AddProvider');
+  assert.equal(req.reauth_token, 'reauth.verified.kakao.x');
+  assert.equal(req.provider, 'PROVIDER_GOOGLE');
+  assert.equal(req.provider_user_id, op.users.google.sub);
+  assert.ok(req.session_id && req.account_id);
+  // 새 로그인 세션을 만들지 않는다
+  assert.equal(identity.calls.filter((c) => c.method === 'CreateSession').length, sid);
+  assert.equal(new URL(r.trail.at(-1).url).pathname + new URL(r.trail.at(-1).url).search, '/my/settings/providers?loginMethod=linked');
+  assert.ok(b.names().includes(AT) && !b.names().includes(OIDC));
+});
+
+test('로그인 수단 추가의 결과값(이미 이 계정·같은 종류·다른 계정·재인증 필요·실패)을 돌아갈 주소의 loginMethod로 넘긴다', async () => {
+  const b = await signedIn();
+  for (const [result, expected] of [
+    ['ADD_PROVIDER_RESULT_ALREADY_LINKED', 'already-linked'],
+    ['ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN', 'type-taken'],
+    ['ADD_PROVIDER_RESULT_OTHER_ACCOUNT', 'other-account'],
+    ['ADD_PROVIDER_RESULT_REAUTH_REQUIRED', 'reauth-required'],
+  ]) {
+    identity.mode.addResult = result;
+    const r = await addProvider(b, 'google');
+    assert.equal(new URL(r.trail.at(-1).url).searchParams.get('loginMethod'), expected, result);
+  }
+  identity.mode.addResult = null;
+  identity.mode.addFails = true;
+  const r = await addProvider(b, 'google');
+  assert.equal(new URL(r.trail.at(-1).url).searchParams.get('loginMethod'), 'failed');
+  assert.ok(logs.some((l) => l.event === 'link-add.failed'));
+});
+
+test('로그인 수단 추가는 다른 출처·팬 세션 없음·재인증 토큰 없음이면 시작하지 않는다 [ASVS v5.0.0-3.5.1]', async () => {
+  const b = await signedIn();
+  assert.equal((await addProvider(b, 'google', {}, 'https://evil.test')).res.status, 403);
+  assert.equal((await addProvider(new Browser(), 'google')).res.status, 401);
+  assert.equal((await addProvider(b, 'google', { reauthToken: '' })).res.status, 400);
+  assert.equal((await addProvider(b, 'apple')).res.status, 404);
+});
+
+test('리뷰 재현: 로그인 수단 추가에서 제공자가 오류(취소)를 돌려주면 막다른 페이지가 아니라 설정 화면으로 loginMethod=failed다', async () => {
+  const b = await signedIn();
+  const start = await b.go(`${web.url}/link/google`, { ...formPost(web.url, { returnTo: '/my/settings/providers', reauthToken: 'reauth.verified.kakao.x' }), follow: false });
+  const toOp = new URL(start.res.headers.get('location'));
+  const state = toOp.searchParams.get('state');
+  const back = await b.go(`${web.url}/login/callback/google?error=access_denied&state=${state}`, { follow: false });
+  assert.equal(back.res.status, 303);
+  assert.equal(back.res.headers.get('location'), '/my/settings/providers?loginMethod=failed');
+  assert.ok(logs.some((l) => l.event === 'link-add.failed' && l.reason === 'provider_error'));
+  assert.ok(!b.names().includes(OIDC));
+});
+
+test('I-T31 로그인 수단이 다른 계정의 것이고 병합 제안이 있으면 돌아갈 주소에 mergeProposal을 함께 싣는다(BOT-042)', async () => {
+  const b = await signedIn();
+  identity.mode.addResult = 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT';
+  identity.mode.mergeProposalId = 'M'.repeat(22);
+  try {
+    const r = await addProvider(b, 'google');
+    const u = new URL(r.trail.at(-1).url);
+    assert.equal(u.searchParams.get('loginMethod'), 'other-account');
+    assert.equal(u.searchParams.get('mergeProposal'), 'M'.repeat(22));
+    identity.mode.mergeProposalId = '';
+    const r2 = await addProvider(b, 'google');
+    assert.equal(new URL(r2.trail.at(-1).url).searchParams.get('mergeProposal'), null);
+  } finally {
+    identity.mode.mergeProposalId = undefined;
+  }
+});
+
+// 공급자 호출 보호(docs/architecture.md §5 '소셜 로그인 공급자 HTTP', identity §10 ①~③, ADR-0180, BUILD_ORDER HOT-320)
+/** 공급자 보호 값을 줄인 앱 하나를 띄운다. prepare는 콜백 직전까지 간다 */
+async function guardedApp(providerGuard) {
+  let guarded;
+  const server = await serve((req) => guarded.dispatch(req));
+  guarded = createSocialLogin(config(server.url), { log: (event, fields) => logs.push({ event, ...fields }), providerGuard });
+  const start = (b, provider = 'kakao') => b.go(`${server.url}/login/${provider}`, { ...formPost(server.url, { returnTo: '/' }), follow: false });
+  const prepare = async (provider = 'kakao') => {
+    const b = new Browser();
+    const s = await start(b, provider);
+    assert.equal(s.res.status, 303, `${provider} 로그인 시작`);
+    const back = await fetch(s.res.headers.get('location'), { redirect: 'manual' });
+    const cb = new URL(back.headers.get('location'));
+    return () => b.go(`${server.url}${cb.pathname}${cb.search}`, { follow: false });
+  };
+  const post = (path, fields) => guarded.dispatch(new Request(`${server.url}${path}`, formPost(server.url, fields)));
+  return { start, prepare, post, close: async () => (guarded.close(), server.close()) };
+}
+
+/** 토큰 요청이 닿은 횟수를 세고, n번째가 닿을 때를 기다릴 수 있게 한다 */
+function tokenArrivals() {
+  const seen = [];
+  let waiters = [];
+  op.mode.onToken = (p) => {
+    seen.push(p);
+    const w = waiters;
+    waiters = [];
+    for (const f of w) f();
+  };
+  const reach = (n) =>
+    new Promise((r) => {
+      const check = () => (seen.length >= n ? r() : waiters.push(check));
+      check();
+    });
+  return { count: () => seen.length, reach };
+}
+
+test('I-T71_공급자 토큰 교환이 시간 상한을 넘으면 같은 인가 코드로 다시 보내지 않고 진행 쿠키를 지워 로그인 화면에서 처음부터 다시 하게 한다', async () => {
+  const g = await guardedApp({ timeoutMs: 100 });
+  try {
+    const go = await g.prepare();
+    const arrivals = tokenArrivals();
+    op.mode.tokenDelayMs = 400;
+    const r = await go();
+    const hop = toLoginScreen(r);
+    assert.ok(failures().some((l) => l.reason === 'timeout'), JSON.stringify(failures()));
+    assert.ok(hop.setCookie.some((c) => /Max-Age=0/.test(c)), '진행 쿠키를 지운다');
+    // 늦은 응답이 끝날 때까지 기다려도 토큰 요청은 한 번뿐이다
+    await new Promise((res) => setTimeout(res, 450));
+    assert.equal(arrivals.count(), 1, '같은 인가 코드로 다시 보내지 않는다');
+  } finally {
+    op.mode.tokenDelayMs = 0;
+    await g.close();
+  }
+});
+
+test('I-T71_공급자가 토큰 교환에 429·403을 몰아 주면 그 공급자를 잠시 끊어 새 로그인을 시작부터 로그인 화면의 제공자 장애로 돌려보내고, 다른 공급자는 그대로다', async () => {
+  const g = await guardedApp({ minCalls: 2, rejectRatio: 0.5, openMs: 60_000 });
+  try {
+    // 끊기기 전에 시작해 공급자에서 돌아오는 중인 로그인
+    const inFlight = await g.prepare();
+    op.mode.tokenStatus = 429;
+    for (let i = 0; i < 2; i++) toLoginScreen(await (await g.prepare())(), {}, '거절 응답 자체는 로그인 실패');
+    op.mode.tokenStatus = 0;
+    // 돌아온 콜백은 '제공자 장애' 상태로 가고 진행 쿠키를 지운다(공급자를 부르지 않는다)
+    const arrivals = tokenArrivals();
+    const back = await inFlight();
+    assert.ok(toLoginScreen(back, { error: 'down', provider: 'kakao' }).setCookie.some((c) => /Max-Age=0/.test(c)));
+    assert.equal(arrivals.count(), 0, '끊긴 동안은 공급자를 부르지 않는다');
+    // 새 로그인은 공급자로 보내기 전에 막는다
+    const fresh = new Browser();
+    toLoginScreen(await g.start(fresh), { error: 'down', provider: 'kakao' });
+    assert.deepEqual(fresh.names(), [], '진행 쿠키를 주지 않는다');
+    assert.ok(failures().filter((l) => l.reason === 'open' && l.provider === 'kakao').length >= 2);
+    assert.equal((await (await g.prepare('google'))()).res.status, 303, '다른 공급자는 그대로 로그인된다');
+  } finally {
+    op.mode.tokenStatus = 0;
+    await g.close();
+  }
+});
+
+test('I-T71_없어도 되는 카카오 사용자 정보가 429로 거절되어도 서킷을 열지 않고 로그인은 이어진다', async () => {
+  // 모든 호출을 센다면 두 번째 로그인 뒤 거절 비율이 2/6(발견 문서·공개키·토큰 교환 성공과 사용자 정보 거절)으로 기준 0.3을 넘는다
+  const g = await guardedApp({ minCalls: 2, rejectRatio: 0.3, openMs: 60_000 });
+  op.mode.kakaoUserinfoFails = 429;
+  try {
+    for (let i = 0; i < 3; i++) assert.equal((await (await g.prepare())()).res.status, 303, `로그인 ${i + 1}`);
+    assert.ok(logs.filter((l) => l.event === 'login.userinfo-fallback').length >= 3);
+    assert.equal((await g.start(new Browser())).res.status, 303, '카카오를 끊지 않았다');
+  } finally {
+    op.mode.kakaoUserinfoFails = false;
+    await g.close();
+  }
+});
+
+test('I-T71_공급자 동시 호출 상한을 넘으면 기다리지 않고 바로 로그인 화면의 에러 상태로 돌려보낸다', async () => {
+  const g = await guardedApp({ maxConcurrent: 1 });
+  try {
+    const first = await g.prepare();
+    const second = await g.prepare();
+    const arrivals = tokenArrivals();
+    op.mode.tokenDelayMs = 300;
+    const slow = first();
+    // 첫 로그인의 토큰 요청이 공급자에 닿을 때까지 기다린다(그동안 자리를 쥐고 있다)
+    await arrivals.reach(1);
+    const r = await second();
+    // 기다리지 않고 바로 '에러' 상태로 돌려보낸다(다시 누르면 처음부터)
+    assert.ok(toLoginScreen(r).setCookie.some((c) => /Max-Age=0/.test(c)), '진행 쿠키를 지운다');
+    assert.ok(failures().some((l) => l.reason === 'busy'));
+    assert.equal(arrivals.count(), 1, '상한을 넘은 호출은 공급자에 보내지 않는다');
+    assert.equal((await slow).res.status, 303, '먼저 온 로그인은 끝난다');
+  } finally {
+    op.mode.tokenDelayMs = 0;
+    await g.close();
+  }
+});
+
+test('I-T71_로그인 실패를 로그인 화면으로 돌려보낼 때 쿼리가 있는 돌아갈 주소도 그대로 한 번만 싣는다(ADR-0202 결정 4)', async () => {
+  op.mode.wrongIss = true;
+  try {
+    const r = await login(new Browser(), 'kakao', { returnTo: '/events/0b8f?round=2&x=%ED%95%9C' });
+    const hop = toLoginScreen(r, { next: '/events/0b8f?round=2&x=%ED%95%9C' });
+    assert.equal(hop.location.split('next=').length, 2, 'next는 하나');
+  } finally {
+    op.mode.wrongIss = false;
   }
 });

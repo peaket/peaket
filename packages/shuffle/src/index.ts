@@ -5,7 +5,73 @@
 // - 난수는 SHA-256(K ‖ i) 블록(i는 0부터 세는 64비트 큰 끝)의 32비트 큰 끝 단어 여덟 개를 차례로 쓴다
 // - Fisher–Yates는 뒤에서부터 j를 [0, i]에서 뽑고, 단어 r이 floor(2^32 ÷ (i+1)) × (i+1) 이상이면 버린다(편향 없는 거부 표본추출)
 // - 머클 트리는 RFC 6962(잎 0x00, 노드 0x01, n보다 작은 가장 큰 2의 거듭제곱에서 나눔). 빈 목록은 SHA-256("")
-import { createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
+
+/** drand quicknet의 공개 값(3초 주기, 서명만으로 검증하는 unchained 체인, ADR-0231 결정 7). 체인·판을 바꾸면 커밋에 공시한 값도 바뀐다 */
+export const DRAND_CHAIN = 'quicknet';
+export const DRAND_CHAIN_HASH = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
+export const DRAND_GENESIS_MS = 1_692_803_367_000;
+export const DRAND_PERIOD_MS = 3_000;
+/** 목록 고정 뒤 기다리는 최소 시간 3초 [가정, Phase 2 2.4.1에서 확정] */
+export const BEACON_MIN_DELAY_MS = 3_000;
+export const drandRoundTimeMs = (round: number): number => DRAND_GENESIS_MS + (round - 1) * DRAND_PERIOD_MS;
+/** 시각 atMs + minDelayMs 이후(같아도 된다)의 첫 라운드 */
+export const drandRoundAfter = (atMs: number, minDelayMs: number = BEACON_MIN_DELAY_MS): number => Math.ceil((atMs + minDelayMs - DRAND_GENESIS_MS) / DRAND_PERIOD_MS) + 1;
+
+/** 셔플 구간: 로비(`lobby`)와 동시 도착 묶음 번호(한 회차는 1) */
+export type ShuffleGroup = 'lobby' | number;
+/** 봉인의 용도 표시(KMS 암호화 컨텍스트의 purpose, 시험 대역의 AAD) */
+export const SEAL_PURPOSE = 'peaket-shuffle-seed-v1';
+/** 시드 봉인(queue-svc). 운영은 KMS Encrypt만 부른다(ADR-0239 결정 1). local·ci·demo는 TestSeedSealer */
+export interface SeedSealer {
+  seal(eventId: string, group: ShuffleGroup, seed: Uint8Array): Promise<string>;
+}
+/** 시드 봉인 풀기(admission-ctrl). 운영은 KMS Decrypt만 부른다(ADR-0239 결정 1) */
+export interface SeedOpener {
+  open(eventId: string, group: ShuffleGroup, sealed: string): Promise<Buffer>;
+}
+/** KMS 암호화 컨텍스트(문자열 값만 받는다). 다른 회차·구간의 봉인 값은 풀리지 않는다 */
+export const sealContext = (eventId: string, group: ShuffleGroup): { purpose: string; eventId: string; group: string } => ({ purpose: SEAL_PURPOSE, eventId, group: String(group) });
+
+/** 시험 봉인을 켜는 값(base64 32바이트 이상, 묶음 시험 시드·비콘과 같은 값, local·ci·demo만) */
+export const TEST_SEAL_ENV = 'PEAKET_TEST_BATCH_RANDOMNESS';
+const TEST_SEAL_ENVS = ['local', 'ci', 'demo'];
+
+/** local·ci·demo의 시험 봉인: AES-256-GCM과 회차·구간을 묶은 AAD. 비밀을 아는 사람이 풀 수 있어 공정성 증명이 되지 않는다 */
+export class TestSeedSealer implements SeedSealer, SeedOpener {
+  readonly #key: Buffer;
+
+  constructor(secret: Buffer) {
+    if (secret.length < 32) throw new Error('시험 봉인 비밀은 32바이트 이상이다');
+    this.#key = createHmac('sha256', secret).update('seed-sealer').digest();
+  }
+
+  static fromEnv(env: Record<string, string | undefined>): TestSeedSealer {
+    if (!TEST_SEAL_ENVS.includes(env.PEAKET_ENV ?? '')) throw new Error('시험 봉인은 local·ci·demo에서만 켠다(운영은 KMS, ADR-0239)');
+    const raw = env[TEST_SEAL_ENV];
+    if (!raw) throw new Error(`${TEST_SEAL_ENV}가 없다(base64 32바이트 이상)`);
+    return new TestSeedSealer(Buffer.from(raw, 'base64'));
+  }
+
+  async seal(eventId: string, group: ShuffleGroup, seed: Uint8Array): Promise<string> {
+    const iv = randomBytes(12);
+    const c = createCipheriv('aes-256-gcm', this.#key, iv).setAAD(aadOf(eventId, group));
+    const body = Buffer.concat([c.update(seed), c.final()]);
+    return Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
+  }
+
+  async open(eventId: string, group: ShuffleGroup, sealed: string): Promise<Buffer> {
+    const b = Buffer.from(sealed, 'base64');
+    const d = createDecipheriv('aes-256-gcm', this.#key, b.subarray(0, 12)).setAAD(aadOf(eventId, group));
+    d.setAuthTag(b.subarray(12, 28));
+    return Buffer.concat([d.update(b.subarray(28)), d.final()]);
+  }
+}
+
+const aadOf = (eventId: string, group: ShuffleGroup): Buffer => Buffer.from(`${SEAL_PURPOSE}\0${eventId}\0${group}`, 'utf8');
+
+/** 시드 공개: 오픈 60분 뒤(POL-005, ADR-0232 결정 7) */
+export const SEED_REVEAL_AFTER_MS = 60 * 60_000;
 
 /** 알고리즘 판(커밋과 함께 공시한다) */
 export const ALGORITHM = 'v1';
@@ -19,6 +85,16 @@ const sha256 = (...parts: Uint8Array[]): Buffer => {
   for (const p of parts) h.update(p);
   return h.digest();
 };
+
+/**
+ * 시드만 쓰는 비상 셔플(RB-35)을 받는 멈춤 이유. 정본(ADR-0050 결정 7)은 비콘 지연만 대상으로 한다.
+ * 목록은 여기 하나이고, 적용·게시 직전 재검증(admission-ctrl)과 공시(queue-svc)가 모두 이 값을 본다(ADR-0239 결정 9)
+ */
+export const EMERGENCY_STOP_REASONS: readonly string[] = ['beacon'];
+export const isEmergencyStopReason = (reason: unknown): boolean => typeof reason === 'string' && EMERGENCY_STOP_REASONS.includes(reason);
+
+/** 시드만 쓰는 비상 셔플(RB-35, ADR-0239 결정 11)의 비콘 값 자리에 넣는 고정값. 재현 규격의 입력 길이를 그대로 둔다 */
+export const EMERGENCY_BEACON: Buffer = sha256(Buffer.from('PEAKET-shuffle-v1-no-beacon', 'utf8'));
 
 export function commitment(eventId: string, seed: Uint8Array): Buffer {
   return sha256(COMMIT_DOMAIN, Buffer.from(eventId, 'utf8'), seed);

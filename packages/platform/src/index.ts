@@ -2,9 +2,9 @@
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
 export { DEBUG_ERRORS_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
 export { currentDeadline, requestContext, runInRequestContext, type RequestContext } from './context.js';
-export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
-export { AcceptTextPlain, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
-export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline } from './deadline.js';
+export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
+export { AcceptTextPlain, BodyLimit, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
+export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
 // 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
 export { Counter, Gauge, Histogram, type Registry } from '@prometheus-io/client';
@@ -13,7 +13,7 @@ export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded
 export { DATABASE, POOL_DEFAULTS, createDatabase, databaseModule, type Database, type DatabaseOptions, type DatabaseProfile, type DbTransaction, type TransactionOptions } from './database.js';
 export { ProblemFilter } from './problem-filter.js';
 export { createService, type CreateServiceOptions, type PlatformService } from './service.js';
-export { clientFamily } from './client-family.js';
+export { browserFamily, type BrowserFamily, clientFamily } from './client-family.js';
 export { LOG_PSEUDONYM_KEY_ENV, LogPseudonymizer, ipPrefix, loadLogPseudonymizer } from './pseudonym.js';
 export { sampleKeep, sampleThreshold } from './sampling.js';
 export { APP_HEADER, APPS } from './http-hooks.js';
@@ -59,7 +59,16 @@ export {
 } from './outbox.js';
 export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
 export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, memoryLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
-export { RELAY_PROCESS_DEFAULTS, loadOutboxRelayProcessConfig, startOutboxRelayProcess, type OutboxRelayProcess, type OutboxRelayProcessConfig, type OutboxRelayProcessOptions } from './relay-process.js';
+export {
+  RELAY_PROCESS_DEFAULTS,
+  loadOutboxRelayProcessConfig,
+  startOutboxRelayProcess,
+  type LeaderLoop,
+  type LeaderLoopContext,
+  type OutboxRelayProcess,
+  type OutboxRelayProcessConfig,
+  type OutboxRelayProcessOptions,
+} from './relay-process.js';
 export { KAFKA_AUTH_LOCKED, KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
 export { kafkaAuthFromEnv, mskIamTokenProvider, mskSessionName, type KafkaAuth, type KafkaMskIamAuth, type MskIamOptions, type OAuthBearerProvider, type OAuthBearerToken } from './msk-iam.js';
 export {
@@ -109,9 +118,9 @@ export {
   type MonthlyPartitionSpec,
 } from './partitions.js';
 export { STAT_SNAPSHOT_KEEP_DAYS, STAT_SNAPSHOT_TABLE, statSnapshotTable, takeStatSnapshot } from './stat-snapshot.js';
-export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
+export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, deleteInBatches, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type BatchDeleteOptions, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
 export { STREAM_KEY_TTL_AFTER_SALE_MS, ackAndTrimStream, compareStreamIds, expireStreamAfterSale, nextStreamId, type RedisCommander } from './redis-stream.js';
-export { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, createHotRedis, hotRedisOver, isRedisUnavailable, redisClusterOptions, redisScript, type CallOptions, type HotRedis, type HotRedisOptions, type RawRedis, type RedisScript } from './redis.js';
+export { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, createHotRedis, hotRedisOver, isRedisOutOfMemory, isRedisUnavailable, redisClusterOptions, redisScript, type CallOptions, type HotRedis, type HotRedisOptions, type RawRedis, type RedisScript } from './redis.js';
 export {
   MAINTENANCE_DEFAULTS,
   MaintenanceRunner,

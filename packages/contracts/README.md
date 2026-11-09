@@ -19,8 +19,8 @@
 
 | 가져오는 이름 | 내용 |
 | --- | --- |
-| `@peaket/contracts/openapi/model` | openapi `components.schemas`(190개)마다 Zod 스키마와 타입 둘(`X`는 `zod.input`, `XOutput`은 `zod.output`). orval이 작업별 매개변수·본문을 따로 꺼낸 스키마(`GetV1WishesParams` 등)도 함께 있다. 작업별 검사에는 태그 파일의 것을 쓴다 |
-| `@peaket/contracts/openapi/<태그>` | 태그(`queue`, `seats`, `orders`, `ops` …)마다 작업별 경로·쿼리·머리·본문·응답 Zod 스키마. 계약에 `operationId`가 아직 없어 이름은 메서드와 경로에서 나온다(`PostV1QueuesEventIdLobbyParticipantsBody`). wbs 0.2.3에서 `operationId`를 붙이면 이름이 바뀐다 |
+| `@peaket/contracts/openapi/model` | openapi `components.schemas`(204개)마다 Zod 스키마와 타입 둘(`X`는 `zod.input`, `XOutput`은 `zod.output`). 요청용 스키마는 `<이름>Input`이다(닫힘, docs/api/guidelines.md §1). orval이 작업별 매개변수·본문을 따로 꺼낸 스키마(`ListWishesParams` 등)도 함께 있다. 작업별 검사에는 태그 파일의 것을 쓴다 |
+| `@peaket/contracts/openapi/<태그>` | 태그(`queue`, `seats`, `orders`, `ops` …)마다 작업별 경로·쿼리·머리·본문·응답 Zod 스키마. 이름은 작업 이름(`operationId`, docs/api/guidelines.md §10 '작업 이름')에서 나온다(`CreateQueueLobbyParticipantBody`, `CreateEventHoldResponse`). 작업 이름은 경로를 바꿀 때만 바뀐다 |
 | `@peaket/contracts/asyncapi` | asyncapi 메시지 본문마다 Zod 스키마와 타입(메시지 이름 그대로, 예: `OrderEvent`) |
 | `@peaket/contracts/proto` | 내부 gRPC 계약(`docs/api/proto`)의 파일마다 protobufjs JSON 설명자(앞의 `peaket`을 뺀 경로 이름, 예: `identityV1Identity`). 서버는 `.proto` 파일을 읽지 않고 이것을 `@grpc/proto-loader`의 `fromJSON`에 넣는다(Next.js 앱 서버처럼 묶어도 경로가 깨지지 않는다, 2026-11-03 BUILD_ORDER PRF-020). 코드 생성 방식은 BUILD_ORDER BAS-030(proto CI)이 다시 본다 |
 

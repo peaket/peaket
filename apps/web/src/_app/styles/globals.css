@@ -2,15 +2,18 @@
 @layer theme, base, seed-base, seed-components, components, utilities;
 @import "tailwindcss";
 @import "@peaket/ds/styles.css";
+/* Pretendard 가변 글꼴 동적 서브셋(OFL-1.1): 글자 범위별 조각 92개를 unicode-range로 나눠, 브라우저가 화면에 쓰인 글자의 조각만 받는다.
+   가변 글꼴 전체(woff2 2,010KiB)를 미리 받던 next/font를 바꿨다(docs/frontend.md §5.8 'Pretendard 서브셋', HOT-291) */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 @source "../../../../../packages/ds/src";
 
 /*
- * 직접 호스팅한 Pretendard(next/font/local, OFL-1.1)를 키트 글꼴 목록의 "Pretendard Variable" 자리에 끼운다(d2 §1 타이포).
- * 순서는 tokens.json 그대로(애플 기기는 시스템 글꼴 먼저). kit.css는 고치지 않고, 같은 components 층의 뒤 규칙으로 --font만 바꾼다.
+ * 직접 호스팅한 Pretendard 동적 서브셋(위 @import, 이름 "Pretendard Variable")이 키트 글꼴 목록의 그 자리에 든다(d2 §1 타이포).
+ * 순서는 tokens.json 그대로(애플 기기는 시스템 글꼴 먼저). kit.css는 고치지 않고, 같은 components 층의 뒤 규칙으로 --font만 둔다.
  */
 @layer components {
   .pk {
-    --font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", var(--font-pretendard), "Pretendard Variable", Pretendard,
+    --font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard Variable", Pretendard,
       "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
       "Segoe UI Symbol", "Noto Color Emoji";
   }

@@ -1,50 +1,41 @@
 // SCR-008 대기열(오픈 후). 캔버스 SCR-008 m·t·d 보드를 한 페이지의 반응형으로 옮겼다(d5 §5.8).
-// 기본 네 가지: ① 앞 인원(display) ③ 진행 막대(CMP-016 queue) ② 남은 예상 시간 ⑦ [대기 취소]. 나머지는 생길 때만 뜬다(ADR-0063).
+// 화면 값은 상태 기계(src/live/controller.ts)가 실제 응답으로 낸다(ADR-0207). 기본 네 가지: ① 앞 인원 ③ 진행 막대 ② 남은 예상 시간 ⑦ [대기 취소].
+// 나머지는 생길 때만 뜬다(ADR-0063). 차례 도래 유예는 ADR-0208 결정 6, 자동 배정 희망 조건(⑧)과 [차례 알림 받기](⑥)는 HOT-343이 잇는다.
 import { links } from '../config';
-import type { EventCtx } from '../ctx';
-import { cx, h, ic, setVars } from '../dom';
-import { aheadCount, clock, etaText, fmt, progressPercent, queueSentence } from '../queue-math';
+import type { LiveCtx } from '../ctx';
+import type { QueueView } from '../live/controller.ts';
+import { append, cx, h, ic, setVars, type Child } from '../dom';
+import { fmt, queueSentence } from '../queue-math';
 import { announceEveryMinute, countdown } from '../ui/timers';
+import { rollDigits } from '../ui/roll.ts';
+import { steadyNow } from '../live/steady.ts';
+import { clock } from '../queue-math';
 import { focusHeader, offlineStrip } from './shell';
+import { prefSummary } from './preference';
+import { defaultPreference } from '../live/preference.ts';
 
-/** 시트·대화상자가 열린 채로 그리는 상태 → 여는 버튼 */
-export const QUEUE_OPEN_ON_LOAD: Record<string, 'cancel' | 'info' | 'pref'> = {
-  '대기 취소 확인': 'cancel',
-  '순번 안내 시트': 'info',
-  '순번 안내 시트 — 선착순': 'info',
-  '희망 조건 바꾸기 시트': 'pref',
+/** 예상 대기 글(분으로 반올림, 1분 미만도 약 1분, 60분부터 시간, ADR-0207 결정 9). null이면 숨김 */
+export function etaLabel(sec: number | null | undefined): string | null {
+  if (sec === null || sec === undefined) return null;
+  const minutes = Math.max(1, Math.round(sec / 60));
+  if (minutes < 60) return `약 ${minutes}분`;
+  const hh = Math.floor(minutes / 60);
+  const mm = minutes % 60;
+  return mm ? `약 ${hh}시간 ${mm}분` : `약 ${hh}시간`;
+}
+
+const hhmm = (ms: number): string => {
+  const d = new Date(ms + 9 * 3600_000);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 };
 
-export function queueScreen(c: EventCtx): HTMLElement[] {
-  const st = c.state.name;
+export function queueScreen(c: LiveCtx): HTMLElement[] {
+  const v = c.view;
   const ev = c.ev;
-  const batching = st === '순서를 정하는 중';
-  const soon = st === '곧 입장';
-  const stale = st === '연결 확인 중';
-  const expired = st === '대기표 만료';
-  const rolling = st === '값이 바뀌는 순간';
-  const other = st === '다른 기기에서 취소';
-  const verify = st === '추가 검증';
-  const admitted = st === '이미 입장';
-  const loginExp = st === '로그인 만료';
-  const ended = st === '판매 종료';
-  const loading = st === '순번 확인 중';
-  const grace = st === '차례 도래 유예';
-  const tierOut = st === '1순위 등급 매진';
-  const invalid = st === '다른 곳에서 이미 입장';
-  const allHeld = st === '일시 매진';
-  const restricted = st === '예매 제한(입장 확정 403)';
-  const offline = st === '연결 끊김';
-  const terminal = expired || other || admitted || loginExp || ended || invalid || restricted;
-  const showCount = !batching && !soon && !verify && !rolling && !terminal && !loading && !grace;
-
-  // 대기 상태 파일(목업 고정 값)에서 브라우저가 계산한다(§2.6·§3.4). 일시정지 상태는 판매 중 파일을 PAUSED로 바꿔 읽는다
-  const paused = st === '일시정지';
-  const status = paused ? { ...ev.status, saleStatus: 'PAUSED' as const } : ev.status;
-  const ahead = aheadCount(ev.myNumber, status);
-  const pct = Math.round(progressPercent(ev.initialAhead, ahead));
-  const eta = etaText(ahead, status);
-  const sentence = queueSentence(ahead, eta, allHeld);
+  const st = v.state;
+  const terminal = ['expired', 'cancelled-elsewhere', 'already-admitted', 'login-expired', 'ended', 'duplicate', 'restricted', 'other-device'].includes(st);
+  const loading = st === 'enter' || st === 'boot' || st === 'leaving' || st === 'admitted' || st === 'turn';
+  const hasCount = v.ahead !== undefined && (st === 'waiting' || st === 'stale' || st === 'paused' || st === 'all-held' || st === 'offline');
 
   const main = h('main', { class: 'page-main q-main q-queue', id: 'main' });
   const frame = h('div', { class: 'col q-frame q-queue-frame' }, h('h1', { class: 'sr-only', tabindex: '-1' }, '대기열'));
@@ -55,87 +46,102 @@ export function queueScreen(c: EventCtx): HTMLElement[] {
     frame.append(inQueue);
 
     // 생길 때만 ①~② 위에 뜨는 안내
-    if (st === '운영 공지' && ev.notice) {
-      inQueue.append(h('div', { class: 'banner banner-announce', role: 'status' }, ic('megaphone'), h('div', { class: 'banner-body' }, h('span', { class: 'banner-title' }, '운영 공지'), ev.notice)));
+    if (v.banner) {
+      inQueue.append(h('div', { class: 'banner banner-announce', role: 'status' }, ic('megaphone'), h('div', { class: 'banner-body' }, h('span', { class: 'banner-title' }, '운영 공지'), v.banner)));
     }
-    if (st === '일시정지') {
+    if (st === 'paused') {
       inQueue.append(h('div', { class: 'banner banner-warning', role: 'status' }, ic('pause'), h('div', { class: 'banner-body fw-b' }, '판매가 잠시 멈췄습니다. 대기 순서는 그대로입니다')));
     }
-    if (allHeld) {
+    if (st === 'all-held') {
       inQueue.append(h('div', { class: 'banner banner-info', role: 'status' }, ic('seat'), h('div', { class: 'banner-body fw-b' }, '남은 좌석이 모두 결제 중입니다. 결제되지 않은 좌석이 풀리면 차례대로 이어집니다')));
     }
-    if (st === '구매가 어려울 수 있음') {
+    if (v.purchaseUnlikely) {
       inQueue.append(h('div', { class: 'banner banner-warning', role: 'status' }, ic('alert'), h('div', { class: 'banner-body' }, '현재 순번으로는 구매가 어려울 수 있습니다')));
     }
-    // ⑧ 자동 배정 공연의 희망 조건 한 줄 요약
-    if (ev.autoAssign && !tierOut) {
-      const change = h('button', { class: 'btn btn-outline btn-sm', type: 'button', 'aria-haspopup': 'dialog', 'aria-describedby': 'pf-sum', 'data-opens': 'pref' }, '바꾸기');
-      change.addEventListener('click', () => c.open('pref', change));
-      inQueue.append(h('div', { class: 'card-flat row between q-pref-row' },
-        h('p', { class: 't-sm q-pref-text', id: 'pf-sum' }, h('span', { class: 'muted' }, '희망'), ' ', h('strong', null, `${ev.pref.tier} ${ev.pref.qty}매`)),
-        change,
-      ));
-    }
-    if (tierOut) {
-      const change = h('button', { class: 'btn btn-outline btn-sm', type: 'button', 'aria-haspopup': 'dialog', 'aria-describedby': 'pf-out', 'data-opens': 'pref' }, '바꾸기');
-      change.addEventListener('click', () => c.open('pref', change));
-      inQueue.append(h('div', { class: 'card-flat row between q-pref-row', role: 'status' },
-        h('p', { class: 't-sm row q-pref-text q-top', id: 'pf-out' }, ic('alert', 'tx-warning'), h('span', null, '1순위 등급이 매진되었습니다. 2순위 등급을 골라 두세요')),
-        change,
-      ));
-    }
+    // ⑧ 희망 조건 한 줄(자동 배정 공연만, ADR-0212 결정 1·2). 1순위 등급이 매진되면 2순위를 고르라고 알린다
+    if (c.pref && hasCount) inQueue.append(prefLine(c, v.soldOutTiers ?? []));
 
     const region = h('section', { class: 'col q-region', role: 'region', 'aria-label': '대기 상태' });
     inQueue.append(region);
 
-    if (stale) region.append(h('p', { class: 'row t-sm fw-b q-jc', role: 'status' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '연결 확인 중'));
-    if (loading) region.append(spinnerBlock('muted', h('p', { class: 't-lg', role: 'status' }, '순번 확인 중')));
-    if (showCount) region.append(countBlock(c, { ahead, pct, eta, sentence, stale, allHeld, paused }));
-    if (rolling) region.append(rollingBlock(ahead, eta, sentence));
-    if (batching) region.append(spinnerBlock('tx-link', h('p', { class: 't-lg', role: 'status' }, '순서를 정하는 중입니다. 이 동안에는 순번이 보이지 않습니다')));
-    if (soon) region.append(soonBlock(c));
-    if (grace) region.append(graceBlock(c));
-    if (verify) {
+    if (st === 'stale') region.append(h('p', { class: 'row t-sm fw-b q-jc', role: 'status' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '연결 확인 중'));
+    if (loading) region.append(spinnerBlock('muted', h('p', { class: 't-lg', role: 'status' }, st === 'turn' ? '입장 중' : '순번 확인 중')));
+    if (st === 'enter' && v.busyUntil !== undefined) region.append(busyLine(c, v.busyUntil));
+    if (st === 'stale' && v.ahead === undefined) region.append(spinnerBlock('muted', h('p', { class: 't-lg' }, '순번 확인 중')));
+    if (hasCount) {
+      const eta = etaLabel(v.etaSec);
+      const allHeld = st === 'all-held';
+      region.append(countBlock(c, { ahead: v.ahead!, pct: Math.round(v.progress ?? 0), eta, sentence: queueSentence(v.ahead!, eta, allHeld), stale: st === 'stale', allHeld, paused: st === 'paused' }));
+    }
+    if (st === 'batching') region.append(spinnerBlock('tx-link', h('p', { class: 't-lg', role: 'status' }, '순서를 정하는 중입니다. 이 동안에는 순번이 보이지 않습니다')));
+    if (st === 'soon') region.append(soonBlock(c, v.retryAt ?? steadyNow()));
+    if (st === 'grace') region.append(graceBlock(c, v.graceUntil ?? steadyNow()));
+    if (st === 'verify-redirect') {
       region.append(h('div', { class: 'col q-center-block q-g16' },
         h('span', { class: 'state-icon is-primary' }, ic('shield')),
         h('p', { class: 't-lg', role: 'status' }, '자동으로 확인된 사항이 있어 한 번 더 확인합니다. 통과하면 원래 순번의 차례에 입장합니다'),
         h('span', { class: 'spinner muted', 'aria-hidden': 'true' }),
       ));
     }
-    // ⑦ 대기 취소(확인 대화상자 뒤 취소)
-    if (!verify) {
+    // ⑦ 대기 취소(확인 대화상자 뒤 DELETE entries/me)
+    if (st !== 'verify-redirect' && st !== 'admitted' && st !== 'leaving') {
       const cancel = h('button', { class: 'btn btn-text q-self-center', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'cancel' }, '대기 취소');
       cancel.addEventListener('click', () => c.open('cancel', cancel));
       region.append(cancel);
     }
 
-    // ⑥ 차례 알림 받기 · ⑨ 순번 안내 ›
-    const notify = h('button', { class: 'btn btn-secondary', type: 'button', 'aria-haspopup': 'dialog' }, ic('bell'), '차례 알림 받기');
-    notify.addEventListener('click', () => c.open('notify', notify));
+    // ⑨ 순번 안내 ›
     const info = h('button', { class: 'btn btn-text btn-sm q-mh32', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'info' }, '순번 안내', ic('chevron-right', 'ic-16'));
     info.addEventListener('click', () => c.open('info', info));
+    // ⑥ [차례 알림 받기](CMP-068): 알림음을 쓰려면 사용자 동작이 있어야 해 늘 둔다(d5 §5.8, ADR-0212 결정 4)
+    const notify = h('button', { class: 'btn btn-secondary btn-block q-cta', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'notify' }, ic('bell'), '차례 알림 받기');
+    notify.addEventListener('click', () => c.open('notify', notify));
     inQueue.append(h('div', { class: 'col q-queue-foot' }, notify, info));
   }
 
-  if (expired) {
-    frame.append(statePage('is-danger', 'clock', '차례가 지난 지 15분이 넘어 대기표가 만료됐습니다', '다시 줄을 서면 맨 뒤 순번을 받습니다',
+  if (st === 'expired') {
+    frame.append(statePage('is-danger', 'clock', '차례가 지난 지 15분이 넘어 대기표가 만료됐습니다', v.rejoinAllowed ? '다시 줄을 서면 맨 뒤 순번을 받습니다' : null,
       h('div', { class: 'col q-g10 q-cta q-mt8' },
-        h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'button', onclick: () => c.go('순번 확인 중') }, '다시 줄 서기'),
+        v.rejoinAllowed ? h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'button', onclick: () => c.actions.rejoin() }, '다시 줄 서기') : null,
         h('a', { class: 'btn btn-outline btn-lg btn-block', href: links.event(ev.id) }, '공연 상세', ic('chevron-right')),
       )));
   }
-  if (other) frame.append(statePage('', 'device', '다른 기기에서 이 대기를 취소했습니다', null, linkBtn(links.event(ev.id), '공연 상세')));
-  if (admitted) frame.append(statePage('is-primary', 'ticket', '이 회차에는 이미 입장했습니다. 같은 회차에는 다시 줄을 설 수 없습니다', null, linkBtn(links.orders(), '예매 내역')));
-  if (loginExp) {
+  if (st === 'other-device') {
+    const again = h('button', { class: 'link-more', type: 'button', onclick: () => c.actions.rejoin() }, '이 기기에서 다시 참가', ic('chevron-right'));
+    frame.append(statePage('', 'device', '다른 기기나 탭에서 이미 대기 중입니다', '처음 기기에서 계속하세요', h('div', { class: 'col q-g10 q-cta q-mt8 q-ai-center' }, again)));
+  }
+  if (st === 'cancelled-elsewhere') frame.append(statePage('', 'device', '다른 기기에서 이 대기를 취소했습니다', null, linkBtn(links.event(ev.id), '공연 상세')));
+  if (st === 'already-admitted') frame.append(statePage('is-primary', 'ticket', '이 회차에는 이미 입장했습니다. 같은 회차에는 다시 줄을 설 수 없습니다', null, linkBtn(links.orders(), '예매 내역')));
+  if (st === 'login-expired') {
     frame.append(statePage('', 'lock', '로그인이 만료되었습니다', '다시 로그인해도 순번은 그대로입니다',
       h('button', { class: 'btn btn-secondary btn-lg btn-block q-cta q-mt8', type: 'button', onclick: () => location.assign(links.login(c.path)) }, '다시 로그인')));
   }
-  if (ended) frame.append(statePage('', 'calendar', '판매 시간이 끝났습니다', null, linkBtn(links.event(ev.id), '다른 회차')));
-  if (restricted) frame.append(statePage('is-danger', 'ban', '예매가 제한되어 있어 입장할 수 없습니다', null, linkBtn(links.appeal(ev.appealId), '소명하기')));
-  if (invalid) frame.append(statePage('', 'device', '이미 다른 기기나 탭의 대기표로 입장했습니다', '처음 입장한 곳에서 계속하세요', null));
+  if (st === 'ended') frame.append(statePage('', 'calendar', '판매 시간이 끝났습니다', null, linkBtn(links.event(ev.id), '다른 회차')));
+  // ( 소명하기 › )는 팬 API로 받은 제한 ID로 SCR-042에 잇는다(ADR-0213 결정 4). 받기 전·실패·기한 지남이면 공연 상세로.
+  // 제한 ID는 이 화면을 그린 뒤에 오므로 링크만 제자리에서 바꾼다(updateRestrictedLink)
+  if (st === 'restricted') frame.append(statePage('is-danger', 'ban', '예매가 제한되어 있어 입장할 수 없습니다', null, restrictedLink(v, ev.id)));
+  if (st === 'duplicate') frame.append(statePage('', 'device', '이미 다른 기기나 탭의 대기표로 입장했습니다', '처음 입장한 곳에서 계속하세요', null));
 
-  return [offline ? offlineStrip(`인터넷 연결이 없습니다 · 마지막 동기화 20:03`) : null, focusHeader(c), main]
-    .filter((x): x is HTMLElement => x !== null);
+  const offline = st === 'offline' ? offlineStrip(v.lastSyncAt !== undefined ? `인터넷 연결이 없습니다 · 마지막 동기화 ${hhmm(v.lastSyncAt)}` : '인터넷 연결이 없습니다') : null;
+  return [offline, focusHeader(c), main].filter((x): x is HTMLElement => x !== null);
+}
+
+function restrictedLink(v: QueueView, eventId: string): HTMLElement {
+  const a = v.appealId ? linkBtn(links.appeal(v.appealId), '소명하기') : linkBtn(links.event(eventId), '공연 상세');
+  a.setAttribute('data-q', 'restricted-link');
+  return a;
+}
+
+/** 예매 제한 화면의 링크만 바꾼다(제한 ID가 늦게 왔을 때). 초점이 그 링크에 있었으면 새 링크로 옮긴다 */
+export function updateRestrictedLink(root: HTMLElement, v: QueueView, eventId: string): void {
+  if (v.state !== 'restricted') return;
+  const old = root.querySelector<HTMLElement>('[data-q="restricted-link"]');
+  if (!old) return;
+  const next = restrictedLink(v, eventId);
+  if (old.getAttribute('href') === next.getAttribute('href')) return;
+  const focused = document.activeElement === old;
+  old.replaceWith(next);
+  if (focused) next.focus();
 }
 
 function linkBtn(href: string, text: string): HTMLElement {
@@ -146,7 +152,7 @@ function linkBtn(href: string, text: string): HTMLElement {
 function statePage(tone: string, icon: string, title: string, sub: string | null, action: HTMLElement | null): HTMLElement {
   return h('section', { class: 'state q-state-page', role: 'alert' },
     h('span', { class: cx('state-icon', tone) }, ic(icon)),
-    h('h2', { class: 't-lg' }, title),
+    h('h2', { class: 't-lg', tabindex: '-1' }, title),
     sub && h('p', { class: 't-sm muted' }, sub),
     action,
   );
@@ -156,18 +162,29 @@ function spinnerBlock(tone: string, text: HTMLElement): HTMLElement {
   return h('div', { class: 'col q-center-block q-g16' }, h('span', { class: cx('spinner q-spin-lg', tone), 'aria-hidden': 'true' }), text);
 }
 
+/** 진입 혼잡(429): "요청이 많아 잠시 기다려야 합니다. N초 뒤 자동으로 다시 시도합니다"(d5 '진입 혼잡') */
+function busyLine(c: LiveCtx, until: number): HTMLElement {
+  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((until - steadyNow()) / 1000))}초`);
+  c.onCleanup(countdown(until, (sec) => (secs.textContent = `${sec}초`), () => undefined));
+  // 남은 초는 매초 바뀌므로 낭독 영역 밖에 두고, 낭독은 한 번만 한다(숫자에 live를 두지 않는다, ADR-0063)
+  return h('p', { class: 't-sm muted q-jc' },
+    h('span', { class: 'sr-only', role: 'status' }, '요청이 많아 잠시 기다려야 합니다. 곧 자동으로 다시 시도합니다'),
+    h('span', { 'aria-hidden': 'true' }, '요청이 많아 잠시 기다려야 합니다. ', secs, ' 뒤 자동으로 다시 시도합니다'),
+  );
+}
+
 /** '나' 표시(막대 위 배지와 눈금). 진행률만큼 transform으로 옮긴다(d5 §5.8: 움직임은 transform·opacity만) */
-function meMarker(pct: number, ghost = false): HTMLElement {
-  const track = h('span', { class: cx('q-me', ghost && 'q-me-ghost'), 'aria-hidden': 'true' },
+function meMarker(pct: number): HTMLElement {
+  const track = h('span', { class: 'q-me', 'aria-hidden': 'true' },
     h('span', { class: 'badge badge-solid q-me-badge' }, '나'),
-    !ghost && h('span', { class: 'q-me-tick' }),
+    h('span', { class: 'q-me-tick' }),
   );
   setVars(track, { '--p': `${pct}%` });
   return track;
 }
 
 /** ③ 진행 막대(CMP-016 queue). 채움은 transform으로 옮기고, 흐름 효과는 막대 안 줄무늬가 transform으로 흐른다 */
-function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean; extra?: HTMLElement; valueNow?: number }): HTMLElement {
+function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean }): HTMLElement {
   const fill = h('span', { class: cx('q-fill', opts.flow && 'q-flow', opts.dim && 'q-dim') });
   setVars(fill, { '--p': `${pct}%` });
   return h('div', {
@@ -176,77 +193,96 @@ function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean
     'aria-label': '대기 진행',
     'aria-valuemin': '0',
     'aria-valuemax': '100',
-    'aria-valuenow': String(opts.valueNow ?? pct),
+    'aria-valuenow': String(pct),
     'aria-valuetext': valueText,
-  }, fill, opts.extra);
+  }, fill);
 }
 
-function countBlock(c: EventCtx, v: { ahead: number; pct: number; eta: string | null; sentence: string; stale: boolean; allHeld: boolean; paused: boolean }): HTMLElement {
+/**
+ * ① 앞 인원: 낭독용 글 하나와 화면용 숫자(aria-hidden). 값이 바뀌면 바뀐 자리만 위에서 내려오게 굴린다(d5 §5.8 lg, 움직임 base).
+ * 움직임 줄이기·저전력이면 CSS가 효과를 꺼 새 값만 보인다. 숫자 자체에는 live를 두지 않는다(낭독은 1분 문장 하나)
+ */
+function aheadContent(now: string, before?: string): Child[] {
+  // 바뀌지 않은 글자는 이어 붙여 글 하나로 둔다(inline-flex 안에서 글자마다 따로 놓이면 자간이 달라진다, React QueuePanel과 같은 그림)
+  const digits: Child[] = [];
+  let run = '';
+  for (const d of rollDigits(now, before)) {
+    if (d.old === undefined) {
+      run += d.ch;
+      continue;
+    }
+    if (run) digits.push(run);
+    run = '';
+    digits.push(h('span', { class: 'q-digit' }, h('span', { class: 'q-digit-stack' }, h('span', null, d.ch), h('span', { class: 'q-digit-old' }, d.old || '\u00a0'))));
+  }
+  if (run) digits.push(run);
+  return [h('span', { class: 'sr-only' }, `${now}명`), h('span', { class: 'q-roll', 'aria-hidden': 'true' }, digits, '명')];
+}
+
+function countBlock(c: LiveCtx, v: { ahead: number; pct: number; eta: string | null; sentence: string; stale: boolean; allHeld: boolean; paused: boolean }): HTMLElement {
   const tone = v.stale ? 'muted' : '';
   // 속도가 0이거나 일시정지면 숫자 대신 '잠시 멈춤'(frontend §3.4). 멈춘 동안 막대도 흐르지 않는다
   const etaValue = v.eta ?? '잠시 멈춤';
   // 낭독은 live 영역 하나가 1분에 한 번 같은 문장을 읽는다. 앞 인원 숫자 자체에는 live를 두지 않는다(ADR-0063)
   const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
-  c.onCleanup(announceEveryMinute(live, () => v.sentence));
-  return h('div', { class: 'col q-count' },
-    h('p', { class: 'row q-ahead' }, h('span', { class: cx('t-lg fw-b q-ahead-l', tone) }, '앞에'), h('span', { class: cx('t-display num', tone) }, `${fmt(v.ahead)}명`)),
+  // 새 값이 와도 다시 그리지 않고 제자리에서 고친다(updateQueueNumbers). 낭독 문장은 마지막 값을 읽는다
+  const block = h('div', { class: 'col q-count', 'data-sentence': v.sentence });
+  c.onCleanup(announceEveryMinute(live, () => block.getAttribute('data-sentence') ?? v.sentence));
+  append(block, [
+    h('p', { class: 'row q-ahead' }, h('span', { class: cx('t-lg fw-b q-ahead-l', tone) }, '앞에'), h('span', { class: cx('t-display num', tone), 'data-q': 'ahead', 'data-v': fmt(v.ahead) }, aheadContent(fmt(v.ahead)))),
     h('div', { class: 'q-barwrap' }, meMarker(v.pct), bar(v.pct, v.sentence, { flow: !v.stale && !v.paused, dim: v.stale })),
-    !v.allHeld && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', v.eta && 'num', tone) }, etaValue)),
+    !v.allHeld && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', v.eta && 'num', tone), 'data-q': 'eta' }, etaValue)),
     v.allHeld && h('p', { class: 'row t-md fw-b q-jc' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '좌석이 풀리길 기다리는 중'),
     live,
-  );
+  ]);
+  return block;
 }
 
-/** '값이 바뀌는 순간'(보드): 앞 인원이 줄 때 바뀐 자리 숫자가 굴러 내려오고, '나' 표시가 앞으로 나아간다. 움직임 줄이기면 바로 바뀐다 */
-function rollingBlock(ahead: number, eta: string | null, sentence: string): HTMLElement {
-  const prevAhead = 3_640; // 직전 파일의 앞 인원(보드 그림의 이전 숫자)
-  const prevPct = 57;
-  const nowPct = 62;
-  const now = fmt(ahead);
-  const before = fmt(prevAhead).padStart(now.length, ' ');
-  const digits = [...now].map((ch, i) => {
-    const old = before[i] ?? ch;
-    if (ch === old) return ch;
-    return h('span', { class: 'q-digit' }, h('span', { class: 'q-digit-stack' }, h('span', null, ch), h('span', { class: 'q-digit-old' }, old)));
-  });
-  const next = h('span', { class: 'q-fill-next', 'aria-hidden': 'true' });
-  setVars(next, { '--from': `${prevPct}%`, '--w': `${nowPct - prevPct}%` });
-  return h('div', { class: 'col q-count' },
-    h('p', { class: 'row q-ahead' },
-      h('span', { class: 't-lg fw-b q-ahead-l' }, '앞에'),
-      h('span', { class: 'sr-only' }, `${now}명`),
-      h('span', { class: 't-display num q-roll', 'aria-hidden': 'true' }, digits, '명'),
-    ),
-    h('div', { class: 'q-barwrap' }, meMarker(prevPct, true), meMarker(nowPct), bar(prevPct, sentence, { flow: true, dim: false, extra: next, valueNow: nowPct })),
-    h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', eta && 'num') }, eta ?? '잠시 멈춤')),
-    h('p', { class: 'sr-only', 'aria-live': 'polite' }, sentence),
-  );
+/**
+ * 같은 모양의 화면에서 숫자만 바뀌면 다시 그리지 않고 고친다(열린 대화상자·초점·낭독을 지킨다). 고쳤으면 true,
+ * 숫자 칸이 없으면 false(다시 그려야 한다)
+ */
+export function updateQueueNumbers(root: HTMLElement, v: QueueView): boolean {
+  const block = root.querySelector<HTMLElement>('.q-count');
+  if (!block || v.ahead === undefined) return false;
+  const eta = etaLabel(v.etaSec);
+  const pct = Math.round(v.progress ?? 0);
+  const sentence = queueSentence(v.ahead, eta, v.state === 'all-held');
+  block.setAttribute('data-sentence', sentence);
+  const ahead = block.querySelector<HTMLElement>('[data-q="ahead"]');
+  if (ahead) {
+    const now = fmt(v.ahead);
+    const before = ahead.getAttribute('data-v') ?? undefined;
+    if (now !== before) {
+      ahead.replaceChildren();
+      append(ahead, aheadContent(now, before));
+      ahead.setAttribute('data-v', now);
+    }
+  }
+  const etaEl = block.querySelector<HTMLElement>('[data-q="eta"]');
+  if (etaEl) {
+    etaEl.textContent = eta ?? '잠시 멈춤';
+    etaEl.classList.toggle('num', eta !== null);
+  }
+  const me = block.querySelector<HTMLElement>('.q-me');
+  if (me) setVars(me, { '--p': `${pct}%` });
+  const fill = block.querySelector<HTMLElement>('.q-fill');
+  if (fill) setVars(fill, { '--p': `${pct}%` });
+  const barEl = block.querySelector<HTMLElement>('[role="progressbar"]');
+  barEl?.setAttribute('aria-valuenow', String(pct));
+  barEl?.setAttribute('aria-valuetext', sentence);
+  return true;
 }
 
 /** soon: "곧 입장합니다" + 자동 재시도까지 남은 초. 탭 제목에도 남은 초를 보인다(d5 §5.8) */
-function soonBlock(c: EventCtx): HTMLElement {
-  const secs = h('span', { class: 'num fw-b' }, '12초');
+function soonBlock(c: LiveCtx, retryAt: number): HTMLElement {
+  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((retryAt - steadyNow()) / 1000))}초`);
   const baseTitle = document.title;
-  let stop = (): void => undefined;
-  let retry: number | undefined;
-  let disposed = false;
-  const run = (): void => {
-    retry = undefined;
-    if (disposed) return;
-    stop = countdown(Date.now() + 12_000, (sec) => {
-      secs.textContent = `${sec}초`;
-      document.title = `(${sec}초) 곧 입장 · ${c.ev.title}`;
-    }, () => {
-      // 목업: 다시 시도해도 SOON이 와서 다시 센다(입장 확정 SOON의 retryAfterSeconds)
-      if (!disposed) retry = window.setTimeout(run, 300);
-    });
-  };
-  run();
+  const stop = countdown(retryAt, (sec) => {
+    secs.textContent = `${sec}초`;
+    document.title = `(${sec}초) 곧 입장${c.ev.title ? ` · ${c.ev.title}` : ''}`;
+  }, () => undefined);
   c.onCleanup(() => {
-    // 정리된 뒤에는 다시 세지 않는다: 기다리던 재시도 타이머를 지우고 진행 중인 카운트다운을 멈춘다
-    disposed = true;
-    if (retry !== undefined) window.clearTimeout(retry);
-    retry = undefined;
     stop();
     document.title = baseTitle;
   });
@@ -258,16 +294,39 @@ function soonBlock(c: EventCtx): HTMLElement {
   );
 }
 
-/** 차례 도래 유예(15분, POL-008): 남은 시간 안에 [지금 입장] → 좌석 화면(SCR-010)으로 전체 이동 */
-function graceBlock(c: EventCtx): HTMLElement {
-  const remain = h('span', { class: 'num fw-b' }, '14:32');
-  c.onCleanup(countdown(Date.now() + (14 * 60 + 32) * 1000, (sec) => {
-    remain.textContent = clock(sec);
-  }, () => c.go('대기표 만료')));
+/**
+ * 차례 도래 유예(d5 §5.8 '차례 도래 유예', ADR-0208 결정 6): "차례가 되었습니다. m:ss 안에 입장하세요" + [[ 지금 입장 ]].
+ * 남은 시간은 매초 숫자만 바꾸고 낭독하지 않는다(처음 한 번 알린다). 0이 되어도 버튼은 두고 만료는 서버가 정한다
+ */
+function graceBlock(c: LiveCtx, until: number): HTMLElement {
+  const remain = h('span', { class: 'num fw-b' }, clock(Math.ceil((until - steadyNow()) / 1000)));
+  c.onCleanup(countdown(until, (sec) => (remain.textContent = clock(sec))));
+  const go = h('button', { class: 'btn btn-primary btn-lg btn-block q-cta', type: 'button', onclick: () => c.actions.admitNow() }, '지금 입장');
   return h('div', { class: 'col q-center-block q-g12' },
-    h('span', { class: 'state-icon is-primary' }, ic('bell-fill')),
-    h('p', { class: 't-2xl', role: 'alert' }, '차례가 되었습니다'),
-    h('p', { class: 't-md' }, remain, ' 안에 입장하세요'),
-    h('button', { class: 'btn btn-primary btn-lg btn-block q-mt4 q-cta', type: 'button', onclick: () => location.assign(links.seats(c.ev.id)) }, '지금 입장'),
+    h('span', { class: 'state-icon is-primary' }, ic('bell')),
+    h('h2', { class: 't-2xl', tabindex: '-1' }, '차례가 되었습니다'),
+    h('p', { class: 'sr-only', role: 'alert' }, `차례가 되었습니다. ${Math.max(1, Math.ceil((until - steadyNow()) / 60_000))}분 안에 입장하세요`),
+    h('p', { class: 't-md', 'aria-hidden': 'true' }, remain, ' 안에 입장하세요'),
+    go,
   );
+}
+
+/** ⑧ 희망 조건 한 줄: '희망 R석 2매 [바꾸기]', 1순위 등급이 매진이면 경고(d5 §5.8 tier-sold-out) */
+function prefLine(c: LiveCtx, soldOut: readonly string[]): HTMLElement {
+  const pref = c.pref!;
+  const p = pref.read() ?? defaultPreference(pref.tiers);
+  const out = soldOut.includes(p.firstTierId);
+  const id = out ? 'pf-out' : 'pf-sum';
+  const change = h('button', { class: 'btn btn-outline btn-sm', type: 'button', 'aria-haspopup': 'dialog', 'aria-describedby': id, 'data-opens': 'pref' }, '바꾸기');
+  change.addEventListener('click', () => c.open('pref', change));
+  return out
+    ? h('div', { class: 'card-flat row between q-pref-row' },
+        // 낭독 영역에는 글만 둔다(버튼은 밖)
+        h('p', { class: 't-sm row q-pref-text q-top', id, role: 'status' }, ic('alert', 'tx-warning'), h('span', null, '1순위 등급이 매진되었습니다. 2순위 등급을 골라 두세요')),
+        change,
+      )
+    : h('div', { class: 'card-flat row between q-pref-row' },
+        h('p', { class: 't-sm q-pref-text', id }, h('span', { class: 'muted' }, '희망'), ' ', h('strong', null, prefSummary(p, pref.tiers))),
+        change,
+      );
 }

@@ -2,8 +2,8 @@
 // 세션이 살아 있고 그 계정의 세션이며 (제공자, provider_user_id)가 그 계정에 연결돼 있을 때만 재인증 토큰(5분, 강도를 싣는다)을 준다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
-import { needsReverification, type Provider, type ReauthPurpose, type ReauthStrength, sessionAlive } from '../domain/session.js';
+import { REVERIFICATIONS, type Reverifications, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
+import { needsReverification, type Provider, type ReauthPurpose, type ReauthStrength, REVERIFY_WINDOW_MS, sessionAlive } from '../domain/session.js';
 import { checkIds } from './end-session.js';
 import { SessionError } from './session-error.js';
 
@@ -15,6 +15,7 @@ export class IssueReauthToken {
     @Inject(SESSION_STORE) private readonly store: SessionStore,
     @Inject(TOKEN_SIGNER) private readonly signer: TokenSigner,
     @Inject(SESSION_SIGNALS) private readonly signals: SessionSignals,
+    @Inject(REVERIFICATIONS) private readonly reverifications: Reverifications,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -33,8 +34,8 @@ export class IssueReauthToken {
       this.signals.reauthMismatch(i.provider);
       return { result: 'ACCOUNT_MISMATCH' };
     }
-    // 본인확인 재통과 기록을 보는 일은 재통과가 생기는 본인확인 단계(BUILD_ORDER BOT-020)가 붙인다. 그 전에는 늘 재통과가 필요하다
-    if (needsReverification(i.purpose, i.strength, verdict)) {
+    // 재통과가 필요한 경우에도 같은 세션의 REVERIFY가 10분 [가정] 안에 확정됐으면 준다(identity §5 '키 판·만 14세…', I-T55 ④)
+    if (needsReverification(i.purpose, i.strength, verdict) && !(await this.reverifications.recentlyReverified(i.accountId.toLowerCase(), i.sessionId.toLowerCase(), now - REVERIFY_WINDOW_MS))) {
       this.signals.reverifyRequired(i.provider);
       return { result: 'REVERIFY_REQUIRED' };
     }

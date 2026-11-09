@@ -1,0 +1,3 @@
+-- 비밀번호만 맞은 로그인 찾기의 부분 색인(docs/data.md admin_login_step, docs/features/identity.md §6 '비밀번호만 맞은 로그인', BOT-123이 넘긴 것).
+-- admin_login_step은 5분 수명에 정비가 2일 뒤 지우는 작은 표라 트랜잭션 안에서 바로 만든다(docs/devops.md §7.2의 CONCURRENTLY는 큰 표).
+CREATE INDEX "admin_login_step_password_only_idx" ON "admin_login_step" USING btree ("created_at") WHERE "admin_login_step"."used_at" is null and "admin_login_step"."known_source" = false and "admin_login_step"."password_only_noticed_at" is null;

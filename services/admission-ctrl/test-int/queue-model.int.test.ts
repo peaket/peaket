@@ -1,11 +1,12 @@
 // 대기열·입장 제어 모델 기반 시험(wbs 2.3.4, docs/verification.md §2.4, V-T40, BUILD_ORDER PRF-120). 실제 Valkey(노드 하나짜리 클러스터 모드)
 // 위에서 운영 코드(queue-svc 진입·입장 확정, admission-ctrl 리더·묶음 게시)를 돌린다. 명령은 명세 specs/queue.qnt의 동작과 이름이 같다.
-// ① 무작위 명령 순서(fc.asyncModelRun): 범위 넷(복제 지연 1·2, 묶음 있음·없음, 입장 확정 한 번·네 호출)에서 걸음마다 명세 불변식 ①~⑤와
+// ① 무작위 명령 순서(fc.asyncModelRun): 범위 다섯(복제 지연 1·2, 묶음 있음·없음, 입장 확정 한 번·네 호출, 도착 시각 칸)에서 걸음마다 명세 불변식 ①~⑦와
 //    '입장한 대기표의 입장 키가 남음'(ADR-0183 결정 2·3)이 지켜진다.
 // ② 경합(fc.scheduler): 운영 코드의 모든 Redis 호출이 끝나는 순서를 스케줄러가 섞는다(걸음마다 하네스가 스케줄러를 돌린다, system.ts). 무작위 명령 순서
 //    위에서 한 번, 차례가 온 대기표 하나에 같은 대기표 요청 2~3개와 지금 목표 변경만 섞는 집중 시험으로 한 번 본다.
 // ③ 동작 기록 재생: tools/spec-check traces가 낸 명세 기록을 같은 이름의 동작으로 다시 돌려, 걸음마다 탭 단계·대기표와 카운터·serving·세대·리더 세대가
 //    명세와 같다.
+//    진입 Degraded의 칸 떼기·닫기(HOT-061)도 같은 틀이다: 명세 enterNumberArrival·plan ARRCLOSE를 운영 코드로 돌려 ⑥·⑦(칸 번호 중복, 받은 번호가 빠진 번호)을 본다.
 // 실패하면 fast-check가 줄인 순서를 찍는다. 운영 코드의 결함이면 그 순서를 회귀 시험으로 이 파일에 고정한다(2026-11-04 지금은 없다).
 // 횟수: MBT_RUNS(기본 25, 집중 경합은 4배). 실패를 다시 돌리려면 MBT_SEED·MBT_PATH(fast-check가 찍는 seed·path). 걸음 기록: MBT_DEBUG=<파일>.
 import { createHash } from 'node:crypto';
@@ -76,9 +77,11 @@ const VARIANTS: Array<[string, Scope]> = [
   ['복제 지연 2·묶음·한 번', { ...FULL, lag: 2, admitSteps: false }],
   ['복제 지연 2·묶음 없음·네 호출', { ...FULL, lag: 2, openBatch: false }],
   ['복제 지연 1·묶음 없음·한 번', { ...FULL, openBatch: false, admitSteps: false }],
+  // 진입 Degraded의 도착 시각 칸(HOT-061): 칸 2개(크기 2), 장애 전환 2회. 칸 번호가 겹치지 않고 받은 번호가 빠진 번호가 되지 않는지 본다
+  ['복제 지연 1·칸 2개·한 번', { tickets: [[1, 1], [1, 2], [2, 1]], ctrls: [1], lag: 1, openBatch: false, admitSteps: false, maxFailovers: 2, personFailovers: false, maxLeaderChanges: 0, epochJumps: [1], arrSlots: [1, 2], arrSize: 2, skipBase: 5 }],
 ];
 
-test.each(VARIANTS)('모델 기반 무작위 명령 순서(%s): 명세 불변식 ①~⑤가 지켜진다', async (_name, scope) => {
+test.each(VARIANTS)('모델 기반 무작위 명령 순서(%s): 명세 불변식 ①~⑦이 지켜진다', async (_name, scope) => {
   await fc.assert(
     fc.asyncProperty(plan(scope), async (cmds) => {
       await fc.asyncModelRun(setup(scope), cmds);
@@ -123,6 +126,70 @@ test('경합 집중(스케줄러): 차례가 온 대기표의 요청 2~3개와 �
     { numRuns: RUNS * 4, ...replayParams },
   );
 }, 600_000);
+
+// 무작위 실행은 이 순서에 잘 닿지 않아(25회로 변이를 못 잡았다, HOT-061) 명세 반례(queue_arrival_close_no_gen)의 순서를 그대로 고정한다.
+// 세대 확인을 뺀 닫기 Lua에서는 둘째 사람의 번호가 빠진 번호가 되어 실패한다
+test('V-T40 집중(HOT-061): 장애 전환으로 쓴 번호 수를 잃은 칸을 닫아도 받은 번호가 빠진 번호가 되지 않는다', async () => {
+  const scope: Scope = { tickets: [[1, 1], [2, 1]], ctrls: [1], lag: 1, openBatch: false, admitSteps: false, maxFailovers: 1, personFailovers: false, maxLeaderChanges: 0, epochJumps: [1], arrSlots: [1], arrSize: 2, skipBase: 5 };
+  const { real } = await setup(scope)();
+  const s = real.s;
+  // 리더가 세대를 올린다
+  s.acquire(1);
+  await s.step('applyWrite', async () => void (await s.applyWrite(1)));
+  // 두 사람이 같은 칸에서 번호를 받는다. 둘째 번호의 쓴 수는 아직 복제되지 않았다(복제 지연 1). 둘째가 번호를 기록한다
+  await s.step('enterPreempt', () => s.enterPreempt([1, 1]));
+  await s.step('enterPreempt', () => s.enterPreempt([2, 1]));
+  await s.step('enterNumberArrival', () => s.enterNumberArrival([1, 1], 1));
+  await s.step('enterNumberArrival', () => s.enterNumberArrival([2, 1], 1));
+  await s.step('enterRecord', () => s.enterRecord([2, 1]));
+  expect(s.tab([2, 1]).phase).toBe('HELD');
+  const seq = s.tab([2, 1]).seq;
+  expect(seq).toBe(2);
+  // 장애 전환이 쓴 번호 수를 잃고(칸의 used가 1로 돌아감) RB-05가 세대를 올린 뒤 리더가 칸을 닫는다
+  await s.failoverEv(1);
+  s.note('failoverEv');
+  await s.step('rb05', async () => void (await s.rb05()));
+  s.replicateEv();
+  s.note('replicateEv');
+  await s.step('rb05Confirm', async () => void (await s.rb05Confirm()));
+  s.plan(1, 'ARRCLOSE');
+  s.note('plan');
+  await s.step('applyWrite', async () => void (await s.applyWrite(1)));
+  // 닫기가 실제로 돌았다: 칸 1이 닫히고 믿지 못하는 칸으로 표시됐다
+  expect(s.observed().arr).toMatchObject({ closedUpto: 1, lostUpto: 1 });
+  expect(s.observed().removed).not.toContain(seq);
+  await finish();
+}, 60_000);
+
+// TLC가 찾은 가장 짧은 반례(specs/results/queue/queue_arrival_entry_no_gen.tlc.txt)의 순서: 진입 Lua가 칸 기록의 세대를 보지 않으면 쓴 번호 수를 잃은 칸에서 같은 번호를 다시 낸다. 앞 사람이 그 번호를 돌렸으면 새로 받은 번호가 이미 빠진 번호다
+test('V-T40 집중(HOT-061): 장애 전환 뒤 옛 칸의 쿠키는 그 칸의 번호를 다시 받지 않는다', async () => {
+  const scope: Scope = { tickets: [[1, 1], [2, 1], [3, 1]], ctrls: [1], lag: 1, openBatch: false, admitSteps: false, maxFailovers: 1, personFailovers: false, maxLeaderChanges: 0, epochJumps: [1], arrSlots: [1], arrSize: 2, skipBase: 5 };
+  const { real } = await setup(scope)();
+  const s = real.s;
+  // 두 사람이 같은 칸에서 번호를 받고(둘째 번호의 쓴 수는 복제 전) 둘째가 기록한다
+  await s.step('enterPreempt', () => s.enterPreempt([1, 1]));
+  await s.step('enterPreempt', () => s.enterPreempt([2, 1]));
+  await s.step('enterPreempt', () => s.enterPreempt([3, 1]));
+  await s.step('enterNumberArrival', () => s.enterNumberArrival([1, 1], 1));
+  await s.step('enterNumberArrival', () => s.enterNumberArrival([2, 1], 1));
+  await s.step('enterRecord', () => s.enterRecord([2, 1]));
+  const lost = s.tab([2, 1]).seq;
+  expect(lost).toBe(2);
+  // 장애 전환이 쓴 번호 수를 잃고, 둘째가 이탈해 번호를 돌린다. 그 뒤 RB-05와 복제 확인이 끝난다
+  await s.failoverEv(1);
+  s.note('failoverEv');
+  await s.step('leave', () => s.leave([2, 1]));
+  await s.step('rb05', async () => void (await s.rb05()));
+  s.replicateEv();
+  s.note('replicateEv');
+  await s.step('rb05Confirm', async () => void (await s.rb05Confirm()));
+  // 셋째 사람의 쿠키도 같은 칸이다. 옛 칸은 믿지 못하는 칸이라 카운터 끝의 번호를 받는다(잃은 번호를 다시 주지 않는다)
+  await s.step('enterNumberArrival', () => s.enterNumberArrival([3, 1], 1));
+  await s.step('enterRecord', () => s.enterRecord([3, 1]));
+  expect(s.tab([3, 1]).phase).toBe('HELD');
+  expect(s.tab([3, 1]).seq).not.toBe(lost);
+  await finish();
+}, 60_000);
 
 // ---- 동작 기록 재생 ----
 const manifest = JSON.parse(readFileSync(join(TRACES, 'manifest.json'), 'utf8')) as { specSha256: string; files: string[] };

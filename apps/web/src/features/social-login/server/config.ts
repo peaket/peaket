@@ -31,10 +31,18 @@ export interface SocialLoginConfig {
   fanJwks?: JSONWebKeySet;
   /** 팬 토큰 발급자(iss) */
   tokenIssuer: string;
+  /** 파드마다 공급자별 동시 호출 상한(PEAKET_OIDC_MAX_CONCURRENT, 없으면 기본 233 [가정], docs/architecture.md §5 '소셜 로그인 공급자 HTTP' 식) */
+  oidcMaxConcurrent?: number;
 }
 
 export const TEST_ENVS = ['local', 'ci'] as const;
 export const allowsMockProviders = (env: string): boolean => (TEST_ENVS as readonly string[]).includes(env);
+
+const positiveInt = (v: string, name: string): number => {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name}은(는) 1 이상의 정수여야 한다`);
+  return n;
+};
 
 const need = (env: Record<string, string | undefined>, name: string): string => {
   const v = env[name];
@@ -80,5 +88,6 @@ export function loadSocialLoginConfig(env: Record<string, string | undefined>): 
     fanJwksUrl,
     fanJwks,
     tokenIssuer: need(env, 'PEAKET_TOKEN_ISSUER'),
+    ...(env.PEAKET_OIDC_MAX_CONCURRENT ? { oidcMaxConcurrent: positiveInt(env.PEAKET_OIDC_MAX_CONCURRENT, 'PEAKET_OIDC_MAX_CONCURRENT') } : {}),
   };
 }

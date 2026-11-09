@@ -4,6 +4,7 @@
 # - 의존성은 잠금 파일대로만 설치한다(--frozen-lockfile, 설치 스크립트 허용 목록은 pnpm-workspace.yaml)
 # - 미리 빌드한 Kafka 바인딩(플랫폼 패키지가 끌고 온다)은 게시 다이제스트와 견준 뒤에만 실행 단계로 옮긴다(docs/devops.md §4.4)
 # - 실행 이미지에는 빌드 도구·원본·시험·.git이 없다(.dockerignore, ASVS v5.0.0-13.4.1). 비밀은 빌드 인자로 넘기지 않는다
+# - payment-svc는 v0가 쓰는 공개 면(결제 포트·시뮬레이터, src/modules/payment/index.ts)만 컴파일한다(build:lib). 서버 쪽과 packages/contracts는 v0에 필요 없다(BUILD_ORDER PRF-180 코드 리뷰)
 # 시작 명령: 앱   node --import @peaket/platform/telemetry/register dist/main.js
 #           입구 node dist/gateway/main.js
 #           마이그레이션 잡 node scripts/migrate.mjs
@@ -25,13 +26,16 @@ COPY services/payment-svc services/payment-svc
 COPY services/v0-monolith services/v0-monolith
 COPY tools/ci/verify-native-binding.mjs tools/ci/
 RUN pnpm --filter @peaket/platform build \
- && pnpm --filter @peaket/payment-svc build \
+ && pnpm --filter @peaket/payment-svc build:lib \
  && pnpm --filter @peaket/v0-monolith build \
  && pnpm --filter @peaket/v0-monolith deploy --prod --legacy /out \
  && node tools/ci/verify-native-binding.mjs /out --expect \
  && cd /out \
  && rm -rf src test test-int tsconfig.json tsconfig.build.json tsconfig.web.json vitest.config.mjs vitest.integration.config.mjs \
-           drizzle.config.ts Dockerfile scripts/local-demo.mjs scripts/local-gateway.mjs
+           drizzle.config.ts Dockerfile scripts/local-demo.mjs scripts/local-gateway.mjs \
+ && cd node_modules/.pnpm/@peaket+payment-svc@*/node_modules/@peaket/payment-svc \
+ && rm -rf src test test-int scripts migrations drizzle.config.ts tsconfig.json tsconfig.build.json tsconfig.lib.json tsconfig.drizzle.json \
+           vitest.config.mjs vitest.integration.config.mjs
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 ENV NODE_ENV=production

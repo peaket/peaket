@@ -1,20 +1,47 @@
 // SCR-039 계정 연결 제안(d5 §5.21, d3 SCR-039 행, 캔버스 보드 SCR-039-m·t·d를 한 페이지 반응형으로 합쳤다).
 // 로그인 카드와 같은 폭(최대 400). 휴대폰은 바탕 위에 바로, md 768부터 옅은 바탕 가운데 카드. 본문은 ds AccountLinkPrompt(CMP-055).
-// 연결 성공은 원래 화면으로 돌아가며 그 화면을 불러오는 뼈대와 토스트 "구글 계정을 연결했습니다"를 보인다(셸은 로그인한 모양).
+// 연결 성공은 원래 화면으로 돌아가며 그 화면을 불러오는 뼈대와 토스트 "구글 계정을 연결했습니다. 다른 기기에서는 모두 로그아웃했습니다"를 보인다(셸은 로그인한 모양, 뒷 문장은 BOT-044).
 // 상태는 ?state=(보드 state 값), 다크는 ?theme=dark.
+// 실제 흐름(콜백이 보낸 ?proposal=·?link=expired·?linked=)은 LiveLinkPrompt가 그린다(identity §2.1 '가입 때 연결 제안의 첫 구현', BUILD_ORDER BOT-040).
 import { AccountLinkPrompt } from '@peaket/ds/AccountLinkPrompt';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { Toast } from '@peaket/ds/Toast';
-import { LINK_PROPOSAL, PROVIDER_LOGIN_LABEL, PROVIDER_NAME } from '@/entities/provider';
+import { LINK_PROPOSAL, linkedText, PROVIDER_LOGIN_LABEL, PROVIDER_NAME } from '@/entities/provider';
 import { SCR039_STATES } from '@/shared/config/screens.account';
 import { renderNextLink } from '@/shared/lib/next-link';
 import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { linkView } from '../model/state';
+import { LiveLinkPrompt } from './LiveLinkPrompt';
+
+const one = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
 
 export async function LoginLinkPage({ searchParams }: PageProps) {
   const sp = await searchParams;
+  const proposal = one(sp.proposal);
+  const linked = one(sp.linked);
+  const expiredLive = one(sp.link) === 'expired';
+  if (proposal !== undefined || linked !== undefined || expiredLive) {
+    const mismatch = Number(one(sp.mismatch));
+    return (
+      <AppShell guest={linked === undefined}>
+        <main
+          className="page-main px-4 pt-6 pb-8 md:items-center md:justify-center md:bg-(--surface-basement) md:px-6 md:pt-14 md:pb-[72px] lg:px-8"
+          id="main"
+          tabIndex={-1}
+        >
+          <LiveLinkPrompt
+            proposalId={proposal}
+            mismatchLeft={Number.isInteger(mismatch) && mismatch > 0 ? mismatch : undefined}
+            expired={expiredLive}
+            linked={linked}
+            next={one(sp.next)}
+          />
+        </main>
+      </AppShell>
+    );
+  }
   const state = resolvePreviewState(sp, SCR039_STATES, '제안');
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = linkView(state);
@@ -66,7 +93,7 @@ export async function LoginLinkPage({ searchParams }: PageProps) {
               <span className="skel" style={{ height: 52, marginTop: 8 }} />
             </div>
             <div className="center fixed inset-x-4 bottom-6 z-[90]">
-              <Toast tone="success">{incoming} 계정을 연결했습니다</Toast>
+              <Toast tone="success">{linkedText(incoming)}</Toast>
             </div>
           </>
         ) : null}

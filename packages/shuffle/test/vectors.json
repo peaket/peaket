@@ -45,6 +45,22 @@
   2,
   3
  ],
+ "emergency": {
+  "beacon": "5a0a07005e996232e2cc59a91675773e1df94dd0af57f5c0c46306e0a028e6dc",
+  "key": "7681d3b97383b301cedd3710684915fccb89bd5da6266fd6b939988a0139c754",
+  "shuffled": [
+   "47076dea039ec9db94fc55694f6864a1cfe47d4f93e41c010e4521e3378888e5",
+   "6c02cf2083469e72758a38be0b7c6eabe9bc58580774daf6b2cf4b6ea1469722",
+   "6fcb1cf1b113a341db0fa49dc95fcb841140e6ef6e05ac4cf9b0a5b22a0f056c",
+   "fe1e004b2f1cd6bade61f13fc301ff4f8c5aea1b7b19fe9075a0be3b5706655c",
+   "a2f2b0b588bcc84fbf4d2ac8cc086b6f84de3e00fa3c1ba11e38ac078eb03192",
+   "b97607173d82f4f5fc71f828aa26f14cfff17ac6f3f6d4a248fa85be851896d1",
+   "3f08aace122ee2368432c1ca23a049bc640bafbf00fdf33a52429f38ba12dbf9",
+   "0d59e266304dee1d75ac34fa01986a53b8097398a4e7e87b54b8b9732691dc98",
+   "e7c9583f202a49ecd684b04f6435a3cfa6788f8f541e9c09965a857802757b17",
+   "0f6bffa9661cb5dd2f3f7b2929f33061f58a7ba7fdd689530b1a306f8ed8f3ec"
+  ]
+ },
  "firstWords": [
   733980668,
   550491954,
@@ -57,6 +73,53 @@
   1275915543,
   2854503761
  ],
+ "drand": {
+  "genesisMs": 1692803367000,
+  "periodMs": 3000,
+  "minDelayMs": 3000,
+  "cases": [
+   {
+    "atMs": 1692803367000,
+    "round": 2,
+    "timeMs": 1692803370000
+   },
+   {
+    "atMs": 1692803367001,
+    "round": 3,
+    "timeMs": 1692803373000
+   },
+   {
+    "atMs": 1692803369999,
+    "round": 3,
+    "timeMs": 1692803373000
+   },
+   {
+    "atMs": 1692803370000,
+    "round": 3,
+    "timeMs": 1692803373000
+   },
+   {
+    "atMs": 1794000000000,
+    "round": 33732213,
+    "timeMs": 1794000003000
+   },
+   {
+    "atMs": 1794000000001,
+    "round": 33732214,
+    "timeMs": 1794000006000
+   },
+   {
+    "atMs": 1794000002999,
+    "round": 33732214,
+    "timeMs": 1794000006000
+   },
+   {
+    "atMs": 1794000003000,
+    "round": 33732214,
+    "timeMs": 1794000006000
+   }
+  ]
+ },
  "rejection": {
   "items": [
    0,

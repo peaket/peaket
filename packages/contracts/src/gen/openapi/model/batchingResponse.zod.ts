@@ -14,7 +14,7 @@ import * as zod from 'zod';
 export const BatchingResponse = zod.object({
   "entryRequestId": zod.uuid().optional().describe('이 묶음 참가의 진입 요청 ID(본문에 없었으면 queue-svc가 만든 값). 결과 뒤 이 값으로 진입을 다시 보낸다(묶음 기록은 같은 요청 ID로만 잇는다. 화면은 이 값을 localStorage에 둔다, 추천 적용 2026-11-03)'),
   "resultPath": zod.string().optional().describe('queue-files의 묶음 결과 파일 경로(/v1/queues/{eventId}/batch-results/{hashPrefix}.json)'),
-  "resultAt": zod.iso.datetime({"offset":true}).optional().describe('결과 공개 예정 시각'),
+  "resultAt": zod.iso.datetime({"offset":true}).optional().describe('결과 공개 예정 시각(공시 drand 라운드의 예정 시각 + 게시 목표 5초 [가정], ADR-0231)'),
   "spreadSec": zod.int().optional().describe('분산 창(초, 8 [가정])'),
   "serverTimeMs": zod.int().optional().describe('서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)')
 }).describe('202 BATCHING 본문(ADR-0041·0058)')

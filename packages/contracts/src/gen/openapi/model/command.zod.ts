@@ -20,7 +20,7 @@ export const Command = zod.object({
   "params": zod.looseObject({
 
 }).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073)')
-})
+}).strict()
 
 export type Command = zod.input<typeof Command>;
 export type CommandOutput = zod.output<typeof Command>;

@@ -1,0 +1,32 @@
+{
+  "$comment": "재생용 동작 기록(wbs 2.3.4, V-T40). node tools/spec-check/run-local.mjs traces --spec seat가 만든다. 손으로 고치지 않는다",
+  "spec": "specs/seat.qnt",
+  "specSha256": "99dbb599bbc9573d9d2306aa4403646bc73efe083c4e78d34328de5d3eccd6de",
+  "quint": "0.33.1",
+  "modules": [
+    {
+      "main": "seat_proposed",
+      "traces": 8
+    },
+    {
+      "main": "seat_proposed_full",
+      "traces": 4
+    }
+  ],
+  "seed": "0x5eed",
+  "maxSteps": 40,
+  "files": [
+    "seat_proposed_0.itf.json",
+    "seat_proposed_1.itf.json",
+    "seat_proposed_2.itf.json",
+    "seat_proposed_3.itf.json",
+    "seat_proposed_4.itf.json",
+    "seat_proposed_5.itf.json",
+    "seat_proposed_6.itf.json",
+    "seat_proposed_7.itf.json",
+    "seat_proposed_full_0.itf.json",
+    "seat_proposed_full_1.itf.json",
+    "seat_proposed_full_2.itf.json",
+    "seat_proposed_full_3.itf.json"
+  ]
+}

@@ -17,10 +17,11 @@ const ResultBody = z.object({ providerResult: z.record(z.string(), z.string()) }
 const PROBLEM: Record<VerificationError['code'], { status: number; type: string; title: string; retryAfterSeconds?: number }> = {
   NEXT_INVALID: { status: 400, type: 'next-invalid', title: '돌아갈 주소가 같은 출처 경로가 아닙니다' },
   ALREADY_VERIFIED: { status: 409, type: 'already-verified', title: '이미 본인확인을 마친 계정입니다' },
-  NOT_FOUND: { status: 404, type: 'not-found', title: '본인확인 건을 찾을 수 없습니다' },
+  NOT_FOUND: { status: 404, type: 'verification-not-found', title: '본인확인 건을 찾을 수 없습니다' },
   DUPLICATE_ACCOUNT: { status: 409, type: 'duplicate-account', title: '이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요' },
   PROVIDER_DOWN: { status: 503, type: 'provider-down', title: '지금은 본인확인을 할 수 없습니다', retryAfterSeconds: 30 },
   PURPOSE_UNSUPPORTED: { status: 400, type: 'purpose-not-supported', title: '아직 받지 않는 본인확인 목적입니다' },
+  UNDER_14: { status: 403, type: 'under-14', title: '만 14세 미만은 피켓을 이용할 수 없습니다' },
 };
 
 async function problem<T>(p: Promise<T>): Promise<T> {
@@ -44,7 +45,7 @@ export class VerificationController {
   @Roles(['fan'])
   @HttpCode(201)
   async start(@ContractBody(StartBody) body: z.output<typeof StartBody>, @CurrentPrincipal() me: Principal) {
-    const r = await problem(this.startVerification.run({ accountId: me.accountId, purpose: body.purpose, next: body.next }));
+    const r = await problem(this.startVerification.run({ accountId: me.accountId, sessionId: me.sessionId, purpose: body.purpose, next: body.next }));
     return { verificationId: r.verificationId, window: r.window, expiresAt: new Date(r.expiresAt).toISOString() };
   }
 

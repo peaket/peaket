@@ -1,11 +1,15 @@
 // 진입 3단계 Lua를 실제 Valkey 8.1로 돈다(test/entry-cases.ts의 사례를 메모리 저장소와 똑같이). 선점 수명은 300ms로 줄여 실제로 기다린다.
 import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { RedisEntryStore, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
+import { RedisEntryStore, RedisShuffleCommits, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
-import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
+import { ARRIVAL_CARVE_WINDOW_MS, type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
+import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
+import { leaveCases } from '../test/leave-cases.js';
+import { lobbyCases } from '../test/lobby-cases.js';
 import { entryCases } from '../test/entry-cases.js';
+import { type PidWorld, pidTransitionEntryCases } from '../test/pid-transition-cases.js';
 import { newEvent, openSchedule } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -24,18 +28,24 @@ afterAll(async () => {
   valkey?.stop();
 });
 
+/** Valkey의 서버 시각(칸 Lua가 쓰는 TIME과 같은 시계) */
+async function serverNowMs(): Promise<number> {
+  const t = (await redis.command(['TIME'])) as unknown[];
+  return Number(String(t[0])) * 1000 + Math.floor(Number(String(t[1])) / 1000);
+}
+
 const cmd = (key: string, args: string[]) => redis.command(args, { key });
 
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
   const key = keys.cfg(eventId);
-  const window = s.batchWindowMs === undefined ? [] : ['batchWindowMs', String(s.batchWindowMs)];
+  const window = [...(s.batchWindowMs === undefined ? [] : ['batchWindowMs', String(s.batchWindowMs)]), ...(s.lobbyMinutes === undefined ? [] : ['lobbyMinutes', String(s.lobbyMinutes)])];
   await cmd(key, ['HSET', key, 'opensAtMs', String(s.opensAtMs), 'startsAtMs', String(s.startsAtMs), 'lobbyShuffle', s.lobbyShuffle ? '1' : '0', 'openBatch', s.openBatch ? '1' : '0', 'rev', '1', ...window]);
 }
 
 const WINDOW_MS = 800;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-entryCases('Valkey Lua', async () => {
+const valkeyWorld = async (): Promise<PidWorld> => {
   const schedules = new RedisEventSchedules(redis, systemClock);
   return {
     store: new RedisEntryStore(redis),
@@ -53,7 +63,108 @@ entryCases('Valkey Lua', async () => {
     counter: async (eventId) => Number((await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])) ?? 0),
     failover: async (eventId) => void (await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary'])),
     skipped: async (eventId) => ((await cmd(keys.skipped(eventId), ['LRANGE', keys.skipped(eventId), '0', '-1'])) as unknown[]).map(String),
-    lose: async (eventId, seq) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
+    lose: async (eventId: string, seq: number) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
+    setSaleState: async (eventId: string, state: string) => void (await cmd(keys.notice(eventId), ['HSET', keys.notice(eventId), 'saleState', state])),
+    dupValue: async (pid: string, eventId: string) => {
+      const v = await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)]);
+      return v === null ? null : String(v);
+    },
+    dupOf: async (pid: string, eventId: string) => {
+      const k = keys.dup(pid, eventId);
+      const value = await cmd(k, ['GET', k]);
+      const at = Number(await cmd(k, ['PEXPIRETIME', k]));
+      return { value: value === null ? null : String(value), expireAtMs: at > 0 ? at : null };
+    },
+    setDup: async (pid: string, eventId: string, value: string | null, expireAtMs?: number) => {
+      const k = keys.dup(pid, eventId);
+      await cmd(k, value === null ? ['DEL', k] : ['SET', k, value, ...(expireAtMs ? ['PXAT', String(expireAtMs)] : [])]);
+    },
+  };
+};
+
+entryCases('Valkey Lua', valkeyWorld);
+arrivalSlotCases('Valkey Lua', async () => ({
+  store: new RedisEntryStore(redis),
+  now: () => Date.now(),
+  counter: async (e) => Number((await cmd(keys.seq(e), ['GET', keys.seq(e)])) ?? 0),
+  failover: async (e) => void (await cmd(keys.epoch(e), ['HSET', keys.epoch(e), 'node', 'old-primary'])),
+  setUsed: async (e, slot, used) => void (await cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), `${slot}:used`, String(used)])),
+  // 시간 창은 서버 시각으로 나뉜다. 창의 앞 3분의 1 안에서 시작하게 기다려 뒤따르는 호출들이 한 창 안에서 끝나게 한다
+  alignCarveWindow: async () => {
+    for (;;) {
+      const at = await serverNowMs();
+      if (at % ARRIVAL_CARVE_WINDOW_MS < ARRIVAL_CARVE_WINDOW_MS / 3) return;
+      await sleep(ARRIVAL_CARVE_WINDOW_MS - (at % ARRIVAL_CARVE_WINDOW_MS));
+    }
+  },
+  nextCarveWindow: async () => {
+    const was = Math.floor((await serverNowMs()) / ARRIVAL_CARVE_WINDOW_MS);
+    while (Math.floor((await serverNowMs()) / ARRIVAL_CARVE_WINDOW_MS) === was) await sleep(10);
+  },
+}));
+
+test('[Q-T16] 칸떼기를다시시작하면_건너뛴빈칸의범위를적어_리더가훑지않게한다', async () => {
+  const store = new RedisEntryStore(redis);
+  const e = newEvent();
+  const k = Math.floor(Date.now() / 100) - 95;
+  const at = Date.now() + 86_400_000;
+  await store.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 1, items: [{ arrivalSlot: k }] });
+  await store.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 1, items: [{ arrivalSlot: k + 140 }] });
+  const field = async (f: string) => String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), f]));
+  // k..k+100까지 뗀 뒤 k+101부터 창이 비어 k+140으로 다시 시작했다
+  expect(await field('first')).toBe(String(k + 140));
+  expect(await field('gap_from')).toBe(String(k + 101));
+  expect(await field('gap_to')).toBe(String(k + 139));
+});
+
+pidTransitionEntryCases('Valkey Lua', valkeyWorld);
+leaveCases('Valkey Lua', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  const soonKeys = (e: string) => [`q:{event:${e}}:soon`, `q:{event:${e}}:soon_at`, `q:{event:${e}}:soon_first`] as const;
+  return {
+    store: new RedisEntryStore(redis),
+    commits: new RedisShuffleCommits(redis),
+    schedules: Object.assign(schedules, { set: writeSchedule }),
+    clock: systemClock,
+    admit: async (pid, eventId, hash) => void (await cmd(keys.adm(pid, eventId), ['SET', keys.adm(pid, eventId), hash])),
+    closeList: async (eventId, field, marker) => void (await cmd(keys.batchDone(eventId), ['HSET', keys.batchDone(eventId), field, marker])),
+    lobbyMembers: async (eventId) => (await cmd(keys.lobbyMembers(eventId), ['SMEMBERS', keys.lobbyMembers(eventId)])) as string[],
+    batchMembers: async (eventId) => (await cmd(keys.batchMembers(eventId), ['SMEMBERS', keys.batchMembers(eventId)])) as string[],
+    dupValue: async (pid, eventId) => (await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)])) as string | null,
+    setDup: async (pid, eventId, value) => void (await cmd(keys.dup(pid, eventId), ['SET', keys.dup(pid, eventId), value])),
+    verifyOf: async (eventId, hash) => (await cmd(keys.verify(eventId), ['HGET', keys.verify(eventId), hash])) as string | null,
+    setVerify: async (eventId, hash, value) => void (await cmd(keys.verify(eventId), ['HSET', keys.verify(eventId), hash, value])),
+    removed: async (eventId, seq) => Number(await cmd(keys.removed(eventId), ['GETBIT', keys.removed(eventId), String(seq)])) === 1,
+    setResult: async (tokenHash, group, seq, gen) => {
+      const k = group === 'lobby' ? keys.lobbyResult(tokenHash) : keys.batchResult(tokenHash);
+      await cmd(k, ['SET', k, `${seq}:${gen}`]);
+    },
+    addSoon: async (eventId, hash, seq) => {
+      const [soon, at, first] = soonKeys(eventId);
+      await cmd(soon, ['ZADD', soon, String(seq), hash]);
+      await cmd(at, ['ZADD', at, '1', hash]);
+      await cmd(first, ['HSET', first, hash, '1']);
+    },
+    soonOf: async (eventId) => {
+      const [soon, at, first] = soonKeys(eventId);
+      return [(await cmd(soon, ['ZRANGE', soon, '0', '-1'])) as string[], (await cmd(at, ['ZRANGE', at, '0', '-1'])) as string[], (await cmd(first, ['HKEYS', first])) as string[]];
+    },
+    markerOf: async (eventId, field) => (await cmd(keys.batchDone(eventId), ['HGET', keys.batchDone(eventId), field])) as string | null,
+  };
+});
+
+lobbyCases('Valkey Lua', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  return {
+    store: new RedisEntryStore(redis),
+    commits: new RedisShuffleCommits(redis),
+    schedules: Object.assign(schedules, { set: writeSchedule }),
+    clock: systemClock,
+    admit: async (pid, eventId, hash) => void (await cmd(keys.adm(pid, eventId), ['SET', keys.adm(pid, eventId), hash])),
+    closeLobby: async (eventId) => void (await cmd(keys.batchDone(eventId), ['HSET', keys.batchDone(eventId), 'lobby', '1:0:1'])),
+    members: async (eventId) => (await cmd(keys.lobbyMembers(eventId), ['SMEMBERS', keys.lobbyMembers(eventId)])) as string[],
+    dupValue: async (pid, eventId) => (await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)])) as string | null,
+    verifying: async (eventId, hash) => (await cmd(keys.verify(eventId), ['HGET', keys.verify(eventId), hash])) as string | null,
   };
 });
 

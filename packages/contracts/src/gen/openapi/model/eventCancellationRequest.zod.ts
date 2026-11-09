@@ -36,7 +36,19 @@ export const EventCancellationRequest = zod.object({
   "failed": zod.int().optional(),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
-}).optional()
+}).optional(),
+  "promoterId": zod.string().optional(),
+  "title": zod.string().optional().describe('공연 제목'),
+  "partnerReason": zod.string().nullish().describe('파트너가 적은 사유(docs/data.md partner_reason). commander가 직접 낸 요청이면 그 사유'),
+  "faultOpinion": zod.union([zod.literal('ORGANIZER'),zod.literal('FORCE_MAJEURE'),zod.literal('CONTENT_CHANGE'),zod.literal(null)]).nullish().describe('파트너의 귀책 의견(참고값)'),
+  "evidenceRef": zod.string().nullish().describe('증빙 참조값'),
+  "newStartsAt": zod.iso.datetime({"offset":true}).nullish().describe('연기일 때 바뀐 공연 시작 시각'),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "judgedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional().describe('판정한 commander. 관제 GET에만 싣고 파트너 응답에는 싣지 않는다')
 }).describe('회차 취소 요청(ADR-0046 결정 4)')
 
 export type EventCancellationRequest = zod.input<typeof EventCancellationRequest>;

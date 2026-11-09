@@ -1,0 +1,5 @@
+-- 계정 병합 이력(account_merge의 대표·흡수 계정)과 이의 제기·소명 계류(account_hold의 계정)에 account(id) 외래키를 더한다(docs/data.md 그림, BUILD_ORDER BOT-042가 넘긴 것).
+-- 이미 있는 표라 NOT VALID로 더해 행을 훑지 않고(두 표와 account에 SHARE ROW EXCLUSIVE 잠금을 잠깐 잡는다) 0026에서 따로 검증한다(docs/devops.md §7.2). 계정 행은 지우지 않아(탈퇴도 DELETED로 남긴다, docs/data.md §6) ON DELETE는 기본(NO ACTION)이다.
+ALTER TABLE "account_hold" ADD CONSTRAINT "account_hold_account_id_account_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."account"("id") ON DELETE no action ON UPDATE no action NOT VALID;--> statement-breakpoint
+ALTER TABLE "account_merge" ADD CONSTRAINT "account_merge_primary_account_id_account_id_fk" FOREIGN KEY ("primary_account_id") REFERENCES "public"."account"("id") ON DELETE no action ON UPDATE no action NOT VALID;--> statement-breakpoint
+ALTER TABLE "account_merge" ADD CONSTRAINT "account_merge_merged_account_id_account_id_fk" FOREIGN KEY ("merged_account_id") REFERENCES "public"."account"("id") ON DELETE no action ON UPDATE no action NOT VALID;

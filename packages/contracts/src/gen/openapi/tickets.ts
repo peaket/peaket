@@ -17,18 +17,18 @@ import * as zod from 'zod';
  * FR-012. 목록은 커서로 나눈다(guidelines §3). 월렛의 기기 저장은 nextCursor가 없을 때까지 받는다(추천 적용 2026-10-21, ADR-0081)
  * @summary 마이 티켓 목록(월렛)
  */
-export const getV1TicketsQueryLimitMax = 100;
+export const listTicketsQueryLimitMax = 100;
 
 
 
-export const GetV1TicketsQueryParams = zod.object({
+export const ListTicketsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1TicketsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listTicketsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1TicketsResponseItemsItemTransferLockedDefault = false;
+export const listTicketsResponseItemsItemTransferLockedDefault = false;
 
-export const GetV1TicketsResponse = zod.object({
+export const ListTicketsResponse = zod.object({
   "items": zod.array(zod.object({
   "ticketId": zod.string().optional(),
   "eventId": zod.string().optional(),
@@ -36,10 +36,27 @@ export const GetV1TicketsResponse = zod.object({
   "gateZone": zod.string().optional(),
   "status": zod.enum(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED']).optional().describe('티켓 상태(docs/planning/03 §2.5, ScannerPackageTicket과 같은 값). Reissued·Transferred는 상태가 아니라 사건(이력)이고, ScannedIn·ScannedOut은 입장 상태(ScannerPackageTicket의 scanState)다'),
   "transferable": zod.boolean().optional(),
-  "transferLocked": zod.boolean().default(getV1TicketsResponseItemsItemTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
+  "transferLocked": zod.boolean().default(listTicketsResponseItemsItemTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
   "transferLockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(소명 요청 + 14일 [가정], 연장 없음). 잠겼을 때만 싣고 아니면 null이다. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료가 먼저 오면 그때 풀린다(추천 적용 2026-10-31, ADR-0173)'),
   "transferDeadline": zod.iso.datetime({"offset":true}).optional(),
-  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)')
+  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)'),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "placeName": zod.string().optional().describe('장소'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
+  "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
+  "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt)')
 })).optional(),
   "nextCursor": zod.string().nullish()
 })
@@ -48,75 +65,91 @@ export const GetV1TicketsResponse = zod.object({
  * FR-012, POL-018, ADR-0025, ADR-0050 결정 2, ADR-0051 결정 10·11. ISSUE는 월렛의 '이 휴대폰을 입장용으로 등록'에서만 부르고, 입장 시작 뒤 ISSUE는 재인증 토큰이 있어야 하며 계정 이메일로 알린다. REISSUE는 입장 시작 전에만, 소셜 제공자 재인증 토큰이 있어야 하고 티켓당 24시간에 1회까지다. 재발급하면 계정 이메일과 이전 기기에 알린다. 입장 시작 뒤 REISSUE는 403이고 BOOTH만 된다. BOOTH는 그 티켓의 부스 허용(POST /v1/scanner/booth-authorizations)이 있고 허용 뒤 10분 안일 때만 된다. TRANSFER는 양도 수락·돌려주기·양도 회수로 보유자가 바뀐 뒤 새 보유자가 같은 버튼으로 처음 등록할 때이고 ISSUE와 같은 규칙을 따른다(키는 등록 버튼으로만 만든다). 등록·폐기는 scanner_change에 남는다. 응답에 keyId(SPKI SHA-256 앞 8바이트)를 준다
  * @summary 기기 공개키 등록(입장용 휴대폰 등록·재발급·부스). 이전 키 폐기
  */
-export const PostV1TicketsTicketIdDeviceKeysParams = zod.object({
+export const CreateTicketDeviceKeyParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdDeviceKeysHeader = zod.object({
+export const CreateTicketDeviceKeyHeader = zod.object({
   "X-Reauth-Token": zod.string().optional().describe('REISSUE와 입장 시작 뒤 ISSUE일 때 필수(guidelines §7)')
 })
 
-export const PostV1TicketsTicketIdDeviceKeysBody = zod.object({
-  "publicKeyJwk": zod.looseObject({
+export const createTicketDeviceKeyBodyPublicKeyJwkXRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createTicketDeviceKeyBodyPublicKeyJwkYRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createTicketDeviceKeyBodyPublicKeyJwkKeyOpsMax = 2;
 
-}),
+
+
+export const CreateTicketDeviceKeyBody = zod.object({
+  "publicKeyJwk": zod.object({
+  "kty": zod.enum(['EC']),
+  "crv": zod.enum(['P-256']),
+  "x": zod.string().regex(createTicketDeviceKeyBodyPublicKeyJwkXRegExp),
+  "y": zod.string().regex(createTicketDeviceKeyBodyPublicKeyJwkYRegExp),
+  "ext": zod.boolean().optional(),
+  "key_ops": zod.array(zod.enum(['verify'])).max(createTicketDeviceKeyBodyPublicKeyJwkKeyOpsMax).optional(),
+  "alg": zod.enum(['ES256']).optional()
+}).strict().describe('기기 공개키(P-256, RFC 7517 JWK). 브라우저 crypto.subtle.exportKey(\'jwk\')가 내는 칸(ext·key_ops)까지만 받고, 개인키 칸(d)이 섞이면 정의 밖 칸이라 400이다(BAS-040)'),
   "reason": zod.enum(['ISSUE', 'REISSUE', 'TRANSFER', 'BOOTH']),
   "boothRequestId": zod.string().optional().describe('BOOTH일 때 필수')
-})
+}).strict()
 
-export const PostV1TicketsTicketIdDeviceKeysResponse = zod.void()
+export const CreateTicketDeviceKeyResponse = zod.void()
 
 /**
  * FR-066, ADR-0051 결정 11. reverificationToken은 POST /v1/identity/booth-reverifications 결과(ci_hmac 일치)다. 티켓당 하루 3회 [가정]
  * @summary 부스 재발급 요청(입장 시작 뒤, 보유자). 부스 본인확인 대조 결과로 부스 코드(8자, 10분)를 받는다
  */
-export const PostV1TicketsTicketIdBoothRequestsParams = zod.object({
+export const CreateTicketBoothRequestParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdBoothRequestsBody = zod.object({
+export const CreateTicketBoothRequestBody = zod.object({
   "reverificationToken": zod.string()
-})
+}).strict()
 
-export const PostV1TicketsTicketIdBoothRequestsResponse = zod.void()
+export const CreateTicketBoothRequestResponse = zod.void()
 
 /**
  * FR-013, POL-017, ADR-0046. 행 잠금 + 버전으로 이중 양도 방지. 받은 티켓의 재양도는 409
  * @summary 양도 요청(결제자인 보유자만, 본인확인 회원에게, 공연 2시간 전과 입장 시작 중 이른 때까지, 제공자 재인증 후). 받는 사람이 수락해야 넘어간다
  */
-export const PostV1TicketsTicketIdTransfersParams = zod.object({
+export const CreateTicketTransferParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdTransfersHeader = zod.object({
+export const CreateTicketTransferHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1TicketsTicketIdTransfersBody = zod.object({
+export const CreateTicketTransferBody = zod.object({
   "recipientRef": zod.string().describe('POST /v1/transfer-recipient-lookups 결과')
-})
+}).strict()
 
-export const PostV1TicketsTicketIdTransfersResponse = zod.object({
+export const CreateTicketTransferResponse = zod.object({
   "offerId": zod.string().optional(),
   "ticketId": zod.string().optional(),
   "role": zod.enum(['SENDER', 'RECIPIENT']).optional(),
   "counterpartNickname": zod.string().optional(),
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
-  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구')
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
 }).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')
 
 /**
  * FR-013, POL-017, SCR-014. 번호는 본문으로만 받는다(URL 금지, guidelines §9). 받을 수 있는 회원(본인확인 완료)만 찾고, 없거나 받을 수 없으면 같은 404. 계정당 시간당 10회 [가정] 레이트 리밋과 조회 기록. 회원 여부가 조회한 사람에게 드러나는 것은 남는 한계다
  * @summary 양도 받는 사람 확인(휴대폰 번호 또는 회원 코드 → 닉네임 일부와 불투명 참조값)
  */
-export const PostV1TransferRecipientLookupsBody = zod.object({
+export const CreateTransferRecipientLookupBody = zod.object({
   "phoneNumber": zod.string().optional(),
   "memberCode": zod.string().optional()
-})
+}).strict()
 
-export const PostV1TransferRecipientLookupsResponse = zod.object({
+export const CreateTransferRecipientLookupResponse = zod.object({
   "recipientRef": zod.string().optional().describe('불투명 참조값(10분 [가정], 양도 요청 한 번에만 쓴다)'),
   "nicknameMasked": zod.string().optional().describe('닉네임 일부')
 }).describe('양도 받는 사람 확인 결과(FR-013)')
@@ -125,86 +158,90 @@ export const PostV1TransferRecipientLookupsResponse = zod.object({
  * FR-013, FR-060
  * @summary 양도 요청 조회(보낸 사람·받는 사람만)
  */
-export const GetV1TransfersOfferIdParams = zod.object({
+export const GetTransferParams = zod.object({
   "offerId": zod.string()
 })
 
-export const GetV1TransfersOfferIdResponse = zod.object({
+export const GetTransferResponse = zod.object({
   "offerId": zod.string().optional(),
   "ticketId": zod.string().optional(),
   "role": zod.enum(['SENDER', 'RECIPIENT']).optional(),
   "counterpartNickname": zod.string().optional(),
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
-  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구')
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
 }).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')
 
 /**
  * FR-060, POL-017, ADR-0051. 행 잠금 안에서 기한·상태·입장 시작을 재확인. 입장 시작부터 입장 기록 마감까지는 409 ENTRY_STARTED
  * @summary 양도 수락(받는 사람). 보낸 사람 키 폐기. 받는 사람은 '입장용으로 등록'(device-keys, reason=TRANSFER)으로 새 키를 등록한다
  */
-export const PostV1TransfersOfferIdAcceptanceParams = zod.object({
+export const CreateTransferAcceptanceParams = zod.object({
   "offerId": zod.string()
 })
 
-export const PostV1TransfersOfferIdAcceptanceHeader = zod.object({
+export const CreateTransferAcceptanceHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1TransfersOfferIdAcceptanceResponse = zod.unknown()
+export const CreateTransferAcceptanceResponse = zod.unknown()
 
 /**
  * FR-060. 수락처럼 Idempotency-Key를 받는다(추천 적용 2026-10-15, ADR-0065 결정 12)
  * @summary 양도 거절(받는 사람)
  */
-export const PostV1TransfersOfferIdRejectionParams = zod.object({
+export const CreateTransferRejectionParams = zod.object({
   "offerId": zod.string()
 })
 
-export const PostV1TransfersOfferIdRejectionHeader = zod.object({
+export const CreateTransferRejectionHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1TransfersOfferIdRejectionResponse = zod.unknown()
+export const CreateTransferRejectionResponse = zod.unknown()
 
 /**
  * FR-013. 수락처럼 Idempotency-Key를 받는다(추천 적용 2026-10-15, ADR-0065 결정 12)
  * @summary 양도 요청 철회(보낸 사람, 수락 전)
  */
-export const PostV1TransfersOfferIdWithdrawalParams = zod.object({
+export const CreateTransferWithdrawalParams = zod.object({
   "offerId": zod.string()
 })
 
-export const PostV1TransfersOfferIdWithdrawalHeader = zod.object({
+export const CreateTransferWithdrawalHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1TransfersOfferIdWithdrawalResponse = zod.unknown()
+export const CreateTransferWithdrawalResponse = zod.unknown()
 
 /**
  * FR-060, POL-017, ADR-0051. 입장 시작 전, 입장 기록 없음. 입장 시작부터 입장 기록 마감까지는 409 ENTRY_STARTED
  * @summary 결제자에게 돌려주기(받은 보유자, 결제자 수락 없음). 키 교체
  */
-export const PostV1TicketsTicketIdReturnsParams = zod.object({
+export const CreateTicketReturnParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdReturnsHeader = zod.object({
+export const CreateTicketReturnHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1TicketsTicketIdReturnsResponse = zod.unknown()
+export const CreateTicketReturnResponse = zod.unknown()
 
 /**
  * FR-047, POL-032
  * @summary 예매 취소 환급 예상(공제율·근거·환급액)
  */
-export const GetV1TicketsTicketIdCancellationQuoteParams = zod.object({
+export const GetTicketCancellationQuoteParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const GetV1TicketsTicketIdCancellationQuoteResponse = zod.object({
+export const GetTicketCancellationQuoteResponse = zod.object({
   "ticketId": zod.string().optional(),
   "daysBefore": zod.int().optional().describe('공연일까지 남은 달력일(공연장 현지 날짜)'),
   "within24h": zod.boolean().optional().describe('예매 후 24시간 이내(비영업일 제외)이고 공연 3일 전까지'),
@@ -220,24 +257,24 @@ export const GetV1TicketsTicketIdCancellationQuoteResponse = zod.object({
  * FR-047, POL-032, POL-017. 결제자가 보유한 티켓만 취소한다. 입장 시작 뒤 취소는 환급을 입장 기록 마감 뒤 실행(ADR-0051). 양도·스캔과의 경합은 행 잠금 + 버전. 가상계좌 결제는 환급을 바로 실행할 때만 refundAccount를 받아 저장하지 않고 결제사 취소 요청에 넘긴다(POL-014). 입장 시작 뒤 취소처럼 환급을 미루는 경우에는 refundAccount를 받지 않고(보내도 버린다) 실행할 때 알림으로 다시 받는다(ADR-0050 결정 3)
  * @summary 예매 취소(티켓 단위, 공연 시작 전까지, 제공자 재인증 후). 키 즉시 폐기, 좌석 취소표, 환급은 PG 부분 취소
  */
-export const PostV1TicketsTicketIdCancellationParams = zod.object({
+export const CreateTicketCancellationParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdCancellationHeader = zod.object({
+export const CreateTicketCancellationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1TicketsTicketIdCancellationBody = zod.object({
+export const CreateTicketCancellationBody = zod.object({
   "refundAccount": zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
-})
+}).strict().optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+}).strict()
 
-export const PostV1TicketsTicketIdCancellationResponse = zod.object({
+export const CreateTicketCancellationResponse = zod.object({
   "cancellationId": zod.string().optional(),
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
   "refundAmount": zod.int().optional()
@@ -247,78 +284,227 @@ export const PostV1TicketsTicketIdCancellationResponse = zod.object({
  * FR-014, POL-016. 주문 시점 스냅샷(가격과 옵션을 주문서에 그대로 복사). 굿즈 주문(POST /v1/shop/orders)과 같은 merch_order에 담고, 부가 상품은 티켓과 함께 월렛에 이용권으로 발급하므로 수령 방식이 WALLET이다(docs/data.md §2 merch_order, FR-014). 본문과 응답 모양은 추천 적용 2026-10-29
  * @summary 티켓 연동 부가 상품 주문(티켓 보유 확인)
  */
-export const PostV1TicketsTicketIdAddonsParams = zod.object({
+export const CreateTicketAddonParams = zod.object({
   "ticketId": zod.string()
 })
 
-export const PostV1TicketsTicketIdAddonsHeader = zod.object({
+export const CreateTicketAddonHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
 
 
 
-export const PostV1TicketsTicketIdAddonsBody = zod.object({
+export const CreateTicketAddonBody = zod.object({
   "productId": zod.string(),
   "quantity": zod.int().min(1),
   "options": zod.record(zod.string(), zod.string()).optional().describe('상품 옵션(이름 → 고른 값). 옵션 이름은 굿즈 상세 설계에서 정한다 [가정]')
-})
+}).strict()
 
-export const PostV1TicketsTicketIdAddonsResponse = zod.object({
+export const CreateTicketAddonResponse = zod.object({
   "orderId": zod.string().optional(),
   "fulfillment": zod.enum(['WALLET']).optional().describe('월렛 이용권(티켓 아래에 연동되어 보인다, FR-014)'),
   "stockReservedUntil": zod.iso.datetime({"offset":true}).optional().describe('한정 수량 상품일 때만. 재고 예약이 끝나는 시각(주문 + 15분 [가정], 결제 접수 때 승인 기한까지 늘어난다). 그때까지 결제가 끝나지 않으면 주문이 만료되고 재고가 돌아간다(ADR-0107)')
 })
 
 /**
+ * FR-014, POL-016, SCR-013 ⑫, docs/frontend.md §6.2 32번. 티켓의 지금 보유자만 읽는다. 새로 살 수 있는 부가 상품 목록은 GET /v1/shop/products?linkedEventId={eventId}다. 양도로 받은 티켓에는 그 상품이 양도 가능(product.transferable)일 때만 보인다 [가정]. 주문 항목을 티켓에 잇는 칸이 docs/data.md merch_order·merch_order_item에 아직 없다(더해야 한다, POL-016 §1.4 '연결 티켓' 행도 이 칸이 있어야 된다). Cache-Control: private, no-store
+ * @summary 이 티켓에 연동해 산 부가 상품 목록(월렛의 이용권 표시)
+ */
+export const ListTicketAddonsParams = zod.object({
+  "ticketId": zod.string()
+})
+
+export const listTicketAddonsQueryLimitMax = 100;
+
+
+
+export const ListTicketAddonsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listTicketAddonsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListTicketAddonsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "orderId": zod.string().nullish().describe('이 부가 상품의 주문. 받은 티켓에서는 결제자의 주문이라 null이다 [가정](POL-017, Ticket.bookingNumber와 같은 규칙)'),
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status 가운데 부가 상품에 쓰는 값(READY \'사용 가능\', LOCKED \'입장 시작, 취소 불가\')')
+}).describe('티켓에 연동해 산 부가 상품(월렛에 이용권으로 보인다, FR-014)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
  * FR-056, POL-014, POL-019, ADR-0046 결정 5. 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다(추천 적용 2026-10-26, ADR-0089)
  * @summary 배상금 받을 계좌 입력(결제자 본인). 저장하지 않고 송금 요청에 바로 넘김
  */
-export const PostV1CompensationsCompensationIdAccountParams = zod.object({
+export const CreateCompensationAccountParams = zod.object({
   "compensationId": zod.string()
 })
 
-export const PostV1CompensationsCompensationIdAccountHeader = zod.object({
+export const CreateCompensationAccountHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1CompensationsCompensationIdAccountBody = zod.object({
+export const CreateCompensationAccountBody = zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
 
-export const PostV1CompensationsCompensationIdAccountResponse = zod.object({
+export const CreateCompensationAccountResponse = zod.object({
   "compensationId": zod.string().optional(),
   "orderId": zod.string().optional(),
   "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional()
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
 
 /**
  * FR-047, POL-014, POL-019, ADR-0050 결정 3, ADR-0089(추천 적용 2026-10-26). 환급을 미뤘던 취소(입장 시작 뒤 취소, 결제사 취소 장애, 회차 취소·연기)의 환급을 실행할 수 있게 되면 알림이 SCR-060을 연다. 취소 상태가 REFUND_PENDING이고 계좌를 기다리는 건(CS 처리함 REFUND_ACCOUNT_PENDING)만 받는다. 계좌는 저장하지 않고 같은 요청 안의 즉시 재시도에만 쓴다(payment §6). 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다
  * @summary 지연 환급 계좌 입력(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
  */
-export const PostV1CancellationsCancellationIdAccountParams = zod.object({
+export const CreateCancellationAccountParams = zod.object({
   "cancellationId": zod.string()
 })
 
-export const PostV1CancellationsCancellationIdAccountHeader = zod.object({
+export const CreateCancellationAccountHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1CancellationsCancellationIdAccountBody = zod.object({
+export const CreateCancellationAccountBody = zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
 
-export const PostV1CancellationsCancellationIdAccountResponse = zod.object({
+export const CreateCancellationAccountResponse = zod.object({
   "cancellationId": zod.string().optional(),
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
   "refundAmount": zod.int().optional()
 })
+
+/**
+ * FR-012, FR-053, POL-037, SCR-013, docs/frontend.md §6.2 32번. 지금 보유자만 읽는다(ticket.account_id, authz-matrix §3.2). 남의 티켓과 없는 티켓은 같은 404다. 응답은 Ticket이고 상세에서만 seller를 더 싣는다(patch-Ticket). QR 서명 재료는 싣지 않는다(기기 안의 키로 만든다). Cache-Control: private, no-store
+ * @summary 내 티켓 상세(월렛 펼침)
+ */
+export const GetTicketParams = zod.object({
+  "ticketId": zod.string()
+})
+
+export const getTicketResponseTransferLockedDefault = false;
+
+export const GetTicketResponse = zod.object({
+  "ticketId": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "seatLabel": zod.string().optional(),
+  "gateZone": zod.string().optional(),
+  "status": zod.enum(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED']).optional().describe('티켓 상태(docs/planning/03 §2.5, ScannerPackageTicket과 같은 값). Reissued·Transferred는 상태가 아니라 사건(이력)이고, ScannedIn·ScannedOut은 입장 상태(ScannerPackageTicket의 scanState)다'),
+  "transferable": zod.boolean().optional(),
+  "transferLocked": zod.boolean().default(getTicketResponseTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
+  "transferLockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(소명 요청 + 14일 [가정], 연장 없음). 잠겼을 때만 싣고 아니면 null이다. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료가 먼저 오면 그때 풀린다(추천 적용 2026-10-31, ADR-0173)'),
+  "transferDeadline": zod.iso.datetime({"offset":true}).optional(),
+  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)'),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "placeName": zod.string().optional().describe('장소'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
+  "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
+  "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt)')
+})
+
+/**
+ * FR-060, POL-017, SCR-041, SCR-013, docs/frontend.md §6.2 32번. 세션 계정이 받는 사람으로 지정된 요청만 최근 순으로 준다(그래서 role은 늘 RECIPIENT다). 경로와 쿼리에 계정 값이 없다. 결제 금액과 결제자 연락처는 싣지 않는다(authz-matrix §4.1 '양도 요청'). 화면 칩 '받기 기다리는 중'은 status=OFFERED다. Cache-Control: private, no-store
+ * @summary 내가 받은 양도 요청 목록(월렛의 받기 카드)
+ */
+export const listTransfersQueryLimitMax = 100;
+
+
+
+export const ListTransfersQueryParams = zod.object({
+  "status": zod.array(zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listTransfersQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListTransfersResponse = zod.object({
+  "items": zod.array(zod.object({
+  "offerId": zod.string().optional(),
+  "ticketId": zod.string().optional(),
+  "role": zod.enum(['SENDER', 'RECIPIENT']).optional(),
+  "counterpartNickname": zod.string().optional(),
+  "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
+}).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-056, POL-019, POL-032, ADR-0046 결정 5, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인 건만 최근 순으로 준다. 계좌는 끝 4자리만 싣는다(data.md compensation.account_last4). Cache-Control: private, no-store
+ * @summary 내 배상 건 목록(SCR-055, SCR-013에서 잇는다)
+ */
+export const listCompensationsQueryLimitMax = 100;
+
+
+
+export const ListCompensationsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listCompensationsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListCompensationsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-056, POL-019, ADR-0046 결정 5, SCR-043, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인만 읽는다. 남의 건과 없는 건은 같은 404다. Cache-Control: private, no-store
+ * @summary 내 배상 건 하나(SCR-043 사유·금액·결과)
+ */
+export const GetCompensationParams = zod.object({
+  "compensationId": zod.string()
+})
+
+export const GetCompensationResponse = zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
 

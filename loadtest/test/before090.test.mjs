@@ -1371,7 +1371,7 @@ test('BSL090_O-T1_콘솔나누기_검표시도줄이규칙을어기면_줄번호
   }
 });
 
-test('BSL090_ASVS-v5.0.0-16.2.5_콘솔나누기_검표시도오류메시지에_줄내용을싣지않는다', () => {
+test('BSL090_[ASVS v5.0.0-16.2.5]_콘솔나누기_검표시도오류메시지에_줄내용을싣지않는다', () => {
   const secret = 'tok_SECRET_9f8e7d6c5b4a3921';
   same(splitConsole(`${ENTRY}\n${scanLine()}\n`).probes, [{ ...SCAN0 }]); // 기준
   const lines = [

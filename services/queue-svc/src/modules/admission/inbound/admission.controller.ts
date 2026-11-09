@@ -8,7 +8,7 @@ import { QueueStoreUnavailable } from '../../entry/index.js';
 import { AdmissionError } from '../application/admission-error.js';
 import { ConfirmAdmission } from '../application/confirm-admission.js';
 
-// openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
+// openapi 요청 본문 모양을 여기 같은 모양으로 둔다. 계약처럼 닫는다(정하지 않은 칸은 400, docs/api/guidelines.md §1, BAS-040)
 const AdmissionBody = z
   .object({
     queueTicket: z.string().min(1).max(4096).optional(),
@@ -18,6 +18,7 @@ const AdmissionBody = z
     firstEtaSec: z.unknown().optional(),
     firstEtaAtMs: z.unknown().optional(),
   })
+  .strict()
   .refine((b) => b.queueTicket !== undefined || b.lobbyToken !== undefined || b.priorityGrantId !== undefined, { message: '대기표·참가 토큰·우선 구매 권리 ID 가운데 하나가 있어야 한다' });
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */
@@ -33,6 +34,7 @@ const PROBLEM: Record<AdmissionError['code'], { status: number; type: string; ti
   SOLD_OUT: { status: 410, type: 'sold-out', title: '매진되었습니다' },
   EXPIRED: { status: 410, type: 'queue-ticket-expired', title: '입장 시간이 지났습니다' },
   REMOVED: { status: 410, type: 'queue-ticket-removed', title: '이 대기표는 더 쓸 수 없습니다' },
+  LOBBY_REPAIRING: { status: 503, type: 'batching', title: '순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요' },
 };
 
 @Controller('v1/queues/:eventId')
@@ -48,10 +50,13 @@ export class AdmissionController {
     try {
       if (!KEY_PART.test(eventId)) throw new AdmissionError('NOT_FOUND', '회차 ID 모양이 틀렸다');
       if (!me.pid || !KEY_PART.test(me.pid)) throw new AdmissionError('IDENTITY_VERIFICATION_REQUIRED', 'pid가 없다(본인확인 전)');
-      return await this.confirmAdmission.run({ accountId: me.accountId, pid: me.pid, sessionId: me.sessionId, eventId, body });
+      // pid 키 전환 기간의 옛 pid(X-User-Pid-Prev)도 같은 모양이어야 한다. pid와 같으면 버린다(queue-admission §3 'pid 키 전환 기간'의 첫 구현)
+      if (me.pidPrev !== undefined && !KEY_PART.test(me.pidPrev)) throw new AdmissionError('IDENTITY_VERIFICATION_REQUIRED', '옛 pid 모양이 틀렸다');
+      const pidPrev = me.pidPrev && me.pidPrev !== me.pid ? { pidPrev: me.pidPrev } : {};
+      return await this.confirmAdmission.run({ accountId: me.accountId, pid: me.pid, ...pidPrev, sessionId: me.sessionId, eventId, body });
     } catch (e) {
       if (e instanceof AdmissionError) {
-        throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}) });
+        throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}), ...(e.code === 'LOBBY_REPAIRING' ? { retryAfterSeconds: 2 } : {}) });
       }
       // 대기열 Redis 일시 장애는 503과 짧은 Retry-After(1초 [가정])로 답한다(진입과 같다). 화면은 같은 대기표로 다시 보낸다
       if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '대기열을 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });

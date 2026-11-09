@@ -85,7 +85,7 @@ describe('원본·기록이 없을 때', () => {
   });
 });
 
-describe('원본을 바꾸지 않는다(ASVS v5.0.0-13.2.2·14.2.6)', () => {
+describe('원본을 바꾸지 않는다([ASVS v5.0.0-13.2.2]·[ASVS v5.0.0-14.2.6])', () => {
   it('purchase DB를 검사 DB로 써도 원본 행이 그대로이고 임시 표가 남지 않으며 개인정보 칸을 읽지 않는다', async () => {
     const acct = randomUUID();
     const o1 = await order({ account: acct });
@@ -258,6 +258,40 @@ describe('결제(K7, NFR-005·006, ADR-0106)', () => {
     expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([late]);
     r = (await check({ asOf: '2026-11-02T11:10:01+09:00' })).run;
     expect(res(r, 'P4').details.map((d) => d.subject).sort()).toEqual([late, waiting].sort());
+  });
+
+  it('P3 P-T36 ④_입금 오류로 되돌린 뒤 다시 들어온 승인은 마지막 입금 대기 뒤의 사건만 본다', async () => {
+    const missing = await order({ status: 'AWAITING_DEPOSIT' });
+    await payment({ orderId: missing, approvedAt: '2026-11-02T11:00:00+09:00' });
+    await event(missing, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(missing, 2, 'CONFIRMED', '2026-11-02T10:00:06+09:00');
+    await event(missing, 3, 'AWAITING_DEPOSIT', '2026-11-02T10:30:00+09:00');
+    const ok = await order();
+    await payment({ orderId: ok, approvedAt: '2026-11-02T11:00:00+09:00' });
+    await event(ok, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(ok, 2, 'CONFIRMED', '2026-11-02T10:00:06+09:00');
+    await event(ok, 3, 'AWAITING_DEPOSIT', '2026-11-02T10:30:00+09:00');
+    await event(ok, 4, 'APPROVED', '2026-11-02T11:00:05+09:00');
+    const r = (await check({ asOf: '2026-11-02T11:02:00+09:00' })).run;
+    expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([missing]);
+  });
+
+  it('P4 P-T36 ④_다시 들어온 승인의 발권 기한은 첫 CONFIRMED로 덮이지 않는다', async () => {
+    const stuck = await order({ status: 'APPROVED' });
+    await payment({ orderId: stuck, approvedAt: '2026-11-02T11:00:00+09:00' });
+    await event(stuck, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(stuck, 2, 'CONFIRMED', '2026-11-02T10:00:06+09:00');
+    await event(stuck, 3, 'AWAITING_DEPOSIT', '2026-11-02T10:30:00+09:00');
+    await event(stuck, 4, 'APPROVED', '2026-11-02T11:00:05+09:00');
+    const done = await order();
+    await payment({ orderId: done, approvedAt: '2026-11-02T11:00:00+09:00' });
+    await event(done, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(done, 2, 'CONFIRMED', '2026-11-02T10:00:06+09:00');
+    await event(done, 3, 'AWAITING_DEPOSIT', '2026-11-02T10:30:00+09:00');
+    await event(done, 4, 'APPROVED', '2026-11-02T11:00:05+09:00');
+    await event(done, 5, 'CONFIRMED', '2026-11-02T11:10:00+09:00');
+    const r = (await check({ asOf: '2026-11-02T11:40:00+09:00' })).run;
+    expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([stuck]);
   });
 
   it('P5 살아 있는 승인이 없는 유효 티켓(결제 취소, 주문 없음, 환불된 취소)', async () => {

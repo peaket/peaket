@@ -1,0 +1,27 @@
+{
+  "name": "@peaket/seatmap",
+  "private": true,
+  "version": "0.0.0",
+  "description": "좌석맵: 열 단위 팬 좌석맵 파일 풀기, 구역별 격자 색인과 누른 좌석 찾기, 스냅샷·델타 이진 형식, 색 + 무늬 그리기, OffscreenCanvas Worker와 메인 스레드 대체(docs/frontend.md §3.5·§5.2, BUILD_ORDER HOT-110)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "demo:build": "node demo/gen.mjs && vite build -c demo/vite.config.mjs"
+  },
+  "dependencies": {
+    "@peaket/ds": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

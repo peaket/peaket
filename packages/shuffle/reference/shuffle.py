@@ -28,6 +28,10 @@ def mth(leaves):
     return sha(b'\x01', mth(leaves[:k]), mth(leaves[k:]))
 
 
+# 시드만 쓰는 비상 셔플(RB-35)의 비콘 자리 고정값(재현 규격의 값을 적어 둔 것, ADR-0239). 이 파일은 기준값을 만드는 참조 구현이라 응답을 입력받지 않는다
+EMERGENCY_BEACON = sha(b'PEAKET-shuffle-v1-no-beacon')
+
+
 def combined_key(seed, beacon, root, event_id):
     return sha(seed, beacon, root, event_id.encode('utf-8'))
 
@@ -59,6 +63,21 @@ def shuffle_with(items, g):
     return a
 
 
+# drand quicknet 라운드 규칙(ADR-0231 결정 7): 정수 계산만 쓴다
+DRAND_GENESIS_MS = 1692803367000
+DRAND_PERIOD_MS = 3000
+BEACON_MIN_DELAY_MS = 3000
+
+
+def drand_round_time_ms(round_no):
+    return DRAND_GENESIS_MS + (round_no - 1) * DRAND_PERIOD_MS
+
+
+def drand_round_after(at_ms, min_delay_ms=BEACON_MIN_DELAY_MS):
+    # at_ms + min_delay_ms 이후(같아도 된다)의 첫 라운드. 올림 나눗셈은 음수 몫의 내림으로 쓴다
+    return -((-(at_ms + min_delay_ms - DRAND_GENESIS_MS)) // DRAND_PERIOD_MS) + 1
+
+
 def h(s):
     return hashlib.sha256(s.encode()).digest()
 
@@ -70,6 +89,8 @@ tokens = sorted([h(f'token-{i}') for i in range(10)])
 root = mth(tokens)
 key = combined_key(seed, beacon, root, event)
 out = shuffle(tokens, key)
+# 비상 셔플(RB-35, ADR-0239 결정 11): 비콘 자리에 고정값을 넣고 나머지는 같은 규격이다. 검증 화면(SCR-019)의 다시 계산과 대조한다
+emergency_key = combined_key(seed, EMERGENCY_BEACON, root, event)
 print(json.dumps({
     'event': event,
     'seed': seed.hex(),
@@ -81,8 +102,17 @@ print(json.dumps({
     'key': key.hex(),
     'shuffled': [t.hex() for t in out],
     'small': shuffle(list(range(5)), key),
+    'emergency': {'beacon': EMERGENCY_BEACON.hex(), 'key': emergency_key.hex(), 'shuffled': [t.hex() for t in shuffle(tokens, emergency_key)]},
     # 블록 번호는 0부터: 처음 열 단어(두 블록에 걸친다)
     'firstWords': [w for w, _ in zip(words(key), range(10))],
     # 거부 표본추출: 셋을 섞을 때 첫 단어 0xFFFFFFFF는 한도 floor(2^32/3)*3 이상이라 버린다
+    'drand': {
+        'genesisMs': DRAND_GENESIS_MS,
+        'periodMs': DRAND_PERIOD_MS,
+        'minDelayMs': BEACON_MIN_DELAY_MS,
+        'cases': [{'atMs': at, 'round': drand_round_after(at), 'timeMs': drand_round_time_ms(drand_round_after(at))}
+                  for at in [DRAND_GENESIS_MS, DRAND_GENESIS_MS + 1, DRAND_GENESIS_MS + 2999, DRAND_GENESIS_MS + 3000,
+                             1794000000000, 1794000000001, 1794000002999, 1794000003000]],
+    },
     'rejection': {'items': [0, 1, 2], 'words': [0xFFFFFFFF, 1, 0], 'out': shuffle_with([0, 1, 2], iter([0xFFFFFFFF, 1, 0]))},
 }, indent=1))

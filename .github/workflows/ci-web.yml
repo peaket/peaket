@@ -1,0 +1,334 @@
+# 화면 잡(docs/devops.md §3.1·§3.2 '프론트엔드', docs/frontend.md §5.17). ci.yml이 바뀐 범위에 web이 있을 때 부른다.
+# 지금 있는 것(2026-11-04, BUILD_ORDER BAS-170): 토큰 검사(FE-T44·FE-T45와 생성물 차이), 시각 회귀(FE-T40, 대기실 셸),
+# SEED CSS 층 검사(FE-T36, 앱 다섯의 PoC 빌드). 브라우저 잡은 기준 이미지를 찍은 것과 같은 Playwright 컨테이너(다이제스트 고정,
+# tools/web-checks/lib/docker.mjs의 IMAGE와 같다)에서 돈다. 브라우저 그리기는 OS·판·글꼴에 따라 달라서다(docs/design/d2 §1).
+# 성능 예산(2026-11-04 BAS-220): 대기실 FE-T1(size-limit), 경로별 첫 JS, Lighthouse 적재 지표, 정적 자산 올리기 목록·소스 맵 링크·SBOM.
+# 소비자 웹 CSP(2026-11-04 HOT-290): budgets 잡이 같은 운영 빌드로 FE-T35·FE-T30·캐시 화면 응답 때 해시(ADR-0193)를 세 엔진에서 본다.
+# ds 부품(2026-11-04 BAS-180): Storybook 정적 빌드의 모든 이야기를 시각 회귀(FE-T40, visual 잡)와 axe·동작 검사(FE-T18, ds 잡)로 본다.
+name: ci-web
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # 토큰: 생성물 차이(tokens:check), 형식 검사 FE-T45, d2 §5 대비표 계산 FE-T44(pnpm --filter @peaket/ds test)
+  tokens:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/ds..."
+      - run: pnpm --filter @peaket/ds test
+
+  # 시각 회귀 FE-T40: 대기실 경량 페이지 셸 네 상태와 @peaket/ds Storybook 이야기 × 라이트·다크를 Chromium·WebKit으로 찍어 기준 이미지와 견준다(문턱 0.1% [가정])
+  visual:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/queue-room..." --filter "@peaket/ds..."
+      - run: pnpm --filter @peaket/queue-room build
+      # ds Storybook은 뿌리와 따로 둔 작업 공간이다(자기 잠금 파일). 사용 통계 전송은 .storybook/main.ts에서 끄고, 환경 변수로도 끈다
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/storybook
+      - run: pnpm run typecheck && pnpm run build
+        working-directory: tools/storybook
+        env:
+          STORYBOOK_DISABLE_TELEMETRY: '1'
+      # 검사 도구는 뿌리 작업 공간과 따로 둔 작업 공간이다(자기 잠금 파일)
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm test
+        working-directory: tools/web-checks
+      # Firefox·WebKit은 컨테이너의 root가 자기 HOME을 가져야 뜬다(Playwright 문서의 컨테이너 안내)
+      - run: pnpm run visual
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 다르면 기준·실제·차이 그림을 내려받아 PR에서 본다
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-diff
+          path: tools/web-checks/test-results/
+          retention-days: 7
+
+  # 대기실 T=0 세 엔진 검사(HOT-347, ADR-0217): 운영 빌드에 출처만 검사용 가짜 API로 바꾼 대기실 빌드를 같은 출처 검사 틀로 띄워
+  # FE-T3(사전 요청 0)·FE-T15(AbortSignal.any 없는 페이지)·FE-T4(폴링 간격·셔플 고정 지연)·FE-T6(여러 탭, HOT-348)을 Chromium·WebKit·Firefox로 본다(tools/web-checks/queue-room/)
+  queue-room:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/queue-room..." --filter "@peaket/ds..."
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run queue-room:build
+        working-directory: tools/web-checks
+      # Firefox·WebKit은 컨테이너의 root가 자기 HOME을 가져야 뜬다(Playwright 문서의 컨테이너 안내)
+      - run: pnpm run queue-room
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: queue-room-checks
+          path: tools/web-checks/test-results/
+          retention-days: 7
+
+  # 구매 세션 서명기 세 엔진 검사(HOT-360 ①, ADR-0221 결정 7, FE-T7): packages/api-client/src/purchase 원본을 타입만 지워 내는 작은 서버로
+  # 서버와 같은 시험 벡터, 키 합의 왕복, IndexedDB의 추출 불가 키, 두 탭 동시 쓰기의 일련번호 차례(Web Locks)를 Chromium·WebKit·Firefox로 본다
+  purchase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run purchase
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: purchase-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # ds 부품 검사(BAS-180): Storybook의 모든 이야기 × 라이트·다크 axe(FE-T18, WCAG 2.2 AA까지)와, 이유 있는 비활성 버튼·대화상자·탭·입력의
+  # 동작을 Chromium·WebKit·Firefox로 본다(tools/web-checks/ds/)
+  ds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/ds..."
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/storybook
+      - run: pnpm run build
+        working-directory: tools/storybook
+        env:
+          STORYBOOK_DISABLE_TELEMETRY: '1'
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run ds
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ds-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # SEED CSS 층 검사 FE-T36: 앱 다섯을 PoC 빌드(PEAKET_POC=seed-css)해 첫 화면 CSS의 층 차례·SEED 층·전체 CSS 없음·크기와
+  # 탐침 화면의 계산된 스타일(세 엔진)을 본다. 크기 표는 늘 산출물로 남긴다
+  seed-css:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: >-
+          pnpm install --frozen-lockfile
+          --filter "@peaket/web..." --filter "@peaket/partner..." --filter "@peaket/console-host..."
+          --filter "@peaket/scanner..." --filter "@peaket/forensics..."
+      - run: node seed-css/build.mjs
+        working-directory: tools/web-checks
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run seed-css
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        run: node seed-css/report.mjs >> "$GITHUB_STEP_SUMMARY" || true
+        working-directory: tools/web-checks
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: seed-css-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # 성능 예산과 정적 자산(docs/frontend.md §5.8·§5.18·§5.14.5, BUILD_ORDER BAS-220). 운영 빌드만 만든다.
+  # FE-T1 대기실 size-limit → 경로별 첫 JS(HTML이 싣는 스크립트의 gzip) → Lighthouse 적재 지표(이 이미지의 Chromium, 세 번의 가운데 값)
+  # → 올릴 파일 목록(허용 확장자, 소스 맵 링크 0)과 앱별 정적 자산 SBOM(CycloneDX, 산출물로 남긴다)
+  budgets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: >-
+          pnpm install --frozen-lockfile
+          --filter "@peaket/web..." --filter "@peaket/partner..." --filter "@peaket/console-host..."
+          --filter "@peaket/scanner..." --filter "@peaket/forensics..." --filter "@peaket/queue-room..." --filter "@peaket/config"
+      # 정본(docs/frontend.md §5.14.1·§5.8)과 코드 값을 견주는 시험: 문서만 바뀐 PR(바뀐 범위 web)에서도 돈다
+      - run: pnpm --filter @peaket/config test
+      - run: pnpm --filter @peaket/queue-room test
+      - run: node seed-css/build.mjs
+        working-directory: tools/web-checks
+        env:
+          PEAKET_BUILDS: prod
+      - run: pnpm --filter @peaket/queue-room build
+      # FE-T1: 대기실 경량 페이지 JS 50KB 이하·CSS 10KB 미만(gzip)
+      - run: pnpm --filter @peaket/queue-room size
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run budgets
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 소비자 웹 CSP(HOT-290): 같은 운영 빌드를 캐시 화면 응답 때 해시 서버 앞으로 띄워 세 엔진에서 FE-T35·FE-T30·캐시 화면 해시를 본다(ADR-0193)
+      - run: pnpm run csp
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 올릴 파일 목록과 정적 자산 SBOM. 실행 중에 밖에서 받는 스크립트(사람 확인·결제사)는 SBOM 비고에 적는다(ADR-0079 결정 22)
+      - run: |
+          set -e
+          o=reports/static
+          node static/assets.mjs --app queue-room --dir ../../apps/web/queue-room/dist --package ../../apps/web/queue-room --out "$o/queue-room" --external https://challenges.cloudflare.com
+          node static/assets.mjs --app console --dir ../../apps/console-host/dist --package ../../apps/console-host --out "$o/console"
+          node static/assets.mjs --app scanner --dir ../../apps/scanner/dist --package ../../apps/scanner --out "$o/scanner"
+          node static/assets.mjs --app forensics --dir ../../apps/forensics/dist --package ../../apps/forensics --out "$o/forensics"
+          node static/assets.mjs --app web --dir ../../apps/web/.next/static --out "$o/web" --external https://challenges.cloudflare.com --external https://js.tosspayments.com --external https://cdn.portone.io
+          node static/assets.mjs --app partner --dir ../../apps/partner/.next/static --out "$o/partner"
+          # 소비자 웹의 public/(판매 일시 중지 정적 화면 등)도 같은 올리기 규칙을 받는다(구간 1 끝 정리)
+          node static/assets.mjs --app web-public --dir ../../apps/web/public --out "$o/web-public"
+        working-directory: tools/web-checks
+      # 첫 JS·Lighthouse 표를 잡 요약에 남긴다(seed-css 잡의 CSS 크기 표와 같은 꼴)
+      - if: always()
+        run: node budgets/report.mjs >> "$GITHUB_STEP_SUMMARY" || true
+        working-directory: tools/web-checks
+      # Next.js 앱은 브라우저 소스 맵을 내지 않아(§5.18 '숨김 소스 맵') 실행 의존성 SBOM(묶음보다 넓다)을 함께 남긴다
+      - run: |
+          set -e
+          pnpm --filter @peaket/web sbom --sbom-format cyclonedx --prod --lockfile-only > tools/web-checks/reports/static/web/sbom-runtime.cdx.json
+          pnpm --filter @peaket/partner sbom --sbom-format cyclonedx --prod --lockfile-only > tools/web-checks/reports/static/partner/sbom-runtime.cdx.json
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: budgets-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # 좌석맵 패키지 세 엔진 검사(BUILD_ORDER HOT-120, docs/frontend.md §5.2·§5.17): 시연 페이지를 빌드해 같은 컨테이너의 Chromium·Firefox·WebKit에서
+  # 첫 그림(전체 배치)·구역 확대·상태 색·누르기·미니맵을 보고, Chromium에서 첫 그림 시각을 성능 추적의 프레임 그리기 기록과 맞춰 본다
+  seatmap-pkg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/seatmap..."
+      - run: pnpm --filter @peaket/seatmap demo:build
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run seatmap-pkg
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: seatmap-pkg-reports
+          path: tools/web-checks/reports/
+          retention-days: 7

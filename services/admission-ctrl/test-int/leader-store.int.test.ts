@@ -5,6 +5,8 @@ import { createHotRedis, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore, keys } from '../src/modules/leader/adapters/redis-leader-store.js';
 import type { TickInput } from '../src/modules/leader/domain/ports.js';
+import { RedisEntryStore } from '../../queue-svc/src/modules/entry/adapters/redis-entry-store.js';
+import { ARRIVAL_AGE_SLOTS, SHIFT_SLOTS } from './queue-model/system.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 let valkey: ValkeyContainer;
@@ -31,7 +33,134 @@ function tickOf(eventId: string, gen: number, o: Partial<TickInput> = {}): TickI
   return { eventId, gen, target: 5_000, ratioFloor: 0.2, saleStateFallback: 'ON_SALE', windowMs: 5_000, maxAdvance: 200, keepUntilMs: Date.now() + 2 * DAY, saleEndMs: Date.now() + DAY, lobbyShuffle: false, openBatch: false, closeAtMs: 0, ...o };
 }
 const serving = async (e: string) => Number((await cmd(keys.serving(e), ['GET', keys.serving(e)])) ?? 0);
+/** 이 시험들이 보는 것: 고정 중 목표와 일시정지(자동 제어 칸은 '자동 제어 칸' 묶음이 본다) */
+const brief = (c: { target?: number; paused: boolean }) => ({ ...(c.target !== undefined ? { target: c.target } : {}), paused: c.paused });
 const seqTo = (e: string, s: number) => cmd(keys.seq(e), ['SET', keys.seq(e), String(s)]);
+
+describe('도착 시각 칸 닫기(Q-T16, ADR-0223 결정 7)', () => {
+  const bitOf = async (e: string, n: number) => Number(await cmd(keys.removed(e), ['GETBIT', keys.removed(e), String(n)]));
+  const hset = (e: string, ...args: (string | number)[]) => cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), ...args.map(String)]);
+  const close = (e: string, gen = 1) => store.closeArrivalSlots({ eventId: e, gen, keepUntilMs: Date.now() + DAY });
+  const slotAgo = (ms: number) => Math.floor((Date.now() - ms) / 100);
+
+  test('[Q-T16] 칸끝+20초가지난칸의_쓰지않은번호만빠진번호로돌리고_쓴번호는두며_닫음표시를옮긴다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    await hset(e, 'next', k + 2, 'first', k, 'gen', 1, `${k}:base`, 10, `${k}:size`, 20, `${k}:used`, 5, `${k + 1}:base`, 30, `${k + 1}:size`, 10, `${k + 1}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 2, returned: 15 + 10 });
+    // 칸 k: 10~14(쓴 번호)는 그대로, 15~29는 켜졌다. 바이트 경계를 걸치는 범위다
+    for (const n of [10, 11, 12, 13, 14]) expect(await bitOf(e, n), `번호 ${n}`).toBe(0);
+    for (const n of [15, 16, 23, 24, 29]) expect(await bitOf(e, n), `번호 ${n}`).toBe(1);
+    for (const n of [30, 39]) expect(await bitOf(e, n), `번호 ${n}`).toBe(1);
+    expect(await bitOf(e, 40)).toBe(0);
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'closed_upto']))).toBe(String(k + 1));
+    expect((await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`]))).toBeNull();
+    expect(await close(e)).toEqual({ kind: 'NONE', slots: 0, returned: 0 });
+  });
+
+  test('[Q-T16] 칸끝+20초가지나지않은칸은_닫지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(15_000);
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'NONE', slots: 0, returned: 0 });
+    expect(await bitOf(e, 1)).toBe(0);
+  });
+
+  test('[Q-T16] 진입Lua가적은잃은칸(lost_upto이하)은_돌려주지않고기록만지운다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    await hset(e, 'next', k + 2, 'first', k, 'gen', 2, 'lost_upto', k, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2, `${k + 1}:base`, 16, `${k + 1}:size`, 8, `${k + 1}:used`, 0);
+    await cmd(keys.skipped(e), ['RPUSH', keys.skipped(e), '1:100:1']);
+    expect(await close(e, 1)).toEqual({ kind: 'OK', slots: 2, returned: 8 });
+    expect(await bitOf(e, 3)).toBe(0);
+    expect(await bitOf(e, 16)).toBe(1);
+    expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).toBeNull();
+  });
+
+  test('[Q-T16] 진입Lua보다리더가먼저돌아도_세대가바뀐칸은_돌려주지않고기록만지운다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    // RB-05가 건너뛴 뒤(세대 2)인데 칸 기록은 세대 1이다. used는 복제 지연으로 줄었을 수 있다
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2);
+    await cmd(keys.skipped(e), ['RPUSH', keys.skipped(e), '200:300:1']);
+    expect(await close(e, 1)).toEqual({ kind: 'OK', slots: 1, returned: 0 });
+    expect(await bitOf(e, 3)).toBe(0);
+    expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).toBeNull();
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'lost_upto']))).toBe(String(k));
+  });
+
+  test('[Q-T16] 장애전환뒤RB-05전이거나_복제확인전(pend)이면_닫지않는다', async () => {
+    for (const fields of [
+      ['node', 'old-primary'],
+      ['node', 'standalone', 'pend', '1'],
+    ]) {
+      const e = newEvent();
+      const k = slotAgo(25_000);
+      await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2);
+      await cmd(keys.epoch(e), ['HSET', keys.epoch(e), ...fields]);
+      expect(await close(e, 1)).toEqual({ kind: 'RB05', slots: 0, returned: 0 });
+      expect(await bitOf(e, 3)).toBe(0);
+      expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).not.toBeNull();
+    }
+  });
+
+  test('[Q-T16] 옛세대리더는_FENCED이고아무것도쓰지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    expect(await store.bump(e, 5, Date.now() + DAY)).toBe('OK');
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0);
+    expect((await close(e, 4)).kind).toBe('FENCED');
+    expect(await bitOf(e, 1)).toBe(0);
+  });
+
+  test('[Q-T16] 칸떼기를다시시작해건너뛴빈칸은_한번에넘어가고_그앞뒤칸기록은돌려준다', async () => {
+    const e = newEvent();
+    const k = slotAgo(80_000);
+    // k·k+1은 쉬기 전의 칸이라 기록이 남아 있다. k+2~k+499는 비었고, k+500에서 다시 시작했다
+    await hset(e, 'next', k + 501, 'first', k + 500, 'gen', 1, 'gap_from', k + 2, 'gap_to', k + 499, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0, `${k + 1}:base`, 9, `${k + 1}:size`, 8, `${k + 1}:used`, 0, `${k + 500}:base`, 17, `${k + 500}:size`, 8, `${k + 500}:used`, 0);
+    await cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), 'closed_upto', String(k - 1)]);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 3, returned: 24 });
+    expect(await bitOf(e, 1)).toBe(1);
+    expect(await bitOf(e, 17)).toBe(1);
+  });
+
+  test('[Q-T16] 진입Lua가실제로빈칸을건너뛴뒤에도_리더가옛칸을닫아쓰지않은번호를돌린다(closed_upto를미리심지않는다)', async () => {
+    const e = newEvent();
+    const entry = new RedisEntryStore(redis);
+    const at = Date.now() + DAY;
+    const k = Math.floor(Date.now() / 100) - 95;
+    // 칸 k에서 번호 하나를 쓰고(크기 2), 칸 k+140의 쿠키가 빈 칸을 건너뛰게 한다: k~k+99는 첫 크기, k+100은 직전 칸 최댓값, k+101부터 창이 비어 k+140이 새 첫 칸이다
+    await entry.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 2, items: [{ arrivalSlot: k }] });
+    await entry.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 2, items: [{ arrivalSlot: k + 140 }] });
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'first']))).toBe(String(k + 140));
+    // 칸 끝 + 20초가 지난 것으로 만든다(서버 시각은 바꿀 수 없어 칸 번호를 과거로 민다)
+    await redis.evalScript(SHIFT_SLOTS, [keys.arrSlots(e)], [String(-ARRIVAL_AGE_SLOTS)]);
+    // 옛 칸 k~k+100과 새 칸 k+140을 닫는다. 돌리는 번호: 칸 k는 1개(1번을 썼다), k+1~k+99는 2개씩, k+100은 2개, k+140은 1개
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 102, returned: 1 + 99 * 2 + 2 + 1 });
+    expect(await bitOf(e, 1)).toBe(0);
+    expect(await bitOf(e, 2)).toBe(1);
+    expect(await bitOf(e, 3)).toBe(1);
+  });
+
+  test('[Q-T16] 빈칸범위밖에는_칸기록이있으면건너뛰지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(80_000);
+    // first가 앞으로 옮겨졌어도 빈 칸 범위가 없으면 그 앞의 칸 기록을 돌려준다
+    await hset(e, 'next', k + 101, 'first', k + 100, 'gen', 1, 'closed_upto', k - 1, `${k + 50}:base`, 1, `${k + 50}:size`, 8, `${k + 50}:used`, 0, `${k + 100}:base`, 9, `${k + 100}:size`, 8, `${k + 100}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 2, returned: 16 });
+  });
+
+  test('[Q-T16] 칸이많으면_한번에200칸만닫고_다음에잇는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(60_000);
+    const n = 250;
+    const args: (string | number)[] = ['next', k + n, 'first', k, 'gen', 1];
+    for (let i = 0; i < n; i++) args.push(`${k + i}:base`, 1 + i * 8, `${k + i}:size`, 8, `${k + i}:used`, 0);
+    await hset(e, ...args);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 200, returned: 1600 });
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 50, returned: 400 });
+  });
+});
 
 test('[Q-T30] 새리더가세대를올리면_옛세대의전진은FENCED이고아무것도쓰지않는다', async () => {
   const e = newEvent();
@@ -157,9 +286,31 @@ test('로비셔플회차는로비표시가있는데로비게시가없으면_로�
   await seqTo(e, 50);
   await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'lobby', '1:40:1']);
   await store.bump(e, 1, Date.now() + DAY);
-  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 0, lobbyMarked: 1 });
+  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 0, lobbyMarked: 1, gated: 1, lobbyPublished: 0 });
   await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'pub:lobby', String(Date.now() - 9_000)]);
   expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 50 });
+});
+
+test('[Q-T33] 로비 게시가 공개 예정보다 늦었으면 21초 전에는 로비 첫 번호를 넘지 않는다', async () => {
+  const e = newEvent();
+  await seqTo(e, 50);
+  const now = Date.now();
+  await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(e, 1, now + DAY);
+  // 게시 뒤 15초: 공개 예정보다 늦었으므로 8초가 아니라 21초를 기다린다
+  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true, lobbyResultAtMs: now - 20_000 }))).toMatchObject({ serving: 0, gated: 1 });
+  // 공개 예정 안이면 8초 뒤부터 나간다
+  const f = newEvent();
+  await seqTo(f, 50);
+  await cmd(keys.batchDone(f), ['HSET', keys.batchDone(f), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(f, 1, now + DAY);
+  expect(await store.tick(tickOf(f, 1, { lobbyShuffle: true, lobbyResultAtMs: now + 1_000 }))).toMatchObject({ serving: 50 });
+  // 공시 기록이 없으면(참가자 0명 게시) 늦었다고 보지 않는다
+  const g = newEvent();
+  await seqTo(g, 50);
+  await cmd(keys.batchDone(g), ['HSET', keys.batchDone(g), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(g, 1, now + DAY);
+  expect(await store.tick(tickOf(g, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 50 });
 });
 
 test('리더는오픈이지나면로비표시를_구간끝이지나면묶음표시를진입Lua와같은모양으로쓰고_인원만큼카운터를뗀다', async () => {
@@ -218,15 +369,15 @@ test('진행중인회차목록은점수(판매종료+1일)가지난회차를지�
 test('리더상태는운영자목표와수동고정만료_입장일시정지·판매일시정지·판매중지를읽는다', async () => {
   const e = newEvent();
   const now = Date.now();
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'target', '800', 'targetUntil', String(now + 60_000), 'admitPaused', '1']);
-  expect(await store.control(e, now)).toEqual({ target: 800, paused: true });
+  expect(brief(await store.control(e, now))).toEqual({ target: 800, paused: true });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'targetUntil', String(now - 1), 'admitPaused', '0']);
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
   // 판매 일시정지(명령 3)·판매 중지도 하나라도 참이면 serving 전진을 멈춘다(ADR-0123)
   for (const f of ['paused', 'suspended']) {
     await cmd(keys.ctl(e), ['HSET', keys.ctl(e), f, '1']);
-    expect(await store.control(e, now)).toEqual({ paused: true });
+    expect(brief(await store.control(e, now))).toEqual({ paused: true });
     await cmd(keys.ctl(e), ['HDEL', keys.ctl(e), f]);
   }
 });
@@ -242,6 +393,21 @@ test('전진기록은판매종료까지_차례시각기록과serving은판매종
   expect(await at(keys.calls(e))).toBe(saleEnd);
   expect(await at(keys.servingLog(e))).toBe(keep);
   expect(await at(keys.serving(e))).toBe(keep);
+});
+
+test('리더주기는notice(회차판매상태)의수명을회차키수명으로늘리고_없는notice는만들지않는다(연기된회차의판매상태를잃지않게,HOT-010리뷰)', async () => {
+  const e = newEvent();
+  const keep = Date.now() + 3 * DAY;
+  await seqTo(e, 1);
+  await cmd(keys.notice(e), ['HSET', keys.notice(e), 'saleState', 'SOLD_OUT', 'soldOutLastSeq', '1']);
+  await cmd(keys.notice(e), ['PEXPIREAT', keys.notice(e), String(Date.now() + DAY)]);
+  await store.bump(e, 1, keep);
+  await store.tick(tickOf(e, 1, { keepUntilMs: keep }));
+  expect(Number(await cmd(keys.notice(e), ['PEXPIRETIME', keys.notice(e)]))).toBe(keep);
+  const none = newEvent();
+  await store.bump(none, 1, keep);
+  await store.tick(tickOf(none, 1, { keepUntilMs: keep }));
+  expect(Number(await cmd(keys.notice(none), ['EXISTS', keys.notice(none)]))).toBe(0);
 });
 
 test('닫기는인원이0이면카운터를떼지않고표시만쓰며_할일이없어도리더키수명을둔다', async () => {
@@ -274,9 +440,9 @@ test('입장일시정지는만료시각이지나면풀린다', async () => {
   const e = newEvent();
   const now = Date.now();
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'admitPaused', '1', 'admitPausedUntil', String(now + 60_000)]);
-  expect(await store.control(e, now)).toEqual({ paused: true });
+  expect(brief(await store.control(e, now))).toEqual({ paused: true });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'admitPausedUntil', String(now - 1)]);
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
 });
 
 describe('입장 비율(ADR-0104 결정 3)', () => {
@@ -404,4 +570,52 @@ test('[Q-T10] 한1초칸에여러번전진하고리더가바뀌어도_차례시�
   // 1초 칸 둘: 앞 리더의 30, 새 리더의 60
   expect(log.filter((_, i) => i % 2 === 1)).toEqual([30, 60]);
   expect(log[2]! - log[0]!).toBeGreaterThanOrEqual(1);
+});
+
+describe('자동 제어 칸(Q-T42, ADR-0226)', () => {
+  test('[Q-T42] 전진Lua는_바뀐자동제어칸을세대확인안에서쓰고_옛세대는쓰지못한다', async () => {
+    const e = newEvent();
+    const now = Date.now();
+    await seqTo(e, 50);
+    await store.bump(e, 3, now + DAY);
+    const r = await store.tick(tickOf(e, 3, { target: 2_500, fields: { aimdTarget: '2500', inputStale: '1', inputStaleAt: String(now), lastDecrease: '{"reason":"aimd"}' } }));
+    expect(r.kind === 'OK' && r.waiting).toBe(50 - (r.kind === 'OK' ? r.serving : 0));
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'targetNow'])).toBe('2500');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'aimdTarget'])).toBe('2500');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'inputStale'])).toBe('1');
+    // 빈 글자는 없는 칸과 같다
+    await store.tick(tickOf(e, 3, { fields: { inputStale: '' } }));
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'inputStale'])).toBe('');
+    await store.bump(e, 4, now + DAY);
+    expect((await store.tick(tickOf(e, 3, { fields: { aimdTarget: '1' } }))).kind).toBe('FENCED');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'aimdTarget'])).toBe('2500');
+  });
+
+  test('[Q-T42] 리더상태읽기는_자동제어기억과운영자칸과결제사칸을돌려준다', async () => {
+    const e = newEvent();
+    const now = Date.now();
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'target', '6000', 'targetUntil', String(now + 60_000), 'aimdResumeAt', String(now - 5), 'aimdTarget', '4000', 'inputStale', '1', 'inputStaleAt', String(now - 1), 'pgKey', 'toss', 'pgTps', '300']);
+    const c = await store.control(e, now);
+    expect(c).toMatchObject({ target: 6_000, paused: false, operator: { value: 6_000, untilMs: now + 60_000, resumeAtMs: now - 5 }, pgKey: 'toss', pgTps: 300 });
+    expect(c.memory?.aimdTarget).toBe('4000');
+    expect(c.memory?.inputStale).toBe('1');
+    // 버짓 감축이 끝낸 고정은 고정이 아니다
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'manualEndedAt', String(now)]);
+    expect((await store.control(e, now + 1)).target).toBeUndefined();
+    // 틀린 결제사 칸은 없는 것으로 본다
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'pgTps', 'abc']);
+    expect((await store.control(e, now + 1)).pgTps).toBeUndefined();
+  });
+
+  test('[Q-T67] 일정사본의결제사칸과_명령11칸을읽는다', async () => {
+    const e = newEvent();
+    await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'opensAtMs', '1000', 'startsAtMs', '2000', 'lobbyShuffle', '0', 'openBatch', '1', 'pgKey', 'portone', 'pgTps', '50']);
+    expect(await store.schedule(e)).toMatchObject({ pgKey: 'portone', pgTps: 50 });
+    await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'pgTps', '-1']);
+    expect((await store.schedule(e))?.pgTps).toBeUndefined();
+    expect(await store.platformControl()).toEqual({ autoStopped: false });
+    await cmd(keys.platformCtl(), ['HSET', keys.platformCtl(), 'autoStopped', '1']);
+    expect(await store.platformControl()).toEqual({ autoStopped: true });
+    await cmd(keys.platformCtl(), ['HDEL', keys.platformCtl(), 'autoStopped']);
+  });
 });

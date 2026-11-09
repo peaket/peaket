@@ -1,7 +1,7 @@
 // 셸(CMP-065). 대기실은 집중 셸(web-focus)과 같은 모양을 React 없이 그린다(docs/frontend.md §2.7, d5 §3.1).
 // 굿즈 대기(/shop/[productId]/queue)는 캔버스 SCR-015 보드대로 일반 셸(web-default) 머리·바닥글을 쓴다.
 import { links, WEB } from '../config';
-import type { Ctx, EventCtx } from '../ctx';
+import type { BaseCtx, Ctx, HeaderEvent } from '../ctx';
 import { h, ic } from '../dom';
 import { ACCOUNT } from '../fixtures';
 
@@ -10,7 +10,9 @@ function logoMark(): HTMLElement {
 }
 
 /** 계정 메뉴. 휴대폰·태블릿은 아이콘 버튼이 로그아웃 확인을 바로 열고, 데스크톱(lg)은 이름 버튼이 작은 메뉴를 연다(보드 SCR-007·008-d) */
-function accountControls(c: Ctx): HTMLElement {
+function accountControls(c: BaseCtx): HTMLElement {
+  // 퍼블리싱 화면(?state=)은 목업 이름을, 데이터 연결 화면은 이름 없이 '계정'을 보인다(대기실은 계정 요약을 받지 않는다, ADR-0207)
+  const acct = 'state' in c ? ACCOUNT : null;
   const small = h('button', {
     class: 'icon-btn q-lt-lg',
     type: 'button',
@@ -25,8 +27,8 @@ function accountControls(c: Ctx): HTMLElement {
     type: 'button',
     'aria-haspopup': 'menu',
     'aria-expanded': 'false',
-    'aria-label': `계정 메뉴 ${ACCOUNT.name}(로그아웃)`,
-  }, h('span', { class: 'avatar' }, ACCOUNT.initial), ACCOUNT.name, ic('chevron-down'));
+    'aria-label': acct ? `계정 메뉴 ${acct.name}(로그아웃)` : '계정 메뉴(로그아웃)',
+  }, h('span', { class: 'avatar' }, acct ? acct.initial : ic('user')), acct ? acct.name : '계정', ic('chevron-down'));
   const hide = (focusToggle: boolean): void => {
     menu.hidden = true;
     toggle.setAttribute('aria-expanded', 'false');
@@ -66,13 +68,14 @@ function accountControls(c: Ctx): HTMLElement {
 }
 
 /** 집중 셸 머리: ( 닫기 › ) 공연명 · 회차 · 계정 메뉴(로그아웃). lg에서는 로고와 이름 버튼이 더해진다 */
-export function focusHeader(c: EventCtx, closeLabel = '닫고 공연 상세로 가기(대기는 유지됩니다)'): HTMLElement {
+export function focusHeader(c: BaseCtx & { ev: HeaderEvent }, closeLabel = '닫고 공연 상세로 가기(대기는 유지됩니다)'): HTMLElement {
   return h('header', { class: 'fh q-fh' },
     h('div', { class: 'q-fh-in' },
       h('a', { class: 'icon-btn', href: links.event(c.ev.id), 'aria-label': closeLabel }, ic('close')),
       h('span', { class: 'logo logo-sm q-lg' }, logoMark(), 'PEAKET'),
       h('span', { class: 'vdivider q-lg q-fh-div', 'aria-hidden': 'true' }),
       h('div', { class: 'fh-title' }, h('strong', null, c.ev.title), h('span', null, c.ev.when)),
+      // 로그아웃은 같은 출처 fetch POST /logout이다(대기실 CSP의 form-action을 바꾸지 않는다, ADR-0208 결정 7)
       accountControls(c),
     ),
   );

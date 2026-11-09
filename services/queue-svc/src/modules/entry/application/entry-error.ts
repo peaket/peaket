@@ -3,11 +3,15 @@ export type EntryErrorCode =
   | 'NOT_FOUND'
   | 'NOT_OPEN'
   | 'SALE_ENDED'
+  | 'SOLD_OUT'
   | 'BATCHING'
   | 'QUEUE_RECOVERING'
   | 'PREVERIFY_INVALID'
   | 'ALREADY_ADMITTED'
   | 'ALREADY_WAITING'
+  | 'LOBBY_CLOSED'
+  | 'LOBBY_PARTICIPANT_NOT_FOUND'
+  | 'ENTRY_CANCELLED'
   | 'IDENTITY_VERIFICATION_REQUIRED';
 
 export class EntryError extends Error {

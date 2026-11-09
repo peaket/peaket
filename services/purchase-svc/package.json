@@ -2,27 +2,37 @@
   "name": "@peaket/purchase-svc",
   "private": true,
   "version": "0.0.0",
-  "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①)가 있다. 좌석 Redis만 쓰고 DB는 아직 없다",
+  "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①), 1초 만료 반복(PRF-135), 구매 세션 열기·확인(입장 토큰 확인, s:jti·s:session, 요청 인증 키, PRF-136)이 있다. 좌석 Redis와, 판매 확정 저장소 `SeatSales`가 쓰는 purchase DB(PostgreSQL, Drizzle, BUILD_ORDER PRF-140 ①)를 쓴다",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "migrate": "node scripts/migrate.mjs",
+    "db:generate": "node scripts/db-generate.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
     "@peaket/platform": "workspace:*",
+    "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
+    "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
-    "@peaket/contracts": "workspace:*",
+    "@peaket/shuffle": "workspace:*",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "fast-check": "4.10.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

@@ -1,0 +1,1183 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 2: <queue_arrival_close_no_gen_queue_acquire(1) line 1509, col 3 to line 1538, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 3: <queue_arrival_close_no_gen_queue_enterPreempt(2,1) line 831, col 3 to line 866, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 4: <queue_arrival_close_no_gen_queue_enterPreempt(1,1) line 831, col 3 to line 866, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {} ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 5: <queue_arrival_close_no_gen_queue_enterNumberArrival(1,1,1) line 2033, col 3 to line 2072, col 45 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 2,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]} ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 6: <queue_arrival_close_no_gen_queue_enterNumberArrival(2,1,1) line 2033, col 3 to line 2072, col 45 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 2]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 2,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 2]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [ seq |-> 2,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 7: <queue_arrival_close_no_gen_queue_enterRecord(2,1) line 1760, col 3 to line 1809, col 45 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 2]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 2,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 2]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+
+State 8: <queue_arrival_close_no_gen_queue_failoverEv(1) line 1596, col 3 to line 1622, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 9: <queue_arrival_close_no_gen_queue_applyWrite(1) line 2124, col 3 to line 2162, col 45 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 2,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 10: <queue_arrival_close_no_gen_queue_plan(1,"ARRCLOSE") line 1544, col 3 to line 1590, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "ARRCLOSE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 2,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 11: <queue_arrival_close_no_gen_queue_rb05 line 2206, col 3 to line 2238, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "ARRCLOSE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 2,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 5,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> TRUE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 12: <queue_arrival_close_no_gen_queue_replicateEv line 1644, col 3 to line 1659, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "ARRCLOSE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = <<>>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 13: <queue_arrival_close_no_gen_queue_rb05Confirm line 2244, col 3 to line 2261, col 47 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "ARRCLOSE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 5,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+     removed |-> {},
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+
+State 14: <queue_arrival_close_no_gen_queue_applyWrite(1) line 2124, col 3 to line 2162, col 45 of module queue_arrival_close_no_gen>
+/\ queue_arrival_close_no_gen_queue_ev = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> 2..2,
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 1,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ]
+/\ queue_arrival_close_no_gen_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+/\ queue_arrival_close_no_gen_queue_evRep = [ size |-> 0,
+  seq |-> 5,
+  first |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+  removed |-> {},
+  closed |-> FALSE,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 1,
+        next |-> 2,
+        first |-> 1,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<[base |-> 1, size |-> 2, used |-> 1]>> ] ]
+/\ queue_arrival_close_no_gen_queue_evPend = << [ size |-> 0,
+     seq |-> 5,
+     first |-> 0,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 3, end |-> 5]},
+     removed |-> 2..2,
+     closed |-> FALSE,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 1,
+           next |-> 2,
+           first |-> 1,
+           closedUpto |-> 1,
+           lostUpto |-> 0,
+           slots |-> <<[base |-> 0, size |-> 0, used |-> 0]>> ] ] >>
+/\ queue_arrival_close_no_gen_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 1,
+        gen |-> 1,
+        phase |-> "NUMBERED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 2, gen |-> 1, phase |-> "HELD", own |-> FALSE, after |-> ""] )
+/\ queue_arrival_close_no_gen_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {},
+  arrIssued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 2, gen |-> 1, pid |-> 2] } ]
+/\ queue_arrival_close_no_gen_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_arrival_close_no_gen_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]

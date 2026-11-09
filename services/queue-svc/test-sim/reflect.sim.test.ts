@@ -88,7 +88,7 @@ async function runVariant(delayMs: number) {
   writeFileSync(conf, nginxConf(port));
   const name = `peaket-sim-nginx-${delayMs}`;
   try {
-    docker('rm', '-f', name);
+    docker('rm', '-f', '-v', name);
   } catch {
     // 없다
   }
@@ -183,7 +183,7 @@ async function runVariant(delayMs: number) {
   await Promise.race([Promise.all(done), sleep(15_000)]);
   stop = true;
   await Promise.allSettled([genLoop, advLoop]);
-  docker('rm', '-f', name);
+  docker('rm', '-f', '-v', name);
   await svc.close();
   await redis.close();
   valkey.stop();

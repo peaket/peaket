@@ -1,0 +1,276 @@
+Error: Temporal property q_temporalProps was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<>>,
+        phase |-> "IDLE",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+
+State 2: <seat_live_no_fail_release_seat_hold(11,<<1, 2>>) line 505, col 3 to line 557, col 80 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1, 2>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+
+State 3: <seat_live_no_fail_release_seat_relay(11) line 1028, col 3 to line 1052, col 45 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1, 2>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+
+State 4: <seat_live_no_fail_release_seat_accept(11) line 701, col 3 to line 722, col 45 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "ACCEPTED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+
+State 5: <seat_live_no_fail_release_seat_pin(11) line 798, col 3 to line 856, col 80 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 6: <seat_live_no_fail_release_seat_hold(21,<<1>>) line 505, col 3 to line 557, col 80 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "DONE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 7: <seat_live_no_fail_release_seat_saleStep(11) line 1302, col 3 to line 1434, col 80 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "DONE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 8: <seat_live_no_fail_release_seat_replicate line 372, col 3 to line 381, col 45 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "DONE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 9: <seat_live_no_fail_release_seat_saleStep(11) line 1302, col 3 to line 1434, col 80 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {11}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<2, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "DONE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 10: <seat_live_no_fail_release_seat_decline(11) line 936, col 3 to line 972, col 45 of module seat_live_no_fail_release>
+/\ seat_live_no_fail_release_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_live_no_fail_release_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+/\ seat_live_no_fail_release_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {11} ]
+/\ seat_live_no_fail_release_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_live_no_fail_release_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "FAILED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "DONE", late |-> FALSE, ins |-> 0] )
+/\ seat_live_no_fail_release_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+
+State 11: Stuttering
+Warning: The stuttering counterexample above may be caused by the absence of a behavior specification (SPECIFICATION). Only INIT and NEXT have been provided, so TLC permits infinite stuttering. To rule out such counterexamples, use SPECIFICATION Spec, with Spec asserting a suitable fairness constraint (compare Chapter 8, page 87ff of Specifying Systems at https://lamport.azurewebsites.net/tla/book.html).

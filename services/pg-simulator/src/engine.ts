@@ -9,7 +9,22 @@ import { kstIso, systemClock, type SimClock } from './time.js';
 
 export const CONFIRM_DEADLINE_MS = 10 * 60_000;
 export const IDEMPOTENCY_RETENTION_MS = 15 * 24 * 3_600_000;
+/** 포트원 모양 경로의 멱등키 보관 3시간(payment §2.1 멱등키 규격, BUILD_ORDER HOT-140) */
+export const PORTONE_IDEMPOTENCY_RETENTION_MS = 3 * 3_600_000;
 export const ORDER_ID = /^[A-Za-z0-9_-]{6,64}$/;
+/** 가상계좌 입금 기한 3일 [가정](시뮬레이터 고정 값) */
+export const DEPOSIT_WINDOW_MS = 3 * 86_400_000;
+
+/** 포트원 모양 경로가 엔진에 넘기는 값(토큰 대조, 멱등 보관 3시간, 취소 가능 금액 대조). 토스 모양 경로는 쓰지 않는다 */
+export interface PortoneCallOptions {
+  retentionMs: number;
+  /** 승인: 이 토큰과 결제의 토큰이 달라야 400 INVALID_PAYMENT_TOKEN이다 */
+  token?: string;
+  /** 승인: 값이 있으면 결제의 결제 시도 ID와 같아야 한다(다르면 포트원 경로의 409 INFORMATION_MISMATCH) */
+  txId?: string;
+  /** 취소: 값이 있으면 남은 금액과 같아야 한다 */
+  currentCancellableAmount?: number;
+}
 
 export const OPS = ['confirm', 'cancel', 'query'] as const;
 export type Op = (typeof OPS)[number];
@@ -30,7 +45,7 @@ export interface SimResponse {
   drop?: boolean;
 }
 
-type PaymentStatus = 'READY' | 'IN_PROGRESS' | 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'ABORTED' | 'EXPIRED';
+type PaymentStatus = 'READY' | 'IN_PROGRESS' | 'WAITING_FOR_DEPOSIT' | 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'ABORTED' | 'EXPIRED';
 
 interface CancelRecord {
   cancelAmount: number;
@@ -51,6 +66,40 @@ interface Payment {
   cancels: CancelRecord[];
   serial: number;
   lastTransactionKey?: string;
+  /** 포트원 모양 결제의 결제 토큰과 결제 시도 ID(결제창 인증이 준다) */
+  portoneToken?: string;
+  txId?: string;
+  /** 결제창에서 고른 결제 수단(없으면 카드) */
+  method?: SimPayMethod;
+  /** 결제창에서 고른 시험 카드. null이면 카드 정보가 없다(없으면 합성 카드) */
+  testCard?: SimTestCard | null;
+  /** 발급한 가상계좌(계좌번호는 합성 값이다) */
+  virtualAccount?: { accountNumber: string; bankCode: string; dueAt: number };
+  /** 입금 통보 대조값 */
+  secret?: string;
+}
+
+/** 시험이 고르는 결제 수단(BUILD_ORDER HOT-145) */
+export const SIM_PAY_METHODS = ['카드', '계좌이체', '가상계좌'] as const;
+export type SimPayMethod = (typeof SIM_PAY_METHODS)[number];
+
+/** 시험이 고르는 카드(BUILD_ORDER HOT-145). 번호는 합성 값이다 */
+export interface SimTestCard {
+  number: string;
+  /** null이면 발급사 칸을 뺀다(포트원 모양) */
+  issuerCode?: string | null;
+  cardType?: string;
+  /** 포트원 모양의 bin. 없으면 번호의 앞 8자리, null이면 뺀다 */
+  bin?: string | null;
+}
+
+/** 토스 모양 거래 목록의 한 줄(BUILD_ORDER HOT-153) */
+interface TransactionRow {
+  key: string;
+  p: Payment;
+  status: 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED';
+  amount: number;
+  atMs: number;
 }
 
 interface IdemEntry {
@@ -67,8 +116,28 @@ interface ArmedFault {
 
 export interface WebhookEvent {
   paymentKey: string;
+  /** 포트원 모양 결제의 결제 시도 ID(포트원 웹훅 본문의 transactionId) */
+  txId?: string;
   headers: Record<string, string>;
   body: { eventType: 'PAYMENT_STATUS_CHANGED'; createdAt: string; data: unknown };
+}
+
+/** 대사 시험·측정이 넣는 결제 한 줄(BUILD_ORDER HOT-153). atMs는 그 상태가 된 시각이다 */
+export interface SeedTransaction {
+  paymentKey: string;
+  orderId: string;
+  amount: number;
+  status: 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'WAITING_FOR_DEPOSIT';
+  atMs: number;
+}
+
+/** 토스 DEPOSIT_CALLBACK 본문 모양(docs/features/payment.md §2.1 '공식 문서 대조 결과') */
+export interface DepositCallback {
+  createdAt: string;
+  secret: string;
+  status: 'DONE' | 'WAITING_FOR_DEPOSIT' | 'CANCELED';
+  transactionKey: string;
+  orderId: string;
 }
 
 export interface EngineOptions {
@@ -80,6 +149,13 @@ export interface EngineOptions {
 
 const err = (status: number, code: string, message: string): SimResponse => ({ status, body: { code, message } });
 const APPROVED: ReadonlySet<PaymentStatus> = new Set(['DONE', 'PARTIAL_CANCELED', 'CANCELED']);
+/** 결제창 인증이 받는 시험 결제 수단 */
+export interface SimInstrument {
+  method?: SimPayMethod;
+  card?: SimTestCard | null;
+}
+const instrumentOf = (a: SimInstrument): Pick<Payment, 'method' | 'testCard'> => ({ ...(a.method === undefined ? {} : { method: a.method }), ...(a.card === undefined ? {} : { testCard: a.card }) });
+
 /** 다시 보내면 결과가 달라질 수 있어 멱등 기록에 남기지 않는 응답 */
 const transient = (r: SimResponse) => r.drop === true || r.status >= 500 || r.status === 409 || r.status === 429 || (r.body as { code?: string } | undefined)?.code === 'ALREADY_PROCESSING_REQUEST';
 
@@ -94,7 +170,9 @@ export class PgSimulatorEngine {
   private idem = new Map<string, IdemEntry>();
   private faults: ArmedFault[] = [];
   private events: WebhookEvent[] = [];
+  private deposits: DepositCallback[] = [];
   private serial = 0;
+  private transactionRows: { rows: TransactionRow[]; indexOf: Map<string, number> } | undefined;
 
   constructor(o: EngineOptions = {}) {
     this.clock = o.clock ?? systemClock;
@@ -117,16 +195,18 @@ export class PgSimulatorEngine {
   }
 
   reset(): void {
+    this.transactionRows = undefined;
     this.payments.clear();
     this.approvedByOrder.clear();
     this.idem.clear();
     this.faults = [];
     this.events = [];
+    this.deposits = [];
     this.nextLatency = latencySampler(this.initialLatency, this.random);
   }
 
   /** 구매자가 결제창에서 인증을 마친 것을 흉내 낸다. 성공 주소가 받을 값(paymentKey·orderId·amount)을 준다 */
-  authenticate(a: { orderId: string; amount: number; orderName?: string }): SimResponse {
+  authenticate(a: { orderId: string; amount: number; orderName?: string } & SimInstrument): SimResponse {
     if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
     if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
     const serial = ++this.serial;
@@ -141,19 +221,47 @@ export class PgSimulatorEngine {
       balance: a.amount,
       cancels: [],
       serial,
+      ...instrumentOf(a),
     });
     return { status: 200, body: { paymentKey, orderId: a.orderId, amount: a.amount } };
   }
 
-  confirm(c: { paymentKey: string; orderId: string; amount: number }, idemKey?: string): Promise<SimResponse> {
-    const fp = JSON.stringify(['confirm', c.paymentKey, c.orderId, c.amount]);
-    return this.idempotent('confirm', idemKey, fp, c.orderId, async (fault) => {
+  /** 포트원 모양 결제창 인증. 결제 ID는 pay-{주문 ID}이고 같은 주문을 다시 인증하면 앞 시도를 대체한다(성공은 한 번). 승인된 주문은 다시 인증할 수 없다 */
+  authenticatePortone(a: { orderId: string; amount: number; orderName?: string } & SimInstrument): SimResponse {
+    if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
+    if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
+    const paymentKey = `pay-${a.orderId}`;
+    const portoneToken = `ptok_${randomBytes(16).toString('hex')}`;
+    const txId = `tx_${randomBytes(9).toString('hex')}`;
+    const serial = ++this.serial;
+    this.payments.set(paymentKey, {
+      paymentKey,
+      orderId: a.orderId,
+      orderName: a.orderName ?? '시뮬레이터 주문',
+      amount: a.amount,
+      status: 'READY',
+      requestedAt: this.clock.now(),
+      balance: a.amount,
+      cancels: [],
+      serial,
+      portoneToken,
+      txId,
+      ...instrumentOf(a),
+    });
+    return { status: 200, body: { paymentId: paymentKey, paymentToken: portoneToken, txId, orderId: a.orderId, amount: a.amount } };
+  }
+
+  confirm(c: { paymentKey: string; orderId: string; amount: number }, idemKey?: string, portone?: PortoneCallOptions): Promise<SimResponse> {
+    const fp = JSON.stringify(['confirm', c.paymentKey, c.orderId, c.amount, portone?.token ?? null, portone?.txId ?? null]);
+    return this.idempotent('confirm', idemKey, fp, c.orderId, portone?.retentionMs ?? IDEMPOTENCY_RETENTION_MS, async (fault) => {
       const p = this.payments.get(c.paymentKey);
       if (!p) return { response: err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다') };
       this.expireIfDue(p);
       if (p.status === 'EXPIRED' || p.status === 'ABORTED') return { response: err(400, 'NOT_FOUND_PAYMENT_SESSION', '결제 시간이 만료되어 결제 진행 데이터가 없습니다') };
       if (p.status === 'IN_PROGRESS') return { response: err(400, 'ALREADY_PROCESSING_REQUEST', '이미 처리 중인 요청입니다') };
-      if (APPROVED.has(p.status)) return { response: err(400, 'ALREADY_PROCESSED_PAYMENT', '이미 처리된 결제입니다') };
+      if (APPROVED.has(p.status) || p.status === 'WAITING_FOR_DEPOSIT') return { response: err(400, 'ALREADY_PROCESSED_PAYMENT', '이미 처리된 결제입니다') };
+      if (portone?.token !== undefined && p.portoneToken !== portone.token) return { response: err(400, 'INVALID_PAYMENT_TOKEN', '결제 토큰이 올바르지 않습니다') };
+      if (portone?.txId !== undefined && p.txId !== portone.txId) return { response: err(400, 'INVALID_REQUEST', '결제 시도 ID가 결제창 값과 다릅니다') };
       if (p.orderId !== c.orderId || p.amount !== c.amount) return { response: err(400, 'INVALID_REQUEST', '주문 ID나 금액이 결제창 값과 다릅니다') };
       if (this.approvedByOrder.has(c.orderId)) return { response: err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다') };
 
@@ -174,7 +282,8 @@ export class PgSimulatorEngine {
         p.status = 'READY';
         return { response: fault.kind === 'drop' ? { status: 0, drop: true } : err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다') };
       }
-      this.approve(p);
+      if (p.method === '가상계좌') this.issueVirtualAccount(p);
+      else this.approve(p);
       const ok: SimResponse = { status: 200, body: this.view(p) };
       if (fault?.kind === 'pg-error') return { response: err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다'), store: ok };
       if (fault?.kind === 'drop') return { response: { status: 0, drop: true }, store: ok };
@@ -182,15 +291,24 @@ export class PgSimulatorEngine {
     });
   }
 
-  cancel(paymentKey: string, c: { cancelReason: string; cancelAmount?: number }, idemKey?: string): Promise<SimResponse> {
-    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null]);
+  cancel(paymentKey: string, c: { cancelReason: string; cancelAmount?: number }, idemKey?: string, portone?: PortoneCallOptions): Promise<SimResponse> {
+    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null, portone?.currentCancellableAmount ?? null]);
     const orderId = this.payments.get(paymentKey)?.orderId;
-    return this.idempotent('cancel', idemKey, fp, orderId, async (fault) => {
+    return this.idempotent('cancel', idemKey, fp, orderId, portone?.retentionMs ?? IDEMPOTENCY_RETENTION_MS, async (fault) => {
       const p = this.payments.get(paymentKey);
       if (!p) return { response: err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다') };
       if (!c.cancelReason || c.cancelReason.length > 200) return { response: err(400, 'INVALID_REQUEST', '취소 사유가 필요합니다') };
       if (p.status === 'CANCELED') return { response: err(400, 'ALREADY_CANCELED_PAYMENT', '이미 취소된 결제입니다') };
+      if (p.status === 'WAITING_FOR_DEPOSIT') {
+        // 입금 전 취소: 받은 돈이 없어 환불 없이 끝난다(BUILD_ORDER HOT-152)
+        p.balance = 0;
+        p.lastTransactionKey = this.transactionKey();
+        p.cancels.push({ cancelAmount: 0, cancelReason: c.cancelReason, canceledAt: this.clock.now(), transactionKey: p.lastTransactionKey });
+        this.setStatus(p, 'CANCELED');
+        return { response: { status: 200, body: this.view(p) } };
+      }
       if (p.status !== 'DONE' && p.status !== 'PARTIAL_CANCELED') return { response: err(403, 'NOT_CANCELABLE_PAYMENT', '취소할 수 없는 결제입니다') };
+      if (portone?.currentCancellableAmount !== undefined && portone.currentCancellableAmount !== p.balance) return { response: err(409, 'CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN', '취소 가능 금액이 맞지 않습니다') };
       const fits = (a: number) => Number.isSafeInteger(a) && a > 0 && a <= p.balance;
       if (!fits(c.cancelAmount ?? p.balance)) return { response: err(400, 'NOT_CANCELABLE_AMOUNT', '취소할 수 없는 금액입니다') };
 
@@ -243,12 +361,108 @@ export class PgSimulatorEngine {
       }));
   }
 
+  /**
+   * 대사 시험·측정의 씨앗: 결제 줄을 바로 넣는다(결제창·승인을 거치지 않는다, BUILD_ORDER HOT-153).
+   * DONE은 approvedAt = atMs, CANCELED·PARTIAL_CANCELED는 승인(atMs − 1초) 뒤 취소(atMs, 부분이면 절반)이고, WAITING_FOR_DEPOSIT은 가상계좌 입금 대기다.
+   */
+  seedTransactions(items: readonly SeedTransaction[]): number {
+    for (const it of items) {
+      const serial = ++this.serial;
+      const base: Payment = { paymentKey: it.paymentKey, orderId: it.orderId, orderName: '씨앗 주문', amount: it.amount, status: 'READY', requestedAt: it.atMs, balance: it.amount, cancels: [], serial };
+      if (it.status === 'DONE') {
+        base.status = 'DONE';
+        base.approvedAt = it.atMs;
+      } else if (it.status === 'WAITING_FOR_DEPOSIT') {
+        base.method = '가상계좌';
+        base.status = 'WAITING_FOR_DEPOSIT';
+        base.virtualAccount = { accountNumber: `562${String(serial).padStart(11, '0')}`, bankCode: '20', dueAt: it.atMs + DEPOSIT_WINDOW_MS };
+      } else {
+        base.status = it.status;
+        base.approvedAt = it.atMs - 1_000;
+        const cancelAmount = it.status === 'CANCELED' ? it.amount : Math.floor(it.amount / 2);
+        base.balance = it.amount - cancelAmount;
+        base.cancels = [{ cancelAmount, cancelReason: '씨앗 취소', canceledAt: it.atMs, transactionKey: this.transactionKey() }];
+      }
+      base.lastTransactionKey = this.transactionKey();
+      this.payments.set(it.paymentKey, base);
+      if (base.approvedAt !== undefined) this.approvedByOrder.set(it.orderId, it.paymentKey);
+    }
+    this.transactionRows = undefined;
+    return items.length;
+  }
+
+  /** 토스 모양 거래 조회(GET /v1/transactions, BUILD_ORDER HOT-153): 승인과 취소가 거래마다 한 줄이고 시각 차례다. startDate·endDate는 KST다 */
+  transactions(q: { startDate: string; endDate: string; startingAfter?: string; limit: number }): Array<Record<string, unknown>> {
+    const fromMs = Date.parse(`${q.startDate}+09:00`);
+    const toMs = Date.parse(`${q.endDate}+09:00`);
+    const { rows, indexOf } = this.transactionIndex();
+    const start = q.startingAfter === undefined ? 0 : (indexOf.get(q.startingAfter) ?? -1) + 1;
+    const out: Array<Record<string, unknown>> = [];
+    for (let i = start; i < rows.length && out.length < q.limit; i += 1) {
+      const r = rows[i]!;
+      if (r.atMs < fromMs || r.atMs >= toMs) continue;
+      out.push({ mId: 'peaketsim', transactionKey: r.key, paymentKey: r.p.paymentKey, orderId: r.p.orderId, method: r.p.method ?? '카드', customerKey: null, useEscrow: false, receiptUrl: null, status: r.status, transactionAt: kstIso(r.atMs), currency: 'KRW', amount: r.amount });
+    }
+    return out;
+  }
+
+  /** 포트원 모양 결제 대용량 다건 조회(GET /payments-by-cursor, BUILD_ORDER HOT-153): 결제 한 건이 한 줄(최종 상태)이고 상태가 바뀐 시각이 범위 안인 건만 준다. items는 토스 모양 보기이고 경로가 포트원 모양으로 바꾼다. 커서는 줄 번호다 */
+  portonePaymentsByCursor(q: { from: string; until: string; cursor?: string; size: number }): { items: Array<Record<string, unknown>>; cursor?: string } {
+    const fromMs = Date.parse(q.from);
+    const toMs = Date.parse(q.until);
+    const changedAt = (p: Payment): number => p.cancels.at(-1)?.canceledAt ?? p.approvedAt ?? p.requestedAt;
+    const matches = [...this.payments.values()].filter((p) => p.status !== 'READY' && p.status !== 'IN_PROGRESS' && changedAt(p) >= fromMs && changedAt(p) < toMs).sort((a, b) => changedAt(a) - changedAt(b) || a.serial - b.serial);
+    const start = q.cursor === undefined ? 0 : Number(q.cursor);
+    const page = matches.slice(start, start + q.size);
+    const next = start + q.size;
+    return { items: page.map((p) => ({ ...this.view(p), statusChangedAt: kstIso(changedAt(p)) })), ...(next < matches.length ? { cursor: String(next) } : {}) };
+  }
+
+  /** 입금을 흉내 낸다: 입금 대기면 DONE으로 바꾸고 입금 통보 본문을 쌓는다. 없는 결제는 404, 입금 대기가 아니면 400이다 */
+  deposit(paymentKey: string): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'WAITING_FOR_DEPOSIT') return err(400, 'NOT_WAITING_FOR_DEPOSIT', '입금 대기 결제가 아닙니다');
+    this.approve(p);
+    this.deposits.push({ createdAt: kstIso(this.clock.now()), secret: p.secret!, status: 'DONE', transactionKey: p.lastTransactionKey!, orderId: p.orderId });
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 입금 오류를 흉내 낸다: 입금 완료를 입금 대기로 되돌리고(승인 시각·승인 표시를 지운다) 입금 통보 본문(WAITING_FOR_DEPOSIT)을 쌓는다. dueDate를 주면 새 기한이다. 없는 결제는 404, 입금 완료 가상계좌가 아니면 400이다(BUILD_ORDER HOT-152) */
+  reverseDeposit(paymentKey: string, o: { dueDate?: string } = {}): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'DONE' || p.virtualAccount === undefined) return err(400, 'NOT_DEPOSITED', '입금 완료된 가상계좌 결제가 아닙니다');
+    const due = o.dueDate === undefined ? Number.NaN : Date.parse(o.dueDate);
+    if (!Number.isNaN(due)) p.virtualAccount.dueAt = due;
+    delete p.approvedAt;
+    this.approvedByOrder.delete(p.orderId);
+    p.lastTransactionKey = this.transactionKey();
+    this.setStatus(p, 'WAITING_FOR_DEPOSIT');
+    this.deposits.push({ createdAt: kstIso(this.clock.now()), secret: p.secret!, status: 'WAITING_FOR_DEPOSIT', transactionKey: p.lastTransactionKey, orderId: p.orderId });
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 결제사 쪽 입금 만료를 흉내 낸다. 토스는 기한이 지나도 상태가 그대로이므로(payment §6) 시험이 부를 때만 바뀐다. 입금 통보는 없다 */
+  expireDeposit(paymentKey: string): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'WAITING_FOR_DEPOSIT') return err(400, 'NOT_WAITING_FOR_DEPOSIT', '입금 대기 결제가 아닙니다');
+    this.setStatus(p, 'EXPIRED');
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 입금 통보 본문(DEPOSIT_CALLBACK). 시험이 받아 웹훅 경로로 보낸다 */
+  depositCallbacks(orderId?: string): DepositCallback[] {
+    return this.deposits.filter((d) => orderId === undefined || d.orderId === orderId);
+  }
+
   webhooks(paymentKey?: string): WebhookEvent[] {
     return this.events.filter((e) => paymentKey === undefined || e.paymentKey === paymentKey);
   }
 
   private read(p: Payment | undefined, orderId?: string): Promise<SimResponse> {
-    return this.idempotent('query', undefined, '', p?.orderId ?? orderId, async (fault) => {
+    return this.idempotent('query', undefined, '', p?.orderId ?? orderId, IDEMPOTENCY_RETENTION_MS, async (fault) => {
       await this.sleep(fault?.kind === 'delay' ? fault.ms : 0);
       if (fault?.kind === 'decline') return { response: err(400, fault.code, fault.message ?? '결제사가 조회를 거절했습니다') };
       if (fault?.kind === 'pg-error') return { response: err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다') };
@@ -264,6 +478,7 @@ export class PgSimulatorEngine {
     idemKey: string | undefined,
     fingerprint: string,
     orderId: string | undefined,
+    retentionMs: number,
     run: (fault: FaultKind | undefined) => Promise<{ response: SimResponse; store?: SimResponse }>,
   ): Promise<SimResponse> {
     const now = this.clock.now();
@@ -271,7 +486,7 @@ export class PgSimulatorEngine {
     if (slot) {
       // 보관 기간이 지난 기록은 꺼낼 때 지운다(요청마다 전부 훑지 않는다)
       const found = this.idem.get(slot);
-      if (found?.response && now - found.at > IDEMPOTENCY_RETENTION_MS) this.idem.delete(slot);
+      if (found?.response && now - found.at > retentionMs) this.idem.delete(slot);
       const e = this.idem.get(slot);
       if (e && e.fingerprint !== fingerprint) return err(422, 'IDEMPOTENCY_KEY_REUSED', '같은 멱등키로 다른 요청을 보냈습니다');
       if (e && !e.response) return err(409, 'IDEMPOTENT_REQUEST_PROCESSING', '같은 멱등키의 요청을 처리하고 있습니다');
@@ -308,6 +523,15 @@ export class PgSimulatorEngine {
     if (p.status === 'READY' && this.clock.now() - p.requestedAt > CONFIRM_DEADLINE_MS) this.setStatus(p, 'EXPIRED');
   }
 
+  /** 가상계좌를 발급해 입금 대기로 둔다(계좌번호·secret은 합성 값이다) */
+  private issueVirtualAccount(p: Payment): void {
+    const now = this.clock.now();
+    p.virtualAccount = { accountNumber: `562${String(p.serial).padStart(11, '0')}`, bankCode: '20', dueAt: now + DEPOSIT_WINDOW_MS };
+    p.secret = `ps_${randomBytes(12).toString('hex')}`;
+    p.lastTransactionKey = this.transactionKey();
+    this.setStatus(p, 'WAITING_FOR_DEPOSIT');
+  }
+
   private approve(p: Payment): void {
     p.approvedAt = this.clock.now();
     p.balance = p.amount;
@@ -318,9 +542,11 @@ export class PgSimulatorEngine {
 
   private setStatus(p: Payment, status: PaymentStatus): void {
     p.status = status;
+    this.transactionRows = undefined;
     const at = kstIso(this.clock.now());
     this.events.push({
       paymentKey: p.paymentKey,
+      ...(p.txId === undefined ? {} : { txId: p.txId }),
       headers: {
         'tosspayments-webhook-transmission-id': `wh_${randomBytes(12).toString('hex')}`,
         'tosspayments-webhook-transmission-time': at,
@@ -330,13 +556,49 @@ export class PgSimulatorEngine {
     });
   }
 
+  /** 거래 목록(시각 차례)과 거래 키 → 줄 번호. 측정 규모에서 호출마다 다시 만들지 않게 바뀔 때까지 담아 둔다 */
+  private transactionIndex(): { rows: TransactionRow[]; indexOf: Map<string, number> } {
+    if (this.transactionRows !== undefined) return this.transactionRows;
+    const rows: TransactionRow[] = [];
+    for (const p of this.payments.values()) {
+      if (p.approvedAt !== undefined) rows.push({ key: `${p.paymentKey}:approve`, p, status: 'DONE', amount: p.amount, atMs: p.approvedAt });
+      let balance = p.amount;
+      p.cancels.forEach((c) => {
+        balance -= c.cancelAmount;
+        rows.push({ key: c.transactionKey, p, status: balance === 0 ? 'CANCELED' : 'PARTIAL_CANCELED', amount: c.cancelAmount, atMs: c.canceledAt });
+      });
+    }
+    rows.sort((a, b) => a.atMs - b.atMs || a.p.serial - b.p.serial || (a.status === 'DONE' ? -1 : 1));
+    const indexOf = new Map(rows.map((r, i) => [r.key, i]));
+    this.transactionRows = { rows, indexOf };
+    return this.transactionRows;
+  }
+
   private transactionKey(): string {
     return `txsim_${randomBytes(10).toString('hex')}`;
+  }
+
+  /** Payment.card 모양. 토스에는 bin 칸이 없어 포트원 모양 결제에만 싣는다 */
+  private cardView(p: Payment): Record<string, unknown> {
+    const t = p.testCard;
+    const number = t?.number ?? `43301234****${String(p.serial % 1000).padStart(3, '0')}*`;
+    const bin = t?.bin === undefined ? number.slice(0, 8) : t.bin;
+    return {
+      issuerCode: t?.issuerCode === undefined ? '61' : t.issuerCode,
+      acquirerCode: '31',
+      number,
+      cardType: t?.cardType ?? '신용',
+      ownerType: '개인',
+      approveNo: String(p.serial).padStart(8, '0'),
+      amount: p.amount,
+      ...(p.txId !== undefined && bin !== null ? { bin } : {}),
+    };
   }
 
   /** 토스페이먼츠 Payment 객체 모양(필요한 칸만). 카드 정보는 합성 값이다 */
   private view(p: Payment): Record<string, unknown> {
     const approved = p.approvedAt !== undefined;
+    const method = p.method ?? '카드';
     return {
       mId: 'peaketsim',
       version: '2022-11-16',
@@ -350,14 +612,15 @@ export class PgSimulatorEngine {
       totalAmount: p.amount,
       balanceAmount: p.balance,
       currency: 'KRW',
-      method: '카드',
-      card: approved
-        ? { issuerCode: '61', acquirerCode: '31', number: `43301234****${String(p.serial % 1000).padStart(3, '0')}*`, cardType: '신용', ownerType: '개인', approveNo: String(p.serial).padStart(8, '0'), amount: p.amount }
-        : null,
+      method,
+      card: approved && method === '카드' && p.testCard !== null ? this.cardView(p) : null,
+      virtualAccount: p.virtualAccount ? { accountType: '일반', accountNumber: p.virtualAccount.accountNumber, bankCode: p.virtualAccount.bankCode, customerName: '시뮬레이터', dueDate: kstIso(p.virtualAccount.dueAt), expired: false, settlementStatus: 'INCOMPLETED', refundStatus: 'NONE' } : null,
+      secret: p.secret ?? null,
       cancels: p.cancels.length
         ? p.cancels.map((c) => ({ cancelAmount: c.cancelAmount, cancelReason: c.cancelReason, canceledAt: kstIso(c.canceledAt), transactionKey: c.transactionKey }))
         : null,
       lastTransactionKey: p.lastTransactionKey ?? null,
+      ...(p.txId === undefined ? {} : { txId: p.txId }),
     };
   }
 }

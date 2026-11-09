@@ -11,6 +11,10 @@
  */
 import * as zod from 'zod';
 
+export const tooManyRequestsResponseRemainingAttemptsMin = 0;
+
+
+
 export const TooManyRequestsResponse = zod.object({
   "type": zod.url().optional(),
   "title": zod.string().optional(),
@@ -24,10 +28,15 @@ export const TooManyRequestsResponse = zod.object({
   "rejoinAllowed": zod.boolean().optional().describe('입장 확정의 대기표 만료 410에만. 다시 줄 서기 가능 여부(이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·0064)'),
   "holdRemainingSeconds": zod.int().optional().describe('결제 시도 시작의 503(새 결제 일시 정지)에만. 주문을 만들고 결제 접수 전인 홀드의 멈춘 남은 시간(초). 다시 열리면 이어 센다(ADR-0085)'),
   "myReviewId": zod.string().optional().describe('후기 쓰기의 409 review-already-written에만. 이 계정이 이 회차에 이미 쓴 후기 ID(수정으로 안내)'),
+  "ended": zod.enum(['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE', 'LOGIN_METHOD_CHANGED']).optional().describe('토큰 갱신(POST /v1/identity/access-tokens)의 401 refresh-token-invalid에만. 쿠키의 토큰이 끝난 세션의 것이고 끝난 까닭을 알 때 그 까닭을 싣는다(세션 종료 사건 SessionTerminated.reason 가운데 팬에게 보이는 것, d5 §3.5, 추천 적용 2026-11-09, ADR-0235). 모르는 토큰·모양이 틀린 토큰·유휴·절대 만료에는 없다'),
   "fraudHold": zod.object({
   "state": zod.enum(['CASE_OPEN', 'RESTRICTED']).optional(),
   "until": zod.iso.datetime({"offset":true}).optional()
-}).optional().describe('탈퇴(DELETE /v1/identity/account)의 409 \'탈퇴 전 확인\'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173))')
+}).optional().describe('탈퇴(DELETE /v1/identity/account)의 409 \'탈퇴 전 확인\'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173))'),
+  "remainingAttempts": zod.int().min(tooManyRequestsResponseRemainingAttemptsMin).optional().describe('관리 계정 로그인 401 admin-login-failed·admin-login-code-invalid와 본인 해제 422 unlock-code-invalid(그 링크로 남은 수, BOT-121)에만. 잠금까지 남은 실패 수(계정 실패 수와 출발지 묶음 실패 수 가운데 잠금에 가까운 쪽). 없는 이메일도 같은 규칙으로 센 값이다(docs/security/auth-controls.md §2.2, 추천 적용 2026-11-05, BUILD_ORDER BOT-111)'),
+  "humanCheckRequired": zod.boolean().optional().describe('관리 계정 로그인 401 admin-login-failed에만. 다음 시도에 사람 확인 토큰이 필요한지(auth-controls §2.3, 추천 적용 2026-11-05)'),
+  "lock": zod.enum(['TIMED', 'PROTECT']).optional().describe('관리 계정 로그인 423 admin-account-locked에만. TIMED는 시간 잠금이나 출발지 묶음 잠금(Retry-After와 retryAfterSeconds를 함께 준다), PROTECT는 보호 잠금(원인은 싣지 않는다, auth-controls §3.2, 추천 적용 2026-11-05)'),
+  "retryAfterSeconds": zod.int().min(1).optional().describe('관리 계정 로그인 423(lock TIMED)에만. 잠금이 풀릴 때까지 남은 초(화면의 남은 분 표시, Retry-After와 같은 값, 추천 적용 2026-11-05)')
 }).describe('RFC 9457 Problem Details(guidelines §2). 오류 식별자는 type URI다. 아래 선택 확장 필드는 적힌 응답에만 싣는다')
 
 export type TooManyRequestsResponse = zod.input<typeof TooManyRequestsResponse>;

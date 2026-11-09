@@ -17,12 +17,14 @@ import * as zod from 'zod';
  * FR-003, SCR-001(소유자 결정 2026-10-14, ADR-0063). 홈 ISR의 원본이다. 개인 값(찜한 공연, 오픈 알림 상태)은 싣지 않고 브라우저가 로그인했을 때 따로 받는다(GET /v1/wishes, GET /v1/subscriptions?eventIds=). 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=86400 [가정]이다. 원본 장애 때는 마지막 정상 응답이 나간다(SCR-001 오류 상태). 홈 구성 저장·판매 승인·매진 때 홈 캐시 태그를 무효화한다(추천 적용 2026-10-14, ADR-0063)
  * @summary 홈 피드(배너·오픈 예정·지금 판매 중·테마·공연장). 인증 없음, CDN 캐시
  */
-export const GetV1HomeResponse = zod.object({
+export const GetHomeResponse = zod.object({
   "banners": zod.array(zod.object({
   "bannerId": zod.string().optional(),
   "productionId": zod.string().optional(),
   "eventId": zod.string().optional().describe('대표 회차(누르면 이 회차 상세, ADR-0093)'),
-  "imageUrl": zod.url().optional().describe('가로형 배너 파생본(1240×400 이상 [가정])'),
+  "title": zod.string().optional().describe('배너의 핵심 문구(HTML 글자로 이미지 위·아래에 보인다. 이미지 안 글자로 넣지 않는다, d5 §5.1, WCAG 2.2 SC 1.4.5). [홈 구성]에서 적지 않았으면 없다'),
+  "subtitle": zod.string().optional().describe('둘째 줄(일시·장소 등)'),
+  "imageUrl": zod.url().optional().describe('가로형 배너 파생본 묶음의 기준 주소(원본 1240×400 이상 [가정]). 파생본 이름은 posterUrl과 같은 규칙이다(ADR-0199 결정 4)'),
   "alt": zod.string().optional(),
   "displayUntil": zod.iso.datetime({"offset":true}).optional()
 })).optional().describe('운영자가 [홈 구성]에서 정한 순서. 노출 기간 안이고 판매 승인된 공연만'),
@@ -31,7 +33,7 @@ export const GetV1HomeResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -48,7 +50,7 @@ export const GetV1HomeResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -68,7 +70,7 @@ export const GetV1HomeResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -95,14 +97,14 @@ export const GetV1HomeResponse = zod.object({
  * @summary 장르별 랭킹 파일(어제 확정 판매 매수 순, 매일 10:00 [가정] 게시, 인증 없음)
  */
 
-export const getV1HomeRankingsJsonResponseOverallMax = 10;
+export const getHomeRankingsResponseOverallMax = 10;
 
 
-export const getV1HomeRankingsJsonResponseGenresItemItemsMax = 10;
+export const getHomeRankingsResponseGenresItemItemsMax = 10;
 
 
 
-export const GetV1HomeRankingsJsonResponse = zod.object({
+export const GetHomeRankingsResponse = zod.object({
   "basisDate": zod.iso.date().optional().describe('집계한 날(어제, KST)'),
   "generatedAt": zod.iso.datetime({"offset":true}).optional(),
   "overall": zod.array(zod.object({
@@ -110,7 +112,7 @@ export const GetV1HomeRankingsJsonResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -123,7 +125,7 @@ export const GetV1HomeRankingsJsonResponse = zod.object({
   "badges": zod.array(zod.enum(['PREQUEUE_SHUFFLE', 'HYBRID', 'FIFO', 'PRESALE', 'AUTO_SEAT'])).optional().describe('대표 회차의 피켓 판매 정보 배지 코드. 문구는 화면이 정한다. PREQUEUE_SHUFFLE·HYBRID·FIFO는 회차의 정렬 설정 두 값(lobbyShuffle·openBatch)의 조합에서 계산한 이름이다(ADR-0118)')
 }).describe('홈·검색·랭킹·찜이 함께 쓰는 공연 카드. 공연(회차 묶음) 하나에 카드 하나이고 공개 값만 싣는다(추천 적용 2026-10-27, ADR-0093. 회차 단위였던 EventCard를 바꿈). 누르면 대표 회차 상세(/events/{eventId})로 간다').and(zod.object({
   "rank": zod.int().min(1)
-}))).max(getV1HomeRankingsJsonResponseOverallMax).optional().describe('\'전체\' 칩의 장르 구분 없는 순위, 최대 10위 [가정](추천 적용 2026-10-14, ADR-0063)'),
+}))).max(getHomeRankingsResponseOverallMax).optional().describe('\'전체\' 칩의 장르 구분 없는 순위, 최대 10위 [가정](추천 적용 2026-10-14, ADR-0063)'),
   "genres": zod.array(zod.object({
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
   "items": zod.array(zod.object({
@@ -131,7 +133,7 @@ export const GetV1HomeRankingsJsonResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -144,7 +146,7 @@ export const GetV1HomeRankingsJsonResponse = zod.object({
   "badges": zod.array(zod.enum(['PREQUEUE_SHUFFLE', 'HYBRID', 'FIFO', 'PRESALE', 'AUTO_SEAT'])).optional().describe('대표 회차의 피켓 판매 정보 배지 코드. 문구는 화면이 정한다. PREQUEUE_SHUFFLE·HYBRID·FIFO는 회차의 정렬 설정 두 값(lobbyShuffle·openBatch)의 조합에서 계산한 이름이다(ADR-0118)')
 }).describe('홈·검색·랭킹·찜이 함께 쓰는 공연 카드. 공연(회차 묶음) 하나에 카드 하나이고 공개 값만 싣는다(추천 적용 2026-10-27, ADR-0093. 회차 단위였던 EventCard를 바꿈). 누르면 대표 회차 상세(/events/{eventId})로 간다').and(zod.object({
   "rank": zod.int().min(1)
-}))).max(getV1HomeRankingsJsonResponseGenresItemItemsMax).optional().describe('최대 10위 [가정]')
+}))).max(getHomeRankingsResponseGenresItemItemsMax).optional().describe('최대 10위 [가정]')
 })).optional()
 }).describe('장르별 랭킹 파일(SCR-001 ⑧, 추천 적용 2026-10-14, ADR-0063). 어제(KST) 확정 판매 매수 순위이고 매수 값은 싣지 않는다. 공연 단위다(그 공연 회차들의 판매 매수 합, 추천 적용 2026-10-27, ADR-0093). docs/features/analytics.md §8.5')
 
@@ -152,39 +154,41 @@ export const GetV1HomeRankingsJsonResponse = zod.object({
  * FR-003, SCR-003(소유자 결정 2026-10-14, ADR-0063), docs/features/search.md(추천 적용 2026-10-27, ADR-0094). 한 줄은 공연(ADR-0093)이고 판매 승인된 공연만 나온다. q는 정규화(NFKC·소문자·제로폭 문자 지움·공백 정리)한 뒤 공연명·아티스트·공연장과 그 다른 이름의 앞부분·낱자·초성·중간 일치로 찾는다. 로마자만인 q가 0건이면 한/영 변환 값으로 다시 찾는다. LIKE 패턴의 특수 문자는 이스케이프한다. 검색 읽기 모델(search_document·search_term)을 읽기 전용 복제본과 검색 전용 연결 묶음으로 읽는다. 기본 범위는 판매 중·오픈 예정·매진이고 includePast=true면 끝난 공연도 넣는다. 정렬 기본은 q가 있으면 RELEVANCE, 없으면 OPEN_SOON이고, 모든 정렬의 마지막은 공연 ID다. 결과는 페이지 번호로 나눈다(주소 ?q=&page=로 공유·뒤로 가기, guidelines §3 예외). 한 쪽은 20개로 고정하고(limit는 20만), page × 20이 1,000 [가정]을 넘으면 400이다. 인기순은 랭킹 잡이 함께 내는 공연별 최근 7일 확정 판매 매수 [가정] 순위(비공개 값, POL-043)를 쓰고 순위가 없는 공연은 뒤에 오픈 임박 순으로 둔다. 개인화·유료 노출은 없다(POL-045). 캐시 키는 정규화한 q와 정해진 순서의 매개변수뿐이고 쿠키는 넣지 않는다(Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=600 [가정]). 판매 승인 취소·회차 전부 취소 때 CDN 경로 /v1/search*를 무효화한다
  * @summary 공연 검색(필터·정렬·페이지 번호, 결과 0건 제안, 관련 공연). 인증 없음, CDN 캐시
  */
-export const getV1SearchQueryQMax = 50;
+export const listSearchResultsQueryQMax = 50;
 
-export const getV1SearchQueryIncludePastDefault = false;
-export const getV1SearchQueryPageDefault = 1;
+export const listSearchResultsQueryIncludePastDefault = false;
+export const listSearchResultsQueryNoConvertDefault = false;
+export const listSearchResultsQueryPageDefault = 1;
 
-export const getV1SearchQueryLimitDefault = 20;
+export const listSearchResultsQueryLimitDefault = 20;
 
-export const GetV1SearchQueryParams = zod.object({
-  "q": zod.string().max(getV1SearchQueryQMax).optional(),
+export const ListSearchResultsQueryParams = zod.object({
+  "q": zod.string().max(listSearchResultsQueryQMax).optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional(),
   "placeId": zod.string().optional().describe('공연장(ADR-0093)'),
   "artistId": zod.string().optional().describe('아티스트(ADR-0093)'),
   "dateFrom": zod.iso.date().optional().describe('공연 기간이 이 범위와 겹치는 공연(KST 날짜)'),
   "dateTo": zod.iso.date().optional(),
   "status": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED']).optional().describe('예매 상태. ENDED면 끝난 공연만'),
-  "includePast": zod.boolean().default(getV1SearchQueryIncludePastDefault).describe('끝난 공연도 넣기'),
+  "includePast": zod.boolean().default(listSearchResultsQueryIncludePastDefault).describe('끝난 공연도 넣기'),
+  "noConvert": zod.boolean().default(listSearchResultsQueryNoConvertDefault).describe('한/영 변환을 하지 않는다. 바꿔 찾은 결과 위의 \'{입력}(으)로 찾기\'가 원래 값으로 찾을 때 쓴다(추천 적용 2026-11-05, HOT-312)'),
   "sort": zod.enum(['RELEVANCE', 'OPEN_SOON', 'POPULAR']).optional().describe('없으면 q가 있을 때 RELEVANCE, 없을 때 OPEN_SOON'),
-  "page": zod.int().min(1).default(getV1SearchQueryPageDefault),
-  "limit": zod.literal(20).default(getV1SearchQueryLimitDefault).describe('한 쪽 20개 [가정] 고정. 캐시 키가 갈리지 않게 다른 값은 받지 않는다')
+  "page": zod.int().min(1).default(listSearchResultsQueryPageDefault),
+  "limit": zod.literal(20).default(listSearchResultsQueryLimitDefault).describe('한 쪽 20개 [가정] 고정. 캐시 키가 갈리지 않게 다른 값은 받지 않는다')
 })
 
 
-export const getV1SearchResponseRelatedItemsMax = 6;
+export const listSearchResultsResponseRelatedItemsMax = 6;
 
 
 
-export const GetV1SearchResponse = zod.object({
+export const ListSearchResultsResponse = zod.object({
   "items": zod.array(zod.object({
   "productionId": zod.string().optional(),
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -210,6 +214,10 @@ export const GetV1SearchResponse = zod.object({
 }).optional().describe('검색어 해석'),
   "didYouMean": zod.string().nullish().describe('결과가 0건일 때 낱자 단위로 가장 가까운 이름 하나(없으면 null)'),
   "relaxedTotal": zod.int().nullish().describe('결과가 0건이고 필터가 걸려 있을 때 필터를 뺀 결과 수'),
+  "filterNames": zod.object({
+  "placeName": zod.string().nullish(),
+  "artistName": zod.string().nullish()
+}).optional().describe('주소로 받은 공연장·아티스트 필터의 화면 이름(필터 칩에 보인다. 홈 공연장 줄·자동완성 후보가 ID로만 연다, 추천 적용 2026-11-05, HOT-312). 없는 ID면 null'),
   "related": zod.object({
   "basis": zod.object({
   "kind": zod.enum(['ARTIST', 'PLACE', 'UPCOMING_POPULAR']).optional(),
@@ -221,7 +229,7 @@ export const GetV1SearchResponse = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),
@@ -232,7 +240,7 @@ export const GetV1SearchResponse = zod.object({
   "saleEndsAt": zod.iso.datetime({"offset":true}).optional().describe('이 공연의 마지막 회차의 판매 종료(그 회차의 starts_at − 24시간, 새 데이터 칸 없이 계산, 추천 적용 2026-10-14, ADR-0064). \'지금 판매 중\'의 남은 판매 기간 표시와 정렬에 쓴다(POL-043)'),
   "minPrice": zod.int().optional().describe('가장 낮은 등급의 티켓 가격(원). 예매 수수료를 받지 않으므로(POL-032) 이 값이 소비자가 내는 총금액이다(수수료 없음, 전자상거래법 §21의2①1호, 전자상거래 소비자보호 지침 12, 2026-10-14 원문 확인)'),
   "badges": zod.array(zod.enum(['PREQUEUE_SHUFFLE', 'HYBRID', 'FIFO', 'PRESALE', 'AUTO_SEAT'])).optional().describe('대표 회차의 피켓 판매 정보 배지 코드. 문구는 화면이 정한다. PREQUEUE_SHUFFLE·HYBRID·FIFO는 회차의 정렬 설정 두 값(lobbyShuffle·openBatch)의 조합에서 계산한 이름이다(ADR-0118)')
-}).describe('홈·검색·랭킹·찜이 함께 쓰는 공연 카드. 공연(회차 묶음) 하나에 카드 하나이고 공개 값만 싣는다(추천 적용 2026-10-27, ADR-0093. 회차 단위였던 EventCard를 바꿈). 누르면 대표 회차 상세(/events/{eventId})로 간다')).max(getV1SearchResponseRelatedItemsMax).optional().describe('6개 [가정]')
+}).describe('홈·검색·랭킹·찜이 함께 쓰는 공연 카드. 공연(회차 묶음) 하나에 카드 하나이고 공개 값만 싣는다(추천 적용 2026-10-27, ADR-0093. 회차 단위였던 EventCard를 바꿈). 누르면 대표 회차 상세(/events/{eventId})로 간다')).max(listSearchResultsResponseRelatedItemsMax).optional().describe('6개 [가정]')
 }).nullish().describe('관련 공연. 맨 위 결과가 아티스트·공연장으로 맞았으면 그 아티스트의 다른 공연이나 그 공연장의 오픈 예정 공연, 결과가 0건이면 오픈 예정 인기 공연. 검색 기록은 쓰지 않는다')
 }).describe('검색 결과 한 쪽(페이지 번호 방식, guidelines §3 예외, 소유자 결정 2026-10-14, ADR-0063). 한 줄은 공연이다(ADR-0093). 결과 0건 처리와 관련 공연은 docs/features/search.md §5.5·§6(추천 적용 2026-10-27, ADR-0094)')
 
@@ -240,19 +248,19 @@ export const GetV1SearchResponse = zod.object({
  * SCR-003 머리 검색창의 자동완성 창(소유자 결정 2026-10-14, ADR-0063. 이름은 소유자 결정 2026-10-27, ADR-0094). core-svc 파드마다 둔 메모리 사전(검색 읽기 모델의 판을 10초 [가정]마다 확인)에서 답하고 DB와 Redis를 부르지 않는다. 입력은 정규화(NFKC·소문자·제로폭 문자 지움·공백 정리)하고 이름의 낱자 앞부분(조합 중 글자), 초성, 낱말 앞부분, 중간 일치(두 음절 이상) 순으로 찾는다. 순서는 일치 등급 → 판매 상태 → 관심도 → 이름 → ID다(docs/features/search.md §4). 공연 후보는 기본 범위(판매 중·오픈 예정·매진)의 판매 승인된 공연만, 아티스트·공연장 후보는 그런 공연이 하나 이상 있을 때만 낸다. 후보는 카탈로그에서만 만들고 검색 기록으로 만들지 않는다(POL-045). 캐시 키는 정규화한 입력뿐이다(Cache-Control: public, max-age=60, stale-while-revalidate=60, stale-if-error=600 [가정]). 브라우저는 입력이 바뀌면 앞 요청을 취소하고, 받은 후보가 8개보다 적으면 더 긴 입력은 받은 후보 안에서 거른다. 최근 검색어는 서버로 보내지 않고 기기에만 둔다(추천 적용 2026-10-14, ADR-0063)
  * @summary 자동완성(공연·아티스트·공연장 후보, 최대 8개 [가정]). 인증 없음, CDN 캐시, 서버 메모리 사전
  */
-export const getV1SearchSuggestionsQueryQMax = 50;
+export const getSearchSuggestionsQueryQMax = 50;
 
 
 
-export const GetV1SearchSuggestionsQueryParams = zod.object({
-  "q": zod.string().min(1).max(getV1SearchSuggestionsQueryQMax).describe('정규화한 입력. 한글 음절이 하나라도 있으면 1자부터, 로마자·숫자·낱자만이면 2자부터 [가정]')
+export const GetSearchSuggestionsQueryParams = zod.object({
+  "q": zod.string().min(1).max(getSearchSuggestionsQueryQMax).describe('정규화한 입력. 한글 음절이 하나라도 있으면 1자부터, 로마자·숫자·낱자만이면 2자부터 [가정]')
 })
 
-export const getV1SearchSuggestionsResponseItemsMax = 8;
+export const getSearchSuggestionsResponseItemsMax = 8;
 
 
 
-export const GetV1SearchSuggestionsResponse = zod.object({
+export const GetSearchSuggestionsResponse = zod.object({
   "query": zod.string().optional().describe('정규화한 입력(NFKC 뒤 자모를 호환 자모로 되돌림, 소문자, 제로폭과 한글 채움 문자 지움, 공백 정리, docs/features/search.md §3.1)'),
   "items": zod.array(zod.object({
   "kind": zod.enum(['PRODUCTION', 'ARTIST', 'PLACE']).describe('공연·아티스트·공연장. 화면이 종류 아이콘과 종류 글자를 붙인다'),
@@ -268,22 +276,132 @@ export const GetV1SearchSuggestionsResponse = zod.object({
   "saleStatus": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT']).optional().describe('kind=PRODUCTION일 때'),
   "artistId": zod.string().optional().describe('kind=ARTIST일 때. 고르면 /search?artistId='),
   "placeId": zod.string().optional().describe('kind=PLACE일 때. 고르면 /search?placeId=')
-})).max(getV1SearchSuggestionsResponseItemsMax).optional()
+})).max(getSearchSuggestionsResponseItemsMax).optional()
 }).describe('자동완성 창의 응답(소유자 결정 2026-10-14, ADR-0063. 이름 \'자동완성\'은 소유자 결정 2026-10-27, ADR-0094). 최대 8개 [가정]이고 종류별 몫은 공연 5·아티스트 2·공연장 1 [가정], 빈 몫은 다른 종류로 채운다(docs/features/search.md §4)')
 
 /**
- * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답하고, 그 밖의 회차와 없는 회차는 같은 404다(docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보의 나머지 여섯 항목과 공연 상세의 다른 칸(가격 등급, 판매 정책, 고지, 이미지)은 공연 상세 계약과 함께 wbs 0.2.3에서 더한다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그(event:{eventId})로 무효화한다(docs/frontend.md의 /events/[id] 행)
- * @summary 회차 공개 요약(공연명·회차 시작·판매자 상호). 인증 없음, CDN 캐시
+ * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답한다. 승인 이력이 없는 회차와 없는 회차는 같은 404이고, 한 번 공개된 뒤 판매 중지된 회차는 410 event-suspended다(사유는 싣지 않는다. 상세 화면이 판매 중지 안내를 보인다, docs/planning/03 §2.14, ADR-0123 결정 1, ADR-0200 결정 3, docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보 7항목과 공연 상세의 다른 칸(공연 정보·이미지·회차 목록·등급별 정가·판매 조건 재료)은 같은 응답에 더했다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그로 무효화한다(docs/frontend.md의 /events/[id] 행). 그래서 200은 CDN 태그 머리 x-peaket-cache-tag에 event:{eventId}와 production:{productionId}(소문자 ID, 쉼표로 이음)를 싣는다 [가정](docs/infra.md §4.1). 응답에 같은 공연의 회차 목록·공연 칸·판매자 정보가 있어, 공연 단위 변경은 production 태그로 그 공연의 모든 회차를 지운다(ADR-0200 결정 5). 404는 Cache-Control: no-store [가정]이다(판매 승인 직후 캐시된 404가 공개를 늦추지 않게)
+ * @summary 회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시
  */
-export const GetV1EventsEventIdParams = zod.object({
-  "eventId": zod.string()
+export const GetEventParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
-export const GetV1EventsEventIdResponse = zod.object({
+export const getEventResponseDescriptionTextMax = 20000;
+
+export const getEventResponseDescriptionBlocksItemOneCItemOneVMax = 20000;
+
+export const getEventResponseDescriptionBlocksItemOneCMax = 5000;
+
+export const getEventResponseDescriptionBlocksItemTwoCItemOneVMax = 20000;
+
+export const getEventResponseDescriptionBlocksItemTwoCMax = 5000;
+
+export const getEventResponseDescriptionBlocksItemThreeItemsItemItemOneVMax = 20000;
+
+export const getEventResponseDescriptionBlocksItemThreeItemsItemMax = 5000;
+
+export const getEventResponseDescriptionBlocksItemThreeItemsMax = 5000;
+
+export const getEventResponseDescriptionBlocksMax = 200;
+
+export const getEventResponseDetailImagesMax = 10;
+
+export const getEventResponseArtistsMax = 20;
+
+export const getEventResponseRoundsMax = 60;
+
+export const getEventResponsePriceTiersMax = 20;
+
+
+
+export const GetEventResponse = zod.object({
   "eventId": zod.string().optional(),
   "productionId": zod.string().optional(),
   "title": zod.string().optional().describe('공연명'),
   "startsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
-  "sellerName": zod.string().optional().describe('판매자 상호(판매자 신원정보 SellerInfo.legalName과 같은 값, 전자상거래법 제20조 제2항, POL-037). 공연 상세의 판매자 줄에 보이는 값이다')
-}).describe('회차 공개 요약(GET /v1/events/{eventId}, 소유자 결정 2026-10-30, open-items 78번. 칸은 추천 적용 2026-10-30). 공연 상세의 나머지 칸은 공연 상세 계약과 함께 더한다')
+  "sellerName": zod.string().optional().describe('판매자 상호(판매자 신원정보 SellerInfo.legalName과 같은 값, 전자상거래법 제20조 제2항, POL-037). 공연 상세의 판매자 줄에 보이는 값이다'),
+  "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
+  "ageRating": zod.string().optional().describe('관람 연령(예: 만 7세 이상)'),
+  "runningMinutes": zod.int().optional().describe('러닝타임(분)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ProductionCard.posterUrl과 같은 규칙, ADR-0199 결정 4)'),
+  "posterAlt": zod.string().optional(),
+  "descriptionText": zod.string().max(getEventResponseDescriptionTextMax).optional().describe('공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식은 description이다. 이 칸은 글자로만 그린다(ADR-0200 결정 1)'),
+  "description": zod.object({
+  "v": zod.literal(1),
+  "blocks": zod.array(zod.union([zod.object({
+  "t": zod.enum(['p']),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(getEventResponseDescriptionBlocksItemOneCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(getEventResponseDescriptionBlocksItemOneCMax)
+}),zod.object({
+  "t": zod.enum(['h']),
+  "level": zod.union([zod.literal(2),zod.literal(3)]),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(getEventResponseDescriptionBlocksItemTwoCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(getEventResponseDescriptionBlocksItemTwoCMax)
+}),zod.object({
+  "t": zod.enum(['ul', 'ol']),
+  "items": zod.array(zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(getEventResponseDescriptionBlocksItemThreeItemsItemItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(getEventResponseDescriptionBlocksItemThreeItemsItemMax)).max(getEventResponseDescriptionBlocksItemThreeItemsMax)
+})])).max(getEventResponseDescriptionBlocksMax)
+}).optional().describe('공연 설명 구조 문서(CMP-070). HTML이 아니라 허용 노드 다섯(문단·줄바꿈·강조·목록·제목)만 담는다(asvs/catalog-review 1.3.1, ADR-0204). 합계 상한은 글자판(블록 사이 빈 줄 포함) 20,000자, 노드 5,000개 [가정]이고 넘으면 400이다(ADR-0244)'),
+  "detailImages": zod.array(zod.object({
+  "url": zod.url().describe('파생본 묶음의 기준 주소'),
+  "alt": zod.string()
+})).max(getEventResponseDetailImagesMax).optional().describe('상세 이미지 0~10장(ADR-0062 결정 38). 이미지에만 있는 정보는 설명 글에도 있다'),
+  "artists": zod.array(zod.object({
+  "artistId": zod.string().optional(),
+  "name": zod.string().optional()
+})).max(getEventResponseArtistsMax).optional(),
+  "placeId": zod.string().optional(),
+  "placeName": zod.string().optional(),
+  "placeAddress": zod.string().optional().describe('도로명 주소(장소 섹션의 [주소 복사])'),
+  "openAt": zod.iso.datetime({"offset":true}).optional().describe('티켓 오픈(T=0)'),
+  "lobbyOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('로비 개방(오픈 − 로비 분). 로비 셔플을 끈 회차(FIFO)는 null'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작'),
+  "endsAt": zod.iso.datetime({"offset":true}).optional().describe('공연 종료 예정'),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).optional().describe('판매 종료(공연 시작 − 24시간, ADR-0064)'),
+  "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional().describe('회차 상태(docs/data.md event.status). 판매 상태(판매 전·판매 중·판매 종료)는 이 값이 아니다'),
+  "queueOrder": zod.enum(['HYBRID', 'PREQUEUE_SHUFFLE', 'FIFO']).optional().describe('정렬 방식 이름(회차의 lobbyShuffle·openBatch 두 값에서 계산, ADR-0118). 화면은 POL-004 표준 문구를 고른다'),
+  "seatAssignment": zod.enum(['PICK', 'AUTO']).optional(),
+  "perPersonLimit": zod.int().optional().describe('1인 한도(POL-011)'),
+  "reentryAllowed": zod.boolean().optional().describe('재입장 허용(POL-018)'),
+  "badges": zod.array(zod.enum(['PREQUEUE_SHUFFLE', 'HYBRID', 'FIFO', 'PRESALE', 'AUTO_SEAT'])).optional().describe('판매 정보 배지 코드(ProductionCard.badges와 같다)'),
+  "rounds": zod.array(zod.object({
+  "eventId": zod.string().optional(),
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "openAt": zod.iso.datetime({"offset":true}).optional(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).optional(),
+  "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional().describe('회차 상태(docs/data.md event.status). 판매 상태(판매 전·판매 중·판매 종료)는 이 값이 아니다')
+})).max(getEventResponseRoundsMax).optional().describe('같은 공연의 공개 회차(시작 순, 이 회차 포함). 취소된 회차와 판매 종료가 지난 회차는 빼고(이 회차는 늘 넣는다) 60개 [가정]까지다. 승인 뒤 더한 회차(변경분, ADR-0198 결정 3)는 재승인 전까지 없다. 회차 칩(CMP-066)이 회차마다 주소를 바꾸고 오픈 예정·판매 중·판매 종료를 가른다(ADR-0093)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().optional().describe('등급 ID(좌석맵 판의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().optional().describe('등급 이름(예: R석)'),
+  "price": zod.int().optional().describe('정가(원). 예매 수수료가 없어 소비자가 내는 총금액이다(POL-032)')
+})).max(getEventResponsePriceTiersMax).optional().describe('등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2)'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 신원정보(전자상거래법 §20②, POL-037)')
+}).describe('회차 공개 요약과 공연 상세(GET /v1/events/{eventId}). 처음 다섯 칸은 소유자 결정 2026-10-30(open-items 78번, 칸은 추천 적용 2026-10-30)이고, 스캐너 승인 화면(SCR-051)은 그 가운데 title·startsAt·sellerName을 읽는다. 나머지는 공연 상세(SCR-002) 정적 셸이 읽는 칸이다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다(실시간 값은 대기 상태 파일, 후기는 review-summary, 개인 값은 화면 스크립트)')
 

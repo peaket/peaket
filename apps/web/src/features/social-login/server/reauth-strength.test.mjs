@@ -1,4 +1,4 @@
-// 재인증 강도 판정(docs/features/identity.md §7.1 표와 '재인증 흐름과 토큰' ②, I-T54, ASVS v5.0.0-6.8.4).
+// 재인증 강도 판정(docs/features/identity.md §7.1 표와 '재인증 흐름과 토큰' ②, I-T54, [ASVS v5.0.0-6.8.4]).
 // `pnpm --filter @peaket/web test`가 타입 지우기로 .ts를 그대로 읽는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,0 +1,8 @@
+{
+  "_provenance": "토스페이먼츠 공식 문서(에러 코드, 인증 및 기타 헤더 설정, 2026-11-09 확인)의 모양으로 손으로 쓴 응답이다. 실제 호출 기록이 아니다. 응답 칸 일부만 적었다(대조 함수가 보는 칸 위주다). 스모크 스크립트의 대조 함수 시험에만 쓴다.",
+  "notFound": { "status": 404, "body": { "code": "NOT_FOUND_PAYMENT", "message": "존재하지 않는 결제 정보 입니다." } },
+  "testCodeRejected": { "status": 400, "body": { "code": "INVALID_REJECT_CARD", "message": "카드 사용이 거절되었습니다. 카드사 문의가 필요합니다." } },
+  "wrongCode": { "status": 400, "body": { "code": "SOMETHING_ELSE", "message": "다른 코드" } },
+  "noMessage": { "status": 404, "body": { "code": "NOT_FOUND_PAYMENT" } },
+  "serverError": { "status": 500, "body": { "code": "FAILED_INTERNAL_SYSTEM_PROCESSING", "message": "내부 오류" } }
+}

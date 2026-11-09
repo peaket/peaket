@@ -1,0 +1,38 @@
+{
+  "name": "@peaket/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "화면이 API를 부르는 한 곳: 계약에서 만든 작업 서술 표·orval 호출 함수·TanStack Query 훅·MSW 처리기(src/gen/)와 그 위의 호스트·자격 증명·본문·멱등키·If-Match·시간 초과·자동 재시도·오류 모양 정책(docs/frontend.md §2.2·§4.1, BUILD_ORDER BAS-041)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./endpoints/*": "./src/gen/endpoints/*/*.ts",
+    "./mocks": "./src/mocks.ts",
+    "./model": "./src/gen/model/index.ts",
+    "./purchase": "./src/purchase/index.ts"
+  },
+  "scripts": {
+    "gen": "node scripts/generate.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@faker-js/faker": "10.6.0",
+    "@peaket/validation": "workspace:*",
+    "msw": "2.15.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@tanstack/react-query": "5.105.0",
+    "@types/node": "^24.0.0",
+    "orval": "8.45.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.105.0",
+    "react": "^19.3.0"
+  }
+}

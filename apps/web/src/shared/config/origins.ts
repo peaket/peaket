@@ -13,9 +13,24 @@ export const ORIGINS = {
   partner: process.env.NEXT_PUBLIC_PARTNER_ORIGIN || (DEV ? dev(3001) : 'https://partner.peaket.example'),
   console: process.env.NEXT_PUBLIC_CONSOLE_ORIGIN || (DEV ? dev(3002) : 'https://console.peaket.example'),
   scanner: process.env.NEXT_PUBLIC_SCANNER_ORIGIN || (DEV ? dev(3003) : 'https://scanner.peaket.example'),
-  queueRoom: DEV ? dev(3004) : '',
+  // 대기실은 운영처럼 같은 출처의 상대 경로다. 개발 서버는 next.config.ts가 대기실 개발 서버로 넘긴다(ADR-0211 결정 5)
+  queueRoom: '',
   forensics: process.env.NEXT_PUBLIC_FORENSICS_ORIGIN || (DEV ? dev(3005) : 'https://console.peaket.example/forensics'),
+  /**
+   * 팬 API(gw-fan) 출처(docs/frontend.md §2.1 `api`). 개발 서버에서 값이 없으면 비워 두고, 그때 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
+   * 로컬에서 실제 흐름을 돌릴 때는 게이트웨이 대역(scripts/local-fan-gateway.mjs) 주소를 넣는다(docs/features/identity.md §5)
+   */
+  api: process.env.NEXT_PUBLIC_API_ORIGIN || (DEV ? '' : 'https://api.peaket.example'),
+  /** 대기열 API·파일 출처(docs/frontend.md §2.1 `queue`·`queue-files`). api-client 클라이언트가 함께 담는다(ADR-0199) */
+  queue: process.env.NEXT_PUBLIC_QUEUE_ORIGIN || (DEV ? '' : 'https://queue.peaket.example'),
+  queueFiles: process.env.NEXT_PUBLIC_QUEUE_FILES_ORIGIN || (DEV ? '' : 'https://queue-files.peaket.example'),
 } as const;
+
+/**
+ * 소비자 웹의 공개 출처(docs/frontend.md §1 `www.peaket.example`). 정규 주소·구조화 데이터의 절대 주소에 쓴다(서버에서 읽는다).
+ * 환경마다 다르면 PEAKET_SITE_ORIGIN으로 넣는다
+ */
+export const SITE_ORIGIN = (process.env.PEAKET_SITE_ORIGIN || 'https://www.peaket.example').replace(/\/+$/, '');
 
 /** 대기실(로비·대기열, SCR-007·008·018) 주소. 대기실 경량 페이지는 별도 빌드(apps/web/queue-room)이고 운영에서는 같은 출처의 `/queue/{id}`다 */
 export function queueRoomHref(eventId: string): string {

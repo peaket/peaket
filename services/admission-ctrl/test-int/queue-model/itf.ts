@@ -43,6 +43,21 @@ interface SpecEv {
   removed: number[];
   node: number;
   pend: boolean;
+  arr: ArrState;
+}
+export interface ArrSlotState {
+  base: number;
+  size: number;
+  used: number;
+}
+/** 도착 시각 칸(명세 Arr, queue_arrival 범위만. 그 밖의 범위는 비어 있다) */
+export interface ArrState {
+  next: number;
+  first: number;
+  closedUpto: number;
+  lostUpto: number;
+  gen: number;
+  slots: Array<[number, ArrSlotState]>;
 }
 interface SpecSlot {
   kind: string;
@@ -102,6 +117,9 @@ export function scopeOf(spec: string, module: string): Scope {
     personFailovers: v('PERSON_FAILOVERS') === 'true',
     maxLeaderChanges: Number(v('MAX_LEADER_CHANGES')),
     epochJumps: ints(v('EPOCH_JUMPS')),
+    arrSlots: ints(v('ARR_SLOTS')),
+    arrSize: Number(v('ARR_SIZE')),
+    skipBase: Number(v('SKIP_BASE')),
   };
 }
 
@@ -119,6 +137,8 @@ async function apply(s: QueueSystem, a: SpecAction, picks: Record<string, unknow
       return step(() => s.pendingExpires(p));
     case 'enterNumber':
       return step(() => s.enterNumber(k));
+    case 'enterNumberArrival':
+      return step(() => s.enterNumberArrival(picks.k2 as K, picks.s as number));
     case 'enterRecord':
       return step(() => s.enterRecord(k));
     case 'enterBatchRecord':
@@ -156,8 +176,8 @@ async function apply(s: QueueSystem, a: SpecAction, picks: Record<string, unknow
       s.acquire(c);
       break;
     case 'plan':
-      // ADVANCE·CLOSE는 nondet이 아니라 step의 인자라 다음 상태의 ctl에서 읽는다
-      s.plan(c, post.ctl.c.find(([x]) => x === c)![1].op as 'ADVANCE' | 'CLOSE');
+      // ADVANCE·CLOSE·ARRCLOSE는 nondet이 아니라 step의 인자라 다음 상태의 ctl에서 읽는다
+      s.plan(c, post.ctl.c.find(([x]) => x === c)![1].op as 'ADVANCE' | 'CLOSE' | 'ARRCLOSE');
       break;
     case 'replicateEv':
       s.replicateEv();
@@ -209,6 +229,7 @@ export async function replay(s: QueueSystem, states: SpecState[]): Promise<Repla
     if (JSON.stringify(o.removed) !== JSON.stringify(post.ev.removed)) diffs.push(`빠진 번호 ${JSON.stringify(o.removed)} ≠ 명세 ${JSON.stringify(post.ev.removed)}`);
     if (o.markerMine !== (post.ev.node === post.env.primary)) diffs.push(`세대 키가 지금 노드인가 ${o.markerMine} ≠ 명세 ${post.ev.node === post.env.primary}`);
     if (o.pend !== post.ev.pend) diffs.push(`RB-05 확인 전 ${o.pend} ≠ 명세 ${post.ev.pend}`);
+    if (!isDeepStrictEqual(o.arr, post.ev.arr)) diffs.push(`도착 시각 칸 ${JSON.stringify(o.arr)} ≠ 명세 ${JSON.stringify(post.ev.arr)}`);
     for (const [p, want] of post.pss) {
       const got = await s.personKinds(p);
       if (got.dup !== want.dup.kind || got.adm !== want.adm.kind) diffs.push(`사람 ${p} q:dup·q:adm ${got.dup}·${got.adm} ≠ 명세 ${want.dup.kind}·${want.adm.kind}`);

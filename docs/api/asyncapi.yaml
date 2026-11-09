@@ -84,6 +84,18 @@ channels:
     description: "계정 병합 이벤트(identity 발행, 키 = mergedAccountId). 각 서비스는 지금의 소유·상태 값(찜·오픈 알림 구독·배송지)만 account_id를 대표 계정으로 바꾼다(mergeId로 멱등). 사건·원장·법정 보존 기록(주문·결제·정산·스캔·접속기록)은 account_id를 고치지 않고, 자기 DB의 대응표 merged_account(흡수 계정 → 대표 계정)를 이 이벤트로 채운다(docs/data.md §4의 9번, 추천 적용 2026-10-28, 기술 검토 중간-054, POL-034, ADR-0038)"
     messages:
       AccountMerged: { $ref: '#/components/messages/AccountMerged' }
+  identity.accounts-withdrawn:
+    address: identity.accounts-withdrawn
+    servers: [{ $ref: '#/servers/kafka-trade' }]
+    description: "탈퇴 사건(identity 발행, 키 = accountId). 계정을 탈퇴 처리하는 트랜잭션(docs/features/identity.md §8 '탈퇴의 첫 구현'의 첫 트랜잭션)이 계정을 잠근 뒤 읽은 본인확인 기록의 pid(pid 키 전환 기간이면 옛 pid도)를 실어, 세션 종료 사건 뒤 identity DB Outbox에 적는다. 본인확인을 하지 않은 계정은 pid가 없어 내지 않는다. 본인확인 기록을 지우는 둘째 트랜잭션이 실패해도 사건은 탈퇴 시각에 나간다. queue-svc가 서비스 소비자 그룹 하나로 받아, 진행 중인 회차(`q:{admission}:events`)마다 그 pid의 1인 1순번 키 `q:dup:{pid}:E`·`q:adm:{pid}:E`의 만료를 purgeBy(탈퇴 + 5일)로 당긴다(`PEXPIREAT … LT`라 이미 더 이른 키는 그대로, 다시 받아도 같다. docs/data.md §3, 표준 개인정보 보호지침 §10①). 값에 pid가 있어 보존을 짧게 둔다: retention.ms 3일·segment.ms 1일 [가정](한 레코드가 늦어도 약 4일 안에 지워진다). 소비가 3일 넘게 멈추면 그 사이 사건을 잃고 그 키는 판매 종료 TTL로만 지워진다(남는 한계. 소비 지연 경보가 막는다). 추천 적용 2026-11-04, BUILD_ORDER BOT-037"
+    messages:
+      AccountWithdrawn: { $ref: '#/components/messages/AccountWithdrawn' }
+  identity.login-methods-changed:
+    address: identity.login-methods-changed
+    servers: [{ $ref: '#/servers/kafka-trade' }]
+    description: "로그인 수단 연결·해제 사건(identity 발행, 키 = accountId). 계정 설정의 추가·해제와 가입 때 연결 제안의 연결이 같은 트랜잭션의 마지막 쓰기로 identity DB Outbox에 적는다. core-svc notify가 받아 그 계정의 알림 채널로 한 번 보낸다(I-T34, docs/features/notify.md §2.1 E2). 병합은 identity.accounts-merged다. 추천 적용 2026-11-04, BUILD_ORDER BOT-041, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'"
+    messages:
+      LoginMethodChanged: { $ref: '#/components/messages/LoginMethodChanged' }
   support.cases-requested:
     address: support.cases-requested
     servers: [{ $ref: '#/servers/kafka-trade' }]
@@ -189,6 +201,10 @@ operations:
   consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "모든 서비스의 모든 파드(공용 서버 패키지 packages/platform의 종료 세션 목록. 파드마다 따로 읽고, 뜰 때 지금 − 15분부터 다시 읽는다, ADR-0103)" }
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
   consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(지금의 소유·상태 값만 대표 계정으로 바꾸고 사건·원장·법정 보존 기록은 고치지 않고 merged_account 대응표를 채움, mergeId로 멱등, docs/data.md §4의 9번, POL-034)" }
+  publishAccountWithdrawn: { action: send, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "identity-svc Outbox(계정을 탈퇴 처리하는 트랜잭션, 세션 종료 사건 뒤) → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
+  consumeAccountWithdrawn: { action: receive, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "queue-svc(서비스 소비자 그룹 하나. 진행 중인 회차의 q:dup·q:adm 만료를 purgeBy로 당긴다, docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키')" }
+  publishLoginMethodChanged: { action: send, channel: { $ref: '#/channels/identity.login-methods-changed' }, summary: "identity-svc Outbox(로그인 수단을 잇거나 지운 트랜잭션) → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
+  consumeLoginMethodChanged: { action: receive, channel: { $ref: '#/channels/identity.login-methods-changed' }, summary: "core-svc notify(그 계정의 알림 채널로 연결·해제 안내 한 번, I-T34)" }
   publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의, 소명 APPEAL. 소명은 추천 적용 2026-10-30)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
   consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
   streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker(델타 묶음, 하트비트, 묶음 간격 변경)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }, { $ref: '#/channels/ws.seat-delta/messages/Heartbeat' }, { $ref: '#/channels/ws.seat-delta/messages/BatchInterval' }] }
@@ -242,16 +258,17 @@ components:
           type: { type: string, enum: [AWAITING_DEPOSIT, APPROVED, DEPOSIT_REVERSED, FAILED, UNKNOWN, RESOLVED, PARTIAL_CANCELED, CANCELED], description: "AWAITING_DEPOSIT은 가상계좌 발급, APPROVED는 가상계좌면 입금 확인, DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌림(조회로 확인, payment §6, 추천 적용 2026-10-14, ADR-0062). RESOLVED는 UNKNOWN 해소 기록이고 해소 결과는 result에 싣는다. 결과가 승인이면 APPROVED, 가상계좌 발급이면 AWAITING_DEPOSIT, 미승인이면 FAILED 사건을 따로 낸다(추천 적용 2026-10-20, ADR-0073)" }
           amount: { type: integer, description: "결제 금액(원, payment.amount, ADR-0052). 취소·부분 취소 사건도 결제 금액이고, 취소한 금액은 이 칸이 아니다(ADR-0150)" }
           payMethodCategory: { type: string, enum: [CARD, EASY_PAY, TRANSFER, OTHER] }
-          paymentMethodRef: { type: string, description: "결제 수단 연결값(조사용 가명). 결제사 승인 응답의 카드 정보(토스 card, 포트원 method.card)에 BIN(카드 번호 앞 6자리)이 있을 때만 cardBin과 함께 싣는다. 두 결제사 모두 카드 지문을 주지 않아(2026-10-31 공식 문서 확인), payment-svc가 invRef(pay, BIN 6자리 + '|' + 가린 번호의 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류)(키 판 접두어 포함, 계산하지 못하면 cardBin과 함께 비우고 refMissing이 true)로 만든 약한 값이다. 발급사 코드·종류·끝자리가 빠지면 빈 글자로 두고 계산한다. 서로 다른 카드가 같은 값일 수 있어 혼자서는 묶음 근거가 아니다. 카드 번호 원문은 받지 않는다. 분석 적재는 버린다(docs/features/payment.md, ADR-0171 결정 4, 추천 적용 2026-10-31)" }
+          paymentMethodRef: { type: string, description: "결제 수단 연결값(조사용 가명). 결제사 승인 응답의 카드 정보(토스 card, 포트원 method.card, 간편결제가 카드면 method.easyPayMethod.card)에 BIN(카드 번호 앞 6자리)이 있을 때만 cardBin과 함께 싣는다. 두 결제사 모두 카드 지문을 주지 않아(2026-10-31 공식 문서 확인), payment-svc가 invRef(pay, BIN 6자리 + '|' + 가린 번호의 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류)(키 판 접두어 포함, 계산하지 못하면 cardBin과 함께 비우고 refMissing이 true)로 만든 약한 값이다. 발급사 코드·종류·끝자리가 빠지면 빈 글자로 두고 계산한다. 서로 다른 카드가 같은 값일 수 있어 혼자서는 묶음 근거가 아니다. 카드 번호 원문은 받지 않는다. 분석 적재는 버린다(docs/features/payment.md, ADR-0171 결정 4, 추천 적용 2026-10-31)" }
           cardBin: { type: string, description: "카드 BIN(카드 번호 앞 6자리, 발급사·카드 종류를 가리는 번호). paymentMethodRef와 늘 함께 있거나 함께 빈다. 토스는 가린 번호의 앞 6자리, 포트원은 card.bin의 앞 6자리다. 가상카드 여부는 두 결제사 모두 주지 않아 칸을 두지 않는다(ADR-0171 '되돌릴 조건'). 분석 적재는 버린다(추천 적용 2026-10-31)" }
-          refMissing: { type: boolean, default: false, description: "조사용 가명 칸을 계산하지 못해 비웠으면 true(라벨 키를 KMS에서 받지 못함·한도 초과). 업무 처리는 막지 않았고 조사 적재가 나중에 채우지 않는다(docs/security/secrets-and-keys.md inv-ref-key, 추천 적용 2026-10-31, ADR-0171)" }
+          refMissing: { type: boolean, default: false, description: "조사용 가명 칸을 계산하지 못해 비웠으면 true(라벨 키가 없음·KMS에서 받지 못함·한도 초과, 또는 결제사 응답의 카드 정보 모양이 틀림). 업무 처리는 막지 않았고 조사 적재가 나중에 채우지 않는다(docs/security/secrets-and-keys.md inv-ref-key, 추천 적용 2026-10-31, ADR-0171. 카드 정보 모양은 추천 적용 2026-11-09, BUILD_ORDER HOT-145, 코드 리뷰)" }
           result: { type: string, enum: [APPROVED, ALREADY_APPROVED, IN_PROGRESS, DECLINED, WAITING_FOR_DEPOSIT, UNKNOWN], description: "payment §2.1 정규화 결과. WAITING_FOR_DEPOSIT은 가상계좌 발급(RESOLVED의 결과로도 온다, ADR-0073)" }
-          failureCategory: { x-present-when: [{ type: [FAILED] }], type: string, enum: [CARD_DECLINED, USER_ABORTED, VALIDATION, EXPIRED, PG_ERROR, THROTTLED], description: "실패일 때만. 결제 어댑터가 정한다(payment §2.1)" }
+          failureCategory: { x-present-when: [{ type: [FAILED] }], type: string, enum: [CARD_DECLINED, USER_ABORTED, VALIDATION, EXPIRED, PG_ERROR, THROTTLED, DEPOSIT_CANCELED], description: "실패일 때만. 결제 어댑터가 정한다(payment §2.1). DEPOSIT_CANCELED는 입금 대기 결제의 입금 전 취소다(추천 적용 2026-11-09, BUILD_ORDER HOT-152)" }
           attemptNo: { type: integer, description: 같은 주문의 결제 시도 순번 }
           latencyMs: { type: integer, description: 결제사 승인 응답 시간 }
           occurredAt: { type: string, format: date-time }
           eventSeq: { type: integer, format: int64, description: "결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기로 받은 결과와 같은 사건인지 가린다(ADR-0140)" }
           eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          depositDueAt: { x-present-when: [{ type: [AWAITING_DEPOSIT, DEPOSIT_REVERSED] }], type: string, format: date-time, description: "입금 대기 사건(AWAITING_DEPOSIT)과 입금 오류 되돌림 사건(DEPOSIT_REVERSED, 새 입금 기한)에만 싣는 입금 기한. 결제사가 답에 주지 않은 입금 대기는 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151·HOT-152)" }
     SeatEvent:
       payload:
         type: object
@@ -269,13 +286,15 @@ components:
           holdKind: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: string, enum: [FAN, PRIORITY], description: "홀드 종류. FAN은 구매 세션의 홀드, PRIORITY는 우선 구매 보류(이의가 인정된 부정 예매 표 취소의 되돌림으로 그 팬 몫으로 48시간 [가정] 잡아 둔 좌석, 구매 세션 없음, docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171). 분석 적재는 버린다" }
           purchaseSessionId: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED], holdKind: [FAN] }], type: string, description: "구매 세션 ID. holdId와 같은 규칙이다(ADR-0150). 우선 구매 보류(holdKind PRIORITY)에는 구매 세션이 없어 비고 priorityGrantId를 싣는다(2026-10-31)" }
           priorityGrantId: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED], holdKind: [PRIORITY] }], type: string, description: "우선 구매 권리 ID(purchase DB priority_grant.id). 홀드 원장 적재가 seat_hold.priority_grant_id에 적는다. 분석 적재는 버린다(추천 적용 2026-10-31, ADR-0171)" }
+          accountId: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: string, description: "홀드한 계정 ID. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.account_id에 쓴다. 분석 적재는 가명 처리한다(trade.orders·trade.tickets와 같다, 추천 적용 2026-11-04, BUILD_ORDER PRF-141)" }
+          expiresAt: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: string, format: date-time, description: "홀드 만료 시각. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.expires_at에 쓴다(추천 적용 2026-11-04, BUILD_ORDER PRF-141)" }
           occurredAt: { type: string, format: date-time }
-          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 홀드 사건은 UUID 버전 8(SHA-256('SeatEvent:' + type + ':' + eventId + ':' + holdId + ':' + seatId + ':' + fencingToken)의 앞 16바이트, docs/features/seat-hold.md §6 '홀드 원장 적재의 첫 구현')" }
     EventSaleChanged:
       payload:
         type: object
-        description: "회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다"
-        required: [eventId, status, available, held, paying, version, changedAt, eventKey]
+        description: "회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다. 다시 내기(추천 적용 2026-11-06, ADR-0219 결정 5): ON_SALE·ALL_HELD·SOLD_OUT 회차는 같은 판(version·eventKey 그대로)을 5초 [가정]마다 그때의 셈(available·held·paying·countedAt·avgTicketsPerOrder)으로 다시 낸다. 받는 쪽은 판 번호로 거르고, queue-svc는 같은 판의 더 늦은 셈으로 대기 상태 파일의 남은 좌석 수를 고치고 엣지 매진 표시를 다시 맞춘다"
+        required: [eventId, status, available, held, paying, soldOutTiers, version, changedAt, eventKey]
         properties:
           eventId: { type: string }
           status: { type: string, enum: [UPCOMING, ON_SALE, ALL_HELD, SOLD_OUT, ENDED], description: "바뀐 뒤 상태. ALL_HELD는 일시 매진(가용 0, 홀드나 결제 중 남음, 대기는 이어지고 입장만 멈춤)" }
@@ -283,9 +302,12 @@ components:
           available: { type: integer, description: "판정 때 가용 좌석(비트맵에서 비어 있는 판매 대상 좌석)" }
           held: { type: integer, description: "판정 때 홀드 수" }
           paying: { type: integer, description: "판정 때 결제 중인 판매 예약(승인 결과를 기다리는 PENDING) 수" }
-          version: { type: integer, description: "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다" }
+          soldOutTiers: { type: array, items: { type: string }, description: "판정 때 매진인 등급 ID(좌석맵 판의 tierId) 전체. 없으면 빈 배열. 등급의 가용·홀드·결제 중이 모두 0이면 그 등급은 매진이다. 등급 매진은 회차 판매 상태가 아니라 덧씌우는 표시라, status가 그대로여도 이 목록이 바뀌면 판 번호를 올려 다시 낸다. queue-svc가 대기 상태 파일의 soldOutTiers·TIER_SOLD_OUT으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)" }
+          version: { type: integer, description: "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다. 매진 등급만 바뀌어도 오른다" }
           changedAt: { type: string, format: date-time }
           eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          countedAt: { type: string, format: date-time, description: "available·held·paying·avgTicketsPerOrder를 센 시각. 셈을 실은 사건(판이 바뀔 때와 같은 판의 다시 내기)에만 싣는다. queue-svc는 이 칸이 없거나 자기 시계보다 5초 [가정] 넘게 앞서면 셈을 대기 상태 파일에 쓰지 않는다. 이 칸이나 avgTicketsPerOrder의 모양만 틀리면 셈 칸만 버리고 판매 상태는 받는다(추천 적용 2026-11-06, ADR-0219 결정 5)" }
+          avgTicketsPerOrder: { type: number, description: "그 회차의 이번 판매에서 결제가 끝난 주문의 평균 좌석 수(좌석 수 ÷ 주문 수, 소수 둘째 자리). 그런 주문이 100건 [가정] 이상일 때만 싣는다. queue-svc는 없거나 1~10 밖이면 기본값 2 [가정]를 쓴다(POL-015, 추천 적용 2026-11-06, ADR-0219 결정 6)" }
     PurchaseSessionStarted:
       payload:
         type: object
@@ -378,7 +400,7 @@ components:
         properties:
           accountId: { type: string }
           sessionId: { type: string, description: "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다" }
-          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED, ROLE_CHANGED, PASSWORD_CHANGED], description: "LOGOUT은 로그아웃이다. DELETE는 계정이 없어져 끝낸 것이다: 팬의 회원 탈퇴(DELETE /v1/identity/account)와 관리 계정 삭제(POST /v1/ops/admin-accounts/{adminAccountId}/removal, 상태 REMOVED)를 함께 뜻한다(docs/features/identity.md §3 '세션 즉시 무효화 전파'의 회원 탈퇴, 관리 계정 삭제는 2026-10-30 추천 적용). REFRESH_REUSE는 리프레시 토큰 재사용 감지다. DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 지금 내지 않는 예약 값이다. 관리 계정 잠금(시간 잠금·보호 잠금)은 새 로그인만 막고 이미 열린 세션을 끝내지 않는다(docs/security/auth-controls.md §3.2, 2026-10-30 맞춤). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)와, 재초대(PROTECT_LOCK·CREDENTIAL_LOST)로 인증 수단을 지우며 끝낸 세션이다(재초대는 추천 적용 2026-10-30, docs/security/authz-matrix.md §5.4). ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)" }
+          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED, ROLE_CHANGED, PASSWORD_CHANGED, LOGIN_METHOD_CHANGED], description: "LOGOUT은 로그아웃이다. 팬이 계정 설정의 로그인한 기기에서 다른 기기를 끈 원격 로그아웃(DELETE /v1/identity/sessions/{sessionId})도 LOGOUT이다(추천 적용 2026-11-05, ADR-0209). DELETE는 계정이 없어져 끝낸 것이다: 팬의 회원 탈퇴(DELETE /v1/identity/account)와 관리 계정 삭제(POST /v1/ops/admin-accounts/{adminAccountId}/removal, 상태 REMOVED)를 함께 뜻한다(docs/features/identity.md §3 '세션 즉시 무효화 전파'의 회원 탈퇴, 관리 계정 삭제는 2026-10-30 추천 적용). REFRESH_REUSE는 리프레시 토큰 재사용 감지다. DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 지금 내지 않는 예약 값이다. 관리 계정 잠금(시간 잠금·보호 잠금)은 새 로그인만 막고 이미 열린 세션을 끝내지 않는다(docs/security/auth-controls.md §3.2, 2026-10-30 맞춤). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)와, 재초대(PROTECT_LOCK·CREDENTIAL_LOST)로 인증 수단을 지우며 끝낸 세션이다(재초대는 추천 적용 2026-10-30, docs/security/authz-matrix.md §5.4). ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30). LOGIN_METHOD_CHANGED는 팬 계정의 로그인 수단이 바뀌어(설정의 추가·해제, 계정 병합 확정의 대표 계정, 가입 때 연결 제안의 연결) 그 일을 한 세션 말고 그 계정의 세션을 끝낸 것이다(ASVS 7.4.3, docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', 추천 적용 2026-11-05, ADR-0209)" }
           terminatedAt: { type: string, format: date-time }
     AccountMerged:
       payload:
@@ -389,6 +411,26 @@ components:
           primaryAccountId: { type: string }
           mergedAccountId: { type: string }
           confirmedAt: { type: string, format: date-time }
+    AccountWithdrawn:
+      payload:
+        type: object
+        required: [eventKey, accountId, pids, withdrawnAt, purgeBy]
+        properties:
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          accountId: { type: string, format: uuid, description: "탈퇴한 계정" }
+          pids: { type: array, minItems: 1, maxItems: 2, items: { type: string }, description: "그 계정의 pid(액세스 토큰의 pid와 같은 base64url 글자). 1~2개이고 지금 pid가 먼저, pid 키 전환 기간이면 옛 pid가 뒤다(docs/features/identity.md §5 'pid 키 전환의 첫 구현')" }
+          withdrawnAt: { type: string, format: date-time, description: "계정을 탈퇴 처리한 시각(account.deleted_at)" }
+          purgeBy: { type: string, format: date-time, description: "이 시각까지 사람 단위 대기열 키를 남기고 이 시각에 지운다. withdrawnAt + 5일(그 순간 만료되어 읽히지 않으므로 '5일 안에는 같은 회차에 다시 줄 서지 못한다'와 '5일 안에 지운다'를 함께 지킨다, docs/features/identity.md §8 '탈퇴 계정의 대기열 키 지우기'). 받는 쪽은 withdrawnAt ~ withdrawnAt + 5일 밖이면 보류한다" }
+    LoginMethodChanged:
+      payload:
+        type: object
+        required: [eventKey, accountId, change, provider, occurredAt]
+        properties:
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          accountId: { type: string, format: uuid }
+          change: { type: string, enum: [LINKED, UNLINKED], description: "LINKED는 로그인 수단을 이었다(계정 설정의 추가, 가입 때 연결 제안의 연결). UNLINKED는 해제했다" }
+          provider: { type: string, enum: [kakao, naver, google] }
+          occurredAt: { type: string, format: date-time }
     CaseRequested:
       payload:
         type: object
@@ -564,7 +606,7 @@ components:
       payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 2, u64 serverTimeMs, u64 echoClientTimeMs. 서버가 15초 [가정]마다 보내고, TimeSync를 받으면 바로 보내며 받은 clientTimeMs를 echoClientTimeMs에 싣는다(그 밖에는 0, ADR-0110). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
     BatchInterval:
       contentType: application/octet-stream
-      payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 3, u16 intervalMs(100 또는 Degraded 1000). 묶음 간격이 바뀔 때만 보낸다. 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
+      payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 3, u16 intervalMs(100 또는 Degraded 1000). 연결 직후 한 번과 묶음 간격이 바뀔 때 보낸다(ADR-0240). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
     TimeSync:
       contentType: application/octet-stream
       payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 18, u64 clientTimeMs(보낼 때의 단조 시계 값). 클라이언트가 연결 직후와 60초 [가정]마다 보내고, 서버는 바로 하트비트(type 2)의 echoClientTimeMs로 돌려준다. 클라이언트는 왕복으로 서버 시각 차를 잰다(추천 적용 2026-10-28, ADR-0110). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4' }

@@ -83,6 +83,19 @@ export const CurrentPurchaseSession = createParamDecorator((_data: unknown, ctx:
 
 export type PurchaseRejection = 'missing' | 'malformed' | 'no_session' | 'mismatch' | 'replay';
 
+/**
+ * 거절 이유별 401 Problem(openapi x-peaket-problem-types, BUILD_ORDER BAS-040). 화면은 type으로 다음 동작을 고른다(docs/frontend.md §4.1 '401'):
+ * 머리 없음·형식·서명 불일치는 구매 세션 키로 서명을 맞출 수 없다는 뜻이고, 세션 없음은 예매 시간이 끝났다는 뜻이며, 번호 재사용은
+ * 다른 탭과 일련번호가 엇갈렸다는 뜻이다. 어느 머리·칸이 틀렸는지는 싣지 않는다(서명 오라클을 만들지 않는다)
+ */
+export const PURCHASE_REJECTION_PROBLEMS: Readonly<Record<PurchaseRejection, { type: string; status: 401; title: string }>> = Object.freeze({
+  missing: { type: 'purchase-signature-invalid', status: 401, title: '요청 서명을 확인하지 못했습니다' },
+  malformed: { type: 'purchase-signature-invalid', status: 401, title: '요청 서명을 확인하지 못했습니다' },
+  mismatch: { type: 'purchase-signature-invalid', status: 401, title: '요청 서명을 확인하지 못했습니다' },
+  no_session: { type: 'purchase-session-ended', status: 401, title: '예매 시간이 끝났습니다' },
+  replay: { type: 'purchase-seq-reused', status: 401, title: '이미 받은 요청 번호입니다' },
+});
+
 const metricsByRegistry = new WeakMap<Registry, Counter<'service' | 'reason'>>();
 export function purchaseRejections(registry: Registry): Counter<'service' | 'reason'> {
   let c = metricsByRegistry.get(registry);

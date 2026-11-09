@@ -5,13 +5,14 @@
 //   장애 전환은 복제본 사본을 되살리고, 세대 키의 표지를 '다른 노드, 설정 세대 j만큼 낮음'으로 바꿔 새 주 노드를 흉내 낸다(이 노드는 늘 설정 세대 E).
 // - 사람 슬롯(q:dup·q:adm)은 사람마다 쓰기 하나 늦은 사본을 둔다.
 // - 리더의 묶음 게시 전 복제 확인(WAIT)은 복제본 사본에 같은 표시가 있는지로 본다. 게시 시각은 분산 창(첫 전진 문)이 지난 것으로 둔다(명세가 시간을 줄인 것).
-// - 이탈(leave)은 아직 구현이 없어(BUILD_ORDER HOT-060) 명세의 뜻(빠진 번호 켜기, 이 요청의 기록 지우기)을 저장소 호출로 흉내 낸다.
+// - 이탈(leave)은 운영 코드 LeaveQueue를 부른다(BUILD_ORDER HOT-060, ADR-0233). 대기 취소에는 대기표가 없어, 사람 키의 기록이 이 탭의 것일 때만 같은 호출이다. 사람 슬롯 장애 전환으로 기록을 잃었으면 명세의 뜻대로 그 번호만 돌린다.
 // - 경합 시험(SystemOptions.scheduler)은 운영 코드의 Redis 호출을 fast-check 스케줄러로 감싸고, 걸음마다 스케줄러를 직접 돌려 끝나는 순서를 섞는다.
-// 메서드 이름은 명세의 동작 이름이다. 결과로 탭 상태(명세 Tab)를 바꾸고, 불변식 ①~⑤와 입장 키 유지를 관측으로 센다(violations).
+// - 도착 시각 칸(HOT-061, ADR-0223 결정 6·7): 쿠키 있는 진입은 운영 코드의 번호 Lua를, 닫기는 운영 코드의 닫기 Lua를 부른다. 시각은 칸 번호를 지금 근처에 두고(ARRIVAL_ANCHOR_AHEAD) 닫기 앞뒤로 칸 번호를 밀어(SHIFT_SLOTS) 맞춘다.
+// 메서드 이름은 명세의 동작 이름이다. 결과로 탭 상태(명세 Tab)를 바꾸고, 불변식 ①~⑦과 입장 키 유지를 관측으로 센다(violations).
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { type CallOptions, type Clock, type HotRedis, type RedisScript, redisScript, systemClock } from '@peaket/platform';
-import { combinedKey, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
+import { combinedKey, drandRoundAfter, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
 import type { Scheduler } from 'fast-check';
 import { Es256AdmissionTokens } from '../../../queue-svc/src/modules/admission/adapters/es256-admission-tokens.js';
 import { RedisAdmissionStore } from '../../../queue-svc/src/modules/admission/adapters/redis-admission-store.js';
@@ -21,6 +22,7 @@ import type { AdmissionSignals } from '../../../queue-svc/src/modules/admission/
 import { HmacQueueTokens, QUEUE_TOKEN_KEY_ENV } from '../../../queue-svc/src/modules/entry/adapters/hmac-tokens.js';
 import { keys as entryKeys, RedisEntryStore } from '../../../queue-svc/src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../../../queue-svc/src/modules/entry/adapters/redis-event-schedules.js';
+import { LeaveQueue } from '../../../queue-svc/src/modules/entry/application/leave-queue.js';
 import { RedisBatchStore } from '../../src/modules/batch/adapters/redis-batch-store.js';
 import { PublishBatchResults } from '../../src/modules/batch/application/publish-batch-results.js';
 import type { BatchStore, SeedSource } from '../../src/modules/batch/domain/ports.js';
@@ -51,15 +53,36 @@ export interface Scope {
   personFailovers: boolean;
   maxLeaderChanges: number;
   epochJumps: readonly number[];
+  /** 도착 시각 칸(명세 ARR_SLOTS, HOT-061). 없으면 쿠키 없는 범위다 */
+  arrSlots?: readonly number[];
+  /** 칸마다 떼는 번호 수(명세 ARR_SIZE) */
+  arrSize?: number;
+  /** RB-05 바탕 값(명세 SKIP_BASE). 없으면 lag(쓰기 하나에 번호 하나) */
+  skipBase?: number;
+}
+/** 재생이 견주는 도착 시각 칸(명세 Arr와 같은 모양) */
+export interface ArrObserved {
+  next: number;
+  first: number;
+  closedUpto: number;
+  lostUpto: number;
+  gen: number;
+  slots: Array<[number, { base: number; size: number; used: number }]>;
 }
 /** 명세 Tab을 고르는 (사람, 탭) */
 export type K = readonly [number, number];
 export const HOLDING: ReadonlySet<Phase> = new Set(['BATCHED', 'HELD', 'CHECKED', 'CLAIMED', 'SLOTTED', 'RELEASING', 'ADMITTED']);
+/** 번호를 받아 아직 든 단계(명세 HOLDING_NUMBER, 불변식 ⑦) */
+export const HOLDING_NUMBER: ReadonlySet<Phase> = new Set(['HELD', 'CHECKED', 'CLAIMED', 'SLOTTED', 'RELEASING', 'ADMITTED']);
 
 /** 이 노드의 설정 세대. 흉내 낸 옛 주 노드는 이보다 낮다 */
 export const NODE_EPOCH = 100;
 const OTHER_NODE = 'f'.repeat(40);
 const DAY = 86_400_000;
+/** 도착 시각 칸 닫기를 부르기 전에 칸 번호를 과거로 미는 칸 수(200초, 칸 끝 + 20초보다 넉넉히 크다. 아래 SHIFT_SLOTS) */
+export const ARRIVAL_AGE_SLOTS = 2000;
+/** 재생과 무작위 실행에서 칸 번호의 기준: 지금 시각의 칸 + 이 칸 수(3초 뒤. 쿠키 시각이 5초 넘게 앞서면 안 되고, 칸 끝 + 20초 안에 끝나도록 앞쪽으로 둔다) */
+const ARRIVAL_ANCHOR_AHEAD = 30;
 const BIG_TARGET = 1_000_000;
 const JNY = '0190f3a1-7c2e-7a00-8000-0000000000aa';
 const accountOf = (p: number) => `0190f3a1-7c2e-7a00-8000-${String(p).padStart(12, '0')}`;
@@ -105,13 +128,24 @@ for _, e in ipairs(cjson.decode(ARGV[1])) do
 end
 return 1
 `);
-// 이탈 흉내(HOT-060 전): 이 요청의 번호 기록이나 묶음 기록일 때만 q:dup을 지운다
-const LEAVE_DUP = redisScript(`
-local v = redis.call('GET', KEYS[1])
-if not v then return 0 end
-local rq = string.match(v, '^%d+:%d+:([^:]+):') or string.match(v, '^BATCH:1:[0-9a-f]+:([^:]+):')
-if rq == ARGV[1] then redis.call('DEL', KEYS[1]) return 1 end
-return 0
+// 도착 시각 칸(q:{event:E}:arr_slots)의 칸 번호를 d만큼 민다(칸 기록의 칸 이름과 next·first·closed_upto·lost_upto·gap_from·gap_to). 구현의 닫기 Lua는 서버 시각으로 '칸 끝 + 20초가 지난 칸'을 고른다.
+// 서버 시각은 시험이 바꿀 수 없고 명세는 시각을 담지 않으므로, 하네스는 닫기 앞에 칸 번호를 과거로 밀고 닫은 뒤 되돌린다(칸끼리의 차는 그대로라 닫을 칸의 범위가 달라지지 않는다).
+// 진입 Lua의 시각 조건(칸이 닫혔나·미래인가)은 칸 번호를 지금 시각 근처로 두어 맞춘다(ARRIVAL_ANCHOR_AHEAD)
+export const SHIFT_SLOTS = redisScript(`
+local d = tonumber(ARGV[1])
+local h = redis.call('HGETALL', KEYS[1])
+local function fmt(n) return string.format('%.0f', n) end
+for i = 1, #h, 2 do
+  local f, v = h[i], h[i + 1]
+  local j, part = string.match(f, '^(%d+):(%a+)$')
+  if j then
+    redis.call('HDEL', KEYS[1], f)
+    redis.call('HSET', KEYS[1], fmt(tonumber(j) + d) .. ':' .. part, v)
+  elseif (f == 'next' or f == 'first' or f == 'closed_upto' or f == 'lost_upto' or f == 'gap_from' or f == 'gap_to') and tonumber(v) and tonumber(v) >= 0 then
+    redis.call('HSET', KEYS[1], f, fmt(tonumber(v) + d))
+  end
+end
+return 1
 `);
 const EXPIRE_PENDING = redisScript(`
 local v = redis.call('GET', KEYS[1])
@@ -162,6 +196,7 @@ export interface Ghost {
   maxGenSeen: number;
   admLost: Set<number>;
   dupLost: Set<number>;
+  arrIssued: Map<string, string>;
 }
 
 export interface SystemOptions {
@@ -179,7 +214,7 @@ export class QueueSystem {
   readonly tabs = new Map<string, TabState>();
   readonly ctl = { holder: 0, transitions: 0, acquisitions: 0, c: new Map<number, { gen: number; op: string }>() };
   readonly env = { windowOpen: false, primary: 1, evFailovers: 0, psFailovers: 0 };
-  readonly ghost: Ghost = { issued: new Map(), admittedBy: new Map(), early: false, staleApplied: 0, maxGenSeen: 0, admLost: new Set(), dupLost: new Set() };
+  readonly ghost: Ghost = { issued: new Map(), admittedBy: new Map(), early: false, staleApplied: 0, maxGenSeen: 0, admLost: new Set(), dupLost: new Set(), arrIssued: new Map() };
   readonly violations: string[] = [];
   /** 회차 슬롯: 지금 주 노드, 복제본, 복제되지 않은 쓰기 */
   current: Copy = new Map();
@@ -192,6 +227,7 @@ export class QueueSystem {
   readonly #redis: HotRedis;
   readonly #raw: HotRedis;
   readonly #entry: RedisEntryStore;
+  readonly #leave: LeaveQueue;
   readonly #adm: RedisAdmissionStore;
   readonly #leader: RedisLeaderStore;
   readonly #app: ConfirmAdmission;
@@ -202,6 +238,8 @@ export class QueueSystem {
   #onAdmitCall: (() => void) | undefined;
   #myMarker = '';
   #earlySignal = false;
+  /** 명세의 칸 번호 s를 실제 칸 번호로 옮기는 기준(칸 번호 = 이 값 + s) */
+  #arrivalAnchor = 0;
 
   constructor(
     raw: HotRedis,
@@ -248,19 +286,37 @@ export class QueueSystem {
       },
     });
     this.#app = new ConfirmAdmission(watched, new RedisEventSchedules(this.#redis, systemClock), tokens, signer, signals, systemClock);
+    this.#leave = new LeaveQueue(this.#entry, new RedisEventSchedules(this.#redis, systemClock));
     const real = new RedisBatchStore(this.#redis);
     // 게시 전 복제 확인: 구현의 표시 확인(WAIT 앞 Lua) + 복제본 사본에 같은 표시가 있는가(WAIT 흉내)
     const batches: BatchStore = Object.assign(Object.create(real) as BatchStore, {
-      confirmReplicated: async (e: string, n: number, marker: string) => (await real.confirmReplicated(e, n, marker)) && this.replicaMarker() === marker,
+      confirmReplicated: async (e: string, n: number | 'lobby', marker: string) => (await real.confirmReplicated(e, n, marker)) && this.replicaMarker() === marker,
+      // 모델의 회차는 과거 일정이라 저장소 시각이 늘 라운드 뒤다. 공정성 공시의 시각은 모델 밖이다(명세는 공시를 뺀다)
+      markRoot: async (e: string, n: number | 'lobby', root: string, expireAtMs: number) => ({ ...(await real.markRoot(e, n, root, expireAtMs)), atMs: 0 }),
+      earlyRootOf: async (e: string, n: number | 'lobby') => {
+        const r = await real.earlyRootOf(e, n);
+        return r ? { ...r, atMs: 0 } : null;
+      },
     });
     const secret = createHash('sha256').update(`mbt-randomness-${run}`).digest();
     const beacon = async () => createHash('sha256').update(`beacon\0${secret.toString('hex')}`).digest();
     const seeds: SeedSource = o.specRanks
-      ? { seed: async (e, n) => this.#seedForSpecOrder(real, e, n, await beacon()) }
+      ? { seed: async (e, n) => this.#seedForSpecOrder(real, e, n as number, await beacon()) }
       : { seed: async (e, n) => createHash('sha256').update(`seed\0${secret.toString('hex')}\0${e}\0${n}`).digest() };
     // 게시 시각을 분산 창(8초)과 늦은 게시 창보다 앞으로 둔다: 명세는 '게시 뒤 첫 전진 문이 열림'을 한 걸음으로 줄였다
     const pastClock: Clock = { now: () => Date.now() - 600_000, monotonicMs: () => systemClock.monotonicMs() };
-    this.#publisher = new PublishBatchResults(batches, seeds, { value: beacon }, { write: async () => undefined }, pastClock);
+    // 공시 기록은 모델 밖이다: 언제나 있고 멈추지 않는다(명세는 공정성 공시를 뺀다)
+    const records = {
+      read: async (e: string, g: number | 'lobby') => {
+        const s = await real.scheduleOf(e);
+        const fixAt = g === 'lobby' ? s!.opensAtMs : s!.opensAtMs + (s!.batchWindowMs ?? 2_000);
+        return { commit: '00'.repeat(32), round: drandRoundAfter(fixAt), sealed: 'x', atMs: 0 };
+      },
+      stop: async () => true,
+      recordBeacon: async () => true,
+      reveal: async () => undefined,
+    };
+    this.#publisher = new PublishBatchResults(batches, records, seeds, { round: async (...a: Parameters<typeof beacon>) => ({ value: (await beacon(...a))!, signature: '00' }), verifyStored: () => true }, { write: async () => undefined }, pastClock);
   }
 
   persons(): number[] {
@@ -290,6 +346,9 @@ export class QueueSystem {
     const e = this.eventId;
     const cmd = (key: string, args: string[]) => this.#raw.command(args, { key });
     this.#myMarker = `${text(await this.#raw.command(['CLUSTER', 'MYID']))}:${NODE_EPOCH}`;
+    // 칸 Lua가 보는 시계는 Valkey TIME이다(시험 PC 시계와 어긋날 수 있다)
+    const t = (await this.#raw.command(['TIME'])) as unknown[];
+    this.#arrivalAnchor = Math.floor((Number(text(t[0])) * 1000 + Math.floor(Number(text(t[1])) / 1000)) / 100) + ARRIVAL_ANCHOR_AHEAD;
     // 묶음 없는 범위는 로비 셔플을 켠 회차로 둔다(둘 다 끈 회차는 없다, ADR-0118). 로비는 명세가 뺀 것이라 Lua는 늘 로비를 끈 값으로 부른다
     await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'opensAtMs', String(this.#opensAt), 'startsAtMs', String(this.#startsAt), 'lobbyShuffle', this.scope.openBatch ? '0' : '1',
       'openBatch', this.scope.openBatch ? '1' : '0', 'rev', '1']);
@@ -438,20 +497,48 @@ export class QueueSystem {
     return canon(await this.#dumpPerson(p)) !== canon(this.personRep.get(p)!);
   }
   /** 재생이 견주는 회차 슬롯 관측(사본): 묶음 표시 '{첫 번호}:{크기}:{세대}', 게시 표시, 빠진 번호, 세대 키가 지금 노드인가 */
-  observed(): { marker: string | null; pub: boolean; removed: number[]; markerMine: boolean; pend: boolean } {
+  observed(): { marker: string | null; pub: boolean; removed: number[]; markerMine: boolean; pend: boolean; arr: ArrObserved } {
     const bits = this.current.get(keys.removed(this.eventId));
     const removed: number[] = [];
     if (bits) {
       const b = Buffer.from(bits.v as string, 'hex');
       for (let i = 0; i < b.length * 8; i++) if ((b[i >> 3]! >> (7 - (i & 7))) & 1) removed.push(i);
     }
-    return { marker: this.#field(this.current, keys.batchDone(this.eventId), '1'), pub: this.published(), removed, markerMine: this.markerMine(), pend: this.rb05Pending() };
+    return { marker: this.#field(this.current, keys.batchDone(this.eventId), '1'), pub: this.published(), removed, markerMine: this.markerMine(), pend: this.rb05Pending(), arr: this.#arrivalState() };
   }
-  /** 사람 슬롯 값의 종류(명세 Slot.kind): q:dup은 NONE·PENDING·REC·BATCH, q:adm은 NONE·ADM */
+  /** 도착 시각 칸(명세 Arr와 같은 모양). 칸 번호는 명세의 작은 정수로 옮긴다(없으면 0, 지운 칸은 base·size·used 0) */
+  #arrivalState(): ArrObserved {
+    const k = keys.arrSlots(this.eventId);
+    const num = (f: string) => {
+      const v = this.#field(this.current, k, f);
+      return v === null ? null : Number(v);
+    };
+    const slotNo = (f: string) => {
+      const v = num(f);
+      return v === null ? 0 : v - this.#arrivalAnchor;
+    };
+    const slots = (this.scope.arrSlots ?? []).map((s): [number, { base: number; size: number; used: number }] => {
+      const r = this.#arrivalAnchor + s;
+      return [s, { base: num(`${r}:base`) ?? 0, size: num(`${r}:size`) ?? 0, used: num(`${r}:used`) ?? 0 }];
+    });
+    return { next: slotNo('next'), first: slotNo('first'), closedUpto: slotNo('closed_upto'), lostUpto: slotNo('lost_upto'), gen: num('gen') ?? 0, slots };
+  }
+  /** 칸을 하나라도 뗐는가(명세 ev.arr.next > 0, 닫기를 정할 수 있는지) */
+  arrivalCarved(): boolean {
+    return this.#field(this.current, keys.arrSlots(this.eventId), 'next') !== null;
+  }
+  /** 받은 번호(명세 HOLDING_NUMBER)가 빠진 번호가 되었는가(불변식 ⑦) */
+  #removedHolders(): string[] {
+    const removed = new Set(this.observed().removed);
+    const out: string[] = [];
+    for (const [key, t] of this.tabs) if (HOLDING_NUMBER.has(t.phase) && removed.has(t.seq)) out.push(`${key}=${t.seq}`);
+    return out;
+  }
+  /** 사람 슬롯 값의 종류(명세 Slot.kind): q:dup은 NONE·PENDING·REC·BATCH, q:adm은 NONE·ADM. 취소 끝 표지(LEFT)는 다른 요청에게 빈 키와 같아 NONE이다(ADR-0233. 취소한 탭은 명세에서 DONE이라 다시 오지 않는다) */
   async personKinds(p: number): Promise<{ dup: string; adm: string }> {
     const [dupK, admK] = this.#personKeys(p);
     const v = text((await this.#raw.command(['GET', dupK!], { key: dupK! })) ?? '');
-    const dup = v === '' ? 'NONE' : v.startsWith('PENDING:') ? 'PENDING' : v.startsWith('BATCH:1:') ? 'BATCH' : /^\d+:\d+:/.test(v) ? 'REC' : `?${v}`;
+    const dup = v === '' || v.startsWith('LEFT:') ? 'NONE' : v.startsWith('PENDING:') ? 'PENDING' : v.startsWith('BATCH:1:') ? 'BATCH' : /^\d+:\d+:/.test(v) ? 'REC' : `?${v}`;
     const adm = Number(await this.#raw.command(['EXISTS', admK!], { key: admK! })) === 1 ? 'ADM' : 'NONE';
     return { dup, adm };
   }
@@ -481,7 +568,22 @@ export class QueueSystem {
     // 명세 enterNumber는 markerOk일 때만 할 수 있다: 세대 키가 다르거나 RB-05 확인 전이면 번호도 묶음도 없어야 한다(ADR-0181·0186)
     const ok = this.markerOk();
     const r = await this.#entry.number({ ...this.#numberInput(), eligible: true, tokenHash: this.#tokenHash(k) });
-    if (!ok && r.kind !== 'RECOVERING') this.#violate(`enterNumber ${keyOf(k)}: 세대 키가 다르거나 RB-05 확인 전인데 결과가 ${r.kind}`);
+    await this.#afterNumber(k, r, ok, 'enterNumber');
+  }
+  /** 진입 ②의 도착 시각 쿠키 갈래(명세 enterNumberArrival, ADR-0223 결정 6). 운영 코드의 묶음 호출을 쿠키가 있는 요청 하나로 부른다 */
+  async enterNumberArrival(k: K, s: number): Promise<void> {
+    const ok = this.markerOk();
+    const [r] = await this.#entry.numberBatch({ ...this.#numberInput(), arrivalInitial: this.scope.arrSize ?? 0, items: [{ eligible: true, tokenHash: this.#tokenHash(k), arrivalSlot: this.#arrivalAnchor + s }] });
+    await this.#afterNumber(k, r!, ok, 'enterNumberArrival');
+    if (r!.kind === 'NUMBERED' && r!.arrival === 'slot') {
+      const id = `${r!.seq}:${r!.gen}`;
+      const was = this.ghost.arrIssued.get(id);
+      if (was !== undefined && was !== keyOf(k)) this.#violate(`⑥ 칸 번호 중복: ${id}를 ${was}와 ${keyOf(k)}가 받았다`);
+      this.ghost.arrIssued.set(id, keyOf(k));
+    }
+  }
+  async #afterNumber(k: K, r: Awaited<ReturnType<RedisEntryStore['number']>>, ok: boolean, name: string): Promise<void> {
+    if (!ok && r.kind !== 'RECOVERING') this.#violate(`${name} ${keyOf(k)}: 세대 키가 다르거나 RB-05 확인 전인데 결과가 ${r.kind}`);
     const t = this.tab(k);
     if (r.kind === 'NUMBERED') Object.assign(t, { phase: 'NUMBERED', seq: r.seq, gen: r.gen });
     else if (r.kind === 'BATCHING') t.phase = 'SADDED';
@@ -494,7 +596,7 @@ export class QueueSystem {
   }
   async enterRecord(k: K): Promise<void> {
     const t = this.tab(k);
-    const r = await this.#entry.record({ pid: `p${k[0]}`, eventId: this.eventId, requestId: this.#requestId(k), seq: t.seq, gen: t.gen, jny: JNY, expireAtMs: this.#saleEnd });
+    const r = await this.#entry.record({ pid: `p${k[0]}`, eventId: this.eventId, requestId: this.#requestId(k), seq: t.seq, gen: t.gen, jny: JNY, expireAtMs: this.#saleEnd, ticketHash: tokens.hash(this.#ticket(k, t.seq, t.gen)) });
     if (r.kind === 'RECORDED') this.#hold(k, t.seq, t.gen);
     else if (r.kind === 'ADMITTED' || r.kind === 'TAKEN') {
       await this.#entry.markRemoved({ eventId: this.eventId, seq: t.seq, expireAtMs: this.#keepUntil });
@@ -516,7 +618,7 @@ export class QueueSystem {
     const r = await this.#entry.batchResult({ eventId: this.eventId, tokenHash: h });
     const pid = `p${k[0]}`;
     if (r.kind === 'RESULT') {
-      const c = await this.#entry.convertBatch({ pid, eventId: this.eventId, requestId: this.#requestId(k), tokenHash: h, seq: r.seq, gen: r.gen, expireAtMs: this.#saleEnd });
+      const c = await this.#entry.convertBatch({ pid, eventId: this.eventId, requestId: this.#requestId(k), tokenHash: h, seq: r.seq, gen: r.gen, expireAtMs: this.#saleEnd, ticketHash: tokens.hash(this.#ticket(k, r.seq, r.gen)) });
       if (c.kind === 'RECORDED') {
         this.#hold(k, c.seq, c.gen);
         return 'RESULT';
@@ -543,8 +645,10 @@ export class QueueSystem {
   }
   async leave(k: K): Promise<void> {
     const t = this.tab(k);
-    await this.#entry.markRemoved({ eventId: this.eventId, seq: t.seq, expireAtMs: this.#keepUntil });
-    await this.#raw.evalScript(LEAVE_DUP, [entryKeys.dup(`p${k[0]}`, this.eventId)], [this.#requestId(k)]);
+    const pid = `p${k[0]}`;
+    const held = await this.#entry.readHeld({ pid, eventId: this.eventId });
+    if (held?.requestId === this.#requestId(k)) await this.#leave.entry({ eventId: this.eventId, pid });
+    else await this.#entry.leaveNumber({ eventId: this.eventId, seq: t.seq, ...(t.hash ? { ticketHash: t.hash } : {}), expireAtMs: this.#keepUntil });
     t.phase = 'DONE';
   }
   async windowEnds(): Promise<void> {
@@ -556,10 +660,13 @@ export class QueueSystem {
     if (can && st !== 'PUBLISHED') this.#violate(`publishBatch: 표시가 복제됐는데 게시 결과가 ${st}`);
     return st;
   }
+  #ticket(k: K, seq: number, gen: number): string {
+    return tokens.ticket({ e: this.eventId, a: accountOf(k[0]), d: '', s: seq, g: gen, seg: 0, rq: this.#requestId(k), jny: JNY });
+  }
   #hold(k: K, seq: number, gen: number): void {
     const t = this.tab(k);
     Object.assign(t, { phase: 'HELD', seq, gen });
-    t.ticket = tokens.ticket({ e: this.eventId, a: accountOf(k[0]), d: '', s: seq, g: gen, seg: 0, rq: this.#requestId(k), jny: JNY });
+    t.ticket = this.#ticket(k, seq, gen);
     t.hash = tokens.hash(t.ticket);
     const id = `${seq}:${gen}`;
     const was = this.ghost.issued.get(id);
@@ -574,7 +681,7 @@ export class QueueSystem {
     this.ctl.acquisitions += 1;
     this.ctl.c.set(c, { gen: this.ctl.transitions, op: 'BUMP' });
   }
-  plan(c: number, op: 'ADVANCE' | 'CLOSE'): void {
+  plan(c: number, op: 'ADVANCE' | 'CLOSE' | 'ARRCLOSE'): void {
     this.ctl.c.get(c)!.op = op;
   }
   async applyWrite(c: number): Promise<string> {
@@ -586,6 +693,8 @@ export class QueueSystem {
       const r = await this.#leader.tick({ eventId: e, gen: w.gen, target: BIG_TARGET, ratioFloor: 0.2, saleStateFallback: 'ON_SALE', windowMs: 0, maxAdvance: 1,
         keepUntilMs: this.#keepUntil, saleEndMs: this.#saleEnd, lobbyShuffle: false, openBatch: this.scope.openBatch, closeAtMs: this.#closeAt });
       out = r.kind;
+    } else if (w.op === 'ARRCLOSE') {
+      out = await this.#closeArrival(w.gen);
     } else {
       out = await this.#leader.close({ eventId: e, gen: w.gen, keepUntilMs: this.#keepUntil, opensAtMs: this.#opensAt, closeAtMs: this.#closeAt, lobbyShuffle: false, openBatch: this.scope.openBatch });
     }
@@ -595,6 +704,15 @@ export class QueueSystem {
       this.ghost.maxGenSeen = Math.max(this.ghost.maxGenSeen, w.gen);
     }
     return out;
+  }
+
+  /** 도착 시각 칸 닫기(명세 ARRCLOSE, 운영 코드 closeArrivalSlots). 닫기 Lua는 서버 시각으로 칸을 고르므로 앞뒤로 칸 번호를 밀어 '칸 끝 + 20초가 지남'을 만든다(SHIFT_SLOTS) */
+  async #closeArrival(gen: number): Promise<string> {
+    const k = keys.arrSlots(this.eventId);
+    await this.#raw.evalScript(SHIFT_SLOTS, [k], [String(-ARRIVAL_AGE_SLOTS)]);
+    const r = await this.#leader.closeArrivalSlots({ eventId: this.eventId, gen, keepUntilMs: this.#keepUntil });
+    await this.#raw.evalScript(SHIFT_SLOTS, [k], [String(ARRIVAL_AGE_SLOTS)]);
+    return r.kind;
   }
 
   // ---- 복제와 장애 전환 ----
@@ -638,7 +756,7 @@ export class QueueSystem {
   }
   async rb05(): Promise<string> {
     const want = !this.markerMine() ? 'SKIPPED' : this.rb05Pending() ? 'PENDING' : 'DONE';
-    const r = await this.#entry.rb05({ eventId: this.eventId, expireAtMs: this.#keepUntil, skippedExpireAtMs: this.#saleEnd, skipBase: this.scope.lag,
+    const r = await this.#entry.rb05({ eventId: this.eventId, expireAtMs: this.#keepUntil, skippedExpireAtMs: this.#saleEnd, skipBase: this.scope.skipBase ?? this.scope.lag,
       opensAtMs: this.#opensAt, closeAtMs: this.#closeAt, lobbyShuffle: false, openBatch: this.scope.openBatch });
     if (r.kind !== want) this.#violate(`rb05: ${want}이어야 하는데 결과가 ${r.kind}`);
     return r.kind;
@@ -756,12 +874,13 @@ export class QueueSystem {
     this.ghost.admittedBy.get(k[0])!.add(`${k[1]}:${t.seq}:${t.gen}`);
   }
 
-  // ---- 불변식(명세 ①~⑤) + 입장한 대기표의 입장 키(ADR-0183 결정 2·3) ----
+  // ---- 불변식(명세 ①~⑦, ⑥은 enterNumberArrival이 낼 때 본다) + 입장한 대기표의 입장 키(ADR-0183 결정 2·3) ----
   #violate(msg: string): void {
     this.violations.push(`${msg} [걸음 ${this.log.length}: ${this.log.slice(-12).join(' → ')}]`);
   }
   #checkInvariants(name: string): void {
     const g = this.ghost;
+    for (const bad of this.#removedHolders()) this.#violate(`⑦ 받은 번호가 빠진 번호가 됐다: ${bad}(${name})`);
     if (g.early) this.#violate(`① 차례 전 입장(${name})`);
     if ((this.env.evFailovers === 0 && g.staleApplied > 0) || g.staleApplied > this.env.evFailovers) this.#violate(`③ 옛 리더 쓰기 ${g.staleApplied}회(장애 전환 ${this.env.evFailovers}회)`);
     for (const p of this.persons()) {

@@ -43,7 +43,7 @@ export async function startValkey(): Promise<ValkeyContainer> {
     url,
     stop: () => {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }

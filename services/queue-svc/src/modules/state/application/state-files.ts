@@ -4,14 +4,37 @@
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { type EventSchedule, type EventSchedules, QueueStoreUnavailable } from '../../entry/index.js';
-import { STATE_OPTIONS, STATE_SCHEDULES, STATE_SNAPSHOTS, type StateOptions, type StateSnapshots } from '../domain/ports.js';
-import { ACTIVE_FOR_MS, boundaryOf, buildStateFiles, MAX_ACTIVE_EVENTS, type StateFile, TICK_CONCURRENCY } from '../domain/state.js';
+import {
+  STATE_MIRROR_LEASE,
+  STATE_MIRROR_SIGNALS,
+  STATE_MIRROR_STORE,
+  STATE_OPTIONS,
+  STATE_SCHEDULES,
+  STATE_SNAPSHOTS,
+  type StateMirrorLease,
+  type StateMirrorSignals,
+  type StateMirrorStore,
+  type StateOptions,
+  type StateSnapshots,
+} from '../domain/ports.js';
+import { ACTIVE_FOR_MS, boundaryOf, buildStateFiles, MAX_ACTIVE_EVENTS, type PlatformNotice, type StateFile, TICK_CONCURRENCY } from '../domain/state.js';
 
 interface Active {
   schedule: EventSchedule;
   askedAt: number;
   files: StateFile[];
 }
+
+/** S3 사본의 키: 요청 경로와 같게 맞춘다. CloudFront S3 원본의 원본 경로는 /queue/fallback이다(ADR-0223 결정 9) */
+export const mirrorKeyOf = (eventId: string, segment: number): string => `queue/fallback/v1/queues/${eventId}/segment-states/${segment}.json`;
+
+/** 이 초 경계에 이 구간의 사본을 쓰는가: 시각으로만 정해 쓰는 파드가 바뀌어도 주기가 같다. 구간 번호를 더해 먼 구간의 쓰기를 초마다 나눈다(ADR-0223 결정 9) */
+export const mirrorDue = (segment: number, boundaryMs: number, everyMs: number): boolean => (Math.floor(boundaryMs / 1000) + segment) % Math.round(everyMs / 1000) === 0;
+
+/** 사본 쓰기 실패 기록을 회차마다 이 간격에 한 번만 남긴다 [가정] */
+const MIRROR_WARN_EVERY_MS = 60_000;
+/** 사본을 함께 쓰는 수 [가정] */
+const MIRROR_CONCURRENCY = 8;
 
 /** 켤 때 처음 만들지 못했다(일정 사본이나 회차 슬롯을 대기열 Redis에서 못 읽음). 받는 층이 503 Retry-After 1초로 답한다 */
 export class StateUnavailable extends Error {
@@ -35,6 +58,11 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
   #timer: NodeJS.Timeout | undefined;
   #ticking = false;
   #lastBoundary: number | undefined;
+  /** 마지막으로 읽은 전체 범위 공지(못 읽으면 이 값으로 만든다, ADR-0214) */
+  #platform: PlatformNotice = {};
+  /** 회차마다 도는 사본 쓰기(앞 번이 끝나지 않으면 이번 경계는 건너뛴다) */
+  readonly #mirroring = new Map<string, Promise<void>>();
+  readonly #mirrorWarnAt = new Map<string, number>();
 
   constructor(
     @Inject(STATE_SNAPSHOTS) private readonly snapshots: StateSnapshots,
@@ -42,6 +70,9 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(STATE_OPTIONS) private readonly options: StateOptions,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
+    @Optional() @Inject(STATE_MIRROR_STORE) private readonly mirrorStore?: StateMirrorStore,
+    @Optional() @Inject(STATE_MIRROR_LEASE) private readonly mirrorLease?: StateMirrorLease,
+    @Optional() @Inject(STATE_MIRROR_SIGNALS) private readonly mirrorSignals?: StateMirrorSignals,
   ) {}
 
   onModuleInit(): void {
@@ -83,7 +114,8 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
       const schedule = await this.schedules.get(eventId);
       if (!schedule) return null;
       const boundaryMs = boundaryOf(this.clock.now());
-      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs);
+      const platform = await this.#readPlatform();
+      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs, platform, eventId);
       const a: Active = { schedule, askedAt: this.clock.now(), files };
       this.#active.set(eventId, a);
       return a;
@@ -103,6 +135,7 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
         if (boundaryMs - a.askedAt > ACTIVE_FOR_MS) this.#active.delete(eventId);
         else work.push([eventId, a]);
       }
+      const platform = work.length > 0 ? await this.#readPlatform() : this.#platform;
       let next = 0;
       const lane = async () => {
         while (next < work.length) {
@@ -110,9 +143,12 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
           try {
             const schedule = await this.schedules.get(eventId).catch(() => a.schedule);
             if (schedule) a.schedule = schedule;
-            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs);
+            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs, platform, eventId);
             // 늦게 끝난 생성이 그 사이 만든 더 새 파일을 덮지 않게 한다
-            if (a.files[0]!.generatedAtMs < boundaryMs) a.files = files;
+            if (a.files[0]!.generatedAtMs < boundaryMs) {
+              a.files = files;
+              this.#mirror(eventId, a, boundaryMs);
+            }
           } catch (err) {
             if (!(err instanceof QueueStoreUnavailable)) this.logger?.error({ err, eventId }, '대기 상태 파일을 다시 만들지 못했다');
           }
@@ -122,6 +158,69 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.#ticking = false;
     }
+  }
+
+  /**
+   * S3 대체 원본 사본을 쓴다(ADR-0223 결정 9). 파드 하나만 쓰고, 구간마다 거리별 주기를 지킨다. 실패해도 파일 생성은 멈추지 않는다.
+   * 앞 번이 끝나지 않았으면 이번 경계는 건너뛴다
+   */
+  #mirror(eventId: string, a: Active, boundaryMs: number): void {
+    if (!this.mirrorStore || !this.mirrorLease || this.#mirroring.has(eventId)) return;
+    const p = this.#writeMirror(eventId, a, boundaryMs).finally(() => this.#mirroring.delete(eventId));
+    this.#mirroring.set(eventId, p);
+  }
+
+  async #writeMirror(eventId: string, a: Active, boundaryMs: number): Promise<void> {
+    try {
+      if (!(await this.mirrorLease!.claim(eventId, boundaryMs))) return;
+    } catch (err) {
+      this.#mirrorFailed(eventId, boundaryMs, err);
+      return;
+    }
+    const due: [number, StateFile][] = [];
+    a.files.forEach((f, seg) => {
+      if (mirrorDue(seg, boundaryMs, f.mirrorEveryMs)) due.push([seg, f]);
+    });
+    let next = 0;
+    const lane = async () => {
+      while (next < due.length) {
+        const [seg, f] = due[next++]!;
+        try {
+          await this.mirrorStore!.put({
+            key: mirrorKeyOf(eventId, seg),
+            body: f.body,
+            contentType: 'application/json; charset=utf-8',
+            cacheControl: f.imminent ? 'public' : 'public, max-age=1, stale-while-revalidate=2',
+            ...(f.imminent ? { expiresAtMs: f.generatedAtMs + 1000 } : {}),
+          });
+        } catch (err) {
+          this.#mirrorFailed(eventId, boundaryMs, err);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(MIRROR_CONCURRENCY, due.length) }, lane));
+  }
+
+  #mirrorFailed(eventId: string, boundaryMs: number, err: unknown): void {
+    this.mirrorSignals?.failed();
+    if (boundaryMs - (this.#mirrorWarnAt.get(eventId) ?? -Infinity) < MIRROR_WARN_EVERY_MS) return;
+    this.#mirrorWarnAt.set(eventId, boundaryMs);
+    this.logger?.warn({ err, eventId }, 'S3 대체 원본 사본을 쓰지 못했다(파일 생성은 계속한다, 같은 회차는 1분에 한 번 남긴다)');
+  }
+
+  /** 뒤에서 도는 사본 쓰기가 끝나기를 기다린다(시험) */
+  async mirrorsSettled(): Promise<void> {
+    await Promise.all([...this.#mirroring.values()]);
+  }
+
+  /** 전체 범위 공지를 읽는다. 못 읽으면 마지막 값을 쓴다(일시 장애가 아닌 오류는 남긴다) */
+  async #readPlatform(): Promise<PlatformNotice> {
+    try {
+      this.#platform = await this.snapshots.readPlatform();
+    } catch (err) {
+      if (!(err instanceof QueueStoreUnavailable)) this.logger?.error({ err }, '전체 범위 공지를 읽지 못했다');
+    }
+    return this.#platform;
   }
 
   activeForTest(): number {

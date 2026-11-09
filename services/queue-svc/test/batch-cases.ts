@@ -102,6 +102,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 3}:1`]);
       const t = ticket(await go());
       // 다음 진입이 묶음을 닫는다: 묶음 몫 3을 뗀 뒤 번호
@@ -120,6 +122,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT2, pid: PID2, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId, { a: ACCOUNT2 }), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`5:${4 + SKIP}:1`]);
     });
 
@@ -132,6 +136,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 4}:1`]);
       const t = ticket(await go());
       expect(await w.marker(eventId, 'lobby')).toBe(`${SKIP + 5}:4:2`);
@@ -239,7 +245,7 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const r = ticket(await run({ preverifyToken: early(), entryRequestId: rq }));
       expect(r).toMatchObject({ seq: 7, generation: 1, segment: 0, verification: 'REQUIRED', verificationReason: 'NETWORK' });
       expect(tokens.readTicket(r.queueTicket)).toMatchObject({ s: 7, g: 1, rq, jny: JNY, vr: 'NETWORK' });
-      expect((await w.dupOf(PID, eventId)).value).toBe(`7:1:${rq}:${JNY}:NETWORK`);
+      expect((await w.dupOf(PID, eventId)).value).toBe(`7:1:${rq}:${JNY}:NETWORK:${tokens.hash(r.queueTicket)}`);
       expect(await w.verifying(eventId, tokens.hash(r.queueTicket))).toMatch(/^VERIFYING:\d+:NETWORK$/);
       const again = ticket(await run({ preverifyToken: early(), entryRequestId: rq }));
       expect(again.queueTicket).toBe(r.queueTicket);
@@ -255,7 +261,7 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       await w.publishNone(eventId);
       const r = ticket(await run({ preverifyToken: early(), entryRequestId: rq }));
       expect(r.seq).toBe(1);
-      expect((await w.dupOf(PID, eventId)).value).toBe(`1:1:${rq}:${JNY}:`);
+      expect((await w.dupOf(PID, eventId)).value).toBe(`1:1:${rq}:${JNY}::${tokens.hash(r.queueTicket)}`);
     });
 
     test('Q-T52③_503뒤새요청ID로다시와도_선점이남지않아409가아니다_닫힌뒤에는번호를받는다', async () => {
@@ -303,7 +309,7 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const r = ticket(await run({ preverifyToken: t, entryRequestId: first.entryRequestId }));
       expect(r.seq).toBe(3);
       expect(tokens.readTicket(r.queueTicket)?.rq).toBe(first.entryRequestId);
-      expect((await w.dupOf(PID, eventId)).value).toBe(`3:1:${first.entryRequestId}:${JNY}:`);
+      expect((await w.dupOf(PID, eventId)).value).toBe(`3:1:${first.entryRequestId}:${JNY}::${tokens.hash(r.queueTicket)}`);
     });
 
     test('같은요청ID쌍둥이가구간끝을걸쳐_뒤요청이먼저번호를기록했으면_앞요청의묶음기록도같은대기표를준다', async () => {

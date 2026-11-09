@@ -1,1 +1,1 @@
-export { EventDetailPage, generateMetadata } from './ui/EventDetailPage';
+export { EventDetailPage, generateMetadata, generateStaticParams } from './ui/EventDetailPage';

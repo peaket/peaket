@@ -16,7 +16,7 @@ export const ProductionCard = zod.object({
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
   "title": zod.string().optional(),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
-  "posterUrl": zod.url().optional().describe('포스터 파생본(ADR-0062 결정 38)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
   "placeName": zod.string().optional().describe('공연장 이름(ADR-0093)'),
   "periodStart": zod.iso.date().optional().describe('첫 회차 시작 날짜(KST)'),

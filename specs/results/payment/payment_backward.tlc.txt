@@ -20,7 +20,7 @@ State 1: <Initial predicate>
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 2: <payment_backward_payment_newAttempt(1) line 1146, col 3 to line 1174, col 72 of module payment_backward>
+State 2: <payment_backward_payment_newAttempt(1) line 1170, col 3 to line 1198, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -100,7 +100,7 @@ State 5: <payment_backward_payment_reserve(1) line 474, col 3 to line 501, col 7
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 6: <payment_backward_payment_command(1) line 1188, col 3 to line 1209, col 45 of module payment_backward>
+State 6: <payment_backward_payment_command(1) line 1212, col 3 to line 1233, col 45 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -160,7 +160,7 @@ State 8: <payment_backward_payment_pgProcess(1,1) line 562, col 3 to line 595, c
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
 
-State 9: <payment_backward_payment_respond(1,1) line 625, col 3 to line 649, col 45 of module payment_backward>
+State 9: <payment_backward_payment_respond(1,1) line 649, col 3 to line 673, col 45 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -180,7 +180,7 @@ State 9: <payment_backward_payment_respond(1,1) line 625, col 3 to line 649, col
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 10: <payment_backward_payment_applyResult(1,1) line 735, col 3 to line 770, col 72 of module payment_backward>
+State 10: <payment_backward_payment_applyResult(1,1) line 759, col 3 to line 794, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -200,7 +200,7 @@ State 10: <payment_backward_payment_applyResult(1,1) line 735, col 3 to line 770
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 11: <payment_backward_payment_issue(1) line 776, col 3 to line 800, col 72 of module payment_backward>
+State 11: <payment_backward_payment_issue(1) line 800, col 3 to line 824, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -220,7 +220,7 @@ State 11: <payment_backward_payment_issue(1) line 776, col 3 to line 800, col 72
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 12: <payment_backward_payment_issueAck(1) line 1398, col 3 to line 1452, col 68 of module payment_backward>
+State 12: <payment_backward_payment_issueAck(1) line 1422, col 3 to line 1476, col 68 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,

@@ -1,22 +1,38 @@
 // 메모리 저장소(시험·로컬 시제품용). PostgreSQL 저장소와 같은 규칙을 지킨다: 트랜잭션은 한 번에 하나씩 돌고(직렬),
 // 실패하면 그 트랜잭션의 변경을 모두 되돌린다. 세션 종료 사건은 Outbox 대신 목록에 모은다.
-import { uuidv7 } from '@peaket/platform';
-import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
-import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+import { randomUUID } from 'node:crypto';
+import { CONTROL_TOPICS, type OutboxMessage, uuidv7 } from '@peaket/platform';
+import type { AccountRow, ContactKind, CreateKeyRecord, InvestigationRefsRow, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx, SignupRecord, SignupState } from '../domain/ports.js';
+import { nextRefPrev } from '../domain/inv-ref.js';
+import { type ActiveSession, CREATE_KEY_TTL_MS, type LiveSession, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+import { accountWithdrawnMessage } from './account-withdrawn-message.js';
+import { loginMethodChangedMessage } from './login-method-message.js';
+import { accountMergedMessage } from './account-merged-message.js';
 
-type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
+
+type StoredSession = NewSession & { terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
 interface State {
-  accounts: Map<string, AccountRow & { email: string | null; createdAt: number }>;
-  providers: Map<string, { accountId: string; linkedAt: number }>;
-  devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
+  accounts: Map<string, StoredAccount>;
+  providers: Map<string, { accountId: string; linkedAt: number; lastLoginAt: number | null }>;
+  devices: Map<string, { id: string; accountId: string; ref: string; prevRef?: string | null; boundAt: number }>;
   sessions: Map<string, StoredSession>;
   keys: Map<string, CreateKeyRecord & { createdAt: number }>;
   hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
   events: Array<{ sessionId: string; accountId: string; reason: TerminationReason; at: number }>;
+  reauthUses: Map<string, { accountId: string; usedAt: number; expiresAt: number }>;
+  /** 트랜잭션이 Outbox에 적었을 사건(탈퇴 BOT-037, 로그인 수단 연결·해제 BOT-041). 시험이 읽는다 */
+  outbox: OutboxMessage[];
+  holds: Map<string, { accountId: string; kind: string; state: 'OPEN' | 'CLOSED'; sourceVersion: number; updatedAt: number }>;
+  merges: Map<string, { primaryAccountId: string; mergedAccountId: string; mergedProvider: string; moved: Record<string, number>; requestedAt: number; confirmedAt: number }>;
+  /** 조사용 연락처 가명(account_contact_ref, BOT-045). 키는 계정 ID|종류 */
+  contacts: Map<string, { accountId: string; kind: ContactKind; ref: string; refPrev?: string | null; updatedAt: number }>;
+  /** 동의 행(consent, BOT-047). 키는 계정 ID|종류|판 */
+  consents: Map<string, { accountId: string; kind: string; noticeVersion: string; channels: string | null; agreedAt: number }>;
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [] });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [], holds: new Map(), merges: new Map(), contacts: new Map(), consents: new Map() });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -26,7 +42,14 @@ const clone = (s: State): State => ({
   keys: copy(s.keys),
   hashes: copy(s.hashes),
   events: [...s.events],
+  reauthUses: copy(s.reauthUses),
+  outbox: [...s.outbox],
+  holds: copy(s.holds),
+  merges: copy(s.merges),
+  contacts: copy(s.contacts),
+  consents: copy(s.consents),
 });
+const KIND_ORDER: readonly ContactKind[] = ['PHONE', 'EMAIL'];
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
 const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
 const row = (x: StoredSession): SessionRow => ({
@@ -36,9 +59,39 @@ const row = (x: StoredSession): SessionRow => ({
   absoluteExpiresAt: x.absoluteExpiresAt,
   idleExpiresAt: x.idleExpiresAt,
   terminatedAt: x.terminatedAt,
+  terminatedReason: x.terminatedReason,
   loginVerdict: x.loginVerdict,
   refreshFamily: x.refreshFamily,
 });
+
+function signupStateIn(s: State, accountId: string): SignupState | null {
+  const a = s.accounts.get(accountId);
+  if (!a) return null;
+  return { status: a.status, nickname: a.nickname ?? null, ageVerified: a.ageVerified === true, consentKinds: [...s.consents.values()].filter((c) => c.accountId === accountId).map((c) => c.kind) };
+}
+const nicknameTakenIn = (s: State, key: string): boolean => [...s.accounts.values()].some((a) => a.nicknameKey === key);
+
+/** 세션 끝내기: 끝난 시각·기기 이름·해시를 모두 고친 뒤 사건을 적는다(PostgreSQL 저장소와 같은 차례, ADR-0116 결정 3) */
+function endIn(s: State, items: ReadonlyArray<{ id: string; reason: TerminationReason }>, now: number): void {
+  const ended: Array<{ x: StoredSession; reason: TerminationReason }> = [];
+  for (const { id, reason } of items) {
+    const x = s.sessions.get(id);
+    if (x && x.terminatedAt === null) {
+      x.terminatedAt = now;
+      x.terminatedReason = reason;
+      // 끝난 세션의 화면용 기기 이름은 같은 트랜잭션에서 지운다(ADR-0209 결정 1)
+      x.deviceLabel = null;
+      ended.push({ x, reason });
+    }
+    // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255)
+    for (const [k, h] of s.hashes) if (h.sessionId === id) s.hashes.delete(k);
+  }
+  for (const { x, reason } of ended) {
+    s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
+    // PostgreSQL 저장소처럼 Outbox에도 적는다(다른 사건과의 차례를 시험이 본다)
+    s.outbox.push({ topic: CONTROL_TOPICS.sessionsTerminated, key: x.accountId, payload: Buffer.from(JSON.stringify({ accountId: x.accountId, sessionId: x.id, reason, terminatedAt: new Date(now).toISOString() })) });
+  }
+}
 
 export class MemorySessionStore implements SessionStore {
   #state = empty();
@@ -70,6 +123,230 @@ export class MemorySessionStore implements SessionStore {
     return [...this.#state.devices.values()].filter((d) => d.accountId === accountId).length;
   }
 
+  /** 시험용: 그 계정의 기기 가명(묶은 순) */
+  devicesOf(accountId: string): string[] {
+    return [...this.#state.devices.values()]
+      .filter((d) => d.accountId === accountId)
+      .sort((a, b) => a.boundAt - b.boundAt)
+      .map((d) => d.ref);
+  }
+
+  /** 시험용: 그 계정 기기 행의 옛 판 대응(묶은 순, 있는 것만) */
+  devicePrevsOf(accountId: string): string[] {
+    return [...this.#state.devices.values()]
+      .filter((d) => d.accountId === accountId && d.prevRef)
+      .sort((a, b) => a.boundAt - b.boundAt)
+      .map((d) => d.prevRef!);
+  }
+
+  /** 시험용: 그 계정의 연락처 행(옛 판 값 포함) */
+  contactRowsOf(accountId: string): { kind: ContactKind; ref: string; refPrev: string | null }[] {
+    return [...this.#state.contacts.values()]
+      .filter((c) => c.accountId === accountId)
+      .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+      .map((c) => ({ kind: c.kind, ref: c.ref, refPrev: c.refPrev ?? null }));
+  }
+
+  async contactRefsToRotate(after: string, writePrefix: string, limit: number): Promise<{ accountId: string; email: string; ref: string }[]> {
+    return this.#serial(() =>
+      [...this.#state.contacts.values()]
+        .filter((c) => c.kind === 'EMAIL' && !c.ref.startsWith(writePrefix) && c.accountId > after)
+        .map((c) => ({ c, a: this.#state.accounts.get(c.accountId) }))
+        .filter((x) => x.a?.status === 'ACTIVE' && x.a.email)
+        .sort((x, y) => (x.c.accountId < y.c.accountId ? -1 : 1))
+        .slice(0, limit)
+        .map((x) => ({ accountId: x.c.accountId, email: x.a!.email!, ref: x.c.ref })),
+    );
+  }
+
+  async closeInvRefBridge(label: 'device' | 'contact', prevPrefix: string, _chunk?: number): Promise<{ cleared: number; removed: number }> {
+    return this.#serial(() => {
+      let cleared = 0;
+      let removed = 0;
+      if (label === 'device') {
+        for (const [k, d] of this.#state.devices) {
+          if (d.prevRef) {
+            cleared++;
+            this.#state.devices.set(k, { ...d, prevRef: null });
+          } else if (d.ref.startsWith(prevPrefix)) {
+            removed++;
+            this.#state.devices.delete(k);
+          }
+        }
+      } else {
+        for (const [k, c] of this.#state.contacts) {
+          if (c.refPrev) {
+            cleared++;
+            this.#state.contacts.set(k, { ...c, refPrev: null });
+          }
+        }
+      }
+      return { cleared, removed };
+    });
+  }
+
+  /** 시험용: 그 계정의 연락처 가명(PHONE, EMAIL 순) */
+  contactRefsOf(accountId: string): { kind: ContactKind; ref: string }[] {
+    return [...this.#state.contacts.values()]
+      .filter((c) => c.accountId === accountId)
+      .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+      .map((c) => ({ kind: c.kind, ref: c.ref }));
+  }
+
+  async investigationRefsOf(accountIds: readonly string[], _since?: number): Promise<InvestigationRefsRow[]> {
+    return this.#serial(() =>
+      accountIds.flatMap((id) => {
+        const a = this.#state.accounts.get(id);
+        if (!a) return [];
+        // 같은 본인확인 시도 기록은 본인확인 컨텍스트의 표라 메모리 저장소는 보지 못한다(빈 목록)
+        // 키 회전의 이음 동안 남은 옛 판 값도 함께 싣는다(BOT-046)
+        const contactRefs = this.contactRowsOf(id).flatMap((c) => [{ kind: c.kind, ref: c.ref }, ...(c.refPrev ? [{ kind: c.kind, ref: c.refPrev }] : [])]);
+        return [{ accountId: id, contactRefs, deviceRefs: [...this.devicesOf(id), ...this.devicePrevsOf(id)], identityConflicts: [] }];
+      }),
+    );
+  }
+
+  async accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]> {
+    return this.#serial(() =>
+      [...this.#state.accounts.values()]
+        .filter((a) => a.status === 'ACTIVE' && a.email && a.id > after && !this.#state.contacts.has(`${a.id}|EMAIL`))
+        .sort((x, y) => (x.id < y.id ? -1 : 1))
+        .slice(0, limit)
+        .map((a) => ({ accountId: a.id, email: a.email! })),
+    );
+  }
+
+  /** 시험용: 그 계정의 동의 행 */
+  consentsOf(accountId: string): { kind: string; noticeVersion: string; channels: string | null }[] {
+    return [...this.#state.consents.values()].filter((c) => c.accountId === accountId).map(({ kind, noticeVersion, channels }) => ({ kind, noticeVersion, channels }));
+  }
+
+  /** 시험용: 계정 수 */
+  accountCount(): number {
+    return this.#state.accounts.size;
+  }
+
+  /** 시험용: 로그인 수단 없이 그 이메일의 ACTIVE 계정을 만든다(같은 이메일 계정이 여럿인 경우) */
+  forceCreate(email: string, emailVerified: boolean): string {
+    const id = uuidv7({ now: () => Date.now(), monotonicMs: () => 0 });
+    this.#state.accounts.set(id, { id, status: 'ACTIVE', email, emailVerified, createdAt: 0 });
+    return id;
+  }
+
+  /** 시험용: 계정 상태를 바꾼다 */
+  setStatus(id: string, status: AccountRow['status']): void {
+    const a = this.#state.accounts.get(id);
+    if (a) a.status = status;
+  }
+
+  /** 시험이 보는 계정 행 */
+  accountOf(id: string): StoredAccount | undefined {
+    const a = this.#state.accounts.get(id);
+    return a ? { ...a } : undefined;
+  }
+
+  providerCount(accountId: string): number {
+    return [...this.#state.providers.values()].filter((p) => p.accountId === accountId).length;
+  }
+
+  /** 그 계정 세션들의 리프레시 토큰 해시 줄 수 */
+  refreshHashCount(accountId: string): number {
+    return [...this.#state.hashes.values()].filter((h) => this.#state.sessions.get(h.sessionId)?.accountId === accountId).length;
+  }
+
+  async purgeExpiredRefreshHashes(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const [k, h] of this.#state.hashes) {
+        const x = this.#state.sessions.get(h.sessionId);
+        if (h.expiresAt <= now || !x || !sessionAlive(x, now)) {
+          this.#state.hashes.delete(k);
+          n++;
+        }
+      }
+      return n;
+    });
+  }
+
+  async refreshOwner(hash: Uint8Array): Promise<string | null> {
+    return this.#serial(() => {
+      const h = hex(hash);
+      for (const x of this.#state.sessions.values()) if (hex(x.refreshHash) === h || (x.prevRefreshHash && hex(x.prevRefreshHash) === h)) return x.accountId;
+      return null;
+    });
+  }
+
+  async liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]> {
+    return this.#serial(() =>
+      [...this.#state.sessions.values()]
+        .filter((x) => x.accountId === accountId.toLowerCase() && sessionAlive(x, now))
+        .map((x) => ({ sessionId: x.id, deviceId: x.deviceId, deviceLabel: x.deviceLabel, lastActiveAt: x.lastActiveAt })),
+    );
+  }
+
+  async clearEndedDeviceLabels(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const x of this.#state.sessions.values())
+        if (x.deviceLabel !== null && x.absoluteExpiresAt <= now) {
+          x.deviceLabel = null;
+          n++;
+        }
+      return n;
+    });
+  }
+
+  async sessionOf(id: string): Promise<SessionRow | null> {
+    return this.#serial(() => {
+      const x = this.#state.sessions.get(id.toLowerCase());
+      return x ? row(x) : null;
+    });
+  }
+
+  async signupStateOf(accountId: string): Promise<SignupState | null> {
+    return this.#serial(() => signupStateIn(this.#state, accountId));
+  }
+
+  async nicknameKeyTaken(key: string): Promise<boolean> {
+    return this.#serial(() => nicknameTakenIn(this.#state, key));
+  }
+
+  async purgeReauthUses(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const [k, u] of this.#state.reauthUses) {
+        if (u.expiresAt <= now) {
+          this.#state.reauthUses.delete(k);
+          n++;
+        }
+      }
+      return n;
+    });
+  }
+
+  /** 트랜잭션과 같은 줄에 세워 바꾼다 */
+  #serial<T>(fn: () => T): Promise<T> {
+    const run = async () => fn();
+    const next = this.#queue.then(run, run);
+    this.#queue = next.catch(() => {});
+    return next;
+  }
+
+  /** 적힌 탈퇴 사건(BOT-037, 시험용) */
+  withdrawnMessages(): OutboxMessage[] {
+    return this.#state.outbox.filter((m) => m.topic === 'identity.accounts-withdrawn');
+  }
+
+  /** 남긴 병합 이력(시험용) */
+  mergesOf(primaryAccountId: string): { mergedAccountId: string; mergedProvider: string; moved: Record<string, number> }[] {
+    return [...this.#state.merges.values()].filter((m) => m.primaryAccountId === primaryAccountId).map((m) => ({ mergedAccountId: m.mergedAccountId, mergedProvider: m.mergedProvider, moved: m.moved }));
+  }
+
+  /** 적힌 모든 사건(시험용) */
+  outboxMessages(): OutboxMessage[] {
+    return [...this.#state.outbox];
+  }
+
   /** 그 계정의 세션 종료 사건(적힌 순서): [세션 ID, 사유] */
   terminations(accountId: string): Array<[string, string]> {
     return this.#state.events.filter((e) => e.accountId === accountId).map((e) => [e.sessionId, e.reason]);
@@ -97,37 +374,186 @@ export class MemorySessionStore implements SessionStore {
         const a = link && s.accounts.get(link.accountId);
         return a ? { id: a.id, status: a.status } : null;
       },
-      createAccount: async ({ id, email }, now) => {
-        s.accounts.set(id, { id, status: 'ACTIVE', email, createdAt: now });
+      createAccount: async ({ id, email, emailVerified }, now) => {
+        s.accounts.set(id, { id, status: 'ACTIVE', email, emailVerified: emailVerified === true, createdAt: now });
       },
+      findLinkTargets: async (email) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'ACTIVE' && a.emailVerified && a.email !== null && normalizeEmail(a.email) === email)
+          .sort((x, y) => (x.id < y.id ? -1 : 1))
+          .slice(0, 2)
+          .map((a) => ({
+            accountId: a.id,
+            providers: [...s.providers]
+              .filter(([, v]) => v.accountId === a.id)
+              .sort(([ka, a1], [kb, b1]) => a1.linkedAt - b1.linkedAt || (ka < kb ? -1 : 1))
+              .map(([k]) => k.split('\u0000')[0] as Provider),
+          })),
       linkProvider: async (accountId, provider, providerUserId, now) => {
         const k = providerKey(provider, providerUserId);
         if (s.providers.has(k)) throw new Error('account_provider (provider, provider_user_id) 중복');
-        s.providers.set(k, { accountId, linkedAt: now });
+        s.providers.set(k, { accountId, linkedAt: now, lastLoginAt: null });
       },
       isProviderLinked: async (accountId, provider, providerUserId) => s.providers.get(providerKey(provider, providerUserId))?.accountId === accountId,
-      bindDevice: async (accountId, ref, now) => {
+      providersOf: async (accountId) =>
+        [...s.providers]
+          .filter(([, v]) => v.accountId === accountId)
+          .map(([k, v]) => ({ provider: k.split('\u0000')[0] as Provider, linkedAt: v.linkedAt, lastLoginAt: v.lastLoginAt }))
+          .sort((a, b) => a.linkedAt - b.linkedAt),
+      touchProviderLogin: async (provider, providerUserId, now) => {
+        const v = s.providers.get(providerKey(provider, providerUserId));
+        if (v) v.lastLoginAt = now;
+      },
+      unlinkProvider: async (accountId, provider) => {
+        let n = 0;
+        for (const [k, v] of s.providers)
+          if (v.accountId === accountId && k.split('\u0000')[0] === provider) {
+            s.providers.delete(k);
+            n++;
+          }
+        return n;
+      },
+      openHoldsOf: async (accountId) => [...s.holds.values()].filter((h) => h.accountId === accountId && h.state === 'OPEN').length,
+      setAccountHold: async (i) => {
+        // 외래키처럼 없는 계정의 건은 쓰지 않는다(BOT-042가 넘긴 것)
+        if (!s.accounts.has(i.accountId)) return 'NOT_FOUND';
+        const h = s.holds.get(i.sourceRef);
+        if (h && (h.accountId !== i.accountId || h.kind !== i.kind)) return 'CONFLICT';
+        if (h && i.sourceVersion <= h.sourceVersion) return 'STALE';
+        s.holds.set(i.sourceRef, { accountId: i.accountId, kind: i.kind, state: i.state, sourceVersion: i.sourceVersion, updatedAt: i.now });
+        return 'APPLIED';
+      },
+      purgeClosedHolds: async (before) => {
+        let n = 0;
+        for (const [k, h] of s.holds)
+          if (h.state === 'CLOSED' && h.updatedAt < before) {
+            s.holds.delete(k);
+            n++;
+          }
+        return n;
+      },
+      mergeAccounts: async (i) => {
+        for (const [k, v] of s.providers) if (v.accountId === i.absorbedAccountId) s.providers.set(k, { ...v, accountId: i.primaryAccountId });
+        // 기기 행을 대표 계정으로 옮긴다(OPEN[22], PostgreSQL 저장소와 같은 세 단계).
+        const absorbedDevices = [...s.devices.values()].filter((d) => d.accountId === i.absorbedAccountId);
+        const primaryDevices = () => [...s.devices.values()].filter((d) => d.accountId === i.primaryAccountId);
+        // ① 흡수 행만 새 판이면(흡수 행의 옛 판 값이 대표 행의 device_ref) 대표 행이 행 ID 그대로 새 판 짝을 이어받는다. 대표 계정에 새 판 값의 행이 따로 있으면 바꾸지 않는다
+        for (const d of absorbedDevices) {
+          const old = d.prevRef && !primaryDevices().some((p) => p.ref === d.ref) ? primaryDevices().find((p) => p.ref === d.prevRef) : undefined;
+          if (old) s.devices.set(old.id, { ...old, ref: d.ref, prevRef: d.prevRef });
+        }
+        // ② 대표 계정에 같은 기기(device_ref·device_ref_prev 가운데 하나라도 같음, 빈 값 빼고)가 있으면 흡수 쪽 행을 지운다.
+        //    지운 행을 가리키던 세션의 기기 칸은 PostgreSQL의 ON DELETE SET NULL처럼 비운다. ③ 남은 행을 옮긴다
+        const primaryRefs = new Set(primaryDevices().flatMap((d) => [d.ref, ...(d.prevRef ? [d.prevRef] : [])]));
+        for (const d of absorbedDevices) {
+          if (primaryRefs.has(d.ref) || (d.prevRef && primaryRefs.has(d.prevRef))) {
+            s.devices.delete(d.id);
+            for (const x of s.sessions.values()) if (x.deviceId === d.id) x.deviceId = null;
+          } else s.devices.set(d.id, { ...d, accountId: i.primaryAccountId });
+        }
+        const a = s.accounts.get(i.absorbedAccountId);
+        if (a) s.accounts.set(i.absorbedAccountId, { ...a, status: 'MERGED', mergedInto: i.primaryAccountId, email: null, emailVerified: false, nickname: null, nicknameKey: null, phone: null, memberCode: null });
+        // 흡수 계정의 동의 행을 지운다(data.md consent)
+        for (const [k, c] of s.consents) if (c.accountId === i.absorbedAccountId) s.consents.delete(k);
+        for (const [k, x] of s.accounts) if (x.mergedInto === i.absorbedAccountId) s.accounts.set(k, { ...x, mergedInto: i.primaryAccountId });
+        // 흡수 계정의 프로필은 파기한다: 연락처 가명 행도 지운다(BOT-045)
+        for (const [k, c] of s.contacts) if (c.accountId === i.absorbedAccountId) s.contacts.delete(k);
+        s.merges.set(i.mergeId, { primaryAccountId: i.primaryAccountId, mergedAccountId: i.absorbedAccountId, mergedProvider: i.mergedProvider, moved: i.moved, requestedAt: i.requestedAt, confirmedAt: i.now });
+      },
+      recordAccountMerged: async (i) => {
+        s.outbox.push(accountMergedMessage(i));
+      },
+      recordLoginMethodChanged: async (i) => {
+        s.outbox.push(loginMethodChangedMessage({ eventKey: randomUUID(), ...i }));
+      },
+      bindDevice: async (accountId, ref, now, prevRef) => {
         const found = [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === ref);
         if (found) return found.id;
+        // 키 회전의 이음: 옛 판 값의 행이 있으면 새 판 값으로 바꾼다(새 기기로 세지 않는다, BOT-046)
+        const old = prevRef ? [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === prevRef) : undefined;
+        if (old) {
+          s.devices.set(old.id, { ...old, ref, prevRef });
+          return old.id;
+        }
         const id = uuidv7({ now: () => now, monotonicMs: () => 0 });
-        s.devices.set(id, { id, accountId, ref, boundAt: now });
+        s.devices.set(id, { id, accountId, ref, prevRef: prevRef ?? null, boundAt: now });
         return id;
       },
       activeSessions: async (accountId, now) =>
         [...s.sessions.values()]
           .filter((x) => x.accountId === accountId && sessionAlive(x, now))
           .map((x): ActiveSession => ({ sessionId: x.id, deviceId: x.deviceId, idleExpiresAt: x.idleExpiresAt })),
-      terminateSessions: async (ids, reason, now) => {
-        for (const id of ids) {
-          const x = s.sessions.get(id);
-          if (x && x.terminatedAt === null) {
-            x.terminatedAt = now;
-            s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
-          }
-        }
+      unterminatedSessions: async (accountId) => [...s.sessions.values()].filter((x) => x.accountId === accountId && x.terminatedAt === null).map((x) => x.id),
+      closureReasonOf: async (accountId) => {
+        const a = s.accounts.get(accountId);
+        return a && a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'UNDER_14' ? 'UNDER_14' : null;
+      },
+      markClosure: async (accountId, reason, now) => {
+        const a = s.accounts.get(accountId);
+        if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: now });
+      },
+      accountStatusOf: async (accountId) => s.accounts.get(accountId)?.status ?? null,
+      signupStateOf: async (accountId) => signupStateIn(s, accountId),
+      lockNicknameKey: async () => {},
+      nicknameKeyTaken: async (key) => nicknameTakenIn(s, key),
+      memberCodeTaken: async (code) => [...s.accounts.values()].some((a) => a.memberCode === code),
+      completeSignup: async (r: SignupRecord) => {
+        const a = s.accounts.get(r.accountId);
+        if (!a) return;
+        if (nicknameTakenIn(s, r.nicknameKey)) throw new Error('nickname_key UNIQUE 위반');
+        Object.assign(a, { ageVerified: true, nickname: r.nickname, nicknameKey: r.nicknameKey, phone: r.phone, memberCode: r.memberCode });
+        for (const c of r.consents) s.consents.set(`${r.accountId}|${c.kind}|${c.noticeVersion}`, { accountId: r.accountId, kind: c.kind, noticeVersion: c.noticeVersion, channels: c.channels, agreedAt: r.now });
+      },
+      incompleteSignupsBefore: async (before, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'ACTIVE' && !a.ageVerified && a.createdAt <= before)
+          .map((a) => a.id)
+          .sort()
+          .slice(0, limit),
+      eraseAccount: async (accountId, now) => {
+        const a = s.accounts.get(accountId);
+        if (!a) return;
+        s.accounts.set(accountId, { id: a.id, status: 'DELETED', email: null, emailVerified: false, createdAt: a.createdAt, deletedAt: now });
+        for (const [k, p] of s.providers) if (p.accountId === accountId) s.providers.delete(k);
+        for (const [k, d] of s.devices) if (d.accountId === accountId) s.devices.delete(k);
+        for (const [k, c] of s.keys) if (s.sessions.get(c.sessionId)?.accountId === accountId) s.keys.delete(k);
+        // 대표 계정이 탈퇴하면 그 계정의 병합 이력도 지운다(data-classification '계정 연결 및 병합 감사 원장', 새 맥락 리뷰 중간 6)
+        const chain = new Set([accountId, ...[...s.accounts.values()].filter((x) => x.mergedInto === accountId).map((x) => x.id)]);
+        for (const [k, m] of s.merges) if (chain.has(m.primaryAccountId)) s.merges.delete(k);
+        for (const [k, c] of s.contacts) if (c.accountId === accountId) s.contacts.delete(k);
+        for (const [k, c] of s.consents) if (c.accountId === accountId) s.consents.delete(k);
+      },
+      closuresStartedBefore: async (before, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'UNDER_14' && a.closureStartedAt !== undefined && a.closureStartedAt <= before)
+          .slice(0, limit)
+          .map((a) => a.id),
+      deletedSince: async (since, after, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'DELETED' && a.deletedAt !== undefined && a.deletedAt > since && a.id > after)
+          .map((a) => a.id)
+          .sort()
+          .slice(0, limit),
+      // 메모리 세션 저장소는 보관 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
+      activeHoldOf: async () => null,
+      setContactRef: async (i) => {
+        const k = `${i.accountId}|${i.kind}`;
+        const cur = s.contacts.get(k);
+        s.contacts.set(k, { accountId: i.accountId, kind: i.kind, ref: i.ref, refPrev: nextRefPrev(cur && { ref: cur.ref, refPrev: cur.refPrev ?? null }, i.ref, i.refPrev), updatedAt: i.now });
+      },
+      verifiedOf: async () => null,
+      useReauth: async (r) => {
+        if (s.reauthUses.has(r.jti)) return false;
+        s.reauthUses.set(r.jti, { accountId: r.accountId, usedAt: r.usedAt, expiresAt: r.expiresAt });
+        return true;
+      },
+      terminateSessions: async (ids, reason, now) => endIn(s, ids.map((id) => ({ id, reason })), now),
+      endSessions: async (items, now) => endIn(s, items, now),
+      recordWithdrawn: async (i) => {
+        s.outbox.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
-        s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false });
+        s.sessions.set(r.id, { ...r, terminatedAt: null, terminatedReason: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt });
       },
       getSessionForUpdate: async (id) => {
         const x = s.sessions.get(id.toLowerCase());
@@ -143,6 +569,7 @@ export class MemorySessionStore implements SessionStore {
         x.prevRefreshHash = x.refreshHash;
         x.refreshHash = hash;
         x.rotatedAt = now;
+        x.lastActiveAt = now;
         x.refreshUsed = false;
         x.idleExpiresAt = idleExpiresAt;
       },

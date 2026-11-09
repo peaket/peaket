@@ -13,6 +13,10 @@ import * as zod from 'zod';
 
 export const homeLayoutBannersItemAltMax = 300;
 
+export const homeLayoutBannersItemTitleMax = 40;
+
+export const homeLayoutBannersItemSubtitleMax = 80;
+
 export const homeLayoutBannersMax = 10;
 
 export const homeLayoutThemesItemNameMax = 30;
@@ -29,6 +33,8 @@ export const HomeLayout = zod.object({
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
   "alt": zod.string().min(1).max(homeLayoutBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "title": zod.string().min(1).max(homeLayoutBannersItemTitleMax).optional().describe('배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)'),
+  "subtitle": zod.string().min(1).max(homeLayoutBannersItemSubtitleMax).optional().describe('둘째 줄 80자 [가정](일시·장소 등)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
 })).max(homeLayoutBannersMax),

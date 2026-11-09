@@ -218,6 +218,22 @@ export function isRedisUnavailable(err: unknown): boolean {
   return /^(CLUSTERDOWN|TRYAGAIN|LOADING|MASTERDOWN|READONLY|NOREPLICAS)\b/.test(err.message);
 }
 
+/**
+ * 서버 메모리 부족으로 거절된 명령인가(maxmemory에 닿았고 정책이 noeviction이라 메모리를 더 쓰는 명령·`#!lua` 스크립트를 받지 않음,
+ * Valkey 답 'OOM command not allowed when used memory > 'maxmemory'.', docs/data.md §3 ADR-0109, BUILD_ORDER PRF-135).
+ *
+ * 판정: err가 Error이고 err.message가 /^OOM\b/에 맞을 때만 true다(앞 빈칸·소문자 'oom'·'ERR … OOM …'처럼 가운데 든 것은 false).
+ * Error가 아닌 값(글·null·undefined·객체)은 false다. 던지지 않는다.
+ *
+ * isRedisUnavailable과 섞지 않는다(OOM은 isRedisUnavailable이 false다): 메모리 부족은 잠깐 기다려 다시 보낸다고 풀리지 않으므로,
+ * 일시 장애로 다시 시도하는 루프(admission-ctrl 등)가 OOM에 돌지 않게 따로 가른다. 받는 쪽이 무엇으로 답할지는 그 서비스가 정한다
+ * (purchase-svc는 503 seat-store-unavailable + Retry-After, 까닭 oom은 지표·로그에만).
+ * `allow-oom` 스크립트 표시는 쓰지 않는다(메모리 부족이면 만료도 거절되고 RB-06을 따른다).
+ */
+export function isRedisOutOfMemory(err: unknown): boolean {
+  return err instanceof Error && /^OOM\b/.test(err.message);
+}
+
 export interface HotRedisOptions {
   /** 단일 노드 주소(redis:// 또는 rediss://) */
   url?: string;

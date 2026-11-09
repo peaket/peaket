@@ -19,6 +19,9 @@ export interface ChoiceCardsProps {
   required?: boolean;
   choices: readonly Choice[];
   defaultValue: string;
+  /** 주면 부르는 쪽이 값을 쥔다(실제 위저드, ADR-0245) */
+  value?: string;
+  onValueChange?: (value: string) => void;
   /** 기본값 카드에 '기본', 잠긴 화면에서 지금 값에 '지금 방식' 배지 */
   badgeFor?: { value: string; text: string; tone: 'primary' | 'outline' };
   /** 잠김(온세일 중): 바꿀 수 없음 이유 요소 id */
@@ -40,6 +43,8 @@ export function ChoiceCards({
   required,
   choices,
   defaultValue,
+  value: controlled,
+  onValueChange,
   badgeFor,
   lockedBy,
   padding = '14px 16px',
@@ -48,7 +53,12 @@ export function ChoiceCards({
   extraFor,
   hint,
 }: ChoiceCardsProps) {
-  const [value, setValue] = useState(defaultValue);
+  const [inner, setInner] = useState(defaultValue);
+  const value = controlled ?? inner;
+  const setValue = (v: string) => {
+    setInner(v);
+    onValueChange?.(v);
+  };
   const current = choices.find((c) => c.value === value);
   return (
     <>

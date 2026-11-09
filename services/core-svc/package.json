@@ -1,0 +1,38 @@
+{
+  "name": "@peaket/core-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "core-svc. 지금은 catalog 모듈의 공연(회차 묶음)·공연장·아티스트·다른 이름·회차 데이터와 회차 공개 요약(GET /v1/events/{eventId}), 대표 회차·카드 판매 상태 계산(ADR-0093, BUILD_ORDER HOT-170 ①), 공연 등록·회차 더하기·찜(ADR-0198, HOT-171)만 있다. notify·shop·review·support 모듈과 이미지·좌석맵·판매 승인 경로는 뒤 단계가 더한다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "migrate": "node scripts/migrate.mjs",
+    "db:generate": "node scripts/db-generate.mjs",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "@peaket/search-normalize": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "fastify": "^5.12.7",
+    "pg": "^8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

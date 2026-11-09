@@ -6,6 +6,9 @@ export const REFRESH_COOKIE = '__Secure-peaket_rt';
 export const REFRESH_PATH = '/v1/identity/access-tokens';
 export const PROGRESS_COOKIE = '__Host-peaket_oidc';
 export const REAUTH_COOKIE = '__Host-peaket_reauth';
+/** 가입 때 계정 연결 제안 쿠키(identity §2.1·§3, 10분): 제안 ID·브라우저 묶음 값·돌아갈 주소를 봉인한다 */
+export const LINK_COOKIE = '__Host-peaket_link';
+export const LINK_TTL_MS = 10 * 60_000;
 /** 로그인 진행 쿠키 10분 [가정], 재인증 결과 쿠키 1분 [가정](identity §3·§7.1) */
 export const PROGRESS_TTL_MS = 10 * 60_000;
 export const REAUTH_RESULT_TTL_MS = 60_000;
@@ -37,6 +40,9 @@ export const clearProgressCookie = () => `${PROGRESS_COOKIE}=; Path=/; Max-Age=0
 /** 재인증 결과 쿠키: 화면 스크립트의 같은 출처 POST만 읽으면 되므로 Strict다 */
 export const reauthCookie = (v: string) => `${REAUTH_COOKIE}=${v}; Path=/; Max-Age=${maxAge(REAUTH_RESULT_TTL_MS)}; ${BASE}; SameSite=Strict`;
 export const clearReauthCookie = () => `${REAUTH_COOKIE}=; Path=/; Max-Age=0; ${BASE}; SameSite=Strict`;
+/** 연결 제안 쿠키: 기존 제공자 로그인에서 돌아오는 최상위 GET에 실려야 해서 Lax다(identity §3) */
+export const linkCookie = (v: string) => `${LINK_COOKIE}=${v}; Path=/; Max-Age=${maxAge(LINK_TTL_MS)}; ${BASE}; SameSite=Lax`;
+export const clearLinkCookie = () => `${LINK_COOKIE}=; Path=/; Max-Age=0; ${BASE}; SameSite=Lax`;
 
 export function cookieOf(req: Request, name: string): string | undefined {
   for (const part of (req.headers.get('cookie') ?? '').split(';')) {

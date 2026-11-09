@@ -27,11 +27,17 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 엣지 저장소 맞추기 도구(ADR-0223 결정 10)
+      - run: node --test "tools/edge/*.test.mjs"
+      # 결제사 스모크 도구(BUILD_ORDER HOT-145. 실제 결제사를 부르지 않는다)
+      - run: node --test "tools/pg-smoke/*.test.mjs"
       # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
       - run: node --test "tools/perf-ledger/*.test.mjs"
       - run: python3 -I -X utf8 tools/perf-ledger/collect.py --selftest
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
       - run: node tools/ci/check-workspace-protocol.mjs
+      # 신뢰 정책 예외는 이름@정확한 판만, devops §4.4 예외 표에 적은 것만(ADR-0191)
+      - run: node tools/ci/check-trust-exceptions.mjs
       # Kafka 클라이언트 필수 설정 정적 검사(D-T45, ADR-0142 결정 3)
       - run: node tools/ci/check-kafka-settings.mjs

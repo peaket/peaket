@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>좌석맵 시연(@peaket/seatmap, BUILD_ORDER HOT-120)</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
+      #map { display: block; width: 640px; height: 480px; }
+      .bar { padding: 8px; display: flex; gap: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <button id="zin" type="button" aria-label="확대">+</button>
+      <button id="zout" type="button" aria-label="축소">−</button>
+      <button id="fit" type="button">전체 보기</button>
+      <span id="hint" role="status"></span>
+    </div>
+    <!-- 좌석맵 캔버스는 aria-hidden이다(접근성 대안 목록은 좌석 화면 HOT-350이 둔다) -->
+    <canvas id="map" aria-hidden="true"></canvas>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

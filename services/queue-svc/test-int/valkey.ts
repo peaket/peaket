@@ -29,7 +29,7 @@ export async function startValkey(o: { cluster?: boolean; configEpoch?: number }
     url: `redis://127.0.0.1:${port}`,
     stop: () => {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }
@@ -54,7 +54,7 @@ export async function startValkeyPair(): Promise<ValkeyPair> {
   const stop = () => {
     for (const id of ids) {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }

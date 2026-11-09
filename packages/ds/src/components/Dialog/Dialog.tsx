@@ -1,21 +1,18 @@
 'use client';
-// CMP-019 Dialog. 캔버스 키트 14절 .scrim + .dialog(가운데 대화상자) / .scrim.bottom + .sheet(바텀 시트) 마크업을 그대로 낸다.
+// CMP-019 Dialog. 캔버스 키트 14절 .scrim + .dialog(가운데 대화상자) / .scrim.bottom + .sheet(바텀 시트) 마크업을 그대로 내고,
+// 동작은 SEED 동작 부품 @seed-design/react-dialog에 맡긴다(ADR-0192 결정 2).
 // - role="dialog"(기본) 또는 "alertdialog"(시간 제한 경고·위험 확인), aria-modal, 제목은 aria-labelledby, 설명은 aria-describedby.
-// - 열리면 초점을 안으로 옮기고(initialFocus 또는 첫 초점 가능 요소) Tab·Shift+Tab을 안에서 돌린다(초점 가두기).
-//   Esc와 바깥(scrim) 누르기로 닫고(dismissible), 닫히면 연 요소(트리거)로 초점을 되돌린다. 열린 동안 바탕 스크롤을 막는다.
+// - SEED가 하는 것: 초점 가두기(Tab·Shift+Tab이 안에서 돈다), 열린 동안 바깥 내용을 보조기기에서 숨기기(hideOthers),
+//   Esc·바깥(scrim) 누르기로 닫기(겹친 층은 맨 위만, dismissible이 거짓이면 닫지 않는다), 바탕 스크롤 막기(iOS 포함).
+// - 이 부품이 하는 것: 열릴 때 초점을 initialFocus(없으면 첫 초점 가능 요소)로 옮기고(SEED 기본은 대화상자 자신),
+//   닫힐 때 연 요소로 되돌린다. SEED 초점 범위는 대화상자 요소를 ref로 받아 다음 커밋에서야 효과가 돌아, 그때는 이 부품이
+//   이미 안으로 초점을 옮긴 뒤다. 그래서 SEED 쪽 첫 초점은 건너뛰고, 대화상자 안 요소를 되돌릴 곳으로 기억한다.
+//   되돌리기는 어떤 효과보다 먼저 도는 레이아웃 효과에서 연 요소를 기억해 이 부품이 한다(2026-11-04 재현 시험).
 // - layout: dialog · sheet · auto(휴대폰 배치 md 768 미만은 시트, 그 위는 대화상자. d2 info 변형).
 // - 키트의 .scrim은 보드 안 절대 위치라 화면에서는 position:fixed로 덮는다(인라인 스타일, 코드 값).
 // - 모달 위에 모달을 겹치지 않는다(d2). 상태 미리보기는 open을 참으로 두고 그린다(서버에서도 열린 채로 그려진다).
-import {
-  useEffect,
-  useId,
-  useRef,
-  type CSSProperties,
-  type KeyboardEvent,
-  type MouseEvent,
-  type ReactNode,
-  type RefObject,
-} from 'react';
+import { DialogContent, DialogDescription, DialogPositioner, DialogRoot, DialogTitle } from '@seed-design/react-dialog';
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { cx } from '../../lib/cx';
 import { useMediaQuery } from '../../lib/hooks';
 import { Icon, type IconName } from '../../icons';
@@ -58,8 +55,8 @@ export interface DialogProps {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function focusables(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => !el.hasAttribute('hidden') && el.getClientRects().length > 0);
+function firstFocusable(root: HTMLElement): HTMLElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).find((el) => !el.hasAttribute('hidden') && el.getClientRects().length > 0);
 }
 
 export function Dialog({
@@ -92,51 +89,25 @@ export function Dialog({
   const wide = useMediaQuery('(min-width: 768px)', true);
   const sheet = layout === 'sheet' || (layout === 'auto' && !wide);
 
-  // 열릴 때: 트리거 기억 → 안으로 초점 → 바탕 스크롤 막기. 닫힐 때: 되돌리기
-  useEffect(() => {
+  // 연 요소를 기억했다가 닫힐 때(또는 열린 채 사라질 때) 되돌린다. 레이아웃 효과라 초점을 옮기는 어떤 효과보다 먼저 돈다
+  useLayoutEffect(() => {
     if (!open) return;
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const panel = panelRef.current;
-    const target = initialFocus?.current ?? (panel ? focusables(panel)[0] : undefined) ?? panel;
-    target?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = prevOverflow;
       if (trigger && document.contains(trigger)) trigger.focus();
     };
+  }, [open]);
+
+  // 열린 첫 커밋에서 initialFocus나 첫 초점 가능 요소로 옮긴다(SEED 초점 범위의 효과는 그다음 커밋에 돈다)
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    const target = initialFocus?.current ?? (panel ? firstFocusable(panel) : undefined) ?? panel;
+    target?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape' && dismissible) {
-      event.stopPropagation();
-      onCloseRef.current();
-      return;
-    }
-    if (event.key !== 'Tab' || !panelRef.current) return;
-    const list = focusables(panelRef.current);
-    if (list.length === 0) {
-      event.preventDefault();
-      return;
-    }
-    const first = list[0]!;
-    const last = list[list.length - 1]!;
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || active === panelRef.current)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  const onScrimDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (dismissible && event.target === event.currentTarget) onCloseRef.current();
-  };
 
   const iconSize = iconPlacement === 'inline' ? 44 : 56;
   const iconEl = icon ? (
@@ -148,9 +119,9 @@ export function Dialog({
     </span>
   ) : null;
   const titleEl = (
-    <h2 className={sheet ? 't-lg' : 'dialog-title'} id={titleId}>
+    <DialogTitle className={sheet ? 't-lg' : 'dialog-title'} id={titleId}>
       {title}
-    </h2>
+    </DialogTitle>
   );
   const head =
     iconPlacement === 'inline' ? (
@@ -169,33 +140,36 @@ export function Dialog({
     );
 
   return (
-    <div
-      className={cx('scrim', sheet && 'bottom')}
-      style={{ position: 'fixed', ...(sheet ? null : { overflowY: 'auto' }) }}
-      onMouseDown={onScrimDown}
+    <DialogRoot
+      open
+      onOpenChange={(next) => {
+        if (!next) onCloseRef.current();
+      }}
+      role={role}
+      closeOnEscape={dismissible}
+      closeOnInteractOutside={dismissible}
     >
-      <div
-        ref={panelRef}
-        className={cx(sheet ? 'sheet' : 'dialog', className)}
-        role={role}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={[description ? descId : '', describedBy ?? ''].filter(Boolean).join(' ') || undefined}
-        tabIndex={-1}
-        style={{ ...(maxWidth && !sheet ? { maxWidth } : null), ...(sheet ? { maxHeight: '90dvh', overflowY: 'auto' } : null), ...style }}
-        onKeyDown={onKeyDown}
-      >
-        {sheet ? <span className="sheet-handle" aria-hidden="true" /> : null}
-        {head}
-        {description ? (
-          <p className="t-sm" id={descId}>
-            {description}
-          </p>
-        ) : null}
-        {children}
-        {actions ? sheet ? actions : <div className="dialog-actions">{actions}</div> : null}
-        {footnote ? <p className="t-xs muted">{footnote}</p> : null}
-      </div>
-    </div>
+      <DialogPositioner className={cx('scrim', sheet && 'bottom')} style={{ position: 'fixed', ...(sheet ? null : { overflowY: 'auto' }) }}>
+        <DialogContent
+          ref={panelRef}
+          className={cx(sheet ? 'sheet' : 'dialog', className)}
+          aria-labelledby={titleId}
+          aria-describedby={[description ? descId : '', describedBy ?? ''].filter(Boolean).join(' ') || undefined}
+          tabIndex={-1}
+          style={{ ...(maxWidth && !sheet ? { maxWidth } : null), ...(sheet ? { maxHeight: '90dvh', overflowY: 'auto' } : null), ...style }}
+        >
+          {sheet ? <span className="sheet-handle" aria-hidden="true" /> : null}
+          {head}
+          {description ? (
+            <DialogDescription className="t-sm" id={descId}>
+              {description}
+            </DialogDescription>
+          ) : null}
+          {children}
+          {actions ? sheet ? actions : <div className="dialog-actions">{actions}</div> : null}
+          {footnote ? <p className="t-xs muted">{footnote}</p> : null}
+        </DialogContent>
+      </DialogPositioner>
+    </DialogRoot>
   );
 }

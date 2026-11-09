@@ -43,7 +43,7 @@ afterAll(async () => {
 const post = (url: string, headers: Record<string, string>, payload: string) => svc.http.inject({ method: 'POST', url, headers, payload });
 
 describe('본문 형식', () => {
-  test('ASVS_3_5_2_FND070_표시하지않은경로의_text_plain·폼·형식없는본문은_415다 [ASVS v5.0.0-3.5.2]', async () => {
+  test('FND070_표시하지않은경로의_text_plain·폼·형식없는본문은_415다 [ASVS v5.0.0-3.5.2]', async () => {
     const cases: Record<string, string>[] = [
       { 'content-type': 'text/plain' },
       { 'content-type': 'text/plain; charset=utf-8' },

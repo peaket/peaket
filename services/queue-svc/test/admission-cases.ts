@@ -66,6 +66,14 @@ export interface AdmissionHarness {
   dup(pid: string, eventId: string): Promise<string | null>;
   adm(pid: string, eventId: string): Promise<string | null>;
   setAdm(pid: string, eventId: string, v: string): Promise<void>;
+  /** 자리를 처음 잡은 시각(slot_of의 '<해시>:at')을 바꾼다 */
+  setIssuedAt(eventId: string, ticketHash: string, atMs: number): Promise<void>;
+  /** 로비 셔플 결과 q:lobby:{해시} = {번호}:{세대} */
+  setLobbyResult(hash: string, seq: number, gen: number, expireAtMs: number): Promise<void>;
+  addLobbyMember(eventId: string, hash: string): Promise<void>;
+  setLobbyPublished(eventId: string, atMs: number): Promise<void>;
+  /** repair:lobby 값(없으면 null) */
+  lobbyRepair(eventId: string): Promise<string | null>;
 }
 
 let pidN = 0;
@@ -99,6 +107,89 @@ export function admissionCases(name: string, setup: () => Promise<AdmissionHarne
     expect((e as AdmissionError).code).toBe(code);
     return e as AdmissionError;
   };
+
+  // 로비 참가자(HOT-040, ADR-0231 결정 10): 참가 토큰을 대기표 자리에 넣어 같은 확인·입장 Lua를 탄다
+  async function lobbyWorld(o: { seq?: number | null; serving?: number; published?: boolean; member?: boolean; schedule?: Partial<EventSchedule> } = {}) {
+    const a = await world({ serving: o.serving ?? 200, ...(o.schedule ? { schedule: o.schedule } : {}) });
+    const lobbyToken = tokens.lobby({ e: a.eventId, a: ACCOUNT, d: DEVICE, iat: a.now, jny: JNY });
+    const hash = tokens.hash(lobbyToken);
+    if (o.member !== false) await a.h.addLobbyMember(a.eventId, hash);
+    if (o.published !== false) await a.h.setLobbyPublished(a.eventId, a.now - 5_000);
+    if (o.seq !== null) await a.h.setLobbyResult(hash, o.seq ?? 150, 1, a.now + 86_400_000);
+    return { ...a, lobbyToken, hash, enter: (o2: Partial<ConfirmInput> & { pid?: string } = {}) => a.app.run({ accountId: ACCOUNT, sessionId: 'sess-1', eventId: a.eventId, body: { lobbyToken }, ...o2, pid: o2.pid ?? PID }) };
+  }
+
+  test(`[${name}] [ASVS v5.0.0-9.1.1] Q-T60 참가 토큰으로 입장하면 입장 토큰 jny는 참가 토큰의 값이고 q:adm은 토큰 해시로 잡는다`, async () => {
+    const a = await lobbyWorld();
+    await a.h.setDup(PID, a.eventId, `LOBBY:${a.hash}:rq-1`);
+    const r = await a.enter();
+    expect(r.status).toBe('ADMITTED');
+    if (r.status !== 'ADMITTED') return;
+    expect(readAdmissionToken(r.admissionToken).claims).toMatchObject({ jny: JNY });
+    expect(await a.h.adm(PID, a.eventId)).toMatch(new RegExp(`^${a.hash}:`));
+    expect(await a.h.dup(PID, a.eventId)).toBeNull();
+    expect((await a.h.slots(a.eventId)).size).toBe(1);
+  });
+
+  test(`[${name}] 참가 토큰의 MAC·회차·계정이 틀리면 403 TICKET_INVALID이고, 대기표 자리에 넣은 참가 토큰도 같다`, async () => {
+    const a = await lobbyWorld();
+    await rejects(a.enter({ body: { lobbyToken: `${a.lobbyToken.slice(0, -2)}xx` } }), 'TICKET_INVALID');
+    await rejects(a.enter({ accountId: OTHER_ACCOUNT }), 'TICKET_INVALID');
+    await rejects(a.enter({ eventId: `${a.eventId}x` }), 'TICKET_INVALID');
+    await rejects(a.confirm(a.lobbyToken), 'TICKET_INVALID');
+    expect(await a.h.adm(PID, a.eventId)).toBeNull();
+  });
+
+  test(`[${name}] 셔플 결과 게시 전이면 200 NOT_YET(2초)이고, 결과 키를 잃은 참가자는 repair:lobby를 쓰고 503이며, 참가자가 아니면 403이다`, async () => {
+    const pending = await lobbyWorld({ seq: null, published: false });
+    const r = await pending.enter();
+    expect(r).toMatchObject({ status: 'NOT_YET', retryAfterMs: 2_000 });
+    const lost = await lobbyWorld({ seq: null });
+    await rejects(lost.enter(), 'LOBBY_REPAIRING');
+    expect(await lost.h.lobbyRepair(lost.eventId)).not.toBeNull();
+    const gone = await lobbyWorld({ seq: null, member: false });
+    await rejects(gone.enter(), 'TICKET_INVALID');
+    expect(await gone.h.adm(PID, gone.eventId)).toBeNull();
+  });
+
+  test(`[${name}] Q-T38 판매 종료 뒤의 참가 토큰은 결과를 읽기 전에 410이고, 일정 사본이 없는 회차는 404다`, async () => {
+    const ended = await lobbyWorld({ seq: null, published: false, schedule: { startsAtMs: Date.now() + 3_600_000 } });
+    await rejects(ended.enter(), 'SALE_ENDED');
+    const none = await lobbyWorld({ seq: null, published: false });
+    const other = `${none.eventId}-none`;
+    await rejects(none.enter({ eventId: other, body: { lobbyToken: tokens.lobby({ e: other, a: ACCOUNT, d: DEVICE, iat: none.now, jny: JNY }) } }), 'NOT_FOUND');
+  });
+
+  test(`[${name}] [ASVS v5.0.0-9.2.1] 참가 토큰도 차례 뒤 15분이 지나면 410이고 LOBBY 값의 q:dup을 지운다`, async () => {
+    const a = await lobbyWorld();
+    await a.h.setDup(PID, a.eventId, `LOBBY:${a.hash}:rq-1`);
+    await a.h.logServing(a.eventId, a.now - TURN_GRACE_MS - 5_000, 200);
+    await rejects(a.enter(), 'EXPIRED');
+    expect(await a.h.dup(PID, a.eventId)).toBeNull();
+  });
+
+  test(`[${name}] Q-T45 참가 토큰의 입장도 전환 기간에는 옛 pid → 새 pid 두 키를 함께 마무리한다`, async () => {
+    const a = await lobbyWorld();
+    await a.h.setDup(PID, a.eventId, `LOBBY:${a.hash}:rq-1`);
+    await a.h.setDup('pid-old-x', a.eventId, `LOBBY:${a.hash}:rq-1`);
+    const r = await a.enter({ pidPrev: 'pid-old-x' });
+    expect(r.status).toBe('ADMITTED');
+    expect(await a.h.dup(PID, a.eventId)).toBeNull();
+    expect(await a.h.dup('pid-old-x', a.eventId)).toBeNull();
+    expect(await a.h.adm('pid-old-x', a.eventId)).toMatch(new RegExp(`^${a.hash}:`));
+  });
+
+  test(`[${name}] Q-T64⑤ 일정 사본에 좌석맵 판이 있으면 입장 확정 응답에 그 회차의 좌석맵 파일 경로를 싣고, 없으면 그 칸을 뺀다`, async () => {
+    const a = await world({ schedule: { layoutVersion: 7 } });
+    const r = await a.confirm(a.ticket(150));
+    expect(r.status).toBe('ADMITTED');
+    if (r.status !== 'ADMITTED') return;
+    expect(r.seatmapLayoutPath).toBe(`/v1/events/${encodeURIComponent(a.eventId)}/seatmap-layouts/7.json`);
+    const b = await world();
+    const none = await b.confirm(b.ticket(150, { a: 'other-account' }), { accountId: 'other-account', pid: 'pid-other' });
+    expect(none.status).toBe('ADMITTED');
+    expect('seatmapLayoutPath' in none).toBe(false);
+  });
 
   test(`[${name}] 차례가 온 대기표는 ADMITTED와 입장 토큰(typ·iss·aud·jti·sid·event·jny·exp)을 받고, 자리·입장 수·1인 1순번 키가 남고 q:dup이 지워진다(Q-T60)`, async () => {
     const { h, eventId, ticket, confirm } = await world();
@@ -138,6 +229,25 @@ export function admissionCases(name: string, setup: () => Promise<AdmissionHarne
     expect(jc).not.toBe(ja);
     expect([...(await h.slots(eventId)).keys()]).toEqual([jc]);
     expect((await h.adm(PID, eventId))?.startsWith(`${tokens.hash(t)}:`)).toBe(true);
+  });
+
+  test(`[${name}] BAS-042 같은 대기표로 다시 받는 입장 토큰은 첫 발급 + 최대 체류를 exp로 두고, 그 시각이 지났으면 다시 주지 않고 410 만료(rejoinAllowed 거짓)다(exp < iat 토큰을 내지 않는다, HOT-010 리뷰)`, async () => {
+    const { h, eventId, ticket, confirm } = await world();
+    const t = ticket(150);
+    const a = await confirm(t);
+    if (a.status !== 'ADMITTED') throw new Error('ADMITTED가 아니다');
+    const near = h.clock.now() - MAX_STAY_MS + 60_000;
+    await h.setIssuedAt(eventId, tokens.hash(t), near);
+    const b = await confirm(t);
+    if (b.status !== 'ADMITTED') throw new Error('ADMITTED가 아니다');
+    const cb = readAdmissionToken(b.admissionToken).claims;
+    expect(cb.exp).toBe(Math.floor(near / 1000) + MAX_STAY_MS / 1000);
+    expect(cb.exp as number).toBeGreaterThan(cb.iat as number);
+    expect(Date.parse(b.purchaseSessionExpiresAt)).toBe((cb.exp as number) * 1000);
+    await h.setIssuedAt(eventId, tokens.hash(t), h.clock.now() - MAX_STAY_MS);
+    const e = await rejects(confirm(t), 'EXPIRED');
+    expect(e.rejoinAllowed).toBe(false);
+    expect(await h.admitted(eventId)).toBe(1);
   });
 
   test(`[${name}] 같은 대기표의 요청 둘이 동시에 와도 자리·입장 수는 하나이고 같은 jti를 받는다(ADR-0183 결정 2)`, async () => {

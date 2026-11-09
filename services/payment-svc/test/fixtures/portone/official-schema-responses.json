@@ -1,0 +1,176 @@
+{
+  "_provenance": "공식 스키마(developers.portone.io/schema/v2.openapi.json 1.16.0, 2026-11-09 확인)로 손으로 쓴 응답이다. 실제 녹화가 아니다. 계정이 없어 포트원 서버의 실제 응답과 대조하지 못했다(docs/features/payment.md §2.1 '계약 시험과 실제 결제사 호출의 몫'). 응답 칸 일부만 적었다(어댑터가 읽는 칸 위주이고, 공식 스키마의 필수 칸이 빠진 답도 있다). 카드 번호와 식별자는 지어낸 값이다.",
+  "confirmPaid": {
+    "status": 200,
+    "body": { "pgTxId": "pg-tx-fixture-1", "paidAt": "2026-11-09T01:00:00.000Z" }
+  },
+  "paidCard": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "merchantId": "merchant-fixture",
+      "storeId": "store-fixture",
+      "method": {
+        "type": "PaymentMethodCard",
+        "card": { "publisher": "SHINHAN", "issuer": "SHINHAN", "brand": "VISA", "type": "CREDIT", "ownerType": "PERSONAL", "bin": "43301234", "name": "시험 카드", "number": "43301234****1234" },
+        "approvalNumber": "00000001",
+        "pointUsed": false
+      },
+      "channel": { "type": "TEST", "id": "channel-fixture", "key": "channel-key-fixture", "name": "시험", "pgProvider": "KCP_V2", "pgMerchantId": "pg-fixture" },
+      "version": "V2",
+      "requestedAt": "2026-11-09T00:59:00.000Z",
+      "updatedAt": "2026-11-09T01:00:00.000Z",
+      "statusChangedAt": "2026-11-09T01:00:00.000Z",
+      "orderName": "공연 티켓",
+      "amount": { "total": 10000, "taxFree": 0, "vat": 909, "supply": 9091, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "customer": {},
+      "promotionId": null,
+      "isCulturalExpense": false,
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1",
+      "receiptUrl": "https://example.test/receipt",
+      "origin": { "type": "API" },
+      "disputes": []
+    }
+  },
+  "paidCardNoIssuer6DigitBin": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodCard", "card": { "type": "DEBIT", "bin": "433012", "number": "433012******1234" } },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidCardNoCardFields": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodCard" },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidEasyPayCard": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": {
+        "type": "PaymentMethodEasyPay",
+        "provider": "KAKAOPAY",
+        "easyPayMethod": {
+          "type": "PaymentMethodCard",
+          "card": { "issuer": "KOOKMIN", "type": "DEBIT", "bin": "43301234", "number": "43301234****5678" }
+        }
+      },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidEasyPayCharge": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodEasyPay", "provider": "KAKAOPAY", "easyPayMethod": { "type": "PaymentMethodEasyPayMethodCharge" } },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidEasyPayTransfer": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodEasyPay", "provider": "TOSSPAY", "easyPayMethod": { "type": "PaymentMethodTransfer", "bank": "SHINHAN" } },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidEasyPayNoMethod": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodEasyPay", "provider": "KAKAOPAY" },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "paidTransfer": {
+    "status": 200,
+    "body": {
+      "status": "PAID",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodTransfer", "bank": "SHINHAN" },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 10000, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW",
+      "paidAt": "2026-11-09T01:00:00.000Z",
+      "pgTxId": "pg-tx-fixture-1"
+    }
+  },
+  "virtualAccountIssued": {
+    "status": 200,
+    "body": {
+      "status": "VIRTUAL_ACCOUNT_ISSUED",
+      "id": "pay-0195f3a0-0000-7000-8000-00000000a001",
+      "transactionId": "tx-fixture-1",
+      "method": { "type": "PaymentMethodVirtualAccount", "bank": "SHINHAN", "accountNumber": "0000000000", "accountType": "NORMAL", "remitteeName": "시험" },
+      "amount": { "total": 10000, "taxFree": 0, "discount": 0, "paid": 0, "cancelled": 0, "cancelledTaxFree": 0 },
+      "currency": "KRW"
+    }
+  },
+  "alreadyPaid": { "status": 409, "body": { "type": "ALREADY_PAID", "message": "이미 결제되었습니다." } },
+  "outstanding": { "status": 409, "body": { "type": "IDEMPOTENCY_OUTSTANDING_REQUEST", "message": "같은 멱등키의 요청을 처리하고 있습니다." } },
+  "informationMismatch": { "status": 409, "body": { "type": "INFORMATION_MISMATCH", "message": "결제 정보가 일치하지 않습니다." } },
+  "invalidPaymentToken": { "status": 400, "body": { "type": "INVALID_PAYMENT_TOKEN", "message": "결제 토큰이 유효하지 않습니다." } },
+  "invalidRequest": { "status": 400, "body": { "type": "INVALID_REQUEST", "message": "요청이 올바르지 않습니다." } },
+  "unauthorized": { "status": 401, "body": { "type": "UNAUTHORIZED", "message": "인증 정보가 올바르지 않습니다." } },
+  "forbidden": { "status": 403, "body": { "type": "FORBIDDEN", "message": "권한이 없습니다." } },
+  "paymentNotFound": { "status": 404, "body": { "type": "PAYMENT_NOT_FOUND", "message": "결제 건이 존재하지 않습니다." } },
+  "pgProvider": { "status": 502, "body": { "type": "PG_PROVIDER", "message": "PG사에서 오류가 발생했습니다.", "pgCode": "9999", "pgMessage": "카드 거절" } },
+  "cancelSucceeded": {
+    "status": 200,
+    "body": {
+      "cancellation": {
+        "status": "SUCCEEDED",
+        "id": "cancel-fixture-1",
+        "pgCancellationId": "pg-cancel-fixture-1",
+        "totalAmount": 3000,
+        "taxFreeAmount": 0,
+        "vatAmount": 273,
+        "reason": "고객 요청",
+        "requestedAt": "2026-11-09T01:10:00.000Z",
+        "cancelledAt": "2026-11-09T01:10:00.000Z",
+        "receiptUrl": "https://example.test/receipt"
+      }
+    }
+  },
+  "cancelRequested": { "status": 200, "body": { "cancellation": { "status": "REQUESTED", "id": "cancel-fixture-2", "totalAmount": 3000, "taxFreeAmount": 0, "reason": "고객 요청", "requestedAt": "2026-11-09T01:10:00.000Z" } } },
+  "paymentAlreadyCancelled": { "status": 409, "body": { "type": "PAYMENT_ALREADY_CANCELLED", "message": "이미 취소된 결제입니다." } }
+}

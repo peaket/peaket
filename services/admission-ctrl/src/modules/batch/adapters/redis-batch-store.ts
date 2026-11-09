@@ -5,7 +5,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchEntry, BatchStore, ClosedBatch, PublishedBatch } from '../domain/ports.js';
+import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, EmergencyMark, PublishedBatch, RecommitMark, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
 
 export const ADMISSION_REDIS = Symbol('admission.QueueRedis');
 /** 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], PEAKET_QUEUE_REDIS_MIN_REPLICAS) */
@@ -26,9 +26,17 @@ export const keys = {
   cfg: (e: string) => `q:{event:${e}}:cfg`,
   batchDone: (e: string) => `q:{event:${e}}:batch_done`,
   batchMembers: (e: string, n: number) => `q:{event:${e}}:batch_members:${n}`,
+  lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
   removed: (e: string) => `q:{event:${e}}:removed`,
+  verify: (e: string) => `q:{event:${e}}:verify`,
+  shuffle: (e: string) => `q:{event:${e}}:shuffle`,
   batchResult: (tokenHash: string) => `q:batch:{${tokenHash}}`,
+  lobbyResult: (tokenHash: string) => `q:lobby:{${tokenHash}}`,
 };
+
+/** 구간별 참가자 목록·결과 키(로비 q:lobby:{hash}, 묶음 q:batch:{hash}) */
+const membersKey = (e: string, g: ShuffleGroup): string => (g === 'lobby' ? keys.lobbyMembers(e) : keys.batchMembers(e, g));
+const resultKey = (g: ShuffleGroup, h: string): string => (g === 'lobby' ? keys.lobbyResult(h) : keys.batchResult(h));
 
 /** 결과 쓰기 한 번에 보내는 명령 수(같은 이벤트 루프 차례의 명령을 node-redis가 묶어 보낸다) */
 const CHUNK = 1_000;
@@ -44,10 +52,38 @@ if redis.call('HGET', KEYS[1], ARGV[2]) ~= ARGV[1] then return 0 end
 redis.call('HSET', KEYS[1], 'wait:' .. ARGV[2], ARGV[3])
 return 1
 `);
+// 멈춤 표시: 비어 있을 때만 쓰고(HSETNX 결과를 돌려준다) 수명을 회차 키와 같게 늦은 쪽으로만 늘린다(공시 기록 없이 멈춤만 써도 키가 영원히 남지 않게)
+const STOP_SHUFFLE = redisScript(`
+local wrote = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[3]) then redis.call('PEXPIREAT', KEYS[1], ARGV[3]) end
+return wrote
+`);
 // 게시 표시는 비어 있을 때만 쓴다
 const MARK_PUBLISHED = redisScript(`
 redis.call('HSETNX', KEYS[1], 'pub:' .. ARGV[1], ARGV[2])
 redis.call('HSETNX', KEYS[1], 'root:' .. ARGV[1], ARGV[3])
+return 1
+`);
+// 머클 루트 공시: 비어 있을 때만 쓰고 공시 시각은 저장소 시각이다. 파드 시계가 어긋나도 라운드 시각과 견줄 수 있게 한다(ADR-0232 결정 5). 남아 있는 값을 돌려준다
+const MARK_ROOT = redisScript(`
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then redis.call('HSET', KEYS[1], ARGV[3], tostring(now)) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[4]) then redis.call('PEXPIREAT', KEYS[1], ARGV[4]) end
+return redis.call('HMGET', KEYS[1], ARGV[1], ARGV[3])
+`);
+// 공시 칸 두 개를 비어 있을 때만 쓴다(비콘·시드, ADR-0232). 첫 칸이 이미 있으면 둘 다 그대로 둔다. 수명은 늦은 쪽으로만 늘린다
+const WRITE_ONCE_PAIR = redisScript(`
+if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then redis.call('HSET', KEYS[1], ARGV[3], ARGV[4]) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[5]) then redis.call('PEXPIREAT', KEYS[1], ARGV[5]) end
+return 1
+`);
+// 비콘 기록: 공시 라운드가 게시가 쓴 라운드와 같고 비상 표시가 없을 때만 쓴다(RB-35 적용과 겹칠 때 둘 중 하나만 이기게, ADR-0239 결정 12). 값은 비어 있을 때만 쓴다
+const RECORD_BEACON = redisScript(`
+if redis.call('HGET', KEYS[1], 'round:' .. ARGV[1]) ~= ARGV[2] then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'emergency:' .. ARGV[1]) == 1 then return 0 end
+if redis.call('HSETNX', KEYS[1], 'beacon:' .. ARGV[1], ARGV[3]) == 1 then redis.call('HSET', KEYS[1], 'sig:' .. ARGV[1], ARGV[4]) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[5]) then redis.call('PEXPIREAT', KEYS[1], ARGV[5]) end
 return 1
 `);
 // 본 값일 때만 지운다(그 사이 새로 청한 표시를 지우지 않게)
@@ -65,7 +101,7 @@ export class RedisBatchStore implements BatchStore {
     @Optional() @Inject(WAIT_REDIS) private readonly waitRedis?: HotRedis,
   ) {}
 
-  async confirmReplicated(eventId: string, batchNo: number, marker: string): Promise<boolean> {
+  async confirmReplicated(eventId: string, batchNo: ShuffleGroup, marker: string): Promise<boolean> {
     const k = keys.batchDone(eventId);
     // 쓰기와 WAIT를 같은 연결로 보내야 그 쓰기까지의 복제를 센다. 복제는 순서대로라 이 쓰기가 복제됐으면 묶음 표시까지 복제됐다.
     // 같은 노드의 다른 회차 WAIT 뒤에 줄을 설 수 있어 쓰기에도 WAIT만큼의 마감을 준다
@@ -79,13 +115,18 @@ export class RedisBatchStore implements BatchStore {
     return acked >= this.minReplicas;
   }
 
-  async startsAtOf(eventId: string): Promise<number | null> {
+  async scheduleOf(eventId: string): Promise<BatchSchedule | null> {
     const k = keys.cfg(eventId);
-    const v = str(await this.redis.command(['HGET', k, 'startsAtMs'], { key: k }));
-    return v !== null && /^\d{1,16}$/.test(v) ? Number(v) : null;
+    const [startsAt, opensAt, window] = ((await this.redis.command(['HMGET', k, 'startsAtMs', 'opensAtMs', 'batchWindowMs'], { key: k })) as unknown[]).map(str);
+    const int = (v: string | null | undefined): number | null => (v !== null && v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
+    const startsAtMs = int(startsAt);
+    const opensAtMs = int(opensAt);
+    if (startsAtMs === null || opensAtMs === null) return null;
+    const batchWindowMs = int(window);
+    return { startsAtMs, opensAtMs, ...(batchWindowMs !== null ? { batchWindowMs } : {}) };
   }
 
-  async closed(eventId: string, batchNo: number): Promise<ClosedBatch | null> {
+  async closed(eventId: string, batchNo: ShuffleGroup): Promise<ClosedBatch | null> {
     const k = keys.batchDone(eventId);
     const v = str(await this.redis.command(['HGET', k, String(batchNo)], { key: k }));
     const m = v === null ? null : /^(\d+):(\d+):(\d+)$/.exec(v);
@@ -93,8 +134,8 @@ export class RedisBatchStore implements BatchStore {
   }
 
   // SSCAN은 같은 원소를 두 번 줄 수 있어(읽는 사이 해시 표가 커질 때) 겹침을 뺀다
-  async members(eventId: string, batchNo: number): Promise<string[]> {
-    const k = keys.batchMembers(eventId, batchNo);
+  async members(eventId: string, batchNo: ShuffleGroup): Promise<string[]> {
+    const k = membersKey(eventId, batchNo);
     const seen = new Set<string>();
     let cursor = '0';
     do {
@@ -105,21 +146,21 @@ export class RedisBatchStore implements BatchStore {
     return [...seen];
   }
 
-  async published(eventId: string, batchNo: number): Promise<PublishedBatch | null> {
+  async published(eventId: string, batchNo: ShuffleGroup): Promise<PublishedBatch | null> {
     const k = keys.batchDone(eventId);
     const [at, root, repair] = ((await this.redis.command(['HMGET', k, `pub:${batchNo}`, `root:${batchNo}`, `repair:${batchNo}`], { key: k })) as unknown[]).map(str);
     if (at === null || at === undefined) return null;
     return { atMs: Number(at), root: root ?? null, repairAtMs: repair === null || repair === undefined ? null : Number(repair) };
   }
 
-  async writeResults(entries: readonly BatchEntry[], gen: number, expireAtMs: number): Promise<void> {
+  async writeResults(group: ShuffleGroup, entries: readonly BatchEntry[], gen: number, expireAtMs: number): Promise<void> {
     for (let i = 0; i < entries.length; i += CHUNK) {
       const chunk = entries.slice(i, i + CHUNK);
       for (let attempt = 1; ; attempt++) {
         try {
           await Promise.all(
             chunk.map((e) => {
-              const k = keys.batchResult(e.tokenHash);
+              const k = resultKey(group, e.tokenHash);
               return this.redis.command(['SET', k, `${e.seq}:${gen}`, 'PXAT', String(expireAtMs)], { key: k });
             }),
           );
@@ -140,12 +181,96 @@ export class RedisBatchStore implements BatchStore {
     if (Number(await this.redis.command(['PEXPIRETIME', k], { key: k })) < expireAtMs) await this.redis.command(['PEXPIREAT', k, String(expireAtMs)], { key: k });
   }
 
-  async markPublished(eventId: string, batchNo: number, atMs: number, root: string): Promise<void> {
+  async markPublished(eventId: string, batchNo: ShuffleGroup, atMs: number, root: string): Promise<void> {
     const k = keys.batchDone(eventId);
     await this.redis.evalScript(MARK_PUBLISHED, [k], [String(batchNo), String(atMs), root]);
   }
 
-  async clearRepair(eventId: string, batchNo: number, repairAtMs: number): Promise<void> {
+  async markRoot(eventId: string, batchNo: ShuffleGroup, root: string, expireAtMs: number): Promise<EarlyRoot> {
+    const r = (await this.redis.evalScript(MARK_ROOT, [keys.batchDone(eventId)], [`root:${batchNo}`, root, `rootAt:${batchNo}`, String(expireAtMs)])) as unknown[];
+    return { root: str(r[0])!, atMs: Number(str(r[1])) };
+  }
+
+  async earlyRootOf(eventId: string, batchNo: ShuffleGroup): Promise<EarlyRoot | null> {
+    const k = keys.batchDone(eventId);
+    const [root, at] = ((await this.redis.command(['HMGET', k, `root:${batchNo}`, `rootAt:${batchNo}`], { key: k })) as unknown[]).map(str);
+    return root && at ? { root, atMs: Number(at) } : null;
+  }
+
+  async clearRepair(eventId: string, batchNo: ShuffleGroup, repairAtMs: number): Promise<void> {
     await this.redis.evalScript(CLEAR_REPAIR, [keys.batchDone(eventId)], [`repair:${batchNo}`, String(repairAtMs)]);
+  }
+
+  async toRemoveAmong(eventId: string, group: ShuffleGroup, hashes: readonly string[]): Promise<string[]> {
+    const k = keys.verify(eventId);
+    // 100만 명이면 해시를 읽는 왕복이 1,000번이다. 돌릴 것이 없다는 것을 한 번에 알면 읽지 않는다: 묶음은 취소가 남긴 표시, 로비는 verify가 빈지(ADR-0233)
+    const d = keys.batchDone(eventId);
+    const any = group === 'lobby' ? await this.redis.command(['HLEN', k], { key: k }) : await this.redis.command(['HEXISTS', d, `orphan:${group}`], { key: d });
+    if (Number(any) === 0) return [];
+    const out: string[] = [];
+    for (let i = 0; i < hashes.length; i += CHUNK) {
+      const chunk = hashes.slice(i, i + CHUNK);
+      const vals = (await this.redis.command(['HMGET', k, ...chunk], { key: k })) as unknown[];
+      chunk.forEach((h, j) => {
+        if (/^(VERIFYING|ORPHAN|BLOCKED):/.test(str(vals[j]) ?? '')) out.push(h);
+      });
+    }
+    return out;
+  }
+}
+
+const STOP_REASONS: readonly string[] = ['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unauthorized', 'seed_unavailable'];
+const isObject = (v: unknown): boolean => typeof v === 'object' && v !== null;
+
+/** RB-35가 쓴 JSON 칸 읽기. 칸이 있는데 모양이 틀리면 null(게시가 없는 것으로 치지 않고 멈춘다, ADR-0239 결정 15) */
+function parseEmergency(raw: string): EmergencyMark | null {
+  try {
+    const v = JSON.parse(raw) as { at?: unknown; stop?: unknown; reason?: unknown; signed?: unknown };
+    return typeof v.at === 'number' && typeof v.stop === 'string' && STOP_REASONS.includes(v.stop) && typeof v.reason === 'string' && isObject(v.signed) ? { atMs: v.at, stopReason: v.stop as BeaconStopReason, reason: v.reason, signed: v.signed } : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseRecommits(raw: string): RecommitMark[] | null {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v) || v.length === 0) return null;
+    const out = v.flatMap((e: { at?: unknown; prev?: unknown; round?: unknown; reason?: unknown; signed?: unknown }) => (typeof e?.at === 'number' && typeof e?.prev === 'number' && typeof e?.round === 'number' && typeof e?.reason === 'string' && isObject(e?.signed) ? [{ atMs: e.at, prev: e.prev, round: e.round, reason: e.reason, signed: e.signed }] : []));
+    return out.length === v.length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 셔플 공시 기록 읽기와 멈춤 표시(q:{event:E}:shuffle, ADR-0231 결정 6·12) */
+@Injectable()
+export class RedisShuffleRecords implements ShuffleRecords {
+  constructor(@Inject(ADMISSION_REDIS) private readonly redis: HotRedis) {}
+
+  async read(eventId: string, group: ShuffleGroup): Promise<ShuffleRecord | null> {
+    const k = keys.shuffle(eventId);
+    const [commit, round, sealed, at, stop, beacon, signature, seed, seedAt, waitUntil, emergency, recommit] = ((await this.redis.command(['HMGET', k, `commit:${group}`, `round:${group}`, `sealed:${group}`, `at:${group}`, `stop:${group}`, `beacon:${group}`, `sig:${group}`, `seed:${group}`, `seedAt:${group}`, `waitUntil:${group}`, `emergency:${group}`, `recommit:${group}`], { key: k })) as unknown[]).map(str);
+    if (!commit || !round || !sealed || !at) return null;
+    const emergencyOf = emergency ? parseEmergency(emergency) : undefined;
+    const recommits = recommit ? parseRecommits(recommit) : undefined;
+    const runbookInvalid = emergencyOf === null || recommits === null;
+    const rec: ShuffleRecord = { commit, round: Number(round), sealed, atMs: Number(at), ...(beacon ? { beacon } : {}), ...(signature ? { signature } : {}), ...(seed && seedAt ? { seed, seedAtMs: Number(seedAt) } : {}), ...(waitUntil && /^\d{1,16}$/.test(waitUntil) ? { waitUntilMs: Number(waitUntil) } : {}), ...(emergencyOf ? { emergency: emergencyOf } : {}), ...(recommits ? { recommits } : {}), ...(runbookInvalid ? { runbookInvalid } : {}) };
+    if (!stop) return rec;
+    // 값이 있으면 모양이 틀려도 멈춘 것으로 본다(모르는 값을 '멈춤 아님'으로 읽으면 RB-35 없이 게시가 다시 돈다)
+    const m = /^(\d+):(beacon|stale_round|late_commit|no_commit|late_root|members_changed|unauthorized|seed_unavailable)$/.exec(stop);
+    return { ...rec, stopped: m ? { atMs: Number(m[1]), reason: m[2] as BeaconStopReason } : { atMs: 0, reason: 'unknown' } };
+  }
+
+  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number, expectRound: number): Promise<boolean> {
+    return Number(await this.redis.evalScript(RECORD_BEACON, [keys.shuffle(eventId)], [String(group), String(expectRound), value, signature, String(expireAtMs)])) === 1;
+  }
+
+  async reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number, expireAtMs: number): Promise<void> {
+    await this.redis.evalScript(WRITE_ONCE_PAIR, [keys.shuffle(eventId)], [`seed:${group}`, seed, `seedAt:${group}`, String(atMs), String(expireAtMs)]);
+  }
+
+  async stop(eventId: string, group: ShuffleGroup, atMs: number, reason: BeaconStopReason, expireAtMs: number): Promise<boolean> {
+    return Number(await this.redis.evalScript(STOP_SHUFFLE, [keys.shuffle(eventId)], [`stop:${group}`, `${atMs}:${reason}`, String(expireAtMs)])) === 1;
   }
 }

@@ -47,6 +47,10 @@ export interface AccountLinkPromptProps {
   headingLevel?: 1 | 2;
   renderLink?: RenderLink;
   className?: string;
+  /** 실제 화면: [기존 제공자 로그인]을 누르면(없으면 버튼만, 퍼블리싱) */
+  onProvider?: () => void;
+  /** 실제 화면: [새 계정 만들기]를 링크 대신 버튼으로(POST를 부르는 쪽이 한다) */
+  onNewAccount?: () => void;
 }
 
 function clock(total: number): string {
@@ -72,6 +76,8 @@ export function AccountLinkPrompt({
   headingLevel = 1,
   renderLink,
   className,
+  onProvider,
+  onNewAccount,
 }: AccountLinkPromptProps) {
   const H = headingLevel === 1 ? "h1" : "h2";
 
@@ -127,12 +133,16 @@ export function AccountLinkPrompt({
 
       <div className="col" style={{ gap: 10 }}>
         <p className="t-sm fw-b">{instruction}</p>
-        <button className={`btn btn-${provider} btn-lg btn-block`} type="button" aria-busy={busy ? true : undefined}>
+        <button className={`btn btn-${provider} btn-lg btn-block`} type="button" aria-busy={busy ? true : undefined} onClick={busy ? undefined : onProvider}>
           {busy ? <span className="spinner" aria-hidden="true" /> : <i className={`prov prov-${provider}`} aria-hidden="true" />}
           {providerLabel}
         </button>
         {busy ? (
           <button className="btn btn-secondary btn-lg btn-block" type="button" disabled>
+            {newAccount.label}
+          </button>
+        ) : onNewAccount ? (
+          <button className="btn btn-secondary btn-lg btn-block" type="button" onClick={onNewAccount}>
             {newAccount.label}
           </button>
         ) : (

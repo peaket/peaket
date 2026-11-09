@@ -2,6 +2,7 @@
 // next는 safeNext() 규칙(docs/frontend.md §5.14, ASVS v5.0.0-3.7.2)으로 서버도 거절한다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
+import { ACCOUNT_CLOSURE, type AccountClosure } from '../../session/index.js';
 import { VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
 import { ATTEMPT_TTL_MS, ProviderUnavailable, type Purpose } from '../domain/verification.js';
 import { VerificationError } from './verification-error.js';
@@ -16,13 +17,17 @@ export class StartVerification {
   constructor(
     @Inject(VERIFICATION_STORE) private readonly store: VerificationStore,
     @Inject(VERIFICATION_PROVIDER) private readonly provider: VerificationProvider,
+    @Inject(ACCOUNT_CLOSURE) private readonly closure: AccountClosure,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async run(i: { accountId: string; purpose: Purpose; next: string }) {
+  /** sessionId: 시작한 세션(고위험 재인증의 재통과 확인에 쓴다, identity §5) */
+  async run(i: { accountId: string; sessionId?: string | null; purpose: Purpose; next: string }) {
     if (!safeNextPath(i.next)) throw new VerificationError('NEXT_INVALID', 'next는 같은 출처 경로만 받는다');
     // 미성년자 계약 취소 확인(동의 → 대조 → 만 나이 → resultToken)은 그 단계가 붙인다. 그 전에는 받지 않는다(identity §5)
     if (i.purpose === 'MINOR_CONTRACT') throw new VerificationError('PURPOSE_UNSUPPORTED', '이 목적은 아직 받지 않는다');
+    // 만 14세 미만으로 정리 중인 계정은 다시 본인확인하지 못한다(다른 사람 휴대폰으로 ticket:buy를 받지 못하게, 새 맥락 리뷰 중간 2)
+    if ((await this.closure.closureReasonOf(i.accountId)) === 'UNDER_14') throw new VerificationError('UNDER_14', '만 14세 미만으로 정리 중인 계정이다');
     if (i.purpose === 'FIRST' && (await this.store.isVerified(i.accountId))) throw new VerificationError('ALREADY_VERIFIED', '이미 본인확인한 계정이다');
     const now = this.clock.now();
     const id = uuidv7(this.clock);
@@ -35,7 +40,7 @@ export class StartVerification {
       if (e instanceof ProviderUnavailable) throw new VerificationError('PROVIDER_DOWN', '본인확인기관을 쓸 수 없다');
       throw e;
     }
-    await this.store.transaction((tx) => tx.insertAttempt({ id, accountId: i.accountId, purpose: i.purpose, next: i.next, status: 'PENDING', expiresAt, createdAt: now, completedAt: null }));
+    await this.store.transaction((tx) => tx.insertAttempt({ id, accountId: i.accountId, sessionId: i.sessionId ?? null, purpose: i.purpose, next: i.next, status: 'PENDING', expiresAt, createdAt: now, completedAt: null }));
     return { verificationId: id, window, expiresAt };
   }
 }

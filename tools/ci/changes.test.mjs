@@ -103,9 +103,10 @@ test('DT38_서비스템플릿과_서비스문서비교본체를바꾸면_contrac
 test('자바스크립트검사방식을바꾸면_전체js를고르고_서비스템플릿이읽는정본문서를바꾸면_js를고른다', () => {
   // ci-node.yml·turbo.json·.nvmrc는 모든 자바스크립트 검사가 도는 방식이다. observability.md는 서비스 템플릿 시험이 칸 목록을 견준다
   assert.deepEqual(scopes({ '.github/workflows/ci-node.yml': 'x\n' }), ['js', 'js_all', 'ci']);
-  assert.deepEqual(scopes({ 'turbo.json': '{}\n' }), ['docs', 'js', 'js_all']);
+  // turbo.json·.nvmrc는 화면 잡(web)이 도는 방식이기도 하다(BAS-170)
+  assert.deepEqual(scopes({ 'turbo.json': '{}\n' }), ['docs', 'js', 'js_all', 'web']);
   // .nvmrc는 이미지 빌드 시험(image)의 작업 공간 파일에도 든다(BSL-050)
-  assert.deepEqual(scopes({ '.nvmrc': '24\n' }), ['js', 'js_all', 'image']);
+  assert.deepEqual(scopes({ '.nvmrc': '24\n' }), ['js', 'js_all', 'image', 'web']);
   assert.deepEqual(scopes({ 'docs/observability.md': '글\n' }), ['docs', 'js']);
 });
 
@@ -113,7 +114,8 @@ test('낮음008_뿌리ESLint설정과_공용설정패키지를바꾸면_전체js
   // 뿌리 eslint.config.mjs와 @peaket/config(ESLint·TypeScript 설정)는 모든 서비스·패키지의 린트와 형 검사 방식이다(add-service-structure-and-request-checks)
   assert.deepEqual(scopes({ 'eslint.config.mjs': 'export default [];\n' }), ['js', 'js_all']);
   // @peaket/config는 이미지가 담는 패키지라 이미지 빌드 시험(image)도 고른다(BSL-050)
-  assert.deepEqual(scopes({ 'packages/config/eslint/service-layers.mjs': 'x\n' }), ['js', 'js_all', 'kind', 'image']);
+  // 화면 앱도 같은 설정을 쓰므로 화면 잡(web)도 고른다(BAS-170)
+  assert.deepEqual(scopes({ 'packages/config/eslint/service-layers.mjs': 'x\n' }), ['js', 'js_all', 'kind', 'image', 'web']);
 });
 
 test('FND110_로컬클러스터·공용차트·릴레이·Lease코드·이미지파일을바꾸면_kind를고른다', () => {
@@ -344,4 +346,56 @@ test('BSL060_부하시험이견주지않는서비스·도구·이름만비슷한
 test('BSL060_범위loadtest가_출력에있고_비교기준을읽지못하면_고른다', () => {
   assert.equal(scopeMap({ 'docs/a.md': '글\n' }).loadtest, false);
   assert.ok(scopes({ 'docs/a.md': '글\n' }, 'no-such-ref').includes('loadtest'));
+});
+
+// 화면 잡(ci-web.yml, docs/devops.md §3.1, BUILD_ORDER BAS-170): 화면 앱·화면용 패키지·그 검사가 읽는 정본·화면 검사 도구·워크플로·작업 공간 파일
+test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표·화면검사도구·화면워크플로·작업공간파일을바꾸면_web을고른다', () => {
+  for (const f of [
+    'apps/web/app/(cached)/page.tsx',
+    'apps/web/queue-room/src/main.ts',
+    'packages/ds/src/styles/index.css',
+    'packages/config/eslint/index.mjs',
+    'packages/seatmap/src/engine.ts',
+    'docs/design/tokens.json',
+    'docs/design/d2-design-system.md',
+    'docs/frontend.md',
+    'tools/web-checks/seed-css/check-css.mjs',
+    'tools/storybook/.storybook/main.ts',
+    '.github/workflows/ci-web.yml',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    'package.json',
+    'turbo.json',
+    '.nvmrc',
+  ]) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+});
+
+// 구매 세션 서명기 세 엔진 검사(purchase 잡, HOT-360 ①, ADR-0221 결정 7): 서명기 원본과 서버와 같은 시험 벡터가 바뀌면 화면 잡을 돌린다
+test('HOT360_구매세션서명기원본이나시험벡터를바꾸면_web을고르고_api-client의다른곳은_고르지않는다', () => {
+  for (const f of ['packages/api-client/src/purchase/signer.ts', 'docs/api/vectors/purchase-request-mac.v1.json']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+  assert.ok(!scopes({ 'packages/api-client/src/client.ts': '바꿈\n' }).includes('web'));
+});
+
+test('BAS170_서비스·플랫폼·다른문서·다른도구만바꾸면_web을고르지않는다', () => {
+  for (const f of ['services/queue-svc/src/main.ts', 'packages/platform/x.ts', 'docs/design/d5-screen-blueprint.md', 'docs/a.md', 'tools/ci/x.mjs', 'tools/poc/login-compare/x.mjs']) {
+    assert.ok(!scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+});
+
+// 신뢰 정책 예외 검사(tools-check의 check-trust-exceptions.mjs, ADR-0191): 어느 작업 공간 파일이나 그 예외 표(devops §4.4)가 바뀌어도 돈다
+test('BAS180_작업공간파일이나devops문서를바꾸면_tools를고른다', () => {
+  for (const f of ['pnpm-workspace.yaml', 'tools/storybook/pnpm-workspace.yaml', 'loadtest/poc/bench/pnpm-workspace.yaml', 'docs/devops.md']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('tools'), f);
+  }
+  for (const f of ['docs/a.md', 'packages/ds/src/x.ts']) {
+    assert.ok(!scopes({ [f]: '바꿈\n' }).includes('tools'), f);
+  }
+});
+
+test('BAS170_비교기준을읽지못하면_web도고른다', () => {
+  assert.ok(scopes({ 'docs/a.md': '글\n' }, 'no-such-ref').includes('web'));
 });

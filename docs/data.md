@@ -48,7 +48,7 @@ PostgreSQL은 연결 하나마다 서버 프로세스 하나를 띄우고 그만
 - **①을 고를 때 함께 할 것**:
   - 다시 붙기: 장애 조치 뒤 연결은 지수 간격과 지터(시각을 일부러 조금씩 흩뜨리는 것)로 다시 붙는다. 연결 수명 30분(`maxLifetimeSeconds`, docs/architecture.md §5)으로 연결을 고르게 갈아 끼운다.
   - 시간 초과: 앱 풀의 연결 대기 상한(핫패스 100ms·일반 1초, 넘으면 429 `server-busy`)은 그대로다. PgBouncer 행의 `query_wait_timeout`은 이 대기 상한이 대신한다. 서버 쪽 상한은 지금처럼 역할 기본값(`ALTER ROLE … SET`)으로 둔다.
-  - 계산 예(모두 [가정]): purchase DB(db.r7g.xlarge)의 연결 상한은 약 3,600보다 작고 [추정], 그 80%는 약 2,800이다. purchase-svc 최대 40개 × 풀 20개 = 800, Outbox 릴레이 2개 × 풀 2개 = 4, 작업·관리 예비 50이면 약 850으로 예산 안이다. payment DB(db.r7g.large, 약 1,800보다 작음 [추정])는 payment-svc 최대 12개 × 풀 20개 = 240이다. 실제 최대 복제 수와 풀 크기는 wbs 2.11.2·2.12.1에서 정한다.
+  - 계산 예(모두 [가정]): purchase DB(db.r7g.xlarge)의 연결 상한은 약 3,600보다 작고 [추정], 그 80%는 약 2,800이다. purchase-svc 최대 40개 × 풀 20개 = 800, Outbox 릴레이 2개 × 풀 2개 = 4, 작업·관리 예비 50이면 약 850으로 예산 안이다. payment DB(db.r7g.large, 약 1,800보다 작음 [추정])는 payment-svc 최대 12개 × 풀 32개(핫패스 16, 일반 4, 승인 실행기 8, 웹훅 4, 모두 [가정]) = 384이다. 실제 최대 복제 수와 풀 크기는 wbs 2.11.2·2.12.1에서 정한다.
   - 감시: DB 연결 수(CloudWatch `DatabaseConnections`)가 상한의 80%를 넘으면 문제 대장에 올린다.
 - **어느 대안이든 같은 것**: 연결 수를 작게 지키는 첫째 장치는 구조다. 핫패스에서 DB를 빼고(좌석 Redis Lua, 대기열 Redis), 예매 계층의 쓰기를 입장 속도로 묶는다(docs/architecture.md §9.1). 위 대안은 그다음 장치다.
 - **바꿀 때**: 기본안을 바꾸면 ADR로 남기고 docs/architecture.md §5 시간 초과 표, docs/verification.md §4.1, docs/infra-handover.md §3.2를 함께 고친다.
@@ -69,6 +69,7 @@ erDiagram
     account ||--o{ device : binds
     account ||--o{ account_contact_ref : "조사용 연락처 가명(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
+    account ||--o{ reauth_token_use : "쓴 재인증 토큰(탈퇴, 추천 적용 2026-11-04)"
     account ||--o{ consent : gives
     account ||--o| identity_verification : "verified_by (ci_hmac)"
     account ||--o{ verification_attempt : "본인확인 건(추천 적용 2026-11-03)"
@@ -80,6 +81,14 @@ erDiagram
     admin_account ||--o{ admin_passkey : "단계 인증 패스키(기술 검토 중간-051)"
     admin_account ||--o{ admin_recovery_code : "비상 복구 코드"
     admin_account ||--o{ admin_designation : "지정(접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30. 부정 거래 조사관, 추천 적용 2026-10-31)"
+    admin_account ||--o{ admin_login_step : "1단계를 통과한 로그인(TOTP를 기다림, 추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_security_notice : "보낼 보안 알림(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_unlock_link : "본인 해제 링크(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_known_source : "익숙한 출발지(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_account_request : "관리 계정 관리 호출의 멱등 기록(추천 적용 2026-11-05)"
+    admin_session ||--o{ admin_refresh_token_hash : "발급한 관리 리프레시 토큰 해시(추천 적용 2026-11-05)"
+    admin_session ||--o{ admin_reauth : "발급한 관리 재인증 토큰(추천 적용 2026-11-05, BOT-122)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -90,12 +99,16 @@ erDiagram
         text status "ACTIVE|WITHDRAWAL_PENDING|MERGED|DELETED. WITHDRAWAL_PENDING은 탈퇴 유예(결제 결과 대기·가상계좌 지연 환급 동안, 탈퇴 요청 202). 새 예매·주문·양도 요청은 409이고 로그인·환불 계좌 입력·알림만 허용(docs/planning/03 §1.5 ⑧, 추천 적용 2026-10-20, ADR-0073)"
         uuid merged_into_account_id "MERGED일 때 대표 계정"
         text nickname
+        text nickname_key "UNIQUE(비어 있으면 제외), 닉네임의 전각·반각처럼 모양만 다른 글자를 한 모양으로 맞추고(유니코드 NFKC 정규화) 대소문자를 없앤 키. 중복 판정에만 쓴다. 닉네임을 지울 때 함께 지운다(추천 적용 2026-11-09, ADR-0203 결정 2, ADR-0235)"
         text email
+        bool email_verified "계정을 만들 때 제공자가 준 이메일 검증 여부(네이버는 false). 가입 때 연결 제안의 대상은 true인 계정뿐이다(추천 적용 2026-11-04, BUILD_ORDER BOT-040)"
         text phone "optional"
         text member_code "UNIQUE, 계정마다 매기는 회원 코드(SCR-017 ⑦, 판매 자격 명단·양도 받는 사람 찾기)"
         text saved_booker_name "optional, 저장된 예매자 성명(SCR-017 ⑦)"
         text saved_booker_phone "optional, 저장된 예매자 휴대폰 번호(SCR-017 ⑦)"
         bool age_verified "14세 이상 확인 여부만"
+        text closure_reason "optional, WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만이라 탈퇴와 같은 절차로 정리 중(추천 적용 2026-11-04, BUILD_ORDER BOT-020)"
+        timestamptz closure_started_at "optional, 정리를 시작한 시각. 만 14세 미만 정리는 10분 [가정]이 지난 뒤 처음 도는 정비(하루 한 번)가 끝낸다(추천 적용 2026-11-04, BUILD_ORDER BOT-030)"
         text locale "ko|en|ja|zh, 알림 문구 언어(NFR-024). 가입·로그인 때 화면의 로케일(주소 접두)로 쓰고 없으면 ko [가정]. 알림 받는 사람 묶음 조회 BatchGetRecipients의 locale(추천 적용 2026-10-30, docs/features/notify.md §2.1 E6)"
         timestamptz created_at
         timestamptz deleted_at
@@ -106,7 +119,7 @@ erDiagram
         int ci_hmac_key_version
         bytea pid "HMAC(pid 키, ci_hmac), 계정의 첫 본인확인 때 한 번 계산. 다시 본인확인해도 그대로(ADR-0050, 기술 검토 높음-18)"
         int pid_key_version
-        bytea pid_prev "optional, pid 키 전환 기간에만 두는 옛 pid. 전환이 끝나면 지운다(docs/features/identity.md §5)"
+        bytea pid_prev "optional, pid 키 전환 기간에만 두는 옛 pid. 전환이 끝나면 지운다(docs/features/identity.md §5, 전환 기록은 pid_key_rotation)"
         timestamptz verified_at
         text source_record "출처·시기·목적·대상, 1년 이상"
     }
@@ -115,7 +128,8 @@ erDiagram
         uuid account_id FK "시작한 계정. 다른 계정의 결과 확정·조회는 404"
         text purpose "FIRST|REVERIFY|MINOR_CONTRACT"
         text next "결과를 보인 뒤 돌아갈 같은 출처 경로(safeNext 규칙)"
-        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT"
+        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT|PROVIDER_DOWN(결과 경로에서 기관 장애·KMS 장애를 만난 건, 추천 적용 2026-11-04, BUILD_ORDER BOT-010)|UNDER_14(만 14세 미만, 연계정보 처리 기록이라 1년 [가정] 남긴다, BUILD_ORDER BOT-020)"
+        uuid session_id "optional, 시작한 세션. 고위험 재인증의 재통과 확인에 쓴다(추천 적용 2026-11-04, BUILD_ORDER BOT-020)"
         timestamptz expires_at "시작 + 10분 [가정]. 지나면 결과를 받지 않는다"
         timestamptz created_at
         timestamptz completed_at "확정 시각. 결과는 1일 [가정] 조회하고 지운다"
@@ -125,6 +139,7 @@ erDiagram
         text provider
         text provider_user_id "UNIQUE (provider, provider_user_id)"
         timestamptz linked_at
+        timestamptz last_login_at "optional, 이 (제공자, sub)로 로그인 세션을 만든 마지막 시각(SCR-040 '최근 로그인', 추천 적용 2026-11-04, BUILD_ORDER BOT-041)"
     }
     account_merge {
         uuid id PK
@@ -148,7 +163,7 @@ erDiagram
         uuid id PK
         uuid account_id FK
         text kind "TERMS|PRIVACY_REQUIRED|PRIVACY_PHONE|MARKETING. 가입 화면(SCR-005 ②·③)과 계정 설정(SCR-017 ④)의 동의만 둔다. 예매·굿즈 택배 주문과 현장 스태프 배정의 동의는 그 기록의 consent_version과 시각으로 남긴다(추천 적용 2026-10-26, ADR-0089)"
-        text notice_version "동의한 고지 문안의 판. 새 판에 다시 동의하면 행을 더한다"
+        text notice_version "동의한 고지 문안의 판. 그 문안이 있는 문서의 시행일이다(TERMS는 이용약관, PRIVACY_REQUIRED·PRIVACY_PHONE은 개인정보 처리방침, MARKETING은 가입 화면 문구 [가정], ADR-0235 결정 4). 새 판에 다시 동의하면 행을 더한다"
         text channels "MARKETING만. 수신 채널(docs/planning/03 §1.2)"
         timestamptz agreed_at "선택 동의(PRIVACY_PHONE·MARKETING)를 철회하면 그 종류의 행을 지운다. 탈퇴하면 모두 지우고, 병합되면 흡수 계정의 행을 지운다(POL-034)"
     }
@@ -164,9 +179,12 @@ erDiagram
         timestamptz absolute_expires_at
         timestamptz idle_expires_at
         timestamptz terminated_at
+        text terminated_reason "optional, 끝난 까닭(asyncapi SessionTerminated.reason). 끝난 시각과 같은 트랜잭션에 적는다. 갱신 401의 ended로 보인다. 이 칸 전에 끝난 세션은 비어 있다(추천 적용 2026-11-09, ADR-0235)"
         text login_verdict "ALLOW|CHALLENGE|UNKNOWN, 로그인 때 trust-svc ScoreRisk(LOGIN) 판정. UNKNOWN은 trust-svc가 답하지 않음(서킷 열림·데드라인). 양도·환급·배상 계좌 입력에서 재인증이 '요청만 함'일 때 쓴다(docs/features/identity.md §7, 추천 적용 2026-10-30)"
         text login_verdict_reason "optional, CHALLENGE일 때의 사유 범주 코드(trust.proto ReasonCategory, 점수 원값 없음)"
         timestamptz login_verdict_at
+        text device_label "optional, 화면용 기기 이름 '브라우저 · 운영체제'(로그인한 기기 목록 SCR-017). 로그인 때 User-Agent에서 정해진 낱말만 뽑는다. 원문·판 번호는 두지 않는다. 40자 이하(CHECK). 세션이 끝나면 같은 트랜잭션에서 비우고, 유휴 만료로 끝난 세션의 값은 정비 session-label-expired가 그 세션의 절대 만료 뒤에 비운다(부분 인덱스 (absolute_expires_at) WHERE device_label IS NOT NULL. docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', 추천 적용 2026-11-05, ADR-0209)"
+        timestamptz last_active_at "optional, 마지막 활동: 로그인과 토큰 갱신(회전) 때 지금 시각. 실제 활동과 최대 15분(액세스 토큰 수명) 차이 난다. 이 칸이 생기기 전(마이그레이션 0028)의 세션은 rotated_at, 없으면 login_verdict_at(로그인 시각)으로 대신한다(추천 적용 2026-11-05, ADR-0209)"
     }
     refresh_token_hash {
         bytea hash PK "발급한 리프레시 토큰의 SHA-256. 예전 토큰이 다시 오면 그 패밀리를 찾아 재사용 탐지를 한다(docs/features/identity.md §3 '토큰 수명주기 구현', 추천 적용 2026-11-03)"
@@ -186,7 +204,7 @@ erDiagram
     device {
         uuid id PK
         uuid account_id FK
-        text device_ref "기기 가명 invRef(device, deviceId): 키 판 접두어(k1. 등) + base64url(HMAC-SHA256(device 라벨 키, deviceId)), docs/security/secrets-and-keys.md. 로그인 때 라벨 키를 받지 못하면 그 로그인의 기기 행을 쓰지 않고 세션은 만든다(새 기기 알림은 보낸다, docs/features/identity.md §10). trust-svc의 deviceRef와 같은 값이다(기기 키 통일). 2026-10-30까지는 단방향 SHA-256 device_hash였다. 원문 deviceId는 두지 않는다. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
+        text device_ref "기기 가명 invRef(device, deviceId): 키 판 접두어(k1. 등) + base64url(HMAC-SHA256(device 라벨 키, deviceId)), docs/security/secrets-and-keys.md. 로그인 때 라벨 키를 받지 못하면 그 로그인의 기기 행을 쓰지 않고 세션은 만든다(새 기기 알림은 보낸다, docs/features/identity.md §10). trust-svc의 deviceRef와 같은 값이다(기기 키 통일). 2026-10-30까지는 단방향 SHA-256 device_hash였다. 원문 deviceId는 두지 않는다. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md, 추천 적용 2026-10-31, ADR-0171 결정 4). 계정 병합 때는 흡수 계정의 행을 대표 계정으로 옮기고, 흡수 행의 device_ref나 device_ref_prev가 대표 계정 행의 device_ref나 device_ref_prev(빈 값 빼고)와 같으면 같은 기기로 보고 흡수 쪽 행을 지운다. 흡수 행만 새 판이면(흡수 행의 device_ref_prev가 대표 행의 device_ref) 대표 행이 행 ID 그대로 흡수 행의 device_ref·device_ref_prev를 이어받은 뒤 흡수 행을 지운다(docs/features/identity.md §9.1 '병합 때 기기 행', 소유자 결정 2026-11-05, OPEN[22] 추천 적용)"
         text device_ref_prev "키 회전의 이음 기간에만: 로그인 때 옛 판으로 구한 같은 기기의 값. 이음 기간이 끝날 때 옛 판 → 새 판 대응을 조사 저장소에 한 번 넘긴 뒤 지운다(docs/security/secrets-and-keys.md 회전 절차, 추천 적용 2026-10-31, ADR-0171)"
         timestamptz bound_at
     }
@@ -194,6 +212,7 @@ erDiagram
         uuid account_id PK
         text kind PK "PHONE|EMAIL. 기본 키 (account_id, kind)"
         text ref "invRef(contact, 정규화한 값), 키 판 접두어 포함(docs/security/secrets-and-keys.md). 계산하지 못하면 행을 쓰지 않고 identity-svc 작업이 원문으로 다시 계산한다. 휴대폰은 본인확인 번호를 E.164로, 이메일은 로그인 이메일을 소문자·앞뒤 빈칸 제거로 맞춘다. 원문은 이 표에 두지 않는다. 부정 예매 후보 묶음의 연락처 신호(FR-072)에만 쓰고 조사 적재가 BatchGetInvestigationRefs로 읽는다(추천 적용 2026-10-31, ADR-0171)"
+        text ref_prev "키 회전의 이음 기간에만: 같은 원문을 옛 판으로 구한 값. 이음 기간이 끝나고 대응을 조사 저장소에 넘긴 뒤 지운다(docs/security/secrets-and-keys.md 회전 절차 ④⑧, 추천 적용 2026-11-05, BUILD_ORDER BOT-046)"
         timestamptz updated_at "번호·이메일이 바뀌면 다시 계산한다. 탈퇴 때 지운다"
     }
     identity_conflict_attempt {
@@ -202,15 +221,28 @@ erDiagram
         uuid existing_account_id "그 연계정보로 이미 본인확인한 계정"
         timestamptz attempted_at "본인확인 409(이미 다른 계정에서 본인확인) 때 남긴다. 1년 [가정] 뒤 지운다. 명의 대여·사들인 계정 후보의 연결 신호이고 사람이 확인한 라벨이 아니다(추천 적용 2026-10-31, ADR-0171)"
     }
+    pid_key_rotation {
+        int to_version PK "새 pid 키 판. pid 키 전환마다 한 줄(추천 적용 2026-11-04, docs/features/identity.md §5 'pid 키 전환의 첫 구현', BUILD_ORDER BOT-025)"
+        timestamptz started_at
+        timestamptz transition_ends_at "전환 끝 시각(운영자가 정한 --until). 이 전에는 pid_prev를 지우지 않는다"
+        timestamptz moved_at "optional, 모든 본인확인 기록의 옛 pid를 pid_prev로 옮긴 시각"
+        timestamptz finished_at "optional, pid_prev를 지우고 닫은 시각. 닫지 않은 줄은 하나만 둔다"
+    }
+    reauth_token_use {
+        uuid jti PK "한 번 쓴 재인증 토큰의 jti(탈퇴를 실행할 때, docs/features/identity.md §8 '탈퇴의 첫 구현', 추천 적용 2026-11-04, BUILD_ORDER BOT-030)"
+        uuid account_id
+        timestamptz used_at
+        timestamptz expires_at "토큰 만료. 지난 줄은 정비가 지운다"
+    }
     restricted_ci_hold {
-        bytea ci_hmac PK "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 기본 키 (ci_hmac, fraud_case_id). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
+        bytea ci_hmac "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 다시 가입한 계정에 잇는 대조값(인덱스). 기본 키는 멱등 키 (source_account_id, fraud_case_id)다(추천 적용 2026-11-04, BUILD_ORDER BOT-035). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
         int ci_hmac_key_version "연계정보 HMAC 키 판. 다시 가입한 계정의 본인확인 때 보존 중인 모든 판으로 견준다"
         uuid fraud_case_id PK "제한을 정한 부정 예매 사건(ops 논리 DB라 외래키 없음)"
         text state "CASE_OPEN|RESTRICTED. CASE_OPEN은 소명 요청 뒤 결정 전(탈퇴해도 보관만 하고 다시 가입한 계정을 막지 않는다), RESTRICTED는 이용 제한 중. 제한 없이 끝나거나 풀리면(RELEASED) 행을 지운다(추천 적용 2026-10-31, ADR-0171)"
         timestamptz until "행을 지울 끝 시각(두 상태 모두 NOT NULL). CASE_OPEN은 그 회차 공연일 + 30일 [가정](그때까지 제한이 걸리지 않으면 지운다), RESTRICTED는 이용 제한 끝이고 건 날 + 1년 [가정]을 넘지 않는다(넘는 제한은 조치 요청이 422 restriction-too-long). 이 시각이 지나면 정비 작업이 행을 지운다(추천 적용 2026-10-31, ADR-0173)"
-        uuid source_account_id "제한을 받은 계정. 탈퇴해도 이 행은 until까지 남는다(POL-033의 예외, 법률 확인 36번)"
+        uuid source_account_id PK "제한을 받은 계정. 탈퇴해도 이 행은 until까지 남는다(POL-033의 예외, 법률 확인 36번)"
         uuid carried_account_id "같은 연계정보로 다시 가입해 제한을 이은 계정. 상태가 RESTRICTED인 동안 그 계정의 토큰에는 until까지 ticket:buy를 싣지 않는다. CASE_OPEN이면 적어만 두고 막지 않는다(추천 적용 2026-10-31, ADR-0173)"
-        bigint version "SetRestrictedCiHold.version. 더 클 때만 반영. RELEASED가 오면 행을 지운다"
+        bigint version "SetRestrictedCiHold.version. 더 클 때만 반영하고, 같은 판·같은 내용의 재전송은 OK다. RELEASED가 오면 행을 지운다"
     }
     admin_account {
         uuid id PK
@@ -222,27 +254,116 @@ erDiagram
         bytea invite_token_hash "초대·재초대 링크 토큰(32바이트 난수)의 SHA-256. 수락·새 재초대·만료 때 지운다(추천 적용 2026-10-30)"
         timestamptz invite_expires_at "보낸 때부터 24시간"
         timestamptz last_login_at "마지막 로그인 성공 시각. SCR-064 계정 표와 SCR-020 팀 계정의 마지막 접속(추천 적용 2026-10-30)"
-        timestamptz removed_at "삭제 시각. 삭제하면 email·password_phc·totp_seed_enc와 패스키·복구 코드를 바로 지우고 ID·역할·삭제 시각만 남긴다. 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
+        timestamptz removed_at "삭제 시각. 삭제하면 email·display_name·password_phc·totp_seed_enc와 패스키·복구 코드, 마지막 접속·유출 대조·실패 수·잠금 칸을 바로 지우고 ID·역할·삭제 시각만 남긴다(파트너사 ID는 역할 묶음 제약 때문에 남는다, BOT-150). 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
         bigint version "판. 역할 변경의 If-Match와 ETag(docs/api/guidelines.md §12, 추천 적용 2026-10-30)"
         text password_phc "pbkdf2-sha256, 600000회 이상, KMS 페퍼 버전 포함(ADR-0033, ADR-0050)"
-        bytea totp_seed_enc "AES-256-GCM"
+        bytea totp_seed_enc "AES-256-GCM. KMS 데이터 키 봉투 암호화, 암호화 컨텍스트 {purpose: peaket-admin-totp-v1, accountId}. 꼴은 docs/features/identity.md §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(추천 적용 2026-11-05, BOT-120)"
+        bytea totp_pending_enc "등록 중인 TOTP 시드(같은 꼴). 등록 확인 때 totp_seed_enc로 옮기고 지운다(추천 적용 2026-11-05)"
+        bigint totp_last_step "마지막으로 받은 TOTP 시간 칸(유닉스 초 / 30). 그 칸 이하는 다시 받지 않는다(같은 코드 재사용 막기, 추천 적용 2026-11-05)"
         int failed_attempts "계정 실패 수: 비밀번호·TOTP·복구 코드가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 로그인 성공·시간 잠금을 걸 때·본인 해제 때 0. 3 [가정]이면 사람 확인, 5면 시간 잠금. 출발지가 든 값(묶음 실패 수 등)은 Redis에 둔다(docs/security/auth-controls.md §3.1, 추천 적용 2026-10-30)"
         int second_factor_failures "2단계 실패 수: 비밀번호가 맞은 뒤나 해제 링크에서 TOTP·복구 코드가 틀릴 때 센다. 로그인 성공만 0(시간 잠금·본인 해제로는 0이 되지 않는다). 5 [가정]면 보호 잠금(auth-controls §3.1·§3.2, 추천 적용 2026-10-30)"
         int password_failure_total "비밀번호 연속 실패 누계: 비밀번호가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 비밀번호와 2단계를 모두 통과한 로그인만 0. 50 [가정]이면 알림, 100이면 보호 잠금(NIST SP 800-63B-4 §3.2.2 상한, auth-controls §3.1, 추천 적용 2026-10-30)"
         timestamptz breach_checked_at "마지막으로 유출 비밀번호 목록과 대조한 시각. 로그인에 성공할 때 30일 [가정]이 지났으면 다시 본다(auth-controls §4.3 8, 추천 적용 2026-10-30)"
-        bool password_change_required "비밀번호 바꾸기 필요 표시. 비밀번호만 맞은 로그인이나 유출 목록 적중 때 켠다. 켜져 있으면 다음 세션은 비밀번호 바꾸기와 로그아웃만 한다. 바꾸면 끈다(auth-controls §3.5, 추천 적용 2026-10-30)"
+        bool password_change_required "비밀번호 바꾸기 필요 표시. 비밀번호만 맞은 로그인이나 유출 목록 적중 때 켠다. 켜져 있으면 다음 세션은 비밀번호 바꾸기와 로그아웃만 한다. 이미 열린 세션도 다음 토큰 갱신부터 같다(BOT-130). 바꾸면 끈다(auth-controls §3.5, 추천 적용 2026-10-30)"
         text lock_kind "NONE|TIMED|PROTECT(없음·시간 잠금·보호 잠금, docs/security/auth-controls.md §3.2, 기술 검토 중간-052)"
-        timestamptz locked_until "TIMED만. 15분, 24시간 안에 다시 잠기면 1시간"
+        timestamptz locked_until "TIMED면 잠금이 풀리는 시각(15분, 풀린 뒤 24시간 안에 다시 잠기면 1시간). 본인 해제 때는 푼 시각을 남긴다(반복 잠금 기준, BOT-121)"
         jsonb recent_lock_at "24시간 안의 잠금 시각 목록. 24시간 안 잠금 횟수를 센다"
         timestamptz locked_at "마지막으로 잠긴 시각(감사·화면 표시용)"
         text lock_reason "FAILED_ATTEMPTS|SECOND_FACTOR_FAILURES|PASSWORD_FAILURE_TOTAL. 잠근 까닭(계정 실패 수 5, 2단계 실패 수 5, 비밀번호 연속 실패 누계 100). 관제 화면의 잠김 상세에만 쓰고 계정 주인에게는 알리지 않는다(추천 적용 2026-10-30)"
+        timestamptz created_at "행을 만든 때(초대 때, 추천 적용 2026-11-05, BUILD_ORDER BOT-110)"
+        timestamptz updated_at "행을 마지막으로 고친 때(추천 적용 2026-11-05)"
+    }
+    admin_login_step {
+        uuid id PK
+        uuid admin_account_id FK
+        bytea token_hash "1단계 통과 토큰(32바이트 난수)의 SHA-256. 2단계(TOTP) 요청 본문의 loginStep과 견준다"
+        text aud "partner|ops. 다른 콘솔 경로에서 쓰지 못한다"
+        text pair_ref "출발지 묶음 해시(SHA-256(IP ‖ 0x00 ‖ 기기 식별값) 앞 16바이트 16진수). 2단계 실패와 성공을 같은 묶음에 센다"
+        timestamptz created_at "비밀번호가 맞은 때. 10분 [가정] 안에 2단계를 끝내지 않으면 비밀번호만 맞은 로그인 알림(BOT-121)"
+        timestamptz expires_at "만든 때 + 5분 [가정]"
+        timestamptz used_at "2단계에서 쓴 때(한 번만)"
+        bool known_source "1단계 통과 때 그 묶음이 30일 [가정] 안에 성공한 익숙한 출발지였는지(BOT-123)"
+        timestamptz password_only_noticed_at "비밀번호만 맞은 로그인으로 알린 때(BOT-123). 알림 찾기는 만든 지 10분~1일 10분 [가정]의 쓰이지 않은 익숙하지 않은 행만 본다(부분 색인 admin_login_step_password_only_idx). 정비 admin-login-step-expired가 만든 지 2일 [가정] 지난 행을 지운다(2026-11-05)"
+    }
+    admin_refresh_token_hash {
+        bytea hash PK "발급한 관리 리프레시 토큰의 SHA-256(로그인 때 준 첫 토큰 포함). 예전 토큰이 다시 오면 그 패밀리를 끝낸다(docs/features/identity.md §6 BOT-130)"
+        uuid admin_session_id FK "세션을 지우면 함께 지운다"
+        uuid refresh_family
+        timestamptz issued_at
+        timestamptz expires_at "그 세션의 절대 만료. 지나면 매일 정비가 지운다"
+    }
+    admin_account_request {
+        text request_id PK "ops-svc 감사 기록 ID(AdminAccountService 바꾸는 호출의 request_id). 같은 값이 다시 오면 처리하지 않고 적은 결과를 준다(docs/features/identity.md §6 BOT-150)"
+        text kind "INVITE|CHANGE_ROLE|REINVITE|REMOVE|DESIGNATE|REVOKE_DESIGNATION(지정, BOT-151)"
+        uuid admin_account_id "대상 계정(초대는 만든 계정). 외래키 없음(삭제한 계정 행도 남는다)"
+        text result "AdminAccountResult 이름(OK, ROLE_NOT_ALLOWED 등)"
+        timestamptz created_at "30일 [가정] 지나면 매일 정비가 지운다"
+    }
+    admin_known_source {
+        uuid admin_account_id PK "FK. 계정을 지우면 함께 지운다"
+        text pair_ref PK "출발지 묶음 해시(admin_login_step.pair_ref와 같다)"
+        timestamptz last_success_at "비밀번호와 2단계를 모두 통과한 마지막 때. 30일 [가정] 지나면 매일 정비가 지운다(docs/security/auth-controls.md §3.1, BOT-123)"
+    }
+    admin_unlock_link {
+        uuid id PK
+        uuid admin_account_id FK
+        bytea token_hash "해제 링크 토큰(32바이트 난수)의 SHA-256. 원문은 메일 본문에만 있다"
+        int code_failures "이 링크에서 틀린 인증 앱 코드·복구 코드 수. 3 [가정]이면 무효"
+        timestamptz created_at
+        timestamptz expires_at "만든 때 + 30분 [가정]"
+        timestamptz used_at "본인 해제에 쓴 때(한 번만)"
+        timestamptz revoked_at "새 링크를 만들어 무효가 된 때"
+    }
+    admin_session {
+        uuid id PK "액세스 토큰의 sid"
+        uuid admin_account_id FK
+        text aud "partner|ops"
+        bytea refresh_hash "지금 리프레시 토큰의 SHA-256"
+        bytea prev_refresh_hash "바로 앞 리프레시 토큰의 SHA-256(응답을 잃은 재시도, BOT-130)"
+        timestamptz rotated_at "마지막 회전 시각. 바로 앞 토큰을 받아 주는 유예 30초 [가정]의 기준"
+        bool refresh_used "팬 session과 같은 칸(회전마다 false)"
+        uuid refresh_family
+        text pair_ref "로그인한 출발지 묶음 해시(admin_login_step과 같다)"
+        timestamptz created_at
+        timestamptz absolute_expires_at "만든 때 + 24시간(POL-019)"
+        timestamptz idle_expires_at "마지막 활동 + 1시간(POL-019). 토큰 갱신이 늦춘다(BOT-130)"
+        timestamptz terminated_at
+        text termination_reason "LOGOUT|DEVICE_LIMIT|ADMIN_FORCE|REFRESH_REUSE|DELETE|ROLE_CHANGED|PASSWORD_CHANGED(asyncapi SessionTerminated.reason)"
+    }
+    admin_security_notice {
+        uuid id PK
+        uuid admin_account_id FK
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)|INVITATION(초대·재초대 링크, 보낼 때 토큰을 만든다, BOT-150)|PASSKEY_ADDED·PASSKEY_REMOVED(패스키를 등록·지움, BOT-122)"
+        timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
+        timestamptz sent_at "업무 이메일로 보낸 때(또는 보낼 것이 없어 닫은 때). identity의 발송 고리가 메일 포트로 보낸다(BOT-121, 발송 대행은 [가정])"
+        int attempts "보내지 못한 횟수(BOT-121)"
+        timestamptz next_attempt_at "다음에 해 볼 때(1분부터 두 배씩, 최대 1시간 [가정]). 앞의 실패 행이 뒤의 알림을 막지 않게 한다"
     }
     admin_passkey {
-        bytea credential_id PK "WebAuthn 자격 ID"
-        uuid admin_account_id FK
-        bytea public_key "공개키라 평문, 무결성만 지킨다. 등록 해제 때 지운다(P3)"
-        bigint sign_count "인증기가 알린 서명 횟수(동기화 패스키는 0일 수 있다)"
+        uuid id PK "경로의 passkeyId(자격 ID는 길어 경로에 쓰지 않는다, 추천 적용 2026-11-05, BUILD_ORDER BOT-122, ADR-0206)"
+        uuid admin_account_id FK "계정 행을 지우는 일은 없다. 삭제·재초대(CREDENTIAL_LOST·PROTECT_LOCK) 트랜잭션이 행을 지운다"
+        bytea credential_id "WebAuthn 자격 ID(1~1023바이트). 모든 계정 사이에서 UNIQUE(남의 자격을 다시 등록하지 못한다)"
+        bytea public_key "COSE 꼴 공개키(COSE: 키를 CBOR라는 이진 꼴로 적는 표준, RFC 9052. 인증기가 등록 때 이 꼴로 보낸다). 공개키라 평문, 무결성만 지킨다. 등록 해제 때 지운다(P3)"
+        bigint sign_count "인증기가 알린 서명 횟수(동기화 패스키는 0일 수 있다). 둘 다 0이면 받고, 받은 값이 크면 받아 적고, 그 밖은 거절한다(읽은 값과 같을 때만 고친다, docs/features/identity.md §6 '관리 계정 패스키의 첫 구현')"
+        text_array transports "인증기가 알린 전송 방식(internal·hybrid·usb·nfc·ble 등). 확인 옵션의 allowCredentials에 싣는다"
+        text device_type "singleDevice|multiDevice(여러 기기에 동기화되는 패스키인지)"
+        bool backed_up "백업 상태(BS 표시). 확인할 때마다 고친다"
+        uuid aaguid "인증기 모델 번호. 표시·감사용(증명은 받지 않는다, ADR-0206 결정 1)"
+        text name "이름표(1~30자 [가정], 사용자가 정한다. 없으면 '패스키')"
         timestamptz created_at
+        timestamptz last_used_at "마지막으로 재인증에 쓴 때"
+    }
+    admin_reauth {
+        uuid jti PK "발급한 관리 재인증 토큰의 jti(docs/features/identity.md §6 '관리 계정 패스키의 첫 구현', 추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+        uuid admin_account_id FK
+        uuid admin_session_id FK "토큰의 sid"
+        text aud "partner|ops"
+        text act "작업 묶음(docs/security/authz-matrix.md §6 '작업 묶음 act의 값')"
+        text_array factors "확인한 요소(password·totp·passkey 차례). 재인증 기록(I-T53 ③)"
+        uuid passkey_id "passkey로 확인했으면 쓴 패스키(외래키 없음: 패스키를 지워도 기록은 남는다)"
+        timestamptz issued_at "90일 [가정] 지나면 매일 정비 admin-reauth-expired가 지운다. 법정 접속기록은 접속기록 저장소 단계(FR-045)가 따로 옮긴다"
+        timestamptz expires_at "발급 + 5분"
+        timestamptz used_at "identity가 직접 받는 묶음(ACCOUNT_SECURITY)에 쓴 때(한 번만). 다른 묶음의 한 번 쓰기는 받는 서비스가 본다"
     }
     admin_recovery_code {
         uuid id PK
@@ -329,7 +450,7 @@ erDiagram
         uuid id PK
         uuid production_id FK "공연(회차 묶음, ADR-0093). 한 공연의 회차는 모두 같은 배치본(venue_id)을 쓴다"
         uuid promoter_id FK "공연의 파트너와 같은 값(테넌트 검사용 사본)"
-        uuid venue_id FK
+        uuid venue_id FK "공연의 배치본. 배치본을 만들기 전(위저드 3단계 전)에는 NULL이고, 배치본 단계가 그 공연의 모든 회차에 같은 값을 넣는다(ADR-0198 결정 4)"
         timestamptz open_at "오픈 시각(오픈 간격 규칙)"
         timestamptz entry_opens_at "입장 시작"
         timestamptz starts_at "공연 시작. 판매 종료 = starts_at - 24시간, 칸 없이 계산(ADR-0064)"
@@ -351,7 +472,7 @@ erDiagram
     production {
         uuid id PK
         uuid promoter_id FK "파트너(판매자)"
-        uuid place_id FK "공연장(실제 장소, ADR-0093)"
+        uuid place_id FK "공연장(실제 장소, ADR-0093). 새 공연장 요청이면 판매 승인 때 운영자가 잇거나 만들 때까지 NULL이다. requested_place와 꼭 하나만 찬다. 승인 이력이 있으면 늘 찬다(ADR-0198 결정 4)"
         text title "공연명 1~100자 [가정]"
         text genre "장르 정본 목록: 콘서트|뮤지컬|연극|클래식|페스티벌|팬미팅|기타. SCR-021 1단계·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063. 회차에서 옮김, ADR-0093)"
         text age_rating "관람 연령"
@@ -360,7 +481,9 @@ erDiagram
         jsonb kopis_fields "공연예술통합전산망 항목 가운데 공연에 딸린 것(명칭·종류, 관람 가능 연령, 출연진·제작진 등)"
         text sale_review "DRAFT|SUBMITTED|APPROVED|REJECTED|SUSPENDED, 판매 승인(POL-037, docs/planning/03 §2.14). 공연마다 하나(ADR-0093). SUSPENDED는 운영자의 판매 중지(2인 승인, 비공개·새 판매 막음·판 티켓 유지, 추천 적용 2026-10-28, ADR-0123)"
         timestamptz sale_approved_at "마지막 판매 승인 시각. NULL이면 비공개"
-        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093)"
+        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093). 승인 뒤 더한 회차는 addedEvents에 회차 ID와 함께 두고 event 행으로 넣지 않는다. production·event 행은 늘 마지막 승인 내용이다(ADR-0198 결정 3)"
+        jsonb requested_place "새 공연장 요청(이름·주소). 판매 승인 때 운영자가 기존 공연장에 잇거나 새로 만들고 비운다(ADR-0093 결정 3, ADR-0198 결정 4)"
+        jsonb requested_artists "새 아티스트 이름 요청(이름과 보이는 순서). 기존 아티스트는 production_artist로 잇는다. 판매 승인 때 운영자가 잇거나 만들고 비운다(ADR-0093 결정 4, ADR-0198 결정 4)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
         timestamptz created_at
     }
@@ -467,6 +590,8 @@ erDiagram
         uuid production_id "대상 공연(판매 승인된 공연만, ADR-0093). 누르면 대표 회차 상세"
         text image_key "운영자가 올린 가로형 배너 원본 키. 공개는 메타데이터를 지운 파생본만"
         text alt_text "대체 텍스트, 필수"
+        text title "배너의 핵심 문구 1~40자 [가정], 선택. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)"
+        text subtitle "둘째 줄 1~80자 [가정], 선택"
         int sort_order
         timestamptz display_from "노출 시작"
         timestamptz display_until "노출 끝"
@@ -497,7 +622,8 @@ erDiagram
         text phone
         text email
         text business_reg_no "사업자등록번호"
-        text mail_order_report_no "통신판매업 신고번호 또는 면제 근거"
+        text mail_order_report_no "통신판매업 신고번호"
+        text exemption_basis "신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, 2026-11-09 HOT-306)"
         timestamptz verified_at "판매 승인 때 사업자 진위 확인"
         text toss_seller_id "토스페이먼츠 지급대행 셀러(ADR-0047)"
         text toss_seller_status "APPROVAL_REQUIRED|PARTIALLY_APPROVED|KYC_REQUIRED|APPROVED"
@@ -579,6 +705,8 @@ erDiagram
     account ||--o{ purchase_quota : "per event"
     purchase_order ||--o{ payment_attempt : "결제 시도(활성 1건)"
     purchase_order ||--o| ticket_issue_job : "발권 재시도 큐(승인 뒤 발권 전까지, ADR-0106)"
+    purchase_order ||--o| ticket_void_job : "티켓 무효 큐(입금 오류 되돌림 뒤)"
+    purchase_order ||--o| order_saga_job : "주문 Saga 작업(결제 접수부터 결과 반영·실패 해제까지, PRF-165)"
     purchase_order ||--o{ order_cancellation : "티켓 단위 취소"
     event ||--o{ event_cancellation_request : "회차 취소 요청(ADR-0046)"
     event ||--|| event_sale : "회차 판매 상태(purchase, ADR-0122)"
@@ -598,15 +726,20 @@ erDiagram
         text buyer_phone "예매자 휴대폰 번호. buyer_name과 같은 보존"
         text idempotency_key "사본. 멱등 확인은 order_idempotency(계정 × 작업 범위, 기술 검토 중간-046)"
         text consent_version "판매자 제공 동의(SCR-011 ③)와 판매 조건 동의(POL-004)에 보인 고지 문안의 판. 두 동의는 주문 생성의 필수 값이라 동의 일시는 created_at이다. 주문 원장과 함께 보존(ADR-0089)"
+        text seat_assignment "PICK|AUTO. 주문 사건마다 싣는 좌석 고르기 방식(ADR-0150, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
+        text failure_reason "FAILED일 때만. SEAT_TAKEN|QUOTA_EXCEEDED|STALE_GEN|EXPIRED|STORE_GONE(Saga 1단계, 추천 적용 2026-11-05, BUILD_ORDER PRF-165)과 결제 쪽 사유(PRF-163)"
+        int seat_gen "결제 접수 때 적은 좌석 Redis 다시 만들기 판 번호(명세 accept). 판매 예약은 이 번호가 seat_rebuild의 지금 번호와 같을 때만 커밋한다(OPEN[15], PRF-165)"
+        timestamptz pinned_at "Saga 묶기가 OK인 뒤 적는 시각(판 번호 seat_gen과 같은 UPDATE). 다시 만들기가 결제 접수한 묶인 주문의 좌석을 되살리는 근거(PRF-167)"
+        uuid hold_id "주문을 만든 홀드(UNIQUE: 한 홀드에 주문 하나, 겹치면 409 hold-already-ordered). 실패 해제·다시 만들기가 주문 기준으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER PRF-161)"
+        text purchase_session_id "주문을 만든 구매 세션. 결제 시도·접수가 '이 구매 세션의 주문'을 가린다(PRF-161, 사건에는 CREATED에만 싣는다). 인덱스 purchase_order_session_idx (purchase_session_id)로 세션이 끝날 때 그 세션의 열린 주문을 찾는다(마이그레이션 0011, 추천 적용 2026-11-09, BUILD_ORDER PRF-172)"
         timestamptz created_at
     }
     order_idempotency {
-        uuid account_id PK "부른 계정. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)"
+        text account_ref PK "부른 계정 ID. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046). 칸은 서비스마다 둔 멱등 기록 표와 같은 꼴이다(packages/platform idempotencyRecordTable, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
         text operation PK "CREATE_ORDER|START_PAYMENT|ACCEPT_PAYMENT(주문 생성·결제 시도 시작·결제 접수)"
-        text idempotency_key PK "클라이언트 Idempotency-Key, 파티션하지 않음"
+        uuid idempotency_key PK "클라이언트 Idempotency-Key(소문자로 맞춘 v4), 파티션하지 않음"
         bytea request_hash "요청 지문(메서드·실제 경로·본문 바이트의 SHA-256). 같은 키에 지문이 다르면 422 idempotency-key-reused"
-        uuid order_id
-        uuid result_id "다시 돌려줄 응답의 대상(결제 시도 ID. 주문 생성·결제 접수는 비움)"
+        text result_ref "다시 돌려줄 응답의 대상(주문 생성·결제 접수는 주문 ID, 결제 시도 시작은 결제 시도 ID). 업무 쓰기를 커밋할 때 채운다"
         timestamptz created_at "24시간 [가정] 뒤 정비 시간에 지움"
     }
     order_event {
@@ -614,14 +747,15 @@ erDiagram
         int seq PK "주문마다 1부터 빈틈 없이 늘어난다. purchase_order.event_seq와 같은 UPDATE에서 매긴다(ADR-0113)"
         text from_status "이전 상태(첫 행은 비움)"
         text to_status "새 상태"
-        text cause "전이 원인(요청·결제 결과·만료·취소 등)"
-        text actor "행위자(팬 계정, 관리 계정, 시스템 작업)"
+        text cause "전이 원인. 전이 번호 T1~T26(payment §3 전이 표, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
+        text actor "행위자. account:<계정 ID>(팬)|admin:<관리 계정 ID>|system:<작업 이름>(추천 적용 2026-11-05)"
         timestamptz occurred_at
     }
     seat_sale {
         uuid event_id PK
         uuid seat_id PK
         uuid order_id PK "기본 키 (event_id, seat_id, order_id)(ADR-0086)"
+        uuid account_id "주문한 계정. 한도를 되돌릴 때 넘겨받은 계정과 대조한다(추천 적용 2026-11-04, BUILD_ORDER PRF-140 ① 리뷰)"
         text status "PENDING|SOLD|RETURNED"
         timestamptz reserved_at
         timestamptz pending_until "가상계좌 PENDING 기한(입금 기한 + 10분 [가정]), 쓸기 작업의 안전망(ADR-0086)"
@@ -671,20 +805,29 @@ erDiagram
     event_sale {
         uuid event_id PK "회차. 회차 판매 상태의 원본(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122)"
         text status "UPCOMING|ON_SALE|ALL_HELD|SOLD_OUT|ENDED. 바뀔 때 같은 트랜잭션의 Outbox로 trade.seats EventSaleChanged"
+        text previous_status "바뀌기 전 상태. 같은 판을 다시 낼 때 그 판의 값으로 싣는다. 첫 행은 비움(추천 적용 2026-11-09, BUILD_ORDER PRF-144)"
         bigint version "판 번호. 바뀔 때마다 1 올리고 조건부로 쓴다"
         int sellable_seats "판매 대상 좌석 수"
         int available "마지막 판정의 가용 좌석"
         int held "마지막 판정의 홀드 수"
         int paying "마지막 판정의 결제 중 판매 예약(승인 결과를 기다리는 PENDING. 입금 대기·결과 모름은 넣지 않음)"
+        text sold_out_tiers "매진인 등급 ID 배열(text[], 기본 빈 배열). 집합이 바뀌면 판 번호를 올린다(추천 적용 2026-11-09, BUILD_ORDER PRF-144, ADR-0214 결정 3)"
+        timestamptz open_at "UPCOMING이면 오픈 시각(LCH-080이 쓴다). 그 밖에는 비움(추천 적용 2026-11-09, BUILD_ORDER PRF-144)"
         timestamptz first_sold_out_at "처음 SOLD_OUT이 된 시각(분석의 매진 시각)"
         int reopen_count "매진이 풀린 횟수"
         timestamptz changed_at
+        timestamptz counted_at "셈(available·held·paying)을 쓴 시각. 지금 − 이 값 ≥ 5초 [가정]이면 같은 판을 다시 낸다(추천 적용 2026-11-09, BUILD_ORDER PRF-144)"
     }
     payment_attempt {
         uuid id PK
         uuid order_id "활성(READY·ACCEPTED) 부분 유니크"
         text pg "TOSS|PORTONE|SIMULATOR"
         text pg_order_ref "토스 orderId 또는 포트원 paymentId"
+        text pg_payment_key "토스 paymentKey(결제 접수 때 저장, 승인 명령이 접수되거나 과금 없이 끝나면 지움, 추천 적용 2026-11-05, BUILD_ORDER PRF-162)"
+        text pg_tx_id "포트원 txId(같은 수명)"
+        text pg_payment_token "포트원 paymentToken(같은 수명, 로그·사건·응답에 싣지 않는다, ADR-0044)"
+        timestamptz authenticated_at "결제창 인증 완료(접수) 시각. 승인 기한(인증 + 10분)의 기준"
+        timestamptz accepted_at "결제 접수 시각"
         text status "READY|ACCEPTED|SUPERSEDED|EXPIRED. READY는 만든 지 40분 [가정](결제창 인증 유효 30분 + 승인 기한 10분) 지나면 EXPIRED(ADR-0107)"
         timestamptz created_at
     }
@@ -692,10 +835,34 @@ erDiagram
         uuid order_id PK "발권할 주문. 승인 결과를 받은 트랜잭션(seat_sale SOLD, 주문 APPROVED)에서 넣고, 발권(CONFIRMED)·보상(COMPENSATED)과 같은 트랜잭션에서 지운다(ADR-0106)"
         uuid event_id
         int attempts "발권 시도 수"
+        bigint issue_generation "NOT NULL DEFAULT 0. 이 발권을 낳은 승인 사건의 순번(IssueTickets issue_generation, 재발권이 앞 세대와 멱등 충돌하지 않게, 추천 적용 2026-11-09, BUILD_ORDER HOT-152)"
         timestamptz next_attempt_at "다음 시도 시각. 1초에서 두 배씩 최대 60초 간격 [가정]. 다시 보내도 결과가 같은 오류면 비워 자동 재시도를 멈춘다"
         timestamptz issue_due_at "발권 기한 = 결제 승인 + 30분 [가정]. 넘기면 SEV1과 CS 처리함 TICKET_NOT_ISSUED"
         text last_error "마지막 gRPC 상태 코드"
         timestamptz created_at "60초 [가정] 넘게 남으면 SEV2와 trade.orders ISSUE_DELAYED"
+        timestamptz lease_until "실행기가 잡은 동안의 임대 끝(잡을 때 지금 + 30초 [가정], 다시 보낼 실패면 비운다). 널 허용(추천 적용 2026-11-05, BUILD_ORDER PRF-170)"
+        timestamptz delayed_at "ISSUE_DELAYED를 낸 시각. 한 번만 내려고 적는다. 널 허용"
+        timestamptz overdue_at "발권 기한 넘김 신호(SEV1)를 낸 시각. 한 번만 내려고 적는다. 널 허용"
+    }
+    ticket_void_job {
+        uuid order_id PK "입금 오류 되돌림(T21) 트랜잭션이 넣는다. 무효 호출이 끝나면 지운다(추천 적용 2026-11-09, BUILD_ORDER HOT-152)"
+        bigint issue_generation "무효로 할 발권 세대(되돌림 직전의 payment_event_seq)"
+        int attempts "무효 호출 시도 수"
+        timestamptz next_attempt_at "다음 시도 시각(1초에서 두 배씩 최대 60초 [가정]). 다시 보내도 결과가 같은 오류면 비워 자동 재시도를 멈춘다"
+        timestamptz lease_until "실행기가 잡은 동안의 임대 끝. 널 허용"
+        text last_error "마지막 gRPC 상태 코드"
+        timestamptz created_at
+    }
+    order_saga_job {
+        uuid order_id PK "결제 접수 트랜잭션이 RESERVE로 넣는다(PRF-162). 승인·실패 반영이나 실패 해제가 끝나면 지운다(PRF-163·165). 승인 명령 접수 뒤와 UNKNOWN·입금 대기 반영 뒤에는 AWAIT로 남는다(PRF-171). 칸은 §4 여섯·일곱·열한 번째 마이그레이션"
+        uuid event_id
+        text step "RESERVE|CONFIRM|AWAIT|RELEASE. AWAIT는 승인 명령이 접수돼 결과를 기다리는 행이다. Saga 실행기는 고르지 않고 결과 당기기가 고른다(추천 적용 2026-11-06, BUILD_ORDER PRF-171)"
+        int attempts
+        timestamptz next_attempt_at "다음 실행 시각(쓸기 색인)"
+        timestamptz lease_until "실행기가 잡은 동안의 임대 끝. 널 허용"
+        timestamptz created_at
+        timestamptz confirm_sent_at "승인 명령을 처음 보내기 직전에 적은 시각. 있으면 purchase가 혼자 T11을 하지 않는다(PRF-165). 널 허용"
+        timestamptz pull_next_at "결과 당기기의 다음 점검 시각. 고를 때 지금 + 5초 [가정]를 쓴다. 널 허용(추천 적용 2026-11-06, BUILD_ORDER PRF-171)"
     }
     order_cancellation {
         uuid id PK
@@ -750,7 +917,8 @@ erDiagram
         uuid order_id PK "기본 키 (order_id, line_no). 표는 나누지 않는다(ADR-0114)"
         int line_no PK
         uuid seat_id
-        text tier "등급"
+        text tier "등급 ID(주문 사건 items의 tierId)"
+        text section_id "구역 ID(주문 사건 items의 sectionId, ADR-0150, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
         int unit_price "주문 때 가격 스냅샷, 티켓 단위 환급 계산의 기준"
         uuid ticket_id "발권 뒤 채움, ticket DB라 외래 키 없음"
     }
@@ -779,21 +947,24 @@ erDiagram
     settlement_statement ||--o{ receivable_movement : "상계한 정산서"
     purchase_order ||--o| payment : paid_by
     payment ||--o{ payment_event : ""
-    payment ||--o{ webhook_receipt : "dedup key(PG별)"
     payment_entry_pause ||--o{ payment_entry_trial : "시험 재개로 받은 결제(ADR-0105)"
     payment ||--o{ payment_cancel : "부분·전액 취소"
+    payment ||--o| payment_confirm_job : "승인 명령(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
     payment {
         uuid id PK "UUIDv7(시간순). 표는 나누지 않는다(ADR-0114)"
         uuid order_id "UNIQUE. 승인 요청은 주문당 한 번(ADR-0114)"
         uuid event_id "회차. 결제를 만들 때 주문에서 복사, 바뀌지 않음. 정산 합계와 결제 사건의 회차(ADR-0086)"
         uuid attempt_id
+        int attempt_no "같은 주문의 결제 시도 순번(1부터). 승인 명령이 싣고 온 값이고 결제 사건 attemptNo가 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
         text pg "TOSS|PORTONE|SIMULATOR(결제 시도에서 고정)"
         text pg_payment_ref "토스 paymentKey 또는 포트원 paymentId"
         text pg_confirm_token "포트원 paymentToken, 결과 확정 시 삭제"
-        bytea deposit_secret_hash "토스 가상계좌 입금 콜백 secret의 SHA-256, 입금 확정·만료 시 삭제(ADR-0050, 가상계좌 번호와 같은 수명)"
+        text pg_tx_id "포트원 결제 시도 ID(txId). 승인 본문의 검증값이자 조회 답 대조값, 토스·시뮬레이터는 비움(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰)"
+        bytea deposit_secret_hash "토스 가상계좌 입금 콜백 secret의 SHA-256. 입금 오류 통보를 대조하려고 입금 확정(T16)에는 지우지 않고 회차가 끝날 때까지 둔다. 기한 경과·실패(T17)면 지운다(ADR-0050, 추천 적용 2026-11-09, BUILD_ORDER HOT-152. 회차 종료 뒤 지우는 작업은 HOT-153)"
         int amount
         text status "ACCEPTED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|FAILED|PARTIAL_CANCELED|CANCELED"
         timestamptz deposit_due_at "가상계좌 입금 기한(결제사에 보낸 값, ADR-0062)"
+        timestamptz deposit_notified_at "입금 완료 통보를 처음 받은 시각. 입금 대기 행은 짧은 간격 조회의 기준이고 입금 확정·만료 때 삭제, FAILED 행은 늦은 입금 확인을 건 표시(추천 적용 2026-11-09, BUILD_ORDER HOT-151, 코드 리뷰)"
         text virtual_account_no "결제사가 발급한 가상계좌 번호, 필드 암호화(P1 기준), 입금 확정·만료 때 삭제"
         text virtual_account_bank "가상계좌 은행, 입금 확정·만료 때 삭제"
         text idempotency_key "confirm-{orderId}"
@@ -803,6 +974,12 @@ erDiagram
         timestamptz created_at
         timestamptz approved_at "승인(가상계좌는 입금 확인) 시각, 정산 기간 판정(ADR-0086)"
         timestamptz status_changed_at "마지막 상태 전이 시각, 상태 불명 1시간 쓸기 기준(ADR-0086)"
+        text failure_category "분석용 실패 범주 여섯 값. FAILED일 때만 채운다. ConfirmPayment 재전송의 답과 BatchGetPayments가 읽는다(추천 적용 2026-11-09, BUILD_ORDER PRF-181)"
+        timestamptz next_query_at "다음 단독 조회 시각. status가 UNKNOWN이나 AWAITING_DEPOSIT이면 NULL일 수 없다(CHECK, AWAITING_DEPOSIT은 입금 기한 + 10분 [가정], 기한을 모르면 지금 + 1시간 [가정], 추천 적용 2026-11-09, BUILD_ORDER HOT-151). UNKNOWN을 쓸 때 지금 + 5초 [가정], 잡을 때 지금 + max(실제 간격, 15초 [가정]), 답을 본 뒤 그대로 둘 때 실제 간격(조회 횟수로 5초에서 두 배 최대 60초 [가정]). 잡기 부분 인덱스 payment_query_due_idx(추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)"
+        int query_attempts "NOT NULL DEFAULT 0. UNKNOWN 조회 실행기가 잡은 횟수. 다음 간격을 정한다(추천 적용 2026-11-09, BUILD_ORDER PRF-182)"
+        timestamptz query_touched_at "웹훅 조회 신호를 쓰거나 실행기가 잡은 마지막 시각. 결제별 최소 간격 5초 [가정]의 기준(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰)"
+        timestamptz overdue_at "UNKNOWN이 1시간 [가정] 넘었다고 처음 알린 시각. 두 번 알리지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-182). 입금 오류를 1시간 [가정] 확인하지 못한 SEV1에도 같은 칸을 쓰고 되돌림 통보를 처음 받을 때 비운다(추천 적용 2026-11-09, BUILD_ORDER HOT-152, 코드 리뷰)"
+        timestamptz anomaly_logged_at "조회 답의 금액·주문 어긋남이나 결제사 쪽 취소 상태를 SEV1로 처음 알린 시각. 결제마다 한 번만 낸다. 널 허용(추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)"
     }
     payment_event {
         uuid payment_id PK
@@ -811,6 +988,21 @@ erDiagram
         text type "결제 상태 전이 사건의 종류(trade.payments type과 같은 값)와 내부 표시(CONFIRM_SENT 등)"
         bool exported "밖으로 내보내는 사건인지. CONFIRM_SENT 같은 내부 표시는 내보내지 않는다(docs/features/payment.md §4.2 5번)"
         timestamptz occurred_at
+    }
+    payment_confirm_job {
+        uuid payment_id PK "FK payment. 승인 명령 하나(추천 적용 2026-11-09, BUILD_ORDER PRF-180). 끝난 명령은 행을 지운다"
+        text pg "NOT NULL, CHECK 결제사 셋. 접수 때 원장의 pg를 그대로 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰)"
+        timestamptz next_attempt_at "NOT NULL. 다음 시도 시각. 잡기 인덱스 (pg, next_attempt_at, payment_id)"
+        text lease_owner "실행기가 잡은 파드. 널 허용"
+        timestamptz lease_until "잡은 동안의 임대 끝. 널 허용"
+        int attempts "NOT NULL DEFAULT 0, 0 이상. 결제사 답(처리 중·한도 초과)으로 다시 미룬 횟수. 잡기·어댑터 없음·읽기 실패로는 오르지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰)"
+        timestamptz created_at "NOT NULL DEFAULT now()"
+    }
+    webhook_receipt {
+        text pg PK "TOSS|PORTONE|SIMULATOR. CHECK 결제사 셋(추천 적용 2026-11-09, BUILD_ORDER HOT-150). 먼저 온 웹훅을 받아야 해서 payment와 관계선·외래 키를 두지 않는다(§4 웹훅 수신 기록)"
+        text dedup_key PK "결제사별 중복 제거 키(포트원 PORTONE:{webhook-id}, 토스 TOSS:{전송 ID}, 토스 입금 통보 TOSS:deposit:{transactionKey}:{status}:{createdAt})"
+        uuid payment_id "찾은 원장 행. 못 찾았거나 경로의 결제사와 다르면 널"
+        timestamptz received_at "NOT NULL. 받은 지 7일 [가정]이면 정비 일이 지운다"
     }
     payment_entry_pause {
         text pg PK "TOSS|PORTONE|SIMULATOR(새 결제 진입 정지 상태, ADR-0105)"
@@ -950,6 +1142,37 @@ erDiagram
         int matched_count
         int mismatch_count "어긋난 건은 UNKNOWN 해소로 넘김"
         timestamptz finished_at "정산은 판매 기간의 모든 날짜가 DONE인지 먼저 확인(ADR-0086)"
+        text owner "지금 도는 실행의 소유자(파드, 추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰)"
+        int generation "시작마다 1 오른다. 커서·건수·끝내기 쓰기의 조건이다(옛 실행의 쓰기를 거절한다, 추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰)"
+        text stage "LISTING|COMPARING|LEDGER|PULLING(대사 단계, 추천 적용 2026-11-09, BUILD_ORDER HOT-153)"
+        text pg_cursor "결제사 조회의 다음 커서. 멈추면 이어 한다"
+        text compare_after "맞추기 단계의 다음 결제 참조"
+        timestamptz ledger_after_at "원장 쪽 단계의 다음 행(승인 시각)"
+        uuid ledger_after_id "원장 쪽 단계의 다음 행(ID)"
+        int listed_count "결제사에서 받은 거래 수"
+        timestamptz started_at
+    }
+    reconciliation_seen {
+        uuid run_id PK "대사 실행(추천 적용 2026-11-09, BUILD_ORDER HOT-153). 작업 표라 실행이 끝나면 지우고, 정비 일 reconciliation-seen-delete가 끝난 실행과 7일 기간을 넘긴 실행의 남은 행을 지운다(추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰)"
+        text payment_ref PK "결제사의 결제 참조"
+        text order_ref "결제사가 준 주문 참조"
+        text pg_status "대상 날짜 안의 마지막 거래의 상태. 여백의 줄은 대상 날짜 안의 줄이 없을 때만 남고 존재 확인에만 쓴다(추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰)"
+        int amount
+        timestamptz seen_at "그 거래의 시각"
+    }
+    reconciliation_diff {
+        uuid id PK "불일치 기록(추천 적용 2026-11-09, BUILD_ORDER HOT-153)"
+        uuid run_id "찾아낸 실행"
+        text pg "UNIQUE(pg, payment_ref, kind)로 건마다 한 번만 쓴다"
+        text order_ref "주문 ID(결제사 답의 값은 원문이다)"
+        text payment_ref
+        text kind "PG_APPROVED_NO_LEDGER|PG_MISMATCH|AMOUNT_MISMATCH|ORDER_MISMATCH|LEDGER_APPROVED_PG_NOT_PAID|LEDGER_APPROVED_NO_PG_RECORD|LEDGER_FAILED_PG_APPROVED|PARTIAL_CANCELED_AT_PG|LEDGER_CANCELED_PG_APPROVED|UNKNOWN_HANDED_OFF|UNKNOWN_CANCELED_CLOSED|UNREADABLE(못 읽는 줄, 추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰)"
+        text ledger_status "원장 상태(없으면 널)"
+        text pg_status
+        int ledger_amount
+        int pg_amount
+        text state "OPEN|HANDED_OFF|CLOSED(처리 상태. CLOSED는 원장을 닫은 UNKNOWN_CANCELED_CLOSED뿐이다)"
+        timestamptz created_at
     }
 ```
 
@@ -1370,7 +1593,7 @@ erDiagram
     wish {
         uuid account_id PK "identity 논리 DB라 외래키 없음. 병합 때 대표 계정으로 옮긴다(§4의 9번)"
         uuid production_id PK "공연. 기본 키 (account_id, production_id)"
-        timestamptz created_at "찜한 최근 순 목록의 기준. 해제·회원 탈퇴 때 행을 지운다(data-classification '관심 공연 찜하기 내역')"
+        timestamptz created_at "찜한 최근 순 목록의 기준. 같은 찜을 다시 보내도 처음 시각을 그대로 둔다. 해제·회원 탈퇴 때 행을 지운다(data-classification '관심 공연 찜하기 내역', ADR-0198 결정 5)"
     }
     push_subscription {
         uuid id PK
@@ -1905,13 +2128,13 @@ erDiagram
 
 큰 원장 표의 보존 삭제(추천 적용 2026-10-28, ADR-0114. 2026-10-22 ADR-0083의 월 파티션을 다시 봤다): 주문(`purchase_order`)·결제(`payment`)·티켓(`ticket`)과 그 자식 표는 나누지 않는다. 5년 누적(주문 약 1,700만·티켓 약 3,500만)이 한 표로 감당할 크기이기 때문이다. 유일 규칙은 보통 UNIQUE로 건다(주문당 결제 1건은 `payment.order_id` UNIQUE). 주문 멱등키는 멱등 기록 표 `order_idempotency`가 맡는다(계정 × 작업 범위, 기술 검토 중간-046).
 
-**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 29곳이다. 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
+**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 50곳이다(2026-11-05 다시 셈. 공연 등록이 더해졌다, ADR-0198). 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
 
 | 서비스 DB | 이 표에 남기는 작업 |
 | --- | --- |
 | ticket | 양도 요청·수락·거절·철회, 받은 티켓을 결제자에게 돌려주기 |
 | purchase | 예매 취소, 지연 환급 계좌 입력, 배상금 계좌 입력(주문 생성·결제 시도 시작·결제 접수는 `order_idempotency`) |
-| core | 티켓 연동 부가 상품 주문, 굿즈 주문, 후기 쓰기, 후기 신고, 문의 접수·추가 문의, 파트너의 회차 더하기·판매자 정보 변경 요청 |
+| core | 티켓 연동 부가 상품 주문, 굿즈 주문, 후기 쓰기, 후기 신고, 문의 접수·추가 문의, 파트너의 공연 등록·회차 더하기·판매자 정보 변경 요청 |
 | payment | 파트너의 정산서 이의 제기 |
 | ops | 운영 명령, 문의 답변·진행 경과, 승인 업무 요청, 회차 취소 요청(파트너 요청과 운영자 요청), 정산서 수기 조정 요청, 지급 묶음 확인 요청, 결정 기록 |
 
@@ -2020,60 +2243,68 @@ erDiagram
 | `q:{event:E}:seq` | 문자열 (`INCR` / `INCRBY`) | 대기열 순번 발급 카운터 | 회차 해시 태그는 이 카운터처럼 같은 Lua에서 함께 쓰는 회차 단위 키에 붙인다. 사람·토큰 단위 키(`q:dup`·`q:adm`·`q:lobby:{hash}`·`q:arr`)에는 붙이지 않아 샤드 전체에 고르게 흩는다(§1). 장애 전환 직후에는 복제 지연 중에 잃었을 수 있는 최대 발급량(장애 직전 초당 발급 × 측정한 복제 지연 p99.9 × 2 [가정])을 건너뛰고, 대기표에 세대 번호를 새긴다. 건너뛴 구간은 아래 `q:{event:E}:skipped`에 남긴다(추천 적용 2026-10-28, 기술 검토 중간-030). |
 | `q:{event:E}:skipped` | List | 장애 전환 때 건너뛴 번호 구간(줄마다 `{시작}:{끝}:{그때까지의 세대}`) | RB-05 작업(진입 파드가 부르는 RB-05 Lua, ADR-0181)이 카운터 전진과 같은 Lua에서 한 줄을 더한다. 대기표 세대 번호는 이 목록의 줄 수 + 1이다. 대기 상태 파일 생성은 이 구간을 빠진 번호로 세고, serving 전진과 입장 비율은 이 구간을 건너뛴다. 입장 확정은 이 구간의 번호라도 대기표 세대가 그 구간의 세대 이하이면 빠진 번호로 보지 않는다(장애 전에 받은 진짜 대기자). 장애 전환마다 한 줄이라 보통 0~2줄이다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, 기술 검토 중간-030, docs/features/queue-admission.md §3) |
 | `q:{event:E}:epoch` | Hash | 대기열 세대 키: `node`(이 회차 키를 쓴 주 노드의 표지 `{CLUSTER MYID}:{cluster_my_epoch}`, 단일 노드는 `standalone`), `chk`(진입 ②가 마지막으로 설정 세대까지 견준 초. 같은 초 안에는 노드 ID만 본다), `pend`(RB-05가 건너뛰고 아직 복제를 확인하지 않음, `1`), `wait`(확인이 `WAIT` 앞에 쓴 서버 시각) | 일정 사본 읽기 Lua와 진입 ② 묶음 Lua가 없으면 쓰고, 진입 ②는 지금 노드 표지와 다르면 장애 전환이라 번호를 내지 않는다. RB-05 Lua가 건너뛰고 `skipped`에 한 줄을 더한 뒤 지금 표지로 바꾸며 `pend`를 쓴다. 진입 ②와 리더의 닫기는 `pend`가 있어도 번호를 내지 않는다. RB-05를 부른 쪽이 붙은 복제본에 닿은 것을 `WAIT`로 확인한 뒤 `pend`·`wait`을 지운다(소유자 결정 2026-11-04, ADR-0186. 처음의 설정 세대 곱하기는 뺐다). 수명은 순번 카운터와 같다(판매 종료 + 1일). 좌석의 `s:{event:E}:epoch`(ADR-0121)와 같은 생각이다(추천 적용 2026-11-03, ADR-0181) |
-| `q:{event:E}:cfg` | Hash | 회차 일정·정렬 설정 사본: `opensAtMs`(오픈 시각), `startsAtMs`(공연 시작 시각), `lobbyShuffle`·`openBatch`(`1`·`0`), `batchWindowMs`(선택, 오픈 직후 묶음 구간 길이 1~60,000밀리초, 없으면 2초 [가정]), `rev`(판 번호) | 판매 승인(BUILD_ORDER LCH-080)이 쓰고 queue-svc가 읽는다. 진입 경로가 공연 DB에 기대지 않게 대기열 Redis에 둔다. 쓰는 쪽은 `rev`가 지금 값보다 클 때만 바꾼다. queue-svc는 파드 메모리에 1초 [가정] 둔다. 키가 없으면 그 회차의 대기열이 열리지 않은 것이다(404 `queue-not-found`). 수명은 판매 종료(`starts_at` − 24시간) + 1일 [가정]이다. 판매 종료 뒤 하루는 진입·입장 확정에 410 `sale-ended`를 줄 수 있게 남긴다(추천 적용 2026-11-03, docs/features/queue-admission.md §3 '첫 구현의 세부') |
-| `q:dup:{pid}:E` | 문자열 (`SET NX`) | 1인 1순번 중복 발급 검증(로비 참가 1인 1장 포함) | 사람(pid) 식별자를 기준으로 전체 샤드에 고르게 나눠 둔다. '중복 확인 키 잡기(순번 선점) → 순번 발급 → 순번 기록' 순서로 실행된다. 진입의 선점 값은 `PENDING:{요청 ID}`(수명 10초 [가정])이고, 순번을 기록할 때 `{번호}:{세대}:{요청 ID}:{jny}:{vr}`로 바꾸며(동시 도착 묶음에 넣으면 묶음 기록 `BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}`로 바꾸고 수명을 판매 종료로 늘린다, OPEN[14] 추천 적용 2026-11-02)(`jny`·`vr`은 응답을 잃은 재시도가 처음 대기표를 그대로 받게 함께 둔다, 추천 적용 2026-11-03) 수명을 아래 판매 종료 TTL로 늘린다. 같은 요청 ID로 다시 오면 이어서 처리하고(기록이 끝났으면 같은 번호의 대기표를 다시 준다), 수명이 지난 `PENDING`은 다른 요청이 새로 잡을 수 있다. 그래서 선점 직후 파드가 멈춰도 그 사람이 '이미 대기 중'에 갇히지 않는다(추천 적용 2026-10-28, 기술 검토 중간-035, docs/features/queue-admission.md §3). 그 대기가 끝날 때 지우고, 남은 키는 그 회차의 판매 종료(공연 시작 24시간 전 = `starts_at` - 24시간, ADR-0064)에 맞춘 TTL로 자동 파기된다(탈퇴 계정 키도 표준 개인정보 보호지침 §10①에 따라 5일 이내 삭제). 판매는 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 윈도우가 아니라 판매 종료나 매진까지 이어지므로, 윈도우 끝에 묶지 않는다(추천 적용 2026-10-14, ADR-0063 결정 11). 대기 취소·로비 참가 취소 때(ADR-0060)와 만료된 대기표의 입장 확정(410) 때 지워서 같은 사람이 다시 참가할 수 있게 한다. 입장 확정(ADMITTED) 때도 지운다(그 뒤에는 `q:adm`이 다시 줄 서기를 막는다). 진입 Lua는 같은 Redis 해시 슬롯에 있는 그 사람의 `q:adm`이 있으면 선점하지 않고 409 `ALREADY_ADMITTED`로 거절한다(추천 적용 2026-10-14, ADR-0062). pid 키 전환 기간에는 옛 pid와 새 pid의 키가 해시 슬롯이 달라, 같은 Lua를 옛 pid 쪽부터 차례로 두 번 부르고 순번도 두 키에 기록한다(docs/features/queue-admission.md §3, 추천 적용 2026-10-28, 기술 검토 높음-18). |
-| `q:lobby:{hash}` | 문자열 | 참가 토큰 해시 → 순번 매핑 (셔플 결과) | 특정 공연 태그 없이 토큰 해시를 기준으로 샤드 전체에 나눠 둔다(최대 100만 건 수준). |
-| `q:{event:E}:lobby_members` | Set | 로비 참가자 목록(참가 토큰 해시) | 로비 입장 때 `SADD`, 로비 참가 취소 때 `SREM`을 한다(ADR-0060). 로비 1인 1장 선점은 `q:dup:{pid}:E`가 맡는다. T=0에 리더가 목록을 고정해 셔플 전 배열(해시 오름차순)과 머클 루트를 만든다(최대 100만 건 수준). 셔플 결과를 담는 `q:lobby:{hash}`와는 다른 키다. 수명은 `q:dup`과 같다(그 회차 판매 종료 TTL, 추천 적용 2026-10-20, ADR-0073). T=0에 고정한 목록은 `SMEMBERS`로 한 번에 읽지 않고 `SSCAN … COUNT 1000` [가정]으로 나눠 읽으며, 같은 원소가 두 번 올 수 있어 받는 쪽에서 중복을 지운다. `SMEMBERS`는 O(N)으로 응답을 한 번에 돌려주고, 일반 클라이언트 출력 버퍼에는 기본 상한이 없다(Redis 문서). 판매 종료 정비 잡이 이 키를 `UNLINK`로 먼저 지우고, TTL은 안전망으로 남긴다(추천 적용 2026-10-22, ADR-0086). |
+| `q:{event:E}:cfg` | Hash | 회차 일정·정렬 설정 사본: `opensAtMs`(오픈 시각), `startsAtMs`(공연 시작 시각), `lobbyShuffle`·`openBatch`(`1`·`0`), `batchWindowMs`(선택, 오픈 직후 묶음 구간 길이 1~60,000밀리초, 없으면 2초 [가정]), `lobbyMinutes`(선택, 로비를 여는 분 0~60, `event.lobby_minutes`의 사본, 없거나 범위 밖이면 10분 [가정], 추천 적용 2026-11-09, ADR-0231), `layoutVersion`(선택, 그 회차의 지금 좌석맵 판 번호, 게시한 판이라 1 ~ 2^32 − 1의 정수 글이다. 0은 게시하지 않는 초안이라 받지 않는다(openapi `SeatMapLayout.layoutVersion`). 대기 상태 파일의 `seatmapLayoutPath`를 만든다. 없거나 모양이 틀리면 그 칸만 빼고 일정은 그대로 쓴다, 추천 적용 2026-11-06, ADR-0219 결정 7), `pgKey`·`pgTps`(선택, 그 회차의 결제사 묶음 이름과 승인 상한(초당 건수, 1 이상 정수). 입장 제어 리더가 결제사 상한을 계산할 때 읽는다. 없거나 틀리면 결제사 상한을 걸지 않는다, 추천 적용 2026-11-09, ADR-0226), `rev`(판 번호) | 판매 승인(BUILD_ORDER LCH-080)이 쓰고 queue-svc가 읽는다. 진입 경로가 공연 DB에 기대지 않게 대기열 Redis에 둔다. 쓰는 쪽은 `rev`가 지금 값보다 클 때만 바꾼다. queue-svc는 파드 메모리에 1초 [가정] 둔다. 키가 없으면 그 회차의 대기열이 열리지 않은 것이다(404 `queue-not-found`). 수명은 판매 종료(`starts_at` − 24시간) + 1일 [가정]이다. 판매 종료 뒤 하루는 진입·입장 확정에 410 `sale-ended`를 줄 수 있게 남긴다(추천 적용 2026-11-03, docs/features/queue-admission.md §3 '첫 구현의 세부') |
+| `q:dup:{pid}:E` | 문자열 (`SET NX`) | 1인 1순번 중복 발급 검증(로비 참가 1인 1장 포함) | 사람(pid) 식별자를 기준으로 전체 샤드에 고르게 나눠 둔다. 로비 참가는 `PENDING:{요청 ID}`(10초 [가정])로 선점한 뒤 `LOBBY:{토큰 해시}:{요청 ID}`(수명 판매 종료)로 바꾼다(2026-11-09 HOT-040, ADR-0231). '중복 확인 키 잡기(순번 선점) → 순번 발급 → 순번 기록' 순서로 실행된다. 진입의 선점 값은 `PENDING:{요청 ID}`(수명 10초 [가정])이고, 순번을 기록할 때 `{번호}:{세대}:{요청 ID}:{jny}:{vr}:{대기표 해시}`로 바꾸며(대기표 해시는 2026-11-09에 더했다. 대기표 없이 오는 대기 취소가 `soon`·`verify`의 칸을 찾는 값이다. 해시가 없는 옛 다섯 칸 값도 읽는다, ADR-0233)(동시 도착 묶음에 넣으면 묶음 기록 `BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}`로 바꾸고 수명을 판매 종료로 늘린다, OPEN[14] 추천 적용 2026-11-02)(`jny`·`vr`은 응답을 잃은 재시도가 처음 대기표를 그대로 받게 함께 둔다, 추천 적용 2026-11-03) 수명을 아래 판매 종료 TTL로 늘린다. 같은 요청 ID로 다시 오면 이어서 처리하고(기록이 끝났으면 같은 번호의 대기표를 다시 준다), 수명이 지난 `PENDING`은 다른 요청이 새로 잡을 수 있다. 그래서 선점 직후 파드가 멈춰도 그 사람이 '이미 대기 중'에 갇히지 않는다(추천 적용 2026-10-28, 기술 검토 중간-035, docs/features/queue-admission.md §3). 그 대기가 끝날 때 지우고, 남은 키는 그 회차의 판매 종료(공연 시작 24시간 전 = `starts_at` - 24시간, ADR-0064)에 맞춘 TTL로 자동 파기된다(탈퇴 계정 키도 표준 개인정보 보호지침 §10①에 따라 5일 이내 삭제: identity의 탈퇴 사건 `identity.accounts-withdrawn`을 받은 queue-svc가 진행 중인 회차마다 이 키와 `q:adm`의 만료를 탈퇴 + 5일로 당긴다(`PEXPIREAT … LT`), 추천 적용 2026-11-04, docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키'). 판매는 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 윈도우가 아니라 판매 종료나 매진까지 이어지므로, 윈도우 끝에 묶지 않는다(추천 적용 2026-10-14, ADR-0063 결정 11). 대기 취소·로비 참가 취소 때는 값을 `LEAVING:{요청 ID}:{원래 기록}`(취소 중)으로 잡았다가 `LEFT:{요청 ID}`(취소 끝, 수명 그대로)로 바꾼다. `LEFT`는 다른 요청 ID에게 빈 키와 같아 다시 참가할 수 있고, 같은 요청 ID의 재전송에는 새 번호를 주지 않는다(ADR-0060·0233). 만료된 대기표의 입장 확정(410) 때는 지워서 같은 사람이 다시 참가할 수 있게 한다. 입장 확정(ADMITTED) 때도 지운다(그 뒤에는 `q:adm`이 다시 줄 서기를 막는다). 진입 Lua는 같은 Redis 해시 슬롯에 있는 그 사람의 `q:adm`이 있으면 선점하지 않고 409 `ALREADY_ADMITTED`로 거절한다(추천 적용 2026-10-14, ADR-0062). pid 키 전환 기간에는 옛 pid와 새 pid의 키가 해시 슬롯이 달라, 같은 Lua를 옛 pid 쪽부터 차례로 두 번 부르고 순번도 두 키에 기록한다(docs/features/queue-admission.md §3, 추천 적용 2026-10-28, 기술 검토 높음-18). |
+| `q:lobby:{hash}` | 문자열 | 참가 토큰 해시 → `{번호}:{세대}` (셔플 결과, 2026-11-09 HOT-040, ADR-0231) | 특정 공연 태그 없이 토큰 해시를 기준으로 샤드 전체에 나눠 둔다(최대 100만 건 수준). `q:batch:{hash}`와 같은 꼴이다. 수명은 판매 종료다. 입장 확정이 먼저 읽고, 없으면 회차 슬롯에서 `pub:lobby`와 `lobby_members`를 본다. |
+| `q:{event:E}:shuffle` | Hash | 셔플 커밋 공시 기록(2026-11-09 HOT-040, ADR-0231): 구간(`lobby`·`1`)마다 `commit:{구간}`(16진 64자), `round:{구간}`(공시 drand 라운드), `sealed:{구간}`(KMS로 봉인한 시드, base64), `at:{구간}`(공시 시각 밀리초, Redis `TIME`), 멈춤 표시 `stop:{구간}`(`{시각}:{이유}`, 이유는 beacon·stale_round·late_commit·no_commit·late_root·members_changed·unauthorized·seed_unavailable. 모양이 틀린 값도 멈춘 것으로 읽는다), 게시 때 받은 비콘 `beacon:{구간}`·`sig:{구간}`(16진, HOT-050), 공개한 시드 `seed:{구간}`(16진)·`seedAt:{구간}`(밀리초, 오픈 60분 뒤 admission-ctrl이 쓴다, ADR-0232), 공통 칸 `chain`(`quicknet`)·`algo`(`v1`). RB-35(HOT-041, ADR-0239): `waitUntil:{구간}`(더 기다리기의 끝, 밀리초), `emergency:{구간}`(JSON: 시각·멈춤 이유·공개 사유·서명 묶음 원문 `signed`), `recommit:{구간}`(JSON 배열: 다시 공시한 시각·이전 라운드·새 라운드·공개 사유·서명 묶음 원문 `signed`), 전달 칸 `rb35:pending:{구간}`(서명한 묶음), 처리 표시 `rb35:done:{명령 ID}`·`rb35:result:{명령 ID}` | 구간별 칸은 Lua 한 번에 비어 있을 때만 함께 쓰고 바꾸지 않는다. 예외로 RB-35의 적용 Lua만 `round:{구간}`을 바꾸고 `stop:{구간}`을 지운다(지금의 값이 서명 묶음과 같을 때만). queue-svc 일꾼이 공시 때가 지나면 쓰고(모든 파드가 돌아도 먼저 쓴 값 하나다), 참가 응답이 없으면 그 자리에서 쓴다. admission-ctrl이 시드를 풀어 커밋과 대조한 뒤 셔플에 쓴다. `stop:{구간}`은 RB-35 CLI만 지운다. 수명은 다른 회차 키와 같다(판매 종료 + 1일). |
+| `q:{event:E}:lobby_members` | Set | 로비 참가자 목록(참가 토큰 해시) | 로비 입장 때 `SADD`, 로비 참가 취소 때 `SREM`을 한다(ADR-0060). 목록을 고정한 뒤(`batch_done`의 `lobby`가 선 뒤)의 취소는 목록을 바꾸지 않고 `verify`에 `ORPHAN`을 적는다(ADR-0233). 로비 1인 1장 선점은 `q:dup:{pid}:E`가 맡는다. T=0에 리더가 목록을 고정해 셔플 전 배열(해시 오름차순)과 머클 루트를 만든다(최대 100만 건 수준). 셔플 결과를 담는 `q:lobby:{hash}`와는 다른 키다. 수명은 `q:dup`과 같다(그 회차 판매 종료 TTL, 추천 적용 2026-10-20, ADR-0073). T=0에 고정한 목록은 `SMEMBERS`로 한 번에 읽지 않고 `SSCAN … COUNT 1000` [가정]으로 나눠 읽으며, 같은 원소가 두 번 올 수 있어 받는 쪽에서 중복을 지운다. `SMEMBERS`는 O(N)으로 응답을 한 번에 돌려주고, 일반 클라이언트 출력 버퍼에는 기본 상한이 없다(Redis 문서). 판매 종료 정비 잡이 이 키를 `UNLINK`로 먼저 지우고, TTL은 안전망으로 남긴다(추천 적용 2026-10-22, ADR-0086). |
 | `q:{event:E}:removed` | 비트맵 (125KB) | 이탈하거나 취소해 빠진 번호의 비트맵 | queue-svc 파드가 켠 회차마다 매초 경계에 0번째 바이트부터 `seq`가 든 바이트까지 읽어(GETRANGE, 바이트로 받음) 구간 대기 상태 파일을 만든다(추천 적용 2026-11-03, docs/features/queue-admission.md §4 '대기 상태 파일의 첫 구현'). 번호 n은 비트 n(바이트 안 높은 비트부터, `SETBIT {번호} 1`)이다. 추가 검증을 통과해 돌아온 번호도 비트를 끄지 않는다(입장 확정은 `q:{event:E}:verify`로 예외 처리한다, ADR-0062). |
 | `q:{event:E}:slots` | Sorted Set (점수 = 만료 타임스탬프) | 입장 자리 관리 | 처음 진입하면 사용 기한 5분을 준다. 구매 세션 시작 이벤트를 받으면 최대 체류 시한으로 갱신하고, 세션 종료 이벤트를 받으면 바로 지운다. 만료된 입장 자리는 `ZREMRANGEBYSCORE` 명령으로 한꺼번에 정리한다. 멤버는 입장 토큰 jti다. 시작 이벤트는 자리가 남아 있을 때만 점수를 올린다(`ZADD XX GT`, 회수된 자리를 늦게 온 사건이 되살리지 않게). 수명은 회차 키와 같다(판매 종료 + 1일, 추천 적용 2026-11-03, ADR-0183) |
 | `q:{event:E}:admitted` | 카운터 | 누적·실시간 입장 인원 계측 | 예매 단계로 통과한 사용자 수를 실시간으로 추적한다. |
-| `q:{event:E}:slot_of` | Hash | 대기표(로비 진입자는 참가 토큰) 해시 → 그 대기표가 받은 입장 자리 jti | 입장 확정 Lua가 자리를 잡을 때 쓰고, 같은 대기표가 다시 오면 그 jti의 자리가 만료 전일 때 같은 jti를 다시 주며 첫 사용 기한을 지금 + 5분으로 올린다(응답을 잃은 재시도·동시 요청에 자리를 둘 주지 않는다). 입장한 대기표마다 한 칸이다. 수명은 회차 키와 같다(판매 종료 + 1일, 추천 적용 2026-11-03, ADR-0183) |
+| `q:{event:E}:slot_of` | Hash | 대기표(로비 진입자는 참가 토큰) 해시 → 그 대기표가 받은 입장 자리 jti | 입장 확정 Lua가 자리를 잡을 때 쓰고, 같은 대기표가 다시 오면 그 jti의 자리가 만료 전일 때 같은 jti를 다시 주며 첫 사용 기한을 지금 + 5분으로 올린다(응답을 잃은 재시도·동시 요청에 자리를 둘 주지 않는다). 입장한 대기표마다 한 칸이다. 수명은 회차 키와 같다(판매 종료 + 1일, 추천 적용 2026-11-03, ADR-0183). 자리를 처음 잡을 때 그 시각을 `<대기표 해시>:at` 칸에 함께 두고, 같은 jti를 다시 줄 때 돌려줘 입장 토큰의 만료를 첫 발급과 같게 한다(추천 적용 2026-11-05, HOT-010, ADR-0214 결정 8) |
 | `q:{event:E}:req` | 비트맵 | 입장 확정을 처음 요청한 번호(비트 n = 번호 n) | 입장 확정 Lua가 처음 요청을 셀 때 켠다(`SETBIT`이 0을 돌려줄 때만 `call_req`에 센다). 곧 입장에서 빠진 뒤 다시 온 요청을 두 번 세지 않게 한다. 건너뛴 구간의 옛 세대 번호는 켜지 않는다. 수명은 판매 종료다(추천 적용 2026-11-03, ADR-0183) |
 | `q:{event:E}:admits` | Hash | 최근 입장 속도(1초 칸 16개를 돌려 쓰는 고리. 필드 = 초 % 16, 값 = `{초}:{입장 수}`) | 입장 확정 Lua가 ADMITTED 때 그 초 칸을 올리고, `SOON` 때 지난 10초를 더해 `retryAfterSeconds`의 '최근 자리가 비는 속도'로 쓴다. 칸이 16개라 크기가 늘지 않는다. 수명은 회차 키와 같다(판매 종료 + 1일, 추천 적용 2026-11-03, ADR-0183) |
 | `q:{event:E}:serving` | 문자열 | 현재 입장 번호(serving) | admission-ctrl 리더만, 리더 세대를 확인하는 Lua로 이 값을 앞으로 옮긴다(ADR-0056). |
 | `q:{event:E}:serving_log` | 정렬 집합(점수 = 그 1초 칸의 마지막 serving, 멤버 = 칸의 시각(초)) | 차례가 온 시각 기록(serving이 어떤 번호를 언제 넘었는지) | 리더가 serving을 올리는 같은 Lua에서 1초 칸마다 한 항목을 넣거나 점수를 고친다(`ZADD`, 전진이 있던 칸만). 입장 확정 Lua는 `ZRANGE … 내 번호 +inf BYSCORE LIMIT 0 1`로 내 번호 이상인 첫 기록의 칸을 차례 시각으로 쓰고, 15분 판정과 사람별 대기 기록(`QueueEntryRecord`의 차례가 온 시각)에 쓴다. 정밀도는 1초다. 항목은 serving이 움직인 1초 칸마다 하나라 온세일 첫 1시간에 많아야 3,600개이고, 그 뒤에는 새 도착으로 serving이 움직일 때만 는다. 수명은 그 회차 판매 종료 + 1일 TTL이다(추천 적용 2026-10-28, 기술 검토 중간-029, docs/features/queue-admission.md §5·§6) |
 | `q:{event:E}:calls` | 정렬 집합(점수로 정렬되는 집합. 점수 = 그 전진의 마지막 번호) | serving 전진 기록(값은 `{전진 시각(밀리초)}:{그 전진에서 부른 유효 번호 수}`, 추천 적용 2026-11-03) | 리더가 serving을 올리는 같은 Lua에서 쓴다(리더 세대 확인, ADR-0056). 입장 확정 Lua는 번호가 든 전진을 `ZRANGE … BYSCORE LIMIT 0 1`로 찾는다. 루프는 이 기록으로 '오는 중'과 입장 비율을 계산하고, 60초보다 오래된 기록을 지운다(최대 약 300개). 대기 상태 파일은 끝 50개를 읽어 최근 5초의 전진을 입장 임박 구간 파일의 `servingSteps`로 싣는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, ADR-0104) |
 | `q:{event:E}:call_req` | Hash | 전진마다 처음 온 입장 확정 요청 수 | 필드는 `q:{event:E}:calls`의 값(전진)이고, 값은 그 전진의 번호 가운데 처음 요청한 번호 수다(바로 ADMITTED가 되었거나 처음 `SOON`을 받은 때 한 번만 센다). `calls`와 함께 지운다(추천 적용 2026-10-28, ADR-0104) |
-| `q:{event:E}:soon`, `q:{event:E}:soon_at` | 정렬 집합 둘(점수 = 순번 / 마지막 시도 시각) | 곧 입장 대기열(자리가 없어 `SOON`을 받은 대기표·참가 토큰의 해시) | 입장 확정은 '빈자리 수 > `soon`에서 내 번호보다 작은 번호의 수'일 때만 자리를 주고, 자리를 주면 두 집합에서 뺀다. 안내한 다시 시도 시각 + 3초 [가정] 동안 다시 오지 않은 항목은 리더가 `soon_at`으로 찾아 뺀다. `SOON`이 드물어 작다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, ADR-0104). 처음 `SOON` 시각은 `q:{event:E}:soon_first`(Hash, 필드 = 해시, 값 = 밀리초, 수명 같음)에 비었을 때만 두어 `admission_soon_wait_seconds`를 재고, ADMITTED 때와 리더가 낡은 항목을 뺄 때 함께 지운다(추천 적용 2026-11-03, ADR-0183) |
+| `q:{event:E}:soon`, `q:{event:E}:soon_at` | 정렬 집합 둘(점수 = 순번 / 마지막 시도 시각) | 곧 입장 대기열(자리가 없어 `SOON`을 받은 대기표·참가 토큰의 해시) | 입장 확정은 '빈자리 수 > `soon`에서 내 번호보다 작은 번호의 수'일 때만 자리를 주고, 자리를 주면 두 집합에서 뺀다. 안내한 다시 시도 시각 + 3초 [가정] 동안 다시 오지 않은 항목은 리더가 `soon_at`으로 찾아 뺀다. `SOON`이 드물어 작다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, ADR-0104). 처음 `SOON` 시각은 `q:{event:E}:soon_first`(Hash, 필드 = 해시, 값 = 밀리초, 수명 같음)에 비었을 때만 두어 `admission_soon_wait_seconds`를 재고, ADMITTED 때와 리더가 낡은 항목을 뺄 때 함께 지운다(추천 적용 2026-11-03, ADR-0183). 대기 취소도 세 키에서 함께 뺀다(추천 적용 2026-11-09, ADR-0233) |
 | `q:{event:E}:leader` | 문자열 | 리더 세대(펜싱 토큰) | 리더가 Lease(정해진 시간 동안만 유효한 권한. 갱신하지 않으면 다른 쪽이 가져간다)를 얻을 때 올린 `leaseTransitions` + 1(리더 세대, 처음 만든 Lease의 첫 리더가 1)의 최댓값이다(ADR-0182 결정 1). 리더가 쓸 때마다 같은 Lua에서 이 값과 비교해, 낮은 세대의 쓰기는 `FENCED`로 거절한다(ADR-0056). |
-| `q:{event:E}:ctl` | Hash | 리더 상태 | 운영자가 정한 동시 입장 목표와 수동 고정 만료 시각, 입장 일시정지와 만료 시각, 판매 일시정지(명령 3, 만료 없음), 판매 중지 여부(`suspended`, 회차 범위, 판매 일시정지와 따로 두고 하나라도 참이면 serving 전진을 멈춘다, ADR-0123), 대체 결제사 전환과 그 판 번호(동시 입장 목표 상한을 다시 계산하는 입력, ADR-0143 결정 1), AIMD(정상이면 조금씩 늘리고 나빠지면 크게 줄이는 조절 방식)의 현재 목표, 제어 입력 없음 상태와 시작 시각(ADR-0069)을 담는다. 새 리더는 이 값으로 시작한다(ADR-0056, 판매 일시정지는 ADR-0062). 필드 이름(추천 적용 2026-11-03, ADR-0182): 운영자 목표 `target`과 수동 고정 만료 `targetUntil`(밀리초), 입장 일시정지 `admitPaused`와 그 만료 `admitPausedUntil`(밀리초, 없으면 만료 없음), 판매 일시정지 `paused`, 판매 중지 `suspended`(`1`·`0`). 셋 가운데 하나라도 참이면 serving 전진이 0이다. 지금 쓰는 목표 `targetNow`는 리더가 `ADVANCE` 주기마다 쓰고, 입장 확정이 빈자리를 셀 때 읽는다(없으면 5,000. AIMD의 현재 목표도 이 칸이다, 추천 적용 2026-11-03, ADR-0183). |
-| `q:{event:E}:batch_done` | Hash | 카운터 전진 표시: 로비 '목록 고정 완료'(필드 `lobby`)와 '묶음 n 닫힘'(필드 `{batchNo}`). 값은 그 몫의 첫 번호와 크기(`{첫 번호}:{크기}:{세대}`, 추천 적용 2026-11-03). 묶음 결과를 게시하면 `pub:{batchNo}`에 게시 시각(밀리초), `root:{batchNo}`에 참가자 머클 루트(16진)를 쓴다. 로비 셔플 결과의 게시 시각은 `pub:lobby`이고(로비 결과 게시 단계가 쓴다), 게시 전 복제 확인은 `wait:{batchNo}`에 확인한 시각을 쓴다(추천 적용 2026-11-03, ADR-0182). 결과 키를 잃은 참가자를 본 진입은 `repair:{batchNo}`에 처음 청한 시각을 `HSETNX`로 쓰고, admission-ctrl이 같은 결과를 다시 쓴 뒤 지운다 | 로비 몫은 T=0 목록 고정 때, 묶음 몫은 구간이 닫히는 순간(셔플을 기다리지 않는다) 그 필드를 `HSETNX`로 남기는 일과 카운터 전진을 같은 Lua에서 해서 몫마다 한 번만 전진한다(ADR-0056). 진입 Lua는 같은 슬롯에서 필요한 표시를 본 뒤에만 `INCR`하고, 표시가 없으면 그 일을 먼저 한다. 리더가 늦거나 멈춰도 오픈 뒤 첫 번호가 로비·묶음 몫보다 앞서지 않는다. 표시가 선 뒤에는 그 목록(`lobby_members`·`batch_members`)에 더하거나 빼지 않는다. 장애 전환으로 사라지면 되살리지 않는다. RB-05가 그 표시의 몫(인원)까지 건너뛴 뒤 다음 진입이나 리더가 새 카운터 위에서 다시 닫는다(2026-11-03 ADR-0181 결정 5·ADR-0182 결정 6이 2026-10-28 '같은 값으로 다시 쓴다'를 바꿈, 기술 검토 중간-028, docs/features/queue-admission.md §3). 게시 표시 `pub:{batchNo}`·`root:{batchNo}`는 비어 있을 때만 쓴다(두 번째 게시가 게시 시각을 늦춰 분산 창을 다시 닫지 않게, ADR-0182). |
+| `q:{event:E}:ctl` | Hash | 리더 상태 | 운영자가 정한 동시 입장 목표와 수동 고정 만료 시각, 입장 일시정지와 만료 시각, 판매 일시정지(명령 3, 만료 없음), 판매 중지 여부(`suspended`, 회차 범위, 판매 일시정지와 따로 두고 하나라도 참이면 serving 전진을 멈춘다, ADR-0123), 대체 결제사 전환과 그 판 번호(동시 입장 목표 상한을 다시 계산하는 입력, ADR-0143 결정 1), AIMD(정상이면 조금씩 늘리고 나빠지면 크게 줄이는 조절 방식)의 현재 목표, 제어 입력 없음 상태와 시작 시각(ADR-0069)을 담는다. 새 리더는 이 값으로 시작한다(ADR-0056, 판매 일시정지는 ADR-0062). 필드 이름(추천 적용 2026-11-03, ADR-0182): 운영자 목표 `target`과 수동 고정 만료 `targetUntil`(밀리초), 입장 일시정지 `admitPaused`와 그 만료 `admitPausedUntil`(밀리초, 없으면 만료 없음), 판매 일시정지 `paused`, 판매 중지 `suspended`(`1`·`0`). 셋 가운데 하나라도 참이면 serving 전진이 0이다. 지금 쓰는 목표 `targetNow`는 결제사·합산 나누기까지 끝난 값이다. 리더가 `ADVANCE` 주기마다 쓰고, 입장 확정이 빈자리를 셀 때 읽는다(없으면 5,000, 추천 적용 2026-11-03, ADR-0183). AIMD의 자기 목표는 아래 `aimdTarget`이고 `targetNow`를 시작 값으로 쓰지 않는다(ADR-0226 결정 3). 자동 제어 칸(추천 적용 2026-11-09, ADR-0226). 리더가 `ADVANCE` Lua 안에서 쓴다: `aimdTarget`(결제사·합산 나누기 전의 AIMD 목표), `aimdChangeAt`(마지막 증액·감축의 표본 시각), `aimdDecAt`·`aimdDecTo`(AIMD 감축 시각과 그때의 새 목표, 감축 확인 시간의 기준), `aimdSample`(마지막으로 판단한 표본 시각), `inputStale`(`1`·`0`)·`inputStaleAt`·`inputFreshAt`·`inputStaleKinds`(입력 없음과 그 시작 시각, 돌아오기 시작한 시각, 없는 입력 이름들), `aimdRecoveredAt`(입력 없음이 끝난 시각, 복귀 확인 기준), `budgetHoldAt`(에러 버짓 연동 감축 시각), `budgetSeen`(켜짐을 본 신호, JSON 배열), `seatStoreDown`(`1`·`0`), `seatStoreCutAt`, `budgetHoldCutAt`(좌석 홀드 여정 감축 시각), `manualEndedAt`(버짓 감축으로 끝난 자동 조절 멈춤의 시각), `lastDecrease`(JSON: 사유·여정·전후 목표·노출 줄이기 표시). 운영자 쪽 칸(쓰는 코드는 OPS-300·OPS-310): `aimdResumeAt`(자동 조절 복귀 확인 시각, 밀리초), `pgKey`·`pgTps`(명령 6 대체 결제사 전환으로 `cfg`의 같은 칸을 덮는다). 없거나 뜻이 틀린 칸은 없는 것으로 본다. 시간 칸은 모두 밀리초이고 빈 글자는 없는 것과 같다. |
+| `q:{event:E}:batch_done` | Hash | 카운터 전진 표시: 로비 '목록 고정 완료'(필드 `lobby`)와 '묶음 n 닫힘'(필드 `{batchNo}`). 값은 그 몫의 첫 번호와 크기(`{첫 번호}:{크기}:{세대}`, 추천 적용 2026-11-03). 묶음 결과를 게시하면 `pub:{batchNo}`에 게시 시각(밀리초), `root:{batchNo}`에 참가자 머클 루트(16진)를 쓴다. 머클 루트는 목록을 고정하고 복제를 확인한 뒤 비콘을 기다리기 전에 `root:{구간}`과 `rootAt:{구간}`(저장소 시각 밀리초)으로 먼저 쓴다(`HSETNX`, 게시는 이 값을 바꾸지 않는다, HOT-050, ADR-0232 결정 5). 로비 셔플 결과의 게시 시각은 `pub:lobby`이고(로비 결과 게시 단계가 쓴다), 게시 전 복제 확인은 `wait:{batchNo}`에 확인한 시각을 쓴다(추천 적용 2026-11-03, ADR-0182). 결과 키를 잃은 참가자를 본 진입은 `repair:{batchNo}`에 처음 청한 시각을 `HSETNX`로 쓰고, admission-ctrl이 같은 결과를 다시 쓴 뒤 지운다. 목록을 고정한 뒤의 취소는 `verify`에 `ORPHAN`을 쓰는 Lua에서 `orphan:{구간}`을 함께 쓴다. 묶음 게시는 이 칸이 없으면 돌릴 번호를 찾지 않는다(추천 적용 2026-11-09, ADR-0233) | 로비 몫은 T=0 목록 고정 때, 묶음 몫은 구간이 닫히는 순간(셔플을 기다리지 않는다) 그 필드를 `HSETNX`로 남기는 일과 카운터 전진을 같은 Lua에서 해서 몫마다 한 번만 전진한다(ADR-0056). 진입 Lua는 같은 슬롯에서 필요한 표시를 본 뒤에만 `INCR`하고, 표시가 없으면 그 일을 먼저 한다. 리더가 늦거나 멈춰도 오픈 뒤 첫 번호가 로비·묶음 몫보다 앞서지 않는다. 표시가 선 뒤에는 그 목록(`lobby_members`·`batch_members`)에 더하거나 빼지 않는다. 장애 전환으로 사라지면 되살리지 않는다. RB-05가 그 표시의 몫(인원)까지 건너뛴 뒤 다음 진입이나 리더가 새 카운터 위에서 다시 닫는다(2026-11-03 ADR-0181 결정 5·ADR-0182 결정 6이 2026-10-28 '같은 값으로 다시 쓴다'를 바꿈, 기술 검토 중간-028, docs/features/queue-admission.md §3). 게시 표시 `pub:{batchNo}`·`root:{batchNo}`는 비어 있을 때만 쓴다(두 번째 게시가 게시 시각을 늦춰 분산 창을 다시 닫지 않게, ADR-0182). |
 | `q:batch:{hash}` | 문자열 | 동시 도착 묶음 결과: 사전 검증 토큰 해시 → `{번호}:{세대}` | admission-ctrl이 묶음 결과를 게시할 때 쓴다. 결과 뒤 같은 진입 요청 ID로 다시 온 진입이 이 값을 먼저 보고 대기표를 준다. 게시 표시보다 먼저 쓰므로 있으면 그 번호다. 장애 전환으로 잃으면 진입이 다시 쓰기를 청한다(`q:{event:E}:batch_done`의 `repair`). 회차 태그 없이 토큰 해시를 기준으로 샤드 전체에 나눠 둔다(`q:lobby:{hash}`와 같음). 수명은 판매 종료다(추천 적용 2026-11-03, docs/features/queue-admission.md §3 '묶음의 첫 구현') |
-| `q:{event:E}:batch_members:{batchNo}` | Set | 동시 도착 구간 묶음 모으기(사전 검증 토큰 해시) | 오픈 직후 N초(2초 [가정]) 안에 들어온 묶음 대상 진입을 `INCR` 대신 `SADD`로 모은다(ADR-0041). 구간이 닫히면 카운터를 묶음 크기만큼 바로 전진하고 닫힘 표시를 남긴다(`q:{event:E}:batch_done`, 기술 검토 중간-028). 리더는 닫힌 목록을 묶음 셔플과 머클 루트에 쓴다. admission-ctrl은 `SSCAN`(COUNT 1,000)으로 나눠 읽는다(한 번에 다 읽으면 그동안 회차 샤드가 막힌다). 진입은 결과 키가 없을 때 이 목록으로 잃은 `SADD`(목록에 없음)와 잃은 결과 키(목록에 있음)를 가른다. 수명은 `q:dup`과 같다(추천 적용 2026-10-20, ADR-0073). |
-| `q:{admission}:leader`, `q:{admission}:ctl` | 문자열, Hash | 회차와 무관한 리더 세대와 상태(자동 제어 긴급 정지, 전체 범위 판매 일시정지) | 회차별 키와 같은 방식으로 쓴다(ADR-0056, 판매 일시정지는 ADR-0062). |
+| `q:{event:E}:batch_members:{batchNo}` | Set | 동시 도착 구간 묶음 모으기(사전 검증 토큰 해시) | 오픈 직후 N초(2초 [가정]) 안에 들어온 묶음 대상 진입을 `INCR` 대신 `SADD`로 모은다(ADR-0041). 구간이 닫히면 카운터를 묶음 크기만큼 바로 전진하고 닫힘 표시를 남긴다(`q:{event:E}:batch_done`, 기술 검토 중간-028). 리더는 닫힌 목록을 묶음 셔플과 머클 루트에 쓴다. admission-ctrl은 `SSCAN`(COUNT 1,000)으로 나눠 읽는다(한 번에 다 읽으면 그동안 회차 샤드가 막힌다). 진입은 결과 키가 없을 때 이 목록으로 잃은 `SADD`(목록에 없음)와 잃은 결과 키(목록에 있음)를 가른다. 구간이 닫히기 전의 대기 취소는 `SREM`으로 빼고, 닫힌 뒤의 취소는 목록을 바꾸지 않고 `verify`에 `ORPHAN`을 적는다(추천 적용 2026-11-09, ADR-0233). 수명은 `q:dup`과 같다(추천 적용 2026-10-20, ADR-0073). |
+| `q:{admission}:leader`, `q:{admission}:ctl` | 문자열, Hash | 회차와 무관한 리더 세대와 상태(자동 제어 긴급 정지, 전체 범위 판매 일시정지). 자동 제어 긴급 정지(명령 11) 칸 이름은 `autoStopped`(`1`이면 정지, 추천 적용 2026-11-09, ADR-0226. 쓰는 코드는 OPS-300) | 회차별 키와 같은 방식으로 쓴다(ADR-0056, 판매 일시정지는 ADR-0062). |
 | `q:{admission}:events` | Sorted Set (점수 = 회차 키 수명, 판매 종료 + 1일 = 공연 시작 시각) | 진행 중인 회차 목록(admission-ctrl 리더가 볼 회차) | queue-svc가 회차 일정 사본을 읽을 때(파드마다 1초 [가정]에 한 번) `ZADD GT`로 넣고, 리더가 점수가 지난 회차를 지운다. 판매 승인(BUILD_ORDER LCH-080)이 생기면 일정 사본을 쓸 때 함께 넣는다(추천 적용 2026-11-03, ADR-0182) |
-| `q:{event:E}:notice` | Hash | 대기 화면에 싣는 제어 상태(queue-svc): 판매 상태(판매 중·일시정지), 판매 중지 여부(`suspended`, ADR-0123), 대기실 공지 템플릿과 표시 범위, 판 번호, 명령 ID. 회차 판매 상태(`saleState`: ON_SALE·ALL_HELD·SOLD_OUT·ENDED와 `EventSaleChanged`의 판 번호)와 매진을 받은 때의 마지막 발급 번호(`soldOutLastSeq`)도 둔다(추천 적용 2026-10-28, ADR-0122) | 제어 gRPC를 받은 queue-svc 파드가 판 번호가 지금 값보다 클 때만 쓴다(비교하고 쓰기). 대기 상태 파일을 만드는 작업이 1초마다 읽어 파일에 넣는다. 범위가 전체면 회차 자리에 `PLATFORM`을 쓴 키(`q:{event:PLATFORM}:notice`)에 두고, 파일 생성 작업은 두 키를 함께 읽어 하나라도 일시정지면 일시정지로 쓰고, `paused`·`suspended` 중 하나라도 참이면 `PAUSED`로 쓴다(ADR-0123). queue-svc의 ack는 이 키에 판이 선 것이다. 수명은 회차 판매 종료 + 1일 [가정] TTL이다(추천 적용 2026-10-28, ADR-0103) |
-| `q:adm:{pid}:E` | 문자열 (Lua 확인·기록) | 입장 확정 때 1인 1순번을 다시 확인 | 값은 입장한 대기표(로비 진입자는 참가 토큰)의 해시다. 키가 비어 있으면 지금 입장 확정하는 대기표의 해시를 넣고 통과시킨다. 같은 대기표면 통과시키고, 다른 대기표면 409 `DUPLICATE_ADMISSION`으로 거절한 뒤 거절한 대기표의 번호를 빠진 번호(1인 1순번 위반 무효화, POL-002)로 기록한다. PRF-110부터 값은 `{대기표 해시}:{요청 표지}`다(요청 표지는 입장 확정 요청마다 새로 만드는 값으로, `SOON` 되돌리기가 같은 대기표의 다른 요청이 다시 쓴 값을 지우지 않게 가린다). 입장 확정이 곧 입장(`SOON`)이면 그 요청이 채운 값이 그대로일 때만 지우고, ADMITTED면 값이 없거나 같은 대기표일 때 다시 쓴다. 대기표가 받은 자리의 jti는 회차 슬롯 `q:{event:E}:slot_of`에 둔다(추천 적용 2026-11-03, ADR-0183). `q:dup`과 같은 분산 규칙(사람 식별자 기준)을 따른다. 수명은 그 회차의 판매 종료(공연 시작 24시간 전 = `starts_at` - 24시간)에 맞춘 TTL이다(입장 뒤 판매가 끝날 때까지 다시 줄 서기를 막는다. 판매 종료 뒤에는 진입과 입장 확정을 410 `sale-ended`로 받지 않으므로 이 키가 더 필요 없다. 탈퇴 계정은 5일 이내 삭제, ADR-0056, 판매가 윈도우로 끝나지 않는 것은 ADR-0063 결정 11, 판매 종료 시각은 ADR-0064). pid 키 전환 기간에는 `q:dup`처럼 옛 pid 쪽부터 두 키를 확인하고 기록한다(docs/features/queue-admission.md §6, 추천 적용 2026-10-28, 기술 검토 높음-18). |
-| `q:arr:{reqId}:E` | 문자열 (`SET NX`) | 도착 시각 쿠키(`__Host-peaket_arr`)에 담긴 CloudFront(AWS의 CDN) 요청 ID를 한 번만 받기 | 진입이 Degraded일 때 queue-svc가 쿠키의 MAC·회차·시각·sid를 확인한 뒤, 요청 ID로 이 키를 먼저 차지한다. 키가 이미 있으면 쿠키를 무시하고 일반 진입으로 처리한다(ADR-0053 결정 2). 키는 요청 ID를 기준으로 샤드 전체에 흩는다. 수명은 쿠키 수명과 같은 10분 [가정, Phase 2 2.2.3에서 확정](추천 적용 2026-10-20, ADR-0073). |
-| `q:{event:E}:arr_slots` | Hash | 진입 Degraded의 도착 시각 칸(100ms [가정])마다 미리 뗀 번호 구간: `next`(아직 떼지 않은 첫 칸), 칸마다 `{k}:base`·`{k}:size`·`{k}:used`, `closed_upto`(이 칸까지 닫음) | 쿠키를 확인한 진입 Lua가 같은 회차 슬롯에서 칸 k까지 아직 떼지 않은 칸을 차례로 떼고(카운터를 칸 크기만큼 전진), 칸 k의 `used`를 1 올려 구간 안 번호를 준다. 구간이 찼거나 칸이 닫혔으면 카운터 끝의 `INCR`로 준다. 리더가 1초마다 칸 끝 + 10초 [가정]가 지난 칸을 닫고, 쓰지 않은 번호를 빠진 번호 비트맵에 켠다. Degraded가 끝나면 더 떼지 않는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, 기술 검토 중간-031, docs/features/queue-admission.md §9) |
-| `q:{event:E}:verify` | Hash | 추가 검증으로 격리한 기록 | 필드는 대기표(로비 진입자는 참가 토큰)의 해시이고, 값은 `VERIFYING`·`PASSED`·`BLOCKED`와 시각, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory`. 실시간 판정은 `ScoreRiskResponse.reason`, 재평가 격리는 패턴에서 정한 값)다(사유 범주는 추천 적용 2026-10-30). 격리할 때 쓰고, 통과하거나 이의가 인정되면 `PASSED`로, 기각되면 `BLOCKED`로 바꾼다. 기각 값은 대기 참여의 빠진 사유(asyncapi `removeReason` `BLOCKED`)·검증 경로(`verifyRoute`)·queue.proto와 같은 이름으로 맞췄다(이전 이름 `REJECTED`, 추천 적용 2026-10-30, docs/features/bot-defense.md §12). `VERIFYING`의 시각은 추가 검증을 시작한 때라, 본인확인 재통과 확인(identity.proto `CheckReverification`의 `not_before`)에 쓴다. 복귀한 대기표가 대기를 취소하거나 1인 1순번을 어기면 지운다. 입장 확정은 빠진 번호라도 `PASSED`면 받는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-14, ADR-0062) |
+| `q:{event:E}:notice` | Hash | 대기 화면에 싣는 제어 상태(queue-svc): 판매 상태(판매 중·일시정지), 판매 중지 여부(`suspended`, ADR-0123), 대기실 공지 템플릿과 표시 범위, 판 번호, 명령 ID. 회차 판매 상태(`saleState`: ON_SALE·ALL_HELD·SOLD_OUT·ENDED와 `EventSaleChanged`의 판 번호)와 매진을 받은 때의 마지막 발급 번호(`soldOutLastSeq`)도 둔다(추천 적용 2026-10-28, ADR-0122) | 제어 gRPC를 받은 queue-svc 파드가 판 번호가 지금 값보다 클 때만 쓴다(비교하고 쓰기). 대기 상태 파일을 만드는 작업이 1초마다 읽어 파일에 넣는다. 범위가 전체면 회차 자리에 `PLATFORM`을 쓴 키(`q:{event:PLATFORM}:notice`)에 두고, 파일 생성 작업은 두 키를 함께 읽어 하나라도 일시정지면 일시정지로 쓰고, `paused`·`suspended` 중 하나라도 참이면 `PAUSED`로 쓴다(ADR-0123). queue-svc의 ack는 이 키에 판이 선 것이다. 수명은 회차 판매 종료 + 1일 [가정] TTL이다(추천 적용 2026-10-28, ADR-0103). 칸 이름(추천 적용 2026-11-05, HOT-010, ADR-0214): 제어 받는 쪽이 `paused`·`suspended`(`1`이면 참)·`banner`(공지 배너 글)·`version`(제어 판 번호)·`commandId`를 쓰고, `EventSaleChanged` 처리기가 `saleState`·`saleVersion`(그 사건의 판 번호)·`soldOutTiers`(등급 ID JSON 배열)·`soldOutLastSeq`를 쓴다. 처리기는 회차 슬롯 Lua 하나로 `saleVersion`보다 큰 판만 쓰고, `SOLD_OUT` 판이면 같은 Lua에서 `seq`를 읽어 `soldOutLastSeq`로 둔다(매진이 풀려도 지우지 않는다). 일정 사본이 없으면 수명은 지금 + 2일 [가정]이다. 남은 좌석 수 칸(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 5·6): 같은 처리기가 같은 Lua에서 `remainingSeats`(사건의 `available`)·`seatsAtMs`(사건의 `countedAt`, 유닉스 밀리초)·`avgTicketsPerOrder`(사건에 없으면 칸을 지운다)를 쓴다. 판 번호가 `saleVersion` 이상이고 `countedAt`이 `seatsAtMs`보다 늦을 때만 쓴다(`countedAt`이 queue-svc 시계보다 5초 [가정] 넘게 앞서면 쓰지 않는다). 대기 상태 파일은 `seatsAtMs`가 생성 시각에서 30초 [가정] 안이고 5초 넘게 앞서지 않을 때만 두 칸을 싣는다. 상태 조회 Degraded 칸(추천 적용 2026-11-09, HOT-020, ADR-0223 결정 8): 명령 6이 `stateDegraded`(`1`이면 켬, 회차나 전체 범위)를 쓰고, 파일 생성이 읽어 `pollHintMs`를 거리별 주기의 2배로 싣는다 |
+| `q:{held:<토픽>}:keys`·`q:{held:<토픽>}:p:<파티션>`·`q:{held:<토픽>}:all`·`q:{held:<토픽>}:r:<파티션>:<오프셋>`·`q:{held:<토픽>}:v:<파티션>:<오프셋>`·`q:{held:<토픽>}:e:<eventKey>` | Sorted Set·Sorted Set·Sorted Set·Hash·문자열·문자열 | queue-svc Kafka 소비자의 보류 사건(DB 보류 표 `held_event`를 대신한다, 추천 적용 2026-11-05, HOT-010, ADR-0214) | 토픽마다 한 슬롯이다. `keys`·`p:`는 보류 중인 업무 키(점수 = 넣은 시각), `all`은 보류 기록 위치(개수 상한을 센다)이고, `r:`은 위치·`eventKey`·업무 키·오류 요약·Kafka 키·레코드 시각·머리·넣은 시각, `v:`는 사건 값(바이트를 base64로), `e:`는 같은 `eventKey`를 두 번 넣지 않는 표시다. 넣기와 '그 키가 아직 보류 중이면 넣기'는 Lua 하나다. 보류 표시와 값은 다시 처리할 때까지 둔다(저절로 지우지 않는다, ADR-0142). `r:`과 업무 키 목록의 업무 키·Kafka 키(탈퇴 사건이면 계정 ID)도 그 키의 뒤 사건을 막는 데 필요해 함께 둔다(계정 ID는 내부 ID이고 identity도 탈퇴 계정 행을 그 ID로 남긴다). `identity.accounts-withdrawn`만 값(`v:`)을 min(`purgeBy`, `withdrawnAt` + 5일, 지금 + 7일 [가정])까지 두고 머리를 싣지 않으며, 그 시각들을 읽지 못하면 값 없이 위치만 둔다(pid가 실려 있다). 토픽마다 1만 건 [가정]을 넘으면 넣지 않고 일시 실패로 돌려준다 |
+| `q:{wdr}:due`·`q:{wdr}:leased`·`q:{wdr}:all`·`q:{wdr}:n`·`q:{wdr}:v:<eventKey>` | Sorted Set·Sorted Set·Sorted Set·Hash·문자열 | 때(`withdrawnAt` + 15분)를 기다리는 탈퇴 사건(추천 적용 2026-11-05, HOT-010, ADR-0214 결정 7) | 한 슬롯이다(탈퇴는 드물다). `due`는 꺼낼 수 있는 eventKey(점수 = 처리할 때), `leased`는 빌려 간 eventKey(점수 = 빌림 끝), `all`은 처리하지 못한 모든 eventKey(점수 = 처리할 때, 경보와 되돌리기), `n`은 꺼낸 횟수, `v:`는 pid·`purgeBy`·처리할 때의 JSON이고 수명은 `purgeBy`(지금 + 5일을 넘지 않게 자름)다. queue-svc 처리기가 때가 안 된 사건을 넣고(같은 eventKey는 한 번만), 모든 파드의 반복이 때가 된 것을 빌려(60초 [가정], 다시 나올 때마다 두 배, 1시간까지) 꺼내 만료를 당긴 뒤 지운다. 값이 있으면 `purgeBy`가 지났어도 처리하고, 값이 사라졌을 때만 항목을 지운다. 장애 전환으로 이 키를 잃으면 그 토픽의 그룹 위치를 되돌려 다시 읽는다(ADR-0214 결정 7) |
+| `q:adm:{pid}:E` | 문자열 (Lua 확인·기록) | 입장 확정 때 1인 1순번을 다시 확인 | 값은 입장한 대기표(로비 진입자는 참가 토큰)의 해시다. 키가 비어 있으면 지금 입장 확정하는 대기표의 해시를 넣고 통과시킨다. 같은 대기표면 통과시키고, 다른 대기표면 409 `DUPLICATE_ADMISSION`으로 거절한 뒤 거절한 대기표의 번호를 빠진 번호(1인 1순번 위반 무효화, POL-002)로 기록한다. PRF-110부터 값은 `{대기표 해시}:{요청 표지}`다(요청 표지는 입장 확정 요청마다 새로 만드는 값으로, `SOON` 되돌리기가 같은 대기표의 다른 요청이 다시 쓴 값을 지우지 않게 가린다). 입장 확정이 곧 입장(`SOON`)이면 그 요청이 채운 값이 그대로일 때만 지우고, ADMITTED면 값이 없거나 같은 대기표일 때 다시 쓴다. 대기표가 받은 자리의 jti는 회차 슬롯 `q:{event:E}:slot_of`에 둔다(추천 적용 2026-11-03, ADR-0183). `q:dup`과 같은 분산 규칙(사람 식별자 기준)을 따른다. 수명은 그 회차의 판매 종료(공연 시작 24시간 전 = `starts_at` - 24시간)에 맞춘 TTL이다(입장 뒤 판매가 끝날 때까지 다시 줄 서기를 막는다. 판매 종료 뒤에는 진입과 입장 확정을 410 `sale-ended`로 받지 않으므로 이 키가 더 필요 없다. 탈퇴 계정은 5일 이내 삭제(`q:dup`과 같은 길, 2026-11-04), ADR-0056, 판매가 윈도우로 끝나지 않는 것은 ADR-0063 결정 11, 판매 종료 시각은 ADR-0064). pid 키 전환 기간에는 `q:dup`처럼 옛 pid 쪽부터 두 키를 확인하고 기록한다(docs/features/queue-admission.md §6, 추천 적용 2026-10-28, 기술 검토 높음-18). |
+| `q:arr:{reqId}:E` | 문자열 (`SET NX`) | 도착 시각 쿠키(`__Host-peaket_arr`)에 담긴 CloudFront(AWS의 CDN) 요청 ID를 한 번만 받기 | 진입이 Degraded일 때 queue-svc가 쿠키의 MAC·회차·시각·sid를 확인한 뒤, 요청 ID로 이 키를 먼저 차지한다. 키가 이미 있으면 쿠키를 무시하고 일반 진입으로 처리한다(ADR-0053 결정 2). 값은 진입 요청 ID이고, 같은 진입 요청 ID의 다시 보내기는 받아 준다(HOT-020, ADR-0223 결정 5). 키는 요청 ID를 기준으로 샤드 전체에 흩는다. 수명은 쿠키 수명과 같은 10분 [가정, Phase 2 2.2.3에서 확정](추천 적용 2026-10-20, ADR-0073). |
+| `q:{event:E}:arr_slots` | Hash | 진입 Degraded의 도착 시각 칸(100ms [가정])마다 미리 뗀 번호 구간: `next`(아직 떼지 않은 첫 칸), `first`(처음 뗀 칸), `gen`(뗀 때의 세대), 칸마다 `{k}:base`·`{k}:size`·`{k}:used`, `closed_upto`(이 칸까지 닫음), `lost_upto`(장애 전환으로 이 칸까지는 `used`를 믿지 못해 돌려주지 않는다, ADR-0223), `gap_from`·`gap_to`(칸 떼기를 다시 시작할 때 건너뛴 빈 칸의 범위, 칸 기록이 없어 리더가 훑지 않는다), `cw`·`cn`(칸 떼기 시간 창의 번호와 그 창에서 뗀 번호 수, ADR-0243) | 쿠키를 확인한 진입 Lua가 같은 회차 슬롯에서 칸 k까지 아직 떼지 않은 칸을 차례로 떼고(카운터를 칸 크기만큼 전진), 칸 k의 `used`를 1 올려 구간 안 번호를 준다. 구간이 찼거나 칸이 닫혔으면 카운터 끝의 `INCR`로 준다. 리더가 1초마다 칸 끝 + 20초 [가정]가 지난 칸을 닫고, 쓰지 않은 번호를 빠진 번호 비트맵에 켠다. 세대가 바뀐 칸은 돌려주지 않고 기록만 지운다. Degraded가 끝나면 더 떼지 않는다(떼기는 닫히지 않은 칸의 쿠키가 올 때만 일어난다). 수명은 `q:dup`과 같다(추천 적용 2026-10-28, 기술 검토 중간-031, docs/features/queue-admission.md §9, 첫 구현 §4 HOT-020 절, ADR-0223) |
+| `q:{event:E}:mirror` | 문자열 (`SET NX PX`) | 대기 상태 파일의 S3 사본을 이번 초에 쓰는 파드 하나 고르기 | 파일을 만드는 queue-svc 파드가 매초 경계마다 `SET NX PX 900 [가정]`으로 잡고, 잡은 파드만 S3에 쓴다(ADR-0223 결정 9). 회차 슬롯이라 같은 샤드에서 끝난다 |
+| `q:{event:E}:verify` | Hash | 추가 검증으로 격리한 기록 | 필드는 대기표(로비 진입자는 참가 토큰)의 해시이고, 값은 `VERIFYING`·`PASSED`·`BLOCKED`와 시각(로비 목록을 고정한 뒤의 되돌리기와 목록을 고정한 뒤의 취소가 남긴 주인 없는 자리는 `ORPHAN:{시각}`이고 게시 때 `VERIFYING`·`BLOCKED`처럼 그 번호를 빠진 번호로 돌린다. 묶음 참가자의 취소는 사전 검증 토큰 해시가 필드다, 2026-11-09 HOT-040·HOT-060, ADR-0231·0233), 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory`. 실시간 판정은 `ScoreRiskResponse.reason`, 재평가 격리는 패턴에서 정한 값)다(사유 범주는 추천 적용 2026-10-30). 격리할 때 쓰고, 통과하거나 이의가 인정되면 `PASSED`로, 기각되면 `BLOCKED`로 바꾼다. 기각 값은 대기 참여의 빠진 사유(asyncapi `removeReason` `BLOCKED`)·검증 경로(`verifyRoute`)·queue.proto와 같은 이름으로 맞췄다(이전 이름 `REJECTED`, 추천 적용 2026-10-30, docs/features/bot-defense.md §12). `VERIFYING`의 시각은 추가 검증을 시작한 때라, 본인확인 재통과 확인(identity.proto `CheckReverification`의 `not_before`)에 쓴다. 복귀한 대기표가 대기를 취소하거나 1인 1순번을 어기면 지운다. 입장 확정은 빠진 번호라도 `PASSED`면 받는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-14, ADR-0062) |
 | `q:appeal:{pid}:E` | Hash | 봇 판정 이의 제기의 임시 보관: 이의 ID(queue-svc가 접수 때 만드는 UUID, `CaseRequested.sourceId`), 계정 ID, 대기표(로비 진입자는 참가 토큰)의 해시, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory` 이름, `CaseRequested.category`), 이의 글(NFC 정규화 뒤 0~1,000자, 비우면 설명 요구), 처리함 건 요청의 `eventKey`, 접수 시각, 결과를 반영한 건 ID·판 번호. queue.proto 두 호출은 이의 ID만 받으므로 이의 ID로 찾는 색인 `q:appealid:{appealId}`(문자열, 값 = 회차 ID와 pid, 같은 수명)를 같은 처리에서 함께 쓴다(추천 적용 2026-10-30) | queue-svc는 DB가 없어 이의 글을 여기에 두고 `support.cases-requested`에 `VERIFICATION_APPEAL` 건 요청을 보낸 뒤 202로 답한다. 보내기에 실패하면 503과 `Retry-After`다. ops-svc가 건을 만든 뒤 queue-svc 내부 호출로 내용을 읽어 ops DB `verification_case`로 옮긴다. 한 대기 참여에 한 번이라 `HSETNX`로 처음 것만 둔다. 수명은 그 회차 판매 종료 + 7일 [가정]이다. 사람 식별값을 기준으로 샤드 전체에 흩는다(`q:dup`과 같은 규칙). ops-svc가 옮기기 전에 키를 잃으면 건만 남고 이의 글은 없어진다(남는 한계). 건 종류는 asyncapi `CaseRequested.kind`의 `VERIFICATION_APPEAL`, 내용 읽기·결과 반영은 queue.proto `VerificationAppealService`다(추천 적용 2026-10-30, docs/features/bot-defense.md §12) |
 | `q:prio:{account}:E` | Hash | 우선 구매 권리의 대기열 사본: 권리 ID, 만료 시각, 상태(OFFERED·WITHDRAWN. queue.proto `PriorityGrantState`와 같다. WITHDRAWN은 ops-svc가 만료 전에 거둔 권리다. 결제를 마친 권리(priority_grant USED)는 사본이 OFFERED여도 purchase-svc가 그 권리의 홀드·주문을 409로 막는다), 판 번호 | 대기열 클러스터. ops-svc의 `SetPriorityGrant`(queue.proto)를 받아 판 번호가 클 때만 쓴다. 입장 확정이 `priorityGrantId`로 오면 이 사본을 읽어, 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호 없이 새 여정 ID(`jny`)와 입장 토큰(클레임 `prio`)을 준다. 입장 자리 수에는 세지 않는다. 결제가 실패하면 같은 권리로 다시 입장할 수 있고, 한 번만 사게 하는 것은 purchase-svc의 `priority_grant.status`가 지킨다. 수명은 권리 만료와 같다(추천 적용 2026-10-31, ADR-0171) |
 | `q:rst:{account}` | Hash | 예매 제한의 대기열 사본: 상태(ACTIVE·LIFTED), 끝 시각(없으면 비움), 제한 ID, 판 번호 | 원본은 ops DB `booking_restriction`이다. ops-svc의 `SetBookingRestriction`을 받은 queue-svc가 판 번호가 지금 값보다 클 때만 쓴다. 입장 확정이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 거절한다. 키가 없으면 제한이 없는 것으로 본다. 계정 단위라 회차 태그를 붙이지 않고 샤드 전체에 흩는다(`q:dup`과 같은 규칙). 수명은 ACTIVE면 끝 시각 + 1일(끝이 없으면 30일 [가정]), LIFTED면 30일 [가정]이다(늦게 온 작은 판을 무시하려고 남긴다). 잃어도 ops-svc 작업 워커가 10분 [가정]마다 ACTIVE인 제한을 다시 보내 다시 선다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6) |
 | `q:{event:E}:elig:{listKey}` | Set | 판매 자격 명단의 대기열 사본(사람 식별자) | 로비·진입 때 자격을 확인한다. 수명은 판매 기간 끝 + 1일 TTL이다(추천 적용 2026-10-14, ADR-0062) |
 | `s:{event:E}:bitmap` | 비트맵 (6.25KB) | 공연장 좌석의 홀드 상태 비트맵 | Lua 스크립트로 여러 좌석의 홀드 여부를 1회 왕복 안에 원자적으로(중간 상태 없이 한 번에) 검사하고 설정한다. 비트 위치는 좌석 색인이다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(추천 적용 2026-11-04, docs/features/seat-hold.md §3 '키 수명'). |
 | `s:{event:E}:auto:{tier}:{n}`, `s:{event:E}:auto_cur`, `s:{event:E}:auto_back:{tier}` | 문자열(후보의 첫 좌석 인덱스를 고정 길이로 이은 값), Hash(등급·매수별 커서), 정렬 집합(돌아온 좌석, 점수 = 선호 순위) | 좌석 자동 배정 공연의 연석 후보 목록과 찾기 상태 | 판매를 열 때 등급·매수(1~4)마다 선호 순서로 만든다. 자동 배정 Lua가 비트맵과 같은 슬롯에서 커서부터 후보를 한 번에 32개 [가정]까지 보고, 빈 블록을 찾으면 그 자리에서 홀드한다. 홀드가 풀린 좌석은 `auto_back`에 넣고 다음 요청이 먼저 본다. 커서는 빨리 찾기 위한 표시이고 맞는지는 비트가 지킨다. 크기는 5만 석이면 1MB [가정] 이하다. 수명은 회차 판매 종료 + 1일 [가정] TTL이다(추천 적용 2026-10-28, 기술 검토 중간-034, docs/features/seat-hold.md §3) |
-| `s:{event:E}:hold:{seat}` | Hash | 좌석별 홀드 상세(소유자, holdId, 펜싱 토큰, 만료 시각, 주문 생성 시각, 구매 세션의 최대 체류 시각, 정지 때 남은 시간. 뒤의 셋은 새 결제 일시 정지 동안 남은 시간을 멈추고 다시 여는 계산에 쓴다, ADR-0085, 기술 검토 중간-041) | 특정 좌석의 임시 홀드를 누가 가졌는지와 펜싱 토큰을 확인한다. holdId는 purchase-svc가 Lua 전에 만들어 홀드 Lua가 함께 적는다. 해제·연장 Lua는 이 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다. 남의 holdId와 없는 holdId는 같은 404다(추천 적용 2026-10-30, docs/features/seat-hold.md §3). `{seat}`은 좌석 색인(10진 글)이다. 홀드 Lua가 쓰는 칸 이름(추천 적용 2026-11-04, BUILD_ORDER PRF-130): `holdId`, `owner`(소유 계정 ID), `psid`(구매 세션 ID), `fence`(펜싱 토큰, 10진 글), `heldAt`(잡은 시각), `exp`(만료 시각. 시각은 모두 epoch 밀리초), `kind`(`FAN`·`PRIORITY`, 홀드 Lua는 `FAN`), `ext`(연장한 횟수, 홀드 Lua는 `0`). 주문 생성 시각·최대 체류 시각·정지 때 남은 시간·우선 구매 권리 ID의 칸 이름은 그 일을 만드는 단계에서 이 줄에 더한다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(seat-hold §3 '키 수명') |
+| `s:{event:E}:hold:{seat}` | Hash | 좌석별 홀드 상세(소유자, holdId, 펜싱 토큰, 만료 시각, 주문 생성 시각, 구매 세션의 최대 체류 시각, 정지 때 남은 시간. 뒤의 셋은 새 결제 일시 정지 동안 남은 시간을 멈추고 다시 여는 계산에 쓴다, ADR-0085, 기술 검토 중간-041) | 특정 좌석의 임시 홀드를 누가 가졌는지와 펜싱 토큰을 확인한다. holdId는 purchase-svc가 Lua 전에 만들어 홀드 Lua가 함께 적는다. 해제·연장 Lua는 이 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다. 남의 holdId와 없는 holdId는 같은 404다(추천 적용 2026-10-30, docs/features/seat-hold.md §3). 만료 Lua는 `holdId`·`fence`·`owner`가 앱이 먼저 읽은 값과 같고 `exp`가 Lua의 지금 이하일 때만 이 키를 지운다. 칸이 일부만 있거나, `exp`가 10진 정수 글이 아니거나, `fence`가 앞 0이 없는 양의 정수 글(`^[1-9]%d*$`)이 아니거나 2^53 − 1(9007199254740991)을 넘으면 그 좌석만 망가진 좌석으로 건너뛴다(15자리 이하는 통과, 16자리는 문자열 비교로 그 값 이하일 때만 통과, 17자리 이상은 넘음. 추천 적용 2026-11-04, BUILD_ORDER PRF-135, seat-hold §5 '운영 만료 Lua와 1초 반복'). `{seat}`은 좌석 색인(10진 글)이다. 홀드 Lua가 쓰는 칸 이름(추천 적용 2026-11-04, BUILD_ORDER PRF-130): `holdId`, `owner`(소유 계정 ID), `psid`(구매 세션 ID), `fence`(펜싱 토큰, 10진 글), `heldAt`(잡은 시각), `exp`(만료 시각. 시각은 모두 epoch 밀리초), `kind`(`FAN`·`PRIORITY`, 홀드 Lua는 `FAN`), `ext`(연장한 횟수, 홀드 Lua는 `0`). 주문 생성 시각·최대 체류 시각·정지 때 남은 시간·우선 구매 권리 ID의 칸 이름은 그 일을 만드는 단계에서 이 줄에 더한다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(seat-hold §3 '키 수명') |
 | `s:{event:E}:fence` | 문자열(10진 정수) | 회차의 펜싱 토큰 카운터: 그 회차에서 마지막으로 낸 펜싱 토큰 | 비트맵과 같은 회차 슬롯이다. 토큰을 내는 Lua(홀드, 자동 배정, 판매 예약 앞의 좌석 묶기)가 `KEYS`로 받아 토큰 = max(이 값 + 1, Redis `TIME`의 마이크로초)로 내고, 이 키에 그 값을 쓴다. 키가 없으면 0으로 본다. 주 노드 승격이나 전체 유실로 값이 되돌아가거나 없어져도 새 토큰은 그때의 Redis 시각 이상이라, 이미 낸 토큰이 다시 나오지 않는다(노드 시계가 크게 뒤로 어긋나지 않는다는 전제, ADR-0121 결정 5와 같다). 그래서 다시 만들기(RB-06)는 이 키를 쓰지 않는다. 값은 약 1.7 × 10^15라 Lua에서 `string.format('%.0f', x)`로 글로 바꿔 쓴다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(소유자 결정 2026-11-02, PROGRESS OPEN[16] 추천안. 키 이름·수명은 추천 적용 2026-11-04, docs/features/seat-hold.md §3) |
-| `s:{event:E}:expiry` | Sorted Set(멤버 = 좌석 색인(10진 글), 점수 = 만료 시각(epoch 밀리초)) | 홀드 만료 시간 인덱스 | purchase-svc 안의 타이머 워커가 이 인덱스를 정해진 간격으로 다시 확인하는 폴링 방식으로 만료된 좌석을 찾아 원자적으로 회수한다(BullMQ 미사용). 새 결제 일시 정지 중인 회차의 주문 뒤 홀드는 이 인덱스에서 빼 `s:{event:E}:paused`로 옮기므로 앞줄에 남지 않는다. 다시 열리면 200개 [가정]씩 Lua 한 번에 새 만료 시각으로 되돌린다(docs/features/seat-hold.md §5, ADR-0085, 추천 적용 2026-10-28, 기술 검토 중간-041). 홀드 Lua가 좌석마다 넣는다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(추천 적용 2026-11-04, seat-hold §3 '키 수명'). |
-| `s:{event:E}:ordered` | Sorted Set(점수 = 주문 생성 시각) | 주문을 만들고 결제 접수 전인 홀드 | 주문 생성 때 홀드 Hash를 고치는 같은 Lua가 넣고, 결제 접수·해제·만료·회수 Lua가 뺀다. 새 결제 일시 정지가 시작되면 만료 작업이 주문 생성 시각 순으로 200개 [가정]씩 읽어 정지 대상을 찾는다(큰 집합을 Lua 하나로 훑지 않는다, ADR-0086 결정 9). 수명은 `s:{event:E}:stream`과 같다(추천 적용 2026-10-28, 기술 검토 중간-041) |
+| `s:{event:E}:expiry` | Sorted Set(멤버 = 좌석 색인(10진 글), 점수 = 만료 시각(epoch 밀리초)) | 홀드 만료 시간 인덱스 | purchase-svc 안의 타이머 워커가 이 인덱스를 정해진 간격으로 다시 확인하는 폴링 방식으로 만료된 좌석을 찾아 원자적으로 회수한다(BullMQ 미사용). 새 결제 일시 정지 중인 회차의 주문 뒤 홀드는 이 인덱스에서 빼 `s:{event:E}:paused`로 옮기므로 앞줄에 남지 않는다. 다시 열리면 200개 [가정]씩 Lua 한 번에 새 만료 시각으로 되돌린다(docs/features/seat-hold.md §5, ADR-0085, 추천 적용 2026-10-28, 기술 검토 중간-041). 홀드 Lua가 좌석마다 넣는다. 만료 Lua는 푼 좌석과 고아 멤버(홀드 Hash 없이 남은 좌석)를 뺀다. 앱이 먼저 `ZRANGE … -inf {지금} BYSCORE LIMIT 0 100`으로 읽고, Lua 한 번에 100석 [가정]까지 푼다(추천 적용 2026-11-04, BUILD_ORDER PRF-135, seat-hold §5). 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(추천 적용 2026-11-04, seat-hold §3 '키 수명'). |
+| `s:{event:E}:sweep` | 문자열(값 = 파드 ID) | 그 회차의 만료 작업 임대(정해진 시간 동안만 그 일을 맡는 권한): 1초 만료 반복을 그 회차에서 돌릴 파드 하나 | purchase-svc의 모든 파드가 1초마다 `s:ctl:events`를 읽고, 회차 설정이 있는 회차마다 이 키를 잡은 파드만 그 회차의 만료를 돈다. 수명은 3초 [가정]이고, 파드가 죽으면 3초 안에 다른 파드가 잡는다. 비트맵과 같은 회차 슬롯이고, 임대 잡기 전용 작은 Lua가 이 키 하나만 다룬다. 값이 내 파드 ID면 `PEXPIRE`로 늘리고, 키가 없으면 `SET … NX PX 3000`으로 잡고, 남의 것이면 0을 돌려준다(추천 적용 2026-11-04). 파드 ID는 `HOSTNAME` 앞 57자 + `-` + 16진 6자리이고, 모양이 틀리면 UUID다(추천 적용 2026-11-04). 두 파드가 잠깐 함께 돌아도 만료 Lua의 펜싱 확인(`ZMSCORE`와 Hash 대조)이 같은 홀드를 두 번 풀지 않는다(추천 적용 2026-11-04, BUILD_ORDER PRF-135, docs/features/seat-hold.md §5 '운영 만료 Lua와 1초 반복') |
+| `s:{event:E}:ordered` | Sorted Set(점수 = 주문 생성 시각) | 주문을 만들고 결제 접수 전인 홀드 | 주문 생성 때 홀드 Hash를 고치는 같은 Lua가 넣고, 결제 접수·해제·만료·회수 Lua가 뺀다. 새 결제 일시 정지가 시작되면 만료 작업이 주문 생성 시각 순으로 200개 [가정]씩 읽어 정지 대상을 찾는다(큰 집합을 Lua 하나로 훑지 않는다, ADR-0086 결정 9). 수명은 `s:{event:E}:stream`과 같다(추천 적용 2026-10-28, 기술 검토 중간-041). 할 일(추천 적용 2026-11-04, BUILD_ORDER PRF-135가 HOT-070에 넘긴 것): 지금 만료 Lua(PRF-135)는 이 키를 건드리지 않는다. 주문 생성이 들어올 때(HOT-070) 만료 Lua의 `KEYS`에 이 키를 넣어 푼 홀드를 여기서도 빼야 한다 |
 | `s:{event:E}:paused` | Sorted Set(점수 = 그 구매 세션의 최대 체류 시각) | 새 결제 일시 정지로 남은 시간을 멈춘 홀드 | 정지 동안 만료 작업은 점수가 지난 것(최대 체류 시각에 닿은 홀드)만 회수한다. 다시 열리거나 일시 정지 답이 10초 [가정] 넘게 없으면 200개씩 Lua 한 번에 '지금 + 남은 시간'(최대 체류 시각을 넘지 않는다)으로 `s:{event:E}:expiry`에 되돌린다. 수명은 `s:{event:E}:stream`과 같다(추천 적용 2026-10-28, 기술 검토 중간-041) |
 | `s:{event:E}:ctl` | Hash | 그 회차에 걸린 판매 일시정지(명령 3)의 사본: 회차 범위 정지와 전체 범위 정지 각각의 정지 여부·판 번호·명령 ID, 그리고 판매 중지 여부(`suspended`, 회차 범위만, ADR-0123) | 원본은 purchase DB `sale_control`이다. 홀드 Lua가 비트맵과 같은 샤드에서 이 키를 함께 읽어, 둘 중 하나라도 정지면 423 Locked로 거절한다. purchase-svc가 판 번호가 지금 값보다 클 때만 쓰고(비교하고 쓰기), 2초 [가정]마다 원본대로 다시 쓴다. 그래서 지워지거나 장애 조치로 잃어도 다시 선다(C-T50). 좌석 Redis 장애 전환 중에는 파드 메모리 상태로 확인한다(추천 적용 2026-10-28, ADR-0103). 칸 이름(임시안, 추천 적용 2026-11-04): 회차 범위는 `paused`(판매 일시정지)·`suspended`(판매 중지)(`1`·`0`)와 그 행의 판 번호 `rev`·명령 ID `cmd`·판매 중지 승인 업무 ID `suspRef`, 전체 범위는 `allPaused`(`1`·`0`)·`allRev`·`allCmd`다(`sale_control`의 회차 행과 PLATFORM 행). 쓰는 쪽은 범위마다 판 번호가 지금 값보다 클 때만 그 범위의 칸을 바꾼다. 홀드 Lua는 `paused`·`allPaused`·`suspended` 가운데 하나라도 `1`이면 423 `sale-paused`이고, 키나 칸이 없으면 정지가 아닌 것으로 본다(2초 다시 맞춤이 다시 세운다) |
-| `s:ctl:events` | Set | 좌석 비트맵이 있는 회차 목록 | 전체 범위 정지를 그 회차들의 `s:{event:E}:ctl`에 쓰려고 둔다. 회차의 좌석 비트맵을 처음 만들 때는 이 목록에 먼저 넣고, 그다음 `sale_control`의 전체 범위 상태를 읽어 사본을 쓴다. 전체 정지는 `sale_control`의 전체 범위 행을 먼저 쓰고, 그다음 목록을 돌며 사본을 쓴다. 그래서 둘이 함께 일어나도 어느 한쪽이 정지를 본다. 판매 종료 정비 잡이 그 회차를 뺀다(추천 적용 2026-10-28, ADR-0103) |
+| `s:ctl:events` | Set | 좌석 비트맵이 있는 회차 목록 | 전체 범위 정지를 그 회차들의 `s:{event:E}:ctl`에 쓰려고 둔다. 회차의 좌석 비트맵을 처음 만들 때는 이 목록에 먼저 넣고, 그다음 `sale_control`의 전체 범위 상태를 읽어 사본을 쓴다. 전체 정지는 `sale_control`의 전체 범위 행을 먼저 쓰고, 그다음 목록을 돌며 사본을 쓴다. 그래서 둘이 함께 일어나도 어느 한쪽이 정지를 본다. 판매 종료 정비 잡이 그 회차를 뺀다(추천 적용 2026-10-28, ADR-0103). 1초 만료 반복도 이 목록으로 회차를 고른다. 회차 ID 모양(`KEY_PART`)이 아닌 값은 거르고 로그에 남긴다(경고는 파드마다 60초에 한 줄까지, 추천 적용 2026-11-04, docs/features/seat-hold.md §5). 할 일(추천 적용 2026-11-04, BUILD_ORDER PRF-135가 PRF-140에 넘긴 것): 회차를 빼는 때는 판매 종료 + 홀드 최대 수명 뒤여야 한다. 판매 종료 직후에 빼면 만료 반복이 그 회차를 읽지 않아 마지막 홀드가 만료되지 않는다 |
 | `shop:{product:P}:resv`, `shop:{product:P}:resv_qty` | Sorted Set(점수 = 예약 만료 시각), Hash(주문 ID → 수량) | 굿즈 한정 재고 예약과 만료 인덱스 | 세션·캐시 클러스터에 둔다(2026-11-02 정합 점검, §1, ADR-0109). 굿즈 재고 차감 카운터와 같은 해시 슬롯(상품 해시 태그)에 둔다. 주문 생성 Lua가 재고를 깎으면서 둘에 예약을 넣는다. core-svc shop의 만료 작업이 1초 [가정]마다 `ZRANGE … BYSCORE … LIMIT 0 n`으로 지난 예약을 찾는다. 먼저 PostgreSQL에서 주문을 조건부로 EXPIRED로 바꾸고(상태 CREATED이고 `stock_reserved_until`이 지났을 때만), 바뀐 주문만 Lua 하나로 예약을 지우며 재고를 돌린다. 예약이 이미 없으면 돌리지 않아 두 번 돌리지 않는다. 결제 접수 때 점수를 승인 기한으로 늘리고, 승인되면 예약만 지운다(docs/planning/03 §2.13, 추천 적용 2026-10-28, ADR-0107) |
-| `s:{event:E}:quota:{account}` | 문자열 | 계정별 실시간 좌석 보유 수 | 쿼터를 원자적으로 차감하려고 좌석 비트맵과 같은 샤드에서 같은 Lua 스크립트로 처리한다. 값은 10진 정수이고 홀드 Lua가 `INCRBY`로 올린다. 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(추천 적용 2026-11-04, seat-hold §3 '키 수명'). |
+| `s:{event:E}:quota:{account}` | 문자열 | 계정별 실시간 좌석 보유 수 | 쿼터를 원자적으로 차감하려고 좌석 비트맵과 같은 샤드에서 같은 Lua 스크립트로 처리한다. 값은 표준 10진 정수(글이 `0`이거나, 첫 자리가 1~9이고 18자리 이하인 수. Redis `INCRBY`가 앞 0과 int64 밖의 값을 받지 않는다)이고 홀드 Lua가 `INCRBY`로 올린다. 만료 Lua는 푼 좌석 수만큼 내리고, 0 이하가 되면 지우며(`DEL`) 아니면 `SET … KEEPTTL`로 써서 수명을 지우지 않는다. 값이 표준 10진 정수가 아니면 홀드 Lua는 쓰기 전에 거절하고(`PEAKET_CORRUPT_KEY`) 만료 Lua는 그 계정의 좌석만 건너뛰고 `corrupt`로 센다(추천 적용 2026-11-04, BUILD_ORDER PRF-135, seat-hold §3 '쓰기 전 지킴'·§5). 수명은 판매 종료 + 1일 [가정]이고 홀드 Lua가 건다(추천 적용 2026-11-04, seat-hold §3 '키 수명'). |
 | `s:{event:E}:prio` | Sorted Set(멤버 = 좌석 색인, 점수 = 만료 시각(ms)) | 우선 구매 보류의 만료 인덱스. 우선 구매 보류는 7분 만료 인덱스(`s:{event:E}:expiry`)가 아니라 여기에 둔다. 홀드 Hash는 일반 홀드와 같은 키이고 `kind` PRIORITY·권리 ID·소유 계정을 적는다 | 좌석 클러스터의 회차 슬롯. purchase-svc의 우선 구매 Lua(비트 설정·Hash·이 집합을 한 번에)가 쓰고, 만료 작업이 1분 [가정]마다 지난 것을 푼다(해제 Lua와 같다. 방금 놓은 좌석 키에는 넣지 않는다). 수명은 권리 만료(48시간 [가정]과 입장 시작 가운데 이른 때)다(docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171) |
-| `s:{event:E}:rel:{account}` | Sorted Set(멤버 = 좌석 색인, 점수 = 다시 잡을 수 있는 시각(밀리초)) | 그 계정이 방금 놓은 좌석(직접 해제·만료·자동 배정 반납) | 해제·만료 Lua가 비트를 끄는 같은 원자 연산에서 넣고, 점수는 Lua 안의 Redis `TIME` + 30초 [가정]다. 넣을 때 점수가 지난 멤버를 지우고, 키 수명은 마지막으로 넣은 때부터 30초다. 홀드 Lua는 요청 좌석의 점수가 지금보다 크면 아무것도 잡지 않고 409 `seat-recently-released`다. 자동 배정 Lua는 이 좌석이 든 후보를 그 계정에게만 건너뛴다. 비트맵과 같은 회차 슬롯이다. 멤버는 1인 한도(4매)와 30초 안의 해제 수만큼이라 작다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5) |
+| `s:{event:E}:rel:{account}` | Sorted Set(멤버 = 좌석 색인, 점수 = 다시 잡을 수 있는 시각(밀리초)) | 그 계정이 방금 놓은 좌석(직접 해제·만료·자동 배정 반납) | 해제·만료 Lua가 비트를 끄는 같은 원자 연산에서 넣고, 점수는 Lua 안의 Redis `TIME` + 30초 [가정]다. 넣을 때 점수가 지난 멤버를 지우고, 키 수명은 마지막으로 넣은 때부터 30초다. 만료 Lua는 계정마다 `ZREMRANGEBYSCORE … -inf 지금` → 푼 좌석마다 `ZADD 지금 + 30초 {좌석 색인}` → `PEXPIRE 30000` 차례로 쓴다(추천 적용 2026-11-04, BUILD_ORDER PRF-135). 홀드 Lua는 요청 좌석의 점수가 지금보다 크면 아무것도 잡지 않고 409 `seat-recently-released`다. 자동 배정 Lua는 이 좌석이 든 후보를 그 계정에게만 건너뛴다. 비트맵과 같은 회차 슬롯이다. 멤버는 1인 한도(4매)와 30초 안의 해제 수만큼이라 작다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5) |
 | `s:{event:E}:idem:{account}:{key}` | Hash | 홀드 요청의 멱등성(같은 요청이 여러 번 와도 한 번 처리한 것과 결과가 같은 성질)을 지키는 키. 칸은 `fp`(요청 지문. 직접 선택은 본문 전체가 아니라 정렬한 좌석 ID 목록의 SHA-256 16진이다, docs/features/seat-hold.md §3 '멱등키'. 희망 조건의 지문은 wbs 2.5.4에서 정한다)와 `resp`(처음 응답. 글 `{holdId}:{heldAt}:{exp}:{fencingToken}`이고 시각은 epoch 밀리초, 토큰은 10진 글이다. 연장 가능 여부는 처음 응답이라 늘 참이어서 싣지 않는다)다(추천 적용 2026-11-04) | 좌석 비트맵과 같은 회차 샤드에 둬서, 홀드 Lua가 좌석을 잡는 같은 원자 연산에서 확인하고 적는다. 같은 키·같은 지문이면 처음 응답을 돌려주고, 지문이 다르면 아무 좌석도 잡지 않고 422 `idempotency-key-reused`다. 홀드를 잡을 때만 적고(경합·한도 실패는 적지 않는다), 수명은 홀드 TTL(7분)이다. 영구 보관하는 주문·결제 멱등키는 PostgreSQL `order_idempotency`에 기록한다(추천 적용 2026-10-28, 기술 검토 중간-046. 이전 키 `s:idem:{key}`는 해시 태그가 멱등키라 Lua 밖에서 확인했다) |
-| `s:jti:{jti}` | 문자열 (`SET NX`) | 대기열 입장 토큰의 재사용을 막고 세션에 묶기 | 토큰이 1회만 쓰였는지 확인한 뒤 구매 세션 ID와 서로 묶는다. |
-| `s:session:{sid}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 여정 ID `journeyId`(입장 토큰의 `jny`, 2026-10-31), 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2) |
-| `s:rst:{account}` | Hash | 예매 제한의 구매 사본(상태·끝 시각·제한 ID·판 번호, `q:rst:{account}`와 같은 모양) | ops-svc의 `SetBookingRestriction`을 받은 purchase-svc가 판 번호가 클 때만 쓴다. 주문 생성이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 주문을 만들지 않고 그 구매 세션의 홀드를 푼다. 계정 단위라 회차 태그 없이 흩는다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6, docs/features/payment.md §2) |
+| `s:jti:{jti}` | 문자열 | 대기열 입장 토큰의 재사용을 막는 표지 | 구매 세션을 여는 Lua가 표지가 없을 때 같은 원자 연산 안에서 만든다(값은 만든 시각 ms, `SET … PXAT`). 같은 `jti`로 다시 받을 수 있는 가장 늦은 입장 토큰의 `exp` + 60초 [가정]에 지우도록 수명을 건다(queue-svc는 자리가 살아 있는 동안 같은 `jti`로 입장 토큰을 다시 주고 그 `exp`는 새 `iat` + 최대 체류라서 가장 늦은 `exp`는 `exp` + (`exp` − `iat`)다). 더 늦은 `exp`의 토큰으로 다시 열면(REPLAY) 수명을 그 토큰의 같은 값 + 60초까지 늘린다(줄이지 않는다). 그래서 다시 받은 토큰이 유효한 동안은 세션이 끝나 지워져도 표지가 남아 같은 `jti`로 새 세션을 열지 못한다. 표지와 세션 상태를 함께 쓸 때는 오류가 날 수 있는 세션 상태를 먼저 써서, 세션 키의 형이 틀려 오류가 나도 표지만 남지 않는다(PRF-136 리뷰). 구매 세션 ID가 입장 토큰의 `jti`와 같고 해시 태그도 같은 `{jti}`라 `s:session:{jti}`와 같은 슬롯이다(추천 적용 2026-11-04, BUILD_ORDER PRF-136, docs/features/seat-hold.md §2). |
+| `s:session:{jti}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 여정 ID `journeyId`(입장 토큰의 `jny`, 2026-10-31), 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2). 키 이름의 `{jti}`는 구매 세션 ID이자 입장 토큰의 `jti`다. 칸 이름(임시안, 추천 적용 2026-11-04, BUILD_ORDER PRF-136): `acct`(계정 ID), `login`(로그인 세션 ID, 입장 토큰의 `sid`), `event`(회차 ID), `jny`(여정 ID), `cpk`(클라이언트 임시 공개키, 비압축 점 65바이트의 base64url), `seq`(마지막 요청 일련번호, 앞 0 없는 10진 정수, 처음 `0`), `idle`(유휴 시한 ms), `started`(연 시각 ms, 저장소 `TIME`), `max`(최대 체류 시각 ms, 처음 연 입장 토큰의 `exp`이고 같은 `jti`로 다시 받은 토큰의 더 늦은 `exp`로 바꾸지 않는다)이고, 우선 구매 입장이면 `prio`(권리 ID)가 더해진다. `pay`는 주문을 만든 뒤 결제가 끝날 때까지 `1`이다(Paying. 유휴 시한을 세지 않는다. 지우면 Active, 추천 적용 2026-11-04, BUILD_ORDER PRF-138). `sev`는 SESSION_STARTED를 `s:{event:E}:stream`에 더한 뒤 따로 쓰는 표시 `1`이다(없으면 아직. 열기의 REPLAY가 이 표시가 없고 연 지 1초 [가정]가 지났으면 시작 사건을 한 번 더 더한다). 키 수명은 처음 `exp` + 60초 [가정]까지다. `seq`는 구매 세션 요청 인증이 Lua 한 번으로 올린다(마지막 번호보다 클 때만, 이때 `idle`을 지금 + 5분 [가정]으로 다시 쓴다). 홀드 목록은 `h:{holdId}` 칸(그 홀드의 좌석 ID들을 쉼표로 이은 글)이고 첫 홀드 표시 `fh`(처음 한 번 `1`)와 함께 홀드 Lua가 좌석을 잡은 뒤 작은 Lua 한 번(`HSETNX` 포함)이 더한다(추천 적용 2026-11-04, PRF-137. 지우는 일은 wbs 2.5.2). 기기 식별값 `deviceId`는 어느 머리에서 받는지 정본에 없어 아직 쓰지 않는다. 요청 인증 키는 저장하지 않고 요청마다 `cpk`와 서버 ECDH 개인키로 다시 계산한다 |
+| `s:rst:{account}` | Hash | 예매 제한의 구매 사본(상태 `st`·끝 시각 `until`(유닉스 밀리초, 비면 끝 없음)·제한 ID `rid`·판 번호 `ver`, `q:rst:{account}`와 같은 모양. 칸 이름은 추천 적용 2026-11-05, BUILD_ORDER PRF-161) | ops-svc의 `SetBookingRestriction`을 받은 purchase-svc가 판 번호가 클 때만 쓴다. 주문 생성이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 주문을 만들지 않고 그 구매 세션의 홀드를 푼다. 계정 단위라 회차 태그 없이 흩는다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6, docs/features/payment.md §2) |
 | `sup:far:{account}` | Hash(필드 = 사건 ID) | 부정 예매 소명 요청의 화면용 사본: 갈래(PAYER 결제자·HOLDER 받은 사람, HOLDER는 사유 범주 없이 가진 사건 표 ID와 취소 대상에서 빠진 표 ID만), 회차, 사유 범주, 소명 기한, 이의 창 끝(조치 결과 통지 + 30일 [가정])과 이의 상태, 잠긴 티켓 ID(잠금이 풀려도 목록은 남긴다. 풀렸는지는 잠금 여부로만 안다), 잠금 최대 기한과 잠금 여부(HOLDER는 늘 풀림이고 기한이 없다)(추천 적용 2026-10-31, ADR-0173), 소명 상태(OPEN·SUBMITTED·ACCEPTED·REJECTED·EXPIRED. EXPIRED는 기한까지 제출하지 않음), 우선 구매 권리(권리 ID·좌석 표시·가격·기한·상태), 조치 결과(취소한 티켓 ID, 이용 제한 끝)와 이의 결과의 이유(2026-10-31 FRN-070), 판 번호. 알림 판단은 이 키가 아니라 core DB `fraud_appeal_notice`와 견준다(docs/features/notify.md §4.5) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetFraudAppealView`(core.proto)를 받아 필드마다 판 번호가 클 때만 쓰고, 팬의 `GET /v1/fraud-appeal-requests`와 소명 제출(`POST /v1/appeals` kind FRAUD_CASE)의 기한 확인에 쓴다. 조치 전의 소명은 소명 기한으로, 조치 뒤의 이의는 이의 창으로 본다. 필드 수명은 결정된 뒤 30일 [가정]이고, ops-svc 작업 워커가 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다(`sup:rst`와 같은 규칙, 추천 적용 2026-10-31, ADR-0171) |
 | `sup:rst:{account}` | Hash | 예매 제한의 화면용 사본(상태·사유 코드·시작·끝 시각·소명 기한·제한 ID·판 번호) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetBookingRestrictionView`(core.proto)를 받아 판 번호가 클 때만 쓰고, 팬의 `GET /v1/booking-restrictions/me`에 답한다. 집행에는 쓰지 않는다(집행은 `q:rst`·`s:rst`). 키가 없으면 제한 없음으로 답한다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(추천 적용 2026-10-30, docs/design/d5 §1.6 21번) |
-| `s:{event:E}:stream` | Stream | 홀드 획득·해제·만료(HELD·RELEASED·EXPIRED), 구매 세션 시작·종료 이벤트(Redis 메모리 안의 Outbox) | 릴레이 워커가 비동기로 읽어 Kafka 토픽으로 보낸다. Kafka 전송 확인을 받은 항목까지 `XACK`한 뒤 `XTRIM … MINID`(Redis 6.2·Valkey부터)로 지운다. 키는 회차 판매 종료 + 1일 [가정] TTL로 지운다(추천 적용 2026-10-20, ADR-0070). 이 TTL은 홀드 Lua가 건다(seat-hold §3 '키 수명'). HELD 사건의 칸(임시안, 추천 적용 2026-11-04): 좌석마다 항목 하나이고, `type`(`HELD`), `seatIdx`(좌석 색인), `seatId`·`tierId`·`sectionId`(좌석·등급·구역 ID), `holdId`, `holdKind`(`FAN`), `purchaseSessionId`, `accountId`(소유 계정), `fencingToken`(10진 글), `sectionVersion`(올린 뒤의 구역 일련번호), `seatEpoch`(회차 세대), `occurredAtMs`(잡은 시각), `expiresAtMs`(만료 시각. 둘 다 epoch 밀리초)다. `MAXLEN`을 쓰지 않는다(지우기는 위 `XTRIM … MINID`). 릴레이(wbs 2.5.3)가 이 칸을 asyncapi `SeatEvent`로 옮긴다(`eventId`는 키의 회차, `occurredAt`은 ISO 8601) |
+| `s:{event:E}:stream` | Stream | 홀드 획득·해제·만료(HELD·RELEASED·EXPIRED), 구매 세션 시작·종료 이벤트(Redis 메모리 안의 Outbox) | 릴레이 워커가 비동기로 읽어 Kafka 토픽으로 보낸다. Kafka 전송 확인을 받은 항목까지 `XACK`한 뒤 `XTRIM … MINID`(Redis 6.2·Valkey부터)로 지운다. 키는 회차 판매 종료 + 1일 [가정] TTL로 지운다(추천 적용 2026-10-20, ADR-0070). 이 TTL은 홀드 Lua와 만료 Lua가 같은 규칙으로 건다(seat-hold §3 '키 수명'·§5). 릴레이의 소비자 그룹·보내는 규칙은 §4 '홀드 원장 적재와 Stream 릴레이'(PRF-141). HELD 사건의 칸(임시안, 추천 적용 2026-11-04): 좌석마다 항목 하나이고, `type`(`HELD`), `seatIdx`(좌석 색인), `seatId`·`tierId`·`sectionId`(좌석·등급·구역 ID), `holdId`, `holdKind`(`FAN`), `purchaseSessionId`, `accountId`(소유 계정), `fencingToken`(10진 글), `sectionVersion`(올린 뒤의 구역 일련번호), `seatEpoch`(회차 세대), `occurredAtMs`(잡은 시각), `expiresAtMs`(만료 시각. 둘 다 epoch 밀리초)다. `MAXLEN`을 쓰지 않는다(지우기는 위 `XTRIM … MINID`). EXPIRED 사건의 칸(추천 적용 2026-11-04, BUILD_ORDER PRF-135): 만료 Lua가 푼 좌석마다 항목 하나이고, 칸 이름은 HELD와 같다. `type`(`EXPIRED`), `seatIdx`(좌석 색인), `seatId`·`tierId`·`sectionId`(입력값의 좌석·등급·구역 ID), `holdId`(홀드 Hash의 `holdId`), `holdKind`(Hash의 `kind`. 7분 만료 인덱스에는 `FAN`만 든다), `purchaseSessionId`(Hash의 `psid`), `accountId`(Hash의 `owner`), `fencingToken`(그 홀드의 토큰, Hash의 `fence`. 새 토큰을 내지 않는다), `sectionVersion`(올린 뒤의 구역 일련번호), `seatEpoch`(회차 세대), `occurredAtMs`(푼 시각, 만료 Lua의 `TIME`), `expiresAtMs`(Hash의 `exp`. 둘 다 epoch 밀리초)다. 릴레이(wbs 2.5.3)가 이 칸을 asyncapi `SeatEvent`로 옮긴다(`eventId`는 키의 회차, `occurredAt`은 ISO 8601). SESSION_STARTED 사건의 칸(임시안, 추천 적용 2026-11-04, BUILD_ORDER PRF-136): 구매 세션을 새로 만든 뒤 따로 더하는 항목 하나이고(더하기가 실패했거나 `sev` 표시가 실패한 채 응답을 잃은 재시도가 같은 항목을 한 번 더 더할 수 있다. 같은 사건은 `eventKey`가 같아 받는 쪽이 거른다), `type`(`SESSION_STARTED`), `purchaseSessionId`·`admissionJti`(둘 다 입장 토큰의 `jti`), `journeyId`, `startedAtMs`(세션을 연 저장소 시각), `maxStayUntilMs`(입장 토큰 `exp`)다. 값은 모두 글이고 `MAXLEN`을 쓰지 않는다. 이 항목이 스트림을 처음 만들 수 있어, 더하는 Lua가 수명이 없거나 입장 토큰 `exp` + 1일 [가정]보다 이르면 그 시각까지 늘린다(홀드·만료 Lua가 건 더 늦은 수명은 둔다). asyncapi `PurchaseSessionStarted`로 바꾸는 법: `eventId`는 키의 회차, `purchaseSessionId`·`admissionJti`·`journeyId`는 그대로, `startedAt`·`maxStayUntil`은 밀리초까지 쓴 ISO 8601 UTC 글, `eventKey`는 `SHA-256("PurchaseSessionStarted:" + purchaseSessionId)`의 앞 16바이트를 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트로 맞춘 UUID 글이다(같은 사건을 다시 보내면 같은 값, ADR-0052). 바꾸는 함수는 이 단계에 있고, Stream을 읽어 Kafka로 내는 릴레이는 PRF-141이다(2026-11-04 PRF-140을 나누며 고침). SESSION_ENDED 사건의 칸(임시안, 추천 적용 2026-11-04, BUILD_ORDER PRF-138): 구매 세션을 끝낸 뒤 따로 더하는 항목 하나이고, `type`(`SESSION_ENDED`), `purchaseSessionId`·`admissionJti`(둘 다 입장 토큰의 `jti`), `reason`(`COMPLETED`·`LEFT`·`IDLE`·`MAX_STAY`), `endedAtMs`(끝낸 시각)다. 정리 반복이 끝낸 것(IDLE·MAX_STAY)은 좌석 Redis의 시각(`TIME`)이고, 나가기·결제 확정(LEFT·COMPLETED)은 끝내는 파드의 주입 시계다. 값은 모두 글이고 `MAXLEN`을 쓰지 않으며, 더하는 Lua가 `s:{event:E}:sessions`에서 그 세션을 빼고, 스트림 수명이 없거나 끝낸 시각 + 1일 [가정]보다 이르면 그 시각까지 늘린다(더 늦은 수명은 둔다). asyncapi `PurchaseSessionEnded`로 바꾸는 법: `eventId`는 키의 회차, `purchaseSessionId`·`admissionJti`·`reason`은 그대로, `endedAt`은 밀리초까지 쓴 ISO 8601 UTC 글, `eventKey`는 `SHA-256("PurchaseSessionEnded:" + purchaseSessionId)`의 앞 16바이트를 UUID 버전 8로 맞춘 UUID 글이다(세션 하나는 한 번만 끝나므로 같은 사건을 다시 보내면 같은 값) |
+| `s:{event:E}:failed:{holdId}` | 글 | 실패 해제한 홀드의 표시(값 1, 수명 10분 [가정], 추천 적용 2026-11-05, BUILD_ORDER PRF-165) | 실패 해제 Lua가 남기고 묶기 Lua가 보면 거절한다. 마감을 넘겨 늦게 실행된 묶기가 풀린 좌석을 다시 잡지 않게 한다(docs/features/payment.md §2 'Saga 1단계의 첫 구현') |
 | `s:{event:E}:sec:{section}` | 샤드 Pub/Sub 채널 | 구역별 좌석 홀드 상태의 바뀐 부분(델타)을 구독자 모두에게 보내기 | 그 구역을 보고 있는 클라이언트가 접속한 realtime-gw 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위)만 골라서 구독한다. 메시지마다 회차 세대와 구역별 일련번호를 싣는다(기술 검토 중간-040). `{section}`은 구역 색인(10진)이다. 메시지(`SPUBLISH`, 임시안, 추천 적용 2026-11-04)는 칸을 빈칸 하나로 이은 글 `1 {seatEpoch} {sectionIndex} {sectionVersion} {changedAtMs} {seatOffset}:{state} …`이다. 맨 앞 `1`은 메시지 판, `changedAtMs`는 바꾼 Lua의 Redis `TIME`(epoch 밀리초), `seatOffset`은 그 구역 `seatIndexRange.from`에서의 거리, `state`는 0 가능·1 다른 분 선택·2 판매(docs/frontend.md §4.4.1과 같은 값)다. Lua 한 번에 바뀐 구역마다 메시지 하나를 보낸다. realtime-gw는 이 글을 묶음에 옮기기만 하고 좌석맵을 읽지 않는다 |
-| `s:{event:E}:secver` | Hash | 구역별 일련번호(필드 = 구역, 값 = 마지막 번호) | 홀드·해제·만료·판매 반영 Lua가 바꾼 구역의 번호를 1 올리고, 그 번호를 델타에 싣는다. 쓰는 쪽이 Lua 하나뿐이라 버전 벡터가 아니라 구역별 일련번호다. 장애 조치로 마지막 증가를 잃을 수 있어, 비교는 같은 세대 안에서만 한다(추천 적용 2026-10-28, 기술 검토 중간-040). 필드는 구역 색인(10진 글)이다. 수명은 `s:{event:E}:stream`과 같고 홀드 Lua가 건다(임시안, 추천 적용 2026-11-04) |
-| `s:{event:E}:epoch` | Hash | 회차 세대(`seatEpoch`)와 그 세대를 연 주 노드. 이 키가 있어야 좌석 저장소가 준비된 것이다 | 비트맵을 처음 만들거나 다시 만들 때 마지막에 쓴다. 홀드·해제·연장·만료 Lua와 스냅샷이 함께 읽고, 키가 없으면 좌석을 잡거나 읽지 않는다(503 `seat-store-unavailable`). 파드가 그 회차 슬롯의 주 노드가 바뀐 것을 보면 Lua 하나로 '저장된 주 노드와 다를 때만 세대 = max(세대 + 1, Redis `TIME`의 초)'로 올린다. 그래서 여러 파드가 불러도 한 번만 오르고, 복제되지 못한 올리기를 잃어도 되돌아가지 않는다. 수명은 `s:{event:E}:stream`과 같다(추천 적용 2026-10-28, ADR-0121). 칸 이름(임시안, 추천 적용 2026-11-04): `epoch`(세대 `seatEpoch`, 10진 정수)와 `node`(그 세대를 연 주 노드 표지. 모양은 대기열 `q:{event:E}:epoch`의 `node`와 같다). Lua는 `epoch` 칸이 없으면 준비되지 않은 것으로 본다 |
+| `s:{event:E}:salesweep` | 문자열(값 = 파드 ID) | 그 회차의 판매 상태 판정 임대: 1초 [가정] 판정을 그 회차에서 돌릴 파드 하나(추천 적용 2026-11-09, BUILD_ORDER PRF-144, ADR-0122) | `s:{event:E}:sweep`과 같은 임대 잡기 Lua로 잡고 수명도 3초 [가정]로 같다. 파드가 죽으면 3초 안에 다른 파드가 잡는다. 비트맵과 같은 회차 슬롯이다. 두 파드가 잠깐 함께 돌아도 `event_sale`의 판 번호 조건부 UPDATE가 한 파드만 이기게 한다(docs/features/seat-hold.md §4 '판정의 첫 구현') |
+| `s:{event:E}:sessions` | Sorted Set(멤버 = 구매 세션 ID jti, 점수 = 다음에 볼 시각(epoch ms)) | 유휴 시한·최대 체류에 닿은 구매 세션을 찾는 정리 색인(BUILD_ORDER PRF-138) | 세션을 새로 열고 시작 사건을 더하는 Lua가 같은 슬롯이라 `ZADD NX`로 넣는다(점수 = min(최대 체류, 시작 + 5분 [가정])). 세션 키가 `{jti}` 슬롯이라 요청마다 고치지 않고, 점검 반복(1초 [가정])이 점수가 지금 이하인 멤버를 열어 보고 살아 있으면 다음 점검 시각으로 다시 놓는다(`ZADD XX`). 끝난 세션은 `SESSION_ENDED`를 더하는 Lua가 `ZREM`으로 뺀다. 세션이 이미 없으면(키 수명으로 사라짐) 점검이 뺀다. 수명은 `s:{event:E}:stream`과 같다. 멤버 수는 그 회차에서 열린 구매 세션 수를 넘지 않는다(추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리') |
+| `s:{event:E}:secver` | Hash | 구역별 일련번호(필드 = 구역, 값 = 마지막 번호) | 홀드·해제·만료·판매 반영 Lua가 바꾼 구역의 번호를 1 올리고, 그 번호를 델타에 싣는다. 쓰는 쪽이 Lua 하나뿐이라 버전 벡터가 아니라 구역별 일련번호다. 장애 조치로 마지막 증가를 잃을 수 있어, 비교는 같은 세대 안에서만 한다(추천 적용 2026-10-28, 기술 검토 중간-040). 필드는 구역 색인(10진 글)이다. 수명은 `s:{event:E}:stream`과 같고 홀드 Lua와 만료 Lua가 건다(임시안, 추천 적용 2026-11-04). 값은 표준 10진 정수 글이다(글이 `0`이거나, 첫 자리가 1~9이고 18자리 이하인 수. `quota`와 같다). 홀드·만료 Lua는 쓰기 전에 이번에 올릴 구역 칸의 값을 본다. 표준 10진 정수가 아니면 홀드 Lua는 아무것도 쓰지 않고 `PEAKET_CORRUPT_KEY`이고, 만료 Lua는 그 구역의 좌석만 건너뛰고 `corrupt`로 센다(`HINCRBY`가 쓰기 도중에 실패해 일부만 쓰이지 않게, 추천 적용 2026-11-04, BUILD_ORDER PRF-135, seat-hold §3 '쓰기 전 지킴'·§5) |
+| `s:{event:E}:epoch` | Hash | 회차 세대(`seatEpoch`)와 그 세대를 연 주 노드. 이 키가 있어야 좌석 저장소가 준비된 것이다 | 비트맵을 처음 만들거나 다시 만들 때 마지막에 쓴다. 홀드·해제·연장·만료 Lua와 스냅샷이 함께 읽고, 키가 없으면 좌석을 잡거나 읽지 않는다(503 `seat-store-unavailable`). 좌석을 쓰는 Lua와 세대 올리기 감시가 그 Lua가 도는 노드의 표지를 견줘 '저장된 주 노드와 다를 때만 세대 = max(세대 + 1, Redis `TIME`의 초)'로 올린다(ADR-0210, 설정 세대까지는 `chk` 칸으로 회차마다 1초에 한 번). 그래서 여러 파드가 불러도 한 번만 오르고, 복제되지 못한 올리기를 잃어도 되돌아가지 않는다. 수명은 `s:{event:E}:stream`과 같다(추천 적용 2026-10-28, ADR-0121). 칸 이름(임시안, 추천 적용 2026-11-04): `epoch`(세대 `seatEpoch`, 10진 정수)와 `node`(그 세대를 쓴 Lua가 돈 노드의 표지 `CLUSTER MYID:cluster_my_epoch`, 단일 노드는 `standalone`. 모양은 대기열 `q:{event:E}:epoch`의 `node`와 같다. 판매 열기·다시 만들기·세대 올리기가 같은 표지를 쓴다, 추천 적용 2026-11-05, BUILD_ORDER PRF-168)와 `chk`(표지의 설정 세대까지 마지막으로 견준 Redis `TIME` 초, 쓰는 Lua가 회차마다 1초에 한 번만 `CLUSTER INFO`를 부르게 한다, ADR-0210)·`bumps`(장애 조치 뒤 세대를 올린 누적 수, 쓰는 Lua와 세대 올리기 Lua가 올릴 때 1씩 더한다. 감시 반복이 차이로 지표를 낸다). Lua는 `epoch` 칸이 없으면 준비되지 않은 것으로 본다 |
 | `id:devauth:{device_code}` [보완] | Hash | 현장 스캐너 모바일 기기의 간편 승인 정보(user_code 8자, 단말 기기 식별자, 배정 파트너, 승인 상태, 승인 계정 ID, 선택한 배정, 대리 승인 여부) | 세션·캐시 클러스터에 저장한다. 유효 수명은 5분 [가정, wbs 5.5.2에서 확정]이고, 모바일 승인이 끝나거나 만료되면 바로 지운다(ADR-0030·0051). 승인 실패 횟수를 세는 키는 `id:devauth:fail:{account}`(10분), 코드 발급 횟수를 세는 키는 `id:devauth:issue:{device}`(1시간)다 |
 | `scanner:enroll:{코드 SHA-256}` | 문자열 | 스캐너 기기 등록 코드(12자 `XXXX-XXXX-XXXX`) → 기기 ID | 값은 기기 ID다. TTL은 10분 [가정, wbs 5.4.3에서 확정]이다. 등록되면 바로 지우고, 새 코드를 만들면 이전 키를 지운다. 기기 승인 코드와 같은 방식으로 세션·캐시 클러스터에 둔다. 기기 자격의 기본안(기기 키 + DPoP)이라 늘 쓴다(추천 적용 2026-10-14, ADR-0062. 기본안은 2026-10-28 기술 검토 중간-057) |
 | `scanner:dpop:{jti}` | 문자열(`SET NX`) | 스캐너 DPoP 증명의 `jti`를 한 번만 받기 | 값은 기기 ID다. TTL은 10분 [가정, wbs 5.4.3에서 확정]이다(`iat` 창 ±5분보다 길게). 이미 있으면 다시 보낸 증명으로 보고 401로 거부한다. 세션·캐시 클러스터에 둔다(docs/features/offline-gate.md §6.1, 추천 적용 2026-10-28, 기술 검토 중간-057) |
@@ -2086,8 +2317,10 @@ erDiagram
 | `tr:devhist:{deviceRef}` | Hash | 기기 신뢰 이력 ②: 그 기기의 지난 30일 추가 검증 보냄·통과·실패 수 | 위와 같은 클러스터·해시 태그, 수명 30일이다. 기기 100만 개면 `tr:devacct`와 합쳐 약 200MB [추정]다(추천 적용 2026-10-30, bot-defense §3.2) |
 | `tr:hp:{pid}` | 문자열 | 허니팟 적중 표시. 값은 적중 시각과 회차다 | 세션·캐시 클러스터에 두고 trust-svc의 허니팟 기록 처리기가 로그인한 요청의 적중에만 쓴다. 수명 24시간 [가정]이다. 그 사람의 다음 로비 입장·사전 검증에서 `EXISTS`로 보고 확정 신호로 쓴다. 이미 판정을 통과해 기다리는 사람은 이것만으로 격리하지 않는다. 해시 태그는 pid다(추천 적용 2026-10-30, bot-defense §7) |
 | `tr:vb:{pid}:E` | 문자열 | 판정 근거 키. `CHALLENGE` 판정과 재평가 격리에만 쓴다. 값은 판정 키(`TrustVerdict.eventKey`), 기기 가명, 확정 신호 근거(차단 목록·허니팟), 사유 범주, 프로필 판, 판정 시각이다 | 세션·캐시 클러스터에 두고 trust-svc가 쓴다. 수명 30일 [가정]이다. 이의 처리(CS 화면의 사유 범주·확정 신호 여부)와 이의 인정 때 지울 차단 기기 키를 찾는 데 쓴다. 해시 태그는 pid다. 추가 검증으로 보낸 판정만 남기므로 대형 온세일에서도 많아야 수만 건 [추정]이다(추천 적용 2026-10-30, bot-defense §3.2·§12) |
-| `id:link:{proposal_id}` [보완] | Hash | 소셜 가입 때 기존 계정에 연결하자고 제안하는 임시 세션(새 제공자, sub, 검증 이메일, 대상 계정 ID, 브라우저 지문, 인증 실패 횟수) | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이다. 1회성 토큰으로 한 번만 쓰이고, 연결을 마치거나 만료되면 바로 지운다(POL-034). |
-| `id:merge:{proposal_id}` [보완] | Hash | 본인인증으로 확인한 계정 병합 제안 세션(대표 계정 ID, 흡수 계정 ID, 옮길 항목의 통계 요약, 병합을 막는 사유) | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이며, 사용자의 최종 승인을 확인한 직후 지운다(POL-034). |
+| `id:link:{proposal_id}` [보완] | Hash | 소셜 가입 때 기존 계정에 연결하자고 제안하는 임시 세션(새 제공자, sub, 검증 이메일, 대상 계정 ID, 보일 기존 제공자, 브라우저 묶음 값의 SHA-256(2026-11-04 '브라우저 지문'을 이렇게 정함), 인증 실패 횟수, 만든 시각, 새 계정 만들기에 쓴 멱등 키(`usedKey`, 쓴 뒤에만). docs/features/identity.md §2.1 '가입 때 연결 제안의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이다. 1회성 토큰으로 한 번만 쓰이고, 연결을 마치거나 만료되면 바로 지운다(POL-034). 새 계정 만들기는 지우지 않고 `usedKey`를 적어 남은 수명 동안 같은 키의 다시 보내기만 받는다(2026-11-05). |
+| `id:nick:{session_id}` | String(정수) | 닉네임 확인의 세션별 요청 수(1분 [가정], 추천 적용 2026-11-09, ADR-0235 결정 5). 닉네임 원문은 두지 않는다 | 닉네임 확인(`POST /v1/identity/nickname-checks`)이 쓴다. 수명 1분이다 |
+| `id:merge:{proposal_id}` [보완] | Hash | 본인인증으로 확인한 계정 병합 제안 세션(대표 계정 ID, 흡수 계정 ID, 옮길 항목의 통계 요약, 병합을 막는 사유(같은 종류의 로그인 수단으로 막으면 겹친 종류도, 소유자 결정 2026-11-05, OPEN[21] 추천 적용). 제안한 계정·세션, 추가하려던 제공자와 sub, 남는 계정의 본인확인 여부(화면 문구, BOT-043), 상태 PROPOSED·BLOCKED, 불변식 위반 표시, 만든 시각도, 2026-11-04 BOT-042, docs/features/identity.md §2.1 '계정 병합의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이며, 사용자의 최종 승인을 확인한 직후 지운다(POL-034). |
+| `id:wa:reg:{등록 ID의 SHA-256}`·`id:wa:rea:{재인증 단계의 SHA-256}` | 문자열(JSON) | 관리 계정 패스키 챌린지(32바이트 난수). 등록은 계정·세션·콘솔, 재인증은 여기에 작업 묶음·확인한 요소(password·totp)와 허용한 패스키 ID 목록을 함께 둔다(추천 적용 2026-11-05, BUILD_ORDER BOT-122, docs/features/identity.md §6 '관리 계정 패스키의 첫 구현', ADR-0206) | 세션·캐시 클러스터에 둔다. 수명은 5분 [가정]이다. 확인할 때 `GETDEL`로 꺼내며 지워 맞든 틀리든 한 번만 쓴다. 한 키만 다뤄 해시 태그를 두지 않는다. 값은 1KB [가정] 안팎이다 |
 
 - 클러스터 환경에서 표준 Pub/Sub을 쓰면 발행한 모든 메시지가 전체 클러스터 노드(클러스터를 이루는 각 서버)로 복제되어 네트워크 부담이 크게 늘어난다. 그래서 Redis 7.0의 샤드 Pub/Sub(`SPUBLISH`)을 필수로 쓰고, 트래픽을 대상 샤드 노드에만 가둔다. 앱의 Redis 클라이언트는 샤드 Pub/Sub 구독을 지원해야 한다. 기본안 node-redis는 `sSubscribe`·`sPublish`를 쓰고 슬롯이 옮겨지면 `sharded-channel-moved` 사건을 낸다. ioredis는 클러스터 연결에 `shardedSubscribers: true`를 켜야 `ssubscribe`를 쓸 수 있다(각 문서, 2026-10-28 확인). 클라이언트는 docs/architecture.md §9.4 PoC(V-T33)로 정한다(추천 적용 2026-10-28, 기술 검토 중간-026).
 - Redis의 마스터-복제본 동기화는 기본이 비동기다. 그래서 장애 조치(Failover) 때 아직 복제되지 못한 쓰기가 사라질 수 있다(Redis Cluster 아키텍처의 한계). 대기열 순번 발급은 세대 번호 체계로 이 오차를 흡수한다(1인 1순번은 입장 확정 때 사람별 입장 키로 다시 확인한다, ADR-0056). 좌석 홀드가 빠지는 경우는 관계형 데이터베이스의 마지막 트랜잭션 검증 단계에서 무결성을 지키도록 설계한다. 좌석 샤드가 장애 조치 중이면 그 회차의 구매 요청을 503으로 미루고(PostgreSQL로 홀드를 주는 비상 경로는 없다), 되돌아갔을 수 있는 구역별 일련번호는 회차 세대(`s:{event:E}:epoch`)로 가른다(추천 적용 2026-10-28, ADR-0121).
@@ -2095,7 +2328,14 @@ erDiagram
 - Redis에는 보조 인덱스와 실행 계획이 없다. 기본 키(키 이름)로만 찾고, 순서가 필요한 조회는 정렬 집합을 손으로 만든 인덱스로 쓴다(Redis 문서). 만료 정렬 집합은 `ZRANGE … BYSCORE … LIMIT 0 n`처럼 건너뛰기를 0으로 두고 읽는다. 건너뛰기가 크면 O(N)까지 커진다. `ZRANGEBYSCORE`는 사용 중단 예정이라 쓰지 않는다(추천 적용 2026-10-22, ADR-0086).
 - Lua 스크립트는 도는 동안 그 샤드의 다른 명령을 모두 막는다. ElastiCache의 스크립트 시간 상한(`lua-time-limit` 5,000ms)은 바꿀 수 없고, 넘으면 `SCRIPT KILL` 뒤 노드를 강제로 다시 시작할 수 있다(AWS 문서). 그래서 스크립트는 요청 좌석 수만큼의 O(1)·O(log N) 작업만 하고 큰 컬렉션을 훑지 않는다. 첫 줄에 `#!lua`를 두고 쓰는 키를 모두 `KEYS`로 넘긴다. `#!` 줄이 없으면 선언하지 않은 다른 슬롯 키에 접근해도 바로 막히지 않고, 키가 다른 노드로 옮겨질 때 실패한다(Redis 문서, 추천 적용 2026-10-22, ADR-0086).
   - **자동 배정 Lua의 예외(추천 적용 2026-10-30, docs/features/seat-hold.md §3 '한 번에 찾고 잡는다')**: 자동 배정 Lua(기술 검토 중간-034, 2026-10-28)는 후보 목록·커서·돌아온 좌석·1인 한도·방금 놓은 좌석 키(`s:{event:E}:auto:{tier}:{n}`·`auto_cur`·`auto_back:{tier}`·`quota:{account}`·`rel:{account}`)를 요청의 등급·매수·계정으로 정해 `KEYS`로 넘긴다. 하지만 찾은 좌석의 홀드 Hash `s:{event:E}:hold:{seat}`는 스크립트가 빈 블록을 찾은 뒤에야 좌석이 정해져 미리 넘길 수 없다. 그래서 이 키 하나만 스크립트 안에서 만들고, 이름은 넘겨받은 비트맵 키의 해시 태그 `{event:E}`를 그대로 붙여서만 만든다. 같은 슬롯이라 다른 노드의 키에 닿지 않는다. Redis 문서는 스크립트 안에서 만든 키 이름을 쓰지 말라고 권하고(키 이름은 모두 입력으로 넘긴다, redis.io 'Scripting with Lua'·'Lua API', 2026-10-30 확인), 그 까닭은 클러스터에서 키가 있는 노드를 미리 알 수 있게 하려는 것이다. 슬롯을 옮기는 일(샤드 추가·슬롯 이동)은 정비 시간에만 하므로(docs/devops.md §12.1) 그동안 이 Lua가 옮겨지는 중인 홀드 Hash에 닿을 때 어떻게 실패하는지는 [확인 필요]로 남긴다. 이 예외 밖의 Lua는 지금처럼 모든 키를 `KEYS`로 넘긴다.
-- **회차 해시 태그와 샤드 배치(추천 적용 2026-10-28, 기술 검토 낮음-003)**: `{event:E}` 해시 태그는 한 회차의 키를 한 슬롯에 모을 뿐, 그 슬롯이 어느 샤드에 놓일지는 태그 값의 해시가 정한다. 그래서 동시에 파는 회차 여럿이 좌석 클러스터의 한 샤드에 겹칠 수 있다(샤드 셋에 회차 다섯이면 반드시 겹친다). 키 이름은 바꾸지 않고, 겹친 최악(3년차 회차 다섯의 홀드 피크 합 초당 약 6,000건)을 샤드 하나가 받는지를 PoC로 확인한다(seat-hold S-T27, docs/architecture.md §9.4). 넘으면 큰 회차의 해시 태그 값을 슬롯 배치표로 골라 서로 다른 주 노드에 두는 규칙을 새 ADR로 정한다.
+- **회차 해시 태그와 샤드 배치(추천 적용 2026-10-28, 기술 검토 낮음-003)**: `{event:E}` 해시 태그는 한 회차의 키를 한 슬롯에 모을 뿐, 그 슬롯이 어느 샤드에 놓일지는 태그 값의 해시가 정한다. 그래서 동시에 파는 회차 여럿이 좌석 클러스터의 한 샤드에 겹칠 수 있다(샤드 셋에 회차 다섯이면 반드시 겹친다). 겹친 최악(3년차 회차 다섯의 홀드 피크 합 초당 약 6,000건)을 샤드 하나가 받는지를 PoC로 확인했다(seat-hold S-T27, docs/architecture.md §9.4). 2026-11-01 PoC에서 SLOWLOG 기준을 넘어, 큰 회차의 해시 태그 값을 슬롯 배치표로 골라 서로 다른 주 노드에 두는 규칙을 ADR-0176 결정 3으로 두었다(아래).
+  - **큰 회차 배치 규칙(ADR-0176 결정 3, 세부는 추천 적용 2026-11-04, BUILD_ORDER PRF-135)**: 판매 승인 업무(BUILD_ORDER LCH-080)가 아직 없어, 지금은 순수 함수(같은 입력에 늘 같은 답을 내고 바깥을 바꾸지 않는 함수)와 그 시험만 둔다. 고른 태그를 키 이름에 넣는 운영 경로는 판매 열기 운영 경로(LCH-080)와 함께 만든다.
+    - **슬롯 계산 `slotOf(key)`**: Redis Cluster 규칙대로 CRC16(XMODEM) mod 16384다. 해시 태그 규칙을 따른다. 키에 `{`가 있고 그 뒤에 `}`가 있으며 둘 사이가 비어 있지 않으면, 첫 `{`와 그다음 첫 `}` 사이만 센다.
+    - **태그 고르기**: 큰 회차(아래 대형)만 태그를 `event:E:k`로 바꾼다. k는 그 태그의 슬롯이 목표 주 노드의 슬롯 범위에 드는 가장 작은 0 이상 정수다. 작은 회차는 `event:E` 그대로다. 회차 ID 모양(`^[A-Za-z0-9_-]{1,64}$`, 코드 이름 `KEY_PART`)에 `:`가 없어, `event:E:k`가 다른 회차의 태그와 섞이지 않는다.
+    - **겹침 확인 `checkPlacement({ slotRanges, target, others })`**: `slotRanges`는 `[{ from, to, node }]`(주 노드마다 맡은 슬롯 범위)이고, `target`과 `others`의 회차마다 `{ eventId, tag, seats, saleFrom, saleTo }`다. 회차의 주 노드는 `slotOf(tag)`가 드는 범위의 `node`다. 판매 구간(`saleFrom`~`saleTo`)이 겹치는 회차끼리 같은 주 노드에서 본다. 대형(좌석 3만 석 이상 [가정])은 주 노드 혼자여야 하고, 중형(1만 석 이상 [가정])은 주 노드마다 2개 [가정]까지다. 결과는 `{ ok, conflicts: [{ node, events, rule }] }`다(`rule`은 어긴 규칙).
+    - **알아 둘 것(추천 적용 2026-11-04)**: 태그를 고르는 것은 대형뿐이다. 그래서 중형이 대상인 위반은 태그로 고칠 수 없고, 판매 승인에서 판매 일정을 옮겨 풀어야 한다. 중형 수는 '대상과 판매 구간이 겹치는 회차'를 모두 세는 보수적 계산이다(그 회차들끼리는 서로 겹치지 않아도 함께 센다).
+    - **필수 규칙으로 확정(2026-11-04, ADR-0188)**: 운영 Lua로 다시 잰 S-T27에서 회차 다섯을 한 샤드에 몰면 샤드 엔진 CPU가 54.7~56.4%로 기준 50%를 넘었고, 나눈 배치는 샤드마다 28.7~30.2%였다. 그래서 이 규칙은 선택이 아니라 판매 승인의 필수 확인이다(어기면 승인하지 않는다).
+    - 여기의 대형·중형은 좌석 수로 나눈 배치 규칙의 말이다. 대기 인원으로 나누는 공연 규모 등급(docs/architecture.md §9.5, ADR-0078)과 기준이 다르다.
 - 큰 키(로비 집합, 묶음 집합)는 판매 종료 정비 잡이 `UNLINK`로 지운다. `UNLINK`는 메모리를 다른 스레드에서 돌려받아 주 스레드를 막지 않는다. TTL로 지울 때 막는지는 엔진 설정에 달렸고, ElastiCache Valkey 8은 그 값을 밝히지 않는다(추천 적용 2026-10-22, ADR-0086).
 
 **세션·캐시 클러스터의 키별 유실 등급과 메모리 규칙(추천 적용 2026-10-28, ADR-0109)**: 이 클러스터는 '데이터 유실 허용' 하나로 묶지 않는다. 키마다 잃었을 때 무엇이 일어나고 무엇이 마지막을 지키는지 정한다. 매개변수 그룹은 `maxmemory-policy noeviction`이다(ElastiCache 기본값 `volatile-lru`를 바꾼다). 메모리가 차면 키를 지우지 않고, 메모리를 더 쓰는 명령이 오류를 낸다(Valkey 문서). 조용히 지워 한도가 풀리거나 로그인이 끊기는 것보다 오류로 바로 보이는 쪽을 고른 것이다. 그래서 모든 키에 TTL을 두고, 캐시 값에는 크기 상한(ISR 항목 1MB [가정])을 둔다. '모든 키에 TTL'은 이 클러스터의 규칙이다. 대기열·좌석 클러스터도 `noeviction`이지만 회차와 무관한 키(`q:{admission}:*`, `s:ctl:events`)처럼 TTL을 두지 않는 키가 있어, 키마다 위 키 표의 수명을 따른다(2026-11-01 정합 점검, ADR-0109 결정 5). 메모리 사용률이 70% [가정]를 넘으면 SEV3, 85% [가정]를 넘으면 SEV2다(docs/observability.md §5). 새 키는 등급·TTL·크기 상한을 이 표에 먼저 적고 쓴다.
@@ -2105,7 +2345,9 @@ erDiagram
 | catalog 읽기 모델 캐시, 웹 앱 서버의 ISR·데이터 캐시 | A 다시 만든다 | 원본을 다시 읽는다 | 원본 DB와 원 서버 | 캐시가 없는 것으로 보고 원본을 읽는다. 화면은 그대로다 |
 | identity 사용자 세션 | B 사람이 다시 한다 | 리프레시 토큰으로 다시 받는다 | identity DB의 세션 참조와 리프레시 토큰 | 새 로그인은 Problem 503과 `Retry-After`로 다시 하게 한다 |
 | 계정 연결·병합 제안(`id:link:*`·`id:merge:*`, 10분) | B | 처음부터 다시 한다 | — | 다시 하라고 알린다 |
-| 관리 계정 로그인의 출발지가 든 값: 계정 × 출발지 묶음 실패 수와 묶음 잠금, 계정의 출발지 수, 출발지의 계정 수와 출발지 경보(identity, docs/security/auth-controls.md §3.1, 기술 검토 중간-052). 계정에 묶인 값(계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계)은 여기 두지 않고 identity DB `admin_account`에 둔다(추천 적용 2026-10-30, auth-controls §3.1). 키 이름과 TTL은 wbs 3.5.1에서 정한다 [가정] | C 다른 층이 지킨다 | 묶음 실패 수와 출발지 계수가 처음부터 다시 세어지고 묶음 잠금·출발지 경보가 풀린다. 그동안 출발지 단위 통제가 잠시 약해진다(auth-controls §3.7) | identity DB `admin_account`의 계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계와 잠금(`lock_kind`·`locked_until`), 24시간 안 잠금 기록, 전체 실패율 경보 | 실패를 세지 못하면 그 로그인 시도를 받지 않고 Problem 503과 `Retry-After`로 다시 하게 한다 [가정] |
+| 닉네임 확인 요청 수(`id:nick:*`, 1분 [가정], 추천 적용 2026-11-09, ADR-0235) | A | 숫자가 사라지면 처음부터 다시 센다. 닿지 못하는 동안은 세지 않고 통과시킨다(참고용이고 확정은 가입 마무리의 409다) | — | 없다 |
+| 관리 계정 패스키 챌린지(`id:wa:*`, 5분 [가정], 추천 적용 2026-11-05, BOT-122) | B | 패스키 등록이나 재인증을 처음부터 다시 한다 | 확인은 챌린지가 있어야만 통과하므로, 잃으면 막히는 쪽이다 | 503 `admin-login-unavailable`과 `Retry-After`로 다시 하게 한다 |
+| 관리 계정 로그인의 출발지가 든 값: 계정 × 출발지 묶음 실패 수와 묶음 잠금, 계정의 출발지 수, 출발지의 계정 수와 출발지 경보(identity, docs/security/auth-controls.md §3.1, 기술 검토 중간-052). 계정에 묶인 값(계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계)은 여기 두지 않고 identity DB `admin_account`에 둔다(추천 적용 2026-10-30, auth-controls §3.1). 키는 `id:alf:*`이고 이름과 TTL은 docs/features/identity.md §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현'에 있다(추천 적용 2026-11-05, BUILD_ORDER BOT-111). 없는 이메일의 가짜 상태(`id:alf:{a:g:…}:state`, 30일 [가정])와 한 대상의 처리 중 임대(`…:busy`, 10초)도 여기 든다 | C 다른 층이 지킨다 | 묶음 실패 수와 출발지 계수가 처음부터 다시 세어지고 묶음 잠금·출발지 경보가 풀린다. 그동안 출발지 단위 통제가 잠시 약해진다(auth-controls §3.7) | identity DB `admin_account`의 계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계와 잠금(`lock_kind`·`locked_until`), 24시간 안 잠금 기록, 전체 실패율 경보 | 실패를 세지 못하면 그 로그인 시도를 받지 않고 Problem 503과 `Retry-After`로 다시 하게 한다 [가정] |
 | 스캐너 기기 승인·등록 코드(`id:devauth:*`·`scanner:enroll:*`) | B | 코드를 다시 받는다 | 기기 등록·배정 원장(DB) | 다시 받으라고 알린다 |
 | 스캐너 DPoP 증명 `jti`(`scanner:dpop:*`) | C | 10분 안의 같은 증명을 다시 받을 수 있다 | `iat` ±5분 창, TLS, 요청마다 하는 기기·세션 상태 확인, 업로드의 클라이언트 ID 멱등 | 키가 없는 것으로 보고 받는다(경보 없음) |
 | trust-svc 판정 피처와 대기 중 재평가 키(`tr:devshare:*`·`tr:asnhost:*`·`tr:ra:*`, 기술 검토 낮음-033) | B | 최대 10분의 문맥을 잃는다(ADR-0099) | 사전 검증 규칙과 게이트웨이 한도 | 그 신호 없이 판정한다(축소 운영과 같다, POL-006) |
@@ -2161,7 +2403,7 @@ erDiagram
      - 자격 갱신 주기를 넘겨 이어지는지는 실제 MSK와 EKS에서만 확인된다 [확인 필요, docs/review/open-items.md 42번].
    - 연결 풀의 유휴 연결 회수와 DB·Redis 시간 초과 기본값은 docs/architecture.md §5 '시간 초과 기본값'을 따른다. 세션 `idle_session_timeout`은 연결 풀과 맞지 않아 쓰지 않는다.
 8. **예매 취소 오케스트레이션 (purchase → ticket → payment)**: purchase 서비스가 `order_cancellation` 등록, 주문 이벤트 기록, Outbox 적재를 트랜잭션 하나로 한다. 같은 티켓에 진행 중인 취소가 이미 있으면 유일 제약(§2)에 걸리므로 새 행을 만들지 않고 그 취소를 이어서 처리한다(추천 적용 2026-10-22, ADR-0086). 이어 ticket 서비스가 티켓 키를 폐기하고 상태를 바꾼다(행 잠금 + 버전 검증). 그 뒤 purchase 서비스가 `seat_sale`을 RETURNED 상태로 바꾸고, 쿼터를 되돌리고, Redis 비트맵을 복원한다. 마지막으로 payment 서비스가 PG사 결제 취소 API를 부르고 `payment_cancel`을 기록한다. 단, 현장 입장이 시작된 뒤 접수된 취소 건은 악의적으로 입장한 뒤 환불받는 일을 막으려고, 마지막 결제 취소 단계를 입장 기록 마감(docs/features/offline-gate.md §7.3) 뒤로 미룬다(POL-032, ADR-0051 결정 13).
-9. **계정 병합 오케스트레이션 (identity → 각 분산 서비스)**: identity 서비스가 흡수 대상 계정 상태를 MERGED로 바꾸고, 소셜 로그인 제공자 연결(`account_provider`)을 옮기고, `account_merge` 이력 기록과 Outbox 메시지 발행을 트랜잭션 하나로 끝낸다. 그 뒤 각 분산 서비스는 `identity.accounts-merged` 이벤트를 받아 자기 데이터를 두 종류로 나눠 처리한다(추천 적용 2026-10-28, 기술 검토 중간-054). ① 지금의 소유·상태 값(core의 찜·오픈 알림 구독, 배송지)은 `account_id`를 대표 계정 ID로 멱등하게 고친다(`merge_id` 멱등키). ② 사건·원장·법정 보존 기록(purchase의 주문·`order_event`·주문 취소, core의 굿즈 주문(`merch_order`는 core 논리 DB에 있다, §1, 2026-11-01 정합 점검), payment의 결제 원장·`payment_event`·정산, ticket의 스캔 기록, 접속기록)은 원래 `account_id`를 고치지 않는다. 덧붙이기만 하는 사건 기록이라는 전제와 5년 보존 기록(전자상거래법 §6), 봇·부정 조사의 '실제로 산 계정'을 지키려는 것이다. 대신 그 서비스가 자기 DB의 대응표 `merged_account(absorbed_account_id PK, representative_account_id, merged_at)`를 이 이벤트로 채우고, '내 주문' 조회와 소유 확인을 `account_id = ANY(대표 계정 + 흡수 계정 ID들)`로 한다. 흡수 계정은 본인확인 전 계정이라 티켓·관람 후기가 없으므로 ticket-svc의 소유권 이전·기기 키 폐기 단계는 두지 않는다. identity가 병합 제안을 만들 때와 확정하기 바로 앞에 purchase-svc·ticket-svc·core-svc의 `CheckAccountMerge`로 막는 사유를 묻는다. 흡수 계정의 티켓·후기가 0이 아니면 불변식 위반으로 막고(POL-034), 한 곳이라도 1초 [가정] 안에 답하지 않으면 확정하지 않는다. ops 데이터의 이의 제기·소명 계류는 ops-svc가 알려 둔 `account_hold`로 본다. 병합 뒤 1인 한도 검사는 `merged_account`로 계정 묶음을 함께 센다(추천 적용 2026-10-29, ADR-0148).
+9. **계정 병합 오케스트레이션 (identity → 각 분산 서비스)**: identity 서비스가 흡수 대상 계정 상태를 MERGED로 바꾸고, 소셜 로그인 제공자 연결(`account_provider`)을 옮기고, 기기 행(`device`)을 옮기고(대표 계정에 같은 기기가 이미 있으면 흡수 쪽 행을 지운다. 흡수 쪽만 키 회전의 새 판이면 대표 행이 그 새 판 값을 이어받는다, 소유자 결정 2026-11-05, OPEN[22] 추천 적용), `account_merge` 이력 기록과 Outbox 메시지 발행을 트랜잭션 하나로 끝낸다. 두 계정에 같은 종류의 다른 로그인 수단이 있으면 옮기지 않고 막는다(`SAME_PROVIDER_KIND`, 소유자 결정 2026-11-05, OPEN[21] 추천 적용). 그 뒤 각 분산 서비스는 `identity.accounts-merged` 이벤트를 받아 자기 데이터를 두 종류로 나눠 처리한다(추천 적용 2026-10-28, 기술 검토 중간-054). ① 지금의 소유·상태 값(core의 찜·오픈 알림 구독, 배송지)은 `account_id`를 대표 계정 ID로 멱등하게 고친다(`merge_id` 멱등키). ② 사건·원장·법정 보존 기록(purchase의 주문·`order_event`·주문 취소, core의 굿즈 주문(`merch_order`는 core 논리 DB에 있다, §1, 2026-11-01 정합 점검), payment의 결제 원장·`payment_event`·정산, ticket의 스캔 기록, 접속기록)은 원래 `account_id`를 고치지 않는다. 덧붙이기만 하는 사건 기록이라는 전제와 5년 보존 기록(전자상거래법 §6), 봇·부정 조사의 '실제로 산 계정'을 지키려는 것이다. 대신 그 서비스가 자기 DB의 대응표 `merged_account(absorbed_account_id PK, representative_account_id, merged_at)`를 이 이벤트로 채우고, '내 주문' 조회와 소유 확인을 `account_id = ANY(대표 계정 + 흡수 계정 ID들)`로 한다. 흡수 계정은 본인확인 전 계정이라 티켓·관람 후기가 없으므로 ticket-svc의 소유권 이전·기기 키 폐기 단계는 두지 않는다. identity가 병합 제안을 만들 때와 확정하기 바로 앞에 purchase-svc·ticket-svc·core-svc의 `CheckAccountMerge`로 막는 사유를 묻는다. 흡수 계정의 티켓·후기가 0이 아니면 불변식 위반으로 막고(POL-034), 한 곳이라도 1초 [가정] 안에 답하지 않으면 확정하지 않는다. ops 데이터의 이의 제기·소명 계류는 ops-svc가 알려 둔 `account_hold`로 본다. 병합 뒤 1인 한도 검사는 `merged_account`로 계정 묶음을 함께 센다(추천 적용 2026-10-29, ADR-0148).
 10. **양도 수락·돌려주기·회수 (ticket)**: 티켓 행을 잠근 상태에서 양도 요청 상태와 기한을 다시 확인한다. 그리고 보유자 변경, 이전 키 폐기, `transfer_offer` 상태 전이, Outbox 적재를 트랜잭션 하나로 처리한다(ADR-0046). 새 보유자의 키는 등록 버튼으로만 따로 만든다(ADR-0051 결정 10).
 11. **승인 업무 실행 (ops → purchase·ticket·payment)**: ops 서비스가 `approval_request` 상태를 EXECUTING으로 바꾸고, 감사 이벤트와 Outbox를 같은 트랜잭션에 쓴다. 대상 서비스는 승인 ID를 멱등키로 쓰므로 다시 전달돼도 한 번만 반영된다. 실패하면 Failed 상태와 CS 처리함 건이 남는다. 원인을 고친 뒤 승인자가 같은 approve를 다시 부르면(재인증) 같은 승인 ID로 다시 실행하고, 새 경로는 두지 않는다(추천 적용 2026-10-20, ADR-0073).
 12. **일괄 환불 작업 (purchase → payment)**: 주문마다 `order_cancellation`을 만들고 `cancel-{cancellationId}`로 결제사 취소를 호출한다. 대상 주문은 회차의 환급 대상 주문을 주문 ID 커서로 500개씩 [가정] 고른다(§5.1). 취소 행은 `event_cancellation_request_id`를 담아 `INSERT … ON CONFLICT DO NOTHING`으로 넣는다. 작업이 멈췄다가 다시 시작돼도 '티켓당 진행 중 취소 하나' 유일 제약(§2) 때문에 취소 행과 멱등키가 둘 생기지 않아 환급이 중복되지 않는다. 진행률의 원본은 `order_cancellation`을 요청별 상태로 묶어 센 값이고, `event_cancellation_request`의 진행 수와 실패 수는 작업자가 묶음마다 한 번 올리는 화면용 값이다(추천 적용 2026-10-22, ADR-0086).
@@ -2172,21 +2414,95 @@ erDiagram
    - **넣기**: 다시 해도 같은 결과일 실패(검증 실패, 상태 전이 불가, 코드 예외)를 5회 [가정] 겪은 사건을 `held_event`에 넣는다. 그 뒤로 같은 업무 키의 사건이 오면 처리하지 않고 같은 표에 넣는다. 보류 행을 넣는 트랜잭션이 커밋된 뒤에 그 위치를 커밋하므로, 멈췄다 다시 받아도 `eventKey`로 걸러 두 번 넣지 않는다. 저장소 연결 실패·시간 초과는 보류하지 않고 그 파티션을 멈춰 기다린다(스트림 작업자와 같은 규칙, docs/streaming.md).
    - **다시 처리와 정리**: 보류가 1건이라도 있으면 결제·주문 토픽은 SEV2, 그 밖은 SEV3다. 원인을 고친 뒤 RB-11 '보류 사건 다시 처리'로 업무 키마다 들어온 순서대로 다시 넣고, 다시 처리한 행은 7일 [가정] 뒤 지운다(Kafka 보관과 같다).
 
+**purchase DB의 좌석 표 마이그레이션(추천 적용 2026-11-04, BUILD_ORDER PRF-140 ①, ADR-0086·ADR-0083)**: purchase-svc의 첫 마이그레이션이 `seat_sale`·`purchase_quota`·`seat_hold` 셋을 만든다.
+- `seat_sale (event_id uuid, seat_id uuid, order_id uuid, account_id uuid, status text, reserved_at timestamptz, pending_until timestamptz)`: 기본 키 `(event_id, seat_id, order_id)`, `account_id`는 주문한 계정(한도를 되돌리는 연산이 대조한다), `status`는 `PENDING`·`SOLD`·`RETURNED`만(`CHECK`), 활성 상태 유일 부분 인덱스 `UNIQUE (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`. `reserved_at`은 기본 `now()`다.
+- `purchase_quota (account_id uuid, event_id uuid, used int, limit_count int)`: 기본 키 `(account_id, event_id)`, `CHECK (used >= 0 AND limit_count >= 0 AND used <= limit_count)`. 한도를 넘는 갱신은 이 제약이 막는다(docs/features/seat-hold.md §6의 `reserve`).
+- `seat_hold (event_id uuid, seat_id uuid, account_id uuid, fencing_token bigint, status text, kind text, priority_grant_id uuid, held_at timestamptz, expires_at timestamptz)`: `PARTITION BY RANGE (event_id)`, 기본 키 `(event_id, seat_id, fencing_token)`, `status`는 `HELD`·`RELEASED`·`EXPIRED`, `kind`는 `FAN`·`PRIORITY`(기본 `FAN`), 활성 홀드 유일 부분 인덱스 `UNIQUE (event_id, seat_id) WHERE status = 'HELD'`. 부모 표는 손으로 쓴 SQL 마이그레이션이 만들고(Drizzle 0.45.4에는 파티션 선언이 없다), `DEFAULT` 파티션은 두지 않는다(위 '파티션 표 규칙'). 첫 월 파티션은 마이그레이션 직후 `scripts/migrate.mjs`가 `ensureMonthlyPartitions(spec: seat_hold, uuidv7)`로 만든다(이번 달부터 3개월 앞, 운영 실행기와 매일 정비 잡은 BAS-060·wbs 2.11). 파티션이 없는 달의 회차로 쓰면 삽입이 실패하는 것이 정본 동작이다. 적재(PRF-141)가 이 표를 채운다. Drizzle 표 정의는 부모 표 모양만 적고 파티션 선언은 마이그레이션 SQL에만 있다.
+- 마이그레이션 실행은 `scripts/migrate.mjs`(identity-svc와 같은 방식, 실행기는 BAS-060)다. 표 정의는 `src/modules/inventory/adapters/db/schema.ts`(Drizzle)다.
+- 아래 §5의 저장 매개변수(`purchase_quota`의 `fillfactor`, `seat_hold`의 `autovacuum_vacuum_scale_factor` 0.02 [가정])는 이 마이그레이션에 넣지 않았다. 파티션 부모에는 저장 매개변수를 걸 수 없고 `ensureMonthlyPartitions`의 `CREATE TABLE … LIKE`도 옮기지 않으므로, 파티션을 만들 때 거는 일과 `fillfactor` 값은 측정과 함께 BAS-060·wbs 2.11에서 정한다.
+
+**홀드 원장 적재와 Stream 릴레이(추천 적용 2026-11-04, BUILD_ORDER PRF-141, ADR-0142)**: 규칙의 정본은 docs/features/seat-hold.md §6 '홀드 원장 적재의 첫 구현'이다. 저장소 쪽 요점만 적는다.
+- `s:{event:E}:stream`의 소비자 그룹은 `stream-relay` 하나, 소비자 이름은 `relay` 하나다(리더 하나가 읽는다). Stream이 없는 회차에 그룹을 만들려고 키를 새로 만들지 않는다(`MKSTREAM`을 쓰지 않는다. 쓰면 수명이 없는 키가 생긴다).
+- purchase DB 두 번째 마이그레이션이 보류 표 `held_event`와 정비 통계 `stat_snapshot`을 만든다(platform 템플릿 0003과 같다).
+- `seat_hold` 적재는 기본 키 `(event_id, seat_id, fencing_token)`로 멱등이고, 좌석의 HELD 행은 부분 유일 인덱스로 하나다. 새 HELD가 오면 같은 좌석의 낮은 토큰 HELD 행을 먼저 끝 상태로 바꾼 뒤 넣어 인덱스와 부딪히지 않는다.
+
+**좌석 묶기·실패 해제·판 번호(소유자 결정 2026-11-02 OPEN[15], 세부 추천 적용 2026-11-04, BUILD_ORDER PRF-142)**: 규칙의 정본은 docs/features/seat-hold.md §6 '좌석 묶기와 실패 해제의 첫 구현'이다. 키 쪽 요점만 적는다.
+- 홀드 Hash `s:{event:E}:hold:{seatIdx}`에 `pin` 칸(`1`이면 결제가 끝날 때까지 묶음, 만료 인덱스에 없다)을 더한다. 묶기 Lua가 빈 좌석을 다시 잡을 때도 홀드 Lua와 같은 칸을 쓴다.
+- 세대 키 `s:{event:E}:epoch`에 `gen` 칸(다시 만들기 판 번호, 판매 열기가 `1`로 둔다)을 더한다. 칸이 없으면 `1`로 본다.
+- 묶기·실패 해제 Lua는 회차 슬롯의 키만 쓴다(비트맵, 만료 인덱스, 보유 수, Stream, 세대 키, 구역 일련번호, fence, 홀드 Hash). 회차 목록 `s:ctl:events`에서 빼는 연산은 다른 슬롯이라 Stream 확인(회차 슬롯) 뒤 `SREM`(목록 슬롯)을 따로 보낸다.
+
+**다시 만들기 표와 원장 칸(추천 적용 2026-11-04, BUILD_ORDER PRF-143)**: purchase DB 세 번째 마이그레이션이 다음을 더한다. 규칙의 정본은 docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현'이다.
+- `seat_rebuild (event_id uuid PK, gen int NOT NULL DEFAULT 1 CHECK (gen >= 1), holder text, lease_until timestamptz)`: 회차마다 한 행. 다시 만들기 판 번호와 다시 만들기 임대다.
+- `seat_hold`에 `hold_id uuid`·`purchase_session_id text`(널 허용): 홀드 원장 적재가 SeatEvent의 holdId·purchaseSessionId를 쓴다. 다시 만들기가 되살린 홀드 Hash의 holdId·psid로 쓴다.
+- 좌석 Redis 회차 슬롯의 새 키 `s:{event:E}:rebuild`(글, 다시 만들기 시도의 판 번호, 수명 판매 종료 + 1일): 다시 만들기의 첫 Lua가 쓰고 그 뒤 Lua들이 대조한다(앞 시도·늦은 파드의 쓰기를 막는 펜싱).
+
+**주문 표 마이그레이션(추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113·ADR-0114)**: purchase DB 네 번째 마이그레이션이 주문 저장소의 표를 만든다. 전이 규칙의 정본은 docs/features/payment.md §3 '주문 저장소의 첫 구현'이다.
+- `purchase_order`: 위 칸 그대로이고 `status`는 열세 값만(`CHECK`), `amount >= 0`, `event_seq >= 1`, `payment_event_seq >= 0`, `seat_assignment`는 `PICK`·`AUTO`다. 표는 나누지 않는다(ADR-0114). 새 인덱스는 두지 않는다(쓰기가 많은 표, §5.1).
+- `order_item (order_id, line_no)` 기본 키, `unit_price >= 0`, 같은 주문의 좌석 중복을 막는 `UNIQUE (order_id, seat_id)`. `order_event (order_id, seq)` 기본 키, `seq >= 1`, `from_status`·`to_status`는 주문 상태 열세 값만(`CHECK`), `occurred_at`의 BRIN 인덱스(`autosummarize = on`. 덧붙이기만 하는 표라 시각 순으로 쌓여 작은 BRIN으로 '전날 이력'을 찾는다, 매일 검사, §5.1). 두 표는 주문에 외래 키를 건다(보존 삭제는 자식부터, ADR-0114).
+- 지연 제약 트리거 `order_status_has_event`(`AFTER INSERT OR UPDATE OF status, event_seq ON purchase_order DEFERRABLE INITIALLY DEFERRED`): 커밋 때 (주문, `event_seq`, `status`)와 같은 `order_event` 행이 없으면 실패한다(이력 없이 상태만 바꾸는 길을 막는다, 추천 적용 2026-11-05, payment §3).
+- `order_idempotency`: packages/platform의 `idempotencyRecordTable(작업 셋, 'order_idempotency')`로 만든다(위 ERD).
+- `payment_attempt`: `pg`는 `TOSS`·`PORTONE`·`SIMULATOR`, `status`는 `READY`·`ACCEPTED`·`SUPERSEDED`·`EXPIRED`, 활성 시도 유일 부분 인덱스 `UNIQUE (order_id) WHERE status IN ('READY','ACCEPTED')`, 외래 키 조회·주문의 시도 목록용 일반 인덱스 `(order_id)`(부분 인덱스는 상태 조건이 없는 외래 키 점검에 쓰이지 않아 주문을 지울 때마다 표를 다 훑었다, 2026-11-05 코드 리뷰). 결제 접수가 저장할 결제 참조 칸은 PRF-162가 더한다.
+- Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같다(일 파티션은 `ensureOutboxPartitions`가 만든다).
+- 발권 재시도 큐 `ticket_issue_job`은 승인 결과를 반영하는 PRF-163이 더한다.
+- 다섯 번째 마이그레이션(0004, BUILD_ORDER PRF-161)이 `purchase_order`에 `hold_id uuid NOT NULL`(유일 인덱스 `purchase_order_hold_key`)과 `purchase_session_id text NOT NULL`을 더한다(주문 표가 비어 있는 단계라 기본값 없이 더한다).
+- 여섯 번째 마이그레이션(0005, BUILD_ORDER PRF-162): `payment_attempt`에 결제 참조 칸 다섯(`pg_payment_key`·`pg_tx_id`·`pg_payment_token`·`authenticated_at`·`accepted_at`, 널 허용), `purchase_order.seat_gen int`(널 허용, 접수 때 채움), Saga 작업 표 `order_saga_job (order_id uuid PK FK, event_id uuid, step text, attempts int, next_attempt_at timestamptz, lease_until timestamptz, created_at timestamptz)`(`ticket_issue_job`과 같은 꼴, 쓸기 색인 `(next_attempt_at)`). `step`은 PRF-165가 값 목록을 정한다(접수는 `RESERVE`로 넣는다).
+- 일곱 번째 마이그레이션(0006, BUILD_ORDER PRF-165): `purchase_order.failure_reason text`(널 허용), `order_saga_job.step`의 값 `RESERVE`·`CONFIRM`·`RELEASE`(CHECK), `order_saga_job.confirm_sent_at timestamptz`(승인 명령을 처음 보내기 직전에 적는다. 있으면 purchase가 혼자 T11을 하지 않는다).
+- 여덟 번째 마이그레이션(0007, BUILD_ORDER PRF-163): 발권 재시도 큐 `ticket_issue_job`(위 ERD 칸 그대로, 쓸기 색인 `(next_attempt_at)`). `purchase_order.failure_reason`에 결제 쪽 사유(사건의 `failureCategory`)가 들어온다.
+- 아홉 번째 마이그레이션(0008, BUILD_ORDER PRF-167): `purchase_order.pinned_at timestamptz`(널 허용). Saga 묶기가 OK인 뒤 판 번호와 같은 UPDATE로 적고, 다시 만들기가 결제 접수한 묶인 주문의 좌석을 되살리는 근거로 쓴다(docs/features/seat-hold.md §6 '주문 기준 되살리기').
+- 열 번째 마이그레이션(0009, 추천 적용 2026-11-05, BUILD_ORDER PRF-170): `ticket_issue_job`에 `lease_until`·`delayed_at`·`overdue_at`(모두 `timestamptz`, 널 허용)을 더한다. 발권 실행기의 잡기(임대)와 `ISSUE_DELAYED`·발권 기한 넘김 신호를 한 번만 내는 표시다(docs/features/payment.md §2 '발권 호출과 재시도 큐의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
+- 열한 번째 마이그레이션(0010, 추천 적용 2026-11-06, BUILD_ORDER PRF-171): `order_saga_job.step` CHECK에 `AWAIT`(승인 명령이 접수돼 결과를 기다림)를 더하고, `order_saga_job.pull_next_at timestamptz`(결과 당기기의 다음 점검 시각, 널 허용)를 더한다. 승인 명령이 접수된 작업 행을 지우지 않고 `AWAIT`로 남겨, 결과 당기기가 '접수했는데 결과가 아직 없는 주문'을 이 작은 표에서 찾는다(docs/features/payment.md §2 '결제 결과 당기기의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
+- 열두 번째 마이그레이션(0011, 추천 적용 2026-11-09, BUILD_ORDER PRF-172): `purchase_order_session_idx ON purchase_order (purchase_session_id)`를 더한다. 구매 세션이 끝날 때 그 세션의 열린 주문을 찾는 인덱스다(docs/features/payment.md §2 '결제하지 않은 주문 만료의 첫 구현'). 주문 표에 인덱스를 두지 않는 원칙의 예외이고, 까닭과 대가는 §5.1이다.
+- 열세 번째 마이그레이션(0012, 추천 적용 2026-11-09, BUILD_ORDER PRF-144): `event_sale`(회차마다 한 행. 판 번호 `version`은 1 이상, `status`·`previous_status`는 다섯 상태만 `CHECK`, 좌석 수 칸과 `reopen_count`는 0 이상)을 만들고 `seat_sale_pending_idx ON seat_sale (event_id, reserved_at) WHERE status = 'PENDING'`을 더한다(`reserved_at`까지 둔 것은 추천 적용 2026-11-09, BUILD_ORDER PRF-144, 코드 리뷰). 정본 칸에 `previous_status`·`sold_out_tiers`·`open_at`·`counted_at`을 더한 까닭은 같은 판을 다시 낼 때 그 판의 값이 필요하기 때문이다(docs/features/seat-hold.md §4 '판정의 첫 구현'). 인덱스의 까닭과 대가는 §5.1이다.
+- 마이그레이션 SQL은 `pnpm --filter @peaket/purchase-svc db:generate`(`scripts/db-generate.mjs`가 `tsconfig.drizzle.json`으로 drizzle-kit을 띄운다. 표 정의가 `@peaket/platform`의 `idempotencyRecordTable`을 가져와, 원본 경로를 읽으면 실패하므로 빌드된 패키지를 읽는다)로 만들고, 파티션·BRIN·트리거처럼 Drizzle 0.45가 나타내지 못하는 문장은 손으로 덧붙인다.
+
+**결제 표 마이그레이션(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0114)**: payment DB의 첫 마이그레이션(`services/payment-svc/migrations/0000_payment.sql`)이 승인 명령 접수의 표를 만든다. 접수 규칙의 정본은 docs/features/payment.md §2 '승인 명령 접수의 첫 구현'이다.
+- `payment`: 위 ERD 칸 그대로이고 `status`는 일곱 값만, `pg`는 셋만(`CHECK`), `amount > 0`, `attempt_no >= 1`, `order_id` 유일(주문당 결제 1건)이다. `payment_method_ref`와 `card_bin`은 함께 있거나 함께 빈다(`CHECK`). 승인 답을 쓰는 트랜잭션에서 승인일 때만 채운다(docs/features/payment.md §2.1 '결제 수단 연결값의 첫 구현', 추천 적용 2026-11-09, BUILD_ORDER HOT-145). `event_id`·`attempt_id`·`pg_payment_ref`·`idempotency_key`·`authenticated_at`·`status_changed_at`은 `NOT NULL`이다(승인 명령이 그 값을 싣고 온다). 표는 나누지 않는다(ADR-0114).
+- `payment_event`: 기본 키 `(payment_id, seq)`, `seq >= 1`, 결제에 외래 키를 건다. 접수의 내부 표시 행(`ACCEPTED`, `exported = false`)이 순번 1이다.
+- `payment_confirm_job`: 위 ERD 칸, 잡기 인덱스 `payment_confirm_job_next_idx (next_attempt_at)`(0003이 채널별 색인으로 바꾼다, 아래 '승인 명령의 결제사 칸'), 결제에 외래 키를 건다. `order_saga_job`과 같은 꼴이고 끝난 명령은 행을 지워 작은 표로 둔다.
+- Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같은 문장을 `0000`에 손으로 덧붙였다(일 파티션은 `ensureOutboxPartitions`가 만든다).
+- 다른 표(`payment_entry_pause`·`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
+- 마이그레이션 SQL은 `pnpm --filter @peaket/payment-svc db:generate`(purchase-svc와 같은 `scripts/db-generate.mjs`)로 만들었다.
+- `failure_category`(추천 적용 2026-11-09, BUILD_ORDER PRF-181): 두 번째 마이그레이션(`services/payment-svc/migrations/0001_payment_failure_category.sql`)이 `payment`에 `text`(널 허용) 칸과 여섯 값 `CHECK`(`payment_failure_category_check`)를 더한다. 값은 `FAILED`일 때만 채운다. 표가 아직 배포되지 않아 행이 없으므로 제약을 나눠 검증하지 않는다.
+- UNKNOWN 조회 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-182): 세 번째 마이그레이션(`services/payment-svc/migrations/0002_payment_unknown_query.sql`)이 `payment`에 `next_query_at`(`timestamptz`, 널 허용)·`query_attempts`(`int NOT NULL DEFAULT 0`)·`overdue_at`·`anomaly_logged_at`(`timestamptz`, 널 허용)을 더하고 부분 인덱스 `payment_unknown_query_idx ON payment (next_query_at) WHERE status = 'UNKNOWN'`과 `payment_unknown_status_changed_idx ON payment (status_changed_at) WHERE status = 'UNKNOWN'`(끝난 행은 인덱스에 없다), CHECK `status <> 'UNKNOWN' OR next_query_at IS NOT NULL`(`payment_unknown_next_query_check`, 잡히지 않은 채 남는 UNKNOWN을 막는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)을 만든다. 표가 아직 배포되지 않아 행이 없으므로 기존 행을 채우는 문장이 없다.
+- 승인 명령의 결제사 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰): 네 번째 마이그레이션(`services/payment-svc/migrations/0003_payment_confirm_job_pg.sql`)이 `payment_confirm_job`에 `pg`(`text NOT NULL`, CHECK `payment_confirm_job_pg_check` 결제사 셋)를 더하고 잡기 인덱스를 `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`로 바꾼다(`payment_confirm_job_next_idx`는 지운다). 표가 아직 배포되지 않아 행이 없으므로 기본값도 기존 행을 채우는 문장도 없다.
+- 결제 시도 ID 칸(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰): 다섯 번째 마이그레이션(`services/payment-svc/migrations/0004_payment_pg_tx_id.sql`)이 `payment`에 `pg_tx_id`(`text`, 비울 수 있음, 포트원 `txId`)를 더한다. 포트원 승인 본문의 검증값이고 조회 답이 이 시도의 것인지 대조한다. 비밀이 아니므로 결과가 정해져도 지우지 않는다.
+- 웹훅 수신 기록(추천 적용 2026-11-09, BUILD_ORDER HOT-150): 여섯 번째 마이그레이션(`services/payment-svc/migrations/0005_payment_webhook_receipt.sql`)이 `webhook_receipt`(기본 키 `(pg, dedup_key)`, CHECK `webhook_receipt_pg_check` 결제사 셋, 지우기 인덱스 `webhook_receipt_received_at_idx (received_at)`)를 만들고 `payment`에 참조로 원장을 찾는 인덱스 `payment_pg_ref_idx (pg, pg_payment_ref)`를 더한다. 웹훅은 승인 명령보다 먼저 올 수 있어 `payment_id`에 외래 키를 걸지 않고 ERD에서도 관계선을 뺐다. 표가 아직 배포되지 않아 행이 없으므로 인덱스를 `CONCURRENTLY`로 만들지 않는다. 같은 마이그레이션이 조회 신호의 결제별 최소 간격을 재는 `payment.query_touched_at`(비울 수 있음, 기본값 없음)을 더한다(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰).
+- 입금 오류 되돌림과 입금 전 취소(추천 적용 2026-11-09, BUILD_ORDER HOT-152): 여덟 번째 마이그레이션(`services/payment-svc/migrations/0007_payment_deposit_reversal.sql`)이 `payment_query_due_idx`를 `status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status IN ('FAILED', 'APPROVED') AND next_query_at IS NOT NULL)`로 다시 만들고(되돌림 확인을 건 승인 행도 잡는다) CHECK `payment_failure_category_check`에 `DEPOSIT_CANCELED`를 더한다. 열네 번째 purchase 마이그레이션(`services/purchase-svc/migrations/0013_ticket_void_job.sql`)이 `ticket_issue_job.issue_generation`(`bigint NOT NULL DEFAULT 0`)과 `ticket_void_job`(위 ERD 칸 그대로, 쓸기 색인 `(next_attempt_at)`)을 더한다.
+- 대사(추천 적용 2026-11-09, BUILD_ORDER HOT-153): 아홉 번째 마이그레이션(`services/payment-svc/migrations/0008_payment_reconciliation.sql`)이 `reconciliation_run`(결제사·대상 날짜 유일, 칸은 ERD), 작업 표 `reconciliation_seen`, 불일치 기록 `reconciliation_diff`(UNIQUE `(pg, payment_ref, kind)`, CHECK 세 가지)를 더하고, `payment`에 부분 인덱스 `payment_recon_approved_idx (pg, approved_at, id) WHERE status = 'APPROVED'`와 `payment_deposit_hash_idx (approved_at) WHERE deposit_secret_hash IS NOT NULL`을 더한다. payment 표가 아직 배포되지 않아 인덱스를 CONCURRENTLY로 만들지 않는다.
+- 단독 조회 잡기 넓히기(추천 적용 2026-11-09, BUILD_ORDER HOT-151): 일곱 번째 마이그레이션(`services/payment-svc/migrations/0006_payment_query_due.sql`)이 부분 인덱스 `payment_unknown_query_idx`를 지우고 `payment_query_due_idx ON payment (next_query_at) WHERE status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status = 'FAILED' AND next_query_at IS NOT NULL)`을 만들며(늦은 입금 확인을 건 `FAILED` 행도 잡는다, 코드 리뷰), CHECK `payment_unknown_next_query_check`를 `payment_next_query_check`(`status NOT IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR next_query_at IS NOT NULL`)로 바꾸고, 칸 `deposit_notified_at`(`timestamptz`, 널 허용, 코드 리뷰)을 더한다. 입금 대기의 조회 시각이 이 칸 하나라서 입금 기한 전용 인덱스 `payment (deposit_due_at)`은 만들지 않는다. 가상계좌 칸은 첫 마이그레이션에 이미 있다. 표가 아직 배포되지 않아 행이 없으므로 인덱스를 `CONCURRENTLY`로 만들지 않고 기존 행을 채우는 문장이 없다.
+
 ## 5. 동시성 제어가 필요한 지점
 
 | 동시성 경합 지점 | 제어 메커니즘 | 검증 및 보증 수단 |
 | --- | --- | --- |
 | 동일 인기 좌석에 대해 1,000명의 사용자가 동시 홀드 시도 | Redis Lua 스크립트로 비트맵을 원자적으로 검사·설정, 단조 증가(계속 커지기만 하는) 펜싱 토큰 발급. Lua는 샤드에서 하나씩 차례로 돌아 잠금이 없고, 여러 좌석의 좌석 ID 정렬은 판매 확정(Hard Sale)의 DB 삽입 순서용이다(docs/features/seat-hold.md §3, 기술 검토 낮음-068) | K2 불변식 자동 검사기 |
+| 좌석 스냅샷을 읽는 동안 홀드·해제·만료가 비트맵과 구역 일련번호를 바꿔, 비트맵은 새것인데 번호는 옛것(또는 반대)인 스냅샷이 나감(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-137) | 스냅샷은 읽기 Lua 한 번(`SNAPSHOT_LUA`)으로 세대 키·비트맵 바이트·구역 일련번호를 한 원자 연산에서 읽는다. 홀드·해제·만료 Lua가 같은 슬롯에서 차례로 돌므로 읽는 중간 상태가 없다. 클라이언트는 받은 구역 일련번호보다 큰 델타만 적용한다(docs/features/seat-hold.md §7) | S-T13(갭 자가 치유), S-T26 ③(스냅샷), PRF-137의 스냅샷 읽기 시험 |
+| RB-35 묶음 적용과 게시가 겹침, 같은 묶음을 두 번 적용(추천 적용 2026-11-09, BUILD_ORDER HOT-041, ADR-0239) | 적용 Lua 한 번이 `rb35:done:{명령 ID}` 없음·게시 표시 없음·비콘 기록 없음(더 기다리기는 비콘을 기록한 구간도 받는다)·`stop:{구간}`·커밋·라운드가 묶음과 같음을 함께 보고 쓴다. 먼저 적용한 묶음이 상태를 바꾸면 뒤 묶음은 거절된다. 게시는 비콘을 결과보다 먼저, 공시 라운드가 같고 비상 표시가 없을 때만 기록해(Lua) 적용과 겹치면 둘 중 하나만 이긴다 | `services/admission-ctrl/test-int/rb35-store.int.test.ts` |
+| 셔플 공시 기록을 리더가 바뀌거나 두 번 게시해 다시 씀(머클 루트 먼저 공시, 비콘 기록, 시드 공개. 추천 적용 2026-11-09, ADR-0180, ADR-0232, BUILD_ORDER HOT-050) | 세 값 모두 칸이 비어 있을 때만 쓰는 한 Lua(`HSETNX`)다. 공시한 머클 루트와 게시 때 다시 센 루트가 다르면 게시를 멈춘다. 시드 공개는 그 구간의 게시 표시가 선 뒤에만 한다 | Q-T6, admission-ctrl `test-int/batch-store.int.test.ts`·`test/seed-reveal.test.ts` |
+| 구매 세션 종료(나가기·결제 확정·유휴·최대 체류)가 같은 세션의 요청 확인·일련번호 올리기·주문 생성(Paying 표시)과 겹침, 같은 세션을 정리 반복이 둘 이상의 파드에서 점검(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-138) | 끝내는 연산·유휴/최대 체류 점검·Paying 표시는 모두 jti 슬롯의 Lua 한 번이라 세션 상태를 읽고 바꾸는 사이가 없다. 일련번호 올리기 Lua는 세션이 없으면 거짓이라 끝난 세션의 요청은 401이다. 정리 점검은 회차별 임대(`s:{event:E}:sesweep`)를 잡은 파드 하나만 돌고, 임대가 겹쳐도 점검이 멱등이다(이미 없으면 GONE). 끝낸 뒤 사건을 더하지 못하면 최대 체류 시각의 입장 자리 정리가 덮는다 | S-T33 ⑥(LEFT 뒤 같은 대기표 재입장), Q-T11(자리 즉시 비움), PRF-138의 종료·점검 시험 |
 | 계정 병합 처리 도중 해당 계정의 동시 로그인 및 신규 주문 인입 | 흡수 대상 계정의 행을 비관적으로 잠그고(`FOR UPDATE`) MERGED 상태를 확인한다. 진행 중인 활성 구매 세션이나 결제 대기 주문이 있으면 병합 요청을 거부한다. 서비스별 데이터 이전은 고유 `merge_id` 멱등키로 제어한다 | identity 통합 테스트 (I-T31·I-T32) |
+| 팬의 원격 로그아웃·로그인 수단 바꾸기(추천 적용 2026-11-05, ADR-0180, ADR-0209, BUILD_ORDER BOT-044): 다른 기기 로그아웃이 그 기기의 토큰 갱신·새 로그인과 겹침, 두 탭이 같은 기기를 동시에 끔, 로그인 수단 추가·해제가 다른 기기의 로그인과 겹침 | 원격 로그아웃과 로그인 수단 바꾸기는 계정 행을 먼저 잠그고(`FOR UPDATE`) 그 계정의 살아 있는 세션 행을 `FOR UPDATE`로 읽은 뒤 끝낸다. 로그인(CreateSession)도 계정을 잠근 뒤 세션을 만들므로, 겹친 로그인은 끝낸 뒤에 만들어져 살아남거나(바꾸기 뒤의 새 로그인) 앞서 만들어져 함께 끝난다. 갱신은 세션 행을 `FOR UPDATE`로 잡고 끝난 세션이면 401이다. 세션 끝내기는 `terminated_at IS NULL`일 때만 바꾸므로 두 탭이 같은 기기를 끄면 사건은 한 번이다. 뒤 쪽은 목록에서 이미 빠져 404 `session-not-found`이고 재인증 토큰은 되돌려 쓰지 않는다. 잠금 차례는 늘 계정 → 세션이라 교착이 없다 | identity 단위·통합 시험(I-T74 ②④⑥, I-T75. 동시에 두 요청을 겹치는 시험은 없고, 차례로 두 번 끄면 뒤 쪽이 404인지를 본다) |
+| 가입 마무리(추천 적용 2026-11-09, ADR-0180, ADR-0203, ADR-0235, BUILD_ORDER BOT-047): 같은 계정이 두 번 보냄(여러 탭), 두 사람이 같은 닉네임을 동시에 고름 | 계정 행을 먼저 잠그고(`FOR UPDATE`) 가입을 마쳤는지 본다. 뒤에 온 요청은 앞이 커밋한 뒤 이미 마친 상태를 보고 409 `signup-already-completed`다. 닉네임은 그 키의 잠금(`pg_advisory_xact_lock`)으로 한 번에 하나씩 처리하고 잠근 뒤 키가 있는지 본다. 그래서 겹치면 뒤쪽이 409 `nickname-taken`을 받는다(UNIQUE 위반으로 트랜잭션이 깨지지 않는다). 잠금 차례는 늘 계정 → 닉네임 키다. `nickname_key`의 UNIQUE는 마지막 방어선이다 | identity 통합 시험(I-T79 동시 두 번, I-T80 동시 같은 닉네임) |
+| 관리 계정 패스키: 같은 챌린지·같은 서명을 두 요청이 동시에 내거나, 같은 계정에 패스키 등록이 동시에 오거나, 재인증 토큰 하나로 패스키 등록·지우기를 동시에 부름(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER BOT-122) | 챌린지는 Redis `GETDEL`로 꺼내 하나만 받는다. 서명 횟수는 읽은 값과 같을 때만 고친다(`UPDATE … WHERE sign_count = 읽은 값`). 동기화 패스키처럼 0인 채면 챌린지가 한 번만 쓰여 막는다. 등록은 `admin_account` 행을 `FOR UPDATE`로 잠근 뒤 10개 상한을 세고 넣으며, 자격 ID는 고유 색인이 둘째 넣기를 막는다. 재인증 토큰은 `admin_reauth.used_at`을 조건부로 적어 한 번만 받는다. 지우기도 계정 행을 잠근 뒤 '마지막 하나'를 센다 | identity 단위·통합 시험(`admin-passkey.test.ts`·`admin-passkey.int.test.ts`, I-T53) |
 | 남은 좌석 수를 숫자 하나에 두고 예매마다 1씩 빼면, 모든 예매가 그 한 칸 앞에 줄 서고, 동시에 고칠 때 두 장이 팔렸는데 하나만 줄어드는 갱신 유실이 생긴다(추천 적용 2026-11-03, ADR-0180) | 그런 숫자를 두지 않는다. 남은 좌석은 판매 대상 좌석 수에서 좌석 비트맵의 켜진 비트 수(잡히거나 팔린 좌석)를 빼서 그때그때 센다. 회차 판매 상태(`event_sale`)는 예매마다 빼는 값이 아니라 1초 [가정]마다 한 파드가 세어 판 번호 조건으로 쓴다(§2, docs/features/seat-hold.md §4). 좌석맵에는 구역마다 숫자 대신 대략의 남은 상태(많음·적음·매진)를 보인다(FR-009) | 회차 판매 상태 판정 S-T25, 좌석 샤드 처리량 S-T27, K2 불변식 자동 검사 |
+| 두 파드가 같은 회차의 판매 상태를 함께 판정해 판 번호가 거꾸로 가거나 같은 전이를 두 번 냄(추천 적용 2026-11-09, BUILD_ORDER PRF-144, ADR-0122) | 회차 임대(`s:{event:E}:salesweep`)를 잡은 파드 하나만 판정한다. 임대가 잠깐 겹쳐도 `event_sale` 쓰기가 판 번호 조건부 UPDATE라 진 쪽은 0행이고 이번 틱을 끝낸다 | 회차 판매 상태 판정 S-T25 ⑦ |
+| 결제 진행과 매진 판정의 틈: 홀드를 묶어 만료 인덱스에서 뺀 뒤 판매 예약(PENDING)을 넣는 트랜잭션이 끝나기 전에는 가용·홀드·결제 중이 모두 0으로 보여 거짓 매진이 날 수 있음(추천 적용 2026-11-09, BUILD_ORDER PRF-144, ADR-0122) | 회차 전체가 '셋 다 0' 후보일 때만 활성 판매 행 수(`seat_sale` PENDING·SOLD)를 읽어 판매 대상 − 가용(곧 켜진 비트 수)과 같을 때만 비었다고 본다. 다르면 그 틱은 비지 않은 것으로 친다 | 회차 판매 상태 판정 S-T25 ⑪ |
 | 동일 사용자가 여러 브라우저 탭 및 기기에서 동시 홀드를 시도하여 1인 예매 한도 초과 | 같은 Lua 스크립트 트랜잭션 안에서 현재 보유 수와 요청 수량의 합을 검사, 판매 확정(Hard Sale) 때 쿼터 원장 행을 조건부로 갱신(`used + qty <= limit_count`, 칸 이름은 §2 `purchase_quota`, 2026-11-01 정합 점검) | K2 카오스 검증 ('1인 예매 한도 초과 0건' 달성) |
+| 로비 참가가 T=0 목록 고정과 겹침, 같은 사람의 두 탭이 동시에 참가(추천 적용 2026-11-09, ADR-0180, ADR-0231, BUILD_ORDER HOT-040) | 참가자 넣기 Lua가 서버 시각(`TIME`)과 `batch_done`의 `lobby` 표시를 같은 Lua에서 본 뒤 `SADD`한다. 표시가 선 뒤에는 넣지 않아 목록이 바뀌지 않는다. 사람 슬롯은 진입과 같은 선점으로 한 요청만 지나간다 | Q-T52 ⑤, Q-T55 ② |
+| 대기 취소·로비 참가 취소가 목록 고정·결과 게시·입장 확정·다시 참가와 겹침(추천 적용 2026-11-09, ADR-0180, ADR-0233, BUILD_ORDER HOT-060) | 목록을 고정했는지 보는 일과 목록에서 빼는 일이 한 Lua이고, 번호 돌리기와 곧 입장 대기열에서 빼기도 한 Lua다. 취소는 주인 없는 자리 표시를 쓴 뒤 결과 키를 읽고 게시는 결과 키를 쓴 뒤 표시를 읽어, 어떻게 겹쳐도 둘 중 하나가 번호를 돌린다. 사람 키를 읽은 값과 같을 때만 '취소 중'으로 잡은 뒤 회차 슬롯의 일을 하므로 늦은 취소가 다시 참가한 자리를 건드리지 않는다. 묶음→번호 변환과 겹치면 다시 읽어 잡는다. 진입은 추가 검증 표시를 쓴 뒤 사람 키를 다시 읽는다 | Q-T68 |
 | 오픈 직후 대기열 순번 발급 트래픽 초당 20만 건 폭주 | Redis 키 하나를 queue-svc 파드마다 2ms [가정]·500건 [가정]까지 요청을 모아 진입 Lua 한 번으로 `INCRBY`해 올린다(2026-11-03, ADR-0179). 순수 `INCR`은 묶음 없이도 기준 안이었지만, 표시 확인까지 하는 진입 Lua를 요청마다 부르면 샤드 스레드가 찼다 | K1 벤치마크, PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험) 실측 평가(2026-11-01 실측(PC): 순수 `INCR`은 묶음 없이 기준 안, ADR-0176 결정 1. 2026-11-03 실측(PC): 진입 Lua 직접 호출은 초당 약 8만~9만 건에서 샤드 엔진 스레드 94~99%라 묶음으로 바꿈, ADR-0179. 묶음 진입 Lua는 BUILD_ORDER PRF-085에서 잰다) |
+| 회차 판매 상태 받기(추천 적용 2026-11-05, ADR-0180, ADR-0214, BUILD_ORDER HOT-010): 같은 회차의 `EventSaleChanged`가 뒤바뀐 차례로 오거나 두 번 옴, 매진 판과 같은 순간의 진입 번호 내기, 처리기와 제어 받는 쪽이 같은 `notice`를 씀 | 판 번호 비교와 쓰기, 매진 판의 `seq` 읽기를 회차 슬롯 Lua 하나로 한다(`saleVersion`보다 큰 판만). 진입 ②는 판매 상태 확인과 `INCRBY`를 같은 회차 슬롯 Lua에서 해, 매진 판이 선 뒤에는 번호를 내지 않는다(그 앞에 낸 번호는 `soldOutLastSeq` 안이라 입장 확정이 410으로 끝낸다). 처리기와 제어 받는 쪽은 서로 다른 칸만 쓴다(판 번호도 따로). 모양이 틀린 사건은 회차 키와 다른 `bad:<회차 ID>` 키로 보류해 뒤 정상 판을 막지 않는다 | Q-T51(판 번호 차례, 매진 뒤 진입·입장 확정 410), queue-svc `test-int/sale-state.int.test.ts` |
+| 엣지 매진 표시(추천 적용 2026-11-06, ADR-0180, ADR-0219, BUILD_ORDER HOT-011): 소비자 재조정 동안 두 파드가 같은 회차의 켬·끔을 겹쳐 씀, 늦게 쓴 옛 켬이 새 끔을 덮음, 같은 판을 5초마다 다시 받음 | 값에 `notice`의 판 번호를 함께 두고, 끈 값도 지우지 않고 남긴다. 저장된 판보다 작은 판은 쓰지 않고 '저장된 판이 더 큼'을 돌려준다. `notice`의 판보다 큰 저장값은 앞선 회차로 따로 세어 경보한다. 실제 어댑터는 저장소 전체의 ETag(저장소가 바뀔 때마다 바뀌는 판 표시)를 읽고 `IfMatch`(그 판일 때만 쓰라는 조건)로 쓴다. 그래서 다른 회차의 쓰기끼리도 조건 실패(412)가 날 수 있고, 마감 2초 안에서 판 표시를 다시 읽어 3번 [가정]까지 다시 쓴다(HOT-012). 파드는 마지막으로 쓴 값을 60초 [가정] 두고 같은 값이면 쓰지 않으며, 60초가 지나면 다시 써서 겹침으로 남은 옛 값을 1분 안에 바로잡는다. 남은 좌석 수 칸은 판매 상태와 같은 회차 슬롯 Lua에서 판 번호와 셈 시각을 견주고 쓴다 | Q-T63, Q-T64, queue-svc `test/edge-sale-flags.test.ts`·`test-int/sale-state.int.test.ts` |
+| 탈퇴 사건의 처리할 때 집합(추천 적용 2026-11-05, ADR-0180, ADR-0214 결정 7, BUILD_ORDER HOT-010): 여러 파드의 반복이 같은 때 된 항목을 함께 집음, 처리 도중 파드가 멈춤, 같은 탈퇴 사건을 다시 받음 | 빌리기는 Lua 하나다(빌림이 끝난 항목을 되돌린 뒤 때가 된 항목을 꺼내 빌린 집합으로 옮긴다. 빌린 항목은 훑는 범위에서 빠진다). 처리를 마치면 항목·빌림·값을 Lua 하나로 지운다. 마치지 못하면 빌림(60초 [가정])이 끝난 뒤 다시 나온다. 만료 당기기(`PEXPIREAT … LT`)는 다시 해도 결과가 같다. 넣기는 값 `SET NX`·집합 `ZADD NX`라 다시 받아도 한 번이다 | I-T27(빌린 동안 다른 파드가 집지 않음, 빌림이 끝나면 다시 나옴), queue-svc `test-int/withdrawn-keys.int.test.ts` |
 | 1인 1순번 보장 및 중복 발급 차단 | `SET NX`로 중복 확인 키 잡기 → 순번 카운터 증가 → 계정별 순번 기록, 이 3단계를 차례로 실행한다. 한 번에 묶어 원자적으로 실행하지 않는다. 중복 확인 키 `q:dup:{pid}:E`와 순번 카운터 `q:{event:E}:seq`는 해시 슬롯(Redis 클러스터가 키를 나눠 두는 칸. MULTI나 Lua 하나는 한 칸의 키만 다룬다)이 달라 한 번에 묶을 수 없다. Redis 파이프라인은 여러 명령을 한 번에 보낼 뿐 원자적이지 않다. 번호를 발급한 뒤 기록하기 전에 실패한 번호는 빠진 번호 비트맵으로 보정한다(queue-admission §3, 기술 검토 중간-108). 선점 값은 `PENDING:{요청 ID}`와 짧은 수명(10초 [가정])으로 먼저 쓰고, 순번을 기록할 때 값을 순번으로·수명을 판매 종료로 바꾼다. 같은 요청 ID의 재시도와 수명이 지난 `PENDING`은 이어서 처리하므로, 선점 직후 파드가 멈춰도 같은 사람이 '이미 대기 중'에 갇혀 맨 뒤로 밀리지 않는다. 다만 발급과 기록 사이에 파드가 멈춘 번호는 그 번호를 아는 곳이 없어 바로 보정하지 못하고, 아무도 갖지 않은 번호로 남는다(작은 오차, 추천 적용 2026-10-28, 기술 검토 중간-035). 장애 전환으로 중복 확인 키가 사라져 나간 두 번째 순번은 입장 확정 때 사람별 입장 키로 막는다(ADR-0056) | K1 순번 연속성 및 오차율 계측, Q-T31, Q-T53 |
+| 입장 제어 리더의 자동 제어 기억과 운영자 명령이 같은 `q:{event:E}:ctl`을 쓴다 | 자동 제어 칸(`aimdTarget` 등)은 리더만 세대 확인 `ADVANCE` Lua 안에서 쓴다. 운영자 칸(`target`·`targetUntil`·`aimdResumeAt`·`pgKey`·`pgTps`)은 명령을 받는 쪽만 쓴다. 칸 이름이 겹치지 않아 서로 덮어쓰지 않는다(ADR-0226) | Q-T42, Q-T30 |
 | 동시 입장 목표 제어 | admission-ctrl 리더 파드만 serving 번호를 앞으로 옮기고, 200ms 주기로 활성 구매 세션의 빈자리를 다시 계산한다. 빈자리에서 곧 입장 대기 수와 '오는 중'(최근에 불렀지만 아직 오지 않은 몫)을 뺀 만큼만 부른다. 빈자리가 다 차면 클라이언트에 '곧 입장' 대기 상태를 돌려주고, 곧 입장 대기열(`q:{event:E}:soon`)의 낮은 번호부터 자리를 준다(입장 확정 Lua 하나에서 빈자리 수와 앞 번호 수를 견준다, ADR-0104) | ADR-0005, ADR-0104 |
 | 컨트롤러 이중화 시 리더 중복 발생 (두 파드가 동시에 serving 번호를 갱신하는 스플릿 브레인) | Kubernetes Lease로 분산 리더 선출(여러 복제 중 일을 맡을 하나를 고르는 것)을 한다. 제어 명령을 실행하기 직전에 Lease 갱신 상태를 다시 확인한다. 대기열 Redis에 쓸 때마다 리더 세대(Lease `leaseTransitions`)를 확인해 옛 리더의 쓰기를 거절한다(ADR-0056) | 리더 강제 종료 카오스 실험, Q-T30 |
 | Redis 마스터 장애 조치(Failover) 직후 복제 누락으로 인한 순번 중복 발급 위험 | 새로 승격한 마스터에서 카운터 값을 넉넉한 안전 여유(장애 직전 초당 발급 × 복제 지연 p99.9 × 2 [가정])만큼 한꺼번에 앞으로 옮기고, 발급하는 대기표에 새 세대 번호를 붙인다. 건너뛴 구간은 `q:{event:E}:skipped`에 남겨, 앞 인원과 입장 비율에서는 빠진 번호로 세고 입장 확정에서는 옛 세대 대기표를 받는다(추천 적용 2026-10-28, 기술 검토 중간-030) | FIS (AWS Fault Injection Simulator) 장애 주입 시험(포트폴리오 기간에는 로컬 Redis 주 노드 강제 종료, docs/verification.md §5.3) |
 | 동일 주문에 대한 결제 승인 중복 호출 | 결제 대행사를 부를 때 `Idempotency-Key: confirm-{orderId}` 헤더를 보낸다. 승인 결과를 모르면 UNKNOWN 상태로 바꾸고, 나중에 결제 단건 조회 API 결과로 상태를 맞춘다 | K7 결제 무결성 검증 |
 | 결제 대행사 웹훅의 중복 및 역순 도달 | PG사별 결제 식별자로 `webhook_receipt` 유니크 제약을 건다(토스 `transmission_id`, 포트원 `webhook-id`. Standard Webhooks 규격의 재전송에도 같은 사건 키다, 기술 검토 낮음-070). 중복을 거른 뒤에도 상태는 조회 API 결과로만 바꾼다 | K7, 결제 단위 테스트 (P-T17) |
+| 같은 키의 웹훅이 같은 순간에 여럿 옴, 웹훅의 조회 신호가 돌고 있는 단독 조회와 겹침(추천 적용 2026-11-09, BUILD_ORDER HOT-150, ADR-0180) | 수신 기록을 `INSERT … ON CONFLICT (pg, dedup_key) DO NOTHING`으로 넣어 한 요청만 행을 넣고, 0행을 받은 쪽은 조회 신호를 내지 않는다. 수신 기록과 조회 신호는 한 트랜잭션이다(신호를 쓰지 못하면 수신 기록도 남지 않아 결제사의 재전송이 다시 신호를 낸다). 조회 신호는 `status = 'UNKNOWN' AND next_query_at > 지금 AND 직전 신호·잡기로부터 5초 [가정] 지남` 조건부 UPDATE다(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰). 조회가 도는 중에 신호가 쓰이면 그 조회의 간격 쓰기가 0행이 되고 다음 틱에 한 번 더 물을 뿐이며, 답 반영은 `status = 'UNKNOWN'` 조건이라 결과가 두 번 쓰이지 않는다 | P-T17(같은 키 중복 조회 1번), payment-svc `test-int/payment-webhook.int.test.ts`(동시 같은 키 20개) |
+| 토스 입금 통보의 위조와 재전송, 입금 통보의 조회 신호가 입금 기한 조회와 겹침(추천 적용 2026-11-09, BUILD_ORDER HOT-151, ADR-0180) | `secret`의 SHA-256을 `deposit_secret_hash`와 상수 시간으로 맞춘 뒤에만 수신 기록을 쓰므로 위조가 `{pg}:deposit:{transactionKey}:{status}:{createdAt}` 키(뒤 칸은 추천 적용 2026-11-09, BUILD_ORDER HOT-152, 코드 리뷰)를 먼저 차지하지 못한다. 수신 기록과 조회 신호는 한 트랜잭션이다. 조회 신호·잡기·답 반영은 UNKNOWN과 같은 규칙을 `AWAITING_DEPOSIT`에도 쓴다. 답 반영은 `payment` 행을 `FOR UPDATE`로 잠근 뒤 잡을 때의 상태일 때만 원장·사건·Outbox를 쓰므로 겹친 쪽은 0건을 쓴다 | P-T9·P-T36, payment-svc `test-int/payment-deposit.int.test.ts` |
 | 알림·파트너 웹훅 발송 작업을 여러 워커가 동시에 가져감, 같은 사건의 재전달 | 같은 사건은 `notification_dedup`·`webhook_delivery`의 유일 제약(`INSERT … ON CONFLICT DO NOTHING`)으로 한 행만 만든다. 워커는 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 임대 시각(`lease_until`)을 쓰고 커밋한 뒤 보낸다. 잠금을 쥔 채 바깥 호출을 하지 않는다. 보내다 죽으면 임대가 끝난 뒤 다른 워커가 같은 `webhook-id`로 다시 보낸다(적어도 한 번, ADR-0109) | V-T24, G-29 |
 | 동일 티켓에 대한 이중 양도 사기, 양도 수락과 기한 만료·철회의 경합 | PostgreSQL `SELECT … FOR UPDATE` 행 잠금 안에서 상태와 기한을 다시 확인한다. `version` 칸 비교는 CS·관리 화면처럼 사람이 읽고 나중에 저장하는 흐름에만 쓴다(기술 검토 낮음-071) | E2E 동시성 시나리오 테스트 |
 | 동일 티켓에 대한 취소, 양도, 게이트 스캔이 동시 경합 | 비관적 행 잠금으로 데이터베이스에서 처리 순서를 정한다(버전 칸은 사람이 화면에서 읽고 저장하는 흐름용, 기술 검토 낮음-071). 입장 시작부터 마감까지는 돌려주기·양도 수락·회수를 금지한다(ADR-0051). 오프라인 스캔이 늦게 올라오면 '취소 뒤 입장' 이상 표시를 남긴다 | E2E, 현장 오프라인 테스트 (O-T16, O-T22) |
@@ -2195,6 +2511,24 @@ erDiagram
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
 | 다중 좌석 판매 확정(Hard Sale) 때 DB 트랜잭션 간 데드락 발생 | 여러 좌석의 PENDING 행을 좌석 고유 ID 오름차순으로 넣는다. 좌석 Redis 장애 때의 비상 우회 경로(정렬 잠금과 `SET LOCAL lock_timeout = '100ms'`, ADR-0083)는 2026-10-28에 없앴다. 장애 조치 동안은 그 회차의 구매 요청을 503으로 미룬다(추천 적용 2026-10-28, ADR-0121) | K3 판매 확정과 v0 행 잠금 홀드 스트레스 테스트(S-T10) |
+| 결제 접수 `reserve`(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-140 ①): 같은 좌석을 두 주문이 동시에 `PENDING`으로 넣음, 같은 계정의 주문 둘(여러 탭)이 한도 행 하나를 동시에 올림, 같은 주문의 `markSold`와 `releasePending`(승인 성공 응답과 승인 기한 만료)이 겹침 | 좌석은 활성 상태 부분 유일 인덱스에 `INSERT … ON CONFLICT DO NOTHING RETURNING`으로 넣는다. 먼저 넣은 쪽이 아직 커밋하지 않았으면 뒤 쪽은 그 결과를 기다린 뒤 판정한다(커밋되면 경합, 되돌려지면 얻는다). 돌려받지 못한 좌석은 SEAT_TAKEN이고 트랜잭션 전체를 되돌린다. 한도 행은 `ON CONFLICT DO UPDATE … WHERE used + n <= limit` 한 문장이라 읽고 쓰는 사이가 없고, 같은 계정의 주문은 그 행의 쓰기 잠금에서 줄을 선다. 한도 행을 먼저, 좌석을 정렬 순서로 잠가 순환 대기가 없다. `markSold`와 `releasePending`은 바꿀 행을 좌석 ID 순으로 먼저 잠그고(`SELECT … ORDER BY seat_id FOR UPDATE`) 상태 조건(`status = 'PENDING'`)을 잠근 뒤 다시 평가하므로 둘 중 하나만 효과가 있고, 지는 쪽은 0행이다(한도는 `releasePending`이 지운 행 수만큼만 되돌린다). 커밋 응답을 잃은 `reserve` 재시도는 같은 계정·주문의 활성 행이 모두 있으면 아무것도 바꾸지 않는다. 트랜잭션은 모두 READ COMMITTED를 직접 고른다(서버 기본값이 REPEATABLE READ여도 한도 행 경쟁이 40001로 끝나지 않는다). 유일 위반(23505)을 예외로 받지 않고 `DO NOTHING`으로 받아 트랜잭션이 중단되지 않는다 | S-T7·S-T8·S-T10·S-T11(실제 PostgreSQL 통합 시험) |
+| 홀드 원장 적재(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-141): 같은 좌석의 홀드 사건이 뒤바뀐 차례로 오거나(끝 사건이 HELD보다 먼저, 옛 홀드의 HELD가 새 홀드 뒤에) 두 번 옴, 릴레이 리더가 바뀌는 동안 두 파드가 같은 항목을 보냄 | 업무 키(`회차 ID:좌석 ID`)마다 받은 차례로 하나씩 처리하고(키 단위 소비자, ADR-0142), 행 키에 펜싱 토큰을 넣어 옛 토큰 사건은 자기 행만 바꾼다. 새 HELD는 같은 좌석의 낮은 토큰 HELD 행을 끝 상태로 바꾼 뒤 넣어 HELD 하나 규칙(부분 유일 인덱스)을 지키고, 늦게 온 끝 사건이 바른 상태로 고친다. 다시 받은 사건은 기본 키 `ON CONFLICT`가 거른다. 릴레이는 확인받은 항목만 지우므로 리더가 바뀌면 같은 항목이 두 번 나갈 수 있고(적어도 한 번), 위 멱등이 받아 낸다 | S-T5·S-T35, 적재 처리기 통합 시험(실제 PostgreSQL), 릴레이 통합 시험(실제 Valkey·Kafka) |
+| 결제 접수 뒤 좌석 묶기(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-142): 묶기와 같은 좌석의 만료·다른 사람의 홀드가 겹침, 같은 주문의 묶기가 두 번 옴, 실패 해제가 남의 새 홀드를 풂 | 묶기·실패 해제·홀드·만료는 모두 같은 회차 슬롯의 Lua라 샤드에서 하나씩 차례로 돈다. 묶기는 판정을 모두 먼저 하고 쓰기를 마지막에 한꺼번에 해(하나라도 남의 좌석이면 아무것도 쓰지 않는다) 만료가 사이에 끼지 못하고, 묶은 좌석은 만료 인덱스에서 빠져 만료가 건드리지 않는다. 실패 해제는 홀드 Hash의 `holdId`·`owner`가 같은 좌석만 푼다. 다시 만든 뒤의 빈 좌석은 판 번호가 같을 때만 다시 잡는다 | `specs/seat.qnt`의 `inv_noOversell`·`inv_quotaNotExceeded`·`inv_staleSalesBounded`, 묶기·실패 해제 Lua 통합 시험(실제 Valkey) |
+| 다시 만들기(RB-06, 추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-143): 두 파드가 같은 회차를 함께 다시 만듦, 다시 만드는 동안 판매 예약이 커밋됨, 다시 만들기와 판매 열기가 둘 다 세대 키를 씀 | `seat_rebuild` 회차 행 하나를 임대로 잡는 한 문장(`ON CONFLICT … DO UPDATE … WHERE lease_until이 비었거나 지남 RETURNING gen`)이 판 번호를 올려 커밋한다. 임대를 못 잡은 쪽은 BUSY로 끝난다. 판 번호를 커밋한 뒤 판매 행을 읽으므로, 그 전에 커밋된 판매는 읽히고 그 뒤의 판매 예약은 판 번호가 달라 묶기부터 다시 한다(PRF-160). 좌석 Redis 쓰기 Lua는 세대 키가 이미 있으면 아무것도 쓰지 않는다. 판매 열기는 판매 시작 전에만 부른다 | `specs/seat.qnt`의 `rebuild`·`inv_noOversell`·`inv_staleSalesBounded`, 다시 만들기 통합 시험(실제 PostgreSQL·Valkey, S-T26 ④) |
+| 릴레이 리더 넘김(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-164): 옛 리더가 Lease를 잃은 줄 모르고 도는 동안(Lease 12초) 새 리더도 Outbox 릴레이·좌석 Stream 릴레이·다시 만들기 반복·정비 일을 돈다 | 반복마다 받는 쪽이 견딘다. Outbox는 적어도 한 번 보내기(받는 쪽이 `eventKey`로 거름). 좌석 Stream 릴레이는 같은 그룹·같은 소비자 이름이라 둘이 같은 항목을 보내거나 서로 다른 항목을 한 파티션에 차례가 바뀐 채 보낼 수 있다. 원장 적재는 다시 받은 사건을 기본 키로 거르고, 끝 사건이 HELD보다 먼저 와도 토큰 키로 바른 상태를 만든다(seat-hold §6 '적재 소비자'). 겹침은 릴레이가 묶음마다 리더를 다시 봐서 묶음 하나와 그 보내기 시간까지다. 다시 만들기는 회차 임대(`seat_rebuild`)와 판 번호 펜싱(위 행), 회차 목록 빼기는 빼고 다시 보고 되돌리기, 주문 이력 검사는 읽기만 한다. 반복은 틱마다 리더 확인을 다시 본다 | 플랫폼 릴레이 프로세스 시험(리더만 돈다, 넘기기), purchase 릴레이 조립 통합 시험(리더가 아닌 복제는 반복을 돌지 않음) |
+| 주문 상태 전이(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-160): 같은 주문의 두 전이가 겹침(승인 결과와 승인 기한 만료, 같은 결제 사건이 사건 길과 당기기로 두 번 옴), 이력 번호를 두 트랜잭션이 같이 매김 | 상태 바꾸기는 주문 전이 함수의 조건부 UPDATE 하나(`WHERE id = $1 AND status = <출발>`)다. 같은 행을 바꾸는 트랜잭션은 행 쓰기 잠금에서 줄을 서고, 뒤 쪽은 앞 쪽이 커밋한 뒤 조건을 다시 평가해 0행이 되므로 하나만 효과가 있다. 이력 번호는 같은 UPDATE가 `event_seq`를 1 올려 얻으므로 빈틈도 겹침도 없고 커밋 순서와 같다. 이력 없이 상태만 바꾼 트랜잭션은 지연 제약 트리거가 커밋 때 막는다. 결제 결과는 `payment_event_seq < 받은 순번` 조건을 같은 UPDATE에 두어 늦게 온 같은 사건을 거른다(ADR-0146 결정 2). Outbox 행은 마지막 문장이다(ADR-0116 결정 3) | 주문 저장소 통합 시험(실제 PostgreSQL 18, 같은 주문에 전이 둘을 동시에), P-T13(이력 역추적), 매일 상태·이력 검사 |
+| 주문 생성(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-161): 같은 홀드로 주문 둘이 겹침(여러 탭, 다른 멱등 키), 같은 멱등 키의 요청이 겹침, 주문을 만드는 사이에 홀드가 끝남 | 한 홀드에 주문 하나는 `purchase_order.hold_id` 유일 인덱스가 정한다. 뒤 쪽 트랜잭션은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 23505로 끝나 409 `hold-already-ordered`다. 같은 멱등 키는 `order_idempotency`의 키 행이 트랜잭션의 첫 쓰기라 뒤 쪽이 기다렸다가 처음 결과를 다시 돌려준다(guidelines §4). 홀드 확인은 읽기 Lua 한 번이라 커밋 전에 홀드가 끝날 수 있고, 그 주문은 결제를 접수하지 않으면 만료(T5)로 끝난다(ADR-0107) | 주문 생성 통합 시험(실제 PostgreSQL·Valkey, 같은 홀드 두 주문 동시), P-T45 |
+| 결제 접수(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-162): 같은 주문을 두 탭이 동시에 접수, 같은 멱등 키가 겹침, 접수와 주문 만료가 겹침 | 잠금 차례는 늘 '주문 행 → 결제 시도 행'이다(결제 시도 시작·만료도 같은 차례, 거꾸로 잡으면 교착). 주문 CREATED → AUTHENTICATED(T3)가 첫 조건부 UPDATE라 같은 주문의 두 트랜잭션은 주문 행 쓰기 잠금에서 줄을 서고, 뒤 쪽은 0행이 되어 409 `payment-already-accepted`로 트랜잭션째 되돌린다. 만료(T5)가 먼저 커밋되면 접수의 T3가 0행이라 409 `order-expired`다. 그 뒤 시도 READY → ACCEPTED가 0행이면 그사이 시도가 대체·만료된 것이라 409 `payment-attempt-mismatch`다. READ COMMITTED를 직접 고른다(REPEATABLE READ면 뒤 쪽이 40001로 끝난다). Saga 작업 행은 주문 ID 기본 키라 둘이 될 수 없다 | 결제 접수 통합 시험(실제 PostgreSQL, 두 탭 동시), P-T23 |
+| Saga 1단계(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-165): 두 파드가 같은 작업 행을 함께 집음, 판매 예약과 다시 만들기가 겹침, 실패 해제 뒤 늦은 묶기 | 작업 행은 짧은 트랜잭션의 `FOR UPDATE SKIP LOCKED`로 골라 임대 시각을 쓰고 커밋한 뒤 돌린다. 임대가 끝나기 전에는 다른 파드가 집지 않고, 같은 단계를 두 번 돌아도 주문 전이가 조건부라 하나만 효과가 있다. 판매 예약과 실패 기록은 둘 다 작업 행(`WHERE step = 기대 단계`)을 먼저 잡고 주문 행을 잡아 교착이 없고, 다른 실행이 이미 끝낸 작업이면 0행이라 늦은 실행이 T11을 쓰지 못한다. 판매 예약은 `seat_rebuild` 회차 행을 `FOR SHARE`로 잠근 채 판 번호를 견주므로, 다시 만들기의 판 번호 올리기(그 행의 갱신)와 차례가 정해진다(OPEN[15]). 실패 해제가 남긴 실패 표시를 묶기가 같은 회차 슬롯 Lua에서 보므로 늦은 묶기는 아무것도 쓰지 않는다 | Saga 1단계 통합 시험(실제 PostgreSQL·Valkey), 좌석 모델 기반 시험(V-T40 ④, 늦은 묶기 재현 시험) |
+| 입금 오류 되돌림의 통보·조회·사건이 겹침, 재입금과 재발권(추천 적용 2026-11-09, BUILD_ORDER HOT-152) | 통보는 토스 경로면 `deposit_secret_hash` 대조를 지난 뒤에만 수신 기록을 쓰고 조회를 건다(서명 없는 위조가 키를 차지하지 못한다). 조회 잡기는 `FOR UPDATE SKIP LOCKED`, 답 반영은 `payment` 행 `FOR UPDATE` 뒤 상태가 `APPROVED`일 때만 쓴다. 주문 쪽 T21은 `payment_event_seq < 순번`과 출발 `CONFIRMED`를 함께 본다. 출발 상태가 아니면 전이하지 않고 보류(SEV1)다. 판매 행은 좌석 ID 순으로 잠가 `SOLD` → `PENDING`이고 바뀐 수가 좌석 수와 다르면 되돌린다. 재발권은 새 `issue_generation`이라 앞 세대의 멱등 기록과 부딪치지 않는다 | P-T36, payment-svc `test-int/payment-deposit.int.test.ts`, purchase-svc `test-int/payment-results.int.test.ts` |
+| 대사와 승인·조회가 겹침, 대사 프로세스가 멈춤(추천 적용 2026-11-09, BUILD_ORDER HOT-153) | 대사 실행은 결제사·대상 날짜로 유일하고 Lease 리더 하나만 돌지만 단계 커서로 이어 한다. 리더가 바뀌는 순간 옛 실행이 겹치지 않게 시작마다 세대를 올리고 커서·건수·끝내기는 세대를 조건으로 쓴다(코드 리뷰). 불일치 기록은 UNIQUE `(pg, payment_ref, kind)`와 `ON CONFLICT DO NOTHING`이라 같은 건의 SEV1이 한 번이다. 묶음 처리 차례는 불일치 쓰기 → 조회 넘기기·닫기 → 커서와 건수 쓰기이고, 뒤 단계 앞에서 멈추면 그 묶음을 다시 해도 같은 결과다(닫기는 `FOR UPDATE`로 `UNKNOWN`일 때만 쓴다). 작업 표는 대상 날짜마다의 거래를 다시 받아도 결제 참조 기본 키가 같은 줄을 덮는다. 조회 넘기기는 `UNKNOWN`·`AWAITING_DEPOSIT` 행의 `next_query_at`만 당긴다(더 이른 시각은 건드리지 않는다) | 문장 시간 한도 5초 [가정], READ COMMITTED |
+| 결제 결과 반영(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-163): 같은 결제 사건이 사건 길과 당기기로 두 번 옴, 결과가 Saga CONFIRM 실행과 겹침, 같은 주문의 사건이 뒤바뀐 차례로 옴 | 같은 주문의 사건은 키 단위 처리기가 차례대로 하나씩 처리한다(ADR-0142). 반영 UPDATE의 `payment_event_seq < 순번` 조건이 다시 온 사건과 낮은 순번을 거른다(ADR-0146 결정 2). 승인·실패 트랜잭션은 Saga와 같은 잠금 차례(작업 행 → 주문 행)로 작업 행을 먼저 잡고 승인은 곧바로 주문 행을 `FOR NO KEY UPDATE`로 잠그므로(뒤의 결제 시도·판매 행 쓰기 차례가 실패 쓰기와 달라도 교착이 없다), 겹친 CONFIRM 실행은 작업 행이 바뀌어 0행이 되고 물러난다 | 결과 반영 통합 시험(실제 PostgreSQL, 같은 사건 두 번·뒤바뀐 차례·CONFIRM과 겹침), P-T15 |
+| 발권 재시도 큐를 두 파드가 함께 잡음(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-170): 같은 큐 행을 두 실행기가 고름, 임대가 끝난 뒤 늦게 온 발권 답과 새 시도가 겹침, 발권 답과 보상이 겹침 | 잠금 차례는 '큐 행 → 주문 행'이다(성공 반영과 `ISSUE_DELAYED`가 큐 행을 먼저 잠근다. 보상(PRF-173)도 큐 행을 먼저 잠그고 지운 뒤 주문을 바꿔야 서로 기다리지 않는다, 2026-11-05 코드 리뷰). 잡기는 Saga 작업 행과 같은 꼴이다. 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 `lease_until`(지금 + 30초 [가정])을 쓰고 커밋한 뒤 잠금 밖에서 ticket-svc를 부르므로, 임대가 끝나기 전에는 다른 파드가 그 행을 집지 않는다. 임대가 끝나 두 파드가 같은 주문을 부르게 돼도 `IssueTickets`가 주문 ID로 멱등이라 티켓은 한 번만 생긴다. 성공 쓰기의 T18은 출발 상태가 APPROVED일 때만 바꾸는 조건부 갱신이라, 둘째 답이나 보상 뒤에 온 답은 상태를 바꾸지 않고 큐 행만 지운다(명세 `issueAck`). `ISSUE_DELAYED`·기한 넘김은 `delayed_at`·`overdue_at`을 같은 트랜잭션에 적어 다음 틱에 다시 고르지 않고, `ISSUE_DELAYED`의 `eventKey`가 주문마다 고정이라 두 파드가 함께 내도 받는 쪽이 한 번만 처리한다 | 발권 실행기 통합 시험(실제 PostgreSQL), P-T15(발권 gRPC 중복 전달), P-T39 |
+| 결과 당기기를 두 파드가 함께 잡음(추천 적용 2026-11-06, ADR-0180, BUILD_ORDER PRF-171): 같은 작업 행을 두 파드의 당기기가 고름, 당기기와 늦게 온 결과 사건이 같은 결과를 함께 반영하려 함, 당기기가 고른 `CONFIRM` 행을 Saga 실행기도 다시 돌림 | 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 `pull_next_at`(지금 + 5초 [가정])을 쓰고 커밋한 뒤 잠금 밖에서 `BatchGetPayments`를 부르므로, 다음 점검 시각 전에는 다른 파드가 그 행을 고르지 않는다(ADR-0140 결정 1). 두 길로 온 같은 결과는 사건과 같은 반영 함수가 같은 순번을 걸러(`payment_event_seq < 순번`, ADR-0146 결정 2) 한 번만 반영한다. 반영의 승인·실패 트랜잭션은 작업 행을 먼저 잡으므로(작업 행 → 주문 행) 겹친 Saga `CONFIRM` 실행은 0행이 되어 물러난다(위 결과 반영 행과 같다) | 결과 당기기 통합 시험(실제 PostgreSQL), P-T15(사건·당기기 두 길의 중복), P-T47 |
+| 주문 만료(추천 적용 2026-11-09, BUILD_ORDER PRF-172): 만료와 결제 접수가 겹침, 세 사건의 고리와 안전망이 같은 주문을 함께 판정함, READY 결제 시도의 만료와 결제 접수가 겹침 | 만료 판정은 주문 행을 `FOR UPDATE`로 잠근 뒤 상태와 결제 시도를 다시 보고, 상태가 CREATED·AUTHENTICATED일 때만 바뀌는 조건부 전이 T5·T6으로 끝낸다. 결제 접수(T3·T4)도 주문 행을 먼저 잠그므로 둘 중 하나만 이긴다(잠금 차례 '주문 행 → 결제 시도 행', 위 결제 접수 행). 접수가 이기면 만료는 `NOT_OPEN`으로 끝나고, 만료가 이기면 접수는 409 `order-expired`다(PRF-162). 같은 주문을 여러 번 판정해도 조건부 전이라 하나만 효과가 있다. READY 만료는 결제 시도 행만 바꾸는 조건부 UPDATE 한 문장이라 주문 행을 쥐지 않고, 그 뒤 판정이 '주문 행 → 결제 시도 행' 차례로 다시 잡는다. 시도가 먼저 만료되면 접수의 READY → ACCEPTED가 0행이라 409 `payment-attempt-mismatch`다. Redis 읽기는 트랜잭션을 열기 전에 한다(DB 잠금을 쥔 채 Redis를 부르지 않는다) | P-T41 ③(만료 직전 접수)·④(사건 유실 뒤 안전망), 만료 판정 통합 시험(실제 PostgreSQL) |
+| UNKNOWN 조회 실행기(추천 적용 2026-11-09, BUILD_ORDER PRF-182, ADR-0180): 두 파드가 같은 UNKNOWN을 잡음, 조회 뒤 답 반영과 다른 쓰기가 겹침 | 짧은 트랜잭션에서 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 고르고 `next_query_at`을 먼저 민 뒤 커밋하므로 살아 있는 간격 안에는 한 파드만 조회한다(조회 중에 파드가 죽어도 간격이 지나면 다시 잡힌다). 답 반영은 `payment` 행을 `FOR UPDATE`로 잠근 뒤 `status = 'UNKNOWN'`일 때만 원장·사건·Outbox를 한 트랜잭션에 쓰므로 겹친 쪽은 0건을 쓴다. 답을 본 뒤의 간격 쓰기는 `next_query_at`이 잡을 때 쓴 값일 때만 쓴다. 1시간 표시는 `FOR UPDATE SKIP LOCKED`와 `overdue_at IS NULL`로, SEV1 표시는 `anomaly_logged_at IS NULL` 조건의 UPDATE로 한 번만 난다(추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰) | 통합 시험(실제 PostgreSQL + 시뮬레이터: 두 실행기가 UNKNOWN 하나를 한 번만 조회, 두 실행기가 겹쳐도 1시간 표시 행마다 한 번, SEV1 한 줄, 실제 프로세스를 강제 종료한 뒤 새 프로세스가 승인 1건에 이름, P-T3·P-T24) |
+| 승인 실행기(추천 적용 2026-11-09, BUILD_ORDER PRF-181, ADR-0180): 두 파드가 같은 승인 명령을 잡음, 처리 중 재전송과 늦게 온 답이 겹침, 임대가 끝난 뒤 앞 파드의 답과 다음 실행기의 `UNKNOWN`이 겹침 | 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 임대(`lease_owner`·`lease_until`, 지금 + 75초 [가정])를 쓰고 커밋한 뒤 잠금 밖에서 결제사를 부르므로 살아 있는 임대의 행은 한 파드만 돈다. `CONFIRM_SENT`는 `payment` 행 → 명령 행 차례로 잠그고 자기 임대일 때만 커밋한다(임대를 잃었으면 부르지 않는다. 표시가 이미 있는 재전송도 호출 앞에서 같은 확인을 거친다, 추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰). 답 반영은 `payment` 행을 `FOR UPDATE`로 잠근 뒤 `status = 'ACCEPTED'`일 때만 원장·이력·Outbox를 쓰고 명령 행을 지우므로(잠금 차례는 `payment` → 명령 행) 겹친 쪽은 0건을 쓰고 명령 행만 치운다. 앞 소유자가 있고 `CONFIRM_SENT`가 있는 행은 결제사를 다시 부르지 않고 `UNKNOWN`으로 끝내고, 멱등키 `confirm-{orderId}`가 결제사 쪽 이중 승인을 막는다. 잡기는 명령 행의 결제사 칸으로 채널의 행만 골라 명령 행만 잠근다(잠금 차례는 그대로다. 기한 지난 행만 잡는 길은 `payment`와 조인해 기한을 보되 `FOR UPDATE OF j`로 명령 행만 잠근다, 추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰) | P-T6·P-T24 통합 시험(실제 PostgreSQL + 시뮬레이터: 두 파드가 하나만 잡음, 임대가 끊긴 잔해를 시계로 만들어 다른 실행기가 잡아도 승인 호출이 더 나가지 않음). 프로세스를 실제로 강제 종료하는 시험은 PRF-182의 P-T24 몫이다(추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰) |
+| 승인 명령 접수(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0180): 같은 주문의 `ConfirmPayment` 두 개가 겹침(Saga가 데드라인 뒤 다시 보냄, 두 파드), 한 주문을 다른 결제사로 부름 | `INSERT payment … ON CONFLICT (order_id) DO NOTHING`의 유일 제약이 하나만 받는다. 뒤 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 0행이라 있는 행을 읽어 같은 답을 준다. 원장·이력 첫 행·승인 명령은 한 트랜잭션이라 진 쪽은 아무것도 쓰지 않는다. 있는 행의 시도·결제사·금액이 요청과 다르면 `FAILED_PRECONDITION`으로 거절하고 SEV2 로그를 남긴다(결제사를 바꾸지 않는다) | P-T53(실제 PostgreSQL로 동시 두 요청 → 원장 1행·승인 명령 1행과 같은 답, 다른 결제사 거절) |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
@@ -2211,6 +2545,20 @@ erDiagram
 | 좌석 비트맵 다시 만들기(purchase, RB-06) | 회차의 활성 판매(`seat_sale` PENDING·SOLD)와 만료 전 활성 홀드(`seat_hold` HELD, `expires_at > now()`)를 회차로 읽기. 2026-10-28 비상 홀드 경로(좌석 ID 순 `FOR UPDATE`)를 없애 그 쿼리와 만료 쓸기 인덱스 `seat_hold (expires_at) WHERE status = 'HELD'`는 만들지 않는다(추천 적용 2026-10-28, ADR-0121) | `seat_sale`·`seat_hold` 활성 부분 유일(회차 범위) | 부분 인덱스의 `Index Scan`(회차 하나, 만 건 단위) | 다시 만들기 시간, 읽은 행 수 |
 | 판매 확정·결제 접수(purchase) | 멱등 기록 표·주문·`seat_sale` INSERT, `purchase_quota` 조건부 UPDATE, 결제 시도 전이 | 정본 멱등 기록 표, 활성 부분 유일 둘. 새로 `purchase_quota` 기본 키 | 표에 바로 INSERT(주문 표는 나누지 않는다, ADR-0114), `Update → Index Scan using purchase_quota_pkey`(HOT 갱신) | 유일 위반(23505) 수를 표별 지표로, `n_tup_hot_upd / n_tup_upd` |
 | 결제 결과 조회(purchase·payment) | `WHERE id = $1`, `payment WHERE order_id = $1`, 결과 당기기 `payment WHERE order_id = ANY($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, ADR-0140) | 기본 키, `payment (order_id)` 유일 인덱스(ADR-0114) | `Index Scan`(표를 나누지 않아 가지치기가 필요 없다) | 계획 시간(`track_planning`), long polling 동안 트랜잭션을 열지 않음. 당기기가 쓰기 인스턴스 CPU를 5%p [가정] 넘게 올리면 읽기 복제본 + 순번 확인으로 바꾼다(ADR-0140 되돌릴 조건) |
+| 승인 명령 접수(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180) | `INSERT INTO payment … ON CONFLICT (order_id) DO NOTHING RETURNING id`, 처음이면 `payment_event`·`payment_confirm_job` INSERT, 0행이면 `payment WHERE order_id = $1` | `payment (order_id)` 유일 인덱스, 잡기 `payment_confirm_job (pg, next_attempt_at, payment_id)`(실행기가 쓴다, PRF-181·PRF-183) | 표에 바로 INSERT(표를 나누지 않는다, ADR-0114) | 다시 받은 수(`payment_confirm_commands_total{outcome="replayed"}`), 실행 시간 |
+| 승인 명령 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-181) | 100ms [가정]마다 어댑터가 있는 결제사 채널마다 `with picked as (select payment_id, lease_owner from payment_confirm_job where pg = $5 and next_attempt_at <= $1 and (lease_until is null or lease_until < $1) order by next_attempt_at, payment_id limit $2 for update skip locked) update payment_confirm_job j set lease_owner = $3, lease_until = $4 from picked p where j.payment_id = p.payment_id returning j.*, p.lease_owner as previous_owner`(채널의 여유만큼, 어댑터가 없는 채널은 1초 [가정]에 한 번 채널마다 8건 [가정]까지, 추천 적용 2026-11-09, BUILD_ORDER PRF-183. `attempts`는 잡을 때 올리지 않고 처리 중·한도 초과로 다시 미룰 때 올린다, 추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰). 기한 지난 행은 틱마다 채널당 50건 [가정]까지 따로 잡는다: 그 채널의 앞쪽 500행 [가정]을 고른 뒤 `payment`와 조인해 `authenticated_at <= 지금 − 기한`인 행만 `for update of j skip locked`로 잠근다(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰) | `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`(기한 지난 행은 `payment` 기본 키도) | `Limit → LockRows → Index Scan` | 잡은 행 수, 실행 시간, `payment_confirm_in_flight`, `payment_pg_saturated_total{reason}` |
+| 승인 명령 읽기와 답 반영(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-181) | 읽기 `select … , exists (select 1 from payment_event e where e.payment_id = p.id and e.type = 'CONFIRM_SENT') from payment p where p.id = $1`. 답 반영 `select … from payment where id = $1 for update` → `select coalesce(max(seq), 0) + 1 from payment_event where payment_id = $1` → `insert payment_event` → `update payment` → `delete from payment_confirm_job where payment_id = $1` → Outbox(문장 시간 한도 5초 [가정]) | `payment` 기본 키, `payment_event` 기본 키 `(payment_id, seq)`(결제 한 건의 이력은 몇 줄뿐이다) | `Index Scan`, `Index Only Scan Backward`(`max`) | 실행 시간, `payment_confirm_write_failures_total` |
+| 단독 조회 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-182·HOT-151) | 1초 [가정]마다 `select … from payment where status in ('UNKNOWN', 'AWAITING_DEPOSIT') and next_query_at <= $1 order by next_query_at limit $2 for update skip locked`, 같은 트랜잭션에서 행마다 `next_query_at`·`query_attempts` UPDATE | `payment_query_due_idx (next_query_at) WHERE status IN ('UNKNOWN', 'AWAITING_DEPOSIT')` | `Limit → LockRows → Index Scan`(끝난 행은 인덱스에 없다) | 잡은 행 수, 실행 시간, `payment_unknown_in_flight` |
+| 되돌림 확인 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-152) | 단독 조회 잡기와 같은 문장과 인덱스(`payment_query_due_idx`)다. `APPROVED` 행은 되돌림 통보를 받은 동안만 `next_query_at`이 차 있어 인덱스에 들어간다 | `payment_query_due_idx` | `Limit → LockRows → Index Scan` | `payment_unknown_query_total{outcome}`의 `deposit_reversed`·`reversal_waiting`·`reversal_unconfirmed` |
+| 티켓 무효 큐(purchase, 추천 적용 2026-11-09, BUILD_ORDER HOT-152) | 잡기(1초 [가정]마다): `WHERE next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) LIMIT 20 FOR UPDATE SKIP LOCKED` | `ticket_void_job_next_attempt_idx (next_attempt_at)` | `Limit → LockRows → Index Scan` | `ticket_void_attempts_total{result}` |
+| UNKNOWN 1시간 표시(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰) | 1분 [가정]마다 `with picked as (select id from payment where status = 'UNKNOWN' and status_changed_at < $1 and overdue_at is null order by status_changed_at limit 100 for update skip locked) update payment … returning order_id` | `payment_unknown_status_changed_idx (status_changed_at) WHERE status = 'UNKNOWN'` | `Limit → LockRows → Index Scan`(끝난 행은 인덱스에 없다) | 표시한 행 수(`payment_unknown_overdue_total`), 실행 시간 |
+| 결제 결과 당기기 서버(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0140) | `select … from payment p left join lateral (select event_key, seq from payment_event e where e.payment_id = p.id and e.exported and e.type <> 'RESOLVED' order by e.seq desc limit 1) ev on true where p.order_id = any($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, 문장 시간 한도 400ms [가정]) | `payment (order_id)` 유일 인덱스, `payment_event` 기본 키 `(payment_id, seq)` | `Nested Loop Left Join`(바깥 `Index Scan`, 안쪽 `Limit → Index Scan Backward`) | 안쪽 loops·Buffers, 실행 시간 |
+| 웹훅 수신의 원장 찾기와 수신 기록(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-150) | 찾기는 한 문장이다(문장 수가 토스 응답 기한 안의 시간 예산을 정한다, 코드 리뷰): `select … from payment where order_id = $1 or (pg = any($2) and pg_payment_ref = $3) order by case when order_id = $1 then 0 else 1 end, case when pg = any($4) then 0 else 1 end limit 1`. 다음 `insert into webhook_receipt … on conflict (pg, dedup_key) do nothing returning 1`(서명 없는 경로에서 못 찾았으면 쓰지 않는다. 입금 통보는 `secret` 대조를 지난 뒤에만 쓴다(추천 적용 2026-11-09, BUILD_ORDER HOT-151)), UNKNOWN이면 `update payment set next_query_at = $1, query_touched_at = $1 where id = $2 and status = 'UNKNOWN' and next_query_at > $1 and (query_touched_at is null or query_touched_at <= $3) returning id` | `payment_order_id_key`, 새로 `payment_pg_ref_idx (pg, pg_payment_ref)`, `webhook_receipt` 기본 키 | `Bitmap Or`(주문 인덱스와 참조 인덱스) 또는 참조만 있으면 `Index Scan`(`pg` 값마다 한 번) | 실행 시간, `webhook_receipt` 행 수 |
+| 웹훅 수신 기록 지우기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-150) | 정비 시간에 `delete from webhook_receipt where received_at <= $1 and (pg, dedup_key) in (select pg, dedup_key from webhook_receipt where received_at <= $1 order by received_at limit 10000)`를 1만 건보다 적게 지워질 때까지. 묶음 사이 0.5초 [가정], 묶음 전마다 정비 시간 끝·지키는 선을 본다(§2 규칙, 추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰) | 새로 `webhook_receipt_received_at_idx (received_at)` | `Limit → Index Scan` | 지운 행 수, 정비 일 실패 수 |
+| 대사 실행 찾기·시작(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-153) | `insert into reconciliation_run … on conflict (pg, recon_date) do update` 한 문장. 끝내지 못한 날짜는 `recon_date >= $1 and status <> 'DONE'` | UNIQUE `reconciliation_run_pg_date_key` | 결제사마다 하루 한 번 | 실행 표의 `status` |
+| 대사 맞추기 묶음(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-153) | `select … from reconciliation_seen s left join lateral (select … from payment p where p.pg = any($names) and p.pg_payment_ref = s.payment_ref order by case when p.pg = $pg then 0 else 1 end limit 1) l on true where s.run_id = $1 and s.payment_ref > $2 and s.at >= $3 and s.at < $4 order by s.payment_ref limit $5` | PK `reconciliation_seen`, `payment_pg_ref_idx` | 묶음 1,000건 [가정]을 묶음마다 한 문장 | 지표 `payment_reconciliation_last_duration_seconds` |
+| 대사 원장 쪽 묶음(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-153, 코드 리뷰) | `with page as (select … from payment p where p.status = 'APPROVED' and p.pg = $1 and (p.approved_at, p.id) > ($2, $3) and p.approved_at >= $4 and p.approved_at < $5 and exists (실행의 세대가 그대로) order by p.approved_at, p.id limit $6) select page.*, exists (select 1 from reconciliation_seen s where s.run_id = $7 and s.payment_ref = page.pg_payment_ref) as seen from page`. 승인 행을 먼저 잘라 읽고 그 묶음만 작업 표와 견준다 | 부분 인덱스 `payment_recon_approved_idx`, PK `reconciliation_seen` | 결제사마다 하루치 승인 행을 건수에 비례해 한 번 훑는다. 문장 시간 한도 5초 [가정] | 같은 지표 |
+| 입금 secret 해시 지우기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-153) | 정비 시간에 `update payment set deposit_secret_hash = null where id in (select id from payment where deposit_secret_hash is not null and approved_at <= $1 order by approved_at limit $2 for update skip locked)` | 부분 인덱스 `payment_deposit_hash_idx` | 플랫폼 `deleteInBatches` 규칙으로 나눠 비운다 | 정비 일 지표 |
 | 마이 티켓(ticket) | `WHERE account_id = $1 AND id < $2 ORDER BY id DESC LIMIT 50` | 새로 `ticket (account_id, id)` | `Limit → Index Scan Backward`(표를 나누지 않아 인덱스 하나만 찾는다, ADR-0114) | 실행 시간, 계획 시간 |
 | 스캐너 패키지(ticket) | 회차의 티켓 + 유효 기기 키 | 새로 `ticket (event_id) INCLUDE (seat_id, gate_zone, status, version)`, `device_key (ticket_id) INCLUDE (key_id, public_key) WHERE revoked_at IS NULL` | `Nested Loop Left Join`, 안쪽 Index Only Scan(loops ≈ 5만) | 안쪽 노드의 loops·Buffers(합계)·Heap Fetches, 맞춤 계획 강제(§5.2) |
 | 변경분(ticket) | `WHERE event_id = $1 AND seq > $2 ORDER BY seq LIMIT 5000` | 새로 `scanner_change` 기본 키 `(event_id, seq)` | `Limit → Index Scan`(정렬 없음) | 실행 시간 |
@@ -2223,9 +2571,16 @@ erDiagram
 | 내 문의(core) | `WHERE account_id = $1 ORDER BY created_at DESC LIMIT 20 OFFSET $2` | 새로 `inquiry (account_id, created_at)` | `Limit → Index Scan Backward`(계정당 행이 적어 OFFSET 비용이 작다) | 실행 시간 |
 | 공연 검색(core, 읽기 전용 복제본) | `search_term`에서 이름(공연명·아티스트·공연장·다른 이름)의 앞부분(`LIKE '…%'`, 이스케이프)·중간 일치를 찾아 공연으로 묶고, `search_document`에서 장르·일정·상태·공연장·아티스트로 거른 뒤 정확도·오픈 임박·인기 순과 공연 ID로 정렬, `LIMIT 20 OFFSET` | `search_term (norm_nospace·jamo·chosung text_pattern_ops)` B-tree, 중간 일치는 훑기(NFR-028을 넘으면 pg_bigm GIN), `search_document` 정렬 열 | 앞부분은 `Index Scan`(범위 조건), 중간 일치는 `Seq Scan`(행 수만 개), 공연 묶기는 `HashAggregate`, 정렬은 `Sort`(top-N) | 쪽당 시간, 중간 일치 비율, `Rows Removed by Filter`, 두 글자 검색어 시간(ADR-0094) |
 | 자동완성 사전 증분 갱신(core, 읽기 전용 복제본, 10초 [가정]마다) | 한 읽기 전용 트랜잭션(`REPEATABLE READ`)에서 `search_version`을 먼저 읽고, `search_term`·`search_document`의 `updated_version > $지난판`과 `search_removal`의 `version > $지난판`을 읽는다(docs/features/search.md §2.3, 추천 적용 2026-10-28, 기술 검토 중간-089) | 두 표의 `(updated_version)` B-tree, `search_removal` 기본 키(판이 앞) | 세 쿼리 모두 `Index Scan`(범위 조건). 바뀐 줄이 없으면 빈 결과 | 갱신 한 번의 시간, 읽은 줄 수, `search_dictionary_drift_entries` |
-| 상태 쓸기 작업(각 서비스) | `WHERE status = '<대기 상태>' AND <기한> < now() ORDER BY <기한> LIMIT n` | 새로 대기 상태만 담은 부분 인덱스: `payment (status_changed_at) WHERE status = 'UNKNOWN'`, `payment (deposit_due_at) WHERE status = 'AWAITING_DEPOSIT'`, `seat_sale (pending_until) WHERE status = 'PENDING'`, `transfer_offer (expires_at) WHERE status = 'OFFERED'`, `(purge_at) WHERE purge_at IS NOT NULL`, `order_idempotency (created_at)`, 서비스마다 둔 `idempotency_record (created_at)`(ADR-0146 결정 1), Outbox `(seq) WHERE sent_at IS NULL`(모든 환경의 폴링 릴레이, ADR-0116), `ticket_issue_job (next_attempt_at)`(발권 재시도, 행이 적은 작은 표, ADR-0106), `merch_order (stock_reserved_until) WHERE status = 'CREATED'`(굿즈 재고 예약 만료의 안전망, ADR-0107) | `Limit → Index Scan`(끝난 행은 인덱스에 없다) | 한 번에 찾은 행 수, 부분 인덱스 크기 추이 |
+| 상태 쓸기 작업(각 서비스) | `WHERE status = '<대기 상태>' AND <기한> < now() ORDER BY <기한> LIMIT n` | 새로 대기 상태만 담은 부분 인덱스: `payment (next_query_at) WHERE status IN ('UNKNOWN', 'AWAITING_DEPOSIT')`(단독 조회 실행기가 잡는 인덱스, 입금 기한 조회도 이 인덱스다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182·HOT-151), `payment (status_changed_at) WHERE status = 'UNKNOWN'`(1시간 표시. 그 실행기가 잡기와 별개로 1분 [가정]마다 돈다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰), `seat_sale (pending_until) WHERE status = 'PENDING'`, `transfer_offer (expires_at) WHERE status = 'OFFERED'`, `(purge_at) WHERE purge_at IS NOT NULL`, `order_idempotency (created_at)`, 서비스마다 둔 `idempotency_record (created_at)`(ADR-0146 결정 1), Outbox `(seq) WHERE sent_at IS NULL`(모든 환경의 폴링 릴레이, ADR-0116), `ticket_issue_job (next_attempt_at)`(발권 재시도, 행이 적은 작은 표, ADR-0106), `merch_order (stock_reserved_until) WHERE status = 'CREATED'`(굿즈 재고 예약 만료의 안전망, ADR-0107) | `Limit → Index Scan`(끝난 행은 인덱스에 없다) | 한 번에 찾은 행 수, 부분 인덱스 크기 추이 |
 | 알림 발송 워커(core, 추천 적용 2026-10-30, docs/features/notify.md §4) | 낱건: `WHERE status IN ('PENDING','RETRYING') AND next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at LIMIT 50 FOR UPDATE SKIP LOCKED`(ADR-0109). 대량 발송: 같은 꼴로 `notification_broadcast_chunk`의 `slot_at`을 `LIMIT 1`, 조각 범위의 신청은 `WHERE event_id = $1 AND kind = $2 AND status = 'ACTIVE' AND id > $sent_upto AND id < $id_to ORDER BY id LIMIT 100`(읽기 전용 복제본), 그 계정들의 구독은 `push_subscription WHERE account_id = ANY($1)` | 새로 `notification_job (next_attempt_at) WHERE status IN ('PENDING','RETRYING')`, `notification_broadcast_chunk (slot_at) WHERE status IN ('PENDING','RUNNING')`, `notification_subscription (event_id, kind, id)`, `push_subscription (account_id)`. `webhook_delivery`의 부분 인덱스는 정본(§2) | `LockRows → Limit → Index Scan`(끝난 행은 인덱스에 없다), 신청 범위는 `Limit → Index Scan`(범위 조건) | 한 번에 고른 행 수, 잠금 대기, 조각 하나의 처리 시간(N-T6) |
-| 주문 만료 안전망(purchase) | `WHERE id >= $1 AND id < $2 AND status IN ('CREATED','AUTHENTICATED') ORDER BY id LIMIT 500`($1·$2는 '만든 지 1일~90분 [가정]'을 UUIDv7 경계로 바꾼 값) | 새 인덱스 없음(정본 기본 키). 쓰기가 많은 `purchase_order`에 인덱스를 더하지 않는다 | `Limit → Index Scan using purchase_order_pkey`, 상태는 Filter | `Rows Removed by Filter`, 한 번에 끝낸 수(ADR-0107) |
+| 주문 만료 안전망(purchase) | 10분 [가정]마다 `WHERE id >= $1 AND id < $2 AND status IN ('CREATED','AUTHENTICATED') ORDER BY id LIMIT 500`($1·$2는 '만든 지 1일~90분 [가정]'을 UUIDv7 경계로 바꾼 값). 고른 주문마다 `OrderExpiry.check`를 부른다. 하루가 넘은 열린 주문은 읽지 않고 경고와 지표로 남긴다(추천 적용 2026-11-09, BUILD_ORDER PRF-172) | 새 인덱스 없음(정본 기본 키). 이 훑기를 위해 쓰기가 많은 `purchase_order`에 인덱스를 더하지 않는다 | `Limit → Index Scan using purchase_order_pkey`, 상태는 Filter | `Rows Removed by Filter`, 한 번에 끝낸 수(ADR-0107), `purchase_order_open_stale` |
+| 결제 시도 READY 만료(purchase) | 10분 [가정]마다 `payment_attempt WHERE id >= $1 AND id < $2 AND status = 'READY' ORDER BY id LIMIT 500`인 행을 `EXPIRED`로 바꾼다($1·$2는 '만든 지 1일~40분 [가정]'을 UUIDv7 경계로 바꾼 값, 조건부 UPDATE, 결제 시도 행만). 바뀐 시도의 주문마다 `OrderExpiry.check`를 부른다(추천 적용 2026-11-09, BUILD_ORDER PRF-172) | 새 인덱스 없음(기본 키). `payment_attempt.id`가 UUIDv7이어야 범위가 맞는다(결제 시도를 만드는 PRF-190이 그렇게 넣는다) | `Limit → Index Scan using payment_attempt_pkey`, 상태는 Filter | `Rows Removed by Filter`, 한 번에 바꾼 수 |
+| 회차 판매 상태 판정(purchase, 추천 적용 2026-11-09, BUILD_ORDER PRF-144) | 회차마다 1초 [가정]: 행 읽기 `event_sale WHERE event_id = $1`. 결제 중 `seat_sale s JOIN purchase_order o ON o.id = s.order_id JOIN order_item i ON i.order_id = s.order_id AND i.seat_id = s.seat_id WHERE s.event_id = $1 AND s.status = 'PENDING' AND o.status = 'RESERVED' AND s.reserved_at > $2 GROUP BY i.tier`. 가용·홀드·결제 중이 모두 0인 틱만 활성 행 수 `seat_sale WHERE event_id = $1 AND status IN ('PENDING','SOLD')`. 평균은 1분 [가정]에 한 번 `seat_sale WHERE event_id = $1 AND status = 'SOLD'`의 좌석 수·주문 수 | 새로 `seat_sale_pending_idx ON seat_sale (event_id, reserved_at) WHERE status = 'PENDING'`(마이그레이션 0012. `reserved_at`까지 두어 승인 기한 조건을 인덱스로 거르고 입금 대기·결과 모름으로 오래 남은 PENDING을 틱마다 읽지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-144, 코드 리뷰). 활성 행 수와 평균은 `seat_sale_active_key`, 행 읽기는 `event_sale` 기본 키. `seat_sale`의 `status` UPDATE는 이미 활성 유일 부분 인덱스 때문에 HOT 갱신(인덱스를 고치지 않는 갱신)이 아니라 이 인덱스로 HOT을 더 잃지 않는다 | 결제 중은 `Nested Loop`의 바깥이 `Index Scan using seat_sale_pending_idx`(`Index Cond`에 `reserved_at`), 활성 행 수는 `Aggregate → Index Only Scan using seat_sale_active_key` | 틱 안에 끝나는 실행 시간, 인덱스 크기 추이 |
+| 만료 고리의 열린 주문 찾기(purchase) | 구매 세션 종료: `purchase_order WHERE purchase_session_id = $1 AND status IN ('CREATED','AUTHENTICATED')`. 홀드 만료: 고리 한 번에 `purchase_order WHERE hold_id = ANY($1) AND status IN ('CREATED','AUTHENTICATED')` 한 문장(추천 적용 2026-11-09, BUILD_ORDER PRF-172) | 새로 `purchase_order_session_idx ON purchase_order (purchase_session_id)`(마이그레이션 0011). 홀드 쪽은 `purchase_order_hold_key`. 주문 표에 인덱스를 두지 않는 원칙의 예외다. 구매 세션으로 주문을 찾을 길이 달리 없다. 조건 없는 인덱스로 둔 까닭: `status`를 조건에 넣은 부분 인덱스는 주문의 상태를 바꾸는 UPDATE를 모두 HOT 갱신에서 빼므로(결제 완료까지 전이 약 5번, 2026-11-09 코드 리뷰) 쓰기 비용이 더 크다. `purchase_session_id`는 바뀌지 않아 주문을 넣을 때 항목이 하나 늘 뿐이다 | 둘 다 `Index Scan` | 실행 시간, 인덱스 크기 추이 |
+| 매일 주문 상태·이력 검사(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113) | 전날(한국 시각) `order_event.occurred_at` 범위의 주문 ID를 한 번에 모으기(`SELECT DISTINCT order_id … WHERE occurred_at >= $1 AND occurred_at < $2`), 그 ID를 1,000건 [가정]씩 이력 행 수·마지막 번호·마지막 도착 상태와 `purchase_order.status`·`event_seq` 견주기. 묶음마다 `ORDER BY order_id LIMIT`로 범위를 다시 훑으면 기본 키 색인을 처음부터 타 비용이 표 전체에 비례했다(2026-11-05 코드 리뷰 실측: 397만 행에서 16배) | 새로 `order_event USING brin (occurred_at)`. 나머지는 정본 기본 키 `order_event (order_id, seq)`·`purchase_order_pkey` | `Bitmap Heap Scan`(BRIN) → `HashAggregate`, 주문별 `Index Scan using order_event_pkey` | 한 번에 본 주문 수, 어긋난 주문 수(`order_history_mismatch`), 실행 시간 |
+| 다시 만들기의 주문 근거(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-167) | 판매 주문: `purchase_order WHERE id = ANY($1)`(1,000개씩), 묶인 주문: `order_saga_job j JOIN purchase_order o ON o.id = j.order_id WHERE j.event_id = $1 AND j.step = 'RESERVE' AND o.status = 'ACCEPTED' AND o.pinned_at IS NOT NULL`, 원장 대조: `seat_hold WHERE event_id = $1 AND hold_id = ANY($2)` | 새 인덱스 없음(주문 기본 키, 작은 표 `order_saga_job`, `seat_hold` 파티션의 기본 키·활성 유일) | 주문 표는 `Index Scan using purchase_order_pkey`(Seq Scan 없음) | 실행 시간(전체 유실 뒤 회차마다 한 번), 한 번에 읽은 주문 수 |
+| 발권 재시도 큐(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-170) | 잡기(1초 [가정]마다): `WHERE next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) AND NOT EXISTS (그 주문의 ticket_void_job 행) LIMIT 50 FOR UPDATE SKIP LOCKED`(`NOT EXISTS`는 `ticket_void_job` 기본 키로 본다, 추천 적용 2026-11-09, BUILD_ORDER HOT-152, 코드 리뷰). `ISSUE_DELAYED`(같은 틱): `WHERE created_at <= now() - interval '60 seconds' AND delayed_at IS NULL LIMIT 100`. 기한 넘김(같은 틱): `WHERE issue_due_at <= now() AND overdue_at IS NULL`. 게이지(10초 [가정]마다): 다시 보낼 행·멈춘 행 수와 가장 오래된 `created_at`을 한 질의로 | 새 인덱스 없음. 잡기는 정본 `ticket_issue_job (next_attempt_at)`을 탄다(멈춘 행은 `next_attempt_at`이 비어 범위 밖이다). 나머지 셋은 표를 훑는다. 큐에는 승인 뒤 발권 전인 진행 중 행만 있어 작은 표다. 평소에는 승인 커밋 뒤 곧바로 발권해 행이 1초 안팎만 남으므로 수백 행 아래다 [추정] | 잡기는 `LockRows → Limit → Index Scan`, 나머지는 `Seq Scan`(작은 표) | 한 번에 고른 행 수, 질의 시간. ticket-svc가 멈추면 행이 승인 수만큼 쌓인다(승인 초당 300건 [가정] × 5분이면 약 9만 행 [추정]). 그때 `ISSUE_DELAYED`·기한 넘김 질의의 훑기가 틱(1초)을 압박하면 부분 인덱스 `(created_at) WHERE delayed_at IS NULL`·`(issue_due_at) WHERE overdue_at IS NULL`을 더한다 |
+| 결과 당기기 대상(purchase, 추천 적용 2026-11-06, BUILD_ORDER PRF-171) | 잡기(1초 [가정]마다): `order_saga_job WHERE step IN ('CONFIRM','AWAIT') AND confirm_sent_at IS NOT NULL AND confirm_sent_at <= now() - interval '5 seconds' AND (pull_next_at IS NULL OR pull_next_at <= now()) LIMIT 100 FOR UPDATE SKIP LOCKED`, 같은 트랜잭션에서 고른 행에 `pull_next_at = now() + interval '5 seconds'`. 반영 앞에 그 주문의 ACCEPTED 결제 시도를 읽는다 | 새 인덱스 없음. 작업 표에는 결제 접수부터 결과 반영까지 진행 중인 주문만 있어 작은 표다(주문 표에 색인을 더하지 않으려고 이 표에서 찾는다). 평소에는 결과 사건이 1초 안에 와 `AWAIT` 행이 곧 지워지므로 수백 행 아래다 [추정]. 다만 입금 대기·UNKNOWN 주문의 `AWAIT` 행은 며칠 남을 수 있어, `AWAIT`로 바꿀 때 Saga의 `next_attempt_at`을 무한대(`infinity`)로 두어 Saga 잡기의 `next_attempt_at` 차례 앞을 막지 않게 한다(2026-11-06 코드 리뷰). 결제 시도는 정본 `payment_attempt (order_id)`를 탄다 | 잡기는 `LockRows → Limit → Seq Scan`(작은 표, 쓸기 색인 `(next_attempt_at)`은 쓰지 않는다), 결제 시도는 `Index Scan` | 한 번에 고른 행 수, 질의 시간. 사건 길만 멈추면 당기기가 맞추는 동안의 행만 남는다(승인 초당 300건 [가정] × 수 초, 수천 행 [추정]). 당기기도 실패하면(사건 길과 payment-svc가 함께 멈춤) 결제 접수 수만큼 쌓인다(초당 300건 [가정] × 5분이면 약 9만 행 [추정]). 그때 훑기가 틱(1초)을 압박하면 부분 인덱스 `(confirm_sent_at) WHERE step IN ('CONFIRM','AWAIT')`를 더한다 |
 
 - 외래 키를 참조하는 쪽 열에는 인덱스를 둔다. PostgreSQL은 자동으로 만들지 않고(18 문서), 보존 기한이 지난 행의 나눠 지우기(§2, ADR-0114), 부모 행 삭제, 파티션 떼어 내기가 이 인덱스로 자식 행을 찾는다.
 - 쓰기가 많은 표(`seat_hold`, `seat_sale`, `purchase_order`, `payment`, Outbox)는 인덱스를 아낀다. 인덱스마다 INSERT·UPDATE 비용이 늘고, 인덱스가 걸린 칸을 바꾸면 HOT 갱신이 되지 않는다.
@@ -2312,6 +2667,7 @@ erDiagram
 | 서비스 DB | 보존 전용 표 [가정] | 옮기는 칸 | 보존 기한(정본) |
 | --- | --- | --- | --- |
 | purchase | `retention.order_buyer` | `purchase_order.buyer_name`·`buyer_phone` | 주문과 같은 5년(data-classification '예매자 성명 및 휴대폰 번호') |
+| identity | `retention.verification_record` | `identity_verification.source_record`·`verified_at`(연계정보 HMAC·pid는 옮기지 않는다) | 처리한 날의 달력 1년 뒤(연계정보 처리 기록, docs/features/identity.md §5 법적 안전조치. 그보다 오래된 기록은 옮기지 않는다, 추천 적용 2026-11-04, BUILD_ORDER BOT-030) |
 | core | `retention.merch_order_recipient` | `merch_order.recipient_name`·`recipient_phone`·`delivery_address` | 5년(data-classification '굿즈 배송지') |
 | core | `retention.inquiry_text` | `inquiry.title`, 팬이 쓴 `inquiry_message.body` | 닫힌 뒤 3년(data-classification '고객 문의') |
 | core | `retention.appeal_body` | `appeal.body` | 처리를 마치고 3년(data-classification '소명 본문'). 소명은 2026-10-30에 core-svc support 모듈로 옮겼다(추천 적용 2026-10-30) |

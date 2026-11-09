@@ -246,6 +246,20 @@ export function writeResult(path, obj) {
   console.log(text);
 }
 
+/**
+ * 두 종류가 섞인 한 분포(엔진 명령별 지연, 예: 홀드·만료 Lua가 둘 다 EVALSHA)에서 많은 쪽(nAll − nx번)의 p99를 읽을 백분위(0~100).
+ * 섞인 분포에서 그 p99 v 이하의 몫은 (0.99·(nAll − nx) + f·nx)/nAll이다(f = 적은 쪽 nx번 가운데 v보다 빠른 몫).
+ * @param {number} nAll 섞인 호출 수
+ * @param {number} nx 적은 쪽(만료) 호출 수
+ * @param {number} nxFast 적은 쪽 가운데 v보다 빠를 수 있다고 보는 호출 수(0 ~ nx)
+ * @returns {{ lo: number, est: number, hi: number }} lo: f = 0(아래 끝, 내림), est: f = nxFast/nx(올림), hi: f = 1(위 끝, 올림). 소수 넷째 자리까지
+ */
+export function mixedP99Percentiles(nAll, nx, nxFast) {
+  if (!(nAll > 0) || nx < 0 || nx > nAll || nxFast < 0 || nxFast > nx) throw new RangeError(`호출 수가 틀렸다: nAll ${nAll}, nx ${nx}, nxFast ${nxFast}`);
+  const q = (fast) => Math.min(100, (99 * (nAll - nx) + 100 * fast) / nAll);
+  return { lo: Math.floor(q(0) * 1e4) / 1e4, est: Math.min(100, Math.ceil(q(nxFast) * 1e4) / 1e4), hi: Math.min(100, Math.ceil(q(nx) * 1e4) / 1e4) };
+}
+
 // ---- Redis 클러스터 슬롯(CRC16/XMODEM, Redis Cluster 명세) ----
 const CRC_TABLE = (() => {
   const t = new Uint16Array(256);

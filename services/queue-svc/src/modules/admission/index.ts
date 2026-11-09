@@ -4,4 +4,5 @@ export { MemoryAdmissionStore } from './adapters/memory-admission-store.js';
 export { PromAdmissionSignals } from './adapters/prom-admission-signals.js';
 export { PurchaseSessionSlots, type SessionEnded, type SessionStarted } from './application/purchase-session-slots.js';
 export type { AdmissionSignals, AdmissionStore, AdmissionTokens } from './domain/ports.js';
+export { PurchaseSessionHandler, jsonPurchaseSessionCodec, type PurchaseSessionCodec, type PurchaseSessionEvent } from './inbound/purchase-session.handler.js';
 export { AdmissionModule, type AdmissionModuleOptions } from './admission.module.js';

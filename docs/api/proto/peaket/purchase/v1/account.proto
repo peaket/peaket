@@ -46,6 +46,8 @@ message MergeBlock {
 
 message CheckAccountMergeResponse {
   repeated MergeBlock blocks = 1;
+  // 흡수 계정의 주문 수(대표 계정의 '내 주문'에 함께 보일 것, 병합 요약 MergeProposal.moved.orders, 추천 적용 2026-11-04)
+  int32 absorbed_orders = 2;
 }
 
 // 부르는 쪽: ops-svc만(승인 업무 '예매 제한'의 실행 T14와 소명 인정으로 푸는 때, 작업 워커의 다시 보내기).

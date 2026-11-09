@@ -596,7 +596,7 @@ test('V-T1 행렬_저장소의 specs.json은 대기열의 가장 큰 검사를 �
   const m = loadManifest(readFileSync(`${REPO_ROOT}specs/specs.json`, 'utf8'), (f) => readFileSync(`${REPO_ROOT}${f}`, 'utf8'), { traceHash: false });
   const full = matrixFor(m, 'full').include;
   const queue = full.filter((x) => x.spec === 'queue');
-  assert.deepEqual(queue.map((x) => x.shard).sort(), ['default', 'proposed']);
+  assert.deepEqual(queue.map((x) => x.shard).sort(), ['arrival', 'default', 'proposed']);
   // 큰 러너는 가장 큰 검사의 묶음에만 붙는다
   assert.deepEqual(queue.filter((x) => x.large).map((x) => x.shard), ['proposed']);
   // 가장 큰 검사 하나만 따로 두고, 나머지는 한 잡에서 차례로 돈다

@@ -1,10 +1,10 @@
 'use client';
 // SCR-011 주문·결제의 움직이는 부분: 필수 동의 체크(③④) ↔ 결제 버튼(휴대폰·태블릿 아래 띠, 데스크톱 오른쪽 패널),
 // 홀드 만료 대화상자. 결제 버튼은 필수 동의가 빠지면 aria-disabled + 보이는 이유 글(버튼 앞, aria-describedby)이다.
-// 결제창은 붙이지 않는다: [결제하기]가 켜져 있으면 결제창에서 돌아온 것처럼 결제 복귀 화면(/checkout/return)으로 간다.
+// 미리보기(개발 서버)의 [결제하기]는 결제 복귀 화면으로 가고, 실제 화면은 onPay로 주문을 만든다(ADR-0228).
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Dialog } from '@peaket/ds/Dialog';
 import type { PayMode } from '../model/view';
 
@@ -12,21 +12,40 @@ type ConsentKey = 'thirdParty' | 'terms';
 interface ConsentValue {
   checked: Record<ConsentKey, boolean>;
   set: (key: ConsentKey, value: boolean) => void;
+  /** 체크를 모두 지운다(동의 문안이 바뀌었다는 응답 뒤) */
+  clear: () => void;
 }
 
 const ConsentContext = createContext<ConsentValue | null>(null);
 
-function useConsent(): ConsentValue {
+export function useCheckoutConsent(): ConsentValue {
   const ctx = useContext(ConsentContext);
   if (!ctx) throw new Error('CheckoutConsentProvider 안에서만 쓴다');
   return ctx;
 }
 
-/** 필수 동의 두 개의 체크 상태를 본문(체크 칸)과 결제 버튼(아래 띠·오른쪽 패널)이 함께 본다 */
-export function CheckoutConsentProvider({ initialAgreed, children }: { initialAgreed: boolean; children: ReactNode }) {
-  const [checked, setChecked] = useState<Record<ConsentKey, boolean>>({ thirdParty: initialAgreed, terms: initialAgreed });
+/** 필수 동의 두 개의 체크 상태를 본문(체크 칸)과 결제 버튼(아래 띠·오른쪽 패널)이 함께 본다. storageKey를 주면 새로고침에 되살린다(개인정보 없음, docs/frontend.md §3.12) */
+export function CheckoutConsentProvider({ initialAgreed, storageKey, children }: { initialAgreed: boolean; storageKey?: string; children: ReactNode }) {
+  const [checked, setChecked] = useState<Record<ConsentKey, boolean>>(() => {
+    const none = { thirdParty: initialAgreed, terms: initialAgreed };
+    if (!storageKey) return none;
+    try {
+      const v = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') as Partial<Record<ConsentKey, unknown>> | null;
+      return v ? { thirdParty: v.thirdParty === true, terms: v.terms === true } : none;
+    } catch {
+      return none;
+    }
+  });
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(checked));
+    } catch {
+      /* 저장소를 못 쓰면 새로고침에 되살리지 못할 뿐이다 */
+    }
+  }, [checked, storageKey]);
   return (
-    <ConsentContext.Provider value={{ checked, set: (key, value) => setChecked((prev) => ({ ...prev, [key]: value })) }}>
+    <ConsentContext.Provider value={{ checked, set: (key, value) => setChecked((prev) => ({ ...prev, [key]: value })), clear: () => setChecked({ thirdParty: false, terms: false }) }}>
       {children}
     </ConsentContext.Provider>
   );
@@ -34,7 +53,7 @@ export function CheckoutConsentProvider({ initialAgreed, children }: { initialAg
 
 /** 필수 동의 체크 줄(.check-row + .cb) */
 export function ConsentCheck({ id, which, children }: { id: string; which: ConsentKey; children: ReactNode }) {
-  const { checked, set } = useConsent();
+  const { checked, set } = useCheckoutConsent();
   return (
     <label className="check-row" htmlFor={id}>
       <input className="cb" id={id} type="checkbox" checked={checked[which]} onChange={(e) => set(which, e.target.checked)} />
@@ -67,6 +86,10 @@ function reasonOf(mode: PayMode, consentOk: boolean): Reason | null {
       };
     case 'expired':
       return { text: '홀드 시간이 끝났습니다' };
+    case 'sale-ended':
+      return { text: '판매 시간이 끝났습니다', tone: 'danger' };
+    case 'ordered':
+      return { text: '주문을 만들었습니다', role: 'status' };
     default:
       return null;
   }
@@ -81,13 +104,18 @@ export interface PayActionProps {
   /** 홀드 남은 시간 '5:12'와 낭독 이름 */
   holdText: string;
   holdAria: string;
-  /** 결제창 복귀 화면(결제창을 흉내 낸다) */
-  returnHref: string;
+  /** 미리보기: 결제창 복귀 화면(결제창을 흉내 낸다) */
+  returnHref?: string;
+  /** 실제 화면: 주문을 만든다 */
+  onPay?: () => void;
+  busy?: boolean;
+  /** 본인확인 정보가 없을 때 결제 버튼 자리에 둔다 */
+  verify?: ReactNode;
 }
 
-export function PayAction({ layout, mode, amountText, holdText, holdAria, returnHref }: PayActionProps) {
+export function PayAction({ layout, mode, amountText, holdText, holdAria, returnHref, onPay, busy = false, verify }: PayActionProps) {
   const router = useRouter();
-  const { checked } = useConsent();
+  const { checked } = useCheckoutConsent();
   const reason = reasonOf(mode, checked.thirdParty && checked.terms);
   const reasonId = `pay-why-${layout}`;
   const timerTone = mode === 'pay-paused' ? 'is-paused' : mode === 'expired' ? 'is-expired' : '';
@@ -108,7 +136,9 @@ export function PayAction({ layout, mode, amountText, holdText, holdAria, return
     </p>
   ) : null;
   const button =
-    mode === 'no-id' ? (
+    mode === 'no-id' && verify ? (
+      verify
+    ) : mode === 'no-id' ? (
       // 본인확인 정보를 잃은 경우: 이 화면 위에 기관 창(SCR-006)을 연다. 창은 데이터 연결 단계에서 붙인다
       <button className={`btn btn-primary btn-lg ${layout === 'panel' ? 'btn-block' : 'grow md:grow-0'}`} type="button">
         <i className="ic ic-phone" aria-hidden="true" />
@@ -118,13 +148,16 @@ export function PayAction({ layout, mode, amountText, holdText, holdAria, return
       <button
         className={`btn btn-primary btn-lg ${layout === 'panel' ? 'btn-block' : 'grow md:grow-0'}`}
         type="button"
-        aria-disabled={reason ? true : undefined}
+        aria-disabled={reason || busy ? true : undefined}
+        aria-busy={busy || undefined}
         aria-describedby={reason ? reasonId : undefined}
         onClick={() => {
-          if (!reason) router.push(returnHref);
+          if (reason || busy) return;
+          if (onPay) onPay();
+          else if (returnHref) router.push(returnHref);
         }}
       >
-        {amountText} 결제하기
+        {busy ? '주문을 만드는 중' : `${amountText} 결제하기`}
       </button>
     );
 

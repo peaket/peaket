@@ -1,3 +1,4 @@
+"use client";
 // 겹침 창(서랍·대화상자·시트)의 초점 가두기와 Esc 닫기. 열릴 때 안의 첫 초점 대상으로 옮기고, 닫히면 연 요소로 돌려준다.
 import { useEffect, useRef, type RefObject } from "react";
 

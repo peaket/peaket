@@ -29,6 +29,11 @@
   - `SeatEvent`: 우선 구매 보류(이의가 인정된 부정 예매 표 취소의 되돌림, 구매 세션 없음)를 위해 홀드 종류 `holdKind`(새 열거 `SeatEventHoldKind`)와 권리 ID `priorityGrantId`를 더하고, `purchaseSessionId`의 조건을 holdKind FAN으로 좁혔다. 첫 등록 전이라 조건을 좁혀도 된다.
   - 분석 원본 적재(analytics-ingest)는 새 조사 칸을 브론즈에 싣기 전에 버린다(docs/features/analytics.md). 조사 적재 작업자 `inv-ingest`가 같은 토픽을 함께 읽는다(§4, docs/streaming.md §6.4).
   - 직접 쓴 검사(asyncapi를 YAML로 읽어 avsc와 견줌)로 19개 파일이 JSON으로 읽히고, 이름 붙은 타입 68개가 겹치지 않으며, 열거 40개마다 맨 앞 `UNRECOGNIZED`와 기본값이 있고, 필드 이름·순서, 필수 목록, null 첫 갈래와 기본값 null, 기본값 false, `x-present-when`(값이 그 열거의 기호인지, 조건부 칸을 가리키면 그 칸의 조건을 품는지), 열거 기호, uuid·시각 형식이 asyncapi와 어긋남 0건임을 확인했다. Avro 라이브러리 검사는 하지 못했다(wbs 0.2.2의 CI가 한다).
+- **바꿈(2026-11-04, BUILD_ORDER BOT-037)**: 탈퇴 사건 `identity/AccountWithdrawn.avsc`(토픽 `identity.accounts-withdrawn`, 레코드 하나, 칸 다섯 모두 필수)를 더했다. 파일 20개(identity 2), 이름 붙은 타입 69개(레코드 29개, 열거 40개)다. 처음 등록 전이라 §6 규칙대로 늘 있는 칸은 필수로 두었다. `pids`는 문자열 배열이다(1~2개는 asyncapi `minItems`·`maxItems`가 적고, Avro에는 그 제약이 없어 받는 쪽이 본다). 직접 견준 검사로 asyncapi와 필드 이름·순서·필수 목록·형식(uuid·시각)이 같음을 확인했다(Avro 라이브러리 검사는 wbs 0.2.2의 CI가 한다).
+- **바꿈(2026-11-04, BUILD_ORDER BOT-041)**: 로그인 수단 연결·해제 `identity/LoginMethodChanged.avsc`(토픽 `identity.login-methods-changed`, 레코드 하나, 열거 둘 `LoginMethodChange`·`LoginMethodProvider`, 칸 다섯 모두 필수)를 더했다. 파일 21개(identity 3), 이름 붙은 타입 72개(레코드 30개, 열거 42개)다. 열거마다 맨 앞 `UNRECOGNIZED`와 기본값을 두었다(§2).
+- **바꿈(2026-11-05, BUILD_ORDER BOT-044, ADR-0209)**: `SessionTerminatedReason` 끝에 `LOGIN_METHOD_CHANGED`(팬 계정의 로그인 수단이 바뀌어 다른 세션을 끝냄, ASVS 7.4.3)를 더했다. 2026-10-30과 같이 열거 끝에 더해 기존 기호의 순서는 그대로이고, 새 기호를 모르는 옛 읽는 쪽은 기본값 `UNRECOGNIZED`로 읽는다. 파일·타입 수는 그대로다.
+- **바꿈(2026-11-06, BUILD_ORDER HOT-011, ADR-0219 결정 5·6)**: `trade/EventSaleChanged.avsc`의 끝에 셈 시각 `countedAt`(null 허용 timestamp-millis)과 평균 구매 매수 `avgTicketsPerOrder`(null 허용 double)를 기본값 null로 더했다. 내는 쪽이 같은 판을 다시 낼 때 그때의 셈을 싣는다. 이름 붙은 타입 수는 그대로다.
+- **바꿈(2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)**: `trade/EventSaleChanged.avsc`의 `paying` 뒤에 매진 등급 `soldOutTiers`(문자열 배열, 필수, 없으면 빈 배열)를 더했다. 첫 등록 전이고 내는 쪽(회차 판매 상태 판정 작업)이 아직 없어 §6의 규칙대로 필수로 넣었다. 이름 붙은 타입 수는 그대로다.
 
 ## 2. 옮긴 규칙(추천 적용 2026-10-22)
 
@@ -78,6 +83,8 @@
 | `control.settings` | `SettingChanged` | `<범위>:<종류>:<대상>`(압축 토픽, §5) | ops-svc | 모든 서비스의 모든 파드(파드마다 따로) |
 | `control.sessions-terminated` | `SessionTerminated` | `accountId` | identity-svc | 모든 서비스의 모든 파드(파드마다 따로, 뜰 때 15분 되감기) |
 | `identity.accounts-merged` | `AccountMerged` | `mergedAccountId` | identity-svc | 각 도메인 서비스 |
+| `identity.accounts-withdrawn` | `AccountWithdrawn` | `accountId` | identity-svc(Outbox, 계정을 탈퇴 처리하는 트랜잭션) | queue-svc(서비스 소비자 그룹, 2026-11-04 BOT-037) |
+| `identity.login-methods-changed` | `LoginMethodChanged` | `accountId` | identity-svc(Outbox, 로그인 수단을 잇거나 지운 트랜잭션) | core-svc notify(2026-11-04 BOT-041) |
 | `support.cases-requested` | `CaseRequested` | `sourceId` | core-svc(Outbox), queue-svc(봇 판정 이의 제기, Outbox 없이 바로 냄. 추천 적용 2026-10-30, docs/features/bot-defense.md §12) | ops-svc |
 | `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`·`PipelinePulse`), analytics-ingest·inv-ingest(`QueueEntryRecord`) |
 | `telemetry.purchase` | `HoldAttempt`, `PipelinePulse` | `purchaseSessionId`, 없음 | purchase-svc, rt-pulse | ops-rt, analytics-ingest, inv-ingest |
@@ -109,11 +116,11 @@ Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정
 
 - **원칙**: 늘 값이 있는 칸은 필수, 사건 종류·결과에 따라 없을 수 있는 칸만 null 허용(조건부), 참·거짓은 기본값 false다(§2). 판정은 정본 문서(docs/data.md의 표, 기능 문서, asyncapi 설명)를 근거로 했고, 칸의 뜻을 새로 정한 곳은 ADR-0150 결정 6에 있다(추천 적용).
 - **조건부 칸의 조건**: `x-present-when`이 있는 칸은 그 조건이 맞으면 값이 있어야 한다. 값은 조건 목록이고 하나라도 맞으면 된다. 조건 하나 안의 칸은 모두 맞아야 한다('이고'). 조건이 맞지 않을 때 비워야 한다는 뜻은 아니다. `x-present-when`이 없는 조건부 칸은 아래 글 조건을 따른다. 생산자 단위 시험이 사건 종류마다 예시 메시지를 만들어 두 가지를 모두 확인하고, 계약 검사가 asyncapi와 avsc의 필수 목록·기본값·조건이 같은지 본다(docs/devops.md §3.1).
-- **세기**: 19종 191칸 = 필수 129, 기본값 false 9, 조건부 53(그 가운데 `x-present-when` 34). 2026-10-31 FRN-040에서 조사용 가명 칸을 계산하지 못한 표시 `refMissing`(기본값 false)을 `TrustVerdict`·`BehaviorSignal`·`OrderEvent`·`PaymentEvent`에 하나씩 더했다(187칸 → 191칸, avsc 파일에서 다시 셈, ADR-0171). 2026-10-29의 172칸(필수 125, 기본값 false 5, 조건부 42, `x-present-when` 26)에 2026-10-31 조사 칸 13개를 더하고 `BehaviorSignal.netClass`를 필수에서 조건부로 옮겼고(185칸), 같은 날 우선 구매 보류 때문에 `SeatEvent`에 `holdKind`·`priorityGrantId`를 더했다(ADR-0171, 추천 적용 2026-10-31).
+- **세기**: 21종 204칸 = 필수 140, 기본값 false 9, 조건부 55(그 가운데 `x-present-when` 34). 2026-11-06 HOT-011에서 `EventSaleChanged`에 셈 시각 `countedAt`과 평균 구매 매수 `avgTicketsPerOrder`(둘 다 조건부, ADR-0219 결정 5·6)를 더했다(202칸 → 204칸). 2026-11-05 HOT-010에서 `EventSaleChanged`에 `soldOutTiers`(필수)를 더했다(201칸 → 202칸). 2026-11-04 BOT-037에서 `AccountWithdrawn`(필수 5칸)을, BOT-041에서 `LoginMethodChanged`(필수 5칸)를 더했다(191칸 → 201칸). 2026-10-31 FRN-040에서 조사용 가명 칸을 계산하지 못한 표시 `refMissing`(기본값 false)을 `TrustVerdict`·`BehaviorSignal`·`OrderEvent`·`PaymentEvent`에 하나씩 더했다(187칸 → 191칸, avsc 파일에서 다시 셈, ADR-0171). 2026-10-29의 172칸(필수 125, 기본값 false 5, 조건부 42, `x-present-when` 26)에 2026-10-31 조사 칸 13개를 더하고 `BehaviorSignal.netClass`를 필수에서 조건부로 옮겼고(185칸), 같은 날 우선 구매 보류 때문에 `SeatEvent`에 `holdKind`·`priorityGrantId`를 더했다(ADR-0171, 추천 적용 2026-10-31).
 
 | 메시지 | 칸 | 필수 | 기본값 false | 조건부(이 조건이면 값이 있다) |
 | --- | --- | --- | --- | --- |
-| `EventSaleChanged` | 9 | `eventId`·`status`·`available`·`held`·`paying`·`version`·`changedAt`·`eventKey` | — | `previousStatus`: 회차의 첫 상태를 낼 때는 없다 |
+| `EventSaleChanged` | 12 | `eventId`·`status`·`available`·`held`·`paying`·`soldOutTiers`(2026-11-05)·`version`·`changedAt`·`eventKey` | — | `previousStatus`: 회차의 첫 상태를 낼 때는 없다. `countedAt`(2026-11-06): 셈을 실은 사건(판이 바뀔 때와 같은 판의 다시 내기)이면 있다. `avgTicketsPerOrder`(2026-11-06): 그 회차에서 결제가 끝난 주문이 100건 [가정] 이상이면 있다 |
 | `OrderEvent` | 15 | `eventId`·`orderId`·`accountId`·`type`·`amount`·`seatIds`·`items`·`seatAssignment`·`occurredAt`·`eventKey` (안쪽 `OrderEventItem`의 `seatId`·`tierId`·`sectionId`·`price`도 필수) | `firstInStage`·`refMissing`(2026-10-31) | `purchaseSessionId`: `x-present-when` type CREATED; `journeyId`: `x-present-when` type CREATED(2026-10-31); `contactRef`: `x-present-when` type CREATED 이고 refMissing false(2026-10-31) |
 | `PaymentEvent` | 16 | `eventId`·`orderId`·`pg`·`type`·`amount`·`attemptNo`·`occurredAt`·`eventSeq`·`eventKey` | `refMissing`(2026-10-31) | `payMethodCategory`: 결제 수단이 정해진 뒤의 사건(결제창 이탈처럼 수단을 고르기 전에 끝난 실패는 없다); `paymentMethodRef`·`cardBin`: 결제사 응답의 카드 정보에 BIN이 있고 refMissing false인 사건(둘은 함께 있거나 함께 빈다, 2026-10-31); `result`: 승인 흐름의 정규화 결과가 있는 사건(payment §2.1). 입금 되돌림·취소에는 없을 수 있다; `failureCategory`: `x-present-when` type FAILED; `latencyMs`: 결제사 승인 호출의 응답을 받은 사건만 |
 | `PurchaseSessionEnded` | 6 | `eventId`·`purchaseSessionId`·`admissionJti`·`reason`·`endedAt`·`eventKey` | — | — |
@@ -124,6 +131,8 @@ Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정
 | `SessionTerminated` | 4 | `accountId`·`sessionId`·`reason`·`terminatedAt` | — | — |
 | `SettingChanged` | 8 | `commandId`·`key`·`scope`·`value`·`actor`·`occurredAt`·`eventKey` | — | `expiresAt`: `x-present-when` key LOG_LEVEL |
 | `AccountMerged` | 4 | `mergeId`·`primaryAccountId`·`mergedAccountId`·`confirmedAt` | — | — |
+| `AccountWithdrawn` | 5 | `eventKey`·`accountId`·`pids`·`withdrawnAt`·`purgeBy` | — | — |
+| `LoginMethodChanged` | 5 | `eventKey`·`accountId`·`change`·`provider`·`occurredAt` | — | — |
 | `CaseRequested` | 7 | `eventKey`·`kind`·`sourceId`·`category`·`createdAt` | `followUp`·`hold` | — |
 | `BehaviorSignal` | 11 | `pid`·`eventId`·`journeyId`(2026-10-31)·`screen`(2026-10-31)·`ts`·`eventKey` | `refMissing`(2026-10-31) | `deviceRef`: 로비 입장·사전 검증 본문에 기기 ID가 있고 refMissing false일 때; `netClass`: `x-present-when` screen LOBBY·EVENT_DETAIL(2026-10-31에 필수에서 옮김); `asn`: `x-present-when` screen LOBBY·EVENT_DETAIL 이고 netClass HOSTING·PROXY; `features`: 사전 검증 본문에 행동 요약이 있을 때(로비 입장에는 없다. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) |
 | `HoldAttempt` | 15 | `eventId`·`purchaseSessionId`·`journeyId`(2026-10-31)·`mode`·`tierId`·`result`·`retryNo`·`latencyMs`·`occurredAt`·`eventKey` | `firstHeldInSession` | `sectionId`: PICK이거나, AUTO에서 좌석을 잡았을 때; `seatIds`: `x-present-when` mode PICK, 또는 result HELD(2026-10-31); `autoResult`: `x-present-when` mode AUTO; `heldAt`: `x-present-when` result HELD(2026-10-31) |

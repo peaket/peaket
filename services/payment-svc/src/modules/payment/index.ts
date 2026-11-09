@@ -14,10 +14,13 @@ export {
   type FailureCategory,
   type HeaderBag,
   type PaymentGatewayPort,
+  type PayMethodCategory,
   type PgCapabilities,
   type PgName,
   type QueryResult,
   type QueryStatus,
+  type WebhookInvalidReason,
+  type WebhookParseResult,
   type WebhookTrigger,
 } from './domain/payment-gateway.js';
 export { SimulatorPaymentGateway, type SimulatorGatewayOptions } from './adapters/pg/simulator-gateway.js';

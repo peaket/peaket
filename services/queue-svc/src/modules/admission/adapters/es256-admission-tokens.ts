@@ -68,9 +68,10 @@ export class Es256AdmissionTokens implements AdmissionTokens {
     return new Es256AdmissionTokens({ jwk: parseJwk(ADMISSION_TOKEN_KEY_ENV, raw), issuer, ...(ecdhPublicJwk ? { ecdhPublicJwk } : {}) });
   }
 
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number }): { token: string; expiresAtMs: number } {
+  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number }): { token: string; expiresAtMs: number } {
     const iat = seconds(c.nowMs);
-    const exp = iat + seconds(MAX_STAY_MS);
+    // 같은 jti를 다시 줄 때도 만료는 첫 발급 + 최대 체류다(purchase-svc는 첫 토큰의 만료로 구매 세션을 연다, HOT-010 리뷰)
+    const exp = seconds(Math.min(c.firstIssuedAtMs ?? c.nowMs, c.nowMs)) + seconds(MAX_STAY_MS);
     const head = b64({ alg: 'ES256', typ: 'admission+jwt', kid: this.#kid });
     const body = b64({ iss: this.#issuer, sub: c.accountId, aud: 'purchase', jti: c.jti, sid: c.sessionId, event: c.eventId, jny: c.jny, iat, exp });
     const signed = `${head}.${body}`;

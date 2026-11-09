@@ -12,7 +12,7 @@ const g = gw as unknown as {
 };
 
 describe('게이트웨이 대역', () => {
-  test('ASVS_8_2_1_브라우저가보낸신원머리는x-session-id까지모두지운다 [ASVS v5.0.0-8.2.1]', () => {
+  test('브라우저가보낸신원머리는x-session-id까지모두지운다 [ASVS v5.0.0-8.2.1]', () => {
     const out = g.forwardHeaders({ 'x-session-id': 'forged', 'x-user-id': 'forged', 'x-user-pid': 'forged', accept: 'text/html' }, '127.0.0.1:8080');
     expect(out).toEqual({ accept: 'text/html', host: '127.0.0.1:8080' });
   });

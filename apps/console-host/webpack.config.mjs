@@ -10,9 +10,11 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default (_env, argv) => {
   const dev = argv.mode !== 'production';
+  // SEED CSS 층 PoC 빌드(FE-T36, tools/web-checks/seed-css/)는 탐침 화면(poc-seed-css.html) 하나만 묶는다(운영 빌드처럼 진입점 하나)
+  const seedCssPoc = process.env.PEAKET_POC === 'seed-css';
   return {
     mode: dev ? 'development' : 'production',
-    entry: path.join(dirname, 'src/main.tsx'),
+    entry: seedCssPoc ? { 'poc-seed-css': path.join(dirname, 'src/poc-seed-css.tsx') } : { main: path.join(dirname, 'src/main.tsx') },
     output: {
       path: path.join(dirname, 'dist'),
       filename: dev ? '[name].js' : 'assets/[name].[contenthash:8].js',
@@ -46,7 +48,9 @@ export default (_env, argv) => {
       ],
     },
     plugins: [
-      new HtmlWebpackPlugin({ template: path.join(dirname, 'src/index.html') }),
+      seedCssPoc
+        ? new HtmlWebpackPlugin({ filename: 'poc-seed-css.html', template: path.join(dirname, 'src/poc-seed-css.html') })
+        : new HtmlWebpackPlugin({ template: path.join(dirname, 'src/index.html') }),
       // 화면 목록(/preview)은 개발 서버에서만 연다(design.md 결정 7)
       new webpack.DefinePlugin({ __PREVIEW__: JSON.stringify(dev) }),
       ...(dev ? [] : [new MiniCssExtractPlugin({ filename: 'assets/[name].[contenthash:8].css', chunkFilename: 'assets/[name].[contenthash:8].chunk.css' })]),

@@ -55,6 +55,13 @@ export const COMMANDS: Record<SpecAction, (sc: Scope) => fc.Arbitrary<Act>> = {
       write('pendingExpires', `pendingExpires(${p})`, (s) => sc.tickets.some((k) => k[0] === p && at(s, k, 'PREEMPTED', 'NUMBERED', 'SADDED')), (s) => s.pendingExpires(p)),
     ),
   enterNumber: (sc) => tk(sc).map((k) => write('enterNumber', `enterNumber(${k})`, (s) => at(s, k, 'PREEMPTED'), (s) => s.enterNumber(k))),
+  // 도착 시각 쿠키가 있는 진입(칸이 없는 범위는 고를 칸이 없어 할 수 없다)
+  enterNumberArrival: (sc) =>
+    (sc.arrSlots ?? []).length === 0
+      ? fc.constant(new Act('enterNumberArrival', 'enterNumberArrival(칸 없음)', () => false, async () => undefined))
+      : fc.tuple(tk(sc), fc.constantFrom(...(sc.arrSlots ?? []))).map(([k, slot]) =>
+          write('enterNumberArrival', `enterNumberArrival(${k}, ${slot})`, (s) => at(s, k, 'PREEMPTED'), (s) => s.enterNumberArrival(k, slot)),
+        ),
   enterRecord: (sc) => tk(sc).map((k) => write('enterRecord', `enterRecord(${k})`, (s) => at(s, k, 'NUMBERED'), (s) => s.enterRecord(k))),
   enterBatchRecord: (sc) => tk(sc).map((k) => write('enterBatchRecord', `enterBatchRecord(${k})`, (s) => at(s, k, 'SADDED'), (s) => s.enterBatchRecord(k))),
   batchMissing: (sc) =>
@@ -69,14 +76,14 @@ export const COMMANDS: Record<SpecAction, (sc: Scope) => fc.Arbitrary<Act>> = {
       meta('acquire', `acquire(${c})`, (s) => s.ctl.holder !== c && s.ctl.c.get(c)!.op === 'NONE' && s.ctl.acquisitions <= sc.maxLeaderChanges, (s) => s.acquire(c)),
     ),
   plan: (sc) =>
-    fc.tuple(cc(sc), fc.constantFrom('ADVANCE' as const, 'CLOSE' as const)).map(([c, op]) =>
+    fc.tuple(cc(sc), fc.constantFrom('ADVANCE' as const, 'CLOSE' as const, 'ARRCLOSE' as const)).map(([c, op]) =>
       meta(
         'plan',
         `plan(${c}, ${op})`,
         (s) =>
           s.ctl.holder === c &&
           s.ctl.c.get(c)!.op === 'NONE' &&
-          (op === 'ADVANCE' ? s.counters().seq > s.counters().serving : sc.openBatch && !s.env.windowOpen && !s.closed()),
+          (op === 'ADVANCE' ? s.counters().seq > s.counters().serving : op === 'ARRCLOSE' ? s.arrivalCarved() : sc.openBatch && !s.env.windowOpen && !s.closed()),
         (s) => s.plan(c, op),
       ),
     ),
@@ -127,6 +134,6 @@ export const COMMANDS: Record<SpecAction, (sc: Scope) => fc.Arbitrary<Act>> = {
 
 /** 명령 모음과 고르는 무게: 진입·입장·리더 쓰기는 자주, 묶음 구간 끝은 드물게(묶음이 모일 틈을 둔다), 나머지는 보통 */
 export function commandArbs(sc: Scope): Array<{ arbitrary: fc.Arbitrary<Act>; weight: number }> {
-  const often = new Set<SpecAction>(['enterPreempt', 'enterNumber', 'enterRecord', 'enterBatchRecord', 'takeBatchResult', 'admit', 'admitCheck', 'admitClaim', 'admitSlot', 'admitSettle', 'admitRelease', 'plan', 'applyWrite', 'publishBatch']);
+  const often = new Set<SpecAction>(['enterPreempt', 'enterNumber', 'enterNumberArrival', 'enterRecord', 'enterBatchRecord', 'takeBatchResult', 'admit', 'admitCheck', 'admitClaim', 'admitSlot', 'admitSettle', 'admitRelease', 'plan', 'applyWrite', 'publishBatch']);
   return (Object.keys(COMMANDS) as SpecAction[]).map((n) => ({ arbitrary: COMMANDS[n](sc), weight: n === 'windowEnds' ? 1 : often.has(n) ? 12 : 4 }));
 }
