@@ -221,10 +221,11 @@ type RestrictedCta = 'loading' | { text: string; appealHref?: string } | null;
 
 function useRestrictedCta(phase: BookingPhase | undefined, session: FanSession, now: number | undefined): RestrictedCta {
   const r = useBookingRestriction(session);
-  const at = now ?? Date.now();
-  const gate = restrictionGate(phase, session, r, at);
+  // 서버 그리기와 첫 효과 전에는 시각도 단계도 없다(BookingProvider가 둘을 함께 정한다). 이때 시계를 읽으면 ISR 항목이 저장되지 않는다(isr.spec.mjs)
+  if (now === undefined) return null;
+  const gate = restrictionGate(phase, session, r, now);
   if (gate !== 'restricted') return gate;
-  return restrictionCta(r, at, appealHref);
+  return restrictionCta(r, now, appealHref);
 }
 
 function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>, restricted: RestrictedCta): CtaModel {

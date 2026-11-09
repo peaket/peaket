@@ -16,6 +16,7 @@ export default defineConfig({
   use: { trace: 'off', screenshot: 'off' },
   projects: [
     { name: 'js', testMatch: /js\.spec\.mjs$/ },
+    { name: 'isr', testMatch: /isr\.spec\.mjs$/ },
     { name: 'lighthouse', testMatch: /lighthouse\.spec\.mjs$/ },
   ],
   // 앱마다 운영 빌드 서버 하나(4101~4105)와 대기실 경량 페이지 정적 서버(4106). 밖에서 띄웠으면(lib/docker.mjs) 여기서 띄우지 않는다
