@@ -89,6 +89,7 @@ export const ROUTES: readonly RouteRule[] = [
   handler('/logout'),
   handler('/reauth/[provider]'),
   handler('/reauth/token'),
+  handler('/demo/pg-simulator/authenticate'),
   handler('/v1/identity/link-proposals/[proposalId]'),
   handler('/v1/identity/link-proposals/[proposalId]/separate-account'),
 ];

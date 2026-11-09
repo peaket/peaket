@@ -11,6 +11,9 @@ const seedCssPoc = process.env.PEAKET_POC === 'seed-css';
 // - Cache Components를 켠다: (cached) 묶음은 빌드 때 정적 셸, (request) 묶음은 루트 레이아웃이 요청 nonce를 읽어 정적 셸 없이 그린다(FE-T35).
 // - 해시 방식(SRI)을 켠다: 외부 스크립트에 integrity를 단다(배포 경로의 변조 확인). App Router 인라인 스크립트는 덮지 못한다(SRI PoC, csp/web.spec.mjs).
 // - 화면 묶음별 보안 헤더는 proxy.ts가 단다.
+// 데모 SIMULATOR 결제창은 빌드 값이 있을 때만 묶음에 든다(FE-T21, ADR-0253). 그 밖은 대역을 싣는다
+const simulatorWindowModule = process.env.NEXT_PUBLIC_PEAKET_PG_SIMULATOR === '1' ? './src/_pages/checkout/windows/simulator.ts' : './src/_pages/checkout/windows/simulator-absent.ts';
+
 const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -18,7 +21,7 @@ const config: NextConfig = {
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
-  turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: seedLayeredAlias(import.meta.dirname) },
+  turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: { ...seedLayeredAlias(import.meta.dirname), 'peaket-pg-simulator-window': simulatorWindowModule } },
   pageExtensions: seedCssPoc ? ['poc.tsx', 'tsx', 'ts', 'jsx', 'js'] : ['tsx', 'ts', 'jsx', 'js'],
   // 루트 레이아웃이 둘((cached)·(request))이라 맞는 경로가 없는 주소는 app/global-not-found.tsx가 받는다(Next.js 16 실험 기능)
   cacheComponents: true,

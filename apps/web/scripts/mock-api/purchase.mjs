@@ -44,6 +44,10 @@ export function createPurchaseMock({ now, state }) {
   const orders = new Map();
   /** 접수한 주문 → { at, pg } */
   const accepted = new Map();
+  /** holdId → 회차 ID(결제창 복귀 주소) */
+  const holdEvents = new Map();
+  /** 주문 ID → holdId */
+  const orderHolds = new Map();
 
   /** 스냅샷을 연 입장 토큰의 임시 공개키를 둔다. 처음이고 키가 없으면 false */
   function open(token, clientKey) {
@@ -86,8 +90,56 @@ export function createPurchaseMock({ now, state }) {
       if (readHold && req.method === 'GET') {
         const found = holds.get(readHold[1]);
         if (!sessions.get(req.headers['x-admission-token'])) return (io.problem(401, 'purchase-session-ended', '예매 시간이 끝났습니다'), true);
-        if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'not-found', '찾을 수 없습니다'), true);
+        if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'hold-not-found', '홀드를 찾을 수 없습니다'), true);
         return (io.send(200, found), true);
+      }
+      // 해제·연장(ADR-0254): 서명을 확인한다. holdAction=normal|gone|in-payment|down|already(연장만)
+      const extension = /^\/v1\/holds\/([^/]+)\/extension$/.exec(p);
+      if ((readHold && req.method === 'DELETE') || (extension && req.method === 'POST')) {
+        const { send, problem } = io;
+        const id = (extension ?? readHold)[1];
+        void (async () => {
+          const raw = await readRaw(req);
+          const bad = verify(req, p + url.search, raw);
+          if (bad) return problem(401, bad, '요청 서명을 확인하지 못했습니다');
+          const found = holds.get(id);
+          const mode = state.holdAction;
+          if (mode === 'gone' || !found) return problem(404, 'hold-not-found', '홀드를 찾을 수 없습니다');
+          if (mode === 'in-payment') return problem(409, 'hold-in-payment', '결제가 진행 중인 홀드입니다');
+          if (mode === 'down') return problem(503, 'seat-store-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
+          if (extension) {
+            if (!found.extendable || mode === 'already') return problem(409, 'hold-already-extended', '이미 연장한 홀드입니다');
+            found.expiresAt = new Date(Date.parse(found.expiresAt) + 180_000).toISOString();
+            found.extendable = false;
+            return send(200, found);
+          }
+          holds.delete(id);
+          return send(204, undefined);
+        })().catch(() => problem(500, 'internal', '오류'));
+        return true;
+      }
+      // 결제 시도(BUILD_ORDER HOT-358): SIMULATOR 결제창 값을 준다. payments=normal|paused|down|exceeded|accepted
+      const startPay = /^\/v1\/orders\/([^/]+)\/payments$/.exec(p);
+      if (startPay && req.method === 'POST') {
+        const { send, problem } = io;
+        void (async () => {
+          const raw = await readRaw(req);
+          const bad = verify(req, p + url.search, raw);
+          if (bad) return problem(401, bad, '요청 서명을 확인하지 못했습니다');
+          const orderId = startPay[1];
+          const entry = [...orders.values()].find((o) => o.order.orderId === orderId);
+          if (!entry) return problem(404, 'not-found', '찾을 수 없습니다');
+          const mode = state.payments;
+          if (mode === 'paused') return problem(503, 'new-payment-paused', '새 결제를 잠시 멈췄습니다', { 'retry-after': '5' }, { holdRemainingSeconds: 240 });
+          if (mode === 'down') return problem(503, 'pg-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '2' });
+          if (mode === 'exceeded') return problem(409, 'payment-attempts-exceeded', '결제 시도 횟수를 넘었습니다');
+          if (mode === 'accepted') return problem(409, 'payment-already-accepted', '이미 접수했습니다');
+          const eventId = holdEvents.get(orderHolds.get(orderId));
+          const back = `${url.searchParams.get('webOrigin') ?? process.env.PEAKET_WEB_ORIGIN ?? 'http://localhost:3000'}/booking/${encodeURIComponent(eventId)}/checkout/return?order=${encodeURIComponent(orderId)}&pg=SIMULATOR`;
+          const held = holds.get(orderHolds.get(orderId));
+          return send(201, { attemptId: randomUUID(), pg: 'SIMULATOR', switched: false, holdExpiresAt: held?.expiresAt, allowedPayMethods: ['CARD'], checkout: { clientKey: 'sim_ck_mock', customerKey: 'mock-customer', orderId, orderName: '데모 공연', amount: entry.order.amount, successUrl: back, failUrl: back } });
+        })().catch(() => problem(500, 'internal', '오류'));
+        return true;
       }
       const payStatus = /^\/v1\/orders\/([^/]+)\/payment-status$/.exec(p);
       if (payStatus && req.method === 'GET') {
@@ -149,12 +201,17 @@ export function createPurchaseMock({ now, state }) {
           if (mode === 'no-id') return problem(403, 'identity-verification-required', '본인확인이 필요합니다');
           if (mode === 'restricted') return problem(403, 'booking-restricted', '예매가 제한되어 있습니다');
           if (mode === 'other-tab') return problem(409, 'hold-already-ordered', '이미 주문을 만들었습니다');
+          if (mode === 'lost-response') {
+            const prior = [...orderHolds].find(([, h]) => h === body?.holdId)?.[0];
+            if (prior) return problem(409, 'hold-already-ordered', '이미 주문을 만들었습니다', {}, { orderId: prior });
+          }
           if (mode === 'paused') return problem(423, 'sale-paused', '판매가 잠시 멈췄습니다');
           if (mode === 'sale-ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
           if (mode === 'down') return problem(503, 'internal', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
           if (AUTH_FAILURES[mode]) return problem(401, AUTH_FAILURES[mode], '구매 세션을 확인하지 못했습니다');
           const order = { orderId: randomUUID(), amount: held.totalAmount, status: 'CREATED', items: held.seats };
           orders.set(key, { order, body: raw.toString('utf8') });
+          orderHolds.set(order.orderId, body.holdId);
           return send(201, order);
         })().catch(() => io.problem(500, 'internal', '오류'));
         return true;
@@ -192,6 +249,7 @@ export function createPurchaseMock({ now, state }) {
         const seats = seatIds.map(seatOf);
         const created = { holdId: randomUUID(), seatIds, expiresAt: new Date(now() + HOLD_MS).toISOString(), extendable: true, fencingToken: 1, seats, totalAmount: seats.reduce((n, s) => n + s.price, 0), ...(body?.auto ? { assignResult: 'FIRST' } : {}) };
         holds.set(created.holdId, created);
+        holdEvents.set(created.holdId, hold[1]);
         return send(201, created);
       })().catch(() => problem(500, 'internal', '오류'));
       return true;

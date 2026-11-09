@@ -28,6 +28,6 @@ export async function loadPaymentWindow(a: PaymentAttempt): Promise<PaymentWindo
   if (a.pg === 'TOSS') return (await import('./toss')).tossWindow(a);
   if (a.pg === 'PORTONE') return (await import('./portone')).portoneWindow(a);
   // 데모 전용: 빌드 값이 없으면 분기째 지워져 운영 묶음에 들지 않는다(FE-T21)
-  if (process.env.NEXT_PUBLIC_PEAKET_PG_SIMULATOR === '1') return (await import('./simulator')).simulatorWindow(a);
+  if (process.env.NEXT_PUBLIC_PEAKET_PG_SIMULATOR === '1') return (await import('peaket-pg-simulator-window')).simulatorWindow(a);
   throw new PaymentWindowError('failed');
 }

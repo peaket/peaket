@@ -274,11 +274,10 @@ interface Fan {
   seq: number;
 }
 
-async function fan(eventId: string): Promise<Fan> {
+async function fan(eventId: string, accountId: string = randomUUID()): Promise<Fan> {
   const jti = randomUUID();
   const login = randomUUID();
-  const accountId = randomUUID();
-  const pid = `pid-${randomUUID()}`;
+  const pid = pidOf.get(accountId) ?? `pid-${randomUUID()}`;
   pidOf.set(accountId, pid);
   const token = signAdmission(admissionKey, claimsOf({ nowMs: Date.now(), jti, accountId, loginSessionId: login, eventId }, { jny: randomUUID() }));
   const client = clientKeyOf();
@@ -395,7 +394,7 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     expect(createHash('sha256').update(attemptRes.payload).digest('hex')).toHaveLength(64);
   }, 120_000);
 
-  test('HOT070_ 예매 제한 403은 그 세션의 홀드를 풀고 해제는 같은 계정의 재홀드를 30초 막는다', async () => {
+  test('P-T49 HOT070_ 예매 제한 403은 그 세션의 홀드를 풀고 해제는 같은 계정의 재홀드를 30초 막는다', async () => {
     const w = await world();
     const f = await fan(w.eventId);
     const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[1]] }, { idem: randomUUID() });
@@ -410,5 +409,19 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     expect(again.statusCode).toBe(409);
     expect(json(again).type).toBe('seat-recently-released');
     expect((await call(f, 'GET', `/v1/holds/${holdId}`, undefined, { unsigned: true })).statusCode).toBe(404);
+  }, 60_000);
+
+  test('S-T33 ⑥ S-T29 구매 세션을 나가면(LEFT) 그 세션의 홀드가 풀리고, 같은 계정의 새 세션도 30초 동안 다시 잡지 못한다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[2]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    const left = await call(f, 'DELETE', `/v1/events/${w.eventId}/purchase-session`);
+    expect(left.statusCode, left.payload).toBe(204);
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '2'], { key: seatKeys.bitmap(w.eventId) }))).toBe(0);
+    const again = await fan(w.eventId, f.accountId);
+    const retry = await call(again, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[2]] }, { idem: randomUUID() });
+    expect(retry.statusCode, retry.payload).toBe(409);
+    expect(json(retry).type).toBe('seat-recently-released');
   }, 60_000);
 });

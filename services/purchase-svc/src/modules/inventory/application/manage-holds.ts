@@ -1,9 +1,8 @@
 // 홀드 다시 읽기·해제·연장과 주문 표시·세션 끝 해제(docs/features/seat-hold.md §5 '해제·연장·다시 읽기와 결제 정지 멈춤의 첫 구현', BUILD_ORDER HOT-070, ADR-0254).
 import type { Clock, Deadline, PlatformLogger } from '@peaket/platform';
-import { heldSeatIdsOf } from '../adapters/redis-order-holds.js';
 import { AdmissionTokenRejected, type AdmissionKeys, verifyAdmissionToken } from '../domain/admission-token.js';
 import { type HoldLifecycle, type HoldReleaseReason, type HoldTarget, holdSeatsView } from '../domain/hold-lifecycle.js';
-import { KEEP_AFTER_SALE_END_MS, KEY_PART, SEAT_CALL_CAP_MS, SEAT_CALL_MIN_REMAINING_MS, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
+import { heldSeatIdsOf, KEEP_AFTER_SALE_END_MS, KEY_PART, SEAT_CALL_CAP_MS, SEAT_CALL_MIN_REMAINING_MS, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
 import type { EventSeatConfig, PurchaseSessionStore, SeatCallOptions, SeatMap, SeatSignals, SessionHoldLists } from '../domain/ports.js';
 import type { SessionHoldEntry } from '../domain/purchase-session.js';
 import { HoldError, storeUnavailableError } from './hold-error.js';

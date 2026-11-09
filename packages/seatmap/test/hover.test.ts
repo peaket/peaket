@@ -194,3 +194,33 @@ describe('낮은 배율의 좌석 클릭(ADR-0236)', () => {
     expect(view().camera.scale).toBe(scale);
   });
 });
+
+describe('방금 놓은 좌석(docs/frontend.md §4.2.2 6행, BUILD_ORDER HOT-356)', () => {
+  const engineOf = () => {
+    const e = new SeatMapEngine({ ctx: fakeCtx() as never, width: 600, height: 400, dpr: 1, theme: 'light' });
+    const file = makeLayout();
+    e.load(file, encodeSnapshot({ layoutVersion: file.layoutVersion, seatEpoch: 1, sections: [[0, 1], [1, 1], [2, 1], [3, 1]], occupied: Array(decodeLayout(file).N).fill(false) as boolean[] }));
+    return e;
+  };
+  it('좌석 ID로 표시하면 시간이 지나기 전에는 고를 수 없고, 지나면 다시 고를 수 있다', () => {
+    const e = engineOf();
+    const k = 5;
+    const id = e.L.seatIds[0]![k]!;
+    expect(e.canSelect(k)).toBe(true);
+    e.markReleased(id, Date.now() + 30_000);
+    expect(e.isRecentlyReleased(k, Date.now())).toBe(true);
+    expect(e.canSelect(k)).toBe(false);
+    expect(e.pruneReleased(Date.now() + 31_000)).toBeUndefined();
+    expect(e.canSelect(k)).toBe(true);
+  });
+  it('setMine은 좌석 ID로 내 좌석 표시를 켜고 끄며, 내 좌석은 놓은 좌석이어도 고른 상태로 둔다', () => {
+    const e = engineOf();
+    const id = e.L.seatIds[0]![3]!;
+    e.setMine(id, true);
+    expect(e.isMine(3)).toBe(true);
+    e.setMine(id, true);
+    expect(e.isMine(3)).toBe(true);
+    e.setMine(id, false);
+    expect(e.isMine(3)).toBe(false);
+  });
+});

@@ -588,7 +588,7 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', holdAction: 'normal', payments: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
   /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
   let openAtOverride;
   const scheduleOf = (eventId) => {
@@ -669,7 +669,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'order', 'accept', 'pay', 'ticketEvent', 'partner', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }

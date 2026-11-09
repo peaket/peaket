@@ -170,6 +170,11 @@ export function CheckoutLive({ eventId }: { eventId: string }) {
     return () => clearTimeout(t);
   }, [phase, eventId]);
 
+  /** 서버가 준 남은 시간(ms)으로 마감을 다시 잡는다 */
+  const syncDeadline = (remaining: number): void => {
+    if (!Number.isFinite(remaining)) return;
+    deadline.current = { mono: performance.now() + remaining, wall: Date.now() + remaining };
+  };
   const seatsHref = `/booking/${encodeURIComponent(eventId)}/seats`;
   const eventHref = `/events/${encodeURIComponent(eventId)}`;
   const clock = left !== null ? holdClock(left) : null;
@@ -260,7 +265,7 @@ export function CheckoutLive({ eventId }: { eventId: string }) {
   }
   return (
     <CheckoutConsentProvider initialAgreed={false} storageKey={`peaket.checkout.${hold.holdId}`}>
-      <Ready eventId={eventId} hold={hold} event={event} seatsHref={seatsHref} expired={expired} setExpired={setExpired} setPhase={setPhase} admission={admission.current!} shell={shell} clock={clock} />
+      <Ready eventId={eventId} hold={hold} event={event} seatsHref={seatsHref} expired={expired} setExpired={setExpired} setPhase={setPhase} admission={admission.current!} syncDeadline={syncDeadline} shell={shell} clock={clock} />
     </CheckoutConsentProvider>
   );
 }
@@ -274,11 +279,13 @@ interface ReadyProps {
   setExpired(v: boolean): void;
   setPhase(p: Phase): void;
   admission: StoredAdmissionRef;
+  /** 서버가 준 남은 시간으로 홀드 타이머를 맞춘다(결제 일시 정지로 멈춘 시간 반영, ADR-0085) */
+  syncDeadline(remainingMs: number): void;
   shell(children: React.ReactNode, bottomBar?: React.ReactNode): React.ReactElement;
   clock: ReturnType<typeof holdClock> | null;
 }
 
-function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase, admission, shell, clock }: ReadyProps) {
+function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase, admission, syncDeadline, shell, clock }: ReadyProps) {
   const { clear } = useCheckoutConsent();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -356,6 +363,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
         setAttemptState('unavailable');
         return;
       case 'pay-paused':
+        if (out.holdRemainingSeconds !== undefined) syncDeadline(out.holdRemainingSeconds * 1000);
         setNotice({ text: out.holdRemainingSeconds !== undefined ? `결제가 잠시 멈췄습니다. 홀드 남은 시간은 ${Math.ceil(out.holdRemainingSeconds / 60)}분이고 멈춘 동안 줄지 않습니다` : '결제가 잠시 멈췄습니다', tone: 'warning' });
         setAttemptState('paused');
         attemptRetry.current = setTimeout(restart, Math.max(ATTEMPT_RETRY_MS, (out.retryAfterSeconds ?? 0) * 1000));
@@ -367,12 +375,15 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
   };
 
   /** 결제 시도를 시작하고 결제창을 준비한다(주문 뒤 한 번, 수단을 바꾸거나 일시 장애 뒤 다시) */
-  const startAttempt = async (payMethod?: PayMethod): Promise<void> => {
+  const startAttempt = async (payMethod?: PayMethod, quiet = false): Promise<void> => {
     if (!orderId) return;
     const generation = ++attemptGeneration.current;
     if (attemptRetry.current) clearTimeout(attemptRetry.current);
-    setAttemptState('starting');
-    setNotice(null);
+    // 멈춘 동안의 자동 재시도는 안내를 지우지 않는다(되살아나면 지운다)
+    if (!quiet) {
+      setAttemptState('starting');
+      setNotice(null);
+    }
     try {
       const [{ ApiError, OPERATIONS }, { PurchaseKeyError, openPurchaseSession }, api, windows] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api'), import('../windows')]);
       const client = api.browserApiClient();
@@ -390,9 +401,11 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
           const r = await send();
           if (generation !== attemptGeneration.current) return;
           const a = attemptOf(r.data);
-          if (!a) return applyAttempt({ kind: 'unavailable' }, () => void startAttempt(payMethod));
+          if (!a) return applyAttempt({ kind: 'unavailable' }, () => void startAttempt(payMethod, true));
           setAttempt(a);
           setAttemptState('idle');
+          setNotice(null);
+          if (a.holdExpiresAt) syncDeadline(Date.parse(a.holdExpiresAt) - (Date.parse(r.headers.get('date') ?? '') || Date.now()));
           sessionStorage.setItem(attemptStorageKey(orderId), a.attemptId);
           const win = await windows.loadPaymentWindow(a);
           if (generation !== attemptGeneration.current) return;
@@ -401,16 +414,16 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
           return;
         } catch (e) {
           if (generation !== attemptGeneration.current) return;
-          if (e instanceof PurchaseKeyError) return applyAttempt(e.reason === 'storage' ? { kind: 'retry' } : { kind: 'ended' }, () => void startAttempt(payMethod));
+          if (e instanceof PurchaseKeyError) return applyAttempt(e.reason === 'storage' ? { kind: 'retry' } : { kind: 'ended' }, () => void startAttempt(payMethod, true));
           const out = attemptOutcome(e instanceof ApiError ? { status: e.status, type: e.type, extensions: e.extensions, ...(e.retryAfter !== null && Number.isFinite(Number(e.retryAfter)) ? { retryAfterSeconds: Number(e.retryAfter) } : {}) } : {});
-          if (out.kind !== 'refresh' || refreshed) return applyAttempt(out, () => void startAttempt(payMethod));
+          if (out.kind !== 'refresh' || refreshed) return applyAttempt(out, () => void startAttempt(payMethod, true));
           refreshed = true;
           const r2 = await api.refreshFanToken();
-          if (r2 !== 'ok') return applyAttempt(r2 === 'rejected' ? { kind: 'ended' } : { kind: 'retry' }, () => void startAttempt(payMethod));
+          if (r2 !== 'ok') return applyAttempt(r2 === 'rejected' ? { kind: 'ended' } : { kind: 'retry' }, () => void startAttempt(payMethod, true));
         }
       }
     } catch {
-      if (generation === attemptGeneration.current) applyAttempt({ kind: 'retry' }, () => void startAttempt(payMethod));
+      if (generation === attemptGeneration.current) applyAttempt({ kind: 'retry' }, () => void startAttempt(payMethod, true));
     }
   };
 
@@ -679,7 +692,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
                   ))}
                 </div>
               ) : null}
-              {attempt?.pg === 'SIMULATOR' ? <p className="t-sm muted">데모 결제창입니다. 실제 요금은 청구되지 않습니다</p> : null}
+              {process.env.NEXT_PUBLIC_PEAKET_PG_SIMULATOR === '1' && attempt?.pg === 'SIMULATOR' ? <p className="t-sm muted">데모 결제창입니다. 실제 요금은 청구되지 않습니다</p> : null}
               {attemptState === 'unavailable' ? (
                 <button className="btn btn-outline btn-sm self-start" type="button" onClick={() => void startAttempt(method ?? undefined)}>
                   결제 준비 다시 시도

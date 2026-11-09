@@ -181,3 +181,15 @@ export function holdFingerprint(seatIds: readonly string[]): string {
   if (seatIds.length === 0) throw new RangeError('홀드 지문을 만들 좌석이 없다');
   return createHash('sha256').update([...seatIds].sort().join('\n'), 'utf8').digest('hex');
 }
+
+/**
+ * 구매 세션 상태의 h:{holdId} 칸(좌석 ID 쉼표 목록)을 좌석 ID들로 나눈다. 비었거나, 좌석 ID 모양이 아닌 조각·빈 조각·같은 좌석이 있거나, MAX_SEATS를 넘으면
+ * Error(망가진 칸. NOT_FOUND로 숨기지 않는다). 오류 글에 칸 값을 싣지 않는다
+ */
+export function heldSeatIdsOf(text: string): string[] {
+  const ids = text.split(',');
+  if (text === '' || ids.length > MAX_SEATS || ids.some((s) => !SEAT_ID_PATTERN.test(s)) || new Set(ids).size !== ids.length) {
+    throw new Error('구매 세션 상태의 홀드 목록 칸(h:{holdId})이 망가졌다');
+  }
+  return ids;
+}

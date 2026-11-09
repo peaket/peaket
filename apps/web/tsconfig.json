@@ -1,7 +1,7 @@
 {
   "extends": "@peaket/config/tsconfig/nextjs.json",
   "compilerOptions": {
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "peaket-pg-simulator-window": ["./src/_pages/checkout/windows/simulator.ts"] },
     "allowImportingTsExtensions": true
   },
   "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],

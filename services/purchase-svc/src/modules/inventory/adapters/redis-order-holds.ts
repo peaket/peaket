@@ -3,7 +3,7 @@
 // 키에 넣는 값(jti·회차 ID·holdId)은 KEY_PART 모양을 다시 확인한다(해시 태그를 깨는 값이 키로 가지 않게. 모양이 틀리면 저장소를 부르지 않고 NOT_FOUND).
 // 주문 만료의 '홀드 남음' 읽기(holdLeft, BUILD_ORDER PRF-172)도 여기 둔다. 회차 ID가 좌석맵 판을 지나야 키가 되므로 모양을 따로 보지 않는다.
 import { type HotRedis, redisScript } from '@peaket/platform';
-import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
+import { heldSeatIdsOf, KEY_PART, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
 import type { OrderHoldCheck, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
 import { ORDER_HOLD_EXPIRY_LUA, ORDER_HOLD_LEFT_LUA, ORDER_HOLD_LUA } from './order-hold-lua.js';
 import { sessionKeys } from './redis-purchase-sessions.js';
@@ -25,17 +25,7 @@ export function orderHoldQueryShaped(q: OrderHoldQuery): boolean {
   return isKeyPart(q.eventId) && isKeyPart(q.purchaseSessionId) && isKeyPart(q.holdId) && typeof q.accountId === 'string' && q.accountId.length > 0;
 }
 
-/**
- * 구매 세션 상태의 h:{holdId} 칸(좌석 ID 쉼표 목록)을 좌석 ID들로 나눈다. 비었거나, 좌석 ID 모양이 아닌 조각·빈 조각·같은 좌석이 있거나, MAX_SEATS를 넘으면
- * Error(망가진 칸. NOT_FOUND로 숨기지 않는다). 오류 글에 칸 값을 싣지 않는다
- */
-export function heldSeatIdsOf(text: string): string[] {
-  const ids = text.split(',');
-  if (text === '' || ids.length > MAX_SEATS || ids.some((s) => !SEAT_ID_PATTERN.test(s)) || new Set(ids).size !== ids.length) {
-    throw new Error('구매 세션 상태의 홀드 목록 칸(h:{holdId})이 망가졌다');
-  }
-  return ids;
-}
+export { heldSeatIdsOf };
 
 /** 좌석맵 판의 좌석 → 홀드 확인 결과의 좌석(좌석 ID·등급·구역) */
 export const heldSeatOf = (r: SeatRef): { seatId: string; tierId: string; sectionId: string } => ({ seatId: r.seatId, tierId: r.tierId, sectionId: r.sectionId });
