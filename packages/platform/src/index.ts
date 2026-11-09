@@ -3,7 +3,7 @@ export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clo
 export { DEBUG_ERRORS_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
 export { currentDeadline, requestContext, runInRequestContext, type RequestContext } from './context.js';
 export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
-export { AcceptTextPlain, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
+export { AcceptTextPlain, BodyLimit, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
 // 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
@@ -118,7 +118,7 @@ export {
   type MonthlyPartitionSpec,
 } from './partitions.js';
 export { STAT_SNAPSHOT_KEEP_DAYS, STAT_SNAPSHOT_TABLE, statSnapshotTable, takeStatSnapshot } from './stat-snapshot.js';
-export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
+export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, deleteInBatches, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type BatchDeleteOptions, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
 export { STREAM_KEY_TTL_AFTER_SALE_MS, ackAndTrimStream, compareStreamIds, expireStreamAfterSale, nextStreamId, type RedisCommander } from './redis-stream.js';
 export { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, createHotRedis, hotRedisOver, isRedisOutOfMemory, isRedisUnavailable, redisClusterOptions, redisScript, type CallOptions, type HotRedis, type HotRedisOptions, type RawRedis, type RedisScript } from './redis.js';
 export {

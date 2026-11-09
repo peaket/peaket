@@ -516,7 +516,7 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
   const headersOf = (over: Record<string, string> = {}, ts = nowSec, b = body): Record<string, string> => ({ 'webhook-id': 'msg_1', 'webhook-timestamp': String(ts), 'webhook-signature': sign('msg_1', ts, b), ...over });
 
   it('P-T16_서명이 맞으면 webhook-id를 중복 제거 키로 쓰고 상태를 싣지 않는다 [ASVS v5.0.0-11.2.3]', () => {
-    expect(gatewayOf().parseWebhook(headersOf(), body)).toEqual({ dedupKey: 'PORTONE:msg_1', paymentRef: PAYMENT_ID, orderRef: ORDER_ID });
+    expect(gatewayOf().parseWebhook(headersOf(), body)).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: PAYMENT_ID, orderRef: ORDER_ID });
   });
 
   it('P-T16_머리 이름의 대소문자는 가리지 않는다', () => {
@@ -528,14 +528,14 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
     const later = nowSec + 60;
     const a = gatewayOf().parseWebhook(headersOf(), body);
     const b = gatewayOf().parseWebhook(headersOf({}, later), body);
-    expect(a).not.toBeNull();
+    expect(a.kind).toBe('TRIGGER');
     expect(b).toEqual(a);
   });
 
   it('P-T16_시크릿이 둘이면 옛 시크릿의 서명도 받는다(무중단 교체)', () => {
     const gateway = gatewayOf({ webhookSecrets: [WEBHOOK_SECRET, OLD_WEBHOOK_SECRET] });
-    expect(gateway.parseWebhook(headersOf({ 'webhook-signature': sign('msg_1', nowSec, body, OLD_WEBHOOK_KEY) }), body)).not.toBeNull();
-    expect(gateway.parseWebhook(headersOf({ 'webhook-signature': `v1a,xxx v1,${sign('msg_1', nowSec, body).slice(3)}` }), body)).not.toBeNull();
+    expect(gateway.parseWebhook(headersOf({ 'webhook-signature': sign('msg_1', nowSec, body, OLD_WEBHOOK_KEY) }), body)).toMatchObject({ kind: 'TRIGGER' });
+    expect(gateway.parseWebhook(headersOf({ 'webhook-signature': `v1a,xxx v1,${sign('msg_1', nowSec, body).slice(3)}` }), body)).toMatchObject({ kind: 'TRIGGER' });
   });
 
   it.each<[string, () => Parameters<PortoneGateway['parseWebhook']>]>([
@@ -551,27 +551,27 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
     ['시각이 숫자가 아님', () => [headersOf({ 'webhook-timestamp': 'abc' }), body]],
     ['JSON이 아님', () => [headersOf({}, nowSec, '{'), '{']],
     ['null 본문', () => [headersOf({}, nowSec, 'null'), 'null']],
-  ])('P-T17_%s이면 null이다 [ASVS v5.0.0-16.5.3]', (_n, args) => {
-    expect(gatewayOf().parseWebhook(...args())).toBeNull();
+  ])('P-T17_%s이면 거절이다 [ASVS v5.0.0-16.5.3]', (_n, args) => {
+    expect(gatewayOf().parseWebhook(...args())).toMatchObject({ kind: 'INVALID' });
   });
 
-  it('P-T17_webhook-id가 200자를 넘으면 null이다 [ASVS v5.0.0-2.2.1]', () => {
+  it('P-T17_webhook-id가 200자를 넘으면 거절이다 [ASVS v5.0.0-2.2.1]', () => {
     const id = 'x'.repeat(201);
-    expect(gatewayOf().parseWebhook(headersOf({ 'webhook-id': id, 'webhook-signature': sign(id, nowSec, body) }), body)).toBeNull();
+    expect(gatewayOf().parseWebhook(headersOf({ 'webhook-id': id, 'webhook-signature': sign(id, nowSec, body) }), body)).toMatchObject({ kind: 'INVALID', reason: 'HEADER' });
   });
 
   it.each([
     ['5분 지남', nowSec - 300 - 1],
     ['5분 앞', nowSec + 300 + 1],
-  ])('P-T17_시각이 %s면 null이다(시각 허용 폭 5분) [ASVS v5.0.0-16.5.3]', (_n, ts) => {
-    expect(gatewayOf().parseWebhook(headersOf({}, ts), body)).toBeNull();
+  ])('P-T17_시각이 %s면 거절이다(시각 허용 폭 5분) [ASVS v5.0.0-16.5.3]', (_n, ts) => {
+    expect(gatewayOf().parseWebhook(headersOf({}, ts), body)).toMatchObject({ kind: 'INVALID', reason: 'TIMESTAMP' });
   });
 
   it.each([
     ['5분 전 경계', nowSec - 300],
     ['5분 뒤 경계', nowSec + 300],
   ])('P-T17_시각이 %s이면 받는다', (_n, ts) => {
-    expect(gatewayOf().parseWebhook(headersOf({}, ts), body)).not.toBeNull();
+    expect(gatewayOf().parseWebhook(headersOf({}, ts), body)).toMatchObject({ kind: 'TRIGGER' });
   });
 
   const signedBody = (over: unknown): [Record<string, string>, string] => {
@@ -583,8 +583,8 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
     expect(gatewayOf().parseWebhook(...signedBody({ type, data: { paymentId: PAYMENT_ID } }))).toMatchObject({ paymentRef: PAYMENT_ID });
   });
 
-  it.each(['Transaction.Ready', 'Transaction.DisputeCreated', 'BillingKey.Issued', 'Something.New', undefined])('P-T17_결제 사건이 아닌 %s는 null이다', (type) => {
-    expect(gatewayOf().parseWebhook(...signedBody({ type, data: { paymentId: PAYMENT_ID } }))).toBeNull();
+  it.each(['Transaction.Ready', 'Transaction.DisputeCreated', 'BillingKey.Issued', 'Something.New', undefined])('P-T17_결제 사건이 아닌 %s는 거절이 아니라 무시다 [ASVS v5.0.0-16.5.3]', (type) => {
+    expect(gatewayOf().parseWebhook(...signedBody({ type, data: { paymentId: PAYMENT_ID } }))).toEqual({ kind: 'IGNORED' });
   });
 
   it.each<[string, unknown]>([
@@ -594,16 +594,16 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
     ['paymentId에 줄바꿈', { type: 'Transaction.Paid', data: { paymentId: 'pay-1\n2' } }],
     ['paymentId가 200자를 넘음', { type: 'Transaction.Paid', data: { paymentId: 'x'.repeat(201) } }],
     ['data 없음', { type: 'Transaction.Paid' }],
-  ])('P-T17_%s이면 null이다 [ASVS v5.0.0-2.2.1]', (_n, payload) => {
-    expect(gatewayOf().parseWebhook(...signedBody(payload))).toBeNull();
+  ])('P-T17_%s이면 거절이다 [ASVS v5.0.0-2.2.1]', (_n, payload) => {
+    expect(gatewayOf().parseWebhook(...signedBody(payload))).toMatchObject({ kind: 'INVALID', reason: 'BODY' });
   });
 
   it('P-T16_pay- 접두사가 없는 paymentId면 주문 ID를 싣지 않는다', () => {
-    expect(gatewayOf().parseWebhook(...signedBody({ type: 'Transaction.Paid', data: { paymentId: 'other-ref' } }))).toEqual({ dedupKey: 'PORTONE:msg_1', paymentRef: 'other-ref' });
+    expect(gatewayOf().parseWebhook(...signedBody({ type: 'Transaction.Paid', data: { paymentId: 'other-ref' } }))).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: 'other-ref' });
   });
 
   it('P-T17_웹훅 시크릿이 없으면 어떤 웹훅도 받지 않는다 [ASVS v5.0.0-16.5.3]', () => {
-    expect(gatewayOf({ webhookSecrets: [] }).parseWebhook(headersOf(), body)).toBeNull();
+    expect(gatewayOf({ webhookSecrets: [] }).parseWebhook(headersOf(), body)).toMatchObject({ kind: 'INVALID', reason: 'NO_SECRET' });
   });
 });
 

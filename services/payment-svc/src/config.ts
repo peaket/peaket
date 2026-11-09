@@ -152,6 +152,11 @@ export function assertPgAdapters(env: Record<string, string | undefined>, adapte
   if (!adapters.toss) throw new Error('PEAKET_PG_TOSS_SECRET_KEY가 없다(local·ci 밖에서는 토스 어댑터가 있어야 시작한다)');
 }
 
+/** 토스 경로의 웹훅으로 시뮬레이터 결제를 받는 환경인가(local·ci뿐, docs/features/payment.md §5 '웹훅 받기의 첫 구현', BUILD_ORDER HOT-150) */
+export function webhookAcceptsSimulator(env: Record<string, string | undefined>): boolean {
+  return env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';
+}
+
 export interface PgCallGuardConfig {
   /** PEAKET_PAYMENT_POD_COUNT: 그 서비스의 최대 복제 수(local·ci에서 비면 1 [가정]) */
   readonly podCount: number;

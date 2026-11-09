@@ -1,6 +1,6 @@
 // payment DB의 표(docs/data.md §2 ERD payment·payment_event·payment_confirm_job과 §4 '결제 표 마이그레이션', docs/features/payment.md §2 '승인 명령 접수의 첫 구현',
 // BUILD_ORDER PRF-180, ADR-0114). 마이그레이션은 0000_payment.sql이고, Outbox 부모 표는 Drizzle 0.45가 나타내지 못해 그 SQL에 손으로 덧붙였다.
-// 다른 표(webhook_receipt·payment_entry_pause·payment_cancel 등)는 그 표를 쓰는 단계가 더한다.
+// 다른 표(payment_entry_pause·payment_cancel 등)는 그 표를 쓰는 단계가 더한다.
 // drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다. 상태 목록은 도메인 상수와 같은 차례로 글로 적는다.
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, customType, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -59,6 +59,8 @@ export const payment = pgTable(
     anomalyLoggedAt: at('anomaly_logged_at'),
     // 포트원 결제 시도 ID(txId). 승인 본문의 검증값이고 조회 답이 이 시도의 것인지 대조한다. 비밀이 아니라 결과가 정해져도 지우지 않는다(BUILD_ORDER HOT-140 코드 리뷰, 마이그레이션 0004)
     pgTxId: text('pg_tx_id'),
+    // 웹훅 조회 신호를 쓰거나 실행기가 잡은 마지막 시각. 결제별 최소 간격의 기준이다(BUILD_ORDER HOT-150 코드 리뷰, 마이그레이션 0005)
+    queryTouchedAt: at('query_touched_at'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
@@ -66,6 +68,8 @@ export const payment = pgTable(
     index('payment_unknown_query_idx').on(t.nextQueryAt).where(sql`${t.status} = 'UNKNOWN'`),
     // 1시간 표시(docs/data.md §5.1 상태 쓸기 작업)
     index('payment_unknown_status_changed_idx').on(t.statusChangedAt).where(sql`${t.status} = 'UNKNOWN'`),
+    // 웹훅의 결제 참조로 원장 찾기(docs/data.md §5.1, BUILD_ORDER HOT-150, 마이그레이션 0005)
+    index('payment_pg_ref_idx').on(t.pg, t.pgPaymentRef),
     // UNKNOWN 행은 다음 조회 시각이 있어야 실행기가 잡는다(잡히지 않은 채 남는 행을 막는다)
     check('payment_unknown_next_query_check', sql`${t.status} <> 'UNKNOWN' OR ${t.nextQueryAt} IS NOT NULL`),
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
@@ -116,5 +120,24 @@ export const paymentConfirmJob = pgTable(
     index('payment_confirm_job_claim_idx').on(t.pg, t.nextAttemptAt, t.paymentId),
     check('payment_confirm_job_attempts_check', sql`${t.attempts} >= 0`),
     check('payment_confirm_job_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+  ],
+);
+
+/** 웹훅 수신 기록(docs/data.md §2·§4 '웹훅 수신 기록', BUILD_ORDER HOT-150, 마이그레이션 0005). 중복만 거른다. 본문·상태를 두지 않는다 */
+export const webhookReceipt = pgTable(
+  'webhook_receipt',
+  {
+    pg: text('pg').notNull(),
+    // 결제사별 중복 제거 키
+    dedupKey: text('dedup_key').notNull(),
+    // 찾은 원장 행. 승인 명령보다 먼저 온 웹훅을 받아야 해서 외래 키를 걸지 않는다
+    paymentId: uuid('payment_id'),
+    receivedAt: at('received_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pg, t.dedupKey] }),
+    // 받은 지 7일 [가정] 지난 행 지우기(docs/data.md §5.1)
+    index('webhook_receipt_received_at_idx').on(t.receivedAt),
+    check('webhook_receipt_pg_check', sql`${t.pg} IN (${PG_LIST})`),
   ],
 );

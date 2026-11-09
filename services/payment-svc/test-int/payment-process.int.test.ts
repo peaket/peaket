@@ -82,6 +82,7 @@ function spawnMain(env: Record<string, string | undefined>): Running {
 }
 
 interface Service extends Running {
+  appPort: number;
   managementPort: number;
   grpcPort: number;
   client: PaymentClient;
@@ -115,7 +116,7 @@ async function startService(extra: Record<string, string> = {}): Promise<Service
   const client = paymentClient(`127.0.0.1:${grpcPort}`);
   await new Promise<void>((resolve, reject) => client.waitForReady(new Date(Date.now() + 20_000), (e) => (e ? reject(e) : resolve())));
   await warmHotPool(client);
-  return { ...running, managementPort, grpcPort, client, exitedAt: () => gone };
+  return { ...running, appPort, managementPort, grpcPort, client, exitedAt: () => gone };
 }
 
 /**
@@ -187,6 +188,16 @@ describe('payment-svc 앱 프로세스', () => {
     const text = await metricsOf(s);
     expect(text).toMatch(/^# TYPE payment_confirm_commands_total counter$/m);
     expect(text).toMatch(/^# TYPE payment_batch_get_requests_total counter$/m);
+  }, 120_000);
+
+  test('P-T17_앱 포트에 웹훅 경로가 열리고, 어댑터가 없으면 포트원 경로는 400·토스 경로는 200이며 지표 no_adapter가 오른다 [ASVS v5.0.0-16.5.3]', async () => {
+    const s = await service();
+    const post = (route: string) => fetch(`http://127.0.0.1:${s.appPort}/v1/webhooks/${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect((await post('portone')).status).toBe(400);
+    expect((await post('toss')).status).toBe(200);
+    const text = await metricsOf(s);
+    expect(text).toContain('payment_webhook_received_total{pg="PORTONE",outcome="no_adapter"} 1');
+    expect(text).toContain('payment_webhook_received_total{pg="TOSS",outcome="no_adapter"} 1');
   }, 120_000);
 
   test('P-T53_프로세스의 gRPC 포트로 ConfirmPayment를 받아 원장을 쓰고 지표 accepted가 오르며, 다시 보내면 replayed다 [ASVS v5.0.0-2.3.3]', async () => {

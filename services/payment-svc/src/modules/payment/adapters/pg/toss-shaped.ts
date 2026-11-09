@@ -28,7 +28,7 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
-  type WebhookTrigger,
+  type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { tossCardOf } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
@@ -91,6 +91,8 @@ const TRANSIENT_CODES = new Set([
 ]);
 /** 웹훅의 결제 키·주문 ID 모양: 공백·제어 문자가 없는 ASCII 1~200자 */
 const WEBHOOK_REF = /^[\x21-\x7e]{1,200}$/;
+/** 전송 ID는 저장하는 키라 글자와 길이만 묶는다: 공백·제어 문자가 없는 ASCII 1~128자 [가정]. 토스 문서가 불투명한 글이라고 적어 그 안의 형식은 보지 않는다 */
+const TRANSMISSION_ID_SHAPE = /^[\x21-\x7e]{1,128}$/;
 
 export abstract class TossShapedGateway implements PaymentGatewayPort {
   abstract readonly pg: PgName;
@@ -202,25 +204,36 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     return { outcome: 'REJECTED', pgCode: code };
   }
 
-  parseWebhook(headers: HeaderBag, body: string): WebhookTrigger | null {
-    let id: string | undefined;
-    for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === TRANSMISSION_ID) id = typeof v === 'string' ? v : undefined;
-    if (!id || id.length > 200) return null;
+  parseWebhook(headers: HeaderBag, body: string): WebhookParseResult {
     let msg: unknown;
     try {
       msg = JSON.parse(body);
     } catch {
-      return null;
+      return { kind: 'INVALID', reason: 'BODY' };
     }
-    const m = msg as { eventType?: unknown; data?: { paymentKey?: unknown; orderId?: unknown } };
-    if (m?.eventType !== 'PAYMENT_STATUS_CHANGED') return null;
+    if (msg === null || typeof msg !== 'object') return { kind: 'INVALID', reason: 'BODY' };
+    const m = msg as { eventType?: unknown; data?: { paymentKey?: unknown; orderId?: unknown }; secret?: unknown; orderId?: unknown; transactionKey?: unknown; status?: unknown };
+    // 입금 통보(DEPOSIT_CALLBACK)는 사건 이름 없이 본문 최상위에 secret·orderId가 있다. 주문 ID만 조회 신호로 싣고 secret은 HOT-151이 대조한다.
+    // 중복 키는 거래 키와 상태다: 문서가 이 사건의 머리를 따로 적지 않고 전송 ID는 보낼 때마다 새로 나오므로 머리에 기대지 않는다
+    if (m.eventType === undefined && typeof m.secret === 'string') {
+      const depositOrderRef = str(m.orderId);
+      const transactionKey = str(m.transactionKey);
+      const depositStatus = str(m.status);
+      if (depositOrderRef === undefined || !WEBHOOK_REF.test(depositOrderRef) || transactionKey === undefined || !WEBHOOK_REF.test(transactionKey) || depositStatus === undefined || !WEBHOOK_REF.test(depositStatus)) return { kind: 'INVALID', reason: 'BODY' };
+      return { kind: 'TRIGGER', dedupKey: `${this.pg}:deposit:${transactionKey}:${depositStatus}`, orderRef: depositOrderRef };
+    }
+    let id: string | undefined;
+    for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === TRANSMISSION_ID) id = typeof v === 'string' ? v : undefined;
+    if (id === undefined || !TRANSMISSION_ID_SHAPE.test(id)) return { kind: 'INVALID', reason: 'HEADER' };
+    // 받지 않는 사건(지급대행 사건 등)은 거절이 아니라 무시다(P-T17)
+    if (m.eventType !== 'PAYMENT_STATUS_CHANGED') return { kind: 'IGNORED' };
     const paymentRef = str(m.data?.paymentKey);
-    if (paymentRef === undefined || !WEBHOOK_REF.test(paymentRef)) return null;
+    if (paymentRef === undefined || !WEBHOOK_REF.test(paymentRef)) return { kind: 'INVALID', reason: 'BODY' };
     const rawOrderRef = m.data?.orderId;
-    if (rawOrderRef === undefined) return { dedupKey: `${this.pg}:${id}`, paymentRef };
+    if (rawOrderRef === undefined) return { kind: 'TRIGGER', dedupKey: `${this.pg}:${id}`, paymentRef };
     const orderRef = str(rawOrderRef);
-    if (orderRef === undefined || !WEBHOOK_REF.test(orderRef)) return null;
-    return { dedupKey: `${this.pg}:${id}`, paymentRef, orderRef };
+    if (orderRef === undefined || !WEBHOOK_REF.test(orderRef)) return { kind: 'INVALID', reason: 'BODY' };
+    return { kind: 'TRIGGER', dedupKey: `${this.pg}:${id}`, paymentRef, orderRef };
   }
 
   #approvedFields(paymentRef: string, json: Record<string, unknown>): Omit<ConfirmResult, 'outcome'> {

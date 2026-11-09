@@ -1,10 +1,11 @@
 // 승인 명령 접수와 결과 조회의 포트(docs/features/payment.md §2 '승인 명령 접수의 첫 구현', BUILD_ORDER PRF-180).
 import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
-import type { FailureCategory, PaymentGatewayPort, PgName } from './payment-gateway.js';
+import type { FailureCategory, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
+import type { PaymentWebhookOutcome, WebhookDecision, WebhookRoute } from './webhook-receipt.js';
 
 /** 새 결제를 쓸 때 쓰임새가 만들어 넘기는 값 */
 export interface NewPaymentValues {
@@ -191,7 +192,7 @@ export type ResolveUnknownResult = 'APPLIED' | 'STALE';
 export interface PaymentUnknownQueries {
   /**
    * 짧은 트랜잭션 하나에서 그 결제사의 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례),
-   * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
+   * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1, query_touched_at = 지금을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
    * @throws RangeError limit이 1 이상의 정수가 아님
    */
   claimDueQueries(pg: PgName, limit: number): Promise<UnknownQueryJob[]>;
@@ -274,4 +275,53 @@ export interface PgCallGuardSignals {
 export interface PgCallGuardLog {
   /** 첫 승인 호출이 429를 받아 상한을 낮췄다(SEV2, kind pg-throttled-first) */
   throttledFirst(e: { readonly pg: PgName; readonly rps: number; readonly concurrency: number }): void;
+}
+
+// ---- 웹훅 받기(BUILD_ORDER HOT-150, docs/features/payment.md §5 '웹훅 받기의 첫 구현') ----
+
+/** 수신 기록과 조회 신호의 입력. 본문의 상태·금액은 받지 않는다 */
+export interface WebhookReceiveRequest {
+  /** 수신 기록의 결제사(본문을 읽은 어댑터) */
+  readonly pg: PgName;
+  readonly dedupKey: string;
+  readonly paymentRef?: string;
+  readonly orderRef?: string;
+  /** 그 경로로 받는 결제사 */
+  readonly allowedPgs: readonly PgName[];
+  /** 서명으로 보낸 쪽을 확인한 경로인가. 거짓이면 원장을 못 찾은 웹훅의 수신 기록을 쓰지 않는다 */
+  readonly signed: boolean;
+  /** 지금(epoch ms). received_at과 next_query_at */
+  readonly nowMs: number;
+}
+
+/** DUPLICATE: 같은 키의 수신 기록이 이미 있어 아무것도 쓰지 않았다. QUERY_SIGNAL_SKIPPED: 수신 기록은 썼지만 조회 시각을 당긴 행이 없다(최소 간격 안, 이미 더 이름, UNKNOWN을 떠남). 그 밖은 원장을 본 판단이다 */
+export type WebhookReceiveResult = { readonly kind: 'DUPLICATE' } | { readonly kind: 'QUERY_SIGNAL_SKIPPED' } | WebhookDecision;
+
+export interface PaymentWebhookStore {
+  /**
+   * 한 트랜잭션(READ COMMITTED, 문장 시간 한도 WEBHOOK_STATEMENT_TIMEOUT_MS, 문장 셋): 원장 찾기 한 문장(주문 참조가 UUID 모양이면 order_id를 먼저, 다음 결제 참조로 결제사 셋 모두, 경로가 받는 결제사의 행을 먼저)
+   * → decideWebhookLedger → 수신 기록 `INSERT … ON CONFLICT (pg, dedup_key) DO NOTHING`(0행이면 DUPLICATE. 서명 없는 경로에서 원장을 못 찾으면 쓰지 않고 LEDGER_NOT_FOUND)
+   * → QUERY_SIGNAL이면 `next_query_at = 지금`(status = 'UNKNOWN' AND next_query_at > 지금 AND 직전 신호·잡기로부터 WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS가 지남 조건, 0행이면 QUERY_SIGNAL_SKIPPED).
+   * 원장을 찾지 못했거나 PG_MISMATCH면 수신 기록의 payment_id는 비운다.
+   */
+  receive(request: WebhookReceiveRequest): Promise<WebhookReceiveResult>;
+}
+
+/** 웹훅 거절의 까닭(어댑터의 까닭과 받는 쪽의 까닭) */
+export type WebhookRejectReason = WebhookInvalidReason | 'NO_ADAPTER';
+
+/** 웹훅 받기의 로그(경로·결제사·닫힌 까닭·코드와 어긋남의 주문 ID만 싣는다. 본문·머리 값·입금 secret은 싣지 않는다). 던지지 않는다 */
+export interface PaymentWebhookLog {
+  /** 거절했다(kind payment-webhook-invalid) */
+  invalid(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly reason: WebhookRejectReason }): void;
+  /** 경로의 결제사와 원장의 결제사가 다르다(SEV2, kind payment-webhook-pg-mismatch) */
+  pgMismatch(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly ledgerPg: PgName; readonly orderId: string }): void;
+  /** 수신 기록을 쓰지 못했다(kind payment-webhook-store-failed, 코드만) */
+  storeFailed(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly code: string }): void;
+}
+
+/** 웹훅 받기 지표(docs/observability.md). 던지지 않는다 */
+export interface PaymentWebhookSignals {
+  /** payment_webhook_received_total{pg, outcome}를 1 올린다 */
+  outcome(pg: PgName, outcome: PaymentWebhookOutcome): void;
 }

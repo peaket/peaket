@@ -20,7 +20,8 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  ProblemResponse
+  ProblemResponse,
+  ServiceUnavailableResponse
 } from '../../model';
 
 import { orvalFetch } from '../../../orval-fetch';
@@ -36,10 +37,32 @@ export type receiveTossWebhookResponse200 = {
   status: 200
 }
 
+export type receiveTossWebhookResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type receiveTossWebhookResponse413 = {
+  data: ProblemResponse
+  status: 413
+}
+
+export type receiveTossWebhookResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type receiveTossWebhookResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type receiveTossWebhookResponseSuccess = (receiveTossWebhookResponse200) & {
   headers: Headers;
 };
-;
+export type receiveTossWebhookResponseError = (receiveTossWebhookResponse400 | receiveTossWebhookResponse413 | receiveTossWebhookResponse415 | receiveTossWebhookResponse503) & {
+  headers: Headers;
+};
 
 export const getReceiveTossWebhookUrl = () => {
 
@@ -70,7 +93,7 @@ export const receiveTossWebhook = async ( options?: Parameters<typeof orvalFetch
 
 export const getReceiveTossWebhookMutationKey = () => ['receiveTossWebhook'] as const;
 
-export const getReceiveTossWebhookMutationOptions = <TError = ErrorType<unknown>,
+export const getReceiveTossWebhookMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveTossWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof receiveTossWebhook>>, TError,void, TContext> => {
 
@@ -99,13 +122,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReceiveTossWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receiveTossWebhook>>>
 
-    export type ReceiveTossWebhookMutationError = ErrorType<unknown>
+    export type ReceiveTossWebhookMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
 
 
     /**
  * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, transmission-id 중복 제거
  */
-export const useReceiveTossWebhook = <TError = ErrorType<unknown>,
+export const useReceiveTossWebhook = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveTossWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof receiveTossWebhook>>,
@@ -125,10 +148,25 @@ export type receivePortoneWebhookResponse400 = {
   status: 400
 }
 
+export type receivePortoneWebhookResponse413 = {
+  data: ProblemResponse
+  status: 413
+}
+
+export type receivePortoneWebhookResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type receivePortoneWebhookResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type receivePortoneWebhookResponseSuccess = (receivePortoneWebhookResponse200) & {
   headers: Headers;
 };
-export type receivePortoneWebhookResponseError = (receivePortoneWebhookResponse400) & {
+export type receivePortoneWebhookResponseError = (receivePortoneWebhookResponse400 | receivePortoneWebhookResponse413 | receivePortoneWebhookResponse415 | receivePortoneWebhookResponse503) & {
   headers: Headers;
 };
 
@@ -141,8 +179,8 @@ export const getReceivePortoneWebhookUrl = () => {
 }
 
 /**
- * FR-041, ADR-0029, ADR-0036. 서명 헤더는 Standard Webhooks의 세 헤더(2026-10-09 확인). 검증은 서버 SDK가 하고 시각 차이 5분을 넘으면 거부. 모르는 이벤트 종류는 무시. 결제 기록의 결제사가 PORTONE일 때만 반영(ADR-0044)
- * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 서버 SDK로 검증, 조회 API 재확인, webhook-id로 중복 제거
+ * FR-041, ADR-0029, ADR-0036. 서명 헤더는 Standard Webhooks의 세 헤더(2026-10-09 확인). 검증은 node:crypto로 하고 시각 차이 5분을 넘으면 거부. 모르는 이벤트 종류는 무시. 결제 기록의 결제사가 PORTONE일 때만 반영(ADR-0044)
+ * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 node:crypto로 검증, 조회 API 재확인, webhook-id로 중복 제거
  */
 export const receivePortoneWebhook = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<receivePortoneWebhookResponseSuccess> => {
 
@@ -161,7 +199,7 @@ export const receivePortoneWebhook = async ( options?: Parameters<typeof orvalFe
 
 export const getReceivePortoneWebhookMutationKey = () => ['receivePortoneWebhook'] as const;
 
-export const getReceivePortoneWebhookMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getReceivePortoneWebhookMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePortoneWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof receivePortoneWebhook>>, TError,void, TContext> => {
 
@@ -190,13 +228,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReceivePortoneWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receivePortoneWebhook>>>
 
-    export type ReceivePortoneWebhookMutationError = ErrorType<ProblemResponse>
+    export type ReceivePortoneWebhookMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
 
 
     /**
- * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 서버 SDK로 검증, 조회 API 재확인, webhook-id로 중복 제거
+ * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 node:crypto로 검증, 조회 API 재확인, webhook-id로 중복 제거
  */
-export const useReceivePortoneWebhook = <TError = ErrorType<ProblemResponse>,
+export const useReceivePortoneWebhook = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePortoneWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof receivePortoneWebhook>>,

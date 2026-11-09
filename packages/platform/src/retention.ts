@@ -45,46 +45,57 @@ function check(spec: RetentionSpec): void {
 /** 기한 경계: 지금 − 보존 기간의 UUID 아래 경계(이보다 작은 ID가 지울 행) */
 export const retentionBoundary = (clock: Clock, spec: RetentionSpec): string => uuidLowerBound(clock.now() - spec.retentionMs);
 
-export async function deleteExpiredRows(
-  database: Database,
-  clock: Clock,
-  spec: RetentionSpec,
-  o: {
-    batchSize?: number;
-    pauseMs?: number;
-    /** 묶음 전마다 부른다. 멈출 까닭(예: '읽기 복제본 지연 1.4초')을 돌려주면 그날 밤은 멈춘다 */
-    guard?: () => Promise<string | undefined>;
-    /** 정비 시간 밖에서도 돈다(시험·손으로 돌릴 때) */
-    ignoreWindow?: boolean;
-    sleep?: (ms: number) => Promise<void>;
-    /** 끊기면 다음 묶음을 시작하지 않는다(정비 반복을 멈출 때) */
-    signal?: AbortSignal;
-  } = {},
-): Promise<RetentionResult> {
-  check(spec);
+export interface BatchDeleteOptions {
+  batchSize?: number;
+  pauseMs?: number;
+  /** 묶음 전마다 부른다. 멈출 까닭(예: '읽기 복제본 지연 1.4초')을 돌려주면 그날 밤은 멈춘다 */
+  guard?: () => Promise<string | undefined>;
+  /** 정비 시간 밖에서도 돈다(시험·손으로 돌릴 때) */
+  ignoreWindow?: boolean;
+  sleep?: (ms: number) => Promise<void>;
+  /** 끊기면 다음 묶음을 시작하지 않는다(정비 반복을 멈출 때) */
+  signal?: AbortSignal;
+}
+
+/**
+ * 나눠 지우기의 반복(docs/data.md §2 보존 규칙): 묶음 전마다 멈춤 신호·정비 시간·지키는 선을 보고, 묶음 사이에 쉰다.
+ * UUIDv7 `id`가 아닌 표(복합 키)도 이 반복을 쓴다(BUILD_ORDER HOT-150 코드 리뷰).
+ * @param deleteBatch 한 묶음(한 트랜잭션)을 지우고 지운 행 수를 돌려준다. batchSize보다 적으면 끝이다
+ */
+export async function deleteInBatches(clock: Clock, deleteBatch: (batchSize: number) => Promise<number>, o: BatchDeleteOptions = {}): Promise<RetentionResult> {
   const batchSize = o.batchSize ?? RETENTION_DEFAULTS.batchSize;
   const pause = o.pauseMs ?? RETENTION_DEFAULTS.pauseMs;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const boundary = retentionBoundary(clock, spec);
   const result: RetentionResult = { deleted: 0, batches: 0, stopped: 'done' };
   for (;;) {
     if (o.signal?.aborted) return { ...result, stopped: 'aborted' };
     if (!o.ignoreWindow && !inMaintenanceWindow(clock.now())) return { ...result, stopped: 'window' };
     const reason = await o.guard?.();
     if (reason) return { ...result, stopped: 'guard', reason };
-    const n = await database.transaction(async (tx) => {
-      const ids = ((await tx.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${boundary}::uuid order by ${sql.identifier(spec.table)}.id limit ${batchSize} for update`)).rows as { id: string }[]).map((r) => r.id);
-      if (ids.length === 0) return 0;
-      for (const c of spec.children ?? []) await tx.execute(sql`delete from ${sql.identifier(c.table)} where ${sql.identifier(c.column)} = any(${arr(ids)}::uuid[])`);
-      await tx.execute(sql`delete from ${sql.identifier(spec.table)} where id = any(${arr(ids)}::uuid[])`);
-      return ids.length;
-    });
+    const n = await deleteBatch(batchSize);
     if (n === 0) return result;
     result.deleted += n;
     result.batches += 1;
     if (n < batchSize) return result;
     await sleep(pause);
   }
+}
+
+export async function deleteExpiredRows(database: Database, clock: Clock, spec: RetentionSpec, o: BatchDeleteOptions = {}): Promise<RetentionResult> {
+  check(spec);
+  const boundary = retentionBoundary(clock, spec);
+  return deleteInBatches(
+    clock,
+    (batchSize) =>
+      database.transaction(async (tx) => {
+        const ids = ((await tx.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${boundary}::uuid order by ${sql.identifier(spec.table)}.id limit ${batchSize} for update`)).rows as { id: string }[]).map((r) => r.id);
+        if (ids.length === 0) return 0;
+        for (const c of spec.children ?? []) await tx.execute(sql`delete from ${sql.identifier(c.table)} where ${sql.identifier(c.column)} = any(${arr(ids)}::uuid[])`);
+        await tx.execute(sql`delete from ${sql.identifier(spec.table)} where id = any(${arr(ids)}::uuid[])`);
+        return ids.length;
+      }),
+    o,
+  );
 }
 
 /** 남은 가장 오래된 지울 행이 기한을 넘긴 시간(초). 없으면 0(maintenance_retention_overdue_seconds) */

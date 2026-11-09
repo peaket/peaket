@@ -48,7 +48,7 @@ PostgreSQL은 연결 하나마다 서버 프로세스 하나를 띄우고 그만
 - **①을 고를 때 함께 할 것**:
   - 다시 붙기: 장애 조치 뒤 연결은 지수 간격과 지터(시각을 일부러 조금씩 흩뜨리는 것)로 다시 붙는다. 연결 수명 30분(`maxLifetimeSeconds`, docs/architecture.md §5)으로 연결을 고르게 갈아 끼운다.
   - 시간 초과: 앱 풀의 연결 대기 상한(핫패스 100ms·일반 1초, 넘으면 429 `server-busy`)은 그대로다. PgBouncer 행의 `query_wait_timeout`은 이 대기 상한이 대신한다. 서버 쪽 상한은 지금처럼 역할 기본값(`ALTER ROLE … SET`)으로 둔다.
-  - 계산 예(모두 [가정]): purchase DB(db.r7g.xlarge)의 연결 상한은 약 3,600보다 작고 [추정], 그 80%는 약 2,800이다. purchase-svc 최대 40개 × 풀 20개 = 800, Outbox 릴레이 2개 × 풀 2개 = 4, 작업·관리 예비 50이면 약 850으로 예산 안이다. payment DB(db.r7g.large, 약 1,800보다 작음 [추정])는 payment-svc 최대 12개 × 풀 28개(핫패스 16, 일반 4, 승인 실행기 8, 모두 [가정]) = 336이다. 실제 최대 복제 수와 풀 크기는 wbs 2.11.2·2.12.1에서 정한다.
+  - 계산 예(모두 [가정]): purchase DB(db.r7g.xlarge)의 연결 상한은 약 3,600보다 작고 [추정], 그 80%는 약 2,800이다. purchase-svc 최대 40개 × 풀 20개 = 800, Outbox 릴레이 2개 × 풀 2개 = 4, 작업·관리 예비 50이면 약 850으로 예산 안이다. payment DB(db.r7g.large, 약 1,800보다 작음 [추정])는 payment-svc 최대 12개 × 풀 32개(핫패스 16, 일반 4, 승인 실행기 8, 웹훅 4, 모두 [가정]) = 384이다. 실제 최대 복제 수와 풀 크기는 wbs 2.11.2·2.12.1에서 정한다.
   - 감시: DB 연결 수(CloudWatch `DatabaseConnections`)가 상한의 80%를 넘으면 문제 대장에 올린다.
 - **어느 대안이든 같은 것**: 연결 수를 작게 지키는 첫째 장치는 구조다. 핫패스에서 DB를 빼고(좌석 Redis Lua, 대기열 Redis), 예매 계층의 쓰기를 입장 속도로 묶는다(docs/architecture.md §9.1). 위 대안은 그다음 장치다.
 - **바꿀 때**: 기본안을 바꾸면 ADR로 남기고 docs/architecture.md §5 시간 초과 표, docs/verification.md §4.1, docs/infra-handover.md §3.2를 함께 고친다.
@@ -936,7 +936,6 @@ erDiagram
     settlement_statement ||--o{ receivable_movement : "상계한 정산서"
     purchase_order ||--o| payment : paid_by
     payment ||--o{ payment_event : ""
-    payment ||--o{ webhook_receipt : "dedup key(PG별)"
     payment_entry_pause ||--o{ payment_entry_trial : "시험 재개로 받은 결제(ADR-0105)"
     payment ||--o{ payment_cancel : "부분·전액 취소"
     payment ||--o| payment_confirm_job : "승인 명령(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
@@ -966,6 +965,7 @@ erDiagram
         text failure_category "분석용 실패 범주 여섯 값. FAILED일 때만 채운다. ConfirmPayment 재전송의 답과 BatchGetPayments가 읽는다(추천 적용 2026-11-09, BUILD_ORDER PRF-181)"
         timestamptz next_query_at "다음 단독 조회 시각. status가 UNKNOWN이면 NULL일 수 없다(CHECK). UNKNOWN을 쓸 때 지금 + 5초 [가정], 잡을 때 지금 + max(실제 간격, 15초 [가정]), 답을 본 뒤 그대로 둘 때 실제 간격(조회 횟수로 5초에서 두 배 최대 60초 [가정]). 잡기 부분 인덱스 payment_unknown_query_idx(추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)"
         int query_attempts "NOT NULL DEFAULT 0. UNKNOWN 조회 실행기가 잡은 횟수. 다음 간격을 정한다(추천 적용 2026-11-09, BUILD_ORDER PRF-182)"
+        timestamptz query_touched_at "웹훅 조회 신호를 쓰거나 실행기가 잡은 마지막 시각. 결제별 최소 간격 5초 [가정]의 기준(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰)"
         timestamptz overdue_at "UNKNOWN이 1시간 [가정] 넘었다고 처음 알린 시각. 두 번 알리지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-182)"
         timestamptz anomaly_logged_at "조회 답의 금액·주문 어긋남이나 결제사 쪽 취소 상태를 SEV1로 처음 알린 시각. 결제마다 한 번만 낸다. 널 허용(추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)"
     }
@@ -985,6 +985,12 @@ erDiagram
         timestamptz lease_until "잡은 동안의 임대 끝. 널 허용"
         int attempts "NOT NULL DEFAULT 0, 0 이상. 결제사 답(처리 중·한도 초과)으로 다시 미룬 횟수. 잡기·어댑터 없음·읽기 실패로는 오르지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰)"
         timestamptz created_at "NOT NULL DEFAULT now()"
+    }
+    webhook_receipt {
+        text pg PK "TOSS|PORTONE|SIMULATOR. CHECK 결제사 셋(추천 적용 2026-11-09, BUILD_ORDER HOT-150). 먼저 온 웹훅을 받아야 해서 payment와 관계선·외래 키를 두지 않는다(§4 웹훅 수신 기록)"
+        text dedup_key PK "결제사별 중복 제거 키(포트원 PORTONE:{webhook-id}, 토스 TOSS:{전송 ID}, 토스 입금 통보 TOSS:deposit:{transactionKey}:{status})"
+        uuid payment_id "찾은 원장 행. 못 찾았거나 경로의 결제사와 다르면 널"
+        timestamptz received_at "NOT NULL. 받은 지 7일 [가정]이면 정비 일이 지운다"
     }
     payment_entry_pause {
         text pg PK "TOSS|PORTONE|SIMULATOR(새 결제 진입 정지 상태, ADR-0105)"
@@ -2411,12 +2417,13 @@ erDiagram
 - `payment_event`: 기본 키 `(payment_id, seq)`, `seq >= 1`, 결제에 외래 키를 건다. 접수의 내부 표시 행(`ACCEPTED`, `exported = false`)이 순번 1이다.
 - `payment_confirm_job`: 위 ERD 칸, 잡기 인덱스 `payment_confirm_job_next_idx (next_attempt_at)`(0003이 채널별 색인으로 바꾼다, 아래 '승인 명령의 결제사 칸'), 결제에 외래 키를 건다. `order_saga_job`과 같은 꼴이고 끝난 명령은 행을 지워 작은 표로 둔다.
 - Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같은 문장을 `0000`에 손으로 덧붙였다(일 파티션은 `ensureOutboxPartitions`가 만든다).
-- 다른 표(`webhook_receipt`·`payment_entry_pause`·`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
+- 다른 표(`payment_entry_pause`·`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
 - 마이그레이션 SQL은 `pnpm --filter @peaket/payment-svc db:generate`(purchase-svc와 같은 `scripts/db-generate.mjs`)로 만들었다.
 - `failure_category`(추천 적용 2026-11-09, BUILD_ORDER PRF-181): 두 번째 마이그레이션(`services/payment-svc/migrations/0001_payment_failure_category.sql`)이 `payment`에 `text`(널 허용) 칸과 여섯 값 `CHECK`(`payment_failure_category_check`)를 더한다. 값은 `FAILED`일 때만 채운다. 표가 아직 배포되지 않아 행이 없으므로 제약을 나눠 검증하지 않는다.
 - UNKNOWN 조회 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-182): 세 번째 마이그레이션(`services/payment-svc/migrations/0002_payment_unknown_query.sql`)이 `payment`에 `next_query_at`(`timestamptz`, 널 허용)·`query_attempts`(`int NOT NULL DEFAULT 0`)·`overdue_at`·`anomaly_logged_at`(`timestamptz`, 널 허용)을 더하고 부분 인덱스 `payment_unknown_query_idx ON payment (next_query_at) WHERE status = 'UNKNOWN'`과 `payment_unknown_status_changed_idx ON payment (status_changed_at) WHERE status = 'UNKNOWN'`(끝난 행은 인덱스에 없다), CHECK `status <> 'UNKNOWN' OR next_query_at IS NOT NULL`(`payment_unknown_next_query_check`, 잡히지 않은 채 남는 UNKNOWN을 막는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)을 만든다. 표가 아직 배포되지 않아 행이 없으므로 기존 행을 채우는 문장이 없다.
 - 승인 명령의 결제사 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰): 네 번째 마이그레이션(`services/payment-svc/migrations/0003_payment_confirm_job_pg.sql`)이 `payment_confirm_job`에 `pg`(`text NOT NULL`, CHECK `payment_confirm_job_pg_check` 결제사 셋)를 더하고 잡기 인덱스를 `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`로 바꾼다(`payment_confirm_job_next_idx`는 지운다). 표가 아직 배포되지 않아 행이 없으므로 기본값도 기존 행을 채우는 문장도 없다.
 - 결제 시도 ID 칸(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰): 다섯 번째 마이그레이션(`services/payment-svc/migrations/0004_payment_pg_tx_id.sql`)이 `payment`에 `pg_tx_id`(`text`, 비울 수 있음, 포트원 `txId`)를 더한다. 포트원 승인 본문의 검증값이고 조회 답이 이 시도의 것인지 대조한다. 비밀이 아니므로 결과가 정해져도 지우지 않는다.
+- 웹훅 수신 기록(추천 적용 2026-11-09, BUILD_ORDER HOT-150): 여섯 번째 마이그레이션(`services/payment-svc/migrations/0005_payment_webhook_receipt.sql`)이 `webhook_receipt`(기본 키 `(pg, dedup_key)`, CHECK `webhook_receipt_pg_check` 결제사 셋, 지우기 인덱스 `webhook_receipt_received_at_idx (received_at)`)를 만들고 `payment`에 참조로 원장을 찾는 인덱스 `payment_pg_ref_idx (pg, pg_payment_ref)`를 더한다. 웹훅은 승인 명령보다 먼저 올 수 있어 `payment_id`에 외래 키를 걸지 않고 ERD에서도 관계선을 뺐다. 표가 아직 배포되지 않아 행이 없으므로 인덱스를 `CONCURRENTLY`로 만들지 않는다. 같은 마이그레이션이 조회 신호의 결제별 최소 간격을 재는 `payment.query_touched_at`(비울 수 있음, 기본값 없음)을 더한다(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰).
 
 ## 5. 동시성 제어가 필요한 지점
 
@@ -2448,6 +2455,7 @@ erDiagram
 | Redis 마스터 장애 조치(Failover) 직후 복제 누락으로 인한 순번 중복 발급 위험 | 새로 승격한 마스터에서 카운터 값을 넉넉한 안전 여유(장애 직전 초당 발급 × 복제 지연 p99.9 × 2 [가정])만큼 한꺼번에 앞으로 옮기고, 발급하는 대기표에 새 세대 번호를 붙인다. 건너뛴 구간은 `q:{event:E}:skipped`에 남겨, 앞 인원과 입장 비율에서는 빠진 번호로 세고 입장 확정에서는 옛 세대 대기표를 받는다(추천 적용 2026-10-28, 기술 검토 중간-030) | FIS (AWS Fault Injection Simulator) 장애 주입 시험(포트폴리오 기간에는 로컬 Redis 주 노드 강제 종료, docs/verification.md §5.3) |
 | 동일 주문에 대한 결제 승인 중복 호출 | 결제 대행사를 부를 때 `Idempotency-Key: confirm-{orderId}` 헤더를 보낸다. 승인 결과를 모르면 UNKNOWN 상태로 바꾸고, 나중에 결제 단건 조회 API 결과로 상태를 맞춘다 | K7 결제 무결성 검증 |
 | 결제 대행사 웹훅의 중복 및 역순 도달 | PG사별 결제 식별자로 `webhook_receipt` 유니크 제약을 건다(토스 `transmission_id`, 포트원 `webhook-id`. Standard Webhooks 규격의 재전송에도 같은 사건 키다, 기술 검토 낮음-070). 중복을 거른 뒤에도 상태는 조회 API 결과로만 바꾼다 | K7, 결제 단위 테스트 (P-T17) |
+| 같은 키의 웹훅이 같은 순간에 여럿 옴, 웹훅의 조회 신호가 돌고 있는 단독 조회와 겹침(추천 적용 2026-11-09, BUILD_ORDER HOT-150, ADR-0180) | 수신 기록을 `INSERT … ON CONFLICT (pg, dedup_key) DO NOTHING`으로 넣어 한 요청만 행을 넣고, 0행을 받은 쪽은 조회 신호를 내지 않는다. 수신 기록과 조회 신호는 한 트랜잭션이다(신호를 쓰지 못하면 수신 기록도 남지 않아 결제사의 재전송이 다시 신호를 낸다). 조회 신호는 `status = 'UNKNOWN' AND next_query_at > 지금 AND 직전 신호·잡기로부터 5초 [가정] 지남` 조건부 UPDATE다(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰). 조회가 도는 중에 신호가 쓰이면 그 조회의 간격 쓰기가 0행이 되고 다음 틱에 한 번 더 물을 뿐이며, 답 반영은 `status = 'UNKNOWN'` 조건이라 결과가 두 번 쓰이지 않는다 | P-T17(같은 키 중복 조회 1번), payment-svc `test-int/payment-webhook.int.test.ts`(동시 같은 키 20개) |
 | 알림·파트너 웹훅 발송 작업을 여러 워커가 동시에 가져감, 같은 사건의 재전달 | 같은 사건은 `notification_dedup`·`webhook_delivery`의 유일 제약(`INSERT … ON CONFLICT DO NOTHING`)으로 한 행만 만든다. 워커는 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 임대 시각(`lease_until`)을 쓰고 커밋한 뒤 보낸다. 잠금을 쥔 채 바깥 호출을 하지 않는다. 보내다 죽으면 임대가 끝난 뒤 다른 워커가 같은 `webhook-id`로 다시 보낸다(적어도 한 번, ADR-0109) | V-T24, G-29 |
 | 동일 티켓에 대한 이중 양도 사기, 양도 수락과 기한 만료·철회의 경합 | PostgreSQL `SELECT … FOR UPDATE` 행 잠금 안에서 상태와 기한을 다시 확인한다. `version` 칸 비교는 CS·관리 화면처럼 사람이 읽고 나중에 저장하는 흐름에만 쓴다(기술 검토 낮음-071) | E2E 동시성 시나리오 테스트 |
 | 동일 티켓에 대한 취소, 양도, 게이트 스캔이 동시 경합 | 비관적 행 잠금으로 데이터베이스에서 처리 순서를 정한다(버전 칸은 사람이 화면에서 읽고 저장하는 흐름용, 기술 검토 낮음-071). 입장 시작부터 마감까지는 돌려주기·양도 수락·회수를 금지한다(ADR-0051). 오프라인 스캔이 늦게 올라오면 '취소 뒤 입장' 이상 표시를 남긴다 | E2E, 현장 오프라인 테스트 (O-T16, O-T22) |
@@ -2494,6 +2502,8 @@ erDiagram
 | UNKNOWN 조회 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-182) | 1초 [가정]마다 `select … from payment where status = 'UNKNOWN' and next_query_at <= $1 order by next_query_at limit $2 for update skip locked`, 같은 트랜잭션에서 행마다 `next_query_at`·`query_attempts` UPDATE | `payment_unknown_query_idx (next_query_at) WHERE status = 'UNKNOWN'` | `Limit → LockRows → Index Scan`(끝난 행은 인덱스에 없다) | 잡은 행 수, 실행 시간, `payment_unknown_in_flight` |
 | UNKNOWN 1시간 표시(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰) | 1분 [가정]마다 `with picked as (select id from payment where status = 'UNKNOWN' and status_changed_at < $1 and overdue_at is null order by status_changed_at limit 100 for update skip locked) update payment … returning order_id` | `payment_unknown_status_changed_idx (status_changed_at) WHERE status = 'UNKNOWN'` | `Limit → LockRows → Index Scan`(끝난 행은 인덱스에 없다) | 표시한 행 수(`payment_unknown_overdue_total`), 실행 시간 |
 | 결제 결과 당기기 서버(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0140) | `select … from payment p left join lateral (select event_key, seq from payment_event e where e.payment_id = p.id and e.exported and e.type <> 'RESOLVED' order by e.seq desc limit 1) ev on true where p.order_id = any($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, 문장 시간 한도 400ms [가정]) | `payment (order_id)` 유일 인덱스, `payment_event` 기본 키 `(payment_id, seq)` | `Nested Loop Left Join`(바깥 `Index Scan`, 안쪽 `Limit → Index Scan Backward`) | 안쪽 loops·Buffers, 실행 시간 |
+| 웹훅 수신의 원장 찾기와 수신 기록(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-150) | 찾기는 한 문장이다(문장 수가 토스 응답 기한 안의 시간 예산을 정한다, 코드 리뷰): `select … from payment where order_id = $1 or (pg = any($2) and pg_payment_ref = $3) order by case when order_id = $1 then 0 else 1 end, case when pg = any($4) then 0 else 1 end limit 1`. 다음 `insert into webhook_receipt … on conflict (pg, dedup_key) do nothing returning 1`(서명 없는 경로에서 못 찾았으면 쓰지 않는다), UNKNOWN이면 `update payment set next_query_at = $1, query_touched_at = $1 where id = $2 and status = 'UNKNOWN' and next_query_at > $1 and (query_touched_at is null or query_touched_at <= $3) returning id` | `payment_order_id_key`, 새로 `payment_pg_ref_idx (pg, pg_payment_ref)`, `webhook_receipt` 기본 키 | `Bitmap Or`(주문 인덱스와 참조 인덱스) 또는 참조만 있으면 `Index Scan`(`pg` 값마다 한 번) | 실행 시간, `webhook_receipt` 행 수 |
+| 웹훅 수신 기록 지우기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-150) | 정비 시간에 `delete from webhook_receipt where received_at <= $1 and (pg, dedup_key) in (select pg, dedup_key from webhook_receipt where received_at <= $1 order by received_at limit 10000)`를 1만 건보다 적게 지워질 때까지. 묶음 사이 0.5초 [가정], 묶음 전마다 정비 시간 끝·지키는 선을 본다(§2 규칙, 추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰) | 새로 `webhook_receipt_received_at_idx (received_at)` | `Limit → Index Scan` | 지운 행 수, 정비 일 실패 수 |
 | 마이 티켓(ticket) | `WHERE account_id = $1 AND id < $2 ORDER BY id DESC LIMIT 50` | 새로 `ticket (account_id, id)` | `Limit → Index Scan Backward`(표를 나누지 않아 인덱스 하나만 찾는다, ADR-0114) | 실행 시간, 계획 시간 |
 | 스캐너 패키지(ticket) | 회차의 티켓 + 유효 기기 키 | 새로 `ticket (event_id) INCLUDE (seat_id, gate_zone, status, version)`, `device_key (ticket_id) INCLUDE (key_id, public_key) WHERE revoked_at IS NULL` | `Nested Loop Left Join`, 안쪽 Index Only Scan(loops ≈ 5만) | 안쪽 노드의 loops·Buffers(합계)·Heap Fetches, 맞춤 계획 강제(§5.2) |
 | 변경분(ticket) | `WHERE event_id = $1 AND seq > $2 ORDER BY seq LIMIT 5000` | 새로 `scanner_change` 기본 키 `(event_id, seq)` | `Limit → Index Scan`(정렬 없음) | 실행 시간 |

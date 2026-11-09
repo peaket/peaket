@@ -27,8 +27,8 @@ export const ReceiveTossWebhookHeader = zod.object({
 export const ReceiveTossWebhookResponse = zod.unknown()
 
 /**
- * FR-041, ADR-0029, ADR-0036. 서명 헤더는 Standard Webhooks의 세 헤더(2026-10-09 확인). 검증은 서버 SDK가 하고 시각 차이 5분을 넘으면 거부. 모르는 이벤트 종류는 무시. 결제 기록의 결제사가 PORTONE일 때만 반영(ADR-0044)
- * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 서버 SDK로 검증, 조회 API 재확인, webhook-id로 중복 제거
+ * FR-041, ADR-0029, ADR-0036. 서명 헤더는 Standard Webhooks의 세 헤더(2026-10-09 확인). 검증은 node:crypto로 하고 시각 차이 5분을 넘으면 거부. 모르는 이벤트 종류는 무시. 결제 기록의 결제사가 PORTONE일 때만 반영(ADR-0044)
+ * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 node:crypto로 검증, 조회 API 재확인, webhook-id로 중복 제거
  */
 export const ReceivePortoneWebhookHeader = zod.object({
   "webhook-id": zod.string(),

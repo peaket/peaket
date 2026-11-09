@@ -239,6 +239,22 @@ export function AcceptTextPlain(): MethodDecorator {
   };
 }
 
+const BODY_LIMIT_KEY = 'peaketBodyLimit';
+
+/**
+ * 그 경로만 본문 상한을 줄인다(바이트). 본문 해석기가 읽기 전에 413으로 막는다(BUILD_ORDER HOT-150 코드 리뷰). 플랫폼 기본 상한(1MiB)보다 크게 쓰지 않는다.
+ * @throws RangeError 양의 정수가 아님
+ */
+export function BodyLimit(bytes: number): MethodDecorator {
+  if (!Number.isInteger(bytes) || bytes <= 0) throw new RangeError(`본문 상한은 양의 정수다: ${String(bytes)}`);
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [BODY_LIMIT_KEY]: bytes }, fn);
+    return descriptor;
+  };
+}
+
 function unsupportedMediaType(): Error {
   return Object.assign(new Error('Unsupported Media Type'), { statusCode: 415, code: 'FST_ERR_CTP_INVALID_MEDIA_TYPE' });
 }
@@ -256,6 +272,7 @@ export function installRequestChecks(http: FastifyInstance): void {
   http.addHook('onRoute', (route) => {
     const config = route.config as Record<string, unknown> | undefined;
     if (config?.[DEFER_VALIDATION_KEY] === true && route.schema) route.attachValidation = true;
+    if (typeof config?.[BODY_LIMIT_KEY] === 'number') route.bodyLimit = config[BODY_LIMIT_KEY];
   });
   const json = http.getDefaultJsonParser('error', 'error');
   // 해석기는 바이트로 받아 해석 전 바이트를 남기고(요청 지문·요청 서명, add-idempotency-and-outbox 결정 4), 해석은 기본 JSON 해석기에 맡긴다

@@ -136,11 +136,24 @@ export interface CancelResult {
 
 /** 웹훅은 확정 데이터가 아니라 조회를 부르는 신호다(ADR-0029 결정 5). 상태를 싣지 않는다 */
 export interface WebhookTrigger {
+  kind: 'TRIGGER';
   /** 결제사별 중복 제거 키 */
   dedupKey: string;
-  paymentRef: string;
+  /** 토스 입금 통보는 결제 키 없이 주문 ID만 온다(BUILD_ORDER HOT-150) */
+  paymentRef?: string;
   orderRef?: string;
 }
+
+/** 웹훅을 거절한 까닭. 닫힌 값만 쓴다(보안 로그·지표에 원문이 실리지 않게, BUILD_ORDER HOT-150) */
+export type WebhookInvalidReason = 'NO_SECRET' | 'HEADER' | 'TIMESTAMP' | 'SIGNATURE' | 'BODY';
+
+/**
+ * 웹훅 해석 결과(P-T17, BUILD_ORDER HOT-150, HOT-140이 넘긴 것). 거절과 무시를 나눈다.
+ * - INVALID: 서명·머리·본문 모양이 틀렸다
+ * - IGNORED: 형식은 맞는데 받지 않는 사건이다
+ * - TRIGGER: 단독 조회를 부르는 신호다
+ */
+export type WebhookParseResult = { kind: 'INVALID'; reason: WebhookInvalidReason } | { kind: 'IGNORED' } | WebhookTrigger;
 
 export type HeaderBag = Readonly<Record<string, string | readonly string[] | undefined>>;
 
@@ -161,8 +174,8 @@ export interface PaymentGatewayPort {
    * expectedBalance는 이 취소 앞의 취소 가능 금액(포트원 currentCancellableAmount). 호출자가 첫 전송 전에 저장한 값을 재시도에도 그대로 넘긴다. 같은 멱등키의 본문이 달라지면 안 되기 때문이다(BUILD_ORDER HOT-140, 코드 리뷰)
    */
   cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult>;
-  /** 틀린 웹훅은 null */
-  parseWebhook(headers: HeaderBag, body: string): WebhookTrigger | null;
+  /** 본문은 원문 바이트를 UTF-8로 읽은 글이다. 던지지 않는다 */
+  parseWebhook(headers: HeaderBag, body: string): WebhookParseResult;
 }
 
 /**

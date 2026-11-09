@@ -26,7 +26,7 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
-  type WebhookTrigger,
+  type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { portoneCardOfMethod } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
@@ -128,7 +128,7 @@ const CANCEL_REJECTED = new Set([
   'SUM_OF_PARTS_EXCEEDS_CANCEL_AMOUNT',
   'UNAUTHORIZED',
 ]);
-/** 조회를 부를 결제 사건. 그 밖의 사건은 null로 무시한다(payment §5) */
+/** 조회를 부를 결제 사건. 그 밖의 사건은 무시한다(payment §5) */
 const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountIssued', 'Transaction.PartialCancelled', 'Transaction.Cancelled', 'Transaction.Failed', 'Transaction.PayPending', 'Transaction.CancelPending']);
 
 type Found = Extract<QueryResult, { kind: 'FOUND' }>;
@@ -277,27 +277,30 @@ export class PortoneGateway implements PaymentGatewayPort {
     return CANCEL_REJECTED.has(code) ? { outcome: 'REJECTED', pgCode: code } : { outcome: 'UNKNOWN' };
   }
 
-  parseWebhook(headers: HeaderBag, body: string): WebhookTrigger | null {
-    if (this.#webhookKeys.length === 0) return null;
+  parseWebhook(headers: HeaderBag, body: string): WebhookParseResult {
+    if (this.#webhookKeys.length === 0) return { kind: 'INVALID', reason: 'NO_SECRET' };
     const lower = new Map<string, string | undefined>();
     for (const [k, v] of Object.entries(headers)) lower.set(k.toLowerCase(), typeof v === 'string' ? v : undefined);
     const id = lower.get('webhook-id');
     const timestamp = lower.get('webhook-timestamp');
     const signature = lower.get('webhook-signature');
-    if (!id || id.length > MAX_WEBHOOK_ID || !timestamp || !signature || !/^[0-9]{1,12}$/.test(timestamp)) return null;
-    if (Math.abs(Math.floor(this.#clock.now() / 1000) - Number(timestamp)) > WEBHOOK_TOLERANCE_SECONDS) return null;
-    if (!this.#signatureMatches(id, timestamp, body, signature)) return null;
+    if (!id || id.length > MAX_WEBHOOK_ID || !timestamp || !signature || !/^[0-9]{1,12}$/.test(timestamp)) return { kind: 'INVALID', reason: 'HEADER' };
+    if (Math.abs(Math.floor(this.#clock.now() / 1000) - Number(timestamp)) > WEBHOOK_TOLERANCE_SECONDS) return { kind: 'INVALID', reason: 'TIMESTAMP' };
+    if (!this.#signatureMatches(id, timestamp, body, signature)) return { kind: 'INVALID', reason: 'SIGNATURE' };
     let msg: unknown;
     try {
       msg = JSON.parse(body);
     } catch {
-      return null;
+      return { kind: 'INVALID', reason: 'BODY' };
     }
-    const m = msg as { type?: unknown; data?: { paymentId?: unknown } } | null;
-    if (typeof m?.type !== 'string' || !PAYMENT_EVENTS.has(m.type)) return null;
+    if (msg === null || typeof msg !== 'object') return { kind: 'INVALID', reason: 'BODY' };
+    const m = msg as { type?: unknown; data?: { paymentId?: unknown } };
+    // 서명이 맞은 본문의 사건 종류만 모르는 것은 거절이 아니라 무시다(P-T17)
+    if (typeof m.type !== 'string' || !PAYMENT_EVENTS.has(m.type)) return { kind: 'IGNORED' };
     const paymentRef = str(m.data?.paymentId);
-    if (paymentRef === undefined || !WEBHOOK_REF.test(paymentRef)) return null;
+    if (paymentRef === undefined || !WEBHOOK_REF.test(paymentRef)) return { kind: 'INVALID', reason: 'BODY' };
     return {
+      kind: 'TRIGGER',
       dedupKey: `PORTONE:${id}`,
       paymentRef,
       ...(paymentRef.startsWith(PAYMENT_ID_PREFIX) ? { orderRef: paymentRef.slice(PAYMENT_ID_PREFIX.length) } : {}),

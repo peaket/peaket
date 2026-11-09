@@ -389,7 +389,7 @@ describe.each<[string, Make]>([
 
   it('P-T16_웹훅: 전송 ID를 중복 제거 키로 쓰고(머리 이름 대소문자 무관) 상태를 싣지 않는다', () => {
     const gateway = make();
-    expect(gateway.parseWebhook({ 'TossPayments-Webhook-Transmission-Id': 'wh_1' }, body)).toEqual({ dedupKey: `${gateway.pg}:wh_1`, paymentRef: 'tgen_1', orderRef: 'order-1' });
+    expect(gateway.parseWebhook({ 'TossPayments-Webhook-Transmission-Id': 'wh_1' }, body)).toEqual({ kind: 'TRIGGER', dedupKey: `${gateway.pg}:wh_1`, paymentRef: 'tgen_1', orderRef: 'order-1' });
   });
 
   it.each<[string, Record<string, string | string[]>, string]>([
@@ -398,11 +398,19 @@ describe.each<[string, Make]>([
     ['전송 ID가 너무 김', { 'tosspayments-webhook-transmission-id': 'x'.repeat(201) }, body],
     ['JSON이 아님', hook, '{'],
     ['null 본문', hook, 'null'],
-    ['다른 사건', hook, JSON.stringify({ eventType: 'SOMETHING', data: { paymentKey: 'tgen_1' } })],
     ['결제 키 없음', hook, JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', data: {} })],
     ['결제 키가 글이 아님', hook, JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', data: { paymentKey: 1 } })],
-  ])('P-T16_웹훅 %s이면 null이다 [ASVS v5.0.0-16.5.3]', (_n, headers, text) => {
-    expect(make().parseWebhook(headers, text)).toBeNull();
+  ])('P-T16_웹훅 %s이면 거절이다 [ASVS v5.0.0-16.5.3]', (_n, headers, text) => {
+    expect(make().parseWebhook(headers, text)).toMatchObject({ kind: 'INVALID' });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['모르는 사건', { eventType: 'SOMETHING', data: { paymentKey: 'tgen_1' } }],
+    ['지급대행 사건', { eventType: 'payout.changed', data: { payoutId: 'p-1' } }],
+    ['사건 이름도 입금 통보 칸도 없음', { createdAt: '2026-11-09T10:00:00.000000' }],
+    ['데이터 칸의 입금 통보 이름', { eventType: 'DEPOSIT_CALLBACK', data: {} }],
+  ])('P-T17_웹훅 %s은 거절이 아니라 무시다 [ASVS v5.0.0-16.5.3]', (_n, payload) => {
+    expect(make().parseWebhook(hook, JSON.stringify(payload))).toEqual({ kind: 'IGNORED' });
   });
 
   const webhookOf = (data: Record<string, unknown>): string => JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', data });
@@ -416,15 +424,15 @@ describe.each<[string, Make]>([
     ['주문 ID가 200자를 넘음', { paymentKey: 'tgen_1', orderId: 'x'.repeat(201) }],
     ['주문 ID가 글이 아님', { paymentKey: 'tgen_1', orderId: 1 }],
     ['주문 ID가 빈 글', { paymentKey: 'tgen_1', orderId: '' }],
-  ])('P-T16_리뷰 고침 낮음: 웹훅의 %s이면 null이다 [ASVS v5.0.0-2.2.1]', (_n, data) => {
-    expect(make().parseWebhook(hook, webhookOf(data))).toBeNull();
+  ])('P-T16_리뷰 고침 낮음: 웹훅의 %s이면 거절이다 [ASVS v5.0.0-2.2.1]', (_n, data) => {
+    expect(make().parseWebhook(hook, webhookOf(data))).toMatchObject({ kind: 'INVALID', reason: 'BODY' });
   });
 
   it('P-T16_리뷰 고침 낮음: 웹훅의 결제 키·주문 ID는 200자까지 받고 주문 ID는 없어도 된다 [ASVS v5.0.0-2.2.1]', () => {
     const gateway = make();
     const long = 'x'.repeat(200);
-    expect(gateway.parseWebhook(hook, webhookOf({ paymentKey: long, orderId: long }))).toEqual({ dedupKey: `${gateway.pg}:wh_1`, paymentRef: long, orderRef: long });
-    expect(gateway.parseWebhook(hook, webhookOf({ paymentKey: 'tgen_1' }))).toEqual({ dedupKey: `${gateway.pg}:wh_1`, paymentRef: 'tgen_1' });
+    expect(gateway.parseWebhook(hook, webhookOf({ paymentKey: long, orderId: long }))).toEqual({ kind: 'TRIGGER', dedupKey: `${gateway.pg}:wh_1`, paymentRef: long, orderRef: long });
+    expect(gateway.parseWebhook(hook, webhookOf({ paymentKey: 'tgen_1' }))).toEqual({ kind: 'TRIGGER', dedupKey: `${gateway.pg}:wh_1`, paymentRef: 'tgen_1' });
   });
 });
 
@@ -599,8 +607,49 @@ describe('P-T16 토스 어댑터만의 것', () => {
     await expect(simulator({ fetch: scriptedFetch([{ status: 403, body: { code: 'REJECT_CARD_PAYMENT' } }]) }).confirm(C)).resolves.toMatchObject({ outcome: 'DECLINED', failureCategory: 'PG_ERROR' });
   });
 
-  it('P-T16_입금 통보(DEPOSIT_CALLBACK)는 본문에 결제 키가 없어 지금은 null이다(받기·secret 대조는 웹훅 단계)', () => {
-    const deposit = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: 'x', status: 'DONE', transactionKey: 't', orderId: 'order-1' });
-    expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, deposit)).toBeNull();
+  it('P-T16_입금 통보(DEPOSIT_CALLBACK)는 주문 ID만 실은 조회 신호이고 secret·상태를 싣지 않는다 [ASVS v5.0.0-16.2.5]', () => {
+    const deposit = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: 'deposit-secret', status: 'DONE', transactionKey: 't', orderId: 'order-1' });
+    const parsed = toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, deposit);
+    expect(parsed).toMatchObject({ kind: 'TRIGGER', orderRef: 'order-1' });
+    expect(JSON.stringify(parsed)).not.toContain('deposit-secret');
+  });
+
+  it('P-T16_리뷰 고침 L6: 입금 통보는 전송 ID 머리에 기대지 않고 거래 키와 상태로 중복을 가른다(머리가 없어도 받고, 다시 보내도 같은 키다)', () => {
+    const deposit = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: 'deposit-secret', status: 'DONE', transactionKey: 'tx-1', orderId: 'order-1' });
+    const expected = { kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:DONE', orderRef: 'order-1' };
+    expect(toss().parseWebhook({}, deposit)).toEqual(expected);
+    expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, deposit)).toEqual(expected);
+    expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_2' }, deposit)).toEqual(expected);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['거래 키 없음', { secret: 'x', status: 'DONE', orderId: 'order-1' }],
+    ['거래 키에 공백이 있음', { secret: 'x', status: 'DONE', transactionKey: 'tx 1', orderId: 'order-1' }],
+    ['상태 없음', { secret: 'x', transactionKey: 't', orderId: 'order-1' }],
+  ])('P-T16_리뷰 고침 L6: 입금 통보의 %s이면 거절이다 [ASVS v5.0.0-2.2.1]', (_n, payload) => {
+    expect(toss().parseWebhook({}, JSON.stringify(payload))).toMatchObject({ kind: 'INVALID', reason: 'BODY' });
+  });
+
+  it.each<[string, string]>([
+    ['129자', 'x'.repeat(129)],
+    ['공백이 든 값', 'wh 1'],
+    ['줄바꿈이 든 값', 'wh\n1'],
+    ['ASCII가 아닌 값', '전송아이디'],
+  ])('P-T17_리뷰 고침 H1: 전송 ID가 %s이면 거절이다(저장하는 키의 모양과 길이를 묶는다) [ASVS v5.0.0-2.2.1]', (_n, id) => {
+    const body = JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', data: { paymentKey: 'tgen_1', orderId: 'order-1' } });
+    expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': id }, body)).toEqual({ kind: 'INVALID', reason: 'HEADER' });
+  });
+
+  it('P-T17_리뷰 고침 H1: 전송 ID는 128자까지 받고 형식을 더 따지지 않는다(토스 문서가 불투명한 글이라고 적는다) [ASVS v5.0.0-2.2.1]', () => {
+    const body = JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', data: { paymentKey: 'tgen_1' } });
+    for (const id of ['x'.repeat(128), 'a.b:c/d+e=~!']) expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': id }, body)).toEqual({ kind: 'TRIGGER', dedupKey: `TOSS:${id}`, paymentRef: 'tgen_1' });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['주문 ID 없음', { secret: 'x', status: 'DONE', transactionKey: 't' }],
+    ['주문 ID가 글이 아님', { secret: 'x', status: 'DONE', transactionKey: 't', orderId: 1 }],
+    ['주문 ID가 ASCII가 아님', { secret: 'x', status: 'DONE', transactionKey: 't', orderId: '주문' }],
+  ])('P-T16_입금 통보의 %s이면 거절이다 [ASVS v5.0.0-2.2.1]', (_n, payload) => {
+    expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, JSON.stringify(payload))).toMatchObject({ kind: 'INVALID', reason: 'BODY' });
   });
 });

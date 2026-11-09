@@ -18,9 +18,9 @@ const started = async (): Promise<OutboxRelayProcessOptions> => {
 };
 
 describe('startPaymentRelay', () => {
-  test('P-T53_리뷰 고침 L9: 정비 일은 Outbox 파티션 만들기·지우기 둘뿐이다(표가 없는 일은 돌리지 않는다)', async () => {
+  test('P-T17_정비 일은 Outbox 파티션 만들기·지우기와 웹훅 수신 기록 지우기 셋뿐이다(표가 없는 일은 돌리지 않는다)', async () => {
     const names = ((await started()).maintenanceTasks ?? []).map((t) => t.name);
-    expect([...names].sort()).toEqual(['outbox-partitions-drop', 'outbox-partitions-ensure']);
+    expect([...names].sort()).toEqual(['outbox-partitions-drop', 'outbox-partitions-ensure', 'webhook-receipts-delete']);
   });
 
   test('P-T53_리뷰 고침 L9: 공용 정비 일에는 이 서비스가 뺀 일이 실제로 있다(위 시험이 거르는 쪽을 본다)', () => {

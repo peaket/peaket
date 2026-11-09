@@ -154,10 +154,10 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       const w = await h.lastWebhook(paymentRef);
       const a = h.gateway.parseWebhook(w.headers, w.body);
       const b = h.gateway.parseWebhook(w.headers, w.body);
-      expect(a).not.toBeNull();
+      if (a.kind !== 'TRIGGER') throw new Error(`조회 신호여야 한다: ${a.kind}`);
       expect(a).toEqual(b);
-      expect(a!.dedupKey.length).toBeGreaterThan(0);
-      expect(a!.paymentRef).toBe(paymentRef);
+      expect(a.dedupKey.length).toBeGreaterThan(0);
+      expect(a.paymentRef).toBe(paymentRef);
       expect(a).not.toHaveProperty('status');
     });
 

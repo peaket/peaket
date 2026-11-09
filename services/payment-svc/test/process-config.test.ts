@@ -207,7 +207,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('PRF181_main.ts는 실행기 지표를 서비스 레지스트리에 붙이고 플랫폼 로거로 로그를 잇는다', () => {
     expect(main()).toMatch(/\bnew PromPaymentConfirmSignals\(/);
-    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(5);
+    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(6);
     expect(main()).toMatch(/\bpaymentConfirmLog\(service\.logger\)/);
   });
 
@@ -257,7 +257,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new PaymentConfirmRunner('), '만들기 < 켜기').toBeLessThan(start);
     expect(m.indexOf('await service.listen()'), 'listen < 켜기').toBeLessThan(start);
     expect(m.lastIndexOf('.register(service.metrics.registry)', start), '지표 붙이기 < 켜기').toBeGreaterThan(-1);
-    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 다섯 다 켜기 앞').toHaveLength(5);
+    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 여섯 다 켜기 앞').toHaveLength(6);
   });
 
   test('PRF181_SIGTERM: 준비 상태를 내린 뒤 실행기를 멈추고(돌던 호출을 기다린다), 그 뒤에 서비스와 전용 풀을 닫는다 [ASVS v5.0.0-2.3.3]', () => {
@@ -310,7 +310,7 @@ describe('운영 조립(글 검사)', () => {
     expect(main).toMatch(/\bloadPaymentServiceConfig\(process\.env\)/);
   });
 
-  test('PRF181_main.ts의 SIGTERM은 gRPC 포트 → 서비스 → DB 풀 셋(핫패스·일반·실행기 전용) 차례로 닫는다', () => {
+  test('PRF181_main.ts의 SIGTERM은 gRPC 포트 → 서비스 → DB 풀 넷(핫패스·일반·실행기 전용·웹훅 전용) 차례로 닫는다', () => {
     const main = code('main.ts');
     const at = main.indexOf('SIGTERM');
     expect(at, 'main.ts에 SIGTERM 처리가 있다').toBeGreaterThan(-1);
@@ -318,7 +318,20 @@ describe('운영 조립(글 검사)', () => {
     expect(closes.length, closes.join(',')).toBeGreaterThanOrEqual(5);
     expect(closes[0], closes.join(',')).toMatch(/grpc/i);
     expect(closes[1], closes.join(',')).toBe('service');
-    expect(closes.slice(2).filter((n) => /database|db|pool/i.test(n)), closes.join(',')).toHaveLength(3);
+    expect(closes.slice(2).filter((n) => /database|db|pool/i.test(n)), closes.join(',')).toHaveLength(4);
+  });
+
+  test('P-T17_main.ts는 웹훅 전용 풀과 어댑터 등록부·지표·늦게 잇는 로그를 모듈에 넘긴다(시뮬레이터 허용은 환경 값으로)', () => {
+    const main = code('main.ts');
+    expect(main).toMatch(/createDatabase\(webhookDatabaseOptions\(config\.databaseUrl\)\)/);
+    expect(main).toMatch(/new DrizzleWebhookStore\(\{ database: webhookDatabase \}\)/);
+    expect(main).toMatch(/webhook: \{ store: new DrizzleWebhookStore\(\{ database: webhookDatabase \}\), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator\(process\.env\) \}/);
+    expect(main).toMatch(/webhookSignals\.register\(service\.metrics\.registry\)/);
+    expect(main).toMatch(/webhookLog = paymentWebhookLog\(service\.logger, systemClock\)/);
+  });
+
+  test('P-T17_리뷰 고침 M4: main.ts는 앱 포트에 웹훅 요청 받기 시한을 건다 [ASVS v5.0.0-2.4.1]', () => {
+    expect(code('main.ts')).toMatch(/requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS/);
   });
 
   test('PRF180_relay.ts는 릴레이·정비 역할 연결과 Kafka 생산자로 startPaymentRelay를 띄우고 SIGTERM에 멈춘다', () => {

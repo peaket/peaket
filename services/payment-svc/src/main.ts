@@ -3,12 +3,13 @@
 // 앱·관리 포트(건강·지표)는 서비스 뼈대(createService)가, 업무 gRPC 포트는 이 파일이 grpc-server.ts로 연다(identity-svc main.ts와 같은 꼴).
 // 조립: 핫패스 풀(applicationName payment-svc)·일반 풀(payment-svc-batch)·승인 실행기 전용 풀(payment-svc-confirm), PromPaymentCommandSignals·PromPaymentConfirmSignals를 서비스 레지스트리에 붙이고,
 // paymentServiceHandlers를 PaymentService에 묶는다. 준비 상태는 gRPC 포트를 연 뒤에 켠다. 승인 실행기와 UNKNOWN 조회 실행기(승인 실행기의 풀과 채널별 호출 보호기를 함께 쓴다)는 그 뒤에 켠다(BUILD_ORDER PRF-181·PRF-182·PRF-183).
-// SIGTERM: 준비 상태를 내리고(docs/devops.md §6.4) gRPC 포트를 닫으면서 두 실행기를 멈춘 뒤(돌던 호출과 그 뒤 쓰기를 기다린다) 서비스를 닫고 DB 풀 셋을 닫는다.
+// 앱 포트에는 결제사 웹훅 경로가 있다(웹훅 전용 풀 payment-svc-webhook, BUILD_ORDER HOT-150).
+// SIGTERM: 준비 상태를 내리고(docs/devops.md §6.4) gRPC 포트를 닫으면서 두 실행기를 멈춘 뒤(돌던 호출과 그 뒤 쓰기를 기다린다) 서비스를 닫고 DB 풀 넷을 닫는다.
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import { createDatabase, createService, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertPgAdapters, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from './config.js';
+import { assertPgAdapters, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
 import {
@@ -18,6 +19,7 @@ import {
   createPgHttp,
   DrizzleConfirmJobs,
   DrizzlePaymentStore,
+  DrizzleWebhookStore,
   type PaymentCommandLog,
   paymentCommandLog,
   paymentConfirmLog,
@@ -26,6 +28,8 @@ import {
   paymentServiceHandlers,
   PaymentUnknownResolver,
   paymentUnknownLog,
+  type PaymentWebhookLog,
+  paymentWebhookLog,
   PayRefKeyRing,
   perPodBulkhead,
   PG_CHANNEL_BULKHEAD,
@@ -36,12 +40,16 @@ import {
   PromPaymentConfirmSignals,
   PromPaymentMethodRefSignals,
   PromPaymentUnknownSignals,
+  PromPaymentWebhookSignals,
   PromPgCallGuardSignals,
   StaticPaymentGateways,
   TossPaymentGateway,
   UNKNOWN_QUERY_CONCURRENCY,
+  WEBHOOK_REQUEST_TIMEOUT_MS,
+  webhookDatabaseOptions,
 } from './modules/payment/server.js';
 import { safeErrorCode } from './safe-error-code.js';
+import { shutdownInOrder } from './shutdown.js';
 
 const SERVICE = 'payment-svc';
 const config = loadPaymentServiceConfig(process.env);
@@ -69,24 +77,45 @@ const gateways = new StaticPaymentGateways([
 const database = createDatabase({ url: config.databaseUrl, profile: 'hot', max: PAYMENT_HOT_POOL_MAX, applicationName: SERVICE });
 const batchDatabase = createDatabase({ url: config.databaseUrl, max: PAYMENT_BATCH_POOL_MAX, applicationName: `${SERVICE}-batch` });
 const confirmDatabase = createDatabase(confirmRunnerDatabaseOptions(config.databaseUrl));
+const webhookDatabase = createDatabase(webhookDatabaseOptions(config.databaseUrl));
 const store = new DrizzlePaymentStore({ database, batchDatabase });
 const signals = new PromPaymentCommandSignals();
 const confirmSignals = new PromPaymentConfirmSignals();
 const unknownSignals = new PromPaymentUnknownSignals();
 const guardSignals = new PromPgCallGuardSignals();
 const methodRefSignals = new PromPaymentMethodRefSignals();
+const webhookSignals = new PromPaymentWebhookSignals();
 
-// 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC 포트는 그 뒤에 열려 그 전에 불리지 않는다)
+// 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC·앱 포트는 그 뒤에 열려 그 전에 불리지 않는다)
 let log: PaymentCommandLog | undefined;
 const lateLog: PaymentCommandLog = { mismatch: (e) => log?.mismatch(e) };
+let webhookLog: PaymentWebhookLog | undefined;
+const lateWebhookLog: PaymentWebhookLog = {
+  invalid: (e) => webhookLog?.invalid(e),
+  pgMismatch: (e) => webhookLog?.pgMismatch(e),
+  storeFailed: (e) => webhookLog?.storeFailed(e),
+};
 
-const service = await createService({ name: SERVICE, module: AppModule.register({ store, reader: store, log: lateLog, signals }) });
+const service = await createService({
+  name: SERVICE,
+  module: AppModule.register({
+    store,
+    reader: store,
+    log: lateLog,
+    signals,
+    webhook: { store: new DrizzleWebhookStore({ database: webhookDatabase }), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator(process.env) },
+  }),
+  // 이 앱 포트의 HTTP 경로는 웹훅뿐이라 웹훅에 맞춘 시한을 서버 전체에 건다
+  requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS,
+});
 log = paymentCommandLog(service.logger);
+webhookLog = paymentWebhookLog(service.logger, systemClock);
 signals.register(service.metrics.registry);
 confirmSignals.register(service.metrics.registry);
 unknownSignals.register(service.metrics.registry);
 guardSignals.register(service.metrics.registry);
 methodRefSignals.register(service.metrics.registry);
+webhookSignals.register(service.metrics.registry);
 for (const warning of methodRefWarnings) service.logger.warn({ kind: 'payment-method-ref-key' }, warning);
 service.readiness.register('grpc');
 if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
@@ -120,9 +149,11 @@ unknownResolver.start();
 
 process.once('SIGTERM', () => {
   service.readiness.register('shutting-down');
-  // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 모두 끝나면 서비스와 DB 풀을 닫는다
-  void Promise.all([grpc.close(), confirmRunner.stop(), unknownResolver.stop()])
-    .then(() => service.close())
-    .catch((err: unknown) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'))
-    .finally(() => Promise.all([database.close(), batchDatabase.close(), confirmDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()]));
+  // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
+  void shutdownInOrder({
+    stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop()],
+    closeService: () => service.close(),
+    closeConnections: () => [database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()],
+    onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
+  });
 });

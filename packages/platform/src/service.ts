@@ -62,6 +62,8 @@ export interface CreateServiceOptions {
   adminAuthz?: AdminAuthzPort;
   /** 구매 세션 포트(purchase-svc). @PurchaseSigned()를 단 처리기가 있으면 꼭 있어야 한다(ADR-0050 결정 8) */
   purchaseSessions?: PurchaseSessionPort;
+  /** 앱 포트가 요청 하나(머리·본문)를 다 받는 시한(ms). 기본은 Fastify 기본(시한 없음)이다. 서버 전체에 걸리므로 그 포트의 경로를 모두 보고 정한다 */
+  requestTimeoutMs?: number;
 }
 
 export interface PlatformService {
@@ -125,6 +127,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   });
 
   const adapter = new FastifyAdapter({
+    ...(o.requestTimeoutMs === undefined ? {} : { requestTimeout: o.requestTimeoutMs }),
     frameworkErrors: (error: Error, request: FastifyRequest, reply: FastifyReply) => {
       const { status, body } = frameworkErrorProblem(error, config.debugErrors);
       const labels = { service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) };

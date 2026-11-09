@@ -322,7 +322,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       const nextAts = jobs.map((j) => new Date(j.claimedNextQueryAtMs).toISOString());
       await tx.execute(sql`
         update payment p
-        set next_query_at = v.next_at, query_attempts = p.query_attempts + 1
+        set next_query_at = v.next_at, query_attempts = p.query_attempts + 1, query_touched_at = ${new Date(now)}::timestamptz
         from unnest(${sql.param(ids)}::uuid[], ${sql.param(nextAts)}::timestamptz[]) as v(id, next_at)
         where p.id = v.id`);
       return jobs;

@@ -193,13 +193,13 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     expect(await g.cancel({ paymentRef: r.paymentRef, amount: 1, reason: '고객 요청', idemKey: 'cancel-a6' })).toMatchObject({ outcome: 'REJECTED', pgCode: 'ALREADY_CANCELED_PAYMENT' });
   });
 
-  it('웹훅 해석: 전송 ID가 없거나 본문이 틀리면 null', () => {
+  it('웹훅 해석: 전송 ID가 없거나 본문이 틀리면 거절이다', () => {
     const g = sim.gateway();
     const body = JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', createdAt: '2026-11-02T10:00:00.000+09:00', data: { paymentKey: 'tsim_1', orderId: 'o-123456', status: 'DONE' } });
-    expect(g.parseWebhook({}, body)).toBeNull();
-    expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, '{')).toBeNull();
-    expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, JSON.stringify({ eventType: 'DEPOSIT_CALLBACK', data: {} }))).toBeNull();
-    expect(g.parseWebhook({ 'TossPayments-Webhook-Transmission-Id': 'wh_1' }, body)).toEqual({ dedupKey: 'SIMULATOR:wh_1', paymentRef: 'tsim_1', orderRef: 'o-123456' });
+    expect(g.parseWebhook({}, body)).toMatchObject({ kind: 'INVALID' });
+    expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, '{')).toMatchObject({ kind: 'INVALID' });
+    expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, JSON.stringify({ eventType: 'DEPOSIT_CALLBACK', data: {} }))).toEqual({ kind: 'IGNORED' });
+    expect(g.parseWebhook({ 'TossPayments-Webhook-Transmission-Id': 'wh_1' }, body)).toEqual({ kind: 'TRIGGER', dedupKey: 'SIMULATOR:wh_1', paymentRef: 'tsim_1', orderRef: 'o-123456' });
   });
 });
 
