@@ -3,7 +3,7 @@ import { fakeClock } from '@peaket/platform';
 import { expect, test } from 'vitest';
 import { MemoryEntryStore, MemoryEventSchedules, MemoryShuffleCommits } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
-import { segmentOf } from '../src/modules/entry/domain/queue.js';
+import { ARRIVAL_CARVE_WINDOW_MS, segmentOf } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from './arrival-slot-cases.js';
 import { batchCases } from './batch-cases.js';
 import { leaveCases } from './leave-cases.js';
@@ -42,7 +42,7 @@ entryCases('메모리', memoryWorld);
 arrivalSlotCases('메모리', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 1, 0, 0) });
   const store = new MemoryEntryStore(clock);
-  return { store, now: () => clock.now(), counter: async (e) => store.counterOf(e), failover: async (e) => store.failoverForTest(e), setUsed: async (e, slot, used) => store.setArrivalUsedForTest(e, slot, used) };
+  return { store, now: () => clock.now(), counter: async (e) => store.counterOf(e), failover: async (e) => store.failoverForTest(e), setUsed: async (e, slot, used) => store.setArrivalUsedForTest(e, slot, used), alignCarveWindow: async () => undefined, nextCarveWindow: async () => void clock.advance(ARRIVAL_CARVE_WINDOW_MS) };
 });
 pidTransitionEntryCases('메모리', memoryWorld);
 lobbyCases('메모리', async () => {

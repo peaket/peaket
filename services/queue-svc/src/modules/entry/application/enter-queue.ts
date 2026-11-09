@@ -42,7 +42,7 @@ export interface EntryOptions {
   /** 진입 ② 파드별 묶음의 모으는 시간과 최대 건수(ADR-0179, 없으면 2ms·500건) */
   batchWindowMs?: number;
   batchMax?: number;
-  /** RB-05가 건너뛰는 양의 바탕 값(ADR-0181, 없으면 12만 [가정]. 시험이 줄인다) */
+  /** RB-05가 건너뛰는 양의 바탕 값(ADR-0181·0243, 없으면 42만 [가정]. 시험이 줄인다) */
   rb05SkipBase?: number;
   /** 도착 시각 칸의 첫 크기(ADR-0223, 없으면 3만 [가정]. 시험이 줄인다) */
   arrivalSlotInitial?: number;

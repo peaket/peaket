@@ -3,7 +3,7 @@ import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { RedisEntryStore, RedisShuffleCommits, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
-import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
+import { ARRIVAL_CARVE_WINDOW_MS, type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
 import { leaveCases } from '../test/leave-cases.js';
@@ -27,6 +27,12 @@ afterAll(async () => {
   await redis?.close();
   valkey?.stop();
 });
+
+/** Valkey의 서버 시각(칸 Lua가 쓰는 TIME과 같은 시계) */
+async function serverNowMs(): Promise<number> {
+  const t = (await redis.command(['TIME'])) as unknown[];
+  return Number(String(t[0])) * 1000 + Math.floor(Number(String(t[1])) / 1000);
+}
 
 const cmd = (key: string, args: string[]) => redis.command(args, { key });
 
@@ -83,6 +89,18 @@ arrivalSlotCases('Valkey Lua', async () => ({
   counter: async (e) => Number((await cmd(keys.seq(e), ['GET', keys.seq(e)])) ?? 0),
   failover: async (e) => void (await cmd(keys.epoch(e), ['HSET', keys.epoch(e), 'node', 'old-primary'])),
   setUsed: async (e, slot, used) => void (await cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), `${slot}:used`, String(used)])),
+  // 시간 창은 서버 시각으로 나뉜다. 창의 앞 3분의 1 안에서 시작하게 기다려 뒤따르는 호출들이 한 창 안에서 끝나게 한다
+  alignCarveWindow: async () => {
+    for (;;) {
+      const at = await serverNowMs();
+      if (at % ARRIVAL_CARVE_WINDOW_MS < ARRIVAL_CARVE_WINDOW_MS / 3) return;
+      await sleep(ARRIVAL_CARVE_WINDOW_MS - (at % ARRIVAL_CARVE_WINDOW_MS));
+    }
+  },
+  nextCarveWindow: async () => {
+    const was = Math.floor((await serverNowMs()) / ARRIVAL_CARVE_WINDOW_MS);
+    while (Math.floor((await serverNowMs()) / ARRIVAL_CARVE_WINDOW_MS) === was) await sleep(10);
+  },
 }));
 
 test('[Q-T16] 칸떼기를다시시작하면_건너뛴빈칸의범위를적어_리더가훑지않게한다', async () => {

@@ -19,15 +19,19 @@
         "0181",
         "0182",
         "0183",
-        "0186"
+        "0186",
+        "0223",
+        "0243"
       ],
-      "scope": "정본 범위(docs/verification.md §2.1): 사람 2명(탭 2개씩, 대기표 4장), admission-ctrl 2대, 대기열 Redis 장애 전환 2회(회차 슬롯·사람 슬롯 합), 리더 교체 2회, 묶음 구간 1개. 전수 검사는 범위를 나눈다: 진입 범위(사람 2명, 한 사람은 탭 2개라 대기표 3장, admission-ctrl 1대 교체 없음, 장애 전환 2회, 입장 확정 한 걸음), 리더 범위(대기표 1장, admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회), 입장 확정 범위(사람 1명 탭 2개, 묶음 없음, 장애 전환 2회, 입장 확정 네 호출), 복제 지연 두 쓰기 범위(사람 2명, 회차 슬롯 장애 전환 2회, 복제되지 않은 쓰기 2개까지), 진행성 범위(사람 2명, 회차 슬롯 장애 전환 1회, 공정성 가정). 정본 범위 전체(입장 확정 네 호출, 설정 세대가 한 번에 3까지 오름)는 시뮬레이션으로 본다. 복제 지연은 따로 적지 않으면 쓰기 하나",
+      "scope": "정본 범위(docs/verification.md §2.1): 사람 2명(탭 2개씩, 대기표 4장), admission-ctrl 2대, 대기열 Redis 장애 전환 2회(회차 슬롯·사람 슬롯 합), 리더 교체 2회, 묶음 구간 1개. 전수 검사는 범위를 나눈다: 진입 범위(사람 2명, 한 사람은 탭 2개라 대기표 3장, admission-ctrl 1대 교체 없음, 장애 전환 2회, 입장 확정 한 걸음), 리더 범위(대기표 1장, admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회), 입장 확정 범위(사람 1명 탭 2개, 묶음 없음, 장애 전환 2회, 입장 확정 네 호출), 복제 지연 두 쓰기 범위(사람 2명, 회차 슬롯 장애 전환 2회, 복제되지 않은 쓰기 2개까지), 진행성 범위(사람 2명, 회차 슬롯 장애 전환 1회, 공정성 가정), 진입 Degraded 칸 범위(사람 2명 탭 1개씩, admission-ctrl 1대, 회차 슬롯 장애 전환 2회, 칸 2개 크기 2, 묶음 없음, 입장 확정 한 걸음, HOT-061), 칸 넘침 범위(사람 3명 탭 1개씩, 장애 전환 없음, 칸 2개 크기 1), 진입 세대 확인 범위(사람 3명 탭 1개씩, 회차 슬롯 장애 전환 1회, 칸 1개 크기 2). 정본 범위 전체(입장 확정 네 호출, 설정 세대가 한 번에 3까지 오름)는 시뮬레이션으로 본다. 복제 지연은 따로 적지 않으면 쓰기 하나",
       "invariants": [
         "inv_noAdmissionBeforeTurn",
         "inv_noDuplicateNumberInGeneration",
         "inv_staleLeaderWritesBounded",
         "inv_onePersonOneAdmission",
-        "inv_onePersonOneTicket"
+        "inv_onePersonOneTicket",
+        "inv_noDuplicateArrivalNumber",
+        "inv_receivedNumberNotRemoved"
       ],
       "mbt": {
         "$comment": "모델 기반 시험(wbs 2.3.4, docs/verification.md §2.4, V-T40): actions의 SPEC_ACTIONS가 명세 step의 동작 이름과 같아야 하고, traces의 동작 기록은 modules마다 traces개를 지켜짐 시뮬레이션으로 낸다(spec-check.mjs traces)",
@@ -53,6 +57,10 @@
           {
             "main": "queue_proposed_full",
             "traces": 4
+          },
+          {
+            "main": "queue_arrival",
+            "traces": 8
           }
         ]
       },
@@ -62,7 +70,7 @@
           "shard": "proposed",
           "large": true,
           "expect": "hold",
-          "why": "진입 범위: RB-05가 끝날 때까지 번호를 내지 않고(ADR-0181), 묶음 참가자의 선점 값을 묶음 기록으로 바꾼(PRF-060) 지금 구현으로 다섯 불변식이 모두 지켜지는지. RB-05는 구현처럼 세대 키로 장애 전환을 알아채고 잃은 묶음 표시를 다시 닫는다(PRF-120)"
+          "why": "진입 범위: RB-05가 끝날 때까지 번호를 내지 않고(ADR-0181), 묶음 참가자의 선점 값을 묶음 기록으로 바꾼(PRF-060) 지금 구현으로 일곱 불변식(⑥·⑦은 칸이 없는 범위에서는 늘 참이고 ⑦은 일반 번호에도 걸린다)이 모두 지켜지는지. RB-05는 구현처럼 세대 키로 장애 전환을 알아채고 잃은 묶음 표시를 다시 닫는다(PRF-120)"
         },
         {
           "main": "queue_leader",
@@ -85,6 +93,22 @@
           "why": "설정 세대가 장애 전환 한 번에 1 또는 3 오르는 복제 지연 두 쓰기 범위(ADR-0186): 처음의 곱하기(상한 3)는 첫 장애 전환에서 설정 세대가 3 이상 오르면 RB-05와 그 뒤 번호를 함께 잃은 뒤 같은 번호·세대를 다시 냈다(PRF-120 새 맥락 리뷰, open-items 105번). RB-05의 쓰기가 붙은 복제본에 닿은 것을 확인한 뒤에야 번호를 내면 지켜지는지"
         },
         {
+          "main": "queue_arrival",
+          "expect": "hold",
+          "why": "진입 Degraded 칸 범위(HOT-061, ADR-0223 결정 6·7): 칸 떼기·닫기와 장애 전환으로 칸 기록(쓴 번호 수)을 잃는 경우를 넣어도, 같은 세대 안 번호가 겹치지 않고 받은 번호가 빠진 번호가 되지 않는지. 장애 전환 뒤 RB-05 전이면 닫지 않고, 세대가 바뀐 옛 칸은 돌려주지도 더 내주지도 않는다"
+        },
+        {
+          "main": "queue_arrival_guarded_entry",
+          "shard": "arrival",
+          "expect": "hold",
+          "why": "진입 세대 확인 범위(사람 3명, 칸 1개 크기 2, 장애 전환 1회, 장치 켬, HOT-061): queue_arrival은 사람 둘이라 옛 칸에 다시 온 쿠키에 닿지 못한다. 이 범위는 장애 전환 뒤 옛 칸의 쿠키가 진입의 세대 확인에 닿아도 일곱 불변식이 지켜지는지 본다. 2026-11-09 이 PC 8코어에서 상태 약 5,900만 개·21분이라 전수 검사로 두고, CI에서는 따로 잡을 돈다(묶음 arrival)"
+        },
+        {
+          "main": "queue_arrival_guarded_overflow",
+          "expect": "hold",
+          "why": "칸 넘침 범위(사람 3명, 칸 2개 크기 1, 장애 전환 없음, 장치 켬, HOT-061): queue_arrival은 사람 둘에 칸 크기 2라 칸이 차는 갈래에 닿지 못한다. 이 범위는 칸이 찬 요청이 카운터 끝의 번호를 받는 갈래에 닿아도 일곱 불변식이 지켜지는지 본다"
+        },
+        {
           "main": "queue_live",
           "expect": "hold",
           "temporal": "fairLiveness",
@@ -100,7 +124,7 @@
           "main": "queue_canon",
           "expect": "hold",
           "tlc": false,
-          "why": "정본·구현 그대로(입장 확정 네 호출, PRF-120)면 다섯 불변식이 지켜진다. 진입 범위에 입장 확정 네 호출을 더하면 전수 검사가 너무 커서(진입 범위가 이미 6천만 상태) 시뮬레이션만 보고, 네 호출의 전수 검사는 queue_admit이 한다. 2026-11-02 정본(RB-05 전에도 번호를 냄)은 같은 세대 안에서 번호가 겹치는 반례였다"
+          "why": "정본·구현 그대로(입장 확정 네 호출, PRF-120)면 일곱 불변식이 지켜진다. 진입 범위에 입장 확정 네 호출을 더하면 전수 검사가 너무 커서(진입 범위가 이미 6천만 상태) 시뮬레이션만 보고, 네 호출의 전수 검사는 queue_admit이 한다. 2026-11-02 정본(RB-05 전에도 번호를 냄)은 같은 세대 안에서 번호가 겹치는 반례였다"
         },
         {
           "main": "queue_canon_batch_dup",
@@ -144,6 +168,31 @@
           "expect": "violate",
           "temporal": "fairLiveness",
           "why": "V-T1(진행성): 게시된 묶음의 참가자 목록에 없는 참가의 묶음 기록을 지우고 다시 진입하게 하는 장치(batchMissing)를 빼면 장애 전환으로 SADD를 잃은 참가자가 번호도 다시 진입도 없이 남는다"
+        },
+        {
+          "main": "queue_arrival_close_no_gen",
+          "expect": "violate",
+          "invariant": "inv_receivedNumberNotRemoved",
+          "why": "V-T1(HOT-061, ADR-0223 결정 7, 세대 확인 없는 닫기): 닫기가 칸 기록의 세대를 보지 않으면(lost_upto를 적지 않음), 장애 전환으로 쓴 번호 수를 잃은 칸의 '쓰지 않은 번호' 범위에 이미 나간 번호가 들어가 받은 사람의 번호가 빠진 번호가 된다"
+        },
+        {
+          "main": "queue_arrival_entry_no_gen",
+          "expect": "violate",
+          "invariant": "inv_receivedNumberNotRemoved",
+          "why": "V-T1(HOT-061, ADR-0223 결정 6): 진입 Lua가 칸 기록의 세대를 보지 않으면, 장애 전환으로 used를 잃은 칸에서 이미 나간 번호를 새 세대로 다시 낸다. 기록된 반례에서는 뒤 사람이 그 번호를 돌려(이탈) 앞 사람의 번호가 빠진 번호가 된다. 같은 번호·다른 세대라 ②는 잡지 못한다"
+        },
+        {
+          "main": "queue_arrival_no_overflow",
+          "expect": "violate",
+          "invariant": "inv_noDuplicateArrivalNumber",
+          "why": "V-T1(HOT-061, 불변식이 공허하지 않은지): 칸이 찼는지 보지 않으면 칸을 넘어 준 번호가 다음 칸의 첫 번호와 같은 세대에서 겹친다(⑥이 칸 번호의 겹침을 실제로 잡는다)"
+        },
+        {
+          "main": "queue_arrival_skip_short",
+          "expect": "violate",
+          "invariant": "inv_receivedNumberNotRemoved",
+          "simulate": false,
+          "why": "V-T1(ADR-0243, 전제를 끈 변형): RB-05 건너뛰기가 복제 지연 안에 잃는 번호를 덮는다는 전제(구현은 칸 떼기 시간 창이 보증한다)를 끄면, 건너뛴 구간 밖에서 세대만 다른 같은 번호가 생기고 세대를 보지 않는 빠진 번호 비트 때문에 받은 번호가 빠진 번호가 된다. 칸 셋과 깊이 16이 필요해 PR 시뮬레이션이 닿는다는 보장이 없어 전수 검사에서만 본다"
         }
       ],
       "temporal": [

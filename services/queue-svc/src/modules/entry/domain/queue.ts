@@ -11,10 +11,16 @@ export const OPEN_BATCH_MS = 2_000;
 /** 진입 ② 파드별 묶음: 첫 요청부터 모으는 시간과 한 묶음의 최대 건수 [가정](ADR-0179) */
 export const NUMBER_BATCH_WINDOW_MS = 2;
 export const NUMBER_BATCH_MAX = 500;
-/** 장애 전환 뒤 RB-05가 건너뛰는 양의 바탕 값(ADR-0181 결정 4): ⌈회차 하나의 진입 상한 초당 20만 건 [가정, NFR-001] × 복제 지연 p99.9 0.3초 [가정] × 2⌉ */
+/** 칸 떼기 시간 창의 길이 [가정, 운영 측정으로 확정]: 서버 시각을 이 값으로 나눈 창마다 떼는 양을 센다(복제 지연 안에 잃는 번호의 상한을 만든다, ADR-0243) */
+export const ARRIVAL_CARVE_WINDOW_MS = 300;
+/** 창 하나에서 떼는 번호 수의 상한 [가정, 운영 측정으로 확정]: 평소 칸 3개 9만의 약 1.67배(초당 50만) */
+export const ARRIVAL_CARVE_WINDOW_MAX = 150_000;
+/** 칸 떼기 속도의 상한(창 상수에서 나온다) */
+export const ARRIVAL_CARVE_RATE_MAX_PER_SEC = (ARRIVAL_CARVE_WINDOW_MAX * 1000) / ARRIVAL_CARVE_WINDOW_MS;
+/** 장애 전환 뒤 RB-05가 건너뛰는 양의 바탕 값(ADR-0181 결정 4, ADR-0243): ⌈(회차 하나의 진입 상한 초당 20만 건 [가정, NFR-001] + 칸 떼기 상한 초당 50만 건 [가정]) × 복제 지연 p99.9 0.3초 [가정] × 2⌉ = 42만 [가정, 운영 측정으로 확정] */
 export const RB05_RATE_MAX_PER_SEC = 200_000;
 export const REPLICATION_LAG_P999_MS = 300;
-export const RB05_SKIP_BASE = Math.ceil((RB05_RATE_MAX_PER_SEC * REPLICATION_LAG_P999_MS * 2) / 1000);
+export const RB05_SKIP_BASE = Math.ceil(((RB05_RATE_MAX_PER_SEC + ARRIVAL_CARVE_RATE_MAX_PER_SEC) * REPLICATION_LAG_P999_MS * 2) / 1000);
 /** RB-05 복제 확인의 WAIT 한도 [가정](ADR-0186). 붙은 복제본이 이 안에 받지 못하면 다음 RB-05 호출(진입 503의 다시 시도, 리더 1초)이 다시 확인한다 */
 export const RB05_CONFIRM_WAIT_MS = 500;
 /** RB-05 전 진입의 503 queue-recovering Retry-After(초) [가정] */
@@ -151,7 +157,7 @@ export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
 export const ARRIVAL_SLOT_INITIAL = 30_000;
 /** 처음 칸부터 첫 크기를 쓰는 칸 수이자, 그 뒤 크기를 보는 직전 칸 수(10초) [가정] */
 export const ARRIVAL_WINDOW_SLOTS = 100;
-/** 한 Lua에서 떼는 번호 수의 상한 [가정]. RB-05가 건너뛰는 양(RB05_SKIP_BASE 12만)보다 작아야 장애 전환으로 잃은 칸의 번호가 건너뛴 구간 안에 든다(ADR-0223 결정 6) */
+/** 한 Lua에서 떼는 번호 수의 상한 [가정]. 창 상한(ARRIVAL_CARVE_WINDOW_MAX) 이하여야 몫이 남은 창에서 한 호출의 첫 칸을 뗄 수 있다. 복제 지연 안에 잃는 양의 상한은 시간 창이 만든다(ADR-0223 결정 6, ADR-0243) */
 export const ARRIVAL_CARVE_MAX = 100_000;
 
 /** 도착 시각 쿠키 이름(__Host-: Domain 없음·Path=/·Secure, ASVS v5.0.0-3.3.3) */

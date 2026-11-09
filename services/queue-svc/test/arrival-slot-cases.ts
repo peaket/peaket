@@ -12,6 +12,10 @@ export interface ArrivalWorld {
   failover: (eventId: string) => Promise<void>;
   /** 시험 도구: 칸의 쓴 번호 수를 바로 넣는다(큰 수를 요청으로 채우지 않으려고) */
   setUsed: (eventId: string, slot: number, used: number) => Promise<void>;
+  /** 칸 떼기 시간 창(ADR-0243)의 앞머리로 간다. 뒤따르는 호출들이 한 창 안에서 끝나게 한다 */
+  alignCarveWindow: () => Promise<void>;
+  /** 다음 칸 떼기 시간 창으로 넘어간다 */
+  nextCarveWindow: () => Promise<void>;
 }
 
 const expireFar = () => Date.now() + 3600_000 * 24 * 365 * 20;
@@ -112,7 +116,8 @@ export function arrivalSlotCases(label: string, make: () => Promise<ArrivalWorld
       const r = await numbers(w, eventId, [k + 3], 60_000);
       expect(r[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'late' });
       expect(await w.counter(eventId)).toBe(120_001);
-      // 다음 호출이 이어서 뗀다
+      // 다음 호출이 이어서 뗀다(이 시험은 Lua 한 번의 상한만 본다. 시간 창 상한은 아래 시험이 본다)
+      await w.nextCarveWindow();
       await numbers(w, eventId, [k + 3], 60_000);
       expect(await w.counter(eventId)).toBe(180_002);
       // 첫 크기가 상한보다 커도 칸 하나가 상한을 넘지 않는다
@@ -137,10 +142,39 @@ export function arrivalSlotCases(label: string, make: () => Promise<ArrivalWorld
       // 다음 호출이 k+101을 온전한 6만으로 뗀다
       await numbers(w, eventId, [k + 102], 1);
       expect(await w.counter(eventId)).toBe(100 + 60_000 + 1 + 60_000 + 1);
-      // 그다음 호출이 k+102를 떼어 쿠키가 칸 번호를 받는다
+      // 그다음 호출이 k+102를 떼어 쿠키가 칸 번호를 받는다(시간 창 상한에 걸리지 않게 다음 창에서)
+      await w.nextCarveWindow();
       const r3 = await numbers(w, eventId, [k + 102], 1);
       expect(r3[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'slot' });
       expect(await w.counter(eventId)).toBe(100 + 60_000 + 1 + 60_000 + 1 + 60_000);
+    });
+
+    // Valkey 쪽은 실제 시계라 창 안에서 끝나지 못하면(몰린 러너) 기대가 깨진다. 결함이면 세 번 다 실패한다
+    test('[Q-T16] 시간창의몫을넘긴떼기는_멈추고_못뗀칸의쿠키는카운터끝이고_다음창에서이어뗀다(ADR-0243)', { retry: 2 }, async () => {
+      const w = await make();
+      const eventId = newEvent();
+      const k = nowSlot(w) - 5;
+      await w.alignCarveWindow();
+      // 한 창의 몫은 15만이다. 칸 k가 10만을 쓴다
+      expect(seqOf((await numbers(w, eventId, [k], 100_000))[0]!)).toBe(1);
+      expect(await w.counter(eventId)).toBe(100_000);
+      // 이미 뗀 창에서 남은 몫(5만)보다 큰 칸은 줄여 떼지 않는다. 작은 칸을 만들면 그 칸의 도착자가 곧바로 넘친다. 그 쿠키는 카운터 끝의 번호를 받는다
+      const r = await numbers(w, eventId, [k + 1], 100_000);
+      expect(r[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'late', seq: 100_001 });
+      expect(await w.counter(eventId)).toBe(100_001);
+      // 남은 몫에 맞는 칸은 뗀다
+      const fit = await numbers(w, eventId, [k + 1], 50_000);
+      expect(fit[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'slot', seq: 100_002 });
+      expect(await w.counter(eventId)).toBe(150_001);
+      // 몫을 다 썼다. 칸 k+2는 떼지 않고 그 쿠키는 카운터 끝의 번호를 받는다(늦음)
+      const r2 = await numbers(w, eventId, [k + 2], 100_000);
+      expect(r2[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'late', seq: 150_002 });
+      expect(await w.counter(eventId)).toBe(150_002);
+      // 다음 창에서 이어 뗀다
+      await w.nextCarveWindow();
+      const r3 = await numbers(w, eventId, [k + 2], 100_000);
+      expect(r3[0]).toMatchObject({ kind: 'NUMBERED', arrival: 'slot', seq: 150_003 });
+      expect(await w.counter(eventId)).toBe(250_002);
     });
 
     test('[Q-T16] 장애전환으로세대가바뀌면_옛칸은닫힌칸이고_그칸의쿠키는카운터끝의번호를받는다', async () => {

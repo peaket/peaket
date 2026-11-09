@@ -1,7 +1,7 @@
 {
   "$comment": "재생용 동작 기록(wbs 2.3.4, V-T40). node tools/spec-check/run-local.mjs traces --spec queue가 만든다. 손으로 고치지 않는다",
   "spec": "specs/queue.qnt",
-  "specSha256": "6791d955d3cd12a00c93c4eec8e02ed9688e9aa51e893bd01c4188766cb55542",
+  "specSha256": "1dcbfc1dd45608bd71445eefa10a0b57212f8b6f2c50ad0a672423fe64731095",
   "quint": "0.33.1",
   "modules": [
     {
@@ -23,6 +23,10 @@
     {
       "main": "queue_proposed_full",
       "traces": 4
+    },
+    {
+      "main": "queue_arrival",
+      "traces": 8
     }
   ],
   "seed": "0x5eed",
@@ -51,6 +55,14 @@
     "queue_proposed_full_0.itf.json",
     "queue_proposed_full_1.itf.json",
     "queue_proposed_full_2.itf.json",
-    "queue_proposed_full_3.itf.json"
+    "queue_proposed_full_3.itf.json",
+    "queue_arrival_0.itf.json",
+    "queue_arrival_1.itf.json",
+    "queue_arrival_2.itf.json",
+    "queue_arrival_3.itf.json",
+    "queue_arrival_4.itf.json",
+    "queue_arrival_5.itf.json",
+    "queue_arrival_6.itf.json",
+    "queue_arrival_7.itf.json"
   ]
 }

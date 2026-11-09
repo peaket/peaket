@@ -69,8 +69,14 @@ export const PRE_OPEN_MS = 60_000;
 export const BATCH_WINDOW_DEFAULT_MS = 2_000;
 /** 한 주기에 훑는 번호 상한(빠진 번호가 많아도 Lua가 오래 막지 않게) [가정] */
 export const SCAN_BUDGET = 20_000;
-/** RB-05 바탕 값(queue-svc RB05_SKIP_BASE와 같다, ADR-0181 결정 4) */
-export const RB05_SKIP_BASE = 120_000;
+/** 칸 떼기 시간 창의 길이·창 하나의 상한 [가정, 운영 측정으로 확정](queue-svc ARRIVAL_CARVE_WINDOW_MS·ARRIVAL_CARVE_WINDOW_MAX와 같다, ADR-0243) */
+export const ARRIVAL_CARVE_WINDOW_MS = 300;
+export const ARRIVAL_CARVE_WINDOW_MAX = 150_000;
+/** 회차 하나의 진입 상한 초당 20만 건 [가정, NFR-001]·복제 지연 p99.9 0.3초 [가정](queue-svc와 같다, ADR-0181 결정 4) */
+export const RB05_RATE_MAX_PER_SEC = 200_000;
+export const REPLICATION_LAG_P999_MS = 300;
+/** RB-05 바탕 값(queue-svc RB05_SKIP_BASE와 같다, ADR-0181 결정 4, ADR-0243): ⌈(진입 상한 + 칸 떼기 상한) × 복제 지연 × 2⌉ = 42만 [가정, 운영 측정으로 확정] */
+export const RB05_SKIP_BASE = Math.ceil(((RB05_RATE_MAX_PER_SEC + (ARRIVAL_CARVE_WINDOW_MAX * 1000) / ARRIVAL_CARVE_WINDOW_MS) * REPLICATION_LAG_P999_MS * 2) / 1000);
 /** 리더가 회차마다 RB-05가 필요한지 보는 간격 [가정]. 세대 키가 지금 노드 표지와 같으면 Lua가 바로 끝난다(진입 ②가 설정 세대를 1초에 한 번 견주는 것과 같다, ADR-0184) */
 export const RB05_CHECK_MS = 1_000;
 /** RB-05 복제 확인의 WAIT 한도 [가정](queue-svc RB05_CONFIRM_WAIT_MS와 같다, ADR-0186) */

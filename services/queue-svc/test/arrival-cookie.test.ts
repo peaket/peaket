@@ -22,6 +22,16 @@ test('[Q-T16] Lua의칸상수는_domain값과같다(측정도구가Lua파일을�
   expect([lua.ARRIVAL_SLOT_MS, lua.ARRIVAL_CLOSE_AFTER_MS, lua.ARRIVAL_FUTURE_MS, lua.ARRIVAL_WINDOW_SLOTS, lua.ARRIVAL_CARVE_MAX]).toEqual([domain.ARRIVAL_SLOT_MS, domain.ARRIVAL_CLOSE_AFTER_MS, domain.ARRIVAL_FUTURE_MS, domain.ARRIVAL_WINDOW_SLOTS, domain.ARRIVAL_CARVE_MAX]);
   // 한 Lua에서 떼는 양은 RB-05가 건너뛰는 양보다 작아야 잃은 칸의 번호가 건너뛴 구간 안에 든다(ADR-0223 결정 6)
   expect(domain.ARRIVAL_CARVE_MAX).toBeLessThan(domain.RB05_SKIP_BASE);
+  expect([lua.ARRIVAL_CARVE_WINDOW_MS, lua.ARRIVAL_CARVE_WINDOW_MAX]).toEqual([domain.ARRIVAL_CARVE_WINDOW_MS, domain.ARRIVAL_CARVE_WINDOW_MAX]);
+});
+
+test('[Q-T16] 복제지연안에잃는번호의상한이_RB-05건너뛰기안에든다(ADR-0243)', () => {
+  // 복제 지연 0.3초는 시간 창 둘에 걸칠 수 있다: 칸 떼기는 창 상한 × 2까지, 일반 진입은 초당 20만 × 0.3초까지다
+  expect(domain.ARRIVAL_CARVE_WINDOW_MAX * 2 + (domain.RB05_RATE_MAX_PER_SEC * domain.REPLICATION_LAG_P999_MS) / 1000).toBeLessThanOrEqual(domain.RB05_SKIP_BASE);
+  // 창의 몫이 남아 있으면 한 호출의 첫 칸을 뗄 수 있어야 한다
+  expect(domain.ARRIVAL_CARVE_MAX).toBeLessThanOrEqual(domain.ARRIVAL_CARVE_WINDOW_MAX);
+  expect(domain.ARRIVAL_CARVE_RATE_MAX_PER_SEC).toBe((domain.ARRIVAL_CARVE_WINDOW_MAX * 1000) / domain.ARRIVAL_CARVE_WINDOW_MS);
+  expect(domain.RB05_SKIP_BASE).toBe(Math.ceil(((domain.RB05_RATE_MAX_PER_SEC + domain.ARRIVAL_CARVE_RATE_MAX_PER_SEC) * domain.REPLICATION_LAG_P999_MS * 2) / 1000));
 });
 
 describe('다시 보내기 분포와 칸 닫기(Q-T16)', () => {

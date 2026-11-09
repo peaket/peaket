@@ -316,7 +316,7 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
   });
 
   describe(`장애 전환과 RB-05(${label})`, () => {
-    // 건너뛰는 양의 바탕 값을 작게 두어 구간을 확인한다(운영은 12만 [가정], ADR-0181 결정 4)
+    // 건너뛰는 양의 바탕 값을 작게 두어 구간을 확인한다(운영은 42만 [가정], ADR-0181 결정 4·ADR-0243)
     const SKIP = 50;
     const setup = async () => {
       const w = await make();

@@ -5,6 +5,7 @@ export const SPEC_ACTIONS = [
   'enterPreempt',
   'pendingExpires',
   'enterNumber',
+  'enterNumberArrival',
   'enterRecord',
   'enterBatchRecord',
   'batchMissing',

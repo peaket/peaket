@@ -3,7 +3,7 @@
 import type { Clock } from '@peaket/platform';
 import type { ShuffleGroup } from '@peaket/shuffle';
 import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
-import { ARRIVAL_CARVE_MAX, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type HeldRecord, parseHeld, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { ARRIVAL_CARVE_MAX, ARRIVAL_CARVE_WINDOW_MAX, ARRIVAL_CARVE_WINDOW_MS, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type HeldRecord, parseHeld, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)(?::[0-9a-f]*)?$/;
 const BATCHED = /^BATCH:1:([0-9a-f]+):([^:]+):([^:]*):([^:]*)$/;
@@ -32,6 +32,9 @@ interface ArrivalState {
   gen?: number;
   closed: number;
   lost: number;
+  /** 칸 떼기 시간 창(ADR-0243): 창 번호와 그 창에서 뗀 번호 수 */
+  cw?: number;
+  cn: number;
   slots: Map<number, { base: number; size: number; used: number }>;
 }
 
@@ -159,6 +162,11 @@ export class MemoryEntryStore implements EntryStore {
       st.gen = gen;
     }
     const carved = { n: 0 };
+    const cw = Math.floor(now / ARRIVAL_CARVE_WINDOW_MS);
+    if (st.cw !== cw) {
+      st.cw = cw;
+      st.cn = 0;
+    }
     const out: (NumberResult | null)[] = i.items.map((it) => {
       const k = it.arrivalSlot;
       if (k === undefined) return null;
@@ -180,12 +188,12 @@ export class MemoryEntryStore implements EntryStore {
   }
 
   #arrOf(eventId: string): ArrivalState {
-    const s = this.#arr.get(eventId) ?? { closed: -1, lost: -1, slots: new Map() };
+    const s = this.#arr.get(eventId) ?? { closed: -1, lost: -1, cn: 0, slots: new Map() };
     this.#arr.set(eventId, s);
     return s;
   }
 
-  /** k칸까지 차례로 뗀다. 처음 100칸은 첫 크기, 그 뒤는 직전 100칸이 쓴 번호 최댓값 × 1.5. 직전 칸이 모두 비면 빈 칸을 건너뛰고 k를 새 첫 칸으로 삼아 첫 크기로 다시 뗀다. 한 번에 떼는 양은 ARRIVAL_CARVE_MAX까지다 */
+  /** k칸까지 차례로 뗀다. 처음 100칸은 첫 크기, 그 뒤는 직전 100칸이 쓴 번호 최댓값 × 1.5. 직전 칸이 모두 비면 빈 칸을 건너뛰고 k를 새 첫 칸으로 삼아 첫 크기로 다시 뗀다. 한 번에 떼는 양은 ARRIVAL_CARVE_MAX까지, 시간 창 하나에서는 ARRIVAL_CARVE_WINDOW_MAX까지다 */
   #carve(eventId: string, st: ArrivalState, k: number, gen: number, initial: number, carved: { n: number }): void {
     if (st.next === undefined) {
       st.next = k;
@@ -194,25 +202,29 @@ export class MemoryEntryStore implements EntryStore {
     }
     if (k < st.next) return;
     let j = st.next;
-    while (j <= k && carved.n < ARRIVAL_CARVE_MAX) {
+    while (j <= k && carved.n < ARRIVAL_CARVE_MAX && st.cn < ARRIVAL_CARVE_WINDOW_MAX) {
       let desired = initial;
       if (j - st.first! >= ARRIVAL_WINDOW_SLOTS) {
         let mx = 0;
         for (let m = j - ARRIVAL_WINDOW_SLOTS; m < j; m++) mx = Math.max(mx, st.slots.get(m)?.used ?? 0);
         desired = Math.ceil(mx * 1.5);
         if (desired === 0) {
+          // 첫 칸을 옮기기 전에 닫힘 표시가 없으면 옛 첫 칸 앞으로 적는다(Lua의 HSETNX closed_upto와 같다)
+          if (st.closed === -1) st.closed = st.first! - 1;
           j = k;
           st.first = k;
           desired = initial;
         }
       }
-      // 남은 몫보다 크면 칸을 자르지 않고 멈춘다. 다음 호출이 온전한 크기로 뗀다. 한 호출의 첫 칸만 상한까지 줄인다
-      if (carved.n > 0 && desired > ARRIVAL_CARVE_MAX - carved.n) break;
-      const size = Math.min(desired, ARRIVAL_CARVE_MAX);
+      // 이 호출과 이 시간 창의 남은 몫. 이 창에서 이미 뗐는데 남은 몫보다 크면 칸을 자르지 않고 멈춘다. 다음 호출이나 다음 창이 온전한 크기로 뗀다. 새 창의 첫 칸만 호출 상한까지 줄인다
+      const room = Math.min(ARRIVAL_CARVE_MAX - carved.n, ARRIVAL_CARVE_WINDOW_MAX - st.cn);
+      if (st.cn > 0 && desired > room) break;
+      const size = Math.min(desired, room);
       const base = (this.#seq.get(eventId) ?? 0) + 1;
       st.slots.set(j, { base, size, used: 0 });
       this.#seq.set(eventId, base + size - 1);
       carved.n += size;
+      st.cn += size;
       j++;
     }
     st.next = j;

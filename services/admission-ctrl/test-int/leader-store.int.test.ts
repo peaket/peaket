@@ -5,6 +5,8 @@ import { createHotRedis, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore, keys } from '../src/modules/leader/adapters/redis-leader-store.js';
 import type { TickInput } from '../src/modules/leader/domain/ports.js';
+import { RedisEntryStore } from '../../queue-svc/src/modules/entry/adapters/redis-entry-store.js';
+import { ARRIVAL_AGE_SLOTS, SHIFT_SLOTS } from './queue-model/system.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 let valkey: ValkeyContainer;
@@ -120,6 +122,24 @@ describe('도착 시각 칸 닫기(Q-T16, ADR-0223 결정 7)', () => {
     expect(await close(e)).toEqual({ kind: 'OK', slots: 3, returned: 24 });
     expect(await bitOf(e, 1)).toBe(1);
     expect(await bitOf(e, 17)).toBe(1);
+  });
+
+  test('[Q-T16] 진입Lua가실제로빈칸을건너뛴뒤에도_리더가옛칸을닫아쓰지않은번호를돌린다(closed_upto를미리심지않는다)', async () => {
+    const e = newEvent();
+    const entry = new RedisEntryStore(redis);
+    const at = Date.now() + DAY;
+    const k = Math.floor(Date.now() / 100) - 95;
+    // 칸 k에서 번호 하나를 쓰고(크기 2), 칸 k+140의 쿠키가 빈 칸을 건너뛰게 한다: k~k+99는 첫 크기, k+100은 직전 칸 최댓값, k+101부터 창이 비어 k+140이 새 첫 칸이다
+    await entry.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 2, items: [{ arrivalSlot: k }] });
+    await entry.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 2, items: [{ arrivalSlot: k + 140 }] });
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'first']))).toBe(String(k + 140));
+    // 칸 끝 + 20초가 지난 것으로 만든다(서버 시각은 바꿀 수 없어 칸 번호를 과거로 민다)
+    await redis.evalScript(SHIFT_SLOTS, [keys.arrSlots(e)], [String(-ARRIVAL_AGE_SLOTS)]);
+    // 옛 칸 k~k+100과 새 칸 k+140을 닫는다. 돌리는 번호: 칸 k는 1개(1번을 썼다), k+1~k+99는 2개씩, k+100은 2개, k+140은 1개
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 102, returned: 1 + 99 * 2 + 2 + 1 });
+    expect(await bitOf(e, 1)).toBe(0);
+    expect(await bitOf(e, 2)).toBe(1);
+    expect(await bitOf(e, 3)).toBe(1);
   });
 
   test('[Q-T16] 빈칸범위밖에는_칸기록이있으면건너뛰지않는다', async () => {

@@ -8,7 +8,8 @@ State 1: <Initial predicate>
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
@@ -16,38 +17,52 @@ State 1: <Initial predicate>
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_fencing_queue_evRep = [ seq |-> 0,
+/\ queue_no_fencing_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ev = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"], [gen |-> 0, op |-> "NONE"]>> ]
 
-State 2: <queue_no_fencing_queue_acquire(1) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
+State 2: <queue_no_fencing_queue_acquire(2) line 1299, col 3 to line 1319, col 68 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
@@ -55,7 +70,8 @@ State 2: <queue_no_fencing_queue_acquire(1) line 970, col 3 to line 990, col 68 
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
@@ -63,38 +79,52 @@ State 2: <queue_no_fencing_queue_acquire(1) line 970, col 3 to line 990, col 68 
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_fencing_queue_evRep = [ seq |-> 0,
+/\ queue_no_fencing_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ev = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ctl = [ holder |-> 1,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 0, op |-> "NONE"]>> ]
+  c |-> <<[gen |-> 0, op |-> "NONE"], [gen |-> 1, op |-> "BUMP"]>> ]
 
-State 3: <queue_no_fencing_queue_acquire(2) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
+State 3: <queue_no_fencing_queue_acquire(1) line 1299, col 3 to line 1319, col 68 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
@@ -102,7 +132,8 @@ State 3: <queue_no_fencing_queue_acquire(2) line 970, col 3 to line 990, col 68 
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
@@ -110,58 +141,80 @@ State 3: <queue_no_fencing_queue_acquire(2) line 970, col 3 to line 990, col 68 
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_fencing_queue_evRep = [ seq |-> 0,
+/\ queue_no_fencing_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ev = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ctl = [ holder |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ctl = [ holder |-> 1,
   transitions |-> 2,
   acquisitions |-> 2,
-  c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "BUMP"]>> ]
+  c |-> <<[gen |-> 2, op |-> "BUMP"], [gen |-> 1, op |-> "BUMP"]>> ]
 
-State 4: <queue_no_fencing_queue_applyWrite(2) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
-/\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
+State 4: <queue_no_fencing_queue_applyWrite(1) line 1809, col 3 to line 1844, col 64 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = << [ size |-> 0,
+     seq |-> 0,
+     first |-> 0,
      serving |-> 0,
      leader |-> 2,
      skips |-> {},
      removed |-> {},
      closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
      bgen |-> 0,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 2,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
@@ -169,58 +222,80 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1410, col 3 to line 1445, co
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_fencing_queue_evRep = [ seq |-> 0,
+/\ queue_no_fencing_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ev = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 2,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ctl = [ holder |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ctl = [ holder |-> 1,
   transitions |-> 2,
   acquisitions |-> 2,
-  c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "NONE"]>> ]
+  c |-> <<[gen |-> 2, op |-> "NONE"], [gen |-> 1, op |-> "BUMP"]>> ]
 
-State 5: <queue_no_fencing_queue_applyWrite(1) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
-/\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
+State 5: <queue_no_fencing_queue_applyWrite(2) line 1809, col 3 to line 1844, col 64 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = << [ size |-> 0,
+     seq |-> 0,
+     first |-> 0,
      serving |-> 0,
      leader |-> 2,
      skips |-> {},
      removed |-> {},
      closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
      bgen |-> 0,
      pub |-> FALSE,
      members |-> {},
      node |-> 1,
-     pend |-> FALSE ] >>
+     pend |-> FALSE,
+     arr |->
+         [ gen |-> 0,
+           next |-> 0,
+           first |-> 0,
+           closedUpto |-> 0,
+           lostUpto |-> 0,
+           slots |-> <<>> ] ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 1,
   maxGenSeen |-> 2,
   admLost |-> {},
-  dupLost |-> {} ]
+  dupLost |-> {},
+  arrIssued |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
@@ -228,33 +303,47 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1410, col 3 to line 1445, co
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_fencing_queue_evRep = [ seq |-> 0,
+/\ queue_no_fencing_queue_evRep = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 0,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ev = [ seq |-> 0,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ev = [ size |-> 0,
+  seq |-> 0,
+  first |-> 0,
   serving |-> 0,
   leader |-> 2,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
   node |-> 1,
-  pend |-> FALSE ]
-/\ queue_no_fencing_queue_ctl = [ holder |-> 2,
+  pend |-> FALSE,
+  arr |->
+      [ gen |-> 0,
+        next |-> 0,
+        first |-> 0,
+        closedUpto |-> 0,
+        lostUpto |-> 0,
+        slots |-> <<>> ] ]
+/\ queue_no_fencing_queue_ctl = [ holder |-> 1,
   transitions |-> 2,
   acquisitions |-> 2,
-  c |-> <<[gen |-> 1, op |-> "NONE"], [gen |-> 2, op |-> "NONE"]>> ]
+  c |-> <<[gen |-> 2, op |-> "NONE"], [gen |-> 1, op |-> "NONE"]>> ]

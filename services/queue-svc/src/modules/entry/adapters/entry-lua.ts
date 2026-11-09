@@ -7,6 +7,8 @@ export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
 export const ARRIVAL_FUTURE_MS = 5_000;
 export const ARRIVAL_WINDOW_SLOTS = 100;
 export const ARRIVAL_CARVE_MAX = 100_000;
+export const ARRIVAL_CARVE_WINDOW_MS = 300;
+export const ARRIVAL_CARVE_WINDOW_MAX = 150_000;
 
 // 회차 키의 수명은 부를 때마다 더 늦은 쪽으로만 늘린다(회차 연기로 판매 종료가 늦춰져도 옛 일정에 사라지지 않게. 당기지는 않는다).
 // 수명이 없는 키(-1, 예: RB-05의 INCRBY로 먼저 생긴 카운터)에도 건다. 없는 키(-2)는 PEXPIREAT이 아무 일도 하지 않는다
@@ -92,8 +94,9 @@ return 0
 // 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
 // 진입 Degraded(ADR-0223 결정 6): KEYS[8] = arr_slots이고, 요청 인수 뒤에 ARGV[8 + 2n] = 칸의 첫 크기, 그 뒤 요청마다 칸 번호(없으면 빈 글). 둘 다 없으면(측정 도구, 쿠키 없는 묶음) 예전과 같다.
 // 쿠키가 있는 요청의 종류: S = 칸 안의 번호, L = 칸이 닫혔거나 없어 카운터 끝, O = 구간이 차서 카운터 끝(값은 모두 번호).
-// 세대가 바뀌면(장애 전환) lost_upto를 적어 옛 칸을 쓰지 않는다. 칸의 used를 잃었을 수 있어 그 칸에서 번호를 다시 주면 같은 세대에서 겹칠 수 있다.
-// 한 Lua에서 떼는 양은 ARRIVAL_CARVE_MAX까지다(RB-05가 건너뛰는 12만 [가정]보다 작아야 잃은 칸의 번호가 건너뛴 구간 안에 든다). 남은 칸은 다음 호출이 뗀다
+// 세대가 바뀌면(장애 전환) lost_upto를 적어 옛 칸을 쓰지 않는다. 칸의 used를 잃었을 수 있어 그 칸에서 번호를 다시 주면 이미 나간 번호를 새 세대로 다시 내게 되고, 그 번호가 빠진 번호가 되면 다른 사람의 번호까지 빠진 번호가 된다.
+// 한 Lua에서 떼는 양은 ARRIVAL_CARVE_MAX까지이고, 서버 시각을 ARRIVAL_CARVE_WINDOW_MS로 나눈 시간 창 하나에서 떼는 양은 ARRIVAL_CARVE_WINDOW_MAX까지다(ADR-0243. 복제 지연 안에 잃는 번호가 RB-05의 건너뛰기 안에 들게 한다).
+// 창의 몫이 남았으면 한 호출의 첫 칸은 남은 몫까지 줄여서라도 뗀다. 몫이 없으면 떼지 않고 그 쿠키는 카운터 끝의 번호를 받는다(L). 다음 창에서 이어 뗀다
 export const NUMBER_BATCH_LUA = `${EXTEND}${NODE_ID}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -159,8 +162,12 @@ local values = {}
 local tail = n
 if initial then
   tail = 0
-  local a = redis.call('HMGET', arr, 'next', 'gen', 'closed_upto', 'first', 'lost_upto')
+  local a = redis.call('HMGET', arr, 'next', 'gen', 'closed_upto', 'first', 'lost_upto', 'cw', 'cn')
   local nxt, agen, closed, first, lost = tonumber(a[1]), tonumber(a[2]), tonumber(a[3]) or -1, tonumber(a[4]), tonumber(a[5]) or -1
+  -- 칸 떼기 시간 창(ADR-0243): cw = 창 번호, cn = 그 창에서 지금까지 뗀 번호 수. 창이 바뀌면 0부터 센다
+  local cw = math.floor(now / ${ARRIVAL_CARVE_WINDOW_MS})
+  local cn = 0
+  if tonumber(a[6]) == cw then cn = tonumber(a[7]) or 0 end
   if nxt and not first then first = nxt end
   if agen and agen ~= gen then
     if nxt and nxt - 1 > lost then lost = nxt - 1 end
@@ -176,7 +183,7 @@ if initial then
     end
     if k < nxt then return end
     local j = nxt
-    while j <= k and carved < ${ARRIVAL_CARVE_MAX} do
+    while j <= k and carved < ${ARRIVAL_CARVE_MAX} and cn < ${ARRIVAL_CARVE_WINDOW_MAX} do
       local desired = initial
       if j - first >= ${ARRIVAL_WINDOW_SLOTS} then
         local flds = {}
@@ -191,19 +198,23 @@ if initial then
         if desired == 0 then
           -- 건너뛰는 빈 칸의 범위를 적는다. 이 범위에는 칸 기록이 없어 리더가 훑지 않는다(그 앞 칸의 기록은 남아 있을 수 있다)
           if k > j then redis.call('HSET', arr, 'gap_from', j, 'gap_to', k - 1) end
+          -- 첫 칸을 옮기기 전에 닫힘 표시가 없으면 옛 첫 칸 앞으로 적는다. 리더의 닫기는 표시가 없으면 first - 1부터 닫으므로, 옮긴 뒤에는 옛 칸을 영영 닫지 못한다
+          redis.call('HSETNX', arr, 'closed_upto', first - 1)
           j = k
           first = k
           desired = initial
           redis.call('HSET', arr, 'first', first)
         end
       end
-      -- 남은 몫보다 크면 칸을 자르지 않고 멈춘다(작게 잘린 칸은 일찍 차서 넘침이 는다). 다음 호출이 온전한 크기로 뗀다. 한 호출의 첫 칸만 상한까지 줄인다
-      if carved > 0 and desired > ${ARRIVAL_CARVE_MAX} - carved then break end
-      local size = math.min(desired, ${ARRIVAL_CARVE_MAX})
+      -- 이 호출과 이 시간 창의 남은 몫. 이 창에서 이미 뗐는데 남은 몫보다 크면 칸을 자르지 않고 멈춘다(작게 잘린 칸은 일찍 차서 넘침이 는다). 다음 호출이나 다음 창이 온전한 크기로 뗀다. 새 창의 첫 칸만 호출 상한까지 줄인다
+      local room = math.min(${ARRIVAL_CARVE_MAX} - carved, ${ARRIVAL_CARVE_WINDOW_MAX} - cn)
+      if cn > 0 and desired > room then break end
+      local size = math.min(desired, room)
       local s = tonumber(redis.call('GET', KEYS[1]) or '0')
       redis.call('HSET', arr, j .. ':base', s + 1, j .. ':size', size, j .. ':used', 0)
       redis.call('INCRBY', KEYS[1], size)
       carved = carved + size
+      cn = cn + size
       j = j + 1
     end
     nxt = j
@@ -233,6 +244,7 @@ if initial then
       end
     end
   end
+  if carved > 0 then redis.call('HSET', arr, 'cw', cw, 'cn', cn) end
   extend(arr, ARGV[6])
 end
 local last = 0
