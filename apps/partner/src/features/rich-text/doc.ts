@@ -157,6 +157,7 @@ function checkInline(n: unknown, at: string, errs: string[]): number {
   }
   for (const k of extraKeys(o, ['t', 'v', 'b'])) errs.push(`${at}: 모르는 속성 ${k}`);
   if (typeof o.v !== 'string') errs.push(`${at}: 글자가 아니다`);
+  else if (/\p{Cs}/u.test(o.v) || o.v.includes('\u0000')) errs.push(`${at}: 저장할 수 없는 글자가 있다`);
   if (o.b !== undefined && o.b !== true) errs.push(`${at}: 굵기는 true만`);
   return typeof o.v === 'string' ? o.v.length : 0;
 }
@@ -196,7 +197,14 @@ export function validateDoc(doc: unknown): string[] {
         });
     } else errs.push(`${at}: 모르는 노드 ${String(o.t)}`);
   });
-  if (chars > MAX_CHARS) errs.push(`문서: 글자는 ${MAX_CHARS.toLocaleString('en-US')}자까지`);
+  // 서버는 글자판 전체(블록 사이 빈 줄 포함)로 잰다(ADR-0244). 블록 사이 두 글자를 더한다
+  const gaps = Math.max(0, blocks.length - 1) * 2;
+  const lineBreaks = blocks.reduce<number>((sum, b) => {
+    const o = obj(b);
+    if (!Array.isArray(o.items)) return sum + (Array.isArray(o.c) ? o.c.filter((n) => obj(n).t === 'br').length : 0);
+    return sum + Math.max(0, o.items.length - 1) + o.items.reduce<number>((s2, ln) => s2 + (Array.isArray(ln) ? ln.filter((n) => obj(n).t === 'br').length : 0), 0);
+  }, 0);
+  if (chars + gaps + lineBreaks > MAX_CHARS) errs.push(`문서: 글자는 ${MAX_CHARS.toLocaleString('en-US')}자까지`);
   if (nodes > MAX_NODES) errs.push(`문서: 노드는 ${MAX_NODES.toLocaleString('en-US')}개까지`);
   return errs;
 }

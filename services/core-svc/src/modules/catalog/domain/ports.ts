@@ -2,6 +2,7 @@
 import type { RoundRow, SellerRow } from './event-detail.js';
 import type { CatalogEvent, Genre, Production } from './production.js';
 import type { EventDraft, PendingEvent } from './registration.js';
+import type { DescriptionDoc, KopisFields } from './description.js';
 
 /** 회차 공개 요약에 쓰는 회차 칸 */
 export interface EventPublicFields {
@@ -20,6 +21,7 @@ export interface ProductionPublicFields {
   ageRating: string | null;
   runningMinutes: number | null;
   description: string | null;
+  descriptionDoc: DescriptionDoc | null;
 }
 
 /** 회차 공개 요약·공연 상세에 쓰는 한 벌(회차·공연·판매자·공연장·아티스트·같은 공연의 회차) */
@@ -55,6 +57,10 @@ export interface NewProduction {
   genre: Genre;
   ageRating?: string;
   runningMinutes?: number;
+  /** 구조 문서에서 만든 글자판 */
+  description?: string;
+  descriptionDoc?: DescriptionDoc;
+  kopisFields?: KopisFields;
   placeId?: string;
   requestedPlace?: { name: string; address: string };
   /** 기존 아티스트(보이는 순서와 함께) */

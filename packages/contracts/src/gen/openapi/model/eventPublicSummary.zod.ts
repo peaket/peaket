@@ -13,6 +13,22 @@ import * as zod from 'zod';
 
 export const eventPublicSummaryDescriptionTextMax = 20000;
 
+export const eventPublicSummaryDescriptionBlocksItemOneCItemOneVMax = 20000;
+
+export const eventPublicSummaryDescriptionBlocksItemOneCMax = 5000;
+
+export const eventPublicSummaryDescriptionBlocksItemTwoCItemOneVMax = 20000;
+
+export const eventPublicSummaryDescriptionBlocksItemTwoCMax = 5000;
+
+export const eventPublicSummaryDescriptionBlocksItemThreeItemsItemItemOneVMax = 20000;
+
+export const eventPublicSummaryDescriptionBlocksItemThreeItemsItemMax = 5000;
+
+export const eventPublicSummaryDescriptionBlocksItemThreeItemsMax = 5000;
+
+export const eventPublicSummaryDescriptionBlocksMax = 200;
+
 export const eventPublicSummaryDetailImagesMax = 10;
 
 export const eventPublicSummaryArtistsMax = 20;
@@ -33,7 +49,39 @@ export const EventPublicSummary = zod.object({
   "runningMinutes": zod.int().optional().describe('러닝타임(분)'),
   "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ProductionCard.posterUrl과 같은 규칙, ADR-0199 결정 4)'),
   "posterAlt": zod.string().optional(),
-  "descriptionText": zod.string().max(eventPublicSummaryDescriptionTextMax).optional().describe('공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식 있는 구조 문서(허용 노드 다섯, asvs/catalog-review 1.3.1)는 HOT-180이 칸 description으로 더한다. 화면은 이 칸을 글자로만 그린다(ADR-0200 결정 1)'),
+  "descriptionText": zod.string().max(eventPublicSummaryDescriptionTextMax).optional().describe('공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식은 description이다. 이 칸은 글자로만 그린다(ADR-0200 결정 1)'),
+  "description": zod.object({
+  "v": zod.literal(1),
+  "blocks": zod.array(zod.union([zod.object({
+  "t": zod.enum(['p']),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(eventPublicSummaryDescriptionBlocksItemOneCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(eventPublicSummaryDescriptionBlocksItemOneCMax)
+}),zod.object({
+  "t": zod.enum(['h']),
+  "level": zod.union([zod.literal(2),zod.literal(3)]),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(eventPublicSummaryDescriptionBlocksItemTwoCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(eventPublicSummaryDescriptionBlocksItemTwoCMax)
+}),zod.object({
+  "t": zod.enum(['ul', 'ol']),
+  "items": zod.array(zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(eventPublicSummaryDescriptionBlocksItemThreeItemsItemItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}),zod.object({
+  "t": zod.enum(['br'])
+})]).describe('글자 또는 줄바꿈(CMP-070)')).max(eventPublicSummaryDescriptionBlocksItemThreeItemsItemMax)).max(eventPublicSummaryDescriptionBlocksItemThreeItemsMax)
+})])).max(eventPublicSummaryDescriptionBlocksMax)
+}).optional().describe('공연 설명 구조 문서(CMP-070). HTML이 아니라 허용 노드 다섯(문단·줄바꿈·강조·목록·제목)만 담는다(asvs/catalog-review 1.3.1, ADR-0204). 합계 상한은 글자판(블록 사이 빈 줄 포함) 20,000자, 노드 5,000개 [가정]이고 넘으면 400이다(ADR-0244)'),
   "detailImages": zod.array(zod.object({
   "url": zod.url().describe('파생본 묶음의 기준 주소'),
   "alt": zod.string()

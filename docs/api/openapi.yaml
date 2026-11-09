@@ -1030,7 +1030,8 @@ components:
         runningMinutes: { type: integer, description: "러닝타임(분)" }
         posterUrl: { type: string, format: uri, description: "포스터 파생본 묶음의 기준 주소(ProductionCard.posterUrl과 같은 규칙, ADR-0199 결정 4)" }
         posterAlt: { type: string }
-        descriptionText: { type: string, maxLength: 20000, description: "공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식 있는 구조 문서(허용 노드 다섯, asvs/catalog-review 1.3.1)는 HOT-180이 칸 description으로 더한다. 화면은 이 칸을 글자로만 그린다(ADR-0200 결정 1)" }
+        descriptionText: { type: string, maxLength: 20000, description: "공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식은 description이다. 이 칸은 글자로만 그린다(ADR-0200 결정 1)" }
+        description: { $ref: '#/components/schemas/ProductionDescriptionDoc' }
         detailImages:
           type: array
           maxItems: 10
@@ -1062,12 +1063,106 @@ components:
           description: "등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2)"
           items: { type: object, properties: { tierId: { type: string, description: "등급 ID(좌석맵 판의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)" }, name: { type: string, description: "등급 이름(예: R석)" }, price: { type: integer, description: "정가(원). 예매 수수료가 없어 소비자가 내는 총금액이다(POL-032)" } } }
         seller: { $ref: '#/components/schemas/SellerInfo' }
+    ProductionDescriptionInline:
+      description: "글자 또는 줄바꿈(CMP-070)"
+      oneOf:
+        - type: object
+          required: [t, v]
+          properties:
+            t: { type: string, enum: [text] }
+            v: { type: string, maxLength: 20000 }
+            b: { type: boolean, enum: [true], description: "강조. 없으면 강조 없음" }
+        - type: object
+          required: [t]
+          properties:
+            t: { type: string, enum: [br] }
+    ProductionDescriptionDoc:
+      type: object
+      description: "공연 설명 구조 문서(CMP-070). HTML이 아니라 허용 노드 다섯(문단·줄바꿈·강조·목록·제목)만 담는다(asvs/catalog-review 1.3.1, ADR-0204). 합계 상한은 글자판(블록 사이 빈 줄 포함) 20,000자, 노드 5,000개 [가정]이고 넘으면 400이다(ADR-0244)"
+      required: [v, blocks]
+      properties:
+        v: { type: integer, enum: [1] }
+        blocks:
+          type: array
+          maxItems: 200
+          items:
+            oneOf:
+              - type: object
+                required: [t, c]
+                properties:
+                  t: { type: string, enum: [p] }
+                  c: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInline' } }
+              - type: object
+                required: [t, level, c]
+                properties:
+                  t: { type: string, enum: [h] }
+                  level: { type: integer, enum: [2, 3] }
+                  c: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInline' } }
+              - type: object
+                required: [t, items]
+                properties:
+                  t: { type: string, enum: [ul, ol] }
+                  items: { type: array, maxItems: 5000, items: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInline' } } }
+    ProductionDescriptionInlineInput:
+      description: "글자 또는 줄바꿈(CMP-070)"
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [t, v]
+          properties:
+            t: { type: string, enum: [text] }
+            v: { type: string, maxLength: 20000 }
+            b: { type: boolean, enum: [true], description: "강조. 없으면 강조 없음" }
+        - type: object
+          additionalProperties: false
+          required: [t]
+          properties:
+            t: { type: string, enum: [br] }
+    ProductionDescriptionDocInput:
+      type: object
+      additionalProperties: false
+      description: "공연 설명 구조 문서(CMP-070). HTML이 아니라 허용 노드 다섯(문단·줄바꿈·강조·목록·제목)만 담는다(asvs/catalog-review 1.3.1, ADR-0204). 합계 상한은 글자판(블록 사이 빈 줄 포함) 20,000자, 노드 5,000개 [가정]이고 넘으면 400이다(ADR-0244)"
+      required: [v, blocks]
+      properties:
+        v: { type: integer, enum: [1] }
+        blocks:
+          type: array
+          maxItems: 200
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [t, c]
+                properties:
+                  t: { type: string, enum: [p] }
+                  c: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInlineInput' } }
+              - type: object
+                additionalProperties: false
+                required: [t, level, c]
+                properties:
+                  t: { type: string, enum: [h] }
+                  level: { type: integer, enum: [2, 3] }
+                  c: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInlineInput' } }
+              - type: object
+                additionalProperties: false
+                required: [t, items]
+                properties:
+                  t: { type: string, enum: [ul, ol] }
+                  items: { type: array, maxItems: 5000, items: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/ProductionDescriptionInlineInput' } } }
     PartnerProductionCreate:
       type: object
       additionalProperties: false
-      description: "공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 공연 설명 글·공연예술통합전산망 항목(HOT-180), 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)"
+      description: "공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)"
       required: [title, genre, artists, events]
       properties:
+        description: { $ref: '#/components/schemas/ProductionDescriptionDocInput' }
+        kopisFields:
+          type: object
+          additionalProperties: false
+          description: "공연예술통합전산망 항목 가운데 파트너가 적는 칸(공연법 시행규칙 §2, transfer-refund §2.4). 나머지는 공연명·회차·공연장·가격·판매 집계에서 온다. 위저드가 임시저장하므로 여기서는 선택이고 필수 여부는 판매 승인 요청이 본다(ADR-0244)"
+          properties:
+            producer: { type: string, minLength: 1, maxLength: 200, description: "기획사·제작사 [가정]" }
+            notice: { type: string, minLength: 1, maxLength: 1000, description: "안내 사항 [가정]" }
         title: { type: string, minLength: 1, maxLength: 100, description: "공연명 1~100자 [가정]" }
         genre: { $ref: '#/components/schemas/Genre' }
         ageRating: { type: string, minLength: 1, maxLength: 30, description: "관람 연령(예: 만 7세 이상)" }

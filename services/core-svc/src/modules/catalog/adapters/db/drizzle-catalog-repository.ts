@@ -4,6 +4,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
 import { and, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
+import type { DescriptionDoc } from '../../domain/description.js';
 import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry } from '../../domain/ports.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
@@ -143,7 +144,7 @@ export class DrizzleCatalogRepository implements CatalogRepository {
         seatAssignment: r.e.seatAssignment as 'PICK' | 'AUTO',
         perPersonLimit: r.e.perPersonLimit,
       },
-      production: { id: r.p.id, promoterId: r.p.promoterId, placeId: r.p.placeId, title: r.p.title, genre: r.p.genre as Genre, saleReview: r.p.saleReview as SaleReview, saleApprovedAt: r.p.saleApprovedAt, ageRating: r.p.ageRating, runningMinutes: r.p.runningMinutes, description: r.p.description },
+      production: { id: r.p.id, promoterId: r.p.promoterId, placeId: r.p.placeId, title: r.p.title, genre: r.p.genre as Genre, saleReview: r.p.saleReview as SaleReview, saleApprovedAt: r.p.saleApprovedAt, ageRating: r.p.ageRating, runningMinutes: r.p.runningMinutes, description: r.p.description, descriptionDoc: r.p.descriptionDoc as DescriptionDoc | null },
       sellerName: r.s.legalName,
       seller: { legalName: r.s.legalName, representative: r.s.representative, address: r.s.address, phone: r.s.phone, email: r.s.email, businessRegNo: r.s.businessRegNo, mailOrderReportNo: r.s.mailOrderReportNo, exemptionBasis: r.s.exemptionBasis },
       place: r.place ? { id: r.place.id, name: r.place.name, address: r.place.address } : null,
@@ -189,6 +190,9 @@ export class DrizzleCatalogRepository implements CatalogRepository {
           genre: p.genre,
           ageRating: p.ageRating ?? null,
           runningMinutes: p.runningMinutes ?? null,
+          description: p.description ?? null,
+          descriptionDoc: p.descriptionDoc ?? null,
+          kopisFields: p.kopisFields ?? null,
         });
         if (p.artists.length > 0) await tx.insert(productionArtist).values(p.artists.map((a) => ({ productionId: p.id, artistId: a.artistId, sortOrder: a.sortOrder })));
         if (p.aliases.length > 0) {

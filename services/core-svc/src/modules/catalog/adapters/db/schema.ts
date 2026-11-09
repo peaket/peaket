@@ -51,6 +51,7 @@ export const production = pgTable(
     ageRating: text('age_rating'),
     runningMinutes: integer('running_minutes'),
     description: text('description'),
+    descriptionDoc: jsonb('description_doc'),
     saleReview: text('sale_review').notNull().default('DRAFT'),
     saleApprovedAt: at('sale_approved_at'),
     /** 공연예술통합전산망 항목 가운데 공연에 딸린 것(HOT-180이 채운다) */

@@ -5,6 +5,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { CATALOG_REPOSITORY, type CatalogRepository, type NewProduction, type RequestOnce } from '../domain/ports.js';
+import { type DescriptionDoc, descriptionText, type KopisFields } from '../domain/description.js';
 import type { Genre } from '../domain/production.js';
 import type { EventDraft } from '../domain/registration.js';
 import { notFound } from './problems.js';
@@ -20,6 +21,8 @@ export interface ProductionInput {
   /** 칸마다 artistId와 name 가운데 하나(받는 층이 확인했다) */
   artists: ({ artistId: string } | { name: string })[];
   aliases: string[];
+  description?: DescriptionDoc;
+  kopisFields?: KopisFields;
   events: EventDraft[];
 }
 
@@ -50,6 +53,8 @@ export class CreateProduction {
       const wanted = c.input.artists.flatMap((a) => ('artistId' in a ? [a.artistId] : []));
       if (wanted.length > 0 && (await tx.existingArtists(wanted)).length !== new Set(wanted).size) throw notFound();
       const productionId = uuidv7(this.clock);
+      // 내용 없는 문서는 설명이 없는 것이다(ADR-0244)
+      const text = c.input.description ? descriptionText(c.input.description).trim() : '';
       for (const [i, e] of c.input.events.entries()) await assertOpenSlot(tx, e, i, productionId);
       const events = c.input.events.map((e) => ({ ...e, id: uuidv7(this.clock) }));
       const p: NewProduction = {
@@ -59,6 +64,8 @@ export class CreateProduction {
         genre: c.input.genre,
         ...(c.input.ageRating !== undefined ? { ageRating: c.input.ageRating } : {}),
         ...(c.input.runningMinutes !== undefined ? { runningMinutes: c.input.runningMinutes } : {}),
+        ...(text ? { description: text, descriptionDoc: c.input.description as DescriptionDoc } : {}),
+        ...(c.input.kopisFields ? { kopisFields: c.input.kopisFields } : {}),
         ...(c.input.placeId !== undefined ? { placeId: c.input.placeId } : {}),
         ...(c.input.newPlace ? { requestedPlace: c.input.newPlace } : {}),
         artists: c.input.artists.flatMap((a, i) => ('artistId' in a ? [{ artistId: a.artistId, sortOrder: i }] : [])),

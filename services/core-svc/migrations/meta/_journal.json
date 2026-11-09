@@ -36,6 +36,13 @@
       "when": 1794188620416,
       "tag": "0004_partner_row_security",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794201977675,
+      "tag": "0005_production_description_doc",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import { ContractBody, ContractParams, CurrentPrincipal, IdempotencyRequest, Ide
 import { z } from 'zod';
 import { AddProductionEvent, type EventAdded } from '../application/add-production-event.js';
 import { CreateProduction, type ProductionCreated, type ProductionInput } from '../application/create-production.js';
+import { type DescriptionDoc, MAX_DESCRIPTION_BLOCKS, MAX_DESCRIPTION_CHARS, MAX_DESCRIPTION_NODES, withinDescriptionLimits } from '../domain/description.js';
 import { GENRES } from '../domain/production.js';
 import { type EventDraft, withEventDefaults } from '../domain/registration.js';
 
@@ -28,17 +29,46 @@ export const PartnerEventBody = z
   })
   .strict();
 
+/** PostgreSQL이 저장하지 못하는 글자(NUL, 짝이 깨진 서로게이트)를 막는다(ADR-0244) */
+const storable = (s: string): boolean => !/\p{Cs}/u.test(s) && !s.includes('\u0000');
+const StorableText = (min: number, max: number) => z.string().min(min).max(max).refine(storable, '저장할 수 없는 글자가 있다');
+
+const Inline = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('text'), v: StorableText(0, MAX_DESCRIPTION_CHARS), b: z.literal(true).optional() }).strict(),
+  z.object({ t: z.literal('br') }).strict(),
+]);
+const InlineList = z.array(Inline).max(MAX_DESCRIPTION_NODES);
+
+/** 계약 ProductionDescriptionDoc: 허용 노드 다섯만 받는다(asvs/catalog-review 1.3.1) */
+export const DescriptionDocBody = z
+  .object({
+    v: z.literal(1),
+    blocks: z
+      .array(
+        z.discriminatedUnion('t', [
+          z.object({ t: z.literal('p'), c: InlineList }).strict(),
+          z.object({ t: z.literal('h'), level: z.union([z.literal(2), z.literal(3)]), c: InlineList }).strict(),
+          z.object({ t: z.enum(['ul', 'ol']), items: z.array(InlineList).max(MAX_DESCRIPTION_NODES) }).strict(),
+        ]),
+      )
+      .max(MAX_DESCRIPTION_BLOCKS),
+  })
+  .strict()
+  .refine((d) => withinDescriptionLimits(d as DescriptionDoc), '글자·노드 합계 상한을 넘었다');
+
 /** 계약 PartnerProductionCreate */
 export const PartnerProductionBody = z
   .object({
-    title: z.string().min(1).max(100),
+    title: StorableText(1, 100),
     genre: z.enum(GENRES),
-    ageRating: z.string().min(1).max(30).optional(),
+    ageRating: StorableText(1, 30).optional(),
     runningMinutes: z.int().min(1).max(1440).optional(),
     placeId: z.uuid().optional(),
-    newPlace: z.object({ name: z.string().min(1).max(100), address: z.string().min(1).max(200) }).strict().optional(),
-    artists: z.array(z.object({ artistId: z.uuid().optional(), name: z.string().min(1).max(100).optional() }).strict()).max(20),
-    aliases: z.array(z.string().min(1).max(100)).max(5).optional(),
+    newPlace: z.object({ name: StorableText(1, 100), address: StorableText(1, 200) }).strict().optional(),
+    artists: z.array(z.object({ artistId: z.uuid().optional(), name: StorableText(1, 100).optional() }).strict()).max(20),
+    aliases: z.array(StorableText(1, 100)).max(5).optional(),
+    description: DescriptionDocBody.optional(),
+    kopisFields: z.object({ producer: StorableText(1, 200).optional(), notice: StorableText(1, 1000).optional() }).strict().optional(),
     events: z.array(PartnerEventBody).min(1).max(50),
   })
   .strict();
@@ -58,6 +88,8 @@ export function toDraft(e: EventBody): EventDraft {
   });
 }
 
+const dropUndefined = (o: { producer?: string | undefined; notice?: string | undefined }) => ({ ...(o.producer !== undefined ? { producer: o.producer } : {}), ...(o.notice !== undefined ? { notice: o.notice } : {}) });
+
 /** 모양 규칙(400). 맞으면 유스케이스 입력으로 바꾼다 */
 export function toProductionInput(b: z.output<typeof PartnerProductionBody>): ProductionInput {
   if ((b.placeId === undefined) === (b.newPlace === undefined)) throw new RequestValidationError('placeId와 newPlace 가운데 꼭 하나');
@@ -74,6 +106,8 @@ export function toProductionInput(b: z.output<typeof PartnerProductionBody>): Pr
     genre: b.genre,
     ...(b.ageRating !== undefined ? { ageRating: b.ageRating } : {}),
     ...(b.runningMinutes !== undefined ? { runningMinutes: b.runningMinutes } : {}),
+    ...(b.description ? { description: b.description as DescriptionDoc } : {}),
+    ...(b.kopisFields ? { kopisFields: dropUndefined(b.kopisFields) } : {}),
     ...(b.placeId !== undefined ? { placeId: b.placeId.toLowerCase() } : {}),
     ...(b.newPlace ? { newPlace: b.newPlace } : {}),
     artists,

@@ -377,6 +377,26 @@ export const CreatePartnerProductionHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
+export const createPartnerProductionBodyDescriptionBlocksItemOneCItemOneVMax = 20000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemOneCMax = 5000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemTwoCItemOneVMax = 20000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemTwoCMax = 5000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemThreeItemsItemItemOneVMax = 20000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemThreeItemsItemMax = 5000;
+
+export const createPartnerProductionBodyDescriptionBlocksItemThreeItemsMax = 5000;
+
+export const createPartnerProductionBodyDescriptionBlocksMax = 200;
+
+export const createPartnerProductionBodyKopisFieldsProducerMax = 200;
+
+export const createPartnerProductionBodyKopisFieldsNoticeMax = 1000;
+
 export const createPartnerProductionBodyTitleMax = 100;
 
 export const createPartnerProductionBodyAgeRatingMax = 30;
@@ -411,6 +431,42 @@ export const createPartnerProductionBodyEventsMax = 50;
 
 
 export const CreatePartnerProductionBody = zod.object({
+  "description": zod.object({
+  "v": zod.literal(1),
+  "blocks": zod.array(zod.union([zod.object({
+  "t": zod.enum(['p']),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(createPartnerProductionBodyDescriptionBlocksItemOneCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}).strict(),zod.object({
+  "t": zod.enum(['br'])
+}).strict()]).describe('글자 또는 줄바꿈(CMP-070)')).max(createPartnerProductionBodyDescriptionBlocksItemOneCMax)
+}).strict(),zod.object({
+  "t": zod.enum(['h']),
+  "level": zod.union([zod.literal(2),zod.literal(3)]),
+  "c": zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(createPartnerProductionBodyDescriptionBlocksItemTwoCItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}).strict(),zod.object({
+  "t": zod.enum(['br'])
+}).strict()]).describe('글자 또는 줄바꿈(CMP-070)')).max(createPartnerProductionBodyDescriptionBlocksItemTwoCMax)
+}).strict(),zod.object({
+  "t": zod.enum(['ul', 'ol']),
+  "items": zod.array(zod.array(zod.union([zod.object({
+  "t": zod.enum(['text']),
+  "v": zod.string().max(createPartnerProductionBodyDescriptionBlocksItemThreeItemsItemItemOneVMax),
+  "b": zod.literal(true).optional().describe('강조. 없으면 강조 없음')
+}).strict(),zod.object({
+  "t": zod.enum(['br'])
+}).strict()]).describe('글자 또는 줄바꿈(CMP-070)')).max(createPartnerProductionBodyDescriptionBlocksItemThreeItemsItemMax)).max(createPartnerProductionBodyDescriptionBlocksItemThreeItemsMax)
+}).strict()])).max(createPartnerProductionBodyDescriptionBlocksMax)
+}).strict().optional().describe('공연 설명 구조 문서(CMP-070). HTML이 아니라 허용 노드 다섯(문단·줄바꿈·강조·목록·제목)만 담는다(asvs/catalog-review 1.3.1, ADR-0204). 합계 상한은 글자판(블록 사이 빈 줄 포함) 20,000자, 노드 5,000개 [가정]이고 넘으면 400이다(ADR-0244)'),
+  "kopisFields": zod.object({
+  "producer": zod.string().min(1).max(createPartnerProductionBodyKopisFieldsProducerMax).optional().describe('기획사·제작사 [가정]'),
+  "notice": zod.string().min(1).max(createPartnerProductionBodyKopisFieldsNoticeMax).optional().describe('안내 사항 [가정]')
+}).strict().optional().describe('공연예술통합전산망 항목 가운데 파트너가 적는 칸(공연법 시행규칙 §2, transfer-refund §2.4). 나머지는 공연명·회차·공연장·가격·판매 집계에서 온다. 위저드가 임시저장하므로 여기서는 선택이고 필수 여부는 판매 승인 요청이 본다(ADR-0244)'),
   "title": zod.string().min(1).max(createPartnerProductionBodyTitleMax).describe('공연명 1~100자 [가정]'),
   "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
   "ageRating": zod.string().min(1).max(createPartnerProductionBodyAgeRatingMax).optional().describe('관람 연령(예: 만 7세 이상)'),
@@ -439,7 +495,7 @@ export const CreatePartnerProductionBody = zod.object({
   "seatAssignment": zod.enum(['PICK', 'AUTO']).default(createPartnerProductionBodyEventsItemSeatAssignmentDefault).describe('좌석 배정 방식(POL-035)'),
   "perPersonLimit": zod.int().min(1).max(createPartnerProductionBodyEventsItemPerPersonLimitMax).default(createPartnerProductionBodyEventsItemPerPersonLimitDefault).describe('1인 한도 [가정](POL-011). 판매 정책 DSL의 단계별 한도(HOT-250)는 이 값을 넘지 않는다')
 }).strict().describe('회차 하나(공연 등록의 events 칸과 회차 더하기 본문, ADR-0198 결정 2). 판정 순서: 일정(422 event-schedule-invalid: 지금 < 오픈 < 판매 종료(공연 시작 − 24시간) < 공연 시작 < 공연 종료, 입장 시작 ≤ 공연 시작) → 정렬 설정(422 queue-order-invalid: 둘 다 false) → 정비 창(409 open-maintenance-window: 오픈이 수요일 03:00~06:30 KST) → 오픈 간격(409 open-too-close: 공개 중인 다른 공연의 취소되지 않은 회차와 5분 안, 정확히 5분은 된다. 확장 칸 suggestedOpenAt은 판매 종료 전인 가능 시각이 있을 때만). 같은 공연의 회차끼리는 오픈 간격을 보지 않는다. 승인 전 공연끼리의 간격은 판매 승인이 다시 본다(ADR-0198 결정 2)')).min(1).max(createPartnerProductionBodyEventsMax).describe('첫 회차들 1~50개 [가정]. 응답의 eventIds가 같은 순서다')
-}).strict().describe('공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 공연 설명 글·공연예술통합전산망 항목(HOT-180), 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)')
+}).strict().describe('공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)')
 
 export const CreatePartnerProductionResponse = zod.object({
   "productionId": zod.uuid(),

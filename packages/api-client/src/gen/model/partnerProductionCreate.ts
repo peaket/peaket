@@ -12,12 +12,17 @@
 import type { Genre } from './genre';
 import type { PartnerEventCreate } from './partnerEventCreate';
 import type { PartnerProductionCreateArtistsItem } from './partnerProductionCreateArtistsItem';
+import type { PartnerProductionCreateKopisFields } from './partnerProductionCreateKopisFields';
 import type { PartnerProductionCreateNewPlace } from './partnerProductionCreateNewPlace';
+import type { ProductionDescriptionDocInput } from './productionDescriptionDocInput';
 
 /**
- * 공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 공연 설명 글·공연예술통합전산망 항목(HOT-180), 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)
+ * 공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)
  */
 export interface PartnerProductionCreate {
+  description?: ProductionDescriptionDocInput;
+  /** 공연예술통합전산망 항목 가운데 파트너가 적는 칸(공연법 시행규칙 §2, transfer-refund §2.4). 나머지는 공연명·회차·공연장·가격·판매 집계에서 온다. 위저드가 임시저장하므로 여기서는 선택이고 필수 여부는 판매 승인 요청이 본다(ADR-0244) */
+  kopisFields?: PartnerProductionCreateKopisFields;
   /**
      * 공연명 1~100자 [가정]
      * @minLength 1

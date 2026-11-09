@@ -97,6 +97,16 @@ describe('공연 등록(DB)', () => {
   });
 });
 
+describe('공연 설명·전산망 항목(DB)', () => {
+  test('실제 권한으로 구조 문서·글자판·전산망 항목을 저장한다', async () => {
+    const description = { v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: '설명', b: true }] }] };
+    const r = await post('/v1/partner/productions', identity.partner(TENANT), productionBody(PLACE, { title: '설명 공연', events: [eventBody({ openAt: '2026-11-27T11:00:00Z' })], description, kopisFields: { producer: '(주)피켓공연' } }));
+    expect(r.statusCode).toBe(201);
+    const [p] = await database.db.select().from(production).where(eq(production.id, JSON.parse(r.payload).productionId));
+    expect(p).toMatchObject({ description: '설명', descriptionDoc: description, kopisFields: { producer: '(주)피켓공연' } });
+  });
+});
+
 describe('아티스트·공연장 찾기(DB)', () => {
   test('실제 권한으로 이름·다른 이름·닫은 공연장을 거른다', async () => {
     const closed = randomUUID();

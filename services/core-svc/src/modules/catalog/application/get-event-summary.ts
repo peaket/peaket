@@ -4,6 +4,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { lobbyOpensAt, MAX_ARTISTS, MAX_DESCRIPTION_TEXT, publicRounds, queueOrder, sellerInfo, type PublicRound, type QueueOrder, type SellerInfo } from '../domain/event-detail.js';
+import type { DescriptionDoc } from '../domain/description.js';
 import { CATALOG_REPOSITORY, type CatalogRepository } from '../domain/ports.js';
 import { type EventStatus, type Genre, isPublic, saleEndsAt } from '../domain/production.js';
 
@@ -17,6 +18,7 @@ export interface EventPublicSummary {
   ageRating?: string;
   runningMinutes?: number;
   descriptionText?: string;
+  description?: DescriptionDoc;
   artists: { artistId: string; name: string }[];
   placeId?: string;
   placeName?: string;
@@ -61,6 +63,7 @@ export class GetEventSummary {
       ...(p.ageRating ? { ageRating: p.ageRating } : {}),
       ...(p.runningMinutes ? { runningMinutes: p.runningMinutes } : {}),
       ...(p.description ? { descriptionText: p.description.slice(0, MAX_DESCRIPTION_TEXT) } : {}),
+      ...(p.descriptionDoc ? { description: p.descriptionDoc } : {}),
       artists: row.artists.slice(0, MAX_ARTISTS),
       ...(place ? { placeId: place.id, placeName: place.name, placeAddress: place.address } : {}),
       openAt: e.openAt.toISOString(),

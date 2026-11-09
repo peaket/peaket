@@ -99,3 +99,11 @@ test('깊게 겹친 입력도 멈추지 않는다(깊이 64 [가정]에서 자�
   for (let i = 0; i < 20_000; i++) tt = { type: 'blockquote', content: [tt] };
   assert.doesNotThrow(() => fromTiptap({ type: 'doc', content: [tt] }));
 });
+
+test('리뷰 재현(서버와 같은 규칙): 글자판 길이(블록 사이 빈 줄 포함)와 저장할 수 없는 글자를 막는다', () => {
+  const para = (n) => ({ t: 'p', c: [{ t: 'text', v: '가'.repeat(n) }] });
+  assert.deepEqual(validateDoc({ v: 1, blocks: Array.from({ length: 200 }, () => para(98)) }), []);
+  assert.ok(validateDoc({ v: 1, blocks: Array.from({ length: 200 }, () => para(100)) }).some((e) => e.includes('글자')));
+  assert.ok(validateDoc({ v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: 'a\u0000' }] }] }).length > 0);
+  assert.ok(validateDoc({ v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: 'a\ud800' }] }] }).length > 0);
+});

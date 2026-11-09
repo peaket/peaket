@@ -44,7 +44,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
     const d = this.details.get(eventId);
     return {
       event: { entryOpensAt: null, endsAt: new Date(event.startsAt.getTime() + 2 * 3_600_000), reentryAllowed: false, lobbyMinutes: 10, lobbyShuffle: true, openBatch: true, seatAssignment: 'PICK', perPersonLimit: 4, ...event, ...d?.event },
-      production: { ageRating: null, runningMinutes: null, description: null, ...production, ...d?.production },
+      production: { ageRating: null, runningMinutes: null, description: null, descriptionDoc: null, ...production, ...d?.production },
       sellerName,
       seller: { legalName: sellerName, representative: null, address: null, phone: null, email: null, businessRegNo: null, mailOrderReportNo: null, exemptionBasis: null, ...d?.seller },
       place: d?.place ?? null,

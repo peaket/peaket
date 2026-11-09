@@ -18,6 +18,7 @@ import type { EventPublicSummaryRoundsItem } from './eventPublicSummaryRoundsIte
 import type { EventPublicSummarySeatAssignment } from './eventPublicSummarySeatAssignment';
 import type { EventStatus } from './eventStatus';
 import type { Genre } from './genre';
+import type { ProductionDescriptionDoc } from './productionDescriptionDoc';
 import type { SellerInfo } from './sellerInfo';
 
 /**
@@ -41,10 +42,11 @@ export interface EventPublicSummary {
   posterUrl?: string;
   posterAlt?: string;
   /**
-     * 공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식 있는 구조 문서(허용 노드 다섯, asvs/catalog-review 1.3.1)는 HOT-180이 칸 description으로 더한다. 화면은 이 칸을 글자로만 그린다(ADR-0200 결정 1)
+     * 공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식은 description이다. 이 칸은 글자로만 그린다(ADR-0200 결정 1)
      * @maxLength 20000
      */
   descriptionText?: string;
+  description?: ProductionDescriptionDoc;
   /**
      * 상세 이미지 0~10장(ADR-0062 결정 38). 이미지에만 있는 정보는 설명 글에도 있다
      * @maxItems 10
