@@ -810,6 +810,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 구역 표 | `sectionCount` × (`u16 sectionIndex`, `u32 sectionVersion`) | 구역별 일련번호 |
 | 비트맵 | 좌석 색인 순서. 바이트 안에서는 낮은 비트부터 | 1 = 점유(홀드·결제 예약·판매), 0 = 가능. 구역 하나만 실으면 그 구역 범위만 담는다 |
 
+- **바이트 순서**: 수는 §4.4.1 델타와 같은 리틀 엔디언이다(정본에 비어 있어 서버는 빅, 화면은 리틀로 어긋났던 것을 실제 화면 연결에서 찾았다, 추천 적용 2026-11-10, BUILD_ORDER HOT-358 리뷰 V2).
 - 전체 비트맵은 5만 석에 6,250바이트다. seat-hold §2의 '약 6.25KB'가 이 크기다. 전송할 때의 압축은 HTTP `Content-Encoding`(br·gzip)에 맡긴다(§6.2).
 - 응답은 `application/octet-stream`이고 `Cache-Control: no-store`다. 스냅샷 요청은 첫 요청(구매 세션을 연다)이든 재요청이든 헤지 요청(응답이 늦으면 같은 요청을 하나 더 보내 먼저 온 응답을 쓰는 방식)을 쓰지 않는다(seat-hold §2, 추천 적용 2026-10-28, ADR-0117). 재요청은 읽기라 §4.1의 읽기 규칙(시간 초과, `Retry-After`와 지터를 지킨 자동 재시도, 분당 재시도 예산)을 따른다. 같은 구역의 재요청은 한 번에 하나만 보내고, 그 사이 갭이 또 생기면 앞 요청의 결과를 기다린다.
 
@@ -1445,7 +1446,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 - **출력**: React 텍스트 노드(문자열을 글자 그대로 넣는 화면 조각)와 `textContent`만 쓴다. `dangerouslySetInnerHTML`·`innerHTML`은 공용 ESLint가 막는다. 공연 설명(서식 글)의 기본안은 허용 노드만 담은 구조 문서(JSON)를 노드마다 React 요소로 그리는 것이라 예외가 없다(docs/design/d2 CMP-070, 추천 적용 2026-10-28, 기술 검토 낮음-100). 편집기 PoC(FE-T41)가 이 안을 못 넘어 HTML 정화 대체안으로 가면, 정화한 공연 설명을 그리는 `@peaket/ds` 서식 글 컴포넌트 하나만 예외다(asvs/catalog-review 1.3.1). 그때 정화기는 DOMPurify 하나다. 서버(저장할 때·ISR로 그릴 때)에서는 최신 jsdom과 함께 쓰고, happy-dom은 쓰지 않는다(DOMPurify 안내는 서버에서 최신 jsdom을 강하게 권하고 happy-dom은 안전하지 않다고 밝힌다, 2026-10-28 확인). 허용 목록 설정은 공용 패키지 하나에 두어 저장 때와 표시 때가 같은 목록을 쓴다(추천 적용 2026-10-28, 기술 검토 낮음-094).
 - **돌아갈 주소 `safeNext()`**: 512자 이하이고, `/`로 시작하며, `//`·`/\`로 시작하지 않고, 제어 문자·백슬래시·`%2f%2f`·`%5c`(대소문자 무시)가 없는 같은 출처 경로만 받는다. 결과는 경로와 쿼리이고, 조각(`#`)은 버린다. 아니면 앱 첫 화면으로 보낸다. 로그인 `next`, 본인확인 `next`, 알림 착지 주소가 모두 이 함수를 쓴다(FE-T12).
 - **URL 조각 비밀값**: `#token=`·`#code=`는 읽자마자 `history.replaceState`로 지우고, 탭 세션 저장소에 잠시 둔다(ADR-0065 결정 10).
-- **창·탭 메시지**: 우리가 받는 창 메시지는 본인확인 결과 하나다. 이 메시지는 같은 출처 `BroadcastChannel`로 받고, `verificationId`와 형식을 확인한다. `postMessage`를 보낼 때는 `targetOrigin`에 정확한 출처를 쓰고 `*`를 쓰지 않는다(Semgrep 규칙). Worker·탭 메시지는 Zod로 검사한다.
+- **창·탭 메시지**: 우리가 받는 창 메시지는 본인확인 결과 하나다. 이 메시지는 같은 출처 `BroadcastChannel`로 받고, `verificationId`와 형식을 확인한다. 창의 `message` 수신기는 `eslint.config.mjs`의 `NO_WINDOW_MESSAGE`가 막는다(ADR-0253). `postMessage`를 보낼 때는 `targetOrigin`에 정확한 출처를 쓰고 `*`를 쓰지 않는다. Worker·탭 메시지는 Zod로 검사한다.
 - **전역 금지**: `window`·`document`에 앱 값을 두지 않고, TypeScript `strict`와 `eqeqeq`를 둔다(ASVS 3.2.3·15.3.5).
 
 #### 5.14.4 로그아웃 정리 루틴(ADR-0079 결정 17)

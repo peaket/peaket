@@ -158,3 +158,36 @@ test('I-T45 게이트웨이가 정하는 머리(남은 시간·앱 이름·앞�
   assert.equal(r.headers.get('content-encoding'), null);
   assert.deepEqual(await r.json(), { zipped: true });
 });
+
+test('V2 구매 경로는 purchaseUrl로, 나머지는 fallbackUrl로 가고 대역 신원은 쿠키가 없을 때만 실린다. local-dev 입장 경로를 넘긴다', async () => {
+  const purchase = [];
+  const mk = (sink) => createServer((req, res) => {
+    sink.push({ url: req.url, headers: req.headers });
+    req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  const a = mk(purchase);
+  const b = mk([]);
+  const c = mk(purchase);
+  await Promise.all([a, b, c].map((s) => new Promise((f) => s.listen(0, '127.0.0.1', f))));
+  const url = (s) => `http://127.0.0.1:${s.address().port}`;
+  const g = await startLocalFanGateway({ identityUrl: 'http://127.0.0.1:1', webOrigin: WEB, jwks: { keys: [] }, issuer: ISSUER, env: { PEAKET_ENV: 'local' }, purchaseUrl: url(a), fallbackUrl: url(b), localAdmissionUrl: url(c), devIdentity: { 'x-user-id': 'dev' } });
+  try {
+    await fetch(`${g.url}/v1/holds/h1`, { headers: { 'x-user-id': 'attacker' } });
+    assert.equal(purchase[0].url, '/v1/holds/h1');
+    assert.equal(purchase[0].headers['x-user-id'], 'dev');
+    await fetch(`${g.url}/v1/events/e1/seatmap-snapshot`);
+    assert.equal(purchase[1].url, '/v1/events/e1/seatmap-snapshot');
+    assert.equal((await fetch(`${g.url}/v1/events/e1`)).status, 200);
+    assert.equal(purchase.length, 2);
+    await fetch(`${g.url}/v1/local-dev/admission`, { method: 'POST', headers: { origin: WEB }, body: '{}' });
+    assert.equal(purchase[2].url, '/v1/local-dev/admission');
+    const pre = await fetch(`${g.url}/v1/orders`, { method: 'OPTIONS', headers: { origin: WEB } });
+    assert.match(pre.headers.get('access-control-allow-headers'), /x-purchase-mac/);
+  } finally {
+    await g.close();
+    for (const s of [a, b, c]) s.close();
+  }
+});
+

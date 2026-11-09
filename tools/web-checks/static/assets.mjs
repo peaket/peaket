@@ -1,6 +1,6 @@
 // 정적 자산 올리기 목록·소스 맵 링크 검사·정적 자산 SBOM(docs/frontend.md §5.18 '정적 업로드 허용 확장자'·§5.14.5 'SBOM',
 // FE-T21의 '소스 맵 링크·허용 확장자', ASVS 13.4.1·13.4.7·15.1.2, BUILD_ORDER BAS-220).
-//   node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--package <앱 폴더>] [--external <출처>]...
+//   node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--package <앱 폴더>] [--external <출처>]... [--allow-simulator]
 // --package: 앱이 기대는 작업 공간 패키지(@peaket/*, 설정 패키지 빼고)와 그 실행 의존성도 SBOM에 더한다. Vite는 CSS 소스 맵을 내지 않아
 // CSS로만 실리는 패키지(@peaket/ds·@seed-design/css)가 소스 맵에서 빠지기 때문이다(구간 1 끝 정리).
 // 결과: upload.json(올릴 파일과 뺀 파일·까닭), sbom.cdx.json(CycloneDX 1.6, 묶음에 실제로 든 패키지). 오류가 있으면 끝 코드 1.
@@ -199,13 +199,14 @@ export function cycloneDx(o) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { app: { type: 'string' }, dir: { type: 'string' }, out: { type: 'string' }, package: { type: 'string' }, external: { type: 'string', multiple: true } } });
+  const { values } = parseArgs({ options: { app: { type: 'string' }, dir: { type: 'string' }, out: { type: 'string' }, package: { type: 'string' }, external: { type: 'string', multiple: true }, 'allow-simulator': { type: 'boolean' } } });
   if (!values.app || !values.dir || !values.out) {
     console.error('쓰는 법: node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--external <출처>]...');
     process.exit(2);
   }
   const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-  const plan = planUpload(resolve(values.dir));
+  // 데모 오버레이 빌드만 데모 결제창을 허용한다(FE-T21, ADR-0253)
+  const plan = planUpload(resolve(values.dir), { allowSimulator: values['allow-simulator'] === true });
   const fromMaps = bundledPackages(resolve(values.dir), repoRoot);
   const fromPkg = values.package ? workspaceDeps(resolve(values.package), repoRoot) : [];
   // 소스 맵에서 읽은 패키지(묶음에 실제로 든 것)가 이긴다. --package로 더한 것은 '선언한 의존성'(묶음에 들 수 있는 것)으로 표시한다

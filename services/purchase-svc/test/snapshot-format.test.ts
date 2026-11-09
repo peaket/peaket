@@ -1,6 +1,6 @@
 // 좌석 스냅샷 이진 형식(docs/frontend.md §4.4.2, docs/features/seat-hold.md §2 '스냅샷 API의 첫 구현' 본문 글머리, BUILD_ORDER PRF-137).
 // encodeSnapshot·decodeSnapshot·lsbFirstBits(src/modules/inventory/domain/snapshot.ts)를 손으로 계산한 바이트 벡터와 비트 단위 참조 구현으로 본다.
-// 모든 수는 big endian. 헤더 = version u8, flags u8, layoutVersion u32, seatEpoch u32, sectionCount u16(12바이트) + 구역 표((sectionIndex u16, sectionVersion u32) × n) + 비트맵.
+// 모든 수는 little endian. 헤더 = version u8, flags u8, layoutVersion u32, seatEpoch u32, sectionCount u16(12바이트) + 구역 표((sectionIndex u16, sectionVersion u32) × n) + 비트맵.
 import { describe, expect, test } from 'vitest';
 import {
   decodeSnapshot,
@@ -49,7 +49,7 @@ describe('encodeSnapshot: 손으로 계산한 바이트', () => {
     });
     // 01 | 00 | 00000007 | 01020304 | 0002 | 0000 00000005 | 0001 0a0b0c0d | a5 01
     expect(Buffer.isBuffer(out)).toBe(true);
-    expect(out.toString('hex')).toBe(hex('01 00 00000007 01020304 0002 000000000005 00010a0b0c0d a501').toString('hex'));
+    expect(out.toString('hex')).toBe(hex('01 00 07000000 04030201 0200 000005000000 01000d0c0b0a a501').toString('hex'));
     expect(out.length).toBe(26);
   });
 
@@ -61,7 +61,7 @@ describe('encodeSnapshot: 손으로 계산한 바이트', () => {
       sections: [{ sectionIndex: U16_MAX, sectionVersion: U32_MAX }],
       bitmap: Uint8Array.from([0x80]),
     });
-    expect(out.toString('hex')).toBe(hex('01 01 ffffffff ffffffff 0001 ffff ffffffff 80').toString('hex'));
+    expect(out.toString('hex')).toBe(hex('01 01 ffffffff ffffffff 0100 ffff ffffffff 80').toString('hex'));
     expect(out.length).toBe(19);
   });
 
@@ -72,17 +72,17 @@ describe('encodeSnapshot: 손으로 계산한 바이트', () => {
 
   test('FR009_ 모든 값이 0인 가장 작은 본문: 구역 색인 0·일련번호 0·비트맵 0', () => {
     const out = encodeSnapshot({ layoutVersion: 0, seatEpoch: 0, sectionOnly: false, sections: [{ sectionIndex: 0, sectionVersion: 0 }], bitmap: Uint8Array.from([0x00]) });
-    expect(out.toString('hex')).toBe(hex('01 00 00000000 00000000 0001 000000000000 00').toString('hex'));
+    expect(out.toString('hex')).toBe(hex('01 00 00000000 00000000 0100 000000000000 00').toString('hex'));
   });
 
   test('FR009_ 구역 65535개(구역 색인 0 ~ 65534)까지 만들 수 있고 sectionCount는 0xffff다', () => {
     const sections = Array.from({ length: 65535 }, (_, i) => ({ sectionIndex: i, sectionVersion: i }));
     const out = encodeSnapshot(body({ sections, bitmap: Uint8Array.from([0x01]) }));
     expect(out.length).toBe(12 + 65535 * 6 + 1);
-    expect(out.readUInt16BE(10)).toBe(65535);
+    expect(out.readUInt16LE(10)).toBe(65535);
     // 마지막 구역 표 칸 (65534, 65534)
-    expect(out.readUInt16BE(12 + 65534 * 6)).toBe(65534);
-    expect(out.readUInt32BE(12 + 65534 * 6 + 2)).toBe(65534);
+    expect(out.readUInt16LE(12 + 65534 * 6)).toBe(65534);
+    expect(out.readUInt32LE(12 + 65534 * 6 + 2)).toBe(65534);
     expect(out[out.length - 1]).toBe(0x01);
   });
 
@@ -157,7 +157,7 @@ describe('encodeSnapshot: 범위 밖 값은 RangeError', () => {
 
 describe('decodeSnapshot', () => {
   test('FR009_ 손으로 만든 바이트를 읽는다: 헤더·구역 표·비트맵이 정해진 자리에서 나온다', () => {
-    const r = decodeSnapshot(hex('01 00 00000007 01020304 0002 000000000005 00010a0b0c0d a501'));
+    const r = decodeSnapshot(hex('01 00 07000000 04030201 0200 000005000000 01000d0c0b0a a501'));
     expect(r.layoutVersion).toBe(7);
     expect(r.seatEpoch).toBe(0x01020304);
     expect(r.sectionOnly).toBe(false);
@@ -169,7 +169,7 @@ describe('decodeSnapshot', () => {
   });
 
   test('FR009_ flags 비트 0이 켜져 있으면 sectionOnly이고 u32 끝값을 부호 없이 읽는다', () => {
-    const r = decodeSnapshot(hex('01 01 ffffffff ffffffff 0001 ffff ffffffff 80'));
+    const r = decodeSnapshot(hex('01 01 ffffffff ffffffff 0100 ffff ffffffff 80'));
     expect(r).toMatchObject({ layoutVersion: U32_MAX, seatEpoch: U32_MAX, sectionOnly: true });
     expect(r.sections).toEqual([{ sectionIndex: U16_MAX, sectionVersion: U32_MAX }]);
     expect(bytesOf(r.bitmap)).toEqual([0x80]);
@@ -194,30 +194,30 @@ describe('decodeSnapshot', () => {
   });
 
   test('FR009_ 헤더 12바이트보다 짧으면 RangeError다(0·1·11바이트)', () => {
-    const full = hex('01 00 00000007 01020304 0002 000000000005 00010a0b0c0d a501');
+    const full = hex('01 00 07000000 04030201 0200 000005000000 01000d0c0b0a a501');
     for (const n of [0, 1, 2, 11]) expect(() => decodeSnapshot(full.subarray(0, n)), `${n}바이트`).toThrow(RangeError);
   });
 
   test('FR009_ sectionCount가 가리키는 구역 표가 입력보다 길면 RangeError다(구역 표 중간에서 잘림)', () => {
-    const full = hex('01 00 00000007 01020304 0002 000000000005 00010a0b0c0d a501');
+    const full = hex('01 00 07000000 04030201 0200 000005000000 01000d0c0b0a a501');
     // 구역 표 두 칸 가운데 둘째 칸 중간(헤더 12 + 6 + 3)에서 자른다
     expect(() => decodeSnapshot(full.subarray(0, 12 + 6 + 3))).toThrow(RangeError);
     // sectionCount만 크게 고친 입력
     const lying = Buffer.from(full);
-    lying.writeUInt16BE(500, 10);
+    lying.writeUInt16LE(500, 10);
     expect(() => decodeSnapshot(lying)).toThrow(RangeError);
   });
 
   test('FR009_ version이 1이 아니면 RangeError다(0·2·255)', () => {
     for (const v of [0, 2, 255]) {
-      const b = Buffer.from(hex('01 00 00000007 01020304 0001 000000000005 a5'));
+      const b = Buffer.from(hex('01 00 07000000 04030201 0100 000005000000 a5'));
       b[0] = v;
       expect(() => decodeSnapshot(b), `version ${v}`).toThrow(RangeError);
     }
   });
 
   test('FR009_ 입력 바이트를 바꾸지 않고, 순수 Uint8Array(Buffer가 아닌 입력)도 읽는다', () => {
-    const raw = hex('01 00 00000007 01020304 0001 000000000005 a5');
+    const raw = hex('01 00 07000000 04030201 0100 000005000000 a5');
     const input = Uint8Array.from(raw);
     const r = decodeSnapshot(input);
     expect(bytesOf(r.bitmap)).toEqual([0xa5]);
@@ -362,5 +362,17 @@ describe('속성 시험(시드 고정)', () => {
       const back = decodeSnapshot(encoded);
       expect({ n, back: { ...back, bitmap: bytesOf(back.bitmap) } }).toEqual({ n, back: { ...original, bitmap: bytesOf(original.bitmap) } });
     }
+  });
+});
+
+describe('화면 복호기와 맞물림(BUILD_ORDER HOT-358 리뷰 V2)', () => {
+  test('HOT-358 V2 서버가 만든 스냅샷을 화면 복호기(packages/seatmap wire)가 같은 값으로 읽는다', async () => {
+    const { decodeSnapshot: browserDecode } = await import('../../../packages/seatmap/src/wire.js');
+    const bytes = encodeSnapshot({ layoutVersion: 2, seatEpoch: 7, sectionOnly: false, sections: [{ sectionIndex: 0, sectionVersion: 1 }, { sectionIndex: 5, sectionVersion: 300 }], bitmap: new Uint8Array([1, 2, 3]) });
+    const s = browserDecode(new Uint8Array(bytes));
+    expect(s.layoutVersion).toBe(2);
+    expect(s.seatEpoch).toBe(7);
+    expect(s.sections).toEqual([{ sectionIndex: 0, sectionVersion: 1 }, { sectionIndex: 5, sectionVersion: 300 }]);
+    expect(Array.from(s.bitmap)).toEqual([1, 2, 3]);
   });
 });

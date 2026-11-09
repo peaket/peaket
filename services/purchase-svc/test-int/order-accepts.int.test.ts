@@ -300,7 +300,7 @@ describe('DrizzleOrderAccepts.order·activeAttempt(트랜잭션 밖 읽기)', ()
     const o = await placed(s);
     const createdAtMs = s.clock.now() + 1234;
     const attemptId = await putAttempt(s, o, { pg, status, createdAtMs });
-    expect(await s.accepts.activeAttempt(o.id)).toEqual({ attemptId, pg, status, pgOrderRef: pg === 'PORTONE' ? `pay-${o.id}` : o.id, createdAtMs });
+    expect(await s.accepts.activeAttempt(o.id)).toEqual({ attemptId, pg, status, attemptCount: 1, pgOrderRef: pg === 'PORTONE' ? `pay-${o.id}` : o.id, createdAtMs });
   });
 
   test('activeAttempt: pg_order_ref가 널이면 pgOrderRef가 없다', async () => {
@@ -308,7 +308,7 @@ describe('DrizzleOrderAccepts.order·activeAttempt(트랜잭션 밖 읽기)', ()
     const o = await placed(s);
     const attemptId = await putAttempt(s, o, { pg: 'PORTONE', pgOrderRef: null });
     const r = await s.accepts.activeAttempt(o.id);
-    expect(r).toEqual({ attemptId, pg: 'PORTONE', status: 'READY', createdAtMs: s.clock.now() });
+    expect(r).toEqual({ attemptId, pg: 'PORTONE', status: 'READY', attemptCount: 1, createdAtMs: s.clock.now() });
     expect(r?.pgOrderRef).toBeUndefined();
   });
 

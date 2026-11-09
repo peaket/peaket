@@ -16,6 +16,8 @@ import {
   ApplyPaymentResult,
   discardBehaviorSignals,
   DrizzleOrderAccepts,
+  DrizzlePaymentStatus,
+  PaymentStatusWaitTable,
   DrizzleOrderStarts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
@@ -76,7 +78,7 @@ import { type PostgresContainer, startPostgres } from './postgres.js';
 import { until } from './support.js';
 
 const CONSENT = '2026-10-30';
-const WEB = 'https://www.it.example';
+const WEB = process.env.PEAKET_LOCAL_WEB ?? 'https://www.it.example';
 const SIM_KEY = 'sim_sk_e2e_only';
 
 let pgc: PostgresContainer | undefined;
@@ -179,7 +181,7 @@ beforeAll(async () => {
   redisGate = await startRedisGate(valkey!.url);
   redis = await createHotRedis({ url: redisGate.url });
   sim = buildSimulatorApp({ secretKey: SIM_KEY });
-  simUrl = await sim.listen({ host: '127.0.0.1', port: 0 });
+  simUrl = await sim.listen({ host: '127.0.0.1', port: Number(process.env.PEAKET_LOCAL_SIM_PORT ?? 0) });
 
   const root = createDatabase({ url: pgc!.url, profile: 'general', max: 2, applicationName: 'e2e-root' });
   await root.pool.query('create database purchase_e2e');
@@ -283,6 +285,11 @@ beforeAll(async () => {
         consentVersion: CONSENT,
         clock: systemClock,
         onAccepted: (orderId) => saga.kick(orderId),
+        // 결과 화면용(실제 화면 연결, V2)
+        paymentStatus: (() => {
+          const reads = new DrizzlePaymentStatus({ database: purchaseDb });
+          return { reads, waiters: new PaymentStatusWaitTable({ reads, clock: systemClock, signals: new Proxy({}, { get: () => () => {} }) as never }) };
+        })(),
       },
     }),
     purchaseSessions: sessions,
@@ -793,3 +800,62 @@ async function until2<T>(f: () => Promise<T | null>, what: string, ms = 20_000):
     await new Promise((r) => setTimeout(r, 200));
   }
 }
+
+// 실제 화면 연결용 로컬 스택(BUILD_ORDER HOT-358 리뷰 V2). 평소에는 돌지 않는다. PEAKET_LOCAL_STACK=1이면 실제 서비스를 포트에 묶고 멈춤 파일이 생길 때까지 기다린다.
+// 좌석맵 파일과 회차 요약은 가짜 API의 값을 그대로 쓴다(좌석 ID·등급이 화면과 같아야 한다).
+describe.runIf(process.env.PEAKET_LOCAL_STACK === '1')('로컬 스택', () => {
+  test('화면이 붙을 수 있게 띄워 둔다', async () => {
+    const mock = (await import(/* @vite-ignore */ new URL('../../../apps/web/scripts/mock-api.mjs', import.meta.url).href)) as { eventDetail(o: string, id: string): { priceTiers: { tierId: string; name: string; price: number }[] } };
+    const layoutMod = (await import(/* @vite-ignore */ new URL('../../../apps/web/scripts/mock-api/seatmap.mjs', import.meta.url).href)) as { seatmapLayoutV(v: number): { sections: { sectionId: string; name: string; seatIndexRange: { from: number }; seats: { seatId: string[]; row: string[]; number: string[]; tier: number[] } }[]; tiers: string[]; seatCount: number } };
+    const eventId = process.env.PEAKET_LOCAL_EVENT!;
+    const layout = layoutMod.seatmapLayoutV(3);
+    const tiers = mock.eventDetail('', eventId).priceTiers;
+    // 주문 DB의 좌석 ID는 UUID다: 가짜 파일의 글 ID를 같은 값으로 바꿔 판과 파일에 함께 쓴다
+    const uuidOf = (id: string): string => {
+      const h = createHash('sha256').update(id).digest('hex');
+      return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+    };
+    for (const s of layout.sections) s.seats.seatId = s.seats.seatId.map(uuidOf);
+    const layoutBody = JSON.stringify(layout);
+    const seats = layout.sections.flatMap((s, si) => s.seats.seatId.map((seatId, o) => ({ seatId, index: s.seatIndexRange.from + o, sectionId: s.sectionId, sectionIndex: si, seatOffset: o, tierId: layout.tiers[s.seats.tier[o]!]!, label: `${s.name} ${s.seats.row[o]}열 ${s.seats.number[o]}번` })));
+    seatMap.put({ eventId, layoutVersion: '3', seatCount: layout.seatCount, perAccountLimit: 4, saleEndsAtMs: Date.now() + 2 * 86400_000, tierPrices: Object.fromEntries(tiers.map((x) => [x.tierId, x.price])), tierNames: Object.fromEntries(tiers.map((x) => [x.tierId, x.name])), orderName: 'LUMEN 콘서트', virtualAccountAllowed: false } as never, seats as never);
+    await new RedisSeatStore(redis).openSale({ eventId, seatCount: layout.seatCount, keepUntilMs: Date.now() + 2 * 86400_000 + KEEP_AFTER_SALE_END_MS });
+    const accountId = process.env.PEAKET_LOCAL_ACCOUNT!;
+    const login = process.env.PEAKET_LOCAL_LOGIN!;
+    pidOf.set(accountId, process.env.PEAKET_LOCAL_PID!);
+    await svc.http.listen({ host: '127.0.0.1', port: Number(process.env.PEAKET_LOCAL_PURCHASE_PORT) });
+    const { createServer: http } = await import('node:http');
+    const admission = http((req, res) => {
+      if (req.url?.includes('/seatmap-layouts/')) {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return void res.end(layoutBody);
+      }
+      const jti = randomUUID();
+      const token = signAdmission(admissionKey, claimsOf({ nowMs: Date.now(), jti, accountId, loginSessionId: login, eventId }, { jny: randomUUID() }));
+      const pub = serverPriv.publicJwk();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ admissionToken: token, purchaseSessionExpiresAt: new Date(Date.now() + 40 * 60_000).toISOString(), serverEcdhPublicKey: pub, seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/3.json` }));
+      req.resume();
+    });
+    await new Promise<void>((f) => admission.listen(Number(process.env.PEAKET_LOCAL_ADMISSION_PORT), '127.0.0.1', f));
+    const seen = new Set<string>();
+    let offset = 5_000_000n;
+    const stopFile = process.env.PEAKET_LOCAL_STOP!;
+    const { existsSync } = await import('node:fs');
+    while (!existsSync(stopFile)) {
+      await confirmRunner.tick().catch(() => undefined);
+      await confirmRunner.whenIdle().catch(() => undefined);
+      await unknownResolver.tick().catch(() => undefined);
+      const rows = (await adminPay.pool.query<{ payload: Buffer; id: string }>('select seq::text as id, payload from outbox where msg_key = $1 order by seq', [eventId])).rows;
+      for (const r of rows) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        offset += 1n;
+        const m: ConsumedMessage = { topic: 'trade.payments', partition: 0, offset, key: eventId, value: r.payload, headers: {}, timestamp: Date.now() };
+        await results.handle(results.decode(m), m).catch((e: unknown) => console.error('result', e));
+      }
+      await new Promise((f) => setTimeout(f, 300));
+    }
+    admission.close();
+  }, 3_600_000);
+});

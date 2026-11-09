@@ -461,7 +461,7 @@ describe('다시 만들기 Lua의 모양(rebuild-lua.ts 계약, ADR-0086)', () =
     expect(await rebuilder.rebuild(eventId, { keepUntilMs })).toEqual({ result: 'REBUILT', gen: 2, sold: count, held: 0, skipped: 0 });
 
     expect(calls[0]!.script.source).toBe(BEGIN_REBUILD_LUA);
-    expect(calls[0]!.keys).toEqual([seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.rebuild(eventId)]);
+    expect(calls[0]!.keys).toEqual([seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.rebuild(eventId), seatKeys.ordered(eventId), seatKeys.paused(eventId)]);
     expect(calls[0]!.args).toEqual(['2', String(keepUntilMs)]);
     const seatCalls = calls.filter((c) => c.script.source === REBUILD_SEATS_LUA);
     expect(seatCalls.map((c) => c.keys.length - 4)).toEqual([200, 200, 50]);

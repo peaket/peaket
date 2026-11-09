@@ -449,7 +449,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const isPaused = booking?.value === 'paused';
   useEffect(() => {
     if (!isPaused) return;
-    const t = setTimeout(() => bookingRef.current?.resume(), PAUSED_RETRY_MS);
+    const t = setTimeout(() => bookingRef.current?.resume(), PAUSED_RETRY_MS * (1 + Math.random() * 0.2));
     return () => clearTimeout(t);
   }, [isPaused]);
 

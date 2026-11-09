@@ -613,6 +613,44 @@ ${createHash('sha256').update(body).digest('base64url')}`;
       assert.equal((await r.json()).type.split('/').pop(), type);
     }
     await fetch(`${base}/__mock/state?hold=normal`);
+    // 실제 서버와 맞춘 동작(BUILD_ORDER HOT-358 리뷰 V2)
+    const callSigned = async (method, path, bodyObj, extra = {}) => {
+      const body = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
+      return fetch(base + path, { method, headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...signed(method, path, body), ...extra }, ...(body ? { body } : {}) });
+    };
+    const made = await (await post({ seatIds: ['A-2-1'] })).json();
+    assert.equal((await callSigned('DELETE', `/v1/holds/${made.holdId}`)).status, 204);
+    const again = await post({ seatIds: ['A-2-1'] });
+    assert.equal(again.status, 409);
+    const recentBody = await again.json();
+    assert.equal(recentBody.type.split('/').pop(), 'seat-recently-released');
+    assert.ok(recentBody.reholdAvailableAt);
+    const h2 = await (await post({ seatIds: ['A-2-2'] })).json();
+    await fetch(`${base}/__mock/state?holdAction=session-ended`);
+    const named = await callSigned('POST', `/v1/holds/${h2.holdId}/extension`, {});
+    assert.equal((await named.json()).type.split('/').pop(), 'purchase-session-ended');
+    await fetch(`${base}/__mock/state?holdAction=normal`);
+    const order = await (await callSigned('POST', '/v1/orders', { holdId: h2.holdId, buyer: { name: '김', phone: '010' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: '2026-10-30' } }, { 'idempotency-key': 'o-1' })).json();
+    const start = (k) => callSigned('POST', `/v1/orders/${order.orderId}/payments`, {}, { 'idempotency-key': k });
+    const a1 = await (await start('k1')).json();
+    assert.equal((await (await start('k1')).json()).attemptId, a1.attemptId, '같은 키는 재생');
+    const a2 = await (await start('k2')).json();
+    const late = await callSigned('POST', `/v1/orders/${order.orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey: 'p', amount: order.amount, attemptId: a1.attemptId }, { 'idempotency-key': 'a-1' });
+    assert.equal((await late.json()).type.split('/').pop(), 'payment-attempt-mismatch', '대체된 시도');
+    const noId = await callSigned('POST', `/v1/orders/${order.orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey: 'p', amount: order.amount }, { 'idempotency-key': 'a-2' });
+    assert.equal(noId.status, 409, '시도가 둘이면 attemptId가 필요');
+    await start('k3');
+    const over = await start('k4');
+    assert.equal((await over.json()).type.split('/').pop(), 'payment-attempts-exceeded');
+    assert.ok(a2.attemptId);
+    await fetch(`${base}/__mock/state?payments=expired`);
+    assert.equal((await (await start('k5')).json()).type.split('/').pop(), 'order-expired');
+    await fetch(`${base}/__mock/state?payments=paused`);
+    const paused = await (await start('k6')).json();
+    assert.equal(paused.holdRemainingSeconds, 240);
+    const frozen = await (await fetch(`${base}/v1/holds/${h2.holdId}`, { headers: { 'x-admission-token': token } })).json();
+    assert.equal(frozen.frozen, true);
+    await fetch(`${base}/__mock/state?payments=normal`);
     const leave = await fetch(`${base}/v1/events/${event}/purchase-session`, { method: 'DELETE', headers: signed('DELETE', `/v1/events/${event}/purchase-session`, '') });
     assert.equal(leave.status, 204);
   } finally {

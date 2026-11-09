@@ -69,13 +69,13 @@ export function encodeSnapshot(body: SnapshotBody): Buffer {
   const out = Buffer.allocUnsafe(HEADER_BYTES + SECTION_ROW_BYTES * n + body.bitmap.length);
   out.writeUInt8(SNAPSHOT_VERSION, 0);
   out.writeUInt8(body.sectionOnly ? SNAPSHOT_FLAG_SECTION_ONLY : 0, 1);
-  out.writeUInt32BE(body.layoutVersion, 2);
-  out.writeUInt32BE(body.seatEpoch, 6);
-  out.writeUInt16BE(n, 10);
+  out.writeUInt32LE(body.layoutVersion, 2);
+  out.writeUInt32LE(body.seatEpoch, 6);
+  out.writeUInt16LE(n, 10);
   let at = HEADER_BYTES;
   for (const s of body.sections) {
-    out.writeUInt16BE(s.sectionIndex, at);
-    out.writeUInt32BE(s.sectionVersion, at + 2);
+    out.writeUInt16LE(s.sectionIndex, at);
+    out.writeUInt32LE(s.sectionVersion, at + 2);
     at += SECTION_ROW_BYTES;
   }
   out.set(body.bitmap, at);
@@ -89,17 +89,17 @@ export function decodeSnapshot(buf: Uint8Array): SnapshotBody {
   if (b.readUInt8(0) !== SNAPSHOT_VERSION) throw new RangeError('스냅샷 본문의 version이 1이 아니다');
   const flags = b.readUInt8(1);
   if ((flags & ~SNAPSHOT_FLAG_SECTION_ONLY) !== 0) throw new RangeError('스냅샷 본문의 flags에 모르는 비트가 있다');
-  const n = b.readUInt16BE(10);
+  const n = b.readUInt16LE(10);
   if (b.length < HEADER_BYTES + SECTION_ROW_BYTES * n) throw new RangeError('스냅샷 본문이 구역 표보다 짧다');
   const sections: Array<{ sectionIndex: number; sectionVersion: number }> = [];
   let at = HEADER_BYTES;
   for (let i = 0; i < n; i++) {
-    sections.push({ sectionIndex: b.readUInt16BE(at), sectionVersion: b.readUInt32BE(at + 2) });
+    sections.push({ sectionIndex: b.readUInt16LE(at), sectionVersion: b.readUInt32LE(at + 2) });
     at += SECTION_ROW_BYTES;
   }
   return {
-    layoutVersion: b.readUInt32BE(2),
-    seatEpoch: b.readUInt32BE(6),
+    layoutVersion: b.readUInt32LE(2),
+    seatEpoch: b.readUInt32LE(6),
     sectionOnly: (flags & SNAPSHOT_FLAG_SECTION_ONLY) !== 0,
     sections,
     bitmap: Uint8Array.from(b.subarray(at)),

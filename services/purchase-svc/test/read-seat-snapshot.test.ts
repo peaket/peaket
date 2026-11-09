@@ -199,11 +199,11 @@ describe('본문', () => {
     // 바이트로 직접: version 1, flags 0, layoutVersion 3, seatEpoch, 구역 3개
     expect(raw[0]).toBe(1);
     expect(raw[1]).toBe(0);
-    expect(raw.readUInt32BE(2)).toBe(3);
-    expect(raw.readUInt32BE(6)).toBe(w.opened!.seatEpoch);
-    expect(raw.readUInt16BE(10)).toBe(3);
+    expect(raw.readUInt32LE(2)).toBe(3);
+    expect(raw.readUInt32LE(6)).toBe(w.opened!.seatEpoch);
+    expect(raw.readUInt16LE(10)).toBe(3);
     // 구역 표: (색인 u16, 일련번호 u32) × 3. 홀드는 구역 A·B에 한 번씩 올렸고 구역 2(판매 제외석)는 0이다
-    expect(raw.subarray(HEADER, HEADER + 18).toString('hex')).toBe('000000000001' + '000100000001' + '000200000000');
+    expect(raw.subarray(HEADER, HEADER + 18).toString('hex')).toBe('000001000000' + '010001000000' + '020000000000');
     // 비트맵: 좌석 색인 0·1 → 바이트 0의 비트 0·1(0x03), 색인 20 → 바이트 2의 비트 4(0x10). 낮은 비트부터다(Redis의 0xc0 / 0x08과 거꾸로)
     expect(raw.subarray(HEADER + 18).toString('hex')).toBe('0300100000');
     // 같은 내용을 decodeSnapshot으로도 본다
@@ -254,9 +254,9 @@ describe('본문', () => {
     await w.hold(['A01'], ACCOUNT_B);
     const raw = await w.uc.execute(f.cmd({ section: 1 }));
     expect(raw[1]).toBe(1);
-    expect(raw.readUInt16BE(10)).toBe(1);
+    expect(raw.readUInt16LE(10)).toBe(1);
     // 구역 표 한 칸: (색인 1, 일련번호 1)
-    expect(raw.subarray(HEADER, HEADER + 6).toString('hex')).toBe('000100000001');
+    expect(raw.subarray(HEADER, HEADER + 6).toString('hex')).toBe('010001000000');
     // 비트 10개 = 2바이트. 첫 좌석(색인 20) → 비트 0(0x01), 마지막 좌석(색인 29) → 비트 9 = 바이트 1의 비트 1(0x02)
     expect(raw.subarray(HEADER + 6).toString('hex')).toBe('0102');
     const body = decodeSnapshot(raw);

@@ -1,5 +1,4 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
-import type { Deadline } from '@peaket/platform';
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
 import type { OrderExpiryNotYetReason, OrderExpiryStage, OrderExpiryTransition, OrderExpiryTrigger } from './order-expiry.js';
 import type { OrderPaymentState, PaymentLedgerStatus, PaymentPullFailureCode, PaymentPullIgnoreReason, PaymentPullRunStage } from './payment-pull.js';
@@ -18,6 +17,12 @@ import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js'
 import type { IssuedTicketRef, TicketIssueAttemptResult, TicketIssueFailureCode, TicketIssueRunStage } from './ticket-issue.js';
 
 /** 주문 사건을 Outbox 값 바이트로 바꾼다. Avro 인코더(BAS-030)가 오기 전까지 JSON 대역이다 */
+/** 호출 시간 한도(도메인은 플랫폼을 모른다. 플랫폼 Deadline이 이 모양을 만족한다) */
+export interface HoldMarkDeadline {
+  remainingMs(): number;
+  budgetFor(capMs: number): number;
+}
+
 export interface OrderEventCodec {
   encode(message: OrderEventMessage): Uint8Array;
 }
@@ -293,7 +298,7 @@ export type OrderCreateOutcome =
 /** 주문 쓰기(운영은 adapters/db/drizzle-order-writes.ts: purchase DB 트랜잭션 하나에 IdempotencyStore.run과 DrizzleOrderStore.createOrder를 묶는다) */
 /** 주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070, 운영은 inventory ManageHolds). 던지지 않는다 */
 export interface OrderHoldMarks {
-  markOrdered(q: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; deadline?: Deadline }): Promise<boolean>;
+  markOrdered(q: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; deadline?: HoldMarkDeadline }): Promise<boolean>;
   releaseSession(q: { eventId: string; accountId: string; sessionId: string }): Promise<void>;
 }
 

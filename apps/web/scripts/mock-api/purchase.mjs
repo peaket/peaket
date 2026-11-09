@@ -9,6 +9,10 @@ const SERVER_JWK = { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e
 const serverKey = createPrivateKey({ key: SERVER_JWK, format: 'jwk' });
 
 const HOLD_MS = 7 * 60_000;
+const REHOLD_MS = 30_000;
+const MAX_ATTEMPTS = 3;
+/** 결제 일시 정지로 멈춘 홀드의 남은 시간(초) */
+const FROZEN_LEFT_S = 240;
 
 /** 입장 토큰 본문의 jti(서명은 보지 않는다) */
 function jtiOf(token) {
@@ -48,6 +52,12 @@ export function createPurchaseMock({ now, state }) {
   const holdEvents = new Map();
   /** 주문 ID → holdId */
   const orderHolds = new Map();
+  /** 주문 ID → 시도 행(실제와 같이 세 번까지, BUILD_ORDER HOT-358 리뷰 V2) */
+  const attempts = new Map();
+  /** 멱등 키 → { fp, attemptResponse } */
+  const attemptKeys = new Map();
+  /** 방금 놓은 좌석 → 다시 잡을 수 있는 시각(30초) */
+  const released = new Map();
 
   /** 스냅샷을 연 입장 토큰의 임시 공개키를 둔다. 처음이고 키가 없으면 false */
   function open(token, clientKey) {
@@ -90,6 +100,8 @@ export function createPurchaseMock({ now, state }) {
       if (readHold && req.method === 'GET') {
         const found = holds.get(readHold[1]);
         if (!sessions.get(req.headers['x-admission-token'])) return (io.problem(401, 'purchase-session-ended', '예매 시간이 끝났습니다'), true);
+        // 멈춘 홀드는 시간이 지나도 살아 있다(ADR-0254): 남은 시간을 그대로 답한다
+        if (found && state.payments === 'paused') return (io.send(200, { ...found, expiresAt: new Date(now() + FROZEN_LEFT_S * 1000).toISOString(), frozen: true }), true);
         if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'hold-not-found', '홀드를 찾을 수 없습니다'), true);
         return (io.send(200, found), true);
       }
@@ -104,6 +116,7 @@ export function createPurchaseMock({ now, state }) {
           if (bad) return problem(401, bad, '요청 서명을 확인하지 못했습니다');
           const found = holds.get(id);
           const mode = state.holdAction;
+          if (AUTH_FAILURES[mode]) return problem(401, AUTH_FAILURES[mode], '구매 세션을 확인하지 못했습니다');
           if (mode === 'gone' || !found) return problem(404, 'hold-not-found', '홀드를 찾을 수 없습니다');
           if (mode === 'in-payment') return problem(409, 'hold-in-payment', '결제가 진행 중인 홀드입니다');
           if (mode === 'down') return problem(503, 'seat-store-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
@@ -113,6 +126,7 @@ export function createPurchaseMock({ now, state }) {
             found.extendable = false;
             return send(200, found);
           }
+          for (const s of found.seatIds) released.set(s, now() + REHOLD_MS);
           holds.delete(id);
           return send(204, undefined);
         })().catch(() => problem(500, 'internal', '오류'));
@@ -130,14 +144,25 @@ export function createPurchaseMock({ now, state }) {
           const entry = [...orders.values()].find((o) => o.order.orderId === orderId);
           if (!entry) return problem(404, 'not-found', '찾을 수 없습니다');
           const mode = state.payments;
-          if (mode === 'paused') return problem(503, 'new-payment-paused', '새 결제를 잠시 멈췄습니다', { 'retry-after': '5' }, { holdRemainingSeconds: 240 });
+          if (mode === 'expired') return problem(409, 'order-expired', '주문이 끝났습니다');
+          if (mode === 'paused') return problem(503, 'new-payment-paused', '새 결제를 잠시 멈췄습니다', { 'retry-after': '5' }, { holdRemainingSeconds: FROZEN_LEFT_S });
           if (mode === 'down') return problem(503, 'pg-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '2' });
           if (mode === 'exceeded') return problem(409, 'payment-attempts-exceeded', '결제 시도 횟수를 넘었습니다');
           if (mode === 'accepted') return problem(409, 'payment-already-accepted', '이미 접수했습니다');
+          // 실제와 같이 같은 키·같은 본문은 재생이고, 새 시도는 세 번까지다(P-T25)
+          const idemKey = String(req.headers['idempotency-key'] ?? '');
+          const seen = attemptKeys.get(idemKey);
+          if (seen) return seen.fp === raw.toString('utf8') ? send(201, seen.response) : problem(422, 'idempotency-key-reused', '같은 키로 다른 요청을 보냈습니다');
+          const rows = attempts.get(orderId) ?? [];
+          if (rows.length >= MAX_ATTEMPTS) return problem(409, 'payment-attempts-exceeded', '결제 시도 횟수를 넘었습니다');
           const eventId = holdEvents.get(orderHolds.get(orderId));
           const back = `${url.searchParams.get('webOrigin') ?? process.env.PEAKET_WEB_ORIGIN ?? 'http://localhost:3000'}/booking/${encodeURIComponent(eventId)}/checkout/return?order=${encodeURIComponent(orderId)}&pg=SIMULATOR`;
           const held = holds.get(orderHolds.get(orderId));
-          return send(201, { attemptId: randomUUID(), pg: 'SIMULATOR', switched: false, holdExpiresAt: held?.expiresAt, allowedPayMethods: ['CARD'], checkout: { clientKey: 'sim_ck_mock', customerKey: 'mock-customer', orderId, orderName: '데모 공연', amount: entry.order.amount, successUrl: back, failUrl: back } });
+          const response = { attemptId: randomUUID(), pg: 'SIMULATOR', switched: false, holdExpiresAt: held?.expiresAt, allowedPayMethods: ['CARD'], checkout: { clientKey: 'sim_ck_mock', customerKey: 'mock-customer', orderId, orderName: '데모 공연', amount: entry.order.amount, successUrl: back, failUrl: back } };
+          rows.push(response.attemptId);
+          attempts.set(orderId, rows);
+          attemptKeys.set(idemKey, { fp: raw.toString('utf8'), response });
+          return send(201, response);
         })().catch(() => problem(500, 'internal', '오류'));
         return true;
       }
@@ -172,6 +197,9 @@ export function createPurchaseMock({ now, state }) {
           const mode = state.accept;
           if (!order) return problem(404, 'not-found', '찾을 수 없습니다');
           if (accepted.has(orderId)) return problem(409, 'payment-already-accepted', '이미 접수했습니다');
+          // 활성 시도 대조: 있으면 지금 시도와 같아야 하고, 없으면 시도가 하나뿐일 때만 받는다(L1)
+          const tried = attempts.get(orderId) ?? [];
+          if (tried.length > 0 && (body?.attemptId !== undefined ? body.attemptId !== tried.at(-1) : tried.length > 1)) return problem(409, 'payment-attempt-mismatch', '결제 시도가 맞지 않습니다');
           if (mode === 'mismatch' || (body?.pg !== 'PORTONE' && body?.amount !== order.amount)) return problem(400, 'invalid-request', '금액이 맞지 않습니다');
           if (mode === 'already') return problem(409, 'payment-already-accepted', '이미 접수했습니다');
           if (mode === 'attempt') return problem(409, 'payment-attempt-mismatch', '결제 시도가 맞지 않습니다');
@@ -246,6 +274,8 @@ export function createPurchaseMock({ now, state }) {
         if (mode === 'ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
         if (mode === 'down') return problem(503, 'seat-store-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
         const seatIds = body?.auto ? ['B-1-3', 'B-1-4'] : (body?.seatIds ?? []);
+        const recent = seatIds.filter((s) => (released.get(s) ?? 0) > now());
+        if (recent.length > 0) return problem(409, 'seat-recently-released', '방금 놓은 좌석입니다', {}, { recentlyReleasedSeats: recent, reholdAvailableAt: new Date(Math.max(...recent.map((s) => released.get(s)))).toISOString() });
         const seats = seatIds.map(seatOf);
         const created = { holdId: randomUUID(), seatIds, expiresAt: new Date(now() + HOLD_MS).toISOString(), extendable: true, fencingToken: 1, seats, totalAmount: seats.reduce((n, s) => n + s.price, 0), ...(body?.auto ? { assignResult: 'FIRST' } : {}) };
         holds.set(created.holdId, created);

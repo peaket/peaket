@@ -365,7 +365,8 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
       storage: sessionStorage,
       makeKey: () => crypto.randomUUID(),
       container: { methods: `#${TOSS_METHODS}`, agreement: `#${TOSS_AGREEMENT}` },
-      afterRender: () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+      // 위젯 자리가 그려진 뒤에 싣는다. 탭이 숨겨지면 멈추는 requestAnimationFrame 대신 타이머를 쓴다
+      afterRender: () => new Promise((resolve) => setTimeout(resolve, 30)),
       api: {
         async start(body, key) {
           const [{ OPERATIONS }, { openPurchaseSession }, api] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api')]);
@@ -431,7 +432,8 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
     const t = setTimeout(() => {
       setBlocked(null);
       setNotice(null);
-    }, PAUSED_RETRY_MS);
+      // 한꺼번에 다시 몰리지 않게 위로만 0~20% 퍼뜨린다(docs/frontend.md §4.1 '기다림')
+    }, PAUSED_RETRY_MS * (1 + Math.random() * 0.2));
     return () => clearTimeout(t);
   }, [blocked]);
 
