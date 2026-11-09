@@ -29,7 +29,7 @@ export class StateFilesController {
     if (!found) {
       // 없는 회차·구간도 엣지가 1초만 들고 있게 한다(같은 404가 원본으로 몰리지 않게)
       void reply.header('cache-control', 'public, max-age=1');
-      throw new ProblemError({ type: 'queue-not-found', status: 404, title: '이 회차·구간의 대기 상태가 없습니다' });
+      throw new ProblemError({ type: 'queue-not-found', status: 404, title: '이 회차의 대기열이 열리지 않았습니다', detail: '이 회차·구간의 대기 상태가 없습니다' });
     }
     void reply.header('content-type', 'application/json; charset=utf-8');
     if (found.imminent) {
@@ -48,7 +48,7 @@ export class StateFilesController {
     } catch (e) {
       // 오류 응답을 CDN이 기본 시간(10초) 동안 들고 있지 않게 한다
       if (e instanceof StateUnavailable) void reply.header('cache-control', 'no-store');
-      if (e instanceof StateUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '대기 상태를 잠시 만들 수 없습니다', retryAfterSeconds: 1, cause: e });
+      if (e instanceof StateUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });
       throw e;
     }
   }

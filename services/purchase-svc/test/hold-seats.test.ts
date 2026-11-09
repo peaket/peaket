@@ -2,7 +2,7 @@
 // 홀드 지문·시험 대역(좌석맵 판·구매 세션·시도 기록)의 계약도 본다. 앱 쪽 시각은 모두 주입한 가짜 시계다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { ForbiddenException, HttpException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, HttpException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, Deadline, type FakeClock, fakeClock, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, test } from 'vitest';
@@ -952,11 +952,22 @@ describe('문제 상세 대응(throwHoldProblem, application/hold-error.ts의 �
     });
   });
 
-  test('FR010_ 401은 WWW-Authenticate(Cookie realm="peaket")를 단 Nest 401, 403은 Nest 403, 좌석 없음은 요청 검사 400이다(이름 없는 오류)', () => {
-    const u = thrown('SESSION_NOT_FOUND');
-    expect(u.err).toBeInstanceOf(UnauthorizedException);
-    expect(u.err).not.toBeInstanceOf(ProblemError);
-    expect(u.headers).toEqual([['www-authenticate', COOKIE_CHALLENGE]]);
+  test('PRF192_FR010_ 세션 없음은 WWW-Authenticate(Cookie realm="peaket")를 단 401 purchase-session-ended다(플랫폼 구매 요청 확인의 no_session과 같은 본문) [ASVS v5.0.0-8.2.1]', () => {
+    const { e, err, headers } = thrown('SESSION_NOT_FOUND');
+    expect(err).toBeInstanceOf(ProblemError);
+    const p = err as ProblemError;
+    expect({ status: p.status, type: p.type, title: p.title, detail: p.detail, normal: p.normalBranch, cause: p.cause === e }).toEqual({
+      status: 401,
+      type: `${PROBLEM_TYPE_BASE}purchase-session-ended`,
+      title: '예매 시간이 끝났습니다',
+      detail: undefined,
+      normal: false,
+      cause: true,
+    });
+    expect(headers).toEqual([['www-authenticate', COOKIE_CHALLENGE]]);
+  });
+
+  test('FR010_ 403은 Nest 403, 좌석 없음은 요청 검사 400이다(이름 없는 오류)', () => {
     const f = thrown('EVENT_MISMATCH');
     expect(f.err).toBeInstanceOf(ForbiddenException);
     expect(f.err).not.toBeInstanceOf(ProblemError);

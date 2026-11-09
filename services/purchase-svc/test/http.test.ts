@@ -65,7 +65,7 @@ const store: SeatStore & ReplayPort = {
   },
 };
 /** 409 seat-already-held의 제목: 내 좌석을 새 키로 다시 누른 경우도 있어 '다른 분이 먼저'가 아닌 중립 문구다(추천 적용 2026-11-04) */
-const CONFLICT_TITLE = '이미 잡힌 좌석이 있습니다';
+const CONFLICT_TITLE = '좌석이 이미 선택되었습니다';
 
 let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
@@ -435,7 +435,7 @@ describe('업무 거절', () => {
     untouched(ev());
   });
 
-  test('FR010_ 인증 훅을 지난 뒤 구매 세션이 끝났으면 쓰임새의 401이고 WWW-Authenticate(Cookie realm="peaket")·이름 없는 본문이며 시도 기록이 없다', async () => {
+  test('PRF192_FR010_ 인증 훅을 지난 뒤 구매 세션이 끝났으면 쓰임새의 401 purchase-session-ended이고 WWW-Authenticate(Cookie realm="peaket")가 있으며 시도 기록이 없다 [ASVS v5.0.0-8.2.1]', async () => {
     const { eventId, fan, ev } = await world();
     const f = fan(1);
     // 인증 훅(resolve·advance)은 지나고 쓰임새의 세션 읽기(get)만 비게 한다
@@ -448,7 +448,7 @@ describe('업무 거절', () => {
       expect(r.statusCode).toBe(401);
       expect(r.headers['www-authenticate']).toBe('Cookie realm="peaket"');
       expect(r.headers['cache-control']).toBe('no-store');
-      expect(json(r)).toMatchObject({ type: 'about:blank', status: 401 });
+      expect(json(r)).toMatchObject({ type: problem('purchase-session-ended'), status: 401, title: '예매 시간이 끝났습니다' });
     } finally {
       sessions.get = get;
     }

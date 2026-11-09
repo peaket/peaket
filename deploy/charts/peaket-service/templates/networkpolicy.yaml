@@ -1,8 +1,11 @@
-{{- if and .Values.service.enabled .Values.service.networkPolicy.enabled }}
-{{- $name := include "peaket.name" . }}
 {{- $np := .Values.service.networkPolicy }}
+{{- $egress := $np.egress | default dict }}
+{{- $hasEgress := or $egress.publicHttps $egress.internal }}
+{{- if and .Values.service.enabled $np.enabled }}
+{{- $name := include "peaket.name" . }}
 # 서비스 파드에 닿을 수 있는 곳(docs/infra.md §3 'v0 배포' '앱 포트 막기'). 앱 포트는 정한 라벨의 파드만, 관리 포트는 정한 네임스페이스만.
 # 정하지 않은 들어오는 연결은 모두 막는다. 운영 정책은 wbs 0.4.4에서 정한다
+# 나가는 쪽은 service.networkPolicy.egress에 값이 있을 때만 막는다(docs/infra.md §9, BUILD_ORDER PRF-192)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,7 +18,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
       app.kubernetes.io/component: service
-  policyTypes: [Ingress]
+  policyTypes: [Ingress{{ if $hasEgress }}, Egress{{ end }}]
   {{- if not (or $np.appFromPodLabels $np.managementFromNamespaces) }}
   ingress: []
   {{- else }}
@@ -38,4 +41,29 @@ spec:
         - { protocol: TCP, port: {{ int .Values.managementPort }} }
     {{- end }}
   {{- end }}
+  {{- if $hasEgress }}
+  egress:
+    {{- include "peaket.egressRules" $egress | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.outboxRelay.enabled $np.enabled $hasEgress }}
+{{- $name := include "peaket.name" . }}
+---
+# 릴레이 파드의 나가는 쪽도 서비스와 같은 값으로 막는다. 같은 이미지·같은 비밀을 받는 파드라 빠지면 정책을 돌아가는 길이 된다(추천 적용 2026-11-09, BUILD_ORDER PRF-192, 코드 리뷰).
+# 들어오는 쪽은 이 정책이 다루지 않는다(policyTypes에 Ingress 없음). 서비스 Deployment를 꺼도 릴레이가 열린 채 남지 않게 service.enabled는 보지 않는다
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-outbox-relay
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: outbox-relay
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: outbox-relay
+  policyTypes: [Egress]
+  egress:
+    {{- include "peaket.egressRules" $egress | nindent 4 }}
 {{- end }}

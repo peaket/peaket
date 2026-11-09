@@ -1,0 +1,15 @@
+# payment-svc 배포 단위 기본 값(docs/devops.md §5.2). 환경 값은 deploy/envs/<환경>/payment-svc.yaml에 둔다.
+name: payment-svc
+
+service:
+  networkPolicy:
+    # 결제사 출구(docs/security/asvs/payment.md 13.2.4, BUILD_ORDER PRF-192). 표준 NetworkPolicy는 이름을 받지 못해 공인 주소의 443과 클러스터 DNS까지 좁힌다.
+    # 호스트(api.tosspayments.com·api.portone.io)는 앱이 시작할 때 고정한다(services/payment-svc/src/config.ts). 이름 단위 장치는 wbs 0.4.2에서 정한다.
+    # 정책을 켜는 enabled, 앱 포트에 닿는 곳(appFromPodLabels), DB·수집기 같은 안쪽 대상(egress.internal)은 환경마다 달라 환경 값에 둔다.
+    # 정책을 켜는 환경 값은 아래 안쪽 대상을 모두 egress.internal로 허용해야 한다. 적지 않은 곳은 막혀 서비스가 뜨지 못하거나 멈춘다(추천 적용 2026-11-09, BUILD_ORDER PRF-192, 코드 리뷰).
+    # - EKS Pod Identity 에이전트(파드에 AWS 권한을 주는 노드 프로그램) 169.254.170.23: 링크 로컬이라 allowLinkLocalCidrs에 /32로 적는다(포트 80)
+    # - 앰비언트 메시 15008(메시를 거치는 서비스 사이 연결이 실제로 나가는 포트): gRPC로 부르는 서비스 쪽을 허용한다
+    # - DB(PgBouncer·Aurora)와 텔레메트리 수집기
+    # 릴레이 파드도 같은 값을 받으므로 릴레이가 닿는 Kafka와 쿠버네티스 API 서버(Lease로 리더를 뽑는다)도 함께 적는다
+    egress:
+      publicHttps: true

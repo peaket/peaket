@@ -10,18 +10,6 @@ import { expect, test } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const FROZEN = new Set(['v0-monolith']);
 
-/**
- * 목록과 제목이 다른 코드(서비스 갈래가 고친다). 새로 늘리지 않는다: 같은 뜻이면 목록의 제목을 쓰고, 뜻이 다르면 이름을 따로 짓는다.
- * - queue-svc: dependency-unavailable 둘(대기 상태 파일·대기열의 503), queue-not-found 하나(구간 대기 상태 없음)
- * - purchase-svc: seat-already-held(제목을 목록과 맞춘다)
- */
-const KNOWN_TITLE_DIFFS = [
-  "purchase-svc seat-already-held '이미 잡힌 좌석이 있습니다'",
-  "queue-svc dependency-unavailable '대기 상태를 잠시 만들 수 없습니다'",
-  "queue-svc dependency-unavailable '대기열을 잠시 쓸 수 없습니다'",
-  "queue-svc queue-not-found '이 회차·구간의 대기 상태가 없습니다'",
-];
-
 function tsFiles(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
@@ -180,7 +168,8 @@ test('problemLiterals는 ProblemError 인자와 오류 표 줄을 읽고, 세 �
   ]);
 });
 
-test('서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태 코드가 같으며, 제목은 알려진 차이 밖에서 같다', async () => {
+// 알려진 차이는 PRF-192에서 모두 지웠다. 같은 뜻이면 목록의 제목을 쓰고, 뜻이 다르면 이름을 따로 짓는다
+test('PRF192_서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태 코드와 제목이 같다', async () => {
   const types = await contractTypes();
   expect(Object.keys(types).length).toBeGreaterThan(100);
   const found = codeProblems();
@@ -190,6 +179,6 @@ test('서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태
   const titles = [...new Set(found.filter((f) => types[f.type] && types[f.type].title !== f.title).map((f) => `${f.where} ${f.type} '${f.title}'`))].sort();
   expect(missing).toEqual([]);
   expect(status).toEqual([]);
-  expect(titles).toEqual(KNOWN_TITLE_DIFFS);
+  expect(titles).toEqual([]);
   // 정본 openapi와 서비스 코드 전체를 읽어 몰리는 러너에서 기본 5초를 넘긴다(CI 42529879827)
 }, 30_000);

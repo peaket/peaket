@@ -64,7 +64,7 @@ async function problem<T>(p: Promise<T>): Promise<T> {
   } catch (e) {
     if (e instanceof EntryError) throw new ProblemError({ ...PROBLEM[e.code], ...(e.retryAfterSeconds !== undefined ? { retryAfterSeconds: e.retryAfterSeconds } : {}) });
     // 대기열 Redis 일시 장애는 503과 짧은 Retry-After(1초 [가정])로 답한다. 화면은 같은 진입 요청 ID로 다시 보낸다(openapi 진입 503)
-    if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '대기열을 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });
+    if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });
     throw e;
   }
 }

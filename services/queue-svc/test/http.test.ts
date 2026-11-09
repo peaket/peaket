@@ -176,7 +176,7 @@ describe('사전 검증 경로', () => {
 });
 
 describe('대기열 Redis 일시 장애', () => {
-  test('저장소가일시장애면_503dependency-unavailable과Retry-After1초로답한다', async () => {
+  test('PRF192_저장소가일시장애면_503dependency-unavailable과Retry-After1초로답하고_제목은오류목록과같다', async () => {
     const { QueueStoreUnavailable } = await import('../src/modules/entry/domain/queue.js');
     const down = await createService({
       name: 'queue-svc',
@@ -194,6 +194,7 @@ describe('대기열 Redis 일시 장애', () => {
         expect(r.statusCode).toBe(503);
         expect(r.headers['retry-after']).toBe('1');
         expect(JSON.parse(r.payload).type).toMatch(/dependency-unavailable$/);
+        expect(JSON.parse(r.payload).title).toBe('의존 서비스를 잠시 쓸 수 없습니다');
       }
     } finally {
       await down.close();

@@ -68,8 +68,8 @@ export type SeatsPhase = 'loading' | 'ready' | 'ended' | 'invalid' | 'failed';
 
 /**
  * 좌석맵 오류 → 다음 동작(§4.1 '401'·§4.4.2, ADR-0224 결정 5).
- * 스냅샷의 이름 없는 401은 팬 쿠키 만료일 수 있어 한 번 갱신하고 다시 받는다(입장 토큰 거절도 같은 모양이라 다시 받아도 401이면 끝이다).
- * 이름 있는 401과 403은 구매 세션이 끝난 것이다. Retry-After가 있는 503·429는 그만큼 뒤에 스스로 다시 받는다
+ * 스냅샷의 이름 없는 401은 팬 쿠키 만료라 한 번 갱신하고 다시 받는다(다시 받아도 401이면 끝이다).
+ * 이름 있는 401(입장 토큰 거절 admission-token-invalid·세션 끝남 purchase-session-ended, BUILD_ORDER PRF-192)과 403은 구매 세션이 끝난 것이다. Retry-After가 있는 503·429는 그만큼 뒤에 스스로 다시 받는다
  */
 export function errorPhase(e: { source?: 'layout' | 'snapshot'; status?: number; problem?: string; retryAfter?: number }): 'ended' | 'refresh' | 'retry' | 'failed' {
   if (e.source !== 'snapshot') return 'failed';

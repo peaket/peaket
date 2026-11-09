@@ -75,20 +75,23 @@ describe('대기 상태 파일 경로', () => {
     expect(Object.keys(JSON.parse(r.payload)).every((k) => k in QueueState.shape)).toBe(true);
   });
 
-  test('없는회차·마지막구간뒤·틀린파일이름은_404이고_엣지가1초만들고있게한다', async () => {
+  test('PRF192_없는회차·마지막구간뒤·틀린파일이름은_404queue-not-found이고_제목은오류목록과같으며_엣지가1초만들고있게한다', async () => {
     const id = await event(1_500, 0);
     for (const r of [await get(newEvent(), '0.json'), await get(id, '102.json'), await get(id, 'x.json'), await get('bad.id', '0.json')]) {
       expect(r.statusCode).toBe(404);
+      expect(JSON.parse(r.payload)).toMatchObject({ status: 404, title: '이 회차의 대기열이 열리지 않았습니다', detail: '이 회차·구간의 대기 상태가 없습니다' });
+      expect(JSON.parse(r.payload).type).toMatch(/queue-not-found$/);
       expect(r.headers['cache-control']).toBe('public, max-age=1');
       expect(r.headers['access-control-allow-origin']).toBe('https://www.peaket.example');
     }
   });
 
-  test('켤때대기열Redis가잠시안되면_503과Retry-After1초다', async () => {
+  test('PRF192_켤때대기열Redis가잠시안되면_503과Retry-After1초이고_제목은오류목록과같다', async () => {
     const id = await event(10, 0);
     snapshots.failNext = new QueueStoreUnavailable(new Error('down'));
     const r = await get(id, '0.json');
     expect(r.statusCode).toBe(503);
+    expect(JSON.parse(r.payload).title).toBe('의존 서비스를 잠시 쓸 수 없습니다');
     expect(r.headers['retry-after']).toBe('1');
     // 오류 응답을 CDN이 기본 시간(10초) 동안 들고 있지 않게 한다
     expect(r.headers['cache-control']).toBe('no-store');

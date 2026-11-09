@@ -23,6 +23,12 @@ class 공인대역(unittest.TestCase):
         for line in ('가상 사용자 IP는 198.18.0.0/15에서 붙인다', '198.19.0.0/16', '198.18.1.0/24'):
             self.assertEqual([], errors(line), line)
 
+    def test_PRF192_나가는연결제외목록의_특수용도대역은_적을수있고_그밖의대역은_여전히오류다(self):
+        for line in ('0.0.0.0/8', '192.0.0.0/24', '224.0.0.0/4', '240.0.0.0/4'):
+            self.assertEqual([], errors(line), line)
+        for line in ('192.0.0.0/23', '192.0.1.0/24', '223.0.0.0/8'):
+            self.assertEqual(1, len(errors(line)), line)
+
     def test_NFR013_측정용대역을_넘는_대역과_실제공인대역은_오류다(self):
         for line in ('198.18.0.0/14', '198.20.0.0/16', '8.8.8.0/24', '52.95.0.0/16'):
             self.assertEqual(1, len(errors(line)), line)

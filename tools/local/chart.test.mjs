@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -221,6 +221,219 @@ test('BSL050_앱포트허용파드가비면_아무도앱포트에닿지못한다
 
 test('BSL050_NetworkPolicy를끄면_만들지않는다', () => {
   assert.equal(all(render(BASE).objects, 'NetworkPolicy').length, 0);
+});
+
+// --- 나가는 연결 허용 목록(docs/infra.md §9 '나가는 연결 허용 목록의 첫 구현', BUILD_ORDER PRF-192) ---
+
+const NP_ON = [...BASE, 'service.networkPolicy.enabled=true'];
+const egressValues = (yamlLines) => valuesFile(['service:', '  networkPolicy:', '    egress:', ...yamlLines.map((l) => `      ${l}`), ''].join('\n'));
+const egressOf = (yamlLines, extraSets = []) => renderFiles([egressValues(yamlLines)], [...NP_ON, ...extraSets], 'example');
+const DNS_EGRESS = {
+  to: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } }, podSelector: { matchLabels: { 'k8s-app': 'kube-dns' } } }],
+  ports: [
+    { protocol: 'UDP', port: 53 },
+    { protocol: 'TCP', port: 53 },
+  ],
+};
+const assertPublicHttpsRule = (rule) => {
+  assert.deepEqual(rule.ports, [{ protocol: 'TCP', port: 443 }]);
+  assert.deepEqual(rule.to.map((t) => t.ipBlock.cidr), ['0.0.0.0/0', '::/0']);
+  const [v4, v6] = rule.to.map((t) => t.ipBlock.except);
+  // 사설·루프백·링크 로컬(메타데이터 169.254.169.254 포함)·CGNAT·멀티캐스트·예약 대역
+  for (const c of ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4']) assert.ok(v4.includes(c), c);
+  for (const c of ['::1/128', 'fc00::/7', 'fe80::/10', 'ff00::/8']) assert.ok(v6.includes(c), c);
+  // IPv4 사상 대역은 API 서버가 ::/0의 부분 대역으로 보지 않아 정책 전체를 거절한다(서버 드라이런 2026-11-09)
+  assert.equal(v6.includes('::ffff:0:0/96'), false);
+};
+
+test('PRF192_이그레스값이없으면_Egress를넣지않아_다른서비스는나가는쪽이그대로다 [ASVS v5.0.0-13.2.4]', () => {
+  const { objects, error } = render(NP_ON);
+  assert.equal(error, undefined, error);
+  const np = find(objects, 'NetworkPolicy', 'example-svc');
+  assert.deepEqual(np.spec.policyTypes, ['Ingress']);
+  assert.equal('egress' in np.spec, false);
+});
+
+test('PRF192_공인대역을켜면_클러스터DNS53과공인주소443만나가고_사설·메타데이터대역은뺀다 [ASVS v5.0.0-13.2.4] [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf(['publicHttps: true']);
+  assert.equal(error, undefined, error);
+  const np = find(objects, 'NetworkPolicy', 'example-svc');
+  assert.deepEqual(np.spec.policyTypes, ['Ingress', 'Egress']);
+  assert.equal(np.spec.egress.length, 2);
+  assert.deepEqual(np.spec.egress[0], DNS_EGRESS);
+  assertPublicHttpsRule(np.spec.egress[1]);
+  // 들어오는 쪽 규칙은 그대로다
+  assert.deepEqual(np.spec.ingress, [mgmtRule(['observability'])]);
+});
+
+test('PRF192_공인대역규칙의_제외대역은_NAT64·문서·폐기대역까지_하나도빠지지않는다 [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf(['publicHttps: true']);
+  assert.equal(error, undefined, error);
+  const [v4, v6] = find(objects, 'NetworkPolicy', 'example-svc').spec.egress[1].to.map((t) => t.ipBlock.except);
+  // docs/infra.md §9 대역 정책의 '예약 대역' 전부다. NAT64(64:ff9b::/96)가 빠지면 IPv6로 사설 IPv4에 닿는 길이 열린다
+  assert.deepEqual([...v4].sort(), ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4'].sort());
+  assert.deepEqual([...v6].sort(), ['::1/128', '64:ff9b::/96', '64:ff9b:1::/48', '100::/64', '2001::/32', '2001:db8::/32', '2002::/16', 'fc00::/7', 'fe80::/10', 'ff00::/8'].sort());
+});
+
+test('PRF192_리뷰 고침_IPv6제외대역에_IPv4를싣는전환대역(6to4·Teredo·지역NAT64)이있다 [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf(['publicHttps: true']);
+  assert.equal(error, undefined, error);
+  const v6 = find(objects, 'NetworkPolicy', 'example-svc').spec.egress[1].to[1].ipBlock.except;
+  // 이 대역의 주소에는 IPv4 주소가 실려 있어, 빠지면 IPv6로 사설 IPv4에 닿는 길이 된다
+  for (const c of ['2002::/16', '2001::/32', '64:ff9b:1::/48']) assert.ok(v6.includes(c), c);
+});
+
+const RELAY_NAME = 'example-svc-outbox-relay';
+const RELAY_ON = ['outboxRelay.enabled=true'];
+
+test('PRF192_리뷰 고침_릴레이파드도_서비스와같은이그레스값을받고_들어오는쪽은건드리지않는다 [ASVS v5.0.0-13.2.4] [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf(['publicHttps: true', 'internal:', '  - cidrs: [10.20.0.0/16]', '    ports: [5432]'], RELAY_ON);
+  assert.equal(error, undefined, error);
+  const svc = find(objects, 'NetworkPolicy', 'example-svc');
+  const relay = find(objects, 'NetworkPolicy', RELAY_NAME);
+  assert.ok(relay, '릴레이 NetworkPolicy');
+  assert.deepEqual(relay.spec.podSelector, { matchLabels: { 'app.kubernetes.io/name': 'example-svc', 'app.kubernetes.io/component': 'outbox-relay' } });
+  // 고른 라벨을 릴레이 파드가 실제로 단다
+  const labels = find(objects, 'Deployment', RELAY_NAME).spec.template.metadata.labels;
+  for (const [k, v] of Object.entries(relay.spec.podSelector.matchLabels)) assert.equal(labels[k], v, k);
+  assert.deepEqual(relay.spec.policyTypes, ['Egress']);
+  assert.equal('ingress' in relay.spec, false);
+  assert.deepEqual(relay.spec.egress, svc.spec.egress);
+  // 서비스 정책은 여전히 서비스 파드만 고른다
+  assert.deepEqual(svc.spec.podSelector, { matchLabels: SERVICE_PODS('example-svc') });
+});
+
+test('PRF192_리뷰 고침_릴레이정책은_서비스이그레스와같은스위치로켜진다 [ASVS v5.0.0-13.2.4]', () => {
+  const relayPolicy = (r) => {
+    assert.equal(r.error, undefined, r.error);
+    return find(r.objects, 'NetworkPolicy', RELAY_NAME);
+  };
+  // 켜짐: 릴레이 + 정책 + 이그레스 값. 서비스 Deployment를 꺼도 릴레이만 열린 채 남지 않는다
+  assert.ok(relayPolicy(egressOf(['publicHttps: true'], RELAY_ON)));
+  assert.ok(relayPolicy(egressOf(['publicHttps: true'], [...RELAY_ON, 'service.enabled=false'])));
+  // 꺼짐: 릴레이가 없거나, 이그레스 값이 없거나, 정책을 껐을 때
+  assert.equal(relayPolicy(egressOf(['publicHttps: true'])), undefined);
+  assert.equal(relayPolicy(render([...NP_ON, ...RELAY_ON])), undefined);
+  assert.equal(relayPolicy(renderFiles([egressValues(['publicHttps: true'])], [...BASE, ...RELAY_ON], 'example')), undefined);
+});
+
+test('PRF192_리뷰 고침_안쪽대상cidrs가_전체나너무넓은대역이면_렌더하지않는다 [ASVS v5.0.0-13.2.5]', () => {
+  for (const c of ['0.0.0.0/0', '::/0', '0:0:0:0:0:0:0:0/0', '1.2.3.4/0', '0.0.0.0/1', '128.0.0.0/1', '::/1', '8000::/1']) {
+    assert.match(egressOf(['internal:', `  - { cidrs: ["${c}"], ports: [443] }`]).error ?? '(렌더됨)', /cidrs/, c);
+  }
+  // 경계: 가장 넓은 사설 대역은 받는다
+  for (const c of ['10.0.0.0/8', 'fc00::/7']) assert.equal(egressOf(['internal:', `  - { cidrs: ["${c}"], ports: [5432] }`]).error, undefined, c);
+});
+
+test('PRF192_리뷰 고침_안쪽대상cidrs가_링크로컬에겹치면_렌더하지않는다(메타데이터길) [ASVS v5.0.0-13.2.5]', () => {
+  for (const c of ['169.254.0.0/16', '169.254.169.254/32', '169.254.170.23/32', '169.254.169.0/24', '169.0.0.0/8']) {
+    assert.match(egressOf(['internal:', `  - { cidrs: ["${c}"], ports: [80] }`]).error ?? '(렌더됨)', /allowLinkLocalCidrs/, c);
+  }
+  for (const c of ['fe80::/10', 'FE80::1/128', '::ffff:169.254.169.254/128']) {
+    assert.match(egressOf(['internal:', `  - { cidrs: ["${c}"], ports: [80] }`]).error ?? '(렌더됨)', /cidrs/, c);
+  }
+  // 대역 표기가 아니면 검사를 건너뛰지 않고 멈춘다
+  assert.match(egressOf(['internal:', '  - { cidrs: ["169.254.169.254"], ports: [80] }']).error ?? '(렌더됨)', /cidrs/);
+});
+
+test('PRF192_리뷰 고침_allowLinkLocalCidrs는_링크로컬호스트하나씩만받고_메타데이터주소는받지않는다 [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf(['internal:', '  - allowLinkLocalCidrs: [169.254.170.23/32]', '    ports: [80]']);
+  assert.equal(error, undefined, error);
+  assert.deepEqual(find(objects, 'NetworkPolicy', 'example-svc').spec.egress, [DNS_EGRESS, { to: [{ ipBlock: { cidr: '169.254.170.23/32' } }], ports: [{ protocol: 'TCP', port: 80 }] }]);
+  for (const bad of [
+    '  - { allowLinkLocalCidrs: [169.254.169.254/32], ports: [80] }',
+    '  - { allowLinkLocalCidrs: [169.254.0.0/16], ports: [80] }',
+    '  - { allowLinkLocalCidrs: [10.0.0.1/32], ports: [80] }',
+    '  - { allowLinkLocalCidrs: [169.254.170.23/32] }',
+    '  - { allowLinkLocalCidrs: [169.254.170.23/32], cidrs: [10.0.0.0/8], ports: [80] }',
+    '  - { allowLinkLocalCidrs: [169.254.170.23/32], namespaces: [data], ports: [80] }',
+    '  - { allowLinkLocalCidrs: [169.254.170.23/32], podLabels: { app: x }, ports: [80] }',
+  ]) {
+    assert.match(egressOf(['internal:', bad]).error ?? '(렌더됨)', /egress/, bad);
+  }
+});
+
+const repoText = (...p) => readFileSync(join(REPO, ...p), 'utf8');
+const asvsRow = (text, id) => text.split(/\r?\n/).find((l) => l.startsWith(`| v5.0.0-${id} |`)).split(' | ');
+
+test('PRF192_리뷰 고침_payment-svc값의주석이_켜는환경값이허용할안쪽대상을적는다', () => {
+  const text = repoText('deploy', 'workloads', 'payment-svc', 'values.yaml');
+  for (const want of ['169.254.170.23', 'allowLinkLocalCidrs', '15008', 'DB', '수집기', 'Kafka', 'API 서버']) assert.ok(text.includes(want), want);
+});
+
+test('PRF192_리뷰 고침_payment의13.2.4·13.2.5는_부분적용이고_까닭을적는다', () => {
+  const text = repoText('docs', 'security', 'asvs', 'payment.md');
+  for (const id of ['13.2.4', '13.2.5']) {
+    const [, , , verdict, where] = asvsRow(text, id);
+    assert.equal(verdict, '부분 적용', id);
+    for (const want of ['환경 값', '공인', 'wbs 0.4.2', 'BUILD_ORDER PRF-192, 코드 리뷰']) assert.ok(where.includes(want), `${id}: ${want}`);
+  }
+});
+
+test('PRF192_리뷰 고침_문서가_IPv4사상대역을_except로뺀다고적지않고_infra와같이적는다', () => {
+  const guidelines = repoText('docs', 'api', 'guidelines.md');
+  const settlement = repoText('docs', 'security', 'asvs', 'settlement.md');
+  assert.equal(guidelines.includes('IPv4 사상 주소(::ffff:0:0/96)는 `ipBlock`의 `except`로 뺀다'), false);
+  assert.equal(asvsRow(settlement, '13.2.4')[4].includes('IPv4 사상 대역 제외'), false);
+  const webhookRow = guidelines.split(/\r?\n/).find((l) => l.startsWith('| 파트너 웹훅 (발송) |'));
+  for (const [where, line] of [['guidelines', webhookRow], ['1.3.6', asvsRow(settlement, '1.3.6')[4]], ['13.2.4', asvsRow(settlement, '13.2.4')[4]]]) {
+    assert.ok(line.includes('IPv4로 나가 IPv4 규칙을 받는다'), where);
+  }
+});
+
+test('PRF192_리뷰 고침_ADR-0153상태줄이_공개검사허용목록변경을적는다', () => {
+  const status = repoText('docs', 'adr', '0153-public-docs-scope-no-click-demo-session-canonical-browse-pages.md').split(/\r?\n/)[2];
+  for (const want of ['BUILD_ORDER PRF-192', '0.0.0.0/8', '192.0.0.0/24', '224.0.0.0/4', '240.0.0.0/4']) assert.ok(status.includes(want), want);
+});
+
+test('PRF192_내부대상은_값으로받은네임스페이스·파드·대역의그포트만열고_공인대역은열지않는다 [ASVS v5.0.0-13.2.5]', () => {
+  const { objects, error } = egressOf([
+    'internal:',
+    '  - namespaces: [data]',
+    '    podLabels: { app: pgbouncer }',
+    '    ports: [6432]',
+    '  - podLabels: { app: cache }',
+    '    ports: [6379, 6380]',
+    '  - cidrs: [10.20.0.0/16]',
+    '    ports: [5432]',
+  ]);
+  assert.equal(error, undefined, error);
+  const np = find(objects, 'NetworkPolicy', 'example-svc');
+  assert.deepEqual(np.spec.policyTypes, ['Ingress', 'Egress']);
+  const tcp = (...ports) => ports.map((port) => ({ protocol: 'TCP', port }));
+  assert.deepEqual(np.spec.egress, [
+    DNS_EGRESS,
+    { to: [{ namespaceSelector: { matchExpressions: [{ key: 'kubernetes.io/metadata.name', operator: 'In', values: ['data'] }] }, podSelector: { matchLabels: { app: 'pgbouncer' } } }], ports: tcp(6432) },
+    { to: [{ podSelector: { matchLabels: { app: 'cache' } } }], ports: tcp(6379, 6380) },
+    { to: [{ ipBlock: { cidr: '10.20.0.0/16' } }], ports: tcp(5432) },
+  ]);
+});
+
+test('PRF192_대상이나포트가없는내부대상은_렌더하지않는다(빈칸은모두허용이된다) [ASVS v5.0.0-13.2.5]', () => {
+  for (const bad of [
+    ['internal:', '  - { podLabels: { app: x } }'],
+    ['internal:', '  - { ports: [443] }'],
+    ['internal:', '  - { namespaces: [], podLabels: {}, ports: [443] }'],
+    ['internal:', '  - { cidrs: [10.0.0.0/8], podLabels: { app: x }, ports: [443] }'],
+    ['internal:', '  - { cidrs: [10.0.0.0/8], namespaces: [data], ports: [443] }'],
+  ]) {
+    assert.match(egressOf(bad).error ?? '(렌더됨)', /egress/, bad.join(' '));
+  }
+});
+
+test('PRF192_payment-svc값_결제사출구는DNS와공인주소443이고_정책을켜는것은환경값이다 [ASVS v5.0.0-13.2.4]', () => {
+  const file = join(REPO, 'deploy', 'workloads', 'payment-svc', 'values.yaml');
+  const sets = ['image.repository=peaket/payment-svc', 'image.tag=local', 'env.PEAKET_ENV=local'];
+  const off = renderFiles([file], sets, 'payment');
+  assert.equal(off.error, undefined, off.error);
+  assert.ok(find(off.objects, 'Deployment', 'payment-svc'), 'Deployment payment-svc');
+  assert.equal(all(off.objects, 'NetworkPolicy').length, 0);
+  const on = renderFiles([file], [...sets, 'service.networkPolicy.enabled=true'], 'payment');
+  assert.equal(on.error, undefined, on.error);
+  const np = find(on.objects, 'NetworkPolicy', 'payment-svc');
+  assert.deepEqual(np.spec.policyTypes, ['Ingress', 'Egress']);
+  assert.deepEqual(np.spec.egress[0], DNS_EGRESS);
+  assertPublicHttpsRule(np.spec.egress[1]);
 });
 
 test('K9_v0-monolith값_HPA는1~4복제·CPU70%·요청CPU500m이고_복제수를적지않는다', () => {

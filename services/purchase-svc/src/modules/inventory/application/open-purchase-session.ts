@@ -2,7 +2,7 @@
 // 입장 토큰을 처음 쓰는 요청(스냅샷 API, PRF-137)에서 부른다. 차례: 입장 토큰 확인 → 요청의 계정·로그인 세션·회차와 대조 → 클라이언트 임시 공개키 검사 →
 // 저장소에서 열기 → SESSION_STARTED를 따로 더하고 기록 표시를 한다. 새로 열렸거나, 열린 지 1초가 지났는데 아직 기록 표시가 없을 때(더하기가 실패했거나 응답을 잃은 재시도)만 더한다
 // (더하기·표시 실패는 로그만 남기고 열기는 성공이다. 표시가 없는 REPLAY가 다시 더하므로 중복 항목이 생길 수 있고, 같은 사건은 eventKey가 같아 받는 쪽이 거른다, ADR-0052).
-// 거절은 OpenSessionError(code)다: 받는 층(PRF-137)이 TOKEN_*·FIRST_USE_EXPIRED·TOKEN_USED는 401, EVENT_MISMATCH는 403, CLIENT_KEY_INVALID는 400으로 바꾼다.
+// 거절은 OpenSessionError(code)다: 받는 층(PRF-137)이 TOKEN_*·FIRST_USE_EXPIRED·TOKEN_USED는 401 admission-token-invalid, SESSION_ENDED는 401 purchase-session-ended, EVENT_MISMATCH는 403, CLIENT_KEY_INVALID는 400으로 바꾼다(BUILD_ORDER PRF-192).
 // 거절 이유는 로그에만 남긴다(응답에 싣지 않는다, ASVS 16.3.1). 로그에는 이유·갈래·주소의 회차만 싣고 토큰·계정·세션 ID·공개키는 싣지 않는다(ASVS 16.2.5).
 import type { Clock } from '@peaket/platform';
 import { AdmissionTokenRejected, type AdmissionKeys, FIRST_USE_MS, verifyAdmissionToken } from '../domain/admission-token.js';
@@ -23,8 +23,10 @@ export type OpenSessionErrorCode =
   | 'EVENT_MISMATCH'
   /** 클라이언트 임시 공개키가 없거나 모양이 틀리거나 곡선 위의 점이 아니다 (400) */
   | 'CLIENT_KEY_INVALID'
-  /** 이미 쓴 입장 토큰이다: 다른 임시 공개키·계정·회차로 다시 열었거나 끝난 세션에 다시 열었다 (401) */
-  | 'TOKEN_USED';
+  /** 이미 쓴 입장 토큰이다: 열린 세션을 다른 임시 공개키·계정·회차로 다시 열었다 (401) */
+  | 'TOKEN_USED'
+  /** 그 입장 토큰의 구매 세션이 이미 끝났다(재사용 차단 표지가 남아 있다) (401) */
+  | 'SESSION_ENDED';
 
 export class OpenSessionError extends Error {
   constructor(readonly code: OpenSessionErrorCode) {
@@ -124,7 +126,7 @@ export class OpenPurchaseSession {
       case 'MISMATCH':
         throw this.#reject('TOKEN_USED', c.eventId, 'used');
       case 'ENDED':
-        throw this.#reject('TOKEN_USED', c.eventId, 'ended');
+        throw this.#reject('SESSION_ENDED', c.eventId, 'ended');
       case 'CREATED':
       case 'REPLAY':
         break;

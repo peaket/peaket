@@ -1,6 +1,6 @@
 // 좌석 홀드 업무 오류와 HTTP 문제 상세(RFC 9457) 대응표(openapi POST /v1/events/{eventId}/holds, docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①).
 // 쓰임새(HoldSeats)는 HoldError를 던지고, 받는 층이 throwHoldProblem으로 바꿔 던진다.
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, ProblemError, RequestValidationError } from '@peaket/platform';
 import { SEAT_STORE_RETRY_AFTER_SEC, SEAT_STORE_UNAVAILABLE_PROBLEM, type SeatStoreUnavailable, type SeatStoreUnavailableReason } from '../domain/hold.js';
 
@@ -79,11 +79,11 @@ export interface HoldProblemSpec {
 
 /**
  * 결과 → HTTP 문제 상세 대응표(결정 목록 2026-11-04의 상태 코드·problem 이름).
- * 401·403·SEATS_REQUIRED 400은 이름 없는 오류(about:blank)다: 401은 플랫폼 인증 가드와 같이 WWW-Authenticate(COOKIE_CHALLENGE)를 싣고,
- * 403은 게이트웨이의 회차 대조 403과 같은 본문, SEATS_REQUIRED는 요청 검사 실패와 같은 본문(detail 없음, guidelines §2)이다.
+ * 401은 플랫폼 구매 요청 확인의 no_session 거절과 같은 본문(purchase-session-ended)에 WWW-Authenticate(COOKIE_CHALLENGE)를 싣는다(ADR-0194 결정 3, BUILD_ORDER PRF-192).
+ * 403·SEATS_REQUIRED 400은 이름 없는 오류(about:blank)다: 403은 게이트웨이의 회차 대조 403과 같은 본문, SEATS_REQUIRED는 요청 검사 실패와 같은 본문(detail 없음, guidelines §2)이다.
  */
 export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
-  SESSION_NOT_FOUND: { status: 401, type: 'about:blank', title: 'Unauthorized' },
+  SESSION_NOT_FOUND: { status: 401, type: 'purchase-session-ended', title: '예매 시간이 끝났습니다' },
   EVENT_MISMATCH: { status: 403, type: 'about:blank', title: 'Forbidden' },
   AUTO_NOT_SUPPORTED: {
     status: 400,
@@ -101,8 +101,8 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   DEADLINE_EXCEEDED: { status: 504, type: 'deadline-exceeded', title: '남은 처리 시간이 모자라 요청을 끝내지 못했습니다' },
   IDEM_REUSED: { status: 422, type: 'idempotency-key-reused', title: '같은 멱등 키를 다른 요청에 썼습니다' },
   PAUSED: { status: 423, type: 'sale-paused', title: '판매가 잠시 멈췄습니다' },
-  // 내 좌석을 새 키로 다시 누른 경우도 있어 '다른 분이 먼저'가 아닌 중립 문구다(추천 적용 2026-11-04)
-  CONFLICT: { status: 409, type: 'seat-already-held', title: '이미 잡힌 좌석이 있습니다', normalBranch: true },
+  // 내 좌석을 새 키로 다시 누른 경우도 있어 '다른 분이 먼저'가 아닌 중립 문구다(추천 적용 2026-11-04). 제목은 오류 목록과 같다(BUILD_ORDER PRF-192)
+  CONFLICT: { status: 409, type: 'seat-already-held', title: '좌석이 이미 선택되었습니다', normalBranch: true },
   REHOLD_WAIT: { status: 409, type: 'seat-recently-released', title: '방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다', normalBranch: true },
   QUOTA_EXCEEDED: { status: 422, type: 'purchase-limit-exceeded', title: '1인 구매 한도를 넘었습니다' },
 };
@@ -123,7 +123,7 @@ export function storeUnavailableError(err: SeatStoreUnavailable): HoldError {
  * - 이름 있는 줄: ProblemError(type·status·title·detail·retryAfterSeconds·normalBranch, cause = e). REHOLD_WAIT는 확장 칸
  *   recentlyReleasedSeats(details 그대로)와 reholdAvailableAt(details.reholdAvailableAtMs의 ISO 8601 UTC 'Z', 밀리초 셋째 자리까지)를 싣는다.
  *   CONFLICT의 suggestedSeats는 추천 규칙이 [보완]이라 아직 싣지 않는다.
- * - SESSION_NOT_FOUND: reply에 WWW-Authenticate: Cookie realm="peaket"을 달고 Nest UnauthorizedException.
+ * - SESSION_NOT_FOUND: reply에 WWW-Authenticate: Cookie realm="peaket"을 달고 이름 있는 줄(401 purchase-session-ended)로 던진다.
  * - EVENT_MISMATCH: Nest ForbiddenException. SEATS_REQUIRED: 플랫폼 RequestValidationError.
  * 어느 경우든 응답의 Cache-Control은 받는 층이 이미 no-store로 달았다.
  */
@@ -131,7 +131,7 @@ export function throwHoldProblem(e: HoldError, reply: ReplyHeaders): never {
   switch (e.code) {
     case 'SESSION_NOT_FOUND':
       reply.header('www-authenticate', COOKIE_CHALLENGE);
-      throw new UnauthorizedException();
+      break;
     case 'EVENT_MISMATCH':
       throw new ForbiddenException();
     case 'SEATS_REQUIRED':

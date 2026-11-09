@@ -47,6 +47,17 @@ service:
     appFromPodLabels: {}
     # 관리 포트에 닿을 수 있는 네임스페이스 이름(로컬 관측 최소의 Prometheus)
     managementFromNamespaces: [observability]
+    # 나가는 연결 허용 목록(docs/infra.md §9, BUILD_ORDER PRF-192). 둘 다 비면 Egress를 넣지 않아 나가는 쪽을 막지 않는다.
+    # 하나라도 있으면 클러스터 DNS(53)가 함께 열리고 적지 않은 곳은 모두 막힌다(DB·수집기 같은 안쪽 대상도 적어야 닿는다).
+    # 릴레이를 켠 차트는 릴레이 파드도 같은 값을 받는다(NetworkPolicy <서비스>-outbox-relay, 추천 적용 2026-11-09, BUILD_ORDER PRF-192, 코드 리뷰)
+    egress:
+      # 공인 주소의 TCP 443(사설·루프백·링크 로컬·CGNAT·멀티캐스트·예약 대역은 뺀다)
+      publicHttps: false
+      # 안쪽 대상. 칸마다 ports(TCP)가 있고, cidrs·allowLinkLocalCidrs·(namespaces·podLabels) 가운데 한 종류만 쓴다
+      # cidrs: 전체 대역이나 사설 대역보다 넓은 값(IPv4 /8, IPv6 /7 미만)과 링크 로컬(169.254.0.0/16 등)은 렌더를 멈춘다
+      # allowLinkLocalCidrs: 링크 로컬을 일부러 여는 칸이다. 호스트 하나씩(/32)만 받고 메타데이터 주소 169.254.169.254는 받지 않는다
+      # 예: [{ namespaces: [data], podLabels: { app: pgbouncer }, ports: [6432] }, { cidrs: [10.20.0.0/16], ports: [5432] }, { allowLinkLocalCidrs: [169.254.170.23/32], ports: [80] }]
+      internal: []
 
 # 서비스별 Outbox 릴레이(ADR-0116 결정 1·2). 서비스와 같은 이미지를 다른 시작 명령으로 띄운다. Lease 리더만 보내고 정비를 돈다
 outboxRelay:

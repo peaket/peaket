@@ -203,14 +203,14 @@ describe('200 스냅샷', () => {
     expect(startedFor(f.jti)).toBe(1);
   });
 
-  test('ST28_ 세션이 열린 뒤 다른 임시 공개키를 보내면 401(TOKEN_USED)이고 응답에 까닭이 없다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('PRF192_ST28_ 세션이 열린 뒤 다른 임시 공개키를 보내면 401 admission-token-invalid이고 응답에 까닭이 없다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = w.fan(4);
     expect((await get(w.eventId, f)).statusCode).toBe(200);
     const r = await get(w.eventId, f, { key: clientKeyOf().text });
     expect(r.statusCode).toBe(401);
     expect(r.headers['www-authenticate']).toBe('Cookie realm="peaket"');
-    expect(json(r)).toMatchObject({ type: 'about:blank', status: 401 });
+    expect(json(r)).toMatchObject({ type: problem('admission-token-invalid'), status: 401, title: '입장 확인이 끝났습니다' });
     expect(json(r).detail).toBeUndefined();
   });
 
@@ -263,7 +263,7 @@ describe('200 스냅샷', () => {
 });
 
 describe('입장 토큰·신원 거절', () => {
-  test('ST28_[ASVS v5.0.0-16.3.1]_ 입장 토큰 없음·서명 틀림·만료·첫 사용 기한 지남·남의 계정 토큰은 모두 401이고 WWW-Authenticate Cookie realm="peaket"·이름 없는 본문이며 구매 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('PRF192_ST28_[ASVS v5.0.0-16.3.1]_ 입장 토큰 없음·서명 틀림·만료·첫 사용 기한 지남·남의 계정 토큰은 모두 401 admission-token-invalid이고 WWW-Authenticate Cookie realm="peaket"이며 어느 검사에 걸렸는지 싣지 않고 구매 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const base = w.fan(1);
     const cases: [string, Fan, Parameters<typeof get>[2]][] = [
@@ -278,7 +278,7 @@ describe('입장 토큰·신원 거절', () => {
       const r = await get(w.eventId, f, o);
       expect({ what, status: r.statusCode }).toEqual({ what, status: 401 });
       expect({ what, challenge: r.headers['www-authenticate'] }).toEqual({ what, challenge: 'Cookie realm="peaket"' });
-      expect({ what, body: json(r) }).toMatchObject({ what, body: { type: 'about:blank', status: 401 } });
+      expect({ what, body: json(r) }).toMatchObject({ what, body: { type: problem('admission-token-invalid'), status: 401, title: '입장 확인이 끝났습니다' } });
       expect(json(r).detail).toBeUndefined();
       const text = everything(r);
       for (const secret of [f.token, f.jti, f.accountId, f.clientKey]) expect({ what, leaked: text.includes(secret) }).toEqual({ what, leaked: false });

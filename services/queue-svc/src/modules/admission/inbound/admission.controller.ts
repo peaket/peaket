@@ -59,7 +59,7 @@ export class AdmissionController {
         throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}), ...(e.code === 'LOBBY_REPAIRING' ? { retryAfterSeconds: 2 } : {}) });
       }
       // 대기열 Redis 일시 장애는 503과 짧은 Retry-After(1초 [가정])로 답한다(진입과 같다). 화면은 같은 대기표로 다시 보낸다
-      if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '대기열을 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });
+      if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });
       throw e;
     }
   }

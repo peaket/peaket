@@ -298,7 +298,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
 });
 
 describe('나간 뒤: 같은 입장 토큰으로 새 구매 세션을 열 수 없다(S-T33 ⑥, Q-T11)', () => {
-  test('QT11_ST33_ 끝난 뒤 같은 입장 토큰으로 스냅샷을 다시 요청하면 401(TOKEN_USED, 재사용 차단 표지가 남아 ENDED)이고 새 세션이 열리지 않으며 SESSION_STARTED도 늘지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('PRF192_QT11_ST33_ 끝난 뒤 같은 입장 토큰으로 스냅샷을 다시 요청하면 401 purchase-session-ended(재사용 차단 표지가 남아 ENDED)이고 새 세션이 열리지 않으며 SESSION_STARTED도 늘지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = await w.fan(11);
     expect(startedFor(f.jti)).toHaveLength(1);
@@ -306,7 +306,7 @@ describe('나간 뒤: 같은 입장 토큰으로 새 구매 세션을 열 수 �
     const r = await snapshot(w.eventId, f);
     expect(r.statusCode).toBe(401);
     expect(r.headers['www-authenticate']).toBe('Cookie realm="peaket"');
-    expect(json(r)).toMatchObject({ type: 'about:blank', status: 401 });
+    expect(json(r)).toMatchObject({ type: problem('purchase-session-ended'), status: 401, title: '예매 시간이 끝났습니다' });
     expect(await mem.read(f.jti)).toBeUndefined();
     expect(startedFor(f.jti)).toHaveLength(1);
     expect(endedFor(f.jti)).toHaveLength(1);

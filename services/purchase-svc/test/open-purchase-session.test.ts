@@ -198,7 +198,7 @@ describe('거절', () => {
     }
   });
 
-  test('ADR0183_8_이미 쓴 입장 토큰: 다른 임시 공개키로 다시 열거나 끝난 세션에 다시 열면 TOKEN_USED다. 처음 세션은 그대로다', async () => {
+  test('PRF192_ADR0183_8_이미 쓴 입장 토큰: 다른 임시 공개키로 다시 열면 TOKEN_USED이고 끝난 세션에 다시 열면 SESSION_ENDED다. 처음 세션은 그대로다', async () => {
     const { uc, store, log } = setup();
     const { jti, cmd } = command();
     await uc.execute(cmd);
@@ -206,7 +206,7 @@ describe('거절', () => {
     expect(await codeOf(uc.execute({ ...cmd, clientKey: clientKeyOf().text }))).toBe('TOKEN_USED');
     expect(await store.read(jti)).toEqual(before);
     store.endSession(jti);
-    expect(await codeOf(uc.execute(cmd))).toBe('TOKEN_USED');
+    expect(await codeOf(uc.execute(cmd))).toBe('SESSION_ENDED');
     expect(log.entries).toHaveLength(1);
   });
 });
@@ -292,9 +292,9 @@ describe('응답을 잃은 재시도와 다시 받은 입장 토큰(PRF-136 리�
     // 처음 최대 체류가 지나면 다시 받은 토큰의 exp가 남아 있어도 열지 못한다(세션 상태 키가 남은 60초 동안은 TOKEN_EXPIRED)
     clock.advance(60_000);
     expect(await codeOf(uc.execute(reissued))).toBe('TOKEN_EXPIRED');
-    // 세션 상태 키가 사라진 뒤에는 표지가 남아 있어 같은 jti로 새 세션을 열지 못한다(TOKEN_USED). 열린 세션이 없으니 시작 사건도 더하지 않는다
+    // 세션 상태 키가 사라진 뒤에는 표지가 남아 있어 같은 jti로 새 세션을 열지 못한다(SESSION_ENDED). 열린 세션이 없으니 시작 사건도 더하지 않는다
     clock.advance(SESSION_KEY_GRACE_MS + 1);
-    expect(await codeOf(uc.execute(reissued))).toBe('TOKEN_USED');
+    expect(await codeOf(uc.execute(reissued))).toBe('SESSION_ENDED');
     expect(log.entries).toHaveLength(1);
   });
 
@@ -408,12 +408,12 @@ describe('키 없는 재요청(BUILD_ORDER PRF-137: 세션이 열린 뒤에는 X
     expect(await store.read(jti)).toEqual(before);
   });
 
-  test('ADR0183_8_끝난 세션(세션 상태만 사라짐)에 키 없이 다시 열면 TOKEN_USED이고 세션을 되살리지 않는다', async () => {
+  test('PRF192_ADR0183_8_끝난 세션(세션 상태만 사라짐)에 키 없이 다시 열면 SESSION_ENDED이고 세션을 되살리지 않는다', async () => {
     const { uc, store, log } = setup();
     const { jti, cmd } = command();
     await uc.execute(cmd);
     store.endSession(jti);
-    expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('TOKEN_USED');
+    expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('SESSION_ENDED');
     expect(await store.read(jti)).toBeUndefined();
     expect(log.entries).toHaveLength(1);
   });
