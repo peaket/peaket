@@ -1,9 +1,14 @@
 // drand 라운드 계산과 시드 봉인 시험 대역(ADR-0231 결정 6·7·11, docs/features/queue-admission.md §2 '로비 참가와 커밋 공시의 첫 구현')
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { BEACON_MIN_DELAY_MS, DRAND_GENESIS_MS, DRAND_PERIOD_MS, drandRoundAfter, drandRoundTimeMs, EMERGENCY_BEACON, EMERGENCY_STOP_REASONS, isEmergencyStopReason, sealContext, TEST_SEAL_ENV, TestSeedSealer } from '../src/index.js';
+import { BEACON_MIN_DELAY_MS, combinedKey, DRAND_GENESIS_MS, DRAND_PERIOD_MS, drandRoundAfter, drandRoundTimeMs, EMERGENCY_BEACON, EMERGENCY_STOP_REASONS, isEmergencyStopReason, sealContext, shuffle, TEST_SEAL_ENV, TestSeedSealer } from '../src/index.js';
 
 const vectors = JSON.parse(readFileSync(new URL('./vectors.json', import.meta.url), 'utf8')) as {
+  event: string;
+  seed: string;
+  merkleRoot: string;
+  tokens: string[];
+  emergency: { beacon: string; key: string; shuffled: string[] };
   drand: { genesisMs: number; periodMs: number; minDelayMs: number; cases: { atMs: number; round: number; timeMs: number }[] };
 };
 
@@ -71,6 +76,15 @@ describe('운영 봉인·비상 셔플의 규격 값(ADR-0239)', () => {
   test('Q-T27_비상셔플의비콘자리고정값은_SHA-256("PEAKET-shuffle-v1-no-beacon")이다', () => {
     expect(EMERGENCY_BEACON.toString('hex')).toBe('5a0a07005e996232e2cc59a91675773e1df94dd0af57f5c0c46306e0a028e6dc');
     expect(EMERGENCY_BEACON).toHaveLength(32);
+  });
+
+  test('Q-T27_비상셔플의순서는_고정비콘으로만든결합키로참조구현과같다', () => {
+    const e = vectors.emergency;
+    expect(EMERGENCY_BEACON.toString('hex')).toBe(e.beacon);
+    const hex = (s: string) => Buffer.from(s, 'hex');
+    const key = combinedKey(hex(vectors.seed), EMERGENCY_BEACON, hex(vectors.merkleRoot), vectors.event);
+    expect(key.toString('hex')).toBe(e.key);
+    expect(shuffle(vectors.tokens.map(hex).sort(Buffer.compare), key).map((b) => b.toString('hex'))).toEqual(e.shuffled);
   });
 
   test('Q-T27_비상셔플을받는멈춤이유는_비콘지연하나다(ADR-0050 결정 7)', () => {

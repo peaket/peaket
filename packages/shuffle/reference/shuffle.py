@@ -89,6 +89,8 @@ tokens = sorted([h(f'token-{i}') for i in range(10)])
 root = mth(tokens)
 key = combined_key(seed, beacon, root, event)
 out = shuffle(tokens, key)
+# 비상 셔플(RB-35, ADR-0239 결정 11): 비콘 자리에 고정값을 넣고 나머지는 같은 규격이다. 검증 화면(SCR-019)의 다시 계산과 대조한다
+emergency_key = combined_key(seed, EMERGENCY_BEACON, root, event)
 print(json.dumps({
     'event': event,
     'seed': seed.hex(),
@@ -100,6 +102,7 @@ print(json.dumps({
     'key': key.hex(),
     'shuffled': [t.hex() for t in out],
     'small': shuffle(list(range(5)), key),
+    'emergency': {'beacon': EMERGENCY_BEACON.hex(), 'key': emergency_key.hex(), 'shuffled': [t.hex() for t in shuffle(tokens, emergency_key)]},
     # 블록 번호는 0부터: 처음 열 단어(두 블록에 걸친다)
     'firstWords': [w for w, _ in zip(words(key), range(10))],
     # 거부 표본추출: 셋을 섞을 때 첫 단어 0xFFFFFFFF는 한도 floor(2^32/3)*3 이상이라 버린다

@@ -1,10 +1,11 @@
 // SCR-019 셔플 검증의 본문(d5 §5.19): 머리·①~⑤ 공개 기록 타임라인(CMP-049)·⑧ 동시 도착 묶음·⑥⑨ 내 순번 검증·⑦ 재현 규격.
-// 미리보기(?state=)는 서버에서, 실제 공시 기록은 ShuffleProofLive가 브라우저에서 같은 본문을 그린다. 받은 값은 React 텍스트로만 넣는다.
+// 미리보기(?state=)는 서버에서, 실제 공시 기록은 ShuffleProofLive가 브라우저에서 같은 본문을 그린다. 받은 값(해시·사유·한계)은 React 텍스트로만 넣는다.
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ProofCard, ProofHash, ProofValue, ShuffleProofPanel, ShuffleVerifier, type ShuffleProofStep, type ShuffleVerifierResult } from '@peaket/ds/ShuffleProofPanel';
 import { SHUFFLE_SPEC_URL, type ShuffleProof } from '@/entities/shuffle-proof';
-import { type ProofFlags, resultFileHref, resultStep, seedBadgesOf, seedNote, verifyDisabledReason } from '../model/proof-view';
+import { disclosureBadgesOf, type DisclosureView, type ProofFlags, resultFileHref, resultStep, seedBadgesOf, seedNote, verifyDisabledReason } from '../model/proof-view';
+import { EMERGENCY_BEACON_HEX } from '../model/recompute';
 
 export function ProofHeading({ title, perfLabel, backHref, sortLabel, v, openText, seedAt }: { title?: string; perfLabel?: string; backHref: string; sortLabel: string; v: ProofFlags; openText: string; seedAt: string }) {
   return (
@@ -29,6 +30,12 @@ export function ProofHeading({ title, perfLabel, backHref, sortLabel, v, openTex
           {seedBadgesOf(v).map((b) => (
             <span key={b.label} className={`badge badge-${b.tone}`}>
               <i className={`ic ${b.tone === 'success' ? 'ic-check' : 'ic-clock'}`} aria-hidden="true" />
+              {b.label}
+            </span>
+          ))}
+          {disclosureBadgesOf(v).map((b) => (
+            <span key={b.label} className={`badge badge-${b.tone}`}>
+              <i className="ic ic-alert-circle" aria-hidden="true" />
               {b.label}
             </span>
           ))}
@@ -124,7 +131,7 @@ export function ShuffleProofBody({ proof, v, verifierKey, autofill, onVerify, de
 
 /** ①~⑤ 공개 기록 네 단계 */
 function timeline(p: ShuffleProof, v: ProofFlags, autofill: string | undefined): ShuffleProofStep[] {
-  const result = resultStep({ pub: v.pub, rootOpen: v.rootOpen, stoppedNote: v.stoppedNote });
+  const result = resultStep({ pub: v.pub, rootOpen: v.rootOpen, stoppedNote: v.stoppedNote, emergency: v.disclosure.emergency !== null });
   return [
     {
       id: 'lobby',
@@ -141,6 +148,7 @@ function timeline(p: ShuffleProof, v: ProofFlags, autofill: string | undefined):
               ['알고리즘', p.lobby.algorithm],
             ]}
           />
+          <RedisclosureHistory items={v.disclosure.redisclosures} />
         </ProofCard>
       ) : (
         <p className="t-sm muted">로비 개방 전에 시드 해시와 사용할 drand 라운드를 공시합니다</p>
@@ -163,18 +171,23 @@ function timeline(p: ShuffleProof, v: ProofFlags, autofill: string | undefined):
     {
       id: 'result',
       title: '결과 생성',
-      meta: p.result.roundLabel,
+      meta: v.disclosure.emergency ? '비콘 없음' : p.result.roundLabel,
       published: v.pub,
       children: (
         <div className="col" style={{ gap: 8 }}>
+          <DisclosureNotices d={v.disclosure} round={p.lobby.round} />
           {result.showValues ? (
             <ProofCard>
-              <ProofValue label="drand 값">
-                <code className="hash">{p.result.beacon}</code>
-              </ProofValue>
-              <ProofValue label="drand 서명">
-                <code className="hash">{p.result.signature}</code>
-              </ProofValue>
+              {!v.disclosure.emergency && p.result.beacon ? (
+                <>
+                  <ProofValue label="drand 값">
+                    <code className="hash">{p.result.beacon}</code>
+                  </ProofValue>
+                  <ProofValue label="drand 서명">
+                    <code className="hash">{p.result.signature}</code>
+                  </ProofValue>
+                </>
+              ) : null}
               <ProofHash label="결과 파일 주소 · 참가 토큰 해시 앞 세 자리별 4,096개" value={`${p.result.fileBase}{앞 세 자리}.json`} copyLabel="결과 파일 주소 복사" />
               <div className="row between wrap" style={{ gap: 8 }}>
                 <span className="t-sm muted">
@@ -204,6 +217,69 @@ function timeline(p: ShuffleProof, v: ProofFlags, autofill: string | undefined):
   ];
 }
 
+/** ③·⑧ 공시 안내: 읽지 못한 공시(위조·손상 가능성)와 비상 셔플의 사유·한계(ADR-0239 결정 13) */
+function DisclosureNotices({ d, round }: { d: DisclosureView; round: string }) {
+  return (
+    <>
+      {d.invalidNote ? (
+        <div className="banner banner-danger" role="alert">
+          <i className="ic ic-alert-circle" aria-hidden="true" />
+          <div className="banner-body">
+            <span className="banner-title">{d.invalidNote}</span>
+          </div>
+        </div>
+      ) : null}
+      {d.emergency ? <EmergencyNotice e={d.emergency} round={round} /> : null}
+    </>
+  );
+}
+
+/** 비상 셔플은 공개 난수가 없다. 그 사실과 사유·한계를 값 자리에 먼저 보인다(d5 §5.19 '비상 셔플') */
+function EmergencyNotice({ e, round }: { e: NonNullable<DisclosureView['emergency']>; round: string }) {
+  const facts = [
+    ['허가 시각', e.at],
+    ['서버가 적은 사유', e.reason],
+    ['서버가 적은 한계', e.limitation],
+  ] as const;
+  return (
+    <div className="banner banner-warning" role="note" style={{ overflowWrap: 'anywhere' }}>
+      <i className="ic ic-alert-circle" aria-hidden="true" />
+      <div className="banner-body col" style={{ gap: 8, minWidth: 0 }}>
+        <span className="banner-title">비상 셔플: 비콘(외부 공개 난수) 없이 시드만으로 뽑았습니다</span>
+        <dl className="col t-sm" style={{ gap: 4 }}>
+          {facts.map(([k, val]) => (
+            <div key={k}>
+              <dt className="inline fw-b">{k}</dt> <dd className="inline">{val}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="t-sm">{round ? `공시했던 라운드(${round})는 쓰지 않았습니다. ` : ''}다시 계산할 때는 비콘 값 자리에 아래 고정값을 넣습니다</p>
+        <ProofHash label={'고정 비콘 값 · SHA-256("PEAKET-shuffle-v1-no-beacon")'} value={EMERGENCY_BEACON_HEX} copyLabel="고정 비콘 값 복사" />
+      </div>
+    </div>
+  );
+}
+
+/** ①·⑧ 라운드를 다시 공시한 이력은 모두 보인다(라운드를 고르는 일은 결과를 다시 뽑는 일이 될 수 있어 숨기지 않는다, ADR-0239 결정 12) */
+function RedisclosureHistory({ items }: { items: DisclosureView['redisclosures'] }) {
+  if (items.length === 0) return null;
+  return (
+    <ProofValue label="라운드 다시 공시 이력">
+      <p className="t-sm muted">공시 뒤 일정이 바뀌어 라운드만 다시 공시했습니다. 시드와 커밋은 그대로입니다. 줄 끝의 사유는 서버가 적은 글입니다</p>
+      <ol className="col t-sm" style={{ gap: 4, overflowWrap: 'anywhere' }}>
+        {items.map((r, i) => (
+          <li key={`${i}:${r.previousRound}:${r.round}`}>
+            <span className="num">
+              {r.previousRound} → {r.round}
+            </span>{' '}
+            · <span className="num">{r.at}</span> · {r.reason}
+          </li>
+        ))}
+      </ol>
+    </ProofValue>
+  );
+}
+
 /** ④ 결과 파일은 앞자리별로 나뉘어 있어, 내 토큰 해시를 알 때 내 앞자리 파일로 잇는다 */
 function MyResultFile({ base, autofill }: { base: string; autofill: string | undefined }) {
   if (!autofill) return <span className="t-sm muted">토큰 해시 앞 세 자리의 파일을 받습니다</span>;
@@ -231,7 +307,7 @@ function Facts({ items }: { items: readonly (readonly [string, ReactNode])[] }) 
 
 /** ⑧ 동시 도착 묶음(오픈 10분 전 커밋, 오픈 직후 2초 묶음의 시드·참가자 루트) */
 function BatchSection({ proof: p, v, autofill }: { proof: ShuffleProof; v: ProofFlags; autofill: string | undefined }) {
-  const batchResult = resultStep({ pub: v.batchPub, rootOpen: v.batchRootOpen, stoppedNote: v.batchStoppedNote });
+  const batchResult = resultStep({ pub: v.batchPub, rootOpen: v.batchRootOpen, stoppedNote: v.batchStoppedNote, emergency: v.batchDisclosure.emergency !== null });
   const facts: [string, ReactNode][] = [
     ['묶음 구간', <span key="w" className="num">{p.batch.window}</span>],
     ['대상', '오픈 전에 사람 확인을 마치고 이 구간에 도착한 분'],
@@ -256,6 +332,7 @@ function BatchSection({ proof: p, v, autofill }: { proof: ShuffleProof; v: Proof
         ) : (
           <p className="t-sm muted">오픈 10분 전에 묶음 시드 해시를 공시합니다</p>
         )}
+        <RedisclosureHistory items={v.batchDisclosure.redisclosures} />
         {v.batchRootOpen ? (
           <ProofValue
             label={
@@ -270,14 +347,19 @@ function BatchSection({ proof: p, v, autofill }: { proof: ShuffleProof; v: Proof
           <p className="t-sm muted">묶음이 닫히면 참가자 머클 루트를 공개합니다</p>
         )}
         {v.batchRootLate ? <p className="t-sm muted">이 머클 루트는 비콘 라운드가 나온 뒤에 공시했습니다</p> : null}
+        <DisclosureNotices d={v.batchDisclosure} round={p.batch.round} />
         {batchResult.showValues ? (
           <>
-            <ProofValue label="묶음 drand 값">
-              <code className="hash">{p.batch.beacon}</code>
-            </ProofValue>
-            <ProofValue label="묶음 drand 서명">
-              <code className="hash">{p.batch.signature}</code>
-            </ProofValue>
+            {!v.batchDisclosure.emergency && p.batch.beacon ? (
+              <>
+                <ProofValue label="묶음 drand 값">
+                  <code className="hash">{p.batch.beacon}</code>
+                </ProofValue>
+                <ProofValue label="묶음 drand 서명">
+                  <code className="hash">{p.batch.signature}</code>
+                </ProofValue>
+              </>
+            ) : null}
             <ProofHash label="묶음 결과 파일 주소 · 사전 검증 토큰 해시 앞 세 자리별" value={`${p.batch.fileBase}{앞 세 자리}.json`} copyLabel="묶음 결과 파일 주소 복사" />
             {v.fifo ? <MyResultFile base={p.batch.fileBase} autofill={autofill} /> : null}
           </>

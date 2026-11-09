@@ -17,6 +17,8 @@ import {
   GetQueueShuffleProofResponse,
 } from '@peaket/contracts/openapi/queue';
 import { startMockApi } from '../mock-api.mjs';
+import { EMERGENCY_BEACON_HEX } from '../../src/_pages/shuffle-proof/model/recompute.ts';
+import { verifyToken } from '../../src/_pages/shuffle-proof/model/verify-flow.ts';
 
 const EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
 const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -204,6 +206,82 @@ test('FR-038 셔플 검증 정보: 계약 Zod를 지키고 오픈 뒤 머클 루
     assert.equal(pub.body.lobby.seed, undefined);
     m.tick(3_600_000);
     assert.ok((await m.get(`/v1/queues/${EVENT}/shuffle-proof`)).body.lobby.seed);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('Q-T27 셔플 검증 정보의 비상 셔플·다시 공시·읽지 못한 칸 상태: 계약 Zod를 지키고 로비 구간에만 나온다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=300');
+    m.tick(300_000 + 3_700_000);
+    const at = async (mode) => {
+      await m.state(`queueProof=${mode}`);
+      const r = await m.get(`/v1/queues/${EVENT}/shuffle-proof`);
+      assert.equal(r.status, 200);
+      GetQueueShuffleProofResponse.parse(r.body);
+      assert.equal(r.body.batch.emergency, undefined);
+      assert.equal(r.body.batch.invalidDisclosures, undefined);
+      return r.body.lobby;
+    };
+    const emergency = await at('emergency');
+    assert.equal(emergency.beacon, undefined);
+    assert.equal(emergency.beaconSignature, undefined);
+    assert.equal(emergency.emergency.stopReason, 'beacon');
+    assert.ok(emergency.seed);
+    const invalid = await at('invalid-emergency');
+    assert.deepEqual(invalid.invalidDisclosures, ['emergency']);
+    assert.equal(invalid.emergency, undefined);
+    assert.equal(invalid.beacon, undefined);
+    assert.deepEqual((await at('invalid-redisclosures')).invalidDisclosures, ['redisclosures']);
+    const again = await at('redisclosed');
+    assert.equal(again.redisclosures.at(-1).round, again.round);
+    assert.ok(again.beacon);
+    assert.equal((await at('normal')).emergency, undefined);
+    const disguised = await at('disguised');
+    assert.equal(disguised.emergency, undefined);
+    assert.equal(disguised.beacon, EMERGENCY_BEACON_HEX);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('Q-T27 가짜 API의 서명은 규격 길이(16진 96자)다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=-3700');
+    const { body } = await m.get(`/v1/queues/${EVENT}/shuffle-proof`);
+    assert.match(body.lobby.beaconSignature, /^[0-9a-f]{96}$/);
+    assert.equal(body.lobby.beacon, createHash('sha256').update(Buffer.from(body.lobby.beaconSignature, 'hex')).digest('hex'));
+  } finally {
+    m.server.close();
+  }
+});
+
+test('Q-T27 가짜 API의 결과 파일로 ⑥이 일치·주의·위장 차단까지 간다(참가 토큰 해시 = SHA-256("mock-proof-1"))', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=-3700');
+    const outcome = async (mode) => {
+      await m.state(`queueProof=${mode}`);
+      const api = (await m.get(`/v1/queues/${EVENT}/shuffle-proof`)).body;
+      return verifyToken(api, sha('mock-proof-1'), { filesOrigin: m.base, hasWebCrypto: () => true, fetchFile: async (u) => {
+        const r = await fetch(u);
+        return r.status === 200 ? { status: 200, body: await r.json() } : { status: r.status };
+      } });
+    };
+    const ok = await outcome('matched');
+    assert.equal(ok.matched, true);
+    assert.equal(ok.conclusion, undefined);
+    const emergency = await outcome('emergency');
+    assert.equal(emergency.matched, true);
+    assert.equal(emergency.conclusion.tone, 'warning');
+    const disguised = await outcome('disguised');
+    assert.equal(disguised.matched, false);
+    assert.equal(disguised.conclusion.tone, 'danger');
+    assert.equal((await outcome('redisclosed')).matched, true);
+    assert.equal((await outcome('invalid-emergency')).conclusion.tone, 'danger');
   } finally {
     m.server.close();
   }

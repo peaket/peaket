@@ -42,7 +42,8 @@ export class TestRandomness implements SeedSource, Beacon {
   }
 
   #roundOf(eventId: string, batchNo: ShuffleGroup): BeaconRound {
-    const signature = createHmac('sha256', this.#secret).update(`batch-beacon\0${eventId}\0${batchNo}`).digest();
+    // drand quicknet 서명과 같은 48바이트(16진 96자)다. 검증 화면이 서명 길이를 보므로 로컬·e2e의 정상 공시가 어긋난 값으로 읽히지 않게 맞춘다
+    const signature = createHmac('sha384', this.#secret).update(`batch-beacon\0${eventId}\0${batchNo}`).digest();
     return { value: createHash('sha256').update(signature).digest(), signature: signature.toString('hex') };
   }
 }

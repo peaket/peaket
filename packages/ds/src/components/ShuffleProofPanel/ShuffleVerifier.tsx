@@ -5,7 +5,7 @@
 // layout: stack(휴대폰·데스크톱 옆 패널: 입력 아래 버튼) · inline(태블릿: 입력 오른쪽 버튼) · responsive(md~lg 미만만 inline).
 import { useEffect, useId, useState } from 'react';
 import { cx } from '../../lib/cx';
-import { createVerifyRun, IDLE_RUN, type VerifyRunContext, type VerifyRunResult, type VerifyRunState } from './verify-run';
+import { createVerifyRun, IDLE_RUN, verdictOf, type VerifyRunContext, type VerifyRunResult, type VerifyRunState } from './verify-run';
 
 /** 결과 파일의 순번과 다시 계산한 순번('3,215'), 결과 아래 안내 */
 export type ShuffleVerifierResult = VerifyRunResult;
@@ -55,7 +55,7 @@ export function ShuffleVerifier({
   const { busy, error, progress } = run;
   const inline = layout === 'responsive';
   const verified = runner ? run.result : shown ? (result ?? null) : null;
-  const same = verified ? verified.fileRank === verified.recomputedRank : false;
+  const verdict = verified ? verdictOf(verified) : null;
   const verify = () => {
     if (!value.trim()) return;
     if (runner) runner.start(value.trim());
@@ -132,11 +132,11 @@ export function ShuffleVerifier({
             </div>
           </div>
         ) : null}
-        {verified ? (
-          <div className={cx('banner', same ? 'banner-success' : 'banner-danger')}>
-            <i className={cx('ic', same ? 'ic-check-circle' : 'ic-alert-circle')} aria-hidden="true" />
-            <div className="banner-body">
-              <span className="banner-title">{same ? '다시 계산한 순번이 결과 파일과 같습니다' : '다시 계산한 순번이 결과 파일과 다릅니다'}</span>
+        {verified && verdict ? (
+          <div className={cx('banner', `banner-${verdict.tone}`)}>
+            <i className={cx('ic', verdict.tone === 'success' ? 'ic-check-circle' : 'ic-alert-circle')} aria-hidden="true" />
+            <div className="banner-body" style={{ overflowWrap: 'anywhere', minWidth: 0 }}>
+              <span className="banner-title">{verdict.title}</span>
               <dl className="kv" style={{ marginTop: 8, fontSize: 13, lineHeight: '18px' }}>
                 <dt>결과 파일의 순번</dt>
                 <dd className="num">{verified.fileRank}</dd>

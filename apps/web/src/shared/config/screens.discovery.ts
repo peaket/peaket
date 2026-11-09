@@ -57,8 +57,8 @@ export const SCR016_STATES = [
 ] as const;
 export type Scr016State = (typeof SCR016_STATES)[number];
 
-/** SCR-019 셔플 검증: 보드 상태 6 */
-export const SCR019_STATES = ['시드 공개 뒤', '셔플 전', '셔플 직후', '검증 결과 일치', 'FIFO 공연', '파일 없음'] as const;
+/** SCR-019 셔플 검증: 상태 9(보드 6에 HOT-042의 비상 셔플·공시 읽지 못함·라운드 다시 공시를 더했다) */
+export const SCR019_STATES = ['시드 공개 뒤', '셔플 전', '셔플 직후', '검증 결과 일치', 'FIFO 공연', '파일 없음', '비상 셔플', '공시 읽지 못함', '라운드 다시 공시'] as const;
 export type Scr019State = (typeof SCR019_STATES)[number];
 
 /** SCR-056 고객센터·문의: 보드 상태 15를 페이지 넷으로 나눴다(보드 renderVals의 분기대로) */

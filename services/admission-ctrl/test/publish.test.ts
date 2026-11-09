@@ -37,6 +37,12 @@ describe('시험 비콘의 기록 확인', () => {
     expect(r.verifyStored(E, 1, 123, 'bb'.repeat(32), got.signature)).toBe(false);
     expect(r.verifyStored('other', 1, 123, got.value.toString('hex'), got.signature)).toBe(false);
   });
+
+  test('Q-T27 시험 비콘의 서명은 drand G1과 같은 16진 96자이고, 값은 서명의 SHA-256이다(검증 화면이 정상 공시로 대조한다)', async () => {
+    const got = (await new TestRandomness(Buffer.alloc(32, 9)).round(E, 1))!;
+    expect(got.signature).toMatch(/^[0-9a-f]{96}$/);
+    expect(got.value.toString('hex')).toBe(createHash('sha256').update(Buffer.from(got.signature, 'hex')).digest('hex'));
+  });
 });
 
 describe('publishBatch', () => {

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createVerifyRun } from '../src/components/ShuffleProofPanel/verify-run.ts';
+import { createVerifyRun, verdictOf } from '../src/components/ShuffleProofPanel/verify-run.ts';
 
 const deferred = () => {
   let resolve;
@@ -99,6 +99,44 @@ test('부품이 사라지면 돌던 계산을 멈춘다(자동 채움이 늦게 
 test('계산 중에는 [다시 계산] 버튼을 내리고 그 자리에 진행 글을 보인다(d5 §5.19)', () => {
   assert.doesNotMatch(source, /aria-disabled=\{disabledReason \|\| busy/);
   assert.match(source, /\{busy \? null : button\}/);
+});
+
+const OK_TITLE = '다시 계산한 순번이 결과 파일과 같습니다';
+const BAD_TITLE = '다시 계산한 순번이 결과 파일과 다릅니다';
+
+test('Q-T27 결론 표시: matched가 참일 때만 성공이고 그 밖에는 실패다', () => {
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '1', matched: true }), { tone: 'success', title: OK_TITLE });
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '2', matched: false }), { tone: 'danger', title: BAD_TITLE });
+});
+
+test('Q-T27 결론 표시: 표시 글이 같아도 matched가 거짓이면 실패다(글자 비교를 하지 않는다)', () => {
+  assert.deepEqual(verdictOf({ fileRank: '머클 루트 불일치', recomputedRank: '머클 루트 불일치', matched: false }), { tone: 'danger', title: BAD_TITLE });
+  assert.deepEqual(verdictOf({ fileRank: '—', recomputedRank: '—', matched: false }), { tone: 'danger', title: BAD_TITLE });
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '1' }), { tone: 'danger', title: BAD_TITLE });
+});
+
+test('Q-T27 결론 표시: 일치해도 한계가 있으면 부르는 쪽이 준 주의 결론을 쓴다', () => {
+  const conclusion = { tone: 'warning', title: '순번은 같지만 비콘 없이 뽑았습니다' };
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '1', matched: true, conclusion }), conclusion);
+});
+
+test('Q-T27 결론 표시: 일치가 아닌데 주의 결론이 오면 실패로 낸다(안전한 쪽)', () => {
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '2', matched: false, conclusion: { tone: 'warning', title: '주의' } }), { tone: 'danger', title: BAD_TITLE });
+});
+
+test('Q-T27 결론 표시: 확인하지 못한 구간의 실패 결론은 그대로 쓴다', () => {
+  const conclusion = { tone: 'danger', title: '확인됨으로 낼 수 없습니다' };
+  assert.deepEqual(verdictOf({ fileRank: '1', recomputedRank: '확인하지 않음', matched: false, conclusion }), conclusion);
+});
+
+test('Q-T27 부품은 결론을 verdictOf에서만 고르고, 글자로 비교하지 않는다', () => {
+  assert.match(source, /verdictOf\(verified\)/);
+  assert.doesNotMatch(source, /fileRank === /);
+  assert.doesNotMatch(readFileSync(fileURLToPath(new URL('../src/components/ShuffleProofPanel/verify-run.ts', import.meta.url)), 'utf8'), /fileRank === /);
+});
+
+test('Q-T27 결과의 안내 문단은 긴 글이 칸을 넘지 않게 줄을 바꾼다', () => {
+  assert.match(source, /banner-body" style=\{\{ overflowWrap: 'anywhere', minWidth: 0 \}\}/);
 });
 
 test('예상 밖 실패는 정해진 글로 보인다', async () => {

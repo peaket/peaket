@@ -35,12 +35,18 @@ async function mapChunks<T, U>(items: readonly T[], fn: (x: T, i: number) => Pro
   return out;
 }
 
+/**
+ * 비상 셔플(RB-35, ADR-0239 결정 11)의 비콘 값 자리에 넣는 고정값 = SHA-256("PEAKET-shuffle-v1-no-beacon").
+ * 화면에 값을 보여야 해서 상수로 둔다. 규격의 값과 같은지는 참조 구현의 기준값(vectors.json의 emergency)으로 시험한다
+ */
+export const EMERGENCY_BEACON_HEX = '5a0a07005e996232e2cc59a91675773e1df94dd0af57f5c0c46306e0a028e6dc';
+
 /** 커밋 = SHA-256("PEAKET-shuffle-v1" ‖ 회차 ID ‖ 시드)(POL-005) */
 export async function commitmentHex(eventId: string, seedHex: string): Promise<string> {
   return toHex(await sha(COMMIT_DOMAIN, new TextEncoder().encode(eventId), fromHex(seedHex)));
 }
 
-/** drand quicknet의 라운드 값은 SHA-256(서명)이다. BLS 서명 자체의 검증은 하지 않는다(OPEN[27]) */
+/** drand quicknet의 라운드 값은 SHA-256(서명)이다. 브라우저는 BLS 서명 자체를 검증하지 않는다(ADR-0239 결정 3) */
 export async function beaconOfSignatureHex(signatureHex: string): Promise<string> {
   return toHex(await sha(fromHex(signatureHex)));
 }
@@ -117,6 +123,9 @@ export interface VerifyInput {
   entries: Readonly<Record<string, number>>;
 }
 
+/** 비상 셔플 구간의 입력. 비콘과 서명이 없으므로 받지 않는다(받지 않아야 일반 구간에서 서명 대조를 빼먹을 길이 없다) */
+export type EmergencyVerifyInput = Omit<VerifyInput, 'beaconHex' | 'signatureHex'>;
+
 export interface VerifyResult {
   commitMatches: boolean;
   beaconMatches: boolean;
@@ -130,13 +139,24 @@ export interface VerifyResult {
  * 머클 루트만 보면 운영자가 비콘을 본 뒤 원하는 순서가 나오는 시드를 골라도 드러나지 않는다(commit-reveal이 막으려는 경우)
  */
 export async function verifyRank(i: VerifyInput): Promise<VerifyResult> {
-  const fileSeq = i.entries[i.tokenHash] ?? null;
+  return verifyAgainst(i, i.beaconHex, (await beaconOfSignatureHex(i.signatureHex)) === i.beaconHex);
+}
+
+/** 비상 셔플 구간: 고정 비콘으로 다시 계산한다. 공개 난수가 없으므로 비콘을 대조할 것이 없다(결론을 어떻게 적을지는 verify-flow가 정한다) */
+export async function verifyEmergencyRank(i: EmergencyVerifyInput): Promise<VerifyResult> {
+  return verifyAgainst(i, EMERGENCY_BEACON_HEX, true);
+}
+
+/** 결과 파일의 번호는 1 이상의 안전한 정수만 받는다. 그 밖의 값은 없는 것으로 본다(글자가 그대로 비교·표시되지 않게) */
+export const fileSeqOf = (raw: unknown): number | null => (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1 ? raw : null);
+
+async function verifyAgainst(i: EmergencyVerifyInput, beaconHex: string, beaconMatches: boolean): Promise<VerifyResult> {
+  const fileSeq = fileSeqOf(i.entries[i.tokenHash]);
   const commitMatches = (await commitmentHex(i.eventId, i.seedHex)) === i.commitHex;
-  const beaconMatches = (await beaconOfSignatureHex(i.signatureHex)) === i.beaconHex;
   if (!commitMatches || !beaconMatches) return { commitMatches, beaconMatches, rootMatches: false, fileSeq, recomputedSeq: null };
   const sortedTokens = Object.keys(i.entries).sort();
   if ((await merkleRootHex(sortedTokens)) !== i.merkleRootHex) return { commitMatches, beaconMatches, rootMatches: false, fileSeq, recomputedSeq: null };
-  const order = await recomputeOrder({ eventId: i.eventId, seedHex: i.seedHex, beaconHex: i.beaconHex, sortedTokens, rootHex: i.merkleRootHex });
+  const order = await recomputeOrder({ eventId: i.eventId, seedHex: i.seedHex, beaconHex, sortedTokens, rootHex: i.merkleRootHex });
   const rank = order.indexOf(i.tokenHash);
   return { commitMatches, beaconMatches, rootMatches: true, fileSeq, recomputedSeq: rank < 0 ? null : i.firstSeq + rank };
 }

@@ -3,6 +3,7 @@
 // 운영·CI에서는 쓰지 않는다(ADR-0199 결정 2). 상태 바꾸기는 /__mock/state의 queue* 칸이다(scripts/mock-api.mjs 머리 주석).
 import { createHash, randomUUID } from 'node:crypto';
 import { mockAdmissionToken } from './seatmap.mjs';
+import { EMERGENCY_BEACON_HEX, merkleRootHex, recomputeOrder } from '../../src/_pages/shuffle-proof/model/recompute.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEGMENT = 1000;
@@ -10,6 +11,16 @@ const SEGMENT = 1000;
 const FAR_SEGMENTS = 100;
 const SALE = { 'on-sale': 'ON_SALE', paused: 'PAUSED', 'all-held': 'ALL_HELD', 'sold-out': 'SOLD_OUT', ended: 'ENDED' };
 const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+const bytes = (hex) => Buffer.from(hex, 'hex');
+const hashBytes = (...parts) => parts.reduce((h, p) => h.update(p), createHash('sha256')).digest('hex');
+const seedOf = (name) => sha(`seed-${name}`);
+/** drand 서명 자리는 16진 96자다(G1 48바이트, ADR-0239 결정 3) */
+const sigOf = (name) => sha(`sig-${name}`).repeat(2).slice(0, 96);
+const beaconOf = (name) => hashBytes(bytes(sigOf(name)));
+/** queueProof가 normal이 아닐 때 로비 구간의 참가자(토큰 해시). 검증 화면 ⑥에는 SHA-256("mock-proof-1")을 넣는다 */
+const PROOF_TOKENS = ['mock-proof-1', 'mock-proof-2', 'mock-proof-3', 'mock-proof-4'].map(sha);
+/** 결과 파일을 고정 비콘으로 섞는 상태 */
+const NO_BEACON_PROOF = new Set(['emergency', 'disguised', 'invalid-emergency']);
 
 /** 상태 바꾸기의 대기열 칸 기본값 */
 export const QUEUE_DEFAULTS = Object.freeze({
@@ -25,6 +36,8 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueLobby: 'normal',
   /** 셔플 결과 파일: normal(오픈 3초 뒤 게시)|late(43초 뒤)|never|missing(내 참가 토큰이 목록에 없음) */
   queueShuffle: 'normal',
+  /** 셔플 검증 정보의 로비 구간 공시(ADR-0239): normal(결과 파일 합성)|matched(⑥ 일치)|emergency(비콘 없이 비상 셔플, ⑥ 주의)|disguised(비상 셔플을 일반으로 위장, ⑥ 차단)|redisclosed(라운드 다시 공시)|invalid-emergency|invalid-redisclosures(읽지 못한 칸) */
+  queueProof: 'normal',
   /** 오픈까지 남은 초(공연 공개 요약의 openAt을 지금 + 이 값으로 바꾼다. 빈 값이면 고정 자료 그대로) */
   queueOpenIn: '',
   /** 사전 검증(공연 상세): normal|identity|not-found|down|unauthorized. queue-svc는 사람 확인 실패·위험 판정 장애에도 토큰을 준다(ADR-0211 결정 4) */
@@ -77,6 +90,14 @@ export function createQueueMock({ now, state, schedule = () => null }) {
     ...(verification ? { verification: 'REQUIRED', verificationReason: 'RAPID_REQUESTS' } : { verificationReason: null }),
     serverTimeMs: now(),
   });
+
+  /** queueProof가 normal이 아닐 때의 결과: 규격대로 섞은 결과 파일과 머클 루트(재현 코드는 화면의 recompute.ts를 그대로 쓴다) */
+  const lobbyWorld = async (eventId) => {
+    const sortedTokens = [...PROOF_TOKENS].sort();
+    const rootHex = await merkleRootHex(sortedTokens);
+    const order = await recomputeOrder({ eventId, seedHex: seedOf('lobby'), beaconHex: NO_BEACON_PROOF.has(state.queueProof) ? EMERGENCY_BEACON_HEX : beaconOf('lobby'), sortedTokens, rootHex });
+    return { rootHex, entries: Object.fromEntries(order.map((h, i) => [h, i + 1])) };
+  };
 
   /** 처리했으면 true. send(status, body, type?, extra?)·problem(status, name, title, extra?)는 가짜 API의 답하기 함수 */
   return {
@@ -181,10 +202,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
         if (!sched) return problem(404, 'queue-not-found', '이 회차의 셔플 정보가 없습니다'), true;
         const t = now();
         const opensAt = sched.openAtMs;
-        // 검증 화면용 공시 기록(ADR-0232). 커밋·비콘은 규격대로 맞지만, 결과 파일이 합성이라 머클 루트 대조는 일치로 나오지 않는다
-        const seedOf = (name) => sha(`seed-${name}`);
-        const bytes = (hex) => Buffer.from(hex, 'hex');
-        const hashBytes = (...parts) => parts.reduce((h, p) => h.update(p), createHash('sha256')).digest('hex');
+        // 검증 화면용 공시 기록(ADR-0232). 커밋·비콘은 규격대로 맞는다. queueProof=normal은 결과 파일이 합성이라 머클 루트 대조가 일치로 나오지 않고, 그 밖의 값은 결과 파일까지 맞춘다(lobbyWorld)
         const group = (name, path) => ({
           chain: 'quicknet',
           algorithm: 'v1',
@@ -196,16 +214,38 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           round: 8_000_000,
           roundAt: new Date(opensAt + 3000).toISOString(),
           ...(t >= opensAt ? { merkleRoot: sha(`root-${name}-${eventId}`), rootAt: new Date(opensAt + 1000).toISOString(), firstSeq: 1, participantCount: 1 } : {}),
-          ...(t >= opensAt + 3000 ? { beacon: hashBytes(bytes(sha(`sig-${name}`).repeat(2))), beaconSignature: sha(`sig-${name}`).repeat(2), publishedAt: new Date(opensAt + 3000).toISOString() } : {}),
+          ...(t >= opensAt + 3000 ? { beacon: beaconOf(name), beaconSignature: sigOf(name), publishedAt: new Date(opensAt + 3000).toISOString() } : {}),
           ...(t >= opensAt + 3_600_000 ? { seed: seedOf(name), seedRevealedAt: new Date(opensAt + 3_600_000).toISOString() } : {}),
         });
-        send(200, { eventId, opensAt: new Date(opensAt).toISOString(), seedRevealAt: new Date(opensAt + 3_600_000).toISOString(), lobby: group('lobby', 'shuffle-results'), batch: group('batch', 'batch-results') }, undefined, { 'cache-control': 'public, max-age=5' });
+        // 비상 표시가 있는 구간에는 비콘 기록이 없다(ADR-0239 결정 11). 읽지 못한 비상 칸도 같다
+        const withoutBeacon = ({ beacon: _b, beaconSignature: _s, ...rest }) => rest;
+        const disclosed = (g) => {
+          const mode = state.queueProof;
+          if (mode === 'emergency') return { ...withoutBeacon(g), emergency: { at: new Date(opensAt + 70_000).toISOString(), reason: '비콘을 60초 넘게 받지 못해 RB-35 비상 셔플을 실행했습니다', stopReason: 'beacon', limitation: '이 경우 시드를 아는 내부자가 결과를 미리 알 수 있다' } };
+          if (mode === 'disguised') return { ...g, beacon: EMERGENCY_BEACON_HEX, beaconSignature: Buffer.from('PEAKET-shuffle-v1-no-beacon', 'utf8').toString('hex') };
+          if (mode === 'invalid-emergency') return { ...withoutBeacon(g), invalidDisclosures: ['emergency'] };
+          if (mode === 'invalid-redisclosures') return { ...g, invalidDisclosures: ['redisclosures'] };
+          if (mode === 'redisclosed') return { ...g, redisclosures: [{ at: new Date(opensAt - 300_000).toISOString(), previousRound: g.round - 20, round: g.round, reason: '오픈 시각이 바뀌어 라운드를 다시 공시했습니다' }] };
+          return g;
+        };
+        const answer = (lobby) => send(200, { eventId, opensAt: new Date(opensAt).toISOString(), seedRevealAt: new Date(opensAt + 3_600_000).toISOString(), lobby: disclosed(lobby), batch: group('batch', 'batch-results') }, undefined, { 'cache-control': 'public, max-age=5' });
+        const lobby = group('lobby', 'shuffle-results');
+        if (state.queueProof === 'normal' || lobby.merkleRoot === undefined) {
+          answer(lobby);
+          return true;
+        }
+        void lobbyWorld(eventId).then((w) => answer({ ...lobby, merkleRoot: w.rootHex, participantCount: PROOF_TOKENS.length }));
         return true;
       }
 
       if (shufflePrefix && req.method === 'GET') {
         const publishAt = sched ? sched.openAtMs + (state.queueShuffle === 'late' ? 43_000 : 3000) : Infinity;
         if (state.queueShuffle === 'never' || now() < publishAt) return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json', { 'cache-control': 'public, max-age=1' }), true;
+        if (state.queueProof !== 'normal') {
+          // 공시 상태를 보는 값: ⑥이 끝까지 가도록 규격대로 맞춘 파일을 낸다(내 참가 토큰은 들지 않는다, PROOF_TOKENS)
+          void lobbyWorld(eventId).then(({ entries }) => send(200, Object.fromEntries(Object.entries(entries).filter(([h]) => h.startsWith(shufflePrefix))), undefined, { 'cache-control': 'public, max-age=60' }));
+          return true;
+        }
         // 목록을 고정한 뒤의 파일: 아직 취소되지 않은 참가 토큰만 든다(missing이면 다른 기기에서 취소된 것처럼 내 토큰을 뺀다)
         const table = { [sha(`decoy-${shufflePrefix}`)]: 1 };
         if (e.lobby && state.queueShuffle !== 'missing' && sha(e.lobby).startsWith(shufflePrefix)) table[sha(e.lobby)] = e.tickets.get(e.lobby).seq;
