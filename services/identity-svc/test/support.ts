@@ -11,7 +11,7 @@ import { RefreshSession } from '../src/modules/session/application/refresh-sessi
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
 import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
 import { deviceRefsOf } from '../src/modules/session/adapters/phone-contact-refs.js';
-import { type AccountClaims, type AccountClosure, type DeviceRefs, type InvRefs, type LinkProposals, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
+import { type AccountClaims, type AccountClosure, type DeviceRefs, type InvRefs, type LinkProposals, type LoginRisk, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
 
@@ -28,6 +28,7 @@ export function recordingSignals(): SessionSignals & { seen: string[] } {
     seen,
     created: (p, n) => seen.push(`created:${p}:${n}`),
     replayed: (p) => seen.push(`replayed:${p}`),
+    loginVerdict: (v) => seen.push(`verdict:${v}`),
     terminated: (r, c) => seen.push(`terminated:${r}:${c}`),
     reauthIssued: (p, s) => seen.push(`reauth:${p}:${s}`),
     reauthMismatch: (p) => seen.push(`mismatch:${p}`),
@@ -63,7 +64,7 @@ export interface Kit {
 /** 본인확인 전 계정처럼 아무 값도 싣지 않는다 */
 export const noClaims: AccountClaims = { of: async () => ({ scopes: [] }) };
 
-export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims; reverifications?: Reverifications; links?: LinkProposals; invRefs?: InvRefs } = {}): Promise<Kit> {
+export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims; reverifications?: Reverifications; links?: LinkProposals; invRefs?: InvRefs; loginRisk?: LoginRisk } = {}): Promise<Kit> {
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
@@ -77,7 +78,7 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
     keys,
     signals,
     publicJwk,
-    create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock, o.links, invRefs),
+    create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock, o.links, invRefs, o.loginRisk),
     end: new EndSession(store, signals, clock),
     reauth: new IssueReauthToken(store, signer, signals, o.reverifications ?? noReverifications, clock),
     refresh: new RefreshSession(store, signer, signals, o.claims ?? noClaims, clock),

@@ -28,6 +28,8 @@ import {
   PromSessionSignals,
   accountHoldHandlers,
   MERGE_CHECK_BREAKER,
+  GrpcTrustLoginRisk,
+  TRUST_LOGIN_BREAKER,
   mergeCheckersFromEnv,
   RedisLinkProposals,
   RedisMergeProposals,
@@ -131,11 +133,14 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
+// 로그인 판정(identity §7, BOT-050): trust-svc 주소가 없으면 세션의 판정을 UNKNOWN으로 남긴다(양도·계좌 입력에서 안전 쪽, 로그인은 막지 않는다)
+const trustGrpc = process.env.PEAKET_TRUST_GRPC_URL;
+const loginRisk = trustGrpc ? new GrpcTrustLoginRisk(trustGrpc, loadPlatformConfig(process.env).grpcLbProfile, lateBreaker('trust-svc', TRUST_LOGIN_BREAKER)) : undefined;
 // identity 자신의 관리 경로 역할 판정(ADR-0172): 같은 프로세스의 GetAdminAuthz를 가드 포트로 넣는다. 앱이 선 뒤에 잇는다(BOT-123)
 const adminAuthzHolder: { port?: AdminAuthzPort } = {};
 const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
 // 관리 경로(페퍼가 있을 때만 싣는다)가 없으면 판정 포트도 넘기지 않는다: 시작 확인이 관리 역할 처리기 없음을 그대로 본다(새 맥락 리뷰 2026-11-05)
-const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
@@ -195,6 +200,7 @@ for (const w of invRefs.warnings) service.logger.warn(w);
 for (const e of earlyInvRefErrors) service.logger.warn(e, '조사용 가명 라벨 키를 받지 못했다(identity §9.1)');
 invRefs.ring.onRefreshError((label, reason, err) => service.logger.warn({ label, reason, err }, '조사용 가명 라벨 키를 다시 받지 못했다(identity §9.1)'));
 for (const w of merge.warnings) service.logger.warn(w);
+if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 세션의 로그인 판정이 늘 UNKNOWN이다');
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
 await service.listen();
@@ -252,10 +258,13 @@ process.once('SIGTERM', () => {
   void grpc
     .close()
     .then(() => Promise.all([stopAdminNotices(), stopPasswordOnly()]))
+    // 응답 뒤에서 도는 로그인 판정이 끝나기를 기다린다(시간 상한 5초 [가정]. 넘으면 그 세션은 UNKNOWN으로 남는다)
+    .then(() => service.app.get(CreateSession).drain())
     .then(() => service.close())
     .then(() => {
       // 처리 중인 요청이 끝난 뒤 차단기를 끈다(끈 뒤에는 부르지 않는다)
       for (const b of breakers.values()) b.shutdown();
+      loginRisk?.close();
     })
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {

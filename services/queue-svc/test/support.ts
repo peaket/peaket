@@ -9,7 +9,8 @@ export const tokens = HmacQueueTokens.fromEnv({ [QUEUE_TOKEN_KEY_ENV]: `k1:${Buf
 export const ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000001';
 export const OTHER_ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000002';
 export const PID = 'pid-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-export const DEVICE = 'dev-0123456789abcdef';
+/** 정본의 deviceId 형식(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12) */
+export const DEVICE = 'AQEBAQEBAQEBAQEBAQEBAQ';
 export const JNY = '0190f3a1-7c2e-7a00-8000-0000000000aa';
 
 let n = 0;

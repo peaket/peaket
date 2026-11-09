@@ -19,6 +19,7 @@ export { sampleKeep, sampleThreshold } from './sampling.js';
 export { APP_HEADER, APPS } from './http-hooks.js';
 export { NestPinoLogger, PLATFORM_LOGGER, REDACTED_KEYS, createPlatformLogger, kstIso, type PlatformLogger, type PlatformLoggerOptions } from './log.js';
 export { LogPolicy, requestLog, type QueuePhase, type RequestLog, type RequestLogFields, type RouteLogPolicy } from './request-log.js';
+export { parseAsnTable, ReloadingAsnTable, type AsnClassifier, type AsnTableData, type NetClass } from './asn-table.js';
 export { TRACE_PROPAGATION_HEADERS, createExternalHttpClient, type ExternalHttpClient, type ExternalHttpClientOptions, type ExternalRequest } from './http-client.js';
 export { BoundaryPropagator, BoundarySpanProcessor, withoutTracePropagation, type InboundTrust } from './trace-boundary.js';
 export { rawBodyOf } from './raw-body.js';

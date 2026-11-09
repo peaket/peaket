@@ -137,6 +137,14 @@ export interface LeaveSignals {
 }
 export const noLeaveSignals: LeaveSignals = { left: () => undefined };
 
+/** 게이트웨이가 넘긴 요청 정보(trust.proto ClientSignals). asn이 없으면 0이다 */
+export interface RiskClient {
+  ip: string;
+  userAgent?: string;
+  asn: number;
+  clientHints: Record<string, string>;
+}
+
 export interface RiskInput {
   context: 'PREVERIFY' | 'LOBBY';
   eventId: string;
@@ -147,14 +155,32 @@ export interface RiskInput {
   lobbyShuffle: boolean;
   humanCheckToken?: string;
   behaviorSummary?: Record<string, unknown>;
+  client?: RiskClient;
 }
-export type RiskVerdict = { kind: 'OK' } | { kind: 'VERIFY'; reason: ReasonCategory } | { kind: 'UNAVAILABLE' };
+/** OK: 통과, HELD: 통과했지만 trust-svc 의존성 일부가 멈춰 사람 확인을 보류함(degraded), VERIFY: 추가 검증, UNAVAILABLE: 판정을 받지 못함(축소 운영) */
+export type RiskVerdict = { kind: 'OK' } | { kind: 'HELD' } | { kind: 'VERIFY'; reason: ReasonCategory } | { kind: 'UNAVAILABLE' };
 
 export const RISK = Symbol('queue.RiskPort');
 /** trust-svc ScoreRisk(데드라인 800ms [가정]). 실패하면 던지거나 UNAVAILABLE을 준다(축소 운영) */
 export interface RiskPort {
   score(i: RiskInput): Promise<RiskVerdict>;
 }
+
+export const DEGRADED_LIMITS = Symbol('queue.DegradedLimits');
+/** 판정을 받지 못할 때의 파드 메모리 한도(docs/features/bot-defense.md §11.2). false면 이 요청은 한도를 넘었다 */
+export interface DegradedLimits {
+  allow(i: { deviceId: string; pid: string; client?: RiskClient }): boolean;
+}
+export const noDegradedLimits: DegradedLimits = { allow: () => true };
+/** 한도를 넘었을 때의 Retry-After(초). 한도 창과 같다 */
+export const DEGRADED_RETRY_AFTER_SECONDS = 10;
+
+/** 판정을 받지 못한 까닭의 지표(trust_score_fallback_total{reason}, §15) */
+export type RiskFallbackReason = 'open' | 'deadline' | 'error' | 'invalid';
+export interface RiskSignals {
+  fallback(reason: RiskFallbackReason): void;
+}
+export const noRiskSignals: RiskSignals = { fallback: () => undefined };
 
 /** 사람 슬롯에 기록한 진입. 같은 요청 ID의 재시도가 처음 대기표를 그대로 받게 여정 ID와 추가 검증 사유도 함께 둔다 */
 export interface RecordedEntry {

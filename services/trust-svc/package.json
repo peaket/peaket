@@ -1,0 +1,31 @@
+{
+  "name": "@peaket/trust-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "trust-svc. 위험 판정 ScoreRisk(gRPC, docs/features/bot-defense.md §4): 점수기 목록 파이프라인, 사람 확인 즉시 검증, 기기·IP/ASN 신뢰도(BUILD_ORDER BOT-050). 판정 기준값과 가중치는 저장소에 두지 않고 비공개 설정으로 주입한다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "fastify": "^5.12.7",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -133,6 +133,7 @@ export type ProblemType =
   | 'queue-not-open'
   | 'queue-order-invalid'
   | 'queue-recovering'
+  | 'queue-request-limited'
   | 'queue-ticket-expired'
   | 'queue-ticket-invalid'
   | 'queue-ticket-removed'
@@ -315,6 +316,7 @@ export const PROBLEM_TYPES = {
   'queue-not-open': { status: 409, title: "아직 예매가 열리지 않았습니다" },
   'queue-order-invalid': { status: 422, title: "로비 셔플과 오픈 직후 묶음을 둘 다 끌 수는 없습니다" },
   'queue-recovering': { status: 503, title: "대기열을 다시 맞추는 중입니다. 잠시 뒤 다시 시도해 주세요" },
+  'queue-request-limited': { status: 429, title: "요청이 많아 잠시 뒤 다시 시도해 주세요" },
   'queue-ticket-expired': { status: 410, title: "입장 시간이 지났습니다" },
   'queue-ticket-invalid': { status: 403, title: "대기표를 확인할 수 없습니다" },
   'queue-ticket-removed': { status: 410, title: "이 대기표는 더 쓸 수 없습니다" },

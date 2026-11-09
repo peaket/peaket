@@ -549,6 +549,9 @@ export class DrizzleSessionStore implements SessionStore {
           lastActiveAt: date(r.createdAt),
         });
       },
+      setLoginVerdict: async (sessionId, verdict, reason, at) => {
+        await tx.update(session).set({ loginVerdict: verdict, loginVerdictReason: reason, loginVerdictAt: date(at) }).where(and(eq(session.id, sessionId), eq(session.loginVerdict, 'UNKNOWN')));
+      },
       getSessionForUpdate: async (id): Promise<SessionRow | null> => {
         const [r] = await tx.select().from(session).where(eq(session.id, id)).for('update');
         return r ? rowOf(r) : null;

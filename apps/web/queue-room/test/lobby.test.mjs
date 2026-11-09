@@ -146,6 +146,13 @@ test('SCR-007 참가 409: 다른 탭이 받은 참가 토큰이 저장소에 있
   assert.equal(h.calls.filter(isLobbyPost).length, 1, '하한 × 1.1 전에는 다시 보내지 않는다');
   await h.run(1);
   assert.deepEqual(h.calls.filter(isLobbyPost).map((c) => c.body.humanCheckToken), ['hc-1', 'hc-1']);
+  // 축소 운영의 429(queue-request-limited): 서버가 판정을 불러 토큰을 썼을 수 있어 503처럼 새 사람 확인(BOT-050 리뷰 3)
+  n = 0;
+  h = harness({ schedule: sched, handler: ({ m, now }) => (m === 'POSTJSON' ? (++n === 1 ? reply(429, { type: 'https://peaket.example/problems/queue-request-limited' }, { retryAfterMs: 10_000, problem: 'queue-request-limited' }) : reply(201, lobbyBody(now))) : reply(500)) });
+  await h.start();
+  await h.run(11_000);
+  assert.deepEqual(h.calls.filter(isLobbyPost).map((c) => c.body.humanCheckToken), ['hc-1', 'hc-2']);
+  assert.equal(h.last().state, 'lobby');
   // 503: 서버가 토큰을 썼는지 모르므로 새 사람 확인
   n = 0;
   h = harness({ schedule: sched, handler: ({ m, now }) => (m === 'POSTJSON' ? (++n === 1 ? reply(503, {}, { retryAfterMs: 1000 }) : reply(201, lobbyBody(now))) : reply(500)) });

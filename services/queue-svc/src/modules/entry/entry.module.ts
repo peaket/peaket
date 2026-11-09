@@ -12,7 +12,7 @@ import { IssuePreverification } from './application/issue-preverification.js';
 import { JoinLobby } from './application/join-lobby.js';
 import { LeaveQueue } from './application/leave-queue.js';
 import { ShuffleCommits } from './application/shuffle-commits.js';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
 import { QueueController } from './inbound/queue.controller.js';
 
 /** waitRedis: RB-05 복제 확인(WAIT) 전용 연결(ADR-0186). 없으면 공유 연결 */
@@ -27,6 +27,8 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   sealer?: SeedSealer;
   lobbySignals?: LobbySignals;
   leaveSignals?: LeaveSignals;
+  /** 위험 판정을 받지 못할 때의 파드 메모리 한도(운영 조립이 넣는다, docs/features/bot-defense.md §11.2) */
+  degradedLimits?: DegradedLimits;
 };
 
 @Module({})
@@ -65,6 +67,7 @@ export class EntryModule {
         { provide: ENTRY_OPTIONS, useValue: { ...DEFAULT_ENTRY_OPTIONS, ...o.options } },
         { provide: SEED_SEALER, useValue: o.sealer ?? noSealer },
         ...(o.lobbySignals ? [{ provide: LOBBY_SIGNALS, useValue: o.lobbySignals }] : []),
+        ...(o.degradedLimits ? [{ provide: DEGRADED_LIMITS, useValue: o.degradedLimits }] : []),
         ...(o.leaveSignals ? [{ provide: LEAVE_SIGNALS, useValue: o.leaveSignals }] : []),
         ...(o.arrivals ? [{ provide: ARRIVAL_COOKIES, useValue: o.arrivals }] : []),
         ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),

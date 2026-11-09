@@ -12,5 +12,6 @@
 
 export type CreateQueueLobbyParticipantBody = {
   humanCheckToken?: string;
+  /** 기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12). 형식이 다르면 400 */
   deviceId?: string;
 };

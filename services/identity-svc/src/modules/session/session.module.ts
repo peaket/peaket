@@ -18,7 +18,7 @@ import { GetVerificationStatus } from './application/get-verification-status.js'
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
-import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
+import { LOGIN_RISK, type LoginRisk, ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
 import { AddProvider } from './application/add-provider.js';
@@ -63,6 +63,8 @@ export interface SessionModuleOptions {
   mergeCheckers?: MergeChecker[];
   /** 조사용 가명(라벨 키 링, identity §9.1). 없으면 늘 비운다(시험) */
   invRefs?: InvRefs;
+  /** 로그인 판정(trust-svc, identity §7). 없으면 세션의 판정이 UNKNOWN이다 */
+  loginRisk?: LoginRisk;
   /** ComputeContactRef의 파드마다 초당 상한. 없으면 기본값 */
   contactRefRps?: number;
 }
@@ -117,6 +119,7 @@ export class SessionModule {
         { provide: TOKEN_SIGNER, useValue: o.signer },
         { provide: DEVICE_REFS, useValue: o.deviceRefs },
         { provide: SESSION_SIGNALS, useValue: o.signals },
+        ...(o.loginRisk ? [{ provide: LOGIN_RISK, useValue: o.loginRisk }] : []),
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],

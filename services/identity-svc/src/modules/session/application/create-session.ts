@@ -28,6 +28,8 @@ import {
   type StoredLinkProposal,
   TOKEN_SIGNER,
   type TokenSigner,
+  LOGIN_RISK,
+  type LoginRisk,
 } from '../domain/ports.js';
 import {
   LINK_MAX_ATTEMPTS,
@@ -49,8 +51,12 @@ export interface CreateSessionInput {
   /** 제공자가 준 이메일 검증 여부(네이버는 늘 false). 없으면 false */
   emailVerified?: boolean;
   deviceId: string | null;
-  /** 앱 서버가 받은 User-Agent(512자까지). 화면용 기기 이름만 뽑아 세션에 두고 원문은 저장하지 않는다(ADR-0209 결정 1) */
+  /** 앱 서버가 받은 User-Agent(512자까지). 화면용 기기 이름만 뽑아 세션에 두고 원문은 저장하지 않는다(ADR-0209 결정 1). 로그인 판정에도 넘긴다 */
   userAgent?: string | null;
+  /** 앱 서버가 받은 IP(믿을 수 있는 끝단 머리가 정해지기 전에는 비어 있다, BUILD_ORDER HOT-400). 로그인 판정에만 넘긴다 */
+  clientIp?: string;
+  /** CloudFront-Viewer-ASN. 앱 서버가 원본 확인 헤더가 맞는 요청에서만 읽고 없으면 0이다(identity.proto) */
+  asn?: number;
   /** 연결 제안을 따라 다시 로그인할 때만(identity §2.1) */
   link?: { proposalId: string; binding: string };
 }
@@ -119,6 +125,9 @@ function check(i: CreateSessionInput): void {
   if (i.deviceId !== null && i.deviceId.length > 128) throw new SessionError('INVALID_ARGUMENT', 'device_id가 128자를 넘는다');
 }
 
+/** 종료 때 로그인 판정을 기다리는 시간 상한 [가정] */
+export const DRAIN_TIMEOUT_MS = 5_000;
+
 /** 트랜잭션이 돌려주는 세션 자리(토큰 서명은 트랜잭션 밖에서 한다) */
 interface Opened {
   accountId: string;
@@ -134,6 +143,9 @@ interface Opened {
 
 @Injectable()
 export class CreateSession {
+  /** 응답 뒤에서 도는 로그인 판정(세션 커밋 뒤라 파드가 죽어도 UNKNOWN으로 남는다) */
+  readonly #judging = new Set<Promise<void>>();
+
   constructor(
     @Inject(SESSION_STORE) private readonly store: SessionStore,
     @Inject(TOKEN_SIGNER) private readonly signer: TokenSigner,
@@ -145,6 +157,8 @@ export class CreateSession {
     @Optional() @Inject(LINK_PROPOSALS) private readonly links?: LinkProposals,
     /** 조사용 연락처 가명(없으면 쓰지 않는다: 시험, identity §9.1 '조사용 값의 첫 구현') */
     @Optional() @Inject(INV_REFS) private readonly invRefs?: InvRefs,
+    /** 로그인 판정(없으면 UNKNOWN, identity §7) */
+    @Optional() @Inject(LOGIN_RISK) private readonly loginRisk?: LoginRisk,
   ) {}
 
   /** 새 계정의 로그인 이메일로 EMAIL 연락처 가명 행을 쓴다. 라벨 키가 없으면 쓰지 않는다(정비 contact-ref-backfill이 나중에 채운다) */
@@ -153,6 +167,26 @@ export class CreateSession {
     const ref = email === null ? undefined : this.invRefs?.ref('contact', email);
     // 키 회전의 이음 기간이면 옛 판 값도 둔다(조사 적재가 회전 전 기록과 잇는다, BOT-046)
     if (ref) await tx.setContactRef({ accountId, kind: 'EMAIL', ref, refPrev: (email !== null && this.invRefs?.prevRef?.('contact', email)) || null, now });
+  }
+
+  /**
+   * 응답과 떼어 뒤에서 도는 로그인 판정이 끝나기를 기다린다(종료와 시험, identity §7). 시간 상한을 넘으면 기다리지 않고 false다
+   * (끝나지 않은 판정의 세션은 UNKNOWN으로 남는다)
+   */
+  async drain(timeoutMs = DRAIN_TIMEOUT_MS): Promise<boolean> {
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<false>((res) => {
+      timer = setTimeout(() => res(false), timeoutMs);
+    });
+    const done = (async () => {
+      while (this.#judging.size > 0) await Promise.all(this.#judging);
+      return true as const;
+    })();
+    try {
+      return await Promise.race([done, expired]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** 세션만 받는 쪽(시험·옛 호출): 연결 제안이나 불일치면 FAILED_PRECONDITION */
@@ -380,9 +414,47 @@ export class CreateSession {
     return { accountId, sessionId, idleExpiresAt, absoluteExpiresAt, newAccount, replayed: false, ended, endedReason };
   }
 
+  /**
+   * 로그인 판정(identity §7 '로그인 판정의 처리'): 판정으로 로그인을 막거나 늦추지 않는다. CHALLENGE여도 세션을 만든다. 세션을 커밋한 뒤 응답과 떼어 뒤에서 부르고 결과를 세션에 적는다.
+   * 판정을 받지 못했거나(서킷 열림, 데드라인 넘김) 적지 못하거나 파드가 그 사이 죽으면 세션을 만들 때 넣은 UNKNOWN에 머문다(양도·계좌 입력에서 안전 쪽으로 다룬다). 다시 보내기는 판정을 다시 받지 않는다
+   */
+  #judge(i: CreateSessionInput, r: Opened): void {
+    if (r.replayed) return;
+    if (!this.loginRisk) return;
+    const work = this.#runJudge(i, r).finally(() => this.#judging.delete(work));
+    this.#judging.add(work);
+  }
+
+  async #runJudge(i: CreateSessionInput, r: Opened): Promise<void> {
+    if (!this.loginRisk) return;
+    let verdict: 'ALLOW' | 'CHALLENGE' | 'UNKNOWN' = 'UNKNOWN';
+    try {
+      const v = await this.loginRisk.score({
+        accountId: r.accountId,
+        deviceId: i.deviceId,
+        ...(i.clientIp !== undefined ? { clientIp: i.clientIp } : {}),
+        ...(i.asn !== undefined ? { asn: i.asn } : {}),
+        userAgent: i.userAgent ?? null,
+      });
+      verdict = v.verdict;
+      if (v.verdict !== 'UNKNOWN') {
+        const reason = v.verdict === 'CHALLENGE' ? v.reason : null;
+        await this.store.transaction((tx) => tx.setLoginVerdict(r.sessionId, v.verdict, reason, this.clock.now()));
+      }
+    } catch {
+      verdict = 'UNKNOWN';
+    }
+    try {
+      this.signals.loginVerdict(verdict);
+    } catch {
+      // 지표가 실패해도 판정은 끝났다(뒤에서 도는 일이라 처리 못 한 거부를 남기지 않는다)
+    }
+  }
+
   async #tokens(i: CreateSessionInput, r: Opened, refresh: { token: string }, now: number, linkedProvider: Provider | null): Promise<LoginOutcome> {
     if (r.replayed) this.signals.replayed(i.provider);
     else this.signals.created(i.provider, r.newAccount);
+    this.#judge(i, r);
     if (r.ended.length && r.endedReason === 'DEVICE_LIMIT') this.signals.terminated('DEVICE_LIMIT', r.ended.length);
     if (r.ended.length && r.endedReason === 'LOGIN_METHOD_CHANGED') this.signals.othersEnded('login_method_changed', r.ended.length);
     const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);

@@ -166,6 +166,7 @@ x-peaket-problem-types:
     queue-not-open: { status: 409, title: "아직 예매가 열리지 않았습니다" }
     queue-order-invalid: { status: 422, title: "로비 셔플과 오픈 직후 묶음을 둘 다 끌 수는 없습니다" }
     queue-recovering: { status: 503, title: "대기열을 다시 맞추는 중입니다. 잠시 뒤 다시 시도해 주세요" }
+    queue-request-limited: { status: 429, title: "요청이 많아 잠시 뒤 다시 시도해 주세요" }
     queue-ticket-expired: { status: 410, title: "입장 시간이 지났습니다" }
     queue-ticket-invalid: { status: 403, title: "대기표를 확인할 수 없습니다" }
     queue-ticket-removed: { status: 410, title: "이 대기표는 더 쓸 수 없습니다" }
@@ -3523,13 +3524,14 @@ paths:
       description: "FR-005. 본인확인 완료(`ticket:buy`) + 사람 확인(Cloudflare Turnstile) 결과 + 위험 점수. pid당 1장. 위험 점수가 높으면 201 참가 토큰에 verification: REQUIRED를 실어 추가 검증(FR-020)으로 보낸다(303 대신, ADR-0079 결정 4). POL-001·002·030"
       security: [{ fanCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }, { $ref: '#/components/parameters/FirstVisitCookie' }]
-      requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, properties: { humanCheckToken: { type: string }, deviceId: { type: string } } } } } }
+      requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, properties: { humanCheckToken: { type: string }, deviceId: { type: string, description: "기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12). 형식이 다르면 400" } } } } } }
       responses:
         '201': { description: 참가 토큰, content: { application/json: { schema: { $ref: '#/components/schemas/LobbyToken' } } } }
         '403': { $ref: '#/components/responses/Problem', description: "identity-verification-required: 본인확인 전(pid 없음)" }
         '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 대기열이 열리지 않았거나 로비 셔플을 끈 회차(ADR-0231)" }
         '409': { $ref: '#/components/responses/Problem', description: "already-waiting: 이미 참가 토큰 있음(기존 기기에서 계속. 처음 기기를 쓸 수 없으면 로비 참가 취소 뒤 다시 참가, ADR-0060). already-admitted: 이 회차에 이미 입장함. queue-not-open: 로비 개방 전. lobby-closed: 로비가 닫힘(오픈이 지났거나 목록을 고정함)(ADR-0231)" }
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "dependency-unavailable: 대기열 Redis나 시드 봉인을 잠시 쓸 수 없음. Retry-After 1초 [가정](ADR-0231)" }
+        '429': { $ref: '#/components/responses/TooManyRequests', description: "축소 운영의 요청 한도를 넘음(queue-request-limited, trust-svc 판정을 받지 못할 때 파드 메모리에서 세는 기기·계정 5회/10초 [가정], 호스팅·프록시 대역 IP는 IP마다 같은 한도, docs/features/bot-defense.md §11.2, ADR-0248). 게이트웨이 로컬 한도 초과도 같은 429다" }
   /v1/queues/{eventId}/lobby-participants/me:
     delete:
       operationId: deleteMyQueueLobbyParticipant
@@ -3554,12 +3556,13 @@ paths:
       description: "FR-006, FR-039, POL-003. 공연 상세에서 미리 호출. 만료가 가까우면 조용히 갱신. 본문에 사람 확인 토큰과 행동 신호 요약을 함께 보내고 trust-svc가 위험 점수를 낸다(행동 신호 요약을 보내는 경로, 추천 적용 2026-10-15, ADR-0065 결정 9). 교차 출처 JSON이라 사전 요청이 붙는다"
       security: [{ fanCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }, { $ref: '#/components/parameters/FirstVisitCookie' }]
-      requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, properties: { humanCheckToken: { type: string, description: "Cloudflare Turnstile 응답 토큰(300초 1회용, trust-svc가 서버 검증)" }, deviceId: { type: string }, preverifyToken: { type: string, description: "갱신할 때 지금 가진 사전 검증 토큰. 서명이 맞고 회차·계정·기기가 같고 만료 전이면 최초 발급 시각과 여정 ID(jny)를 그대로 옮긴다. 없거나 맞지 않으면 새 여정(추천 적용 2026-11-03, queue-admission §3 '첫 구현의 세부')" }, behaviorSummary: { $ref: '#/components/schemas/BehaviorSummary' } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, properties: { humanCheckToken: { type: string, description: "Cloudflare Turnstile 응답 토큰(300초 1회용, trust-svc가 서버 검증)" }, deviceId: { type: string, description: "기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12). 형식이 다르면 400" }, preverifyToken: { type: string, description: "갱신할 때 지금 가진 사전 검증 토큰. 서명이 맞고 회차·계정·기기가 같고 만료 전이면 최초 발급 시각과 여정 ID(jny)를 그대로 옮긴다. 없거나 맞지 않으면 새 여정(추천 적용 2026-11-03, queue-admission §3 '첫 구현의 세부')" }, behaviorSummary: { $ref: '#/components/schemas/BehaviorSummary' } } } } } }
       responses:
         '201': { content: { application/json: { schema: { $ref: '#/components/schemas/PreverifyResult' } } }, description: "preverifyToken. 위험 점수가 높으면 '추가 검증 필요' 표시를 서명해 넣고, 진입 때 번호를 발급하고 대기표의 verification: REQUIRED로 추가 검증에 보낸다(추천 적용 2026-10-14, ADR-0062. 303 대신 본문 필드, ADR-0079 결정 4). 요청에 최초 방문 쿠키가 없으면 대기열 API 엣지 함수가 이 응답에 __Host-peaket_fv를 싣는다(ADR-0065 결정 9)", headers: { Set-Cookie: { description: "__Host-peaket_fv(쿠키가 없던 브라우저에만)", schema: { type: string } } } }
         '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(행동 신호 요약의 범위 밖 값 포함)" }
         '403': { $ref: '#/components/responses/Problem', description: "identity-verification-required: 본인확인 전(pid 없음, 추천 적용 2026-11-03). 구매 권한(ticket:buy)이 없는 토큰은 게이트웨이가 먼저 거절한다" }
         '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 이 회차의 대기열이 열리지 않았다(회차 일정 사본 q:{event:E}:cfg가 없음, 추천 적용 2026-11-03)" }
+        '429': { $ref: '#/components/responses/TooManyRequests', description: "축소 운영의 요청 한도를 넘음(queue-request-limited, trust-svc 판정을 받지 못할 때 파드 메모리에서 세는 기기·계정 5회/10초 [가정], 호스팅·프록시 대역 IP는 IP마다 같은 한도, docs/features/bot-defense.md §11.2, ADR-0248). 게이트웨이 로컬 한도 초과도 같은 429다" }
   /v1/queues/{eventId}/entries:
     post:
       operationId: createQueueEntry

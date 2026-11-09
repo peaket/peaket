@@ -45,8 +45,26 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const naver = await login(k, { provider: 'naver', email: null });
       expect(naver.accountId).not.toBe(first.accountId);
       expect(k.signals.seen).toEqual(['created:kakao:true', 'created:kakao:false', 'created:naver:true']);
-      // 로그인 판정은 trust-svc가 생기기 전까지 UNKNOWN(identity §2 '첫 구현', §7)
+      // 판정 포트가 없으면 UNKNOWN에 머문다(identity §7)
       expect(await t.loginVerdictOf(first.sessionId)).toBe('UNKNOWN');
+    });
+
+    test('재검토3_판정쓰기는UNKNOWN일때만바꾼다_먼저적은판정을덮지않는다', async () => {
+      const t = await make();
+      const k = await kit(t.store);
+      const s = await login(k);
+      await t.store.transaction((tx) => tx.setLoginVerdict(s.sessionId, 'ALLOW', null, 1_000));
+      await t.store.transaction((tx) => tx.setLoginVerdict(s.sessionId, 'CHALLENGE', 'NETWORK', 2_000));
+      expect(await t.loginVerdictOf(s.sessionId)).toBe('ALLOW');
+    });
+
+    test('I-T55_로그인판정을받으면그세션의login_verdict에남고_CHALLENGE여도세션은있다', async () => {
+      const t = await make();
+      const k = await kit(t.store, { loginRisk: { score: async () => ({ verdict: 'CHALLENGE', reason: 'DEVICE_HISTORY' }) } });
+      const s = await login(k);
+      expect(s.accessToken).toBeTruthy();
+      await k.create.drain();
+      expect(await t.loginVerdictOf(s.sessionId)).toBe('CHALLENGE');
     });
 
     test('I-T50_①_같은멱등키를다시보내면_세션은하나이고_앞서준리프레시토큰은쓸수없다 [ASVS v5.0.0-7.2.4]', async () => {

@@ -441,6 +441,9 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       }
       if (reply?.status === 429) {
         await wait(above(reply.retryAfterMs ?? 1000), sig);
+        // 축소 운영 한도(queue-request-limited, bot-defense §11.2)는 서버가 판정을 불러 토큰을 썼을 수 있어 503처럼 새 사람 확인을 받는다.
+        // 게이트웨이 429는 토큰을 쓰지 않았으므로 같은 토큰으로 다시 보낸다
+        if (reply.problem === 'queue-request-limited') token = null;
         continue;
       }
       if (reply?.status === 503) {

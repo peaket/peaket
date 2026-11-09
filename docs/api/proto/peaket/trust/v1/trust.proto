@@ -136,6 +136,7 @@ message ScoreRiskResponse {
   // 쓰지 않는다. 사유 범주는 4번 reason으로 옮겼다. 형을 바꾸면 하위 호환 검사가 깨지는 변경이라 칸은 남긴다(추천 적용 2026-10-30).
   string reason_category = 2 [deprecated = true];
   // 의존성 장애(피처 Redis 오류, 사람 확인 검증 보류) 때문에 값이 없게 된 점수기가 있으면 true(축소 운영 ① 층).
+  // 로그인 판정(LOGIN)은 근거 있는 점수기가 하나도 없을 때도 true다(이력이 없는 새 기기의 DeviceTrust는 근거로 세지 않는다). 근거 없는 ALLOW가 재확인을 건너뛰지 않게 identity-svc가 UNKNOWN으로 적는다(2026-11-09, ADR-0248).
   // 로비 입장의 행동 요약처럼 원래 없는 값은 degraded가 아니다. trust-svc 전체 장애(② 층)는 부르는 쪽이 정한다
   // (추천 적용 2026-10-30, docs/features/bot-defense.md §4.4·§11.1).
   bool degraded = 3;

@@ -10,6 +10,7 @@ import { EntryError } from '../application/entry-error.js';
 import { IssuePreverification } from '../application/issue-preverification.js';
 import { JoinLobby } from '../application/join-lobby.js';
 import { LeaveQueue } from '../application/leave-queue.js';
+import type { RiskClient } from '../domain/ports.js';
 import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, QueueStoreUnavailable } from '../domain/queue.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
@@ -26,8 +27,12 @@ const BehaviorSummary = z
   })
   .strict();
 // 요청 본문은 계약처럼 닫는다(정하지 않은 칸은 400, docs/api/guidelines.md §1 '요청은 닫고 응답은 연다', BAS-040)
-const PreverifyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional(), preverifyToken: z.string().max(4096).optional(), behaviorSummary: BehaviorSummary.optional() }).strict();
-const LobbyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional() }).strict();
+// deviceId: CSPRNG 128비트, base64url 22자(docs/frontend.md §3.12 peaket.device). 형식 밖 값으로 기기 이력을 더럽히지 못하게 위험 판정에 넘기기 전에 거절한다
+const DeviceId = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
+// 사람 확인 토큰 상한은 관리 로그인 계약(openapi humanCheckToken maxLength 2048)과 같게 둔다. Cloudflare 문서의 값은 저장소 안에서 다시 확인하지 못해 [가정]이다
+const HumanCheckToken = z.string().max(2048);
+const PreverifyBody = z.object({ humanCheckToken: HumanCheckToken.optional(), deviceId: DeviceId.optional(), preverifyToken: z.string().max(4096).optional(), behaviorSummary: BehaviorSummary.optional() }).strict();
+const LobbyBody = z.object({ humanCheckToken: HumanCheckToken.optional(), deviceId: DeviceId.optional() }).strict();
 const EntryBody = z.object({ preverifyToken: z.string().max(4096), deviceId: z.string().max(128).optional(), entryRequestId: z.uuid().optional() }).strict();
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */
@@ -49,6 +54,8 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   // 취소한 참가의 재전송(처음 기기, ADR-0233). 입장 확정의 빠진 번호와 같은 type이라 화면은 '다른 기기에서 취소'로 끝낸다
   ENTRY_CANCELLED: { status: 410, type: 'queue-ticket-removed', title: '이 대기표는 더 쓸 수 없습니다' },
   IDENTITY_VERIFICATION_REQUIRED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
+  // 위험 판정을 받지 못할 때의 파드 메모리 한도(docs/features/bot-defense.md §11.2). 축소 운영 중임을 드러내지 않는다
+  DEGRADED_LIMITED: { status: 429, type: 'queue-request-limited', title: '요청이 많아 잠시 뒤 다시 시도해 주세요' },
 };
 
 async function problem<T>(p: Promise<T>): Promise<T> {
@@ -69,6 +76,26 @@ function who(eventId: string, me: Principal): { pid: string; pidPrev?: string } 
   if (!me.pid || !KEY_PART.test(me.pid)) throw new EntryError('IDENTITY_VERIFICATION_REQUIRED', 'pid가 없다(본인확인 전)');
   if (me.pidPrev !== undefined && !KEY_PART.test(me.pidPrev)) throw new EntryError('IDENTITY_VERIFICATION_REQUIRED', '옛 pid 모양이 틀렸다');
   return me.pidPrev && me.pidPrev !== me.pid ? { pid: me.pid, pidPrev: me.pidPrev } : { pid: me.pid };
+}
+
+const ASN = /^\d{1,10}$/;
+const CLIENT_HINTS = ['sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform'] as const;
+const headerOf = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
+
+/**
+ * 게이트웨이가 넘긴 요청 정보. x-forwarded-for는 입구가 클라이언트 IP 하나로 다시 쓴다(docs/infra.md). cloudfront-viewer-asn은 원본 확인 헤더가 맞는 요청에만 남는다(§3.3).
+ * ASN이 숫자가 아니면 0이다(그 밖으로 본다, trust.proto). Client Hints는 낮은 엔트로피 셋만 받는다(지문을 모으지 않는다, ADR-0079 결정 5)
+ */
+function clientOf(reply: FastifyReply): RiskClient {
+  const h = reply.request.headers;
+  const asnRaw = headerOf(h['cloudfront-viewer-asn']) ?? '';
+  const ip = (headerOf(h['x-forwarded-for']) ?? '').split(',')[0]!.trim();
+  const clientHints: Record<string, string> = {};
+  for (const name of CLIENT_HINTS) {
+    const v = headerOf(h[name]);
+    if (v !== undefined) clientHints[name] = v.slice(0, 256);
+  }
+  return { ip, userAgent: (headerOf(h['user-agent']) ?? '').slice(0, 512), asn: ASN.test(asnRaw) ? Number(asnRaw) : 0, clientHints };
 }
 
 @Controller('v1/queues/:eventId')
@@ -102,7 +129,7 @@ export class QueueController {
   @HttpCode(201)
   async lobby(@Param('eventId') eventId: string, @ContractBody(LobbyBody) body: z.output<typeof LobbyBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    return problem((async () => this.joinLobby.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+    return problem((async () => this.joinLobby.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply) }))());
   }
 
   @Post('pre-verifications')
@@ -110,7 +137,7 @@ export class QueueController {
   @HttpCode(201)
   async preverify(@Param('eventId') eventId: string, @ContractBody(PreverifyBody) body: z.output<typeof PreverifyBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    return problem((async () => this.issuePreverification.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+    return problem((async () => this.issuePreverification.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply) }))());
   }
 
   @Post('entries')

@@ -3,12 +3,12 @@
 // 앱 포트(REST: 사전 검증 POST /v1/queues/{eventId}/pre-verifications, 진입 POST …/entries, 대기 상태 파일 GET …/segment-states/{segment}.json, 입장 확정 POST …/admission)
 // ·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
-import { Counter, createHotRedis, createService, errorSummary, Gauge, systemClock } from '@peaket/platform';
+import { CircuitBreaker, Counter, createHotRedis, createService, errorSummary, Gauge, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, kmsSealClient, seedSealerFromEnv, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
@@ -28,7 +28,20 @@ const signals = new PromAdmissionSignals();
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
 // RB-05 복제 확인(WAIT)은 그 연결을 막으므로 클러스터에서는 따로 연결한다(ADR-0186). 단일 노드(로컬·CI)는 복제본이 없어 기다리지 않는다
 const waitRedis = clusterUrls.length > 0 ? await createHotRedis({ clusterUrls }) : undefined;
-// 위험 판정: trust-svc가 생기기 전(BUILD_ORDER BOT-050)에는 늘 축소 운영(사람 확인 보류)이다
+// 위험 판정(BOT-050): trust-svc ScoreRisk. 주소가 없으면 local·ci·demo만 늘 축소 운영(사람 확인 보류)으로 시작하고, 그 밖은 시작하지 않는다(운영에서 조용히 판정을 잃지 않게).
+// 차단기는 서비스 지표 저장소가 생긴 뒤 진짜를 단다(그 전에는 요청을 받지 않아 부르지 않는다). 판정을 못 받을 때의 파드 메모리 한도(§11.2)에는 ASN 분류표 사본을 쓴다
+const SERVICE_ENV = process.env.PEAKET_ENV || 'prod';
+const trustGrpc = process.env.PEAKET_TRUST_GRPC_URL;
+if (!trustGrpc && !['local', 'ci', 'demo'].includes(SERVICE_ENV)) throw new Error('PEAKET_TRUST_GRPC_URL이 없다(trust-svc host:port)');
+const trustBreakerHolder: { b?: CircuitBreaker } = {};
+const riskSignals = new PromRiskSignals();
+const trustRisk = trustGrpc
+  ? new GrpcTrustRisk(trustGrpc, loadPlatformConfig(process.env).grpcLbProfile, { run: (a) => (trustBreakerHolder.b ? trustBreakerHolder.b.run(a) : a()) }, riskSignals)
+  : undefined;
+const asnFile = process.env.PEAKET_ASN_TABLE_FILE;
+const asnLog: { warn?: (reason: string) => void } = {};
+const asnTable = new ReloadingAsnTable({ load: asnFile ? () => import('node:fs/promises').then((f) => f.readFile(asnFile, 'utf8')) : async () => undefined, clock: systemClock, onError: (reason) => asnLog.warn?.(reason) });
+const degradedLimits = new MemoryDegradedLimits(systemClock, asnTable);
 // 대기열 파일의 교차 출처 허용: 소비자 웹 하나(환경마다 주소가 다르다, 없으면 운영 주소)
 const webOrigin = process.env.PEAKET_WEB_ORIGIN;
 // Kafka 소비자 설정은 듣기 전에 읽는다(브로커 주소가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다)
@@ -42,9 +55,16 @@ const lobbySignals = new PromLobbySignals();
 const leaveSignals = new PromLeaveSignals();
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
+  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: trustRisk ?? unavailableRisk, degradedLimits, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
 });
 arrivalSignals.register(service.metrics.registry);
+riskSignals.register(service.metrics.registry);
+trustBreakerHolder.b = new CircuitBreaker({ service: SERVICE, dependency: 'trust-svc', registry: service.metrics.registry, logger: service.logger, ...TRUST_BREAKER });
+if (!trustRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 위험 판정이 늘 축소 운영이다(local·ci·demo)');
+if (!asnFile) service.logger.warn({ dep: 'asn-table' }, 'PEAKET_ASN_TABLE_FILE이 없어 축소 운영의 IP 한도를 걸지 않는다');
+asnLog.warn = (reason) => service.logger.warn({ dep: 'asn-table', reason }, 'ASN 분류표를 읽지 못해 마지막 판을 쓴다');
+// 경고 함수를 단 뒤에 읽기 시작한다(첫 읽기 실패 경고를 잃지 않게). 파드가 요청을 받기 전이라 그 사이 축소 운영은 IP 한도 없이 간다
+asnTable.start();
 if (!arrivals) service.logger.warn({ dep: 'edge-arrival-key' }, '도착 시각 쿠키 키(PEAKET_ARRIVAL_COOKIE_KEY)가 없어 진입 Degraded의 쿠키를 읽지 않는다');
 signals.register(service.metrics.registry);
 lobbySignals.register(service.metrics.registry);
@@ -121,12 +141,17 @@ function shutdown(): void {
   closing = true;
   // Kafka 소비자를 먼저 멈추고(받기를 멈추고 처리 중인 키를 마친 뒤 커밋), 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   commitWorker?.stop();
+  asnTable.stop();
   void (consumers?.stop() ?? Promise.resolve())
     .then(() => dueWorker?.stop())
     .then(() => edgeSync?.stop())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'queue-svc 종료 실패'))
-    .finally(() => Promise.all([redis.close(), waitRedis?.close()]));
+    .finally(() => {
+      trustBreakerHolder.b?.shutdown();
+      trustRisk?.close();
+      return Promise.all([redis.close(), waitRedis?.close()]);
+    });
 }
 process.once('SIGTERM', shutdown);

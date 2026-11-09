@@ -14,6 +14,7 @@ export { RedisMergeProposals } from './adapters/redis-merge-proposals.js';
 export { RedisNicknameCheckLimits } from './adapters/redis-nickname-check-limits.js';
 export { PurgeIncompleteSignups } from './application/purge-incomplete-signups.js';
 export { MERGE_CHECK_BREAKER, mergeCheckersFromEnv } from './adapters/grpc-merge-checkers.js';
+export { GrpcTrustLoginRisk, TRUST_LOGIN_BREAKER } from './adapters/grpc-trust-login-risk.js';
 export { accountHoldHandlers } from './inbound/session.grpc.js';
 export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';

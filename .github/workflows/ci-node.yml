@@ -97,6 +97,11 @@ jobs:
       - run: pnpm --filter @peaket/queue-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # trust-svc의 판정 피처 키를 실제 Valkey로: 기기 신뢰·확정 신호 읽기, 판정 근거 키, 응답 뒤 쓰기(BUILD_ORDER BOT-050, B-T1·B-T14·B-T16)
+      - run: pnpm exec turbo run build --filter=@peaket/trust-svc^...
+      - run: pnpm --filter @peaket/trust-svc test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # admission-ctrl의 묶음 결과 게시를 실제 Valkey로: 닫힘 표시·참가자를 읽고 사람별 결과·결과 파일·게시 표시를 쓰며, 잃은 결과 키를 같은 값으로 다시 쓴다(BUILD_ORDER PRF-060)
       # 범위를 고른 실행(--affected)에서는 의존 패키지(@peaket/shuffle 등)의 dist가 없을 수 있어 먼저 빌드한다
       - run: pnpm exec turbo run build --filter=@peaket/admission-ctrl^...

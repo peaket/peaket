@@ -91,6 +91,11 @@ export type createQueueLobbyParticipantResponse409 = {
   status: 409
 }
 
+export type createQueueLobbyParticipantResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
 export type createQueueLobbyParticipantResponse503 = {
   data: ServiceUnavailableResponse
   status: 503
@@ -99,7 +104,7 @@ export type createQueueLobbyParticipantResponse503 = {
 export type createQueueLobbyParticipantResponseSuccess = (createQueueLobbyParticipantResponse201) & {
   headers: Headers;
 };
-export type createQueueLobbyParticipantResponseError = (createQueueLobbyParticipantResponse403 | createQueueLobbyParticipantResponse404 | createQueueLobbyParticipantResponse409 | createQueueLobbyParticipantResponse503) & {
+export type createQueueLobbyParticipantResponseError = (createQueueLobbyParticipantResponse403 | createQueueLobbyParticipantResponse404 | createQueueLobbyParticipantResponse409 | createQueueLobbyParticipantResponse429 | createQueueLobbyParticipantResponse503) & {
   headers: Headers;
 };
 
@@ -147,7 +152,7 @@ return orvalFetch<createQueueLobbyParticipantResponseSuccess>(getCreateQueueLobb
 
 export const getCreateQueueLobbyParticipantMutationKey = () => ['createQueueLobbyParticipant'] as const;
 
-export const getCreateQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
+export const getCreateQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext> => {
 
@@ -176,13 +181,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateQueueLobbyParticipantMutationResult = NonNullable<Awaited<ReturnType<typeof createQueueLobbyParticipant>>>
     export type CreateQueueLobbyParticipantMutationBody = BodyType<CreateQueueLobbyParticipantBody> | undefined
-    export type CreateQueueLobbyParticipantMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
+    export type CreateQueueLobbyParticipantMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreateQueueLobbyParticipantMutationVariables = {eventId: string;data?: BodyType<CreateQueueLobbyParticipantBody>}
 
     /**
  * @summary 로비 입장(참가 토큰 발급)
  */
-export const useCreateQueueLobbyParticipant = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
+export const useCreateQueueLobbyParticipant = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createQueueLobbyParticipant>>,
@@ -318,10 +323,15 @@ export type createQueuePreVerificationResponse404 = {
   status: 404
 }
 
+export type createQueuePreVerificationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
 export type createQueuePreVerificationResponseSuccess = (createQueuePreVerificationResponse201) & {
   headers: Headers;
 };
-export type createQueuePreVerificationResponseError = (createQueuePreVerificationResponse400 | createQueuePreVerificationResponse403 | createQueuePreVerificationResponse404) & {
+export type createQueuePreVerificationResponseError = (createQueuePreVerificationResponse400 | createQueuePreVerificationResponse403 | createQueuePreVerificationResponse404 | createQueuePreVerificationResponse429) & {
   headers: Headers;
 };
 
@@ -369,7 +379,7 @@ return orvalFetch<createQueuePreVerificationResponseSuccess>(getCreateQueuePreVe
 
 export const getCreateQueuePreVerificationMutationKey = () => ['createQueuePreVerification'] as const;
 
-export const getCreateQueuePreVerificationMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateQueuePreVerificationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueuePreVerification>>, TError,CreateQueuePreVerificationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createQueuePreVerification>>, TError,CreateQueuePreVerificationMutationVariables, TContext> => {
 
@@ -398,13 +408,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateQueuePreVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof createQueuePreVerification>>>
     export type CreateQueuePreVerificationMutationBody = BodyType<CreateQueuePreVerificationBody>
-    export type CreateQueuePreVerificationMutationError = ErrorType<ProblemResponse>
+    export type CreateQueuePreVerificationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse>
     export type CreateQueuePreVerificationMutationVariables = {eventId: string;data: BodyType<CreateQueuePreVerificationBody>}
 
     /**
  * @summary 사전 검증 토큰 발급(오픈 후 도착 경로의 사람 확인 통과 표시, 15분. 최초 발급 시각 유지, ADR-0041)
  */
-export const useCreateQueuePreVerification = <TError = ErrorType<ProblemResponse>,
+export const useCreateQueuePreVerification = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueuePreVerification>>, TError,CreateQueuePreVerificationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createQueuePreVerification>>,

@@ -29,7 +29,7 @@ export const createQueuePreVerificationBodyBehaviorSummaryScrollDistancePxMin = 
 
 export const CreateQueuePreVerificationBody = zod.object({
   "humanCheckToken": zod.string().optional().describe('Cloudflare Turnstile 응답 토큰(300초 1회용, trust-svc가 서버 검증)'),
-  "deviceId": zod.string().optional(),
+  "deviceId": zod.string().optional().describe('기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12). 형식이 다르면 400'),
   "preverifyToken": zod.string().optional().describe('갱신할 때 지금 가진 사전 검증 토큰. 서명이 맞고 회차·계정·기기가 같고 만료 전이면 최초 발급 시각과 여정 ID(jny)를 그대로 옮긴다. 없거나 맞지 않으면 새 여정(추천 적용 2026-11-03, queue-admission §3 \'첫 구현의 세부\')'),
   "behaviorSummary": zod.object({
   "v": zod.literal(1).describe('형식 버전'),

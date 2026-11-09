@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ALGORITHM, DRAND_CHAIN, drandRoundTimeMs } from '@peaket/shuffle';
-import { ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, type RiskVerdict } from '../domain/ports.js';
+import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noDegradedLimits, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
 import { BATCH_SPREAD_SEC, LOBBY_UNLOCK_SPREAD_MS, lobbyOpensAtOf, PENDING_TTL_MS, type ReasonCategory, saleEndOf, SHUFFLE_PUBLISH_MS } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
 import { ShuffleCommits } from './shuffle-commits.js';
@@ -17,6 +17,8 @@ export interface JoinLobbyInput {
   /** pid 키 전환 기간의 옛 pid(X-User-Pid-Prev). 위험 판정의 사람 식별값은 옛 pid다 */
   pidPrev?: string;
   body: { humanCheckToken?: string; deviceId?: string };
+  /** 게이트웨이가 넘긴 IP·ASN·UA·Client Hints(위험 판정 입력) */
+  client?: RiskClient;
 }
 
 /** 201 본문(openapi LobbyToken) */
@@ -44,6 +46,7 @@ export class JoinLobby {
     private readonly commits: ShuffleCommits,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(LOBBY_SIGNALS) private readonly signals: LobbySignals = noLobbySignals,
+    @Optional() @Inject(DEGRADED_LIMITS) private readonly limits: DegradedLimits = noDegradedLimits,
   ) {}
 
   async run(i: JoinLobbyInput): Promise<JoinLobbyResult> {
@@ -64,8 +67,12 @@ export class JoinLobby {
       // 409(이미 참가·이미 입장·창 밖)면 여기까지 오지 않으므로 jny를 만들지 않는다(ADR-0171)
       const jny = uuidv7(this.clock);
       const verdict = await this.#score(i, device, jny, schedule.lobbyShuffle);
+      // 판정을 받지 못한 동안에만 파드 메모리 한도를 건다(§11.2). 넘으면 선점을 풀고 429다
+      if (verdict.kind === 'UNAVAILABLE' && !this.limits.allow({ deviceId: device, pid: i.pid, ...(i.client ? { client: i.client } : {}) })) {
+        throw new EntryError('DEGRADED_LIMITED', '축소 운영의 요청 한도를 넘었다', DEGRADED_RETRY_AFTER_SECONDS);
+      }
       const reason = verdict.kind === 'VERIFY' ? verdict.reason : null;
-      const token = this.tokens.lobby({ e: i.eventId, a: i.accountId, d: device, iat: now, jny, ...(reason ? { vr: reason } : {}), ...(verdict.kind === 'UNAVAILABLE' ? { hd: true as const } : {}) });
+      const token = this.tokens.lobby({ e: i.eventId, a: i.accountId, d: device, iat: now, jny, ...(reason ? { vr: reason } : {}), ...(verdict.kind === 'UNAVAILABLE' || verdict.kind === 'HELD' ? { hd: true as const } : {}) });
       const tokenHash = this.tokens.hash(token);
       const saleEnd = saleEndOf(schedule);
       const added = await this.store.addLobbyMember({
@@ -144,7 +151,7 @@ export class JoinLobby {
 
   async #score(i: JoinLobbyInput, deviceId: string, journeyId: string, lobbyShuffle: boolean): Promise<RiskVerdict> {
     try {
-      return await this.risk.score({ context: 'LOBBY', eventId: i.eventId, accountId: i.accountId, pid: i.pidPrev ?? i.pid, deviceId, journeyId, lobbyShuffle, ...(i.body.humanCheckToken ? { humanCheckToken: i.body.humanCheckToken } : {}) });
+      return await this.risk.score({ context: 'LOBBY', eventId: i.eventId, accountId: i.accountId, pid: i.pidPrev ?? i.pid, deviceId, journeyId, lobbyShuffle, ...(i.body.humanCheckToken ? { humanCheckToken: i.body.humanCheckToken } : {}), ...(i.client ? { client: i.client } : {}) });
     } catch {
       // 받지 못하면 축소 운영이다(docs/features/bot-defense.md §11). 로비 참가는 막지 않는다
       return { kind: 'UNAVAILABLE' };

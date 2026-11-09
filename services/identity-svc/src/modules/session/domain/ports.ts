@@ -182,6 +182,8 @@ export interface SessionTx {
   /** 재인증 토큰의 jti를 한 번 쓴다. 이미 썼으면 false */
   useReauth(r: { jti: string; accountId: string; usedAt: number; expiresAt: number }): Promise<boolean>;
   insertSession(row: NewSession): Promise<void>;
+  /** 로그인 판정 결과를 세션에 적는다(identity §7) */
+  setLoginVerdict(sessionId: string, verdict: 'ALLOW' | 'CHALLENGE', reason: string | null, at: number): Promise<void>;
   /** 세션 행(쓰기 잠금). 없으면 null */
   getSessionForUpdate(id: string): Promise<SessionRow | null>;
   /** 지금 리프레시 토큰만 바꾼다(CreateSession 다시 보내기, 갱신 재시도). 앞 토큰·회전 시각은 그대로 */
@@ -282,6 +284,13 @@ export interface DeviceRefs {
   prevRef?(deviceId: string): string | undefined;
 }
 
+export const LOGIN_RISK = Symbol('identity.LoginRisk');
+export type LoginVerdictResult = { verdict: 'ALLOW' } | { verdict: 'CHALLENGE'; reason: string } | { verdict: 'UNKNOWN' };
+/** 로그인 판정(trust-svc ScoreRisk LOGIN, identity §7). 받지 못하면 UNKNOWN을 돌려준다(로그인을 막지 않는다). 점수 원값은 받지 않는다 */
+export interface LoginRisk {
+  score(i: { accountId: string; deviceId: string | null; clientIp?: string; asn?: number; userAgent?: string | null }): Promise<LoginVerdictResult>;
+}
+
 export const SESSION_SIGNALS = Symbol('identity.SessionSignals');
 /** 운영 확인 신호(identity §10.1) */
 export interface SessionSignals {
@@ -298,6 +307,8 @@ export interface SessionSignals {
   mergeInvariantViolated(): void;
   /** 다른 기기의 세션을 끝냈다: 원격 로그아웃, 로그인 수단을 바꾼 뒤(identity_other_sessions_ended_total, ADR-0209 결정 6) */
   othersEnded(cause: 'remote_logout' | 'login_method_changed', count: number): void;
+  /** 로그인 판정 결과(identity_login_verdict_total, BOT-050). UNKNOWN은 받지 못했거나 기록하지 못한 것이다 */
+  loginVerdict(verdict: LoginVerdict): void;
   /** 가입 마무리를 끝냈다(identity_signup_completed_total, ADR-0235) */
   signupCompleted(marketing: boolean): void;
   /** 닉네임 확인이 요청 한도에 걸렸다(identity_nickname_check_limited_total, ADR-0235) */

@@ -11,7 +11,7 @@ import { accountMergedMessage } from './account-merged-message.js';
 
 type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
 
-type StoredSession = NewSession & { terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
+type StoredSession = NewSession & { loginVerdictReason: string | null; loginVerdictAt: number; terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
 interface State {
   accounts: Map<string, StoredAccount>;
@@ -553,7 +553,15 @@ export class MemorySessionStore implements SessionStore {
         s.outbox.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
-        s.sessions.set(r.id, { ...r, terminatedAt: null, terminatedReason: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt });
+        s.sessions.set(r.id, { ...r, terminatedAt: null, terminatedReason: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt, loginVerdictReason: null, loginVerdictAt: r.createdAt });
+      },
+      setLoginVerdict: async (sessionId, verdict, reason, at) => {
+        const x = s.sessions.get(sessionId);
+        // 드라이즐 저장소의 WHERE login_verdict = 'UNKNOWN'과 같다
+        if (!x || x.loginVerdict !== 'UNKNOWN') return;
+        x.loginVerdict = verdict;
+        x.loginVerdictReason = reason;
+        x.loginVerdictAt = at;
       },
       getSessionForUpdate: async (id) => {
         const x = s.sessions.get(id.toLowerCase());

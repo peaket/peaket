@@ -13,7 +13,7 @@ import * as zod from 'zod';
 
 export const CreateQueueLobbyParticipantBody = zod.object({
   "humanCheckToken": zod.string().optional(),
-  "deviceId": zod.string().optional()
+  "deviceId": zod.string().optional().describe('기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12). 형식이 다르면 400')
 }).strict()
 
 export type CreateQueueLobbyParticipantBody = zod.input<typeof CreateQueueLobbyParticipantBody>;

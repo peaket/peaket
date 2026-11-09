@@ -17,13 +17,18 @@ export class PromSessionSignals implements SessionSignals {
   readonly #othersEnded = new Counter({ name: 'identity_other_sessions_ended_total', help: '다른 기기의 세션을 끝낸 수(원격 로그아웃, 로그인 수단을 바꾼 뒤, ADR-0209)', labelNames: ['cause'] as const, registers: [] });
 
   readonly #signup = new Counter({ name: 'identity_signup_completed_total', help: '가입 마무리를 끝낸 수(ADR-0235)', labelNames: ['marketing'] as const, registers: [] });
+  readonly #loginVerdict = new Counter({ name: 'identity_login_verdict_total', help: '로그인 판정 결과(UNKNOWN은 trust-svc 판정을 받지 못했거나 기록하지 못함)', labelNames: ['verdict'] as const, registers: [] });
   readonly #nickLimited = new Counter({ name: 'identity_nickname_check_limited_total', help: '요청 한도에 걸린 닉네임 확인(ADR-0235)', registers: [] });
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded];
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded];
     for (const m of all) registry.registerMetric(m);
     return this;
+  }
+
+  loginVerdict(verdict: string): void {
+    this.#loginVerdict.inc({ verdict });
   }
 
   created(provider: string, newAccount: boolean): void {

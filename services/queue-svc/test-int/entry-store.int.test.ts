@@ -30,11 +30,11 @@ afterAll(async () => {
 
 /** Valkey의 서버 시각(칸 Lua가 쓰는 TIME과 같은 시계) */
 async function serverNowMs(): Promise<number> {
-  const t = (await redis.command(['TIME'])) as unknown[];
+  const t = (await redis.command(['TIME'], { deadlineMs: 5_000 })) as unknown[];
   return Number(String(t[0])) * 1000 + Math.floor(Number(String(t[1])) / 1000);
 }
 
-const cmd = (key: string, args: string[]) => redis.command(args, { key });
+const cmd = (key: string, args: string[]) => redis.command(args, { key, deadlineMs: 5_000 });
 
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
   const key = keys.cfg(eventId);
