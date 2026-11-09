@@ -11,6 +11,27 @@ export const DEPOSIT_PAST_DUE_DELAY_MS = 5_000;
 /** 입금 완료 통보 뒤 짧은 간격으로 다시 묻는 시간 10분 [가정](결제사 조회 반영이 통보보다 늦을 때, BUILD_ORDER HOT-151 코드 리뷰) */
 export const DEPOSIT_NOTIFIED_WINDOW_MS = 10 * 60_000;
 
+/** 결제사가 준 새 입금 기한을 그대로 쓰는 최소 여유 2시간 [가정](다시 입금할 시간을 주려고, BUILD_ORDER HOT-152 코드 리뷰) */
+export const REVERSAL_DUE_MIN_LEAD_MS = 2 * 3_600_000;
+
+/**
+ * 입금 오류로 되돌린 결제의 새 입금 기한(epoch ms): 조회 답의 기한이 지금 + 2시간 [가정] 이상 남았으면 그 값, 아니면 다음 날 23:59(KST) [가정](docs/planning/03 §2.4의 공식, BUILD_ORDER HOT-152).
+ * '입장 24시간 전' 상한은 입장 시각을 아는 쪽(PRF-190)이 자른다.
+ * @param answerDueMs 조회 답의 입금 기한(epoch ms). 없으면 undefined
+ * @param nowMs 지금(epoch ms)
+ */
+export function reversalDueAtMs(answerDueMs: number | undefined, nowMs: number): number {
+  if (answerDueMs !== undefined && answerDueMs >= nowMs + REVERSAL_DUE_MIN_LEAD_MS) return answerDueMs;
+  // KST 하루의 시작(epoch ms)을 구해 다음 날 23:59를 더한다
+  const startOfKstDay = Math.floor((nowMs + KST_OFFSET_MS) / DAY_MS) * DAY_MS - KST_OFFSET_MS;
+  return startOfKstDay + DAY_MS + REVERSAL_DUE_TIME_OF_DAY_MS;
+}
+
+const KST_OFFSET_MS = 9 * 3_600_000;
+const DAY_MS = 86_400_000;
+/** 하루의 23:59까지(ms) [가정](docs/planning/03 §2.4의 입금 기한 공식) */
+const REVERSAL_DUE_TIME_OF_DAY_MS = 23 * 3_600_000 + 59 * 60_000;
+
 /** 입금 대기를 쓰는 트랜잭션이 함께 쓰는 값(docs/data.md payment의 가상계좌 칸). 틀리거나 없는 칸은 비운다(코드 리뷰 M5) */
 export interface DepositWrite {
   /** 입금 기한(epoch ms). 결제사가 주지 않았으면 없다 */

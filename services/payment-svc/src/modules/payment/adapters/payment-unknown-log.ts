@@ -34,6 +34,9 @@ export function paymentUnknownLog(logger: Pick<PlatformLogger, 'warn' | 'error'>
     noAdapter: ({ pg }) => quietly(() => logger.warn({ kind: 'payment-unknown-no-adapter', pg }, '결제사 어댑터가 없어 단독 조회를 건너뛰었다')),
     writeFailed: ({ orderId, code }) => quietly(() => logger.error({ kind: 'payment-unknown-write-failed', orderId, code }, '단독 조회 결과를 쓰지 못했다(다음 간격에 다시 조회한다)')),
     staleAnswer: ({ orderId }) => quietly(() => logger.warn({ kind: 'payment-unknown-stale', orderId }, '원장이 이미 UNKNOWN이 아니어서 조회 답을 쓰지 않았다')),
+    depositReversed: ({ orderId }) => quietly(() => logger.warn({ kind: 'payment-deposit-reversed', orderId }, '결제사가 입금을 되돌려 입금 대기로 되돌렸다')),
+    reversalUnconfirmed: ({ orderId }) => quietly(() => logger.warn({ kind: 'payment-deposit-reversal-unconfirmed', orderId }, '입금 오류 통보 뒤 10분이 지나도 결제사가 입금 완료라고 답해 되돌림 확인을 끝냈다')),
+    reversalOverdue: ({ orderId }) => quietly(() => logger.error({ kind: 'payment-deposit-reversal-overdue', severity: 'SEV1', orderId }, '입금 오류 통보 뒤 1시간이 지나도 결제사 조회로 되돌림을 확인하지 못했다(사람이 본다, 조회는 이어 간다)')),
     runError: ({ what, orderId, err }) => quietly(() => logger.error({ kind: 'payment-unknown-run', what, code: safeErrorCode(err), ...(orderId === undefined ? {} : { orderId }) }, 'UNKNOWN 조회 실행기 처리 실패')),
   };
 }

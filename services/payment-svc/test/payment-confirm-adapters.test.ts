@@ -157,7 +157,7 @@ describe('PromPaymentConfirmSignals', () => {
   test('P-T16_리뷰 고침 M7: payment_confirm_declined_total은 결제사 셋 × 범주 여섯을 0으로 미리 보이고 건마다 오른다 [ASVS v5.0.0-16.3.4]', async () => {
     const signals = new PromPaymentConfirmSignals();
     const { named } = await metricsOf(signals);
-    const categories = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'];
+    const categories = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED'];
     const before = (await named('payment_confirm_declined_total'))!;
     expect(String(before.type)).toBe('counter');
     expect(before.values.map((v) => `${v.labels.pg}/${v.labels.category}=${v.value}`).sort()).toEqual(PGS.flatMap((pg) => categories.map((c) => `${pg}/${c}=0`)).sort());

@@ -18,13 +18,13 @@ export const PaymentEvent = zod.object({
   "cardBin": zod.string().optional().describe('카드 BIN(카드 번호 앞 6자리, 발급사·카드 종류를 가리는 번호). paymentMethodRef와 늘 함께 있거나 함께 빈다. 토스는 가린 번호의 앞 6자리, 포트원은 card.bin의 앞 6자리다. 가상카드 여부는 두 결제사 모두 주지 않아 칸을 두지 않는다(ADR-0171 \'되돌릴 조건\'). 분석 적재는 버린다(추천 적용 2026-10-31)'),
   "refMissing": zod.boolean().default(paymentEventRefMissingDefault).describe('조사용 가명 칸을 계산하지 못해 비웠으면 true(라벨 키가 없음·KMS에서 받지 못함·한도 초과, 또는 결제사 응답의 카드 정보 모양이 틀림). 업무 처리는 막지 않았고 조사 적재가 나중에 채우지 않는다(docs/security/secrets-and-keys.md inv-ref-key, 추천 적용 2026-10-31, ADR-0171. 카드 정보 모양은 추천 적용 2026-11-09, BUILD_ORDER HOT-145, 코드 리뷰)'),
   "result": zod.enum(['APPROVED', 'ALREADY_APPROVED', 'IN_PROGRESS', 'DECLINED', 'WAITING_FOR_DEPOSIT', 'UNKNOWN']).optional().describe('payment §2.1 정규화 결과. WAITING_FOR_DEPOSIT은 가상계좌 발급(RESOLVED의 결과로도 온다, ADR-0073)'),
-  "failureCategory": zod.enum(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED']).optional().describe('실패일 때만. 결제 어댑터가 정한다(payment §2.1)'),
+  "failureCategory": zod.enum(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED']).optional().describe('실패일 때만. 결제 어댑터가 정한다(payment §2.1). DEPOSIT_CANCELED는 입금 대기 결제의 입금 전 취소다(추천 적용 2026-11-09, BUILD_ORDER HOT-152)'),
   "attemptNo": zod.int().describe('같은 주문의 결제 시도 순번'),
   "latencyMs": zod.int().optional().describe('결제사 승인 응답 시간'),
   "occurredAt": zod.iso.datetime({"offset":true}),
   "eventSeq": zod.int().describe('결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기로 받은 결과와 같은 사건인지 가린다(ADR-0140)'),
   "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값'),
-  "depositDueAt": zod.iso.datetime({"offset":true}).optional().describe('입금 대기 사건(AWAITING_DEPOSIT)에만 싣는 입금 기한. 결제사가 답에 주지 않았으면 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151)')
+  "depositDueAt": zod.iso.datetime({"offset":true}).optional().describe('입금 대기 사건(AWAITING_DEPOSIT)과 입금 오류 되돌림 사건(DEPOSIT_REVERSED, 새 입금 기한)에만 싣는 입금 기한. 결제사가 답에 주지 않은 입금 대기는 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151·HOT-152)')
 })
 
 export type PaymentEvent = zod.input<typeof PaymentEvent>;

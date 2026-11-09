@@ -276,6 +276,19 @@ describe('issueDelayedEventKey(ISSUE_DELAYED의 중복 제거 키, 설계 7)', (
   });
 });
 
+describe('재발권의 ISSUE_DELAYED 키(BUILD_ORDER HOT-152)', () => {
+  test('P-T36 ④_리뷰 고침 L10: 세대가 있으면 키에 세대가 들어가 재발권 지연 알림이 앞 세대의 키로 지워지지 않는다', () => {
+    expect(issueDelayedEventKey(ORDER, 5)).toBe(uuid8Of(`OrderEvent:${ORDER}:ISSUE_DELAYED:5`));
+    expect(issueDelayedEventKey(ORDER, 5)).not.toBe(issueDelayedEventKey(ORDER, 8));
+    expect(issueDelayedEventKey(ORDER, 5)).toBe(issueDelayedEventKey(ORDER, 5));
+  });
+
+  test('P-T36 ④_리뷰 고침 L10: 세대가 없거나 0인 옛 행은 지금 키 그대로다', () => {
+    expect(issueDelayedEventKey(ORDER, 0)).toBe(issueDelayedEventKey(ORDER));
+    expect(issueDelayedEventKey(ORDER)).toBe(uuid8Of(`OrderEvent:${ORDER}:ISSUE_DELAYED`));
+  });
+});
+
 describe('buildIssueDelayedEvent(상태 전이 없는 ISSUE_DELAYED 주문 사건, 설계 7)', () => {
   /** 승인된 주문 행(이력 번호 5) */
   const approved = (over: Partial<OrderRow> = {}): OrderRow => ({

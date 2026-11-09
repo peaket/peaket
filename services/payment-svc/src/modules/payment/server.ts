@@ -6,6 +6,8 @@ export * from './domain/confirm-runner.js';
 export * from './domain/unknown-resolver.js';
 export * from './domain/pg-call-guard.js';
 export * from './domain/webhook-receipt.js';
+export * from './domain/deposit-cancel.js';
+export { CancelDepositPayment, type CancelDepositPaymentDeps } from './application/cancel-deposit-payment.js';
 export { ReceivePaymentWebhook, type ReceivePaymentWebhookDeps, type WebhookAnswer } from './application/receive-payment-webhook.js';
 export { deleteExpiredWebhookReceipts, DrizzleWebhookStore, type DrizzleWebhookStoreOptions, WEBHOOK_DB_MAX, webhookDatabaseOptions, webhookReceiptsDeleteTask } from './adapters/db/drizzle-webhook-store.js';
 export { paymentWebhookLog } from './adapters/payment-webhook-log.js';
@@ -39,5 +41,5 @@ export { portoneVirtualAccountOf, tossVirtualAccountOf } from './adapters/pg/vir
 export { BATCH_GET_STATEMENT_TIMEOUT_MS, DrizzlePaymentStore, type DrizzlePaymentStoreOptions } from './adapters/db/drizzle-payment-store.js';
 export { paymentCommandLog } from './adapters/payment-command-log.js';
 export { PromPaymentCommandSignals } from './adapters/prom-payment-command-signals.js';
-export { confirmInputOf, confirmResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
+export { cancelInputOf, cancelResponseOf, confirmInputOf, confirmResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
 export { PaymentModule, type PaymentModuleDeps } from './payment.module.js';

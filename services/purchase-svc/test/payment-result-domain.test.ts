@@ -44,11 +44,12 @@ const skip = (reason: string) => ({ kind: 'SKIP', reason }) as PaymentResultDeci
 const hold = (reason: string) => ({ kind: 'HOLD', reason }) as PaymentResultDecision;
 
 /** 정본 표(payment §2 '사건 종류 × 지금 상태 → 전이')를 시험 쪽에 따로 적은 것. 코드 표(PAYMENT_RESULT_TABLE)와 견준다 */
-const CANON: Record<'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT', Partial<Record<OrderStatus, string>>> = {
+const CANON: Record<'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED', Partial<Record<OrderStatus, string>>> = {
   APPROVED: { RESERVED: 'T9', UNKNOWN: 'T13', AWAITING_DEPOSIT: 'T16' },
   FAILED: { RESERVED: 'T11', UNKNOWN: 'T15', AWAITING_DEPOSIT: 'T17' },
   UNKNOWN: { RESERVED: 'T12' },
   AWAITING_DEPOSIT: { RESERVED: 'T10', UNKNOWN: 'T14' },
+  DEPOSIT_REVERSED: { CONFIRMED: 'T21' },
 };
 const APPLIED_TYPES = ['APPROVED', 'FAILED', 'UNKNOWN', 'AWAITING_DEPOSIT'] as const;
 const SOURCE_STATUSES = ['RESERVED', 'UNKNOWN', 'AWAITING_DEPOSIT'] as const;
@@ -76,8 +77,8 @@ describe('decidePaymentResult: 전이 표의 칸(종류 넷 × 출발 상태 셋
 
   test('FR011_코드 표(PAYMENT_RESULT_TABLE)·도착 상태·쓰기 갈래가 정본 표와 같고, 표의 칸마다 결정이 그 전이·그 쓰기 갈래다', () => {
     expect(PAYMENT_RESULT_TABLE).toEqual(CANON);
-    expect(PAYMENT_RESULT_ARRIVAL).toEqual({ APPROVED: 'APPROVED', FAILED: 'FAILED', UNKNOWN: 'UNKNOWN', AWAITING_DEPOSIT: 'AWAITING_DEPOSIT' });
-    expect(PAYMENT_RESULT_WRITES).toEqual({ T9: 'APPROVE', T13: 'APPROVE', T16: 'APPROVE', T11: 'FAIL', T15: 'FAIL', T17: 'FAIL', T10: 'MARK', T12: 'MARK', T14: 'MARK' });
+    expect(PAYMENT_RESULT_ARRIVAL).toEqual({ APPROVED: 'APPROVED', FAILED: 'FAILED', UNKNOWN: 'UNKNOWN', AWAITING_DEPOSIT: 'AWAITING_DEPOSIT', DEPOSIT_REVERSED: 'AWAITING_DEPOSIT' });
+    expect(PAYMENT_RESULT_WRITES).toEqual({ T9: 'APPROVE', T13: 'APPROVE', T16: 'APPROVE', T11: 'FAIL', T15: 'FAIL', T17: 'FAIL', T10: 'MARK', T12: 'MARK', T14: 'MARK', T21: 'REVERSE' });
     for (const type of APPLIED_TYPES) {
       for (const status of SOURCE_STATUSES) {
         const t = CANON[type][status];
@@ -88,8 +89,8 @@ describe('decidePaymentResult: 전이 표의 칸(종류 넷 × 출발 상태 셋
     }
   });
 
-  test('PT2_FAILED의 실패 사유는 사건의 failureCategory 그대로다(여섯 값 모두, 주문 failure_reason에 적는다)', () => {
-    expect(PAYMENT_FAILURE_CATEGORIES).toEqual(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED']);
+  test('PT2_FAILED의 실패 사유는 사건의 failureCategory 그대로다(일곱 값 모두, 주문 failure_reason에 적는다)', () => {
+    expect(PAYMENT_FAILURE_CATEGORIES).toEqual(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED']);
     for (const failureCategory of PAYMENT_FAILURE_CATEGORIES) {
       for (const [status, t] of [
         ['RESERVED', 'T11'],
@@ -176,6 +177,7 @@ describe('decidePaymentResult: 표 밖의 조합은 보류(HOLD IMPOSSIBLE, 닫�
       PG_MISMATCH: { severity: 'SEV2', kind: 'security' },
       NOT_YET_SUPPORTED: { severity: 'SEV2' },
       CHARGED_ON_CLOSED_ORDER: { severity: 'SEV1', kind: 'payment-charged-closed' },
+      DEPOSIT_REVERSED_NOT_CONFIRMED: { severity: 'SEV1' },
       SOLD_MISMATCH: { severity: 'SEV1' },
     });
   });
@@ -210,7 +212,15 @@ describe('decidePaymentResult: 다시 온 사건과 건너뛰는 종류', () => 
     expect(decide('RESOLVED', status, { event: { result: 'APPROVED' } })).toEqual(skip('RECORD_ONLY'));
   });
 
-  test.each(['DEPOSIT_REVERSED', 'PARTIAL_CANCELED', 'CANCELED'] as const)(
+  test('P-T36 ④_DEPOSIT_REVERSED는 CONFIRMED 주문에서 T21(REVERSE)이다 [ASVS v5.0.0-2.3.1]', () => {
+    expect(decide('DEPOSIT_REVERSED', 'CONFIRMED')).toEqual({ kind: 'APPLY', write: 'REVERSE', transition: 'T21' });
+  });
+
+  test.each(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED'] as const)('P-T36 ④_DEPOSIT_REVERSED는 %s 주문이면 전이하지 않고 보류한다 [ASVS v5.0.0-2.3.1]', (status) => {
+    expect(decide('DEPOSIT_REVERSED', status)).toEqual(hold('DEPOSIT_REVERSED_NOT_CONFIRMED'));
+  });
+
+  test.each(['PARTIAL_CANCELED', 'CANCELED'] as const)(
     'FR011_%s는 건너뛰지 않고 HOLD NOT_YET_SUPPORTED다(맡을 단계가 생기면 보류 표에서 다시 처리한다, 리뷰 M3. CONFIRMED·APPROVED·RESERVED 주문 모두)',
     (type) => {
       for (const status of ['CONFIRMED', 'APPROVED', 'RESERVED'] as const) expect(decide(type, status), status).toEqual(hold('NOT_YET_SUPPORTED'));

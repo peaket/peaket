@@ -21,6 +21,7 @@ const TAG_0003 = '0003_payment_confirm_job_pg';
 const TAG_0004 = '0004_payment_pg_tx_id';
 const TAG_0005 = '0005_payment_webhook_receipt';
 const TAG_0006 = '0006_payment_query_due';
+const TAG_0007 = '0007_payment_deposit_reversal';
 const ADDED_COLUMN_0004 = 'pg_tx_id';
 const ADDED_COLUMN_0005 = 'query_touched_at';
 const ADDED_COLUMN_0006 = 'deposit_notified_at';
@@ -200,9 +201,9 @@ describe('표 정의(schema.ts)', () => {
     expect(checkOf(jobShape, 'payment_confirm_job_attempts_check')).toBe('attempts >= 0');
   });
 
-  test('PRF181_failure_category CHECK는 분석용 실패 범주 여섯 값이고 asyncapi PaymentEvent와 같은 값이다', () => {
+  test('PRF181_failure_category CHECK는 분석용 실패 범주 일곱 값이고 asyncapi PaymentEvent와 같은 값이다(입금 전 취소, 0007)', () => {
     const values = literalsOf(checkOf(paymentShape, ADDED_CHECK));
-    expect(values).toEqual(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED']);
+    expect(values).toEqual(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED']);
     expect(values).toEqual(PaymentEvent.shape.failureCategory.unwrap().options);
   });
 
@@ -210,9 +211,9 @@ describe('표 정의(schema.ts)', () => {
     expect(paymentShape.columns.find((c) => c.name === ADDED_COLUMN)).toEqual({ name: 'failure_category', type: 'text', notNull: false, hasDefault: false, primary: false });
   });
 
-  test('P-T36_단독 조회 인덱스는 UNKNOWN·입금 대기와 늦은 입금 확인을 건 FAILED 행만 담는 부분 인덱스다(0006, 리뷰 고침 M6)', () => {
+  test('P-T36_단독 조회 인덱스는 UNKNOWN·입금 대기와 조회를 건 FAILED·APPROVED 행만 담는 부분 인덱스다(0006·0007)', () => {
     const idx = getTableConfig(payment).indexes.find((i) => i.config.name === QUERY_DUE_INDEX)!;
-    expect(canon(sqlText(idx.config.where!))).toBe("status in('UNKNOWN','AWAITING_DEPOSIT')or(status = 'FAILED' and next_query_at is not null)");
+    expect(canon(sqlText(idx.config.where!))).toBe("status in('UNKNOWN','AWAITING_DEPOSIT')or(status in('FAILED','APPROVED')and next_query_at is not null)");
   });
 
   test('P-T3_UNKNOWN 조회 칸 셋: next_query_at·overdue_at은 비울 수 있고 query_attempts는 기본 0이다', () => {
@@ -367,7 +368,8 @@ describe('마이그레이션 SQL(0001_payment_failure_category.sql)', () => {
   });
 
   test('P-T53_CHECK가 schema.ts와 같은 이름·같은 식으로 SQL에 있다 [ASVS v5.0.0-2.2.1]', () => {
-    expect(canon(statements[1]!).replace(/;$/, '')).toBe(`alter table payment add constraint ${ADDED_CHECK} check(${checkOf(paymentShape, ADDED_CHECK)})`);
+    // 0001의 목록은 여섯 값이다(일곱째 DEPOSIT_CANCELED는 0007이 더했다)
+    expect(canon(statements[1]!).replace(/;$/, '')).toBe(`alter table payment add constraint ${ADDED_CHECK} check(${checkOf(paymentShape, ADDED_CHECK).replace(",'DEPOSIT_CANCELED'", '')})`);
   });
 
   test('PRF181_지우거나 바꾸는 문이 없고 표·인덱스를 더 만들지 않는다', () => {
@@ -510,9 +512,10 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const fourth = snapshotOf('0003_snapshot.json');
   const fifth = snapshotOf('0004_snapshot.json');
   const sixth = snapshotOf('0005_snapshot.json');
-  const latest = snapshotOf('0006_snapshot.json');
+  const seventh = snapshotOf('0006_snapshot.json');
+  const latest = snapshotOf('0007_snapshot.json');
 
-  test('PRF182_PRF183_기록은 0000·0001·0002·0003·0004·0005 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0007 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -522,6 +525,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [4, TAG_0004],
       [5, TAG_0005],
       [6, TAG_0006],
+      [7, TAG_0007],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -534,11 +538,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[4]!.when).toBeGreaterThan(journal.entries[3]!.when);
     expect(journal.entries[5]!.when).toBeGreaterThan(journal.entries[4]!.when);
     expect(journal.entries[6]!.when).toBeGreaterThan(journal.entries[5]!.when);
+    expect(journal.entries[7]!.when).toBeGreaterThan(journal.entries[6]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -594,8 +599,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('P-T36_0006 스냅샷의 앞은 0005 스냅샷이다', () => {
-    expect(latest.prevId).toBe(sixth.id);
+    expect(seventh.prevId).toBe(sixth.id);
     expect(Object.keys(sixth.tables['public.payment']!.indexes)).not.toContain(QUERY_DUE_INDEX);
+  });
+
+  test('P-T36_0007 스냅샷의 앞은 0006 스냅샷이다', () => {
+    expect(latest.prevId).toBe(seventh.id);
   });
 
   test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {

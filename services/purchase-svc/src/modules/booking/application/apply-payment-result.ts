@@ -73,6 +73,8 @@ export interface ApplyPaymentResultDeps {
    * 건너뛴 사건(DUPLICATE·ALREADY_THERE 등)에는 부르지 않는다(큐 행을 넣은 커밋이 아니다. 남은 큐 행은 실행기의 틱이 줍는다)
    */
   onApproved?: (orderId: string) => void;
+  /** 입금 오류 되돌림(T21)을 커밋한 뒤 부를 것(티켓 무효 실행기 깨우기, TicketVoidRunner.kick, BUILD_ORDER HOT-152). 던지지 않는다. 없으면 부르지 않는다 */
+  onDepositReversed?: (orderId: string) => void;
 }
 
 /**
@@ -139,7 +141,12 @@ export class ApplyPaymentResult {
         }
         return { status: 'SKIPPED', reason: d.reason };
       }
-      if (d.kind === 'HOLD') throw this.#held(event, d.reason);
+      if (d.kind === 'HOLD') {
+        // 발권 중인 주문에 입금 되돌림이 왔다: 전이는 정본대로 CONFIRMED만 T21이라 보류하고, 돈이 없는 티켓이 새로 나가지 않게 발권 작업을 멈춘다(사람이 발권을 다시 켜 CONFIRMED가 된 뒤 RB-11 다시 처리가 T21로 간다).
+        // 멈추지 못하면 DB 오류를 그대로 던져 처리기가 일시 실패로 다시 한다(발권이 도는 채 보류하지 않는다, BUILD_ORDER HOT-152 코드 리뷰)
+        if (d.reason === 'DEPOSIT_REVERSED_NOT_CONFIRMED' && order?.status === 'APPROVED') await this.deps.writes.holdIssue(order.orderId);
+        throw this.#held(event, d.reason);
+      }
       // APPLY는 주문이 있을 때만 나온다(결정 ①)
       const o = order;
       if (o === undefined) throw new Error('주문 없이 반영 결정이 나왔다(코드 오류)');
@@ -152,6 +159,8 @@ export class ApplyPaymentResult {
         if (to !== undefined && PAYMENT_STATUS_IMMEDIATE.has(to)) this.#orderChanged(o.orderId);
         // 승인(T9·T13·T16)은 같은 트랜잭션에서 발권 재시도 큐 행을 넣었다: 커밋 뒤 일을 마친 뒤 발권 실행기를 곧바로 한 번 깨운다(1초 틱을 기다리지 않는다, PRF-170)
         if (d.write === 'APPROVE') this.#approved(o.orderId);
+        // 되돌림(T21)은 같은 트랜잭션에서 티켓 무효 작업 행을 넣었다: 커밋 뒤 곧바로 무효 실행기를 깨운다(BUILD_ORDER HOT-152)
+        if (d.write === 'REVERSE') this.#depositReversed(o.orderId);
         return { status: 'APPLIED', transition: d.transition, write: d.write };
       }
       // 판매 행이 좌석 수만큼 SOLD가 되지 않았다(되돌렸다): 과금됐는데 좌석을 줄 수 없다
@@ -182,7 +191,19 @@ export class ApplyPaymentResult {
         });
       case 'MARK':
         return this.deps.writes.mark({ ...base, transition: d.transition, ...this.#depositPending(d, event, o) });
+      case 'REVERSE':
+        return this.deps.writes.reverse({ ...base, transition: d.transition, eventId: o.eventId, seatIds: o.seatIds, ...this.#reversedPending(event, o) });
     }
+  }
+
+  /** 입금 되돌림(T21)의 판매 행 기한. 사건에 기한이 없으면 비우고 경고 한 줄이다(BUILD_ORDER HOT-152) */
+  #reversedPending(event: PaymentResultEvent, o: PaymentResultOrder): { pendingUntilMs?: number } {
+    const pendingUntilMs = depositPendingUntilMs(event.depositDueAt);
+    if (pendingUntilMs === undefined) {
+      this.deps.log.depositDueMissing?.({ orderId: o.orderId });
+      return {};
+    }
+    return { pendingUntilMs };
   }
 
   /** 입금 대기 전이(T10·T14)의 판매 행 기한. 사건에 기한이 없으면 비우고 경고 한 줄이다(지금처럼 판매 행 PENDING만 남는다, BUILD_ORDER HOT-151) */
@@ -207,6 +228,7 @@ export class ApplyPaymentResult {
       await this.#bestEffort(o.orderId, 'unmark_paying', () => this.deps.sessions.unmarkPaying(o.purchaseSessionId));
       return;
     }
+    if (d.write === 'REVERSE') return;
     if (d.write === 'APPROVE' || d.transition === 'T10' || d.transition === 'T14') {
       await this.#bestEffort(o.orderId, 'complete_session', () => this.deps.sessions.complete(o.purchaseSessionId));
     }
@@ -218,6 +240,15 @@ export class ApplyPaymentResult {
       this.deps.onOrderChanged?.(orderId);
     } catch {
       // 삼킨다(기다리는 요청은 묶음 조회·시간으로 깬다)
+    }
+  }
+
+  /** 되돌림 전이를 커밋한 뒤 부른다(onDepositReversed가 있을 때만). 던져도 반영 결과는 그대로다(작업 행은 틱이 줍는다) */
+  #depositReversed(orderId: string): void {
+    try {
+      this.deps.onDepositReversed?.(orderId);
+    } catch {
+      // 삼킨다
     }
   }
 

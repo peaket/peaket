@@ -62,7 +62,7 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 13(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스, 0012 회차 판매 상태 표·결제 중 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 14(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스, 0012 회차 판매 상태 표·결제 중 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
@@ -72,7 +72,7 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(13);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(14);
   });
 
   test('ST25_ADR0122_0012(PRF-144, data.md §4 열세 번째 마이그레이션·§5.1): seat_sale_pending_idx는 seat_sale (event_id, reserved_at)의 PENDING 부분 인덱스이고(리뷰 고침 L11), event_sale은 다섯 상태·판 번호 1 이상·음수 아닌 셈을 CHECK로 거절하며 매진 등급 기본값은 빈 배열이다 [ASVS v5.0.0-2.3.4]', async () => {

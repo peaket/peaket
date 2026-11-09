@@ -78,6 +78,10 @@ import {
   ticketIssueDatabaseOptions,
   ticketIssuerFromEnv,
   TicketIssueRunner,
+  TicketVoidRunner,
+  DrizzleTicketVoid,
+  LoggerTicketVoidLog,
+  PromTicketVoidSignals,
   unavailableIdentityRecheck,
 } from './modules/booking/index.js';
 import {
@@ -287,6 +291,8 @@ if (booking && database) {
 let ticketIssuer: ReturnType<typeof ticketIssuerFromEnv> | undefined;
 let ticketBreaker: CircuitBreaker | undefined;
 let ticketRunner: TicketIssueRunner | undefined;
+// 티켓 무효 실행기(입금 오류 되돌림 뒤, BUILD_ORDER HOT-152): 발권 실행기와 같은 자리·같은 풀·같은 ticket-svc 주소를 쓴다
+let ticketVoidRunner: TicketVoidRunner | undefined;
 let ticketIssueDatabase: Database | undefined;
 if (booking && database && databaseUrl) {
   ticketBreaker = new CircuitBreaker({ service: SERVICE, dependency: TICKET_DEPENDENCY, registry: service.metrics.registry, logger: service.logger });
@@ -302,6 +308,7 @@ if (booking && database && databaseUrl) {
     clock: systemClock,
     ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
   });
+  ticketVoidRunner = new TicketVoidRunner({ jobs: new DrizzleTicketVoid({ database: ticketDb, clock: systemClock }), voider: ticketIssuer.voider, log: new LoggerTicketVoidLog(service.logger), signals: new PromTicketVoidSignals().register(service.metrics.registry), clock: systemClock });
 }
 // Kafka 소비자 둘(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현'): purchase DB(와 Saga·발권 실행기·결제 결과 기다림 표)가 있을 때만
 // 설정을 읽는다(DB 없이 뜨는 동작은 그대로다). 브로커 주소가 없으면 local·ci만 경고 한 줄로 끄고, 그 밖의 환경은 여기서 던진다(시작 실패, 듣기 전).
@@ -314,6 +321,7 @@ let consumerDatabase: Database | undefined;
 let applyPaymentResult: ReturnType<typeof paymentResultApply> | undefined;
 if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiters) {
   const issueRunner = ticketRunner;
+  const voidRunner = ticketVoidRunner;
   const kafka = kafkaConsumersFromEnv(process.env, SERVICE);
   if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
   const consumerDb = createDatabase(consumerDatabaseOptions(databaseUrl));
@@ -331,6 +339,7 @@ if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiter
     clock: systemClock,
     onOrderChanged: (orderId) => paymentStatusWaiters.notify(orderId),
     onApproved: (orderId) => issueRunner.kick(orderId),
+    ...(voidRunner ? { onDepositReversed: (orderId: string) => voidRunner.kick(orderId) } : {}),
   });
   if (kafka.enabled) {
     consumerOptions = {
@@ -398,6 +407,7 @@ sweeper.start();
 saleStateJudge?.start();
 sagaRunner?.start();
 ticketRunner?.start();
+ticketVoidRunner?.start();
 paymentPuller?.start();
 paymentStatusWaiters?.start();
 // 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
@@ -431,7 +441,7 @@ function shutdown(): void {
     (consumers?.stop() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)')),
     paymentPuller?.stop(),
   ])
-    .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), paymentStatusWaiters?.stop()]))
+    .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
     // 주문 만료 판정기는 고리를 부르는 것들(만료·정리 반복, 소비자, 나가기 경로)이 멈춘 뒤에 멈춘다. 돌던 판정만 기다리고 줄에 남은 일은 버린다(안전망이 받친다). 전용 풀은 그 뒤에 닫는다

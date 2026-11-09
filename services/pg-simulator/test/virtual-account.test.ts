@@ -139,3 +139,47 @@ describe('포트원 모양', () => {
     expect(call).toBeDefined();
   });
 });
+
+describe('입금 오류와 입금 전 취소 제어', () => {
+  it('P-T36 ④_입금을 되돌리면 입금 대기로 돌아가고 승인 시각이 없으며 통보가 쌓인다', async () => {
+    const { call, issue } = start();
+    const { paymentKey } = await issue();
+    await call('POST', `/sim/deposits/${paymentKey}`);
+    const r = await call('POST', `/sim/deposits/${paymentKey}/reverse`);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ status: 'WAITING_FOR_DEPOSIT', approvedAt: null });
+    const callbacks = (await call('GET', `/sim/deposit-callbacks?orderId=${ORDER}`)).body as unknown as Array<Record<string, unknown>>;
+    expect(callbacks.map((c) => c.status)).toEqual(['DONE', 'WAITING_FOR_DEPOSIT']);
+    expect(callbacks[0]!.transactionKey).not.toBe(callbacks[1]!.transactionKey);
+  });
+
+  it('P-T36 ④_되돌린 뒤 다시 입금하면 DONE이고 승인 원장은 여전히 한 건이다', async () => {
+    const { call, issue } = start();
+    const { paymentKey } = await issue();
+    await call('POST', `/sim/deposits/${paymentKey}`);
+    await call('POST', `/sim/deposits/${paymentKey}/reverse`);
+    expect((await call('POST', `/sim/deposits/${paymentKey}`)).body.status).toBe('DONE');
+    const raw = await apps[0]!.inject({ method: 'GET', url: '/sim/ledger', headers: AUTH });
+    expect(raw.body.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('P-T36 ④_되돌림은 입금 완료 결제만 받고 새 기한을 줄 수 있다', async () => {
+    const { call, issue } = start();
+    const { paymentKey } = await issue();
+    expect((await call('POST', `/sim/deposits/${paymentKey}/reverse`)).status).toBe(400);
+    await call('POST', `/sim/deposits/${paymentKey}`);
+    const due = '2026-12-01T10:00:00+09:00';
+    const r = await call('POST', `/sim/deposits/${paymentKey}/reverse`, { dueDate: due });
+    expect(Date.parse((r.body.virtualAccount as { dueDate: string }).dueDate)).toBe(Date.parse(due));
+    expect((await call('POST', '/sim/deposits/none/reverse')).status).toBe(404);
+  });
+
+  it('P-T36 ⑤_입금 대기 결제를 취소하면 CANCELED다', async () => {
+    const { call, issue } = start();
+    const { paymentKey } = await issue();
+    const r = await call('POST', `/v1/payments/${paymentKey}/cancel`, { cancelReason: '회차 취소' });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('CANCELED');
+    expect((await call('GET', `/v1/payments/${paymentKey}`)).body.status).toBe('CANCELED');
+  });
+});

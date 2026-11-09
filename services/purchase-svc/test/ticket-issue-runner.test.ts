@@ -60,6 +60,7 @@ function issueJob(over: Partial<TicketIssueJob> = {}): TicketIssueJob {
     eventId: EVENT,
     payerAccountId: ACCOUNT,
     seatIds: SEAT_IDS,
+    issueGeneration: 0,
     attempts: 0,
     nextAttemptAtMs: NOW,
     issueDueAtMs: NOW + 30 * MIN,

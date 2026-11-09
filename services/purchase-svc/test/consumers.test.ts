@@ -40,6 +40,8 @@ vi.mock('../src/modules/booking/index.js', async (importOriginal) => {
     read: PaymentResultReads['read'] = (id) => results.fake!.reads.read(id);
     approve: PaymentResultWrites['approve'] = (i) => results.fake!.writes.approve(i);
     fail: PaymentResultWrites['fail'] = (i) => results.fake!.writes.fail(i);
+    reverse: PaymentResultWrites['reverse'] = (i) => results.fake!.writes.reverse(i);
+    holdIssue: PaymentResultWrites['holdIssue'] = (i) => results.fake!.writes.holdIssue(i);
     mark: PaymentResultWrites['mark'] = (i) => results.fake!.writes.mark(i);
   }
   return { ...real, DrizzlePaymentResults: FakeDrizzlePaymentResults };

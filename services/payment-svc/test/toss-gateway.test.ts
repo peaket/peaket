@@ -610,12 +610,12 @@ describe('P-T16 토스 어댑터만의 것', () => {
   it('P-T16_입금 통보(DEPOSIT_CALLBACK)는 주문 ID와 대조할 secret만 실은 조회 신호이고 상태를 싣지 않는다 [ASVS v5.0.0-16.2.5]', () => {
     const deposit = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: 'deposit-secret', status: 'DONE', transactionKey: 't', orderId: 'order-1' });
     const parsed = toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, deposit);
-    expect(parsed).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:t:DONE', orderRef: 'order-1', depositSecret: 'deposit-secret', depositDone: true });
+    expect(parsed).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:t:DONE:2026-11-09T10:00:00.000000', orderRef: 'order-1', depositSecret: 'deposit-secret', depositDone: true });
   });
 
   it('P-T16_리뷰 고침 L6: 입금 통보는 전송 ID 머리에 기대지 않고 거래 키와 상태로 중복을 가른다(머리가 없어도 받고, 다시 보내도 같은 키다)', () => {
     const deposit = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: 'deposit-secret', status: 'DONE', transactionKey: 'tx-1', orderId: 'order-1' });
-    const expected = { kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:DONE', orderRef: 'order-1', depositSecret: 'deposit-secret', depositDone: true };
+    const expected = { kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:DONE:2026-11-09T10:00:00.000000', orderRef: 'order-1', depositSecret: 'deposit-secret', depositDone: true };
     expect(toss().parseWebhook({}, deposit)).toEqual(expected);
     expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, deposit)).toEqual(expected);
     expect(toss().parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_2' }, deposit)).toEqual(expected);

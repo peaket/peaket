@@ -55,6 +55,8 @@ function applying(status = 'RESERVED', log: Partial<ApplyPaymentResultDeps['log'
     writes: {
       approve: async () => ({ status: 'APPLIED' }),
       fail: async () => ({ status: 'APPLIED' }),
+      reverse: async () => ({ status: 'APPLIED' }),
+      holdIssue: async () => true,
       mark: async (i) => {
         marks.push(i);
         return { status: 'APPLIED' };

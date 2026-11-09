@@ -224,6 +224,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     async (req) => engine.webhooks(req.query.paymentKey),
   );
   app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.deposit(req.params.paymentKey)));
+  app.post<{ Params: { paymentKey: string }; Body?: { dueDate?: string } }>('/sim/deposits/:paymentKey/reverse', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.reverseDeposit(req.params.paymentKey, req.body ?? {})));
   app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey/expire', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.expireDeposit(req.params.paymentKey)));
   app.get<{ Querystring: { orderId?: string } }>(
     '/sim/deposit-callbacks',

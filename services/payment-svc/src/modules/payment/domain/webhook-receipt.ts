@@ -23,7 +23,7 @@ export const WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS = 5_000;
 export const WEBHOOK_REJECT_LOG_INTERVAL_MS = 60_000;
 
 /** payment_webhook_received_total의 outcome(docs/observability.md) */
-export const PAYMENT_WEBHOOK_OUTCOMES = ['query_signal', 'query_signal_skipped', 'state_ignored', 'late_deposit_check', 'duplicate', 'ledger_not_found', 'pg_mismatch', 'deposit_secret_mismatch', 'invalid', 'ignored', 'no_adapter', 'store_failed'] as const;
+export const PAYMENT_WEBHOOK_OUTCOMES = ['query_signal', 'query_signal_skipped', 'state_ignored', 'late_deposit_check', 'reversal_check', 'duplicate', 'ledger_not_found', 'pg_mismatch', 'deposit_secret_mismatch', 'invalid', 'ignored', 'no_adapter', 'store_failed'] as const;
 export type PaymentWebhookOutcome = (typeof PAYMENT_WEBHOOK_OUTCOMES)[number];
 
 /** 웹훅이 찾은 원장 행(판단에 쓰는 칸만) */
@@ -48,6 +48,8 @@ export type WebhookDecision =
   | { readonly kind: 'STATE_IGNORED'; readonly paymentId: string; readonly orderId: string }
   /** FAILED로 끝난 원장에 입금 완료 통보가 왔다. 조회를 한 번 건다. 원장은 바꾸지 않는다(BUILD_ORDER HOT-151 코드 리뷰, 닫는 것은 HOT-153) */
   | { readonly kind: 'LATE_DEPOSIT_CHECK'; readonly paymentId: string; readonly orderId: string }
+  /** 승인 원장에 입금 오류(되돌림) 통보가 왔다. 조회를 건다. 조회가 입금 대기로 돌아왔을 때만 원장을 바꾼다(BUILD_ORDER HOT-152) */
+  | { readonly kind: 'REVERSAL_CHECK'; readonly paymentId: string; readonly orderId: string }
   /** 토스 입금 통보의 secret이 원장과 다르거나 대조할 해시가 없다. 수신 기록을 쓰지 않고 조회도 부르지 않는다(BUILD_ORDER HOT-151) */
   | { readonly kind: 'DEPOSIT_SECRET_MISMATCH'; readonly orderId: string };
 
@@ -109,6 +111,17 @@ export function decideDepositCallback(row: WebhookLedgerRow | undefined, allowed
   }
   if (!depositSecretMatches(row.depositSecretHash, secretHash)) return mismatch;
   return { decision: { kind: row.status === 'UNKNOWN' || row.status === 'AWAITING_DEPOSIT' ? 'QUERY_SIGNAL' : 'STATE_IGNORED', ...found }, receipt: true };
+}
+
+/**
+ * 승인 원장에 온 입금 오류 통보를 되돌림 확인으로 바꾼다(payment §6 '되돌림 신호', BUILD_ORDER HOT-152). 보낸 쪽을 확인한(수신 기록을 쓰는) 판단만 바꾼다.
+ * @param row 찾은 원장 행
+ * @param depositReversed 결제사가 입금 되돌림을 알린 통보인가
+ * @param judged 앞선 판단
+ */
+export function withReversalCheck(row: WebhookLedgerRow | undefined, depositReversed: boolean, judged: DepositCallbackJudgement): DepositCallbackJudgement {
+  if (!depositReversed || row?.status !== 'APPROVED' || judged.decision.kind !== 'STATE_IGNORED' || !judged.receipt) return judged;
+  return { decision: { kind: 'REVERSAL_CHECK', paymentId: row.paymentId, orderId: row.orderId }, receipt: true };
 }
 
 /**

@@ -61,6 +61,7 @@ export class ReceivePaymentWebhook {
       // secret은 여기서 해시로만 넘긴다(저장소·로그에 원문이 가지 않는다, BUILD_ORDER HOT-151)
       ...(parsed.depositSecret === undefined ? {} : { depositSecretHash: depositSecretHashOf(parsed.depositSecret) }),
       ...(parsed.depositDone === true ? { depositDone: true } : {}),
+      ...(parsed.depositReversed === true ? { depositReversed: true } : {}),
     };
     return this.#store(route, pg, request);
   }
@@ -94,6 +95,9 @@ export class ReceivePaymentWebhook {
         break;
       case 'STATE_IGNORED':
         signals.outcome(pg, 'state_ignored');
+        break;
+      case 'REVERSAL_CHECK':
+        signals.outcome(pg, 'reversal_check');
         break;
       case 'LATE_DEPOSIT_CHECK':
         signals.outcome(pg, 'late_deposit_check');

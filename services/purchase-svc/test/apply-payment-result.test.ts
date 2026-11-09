@@ -67,6 +67,7 @@ const HOLD_LOG: Record<PaymentResultHoldReason, { severity: 'SEV1' | 'SEV2'; kin
   NOT_YET_SUPPORTED: { severity: 'SEV2' },
   CHARGED_ON_CLOSED_ORDER: { severity: 'SEV1', kind: 'payment-charged-closed' },
   SOLD_MISMATCH: { severity: 'SEV1' },
+  DEPOSIT_REVERSED_NOT_CONFIRMED: { severity: 'SEV1' },
 };
 /** 보류 로그 한 줄의 기대 값(주문 ID·사건 종류·결제사·까닭·수준·표시만. 금액·결제 참조는 없다) */
 const heldLine = (reason: PaymentResultHoldReason, event: PaymentResultEvent = paymentEvent()) => ({ orderId: event.orderId, type: event.type, pg: event.pg, reason, ...HOLD_LOG[reason] });
@@ -225,7 +226,64 @@ describe('건너뛰기(결정의 SKIP): 쓰지 않고 SKIPPED', () => {
     expect(fx.calls).toEqual(['reads.read']);
   });
 
-  test.each(['DEPOSIT_REVERSED', 'PARTIAL_CANCELED', 'CANCELED'] as const)(
+  test('P-T36 ④_되돌림은 T21 한 트랜잭션이고 판매 행 기한은 새 기한 + 10분이며 커밋 뒤 무효 실행기를 깨운다 [ASVS v5.0.0-2.3.3]', async () => {
+    fx.order = resultOrder({ status: 'CONFIRMED' });
+    const reversed: string[] = [];
+    const due = '2026-11-20T10:00:00.000+09:00';
+    const out = await run(paymentEvent({ type: 'DEPOSIT_REVERSED', depositDueAt: due }), { onDepositReversed: (id) => void reversed.push(id) });
+    expect(out).toEqual({ status: 'APPLIED', transition: 'T21', write: 'REVERSE' });
+    expect(fx.reversed).toEqual([{ orderId: ORDER_ID, transition: 'T21', paymentEventSeq: EVENT_SEQ, actor: 'system:payment-result', eventId: EVENT, seatIds: SEAT_IDS, pendingUntilMs: Date.parse(due) + 10 * MIN }]);
+    expect(reversed).toEqual([ORDER_ID]);
+    noAfterCommit();
+  });
+
+  test('P-T36 ④_사건에 기한이 없으면 경고 뒤 판매 행 기한 없이 쓴다', async () => {
+    fx.order = resultOrder({ status: 'CONFIRMED' });
+    const missing: string[] = [];
+    await run(paymentEvent({ type: 'DEPOSIT_REVERSED' }), { log: { ...fx.log, depositDueMissing: (e: { orderId: string }) => void missing.push(e.orderId) } });
+    expect(fx.reversed[0]!.pendingUntilMs).toBeUndefined();
+    expect(missing).toEqual([ORDER_ID]);
+  });
+
+  test('P-T36 ④_출발 상태가 CONFIRMED가 아니면 쓰지 않고 SEV1 보류다 [ASVS v5.0.0-16.3.3]', async () => {
+    fx.order = resultOrder({ status: 'APPROVED' });
+    const e = paymentEvent({ type: 'DEPOSIT_REVERSED' });
+    await expect(run(e)).rejects.toMatchObject({ reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' });
+    expect(fx.reversed).toEqual([]);
+    expect(fx.heldLogs).toEqual([heldLine('DEPOSIT_REVERSED_NOT_CONFIRMED', e)]);
+  });
+
+  test('P-T36 ④_리뷰 고침 M4: APPROVED 주문의 되돌림은 보류하면서 그 주문의 발권 작업을 멈춘다(미납 티켓이 새로 나가지 않게) [ASVS v5.0.0-16.3.3]', async () => {
+    fx.order = resultOrder({ status: 'APPROVED' });
+    const e = paymentEvent({ type: 'DEPOSIT_REVERSED' });
+    await expect(run(e)).rejects.toMatchObject({ reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' });
+    expect(fx.heldIssues).toEqual([ORDER_ID]);
+    expect(fx.calls).toEqual(['reads.read', 'writes.holdIssue', 'log.held']);
+    expect(fx.reversed).toEqual([]);
+  });
+
+  test.each(['PARTIALLY_REFUNDED', 'AWAITING_DEPOSIT'] as const)('P-T36 ④_리뷰 고침 M4: %s 주문은 멈출 발권 작업이 없어 부르지 않고 보류만 한다', async (status) => {
+    fx.order = resultOrder({ status });
+    await expect(run(paymentEvent({ type: 'DEPOSIT_REVERSED' }))).rejects.toMatchObject({ reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' });
+    expect(fx.heldIssues).toEqual([]);
+  });
+
+  test('P-T36 ④_리뷰 고침 M4: 발권 작업을 멈추지 못했으면 보류하지 않고 DB 오류를 그대로 던진다(일시 실패로 다시 한다)', async () => {
+    fx.order = resultOrder({ status: 'APPROVED' });
+    fx.holdIssueAnswer = PG_DOWN();
+    await expect(run(paymentEvent({ type: 'DEPOSIT_REVERSED' }))).rejects.toMatchObject({ code: '57P01' });
+    expect(fx.heldLogs).toEqual([]);
+  });
+
+  test('P-T36 ④_리뷰 고침 M4: 다시 처리(RB-11) 때 주문이 CONFIRMED면 정상 경로 T21이다', async () => {
+    fx.readQueue = [resultOrder({ status: 'APPROVED' }), resultOrder({ status: 'CONFIRMED' })];
+    const e = paymentEvent({ type: 'DEPOSIT_REVERSED' });
+    await expect(run(e)).rejects.toBeInstanceOf(PaymentResultHeld);
+    expect(await run(e)).toEqual({ status: 'APPLIED', transition: 'T21', write: 'REVERSE' });
+    expect(fx.heldIssues).toEqual([ORDER_ID]);
+  });
+
+  test.each(['PARTIAL_CANCELED', 'CANCELED'] as const)(
     'FR011_%s는 건너뛰지 않고 PaymentResultHeld(NOT_YET_SUPPORTED)로 보류한다(보류 표에 남아 맡을 단계가 생기면 다시 처리, 리뷰 M3). log.held 한 줄(SEV2), 쓰기·구매 세션 일 없음',
     async (type) => {
       fx.order = resultOrder({ status: 'CONFIRMED' });

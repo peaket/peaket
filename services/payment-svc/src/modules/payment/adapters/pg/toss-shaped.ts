@@ -217,15 +217,18 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
       return { kind: 'INVALID', reason: 'BODY' };
     }
     if (msg === null || typeof msg !== 'object') return { kind: 'INVALID', reason: 'BODY' };
-    const m = msg as { eventType?: unknown; data?: { paymentKey?: unknown; orderId?: unknown }; secret?: unknown; orderId?: unknown; transactionKey?: unknown; status?: unknown };
+    const m = msg as { eventType?: unknown; data?: { paymentKey?: unknown; orderId?: unknown }; secret?: unknown; orderId?: unknown; transactionKey?: unknown; status?: unknown; createdAt?: unknown };
     // 입금 통보(DEPOSIT_CALLBACK)는 사건 이름 없이 본문 최상위에 secret·orderId가 있다. 주문 ID와 대조할 secret을 싣는다(대조는 저장소가 원장의 해시와 한다, BUILD_ORDER HOT-151).
-    // 중복 키는 거래 키와 상태다: 문서가 이 사건의 머리를 따로 적지 않고 전송 ID는 보낼 때마다 새로 나오므로 머리에 기대지 않는다
+    // 중복 키는 거래 키·상태·통보 생성 시각(createdAt, 2026-11-09 공식 문서 확인)이다: 같은 거래가 두 번 되돌려져도 뒤 통보를 중복으로 버리지 않게 한다(BUILD_ORDER HOT-152 코드 리뷰).
+    // 문서가 이 사건의 머리를 따로 적지 않고 전송 ID는 보낼 때마다 새로 나오므로 머리에 기대지 않는다. createdAt이 없거나 모양이 틀리면 거래 키와 상태만 쓴다(통보를 버리지 않는다)
     if (m.eventType === undefined && typeof m.secret === 'string') {
       const depositOrderRef = str(m.orderId);
       const transactionKey = str(m.transactionKey);
       const depositStatus = str(m.status);
       if (depositOrderRef === undefined || !WEBHOOK_REF.test(depositOrderRef) || transactionKey === undefined || !WEBHOOK_REF.test(transactionKey) || depositStatus === undefined || !WEBHOOK_REF.test(depositStatus) || !WEBHOOK_REF.test(m.secret)) return { kind: 'INVALID', reason: 'BODY' };
-      return { kind: 'TRIGGER', dedupKey: `${this.pg}:deposit:${transactionKey}:${depositStatus}`, orderRef: depositOrderRef, depositSecret: m.secret, ...(depositStatus === 'DONE' ? { depositDone: true as const } : {}) };
+      const createdAt = str(m.createdAt);
+      const notifiedAt = createdAt !== undefined && WEBHOOK_REF.test(createdAt) ? `:${createdAt}` : '';
+      return { kind: 'TRIGGER', dedupKey: `${this.pg}:deposit:${transactionKey}:${depositStatus}${notifiedAt}`, orderRef: depositOrderRef, depositSecret: m.secret, ...(depositStatus === 'DONE' ? { depositDone: true as const } : {}), ...(depositStatus === 'WAITING_FOR_DEPOSIT' ? { depositReversed: true as const } : {}) };
     }
     let id: string | undefined;
     for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === TRANSMISSION_ID) id = typeof v === 'string' ? v : undefined;

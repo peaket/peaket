@@ -575,6 +575,8 @@ export interface SagaOrderView {
   readonly seats: readonly SagaSeat[];
   /** ACCEPTED 결제 시도. 없으면 undefined(코드 오류·손질) */
   readonly attempt?: SagaAttemptView;
+  /** 그 주문의 티켓 무효 작업(ticket_void_job)이 남아 있으면 true. 무효가 끝날 때까지 RELEASE 단계가 좌석을 풀지 않는다(BUILD_ORDER HOT-152 코드 리뷰) */
+  readonly ticketVoidPending?: boolean;
 }
 
 /** Saga 작업에 필요한 주문 읽기(트랜잭션 밖)와 판 번호 적기 */
@@ -917,6 +919,15 @@ export interface PaymentMarkInput extends PaymentResultWriteBase {
   readonly depositPending?: { readonly eventId: string; readonly seatIds: readonly string[]; readonly pendingUntilMs: number };
 }
 
+/** 입금 오류 되돌림 쓰기 입력(T21, BUILD_ORDER HOT-152) */
+export interface PaymentReverseInput extends PaymentResultWriteBase {
+  readonly transition: 'T21';
+  readonly eventId: string;
+  readonly seatIds: readonly string[];
+  /** 판매 행 pending_until(epoch ms) = 새 입금 기한 + 10분 [가정]. 사건에 기한이 없으면 없다 */
+  readonly pendingUntilMs?: number;
+}
+
 /**
  * 쓰기 결과. STALE이면 트랜잭션째 되돌렸다(아무것도 남지 않는다): 주문이 출발 상태가 아니었다.
  * reason은 주문 전이 함수의 까닭과 같은 규칙이다(NOT_FOUND: 주문 없음, STATUS: 지금 상태가 출발이 아님, PAYMENT_SEQ: 그 순번 이상을 이미 반영함). current = 지금 상태(STATUS일 때만).
@@ -955,6 +966,18 @@ export interface PaymentResultWrites {
    * @throws RangeError 입력이 틀림 · Error 그 밖의 DB 오류(되돌렸다)
    */
   mark(input: PaymentMarkInput): Promise<PaymentResultWriteOutcome>;
+  /**
+   * 입금 오류 되돌림 한 트랜잭션(T21, BUILD_ORDER HOT-152): 작업 행 AWAIT(없으면 넣는다) → 주문 행 잠금(상태·순번) → 판매 행 SOLD → PENDING(바뀐 수가 좌석 수가 아니면 되돌리고 SOLD_MISMATCH)
+   * → 주문 항목 ticket_id 비우기 → ticket_void_job 한 행(무효로 할 세대 = 되돌림 직전의 payment_event_seq) → T21(trade.orders DEPOSIT_REVERSED, Outbox 마지막).
+   * @throws RangeError 입력이 틀림 · Error 그 밖의 DB 오류(되돌렸다)
+   */
+  reverse(input: PaymentReverseInput): Promise<PaymentResultWriteOutcome>;
+  /**
+   * APPROVED 주문에 입금 되돌림이 와서 보류할 때 그 주문의 발권 작업을 멈춘다(미납 티켓이 새로 나가지 않게, BUILD_ORDER HOT-152 코드 리뷰): 멈추지 않은 ticket_issue_job 행의 next_attempt_at·lease_until을 비우고 last_error = DEPOSIT_REVERSED.
+   * 임대도 비워 돌던 발권의 늦은 답이 쓰지 못한다(같은 세대라 다시 켠 뒤의 발권은 멱등이다). 이번에 멈췄으면 true. 소문자 UUID가 아니면 DB에 가지 않고 false
+   * @throws Error DB 오류(보류하지 않고 처리기가 일시 실패로 다시 한다)
+   */
+  holdIssue(orderId: string): Promise<boolean>;
 }
 
 /**
@@ -1092,6 +1115,8 @@ export interface TicketIssueJob {
   readonly payerAccountId: string;
   /** 주문 항목의 좌석 ID(줄 번호 차례, 1~10개. IssueTickets seat_ids) */
   readonly seatIds: readonly string[];
+  /** 이 발권을 낳은 승인 사건의 순번(ticket_issue_job.issue_generation, IssueTickets issue_generation, BUILD_ORDER HOT-152) */
+  readonly issueGeneration: number;
   /** 지금까지의 발권 시도 수(retry·stop이 1 올린다. 잡기는 바꾸지 않는다) */
   readonly attempts: number;
   /** 다음 시도 시각(epoch ms). 잡은 행은 늘 있다(멈춘 행은 잡히지 않는다) */
@@ -1126,6 +1151,62 @@ export interface TicketIssueCommand {
   readonly seatIds: readonly string[];
   /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 TICKET_ISSUE_CALL_DEADLINE_MS(2초 [가정])로 준다 */
   readonly deadlineMs: number;
+  /** 이 발권을 낳은 승인 사건의 순번(재발권이 앞 세대와 멱등 충돌하지 않게, BUILD_ORDER HOT-152). 없으면 칸을 비운다(0) */
+  readonly issueGeneration?: number;
+}
+
+/** 티켓 무효 호출 입력(ticket.proto VoidTicketsRequest, BUILD_ORDER HOT-152) */
+export interface TicketVoidCommand {
+  readonly orderId: string;
+  readonly eventId: string;
+  /** 무효로 할 발권 세대(되돌림 직전의 payment_event_seq) */
+  readonly issueGeneration: number;
+  readonly deadlineMs: number;
+}
+
+/** ticket-svc 티켓 무효 호출(운영은 GrpcTicketIssuer, 주소가 없으면 local·ci만 대역) */
+export interface TicketVoider {
+  /** @throws TicketIssueCallError 모든 실패(코드 규칙은 발권 호출과 같다) */
+  voidTickets(c: TicketVoidCommand): Promise<TicketVoidResult>;
+}
+
+/** 티켓 무효 호출의 답 */
+export interface TicketVoidResult {
+  /** 그 세대의 티켓 가운데 입장 기록이 있는 수(ticket.proto VoidTicketsResponse.already_entered, BUILD_ORDER HOT-152 코드 리뷰) */
+  readonly alreadyEntered: number;
+}
+
+/** 잡은 티켓 무효 큐 행 */
+export interface TicketVoidJob {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly issueGeneration: number;
+  readonly attempts: number;
+  readonly leaseUntilMs: number;
+}
+
+/** 티켓 무효 큐(운영은 adapters/db/drizzle-ticket-void.ts, 잡기·다시 보내기는 발권 큐와 같은 꼴이다) */
+export interface TicketVoidJobs {
+  claimDue(limit: number, leaseMs: number): Promise<TicketVoidJob[]>;
+  claim(orderId: string, leaseMs: number): Promise<TicketVoidJob | undefined>;
+  /** 무효 호출이 끝났다: 자기 임대 조건으로 행을 지운다. 임대를 잃었으면 false */
+  done(orderId: string, leaseUntilMs: number): Promise<boolean>;
+  retry(i: { readonly orderId: string; readonly nextAtMs: number; readonly code: TicketIssueFailureCode; readonly leaseUntilMs: number }): Promise<boolean>;
+  stop(i: { readonly orderId: string; readonly code: TicketIssueFailureCode; readonly leaseUntilMs: number }): Promise<boolean>;
+}
+
+/** 티켓 무효 로그(주문 ID·코드만). 던지지 않는다 */
+export interface TicketVoidLog {
+  /** 다시 보내도 같은 결과일 실패로 멈췄다(SEV1, kind ticket-void-stopped. 재발권과 좌석 반환이 그 무효를 기다린다, BUILD_ORDER HOT-152 코드 리뷰) */
+  stopped(e: { readonly orderId: string; readonly code: TicketIssueFailureCode }): void;
+  /** 무효로 한 세대에 입장 기록이 있는 표가 있었다(SEV1, kind ticket-void-already-entered, 주문 ID·수만, BUILD_ORDER HOT-152 코드 리뷰) */
+  alreadyEntered(e: { readonly orderId: string; readonly count: number }): void;
+  runError(e: { readonly what: 'claim' | 'call' | 'write'; readonly orderId?: string; readonly err: unknown }): void;
+}
+
+/** 티켓 무효 지표(ticket_void_attempts_total{result}). 던지지 않는다 */
+export interface TicketVoidSignals {
+  attempt(result: 'voided' | 'retry' | 'stopped'): void;
 }
 
 /**

@@ -36,6 +36,7 @@ import type {
   PaymentFailInput,
   PaymentMarkInput,
   PaymentResultOrder,
+  PaymentReverseInput,
   PaymentResultReads,
   PaymentResultWriteOutcome,
   PaymentResultWrites,
@@ -51,6 +52,8 @@ export interface PaymentResultSeatSales {
   markSoldIn(tx: DbTransaction, order: { eventId: string; orderId: string; seatIds: readonly string[] }): Promise<number>;
   /** 그 주문·계정의 PENDING 행을 지우고 한도를 되돌린다. 지운 행 수 */
   releasePendingIn(tx: DbTransaction, release: SagaSaleRelease): Promise<number>;
+  /** 그 주문의 SOLD 행을 PENDING으로 되돌린다(입금 오류, BUILD_ORDER HOT-152). 바꾼 행 수 */
+  markPendingAgainIn(tx: DbTransaction, order: { eventId: string; orderId: string; seatIds: readonly string[]; pendingUntilMs?: number }): Promise<number>;
   /** 그 주문의 PENDING 행을 좌석 ID 순으로 잠가 pending_until을 쓴다(입금 대기, BUILD_ORDER HOT-151). 바꾼 행 수 */
   setPendingUntilIn(tx: DbTransaction, order: { eventId: string; orderId: string; seatIds: readonly string[]; pendingUntilMs: number }): Promise<number>;
 }
@@ -75,6 +78,7 @@ const TX = { isolationLevel: 'read committed', statementTimeoutMs: SAGA_STATEMEN
 const APPROVE_TRANSITIONS: ReadonlySet<string> = new Set(['T9', 'T13', 'T16']);
 const FAIL_TRANSITIONS: ReadonlySet<string> = new Set(['T11', 'T15', 'T17']);
 const MARK_TRANSITIONS: ReadonlySet<string> = new Set(['T10', 'T12', 'T14']);
+const REVERSE_TRANSITIONS: ReadonlySet<string> = new Set(['T21']);
 const FAILURE_CATEGORIES: ReadonlySet<string> = new Set(PAYMENT_FAILURE_CATEGORIES);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
@@ -116,6 +120,14 @@ function assertFail(i: PaymentFailInput): void {
   if (!isUuid(r.eventId) || !isUuid(r.accountId)) throw new RangeError('release의 eventId·accountId가 소문자 UUID가 아니다');
   if (r.orderId !== i.orderId) throw new RangeError('release의 orderId가 실패 쓰기의 주문과 다르다');
   assertSeatIds(r.seatIds);
+}
+
+function assertReverse(i: PaymentReverseInput): void {
+  assertBase(i, REVERSE_TRANSITIONS, '입금 되돌림');
+  if (!isUuid(i.eventId)) throw new RangeError('eventId가 소문자 UUID가 아니다');
+  assertSeatIds(i.seatIds);
+  const until = i.pendingUntilMs;
+  if (until !== undefined && (typeof until !== 'number' || !Number.isSafeInteger(until) || Number.isNaN(new Date(until).getTime()))) throw new RangeError(`pendingUntilMs가 날짜(유닉스 밀리초)가 아니다: ${String(until)}`);
 }
 
 function assertMark(i: PaymentMarkInput): void {
@@ -239,8 +251,8 @@ export class DrizzlePaymentResults implements PaymentResultReads, PaymentResultW
       if (sold !== input.seatIds.length) throw new PaymentResultRollback({ status: 'SOLD_MISMATCH' });
       // 발권 재시도 큐 한 행
       await tx.execute(sql`
-        insert into ticket_issue_job (order_id, event_id, attempts, next_attempt_at, issue_due_at, last_error, created_at)
-        values (${input.orderId}::uuid, ${input.eventId}::uuid, 0, ${now}::timestamptz, ${new Date(input.issueDueAtMs)}::timestamptz, null, ${now}::timestamptz)
+        insert into ticket_issue_job (order_id, event_id, issue_generation, attempts, next_attempt_at, issue_due_at, last_error, created_at)
+        values (${input.orderId}::uuid, ${input.eventId}::uuid, ${input.paymentEventSeq}::bigint, 0, ${now}::timestamptz, ${new Date(input.issueDueAtMs)}::timestamptz, null, ${now}::timestamptz)
         on conflict (order_id) do nothing`);
       // T9·T13·T16(APPROVED 사건의 Outbox가 업무 문장의 마지막)
       const t = await this.o.store.transition(tx, { orderId: input.orderId, transition: input.transition, actor: input.actor, paymentEventSeq: input.paymentEventSeq });
@@ -308,6 +320,50 @@ export class DrizzlePaymentResults implements PaymentResultReads, PaymentResultW
       if (t.status !== 'APPLIED') throw new PaymentResultRollback(staleOf(t));
       return { status: 'APPLIED' } as const;
     });
+  }
+
+  async reverse(input: PaymentReverseInput): Promise<PaymentResultWriteOutcome> {
+    assertReverse(input);
+    return this.#tx(async (tx) => {
+      const nowMs = this.o.clock.now();
+      const now = new Date(nowMs);
+      // 첫 문장: 주문 행을 잠그고 상태·순번을 본다. CONFIRMED 주문에는 작업 행이 없어 잠금 차례(작업 행 → 주문 행)가 부딪칠 상대가 없다
+      const stale = await lockSource(tx, input.orderId, 'CONFIRMED', input.paymentEventSeq);
+      if (stale) throw new PaymentResultRollback(stale);
+      // 작업 행을 AWAIT로 넣어 다시 들어온 입금을 결과 당기기가 받게 한다(pull_next_at = 지금 + 60초 [가정], 당기기의 조건이라 confirm_sent_at도 쓴다)
+      const pullNextAt = new Date(nowMs + PAYMENT_PULL_AFTER_DEPOSIT_MS);
+      await tx.execute(sql`
+        insert into order_saga_job (order_id, event_id, step, attempts, next_attempt_at, lease_until, created_at, confirm_sent_at, pull_next_at)
+        values (${input.orderId}::uuid, ${input.eventId}::uuid, 'AWAIT', 0, 'infinity'::timestamptz, null, ${now}::timestamptz, ${now}::timestamptz, ${pullNextAt}::timestamptz)
+        on conflict (order_id) do update set step = 'AWAIT', pull_next_at = excluded.pull_next_at, next_attempt_at = 'infinity'::timestamptz, confirm_sent_at = coalesce(order_saga_job.confirm_sent_at, excluded.confirm_sent_at)`);
+      // 판매 행 SOLD → PENDING(좌석 ID 순 잠금). 좌석 수만큼 바뀌지 않았으면 판매 행이 없어진 것이라 되돌린다
+      const pending = await this.o.sales.markPendingAgainIn(tx, { eventId: input.eventId, orderId: input.orderId, seatIds: input.seatIds, ...(input.pendingUntilMs === undefined ? {} : { pendingUntilMs: input.pendingUntilMs }) });
+      if (pending !== input.seatIds.length) throw new PaymentResultRollback({ status: 'SOLD_MISMATCH' });
+      await tx.execute(sql`update order_item set ticket_id = null where order_id = ${input.orderId}::uuid`);
+      // 티켓 무효 작업 행. 무효로 할 세대는 되돌리기 직전의 payment_event_seq다(T21이 순번을 바꾸기 전에 읽는다)
+      await tx.execute(sql`
+        insert into ticket_void_job (order_id, event_id, issue_generation, attempts, next_attempt_at, lease_until, last_error, created_at)
+        select id, ${input.eventId}::uuid, payment_event_seq, 0, ${now}::timestamptz, null, null, ${now}::timestamptz from purchase_order where id = ${input.orderId}::uuid
+        on conflict (order_id) do update set issue_generation = excluded.issue_generation, attempts = 0, next_attempt_at = excluded.next_attempt_at, lease_until = null, last_error = null`);
+      // T21(trade.orders DEPOSIT_REVERSED Outbox가 업무 문장의 마지막)
+      const t = await this.o.store.transition(tx, { orderId: input.orderId, transition: input.transition, actor: input.actor, paymentEventSeq: input.paymentEventSeq });
+      if (t.status !== 'APPLIED') throw new PaymentResultRollback(staleOf(t));
+      return { status: 'APPLIED' } as const;
+    });
+  }
+
+  async holdIssue(orderId: string): Promise<boolean> {
+    if (!isUuid(orderId)) return false;
+    // 이미 멈춘 행은 그대로 둔다(사람이 본 까닭을 덮지 않는다). 임대까지 비워 돌던 발권의 늦은 답이 이어 쓰지 못한다
+    const r = await this.o.database.transaction(
+      (tx) =>
+        tx.execute(sql`
+          update ticket_issue_job set next_attempt_at = null, lease_until = null, last_error = 'DEPOSIT_REVERSED'
+          where order_id = ${orderId}::uuid and next_attempt_at is not null
+          returning order_id`),
+      TX,
+    );
+    return r.rows.length > 0;
   }
 
   /** 트랜잭션 하나(READ COMMITTED, 문장 시간 한도 5초 [가정]). 되돌림 표지는 결과로 바꾼다 */

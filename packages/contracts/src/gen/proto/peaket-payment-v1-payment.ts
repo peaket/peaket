@@ -286,7 +286,8 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "FAILURE_CATEGORY_VALIDATION": 3,
                     "FAILURE_CATEGORY_EXPIRED": 4,
                     "FAILURE_CATEGORY_PG_ERROR": 5,
-                    "FAILURE_CATEGORY_THROTTLED": 6
+                    "FAILURE_CATEGORY_THROTTLED": 6,
+                    "FAILURE_CATEGORY_DEPOSIT_CANCELED": 7
                   }
                 },
                 "ConfirmPaymentResponse": {

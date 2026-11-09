@@ -19,6 +19,7 @@ import {
   issuedTicketsMatch,
   issuedTicketsOf,
   issuingTicketIssuer,
+  voidingTicketVoider,
   LoggerTicketIssueLog,
   PromTicketIssueSignals,
   TICKET_DEPENDENCY,
@@ -274,6 +275,13 @@ async function fakeTicketServer(answer: (req: Record<string, unknown>) => Promis
   const server = new grpc.Server();
   const requests: Record<string, unknown>[] = [];
   server.addService(pkg.TicketService.service, {
+    VoidTickets: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      requests.push(call.request);
+      void Promise.resolve(answer(call.request)).then((a) => {
+        if ('error' in a) cb({ code: a.error as grpc.status, details: 'fake ticket-svc' });
+        else cb(null, a);
+      });
+    },
     IssueTickets: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
       requests.push(call.request);
       void Promise.resolve(answer(call.request)).then((a) => {
@@ -304,7 +312,7 @@ describe('GrpcTicketIssuer와 가짜 ticket-svc', () => {
         { seatId: SEAT_2, ticketId: TICKET_2, status: 'ISSUED' },
       ]);
       expect(srv.requests).toHaveLength(1);
-      expect(srv.requests[0]).toEqual({ order_id: ORDER_ID, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_2, SEAT_1] });
+      expect(srv.requests[0]).toEqual({ order_id: ORDER_ID, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_2, SEAT_1], issue_generation: 0 });
     } finally {
       srv.close();
       c.close();
@@ -528,5 +536,63 @@ describe('발권 실행기 전용 DB 풀(리뷰 고침 H1)', () => {
   test('리뷰 고침 H1_발권 실행기의 큐 쓰기는 핫패스 풀과 따로인 전용 일반 풀(profile general, 연결 4개 [가정], 이름 purchase-svc-ticket-issue)을 쓴다. 주소는 받은 그대로다 (ADR0106) [ASVS v5.0.0-16.5.2]', () => {
     const url = 'postgres://purchase:secret@db.internal:5432/purchase';
     expect(ticketIssueDatabaseOptions(url)).toEqual({ url, profile: 'general', max: 4, applicationName: 'purchase-svc-ticket-issue' });
+  });
+});
+
+describe('재발권 세대와 티켓 무효(P-T36 ④)', () => {
+  test('P-T36 ④_무효 호출은 주문·회차·세대를 싣고, 발권 호출은 새 세대를 싣는다', async () => {
+    const srv = await fakeTicketServer(() => ({ voided: 2, tickets: [] }));
+    const c = new GrpcTicketIssuer({ address: srv.address });
+    try {
+      await c.voidTickets({ orderId: ORDER_ID, eventId: EVENT, issueGeneration: 3, deadlineMs: 1_000 });
+      await c.issue(command({ issueGeneration: 5 }));
+      expect(srv.requests[0]).toEqual({ order_id: ORDER_ID, event_id: EVENT, issue_generation: 3 });
+      expect(srv.requests[1]).toMatchObject({ order_id: ORDER_ID, issue_generation: 5 });
+    } finally {
+      srv.close();
+      c.close();
+    }
+  });
+
+  test('P-T36 ④_리뷰 고침 M6: 무효 답의 입장 기록 수를 돌려준다(칸이 없으면 0이다, 대역도 0이다)', async () => {
+    const srv = await fakeTicketServer(() => ({ voided: 2, already_entered: 1 }));
+    const old = await fakeTicketServer(() => ({ voided: 2 }));
+    const c = new GrpcTicketIssuer({ address: srv.address });
+    const d = new GrpcTicketIssuer({ address: old.address });
+    try {
+      await expect(c.voidTickets({ orderId: ORDER_ID, eventId: EVENT, issueGeneration: 3, deadlineMs: 1_000 })).resolves.toEqual({ alreadyEntered: 1 });
+      await expect(d.voidTickets({ orderId: ORDER_ID, eventId: EVENT, issueGeneration: 3, deadlineMs: 1_000 })).resolves.toEqual({ alreadyEntered: 0 });
+      await expect(voidingTicketVoider.voidTickets({ orderId: ORDER_ID, eventId: EVENT, issueGeneration: 3, deadlineMs: 1_000 })).resolves.toEqual({ alreadyEntered: 0 });
+    } finally {
+      srv.close();
+      old.close();
+      c.close();
+      d.close();
+    }
+  });
+
+  test('P-T36 ④_무효 호출의 실패는 코드로 온다 [ASVS v5.0.0-16.5.2]', async () => {
+    const srv = await fakeTicketServer(() => ({ error: grpc.status.UNAVAILABLE }));
+    const c = new GrpcTicketIssuer({ address: srv.address });
+    try {
+      await expect(c.voidTickets({ orderId: ORDER_ID, eventId: EVENT, issueGeneration: 3, deadlineMs: 1_000 })).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    } finally {
+      srv.close();
+      c.close();
+    }
+  });
+
+  test('P-T36 ④_대역의 티켓 ID는 세대마다 다르다(같은 세대는 같다)', async () => {
+    const one = await issuingTicketIssuer.issue(command({ issueGeneration: 3 }));
+    const same = await issuingTicketIssuer.issue(command({ issueGeneration: 3 }));
+    const next = await issuingTicketIssuer.issue(command({ issueGeneration: 5 }));
+    expect(same).toEqual(one);
+    expect(next.map((t) => t.ticketId)).not.toEqual(one.map((t) => t.ticketId));
+  });
+
+  test('P-T36 ④_주소가 없는 local은 무효도 대역이고 운영은 시작 실패다', () => {
+    const t = ticketIssuerFromEnv({ PEAKET_ENV: 'local' });
+    expect(t.voider).toBe(voidingTicketVoider);
+    expect(() => ticketIssuerFromEnv({ PEAKET_ENV: 'prod' })).toThrow();
   });
 });

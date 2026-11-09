@@ -25,7 +25,7 @@
 // 리뷰(2026-11-05) 반영(새 정본):
 // - M1: mark(T10·T12·T14)도 남은 결제 참조를 지운다(UNKNOWN·AWAITING_DEPOSIT 사건은 승인 명령이 접수됐다는 뜻). 쓰기 차례: 작업 행 → 결제 시도 → 주문 → 이력(→ Outbox).
 // - M2: 닫힌 주문(FAILED·EXPIRED·COMPENSATED)에 APPROVED·AWAITING_DEPOSIT은 CHARGED_ON_CLOSED_ORDER(SEV1)로 보류한다(접수한 결제 시도가 없는 EXPIRED도).
-// - M3: DEPOSIT_REVERSED·PARTIAL_CANCELED·CANCELED는 NOT_YET_SUPPORTED로 보류한다(RESOLVED만 건너뛴다).
+// - M3: PARTIAL_CANCELED·CANCELED는 NOT_YET_SUPPORTED로 보류한다(RESOLVED만 건너뛴다). DEPOSIT_REVERSED는 BUILD_ORDER HOT-152가 맡는다.
 // - M4: 승인에서 SOLD로 바꾼 판매 행 수가 좌석 수와 다르면 되돌리고 SOLD_MISMATCH(SEV1)로 보류한다.
 // - 권고1: 승인은 주문 행을 잠글 때 상태·순번을 보고 맞지 않으면 바로 STALE이다(판매 행·발권 큐 문장까지 가지 않는다).
 // - L1: 승인된 주문의 다시 온 사건은 구매 세션 끝내기만 다시 부른다.
@@ -43,6 +43,7 @@ import {
   DrizzleOrderStore,
   DrizzlePaymentResults,
   DrizzleSaga,
+  DrizzleTicketVoid,
   type NewOrder,
   type OrderRequestOnce,
   type PaymentApproveInput,
@@ -150,6 +151,7 @@ function countingResults(s: Fresh, db: Database = database) {
     },
     releasePendingIn: (tx, r) => inner.releasePendingIn(tx, r),
     setPendingUntilIn: (tx, o) => inner.setPendingUntilIn(tx, o),
+    markPendingAgainIn: (tx, o) => inner.markPendingAgainIn(tx, o),
   };
   return { results: new DrizzlePaymentResults({ database: db, store: s.store, sales, clock: s.clock }), calls };
 }
@@ -1019,6 +1021,7 @@ const HOLD_LOG: Record<PaymentResultHoldReason, { severity: 'SEV1' | 'SEV2'; kin
   NOT_YET_SUPPORTED: { severity: 'SEV2' },
   CHARGED_ON_CLOSED_ORDER: { severity: 'SEV1', kind: 'payment-charged-closed' },
   SOLD_MISMATCH: { severity: 'SEV1' },
+  DEPOSIT_REVERSED_NOT_CONFIRMED: { severity: 'SEV1' },
 };
 const heldLine = (reason: PaymentResultHoldReason, e: PaymentResultEvent) => ({ kind: 'held', e: { orderId: e.orderId, type: e.type, pg: e.pg, reason, ...HOLD_LOG[reason] } });
 
@@ -1159,7 +1162,7 @@ describe('ApplyPaymentResult.execute(실제 DB: 읽기 → 결정 → 한 트랜
     expect(u.log.lines).toEqual([]);
   });
 
-  test.each(['DEPOSIT_REVERSED', 'PARTIAL_CANCELED', 'CANCELED'] as const)(
+  test.each(['PARTIAL_CANCELED', 'CANCELED'] as const)(
     'M3_%s는 건너뛰지 않고 PaymentResultHeld(NOT_YET_SUPPORTED)를 던진다(보류 표에 남아 그 사건을 잃지 않는다). 주문 그대로, held 로그 한 줄(SEV2)',
     async (type) => {
       const s = fresh();
@@ -1257,5 +1260,154 @@ describe('ApplyPaymentResult.execute(실제 DB: 읽기 → 결정 → 한 트랜
     expect((await u.apply.execute(eventOf(s, a))).status).toBe('APPLIED');
     expect(u.log.lines).toEqual([{ kind: 'afterCommitFailed', e: { orderId: a.o.id, what: 'complete_session', errorName: 'OrderSeatStoreUnavailable' } }]);
     expect(await orderRow(a.o.id)).toMatchObject({ status: 'APPROVED' });
+  });
+});
+
+describe('입금 오류 되돌림 T21(P-T36 ④)', () => {
+  const DUE = BASE_MS + 2 * 86_400_000;
+  /** 입금 확인·발권까지 끝난 주문(CONFIRMED, payment_event_seq = seq) */
+  async function confirmed(s: Fresh, seq = 3): Promise<Accepted> {
+    const a = await reserved(s);
+    await walk(s, a.o, [['T10', 1]]);
+    expect((await s.results.approve(approveOf(s, a, { transition: 'T16', paymentEventSeq: seq }))).status).toBe('APPLIED');
+    const tickets = seatIdsOf(a).map((seatId, i) => ({ seatId, ticketId: randomUUID().replace(/^.{2}/, `0${i}`) }));
+    for (const t of tickets) await q('update order_item set ticket_id = $1 where order_id = $2 and seat_id = $3', [t.ticketId, a.o.id, t.seatId]);
+    await q('delete from ticket_issue_job where order_id = $1', [a.o.id]);
+    await walk(s, a.o, ['T18']);
+    return a;
+  }
+  const reverseOf = (a: Accepted, x: Record<string, unknown> = {}) => ({ orderId: a.o.id, transition: 'T21' as const, paymentEventSeq: 4, actor: PAYMENT_ACTOR, eventId: a.o.eventId, seatIds: seatIdsOf(a), pendingUntilMs: DUE, ...x });
+  const voidJob = async (orderId: string) => (await q<{ issue_generation: string; attempts: number }>('select issue_generation::text as issue_generation, attempts from ticket_void_job where order_id = $1', [orderId]))[0];
+  const seatRows = async (a: Accepted) => q<{ status: string; pending_until: Date | null }>('select status, pending_until from seat_sale where event_id = $1 and order_id = $2 order by seat_id', [a.o.eventId, a.o.id]);
+  const items = async (id: string) => q<{ ticket_id: string | null }>('select ticket_id from order_item where order_id = $1', [id]);
+
+  test('P-T36 ④_한 트랜잭션: 주문 입금 대기·판매 행 PENDING·티켓 칸 비움·무효 작업·작업 행 AWAIT·사건 DEPOSIT_REVERSED [ASVS v5.0.0-2.3.3]', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    expect(await s.results.reverse(reverseOf(a))).toEqual({ status: 'APPLIED' });
+    expect(await orderRow(a.o.id)).toMatchObject({ status: 'AWAITING_DEPOSIT', payment_event_seq: '4' });
+    expect((await seatRows(a)).map((r) => [r.status, r.pending_until?.getTime()])).toEqual([
+      ['PENDING', DUE],
+      ['PENDING', DUE],
+    ]);
+    expect((await items(a.o.id)).map((r) => r.ticket_id)).toEqual([null, null]);
+    expect(await voidJob(a.o.id)).toEqual({ issue_generation: '3', attempts: 0 });
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
+    expect((await outboxOf(a.o.eventId)).at(-1)!.event).toMatchObject({ type: 'DEPOSIT_REVERSED', orderId: a.o.id });
+    expect(await quotaOf(a.o.accountId, a.o.eventId)).toMatchObject({ used: 2 });
+  });
+
+  test('P-T36 ④_같은 사건을 다시 쓰면 STALE이고 한 번만 반영한다', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    await s.results.reverse(reverseOf(a));
+    const again = await s.results.reverse(reverseOf(a));
+    expect(again).toMatchObject({ status: 'STALE' });
+    expect((await outboxOf(a.o.eventId)).filter((x) => x.event.type === 'DEPOSIT_REVERSED')).toHaveLength(1);
+  });
+
+  test('P-T36 ④_순번을 이미 반영했으면 STALE PAYMENT_SEQ이고 아무것도 바꾸지 않는다', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    const before = await traceOf(a);
+    expect(await s.results.reverse(reverseOf(a, { paymentEventSeq: 3 }))).toEqual({ status: 'STALE', reason: 'PAYMENT_SEQ' });
+    expect(await traceOf(a)).toEqual(before);
+    expect(await voidJob(a.o.id)).toBeUndefined();
+  });
+
+  test('P-T36 ④_판매 행 수가 좌석 수와 다르면 되돌리고 SOLD_MISMATCH다', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    await q('delete from seat_sale where order_id = $1 and seat_id = $2', [a.o.id, seatIdsOf(a)[0]]);
+    expect(await s.results.reverse(reverseOf(a))).toEqual({ status: 'SOLD_MISMATCH' });
+    expect(await orderRow(a.o.id)).toMatchObject({ status: 'CONFIRMED' });
+    expect(await voidJob(a.o.id)).toBeUndefined();
+  });
+
+  test('P-T36 ④_무효 작업은 T21과 한 트랜잭션이다: 커밋 전 밖에서 보이지 않고 전이가 실패하면 함께 사라진다 [ASVS v5.0.0-2.3.3]', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    const seen = { inside: -1, outside: -1 };
+    // T21 전이 자리(작업 행을 넣은 뒤, 커밋 전)에서 양쪽을 보고 전이를 실패시킨다
+    const store = {
+      transition: async (tx: Parameters<DrizzleOrderStore['transition']>[0]) => {
+        const r = await tx.execute(sql`select count(*)::int as n from ticket_void_job where order_id = ${a.o.id}::uuid`);
+        seen.inside = (r.rows[0] as { n: number }).n;
+        seen.outside = await count('select count(*) as n from ticket_void_job where order_id = $1', [a.o.id]);
+        return { status: 'STALE', reason: 'STATUS' };
+      },
+    } as unknown as DrizzleOrderStore;
+    const results = new DrizzlePaymentResults({ database, store, sales: new DrizzleSeatSales(database), clock: s.clock });
+    expect(await results.reverse(reverseOf(a))).toEqual({ status: 'STALE', reason: 'STATUS' });
+    expect(seen).toEqual({ inside: 1, outside: 0 });
+    expect(await voidJob(a.o.id)).toBeUndefined();
+    expect(await orderRow(a.o.id)).toMatchObject({ status: 'CONFIRMED', payment_event_seq: '3' });
+    expect((await seatRows(a)).map((r) => r.status)).toEqual(['SOLD', 'SOLD']);
+  });
+
+  test('P-T36 ④_재입금(T16)은 새 세대로 발권 큐에 넣는다', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    await s.results.reverse(reverseOf(a));
+    expect((await s.results.approve(approveOf(s, a, { transition: 'T16', paymentEventSeq: 5 }))).status).toBe('APPLIED');
+    expect((await q<{ issue_generation: string }>('select issue_generation::text as issue_generation from ticket_issue_job where order_id = $1', [a.o.id]))[0]).toEqual({ issue_generation: '5' });
+    expect((await seatRows(a)).map((r) => r.status)).toEqual(['SOLD', 'SOLD']);
+  });
+
+  test('P-T36 ④_쓰임새로: 되돌림 뒤 무효 실행기를 깨우고, 출발 상태가 CONFIRMED가 아니면 보류한다 [ASVS v5.0.0-16.3.3]', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    const u = useCase(s);
+    const out = await u.apply.execute(eventOf(s, a, { type: 'DEPOSIT_REVERSED', eventSeq: 4, depositDueAt: new Date(DUE).toISOString() }));
+    expect(out).toEqual({ status: 'APPLIED', transition: 'T21', write: 'REVERSE' });
+    expect((await seatRows(a))[0]!.pending_until!.getTime()).toBe(DUE + 10 * MIN);
+    const b = await reserved(s);
+    await u.apply.execute(eventOf(s, b, { eventSeq: 1 }));
+    await expect(u.apply.execute(eventOf(s, b, { type: 'DEPOSIT_REVERSED', eventSeq: 2 }))).rejects.toMatchObject({ reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' });
+    expect(await orderRow(b.o.id)).toMatchObject({ status: 'APPROVED' });
+  });
+
+  test('P-T36 ④_리뷰 고침 M4: APPROVED 주문의 되돌림은 전이 없이 그 주문의 발권 작업을 멈춘다(임대도 비워 늦은 답이 쓰지 못한다) [ASVS v5.0.0-16.3.3]', async () => {
+    const s = fresh();
+    const b = await reserved(s);
+    const u = useCase(s);
+    await u.apply.execute(eventOf(s, b, { eventSeq: 1 }));
+    await q('update ticket_issue_job set lease_until = $1 where order_id = $2', [new Date(s.clock.now() + LEASE), b.o.id]);
+    await expect(u.apply.execute(eventOf(s, b, { type: 'DEPOSIT_REVERSED', eventSeq: 2 }))).rejects.toMatchObject({ reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' });
+    expect(await orderRow(b.o.id)).toMatchObject({ status: 'APPROVED' });
+    const row = (await q<{ next_attempt_at: Date | null; lease_until: Date | null; last_error: string | null }>('select next_attempt_at, lease_until, last_error from ticket_issue_job where order_id = $1', [b.o.id]))[0];
+    expect(row).toEqual({ next_attempt_at: null, lease_until: null, last_error: 'DEPOSIT_REVERSED' });
+    await expect(s.results.holdIssue(b.o.id)).resolves.toBe(false);
+    await expect(s.results.holdIssue('not-a-uuid')).resolves.toBe(false);
+  });
+
+  test('P-T36 ④_리뷰 고침 H1: 무효 행이 남은 동안 Saga 읽기가 알리고, 끝나면 풀린다', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    expect((await s.saga.read(a.o.id))!.ticketVoidPending).toBeUndefined();
+    await s.results.reverse(reverseOf(a));
+    expect((await s.saga.read(a.o.id))!.ticketVoidPending).toBe(true);
+    const jobs = new DrizzleTicketVoid({ database, clock: s.clock });
+    const job = await jobs.claim(a.o.id, LEASE);
+    await jobs.done(a.o.id, job!.leaseUntilMs);
+    expect((await s.saga.read(a.o.id))!.ticketVoidPending).toBeUndefined();
+  });
+
+  test('P-T36 ④_무효 큐: 잡기·다시 보내기·끝내기와 임대 조건', async () => {
+    const s = fresh();
+    const a = await confirmed(s);
+    await s.results.reverse(reverseOf(a));
+    const jobs = new DrizzleTicketVoid({ database, clock: s.clock });
+    // 표를 시험끼리 나눠 쓰므로 이 주문의 행만 본다
+    const job = (await jobs.claimDue(100, LEASE)).find((j) => j.orderId === a.o.id);
+    expect(job).toMatchObject({ orderId: a.o.id, eventId: a.o.eventId, issueGeneration: 3, attempts: 0, leaseUntilMs: s.clock.now() + LEASE });
+    expect((await jobs.claimDue(100, LEASE)).filter((j) => j.orderId === a.o.id)).toEqual([]);
+    expect(await jobs.retry({ orderId: a.o.id, nextAtMs: s.clock.now() + 1_000, code: 'UNAVAILABLE', leaseUntilMs: job!.leaseUntilMs })).toBe(true);
+    expect(await voidJob(a.o.id)).toMatchObject({ attempts: 1 });
+    s.clock.advance(1_000);
+    const again = await jobs.claim(a.o.id, LEASE);
+    expect(await jobs.done(a.o.id, again!.leaseUntilMs + 1)).toBe(false);
+    expect(await jobs.done(a.o.id, again!.leaseUntilMs)).toBe(true);
+    expect(await voidJob(a.o.id)).toBeUndefined();
   });
 });

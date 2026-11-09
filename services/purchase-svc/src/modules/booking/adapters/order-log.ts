@@ -1,7 +1,7 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import { errorSummary, type PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog, PaymentPullLog, PaymentResultLog, SagaLog, TicketIssueLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog, PaymentPullLog, PaymentResultLog, SagaLog, TicketIssueLog, TicketVoidLog } from '../domain/ports.js';
 import { TICKET_ISSUE_CS_CASE } from '../domain/ticket-issue.js';
 
 /**
@@ -164,6 +164,35 @@ export class LoggerPaymentResultLog implements PaymentResultLog {
  * - runError: error 한 줄 { kind: 'ticket-issue', event: 'run_error', what, orderId?, err }. err는 플랫폼 errorSummary('이름: 글' 한 줄, 스택·원인 없음.
  *   Drizzle 쿼리 오류는 쿼리 틀과 SQLSTATE만 싣고 매개변수 값(주문·좌석·티켓 ID)은 싣지 않는다, ASVS v5.0.0-16.2.5, 리뷰 고침 M2)
  */
+/** 티켓 무효 로그(BUILD_ORDER HOT-152). 주문 ID·코드만 싣는다 */
+export class LoggerTicketVoidLog implements TicketVoidLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  stopped(e: Parameters<TicketVoidLog['stopped']>[0]): void {
+    try {
+      this.logger.error({ kind: 'ticket-void-stopped', severity: 'SEV1', orderId: e.orderId, code: e.code, csCase: 'TICKET_NOT_VOIDED' }, '티켓 무효가 다시 보내도 같은 결과일 오류로 끝나 자동 재시도를 멈췄다(재발권과 좌석 반환이 기다린다)');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  alreadyEntered(e: Parameters<TicketVoidLog['alreadyEntered']>[0]): void {
+    try {
+      this.logger.error({ kind: 'ticket-void-already-entered', severity: 'SEV1', orderId: e.orderId, count: e.count }, '입금 오류로 무효로 한 표 가운데 입장 기록이 있는 표가 있다(사람이 본다)');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  runError(e: Parameters<TicketVoidLog['runError']>[0]): void {
+    try {
+      this.logger.error({ kind: 'ticket-void-run', what: e.what, ...(e.orderId === undefined ? {} : { orderId: e.orderId }), errorName: e.err instanceof Error ? e.err.name : typeof e.err }, '티켓 무효 실행기 처리 실패');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+}
+
 export class LoggerTicketIssueLog implements TicketIssueLog {
   constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
 

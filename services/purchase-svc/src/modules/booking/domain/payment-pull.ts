@@ -76,7 +76,7 @@ export const PAYMENT_PULL_MISSING_LOG_WINDOW_MS = 10 * 60_000;
 export const PAYMENT_PULL_DB_MAX = 2;
 
 /** 당기기가 반영하는 사건 종류(지표 payment_result_pulled_total{type}의 값, 차례는 설계 5) */
-export const PAYMENT_PULL_TYPES: readonly AppliedPaymentEventType[] = ['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN'];
+export const PAYMENT_PULL_TYPES: readonly Exclude<AppliedPaymentEventType, 'DEPOSIT_REVERSED'>[] = ['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN'];
 
 /**
  * 결제 원장 상태(payment.proto PaymentStatus에서 앞머리 PAYMENT_STATUS_를 뗀 이름, docs/data.md payment.status).

@@ -67,6 +67,7 @@ const APPLIED_OF: Record<AppliedPaymentEventType, ApplyPaymentResultOutcome> = {
   FAILED: { status: 'APPLIED', transition: 'T11', write: 'FAIL' },
   UNKNOWN: { status: 'APPLIED', transition: 'T12', write: 'MARK' },
   AWAITING_DEPOSIT: { status: 'APPLIED', transition: 'T10', write: 'MARK' },
+  DEPOSIT_REVERSED: { status: 'APPLIED', transition: 'T21', write: 'REVERSE' },
 };
 
 type Call =

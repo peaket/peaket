@@ -36,6 +36,7 @@ service PaymentService {
 
   // 취소(전액·부분). 결제사 멱등키는 cancel-{cancellation_id}다.
   // 예매 취소, 회차 취소 일괄 환불, 발권 불가 보상(회차 취소 확정·CS 확인 뒤, ADR-0106)이 쓴다. 실패 건의 재시도는 payment-svc 워커가 맡는다.
+  // 첫 구현은 입금 대기 결제의 입금 전 취소만이고 그 밖의 상태는 FAILED_PRECONDITION이다(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
   rpc CancelPayment(CancelPaymentRequest) returns (CancelPaymentResponse);
 
   // 지급대행 판매자 등록(판매 승인 때 core-svc가 부른다).
@@ -179,6 +180,8 @@ enum FailureCategory {
   FAILURE_CATEGORY_EXPIRED = 4;
   FAILURE_CATEGORY_PG_ERROR = 5;
   FAILURE_CATEGORY_THROTTLED = 6;
+  // 입금 대기 결제의 입금 전 취소(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
+  FAILURE_CATEGORY_DEPOSIT_CANCELED = 7;
 }
 
 message ConfirmPaymentResponse {

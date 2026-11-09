@@ -165,12 +165,13 @@ describe('어댑터가 발급 정보를 읽는다', () => {
 
   test('P-T9_토스 입금 통보는 secret을 신호에 싣는다 [ASVS v5.0.0-2.2.1]', () => {
     const body = JSON.stringify({ createdAt: '2026-11-09T10:00:00.000000', secret: SECRET, status: 'DONE', transactionKey: 'tx-1', orderId: ORDER });
-    expect(toss([]).parseWebhook({}, body)).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:DONE', orderRef: ORDER, depositSecret: SECRET, depositDone: true });
+    expect(toss([]).parseWebhook({}, body)).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:DONE:2026-11-09T10:00:00.000000', orderRef: ORDER, depositSecret: SECRET, depositDone: true });
   });
 
   test('P-T9_리뷰 고침 M3: DONE이 아닌 입금 통보에는 입금 완료 표시가 없다', () => {
     const body = JSON.stringify({ createdAt: 'c', secret: SECRET, status: 'WAITING_FOR_DEPOSIT', transactionKey: 'tx-1', orderId: ORDER });
-    expect(toss([]).parseWebhook({}, body)).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:WAITING_FOR_DEPOSIT', orderRef: ORDER, depositSecret: SECRET });
+    // 입금 대기로 돌아왔다는 통보는 입금 오류 되돌림의 신호다(BUILD_ORDER HOT-152)
+    expect(toss([]).parseWebhook({}, body)).toEqual({ kind: 'TRIGGER', dedupKey: 'TOSS:deposit:tx-1:WAITING_FOR_DEPOSIT:c', orderRef: ORDER, depositSecret: SECRET, depositReversed: true });
   });
 
   test.each([

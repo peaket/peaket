@@ -238,6 +238,28 @@ export const ticketIssueJob = pgTable(
     delayedAt: at('delayed_at'),
     // 발권 기한(issue_due_at) 넘김 신호(SEV1 오류 로그·지표)를 낸 시각. 비었으면 아직 내지 않았다(주문마다 한 번, 0009, PRF-170)
     overdueAt: at('overdue_at'),
+    // 이 발권을 낳은 승인 사건의 순번(재발권이 앞 세대와 멱등 충돌하지 않게, BUILD_ORDER HOT-152, 0013). 0은 세대를 적지 않은 행이다
+    issueGeneration: bigint('issue_generation', { mode: 'number' }).notNull().default(0),
   },
   (t) => [index('ticket_issue_job_next_attempt_idx').on(t.nextAttemptAt)],
+);
+
+/** 티켓 무효 큐(0013, BUILD_ORDER HOT-152, data.md §2 ERD ticket_void_job). 입금 오류 되돌림(T21) 트랜잭션이 넣고 무효 호출이 끝나면 지운다 */
+export const ticketVoidJob = pgTable(
+  'ticket_void_job',
+  {
+    orderId: uuid('order_id')
+      .primaryKey()
+      .references(() => purchaseOrder.id),
+    eventId: uuid('event_id').notNull(),
+    // 무효로 할 발권 세대(되돌림 직전의 payment_event_seq)
+    issueGeneration: bigint('issue_generation', { mode: 'number' }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    // 다음 시도 시각. 다시 보내도 결과가 같은 오류면 비워 자동 재시도를 멈춘다(그래서 널 허용)
+    nextAttemptAt: at('next_attempt_at'),
+    leaseUntil: at('lease_until'),
+    lastError: text('last_error'),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('ticket_void_job_next_attempt_idx').on(t.nextAttemptAt)],
 );

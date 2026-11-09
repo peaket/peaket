@@ -21,6 +21,10 @@ service TicketService {
   // 기기 키는 여기서 만들지 않는다. 팬이 월렛에서 '입장용으로 등록'을 누를 때 등록한다.
   rpc IssueTickets(IssueTicketsRequest) returns (IssueTicketsResponse);
 
+  // 입금 오류 되돌림의 티켓 무효(docs/features/payment.md §6 T21, 추천 적용 2026-11-09, BUILD_ORDER HOT-152). 그 세대의 티켓을 VOIDED로 바꾸고 키를 폐기 목록에 올린다(스캐너 변경분 1분).
+  // (order_id, issue_generation)으로 멱등하고 그 세대 이하의 티켓이 대상이다. 이미 입장 기록이 있어도 무효로 하고 그 수를 돌려준다.
+  rpc VoidTickets(VoidTicketsRequest) returns (VoidTicketsResponse);
+
   // 예매 취소 Saga의 '티켓 키 폐기(즉시)' 단계(docs/features/payment.md §4.1).
   // 키를 바로 폐기하고(스캐너에는 1분 변경분으로 간다) 티켓 상태를 바꾼다.
   // 조건(요청자 = 결제자 = 보유자, 진행 중인 양도 요청 없음, 공연 시작 전)은 ticket-svc 데이터라 여기서 확인한다.
@@ -46,6 +50,22 @@ message IssueTicketsRequest {
   string payer_account_id = 3;
   // 판매 확정(SOLD)된 좌석. 게이트 구역은 ticket-svc가 좌석 배치로 정한다.
   repeated string seat_ids = 4;
+  // 이 발권을 낳은 승인 사건의 순번. 입금 오류로 무효가 된 뒤의 재발권이 앞 세대의 멱등 기록과 부딪치지 않게 한다(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
+  int64 issue_generation = 5;
+}
+
+message VoidTicketsRequest {
+  string order_id = 1;
+  string event_id = 2;
+  // 무효로 할 발권 세대(되돌린 입금의 승인 사건 순번).
+  int64 issue_generation = 3;
+}
+
+message VoidTicketsResponse {
+  // 이번 호출로 무효가 된 티켓 수(다시 부르면 0이다).
+  int32 voided = 1;
+  // 그 세대의 티켓 가운데 입장 기록이 있는 수(다시 불러도 같은 값이다). 0보다 크면 부른 쪽이 SEV1을 낸다(추천 적용 2026-11-09, BUILD_ORDER HOT-152, 코드 리뷰).
+  int32 already_entered = 2;
 }
 
 // 티켓 상태(docs/planning/03-policies-glossary.md §2.5). 이 계약이 돌려주는 값만 둔다.

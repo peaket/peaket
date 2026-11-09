@@ -27,7 +27,9 @@ import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call
 import type { PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
 import {
   decideQueryAnswer,
+  decideReversalAnswer,
   type PaymentUnknownQueryOutcome,
+  type QueryAnomaly,
   type QueryDecision,
   type ResolvedFinish,
   UNKNOWN_NO_ADAPTER_WARN_INTERVAL_MS,
@@ -44,6 +46,7 @@ import {
   type UnknownRunOutcome,
 } from '../domain/unknown-resolver.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
+import { reversalDueAtMs } from '../domain/virtual-account.js';
 import { depositWriteOf, type DepositWriteDeps } from './deposit-write.js';
 
 /** 반복 타이머(시험이 손으로 부르는 대역을 꽂는다. 기본은 unref한 setInterval·clearInterval) */
@@ -354,6 +357,7 @@ export class PaymentUnknownResolver {
     // 조회의 429는 그 조회의 다음 시도만 늦추고 상한은 그대로다(지표로만 센다)
     if (answer.kind === 'UNKNOWN' && answer.throttled === true) guard.noteThrottled({ first: false });
     if (job.lateDepositCheck) return this.#lateDeposit(job, answer);
+    if (job.reversalCheck !== undefined) return this.#reversal(job, job.reversalCheck, answer);
     const card = answer.kind === 'FOUND' ? answer.card : undefined;
     const decision = decideQueryAnswer(answer, job, this.deps.clock.now(), () => this.#linkOf(card));
     if (decision.kind === 'ASK_AGAIN') {
@@ -386,6 +390,65 @@ export class PaymentUnknownResolver {
       this.#outcome(job, 'late_deposit');
     }
     return { kind: 'LATE_DEPOSIT', paid };
+  }
+
+  /** 승인 원장의 입금 오류 확인(BUILD_ORDER HOT-152): 결제사 상태가 입금 대기로 돌아왔을 때만 되돌린다. 던지지 않는다 */
+  async #reversal(job: UnknownQueryJob, check: NonNullable<UnknownQueryJob['reversalCheck']>, answer: QueryResult): Promise<UnknownRunOutcome> {
+    const now = this.deps.clock.now();
+    const decision = decideReversalAnswer(answer, job, check.notifiedAtMs, now);
+    if (decision.kind === 'ASK_AGAIN') {
+      await this.#reportAnomaly(job, decision);
+      if (decision.overdue === true) await this.#reportReversalOverdue(job);
+      await this.#reschedule(job, decision.nextAtMs, true);
+      return this.#askedAgain(job, decision.outcome);
+    }
+    if (decision.kind === 'END') {
+      let finished = false;
+      try {
+        finished = await this.deps.queries.finishReversalCheck(job);
+      } catch (err) {
+        this.#runError('reschedule', err, job.orderId);
+      }
+      if (finished) {
+        this.#safe(() => this.deps.log.reversalUnconfirmed({ orderId: job.orderId }));
+        this.#outcome(job, 'reversal_unconfirmed');
+      }
+      return REVERSAL_ENDED;
+    }
+    return this.#reverse(job, decision.virtualAccount, now);
+  }
+
+  /** 입금 오류를 1시간 [가정] 넘게 확인하지 못했다: 표시를 이번에 쓴 행만 SEV1을 낸다(결제마다 한 번). 표시 쓰기가 실패하면 다음 조회가 다시 낸다. 던지지 않는다 */
+  async #reportReversalOverdue(job: UnknownQueryJob): Promise<void> {
+    let marked: boolean;
+    try {
+      marked = await this.deps.queries.markReversalOverdue(job);
+    } catch (err) {
+      this.#runError('anomaly', err, job.orderId);
+      return;
+    }
+    if (marked) this.#safe(() => this.deps.log.reversalOverdue({ orderId: job.orderId }));
+  }
+
+  /** 입금 대기로 되돌린다(원장·사건·Outbox 한 트랜잭션, 암호화는 트랜잭션 앞이다). 던지면 밀어 둔 간격 뒤의 조회에 맡긴다 */
+  async #reverse(job: UnknownQueryJob, va: ConfirmVirtualAccount | undefined, nowMs: number): Promise<UnknownRunOutcome> {
+    const answerDue = va?.dueAt === undefined ? Number.NaN : Date.parse(va.dueAt);
+    const dueAtMs = reversalDueAtMs(Number.isNaN(answerDue) ? undefined : answerDue, nowMs);
+    try {
+      const written = this.deps.deposit === undefined ? undefined : await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va);
+      const result = await this.deps.queries.reverseDeposit(job, { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT', reversed: true, deposit: { ...written, dueAtMs } });
+      if (result === 'STALE') {
+        this.#safe(() => this.deps.log.staleAnswer({ orderId: job.orderId }));
+        return STALE;
+      }
+      this.#safe(() => this.deps.log.depositReversed({ orderId: job.orderId }));
+      this.#outcome(job, 'deposit_reversed');
+      return REVERSED;
+    } catch (err) {
+      this.#safe(() => this.deps.signals.writeFailure());
+      this.#safe(() => this.deps.log.writeFailed({ orderId: job.orderId, code: safeErrorCode(err) }));
+      return WRITE_FAILED;
+    }
   }
 
   /** 답을 본 시각 + 실제 간격을 쓴다(잡을 때 민 더 긴 시각을 줄인다). 입금 대기가 그대로라는 답은 그 답이 정한 시각을 쓰고 조회 횟수를 비운다(통보 뒤 다시 묻는 동안은 횟수를 남겨 간격을 늘린다). 던지지 않는다 */
@@ -439,7 +502,7 @@ export class PaymentUnknownResolver {
   }
 
   /** 어긋난 답의 SEV1을 결제마다 한 번 낸다(표시를 이번에 쓴 행만 로그를 낸다). 던지지 않는다 */
-  async #reportAnomaly(job: UnknownQueryJob, decision: Extract<QueryDecision, { kind: 'ASK_AGAIN' }>): Promise<void> {
+  async #reportAnomaly(job: UnknownQueryJob, decision: { readonly anomaly?: QueryAnomaly }): Promise<void> {
     if (decision.anomaly === undefined || job.anomalyLogged) return;
     let marked: boolean;
     try {
@@ -527,6 +590,8 @@ const STOPPED: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'STO
 const NO_TOKEN: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
 const STALE: UnknownRunOutcome = Object.freeze({ kind: 'STALE' });
 const WRITE_FAILED: UnknownRunOutcome = Object.freeze({ kind: 'WRITE_FAILED' });
+const REVERSED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSED' });
+const REVERSAL_ENDED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSAL_ENDED' });
 const QUERY_UNKNOWN: QueryResult = Object.freeze({ kind: 'UNKNOWN' });
 
 /** 기본 반복 타이머(프로세스를 붙잡지 않게 unref) */

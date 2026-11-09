@@ -786,6 +786,23 @@ describe('실패 해제', () => {
     notCalled('pins.pin', 'reserve.reserve', 'failures.fail', 'confirms.confirm', 'jobs.reschedule');
   });
 
+  test('P-T36 ④_리뷰 고침 H1: 티켓 무효가 끝나지 않은 주문의 RELEASE는 좌석을 풀지 않고 다시 하기로 미룬다(무효 전에 좌석이 다시 팔리지 않게) [ASVS v5.0.0-15.4.1]', async () => {
+    const job = sagaJob({ step: 'RELEASE', attempts: 2 });
+    fx.put(sagaOrder({ status: 'FAILED', ticketVoidPending: true }), job);
+    expect(await runner().runJob(job)).toEqual({ kind: 'RETRY', reason: 'ticket_void_pending', nextAtMs: NOW + 4000 });
+    expect(fx.releaseInputs).toEqual([]);
+    expect(fx.jobRows.has(ORDER_ID)).toBe(true);
+    notCalled('pins.releaseFailed', 'jobs.delete');
+  });
+
+  test('P-T36 ④_리뷰 고침 H1: 무효가 끝나면 같은 RELEASE 작업이 좌석을 푼다', async () => {
+    const job = sagaJob({ step: 'RELEASE', attempts: 2 });
+    fx.put(sagaOrder({ status: 'FAILED', ticketVoidPending: false }), job);
+    expect(await runner().runJob(job)).toEqual({ kind: 'RELEASED' });
+    expectRelease(fx.releaseInputs[0]);
+    expect(fx.jobRows.has(ORDER_ID)).toBe(false);
+  });
+
   test('M4_RELEASE 작업의 실패 해제가 좌석 Redis 장애·회차 키 수명 안의 NOT_READY면 다시 하기(release_failed)이고, 수명 뒤 NOT_READY면 끝난 것으로 지운다', async () => {
     const job = sagaJob({ step: 'RELEASE', attempts: 2 });
     fx.put(sagaOrder({ status: 'FAILED' }), job);

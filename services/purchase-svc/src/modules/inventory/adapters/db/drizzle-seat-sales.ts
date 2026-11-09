@@ -109,6 +109,24 @@ export class DrizzleSeatSales implements SeatSales {
     return done.rows.length;
   }
 
+  /**
+   * 그 주문의 SOLD 행을 좌석 ID 순으로 잠가 PENDING으로 되돌리고 pending_until을 쓴다(입금 오류 되돌림, 부르는 쪽의 트랜잭션 안, BUILD_ORDER HOT-152). 바꾼 행 수. 한도는 그대로 둔다(PENDING도 한도에 든다).
+   * @throws RangeError seatIds가 비었거나 pendingUntilMs가 날짜 범위 밖
+   */
+  async markPendingAgainIn(tx: DbTransaction, order: SeatSaleOrder & { pendingUntilMs?: number }): Promise<number> {
+    assertSeatSaleOrder(order);
+    const seatIds = sortedSeatIds(order.seatIds);
+    const until = order.pendingUntilMs === undefined ? null : new Date(order.pendingUntilMs);
+    if (until !== null && Number.isNaN(until.getTime())) throw new RangeError('pendingUntilMs가 날짜 범위를 넘었다');
+    const done = await tx.execute(sql`
+      with locked as (${lockedRows(order.eventId, order.orderId, seatIds, 'SOLD')})
+      update seat_sale s set status = 'PENDING', pending_until = ${until}::timestamptz
+      from locked l
+      where s.event_id = ${order.eventId}::uuid and s.order_id = ${order.orderId}::uuid and s.seat_id = l.seat_id and s.status = 'SOLD'
+      returning s.seat_id`);
+    return done.rows.length;
+  }
+
   async markSoldIn(tx: DbTransaction, order: SeatSaleOrder): Promise<number> {
     assertSeatSaleOrder(order);
     return markSoldRows(tx, order, sortedSeatIds(order.seatIds));

@@ -115,12 +115,16 @@ function assertCompleteInput(i: TicketIssueCompleteInput): void {
   assertLease(i.leaseUntilMs);
 }
 
+/** 잡기 조건: 그 주문의 티켓 무효 행이 없다. 앞 세대가 무효가 되기 전에 재발권이 나가지 않게 한다(멈춘 무효 행도 막는다, BUILD_ORDER HOT-152 코드 리뷰) */
+const NO_VOID_PENDING = sql.raw('not exists (select 1 from ticket_void_job v where v.order_id = ticket_issue_job.order_id)');
+
 /** 자기 임대 조건 SQL 조각(값이 없으면 빈 조각) */
 const leaseCond = (lease: number | undefined) => (lease === undefined ? sql`` : sql` and lease_until = ${new Date(lease)}::timestamptz`);
 
 type JobRow = {
   order_id: string;
   event_id: string;
+  issue_generation: number | string;
   attempts: number | string;
   next_attempt_at: Date | string | null;
   issue_due_at: Date | string;
@@ -132,7 +136,7 @@ type JobRow = {
 };
 
 /** RETURNING·SELECT의 큐 행 칸 + 결제자(주문 행) + 좌석(주문 항목, 줄 번호 차례). 별칭 j는 ticket_issue_job이다 */
-const JOB_COLUMNS_J = sql.raw(`j.order_id, j.event_id, j.attempts, j.next_attempt_at, j.issue_due_at, j.created_at, j.lease_until, j.last_error,
+const JOB_COLUMNS_J = sql.raw(`j.order_id, j.event_id, j.issue_generation, j.attempts, j.next_attempt_at, j.issue_due_at, j.created_at, j.lease_until, j.last_error,
   (select o.account_id from purchase_order o where o.id = j.order_id) as account_id,
   (select array_agg(i.seat_id::text order by i.line_no) from order_item i where i.order_id = j.order_id) as seat_ids`);
 
@@ -145,6 +149,7 @@ function viewOf(r: JobRow): TicketIssueJobView {
     eventId: r.event_id,
     payerAccountId: r.account_id ?? '',
     seatIds: r.seat_ids ?? [],
+    issueGeneration: Number(r.issue_generation),
     attempts: Number(r.attempts),
     nextAttemptAtMs: r.next_attempt_at === null ? null : msOf(r.next_attempt_at),
     issueDueAtMs: msOf(r.issue_due_at),
@@ -193,7 +198,7 @@ export class DrizzleTicketIssue implements TicketIssueJobs {
       tx.execute(sql`
         with picked as (
           select order_id from ticket_issue_job
-          where next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          where next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz) and ${NO_VOID_PENDING}
           order by next_attempt_at, order_id
           limit ${limit}::int
           for update skip locked)
@@ -217,7 +222,7 @@ export class DrizzleTicketIssue implements TicketIssueJobs {
       tx.execute(sql`
         with picked as (
           select order_id from ticket_issue_job
-          where order_id = ${orderId}::uuid and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          where order_id = ${orderId}::uuid and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz) and ${NO_VOID_PENDING}
           for update skip locked)
         update ticket_issue_job j set lease_until = ${until}::timestamptz
         from picked p
@@ -329,13 +334,15 @@ export class DrizzleTicketIssue implements TicketIssueJobs {
     return this.#tx(async (tx) => {
       // ① 고르기(SKIP LOCKED: 다른 파드가 같은 때 고른 행은 건너뛴다). 멈춘 행·임대 중인 행도 대상이다(행 잠금만 본다). 잠금 차례는 큐 행 → 주문 행이다
       const picked = await tx.execute(sql`
-        select order_id::text as order_id from ticket_issue_job
+        select order_id::text as order_id, issue_generation::text as issue_generation from ticket_issue_job
         where created_at <= ${before}::timestamptz and delayed_at is null
         order by created_at, order_id
         limit ${limit}::int
         for update skip locked`);
-      const ids = (picked.rows as { order_id: string }[]).map((x) => x.order_id);
+      const pickedRows = picked.rows as { order_id: string; issue_generation: string }[];
+      const ids = pickedRows.map((x) => x.order_id);
       if (ids.length === 0) return [];
+      const generations = new Map(pickedRows.map((x) => [x.order_id, Number(x.issue_generation)]));
       // uuid[] 조각(drizzle-orders.ts uuidArray와 같은 꼴)
       const idList = sql`array[${sql.join(
         ids.map((id) => sql`${id}::uuid`),
@@ -350,7 +357,7 @@ export class DrizzleTicketIssue implements TicketIssueJobs {
       for (const orderId of ids) {
         const order = orders.get(orderId);
         if (order?.status !== 'APPROVED') continue;
-        const message = buildIssueDelayedEvent({ order, items: items.get(orderId) ?? [], occurredAtMs: now });
+        const message = buildIssueDelayedEvent({ order, items: items.get(orderId) ?? [], occurredAtMs: now, issueGeneration: generations.get(orderId) ?? 0 });
         messages.push({ topic: TRADE_ORDERS_TOPIC, key: order.eventId, payload: this.#codec.encode(message) });
         sent.push(orderId);
       }

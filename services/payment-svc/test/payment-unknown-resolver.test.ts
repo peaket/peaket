@@ -77,6 +77,23 @@ function play<T>(s: Script<T>): T {
 }
 
 class FakeQueries implements PaymentUnknownQueries {
+  async finishReversalCheck(): Promise<boolean> {
+    return true;
+  }
+
+  async reverseDeposit(): Promise<'APPLIED'> {
+    return 'APPLIED';
+  }
+
+  /** markReversalOverdue를 부른 행 */
+  readonly reversalOverdues: UnknownQueryJob[] = [];
+  reversalOverdueResults: Script<boolean>[] = [];
+  async markReversalOverdue(j: UnknownQueryJob): Promise<boolean> {
+    this.reversalOverdues.push(j);
+    const next = this.reversalOverdueResults.shift();
+    return next === undefined ? true : play(next);
+  }
+
   /** SIMULATOR 채널의 잡기 limit */
   readonly limits: number[] = [];
   /** 그 밖의 채널의 잡기 인자 */
@@ -166,6 +183,15 @@ class FakeGateway implements Pick<PaymentGatewayPort, 'pg' | 'query' | 'capabili
 
 class FakeLog implements PaymentUnknownLog {
   readonly lines: [string, unknown][] = [];
+  depositReversed(e: { readonly orderId: string }): void {
+    this.lines.push(['depositReversed', e]);
+  }
+  reversalUnconfirmed(e: { readonly orderId: string }): void {
+    this.lines.push(['reversalUnconfirmed', e]);
+  }
+  reversalOverdue(e: { readonly orderId: string }): void {
+    this.lines.push(['reversalOverdue', e]);
+  }
   amountMismatch(e: { readonly orderId: string }): void {
     this.lines.push(['amountMismatch', e]);
   }
@@ -488,6 +514,37 @@ describe('결제 수단 연결값 리뷰 고침(BUILD_ORDER HOT-145 코드 리�
     f.gateway.fallback = () => approved({ card: BAD_CARD });
     await expect(f.resolver.runJob(job())).resolves.toMatchObject({ kind: 'RESOLVED', status: 'APPROVED' });
     expect(missing).toEqual(['CARD_SHAPE']);
+  });
+});
+
+describe('입금 오류 확인의 리뷰 고침(BUILD_ORDER HOT-152, 코드 리뷰)', () => {
+  const reversal = (notifiedAtMs: number) => job({ queryAttempts: 9, reversalCheck: { notifiedAtMs } });
+
+  test('P-T36 ④_리뷰 고침 H2: 통보 뒤 1시간이 지나도 답을 믿지 못하면 SEV1을 결제마다 한 번 내고 60초 뒤 다시 묻는다 [ASVS v5.0.0-16.3.4]', async () => {
+    const { queries, gateway, log, resolver } = setup();
+    gateway.fallback = () => ({ kind: 'UNKNOWN' });
+    queries.reversalOverdueResults = [true, false];
+
+    await expect(resolver.runJob(reversal(NOW - 3_600_000))).resolves.toEqual({ kind: 'ASKED_AGAIN', outcome: 'query_failed' });
+    await resolver.runJob(reversal(NOW - 3_600_000));
+
+    expect(queries.reversalOverdues).toHaveLength(2);
+    expect(log.of('reversalOverdue')).toEqual([{ orderId: ORDER_ID }]);
+    expect(queries.rescheduled.map((r) => r.nextAtMs)).toEqual([NOW + 60_000, NOW + 60_000]);
+  });
+
+  test('P-T36 ④_리뷰 고침 H2: 1시간 전에는 표시를 쓰지 않고, 표시 쓰기가 실패해도 다음 조회는 걸어 둔다', async () => {
+    const early = setup();
+    early.gateway.fallback = () => ({ kind: 'UNKNOWN' });
+    await early.resolver.runJob(reversal(NOW - 3_599_999));
+    expect(early.queries.reversalOverdues).toEqual([]);
+
+    const failing = setup();
+    failing.gateway.fallback = () => ({ kind: 'UNKNOWN' });
+    failing.queries.reversalOverdueResults = [throws(new Error('db down'))];
+    await failing.resolver.runJob(reversal(NOW - 3_600_000));
+    expect(failing.log.of('reversalOverdue')).toEqual([]);
+    expect(failing.queries.rescheduled).toHaveLength(1);
   });
 });
 
@@ -1011,6 +1068,14 @@ describe('paymentUnknownLog', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ level: 'error', kind: 'payment-unknown-overdue', severity: 'SEV2', csCase: 'PAYMENT_UNKNOWN', orderId: ORDER_ID });
     expect(lines[0]).not.toHaveProperty('amount');
+  });
+
+  test('P-T36 ④_리뷰 고침 H2: 입금 오류를 1시간 동안 확인하지 못하면 SEV1이고 주문 ID만 싣는다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.2.5]', () => {
+    const { lines, logger } = realLogger();
+    paymentUnknownLog(logger).reversalOverdue({ orderId: ORDER_ID });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'error', kind: 'payment-deposit-reversal-overdue', severity: 'SEV1', orderId: ORDER_ID });
+    for (const key of ['amount', 'paymentRef', 'paymentKey']) expect(lines[0]).not.toHaveProperty(key);
   });
 
   test('PRF182_어댑터 없음은 warn 한 줄이고 결제사만 싣는다', () => {

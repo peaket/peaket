@@ -6,6 +6,7 @@ import type {
   PaymentApproveInput,
   PaymentFailInput,
   PaymentMarkInput,
+  PaymentReverseInput,
   PaymentResultEvent,
   PaymentResultLog,
   PaymentResultOrder,
@@ -85,6 +86,8 @@ export type ResultCall =
   | 'writes.approve'
   | 'writes.fail'
   | 'writes.mark'
+  | 'writes.reverse'
+  | 'writes.holdIssue'
   | 'sessions.complete'
   | 'sessions.unmarkPaying'
   | 'saga.kick'
@@ -100,6 +103,7 @@ const defaults = () => ({
   outcomeQueue: [] as (PaymentResultWriteOutcome | Error)[],
   completeAnswer: true as boolean | Error,
   unmarkAnswer: true as boolean | Error,
+  holdIssueAnswer: true as boolean | Error,
 });
 
 /** 결제 결과 반영 포트(읽기·쓰기·구매 세션·Saga 깨우기·로그)의 메모리 가짜 */
@@ -111,11 +115,14 @@ export class ResultFakes {
   outcomeQueue = defaults().outcomeQueue;
   completeAnswer = defaults().completeAnswer;
   unmarkAnswer = defaults().unmarkAnswer;
+  holdIssueAnswer = defaults().holdIssueAnswer;
 
   readIds: string[] = [];
+  heldIssues: string[] = [];
   approved: PaymentApproveInput[] = [];
   failed: PaymentFailInput[] = [];
   marked: PaymentMarkInput[] = [];
+  reversed: PaymentReverseInput[] = [];
   completed: string[] = [];
   unmarked: string[] = [];
   kicked: string[] = [];
@@ -126,9 +133,11 @@ export class ResultFakes {
     Object.assign(this, defaults());
     this.calls = [];
     this.readIds = [];
+    this.heldIssues = [];
     this.approved = [];
     this.failed = [];
     this.marked = [];
+    this.reversed = [];
     this.completed = [];
     this.unmarked = [];
     this.kicked = [];
@@ -167,6 +176,17 @@ export class ResultFakes {
       this.calls.push('writes.mark');
       this.marked.push(input);
       return this.#nextOutcome();
+    },
+    reverse: async (input) => {
+      this.calls.push('writes.reverse');
+      this.reversed.push(input);
+      return this.#nextOutcome();
+    },
+    holdIssue: async (orderId) => {
+      this.calls.push('writes.holdIssue');
+      this.heldIssues.push(orderId);
+      if (this.holdIssueAnswer instanceof Error) throw this.holdIssueAnswer;
+      return this.holdIssueAnswer;
     },
   };
 

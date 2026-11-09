@@ -114,6 +114,8 @@ export type SagaRetryReason =
   | 'confirm_rejected'
   /** 실패 해제가 좌석 Redis 장애·회차 키 수명 안의 NOT_READY로 끝나지 못함(작업 행은 RELEASE로 남는다, 리뷰 M4) */
   | 'release_failed'
+  /** 티켓 무효가 끝나지 않아 좌석 해제를 미룸(무효 전에 좌석이 다시 팔리지 않게, BUILD_ORDER HOT-152 코드 리뷰) */
+  | 'ticket_void_pending'
   /** purchase DB 오류·예상 밖 예외 */
   | 'error';
 

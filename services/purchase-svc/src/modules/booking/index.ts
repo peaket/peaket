@@ -31,7 +31,7 @@ export {
   type OrderExpiryView,
 } from './domain/order-expiry.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
-export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from './adapters/db/schema.js';
+export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
 export {
   DrizzlePaymentResults,
   PaymentResultRollback,
@@ -111,6 +111,11 @@ export {
 } from './adapters/grpc-payment-confirm.js';
 export { ORDER_SAGA_ACTOR, OrderSagaRunner, type OrderSagaDeps, type SagaRunResult, type SagaTimer } from './application/order-saga.js';
 export { DrizzleTicketIssue, ticketIssueDatabaseOptions, type DrizzleTicketIssueOptions } from './adapters/db/drizzle-ticket-issue.js';
+export { DrizzleTicketVoid, type DrizzleTicketVoidOptions } from './adapters/db/drizzle-ticket-void.js';
+export { PromTicketVoidSignals } from './adapters/prom-ticket-void-signals.js';
+export { TicketVoidRunner, type TicketVoidDeps } from './application/ticket-void.js';
+export { voidingTicketVoider } from './adapters/grpc-ticket-issue.js';
+export type { PaymentReverseInput, TicketVoidCommand, TicketVoider, TicketVoidJob, TicketVoidJobs, TicketVoidLog, TicketVoidResult, TicketVoidSignals } from './domain/ports.js';
 export {
   GrpcTicketIssuer,
   issuedTicketsOf,
@@ -280,7 +285,7 @@ export {
   type SagaStepOutcome,
 } from './domain/saga.js';
 export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
-export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog } from './adapters/order-log.js';
+export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog, LoggerTicketVoidLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
 export {

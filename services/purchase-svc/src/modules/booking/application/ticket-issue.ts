@@ -326,6 +326,8 @@ export class TicketIssueRunner {
         payerAccountId: job.payerAccountId,
         seatIds: job.seatIds,
         deadlineMs: this.deps.callDeadlineMs ?? TICKET_ISSUE_CALL_DEADLINE_MS,
+        // 0은 세대를 적지 않은 옛 행이다(칸을 비운다)
+        ...(job.issueGeneration > 0 ? { issueGeneration: job.issueGeneration } : {}),
       });
     } catch (err) {
       if (err instanceof TicketIssueCallError) {

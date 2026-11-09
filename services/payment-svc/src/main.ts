@@ -15,6 +15,7 @@ import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  CancelDepositPayment,
   confirmRunnerDatabaseOptions,
   createPgHttp,
   DrizzleConfirmJobs,
@@ -129,6 +130,8 @@ for (const warning of methodRefWarnings) service.logger.warn({ kind: 'payment-me
 for (const warning of virtualAccountWarnings) service.logger.warn({ kind: 'payment-virtual-account-key' }, warning);
 const depositLog = paymentDepositLog(service.logger);
 const deposit = { cipher: virtualAccountCipher, log: depositLog, signals: depositSignals };
+const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: systemClock });
+const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger) });
 service.readiness.register('grpc');
 if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
@@ -139,7 +142,7 @@ const grpc = await startGrpcServer({
   services: [
     {
       definition: paymentPackage().PaymentService.service,
-      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }) }, (method, err, orderId) =>
+      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }) }, (method, err, orderId) =>
         // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
         service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
       ),
@@ -149,11 +152,9 @@ const grpc = await startGrpcServer({
 service.readiness.complete('grpc');
 service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 
-const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: systemClock });
 // lease_owner에 적는 파드 이름(쿠버네티스가 PEAKET_POD를 넣는다. 없으면 호스트 이름)
 const podId = process.env.PEAKET_POD?.trim() || hostname();
 // 채널별 호출 보호기는 두 실행기가 하나를 함께 쓴다(토큰 버킷은 승인과 단독 조회를 함께 센다, BUILD_ORDER PRF-183)
-const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger) });
 const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit });
 confirmRunner.start();
 const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit });

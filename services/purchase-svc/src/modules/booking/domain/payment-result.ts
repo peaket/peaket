@@ -12,9 +12,9 @@ export type PaymentEventType = (typeof PAYMENT_EVENT_TYPES)[number];
 /**
  * 결제 쪽 실패 사유(PaymentEvent.failureCategory, 결제 어댑터가 정한다, payment §2.1). 실패 트랜잭션이 주문 failure_reason에 그대로 적는다(0007, data.md §4).
  * - CARD_DECLINED: 카드사·결제사가 거절 · USER_ABORTED: 사용자가 그만둠 · VALIDATION: 요청 검증 실패
- * - EXPIRED: 승인 기한을 넘김 · PG_ERROR: 결제사 오류 · THROTTLED: 결제사 한도에 걸림
+ * - EXPIRED: 승인 기한을 넘김 · PG_ERROR: 결제사 오류 · THROTTLED: 결제사 한도에 걸림 · DEPOSIT_CANCELED: 입금 전 취소(BUILD_ORDER HOT-152)
  */
-export const PAYMENT_FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'] as const;
+export const PAYMENT_FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED'] as const;
 export type PaymentFailureCategory = (typeof PAYMENT_FAILURE_CATEGORIES)[number];
 
 /**
@@ -73,25 +73,26 @@ export interface PaymentResultOrderView {
   readonly acceptedPg?: PaymentPg;
 }
 
-/** 결제 결과 반영 전이 가운데 이번 단계(PRF-163)가 하는 것. T21(입금 되돌림)은 가상계좌 단계가 맡는다 */
-export type PaymentResultTransition = 'T9' | 'T10' | 'T11' | 'T12' | 'T13' | 'T14' | 'T15' | 'T16' | 'T17';
+/** 결제 결과 반영 전이(PRF-163, T21 입금 되돌림은 BUILD_ORDER HOT-152) */
+export type PaymentResultTransition = 'T9' | 'T10' | 'T11' | 'T12' | 'T13' | 'T14' | 'T15' | 'T16' | 'T17' | 'T21';
 
-/** 반영 쓰기의 세 갈래(ports.ts PaymentResultWrites의 approve·fail·mark) */
-export type PaymentResultWrite = 'APPROVE' | 'FAIL' | 'MARK';
+/** 반영 쓰기의 네 갈래(ports.ts PaymentResultWrites의 approve·fail·mark·reverse) */
+export type PaymentResultWrite = 'APPROVE' | 'FAIL' | 'MARK' | 'REVERSE';
 
 /** 전이 표에 있는 사건 종류(그 밖의 종류는 기록·아직 맡지 않음으로 건너뛴다) */
-export type AppliedPaymentEventType = 'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT';
+export type AppliedPaymentEventType = 'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED';
 
 /**
  * 사건 종류 × 지금 상태 → 전이(payment §2 '사건 종류 × 지금 상태 → 전이'). 표 밖의 조합은 있을 수 없는 조합(HOLD IMPOSSIBLE)이다.
  * APPROVED: RESERVED→T9, UNKNOWN→T13, AWAITING_DEPOSIT→T16 · FAILED: RESERVED→T11, UNKNOWN→T15, AWAITING_DEPOSIT→T17
- * UNKNOWN: RESERVED→T12 · AWAITING_DEPOSIT: RESERVED→T10, UNKNOWN→T14
+ * UNKNOWN: RESERVED→T12 · AWAITING_DEPOSIT: RESERVED→T10, UNKNOWN→T14 · DEPOSIT_REVERSED: CONFIRMED→T21
  */
 export const PAYMENT_RESULT_TABLE: Readonly<Record<AppliedPaymentEventType, Readonly<Partial<Record<OrderStatus, PaymentResultTransition>>>>> = {
   APPROVED: { RESERVED: 'T9', UNKNOWN: 'T13', AWAITING_DEPOSIT: 'T16' },
   FAILED: { RESERVED: 'T11', UNKNOWN: 'T15', AWAITING_DEPOSIT: 'T17' },
   UNKNOWN: { RESERVED: 'T12' },
   AWAITING_DEPOSIT: { RESERVED: 'T10', UNKNOWN: 'T14' },
+  DEPOSIT_REVERSED: { CONFIRMED: 'T21' },
 };
 
 /** 사건 종류의 도착 상태(주문이 이미 이 상태면 다시 온 사건으로 건너뛴다, ALREADY_THERE) */
@@ -100,9 +101,10 @@ export const PAYMENT_RESULT_ARRIVAL: Readonly<Record<AppliedPaymentEventType, Or
   FAILED: 'FAILED',
   UNKNOWN: 'UNKNOWN',
   AWAITING_DEPOSIT: 'AWAITING_DEPOSIT',
+  DEPOSIT_REVERSED: 'AWAITING_DEPOSIT',
 };
 
-/** 전이 → 쓰기 갈래: 승인(T9·T13·T16), 실패(T11·T15·T17), 상태만(T10·T12·T14) */
+/** 전이 → 쓰기 갈래: 승인(T9·T13·T16), 실패(T11·T15·T17), 상태만(T10·T12·T14), 입금 되돌림(T21) */
 export const PAYMENT_RESULT_WRITES: Readonly<Record<PaymentResultTransition, PaymentResultWrite>> = {
   T9: 'APPROVE',
   T13: 'APPROVE',
@@ -113,6 +115,7 @@ export const PAYMENT_RESULT_WRITES: Readonly<Record<PaymentResultTransition, Pay
   T10: 'MARK',
   T12: 'MARK',
   T14: 'MARK',
+  T21: 'REVERSE',
 };
 
 /**
@@ -128,13 +131,14 @@ export type PaymentResultSkipReason = 'DUPLICATE' | 'ALREADY_THERE' | 'RECORD_ON
  * - IMPOSSIBLE: 표 밖의 조합(예: CONFIRMED 주문에 새 순번 APPROVED), 주문이 없음 [정함: 없는 주문도 같은 까닭으로 묶는다]
  * - AMOUNT_MISMATCH: 사건 금액이 주문 금액과 다름
  * - PG_MISMATCH: 사건 결제사가 주문의 접수한 결제 시도의 결제사와 다름, 또는 접수한 결제 시도가 없음
- * - NOT_YET_SUPPORTED: DEPOSIT_REVERSED(T21)·PARTIAL_CANCELED·CANCELED. 맡을 단계(가상계좌·취소)가 생기면 보류 표에서 다시 처리한다
+ * - NOT_YET_SUPPORTED: PARTIAL_CANCELED·CANCELED. 맡을 단계(취소)가 생기면 보류 표에서 다시 처리한다
  *   (건너뛰면 그 사건을 영영 잃는다, 리뷰 M3)
  * - CHARGED_ON_CLOSED_ORDER: 닫힌 주문(FAILED·EXPIRED·COMPENSATED)에 과금 사건(APPROVED·AWAITING_DEPOSIT) — 과금됐는데 주문이 닫혔다(SEV1, 리뷰 M2).
  *   CS 처리함 건과 환불로 닫는 길은 보상 세 걸음(PRF-173) 무렵이다(TICKET_NOT_ISSUED와 같은 꼴, CS 건 요청 계약은 GAT-280, docs/features/payment.md §2)
  * - SOLD_MISMATCH: 승인 쓰기에서 SOLD로 바꾼 판매 행 수가 주문 좌석 수와 다름(판매 행이 없어졌다. 되돌렸다, SEV1, 리뷰 M4)
+ * - DEPOSIT_REVERSED_NOT_CONFIRMED: 입금 되돌림 사건인데 주문이 CONFIRMED가 아니다(발권 전·부분 환불 등). 전이하지 않고 사람이 본다(SEV1, BUILD_ORDER HOT-152)
  */
-export type PaymentResultHoldReason = 'IMPOSSIBLE' | 'AMOUNT_MISMATCH' | 'PG_MISMATCH' | 'NOT_YET_SUPPORTED' | 'CHARGED_ON_CLOSED_ORDER' | 'SOLD_MISMATCH';
+export type PaymentResultHoldReason = 'IMPOSSIBLE' | 'AMOUNT_MISMATCH' | 'PG_MISMATCH' | 'NOT_YET_SUPPORTED' | 'CHARGED_ON_CLOSED_ORDER' | 'SOLD_MISMATCH' | 'DEPOSIT_REVERSED_NOT_CONFIRMED';
 
 /** 보류 로그의 경보 수준(SEV1: 과금됐는데 반영하지 못함, SEV2: 그 밖) */
 export type PaymentResultHoldSeverity = 'SEV1' | 'SEV2';
@@ -149,6 +153,7 @@ export const PAYMENT_RESULT_HOLD_LOG: Readonly<Record<PaymentResultHoldReason, {
   NOT_YET_SUPPORTED: { severity: 'SEV2' },
   CHARGED_ON_CLOSED_ORDER: { severity: 'SEV1', kind: 'payment-charged-closed' },
   SOLD_MISMATCH: { severity: 'SEV1' },
+  DEPOSIT_REVERSED_NOT_CONFIRMED: { severity: 'SEV1' },
 };
 
 /** 닫힌 주문 상태(과금 사건이 오면 CHARGED_ON_CLOSED_ORDER, 리뷰 M2) */
@@ -165,6 +170,7 @@ export type PaymentResultDecision =
   | { readonly kind: 'APPLY'; readonly write: 'APPROVE'; readonly transition: 'T9' | 'T13' | 'T16' }
   | { readonly kind: 'APPLY'; readonly write: 'FAIL'; readonly transition: 'T11' | 'T15' | 'T17'; readonly failureReason: PaymentFailureCategory }
   | { readonly kind: 'APPLY'; readonly write: 'MARK'; readonly transition: 'T10' | 'T12' | 'T14' }
+  | { readonly kind: 'APPLY'; readonly write: 'REVERSE'; readonly transition: 'T21' }
   | { readonly kind: 'SKIP'; readonly reason: PaymentResultSkipReason }
   | { readonly kind: 'HOLD'; readonly reason: PaymentResultHoldReason };
 
@@ -179,11 +185,12 @@ export const PAYMENT_RESULT_ACTOR = 'system:payment-result';
  * 보는 차례 [정함: 정본은 각 규칙만 적었고 차례는 없다]:
  *  ① 주문이 없음(order undefined) → HOLD IMPOSSIBLE
  *  ② event.eventSeq ≤ order.paymentEventSeq → SKIP DUPLICATE
- *  ③ RESOLVED → SKIP RECORD_ONLY, DEPOSIT_REVERSED·PARTIAL_CANCELED·CANCELED → HOLD NOT_YET_SUPPORTED(리뷰 M3)
+ *  ③ RESOLVED → SKIP RECORD_ONLY, PARTIAL_CANCELED·CANCELED → HOLD NOT_YET_SUPPORTED(리뷰 M3)
  *  ③-2 닫힌 주문(PAYMENT_RESULT_CLOSED_STATUSES)에 과금 사건(PAYMENT_RESULT_CHARGE_TYPES) → HOLD CHARGED_ON_CLOSED_ORDER
  *      (결제사 대조보다 먼저: 접수한 결제 시도가 없는 EXPIRED 주문도 이 까닭이다, 리뷰 M2)
  *  ④ 접수한 결제 시도가 없거나 그 결제사 ≠ event.pg → HOLD PG_MISMATCH
  *  ⑤ event.amount ≠ order.amount → HOLD AMOUNT_MISMATCH
+ *  ⑤-2 DEPOSIT_REVERSED인데 주문이 CONFIRMED가 아니면 HOLD DEPOSIT_REVERSED_NOT_CONFIRMED(SEV1)
  *  ⑥ 주문이 PAYMENT_RESULT_ARRIVAL[type]이면 SKIP ALREADY_THERE
  *  ⑦ PAYMENT_RESULT_TABLE[type][status]가 있으면 APPLY(쓰기 갈래는 PAYMENT_RESULT_WRITES, FAIL이면 failureReason = failureCategory ?? PAYMENT_FAILURE_FALLBACK),
  *     없으면 HOLD IMPOSSIBLE
@@ -202,6 +209,8 @@ export function decidePaymentResult(event: PaymentResultEvent, order: PaymentRes
   if (order.acceptedPg === undefined || order.acceptedPg !== event.pg) return { kind: 'HOLD', reason: 'PG_MISMATCH' };
   // ⑤ 금액
   if (event.amount !== order.amount) return { kind: 'HOLD', reason: 'AMOUNT_MISMATCH' };
+  // ⑤-2 입금 되돌림은 CONFIRMED에서만 한다(출발이 다르면 전이하지 않고 사람이 본다, BUILD_ORDER HOT-152)
+  if (event.type === 'DEPOSIT_REVERSED' && order.status !== 'CONFIRMED') return { kind: 'HOLD', reason: 'DEPOSIT_REVERSED_NOT_CONFIRMED' };
   // ⑥ 이미 그 사건의 도착 상태(다시 온 사건)
   if (order.status === PAYMENT_RESULT_ARRIVAL[event.type]) return { kind: 'SKIP', reason: 'ALREADY_THERE' };
   // ⑦ 전이 표. 표 밖은 있을 수 없는 조합이다
@@ -228,6 +237,8 @@ function applyOf(transition: PaymentResultTransition, failureReason: PaymentFail
     case 'T12':
     case 'T14':
       return { kind: 'APPLY', write: 'MARK', transition };
+    case 'T21':
+      return { kind: 'APPLY', write: 'REVERSE', transition };
   }
 }
 

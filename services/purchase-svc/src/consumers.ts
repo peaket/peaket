@@ -71,6 +71,8 @@ export interface PaymentResultApplyOptions {
    * 선택 인자다 [구현에서 정한 것: 빠뜨려도 발권 실행기의 1초 틱이 큐 행을 잡아 발권이 1초 안팎 늦을 뿐이다. 소비자 시험은 발권 길을 보지 않는다]
    */
   onApproved?: (orderId: string) => void;
+  /** 입금 오류 되돌림(T21)을 커밋한 뒤 부를 것(티켓 무효 실행기 깨우기, BUILD_ORDER HOT-152) */
+  onDepositReversed?: (orderId: string) => void;
 }
 
 /**
@@ -89,6 +91,7 @@ export function paymentResultApply(o: PaymentResultApplyOptions): ApplyPaymentRe
     clock: o.clock,
     onOrderChanged: o.onOrderChanged,
     ...(o.onApproved ? { onApproved: o.onApproved } : {}),
+    ...(o.onDepositReversed ? { onDepositReversed: o.onDepositReversed } : {}),
   });
 }
 

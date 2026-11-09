@@ -64,7 +64,7 @@ export type CheckoutValues = { toss: TossCheckoutValues } | { portone: PortoneCh
 export type ConfirmOutcome = 'APPROVED' | 'ALREADY_APPROVED' | 'IN_PROGRESS' | 'DECLINED' | 'WAITING_FOR_DEPOSIT' | 'UNKNOWN';
 
 /** 분석용 실패 범주(ADR-0052). UNKNOWN을 조회로 실패라 확정한 것과 결제사 오류는 PG_ERROR */
-export const FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'] as const;
+export const FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED'] as const;
 export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
 /**
@@ -164,6 +164,8 @@ export interface WebhookTrigger {
   depositSecret?: string;
   /** 결제사가 입금 완료를 알렸다(토스 입금 통보 DONE, 포트원 Transaction.Paid, BUILD_ORDER HOT-151 코드 리뷰). 결과가 아니라 조회 간격을 정하는 신호다 */
   depositDone?: true;
+  /** 결제사가 입금 완료를 되돌렸다고 알렸다(토스 입금 통보 WAITING_FOR_DEPOSIT, 포트원 Transaction.VirtualAccountIssued, BUILD_ORDER HOT-152). 결과가 아니라 조회를 부르는 신호다 */
+  depositReversed?: true;
 }
 
 /** 웹훅을 거절한 까닭. 닫힌 값만 쓴다(보안 로그·지표에 원문이 실리지 않게, BUILD_ORDER HOT-150) */

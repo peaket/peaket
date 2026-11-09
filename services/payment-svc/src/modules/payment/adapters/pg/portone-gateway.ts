@@ -307,6 +307,8 @@ export class PortoneGateway implements PaymentGatewayPort {
       paymentRef,
       ...(paymentRef.startsWith(PAYMENT_ID_PREFIX) ? { orderRef: paymentRef.slice(PAYMENT_ID_PREFIX.length) } : {}),
       ...(m.type === 'Transaction.Paid' ? { depositDone: true as const } : {}),
+      // 입금 오류 동작은 포트원 문서에서 찾지 못해 토스와 같게 둔다(추정, payment §6 '결제사 동작'). 조회가 입금 대기일 때만 원장이 바뀐다(BUILD_ORDER HOT-152)
+      ...(m.type === 'Transaction.VirtualAccountIssued' ? { depositReversed: true as const } : {}),
     };
   }
 

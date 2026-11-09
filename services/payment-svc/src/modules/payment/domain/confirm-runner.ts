@@ -47,6 +47,8 @@ export const CONFIRM_EXPIRED_SCAN = 500;
 
 /** payment_event의 내부 표시: 결제사 승인 호출 앞에 남긴다(exported = false, payment §4.2 5번) */
 export const CONFIRM_SENT_EVENT_TYPE = 'CONFIRM_SENT';
+/** payment_event·trade.payments의 입금 오류 되돌림(T21) 사건 종류(BUILD_ORDER HOT-152) */
+export const DEPOSIT_REVERSED_EVENT_TYPE = 'DEPOSIT_REVERSED';
 
 /** payment_confirm_total{outcome}의 값 */
 export const PAYMENT_CONFIRM_OUTCOMES = ['approved', 'already', 'declined', 'waiting', 'in_progress', 'unknown', 'expired', 'restart', 'no_adapter'] as const;
@@ -137,6 +139,8 @@ export type ConfirmFinish =
       readonly latencyMs?: number;
       /** 가상계좌 발급 정보(답에 있을 때만 실행기가 채운다, BUILD_ORDER HOT-151) */
       readonly deposit?: DepositWrite;
+      /** 입금 오류 되돌림이면 참이다(사건 종류가 DEPOSIT_REVERSED이고 저장한 해시를 지우지 않는다, BUILD_ORDER HOT-152) */
+      readonly reversed?: true;
     }
   | { readonly status: 'UNKNOWN'; readonly result: 'UNKNOWN'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number };
 
@@ -154,7 +158,7 @@ export interface PaymentEventMessage {
   readonly eventId: string;
   readonly orderId: string;
   readonly pg: PgName;
-  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'UNKNOWN' | 'RESOLVED';
+  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'UNKNOWN' | 'RESOLVED';
   readonly amount: number;
   readonly payMethodCategory?: PayMethodCategory;
   /** 결제 수단 연결값(cardBin과 늘 함께 있거나 함께 빈다, BUILD_ORDER HOT-145) */
@@ -314,7 +318,7 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventMe
     eventId: target.eventId,
     orderId: target.orderId,
     pg: target.pg,
-    type: finish.status,
+    type: finish.status === 'AWAITING_DEPOSIT' && finish.reversed === true ? DEPOSIT_REVERSED_EVENT_TYPE : finish.status,
     amount: target.amount,
     ...(finish.payMethodCategory === undefined ? {} : { payMethodCategory: finish.payMethodCategory }),
     ...(finish.status === 'APPROVED' && finish.paymentMethodRef !== undefined ? { paymentMethodRef: finish.paymentMethodRef, cardBin: finish.cardBin } : {}),

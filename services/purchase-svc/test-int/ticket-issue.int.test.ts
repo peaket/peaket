@@ -293,12 +293,13 @@ async function putJob(s: Fresh, x: JobSpec = {}): Promise<NewOrder> {
 /** 잡은 큐 행의 기대 값(TicketIssueJob) */
 const jobView = (
   o: NewOrder,
-  x: { nextAttemptAtMs: number; leaseUntilMs: number; createdAtMs: number; issueDueAtMs: number; attempts?: number; lastError?: string },
+  x: { nextAttemptAtMs: number; leaseUntilMs: number; createdAtMs: number; issueDueAtMs: number; attempts?: number; lastError?: string; issueGeneration?: number },
 ): TicketIssueJob => ({
   orderId: o.id,
   eventId: o.eventId,
   payerAccountId: o.accountId,
   seatIds: seatIdsOf(o),
+  issueGeneration: x.issueGeneration ?? 0,
   attempts: x.attempts ?? 0,
   nextAttemptAtMs: x.nextAttemptAtMs,
   issueDueAtMs: x.issueDueAtMs,
@@ -526,6 +527,19 @@ async function waiting(table: PaymentStatusWaitTable, n: number, timeoutMs = 5_0
 // ───────────────────────────── 잡기(claimDue·claim·get) ─────────────────────────────
 
 describe('DrizzleTicketIssue.claimDue·claim·get(짧은 트랜잭션: 기한·임대 조건, FOR UPDATE SKIP LOCKED, 임대 쓰고 커밋)', () => {
+  test('P-T36 ④_리뷰 고침 H1: 그 주문의 티켓 무효 행이 남아 있으면 재발권을 잡지 않고, 무효가 끝나면 잡는다 [ASVS v5.0.0-15.4.1]', async () => {
+    const s = fresh();
+    const now = s.clock.now();
+    const blocked = await putJob(s, { nextAtMs: now });
+    await q('insert into ticket_void_job (order_id, event_id, issue_generation, attempts, next_attempt_at, created_at) values ($1, $2, 3, 0, $3, $3)', [blocked.id, blocked.eventId, new Date(now)]);
+    expect((await s.issue.claimDue(100, LEASE)).map((j) => j.orderId)).not.toContain(blocked.id);
+    expect(await s.issue.claim(blocked.id, LEASE)).toBeUndefined();
+    await q('update ticket_void_job set next_attempt_at = null where order_id = $1', [blocked.id]);
+    expect(await s.issue.claim(blocked.id, LEASE)).toBeUndefined();
+    await q('delete from ticket_void_job where order_id = $1', [blocked.id]);
+    expect(await s.issue.claim(blocked.id, LEASE)).toMatchObject({ orderId: blocked.id });
+  });
+
   test('ADR0106_기한이 됐고(next_attempt_at ≤ 지금) 임대가 비었거나 끝난(lease_until < 지금) 행만 next_attempt_at 차례로 잡아 lease_until = 지금 + 임대를 쓰고 커밋한다. 결제자·좌석(줄 번호 차례)·기한·만든 시각·마지막 오류를 붙이고 attempts는 그대로다. 임대 끝이 지금과 같은 행·기한 전·멈춘 행은 잡지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
     const s = fresh();
     const now = s.clock.now();
@@ -657,7 +671,7 @@ describe('DrizzleTicketIssue.claimDue·claim·get(짧은 트랜잭션: 기한·�
     expect((await issueRowOf(a.o.id))?.lease_until).toBeNull();
     const now = s.clock.now();
     expect(await s.issue.claim(a.o.id, LEASE)).toEqual(
-      jobView(a.o, { nextAttemptAtMs: a.approvedAt, createdAtMs: a.approvedAt, issueDueAtMs: a.approvedAt + ISSUE_WINDOW_MS, leaseUntilMs: now + LEASE }),
+      jobView(a.o, { nextAttemptAtMs: a.approvedAt, createdAtMs: a.approvedAt, issueDueAtMs: a.approvedAt + ISSUE_WINDOW_MS, leaseUntilMs: now + LEASE, issueGeneration: 1 }),
     );
     expect((await issueRowOf(a.o.id))?.lease_until).toEqual(new Date(now + LEASE));
     expect(await s.issue.get(a.o.id)).toMatchObject({ orderId: a.o.id, leaseUntilMs: now + LEASE });
@@ -902,6 +916,15 @@ async function claimFree(s: Fresh, orderId: string): Promise<TicketIssueJob | un
 // ───────────────────────────── ISSUE_DELAYED·발권 기한 넘김 ─────────────────────────────
 
 describe('DrizzleTicketIssue.markDelayed·markOverdue(한 트랜잭션, SKIP LOCKED, 주문마다 한 번)', () => {
+  test('P-T36 ④_리뷰 고침 L10: 세대가 있는 행의 ISSUE_DELAYED eventKey에는 세대가 들어간다', async () => {
+    const s = fresh();
+    const now = s.clock.now();
+    const o = await putJob(s, { createdAtMs: now - 90_000 });
+    await q('update ticket_issue_job set issue_generation = 7 where order_id = $1', [o.id]);
+    expect(await s.issue.markDelayed(100)).toContain(o.id);
+    expect((await outboxOf(o.eventId)).at(-1)!.event).toEqual({ ...issueDelayedOf(o, now), eventKey: uuid8(`OrderEvent:${o.id}:ISSUE_DELAYED:7`) });
+  });
+
   test('PT39_①_ADR0106_markDelayed는 created_at ≤ 지금 − 60초이고 delayed_at이 빈 행마다 Outbox ISSUE_DELAYED(상태 전이·이력 없음, eventKey = 주문마다 고정 UUIDv8, Kafka 키 = 회차)와 delayed_at = 지금을 쓰고 created_at 차례로 주문 ID를 돌려준다. 멈춘 행·임대 중인 행도 대상이고, 다시 부르면 아무것도 내지 않는다', async () => {
     const s = fresh();
     const now = s.clock.now();
@@ -1078,7 +1101,8 @@ describe('TicketIssueRunner + 대역 ticket-svc(실제 purchase DB)', () => {
     expect(await runner.tick()).toMatchObject({ claimed: 1, delayed: 0, overdue: 0, measured: true });
 
     expect(await orderRow(a.o.id)).toEqual({ status: 'CONFIRMED', event_seq: 6 });
-    expect(await ticketIdsOf(a.o.id)).toEqual(ticketRows(a.o, (orderId, seatId) => uuid8(`Ticket:${orderId}:${seatId}`)));
+    // 대역의 티켓 ID는 세대(첫 승인의 순번 1)까지 넣어 만든다(BUILD_ORDER HOT-152)
+    expect(await ticketIdsOf(a.o.id)).toEqual(ticketRows(a.o, (orderId, seatId) => uuid8(`Ticket:${orderId}:1:${seatId}`)));
     expect((await historyOf(a.o.id)).at(-1)).toMatchObject({ from_status: 'APPROVED', to_status: 'CONFIRMED', cause: 'T18', actor: ISSUE_ACTOR });
     expect(await issueRowOf(a.o.id)).toBeUndefined();
     expect(await outboxTypes(a.o)).toEqual([...OUTBOX_APPROVED, 'CONFIRMED']);
@@ -1097,7 +1121,7 @@ describe('TicketIssueRunner + 대역 ticket-svc(실제 purchase DB)', () => {
     const a = await approved(s, { onApproved: (id) => runner.kick(id) });
 
     expect(await waitFor(async () => (await orderRow(a.o.id))?.status === 'CONFIRMED', 5_000)).toBe(true);
-    expect(issuer.calls).toEqual([{ orderId: a.o.id, eventId: a.o.eventId, payerAccountId: a.o.accountId, seatIds: seatIdsOf(a.o), deadlineMs: DEADLINE_MS }]);
+    expect(issuer.calls).toEqual([{ orderId: a.o.id, eventId: a.o.eventId, payerAccountId: a.o.accountId, seatIds: seatIdsOf(a.o), deadlineMs: DEADLINE_MS, issueGeneration: 1 }]);
     expect(await ticketIdsOf(a.o.id)).toEqual(ticketRows(a.o));
     // 다시 돌려도 할 것이 없다(큐 행이 지워졌다)
     expect(await runner.runOne(a.o.id)).toEqual({ kind: 'SKIPPED', reason: 'NO_JOB' });
@@ -1414,7 +1438,9 @@ describe('결제 결과 long polling(GetPaymentStatus)과 발권 실행기', () 
       expect(await s.issue.markDelayed(100)).toEqual([a.o.id]);
       expect(await table.pollOnce()).toBe(1);
       expect((await pending).result).toEqual({ status: 200, body: { status: 'APPROVED', issueDelayed: true, pg: 'TOSS' } });
-      expect((await outboxOf(a.o.eventId)).at(-1)!.event).toEqual(issueDelayedOf(a.o, a.approvedAt + DELAYED_AFTER_MS));
+      // 승인 반영이 넣은 행은 세대(승인 사건 순번)가 있어 키에 세대가 들어간다(BUILD_ORDER HOT-152 코드 리뷰)
+      const generation = (await q<{ g: string }>('select issue_generation::text as g from ticket_issue_job where order_id = $1', [a.o.id]))[0]!.g;
+      expect((await outboxOf(a.o.eventId)).at(-1)!.event).toEqual({ ...issueDelayedOf(a.o, a.approvedAt + DELAYED_AFTER_MS), eventKey: uuid8(`OrderEvent:${a.o.id}:ISSUE_DELAYED:${generation}`) });
     } finally {
       await table.stop();
     }

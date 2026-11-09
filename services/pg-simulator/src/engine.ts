@@ -279,6 +279,14 @@ export class PgSimulatorEngine {
       if (!p) return { response: err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다') };
       if (!c.cancelReason || c.cancelReason.length > 200) return { response: err(400, 'INVALID_REQUEST', '취소 사유가 필요합니다') };
       if (p.status === 'CANCELED') return { response: err(400, 'ALREADY_CANCELED_PAYMENT', '이미 취소된 결제입니다') };
+      if (p.status === 'WAITING_FOR_DEPOSIT') {
+        // 입금 전 취소: 받은 돈이 없어 환불 없이 끝난다(BUILD_ORDER HOT-152)
+        p.balance = 0;
+        p.lastTransactionKey = this.transactionKey();
+        p.cancels.push({ cancelAmount: 0, cancelReason: c.cancelReason, canceledAt: this.clock.now(), transactionKey: p.lastTransactionKey });
+        this.setStatus(p, 'CANCELED');
+        return { response: { status: 200, body: this.view(p) } };
+      }
       if (p.status !== 'DONE' && p.status !== 'PARTIAL_CANCELED') return { response: err(403, 'NOT_CANCELABLE_PAYMENT', '취소할 수 없는 결제입니다') };
       if (portone?.currentCancellableAmount !== undefined && portone.currentCancellableAmount !== p.balance) return { response: err(409, 'CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN', '취소 가능 금액이 맞지 않습니다') };
       const fits = (a: number) => Number.isSafeInteger(a) && a > 0 && a <= p.balance;
@@ -340,6 +348,21 @@ export class PgSimulatorEngine {
     if (p.status !== 'WAITING_FOR_DEPOSIT') return err(400, 'NOT_WAITING_FOR_DEPOSIT', '입금 대기 결제가 아닙니다');
     this.approve(p);
     this.deposits.push({ createdAt: kstIso(this.clock.now()), secret: p.secret!, status: 'DONE', transactionKey: p.lastTransactionKey!, orderId: p.orderId });
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 입금 오류를 흉내 낸다: 입금 완료를 입금 대기로 되돌리고(승인 시각·승인 표시를 지운다) 입금 통보 본문(WAITING_FOR_DEPOSIT)을 쌓는다. dueDate를 주면 새 기한이다. 없는 결제는 404, 입금 완료 가상계좌가 아니면 400이다(BUILD_ORDER HOT-152) */
+  reverseDeposit(paymentKey: string, o: { dueDate?: string } = {}): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'DONE' || p.virtualAccount === undefined) return err(400, 'NOT_DEPOSITED', '입금 완료된 가상계좌 결제가 아닙니다');
+    const due = o.dueDate === undefined ? Number.NaN : Date.parse(o.dueDate);
+    if (!Number.isNaN(due)) p.virtualAccount.dueAt = due;
+    delete p.approvedAt;
+    this.approvedByOrder.delete(p.orderId);
+    p.lastTransactionKey = this.transactionKey();
+    this.setStatus(p, 'WAITING_FOR_DEPOSIT');
+    this.deposits.push({ createdAt: kstIso(this.clock.now()), secret: p.secret!, status: 'WAITING_FOR_DEPOSIT', transactionKey: p.lastTransactionKey, orderId: p.orderId });
     return { status: 200, body: this.view(p) };
   }
 

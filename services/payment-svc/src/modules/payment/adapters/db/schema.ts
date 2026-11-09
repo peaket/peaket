@@ -12,8 +12,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () =>
 const STATUS_LIST = sql.raw("'ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED'");
 /** 결제사 셋의 CHECK 목록 */
 const PG_LIST = sql.raw("'TOSS', 'PORTONE', 'SIMULATOR'");
-/** 분석용 실패 범주 여섯 값의 CHECK 목록(domain/payment-gateway.ts FailureCategory와 같은 값) */
-const FAILURE_CATEGORY_LIST = sql.raw("'CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'");
+/** 분석용 실패 범주 일곱 값의 CHECK 목록(domain/payment-gateway.ts FailureCategory와 같은 값) */
+const FAILURE_CATEGORY_LIST = sql.raw("'CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED'");
 
 export const payment = pgTable(
   'payment',
@@ -36,7 +36,7 @@ export const payment = pgTable(
     amount: integer('amount').notNull(),
     status: text('status').notNull(),
     depositDueAt: at('deposit_due_at'),
-    // 입금 완료 통보를 처음 받은 시각(입금 대기 행은 짧은 간격 조회의 기준, FAILED 행은 늦은 입금 확인을 걸었다는 표시. BUILD_ORDER HOT-151 코드 리뷰, 마이그레이션 0006)
+    // 입금 완료·되돌림 통보를 처음 받은 시각(입금 대기·되돌림 확인 행은 짧은 간격 조회의 기준, FAILED 행은 늦은 입금 확인을 걸었다는 표시. BUILD_ORDER HOT-151·HOT-152, 마이그레이션 0006)
     depositNotifiedAt: at('deposit_notified_at'),
     virtualAccountNo: text('virtual_account_no'),
     virtualAccountBank: text('virtual_account_bank'),
@@ -66,8 +66,8 @@ export const payment = pgTable(
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
-    // 단독 조회 잡기(UNKNOWN과 입금 대기, 늦은 입금 확인을 건 FAILED, BUILD_ORDER HOT-151, 마이그레이션 0006). 그 밖의 끝난 행은 인덱스에 없다
-    index('payment_query_due_idx').on(t.nextQueryAt).where(sql`${t.status} IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (${t.status} = 'FAILED' AND ${t.nextQueryAt} IS NOT NULL)`),
+    // 단독 조회 잡기(UNKNOWN과 입금 대기, 늦은 입금 확인을 건 FAILED, 되돌림 확인을 건 APPROVED, BUILD_ORDER HOT-151·HOT-152, 마이그레이션 0006·0007). 그 밖의 끝난 행은 인덱스에 없다
+    index('payment_query_due_idx').on(t.nextQueryAt).where(sql`${t.status} IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (${t.status} IN ('FAILED', 'APPROVED') AND ${t.nextQueryAt} IS NOT NULL)`),
     // 1시간 표시(docs/data.md §5.1 상태 쓸기 작업)
     index('payment_unknown_status_changed_idx').on(t.statusChangedAt).where(sql`${t.status} = 'UNKNOWN'`),
     // 웹훅의 결제 참조로 원장 찾기(docs/data.md §5.1, BUILD_ORDER HOT-150, 마이그레이션 0005)

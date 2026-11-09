@@ -232,10 +232,12 @@ export function isFinalTicketIssueWriteError(err: unknown): boolean {
 
 /**
  * ISSUE_DELAYED 사건의 eventKey: UUID 버전 8(SHA-256('OrderEvent:' + 주문 ID + ':ISSUE_DELAYED')의 앞 16바이트, orderEventKey와 같은 계산에 이력 번호 대신 고정 글).
- * 주문마다 늘 같은 값이라 다시 내도 소비자가 지운다(설계 7 '{orderId}:ISSUE_DELAYED 고정'. asyncapi eventKey가 format uuid라 글 그대로는 쓰지 않는다)
+ * 주문·발권 세대마다 늘 같은 값이라 다시 내도 소비자가 지운다(설계 7 '{orderId}:ISSUE_DELAYED 고정'. asyncapi eventKey가 format uuid라 글 그대로는 쓰지 않는다).
+ * 세대가 있으면 글 끝에 ':' + 세대를 붙인다: 입금 오류 뒤 재발권의 지연 알림이 앞 세대의 키로 지워지지 않게 한다(BUILD_ORDER HOT-152 코드 리뷰). 세대가 없거나 0인 옛 행은 지금 키 그대로다.
+ * @param issueGeneration 발권 세대(ticket_issue_job.issue_generation)
  */
-export function issueDelayedEventKey(orderId: string): string {
-  return uuid8(`OrderEvent:${orderId}:ISSUE_DELAYED`);
+export function issueDelayedEventKey(orderId: string, issueGeneration = 0): string {
+  return uuid8(issueGeneration > 0 ? `OrderEvent:${orderId}:ISSUE_DELAYED:${issueGeneration}` : `OrderEvent:${orderId}:ISSUE_DELAYED`);
 }
 
 export interface BuildIssueDelayedEventInput {
@@ -245,6 +247,8 @@ export interface BuildIssueDelayedEventInput {
   readonly items: readonly OrderItem[];
   /** 사건 시각(주입한 시계, 유닉스 밀리초) */
   readonly occurredAtMs: number;
+  /** 발권 세대(ticket_issue_job.issue_generation). 없거나 0이면 키에 넣지 않는다 */
+  readonly issueGeneration?: number;
 }
 
 /**
@@ -270,7 +274,7 @@ export function buildIssueDelayedEvent(input: BuildIssueDelayedEventInput): Orde
     firstInStage: false,
     // 밀리초가 날짜 범위 밖이면 toISOString이 RangeError를 던진다
     occurredAt: new Date(input.occurredAtMs).toISOString(),
-    eventKey: issueDelayedEventKey(order.id),
+    eventKey: issueDelayedEventKey(order.id, input.issueGeneration),
   };
 }
 

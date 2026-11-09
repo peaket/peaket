@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
-import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from '../src/modules/booking/adapters/db/schema.js';
+import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
@@ -63,6 +63,8 @@ const SESSION_TAG = '0011_order_session_idx';
 const SESSION_INDEX = 'purchase_order_session_idx';
 /** 회차 판매 상태 표 event_sale과 결제 중 셈 부분 인덱스(BUILD_ORDER PRF-144, ADR-0122) */
 const EVENT_SALE_TAG = '0012_event_sale';
+/** 티켓 무효 큐 ticket_void_job과 발권 세대 ticket_issue_job.issue_generation(BUILD_ORDER HOT-152) */
+const VOID_TAG = '0013_ticket_void_job';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -405,6 +407,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [10, AWAIT_TAG],
       [11, SESSION_TAG],
       [12, EVENT_SALE_TAG],
+      [13, VOID_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -430,6 +433,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${AWAIT_TAG}.sql`,
       `${SESSION_TAG}.sql`,
       `${EVENT_SALE_TAG}.sql`,
+      `${VOID_TAG}.sql`,
     ]);
   });
 
@@ -452,7 +456,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -463,11 +467,11 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   /** booking schema.ts의 주문 표 일곱(PRF-160 다섯 + PRF-162 order_saga_job + PRF-163 ticket_issue_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
-  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob];
+  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob, ticketVoidJob];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0012_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 일곱)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0012_snapshot.json');
+  test('마지막 스냅샷(0013_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 여덟)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0013_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES]) {
@@ -480,7 +484,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
 
   test('마지막 스냅샷의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163, 0009·0010은 인덱스를 더하지 않는다 PRF-170·PRF-171, 0011의 purchase_order_session_idx는 PRF-172) [ASVS v5.0.0-2.3.4]', () => {
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job', 'ticket_issue_job']);
+    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job', 'ticket_issue_job', 'ticket_void_job']);
     ORDER_TABLES.forEach((table, i) => {
       const s = ORDER_SHAPES[i]!;
       const t = snap.tables[`public.${s.name}`]!;
@@ -840,7 +844,7 @@ describe('마이그레이션 SQL 파일(0006_saga_step_one.sql, PRF-165)', () =>
 /** 0007(결제 결과 반영, PRF-163): 발권 재시도 큐 ticket_issue_job */
 const ticketShape = shapeOf(ticketIssueJob);
 /** schema.ts ticket_issue_job 가운데 0007이 만든 칸(0009가 더한 칸 셋을 뺀 것) */
-const ticket0007Columns = ticketShape.columns.filter((c) => !LEASE_COLUMNS.includes(c.name));
+const ticket0007Columns = ticketShape.columns.filter((c) => !LEASE_COLUMNS.includes(c.name) && c.name !== 'issue_generation');
 const ticketFile = readFileSync(join(MIGRATIONS, `${TICKET_TAG}.sql`), 'utf8');
 const ticketBody = ticketFile
   .split('\n')
@@ -887,7 +891,7 @@ describe('마이그레이션 SQL 파일(0007_ticket_issue_job.sql, PRF-163)', ()
     const c = canon(ticketStatements[0]!);
     expect(c).toContain('order_id uuid primary key not null');
     expect((c.match(/primary key/g) ?? []).length).toBe(1);
-    expect(ticketShape.columns.filter((x) => x.hasDefault).map((x) => x.name)).toEqual(['attempts']);
+    expect(ticketShape.columns.filter((x) => x.hasDefault && x.name !== 'issue_generation').map((x) => x.name)).toEqual(['attempts']);
     expect(getTableConfig(ticketIssueJob).columns.find((x) => x.name === 'attempts')!.default).toBe(0);
     expect(c).toContain('attempts integer default 0 not null');
     expect([...ticketBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
@@ -964,7 +968,7 @@ describe('마이그레이션 SQL 파일(0009_ticket_issue_lease.sql, PRF-170)', 
       const col = LEASE_COLUMNS[i]!;
       expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table ticket_issue_job add column ${col} timestamp with time zone`);
     });
-    expect(ticketShape.columns.slice(-3).map((c) => ({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault, primary: c.primary }))).toEqual(
+    expect(ticketShape.columns.filter((c) => c.name !== 'issue_generation').slice(-3).map((c) => ({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault, primary: c.primary }))).toEqual(
       LEASE_COLUMNS.map((name) => ({ name, type: TZ, notNull: false, hasDefault: false, primary: false })),
     );
   });

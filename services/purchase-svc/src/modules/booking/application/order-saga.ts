@@ -357,8 +357,13 @@ export class OrderSagaRunner {
     }
   }
 
-  /** 단계 RELEASE(리뷰 M4): 실패 해제를 다시 하고, 끝났으면(OK·회차 키 수명 뒤의 NOT_READY) 작업 행을 지워 RELEASED, 못 끝났으면 다시 하기 */
+  /**
+   * 단계 RELEASE(리뷰 M4): 실패 해제를 다시 하고, 끝났으면(OK·회차 키 수명 뒤의 NOT_READY) 작업 행을 지워 RELEASED, 못 끝났으면 다시 하기.
+   * 입금 오류로 되돌린 주문의 티켓 무효가 끝나지 않았으면(T17로 기한이 지난 경우) 풀지 않고 다시 하기다: 앞 세대 티켓이 살아 있는 동안 좌석이 다시 팔리지 않게 한다(BUILD_ORDER HOT-152 코드 리뷰).
+   * 판매 행 지우기·한도 되돌림은 T17 트랜잭션 그대로이고, 새 구매자는 좌석 Redis를 거치므로 이 해제가 다시 파는 문이다
+   */
   async releaseStep(job: SagaJob, order: SagaOrderView): Promise<SagaStepOutcome> {
+    if (order.ticketVoidPending === true) return this.#retry(job, 'ticket_void_pending');
     const config = await this.#configOf(order);
     if (!(await this.#releaseHold(order, config))) return this.#retry(job, 'release_failed');
     await this.deps.jobs.delete(order.orderId, { step: 'RELEASE', ...leaseOf(job) });

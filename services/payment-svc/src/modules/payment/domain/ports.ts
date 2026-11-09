@@ -1,9 +1,10 @@
 // 승인 명령 접수와 결과 조회의 포트(docs/features/payment.md §2 '승인 명령 접수의 첫 구현', BUILD_ORDER PRF-180).
-import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentRecord, PaymentState } from './confirm-command.js';
+import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentLedgerStatus, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { FailureCategory, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
+import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 import type { VirtualAccountFieldReason } from './virtual-account.js';
 import type { PaymentWebhookOutcome, WebhookDecision, WebhookRoute } from './webhook-receipt.js';
@@ -81,6 +82,8 @@ export interface PaymentDepositLog {
 export interface PaymentDepositSignals {
   /** payment_virtual_account_field_failures_total{op, reason}를 1 올린다 */
   fieldFailure(op: 'seal' | 'open', reason: VirtualAccountFieldReason): void;
+  /** payment_deposit_cancel_total{outcome}를 1 올린다(BUILD_ORDER HOT-152) */
+  cancel?(outcome: DepositCancelOutcome): void;
 }
 
 /** 승인 명령 접수의 로그(주문 ID만 싣는다. 결제 키·토큰·금액은 싣지 않는다). 던지지 않는다 */
@@ -225,7 +228,7 @@ export type ResolveUnknownResult = 'APPLIED' | 'STALE';
 /** 단독 조회 저장소(UNKNOWN과 입금 대기 행, BUILD_ORDER PRF-182·HOT-151. 모든 쓰기는 READ COMMITTED, 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS) */
 export interface PaymentUnknownQueries {
   /**
-   * 짧은 트랜잭션 하나에서 그 결제사의 `(status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status = 'FAILED' AND next_query_at IS NOT NULL)) AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례. FAILED 행은 늦은 입금 확인 한 번이다),
+   * 짧은 트랜잭션 하나에서 그 결제사의 `(status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status IN ('FAILED', 'APPROVED') AND next_query_at IS NOT NULL)) AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례. FAILED 행은 늦은 입금 확인 한 번이다),
    * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1, query_touched_at = 지금을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
    * @throws RangeError limit이 1 이상의 정수가 아님
    */
@@ -243,6 +246,17 @@ export interface PaymentUnknownQueries {
 
   /** `status = 잡을 때의 상태 AND anomaly_logged_at IS NULL` 조건으로 anomaly_logged_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다) */
   markAnomalyLogged(job: UnknownQueryJob): Promise<boolean>;
+
+  /** 입금 오류 확인이 1시간 [가정]을 넘겼다: `status = 'APPROVED' AND overdue_at IS NULL` 조건으로 overdue_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다, BUILD_ORDER HOT-152 코드 리뷰) */
+  markReversalOverdue(job: UnknownQueryJob): Promise<boolean>;
+
+  /** 입금 오류 확인을 끝낸다: `status = 'APPROVED' AND next_query_at = 이 잡기가 쓴 값` 조건으로 next_query_at·deposit_notified_at을 비운다. 이번에 썼으면 true(BUILD_ORDER HOT-152) */
+  finishReversalCheck(job: UnknownQueryJob): Promise<boolean>;
+
+  /**
+   * 입금 오류 되돌림 한 트랜잭션: payment 행 FOR UPDATE → 'APPROVED'가 아니면 STALE → 다음 순번으로 DEPOSIT_REVERSED 수출 사건 → 원장 AWAITING_DEPOSIT(approved_at 비움, 가상계좌 칸, next_query_at = 새 기한 + 10분) → Outbox `trade.payments`(마지막 문장, BUILD_ORDER HOT-152).
+   */
+  reverseDeposit(job: UnknownQueryJob, finish: Extract<ConfirmFinish, { status: 'AWAITING_DEPOSIT' }>): Promise<ResolveUnknownResult>;
 
   /** 늦은 입금 확인을 끝낸다: `status = 'FAILED' AND next_query_at = 이 잡기가 쓴 값` 조건으로 next_query_at을 비운다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다, 원장의 다른 칸은 바꾸지 않는다) */
   finishLateDepositCheck(job: UnknownQueryJob): Promise<boolean>;
@@ -281,6 +295,12 @@ export interface PaymentUnknownLog {
   writeFailed(e: { readonly orderId: string; readonly code: string }): void;
   /** 답을 쓰려니 원장이 UNKNOWN이 아니었다(경고 한 줄) */
   staleAnswer(e: { readonly orderId: string }): void;
+  /** 결제사 입금 오류를 확인해 입금 대기로 되돌렸다(kind payment-deposit-reversed, 주문 ID만, BUILD_ORDER HOT-152) */
+  depositReversed(e: { readonly orderId: string }): void;
+  /** 통보 뒤 10분 [가정]이 지나도 결제사가 입금 완료라고 답했다(지연된 통보로 끝낸다. kind payment-deposit-reversal-unconfirmed, 주문 ID만) */
+  reversalUnconfirmed(e: { readonly orderId: string }): void;
+  /** 통보 뒤 1시간 [가정]이 지나도 조회로 되돌림을 확인하지 못했다(SEV1, kind payment-deposit-reversal-overdue, 주문 ID만, BUILD_ORDER HOT-152 코드 리뷰) */
+  reversalOverdue(e: { readonly orderId: string }): void;
   /** 실행기 안의 예상 못 한 오류(what = claim·gateway·call·anomaly·reschedule·overdue). 어댑터가 safeErrorCode만 싣는다 */
   runError(e: { readonly what: 'claim' | 'gateway' | 'call' | 'anomaly' | 'reschedule' | 'overdue'; readonly orderId?: string; readonly err: unknown }): void;
 }
@@ -295,6 +315,23 @@ export interface PaymentUnknownSignals {
   inFlight(count: number): void;
   /** payment_unknown_write_failures_total을 1 올린다 */
   writeFailure(): void;
+}
+
+// ---- 입금 전 취소(BUILD_ORDER HOT-152, docs/features/payment.md §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현') ----
+
+/** 입금 전 취소의 저장소(READ COMMITTED, 문장 시간 한도 min(CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS, budget의 남은 시간)) */
+export interface PaymentDepositCancels {
+  /** 원장 행을 읽는다. 없으면 undefined */
+  readCancelTarget(paymentId: string, budget?: CallBudget): Promise<DepositCancelTarget | undefined>;
+  /** 답 반영이 STALE일 때 원장의 지금 상태를 다시 읽는다. 없으면 undefined(BUILD_ORDER HOT-152 코드 리뷰) */
+  readCancelStatus(paymentId: string, budget?: CallBudget): Promise<PaymentLedgerStatus | undefined>;
+  /**
+   * 한 트랜잭션: payment 행 FOR UPDATE → 상태 확인 → 이 취소 ID의 내부 표시(DEPOSIT_CANCEL_SENT)가 없으면 쓴다.
+   * BEGUN 처음이거나 이어서 부른다, DONE 그 취소 ID로 이미 FAILED로 끝났다, NOT_WAITING 그 밖의 상태다
+   */
+  beginDepositCancel(target: DepositCancelTarget, cancellationId: string, budget?: CallBudget): Promise<DepositCancelBegin>;
+  /** 답 반영 한 트랜잭션: payment 행 FOR UPDATE → AWAITING_DEPOSIT이 아니면 STALE → 수출 사건 FAILED(DEPOSIT_CANCELED) → 원장 FAILED → Outbox(마지막 문장) */
+  finishDepositCancel(target: DepositCancelTarget, budget?: CallBudget): Promise<ResolveUnknownResult>;
 }
 
 // ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----
@@ -334,6 +371,8 @@ export interface WebhookReceiveRequest {
   readonly depositSecretHash?: Uint8Array;
   /** 결제사가 입금 완료를 알렸다(토스 입금 통보 DONE, 포트원 Transaction.Paid). 조회 간격과 끝난 원장의 늦은 입금 확인에만 쓴다 */
   readonly depositDone?: boolean;
+  /** 결제사가 입금 완료를 되돌렸다고 알렸다(토스 입금 통보 WAITING_FOR_DEPOSIT, 포트원 Transaction.VirtualAccountIssued, BUILD_ORDER HOT-152). 승인 원장의 되돌림 확인에만 쓴다 */
+  readonly depositReversed?: boolean;
   /** 지금(epoch ms). received_at과 next_query_at */
   readonly nowMs: number;
 }
@@ -349,6 +388,7 @@ export interface PaymentWebhookStore {
    * → QUERY_SIGNAL이면 `next_query_at = 지금`(status IN ('UNKNOWN', 'AWAITING_DEPOSIT') AND next_query_at > 지금 AND 직전 신호·잡기로부터 WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS가 지남 조건, 0행이면 QUERY_SIGNAL_SKIPPED).
    * 보낸 쪽을 확인한(수신 기록을 쓴) 입금 대기의 입금 완료 통보는 deposit_notified_at을 처음 한 번 쓰고 next_query_at = least(지금 값, greatest(지금, 직전 신호·잡기 + 5초))다(지금으로 못 당겼으면 QUERY_SIGNAL_SKIPPED).
    * LATE_DEPOSIT_CHECK면 status = 'FAILED' AND deposit_notified_at IS NULL 조건으로 next_query_at·deposit_notified_at = 지금을 쓴다(0행이면 STATE_IGNORED).
+   * REVERSAL_CHECK면 status = 'APPROVED' 조건으로 deposit_notified_at을 처음 한 번 쓰고 next_query_at = least(지금 값, greatest(지금, 직전 신호·잡기 + 5초))다(지금으로 못 당겼으면 QUERY_SIGNAL_SKIPPED, BUILD_ORDER HOT-152).
    * 원장을 찾지 못했거나 PG_MISMATCH면 수신 기록의 payment_id는 비운다.
    */
   receive(request: WebhookReceiveRequest): Promise<WebhookReceiveResult>;

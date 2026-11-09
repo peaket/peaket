@@ -47,7 +47,7 @@ describe('상수', () => {
     expect([UNKNOWN_QUERY_POLL_INTERVAL_MS, UNKNOWN_QUERY_CONCURRENCY, UNKNOWN_QUERY_BATCH]).toEqual([1_000, 16, 50]);
     expect([UNKNOWN_QUERY_BASE_MS, UNKNOWN_QUERY_FACTOR, UNKNOWN_QUERY_MAX_MS]).toEqual([5_000, 2, 60_000]);
     expect(UNKNOWN_OVERDUE_MS).toBe(3_600_000);
-    expect(PAYMENT_UNKNOWN_QUERY_OUTCOMES).toEqual(['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit']);
+    expect(PAYMENT_UNKNOWN_QUERY_OUTCOMES).toEqual(['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit', 'deposit_reversed', 'reversal_waiting', 'reversal_unconfirmed']);
     expect(RESOLVED_EVENT_TYPE).toBe('RESOLVED');
   });
 });

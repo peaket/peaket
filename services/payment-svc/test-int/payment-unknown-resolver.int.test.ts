@@ -824,6 +824,8 @@ describe('결과 조회와 주문 쪽 처리', () => {
         approve: async (i) => after(i, 'APPROVED'),
         fail: async (i) => after(i, 'FAILED'),
         mark: async (i) => after(i, 'UNKNOWN'),
+        reverse: async (i) => after(i, 'AWAITING_DEPOSIT'),
+        holdIssue: async () => true,
       },
       sessions: { complete: async () => true, unmarkPaying: async () => true },
       saga: { kick: vi.fn() },

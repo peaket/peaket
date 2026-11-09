@@ -16,7 +16,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile, ProblemError } from '@peaket/platform';
 import { uuid8 } from '../domain/order.js';
-import { TicketIssueCallError, type TicketIssueCommand, type TicketIssuer } from '../domain/ports.js';
+import { TicketIssueCallError, type TicketIssueCommand, type TicketIssuer, type TicketVoidCommand, type TicketVoider, type TicketVoidResult } from '../domain/ports.js';
 import { GRPC_STATUS_NAMES, ISSUED_TICKET_STATUSES, type IssuedTicketRef, type IssuedTicketStatus, type TicketIssueFailureCode } from '../domain/ticket-issue.js';
 
 /** 주소 환경 값(host:port) */
@@ -82,8 +82,8 @@ export interface GrpcTicketIssuerOptions {
  * 생성자가 주소(host:port)를 나누고 클라이언트를 만든다(연결은 첫 호출 때).
  * @throws Error 주소가 host:port 모양이 아님(생성 때, 시작 실패)
  */
-export class GrpcTicketIssuer implements TicketIssuer {
-  readonly #client: grpc.Client & { IssueTickets: Unary };
+export class GrpcTicketIssuer implements TicketIssuer, TicketVoider {
+  readonly #client: grpc.Client & { IssueTickets: Unary; VoidTickets: Unary };
 
   constructor(readonly o: GrpcTicketIssuerOptions) {
     const { host, port } = hostPortOf(o.address);
@@ -93,12 +93,12 @@ export class GrpcTicketIssuer implements TicketIssuer {
       profile: o.profile ?? 'service',
       dependency: TICKET_DEPENDENCY,
       timeoutCapMs: TICKET_ISSUE_CAP_MS,
-    }) as unknown as grpc.Client & { IssueTickets: Unary };
+    }) as unknown as grpc.Client & { IssueTickets: Unary; VoidTickets: Unary };
   }
 
   async issue(c: TicketIssueCommand): Promise<readonly IssuedTicketRef[]> {
     const ms = Math.min(TICKET_ISSUE_CAP_MS, Math.max(1, Math.floor(Number.isFinite(c.deadlineMs) ? c.deadlineMs : TICKET_ISSUE_CAP_MS)));
-    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds] };
+    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds], issue_generation: c.issueGeneration ?? 0 };
     const once = (): Promise<Record<string, unknown>> => {
       // 데드라인은 차단기가 들여보낸 뒤부터 잰다
       const deadline = new Date(Date.now() + ms);
@@ -113,6 +113,25 @@ export class GrpcTicketIssuer implements TicketIssuer {
       throw new TicketIssueCallError(failureCodeOf(e), e);
     }
     return issuedTicketsOf(v);
+  }
+
+  async voidTickets(c: TicketVoidCommand): Promise<TicketVoidResult> {
+    const ms = Math.min(TICKET_ISSUE_CAP_MS, Math.max(1, Math.floor(Number.isFinite(c.deadlineMs) ? c.deadlineMs : TICKET_ISSUE_CAP_MS)));
+    const request = { order_id: c.orderId, event_id: c.eventId, issue_generation: c.issueGeneration };
+    const once = (): Promise<Record<string, unknown>> => {
+      const deadline = new Date(Date.now() + ms);
+      return new Promise<Record<string, unknown>>((resolve, reject) => {
+        this.#client.VoidTickets(request, new grpc.Metadata(), { deadline }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
+      });
+    };
+    let v: Record<string, unknown>;
+    try {
+      v = await (this.o.breaker ? this.o.breaker.run(once) : once());
+    } catch (e) {
+      throw new TicketIssueCallError(failureCodeOf(e), e);
+    }
+    // 칸이 없는 옛 서버의 답은 0이다
+    return { alreadyEntered: typeof v.already_entered === 'number' && v.already_entered > 0 ? v.already_entered : 0 };
   }
 
   /** gRPC 채널을 닫는다(SIGTERM, 실행기를 멈춘 뒤) */
@@ -155,7 +174,13 @@ export function issuedTicketsOf(v: Record<string, unknown>): IssuedTicketRef[] {
  * 같은 주문을 다시 불러도 같은 티켓이다(ticket-svc의 주문 ID 멱등과 같은 모양)
  */
 export const issuingTicketIssuer: TicketIssuer = {
-  issue: async (c) => c.seatIds.map((seatId) => ({ seatId, ticketId: uuid8(`Ticket:${c.orderId}:${seatId}`), status: 'ISSUED' as const })),
+  // 세대가 있으면 세대마다 다른 티켓이다(재발권이 앞 세대의 티켓을 돌려주지 않는다, BUILD_ORDER HOT-152)
+  issue: async (c) => c.seatIds.map((seatId) => ({ seatId, ticketId: uuid8(c.issueGeneration ? `Ticket:${c.orderId}:${c.issueGeneration}:${seatId}` : `Ticket:${c.orderId}:${seatId}`), status: 'ISSUED' as const })),
+};
+
+/** 주소가 없을 때(local·ci)의 티켓 무효 대역: 아무것도 하지 않고 성공한다(ticket-svc 서버 HOT-160 전, BUILD_ORDER HOT-152) */
+export const voidingTicketVoider: TicketVoider = {
+  voidTickets: async () => ({ alreadyEntered: 0 }),
 };
 
 /** 주소 없이 대역으로 뜰 수 있는 환경(로컬·CI). 그 밖(demo·staging·prod)은 주소가 없으면 시작하지 않는다 */
@@ -169,7 +194,7 @@ export const TICKET_STUB_ENVS: ReadonlySet<string> = new Set(['local', 'ci']);
 export function ticketIssuerFromEnv(
   env: Record<string, string | undefined>,
   o: { profile?: GrpcLbProfile; breaker?: CircuitBreaker } = {},
-): { issuer: TicketIssuer; warnings: string[]; close(): void } {
+): { issuer: TicketIssuer; voider: TicketVoider; warnings: string[]; close(): void } {
   const address = (env[TICKET_GRPC_ADDR_ENV] ?? '').trim();
   if (address === '') {
     const peaketEnv = env.PEAKET_ENV || 'prod';
@@ -178,10 +203,11 @@ export function ticketIssuerFromEnv(
     }
     return {
       issuer: issuingTicketIssuer,
+      voider: voidingTicketVoider,
       warnings: [`${TICKET_GRPC_ADDR_ENV}가 없어 발권은 좌석마다 티켓 ID를 만들어 주는 '늘 발권' 대역을 쓴다(ticket-svc에 티켓이 생기지 않는다)`],
       close: () => {},
     };
   }
   const issuer = new GrpcTicketIssuer({ address, ...(o.profile ? { profile: o.profile } : {}), ...(o.breaker ? { breaker: o.breaker } : {}) });
-  return { issuer, warnings: [], close: () => issuer.close() };
+  return { issuer, voider: issuer, warnings: [], close: () => issuer.close() };
 }

@@ -6,7 +6,7 @@ import { isLowerUuid, type PaymentLedgerStatus } from '../../domain/confirm-comm
 import type { PgName } from '../../domain/payment-gateway.js';
 import { PG_NAMES } from '../../domain/pg-call-guard.js';
 import type { PaymentWebhookStore, WebhookReceiveRequest, WebhookReceiveResult } from '../../domain/ports.js';
-import { decideDepositCallback, type DepositCallbackJudgement, decideWebhookLedger, WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS, WEBHOOK_RECEIPT_DELETE_BATCH, WEBHOOK_RECEIPT_RETENTION_MS, WEBHOOK_STATEMENT_TIMEOUT_MS, type WebhookLedgerRow, withLateDepositCheck } from '../../domain/webhook-receipt.js';
+import { decideDepositCallback, type DepositCallbackJudgement, decideWebhookLedger, WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS, WEBHOOK_RECEIPT_DELETE_BATCH, WEBHOOK_RECEIPT_RETENTION_MS, WEBHOOK_STATEMENT_TIMEOUT_MS, type WebhookLedgerRow, withLateDepositCheck, withReversalCheck } from '../../domain/webhook-receipt.js';
 
 /** 파드마다 웹훅 전용 일반 풀 연결 4개 [가정](docs/verification.md §4.1) */
 export const WEBHOOK_DB_MAX = 4;
@@ -35,9 +35,10 @@ const ledgerOf = (row: LedgerRow | undefined): WebhookLedgerRow | undefined =>
  * 그 밖의 웹훅: 서명 없는 경로의 먼저 온 웹훅은 남기지 않는다. 누구나 전송 ID만 바꿔 표를 늘릴 수 있고, 찾을 원장이 없어 나중에 볼 일도 없다
  */
 function judge(row: WebhookLedgerRow | undefined, request: WebhookReceiveRequest): DepositCallbackJudgement {
-  if (request.depositSecretHash !== undefined) return withLateDepositCheck(row, request.depositDone === true, decideDepositCallback(row, request.allowedPgs, request.depositSecretHash));
+  const reversed = (judged: DepositCallbackJudgement): DepositCallbackJudgement => withReversalCheck(row, request.depositReversed === true, withLateDepositCheck(row, request.depositDone === true, judged));
+  if (request.depositSecretHash !== undefined) return reversed(decideDepositCallback(row, request.allowedPgs, request.depositSecretHash));
   const decision = decideWebhookLedger(row, request.allowedPgs, request.signed);
-  return withLateDepositCheck(row, request.depositDone === true, { decision, receipt: !(decision.kind === 'LEDGER_NOT_FOUND' && !request.signed) });
+  return reversed({ decision, receipt: !(decision.kind === 'LEDGER_NOT_FOUND' && !request.signed) });
 }
 
 export class DrizzleWebhookStore implements PaymentWebhookStore {
@@ -49,7 +50,7 @@ export class DrizzleWebhookStore implements PaymentWebhookStore {
       const { decision, receipt } = judge(row, request);
       const at = new Date(request.nowMs);
       if (receipt) {
-        const paymentId = decision.kind === 'QUERY_SIGNAL' || decision.kind === 'STATE_IGNORED' || decision.kind === 'LATE_DEPOSIT_CHECK' ? decision.paymentId : null;
+        const paymentId = decision.kind === 'QUERY_SIGNAL' || decision.kind === 'STATE_IGNORED' || decision.kind === 'LATE_DEPOSIT_CHECK' || decision.kind === 'REVERSAL_CHECK' ? decision.paymentId : null;
         const inserted = await tx.execute(sql`
           insert into webhook_receipt (pg, dedup_key, payment_id, received_at)
           values (${request.pg}, ${request.dedupKey}, ${paymentId}::uuid, ${at}::timestamptz)
@@ -64,6 +65,18 @@ export class DrizzleWebhookStore implements PaymentWebhookStore {
           where id = ${decision.paymentId}::uuid and status = 'FAILED' and deposit_notified_at is null
           returning id`);
         return armed.rows.length === 0 ? ({ kind: 'STATE_IGNORED', paymentId: decision.paymentId, orderId: decision.orderId } as const) : decision;
+      }
+      if (decision.kind === 'REVERSAL_CHECK') {
+        // 통보 시각의 처음 값을 지키고, 5초 간격 안이면 간격이 끝나는 때로 당긴다(수신 기록을 쓴 통보의 신호를 버리지 않는다, BUILD_ORDER HOT-152)
+        const armed = await tx.execute(sql`
+          update payment
+          set next_query_at = least(coalesce(next_query_at, 'infinity'::timestamptz), greatest(${at}::timestamptz, coalesce(query_touched_at + ${WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS}::int * interval '1 millisecond', ${at}::timestamptz))),
+              query_attempts = case when deposit_notified_at is null then 0 else query_attempts end,
+              overdue_at = case when deposit_notified_at is null then null else overdue_at end,
+              deposit_notified_at = coalesce(deposit_notified_at, ${at}::timestamptz)
+          where id = ${decision.paymentId}::uuid and status = 'APPROVED'
+          returning next_query_at <= ${at}::timestamptz as pulled`);
+        return (armed.rows[0] as { pulled?: boolean } | undefined)?.pulled === true ? decision : ({ kind: 'QUERY_SIGNAL_SKIPPED' } as const);
       }
       if (decision.kind !== 'QUERY_SIGNAL') return decision;
       // 보낸 쪽을 확인한 입금 완료 통보: 통보 시각을 남기고(처음 시각을 지킨다), 5초 간격 안이면 간격이 끝나는 때로 당긴다. 신호를 버리면 다음 조회가 기한 + 10분까지 밀린다(코드 리뷰 M3)

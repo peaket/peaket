@@ -23,6 +23,7 @@ import { SimulatorPaymentGateway } from '../src/modules/payment/adapters/pg/simu
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  CancelDepositPayment,
   DEPOSIT_QUERY_GRACE_MS,
   DrizzleConfirmJobs,
   DrizzlePaymentStore,
@@ -120,7 +121,7 @@ async function harness(cipher: VirtualAccountCipher): Promise<Harness> {
   const accept = new AcceptPaymentCommand({ store, clock, log: paymentCommandLog(logger), signals: commandSignals });
   const batchGet = new BatchGetPaymentStates({ reader: store, signals: commandSignals });
   const getPayment = new GetPaymentDetail({ reader: store, signals: depositSignals, cipher, depositLog, depositSignals, clock });
-  const server = await startGrpcServer({ host: '127.0.0.1', port: 0, services: [{ definition: paymentPackage().PaymentService.service, handlers: paymentServiceHandlers({ accept, batchGet, getPayment }, () => {}) }] });
+  const server = await startGrpcServer({ host: '127.0.0.1', port: 0, services: [{ definition: paymentPackage().PaymentService.service, handlers: paymentServiceHandlers({ accept, batchGet, getPayment, cancelPayment: new CancelDepositPayment({ store: jobs, gateways, guards: guards(), signals: depositSignals, clock }) }, () => {}) }] });
   const client = paymentClient(`127.0.0.1:${server.port}`);
   return {
     client,
@@ -244,7 +245,7 @@ async function applyToOrder(i: Issued, startStatus = 'RESERVED') {
   };
   const apply = new ApplyPaymentResult({
     reads: { read: async () => order as never },
-    writes: { approve: async (x) => after(x, 'APPROVED'), fail: async (x) => after(x, 'FAILED'), mark: async (x) => after(x, x.transition === 'T12' ? 'UNKNOWN' : 'AWAITING_DEPOSIT') },
+    writes: { approve: async (x) => after(x, 'APPROVED'), fail: async (x) => after(x, 'FAILED'), mark: async (x) => after(x, x.transition === 'T12' ? 'UNKNOWN' : 'AWAITING_DEPOSIT'), reverse: async (x) => after(x, 'AWAITING_DEPOSIT'), holdIssue: async () => true },
     sessions: { complete: async () => true, unmarkPaying: async () => true },
     saga: { kick: vi.fn() },
     log: { held: vi.fn(), afterCommitFailed: vi.fn() },
@@ -361,7 +362,7 @@ describe('P-T9 입금 통보 대조', () => {
     expect(await metric(WEBHOOK, 'query_signal')).toBe(signals + 1);
   });
 
-  test('P-T9_입금 확정 뒤의 재전송은 해시가 지워져 지표만이고 보안 로그가 없다', async () => {
+  test('P-T9_입금 확정 뒤의 재전송은 해시가 남아 맞는 secret이면 수신 기록과 지표만이고 보안 로그가 없다', async () => {
     const i = await issued();
     await control('POST', `/sim/deposits/${i.paymentKey}`);
     await h.webhook.receive('toss', {}, callbackBody(i));
@@ -372,7 +373,7 @@ describe('P-T9 입금 통보 대조', () => {
     await h.webhook.receive('toss', {}, callbackBody(i, { transactionKey: 'tx-again' }));
     expect(await metric(WEBHOOK, 'state_ignored')).toBe(ignored + 1);
     expect(h.logs.join('\n')).not.toContain('payment-webhook-deposit-secret-mismatch');
-    expect(await receipts()).toBe(1);
+    expect(await receipts()).toBe(2);
   });
 });
 
@@ -383,7 +384,9 @@ describe('입금 확인과 기한 조회', () => {
     await h.webhook.receive('toss', {}, callbackBody(i));
     expect(await drive(h.resolver)).toBe(1);
     const row = await rowOf(i.orderId);
-    expect(row).toMatchObject({ status: 'APPROVED', deposit_due_at: null, virtual_account_no: null, virtual_account_bank: null, deposit_secret_hash: null, next_query_at: null });
+    // 해시는 입금 오류 통보를 대조하려고 남긴다(BUILD_ORDER HOT-152)
+    expect(row).toMatchObject({ status: 'APPROVED', deposit_due_at: null, virtual_account_no: null, virtual_account_bank: null, next_query_at: null });
+    expect(row.deposit_secret_hash).not.toBeNull();
     expect(row.approved_at).not.toBeNull();
     const events = await outboxEvents(i);
     expect(events.map((e) => e.type)).toEqual(['AWAITING_DEPOSIT', 'APPROVED']);
@@ -620,5 +623,269 @@ describe('GetPayment', () => {
     const i = await issued();
     const r = (await unary(h.client, 'BatchGetPayments', { order_ids: [i.orderId] })).payments as Record<string, unknown>[];
     expect(msOf(r[0]!.deposit_due_at)).toBe(i.dueAtMs);
+  });
+});
+
+describe('입금 전 취소(P-T36 ⑤)', () => {
+  const cancelReq = (paymentId: string, cancellationId = `evt_${randomBytes(4).toString('hex')}`) => ({ payment_id: paymentId, cancellation_id: cancellationId, reason: '회차 취소' });
+
+  test('P-T36 ⑤_입금 대기를 취소하면 FAILED(DEPOSIT_CANCELED)·사건·Outbox이고 주문이 T17로 좌석을 푼다 [ASVS v5.0.0-2.3.3]', async () => {
+    const i = await issued();
+    const paymentId = (await rowOf(i.orderId)).id;
+    const r = await unary(h.client, 'CancelPayment', cancelReq(paymentId));
+    expect(r).toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 0 } });
+    expect(await control('GET', `/v1/payments/${i.paymentKey}`)).toMatchObject({ status: 'CANCELED' });
+    const row = await rowOf(i.orderId);
+    expect(row).toMatchObject({ status: 'FAILED', failure_category: 'DEPOSIT_CANCELED', virtual_account_no: null, deposit_secret_hash: null, next_query_at: null });
+    const types = (await admin.pool.query<{ type: string; exported: boolean }>('select type, exported from payment_event where payment_id = $1 order by seq', [paymentId])).rows;
+    expect(types.map((e) => e.type)).toEqual(['ACCEPTED', 'CONFIRM_SENT', 'AWAITING_DEPOSIT', 'DEPOSIT_CANCEL_SENT', 'FAILED']);
+    expect(types.find((e) => e.type === 'DEPOSIT_CANCEL_SENT')!.exported).toBe(false);
+    expect((await outboxEvents(i)).at(-1)).toMatchObject({ type: 'FAILED', failureCategory: 'DEPOSIT_CANCELED' });
+    const { applied, order } = await applyToOrder(i);
+    expect(applied.map((x) => x.transition)).toEqual(['T10', 'T17']);
+    expect(order.status).toBe('FAILED');
+  });
+
+  test('P-T36 ⑤_같은 취소 ID를 다시 보내면 결제사를 다시 부르지 않고 같은 답이다', async () => {
+    const i = await issued();
+    const paymentId = (await rowOf(i.orderId)).id;
+    const req = cancelReq(paymentId);
+    await unary(h.client, 'CancelPayment', req);
+    expect(await unary(h.client, 'CancelPayment', req)).toMatchObject({ result: 'CANCEL_RESULT_CANCELLED' });
+    const n = (await admin.pool.query<{ n: string }>(`select count(*) as n from payment_event where payment_id = $1 and type = 'FAILED'`, [paymentId])).rows[0]!.n;
+    expect(Number(n)).toBe(1);
+  });
+
+  test('P-T36 ⑤_입금 대기가 아니면 FAILED_PRECONDITION이다 [ASVS v5.0.0-2.3.1]', async () => {
+    const i = await issued();
+    await control('POST', `/sim/deposits/${i.paymentKey}`);
+    await h.webhook.receive('toss', {}, callbackBody(i));
+    await drive(h.resolver);
+    const paymentId = (await rowOf(i.orderId)).id;
+    expect((await failure(unary(h.client, 'CancelPayment', cancelReq(paymentId)))).code).toBe(grpc.status.FAILED_PRECONDITION);
+    expect((await rowOf(i.orderId)).status).toBe('APPROVED');
+  });
+
+  test('P-T36 ⑤_리뷰 고침 M3: 조회 뒤 원장이 먼저 끝나면 답 반영은 STALE이고 다시 읽은 상태로 답한다 [ASVS v5.0.0-15.4.1]', async () => {
+    const i = await issued();
+    const row = await rowOf(i.orderId);
+    const store = new DrizzleConfirmJobs({ database: admin, clock });
+    const target = (await store.readCancelTarget(row.id))!;
+    await admin.pool.query(`update payment set status = 'FAILED' where id = $1`, [row.id]);
+    await expect(store.finishDepositCancel(target, { remainingMs: 1_000 })).resolves.toBe('STALE');
+    await expect(store.readCancelStatus(row.id, { remainingMs: 1_000 })).resolves.toBe('FAILED');
+    await expect(store.readCancelStatus(newId())).resolves.toBeUndefined();
+  });
+
+  test('P-T36 ⑤_입력이 틀리면 INVALID_ARGUMENT, 없는 결제는 NOT_FOUND다 [ASVS v5.0.0-2.2.1]', async () => {
+    expect((await failure(unary(h.client, 'CancelPayment', { payment_id: 'x', cancellation_id: 'a', reason: 'r' }))).code).toBe(grpc.status.INVALID_ARGUMENT);
+    expect((await failure(unary(h.client, 'CancelPayment', cancelReq(newId())))).code).toBe(grpc.status.NOT_FOUND);
+  });
+});
+
+describe('입금 오류 되돌림(P-T36 ④)', () => {
+  const NOTIFIED_MS = 600_000;
+
+  /** 입금을 확정한 원장(T16) */
+  async function paid(): Promise<Issued> {
+    const i = await issued();
+    await control('POST', `/sim/deposits/${i.paymentKey}`);
+    await h.webhook.receive('toss', {}, callbackBody(i));
+    await drive(h.resolver);
+    expect((await rowOf(i.orderId)).status).toBe('APPROVED');
+    clock.advance(10_000);
+    return i;
+  }
+  const reversalBody = (i: Issued, over: Record<string, unknown> = {}): Buffer => callbackBody(i, { status: 'WAITING_FOR_DEPOSIT', transactionKey: `rev-${i.orderId}`, ...over });
+
+  test('P-T36 ④_입금 확정 뒤에도 해시는 남고 계좌 칸은 지워진다 [ASVS v5.0.0-14.2.7]', async () => {
+    const i = await paid();
+    const row = await rowOf(i.orderId);
+    expect(row.deposit_secret_hash!.equals(createHash('sha256').update(i.secret, 'utf8').digest())).toBe(true);
+    expect(row).toMatchObject({ virtual_account_no: null, virtual_account_bank: null, deposit_due_at: null, next_query_at: null });
+  });
+
+  test('P-T36 ④_되돌림 통보 → 조회 확인 → AWAITING_DEPOSIT·DEPOSIT_REVERSED, 칸을 다시 저장하고 새 기한 + 10분에 조회한다 [ASVS v5.0.0-2.3.3] [ASVS v5.0.0-11.3.3]', async () => {
+    const i = await paid();
+    const before = await rowOf(i.orderId);
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await expect(h.webhook.receive('toss', {}, reversalBody(i))).resolves.toBe('ACCEPTED');
+    expect((await rowOf(i.orderId)).status).toBe('APPROVED');
+    expect(await drive(h.resolver)).toBe(1);
+    const row = await rowOf(i.orderId);
+    expect(row).toMatchObject({ status: 'AWAITING_DEPOSIT', approved_at: null, deposit_notified_at: null, query_attempts: 0 });
+    expect(row.virtual_account_bank).toBe(i.bank);
+    expect(row.deposit_secret_hash!.equals(before.deposit_secret_hash!)).toBe(true);
+    expect(row.next_query_at!.getTime()).toBe(row.deposit_due_at!.getTime() + DEPOSIT_QUERY_GRACE_MS);
+    const d = await unary(h.client, 'GetPayment', { order_id: i.orderId });
+    expect((d.virtual_account as { account_number: string }).account_number).toBe(i.accountNumber);
+    const m = (await outboxEvents(i)).at(-1)!;
+    expect(m).toMatchObject({ type: 'DEPOSIT_REVERSED', depositDueAt: row.deposit_due_at!.toISOString() });
+    expect(PaymentEvent.safeParse(m).success).toBe(true);
+    expect(await metric(QUERY, 'deposit_reversed')).toBeGreaterThan(0);
+    expect(h.logs.join('\n')).not.toContain(i.accountNumber);
+    expect(h.logs.join('\n')).not.toContain(i.secret);
+  });
+
+  test('P-T36 ④_결제사가 준 기한이 지났으면 되돌림 시점 다음 날 23:59(KST)를 새 기한으로 쓴다', async () => {
+    const i = await paid();
+    clock.advance(i.dueAtMs - clock.now() + 3_600_000);
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    await drive(h.resolver);
+    const kst = new Date(clock.now() + 9 * 3_600_000);
+    const expected = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 1, 23, 59) - 9 * 3_600_000;
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('AWAITING_DEPOSIT');
+    expect(row.deposit_due_at!.getTime()).toBe(expected);
+    expect(row.next_query_at!.getTime()).toBe(expected + DEPOSIT_QUERY_GRACE_MS);
+    expect((await outboxEvents(i)).at(-1)).toMatchObject({ type: 'DEPOSIT_REVERSED', depositDueAt: new Date(expected).toISOString() });
+  });
+
+  test('P-T36 ④_결제사가 준 기한이 남아 있으면 그 기한을 그대로 쓴다', async () => {
+    const i = await paid();
+    const due = Math.floor((clock.now() + 3 * 86_400_000) / 1_000) * 1_000;
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`, { dueDate: new Date(due).toISOString() });
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    await drive(h.resolver);
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('AWAITING_DEPOSIT');
+    expect(row.deposit_due_at!.getTime()).toBe(due);
+  });
+
+  test('P-T36 ④_재입금하면 T16 경로로 승인하고 approved_at을 새로 쓴다', async () => {
+    const i = await paid();
+    const firstApproved = (await rowOf(i.orderId)).approved_at!.getTime();
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    await drive(h.resolver);
+    clock.advance(60_000);
+    await control('POST', `/sim/deposits/${i.paymentKey}`);
+    const cb = (await control('GET', `/sim/deposit-callbacks?orderId=${i.orderId}`)) as unknown as { status: string; transactionKey: string }[];
+    expect(cb.map((c) => c.status)).toEqual(['DONE', 'WAITING_FOR_DEPOSIT', 'DONE']);
+    await h.webhook.receive('toss', {}, callbackBody(i, { transactionKey: cb[2]!.transactionKey }));
+    await drive(h.resolver);
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('APPROVED');
+    expect(row.approved_at!.getTime()).toBeGreaterThan(firstApproved);
+    expect((await outboxEvents(i)).at(-1)).toMatchObject({ type: 'APPROVED' });
+  });
+
+  test('P-T36 ④_위조 통보는 수신 기록·조회 없이 보안 로그다 [ASVS v5.0.0-16.3.3] [ASVS v5.0.0-8.2.2]', async () => {
+    const i = await paid();
+    const n = await receipts();
+    const before = await metric(WEBHOOK, 'deposit_secret_mismatch');
+    await expect(h.webhook.receive('toss', {}, reversalBody(i, { secret: 'forged-secret' }))).resolves.toBe('ACCEPTED');
+    expect(await receipts()).toBe(n);
+    expect(await metric(WEBHOOK, 'deposit_secret_mismatch')).toBe(before + 1);
+    expect(h.logs.join('\n')).toContain('payment-webhook-deposit-secret-mismatch');
+    expect(await rowOf(i.orderId)).toMatchObject({ status: 'APPROVED', next_query_at: null });
+    expect(await drive(h.resolver)).toBe(0);
+  });
+
+  test('P-T36 ④_같은 통보를 다시 보내면 중복이고 되돌림은 한 번이다', async () => {
+    const i = await paid();
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    const dup = await metric(WEBHOOK, 'duplicate');
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    expect(await metric(WEBHOOK, 'duplicate')).toBe(dup + 1);
+    await drive(h.resolver);
+    const paymentId = (await rowOf(i.orderId)).id;
+    const n = (await admin.pool.query<{ n: string }>(`select count(*) as n from payment_event where payment_id = $1 and type = 'DEPOSIT_REVERSED'`, [paymentId])).rows[0]!.n;
+    expect(Number(n)).toBe(1);
+  });
+
+  test('P-T36 ④_이미 되돌린 결제에 되돌림을 다시 쓰면 STALE이고 사건 순번·수출 사건이 늘지 않는다(겹친 조회의 재전송) [ASVS v5.0.0-2.3.3]', async () => {
+    const i = await paid();
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    await drive(h.resolver);
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('AWAITING_DEPOSIT');
+    const eventsOf = async () => (await admin.pool.query<{ seq: string; type: string }>('select seq::text as seq, type from payment_event where payment_id = $1 order by seq', [row.id])).rows;
+    const before = await eventsOf();
+    const outboxBefore = (await outboxEvents(i)).length;
+    const job = { paymentId: row.id, orderId: i.orderId, eventId: i.eventId, attemptNo: 1, pg: 'TOSS', paymentRef: i.paymentKey, amount: 10_000, queryAttempts: 1, claimedNextQueryAtMs: clock.now(), anomalyLogged: false, reversalCheck: {} } as unknown as Parameters<DrizzleConfirmJobs['reverseDeposit']>[0];
+    const again = await new DrizzleConfirmJobs({ database: admin, clock }).reverseDeposit(job, { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT', reversed: true, deposit: { dueAtMs: clock.now() + 86_400_000 } });
+    expect(again).toBe('STALE');
+    expect(await eventsOf()).toEqual(before);
+    expect((await outboxEvents(i)).length).toBe(outboxBefore);
+  });
+
+  test('P-T36 ④_결제사 상태가 입금 완료면 원장을 바꾸지 않고, 10분이 지나면 묻기를 끝낸다 [ASVS v5.0.0-16.5.3]', async () => {
+    const i = await paid();
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    expect(await drive(h.resolver)).toBe(1);
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('APPROVED');
+    expect(row.next_query_at!.getTime()).toBe(clock.now() + 5_000);
+    clock.advance(NOTIFIED_MS + 1);
+    expect(await drive(h.resolver)).toBe(1);
+    expect(await rowOf(i.orderId)).toMatchObject({ status: 'APPROVED', next_query_at: null, deposit_notified_at: null });
+    expect(h.logs.join('\n')).toContain('payment-deposit-reversal-unconfirmed');
+    expect(await metric(QUERY, 'reversal_unconfirmed')).toBeGreaterThan(0);
+    expect(await drive(h.resolver)).toBe(0);
+  });
+
+  test('P-T36 ④_리뷰 고침 H2: 조회가 기록 없음이면 창이 지나도 끝내지 않고 60초마다 묻고, 1시간에 SEV1을 한 번 낸다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3]', async () => {
+    const i = await paid();
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    const paymentId = (await rowOf(i.orderId)).id;
+    await admin.pool.query(`update payment set pg_payment_ref = 'tgen_missing_payment' where id = $1`, [paymentId]);
+    clock.advance(NOTIFIED_MS + 1);
+    expect(await drive(h.resolver)).toBe(1);
+    const row = await rowOf(i.orderId);
+    expect(row.status).toBe('APPROVED');
+    expect(row.next_query_at!.getTime()).toBe(clock.now() + 60_000);
+    expect(row.deposit_notified_at).not.toBeNull();
+    clock.advance(3_600_000);
+    expect(await drive(h.resolver)).toBe(1);
+    const count = () => h.logs.join('\n').split('payment-deposit-reversal-overdue').length - 1;
+    expect(count()).toBe(1);
+    clock.advance(60_000);
+    expect(await drive(h.resolver)).toBe(1);
+    expect(count()).toBe(1);
+    expect((await rowOf(i.orderId)).next_query_at!.getTime()).toBe(clock.now() + 60_000);
+  });
+
+  test('P-T36 ④_리뷰 고침 H2: 앞선 UNKNOWN 1시간 표시가 있어도 새 되돌림 통보의 SEV1은 낸다', async () => {
+    const i = await paid();
+    const paymentId = (await rowOf(i.orderId)).id;
+    await admin.pool.query('update payment set overdue_at = $1 where id = $2', [new Date(clock.now() - 86_400_000), paymentId]);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    expect((await admin.pool.query<{ overdue_at: Date | null }>('select overdue_at from payment where id = $1', [paymentId])).rows[0]!.overdue_at).toBeNull();
+  });
+
+  test('P-T36 ④_리뷰 고침 L7: 되돌린 결제를 잡으면 T21 시각을 함께 읽는다', async () => {
+    const i = await paid();
+    await control('POST', `/sim/deposits/${i.paymentKey}/reverse`);
+    await h.webhook.receive('toss', {}, reversalBody(i));
+    await drive(h.resolver);
+    const row = await rowOf(i.orderId);
+    const reversedAt = (await admin.pool.query<{ occurred_at: Date }>(`select occurred_at from payment_event where payment_id = $1 and type = 'DEPOSIT_REVERSED'`, [row.id])).rows[0]!.occurred_at;
+    await admin.pool.query('update payment set next_query_at = $1 where id = $2', [new Date(clock.now() - 1), row.id]);
+    const jobs = await new DrizzleConfirmJobs({ database: admin, clock }).claimDueQueries('SIMULATOR', 100);
+    expect(jobs.find((j) => j.paymentId === row.id)?.deposit?.reversedAtMs).toBe(reversedAt.getTime());
+  });
+
+  test('P-T36 ④_리뷰 고침 L8: createdAt이 다른 같은 거래의 되돌림 통보는 중복이 아니고 같은 통보만 중복이다', async () => {
+    const i = await paid();
+    const dup = await metric(WEBHOOK, 'duplicate');
+    const at = (createdAt: string) => reversalBody(i, { createdAt });
+    await h.webhook.receive('toss', {}, at('2026-11-20T10:00:00.000000'));
+    clock.advance(10_000);
+    await h.webhook.receive('toss', {}, at('2026-11-21T10:00:00.000000'));
+    expect(await metric(WEBHOOK, 'duplicate')).toBe(dup);
+    await h.webhook.receive('toss', {}, at('2026-11-21T10:00:00.000000'));
+    expect(await metric(WEBHOOK, 'duplicate')).toBe(dup + 1);
+  });
+
+  test('P-T36 ④_재전송 DONE은 조회를 걸지 않는다', async () => {
+    const i = await paid();
+    const ignored = await metric(WEBHOOK, 'state_ignored');
+    await h.webhook.receive('toss', {}, callbackBody(i, { transactionKey: `again-${i.orderId}` }));
+    expect(await metric(WEBHOOK, 'state_ignored')).toBe(ignored + 1);
+    expect((await rowOf(i.orderId)).next_query_at).toBeNull();
   });
 });
