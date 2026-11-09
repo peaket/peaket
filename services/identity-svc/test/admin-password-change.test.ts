@@ -2,7 +2,7 @@
 // 시험: AC-T4, AC-T7 ④의 세션 쪽, GetAdminAuthz(ADR-0172). 메모리 저장소·메모리 셈·로컬 키로 본다.
 import { fakeClock } from '@peaket/platform';
 import { decodeJwt } from 'jose';
-import { describe, expect, test } from 'vitest';
+import { vi, describe, expect, test } from 'vitest';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
 import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
 import { LocalTotpSeedCipher } from '../src/modules/admin/adapters/local-totp-seed-cipher.js';
@@ -22,6 +22,9 @@ import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-conf
 import { base32Decode, totpAt } from '../src/modules/admin/domain/totp.js';
 import { TokenKeyRing } from '../src/modules/session/index.js';
 import { fanKey } from './support.js';
+
+// 비밀번호 해시를 실제로 여러 번 돌려 몰리는 러너에서 기본 5초를 넘긴다(CI 66c9a912)
+vi.setConfig({ testTimeout: 30_000 });
 
 const M = 60_000;
 const PARTNER = '0190f3a1-7c2e-7a00-8000-0000000008a1';
