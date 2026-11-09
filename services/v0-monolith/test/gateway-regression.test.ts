@@ -164,7 +164,9 @@ describe('입구 재현 시험: 우아한 종료', () => {
     const { port: p } = await g.listen('127.0.0.1');
     try {
       const pending = httpsCall(p, tls2.cert, { path: '/slow' });
-      await new Promise((ok) => setTimeout(ok, 150)); // 앱에 닿은 뒤
+      // 앱에 닿은 뒤에 닫는다(시간을 정해 두면 몰리는 러너에서 닿기 전에 닫혀 연결이 끊긴다, CI 42554043503)
+      for (let i = 0; i < 500 && slow.started.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+      expect(slow.started).toEqual(['/slow']);
       const closed = g.close(5_000);
       const reply = await pending;
       expect(reply.status).toBe(200);

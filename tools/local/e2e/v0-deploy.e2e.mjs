@@ -155,6 +155,8 @@ async function diagnostics(label) {
 function e2e(name, options, fn) {
   test(name, options, async (t) => {
     try {
+      // 앞 시험의 연결 재설정으로 포트 전달이 끝났을 수 있다(CI 42554043503, ECONNREFUSED). 이 시험이 띄운 포트 전달이면 살려 두고 시작한다
+      if (forward) await ensureForward();
       await fn(t);
     } catch (err) {
       await diagnostics(name).catch(() => {});
