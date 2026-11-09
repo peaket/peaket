@@ -46,7 +46,7 @@ export const UNKNOWN_QUERY_NO_TOKEN_DELAY_MS = 1_000;
 export const RESOLVED_EVENT_TYPE = 'RESOLVED';
 
 /** payment_unknown_query_total{outcome}의 값 */
-export const PAYMENT_UNKNOWN_QUERY_OUTCOMES = ['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit', 'deposit_reversed', 'reversal_waiting', 'reversal_unconfirmed'] as const;
+export const PAYMENT_UNKNOWN_QUERY_OUTCOMES = ['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit', 'deposit_reversed', 'reversal_waiting', 'reversal_unconfirmed', 'reversal_no_time'] as const;
 export type PaymentUnknownQueryOutcome = (typeof PAYMENT_UNKNOWN_QUERY_OUTCOMES)[number];
 
 /** 잡은 UNKNOWN 한 행(claimDueQueries의 결과). 답 반영에 필요한 원장 값을 함께 싣는다 */
@@ -63,6 +63,8 @@ export interface UnknownQueryJob extends Pick<ConfirmTarget, 'paymentId' | 'orde
   readonly lateDepositCheck?: true;
   /** 승인 원장의 입금 오류 확인일 때만 있다. notifiedAtMs는 되돌림 통보를 처음 받은 시각이다(BUILD_ORDER HOT-152) */
   readonly reversalCheck?: { readonly notifiedAtMs?: number };
+  /** 회차의 입장 시작 시각(epoch ms). 되돌림의 새 입금 기한을 자른다. 승인 명령에 없었으면 없다(BUILD_ORDER PRF-190) */
+  readonly entryOpensAtMs?: number;
 }
 
 /** UNKNOWN을 떠나는 결과(UNKNOWN으로 끝나는 갈래는 없다) */
@@ -107,6 +109,8 @@ export type UnknownRunOutcome =
   | { readonly kind: 'STALE' }
   | { readonly kind: 'LATE_DEPOSIT'; readonly paid: boolean }
   | { readonly kind: 'REVERSED' }
+  /** 되돌렸지만 입장이 2시간 [가정] 안이라 재입금 없이 실패로 끝냈다(BUILD_ORDER PRF-190 코드 리뷰) */
+  | { readonly kind: 'REVERSAL_CLOSED' }
   | { readonly kind: 'REVERSAL_ENDED' }
   | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' | 'NO_TOKEN' }
   | { readonly kind: 'WRITE_FAILED' };

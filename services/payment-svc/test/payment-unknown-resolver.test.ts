@@ -7,7 +7,7 @@
 // 실제 PostgreSQL·시뮬레이터로 도는 것(한 트랜잭션, SKIP LOCKED, 프로세스 강제 종료)은 test-int가 본다.
 import { Writable } from 'node:stream';
 import { createPlatformLogger, type Database, Deadline, fakeClock, type FakeClock, PlatformMetrics, type RequestContext, requestContext, runInRequestContext, systemClock } from '@peaket/platform';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { DrizzleConfirmJobs } from '../src/modules/payment/adapters/db/drizzle-confirm-jobs.js';
 import { paymentUnknownLog } from '../src/modules/payment/adapters/payment-unknown-log.js';
 import { PromPaymentUnknownSignals } from '../src/modules/payment/adapters/prom-payment-unknown-signals.js';
@@ -81,8 +81,20 @@ class FakeQueries implements PaymentUnknownQueries {
     return true;
   }
 
-  async reverseDeposit(): Promise<'APPLIED'> {
+  /** reverseDeposit에 넘긴 값 */
+  readonly reversals: Parameters<PaymentUnknownQueries['reverseDeposit']>[1][] = [];
+  async reverseDeposit(_job: UnknownQueryJob, finish: Parameters<PaymentUnknownQueries['reverseDeposit']>[1]): Promise<'APPLIED'> {
+    this.reversals.push(finish);
     return 'APPLIED';
+  }
+
+  /** closeReversedDeposit에 넘긴 값과 답 */
+  readonly closedReversals: { reversed: Parameters<PaymentUnknownQueries['closeReversedDeposit']>[1]; failed: Parameters<PaymentUnknownQueries['closeReversedDeposit']>[2] }[] = [];
+  closeResults: Script<ResolveUnknownResult>[] = [];
+  async closeReversedDeposit(_job: UnknownQueryJob, reversed: Parameters<PaymentUnknownQueries['closeReversedDeposit']>[1], failed: Parameters<PaymentUnknownQueries['closeReversedDeposit']>[2]): Promise<ResolveUnknownResult> {
+    this.closedReversals.push({ reversed, failed });
+    const next = this.closeResults.shift();
+    return next === undefined ? 'APPLIED' : play(next);
   }
 
   /** markReversalOverdue를 부른 행 */
@@ -191,6 +203,9 @@ class FakeLog implements PaymentUnknownLog {
   }
   reversalOverdue(e: { readonly orderId: string }): void {
     this.lines.push(['reversalOverdue', e]);
+  }
+  reversalNoTime(e: { readonly orderId: string }): void {
+    this.lines.push(['reversalNoTime', e]);
   }
   amountMismatch(e: { readonly orderId: string }): void {
     this.lines.push(['amountMismatch', e]);
@@ -545,6 +560,82 @@ describe('입금 오류 확인의 리뷰 고침(BUILD_ORDER HOT-152, 코드 리�
     await failing.resolver.runJob(reversal(NOW - 3_600_000));
     expect(failing.log.of('reversalOverdue')).toEqual([]);
     expect(failing.queries.rescheduled).toHaveLength(1);
+  });
+
+  test('P-T26_입금 오류 되돌림의 새 기한은 잡기가 읽은 입장 시각의 24시간 전을 넘지 않는다', async () => {
+    const { queries, gateway, resolver } = setup();
+    const answerDueMs = NOW + 72 * 3_600_000;
+    const entryOpensAtMs = NOW + 50 * 3_600_000;
+    gateway.fallback = () => approved({ status: 'WAITING_FOR_DEPOSIT', virtualAccount: { accountNumber: '562', bank: '20', dueAt: new Date(answerDueMs).toISOString() } });
+
+    await resolver.runJob({ ...reversal(NOW), entryOpensAtMs });
+    await resolver.runJob(reversal(NOW));
+
+    expect(queries.reversals.map((f) => f.deposit?.dueAtMs)).toEqual([entryOpensAtMs - 24 * 3_600_000, answerDueMs]);
+  });
+
+  const HOUR = 3_600_000;
+  const waiting = () => approved({ status: 'WAITING_FOR_DEPOSIT', virtualAccount: { accountNumber: '562', bank: '20', dueAt: new Date(NOW + 72 * HOUR).toISOString() } });
+
+  test('P-T26_리뷰 고침 4: 입장 24시간 안의 되돌림은 새 기한을 지금 + 2시간으로 두고 되돌린다', async () => {
+    const { queries, gateway, log, resolver } = setup();
+    gateway.fallback = waiting;
+
+    await expect(resolver.runJob({ ...reversal(NOW), entryOpensAtMs: NOW + 5 * HOUR })).resolves.toEqual({ kind: 'REVERSED' });
+
+    expect(queries.reversals.map((f) => f.deposit?.dueAtMs)).toEqual([NOW + 2 * HOUR]);
+    expect(queries.closedReversals).toEqual([]);
+    expect(log.of('reversalNoTime')).toEqual([]);
+  });
+
+  test('P-T26_리뷰 고침 4: 입장이 2시간 안이면 재입금 불가로 되돌림과 실패를 한 번에 쓰고 SEV2를 낸다 [ASVS v5.0.0-16.3.4]', async () => {
+    const { queries, gateway, log, signals, resolver } = setup();
+    gateway.fallback = waiting;
+
+    await expect(resolver.runJob({ ...reversal(NOW), entryOpensAtMs: NOW + 2 * HOUR - 1 })).resolves.toEqual({ kind: 'REVERSAL_CLOSED' });
+
+    expect(queries.reversals).toEqual([]);
+    expect(queries.closedReversals).toEqual([{ reversed: { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT', reversed: true, deposit: { dueAtMs: NOW } }, failed: { status: 'FAILED', result: 'DECLINED', failureCategory: 'EXPIRED' } }]);
+    expect(log.of('reversalNoTime')).toEqual([{ orderId: ORDER_ID }]);
+    expect(log.of('depositReversed')).toEqual([]);
+    expect(signals.outcomes).toEqual([['SIMULATOR', 'reversal_no_time']]);
+  });
+
+  test('P-T26_리뷰 고침 4: 재입금 불가를 쓸 때 원장이 이미 바뀌었으면 SEV2를 내지 않는다', async () => {
+    const { queries, gateway, log, signals, resolver } = setup();
+    gateway.fallback = waiting;
+    queries.closeResults = ['STALE'];
+
+    await expect(resolver.runJob({ ...reversal(NOW), entryOpensAtMs: NOW + HOUR })).resolves.toEqual({ kind: 'STALE' });
+
+    expect(log.of('reversalNoTime')).toEqual([]);
+    expect(log.of('staleAnswer')).toEqual([{ orderId: ORDER_ID }]);
+    expect(signals.outcomes).toEqual([]);
+  });
+
+  test('P-T26_리뷰 고침 4: 재입금 불가 쓰기가 실패하면 밀어 둔 간격 뒤에 다시 조회한다', async () => {
+    const { queries, gateway, log, signals, resolver } = setup();
+    gateway.fallback = waiting;
+    queries.closeResults = [throws(new Error('db down'))];
+
+    await expect(resolver.runJob({ ...reversal(NOW), entryOpensAtMs: NOW + HOUR })).resolves.toEqual({ kind: 'WRITE_FAILED' });
+
+    expect(signals.writeFailures).toBe(1);
+    expect(log.of('writeFailed')).toHaveLength(1);
+    expect(log.of('reversalNoTime')).toEqual([]);
+  });
+
+  test('P-T26_리뷰 고침 5: UNKNOWN에서 입금 대기로 갈 때도 답의 기한을 입장 24시간 전으로 자르고 지표를 낸다', async () => {
+    const dueCapped = vi.fn();
+    const cipher = { ready: true, seal: async () => 'sealed', open: async () => '562' };
+    const { queries, gateway, resolver } = setup({ deposit: { cipher, log: { infoMissing: vi.fn(), accountUnsaved: vi.fn(), accountUnopened: vi.fn() }, signals: { fieldFailure: vi.fn(), dueCapped } } });
+    gateway.fallback = waiting;
+    const entryOpensAtMs = NOW + 30 * HOUR;
+
+    await resolver.runJob(job({ entryOpensAtMs }));
+
+    expect(queries.resolved.map((r) => (r.finish as { deposit?: { dueAtMs?: number } }).deposit?.dueAtMs)).toEqual([entryOpensAtMs - 24 * HOUR]);
+    expect(dueCapped).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1075,6 +1166,14 @@ describe('paymentUnknownLog', () => {
     paymentUnknownLog(logger).reversalOverdue({ orderId: ORDER_ID });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ level: 'error', kind: 'payment-deposit-reversal-overdue', severity: 'SEV1', orderId: ORDER_ID });
+    for (const key of ['amount', 'paymentRef', 'paymentKey']) expect(lines[0]).not.toHaveProperty(key);
+  });
+
+  test('P-T26_리뷰 고침 4: 재입금 불가는 SEV2, csCase PAYMENT_DEPOSIT_REVERSED이고 주문 ID만 싣는다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.2.5]', () => {
+    const { lines, logger } = realLogger();
+    paymentUnknownLog(logger).reversalNoTime({ orderId: ORDER_ID });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'error', kind: 'payment-deposit-reversal-no-time', severity: 'SEV2', csCase: 'PAYMENT_DEPOSIT_REVERSED', orderId: ORDER_ID });
     for (const key of ['amount', 'paymentRef', 'paymentKey']) expect(lines[0]).not.toHaveProperty(key);
   });
 

@@ -2,6 +2,8 @@
 import type { PortoneGatewayOptions } from './modules/payment/adapters/pg/portone-gateway.js';
 import type { SimulatorGatewayOptions } from './modules/payment/adapters/pg/simulator-gateway.js';
 import type { TossGatewayOptions } from './modules/payment/adapters/pg/toss-gateway.js';
+import { PAY_METHODS, type PayMethod, type PgName } from './modules/payment/domain/payment-gateway.js';
+import type { PgPlatformDefaults } from './modules/payment/domain/pg-selection.js';
 
 /** 업무 gRPC 포트 [가정](identity-svc와 같다. BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
 export const DEFAULT_PAYMENT_GRPC_PORT = 50051;
@@ -18,6 +20,8 @@ export const MAX_PAYMENT_POD_COUNT = 1_000;
 export const DEFAULT_TOSS_API_URL = 'https://api.tosspayments.com';
 /** 포트원 공식 API 주소(PEAKET_PG_PORTONE_URL의 기본값) */
 export const DEFAULT_PORTONE_API_URL = 'https://api.portone.io';
+/** local·ci에서 PEAKET_WEB_ORIGIN이 비었을 때의 웹 출처 */
+export const DEFAULT_LOCAL_WEB_ORIGIN = 'http://localhost:3000';
 const PORTONE_REQUIRED = ['PEAKET_PG_PORTONE_SECRET', 'PEAKET_PG_PORTONE_STORE_ID', 'PEAKET_PG_PORTONE_CHANNEL_KEY', 'PEAKET_PG_PORTONE_WEBHOOK_SECRET'] as const;
 const TEST_ENVS: ReadonlySet<string> = new Set(['local', 'ci', 'demo', 'staging']);
 /** 시험 키(test_)의 호출 상한 초당 1 [가정]. 토스 시험 환경은 API별 분당 100건이고(payment §2.1), 파드가 나눠 쓴다 */
@@ -114,7 +118,7 @@ function tossCallsPerSecondOf(raw: string | undefined, secretKey: string): numbe
 
 /**
  * 포트원 어댑터 설정을 읽는다(BUILD_ORDER HOT-140, docs/features/payment.md §2.1 '포트원 어댑터의 첫 구현').
- * PEAKET_PG_PORTONE_URL(기본 공식 주소)·PEAKET_PG_PORTONE_SECRET·PEAKET_PG_PORTONE_STORE_ID·PEAKET_PG_PORTONE_CHANNEL_KEY·PEAKET_PG_PORTONE_WEBHOOK_SECRET(교체 중의 옛 값은 PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS).
+ * PEAKET_PG_PORTONE_URL(기본 공식 주소)·PEAKET_PG_PORTONE_SECRET·PEAKET_PG_PORTONE_STORE_ID·PEAKET_PG_PORTONE_CHANNEL_KEY·PEAKET_PG_PORTONE_WEBHOOK_SECRET(교체 중의 옛 값은 PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS)·선택 값 PEAKET_PG_PORTONE_CHANNEL_KEYS(수단 → 채널 키 JSON, BUILD_ORDER PRF-190).
  * 넷이 다 없으면 undefined다. 포트원 시크릿은 접두사가 정해져 있지 않아 환경과 맞춰 볼 수 없다. 대신 sim_sk_는 시험 환경의 시뮬레이터 주소에서만 받고, 그 밖의 시크릿은 공식 호스트 https로만 나간다.
  * @throws Error 일부만 있음, 운영에 sim_sk_, sim_sk_로 공식 주소를 가리킴, sim_sk_가 아닌데 https가 아니거나 공식 호스트가 아님, 주소 모양이 틀림(시작 실패). 글에 비밀 값·주소 값을 싣지 않는다
  */
@@ -138,7 +142,8 @@ export function loadPortoneGatewayConfig(env: Record<string, string | undefined>
     throw new Error('PEAKET_PG_PORTONE_URL은 포트원 공식 주소여야 한다(시뮬레이터용 시크릿만 다른 주소를 쓸 수 있다)');
   }
   const previous = env.PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS?.trim();
-  return { baseUrl, secret, storeId, channelKey, webhookSecrets: previous ? [webhookSecret, previous] : [webhookSecret], isTest: test };
+  const channelKeys = portoneChannelKeysOf(env.PEAKET_PG_PORTONE_CHANNEL_KEYS);
+  return { baseUrl, secret, storeId, channelKey, ...(channelKeys === undefined ? {} : { channelKeys }), webhookSecrets: previous ? [webhookSecret, previous] : [webhookSecret], isTest: test };
 }
 
 /**
@@ -155,6 +160,83 @@ export function assertPgAdapters(env: Record<string, string | undefined>, adapte
 /** 토스 경로의 웹훅으로 시뮬레이터 결제를 받는 환경인가(local·ci뿐, docs/features/payment.md §5 '웹훅 받기의 첫 구현', BUILD_ORDER HOT-150) */
 export function webhookAcceptsSimulator(env: Record<string, string | undefined>): boolean {
   return env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';
+}
+
+/** 결제창 준비 설정(BUILD_ORDER PRF-190) */
+export interface CheckoutConfig {
+  /** PEAKET_PG_DEFAULT(비면 TOSS)와 PEAKET_PG_FALLBACK(비면 PORTONE, none이면 대체 없음) */
+  readonly defaults: PgPlatformDefaults;
+  /** PEAKET_WEB_ORIGIN. local·ci에서 비면 http://localhost:3000 */
+  readonly webOrigin: string;
+}
+
+/**
+ * 결제창 준비 설정을 읽는다.
+ * @throws Error 결제사 이름이 틀림, 기본과 대체가 같음, 시뮬레이터를 운영에 지정, local·ci 밖에서 PEAKET_WEB_ORIGIN이 비었거나 https 출처가 아님(시작 실패). 글에 값을 싣지 않는다
+ */
+export function loadCheckoutConfig(env: Record<string, string | undefined>): CheckoutConfig {
+  const primary = checkoutPgOf('PEAKET_PG_DEFAULT', env.PEAKET_PG_DEFAULT) ?? 'TOSS';
+  const rawFallback = env.PEAKET_PG_FALLBACK?.trim();
+  const fallback = rawFallback === 'none' ? undefined : (checkoutPgOf('PEAKET_PG_FALLBACK', rawFallback) ?? (primary === 'PORTONE' ? 'TOSS' : 'PORTONE'));
+  if (fallback === primary) throw new Error('PEAKET_PG_FALLBACK이 PEAKET_PG_DEFAULT와 같다');
+  if (!isTestEnv(env) && (primary === 'SIMULATOR' || fallback === 'SIMULATOR')) throw new Error('이 환경(운영)에서는 시뮬레이터를 플랫폼 결제사로 지정할 수 없다');
+  return { defaults: { primary, ...(fallback === undefined ? {} : { fallback }) }, webOrigin: webOriginOf(env) };
+}
+
+/**
+ * 플랫폼 결제사의 어댑터가 있는지 본다(BUILD_ORDER PRF-190 코드 리뷰). local·ci는 어댑터 없이도 켠다.
+ * @param hasAdapter 그 결제사의 어댑터가 등록부에 있는가
+ * @returns 대체 결제사의 어댑터가 없을 때의 경고(전환해도 그 결제사로는 결제창을 열 수 없다)
+ * @throws Error local·ci 밖에서 플랫폼 기본 결제사의 어댑터가 없음(시작 실패)
+ */
+export function checkoutAdapterWarnings(env: Record<string, string | undefined>, defaults: PgPlatformDefaults, hasAdapter: (pg: PgName) => boolean): string[] {
+  if (env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci') return [];
+  if (!hasAdapter(defaults.primary)) throw new Error(`PEAKET_PG_DEFAULT(${defaults.primary})의 어댑터가 없다(local·ci 밖에서는 플랫폼 기본 결제사의 어댑터가 있어야 시작한다)`);
+  return defaults.fallback === undefined || hasAdapter(defaults.fallback) ? [] : [`PEAKET_PG_FALLBACK(${defaults.fallback})의 어댑터가 없어 그 결제사로 전환하면 결제창을 열지 못한다`];
+}
+
+function checkoutPgOf(name: 'PEAKET_PG_DEFAULT' | 'PEAKET_PG_FALLBACK', raw: string | undefined): PgName | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value !== 'TOSS' && value !== 'PORTONE' && value !== 'SIMULATOR') throw new Error(`${name}는 TOSS·PORTONE·SIMULATOR 가운데 하나여야 한다`);
+  return value;
+}
+
+/** 결제창 복귀 주소의 출처. local·ci는 비면 기본값이고 http도 받는다. 그 밖은 https 출처만 받는다(경로·쿼리 없음) */
+function webOriginOf(env: Record<string, string | undefined>): string {
+  const local = env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';
+  const raw = env.PEAKET_WEB_ORIGIN?.trim();
+  if (!raw) {
+    if (local) return DEFAULT_LOCAL_WEB_ORIGIN;
+    throw new Error('PEAKET_WEB_ORIGIN이 없다(local·ci 밖에서는 결제창 복귀 주소의 출처를 넣는다)');
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('PEAKET_WEB_ORIGIN이 URL이 아니다');
+  }
+  if (url.origin !== raw || (url.protocol !== 'https:' && !(local && url.protocol === 'http:'))) throw new Error('PEAKET_WEB_ORIGIN은 경로·쿼리가 없는 https 출처여야 한다');
+  return raw;
+}
+
+/** PEAKET_PG_PORTONE_CHANNEL_KEYS(수단 → 채널 키 JSON). 비었으면 undefined다. 글에 값을 싣지 않는다 */
+function portoneChannelKeysOf(raw: string | undefined): Partial<Record<PayMethod, string>> | undefined {
+  const text = raw?.trim();
+  if (!text) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('PEAKET_PG_PORTONE_CHANNEL_KEYS가 JSON이 아니다');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || Object.keys(parsed).length === 0) throw new Error('PEAKET_PG_PORTONE_CHANNEL_KEYS는 수단 → 채널 키 객체여야 한다');
+  const keys: Partial<Record<PayMethod, string>> = {};
+  for (const [method, key] of Object.entries(parsed)) {
+    if (!(PAY_METHODS as readonly string[]).includes(method) || typeof key !== 'string' || key.trim() === '') throw new Error('PEAKET_PG_PORTONE_CHANNEL_KEYS의 수단 이름이나 채널 키가 틀렸다');
+    keys[method as PayMethod] = key.trim();
+  }
+  return keys;
 }
 
 export interface PgCallGuardConfig {

@@ -88,6 +88,8 @@ export interface ConfirmTarget {
   readonly authenticatedAtMs: number;
   /** payment_event에 CONFIRM_SENT 표시가 있는가 */
   readonly confirmSent: boolean;
+  /** 회차의 입장 시작 시각(epoch ms). 답의 입금 기한을 자른다. 승인 명령에 없었으면 없다(BUILD_ORDER PRF-190 코드 리뷰) */
+  readonly entryOpensAtMs?: number;
 }
 
 /**

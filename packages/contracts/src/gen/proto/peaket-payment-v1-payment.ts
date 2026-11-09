@@ -51,6 +51,13 @@ export const paymentV1Payment: Record<string, unknown> = {
                   }
                 },
                 "PrepareCheckoutRequest": {
+                  "oneofs": {
+                    "_virtual_account_allowed": {
+                      "oneof": [
+                        "virtual_account_allowed"
+                      ]
+                    }
+                  },
                   "fields": {
                     "order_kind": {
                       "type": "OrderKind",
@@ -79,6 +86,25 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "buyer": {
                       "type": "BuyerContact",
                       "id": 7
+                    },
+                    "attempt_id": {
+                      "type": "string",
+                      "id": 8
+                    },
+                    "customer_key": {
+                      "type": "string",
+                      "id": 9
+                    },
+                    "virtual_account_allowed": {
+                      "type": "bool",
+                      "id": 10,
+                      "options": {
+                        "proto3_optional": true
+                      }
+                    },
+                    "entry_opens_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 11
                     }
                   }
                 },
@@ -124,6 +150,15 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "simulator": {
                       "type": "TossCheckout",
                       "id": 5
+                    },
+                    "allowed_pay_methods": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 6
+                    },
+                    "deposit_due_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 7
                     }
                   }
                 },
@@ -192,6 +227,18 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "customer": {
                       "type": "BuyerContact",
                       "id": 8
+                    },
+                    "custom_data": {
+                      "type": "PortoneCustomData",
+                      "id": 9
+                    }
+                  }
+                },
+                "PortoneCustomData": {
+                  "fields": {
+                    "order_id": {
+                      "type": "string",
+                      "id": 1
                     }
                   }
                 },
@@ -240,6 +287,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "attempt_no": {
                       "type": "int32",
                       "id": 9
+                    },
+                    "entry_opens_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 10
                     }
                   }
                 },

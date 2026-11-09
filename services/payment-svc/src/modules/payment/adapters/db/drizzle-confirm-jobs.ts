@@ -69,6 +69,7 @@ type TargetRow = {
   status: string;
   authenticated_at: Date | string;
   confirm_sent: boolean;
+  entry_opens_at: Date | string | null;
 };
 
 type QueryRow = {
@@ -86,6 +87,7 @@ type QueryRow = {
   deposit_due_at: Date | string | null;
   deposit_notified_at: Date | string | null;
   reversed_at: Date | string | null;
+  entry_opens_at: Date | string | null;
 };
 
 const msOf = (v: Date | string): number => new Date(v).getTime();
@@ -193,7 +195,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
     const r = await this.o.database.db.execute(sql`
-      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at,
+      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at, p.entry_opens_at,
              exists (select 1 from payment_event e where e.payment_id = p.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent
       from payment p where p.id = ${paymentId}::uuid`);
     const row = r.rows[0] as TargetRow | undefined;
@@ -211,6 +213,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       status: row.status as PaymentLedgerStatus,
       authenticatedAtMs: msOf(row.authenticated_at),
       confirmSent: row.confirm_sent,
+      ...(row.entry_opens_at === null ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
     };
   }
 
@@ -319,7 +322,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     return this.#tx(async (tx) => {
       // 상태 목록은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. RETURNING 차례가 정해지지 않아 고르기와 밀기를 나눈다(고른 차례를 지키고 간격 식은 도메인 하나다)
       const r = await tx.execute(sql`
-        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at,
+        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at, entry_opens_at,
                case when status = 'AWAITING_DEPOSIT' then (select max(e.occurred_at) from payment_event e where e.payment_id = payment.id and e.type = ${DEPOSIT_REVERSED_EVENT_TYPE}) end as reversed_at
         from payment
         where ${QUERY_DUE_STATUS} and pg = ${pg} and next_query_at <= ${new Date(now)}::timestamptz
@@ -347,6 +350,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
             : {}),
           ...(row.status === 'FAILED' ? { lateDepositCheck: true as const } : {}),
           ...(row.status === 'APPROVED' ? { reversalCheck: row.deposit_notified_at === null ? {} : { notifiedAtMs: msOf(row.deposit_notified_at) } } : {}),
+          ...(row.entry_opens_at === null ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
         };
       });
       const ids = jobs.map((j) => j.paymentId);
@@ -421,6 +425,21 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     });
   }
 
+  async closeReversedDeposit(job: UnknownQueryJob, reversed: Extract<ConfirmFinish, { status: 'AWAITING_DEPOSIT' }>, failed: Extract<ConfirmFinish, { status: 'FAILED' }>): Promise<ResolveUnknownResult> {
+    return this.#tx(async (tx) => {
+      if ((await lockStatus(tx, job.paymentId)) !== 'APPROVED') return 'STALE';
+      const now = this.o.clock.now();
+      // 주문 쪽 전이가 T21 → T17 차례라 두 사건을 그 차례로 낸다. Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
+      const messages = [await this.#recordResult(tx, job, reversed, now), await this.#recordResult(tx, job, failed, now)];
+      await writeOutbox(
+        tx,
+        this.o.clock,
+        messages.map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(m) })),
+      );
+      return 'APPLIED';
+    });
+  }
+
   async readCancelTarget(paymentId: string, budget?: CallBudget): Promise<DepositCancelTarget | undefined> {
     const r = await this.#tx(
       (tx) =>
@@ -429,7 +448,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       from payment where id = ${paymentId}::uuid`),
       budget,
     );
-    const row = r.rows[0] as Omit<QueryRow, 'anomaly_logged_at' | 'query_attempts' | 'status' | 'deposit_due_at' | 'deposit_notified_at' | 'reversed_at'> | undefined;
+    const row = r.rows[0] as Omit<QueryRow, 'anomaly_logged_at' | 'query_attempts' | 'status' | 'deposit_due_at' | 'deposit_notified_at' | 'reversed_at' | 'entry_opens_at'> | undefined;
     if (!row) return undefined;
     return { paymentId: row.id, orderId: row.order_id, eventId: row.event_id, attemptNo: Number(row.attempt_no), pg: row.pg as PgName, paymentRef: row.pg_payment_ref, amount: Number(row.amount), ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}) };
   }

@@ -87,6 +87,7 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
 
   it('능력 플래그(ADR-0029 결정 2)', () => {
     expect(sim.gateway().capabilities()).toEqual({
+      payMethods: ['CARD'],
       serverConfirm: true,
       confirmDeadlineMs: 600_000,
       partialCancel: true,
@@ -102,9 +103,25 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     const g = sim.gateway();
     const orderId = randomUUID();
     const v = g.checkout({ orderId, orderName: '티켓', amount: 1_000 }, { attemptId: randomUUID(), successUrl: 'https://a.example/s', failUrl: 'https://a.example/f' }, 'CARD');
-    expect(v).toEqual({ simulator: { clientKey: 'sim_ck_test_client', customerKey: 'ANONYMOUS', orderId, orderName: '티켓', amount: 1_000, successUrl: 'https://a.example/s', failUrl: 'https://a.example/f' } });
+    expect(v).toEqual({ simulator: { clientKey: 'sim_ck_test_client', customerKey: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/), orderId, orderName: '티켓', amount: 1_000, successUrl: 'https://a.example/s', failUrl: 'https://a.example/f' } });
     expect(() => g.checkout({ orderId, orderName: '티켓', amount: 1_000 }, { attemptId: 'a', successUrl: 's', failUrl: 'f' }, 'VIRTUAL_ACCOUNT')).toThrow(/카드/);
     expect(() => g.checkout({ orderId, orderName: '티켓', amount: 0 }, { attemptId: 'a', successUrl: 's', failUrl: 'f' }, 'CARD')).toThrow(/금액/);
+  });
+
+  it('P-T26_리뷰 고침 7: 구매자 키를 주지 않으면 호출마다 다른 CSPRNG 값이고 비회원 고정 값이 아니다 [ASVS v5.0.0-11.5.1]', () => {
+    const g = sim.gateway();
+    const keyOf = () => {
+      const v = g.checkout({ orderId: randomUUID(), orderName: '티켓', amount: 1_000 }, { attemptId: randomUUID(), successUrl: 'https://a.example/s', failUrl: 'https://a.example/f' }, 'CARD');
+      return (v as { simulator: { customerKey: string } }).simulator.customerKey;
+    };
+    const a = keyOf();
+    expect(a).not.toBe('ANONYMOUS');
+    expect(a).not.toBe(keyOf());
+  });
+
+  it('P-T26_리뷰 고침 7: 넘어온 구매자 키는 그대로 쓴다', () => {
+    const v = sim.gateway().checkout({ orderId: randomUUID(), orderName: '티켓', amount: 1_000, customerKey: 'cust-key-1' }, { attemptId: randomUUID(), successUrl: 'https://a.example/s', failUrl: 'https://a.example/f' }, 'CARD');
+    expect((v as { simulator: { customerKey: string } }).simulator.customerKey).toBe('cust-key-1');
   });
 
   it('멱등키는 confirm-{주문 ID}·cancel-{취소 ID} 형식만 받는다(ADR-0029 결정 4)', async () => {

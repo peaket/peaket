@@ -9,19 +9,23 @@ import 'reflect-metadata';
 import { hostname } from 'node:os';
 import { createDatabase, createService, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertPgAdapters, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
+import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  CachedPgSelectionReader,
   CancelDepositPayment,
+  channelTableOf,
   confirmRunnerDatabaseOptions,
   createPgHttp,
   DrizzleConfirmJobs,
   DrizzlePaymentStore,
+  DrizzlePgSelection,
   DrizzleWebhookStore,
   GetPaymentDetail,
+  paymentCheckoutLog,
   type PaymentCommandLog,
   paymentCommandLog,
   paymentConfirmLog,
@@ -39,6 +43,8 @@ import {
   PgCallGuards,
   pgCallGuardLog,
   PortoneGateway,
+  PrepareCheckout,
+  PromPaymentCheckoutSignals,
   PromPaymentCommandSignals,
   PromPaymentConfirmSignals,
   PromPaymentDepositSignals,
@@ -64,6 +70,8 @@ const toss = loadTossGatewayConfig(process.env);
 const portone = loadPortoneGatewayConfig(process.env);
 assertPgAdapters(process.env, { simulator: simulator !== undefined, toss: toss !== undefined });
 const guardConfig = loadPgCallGuardConfig(process.env);
+// 플랫폼 기본 결제사와 결제창 복귀 출처. 잘못된 값은 듣기 전에 시작 실패다(BUILD_ORDER PRF-190)
+const checkoutConfig = loadCheckoutConfig(process.env);
 // 결제 수단 연결값의 라벨 키 pay. 없으면 경고만 하고 칸을 비운다(결제는 막지 않는다, BUILD_ORDER HOT-145). 잘못된 설정은 듣기 전에 시작 실패다
 const { ring: methodRefs, warnings: methodRefWarnings } = PayRefKeyRing.fromEnv(process.env);
 // 가상계좌 번호 필드 암호화 키(local·ci·demo는 환경 값, 운영 KMS는 HOT-146). 없으면 경고만 하고 번호를 저장하지 않는다(결제는 막지 않는다, BUILD_ORDER HOT-151). 잘못된 설정은 듣기 전에 시작 실패다
@@ -80,6 +88,8 @@ const gateways = new StaticPaymentGateways([
   ...(toss ? [new TossPaymentGateway({ ...toss, fetch: tossHttp!.fetch, queryFetch: tossQueryHttp!.fetch })] : []),
   ...(portone ? [new PortoneGateway({ ...portone, fetch: portoneHttp!.fetch, queryFetch: portoneQueryHttp!.fetch })] : []),
 ]);
+// 플랫폼 기본 결제사의 어댑터가 없으면 듣기 전에 시작 실패이고, 대체의 어댑터가 없으면 경고다(BUILD_ORDER PRF-190 코드 리뷰)
+const checkoutWarnings = checkoutAdapterWarnings(process.env, checkoutConfig.defaults, (pg) => gateways.of(pg) !== undefined);
 
 const database = createDatabase({ url: config.databaseUrl, profile: 'hot', max: PAYMENT_HOT_POOL_MAX, applicationName: SERVICE });
 const batchDatabase = createDatabase({ url: config.databaseUrl, max: PAYMENT_BATCH_POOL_MAX, applicationName: `${SERVICE}-batch` });
@@ -93,6 +103,9 @@ const guardSignals = new PromPgCallGuardSignals();
 const methodRefSignals = new PromPaymentMethodRefSignals();
 const webhookSignals = new PromPaymentWebhookSignals();
 const depositSignals = new PromPaymentDepositSignals();
+const checkoutSignals = new PromPaymentCheckoutSignals();
+// 전환·회차 지정 읽기는 핫패스 풀이고 회차마다 1초 [가정] 캐시한다(BUILD_ORDER PRF-190)
+const pgSelection = new CachedPgSelectionReader({ reader: new DrizzlePgSelection({ database }), clock: systemClock });
 
 // 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC·앱 포트는 그 뒤에 열려 그 전에 불리지 않는다)
 let log: PaymentCommandLog | undefined;
@@ -126,8 +139,10 @@ guardSignals.register(service.metrics.registry);
 methodRefSignals.register(service.metrics.registry);
 webhookSignals.register(service.metrics.registry);
 depositSignals.register(service.metrics.registry);
+checkoutSignals.register(service.metrics.registry);
 for (const warning of methodRefWarnings) service.logger.warn({ kind: 'payment-method-ref-key' }, warning);
 for (const warning of virtualAccountWarnings) service.logger.warn({ kind: 'payment-virtual-account-key' }, warning);
+for (const warning of checkoutWarnings) service.logger.warn({ kind: 'payment-checkout-adapter' }, warning);
 const depositLog = paymentDepositLog(service.logger);
 const deposit = { cipher: virtualAccountCipher, log: depositLog, signals: depositSignals };
 const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: systemClock });
@@ -142,7 +157,7 @@ const grpc = await startGrpcServer({
   services: [
     {
       definition: paymentPackage().PaymentService.service,
-      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }) }, (method, err, orderId) =>
+      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }), prepareCheckout: new PrepareCheckout({ selection: pgSelection, gateways, channels: channelTableOf(gateways), defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals }) }, (method, err, orderId) =>
         // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
         service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
       ),

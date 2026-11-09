@@ -626,7 +626,7 @@ describe('P-T16 포트원 어댑터만의 것', () => {
 
   it('P-T16_결제창 값은 portone 칸이고 paymentId는 pay-{주문 ID}다', () => {
     expect(port().checkout({ orderId: ORDER_ID, orderName: '티켓', amount: 1_000 }, ATTEMPT, 'CARD')).toEqual({
-      portone: { storeId: 'store-1', channelKey: 'channel-1', paymentId: PAYMENT_ID, orderName: '티켓', totalAmount: 1_000, currency: 'KRW', redirectUrl: ATTEMPT.successUrl },
+      portone: { storeId: 'store-1', channelKey: 'channel-1', paymentId: PAYMENT_ID, orderName: '티켓', totalAmount: 1_000, currency: 'KRW', redirectUrl: ATTEMPT.successUrl, customData: { orderId: ORDER_ID } },
     });
   });
 

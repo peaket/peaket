@@ -17,7 +17,13 @@ export interface PgCapabilities {
   redirectCheckout: boolean;
   /** 승인 한 건이 쓰는 호출 토큰 수. 없으면 1이다. 승인 답에 금액이 없어 승인 뒤 조회를 함께 부르는 포트원은 2다(BUILD_ORDER HOT-140, 코드 리뷰) */
   confirmCallCost?: number;
+  /** 이 채널이 받는 결제수단. 없으면 다섯 가지 모두다(BUILD_ORDER PRF-190) */
+  payMethods?: readonly PayMethod[];
 }
+
+/** 결제수단(openapi 결제 시도 payMethod, proto PrepareCheckoutRequest.pay_method와 같은 값, BUILD_ORDER PRF-190) */
+export const PAY_METHODS = ['CARD', 'EASY_PAY', 'TRANSFER', 'VIRTUAL_ACCOUNT', 'MOBILE'] as const;
+export type PayMethod = (typeof PAY_METHODS)[number];
 
 export interface CheckoutOrder {
   orderId: string;
@@ -55,6 +61,8 @@ export interface PortoneCheckoutValues {
   /** 결제 통화(proto PortoneCheckout.currency) */
   currency: 'KRW';
   redirectUrl: string;
+  /** 결제사가 그대로 돌려주는 값. 대사의 주문 대조가 읽는다(proto PortoneCheckout.custom_data, BUILD_ORDER HOT-153이 넘긴 것) */
+  customData: { orderId: string };
 }
 
 /** 결제창 값. 시뮬레이터는 토스와 같은 모양이다(proto README 2026-10-28) */

@@ -16,15 +16,38 @@ export const REVERSAL_DUE_MIN_LEAD_MS = 2 * 3_600_000;
 
 /**
  * 입금 오류로 되돌린 결제의 새 입금 기한(epoch ms): 조회 답의 기한이 지금 + 2시간 [가정] 이상 남았으면 그 값, 아니면 다음 날 23:59(KST) [가정](docs/planning/03 §2.4의 공식, BUILD_ORDER HOT-152).
- * '입장 24시간 전' 상한은 입장 시각을 아는 쪽(PRF-190)이 자른다.
+ * 입장 시각을 알면 '입장 시작 24시간 전'으로 자른다(BUILD_ORDER PRF-190). 잘린 값이 지금 + 2시간 [가정]보다 가까우면 다시 입금할 시간을 주려고 지금 + 2시간이고, 입장이 그보다 이르면 다시 입금할 수 없다(BUILD_ORDER PRF-190 코드 리뷰).
  * @param answerDueMs 조회 답의 입금 기한(epoch ms). 없으면 undefined
  * @param nowMs 지금(epoch ms)
+ * @param entryOpensAtMs 회차의 입장 시작 시각(epoch ms). 모르면 undefined
+ * @returns 새 입금 기한. 입장이 2시간 [가정] 안이라 다시 입금할 수 없으면 undefined
  */
-export function reversalDueAtMs(answerDueMs: number | undefined, nowMs: number): number {
-  if (answerDueMs !== undefined && answerDueMs >= nowMs + REVERSAL_DUE_MIN_LEAD_MS) return answerDueMs;
-  // KST 하루의 시작(epoch ms)을 구해 다음 날 23:59를 더한다
+export function reversalDueAtMs(answerDueMs: number | undefined, nowMs: number, entryOpensAtMs?: number): number | undefined {
+  const earliestMs = nowMs + REVERSAL_DUE_MIN_LEAD_MS;
+  const dueAtMs = capDepositDueAtEntry(answerDueMs !== undefined && answerDueMs >= earliestMs ? answerDueMs : nextKstDayEndMs(nowMs), entryOpensAtMs);
+  if (dueAtMs >= earliestMs) return dueAtMs;
+  return entryOpensAtMs !== undefined && entryOpensAtMs < earliestMs ? undefined : earliestMs;
+}
+
+/** 다음 날 23:59(KST) [가정]: KST 하루의 시작(epoch ms)을 구해 다음 날 23:59를 더한다 */
+function nextKstDayEndMs(nowMs: number): number {
   const startOfKstDay = Math.floor((nowMs + KST_OFFSET_MS) / DAY_MS) * DAY_MS - KST_OFFSET_MS;
   return startOfKstDay + DAY_MS + REVERSAL_DUE_TIME_OF_DAY_MS;
+}
+
+/** 입금 기한까지 이만큼 남지 않으면 가상계좌를 내지 않는다 2시간 [가정](docs/planning/03 §2.4, BUILD_ORDER PRF-190) */
+export const VIRTUAL_ACCOUNT_MIN_LEAD_MS = 2 * 3_600_000;
+/** 입장 시작 전 입금 기한의 여유 24시간 [가정](docs/planning/03 §2.4) */
+export const DEPOSIT_DUE_BEFORE_ENTRY_MS = 24 * 3_600_000;
+
+/** 입금 기한을 '입장 시작 24시간 전'으로 자른다. 입장 시각을 모르면 그대로다(BUILD_ORDER PRF-190) */
+export function capDepositDueAtEntry(dueAtMs: number, entryOpensAtMs: number | undefined): number {
+  return entryOpensAtMs === undefined ? dueAtMs : Math.min(dueAtMs, entryOpensAtMs - DEPOSIT_DUE_BEFORE_ENTRY_MS);
+}
+
+/** 결제창에 보낼 입금 기한(epoch ms): min(다음 날 23:59 KST [가정], 입장 시작 24시간 전)(docs/planning/03 §2.4, BUILD_ORDER PRF-190) */
+export function checkoutDepositDueAtMs(nowMs: number, entryOpensAtMs: number | undefined): number {
+  return capDepositDueAtEntry(nextKstDayEndMs(nowMs), entryOpensAtMs);
 }
 
 const KST_OFFSET_MS = 9 * 3_600_000;

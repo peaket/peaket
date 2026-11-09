@@ -1,5 +1,5 @@
 // 받는 층: gRPC PaymentService(docs/api/proto/peaket/payment/v1/payment.proto)를 유스케이스에 잇는다(BUILD_ORDER PRF-180).
-// ConfirmPayment·BatchGetPayments·GetPayment(BUILD_ORDER HOT-151)·CancelPayment(입금 전 취소, BUILD_ORDER HOT-152)만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
+// ConfirmPayment·BatchGetPayments·GetPayment(BUILD_ORDER HOT-151)·CancelPayment(입금 전 취소, BUILD_ORDER HOT-152)·PrepareCheckout(BUILD_ORDER PRF-190)만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
 // 업무 오류는 상태 코드로(PaymentInputError → INVALID_ARGUMENT, PaymentCommandMismatchError → FAILED_PRECONDITION), 저장소 오류는 statusOfStoreError로 고른 코드와 고정 문구로
 // 돌려주고 이유는 서버 쪽 기록에만 남긴다(docs/api/proto/README.md §2 'gRPC 상태 코드').
 // 데드라인: 처음에 call.getDeadline()을 보고 남은 시간이 MIN_CALL_REMAINING_MS보다 모자라면 시작하지 않고 DEADLINE_EXCEEDED다(같은 표 '데드라인'). 넉넉하면 남은 시간을 쓰임새에 넘긴다.
@@ -14,6 +14,9 @@ import type { GetPaymentDetail } from '../application/get-payment-detail.js';
 import { type DepositCancelAnswer, type DepositCancelInput, PaymentCancelStateError } from '../domain/deposit-cancel.js';
 import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, type PaymentDetail, PaymentInputError, PaymentNotFoundError, type PaymentState } from '../domain/confirm-command.js';
 import type { CallBudget } from '../domain/ports.js';
+import type { CheckoutValues, TossCheckoutValues } from '../domain/payment-gateway.js';
+import { PaymentPgUnavailableError, type PrepareCheckoutInput } from '../domain/pg-selection.js';
+import type { PrepareCheckout, PrepareCheckoutAnswer } from '../application/prepare-checkout.js';
 
 export interface PaymentPackage {
   PaymentService: grpc.ServiceClientConstructor;
@@ -62,6 +65,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
   const krw = childOf(request.amount)?.krw;
   const paymentRef = paymentRefOf(request);
   const authenticatedAtMs = msOf(request.authenticated_at);
+  const entryOpensAtMs = msOf(request.entry_opens_at);
   return {
     orderId: text(request.order_id),
     attemptId: text(request.attempt_id),
@@ -71,6 +75,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
     ...(paymentRef ? { paymentRef } : {}),
     amount: typeof krw === 'number' ? krw : Number.NaN,
     ...(authenticatedAtMs === undefined ? {} : { authenticatedAtMs }),
+    ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
   };
 }
 
@@ -127,6 +132,47 @@ export function cancelResponseOf(answer: DepositCancelAnswer): Record<string, un
   return { result: `CANCEL_RESULT_${answer.result}`, cancelled_amount: { krw: 0 } };
 }
 
+const tossCheckoutOf = (v: TossCheckoutValues): Record<string, unknown> => ({ client_key: v.clientKey, customer_key: v.customerKey, order_id: v.orderId, order_name: v.orderName, amount: { krw: v.amount }, success_url: v.successUrl, fail_url: v.failUrl });
+
+/** 결제창 값 → oneof checkout의 칸 하나 */
+function checkoutFieldsOf(values: CheckoutValues): Record<string, unknown> {
+  if ('toss' in values) return { toss: tossCheckoutOf(values.toss) };
+  if ('simulator' in values) return { simulator: tossCheckoutOf(values.simulator) };
+  const v = values.portone;
+  return { portone: { store_id: v.storeId, channel_key: v.channelKey, payment_id: v.paymentId, order_name: v.orderName, total_amount: { krw: v.totalAmount }, currency: v.currency, redirect_url: v.redirectUrl, custom_data: { order_id: v.customData.orderId } } };
+}
+
+/** 요청(proto 칸 이름) → 검사 전 입력(BUILD_ORDER PRF-190) */
+export function prepareCheckoutInputOf(request: Record<string, unknown>): PrepareCheckoutInput {
+  const krw = childOf(request.amount)?.krw;
+  const customerKey = text(request.customer_key);
+  const entryOpensAtMs = msOf(request.entry_opens_at);
+  return {
+    orderKind: text(request.order_kind).replace(/^ORDER_KIND_/, '') || 'UNSPECIFIED',
+    orderId: text(request.order_id),
+    attemptId: text(request.attempt_id),
+    eventId: text(request.event_id),
+    amount: typeof krw === 'number' ? krw : Number.NaN,
+    orderName: text(request.order_name),
+    payMethod: text(request.pay_method),
+    ...(customerKey === '' ? {} : { customerKey }),
+    // proto3 optional: 칸이 없으면 undefined로 온다
+    ...(typeof request.virtual_account_allowed === 'boolean' ? { virtualAccountAllowed: request.virtual_account_allowed } : {}),
+    ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
+  };
+}
+
+/** 답 → PrepareCheckoutResponse(proto 칸 이름, BUILD_ORDER PRF-190) */
+export function prepareCheckoutResponseOf(answer: PrepareCheckoutAnswer): Record<string, unknown> {
+  return {
+    pg: `PG_PROVIDER_${answer.pg}`,
+    switched: answer.switched,
+    ...checkoutFieldsOf(answer.checkout),
+    allowed_pay_methods: [...answer.allowedPayMethods],
+    ...(answer.depositDueAtMs === undefined ? {} : { deposit_due_at: timestampOf(answer.depositDueAtMs) }),
+  };
+}
+
 export interface PaymentGrpcUseCases {
   accept: Pick<AcceptPaymentCommand, 'execute'>;
   batchGet: Pick<BatchGetPaymentStates, 'execute'>;
@@ -134,6 +180,8 @@ export interface PaymentGrpcUseCases {
   getPayment?: Pick<GetPaymentDetail, 'execute'>;
   /** 없으면 CancelPayment는 UNIMPLEMENTED다 */
   cancelPayment?: Pick<CancelDepositPayment, 'execute'>;
+  /** 없으면 PrepareCheckout은 UNIMPLEMENTED다 */
+  prepareCheckout?: Pick<PrepareCheckout, 'execute'>;
 }
 
 /** 문장 시간 초과(statement_timeout)의 SQLSTATE */
@@ -187,7 +235,7 @@ export function paymentServiceHandlers(useCases: PaymentGrpcUseCases, onError: (
       fn(call.request, { remainingMs }).then(
         (v) => cb(null, v),
         (err: unknown) => {
-          if (err instanceof PaymentInputError || err instanceof PaymentCommandMismatchError || err instanceof PaymentNotFoundError || err instanceof PaymentCancelStateError) {
+          if (err instanceof PaymentInputError || err instanceof PaymentCommandMismatchError || err instanceof PaymentNotFoundError || err instanceof PaymentCancelStateError || err instanceof PaymentPgUnavailableError) {
             cb({ code: grpc.status[err.code], details: err.message });
             return;
           }
@@ -206,6 +254,7 @@ export function paymentServiceHandlers(useCases: PaymentGrpcUseCases, onError: (
     BatchGetPayments: unary('BatchGetPayments', async (r, budget) => ({
       payments: (await useCases.batchGet.execute(Array.isArray(r.order_ids) ? r.order_ids.map(text) : [], budget)).map(orderPaymentStateOf),
     })),
+    ...(useCases.prepareCheckout === undefined ? {} : { PrepareCheckout: unary('PrepareCheckout', async (r, budget) => prepareCheckoutResponseOf(await useCases.prepareCheckout!.execute(prepareCheckoutInputOf(r), budget))) }),
     ...(useCases.cancelPayment === undefined ? {} : { CancelPayment: unary('CancelPayment', async (r, budget) => cancelResponseOf(await useCases.cancelPayment!.execute(cancelInputOf(r), budget))) }),
     ...(useCases.getPayment === undefined
       ? {}

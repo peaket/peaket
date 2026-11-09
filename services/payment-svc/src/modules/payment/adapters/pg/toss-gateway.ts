@@ -6,6 +6,7 @@
 // - 결제 수단 고르기는 토스 결제창이 하므로 payMethod로 막지 않는다(openapi payMethod는 포트원 채널 선택에 쓴다).
 import { randomBytes } from 'node:crypto';
 import type { CheckoutAttempt, CheckoutOrder, CheckoutValues, FailureCategory, PgCapabilities } from '../../domain/payment-gateway.js';
+import { ANONYMOUS_CUSTOMER_KEY, CUSTOMER_KEY } from '../../domain/pg-selection.js';
 import { TossShapedGateway, type TossShapedOptions } from './toss-shaped.js';
 
 export interface TossGatewayOptions extends TossShapedOptions {
@@ -49,10 +50,6 @@ const BUYER_REJECTED = new Set([
 /** 우리 쪽 가맹점·키 설정이 틀렸다는 코드. 구매자가 다시 해도 안 되고 처리되지 않은 것이 확실하다 */
 const MERCHANT_CONFIG_ERROR = new Set(['INVALID_API_KEY', 'NOT_FOUND_TERMINAL_ID', 'NOT_REGISTERED_BUSINESS', 'INVALID_UNREGISTERED_SUBMALL']);
 const CUSTOMER_KEY_BYTES = 16;
-/** 토스 구매자 키 형식(영문·숫자와 - _ = . @, 2~50자) */
-const CUSTOMER_KEY = /^[A-Za-z0-9\-_=.@]{2,50}$/;
-/** 토스가 비회원 결제에 쓰는 고정 값. 비회원을 한 값으로 묶지 않으므로 받지 않는다(§2.2) */
-const ANONYMOUS_CUSTOMER_KEY = 'ANONYMOUS';
 
 export class TossPaymentGateway extends TossShapedGateway {
   readonly pg = 'TOSS' as const;

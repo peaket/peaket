@@ -1,8 +1,9 @@
 // 승인 명령 접수와 결과 조회의 포트(docs/features/payment.md §2 '승인 명령 접수의 첫 구현', BUILD_ORDER PRF-180).
 import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentLedgerStatus, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
-import type { FailureCategory, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
+import type { FailureCategory, PayMethod, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
+import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-selection.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
 import type { QueryStatus } from './payment-gateway.js';
@@ -53,6 +54,37 @@ export interface PaymentStateReader {
   batchGet(orderIds: readonly string[], budget?: CallBudget): Promise<PaymentState[]>;
 }
 
+/** 결제사 선택 재료 읽기(BUILD_ORDER PRF-190) */
+export interface PgSelectionReader {
+  /**
+   * 그 회차의 전환 행·플랫폼 전환 행·회차 지정 사본을 읽는다. 결제사는 부르지 않는다.
+   * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(읽지 않는다)
+   */
+  read(eventId: string, budget?: CallBudget): Promise<PgSelectionState>;
+}
+
+/** 전환 쓰기(제어 수신 OPS-310과 재생 시험 PRF-210이 쓴다, BUILD_ORDER PRF-190) */
+export interface PgSwitchStore {
+  /** 판 번호가 지금보다 클 때만 쓴다. 썼으면 참, 옛 판이면 거짓이다 */
+  applySwitch(row: PgSwitchRow): Promise<boolean>;
+}
+
+/** payment_checkout_prepared_total의 outcome */
+export type PrepareCheckoutOutcome = 'ok' | 'switched' | 'invalid' | 'pg_unavailable' | 'method_unsupported' | 'error';
+
+/** 결제창 준비 지표. 던지지 않는다 */
+export interface PrepareCheckoutSignals {
+  prepared(pg: PgName | 'none', outcome: PrepareCheckoutOutcome): void;
+}
+
+/** 결제창 준비 로그. 던지지 않는다 */
+export interface PrepareCheckoutLog {
+  /** 고른 결제사를 쓸 수 없다(SEV2, kind payment-pg-unavailable). 결제사·까닭마다 1분 [가정]에 한 번 불린다 */
+  pgUnavailable(e: { readonly pg: PgName; readonly reason: Exclude<PgUnavailableReason, 'METHOD_UNSUPPORTED'>; readonly eventId: string }): void;
+  /** 고른 결제사가 그 수단을 받지 않는다(결제사 장애가 아니라 경고 한 줄, kind payment-pg-method-unsupported). 결제사·수단마다 1분 [가정]에 한 번 불린다(BUILD_ORDER PRF-190 코드 리뷰) */
+  methodUnsupported(e: { readonly pg: PgName; readonly payMethod: PayMethod; readonly eventId: string }): void;
+}
+
 /** GetPayment의 저장소(BUILD_ORDER HOT-151) */
 export interface PaymentDetailReader {
   /**
@@ -86,6 +118,8 @@ export interface PaymentDepositSignals {
   fieldFailure(op: 'seal' | 'open', reason: VirtualAccountFieldReason): void;
   /** payment_deposit_cancel_total{outcome}를 1 올린다(BUILD_ORDER HOT-152) */
   cancel?(outcome: DepositCancelOutcome): void;
+  /** 결제사가 준 입금 기한이 입장 시작 24시간 전을 넘어 잘랐다. payment_deposit_due_capped_total을 1 올린다(BUILD_ORDER PRF-190 코드 리뷰) */
+  dueCapped?(): void;
 }
 
 /** 승인 명령 접수의 로그(주문 ID만 싣는다. 결제 키·토큰·금액은 싣지 않는다). 던지지 않는다 */
@@ -260,6 +294,11 @@ export interface PaymentUnknownQueries {
    */
   reverseDeposit(job: UnknownQueryJob, finish: Extract<ConfirmFinish, { status: 'AWAITING_DEPOSIT' }>): Promise<ResolveUnknownResult>;
 
+  /**
+   * 입금을 되돌렸는데 입장이 2시간 [가정] 안이라 다시 입금할 수 없다(BUILD_ORDER PRF-190 코드 리뷰). 한 트랜잭션: payment 행 FOR UPDATE → 'APPROVED'가 아니면 STALE → DEPOSIT_REVERSED 사건(T21) → 다음 순번으로 FAILED 사건(T17) → 원장 FAILED(가상계좌 칸·next_query_at 비움) → Outbox `trade.payments` 두 행을 그 차례로(마지막 문장).
+   */
+  closeReversedDeposit(job: UnknownQueryJob, reversed: Extract<ConfirmFinish, { status: 'AWAITING_DEPOSIT' }>, failed: Extract<ConfirmFinish, { status: 'FAILED' }>): Promise<ResolveUnknownResult>;
+
   /** 늦은 입금 확인을 끝낸다: `status = 'FAILED' AND next_query_at = 이 잡기가 쓴 값` 조건으로 next_query_at을 비운다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다, 원장의 다른 칸은 바꾸지 않는다) */
   finishLateDepositCheck(job: UnknownQueryJob): Promise<boolean>;
 
@@ -303,6 +342,8 @@ export interface PaymentUnknownLog {
   reversalUnconfirmed(e: { readonly orderId: string }): void;
   /** 통보 뒤 1시간 [가정]이 지나도 조회로 되돌림을 확인하지 못했다(SEV1, kind payment-deposit-reversal-overdue, 주문 ID만, BUILD_ORDER HOT-152 코드 리뷰) */
   reversalOverdue(e: { readonly orderId: string }): void;
+  /** 입금을 되돌렸는데 입장이 2시간 [가정] 안이라 재입금 없이 실패로 끝냈다(SEV2, kind payment-deposit-reversal-no-time, csCase PAYMENT_DEPOSIT_REVERSED, 주문 ID만, BUILD_ORDER PRF-190 코드 리뷰) */
+  reversalNoTime(e: { readonly orderId: string }): void;
   /** 실행기 안의 예상 못 한 오류(what = claim·gateway·call·anomaly·reschedule·overdue). 어댑터가 safeErrorCode만 싣는다 */
   runError(e: { readonly what: 'claim' | 'gateway' | 'call' | 'anomaly' | 'reschedule' | 'overdue'; readonly orderId?: string; readonly err: unknown }): void;
 }

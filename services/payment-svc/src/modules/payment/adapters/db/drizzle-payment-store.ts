@@ -22,7 +22,7 @@ const CONFIRM_TRANSACTION = { isolationLevel: 'read committed' } as const;
  * @param startedAt 호출을 시작한 performance.now()(연결을 기다린 시간을 뺀다)
  * @throws PaymentDeadlineError 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(문장을 보내지 않는다)
  */
-async function armStatementLimit(tx: DbTransaction, capMs: number, budget: CallBudget | undefined, startedAt: number): Promise<void> {
+export async function armStatementLimit(tx: DbTransaction, capMs: number, budget: CallBudget | undefined, startedAt: number): Promise<void> {
   const leftMs = budget ? budget.remainingMs - (performance.now() - startedAt) : Number.POSITIVE_INFINITY;
   if (leftMs < MIN_CALL_REMAINING_MS) throw new PaymentDeadlineError();
   await tx.execute(sql`select set_config('statement_timeout', ${String(Math.min(capMs, Math.floor(leftMs)))}, true)`);
@@ -61,6 +61,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
           status: 'ACCEPTED',
           idempotencyKey: confirmIdemKey(command.orderId),
           authenticatedAt: new Date(command.authenticatedAtMs),
+          ...(command.entryOpensAtMs === undefined ? {} : { entryOpensAt: new Date(command.entryOpensAtMs) }),
           createdAt: now,
           statusChangedAt: now,
         })

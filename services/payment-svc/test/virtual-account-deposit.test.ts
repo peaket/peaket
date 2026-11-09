@@ -665,6 +665,43 @@ describe('입금 대기 쓰기의 값', () => {
     expect(w!.secretHash).toBeUndefined();
   });
 
+  const HOUR = 3_600_000;
+  const withCounter = () => {
+    const d = deps(local);
+    const dueCapped = vi.fn();
+    return { d: { ...d, signals: { ...d.signals, dueCapped } }, dueCapped };
+  };
+
+  test('P-T26_리뷰 고침 5: 답의 기한이 입장 24시간 전을 넘으면 잘라 쓰고 지표를 낸다 [ASVS v5.0.0-2.2.3]', async () => {
+    const { d, dueCapped } = withCounter();
+    const entry = DUE + 12 * HOUR;
+    const w = await depositWriteOf(d, ids, VA, entry);
+    expect(w!.dueAtMs).toBe(entry - 24 * HOUR);
+    expect(dueCapped).toHaveBeenCalledTimes(1);
+  });
+
+  test('P-T26_리뷰 고침 5: 상한 안의 기한은 그대로고 세지 않는다. 입장 시각을 모르면 자르지 않는다', async () => {
+    const { d, dueCapped } = withCounter();
+    expect((await depositWriteOf(d, ids, VA, DUE + 24 * HOUR))!.dueAtMs).toBe(DUE);
+    expect((await depositWriteOf(d, ids, VA))!.dueAtMs).toBe(DUE);
+    expect(dueCapped).not.toHaveBeenCalled();
+  });
+
+  test('P-T26_리뷰 고침 5: 답에 기한이 없으면 자를 것이 없고 세지 않는다', async () => {
+    const { d, dueCapped } = withCounter();
+    const w = await depositWriteOf(d, ids, { accountNumber: ACCOUNT, bank: '20' }, DUE);
+    expect(w).not.toHaveProperty('dueAtMs');
+    expect(dueCapped).not.toHaveBeenCalled();
+  });
+
+  test('P-T26_리뷰 고침 5: 지표 payment_deposit_due_capped_total을 0부터 보인다', async () => {
+    const metrics = new PlatformMetrics('payment-svc');
+    const s = new PromPaymentDepositSignals().register(metrics.registry);
+    expect(await metrics.registry.metrics()).toContain('payment_deposit_due_capped_total 0');
+    s.dueCapped();
+    expect(await metrics.registry.metrics()).toContain('payment_deposit_due_capped_total 1');
+  });
+
   test('P-T36_로그에 계좌번호·secret이 실리지 않는다 [ASVS v5.0.0-16.2.5]', () => {
     const lines: string[] = [];
     const destination = new Writable({

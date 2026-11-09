@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { PaymentAttemptAllowedPayMethodsItem } from './paymentAttemptAllowedPayMethodsItem';
 import type { PaymentAttemptPg } from './paymentAttemptPg';
 import type { PortoneCheckout } from './portoneCheckout';
 import type { TossCheckout } from './tossCheckout';
@@ -24,6 +25,10 @@ export interface PaymentAttempt {
   switched?: boolean;
   /** 이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085) */
   holdExpiresAt?: string;
+  /** 화면에 내도 되는 결제수단(추천 적용 2026-11-09, BUILD_ORDER PRF-190) */
+  allowedPayMethods?: PaymentAttemptAllowedPayMethodsItem[];
+  /** 입금 기한. 가상계좌를 낼 수 있을 때만 있다(추천 적용 2026-11-09, BUILD_ORDER PRF-190) */
+  depositDueAt?: string;
   /** 결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028) */
   checkout: TossCheckout | PortoneCheckout;
 }

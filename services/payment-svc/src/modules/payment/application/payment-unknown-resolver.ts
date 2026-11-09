@@ -433,7 +433,8 @@ export class PaymentUnknownResolver {
   /** 입금 대기로 되돌린다(원장·사건·Outbox 한 트랜잭션, 암호화는 트랜잭션 앞이다). 던지면 밀어 둔 간격 뒤의 조회에 맡긴다 */
   async #reverse(job: UnknownQueryJob, va: ConfirmVirtualAccount | undefined, nowMs: number): Promise<UnknownRunOutcome> {
     const answerDue = va?.dueAt === undefined ? Number.NaN : Date.parse(va.dueAt);
-    const dueAtMs = reversalDueAtMs(Number.isNaN(answerDue) ? undefined : answerDue, nowMs);
+    const dueAtMs = reversalDueAtMs(Number.isNaN(answerDue) ? undefined : answerDue, nowMs, job.entryOpensAtMs);
+    if (dueAtMs === undefined) return this.#closeReversal(job, nowMs);
     try {
       const written = this.deps.deposit === undefined ? undefined : await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va);
       const result = await this.deps.queries.reverseDeposit(job, { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT', reversed: true, deposit: { ...written, dueAtMs } });
@@ -444,6 +445,24 @@ export class PaymentUnknownResolver {
       this.#safe(() => this.deps.log.depositReversed({ orderId: job.orderId }));
       this.#outcome(job, 'deposit_reversed');
       return REVERSED;
+    } catch (err) {
+      this.#safe(() => this.deps.signals.writeFailure());
+      this.#safe(() => this.deps.log.writeFailed({ orderId: job.orderId, code: safeErrorCode(err) }));
+      return WRITE_FAILED;
+    }
+  }
+
+  /** 입장이 2시간 [가정] 안이라 다시 입금할 수 없다: T21과 T17을 한 트랜잭션으로 쓰고 SEV2를 낸다(BUILD_ORDER PRF-190 코드 리뷰). 던지면 밀어 둔 간격 뒤의 조회에 맡긴다 */
+  async #closeReversal(job: UnknownQueryJob, nowMs: number): Promise<UnknownRunOutcome> {
+    try {
+      const result = await this.deps.queries.closeReversedDeposit(job, { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT', reversed: true, deposit: { dueAtMs: nowMs } }, { status: 'FAILED', result: 'DECLINED', failureCategory: 'EXPIRED' });
+      if (result === 'STALE') {
+        this.#safe(() => this.deps.log.staleAnswer({ orderId: job.orderId }));
+        return STALE;
+      }
+      this.#safe(() => this.deps.log.reversalNoTime({ orderId: job.orderId }));
+      this.#outcome(job, 'reversal_no_time');
+      return REVERSAL_CLOSED;
     } catch (err) {
       this.#safe(() => this.deps.signals.writeFailure());
       this.#safe(() => this.deps.log.writeFailed({ orderId: job.orderId, code: safeErrorCode(err) }));
@@ -553,7 +572,7 @@ export class PaymentUnknownResolver {
   /** 입금 대기 결과(T14)에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 던지지 않는다 */
   async #withDeposit(job: UnknownQueryJob, finish: ResolvedFinish, va: ConfirmVirtualAccount | undefined): Promise<ResolvedFinish> {
     if (finish.status !== 'AWAITING_DEPOSIT' || this.deps.deposit === undefined) return finish;
-    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va);
+    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va, job.entryOpensAtMs);
     return deposit === undefined ? finish : { ...finish, deposit };
   }
 
@@ -591,6 +610,7 @@ const NO_TOKEN: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'NO
 const STALE: UnknownRunOutcome = Object.freeze({ kind: 'STALE' });
 const WRITE_FAILED: UnknownRunOutcome = Object.freeze({ kind: 'WRITE_FAILED' });
 const REVERSED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSED' });
+const REVERSAL_CLOSED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSAL_CLOSED' });
 const REVERSAL_ENDED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSAL_ENDED' });
 const QUERY_UNKNOWN: QueryResult = Object.freeze({ kind: 'UNKNOWN' });
 

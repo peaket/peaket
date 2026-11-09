@@ -33,6 +33,7 @@ import {
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { portoneCardOfMethod } from './card-fields.js';
+import type { PayMethod } from '../../domain/payment-gateway.js';
 import { num, pgRequest, str, unreadableRowOf, type PgReply } from './pg-reply.js';
 import { portoneVirtualAccountOf } from './virtual-account-fields.js';
 
@@ -44,6 +45,8 @@ export interface PortoneGatewayOptions {
   storeId: string;
   /** 수동 승인 채널의 채널 키 */
   channelKey: string;
+  /** 결제수단별 채널 키(PEAKET_PG_PORTONE_CHANNEL_KEYS). 없으면 channelKey 하나로 모든 수단을 받는다(BUILD_ORDER PRF-190) */
+  channelKeys?: Readonly<Partial<Record<PayMethod, string>>>;
   /** 웹훅 시크릿(동시에 최대 2개, whsec_ 접두사 + base64). 비어 있으면 어떤 웹훅도 받지 않는다 */
   webhookSecrets: readonly string[];
   /** 승인 API의 isTest 검증값. 설정 층이 PEAKET_ENV로 정한다 */
@@ -180,6 +183,7 @@ export class PortoneGateway implements PaymentGatewayPort {
   readonly #authorization: string;
   readonly #storeId: string;
   readonly #channelKey: string;
+  readonly #channelKeys: Readonly<Partial<Record<PayMethod, string>>> | undefined;
   readonly #webhookKeys: readonly Buffer[];
   readonly #isTest: boolean;
   readonly #clock: Clock;
@@ -200,6 +204,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     this.#authorization = `PortOne ${o.secret}`;
     this.#storeId = o.storeId;
     this.#channelKey = o.channelKey;
+    this.#channelKeys = o.channelKeys;
     this.#webhookKeys = o.webhookSecrets.map(webhookKeyOf);
     this.#isTest = o.isTest;
   }
@@ -214,20 +219,25 @@ export class PortoneGateway implements PaymentGatewayPort {
       callsPerSecond: this.#callsPerSecond,
       redirectCheckout: true,
       confirmCallCost: CONFIRM_CALL_COST,
+      ...(this.#channelKeys === undefined ? {} : { payMethods: Object.keys(this.#channelKeys) as PayMethod[] }),
     };
   }
 
-  checkout(order: CheckoutOrder, attempt: CheckoutAttempt): CheckoutValues {
+  checkout(order: CheckoutOrder, attempt: CheckoutAttempt, payMethod: string): CheckoutValues {
     if (!(Number.isSafeInteger(order.amount) && order.amount > 0)) throw new RangeError(`결제 금액은 양의 정수(원)여야 한다: ${order.amount}`);
+    // 표가 있으면 표에 없는 수단을 다른 채널로 받지 않는다(선택기가 먼저 막는다)
+    const channelKey = this.#channelKeys === undefined ? this.#channelKey : this.#channelKeys[payMethod as PayMethod];
+    if (channelKey === undefined) throw new RangeError(`이 결제수단을 받는 포트원 채널이 없다: ${payMethod}`);
     return {
       portone: {
         storeId: this.#storeId,
-        channelKey: this.#channelKey,
+        channelKey,
         paymentId: `${PAYMENT_ID_PREFIX}${order.orderId}`,
         orderName: order.orderName,
         totalAmount: order.amount,
         currency: CURRENCY,
         redirectUrl: attempt.successUrl,
+        customData: { orderId: order.orderId },
       },
     };
   }

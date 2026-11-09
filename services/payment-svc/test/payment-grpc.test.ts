@@ -7,6 +7,8 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { AcceptPaymentCommand } from '../src/modules/payment/application/accept-payment-command.js';
 import { type ConfirmAnswer, type ConfirmPaymentInput, PAYMENT_LEDGER_STATUSES, PaymentCommandMismatchError, PaymentDeadlineError, PaymentInputError, type PaymentState } from '../src/modules/payment/domain/confirm-command.js';
 import { type PaymentGrpcUseCases, paymentPackage, paymentServiceHandlers } from '../src/modules/payment/inbound/payment.grpc.js';
+import type { PrepareCheckoutAnswer } from '../src/modules/payment/application/prepare-checkout.js';
+import { PaymentPgUnavailableError, type PrepareCheckoutInput } from '../src/modules/payment/domain/pg-selection.js';
 import { startGrpcServer } from '../src/grpc-server.js';
 import {
   ATTEMPT_ID,
@@ -33,6 +35,14 @@ const RPCS = ['ConfirmPayment', 'BatchGetPayments', 'PrepareCheckout', 'GetPayme
 type Client = grpc.Client & Record<(typeof RPCS)[number], Unary>;
 
 const ANSWER: ConfirmAnswer = { result: 'IN_PROGRESS', paymentId: PAYMENT_ID };
+const RETURN_URL = `https://www.example/booking/${EVENT_ID}/checkout/return?order=${ORDER_ID}&pg=TOSS`;
+const PREPARE_ANSWER: PrepareCheckoutAnswer = {
+  pg: 'TOSS',
+  switched: false,
+  checkout: { toss: { clientKey: 'test_ck_x', customerKey: 'cust-1', orderId: ORDER_ID, orderName: '공연 티켓', amount: 55_000, successUrl: RETURN_URL, failUrl: RETURN_URL } },
+  allowedPayMethods: ['CARD', 'VIRTUAL_ACCOUNT'],
+  depositDueAtMs: 1_794_200_000_000,
+};
 /** 승인 시각의 선 위 모양(초·나노초). 밀리초 값과 짝이다 */
 const APPROVED_MS = 1_794_200_000_123;
 const APPROVED_TS = { seconds: 1_794_200_000, nanos: 123_000_000 };
@@ -47,6 +57,7 @@ afterEach(async () => {
 async function serve(useCases: Partial<PaymentGrpcUseCases> = {}) {
   const inputs: ConfirmPaymentInput[] = [];
   const batchInputs: string[][] = [];
+  const prepareInputs: PrepareCheckoutInput[] = [];
   const errors: [string, unknown][] = [];
   const handlers = paymentServiceHandlers(
     {
@@ -62,6 +73,12 @@ async function serve(useCases: Partial<PaymentGrpcUseCases> = {}) {
           return [];
         },
       },
+      prepareCheckout: useCases.prepareCheckout ?? {
+        execute: async (input) => {
+          prepareInputs.push(input);
+          return PREPARE_ANSWER;
+        },
+      },
     },
     (method, err) => errors.push([method, err]),
   );
@@ -73,7 +90,7 @@ async function serve(useCases: Partial<PaymentGrpcUseCases> = {}) {
   });
   const call = (rpc: (typeof RPCS)[number], req: Message) =>
     new Promise<Message>((res, rej) => client[rpc](req, new grpc.Metadata(), { deadline: Date.now() + 5_000 }, (e, v) => (e ? rej(e) : res(v!))));
-  return { call, server, inputs, batchInputs, errors };
+  return { call, server, inputs, batchInputs, prepareInputs, errors };
 }
 
 const failureOf = async (p: Promise<unknown>): Promise<{ code: string; details: string }> => {
@@ -109,6 +126,91 @@ const throwing = (err: unknown): Partial<PaymentGrpcUseCases> => ({
       throw err;
     },
   },
+});
+
+describe('PrepareCheckout: 선 위의 값', () => {
+  const REQUEST: Message = { order_kind: 'ORDER_KIND_TICKET', order_id: ORDER_ID, attempt_id: ATTEMPT_ID, event_id: EVENT_ID, amount: { krw: 55_000 }, pay_method: 'EASY_PAY', order_name: '공연 티켓' };
+
+  test('P-T26_요청의 칸을 입력으로 바꾼다(enum 앞머리 떼기, Money.krw, 선택 칸은 없으면 뺀다) [ASVS v5.0.0-2.2.1]', async () => {
+    const s = await serve();
+    await s.call('PrepareCheckout', REQUEST);
+    expect(s.prepareInputs).toEqual([{ orderKind: 'TICKET', orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT_ID, amount: 55_000, orderName: '공연 티켓', payMethod: 'EASY_PAY' }]);
+  });
+
+  test('P-T26_선택 칸: virtual_account_allowed 거짓과 입장 시각, 구매자 키를 넘긴다', async () => {
+    const s = await serve();
+    await s.call('PrepareCheckout', { ...REQUEST, customer_key: 'cust-key-1', virtual_account_allowed: false, entry_opens_at: { seconds: 1_794_200_000, nanos: 5_000_000 } });
+    expect(s.prepareInputs[0]).toMatchObject({ customerKey: 'cust-key-1', virtualAccountAllowed: false, entryOpensAtMs: 1_794_200_000_005 });
+  });
+
+  test('P-T26_virtual_account_allowed 참도 값으로 온다', async () => {
+    const s = await serve();
+    await s.call('PrepareCheckout', { ...REQUEST, virtual_account_allowed: true });
+    expect(s.prepareInputs[0]).toMatchObject({ virtualAccountAllowed: true });
+  });
+
+  test('P-T26_토스 답은 oneof toss 칸과 Money, 허용 수단, 입금 기한이다 [ASVS v5.0.0-8.2.3]', async () => {
+    const s = await serve();
+    const r = await s.call('PrepareCheckout', REQUEST);
+    expect(r).toMatchObject({
+      pg: 'PG_PROVIDER_TOSS',
+      switched: false,
+      checkout: 'toss',
+      toss: { client_key: 'test_ck_x', customer_key: 'cust-1', order_id: ORDER_ID, order_name: '공연 티켓', amount: { krw: 55_000 }, success_url: RETURN_URL, fail_url: RETURN_URL },
+      allowed_pay_methods: ['CARD', 'VIRTUAL_ACCOUNT'],
+      deposit_due_at: { seconds: 1_794_200_000, nanos: 0 },
+    });
+  });
+
+  test('P-T26_포트원 답은 portone 칸과 custom_data다', async () => {
+    const s = await serve({
+      prepareCheckout: {
+        execute: async () => ({
+          pg: 'PORTONE',
+          switched: true,
+          checkout: { portone: { storeId: 's', channelKey: 'c', paymentId: `pay-${ORDER_ID}`, orderName: '공연 티켓', totalAmount: 55_000, currency: 'KRW', redirectUrl: RETURN_URL, customData: { orderId: ORDER_ID } } },
+          allowedPayMethods: ['CARD'],
+        }),
+      },
+    });
+    const r = await s.call('PrepareCheckout', REQUEST);
+    expect(r).toMatchObject({
+      pg: 'PG_PROVIDER_PORTONE',
+      switched: true,
+      checkout: 'portone',
+      portone: { store_id: 's', channel_key: 'c', payment_id: `pay-${ORDER_ID}`, order_name: '공연 티켓', total_amount: { krw: 55_000 }, currency: 'KRW', redirect_url: RETURN_URL, custom_data: { order_id: ORDER_ID } },
+      deposit_due_at: null,
+    });
+  });
+
+  test('P-T26_시뮬레이터 답은 simulator 칸이다', async () => {
+    const toss = PREPARE_ANSWER.checkout as { toss: Extract<PrepareCheckoutAnswer['checkout'], { toss: unknown }>['toss'] };
+    const s = await serve({ prepareCheckout: { execute: async () => ({ ...PREPARE_ANSWER, pg: 'SIMULATOR', checkout: { simulator: toss.toss } }) } });
+    expect(await s.call('PrepareCheckout', REQUEST)).toMatchObject({ pg: 'PG_PROVIDER_SIMULATOR', checkout: 'simulator', simulator: { client_key: 'test_ck_x' } });
+  });
+
+  test('P-T26_고를 수 없으면 UNAVAILABLE이고 글은 pg-unavailable이며 처리 오류로 세지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+    const s = await serve({
+      prepareCheckout: {
+        execute: async () => {
+          throw new PaymentPgUnavailableError();
+        },
+      },
+    });
+    expect(await failureOf(s.call('PrepareCheckout', REQUEST))).toEqual({ code: 'UNAVAILABLE', details: 'pg-unavailable' });
+    expect(s.errors).toEqual([]);
+  });
+
+  test('P-T26_입력 오류는 INVALID_ARGUMENT다', async () => {
+    const s = await serve({
+      prepareCheckout: {
+        execute: async () => {
+          throw new PaymentInputError('order_id');
+        },
+      },
+    });
+    expect(await failureOf(s.call('PrepareCheckout', REQUEST))).toEqual({ code: 'INVALID_ARGUMENT', details: '입력이 틀렸다: order_id' });
+  });
 });
 
 describe('ConfirmPayment: 요청 → 쓰임새 입력', () => {
@@ -342,7 +444,7 @@ describe('오류 → gRPC 상태', () => {
     expect(s.errors).toHaveLength(1);
   });
 
-  test.each(['PrepareCheckout', 'GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'] as const)('PRF180_구현하지 않은 %s는 UNIMPLEMENTED다', async (rpc) => {
+  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'] as const)('PRF180_구현하지 않은 %s는 UNIMPLEMENTED다', async (rpc) => {
     const s = await serve();
     expect((await failureOf(s.call(rpc, {}))).code).toBe('UNIMPLEMENTED');
     expect(s.errors).toEqual([]);

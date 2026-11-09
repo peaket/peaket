@@ -83,6 +83,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     pg_confirm_token: ['text', 'YES'],
     pg_tx_id: ['text', 'YES'],
     query_touched_at: ['timestamp with time zone', 'YES'],
+    entry_opens_at: ['timestamp with time zone', 'YES'],
     deposit_secret_hash: ['bytea', 'YES'],
     amount: ['integer', 'NO'],
     status: ['text', 'NO'],
@@ -144,14 +145,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0008)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 9개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0009)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 10개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'webhook_receipt']);
+    expect(before).toEqual(['event_pg_config', 'outbox', 'payment', 'payment_confirm_job', 'payment_event', 'pg_switch', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('9');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('10');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -509,7 +510,7 @@ describe('승인 명령 접수 ConfirmPayment', () => {
     expect(await tableCounts(admin)).toEqual(before);
   });
 
-  test.each(['GetPayment', 'CancelPayment', 'PrepareCheckout', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'])('PRF180_이 단계에 만들지 않은 RPC %s는 UNIMPLEMENTED다', async (method) => {
+  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'])('PRF180_이 단계에 만들지 않은 RPC %s는 UNIMPLEMENTED다', async (method) => {
     const s = await stack();
     expect((await failure(unary(s.client, method, {}))).code).toBe(grpc.status.UNIMPLEMENTED);
   });

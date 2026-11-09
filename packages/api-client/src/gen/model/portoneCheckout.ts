@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { PortoneCheckoutCustomData } from './portoneCheckoutCustomData';
 import type { PortoneCheckoutCustomer } from './portoneCheckoutCustomer';
 
 export interface PortoneCheckout {
@@ -24,4 +25,6 @@ export interface PortoneCheckout {
   redirectUrl: string;
   /** 채널이 요구하는 구매자 항목만(이메일·휴대폰. SDK 필드 이름은 연동 때 확인) */
   customer?: PortoneCheckoutCustomer;
+  /** 결제사가 그대로 돌려주는 값. 대사의 주문 대조가 읽는다(추천 적용 2026-11-09, BUILD_ORDER PRF-190) */
+  customData?: PortoneCheckoutCustomData;
 }

@@ -1,7 +1,11 @@
 // 시뮬레이터 어댑터(ADR-0029 결정 1·6). PG 시뮬레이터(services/pg-simulator)를 토스페이먼츠와 같은 모양의 API로 부른다.
 // 호출과 답 읽기는 토스 어댑터와 함께 쓰는 공통 코드(toss-shaped.ts)다(BUILD_ORDER PRF-184). 이 파일에는 시뮬레이터만의 능력 플래그와 결제창 값이 있다.
+import { randomBytes } from 'node:crypto';
 import type { CheckoutAttempt, CheckoutOrder, CheckoutValues, FailureCategory, PgCapabilities } from '../../domain/payment-gateway.js';
 import { TossShapedGateway, type TossShapedOptions } from './toss-shaped.js';
+
+/** 구매자 키를 주지 않았을 때 만드는 CSPRNG 값의 바이트 수(128비트, 토스 어댑터와 같다, ASVS v5.0.0-11.5.1) */
+const CUSTOMER_KEY_BYTES = 16;
 
 export interface SimulatorGatewayOptions extends TossShapedOptions {
   /** sim_sk_ 시험 키. Secrets Manager의 시험 키 경로에서 받는다(docs/security/secrets-and-keys.md) */
@@ -32,6 +36,7 @@ export class SimulatorPaymentGateway extends TossShapedGateway {
       idempotencyRetentionMs: 15 * 24 * 3_600_000,
       callsPerSecond: this.#callsPerSecond,
       redirectCheckout: true,
+      payMethods: ['CARD'],
     };
   }
 
@@ -41,7 +46,7 @@ export class SimulatorPaymentGateway extends TossShapedGateway {
     return {
       simulator: {
         clientKey: this.#clientKey,
-        customerKey: order.customerKey ?? 'ANONYMOUS',
+        customerKey: order.customerKey ?? randomBytes(CUSTOMER_KEY_BYTES).toString('base64url'),
         orderId: order.orderId,
         orderName: order.orderName,
         amount: order.amount,

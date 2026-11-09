@@ -8,6 +8,8 @@ import { safeErrorCode } from '../../../safe-error-code.js';
 export const PAYMENT_UNKNOWN_CS_CASE = 'PAYMENT_UNKNOWN';
 /** FAILED로 끝난 결제에 입금이 확인된 건의 CS 처리함 표시(같은 까닭으로 로그 표시로만 둔다) */
 export const PAYMENT_LATE_DEPOSIT_CS_CASE = 'PAYMENT_LATE_DEPOSIT';
+/** 입금을 되돌렸는데 다시 입금할 시간이 없어 실패로 끝낸 건의 CS 처리함 표시(CS가 취소·환불 경로를 안내한다, 같은 까닭으로 로그 표시로만 둔다) */
+export const PAYMENT_DEPOSIT_REVERSED_CS_CASE = 'PAYMENT_DEPOSIT_REVERSED';
 
 /** 로그 때문에 실행기가 멈추지 않게 로거의 예외를 삼킨다 */
 function quietly(write: () => void): void {
@@ -37,6 +39,7 @@ export function paymentUnknownLog(logger: Pick<PlatformLogger, 'warn' | 'error'>
     depositReversed: ({ orderId }) => quietly(() => logger.warn({ kind: 'payment-deposit-reversed', orderId }, '결제사가 입금을 되돌려 입금 대기로 되돌렸다')),
     reversalUnconfirmed: ({ orderId }) => quietly(() => logger.warn({ kind: 'payment-deposit-reversal-unconfirmed', orderId }, '입금 오류 통보 뒤 10분이 지나도 결제사가 입금 완료라고 답해 되돌림 확인을 끝냈다')),
     reversalOverdue: ({ orderId }) => quietly(() => logger.error({ kind: 'payment-deposit-reversal-overdue', severity: 'SEV1', orderId }, '입금 오류 통보 뒤 1시간이 지나도 결제사 조회로 되돌림을 확인하지 못했다(사람이 본다, 조회는 이어 간다)')),
+    reversalNoTime: ({ orderId }) => quietly(() => logger.error({ kind: 'payment-deposit-reversal-no-time', severity: 'SEV2', orderId, csCase: PAYMENT_DEPOSIT_REVERSED_CS_CASE }, '입금을 되돌렸는데 입장이 2시간 안이라 다시 입금할 수 없어 실패로 끝냈다(CS가 취소·환불 경로를 안내한다)')),
     runError: ({ what, orderId, err }) => quietly(() => logger.error({ kind: 'payment-unknown-run', what, code: safeErrorCode(err), ...(orderId === undefined ? {} : { orderId }) }, 'UNKNOWN 조회 실행기 처리 실패')),
   };
 }

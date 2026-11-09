@@ -513,7 +513,7 @@ export class PaymentConfirmRunner {
   /** 입금 대기 결과에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 던지지 않는다 */
   async #withDeposit(target: ConfirmTarget, finish: ConfirmFinish, va: ConfirmVirtualAccount | undefined): Promise<ConfirmFinish> {
     if (finish.status !== 'AWAITING_DEPOSIT' || this.deps.deposit === undefined) return finish;
-    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: target.paymentId, orderId: target.orderId }, va);
+    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: target.paymentId, orderId: target.orderId }, va, target.entryOpensAtMs);
     return deposit === undefined ? finish : { ...finish, deposit };
   }
 

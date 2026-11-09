@@ -10,6 +10,8 @@ export const PAYMENT_REF_MAX_LENGTH = 200;
 export const PAYMENT_AMOUNT_MAX = 2_147_483_647;
 /** 인증 시각이 지금보다 뒤여도 받는 폭 5분 [가정](서버 사이 시계 차이. 넘으면 승인 기한의 기준이 될 수 없다) */
 export const AUTHENTICATED_AT_MAX_FUTURE_MS = 300_000;
+/** 입장 시각 상한: 9999-12-31T23:59:59.999Z. proto Timestamp가 나타낼 수 있는 끝이다(BUILD_ORDER PRF-190 코드 리뷰) */
+export const ENTRY_OPENS_AT_MAX_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
 /** 호출에 남은 시간이 이보다 모자라면 시작하지 않는다 50ms [가정](docs/api/proto/README.md §2 '데드라인'. INSERT 셋과 커밋이 들어갈 만큼) */
 export const MIN_CALL_REMAINING_MS = 50;
 
@@ -36,6 +38,8 @@ export interface ConfirmPaymentInput {
   readonly amount: number;
   /** 결제창 인증 시각(epoch ms). 칸이 없으면 undefined */
   readonly authenticatedAtMs?: number;
+  /** 회차의 입장 시작 시각(epoch ms). 칸이 없으면 undefined(BUILD_ORDER PRF-190) */
+  readonly entryOpensAtMs?: number;
 }
 
 /** 검사를 마친 승인 명령 */
@@ -48,6 +52,8 @@ export interface ConfirmPaymentCommand {
   readonly paymentRef: ConfirmPaymentRef;
   readonly amount: number;
   readonly authenticatedAtMs: number;
+  /** 회차의 입장 시작 시각(epoch ms). 입금 오류 되돌림의 새 기한을 자른다(BUILD_ORDER PRF-190) */
+  readonly entryOpensAtMs?: number;
 }
 
 /** 저장소가 돌려주는 결제 원장 한 행(답과 대조에 쓰는 칸만) */
@@ -173,6 +179,14 @@ function uuidOf(value: string, field: string): string {
   return value;
 }
 
+/**
+ * entry_opens_at 검사(승인 명령과 결제창 준비가 함께 쓴다): 있으면 양의 정수이고 ENTRY_OPENS_AT_MAX_MS 이하다.
+ * @throws PaymentInputError field = 'entry_opens_at'
+ */
+export function checkEntryOpensAt(entryOpensAtMs: number | undefined): void {
+  if (entryOpensAtMs !== undefined && !(Number.isInteger(entryOpensAtMs) && entryOpensAtMs > 0 && entryOpensAtMs <= ENTRY_OPENS_AT_MAX_MS)) throw new PaymentInputError('entry_opens_at');
+}
+
 function checkRefValue(value: string, field: string): void {
   if (value.length > PAYMENT_REF_MAX_LENGTH || !REF_VALUE.test(value)) throw new PaymentInputError(field);
 }
@@ -194,7 +208,7 @@ function checkedRef(pg: PgName, orderId: string, ref: ConfirmPaymentRef | undefi
  * 승인 명령 입력 검사(payment §2 '승인 명령 접수의 첫 구현' 입력 검사): order_id·attempt_id·event_id는 소문자 UUID, 금액은 1 이상 PAYMENT_AMOUNT_MAX 이하 정수,
  * attempt_no는 1 이상 정수, authenticated_at은 있고 양수이며 nowMs + AUTHENTICATED_AT_MAX_FUTURE_MS 이하(연도 10000 같은 값도 여기서 막힌다),
  * pg는 TOSS·PORTONE·SIMULATOR, 결제 참조는 결제사와 짝이 맞음(TOSS·SIMULATOR는 toss, PORTONE은 portone),
- * 참조 값은 1~PAYMENT_REF_MAX_LENGTH자의 보이는 ASCII(0x21~0x7E), 포트원 paymentId는 `pay-{orderId}`.
+ * 참조 값은 1~PAYMENT_REF_MAX_LENGTH자의 보이는 ASCII(0x21~0x7E), 포트원 paymentId는 `pay-{orderId}`. entry_opens_at은 있으면 양수 시각이고 9999년을 넘지 않는다.
  * @param nowMs 지금(epoch ms, 쓰임새의 시계)
  * @throws PaymentInputError 입력이 틀림(field = proto 칸 이름)
  */
@@ -207,7 +221,9 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
   const authenticatedAtMs = input.authenticatedAtMs;
   if (authenticatedAtMs === undefined || !(Number.isInteger(authenticatedAtMs) && authenticatedAtMs > 0 && authenticatedAtMs <= nowMs + AUTHENTICATED_AT_MAX_FUTURE_MS)) throw new PaymentInputError('authenticated_at');
   if (!isPgName(input.pg)) throw new PaymentInputError('pg');
-  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs };
+  const { entryOpensAtMs } = input;
+  checkEntryOpensAt(entryOpensAtMs);
+  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }) };
 }
 
 /**

@@ -63,6 +63,8 @@ export const payment = pgTable(
     pgTxId: text('pg_tx_id'),
     // 웹훅 조회 신호를 쓰거나 실행기가 잡은 마지막 시각. 결제별 최소 간격의 기준이다(BUILD_ORDER HOT-150 코드 리뷰, 마이그레이션 0005)
     queryTouchedAt: at('query_touched_at'),
+    // 회차의 입장 시작 시각(승인 명령이 싣는다, 선택). 입금 오류 되돌림의 새 기한을 입장 24시간 전으로 자른다(BUILD_ORDER PRF-190, 마이그레이션 0009)
+    entryOpensAt: at('entry_opens_at'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
@@ -200,6 +202,44 @@ export const reconciliationDiff = pgTable(
       sql`${t.kind} IN ('PG_APPROVED_NO_LEDGER', 'PG_MISMATCH', 'AMOUNT_MISMATCH', 'ORDER_MISMATCH', 'LEDGER_APPROVED_PG_NOT_PAID', 'LEDGER_APPROVED_NO_PG_RECORD', 'LEDGER_FAILED_PG_APPROVED', 'PARTIAL_CANCELED_AT_PG', 'LEDGER_CANCELED_PG_APPROVED', 'UNKNOWN_HANDED_OFF', 'UNKNOWN_CANCELED_CLOSED', 'UNREADABLE')`,
     ),
     check('reconciliation_diff_state_check', sql`${t.state} IN ('OPEN', 'HANDED_OFF', 'CLOSED')`),
+  ],
+);
+
+/** 대체 결제사 전환 상태(docs/data.md §4 '결제사 선택 표', ADR-0143, BUILD_ORDER PRF-190, 마이그레이션 0009). 범위마다 한 행이고 판 번호가 지금보다 클 때만 쓴다 */
+export const pgSwitch = pgTable(
+  'pg_switch',
+  {
+    // 'PLATFORM' 또는 회차 ID(제어 gRPC의 scope와 같은 값)
+    scope: text('scope').primaryKey(),
+    active: boolean('active').notNull(),
+    // 전환해 떠나는 결제사. 비면 어느 기준 결제사든 전환한다
+    fromPg: text('from_pg'),
+    // 옮겨 갈 결제사. 비면 미리 지정한 대체 결제사다
+    toPg: text('to_pg'),
+    version: bigint('version', { mode: 'number' }).notNull(),
+    changedAt: at('changed_at').notNull(),
+  },
+  (t) => [
+    check('pg_switch_scope_check', sql`${t.scope} = 'PLATFORM' OR ${t.scope} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`),
+    check('pg_switch_from_pg_check', sql`${t.fromPg} IN (${PG_LIST})`),
+    check('pg_switch_to_pg_check', sql`${t.toPg} IN (${PG_LIST})`),
+    check('pg_switch_version_check', sql`${t.version} >= 1`),
+  ],
+);
+
+/** 회차 결제사 지정의 사본(core-svc event.pg_primary·pg_fallback, docs/data.md §4 '결제사 선택 표', BUILD_ORDER PRF-190, 마이그레이션 0009). 설정 사건 소비자는 OPS-290이다 */
+export const eventPgConfig = pgTable(
+  'event_pg_config',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    pgPrimary: text('pg_primary').notNull(),
+    pgFallback: text('pg_fallback'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    check('event_pg_config_primary_check', sql`${t.pgPrimary} IN (${PG_LIST})`),
+    check('event_pg_config_fallback_check', sql`${t.pgFallback} IN (${PG_LIST})`),
+    check('event_pg_config_distinct_check', sql`${t.pgFallback} IS NULL OR ${t.pgFallback} <> ${t.pgPrimary}`),
   ],
 );
 

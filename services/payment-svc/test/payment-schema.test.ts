@@ -9,7 +9,7 @@ import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { payment, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt } from '../src/modules/payment/adapters/db/schema.js';
+import { payment, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig } from '../src/modules/payment/adapters/db/schema.js';
 import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-command.js';
 
 const SERVICE = fileURLToPath(new URL('..', import.meta.url));
@@ -23,6 +23,8 @@ const TAG_0005 = '0005_payment_webhook_receipt';
 const TAG_0006 = '0006_payment_query_due';
 const TAG_0007 = '0007_payment_deposit_reversal';
 const TAG_0008 = '0008_payment_reconciliation';
+const TAG_0009 = '0009_payment_pg_selection';
+const ADDED_COLUMN_0009 = 'entry_opens_at';
 const ADDED_COLUMN_0004 = 'pg_tx_id';
 const ADDED_COLUMN_0005 = 'query_touched_at';
 const ADDED_COLUMN_0006 = 'deposit_notified_at';
@@ -58,6 +60,7 @@ const eventShape = shapeOf(paymentEvent);
 const jobShape = shapeOf(paymentConfirmJob);
 const receiptShape = shapeOf(webhookReceipt);
 const reconShapes = [shapeOf(reconciliationRun), shapeOf(reconciliationSeen), shapeOf(reconciliationDiff)];
+const selectionShapes = [shapeOf(pgSwitch), shapeOf(eventPgConfig)];
 const TABLES = [payment, paymentEvent, paymentConfirmJob];
 const SHAPES = [paymentShape, eventShape, jobShape];
 const cols = (s: ReturnType<typeof shapeOf>): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
@@ -78,7 +81,7 @@ const RECON_INDEX_0008 = 'payment_recon_approved_idx';
 const HASH_INDEX_0008 = 'payment_deposit_hash_idx';
 const SHAPES_0000 = SHAPES.map((s) => ({
   ...s,
-  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
+  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
   checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK),
   // 0003이 잡기 색인을 바꾼다(0000은 next_attempt_at 하나짜리다)
   indexes: s.name === 'payment_confirm_job' ? [{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }] : s.indexes.filter((i) => i.name !== QUERY_DUE_INDEX && i.name !== ADDED_OVERDUE_INDEX_0002 && i.name !== ADDED_INDEX_0005 && i.name !== RECON_INDEX_0008 && i.name !== HASH_INDEX_0008),
@@ -121,6 +124,7 @@ describe('표 정의(schema.ts)', () => {
       ['anomaly_logged_at', TZ, false],
       ['pg_tx_id', 'text', false],
       ['query_touched_at', TZ, false],
+      ['entry_opens_at', TZ, false],
     ]);
   });
 
@@ -521,9 +525,10 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const sixth = snapshotOf('0005_snapshot.json');
   const seventh = snapshotOf('0006_snapshot.json');
   const eighth = snapshotOf('0007_snapshot.json');
-  const latest = snapshotOf('0008_snapshot.json');
+  const ninth = snapshotOf('0008_snapshot.json');
+  const latest = snapshotOf('0009_snapshot.json');
 
-  test('PRF182_PRF183_기록은 0000~0008 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0009 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -535,6 +540,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [6, TAG_0006],
       [7, TAG_0007],
       [8, TAG_0008],
+      [9, TAG_0009],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -549,11 +555,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[6]!.when).toBeGreaterThan(journal.entries[5]!.when);
     expect(journal.entries[7]!.when).toBeGreaterThan(journal.entries[6]!.when);
     expect(journal.entries[8]!.when).toBeGreaterThan(journal.entries[7]!.when);
+    expect(journal.entries[9]!.when).toBeGreaterThan(journal.entries[8]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -617,8 +624,18 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(eighth.prevId).toBe(seventh.id);
   });
 
+  test('P-T26_0009 스냅샷의 앞은 0008 스냅샷이고, 선택 표 둘과 payment의 입장 시각 칸만 더한다', () => {
+    expect(latest.prevId).toBe(ninth.id);
+    for (const name of ['pg_switch', 'event_pg_config']) expect(Object.keys(ninth.tables)).not.toContain(`public.${name}`);
+    expect(Object.keys(ninth.tables['public.payment']!.columns)).not.toContain(ADDED_COLUMN_0009);
+    expect(Object.keys(latest.tables['public.payment']!.columns)).toContain(ADDED_COLUMN_0009);
+    const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0009}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(sqlOf).toContain('ALTER TABLE "payment" ADD COLUMN "entry_opens_at" timestamp with time zone;');
+    expect(sqlOf).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME)\b/);
+  });
+
   test('P-T32_0008 스냅샷의 앞은 0007 스냅샷이고, 대사 표 셋과 payment 부분 인덱스 둘을 더한다', () => {
-    expect(latest.prevId).toBe(eighth.id);
+    expect(ninth.prevId).toBe(eighth.id);
     for (const name of ['reconciliation_run', 'reconciliation_seen', 'reconciliation_diff']) expect(Object.keys(eighth.tables)).not.toContain(`public.${name}`);
     expect(Object.keys(eighth.tables['public.payment']!.indexes)).not.toContain(RECON_INDEX_0008);
     const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0008}.sql`), 'utf8').replace(/\r\n/g, '\n');
@@ -632,7 +649,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
-    const shapes = [...SHAPES, receiptShape, ...reconShapes];
+    const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes];
     expect(Object.keys(latest.tables).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
       const t = latest.tables[`public.${s.name}`]!;
