@@ -532,6 +532,25 @@ describe('결제 수단 연결값 리뷰 고침(BUILD_ORDER HOT-145 코드 리�
   });
 });
 
+describe('가상계좌를 끈 회차(HOT-358 리뷰 H2, POL-014)', () => {
+  const waiting = () => approved({ status: 'WAITING_FOR_DEPOSIT', virtualAccount: { accountNumber: '562', bank: '20', dueAt: new Date(NOW + 72 * 3_600_000).toISOString() } });
+  test('P-T9_H2 결과 모름이 입금 대기로 해소됐는데 가상계좌를 끈 회차면 입금 전 취소를 부른다', async () => {
+    const cancels: { paymentId: string; orderId: string }[] = [];
+    const { gateway, resolver } = setup({ disallowedDeposit: async (t) => void cancels.push({ paymentId: t.paymentId, orderId: t.orderId }) });
+    gateway.fallback = waiting;
+    await expect(resolver.runJob(job({ virtualAccountAllowed: false }))).resolves.toMatchObject({ kind: 'RESOLVED', status: 'AWAITING_DEPOSIT' });
+    expect(cancels).toEqual([{ paymentId: PAYMENT_ID, orderId: ORDER_ID }]);
+  });
+  test('P-T9_H2 허용 회차나 값이 없는 행은 입금 전 취소를 부르지 않는다', async () => {
+    const cancels: string[] = [];
+    const { gateway, resolver } = setup({ disallowedDeposit: async (t) => void cancels.push(t.paymentId) });
+    gateway.fallback = waiting;
+    await resolver.runJob(job({ virtualAccountAllowed: true }));
+    await resolver.runJob(job({ paymentId: uuidAt(5), orderId: uuidAt(6) }));
+    expect(cancels).toEqual([]);
+  });
+});
+
 describe('입금 오류 확인의 리뷰 고침(BUILD_ORDER HOT-152, 코드 리뷰)', () => {
   const reversal = (notifiedAtMs: number) => job({ queryAttempts: 9, reversalCheck: { notifiedAtMs } });
 

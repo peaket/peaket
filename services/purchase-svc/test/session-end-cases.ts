@@ -175,6 +175,25 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect(await h.store.open(reissued)).toEqual({ kind: 'ENDED' });
   });
 
+  test('S-T33 ⑥ HOT070_sweep: 끝낼 때 세션에 홀드가 있으면 계정과 홀드 칸을 돌려준다(유휴·최대 체류, 끝낸 뒤 홀드를 풀 재료다)', async () => {
+    const h = await make();
+    const idle = await opened(h, { eventId: 'ev-sw-h1' });
+    expect(await h.store.recordHold(idle.jti, 'h1', ['A01', 'A02'])).toBe(true);
+    await reachIdle(h, idle.jti);
+    expect(await h.store.sweep(idle.jti)).toMatchObject({ kind: 'ENDED', reason: 'IDLE', accountId: idle.i.accountId, holds: [{ holdId: 'h1', seatIds: ['A01', 'A02'] }] });
+    const max = await opened(h, { eventId: 'ev-sw-h2', expiresAtMs: h.now() + shortMax(h) });
+    expect(await h.store.recordHold(max.jti, 'h2', ['B01'])).toBe(true);
+    await passMax(h, max.i);
+    expect(await h.store.sweep(max.jti)).toMatchObject({ kind: 'ENDED', reason: 'MAX_STAY', accountId: max.i.accountId, holds: [{ holdId: 'h2', seatIds: ['B01'] }] });
+  });
+
+  test('S-T33 ⑥ HOT070_end: 끝낼 때 세션에 홀드가 있으면 계정과 홀드 칸을 돌려준다', async () => {
+    const h = await make();
+    const { jti, i } = await opened(h, { eventId: 'ev-end-h1' });
+    expect(await h.store.recordHold(jti, 'h1', ['A01'])).toBe(true);
+    expect(await h.store.end(jti)).toMatchObject({ accountId: i.accountId, holds: [{ holdId: 'h1', seatIds: ['A01'] }] });
+  });
+
   test('QT11_POL009_sweep: 유휴 시한에 닿으면 ENDED(IDLE)로 회차·여정·끝낸 시각을 주고 세션 상태를 지운다. 최대 체류 앞이라 MAX_STAY가 아니다', async () => {
     const h = await make();
     const { jti, i } = await opened(h, { eventId: 'ev-sw-2', journeyId: OTHER_JOURNEY });

@@ -250,7 +250,8 @@ describe('정지 집합 전이 S-T23', () => {
     expect(r).toMatchObject({ kind: 'OK', moved: 1 });
     const score = await zscore(seatKeys.expiry(e), S1);
     expect(score).toBeGreaterThan(Date.now() + 90_000);
-    expect(score).toBeLessThanOrEqual(Date.now() + 100_000);
+    // 같은 시계 차이 여유(위 시험과 같다)
+    expect(score).toBeLessThanOrEqual(Date.now() + 101_000);
     expect(await zscore(paused(e), S1)).toBeNull();
     expect(await field(e, S1, 'rem')).toBeNull();
     expect(await zscore(ordered(e), S1)).not.toBeNull();
@@ -458,7 +459,8 @@ describe('리뷰 재현(H3·M3·M4·M5·L12)', () => {
     const holds = new RedisOrderHolds(redis, seatMap);
     const at = await holds.holdExpiry(e, a.holdId, [S1]);
     expect(at).toBeGreaterThan(Date.now() + 90_000);
-    expect(at).toBeLessThanOrEqual(Date.now() + 100_000);
+    // Redis TIME과 이 프로세스 시계는 서로 다른 시계라 1초 [가정]의 여유를 둔다(S-T23 ①의 ±1초와 같다)
+    expect(at).toBeLessThanOrEqual(Date.now() + 101_000);
   });
   test('H3 S-T23 멈춘 홀드는 주문 생성의 홀드 확인에서 살아 있다(ADR-0255 재시도가 404가 되지 않는다)', async () => {
     const e = await openEvent();

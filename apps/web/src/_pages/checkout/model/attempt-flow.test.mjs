@@ -108,6 +108,52 @@ test('P-T25 H1 결제창을 연 뒤 실패로 돌아오면 새 시도이고, 세
   assert.equal(server.rows.length, 3);
 });
 
+test('P-T25 H1 고른 수단이 400으로 거절되면 키를 되돌려 원래 수단은 같은 키를 다시 쓴다(행이 늘지 않는다)', async () => {
+  const server = fakeServer();
+  const { flow } = harness(server);
+  await flow.start('CARD');
+  assert.equal(server.rows.length, 1);
+  server.next.push({ status: 400, type: 'about:blank' });
+  await flow.start('TRANSFER');
+  assert.equal(server.rows.length, 1);
+  await flow.start('CARD');
+  assert.equal(server.rows.length, 1);
+});
+
+test('P-T25 H1 결제 버튼을 두 번 눌러도 결제창은 한 번만 연다(진행 중에는 무시한다)', async () => {
+  const server = fakeServer();
+  const { flow, log } = harness(server, { hang: true });
+  await flow.start();
+  void flow.pay();
+  await Promise.resolve();
+  void flow.pay();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(log.pays.length, 1);
+});
+
+test('H1 늦게 온 앞 시작의 답은 버린다: 뒤 시작의 시도를 덮어쓰지 않는다', async () => {
+  const server = fakeServer();
+  const gates = [];
+  const realStart = server.start;
+  server.start = async (body, key) => {
+    await new Promise((resolve) => gates.push(resolve));
+    return realStart(body, key);
+  };
+  const { flow } = harness(server);
+  const first = flow.start('CARD');
+  await new Promise((r) => setTimeout(r, 0));
+  const second = flow.start('TRANSFER');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(gates.length, 2);
+  gates[1]();
+  await second;
+  const winner = flow.view().attempt;
+  assert.equal(winner?.method, 'TRANSFER');
+  gates[0]();
+  await first;
+  assert.equal(flow.view().attempt?.attemptId, winner.attemptId);
+});
+
 test('P-T25 H1 같은 화면의 결제창 취소도 시도 하나를 쓰고 새 시도로 다시 할 수 있다', async () => {
   const server = fakeServer();
   const { flow } = harness(server, { payResult: () => new PaymentWindowError('cancelled') });

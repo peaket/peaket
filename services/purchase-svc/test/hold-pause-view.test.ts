@@ -55,6 +55,38 @@ describe('HoldPauseView', () => {
     expect(await state(a.v)).toEqual({ kind: 'OPEN' });
     expect(a.outcomes).toEqual(['ok', 'failed', 'stale']);
   });
+  test('S-T23 ④ 첫 실패부터 정확히 10초까지는 마지막 답을 쓰고 10초를 넘어야 OPEN이다(경계)', async () => {
+    const a = view([paused(5_000), FAILED, FAILED, FAILED]);
+    await state(a.v);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(10_000);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(1);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
+  });
+  test('S-T23 ④ L7 답을 받으면 실패 시작을 지운다: 그 뒤의 첫 실패부터 다시 10초를 잰다', async () => {
+    const a = view([paused(5_000), FAILED, paused(5_000), FAILED, FAILED]);
+    await state(a.v);
+    await state(a.v);
+    a.clock.advance(9_000);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(9_000);
+    // 앞 실패가 끝났으므로 이 실패는 첫 실패다(앞 실패에서 18초가 지났어도 OPEN이 아니다)
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(10_001);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
+  });
+  test('S-T23 L6 열림 뒤 정지가 오면 첫 열림 시각도 지운다: 다시 열릴 때 그 시각부터 1초를 잰다', async () => {
+    const a = view([OPEN, paused(6_000), OPEN, OPEN, OPEN]);
+    await state(a.v);
+    a.clock.advance(2_000);
+    await state(a.v);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 6_000 });
+    a.clock.advance(100);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 6_000 });
+    a.clock.advance(1_000);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
+  });
   test('S-T23 ④ 파드가 막 떴고 답이 없으면 뜬 시각부터 10초 뒤 OPEN이다', async () => {
     const a = view([FAILED]);
     expect(await state(a.v)).toEqual({ kind: 'UNSETTLED' });

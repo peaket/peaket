@@ -275,7 +275,52 @@ describe('요청의 남은 시간(deadline)', () => {
   });
 });
 
+describe('주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070)', () => {
+  function marks(results: boolean[] = [true]) {
+    const calls: { op: string; e: unknown }[] = [];
+    let i = 0;
+    const holdMarks = {
+      markOrdered: async (e: unknown) => {
+        calls.push({ op: 'mark', e });
+        return results[Math.min(i++, results.length - 1)]!;
+      },
+      releaseSession: async (e: unknown) => void calls.push({ op: 'release', e }),
+    };
+    return { calls, holdMarks };
+  }
+  test('S-T23 새 주문이면 주문 좌석으로 표시를 한 번 한다', async () => {
+    const m = marks();
+    expect(await run(okCommand(), { holdMarks: m.holdMarks })).toMatchObject({ status: 201 });
+    expect(m.calls).toEqual([{ op: 'mark', e: { eventId: EVENT, accountId: ACCOUNT, sessionId: PSID, holdId: okCommand().body.holdId, seatIds: expect.any(Array) } }]);
+  });
+  test('S-T23 재생이면 다시 표시하지 않는다(seat-hold §5 주문 표시)', async () => {
+    const m = marks();
+    fx.outcome = { status: 'REPLAYED', order: COMMITTED_VIEW };
+    expect(await run(okCommand(), { holdMarks: m.holdMarks })).toMatchObject({ status: 201, replayed: true });
+    expect(m.calls).toEqual([]);
+  });
+  test('S-T23 표시가 실패하면 한 번 더 하고 그래도 실패면 지표를 올리며 201은 그대로다', async () => {
+    const m = marks([false, false]);
+    const failed: number[] = [];
+    const signals = { ...fx.ports().signals, holdMarkFailed: () => void failed.push(1) };
+    expect(await run(okCommand(), { holdMarks: m.holdMarks, signals })).toMatchObject({ status: 201 });
+    expect(m.calls.map((c) => c.op)).toEqual(['mark', 'mark']);
+    expect(failed).toHaveLength(1);
+  });
+  test('PT49_① 예매 제한이면 그 구매 세션의 홀드를 푼다', async () => {
+    const m = marks();
+    fx.restriction = { st: 'ACTIVE' };
+    expect(await run(okCommand(), { holdMarks: m.holdMarks })).toEqual({ status: 'REJECTED', reason: 'BOOKING_RESTRICTED' });
+    expect(m.calls).toEqual([{ op: 'release', e: { eventId: EVENT, accountId: ACCOUNT, sessionId: PSID } }]);
+  });
+});
+
 describe('구매 세션(401 purchase-session-ended)', () => {
+  test('S-T29 구매 세션이 다른 계정의 것이면 없는 것과 같다(SESSION_NOT_FOUND이고 뒤를 부르지 않는다)', async () => {
+    fx.session = { sessionId: PSID, accountId: 'acct-someone-else', eventId: EVENT, journeyId: JOURNEY };
+    expect(await run()).toEqual({ status: 'REJECTED', reason: 'SESSION_NOT_FOUND' });
+    expect(fx.calls).toEqual(['sessions.get']);
+  });
   test('FR011_구매 세션이 없거나 끝났으면 SESSION_NOT_FOUND이고 그 뒤 포트(멱등 기록부터)를 부르지 않는다', async () => {
     fx.session = undefined;
     expect(await run()).toEqual({ status: 'REJECTED', reason: 'SESSION_NOT_FOUND' });

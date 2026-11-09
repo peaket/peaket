@@ -365,16 +365,17 @@ async function fan(eventId: string, accountId: string = randomUUID()): Promise<F
   return { eventId, accountId, login, pid, jti, token, macKey, seq: 0 };
 }
 
-function call(f: Fan, method: 'POST' | 'DELETE' | 'GET', url: string, body?: unknown, o: { idem?: string; unsigned?: boolean } = {}) {
+function call(f: Fan, method: 'POST' | 'DELETE' | 'GET', url: string, body?: unknown, o: { idem?: string; unsigned?: boolean; macKey?: Buffer; seq?: number; headers?: Record<string, string> } = {}) {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const headers: Record<string, string> = { 'x-user-id': f.accountId, 'x-session-id': f.login, 'x-user-aud': 'fan', 'x-user-scope': 'ticket:buy', 'x-user-pid': f.pid, 'x-admission-token': f.token };
   if (payload) headers['content-type'] = 'application/json';
   if (o.idem) headers['idempotency-key'] = o.idem;
   if (!o.unsigned) {
-    const n = ++f.seq;
+    const n = o.seq ?? ++f.seq;
     headers['x-purchase-seq'] = String(n);
-    headers['x-purchase-mac'] = purchaseMac(f.macKey, purchaseMacInput(method, url, n, Buffer.from(payload ?? '', 'utf8')));
+    headers['x-purchase-mac'] = purchaseMac(o.macKey ?? f.macKey, purchaseMacInput(method, url, n, Buffer.from(payload ?? '', 'utf8')));
   }
+  Object.assign(headers, o.headers);
   return svc.http.inject({ method, url, headers, ...(payload ? { payload } : {}) });
 }
 const json = (r: { payload: string }) => {
@@ -493,7 +494,9 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     await until(async () => {
       await confirmRunner.tick();
       await confirmRunner.whenIdle();
-      return (await adminPay.pool.query('select status from payment where order_id = $1', [orderId])).rows[0]?.status !== 'ACCEPTED';
+      // 결제 행은 승인 명령(gRPC)이 만든다. 아직 없으면(undefined) 기다린다(RESERVED와 행 사이의 틈에서 끝나면 이 뒤의 입금 전 취소가 돌지 않는다)
+      const status = (await adminPay.pool.query<{ status: string }>('select status from payment where order_id = $1', [orderId])).rows[0]?.status;
+      return status !== undefined && status !== 'ACCEPTED';
     }, '승인 처리', 20_000, 100);
     await until(async () => (await adminPay.pool.query('select status from payment where order_id = $1', [orderId])).rows[0]?.status === 'FAILED', '입금 전 취소', 10_000, 100);
     const rows = (await adminPay.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1 order by seq', [w.eventId])).rows;
@@ -563,6 +566,92 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     expect(retry.statusCode, retry.payload).toBe(409);
     expect(json(retry).type).toBe('seat-recently-released');
   }, 60_000);
+
+  test('S-T16 ② S-T29 서명 없음·다른 키·재전송의 해제·연장은 401이고, ticket:buy가 없으면 403, 팬이 아니면 401이다. 홀드는 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[6]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    const holdId = String(json(held).holdId);
+    const url = `/v1/holds/${holdId}`;
+    const wrongKey = Buffer.alloc(32, 7);
+    const attempts = {
+      unsignedDelete: await call(f, 'DELETE', url, undefined, { unsigned: true }),
+      unsignedExtend: await call(f, 'POST', `${url}/extension`, undefined, { unsigned: true }),
+      wrongKeyDelete: await call(f, 'DELETE', url, undefined, { macKey: wrongKey, seq: f.seq + 1 }),
+      wrongKeyExtend: await call(f, 'POST', `${url}/extension`, undefined, { macKey: wrongKey, seq: f.seq + 1 }),
+      // 앞선 홀드 요청이 쓴 일련번호를 다시 쓴다
+      replayDelete: await call(f, 'DELETE', url, undefined, { seq: f.seq }),
+      otherAudDelete: await call(f, 'DELETE', url, undefined, { headers: { 'x-user-aud': 'ops' } }),
+      otherAudRead: await call(f, 'GET', url, undefined, { unsigned: true, headers: { 'x-user-aud': 'ops' } }),
+    };
+    for (const [what, r] of Object.entries(attempts)) expect({ what, status: r.statusCode }, r.payload).toEqual({ what, status: 401 });
+    // 신원 머리 없이 입장 토큰만으로는 다시 읽지 못한다(공개 경로가 아니다)
+    expect((await svc.http.inject({ method: 'GET', url, headers: { 'x-admission-token': f.token } })).statusCode).toBe(401);
+    const noScope = { 'x-user-scope': 'other:scope' };
+    expect((await call(f, 'DELETE', url, undefined, { headers: noScope })).statusCode).toBe(403);
+    expect((await call(f, 'POST', `${url}/extension`, undefined, { headers: noScope })).statusCode).toBe(403);
+    // 거절된 요청은 아무것도 바꾸지 않았다
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '6'], { key: seatKeys.bitmap(w.eventId) }))).toBe(1);
+    const read = await call(f, 'GET', url, undefined, { unsigned: true });
+    expect(read.statusCode, read.payload).toBe(200);
+    expect(json(read)).toMatchObject({ extendable: true, expiresAt: json(held).expiresAt });
+  }, 60_000);
+
+  test('S-T29 ⑤ 남의 holdId로 주문하면 404이고 주문이 생기지 않는다. ⑥ 남의 주문으로 결제 시도를 시작하면 404이고 시도가 생기지 않는다', async () => {
+    const w = await world();
+    const a = await fan(w.eventId);
+    const b = await fan(w.eventId);
+    const held = await call(b, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[7]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    const holdId = String(json(held).holdId);
+    const body = { holdId, buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT } };
+    // ①② 남의 holdId와 없는 holdId는 같은 404 본문이다(그런 홀드가 있는지 알리지 않는다)
+    const shape = (r: { statusCode: number; payload: string }) => {
+      const v = JSON.parse(r.payload) as Record<string, unknown>;
+      return { statusCode: r.statusCode, type: v.type, title: v.title, detail: v.detail };
+    };
+    const foreignHold = await call(a, 'DELETE', `/v1/holds/${holdId}`);
+    const noSuchHold = await call(a, 'DELETE', `/v1/holds/${randomUUID()}`);
+    expect(foreignHold.statusCode, foreignHold.payload).toBe(404);
+    expect(shape(foreignHold)).toEqual(shape(noSuchHold));
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '7'], { key: seatKeys.bitmap(w.eventId) }))).toBe(1);
+    const foreign = await call(a, 'POST', '/v1/orders', body, { idem: randomUUID() });
+    expect(foreign.statusCode, foreign.payload).toBe(404);
+    expect((await adminP.pool.query('select count(*)::int n from purchase_order where hold_id = $1', [holdId])).rows[0]).toEqual({ n: 0 });
+    const ordered = await call(b, 'POST', '/v1/orders', body, { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    const start = await call(a, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(start.statusCode, start.payload).toBe(404);
+    expect((await adminP.pool.query('select count(*)::int n from payment_attempt where order_id = $1', [orderId])).rows[0]).toEqual({ n: 0 });
+  }, 60_000);
+
+  test('P-T49 ② 제한 뒤 같은 세션은 다른 좌석을 잡지만 주문은 다시 403이다. ③ 제한 전에 만든 주문의 결제 시도와 접수는 막지 않는다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const before = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[0]] }, { idem: randomUUID() });
+    expect(before.statusCode, before.payload).toBe(201);
+    const body = (holdId: string) => ({ holdId, buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT } });
+    const madeFirst = await call(f, 'POST', '/v1/orders', body(String(json(before).holdId)), { idem: randomUUID() });
+    expect(madeFirst.statusCode, madeFirst.payload).toBe(201);
+    const earlierOrder = String(json(madeFirst).orderId);
+    await redis.command(['HSET', `s:rst:${f.accountId}`, 'st', 'ACTIVE', 'rid', 'r2', 'ver', '1'], { key: `s:rst:${f.accountId}` });
+    // ② 다른 좌석의 홀드는 된다(주문을 막는 것이지 세션을 끝내지 않는다). 주문은 다시 403이다
+    const another = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[5]] }, { idem: randomUUID() });
+    expect(another.statusCode, another.payload).toBe(201);
+    const blocked = await call(f, 'POST', '/v1/orders', body(String(json(another).holdId)), { idem: randomUUID() });
+    expect(blocked.statusCode, blocked.payload).toBe(403);
+    expect(json(blocked).type).toBe('booking-restricted');
+    expect((await adminP.pool.query('select count(*)::int n from purchase_order where hold_id = $1', [String(json(another).holdId)])).rows[0]).toEqual({ n: 0 });
+    // ③ 제한 전 주문은 그대로 결제까지 간다
+    const attempt = await call(f, 'POST', `/v1/orders/${earlierOrder}/payments`, {}, { idem: randomUUID() });
+    expect(attempt.statusCode, attempt.payload).toBe(201);
+    const a = json(attempt) as { attemptId: string; checkout: { orderId: string; amount: number } };
+    const { paymentKey } = (await sim_('/sim/authenticate', { orderId: a.checkout.orderId, amount: a.checkout.amount })) as { paymentKey: string };
+    const accepted = await call(f, 'POST', `/v1/orders/${earlierOrder}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey, amount: a.checkout.amount, attemptId: a.attemptId }, { idem: randomUUID() });
+    expect(accepted.statusCode, accepted.payload).toBe(202);
+  }, 60_000);
 });
 
 describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 금액·주문 불일치 0, 묶인 좌석은 풀리고, 결과 모름은 해소된다', () => {
@@ -607,7 +696,9 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
     await until(async () => {
       await confirmRunner.tick();
       await confirmRunner.whenIdle();
-      return (await payStatus(orderId)) !== 'ACCEPTED';
+      // 결제 행은 승인 명령이 만든다. 아직 없으면(undefined) 기다린다(acceptedOrder의 RESERVED와 행 사이의 틈)
+      const status = await payStatus(orderId);
+      return status !== undefined && status !== 'ACCEPTED';
     }, '승인 실행', 25_000, 100);
     return (await payStatus(orderId))!;
   }
@@ -635,11 +726,15 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
       await until(async () => (await adminP.pool.query('select count(*)::int n from seat_sale where event_id = $1 and status in ($2, $3)', [w.eventId, 'PENDING', 'SOLD'])).rows[0]?.n === 0, '판매 행 지움', 10_000, 50);
     }
     expect(['UNKNOWN', 'ACCEPTED']).not.toContain(pay.status);
-    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), String(seat)], { key: seatKeys.bitmap(w.eventId) }))).toBe(expected === 'SOLD' ? 1 : 0);
+    // 풀림은 판매 행을 지운 뒤 Saga가 응답 밖에서 하므로 기다린다(판매 행 지움과 비트 끄기 사이의 틈)
+    if (expected === 'RELEASED') await until(async () => Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), String(seat)], { key: seatKeys.bitmap(w.eventId) })) === 0, '좌석 해제', 15_000, 100);
+    else expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), String(seat)], { key: seatKeys.bitmap(w.eventId) }))).toBe(1);
   }
 
   test('V4 ① 주문 도중 Redis 연결이 어느 명령에서 끊겨도 복구 뒤 같은 키로 주문은 하나다', async () => {
-    for (const n of [1, 2, 3, 4, 5, 6]) {
+    // 요청의 Redis 명령을 앞에서부터 하나씩 끊어 본다. 끊는 자리가 주문 커밋 뒤의 표시까지 닿아야 복구(재생·표시)를 본다
+    let committedAtCut = 0;
+    for (let n = 1; n <= 14; n += 1) {
       const w = await world();
       const f = await fan(w.eventId);
       const holdId = await holdSeat(w, f, 0);
@@ -647,6 +742,7 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
       redisGate.cutAfter(n);
       const first = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem });
       await healthy();
+      if ((await adminP.pool.query<{ n: number }>('select count(*)::int n from purchase_order where hold_id = $1', [holdId])).rows[0]!.n === 1) committedAtCut += 1;
       const again = await until2(async () => {
         const r = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem });
         return r.statusCode < 500 ? r : null;
@@ -661,7 +757,8 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
       const key = seatKeys.ordered(w.eventId);
       expect(await redis.command(['ZSCORE', key, '0'], { key }), `n=${n} 주문 뒤 표시`).not.toBeNull();
     }
-  }, 180_000);
+    expect(committedAtCut, '끊는 자리가 커밋 뒤까지 닿지 않았다').toBeGreaterThan(0);
+  }, 300_000);
 
   test('V4 ① 결제 시도 도중 Redis가 끊겨도 복구 뒤 같은 키는 시도 행 하나이고 끝까지 팔린다', async () => {
     for (const n of [1, 3, 5]) {
@@ -767,7 +864,8 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
     await acceptedOrder(f, orderId, { kind: 'drop', applied: false });
     expect(await runConfirm(orderId)).toBe('UNKNOWN');
     await drain(w.eventId);
-    // 결제사가 결과를 정하기 전에는 상태를 바꾸지 않는다: 세션이 끝나 EXPIRED를 답하면 실패로 닫힌다
+    // 결제사가 결과를 정하기 전에는 상태를 바꾸지 않는다: 다음 조회 시각을 당겨 조회가 실제로 돌게 하고(처리 중 답), 세션이 끝나 EXPIRED를 답하면 실패로 닫힌다
+    await adminPay.pool.query("update payment set next_query_at = now() - interval '1 second' where order_id = $1 and status = 'UNKNOWN'", [orderId]);
     await unknownResolver.tick();
     await unknownResolver.whenIdle();
     expect(await payStatus(orderId)).toBe('UNKNOWN');
@@ -789,6 +887,38 @@ describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 
     expect(await resolveUnknown(orderId)).toBe('APPROVED');
     await verdict(w, orderId, 'SOLD', 0);
   }, 120_000);
+
+  test('P-T25 승인 단계 거절은 주문 FAILED와 좌석 해제로 끝나고 과금이 없다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    await acceptedOrder(f, orderId, { kind: 'decline', code: 'REJECT_CARD_COMPANY' });
+    expect(await runConfirm(orderId)).toBe('FAILED');
+    await verdict(w, orderId, 'RELEASED', 0);
+    expect(await orderStatus(orderId)).toBe('FAILED');
+  }, 120_000);
+
+  test('P-T25 결제창 단계 세 번 뒤 네 번째 시도는 409이고 행이 늘지 않으며 홀드는 유지된다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    for (let i = 0; i < 3; i += 1) {
+      const started = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+      expect(started.statusCode, started.payload).toBe(201);
+    }
+    const fourth = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(fourth.statusCode, fourth.payload).toBe(409);
+    expect(json(fourth).type).toBe('payment-attempts-exceeded');
+    expect((await adminP.pool.query('select count(*)::int n from payment_attempt where order_id = $1', [orderId])).rows[0]).toEqual({ n: 3 });
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '0'], { key: seatKeys.bitmap(w.eventId) }))).toBe(1);
+    expect((await call(f, 'GET', `/v1/holds/${holdId}`, undefined, { unsigned: true })).statusCode).toBe(200);
+  }, 60_000);
 });
 
 async function until2<T>(f: () => Promise<T | null>, what: string, ms = 20_000): Promise<T> {

@@ -650,6 +650,16 @@ describe('리뷰 고침', () => {
     await expect(jobs.markAnomalyLogged(job!)).resolves.toBe(false);
   });
 
+  test('P-T9_H2 결과 모름 행을 잡을 때 가상계좌 허용값을 함께 읽는다(입금 전 취소의 재료)', async () => {
+    const h = await harness();
+    const f = await unknownPayment();
+    const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock: h.clock });
+    await admin.pool.query('update payment set virtual_account_allowed = false where order_id = $1', [f.orderId]);
+    const [job] = await jobs.claimDueQueries('SIMULATOR', 1);
+    expect(job?.orderId).toBe(f.orderId);
+    expect(job?.virtualAccountAllowed).toBe(false);
+  });
+
   test('P-T3_리뷰 고침 L9: 입금 대기 답의 금액이 다르면 쓰지 않고 SEV1 로그 한 줄이다 [ASVS v5.0.0-2.2.3]', async () => {
     const h = await harness();
     const f = await unknownPayment();

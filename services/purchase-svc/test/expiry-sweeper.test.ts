@@ -88,6 +88,60 @@ function deferred<T>() {
 /** 지금 쌓인 약속 작업을 한 바퀴 돌린다(시간을 기다리지 않는다) */
 const flush = () => new Promise<void>((r) => setImmediate(r));
 
+/** 정지 판단과 건너뛰기 수만 보는 조립: 만료 저장소를 대역으로 두고 입력을 적는다(BUILD_ORDER HOT-070·HOT-358 리뷰 V1) */
+function pauseStub(o: { dues: DueExpiriesInput[]; expires: ExpireInput[]; pause: { kind: 'PAUSED'; sinceMs: number } | { kind: 'OPEN' } | { kind: 'UNSETTLED' }; result: () => Promise<{ kind: 'OK'; released: number; skipped: number; orphans: number; corrupt: number; nowUs: number; expired: { index: number; fencingToken: number }[] }> }) {
+  const E = 'ev-stub-1';
+  const clock = fakeClock({ now: NOW, monotonic: 0 });
+  const seatMap = new MemorySeatMap();
+  const seats: MemorySeatDef[] = Array.from({ length: 300 }, (_, i) => bigSeat(i));
+  seatMap.put({ eventId: E, layoutVersion: 'v1', seatCount: 300, perAccountLimit: 4, saleEndsAtMs: NOW + DAY }, seats);
+  const page = (from: number) => Array.from({ length: 100 }, (_, i) => ({ index: from + i, expiresAtMs: NOW - 10, hold: { holdId: `h${from + i}`, fencingToken: String(from + i + 1), owner: account(i) } }));
+  let reads = 0;
+  const expiries = {
+    saleEvents: async () => [E],
+    dueExpiries: async (i: DueExpiriesInput) => {
+      o.dues.push(i);
+      reads += 1;
+      return reads === 1 ? page(0) : reads === 2 ? page(100) : [];
+    },
+    expire: async (i: ExpireInput) => {
+      o.expires.push(i);
+      return o.result();
+    },
+  };
+  const sweeper = new ExpirySweeper({
+    expiries: expiries as never,
+    seatMap,
+    leases: { acquire: async () => true } as never,
+    clock,
+    podId: 'pod-stub',
+    pauseView: { refresh: async () => new Map([[E, o.pause]]) } as never,
+    lifecycle: { orderedPage: async () => ({ indexes: [], malformed: 0 }), frozenPage: async () => ({ indexes: [], malformed: 0 }), frozenCount: async () => 0, freeze: async () => ({ kind: 'OK', moved: 0, dropped: 0, corrupt: 0 }), thaw: async () => ({ kind: 'OK', moved: 0, dropped: 0, corrupt: 0 }) } as never,
+  });
+  return sweeper;
+}
+
+describe('결제 정지 판단과 만료 Lua 입력(HOT-070)', () => {
+  const ok = () => Promise.resolve({ kind: 'OK' as const, released: 100, skipped: 0, orphans: 0, corrupt: 0, nowUs: NOW * 1000, expired: [] });
+  test.each([
+    ['PAUSED', { kind: 'PAUSED' as const, sinceMs: 5_000 }, 5_000],
+    ['UNSETTLED', { kind: 'UNSETTLED' as const }, 0],
+    ['OPEN', { kind: 'OPEN' as const }, undefined],
+  ])('S-T23 %s면 만료 Lua에 넘기는 정지 시작이 그 값이다(0은 모름, 없음은 정지 아님)', async (_name, pause, want) => {
+    const dues: DueExpiriesInput[] = [];
+    const expires: ExpireInput[] = [];
+    await pauseStub({ dues, expires, pause, result: ok }).tick();
+    expect(expires.length).toBeGreaterThan(0);
+    for (const e of expires) expect(e.pausedSinceMs).toBe(want);
+  });
+  test('ADR0254_다음 묶음은 앞 묶음이 풀지 못하고 남긴 수(망가짐 + 건너뜀)만큼 건너뛰어 읽는다', async () => {
+    const dues: DueExpiriesInput[] = [];
+    const expires: ExpireInput[] = [];
+    await pauseStub({ dues, expires, pause: { kind: 'OPEN' }, result: () => Promise.resolve({ kind: 'OK', released: 90, skipped: 7, orphans: 0, corrupt: 3, nowUs: NOW * 1000, expired: [] }) }).tick();
+    expect(dues.map((d) => d.offset ?? 0).slice(0, 3)).toEqual([0, 10, 20]);
+  });
+});
+
 /** 큰 회차용 좌석(색인 i, 구역 10개를 고르게) */
 const bigSeat = (i: number): MemorySeatDef => ({ seatId: `S${String(i).padStart(5, '0')}`, index: i, sectionId: `SEC-${i % 10}`, sectionIndex: i % 10, seatOffset: Math.floor(i / 10), tierId: 'R' });
 

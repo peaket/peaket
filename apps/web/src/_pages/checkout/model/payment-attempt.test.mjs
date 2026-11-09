@@ -56,6 +56,15 @@ test('HOT-358 ADR-0255 409 hold-already-ordered에 orderId가 있으면 주문�
   assert.deepEqual(orderOutcome({ status: 409, type: 'hold-already-ordered' }), { kind: 'other-tab' });
 });
 
+test('P-T25 시도 시작 401은 재발급(문제 이름 없음·http-)이거나 끝남이고, 403은 끝남이며, 3회 넘음은 exceeded다', () => {
+  assert.equal(attemptOutcome({ status: 401 }).kind, 'refresh');
+  assert.equal(attemptOutcome({ status: 401, type: 'about:blank' }).kind, 'refresh');
+  assert.equal(attemptOutcome({ status: 401, type: 'http-token-expired' }).kind, 'refresh');
+  assert.equal(attemptOutcome({ status: 401, type: 'purchase-session-ended' }).kind, 'ended');
+  assert.equal(attemptOutcome({ status: 403, type: 'forbidden' }).kind, 'ended');
+  assert.equal(attemptOutcome({ status: 409, type: 'payment-attempts-exceeded' }).kind, 'exceeded');
+});
+
 test('P-T9 PRF-190 토스 위젯에서 허용되지 않은 수단은 막고 모르는 값도 막는다', () => {
   assert.equal(tossMethodAllowed('VIRTUAL_ACCOUNT', ['CARD']), false);
   assert.equal(tossMethodAllowed('CARD', ['CARD']), true);
