@@ -1215,30 +1215,6 @@
 | 16. 대안과 바꿀 조건(ADR-0099) | 분야 18 |
 | 17. 참고 자료(2026-10-27 확인) | 분야 18 |
 
-### docs/superpowers/plans/2026-11-08-walkthrough-improvement.md
-
-| 절 | 설명하는 곳 |
-| --- | --- |
-| Global Constraints | — |
-| Review Focus | — |
-| Phase 1: 전체 조감도 및 핫패스 핵심 파이프라인 (최우선) | — |
-| Phase 2: 핵심 아키텍처 결정 및 DB 전체 지도 | — |
-| Phase 3: 도메인 분야 편 (Fields) 완성 | — |
-| Phase 4: 참조 사전 및 종합 정리 | — |
-| Self-Review Checklist | — |
-
-### docs/superpowers/specs/2026-11-08-walkthrough-improvement-design.md
-
-| 절 | 설명하는 곳 |
-| --- | --- |
-| 1. 배경 및 목적 (Intent and Why) | — |
-| 2. 목표, 비목표, 안티골 (Goals, Non-goals, Anti-goals) | — |
-| 3. 제약사항 (Constraints) | — |
-| 4. 검토한 대안 및 접근 방식 (Approaches) | — |
-| 5. 단계별 실행 계획 (Phased Execution) | — |
-| 6. 문서 표준 작성 서식 및 규칙 (Standard Writing Pattern) | — |
-| 7. 작업자 위임 사항 (What's Left to the Builder) | — |
-
 ### docs/verification.md
 
 | 절 | 설명하는 곳 |
