@@ -10,14 +10,16 @@ import {
   SALE_REVIEW_STATES,
   type WizardState,
 } from '@/shared/config/states/scr021';
-import { readPreview, type SearchParams } from '@/shared/lib/preview';
+import { readParam, readPreview, type SearchParams } from '@/shared/lib/preview';
 import { Modal } from '@/shared/ui/Modal';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
 import { edit } from '../model/fixtures';
 import { resolveView, STEP_STATE, type WizardMode, type WizardStep } from '../model/view';
 import { EditRounds } from './EditRounds';
+import { LiveWizard } from './live/LiveWizard';
 import { MobileSummary } from './MobileSummary';
+import { CopyLinkBanner } from './parts/CopyLinkBanner';
 import { StepBasic } from './StepBasic';
 import { editLimit, StepPolicy } from './StepPolicy';
 import { StepRounds } from './StepRounds';
@@ -42,6 +44,18 @@ const FALLBACK: Record<WizardMode, WizardState> = {
 };
 
 export function EventWizardPage({ eventId, mode, path, searchParams }: EventWizardPageProps) {
+  // 새 공연은 ?state=가 없으면 실제 위저드다(ADR-0245 결정 7). 상태를 고르면 지금까지의 퍼블리싱 화면을 그린다
+  if (mode === 'new' && readParam(searchParams, 'state') === undefined) {
+    return (
+      <>
+        <NewHeader />
+        <div className="md:hidden">
+          <CopyLinkBanner title="공연 등록과 수정은 태블릿이나 데스크톱에서 합니다" body="임시저장과 등록도 큰 화면에서 합니다. 링크를 복사해 큰 화면에서 열어 주세요" />
+        </div>
+        <LiveWizard />
+      </>
+    );
+  }
   const states: readonly WizardState[] = STATES_BY_MODE[mode];
   const pv = readPreview(searchParams, states, FALLBACK[mode]);
   const view = resolveView(mode, pv.state);

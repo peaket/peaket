@@ -38,6 +38,7 @@
 | `PEAKET_API_ORIGIN` | 앱 서버가 공개 API(홈 피드 등)를 빌드·ISR 때 부르는 주소. 없으면 부르지 않고 빈 피드로 그린다 |
 | `NEXT_PUBLIC_API_ORIGIN` | 브라우저가 개인 값(로그인·본인확인 상태, 찜·알림)을 부르는 팬 API 주소. 개발 서버에서 없으면 비로그인처럼 둔다 |
 | `PEAKET_DEV_STATIC_ORIGIN` | 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 넘길 곳 |
+| `NEXT_PUBLIC_PARTNER_API_ORIGIN` | 파트너 콘솔이 공연 등록·공연장과 아티스트 찾기를 부르는 파트너 API 주소(개발 서버에서 없으면 비워 둔다, 가짜 API 주소를 넣으면 위저드를 끝까지 볼 수 있다, ADR-0245) |
 | `NEXT_PUBLIC_QUEUE_ORIGIN`·`NEXT_PUBLIC_QUEUE_FILES_ORIGIN` | 브라우저 api-client가 함께 담는 대기열 API·파일 출처(개발 서버에서 없으면 비워 둔다) |
 | `PEAKET_CSP_ORIGINS` | CSP 자리 출처 바꾸기(JSON). 이미지 파생본 출처는 `img`(운영 기본 `https://img.peaket.example` [가정]) |
 

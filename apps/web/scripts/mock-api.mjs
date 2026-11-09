@@ -26,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
+import { createPartnerMock } from './mock-api/partner.mjs';
 import { createPurchaseMock } from './mock-api/purchase.mjs';
 import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
 
@@ -569,6 +570,7 @@ export function startMockApi({
   port = 4010,
   webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000',
   queueRoomOrigin = process.env.PEAKET_QUEUE_ROOM_ORIGIN || 'http://localhost:3004',
+  partnerOrigin = process.env.PEAKET_PARTNER_ORIGIN || 'http://localhost:3001',
   idvUrl = process.env.PEAKET_TEST_VERIFICATION_URL || 'http://127.0.0.1:4020/verify',
   idvSecret = idvSecretFromEnv(),
   now = Date.now,
@@ -611,6 +613,7 @@ export function startMockApi({
   /** 취소표 알림 신청(회차 ID) */
   const cancels = new Set();
   const wished = new Set(INITIAL_WISHES);
+  const partner = createPartnerMock();
   /** 검사 기록(가장 최근 REQUEST_LOG_MAX건) */
   const requestLog = [];
   const server = createServer((req, res) => {
@@ -637,7 +640,7 @@ export function startMockApi({
     }
     // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
     // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다
-    const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin;
+    const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin || req.headers.origin === partnerOrigin;
     const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
@@ -654,7 +657,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'order', 'accept', 'pay', 'ticketEvent', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'order', 'accept', 'pay', 'ticketEvent', 'partner', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
@@ -671,6 +674,8 @@ export function startMockApi({
       send(200, state);
       return;
     }
+    if (p === '/__mock/partner-last' && req.method === 'GET') return send(200, partner.last());
+    if (partner.handle({ p, req, url, state, send, unauthorized, readJson })) return;
     if (p === '/v1/home' && req.method === 'GET') return send(200, homeFeed(origin, state.home));
     if (p === '/v1/home/rankings.json' && req.method === 'GET') {
       if (state.ranking === 'missing') return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');

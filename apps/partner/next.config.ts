@@ -13,7 +13,7 @@ const config: NextConfig = {
   poweredByHeader: false,
   // 퍼블리싱 중 여러 사람이 같은 앱을 동시에 빌드할 때만 산출 폴더를 나눈다(기본은 .next)
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
-  transpilePackages: ['@peaket/ds'],
+  transpilePackages: ['@peaket/ds', '@peaket/api-client'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: seedLayeredAlias(import.meta.dirname) },
   pageExtensions: [...(seedCssPoc ? ['poc.tsx'] : []), ...(richTextPoc ? ['richtext.tsx'] : []), 'tsx', 'ts', 'jsx', 'js'],
