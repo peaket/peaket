@@ -6,9 +6,11 @@ import { MemoryCatalogRepository } from './adapters/memory-catalog-repository.js
 import { AddProductionEvent } from './application/add-production-event.js';
 import { CreateProduction } from './application/create-production.js';
 import { GetEventSummary } from './application/get-event-summary.js';
+import { PartnerDirectory } from './application/partner-directory.js';
 import { Wishes } from './application/wish.js';
 import { CATALOG_REPOSITORY } from './domain/ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
+import { PartnerDirectoryController } from './inbound/partner-directory.controller.js';
 import { PartnerProductionController } from './inbound/partner-production.controller.js';
 import { WishController } from './inbound/wish.controller.js';
 
@@ -18,12 +20,13 @@ export class CatalogModule {
   static register(o: { storage: 'database'; partnerDatabase: Database } | { storage: 'memory'; repository?: MemoryCatalogRepository }): DynamicModule {
     return {
       module: CatalogModule,
-      controllers: [EventSummaryController, PartnerProductionController, WishController],
+      controllers: [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController],
       providers: [
         GetEventSummary,
         CreateProduction,
         AddProductionEvent,
         Wishes,
+        PartnerDirectory,
         ...(o.storage === 'database'
           ? [{ provide: PARTNER_DATABASE, useValue: o.partnerDatabase }, { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository }]
           : [{ provide: CATALOG_REPOSITORY, useValue: o.repository ?? new MemoryCatalogRepository() }]),

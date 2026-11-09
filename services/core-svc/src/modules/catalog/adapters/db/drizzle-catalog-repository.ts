@@ -3,8 +3,8 @@
 // 오픈 간격은 공개 중인 공연과만 견주고 새 등록은 DRAFT라, 동시에 온 두 등록이 서로를 놓쳐도 공개 전 판매 승인(LCH-080)이 다시 본다. 그래서 전역 잠금을 두지 않는다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
-import { and, eq, gte, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
-import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce } from '../../domain/ports.js';
+import { and, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
+import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry } from '../../domain/ports.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
@@ -70,6 +70,29 @@ export class DrizzleCatalogRepository implements CatalogRepository {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {
     this.idempotency = new IdempotencyStore({ clock: this.clock });
+  }
+
+  async listArtistNames(): Promise<NameEntry[]> {
+    const [rows, aliases] = await Promise.all([this.db.db.select({ id: artist.id, name: artist.name }).from(artist), this.#aliases('ARTIST')]);
+    return rows.map((r) => ({ ...r, aliases: aliases.get(r.id) ?? [] }));
+  }
+
+  async listPlaceNames(): Promise<PlaceNameEntry[]> {
+    const [rows, aliases] = await Promise.all([
+      this.db.db.select({ id: place.id, name: place.name, address: place.address }).from(place).where(eq(place.status, 'ACTIVE')),
+      this.#aliases('PLACE'),
+    ]);
+    return rows.map((r) => ({ ...r, aliases: aliases.get(r.id) ?? [] }));
+  }
+
+  async #aliases(kind: 'ARTIST' | 'PLACE'): Promise<Map<string, string[]>> {
+    const rows = await this.db.db
+      .select({ targetId: searchAlias.targetId, alias: searchAlias.alias })
+      .from(searchAlias)
+      .where(and(eq(searchAlias.targetKind, kind), isNull(searchAlias.removedAt)));
+    const out = new Map<string, string[]>();
+    for (const r of rows) out.set(r.targetId, [...(out.get(r.targetId) ?? []), r.alias]);
+    return out;
   }
 
   async findEventSummary(eventId: string): Promise<EventSummaryRow | undefined> {

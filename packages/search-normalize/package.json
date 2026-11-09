@@ -1,0 +1,27 @@
+{
+  "name": "@peaket/search-normalize",
+  "private": true,
+  "version": "0.0.0",
+  "description": "검색어 정규화와 비교 값(띄어쓰기 없앤 값, 낱자, 초성), 일치 등급(docs/features/search.md §3). 브라우저와 서버가 같은 코드를 쓴다. 게시하지 않고 workspace:로만 잇는다",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "es-hangul": "2.4.0"
+  }
+}

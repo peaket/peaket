@@ -93,7 +93,22 @@ export interface RegistrationTx {
   savePending(productionId: string, pendingEvents: PendingEvent[], saleReview: Production['saleReview']): Promise<void>;
 }
 
+/** 찾기 목록의 이름 하나(지우지 않은 다른 이름과 함께) */
+export interface NameEntry {
+  id: string;
+  name: string;
+  aliases: string[];
+}
+
+export interface PlaceNameEntry extends NameEntry {
+  address: string;
+}
+
 export interface CatalogRepository {
+  /** 아티스트 전체와 다른 이름(찾기 목록, ADR-0242) */
+  listArtistNames(): Promise<NameEntry[]>;
+  /** 고를 수 있는 공연장과 다른 이름(닫은 공연장은 뺀다) */
+  listPlaceNames(): Promise<PlaceNameEntry[]>;
   /** 회차와 그 공연·판매자 상호. 없으면 undefined */
   findEventSummary(eventId: string): Promise<EventSummaryRow | undefined>;
   /**

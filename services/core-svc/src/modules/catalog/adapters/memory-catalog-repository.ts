@@ -1,7 +1,7 @@
 // 메모리 저장소(시험·로컬). 운영은 Drizzle 저장소다. 등록 쓰기는 fn이 끝난 뒤에만 반영해(던지면 버린다) DB 트랜잭션과 같게 답한다.
 import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
-import type { CatalogRepository, EventPublicFields, EventSummaryRow, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
+import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
 import { type CatalogEvent, isPublic, type Production } from '../domain/production.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
 
@@ -12,6 +12,9 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly sellerNames = new Map<string, string>();
   /** 회차 ID → 공연 상세의 나머지 칸(시험이 넣는다. 없으면 기본값) */
   readonly details = new Map<string, Partial<Pick<EventSummaryRow, 'place' | 'artists'>> & { event?: Partial<EventPublicFields>; production?: Partial<ProductionPublicFields>; seller?: Partial<EventSummaryRow['seller']> }>();
+  /** 찾기 목록(시험이 넣는다) */
+  artistNames: NameEntry[] = [];
+  placeNames: PlaceNameEntry[] = [];
   readonly places = new Set<string>();
   readonly artists = new Set<string>();
   /** 등록으로 넣은 공연의 나머지 칸(시험이 들여다본다) */
@@ -24,6 +27,14 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly #once = new Map<string, { hash: Buffer; result: string }>();
   /** 등록 쓰기를 한 줄로 세운다(시험이 늘 같은 결과를 보게) */
   #queue: Promise<unknown> = Promise.resolve();
+
+  async listArtistNames(): Promise<NameEntry[]> {
+    return this.artistNames.map((a) => ({ ...a }));
+  }
+
+  async listPlaceNames(): Promise<PlaceNameEntry[]> {
+    return this.placeNames.map((a) => ({ ...a }));
+  }
 
   async findEventSummary(eventId: string): Promise<EventSummaryRow | undefined> {
     const event = this.events.get(eventId);

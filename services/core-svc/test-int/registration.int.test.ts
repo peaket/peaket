@@ -97,6 +97,22 @@ describe('공연 등록(DB)', () => {
   });
 });
 
+describe('아티스트·공연장 찾기(DB)', () => {
+  test('실제 권한으로 이름·다른 이름·닫은 공연장을 거른다', async () => {
+    const closed = randomUUID();
+    await database.db.insert(place).values({ id: closed, name: '피켓 옛홀', address: '서울 어딘가 2', region: '서울', createdBy: ACTOR, status: 'CLOSED' });
+    await database.db.insert(searchAlias).values({ id: randomUUID(), targetKind: 'ARTIST', targetId: ARTIST, alias: 'PICKET BAND', source: 'OPERATOR', createdBy: ACTOR });
+    const removed = randomUUID();
+    await database.db.insert(searchAlias).values({ id: removed, targetKind: 'ARTIST', targetId: ARTIST, alias: '지운 이름', source: 'OPERATOR', createdBy: ACTOR, removedAt: new Date('2026-11-01T00:00:00Z') });
+    const h = identity.partner(TENANT, 'partner_member');
+    const get = async (u: string) => JSON.parse((await svc.http.inject({ method: 'GET', url: u, headers: h })).payload) as { items: Array<Record<string, string>> };
+    expect((await get(`/v1/partner/artists?q=${encodeURIComponent('ㅍㅋㅂㄷ')}`)).items).toEqual([{ artistId: ARTIST, name: '피켓밴드' }]);
+    expect((await get('/v1/partner/artists?q=picket')).items).toEqual([{ artistId: ARTIST, name: '피켓밴드' }]);
+    expect((await get(`/v1/partner/artists?q=${encodeURIComponent('지운')}`)).items).toEqual([]);
+    expect((await get(`/v1/partner/places?q=${encodeURIComponent('피켓')}`)).items.map((p) => p.placeId)).toEqual([PLACE]);
+  });
+});
+
 describe('회차 더하기(DB)', () => {
   test('승인 뒤 더한 회차는 변경분 JSON에만 두고 SUBMITTED가 되며, 승인 이력이 없으면 같은 배치본으로 event 행에 넣는다', async () => {
     const r = await post('/v1/partner/productions', identity.partner(TENANT), productionBody(PLACE, { title: '승인됨', events: [eventBody({ openAt: '2026-12-05T11:00:00Z' })] }));
