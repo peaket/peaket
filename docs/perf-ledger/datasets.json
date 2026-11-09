@@ -1,0 +1,9 @@
+{
+  "note": "공개 자료의 고정값이다(ADR-0246). 값이 null이면 그 자료의 public 측정은 합격이 될 수 없고 UNMEASURABLE로 끝난다. 고정값은 첫 실제 측정 때 소유자 허락을 받아 받은 파일의 SHA-256을 넣는다. 지금은 자료를 받지 않았다.",
+  "datasets": {
+    "Aalto 136M Keystrokes": {
+      "sha256": null,
+      "readme_sha256": null
+    }
+  }
+}
