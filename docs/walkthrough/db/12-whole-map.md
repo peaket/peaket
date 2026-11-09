@@ -1,452 +1,269 @@
-# DB 설계 편 12: 전체 지도 — 저장소와 표를 한눈에
+# DB 설계 편 12: 전체 지도: 저장소와 데이터 흐름을 한눈에 (Panoramic Database Architecture Map)
 
-- **기준 시점**: ADR-0177까지, 2026-11-02. 2026-11-03에 새 계정 표 셋과 표·키 수, 순번 묶음(ADR-0179)을 고쳤다
-- **지금 판의 근거**: [docs/data.md](../../data.md) §1·§2·§3·§4, [docs/infra.md](../../infra.md) §4·§6, [docs/architecture.md](../../architecture.md) §3.1·§3.2·§9.1, [docs/streaming.md](../../streaming.md) §1·§11, [docs/features/analytics.md](../../features/analytics.md) §2·§3·§5·§11, [docs/features/payment.md](../../features/payment.md) §2
-- **규범이 아니다**: 정본을 풀어 쓴 해설이다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **함께 읽기**: DB 설계 편 [1](01-what-and-how-much.md)·[2](02-choose-stores.md)·[3](03-core-tables.md)·[4](04-no-double-sale.md)·[5](05-consistency-transactions.md)·[6](06-concurrency.md)·[7](07-indexes-queries.md)·[8](08-redis-keys.md)·[9](09-scaling.md)·[10](10-analytics-store.md)·[11](11-privacy.md), 표 사전 [13 PostgreSQL](13-table-dictionary-postgres.md)·[14 Redis·ClickHouse·S3·기기](14-table-dictionary-redis-clickhouse.md), [한 판 문서](../01-system-design.md) 3단계·15단계
+- **핵심 아키텍처 원칙**: 폴리글랏 지속성(Polyglot Persistence)의 유기적 결합, RDBMS(ACID 원장) $\leftrightarrow$ Redis(초고속 경합) $\leftrightarrow$ ClickHouse(대규모 OLAP) $\leftrightarrow$ S3(불변 아카이브) $\leftrightarrow$ 단말(오프라인 검표) 간의 단방향 비동기 데이터 동기화, Transactional Outbox와 Kafka 기반의 무유실 이벤트 스트리밍 파이프라인
+- **관련 설계 정본**: [docs/data.md](../../data.md) §1(저장소 종합 지도)·§2(PostgreSQL 152개 테이블)·§3(Redis 67개 키 네임스페이스)·§4(일관성 경계), [docs/infra.md](../../infra.md) §4·§6(인프라 사양 및 RPO/RTO), [docs/architecture.md](../../architecture.md) §3(서비스별 DB 원칙)·§9.1(트래픽 예산), [docs/streaming.md](../../streaming.md) §1·§11(Kafka 토픽 및 릴레이), [docs/features/analytics.md](../../features/analytics.md) §2·§5·§11(ClickHouse 및 Parquet), ADR-0028, ADR-0042, ADR-0082, ADR-0086, ADR-0114, ADR-0116, ADR-0121, ADR-0179
+- **함께 읽기**: [한 판 문서](../01-system-design.md) 3단계·15단계, DB 설계 편 [1](01-what-and-how-much.md)·[2](02-choose-stores.md)·[3](03-core-tables.md)·[4](04-no-double-sale.md)·[5](05-consistency-transactions.md)·[6](06-concurrency.md)·[7](07-indexes-queries.md)·[8](08-redis-keys.md)·[9](09-scaling.md)·[10](10-analytics-store.md)·[11](11-privacy.md), 표 사전 [13 PostgreSQL](13-table-dictionary-postgres.md)·[14 Redis·ClickHouse·S3·기기](14-table-dictionary-redis-clickhouse.md)
 
-DB 설계 편 1~11이 질문 하나씩 잘라 본 데이터를 한 장에 다시 모은다. 표마다 칸과 키마다 수명은 표 사전 13·14에 두고, 여기서는 어느 저장소에 어떤 묶음이 있고 묶음 사이를 무엇이 잇는지만 본다.
+---
 
-## 1. 한 장 그림
+## 1. 면접관의 질문
 
-저장소는 일곱 종류다. 메모리에 두는 빠른 저장소 Redis, 표로 데이터를 두는 관계형 데이터베이스 PostgreSQL(AWS가 운영해 주는 판 Aurora), 사건을 순서대로 쌓아 여러 곳에 나눠 주는 메시지 시스템 Kafka, 대량 분석용 데이터베이스 ClickHouse, 파일 저장소 S3, 사용자 가까이에서 파일로 대신 답하는 전송망 CDN, 브라우저·스캐너 안의 기기 저장소다. 클러스터는 함께 움직이는 서버 묶음이고, 논리 DB는 한 클러스터 안에서 서비스마다 따로 둔 데이터베이스다.
+> **면접관**: "PEAKET 플랫폼의 전체 데이터베이스 아키텍처를 화이트보드에 한 장으로 그려보세요. PostgreSQL 5개 클러스터, Redis 3개 클러스터, ClickHouse, Kafka, S3, 단말 IndexedDB는 각각 어떤 데이터를 저장하며, 서비스 간 트랜잭션과 데이터 동기화는 어떤 파이프라인(Outbox, Saga, 스트리밍)을 타고 흐릅니까? 장애 발생 시 데이터 일관성은 어떻게 증명합니까?"
+
+면접관은 다음 세 가지 전사 시스템 아키텍트(Staff / Principal Engineer) 역량을 집중 검증한다:
+1. **전사 데이터 파노라마 조망 능력**: 마이크로서비스 경계에 따라 분산된 5대 RDBMS 클러스터(152개 테이블), 3대 Redis 클러스터(67개 키), ClickHouse OLAP, S3 콜드 스토리지, 단말 엣지 저장소를 단 하나의 통합 아키텍처 다이어그램으로 조감할 수 있는가?
+2. **이종 저장소 간 무유실 데이터 플로우 설계**: 단일 RDBMS 로컬 트랜잭션에서 시작된 상태 변경이 Transactional Outbox, Kafka 토픽, TypeScript 스트림 워커를 거쳐 ClickHouse와 S3 아카이브까지 유실 없이 동기화되는 파이프라인의 엔지니어링 메커니즘을 설명할 수 있는가?
+3. **가용성과 복구(RPO/RTO)의 정량적 정당화**: 저장소 계층별 장애(노드 크래시, AZ 전면 정전, 리전 대재해) 발생 시 RPO(데이터 유실 허용치)와 RTO(복구 시간)가 비즈니스 요구사항에 부합함을 증명할 수 있는가?
+
+---
+
+## 2. 단순한 답과 깨지는 곳
+
+### 단순한 답 (The Naive Approach)
+> "중앙에 거대한 공유 데이터베이스(Single Shared DB)를 두고 모든 마이크로서비스가 물리 외래키(FK)로 조인합니다. 실시간이 필요한 곳은 Redis를 단일 캐시로 두고, 분석은 매일 밤 RDBMS를 덤프 떠서 S3에 저장합니다. 서비스 간 상태 변경은 HTTP REST 호출로 동기 전파하거나 애플리케이션에서 Redis와 DB를 동시에 씁니다(Dual-Write)."
+
+### 어디서 깨지는가 (Failure Scenarios)
+
+| 단순한 설계 방식 | 대규모 운영 환경에서 깨지는 이유 | 아키텍처 근거 |
+| :--- | :--- | :--- |
+| **단일 공유 DB 및 물리 FK 결합** | 티켓 오픈 순간의 대기열/좌석 부하가 결제, 회원, 현장 입장 서비스로 전파되어 단일 DB 다운 시 전사 서비스 완전 셧다운 | `architecture §3`, `docs/data.md` §1 |
+| **애플리케이션 이중 쓰기 (Dual-Write)** | Redis와 DB에 순차적으로 쓸 때 네트워크 단절이나 프로세스 크래시 발생 시 한쪽만 갱신되어 영구적 데이터 불일치 발생 | `ADR-0014`, `ADR-0116` |
+| **비동기 이벤트를 DB 트랜잭션 밖에서 발행** | DB 커밋 직후 Kafka 전송 실패 시 이벤트가 영구 유실되고, 반대로 Kafka 전송 후 DB 롤백 시 유령 이벤트(Phantom Event)가 전파됨 | `ADR-0116`, `docs/data.md` §4 |
+| **단일 Redis 클러스터 공유** | 대기열 진입 20만 RPS 트래픽이 좌석 선점(피크 2,000 TPS)과 로그인 세션 검증의 지연 시간으로 번져 p99 50ms 목표 붕괴 | `ADR-0082`, `docs/data.md` §3 |
+| **CDC(Debezium) 복제 슬롯 무분별 의존** | 카프카 다운 시 PostgreSQL WAL 복제 슬롯이 무한정 누적되어 RDBMS 디스크를 100% 채우고 데이터베이스 강제 정지 유발 | `ADR-0116` |
+
+---
+
+## 3. 아키텍처 해법: 전사 파노라마 아키텍처 맵
+
+PEAKET의 전사 저장소 토폴로지는 **'서비스별 독립 데이터베이스(Database per Service)'** 원칙과 **'비동기 트랜잭셔널 아웃박스(Transactional Outbox) 기반의 이벤트 동기화'**를 핵심 골격으로 한다.
 
 ```mermaid
-flowchart LR
-    subgraph svc["서비스"]
-        qa["queue-svc·admission-ctrl"]
-        pur["purchase-svc"]
-        rgw["realtime-gw"]
-        pay["payment-svc"]
-        tkt["ticket-svc"]
-        idn["identity-svc"]
-        core["core-svc"]
-        ops["ops-svc"]
-        trust["trust-svc"]
+flowchart TD
+    subgraph Clients["1. 클라이언트 및 단말 엣지 계층"]
+        direction LR
+        WEB["웹 브라우저 (대기실 / 예매창)"]
+        APP["모바일 앱 (티켓 월렛)"]
+        SCAN["현장 스캐너 단말"]
+        IDB[("IndexedDB 단말 저장소<br/>- 비대칭 개인키 (서버 전송 0건)<br/>- 오프라인 검표용 공개키 패키지<br/>- 현장 스캔 큐 (오프라인 판정)")]
+        WEB & APP & SCAN <--> IDB
     end
-    rq[("Redis 대기열")]
-    rs[("Redis 좌석")]
-    rc[("Redis 세션·캐시")]
-    subgraph aur["Aurora PostgreSQL 클러스터 다섯"]
-        pgp[("purchase")]
-        pgy[("payment")]
-        pgt[("ticket")]
-        pgo[("ops 전용")]
-        pgs[("공유: identity·core 논리 DB")]
+
+    subgraph EdgeDelivery["2. 엣지 캐시 & 전송망 계층"]
+        direction TB
+        CDN["CloudFront CDN<br/>- 1,000구간 대기순번 정적 JSON<br/>- 로비 셔플 분할 파일 (36 Gbps)<br/>- 좌석맵 SVG & 아티스트 포스터"]
+        RGW["realtime-gw (웹소켓 게이트웨이)<br/>5,000개 클라이언트 연결 수용"]
     end
-    tokyo[("도쿄 보조 클러스터")]
-    ktr["Kafka 거래·제어"]
-    ktl["Kafka 텔레메트리"]
-    wk["스트림 작업자 넷"]
-    ch[("ClickHouse")]
-    s3[("S3 버킷")]
-    cdn["CDN과 공개 S3"]
-    dev[("기기 저장소")]
-    qa --> rq
-    pur --> rs
-    rgw -->|"구독만"| rs
-    pur --> pgp
-    pay --> pgy
-    tkt --> pgt
-    pgt -->|"교차 리전 복제"| tokyo
-    ops --> pgo
-    idn --> pgs
-    core --> pgs
-    idn --> rc
-    core --> rc
-    trust --> rc
-    aur -->|"Outbox 릴레이"| ktr
-    rs -->|"Stream 릴레이"| ktr
-    svc -->|"텔레메트리"| ktl
-    ktr -->|"사건 받기"| svc
-    ktr --> wk
-    ktl --> wk
-    wk --> ch
-    ops -->|"읽기"| ch
-    ch -->|"회차 동결·일 백업"| s3
-    core -->|"좌석맵·이미지 게시"| cdn
-    cdn -->|"좌석맵 캐시"| dev
-    tkt -->|"회차 목록·월렛 데이터"| dev
+
+    subgraph InvertedMemory["3. 초고속 인메모리 계층 (ElastiCache Valkey 8.1+)"]
+        direction TB
+        RC_Q[("Redis 대기열 클러스터 (q:*)<br/>- seq (INCRBY 2ms 배치)<br/>- removed (125KB 비트맵)<br/>- 1인 1순번 dup/adm")]
+        RC_S[("Redis 좌석 클러스터 (s:*)<br/>- bitmap (6.25KB 비트맵)<br/>- hold (단일 슬롯 HASH)<br/>- SPUBLISH 구역별 델타 전파")]
+        RC_C[("Redis 세션·캐시 클러스터 (id:*, tr:*)<br/>- 사용자 세션, 전역 속도제한<br/>- noeviction 무음 유실 방어")]
+    end
+
+    subgraph RDBMS_OLTP["4. ACID 원장 계층 (Aurora PostgreSQL 18.x - 5개 독립 클러스터)"]
+        direction TB
+        PGB["PgBouncer 트랜잭션 풀러 계층 (AZ별 3개 복제)"]
+        
+        subgraph Clusters["5개 물리 독립 클러스터"]
+            direction LR
+            DB_PUR[("purchase DB<br/>주문·판매·1인한도<br/>(seat_sale 부분인덱스)")]
+            DB_PAY[("payment DB<br/>결제·정산·지급<br/>(외부 PG사 격리)")]
+            DB_TKT[("ticket DB<br/>티켓소유권·게이트입장<br/>(현장 가용성 수호)")]
+            DB_OPS[("ops DB (전용)<br/>운영명령·감사체인<br/>(오픈 직전 p95 500ms)")]
+            DB_SHR[("shared DB (논리 분리)<br/>identity / core 논리 DB<br/>(교차 외래키 조인 금지)")]
+        end
+        PGB --> Clusters
+    end
+
+    subgraph DR_Replica["5. 도쿄 DR 보조 리전"]
+        DB_TOKYO[("ticket DB 글로벌 복제본<br/>(RPO 약 1초 티켓 원장 보존)")]
+    end
+
+    subgraph EventStream["6. 분산 이벤트 스트리밍 계층 (Amazon MSK 3.x)"]
+        direction TB
+        RELAY["Transactional Outbox 릴레이 파드<br/>(K8s Lease 단일 리더 100ms 폴링)"]
+        KF_TR["Kafka trade.* & control.* (거래/제어 클러스터)"]
+        KF_TL["Kafka telemetry.* (관측/신호 클러스터)"]
+    end
+
+    subgraph StreamWorkers["7. 무상태 스트림 워커 계층 (TypeScript 파드)"]
+        direction LR
+        W_OPS["ops-rt 워커<br/>(0.25초 마이크로배치)"]
+        W_ING["analytics-ingest 워커<br/>(KMS HMAC 회차별 가명화)"]
+        W_INV["inv-ingest 워커<br/>(부정 예매 이상행위)"]
+    end
+
+    subgraph OLAP_Archive["8. 대규모 분석 & 콜드 아카이브 계층"]
+        direction TB
+        subgraph ClickHouseEngine["ClickHouse 26.8 LTS 분석 클러스터"]
+            CH_RT[("rt.* 실시간 관제 표<br/>(p95 5초 반영, 잠정 수치)")]
+            CH_MED[("메달리온 파이프라인<br/>Bronze(90일) ──> Silver(90일) ──> Gold(2년)")]
+            CH_INV[("inv.* 부정 예매 조사 저장소")]
+        end
+        
+        subgraph ColdStorage["AWS S3 & 불변 아카이브"]
+            S3_PARQUET[("회차별 동결 Parquet 아카이브<br/>(ClickHouse s3() 조회, 영구 보존)")]
+            S3_WORM[("WORM 감사 앵커 버킷 (변조 불가)")]
+        end
+    end
+
+    %% 연결 플로우
+    WEB & APP -->|"정적 파일 & 대기 순번 캐시 조회"| CDN
+    WEB -->|"티켓 오픈 순간 진입 (20만 RPS)"| RC_Q
+    CDN -.->|"1,000구간 상태 파일 갱신 (초당 1,000건)"| RC_Q
+    
+    RC_Q -->|"입장 제어 (초당 28명)"| RC_S
+    WEB <-->|"구역별 좌석 델타 웹소켓"| RGW
+    RC_S -->|"SPUBLISH (샤드 내부 전파)"| RGW
+    
+    RC_S -->|"선점 성공 좌석 결제 요청"| PGB
+    Clusters -->|"트랜잭션 커밋 내 Outbox 삽입"| Clusters
+    Clusters --> RELAY
+    RELAY -->|"최소 한 번 전송 (acks=all)"| KF_TR
+    
+    DB_TKT -.->|"교차 리전 비동기 스토리지 복제"| DB_TOKYO
+    
+    KF_TR & KF_TL --> W_OPS & W_ING & W_INV
+    W_OPS --> CH_RT
+    W_ING --> CH_MED
+    W_INV --> CH_INV
+    
+    CH_MED -->|"회차 동결 (Freeze)"| S3_PARQUET
+    DB_OPS -.->|"감사 체인 해시 앵커링"| S3_WORM
+    
+    SCAN -->|"오프라인 판정 후 스캔 큐 전송"| PGB
 ```
 
-| 상자 | 한 줄 설명 | 근거 |
-| --- | --- | --- |
-| Redis 대기열 | 순번, 1인 1순번 키, 로비 참가자, 셔플 결과, 빠진 번호 비트맵(값 하나를 1비트로 적은 표), 입장 자리 | data.md §1 |
-| Redis 좌석 | 좌석 비트맵, 홀드(결제하는 동안 좌석을 잠시 잡아 두기), 1인 보유 수, 구매 세션, 변경 채널. realtime-gw는 채널 구독만 한다 | data.md §1 |
-| Redis 세션·캐시 | 로그인 세션, 요청 수 제한 카운터, 읽기 캐시, 봇 판정 피처. 여러 서비스가 키 접두사와 권한으로 나눠 쓴다 | data.md §1 |
-| Aurora 다섯 | purchase(주문·판매), payment(결제·정산), ticket(티켓·입장), ops 전용(운영 명령·감사·CS 곧 고객 지원), 공유(identity·core 논리 DB). 공유 클러스터의 논리 DB끼리도 교차 참조와 외래키(다른 표의 행을 가리키는 칸과 그 제약) 조인을 금지한다 | data.md §1 |
-| 도쿄 보조 클러스터 | ticket만 다른 리전(데이터센터가 모인 지역)에 읽기 인스턴스 1대로 복제한다. 티켓 원장 보존(RPO, 잃어도 되는 시간 폭이 약 1초)과 복구 기준점이고, 리전 장애 당일 읽는 서비스는 없다 | data.md §1, infra §6 |
-| Kafka 둘 | 거래·제어 클러스터(`trade.*`, `control.*`)와 텔레메트리 클러스터(`telemetry.*`, `investigation.requests`). 핵심 제어 명령은 Kafka가 아니라 제어 gRPC(서비스끼리 함수를 부르듯 호출하는 통신 방식)로 간다. 관측 전용 셋째 클러스터는 데이터를 두지 않아 뺐다 | data.md §1, ADR-0143 |
-| Outbox·Stream 릴레이 | Outbox는 보낼 사건을 상태를 바꾸는 같은 트랜잭션(모두 반영하거나 모두 취소하는 작업 단위)으로 표에 적었다가 릴레이가 100ms `[가정]`마다 보내는 방식이다. 좌석 Redis는 Stream 키가 같은 구실을 한다 | data.md §3·§4의 7 |
-| 스트림 작업자 넷 | Kafka를 읽어 ClickHouse에 쓰는 `analytics-ingest`·`ops-rt`·`trust-reassess`·`inv-ingest`. 파일은 마감 실행기 `close-runner`가 싣는다 | streaming §1, analytics §3.2 |
-| ClickHouse | `rt`(관제 잠정 숫자), `bronze`·`silver`·`gold`(분석), `trust`, `inv`(부정 예매 조사), 법정 접속기록 DB | data.md §1 |
-| S3·CDN·기기 | S3는 아카이브·백업·법정 사본·증거(§6). CDN은 좌석맵·랭킹·이미지 같은 공개 파일. 기기 저장소는 IndexedDB(브라우저 안의 저장소)의 월렛 서명 데이터, 꺼낼 수 없는 기기 개인키, 스캐너 회차 목록과 스캔 큐 | data.md §1 |
+---
 
-감사 기록 사본이 S3 감사 앵커 버킷에 남는 선(infra §6)은 선 수를 25개 안에 두려고 뺐다.
+## 4. 전사 저장소별 정량 제원 및 가용성 매트릭스
 
-## 2. 숫자로 본 전체
+PEAKET의 전사 데이터베이스는 **152개 PostgreSQL 테이블, 67개 Redis 키 네임스페이스, 24개 ClickHouse 분석 테이블, S3 및 단말 IndexedDB**로 구성된다.
 
-센 방법: PostgreSQL은 data.md §2 일곱 ERD(표와 관계를 그린 그림)의 표 152개다. 칸을 적은 상자(`이름 {`) 147개에, 칸 정의 없이 관계선에만 나오는 다섯(`price_tier`·`event_seat_price`는 ②, `webhook_receipt`는 ④, `ticket_addon`은 ⑤, `product_stock`은 ⑥)을 더했다. DB는 data.md §1로 나눴다. 서비스마다 두는 공통 표(Outbox, 같은 요청을 한 번만 처리하게 남기는 멱등 기록 `idempotency_record`, 보류 표 `held_event`, 병합 대응표 `merged_account`)와 ERD 밖의 `pg_switch`는 넣지 않았다(§11). Redis는 data.md §3 키 표의 줄 수이고, 키가 둘 적힌 줄도 한 줄로 셌다. ClickHouse는 정본이 이름을 적은 표만 셌다. 성능 숫자는 서비스 수준으로 잰 적이 없어 `[실측 전]`이고, '실측(PC)'은 기반 PoC(본 개발 전에 위험한 부품만 먼저 재 보는 시험)를 PC 한 대에서 잰 숫자다([ADR-0176](../../adr/0176-foundation-poc-results.md)).
+| 저장소 식별자 | 물리 구성 및 엔진 | 테이블 / 키 규모 | 담당 도메인 및 핵심 엔티티 | 피크 처리량 | 장애 시 목표 RPO / RTO |
+| :--- | :--- | :---: | :--- | :--- | :--- |
+| **PG purchase** | Aurora r7g.xlarge<br/>쓰기 1 + 읽기 1 | **17개 테이블**<br/>(`docs/data.md` §2 ③) | `purchase_order`, `order_item`, `seat_sale`, `purchase_quota`, `seat_hold` | 정상 28 TPS,<br/>결제 300 TPS | **AZ 장애: RPO 0 / RTO 5분**<br/>리전 재해: RPO 24h / RTO 12h |
+| **PG payment** | Aurora r7g.large<br/>쓰기 1 + 읽기 1 | **15개 테이블**<br/>(`docs/data.md` §2 ④) | `payment`, `payment_attempt`, `pg_settlement`, `payment_cancel` | 피크 300 TPS | **AZ 장애: RPO 0 / RTO 5분**<br/>외부 PG사 거래 대사 복구 |
+| **PG ticket** | Aurora r7g.large<br/>쓰기 1 + 읽기 1<br/>+ 도쿄 리전 1대 | **13개 테이블**<br/>(`docs/data.md` §2 ⑤) | `ticket`, `device_key`, `scan_event`, `gate_pass`, `ticket_transfer` | 분당 60명/게이트<br/>(NFR-010) | **AZ: RPO 0 / RTO 5분**<br/>**리전 재해: RPO ~1초 / RTO 1h** |
+| **PG ops (전용)** | Aurora r7g.large<br/>쓰기 1 + 읽기 1 | **37개 테이블**<br/>(`docs/data.md` §2 ⑦) | `command_event`, `audit_chain`, `cs_case`, `settlement_review` | 접수 p95 500ms<br/>(NFR-008) | **AZ 장애: RPO 0 / RTO 5분**<br/>WORM 감사 앵커 보존 |
+| **PG shared**<br/>(공유 클러스터) | Aurora r7g.large<br/>쓰기 1 + 읽기 1 | **70개 테이블**<br/>(identity 21 + core 49) | `account`, `identity_verification`, `production`, `event`, `section`, `seat` | 읽기 수천 QPS<br/>(CDN이 99% 흡수) | **AZ 장애: RPO 0 / RTO 5분**<br/>논리 DB 스키마 분리 |
+| **Redis 대기열** | Valkey 8.1+ 클러스터<br/>3 샤드 $\times$ 1 복제본 | **31개 키 패턴**<br/>(`q:*` 네임스페이스) | `q:{event:E}:seq`, `serving`, `removed`, `q:dup:{pid}:E`, `lobby_members` | **피크 20만 RPS**<br/>(진입 순번 발급) | **RPO 수백 ms / RTO 30초**<br/>`noeviction` 메모리 정책 |
+| **Redis 좌석** | Valkey 8.1+ 클러스터<br/>3 샤드 $\times$ 1 복제본 | **19개 키 패턴**<br/>(`s:*` 네임스페이스) | `s:{event:E}:bitmap`, `hold:{seat}`, `quota:{account}`, `sec:{section}` | **피크 2,000 TPS**<br/>(원자적 Lua 홀드) | **RPO 수백 ms / RTO 30초**<br/>PG 부분인덱스가 최종 방어 |
+| **Redis 세션·캐시** | Valkey 8.1+ 클러스터<br/>3 샤드 $\times$ 1 복제본 | **17개 키 패턴**<br/>(`id:*`, `tr:*` 등) | `id:sess:{sid}`, `tr:rate:{ip}`, `tr:block:*`, `shop:{prod}:resv` | 초당 수만 QPS | **RPO 비동기 지연분 / RTO 30초**<br/>Class A/B/C 유실 등급 운용 |
+| **ClickHouse** | ClickHouse 26.8 LTS<br/>Keeper 3중화 클러스터 | **24개 분석 테이블**<br/>(rt 5, 메달리온 19) | `rt.sale_event`, `bronze.trade_event`, `silver.ticket_sales`, `gold.fct_*` | 초당 1만~3만 건<br/>이벤트 일괄 적재 | **RPO 1일 / RTO 1시간**<br/>스냅샷 + Kafka 재읽기 복원 |
+| **AWS S3** | S3 표준 & 버킷 버전관리 | 수백만 객체 | 회차별 Parquet 아카이브, WORM 감사 로그, 정적 좌석맵 SVG 파일 | 수십 Gbps 대역폭 | 내구성 99.999999999% (11 9s)<br/>교차 리전 복제 (CRR) |
+| **단말 IndexedDB** | 브라우저/스캐너 로컬 | 단말별 수천 레코드 | 검표용 공개키 패키지, 기기 비대칭 개인키, 오프라인 스캔 큐 | 로컬 0ms 판정 | 단말 로컬 영구 상주<br/>서버 전송 0건 |
 
-| 저장소·논리 DB | 표·키 수 | 소유 서비스 | 성격 | 가장 바쁜 것 | 잃으면 |
-| --- | --- | --- | --- | --- | --- |
-| PG identity(공유) | 21(① 전부) | identity-svc | 계정·본인확인·동의·관리 계정 원장 | 오픈 직전 로그인·토큰 갱신(`session`), 숫자는 정본에 없음 | AZ(같은 리전 안 독립 데이터센터) 장애에 RPO 0, RTO(복구에 걸려도 되는 시간) 5분 |
-| PG core(공유) | 49(② 25 + ⑥ 23 + `takedown_action`) | core-svc | 공연·배치 설정 자료, 굿즈 주문·발송 원장, 후기·문의, 검색 읽기 모델(검색용으로 따로 만든 표) | 공연 정보 읽기. CDN·캐시가 먼저 받는다 | 위와 같다 |
-| PG purchase | 17(③ 전부) | purchase-svc | 주문·판매·1인 한도·홀드 원장·취소 | 판매 확정 초당 약 28건, `seat_hold` 적재 초당 약 500건 `[실측 전]` | AZ는 위와 같다. 리전 장애는 일 스냅샷(하루 한 번 찍은 전체 사본, RPO 24시간)과 결제사 대사(두 기록을 한 건씩 맞춰 보기) |
-| PG payment | 15(④ 전부) + `pg_switch` | payment-svc | 결제·취소·정산·지급·미수금 원장 | 결제 접수 피크 300 TPS(초당 처리 건수) `[실측 전]` | purchase와 같다 |
-| PG ticket | 13(⑤ 전부) | ticket-svc | 티켓 소유권·입장 원장 | `scan_event`. 판정 지연을 재는 부하 조건이 게이트당 분당 60명(NFR-010) | AZ는 위와 같다. 리전 장애에도 도쿄에 RPO 약 1초로 남는다 |
-| PG ops(전용) | 37(⑦에서 `takedown_action` 뺀 것) | ops-svc | 명령·감사·승인·CS·법적 요청·조사 기록 | 명령 접수 p95(100건 중 95건이 끝나는 시간) 500ms(NFR-008) `[실측 전]` | RPO 0·RTO 5분. `command_event` 일 WORM(고칠 수 없는) 사본, `audit_chain` 5분 앵커 |
-| Redis 대기열 | 31줄(`q:`) | queue-svc, admission-ctrl | 대기 상태와 사본. 영구 백업이 없다 | `q:{event:E}:seq` 키 하나에 초당 최대 20만 건의 번호 떼기. 순수 `INCR`은 p99(100건 중 99건이 끝나는 시간)가 기준 안이었지만(실측(PC)) 실제 진입 Lua는 넘어, 진입 서버 파드마다 2ms 묶음 `INCRBY`로 바꿨다(ADR-0179) | RPO 수백 ms 이내, RTO 30초 |
-| Redis 좌석 | 19줄(`s:`) | purchase-svc, realtime-gw(구독) | 홀드의 빠른 판정. 확정은 PG | 홀드 피크 초당 1,000~2,000건 `[실측 전]` | 위와 같다. 그 회차 구매를 503으로 미룬다 |
-| Redis 세션·캐시 | 17줄(`tr:` 9, `id:` 3, `scanner:` 2, `sup:` 2, `shop:` 1)과 이름 없이 적힌 묶음 | 여러 서비스 | 세션·캐시·판정 피처·짧은 코드 | 정본에 숫자 없음 | 키마다 유실 등급 A·B·C(§5) |
-| CH `rt` | 원시 표 5, 뷰 3 | `ops-rt`가 쓰고 ops-svc가 읽는다 | 관제 잠정 숫자 | 입력 합계 초당 약 1만 건, `rt.hold_attempt` 대형 회차당 약 720만 행 `[추정]` | ClickHouse 전체 RPO 1일·RTO 1시간 |
-| CH 분석 세 층 | 브론즈 이름 있는 표 11, 실버 7, 골드 사실 15·차원 12·관리 2 | 스트림 작업자, 마감 실행기 | 원본(가명: 추가 정보 없이는 누구인지 모르게 바꾼 값) → 정리본 → 집계본 | 토픽 10개를 싣는다 | 스냅샷 복원 뒤 Kafka를 다시 읽는다 |
-| CH `trust`·`inv`·접속기록 | 1, 4, 표 이름은 정본에 없음 | `trust-reassess`, `inv-ingest`, 로그 파이프라인 | 행동 신호 원시, 실명 조사 기록, 법정 접속기록 | 정본에 숫자 없음 | `inv`의 백업 포함 여부는 열린 일 97번 |
-| S3 | 버킷 묶음 9 | 데이터 작업, core-svc 등 | 아카이브·백업·법정 사본·공개 파일 | — | 버전 관리, 백업 버킷은 다른 리전 복제 |
-| 기기 저장소 | 항목 9 | 클라이언트 | 오프라인 입장과 기기 키 | — | 재인증 뒤 재발급, 입장 시작 뒤엔 부스 재발급 |
+---
 
-숫자 출처: PG 쓰기량은 architecture §9.1·ADR-0028, Redis는 architecture §9.1, ClickHouse 입력은 streaming §11, RPO·RTO는 infra §6이다.
+## 5. 엔드-투-엔드 데이터 흐름 (End-to-End Data Lifecycle)
 
-## 3. PostgreSQL 일곱 묶음
-
-data.md §2는 한 그림의 글자 수 한도 때문에 ERD를 업무 묶음 일곱으로 나눴다(ADR-0138). 묶음은 DB 단위가 아니어서 ⑦의 `takedown_action`은 core DB에 있다. 그림은 이름만 그렸고, 선 이름 'ID만'은 다른 DB라 외래키 없이 ID만 두는 관계다. 다른 묶음의 표는 이음 상자로만 넣었다. '(칸 정의 없음)'은 관계선에만 나오는 다섯이다. 칸은 표 사전 13의 같은 번호 묶음에 있다.
-
-### ① 계정과 관리 계정(identity DB, 21)
-
-팬 계정, 로그인 수단, 본인확인 결과(연계정보, 곧 본인확인 기관이 주는 사람마다 하나인 값의 HMAC과 사람 식별자 `pid`. HMAC은 비밀 키로 만든 되돌릴 수 없는 확인 값이다), 동의, 세션, 기기를 담는다. 2026-11-03에 세션 생성 멱등 키(10분 `[가정]`), 발급한 리프레시 토큰 해시(재사용 탐지), 본인확인 건의 세 표가 더해졌다. 관리 계정과 그 인증 수단, 현장 스태프 배정과 스캐너 세션도 있다. 원장은 `account`와 `identity_verification`이다.
+티켓 오픈 순간부터 공연 종료 후 정산 아카이빙까지의 전사 데이터 흐름은 다음 5단계 파이프라인으로 연결된다:
 
 ```mermaid
-erDiagram
-    account ||--o{ session : ""
-    session ||--o{ session_create_key : ""
-    session ||--o{ refresh_token_hash : ""
-    account ||--o{ device : ""
-    account ||--o| identity_verification : "본인확인"
-    account ||--o{ verification_attempt : ""
-    account ||--|{ account_provider : "로그인 수단"
-    account ||--o{ consent : ""
-    account ||--o{ account_merge : ""
-    account ||--o{ account_hold : ""
-    account ||--o{ account_contact_ref : ""
-    account ||--o{ identity_conflict_attempt : ""
-    account |o--o{ restricted_ci_hold : ""
-    account ||--o{ booth_reverification : ""
-    account ||--o{ staff_assignment : ""
-    event ||--o{ staff_assignment : "ID만"
-    staff_assignment ||--o{ scanner_session : ""
-    scanner_device ||--o{ scanner_session : "ID만"
-    admin_account }o--|| promoter : "ID만"
-    admin_account ||--o{ admin_passkey : ""
-    admin_account ||--o{ admin_recovery_code : ""
-    admin_account ||--o{ admin_designation : ""
+sequenceDiagram
+    autonumber
+    participant Fan as "사용자 브라우저"
+    participant CDN as "CloudFront CDN"
+    participant RQ as "Redis 대기열"
+    participant RS as "Redis 좌석"
+    participant PG as "PostgreSQL 원장"
+    participant Outbox as "Transactional Outbox"
+    participant Kafka as "Kafka 브로커"
+    participant Worker as "TypeScript 스트림 워커"
+    participant CH as "ClickHouse OLAP"
+    participant S3 as "AWS S3 아카이브"
+
+    %% 1. 대기 및 입장
+    Fan->>RQ: 1. 티켓 오픈 순간 진입 (20만 RPS, INCRBY 마이크로배치)
+    RQ-->>Fan: 2. 대기 순번 및 토큰 반환
+    Fan->>CDN: 3. 대기 상태 폴링 (1,000구간 정적 JSON, 98% 엣지 캐시 히트)
+    RQ->>Fan: 4. 차례 도달 시 입장 토큰 발급 (초당 28명 정속 제어)
+
+    %% 2. 좌석 선점
+    Fan->>RS: 5. 좌석 클릭 (단일 슬롯 원자적 Lua 실행, 비트맵 검사)
+    RS-->>Fan: 6. 좌석 선점 성공 (Soft Hold 7분 TTL, p99 50ms)
+
+    %% 3. 결제 및 판매 확정
+    Fan->>PG: 7. 결제 접수 (seat_sale PENDING 선삽입, 부분유니크 인덱스 검증)
+    Note over PG: 8. 외부 PG 승인 성공 후<br/>단일 ACID 로컬 트랜잭션 완결:<br/>- seat_sale = 'SOLD'<br/>- purchase_order = 'APPROVED'<br/>- outbox 테이블 이벤트 INSERT
+    
+    %% 4. 비동기 이벤트 전파
+    Outbox->>Kafka: 9. K8s Lease 단일 릴레이가 100ms마다 Kafka로 발행 (acks=all)
+    
+    %% 5. 분석 적재 및 아카이빙
+    Kafka->>Worker: 10. 스트림 워커가 이벤트 소비 (KMS HMAC 회차별 가명화)
+    Worker->>CH: 11. ClickHouse Bronze/Silver 적재 & rt 테이블 5초 대시보드 반영
+    Note over CH: 12. 회차 마감 (R0~R3) 후<br/>Gold 스타 스키마 확정
+    CH->>S3: 13. 동결(Freeze) 완료 회차 Parquet 파일 내보내기 (영구 보존)
 ```
 
-모든 표: `account`, `identity_verification`, `verification_attempt`, `account_provider`, `account_merge`, `account_hold`, `consent`, `session`, `refresh_token_hash`, `session_create_key`, `device`, `account_contact_ref`, `identity_conflict_attempt`, `restricted_ci_hold`, `admin_account`, `admin_passkey`, `admin_recovery_code`, `admin_designation`, `booth_reverification`, `staff_assignment`, `scanner_session`
+1. **대기열 통제 계층**:
+   - 20만 RPS의 오픈 진입은 Redis 대기열 클러스터의 `INCRBY` 마이크로 배치로 처리되고, 대기 순번 조회는 CloudFront CDN의 1,000명 단위 파일 캐싱(오리진 부하 98% 삭감)이 전담한다.
+2. **좌석 선점 계층**:
+   - admission-ctrl을 통해 초당 28명씩 입장한 사용자는 Redis 좌석 클러스터의 단일 샤드 Lua 스크립트를 호출하여 6.25 KB 비트맵과 홀드 해시를 50ms 이내에 원자적으로 선점(Soft Hold)한다.
+3. **ACID 원장 확정 계층**:
+   - 결제 승인이 완료되면 purchase DB에서 `seat_sale` 부분 유니크 인덱스를 통해 최종 판매(`SOLD`)를 확정하고, 주문 원장(`purchase_order`)과 1인 예매 한도(`purchase_quota`)를 단일 로컬 트랜잭션으로 갱신한다. 동일 트랜잭션 내에서 `outbox` 테이블에 이벤트를 적재한다.
+4. **비동기 이벤트 릴레이 계층**:
+   - K8s Lease 단일 리더 기반의 Outbox 릴레이가 100ms 간격으로 변경 사항을 읽어 Kafka 거래 클러스터(`trade.*`)로 최소 한 번(`acks=all`) 발행한다.
+5. **실시간 관제 및 정산 아카이브 계층**:
+   - TypeScript 스트림 워커(`analytics-ingest`)가 카프카 이벤트를 수신하여 KMS HMAC 회차별 가명화를 적용한 후 ClickHouse Bronze로 일괄 삽입한다.
+   - `rt` 테이블을 통해 5초 이내의 관제 지표를 서빙하고, 4단계 마감(R0~R3) 완료 후 Gold 스타 스키마 데이터를 Parquet 파일로 압축하여 S3에 영구 동결 보존한다.
 
-### ② 공연·회차·좌석 배치와 판매자(core DB, 25)
+---
 
-공연(`production`, 회차 묶음)과 회차(`event`), 배치(`venue` → `section` → `seat`), 회차별 등급, 판매자와 계약 조건, 판매 승인 판본, 판매 자격 명단, 홈 구성, 검색 읽기 모델을 담는다. 기준 표는 `event`다. 한 행이 자기 좌석 재고를 가진 회차 하나이고 Redis `{event:E}` 키 묶음의 단위와 같다(data.md §2). 25개라 배치·승인의 중심만 그렸다.
+## 6. 트레이드오프와 버린 대안 (Tradeoffs & Alternatives)
 
-```mermaid
-erDiagram
-    promoter ||--o{ production : ""
-    place ||--o{ production : "공연장"
-    production ||--|{ event : "회차"
-    production ||--o{ production_revision : "승인 판본"
-    production ||--o| search_document : ""
-    production ||--o{ sale_eligibility_list : ""
-    promoter ||--o{ promoter_contract : ""
-    promoter ||--o{ venue : "배치본"
-    venue ||--o{ section : ""
-    section ||--o{ seat : ""
-    venue ||--o{ event : ""
-    event ||--o{ price_tier : ""
-    event ||--o{ event_seat_price : ""
-    seat ||--o{ event_seat_price : ""
-    event ||--o{ kopis_report : ""
-```
+| 설계 결정 | 얻는 이점 (Gains) | 치르는 대가 (Costs) 및 완화책 |
+| :--- | :--- | :--- |
+| **5대 RDBMS 클러스터 물리 분리** | 결제, 티켓, 운영, 주문 간 장애 격리(Blast Radius 최소화) | 서비스 간 물리 FK 사용 불가 (논리 ID 참조 및 Outbox 비동기 정합성 유지) |
+| **비샤딩 단일 쓰기 스케일업** | 2PC 없는 로컬 ACID 트랜잭션 보장, 시스템 단순성 극대화 | 단일 노드 처리 한계선(3,000 TPS) 존재 (초과 시 공연 단위 셀 확장으로 대응) |
+| **3대 물리 Redis 클러스터 분리** | 대기열 정각 폭주가 좌석 예매 및 로그인 세션으로 전파되는 것 차단 | 관리할 ElastiCache 클러스터 인스턴스 3배 증가 |
+| **Transactional Outbox 100ms 폴링** | Debezium WAL 복제 슬롯 누수로 인한 DB 디스크 풀 위험 원천 차단 | 이벤트 전파에 최대 100~200ms의 폴링 지연 발생 (비즈니스 요구사항 내) |
+| **회차별 S3 Parquet 아카이빙** | ClickHouse 고비용 스토리지 70% 절감, 불변 감사 원장 수호 | 아카이빙된 과거 데이터의 개별 행 UPDATE 불가 (불변 원장이라 무관) |
 
-모든 표: `event`, `production`, `production_artist`, `artist`, `place`, `search_alias`, `search_document`, `search_term`, `search_removal`, `search_version`, `venue`, `section`, `home_banner`, `home_theme`, `home_theme_item`, `promoter`, `seat`, `kopis_report`, `sale_eligibility_list`, `sale_eligibility_member`, `production_revision`, `promoter_contract`, `seller_profile_change`, `price_tier`(칸 정의 없음), `event_seat_price`(칸 정의 없음)
+### 버린 대안
 
-### ③ 주문과 좌석 판매(purchase DB, 17)
+1. **단일 거대 PostgreSQL 인스턴스에 모든 도메인 통합**:
+   - 운영할 DB가 하나라 단순하지만, 티켓 오픈 순간의 로그인 및 좌석 경합 부하가 현장 게이트 입장이나 관리자 긴급 취소 명령까지 블로킹하므로 기각.
+2. **Debezium 기반의 WAL CDC 파이프라인 (ADR-0116)**:
+   - Kafka 장애 시 PostgreSQL의 복제 슬롯이 WAL 로그를 끝없이 보관하여 DB 스토리지 고갈 및 전사 셧다운을 유발하므로, K8s Lease 단일 리더 기반의 안전한 Outbox 폴링 릴레이로 대체.
+3. **멀티 리전 액티브-액티브 RDBMS 구성 (ADR-0031)**:
+   - 서울과 도쿄 간 물리적 네트워크 RTT(30ms 이상)로 인해 좌석 홀드 및 결제 승인의 p99 50ms 달성이 불가능하고 상시 비용이 3배로 증가하므로, 단일 리전 액티브 + 도쿄 ticket DR 비동기 복제로 확정.
 
-주문의 지금 상태와 덧붙이기만 하는 이력, 좌석 판매 행, 1인 한도 행, 홀드 원장, 결제 시도, 발권 재시도, 취소·회차 취소·배상, 판매 일시정지와 회차 판매 상태를 담는다. 원장은 `purchase_order`(+`order_event`)와 `seat_sale`이고, 같은 좌석을 두 번 팔지 않게 하는 부분 유니크 인덱스(조건에 맞는 행끼리만 같은 값을 막는 색인)가 `seat_sale`에 있다([DB 설계 편 4](04-no-double-sale.md)).
+---
 
-```mermaid
-erDiagram
-    account ||--o{ purchase_order : "ID만"
-    event ||--o{ purchase_order : "ID만"
-    purchase_order ||--o{ order_item : ""
-    purchase_order ||--o{ order_event : "상태 이력"
-    purchase_order ||--o{ order_idempotency : ""
-    purchase_order ||--o{ payment_attempt : ""
-    purchase_order ||--o{ seat_sale : ""
-    event ||--o{ seat_sale : "ID만"
-    event ||--o{ seat_hold : "ID만"
-    account ||--o{ purchase_quota : "ID만"
-    purchase_order ||--o| ticket_issue_job : ""
-    purchase_order ||--o{ order_cancellation : ""
-    purchase_order ||--o{ compensation : ""
-    event ||--o{ priority_grant : "ID만"
-    event ||--|| event_sale : "ID만"
-    event ||--o{ event_cancellation_request : "ID만"
-    event_cancellation_request ||--o{ order_cancellation : ""
-    event_cancellation_request ||--o{ event_cancellation_approval : ""
-    event_cancellation_request ||--o{ event_refund_pg_part : ""
-    sale_control
-```
+## 7. 핵심 꼬리 질문 5단 방어 (Staff Interview Q&A)
 
-모든 표: `purchase_order`, `order_idempotency`, `order_event`, `seat_sale`, `seat_hold`, `priority_grant`, `purchase_quota`, `sale_control`, `event_sale`, `payment_attempt`, `ticket_issue_job`, `order_cancellation`, `event_cancellation_request`, `event_refund_pg_part`, `compensation`, `order_item`, `event_cancellation_approval`
+| 질문 단계 | 심층 질문 | 방어 논리와 기술적 근거 | 관련 정본 |
+| :--- | :--- | :--- | :--- |
+| **1단: 왜 (Why)** | 152개 테이블을 굳이 5개 PostgreSQL 클러스터로 쪼갠 근거는 무엇인가요? 처리량 때문인가요? | 처리량 때문이 아니라 **'장애 격리 반경(Blast Radius)의 최소화'** 때문입니다. 정상 상태 판매 쓰기는 28 TPS에 불과하여 단일 노드로 충분합니다. 하지만 오픈 순간 로그인 트래픽(identity)이 폭증하거나 외부 PG사 연동(payment)에 장애가 발생하더라도, 현장 게이트 입장(ticket)과 관리자의 긴급 판매 중단 명령(ops)은 100% 정상 작동해야 합니다. 물리 인스턴스를 분리하여 한 도메인의 장애가 전사 셧다운으로 번지는 것을 원천 차단했습니다. | `docs/data.md` §1, `ADR-0028` |
+| **2단: 대안 (Alternatives)** | DB와 Redis 간 데이터 동기화에 왜 널리 쓰이는 CDC(Debezium)를 쓰지 않고 Outbox 폴링을 선택했나요? | CDC는 DB 엔진의 WAL 복제 슬롯에 의존합니다. 만약 다운스트림 카프카 브로커에 일시적 장애가 발생하면 PostgreSQL은 WAL 세그먼트를 디스크에 계속 쌓아두게 되며, 결국 DB 디스크가 100% 가득 차서 데이터베이스 자체가 크래시됩니다. 반면 K8s Lease 기반의 100ms Outbox 폴링 릴레이는 카프카가 죽더라도 DB 트랜잭션에 아무런 악영향을 주지 않고 안전하게 큐잉할 수 있어 복원력이 압도적입니다. | `ADR-0116`, `docs/data.md` §4 |
+| **3단: 장애 대응 (Resilience)** | 서울 리전의 가용 영역(AZ) 1곳이 전면 정전으로 다운되면 전체 저장소들은 어떻게 복구됩니까? | PostgreSQL 5개 클러스터는 3개 AZ에 걸쳐 동기식 스토리지 복제(Aurora Storage Quorum 4/6)를 유지하므로 커밋된 데이터의 RPO는 0입니다. 30초 내에 살아있는 AZ의 Reader가 Writer로 승격되어 RTO 5분 이내에 자동 복구됩니다. Redis 3개 클러스터 역시 다중 AZ 복제본으로 30초 내 페일오버되며, 일시 유실된 홀드는 PostgreSQL 부분 유니크 인덱스가 오버셀을 100% 차단합니다. | `docs/infra.md` §6, NFR-015 |
+| **4단: 수치 근거 (Numbers)** | 5년 누적 1.2억 행의 PostgreSQL과 수 TB의 ClickHouse를 유지할 때의 총 인프라 비용과 리소스 효율은 어떠한가요? | PostgreSQL 5개 클러스터의 5년 총 데이터 용량은 80 GB 미만으로 인스턴스 버퍼 풀에 핫 데이터가 90% 이상 상주하여 추가 스토리지 비용이 거의 들지 않습니다. 대규모 이벤트 로그(수십억 건)는 ClickHouse의 LZ4 열 지향 압축을 통해 수 TB로 압축 수용하고, 마감된 회차는 저비용 S3 Parquet(GB당 월 $0.023)로 내보내어 인프라 스토리지 TCO를 70% 이상 절감했습니다. | `architecture §9.5`, `docs/features/analytics.md` §11 |
+| **5단: 실측과 검증 (Verification)** | 152개 테이블과 67개 Redis 키 간의 전사 종단간(End-to-End) 정합성은 어떻게 검증됩니까? | 전사 카오스 부하 테스트(S-T1, S-T8, S-T10) 환경에서 20만 RPS 진입, 2,000 TPS 좌석 경합, PG사 네트워크 단절을 동시 주입합니다. 부하 종료 후 자동 실행되는 '전사 불변식 검증기(S-T2)'가 ① Redis 좌석 비트맵과 PG `seat_sale` 일치 여부, ② `purchase_order`와 `payment` 간 원 단위 정산 일치 여부, ③ ClickHouse Gold 수치 대조를 전수 수행하여 단 1건의 오차도 없음을 단언(Assert)합니다. | `docs/verification.md` §2.1·§9 |
 
-### ④ 결제와 정산(payment DB, 15)
+---
 
-결제 원장과 사건 순번, 웹훅(상대 서버가 우리 주소를 불러 알려 주는 방식) 수신 기록, 취소, 결제사별 새 결제 진입 정지, 결제사 대사, 정산서와 그 판의 계산 원본 목록·이의·조정, 지급 묶음·지급 건, 미수금을 담는다. 원장은 `payment`(+`payment_event`)와 `settlement_statement`·`payout`이다. 주문당 결제 1건은 `payment.order_id` 유일 제약이 지킨다.
+## 8. 30초 아키텍처 브리핑 (Staff Engineer Summary)
 
-```mermaid
-erDiagram
-    purchase_order ||--o| payment : "ID만"
-    payment ||--o{ payment_event : "사건 순번"
-    payment ||--o{ payment_cancel : ""
-    payment ||--o{ webhook_receipt : ""
-    payment_entry_pause ||--o{ payment_entry_trial : ""
-    promoter ||--o{ settlement_statement : "ID만"
-    settlement_statement ||--o{ statement_source : ""
-    settlement_statement ||--o{ statement_dispute : ""
-    settlement_statement ||--o{ statement_adjustment : ""
-    settlement_statement ||--o{ payout : ""
-    payout_batch ||--o{ payout : ""
-    promoter ||--o{ partner_receivable : "ID만"
-    partner_receivable ||--o{ receivable_movement : ""
-    settlement_statement ||--o{ receivable_movement : ""
-    reconciliation_run
-```
+> "PEAKET의 전사 데이터베이스 아키텍처는 **'도메인별 물리 격리된 5대 PostgreSQL 원장 클러스터'**, **'초고속 경합을 전담하는 3대 독립 Redis 클러스터'**, 그리고 **'대규모 OLAP을 담당하는 ClickHouse 메달리온 및 S3 Parquet 아카이빙'**의 완벽한 삼위일체로 요약됩니다.  
+> 대기열(20만 RPS)과 좌석 홀드(2,000 TPS)는 Redis의 비트맵과 단일 슬롯 원자적 Lua가 흡수하고, RDBMS는 리틀의 법칙에 의해 28 TPS로 정속 통제되므로 샤딩 없이 단일 쓰기 스케일업으로 완전한 ACID 무결성을 수호합니다.  
+> 서비스 간 물리 외래키를 배제하는 대신 Transactional Outbox와 Kafka 스트리밍을 통해 비동기 최종 일관성을 달성하고, 4단계 마감을 통해 원 단위 일치 정산 리포트를 불변 Parquet 파일로 동결함으로써 성능, 가용성, 정합성을 동시에 완성했습니다."
 
-모든 표: `payment`, `payment_event`, `payment_entry_pause`, `payment_entry_trial`, `payment_cancel`, `settlement_statement`, `statement_source`, `statement_dispute`, `statement_adjustment`, `payout_batch`, `payout`, `partner_receivable`, `receivable_movement`, `reconciliation_run`, `webhook_receipt`(칸 정의 없음)
+---
 
-### ⑤ 티켓과 현장 입장(ticket DB, 13)
+## 9. 정본에서 읽을 곳
 
-티켓(보유자와 결제자를 따로 둔다)과 부가 상품, 기기 공개키, 양도 요청, 게이트 스캔 기록, 스캐너 기기와 배치, 회차별 변경 일련번호와 카운터, 이상 표시, 부스 재발급 허용, 부정 예매 양도 잠금을 담는다. 원장은 `ticket`과 `scan_event`이고, 도쿄 보조 클러스터는 이 DB에만 있다.
-
-```mermaid
-erDiagram
-    order_item ||--o| ticket : "ID만"
-    ticket ||--o{ device_key : "기기 공개키"
-    ticket ||--o{ transfer_offer : ""
-    ticket ||--o{ scan_event : ""
-    scanner_device ||--o{ scan_event : ""
-    promoter ||--o{ scanner_device : "ID만"
-    scanner_device ||--o{ scanner_placement : ""
-    event ||--o{ scanner_placement : "ID만"
-    event ||--o{ scanner_change : "ID만"
-    event ||--|| scanner_seq : "ID만"
-    ticket ||--o{ gate_flag : ""
-    gate_flag ||--o{ gate_flag_scan : ""
-    ticket ||--o{ booth_authorization : ""
-    ticket ||--o{ ticket_addon : ""
-    event ||--o{ fraud_transfer_lock : "ID만"
-```
-
-모든 표: `ticket`, `transfer_offer`, `fraud_transfer_lock`, `device_key`, `scan_event`, `scanner_device`, `scanner_placement`, `scanner_change`, `gate_flag`, `booth_authorization`, `scanner_seq`, `gate_flag_scan`, `ticket_addon`(칸 정의 없음)
-
-### ⑥ 굿즈·알림·후기·문의(core DB, 23)
-
-상품 정의(유형별 속성은 JSON 칸 `attributes jsonb`)와 한정 재고, 굿즈 주문, 알림 발송 작업·중복 키·발송 기록, 대량 발송, 파트너 웹훅 발송 원장, 후기·사진·신고, 문의·소명, 찜·Web Push 구독을 담는다. 원장은 `merch_order`(+`merch_order_item`)와 발송 원장 `notification_job`·`notification_delivery`·`webhook_delivery`다. 발송 작업을 Redis가 아닌 DB에 두는 이유는 ADR-0109다. 23개라 중심만 그렸다.
-
-```mermaid
-erDiagram
-    product_type ||--o{ product : "유형"
-    product ||--o| product_stock : "한정 수량"
-    product ||--o{ merch_order_item : ""
-    product_stock ||--o{ merch_order_item : ""
-    account ||--o{ merch_order : "ID만"
-    merch_order ||--o{ merch_order_item : ""
-    product ||--o{ pickup_slot : ""
-    pickup_slot |o--o{ merch_order : ""
-    account ||--o{ notification_job : "ID만"
-    account ||--o{ notification_delivery : "ID만"
-    promoter ||--o{ webhook_endpoint : ""
-    webhook_endpoint ||--o{ webhook_delivery : "발송 원장"
-    purchase_order ||--o{ review : "ID만"
-    review ||--o{ review_image : ""
-    review ||--o{ content_report : ""
-    inquiry ||--|{ inquiry_message : ""
-```
-
-모든 표: `review`, `review_image`, `content_report`, `inquiry`, `inquiry_message`, `appeal`, `merch_order`, `merch_order_item`, `product`, `pickup_slot`, `product_type`, `webhook_endpoint`, `webhook_delivery`, `notification_job`, `notification_delivery`, `notification_subscription`, `notification_dedup`, `fraud_appeal_notice`, `wish`, `push_subscription`, `notification_broadcast`, `notification_broadcast_chunk`, `product_stock`(칸 정의 없음)
-
-### ⑦ 운영·CS·감사·법적 요청(ops DB 37, core DB 1)
-
-운영 명령 사건과 승인, 감사 해시 체인과 체크포인트, 승인 업무, CS 처리함, 예매 제한, 추가 검증 이의 심사, 법적 요청과 보안 사고, 접속기록 점검, 결정·가명정보 처리 기록, 관제 알림·경보 기록, 부정 예매 조사(기록 고정 → 후보 묶음 → 사건 → 증거 묶음)를 담는다. 원장은 `command_event`와 `audit_chain`이고, `command_event`는 이벤트 소싱(사건만 저장하고 상태는 사건에서 다시 만드는 방식)을 쓰는 유일한 곳이다(ADR-0113). 38개라 중심만 그렸다.
-
-```mermaid
-erDiagram
-    command_event ||--o{ command_approval : "2인 승인"
-    admin_account ||--o{ command_actor : "ID만"
-    cs_case |o--o{ approval_request : ""
-    approval_request ||--o{ approval_vote : ""
-    approval_request ||--o{ approval_summary_view : ""
-    cs_case |o--o{ takedown_action : "ID만"
-    takedown_notice ||--o{ takedown_action : "ID만"
-    data_request ||--o{ provision_ledger : ""
-    account ||--o{ booking_restriction : "ID만"
-    fraud_cluster_run ||--o{ fraud_cluster : ""
-    fraud_cluster ||--|{ fraud_cluster_member : ""
-    fraud_cluster ||--o| fraud_case : ""
-    fraud_case ||--o{ fraud_case_event : ""
-    fraud_case |o--o{ approval_request : ""
-    fraud_case ||--o{ evidence_bundle : ""
-    evidence_bundle ||--o{ evidence_custody_log : ""
-    audit_chain
-    audit_chain_head
-```
-
-모든 표: `takedown_notice`, `provision_ledger`, `takedown_action`(core DB), `command_event`, `audit_chain`, `audit_checkpoint`, `data_request`, `data_request_approval`, `security_incident`, `incident_filing`, `access_review`, `access_finding`, `admin_data_access`, `verification_case`, `approval_request`, `approval_summary_view`, `cs_case`, `booking_restriction`, `decision_record`, `demand_forecast`, `pseudonymization_log`, `audit_chain_head`, `ops_push_event`, `ops_presence`, `ops_alert_record`, `approval_vote`, `command_approval`, `fraud_snapshot`, `fraud_cluster`, `fraud_cluster_run`, `fraud_cluster_member`, `fraud_case`, `fraud_case_event`, `fraud_graph_node`, `external_post`, `evidence_bundle`, `evidence_custody_log`, `command_actor`
-
-**ERD 밖 공통 표**: Outbox(서비스 여섯, 큰 표를 하루치씩 나눈 조각인 일 파티션), `idempotency_record`(ticket·purchase·core·payment·ops, 24시간 `[가정]`), `held_event`(Kafka를 소비하는 각 서비스), `merged_account`(병합 사건을 받은 서비스)다(data.md §2 '서비스마다 둔 멱등 기록 표', §4의 7·9·15).
-
-## 4. 묶음 사이를 잇는 ID
-
-트랜잭션 하나는 한 서비스의 한 DB 안에서만 한다(data.md §4). 그래서 DB를 건너는 칸에는 외래키 없이 ID만 있고, Outbox 사건·gRPC·바뀌지 않는 값의 복사·고아 행(가리키는 대상이 없는 행) 지표로 맞춘다. '판 번호'는 상태를 바꿀 때마다 올리는 번호이고, 받는 쪽은 지금보다 큰 판만 반영한다.
-
-| ID | 만드는 곳 | 가리키는 곳 | 외래키가 없는 이유와 맞추는 법 | 근거 |
-| --- | --- | --- | --- | --- |
-| `account_id` | identity `account` | purchase `purchase_order`·`purchase_quota`, ticket `ticket`(보유자·결제자), core `wish`·`review`, ops `booking_restriction` | 'identity 논리 DB라 외래키 없음'. 병합은 `identity.accounts-merged` 사건을 받은 서비스가 맞춘다. 찜·알림 신청 같은 지금 값은 대표 계정으로 고치고, 원장은 고치지 않고 `merged_account`에 적는다. 병합 전 `CheckAccountMerge` gRPC로 막는 사유를 묻는다 | data.md §2 ⑥, §4의 9 |
-| `pid` | identity `identity_verification` | 대기열 `q:dup:{pid}:E`·`q:adm:{pid}:E`, `tr:hp:{pid}`, 액세스 토큰(로그인 뒤 요청마다 싣는 서명된 증표), ClickHouse `inv` | 다른 PostgreSQL DB에는 칸이 없고 키 이름과 액세스 토큰에 실린다. 조사 저장소 `inv`에는 그대로, 분석에는 회차마다 다른 가명으로 싣는다 | data.md §2 ①·'부정 예매 사후 조사의 표'·§3·§6, analytics §3.3 |
-| `event_id` | core `event` | purchase `seat_sale`·`event_sale`, payment `payment`·`settlement_statement`, ticket `ticket`·`scan_event`, ops `decision_record`·`fraud_case` | 'core 논리 DB라 외래키 없음'. Kafka 파티션 키(토픽을 나눈 칸을 고르는 키)이자 Redis 해시 태그(한 회차의 키를 한 슬롯에 모으는 표시)다. `payment.event_id`는 복사한다. 분석은 core가 오픈 30분 전에 내는 기준 자료 파일로 받는다 | data.md §1·§2, architecture §3.2, analytics §3.2 |
-| `production_id` | core `production` | core 안의 `event`·`wish`·`search_document` | 다른 DB로는 회차 ID로 간다. Kafka 키도 회차다. 검색의 판매 상태는 purchase `event_sale` 사건을 공연 단위로 모은 값이다 | architecture §3.2, data.md §2 ② |
-| `promoter_id` | core `promoter` | identity `admin_account`, payment `settlement_statement`·`partner_receivable`, ticket `scanner_device` | 'core 논리 DB라 외래키 없음'. 수수료율은 판매 승인 때 `event.commission_rate_bp`로 복사한다. `trade.settlements` 키가 파트너 ID다 | data.md §2 '복사한 칸 목록', docs/features/settlement.md §10 |
-| `order_id` | purchase `purchase_order` | payment `payment.order_id`(유일), core `review.basis_order_id`, ticket(발권 멱등) | 'purchase 논리 DB라 외래키 없음'. 결제는 gRPC와 `trade.payments`로 맞추고, 5초 `[가정]` 늦으면 `BatchGetPayments`로 당긴다. ticket DB에 주문 ID를 둘 칸은 정본에 없다(열린 일 92번, [DB 설계 편 3](03-core-tables.md) §9) | data.md §4의 2·3, payment §2 |
-| `ticket_id` | ticket `ticket` | purchase `order_item`·`order_cancellation`·`priority_grant`, identity `booth_reverification` | 'ticket DB라 외래 키 없음'. 발권 뒤 purchase가 채운다. 취소는 purchase가 이끄는 Saga(단계별로 처리하고 실패하면 앞 단계를 되돌리는 방식)로 맞춘다 | data.md §2 ③, §4의 8 |
-| `scanner_device_id` | ticket `scanner_device` | identity `scanner_session` | 'ticket 논리 DB라 외래키 없음' | data.md §2 ① |
-| `device_ref` | identity `device`(로그인 때) | `tr:*:{deviceRef}`, ClickHouse `inv_behavior`, ops 조사 | 같은 함수 `invRef(라벨, 값)`로 만든 가명이라 값이 같다. 분석 적재는 이 칸을 버려 분석과 조사를 잇지 않는다 | data.md §2 '부정 예매 사후 조사의 표', analytics §3.3 |
-| `cs_case.id` | ops `cs_case` | core `inquiry`·`content_report`·`appeal`·`takedown_action`의 `case_id` | 'ops 논리 DB라 외래키 없음'. core의 Outbox 사건 `support.cases-requested`로 ops가 건을 만들고, 결과는 core 내부 API로 반영한다. 고아 행 수를 하루 한 번 센다 | architecture §3.1, data.md §2 |
-| `fraud_case.id` | ops `fraud_case` | identity `restricted_ci_hold`, purchase `priority_grant`·`order_cancellation`, ticket `ticket.fraud_lock_case_id`, core `appeal`·`fraud_appeal_notice` | 'ops 논리 DB라 외래키 없음'. ops가 gRPC(`SetRestrictedCiHold`, `SetFraudAppealView` 등)로 알리고 받는 쪽은 큰 판만 반영한다 | data.md §2 ①·③·⑤·⑥ |
-| `booking_restriction.id` | ops `booking_restriction` | 사본 `q:rst:{account}`·`s:rst:{account}`·`sup:rst:{account}`, core `appeal` | 원본은 ops DB 하나다. `SetBookingRestriction`(queue-svc·purchase-svc)과 `SetBookingRestrictionView`(core-svc) gRPC를 받은 서비스가 큰 판만 사본에 쓴다 | data.md §1·§3 |
-
-## 5. Redis 세 클러스터
-
-세 클러스터는 모두 ElastiCache(AWS가 운영해 주는 Redis 호환 저장소) Valkey 8.1 이상이고, 샤드(키를 나눠 맡는 주 노드와 복제본 묶음) 3개 × 복제본 1개, 다중 AZ, 비동기 복제다(infra §4). 대기열 폭주가 좌석으로, 좌석 장애가 대기열로 번지지 않게 나눴다. 해시 태그 덕에 Lua 스크립트(Redis 안에서 한 번에 도는 짧은 프로그램) 하나가 한 회차의 여러 키를 원자적으로(중간 상태 없이) 바꾼다. 키마다 수명은 표 사전 14와 [DB 설계 편 8](08-redis-keys.md)에 있다.
-
-| 클러스터 | 키 묶음(줄 수) | 꼭 알 키 | 장애 조치로 잃는 것 | 지키는 것 |
-| --- | --- | --- | --- | --- |
-| 대기열 27 | 회차 단위 `q:{event:E}:*` 19, 사람·토큰 단위 7(`q:dup`·`q:lobby`·`q:adm`·`q:arr`·`q:appeal`·`q:prio`·`q:rst`), `q:{admission}:*` 1 | `seq`(순번), `q:dup:{pid}:E`(1인 1순번), `serving`(현재 입장 번호), `removed`(빠진 번호 125KB), `slots`(입장 자리) | 복제 안 된 마지막 쓰기. 순번이 겹칠 수 있다 | 새 주 노드가 순번을 건너뛰고 세대(장애 조치마다 올리는 번호)를 올린다(`skipped`). 입장 확정 때 `q:adm`으로 다시 본다. 리더(여러 복제 가운데 일을 맡은 하나)의 세대 `leader`가 옛 리더 쓰기를 거절한다(ADR-0056) |
-| 좌석 19 | 회차 단위 `s:{event:E}:*` 15, `s:ctl:events` 1, `s:jti`·`s:session`·`s:rst` 3 | `bitmap`(6.25KB), `hold:{seat}`(소유자·펜싱 토큰·만료), `quota:{account}`, `stream`, `epoch`(회차 세대). 펜싱 토큰은 늦게 온 옛 요청이 최신 값을 덮지 못하게 커지는 번호다 | 마지막 홀드. 구역별 일련번호(`secver`)가 되돌아갈 수 있다 | `seat_sale` 부분 유니크가 마지막에 막는다. 장애 조치 동안 구매를 503으로 미루고 DB로 홀드를 주지 않는다. 일련번호는 세대로 가른다. 통째로 비면 `seat_sale`·홀드 원장으로 다시 만든다(RB-06, ADR-0121) |
-| 세션·캐시 17 | `tr:` 9, `id:` 3, `scanner:` 2, `sup:` 2, `shop:` 1 | 사용자 세션(이름은 정본에 없음), `tr:block:{deviceRef}`(90일 `[가정]`), `scanner:dpop:{jti}`(스캐너 증명 한 번만 받기), `shop:{product:P}:resv`(재고 예약 15분 `[가정]`) | 키마다 다르다 | A는 원본 DB를 다시 읽고, B는 사람이 다시 하고(세션은 리프레시 토큰으로), C는 다른 층이 지킨다(굿즈는 `product_stock` 조건부 갱신). `noeviction`에 모든 키 TTL(정한 유효 시간)이다(ADR-0109) |
-
-알림·웹훅 발송 작업은 다시 만들 원본이 없어 Redis가 아니라 core DB 원장에 둔다(data.md §3, ADR-0109).
-
-## 6. ClickHouse와 S3
-
-분석은 원본 브론즈, 정리본 실버, 집계본 골드 세 층이고, 골드는 스타 스키마(측정값 표와 나눠 볼 기준 표로 짠 모양)다. dbt는 SQL 변환을 짜고 시험하는 도구다. 잠정(`rt`)과 확정(골드)은 다른 표에 두고 마감 때 대조한다(ADR-0052). 자세한 것은 [DB 설계 편 10](10-analytics-store.md)과 표 사전 14다.
-
-| DB | 들어오는 것 | 나가는 것 | 보존 | 표 |
-| --- | --- | --- | --- | --- |
-| `rt` | `ops-rt`가 원시 사건을 싣는다 | ops-svc가 읽을 때 센다(관제, 파트너 판매 현황) | 판매류·대기열·홀드 400일, 판정 90일, 심장 박동 7일 `[가정]` | `rt.sale_event`·`queue_aggregate`·`hold_attempt`·`verdict`·`pulse`, 매개변수 뷰 셋 |
-| `bronze` | `analytics-ingest`가 토픽 10개를 가명으로, `close-runner`가 수집 파일을 싣는다 | dbt | 적재 뒤 90일 | `brz_<원천>`, `brz_ref_*`, `brz_ops_*`, `brz_cost`, `brz_slo_snapshot`, `brz_intake_log`, `brz_rejected` |
-| `silver` | dbt가 중복을 지운다 | 골드, 가명정보 취급자, 연구 갈래 | 90일(기준 칸은 열린 일 95번) | `slv_purchase_session` 외 여섯 |
-| `gold` | dbt가 집계하고 판을 바꾼다 | 공연 리포트, 비교 대시보드, 파트너 요약, 랭킹 | 2년 | F1~F15, 차원 12, `current_run`·`archive_manifest`, 지표 뷰 `mtr_*` |
-| `archive` | 표가 없다. 뷰가 S3 Parquet(열 단위 압축 파일)을 `s3()`로 읽는다 | 2년보다 오래된 비교 | 영구 | 뷰 `archive.<표>` |
-| `trust` | `trust-reassess` | trust-svc | 30일 | `trust.behavior_raw` |
-| `inv` | `inv-ingest`가 실명 계정·원문 IP를 싣는다 | ops-svc 조사 모듈만. 분석과 권한을 나눈다 | 공연일 + 30일 `[가정]` | `inv_request`·`inv_step`·`inv_behavior`·`inv_link` |
-| 접속기록 DB | identity·게이트웨이 로그 | 수사·신고기관 대응 | 3개월 | 정본에 없음 |
-
-S3 버킷은 정본에 흩어져 있어 한 표로 모았다. Object Lock은 정한 기간 누구도 지우거나 덮지 못하게 잠그는 기능이다.
-
-| 버킷 | 담는 것 | 보존·잠금 | 근거 |
-| --- | --- | --- | --- |
-| 분석 아카이브 `peaket-analytics-archive-<환경>` | 동결된 회차 골드의 Parquet와 manifest(경로·행 수·해시 목록) | 영구, 도쿄 복제, 지우기 권한이 없다 | analytics §5.5, ADR-0115 |
-| 분석 수집 `peaket-analytics-intake` | 기준 자료·운영 기록 코드·비용·SLO(서비스 품질 목표) 결과 파일 | 개인정보가 없다 | analytics §3.2 |
-| 공연 리포트 | 리포트 파일 | 원시 개인정보 금지 | data.md §1 |
-| 백업 전용 | 저장소 백업(키 관리 서비스 KMS의 키로 암호화하는 SSE-KMS) | 다른 리전 복제, 원시 IP가 든 ClickHouse 백업 7일 `[가정]` | data.md §1, infra §6 |
-| 접속기록 사본 | 법정 접속기록 하루 파티션 | Object Lock 준수 모드, 3개월 + 7일 `[가정]` | data.md §1 |
-| 감사 앵커 | `command_event` 일 사본, `audit_chain` 앵커, 접속기록 해시 앵커, 비상 런북 기록 | Object Lock 7년 | infra §6, ADR-0053 |
-| 공개 게시 | 감사 체크포인트와 서명 | Object Lock 컴플라이언스 7년 | [ADR-0075](../../adr/0075-public-audit-anchor-signed-merkle-checkpoints.md) |
-| 증거 | 부정 예매 증거 묶음, 외부 게시물 캡처 | 법적 보존 + 기본 30일 `[가정]`, 리전 복제를 하지 않는다 | infra §6·§9 |
-| 공개 정적 객체(CDN 원본) | 좌석맵, 랭킹, 이미지 파생본, 대기 상태 대체 경로 | 좌석맵은 새 이름으로 내 오래 캐시 | data.md §1 |
-
-## 7. 한 사람의 표 여행
-
-팬 한 명이 가입해 입장하고 그 대금이 정산되기까지다. 각 줄은 '단계 → 저장소·표/키 → 무엇을 쓰나 → 근거'다.
-
-1. **가입·로그인** → identity `account`·`account_provider`·`consent`·`session`·`device`, 세션 Redis → 계정, 동의, 리프레시 토큰(로그인을 이어 가는 토큰)의 해시, 기기 가명 → data.md §2 ①
-2. **본인확인** → identity `identity_verification` → `ci_hmac`과 `pid`(첫 본인확인 때 한 번) → data.md §2 ①
-3. **찜·알림 신청** → core `wish`·`notification_subscription`·`push_subscription` → 공연 찜, 오픈 알림 → data.md §2 ⑥
-4. **로비 입장** → `tr:devshare:{deviceRef}:E`(봇 판정), `q:dup:{pid}:E`·`q:{event:E}:lobby_members` → 1인 1장 선점, 참가 토큰 해시 → data.md §3
-5. **오픈·대기** → `q:lobby:{hash}`(셔플 결과) 또는 `q:{event:E}:seq`, 리더가 올리는 `serving`, CDN 대기 상태 파일 → 순번과 차례 → data.md §3
-6. **입장 확정** → `q:adm:{pid}:E`·`slots`·`admitted` → 1인 1순번 재확인, 입장 자리 5분 → data.md §3
-7. **구매 세션** → 좌석 Redis `s:jti:{jti}`·`s:session:{sid}` → 입장 토큰 한 번만 쓰기 → data.md §3
-8. **좌석 홀드** → `bitmap`·`hold:{seat}`·`expiry`·`quota:{account}`·`idem:{account}:{key}`, 바뀐 좌석만 보내는 채널 `sec:{section}` → Lua 하나로 빈자리·한도·멱등 → data.md §3
-9. **홀드 원장** → `s:{event:E}:stream` → `trade.seats` → purchase `seat_hold` → 비동기 적재, 장애 뒤 다시 만들기의 입력 → data.md §2 ③
-10. **주문 생성** → purchase `purchase_order`·`order_item`·`order_event`(1번)·`order_idempotency`·Outbox는 DB 트랜잭션 하나로 커밋하고 201을 돌려준다. 좌석 Redis의 `s:{event:E}:ordered`는 이 트랜잭션 밖에서 홀드 Hash를 고치는 같은 Lua가 넣는다 → data.md §4의 1, §3
-11. **결제 시도** → purchase `payment_attempt` READY → payment-svc가 결제사와 결제창 값을 준다 → payment §2
-12. **결제 접수·판매 예약** → `payment_attempt` ACCEPTED·`order_event`·Outbox, Saga가 `seat_sale` PENDING + `purchase_quota` → 202 뒤 DB 예약, 유니크 위반이면 FAILED로 두고 과금하지 않는다 → data.md §4의 1·2
-13. **결제 승인** → payment `payment`·`payment_event`·Outbox, 웹훅은 `webhook_receipt` → 승인과 사건 순번 → data.md §4의 3
-14. **결과 반영** → purchase `seat_sale` SOLD, 주문 APPROVED, `payment_event_seq`, `ticket_issue_job` → 한 트랜잭션, 반영한 순번 이하는 건너뛴다 → data.md §4의 2
-15. **발권** → ticket `ticket`(주문 ID로 멱등), purchase 주문 CONFIRMED·`ticket_issue_job` 삭제·`order_item.ticket_id` → 승인 뒤엔 결제를 취소하지 않고 다시 발권 → payment §2, ADR-0106
-16. **알림** → core `notification_dedup`·`notification_job`·`notification_delivery`(90일 `[가정]`) → docs/features/notify.md §4
-17. **관제·분석** → `rt.sale_event`, `bronze`(가명), `inv_*`(실명) → streaming §1
-18. **입장용 휴대폰 등록** → ticket `device_key`·`scanner_change`(`scanner_seq`), 기기 IndexedDB 개인키 → 공개키만 서버로 → data.md §4의 4
-19. **현장 입장** → 스캐너 IndexedDB 큐 → ticket `scan_event`·`gate_flag`·`gate_flag_scan`·`scanner_change` → 오프라인 판정 뒤 서버가 맞춘다 → data.md §4의 14
-20. **후기** → core `review`(`basis_order_id`), gRPC `CheckReviewEligibility` → 쓸 때 자격 재확인 → data.md §4, architecture §3.2
-21. **정산** → payment `reconciliation_run` → `settlement_statement` → ops `approval_request`(PAYOUT_BATCH) → payment `payout_batch`·`payout` → 확정·상계·지급 건을 한 트랜잭션으로, 골드 R3가 정산서와 원 단위 대조 → data.md §4의 13, analytics §7
-
-**갈래: 예매 취소와 환불**
-
-1. **접수** → purchase `idempotency_record`·`order_cancellation`·`order_event`·Outbox → 진행 중 취소가 있으면 이어 간다 → data.md §4의 8
-2. **티켓** → ticket 상태 변경, `device_key` 폐기 + `scanner_change` → data.md §4의 8
-3. **좌석** → `seat_sale` RETURNED, `purchase_quota` 되돌림, 좌석 Redis 비트맵 복원 → 다시 팔 수 있다 → data.md §4의 8
-4. **결제** → payment `payment_cancel`(`cancel-{cancellationId}`) → 입장 시작 뒤 접수분은 입장 기록 마감 뒤로 미룬다 → data.md §4의 8, POL-032
-
-## 8. 이 지도를 그리는 순서(면접 화이트보드)
-
-1. **가운데 PostgreSQL 여섯 상자**: 원장이 여기 있고 나머지는 여기서 다시 만들 수 있다. 처리량이 아니라 격리로 나눴고 대가는 비용과 조인 금지다.
-2. **상자마다 원장 표 하나**(`seat_sale`, `payment`, `ticket`, `command_event`, `account`, `event`): 152개를 다 그리지 않고 나머지는 원장을 지키는 자식 표라고 말한다.
-3. **왼쪽 Redis 셋**: Redis가 먼저 거르고 PG 부분 유니크가 막는다. 대가는 장애 조치 때 잃는 마지막 쓰기다.
-4. **상자 사이 선에 ID만**: 서비스마다 따로 배포할 수 있지만 고아 행을 지표로 봐야 한다.
-5. **아래 Kafka와 Outbox**: 사건을 잃지 않지만 릴레이 지연과 '적어도 한 번' 전달이라 받는 쪽이 멱등해야 한다.
-6. **오른쪽 ClickHouse**: `rt`와 `gold`를 따로 적고, 같은 지표를 두 번 계산해 대조하는 비용을 말한다. `inv`는 분석과 잇지 않는다.
-7. **가장자리 S3·CDN·기기**: 공개 파일은 CDN이, 기기 개인키는 기기만 갖는다. 기기가 지워지면 재발급이다.
-8. **ticket 옆 도쿄, 그리고 §7의 길**: 리전 장애 때 티켓만 약 1초 RPO로 남는다는 선택을 말하며 한 사람의 길을 짚는다.
-
-## 9. 꼬리 질문
-
-| 단 | 질문 | 답의 요지 | 근거 |
-| --- | --- | --- | --- |
-| 1 | 왜 DB를 이렇게 나눴나요? | 격리다. purchase는 판매 확정을 한 트랜잭션으로, payment는 결제 비밀과 결제사 장애를, ticket은 현장 가용성을, ops는 로그인 몰림 속 명령 접수를 지킨다. identity·core는 비용 때문에 클러스터만 함께 쓴다 | data.md §1, [ADR-0028](../../adr/0028-postgres-no-sharding-cell-scaling.md) 상태 줄 |
-| 2 | ops를 공유에 두거나 샤딩하면요? | ops를 공유에 남기면 NFR-008이 로그인 몰림에 묶여 버렸다. 공연 ID 샤딩(여러 저장소에 나눠 담기)은 2PC(여러 저장소가 함께 확정하는 커밋) 비용과 대형 공연 샤드 몰림 때문에 버렸다. CPU 60%·연결 70% `[가정]`면 더 나누고 30% `[가정]` 아래 쌍은 합치기 후보다 | [ADR-0102](../../adr/0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)·ADR-0028 '검토한 대안'·상태 줄 |
-| 1 | DB 사이 조인은요? | 하지 않는다. 바뀌지 않는 값은 복사하고 바뀌는 값은 사건이나 gRPC로 묻는다. 퍼널처럼 여러 DB를 엮는 질문은 ClickHouse에서 구매 세션과 주문으로 잇는다 | data.md §1·§2, analytics §3.3 |
-| 3 | 고아 행은 생기지 않나요? | 생길 수 있어 하루 한 번 센다. 사건은 Outbox에 남아 잃지 않고, 처리 못 한 사건은 `held_event`로 순서를 지킨다 | data.md §2, §4의 7·15, [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md) |
-| 1 | 표 152개는 많지 않나요? | 여섯 DB에 나뉘어 가장 많은 core도 49개다. 2인 승인 자식 표, 판본 이력, 일련번호 카운터처럼 규칙을 DB가 지키게 하려고 뺀 표가 많다. ops 37개는 대부분 법정·감사·조사 기록이다 | data.md §2 '기본 키·유일·검사 규칙' |
-| 4 | 가장 큰 표와 바쁜 곳은요? | 5년치 티켓 약 3,500만·주문 약 1,700만 행을 나누지 않는다. `rt.hold_attempt`는 대형 회차당 약 720만 행 `[추정]`이다. 바쁜 곳은 순번 키 초당 20만, 홀드 1,000~2,000, 판매 확정 약 28(입장 자리 5,000 ÷ 180초), 결제 300 TPS `[실측 전]`이다 | [ADR-0114](../../adr/0114-no-monthly-partitions-for-order-payment-ticket-batched-retention-delete.md), streaming §11, architecture §9.1 |
-| 3 | 리전 전체가 멈추면요? | 판매를 멈춘다. 티켓은 도쿄에 약 1초 RPO로, 주문·결제는 일 스냅샷과 결제사 대사로 복원한다. 당일 입장은 오프라인 판정이다. RTO 24시간 안이 목표다 | infra §6, [ADR-0031](../../adr/0031-environments-and-region-dr.md) |
-| 2 | 하나만 남긴다면요? | PostgreSQL이다. 좌석 Redis는 `seat_sale`과 홀드 원장으로, ClickHouse는 스냅샷과 Kafka로, 캐시는 원본으로 다시 만든다. 반대로 PG 하나로 홀드까지 하면 행 잠금 경합으로 p99가 수 초다 | infra §6, [ADR-0014](../../adr/0014-soft-hold-hard-sale.md) '검토한 대안' |
-| 3 | Kafka가 멈추면요? | 사건은 Outbox에 남았다가 이어 나가 늦어질 뿐이다. 결제 결과가 늦으면 `BatchGetPayments`로 당긴다 | data.md §4의 2·7, [ADR-0143](../../adr/0143-settings-commands-pg-switch-over-grpc-applied-version-outbox.md) |
-| 5 | 실제로 재 봤나요? | 서비스 수준은 아니다 `[실측 전]`. 기반 PoC는 PC 한 대 부품 측정이다. 규칙 모델 검사(모든 실행 순서를 기계로 훑는 검사)에서 부분 유니크를 뺀 변형은 같은 좌석을 두 번 예약하는 반례를 냈고, 정본 그대로의 명세도 홀드 만료와 판매 예약이 엇갈리는 반례를 내 OPEN[15]로 올라갔다. 큰 원장 나눠 지우기(V-T29)는 아직이다 | ADR-0176, docs/verification.md §2.6 |
-
-## 10. 30초·3분 설명
-
-**30초**
-
-> "데이터는 성격에 따라 나눴습니다. 돈, 좌석, 티켓 소유권은 PostgreSQL 원장에 서비스마다 따로 둡니다. 클러스터는 purchase, payment, ticket, ops 전용, identity와 core의 공유 클러스터 다섯이고 표는 152개입니다. 대기열과 좌석은 Redis가 먼저 거르고, 판매 확정은 PostgreSQL 부분 유니크 인덱스가 마지막에 막습니다. DB 사이에는 ID만 두고 Outbox와 Kafka로 맞춥니다. 관제와 분석은 ClickHouse, 오래 둘 집계와 법정 사본은 S3입니다."
-
-**3분**
-
-> "가운데는 PostgreSQL입니다. 주문과 좌석 판매는 purchase, 결제와 정산은 payment, 티켓과 입장은 ticket, 운영 명령과 감사는 ops 전용 클러스터, 계정은 identity, 공연과 굿즈와 알림은 core입니다. identity와 core는 비용 때문에 클러스터를 함께 쓰지만 논리 DB와 계정은 따로입니다. 판매 확정 초당 약 28건, 결제 피크 300 TPS로 셈해 처리량은 하나로도 되지만, 결제사 장애와 현장 입장과 로그인 몰림이 서로 번지지 않게 다섯으로 나눴습니다. 아직 재지는 않았습니다.
-> 표는 일곱 묶음 152개입니다. 묶음마다 원장은 한두 개로, `purchase_order`와 상태 이력, `seat_sale`, `payment`와 사건 순번, `ticket`과 `scan_event`, `command_event`와 감사 해시 체인입니다. 나머지는 2인 승인이나 판본 이력처럼 규칙을 DB가 지키게 뺀 자식 표입니다.
-> 왼쪽은 Redis 셋입니다. 대기열은 순번과 1인 1순번, 좌석은 비트맵과 홀드와 보유 수, 세션·캐시는 로그인 세션과 봇 판정 피처입니다. 장애 조치 때 마지막 쓰기를 잃을 수 있어서 좌석은 부분 유니크 인덱스가 막고, 대기열은 순번을 건너뛰고 세대를 올립니다.
-> DB 사이에는 외래키가 없습니다. `account_id`, `event_id`, `order_id`, `ticket_id`만 두고, 상태를 바꾸는 트랜잭션에 Outbox 사건을 적어 Kafka로 보냅니다. 계정을 합쳐도 원장은 고치지 않고 대응표로 묶습니다.
-> 오른쪽은 ClickHouse입니다. 관제의 잠정 숫자는 `rt`, 리포트의 확정 숫자는 브론즈·실버·골드로 만들고 마감 때 대조합니다. 조사 저장소 `inv`는 분석과 잇지 않습니다. 동결한 회차와 법정 사본, 감사 앵커는 S3입니다.
-> 리전 전체가 멈추면 판매를 멈추고, 티켓은 도쿄에 약 1초 RPO로 남고 주문과 결제는 일 스냅샷과 결제사 대사로 복원합니다."
-
-## 11. 정본에서 찾은 어긋남
-
-전체 지도를 그리며 정본끼리 다르게 적은 곳을 찾았다. 아래는 2026-11-02 기준이다. 같은 날 정합 점검으로 정본을 고친 줄은 '무엇이 다른가'를 '고침'으로 시작하고, 정본에 값이 없어 docs/review/open-items.md(소유자가 정할 빈칸 목록)에 올린 것은 '지금 읽는 법'에 '열린 일 N번'으로 적었다.
-
-| 곳 | 무엇이 다른가 | 지금 읽는 법 |
-| --- | --- | --- |
-| docs/data.md §2 머리와 ERD ②·④·⑤·⑥ | 고침(2026-11-02 정합 점검): 머리는 '표마다 컬럼은 한 그림에만 적는다'였는데 `price_tier`·`event_seat_price`·`webhook_receipt`·`ticket_addon`·`product_stock`은 어느 그림에도 칸이 없었다 | §2 머리가 이 다섯 표를 적고 칸은 아직 정하지 않았다고 쓴다. 실제 표로 읽어 143 + 5 = 148로 센다. 칸은 열린 일 101번 |
-| docs/data.md §1·§4의 3과 ERD ④ | 고침(2026-11-02 정합 점검): `pg_switch`는 ERD에 없고, Outbox·`idempotency_record`·`held_event`·`merged_account`도 글로만 있었다. 뒤의 둘은 어느 DB가 두는지 목록이 없었다 | §2 머리가 그림 밖 표의 자리를 적는다: `pg_switch`는 payment DB, `held_event`는 Kafka를 소비하는 서비스 DB마다, `merged_account`는 §4의 9 ②의 기록을 가진 서비스 DB마다다. `pg_switch`의 칸은 열린 일 101번 |
-| docs/data.md §2 ERD 관계선 | 고침(2026-11-02 정합 점검): `account` → `purchase_order`처럼 DB를 건너는 선이 외래키 선과 똑같이 그려지고, '외래키 없음'은 일부 선에만 적혀 있었다 | §2 머리대로 두 표가 §1에서 다른 DB에 있으면 표시가 없어도 ID만 담는 연결로 읽는다. 이 편 그림은 'ID만'을 붙였다 |
-| docs/data.md §2 ERD ⑦ | 묶음 이름은 운영이지만 `takedown_action`은 core DB다. §2 머리가 'DB는 §1이 정본'이라 적어 규칙 위반은 아니다 | 묶음 번호로 DB를 짐작하지 않는다 |
-| docs/data.md §2 칸 주석 | 따로 된 클러스터인 purchase·ticket·ops에도 'purchase 논리 DB라', 'ops 논리 DB라'처럼 공유 클러스터의 말을 쓴다. ops는 2026-10-28까지 실제로 논리 DB였다 | '그 서비스의 DB'로 읽는다 |
-| docs/data.md §1 세션·캐시 행과 §3 키 표 | §1의 사용자 세션, 전역 레이트 리밋, 읽기 모델 캐시, 웹 앱 서버 화면 캐시, 굿즈 재고 차감 카운터와, 유실 등급 표의 관리 계정 로그인 출발지 값(키 이름은 wbs 3.5.1에서 정한다)은 §3 키 표에 이름 줄이 없고 유실 등급 표에만 묶음으로 나온다 | 있는 키로 읽되 이름은 '정본에 없음'(열린 일 101번). 키 표 17줄은 이 묶음을 빼고 센 값이다 |
+1. [docs/data.md](../../data.md) §1: 전사 저장소 지도 및 클러스터 엔진 제원
+2. [docs/data.md](../../data.md) §2: PostgreSQL 152개 테이블 상세 ERD ①~⑦
+3. [docs/data.md](../../data.md) §3: Redis 67개 키 네임스페이스 및 유실 등급 규정
+4. [docs/data.md](../../data.md) §4: 9대 트랜잭션 경계 및 일관성 요구 매트릭스
+5. [docs/infra.md](../../infra.md) §4·§6: 다중 AZ 토폴로지, RPO/RTO 및 도쿄 DR 복제
+6. [docs/streaming.md](../../streaming.md) §1·§11: MSK 카프카 클러스터 및 Outbox 단일 릴레이
+7. [docs/features/analytics.md](../../features/analytics.md) §2·§5·§11: ClickHouse 메달리온 및 S3 Parquet 동결
+8. [ADR-0028](../../adr/0028-postgres-no-sharding-cell-scaling.md): RDBMS 샤딩 배제 및 5개 클러스터 물리 분리
+9. [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md): Debezium 배제 및 K8s Lease Outbox 릴레이
+10. [ADR-0014](../../adr/0014-soft-hold-hard-sale.md): 해시 태그 기반 단일 샤드 Lua 원자성

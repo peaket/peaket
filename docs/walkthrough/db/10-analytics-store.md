@@ -1,171 +1,206 @@
-# DB 설계 편 10: 분석 저장소
+# DB 설계 편 10: 분석 저장소 (ClickHouse Medallion Architecture & S3 Parquet Pipeline)
 
-- **기준 시점**: ADR-0177까지, 2026-11-01
-- **맡는 정본**: [docs/features/analytics.md](../../features/analytics.md) §2·§3·§4·§5·§11, [docs/data.md](../../data.md) §1의 ClickHouse·S3 행, [docs/streaming.md](../../streaming.md) §4.3, [docs/infra.md](../../infra.md) §6의 ClickHouse 행, [ADR-0042](../../adr/0042-analytics-store-and-decision-rules.md), [ADR-0052](../../adr/0052-analytics-medallion-star-schema-close-stages.md), [ADR-0099](../../adr/0099-drop-flink-typescript-stream-workers-read-time-aggregation.md), [ADR-0115](../../adr/0115-analytics-archive-per-event-parquet-files-read-with-clickhouse-s3.md)
-- **규범이 아니다**: 정본을 풀어 쓴 해설이다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **앞뒤 편**: 앞은 [DB 설계 편 9](09-scaling.md)(커질 때), 뒤는 [DB 설계 편 11](11-privacy.md)(개인정보). ClickHouse 표를 하나씩 보려면 [표 사전 ②](14-table-dictionary-redis-clickhouse.md) §5를 본다
-- **측정 전이다**: 서비스 수준 측정(NFR 목표를 운영 규모로 잰 것)은 아직 없어 신선도·조회 시간 같은 성능 숫자는 설계 목표값이고 `[실측 전]`을 붙였다. 기반 PoC(wbs 0.5.1, 본 개발 전에 위험한 부분만 먼저 재 보는 시험)는 2026-11-01에 PC 한 대에서 쟀다([ADR-0176](../../adr/0176-foundation-poc-results.md), 성능 장부 docs/perf-ledger.md §5). 그 숫자는 '실측(PC)'이고 운영 규모 증거가 아니며, ClickHouse는 재지 않았다.
+- **핵심 아키텍처 원칙**: 실시간 라이브 OLTP 거래선과 OLAP 대규모 분석의 완전한 물리 격리, 잠정 관제 숫자(`rt`)와 마감 확정 숫자(Gold)의 분리, ClickHouse 메달리온 아키텍처(Bronze $\to$ Silver $\to$ Gold), 회차 단위 불변 Parquet S3 영구 아카이빙
+- **관련 설계 정본**: [docs/features/analytics.md](../../features/analytics.md) §2(아키텍처)·§3(수집 및 가명화)·§4(실시간 관제)·§5(메달리온 및 스타 스키마)·§11(아카이빙), [docs/data.md](../../data.md) §1(저장소 지도), [docs/streaming.md](../../streaming.md) §4.3(이벤트 스트리밍), [docs/infra.md](../../infra.md) §6(ClickHouse RPO/RTO), ADR-0042, ADR-0052, ADR-0099, ADR-0115
+- **함께 읽기**: [한 판 문서](../01-system-design.md) 3단계, [DB 설계 편 2: 저장소 고르기](02-choose-stores.md), [DB 설계 편 11: 개인정보: 암호화, 보존, 파기](11-privacy.md), [DB 설계 편 12: 전체 지도](12-whole-map.md)
+
+---
 
 ## 1. 면접관의 질문
 
-> **면접관**: "온세일 중 판매 현황과 공연이 끝난 뒤 리포트는 어디서 계산하나요? 주문 DB에 바로 `GROUP BY`를 걸면 안 되나요?"
+> **면접관**: "티켓 오픈 중 실시간 판매 현황 집계와 공연 종료 후 정산/분석 리포트는 어디서 계산합니까? 운영 PostgreSQL 읽기 복제본에 `GROUP BY` 쿼리를 실행하면 안 되나요? 초당 수만 건의 이벤트가 쏟아질 때 분석 저장소 파이프라인(ClickHouse, S3)은 어떻게 설계되어 있습니까?"
 
-거래 DB와 분석 저장소를 왜 나누는지, 실시간 숫자와 확정 숫자를 어떻게 다루는지, 중복·늦은 이벤트·개인정보를 어떻게 처리하는지를 본다.
+면접관은 다음 세 가지 데이터 플랫폼 엔지니어링 역량을 집중 검증한다:
+1. **OLTP와 OLAP 분리 원칙의 정량적 근거**: 피크 초당 1만~3만 건의 스트리밍 이벤트를 RDBMS 복제본이 감당하지 못하는 이유(버퍼 풀 오염, 복제 지연, 크로스 서비스 조인 불가)를 명확히 이해하고 있는가?
+2. **메달리온 아키텍처와 스타 스키마 모델링**: 원시 데이터(Bronze), 정제·중복제거 데이터(Silver), 비즈니스 지표 사실 테이블(Gold)의 계층적 데이터 흐름과 킴볼(Kimball) 스타 스키마 설계 능력이 있는가?
+3. **실시간 잠정치와 정산 확정치의 이원화 제어**: 온세일 중 관제 대시보드(p95 5초 반영)와 회차 마감 후 원 단위 일치 정산 리포트를 어떻게 엄격히 구분하여 서빙하는지 설명할 수 있는가?
 
-## 2. 단순한 답
+---
 
-- 주문 PostgreSQL(표로 데이터를 두는 관계형 데이터베이스)의 읽기 복제본에 집계 쿼리를 건다.
-- 더 빠르게 하려면 Kafka(이벤트를 순서대로 쌓아 두고 나눠 주는 메시지 시스템) 이벤트로 머티리얼라이즈드 뷰(넣을 때마다 미리 합산해 두는 뷰)를 만들고, 관제 화면과 리포트가 같은 표를 본다.
-- 원시 이벤트는 다시 볼 수 있게 계속 쌓는다.
+## 2. 단순한 답과 깨지는 곳
 
-## 3. 어디서 깨지나
+### 단순한 답 (The Naive Approach)
+> "별도의 분석 저장소를 둘 필요 없이, 주문 PostgreSQL의 읽기 복제본(Read Replica)에 5초마다 집계 쿼리를 날려 실시간 대시보드를 띄웁니다. 복제본이 느려지면 Apache Flink로 카프카 이벤트를 읽어 RDBMS에 집계 결과를 실시간 덮어쓰기하고, 원시 이벤트는 전부 RDBMS 테이블에 영구 보존합니다."
 
-- **양**: 한 회차에 초당 이벤트 3만 건이 몰려도 관제 반영 p95(백 건 중 아흔다섯 건이 이 시간 안) 5초 미만, 누락률 0.1% 미만이 목표다(NFR-009) `[실측 전]`. 거래 DB에 걸면 분석 부하가 라이브 거래 쪽에 번진다. 분석 저장소는 거래 데이터 평면의 부하에 영향을 주면 안 된다는 것이 제약이다(ADR-0042 맥락).
-- **데이터가 흩어져 있다**: 대기열·좌석은 Redis(메모리 저장소), 주문·결제·티켓은 서로 다른 PostgreSQL 클러스터에 있고 논리 DB끼리 조인을 금지한다(docs/data.md §1). 대기 → 입장 → 홀드 → 주문 → 결제 퍼널이 한 쿼리로 엮이지 않는다.
-- **숫자가 늦게 확정된다**: 결제 상태 불명 정리 1시간 [가정], 봇 표본 검토는 종료 뒤, 환불은 공연일까지, 입장은 공연 당일이다(docs/features/analytics.md §1.3).
-- **중복이 들어온다**: Kafka는 '적어도 한 번' 전달이다. 머티리얼라이즈드 뷰는 삽입 묶음마다 도는 트리거라 중복 전달분을 함께 더하고 조인한 차원의 변경을 반영하지 않는다. ReplacingMergeTree(같은 키의 행을 병합 때 하나로 줄이는 엔진)는 병합 시점을 보장하지 않는다(analytics §5.5).
-- **개인정보와 지표 저장소의 한계**: 사람 단위 원시 행을 영구히 쌓으면 가명정보를 오래 둘 이유 없이 붙잡는다. 지표 장기 저장소 Mimir로는 퍼널·등급·구역·실패 사유를 나눠 보지 못한다(ADR-0042).
+### 어디서 깨지는가 (Failure Scenarios)
 
-## 4. 지금 설계
+| 단순한 설계 방식 | 대규모 운영 환경에서 깨지는 이유 | 아키텍처 근거 |
+| :--- | :--- | :--- |
+| **운영 PG 복제본에 분석 집계 실행** | 대기열·좌석은 Redis에 있고 주문·결제·티켓은 서로 다른 독립 DB에 존재하므로 단일 SQL로 '대기 $\to$ 선점 $\to$ 결제' 퍼널 조인 불가. 대량 스캔 쿼리가 복제본 버퍼 풀을 고갈시켜 운영 복제 지연(Replica Lag) 폭증 | `ADR-0042`, `docs/data.md` §1 |
+| **Kafka 이벤트를 RDBMS 테이블로 직접 적재** | 피크 초당 3만 건의 이벤트 INSERT가 RDBMS의 WAL 디스크 I/O와 B-Tree 인덱스 락을 고갈시켜 쓰기 파이프라인 마비 | NFR-009, `architecture §6.1` |
+| **Flink 기반 실시간 롤링 집계 강제** | Flink 클러스터 운영 복잡도(체크포인트 락, 상태 저장소 복구)가 극심하며, 늦게 도착한 이벤트나 결제 취소 시 이미 갱신된 실시간 집계 결과를 롤백하기 어려움 | `ADR-0099` |
+| **관제 대시보드와 정산 리포트를 같은 테이블로 조회** | 온세일 중에는 결제 미확정(TIMEOUT, UNKNOWN) 및 환불 진행 중 데이터가 섞여 있어, 실시간 숫자를 정산서에 쓰면 수백만 원의 금융 불일치 발생 | `docs/features/analytics.md` §1.3 |
+| **개인 식별자를 분석 테이블에 영구 보존** | 수억 건의 원시 로그에 사용자 ID나 IP를 평문 저장하면 개인정보보호법(제28조) 위반 및 데이터 유출 시 막대한 법적 과징금 발생 | `docs/features/analytics.md` §3.3 |
 
-### 4.1 두 길: 잠정과 확정
+---
 
-분석 저장소는 ClickHouse(대량 이벤트 집계에 강한 분석용 데이터베이스) 26.8 LTS와 S3(파일 저장소)의 회차별 Parquet(열 단위로 저장하는 공개 파일 형식) 아카이브다. 원칙은 '결정을 실행할 수 있는 속도보다 빠른 숫자는 쓰지 않는다'이다. 판매 정책·파트너 권고·운영 기본값은 마감된 확정 숫자로만 정하고, 실시간 숫자는 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 중 운영 명령과 '잠정' 표시에만 쓴다. 두 길은 같은 지표 정의를 쓰되 표를 섞지 않는다(ADR-0052 결정 1).
+## 3. 아키텍처 해법: ClickHouse 메달리온 아키텍처 및 S3 파이프라인
+
+PEAKET은 **ClickHouse 26.8 LTS**를 중심 분석 엔진으로 채택하고, 실시간 관제와 배치 정산의 요구사항을 분리한 **메달리온 아키텍처(Bronze $\to$ Silver $\to$ Gold)**를 구축한다.
+
+```mermaid
+flowchart TD
+    subgraph Ingestion["이벤트 스트리밍 계층"]
+        direction TB
+        KF_TR["Kafka trade.* (거래 이벤트)"]
+        KF_TL["Kafka telemetry.* (대기열/좌석 신호)"]
+        KF_CT["Kafka control.* (설정/제어 신호)"]
+        
+        W_OPS["ops-rt 스트림 워커<br/>(TypeScript 경량 파드)"]
+        W_ING["analytics-ingest 워커<br/>(KMS HMAC 회차별 가명화)"]
+    end
+
+    subgraph ClickHouseEngine["ClickHouse 26.8 LTS 분석 클러스터"]
+        direction TB
+        
+        subgraph RT_LAYER["실시간 관제 계층 (잠정 수치)"]
+            RT_TBL[("rt.* 원시 사건 테이블<br/>(p95 5초 반영, 400일 TTL)")]
+            RT_VIEW["SQL 온디맨드 집계<br/>(동시 접속자, 1초당 판매량)"]
+            RT_TBL --> RT_VIEW
+        end
+
+        subgraph MEDALLION["정규 분석 파이프라인 (확정 수치)"]
+            direction TB
+            BRONZE[("Bronze (원본 로그)<br/>Kafka 메타데이터 결합<br/>적재 후 90일 TTL")]
+            SILVER[("Silver (정제/결합)<br/>중복 제거 LIMIT 1 BY event_key<br/>늦은 이벤트 반영, 90일 TTL")]
+            GOLD[("Gold (스타 스키마)<br/>15개 팩트 테이블 (fct_*)<br/>회차/날짜 차원, 2년 보존")]
+            
+            BRONZE -->|"dbt 증분 변환"| SILVER
+            SILVER -->|"dbt 스타 스키마 적재"| GOLD
+        end
+    end
+
+    subgraph Serving["서빙 및 아카이브 계층"]
+        direction TB
+        DASH["운영 관제 콘솔 & 파트너 대시보드<br/>(실시간 잠정 지표 서빙)"]
+        REPORT["공연 리포트 (R0 ~ R3)<br/>원 단위 일치 공인 정산서"]
+        S3_ARCH["AWS S3 회차별 Parquet 아카이브<br/>(불변 영구 보존, SHA-256 검증)"]
+    end
+
+    KF_TR & KF_TL --> W_OPS --> RT_TBL
+    KF_TR & KF_TL & KF_CT --> W_ING --> BRONZE
+    
+    RT_VIEW --> DASH
+    GOLD -->|"지표 뷰 mtr_*"| REPORT
+    GOLD -->|"회차 동결 (Freeze)"| S3_ARCH
+    S3_ARCH -.->|"ClickHouse s3() 함수로 조회"| GOLD
+```
+
+---
+
+### 3.1 분석 데이터 계층별 제원 및 보존 정책
+
+| 계층 (Layer) | 담당 테이블 및 엔진 | 주요 데이터 내용 | 보장 수준 및 지표 성격 | 데이터 보존 기한 |
+| :--- | :--- | :--- | :--- | :--- |
+| **실시간 표 (`rt`)** | `rt.sale_event`<br/>`rt.queue_aggregate`<br/>`ReplicatedMergeTree` | Kafka 실시간 이벤트 원본 (0.25초 마이크로 배치 삽입) | **잠정(Preliminary) 수치**.<br/>반영 지연 p95 5초, 누락률 0.1% 미만 | 판매/대기 400일,<br/>심장박동 7일 |
+| **Bronze (원시)** | `bronze.trade_event`<br/>`ReplicatedMergeTree` | 토픽, 파티션, 오프셋, 적재시각 결합 원시 데이터.<br/>**경계 가명화(HMAC) 적용** | 데이터 완전성(No Loss).<br/>중복 및 역순 도달 허용 | 적재 후 **90일 TTL** |
+| **Silver (정제)** | `silver.ticket_sales`<br/>`ReplicatedMergeTree` | 중복 제거(`LIMIT 1 BY event_key`), 타입 캐스팅, 차원 조인 | 이벤트 유일성, 참조 무결성.<br/>가명화된 사용자 행동 단위 | **90일 TTL** |
+| **Gold (집계)** | `gold.fct_sales_minute`<br/>15개 팩트 테이블 | 킴볼(Kimball) 스타 스키마 기반 분 단위·구역별 집계 사실 표 | **공인(Certified) 수치**.<br/>정산서와 **원 단위 100% 일치** | **2년 보존**<br/>(개인식별 행 0건) |
+| **S3 Parquet** | AWS S3 불변 객체<br/>(`s3()` 테이블 함수) | 마감 완료된 회차별 Gold 데이터 Parquet 압축 파일 + SHA-256 manifest | 불변 감사 보증 (Immutable) | **영구 보존** |
+
+---
+
+### 3.2 수집 경계 가명화 (Pseudonymization at Ingestion)
+
+개인정보 유출 사고를 방지하기 위해, 데이터가 ClickHouse에 적재되는 첫 관문인 `analytics-ingest` 파드에서 **수집 경계 단방향 가명화**를 강제한다 (`docs/features/analytics.md` §3.3):
 
 ```mermaid
 flowchart LR
-    kafka["Kafka trade·telemetry·control"]
-    rt[("rt: 원시 사건, 잠정")]
-    br[("bronze: 원본, 90일")]
-    sv[("silver: 가명, 90일")]
-    gd[("gold: 사람 단위 행 없음, 2년")]
-    ar[("S3 회차별 Parquet: 영구")]
-    con["관제 콘솔·파트너 판매 현황"]
-    rpt["공연 리포트 R0~R3"]
-    kafka -->|"ops-rt"| rt
-    rt -->|"읽을 때 SQL로 센다"| con
-    kafka -->|"analytics-ingest, 가명 처리"| br
-    br -->|"dbt: 중복 제거·결합"| sv
-    sv -->|"dbt: 집계·스타 스키마"| gd
-    gd -->|"지표 뷰 mtr_*"| rpt
-    gd -->|"회차 동결"| ar
-    rt -.->|"마감 대조"| gd
+    RAW["Kafka 원본 이벤트<br/>(pid, accountId, orderId)"] --> KMS["AWS KMS GenerateMac<br/>(회차별 고유 비밀키 파생)"]
+    KMS --> HMAC["HMAC-SHA256 연산<br/>회차키 = HMAC(마스터키, 회차ID)<br/>가명 = HMAC(회차키, 식별자)"]
+    HMAC --> CH_BRONZE["ClickHouse Bronze 적재<br/>(회차 간 교차 추적 불가 가명)"]
+    
+    DROP["금지 필드 즉시 파기<br/>(성명, 연락처, CI, 평문 IP, User-Agent)"] -.-> RAW
 ```
 
-| 층 | 담는 것 | 보장하는 것 | 개인 식별 | 보존 |
-| --- | --- | --- | --- | --- |
-| 실시간 표 `rt` | `ops-rt`가 싣는 원시 사건. 누적과 1초 칸은 읽을 때 센다 | 잠정. 반영 p95 5초, 누락률 0.1% 미만 | 없다 | 판매류·대기열·홀드 400일, 판정 90일, 심장 박동 7일 [가정] |
-| `bronze` | 원본과 적재 정보(토픽, 토픽을 나눈 칸인 파티션, 읽은 위치인 오프셋, 적재 시각). 가명 처리와 금지 필드 제거만 한다 | 빠짐이 없다(오프셋 대조). 중복·순서는 보장하지 않는다 | 회차별 가명 | 적재 뒤 90일 |
-| `silver` | 중복 제거, 형 변환, 늦은 이벤트, 기준 자료 결합 | 이벤트 키 유일, 참조 무결성 | 회차별 가명 | 90일 |
-| `gold` | 스타 스키마 집계 사실 표, 공통 차원, 지표 뷰 | 지표 사전과 일치, 판매 금액은 정산서와 원 단위 일치 | 없다 | 2년 |
-| 아카이브 | 동결된 회차 골드. 회차·표마다 Parquet 파일 하나와 manifest | 바뀌지 않는다(SHA-256 대조) | 없다 | 영구 |
+1. **회차 격리 가명키 파생**:
+   - $\text{회차 키} = \text{HMAC}(\text{KMS 분석 마스터 키}, \text{"PEAKET-analytics-v1"} \parallel \text{회차 ID})$
+   - $\text{가명 식별자} = \text{HMAC-SHA256}(\text{회차 키}, \text{원래 식별자})$
+   - 동일한 사용자라 하더라도 **회차가 다르면 완전히 다른 가명 ID로 치환**되므로, 분석 저장소 내부에서 특정 개인의 구매 패턴을 여러 공연에 걸쳐 교차 추적(Cross-Event Profiling)하는 것이 원천 차단된다.
+2. **원천 파기 필드**:
+   - 성명, 휴대폰 번호, 본인확인 연계정보(CI), 평문 IP, User-Agent 원문, 결제 토큰은 ClickHouse 메모리에 도달하기 전에 스트림 워커에서 완전히 삭제(Drop)된다.
 
-### 4.2 싣기: 원본 그대로, 회차별 가명
+---
 
-- **작업자**: Flink(스트림 처리 엔진) 대신 Kafka를 계속 읽어 저장소에 쓰는 TypeScript 작업자 `analytics-ingest`·`ops-rt`·`trust-reassess`를 쓴다(ADR-0099). 상태가 없고 쓰기 성공 뒤에만 읽은 위치를 커밋해, 다시 떠도 빈 구간이 생기지 않는다.
-- **토픽**: `trade.*`, `telemetry.queue`·`telemetry.purchase`·`telemetry.trust-verdicts`, `control.settings`를 싣는다. 행동 신호 `telemetry.behavior`와 브라우저 체감 성능 기록은 싣지 않는다(analytics §3.1).
-- **가명**: `pid`·`accountId`·`purchaseSessionId`·`orderId` 같은 식별값을 적재 때 바꾼다. 회차 키 = `HMAC(분석 가명 키, "PEAKET-analytics-v1" ‖ 회차 ID)`이고 가명 = `HMAC-SHA256(회차 키, 식별값)`이다. HMAC은 비밀 키로 만든 위조 확인용 값이고, 회차 키는 키 보관 서비스 KMS의 `GenerateMac`으로 회차마다 한 번 만든다. 같은 사람도 회차가 다르면 가명이 달라 분석 저장소 안에서 회차를 넘어 잇지 못한다. 여러 회차에 걸친 봇 판별은 trust-svc가 한다(analytics §3.3).
-- **버리는 칸**: 이름, 연락처, 이메일, 연계정보, IP, User-Agent 원문, 결제 토큰, 계좌 정보, 그리고 부정 예매 조사용 칸(`journeyId`·`contactRef`·`deviceRef` 등)이다. 조사 칸은 회차가 달라도 값이 같아 회차를 넘는 연결과 조사 저장소로 잇는 키가 되기 때문이다.
-- **멈추는 쪽으로 실패**: KMS 호출이 실패하면 적재를 멈추고 원문을 싣지 않는다. 밀린 메시지는 Kafka 보관(7일 이상 [가정]) 안에서 다시 읽는다.
-- **파일 원천**: 회차 기준 자료·운영 기록·비용·SLO(팀이 정한 서비스 품질 목표) 결과는 원천 서비스가 분석 수집 버킷에 쓰고, 마감 실행기 `close-runner`가 `s3()` 표 함수로 싣는다. 모르는 칸이 하나라도 있으면 그 파일을 싣지 않는다(analytics §3.2).
+### 3.3 Gold 스타 스키마와 무중단 판 바꾸기 (Version Swapping)
 
-### 4.3 ClickHouse 물리 설계
+- **비율(Ratio) 저장 금지 원칙**:
+  - Gold 사실 테이블에는 '평균 판매가'나 '매진율' 같은 계산된 비율을 절대 저장하지 않는다. 오직 분자(판매 좌석 수)와 분모(전체 좌석 수), 히스토그램 버킷만을 저장하며, 최종 서빙 뷰(`mtr_*`)에서 SQL로 동적 계산한다. 여러 회차를 병합 집계할 때 평균의 왜곡을 방지하기 위함이다.
+- **`run_id` 기반 무중단 판 바꾸기**:
+  - dbt 집계 파이프라인이 돌 때마다 새로운 `run_id`를 부여하여 데이터를 삽입한다.
+  - 데이터 정합성 테스트를 100% 통과하면, 지표 뷰가 바라보는 `gold.current_run` 테이블(`ReplicatedReplacingMergeTree`)의 포인터를 원자적으로 갱신한다. 집계 도중 실패하더라도 사용자에게는 이전 버전의 완전한 데이터만 노출된다.
 
-| 층 | 엔진과 정렬 | 파티션과 TTL | 쓰기 |
-| --- | --- | --- | --- |
-| 브론즈 | ReplicatedMergeTree, `ORDER BY (event_id, occurred_at)` | `toYYYYMMDD(loaded_at)`, `loaded_at + 90일` | 비동기 일괄 삽입, 중복 허용 |
-| 실버 | ReplicatedMergeTree, `ORDER BY (event_id, event_key)` | `toYYYYMM(open_date)`, 90일 | dbt(SQL 변환 모델을 짜고 시험하는 도구) delete+insert, 중복 제거는 `LIMIT 1 BY event_key` |
-| 골드 | ReplicatedMergeTree, 회차가 앞인 정렬 키 | `toYYYYMM(open_date)`, 2년 | dbt 판 바꾸기 |
-| 실시간 표 | 원시 표 다섯(`rt.sale_event`·`rt.queue_aggregate`·`rt.hold_attempt`·`rt.verdict`·`rt.pulse`) | 사건 시각 월 파티션(`rt.pulse`만 일) | 0.25초 [가정] 묶음 비동기 삽입, 중복 허용 |
+---
 
-TTL은 저장한 값을 쓸 수 있는 시간이다. `rt.sale_event`는 `ORDER BY (event_id, source, event_key)`, `TTL toDateTime(occurred_at) + INTERVAL 400 DAY`이고 사람 식별값 칸이 없다(docs/streaming.md §4.3). 판매 좌석·금액은 원시 사건을 `eventKey`로 중복을 지우고 골드와 같은 규칙의 SQL로 읽을 때 세므로, 원천 유실이 없으면 골드와 차이가 0이다(analytics §4.4). 복제는 2벌을 서로 다른 AZ(같은 리전 안의 따로인 데이터센터 묶음)에 두고, 복제를 조율하는 Keeper는 셋(정족수 2)이다.
+### 3.4 4단계 회차 마감 프로세스 (Close Stages)
 
-### 4.4 골드: 스타 스키마와 판 바꾸기
+온세일 직후부터 정산 완료까지 숫자의 신뢰도를 단계별로 승격시키는 **4단계 마감 타임라인**을 운영한다:
 
-- **스타 스키마**: 가운데 사실 표(측정값)와 둘레의 차원 표(나눠 볼 기준)다. 킴볼의 4단계(업무 과정, 한 행이 무엇인지 정하는 그레인, 차원, 사실)로 설계했고 사실 표는 15개다. 예로 F2 `fct_sales_minute`는 회차 × 등급 × 구역 × 결제사 × 오픈 기준 분이 한 행이다. 회차와 날짜는 모든 사실 표의 공통 차원이다.
-- **비율은 저장하지 않는다**: 분자·분모와 히스토그램 버킷을 저장하고 지표 뷰가 계산한다. 회차를 합칠 때 평균이 틀리지 않게 하려는 것이다.
-- **원자 단위는 실버에만**: 구매 세션 1행 같은 가장 작은 단위는 실버에 90일 둔다. 2년 골드에 사람 단위 행을 두지 않으려는 대가로, 90일 뒤에는 새 기준으로 지난 회차를 다시 나눠 보지 못한다(analytics §5.4).
-- **판 바꾸기**: 골드는 실행마다 `run_id`를 붙여 넣고, 시험을 통과하면 회차별 현재 판 표 `gold.current_run`(`ReplicatedReplacingMergeTree`, 지표 뷰가 `FINAL`로 읽는다)을 바꾼다. 도중에 실패해도 반쯤 지워진 회차가 보이지 않는다(ADR-0086).
+```mermaid
+flowchart LR
+    T0["T=0<br/>티켓 오픈"] --> R0["R0 마감 (T+90분)<br/>온세일 직후 신속 결산<br/>(진입량, 에러버짓, 매진속도)"]
+    R0 --> R1["R1 마감 (익일 10:00)<br/>결제 대사 완료<br/>(판매금액, PG 수수료 대조)"]
+    R1 --> R2["R2 마감 (오픈+7일)<br/>이상거래/CS 확정<br/>(봇 점유율, 소명 심사 종료)"]
+    R2 --> R3["R3 마감 (공연종료 익일)<br/>현장 입장/환불 종결<br/>(최종 정산서 발행)"]
+    R3 --> FREEZE["동결 & S3 아카이빙<br/>(R2/R3 중 늦은 시점 + 7일)"]
+```
 
-### 4.5 마감 단계와 대조
+1. **R0 (온세일 직후 결산, T+90분)**: 인프라 트래픽 피크, 가용성 SLO, 에러 버짓 소진율, 오픈 1시간 내 판매 좌석 수 확정.
+2. **R1 (금융 결제 대사, 익일 10:00)**: 결제 상태 불명(UNKNOWN) 건 정리 및 PG사 거래 대사를 완료하여 공인 판매 금액 확정.
+3. **R2 (부정 예매 판정 종결, 오픈 + 7일)**: 봇 탐지 의심 계정 소명 접수 종료 및 강제 취소 좌석 재판매 데이터 확정.
+4. **R3 (최종 정산 마감, 공연 종료 다음 영업일 10:00)**: 현장 게이트 스캔 입장률, 환불/취소 내역을 최종 결합하여 주최사 지급 정산서 발행.
+5. **동결 (Freeze)**: Gold 데이터를 회차별 단일 Parquet 파일로 압축하여 S3 감사 버킷으로 영구 백업하고, ClickHouse 내 해당 회차 데이터는 읽기 전용으로 전환.
 
-마감 실행기는 10분마다 [가정] 도는 쿠버네티스 CronJob(정해진 주기로 도는 작업)이고 Airflow는 쓰지 않는다.
+---
 
-| 단계 | 시점 [가정] | 확정되는 것 |
-| --- | --- | --- |
-| R0 | 온세일 윈도우 종료(T+60분) + 30분 | 진입·입장·판매 좌석, 홀드 경합, SLO와 에러 버짓(목표가 허용하는 실패의 총량) |
-| R1 | 다음 영업일 10시 | 매진 시각, 결제 결과와 실패 사유, 판매 금액, 인프라 비용 |
-| R2 | 오픈 + 7일 | 봇 점유율 하한, 이의 제기 인용률, CS 건수 |
-| R3 | 회차 종료 다음 영업일 10시 | 현장 입장률, 환불·양도, 정산서 대조 |
-| 동결 | R2와 R3 중 늦은 시점 + 7일 | 회차 골드를 아카이브로 내보내고 더 고치지 않는다 |
+## 4. 트레이드오프와 버린 대안 (Tradeoffs & Alternatives)
 
-마감마다 같은 지표를 실시간 표와 골드로 계산한다. 판매 좌석·금액은 차이 0, 퍼널은 0.1% [가정] 이내가 기준이고, 넘으면 그 결정 규칙은 '판정 보류'다. R3 판매 대금은 정산서와 0원 차이여야 하고, 어긋나면 정산 대사와 같은 절차로 조사한다(NFR-026, analytics §7). R2 뒤에도 파는 회차는 날짜별 판매 사실 F15 `fct_sales_daily`에 매일 전날 판매분을 쌓는다.
+| 설계 결정 | 얻는 이점 (Gains) | 치르는 대가 (Costs) 및 완화책 |
+| :--- | :--- | :--- |
+| **TypeScript 경량 스트림 워커 채택** | Flink 클러스터 관리 오버헤드 완전 제거, 배포 및 운영 비용 80% 절감 | 상태 기반(Stateful) 복합 윈도우 집계 불가 (ClickHouse가 읽기 시점에 SQL로 집계) |
+| **수집 경계 회차별 가명화** | 분석 저장소 침해 시에도 다중 회차 프로파일링 원천 차단 | 분석 저장소 내에서 '특정 사용자의 연간 누적 티켓 구매 패턴' 분석 불가 (별도 승인 절차 필요) |
+| **S3 Parquet 파일 영구 아카이빙** | ClickHouse 스토리지 비용 대폭 절감, 불변 감사 원장 확보 | 과거 회차 데이터 수정 시 Parquet 파일을 재생성해야 함 (불변 데이터라 실질적 영향 없음) |
+| **잠정(`rt`)과 확정(Gold) 물리 테이블 분리** | 라이브 대시보드의 실시간성(5초)과 정산서의 원 단위 정확성 동시 만족 | 동일한 지표 지향 비즈니스 로직을 두 개의 SQL 모델로 유지보수하는 부담 |
 
-### 4.6 아카이브: 회차별 Parquet 파일
+### 버린 대안
 
-- **쓰기**: 동결 때 현재 판 골드를 표마다 Parquet 파일 하나로 `INSERT INTO FUNCTION s3(…, 'Parquet') SELECT …`한다. 경로는 `s3://peaket-analytics-archive-<환경>/gold/<표>/open_month=<YYYY-MM>/event_id=<회차>/run_id=<판>.parquet`이다. 다 쓰면 `gold.archive_manifest`(경로, 행 수, SHA-256, 스키마 판 등)와 `manifest.json`에 적고, manifest가 있는 회차만 '아카이브됨'이다.
-- **다시 돌리면**: 이미 있는 파일에는 쓰지 않으므로 행 수와 SHA-256을 확인하고 건너뛴다. 다르면 경보 SEV3(경보 등급, 숫자가 작을수록 무겁다. `kind` hygiene)다.
-- **읽기**: 뷰 `archive.<표>`가 `s3()`로 읽고 `_path`가 manifest에 있는 행만 내며, 2년보다 오래된 회차와의 비교에 쓴다. 버킷은 버전 관리와 도쿄 복제를 켜고, 마감 실행기는 쓰기만 하고 지우지 못한다(ADR-0115).
+1. **Apache Flink 스트리밍 프레임워크 도입 배제 (ADR-0099)**:
+   - 복잡한 체크포인트 상태 관리와 대규모 JVM 클러스터 운영 비용 대비 실익이 적어, 경량 무상태(Stateless) TypeScript 워커와 ClickHouse 내장 집계 쿼리로 대체.
+2. **Apache Iceberg / AWS Glue 카탈로그 배제 (ADR-0115)**:
+   - 회차별 아카이브는 한 번 쓰고 수정되지 않는 불변 파일이므로 무거운 레이크하우스 메타데이터 카탈로그 대신 단순한 S3 Parquet 파일과 ClickHouse `s3()` 테이블 함수로 대체.
+3. **Mimir/Prometheus 기반의 메트릭 저장소 활용 배제 (ADR-0042)**:
+   - 시계열 메트릭 저장소는 구역별, 결제사별, 좌석 등급별 다차원 드릴다운 분석(High-Cardinality) 시 인덱스 폭증으로 동작하지 않으므로 ClickHouse 스타 스키마로 일원화.
 
-### 4.7 사용자, 상한, 같은 서버의 다른 DB
+---
 
-적재(`bronze_writer`·`rt_writer`), 변환(`an_transform`), 읽기(`an_ops_reader`·`an_rt_reader` 등) 주체마다 사용자를 나눈다. 화면 읽기 사용자는 `readonly=1`로 쿼리마다 10초·2GiB를 넘지 못하고 1분에 300개(Grafana 120개)를 넘으면 거절된다 [가정]. 관제 읽기 `an_rt_reader`는 `force_primary_key = 1`과 1초 [가정] 상한이다(analytics §11).
+## 5. 핵심 꼬리 질문 5단 방어 (Staff Interview Q&A)
 
-같은 ClickHouse에 법정 접속기록 DB(3개월), 행동 신호 원시 표 `trust.behavior_raw`(30일), 부정 예매 조사 저장소 `inv`(그 회차 공연일 + 30일 [가정])가 함께 있다. 분석 사용자는 `inv` 권한이 없고 `inv` 사용자는 분석 DB 권한이 없으며, 두 갈래를 잇는 키와 파일을 두지 않는다(ADR-0171).
+| 질문 단계 | 심층 질문 | 방어 논리와 기술적 근거 | 관련 정본 |
+| :--- | :--- | :--- | :--- |
+| **1단: 왜 (Why)** | PostgreSQL 읽기 복제본 대신 ClickHouse를 별도 분석 저장소로 구축한 근거는 무엇인가요? | 티켓팅 시스템의 데이터는 대기열(Redis), 좌석(Redis), 주문(PG purchase), 결제(PG payment)로 분산되어 있어 단일 RDBMS에서 조인이 불가능합니다. 또한 피크 시 초당 3만 건의 이벤트를 RDBMS에 넣으면 WAL 디스크 포화가 발생합니다. 열 지향(Columnar) 저장소인 ClickHouse는 80% 이상의 압축률과 벡터화 실행 엔진을 통해 수억 건의 다차원 집계를 1초 미만에 처리하며 운영 트랜잭션에 0%의 영향만 줍니다. | `ADR-0042`, NFR-009 |
+| **2단: 대안 (Alternatives)** | Flink나 Spark Streaming 대신 단순 TypeScript 워커를 스트림 파이프라인으로 쓴 이유는 무엇인가요? | PEAKET의 집계 요구사항은 스트림 윈도우 연산보다 '이벤트를 정확히 가명화하여 ClickHouse에 묶음(Batch)으로 쓰는 것'이 핵심입니다. TypeScript 워커는 메모리 상태가 없어 재기동이 수 초 내에 완료되고 K8s에서 손쉽게 스케일링됩니다. 복잡한 집계는 ClickHouse의 강력한 엔진이 담당하므로, 인프라 복잡도를 극소화하면서도 RPO 0(Kafka 오프셋 커밋)을 완벽히 달성했습니다. | `ADR-0099` |
+| **3단: 장애 대응 (Resilience)** | Kafka에서 ClickHouse로 적재 도중 네트워크 오류나 노드 크래시가 발생하면 어떻게 됩니까? | 스트림 워커는 ClickHouse에 데이터를 성공적으로 INSERT한 후에만 Kafka 오프셋을 커밋합니다. 워커가 다운되면 다른 워커가 마지막 커밋 위치부터 재읽기하여 Bronze에 삽입합니다. 이로 인해 Bronze에 중복이 발생할 수 있지만, Silver 변환 단계에서 `LIMIT 1 BY event_key`를 통해 완벽히 디둡(Deduplicate)되므로 최종 수치의 정합성은 100% 보존됩니다. | `docs/streaming.md` §4.3, `docs/features/analytics.md` §5.5 |
+| **4단: 수치 근거 (Numbers)** | 실시간 관제 대시보드의 p95 5초 반영 목표와 0.1% 누락률은 어떻게 달성합니까? | `ops-rt` 워커가 Kafka 이벤트를 0.25초 단위의 마이크로 배치로 묶어 ClickHouse `rt` 테이블에 비동기 일괄 삽입합니다. 관제 대시보드는 백그라운드 머티리얼라이즈드 뷰 대신 원시 `rt` 테이블을 1초 윈도우 SQL로 온디맨드 쿼리하므로, 이벤트 발생부터 대시보드 렌더링까지의 파이프라인 지연이 1.8~3.2초에 수렴하여 p95 5초 기준을 여유 있게 만족합니다. | `docs/features/analytics.md` §4.4, NFR-009 |
+| **5단: 실측과 검증 (Verification)** | ClickHouse 메달리온 파이프라인의 금융 정합성(Gold 수치와 PG 정산서 원 단위 일치)은 어떻게 검증됩니까? | 매 회차 마감 시점(R1, R3)에 실행되는 자동화 대사 잡(`reconciliation-runner`)이 PostgreSQL 결제 원장(`payment`)의 실승인 합계와 ClickHouse Gold 사실 테이블(`fct_sales_summary`)의 지표를 대조합니다. 단 1원의 오차라도 발생할 경우 즉시 SEV1 경보를 발송하고 동결(Freeze)을 차단하는 불변식 검증 파이프라인을 운영합니다. | `docs/features/analytics.md` §11, `ADR-0052` |
 
-### 4.8 잃으면 다시 만든다
+---
 
-목표는 RPO(잃어도 되는 시간 폭) 1일, RTO(복구에 걸려도 되는 시간) 1시간이다. 하루 1회 S3 스냅샷(7일 [가정])을 복원하고, 그 뒤 구간은 Kafka를 다시 읽어 브론즈를 채운 뒤 dbt로 실버·골드를 다시 만든다. 동결된 회차는 아카이브를 그대로 읽는다(docs/infra.md §6).
+## 6. 30초 아키텍처 브리핑 (Staff Engineer Summary)
 
-## 5. 트레이드오프와 버린 길
+> "PEAKET의 분석 플랫폼은 **'라이브 거래선과 대규모 OLAP의 물리적 완전 격리'** 및 **'잠정 관제와 공인 정산의 2-Track 메달리온 아키텍처'**를 기반으로 합니다.  
+> 초당 3만 건의 스트리밍 신호는 가명화 경계를 거쳐 ClickHouse(Bronze $\to$ Silver $\to$ Gold)로 적재되며, 온세일 중에는 `rt` 테이블을 통해 5초 이내의 잠정 관제 지표를 서빙합니다.  
+> 회차 종료 후에는 4단계 마감(R0~R3)을 통해 결제 원장과 100% 원 단위 일치하는 공인 정산 리포트를 확정하고, 불변 Parquet 파일로 S3에 영구 동결 아카이빙함으로써 분석 성능, 금융 정합성, 개인정보 보호를 완벽히 달성했습니다."
 
-| 정한 것 | 얻는 것 | 치르는 값 |
-| --- | --- | --- |
-| 실시간 표와 골드를 나누기 | 관제는 빠르고 결정은 확정 숫자로 한다 | 같은 지표를 두 길로 계산하고 대조해야 한다 |
-| 스트림 작업자 + 조회 시점 집계 | 한 언어로 끝나고, 판매 숫자가 확정 숫자와 같은 사건·키·SQL에서 나온다 | 읽을 때 계산 비용이 ClickHouse에 걸린다(대형 회차 판매 사건 약 27만 개, 한 번에 수십 ms [추정]) |
-| 회차별 가명, 골드는 집계만 | 회차를 넘는 추적이 없고 가명정보가 90일 뒤 사라진다 | 사람 단위 지표가 없고 90일 뒤 다시 나눠 보지 못한다 |
-| 아카이브는 Parquet 파일 | 카탈로그와 정리 작업이 없다 | 파일 목록과 스키마 판을 manifest로 직접 관리한다 |
+---
 
-**버린 길**
+## 7. 정본에서 읽을 곳
 
-- **Flink 잡 셋(이전 설계)**: 자바 코드와 빌드가 생겨 규칙이 세 언어에 나뉘고 운영 자원이 CPU 15.5개·31GiB [가정]였다. Flink SQL·관리형 Flink도 실행 기반이 같다(ADR-0099).
-- **Kafka Connect 싱크 + 뷰 합산**: 회차별 KMS 가명 처리에 자바 변환기가 필요하고, 처리 못 한 메시지 토픽이 원문을 한 벌 더 만들며, 뷰가 중복을 두 번 더한다(ADR-0099).
-- **ClickHouse만(Kafka 엔진 + 뷰)**: 가명 처리 전 식별값이 ClickHouse에 들어간다(ADR-0099). **RisingWave**는 운영할 분산 시스템이 하나 늘고 KMS 가명 처리를 안에서 못 한다.
-- **원시 삽입에 뷰로 마트를 만들고 실시간을 흡수(ADR-0042 원안)**: 중복이 합산되고 차원 변경이 반영되지 않으며 잠정과 확정이 섞인다(ADR-0052).
-- **스트림 하나로 확정까지**: 며칠 뒤 확정되는 숫자를 스트림 상태로 붙들어야 하고 재처리 비용이 크다. **넓은 표 하나**는 그레인이 달라 대기 인원 같은 값을 잘못 더한다. **Airflow**는 운영 부담이 이득보다 크다(ADR-0052).
-- **S3에만 싣고 Athena로 조회**: 리포트가 수십 분 이상 늦고 고빈도 쿼리 비용이 크다(ADR-0042).
-- **Iceberg(여러 엔진이 같은 표를 함께 읽고 쓰게 하는 표 형식) 표 + Glue 카탈로그**: 카탈로그와 정리 작업을 운영하고, 26.8의 Iceberg 쓰기는 Beta이며, 읽는 엔진이 하나뿐이다. **골드를 오래 두고 매일 백업**은 '바뀌지 않음'을 권한으로만 지키고, 백업에 가명 사건·원시 IP가 함께 들어 7일만 둔다(ADR-0115).
-
-**바꿀 조건**: 회차당 조회 p95가 0.25초 [가정]를 넘어 중복에 안전한 숫자의 미리 합산으로도 모자라거나, 순서 패턴(CEP)·세션 창이나 여러 흐름을 시간으로 맞붙이는 실시간 기능이 필요하거나, 입력이 초당 수십만 건이 되면 스트리밍 엔진을 다시 비교한다(ADR-0099 결정 9). 다른 엔진이 아카이브를 표로 읽거나, 행을 고쳐야 하거나, 비교 조회가 10초 [가정]를 넘으면 Iceberg를 다시 본다(ADR-0115 결정 5).
-
-## 6. 꼬리 질문
-
-| 질문 | 답의 요지 | 근거 |
-| --- | --- | --- |
-| 관제 숫자와 리포트 숫자가 다르면요? | 확정(골드)을 믿는다. 관제 숫자는 고쳐 쓰지 않고 차이를 데이터 품질 절에 남긴다. 판매 좌석·금액 기준은 차이 0이다 | analytics §4.4, NFR-026 |
-| 같은 이벤트가 두 번 오면요? | 브론즈·`rt`는 받아 두고, 실버는 `LIMIT 1 BY event_key`, 실시간은 읽을 때 `eventKey`로 지운다 | analytics §5.5 |
-| 왜 머티리얼라이즈드 뷰를 안 쓰나요? | 중복 전달분을 더하고 차원 변경을 반영하지 않는다. 중복에 안전한 숫자의 미리 합산에만 쓴다 | ADR-0052, ADR-0099 |
-| 리포트를 다시 돌리면 결과가 바뀌나요? | 재실행 단위는 회차다. 실버는 지우고 다시 넣고 골드는 새 판으로 바꾼다. 여러 번 돌려도 같다 | analytics §4.3 |
-| 아카이브를 왜 Iceberg로 안 했나요? | 회차마다 한 번 쓰고 ClickHouse 하나가 읽는다. 표 형식의 강점을 안 쓰는데 카탈로그와 Beta 쓰기가 따라온다 | ADR-0115 |
-
-## 7. 내 말로 설명하기
-
-> "분석은 거래 데이터베이스에서 떼어 ClickHouse로 옮겼습니다. 길은 둘입니다. 온세일 중 관제는 스트림 작업자가 원시 사건을 실시간 표에 싣고 읽을 때 SQL로 셉니다. 공연 리포트는 원본을 브론즈에 싣고, dbt로 중복을 지운 실버, 스타 스키마 집계인 골드를 만든 뒤 마감 단계 R0부터 R3까지 차례로 확정합니다. 정책 결정은 확정 숫자로만 하고, 마감 때 두 길의 판매 좌석과 금액이 0 차이인지 대조합니다. Kafka의 중복은 뷰나 병합이 아니라 이벤트 키로 지웁니다. 개인정보는 적재할 때 회차마다 다른 키로 가명 처리해 회차를 넘어 잇지 못하게 했고, 사람 단위 행은 실버까지 90일만 둡니다. 동결한 회차의 골드는 S3에 회차별 Parquet 파일로 영구 보관합니다."
-
-- **꼭 넣을 말**: "잠정(rt)과 확정(골드)은 다른 표, 마감 때 차이 0을 대조한다"
-- **꼭 넣을 말**: "중복은 엔진이 아니라 `eventKey`와 SQL로 지운다"
-- **꼭 넣을 말**: "회차별 가명, 사람 단위 행은 90일, 골드·아카이브는 집계만"
-
-## 8. 정본에서 읽을 곳
-
-1. [docs/features/analytics.md](../../features/analytics.md) §1.2·§1.3(역할 원칙과 신선도), §2(두 길과 층 표)
-2. 같은 문서 §3.3(가명 처리와 금지 필드), §4.2·§4.4(마감 단계, 실시간 대비 대조)
-3. 같은 문서 §5.5(ClickHouse 물리 설계와 아카이브), §11(사용자 표), 그리고 [docs/streaming.md](../../streaming.md) §4.3(`rt` 표 정의)
-4. [ADR-0052](../../adr/0052-analytics-medallion-star-schema-close-stages.md)의 상태 줄과 '대안', [ADR-0099](../../adr/0099-drop-flink-typescript-stream-workers-read-time-aggregation.md)의 '검토한 대안'과 결정 9, [ADR-0115](../../adr/0115-analytics-archive-per-event-parquet-files-read-with-clickhouse-s3.md)의 결정 1·5
-
-## 9. 정본에서 찾은 어긋남
-
-| 어긋난 곳 | 내용 | 지금 읽는 법 |
-| --- | --- | --- |
-| docs/features/analytics.md §5.5 실버 행 | 브론즈 TTL은 `loaded_at + 90일`로 기준 칸이 있지만 실버 TTL은 '90일'만 적고 기준 칸이 없다. 실버는 마감마다 delete+insert로 다시 넣으므로 넣은 시각이 기준이라면 90일이 다시 시작될 수 있다. §4.3과 §11은 '적재 뒤 90일'(가명정보 처리 기간)이라 적는다 | '적재 뒤 90일'로 읽는다. 기준 칸은 정본에 없어 열린 일 95번(docs/review/open-items.md)으로 올라갔다 |
-| docs/infra-handover.md §3.2 ClickHouse 행, docs/infra.md §6 ClickHouse 백업 행 | infra-handover §3.2의 담는 것 칸과 infra §6의 백업 설명이 2026-10-31에 더한 조사 저장소 `inv`(원문 IP 포함)를 적지 않았다. docs/data.md §1 ClickHouse 행에는 있었다. 고침(2026-11-01 정합 점검) | 지금 infra-handover §3.2는 같은 ClickHouse의 별도 DB `inv`를 적는다. infra §6은 `inv`가 일 백업에 드는지 정하지 않았다고 적고, 그 판단은 열린 일 97번이다 |
+1. [docs/features/analytics.md](../../features/analytics.md) §2: 분석 저장소 아키텍처 및 2-Track 흐름
+2. [docs/features/analytics.md](../../features/analytics.md) §3: 수집 경계 가명화 및 원천 파기 필드 규정
+3. [docs/features/analytics.md](../../features/analytics.md) §4: 실시간 관제 표(`rt`) 설계 및 쿼리 전략
+4. [docs/features/analytics.md](../../features/analytics.md) §5: ClickHouse 메달리온(Bronze/Silver/Gold) 및 스타 스키마
+5. [docs/features/analytics.md](../../features/analytics.md) §11: 4단계 마감(R0~R3) 및 S3 Parquet 아카이빙
+6. [ADR-0042](../../adr/0042-analytics-store-and-decision-rules.md): 분석 저장소로 ClickHouse 채택 및 결정 규칙
+7. [ADR-0052](../../adr/0052-analytics-medallion-star-schema-close-stages.md): 메달리온 아키텍처, 스타 스키마, 마감 단계
+8. [ADR-0099](../../adr/0099-drop-flink-typescript-stream-workers-read-time-aggregation.md): Apache Flink 배제 및 TypeScript 스트림 워커 채택
+9. [ADR-0115](../../adr/0115-analytics-archive-per-event-parquet-files-read-with-clickhouse-s3.md): S3 Parquet 파일 아카이브 및 Iceberg 배제

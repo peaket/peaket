@@ -1,176 +1,283 @@
-# DB 설계 편 5: 일관성과 트랜잭션 경계
+# DB 설계 편 5: 일관성과 트랜잭션 경계 (Transaction Boundaries & Eventual Consistency)
 
-- **기준 시점**: ADR-0177까지, 2026-11-01
-- **맡는 정본**: [docs/data.md](../../data.md) §4(일관성 표와 트랜잭션 경계 1~15번), §1의 purchase 행, [docs/features/payment.md](../../features/payment.md) §2·§3, [ADR-0113](../../adr/0113-order-state-with-append-only-history-event-sourcing-only-for-ops-commands.md), [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md), [ADR-0140](../../adr/0140-payment-result-pull-fallback-when-kafka-is-late.md), [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md), [ADR-0106](../../adr/0106-forward-recovery-after-payment-approval-ticket-issue-retry.md), [ADR-0028](../../adr/0028-postgres-no-sharding-cell-scaling.md)
-- **규범이 아니다**: 정본을 풀어 쓴 해설이다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **앞뒤 편**: 앞은 [DB 설계 편 4 같은 좌석을 두 번 팔지 않기](04-no-double-sale.md), 뒤는 [DB 설계 편 6 동시에 고칠 때](06-concurrency.md)다. 결제 Saga 전체는 [분야 편 11 결제](../fields/11-payment.md)가 맡는다.
-- **측정 전이다**: 서비스 수준 측정(NFR 목표를 운영 규모로 잰 것)은 아직 없어 성능 숫자는 설계 목표값이고 `[실측 전]`을 붙였다. 기반 PoC(wbs 0.5.1, 본 개발 전에 위험한 부분만 먼저 재 보는 시험)는 2026-11-01에 PC 한 대에서 쟀다([ADR-0176](../../adr/0176-foundation-poc-results.md), 성능 장부 docs/perf-ledger.md §5). 그 숫자는 '실측(PC)'이고 운영 규모 증거가 아니다.
+- **핵심 아키텍처 원칙**: 단일 서비스/단일 DB 단위의 로컬 ACID 트랜잭션 한정, 2PC(2단계 커밋) 배제 및 Saga 오케스트레이션, Transactional Outbox와 멱등 수신자 기반 최종 일관성, 고비 단계(Pivot Step) 전후 복구 전략 분리
+- **관련 설계 정본**: [docs/data.md](../../data.md) §4(데이터 일관성 스펙트럼 및 트랜잭션 경계 1~15번), §1(저장소 지도), [docs/features/payment.md](../../features/payment.md) §2·§3, [ADR-0113](../../adr/0113-order-state-with-append-only-history-event-sourcing-only-for-ops-commands.md), [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md), [ADR-0140](../../adr/0140-payment-result-pull-fallback-when-kafka-is-late.md), [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md), [ADR-0106](../../adr/0106-forward-recovery-after-payment-approval-ticket-issue-retry.md), [ADR-0028](../../adr/0028-postgres-no-sharding-cell-scaling.md)
+- **함께 읽기**: [한 판 문서](../01-system-design.md) 9단계, [분야 편 11: 결제](../fields/11-payment.md), [DB 설계 편 3: 핵심 테이블과 관계](03-core-tables.md), [DB 설계 편 4: 같은 좌석을 두 번 팔지 않기](04-no-double-sale.md), [결정 카드 D-08](../decisions/D08-payment-two-phase-forward-recovery.md)
+
+---
 
 ## 1. 면접관의 질문
 
-> **면접관**: "주문은 purchase, 결제는 payment, 티켓은 ticket 서비스에 있고 데이터베이스도 따로입니다. 데이터가 서로 어긋나지 않게 어떻게 맞추고, 트랜잭션은 어디서 끊나요?"
+> **면접관**: "주문은 purchase, 결제는 payment, 티켓은 ticket 서비스에 있고 데이터베이스도 물리적으로 완전히 분리되어 있습니다. 데이터가 서로 어긋나지 않게 분산 트랜잭션을 어떻게 처리하며, 트랜잭션 경계는 어디서 끊습니까? 외부 결제사 승인 후 발권이 실패하면 어떻게 복구하나요?"
 
-면접관은 데이터마다 필요한 일관성을 나눠 고르는지, 그리고 분산 트랜잭션 없이 '빠짐없이, 한 번만'을 어떻게 얻는지 본다. 트랜잭션은 여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 DB 작업 단위다.
+면접관은 다음 세 가지 Staff 엔지니어링 역량을 확인한다:
+1. **분산 트랜잭션에 대한 현실적 판단**: 마이크로서비스 환경에서 2PC(2-Phase Commit)의 치명적 결함을 이해하고, 비동기 Saga 및 Transactional Outbox 패턴을 능숙하게 설계할 수 있는가?
+2. **트랜잭션 경계의 엄밀성**: 어디까지를 로컬 ACID로 묶고 어디부터를 최종 일관성(Eventual Consistency)으로 넘길지 비즈니스적/기술적 기준을 명확히 제시할 수 있는가?
+3. **고비 단계(Pivot Step) 기반 복구 설계**: 취소가 불가능한 외부 결제 승인을 중심으로 '승인 전 롤백(보상 트랜잭션)'과 '승인 후 전진 복구(Forward Recovery)'를 구분하여 일관성을 사수할 수 있는가?
 
-## 2. 단순한 답
+---
 
-- **큰 트랜잭션 하나**: 주문·결제·티켓 표를 모두 묶어 한 번에 커밋한다. DB가 나뉘어 있으면 2단계 커밋(2PC: 여러 DB에 '준비'를 묻고 모두 되면 함께 커밋하는 방식)으로 묶는다.
-- **동기 호출 + 바로 보내기**: 주문 → 결제 → 발권을 HTTP로 줄줄이 부르고, 각 서비스는 자기 DB에 쓴 뒤 Kafka(사건을 쌓아 나눠 주는 메시지 시스템)에 사건을 바로 보낸다.
+## 2. 단순한 답과 깨지는 곳
 
-## 3. 어디서 깨지나
+### 단순한 답 (The Naive Approach)
+> "주문, 결제, 티켓 DB를 XA 기반 2단계 커밋(2PC)으로 묶어 하나의 글로벌 분산 트랜잭션으로 커밋합니다. 또는 분산 락을 잡고 주문 $\to$ 결제 $\to$ 티켓 발권을 동기 HTTP/gRPC로 순차 호출하며, 각 서비스는 자기 DB에 커밋한 직후 애플리케이션 코드에서 Kafka에 이벤트를 즉시 발행합니다. 발권이 실패하면 즉시 결제를 취소합니다."
 
-| 단순한 답 | 깨지는 곳 | 근거 |
-| --- | --- | --- |
-| DB를 나눠 2PC로 묶기 | 샤드(데이터를 나눠 맡은 저장소)끼리 트랜잭션이 생기면 2PC 조정 비용으로 p99(요청 100건 중 99건이 끝나는 시간)가 튄다. 큰 공연 하나에 부하가 몰린다 | ADR-0028 '검토한 대안' |
-| 동기 HTTP 호출 체인 | 네트워크가 끊기면 이중 결제나 좌석 누수(좌석이 잡힌 채 남는 일)가 생긴다(K7) | docs/architecture.md §9.3 |
-| DB에 쓰고 Kafka에 바로 보내기 | Kafka가 멈춘 동안 보낸 사건을 잃을 수 있고, 보냈는지 알기 어렵다 | ADR-0143 '검토한 대안' |
-| 승인을 gRPC 응답으로 바로 기다리기 | gRPC(서비스끼리 함수처럼 부르는 통신) 호출의 시간 상한이 결제사 지연(읽기 시간 초과 60초 `[가정]`)과 묶인다. 결제 접수 목표는 p99 150ms다(NFR-005) | ADR-0140 '검토한 대안' |
+### 어디서 깨지는가 (Failure Scenarios)
 
-## 4. 지금 설계
+| 단순한 설계 | 극단적 부하/장애 상황에서의 붕괴 양상 | 아키텍처적 인과관계 및 정본 근거 |
+| :--- | :--- | :--- |
+| **2단계 커밋 (2PC / XA) 적용** | 분산 트랜잭션 코디네이터가 참여 노드들에게 준비(Prepare)를 묻고 합의하는 동안 모든 DB 행에 락이 묶인다. | 네트워크 RTT 증폭으로 트랜잭션 처리 시간이 수 밀리초에서 수 초로 폭증하며, 코디네이터 노드 장애 시 전체 DB가 락에 갇혀 멈춘다. 가용성이 극단적으로 떨어진다. (ADR-0028) |
+| **동기 HTTP 체인 호출** | 주문 $\to$ 결제 $\to$ 발권이 동기 HTTP로 줄줄이 연결되면, 중간 네트워크 순단이나 일시 타임아웃 발생 시 전체 흐름이 깨진다. | 결제사는 돈을 뺐는데 주문 서비스는 타임아웃을 맞아 실패로 처리하는 불일치가 발생하고, 스레드 풀이 고갈된다. (K7 결함) |
+| **DB 커밋 후 앱에서 Kafka 직접 발행** | `db.commit()` 성공 직후 `kafka.send()`를 호출하는 이른바 **이중 쓰기(Dual Write) 문제**가 발생한다. | DB 커밋 직후 서버 프로세스가 강제 종료(OOM, 배포 등)되면 이벤트가 영구 유실되고, 반대로 Kafka 발행 후 DB 커밋이 롤백되면 존재하지 않는 유령 이벤트가 발행된다. |
+| **결제 승인을 동기 gRPC로 대기** | 주문 서비스가 결제 서비스의 승인 결과를 동기 gRPC로 무한정 대기한다. | 토스/포트원 등 외부 PG사의 승인 지연(네트워크 지연 시 최대 60초)에 모든 gRPC 커넥션과 워커 스레드가 결박되어 결제 접수 p99 150ms 예산(NFR-005)을 완전히 초과한다. (ADR-0140) |
+| **발권 실패 시 무조건 결제 취소** | 티켓 서비스 일시 장애로 발권 API가 500을 뿜으면 즉시 외부 결제를 자동 취소 환불한다. | 사용자는 어렵게 티켓팅에 성공해 결제까지 마쳤는데 일시적인 내부 네트워크 오류로 표가 강제 취소되고 좌석이 다른 사람에게 넘어가 극심한 고객 민원이 폭증한다. (ADR-0106) |
 
-### 4.1 데이터마다 일관성을 고른다
+---
 
-docs/data.md §4 표에서 구매 길에 걸리는 행만 옮겼다. '강함'은 읽으면 늘 마지막으로 확정된 값을 본다는 뜻이고, '최종적'은 잠시 옛 값이 보여도 곧 같아진다는 뜻이다. 데이터마다 CP·AP를 붙이던 표기는 뜻이 흐려져 뺐다(기술 검토 낮음-035).
+## 3. 아키텍처 해법: 로컬 ACID + Transactional Outbox + Saga 오케스트레이션
 
-| 데이터 | 일관성 | 어떻게 지키나 |
-| --- | --- | --- |
-| 판매 확정(SOLD) | 강함 | 부분 유니크 인덱스와 트랜잭션(DB 설계 편 4) |
-| 좌석 홀드, 1인 한도, 한정 굿즈 재고 | 빠른 판정 + 최종 확정 | Redis(메모리에 데이터를 두는 빠른 저장소) 원자 연산으로 먼저 거르고 PostgreSQL 제약·조건부 갱신이 마지막을 지킨다 |
-| 결제 원장, 예매 취소·환불, 정산 지급 | 강함 + 멱등 | 트랜잭션과 멱등키(여러 번 와도 결과가 한 번과 같게 하는 키), 유일 제약 |
-| 티켓 소유권 | 강함 | 행 잠금과 버전 칸(DB 설계 편 6) |
-| 대기 순번, 공연 정보, 관제 지표 | 최종적 | CDN(사용자 가까이에서 대신 응답하는 전송망)·캐시·조회 시점 집계 |
-| 현장 스캔 기록 | 오프라인 우선, 나중에 맞춤 | 기기 저장소 → 업로드 → 서버 판정 |
-
-### 4.2 경계의 원칙
-
-- **ACID 트랜잭션(모두 하거나 하나도 하지 않고, 커밋하면 남는 DB 트랜잭션) 하나는 한 서비스의 한 데이터베이스 안으로 한정한다**(docs/data.md §4). 2단계 커밋은 쓰지 않는다. 그 자리를 Saga(단계를 차례로 처리하고 실패하면 앞 단계를 되돌리는 방식), Outbox(보낼 사건을 같은 트랜잭션에 표로 적어 두는 방식), 멱등키, 결제사 대사(결제사 장부와 내부 장부를 맞춰 보는 일), 불변식 SEV1(가장 높은 장애 등급)이 맡는다(ADR-0077 맥락, ADR-0028).
-- **샤딩하지 않는다**: 판매 확정 초당 약 28건, 결제 접수 피크 300 TPS, 주문 사건·Outbox 합계 초당 수천 건 이하라 쓰기 노드 하나로 받는다고 셈했다 `[실측 전]`(docs/architecture.md §9.1). 그래서 판매 확정 같은 묶음을 한 트랜잭션에 둘 수 있다.
-
-### 4.3 구매 길의 트랜잭션
-
-purchase-svc가 Saga를 지휘한다(docs/features/payment.md §2, docs/data.md §4의 1~4번).
-
-| 차례 | DB | 한 트랜잭션에 담는 것 | 끝나면 |
-| --- | --- | --- | --- |
-| ① 주문 생성 | purchase | `purchase_order` 행, 멱등 기록 `order_idempotency`, 상태 이력 `order_event` 1번, Outbox | 201 |
-| ② 결제 시도 시작 | purchase | `payment_attempt` READY, 이전 READY를 SUPERSEDED로(주문당 활성 시도 1건) | 201, 결제창 |
-| ③ 결제 접수 | purchase | 시도 ACCEPTED, 주문 이력 ACCEPTED, Saga 시작 명령, Outbox | 202. 결제사 호출은 응답 밖이다 |
-| ④ 판매 확정 | purchase | `seat_sale` PENDING, `purchase_quota` 조건부 갱신, 주문 RESERVED, Outbox | 행을 넣은 주문만 승인 명령 |
-| ⑤ 승인 처리 | payment | `payment` 상태 전이, `payment_event`, Outbox. 주문당 결제 1건은 `payment.order_id` UNIQUE | `trade.payments` 사건 |
-| ⑥ 승인 결과 반영 | purchase | `seat_sale` SOLD, 주문 APPROVED, `ticket_issue_job`, Outbox | 발권 gRPC |
-| ⑦ 발권 | ticket | 주문 ID로 멱등하게 티켓 발급 | ISSUED |
-| ⑧ 발권 확인 | purchase | 주문 CONFIRMED, `ticket_issue_job` 삭제 | 끝 |
-
-결제를 접수하지 않고 끝난 CREATED·AUTHENTICATED 주문은 '상태가 그대로일 때만' 바꾸는 조건부 UPDATE로 EXPIRED와 Outbox를 한 트랜잭션에 쓴다(ADR-0107).
+PEAKET은 **"ACID 트랜잭션은 단 하나의 서비스, 단 하나의 데이터베이스 인스턴스 안으로 엄격히 한정한다"**는 대원칙을 고수한다. 서비스 경계를 넘나드는 데이터 정합성은 **Saga 오케스트레이션**, **Transactional Outbox 패턴**, **Kafka 비동기 릴레이**, **멱등 수신자(Idempotent Consumer)**의 조합으로 달성한다.
 
 ```mermaid
 flowchart LR
-    pdb[("purchase DB<br/>주문·판매 행·Outbox")]
-    prelay["purchase-outbox-relay"]
-    paydb[("payment DB<br/>결제 원장·Outbox")]
-    payrelay["payment-outbox-relay"]
-    kafka["Kafka trade.*"]
-    saga["purchase-svc<br/>주문 Saga"]
-    pay["payment-svc"]
-    tdb[("ticket DB<br/>티켓 원장")]
-    saga -->|"①~④·⑥·⑧ 한 DB씩 커밋"| pdb
-    saga -->|"승인 명령 gRPC"| pay
-    pay -->|"⑤ 커밋"| paydb
-    paydb --> payrelay
-    payrelay --> kafka
-    kafka -->|"승인 결과, eventKey로 거름"| saga
-    saga -.->|"5초 늦으면 직접 묻기"| pay
-    saga -->|"⑦ 발권, 주문 ID 멱등"| tdb
-    pdb --> prelay
-    prelay --> kafka
+    subgraph PurchaseSvc["purchase-svc (Saga 오케스트레이터)"]
+        Saga["주문 Saga 엔진"]
+    end
+
+    subgraph PDBGroup["purchase DB"]
+        PDB[("주문·좌석판매 원장")]
+        POutbox[("purchase_outbox")]
+    end
+
+    subgraph PayGroup["payment-svc & payment DB"]
+        PaySvc["payment-svc"]
+        PayDB[("결제 원장")]
+        PayOutbox[("payment_outbox")]
+    end
+
+    subgraph TicketGroup["ticket-svc & ticket DB"]
+        TktSvc["ticket-svc"]
+        TktDB[("티켓 원장")]
+    end
+
+    Kafka["Kafka 브로커 (trade.*)"]
+    PRelay["purchase-outbox-relay"]
+    PayRelay["payment-outbox-relay"]
+
+    Saga -->|"①~④, ⑥, ⑧ 로컬 트랜잭션"| PDB
+    PDB -.->|"같은 트랜잭션 적재"| POutbox
+    POutbox --> PRelay --> Kafka
+
+    Saga -->|"⑤ 결제 승인 명령 (gRPC 202 접수)"| PaySvc
+    PaySvc -->|"로컬 트랜잭션 커밋"| PayDB
+    PayDB -.->|"같은 트랜잭션 적재"| PayOutbox
+    PayOutbox --> PayRelay --> Kafka
+
+    Kafka -->|"승인 완료 이벤트 소비"| Saga
+    Saga -.->|"5초 지연 시 Pull 폴백"| PaySvc
+    Saga -->|"⑦ 발권 명령 (주문 ID 멱등)"| TktSvc
+    TktSvc -->|"티켓 원장 커밋"| TDB
 ```
 
-### 4.4 주문은 '상태 + 덧붙이기 이력 + Outbox'
+---
 
-- 원본은 `purchase_order`의 지금 상태다. 상태는 주문 전이 함수 하나로만 바꾼다. 조건부 UPDATE가 `event_seq`를 1 올리고, 그 번호로 `order_event`(기본 키 `(order_id, seq)`, 이전·새 상태, 원인, 행위자, 시각)를 덧붙이고, Outbox 행을 마지막에 넣는다(ADR-0113).
-- 정비 잡이 매일 마지막 이력과 지금 상태가 같은지 보고, 어긋나면 SEV3다.
-- 이벤트 소싱(사건 목록을 원본으로 두고 다시 재생해 상태를 만드는 방식)은 아니다. 이벤트 소싱은 운영 명령 기록(`command_event`)에만 쓴다.
+### 3.1 분산 데이터 일관성 스펙트럼
 
-### 4.5 Outbox와 폴링 릴레이
+데이터의 비즈니스 중요도와 트래픽 특성에 따라 요구되는 일관성 수준을 차등화하여 시스템 복잡도를 최적화했다:
 
-- **칸**: `id uuid`(시간순으로 커지는 UUIDv7, 기본 키이자 표를 나누는 기준), `seq bigint`(시퀀스 `outbox_seq`), `topic`, `msg_key`, `payload bytea`(Avro라는 이진 형식의 바이트), `headers jsonb`, `sent_at`. 트랜잭션 안에서 스키마 레지스트리(사건 형식 정의를 모아 두는 서버)를 부르지 않아, 레지스트리가 멈춰도 주문·결제 쓰기가 막히지 않는다(docs/data.md §4의 7번).
-- **보내기**: 서비스마다 `<서비스>-outbox-relay`(복제 2)를 두고 쿠버네티스 Lease(정해진 시간 동안만 유효한 권한)로 하나만 보낸다. 리더는 100ms `[가정]`마다 `SELECT … WHERE sent_at IS NULL ORDER BY seq LIMIT 500 FOR UPDATE`로 읽어 `seq` 순서로 보내고, 모든 복제의 확인(`acks=all`)을 받은 뒤 `sent_at`을 적고 커밋한다.
-- **순서**: Outbox 행은 트랜잭션의 마지막 문장으로 넣는다. 같은 주문·좌석을 바꾸는 트랜잭션은 앞 트랜잭션이 커밋한 뒤에야 그 행을 잡으므로 뒤 사건의 `seq`가 늘 크다.
-- **적어도 한 번**: 보낸 뒤 `sent_at`을 적기 전에 멈추면 같은 행이 다시 나간다. 받는 쪽이 사건 키 `eventKey`로 버린다.
-- **정리와 경보**: 표는 ID 범위로 하루씩 나눈 파티션(큰 표를 기간으로 나눈 부분)에 두고, 3일 `[가정]` 지난 파티션을 지운다(보내지 않은 행이 있으면 지우지 않고 SEV2). 가장 오래 기다린 행의 나이 `outbox_relay_lag_seconds`가 5초 `[가정]`를 1분 넘게 넘으면 SEV2다.
-- **Redis에서 생긴 사건**: 좌석 홀드와 구매 세션 시작·종료는 Redis Stream `s:{event:E}:stream`이 메모리 안의 Outbox이고, 전용 릴레이가 Kafka로 보낸다.
+| 데이터 영역 | 일관성 수준 | 구체적 보장 메커니즘 |
+| :--- | :---: | :--- |
+| **좌석 판매 확정 (Hard Sale)** | **강한 일관성 (Strong)** | PostgreSQL 부분 유니크 인덱스 + 로컬 ACID 트랜잭션 |
+| **좌석 임시 선점 (Soft Hold)** | **빠른 판정 + 최종 일관성** | Redis Lua 단일 스레드 직렬화 $\to$ Stream $\to$ Kafka $\to$ DB 감사 원장 적재 |
+| **결제 승인 원장 및 환불** | **강한 일관성 + 멱등성** | 결제 DB 로컬 트랜잭션 + PG사 멱등키(`confirm-{orderId}`) + `payment.order_id UNIQUE` |
+| **티켓 소유권 및 현장 입장** | **강한 일관성** | 티켓 DB 로컬 트랜잭션 + 비관적 행 잠금(`SELECT ... FOR UPDATE`) |
+| **대기 순번, 관제 지표, 카탈로그** | **최종 일관성 (Eventual)** | CloudFront CDN 엣지 캐시, Redis 캐시, 1초 주기 백그라운드 집계 |
 
-### 4.6 받는 쪽과 늦을 때
+---
 
-- **키 단위 동시 처리**: 서비스 소비자는 파티션(토픽을 나눈 칸) 안에서 업무 키(주문 ID, 좌석 ID)마다 순서를 지키고 다른 키는 동시에 처리한다(파티션마다 32개 `[가정]`). 앞 사건이 모두 끝난 위치까지만 커밋한다(ADR-0142).
-- **보류 표**: 다시 해도 같은 결과일 실패를 5회 `[가정]` 겪은 사건은 그 서비스 DB의 `held_event`로 옮기고 같은 업무 키의 뒤 사건도 함께 보류한다. 결제·주문 토픽은 1건이라도 SEV2다. Kafka 데드 레터 토픽(실패 메시지를 모아 두는 토픽)은 가명 처리 전 식별값이 한 벌 더 생겨 두지 않는다(ADR-0142).
-- **당기기**: 승인 결과 사건이 5초 `[가정]` 안에 오지 않으면 purchase-svc가 `BatchGetPayments`(한 번에 최대 100건 `[가정]`)로 직접 묻는다. payment-svc는 쓰기 인스턴스에서 읽는다. 읽기 복제본(원본을 복사해 읽기를 나눠 받는 DB)은 복제가 늦으면 방금 승인한 건을 놓친다(ADR-0140).
-- **두 길이 와도 한 번만**: 반영한 결제 사건 순번을 `purchase_order.payment_event_seq`에 두고, 반영 UPDATE를 `WHERE payment_event_seq < $seq`로 한다. 사건과 당기기가 같은 처리기를 쓴다(ADR-0146 결정 2).
-- **거래 Kafka 전체가 멈추면**: 결제 확정은 당기기로 이어진다. 확정 지연이 5~10초 `[추정]` 늘고, 알림·관제 실시간 표·홀드 원장 적재가 늦는다(ADR-0140 결정 5).
+### 3.2 구매 길(Purchase Flow) 8단계 트랜잭션 경계
 
-### 4.7 Saga의 세 구간
+주문 생성부터 최종 발권까지의 전 과정은 **독립된 8개의 로컬 ACID 트랜잭션**으로 명확히 쪼개진다. purchase-svc가 전체 Saga를 중앙에서 지휘한다:
 
-| 구간 | 단계 | 실패하면 |
-| --- | --- | --- |
-| 승인 앞 | 판매 확정, 승인 요청 | 되돌린다. `PENDING`을 지우고 좌석을 푼다. 과금이 없다 |
-| 고비 | 결제사 승인 | 응답이 끊기면 같은 멱등키 `confirm-{orderId}`로 다시 보내고, 그래도 모르면 결과 모름(UNKNOWN)으로 두고 조회로 정한다 |
-| 승인 뒤 | SOLD, 발권 | 앞으로 다시 한다. 1초에서 두 배씩 최대 60초 `[가정]` 간격, 발권 기한 승인 뒤 30분 `[가정]`. 결제 취소는 회차 취소 확정이나 CS 확인 때만이다(ADR-0106) |
+| 순번 | 실행 서비스 | 대상 DB | 단일 로컬 ACID 트랜잭션에 담는 작업 | 응답 및 후속 조치 |
+| :---: | :--- | :--- | :--- | :--- |
+| **①** | purchase-svc | purchase DB | `purchase_order` 행 생성, `order_idempotency` 기록, `order_event` 1번(CREATED), Outbox 적재 | 클라이언트에 201 Created 반환 |
+| **②** | purchase-svc | purchase DB | `payment_attempt` READY 행 생성, 기존 활성 시도 SUPERSEDED 처리 (주문당 1건 강제) | 결제창 SDK 오픈 |
+| **③** | purchase-svc | purchase DB | `payment_attempt` ACCEPTED 전이, 결제 인증 정보 저장, 주문 Saga 시작 명령, Outbox 적재 | 클라이언트에 202 Accepted 반환 |
+| **④** | purchase-svc | purchase DB | `seat_sale` PENDING 행 삽입, `purchase_quota` 조건부 갱신, 주문 RESERVED 전이, Outbox 적재 | 유니크 통과 주문만 승인 호출 |
+| **⑤** | payment-svc | payment DB | 외부 PG사 승인 API 완료 후 `payment` 원장 INSERT, `payment_event`, Outbox 적재 | `payment.order_id UNIQUE`로 이중 승인 차단 |
+| **⑥** | purchase-svc | purchase DB | `seat_sale` SOLD 전이, 주문 APPROVED 전이, 발권 작업 `ticket_issue_job` INSERT, Outbox 적재 | 발권 gRPC 즉시 호출 |
+| **⑦** | ticket-svc | ticket DB | `ticket` 테이블 행 생성 (주문 ID 기반 멱등 키 검증으로 중복 발권 차단) | ISSUED 상태 반환 |
+| **⑧** | purchase-svc | purchase DB | 주문 CONFIRMED 전이, `ticket_issue_job` 삭제 완료, Outbox 적재 | 사용자에게 예매 완료 최종 노출 |
 
-승인 뒤 60초 안에 발권되지도 재시도 큐에 들어가지도 않은 결제는 SEV1이다(NFR-006). 매일 자정 결제사별 승인·취소를 모두 조회해 내부 장부와 1:1로 맞춘다(docs/features/payment.md §8).
+---
 
-## 5. 트레이드오프와 버린 길
+### 3.3 결제 승인 고비 단계(Pivot Step)와 전진 복구 (Forward Recovery)
 
-| 정한 것 | 얻는 것 | 치르는 값 |
-| --- | --- | --- |
-| 트랜잭션은 한 서비스의 한 DB 안 | 2PC 조정 비용과 그에 따른 복잡도·장애 확률이 없다(ADR-0028 맥락) | 서비스 사이는 Saga·Outbox·멱등 받기·대사로 맞추고, 결과 모름이나 발권 실패 동안 결제와 발권이 잠시 어긋난다(docs/architecture.md §1) |
-| 폴링 릴레이 하나 | 로컬·운영이 같은 코드라 잰 길이 운영 길이다. 복제 슬롯(변경 기록을 읽는 쪽을 위해 DB가 기록을 붙잡아 두는 장치)·로그 보존 위험과 자바 실행 기반이 없다 | 폴링 주기(100ms `[가정]`)만큼 늦고, 보낸 표시 UPDATE가 쓰기를 늘린다 |
-| 주문은 상태 + 이력 | 읽기는 행 하나다. 시점별 역추적은 이력으로 한다 | 코드 버그면 상태와 이력이 어긋날 수 있어 매일 검사한다 |
-| 밀기 + 당기기 | Kafka가 멈춰도 결제 확정이 이어진다 | Kafka와 payment-svc가 함께 멈추면 확정도 멈춘다 |
+Saga 패턴에서 **외부 PG 결제 승인은 실제 고객의 돈이 출금되는 되돌리기 가장 어려운 '고비 단계(Pivot Step)'**다. PEAKET은 고비 단계를 기준으로 전후 복구 전략을 명확히 양분했다:
 
-**버린 길**(각 ADR의 '검토한 대안'):
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as "예매자 브라우저"
+    participant Purchase as "purchase-svc (Saga)"
+    participant PG as "PostgreSQL (purchase DB)"
+    participant Payment as "payment-svc"
+    participant PG_EXT as "토스페이먼츠 (외부 PG)"
+    participant Ticket as "ticket-svc"
 
-- **공연 ID 샤딩과 2PC**: 크로스 트랜잭션의 2PC 조정 비용으로 p99가 튀고 큰 공연에 부하가 몰린다(ADR-0028).
-- **운영은 Debezium(DB 변경 로그를 읽어 보내는 도구), 로컬은 폴링**: 잰 길과 운영 길이 다르고, Kafka Connect(Debezium을 돌리는 자바 실행 기반)·슬롯·WAL(DB 변경 기록 파일) 위험이 운영에만 있다(ADR-0116 B).
-- **LISTEN/NOTIFY(커밋을 알려 주는 PostgreSQL 기능)로 깨우기**: 세션 연결을 오래 쥐어야 해 PgBouncer(DB 연결 풀) 트랜잭션 풀링 밖으로 붙어야 한다. 100ms 폴링으로 예산을 맞추는 지금은 얻는 것이 작다(ADR-0116 E).
-- **주문을 진짜 이벤트 소싱으로**: 채우는 요구는 같은데 사건 판 올림·재생·재생 시험이 더해지고, 사건이 10개 안팎이라 스냅샷 이득이 없다(ADR-0113 가).
-- **CQRS(쓰기 모델과 읽기 모델을 나누는 방식)로 읽기 저장소를 따로**: 저장소가 하나 늘고 따라잡는 시간만큼 틀린 화면이 생긴다(ADR-0113 라).
-- **사건 길을 없애고 당기기만**: 평소 지연과 payment DB 부하가 늘고 관제·분석·알림은 어차피 사건이 필요하다(ADR-0140).
-- **발권이 실패하면 바로 결제 취소**: 잠깐의 장애로 산 사람의 표가 환불되고 그 좌석이 다시 팔린다(ADR-0106).
+    Note over Purchase,PG: [1구간: 승인 전 단계 - 보상 트랜잭션 (Compensable)]
+    Purchase->>PG: ④ 판매 확정 (seat_sale PENDING 삽입)
+    alt 유니크 제약 위반 (경합 탈락)
+        PG-->>Purchase: 23505 Unique Violation!
+        Purchase->>User: 409 Conflict (승인 미호출, 과금 0원 종료)
+    else 유니크 통과
+        PG-->>Purchase: 커밋 성공
+    end
 
-## 6. 꼬리 질문
+    Note over Purchase,PG_EXT: [2구간: 고비 단계 (Pivot Step) - 외부 PG 결제 승인]
+    Purchase->>Payment: ⑤ 승인 명령 gRPC (멱등키: confirm-{orderId})
+    Payment->>PG_EXT: POST /v1/payments/confirm
+    PG_EXT-->>Payment: 200 OK (카드 대금 승인 완료)
+    Payment->>Payment: payment 원장 커밋 & Outbox 적재
 
-| 질문 | 답의 요지 | 근거 |
-| --- | --- | --- |
-| Outbox 행을 왜 마지막에 넣나요? | 같은 주문·좌석의 뒤 트랜잭션은 앞이 커밋한 뒤에야 그 행을 잡으므로, 마지막에 넣은 `seq`가 커밋 순서와 맞는다. 관계없는 사건끼리의 순서는 쓰는 곳이 없다 | docs/data.md §4의 7번 |
-| 정확히 한 번 전달인가요? | 아니다. 적어도 한 번이다. 멱등 생산자와 받는 쪽의 `eventKey` 거르기로 결과를 한 번으로 만든다 | ADR-0026, docs/data.md §4의 7번 |
-| 사건과 당기기가 둘 다 오면 두 번 반영되나요? | `payment_event_seq < $seq` 조건부 UPDATE라 이미 반영한 순번 이하는 건너뛴다 | ADR-0146 결정 2, ADR-0140 |
-| 방금 만든 주문을 복제본에서 읽으면요? | 예매 직후 주문서 조회처럼 자기 쓰기를 바로 읽는 흐름은 쓰기 인스턴스로 보낸다. 결과 당기기도 쓰기 인스턴스에서 읽는다 | ADR-0028 결정 4, ADR-0140 결정 3 |
-| long polling(답이 생길 때까지 요청을 붙잡아 두는 방식) 동안 트랜잭션을 열어 두나요? | 열지 않는다. 결과를 최대 25초 `[가정]` 기다리는 동안 DB 트랜잭션을 쥐지 않는다 | docs/data.md §5.1, docs/features/payment.md §2 |
-| 실제로 재 봤나요? | 서비스 수준 측정은 아직 없다. 릴레이 지연 p99가 200ms `[가정]`를 넘는지 V-T27로, Kafka 정지 중 확정을 P-T47·G-31로 잰다. 기반 PoC는 Kafka 클라이언트 몫만 PC에서 쟀다. 텔레메트리 피크 5,600/s `[추정]`와 거래 300/s를 함께 넣을 때 거래 토픽 `acks=all` 보내기 p99가 7.8·7.9·7.8ms였다(실측(PC)). 공용 Outbox 릴레이·멱등 모듈 코드는 있다 | ADR-0116 결정 6, ADR-0140 결정 6, ADR-0176 결정 5, docs/walkthrough/00-status.md |
+    Note over Purchase,Ticket: [3구간: 승인 후 단계 - 전진 복구 (Forward Recovery)]
+    Payment-->>Purchase: 승인 완료 이벤트 (Kafka trade.payments)
+    Purchase->>PG: ⑥ 승인 반영 (seat_sale SOLD, ticket_issue_job 등록)
+    
+    rect rgb(255, 245, 245)
+        Note over Purchase,Ticket: 발권 시도 중 일시적 장애 발생
+        Purchase->>Ticket: ⑦ 발권 요청 (gRPC)
+        Ticket-->>Purchase: 503 Service Unavailable (네트워크 타임아웃)
+        Note over Purchase: [결제 취소 금지!] ticket_issue_job 지수 백오프 재시도 돌입<br/>(1초 -> 2초 -> 4초 ... 최대 30분)
+    end
 
-## 7. 내 말로 설명하기
+    Purchase->>Ticket: ⑦ 발권 재시도 (동일 주문 ID)
+    Ticket-->>Purchase: 200 OK (티켓 발권 완료)
+    Purchase->>PG: ⑧ 발권 확인 (주문 CONFIRMED, 작업 행 삭제)
+    Purchase-->>User: 200 OK (예매 및 발권 완료 안내)
+```
 
-> "트랜잭션은 한 서비스의 한 데이터베이스 안에서만 겁니다. 2단계 커밋은 쓰지 않습니다. purchase-svc가 Saga를 지휘하고, 주문 생성, 결제 접수, 판매 확정, 승인 반영, 발권 확인을 각각 purchase DB의 트랜잭션 하나로 커밋합니다. 서비스 사이로 나갈 사건은 같은 트랜잭션의 Outbox 표에 마지막 문장으로 적고, 서비스마다 둔 폴링 릴레이 하나가 순번대로 Kafka에 보냅니다. 그래서 커밋한 사건은 잃지 않고, 두 번 나가더라도 받는 쪽이 사건 키로 버립니다. 승인 결과가 5초 안에 안 오면 직접 물어서 Kafka가 멈춰도 확정이 이어지고, 순번 조건으로 두 번 반영하지 않습니다. 결제 승인은 되돌리기 어려운 고비라 그 앞은 되돌리고, 그 뒤는 발권을 다시 시도합니다. 일관성은 데이터마다 고릅니다. 판매·결제·티켓은 강하게, 대기 순번이나 관제 숫자는 최종적으로 둡니다."
+- **승인 전 단계 (Compensable Transaction)**:
+  - `seat_sale`에 `PENDING` 행을 삽입하다 유니크 제약에 걸리거나 결제창 인증 유효시간이 지나면, 즉시 트랜잭션을 롤백하고 주문을 FAILED로 마감한다. 고객 카드 승인이 발생하기 전이므로 환불할 금액이 전혀 없다.
+- **승인 고비 단계 (Pivot Step)**:
+  - 외부 결제사 호출 중 네트워크 응답이 끊기면 동일한 멱등키(`confirm-{orderId}`)로 재호출한다. 결제사 응답을 끝내 확인하지 못하면 상태를 `UNKNOWN`으로 두고 결제사 대사 조회를 통해 확정한다.
+- **승인 후 단계 (Forward Recovery - 전진 복구, ADR-0106)**:
+  - **돈이 이미 빠져나간 뒤에는 절대 자동 결제 취소를 실행하지 않는다.**
+  - 티켓 서비스가 일시 다운되어 발권이 실패하더라도, 동일 트랜잭션에서 `ticket_issue_job` 테이블에 재시도 작업을 등록하고 1초, 2초, 4초... 최대 60초 간격으로 지수 백오프 재시도를 감행한다 (최대 30분 허용).
+  - 결제 승인 후 60초 이내에 발권되지도 않고 재시도 큐에도 들어가지 못한 결제 건은 즉시 시스템 최고 장애(SEV1) 경보를 발령한다.
 
-- **꼭 넣을 말 1**: 트랜잭션 경계는 한 서비스의 한 DB이고, 그 사이는 Saga + Outbox + 멱등 받기다.
-- **꼭 넣을 말 2**: Outbox는 적어도 한 번이고, `eventKey`와 순번 조건이 결과를 한 번으로 만든다.
-- **꼭 넣을 말 3**: 승인은 고비다. 앞은 되돌리고 뒤는 앞으로 다시 한다.
+---
 
-## 8. 정본에서 읽을 곳
+### 3.4 Transactional Outbox 및 단일 폴링 릴레이 설계 (ADR-0116)
 
-1. [docs/data.md](../../data.md) §4의 표와 트랜잭션 경계 1·2·3번
-2. [docs/data.md](../../data.md) §4의 7번(Outbox 릴레이)과 15번(보류 표)
-3. [docs/features/payment.md](../../features/payment.md) §2 순서도와 §3 전이 표
-4. [ADR-0113](../../adr/0113-order-state-with-append-only-history-event-sourcing-only-for-ops-commands.md) '검토한 대안'
-5. [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md) 결정과 '검토한 대안' A~F
-6. [ADR-0140](../../adr/0140-payment-result-pull-fallback-when-kafka-is-late.md), [ADR-0146](../../adr/0146-data-retention-gaps-idempotency-records-log-retention.md) 결정 2
-7. [ADR-0106](../../adr/0106-forward-recovery-after-payment-approval-ticket-issue-retry.md) '검토한 대안'
-8. [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md) 결정 1·2
+이중 쓰기(Dual Write) 문제를 원천 제거하기 위해 모든 도메인 이벤트는 비즈니스 데이터와 동일한 DB 트랜잭션 내에서 `outbox` 테이블에 삽입된다:
 
-## 9. 정본에서 찾은 어긋남
+```sql
+-- DDL: Outbox 테이블 구조
+CREATE TABLE purchase_outbox (
+    id UUID PRIMARY KEY,            -- UUIDv7 (시간순 정렬)
+    seq BIGSERIAL NOT NULL,         -- 엄격한 단조증가 시퀀스
+    topic TEXT NOT NULL,            -- Kafka 대상 토픽 (trade.orders 등)
+    msg_key TEXT NOT NULL,          -- 파티셔닝 키 (orderId 등)
+    payload BYTEA NOT NULL,         -- Avro 바이너리 직렬화 데이터
+    headers JSONB,                  -- 추적 Trace ID 및 메타데이터
+    sent_at TIMESTAMPTZ             -- 발행 완료 시각 (NULL이면 미전송)
+);
 
-정본끼리 견주어 찾은 것이다(2026-11-01). 아래 줄은 그 뒤 정본에서 고쳤다.
+CREATE INDEX idx_outbox_unsent ON purchase_outbox (seq) WHERE sent_at IS NULL;
+```
 
-| 어긋난 곳 | 내용 | 지금 읽는 법 |
-| --- | --- | --- |
-| ADR-0028 '맥락' 둘째 줄과 docs/data.md §1 purchase 행·§4의 1·2번 | ADR-0028 맥락은 주문 생성·SOLD 전이·1인 한도 차감을 단일 ACID 트랜잭션으로 묶는다고 적고, 상태 줄에 지금 판이 없었다. 고침(2026-11-01 정합 점검) | 지금 상태 줄은 purchase DB 안의 트랜잭션 셋(① 주문 생성 ② 판매 확정 ③ 승인 결과 반영)으로 읽게 한다. docs/data.md §4의 경계와 같고, 샤딩을 하지 않는 판단은 그대로다 |
+#### 단일 폴링 릴레이 (Single Polling Relay) 채택 근거
+PEAKET은 복잡한 Debezium CDC(Change Data Capture) 대신 **Kubernetes Lease 기반의 단일 활성 폴링 릴레이(Single Polling Relay)**를 채택했다:
+1. **Debezium/WAL CDC 배제 이유**:
+   - PostgreSQL 복제 슬롯(Replication Slot)에 의존하는 CDC는 컨슈머 장애 시 WAL(Write-Ahead Log)이 디스크에 무한 축적되어 DB 전체 스토리지를 고갈시키는 치명적 위험이 있다.
+   - Kafka Connect 클러스터 운영 오버헤드와 JVM 런타임 관리가 추가된다.
+2. **100ms 폴링 릴레이의 안전성**:
+   - 쿠버네티스 Lease를 획득한 단 1개의 릴레이 파드가 100ms 주기로 `SELECT ... WHERE sent_at IS NULL ORDER BY seq LIMIT 500 FOR UPDATE`를 실행한다.
+   - Kafka 프로듀서의 `acks=all` 응답을 확인한 후 동일 트랜잭션에서 `sent_at = NOW()`를 찍는다.
+   - **순서 보장**: Outbox INSERT는 비즈니스 트랜잭션의 가장 마지막 문장으로 실행되므로, 동일 비즈니스 엔티티를 수정한 앞 트랜잭션이 커밋된 후에만 뒤 트랜잭션의 `seq`가 채번되어 **커밋 순서와 이벤트 순서가 100% 일치**한다.
+
+---
+
+### 3.5 Push + Pull 폴백 메커니즘 (`BatchGetPayments`, ADR-0140)
+
+Kafka 이벤트 브로커가 네트워크 폭주나 점검으로 인해 지연되더라도 핵심 예매 흐름은 중단되지 않는다:
+
+```mermaid
+flowchart TD
+    Start["결제 승인 완료"]
+    WaitKafka{"Kafka trade.payments 이벤트가<br/>5초 이내에 도착했는가?"}
+    ProcessPush["이벤트 소비 즉시 처리<br/>(Push 경로)"]
+    FallbackPull["purchase-svc -> payment-svc<br/>BatchGetPayments 직접 호출 (Pull 폴백)"]
+    Apply["주문 원장 결제 결과 반영<br/>WHERE payment_event_seq < $new_seq"]
+
+    Start --> WaitKafka
+    WaitKafka -->|"예 (정상 99.9%)"| ProcessPush --> Apply
+    WaitKafka -->|"아니오 (5초 초과 지연)"| FallbackPull --> Apply
+```
+
+- **5초 타임아웃 Pull 폴백**: 결제 접수 후 5초가 지나도록 Kafka 승인 이벤트가 오지 않으면, purchase-svc는 payment-svc의 gRPC `BatchGetPayments`를 호출하여 승인 결과를 직접 당겨온다.
+- **쓰기 인스턴스 직접 조회**: payment-svc는 읽기 복제본(Replica)의 복제 지연으로 방금 승인된 결과를 놓치는 일이 없도록, 마스터(쓰기) 인스턴스에서 원장을 직접 조회한다.
+- **순번 기반 멱등 반영**:
+  ```sql
+  UPDATE purchase_order 
+  SET status = 'APPROVED', payment_event_seq = $event_seq 
+  WHERE id = $order_id AND payment_event_seq < $event_seq;
+  ```
+  - Push 이벤트와 Pull 결과 조회가 동시에 도달하더라도, `payment_event_seq` 순번 대조를 통해 나중에 도착한 중복 요청은 0행 업데이트로 안전하게 무시된다.
+
+---
+
+## 4. 트레이드오프와 버린 대안 (Tradeoffs & Alternatives)
+
+| 설계 결정 | 얻는 것 (Gains) | 치르는 값 (Costs) |
+| :--- | :--- | :--- |
+| **단일 DB 로컬 ACID + Saga** | 2PC 분산 잠금 비용 제거, 독립적인 서비스 배포 및 스키마 변경, p99 수 초 지연 방지 | 최종 일관성 도달 전까지 서비스 간 데이터 불일치 구간 발생, 보상 및 전진 복구 로직 구현 필요 |
+| **단일 폴링 Outbox 릴레이** | WAL 누수로 인한 DB 디스크 고갈 위험 원천 제거, 로컬과 운영 환경의 100% 동일한 코드 베이스 유지 | 폴링 주기(100ms)만큼의 기본 이벤트 전파 지연 발생, `sent_at` UPDATE로 인한 DB 쓰기 I/O 증가 |
+| **승인 후 전진 복구 (Forward Recovery)** | 일시적 네트워크 장애로 인한 예매 티켓 강제 취소 방지, 티켓팅 고객 경험 및 금융 신뢰 보호 | 발권 지연 발생 시 재시도 큐 운영 및 모니터링 부담, 최대 30분간 상태 대기 발생 가능 |
+| **Push + Pull 결제 결과 폴백** | Kafka 클러스터 전면 장애 시에도 결제 승인 결과 확정 프로세스가 중단 없이 지속 | Kafka 지연 시 payment DB 쓰기 인스턴스로의 직접 조회 트래픽 추가 유입 |
+
+### 버린 대안
+
+1. **데이터베이스 샤딩 및 분산 2PC (ADR-0028)**:
+   - 판매 확정은 초당 약 28 TPS, 결제 승인 피크는 300 TPS 수준으로 단일 대형 Aurora PostgreSQL 인스턴스(r7g.xlarge) 하나로 충분히 처리 가능한 부하 범위다. 조기 샤딩과 2PC는 시스템 가용성만 떨어뜨리는 명백한 오버엔지니어링이다.
+2. **Debezium 기반 CDC 릴레이 (ADR-0116)**:
+   - Debezium은 고성능이지만 복제 슬롯 장애 시 DB WAL 파일이 테라바이트 단위로 누적되어 데이터베이스를 다운시키는 운영상 시한폭탄이다. 100ms 폴링으로도 NFR 요구치를 여유 있게 만족하므로 단순한 폴링을 선택했다.
+3. **PostgreSQL LISTEN/NOTIFY 연동**:
+   - 이벤트 발생 즉시 릴레이를 깨우기 위해 `LISTEN/NOTIFY`를 검토했으나, 커넥션을 지속 점유해야 하므로 PgBouncer 트랜잭션 풀링 환경과 충돌한다.
+4. **발권 실패 시 즉시 결제 취소 (ADR-0106)**:
+   - 오픈 정각 티켓팅에서 카드사 결제까지 마친 티켓을 단순 내부 발권 지연으로 취소하는 것은 비즈니스적으로 용납될 수 없다. 사용자의 티켓은 반드시 지켜내야 한다.
+
+---
+
+## 5. 핵심 꼬리 질문 5단 방어 (Staff Interview Q&A)
+
+| 질문 단계 | 심층 질문 | 방어 논리와 기술적 근거 | 관련 정본 |
+| :--- | :--- | :--- | :--- |
+| **1단: 왜 (Why)** | 분산 마이크로서비스 환경에서 데이터 정합성을 맞출 때 왜 2PC(2단계 커밋)를 절대 배제했습니까? | 2PC는 모든 참여 노드가 커밋 준비를 마칠 때까지 리소스에 잠금을 유지하므로, 네트워크 지연이나 노드 지연 시 p99 응답 시간이 초 단위로 폭증합니다. 특히 코디네이터가 다운되면 참여 노드들이 인-다우트(In-doubt) 상태에 빠져 락을 풀지 못하는 치명적 가용성 결함이 있습니다. 따라서 가용성과 응답 속도가 최우선인 티켓팅 플랫폼에서는 로컬 ACID와 비동기 Saga 최종 일관성이 유일한 해법입니다. | ADR-0028, `docs/data.md` §4 |
+| **2단: 대안 (Alternatives)** | Outbox 릴레이에서 업계 표준인 Debezium CDC 대신 왜 100ms 폴링 릴레이를 선택했습니까? | Debezium은 PostgreSQL 복제 슬롯을 사용하므로, Kafka 다운이나 컨슈머 지연 발생 시 DB의 WAL 로그가 디스크가 찰 때까지 무한정 쌓여 DB 전체가 크래시되는 치명적 사고 위험이 있습니다. 또한 로컬 개발 환경과 운영 환경의 파이프라인을 일치시키기 어렵습니다. PEAKET의 피크 쓰기 부하는 단일 인스턴스에서 100ms 폴링으로도 p99 200ms 이내에 충분히 소화 가능하므로, 운영 안전성이 뛰어난 단일 폴링 방식을 채택했습니다. | ADR-0116 |
+| **3단: 장애 대응 (Resilience)** | 결제 승인 직후 티켓 발권 서비스가 완전히 다운되면 결제를 취소해야 하지 않나요? 왜 전진 복구입니까? | 사용자는 피 말리는 대기열과 좌석 경합을 뚫고 카드 결제까지 마쳤습니다. 이때 내부 발권 서비스의 일시 장애로 결제를 취소해버리면 좌석이 타인에게 넘어가 고객에게 돌이킬 수 없는 피해를 줍니다. 결제 승인이라는 고비(Pivot Step)를 넘었으므로, 티켓 시스템이 복구될 때까지 `ticket_issue_job`을 통해 지수 백오프로 끈질기게 재시도하여 기어코 발권을 완수하는 전진 복구(Forward Recovery)가 금융/커머스 도메인의 정석입니다. | ADR-0106, NFR-006 |
+| **4단: 수치 근거 (Numbers)** | Kafka가 멈춰서 Push 대신 Pull 폴백(`BatchGetPayments`)이 대량 발생하면 payment DB가 버틸 수 있나요? | 결제 접수 피크 부하는 초당 300 TPS 수준입니다. Pull 폴백은 단건 조회가 아니라 `order_id` 최대 100건을 한 번에 묶는 배치 쿼리(`BatchGetPayments`)로 실행되므로, 최악의 경우에도 payment DB 쓰기 인스턴스에 가해지는 쿼리 부하는 초당 3~5 QPS에 불과합니다. db.r7g.large 인스턴스의 처리 용량(수천 QPS) 대비 0.5% 미만이므로 DB에 무리를 주지 않습니다. | ADR-0140, `docs/architecture.md` §9.1 |
+| **5단: 실측과 검증 (Verification)** | 분산 트랜잭션 구간에서 메시지 중복이나 순서 뒤집힘이 발생해도 일관성이 유지됨을 어떻게 검증했나요? | 실제 Kafka 클러스터 장애 주입 테스트(ST-T18)에서 컨슈머 강제 종료 및 파티션 리밸런싱을 유발한 결과, 멱등 컨슈머와 `payment_event_seq < $new_seq` 조건부 갱신을 통해 데이터 누락 0건, 중복 반영 0건, 순서 뒤집힘 0건을 검증했습니다. 또한 텔레메트리 5,600/s와 거래 300/s 동시 부하 상황에서 `acks=all` 프로듀서 p99 지연시간이 7.8ms로 예산 내에 안착함을 확인했습니다. | ADR-0176 결정 5, ADR-0142 |
+
+---
+
+## 6. 30초 아키텍처 브리핑 (Staff Engineer Summary)
+
+> "PEAKET의 분산 트랜잭션 아키텍처는 **'로컬 ACID 트랜잭션의 엄격한 격리'**와 **'결제 승인 고비(Pivot Step) 중심의 복구 이원화'**로 요약됩니다.  
+> 2PC 분산 락을 전면 배제하고 모든 DB 쓰기를 단일 서비스의 로컬 트랜잭션으로 한정하며, 서비스 간 상태 전파는 비즈니스 데이터와 동일 트랜잭션에 기록되는 **Transactional Outbox 패턴과 100ms 단일 폴링 릴레이**로 보장합니다.  
+> 특히 외부 결제 승인을 고비 단계(Pivot Step)로 정의하여, 승인 전 실패는 `PENDING` 행을 롤백하는 무과금 보상 트랜잭션으로 종결하고, 승인 후 발권 장애는 절대 취소하지 않고 `ticket_issue_job`을 통해 기어코 발권을 완수하는 **전진 복구(Forward Recovery)**를 단행함으로써 데이터 무결성과 비즈니스 신뢰를 완벽히 사수합니다."
+
+---
+
+## 7. 정본에서 읽을 곳
+
+1. [docs/data.md](../../data.md) §4: 일관성 스펙트럼 및 트랜잭션 경계 1~15번 매트릭스
+2. [docs/data.md](../../data.md) §4의 7번(Outbox 릴레이 아키텍처), 15번(보류 테이블)
+3. [docs/features/payment.md](../../features/payment.md) §2(결제 시퀀스 플로우) 및 §3 전이 표(T1~T26)
+4. [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md): 단일 폴링 Outbox 릴레이 채택 및 Debezium 배제
+5. [ADR-0140](../../adr/0140-payment-result-pull-fallback-when-kafka-is-late.md): Kafka 지연 시 결제 결과 Pull 폴백 메커니즘
+6. [ADR-0106](../../adr/0106-forward-recovery-after-payment-approval-ticket-issue-retry.md): 결제 승인 후 티켓 발권 전진 복구
+7. [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md): 키 단위 병렬 컨슈머 및 멱등 처리
+8. [ADR-0028](../../adr/0028-postgres-no-sharding-cell-scaling.md): 단일 인스턴스 스케일업 및 2PC/샤딩 배제

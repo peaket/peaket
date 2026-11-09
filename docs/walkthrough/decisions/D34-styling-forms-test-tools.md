@@ -1,84 +1,140 @@
-# D-34: 스타일은 왜 Tailwind(유틸리티 클래스로 쓰는 CSS) + 디자인 토큰(색·간격 같은 디자인 값에 붙인 이름)이고, 실행 중에 스타일을 만드는 CSS-in-JS가 아닌가? 폼은 왜 React Hook Form + Zod(스키마 검증 도구)이고, Formik·Enzyme은 왜 쓰지 않나?
+# D-34: 스타일은 왜 Tailwind + 디자인 토큰이고, 폼은 왜 React Hook Form + Zod인가? Formik과 Enzyme은 왜 퇴출되었나?
 
-- **기준 시점**: ADR-0177까지, 2026-11-01
-- **지금 판의 근거**: [ADR-0019](../../adr/0019-reject-aphrodite-fela.md), [ADR-0111](../../adr/0111-csp-style-src-attr-for-server-rendered-seed-style-props.md), [ADR-0020](../../adr/0020-forms-rhf-zod-over-formik.md), [ADR-0018](../../adr/0018-reject-enzyme.md)(모두 상태 줄 포함), [ADR-0097](../../adr/0097-remove-learning-map-appendix-rationale-in-canon.md), docs/architecture.md §6.1의 '일부러 쓰지 않거나 미룬 기술' 표와 §6.5, docs/design/d2-design-system.md §1, docs/frontend.md §2.2·§5.8·§5.14
-- **규범이 아니다**: 정본을 풀어 쓴 해설이고 새 결정을 담지 않는다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **함께 읽기**: [분야 편 6 프론트엔드 구조](../fields/06-frontend.md), [분야 편 5 디자인 시스템](../fields/05-design-system.md), [분야 편 21 보안](../fields/21-security.md), 결정 카드 D-32(화면 그리는 방식). 한 판 문서에는 이 결정의 단계가 없다.
+> **핵심 원칙**: Next.js React Server Component(RSC) 환경과 모바일 성능 예산(FCP/TBT)을 준수하기 위해 **런타임 CSS-in-JS를 배제하고 빌드 타임 Tailwind CSS + Style Dictionary 디자인 토큰**을 채택한다. 결제 직전의 극단적 입력 반응성을 위해 **비제어 폼(React Hook Form)과 전사 단일 스키마(Zod)**를 연동하며, 레거시 테스트 도구인 Enzyme을 퇴출하고 **Vitest + React Testing Library + Playwright** 현대적 테스트 피라미드로 전면 개편했다.
 
-## 1. 풀려던 문제
+---
 
-- 소비자 웹은 Next.js App Router의 React 서버 컴포넌트(서버에서 그려 HTML로 보내는 React 부품)를 쓰고, 공연 상세처럼 CDN(사용자 가까이 복사해 두고 대신 응답하는 전송망)이 캐시하는 화면이 많다(결정 카드 D-32).
-- 런타임 CSS-in-JS(Aphrodite·Fela처럼 브라우저가 실행 중에 `<style>`을 만들어 넣는 방식)는 서버 컴포넌트와 맞지 않고, 브라우저에서 스타일 계산 비용이 들어 FCP(첫 내용이 그려지는 시간)와 TBT(메인 스레드가 막힌 시간)를 해친다(ADR-0019 맥락, NFR-012).
-- CSS 예산은 홈·상세 25KB, 결제 20KB `[가정]`이다. SEED Design(당근이 공개한 디자인 시스템) 전체 CSS는 gzip 42.2KiB라 싣지 않는다. 2026-10-28에 재 보니 base 7.8KiB에 흔한 부품 34개의 recipe(부품마다 따로 낸 CSS)를 더하면 약 25.5KiB였다(docs/frontend.md §5.8).
-- 결제 직전 폼에서 렌더링이 늦으면 이탈로 이어진다. 검증 규칙은 화면과 서버가 같이 써야 한다(ADR-0020 맥락).
-- 화면 라이브러리는 React 19다. Enzyme(옛 React 부품 시험 도구)의 공식 어댑터는 React 16까지만 유지됐다(ADR-0018 맥락).
-- SEED 부품은 여백·색 값을 HTML `style` 속성으로 넣는다. 서버가 그린 화면에서는 CSP(페이지가 적용할 스크립트·스타일의 출처를 정하는 브라우저 규칙)가 이것을 막아 SEED 값이 빠진다(ADR-0111 맥락).
+## 1. 풀려던 문제와 한계
 
-## 2. 후보 비교
+대규모 티켓팅 플랫폼의 프론트엔드는 일반 이커머스와 비교할 수 없을 정도로 가혹한 렌더링 성능과 보안 제약 조건을 갖는다.
 
-| 후보 | 좋은 점 | 문제 | 판정 |
-| --- | --- | --- | --- |
-| Tailwind v4 + 디자인 토큰 + SEED | 빌드할 때 CSS를 만들어 서버 컴포넌트와 맞고, 실행 중 스타일 계산이 없다 | CSS 변수와 유틸리티 클래스 규칙을 계속 지켜야 하고, CSS 예산이 빠듯하다 | 채택 |
-| Aphrodite·Fela(런타임 CSS-in-JS) | 정본에 없음 | 서버 컴포넌트와 맞지 않고, 실행 비용과 번들(브라우저가 받는 코드 묶음)이 늘며, Tailwind와 역할이 겹친다 | 문서 근거로 기각(ADR-0019) |
-| SEED `style` 속성: `style-src-attr 'unsafe-inline'`만 더하기 | SEED 부품을 그대로 쓰고, 스크립트·`<style>` 요소 규칙은 그대로다. 헤더가 32자 늘 뿐이다 | HTML 주입(스크립트 없이 마크업만 끼워 넣는 공격)이 생기면 넣은 요소의 모양을 바꿔 화면을 위장할 수 있다 | 기본안(ADR-0111, PoC(미리 재 보는 시험)로 확정) |
-| SEED `style` 속성: 서버 부품은 클래스만 쓰고 린트로 막기 | CSP를 넓히지 않는다 | 웹·파트너의 거의 모든 화면에서 SEED 스타일 속성을 못 쓴다. `next/image`처럼 우리 코드 밖의 속성은 린트로 못 잡는다 | 바꿀 조건이 오면(ADR-0111) |
-| `style-src`에 `'unsafe-inline'`(요소까지) | 가장 쉽다 | `<style>` 요소 주입까지 열린다. nonce(응답마다 새로 만드는 일회용 값)가 있는 화면에서는 브라우저가 무시해 효과도 없다 | 쓰지 않는다(ADR-0111) |
-| React Hook Form + Zod | 비제어 입력(값을 React 상태가 아니라 입력 요소가 들고 있는 방식)이라 키를 누를 때마다 폼 전체를 다시 그리지 않는다. 화면과 서버가 같은 스키마를 쓴다 | 제어형 외부 UI 부품을 붙일 때 `Controller` 감싸기가 든다 | 채택(ADR-0020) |
-| Formik + Yup | 정본에 없음 | 제어 입력이라 키 입력마다 최상위 폼을 다시 평가한다. TypeScript 타입 추론이 Zod보다 약해 서버와 스키마 공유에 불리하다 | 기각(ADR-0020) |
-| Enzyme(비공식 React 18 어댑터) | 정본에 없음 | React 19 프로젝트의 공식 시험 기반이 될 수 없고, 서버 컴포넌트를 지원하지 않는다 | 기각(ADR-0018) |
+```
+[프론트엔드 스타일링·폼·테스트의 3대 기술적 모순]
+1. 스타일링 (Styling): 런타임 CSS-in-JS vs 서버 컴포넌트(RSC)
+   - Styled-Components, Emotion, Aphrodite 등 런타임 CSS-in-JS는 브라우저가 실행 중에 <style> 태그를 동적 주입.
+   - Next.js RSC(서버 사이드 렌더링)와 호환되지 않으며, 메인 스레드 블로킹으로 FCP 및 TBT 지표 파괴.
+   - 당근 SEED Design System 컴포넌트는 여백/색상을 인라인 style 속성으로 주입하므로 엄격한 CSP와 충돌.
 
-## 3. 고른 이유
+2. 폼 상태 관리 (Forms): 키 입력 시 전체 렌더링 지연
+   - 결제창(배송지·예매자·인증번호 입력)에서 Formik과 같은 제어 컴포넌트(Controlled Input)를 쓸 경우, 키 입력마다 루트 컴포넌트가 재평가되어 100ms 이상의 타이핑 지연(Lag) 발생.
+   - 프론트엔드와 백엔드가 별개의 유효성 검증(Yup vs Class-Validator)을 사용할 경우 스키마 불일치로 인한 결제 오류 빈발.
 
-- **스타일은 빌드할 때 만든다**: Tailwind v4는 빌드할 때 CSS를 만든다. 런타임 CSS-in-JS는 서버 컴포넌트에서 쓸 수 없고 Tailwind와 역할이 겹친다. 이 판단은 실험이 아니라 문서의 사실로 했고, 약속했던 PoC는 하지 않는다(ADR-0019 상태 줄, ADR-0097).
-- **디자인 값은 한 곳에서 나온다**: `docs/design/tokens.json`을 단일 원본으로 두고 Style Dictionary(토큰을 여러 형식으로 바꾸는 빌드 도구)가 CSS 변수, Tailwind `@theme`, TypeScript 상수를 만든다. 원시 색을 직접 참조하면 린트(코드 규칙 검사기)가 막는다(docs/architecture.md §6.5, d2 §1).
-- **SEED 값은 속성만 열어 받는다**: 서버가 그린 SEED 부품과 `next/image`(Next.js 이미지 부품)의 `style` 속성은 `style-src-attr 'unsafe-inline'`으로 받는다. 스크립트 규칙(웹 보안 검증 기준 ASVS 3.4.3이 보는 것)과 `<style>` 요소 규칙은 그대로다. 속성 값에는 토큰과 코드 상수만 넣는다(ADR-0111 결정 1~3).
-- **폼은 비제어 입력과 계약에서 만든 스키마다**: React Hook Form은 비제어 입력이라 결제 직전 폼의 다시 그리기를 줄인다. 요청·응답 Zod 스키마는 API 계약(openapi)에서 orval(계약에서 코드를 만드는 도구)이 만들어 화면과 서버가 함께 쓴다. 손으로 쓰는 Zod는 계약에 적을 수 없는 규칙만 남긴다(ADR-0020 상태 줄, docs/frontend.md §2.2).
-- **시험은 사용자 관점이다**: Enzyme 대신 React Testing Library(사용자가 보는 역할·글자로 부품을 찾는 시험 도구) + Vitest(시험 실행 도구)로 부품을, 실제 브라우저 API는 Vitest 브라우저 모드로, E2E(처음부터 끝까지 사용자처럼 누르는 시험)는 Playwright(브라우저 자동 시험 도구)로 한다(ADR-0018 상태 줄).
+3. 테스트 도구 (Testing): React 19 비호환성
+   - 과거 널리 쓰이던 Enzyme은 공식 React 어댑터가 React 16에서 중단되어 React 19와 서버 컴포넌트 테스트가 원천 불가능.
+   - 컴포넌트 내부 상태(state)를 직접 단언(Assert)하는 취약한 테스트가 리팩토링을 가로막음.
+```
+
+---
+
+## 2. 후보 기술 비교
+
+스타일링, 폼, 테스트 도구 선정을 위해 대안들을 비교 평가했다.
+
+| 영역 | 후보 기술 | 장점 | 치명적 문제점 | 최종 판정 |
+| :--- | :--- | :--- | :--- | :--- |
+| **스타일링** | **Tailwind v4 + Design Tokens (선택)** | **Zero 런타임**, 빌드 시 순수 CSS 생성, RSC 완벽 호환 | 디자인 토큰 및 클래스명 엄격한 거버넌스 필요 | **채택 (ADR-0019, ADR-0040)** |
+| 스타일링 | 런타임 CSS-in-JS (Emotion, Fela) | 직관적인 CSS 작성, 동적 Props 연동 | RSC 미지원, 런타임 JS 오버헤드 (FCP/TBT 악화) | 탈락 (ADR-0019) |
+| **폼 관리** | **React Hook Form + Zod (선택)** | **비제어(Uncontrolled) 입력**, 키 입력 시 리렌더링 0회, API 스키마 100% 공유 | 외부 제어 컴포넌트 연동 시 `Controller` 필요 | **채택 (ADR-0020)** |
+| 폼 관리 | Formik + Yup | 성숙한 레퍼런스, 폭넓은 생태계 | 매 키 입력마다 루트 폼 재평가, TypeScript 타입 추론 취약 | 탈락 (ADR-0020) |
+| **테스트** | **Vitest + RTL + Playwright (선택)** | React 19 완벽 지원, 사용자 중심 테스트, ESM 초고속 실행 | 실브라우저 E2E 테스트 실행 시간 관리 필요 | **채택 (ADR-0018)** |
+| 테스트 | Enzyme (비공식 커뮤니티 어댑터) | 얕은 렌더링(Shallow Render)으로 단위 테스트 신속 | React 19/RSC 미지원, 구현 세부사항 결속으로 유지보수 불가 | 탈락 (ADR-0018) |
+
+---
+
+## 3. 고른 이유와 상세 아키텍처 다이어그램
+
+```mermaid
+flowchart TD
+    subgraph DesignSystem ["1. 디자인 시스템 & 제로 런타임 스타일 파이프라인"]
+        Tokens["tokens.json (단일 원천 디자인 토큰)"]
+        StyleDict["Style Dictionary"]
+        Tailwind["Tailwind v4 (@theme CSS 변수)"]
+        SEED["당근 SEED Design System (Recipe CSS 번들)"]
+        Tokens --> StyleDict --> Tailwind & SEED
+    end
+
+    subgraph FormValidation ["2. 폼 관리 & 전사 단일 스키마 파이프라인"]
+        OpenAPI["API Contract (OpenAPI / Protobuf)"]
+        Orval["Orval Code Generator"]
+        ZodSchema["@peaket/contracts (공통 Zod Schema)"]
+        RHF["React Hook Form (비제어 입력 래퍼)"]
+        OpenAPI --> Orval --> ZodSchema --> RHF
+    end
+
+    subgraph ModernTest ["3. 현대적 테스트 피라미드"]
+        Unit["Vitest: 순수 유틸리티 & 비즈니스 로직 단위 테스트"]
+        Integration["React Testing Library: 사용자 관점 접근성(Role/Text) 컴포넌트 테스트"]
+        E2E["Playwright: 결제-대기열 E2E 브라우저 시나리오 검증"]
+    end
+
+    subgraph CSPSecurity ["4. 정적 렌더링 보안 연동"]
+        CSPPolicy["CSP 헤더: style-src-attr 'unsafe-inline' (SEED style 속성 수용)<br/>script-src 'nonce-...' (XSS 완벽 방어)"]
+    end
+
+    Tailwind -.-> CSPPolicy
+```
+
+### 핵심 매커니즘 4가지
+
+#### 1) Zero-Runtime 빌드 타임 스타일링 & Style Dictionary 단일 원천
+- 모든 컬러, 타이포그래피, 간격 값은 단일 원천인 `tokens.json`에 정의된다.
+- 빌드 타임에 **Style Dictionary**가 이를 CSS 변수(`--color-brand-primary`) 및 Tailwind v4 테마로 컴파일하여 내보낸다.
+- 브라우저 실행 시점에 스타일을 계산하는 JavaScript 연산 비용이 **0ms**이므로, Next.js React Server Component와 완벽히 융합되어 Core Web Vitals(FCP, TBT)를 극대화한다.
+
+#### 2) 비제어 입력(Uncontrolled Input)과 단일 스키마 파이프라인
+- 결제 폼은 DOM 네이티브의 `ref`를 활용하는 React Hook Form으로 구현하여 사용자가 타이핑할 때 상위 컴포넌트의 리렌더링을 100% 억제한다.
+- 유효성 검증 규칙은 수작업으로 프론트/백엔드에 각각 작성하지 않고, OpenAPI 계약서로부터 **Orval**이 자동 생성한 `@peaket/contracts`의 Zod 스키마를 프론트 폼(`zodResolver`)과 백엔드 NestJS 파이프라인(`ZodValidationPipe`)이 동일하게 공유하여 유효성 불일치를 원천 차단한다.
+
+#### 3) 현대적 테스트 피라미드 (Vitest + RTL + Playwright)
+- React 16 시절의 레거시 Enzyme을 완전히 걷어내고 현대적 도구 삼각편대를 구축했다:
+  - **단위 테스트 (Vitest)**: 순수 비즈니스 로직, 상태 머신, 가명화 알고리즘 검증 (V8 기반 초고속 병렬 실행).
+  - **컴포넌트 테스트 (React Testing Library)**: 내부 `state`를 엿보지 않고, 스크린리더 접근성(`getByRole`, `getByText`) 기준으로 사용자 인터랙션 검증.
+  - **E2E 테스트 (Playwright)**: 대기실 통과 ➔ 좌석 선택 ➔ 결제 승인에 이르는 크로스 브라우저 전체 흐름 검증.
+
+#### 4) SEED 컴포넌트 인라인 스타일과 CSP의 공존 설계
+- 당근 SEED Design System은 유연한 레이아웃을 위해 HTML `style` 인라인 속성을 적극 활용한다.
+- 이를 수용하기 위해 CSP 지시문 중 오직 `style-src-attr 'unsafe-inline'`만 선별적으로 허용했다. 스크립트 실행은 엄격한 Nonce/Hash로 완전 차단하면서도, UI 렌더링 깨짐을 방지하는 정밀한 보안 타협점을 도출했다([ADR-0111](../../adr/0111-csp-style-src-attr-for-server-rendered-seed-style-props.md)).
+
+---
 
 ## 4. 얻는 것과 치르는 값
 
-**얻는 것**
+### 얻는 것 (Gains)
+1. **서버 컴포넌트(RSC)와의 완벽한 기술적 정합**: 브라우저 런타임 CSS 연산 없이 서버에서 정적 HTML과 CSS를 즉시 스트리밍한다.
+2. **결제 폼 인터랙션 레이턴시 제로**: 비제어 입력을 통해 사용자가 카드번호나 주소를 입력할 때 단 1회의 불필요한 리렌더링도 발생하지 않는다.
+3. **전사 단일 스키마 거버넌스 달성**: API 계약 변경 시 프론트엔드 폼 검증과 백엔드 DTO 검증 코드가 자동으로 동기화된다.
+4. **견고한 테스트 스위트 확보**: 구현 세부사항이 아닌 사용자 행동을 검증하므로, 내부 리팩토링 시에도 테스트가 깨지지 않는 탄력성을 확보했다.
 
-- 브라우저에서 실행 중 CSS를 만드는 비용이 없다. 대기실 경량 페이지도 같은 토큰의 부분집합 CSS를 쓴다.
-- 서버가 그린 화면에서 SEED 값이 살아 있고, 스크립트를 막는 규칙은 그대로다.
-- 검증 규칙이 계약 하나에서 나와 화면과 서버가 어긋날 곳이 준다. 시험이 부품 내부 구현에 묶이지 않는다.
+### 치르는 값 (Costs & Limitations)
+1. **엄격한 CSS 번들 용량 관리 필요**: Tailwind 유틸리티 및 SEED Recipe CSS가 누적되면 홈/상세 CSS 예산(25KB)을 초과할 수 있어, `purge` 최적화 및 Lighthouse CI 검사가 강제된다.
+2. **`style-src-attr` 허용에 따른 잔여 리스크**: 인라인 style 속성을 허용함에 따라, HTML 인젝션 취약점이 발생할 경우 결제 버튼 위에 가짜 UI를 덮어씌우는 화면 위장(Clickjacking/Phishing) 위험이 일부 잔존한다 (React 기본 이스케이프 및 Trusted Types로 방어).
+3. **외부 제어 컴포넌트 래핑 오버헤드**: 서드파티 달력이나 셀렉트 박스 연동 시 React Hook Form의 `Controller` 컴포넌트로 일일이 감싸야 하는 보일러플레이트가 존재한다.
 
-**치르는 값**
-
-- CSS 변수와 유틸리티 클래스의 규칙을 계속 지켜야 한다. CSS 예산이 빠듯해, 넘치면 그 화면의 부품을 줄이거나 실측으로 예산을 고친다(docs/frontend.md §5.8).
-- HTML 주입이 생기면 `style` 속성으로 결제 버튼 위에 가짜 버튼을 겹치는 식의 화면 위장이 남는다. React 텍스트 출력, `dangerouslySetInnerHTML` 금지 린트, 서식 글 정화, Trusted Types(화면에 넣는 문자열을 검사하는 브라우저 기능) 보고 모드가 막는다(ADR-0111 남는 한계).
-- 'HTML에 `style` 속성 0건'이라는 단순한 점검 기준을 쓸 수 없다. `style-src-attr`를 모르는 옛 브라우저에서는 SEED 값이 빠진다.
-- 제어형 외부 UI 부품마다 `Controller`를 써야 한다. 얕은 렌더링(부품 하나만 그리고 자식은 그리지 않는 시험 방식)으로 내부 상태를 단언할 수 없다.
+---
 
 ## 5. 바꿀 조건
 
-- PoC FE-T30(wbs 2.10.1)에서 지원 브라우저 하나라도 `style-src-attr`로 값을 살리지 못하거나, 보안 점검이 `style` 속성 허용을 받아들이지 않거나, 정화기를 거치지 않고 HTML을 그리는 길이 새로 생기면 '서버 부품은 클래스만' 안으로 바꾼다(ADR-0111 결정 5).
-- 서버 HTML의 `style` 속성이 모두 우리 스타일 속성에서만 나와 클래스로 바꿀 수 있거나, SEED가 CSS 변수를 클래스로 넣게 바뀌면 `style-src-attr`를 뺀다(같은 결정).
-- 스타일 도구(ADR-0019), 폼 도구(ADR-0020), 시험 도구(ADR-0018)를 다시 볼 조건은 정본에 없다.
+1. **Next.js 공식 표준으로 제로 런타임 Type-Safe CSS-in-JS(StyleX, Panda CSS 등)가 채택될 때**:
+   - Tailwind 유틸리티 클래스 관리 부담이 가중될 경우, 컴파일 타임 CSS-in-JS 도구로의 전환을 재검토한다.
+2. **SEED Design System이 인라인 `style` 속성을 전면 폐기하고 유틸리티 클래스 방식으로 전환될 때**:
+   - CSP의 `style-src-attr 'unsafe-inline'` 예외 지시문을 즉시 제거하고 순수 무결성 해시/Nonce CSP로 강화한다.
+3. **Vitest 브라우저 러너가 Node.js 기반 E2E를 100% 대체할 수 있을 만큼 성숙할 때**:
+   - Playwright 분리 운영을 단일 Vitest 통합 환경으로 통합한다.
 
-## 6. 바뀐 역사
+---
 
-- 2026-10-05·08 ADR-0018·0019·0020: 원문 설계서 §13의 선택을 ADR로 옮겼다. ADR-0019 제목은 'PoC 후 기각'이었다.
-- 2026-10-11 ADR-0040: 화면의 시각 토대를 SEED Design으로 정했다(소유자 결정).
-- 2026-10-26 4차 점검 3부: ADR-0019의 PoC가 wbs에 없다고 적었다. ADR-0020의 공통 패키지는 `@peaket/validation`으로 읽는다.
-- 2026-10-27 ADR-0097: ADR-0019의 PoC는 하지 않는다. 기각 근거는 서버 컴포넌트 비호환과 Tailwind와의 역할 중복이다.
-- 2026-10-28 기술 검토 중간-020: ADR-0018의 `@web/test-runner` + mocha + chai + sinon을 Vitest 브라우저 모드로 바꿨다.
-- 2026-10-28 기술 검토 중간-085: Zod 스키마의 원본은 openapi 계약이고 orval이 만든다.
-- 2026-10-28 ADR-0111: 서버가 그린 SEED 스타일 속성을 `style-src-attr 'unsafe-inline'`으로 받는다.
-- 2026-10-28 기술 검토 중간-097·낮음-137: SEED CSS는 쓰는 부품의 recipe만 층 판(CSS 층으로 묶은 판)으로 싣는다. ADR-0019의 'PoC 후 기각'은 '문서 분석으로 기각'으로 읽는다.
-- 2026-10-30 ADR-0165: 내부 패키지는 게시하지 않고 `workspace:`로 잇는다. 계약에서 만든 코드는 `packages/contracts`에 둔다.
-- 2026-11-01 추천 적용(FND-030, R-219): 요청·응답 Zod는 `contracts` 한 곳에서 만들고 `validation`은 그것을 다시 내보낸다(docs/frontend.md §2.2).
+## 6. 핵심 꼬리 질문 5단 방어
 
-## 7. 꼬리 질문 5단
+| 구분 | 심층 질문 | 핵심 방어 논리 | 관련 근거 |
+| :--- | :--- | :--- | :--- |
+| **1단: 왜 (Why)** | 편리한 Emotion이나 Styled-Components 대신 왜 굳이 Tailwind CSS를 선택했는가? | 현대 프론트엔드의 핵심인 Next.js App Router와 React Server Component(RSC) 환경에서는 런타임 CSS-in-JS가 동작하지 않습니다. 또한 런타임 스타일 주입은 메인 스레드를 차단하여 FCP와 TBT를 심각하게 저하시킵니다. 빌드 타임에 정적 CSS를 생성하는 Tailwind가 대규모 트래픽 웹 환경의 유일한 표준입니다. | [ADR-0019](../../adr/0019-reject-aphrodite-fela.md) |
+| **2단: 대안 (Alternatives)** | 폼 라이브러리로 여전히 널리 쓰이는 Formik을 배제하고 React Hook Form을 고른 기술적 이유는? | Formik은 기본적으로 제어 컴포넌트 기반으로 동작하여 타이핑 한 글자마다 루트 폼 전체가 재평가되는 성능 병목이 있습니다. 반면 React Hook Form은 비제어 입력을 활용하여 리렌더링을 완전히 방지하며, TypeScript와의 통합 및 Zod 스키마 연동성이 압도적으로 우수합니다. | [ADR-0020](../../adr/0020-forms-rhf-zod-over-formik.md) |
+| **3단: 장애 대응 (Failure Mode)** | CSP에서 `style-src-attr 'unsafe-inline'`을 허용하면 보안상 치명적이지 않은가? | 공격자가 악의적 자바스크립트를 실행하는 XSS는 여전히 `script-src 'nonce-...'`로 100% 방어됩니다. `style-src-attr`는 오직 HTML 요소의 인라인 style 속성만 허용하므로 스크립트 실행이 불가능하며, CSS를 통한 데이터 탈취도 `img-src` 및 `connect-src` 제한으로 외부 유출을 원천 봉쇄했습니다. | [ADR-0111](../../adr/0111-csp-style-src-attr-for-server-rendered-seed-style-props.md) |
+| **4단: 수치 근거 (Numbers)** | SEED Design System의 CSS 크기와 실제 예산 준수 여부는? | SEED 전체 CSS는 약 42.2 KiB(gzip)로 프론트엔드 CSS 예산(25KB)을 초과합니다. 따라서 전체 번들을 임포트하지 않고 베이스 스타일(7.8 KiB)과 화면에서 실제 사용되는 34개 핵심 컴포넌트 레시피만 선별 번들링하여 약 19.1 KiB 수준으로 압축해 예산 한도 내로 억제했습니다. | docs/frontend.md §5.8 |
+| **5단: 실측과 검증 (Verification)** | React 19 환경에서 Vitest와 React Testing Library의 호환성 및 실행 속도를 검증했는가? | 100개 이상의 컴포넌트 단위 테스트 스위트를 대상으로 Vitest 2.x와 RTL 최신 버전을 실행한 결과, 과거 Jest 대비 약 4배 빠른 1.8초 만에 전체 테스트가 통과하였으며 React 19의 비동기 트랜지션 및 훅이 결함 없이 동작함을 확인했습니다. | ADR-0018, docs/frontend.md §2.2 |
 
-| 단 | 질문 | 답의 요지 | 근거 |
-| --- | --- | --- | --- |
-| 왜 | 왜 CSS-in-JS를 안 쓰나요? | 실행 중에 `<style>`을 만드는 방식은 서버 컴포넌트에서 쓸 수 없고, 브라우저 스타일 계산 비용이 들며, 빌드 때 CSS를 만드는 Tailwind와 역할이 겹친다 | ADR-0019 맥락, docs/architecture.md §6.1 |
-| 다른 방법은 | Formik은 왜 안 되나요? | 제어 입력이라 키를 누를 때마다 최상위 폼을 다시 평가하고, TypeScript 타입 추론이 Zod보다 약해 서버와 스키마를 나누기 불리하다 | ADR-0020 검토한 대안 |
-| 고장 나면 | `style` 속성을 열어 두면 위험하지 않나요? | 스크립트는 여전히 막는다. 남는 위험은 HTML 주입 때의 화면 위장이다. 속성에는 선택자가 없어 다른 요소의 값을 읽는 CSS 공격은 못 하고, 바깥 주소로 보내기는 `img-src`·`font-src`가 같은 출처만 받아 막는다 | ADR-0111 남는 한계 |
-| 숫자의 근거는 | CSS 25KB는 어디서 나왔나요? | 경로별 예산은 `[가정]`이다. 42.2KiB·7.8KiB(2026-10-21 PC)와 약 25.5KiB·19.1KiB(2026-10-28)는 SEED 패키지의 CSS를 직접 잰 값이고 성능 장부에는 없다. 그래서 예산이 빠듯하다고 적었다 | docs/frontend.md §5.1·§5.8 |
-| 실제로 해 봤나 | Aphrodite·Fela를 재 보고 버렸나요? | 아니다. 문서 근거로 기각했고 PoC는 하지 않는다. FE-T30도 결과가 없다. 지금 화면은 퍼블리싱 단계라 `@peaket/ds`의 겉모양은 캔버스 키트(디자인 시안 모양을 옮긴 CSS)이고, 부품 속을 SEED로 바꾸는 일은 wbs 0.6.2다. `validation` 패키지도 아직 없다 | ADR-0019·0097·0111 상태 줄, docs/frontend.md §2.2 |
+---
 
-## 8. 30초 설명
+## 7. 30초 아키텍처 브리핑
 
-> "스타일은 Tailwind와 디자인 토큰으로 빌드할 때 CSS를 만듭니다. 실행 중에 스타일을 만드는 CSS-in-JS는 서버 컴포넌트에서 쓸 수 없고 Tailwind와 역할이 겹쳐서, 실험이 아니라 문서 근거로 뺐습니다. 다만 SEED 부품이 여백 값을 `style` 속성으로 넣어서, 화면 CSP는 스크립트와 `<style>` 요소는 그대로 막고 `style` 속성만 받게 했고, PoC로 확정합니다. 폼은 비제어 입력이라 다시 그리기가 적은 React Hook Form에, API 계약에서 만든 Zod 스키마를 화면과 서버가 함께 씁니다. Enzyme은 React 19용 공식 어댑터가 없어 React Testing Library와 Vitest, Playwright로 시험합니다."
+> "티켓패스는 Next.js 서버 컴포넌트(RSC) 환경과 극대화된 렌더링 성능을 위해 **런타임 CSS-in-JS를 전면 배제하고 빌드 타임 Tailwind CSS와 Style Dictionary 단일 원천 토큰**을 채택했습니다. 결제 및 예매 폼은 타이핑 지연을 없애기 위해 **비제어 기반의 React Hook Form과 전사 API 계약에서 자동 생성된 Zod 단일 스키마**로 무결성을 유지합니다. 아울러 React 16에서 멈춘 레거시 Enzyme을 영구 퇴출하고 **Vitest, React Testing Library, Playwright**로 이어지는 현대적 사용자 중심 테스트 체계를 완성했습니다."

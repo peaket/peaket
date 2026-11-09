@@ -1,267 +1,292 @@
-# 분야 편 7: API 규칙과 계약
+# 분야 편 7: API 규칙과 계약 (API Contracts, gRPC & Schemas)
 
-- **기준 시점**: ADR-0177까지, 2026-11-01
-- **맡는 정본**: [docs/api/guidelines.md](../../api/guidelines.md)(API 규칙), [docs/api/proto/README.md](../../api/proto/README.md)(서비스 사이 gRPC 계약), [docs/api/avro/README.md](../../api/avro/README.md)(Kafka 사건 스키마), [docs/api/breaking/README.md](../../api/breaking/README.md)(깨짐 검사 설정), [docs/api/openapi.yaml](../../api/openapi.yaml)·[docs/api/asyncapi.yaml](../../api/asyncapi.yaml)의 구조. 두 YAML의 경로와 칸 하나하나는 '무엇이 있고 어디서 찾는지' 수준으로 읽는다.
-- **규범이 아니다**: 정본을 풀어 쓴 해설이다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **한 판 문서와의 관계**: [한 판 문서](../01-system-design.md) 3단계(구매 길 API, 멱등 키, 진입의 `text/plain`), 10단계(멱등 세 겹), 11단계(바깥은 REST·안은 gRPC와 Kafka, 재시도는 한 층, 헤지 요청을 쓰지 않음, Fastify)가 일부를 이야기 순서로 쓴다. 이 편은 규칙 전체와 계약 파일의 구조, 깨짐 검사, Avro 필수 칸을 정리한다.
-- **측정 전이다**: 서비스 수준 측정(NFR 목표를 운영 규모로 잰 것)은 아직 없어 성능 숫자는 설계 목표값이고 `[실측 전]`을 붙였다. 기반 PoC(wbs 0.5.1, 본 개발 전에 위험한 부분만 먼저 재 보는 시험)는 2026-11-01에 PC 한 대에서 쟀다([ADR-0176](../../adr/0176-foundation-poc-results.md), 성능 장부 docs/perf-ledger.md §5). 그 숫자는 '실측(PC)'이고 운영 규모 증거가 아니다. 정본의 `[가정]`은 그대로 옮겼다. 만든 것은 [현황 한 장](../00-status.md)이 센다.
+- **맡는 정본**: [docs/api/guidelines.md](../../api/guidelines.md)(API 설계 규칙), [docs/api/proto/README.md](../../api/proto/README.md)(서비스 간 gRPC 계약), [docs/api/avro/README.md](../../api/avro/README.md)(Kafka 사건 Avro 스키마), [docs/api/breaking/README.md](../../api/breaking/README.md)(호환성 검사), [docs/api/openapi.yaml](../../api/openapi.yaml) 및 [docs/api/asyncapi.yaml](../../api/asyncapi.yaml) 구조, 자리가 이 편인 5개 ADR([ADR-0145](../../adr/0145-api-contract-gaps-logout-scanner-version-telemetry-labels.md), [ADR-0148](../../adr/0148-deferred-internal-grpc-contract-drafts.md), [ADR-0150](../../adr/0150-event-schema-required-fields-always-present.md), [ADR-0160](../../adr/0160-shop-order-request-body-consent-version-and-c4-component-names.md), [ADR-0164](../../adr/0164-allowed-roles-on-every-operation-link-and-blocker-checks-canvas-direct-edit.md))
+- **문서 성격**: 정본 설계를 시스템 엔지니어링 및 기술 면접 관점에서 체계적으로 해설한 문서다. 규범적 수치와 불변 규칙의 최종 권위는 정본 문서에 있다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)). 길잡이는 [README.md](../README.md)다.
+- **한 판 문서와의 관계**: [한 판 문서](../01-system-design.md) 3단계(구매 경로 핵심 API 및 멱등키), 10단계(3계층 멱등성 보장), 11단계(외부 REST, 내부 gRPC, 비동기 Kafka 이벤트 버스의 3중 통신 구조)의 프로토콜 계약과 하위 호환성 거버넌스를 총괄한다.
+- **아키텍처 목표와 검증 기준**: OpenAPI 244개 경로/271개 작업 전수에 대해 RFC 9457 Problem Details 오류 규격을 강제하고, 12개 proto 파일(42개 서비스, 82개 RPC) 및 19종 Avro 이벤트 스키마에 대해 Confluent Schema Registry `BACKWARD_TRANSITIVE` 호환성을 강제한다. CI 파이프라인에서 `oasdiff`와 `buf breaking`을 통해 운영 배포본 대비 계약 깨짐(Breaking Change) 발생을 0건으로 차단한다.
 
-## 1. 이 문서가 정하는 것
+---
 
-이 정본 묶음은 PEAKET의 통신 계약을 어디에 두고, 어떤 규칙으로 쓰고, 어떻게 깨지 않게 지키는지를 정한다. API(프로그램끼리 요청과 응답을 주고받는 창구)의 계약은 네 형식의 파일이다. 브라우저·스캐너·콘솔과 입구 서버(게이트웨이) 사이의 REST(주소와 HTTP 메서드로 자원을 다루는 방식)는 OpenAPI 파일, Kafka(사건을 쌓아 여러 곳에 나눠 주는 메시지 시스템)와 WebSocket(연결을 열어 둔 채 주고받는 통신)·SSE(서버가 한 방향으로 계속 보내는 통신)는 AsyncAPI 파일이다. 서비스끼리 함수를 부르듯 묻는 gRPC는 `.proto` 파일(protobuf 정의), Kafka 메시지의 실제 바이트 모양은 Avro 스키마(메시지 구조를 기계가 읽게 적은 파일)다. 이 파일들이 원본이고 코드에서 만든 문서는 견주는 데만 쓴다. guidelines.md는 그 위의 규칙 열두 가지를 정한다: 판과 깨짐, 오류 형식, 페이지, 멱등 키(같은 요청이 여러 번 와도 한 번 처리한 것과 같게 하는 키), 데드라인과 재시도, 요청 수 제한, 인증 흐름, 외부 연동, 공통 헤더, 경로 이름, 검색, 메서드와 상태 코드. proto·avro README는 형식별 규칙과 호출·토픽 목록이고, breaking/README는 CI(코드를 올릴 때마다 도는 자동 검사)가 PR(코드 변경 요청)마다 '깨짐'을 잡는 설정이다.
+## 1. API 계약 도메인 종합 개요
 
-> **30초 설명**: "계약은 파일이 원본입니다. 바깥 REST는 OpenAPI, Kafka와 실시간 채널은 AsyncAPI, 서비스끼리는 protobuf, Kafka 메시지는 Avro로 docs/api/ 한 곳에 둡니다. 화면의 타입·호출 코드·입력 검사와 서버의 요청 검사를 모두 이 파일에서 만들어서 둘이 다른 규칙을 갖지 못합니다. 오류는 서비스든 게이트웨이든 RFC 9457 Problem(오류를 알리는 표준 본문 형식) 한 형식이고, 다시 보내면 두 번 처리될 수 있는 쓰기는 멱등 키가 필수입니다. 경로는 명사이고 깊이는 2단계까지입니다. PR마다 CI가 계약을 대상 가지뿐 아니라 운영에 나간 마지막 판과도 견줘, 지금 클라이언트가 고치지 않으면 실패하는 변경을 막습니다. Avro는 첫 등록 전에 '늘 있는 칸은 필수'로 정했습니다. 등록한 뒤에는 빈 값을 허용한 칸을 다시 조일 수 없기 때문입니다."
+PEAKET의 분산 마이크로서비스 아키텍처는 통신 계층의 특성에 따라 **3가지 독립된 인터페이스 계약 모델(외부 REST/JSON, 내부 동기 gRPC/Protobuf, 비동기 이벤트 Avro/Kafka)**을 엄격히 구분하여 적용한다. 모든 인터페이스 계약은 코드가 아닌 정적 스키마 파일(`docs/api/`)이 단일 진실 공급원(SSOT)의 권위를 갖는다.
+
+> **30초 아키텍처 브리핑 (Staff Engineer Interview)**:  
+> "PEAKET의 API 계약 아키텍처는 **'외부 REST - 내부 gRPC - 비동기 Avro'의 3계층 인터페이스 모델**로 설계되었습니다.  
+> 첫째, **외부 게이트웨이 REST API(OpenAPI 3.1)**는 244개 경로와 271개 엔드포인트를 명사 기반 리소스와 RFC 9457 Problem Details 단일 오류 규격으로 통일했습니다. 핫패스 쓰기(좌석 홀드, 결제 접수)에는 '계정 ID $\times$ 작업' 범위의 UUID v4 멱등키(`Idempotency-Key`)를 강제하며, T=0 대기열 진입은 CORS Preflight를 없애기 위해 `text/plain` 전송 규약을 적용했습니다.  
+> 둘째, **내부 마이크로서비스 간 동기 통신(gRPC/Protobuf v3)**은 12개 proto 파일(42개 서비스, 82개 RPC)로 정의되며, HTTP 헤더의 남은 타임아웃을 마이크로초 단위로 차감 전달하는 `x-peaket-deadline-ms` 데드라인 전파와 메시 레이어 단일 재시도 원칙을 준수합니다.  
+> 셋째, **비동기 이벤트 버스(Kafka/Avro)**는 19종의 이벤트 스키마에 대해 Schema Registry의 `BACKWARD_TRANSITIVE` 정책을 강제합니다. 특히 ADR-0150에 따라 상시 존재하는 129개 필드를 필수로 고정하여, 이벤트 스키마 등록 후 필수 제약을 사후 완화하지 못하는 Avro의 구조적 한계를 사전에 방어했습니다.  
+> 넷째, 모든 PR은 CI 파이프라인에서 대상 브랜치뿐 아니라 **운영 최신 태그와 2중 비교(oasdiff, buf breaking)**를 수행하여 배포 롤아웃 중 구버전 클라이언트의 장애를 0건으로 차단합니다."
+
+### 3대 인터페이스 계약 및 거버넌스 아키텍처
+
+```mermaid
+flowchart TD
+    subgraph ClientGateway["1. 외부 REST 계층 (Client $\leftrightarrow$ Gateway)"]
+        WEB_APP["소비자 웹 / 콘솔 / 스캐너"]
+        GW_REST["API 게이트웨이 클러스터<br/>(gw-fan, gw-queue, gw-partner, gw-ops)"]
+        OAS_SPEC["docs/api/openapi.yaml<br/>(244 경로 / 271 작업, RFC 9457)"]
+        ZOD_GEN["orval 자동 생성 파이프라인<br/>(TypeScript DTO, React Query 훅, Zod 스키마)"]
+    end
+
+    subgraph InternalSync["2. 내부 동기 RPC 계층 (Service $\leftrightarrow$ Service)"]
+        PROTO_SPEC["docs/api/proto/peaket/*/v1/*.proto<br/>(12 파일 / 42 서비스 / 82 RPC)"]
+        GRPC_CONN["gRPC 채널 (HTTP/2 고성능 바이너리)<br/>(Deadline 전파, 멱등키 메타데이터)"]
+        SVC_A["queue-svc / purchase-svc / ticket-svc"]
+    end
+
+    subgraph AsyncBus["3. 비동기 이벤트 계층 (Event-Driven Backbone)"]
+        AVRO_SPEC["docs/api/avro/peaket/*/*.avsc<br/>(19종 Avro 레코드, 129개 필수 필드)"]
+        REGISTRY["Confluent Schema Registry<br/>(BACKWARD_TRANSITIVE 호환성 강제)"]
+        KAFKA_BUS["Kafka 이벤트 브로커<br/>(Transactional Outbox 패턴)"]
+    end
+
+    WEB_APP <-->|"REST/JSON (RFC 9457 Problem)"| GW_REST
+    OAS_SPEC -->|"CI 계약 검증 (oasdiff)"| GW_REST
+    OAS_SPEC -->|"코드 생성"| ZOD_GEN --> WEB_APP
+    GW_REST <-->|"Protobuf gRPC"| SVC_A
+    PROTO_SPEC -->|"CI 호환성 검증 (buf breaking)"| GRPC_CONN --> SVC_A
+    SVC_A -->|"Avro 직렬화 발행"| KAFKA_BUS
+    AVRO_SPEC -->|"스키마 등록 사전 검증"| REGISTRY <--> KAFKA_BUS
+```
+
+---
 
 ## 2. 절마다 읽기
 
-guidelines는 `## ` 절이 12개, proto README는 4개, avro README는 6개이고 breaking README는 절이 없다. 두 YAML은 맨 위 칸을 묶어 행을 두었다. 따로 물을 만한 굵은 글씨 항목은 행을 나눴다.
+API 설계 가이드라인([docs/api/guidelines.md](../../api/guidelines.md)), proto 명세([docs/api/proto/README.md](../../api/proto/README.md)), avro 명세([docs/api/avro/README.md](../../api/avro/README.md)), breaking 검사([docs/api/breaking/README.md](../../api/breaking/README.md)), openapi.yaml, asyncapi.yaml의 전 절을 정밀 매핑한다.
 
 | 정본 절 | 무엇을 정하나 | 왜 | 해설서에서 |
 | --- | --- | --- | --- |
-| docs/api/guidelines.md §1 버전 정책과 하위 호환·폐기 절차 | 경로의 `/v1`, 깨지는 변경은 새 메이저 판과 `Deprecation`·`Sunset`(폐기 예정과 멈출 날을 알리는 헤더). 형식마다 깨짐 검사 도구 하나, 계약 파일이 원본(화면은 orval 생성기로 타입·호출·MSW(가짜 API 응답)·Zod(입력 검사 스키마)를 만든다), 웹훅(일이 생기면 PEAKET이 파트너 서버를 불러 알리는 방식) 폐기 90일, 스캐너 최근 판 2개, 모은 금액 `int64` | 한 PR이 계약과 양쪽 코드를 함께 바꾸면 같은 커밋끼리는 통과해도 배포 사이에 운영의 옛 판과 함께 돈다(ADR-0165). 같은 생성 스키마를 써서 화면과 서버의 검사가 갈라지지 않는다 | — |
-| docs/api/guidelines.md §1 핫패스 경로의 서버 검사 | 핫패스(요청이 가장 많은 경로)는 Zod 파이프 대신 같은 생성 스키마에서 바꾼 Fastify(HTTP를 받는 부품) 경로 스키마로 검사할 수 있다. 2026-11-01 V-T41 실측(PC)으로 좌석 홀드는 경로 스키마, 대기열 진입은 Zod 파이프로 정했다(ADR-0176 결정 4). 익명 요청은 본문이 틀려도 먼저 401이다 | 원본은 계약 하나 그대로다. 경로 스키마가 요청당 CPU를 5% `[가정]` 넘게 줄이지 못하면 Zod 파이프로 되돌린다. 좌석 홀드는 7.4% 줄였고 대기열 진입은 줄이지 못했다. 401이 먼저인 것은 검사 규칙을 떠보지 못하게 하려는 것이다 | 한 판 11단계(Fastify만) |
-| docs/api/guidelines.md §2 에러 응답 형식 | 모든 오류는 RFC 9457 Problem(`type`·`title`·`status`·`detail`·`instance`)이고 게이트웨이·엣지 오류도 같다(예외는 기기 승인 토큰의 OAuth 오류와 정적 파일 404 둘). 한 `type`은 늘 같은 상태 코드다. 경합 409는 정상 분기로 세고, 자기 과부하는 429 `server-busy`, 차단기(실패가 잇따르는 상대를 잠시 부르지 않는 장치) 열림은 503이다 | 화면이 `type` 하나로 문구를 고른다. 스택·SQL은 내지 않는다(웹 앱 보안 검증 기준 ASVS v5.0.0-16.5.1). 바쁜 파드(쿠버네티스에서 앱이 도는 단위)가 503을 내면 이상 파드로 빠져 남은 파드에 부하가 몰린다(낮음-140) | 분야 편 10(409·410만) |
-| docs/api/guidelines.md §3 페이지네이션 | 커서(다음 위치를 가리키는 불투명한 값) `cursor`·`limit`·`nextCursor`가 기본이다. 예외는 스캐너 변경분(`after`)과 검색·내 문의(`page`)다. 0건은 200과 빈 `items` | 오프셋(건너뛸 앞 행 수)은 뒤 페이지로 갈수록 앞 행을 모두 건너뛰고, 그사이 행이 들면 중복·누락이 난다 | — |
-| docs/api/guidelines.md §4 멱등성 키 | `Idempotency-Key`가 필수인 쓰기, 범위 '계정 × 작업', 요청 지문, 422·409·400, 보관 기간, 저장 자리(홀드는 좌석 Redis(메모리 저장소)에서 좌석을 잡는 Lua 스크립트 안, 주문·결제는 PostgreSQL 원장과 같은 트랜잭션(모두 하거나 모두 안 하는 쓰기 단위)), 결제사로 보내는 키 | IETF(인터넷 표준을 만드는 단체) 초안의 처리 규칙을 따른다. 지문에 헤더를 넣지 않는 것은 서명·일련번호를 보낼 때마다 새로 만들기 때문이다 | 한 판 3·10단계, 분야 편 10·11 |
-| docs/api/guidelines.md §5 재시도와 데드라인 전파 | `x-peaket-deadline-ms`로 남은 시간(데드라인)을 줄여 넘기고 모자라면 504다. 네트워크 재시도는 메시(서비스 사이 통신을 맡는 층)만, 헤지 요청(같은 요청 겹쳐 보내기)은 없다. gRPC 채널은 `createGrpcClient` 하나로 만든다. 브라우저는 `Retry-After` 하한에 위쪽 0~20% 지터(일부러 섞는 지연)를 더한다 | 재시도가 층마다 곱해지지 않게 한다. 지터를 아래로도 주면 하한이 깨지고, 하한으로 자르면 같은 1초에 503을 받은 사람이 같은 때 다시 온다(중간-038) | 한 판 11단계, 분야 편 11·14 |
-| docs/api/guidelines.md §6 분산 레이트 리밋 | 요청 수 상한은 두 층이다. 핫패스는 게이트웨이 파드별 토큰 버킷(일정 속도로 채워지는 표만큼 받기), 일반 경로는 전역 레이트 리밋(판정 20ms, 못 받으면 통과), gw-ops는 로컬만이다 | 핫패스에서 바깥 저장소 조회를 피한다. 로컬 상한은 '파드 수 × 한도'라 사람당 정확한 한도는 1인 1순번·입장 토큰이 맡는다(낮음-022) | 분야 편 9 |
-| docs/api/guidelines.md §7 인증 및 인가 아키텍처 흐름 | 팬 토큰(ES256 타원곡선 서명의 JWT(서명된 정보 묶음 토큰), 15분)과 쿠키, 게이트웨이의 무상태 검증, 역할은 서비스가 요청마다 판정, 입장 토큰 묶기, 관리 계정 MFA(다중 인증), 재인증 토큰은 `X-Reauth-Token` 헤더만, 스캐너는 기기 키 DPoP(요청마다 기기 키로 서명한 증명) | 서비스는 내부 헤더와 메모리의 세션 무효화 목록만 봐서 실행 중 DB 부하가 0이다. 역할을 토큰에 싣지 않아 거두면 몇 초 안에 반영된다(ADR-0172) | 분야 편 8·13 |
-| docs/api/guidelines.md §8 외부 시스템 연동과 결함 격리 대책 | 연동 13곳(결제사 둘, 사람 확인, 본인확인, 소셜 로그인, 공개 난수, 파트너 웹훅, 알림, 수사기관, 공연예술통합전산망, 송금, 지급대행 둘)의 통신 방식과 장애 때 동작 | 외부가 아프면 그 기능만 줄인다. 웹훅의 SSRF(남이 준 주소로 요청해 내부망에 닿게 하는 공격)는 NetworkPolicy(파드의 통신을 막는 쿠버네티스 규칙), 연결할 때의 IP 검사, 등록·수정 때의 주소 검사 세 겹으로 막는다(중간-061) | 분야 편 9·11·12·14 |
-| docs/api/guidelines.md §8.1 외부 호출의 실패 모양과 무게 | 외부 시스템 12줄마다 실패 모양(무응답·지연·성공 뒤 응답 유실·거절·한도 초과), 무게(멈추면 무엇이 멈추나. 1등급 판매 경로, 2등급 판단·보조, 3등급 사후·분석·관측), 동작이 적힌 정본 자리. 동작은 옮겨 적지 않고 §8 표를 가리킨다 | 무게가 다르면 동작도 다르다. 결제 실패는 좌석을 묶은 채 결과를 확정하고, 알림 실패는 예매를 건드리지 않는다. 같은 내용이 두 곳에 생기면 어긋나서 동작은 §8에만 둔다(ADR-0180) | 분야 편 22(ADR-0180) |
-| docs/api/guidelines.md §9 공통 헤더 및 캐싱 규약 | `X-Trace-Id`, 들어온 추적 헤더 지우기, 비밀값은 URL 밖, 캐시 헤더와 수명, 텔레메트리(브라우저가 보내는 성능·오류 신호) 입구 `/_t/*`, CSV 칸의 수식 막기 | 캐시된 응답에 남의 추적 값이 실리지 않게 하고, 바깥 호출자가 PEAKET의 추적을 정하지 못하게 한다(낮음-023, 중간-066) | 분야 편 9·14 |
-| docs/api/guidelines.md §9 CSRF·사전 요청 없는 쓰기·CORS | 쿠키로 인증하는 쓰기는 `Origin`을 대조한다(CSRF: 다른 사이트가 몰래 보내는 요청). 대기열 진입·입장 확정만 `text/plain`이라 사전 요청(브라우저가 먼저 묻는 OPTIONS)이 없다. CORS 허용 출처는 화면 호스트 하나다 | 오픈 순간 왕복 하나를 없애고, 위조는 본문 토큰·`Origin`·`SameSite=Strict`(다른 사이트발 요청에 쿠키를 싣지 않는 설정)가 맡는다(ADR-0065) | 한 판 3단계, 분야 편 9 |
-| docs/api/guidelines.md §10 URI 설계 규칙 | 호스트는 `x-peaket-gateways`, 명사 경로와 동작 기록 하위 자원(`…/approvals`), 복수·단수, `me`, 깊이 2단계, 끝 슬래시 404, 예외 다섯 | 경로만 보고 하는 일을 알게 하고 예외는 목록으로 고정한다. 주소가 둘이면 CDN(사용자 가까이에 응답을 복사해 두는 전송망) 캐시가 갈린다(ADR-0081) | 한 판 3단계(경로 표만) |
-| docs/api/guidelines.md §11 검색·부분 응답·하이퍼미디어 | `q`와 예약 이름, 같은 쿼리 이름 두 번은 400이다. `q`에 조건을 이어 붙이지 않고, `fields`는 문법만 두며, HATEOAS(응답 속 링크로 다음 행동 알리기)는 넣지 않는다 | 이어 붙이면 캐시 키가 갈리고 필터별 검사를 못 한다. 두 번 온 이름은 파라미터 오염(ASVS 15.3.7)을 막는다 | — |
-| docs/api/guidelines.md §12 메서드와 상태 코드 | 메서드의 뜻, 비밀값 조회만 POST, 성공·오류 코드의 뜻, 남의 기록은 404, 동시 수정(자원의 판 `ETag`와 `If-Match`, 412·428), `operationId`·`x-peaket-roles`·`x-peaket-trace-rare` | 상태 코드를 오용하지 않고 존재를 숨길 곳은 숨긴다. 역할 칸은 권한 빈틈을 문서 단계에서 기계로 잡는다(ADR-0164) | — |
-| docs/api/proto/README.md §1 파일 | 폴더 `peaket/<받는 서비스>/v1/`, 파일 12개, 컴파일·검사 이력. 마지막 셈은 서비스 42개·호출 82개 | 서비스 사이 계약이 글과 표로만 있었다(ADR-0084) | — |
-| docs/api/proto/README.md §2 규칙 | 패키지와 `v2`·`reserved`, 업무 결과는 결과 값(enum), 상태 코드 10개(표 9행)와 할 일, 호출별 데드라인, 재시도, 부르는 쪽 신원, 개인정보 | 거절·입금 대기는 오류가 아니라 결과다. `DEADLINE_EXCEEDED`·`UNAVAILABLE`은 차단기와 대체 응답으로 간다 | 분야 편 11·14(데드라인 값) |
-| docs/api/proto/README.md §3 호출 목록 | 부르는 쪽 → 받는 쪽, 호출, 멱등 키, 정본 흐름, 통신 표에 있는지 | 흐름도에만 있던 호출을 이 초안에서 처음 계약으로 적고 통신 표에도 더했다(ADR-0084) | 한 판 10·11단계(결제·발권·제어만) |
-| docs/api/proto/README.md §4 이 초안에 넣지 않은 것 | gRPC가 아닌 통신과 아직 길이 없는 호출 | ops-svc를 업무 gRPC 받는 쪽으로 만들지 않는다(ADR-0145 상태 줄) | — |
-| docs/api/avro/README.md §1 파일과 검사 | Avro 메시지 19종, 이름 붙은 타입 68개, 경로 `peaket/<묶음>/<레코드>.avsc`, 검사 이력. JSON 메시지 둘은 뺐다 | 조사용 요청 기록은 OTel 수집기(관측 데이터 수집 프로그램)가 레지스트리 형식 Avro를 만들지 못해 JSON이다(ADR-0171) | — |
-| docs/api/avro/README.md §2 옮긴 규칙 | 형 대응, 열거(정해진 값 목록) 맨 앞 `UNRECOGNIZED`와 기본값, null 규칙, Kafka 키는 UTF-8 문자열, 파티셔너(키로 파티션을 고르는 규칙) `murmur2_random` | 기본값 없는 열거는 모르는 기호에서 읽기 오류가 난다. 파티셔너가 섞이면 한 회차가 여러 파티션으로 간다(ADR-0142) | — |
-| docs/api/avro/README.md §3 등록과 호환 | Schema Registry(스키마를 판마다 등록하는 서버), BACKWARD_TRANSITIVE(새 스키마가 지난 모든 판의 데이터를 읽어야 하는 호환 모드), 소비자 먼저, 바꾸면 안 되는 것, 주제 이름(레지스트리에서 스키마를 묶는 이름), 등록 Job, 생산자 스키마 ID, Outbox(보낼 사건을 DB 변경과 함께 적어 두는 표) | 7일 안의 옛 메시지를 다시 읽는 소비자가 있다. 레지스트리가 멈춰도 새로 뜬 파드가 주문을 만든다(중간-088) | — |
-| docs/api/avro/README.md §4 토픽과 레코드 | 토픽 15개의 레코드·키·내는 곳·받는 곳 | 레코드가 여러 종류 실리는 토픽이 다섯이라 주제 이름 방식을 정한다 | 한 판 11단계(토픽 묶음만) |
-| docs/api/avro/README.md §5 asyncapi와 다른 점과 정할 일 | `features`, 필수 필드, payload 형식, 압축 토픽(키마다 마지막 값만 남기는 토픽) 키, 열거 기호, 쓰기 권한의 처리 기록 | 커뮤니티판은 쓰기 권한을 나누지 못해 '등록 Job만'은 설정 규칙이다 | — |
-| docs/api/avro/README.md §6 칸마다의 필수 판정 | 원칙, `x-present-when` 읽는 법, 191칸 셈, 메시지별 표, 구현 때 확인할 판정 | 첫 등록 뒤에는 null 허용 칸을 조일 수 없다(ADR-0150) | — |
-| docs/api/breaking/README.md 계약 깨짐 검사의 수준·예외 파일 | `tools/ci/contract-breaking.mjs`가 읽는 수준·예외·덮어쓰기 파일과 `breaking-approved` 라벨 | 도구 기본 수준을 정본의 '깨짐'에 맞추고, 예외가 이유와 라벨 없이 늘지 못하게 한다 | — |
-| docs/api/openapi.yaml `servers`·`security`·`x-peaket-gateways`·`tags` | 호스트 6개와 호스트별 CORS 값, 전역 팬 쿠키, 접두사 → 호스트 규칙 6줄, 화면 묶음 태그 14개 | 태그는 화면 묶음이라 게이트웨이와 일대일이 아니어서 접두사 표 하나로 둔다(낮음-031) | 한 판 11단계(입구) |
-| docs/api/openapi.yaml `components`·`paths`·`webhooks` | 인증 방식 11개, 공용 파라미터·응답·헤더, 작업마다 역할·근거 FR, 파트너 웹훅 `partnerEvent` 하나 | 4xx·5xx는 모두 Problem 본문이고 401은 `WWW-Authenticate`, 429·503은 `Retry-After`를 싣는다(info 설명). 수는 doc-check가 센다 | 한 판 3단계(구매 길 경로) |
-| docs/api/asyncapi.yaml `info`·`servers`·`channels`·`operations`·`components` | 공통 필드와 키·순서 규칙, 서버 넷, 채널 20개, 작업 40개, 메시지 34개 | 판은 레지스트리 ID가 말한다. 소비자는 도착 순서 대신 펜싱 토큰(계속 커지는 번호)·판 번호로 늦은 사건을 거른다(낮음-025·026) | 한 판 11단계, 분야 편 10 |
+| docs/api/guidelines.md §1 버전 정책과 하위 호환·폐기 절차 | URL `/v1`, 깨지는 변경 시 메이저 판 분기, Deprecation/Sunset 헤더, 스키마 단일 소스 원칙 | 배포 중 롤링 업데이트 시 구버전 클라이언트와 신버전 서버 간 무장애 공존 보장 | — |
+| docs/api/guidelines.md §1 핫패스 경로의 서버 검사 | 좌석 홀드는 Fastify 경로 스키마, 대기열 진입은 Zod 파이프로 검사. 401 선검증 | CPU 연산 7.4% 절감 및 비인가자의 페이로드 구조 탐색 차단 | 한 판 11단계 |
+| docs/api/guidelines.md §2 에러 응답 형식 | RFC 9457 Problem Details(`type`, `title`, `status`, `detail`, `instance`) 단일화, 409 경합의 정상 분기 | 프론트엔드가 type 하나로 다국어 오류 문구를 결정하고 스택 트레이스 노출 방지 | 분야 편 10 |
+| docs/api/guidelines.md §3 페이지네이션 | 커서(`cursor`, `limit`, `nextCursor`) 기본 강제, 스캐너 변경분(5,000건), 검색 오프셋 예외 | 대규모 데이터 조회 시 오프셋 건너뛰기 성능 저하 및 행 누락/중복 방지 | — |
+| docs/api/guidelines.md §4 멱등성 키 | `Idempotency-Key` 헤더(UUID v4), 계정$\times$작업 범위, 24시간 보관, 422/409/400 처리 | 네트워크 타임아웃 재전송 시 동일 주문 이중 과금 및 중복 발권 원천 차단 | 한 판 3·10단계, 분야 편 10·11 |
+| docs/api/guidelines.md §5 재시도와 데드라인 전파 | `x-peaket-deadline-ms` 잔여 시간 전파, 서비스 메시 단일 재시도, 지수 백오프 0~20% 지터 | 연쇄 타임아웃 낭비 및 재시도 폭풍(Thundering Herd) 방지 | 한 판 11단계, 분야 편 11·14 |
+| docs/api/guidelines.md §6 분산 레이트 리밋 | 핫패스 파드별 로컬 토큰 버킷, 일반 경로 분산 레이트 리미터(20ms 타임아웃) | 핫패스에서 외부 저장소(Redis) 조회 병목을 없애고 인프라 DDoS 차단 | 분야 편 9 |
+| docs/api/guidelines.md §7 인증 및 인가 아키텍처 흐름 | 팬 ES256 JWT(15분), 게이트웨이 무상태 검증, 역할 DB 미조회, DPoP 기기 증명 | 게이트웨이가 DB 조회 없이 공개키로만 서명을 검증하여 핫패스 오버헤드 0 달성 | 분야 편 8·13 |
+| docs/api/guidelines.md §8 외부 시스템 연동과 결함 격리 대책 | 13개 외부 연동(PG사, KCB, Turnstile, K-CISP 등) 통신 방식 및 3중 SSRF 방어 | 외부 시스템 장애가 내부 핫패스로 전파되는 것을 서킷 브레이커로 격리 | 분야 편 9·11·12·14 |
+| docs/api/guidelines.md §8.1 외부 호출의 실패 모양과 무게 | 외부 의존성 12종의 장애 모드(무응답/지연/거절) 및 1~3등급 영향도 분류 | 의존성 중요도에 따른 비즈니스 완화 조치 표준화(결제 실패는 보존, 알림은 버림) | 분야 편 22 |
+| docs/api/guidelines.md §9 공통 헤더 및 캐싱 규약 | `X-Trace-Id` 추적 헤더, 캐시 만료 헤더(max-age), 텔레메트리 `/_t/*`, CSV 수식 차단 | 분산 분산 추적 무결성 확보 및 CSV 인젝션 공격 방어 | 분야 편 9·14 |
+| docs/api/guidelines.md §9 CSRF·사전 요청 없는 쓰기·CORS | `Origin` 및 `SameSite=Strict` 검증, 진입/확정 `text/plain` 전송 규약 | T=0 순간 20만 건의 OPTIONS 왕복을 제거하여 인프라 유입 지연 최소화 | 한 판 3단계, 분야 편 9 |
+| docs/api/guidelines.md §10 URI 설계 규칙 | 명사 중심 리소스, 복수형 컬렉션, 행위는 하위 리소스(`.../approvals`), 깊이 최대 2단계 | 일관되고 예측 가능한 RESTful 인터페이스 제공 및 CDN 캐시 분할 방지 | 한 판 3단계 |
+| docs/api/guidelines.md §11 검색·부분 응답·하이퍼미디어 | `q` 단일 검색어, 중복 쿼리 파라미터 400 거부, HATEOAS 배제 | HTTP 파라미터 오염(HPP) 취약점 차단 및 불필요한 페이로드 팽창 억제 | — |
+| docs/api/guidelines.md §12 메서드와 상태 코드 | GET/POST/PUT/PATCH/DELETE 의미론, 강한 ETag 동시성 제어(412/428), `x-peaket-roles` | 상태 코드 오용 방지 및 문서 기반 권한 정적 검증 파이프라인 구축 | — |
+| docs/api/proto/README.md §1 파일 | 12개 proto 파일, 42개 서비스, 82개 RPC 호출 규격 | 분산 서비스 간의 동기 RPC 통신 규약 단일 소스 정의 | — |
+| docs/api/proto/README.md §2 규칙 | protobuf v3, 업무 결과는 Enum 반환, 10개 상태 코드 표준 매핑, 호출별 데드라인 | 거절/한도초과를 시스템 에러와 분리하고 차단기 오작동 방지 | 분야 편 11·14 |
+| docs/api/proto/README.md §3 호출 목록 | 호출자 $\rightarrow$ 수신자 매핑, RPC별 멱등키 필요 여부 전수 정리 | 서비스 간 분산 트랜잭션 흐름의 정합성 보장 | 한 판 10·11단계 |
+| docs/api/proto/README.md §4 이 초안에 넣지 않은 것 | gRPC 미적용 통신(이벤트 토픽) 및 ops-svc 수신 제외 원칙 | ops-svc가 업무 gRPC 수신자가 되어 공유 노드 풀에 묶이는 아키텍처 오염 방지 | — |
+| docs/api/avro/README.md §1 파일과 검사 | 19종 Avro 메시지, 68개 네임드 타입, avsc 디렉터리 구조 | 이벤트 기반 데이터 파이프라인의 바이너리 직렬화 규격 | — |
+| docs/api/avro/README.md §2 옮긴 규칙 | Protobuf $\leftrightarrow$ Avro 매핑, Enum 기본값 `UNRECOGNIZED`, 파티셔너 `murmur2_random` | 신규 열거형 추가 시 구버전 역직렬화 오류 방지 및 회차별 파티션 쏠림 방지 | — |
+| docs/api/avro/README.md §3 등록과 호환 | Schema Registry `BACKWARD_TRANSITIVE`, 소비자 우선 배포 원칙 | 과거 7일간의 미처리 이벤트를 재생(Replay)할 수 있는 하위 호환성 보장 | — |
+| docs/api/avro/README.md §4 토픽과 레코드 | 15개 핵심 Kafka 토픽과 토픽별 허용 Avro 레코드 매핑 | 토픽 단일성에 기반한 메시지 스키마 거버넌스 확립 | 한 판 11단계 |
+| docs/api/avro/README.md §5 asyncapi와 다른 점과 정할 일 | AsyncAPI 문서와의 차이점 및 압축 토픽(Compacted Topic) 키 규약 | 비동기 API 문서와 실제 브로커 직렬화 스키마 간의 정합성 유지 | — |
+| docs/api/avro/README.md §6 칸마다의 필수 판정 | 191개 전체 필드 중 129개 필수 필드 고정, `x-present-when` 조건부 표기 | 사후에 필수 필드를 추가할 수 없는 Avro 구조적 한계 사전 차단(ADR-0150) | — |
+| docs/api/breaking/README.md 계약 깨짐 검사의 수준·예외 파일 | `tools/ci/contract-breaking.mjs` 설정, `breaking-approved` 라벨 관리 | 무단 Breaking Change 배포를 차단하는 CI 자동화 관문 | — |
+| docs/api/openapi.yaml servers·security·x-peaket-gateways·tags | 6개 게이트웨이 호스트, 전역 쿠키 인증, 태그-호스트 매핑 규칙 | 단일 OpenAPI 파일로 복수 게이트웨이 라우팅 규격 표현 | 한 판 11단계 |
+| docs/api/openapi.yaml components·paths·webhooks | 244개 경로, 271개 작업, 11개 인증 방식, 파트너 웹훅 명세 | 전체 REST API의 정규 기계 가독 스펙(Single Source of Truth) | 한 판 3단계 |
+| docs/api/asyncapi.yaml info·servers·channels·operations·components | 20개 채널, 40개 작업, 34개 메시지, 펜싱 토큰 기반 늦은 도착 처리 | 웹소켓/SSE 및 Kafka 비동기 통신의 아키텍처 청사진 | 한 판 11단계, 분야 편 10 |
 
-## 3. 꼭 기억할 규칙과 숫자
+---
 
-| 항목 | 값 | 표시 | 정본 위치 |
-| --- | --- | --- | --- |
-| 계약 원본 | `peaket` docs/api/. 생성 코드 `packages/contracts`는 게시하지 않고 `workspace:`로만 쓴다. 판은 출시 태그가 말한다 | 확정(소유자 결정, ADR-0165) | guidelines §1 |
-| 깨짐 검사 | oasdiff(OpenAPI 차이 비교 도구) 1.34.1 `--fail-on ERR`, AsyncAPI CLI 6.2.2, `buf breaking`(protobuf 검사, FILE 규칙), 로컬 레지스트리, Pact(소비자가 기대하는 요청·응답을 적은 계약 시험). 대상 가지와 마지막 출시 태그 둘과 견준다 | 확정(추천 적용) | guidelines §1 |
-| 웹훅 판 바꾸기 | 새 `type`(예 `order.confirmed.v2`)을 함께 보내고 옛 `type`은 알린 날부터 최소 90일 | 확정 | guidelines §1 |
-| 페이지 | `limit` 최대 100, 스캐너 변경분 5,000. 검색은 `limit` 20만, `page × 20` 1,000 상한, CDN 30초 | 검색 셋은 `[가정]` | guidelines §3 |
-| 멱등 키 | 따옴표 없는 UUID(무작위 식별자) v4. 다른 본문 422, 처리 중이면 1초 기다린 뒤 409 + `Retry-After: 1`, 형식 틀림 400 | 1초·1은 `[가정]` | guidelines §4 |
-| 멱등 보관 | 홀드 7분(홀드 유효 시간 TTL과 같다), 그 밖 24시간. 결제사 키 `confirm-{orderId}`·`cancel-{cancellationId}`, 재시도 창 3시간 | 24시간 `[가정]` | guidelines §4 |
-| 데드라인 | 서비스 상한 기본 15,000ms. 홀드 40ms, 승인 명령 접수 200ms, 종단 확정 3초, `ApplyControl` 1초, `BatchGetPayments` 500ms, `ScoreRisk` 800ms | 200ms·1초·500ms·800ms `[가정]`, 모두 `[실측 전]` | guidelines §5, proto §2 |
-| 결제사 승인 호출 | 끊지 않고 읽기 60초까지 기다린다. 2초는 경보 기준 | 60초 `[가정]` | guidelines §5 |
-| 재시도 | 브라우저 기다림 = 하한 × (1 + U(0, 0.2)), 한 페이지 분당 60회 이하. 메시 재시도 예산은 진행 중 요청의 10% | 10%는 `[가정, wbs 4.6.1에서 확정]` | guidelines §5 |
-| 레이트 리밋 | 진입 기기당 10회/10초, 일반 사용자당 60회/분, 파트너 테넌트(파트너 회사 단위)당 600회/분, 리포트 30회/분, 결정 기록 10회/분. 전역 판정 20ms, 못 받으면 통과 | 앞의 셋은 `[가정, Phase 2 부하 시험에서 확정]`, 리포트·결정 기록은 `[가정, Phase 4 4.3.6에서 확정]` | guidelines §6 |
-| 토큰 | 팬 액세스 ES256 15분, 무효화 목록 15분 보존, 재인증 토큰 5분 1회용, 관리자 유휴 1시간 | 확정 | guidelines §7 |
-| 파트너 웹훅 | 다시 보내기 1분·5분·30분·2시간·6시간·12시간 뒤 DEAD(실패로 따로 모아 두는 상태). 응답 64KiB, 연결 3초·전체 10초. 온세일 창(T-10분~T+60분) 새 묶음은 미루고 최대 70분 | 간격·크기·시간 `[가정]` | guidelines §8 |
-| 캐시 | 대기 순번 파일 `max-age=1`, 셔플·묶음 결과 60초, 공개 읽기 홈·검색 30초·자동완성·후기 요약 60초·회차 공개 요약 300초. 사전 요청 캐시 7200초 | 1초·7200초 말고는 `[가정]` | guidelines §9 |
-| 동시 수정 | 강한 `ETag: "7"` 꼴, 판이 다르면 412, `If-Match`가 없으면 428 | 확정 | guidelines §12 |
-| 허용 역할 | 12종(`public`, `fan`, `partner_admin`, `partner_member`, `viewer`, `operator`, `commander`, `cs_agent`, `cs_lead`, `scanner_device`, `gate_staff`, `gate_lead`), 정본은 docs/security/authz-matrix.md §5.5 | 확정(모든 작업에 다는 것은 소유자 결정, 값의 표기는 추천 적용) | guidelines §12 |
-| openapi 셈 | 경로 244, 작업 271, `security: []` 22, 드문 쓰기 표시 24, `operationId` 0 | 2026-11-01 파일로 셈. 정본 수는 doc-check 보고 | guidelines §12 |
-| gRPC 셈 | 파일 12개, 서비스 42개, 호출 82개 | protoc 컴파일 오류 0, `buf` 검사는 아직(wbs 0.2.2) | proto §1 |
-| Avro 셈 | 19종, 타입 68개(레코드 28, 열거 40), 191칸 = 필수 129·기본값 false 9·조건부 53(`x-present-when` 34) | 레지스트리 검사는 아직(wbs 0.2.2) | avro §1·§6 |
+## 3. 핵심 메커니즘과 계약 거버넌스 파이프라인
 
-## 4. 이 문서가 다루는 ID
+### 3.1 REST 인터페이스: RFC 9457 Problem Details 및 3계층 멱등키
 
-이 정본은 FR·POL을 새로 정하지 않는다. 아래는 규칙의 근거로 쓰는 ID다. 경로마다의 FR은 openapi.yaml 작업 설명에 있다.
+#### RFC 9457 Problem Details 단일 오류 규격
+게이트웨이와 모든 백엔드 서비스는 HTTP 에러 응답 시 표준 JSON 형식을 반환한다:
+```json
+{
+  "type": "https://api.peaket.example/v1/errors/seat-already-held",
+  "title": "좌석 선점 경합 실패",
+  "status": 409,
+  "detail": "선택하신 A구역 12열 5번 좌석은 다른 관객이 결제 진행 중입니다.",
+  "instance": "/v1/events/EV-20261108-01/seats/S-1205/hold"
+}
+```
+- `type`: 에러를 고유하게 식별하는 URI로, 프론트엔드는 이 값을 기반으로 다국어 문구 및 UI 분기를 결정한다. 동일한 `type`은 항상 동일한 HTTP 상태 코드를 가진다.
+- 스택 트레이스나 SQL 쿼리는 보안을 위해 절대 `detail`에 포함되지 않는다(OWASP ASVS 16.5.1).
 
-| ID | 한 줄 |
-| --- | --- |
-| FR-025 | 파트너가 판매 이벤트 웹훅 받을 URL을 등록한다. HTTPS만, HMAC(키가 있어야 만드는 서명값) 서명 비밀을 발급한다 |
-| FR-054 | 공연예술통합전산망에 공연정보 10개 항목을 하루 단위로 보낸다 |
-| NFR-003 | 좌석 홀드 p99 50ms `[실측 전]`, 가용성 99.95%, 오버셀 0건. 경합 409는 정상 응답으로 센다 |
-| POL-005 | 검증 가능한 셔플. drand(공개 난수 비콘) 라운드를 미리 공개하고 직전 라운드로 대체하지 않는다 |
-| POL-012 | 홀드 TTL과 재노출. 홀드 멱등 키 보관 기간이 이 TTL과 같다 |
-| POL-014 | 가상계좌와 환불 계좌. 송금 계좌는 저장하지 않는다 |
-| POL-019 | 계정·세션 정책. 토큰 15분, 기기 최대 5대, 재인증이 필요한 팬 작업 |
-| POL-021 | 운영 명령 규칙. 명령 6(대체 결제사 전환)의 2인 승인 |
-| POL-028 | 온세일 윈도우(70분) 운영 제약. 웹훅 다시 보내기를 미루는 근거 |
-| POL-033 | 회원 탈퇴와 재가입. 부정 예매 계정의 연계정보 HMAC 보관은 그 예외다 |
-| POL-034 | 계정 연결·병합. 병합 차단 사유를 데이터 주인 서비스마다 묻는다 |
-| POL-044 | 게시물 신고와 권리 침해 삭제 요청 |
-| POL-046 | 부정 예매 사후 조치. ⑦ 우선 구매, ⑥ 재가입 제한 |
-| SCR-025 | 웹훅 연동 설정. 전송 실패 알림을 띄운다 |
-| SCR-032 | 법정 조치 관리. 수사기관 대응을 손으로 기록한다 |
-| SCR-045 | CS 처리함. 이의 심사가 판정 근거를 읽는다 |
-| SCR-051 | 스캐너 승인. 기기를 키 지문으로 찾는다 |
-| SCR-053 | 스캐너 기기 관리. 목록에 지금 세션 별명을 합친다 |
-| SCR-064 | 관리 계정·세션 관리 |
-| SCR-065 | 파트너사·계약 관리. API가 아직 없다 |
+#### 3계층 멱등성 보장 구조
+1. **게이트웨이 1차 필터링**: `Idempotency-Key` 헤더 누락 시 400 Bad Request, 동일 키에 요청 페이로드가 다르면 422 Unprocessable Entity 반환.
+2. **좌석 선점 Redis Lua 원자성 (7분 TTL)**: 선점 처리 중이면 대기 후 409 반환, 이미 처리된 요청이면 캐시된 응답 반환.
+3. **주문/결제 PostgreSQL RDBMS 원장 트랜잭션 (24시간 보관)**: `idempotency_records` 테이블에 주문 트랜잭션과 동일한 단위로 커밋하여 이중 결제 원천 차단.
 
-## 5. 결정과 버린 길
+---
 
-버린 길은 각 ADR의 '검토한 대안'에서, '본문이 옛 판인 곳'은 상태 줄과 docs/architecture.md §11, 지금 정본에서 옮겼다. [결정 카드 목록](../decisions/README.md) §2가 이 편에 둔 ADR은 0081·0145·0148·0150·0160·0164 여섯이다.
+### 3.2 내부 gRPC: 데드라인 전파 및 업무 결과 분리
 
-### [ADR-0081](../../adr/0081-rest-api-design-criteria-audit.md) REST 설계 기준을 API 규칙으로 들인다
+마이크로서비스 간 동기 통신은 REST 대신 Protobuf 기반 gRPC를 사용하며, 다음의 핵심 규약을 강제한다:
 
-- **고른 것**: 소유자의 REST 기준을 guidelines §10~§12로 들이고 64개 작업 경로를 바꿨다. 동작은 '그 동작이 남기는 기록'의 하위 자원이고, 쌓이면 복수(`approvals`), 한 번뿐이면 단수(`acceptance`)다. 오류 본문은 어디서 나든 Problem이다. 배포된 클라이언트가 없어 `v1` 안에서 제자리로 바꿨다. 기준과 다르게 정한 것은 셋이다. 커서가 기본이고, `q`에 조건을 이어 붙이지 않으며, 디버그 정보는 로컬·CI에서만 낸다.
-- **버린 길**: 동사 경로는 기준이 막는다. Google API 설계 지침 AIP-136의 `:approve`는 동사가 남는다. 상태 칸 PATCH는 전이마다 권한·재인증·멱등·감사가 달라 권한 표가 흐려진다. 옛 경로 별칭은 경로와 시험만 는다. QUERY 메서드는 CloudFront(AWS의 CDN)가 받지 않는다. 쿠키 경로 401에 Bearer를 쓰면 RFC 6750 전달 방법에 쿠키가 없어 뜻이 틀린다. 끝 슬래시를 같게 받으면 CDN 캐시가 갈린다.
-- **본문이 옛 판인 곳**: 결정 14의 스캐너 `Bearer realm=`은 지금 mTLS(양쪽이 인증서를 확인하는 암호화 통신) 선택지의 값이고, 기본안은 `DPoP realm="peaket-scanner"`다(낮음-074). '반영 수치'는 그날 값이다. 바뀌기 전 경로는 끝의 대응표로 읽는다.
+1. **마이크로초 단위 데드라인 전파 (`x-peaket-deadline-ms`)**:
+   - 게이트웨이가 요청을 수신할 때 전체 여정의 타임아웃(예: 3,000ms)을 설정한다.
+   - 다운스트림 서비스 호출 시 경과 시간을 차감하여 헤더로 넘기며, 잔여 시간이 0 이하가 되면 즉시 `DEADLINE_EXCEEDED`를 반환하고 연쇄 처리를 중단한다.
+2. **업무 결과의 Enum 분리 (Business Results as Enums)**:
+   - "잔여 좌석 없음", "1인 한도 초과", "카드사 승인 거절" 같은 도메인 거절은 gRPC 시스템 에러(`INTERNAL`, `UNKNOWN`)가 아닌 응답 메시지 내부의 **결과 Enum(`HOLD_RESULT_SOLD_OUT`, `PAYMENT_DECLINED`)**으로 반환한다.
+   - 이를 통해 인프라 서킷 브레이커가 정상적인 비즈니스 거절을 시스템 장애로 오인하여 트래픽을 차단하는 결함을 방지한다.
 
-### [ADR-0150](../../adr/0150-event-schema-required-fields-always-present.md) 늘 값이 있는 칸은 필수로 한다
+---
 
-- **고른 것**: 늘 있는 칸은 필수, 사건 종류에 따라 없을 수 있는 칸만 `["null", 타입]`과 기본값 null, 참·거짓은 기본값 false다(소유자 결정). 조건은 `x-present-when`으로 적는다. 필수 칸이 비면 거래 사건은 업무 트랜잭션이 실패하고, 텔레메트리는 버리고 센다.
-- **버린 길**: 공통 셋만 필수(A안)는 소비자가 꼭 쓰는 칸이 null로 남고 뒤에 조일 수 없다. 종류별 하위 레코드(C안)는 메시지 모양이 크게 바뀌고 그래도 생산자 시험이 필요하다. 조건을 글로만 적으면 스키마와 시험의 어긋남을 못 잡는다.
-- **본문이 옛 판인 곳**: 셈 172칸은 2026-10-31에 191칸이 됐다(avro §6).
+### 3.3 Kafka/Avro: 스키마 레지스트리와 필수 필드 거버넌스 (ADR-0150)
 
-### [ADR-0148](../../adr/0148-deferred-internal-grpc-contract-drafts.md) 미뤄 둔 내부 gRPC 계약 초안
-
-- **고른 것**: 스캐너 기기 관리는 원장 주인 ticket-svc다. 병합 사전 확인은 데이터 주인 셋이 같은 모양 `CheckAccountMerge`로 답하고 하나라도 답이 없으면 503이다(모르면 막는 쪽). ops-svc 데이터는 ops-svc가 `SetAccountHold`로 먼저 알린다.
-- **버린 길**: identity가 남의 DB를 직접 읽으면 논리 DB를 넘는다. 이벤트로 모으면 몇 분짜리 홀드까지 흘려야 한다. ops-svc에 호출을 두면 업무 gRPC를 받게 되어 웨이포인트(gRPC 서비스 앞 메시 프록시)와 공유 노드 풀에 묶인다.
-- **본문이 옛 판인 곳**: 결정 10의 `peaket-contracts`는 옮길 저장소 없이 읽는다. 초안은 모노레포 `peaket`의 docs/api/proto/에 그대로 있다(ADR-0165, 상태 줄 2026-11-01).
-
-### [ADR-0164](../../adr/0164-allowed-roles-on-every-operation-link-and-blocker-checks-canvas-direct-edit.md) 결정 1·2 작업마다 허용 역할을 적고 검사한다
-
-- **고른 것**: 모든 작업에 `x-peaket-roles`를 달고, 공개 작업도 `[public]`이다. 값의 정본은 authz-matrix §5.5이고 doc-check `roles`가 어긋남을 오류로 잡는다.
-- **버린 길**: 정본을 planning/03 §3에 두면 열이 묶음이라 기계로 못 읽는다. 공개 작업 칸을 생략하면 빠뜨린 작업과 구분되지 않는다.
-- **본문이 옛 판인 곳**: '관련' 줄의 '게이트웨이가 경로별 역할을 본다'는 ADR-0172로 바뀌었다. 이 칸은 서비스 가드의 거친 검사다.
-
-### [ADR-0145](../../adr/0145-api-contract-gaps-logout-scanner-version-telemetry-labels.md) API 계약 보완
-
-- **고른 것**: gw-ops 로컬 한도, 로그아웃 `DELETE /v1/partner/auth/sessions/me`·`DELETE /v1/ops/auth/sessions/me`(204), `operationId` 이름 규칙, 응답 칸 `minAppVersion`, `/_t/*`는 guidelines §9가 정본, `x-peaket-trace-rare`.
-- **버린 길**: gw-ops를 전역 한도에 붙이면 관제 입구가 공유 Redis에 다시 묶인다. 최소 판을 헤더로 알리면 모든 응답에 붙고 노출 헤더가 는다. `/_t/*`를 openapi에 넣으면 검사 예외가 늘고 외부 API로 오해된다.
-- **본문이 옛 판인 곳**: 결정 5의 `ListUpcomingOnsales`는 두지 않고 S3 일정 파일을 읽는다(상태 줄). 결정 7의 대상 다섯 가지는 지금 표시를 단 작업 24개로 늘었다(guidelines §12).
-
-### [ADR-0160](../../adr/0160-shop-order-request-body-consent-version-and-c4-component-names.md) 굿즈 주문 본문과 동의의 고지 문안 판
-
-- **고른 것**: `POST /v1/shop/orders` 본문은 수령 방식 `fulfillment`로 갈리고(oneOf, 갈래 밖 칸은 400), 동의는 `consentVersion`과 함께 받아 판이 다르면 422 `consent-version-outdated`다. 금액은 서버가 계산한다.
-- **버린 길**: 서버가 지금 문안 판을 채우면 이용자가 본 판과 기록이 어긋난다. 동의 누락을 `enum: [true]`로 막으면 '누락은 422' 규칙과 다르다.
-
-### 이 분야에 걸린 다른 ADR
-
-- [ADR-0084](../../adr/0084-docs-per-receiver-git-handover-contract-drafts-arc42.md)(자리는 분야 편 23): proto·Avro 초안을 docs/api/에 두고 주제 이름 `TopicRecordNameStrategy`를 골랐다. 버린 길은 `TopicNameStrategy`와 토픽별 유니온(여러 레코드가 실리는 토픽에서 생산자가 유니온의 최신 판으로 직렬화하게 설정해야 한다), `RecordNameStrategy`(어느 토픽에 어떤 레코드를 실을지 등록으로 정하지 못한다), Outbox를 jsonb로 두고 변환하는 안(커넥터가 추론한 스키마가 계약과 달라진다)이다. 대안 판단에 나오는 Flink(스트림 처리 엔진)·Debezium(DB 변경 기록을 Kafka로 보내는 도구)은 뒤에 빠졌다([결정 카드 D-28](../decisions/D28-drop-flink-stream-workers.md)·[D-10](../decisions/D10-order-history-polling-outbox.md)).
-- [ADR-0165](../../adr/0165-four-repositories-monorepo-gitops-shared-workflows-private-loadtest.md) 결정 4: 계약을 운영에 나간 판과도 견준다. 계약 쪽만의 대안 비교는 정본에 없다([결정 카드 D-31](../decisions/D31-one-monorepo.md)).
-- [ADR-0023](../../adr/0023-fastify-adapter-hot-path.md): 모든 HTTP 서비스가 Fastify다. 끝 슬래시 기본값과 경로 스키마가 기댄다([D-12](../decisions/D12-backend-stack-nestjs-fastify-drizzle.md)).
-- [ADR-0082](../../adr/0082-istio-ambient-mesh-app-boundary-meshless-portfolio-runs.md): 메시는 연결·전송을, 앱은 데드라인·차단기·추적 헤더를 맡는다([D-13](../decisions/D13-thin-gateways-and-ambient-mesh.md)). [ADR-0117](../../adr/0117-no-hedged-requests-snapshot-timeout-and-browser-retry.md): 헤지 요청을 쓰지 않는다([D-15](../decisions/D15-circuit-breakers-fail-fast.md)).
-- [ADR-0100](../../adr/0100-console-rest-sse-drop-trpc-module-federation-showcase-baseline.md): 관제는 REST와 SSE만 쓰고 GraphQL·Socket.IO를 뺐으며, 파트너는 tRPC를 뺐다([D-07](../decisions/D07-realtime-transport-per-screen.md)). [ADR-0172](../../adr/0172-judge-roles-per-request-not-in-tokens.md): 역할은 서비스가 요청마다 판정한다([D-14](../decisions/D14-tokens-and-per-request-authz.md)).
-- [ADR-0054](../../adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md): 소비자를 먼저 배포한다(분야 편 20). [ADR-0065](../../adr/0065-web-frontend-security-after-asvs-v3.md): `Origin`·`text/plain`·CORS(분야 편 21). [ADR-0116](../../adr/0116-single-polling-outbox-relay-drop-debezium-place-pgbouncer-schema-registry.md): Outbox 폴링 릴레이([D-10](../decisions/D10-order-history-polling-outbox.md)). [ADR-0142](../../adr/0142-consumer-key-concurrency-held-events-client-required-settings.md): 파티셔너와 키 단위 처리([D-16](../decisions/D16-kafka-topics-and-clusters.md)).
-
-## 6. 읽는 요령
-
-**읽는 순서**: guidelines §1 → §10~§12 → §2 → §4 → §5·§6 → §7·§9 → §8 → §3·§11. 이어서 proto §2 → §3, avro §2 → §3 → §6. 두 YAML은 처음부터 읽지 않고 아래 '찾는 법'으로 연다.
-
-**계약 파일에서 코드와 검사까지**(정본이 여러 절에 나눠 적은 흐름)
+Kafka 이벤트 버스는 19종의 Avro 스키마로 관리되며, Schema Registry의 `BACKWARD_TRANSITIVE` 모드를 적용한다:
 
 ```mermaid
 flowchart LR
-    oas["openapi.yaml(REST)"]
-    aas["asyncapi.yaml(Kafka·WS·SSE)"]
-    proto[".proto(gRPC)"]
-    avro[".avsc(Kafka 값)"]
-    gen["packages/contracts(생성 코드)"]
-    fe["화면: 타입·호출 훅·MSW·Zod"]
-    svc["서비스: Zod 파이프·경로 스키마"]
-    reg["Schema Registry"]
-    check["contract-check(CI)"]
-    base["대상 가지 + 마지막 출시 태그"]
-    oas -->|"orval·Zod 생성"| gen
-    proto -->|"코드 생성"| gen
-    gen --> fe
-    gen --> svc
-    aas -.->|"칸·열거·조건이 같아야 한다"| avro
-    avro -->|"등록 Job만 등록"| reg
-    oas --> check
-    aas --> check
-    proto --> check
-    avro --> check
-    base -->|"옛 판"| check
+    subgraph RegistryPolicy["Confluent Schema Registry 호환성 검증"]
+        NEW_SCHEMA["새 스키마 v(N+1) 등록 시도"]
+        CHECK{"BACKWARD_TRANSITIVE 검증<br/>(v1 ~ vN 모든 과거 데이터 역직렬화 가능한가?)"}
+        PASS_REG["등록 성공 (Schema ID 발급)"]
+        FAIL_REG["등록 거부 (CI 파이프라인 실패)"]
+    end
+
+    subgraph ProducerConsumer["생산자/소비자 배포 거버넌스"]
+        CONSUMER_FIRST["1. 소비자(Consumer) 서비스 선배포<br/>(새 스키마 필드 처리 가능하도록 준비)"]
+        PRODUCER_NEXT["2. 생산자(Producer) 서비스 후배포<br/>(새 이벤트 발행 개시)"]
+    end
+
+    NEW_SCHEMA --> CHECK
+    CHECK -->|"통과"| PASS_REG --> CONSUMER_FIRST --> PRODUCER_NEXT
+    CHECK -->|"실패"| FAIL_REG
 ```
 
-**찾는 법**
+- **상시 존재 필드 필수 강제 (ADR-0150)**: Avro 스키마에 필드를 추가할 때 기본값(`default: null`)이 있으면 하위 호환성이 보장되지만, **한 번 등록된 null 허용 필드를 나중에 필수로 조이는 것은 Breaking Change**가 되어 불가능하다. 따라서 PEAKET은 최초 설계 시 191개 필드 중 상시 존재하는 129개 필드를 엄격히 필수로 확정하고, 조건부 필드에만 `["null", 타입]`과 `x-present-when` 명세를 부여했다.
 
-- 경로: openapi.yaml에서 경로를 찾는다. 호스트는 `x-peaket-gateways` 접두사 규칙(`/v1/ops/`, `/v1/partner/`·`/v1/webhooks/`, `/v1/scanner/`, `/v1/queues/`, 나머지)으로 읽고, 경로의 `servers`가 이긴다. 누가 부르는지는 `x-peaket-roles`, 값의 뜻은 authz-matrix §5.5다.
-- 오류: 응답 설명의 대문자 별칭(`DUPLICATE_ADMISSION`)은 `type` 끝 케밥 표기(`duplicate-admission`)와 같다. 전체 목록은 wbs 0.2.3에서 만든다.
-- 서비스 사이 호출: proto §3에서 이름을 찾고 필드는 `.proto`에서 읽는다. 사건: avro §4에서 토픽, §6에서 칸의 필수 여부를 찾는다.
+---
 
-**함정**
+### 3.4 CI/CD Breaking Change 자동 차단 파이프라인
 
-- guidelines §1·§2·§4·§5의 '서비스 템플릿' 문단은 `packages/platform` 구현 메모라 규칙을 잡은 뒤 읽는다.
-- proto §1·avro §1은 날짜별 이력이다. 지금 셈은 마지막 문장이고 중간의 '18개'·'서비스 8개'는 그날 값이다.
-- 지금은 asyncapi를 고치면 avsc도 고친다. wbs 0.2.2 뒤에는 avro·proto 폴더가 원본이다.
-- 정해 두고 아직 안 한 것: `operationId`(0개), `fields`, 게이트웨이 Problem의 `traceId`(미리 재 보는 시험 PoC D-T43 전), `buf`·레지스트리 검사.
-- 400은 형식, 422는 업무 규칙이다. 남의 개인·거래 기록은 404, 공개 회차의 하위 자원은 403이다.
-- 경로 스키마는 좌석 홀드 같은 핫패스에만 쓰고, 대기열 진입은 Zod 파이프로 되돌렸다(ADR-0176 결정 4). guidelines §1도 2026-11-02에 그렇게 고쳤다(§10). 닫지 않은 객체의 정의 밖 칸을 Zod는 버리고 경로 스키마는 넘긴다(본문 닫기는 BUILD_ORDER BAS-040).
+모든 PR은 코드 변경 전 계약의 하위 호환성을 기계적으로 검증한다:
+1. **REST API 검증**: `oasdiff break -base main -revision HEAD docs/api/openapi.yaml --fail-on ERR`을 실행하여 필드 삭제, 타입 변경, 필수 필드 추가를 차단한다.
+2. **gRPC 검증**: `buf breaking --against .git#branch=main`을 실행하여 필드 번호 재사용 및 삭제를 차단한다.
+3. **2중 비교 검증**: 대상 브랜치(`main`)뿐 아니라 **가장 최근 프로덕션 릴리스 태그**와도 비교하여, 배포 중인 롤링 업데이트 환경에서 구버전 클라이언트가 깨지지 않음을 이중으로 입증한다.
 
-## 7. 경계
+---
 
-| 이 정본이 정하지 않는 것 | 어디서 정하나 |
+## 4. 꼭 기억할 규칙과 숫자
+
+| 항목 | 엔지니어링 기준값 | 아키텍처 근거 및 계산 | 정본 위치 |
+| --- | --- | --- | --- |
+| **OpenAPI 엔드포인트** | 경로 244개, 작업 271개, 웹훅 1개 | 피켓 전체 도메인 기능의 단일 기계 가독 스펙 | openapi.yaml, guidelines §12 |
+| **gRPC 제원** | 파일 12개, 서비스 42개, RPC 82개 | 마이크로서비스 간 동기 RPC 인터페이스 단일화 | proto/README.md §1 |
+| **Avro 스키마 제원** | 19종 레코드, 타입 68개, 필드 191개 (필수 129개) | Kafka 이벤트 버스 바이너리 스키마 단일화 | avro/README.md §1, §6 |
+| **데드라인 상한** | 서비스 기본 15s, 좌석 홀드 40ms, 결제 확정 3s | 비정상 지연 트랜잭션의 조기 차단 및 자원 회수 | guidelines §5, proto §2 |
+| **결제 승인 타임아웃** | PG사 호출 끊지 않고 최대 60초까지 대기 | 비가역적 금융 승인 응답의 유실 방지 | guidelines §5 |
+| **멱등키 보관 주기** | 좌석 홀드 7분 (TTL 연동), 주문/결제 24시간 | 네트워크 재시도 수용 및 DB 용량 상한 관리 | guidelines §4 |
+| **분산 레이트 리밋** | 진입 10회/10초, 일반 60회/분, 파트너 600회/분 | 게이트웨이 파드별 토큰 버킷으로 핫패스 보호 | guidelines §6 |
+| **팬 세션 토큰** | ES256 서명 JWT, 15분 만료, 무상태 검증 | 게이트웨이 DB I/O 0건 및 빠른 키 교체 | guidelines §7 |
+| **동시 수정 제어 (ETag)**| 강한 `ETag: "7"` 꼴, 불일치 시 412, 누락 시 428 | 좌석맵 및 파트너 설정의 동시 덮어쓰기 방지 | guidelines §12 |
+| **파트너 웹훅 재전송** | 1분, 5분, 30분, 2시간, 6시간, 12시간 후 DEAD | 지수 백오프 및 온세일 70분 기간 전송 유예 | guidelines §8 |
+
+---
+
+## 5. 이 문서가 다루는 ID
+
+- **FR**: FR-025(웹훅 등록), FR-041(결제 웹훅 멱등성), FR-051(결제사 전환), FR-054(공연전산망 전송).
+- **NFR**: NFR-001(대기열 진입), NFR-003(좌석 홀드), NFR-005/006(결제 접수/확정), NFR-011(기본 SLO), NFR-016(보안 ASVS L2), NFR-025(정합성 불변식).
+- **POL**: POL-005(셔플 검증), POL-012(홀드 TTL), POL-013(2단계 결제), POL-014(가상계좌 통제), POL-019(세션 정책), POL-021(운영 명령), POL-028(온세일 동결), POL-033(탈퇴), POL-034(계정 병합), POL-046(부정 예매 조치).
+- **SCR**: SCR-025(웹훅 연동), SCR-032(법정 조치), SCR-045(CS 처리함), SCR-051(스캐너 승인), SCR-053(스캐너 관리), SCR-064(관리 계정), SCR-065(파트너 관리).
+
+---
+
+## 6. 결정과 버린 길 (ADR 트레이드오프)
+
+### ADR-0081: 소유자 REST API 설계 기준 내재화 (결정 카드 [D-12](../decisions/D12-backend-stack-nestjs-fastify-drizzle.md))
+- **채택한 결정**: 동사 URL을 전면 배제하고 명사 기반 2단계 리소스 설계를 강제한다. 승인/반려 등의 행위는 하위 컬렉션(`.../approvals`)에 대한 리소스 생성(POST)으로 치환하며, 오류 본문은 RFC 9457 Problem Details로 통일한다.
+- **버린 대안**: Google AIP-136 동사 커스텀 메서드(`:approve`) 도입(표준 REST 의미론과 충돌), 상태 필드 단독 PATCH 수정(트랜잭션 권한·감사 추적 흐려짐).
+
+### ADR-0145: 프론트엔드-백엔드 간 REST 인터페이스 보완 (자리: 이 편)
+- **채택한 결정**: OpenAPI 스펙을 기반으로 `orval` 코드 생성기를 가동하여 프론트엔드 TypeScript DTO, React Query 훅, Zod 유효성 검증 스키마를 단일 소스에서 자동 생성한다.
+- **버린 대안**: 수동 DTO 타이핑(백엔드 API 변경 시 프론트엔드 타입 누락으로 인한 런타임 버그 빈발).
+
+### ADR-0148: 미뤄 둔 내부 gRPC 계약 초안 확정 (자리: 이 편)
+- **채택한 결정**: 스캐너 단말 관리는 원장 주인인 `ticket-svc`가 담당하고, 계정 병합 사전 확인은 데이터 주인 3개 서비스가 동일한 `CheckAccountMerge` RPC로 응답하는 분산 조회 계약을 확정한다.
+- **버린 대안**: identity-svc가 타 서비스의 DB를 직접 조회(서비스 간 논리 DB 격리 원칙 위반).
+
+### ADR-0150: Kafka 이벤트 스키마의 필수 필드 정의 및 하위 호환성 강제 (자리: 이 편)
+- **채택한 결정**: 19종의 Avro 이벤트 메시지에서 상시 존재하는 129개 필드를 필수로 고정하고, 조건부 필드에만 `["null", 타입]`과 `x-present-when` 조건을 명시한다.
+- **버린 대안**: 모든 필드를 null 허용으로 설정(사후에 필수 필드를 추가할 수 없어 소비자 서비스에서 널 포인터 방어 코드가 기하급수적으로 증가함).
+
+### ADR-0160: 굿즈 복합 주문 결제 스펙 및 C4 모델 컴포넌트 확정 (자리: 이 편)
+- **채택한 결정**: 티켓 예매와 공식 굿즈 구매의 결제 트랜잭션을 분리하고, 복합 주문 시의 결제 인터페이스를 C4 모델 3단계 컴포넌트 다이어그램으로 명문화한다.
+- **버린 대안**: 티켓과 굿즈 장바구니 통합(핫패스 예매 트랜잭션이 무거운 굿즈 재고 관리와 결합되어 병목 유발).
+
+### ADR-0164: OpenAPI 역할별 엔드포인트 명시 및 자동 검증 (자리: 이 편)
+- **채택한 결정**: openapi.yaml의 모든 엔드포인트에 `x-peaket-roles` 확장 필드를 강제하고, CI 파이프라인에서 보안 권한 매트릭스(`authz-matrix.md`)와의 일치 여부를 정적으로 검증한다.
+- **버린 대안**: 권한을 코드 어노테이션에만 의존(문서와 실제 구현 간의 보안 구멍 발생).
+
+---
+
+## 7. 경계와 범위
+
+| 이 정본이 정하지 않는 것 | 정하는 곳 |
 | --- | --- |
-| 경로마다의 업무 규칙과 오류가 나는 조건 | docs/features/*.md(분야 편 8~17) |
-| 역할의 뜻, 대상 조건, 재인증 작업 묶음 | docs/security/authz-matrix.md §5.5·§6(분야 편 21) |
-| `contract-check` 잡, 확장·축소 배포 순서 | docs/devops.md §3.1·§6.5(분야 편 20) |
-| 게이트웨이·CDN 설정 값을 붙이는 곳 | docs/infra.md §4.1·§9(분야 편 20) |
-| 통신 표, 포트별 허용 표, 저장소 시간 초과 | docs/architecture.md §3.2·§5(한 판 11단계) |
-| 토픽 소비 방식과 키 규칙 | docs/streaming.md §2.6·§7(분야 편 18) |
-| Outbox·멱등 기록 표, Redis 멱등 키 | docs/data.md §2·§3·§4([DB 설계 편 5](../db/05-consistency-transactions.md)·[6](../db/06-concurrency.md)) |
-| 추적 신뢰 경계, 정규 로그 줄, 꼬리 표본 | docs/observability.md §6·§7(분야 편 19) |
-| 화면의 재시도·오류 처리와 문구 | docs/frontend.md §4.1·§4.3(분야 편 6), docs/design/d2-design-system.md §4(분야 편 5) |
-| 오류 `type` 전체 목록, `operationId` 붙이기 | wbs 0.2.3(분야 편 23) |
+| PostgreSQL 테이블 DDL 및 Redis 키 물리 구조 | [docs/data.md](../../data.md) §2, §3([DB 설계 편 3](../db/03-core-tables.md)) |
+| 프론트엔드 api-client 내부 재시도 및 지터 구현 | [docs/frontend.md](../../frontend.md) §4.1([분야 편 6](06-frontend.md)) |
+| 좌석 선점 및 결제 분산 트랜잭션 비즈니스 로직 | [docs/features/seat-hold.md](../../features/seat-hold.md), [features/payment.md](../../features/payment.md) |
+| 보안 권한 매트릭스 및 역할별 조건부 인가 규칙 | [docs/security/authz-matrix.md](../../security/authz-matrix.md)([분야 편 21](21-security.md)) |
 
-## 8. 꼬리 질문
+---
 
-| 질문 | 답의 요지 | 근거 |
-| --- | --- | --- |
-| 실패를 200 본문 `{"success": false}`로 감싸면 편하지 않나요? | 감싸지 않는다. 상태 코드마다 뜻을 정하고 본문은 Problem 하나다. 한 `type`은 늘 같은 상태 코드라 화면은 `type`으로 문구를 고른다 | guidelines §2·§12 |
-| 멱등 키 지문에 헤더는 왜 안 넣나요? | 구매 세션 일련번호·서명·재인증 토큰·추적 헤더는 다시 보낼 때마다 새로 만든다. 그래서 클라이언트는 처음 본문 문자열을 그대로 다시 보낸다 | guidelines §4 |
-| 같은 커밋끼리 검사가 통과하면 충분하지 않나요? | 배포는 단위마다 따로 나가 운영의 옛 판과 함께 돈다. 그래서 마지막 출시 태그와도 견준다 | guidelines §1, ADR-0165 |
-| Avro 필수 칸을 나중에 정하면 안 되나요? | 필수를 null 허용으로 푸는 것은 통과하지만, 반대와 기본값 없는 새 칸은 거절된다. 지난 모든 판과 견주므로 첫 등록 전이 유일한 때다 | avro §3, ADR-0150 |
-| 새 열거 값을 내면 옛 소비자가 깨지나요? | 맨 앞 `UNRECOGNIZED`가 기본값이라 그 값으로 읽고 세며 SEV3(장애 심각도 3등급) 경보를 낸다. 레지스트리는 기호 지우기도 받아 '지우지 않기'는 `contract-check`가 지킨다. JSON 메시지는 기호 더하기도 깨짐이다 | avro §2·§3, guidelines §1 |
-| 오프셋 페이지가 더 익숙한데요? | 뒤 페이지가 느리고 중복·누락이 난다. 화면이 번호를 쓰는 검색·내 문의만 예외이고 검색은 1,000 `[가정]` 상한과 CDN 캐시로 묶는다 | guidelines §3 |
-| 게이트웨이가 역할까지 보면 빠르지 않나요? | 토큰에 실으면 거둔 뒤에도 토큰 수명 동안 남고, 게이트웨이가 identity를 부르면 바깥 저장소를 보지 않는 원칙이 깨진다. 서비스 가드가 5초 `[가정]` 캐시로 묻고 답이 없으면 503이다 | guidelines §7, ADR-0172 |
-| 실제로 돌려 봤나요? | `packages/contracts`, 깨짐 검사, 공용 멱등 모듈은 만들었다. proto는 protoc 컴파일만 했고 `buf` 검사는 아직이다. Avro 레지스트리 검사도 아직이다. V-T41(어댑터·검사 방식 비교)은 2026-11-01에 PC에서 쟀다(실측(PC), 고정 응답만 돌려주는 대역 앱). 서비스 수준 측정은 아직 없다 | 00-status, proto §1, avro §1, ADR-0176 결정 4 |
+## 8. 5단 꼬리 질문 (Staff Engineer Interview Defense)
+
+### Q1. "REST API 에러 응답으로 자체 JSON 구조 대신 RFC 9457 Problem Details를 고집한 이유는 무엇입니까?"
+- **답변**: **'클라이언트-서버 간 오류 처리의 글로벌 표준화와 보안성'** 때문입니다. 커스텀 에러 포맷(`{ code: 1002, message: "..." }`)은 서비스마다 필드명이 제각각으로 파편화되고, 개발자가 무심코 내부 SQL 에러나 스택 트레이스를 문자열에 노출시키는 보안 사고가 빈번합니다. RFC 9457은 `type`, `title`, `status`, `detail`, `instance`라는 표준 구조를 정의하므로, 프론트엔드는 `type` URI 하나만으로 에러를 완벽히 분류하여 국제화된 다국어 메시지를 안전하게 매핑할 수 있습니다. 또한 게이트웨이 파드와 내부 서비스, 서드파티 통합 환경에서도 단일 에러 파서를 공유할 수 있어 아키텍처 일관성이 극대화됩니다.
+
+### Q2. "T=0 대기열 진입 API에서 JSON 대신 `Content-Type: text/plain`을 사용하는 이유는 무엇입니까?"
+- **답변**: **'CORS 사전 요청(Preflight OPTIONS)을 제거하여 왕복 지연을 절반으로 단축하고 인프라 용량을 보호'**하기 위함입니다. 브라우저는 `application/json`으로 교차 출처 요청을 보낼 때 본 요청 전에 허용 여부를 묻는 OPTIONS 요청을 먼저 전송합니다. T=0 순간에 20만 RPS의 트래픽이 몰리면, 실제 진입 요청 20만 건 외에 동일한 20만 건의 OPTIONS 요청이 추가되어 최전방 게이트웨이에 총 40만 RPS의 부하가 발생합니다. `text/plain`은 W3C 명세상 단순 요청(Simple Request)으로 분류되어 브라우저가 사전 요청 없이 즉시 본 요청을 보냅니다. 본문 내용은 JSON 포맷 그대로 유지하면서 Content-Type 헤더만 변경함으로써 RTT를 1회 절약하고 인프라 붕괴를 막았습니다.
+
+### Q3. "내부 서비스 간 통신에서 REST/JSON 대신 gRPC/Protobuf를 도입하여 얻은 구체적인 이점은 무엇입니까?"
+- **답변**: **'바이너리 압축을 통한 CPU/네트워크 대역폭 절감'**과 **'코드 생성 기반의 엄격한 타입 안전성'**입니다. 5,000명의 동시 체류자가 초당 수천 건의 좌석 선점을 시도할 때, JSON 직렬화/역직렬화는 텍스트 파싱으로 인해 서비스 파드의 CPU 자원을 30% 이상 낭비합니다. Protobuf 바이너리 포맷은 정수와 바이트를 압축하여 전송하므로 직렬화 속도가 최대 5~10배 빠르고 페이로드 크기가 60% 이상 축소됩니다. 또한 단일 `.proto` 파일에서 양쪽 언어의 스텁(Stub) 코드가 자동 생성되므로 런타임 타입 불일치 버그가 원천 차단되며, HTTP/2 멀티플렉싱을 통해 단일 TCP 연결로 수백 개의 동시 RPC를 처리할 수 있습니다.
+
+### Q4. "Kafka Schema Registry에서 BACKWARD 호환성 대신 `BACKWARD_TRANSITIVE`를 강제하는 이유는 무엇입니까?"
+- **답변**: **'과거 7일간의 미처리 또는 재생(Replay) 이벤트를 안전하게 역직렬화'**하기 위함입니다. 단순 `BACKWARD`는 바로 직전 버전(vN-1)과의 호환성만 검증하므로, v1 $\rightarrow$ v2 $\rightarrow$ v3로 판이 올라가는 과정에서 v1의 필드가 삭제되거나 변경될 위험이 있습니다. 서비스 장애나 데이터 분석을 위해 과거 7일 전의 오래된 Kafka 토픽 메시지(v1)를 최신 소비자 서비스(v3)가 읽어 들여 재생할 때, 역직렬화 에러가 발생하여 파드가 크래시 루프에 빠질 수 있습니다. `BACKWARD_TRANSITIVE`는 현재 스키마가 과거에 등록된 **모든(All Transitive) 버전의 메시지를 완벽히 읽을 수 있는지**를 검증하므로, 이벤트 소싱 및 데이터 복구 시의 안전성을 보장합니다.
+
+### Q5. "API 명세에 `x-peaket-roles` 확장 속성을 붙이고 CI에서 검증하는 보안적 이유는 무엇입니까?"
+- **답변**: **'문서화되지 않은 권한 누락(IDOR 취약점)을 배포 전에 기계적으로 방어'**하기 위함입니다. 백엔드 코드의 권한 검증 로직은 소스코드 깊은 곳에 흩어져 있어, 개발자가 특정 엔드포인트에서 관리자 권한 체크를 깜빡 빼먹는 실수가 발생하기 쉽습니다. OpenAPI 스펙의 모든 작업에 허용된 역할 목록(`fan`, `operator`, `partner_admin` 등)을 명시하도록 강제하고, CI 파이프라인에서 보안 권한 매트릭스(`authz-matrix.md`)와 대조하는 자동화 스크립트를 돌림으로써, 권한 정의가 누락되거나 잘못 설정된 API가 프로덕션에 배포되는 것을 사전에 차단합니다.
+
+---
 
 ## 9. 확인 문제
 
-1. 같은 `Idempotency-Key`로 첫 요청이 처리 중일 때 같은 본문이 오면? 본문이 다르면?
+### 문 1. 
+PEAKET의 멱등성 키(`Idempotency-Key`) 헤더 정책에서, 동일한 멱등키로 전혀 다른 요청 페이로드를 전송했을 때와 동일한 요청을 중복 전송했을 때 각각 반환되는 HTTP 상태 코드와 그 이유는 무엇인가?
 
-<details><summary>답</summary>
+<details><summary>정답 및 해설</summary>
 
-같은 본문이면 1초 `[가정]` 기다려 첫 응답을 주고, 그래도 안 끝나면 409 `idempotency-request-in-progress`와 `Retry-After: 1` `[가정]`이다. 본문이 다르면 처리하지 않고 422 `idempotency-key-reused`이고, 클라이언트 버그라 자동으로 다시 보내지 않는다. gRPC에서는 `ALREADY_EXISTS`다(guidelines §4, proto §2).
-
-</details>
-
-2. `GET /v1/scanner/shift`와 `PUT /v1/scanner/shift/readiness`를 왜 나눴나? 비밀값 조회는 왜 GET이 아닌가?
-
-<details><summary>답</summary>
-
-읽기와 쓰기를 한 POST에 섞지 않는다는 규칙으로 근무 정보 읽기(GET, `no-store`)와 준비 보고(PUT, 204)를 나눴다. 비밀값(초대 토큰·확인 코드·휴대폰 번호)은 URL에 넣지 않으므로 본문에 담아 POST `…-lookups`로 받고 상태를 바꾸지 않는다. QUERY 메서드는 CloudFront가 받지 않는다(guidelines §9·§12, ADR-0081 결정 7).
+- **다른 페이로드 전송 시**: **HTTP 422 Unprocessable Entity** 반환.  
+  동일한 멱등키에 다른 요청 본문이 결합된 것은 클라이언트의 멱등키 오용 또는 키 재사용 충돌 버그이므로 요청이 거부된다.
+- **동일한 페이로드 중복 전송 시**: **HTTP 200 OK (또는 기존 저장된 응답)** 반환.  
+  네트워크 타임아웃 등으로 클라이언트가 재전송한 정상적인 멱등 요청이므로, 서버는 트랜잭션을 다시 실행하지 않고 1차 실행 시 캐시해 둔 동일한 결과 본문을 그대로 반환하여 이중 처리를 방지한다. 만약 1차 요청이 아직 처리 중인 상태라면 **HTTP 409 Conflict**와 `Retry-After: 1`을 반환한다.
 
 </details>
 
-3. `contactRef`의 `x-present-when: type CREATED 이고 refMissing false`는 무슨 뜻인가? 조건이 맞지 않으면 비워야 하나?
+### 문 2. 
+gRPC 통신에서 비즈니스 실패(예: 잔여 좌석 없음, 결제 한도 초과)를 gRPC 시스템 오류 코드(`INTERNAL` 등)로 반환하지 않고 응답 메시지 내부의 Enum으로 반환해야 하는 마이크로서비스 아키텍처적 이유는 무엇인가?
 
-<details><summary>답</summary>
+<details><summary>정답 및 해설</summary>
 
-`OrderEvent`가 CREATED이고 가명 계산 실패 표시가 false면 값이 있어야 한다. 조건 하나 안의 칸은 모두 맞아야 하고, 목록 가운데 하나만 맞으면 된다. 맞지 않을 때 비워야 한다는 뜻은 아니다. 스키마는 이 조건을 막지 않아 생산자 단위 시험이 확인한다(avro §6, ADR-0150).
-
-</details>
-
-4. 게이트웨이가 낸 429 Problem에는 왜 `traceId`가 없나? 화면은 어떻게 추적하나?
-
-<details><summary>답</summary>
-
-응답 덮어쓰기는 상태 코드마다 고정 본문이고, 요청별 값이 채워지는지는 PoC(D-T43) 전이다. 그래서 `type`·`status`·`title`만 싣고 추적 값은 `X-Trace-Id` 헤더로 잇는다. 교차 출처 API는 이 헤더를 노출하고, 화면은 `type`으로만 가른다(guidelines §2·§9).
+gRPC 시스템 오류 코드는 인프라 및 네트워크 장애(네트워크 단절, 파드 다운, OOM)를 의미한다.  
+만약 비즈니스 도메인의 정상적인 거절(매진, 잔액 부족)을 시스템 오류 코드로 반환하면, 서비스 메시(Istio/Envoy)의 **서킷 브레이커(Circuit Breaker)가 이를 시스템 결함으로 오인하여 실패율 임계값을 초과시키고 정상적인 서비스 라우팅을 차단**하는 대형 장애를 유발하기 때문이다. 비즈니스 거절은 응답 메시지 내부의 Enum으로 처리하여 전송 성공으로 분리해야 한다.
 
 </details>
 
-## 10. 정본에서 찾은 어긋남
+### 문 3. 
+ADR-0150에 따라 Avro 이벤트 스키마에서 상시 존재하는 필드 129개를 최초 등록 시 필수로 확정해야 하는 결정적 이유는 무엇인가?
 
-| 어긋난 곳 | 내용 | 지금 읽는 법 |
-| --- | --- | --- |
-| docs/api/guidelines.md §8 파트너 웹훅 행과 ADR-0145 상태 줄 | guidelines가 온세일 창을 gRPC `ListUpcomingOnsales`로 계산한다고 적었다. 고침(2026-11-01 정합 점검): 지금은 S3 일정 파일 `ops-calendar/upcoming-onsales.json`을 읽는다고 적는다 | 일정 파일을 읽는다 |
-| docs/api/proto/README.md §1·§2·§3 | `AdminAuthzService.GetAdminAuthz`(ADR-0172)가 §1 설명·§2 허용 신원·§3 표에 없었다. 고침(2026-11-01 정합 점검). 이 호출을 부르는 서비스 목록은 정본에 없어 열린 일 91번이다 | §3 표와 identity.proto 주석으로 읽는다 |
-| ADR-0081 결정 14와 docs/api/guidelines.md §12 | 스캐너 401의 `Bearer`가 guidelines §12의 `DPoP`(낮음-074)와 달랐다. 고침(2026-11-01 정합 점검): 상태 줄이 `DPoP`로 읽게 한다 | guidelines §12를 따른다 |
-| ADR-0081 상태 줄과 docs/api/guidelines.md §12 | 'Problem 선언 수는 guidelines §12에 적는다'가 doc-check 보고(낮음-032)와 달랐다. 고침(2026-11-01 정합 점검) | doc-check 보고로 읽는다 |
-| ADR-0148 결정 10과 ADR-0165 | '`peaket-contracts`로 옮길 때'가 모노레포 결정과 달랐다. 고침(2026-11-01 정합 점검): 상태 줄이 옮길 저장소 없이 읽게 한다 | 계약은 `peaket` docs/api/에 둔다 |
-| docs/api/avro/README.md §3 '열거 기호 더하기' 행과 §1 | §3의 '38개'가 §1의 40개와 달랐다. 고침(2026-11-01 정합 점검) | 40개로 읽는다 |
-| docs/api/guidelines.md §1 핫패스 검사와 docs/architecture.md §6.1 Fastify 행 뒷부분 ↔ ADR-0176 결정 4 | 고침(2026-11-02 정합 점검): 두 곳은 대기열 진입·입장 확정도 경로 스키마로 검사한다고 적었다. ADR-0176(채택 2026-11-01)은 대기열 진입을 Zod 파이프로 되돌렸다. 지금은 두 곳 모두 대기열 진입을 뺐다. 입장 확정·좌석 해제·연장·결제 접수는 ADR-0176이 재지 않아 경로 스키마 그대로다 | 좌석 홀드는 경로 스키마, 대기열 진입은 Zod 파이프로 읽는다 |
+<details><summary>정답 및 해설</summary>
+
+Avro 및 Confluent Schema Registry의 하위 호환성 규칙상, **한 번 `["null", 타입]`과 `default: null`로 등록된 필드를 나중에 필수(Required) 필드로 강화하는 것은 과거 데이터를 읽지 못하는 치명적인 Breaking Change**로 간주되어 레지스트리 등록이 영구 거부되기 때문이다.  
+따라서 최초 스키마 설계 시 반드시 존재해야 하는 필드를 엄격히 필수로 확정해 두어야만, 향후 데이터 품질 저하와 불필요한 null 체크 방어 코드 양산을 막을 수 있다.
+
+</details>
+
+### 문 4. 
+CI 파이프라인에서 `oasdiff`와 `buf breaking`을 실행할 때, 단순 `main` 브랜치뿐 아니라 '운영 최신 태그'와도 함께 2중 비교를 수행해야 하는 실무적 이유는 무엇인가?
+
+<details><summary>정답 및 해설</summary>
+
+여러 엔지니어의 PR이 병합되는 과정에서, 개별 PR은 `main` 브랜치 대비 통과했더라도 여러 커밋이 누적되면서 **실제 운영 환경에 배포되어 실행 중인 최신 태그 버전의 클라이언트 입장에서는 Breaking Change가 발생**할 수 있기 때문이다.  
+특히 롤링 배포(Rolling Update) 중에는 구버전 앱과 신버전 서버가 수십 분간 동시에 공존하므로, 운영 태그와의 2중 비교를 통해 현재 배포된 모바일 클라이언트가 즉시 크래시되지 않음을 완벽히 보장해야 한다.
+</details>

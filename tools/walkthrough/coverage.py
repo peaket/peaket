@@ -279,7 +279,7 @@ if WRITE:
     w = out.append
     w('# 덮개 표')
     w('')
-    w('- **기준 시점**: ADR-0182까지, 2026-11-03')
+    w('- **정본 매핑 기준**: ADR-0182 반영')
     w('- **이 문서가 하는 일**: 정본의 큰 절(`## ` 제목)과 ADR, FR·NFR·POL·SCR·CMP 하나하나가 해설서의 어느 편에서 설명되는지 적는다. 빈칸이 0이면 docs 전체를 덮었다고 본다([ADR-0177](../adr/0177-walkthrough-explain-in-interview.md) 결정 6).')
     w('- **만드는 법**: 손으로 쓰지 않고 스크립트로 센다. 해설서 파일에 그 정본 문서의 경로와 `§번호`가 함께 나오거나(예: `docs/features/payment.md §3`), 분야 편 §2 표에 그 문서의 `| §3 …` 행이 있으면 그 절을 덮었다고 본다. 번호 없는 절은 제목 글자로 찾는다. ID는 해설서에 그 번호가 나오면 덮었다고 본다. 정본이 바뀌면 `python -I -X utf8 tools/walkthrough/coverage.py --write`로 다시 만든다.')
     w('- **약어**: 한 판 = [한 판 문서](01-system-design.md), 분야 N = 분야 편 N, DB N = DB 설계 편 N, D-NN = 결정 카드, 현황 = [현황 한 장](00-status.md).')

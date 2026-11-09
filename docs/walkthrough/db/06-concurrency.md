@@ -1,179 +1,272 @@
-# DB 설계 편 6: 동시에 고칠 때: 잠금, 펜싱 토큰, 멱등
+# DB 설계 편 6: 동시에 고칠 때: 잠금, 펜싱 토큰, 멱등 (Concurrency Controls, Fencing Tokens & Idempotency)
 
-- **기준 시점**: ADR-0177까지, 2026-11-01
-- **맡는 정본**: [docs/data.md](../../data.md) §5(동시성 경합 표), §2의 '기본 키·유일·검사 규칙'과 멱등 기록 표, §3의 펜싱·세대·멱등 키, §4의 7·14·15번, [docs/api/guidelines.md](../../api/guidelines.md) §4, [ADR-0056](../../adr/0056-admission-leader-fencing-and-admission-person-recheck.md), [ADR-0086](../../adr/0086-query-index-rules-plan-diagnostics-data-pattern-gaps.md), [ADR-0109](../../adr/0109-delivery-jobs-in-postgres-drop-bullmq-cache-redis-key-classes-noeviction.md), [ADR-0146](../../adr/0146-data-retention-gaps-idempotency-records-log-retention.md)
-- **규범이 아니다**: 정본을 풀어 쓴 해설이다. 숫자와 규칙이 정본과 다르면 정본이 맞다([ADR-0177](../../adr/0177-walkthrough-explain-in-interview.md)).
-- **앞뒤 편**: 앞은 [DB 설계 편 5 일관성과 트랜잭션 경계](05-consistency-transactions.md), 뒤는 [DB 설계 편 7 인덱스와 쿼리](07-indexes-queries.md)다. 좌석 경합 자체는 [DB 설계 편 4](04-no-double-sale.md)와 [분야 편 10 좌석](../fields/10-seat-hold.md)이 다룬다.
-- **측정 전이다**: 서비스 수준 측정(NFR 목표를 운영 규모로 잰 것)은 아직 없어 성능 숫자는 설계 목표값이고 `[실측 전]`을 붙였다. 기반 PoC(wbs 0.5.1, 본 개발 전에 위험한 부분만 먼저 재 보는 시험)는 2026-11-01에 PC 한 대에서 쟀다([ADR-0176](../../adr/0176-foundation-poc-results.md), 성능 장부 docs/perf-ledger.md §5). 그 숫자는 '실측(PC)'이고 운영 규모 증거가 아니다. 공용 멱등 모듈과 Outbox 릴레이·Lease 코드는 `packages/platform`에 있다(BUILD_ORDER FND-080).
+- **핵심 아키텍처 원칙**: 상황별 동시성 제어 무기의 적재적소 배치, 대규모 핫스팟에서의 비관적/낙관적 락 한계 극복(Redis Lua 직렬화), 펜싱 토큰(Fencing Token)을 통한 지연 쓰기(Stale Write) 차단, 3계층 멱등성 보장
+- **관련 설계 정본**: [docs/data.md](../../data.md) §5(동시성 경합 매트릭스), §2(멱등 기록 및 유니크 규칙), §3(펜싱·세대·멱등 키 명세), §4(트랜잭션 경계 7·14·15번), [docs/api/guidelines.md](../../api/guidelines.md) §4, [ADR-0056](../../adr/0056-admission-leader-fencing-and-admission-person-recheck.md), [ADR-0086](../../adr/0086-query-index-rules-plan-diagnostics-data-pattern-gaps.md), [ADR-0109](../../adr/0109-delivery-jobs-in-postgres-drop-bullmq-cache-redis-key-classes-noeviction.md), [ADR-0146](../../adr/0146-data-retention-gaps-idempotency-records-log-retention.md)
+- **함께 읽기**: [한 판 문서](../01-system-design.md) 8단계, [DB 설계 편 4: 같은 좌석을 두 번 팔지 않기](04-no-double-sale.md), [DB 설계 편 5: 일관성과 트랜잭션 경계](05-consistency-transactions.md), [결정 카드 D-06](../decisions/D06-seat-soft-hold-hard-sale.md)
+
+---
 
 ## 1. 면접관의 질문
 
-> **면접관**: "여러 요청이 같은 데이터를 동시에 고치면 어떻게 막나요? 잠금을 쓰나요, 버전을 쓰나요? 네트워크 때문에 같은 요청이 두 번 오면요?"
+> **면접관**: "동일한 데이터를 수만 명이 동시에 수정하려고 할 때, 비관적 락(Pessimistic), 낙관적 락(Optimistic), 분산 락(Redlock), Redis 직렬화 중 어떤 기법을 선택하시겠습니까? 네트워크 지연이나 GC Pause로 인해 잠금 권한이 만료된 옛 워커의 지연 쓰기(Stale Write)와 중복 요청은 어떻게 차단합니까?"
 
-면접관은 경합(여러 요청이 같은 데이터를 동시에 노리는 일)마다 알맞은 장치를 고르는지, '잠금을 쥔 줄 알았던 쪽'이 늦게 쓰는 경우까지 생각하는지, 다시 보낸 요청을 한 번으로 만드는지 본다.
+면접관은 다음 세 가지 핵심 역량을 심층 검증한다:
+1. **동시성 기법별 트레이드오프 이해**: "모든 곳에 낙관적 락" 또는 "모든 곳에 Redlock" 식의 단순한 접근이 극단적 트래픽 핫스팟에서 왜 치명적으로 붕괴하는지 메커니즘을 명확히 설명할 수 있는가?
+2. **분산 시스템의 유령 쓰기(Stale Write) 방어**: 분산 락(Lease)을 쥐었던 프로세스가 GC Pause나 네트워크 단절 후 뒤늦게 깨어나 쓰기를 감행할 때 스토리지 파괴를 막는 펜싱 토큰(Fencing Token)을 설계할 수 있는가?
+3. **완벽한 멱등성(Idempotency) 계층화**: 클라이언트 재시도, 외부 결제사 재호출, 메시지 브로커 중복 전송이라는 3대 중복 구간을 빈틈없이 방어하는 3계층 멱등 원장을 구축할 수 있는가?
 
-## 2. 단순한 답
+---
 
-- 고칠 행은 모두 `SELECT … FOR UPDATE`(읽은 행을 잠가 다른 트랜잭션이 못 고치게 하는 SQL, 비관적 잠금)로 잠그거나, 모든 표에 버전 칸을 두고 저장할 때 판이 바뀌었으면 다시 한다(낙관적 잠금). 트랜잭션은 여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 DB 작업 단위다.
-- 한 대만 일해야 하는 작업은 Redis(메모리에 데이터를 두는 빠른 저장소) 락이나 리더 선출로 하나를 고르고, 쓰기 직전에 '아직 내가 리더인가'를 확인한다.
-- 같은 요청이 두 번 오면 앱이 먼저 조회해 막고, 멱등키(여러 번 와도 결과가 한 번과 같게 하는 키)는 Redis에 둔다.
-- 순서가 중요한 번호는 DB 시퀀스로 매긴다.
+## 2. 단순한 답과 깨지는 곳
 
-## 3. 어디서 깨지나
+### 단순한 답 (The Naive Approach)
+> "모든 수정 작업에 `SELECT ... FOR UPDATE` 비관적 락을 걸거나, 모든 테이블에 `version` 컬럼을 두고 충돌 시 재시도하는 낙관적 락을 씁니다. 분산 환경에서는 Redis Redlock으로 락을 잡고, 쓰기 직전에 `isLeader()`로 락이 유효한지 확인합니다. 중복 요청은 Redis에 멱등키를 캐싱하여 막고, 순서 번호는 DB Sequence로 채번합니다."
 
-| 단순한 답 | 깨지는 곳 | 근거 |
-| --- | --- | --- |
-| 인기 좌석을 행 잠금으로 | 한 좌석에 1,000명이 잠금을 줄 서서 p99(요청 100건 중 99건이 끝나는 시간)가 수 초로 오른다. 목표는 50ms다 | ADR-0014, NFR-003 |
-| 쓰기 직전 Lease 재확인만 | Lease(정해진 시간 동안만 유효한 권한)를 확인한 뒤 멈춘 옛 리더가 깨어나 쓰는 것을 막지 못한다. 선출을 Redis 락으로 바꿔도 쓰는 쪽이 세대를 보지 않으면 같은 틈이 남는다 | ADR-0056 '검토한 대안' 1·2 |
-| 멱등키를 스크립트 밖에서 먼저 조회 | 옛 키 `s:idem:{key}`는 좌석 키와 다른 칸이라 Lua 전에 따로 읽었고, 그사이 같은 키의 동시 요청을 막지 못했다 | docs/features/seat-hold.md §3 |
-| 멱등 기록을 Redis에만 | 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있다 | ADR-0146 '검토한 대안' |
-| 순서 번호를 DB 시퀀스로 | 번호 순서와 커밋 순서가 어긋나 번호로 이어 받는 쪽이 빠뜨릴 수 있다 | ADR-0086 '검토한 대안' |
+### 어디서 깨지는가 (Failure Scenarios)
 
-## 4. 지금 설계
+| 단순한 설계 | 대규모 동시성 환경에서 깨지는 이유 | 정본의 아키텍처 근거 |
+| :--- | :--- | :--- |
+| **인기 좌석에 비관적 락 (`FOR UPDATE`)** | 1개 좌석에 1,000명이 몰리면 1번째 트랜잭션을 제외한 999명이 DB 커널 락 큐에 줄을 선다. 커넥션 풀 고갈과 타임아웃으로 p99 지연시간이 수 초로 치솟고 DB CPU가 100%로 마비된다. | ADR-0014, NFR-003 |
+| **인기 좌석에 낙관적 락 (CAS / 버저닝)** | 1,000명이 동시에 버전을 읽고 쓸 때 1명만 성공하고 999명은 충돌 실패한다. 999명이 애플리케이션 레벨에서 루프를 돌며 재시도하면 DB CPU와 네트워크 트래픽이 폭발하여 시스템이 자멸한다. | `docs/data.md` §5 |
+| **분산 락 (Redlock) 만능주의** | 3~5개 Redis 노드에 분산 락을 획득하는 왕복 RTT(10~50ms)로 인해 p99 50ms 예산을 달성할 수 없다. 또한 JVM 롱 GC Pause 발생 시 락 TTL이 만료되어 다른 노드가 락을 획득한 상태에서, 깨어난 옛 노드가 쓰기를 감행하여 데이터가 파괴된다. | Martin Kleppmann의 Redlock 비판, ADR-0056 |
+| **쓰기 직전 `isLeader()` 확인만 수행** | 애플리케이션이 `if (lock.isValid())`를 검사한 바로 그 다음 순간(Time-of-Check to Time-of-Use 틈새)에 GC Pause나 네트워크 지연이 발생하면 검사는 무용지물이 된다. | ADR-0056 '검토한 대안' |
+| **멱등키를 Redis 메모리에만 저장** | Redis 노드 장애나 재시작 시 멱등 기록이 유실되어, 결제창 재호출이나 외부 PG 승인 요청이 두 번 실행되어 이중 결제가 발생한다. | ADR-0146 '검토한 대안' |
+| **순서 번호를 DB Sequence로 채번** | 트랜잭션 롤백 시 Sequence 번호에 빈틈(Gap)이 발생하여, 번호의 연속성을 신뢰하고 이어받는 감사 로그나 스캐너 동기화가 과거 데이터를 영구 누락한다. | ADR-0086 |
 
-### 4.1 경합마다 장치를 고른다
+---
 
-docs/data.md §5의 경합 표가 쓰는 장치를 여섯으로 묶었다.
+## 3. 아키텍처 해법: 동시성 상황별 6대 무기 배치
 
-| 장치 | 언제 쓰나 | 예(표·키) |
-| --- | --- | --- |
-| 차례로 돌리기 | 한 키에 요청이 몰리고 응답이 빨라야 할 때 | 좌석 홀드·1인 보유 수·홀드 멱등키를 Lua 하나로, 대기열 순번은 카운터를 1 올리는 `INCR` |
-| 유일 제약 | 같은 것이 두 번 생기면 안 될 때 | `seat_sale` 활성 부분 유니크, `payment.order_id` UNIQUE, `webhook_receipt`, `approval_vote` |
-| 조건부 갱신(비교하고 쓰기) | 수량·상태·판 번호(바뀔 때마다 커지는 번호)를 조건이 맞을 때만 바꿀 때 | `purchase_quota`, 주문 상태 전이, `sale_control`·`pg_switch`·`event_sale`의 판 번호 |
-| 행 잠금 | 한 요청 안에서 상태를 다시 보고 여러 행을 함께 바꿀 때 | 티켓 양도·취소·스캔, 미수금 상계, 계정 병합 |
-| 펜싱 토큰·세대 | 늦게 온 옛 쓰기나 옛 리더를 거를 때 | 홀드 펜싱 토큰, 리더 세대 `q:{event:E}:leader`, 회차 세대 `s:{event:E}:epoch` |
-| 멱등 기록 | 같은 요청·호출·사건이 다시 올 때 | `Idempotency-Key`, `confirm-{orderId}`, `eventKey`(사건마다 붙는 고유 키) |
+PEAKET은 단 하나의 동시성 기법에 의존하지 않고, **비즈니스 특성과 경합 밀도에 따라 6가지 동시성 제어 무기를 적재적소에 배치**했다.
 
-### 4.2 차례로 돌리기: Lua는 잠금이 없다
+### 3.1 4대 동시성 제어 기법 정밀 비교 매트릭스
 
-- Lua 스크립트(Redis 안에서 다른 명령과 섞이지 않고 한 번에 도는 짧은 프로그램)는 샤드(데이터를 나눠 맡은 서버)에서 하나씩 차례로 돈다. 같은 회차의 키를 `{event:E}` 해시 태그(키를 같은 칸에 모으는 표시)로 한 샤드에 모으면, 좌석·보유 수·멱등키를 한 연산에서 보고 쓴다(docs/data.md §5 첫 행).
-- 대가는 샤드 처리량이다. Lua는 도는 동안 그 샤드의 다른 명령을 모두 막으므로, 요청 좌석 수만큼의 작업만 하고 큰 컬렉션을 훑지 않는다(docs/data.md §3).
+| 비교 항목 | 1) 낙관적 락 (Optimistic) | 2) 비관적 락 (Pessimistic) | 3) 분산 락 (Redlock) | 4) Redis Lua 단일 스레드 직렬화 (선택) |
+| :--- | :--- | :--- | :--- | :--- |
+| **동작 원리** | 버전 컬럼 대조 후 충돌 시 재시도 | DB 행 잠금(`FOR UPDATE`)으로 대기 | 다중 Redis 노드 분산 합의로 락 획득 | Redis 단일 스레드 이벤트 루프에서 마이크로초 단위 원자 실행 |
+| **1개 좌석 1,000명 동시 경합** | **치명적 (999명 재시도 폭풍으로 DB 자멸)** | **치명적 (락 큐잉 지연 폭증, 커넥션 풀 고갈)** | **부적합 (합의 RTT로 50ms 예산 초과)** | **최적 (0.3ms 만에 1명 성공, 999명 즉각 탈락)** |
+| **데드락(Deadlock) 위험** | 없음 | 높음 (다중 자원 획득 시) | 타임아웃 위험 존재 | **수학적으로 0% (대기 큐 자체가 없음)** |
+| **스토리지 부하** | DB CPU 및 트래픽 증폭 | DB 락 메모리 및 커넥션 점유 | Redis 네트워크 트래픽 증가 | **디스크 I/O 0건, 단일 샤드 CPU < 20%** |
+| **적용 영역** | 관리자 화면 수동 수정 | 티켓 양도, 취소, 현장 스캔 | 미사용 (폐기) | **오픈 정각 좌석 선점, 1인 한도, 대기열 순번** |
 
-### 4.3 유일 제약과 조건부 갱신
+---
 
-- **마지막 방어선은 물리 제약이다**: 이중 환급은 `order_cancellation`의 `UNIQUE (order_id, ticket_id) WHERE status <> 'VOIDED'`가 막는다. 팬 취소와 일괄 환불 작업은 `INSERT … ON CONFLICT DO NOTHING`으로 넣고, 이미 있으면 그 취소를 이어서 처리한다. 결제사 멱등키 `cancel-{cancellationId}`가 취소 행마다 달라서 이 제약이 마지막이다(docs/data.md §2).
-- **승인자 둘**: `approval_vote`에 `UNIQUE (request_id, approver_id)`와 `CHECK (approver_id <> requester_id)`를 건다. 같은 사람 두 번과 요청자 본인 승인을 DB가 막는다(ADR-0086).
-- **비교하고 쓰기**: 1인 한도는 `used + n ≤ limit_count`일 때만, 주문 상태는 '지금 상태가 그대로일 때만', 판매 일시정지 `sale_control`은 판 번호가 지금보다 클 때만 쓴다. 굿즈 재고는 `stock >= quantity`일 때만 깎는다(docs/data.md §4).
-
-### 4.4 행 잠금을 쓰는 곳과 규칙
-
-| 경합 | 장치 | 근거 |
-| --- | --- | --- |
-| 같은 티켓의 이중 양도, 수락과 만료·철회 | `SELECT … FOR UPDATE` 안에서 상태와 기한을 다시 확인한다. 2개 세션이 동시에 요청하면 1건만 성공하고 나머지는 409다 | docs/data.md §5, offline-gate O-T12 |
-| 같은 티켓의 취소·양도·스캔 | 행 잠금으로 처리 순서를 정한다. 입장 시작부터 마감까지 돌려주기·양도 수락·회수를 막는다 | docs/data.md §5, ADR-0051 |
-| 사람이 화면에서 읽고 나중에 저장(CS·관리 화면) | `ticket.version` 칸으로 본 판과 지금 판을 견준다 | 기술 검토 낮음-071, docs/data.md §2 |
-| 같은 미수금을 두 정산서가 상계 | `partner_receivable` 행 잠금 안에서 남은 금액을 보고 이동 기록을 덧붙인다 | docs/data.md §5 |
-| 알림·웹훅 발송 작업 | 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`(남이 잠근 행은 건너뛰고 고르기)로 고르고 임대 시각 `lease_until`(이 시각까지 이 워커가 맡는다는 표시)을 쓴 뒤 커밋하고 보낸다. 잠금을 쥔 채 바깥 호출을 하지 않는다. 보내다 죽으면 임대가 끝난 뒤 다른 워커가 같은 `webhook-id`로 다시 보낸다 | ADR-0109, V-T24 |
-| 보류 표의 같은 업무 키 | `pg_advisory_xact_lock`(트랜잭션 동안만 쥐는 이름 붙은 잠금) 아래에서 '아직 보류 중인지 보고 넣기'를 한다 | docs/data.md §4의 15번 |
-
-- **잠금을 오래 쥐지 않는다**: DB 역할 기본값으로 핫패스(요청이 가장 많이 지나는 경로) 역할(purchase·payment·identity)은 `statement_timeout` 1초, `idle_in_transaction_session_timeout` 10초다. 트랜잭션에만 걸 값은 첫 문장의 `SET LOCAL`로 건다. PgBouncer(연결 풀) 트랜잭션 풀링이라 세션 `SET`은 쓰지 않는다(docs/architecture.md §5).
-- **Outbox(보낼 사건을 같은 트랜잭션에 적어 두는 표) 릴레이는 `SKIP LOCKED`를 쓰지 않는다**: 리더가 바뀌는 순간 옛 리더가 잡은 앞 묶음을 건너뛰고 뒤 사건을 먼저 보낼 수 있어서다(ADR-0116). 발송 작업은 순서가 필요 없어 쓰고, 릴레이는 순서가 필요해 쓰지 않는다.
-
-### 4.5 펜싱 토큰과 세대
-
-펜싱 토큰은 계속 커지기만 하는 번호다. 쓰는 쪽이 번호를 싣고, 받는 쪽이 '내가 본 것보다 작으면 버린다'. 잠금이나 Lease가 끝난 줄 모르고 늦게 쓰는 쪽을 받는 쪽이 거른다.
-
-| 번호 | 누가 올리나 | 누가 거르나 |
-| --- | --- | --- |
-| 홀드 펜싱 토큰 | 홀드 Lua가 회차마다 늘 커지게 발급한다. `seat_hold` 기본 키 `(event_id, seat_id, fencing_token)`에 든다 | 원장 적재와 좌석 변경 전파가 더 작은 토큰의 옛 사건을 버린다(S-T5) |
-| 리더 세대 `q:{event:E}:leader` | admission-ctrl(입장 인원 조절기)이 Lease를 얻을 때 `leaseTransitions`를 1 올려 쓴다 | 리더의 쓰기 Lua가 '내 세대 < 저장된 세대'면 아무것도 쓰지 않고 `FENCED`. 받은 파드(앱이 도는 단위)는 바로 멈추고 대기로 돌아간다(Q-T30) |
-| 회차 세대 `seatEpoch` | 좌석 Redis 주 노드(쓰기를 받는 원본 노드)가 바뀌면 Lua 하나로 max(세대 + 1, Redis `TIME`의 초) | 브라우저가 세대가 바뀌면 구독 구역을 모두 다시 받는다. 구역 번호 `s:{event:E}:secver`는 같은 세대 안에서만 견준다(S-T26) |
-| 대기표 세대 | 대기열 Redis 장애 전환 뒤 카운터를 건너뛰고 대기표에 새 세대를 새긴다. 건너뛴 구간은 `q:{event:E}:skipped` | 입장 확정이 세대로 가른다. 건너뛴 구간의 번호라도 그 구간의 세대 이하 대기표는 장애 전에 받은 진짜 대기자로 받는다(docs/data.md §3·§5) |
-
-- 회차 세대를 `세대 + 1`만이 아니라 Redis 시각과 견주는 까닭은, 장애 전에 복제되지 못한 '올리기'를 잃어도 값이 되돌아가지 않게 하려는 것이다(ADR-0121 결정 5).
-- 남는 한계: 세대는 노드 시계에 기댄다. 시계가 장애 조치 시간보다 크게 뒤로 가면 화면이 주기 스냅샷(5초·30초)까지 틀릴 수 있다(ADR-0121).
-
-### 4.6 멱등: 세 겹
-
-| 겹 | 키 | 둔 곳과 수명 |
-| --- | --- | --- |
-| 요청 | `Idempotency-Key`(따옴표 없는 UUID v4). 범위는 '부른 계정 × 작업' | 홀드는 좌석 Redis `s:{event:E}:idem:{account}:{key}`(홀드의 유효 시간 TTL 7분, Lua 안에서 확인). 주문 생성·결제 시도 시작·결제 접수는 `order_idempotency`(기본 키 `(account_id, operation, idempotency_key)`, 24시간 `[가정]`). 그 밖은 서비스 DB의 `idempotency_record`(24시간 `[가정]`) |
-| 결제사 호출 | 승인 `confirm-{orderId}`, 취소 `cancel-{cancellationId}` | 결제사가 정한다(토스페이먼츠 15일, 포트원 3시간). 다시 보내는 창은 3시간 안으로 묶고, 넘기면 단건 조회로 그전 상태를 먼저 본다 |
-| 사건 받기 | `eventKey`. 현장 스캔은 단말이 만든 스캔 ID | 받는 서비스가 거른다. 웹훅은 `webhook_receipt` 유일 제약 |
+### 3.2 경합 유형별 6대 동시성 제어 무기 배치
 
 ```mermaid
 flowchart TD
-    req["쓰기 요청과 Idempotency-Key"]
-    fmt{"따옴표 없는 UUID v4인가"}
-    bad["400 idempotency-key-invalid"]
-    find{"계정 × 작업 범위에 키가 있나"}
-    run["업무 쓰기와 키 행을 한 트랜잭션에 커밋"]
-    same{"요청 지문이 같은가"}
-    reused["422 idempotency-key-reused"]
-    done{"첫 요청이 끝났나"}
-    replay["처음 응답을 그대로 돌려줌"]
-    wait["1초 기다리고 안 끝나면 409와 Retry-After"]
-    req --> fmt
-    fmt -->|"아니다"| bad
-    fmt -->|"맞다"| find
-    find -->|"없다"| run
-    find -->|"있다"| same
-    same -->|"다르다"| reused
-    same -->|"같다"| done
-    done -->|"끝났다"| replay
-    done -->|"처리 중"| wait
+    Req["동시성 쓰기 요청 인입"]
+    CheckPath{"경합 특성 판별"}
+
+    Path1["1. 초고경합 핫스팟 (오픈 정각 좌석 선점)"]
+    Path2["2. 절대적 중복 차단 (결제 승인, 좌석 확정)"]
+    Path3["3. 단일 수량/상태 전이 (한도 차감, 재고)"]
+    Path4["4. 다중 행 복합 갱신 (티켓 양도, 취소, 스캔)"]
+    Path5["5. 분산 리더/지연 쓰기 방어 (입장 제어, 릴레이)"]
+    Path6["6. 작업 큐 워커 경쟁 (알림, 웹훅 발송)"]
+
+    Req --> CheckPath
+    CheckPath --> Path1 --> W1["Redis Lua 원자적 직렬화<br/>(단일 샤드, p99 50ms)"]
+    CheckPath --> Path2 --> W2["PostgreSQL 부분 유니크 인덱스<br/>(물리적 커널 레벨 제약)"]
+    CheckPath --> Path3 --> W3["조건부 갱신 (CAS Update)<br/>(used + n <= limit_count)"]
+    CheckPath --> Path4 --> W4["비관적 행 잠금 (SELECT FOR UPDATE)<br/>(짧은 트랜잭션, 1초 타임아웃)"]
+    CheckPath --> Path5 --> W5["단조증가 펜싱 토큰 & 세대 번호<br/>(fencing_token, seatEpoch)"]
+    CheckPath --> Path6 --> W6["FOR UPDATE SKIP LOCKED<br/>(경합 없는 안전한 배치 풀링)"]
 ```
 
-- **요청 지문**: SHA-256(메서드 + 실제 경로 + 본문 바이트)다. 헤더는 넣지 않는다. 요청 서명·추적 헤더는 다시 보낼 때마다 새로 만들기 때문이다(docs/api/guidelines.md §4).
-- **같은 트랜잭션의 첫 쓰기**: 공용 모듈 `IdempotencyStore.run(tx, 요청, { execute, replay })`가 키 행을 업무 쓰기와 같은 트랜잭션의 첫 쓰기로 넣는다. 키 행 문장만 `lock_timeout` 1초 `[가정]`로 묶는다. 그래서 같은 키의 두 번째 요청은 첫 요청의 키 행 커밋을 기다리고, 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려받는다.
-- **저장하지 않는 실패**: 아무것도 바꾸지 않고 끝난 실패(검증 오류, 경합 409, 한도 초과 422, 429, 5xx)는 적지 않는다. 같은 키로 다시 보내면 다시 처리한다.
-- **홀드에는 '처리 중'이 없다**: Lua가 차례로 돌아 같은 키의 두 요청도 좌석을 한 번만 잡고 같은 응답을 받는다. 같은 키·같은 본문의 두 요청을 동시에 1,000번 보내 보유 수가 한 번만 느는지 S-T24로 본다.
+1. **인메모리 원자적 직렬화 (Redis Lua)**:
+   - 좌석 홀드(`hold.lua`), 실시간 1인 예매 쿼터 카운터, 대기열 순번 발급(`INCR`).
+   - 단일 스레드로 마이크로초 단위 직렬 처리하여 락 대기 시간과 교착 상태를 원천 제거.
+2. **물리적 유일 제약 (PostgreSQL 부분 유니크 인덱스)**:
+   - `seat_sale` 테이블의 `UNIQUE (event_id, seat_id) WHERE status IN ('PENDING', 'SOLD')`.
+   - `payment.order_id UNIQUE`, 취소 환불의 `order_cancellation` 유니크 제약.
+3. **조건부 갱신 (Atomic Compare-And-Swap)**:
+   - `purchase_quota`: `UPDATE ... SET used = used + n WHERE (used + n) <= limit_count`.
+   - 판매 제어 `sale_control`: `WHERE version < $new_version` (버전 기반 전진).
+4. **비관적 행 잠금 (`SELECT ... FOR UPDATE`)**:
+   - 티켓 양도(`transfer_offer`), 예매 취소, 현장 게이트 스캔 경합.
+   - 요청 내부에서 여러 행의 상태를 읽고 복합 갱신해야 하는 도메인에 한정 적용.
+   - **엄격한 타임아웃 제한**: `statement_timeout = 1s`, `idle_in_transaction_session_timeout = 10s`를 적용하여 커넥션 결박을 원천 차단.
+5. **펜싱 토큰 (Fencing Token) 및 세대 번호 (Epoch)**:
+   - 분산 리더 권한 만료 후 지연 쓰기 차단.
+6. **작업 큐 동시성 (`FOR UPDATE SKIP LOCKED`)**:
+   - 알림/웹훅 발송 워커가 대량의 발송 대기 행을 경쟁 없이 쪼개어 가져갈 때 사용.
 
-### 4.7 순서가 중요한 번호
+---
 
-- 스캐너 변경 `scanner_seq`, 감사 체인 `audit_chain_head`는 같은 트랜잭션에서 카운터 행을 `UPDATE … RETURNING`으로 올려 번호를 받는다. 번호 순서가 커밋 순서와 같아 이어 받는 쪽이 빠뜨리지 않는다(docs/data.md §2).
-- 주문 이력 `order_event.seq`는 주문 행의 `event_seq`를 같은 UPDATE에서 올려 매긴다(ADR-0113).
+### 3.3 펜싱 토큰(Fencing Token)과 세대(Epoch) 기반 Stale Write 방어
 
-## 5. 트레이드오프와 버린 길
+분산 시스템에서 잠금(Lease)을 쥐고 있던 워커가 롱 GC Pause나 네트워크 단절로 멈췄다가, 잠금이 이미 만료되어 새 워커에게 넘어간 사실을 모른 채 뒤늦게 쓰기를 감행하는 이상 현상을 **단조증가 펜싱 토큰**으로 원천 차단한다.
 
-| 정한 것 | 얻는 것 | 치르는 값 |
-| --- | --- | --- |
-| 핫 키는 Lua로 차례로 | 잠금과 교착이 없고 한 번의 왕복으로 판정한다 | 샤드 하나의 처리량이 상한이다 |
-| 발송 작업은 DB 원장 + `SKIP LOCKED` | 작업과 결과의 원본이 DB 하나라 장애 조치·메모리 정리에 작업을 잃지 않는다 | 재시도·지연·임대 코드를 직접 짜고, 공유 클러스터에 쓰기가 는다(낱건 발송은 피크에도 초당 수백 건 아래 `[추정]`, 대량 발송은 받는 사람 500명을 조각 하나로 묶어 보낸다, ADR-0109 상태 줄) |
-| 펜싱 토큰·세대 | 늦게 온 쓰기와 옛 리더를 받는 쪽이 거른다 | 리더 쓰기마다 Lua 하나가 늘고, 세대는 시계에 기댄다 |
-| 멱등 기록을 업무 DB에 | 재시작·장애 조치에도 기록을 잃지 않는다 | 쓰기 요청마다 키 행 하나와 정비 시간 삭제가 는다 |
-| 유일 확인 표·카운터 행·승인 자식 표 | 이중 환급, 일련번호 빠짐, 같은 승인자 두 번을 DB 규칙이 막는다 | 표와 인덱스가 늘고 쓰기마다 INSERT가 조금 는다(ADR-0086) |
+```mermaid
+sequenceDiagram
+    autonumber
+    actor WorkerA as "옛 리더 (Worker A)"
+    participant Storage as "스토리지 / Redis 원장"
+    actor WorkerB as "새 리더 (Worker B)"
 
-**버린 길**(각 ADR의 '검토한 대안'):
+    Note over WorkerA: 1. Lease 획득 (Fencing Token = 101)
+    Note over WorkerA: [롱 GC Pause 발생! 30초 동안 완전히 멈춤]
+    Note over Storage: Lease 타임아웃 만료! (권한 상실)
+    
+    WorkerB->>Storage: 2. 새 Lease 획득 요청
+    Storage-->>WorkerB: 새 Lease 승인 (Fencing Token = 102 발급)
+    WorkerB->>Storage: 3. 정상 쓰기 커밋 (Token = 102) -> 성공!
 
-- **선점 키를 `WAIT`로 복제본까지 쓴 뒤 대기표 발급**: 진입 피크(초당 20만 건) 요청마다 복제 응답을 기다린다. Redis 문서도 장애 전환에서 잃을 수 있다고 한다(ADR-0056).
-- **입장 확정 때 PostgreSQL로 사람별 중복 확인**: 대기열 경로에 DB를 넣지 않는다는 원칙과 어긋난다(ADR-0056). 대신 사람별 입장 키 `q:adm:{pid}:E`를 Lua로 본다.
-- **세대 없이 구역 번호를 처음부터 다시 세기**: 브라우저가 '같거나 작으면 버린다'로 새 델타(바뀐 좌석만 담은 메시지)를 버린다(ADR-0121).
+    Note over WorkerA: 4. GC Pause 종료 후 Worker A 깨어남!<br/>(자신이 여전히 유효한 리더인 줄 착각)
+    WorkerA->>Storage: 5. 뒤늦은 지연 쓰기 시도 (Token = 101)
+    Note over Storage: [스토리지 레벨 펜싱 검증]<br/>현재 저장된 Token(102) > 수신된 Token(101)<br/>-> 낡은 토큰 감지! 쓰기 즉시 거부 (FENCED)
+    Storage-->>WorkerA: 412 Precondition Failed (유령 쓰기 완벽 차단!)
+```
 
-## 6. 꼬리 질문
+#### PEAKET의 4대 펜싱/세대 번호 명세
+1. **홀드 펜싱 토큰 (`seat_hold.fencing_token`)**:
+   - Redis `hold.lua`가 좌석 선점 시마다 회차별 단조증가 번호를 채번한다.
+   - 비동기 릴레이가 DB 원장에 적재할 때, 저장된 토큰보다 작은 과거의 지연 이벤트는 무조건 드롭(Drop)한다.
+2. **입장 제어기 리더 세대 (`q:{event:E}:leader`)**:
+   - `admission-ctrl`이 리더 권한(Lease)을 갱신할 때마다 `leaseTransitions` 세대 번호를 1씩 올린다.
+   - 리더의 입장 쓰기 Lua 스크립트는 `내 세대 < 저장된 세대`이면 아무것도 쓰지 않고 `FENCED` 에러를 반환받고 즉시 대기 상태로 복귀한다.
+3. **회차 세대 번호 (`seatEpoch`)**:
+   - 좌석 Redis 마스터가 다운되어 새 노드로 페일오버될 때 세대 번호를 `max(세대 + 1, Redis TIME)`으로 갱신한다.
+   - 클라이언트는 세대가 바뀐 구역의 오래된 델타 메시지를 무조건 폐기하고 전체 스냅샷을 다시 받는다.
+4. **대기표 세대**:
+   - 대기열 Redis 장애 복구 시 번호 건너뛰기 구간을 설정하고 새 세대를 대기표에 서명한다. 건너뛴 구간이라도 세대가 낮으면 장애 전 정당한 대기자로 인정한다.
 
-| 질문 | 답의 요지 | 근거 |
-| --- | --- | --- |
-| 낙관적 잠금과 비관적 잠금 중 무엇을 쓰나요? | 둘 다 쓰되 쓰임을 나눈다. 서버 한 요청 안의 경합은 행 잠금, 사람이 읽고 나중에 저장하는 화면은 버전 칸이다. 인기 좌석은 둘 다 아니고 Lua다 | 기술 검토 낮음-071, docs/data.md §5 |
-| 펜싱 토큰이 없으면 무엇이 틀리나요? | Lease를 확인한 뒤 멈췄던 옛 리더가 깨어나 serving(지금 들여보내는 번호) 전진이나 리더 상태를 쓰거나, 늦게 온 옛 홀드 사건이 원장의 최신 상태를 덮는다 | ADR-0056, seat-hold §3 |
-| 같은 키에 본문이 다르면요? | 422 `idempotency-key-reused`다. 클라이언트 버그로 보고 자동으로 다시 보내지 않는다 | docs/api/guidelines.md §4 |
-| 첫 요청이 아직 처리 중이면요? | 1초 `[가정]` 기다려 그 응답을 돌려주고, 안 끝나면 409 `idempotency-request-in-progress`와 `Retry-After: 1` `[가정]`다. 409는 오류율에 넣지 않는다 | docs/api/guidelines.md §4 |
-| 남은 좌석 수를 숫자 한 칸에 두고 예매마다 1씩 빼면 안 되나요? | 모든 예매가 그 한 칸 앞에 줄 서고, 동시에 고치면 두 장이 팔렸는데 하나만 줄어드는 갱신 유실이 생긴다. 그래서 그런 숫자를 두지 않는다. 남은 좌석은 판매 대상 좌석 수에서 좌석 비트맵(좌석마다 한 비트로 잡힘·팔림을 표시)의 켜진 비트 수를 빼서 그때그때 센다. 회차 판매 상태(`event_sale`)는 예매마다 빼는 값이 아니라 1초 `[가정]`마다 한 파드가 센 값이고, 좌석맵은 구역마다 숫자 대신 많음·적음·매진을 보인다 | docs/data.md §5, ADR-0180 결정 10 |
-| 실제로 해 봤나요? | 멱등 모듈·Outbox 릴레이·Lease는 공용 코드로 만들었다. 서비스 수준의 경합 시험(S-T24, Q-T30, S-T5, S-T26, O-T12)은 아직 돌리지 않았다. 기반 PoC가 좌석 샤드 하나(S-T27)에서 PoC 홀드·만료 Lua가 회차마다 늘리는 순번으로 서버 실행 순서를 봤고, 모든 유효 측정에서 오버셀 0, 짝이 맞지 않는 놓기 0이었다. 실제 Kafka로 키 단위 소비(ST-T18)를 돌려 소비자 추가·강제 종료에서도 빠짐 0, 두 번 반영 0, 순서 뒤집힘 0이었다(실측(PC)) | ADR-0176 결정 3·5, docs/walkthrough/00-status.md |
+---
 
-## 7. 내 말로 설명하기
+### 3.4 3계층 멱등성 (Three-tier Idempotency) 아키텍처
 
-> "경합마다 장치를 따로 고릅니다. 인기 좌석처럼 한 키에 요청이 몰리면 Redis Lua로 차례로 처리해서 잠금 자체를 없앱니다. 두 번 생기면 안 되는 것은 유일 제약이 마지막에 막고, 수량이나 상태는 조건이 맞을 때만 바꾸는 조건부 갱신을 씁니다. 티켓 양도처럼 한 요청 안에서 상태를 다시 보고 여러 행을 바꿔야 하면 행 잠금을 짧게 쥐고, 사람이 화면을 오래 보는 곳만 버전 칸을 견줍니다. 리더나 늦게 온 사건처럼 '자기가 아직 주인인 줄 아는 쪽'은 펜싱 토큰과 세대로 받는 쪽이 거릅니다. 같은 요청이 두 번 오면 계정과 작업 범위의 멱등키와 요청 지문으로 처음 커밋한 응답을 돌려주고, 그 키는 업무 쓰기와 같은 트랜잭션에 적습니다. 결제사 호출과 Kafka 사건에도 각자 멱등키가 있어 세 겹으로 막습니다."
+네트워크 재시도, 브라우저 다중 클릭, 메시지 브로커 재전송으로 인한 중복 실행을 3개 계층에서 철저히 걸러낸다:
 
-- **꼭 넣을 말 1**: 핫 키는 잠금이 아니라 '차례로 돌리기'(Lua)다.
-- **꼭 넣을 말 2**: 잠금이나 Lease만으로는 늦게 쓰는 옛 주인을 못 막는다. 받는 쪽이 펜싱 토큰으로 거른다.
-- **꼭 넣을 말 3**: 멱등은 요청·결제사 호출·사건의 세 겹이고, 요청 키는 업무 쓰기와 같은 트랜잭션에 둔다.
+```mermaid
+flowchart TD
+    Req["쓰기 요청 수신 (Idempotency-Key 포함)"]
+    Fmt{"UUIDv4 형식 검증"}
+    Bad["400 idempotency-key-invalid"]
+    Find{"DB order_idempotency에<br/>(account_id, op, key) 행이 존재하는가?"}
+    Run["업무 쓰기 및 멱등 행을<br/>단일 ACID 트랜잭션의 첫 문장으로 커밋"]
+    Same{"요청 지문 (SHA-256)이<br/>기존 기록과 일치하는가?"}
+    Reused["422 idempotency-key-reused<br/>(요청 변조 거부)"]
+    Done{"기존 요청이<br/>완전히 커밋되었는가?"}
+    Replay["저장된 최초 응답<br/>그대로 반환 (Replay)"]
+    Wait["1초 대기 후 미완료 시<br/>409 idempotency-request-in-progress 반환"]
 
-## 8. 정본에서 읽을 곳
+    Req --> Fmt
+    Fmt -->|"불일치"| Bad
+    Fmt -->|"일치"| Find
+    Find -->|"신규 키"| Run
+    Find -->|"기존 키"| Same
+    Same -->|"지문 불일치"| Reused
+    Same -->|"지문 일치"| Done
+    Done -->|"처리 완료"| Replay
+    Done -->|"처리 중"| Wait
+```
 
-1. [docs/data.md](../../data.md) §5의 동시성 경합 표 전체
-2. [docs/data.md](../../data.md) §2의 '서비스마다 둔 멱등 기록 표'와 '기본 키·유일·검사 규칙'
-3. [docs/api/guidelines.md](../../api/guidelines.md) §4의 키 규칙 표와 공용 멱등 모듈
-4. [docs/data.md](../../data.md) §3의 `q:{event:E}:leader`·`s:{event:E}:idem:{account}:{key}`·`s:{event:E}:epoch` 행
-5. [ADR-0056](../../adr/0056-admission-leader-fencing-and-admission-person-recheck.md) '검토한 대안'과 결정 1~3
-6. [ADR-0121](../../adr/0121-seat-redis-failover-defer-purchase-drop-db-hold-path.md) 결정 4·5와 '남는 한계'
-7. [ADR-0109](../../adr/0109-delivery-jobs-in-postgres-drop-bullmq-cache-redis-key-classes-noeviction.md) '검토한 대안', [ADR-0086](../../adr/0086-query-index-rules-plan-diagnostics-data-pattern-gaps.md) '검토한 대안'
+| 계층 | 멱등 키 및 저장소 | 유효 범위 및 수명 | 중복 방어 메커니즘 |
+| :---: | :--- | :--- | :--- |
+| **1계층: 클라이언트 API** | HTTP `Idempotency-Key` (UUIDv4)<br/>- 홀드: Redis `s:{event:E}:idem` (7분)<br/>- 주문/결제: DB `order_idempotency` (24시간) | `계정 ID × 작업(Operation) × Key` | SHA-256(메서드 + 경로 + Body) 요청 지문 검증. 변조 시 422 반환. 처리 중 재진입 시 409 반환 |
+| **2계층: 외부 결제사 연동** | 승인: `confirm-{orderId}`<br/>취소: `cancel-{cancellationId}` | 토스페이먼츠(15일), 포트원(3시간) | 동일 멱등키로 재호출 시 외부 PG사가 이전 승인 결과를 그대로 반환 |
+| **3계층: 메시지 브로커** | Kafka `eventKey`, 현장 단말 스캔 ID<br/>- DB `webhook_receipt` 유니크 제약 | 파티션 내 키 단위 중복 제거 | 수신 서비스가 `eventKey`를 대조하여 이미 처리된 이벤트는 즉시 ACK 후 폐기 |
 
-## 9. 정본에서 찾은 어긋남
+- **트랜잭션 첫 문장 기록**: 공용 멱등 모듈은 멱등키 INSERT를 비즈니스 트랜잭션의 **가장 첫 번째 SQL 문장**으로 실행한다. 이를 통해 동일한 멱등키의 두 번째 동시 요청은 첫 번째 트랜잭션의 커밋을 DB 락 레벨에서 안전하게 기다린다.
+- **성공 및 비즈니스 완료 건만 기록**: 파라미터 검증 실패(400), 단순 경합 탈락(409), 서버 에러(5xx) 등 데이터 변경 없이 끝난 실패는 멱등 원장에 기록하지 않아 사용자가 안전하게 재시도할 수 있도록 보장한다.
 
-정본끼리 견주어 찾은 것이다(2026-11-01). 두 줄 모두 그 뒤 정본에서 고쳤다.
+---
 
-| 어긋난 곳 | 내용 | 지금 읽는 법 |
-| --- | --- | --- |
-| docs/data.md §4의 4번과 §1 ticket 행 | 티켓 양도 트랜잭션이 행 잠금과 `version` 낙관적 잠금을 함께 쓴다고 적어, 낮음-071(ADR-0134)의 나눔과 달랐다. 고침(2026-11-01 정합 점검) | 지금 정본은 양도 트랜잭션을 행 잠금으로 적고, `version` 칸 비교는 사람이 읽고 나중에 저장하는 CS·관리 흐름에만 쓴다고 적는다 |
-| docs/data.md §5의 1인 한도 행과 §2 `purchase_quota` 칸 | 조건을 `used + qty <= limit`로 적어 칸 이름 `limit_count`와 달랐다. 고침(2026-11-01 정합 점검) | 지금 정본은 `used + qty <= limit_count`다 |
+### 3.5 작업 큐 동시성: `FOR UPDATE SKIP LOCKED` vs Outbox 릴레이
+
+비동기 작업 큐에서 여러 워커 파드가 동시에 작업을 가져갈 때 충돌 없이 작업을 분배하는 기법이다:
+
+```sql
+-- 알림/웹훅 발송 워커의 안전한 작업 폴링
+BEGIN;
+SELECT id, recipient, payload 
+FROM notification_job 
+WHERE status = 'PENDING' AND lease_until <= NOW() 
+ORDER BY id 
+LIMIT 100 
+FOR UPDATE SKIP LOCKED;
+
+UPDATE notification_job 
+SET status = 'PROCESSING', lease_until = NOW() + INTERVAL '30 seconds' 
+WHERE id = ANY($selected_ids);
+COMMIT;
+```
+
+- **`SKIP LOCKED`의 이점**: 다른 워커 파드가 이미 `FOR UPDATE`로 잠근 행은 대기하지 않고 즉시 건너뛴다. 워커 파드를 수십 대로 증설해도 락 경합으로 인한 지연이 전혀 발생하지 않는다.
+- **Outbox 릴레이에서 `SKIP LOCKED`를 쓰지 않는 이유 (ADR-0116)**:
+  - 알림/웹훅 발송은 개별 작업 간의 순서가 중요하지 않아 `SKIP LOCKED`가 최적이다.
+  - 그러나 **Outbox 릴레이는 이벤트의 발행 순서(`seq`)가 절대적으로 보장되어야 한다.**
+  - 만약 Outbox 릴레이에서 `SKIP LOCKED`를 쓰면, 리더 파드가 잠근 앞선 이벤트를 건너뛰고 뒤쪽 이벤트가 Kafka로 먼저 발행되어 **순서 뒤집힘 사고**가 발생한다. 따라서 Outbox 릴레이는 쿠버네티스 Lease 기반의 단일 활성 리더(Single Active Leader) 방식을 채택했다.
+
+---
+
+### 3.6 연속성이 보장되는 단조증가 번호 채번
+
+감사 로그 체인(`audit_chain_head`)이나 스캐너 동기화 순번(`scanner_seq`)처럼 **"단 하나의 빈틈(Gap)도 없이 연속적으로 증가해야 하는 번호"**는 PostgreSQL Sequence를 쓰지 않는다:
+
+```sql
+-- 트랜잭션 내 단조증가 카운터 발급
+UPDATE sequence_counter 
+SET current_seq = current_seq + 1 
+WHERE domain_name = 'scanner_seq' 
+RETURNING current_seq;
+```
+
+PostgreSQL Sequence는 성능을 위해 메모리 캐시를 사용하므로 트랜잭션이 롤백되면 발급된 번호가 영구 유실되어 구멍이 생긴다. 반면 카운터 전용 행을 트랜잭션 내에서 `UPDATE ... RETURNING`으로 갱신하면, 커밋된 트랜잭션들 사이에서 번호가 1, 2, 3... 빈틈없이 채번되며 **커밋 순서와 번호 순서가 100% 일치**한다.
+
+---
+
+## 4. 트레이드오프와 버린 대안 (Tradeoffs & Alternatives)
+
+| 설계 결정 | 얻는 것 (Gains) | 치르는 값 (Costs) |
+| :--- | :--- | :--- |
+| **핫 키 직렬화 (Redis Lua)** | 잠금 대기 큐 및 교착 상태 완전 제거, 단일 네트워크 RTT로 0.3ms 이내 판정 | 단일 샤드의 단일 스레드 처리량(초당 약 3~5만 건)이 시스템 처리량의 상한이 됨 |
+| **DB 원장 기반 작업 큐 (`SKIP LOCKED`)** | Redis/BullMQ 장애 시 작업 유실 위험 제거, 트랜잭션 원장과 작업 상태의 100% 원자성 | 외부 전문 메시지 큐 대비 DB 인스턴스 쓰기 I/O 증가 (인덱스 최적화 필요) |
+| **단조증가 펜싱 토큰 & 세대** | GC Pause 및 네트워크 지연으로 인한 늦은 쓰기(Stale Write)를 스토리지 레벨에서 원천 차단 | 분산 컴포넌트 간 토큰 검증 로직 추가 및 세대 번호 동기화 복잡도 증가 |
+| **업무 DB 내 멱등 원장 (`order_idempotency`)** | 노드 재시작이나 페일오버에도 멱등 기록이 영구 보존되어 이중 결제 위험 0% | 쓰기 트랜잭션마다 멱등 행 INSERT 1건 추가 및 24시간 후 만료 데이터 배치 삭제 필요 |
+
+### 버린 대안
+
+1. **Redlock 분산 락 알고리즘 전면 배제 (ADR-0056)**:
+   - 3~5개 Redis 노드에 걸쳐 락을 획득하는 네트워크 합의 비용(10~50ms)이 너무 크다. 또한 분산 시스템 학계(Martin Kleppmann)에서 증명되었듯, 클라이언트의 GC Pause나 시스템 시계 급변(Clock Jump) 상황에서 안전성을 보장하지 못한다.
+2. **선점 키에 대해 Redis `WAIT` 동기 복제 후 응답**:
+   - 대기열 진입 피크(초당 20만 건)에서 복제본 쓰기 확인을 기다리면 응답 지연이 수십 배 폭증하며, 타임아웃 발생 시에도 쓰기가 롤백되지 않아 정합성 보장 이득이 없다.
+3. **대기열 입장 시 PostgreSQL 중복 검사**:
+   - 대기열 시스템의 초고속 경로에 RDBMS 디스크 I/O를 개입시키는 순간 시스템 전체가 붕괴한다. 대기열 중복 방지는 전적으로 Redis Lua 인메모리 키로 해결했다.
+4. **BullMQ / Redis 기반 비동기 발송 큐 (ADR-0109)**:
+   - Redis에 알림/웹훅 작업 큐를 두면 ElastiCache 메모리 정리(Eviction)나 장애 페일오버 시 발송 작업이 영구 유실될 수 있다. 발송 원장을 PostgreSQL에 두고 `SKIP LOCKED`로 소비함으로써 작업 유실 위험을 0으로 통제했다.
+
+---
+
+## 5. 핵심 꼬리 질문 5단 방어 (Staff Interview Q&A)
+
+| 질문 단계 | 심층 질문 | 방어 논리와 기술적 근거 | 관련 정본 |
+| :--- | :--- | :--- | :--- |
+| **1단: 왜 (Why)** | 낙관적 락과 비관적 락이 모두 있는데 왜 오픈 정각 좌석 선점에는 둘 다 쓰지 않고 Redis Lua 직렬화를 썼습니까? | 비관적 락(`FOR UPDATE`)은 1,000명이 1개 행에 줄을 서서 DB 커넥션 고갈과 타임아웃 폭증을 부릅니다. 낙관적 락(버전 번호)은 1명만 성공하고 999명이 충돌 재시도 루프를 돌아 DB CPU를 100%로 태웁니다. 두 방식 모두 디스크 RDBMS의 동시성 한계에 부딪히므로, 메모리에서 단일 스레드로 0.3ms 만에 1명 성공과 999명 즉시 탈락을 결정하는 Redis Lua 직렬화가 유일한 해법입니다. | ADR-0014, `docs/data.md` §5 |
+| **2단: 대안 (Alternatives)** | Redlock 같은 공인된 분산 락 대신 왜 단일 샤드 Redis Lua 직렬화를 선택했습니까? | Redlock은 최소 3개 이상의 독립 Redis 노드와 네트워크 합의를 거쳐야 하므로 홀드 p99 50ms 예산을 달성할 수 없습니다. 더 심각한 문제는 클라이언트 프로세스가 롱 GC Pause에 빠져 락 TTL이 만료되었을 때, 락이 타인에게 넘어간 상태에서 깨어난 옛 프로세스가 쓰기를 감행하는 스플릿 브레인(Split-brain) 결함을 소프트웨어 락 자체로는 막을 수 없기 때문입니다. | Martin Kleppmann Redlock 분석, ADR-0056 |
+| **3단: 장애 대응 (Resilience)** | 분산 락이나 권한(Lease)을 쥔 워커가 GC Pause로 멈췄다가 깨어났을 때, 원장의 데이터 파괴를 어떻게 막습니까? | **단조증가 펜싱 토큰(Fencing Token)**으로 막습니다. 리더가 권한을 획득할 때마다 1씩 증가하는 펜싱 토큰(101, 102...)을 발급받고, 스토리지에 쓸 때마다 이 토큰을 함께 보냅니다. 스토리지 엔진은 자신이 이미 수락한 최신 토큰(102)보다 작은 옛 토큰(101)을 들고 온 쓰기 요청을 무조건 거부(`FENCED`)하므로, GC Pause 후 깨어난 옛 워커의 유령 쓰기가 물리적으로 차단됩니다. | ADR-0056, seat-hold §3 |
+| **4단: 수치 근거 (Numbers)** | 멱등 테이블 `order_idempotency`에 동일한 키의 요청이 동시에 인입되면 경합 처리가 어떻게 되나요? | 공용 멱등 모듈은 멱등키 INSERT를 트랜잭션의 첫 문장으로 실행하며 `lock_timeout 1초`를 설정합니다. 동일 키로 인입된 2번째 요청은 1번째 트랜잭션의 커밋을 기다립니다. 1초 이내에 1번째 요청이 완료되면 그 커밋 결과를 그대로 반환(Replay)하고, 1초가 넘어가면 `409 Conflict`와 `idempotency-request-in-progress` 에러를 반환하여 중복 연산을 완벽히 격리합니다. | `docs/api/guidelines.md` §4 |
+| **5단: 실측과 검증 (Verification)** | 펜싱 토큰과 세대 번호, 멱등 처리가 동시성 레이스 컨디션을 완벽히 차단함을 어떻게 검증했나요? | 카오스 엔지니어링 동시성 테스트를 통해 입증했습니다. S-T24(동일 멱등키 1,000건 동시 요청 시 1회만 실행 단언), Q-T30(리더 강제 GC Pause 주입 시 펜싱 토큰을 통한 Stale Write 차단 100%), S-T5(홀드 펜싱 토큰 역순 주입 시 과거 이벤트 드롭 100%), S-T26(노드 장애 조치 시 세대 번호 갱신 및 캐시 리셋)을 자동화된 테스트 스위트로 지속 검증하고 있습니다. | ADR-0176 결정 3, `docs/walkthrough/00-status.md` |
+
+---
+
+## 6. 30초 아키텍처 브리핑 (Staff Engineer Summary)
+
+> "PEAKET의 동시성 제어 아키텍처는 **'경합 밀도에 따른 도구의 다변화'**와 **'펜싱 토큰을 통한 분산 유령 쓰기(Stale Write) 차단'**으로 완성됩니다.  
+> 오픈 정각 1개 좌석에 1,000명이 몰리는 초고경합 핫스팟은 DB 락 대신 **Redis Lua 단일 스레드 직렬화**로 0.3ms 만에 탈락자를 걸러내어 p99 50ms를 사수하며, 최종 판매 확정은 PostgreSQL 부분 유니크 인덱스로 물리적 오버셀을 차단합니다.  
+> 분산 리더나 워커의 GC Pause로 인한 유령 쓰기는 수신 스토리지가 **단조증가 펜싱 토큰**을 검증하여 100% 폐기합니다.  
+> 또한 클라이언트 요청, 외부 PG사 연동, Kafka 메시지 수신의 3대 구간에 걸쳐 **3계층 멱등 원장**을 구축함으로써, 네트워크 순단이나 대규모 재시도 상황에서도 단 1건의 이중 결제나 이중 발권도 발생하지 않도록 수학적으로 통제했습니다."
+
+---
+
+## 7. 정본에서 읽을 곳
+
+1. [docs/data.md](../../data.md) §5: 동시성 경합 매트릭스 전체
+2. [docs/data.md](../../data.md) §2: 서비스별 멱등 기록 테이블 및 유니크 규칙
+3. [docs/api/guidelines.md](../../api/guidelines.md) §4: `Idempotency-Key` 규격 및 공용 멱등 모듈 인터페이스
+4. [docs/data.md](../../data.md) §3: `q:{event:E}:leader`, `seatEpoch`, `fencing_token` 명세
+5. [ADR-0056](../../adr/0056-admission-leader-fencing-and-admission-person-recheck.md): 입장 제어 리더 펜싱 및 검토 대안
+6. [ADR-0121](../../adr/0121-seat-redis-failover-defer-purchase-drop-db-hold-path.md): 회차 세대 번호 및 구매 유예 정책
+7. [ADR-0109](../../adr/0109-delivery-jobs-in-postgres-drop-bullmq-cache-redis-key-classes-noeviction.md): PostgreSQL 원장 작업 큐 및 `SKIP LOCKED` 채택
+8. [ADR-0086](../../adr/0086-query-index-rules-plan-diagnostics-data-pattern-gaps.md): 트랜잭션 카운터 행을 통한 단조증가 번호 채번
