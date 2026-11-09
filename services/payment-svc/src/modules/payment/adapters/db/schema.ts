@@ -57,6 +57,8 @@ export const payment = pgTable(
     overdueAt: at('overdue_at'),
     // 금액·주문 어긋남·결제사 쪽 취소의 SEV1을 낸 시각(결제마다 한 번, BUILD_ORDER PRF-182 코드 리뷰)
     anomalyLoggedAt: at('anomaly_logged_at'),
+    // 포트원 결제 시도 ID(txId). 승인 본문의 검증값이고 조회 답이 이 시도의 것인지 대조한다. 비밀이 아니라 결과가 정해져도 지우지 않는다(BUILD_ORDER HOT-140 코드 리뷰, 마이그레이션 0004)
+    pgTxId: text('pg_tx_id'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),

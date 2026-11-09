@@ -238,7 +238,7 @@ export class PaymentConfirmRunner {
     }
     const unused = Math.max(0, reserved - jobs.length);
     guard.release(unused);
-    guard.refundTokens(unused);
+    guard.refundConfirmTokens(unused);
     for (const job of jobs) void this.#startHeld(job, guard, { held: true });
     return jobs.length;
   }
@@ -329,7 +329,7 @@ export class PaymentConfirmRunner {
     try {
       return await this.#run(job, guard, hold);
     } finally {
-      if (hold.held) guard?.refundTokens();
+      if (hold.held) guard?.refundConfirmTokens();
       guard?.release();
     }
   }
@@ -374,7 +374,7 @@ export class PaymentConfirmRunner {
   /** 토큰 → 표시·임대 확인 → 호출 → 답 반영 */
   async #send(job: ConfirmJob, target: ConfirmTarget, gateway: PaymentGatewayPort, guard: PgCallGuard | undefined, markFirst: boolean, hold: TokenHold): Promise<ConfirmRunOutcome> {
     // 표시를 쓰기 전에 토큰을 얻는다(먼저 쓰면 부르지 않았는데 다음 시도가 재전송이 된다). 보호기가 없으면 상한 없이 부르지 않는다. 틱이 잡은 행은 토큰을 미리 뺐다
-    if (guard === undefined || (!hold.held && !guard.tryTakeToken())) return this.#noToken(job);
+    if (guard === undefined || (!hold.held && !guard.tryTakeConfirmTokens())) return this.#noToken(job);
     hold.held = true;
     let mark: MarkConfirmSentResult;
     try {
@@ -397,7 +397,9 @@ export class PaymentConfirmRunner {
     let answer: ConfirmResult | undefined;
     let failure: { err: unknown } | undefined;
     try {
-      answer = await this.#guarded(gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId) }));
+      answer = await this.#guarded(
+        gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId), ...(target.confirmToken === undefined ? {} : { confirmToken: target.confirmToken }), ...(target.txId === undefined ? {} : { txId: target.txId }) }),
+      );
     } catch (err) {
       failure = { err };
     } finally {

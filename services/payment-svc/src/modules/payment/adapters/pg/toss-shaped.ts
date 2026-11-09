@@ -30,6 +30,7 @@ import {
   type QueryStatus,
   type WebhookTrigger,
 } from '../../domain/payment-gateway.js';
+import { num, pgRequest, str, type PgReply } from './pg-reply.js';
 
 export interface TossShapedOptions {
   /** 결제사 주소 */
@@ -89,11 +90,6 @@ const TRANSIENT_CODES = new Set([
 ]);
 /** 웹훅의 결제 키·주문 ID 모양: 공백·제어 문자가 없는 ASCII 1~200자 */
 const WEBHOOK_REF = /^[\x21-\x7e]{1,200}$/;
-
-type Reply = { status: number; json: Record<string, unknown> | undefined } | 'NO_ANSWER';
-
-const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 export abstract class TossShapedGateway implements PaymentGatewayPort {
   abstract readonly pg: PgName;
@@ -238,32 +234,18 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     };
   }
 
-  async #call(method: 'GET' | 'POST', path: string, params: Record<string, string>, body?: unknown, idemKey?: string, timeoutCapMs?: number): Promise<Reply> {
-    try {
-      const res = await (method === 'GET' ? this.#queryHttp : this.#http).request({
-        method,
-        path,
-        params,
-        headers: {
-          authorization: this.#authorization,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-          ...(idemKey ? { 'idempotency-key': idemKey } : {}),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        ...(timeoutCapMs === undefined ? {} : { timeoutCapMs }),
-      });
-      const text = await res.text();
-      let json: Record<string, unknown> | undefined;
-      try {
-        const v: unknown = JSON.parse(text);
-        json = typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
-      } catch {
-        json = undefined;
-      }
-      return { status: res.status, json };
-    } catch {
-      // 끊김·시간 초과·남은 시간 없음: 보냈는지 처리됐는지 모른다
-      return 'NO_ANSWER';
-    }
+  #call(method: 'GET' | 'POST', path: string, params: Record<string, string>, body?: unknown, idemKey?: string, timeoutCapMs?: number): Promise<PgReply> {
+    return pgRequest(method === 'GET' ? this.#queryHttp : this.#http, {
+      method,
+      path,
+      params,
+      headers: {
+        authorization: this.#authorization,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(idemKey ? { 'idempotency-key': idemKey } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(timeoutCapMs === undefined ? {} : { timeoutCapMs }),
+    });
   }
 }

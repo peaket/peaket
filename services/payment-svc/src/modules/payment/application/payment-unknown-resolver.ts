@@ -377,7 +377,7 @@ export class PaymentUnknownResolver {
     this.#calls += 1;
     this.#safe(() => this.deps.signals.inFlight(this.#calls));
     try {
-      return await this.#guarded(gateway.query(job.paymentRef, { timeoutMs: UNKNOWN_QUERY_TIMEOUT_MS }));
+      return await this.#guarded(gateway.query(job.paymentRef, { timeoutMs: UNKNOWN_QUERY_TIMEOUT_MS, ...(job.txId === undefined ? {} : { expectedTxId: job.txId }) }));
     } catch (err) {
       this.#runError('call', err, job.orderId);
       return QUERY_UNKNOWN;

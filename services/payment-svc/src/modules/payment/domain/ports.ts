@@ -31,7 +31,7 @@ export interface PaymentCommandStore {
   /**
    * `INSERT payment … ON CONFLICT (order_id) DO NOTHING`. 넣었으면 같은 트랜잭션에서 payment_event(순번 1, 종류 ACCEPTED, exported false)와
    * payment_confirm_job(next_attempt_at = nowMs)을 쓴다. 0행이면 있는 행을 읽어 EXISTING으로 돌려준다.
-   * 결제 참조는 pg_payment_ref(토스 paymentKey·포트원 paymentId), 포트원 토큰은 pg_confirm_token에 적는다. idempotency_key = confirm-{orderId}.
+   * 결제 참조는 pg_payment_ref(토스 paymentKey·포트원 paymentId), 포트원 토큰은 pg_confirm_token, 포트원 결제 시도 ID는 pg_tx_id에 적는다. idempotency_key = confirm-{orderId}.
    * 트랜잭션은 READ COMMITTED이고, 문장 시간 한도는 min(200ms [가정], 연결을 받은 뒤 budget에 남은 시간)이다.
    * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(아무것도 쓰지 않는다)
    */

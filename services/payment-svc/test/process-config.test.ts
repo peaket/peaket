@@ -160,7 +160,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('PRF181_리뷰 고침 M4: 어댑터가 하나도 없이 켜지면(local·ci만, BUILD_ORDER PRF-184) 시작 때 경고 한 줄을 낸다 [ASVS v5.0.0-16.3.4]', () => {
     const m = main();
-    const warn = /if \(!simulator && !toss\) service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter' \}, '([^']*)'\)/.exec(m);
+    const warn = /if \(!simulator && !toss && !portone\) service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter' \}, '([^']*)'\)/.exec(m);
     expect(warn, '경고 한 줄').not.toBeNull();
     expect(warn![1]).not.toMatch(/local·ci일 때만/);
     expect(m.match(/service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter'/g)).toHaveLength(1);

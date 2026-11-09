@@ -15,6 +15,8 @@ export interface PgCapabilities {
   /** 채널별 호출 상한(초당). 실행기 앞의 채널 토큰 버킷이 쓴다(domain/pg-call-guard.ts, BUILD_ORDER PRF-183) */
   callsPerSecond: number;
   redirectCheckout: boolean;
+  /** 승인 한 건이 쓰는 호출 토큰 수. 없으면 1이다. 승인 답에 금액이 없어 승인 뒤 조회를 함께 부르는 포트원은 2다(BUILD_ORDER HOT-140, 코드 리뷰) */
+  confirmCallCost?: number;
 }
 
 export interface CheckoutOrder {
@@ -50,6 +52,8 @@ export interface PortoneCheckoutValues {
   paymentId: string;
   orderName: string;
   totalAmount: number;
+  /** 결제 통화(proto PortoneCheckout.currency) */
+  currency: 'KRW';
   redirectUrl: string;
 }
 
@@ -109,6 +113,8 @@ export type QueryResult =
 export interface QueryOptions {
   /** 이 조회의 시간 한도(ms). 어댑터의 읽기 시간 초과를 넘지 않는 범위에서 쓴다. 없으면 읽기 시간 초과다 */
   timeoutMs?: number;
+  /** 원장의 결제 시도 ID(포트원 txId). 있으면 답의 결제 시도와 대조해 다르면 UNKNOWN이다. 토스·시뮬레이터는 넘기지 않는다(BUILD_ORDER HOT-140, 코드 리뷰) */
+  expectedTxId?: string;
 }
 
 /** 취소 표준 결과(payment §2.1 결제 취소 API) */
@@ -134,12 +140,19 @@ export interface PaymentGatewayPort {
   readonly pg: PgName;
   capabilities(): PgCapabilities;
   checkout(order: CheckoutOrder, attempt: CheckoutAttempt, payMethod: string): CheckoutValues;
-  /** idemKey는 confirm-{orderId}(ADR-0029 결정 4) */
-  confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string }): Promise<ConfirmResult>;
+  /**
+   * idemKey는 confirm-{orderId}(ADR-0029 결정 4).
+   * confirmToken은 포트원 paymentToken이다(원장의 pg_confirm_token에서 실행기가 넘긴다. 답 뒤 원장이 지운다, BUILD_ORDER HOT-140). 그 호출에만 쓰고 담아 두지 않는다.
+   * txId는 포트원 결제 시도 ID다(원장의 pg_tx_id). 승인 본문의 검증값과 뒤따르는 조회의 대조값으로 쓴다(BUILD_ORDER HOT-140, 코드 리뷰)
+   */
+  confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string; confirmToken?: string; txId?: string }): Promise<ConfirmResult>;
   /** NOT_FOUND는 결제사가 정해진 코드로 '없다'고 답했을 때만이다. 그 밖의 404·JSON이 아닌 답은 중간 장비의 답일 수 있어 UNKNOWN이다 */
   query(paymentRef: string, options?: QueryOptions): Promise<QueryResult>;
-  /** idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액 */
-  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult>;
+  /**
+   * idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액.
+   * expectedBalance는 이 취소 앞의 취소 가능 금액(포트원 currentCancellableAmount). 호출자가 첫 전송 전에 저장한 값을 재시도에도 그대로 넘긴다. 같은 멱등키의 본문이 달라지면 안 되기 때문이다(BUILD_ORDER HOT-140, 코드 리뷰)
+   */
+  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult>;
   /** 틀린 웹훅은 null */
   parseWebhook(headers: HeaderBag, body: string): WebhookTrigger | null;
 }

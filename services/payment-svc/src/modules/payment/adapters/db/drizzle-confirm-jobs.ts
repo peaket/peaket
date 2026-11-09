@@ -60,6 +60,8 @@ type TargetRow = {
   attempt_no: number | string;
   pg: string;
   pg_payment_ref: string;
+  pg_confirm_token: string | null;
+  pg_tx_id: string | null;
   amount: number | string;
   status: string;
   authenticated_at: Date | string;
@@ -73,6 +75,7 @@ type QueryRow = {
   attempt_no: number | string;
   pg: string;
   pg_payment_ref: string;
+  pg_tx_id: string | null;
   amount: number | string;
   anomaly_logged_at: Date | string | null;
   query_attempts: number | string;
@@ -177,7 +180,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
     const r = await this.o.database.db.execute(sql`
-      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.amount, p.status, p.authenticated_at,
+      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at,
              exists (select 1 from payment_event e where e.payment_id = p.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent
       from payment p where p.id = ${paymentId}::uuid`);
     const row = r.rows[0] as TargetRow | undefined;
@@ -189,6 +192,8 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       attemptNo: Number(row.attempt_no),
       pg: row.pg as PgName,
       paymentRef: row.pg_payment_ref,
+      ...(row.pg_confirm_token ? { confirmToken: row.pg_confirm_token } : {}),
+      ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
       amount: Number(row.amount),
       status: row.status as PaymentLedgerStatus,
       authenticatedAtMs: msOf(row.authenticated_at),
@@ -285,7 +290,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     return this.#tx(async (tx) => {
       // 'UNKNOWN'은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. RETURNING 차례가 정해지지 않아 고르기와 밀기를 나눈다(고른 차례를 지키고 간격 식은 도메인 하나다)
       const r = await tx.execute(sql`
-        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, amount, anomaly_logged_at, query_attempts
+        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount, anomaly_logged_at, query_attempts
         from payment
         where status = 'UNKNOWN' and pg = ${pg} and next_query_at <= ${new Date(now)}::timestamptz
         order by next_query_at
@@ -302,6 +307,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
           attemptNo: Number(row.attempt_no),
           pg: row.pg as PgName,
           paymentRef: row.pg_payment_ref,
+          ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
           amount: Number(row.amount),
           queryAttempts,
           claimedNextQueryAtMs: now + unknownQueryClaimHoldMs(queryAttempts),

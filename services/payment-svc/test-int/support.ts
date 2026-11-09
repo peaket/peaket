@@ -193,6 +193,7 @@ export interface PaymentRow {
   pg: string;
   pg_payment_ref: string;
   pg_confirm_token: string | null;
+  pg_tx_id: string | null;
   amount: number;
   status: string;
   idempotency_key: string;

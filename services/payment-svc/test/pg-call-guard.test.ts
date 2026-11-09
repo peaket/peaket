@@ -714,6 +714,62 @@ describe('리뷰 고침(BUILD_ORDER PRF-183, 코드 리뷰)', () => {
     });
   });
 
+  describe('승인 호출 비용(BUILD_ORDER HOT-140 코드 리뷰 M6)', () => {
+    test('P-T16_리뷰 고침 M6: 비용이 2면 승인이 잡을 수 있는 수는 토큰 수의 절반이다 [ASVS v5.0.0-2.3.2]', () => {
+      const { g } = make({ callsPerSecond: 100, channelBulkhead: 200, confirmCallCost: 2 });
+      expect(g.available()).toBe(9);
+    });
+
+    test('P-T16_리뷰 고침 M6: 쥐기는 잡는 수의 두 배로 토큰을 빼고, 돌려주기는 비용만큼 돌려준다 [ASVS v5.0.0-2.3.2]', () => {
+      const { g } = make({ callsPerSecond: 100, channelBulkhead: 200, confirmCallCost: 2 });
+      expect(g.reserve()).toBe(9);
+      expect(g.available()).toBe(0);
+      g.release(4);
+      g.refundConfirmTokens(4);
+      expect(g.available()).toBe(4);
+    });
+
+    test('P-T16_리뷰 고침 M6: 바로 돌리는 행은 비용만큼 토큰을 쓰고, 모자라면 쓰지 않는다 [ASVS v5.0.0-2.3.2]', () => {
+      const { g } = make({ callsPerSecond: 15, channelBulkhead: 200, confirmCallCost: 2 });
+      expect(g.tryTakeConfirmTokens()).toBe(true);
+      expect(g.tryTakeToken()).toBe(true);
+      expect(g.tryTakeConfirmTokens()).toBe(false);
+      expect(g.tryTakeToken()).toBe(false);
+    });
+
+    test('P-T16_리뷰 고침 M6: 단독 조회는 비용과 상관없이 하나씩 쓴다 [ASVS v5.0.0-2.3.2]', () => {
+      const { g } = make({ callsPerSecond: 100, channelBulkhead: 200, confirmCallCost: 2 });
+      expect(g.takeQueryTokens(3)).toBe(3);
+      expect(drain(g)).toBe(17);
+    });
+
+    test.each([
+      [1, 4],
+      [4, 12],
+      [50, 12],
+    ])('P-T16_리뷰 고침 M6: 비용이 2여도 작은 채널(초당 %d, 파드 %d)에서 승인이 굶지 않는다 [ASVS v5.0.0-2.3.2]', (rps, podCount) => {
+      const { g } = make({ callsPerSecond: rps, channelBulkhead: 100, podCount, confirmCallCost: 2 });
+      expect(g.available()).toBeGreaterThanOrEqual(1);
+    });
+
+    test('P-T16_리뷰 고침 M6: 비용을 주지 않으면 1이다(토스·시뮬레이터 동작 불변)', () => {
+      const { g } = make({ callsPerSecond: 100, channelBulkhead: 200 });
+      expect(g.available()).toBe(18);
+      expect(g.tryTakeConfirmTokens()).toBe(true);
+      expect(g.available()).toBe(17);
+    });
+
+    test.each([0, -1, 1.5, Number.NaN])('P-T16_리뷰 고침 M6: 비용이 %d이면 만들지 않는다 [ASVS v5.0.0-2.2.1]', (confirmCallCost) => {
+      expect(() => make({ confirmCallCost })).toThrow(RangeError);
+    });
+
+    test('P-T16_리뷰 고침 M6: 등록부는 어댑터 능력의 비용을 보호기에 넘긴다 [ASVS v5.0.0-2.3.2]', () => {
+      const gateway = { pg: 'PORTONE', capabilities: () => ({ serverConfirm: true, confirmDeadlineMs: 1, partialCancel: true, webhookSignature: true, idempotencyRetentionMs: 1, callsPerSecond: 100, redirectCheckout: true, confirmCallCost: 2 }) } as unknown as PaymentGatewayPort;
+      const guards = new PgCallGuards({ gateways: { of: () => gateway }, podCount: 1, clock: fakeClock(), signals: new FakeSignals(), log: new FakeLog(), bulkheads: { PORTONE: 200 } });
+      expect(guards.of('PORTONE')!.available()).toBe(9);
+    });
+  });
+
   test('P-T34_리뷰 고침 낮음: payment_pg_inflight를 채널별 0으로 미리 낸다 [ASVS v5.0.0-16.3.4]', async () => {
     const metrics = new PlatformMetrics('payment-svc');
     new PromPgCallGuardSignals().register(metrics.registry);

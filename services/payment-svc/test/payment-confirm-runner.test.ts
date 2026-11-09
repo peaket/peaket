@@ -202,6 +202,8 @@ class FakeGateway implements PaymentGatewayPort {
   capabilitiesFailure: unknown;
   /** capabilities().callsPerSecond */
   rps = 300;
+  /** capabilities().confirmCallCost(없으면 싣지 않는다) */
+  confirmCallCost: number | undefined;
 
   constructor(
     readonly pg: PgName,
@@ -211,7 +213,7 @@ class FakeGateway implements PaymentGatewayPort {
 
   capabilities(): PgCapabilities {
     if (this.capabilitiesFailure !== undefined) throw this.capabilitiesFailure;
-    return { serverConfirm: true, confirmDeadlineMs: this.deadlineMs, partialCancel: true, webhookSignature: false, idempotencyRetentionMs: 86_400_000, callsPerSecond: this.rps, redirectCheckout: false };
+    return { serverConfirm: true, confirmDeadlineMs: this.deadlineMs, partialCancel: true, webhookSignature: false, idempotencyRetentionMs: 86_400_000, callsPerSecond: this.rps, redirectCheckout: false, ...(this.confirmCallCost === undefined ? {} : { confirmCallCost: this.confirmCallCost }) };
   }
   async confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string }): Promise<ConfirmResult> {
     this.order.push('gateway.confirm');
@@ -365,6 +367,45 @@ const expectNoGatewayCall = (f: Fixture): void => {
   expect(f.gateway.calls).toEqual([]);
   expect(f.signals.seconds).toEqual([]);
 };
+
+describe('포트원 리뷰 고침(BUILD_ORDER HOT-140 코드 리뷰)', () => {
+  test('P-T16_리뷰 고침 H4: 원장의 결제 시도 ID를 승인 호출에 넘긴다 [ASVS v5.0.0-2.2.3]', async () => {
+    const f = setup();
+    f.jobs.put(target({ txId: 'tx-attempt-1' }));
+    await f.runner.runJob(job());
+    expect(f.gateway.calls[0]).toMatchObject({ txId: 'tx-attempt-1' });
+  });
+
+  test('P-T16_리뷰 고침 H4: 결제 시도 ID가 없는 결제사는 칸을 싣지 않는다', async () => {
+    const f = setup();
+    f.jobs.put(target());
+    await f.runner.runJob(job());
+    expect(f.gateway.calls[0]).not.toHaveProperty('txId');
+  });
+
+  test('P-T16_리뷰 고침 M6: 틱은 승인 호출 비용만큼 토큰을 쥐고 잡지 못한 몫은 비용만큼 돌려준다 [ASVS v5.0.0-2.3.2]', async () => {
+    const f = setup({}, { bulkhead: 200 });
+    f.gateway.rps = 100;
+    f.gateway.confirmCallCost = 2;
+    f.jobs.put(target());
+    expect(f.guards.of('SIMULATOR')!.available()).toBe(9);
+    f.jobs.claims = [[job()]];
+    await f.runner.tick();
+    await f.runner.whenIdle();
+    expect(f.gateway.calls).toHaveLength(1);
+    expect(f.guards.of('SIMULATOR')!.available()).toBe(8);
+  });
+
+  test('P-T16_리뷰 고침 M6: 바로 돌리는 행도 비용만큼 토큰을 쓴다 [ASVS v5.0.0-2.3.2]', async () => {
+    const f = setup({}, { bulkhead: 200 });
+    f.gateway.rps = 100;
+    f.gateway.confirmCallCost = 2;
+    f.jobs.put(target());
+    await f.runner.runJob(job());
+    expect(f.gateway.calls).toHaveLength(1);
+    expect(f.guards.of('SIMULATOR')!.available()).toBe(8);
+  });
+});
 
 describe('runJob ①: 원장 읽기', () => {
   test.each(['AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED'] as const satisfies readonly PaymentLedgerStatus[])('PRF181_원장이 %s이면 부르지 않고 명령 행만 지운다', async (status) => {

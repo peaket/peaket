@@ -949,6 +949,7 @@ erDiagram
         text pg "TOSS|PORTONE|SIMULATOR(결제 시도에서 고정)"
         text pg_payment_ref "토스 paymentKey 또는 포트원 paymentId"
         text pg_confirm_token "포트원 paymentToken, 결과 확정 시 삭제"
+        text pg_tx_id "포트원 결제 시도 ID(txId). 승인 본문의 검증값이자 조회 답 대조값, 토스·시뮬레이터는 비움(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰)"
         bytea deposit_secret_hash "토스 가상계좌 입금 콜백 secret의 SHA-256, 입금 확정·만료 시 삭제(ADR-0050, 가상계좌 번호와 같은 수명)"
         int amount
         text status "ACCEPTED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|FAILED|PARTIAL_CANCELED|CANCELED"
@@ -2415,6 +2416,7 @@ erDiagram
 - `failure_category`(추천 적용 2026-11-09, BUILD_ORDER PRF-181): 두 번째 마이그레이션(`services/payment-svc/migrations/0001_payment_failure_category.sql`)이 `payment`에 `text`(널 허용) 칸과 여섯 값 `CHECK`(`payment_failure_category_check`)를 더한다. 값은 `FAILED`일 때만 채운다. 표가 아직 배포되지 않아 행이 없으므로 제약을 나눠 검증하지 않는다.
 - UNKNOWN 조회 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-182): 세 번째 마이그레이션(`services/payment-svc/migrations/0002_payment_unknown_query.sql`)이 `payment`에 `next_query_at`(`timestamptz`, 널 허용)·`query_attempts`(`int NOT NULL DEFAULT 0`)·`overdue_at`·`anomaly_logged_at`(`timestamptz`, 널 허용)을 더하고 부분 인덱스 `payment_unknown_query_idx ON payment (next_query_at) WHERE status = 'UNKNOWN'`과 `payment_unknown_status_changed_idx ON payment (status_changed_at) WHERE status = 'UNKNOWN'`(끝난 행은 인덱스에 없다), CHECK `status <> 'UNKNOWN' OR next_query_at IS NOT NULL`(`payment_unknown_next_query_check`, 잡히지 않은 채 남는 UNKNOWN을 막는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)을 만든다. 표가 아직 배포되지 않아 행이 없으므로 기존 행을 채우는 문장이 없다.
 - 승인 명령의 결제사 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰): 네 번째 마이그레이션(`services/payment-svc/migrations/0003_payment_confirm_job_pg.sql`)이 `payment_confirm_job`에 `pg`(`text NOT NULL`, CHECK `payment_confirm_job_pg_check` 결제사 셋)를 더하고 잡기 인덱스를 `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`로 바꾼다(`payment_confirm_job_next_idx`는 지운다). 표가 아직 배포되지 않아 행이 없으므로 기본값도 기존 행을 채우는 문장도 없다.
+- 결제 시도 ID 칸(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰): 다섯 번째 마이그레이션(`services/payment-svc/migrations/0004_payment_pg_tx_id.sql`)이 `payment`에 `pg_tx_id`(`text`, 비울 수 있음, 포트원 `txId`)를 더한다. 포트원 승인 본문의 검증값이고 조회 답이 이 시도의 것인지 대조한다. 비밀이 아니므로 결과가 정해져도 지우지 않는다.
 
 ## 5. 동시성 제어가 필요한 지점
 

@@ -35,9 +35,9 @@ export interface DrizzlePaymentStoreOptions {
   readonly batchDatabase: Database;
 }
 
-/** 원장 칸 둘(토스·시뮬레이터 paymentKey 또는 포트원 paymentId, 포트원 토큰). 포트원 txId는 저장하지 않는다(payment §2 '만들지 않은 것') */
-const refColumnsOf = (ref: ConfirmPaymentRef): { pgPaymentRef: string; pgConfirmToken: string | null } =>
-  ref.kind === 'toss' ? { pgPaymentRef: ref.paymentKey, pgConfirmToken: null } : { pgPaymentRef: ref.paymentId, pgConfirmToken: ref.paymentToken };
+/** 원장 칸 셋(토스·시뮬레이터 paymentKey 또는 포트원 paymentId, 포트원 토큰, 포트원 결제 시도 ID. 결제 시도 ID는 승인 검증과 조회 대조에 쓴다, BUILD_ORDER HOT-140 코드 리뷰) */
+const refColumnsOf = (ref: ConfirmPaymentRef): { pgPaymentRef: string; pgConfirmToken: string | null; pgTxId: string | null } =>
+  ref.kind === 'toss' ? { pgPaymentRef: ref.paymentKey, pgConfirmToken: null, pgTxId: null } : { pgPaymentRef: ref.paymentId, pgConfirmToken: ref.paymentToken, pgTxId: ref.txId };
 
 export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateReader {
   constructor(private readonly o: DrizzlePaymentStoreOptions) {}

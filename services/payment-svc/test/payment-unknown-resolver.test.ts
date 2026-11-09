@@ -518,6 +518,12 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
     expect(gateway.options).toEqual([{ timeoutMs: 10_000 }]);
   });
 
+  test('P-T16_리뷰 고침 H4: 원장의 결제 시도 ID를 조회의 대조값으로 넘긴다 [ASVS v5.0.0-2.2.3]', async () => {
+    const { gateway, resolver } = setup();
+    await resolver.runJob(job({ txId: 'tx-attempt-1' }));
+    expect(gateway.options).toEqual([{ timeoutMs: 10_000, expectedTxId: 'tx-attempt-1' }]);
+  });
+
   test('P-T3_리뷰 고침 M6: 답하지 않는 어댑터도 실행기 한도에서 자리를 돌려주고 결과를 가정하지 않는다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-16.5.3]', async () => {
     const { queries, gateway, log, signals, resolver } = setup({ concurrency: 1, queryGuardMs: 20 });
     gateway.fallback = () => new Promise<QueryResult>(() => {});

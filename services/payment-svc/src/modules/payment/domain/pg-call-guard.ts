@@ -8,6 +8,7 @@
 // - 첫 호출 429의 SEV2 로그와 상한 지표는 실제로 값이 바뀐 때만 낸다(몰린 429가 로그를 쏟지 않게, 이미 하한이면 내지 않는다). 429 수 지표는 429마다 센다.
 // - 자리를 다 쥐었는지와 토큰이 없는지가 겹치면 까닭은 bulkhead다(토큰은 곧 차지만 자리는 호출이 끝나야 비기 때문이다).
 // - 승인의 몫은 버킷의 90% [가정]이고 나머지 10%는 단독 조회가 쓴다. 조회는 버킷 전체를 쓴다(몰린 승인이 조회를 굶겨 UNKNOWN이 풀리지 않는 일을 막는다).
+// - 승인 한 건의 토큰 수는 어댑터의 capabilities().confirmCallCost다(없으면 1, BUILD_ORDER HOT-140 코드 리뷰). 묶음의 최소 크기도 비용 배로 늘린다(그래야 작은 채널에서 승인 몫이 한 건 값에 닿는다).
 import type { PgName } from './payment-gateway.js';
 import type { PaymentGateways, PgCallGuardLog, PgCallGuardSignals } from './ports.js';
 
@@ -75,6 +76,8 @@ export interface PgCallGuardOptions {
   readonly clock: MonotonicClock;
   readonly signals: PgCallGuardSignals;
   readonly log: PgCallGuardLog;
+  /** capabilities().confirmCallCost(승인 한 건의 토큰 수). 없으면 1 */
+  readonly confirmCallCost?: number;
 }
 
 /** 채널 하나의 호출 보호기. 던지지 않는다(지표·로그가 던져도 삼킨다) */
@@ -83,6 +86,8 @@ export class PgCallGuard {
   readonly #clock: MonotonicClock;
   readonly #signals: PgCallGuardSignals;
   readonly #log: PgCallGuardLog;
+  /** 승인 한 건의 토큰 수 */
+  readonly #confirmCost: number;
   #rps: number;
   #concurrency: number;
   /** 낮추기 하한 */
@@ -96,11 +101,14 @@ export class PgCallGuard {
   #inflight = 0;
   #loweredAtMs: number | undefined;
 
+  /** @throws RangeError 초당 상한·파드 수·벌크헤드가 틀림, confirmCallCost가 1 이상의 정수가 아님 */
   constructor(o: PgCallGuardOptions) {
+    if (o.confirmCallCost !== undefined && !isPositiveInt(o.confirmCallCost)) throw new RangeError(`승인 호출 비용은 1 이상의 정수다: ${String(o.confirmCallCost)}`);
     this.pg = o.pg;
     this.#clock = o.clock;
     this.#signals = o.signals;
     this.#log = o.log;
+    this.#confirmCost = o.confirmCallCost ?? 1;
     this.#rps = perPodRate(o.callsPerSecond, o.podCount);
     this.#concurrency = perPodBulkhead(o.channelBulkhead, o.podCount);
     // 처음 상한의 25%, 최소 1(나눠서 이미 1보다 작은 값은 그 값이 하한이다)
@@ -116,17 +124,17 @@ export class PgCallGuard {
     return { rps: this.#rps, concurrency: this.#concurrency };
   }
 
-  /** 승인이 지금 잡을 수 있는 수 = min(벌크헤드 빈자리, 조회 몫을 뺀 토큰 수의 정수 부분) */
+  /** 승인이 지금 잡을 수 있는 수 = min(벌크헤드 빈자리, 조회 몫을 뺀 토큰으로 낼 수 있는 승인 건수) */
   available(): number {
     this.#refill();
-    return Math.min(this.#freeSlots(), this.#confirmTokens());
+    return Math.min(this.#freeSlots(), this.#confirmsByTokens());
   }
 
-  /** 여유만큼 벌크헤드 자리와 토큰을 미리 쥐고 쥔 수를 돌려준다. 쓰지 않은 만큼 release·refundTokens로 돌려준다. 0이어도 까닭을 세지 않는다(대기 행을 확인한 뒤 noteBlocked) */
+  /** 여유만큼 벌크헤드 자리와 토큰(건수 × 승인 호출 비용)을 미리 쥐고 쥔 건수를 돌려준다. 쓰지 않은 만큼 release·refundConfirmTokens로 돌려준다. 0이어도 까닭을 세지 않는다(대기 행을 확인한 뒤 noteBlocked) */
   reserve(): number {
     const n = this.available();
     this.#held += n;
-    this.#tokens -= n;
+    this.#tokens -= n * this.#confirmCost;
     return n;
   }
 
@@ -145,15 +153,14 @@ export class PgCallGuard {
     this.#held = Math.max(0, this.#held - count);
   }
 
-  /** 토큰 하나를 쓴다(버킷 전체에서). 없으면 false이고 지표 token을 센다. 틱이 잡지 않고 바로 돌리는 행(runJob)이 쓴다 */
+  /** 토큰 하나를 쓴다(버킷 전체에서). 없으면 false이고 지표 token을 센다. 단독 조회 실행기가 틱 없이 바로 돌리는 행이 쓴다 */
   tryTakeToken(): boolean {
-    this.#refill();
-    if (this.#tokens < 1) {
-      this.#saturated('token');
-      return false;
-    }
-    this.#tokens -= 1;
-    return true;
+    return this.#tryTake(1);
+  }
+
+  /** 승인 한 건 몫의 토큰(승인 호출 비용)을 쓴다. 모자라면 쓰지 않고 false이고 지표 token을 센다. 승인 실행기가 틱 없이 바로 돌리는 행이 쓴다 */
+  tryTakeConfirmTokens(): boolean {
+    return this.#tryTake(this.#confirmCost);
   }
 
   /** 단독 조회가 쓸 토큰을 max까지 미리 빼고 뺀 수를 돌려준다(버킷 전체에서, 쓰지 않은 만큼 refundTokens로 돌려준다) */
@@ -168,6 +175,11 @@ export class PgCallGuard {
   refundTokens(count = 1): void {
     this.#refill();
     this.#tokens = Math.min(this.#burst(), this.#tokens + count);
+  }
+
+  /** 미리 뺐지만 호출하지 않은 승인 건수의 토큰(건수 × 승인 호출 비용)을 돌려준다 */
+  refundConfirmTokens(count = 1): void {
+    this.refundTokens(count * this.#confirmCost);
   }
 
   /** 승인 호출을 시작했다(payment_pg_inflight) */
@@ -214,16 +226,26 @@ export class PgCallGuard {
   // ---- 안쪽 ----
 
   #burst(): number {
-    return Math.max(PG_MIN_TOKEN_BURST, (this.#rps * PG_TOKEN_BURST_MS) / 1000);
+    return Math.max(PG_MIN_TOKEN_BURST * this.#confirmCost, (this.#rps * PG_TOKEN_BURST_MS) / 1000);
   }
 
   #freeSlots(): number {
     return Math.max(0, this.#concurrency - this.#held);
   }
 
-  /** 승인이 쓸 수 있는 토큰 수(버킷의 마지막 10%는 조회 몫) */
-  #confirmTokens(): number {
-    return Math.max(0, Math.floor(this.#tokens - (this.#burst() * PG_QUERY_TOKEN_SHARE_PERCENT) / 100));
+  /** 승인 토큰으로 낼 수 있는 건수(버킷의 마지막 10%는 조회 몫이고, 한 건은 승인 호출 비용만큼 쓴다) */
+  #confirmsByTokens(): number {
+    return Math.max(0, Math.floor((this.#tokens - (this.#burst() * PG_QUERY_TOKEN_SHARE_PERCENT) / 100) / this.#confirmCost));
+  }
+
+  #tryTake(cost: number): boolean {
+    this.#refill();
+    if (this.#tokens < cost) {
+      this.#saturated('token');
+      return false;
+    }
+    this.#tokens -= cost;
+    return true;
   }
 
   #refill(): void {
@@ -282,9 +304,11 @@ export class PgCallGuards {
     if (known !== undefined) return known;
     const gateway = this.o.gateways.of(pg);
     if (gateway === undefined) return undefined;
+    const { callsPerSecond, confirmCallCost } = gateway.capabilities();
     const guard = new PgCallGuard({
       pg,
-      callsPerSecond: gateway.capabilities().callsPerSecond,
+      callsPerSecond,
+      ...(confirmCallCost === undefined ? {} : { confirmCallCost }),
       channelBulkhead: this.o.bulkheads?.[pg] ?? PG_CHANNEL_BULKHEAD[pg],
       podCount: this.o.podCount,
       clock: this.o.clock,

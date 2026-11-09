@@ -1,4 +1,4 @@
-// 결제사 어댑터 등록부(BUILD_ORDER PRF-181). 시뮬레이터와 토스(PRF-184)가 있고 포트원은 HOT-140이 더한다.
+// 결제사 어댑터 등록부(BUILD_ORDER PRF-181). 시뮬레이터와 토스(PRF-184)와 포트원(HOT-140)이 든다.
 import type { PaymentGatewayPort, PgName } from '../../domain/payment-gateway.js';
 import type { PaymentGateways } from '../../domain/ports.js';
 

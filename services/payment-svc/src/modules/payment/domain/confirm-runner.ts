@@ -75,6 +75,10 @@ export interface ConfirmTarget {
   readonly pg: PgName;
   /** pg_payment_ref(토스·시뮬레이터 paymentKey, 포트원 paymentId) */
   readonly paymentRef: string;
+  /** pg_confirm_token(포트원 결제 토큰). 토스·시뮬레이터는 없다. 어댑터 호출에만 넘기고 로그·사건에 싣지 않는다(BUILD_ORDER HOT-140) */
+  readonly confirmToken?: string;
+  /** pg_tx_id(포트원 결제 시도 ID). 토스·시뮬레이터는 없다. 승인 본문의 검증값과 조회의 대조값이다(BUILD_ORDER HOT-140, 코드 리뷰) */
+  readonly txId?: string;
   readonly amount: number;
   readonly status: PaymentLedgerStatus;
   readonly authenticatedAtMs: number;

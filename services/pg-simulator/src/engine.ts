@@ -9,7 +9,20 @@ import { kstIso, systemClock, type SimClock } from './time.js';
 
 export const CONFIRM_DEADLINE_MS = 10 * 60_000;
 export const IDEMPOTENCY_RETENTION_MS = 15 * 24 * 3_600_000;
+/** 포트원 모양 경로의 멱등키 보관 3시간(payment §2.1 멱등키 규격, BUILD_ORDER HOT-140) */
+export const PORTONE_IDEMPOTENCY_RETENTION_MS = 3 * 3_600_000;
 export const ORDER_ID = /^[A-Za-z0-9_-]{6,64}$/;
+
+/** 포트원 모양 경로가 엔진에 넘기는 값(토큰 대조, 멱등 보관 3시간, 취소 가능 금액 대조). 토스 모양 경로는 쓰지 않는다 */
+export interface PortoneCallOptions {
+  retentionMs: number;
+  /** 승인: 이 토큰과 결제의 토큰이 달라야 400 INVALID_PAYMENT_TOKEN이다 */
+  token?: string;
+  /** 승인: 값이 있으면 결제의 결제 시도 ID와 같아야 한다(다르면 포트원 경로의 409 INFORMATION_MISMATCH) */
+  txId?: string;
+  /** 취소: 값이 있으면 남은 금액과 같아야 한다 */
+  currentCancellableAmount?: number;
+}
 
 export const OPS = ['confirm', 'cancel', 'query'] as const;
 export type Op = (typeof OPS)[number];
@@ -51,6 +64,9 @@ interface Payment {
   cancels: CancelRecord[];
   serial: number;
   lastTransactionKey?: string;
+  /** 포트원 모양 결제의 결제 토큰과 결제 시도 ID(결제창 인증이 준다) */
+  portoneToken?: string;
+  txId?: string;
 }
 
 interface IdemEntry {
@@ -67,6 +83,8 @@ interface ArmedFault {
 
 export interface WebhookEvent {
   paymentKey: string;
+  /** 포트원 모양 결제의 결제 시도 ID(포트원 웹훅 본문의 transactionId) */
+  txId?: string;
   headers: Record<string, string>;
   body: { eventType: 'PAYMENT_STATUS_CHANGED'; createdAt: string; data: unknown };
 }
@@ -145,15 +163,41 @@ export class PgSimulatorEngine {
     return { status: 200, body: { paymentKey, orderId: a.orderId, amount: a.amount } };
   }
 
-  confirm(c: { paymentKey: string; orderId: string; amount: number }, idemKey?: string): Promise<SimResponse> {
-    const fp = JSON.stringify(['confirm', c.paymentKey, c.orderId, c.amount]);
-    return this.idempotent('confirm', idemKey, fp, c.orderId, async (fault) => {
+  /** 포트원 모양 결제창 인증. 결제 ID는 pay-{주문 ID}이고 같은 주문을 다시 인증하면 앞 시도를 대체한다(성공은 한 번). 승인된 주문은 다시 인증할 수 없다 */
+  authenticatePortone(a: { orderId: string; amount: number; orderName?: string }): SimResponse {
+    if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
+    if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
+    const paymentKey = `pay-${a.orderId}`;
+    const portoneToken = `ptok_${randomBytes(16).toString('hex')}`;
+    const txId = `tx_${randomBytes(9).toString('hex')}`;
+    const serial = ++this.serial;
+    this.payments.set(paymentKey, {
+      paymentKey,
+      orderId: a.orderId,
+      orderName: a.orderName ?? '시뮬레이터 주문',
+      amount: a.amount,
+      status: 'READY',
+      requestedAt: this.clock.now(),
+      balance: a.amount,
+      cancels: [],
+      serial,
+      portoneToken,
+      txId,
+    });
+    return { status: 200, body: { paymentId: paymentKey, paymentToken: portoneToken, txId, orderId: a.orderId, amount: a.amount } };
+  }
+
+  confirm(c: { paymentKey: string; orderId: string; amount: number }, idemKey?: string, portone?: PortoneCallOptions): Promise<SimResponse> {
+    const fp = JSON.stringify(['confirm', c.paymentKey, c.orderId, c.amount, portone?.token ?? null, portone?.txId ?? null]);
+    return this.idempotent('confirm', idemKey, fp, c.orderId, portone?.retentionMs ?? IDEMPOTENCY_RETENTION_MS, async (fault) => {
       const p = this.payments.get(c.paymentKey);
       if (!p) return { response: err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다') };
       this.expireIfDue(p);
       if (p.status === 'EXPIRED' || p.status === 'ABORTED') return { response: err(400, 'NOT_FOUND_PAYMENT_SESSION', '결제 시간이 만료되어 결제 진행 데이터가 없습니다') };
       if (p.status === 'IN_PROGRESS') return { response: err(400, 'ALREADY_PROCESSING_REQUEST', '이미 처리 중인 요청입니다') };
       if (APPROVED.has(p.status)) return { response: err(400, 'ALREADY_PROCESSED_PAYMENT', '이미 처리된 결제입니다') };
+      if (portone?.token !== undefined && p.portoneToken !== portone.token) return { response: err(400, 'INVALID_PAYMENT_TOKEN', '결제 토큰이 올바르지 않습니다') };
+      if (portone?.txId !== undefined && p.txId !== portone.txId) return { response: err(400, 'INVALID_REQUEST', '결제 시도 ID가 결제창 값과 다릅니다') };
       if (p.orderId !== c.orderId || p.amount !== c.amount) return { response: err(400, 'INVALID_REQUEST', '주문 ID나 금액이 결제창 값과 다릅니다') };
       if (this.approvedByOrder.has(c.orderId)) return { response: err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다') };
 
@@ -182,15 +226,16 @@ export class PgSimulatorEngine {
     });
   }
 
-  cancel(paymentKey: string, c: { cancelReason: string; cancelAmount?: number }, idemKey?: string): Promise<SimResponse> {
-    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null]);
+  cancel(paymentKey: string, c: { cancelReason: string; cancelAmount?: number }, idemKey?: string, portone?: PortoneCallOptions): Promise<SimResponse> {
+    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null, portone?.currentCancellableAmount ?? null]);
     const orderId = this.payments.get(paymentKey)?.orderId;
-    return this.idempotent('cancel', idemKey, fp, orderId, async (fault) => {
+    return this.idempotent('cancel', idemKey, fp, orderId, portone?.retentionMs ?? IDEMPOTENCY_RETENTION_MS, async (fault) => {
       const p = this.payments.get(paymentKey);
       if (!p) return { response: err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다') };
       if (!c.cancelReason || c.cancelReason.length > 200) return { response: err(400, 'INVALID_REQUEST', '취소 사유가 필요합니다') };
       if (p.status === 'CANCELED') return { response: err(400, 'ALREADY_CANCELED_PAYMENT', '이미 취소된 결제입니다') };
       if (p.status !== 'DONE' && p.status !== 'PARTIAL_CANCELED') return { response: err(403, 'NOT_CANCELABLE_PAYMENT', '취소할 수 없는 결제입니다') };
+      if (portone?.currentCancellableAmount !== undefined && portone.currentCancellableAmount !== p.balance) return { response: err(409, 'CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN', '취소 가능 금액이 맞지 않습니다') };
       const fits = (a: number) => Number.isSafeInteger(a) && a > 0 && a <= p.balance;
       if (!fits(c.cancelAmount ?? p.balance)) return { response: err(400, 'NOT_CANCELABLE_AMOUNT', '취소할 수 없는 금액입니다') };
 
@@ -248,7 +293,7 @@ export class PgSimulatorEngine {
   }
 
   private read(p: Payment | undefined, orderId?: string): Promise<SimResponse> {
-    return this.idempotent('query', undefined, '', p?.orderId ?? orderId, async (fault) => {
+    return this.idempotent('query', undefined, '', p?.orderId ?? orderId, IDEMPOTENCY_RETENTION_MS, async (fault) => {
       await this.sleep(fault?.kind === 'delay' ? fault.ms : 0);
       if (fault?.kind === 'decline') return { response: err(400, fault.code, fault.message ?? '결제사가 조회를 거절했습니다') };
       if (fault?.kind === 'pg-error') return { response: err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다') };
@@ -264,6 +309,7 @@ export class PgSimulatorEngine {
     idemKey: string | undefined,
     fingerprint: string,
     orderId: string | undefined,
+    retentionMs: number,
     run: (fault: FaultKind | undefined) => Promise<{ response: SimResponse; store?: SimResponse }>,
   ): Promise<SimResponse> {
     const now = this.clock.now();
@@ -271,7 +317,7 @@ export class PgSimulatorEngine {
     if (slot) {
       // 보관 기간이 지난 기록은 꺼낼 때 지운다(요청마다 전부 훑지 않는다)
       const found = this.idem.get(slot);
-      if (found?.response && now - found.at > IDEMPOTENCY_RETENTION_MS) this.idem.delete(slot);
+      if (found?.response && now - found.at > retentionMs) this.idem.delete(slot);
       const e = this.idem.get(slot);
       if (e && e.fingerprint !== fingerprint) return err(422, 'IDEMPOTENCY_KEY_REUSED', '같은 멱등키로 다른 요청을 보냈습니다');
       if (e && !e.response) return err(409, 'IDEMPOTENT_REQUEST_PROCESSING', '같은 멱등키의 요청을 처리하고 있습니다');
@@ -321,6 +367,7 @@ export class PgSimulatorEngine {
     const at = kstIso(this.clock.now());
     this.events.push({
       paymentKey: p.paymentKey,
+      ...(p.txId === undefined ? {} : { txId: p.txId }),
       headers: {
         'tosspayments-webhook-transmission-id': `wh_${randomBytes(12).toString('hex')}`,
         'tosspayments-webhook-transmission-time': at,
@@ -358,6 +405,7 @@ export class PgSimulatorEngine {
         ? p.cancels.map((c) => ({ cancelAmount: c.cancelAmount, cancelReason: c.cancelReason, canceledAt: kstIso(c.canceledAt), transactionKey: c.transactionKey }))
         : null,
       lastTransactionKey: p.lastTransactionKey ?? null,
+      ...(p.txId === undefined ? {} : { txId: p.txId }),
     };
   }
 }

@@ -514,6 +514,10 @@
 | R-398 | 좌석맵에 마우스 올림 표시가 없고, 고를 수 없는 배율의 클릭에 눈에 보이는 결과가 없으며, 판매 종료 뒤에도 새 좌석이 담겼다 | packages/seatmap engine·worker·protocol, apps/web seats, docs/adr/0236, d2 CMP-021, d5 §5.10, frontend §5.2 | 소유자 지적 → 재현 → 정본 → 시험 → 구현 → 새 맥락 리뷰 | 수정 완료 |
 | R-401 | 운영 결제사 어댑터가 없어 실제 결제를 부를 수 없었다. 만들며 찾은 것: 표에 없는 코드를 거절로 보면 돈이 잡힌 채 좌석을 풀 수 있었고, 주문서형 키 형식과 클라이언트 키 검사, 공식 호스트 고정, 시험 키의 호출 상한이 정본과 어긋나거나 없었다 | docs/features/payment.md §2.1, docs/observability.md, docs/security/asvs/payment.md, docs/security/secrets-and-keys.md, docs/BUILD_ORDER.md, services/payment-svc(토스 어댑터·공통 코드·설정·main.ts) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 12개 → 새 맥락 리뷰 → 고침. 단위 1,469, 통합 216 | 수정 완료 |
 | R-400 | BOT-047 팬 계정 요약·세션 종료 사유·가입 마무리와 VoiceOver 미실행 결정 | docs/adr/0235, 0237, docs/features/identity.md §8·§10.1, docs/api/openapi.yaml, NFR-020, FE-T18, S-T18 | 새 맥락 리뷰 12건 → 재현 시험 먼저 수정 → 짧은 재검토 → 브라우저 확인 | 수정 완료 |
+| R-405 | 포트원 결제를 부를 어댑터가 없었다. 만들며 찾은 것: 공식 승인 답에 결제 ID가 없어 조회 대조가 필요했고, 취소 전 조회가 잔액 검증을 무력화했으며, 한 주문의 여러 시도를 구분하지 않으면 앞 시도의 실패로 결과를 확정할 수 있었고, 시뮬레이터의 만료 처리가 실제와 달라 시험이 거짓으로 통과했다 | docs/features/payment.md §2.1, docs/data.md, docs/security/asvs/payment.md, docs/security/secrets-and-keys.md, docs/BUILD_ORDER.md, services/payment-svc(포트원 어댑터·공통 코드·보호기·마이그레이션 0004·설정), services/pg-simulator(포트원 경로) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 12개 → 새 맥락 리뷰 → 고침. 단위 1,751, 통합 223, 시뮬레이터 66 | 수정 완료 |
+| R-402 | 화면이 쓰는 굿즈 결제·대기열 식별자·읽기 경로가 계약에 없어 화면 단계를 시작할 수 없었다 | docs/api/openapi.yaml, docs/api/guidelines.md, tools/doc-check/check_all.py, packages/contracts, packages/api-client, docs/adr/0238 | 정본 대조 → 영역별 초안 → 합침 검산 → 깨짐 검사 → 새 맥락 리뷰 | 수정 완료 |
+| R-403 | 굿즈 주문 상세의 items 필수 표시가 계약과 생성 Zod에서 달라 CI가 실패했다 | docs/api/openapi.yaml, packages/api-client 생성물 | CI 로그 → 원인 확인 → 고침 → 시험 | 수정 완료 |
+| R-404 | 좌석 연결·재연결·다시 맞추기와 시계가 없고 핸드셰이크 거절이 정본에서 빠져 있었다 | packages/seatmap connection·clock·delta-sync·engine·wire, apps/web seats connection-machine, tools/web-checks/purchase, docs/adr/0240, docs/frontend.md §4.4.1, docs/api/asyncapi.yaml | 정본 대조 → 재현 시험 → 구현 → 세 엔진 PoC → 새 맥락 리뷰 | 수정 완료 |
 
 ## 4. 숫자 일치표
 

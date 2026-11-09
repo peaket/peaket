@@ -1,4 +1,5 @@
 // payment-svc 설정 읽기(BUILD_ORDER PRF-180). 값은 docs/verification.md §4.1 'payment-svc 승인 명령 접수 쓰기와 결과 당기기 서버의 DB 연결'과 맞춘다.
+import type { PortoneGatewayOptions } from './modules/payment/adapters/pg/portone-gateway.js';
 import type { SimulatorGatewayOptions } from './modules/payment/adapters/pg/simulator-gateway.js';
 import type { TossGatewayOptions } from './modules/payment/adapters/pg/toss-gateway.js';
 
@@ -15,6 +16,9 @@ export const MAX_PAYMENT_POD_COUNT = 1_000;
 
 /** 토스 공식 API 주소(PEAKET_PG_TOSS_URL의 기본값) */
 export const DEFAULT_TOSS_API_URL = 'https://api.tosspayments.com';
+/** 포트원 공식 API 주소(PEAKET_PG_PORTONE_URL의 기본값) */
+export const DEFAULT_PORTONE_API_URL = 'https://api.portone.io';
+const PORTONE_REQUIRED = ['PEAKET_PG_PORTONE_SECRET', 'PEAKET_PG_PORTONE_STORE_ID', 'PEAKET_PG_PORTONE_CHANNEL_KEY', 'PEAKET_PG_PORTONE_WEBHOOK_SECRET'] as const;
 const TEST_ENVS: ReadonlySet<string> = new Set(['local', 'ci', 'demo', 'staging']);
 /** 시험 키(test_)의 호출 상한 초당 1 [가정]. 토스 시험 환경은 API별 분당 100건이고(payment §2.1), 파드가 나눠 쓴다 */
 export const TOSS_TEST_KEY_CALLS_PER_SECOND = 1;
@@ -109,6 +113,35 @@ function tossCallsPerSecondOf(raw: string | undefined, secretKey: string): numbe
 }
 
 /**
+ * 포트원 어댑터 설정을 읽는다(BUILD_ORDER HOT-140, docs/features/payment.md §2.1 '포트원 어댑터의 첫 구현').
+ * PEAKET_PG_PORTONE_URL(기본 공식 주소)·PEAKET_PG_PORTONE_SECRET·PEAKET_PG_PORTONE_STORE_ID·PEAKET_PG_PORTONE_CHANNEL_KEY·PEAKET_PG_PORTONE_WEBHOOK_SECRET(교체 중의 옛 값은 PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS).
+ * 넷이 다 없으면 undefined다. 포트원 시크릿은 접두사가 정해져 있지 않아 환경과 맞춰 볼 수 없다. 대신 sim_sk_는 시험 환경의 시뮬레이터 주소에서만 받고, 그 밖의 시크릿은 공식 호스트 https로만 나간다.
+ * @throws Error 일부만 있음, 운영에 sim_sk_, sim_sk_로 공식 주소를 가리킴, sim_sk_가 아닌데 https가 아니거나 공식 호스트가 아님, 주소 모양이 틀림(시작 실패). 글에 비밀 값·주소 값을 싣지 않는다
+ */
+export function loadPortoneGatewayConfig(env: Record<string, string | undefined>): PortoneGatewayOptions | undefined {
+  const required = PORTONE_REQUIRED.map((name) => [name, env[name]?.trim()] as const);
+  if (required.every(([, value]) => !value)) return undefined;
+  for (const [name, value] of required) if (!value) throw new Error(`${name}이 없다(포트원 설정은 넷이 함께 있어야 한다)`);
+  const [secret, storeId, channelKey, webhookSecret] = required.map(([, value]) => value!) as [string, string, string, string];
+  const test = isTestEnv(env);
+  const simulated = secret.startsWith(SIMULATOR_SECRET_PREFIX);
+  if (simulated && !test) throw new Error('PEAKET_PG_PORTONE_SECRET이 이 환경(운영)에 맞지 않는다(시뮬레이터용 시크릿은 시험 환경에서만 받는다)');
+  const baseUrl = env.PEAKET_PG_PORTONE_URL?.trim() || DEFAULT_PORTONE_API_URL;
+  assertHttpUrl('PEAKET_PG_PORTONE_URL', baseUrl);
+  const url = new URL(baseUrl);
+  const official = new URL(DEFAULT_PORTONE_API_URL);
+  if (simulated) {
+    if (url.hostname === official.hostname) throw new Error('PEAKET_PG_PORTONE_URL이 포트원 공식 주소인데 시크릿이 시뮬레이터용이다');
+  } else if (url.protocol !== 'https:') {
+    throw new Error('PEAKET_PG_PORTONE_URL은 https 주소여야 한다(시뮬레이터용 시크릿만 http를 쓸 수 있다)');
+  } else if (url.host !== official.host) {
+    throw new Error('PEAKET_PG_PORTONE_URL은 포트원 공식 주소여야 한다(시뮬레이터용 시크릿만 다른 주소를 쓸 수 있다)');
+  }
+  const previous = env.PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS?.trim();
+  return { baseUrl, secret, storeId, channelKey, webhookSecrets: previous ? [webhookSecret, previous] : [webhookSecret], isTest: test };
+}
+
+/**
  * 결제사 어댑터 시작 조건을 본다(BUILD_ORDER PRF-181이 넘긴 것, PRF-184). local·ci는 어댑터 없이도 켠다. 그 밖의 환경은 토스 어댑터가 있어야 한다.
  * 시뮬레이터 어댑터는 운영에서 켜지 못하고, demo·staging에서는 부하 시험·전환 훈련용으로 함께 켤 수 있지만 '어댑터 하나 이상'에는 세지 않는다.
  * @throws Error 조건을 어김(시작 실패)
@@ -140,7 +173,7 @@ export function loadPgCallGuardConfig(env: Record<string, string | undefined>): 
 }
 
 /** 외부 호출 클라이언트가 받는 주소 모양인지 본다(잘못된 주소가 듣기 시작한 뒤에 드러나지 않게). 값에 비밀번호가 있을 수 있어 글에 싣지 않는다 */
-function assertHttpUrl(name: 'PEAKET_PG_SIM_URL' | 'PEAKET_PG_TOSS_URL', raw: string): void {
+function assertHttpUrl(name: 'PEAKET_PG_SIM_URL' | 'PEAKET_PG_TOSS_URL' | 'PEAKET_PG_PORTONE_URL', raw: string): void {
   let url: URL;
   try {
     url = new URL(raw);

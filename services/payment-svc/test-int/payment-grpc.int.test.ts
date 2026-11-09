@@ -81,6 +81,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     pg: ['text', 'NO'],
     pg_payment_ref: ['text', 'NO'],
     pg_confirm_token: ['text', 'YES'],
+    pg_tx_id: ['text', 'YES'],
     deposit_secret_hash: ['bytea', 'YES'],
     amount: ['integer', 'NO'],
     status: ['text', 'NO'],
@@ -141,14 +142,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0003)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 4개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0004)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 5개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('4');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('5');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -287,12 +288,11 @@ describe('승인 명령 접수 ConfirmPayment', () => {
     expect(reply).toMatchObject({ result: IN_PROGRESS, payment_id: p.id, approved_at: null, failure_category: 'FAILURE_CATEGORY_UNSPECIFIED' });
   });
 
-  test('P-T53_포트원 명령은 pg_payment_ref에 payment_id, pg_confirm_token에 토큰을 적고 tx_id는 저장하지 않는다', async () => {
+  test('P-T16_리뷰 고침 H4: 포트원 명령은 pg_payment_ref에 payment_id, pg_confirm_token에 토큰, pg_tx_id에 tx_id를 적는다 [ASVS v5.0.0-2.2.3]', async () => {
     const f = portoneConfirm();
     await expect(confirm(f.request)).resolves.toMatchObject({ result: IN_PROGRESS });
     const { payments } = await ledgerOf(admin, f.orderId);
-    expect(payments[0]).toMatchObject({ pg: 'PORTONE', pg_payment_ref: f.paymentId, pg_confirm_token: f.paymentToken });
-    expect(JSON.stringify(payments[0])).not.toContain(f.txId);
+    expect(payments[0]).toMatchObject({ pg: 'PORTONE', pg_payment_ref: f.paymentId, pg_confirm_token: f.paymentToken, pg_tx_id: f.txId });
   });
 
   test('P-T53_시뮬레이터 명령은 toss 칸으로 받아 pg SIMULATOR로 적는다', async () => {
