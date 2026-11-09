@@ -15,9 +15,9 @@ export function simulatorWindow(a: PaymentAttempt, nav: (url: string) => void = 
         if (!r.ok) throw new Error(String(r.status));
         paymentKey = ((await r.json()) as { paymentKey?: unknown }).paymentKey;
       } catch {
-        throw new PaymentWindowError('failed');
+        throw new PaymentWindowError('not-opened');
       }
-      if (typeof paymentKey !== 'string' || paymentKey === '') throw new PaymentWindowError('failed');
+      if (typeof paymentKey !== 'string' || paymentKey === '') throw new PaymentWindowError('not-opened');
       const back = new URL(c.successUrl);
       back.searchParams.set('paymentKey', paymentKey);
       back.searchParams.set('amount', String(c.amount));

@@ -161,6 +161,7 @@ export class BookingModule {
                 signals: startPayment.signals,
                 log: startPayment.log ?? (logger ? new LoggerOrderLog(logger) : silentStartLog),
                 clock: clock ?? platformClock,
+                ...(ports.holdMarks ? { holdMarks: ports.holdMarks } : {}),
               }),
             inject: [CLOCK, { token: PLATFORM_LOGGER, optional: true }],
           },

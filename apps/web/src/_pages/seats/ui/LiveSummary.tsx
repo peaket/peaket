@@ -97,7 +97,8 @@ export function LiveSummary({ picks, prices, limit, phase, notice, held, checkou
               <button className="btn btn-ghost btn-sm" type="button" onClick={onRelease}>
                 좌석 놓기
               </button>
-              <button className="btn btn-outline btn-sm" type="button" disabled={extended} onClick={onExtend}>
+              {/* 연장 뒤에도 초점을 잃지 않게 disabled 대신 aria-disabled로 막는다 */}
+              <button className="btn btn-outline btn-sm" type="button" aria-disabled={extended} onClick={extended ? undefined : onExtend}>
                 {extended ? '이미 연장했습니다' : '1회 연장'}
               </button>
             </>

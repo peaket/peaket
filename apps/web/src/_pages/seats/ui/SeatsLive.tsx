@@ -22,6 +22,8 @@ import { LiveSummary } from './LiveSummary';
 import { ZoneLegend } from './ZoneLegend';
 
 type SeatListView = typeof import('./SeatList').SeatList;
+/** 멈춘 홀드를 다시 읽는 간격(초) [가정] */
+const FROZEN_REREAD_TICKS = 10;
 const SEAT_LEGEND: readonly SeatStatus[] = ['available', 'held-by-others', 'mine', 'sold', 'unavailable', 'wheelchair'];
 /** [+]·[−] 배율(엔진 ZOOM_STEP과 같다. 좌석맵 패키지를 첫 묶음에 넣지 않으려고 글자로 둔다) */
 const ZOOM_STEP = 1.5;
@@ -422,10 +424,18 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       setHeldLeft(null);
       return;
     }
+    let frozenTicks = 0;
     const tick = () => {
       const h = bookingRef.current?.held();
       if (!h) return;
       // 기기가 잠든 사이 단조 시계가 멈출 수 있어 벽시계와 함께 보고 더 이른 쪽을 쓴다
+      if (h.frozen) {
+        // 멈춘 홀드는 줄어들지 않고 만료로 끝내지 않는다. 풀렸는지는 가끔 다시 읽는다(H3, ADR-0254)
+        setHeldLeft(h.frozenLeftMs ?? 0);
+        frozenTicks += 1;
+        if (frozenTicks % FROZEN_REREAD_TICKS === 0) void bookingRef.current?.refreshFrozen();
+        return;
+      }
       const left = Math.min(h.deadlineMono - performance.now(), h.deadlineWall - Date.now());
       setHeldLeft(left);
       if (left <= 0) bookingRef.current?.expire();

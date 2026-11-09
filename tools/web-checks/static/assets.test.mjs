@@ -57,6 +57,13 @@ test('FE-T21 올릴 JS·CSS에 소스 맵 링크가 있으면 오류다', () => 
   }
 });
 
+test('FE-T21 M8 올릴 JS에 데모 결제창 표식이 있으면 오류다. 데모 빌드만 allowSimulator로 지나간다(ADR-0253)', () => {
+  const dir = fixture({ 'c.js': 'fetch("/demo/pg-simulator/authenticate",{method:"POST"})', 'ok.js': 'fetch("/v1/home")' });
+  const blocked = planUpload(dir);
+  assert.equal(blocked.errors.filter((e) => e.includes('데모 결제창')).length, 1);
+  assert.equal(planUpload(dir, { allowSimulator: true }).errors.filter((e) => e.includes('데모 결제창')).length, 0);
+});
+
 test('FE-T21 올릴 JS·HTML에 MSW 목업 처리기 글자가 있으면 오류다(ADR-0199 결정 2)', () => {
   const dir = fixture({ 'w.js': "navigator.serviceWorker.register('/mockServiceWorker.js')", 'l.js': 'console.log("[MSW] Mocking enabled")', 'ok.js': 'fetch("/v1/home")', 'p.html': '<p>msw 글자만으로는 걸리지 않는다</p>' });
   try {

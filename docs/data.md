@@ -965,6 +965,7 @@ erDiagram
         text status "ACCEPTED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|FAILED|PARTIAL_CANCELED|CANCELED"
         timestamptz deposit_due_at "가상계좌 입금 기한(결제사에 보낸 값, ADR-0062)"
         timestamptz entry_opens_at "회차의 입장 시작 시각(승인 명령이 싣는다, 선택). 입금 오류 되돌림의 새 기한을 입장 24시간 전으로 자른다(추천 적용 2026-11-09, BUILD_ORDER PRF-190, 마이그레이션 0009)"
+        boolean virtual_account_allowed "이 회차에서 가상계좌를 내도 되는가(승인 명령이 싣는다, 비면 지금처럼 받는다). 거짓인데 승인 답이 입금 대기면 입금 전 취소로 끝낸다(POL-014, 추천 적용 2026-11-09, 마이그레이션 0012, BUILD_ORDER HOT-358 리뷰)"
         timestamptz deposit_notified_at "입금 완료 통보를 처음 받은 시각. 입금 대기 행은 짧은 간격 조회의 기준이고 입금 확정·만료 때 삭제, FAILED 행은 늦은 입금 확인을 건 표시(추천 적용 2026-11-09, BUILD_ORDER HOT-151, 코드 리뷰)"
         text virtual_account_no "결제사가 발급한 가상계좌 번호, 필드 암호화(P1 기준), 입금 확정·만료 때 삭제"
         text virtual_account_bank "가상계좌 은행, 입금 확정·만료 때 삭제"

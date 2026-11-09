@@ -10,7 +10,7 @@ export function parseReturn(search: string): ReturnValues {
   const orderId = q.get('order') ?? undefined;
   const code = q.get('code');
   // 결제사가 준 실패 글은 화면에 옮기지 않고 코드로만 가른다
-  if (code) return { kind: 'fail', ...(orderId ? { orderId } : {}), cancelled: code === 'PAY_PROCESS_CANCELED' || code === 'USER_CANCEL' };
+  if (code) return { kind: 'fail', ...(orderId ? { orderId } : {}), cancelled: code === 'PAY_PROCESS_CANCELED' || code === 'PAY_PROCESS_ABORTED' || code === 'USER_CANCEL' };
   if (!orderId) return { kind: 'none' };
   const paymentKey = q.get('paymentKey');
   if (paymentKey) {

@@ -27,10 +27,10 @@ export function portoneWindow(a: PaymentAttempt, request: PortoneRequest = PortO
           ...(c.customData ? { customData: c.customData } : {}),
         });
       } catch {
-        throw new PaymentWindowError('failed');
+        throw new PaymentWindowError('not-opened');
       }
-      // 리디렉션이 일어나면 돌아오지 않는다. 돌아왔다면 실패 답이다(code가 있으면 그 코드로 가른다)
-      if (r?.code) throw new PaymentWindowError(r.code === 'FAILURE_TYPE_PG' ? 'failed' : 'cancelled');
+      // 리디렉션이 일어나면 돌아오지 않는다. 돌아왔다면 실패 답이다. 취소로 확인된 코드만 취소이고 모르는 코드는 실패로 본다
+      if (r?.code) throw new PaymentWindowError(r.code === 'PAY_PROCESS_CANCELED' || r.code === 'PAY_PROCESS_ABORTED' ? 'cancelled' : 'failed');
     },
   };
 }

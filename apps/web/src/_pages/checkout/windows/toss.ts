@@ -8,7 +8,7 @@ export interface TossSdk {
     setAmount(a: { currency: 'KRW'; value: number }): Promise<void>;
     renderPaymentMethods(p: { selector: string; variantKey: string }): Promise<{ getSelectedPaymentMethod(): Promise<{ method: string }> }>;
     renderAgreement(p: { selector: string; variantKey: string }): Promise<unknown>;
-    requestPayment(p: { orderId: string; orderName: string; successUrl: string; failUrl: string; customerName?: string }): Promise<unknown>;
+    requestPayment(p: { orderId: string; orderName: string; successUrl: string; failUrl: string }): Promise<unknown>;
   };
 }
 
@@ -28,18 +28,18 @@ export function tossWindow(a: PaymentAttempt, load: (clientKey: string) => Promi
         throw new PaymentWindowError('failed');
       }
     },
-    async pay({ buyerName }) {
-      if (!widgets || !methods) throw new PaymentWindowError('failed');
+    async pay() {
+      if (!widgets || !methods) throw new PaymentWindowError('not-opened');
       let picked: { method: string };
       try {
         picked = await methods.getSelectedPaymentMethod();
       } catch {
-        throw new PaymentWindowError('failed');
+        throw new PaymentWindowError('not-opened');
       }
       // 서버가 막은 수단(가상계좌 등)을 위젯에서 골랐으면 결제를 시작하지 않는다(BUILD_ORDER PRF-190)
       if (!tossMethodAllowed(picked.method, a.allowedPayMethods)) throw new PaymentWindowError('method-not-allowed');
       try {
-        await widgets.requestPayment({ orderId: c.orderId, orderName: c.orderName, successUrl: c.successUrl, failUrl: c.failUrl, ...(buyerName ? { customerName: buyerName } : {}) });
+        await widgets.requestPayment({ orderId: c.orderId, orderName: c.orderName, successUrl: c.successUrl, failUrl: c.failUrl });
       } catch (e) {
         throw new PaymentWindowError((e as { code?: string }).code === 'USER_CANCEL' ? 'cancelled' : 'failed');
       }

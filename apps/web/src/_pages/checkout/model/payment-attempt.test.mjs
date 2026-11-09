@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { register } from 'node:module';
-import { attemptIdempotencyKey, attemptOf, attemptOutcome, tossMethodAllowed } from './payment-attempt.ts';
+import { attemptOf, attemptOutcome, nextAttemptKey, readAttemptKey, tossMethodAllowed } from './payment-attempt.ts';
 import { orderOutcome } from './order.ts';
 
 register('../../../shared/lib/test-ts-resolve.mjs', import.meta.url);
@@ -32,12 +32,16 @@ test('HOT-358 409·401·404 뜻이 서버와 같다', () => {
   assert.equal(attemptOutcome({ status: 423 }).kind, 'sale-paused');
 });
 
-test('HOT-358 같은 결제수단은 같은 멱등 키, 다른 수단은 새 키', () => {
+test('P-T25 H1 창을 열기 전 같은 수단은 같은 키, 창을 열었거나 수단이 바뀌면 새 키', () => {
   let n = 0;
   const make = () => `k${(n += 1)}`;
-  const a = attemptIdempotencyKey(null, '', make);
-  assert.equal(attemptIdempotencyKey(a, '', make).key, a.key);
-  assert.notEqual(attemptIdempotencyKey(a, 'CARD', make).key, a.key);
+  const a = nextAttemptKey(null, '', make);
+  assert.equal(nextAttemptKey(a, '', make).key, a.key);
+  assert.notEqual(nextAttemptKey(a, 'CARD', make).key, a.key);
+  assert.notEqual(nextAttemptKey({ ...a, opened: true }, '', make).key, a.key);
+  assert.deepEqual(readAttemptKey(JSON.stringify(a)), a);
+  assert.equal(readAttemptKey('{"key":1}'), null);
+  assert.equal(readAttemptKey('망가짐'), null);
 });
 
 test('HOT-358 응답 모양이 틀리면 쓰지 않는다', () => {
@@ -56,7 +60,8 @@ test('P-T9 PRF-190 토스 위젯에서 허용되지 않은 수단은 막고 모�
   assert.equal(tossMethodAllowed('VIRTUAL_ACCOUNT', ['CARD']), false);
   assert.equal(tossMethodAllowed('CARD', ['CARD']), true);
   assert.equal(tossMethodAllowed('NEW_METHOD', ['CARD']), false);
-  assert.equal(tossMethodAllowed('VIRTUAL_ACCOUNT', undefined), true);
+  // L2: 허용 목록이 없으면 막는다
+  assert.equal(tossMethodAllowed('CARD', undefined), false);
 });
 
 const tossAttempt = { attemptId: 'a1', pg: 'TOSS', allowedPayMethods: ['CARD'], checkout: { clientKey: 'k', customerKey: 'c', orderId: 'order-1', orderName: 'n', amount: 1000, successUrl: 'https://w/s', failUrl: 'https://w/f' } };
@@ -80,6 +85,32 @@ test('HOT-358 토스 창: 위젯을 그린 뒤 허용된 수단이면 결제를 
   await w.mount({ methods: '#m', agreement: '#a' });
   await w.pay({});
   assert.equal(calls.requested, 1);
+});
+
+test('L3 토스 창: 정본에 없는 구매자 이름을 결제사에 넘기지 않는다', async () => {
+  const seen = [];
+  const { sdk } = fakeToss('CARD');
+  const widgets = sdk.widgets();
+  widgets.requestPayment = async (p) => {
+    seen.push(p);
+  };
+  const w = tossWindow(tossAttempt, async () => sdk);
+  await w.mount({ methods: '#m', agreement: '#a' });
+  await w.pay({ buyerName: '김피켓' });
+  assert.equal('customerName' in seen[0], false);
+});
+
+test('L13 포트원: 취소 코드만 취소이고 모르는 코드는 실패다. 스크립트 오류는 창을 열지 못한 것이다', async () => {
+  const attempt = { attemptId: 'a1', pg: 'PORTONE', allowedPayMethods: ['CARD'], checkout: { storeId: 's', channelKey: 'c', paymentId: 'pay-o', orderName: 'n', totalAmount: 100, currency: 'KRW', redirectUrl: 'https://w/r' } };
+  const of = (code) => portoneWindow(attempt, async () => ({ code }));
+  await assert.rejects(() => of('PAY_PROCESS_CANCELED').pay({}), (e) => e.reason === 'cancelled');
+  await assert.rejects(() => of('PAY_PROCESS_ABORTED').pay({}), (e) => e.reason === 'cancelled');
+  await assert.rejects(() => of('FAILURE_TYPE_SYSTEM').pay({}), (e) => e.reason === 'failed');
+  await assert.rejects(() => of('NEW_CODE').pay({}), (e) => e.reason === 'failed');
+  const threw = portoneWindow(attempt, async () => {
+    throw new Error('script');
+  });
+  await assert.rejects(() => threw.pay({}), (e) => e.reason === 'not-opened');
 });
 
 test('P-T9 HOT-358 토스 창: 고를 수 없는 수단을 고르면 결제를 요청하지 않는다', async () => {

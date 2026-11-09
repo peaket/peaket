@@ -1427,7 +1427,7 @@ describe('리뷰 고침(코드 리뷰 2026-11-09, BUILD_ORDER PRF-144)', () => {
     });
 
     test('ST25_ADR0122_ 리뷰 고침 L12: 만료 인덱스의 정수가 아닌 멤버는 던지지 않고 건너뛰어 그 수를 돌려준다 [ASVS v5.0.0-16.5.2]', async () => {
-      const redis = { command: async () => ['1', '01', 'abc', '-1', '2'] };
+      const redis = { evalScript: async () => ['1', '01', 'abc', '-1', '2'] };
       await expect(new RedisSaleCounts(redis as never).holdIndexes('ev-a', 0, 10)).resolves.toEqual({ indexes: [1, 2], badMembers: 3 });
     });
 

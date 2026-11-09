@@ -1,4 +1,4 @@
-// 데모 SIMULATOR 결제창의 서버 경로(FE-T21, ADR-0253). PEAKET_ENV가 local·ci일 때만 PG 시뮬레이터의 시험 인증을 대신 부른다(그 밖은 404).
+// 데모 SIMULATOR 결제창의 서버 경로(FE-T21, ADR-0253). PEAKET_ENV가 local·ci·demo일 때만 PG 시뮬레이터의 시험 인증을 대신 부른다(그 밖은 404).
 // 시뮬레이터 비밀 키는 서버 환경 값으로만 읽고 브라우저로 보내지 않는다.
 import { NextResponse } from 'next/server';
 
@@ -9,7 +9,7 @@ export async function POST(req: Request): Promise<Response> {
   const env = process.env.PEAKET_ENV;
   const base = process.env.PEAKET_PG_SIM_URL;
   const secret = process.env.PEAKET_PG_SIM_SECRET_KEY;
-  if ((env !== 'local' && env !== 'ci') || !base || !secret) return notFound();
+  if ((env !== 'local' && env !== 'ci' && env !== 'demo') || !base || !secret) return notFound();
   let body: { orderId?: unknown; amount?: unknown; orderName?: unknown };
   try {
     body = (await req.json()) as typeof body;

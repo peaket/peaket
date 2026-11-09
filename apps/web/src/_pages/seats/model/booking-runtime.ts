@@ -20,12 +20,16 @@ export interface HoldResult {
   seats?: HeldSeat[];
   totalAmount?: number;
   assignResult?: string;
+  /** 시간이 흐르지 않는다(결제 정지로 멈췄거나 결제 접수 뒤 묶였다). 타이머로 만료 처리하지 않는다(ADR-0254) */
+  frozen?: boolean;
 }
 
 export interface HeldState extends HoldResult {
   /** 마감(받은 때 시계 + 서버 시각 기준 남은 시간). 단조 시계는 기기 절전 중 멈출 수 있어 벽시계도 함께 본다 */
   deadlineMono: number;
   deadlineWall: number;
+  /** 멈춘 동안 보여 줄 남은 시간 */
+  frozenLeftMs?: number;
 }
 
 export type AutoFailure = 'unavailable' | 'no-match' | 'wish-error';
@@ -93,6 +97,9 @@ export function createBooking(d: BookingDeps) {
   let held: HeldState | null = null;
   let firstBehavior: FirstHoldBehavior | null = null;
   let autoFailure: AutoFailure | null = null;
+  /** 응답을 잃은 홀드 요청(서버에 닿았을 수 있다). 다른 좌석을 잡기 전에 같은 키로 먼저 확인한다 */
+  let unconfirmed: { key: string; seats: string; body: object } | null = null;
+  let restoring = false;
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((f) => f());
   const mono = d.now ?? (() => performance.now());
@@ -103,7 +110,7 @@ export function createBooking(d: BookingDeps) {
   /** 응답 하나를 held 값으로 */
   const heldOf = (data: HoldResult, serverDate: string | null): HeldState => {
     const left = remainingMs(data.expiresAt, serverDate, wall());
-    return { ...data, deadlineMono: mono() + left, deadlineWall: wall() + left };
+    return { ...data, deadlineMono: mono() + left, deadlineWall: wall() + left, ...(data.frozen ? { frozenLeftMs: left } : {}) };
   };
 
   /** 놓은 좌석을 표시한다(서버의 다시 잡기 대기와 같은 30초) */
@@ -129,11 +136,17 @@ export function createBooking(d: BookingDeps) {
       } catch (e) {
         if (e instanceof PurchaseKeyError) return e.reason === 'storage' ? { problem: {} } : 'ended';
         const p = problemOf(e);
-        if (holdOutcome(p).type === 'REFRESH' && !refreshed) {
+        const out = holdOutcome(p);
+        if (out.type === 'REFRESH' && !refreshed) {
           refreshed = true;
-          if ((await d.refreshToken()) !== 'ok') return 'ended';
+          const r = await d.refreshToken();
+          // 갱신의 일시 장애는 세션 끝이 아니다(M7)
+          if (r === 'rejected') return 'ended';
+          if (r !== 'ok') return { problem: {} };
           continue;
         }
+        // 이름 있는 401·403은 구매 세션 끝이다(M7)
+        if (out.type === 'SESSION_ENDED' || out.type === 'REFRESH') return 'ended';
         return { problem: p };
       }
     }
@@ -149,10 +162,12 @@ export function createBooking(d: BookingDeps) {
       } catch (e) {
         const p = problemOf(e);
         if (p.status === 404) return 'gone';
-        if (p.status === 401) {
+        if (p.status === 401 || p.status === 403) {
           if (holdOutcome(p).type === 'REFRESH' && !refreshed) {
             refreshed = true;
-            if ((await d.refreshToken()) === 'ok') continue;
+            const r = await d.refreshToken();
+            if (r === 'ok') continue;
+            return r === 'rejected' ? 'ended' : 'failed';
           }
           return 'ended';
         }
@@ -179,12 +194,17 @@ export function createBooking(d: BookingDeps) {
         const r = await d.client.send<HoldResult>(holdOp, { params: { eventId: d.eventId }, body, idempotencyKey, purchase: d.session });
         held = heldOf(r.data, r.headers.get('date'));
         idem = null;
+        unconfirmed = null;
         d.saveHold(r.data);
         actor.send({ type: 'HOLD_OK', hold: r.data });
         return;
       } catch (e) {
         if (e instanceof PurchaseKeyError) return send({ type: e.reason === 'storage' ? 'HOLD_FAILED' : 'SESSION_ENDED' });
-        const out = holdOutcome(problemOf(e));
+        const problem = problemOf(e);
+        // 답을 받지 못했다: 서버에 닿았을 수 있어 기억한다(답이 있으면 끝난 요청이다, L13)
+        unconfirmed = problem.status === undefined && (body as { seatIds?: unknown }).seatIds ? { key: idempotencyKey, seats: [...((body as { seatIds: string[] }).seatIds)].sort().join(','), body } : null;
+        const out = holdOutcome(problem);
+        if (out.type === 'HOLD_RECENT') remember(out.seats, (out.availableAt && Date.parse(out.availableAt)) || wall() + REHOLD_WAIT_MS);
         if (out.type !== 'REFRESH') {
           if ((body as { auto?: unknown }).auto) autoFailure = autoFailureOf(problemOf(e));
           return send(out);
@@ -208,6 +228,7 @@ export function createBooking(d: BookingDeps) {
     autoFailure: () => autoFailure,
     /** 지도에서 누른 좌석. 한도를 넘으면 지도에 표시하지 않는다 */
     pick(seat: SeatPick, seatIndex: number) {
+      if (restoring) return;
       const until = released.get(seat.seatId);
       if (until !== undefined && until > wall()) {
         actor.send({ type: 'NOTICE', notice: { kind: 'recent-pick', until } });
@@ -223,6 +244,8 @@ export function createBooking(d: BookingDeps) {
     },
     setLimit: (limit: number) => actor.send({ type: 'SET_LIMIT', limit }),
     expire() {
+      // 멈춘 홀드는 서버에 살아 있다(시계로 끝내지 않는다, H3)
+      if (held?.frozen) return;
       const seatIds = held?.seatIds ?? [];
       if (seatIds.length > 0) remember(seatIds, wall() + REHOLD_WAIT_MS);
       dropHeld(seatIds);
@@ -232,21 +255,42 @@ export function createBooking(d: BookingDeps) {
     async restore(): Promise<void> {
       const holdId = d.savedHoldId();
       if (!holdId || actor.getSnapshot().value !== 'selecting') return;
-      for (let i = 0; i <= RESTORE_RETRIES; i += 1) {
-        const r = await readHold(holdId);
-        if (actor.getSnapshot().value !== 'selecting') return;
-        if (r === 'ended') return send({ type: 'SESSION_ENDED' });
-        if (r === 'gone') return d.clearHold();
-        if (r !== 'failed') {
-          held = heldOf(r.data, r.date);
-          d.saveHold(r.data);
-          d.setMineOnMap(r.data.seatIds, true);
-          actor.send({ type: 'RESTORE', hold: r.data, extended: r.data.extendable === false });
-          return;
+      // 다시 읽는 동안 고른 좌석이 복원한 홀드와 어긋나지 않게 막는다(L13)
+      restoring = true;
+      try {
+        for (let i = 0; i <= RESTORE_RETRIES; i += 1) {
+          const r = await readHold(holdId);
+          if (actor.getSnapshot().value !== 'selecting') return;
+          if (r === 'ended') return send({ type: 'SESSION_ENDED' });
+          if (r === 'gone') return d.clearHold();
+          if (r !== 'failed') {
+            held = heldOf(r.data, r.date);
+            d.saveHold(r.data);
+            d.setMineOnMap(r.data.seatIds, true);
+            actor.send({ type: 'RESTORE', hold: r.data, extended: r.data.extendable === false });
+            return;
+          }
+          if (i < RESTORE_RETRIES) await new Promise((f) => setTimeout(f, RESTORE_RETRY_MS));
         }
-        if (i < RESTORE_RETRIES) await new Promise((f) => setTimeout(f, RESTORE_RETRY_MS));
+        actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
+      } finally {
+        restoring = false;
       }
-      actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
+    },
+    /** 멈춘 홀드를 다시 읽어 풀렸는지 본다(재개를 알려 주는 길이 아직 없다). 실패는 다음 차례에 다시 한다 */
+    async refreshFrozen(): Promise<void> {
+      const h = held;
+      if (!h?.frozen || actor.getSnapshot().value !== 'held') return;
+      const r = await readHold(h.holdId);
+      if (r === 'ended') return send({ type: 'SESSION_ENDED' });
+      if (r === 'gone') {
+        dropHeld(h.seatIds);
+        return send({ type: 'HOLD_GONE' });
+      }
+      if (r !== 'failed') {
+        held = heldOf(r.data, r.date);
+        notify();
+      }
     },
     /** 1회 연장(서명). 두 번째는 409이고 서버가 준 만료로 맞춘다 */
     async extend(): Promise<void> {
@@ -273,6 +317,8 @@ export function createBooking(d: BookingDeps) {
       }
       if (p.status === 409 && p.type === 'hold-in-payment') return actor.send({ type: 'NOTICE', notice: { kind: 'in-payment' } });
       if (p.status === 404) {
+        clearMap();
+        remember(h.seatIds, wall() + REHOLD_WAIT_MS);
         dropHeld(h.seatIds);
         return send({ type: 'HOLD_GONE' });
       }
@@ -298,6 +344,17 @@ export function createBooking(d: BookingDeps) {
         return send({ type: 'HOLD_GONE' });
       }
       if (p.status === 409 && p.type === 'hold-in-payment') return actor.send({ type: 'NOTICE', notice: { kind: 'in-payment' } });
+      // 답을 받지 못했다: 서버에서 이미 풀렸으면 놓은 것으로 끝낸다(응답 유실, L13)
+      if (p.status === undefined) {
+        const again = await readHold(h.holdId);
+        if (again === 'ended') return send({ type: 'SESSION_ENDED' });
+        if (again === 'gone') {
+          clearMap();
+          remember(h.seatIds, untilMs);
+          dropHeld(h.seatIds);
+          return send({ type: 'RELEASED' });
+        }
+      }
       actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
     },
     resume: () => actor.send({ type: 'RESUME' }),
@@ -308,6 +365,25 @@ export function createBooking(d: BookingDeps) {
       const s = actor.getSnapshot();
       if (s.value !== 'holding') return;
       const seatIds = s.context.picks.map((p) => p.seatId).sort();
+      // 앞 요청의 답을 잃었고 좌석이 달라졌으면, 서버에 잡혔는지 같은 키로 먼저 확인한다(잡혔으면 그 홀드를 잇는다, L13)
+      if (unconfirmed && unconfirmed.seats !== seatIds.join(',')) {
+        const prior = unconfirmed;
+        try {
+          const r = await d.client.send<HoldResult>(holdOp, { params: { eventId: d.eventId }, body: prior.body, idempotencyKey: prior.key, purchase: d.session });
+          unconfirmed = null;
+          held = heldOf(r.data, r.headers.get('date'));
+          idem = null;
+          d.saveHold(r.data);
+          clearMap();
+          d.setMineOnMap(r.data.seatIds, true);
+          actor.send({ type: 'HOLD_OK', hold: r.data });
+          return;
+        } catch (e) {
+          if (problemOf(e).status === undefined) return send({ type: e instanceof PurchaseKeyError && e.reason !== 'storage' ? 'SESSION_ENDED' : 'HOLD_FAILED' });
+          // 답이 왔다: 앞 요청은 잡지 못했다. 새 좌석으로 잇는다
+          unconfirmed = null;
+        }
+      }
       idem = holdIdempotencyKey(idem, seatIds, () => crypto.randomUUID());
       const b = behaviorForHold(firstBehavior, idem.key, () => d.behaviorSummary?.());
       firstBehavior = b.first;

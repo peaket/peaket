@@ -18,6 +18,14 @@ export const WEB_FILES = [
 // proxy.ts·instrumentation.ts는 서버에서만 돌고 화면 린트(TS 해석기)를 받지 않는다. 운영 묶음의 MSW 글자는 FE-T21이 막는다
 const APP_RUNTIME_FILES = ['apps/**/src/**/*.{ts,tsx,js,mjs}', 'apps/web/app/**/*.{ts,tsx}', 'apps/partner/app/**/*.{ts,tsx}'];
 const MOCK_SOURCE = /^(?:msw(?:\/.*)?|@faker-js\/faker(?:\/.*)?|@peaket\/api-client\/mocks|.*\/scripts\/mock-api(?:\.mjs)?)$/;
+/** 화면 코드는 창 메시지를 받지 않는다(ASVS 3.5.5, ADR-0253). 결제 결과는 복귀 주소의 값을 서버가 대조해 정한다 */
+const NO_WINDOW_MESSAGE = [
+  { selector: "CallExpression[callee.property.name='addEventListener'][callee.object.name=/^(window|self|globalThis|parent|top)$/][arguments.0.value='message']", message: '창 메시지(message) 수신기를 두지 않는다(ASVS 3.5.5, ADR-0253)' },
+  { selector: "CallExpression[callee.type='Identifier'][callee.name='addEventListener'][arguments.0.value='message']", message: '창 메시지(message) 수신기를 두지 않는다(ASVS 3.5.5, ADR-0253)' },
+  { selector: "AssignmentExpression[left.type='MemberExpression'][left.property.name='onmessage'][left.object.name=/^(window|self|globalThis|parent|top)$/]", message: '창 메시지(onmessage) 수신기를 두지 않는다(ASVS 3.5.5, ADR-0253)' },
+  { selector: "AssignmentExpression[left.type='Identifier'][left.name='onmessage']", message: '창 메시지(onmessage) 수신기를 두지 않는다(ASVS 3.5.5, ADR-0253)' },
+];
+
 const NO_MOCKS_IN_APPS = {
   files: APP_RUNTIME_FILES,
   ignores: ['**/*.test.*', '**/*.spec.*', '**/*.stories.*'],
@@ -35,6 +43,7 @@ const NO_MOCKS_IN_APPS = {
     'no-restricted-syntax': [
       'error',
       { selector: `ImportExpression[source.value=${MOCK_SOURCE}]`, message: '목업·가짜 값 도구는 동적 가져오기로도 가져오지 않는다(ADR-0199 결정 2, FE-T21)' },
+      ...NO_WINDOW_MESSAGE,
     ],
   },
 };

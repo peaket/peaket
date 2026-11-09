@@ -20,6 +20,8 @@ const TEXT_EXTENSIONS = new Set(['js', 'mjs', 'css', 'html', 'json', 'webmanifes
 const SOURCE_MAP_LINK = /[#@]\s*sourceMappingURL\s*=/;
 /** MSW(목업 처리기)가 묶음에 든 흔적: 서비스 워커 이름, 로그 머리, 진입점 이름(FE-T21 '개발 도구·MSW', ADR-0199 결정 2) */
 export const MSW_MARKERS = /mockServiceWorker|\[MSW\]|msw\/(?:browser|node)/;
+/** 데모 결제창이 묶음에 든 흔적: 데모 전용 경로 이름(FE-T21 '시뮬레이터', ADR-0253). 데모 빌드만 allowSimulator로 지나간다 */
+export const SIMULATOR_MARKERS = /\/demo\/pg-simulator\/authenticate/;
 
 function walk(dir) {
   const out = [];
@@ -42,7 +44,7 @@ const extOf = (path) => {
  * 올릴 글자 파일에 소스 맵 링크가 있으면 오류다(링크가 있으면 맵 주소가 드러난다, FE-T21).
  * @param {string} dir
  */
-export function planUpload(dir) {
+export function planUpload(dir, { allowSimulator = false } = {}) {
   const upload = [];
   const excluded = [];
   const errors = [];
@@ -61,6 +63,7 @@ export function planUpload(dir) {
     const text = TEXT_EXTENSIONS.has(ext) ? bytes.toString('utf8') : '';
     if (text && SOURCE_MAP_LINK.test(text)) errors.push(`${rel}: 소스 맵 링크가 있다(숨김 소스 맵으로 빌드한다)`);
     if ((ext === 'js' || ext === 'mjs' || ext === 'html') && MSW_MARKERS.test(text)) errors.push(`${rel}: MSW 목업 처리기 글자가 있다(운영 묶음에 넣지 않는다, FE-T21)`);
+    if (!allowSimulator && (ext === 'js' || ext === 'mjs' || ext === 'html') && SIMULATOR_MARKERS.test(text)) errors.push(`${rel}: 데모 결제창이 묶음에 있다(운영 묶음에 넣지 않는다, FE-T21, ADR-0253)`);
     upload.push({ path: rel, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
   return { upload, excluded, errors };

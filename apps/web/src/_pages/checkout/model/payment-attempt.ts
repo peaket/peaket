@@ -78,9 +78,27 @@ export function attemptOutcome(e: { status?: number; type?: string; extensions?:
   }
 }
 
-/** 시도 멱등 키: 같은 결제수단을 다시 시작하면 같은 키(재생은 같은 결제사로 값을 다시 만든다), 수단이 바뀌면 새 키 */
-export function attemptIdempotencyKey(prev: { key: string; method: string } | null, method: string, make: () => string): { key: string; method: string } {
-  return prev && prev.method === method ? prev : { key: make(), method };
+/** 주문별 시도 멱등 키(탭 저장소). opened는 이 키의 결제창을 실제로 열었는가다 */
+export interface AttemptKeyRecord {
+  key: string;
+  method: string;
+  opened: boolean;
+}
+
+/** 시도 멱등 키: 결제창을 열기 전 같은 수단이면 같은 키(재생이라 행이 늘지 않는다, P-T25), 창을 열었거나 수단이 바뀌면 새 키 */
+export function nextAttemptKey(prev: AttemptKeyRecord | null, method: string, make: () => string): AttemptKeyRecord {
+  return prev && !prev.opened && prev.method === method ? prev : { key: make(), method, opened: false };
+}
+
+/** 저장값 → 기록. 모양이 틀리면 null(다시 만든다) */
+export function readAttemptKey(raw: string | null): AttemptKeyRecord | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<AttemptKeyRecord> | null;
+    return v && typeof v.key === 'string' && v.key && typeof v.method === 'string' && typeof v.opened === 'boolean' ? { key: v.key, method: v.method, opened: v.opened } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 응답 본문 → PaymentAttempt. 모양이 틀리면 null(그대로 쓰지 않는다) */
@@ -93,7 +111,7 @@ export function attemptOf(v: unknown): PaymentAttempt | null {
 
 /** 토스 위젯이 고른 수단이 서버가 허용한 수단인가(BUILD_ORDER PRF-190). 모르는 값은 허용하지 않는다 */
 export function tossMethodAllowed(method: string, allowed: readonly PayMethod[] | undefined): boolean {
-  if (!allowed) return true;
+  if (!allowed) return false;
   switch (method) {
     case 'CARD':
     case 'BRANDPAY':
@@ -112,6 +130,9 @@ export function tossMethodAllowed(method: string, allowed: readonly PayMethod[] 
       return false;
   }
 }
+
+/** 시도 멱등 키의 탭 저장소 키. 앞머리 peaket.checkout.은 끝날 때(접수·홀드 만료·세션 끝) 함께 지워진다(docs/frontend.md §3.12) */
+export const attemptKeyStorageKey = (orderId: string): string => `peaket.checkout.attempt.${orderId}`;
 
 /** 접수 때 싣는 attemptId의 탭 저장소 키(docs/frontend.md §5.3 '결제창 방식') */
 export const attemptStorageKey = (orderId: string): string => `peaket.attempt.${orderId}`;
