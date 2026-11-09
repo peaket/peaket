@@ -87,7 +87,7 @@ describe('커밋 공시 일꾼', () => {
     await w.worker.tickOnce();
     const before = await w.store.read('e1', 'lobby');
     let sealed = 0;
-    const counted = new ShuffleCommitWorker(new ShuffleCommits(w.store, { seal: async () => (sealed++, 'x'), open: async () => Buffer.alloc(32) }, w.schedules, w.clock), w.schedules, async () => ['e1'], w.clock);
+    const counted = new ShuffleCommitWorker(new ShuffleCommits(w.store, { seal: async () => (sealed++, 'x') }, w.schedules, w.clock), w.schedules, async () => ['e1'], w.clock);
     await counted.tickOnce();
     expect(sealed).toBe(0);
     expect(await w.store.read('e1', 'lobby')).toEqual(before);

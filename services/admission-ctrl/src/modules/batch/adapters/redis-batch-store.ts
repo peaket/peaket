@@ -5,7 +5,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, PublishedBatch, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
+import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, EmergencyMark, PublishedBatch, RecommitMark, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
 
 export const ADMISSION_REDIS = Symbol('admission.QueueRedis');
 /** 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], PEAKET_QUEUE_REDIS_MIN_REPLICAS) */
@@ -75,6 +75,14 @@ return redis.call('HMGET', KEYS[1], ARGV[1], ARGV[3])
 // 공시 칸 두 개를 비어 있을 때만 쓴다(비콘·시드, ADR-0232). 첫 칸이 이미 있으면 둘 다 그대로 둔다. 수명은 늦은 쪽으로만 늘린다
 const WRITE_ONCE_PAIR = redisScript(`
 if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then redis.call('HSET', KEYS[1], ARGV[3], ARGV[4]) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[5]) then redis.call('PEXPIREAT', KEYS[1], ARGV[5]) end
+return 1
+`);
+// 비콘 기록: 공시 라운드가 게시가 쓴 라운드와 같고 비상 표시가 없을 때만 쓴다(RB-35 적용과 겹칠 때 둘 중 하나만 이기게, ADR-0239 결정 12). 값은 비어 있을 때만 쓴다
+const RECORD_BEACON = redisScript(`
+if redis.call('HGET', KEYS[1], 'round:' .. ARGV[1]) ~= ARGV[2] then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'emergency:' .. ARGV[1]) == 1 then return 0 end
+if redis.call('HSETNX', KEYS[1], 'beacon:' .. ARGV[1], ARGV[3]) == 1 then redis.call('HSET', KEYS[1], 'sig:' .. ARGV[1], ARGV[4]) end
 if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[5]) then redis.call('PEXPIREAT', KEYS[1], ARGV[5]) end
 return 1
 `);
@@ -211,6 +219,30 @@ export class RedisBatchStore implements BatchStore {
   }
 }
 
+const STOP_REASONS: readonly string[] = ['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unauthorized', 'seed_unavailable'];
+const isObject = (v: unknown): boolean => typeof v === 'object' && v !== null;
+
+/** RB-35가 쓴 JSON 칸 읽기. 칸이 있는데 모양이 틀리면 null(게시가 없는 것으로 치지 않고 멈춘다, ADR-0239 결정 15) */
+function parseEmergency(raw: string): EmergencyMark | null {
+  try {
+    const v = JSON.parse(raw) as { at?: unknown; stop?: unknown; reason?: unknown; signed?: unknown };
+    return typeof v.at === 'number' && typeof v.stop === 'string' && STOP_REASONS.includes(v.stop) && typeof v.reason === 'string' && isObject(v.signed) ? { atMs: v.at, stopReason: v.stop as BeaconStopReason, reason: v.reason, signed: v.signed } : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseRecommits(raw: string): RecommitMark[] | null {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v) || v.length === 0) return null;
+    const out = v.flatMap((e: { at?: unknown; prev?: unknown; round?: unknown; reason?: unknown; signed?: unknown }) => (typeof e?.at === 'number' && typeof e?.prev === 'number' && typeof e?.round === 'number' && typeof e?.reason === 'string' && isObject(e?.signed) ? [{ atMs: e.at, prev: e.prev, round: e.round, reason: e.reason, signed: e.signed }] : []));
+    return out.length === v.length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 셔플 공시 기록 읽기와 멈춤 표시(q:{event:E}:shuffle, ADR-0231 결정 6·12) */
 @Injectable()
 export class RedisShuffleRecords implements ShuffleRecords {
@@ -218,17 +250,20 @@ export class RedisShuffleRecords implements ShuffleRecords {
 
   async read(eventId: string, group: ShuffleGroup): Promise<ShuffleRecord | null> {
     const k = keys.shuffle(eventId);
-    const [commit, round, sealed, at, stop, beacon, signature, seed, seedAt] = ((await this.redis.command(['HMGET', k, `commit:${group}`, `round:${group}`, `sealed:${group}`, `at:${group}`, `stop:${group}`, `beacon:${group}`, `sig:${group}`, `seed:${group}`, `seedAt:${group}`], { key: k })) as unknown[]).map(str);
+    const [commit, round, sealed, at, stop, beacon, signature, seed, seedAt, waitUntil, emergency, recommit] = ((await this.redis.command(['HMGET', k, `commit:${group}`, `round:${group}`, `sealed:${group}`, `at:${group}`, `stop:${group}`, `beacon:${group}`, `sig:${group}`, `seed:${group}`, `seedAt:${group}`, `waitUntil:${group}`, `emergency:${group}`, `recommit:${group}`], { key: k })) as unknown[]).map(str);
     if (!commit || !round || !sealed || !at) return null;
-    const rec: ShuffleRecord = { commit, round: Number(round), sealed, atMs: Number(at), ...(beacon && signature ? { beacon, signature } : {}), ...(seed && seedAt ? { seed, seedAtMs: Number(seedAt) } : {}) };
+    const emergencyOf = emergency ? parseEmergency(emergency) : undefined;
+    const recommits = recommit ? parseRecommits(recommit) : undefined;
+    const runbookInvalid = emergencyOf === null || recommits === null;
+    const rec: ShuffleRecord = { commit, round: Number(round), sealed, atMs: Number(at), ...(beacon ? { beacon } : {}), ...(signature ? { signature } : {}), ...(seed && seedAt ? { seed, seedAtMs: Number(seedAt) } : {}), ...(waitUntil && /^\d{1,16}$/.test(waitUntil) ? { waitUntilMs: Number(waitUntil) } : {}), ...(emergencyOf ? { emergency: emergencyOf } : {}), ...(recommits ? { recommits } : {}), ...(runbookInvalid ? { runbookInvalid } : {}) };
     if (!stop) return rec;
     // 값이 있으면 모양이 틀려도 멈춘 것으로 본다(모르는 값을 '멈춤 아님'으로 읽으면 RB-35 없이 게시가 다시 돈다)
-    const m = /^(\d+):(beacon|stale_round|late_commit|no_commit|late_root|members_changed)$/.exec(stop);
+    const m = /^(\d+):(beacon|stale_round|late_commit|no_commit|late_root|members_changed|unauthorized|seed_unavailable)$/.exec(stop);
     return { ...rec, stopped: m ? { atMs: Number(m[1]), reason: m[2] as BeaconStopReason } : { atMs: 0, reason: 'unknown' } };
   }
 
-  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number): Promise<void> {
-    await this.redis.evalScript(WRITE_ONCE_PAIR, [keys.shuffle(eventId)], [`beacon:${group}`, value, `sig:${group}`, signature, String(expireAtMs)]);
+  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number, expectRound: number): Promise<boolean> {
+    return Number(await this.redis.evalScript(RECORD_BEACON, [keys.shuffle(eventId)], [String(group), String(expectRound), value, signature, String(expireAtMs)])) === 1;
   }
 
   async reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number, expireAtMs: number): Promise<void> {

@@ -32,6 +32,16 @@ export class TestRandomness implements SeedSource, Beacon {
 
   /** 시험 비콘의 서명은 흉내다(BLS로 검증할 수 없다). drand처럼 값은 서명의 SHA-256이라 검증 화면이 그대로 대조한다 */
   async round(eventId: string, batchNo: ShuffleGroup): Promise<BeaconRound | null> {
+    return this.#roundOf(eventId, batchNo);
+  }
+
+  /** 시험 비콘: 자기가 만드는 값과 같을 때만 믿는다 */
+  verifyStored(eventId: string, batchNo: ShuffleGroup, _round: number, value: string, signature: string): boolean {
+    const own = this.#roundOf(eventId, batchNo);
+    return own.signature === signature && own.value.toString('hex') === value;
+  }
+
+  #roundOf(eventId: string, batchNo: ShuffleGroup): BeaconRound {
     const signature = createHmac('sha256', this.#secret).update(`batch-beacon\0${eventId}\0${batchNo}`).digest();
     return { value: createHash('sha256').update(signature).digest(), signature: signature.toString('hex') };
   }

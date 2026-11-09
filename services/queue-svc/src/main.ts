@@ -4,12 +4,11 @@
 // ·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
 import { Counter, createHotRedis, createService, errorSummary, Gauge, systemClock } from '@peaket/platform';
-import { TEST_SEAL_ENV, TestSeedSealer } from '@peaket/shuffle';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, kmsSealClient, seedSealerFromEnv, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
@@ -37,8 +36,8 @@ const kafka = kafkaConsumersFromEnv(process.env);
 // 도착 시각 쿠키 키(ADR-0223): 없으면 쿠키를 읽지 않는다(그 환경은 쿠키 없는 일반 진입뿐이다, 시작에는 실패하지 않는다)
 const arrivals = HmacArrivalCookies.fromEnv(process.env);
 const arrivalSignals = new PromArrivalSignals();
-// 시드 봉인(ADR-0231): 운영 KMS 어댑터는 BUILD_ORDER HOT-041이다. local·ci·demo는 시험 봉인(admission-ctrl과 같은 PEAKET_TEST_BATCH_RANDOMNESS)이고, 값이 없으면 봉인 없이 시작해 로비 참가와 공시는 503이다
-const sealer = process.env[TEST_SEAL_ENV] ? TestSeedSealer.fromEnv(process.env) : undefined;
+// 시드 봉인(ADR-0239 결정 5): 운영은 KMS Encrypt이고 키가 없으면 시작하지 않는다. local·ci·demo는 시험 봉인(admission-ctrl과 같은 PEAKET_TEST_BATCH_RANDOMNESS)이고, 값이 없으면 봉인 없이 시작해 로비 참가와 공시는 503이다
+const sealer = seedSealerFromEnv(process.env, (endpoint, region) => kmsSealClient({ region, ...(endpoint ? { endpoint } : {}) }));
 const lobbySignals = new PromLobbySignals();
 const leaveSignals = new PromLeaveSignals();
 const service = await createService({
@@ -55,7 +54,7 @@ await service.listen();
 // 셔플 커밋 공시 일꾼(ADR-0231 결정 6): 봉인이 있으면 파드마다 돈다. 먼저 쓴 값 하나로 남는다
 const commitWorker = sealer ? new ShuffleCommitWorker(service.app.get(ShuffleCommits), new RedisEventSchedules(redis, systemClock), (now) => new RedisWithdrawnKeys(redis).activeEvents(now), systemClock, service.logger) : undefined;
 commitWorker?.start();
-if (!sealer) service.logger.warn({ dep: 'seed-sealer' }, '시드 봉인이 없어 로비 참가와 커밋 공시를 하지 않는다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)');
+if (!sealer) service.logger.warn({ dep: 'seed-sealer' }, '시드 봉인이 없어 로비 참가와 커밋 공시를 하지 않는다(로컬·CI)');
 
 // Kafka 소비자(ADR-0214 결정 1): 듣기 시작한 뒤 켠다. 연결·구독이 실패하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1로 나간다(쿠버네티스가 다시 띄운다)
 let consumers: QueueConsumers | undefined;

@@ -300,7 +300,7 @@ export function lobbyCases(name: string, setup: () => Promise<LobbyWorld>): void
 
   test(`[${name}] 커밋 기록을 만들지 못하면 503이고 참가자도 선점도 남기지 않는다`, async () => {
     const a = await world();
-    const broken = new ShuffleCommits(a.w.commits, { seal: () => Promise.reject(new Error('kms down')), open: () => Promise.reject(new Error('x')) }, a.w.schedules, a.w.clock);
+    const broken = new ShuffleCommits(a.w.commits, { seal: () => Promise.reject(new Error('kms down')) }, a.w.schedules, a.w.clock);
     const app = new JoinLobby(a.w.store, a.w.schedules, tokens, recordingRisk(), broken, a.w.clock);
     await expect(app.run({ eventId: a.eventId, pid: PID, accountId: ACCOUNT, body: {} })).rejects.toBeInstanceOf(QueueStoreUnavailable);
     expect(await a.w.members(a.eventId)).toEqual([]);

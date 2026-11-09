@@ -22,6 +22,12 @@ export const queueShuffleProofGroupBeaconSignatureRegExp = new RegExp('^[0-9a-f]
 export const queueShuffleProofGroupFileCountMin = 0;
 
 export const queueShuffleProofGroupSeedRegExp = new RegExp('^[0-9a-f]{64}$');
+export const queueShuffleProofGroupEmergencyReasonMax = 200;
+
+
+
+export const queueShuffleProofGroupRedisclosuresItemReasonMax = 200;
+
 
 export const QueueShuffleProofGroup = zod.object({
   "chain": zod.string().describe('drand 체인 이름(quicknet)'),
@@ -44,8 +50,22 @@ export const QueueShuffleProofGroup = zod.object({
   "seedRevealedAt": zod.iso.datetime({"offset":true}).optional().describe('시드를 공개한 시각'),
   "stopped": zod.object({
   "reason": zod.enum(['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unknown']),
-  "at": zod.iso.datetime({"offset":true})
-}).optional().describe('셔플을 멈춤(RB-35)')
+  "at": zod.iso.datetime({"offset":true}),
+  "detail": zod.string().optional().describe('reason이 unknown일 때의 자세한 이유(unauthorized: 서명 없는 RB-35 표시, seed_unavailable: 시드를 풀지 못하고 상한을 넘김, ADR-0239)')
+}).optional().describe('셔플을 멈춤(RB-35)'),
+  "emergency": zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('비상 셔플을 허가한 시각'),
+  "reason": zod.string().max(queueShuffleProofGroupEmergencyReasonMax).describe('commander 두 명이 서명한 공개 사유'),
+  "stopReason": zod.enum(['beacon']).describe('멈췄던 이유. 비상 셔플은 비콘 지연에서만 받는다(ADR-0050 결정 7)'),
+  "limitation": zod.string().describe('이 처리의 한계(고정 문장)')
+}).optional().describe('시드만 쓰는 비상 셔플을 실행함(RB-35, ADR-0239). 비콘 값이 없고, 다시 계산할 때 비콘 자리에 SHA-256("PEAKET-shuffle-v1-no-beacon")을 넣는다'),
+  "redisclosures": zod.array(zod.object({
+  "at": zod.iso.datetime({"offset":true}).describe('다시 공시한 시각'),
+  "previousRound": zod.int().min(1).describe('이전에 공시한 라운드'),
+  "round": zod.int().min(1).describe('새로 공시한 라운드'),
+  "reason": zod.string().max(queueShuffleProofGroupRedisclosuresItemReasonMax).describe('commander 두 명이 서명한 공개 사유')
+})).optional().describe('공시 뒤 오픈 시각이 바뀌어 라운드를 다시 공시한 이력(시드와 커밋은 그대로, RB-35, ADR-0239)'),
+  "invalidDisclosures": zod.array(zod.enum(['emergency', 'redisclosures'])).optional().describe('비상 셔플·다시 공시 기록이 있는데 읽지 못한 칸(위조나 손상일 수 있다, ADR-0239 결정 15). 있으면 그 구간의 공시를 믿지 않는다')
 }).describe('셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)')
 
 export type QueueShuffleProofGroup = zod.input<typeof QueueShuffleProofGroup>;

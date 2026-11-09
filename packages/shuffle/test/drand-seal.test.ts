@@ -1,7 +1,7 @@
 // drand 라운드 계산과 시드 봉인 시험 대역(ADR-0231 결정 6·7·11, docs/features/queue-admission.md §2 '로비 참가와 커밋 공시의 첫 구현')
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { BEACON_MIN_DELAY_MS, DRAND_GENESIS_MS, DRAND_PERIOD_MS, drandRoundAfter, drandRoundTimeMs, TEST_SEAL_ENV, TestSeedSealer } from '../src/index.js';
+import { BEACON_MIN_DELAY_MS, DRAND_GENESIS_MS, DRAND_PERIOD_MS, drandRoundAfter, drandRoundTimeMs, EMERGENCY_BEACON, EMERGENCY_STOP_REASONS, isEmergencyStopReason, sealContext, TEST_SEAL_ENV, TestSeedSealer } from '../src/index.js';
 
 const vectors = JSON.parse(readFileSync(new URL('./vectors.json', import.meta.url), 'utf8')) as {
   drand: { genesisMs: number; periodMs: number; minDelayMs: number; cases: { atMs: number; round: number; timeMs: number }[] };
@@ -64,5 +64,23 @@ describe('시드 봉인 시험 대역', () => {
     expect(TestSeedSealer.fromEnv({ PEAKET_ENV: 'local', [TEST_SEAL_ENV]: secret })).toBeInstanceOf(TestSeedSealer);
     expect(() => TestSeedSealer.fromEnv({ PEAKET_ENV: 'prod', [TEST_SEAL_ENV]: secret })).toThrow();
     expect(() => TestSeedSealer.fromEnv({ PEAKET_ENV: 'local' })).toThrow();
+  });
+});
+
+describe('운영 봉인·비상 셔플의 규격 값(ADR-0239)', () => {
+  test('Q-T27_비상셔플의비콘자리고정값은_SHA-256("PEAKET-shuffle-v1-no-beacon")이다', () => {
+    expect(EMERGENCY_BEACON.toString('hex')).toBe('5a0a07005e996232e2cc59a91675773e1df94dd0af57f5c0c46306e0a028e6dc');
+    expect(EMERGENCY_BEACON).toHaveLength(32);
+  });
+
+  test('Q-T27_비상셔플을받는멈춤이유는_비콘지연하나다(ADR-0050 결정 7)', () => {
+    expect(EMERGENCY_STOP_REASONS).toEqual(['beacon']);
+    expect(isEmergencyStopReason('beacon')).toBe(true);
+    for (const r of ['stale_round', 'late_commit', 'late_root', 'unknown', undefined]) expect(isEmergencyStopReason(r)).toBe(false);
+  });
+
+  test('[ASVS v5.0.0-11.3.2] 암호화컨텍스트는_정본의세칸이고_구간은문자열이다', () => {
+    expect(sealContext('evt-1', 'lobby')).toEqual({ purpose: 'peaket-shuffle-seed-v1', eventId: 'evt-1', group: 'lobby' });
+    expect(sealContext('evt-1', 1)).toEqual({ purpose: 'peaket-shuffle-seed-v1', eventId: 'evt-1', group: '1' });
   });
 });

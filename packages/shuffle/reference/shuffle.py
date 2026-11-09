@@ -28,6 +28,10 @@ def mth(leaves):
     return sha(b'\x01', mth(leaves[:k]), mth(leaves[k:]))
 
 
+# 시드만 쓰는 비상 셔플(RB-35)의 비콘 자리 고정값(재현 규격의 값을 적어 둔 것, ADR-0239). 이 파일은 기준값을 만드는 참조 구현이라 응답을 입력받지 않는다
+EMERGENCY_BEACON = sha(b'PEAKET-shuffle-v1-no-beacon')
+
+
 def combined_key(seed, beacon, root, event_id):
     return sha(seed, beacon, root, event_id.encode('utf-8'))
 

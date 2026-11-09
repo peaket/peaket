@@ -118,6 +118,10 @@ export class MemoryBatchStore implements BatchStore {
   membersCallsForTest(): number {
     return this.#memberCalls;
   }
+  repairForTest(eventId: string, group: ShuffleGroup, atMs: number): void {
+    const e = this.#of(eventId, group);
+    if (e) e.repairAt = atMs;
+  }
   publishedForTest(eventId: string, group: ShuffleGroup = 1): number | null {
     return this.#of(eventId, group)?.publishedAt ?? null;
   }
@@ -149,10 +153,12 @@ export class MemoryShuffleRecords implements ShuffleRecords {
     this.#stops.set(key, { reason, atMs });
     return true;
   }
-  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string): Promise<void> {
+  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, _expireAtMs: number, expectRound: number): Promise<boolean> {
     const key = `${eventId}|${group}`;
     const r = this.#m.get(key);
-    if (r && r.beacon === undefined) this.#m.set(key, { ...r, beacon: value, signature });
+    if (!r || r.round !== expectRound || r.emergency) return false;
+    if (r.beacon === undefined) this.#m.set(key, { ...r, beacon: value, signature });
+    return true;
   }
   async reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number): Promise<void> {
     const key = `${eventId}|${group}`;

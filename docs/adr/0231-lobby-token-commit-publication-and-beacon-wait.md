@@ -1,6 +1,6 @@
 # ADR-0231: 로비 참가 토큰, 커밋 공시, 로비 셔플 게시와 비콘 대기의 첫 구현
 
-- **상태**: 채택(2026-11-09, 추천 적용). BUILD_ORDER HOT-040 ①, wbs 2.4.1.
+- **상태**: 채택(2026-11-09, 추천 적용). BUILD_ORDER HOT-040 ①, wbs 2.4.1. 2026-11-09(ADR-0239, HOT-041): 결정 13의 커밋 다시 공시 절차와 RB-35 CLI를 더했다.
 - **관련**: POL-002, POL-003, POL-004, POL-005, FR-005, FR-038, ADR-0041, ADR-0050(결정 7), ADR-0053(결정 13), ADR-0058, ADR-0060, ADR-0064, ADR-0073, ADR-0118, ADR-0171, ADR-0182, ADR-0183, [docs/features/queue-admission.md](../features/queue-admission.md) §2·§3·§6, [docs/data.md](../data.md) §3, [docs/security/secrets-and-keys.md](../security/secrets-and-keys.md).
 
 ## 맥락

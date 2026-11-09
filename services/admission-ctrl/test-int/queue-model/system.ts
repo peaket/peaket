@@ -269,10 +269,10 @@ export class QueueSystem {
         return { commit: '00'.repeat(32), round: drandRoundAfter(fixAt), sealed: 'x', atMs: 0 };
       },
       stop: async () => true,
-      recordBeacon: async () => undefined,
+      recordBeacon: async () => true,
       reveal: async () => undefined,
     };
-    this.#publisher = new PublishBatchResults(batches, records, seeds, { round: async (...a: Parameters<typeof beacon>) => ({ value: (await beacon(...a))!, signature: '00' }) }, { write: async () => undefined }, pastClock);
+    this.#publisher = new PublishBatchResults(batches, records, seeds, { round: async (...a: Parameters<typeof beacon>) => ({ value: (await beacon(...a))!, signature: '00' }), verifyStored: () => true }, { write: async () => undefined }, pastClock);
   }
 
   persons(): number[] {

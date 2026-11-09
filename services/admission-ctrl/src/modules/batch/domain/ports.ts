@@ -65,8 +65,28 @@ export interface BatchSchedule {
   batchWindowMs?: number;
 }
 
+/** 묶음 구간 길이의 처음 값(리더와 같다) */
+const BATCH_WINDOW_DEFAULT_MS = 2_000;
+/** 목록을 고정하는 시각: 로비는 오픈, 묶음은 구간 끝(ADR-0231 결정 7) */
+export const fixAtOf = (schedule: BatchSchedule, group: ShuffleGroup): number => (group === 'lobby' ? schedule.opensAtMs : schedule.opensAtMs + (schedule.batchWindowMs ?? BATCH_WINDOW_DEFAULT_MS));
+
 /** 공시 기록(q:{event:E}:shuffle, ADR-0231 결정 6). 멈춤 표시는 이유와 시각을 함께 둔다(RB-35 CLI만 지운다) */
-export type BeaconStopReason = 'beacon' | 'stale_round' | 'late_commit' | 'no_commit' | 'late_root' | 'members_changed' | 'unknown';
+export type BeaconStopReason = 'beacon' | 'stale_round' | 'late_commit' | 'no_commit' | 'late_root' | 'members_changed' | 'unauthorized' | 'seed_unavailable' | 'unknown';
+/** RB-35 비상 표시(emergency:{구간}). signed는 적용한 서명 묶음 원문이고, 게시 직전에 다시 검증한다(ADR-0239 결정 15) */
+export interface EmergencyMark {
+  atMs: number;
+  stopReason: BeaconStopReason;
+  reason: string;
+  signed: unknown;
+}
+/** RB-35 다시 공시 이력 한 줄(recommit:{구간}) */
+export interface RecommitMark {
+  atMs: number;
+  prev: number;
+  round: number;
+  reason: string;
+  signed: unknown;
+}
 export interface ShuffleRecord {
   commit: string;
   round: number;
@@ -79,14 +99,30 @@ export interface ShuffleRecord {
   /** 공개한 시드(16진)와 공개 시각(ADR-0232 결정 7) */
   seed?: string;
   seedAtMs?: number;
+  /** RB-35 더 기다리기의 끝(밀리초, ADR-0239 결정 10) */
+  waitUntilMs?: number;
+  /** RB-35 시드만 쓰는 비상 셔플을 허가함(ADR-0239 결정 11) */
+  emergency?: EmergencyMark;
+  /** RB-35 커밋 다시 공시 이력(ADR-0239 결정 12) */
+  recommits?: RecommitMark[];
+  /** emergency:·recommit: 칸이 있는데 모양이 틀렸다(위조·손상). 없는 것으로 치지 않고 멈춘다 */
+  runbookInvalid?: boolean;
 }
+
+export const RUNBOOK_AUTH = Symbol('admission.RunbookAuth');
+/** 공시 기록의 RB-35 표시를 서명으로 다시 확인한다(ADR-0239 결정 15). 운영은 SignedMarkAuth */
+export interface RunbookAuth {
+  authorized(eventId: string, group: ShuffleGroup, rec: ShuffleRecord): boolean;
+}
+/** 공개키 목록이 없는 환경: 표시가 있으면 믿지 않는다 */
+export const denyRunbookAuth: RunbookAuth = { authorized: () => false };
 export const SHUFFLE_RECORDS = Symbol('admission.ShuffleRecords');
 export interface ShuffleRecords {
   read(eventId: string, group: ShuffleGroup): Promise<ShuffleRecord | null>;
   /** 멈춤을 비어 있을 때만 쓴다(공시 기록이 없어도 쓴다). 수명은 회차 키와 같게 늦은 쪽으로만 늘린다. 이 호출이 쓴 때만 true다(SEV1을 한 번만 내려고) */
   stop(eventId: string, group: ShuffleGroup, atMs: number, reason: BeaconStopReason, expireAtMs: number): Promise<boolean>;
-  /** 게시 때 받은 비콘 값과 서명을 비어 있을 때만 쓴다(ADR-0232 결정 6) */
-  recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number): Promise<void>;
+  /** 게시 때 받은 비콘 값과 서명을 비어 있을 때만 쓴다(ADR-0232 결정 6). 사람별 결과를 쓰기 전에 부른다. 공시 라운드가 expectRound와 다르거나 비상 표시가 있으면 쓰지 않고 false다(ADR-0239 M1) */
+  recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number, expectRound: number): Promise<boolean>;
   /** 공개한 시드를 비어 있을 때만 쓴다(ADR-0232 결정 7) */
   reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number, expireAtMs: number): Promise<void>;
 }
@@ -106,6 +142,8 @@ export interface BeaconRound {
 /** 미리 공시한 비콘 라운드. 아직 나오지 않았으면 null(그 라운드를 기다린다, ADR-0050 결정 7). 운영은 drand(HOT-041) */
 export interface Beacon {
   round(eventId: string, group: ShuffleGroup): Promise<BeaconRound | null>;
+  /** 공시 기록에 저장한 비콘(16진)을 믿어도 되는가: 그 라운드의 서명이 맞고 값이 서명과 맞을 때만 true다(ADR-0239 결정 12). 중계를 부르지 않는다 */
+  verifyStored(eventId: string, group: ShuffleGroup, round: number, value: string, signature: string): boolean;
 }
 
 export const RESULT_FILES = Symbol('admission.ResultFiles');

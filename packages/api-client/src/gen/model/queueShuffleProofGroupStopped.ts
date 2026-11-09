@@ -17,4 +17,6 @@ import type { QueueShuffleProofGroupStoppedReason } from './queueShuffleProofGro
 export type QueueShuffleProofGroupStopped = {
   reason: QueueShuffleProofGroupStoppedReason;
   at: string;
+  /** reason이 unknown일 때의 자세한 이유(unauthorized: 서명 없는 RB-35 표시, seed_unavailable: 시드를 풀지 못하고 상한을 넘김, ADR-0239) */
+  detail?: string;
 };

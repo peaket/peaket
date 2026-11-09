@@ -9,6 +9,9 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { QueueShuffleProofGroupEmergency } from './queueShuffleProofGroupEmergency';
+import type { QueueShuffleProofGroupInvalidDisclosuresItem } from './queueShuffleProofGroupInvalidDisclosuresItem';
+import type { QueueShuffleProofGroupRedisclosuresItem } from './queueShuffleProofGroupRedisclosuresItem';
 import type { QueueShuffleProofGroupStopped } from './queueShuffleProofGroupStopped';
 
 /**
@@ -80,4 +83,10 @@ export interface QueueShuffleProofGroup {
   seedRevealedAt?: string;
   /** 셔플을 멈춤(RB-35) */
   stopped?: QueueShuffleProofGroupStopped;
+  /** 시드만 쓰는 비상 셔플을 실행함(RB-35, ADR-0239). 비콘 값이 없고, 다시 계산할 때 비콘 자리에 SHA-256("PEAKET-shuffle-v1-no-beacon")을 넣는다 */
+  emergency?: QueueShuffleProofGroupEmergency;
+  /** 공시 뒤 오픈 시각이 바뀌어 라운드를 다시 공시한 이력(시드와 커밋은 그대로, RB-35, ADR-0239) */
+  redisclosures?: QueueShuffleProofGroupRedisclosuresItem[];
+  /** 비상 셔플·다시 공시 기록이 있는데 읽지 못한 칸(위조나 손상일 수 있다, ADR-0239 결정 15). 있으면 그 구간의 공시를 믿지 않는다 */
+  invalidDisclosures?: QueueShuffleProofGroupInvalidDisclosuresItem[];
 }

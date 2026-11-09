@@ -1416,7 +1416,10 @@ components:
         fileCount: { type: integer, minimum: 0, description: "결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다" }
         seed: { type: string, pattern: '^[0-9a-f]{64}$', description: "공개한 시드" }
         seedRevealedAt: { type: string, format: date-time, description: "시드를 공개한 시각" }
-        stopped: { type: object, required: [reason, at], description: "셔플을 멈춤(RB-35)", properties: { reason: { type: string, enum: [beacon, stale_round, late_commit, no_commit, late_root, members_changed, unknown] }, at: { type: string, format: date-time } } }
+        stopped: { type: object, required: [reason, at], description: "셔플을 멈춤(RB-35)", properties: { reason: { type: string, enum: [beacon, stale_round, late_commit, no_commit, late_root, members_changed, unknown] }, at: { type: string, format: date-time }, detail: { type: string, description: "reason이 unknown일 때의 자세한 이유(unauthorized: 서명 없는 RB-35 표시, seed_unavailable: 시드를 풀지 못하고 상한을 넘김, ADR-0239)" } } }
+        emergency: { type: object, required: [at, reason, stopReason, limitation], description: "시드만 쓰는 비상 셔플을 실행함(RB-35, ADR-0239). 비콘 값이 없고, 다시 계산할 때 비콘 자리에 SHA-256(\"PEAKET-shuffle-v1-no-beacon\")을 넣는다", properties: { at: { type: string, format: date-time, description: "비상 셔플을 허가한 시각" }, reason: { type: string, maxLength: 200, description: "commander 두 명이 서명한 공개 사유" }, stopReason: { type: string, enum: [beacon], description: "멈췄던 이유. 비상 셔플은 비콘 지연에서만 받는다(ADR-0050 결정 7)" }, limitation: { type: string, description: "이 처리의 한계(고정 문장)" } } }
+        redisclosures: { type: array, description: "공시 뒤 오픈 시각이 바뀌어 라운드를 다시 공시한 이력(시드와 커밋은 그대로, RB-35, ADR-0239)", items: { type: object, required: [at, previousRound, round, reason], properties: { at: { type: string, format: date-time, description: "다시 공시한 시각" }, previousRound: { type: integer, minimum: 1, description: "이전에 공시한 라운드" }, round: { type: integer, minimum: 1, description: "새로 공시한 라운드" }, reason: { type: string, maxLength: 200, description: "commander 두 명이 서명한 공개 사유" } } } }
+        invalidDisclosures: { type: array, description: "비상 셔플·다시 공시 기록이 있는데 읽지 못한 칸(위조나 손상일 수 있다, ADR-0239 결정 15). 있으면 그 구간의 공시를 믿지 않는다", items: { type: string, enum: [emergency, redisclosures] } }
     QueueShuffleProof:
       type: object
       description: "셔플 검증 정보(SCR-019, POL-005, ADR-0232)"

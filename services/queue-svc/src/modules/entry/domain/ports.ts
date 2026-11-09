@@ -98,10 +98,9 @@ export interface ShuffleCommitStore {
 }
 export const SEED_SEALER = Symbol('queue.SeedSealer');
 export type { SeedSealer, ShuffleGroup };
-/** 지금 환경에 봉인이 없음(운영 KMS 어댑터 전, BUILD_ORDER HOT-041) */
+/** 지금 환경에 봉인이 없음(local·ci·demo에서 시험 값을 주지 않은 경우. 운영은 시작하지 않는다, ADR-0239 결정 5) */
 export const noSealer: SeedSealer = {
-  seal: () => Promise.reject(new Error('시드 봉인이 없다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)')),
-  open: () => Promise.reject(new Error('시드 봉인이 없다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)')),
+  seal: () => Promise.reject(new Error('시드 봉인이 없다')),
 };
 
 /** 커밋 공시 감사 기록(POL-005, ADR-0232 결정 10). 불변 감사 저장소에 잇는 일은 그 저장소 단계의 몫이다 */

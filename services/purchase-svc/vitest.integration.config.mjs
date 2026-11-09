@@ -10,6 +10,8 @@ export default defineConfig({
     alias: [
       { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
       { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+      // CI의 통합 시험 단계는 빌드를 하지 않는다. 바뀐 패키지만 빌드하는 실행에서는 dist가 없어 모든 파일이 읽히지 않았다
+      { find: /^@peaket\/shuffle$/, replacement: src('../../packages/shuffle/src/index.ts') },
     ],
   },
   test: {

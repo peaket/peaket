@@ -20,7 +20,7 @@ function world(o: { members?: string[]; closed?: { first: number; size: number; 
   const opensAtMs = clock.now() - 3_000;
   store.setForTest(E, { startsAtMs: START, opensAtMs, members, closed: o.closed === undefined ? { first: 11, size: members.length, gen: 1 } : o.closed });
   const randomness = new TestRandomness(Buffer.alloc(32, 9));
-  const beacons = o.beacon === false ? { round: async () => null } : randomness;
+  const beacons = o.beacon === false ? { round: async () => null, verifyStored: () => true } : randomness;
   const files = new MemoryResultFiles();
   const records = new MemoryShuffleRecords();
   // 이 묶음 시험의 공시 기록(라운드는 지금 뒤라 비콘 대기 상한에 닿지 않는다)
@@ -28,6 +28,16 @@ function world(o: { members?: string[]; closed?: { first: number; size: number; 
   const publish = new PublishBatchResults(store, records, randomness, beacons, files, clock);
   return { clock, store, randomness, files, publish, members, records };
 }
+
+describe('시험 비콘의 기록 확인', () => {
+  test('Q-T27 시험 비콘은 자기가 만든 값만 맞다고 본다', async () => {
+    const r = new TestRandomness(Buffer.alloc(32, 9));
+    const got = (await r.round(E, 1))!;
+    expect(r.verifyStored(E, 1, 123, got.value.toString('hex'), got.signature)).toBe(true);
+    expect(r.verifyStored(E, 1, 123, 'bb'.repeat(32), got.signature)).toBe(false);
+    expect(r.verifyStored('other', 1, 123, got.value.toString('hex'), got.signature)).toBe(false);
+  });
+});
 
 describe('publishBatch', () => {
   test('Q-T6_닫힌묶음의참가자를_재현규격대로섞어_첫번호+순위를준다', async () => {
@@ -125,7 +135,7 @@ describe('publishBatch', () => {
   test('공시때읽은참가자를게시까지쓰고_리더를잃어forget하면비운다(참가자를다시읽는다)', async () => {
     const w = world();
     let round: Awaited<ReturnType<typeof w.randomness.round>> = null;
-    const p = new PublishBatchResults(w.store, w.records, w.randomness, { round: async () => round }, w.files, w.clock);
+    const p = new PublishBatchResults(w.store, w.records, w.randomness, { round: async () => round, verifyStored: () => true }, w.files, w.clock);
     expect(await p.run({ eventId: E })).toEqual({ status: 'WAITING_BEACON' });
     expect(w.store.membersCallsForTest()).toBe(1);
     round = await w.randomness.round(E, 1);
@@ -133,7 +143,7 @@ describe('publishBatch', () => {
     expect(w.store.membersCallsForTest()).toBe(1);
 
     const other = world();
-    const q = new PublishBatchResults(other.store, other.records, other.randomness, { round: async () => null }, other.files, other.clock);
+    const q = new PublishBatchResults(other.store, other.records, other.randomness, { round: async () => null, verifyStored: () => true }, other.files, other.clock);
     await q.run({ eventId: E });
     q.forget();
     const r = new PublishBatchResults(other.store, other.records, other.randomness, other.randomness, other.files, other.clock);
@@ -315,7 +325,7 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     if (!o.noRecord) records.setForTest(E, 'lobby', { commit: commitment(E, seed).toString('hex'), round: o.round ?? ROUND, sealed: await sealer.seal(E, 'lobby', seed), atMs: OPENS - 600_000 + (o.commitOffsetMs ?? 0) });
     const seeds = new CommittedSeedSource(records, sealer);
     const beaconValue = o.beacon === undefined ? Buffer.alloc(32, 6) : o.beacon;
-    const beacons = { round: async () => (beaconValue ? { value: beaconValue, signature: 'ab' } : null) };
+    const beacons = { round: async () => (beaconValue ? { value: beaconValue, signature: 'ab' } : null), verifyStored: () => true };
     const files = new MemoryResultFiles();
     const publish = new PublishBatchResults(store, records, seeds, beacons, files, clock);
     return { clock, store, records, files, publish, members, seed };
@@ -365,7 +375,7 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     expect(await w.publish.run({ eventId: E, group: 'lobby' })).toEqual({ status: 'BEACON_STOPPED', reason: 'beacon', first: true });
     expect((await w.records.read(E, 'lobby'))?.stopped).toMatchObject({ reason: 'beacon' });
     // 값이 뒤늦게 와도(비콘을 바꿔도) 멈춤은 풀리지 않는다(RB-35 CLI만 푼다)
-    const again = new PublishBatchResults(w.store, w.records, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }) }, w.files, w.clock);
+    const again = new PublishBatchResults(w.store, w.records, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }), verifyStored: () => true }, w.files, w.clock);
     expect(await again.run({ eventId: E, group: 'lobby' })).toEqual({ status: 'BEACON_STOPPED', reason: 'beacon', first: false });
     expect(w.store.publishedForTest(E, 'lobby')).toBeNull();
   });
@@ -388,7 +398,7 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     const w = await lobby({ round: ROUND - 3 });
     const before = await w.records.read(E, 'lobby');
     const stale = { read: async () => before, stop: w.records.stop.bind(w.records), recordBeacon: w.records.recordBeacon.bind(w.records), reveal: w.records.reveal.bind(w.records) };
-    const a = new PublishBatchResults(w.store, stale, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }) }, w.files, w.clock);
+    const a = new PublishBatchResults(w.store, stale, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }), verifyStored: () => true }, w.files, w.clock);
     expect(await a.run({ eventId: E, group: 'lobby' })).toMatchObject({ first: true });
     expect(await a.run({ eventId: E, group: 'lobby' })).toMatchObject({ first: false });
   });

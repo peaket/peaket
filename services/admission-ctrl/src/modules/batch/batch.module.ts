@@ -4,7 +4,7 @@ import type { HotRedis } from '@peaket/platform';
 import { ADMISSION_REDIS, MIN_REPLICAS, RedisBatchStore, RedisShuffleRecords, WAIT_REDIS } from './adapters/redis-batch-store.js';
 import { PublishBatchResults } from './application/publish-batch-results.js';
 import { RevealShuffleSeeds } from './application/reveal-shuffle-seeds.js';
-import { BATCH_STORE, BEACON, type Beacon, RESULT_FILES, type ResultFiles, SEED_SOURCE, type SeedSource, SHUFFLE_RECORDS, type ShuffleRecords } from './domain/ports.js';
+import { BATCH_STORE, BEACON, type Beacon, denyRunbookAuth, RESULT_FILES, type ResultFiles, RUNBOOK_AUTH, type RunbookAuth, SEED_SOURCE, type SeedSource, SHUFFLE_RECORDS, type ShuffleRecords } from './domain/ports.js';
 
 export interface BatchModuleOptions {
   redis: HotRedis;
@@ -17,6 +17,8 @@ export interface BatchModuleOptions {
   minReplicas?: number;
   /** 게시 전 복제 확인(WAIT) 전용 연결. 없으면 공유 연결 */
   waitRedis?: HotRedis;
+  /** RB-35 표시의 서명 확인(없으면 표시가 있는 구간을 멈춘다, ADR-0239 결정 15) */
+  runbookAuth?: RunbookAuth;
 }
 
 @Module({})
@@ -34,6 +36,7 @@ export class BatchModule {
         o.records ? { provide: SHUFFLE_RECORDS, useValue: o.records } : { provide: SHUFFLE_RECORDS, useClass: RedisShuffleRecords },
         { provide: SEED_SOURCE, useValue: o.seeds },
         { provide: BEACON, useValue: o.beacon },
+        { provide: RUNBOOK_AUTH, useValue: o.runbookAuth ?? denyRunbookAuth },
         { provide: RESULT_FILES, useValue: o.files },
       ],
       exports: [PublishBatchResults, RevealShuffleSeeds],

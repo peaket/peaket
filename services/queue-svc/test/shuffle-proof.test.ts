@@ -44,6 +44,111 @@ afterAll(async () => {
 const committed = { 'commit:lobby': COMMIT, 'round:lobby': '8000000', 'at:lobby': String(NOW - 600_000), 'sealed:lobby': 'SEALED-SECRET', chain: 'quicknet', algo: 'v1' };
 const get = (e: string) => svc.http.inject({ method: 'GET', url: `/v1/queues/${e}/shuffle-proof` });
 
+/** 표시 칸에 함께 저장되는 서명 묶음의 모양(서명 자체는 리더가 확인한다, ADR-0239 결정 15) */
+const signedOf = (reason: string) => ({ bundle: { params: { reason } }, signatures: [{ signer: 'commander-a', sig: 'AA==' }, { signer: 'commander-b', sig: 'AA==' }] });
+
+describe('RB-35 공시(ADR-0239 결정 13, HOT-041)', () => {
+  test('Q-T27 비상 셔플은 사유와 고정 한계 문장을 공시한다(서명자는 싣지 않는다)', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'emergency:lobby': JSON.stringify({ at: NOW - 1_000, stop: 'beacon', reason: '공개 중계가 모두 응답하지 않음', signed: signedOf('공개 중계가 모두 응답하지 않음') }) }, done: {} });
+    const res = await get(id);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ lobby: Record<string, unknown> }>();
+    expect(QueueShuffleProof.safeParse(body).success).toBe(true);
+    expect(body.lobby.emergency).toEqual({ at: new Date(NOW - 1_000).toISOString(), reason: '공개 중계가 모두 응답하지 않음', stopReason: 'beacon', limitation: '이 경우 시드를 아는 내부자가 결과를 미리 알 수 있다' });
+    expect(res.body).not.toContain('commander');
+  });
+
+  test('Q-T27 다시 공시 이력을 모두 낸다', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'recommit:lobby': JSON.stringify([{ at: NOW - 2_000, prev: 8_000_000, round: 8_000_100, reason: '오픈 시각 변경', signed: signedOf('오픈 시각 변경') }]) }, done: {} });
+    const res = await get(id);
+    expect(res.json<{ lobby: { redisclosures: unknown } }>().lobby.redisclosures).toEqual([{ at: new Date(NOW - 2_000).toISOString(), previousRound: 8_000_000, round: 8_000_100, reason: '오픈 시각 변경' }]);
+  });
+
+  test.each([
+    ['JSON이 아님', 'nope'],
+    ['사유가 없음', JSON.stringify({ at: NOW, stop: 'beacon', signed: signedOf('x') })],
+    ['서명 묶음이 없음', JSON.stringify({ at: NOW, stop: 'beacon', reason: 'x' })],
+    ['사유가 서명과 다름', JSON.stringify({ at: NOW, stop: 'beacon', reason: '다른 말', signed: signedOf('x') })],
+    ['이유가 틀림', JSON.stringify({ at: NOW, stop: 'members_changed', reason: 'x', signed: signedOf('x') })],
+    ['비콘 지연이 아닌 이유', JSON.stringify({ at: NOW, stop: 'stale_round', reason: 'x', signed: signedOf('x') })],
+    ['사유가 200자를 넘음', JSON.stringify({ at: NOW, stop: 'beacon', reason: '가'.repeat(201), signed: signedOf('가'.repeat(201)) })],
+  ])('Q-T27 비상 표시 칸이 틀리면(%s) 칸을 내지 않고 읽지 못했다고 공시한다', async (_n, raw) => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'emergency:lobby': raw }, done: {} });
+    const res = await get(id);
+    const body = res.json<{ lobby: Record<string, unknown> }>();
+    expect(QueueShuffleProof.safeParse(body).success).toBe(true);
+    expect(body.lobby.emergency).toBeUndefined();
+    expect(body.lobby.invalidDisclosures).toEqual(['emergency']);
+  });
+
+  test.each([
+    ['JSON이 아님', 'nope'],
+    ['칸이 틀림', '[{"at":"x"}]'],
+    ['서명 묶음이 없음', JSON.stringify([{ at: NOW, prev: 1, round: 2, reason: 'x' }])],
+    ['사유가 200자를 넘음', JSON.stringify([{ at: NOW, prev: 1, round: 2, reason: '가'.repeat(201), signed: signedOf('가'.repeat(201)) }])],
+    ['이전 라운드가 0', JSON.stringify([{ at: NOW, prev: 0, round: 2, reason: 'x', signed: signedOf('x') }])],
+    ['새 라운드가 소수', JSON.stringify([{ at: NOW, prev: 1, round: 2.5, reason: 'x', signed: signedOf('x') }])],
+    ['새 라운드가 음수', JSON.stringify([{ at: NOW, prev: 1, round: -2, reason: 'x', signed: signedOf('x') }])],
+  ])('Q-T27 다시 공시 칸이 틀리면(%s) 칸을 내지 않고 읽지 못했다고 공시한다', async (_n, raw) => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'recommit:lobby': raw }, done: {} });
+    const body = (await get(id)).json<{ lobby: Record<string, unknown> }>();
+    expect(body.lobby.redisclosures).toBeUndefined();
+    expect(body.lobby.invalidDisclosures).toEqual(['redisclosures']);
+  });
+
+  test('Q-T27 사유가 정확히 200자면 공시한다', async () => {
+    const id = await event();
+    const reason = '가'.repeat(200);
+    proofs.set(id, { shuffle: { ...committed, 'emergency:lobby': JSON.stringify({ at: NOW, stop: 'beacon', reason, signed: signedOf(reason) }) }, done: {} });
+    expect((await get(id)).json<{ lobby: { emergency: { reason: string } } }>().lobby.emergency.reason).toBe(reason);
+  });
+
+  test.each([
+    ['멈춤 시각의 자릿수가 아주 김', { 'stop:lobby': `${'9'.repeat(40)}:beacon` }],
+    ['날짜 범위를 넘는 멈춤 시각', { 'stop:lobby': '9999999999999999:unauthorized' }],
+  ])('Q-T27 %s이어도 500이 아니고 unknown으로 낸다', async (_n, extra) => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, ...extra }, done: {} });
+    const res = await get(id);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ lobby: { stopped: { reason: string } } }>().lobby.stopped.reason).toBe('unknown');
+  });
+
+  test('Q-T27 날짜 범위를 넘는 시각·라운드는 칸을 내지 않고 500도 없다', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'at:lobby': '9999999999999999', 'round:lobby': '9999999999999999' }, done: {} });
+    const res = await get(id);
+    expect(res.statusCode).toBe(200);
+    const lobby = res.json<{ lobby: Record<string, unknown> }>().lobby;
+    expect(lobby).not.toHaveProperty('committedAt');
+    expect(lobby).not.toHaveProperty('roundAt');
+  });
+
+  test('Q-T27 서명 없는 표시로 멈춘 구간은 그 이유를 낸다', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'stop:lobby': `${NOW}:unauthorized` }, done: {} });
+    expect((await get(id)).json<{ lobby: { stopped: unknown } }>().lobby.stopped).toEqual({ reason: 'unknown', detail: 'unauthorized', at: new Date(NOW).toISOString() });
+  });
+
+  test('Q-T27 시드를 풀지 못해 멈춘 구간은 그 이유를 낸다', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed, 'stop:lobby': `${NOW}:seed_unavailable` }, done: {} });
+    expect((await get(id)).json<{ lobby: { stopped: unknown } }>().lobby.stopped).toEqual({ reason: 'unknown', detail: 'seed_unavailable', at: new Date(NOW).toISOString() });
+  });
+
+  test('Q-T27 비상 셔플 표시가 없으면 칸이 없다', async () => {
+    const id = await event();
+    proofs.set(id, { shuffle: { ...committed }, done: {} });
+    const body = (await get(id)).json<{ lobby: Record<string, unknown> }>();
+    expect(body.lobby).not.toHaveProperty('emergency');
+    expect(body.lobby).not.toHaveProperty('redisclosures');
+  });
+});
+
 async function event(o: { lobbyShuffle?: boolean; openBatch?: boolean; opensAtMs?: number } = {}) {
   const id = newEvent();
   await schedules.set(id, { opensAtMs: o.opensAtMs ?? OPENS, startsAtMs: OPENS + 3 * 86_400_000, lobbyShuffle: o.lobbyShuffle ?? true, openBatch: o.openBatch ?? true });

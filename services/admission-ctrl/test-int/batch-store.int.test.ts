@@ -204,8 +204,9 @@ test('[ASVS v5.0.0-15.4.2] POL-005 머클루트·비콘·시드는 비어 있을
   expect(await store.earlyRootOf(E, 'lobby')).toEqual(first);
   await store.markPublished(E, 'lobby', 3_000, 'r3');
   expect((await store.published(E, 'lobby'))?.root).toBe('r1');
-  await records.recordBeacon(E, 'lobby', 'aa', 'bb', expireAtMs);
-  await records.recordBeacon(E, 'lobby', 'cc', 'dd', expireAtMs);
+  await redis.command(['HSET', keys.shuffle(E), 'round:lobby', '7'], { key: keys.shuffle(E) });
+  await records.recordBeacon(E, 'lobby', 'aa', 'bb', expireAtMs, 7);
+  await records.recordBeacon(E, 'lobby', 'cc', 'dd', expireAtMs, 7);
   await records.reveal(E, 'lobby', 'ee', 4_000, expireAtMs);
   await records.reveal(E, 'lobby', 'ff', 5_000, expireAtMs);
   const k = keys.shuffle(E);

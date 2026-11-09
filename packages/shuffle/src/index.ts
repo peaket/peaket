@@ -22,18 +22,23 @@ export const drandRoundAfter = (atMs: number, minDelayMs: number = BEACON_MIN_DE
 export type ShuffleGroup = 'lobby' | number;
 /** 봉인의 용도 표시(KMS 암호화 컨텍스트의 purpose, 시험 대역의 AAD) */
 export const SEAL_PURPOSE = 'peaket-shuffle-seed-v1';
-/** 시드 봉인. 운영은 KMS(HOT-041), local·ci·demo는 TestSeedSealer */
+/** 시드 봉인(queue-svc). 운영은 KMS Encrypt만 부른다(ADR-0239 결정 1). local·ci·demo는 TestSeedSealer */
 export interface SeedSealer {
   seal(eventId: string, group: ShuffleGroup, seed: Uint8Array): Promise<string>;
+}
+/** 시드 봉인 풀기(admission-ctrl). 운영은 KMS Decrypt만 부른다(ADR-0239 결정 1) */
+export interface SeedOpener {
   open(eventId: string, group: ShuffleGroup, sealed: string): Promise<Buffer>;
 }
+/** KMS 암호화 컨텍스트(문자열 값만 받는다). 다른 회차·구간의 봉인 값은 풀리지 않는다 */
+export const sealContext = (eventId: string, group: ShuffleGroup): { purpose: string; eventId: string; group: string } => ({ purpose: SEAL_PURPOSE, eventId, group: String(group) });
 
 /** 시험 봉인을 켜는 값(base64 32바이트 이상, 묶음 시험 시드·비콘과 같은 값, local·ci·demo만) */
 export const TEST_SEAL_ENV = 'PEAKET_TEST_BATCH_RANDOMNESS';
 const TEST_SEAL_ENVS = ['local', 'ci', 'demo'];
 
 /** local·ci·demo의 시험 봉인: AES-256-GCM과 회차·구간을 묶은 AAD. 비밀을 아는 사람이 풀 수 있어 공정성 증명이 되지 않는다 */
-export class TestSeedSealer implements SeedSealer {
+export class TestSeedSealer implements SeedSealer, SeedOpener {
   readonly #key: Buffer;
 
   constructor(secret: Buffer) {
@@ -42,7 +47,7 @@ export class TestSeedSealer implements SeedSealer {
   }
 
   static fromEnv(env: Record<string, string | undefined>): TestSeedSealer {
-    if (!TEST_SEAL_ENVS.includes(env.PEAKET_ENV ?? '')) throw new Error('시험 봉인은 local·ci·demo에서만 켠다(운영은 KMS, BUILD_ORDER HOT-041)');
+    if (!TEST_SEAL_ENVS.includes(env.PEAKET_ENV ?? '')) throw new Error('시험 봉인은 local·ci·demo에서만 켠다(운영은 KMS, ADR-0239)');
     const raw = env[TEST_SEAL_ENV];
     if (!raw) throw new Error(`${TEST_SEAL_ENV}가 없다(base64 32바이트 이상)`);
     return new TestSeedSealer(Buffer.from(raw, 'base64'));
@@ -80,6 +85,16 @@ const sha256 = (...parts: Uint8Array[]): Buffer => {
   for (const p of parts) h.update(p);
   return h.digest();
 };
+
+/**
+ * 시드만 쓰는 비상 셔플(RB-35)을 받는 멈춤 이유. 정본(ADR-0050 결정 7)은 비콘 지연만 대상으로 한다.
+ * 목록은 여기 하나이고, 적용·게시 직전 재검증(admission-ctrl)과 공시(queue-svc)가 모두 이 값을 본다(ADR-0239 결정 9)
+ */
+export const EMERGENCY_STOP_REASONS: readonly string[] = ['beacon'];
+export const isEmergencyStopReason = (reason: unknown): boolean => typeof reason === 'string' && EMERGENCY_STOP_REASONS.includes(reason);
+
+/** 시드만 쓰는 비상 셔플(RB-35, ADR-0239 결정 11)의 비콘 값 자리에 넣는 고정값. 재현 규격의 입력 길이를 그대로 둔다 */
+export const EMERGENCY_BEACON: Buffer = sha256(Buffer.from('PEAKET-shuffle-v1-no-beacon', 'utf8'));
 
 export function commitment(eventId: string, seed: Uint8Array): Buffer {
   return sha256(COMMIT_DOMAIN, Buffer.from(eventId, 'utf8'), seed);
