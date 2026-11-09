@@ -375,7 +375,7 @@ describe('만료 반복과 결제 정지 S-T23', () => {
   };
   const acct = (i: number) => `acct${String(i).padStart(4, '0')}`;
 
-  test('S-T23 ① 정지면 틱이 주문 뒤 홀드를 옮기고 시간이 지나도 회수하지 않으며, 열림은 연속 두 번째에 되돌린다', async () => {
+  test('S-T23 ① 정지면 틱이 주문 뒤 홀드를 옮겨 회수 대상에서 빼고, 열림은 연속 두 번이면서 첫 열림부터 1초 뒤에 되돌린다', async () => {
     const e = await bigEvent(10);
     const a = await holdAt(e, 0, acct(0));
     await life.markOrdered(a, Date.now() + 2_700_000, KEEP());

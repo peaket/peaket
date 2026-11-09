@@ -1,0 +1,91 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 2: <seat_lifecycle_no_unique_seat_lifecycle_hold(2) line 785, col 3 to line 824, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 2, where |-> "HELD", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 3: <seat_lifecycle_no_unique_seat_lifecycle_accept(2) line 950, col 3 to line 986, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 2, where |-> "PINNED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 4: <seat_lifecycle_no_unique_seat_lifecycle_loseAll line 370, col 3 to line 389, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = FALSE
+
+State 5: <seat_lifecycle_no_unique_seat_lifecycle_rebuild line 729, col 3 to line 774, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 6: <seat_lifecycle_no_unique_seat_lifecycle_hold(1) line 785, col 3 to line 824, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 1, where |-> "HELD", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 7: <seat_lifecycle_no_unique_seat_lifecycle_accept(1) line 950, col 3 to line 986, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PINNED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 8: <seat_lifecycle_no_unique_seat_lifecycle_saleStep(1) line 1005, col 3 to line 1041, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{1}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PINNED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "RESERVED", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "ACCEPTED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE
+
+State 9: <seat_lifecycle_no_unique_seat_lifecycle_saleStep(2) line 1005, col 3 to line 1041, col 59 of module seat_lifecycle_no_unique>
+/\ seat_lifecycle_no_unique_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_unique_seat_lifecycle_sale = <<{1, 2}>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_losses = 1
+/\ seat_lifecycle_no_unique_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PINNED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_unique_seat_lifecycle_holds = << [phase |-> "RESERVED", maxDue |-> FALSE, extended |-> FALSE],
+   [phase |-> "RESERVED", maxDue |-> FALSE, extended |-> FALSE] >>
+/\ seat_lifecycle_no_unique_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+/\ seat_lifecycle_no_unique_seat_lifecycle_ready = TRUE

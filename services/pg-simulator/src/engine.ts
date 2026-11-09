@@ -186,6 +186,14 @@ export class PgSimulatorEngine {
     this.nextLatency = latencySampler(spec, this.random);
   }
 
+  /** 인증만 하고 승인되지 않은 결제의 세션이 끝난다(토스 '결제 시간 만료'와 같은 상태, 승인 전 장애의 해소를 시험한다, BUILD_ORDER HOT-358 리뷰 V4) */
+  expireSession(paymentKey: string): boolean {
+    const p = this.payments.get(paymentKey);
+    if (!p || p.status !== 'READY') return false;
+    p.status = 'EXPIRED';
+    return true;
+  }
+
   addFault(f: Fault): void {
     this.faults.push({ fault: f, remaining: f.times ?? Number.POSITIVE_INFINITY });
   }

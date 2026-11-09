@@ -1,0 +1,95 @@
+Error: Temporal property q_temporalProps was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 2: <seat_lifecycle_no_max_thaw_seat_lifecycle_hold(1) line 787, col 3 to line 826, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "HELD", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 3: <seat_lifecycle_no_max_thaw_seat_lifecycle_markOrdered(1) line 445, col 3 to line 474, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "ORDERED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 4: <seat_lifecycle_no_max_thaw_seat_lifecycle_extend(1) line 634, col 3 to line 677, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "ORDERED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 5: <seat_lifecycle_no_max_thaw_seat_lifecycle_pauseStart line 260, col 3 to line 288, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "ORDERED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 6: <seat_lifecycle_no_max_thaw_seat_lifecycle_freeze(1,1) line 512, col 3 to line 546, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PAUSED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 7: <seat_lifecycle_no_max_thaw_seat_lifecycle_maxStayPasses(1) line 552, col 3 to line 582, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PAUSED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> TRUE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 8: <seat_lifecycle_no_max_thaw_seat_lifecycle_pauseBlind line 323, col 3 to line 340, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PAUSED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> TRUE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> TRUE, known |-> FALSE]
+
+State 9: <seat_lifecycle_no_max_thaw_seat_lifecycle_pauseEnd line 294, col 3 to line 317, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PAUSED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> TRUE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 10: <seat_lifecycle_no_max_thaw_seat_lifecycle_pauseStart line 260, col 3 to line 288, col 61 of module seat_lifecycle_no_max_thaw>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_seats = <<[hid |-> 1, where |-> "PAUSED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> TRUE, extended |-> TRUE]>>
+/\ seat_lifecycle_no_max_thaw_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+Back to state 8: <seat_lifecycle_no_max_thaw_seat_lifecycle_pauseBlind line 323, col 3 to line 340, col 61 of module seat_lifecycle_no_max_thaw>

@@ -414,6 +414,56 @@
           "why": "V-T1(진행성): CS 확인 경로를 빼면 ticket-svc가 끝내 발권하지 못하는 승인 주문이 보상으로 끝나지 못한다(진행성 검사가 보상 경로까지 본다는 것을 보인다)"
         }
       ]
+    },
+    {
+      "name": "seat_lifecycle",
+      "file": "specs/seat_lifecycle.qnt",
+      "title": "홀드 해제·연장·주문 뒤 집합·결제 정지 멈춤과 되돌리기",
+      "adrs": [
+        "0085",
+        "0121",
+        "0254"
+      ],
+      "scope": "좌석 2석, 홀드 2개(한 좌석을 다툰다), 좌석 Redis 전체 유실 1회, 결제 정지·조회 끊김은 몇 번이든. 진행성은 홀드 1개·유실 없음, 공정성 가정(사람의 동작·정지·유실에는 두지 않음)에서 TLC로 본다. 시간은 '좌석의 만료 시각이 지남'으로만 둔다",
+      "invariants": [
+        "inv_noDoubleSale",
+        "inv_noFrozenLost",
+        "inv_pausedBelongs"
+      ],
+      "temporal": [
+        "fairLiveness"
+      ],
+      "checks": [
+        {
+          "main": "seat_lifecycle_check",
+          "expect": "hold",
+          "why": "해제·연장·주문 뒤 표시·옮기기·되돌리기·최대 체류·다시 만들기가 섞여도 이중 판매가 없고, 정지 동안 주문 뒤 홀드를 시간으로 풀지 않는다(ADR-0254, BUILD_ORDER HOT-358 리뷰 V3)"
+        },
+        {
+          "main": "seat_lifecycle_live",
+          "expect": "hold",
+          "temporal": "fairLiveness",
+          "why": "결제 정지가 끝나지 않아도 최대 체류가 끝내므로, 잡은 좌석은 판매나 풀림으로 끝난다(묶인 좌석이 영원히 남지 않는다)"
+        },
+        {
+          "main": "seat_lifecycle_no_unique",
+          "expect": "violate",
+          "invariant": "inv_noDoubleSale",
+          "why": "V-T1: 활성 판매 부분 유니크를 빼면 좌석 Redis 유실 뒤 같은 좌석이 두 번 팔린다"
+        },
+        {
+          "main": "seat_lifecycle_no_skip",
+          "expect": "violate",
+          "invariant": "inv_noFrozenLost",
+          "why": "V-T1: 만료 Lua가 정지 중 주문 뒤 홀드를 건너뛰지 않으면 옮기기 전에 풀린다(ADR-0254 frozenWait)"
+        },
+        {
+          "main": "seat_lifecycle_no_max_thaw",
+          "expect": "violate",
+          "temporal": "fairLiveness",
+          "why": "V-T1(진행성): 최대 체류 되돌리기를 빼면 정지가 끝나지 않을 때 멈춘 좌석이 끝내 풀리지 않는다"
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,55 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> FALSE, known |-> TRUE]
+
+State 2: <seat_lifecycle_no_skip_seat_lifecycle_pauseStart line 260, col 3 to line 288, col 57 of module seat_lifecycle_no_skip>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "IDLE", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 3: <seat_lifecycle_no_skip_seat_lifecycle_hold(1) line 780, col 3 to line 819, col 57 of module seat_lifecycle_no_skip>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 1, where |-> "HELD", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 4: <seat_lifecycle_no_skip_seat_lifecycle_markOrdered(1) line 440, col 3 to line 469, col 57 of module seat_lifecycle_no_skip>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 1, where |-> "ORDERED", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 5: <seat_lifecycle_no_skip_seat_lifecycle_ttlPasses(1,1) line 185, col 3 to line 210, col 57 of module seat_lifecycle_no_skip>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 1, where |-> "ORDERED", late |-> TRUE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "HELD", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]
+
+State 6: <seat_lifecycle_no_skip_seat_lifecycle_expire(1,1) line 849, col 3 to line 884, col 52 of module seat_lifecycle_no_skip>
+/\ seat_lifecycle_no_skip_seat_lifecycle_ready = TRUE
+/\ seat_lifecycle_no_skip_seat_lifecycle_sale = <<{}>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_frozenLost = 1
+/\ seat_lifecycle_no_skip_seat_lifecycle_losses = 0
+/\ seat_lifecycle_no_skip_seat_lifecycle_seats = <<[hid |-> 0, where |-> "NONE", late |-> FALSE, preLate |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_holds = <<[phase |-> "GONE", maxDue |-> FALSE, extended |-> FALSE]>>
+/\ seat_lifecycle_no_skip_seat_lifecycle_pause = [on |-> TRUE, known |-> TRUE]

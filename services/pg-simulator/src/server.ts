@@ -239,6 +239,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     engine.addFault(f);
     return reply.code(204).send();
   });
+  app.post<{ Params: { paymentKey: string } }>('/sim/sessions/:paymentKey/expire', { schema: { params: KEY_PARAM } }, async (req, reply) => reply.code(engine.expireSession(req.params.paymentKey) ? 204 : 404).send());
   app.delete('/sim/faults', async (_req, reply) => {
     engine.clearFaults();
     return reply.code(204).send();

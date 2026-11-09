@@ -5,6 +5,7 @@
 // Kafka만 빠진다(이 PC에서 네이티브 모듈이 막혀 있어 Outbox 행의 값을 소비 처리기에 그대로 넘긴다).
 import 'reflect-metadata';
 import { createHash, createPublicKey, diffieHellman, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import { Writable } from 'node:stream';
 import { buildSimulatorApp, type SimulatorApp } from '@peaket/pg-simulator';
 import { type ConsumedMessage, createDatabase, createHotRedis, createPlatformLogger, createService, type Database, ensureOutboxPartitions, type HotRedis, PlatformMetrics, purchaseMac, purchaseMacInput, purchaseRequestKey, systemClock } from '@peaket/platform';
@@ -35,7 +36,7 @@ import {
   SeatMapSagaConfigs,
   type StartPaymentSignals,
 } from '../../purchase-svc/src/modules/booking/index.js';
-import { DrizzleSeatSales, EndPurchaseSession, KEEP_AFTER_SALE_END_MS, ManageHolds, MemorySeatMap, OpenPurchaseSession, RecordingHoldAttempts, RedisHoldLifecycle, RedisOrderHolds, RedisPurchaseSessionStore, RedisSeatSlots, RedisSeatStore, RedisSessionEndedLog, seatKeys, ServerEcdhKey, StoredPurchaseSessions } from '../../purchase-svc/src/modules/inventory/index.js';
+import { DrizzleSeatSales, EndPurchaseSession, ExpirySweeper, HoldPauseView, KEEP_AFTER_SALE_END_MS, ManageHolds, type PaymentPauseAnswer, RedisSweepLeases, MemorySeatMap, OpenPurchaseSession, RecordingHoldAttempts, RedisHoldLifecycle, RedisOrderHolds, RedisPurchaseSessionStore, RedisSeatSlots, RedisSeatStore, RedisSessionEndedLog, seatKeys, ServerEcdhKey, StoredPurchaseSessions } from '../../purchase-svc/src/modules/inventory/index.js';
 import { claimsOf, ISS, newKey, signAdmission } from '../../purchase-svc/test/admission-fixtures.js';
 import { clientKeyOf } from '../../purchase-svc/test/session-fixtures.js';
 import { startValkey, type ValkeyContainer } from '../../purchase-svc/test-int/valkey.js';
@@ -57,6 +58,9 @@ import {
   paymentCommandLog,
   paymentConfirmLog,
   PaymentConfirmRunner,
+  PaymentUnknownResolver,
+  paymentUnknownLog,
+  PromPaymentUnknownSignals,
   paymentPackage,
   paymentServiceHandlers,
   PgCallGuards,
@@ -91,6 +95,64 @@ let saga: OrderSagaRunner;
 let results: PaymentResultHandler;
 let opener: OpenPurchaseSession;
 let mismatch = 0;
+let unknownResolver: PaymentUnknownResolver;
+let redisGate: RedisGate;
+
+/** 앱과 Valkey 사이의 TCP 중계(새 패키지 없이 연결을 끊는다, BUILD_ORDER HOT-358 리뷰 V4) */
+interface RedisGate {
+  url: string;
+  /** n번째 명령 덩어리를 보낸 뒤 연결을 끊고 막는다 */
+  cutAfter(n: number): void;
+  cutNow(): void;
+  mend(): void;
+  close(): Promise<void>;
+}
+
+async function startRedisGate(target: string): Promise<RedisGate> {
+  const t = new URL(target);
+  const live = new Set<Socket>();
+  let down = false;
+  let armed = -1;
+  const cutNow = () => {
+    down = true;
+    armed = -1;
+    for (const s of live) s.destroy();
+    live.clear();
+  };
+  const server: Server = createServer((c) => {
+    if (down) return void c.destroy();
+    const u = connect(Number(t.port), t.hostname);
+    live.add(c);
+    live.add(u);
+    c.on('data', (d) => {
+      u.write(d);
+      if (armed > 0 && (armed -= 1) === 0) setImmediate(cutNow);
+    });
+    u.on('data', (d) => c.write(d));
+    for (const s of [c, u]) {
+      s.on('error', () => undefined);
+      s.on('close', () => {
+        c.destroy();
+        u.destroy();
+      });
+    }
+  });
+  await new Promise<void>((f) => server.listen(0, '127.0.0.1', f));
+  const port = (server.address() as { port: number }).port;
+  return {
+    url: `redis://127.0.0.1:${port}`,
+    cutAfter: (n) => void (armed = n),
+    cutNow,
+    mend: () => {
+      down = false;
+      armed = -1;
+    },
+    close: () => {
+      cutNow();
+      return new Promise<void>((f) => server.close(() => f()));
+    },
+  };
+}
 
 const quiet = new Writable({ write: (_c, _e, cb) => cb() });
 const seatMap = new MemorySeatMap();
@@ -114,7 +176,8 @@ beforeAll(async () => {
   if (v.status === 'fulfilled') valkey = v.value;
   for (const r of [p, v]) if (r.status === 'rejected') throw r.reason as Error;
 
-  redis = await createHotRedis({ url: valkey!.url });
+  redisGate = await startRedisGate(valkey!.url);
+  redis = await createHotRedis({ url: redisGate.url });
   sim = buildSimulatorApp({ secretKey: SIM_KEY });
   simUrl = await sim.listen({ host: '127.0.0.1', port: 0 });
 
@@ -140,7 +203,7 @@ beforeAll(async () => {
   cmdSignals.register(metrics.registry);
   const checkoutSignals = new PromPaymentCheckoutSignals().register(metrics.registry);
   const store = new DrizzlePaymentStore({ database: payHot, batchDatabase: payHot });
-  const gateway = new SimulatorPaymentGateway({ baseUrl: simUrl, secretKey: SIM_KEY, clientKey: 'sim_ck_e2e' });
+  const gateway = new SimulatorPaymentGateway({ baseUrl: simUrl, secretKey: SIM_KEY, clientKey: 'sim_ck_e2e', readTimeoutMs: 2_500 });
   const gateways = new StaticPaymentGateways([gateway]);
   const entry = new DrizzleEntryPause({ database: payHot });
   const prepareCheckout = new PrepareCheckout({
@@ -175,6 +238,8 @@ beforeAll(async () => {
     },
     timer: { setInterval: () => 0, clearInterval: () => {} },
   } as never);
+
+  unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(logger), signals: new PromPaymentUnknownSignals().register(metrics.registry), clock: systemClock, timer: { setInterval: () => 0, clearInterval: () => {} } } as never);
 
   // purchase-svc: 실제 HTTP·Lua·DB·gRPC 클라이언트
   const sessionStore = new RedisPurchaseSessionStore(redis);
@@ -249,6 +314,7 @@ afterAll(async () => {
   await svc?.close().catch(() => undefined);
   for (const f of closeAll) await f().catch(() => undefined);
   await sim?.close();
+  await redisGate?.close().catch(() => undefined);
   await Promise.allSettled([redis?.close(), adminP?.close(), adminPay?.close(), purchaseDb?.close(), payHot?.close()]);
   valkey?.stop();
   pgc?.stop();
@@ -312,8 +378,8 @@ const json = (r: { payload: string }) => {
 
 async function sim_(path: string, body: unknown): Promise<Record<string, unknown>> {
   const r = await fetch(`${simUrl}${path}`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`${SIM_KEY}:`).toString('base64')}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  expect(r.status).toBe(200);
-  return (await r.json()) as Record<string, unknown>;
+  expect(r.status === 200 || r.status === 204).toBe(true);
+  return (r.status === 204 ? {} : await r.json()) as Record<string, unknown>;
 }
 
 describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준비 → 승인 결과', () => {
@@ -491,3 +557,239 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     expect(json(retry).type).toBe('seat-recently-released');
   }, 60_000);
 });
+
+describe('장애 주입(BUILD_ORDER HOT-358 리뷰 V4): 좌석 이중 판매 0, 금액·주문 불일치 0, 묶인 좌석은 풀리고, 결과 모름은 해소된다', () => {
+  const ORDER_BODY = (holdId: string) => ({ holdId, buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT } });
+  const delivered = new Set<string>();
+  let offset = 1_000_000n;
+
+  /** payment-svc Outbox의 새 행을 소비 처리기에 넣는다(Kafka 대신) */
+  async function drain(eventId: string): Promise<void> {
+    const rows = (await adminPay.pool.query<{ payload: Buffer; id: string }>('select seq::text as id, payload from outbox where msg_key = $1 order by seq', [eventId])).rows;
+    for (const r of rows) {
+      if (delivered.has(r.id)) continue;
+      delivered.add(r.id);
+      offset += 1n;
+      const m: ConsumedMessage = { topic: 'trade.payments', partition: 0, offset, key: eventId, value: r.payload, headers: {}, timestamp: Date.now() };
+      await results.handle(results.decode(m), m);
+    }
+  }
+  const orderStatus = async (id: string) => (await adminP.pool.query<{ status: string }>('select status from purchase_order where id = $1', [id])).rows[0]?.status;
+  const payStatus = async (id: string) => (await adminPay.pool.query<{ status: string }>('select status from payment where order_id = $1', [id])).rows[0]?.status;
+  async function holdSeat(w: { eventId: string; seats: string[] }, f: Fan, i: number): Promise<string> {
+    const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[i]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    return String(json(held).holdId);
+  }
+  async function healthy(): Promise<void> {
+    redisGate.mend();
+    await until(async () => (await redis.command(['PING'], { key: 'x' }).catch(() => null)) === 'PONG', 'Redis 복구', 15_000, 50);
+  }
+  /** 주문까지 된 상태에서 결제창(시뮬레이터 인증)과 접수를 지나 Saga가 승인 명령을 낼 때까지 */
+  async function acceptedOrder(f: Fan, orderId: string, fault?: Record<string, unknown>): Promise<void> {
+    const started = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(started.statusCode, started.payload).toBe(201);
+    const a = json(started) as { attemptId: string; checkout: { orderId: string; amount: number } };
+    const { paymentKey } = (await sim_('/sim/authenticate', { orderId: a.checkout.orderId, amount: a.checkout.amount })) as { paymentKey: string };
+    if (fault) await sim_('/sim/faults', { op: 'confirm', orderId: a.checkout.orderId, times: 1, ...fault });
+    const accepted = await call(f, 'POST', `/v1/orders/${orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey, amount: a.checkout.amount, attemptId: a.attemptId }, { idem: randomUUID() });
+    expect(accepted.statusCode, accepted.payload).toBe(202);
+    await until(async () => (await orderStatus(orderId)) === 'RESERVED', 'RESERVED', 20_000, 50);
+  }
+  async function runConfirm(orderId: string): Promise<string> {
+    await until(async () => {
+      await confirmRunner.tick();
+      await confirmRunner.whenIdle();
+      return (await payStatus(orderId)) !== 'ACCEPTED';
+    }, '승인 실행', 25_000, 100);
+    return (await payStatus(orderId))!;
+  }
+  /** 결과 모름을 조회로 해소한다(다음 조회 시각을 앞당긴다) */
+  async function resolveUnknown(orderId: string): Promise<string> {
+    await until(async () => {
+      await adminPay.pool.query("update payment set next_query_at = now() - interval '1 second' where order_id = $1 and status = 'UNKNOWN'", [orderId]);
+      await unknownResolver.tick();
+      await unknownResolver.whenIdle();
+      return (await payStatus(orderId)) !== 'UNKNOWN';
+    }, '결과 모름 해소', 25_000, 150);
+    return (await payStatus(orderId))!;
+  }
+  async function verdict(w: { eventId: string }, orderId: string, expected: 'SOLD' | 'RELEASED', seat: number): Promise<void> {
+    await drain(w.eventId);
+    const sales = (await adminP.pool.query<{ seat_id: string; n: number }>("select seat_id, count(*)::int n from seat_sale where event_id = $1 and status in ('PENDING','SOLD') group by seat_id", [w.eventId])).rows;
+    expect(sales.every((r) => r.n === 1), '좌석 이중 판매').toBe(true);
+    const order = (await adminP.pool.query<{ amount: number; status: string }>('select amount, status from purchase_order where id = $1', [orderId])).rows[0]!;
+    const pay = (await adminPay.pool.query<{ amount: number; status: string }>('select amount, status from payment where order_id = $1', [orderId])).rows[0]!;
+    expect(Number(pay.amount), '금액 불일치').toBe(Number(order.amount));
+    if (expected === 'SOLD') {
+      expect(order.status).toBe('APPROVED');
+      expect(sales.length).toBe(1);
+    } else {
+      await until(async () => (await adminP.pool.query('select count(*)::int n from seat_sale where event_id = $1 and status in ($2, $3)', [w.eventId, 'PENDING', 'SOLD'])).rows[0]?.n === 0, '판매 행 지움', 10_000, 50);
+    }
+    expect(['UNKNOWN', 'ACCEPTED']).not.toContain(pay.status);
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), String(seat)], { key: seatKeys.bitmap(w.eventId) }))).toBe(expected === 'SOLD' ? 1 : 0);
+  }
+
+  test('V4 ① 주문 도중 Redis 연결이 어느 명령에서 끊겨도 복구 뒤 같은 키로 주문은 하나다', async () => {
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+      const w = await world();
+      const f = await fan(w.eventId);
+      const holdId = await holdSeat(w, f, 0);
+      const idem = randomUUID();
+      redisGate.cutAfter(n);
+      const first = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem });
+      await healthy();
+      const again = await until2(async () => {
+        const r = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem });
+        return r.statusCode < 500 ? r : null;
+      }, `주문 재시도 n=${n}`);
+      expect(again.statusCode, `n=${n} 첫 답 ${first.statusCode}: ${again.payload}`).toBe(201);
+      const orderId = String(json(again).orderId);
+      const rows = (await adminP.pool.query('select count(*)::int n from purchase_order where hold_id = $1', [holdId])).rows[0];
+      expect(rows, `n=${n}`).toEqual({ n: 1 });
+      // 결제 시도 시작이 주문 뒤 표시를 복구한다(L4)
+      const started = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+      expect(started.statusCode, `n=${n} ${started.payload}`).toBe(201);
+      const key = seatKeys.ordered(w.eventId);
+      expect(await redis.command(['ZSCORE', key, '0'], { key }), `n=${n} 주문 뒤 표시`).not.toBeNull();
+    }
+  }, 180_000);
+
+  test('V4 ① 결제 시도 도중 Redis가 끊겨도 복구 뒤 같은 키는 시도 행 하나이고 끝까지 팔린다', async () => {
+    for (const n of [1, 3, 5]) {
+      const w = await world();
+      const f = await fan(w.eventId);
+      const holdId = await holdSeat(w, f, 0);
+      const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+      expect(ordered.statusCode, ordered.payload).toBe(201);
+      const orderId = String(json(ordered).orderId);
+      const idem = randomUUID();
+      redisGate.cutAfter(n);
+      await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem });
+      await healthy();
+      const again = await until2(async () => {
+        const r = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem });
+        return r.statusCode < 500 ? r : null;
+      }, `시도 재시도 n=${n}`);
+      expect(again.statusCode, again.payload).toBe(201);
+      expect((await adminP.pool.query('select count(*)::int n from payment_attempt where order_id = $1', [orderId])).rows[0], `n=${n}`).toEqual({ n: 1 });
+      await acceptedOrderAfterAttempt(f, orderId, again);
+      expect(await runConfirm(orderId)).toBe('APPROVED');
+      await verdict(w, orderId, 'SOLD', 0);
+    }
+  }, 180_000);
+
+  async function acceptedOrderAfterAttempt(f: Fan, orderId: string, started: { payload: string }): Promise<void> {
+    const a = json(started) as { attemptId: string; checkout: { orderId: string; amount: number } };
+    const { paymentKey } = (await sim_('/sim/authenticate', { orderId: a.checkout.orderId, amount: a.checkout.amount })) as { paymentKey: string };
+    const accepted = await call(f, 'POST', `/v1/orders/${orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey, amount: a.checkout.amount, attemptId: a.attemptId }, { idem: randomUUID() });
+    expect(accepted.statusCode, accepted.payload).toBe(202);
+    await until(async () => (await orderStatus(orderId)) === 'RESERVED', 'RESERVED', 20_000, 50);
+  }
+
+  test('V4 ① 정지 옮기기 도중 Redis가 끊겨도 좌석을 잃지 않고 복구 뒤 옮겨지며 되돌린 뒤 팔린다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    let answer: PaymentPauseAnswer = { status: 'OK', pauses: [{ eventId: w.eventId, pausedSinceMs: Date.now() - 500 }] };
+    const sweeper = new ExpirySweeper({ expiries: new RedisSeatStore(redis), seatMap, leases: new RedisSweepLeases(redis), clock: systemClock, podId: `pod-v4-${randomUUID()}`, lifecycle: new RedisHoldLifecycle(redis), pauseView: new HoldPauseView({ read: async () => answer }, systemClock) } as never);
+    for (const n of [1, 2, 3, 4]) {
+      redisGate.cutAfter(n);
+      await sweeper.tick().catch(() => undefined);
+      await healthy();
+      expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '0'], { key: seatKeys.bitmap(w.eventId) })), `n=${n}`).toBe(1);
+    }
+    const pausedKey = seatKeys.paused(w.eventId);
+    // 끊겼던 틱의 임대가 끝나면 옮겨진다
+    await until(async () => {
+      await sweeper.tick();
+      return (await redis.command(['ZSCORE', pausedKey, '0'], { key: pausedKey })) !== null;
+    }, '복구 뒤 옮기기', 20_000, 200);
+    answer = { status: 'OK', pauses: [] };
+    await sweeper.tick();
+    await new Promise((r) => setTimeout(r, 1_100));
+    redisGate.cutAfter(2);
+    await sweeper.tick().catch(() => undefined);
+    await healthy();
+    await sweeper.tick();
+    await until(async () => {
+      await sweeper.tick();
+      return (await redis.command(['ZSCORE', pausedKey, '0'], { key: pausedKey })) === null;
+    }, '되돌리기', 10_000, 100);
+    await acceptedOrder(f, orderId);
+    expect(await runConfirm(orderId)).toBe('APPROVED');
+    await verdict(w, orderId, 'SOLD', 0);
+  }, 120_000);
+
+  test('V4 ② PG 지연: 승인이 시간 안에 오면 그대로 팔린다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    const orderId = String(json(ordered).orderId);
+    await acceptedOrder(f, orderId, { kind: 'delay', ms: 800 });
+    expect(await runConfirm(orderId)).toBe('APPROVED');
+    await verdict(w, orderId, 'SOLD', 0);
+  }, 90_000);
+
+  test('V4 ② PG 무응답(시간 초과): 결과 모름이 되고 조회가 승인으로 해소해 한 번만 팔린다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    const orderId = String(json(ordered).orderId);
+    await acceptedOrder(f, orderId, { kind: 'delay', ms: 4_000 });
+    const first = await runConfirm(orderId);
+    expect(first).toBe('UNKNOWN');
+    await drain(w.eventId);
+    await new Promise((r) => setTimeout(r, 2_000));
+    expect(await resolveUnknown(orderId)).toBe('APPROVED');
+    await verdict(w, orderId, 'SOLD', 0);
+  }, 120_000);
+
+  test('V4 ② PG 무응답(처리 안 됨): 결과 모름이 조회로 실패로 끝나 묶인 좌석이 풀린다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    const orderId = String(json(ordered).orderId);
+    await acceptedOrder(f, orderId, { kind: 'drop', applied: false });
+    expect(await runConfirm(orderId)).toBe('UNKNOWN');
+    await drain(w.eventId);
+    // 결제사가 결과를 정하기 전에는 상태를 바꾸지 않는다: 세션이 끝나 EXPIRED를 답하면 실패로 닫힌다
+    await unknownResolver.tick();
+    await unknownResolver.whenIdle();
+    expect(await payStatus(orderId)).toBe('UNKNOWN');
+    const { rows } = await adminPay.pool.query<{ key: string }>('select pg_payment_ref as key from payment where order_id = $1', [orderId]);
+    await sim_(`/sim/sessions/${encodeURIComponent(rows[0]!.key)}/expire`, {});
+    expect(await resolveUnknown(orderId)).toBe('FAILED');
+    await verdict(w, orderId, 'RELEASED', 0);
+  }, 120_000);
+
+  test('V4 ③ 승인 응답 유실(처리됨): 결과 모름이 조회로 승인되어 금액이 맞고 한 번만 팔린다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const holdId = await holdSeat(w, f, 0);
+    const ordered = await call(f, 'POST', '/v1/orders', ORDER_BODY(holdId), { idem: randomUUID() });
+    const orderId = String(json(ordered).orderId);
+    await acceptedOrder(f, orderId, { kind: 'drop', applied: true });
+    expect(await runConfirm(orderId)).toBe('UNKNOWN');
+    await drain(w.eventId);
+    expect(await resolveUnknown(orderId)).toBe('APPROVED');
+    await verdict(w, orderId, 'SOLD', 0);
+  }, 120_000);
+});
+
+async function until2<T>(f: () => Promise<T | null>, what: string, ms = 20_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await f();
+    if (v !== null) return v;
+    if (Date.now() > end) throw new Error(`기다림 끝: ${what}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
