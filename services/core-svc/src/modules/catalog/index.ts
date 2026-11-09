@@ -4,3 +4,4 @@ export { MemoryCatalogRepository } from './adapters/memory-catalog-repository.js
 export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { cardSaleStatus, isPublic, opensAsScheduled, representativeEvent, sameVenue } from './domain/production.js';
 export type { CardSaleStatus, CatalogEvent, EventSaleState, Production, SaleReview } from './domain/production.js';
+export { assertDatabaseRole } from './adapters/db/database-role.js';

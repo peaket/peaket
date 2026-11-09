@@ -57,12 +57,16 @@ const eventRow = (productionId: string, promoterId: string, venueId: string | nu
   perPersonLimit: e.perPersonLimit,
 });
 
+/** 파트너 경로의 DB 연결(core_partner 사용자, ADR-0241) */
+export const PARTNER_DATABASE = Symbol.for('peaket.core.partner-database');
+
 @Injectable()
 export class DrizzleCatalogRepository implements CatalogRepository {
   private readonly idempotency: IdempotencyStore;
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
+    @Inject(PARTNER_DATABASE) private readonly partnerDb: Database,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {
     this.idempotency = new IdempotencyStore({ clock: this.clock });
@@ -126,8 +130,8 @@ export class DrizzleCatalogRepository implements CatalogRepository {
   }
 
   registerOnce<T>(once: RequestOnce, tenantId: string, fn: (tx: RegistrationTx) => Promise<T>): Promise<T> {
-    // 트랜잭션에 테넌트를 건다(SET LOCAL app.tenant_id). 행 보안 정책은 HOT-172가 켠다(authz-matrix §5.3)
-    return this.db.transaction(
+    // 파트너 전용 DB 사용자로 접속하고 트랜잭션에 테넌트를 건다(SET LOCAL app.tenant_id). 조회 조건이 빠져도 행 보안이 거른다(authz-matrix §5.3, ADR-0241)
+    return this.partnerDb.transaction(
       (tx) =>
       this.idempotency.run(tx, once, {
         execute: async () => {
@@ -144,21 +148,9 @@ export class DrizzleCatalogRepository implements CatalogRepository {
     return {
       // 공개 중인 다른 공연의 회차만 본다(승인 전 공연은 남을 막지 않고 드러나지도 않는다, ADR-0198 결정 2)
       otherOpenTimes: async (from, to, exclude) => {
-        const rows = await tx
-          .select({ openAt: event.openAt })
-          .from(event)
-          .innerJoin(production, eq(production.id, event.productionId))
-          .where(
-            and(
-              ne(event.productionId, exclude),
-              ne(event.status, 'CANCELLED'),
-              gte(event.openAt, from),
-              lte(event.openAt, to),
-              isNotNull(production.saleApprovedAt),
-              ne(production.saleReview, 'SUSPENDED'),
-            ),
-          );
-        return rows.map((r) => r.openAt);
+        // 다른 파트너의 회차는 행 보안으로 볼 수 없어 오픈 시각 한 칸만 주는 함수로 읽는다(ADR-0241 결정 5)
+        const r = await tx.execute(sql`select open_at from public_open_times(${from.toISOString()}::timestamptz, ${to.toISOString()}::timestamptz, ${exclude}::uuid)`);
+        return (r.rows as Array<{ open_at: Date | string }>).map((x) => new Date(x.open_at));
       },
       // 닫은 공연장(CLOSED)은 고를 수 없다 [가정]
       placeExists: async (id) => (await tx.select({ id: place.id }).from(place).where(and(eq(place.id, id), eq(place.status, 'ACTIVE'))).limit(1)).length > 0,

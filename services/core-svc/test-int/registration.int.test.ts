@@ -10,9 +10,13 @@ import { artist, event, place, production, productionArtist, promoter, searchAli
 import { WISH_LIMIT } from '../src/modules/catalog/domain/registration.js';
 import { eventBody, FakeIdentity, fan, NOW_MS, productionBody, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { loginFor } from './roles.js';
 
 let pg: PostgresContainer;
 let database: Database;
+// 서비스는 운영과 같은 권한의 사용자로 접속한다(빠진 GRANT가 있으면 이 시험이 실패한다, ADR-0241). 확인 쿼리만 소유자로 한다
+let appDb: Database;
+let partnerDb: Database;
 let svc: Awaited<ReturnType<typeof createService>>;
 const identity = new FakeIdentity();
 const TENANT = randomUUID();
@@ -26,16 +30,20 @@ beforeAll(async () => {
   await migrateCore(pg.url);
   database = createDatabase({ url: pg.url, applicationName: 'core-svc-test', max: 8 });
   await ensureOutboxPartitions(database, systemClock);
+  appDb = await loginFor(database, pg, 'core_app_login', 'core_app', 4);
+  partnerDb = await loginFor(database, pg, 'core_partner_login', 'core_partner', 4);
   await database.db.insert(promoter).values([
     { id: TENANT, legalName: '(주)피켓공연' },
     { id: OTHER, legalName: '(주)다른공연' },
   ]);
   await database.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: ACTOR });
   await database.db.insert(artist).values({ id: ARTIST, name: '피켓밴드', createdBy: ACTOR });
-  svc = await createService({ name: 'core-svc', module: AppModule.register({ database }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
+  svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
 });
 afterAll(async () => {
   await svc?.close();
+  await appDb?.close();
+  await partnerDb?.close();
   await database?.close();
   pg?.stop();
 });

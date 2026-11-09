@@ -6,8 +6,8 @@ import { CatalogModule, type MemoryCatalogRepository } from './modules/catalog/i
 @Module({})
 export class AppModule {
   /** 운영은 database, 시험은 memory를 고른다(저장소가 없을 때 조용히 메모리로 가지 않게 둘 중 하나를 꼭 적는다) */
-  static register(o: { database: Database } | { memory: true; catalog?: MemoryCatalogRepository }): DynamicModule {
-    if ('database' in o) return { module: AppModule, imports: [databaseModule(o.database), CatalogModule.register({ storage: 'database' })] };
+  static register(o: { database: Database; partnerDatabase: Database } | { memory: true; catalog?: MemoryCatalogRepository }): DynamicModule {
+    if ('database' in o) return { module: AppModule, imports: [databaseModule(o.database), CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase })] };
     return { module: AppModule, imports: [CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}) })] };
   }
 }

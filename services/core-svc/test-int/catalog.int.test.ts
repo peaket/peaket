@@ -59,7 +59,7 @@ async function seed(o: { saleReview?: string; saleApprovedAt?: Date | null } = {
 describe('Drizzle 저장소', () => {
   test('회차_공연_판매자상호를_한번에읽고_없는회차와모양이틀린ID는_없음이다', async () => {
     const s = await seed();
-    const repo = new DrizzleCatalogRepository(database, systemClock);
+    const repo = new DrizzleCatalogRepository(database, database, systemClock);
     const row = await repo.findEventSummary(s.eventId);
     expect(row).toMatchObject({
       event: { id: s.eventId, productionId: s.productionId, status: 'SCHEDULED', startsAt: new Date('2026-12-24T10:00:00Z') },
@@ -128,7 +128,7 @@ describe('서비스 전체 경로(DB 저장소)', () => {
   let svc: Awaited<ReturnType<typeof createService>>;
   beforeAll(async () => {
     const quiet = new Writable({ write: (_c, _e, cb) => cb() });
-    svc = await createService({ name: 'core-svc', module: AppModule.register({ database }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet, adminAuthz: new FakeIdentity() });
+    svc = await createService({ name: 'core-svc', module: AppModule.register({ database, partnerDatabase: database }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet, adminAuthz: new FakeIdentity() });
   });
   afterAll(async () => {
     await svc?.close();
