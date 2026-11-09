@@ -240,11 +240,21 @@ export type SessionEndReason = 'COMPLETED' | 'LEFT' | 'IDLE' | 'MAX_STAY';
 export const SESSION_END_REASONS: readonly SessionEndReason[] = ['COMPLETED', 'LEFT', 'IDLE', 'MAX_STAY'];
 
 /** 끝낸 세션에서 읽은 값(PurchaseSessionStore.end의 결과) */
+/** 구매 세션의 홀드 한 건(h:{holdId} 칸, BUILD_ORDER HOT-070) */
+export interface SessionHoldEntry {
+  holdId: string;
+  seatIds: string[];
+}
+
 export interface EndedSession {
   /** 세션이 묶인 회차 ID */
   eventId: string;
   /** 여정 ID */
   journeyId: string;
+  /** 세션의 계정(홀드를 풀 때 쓴다, BUILD_ORDER HOT-070). 없으면 빈 글 */
+  accountId?: string;
+  /** 세션을 지울 때 함께 읽은 홀드 목록(BUILD_ORDER HOT-070) */
+  holds?: SessionHoldEntry[];
 }
 
 /** SESSION_ENDED Stream 항목 하나 */
@@ -275,7 +285,7 @@ export interface PurchaseSessionEndedMessage {
 export type SweepSessionResult =
   | { kind: 'GONE' }
   | { kind: 'LIVE'; nextCheckMs: number }
-  | { kind: 'ENDED'; reason: 'IDLE' | 'MAX_STAY'; eventId: string; journeyId: string; endedAtMs: number };
+  | { kind: 'ENDED'; reason: 'IDLE' | 'MAX_STAY'; eventId: string; journeyId: string; endedAtMs: number; accountId?: string; holds?: SessionHoldEntry[] };
 
 /** 정리 색인 s:{event:E}:sessions의 첫 점수 = min(최대 체류, 시작 + 유휴 5분). 시작 사건을 더하는 Lua가 ZADD NX로 넣는다 */
 export function sessionCheckAt(startedAtMs: number, maxStayUntilMs: number): number {

@@ -37,7 +37,15 @@ export type HoldErrorCode =
   /** 같은 계정이 방금 놓은 좌석(30초 [가정]) */
   | 'REHOLD_WAIT'
   /** 보유 수 + 좌석 수 > 1인 한도 */
-  | 'QUOTA_EXCEEDED';
+  | 'QUOTA_EXCEEDED'
+  /** GET 홀드의 입장 토큰이 맞지 않음(BUILD_ORDER HOT-070) */
+  | 'ADMISSION_INVALID'
+  /** 그 구매 세션의 홀드가 아니거나 끝났다(BOLA 방지로 남의 것·없는 것과 같은 답) */
+  | 'HOLD_NOT_FOUND'
+  /** 두 번째 연장 */
+  | 'HOLD_ALREADY_EXTENDED'
+  /** 결제 접수 뒤 묶인 홀드(ADR-0254 결정 7) */
+  | 'HOLD_IN_PAYMENT';
 
 export interface HoldErrorDetails {
   /** REHOLD_WAIT: 아직 다시 잡을 수 없는 좌석 ID(요청 좌석 차례) */
@@ -105,6 +113,10 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   CONFLICT: { status: 409, type: 'seat-already-held', title: '좌석이 이미 선택되었습니다', normalBranch: true },
   REHOLD_WAIT: { status: 409, type: 'seat-recently-released', title: '방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다', normalBranch: true },
   QUOTA_EXCEEDED: { status: 422, type: 'purchase-limit-exceeded', title: '1인 구매 한도를 넘었습니다' },
+  ADMISSION_INVALID: { status: 401, type: 'admission-token-invalid', title: '입장 확인이 끝났습니다' },
+  HOLD_NOT_FOUND: { status: 404, type: 'hold-not-found', title: '홀드를 찾을 수 없습니다', normalBranch: true },
+  HOLD_ALREADY_EXTENDED: { status: 409, type: 'hold-already-extended', title: '이미 연장한 홀드입니다', normalBranch: true },
+  HOLD_IN_PAYMENT: { status: 409, type: 'hold-in-payment', title: '결제가 진행 중인 홀드입니다', normalBranch: true },
 };
 
 /**
@@ -130,6 +142,7 @@ export function storeUnavailableError(err: SeatStoreUnavailable): HoldError {
 export function throwHoldProblem(e: HoldError, reply: ReplyHeaders): never {
   switch (e.code) {
     case 'SESSION_NOT_FOUND':
+    case 'ADMISSION_INVALID':
       reply.header('www-authenticate', COOKIE_CHALLENGE);
       break;
     case 'EVENT_MISMATCH':

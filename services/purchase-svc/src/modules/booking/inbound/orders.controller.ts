@@ -131,7 +131,7 @@ export function orderResponseOf(order: OrderView): OrderResponse {
  * - PRICE_MISSING: 이름 없는 500(Error. 등급 ID는 응답에 싣지 않는다).
  * 응답의 Cache-Control은 처리기가 이미 no-store로 달았다
  */
-export function throwOrderProblem(reason: CreateOrderRejection, reply: { header(name: string, value: string): unknown }): never {
+export function throwOrderProblem(reason: CreateOrderRejection, reply: { header(name: string, value: string): unknown }, extensions?: Record<string, unknown>): never {
   switch (reason) {
     case 'BUYER_INVALID':
       // 어느 칸이 틀렸는지·받은 값은 싣지 않는다(이유 글도 칸 이름 없이)
@@ -150,6 +150,7 @@ export function throwOrderProblem(reason: CreateOrderRejection, reply: { header(
     type: spec.type,
     status: spec.status,
     title: spec.title,
+    ...(extensions ? { extensions } : {}),
     ...(spec.retryAfterSeconds !== undefined ? { retryAfterSeconds: spec.retryAfterSeconds } : {}),
     ...(spec.normalBranch ? { normalBranch: true } : {}),
   });
@@ -481,7 +482,7 @@ export class OrdersController {
       ...(deadline ? { deadline } : {}),
     });
     if (r.status === 201) return orderResponseOf(r.order);
-    throwOrderProblem(r.reason, reply);
+    throwOrderProblem(r.reason, reply, r.orderId !== undefined ? { orderId: r.orderId } : undefined);
   }
 
   /**

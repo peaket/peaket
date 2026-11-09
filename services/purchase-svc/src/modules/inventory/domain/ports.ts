@@ -2,6 +2,8 @@
 // 운영 어댑터: 좌석 저장소·만료 저장소는 RedisSeatStore, 만료 임대는 RedisSweepLeases, 구매 세션 저장소는 RedisPurchaseSessionStore(PRF-136),
 // 구매 세션 읽기·플랫폼 요청 인증 포트는 StoredPurchaseSessions(PRF-136). 좌석맵 판은 PRF-130 ①에서 메모리 대역뿐이고(운영 구현은 PRF-137),
 // 홀드 시도 기록의 Kafka·Avro 보내기는 BAS-030이다. 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다.
+import type { SessionHoldEntry } from './purchase-session.js';
+import type { HoldReleaseReason } from './hold-lifecycle.js';
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
 import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
@@ -273,6 +275,8 @@ export interface EventSeatConfig {
    * docs/features/payment.md §2 '주문 생성의 첫 구현' 금액, BUILD_ORDER PRF-161). 해석은 seat-layout.ts parseTierPrices다
    */
   tierPrices?: Readonly<Record<string, number>>;
+  /** 등급 ID → 화면 이름(판 파일의 선택 칸 tierNames, BUILD_ORDER HOT-070). 없으면 칸도 없다 */
+  tierNames?: Readonly<Record<string, string>>;
   /** 주문명(판 파일의 선택 칸 orderName, 결제 시도가 쓴다, BUILD_ORDER PRF-191). 없으면 칸도 없다 */
   orderName?: string;
   /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt, BUILD_ORDER PRF-191). 없으면 칸도 없다 */
@@ -597,6 +601,16 @@ export interface PurchaseSessionStore {
   setPaying(jti: string, paying: boolean, o?: SeatCallOptions): Promise<boolean>;
 }
 
+/** 구매 세션의 홀드 목록을 읽고 지운다(BUILD_ORDER HOT-070). 운영은 RedisPurchaseSessionStore, 시험 대역은 MemoryPurchaseSessionStore */
+export interface SessionHoldLists {
+  /** h:{holdId} 칸(좌석 ID 쉼표 글). 세션이나 칸이 없으면 null */
+  heldSeats(jti: string, holdId: string, o?: SeatCallOptions): Promise<string | null>;
+  /** 그 세션의 h: 칸 전부 */
+  sessionHolds(jti: string, o?: SeatCallOptions): Promise<SessionHoldEntry[]>;
+  /** h:{holdId} 칸을 지운다(해제 뒤). 세션이 없어도 던지지 않는다 */
+  forgetHold(jti: string, holdId: string, o?: SeatCallOptions): Promise<void>;
+}
+
 export const SESSION_ENDED_LOG = Symbol('purchase.SessionEndedLog');
 /** SESSION_ENDED Stream 항목을 더하고 정리 색인에서 그 세션을 뺀다(docs/data.md §3 s:{event:E}:stream·sessions). 세션 키와 슬롯이 달라 끝내는 연산과 따로 부른다 */
 export interface SessionEndedLog {
@@ -707,6 +721,16 @@ export interface SeatSignals {
   sessionEnded?(reason: SessionEndReason): void;
   /** 카운터 seat_hold_deferred_total{reason}을 1 올린다: 홀드 요청을 503으로 미룰 때마다(BUILD_ORDER PRF-143, ADR-0121). 선택 메서드다 */
   holdDeferred?(reason: 'not_ready' | 'store_unavailable'): void;
+  /** seat_hold_released_total{reason}을 좌석 수만큼 올린다(BUILD_ORDER HOT-070) */
+  holdReleased?(reason: HoldReleaseReason, seats: number): void;
+  /** seat_hold_extended_total을 1 올린다(BUILD_ORDER HOT-070) */
+  holdExtended?(): void;
+  /** seat_hold_freeze_total{op,result}을 묶음 결과만큼 올리고 seat_hold_freeze_batch_seconds{op}를 잰다(BUILD_ORDER HOT-070) */
+  holdFreezeBatch?(op: 'freeze' | 'thaw', r: { moved: number; dropped: number; corrupt: number }, seconds: number): void;
+  /** seat_payment_pause_read_total{result}을 1 올린다(BUILD_ORDER HOT-070) */
+  pauseRead?(result: 'ok' | 'stale' | 'failed'): void;
+  /** 게이지 seat_frozen_holds를 둔다(BUILD_ORDER HOT-070) */
+  frozenHolds?(n: number): void;
 }
 
 /** 지표를 버리는 구현(시험·지표를 달지 않은 조립의 기본값) */

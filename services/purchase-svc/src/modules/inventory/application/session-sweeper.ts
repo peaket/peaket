@@ -194,7 +194,7 @@ export class SessionSweeper {
         return;
       case 'ENDED':
         // 세션 상태는 이미 지워졌다. 사건을 더하는 Lua가 색인에서도 뺀다(더하기가 실패하면 다음 틱의 점검이 GONE으로 뺀다)
-        await ending.recordEnded({ eventId: r.eventId, sessionId: jti, reason: r.reason, endedAtMs: r.endedAtMs });
+        await ending.recordEnded({ eventId: r.eventId, sessionId: jti, reason: r.reason, endedAtMs: r.endedAtMs, accountId: r.accountId, holds: r.holds });
         report.ended += 1;
         return;
     }

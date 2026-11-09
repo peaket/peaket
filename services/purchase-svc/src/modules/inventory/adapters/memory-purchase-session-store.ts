@@ -1,5 +1,6 @@
 // 구매 세션 저장소와 시작 사건 기록의 메모리 구현(시험·메모리 조립용). Redis 구현(redis-purchase-sessions.ts, Lua 계약은 purchase-session-lua.ts)과 같은 사례에서 같은 결과를 낸다
 // (test/purchase-session-cases.ts). 시각은 주입 Clock이다.
+import type { SessionHoldEntry } from '../domain/purchase-session.js';
 import type { Clock } from '@peaket/platform';
 import { assertEndedEntry, assertHoldRecord, assertIndexArgs, sessionCheckAt, type EndedSession, type SweepSessionResult, assertJti, assertOpenInput, assertSeq, assertStartedEntry, type OpenSessionInput, type OpenSessionResult, SESSION_IDLE_MS, SESSION_KEY_GRACE_MS, SESSION_STARTED_GRACE_MS, type SessionEndedEntry, type SessionStartedEntry, type StoredSession } from '../domain/purchase-session.js';
 import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog } from '../domain/ports.js';
@@ -116,13 +117,30 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     if (m && now >= m.untilMs) this.#markers.delete(jti);
   }
 
+  async heldSeats(jti: string, holdId: string): Promise<string | null> {
+    return this.#holds.get(jti)?.get(holdId)?.join(',') ?? null;
+  }
+
+  #holdEntries(jti: string): SessionHoldEntry[] {
+    return [...(this.#holds.get(jti) ?? new Map<string, string[]>())].map(([holdId, seatIds]) => ({ holdId, seatIds: [...seatIds] }));
+  }
+
+  async sessionHolds(jti: string): Promise<SessionHoldEntry[]> {
+    return this.#holdEntries(jti);
+  }
+
+  async forgetHold(jti: string, holdId: string): Promise<void> {
+    this.#holds.get(jti)?.delete(holdId);
+  }
+
   async end(jti: string, _o?: SeatCallOptions): Promise<EndedSession | null> {
     assertJti(jti);
     this.#expire(jti, this.clock.now());
     const s = this.#sessions.get(jti);
     if (!s) return null;
+    const holds = this.#holdEntries(jti);
     this.#drop(jti);
-    return { eventId: s.eventId, journeyId: s.journeyId };
+    return { eventId: s.eventId, journeyId: s.journeyId, ...(holds.length > 0 ? { accountId: s.accountId, holds } : {}) };
   }
 
   async sweep(jti: string, _o?: SeatCallOptions): Promise<SweepSessionResult> {
@@ -132,13 +150,15 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     const s = this.#sessions.get(jti);
     if (!s) return { kind: 'GONE' };
     if (now >= s.maxStayUntilMs) {
+      const holds = this.#holdEntries(jti);
       this.#drop(jti);
-      return { kind: 'ENDED', reason: 'MAX_STAY', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now };
+      return { kind: 'ENDED', reason: 'MAX_STAY', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now, ...(holds.length > 0 ? { accountId: s.accountId, holds } : {}) };
     }
     if (this.#paying.has(jti)) return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, now + SESSION_IDLE_MS) };
     if (now >= s.idleUntilMs) {
+      const holds = this.#holdEntries(jti);
       this.#drop(jti);
-      return { kind: 'ENDED', reason: 'IDLE', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now };
+      return { kind: 'ENDED', reason: 'IDLE', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now, ...(holds.length > 0 ? { accountId: s.accountId, holds } : {}) };
     }
     return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, s.idleUntilMs) };
   }

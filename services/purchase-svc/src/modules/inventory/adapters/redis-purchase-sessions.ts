@@ -20,13 +20,14 @@ import {
   SESSION_STARTED_GRACE_MS,
   SESSION_STARTED_KEEP_MS,
   type SessionEndedEntry,
+  type SessionHoldEntry,
   type SessionStartedEntry,
   sessionCheckAt,
   sessionEndedFields,
   sessionStartedFields,
   type StoredSession,
 } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog } from '../domain/ports.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionHoldLists, SessionIndex, SessionStartedLog } from '../domain/ports.js';
 import {
   ADVANCE_SESSION_LUA,
   APPEND_SESSION_ENDED_LUA,
@@ -40,6 +41,7 @@ import {
   SWEEP_SESSION_LUA,
 } from './purchase-session-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
+import { sessionHoldEntries } from './session-hold-entries.js';
 
 /** 구매 세션 키 이름(docs/data.md §3). 표지와 세션 상태는 같은 {jti} 해시 태그, Stream은 좌석 쪽 seatKeys.stream과 같다 */
 export const sessionKeys = {
@@ -79,7 +81,7 @@ function msOf(v: unknown, what: string): number {
  * 그 밖(스크립트 오류·WRONGTYPE·모르는 결과 값)은 그대로 던진다
  */
 @Injectable()
-export class RedisPurchaseSessionStore implements PurchaseSessionStore {
+export class RedisPurchaseSessionStore implements PurchaseSessionStore, SessionHoldLists {
   constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
 
   async open(i: OpenSessionInput): Promise<OpenSessionResult> {
@@ -143,7 +145,10 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
     if (!Array.isArray(r) || r.length < 1) throw new Error(`세션 끝내기 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
     const kind = str(r[0]);
     if (kind === 'GONE') return null;
-    if (kind === 'ENDED' && r.length === 3) return { eventId: str(r[1]), journeyId: str(r[2]) };
+    if (kind === 'ENDED' && r.length >= 3) {
+      const holds = sessionHoldEntries(r.slice(4));
+      return { eventId: str(r[1]), journeyId: str(r[2]), ...(holds.length > 0 ? { accountId: str(r[3]), holds } : {}) };
+    }
     throw new Error(`세션 끝내기 Lua가 모르는 결과를 돌려줬다: ${kind}`);
   }
 
@@ -154,12 +159,42 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
     const kind = str(r[0]);
     if (kind === 'GONE') return { kind: 'GONE' };
     if (kind === 'LIVE' && r.length === 2) return { kind: 'LIVE', nextCheckMs: msOf(r[1], 'nextCheck') };
-    if (kind === 'ENDED' && r.length === 5) {
+    if (kind === 'ENDED' && r.length >= 5) {
       const reason = str(r[1]);
       if (reason !== 'IDLE' && reason !== 'MAX_STAY') throw new Error(`정리 점검 Lua가 모르는 까닭을 돌려줬다: ${reason}`);
-      return { kind: 'ENDED', reason, eventId: str(r[2]), journeyId: str(r[3]), endedAtMs: msOf(r[4], 'endedAt') };
+      const holds = sessionHoldEntries(r.slice(6));
+      return { kind: 'ENDED', reason, eventId: str(r[2]), journeyId: str(r[3]), endedAtMs: msOf(r[4], 'endedAt'), ...(holds.length > 0 ? { accountId: str(r[5]), holds } : {}) };
     }
     throw new Error(`정리 점검 Lua가 모르는 결과를 돌려줬다: ${kind}`);
+  }
+
+  async heldSeats(jti: string, holdId: string, o?: SeatCallOptions): Promise<string | null> {
+    assertJti(jti);
+    const key = sessionKeys.session(jti);
+    const v = await guard(this.redis.command(['HGET', key, `h:${holdId}`], { key, ...deadlineOf(o) }));
+    return v === null || v === undefined ? null : str(v);
+  }
+
+  async sessionHolds(jti: string, o?: SeatCallOptions): Promise<SessionHoldEntry[]> {
+    assertJti(jti);
+    const key = sessionKeys.session(jti);
+    const r = await guard(this.redis.command(['HGETALL', key], { key, ...deadlineOf(o) }));
+    const flat: unknown[] = [];
+    if (Array.isArray(r)) flat.push(...r);
+    else if (r instanceof Map) for (const [k, v] of r) flat.push(k, v);
+    else if (r && typeof r === 'object') for (const [k, v] of Object.entries(r)) flat.push(k, v);
+    const held: unknown[] = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const name = str(flat[i]);
+      if (name.startsWith('h:')) held.push(name.slice(2), flat[i + 1]);
+    }
+    return sessionHoldEntries(held);
+  }
+
+  async forgetHold(jti: string, holdId: string, o?: SeatCallOptions): Promise<void> {
+    assertJti(jti);
+    const key = sessionKeys.session(jti);
+    await guard(this.redis.command(['HDEL', key, `h:${holdId}`], { key, ...deadlineOf(o) }));
   }
 
   async setPaying(jti: string, paying: boolean, o?: SeatCallOptions): Promise<boolean> {

@@ -1,7 +1,8 @@
 // 좌석 Lua·만료 반복 지표(BUILD_ORDER PRF-135 'PRF-130 리뷰 낮음 4'·추천 적용 2026-11-04 M1, 경보 행은 docs/observability.md).
 // 이름표는 값이 몇 개뿐인 것만 단다(observability §8). queue-svc adapters/prom-admission-signals.ts와 같은 꼴이다:
 // 지표는 registers: []로 만들고 register(registry)로 서비스 레지스트리에 붙인다.
-import { Counter, Gauge, type Registry } from '@peaket/platform';
+import { Counter, Gauge, Histogram, type Registry } from '@peaket/platform';
+import type { HoldReleaseReason } from '../domain/hold-lifecycle.js';
 import type { SweepOutcome } from '../domain/expiry.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from '../domain/lua-errors.js';
 import type { SeatSignals, SeatStreamRelaySignals } from '../domain/ports.js';
@@ -31,6 +32,12 @@ export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
     labelNames: ['script', 'code'] as const,
     registers: [],
   });
+  readonly #released = new Counter({ name: 'seat_hold_released_total', help: '직접·세션 끝·예매 제한으로 푼 좌석 수(reason: user·left·idle·max_stay·restricted)', labelNames: ['reason'] as const, registers: [] });
+  readonly #extended = new Counter({ name: 'seat_hold_extended_total', help: '1회 연장한 홀드 수', registers: [] });
+  readonly #freezeTotal = new Counter({ name: 'seat_hold_freeze_total', help: '결제 정지 옮기기·되돌리기 좌석 수(op: freeze·thaw, result: moved·dropped·corrupt)', labelNames: ['op', 'result'] as const, registers: [] });
+  readonly #freezeSeconds = new Histogram({ name: 'seat_hold_freeze_batch_seconds', help: '옮기기·되돌리기 묶음 하나의 앱 쪽 시간(초)', labelNames: ['op'] as const, buckets: [0.001, 0.002, 0.005, 0.01, 0.05, 0.1], registers: [] });
+  readonly #pauseReads = new Counter({ name: 'seat_payment_pause_read_total', help: '새 결제 일시 정지 조회 결과(result: ok·stale·failed)', labelNames: ['result'] as const, registers: [] });
+  readonly #frozen = new Gauge({ name: 'seat_frozen_holds', help: '이 파드가 본 회차의 멈춘 좌석 수 합', registers: [] });
   readonly #lag = new Gauge({ name: 'seat_expiry_lag_seconds', help: '이 파드가 돈 회차 가운데 지금 − 가장 오래된 지난 만료 점수(초). 밀린 것이 없으면 0', registers: [] });
   readonly #ticks = new Counter({ name: 'seat_expiry_ticks_total', help: '만료 반복의 회차별 틱 결과 수', labelNames: ['outcome'] as const, registers: [] });
 
@@ -82,6 +89,29 @@ export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
   }
 
   /** seat_lua_errors_total{script, code}를 1 올린다. 던지지 않는다(붙이기 전에도 센다) */
+  holdReleased(reason: HoldReleaseReason, seats: number): void {
+    this.#released.inc({ reason }, seats);
+  }
+
+  holdExtended(): void {
+    this.#extended.inc();
+  }
+
+  holdFreezeBatch(op: 'freeze' | 'thaw', r: { moved: number; dropped: number; corrupt: number }, seconds: number): void {
+    this.#freezeTotal.inc({ op, result: 'moved' }, r.moved);
+    this.#freezeTotal.inc({ op, result: 'dropped' }, r.dropped);
+    this.#freezeTotal.inc({ op, result: 'corrupt' }, r.corrupt);
+    this.#freezeSeconds.observe({ op }, seconds);
+  }
+
+  pauseRead(result: 'ok' | 'stale' | 'failed'): void {
+    this.#pauseReads.inc({ result });
+  }
+
+  frozenHolds(n: number): void {
+    this.#frozen.set(n);
+  }
+
   luaError(script: SeatLuaScript, code: SeatLuaErrorCode): void {
     this.#luaErrors.inc({ script, code });
   }

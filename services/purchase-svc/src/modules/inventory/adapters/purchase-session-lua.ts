@@ -149,16 +149,29 @@ return redis.call('HSETNX', KEYS[1], 'bs', '1')
 //
 // 시작 사건 더하기 Lua(APPEND_SESSION_STARTED_LUA)는 이 단계에서 KEYS에 2 정리 색인을, ARGV에 2 jti·3 첫 점검 시각 ms를 더한다(ZADD NX index 점검 시각 jti, 색인의 수명도 같은 규칙).
 
+// 세션 상태의 h:{holdId} 칸을 out 뒤에 holdId·좌석 글 차례로 붙인다(세션 상태는 칸이 몇 개뿐이라 HGETALL 한 번이다, BUILD_ORDER HOT-070)
+const HELD_FIELDS = `
+local all = redis.call('HGETALL', KEYS[1])
+for i = 1, #all, 2 do
+  if string.sub(all[i], 1, 2) == 'h:' then
+    out[#out + 1] = string.sub(all[i], 3)
+    out[#out + 1] = all[i + 1]
+  end
+end
+`;
+
 /** 세션 끝내기 Lua 원문(위 계약) */
 export const END_SESSION_LUA = `#!lua
-local h = redis.call('HMGET', KEYS[1], 'event', 'jny')
+local h = redis.call('HMGET', KEYS[1], 'event', 'jny', 'acct')
 if not h[1] or not h[2] then
   -- 세션이 아니거나(키가 없다) 칸이 모자란 찌꺼기다: 있으면 지우고 없음으로 답한다
   redis.call('DEL', KEYS[1])
   return {'GONE'}
 end
+local out = {'ENDED', h[1], h[2], h[3] or ''}
+${HELD_FIELDS}
 redis.call('DEL', KEYS[1])
-return {'ENDED', h[1], h[2]}
+return out
 `;
 
 /** 정리 점검 Lua 원문(위 계약) */
@@ -171,7 +184,7 @@ local function num(v)
   if not v or #v > 16 or not string.match(v, '^[1-9][0-9]*$') then return nil end
   return tonumber(v)
 end
-local h = redis.call('HMGET', KEYS[1], 'event', 'jny', 'max', 'idle', 'pay')
+local h = redis.call('HMGET', KEYS[1], 'event', 'jny', 'max', 'idle', 'pay', 'acct')
 if not h[1] then return {'GONE'} end
 local max = num(h[3])
 local idle = num(h[4])
@@ -179,13 +192,17 @@ if not max or not idle or not h[2] then return redis.error_reply('ERR PEAKET_COR
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 if now >= max then
+  local out = {'ENDED', 'MAX_STAY', h[1], h[2], int(now), h[6] or ''}
+  ${HELD_FIELDS}
   redis.call('DEL', KEYS[1])
-  return {'ENDED', 'MAX_STAY', h[1], h[2], int(now)}
+  return out
 end
 if h[5] == '1' then return {'LIVE', int(math.min(max, now + tonumber(ARGV[1])))} end
 if now >= idle then
+  local out = {'ENDED', 'IDLE', h[1], h[2], int(now), h[6] or ''}
+  ${HELD_FIELDS}
   redis.call('DEL', KEYS[1])
-  return {'ENDED', 'IDLE', h[1], h[2], int(now)}
+  return out
 end
 return {'LIVE', int(math.min(max, idle))}
 `;

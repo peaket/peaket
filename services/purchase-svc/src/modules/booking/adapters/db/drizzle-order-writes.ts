@@ -84,6 +84,13 @@ export class DrizzleOrderWrites implements OrderWrites {
     return { status: 'COMMITTED', order: firstResponseOf(order) };
   }
 
+  /** 그 홀드의 주문이 같은 계정·같은 구매 세션의 것이면 주문 ID(ADR-0255). hold_id 유일 인덱스 한 번 */
+  async findOwnOrderId(q: { holdId: string; accountId: string; purchaseSessionId: string }): Promise<string | undefined> {
+    const r = await this.o.database.db.execute(sql`select id from purchase_order where hold_id = ${q.holdId}::uuid and account_id = ${q.accountId}::uuid and purchase_session_id = ${q.purchaseSessionId} limit 1`);
+    const row = (r as unknown as { rows: { id: string }[] }).rows[0];
+    return row ? String(row.id) : undefined;
+  }
+
   async create(once: OrderRequestOnce, order: NewOrder, o?: TransactionCallOptions): Promise<OrderCreateOutcome> {
     // read committed를 늘 걸고, 남은 시간을 받았으면 문장 시간 초과로 건다(리뷰 고침 L3·L4)
     const options = transactionOptionsOf(o);

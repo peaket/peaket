@@ -71,6 +71,8 @@ import {
   PAYMENT_CHECKOUT_BREAKER_OPTIONS,
   type PaymentCheckouts,
   paymentCheckoutsFromEnv,
+  newPaymentPausesFromEnv,
+  PAYMENT_PAUSE_BREAKER_OPTIONS,
   paymentConfirmsFromEnv,
   paymentDepositReaderFromEnv,
   paymentPullDatabaseOptions,
@@ -105,6 +107,10 @@ import {
   LayoutSeatMap,
   PromSaleStateSignals,
   PromSeatSignals,
+  ManageHolds,
+  RedisHoldLifecycle,
+  HoldPauseView,
+  type PaymentPauseSource,
   RedisOrderHolds,
   RedisPurchaseSessionStore,
   RedisSaleCounts,
@@ -206,6 +212,11 @@ const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ r
 // 결제 시도 시작(POST /v1/orders/{orderId}/payments, BUILD_ORDER PRF-191): 결제창 준비 클라이언트와 행동 신호 생산자는 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 묶는다.
 // 그 전이면(듣기 전) 불리지 않는다. 행동 신호는 브로커 주소가 없으면(local·ci) 버린다
 const startLate: { checkouts?: PaymentCheckouts; behavior?: BehaviorSignalPublisher } = {};
+// 홀드 해제·연장·다시 읽기와 결제 정지 멈춤(BUILD_ORDER HOT-070). 주문 만료 고리와 정지 조회 클라이언트는 서비스를 만든 뒤 묶는다
+const holdLifecycle = new RedisHoldLifecycle(redis);
+const manageHolds = new ManageHolds({ lifecycle: holdLifecycle, seatMap, sessions: sessionStore, keys: admissionKeys, issuer: admissionIssuer, clock: systemClock, signals, onReleased: (e) => orderExpiry?.onHoldsExpired(e), logger: { warn: (o: object, m: string) => log?.warn(o, m) } as never });
+const pauseLate: { source?: PaymentPauseSource } = {};
+const holdPauseView = new HoldPauseView({ read: (ids, o) => (pauseLate.source ? pauseLate.source.read(ids, o) : Promise.resolve({ status: 'OK' as const, pauses: [] })) }, systemClock, (r) => signals.pauseRead(r));
 const booking: BookingModuleDeps | undefined = database
   ? {
       startPayment: {
@@ -219,6 +230,7 @@ const booking: BookingModuleDeps | undefined = database
       accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
       slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
       holds: new RedisOrderHolds(redis, seatMap),
+      holdMarks: manageHolds,
       saleConfigs: new SeatMapSaleConfigs(seatMap),
       sessions: new InventoryOrderSessions({ sessions, store: sessionStore }),
       identity: { check: (q) => (identityLate.recheck ?? unavailableIdentityRecheck).check(q) },
@@ -245,6 +257,7 @@ const service = await createService({
     podId,
     signals,
     onHoldsExpired: (e) => orderExpiry?.onHoldsExpired(e),
+    holdFreeze: { pauseView: holdPauseView, lifecycle: holdLifecycle },
     ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
     ...(booking ? { booking } : {}),
     admission: {
@@ -255,6 +268,7 @@ const service = await createService({
       keys: admissionKeys,
       issuer: admissionIssuer,
       onSessionEnded,
+      manageHolds,
     },
   }),
   purchaseSessions: sessions,
@@ -298,6 +312,11 @@ if (database && databaseUrl) {
 // 그 밖의 환경은 주소가 없으면 여기서 던진다(시작 실패, 듣기 전). 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 끈다
 let payment: ReturnType<typeof paymentConfirmsFromEnv> | undefined;
 let paymentBreaker: CircuitBreaker | undefined;
+// 새 결제 일시 정지 조회(GetNewPaymentPause, BUILD_ORDER HOT-070). 주소가 없으면 local·ci만 '정지 없음' 대역이고 그 밖의 환경은 시작을 실패시킨다
+const pauseBreaker = new CircuitBreaker({ service: SERVICE, ...PAYMENT_PAUSE_BREAKER_OPTIONS, registry: service.metrics.registry, logger: service.logger });
+const pauseClient = newPaymentPausesFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: pauseBreaker, onRejected: (reason) => service.logger.error({ dep: 'payment-svc', reason }, 'GetNewPaymentPause가 요청을 거절했다(부르는 쪽 결함)') });
+for (const w of pauseClient.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
+pauseLate.source = { read: async (ids, o) => { const r = await pauseClient.pauses.read(ids, o); return r.status === 'OK' ? { status: 'OK', pauses: r.pauses } : { status: 'FAILED' }; } };
 let paymentCheckouts: ReturnType<typeof paymentCheckoutsFromEnv> | undefined;
 let checkoutBreaker: CircuitBreaker | undefined;
 if (booking && database) {
@@ -381,7 +400,7 @@ if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiter
     store: orderStore,
     sessions: {
       // 결제 확정(COMPLETED)도 모듈의 끝내기와 같은 고리를 지난다(그 세션의 다른 열린 주문을 다시 본다, PRF-172)
-      end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger, onEnded: onSessionEnded }),
+      end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger, onEnded: onSessionEnded, releaseHolds: manageHolds }),
       store: sessionStore,
     },
     saga: sagaRunner,
@@ -544,6 +563,8 @@ function shutdown(): void {
         service.logger.error({ err: errorSummary(err) }, 'identity-svc 클라이언트 닫기 실패');
       }
       try {
+        pauseClient.close();
+        pauseBreaker.shutdown();
         payment?.close();
         paymentBreaker?.shutdown();
         depositReader?.close();

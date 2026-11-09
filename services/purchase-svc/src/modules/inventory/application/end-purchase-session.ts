@@ -3,7 +3,9 @@
 import type { Clock } from '@peaket/platform';
 import type { PurchaseSessionStore, SeatSignals, SessionEndedLog } from '../domain/ports.js';
 import { assertJti } from '../domain/purchase-session.js';
-import type { SessionEndReason } from '../domain/purchase-session.js';
+import type { SessionEndReason, SessionHoldEntry } from '../domain/purchase-session.js';
+import type { HoldReleaseReason } from '../domain/hold-lifecycle.js';
+import type { ManageHolds } from './manage-holds.js';
 
 export interface EndSessionLogger {
   warn(obj: object, msg: string): void;
@@ -20,6 +22,8 @@ export interface EndPurchaseSessionDeps {
    * 던져도 세션 끝내기 결과는 그대로다(경고 한 줄). 없으면 부르지 않는다. 구매 세션 ID만 싣는다(booking은 구매 세션 ID로 주문을 찾는다)
    */
   onEnded?: (e: { readonly purchaseSessionId: string }) => void;
+  /** 끝난 세션의 홀드를 푼다(LEFT·IDLE·MAX_STAY, BUILD_ORDER HOT-070). 던지지 않는 구현을 넘긴다. 없으면 홀드는 만료로 풀린다 */
+  releaseHolds?: Pick<ManageHolds, 'releaseEntries'>;
 }
 
 /** 끝내기 거절: 세션이 묶인 회차가 기대한 회차와 다르다(받는 층이 403으로 바꾼다) */
@@ -29,6 +33,8 @@ export class EndSessionError extends Error {
     this.name = 'EndSessionError';
   }
 }
+
+const RELEASE_REASON: Partial<Record<SessionEndReason, HoldReleaseReason>> = { LEFT: 'left', IDLE: 'idle', MAX_STAY: 'max_stay' };
 
 export class EndPurchaseSession {
   constructor(private readonly deps: EndPurchaseSessionDeps) {}
@@ -51,12 +57,15 @@ export class EndPurchaseSession {
     }
     const ended = await store.end(c.sessionId);
     if (!ended) return false;
-    await this.recordEnded({ eventId: ended.eventId, sessionId: c.sessionId, reason: c.reason, endedAtMs: clock.now() });
+    await this.recordEnded({ eventId: ended.eventId, sessionId: c.sessionId, reason: c.reason, endedAtMs: clock.now(), accountId: ended.accountId, holds: ended.holds });
     return true;
   }
 
   /** 정리 반복이 끝낸 세션(IDLE·MAX_STAY)의 사건을 더하고 지표를 올린다. 사건 더하기 실패는 던지지 않는다 */
-  async recordEnded(e: { eventId: string; sessionId: string; reason: SessionEndReason; endedAtMs: number }): Promise<void> {
+  async recordEnded(e: { eventId: string; sessionId: string; reason: SessionEndReason; endedAtMs: number; accountId?: string; holds?: readonly SessionHoldEntry[] }): Promise<void> {
+    // 끝난 세션의 홀드를 먼저 푼다(COMPLETED는 판매로 간 좌석이라 풀지 않는다). 구현은 던지지 않고, 실패한 홀드는 만료로 풀린다
+    const release = RELEASE_REASON[e.reason];
+    if (release && e.holds && e.holds.length > 0 && e.accountId) await this.deps.releaseHolds?.releaseEntries({ eventId: e.eventId, accountId: e.accountId, sessionId: e.sessionId, holds: e.holds, reason: release });
     try {
       await this.deps.ended.appendEnded({ eventId: e.eventId, purchaseSessionId: e.sessionId, admissionJti: e.sessionId, reason: e.reason, endedAtMs: e.endedAtMs });
     } catch (err) {

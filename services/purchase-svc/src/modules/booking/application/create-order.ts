@@ -9,6 +9,7 @@ import {
   type ContactRefs,
   type IdentityRecheck,
   type NewOrder,
+  type OrderHoldMarks,
   type OrderHolds,
   type OrderLog,
   type OrderRequestOnce,
@@ -45,6 +46,8 @@ export interface CreateOrderDeps {
   clock: Clock;
   /** 지금 동의 문안 판(환경 값 PEAKET_ORDER_CONSENT_VERSION, ^[0-9A-Za-z._-]{1,32}$) */
   consentVersion: string;
+  /** 주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070). 던지지 않는 구현을 넘긴다. 없으면 하지 않는다 */
+  holdMarks?: OrderHoldMarks;
 }
 
 /** 본문(openapi CreateOrderBody. 받는 층의 경로 스키마가 모양을 이미 봤다) */
@@ -107,7 +110,7 @@ export type CreateOrderRejection =
 export type CreateOrderResult =
   /** 201 Order. replayed: 이번에 만들지 않고 처음 결과를 다시 돌려줬다(커밋된 기록 읽기 또는 트랜잭션 안의 재생) */
   | { readonly status: 201; readonly order: OrderView; readonly replayed: boolean }
-  | { readonly status: 'REJECTED'; readonly reason: CreateOrderRejection };
+  | { readonly status: 'REJECTED'; readonly reason: CreateOrderRejection; readonly orderId?: string };
 
 /**
  * 주문 생성. 검사 차례(payment §2, 앞이 걸리면 뒤는 부르지 않는다):
@@ -202,7 +205,11 @@ export class CreateOrder {
       if (e instanceof OrderSeatStoreUnavailable) return rejected('SEAT_STORE_UNAVAILABLE');
       throw e;
     }
-    if (restriction?.st === 'ACTIVE' && (restriction.untilMs === undefined || d.clock.now() < restriction.untilMs)) return rejected('BOOKING_RESTRICTED');
+    if (restriction?.st === 'ACTIVE' && (restriction.untilMs === undefined || d.clock.now() < restriction.untilMs)) {
+      // 같은 처리에서 그 구매 세션의 홀드를 푼다(payment §2 '예매 제한 확인', P-T49 ①). 던지지 않고, 실패한 홀드는 만료로 풀린다
+      await d.holdMarks?.releaseSession({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId });
+      return rejected('BOOKING_RESTRICTED');
+    }
 
     // 8. 금액(홀드 좌석의 등급 가격 합. 클라이언트 값은 쓰지 않는다)
     const pricing = priceSeats(hold.seats, sale.tierPrices);
@@ -246,7 +253,17 @@ export class CreateOrder {
     };
     // 남은 시간이 DB 문장 상한보다 짧으면 트랜잭션의 문장 시간 초과로 넘긴다(리뷰 고침 L4)
     const outcome = await d.writes.create(c.idem, order, transactionCallOf(c.deadline));
-    if (outcome.status === 'HOLD_ALREADY_ORDERED') return rejected('HOLD_ALREADY_ORDERED');
+    if (outcome.status === 'HOLD_ALREADY_ORDERED') {
+      // 같은 계정·같은 구매 세션의 주문이면 그 ID를 함께 준다(응답을 잃은 화면이 이어 간다, ADR-0255)
+      const orderId = await d.writes.findOwnOrderId?.({ holdId: c.body.holdId, accountId: c.accountId, purchaseSessionId: c.purchaseSessionId });
+      return { status: 'REJECTED', reason: 'HOLD_ALREADY_ORDERED', ...(orderId ? { orderId } : {}) };
+    }
+
+    // 주문 뒤 표시(결제 정지 때 멈출 대상, seat-hold §5 '주문 표시'). 실패해도 201은 그대로다
+    if (outcome.status === 'CREATED' && d.holdMarks) {
+      const marked = await d.holdMarks.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: c.body.holdId, seatIds: hold.seats.map((s) => s.seatId), ...(c.deadline ? { deadline: c.deadline } : {}) });
+      if (!marked) d.signals.holdMarkFailed?.();
+    }
 
     // 11. 커밋 뒤 Paying 표시(실패해도 응답을 바꾸지 않는다), 12. 201
     await this.#markPaying(c.purchaseSessionId, outcome.order.orderId, c.deadline);

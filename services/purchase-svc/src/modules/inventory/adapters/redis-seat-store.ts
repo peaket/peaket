@@ -161,6 +161,10 @@ export const seatKeys = {
   /** 그 계정이 방금 놓은 좌석(ADR-0161 결정 2) */
   rel: (e: string, account: string) => `s:{event:${e}}:rel:${account}`,
   secver: (e: string) => `s:{event:${e}}:secver`,
+  /** 주문을 만들고 결제 접수 전인 홀드(멤버 = 좌석 색인, 점수 = 주문 시각, BUILD_ORDER HOT-070) */
+  ordered: (e: string) => `s:{event:${e}}:ordered`,
+  /** 새 결제 일시 정지로 남은 시간을 멈춘 홀드(멤버 = 좌석 색인, 점수 = 최대 체류 시각, BUILD_ORDER HOT-070) */
+  paused: (e: string) => `s:{event:${e}}:paused`,
   /** 회차의 마지막 펜싱 토큰(OPEN[16] 추천 적용) */
   fence: (e: string) => `s:{event:${e}}:fence`,
   /** 구역 델타 샤드 Pub/Sub 채널(키가 아니라 채널) */
@@ -322,8 +326,10 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       seatKeys.secver(e),
       seatKeys.fence(e),
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
-      // 실패 표시(KEYS 끝, PRF-165)
+      // 실패 표시(PRF-165)와 주문 뒤·정지 집합(BUILD_ORDER HOT-070)
       seatKeys.failed(e, i.holdId),
+      seatKeys.ordered(e),
+      seatKeys.paused(e),
     ];
     const args = [
       a,
@@ -380,8 +386,10 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       seatKeys.epoch(e),
       seatKeys.secver(e),
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
-      // 실패 표시(KEYS 끝, PRF-165)
+      // 실패 표시(PRF-165)와 주문 뒤·정지 집합(BUILD_ORDER HOT-070)
       seatKeys.failed(e, i.holdId),
+      seatKeys.ordered(e),
+      seatKeys.paused(e),
     ];
     const args = [a, i.holdId, String(i.keepUntilMs), seatKeys.section(e, ''), ...seatArgsOf(i.seats)];
     const r = (await guard(this.redis.evalScript(RELEASE_FAILED, keys, args, deadlineOf(o)))) as unknown[];
@@ -412,6 +420,8 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       if (count(await guard(this.redis.command(['XLEN', stream], { key: stream })), 'Stream 길이') > 0) return 'STREAM_PENDING';
       if ((await this.#pendingOf(stream)) > 0) return 'STREAM_PENDING';
       if (count(await guard(this.redis.command(['ZCARD', expiry], { key: expiry })), '만료 인덱스 길이') > 0) return 'EXPIRY_PENDING';
+      const paused = seatKeys.paused(i.eventId);
+      if (count(await guard(this.redis.command(['ZCARD', paused], { key: paused })), '멈춘 홀드 수') > 0) return 'EXPIRY_PENDING';
       return undefined;
     };
     const before = await left();
@@ -543,7 +553,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     assertDueExpiriesInput(i);
     const e = i.eventId;
     const expiry = seatKeys.expiry(e);
-    const range = await guard(this.redis.command(['ZRANGE', expiry, '-inf', String(i.nowMs), 'BYSCORE', 'LIMIT', '0', String(i.limit), 'WITHSCORES'], { key: expiry }));
+    const range = await guard(this.redis.command(['ZRANGE', expiry, '-inf', String(i.nowMs), 'BYSCORE', 'LIMIT', String(i.offset ?? 0), String(i.limit), 'WITHSCORES'], { key: expiry }));
     const due = scoredMembers(range).map(([member, score]) => {
       const m = str(member);
       const index = Number(m);
@@ -586,12 +596,14 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
       ...owners.map((a) => seatKeys.quota(e, a)),
       ...owners.map((a) => seatKeys.rel(e, a)),
+      seatKeys.ordered(e),
     ];
     const args = [
       String(REHOLD_WAIT_MS),
       seatKeys.section(e, ''),
       String(i.keepUntilMs),
       String(owners.length),
+      i.pausedSinceMs !== undefined ? String(i.pausedSinceMs) : '',
       ...owners,
       ...i.seats.flatMap((s) => [
         String(s.index),

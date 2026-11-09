@@ -111,7 +111,7 @@ function signatureOf(raw: unknown): string | undefined {
   // 가격 칸이 없으면 빈 글. 있으면 JSON 글 그대로(칸 차례만 바뀐 파일은 다시 해석될 뿐이다)
   const prices = o.tierPrices === undefined ? '' : JSON.stringify(o.tierPrices);
   // 결제 시도의 선택 칸 셋도 같은 방식이다(BUILD_ORDER PRF-191). 없는 칸은 null로 든다
-  const checkout = JSON.stringify([o.orderName ?? null, o.entryOpensAt ?? null, o.virtualAccountAllowed ?? null]);
+  const checkout = JSON.stringify([o.orderName ?? null, o.entryOpensAt ?? null, o.virtualAccountAllowed ?? null, (raw as { tierNames?: unknown }).tierNames ?? null]);
   return `${v}|${o.perAccountLimit}|${o.saleEndsAt}|${prices}|${checkout}`;
 }
 

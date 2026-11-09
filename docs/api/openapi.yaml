@@ -86,6 +86,9 @@ x-peaket-problem-types:
     fraud-run-retrying: { status: 409, title: "분석을 자동으로 다시 시도하고 있습니다" }
     fraud-summary-not-viewed: { status: 409, title: "사건 요약을 먼저 열어 보세요" }
     hold-already-ordered: { status: 409, title: "이 좌석으로 만든 주문이 이미 있습니다" }
+    hold-not-found: { status: 404, title: "홀드를 찾을 수 없습니다" }
+    hold-already-extended: { status: 409, title: "이미 연장한 홀드입니다" }
+    hold-in-payment: { status: 409, title: "결제가 진행 중인 홀드입니다" }
     human-check-required: { status: 428, title: "사람 확인을 마친 뒤 다시 시도해 주세요" }
     human-check-unavailable: { status: 503, title: "잠시 뒤 다시 시도해 주세요" }
     idempotency-key-invalid: { status: 400, title: "멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다" }
@@ -3724,7 +3727,7 @@ paths:
       tags: [seats]
       x-peaket-roles: [fan]
       summary: 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
-      description: "FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'"
+      description: "FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 같은 처리에서 그 세션의 홀드를 푼다(묶인 홀드는 빼고. 추천 적용 2026-11-09, ADR-0254). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'"
       security: [{ fanCookie: [], admissionToken: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }, { $ref: '#/components/parameters/PurchaseSeq' }, { $ref: '#/components/parameters/PurchaseMac' }]
       responses:
@@ -3750,7 +3753,7 @@ paths:
       description: "FR-010, FR-042. 구매 세션 요청 서명 필수. purchase-svc는 요청한 구매 세션 상태에 적힌 그 세션의 holdId 목록에서만 찾고, 해제 Lua는 좌석 홀드 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3). 놓은 좌석은 같은 계정이 30초 [가정] 동안 다시 잡지 못한다(홀드 409 seat-recently-released, 소유자 결정 2026-10-30, open-items 67번, docs/features/seat-hold.md §5)"
       security: [{ fanCookie: [], admissionToken: [] }]
       parameters: [{ name: holdId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/PurchaseSeq' }, { $ref: '#/components/parameters/PurchaseMac' }]
-      responses: { '204': { description: 해제 }, '404': { $ref: '#/components/responses/Problem', description: "그 구매 세션의 홀드가 아니다. 남의 holdId와 없는 holdId는 똑같이 404로 답해 그런 홀드가 있는지 알리지 않는다(BOLA 방지, guidelines §12, 추천 적용 2026-10-30, docs/features/seat-hold.md §3)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "팬 쿠키 없음·만료(about:blank, 화면은 토큰을 한 번 갱신한다), 입장 토큰 없음·만료이거나 구매 세션이 없거나 끝남(purchase-session-ended), 구매 세션 요청 서명 머리 없음·형식·불일치(purchase-signature-invalid), 일련번호 재사용(purchase-seq-reused). 어느 머리가 틀렸는지는 싣지 않는다. 화면 처리는 docs/frontend.md §4.1 '401'(BAS-040)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" } }
+      responses: { '204': { description: 해제 }, '409': { $ref: '#/components/responses/Problem', description: "결제 접수 뒤 묶인 홀드(hold-in-payment, 추천 적용 2026-11-09, ADR-0254)" }, '404': { $ref: '#/components/responses/Problem', description: "그 구매 세션의 홀드가 아니다. 남의 holdId와 없는 holdId는 똑같이 404로 답해 그런 홀드가 있는지 알리지 않는다(BOLA 방지, guidelines §12, 추천 적용 2026-10-30, docs/features/seat-hold.md §3)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "팬 쿠키 없음·만료(about:blank, 화면은 토큰을 한 번 갱신한다), 입장 토큰 없음·만료이거나 구매 세션이 없거나 끝남(purchase-session-ended), 구매 세션 요청 서명 머리 없음·형식·불일치(purchase-signature-invalid), 일련번호 재사용(purchase-seq-reused). 어느 머리가 틀렸는지는 싣지 않는다. 화면 처리는 docs/frontend.md §4.1 '401'(BAS-040)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" } }
   /v1/holds/{holdId}/extension:
     post:
       operationId: createHoldExtension
@@ -3760,14 +3763,14 @@ paths:
       description: "POL-012, NFR-020. 홀드 시간 제한은 WCAG 2.2.1의 실시간 예외로 판단(ADR-0060). 구매 세션 요청 서명 필수. 해제와 같이 그 구매 세션의 holdId만 찾고, 연장 Lua가 holdId와 소유 계정을 다시 대조한다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3)"
       security: [{ fanCookie: [], admissionToken: [] }]
       parameters: [{ name: holdId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/PurchaseSeq' }, { $ref: '#/components/parameters/PurchaseMac' }]
-      responses: { '200': { description: 연장된 홀드 }, '404': { $ref: '#/components/responses/Problem', description: "그 구매 세션의 홀드가 아니다. 남의 holdId와 없는 holdId는 똑같이 404다(BOLA 방지, 추천 적용 2026-10-30, docs/features/seat-hold.md §3)" }, '409': { $ref: '#/components/responses/Problem', description: 이미 연장함 }, '401': { $ref: '#/components/responses/Unauthorized', description: "팬 쿠키 없음·만료(about:blank, 화면은 토큰을 한 번 갱신한다), 입장 토큰 없음·만료이거나 구매 세션이 없거나 끝남(purchase-session-ended), 구매 세션 요청 서명 머리 없음·형식·불일치(purchase-signature-invalid), 일련번호 재사용(purchase-seq-reused). 어느 머리가 틀렸는지는 싣지 않는다. 화면 처리는 docs/frontend.md §4.1 '401'(BAS-040)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" } }
+      responses: { '200': { description: "연장된 홀드(extendable false)", content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }, '404': { $ref: '#/components/responses/Problem', description: "그 구매 세션의 홀드가 아니다. 남의 holdId와 없는 holdId는 똑같이 404다(BOLA 방지, 추천 적용 2026-10-30, docs/features/seat-hold.md §3)" }, '409': { $ref: '#/components/responses/Problem', description: "이미 연장함(hold-already-extended), 결제 접수 뒤 묶인 홀드(hold-in-payment, 추천 적용 2026-11-09, ADR-0254)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "팬 쿠키 없음·만료(about:blank, 화면은 토큰을 한 번 갱신한다), 입장 토큰 없음·만료이거나 구매 세션이 없거나 끝남(purchase-session-ended), 구매 세션 요청 서명 머리 없음·형식·불일치(purchase-signature-invalid), 일련번호 재사용(purchase-seq-reused). 어느 머리가 틀렸는지는 싣지 않는다. 화면 처리는 docs/frontend.md §4.1 '401'(BAS-040)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" } }
   /v1/orders:
     post:
       operationId: createOrder
       tags: [orders]
       x-peaket-roles: [fan]
       summary: 주문 생성(금액 서버 계산, 예매자 정보, 제3자 제공 동의)
-      description: "FR-011, POL-013·023. 본인확인 상태 재확인(POL-001). 구매 세션 요청 서명 필수. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 판매 종료 전에 만든 유효한 홀드의 주문만 받고 그 밖은 410 sale-ended다. 그 주문의 결제 시도·접수는 홀드·결제 시간 안에서 지금처럼 받는다(추천 적용 2026-10-14, ADR-0064)"
+      description: "FR-011, POL-013·023. 본인확인 상태 재확인(POL-001). 구매 세션 요청 서명 필수. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 판매 종료 전에 만든 유효한 홀드의 주문만 받고 그 밖은 410 sale-ended다. 그 주문의 결제 시도·접수는 홀드·결제 시간 안에서 지금처럼 받는다(추천 적용 2026-10-14, ADR-0064). 409 hold-already-ordered는 그 주문이 같은 계정·같은 구매 세션의 것일 때 확장 칸 orderId를 싣는다(ADR-0255)"
       security: [{ fanCookie: [], admissionToken: [] }]
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }, { $ref: '#/components/parameters/PurchaseSeq' }, { $ref: '#/components/parameters/PurchaseMac' }]
       requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [holdId, buyer], properties: { holdId: { type: string }, buyer: { additionalProperties: false, type: object, properties: { name: { type: string }, phone: { type: string } } }, consents: { type: object, additionalProperties: false, description: "두 동의와 고지 문안의 판. 없거나, 두 동의 가운데 하나라도 true가 아니거나, consentVersion이 없으면 422 consent-required다(동의 누락은 형식 오류가 아니라 업무 규칙이다, guidelines §12). 동의 일시는 주문의 created_at이다(추천 적용 2026-10-30, 굿즈 주문 본문 MerchOrderCreateDelivery.consents와 같은 방식, ADR-0089·0160)", properties: { provisionToSeller: { type: boolean, description: "판매자에게 개인정보 제공 동의(필수, 문안 docs/planning/04 SCR-011 ③, 추천 적용 2026-10-14, ADR-0062)" }, salesTerms: { type: boolean, description: "판매 조건(정렬 방식·1인 1순번·매수 한도·취소 규정) 결제 직전 동의(필수, POL-004)" }, consentVersion: { type: string, pattern: '^[0-9A-Za-z._-]{1,32}$', description: "주문서에 보인 두 고지 문안의 판. purchase_order.consent_version에 넣는다(문안은 판마다 따로 보관한다, docs/security/data-classification.md '법적 동의 기록'). 서버가 지금 쓰는 판이 아니면 422 consent-version-outdated이고, 화면은 지금 문안을 다시 보이고 다시 동의받는다. 32자 상한은 [가정](추천 적용 2026-10-30, docs/data.md purchase_order.consent_version)" } } } } } } } }

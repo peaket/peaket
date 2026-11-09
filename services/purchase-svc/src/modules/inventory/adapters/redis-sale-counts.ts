@@ -26,7 +26,7 @@ export class RedisSaleCounts implements SaleCountsReader {
 
   async read(eventId: string): Promise<SaleCountsRead> {
     assertEventId(eventId);
-    const keys = [seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId)];
+    const keys = [seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.paused(eventId)];
     // 비트맵 바이트를 글자로 풀면 0x80 같은 바이트가 깨져 응답을 Buffer로 받는다(platform CallOptions.binary)
     const r = await guard(this.redis.evalScript(SALE_COUNT, keys, [], { binary: true }));
     if (!Array.isArray(r) || r.length < 1) throw new Error('판매 상태 셈 Lua가 모르는 값을 돌려줬다');
@@ -42,9 +42,16 @@ export class RedisSaleCounts implements SaleCountsReader {
     assertEventId(eventId);
     if (!Number.isInteger(start) || start < 0) throw new RangeError('시작 순위는 0 이상의 정수다');
     if (!Number.isInteger(count) || count < 1 || count > SALE_TIER_SCAN_PAGE) throw new RangeError(`읽을 수는 1~${SALE_TIER_SCAN_PAGE}의 정수다`);
+    // 만료 인덱스 다음에 멈춘 홀드를 잇는다(BUILD_ORDER HOT-070). 순위는 두 집합을 이어 붙인 것이다
     const key = seatKeys.expiry(eventId);
-    const r = await guard(this.redis.command(['ZRANGE', key, String(start), String(start + count - 1)], { key }));
-    if (!Array.isArray(r)) throw new Error('ZRANGE 답이 배열이 아니다');
+    const paused = seatKeys.paused(eventId);
+    const expiryLength = Number(await guard(this.redis.command(['ZCARD', key], { key })));
+    const fromExpiry = start < expiryLength ? await guard(this.redis.command(['ZRANGE', key, String(start), String(start + count - 1)], { key })) : [];
+    if (!Array.isArray(fromExpiry)) throw new Error('ZRANGE 답이 배열이 아니다');
+    const rest = count - fromExpiry.length;
+    const fromPaused = rest > 0 ? await guard(this.redis.command(['ZRANGE', paused, String(Math.max(0, start - expiryLength)), String(Math.max(0, start - expiryLength) + rest - 1)], { key: paused })) : [];
+    if (!Array.isArray(fromPaused)) throw new Error('ZRANGE 답이 배열이 아니다');
+    const r = [...fromExpiry, ...fromPaused];
     const indexes: number[] = [];
     let badMembers = 0;
     for (const member of r) {

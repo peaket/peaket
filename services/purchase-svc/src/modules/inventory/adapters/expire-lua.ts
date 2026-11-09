@@ -22,17 +22,19 @@
 //   6 .. 5 + n                hold:{좌석 색인}(ARGV 좌석과 같은 차례)
 //   6 + n .. 5 + n + m        quota:{계정 j}(j = 1..m)
 //   6 + n + m .. 5 + n + 2m   rel:{계정 j}(j = 1..m, quota와 같은 계정 차례)
-//   그래서 #KEYS = 5 + n + 2m.
+//   6 + n + 2m                ordered(주문 뒤 홀드, 푼 좌석을 뺀다. BUILD_ORDER HOT-070)
+//   그래서 #KEYS = 6 + n + 2m.
 //
 // ARGV
 //   1 다시 잡기 대기 ms(REHOLD_WAIT_MS 30000)  2 구역 채널 이름 앞머리('s:{event:E}:sec:')  3 키 만료 시각 epoch ms(keepUntil, 홀드 Lua ARGV 7과 같은 값)  4 m
-//   5 .. 4 + m: 계정 ID(KEYS의 quota·rel과 같은 차례)
-//   5 + m + 9(i − 1) .. 13 + m + 9(i − 1): 좌석 i(1부터)의 9칸
+//   5 새 결제 일시 정지 시작 시각 ms(정지가 아니면 빈 글. Hash에 ordAt이 있고 rem이 없고 exp > max(이 값, ordAt)이면 건너뛴다, BUILD_ORDER HOT-070)
+//   6 .. 5 + m: 계정 ID(KEYS의 quota·rel과 같은 차례)
+//   6 + m + 9(i − 1) .. 14 + m + 9(i − 1): 좌석 i(1부터)의 9칸
 //     ① 좌석 색인 ② 기대 holdId ③ 기대 펜싱 토큰 글 ④ 계정 번호(1..m) ⑤ 구역 색인 ⑥ 구역 안 거리(seatOffset) ⑦ 좌석 ID ⑧ 등급 ID ⑨ 구역 ID
 //     고아(1단계에서 Hash가 없던 좌석, expected null)는 ②·③ = ''·④ = '0'이다. seat가 없으면(고아, 좌석맵 판에 없는 색인) ⑤~⑨ = ''다.
 //     좌석맵 판에 없는 색인(추천 적용 2026-11-04)도 기대값이 맞으면 그대로 푼다: EXPIRED의 seatId·tierId·sectionId·sectionVersion이 빈 글이고,
 //     그 좌석 몫의 secver 올리기·샤드 Pub/Sub는 없다.
-//   그래서 #ARGV = 4 + m + 9n. 어긋나면 'ERR PEAKET_EXPIRE_ARGS …'.
+//   그래서 #ARGV = 5 + m + 9n. 어긋나면 'ERR PEAKET_EXPIRE_ARGS …'.
 //   구역 일련번호 글은 int()로 쓴다(표준 10진 정수 끝값 18자리를 HINCRBY한 큰 수도 지수 표기 없이 글로 싣는다, A1).
 //   알려진 한계(seat-hold.md §5): Lua의 수는 64비트 실수라 보유 수가 18자리 끝값이면 −k 뒤 값이 반올림되어 19자리가 되고 다음 홀드가 CORRUPT_KEY로 거절된다
 //   (정상 운영의 보유 수는 한도 이하라 망가진 값에서만 생긴다. 고치지 않는다).
@@ -140,13 +142,16 @@ local function extend(key, ms)
 end
 ${ENSURE_EPOCH}
 local m = tonumber(ARGV[4])
-local n = m and (#ARGV - 4 - m) / 9 or 0
-if not m or m < 0 or n < 1 or n ~= math.floor(n) or #KEYS ~= 5 + n + 2 * m then
+local n = m and (#ARGV - 5 - m) / 9 or 0
+if not m or m < 0 or n < 1 or n ~= math.floor(n) or #KEYS ~= 6 + n + 2 * m then
   return redis.error_reply('ERR PEAKET_EXPIRE_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
 local function at(i, k)
-  return ARGV[4 + m + 9 * (i - 1) + k]
+  return ARGV[5 + m + 9 * (i - 1) + k]
 end
+-- 새 결제 일시 정지 시작 시각(ms, 정지가 아니면 빈 글, BUILD_ORDER HOT-070). 옮기기가 끝나기 전의 주문 뒤 홀드를 풀지 않게 한다
+local pausedSince = tonumber(ARGV[5])
+local orderedKey = KEYS[6 + n + 2 * m]
 local function quotaKey(j)
   return KEYS[5 + n + j]
 end
@@ -181,7 +186,7 @@ if not ep then return {'NOT_READY'} end
 -- 3a 묶음 전체 오류: 지난 keepUntil, 키 전체의 형(여기까지 아무것도 쓰지 않았다)
 local keep = tonumber(ARGV[3])
 if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[3] .. ' now ' .. int(now)) end
-for _, kt in ipairs({{KEYS[1], 'string'}, {KEYS[2], 'zset'}, {KEYS[3], 'stream'}, {KEYS[5], 'hash'}}) do
+for _, kt in ipairs({{KEYS[1], 'string'}, {KEYS[2], 'zset'}, {KEYS[3], 'stream'}, {KEYS[5], 'hash'}, {orderedKey, 'zset'}}) do
   local ty = typeOf(kt[1])
   if ty ~= 'none' and ty ~= kt[2] then return corrupt(kt[1]) end
 end
@@ -250,10 +255,15 @@ for i = 1, n do
     if (j and badAccount[j]) or (sec ~= '' and badSec[sec]) then
       kind = 'c'
     else
-      local h = redis.call('HMGET', hk, 'holdId', 'owner', 'psid', 'fence', 'exp', 'kind')
+      local h = redis.call('HMGET', hk, 'holdId', 'owner', 'psid', 'fence', 'exp', 'kind', 'ordAt', 'rem')
+      -- 정지 동안 아직 옮기지 못한 주문 뒤 홀드는 건너뛴다(남은 시간이 있던 홀드, BUILD_ORDER HOT-070)
+      local frozenWait = false
+      if pausedSince and h[7] and not h[8] and tonumber(h[7]) and tonumber(h[5] or '') then
+        frozenWait = tonumber(h[5]) > math.max(pausedSince, tonumber(h[7]))
+      end
       if not h[1] or not h[2] or not h[4] or not h[5] or not string.match(h[5], '^%d+$') or not safeFence(h[4]) then
         kind = 'c'
-      elseif j and j >= 1 and j <= m and scores[i] and h[1] == at(i, 2) and h[4] == at(i, 3) and h[2] == ARGV[4 + j] and tonumber(h[5]) <= now then
+      elseif not frozenWait and j and j >= 1 and j <= m and scores[i] and h[1] == at(i, 2) and h[4] == at(i, 3) and h[2] == ARGV[5 + j] and tonumber(h[5]) <= now then
         kind = 'r'
         hashes[i] = h
         local list = freedOf[j]
@@ -296,6 +306,11 @@ if released > 0 then
   end
   redis.call('BITFIELD', KEYS[1], unpack(bits))
   redis.call('DEL', unpack(dels))
+  local releasedMembers = {}
+  for i = 1, n do
+    if kinds[i] == 'r' then releasedMembers[#releasedMembers + 1] = at(i, 1) end
+  end
+  redis.call('ZREM', orderedKey, unpack(releasedMembers))
   -- 보유 수 −k(0 이하면 지우고, 아니면 걸린 수명을 지우지 않게 KEEPTTL), 방금 놓은 좌석(지난 점수 지우기 → 지금 + 30초 → 수명 30초)
   local relScore = int(now + tonumber(ARGV[1]))
   for j = 1, m do

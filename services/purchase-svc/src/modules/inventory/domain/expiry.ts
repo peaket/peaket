@@ -64,6 +64,8 @@ export interface DueExpiriesInput {
   nowMs: number;
   /** 읽을 좌석 수의 상한(1 ~ EXPIRY_BATCH_SIZE의 정수) */
   limit: number;
+  /** 앞줄에서 건너뛸 수(그 틱에서 풀지 못하고 남긴 좌석 수, 기본 0, ADR-0254 결정 6) */
+  offset?: number;
 }
 
 /** 1단계에서 읽은 홀드 Hash s:{event:E}:hold:{색인}의 세 칸(만료 Lua의 기대값) */
@@ -113,6 +115,8 @@ export interface ExpireInput {
   keepUntilMs: number;
   /** 1 ~ EXPIRY_BATCH_SIZE개, 색인이 겹치지 않는다. Lua는 이 차례로 본다 */
   seats: readonly ExpireSeat[];
+  /** 새 결제 일시 정지 시작 시각(정지 중일 때만). 아직 옮기지 못한 주문 뒤 홀드를 건너뛴다(BUILD_ORDER HOT-070). 메모리 구현에는 주문 표시가 없어 이 갈래가 돌지 않는다 */
+  pausedSinceMs?: number;
 }
 
 /** 만료 Lua가 푼 홀드 하나 */

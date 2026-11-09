@@ -2,6 +2,8 @@
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { ENSURE_EPOCH, HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { ORDER_HOLD_LUA } from './adapters/order-hold-lua.js';
+export { RedisHoldLifecycle, holdLifecycleKeys } from './adapters/redis-hold-lifecycle.js';
+export * from './domain/hold-lifecycle.js';
 export { MemoryOrderHolds, type MemoryOrderHoldsDeps } from './adapters/memory-order-holds.js';
 export { RedisOrderHolds } from './adapters/redis-order-holds.js';
 export { SEAT_SLOT_READ_LUA } from './adapters/seat-slot-lua.js';
@@ -183,6 +185,8 @@ export {
   throwHoldProblem,
 } from './application/hold-error.js';
 export { HoldSeats, type HoldBody, type HoldCommand, type HoldResponse } from './application/hold-seats.js';
+export { ManageHolds, type HoldActionCommand, type ManageHoldsDeps } from './application/manage-holds.js';
+export { HoldPauseView } from './application/hold-pause-view.js';
 export {
   ADMISSION_TOKEN_MAX_CHARS,
   AdmissionTokenRejected,

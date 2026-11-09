@@ -52,7 +52,10 @@ export type ProblemType =
   | 'fraud-run-not-failed'
   | 'fraud-run-retrying'
   | 'fraud-summary-not-viewed'
+  | 'hold-already-extended'
   | 'hold-already-ordered'
+  | 'hold-in-payment'
+  | 'hold-not-found'
   | 'human-check-required'
   | 'human-check-unavailable'
   | 'idempotency-key-invalid'
@@ -237,7 +240,10 @@ export const PROBLEM_TYPES = {
   'fraud-run-not-failed': { status: 409, title: "다시 돌릴 실패한 분석이 없습니다" },
   'fraud-run-retrying': { status: 409, title: "분석을 자동으로 다시 시도하고 있습니다" },
   'fraud-summary-not-viewed': { status: 409, title: "사건 요약을 먼저 열어 보세요" },
+  'hold-already-extended': { status: 409, title: "이미 연장한 홀드입니다" },
   'hold-already-ordered': { status: 409, title: "이 좌석으로 만든 주문이 이미 있습니다" },
+  'hold-in-payment': { status: 409, title: "결제가 진행 중인 홀드입니다" },
+  'hold-not-found': { status: 404, title: "홀드를 찾을 수 없습니다" },
   'human-check-required': { status: 428, title: "사람 확인을 마친 뒤 다시 시도해 주세요" },
   'human-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'idempotency-key-invalid': { status: 400, title: "멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다" },

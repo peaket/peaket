@@ -37,6 +37,8 @@ export const getCreateEventHoldResponseMock = (overrideResponse: Partial<Extract
 
 export const getGetHoldResponseMock = (overrideResponse: Partial<Extract<Hold, object>> = {}): Hold => ({seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), label: faker.string.alpha({length: {min: 10, max: 20}}), tierId: faker.string.alpha({length: {min: 10, max: 20}}), tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), price: faker.number.int()})), undefined]), totalAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), holdId: faker.string.alpha({length: {min: 10, max: 20}}), seatIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', extendable: faker.datatype.boolean(), fencingToken: faker.number.int({min: 1}), assignResult: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','FIRST_SPLIT','SECOND','SECOND_SPLIT'] as const), undefined]), ...overrideResponse})
 
+export const getCreateHoldExtensionResponseMock = (overrideResponse: Partial<Extract<Hold, object>> = {}): Hold => ({seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), label: faker.string.alpha({length: {min: 10, max: 20}}), tierId: faker.string.alpha({length: {min: 10, max: 20}}), tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), price: faker.number.int()})), undefined]), totalAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), holdId: faker.string.alpha({length: {min: 10, max: 20}}), seatIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', extendable: faker.datatype.boolean(), fencingToken: faker.number.int({min: 1}), assignResult: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','FIRST_SPLIT','SECOND','SECOND_SPLIT'] as const), undefined]), ...overrideResponse})
+
 
 export const getGetEventSeatmapSnapshotMockHandler = (overrideResponse?: Blob | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<Blob> | Blob), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string }>('*/v1/events/:eventId/seatmap-snapshot', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
@@ -107,11 +109,13 @@ export const getDeleteHoldMockHandler = (overrideResponse?: void | ((info: Param
   }, options)
 }
 
-export const getCreateHoldExtensionMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreateHoldExtensionMockHandler = (overrideResponse?: Hold | ((info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => Promise<Hold> | Hold), options?: RequestHandlerOptions) => {
   return http.post<{ holdId: string }>('*/v1/holds/:holdId/extension', async (info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateHoldExtensionResponseMock(),
       { status: 200
       })
   }, options)

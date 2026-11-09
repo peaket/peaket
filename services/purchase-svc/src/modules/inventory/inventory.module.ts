@@ -15,6 +15,7 @@ import { RedisSeatStore, SEAT_REDIS } from './adapters/redis-seat-store.js';
 import { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 import { ExpirySweeper, type ExpirySweeperDeps } from './application/expiry-sweeper.js';
 import { HoldSeats } from './application/hold-seats.js';
+import { ManageHolds } from './application/manage-holds.js';
 import { LogGate, OOM_WARN_GATE } from './application/log-gate.js';
 import {
   HOLD_ATTEMPTS,
@@ -42,6 +43,7 @@ import {
   SWEEP_LEASES,
   type SweepLeases,
 } from './domain/ports.js';
+import { HoldLifecycleController } from './inbound/hold-lifecycle.controller.js';
 import { HoldsController } from './inbound/holds.controller.js';
 import { PurchaseSessionController } from './inbound/purchase-session.controller.js';
 import { SnapshotController } from './inbound/snapshot.controller.js';
@@ -65,6 +67,8 @@ export interface AdmissionOptions {
   issuer: string;
   /** 구매 세션을 끝낸 뒤 부를 고리(EndPurchaseSession onEnded, BUILD_ORDER PRF-172). 운영은 purchase DB가 있을 때 booking OrderExpiry.onSessionEnded를 잇는다 */
   onSessionEnded?: EndPurchaseSessionDeps['onEnded'];
+  /** 홀드 다시 읽기·해제·연장(BUILD_ORDER HOT-070). 있으면 그 경로를 열고 끝난 세션의 홀드를 푼다 */
+  manageHolds?: ManageHolds;
 }
 
 export type InventoryModuleOptions = (
@@ -73,7 +77,7 @@ export type InventoryModuleOptions = (
    * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop).
    * onHoldsExpired는 만료로 푼 홀드를 알리는 고리다(BUILD_ORDER PRF-172. 운영은 purchase DB가 있을 때 booking OrderExpiry.onHoldsExpired를 잇는다)
    */
-  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
+  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
   /**
    * 시험: 넘기지 않은 것은 새로 만든다(저장소 MemorySeatStore(주입 Clock), 좌석맵 MemorySeatMap, 시도 기록 RecordingHoldAttempts, 지표 버림).
    * 만료 반복은 만들지 않는다(시험은 ExpirySweeper를 직접 만들어 손으로 tick한다)
@@ -112,7 +116,7 @@ export class InventoryModule {
             {
               provide: ExpirySweeper,
               useFactory: (store: RedisSeatStore, seatMap: SeatMap & SeatMapIndex, leases: SweepLeases, clock: Clock, s: SeatSignals, gate: LogGate, logger?: PlatformLogger) =>
-                new ExpirySweeper({ expiries: store, seatMap, leases, clock, podId: o.podId, signals: s, oomWarnGate: gate, ...(logger ? { logger } : {}), ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}) }),
+                new ExpirySweeper({ expiries: store, seatMap, leases, clock, podId: o.podId, signals: s, oomWarnGate: gate, ...(logger ? { logger } : {}), ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}), ...(o.holdFreeze ?? {}) }),
               inject: [SEAT_STORE, SEAT_MAP, SWEEP_LEASES, CLOCK, SEAT_SIGNALS, OOM_WARN_GATE, optionalLogger],
             },
           ]
@@ -140,7 +144,7 @@ export class InventoryModule {
                 {
                   provide: EndPurchaseSession,
                   useFactory: (clock: Clock, signals: SeatSignals, logger?: PlatformLogger) =>
-                    new EndPurchaseSession({ store: o.admission!.store, ended: o.admission!.endedLog!, clock, signals, ...(logger ? { logger } : {}), ...(o.admission!.onSessionEnded ? { onEnded: o.admission!.onSessionEnded } : {}) }),
+                    new EndPurchaseSession({ store: o.admission!.store, ended: o.admission!.endedLog!, clock, signals, ...(logger ? { logger } : {}), ...(o.admission!.onSessionEnded ? { onEnded: o.admission!.onSessionEnded } : {}), ...(o.admission!.manageHolds ? { releaseHolds: o.admission!.manageHolds } : {}) }),
                   inject: [CLOCK, SEAT_SIGNALS, optionalLoggerToken],
                 } satisfies Provider,
               ]
@@ -170,8 +174,8 @@ export class InventoryModule {
         : [];
     return {
       module: InventoryModule,
-      controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
-      providers: [HoldSeats, ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.manageHolds ? [HoldLifecycleController] : []), ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
+      providers: [HoldSeats, ...(o.admission?.manageHolds ? [{ provide: ManageHolds, useValue: o.admission.manageHolds }] : []), ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
       exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
     };
   }

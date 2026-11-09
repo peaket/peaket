@@ -17,7 +17,7 @@ import type {
   OrderAcceptReads,
   OrderAcceptWrites,
   OrderHoldExpiries,
-  OrderHolds,
+  OrderHoldMarks, OrderHolds,
   OrderLog,
   OrderSessions,
   OrderSignals,
@@ -45,6 +45,8 @@ import { CONSENT_VERSION_PATTERN, OrdersController } from './inbound/orders.cont
 export interface BookingModuleDeps {
   writes: OrderWrites;
   holds: OrderHolds;
+  /** 주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070). 없으면 하지 않는다 */
+  holdMarks?: OrderHoldMarks;
   saleConfigs: SaleConfigs;
   sessions: OrderSessions;
   identity: IdentityRecheck;

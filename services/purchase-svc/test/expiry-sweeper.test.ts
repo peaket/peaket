@@ -1151,7 +1151,7 @@ function wrongTypeRedis(eventId: string) {
       evals.push({ keys: [...keys], args: [...args] });
       const m = Number(args[3]);
       const out: string[] = [];
-      for (let k = 4 + m; k + 9 <= args.length; k += 9) {
+      for (let k = 5 + m; k + 9 <= args.length; k += 9) {
         members.delete(Number(args[k]));
         out.push(args[k]!, args[k + 2]!);
       }

@@ -431,12 +431,14 @@ describe('만료 Lua의 모양(ADR-0086, seat-hold.md §5 키 목록·입력값)
       seatKeys.quota(e, ACCOUNT_B),
       seatKeys.rel(e, ACCOUNT_A),
       seatKeys.rel(e, ACCOUNT_B),
+      seatKeys.ordered(e),
     ]);
     expect(args).toEqual([
       '30000',
       seatKeys.section(e, ''),
       String(keepUntilMs),
       '2',
+      '',
       ACCOUNT_A,
       ACCOUNT_B,
       ...['0', ia.holdId, String(ra.fencingToken), '1', '0', '0', 'A01', 'R', 'SEC-A'],

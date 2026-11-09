@@ -1,4 +1,5 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
+import type { Deadline } from '@peaket/platform';
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
 import type { OrderExpiryNotYetReason, OrderExpiryStage, OrderExpiryTransition, OrderExpiryTrigger } from './order-expiry.js';
 import type { OrderPaymentState, PaymentLedgerStatus, PaymentPullFailureCode, PaymentPullIgnoreReason, PaymentPullRunStage } from './payment-pull.js';
@@ -104,6 +105,8 @@ export interface OrderSignals {
    * 선택 메서드다(없는 구현은 버린다)
    */
   payingMarkFailed?(): void;
+  /** purchase_order_hold_mark_failed_total을 1 올린다(주문 뒤 표시 실패, BUILD_ORDER HOT-070). 던지지 않는다 */
+  holdMarkFailed?(): void;
 }
 
 // ---- 주문 생성 POST /v1/orders(docs/features/payment.md §2 '주문 생성의 첫 구현', BUILD_ORDER PRF-161) ----
@@ -288,6 +291,12 @@ export type OrderCreateOutcome =
   | { readonly status: 'HOLD_ALREADY_ORDERED' };
 
 /** 주문 쓰기(운영은 adapters/db/drizzle-order-writes.ts: purchase DB 트랜잭션 하나에 IdempotencyStore.run과 DrizzleOrderStore.createOrder를 묶는다) */
+/** 주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070, 운영은 inventory ManageHolds). 던지지 않는다 */
+export interface OrderHoldMarks {
+  markOrdered(q: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; deadline?: Deadline }): Promise<boolean>;
+  releaseSession(q: { eventId: string; accountId: string; sessionId: string }): Promise<void>;
+}
+
 export interface OrderWrites {
   /**
    * 커밋된 멱등 기록(order_idempotency, 범위 계정 × CREATE_ORDER × 키)을 읽는다. 아무것도 쓰지 않는다.
@@ -303,6 +312,8 @@ export interface OrderWrites {
    * @param o.deadlineMs 트랜잭션의 문장 시간 초과(리뷰 고침 L4). 트랜잭션은 read committed다(리뷰 고침 L3)
    */
   create(once: OrderRequestOnce, order: NewOrder, o?: TransactionCallOptions): Promise<OrderCreateOutcome>;
+  /** 그 홀드의 주문이 같은 계정·같은 구매 세션의 것이면 주문 ID(ADR-0255, purchase_order.hold_id 유일 인덱스 한 번). 없으면 undefined */
+  findOwnOrderId?(q: { holdId: string; accountId: string; purchaseSessionId: string }): Promise<string | undefined>;
 }
 
 /** 주문 생성의 보안·설정 로그(서비스 로그 한 줄씩. 번호 원문·토큰은 싣지 않는다). 던지지 않는다 */

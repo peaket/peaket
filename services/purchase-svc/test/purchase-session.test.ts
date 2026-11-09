@@ -394,7 +394,7 @@ describe('MemoryPurchaseSessionStore.end·sweep·setPaying (종료·정리 계�
     expect(await h.store.recordHold(jti, 'hold-1', ['A01'])).toBe(true);
     expect(await h.store.markStarted(jti)).toBe(true);
     expect((await h.holds(jti))?.get('hold-1')).toEqual(['A01']);
-    expect(await h.store.end(jti)).toEqual({ eventId: EVENT, journeyId: JOURNEY });
+    expect(await h.store.end(jti)).toMatchObject({ eventId: EVENT, journeyId: JOURNEY });
     expect(await h.holds(jti)).toBeUndefined();
     expect(await h.store.recordHold(jti, 'hold-2', ['A02'])).toBeNull();
     expect(await h.holds(jti)).toBeUndefined();

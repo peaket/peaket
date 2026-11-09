@@ -14,9 +14,11 @@ import {
   SWEEP_LEASE_TTL_MS,
   type SweepOutcome,
 } from '../domain/expiry.js';
+import { type EventPauseState, EXPIRY_MAX_OFFSET_PER_TICK, FREEZE_BATCH_SIZE, FREEZE_MAX_BATCHES_PER_TICK, type HoldFreezeResult, type HoldLifecycle } from '../domain/hold-lifecycle.js';
 import { KEEP_AFTER_SALE_END_MS, SeatStoreUnavailable } from '../domain/hold.js';
 import { type SeatKeyKind, type SeatLuaErrorCode, seatLuaErrorOf } from '../domain/lua-errors.js';
 import { noSeatSignals, type SeatExpiries, type SeatMap, type SeatMapIndex, type SeatSignals, type SweepLeases } from '../domain/ports.js';
+import type { HoldPauseView } from './hold-pause-view.js';
 import { LogGate } from './log-gate.js';
 
 export type { SweepOutcome } from '../domain/expiry.js';
@@ -91,6 +93,10 @@ export interface ExpirySweeperDeps {
    * holdIds는 같은 holdId를 한 번만 싣는다. 만료 Lua 답(ExpiredHold)에는 holdId가 없어, 푼 좌석의 색인으로 넘긴 ExpireSeat.expected.holdId에서 얻는다
    */
   onHoldsExpired?: (e: { readonly eventId: string; readonly holdIds: readonly string[] }) => void;
+  /** 새 결제 일시 정지 판단(BUILD_ORDER HOT-070). lifecycle과 함께 있을 때만 멈추고 되돌린다 */
+  pauseView?: Pick<HoldPauseView, 'refresh'>;
+  /** 옮기기·되돌리기 저장소(BUILD_ORDER HOT-070) */
+  lifecycle?: Pick<HoldLifecycle, 'orderedPage' | 'frozenPage' | 'frozenCount' | 'freeze' | 'thaw'>;
 }
 
 /** 로그 한 줄의 첫 인자(계정 ID가 든 키 이름·오류 글은 싣지 않는다) */
@@ -111,7 +117,7 @@ export interface SweepLogFields {
   seatStoreReason?: 'oom';
 }
 
-type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'loop' | 'hook';
+type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'loop' | 'hook' | 'freeze';
 
 /** 회차 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -232,11 +238,13 @@ export class ExpirySweeper {
     const ids = [...new Set(list)].sort(byCodeUnit);
     const reports = new Map<string, SweepEventReport>();
     const lags: number[] = [];
+    // 정지 판단은 틱마다 한 번이다(던지지 않는다). 조회 실패는 HoldPauseView가 마지막 답·10초 규칙으로 흡수한다
+    const pauses = this.deps.pauseView ? await this.deps.pauseView.refresh(ids) : undefined;
     let next = 0;
     const lane = async () => {
       while (next < ids.length && !stopped()) {
         const eventId = ids[next++]!;
-        reports.set(eventId, await this.#sweepEvent(eventId, stopped, lags));
+        reports.set(eventId, await this.#sweepEvent(eventId, stopped, lags, pauses?.get(eventId)));
       }
     };
     await Promise.all(Array.from({ length: Math.min(EXPIRY_CONCURRENCY, ids.length) }, lane));
@@ -244,11 +252,22 @@ export class ExpirySweeper {
     const signals = this.deps.signals ?? noSeatSignals;
     for (const e of events) signals.expiryTick?.(e.outcome);
     signals.expiryLag?.(lags.length > 0 ? Math.max(...lags) : 0);
+    if (this.deps.lifecycle && pauses) {
+      let frozen = 0;
+      for (const id of ids) {
+        try {
+          frozen += await this.deps.lifecycle.frozenCount(id);
+        } catch {
+          // 게이지만 비는다
+        }
+      }
+      signals.frozenHolds?.(frozen);
+    }
     return { overlapped: false, events };
   }
 
   /** 회차 하나를 이번 틱에 돈다(던지지 않는다). 첫 1단계 읽기의 밀림(초)을 lags에 더한다 */
-  async #sweepEvent(eventId: string, stopped: () => boolean, lags: number[]): Promise<SweepEventReport> {
+  async #sweepEvent(eventId: string, stopped: () => boolean, lags: number[], pause?: EventPauseState): Promise<SweepEventReport> {
     const { expiries, seatMap, leases, clock, podId } = this.deps;
     const signals = this.deps.signals ?? noSeatSignals;
     const report: SweepEventReport = { eventId, outcome: 'DRAINED', batches: 0, released: 0, skipped: 0, orphans: 0, unknownSeats: 0, corrupt: 0 };
@@ -267,12 +286,21 @@ export class ExpirySweeper {
       step = 'lease';
       if (!(await leases.acquire(eventId, podId, SWEEP_LEASE_TTL_MS))) return done('NOT_LEASED');
       const keepUntilMs = config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS;
+      // 결제 정지 옮기기·되돌리기(BUILD_ORDER HOT-070). 만료보다 먼저 해 이번 틱의 회수에 반영한다
+      let pausedSinceMs: number | undefined;
+      if (pause && this.deps.lifecycle) {
+        step = 'freeze';
+        await this.#settleFrozen(eventId, pause, keepUntilMs);
+        if (pause.kind === 'PAUSED') pausedSinceMs = pause.sinceMs;
+      }
       let first = true;
+      /** 이번 틱에서 풀지 못하고 앞줄에 남긴 좌석 수(ADR-0254 결정 6) */
+      let offset = 0;
       while (report.batches < EXPIRY_MAX_BATCHES_PER_TICK) {
         if (stopped()) return done('STOPPED');
         step = 'due';
         const nowMs = clock.now();
-        const due = await expiries.dueExpiries({ eventId, nowMs, limit: EXPIRY_BATCH_SIZE });
+        const due = await expiries.dueExpiries({ eventId, nowMs, limit: EXPIRY_BATCH_SIZE, ...(offset > 0 ? { offset } : {}) });
         if (first) {
           first = false;
           lags.push(due.length > 0 ? Math.max(0, nowMs - due[0]!.expiresAtMs) / 1000 : 0);
@@ -312,7 +340,7 @@ export class ExpirySweeper {
         let r: Extract<ExpireResult, { kind: 'OK' }> | undefined;
         if (seats.length > 0) {
           step = 'expire';
-          const out = await expiries.expire({ eventId, keepUntilMs, seats });
+          const out = await expiries.expire({ eventId, keepUntilMs, seats, ...(pausedSinceMs !== undefined ? { pausedSinceMs } : {}) });
           report.batches += 1;
           if (out.kind === 'NOT_READY') {
             signals.luaError('expire', 'NOT_READY');
@@ -327,7 +355,15 @@ export class ExpirySweeper {
           this.#notifyHoldsExpired(eventId, seats, r);
         }
         this.#countCorrupt(report, eventId, corrupt, signals);
-        if (!r || r.released + r.orphans === 0) return done('NO_PROGRESS');
+        if (!r || r.released + r.orphans === 0) {
+          // 묶음이 꽉 찼는데 하나도 풀지 못했으면 다음 쪽을 읽는다(앞줄의 망가진 좌석이 뒤를 막지 않게, ADR-0254 결정 6)
+          if (due.length === EXPIRY_BATCH_SIZE && offset + due.length <= EXPIRY_MAX_OFFSET_PER_TICK) {
+            offset += due.length;
+            continue;
+          }
+          return done('NO_PROGRESS');
+        }
+        offset = Math.min(EXPIRY_MAX_OFFSET_PER_TICK, offset + corrupt + r.skipped);
         if (due.length < EXPIRY_BATCH_SIZE) return done('DRAINED');
       }
       return done('BATCH_LIMIT');
@@ -343,6 +379,28 @@ export class ExpirySweeper {
       this.#log('error', { eventId, step, ...info }, '만료 반복이 그 회차를 이번 틱에서 멈췄다');
       if (step === 'expire') signals.luaError('expire', info.code);
       return done('ERROR');
+    }
+  }
+
+  /** 정지면 ordered를 옮기고 최대 체류에 닿은 것을 돌려놓고, 열렸으면 paused를 되돌린다. 오류는 부른 쪽(회차 하나의 ERROR·UNAVAILABLE)로 간다 */
+  async #settleFrozen(eventId: string, pause: EventPauseState, keepUntilMs: number): Promise<void> {
+    const life = this.deps.lifecycle!;
+    const run = async (op: 'freeze' | 'thaw', page: () => Promise<{ indexes: number[] }>, apply: (indexes: number[]) => Promise<HoldFreezeResult>): Promise<void> => {
+      for (let b = 0; b < FREEZE_MAX_BATCHES_PER_TICK; b++) {
+        const { indexes } = await page();
+        if (indexes.length === 0) return;
+        const started = this.deps.clock.monotonicMs();
+        const r = await apply(indexes);
+        if (r.kind !== 'OK') return;
+        (this.deps.signals ?? noSeatSignals).holdFreezeBatch?.(op, r, Math.max(0, this.deps.clock.monotonicMs() - started) / 1000);
+        if (indexes.length < FREEZE_BATCH_SIZE) return;
+      }
+    };
+    if (pause.kind === 'PAUSED') {
+      await run('freeze', () => life.orderedPage(eventId, FREEZE_BATCH_SIZE), (i) => life.freeze(eventId, pause.sinceMs, keepUntilMs, i));
+      await run('thaw', () => life.frozenPage(eventId, FREEZE_BATCH_SIZE, this.deps.clock.now()), (i) => life.thaw(eventId, keepUntilMs, i));
+    } else if (pause.kind === 'OPEN') {
+      await run('thaw', () => life.frozenPage(eventId, FREEZE_BATCH_SIZE), (i) => life.thaw(eventId, keepUntilMs, i));
     }
   }
 

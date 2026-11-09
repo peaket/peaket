@@ -205,7 +205,7 @@ export const CreateEventHoldResponse = zod.object({
 })
 
 /**
- * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
+ * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 같은 처리에서 그 세션의 홀드를 푼다(묶인 홀드는 빼고. 추천 적용 2026-11-09, ADR-0254). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
  * @summary 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
  */
 export const DeleteEventPurchaseSessionParams = zod.object({
@@ -284,5 +284,23 @@ export const CreateHoldExtensionHeader = zod.object({
   "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const CreateHoldExtensionResponse = zod.unknown()
+
+
+
+export const CreateHoldExtensionResponse = zod.object({
+  "seats": zod.array(zod.object({
+  "seatId": zod.string(),
+  "label": zod.string().describe('구역·열·번호(예 A구역 3열 12)'),
+  "tierId": zod.string(),
+  "tierName": zod.string().optional(),
+  "price": zod.int().describe('원 단위 정가(할인 전)')
+})).optional().describe('홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042)'),
+  "totalAmount": zod.int().optional().describe('좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다'),
+  "holdId": zod.string(),
+  "seatIds": zod.array(zod.string()),
+  "expiresAt": zod.iso.datetime({"offset":true}),
+  "extendable": zod.boolean(),
+  "fencingToken": zod.int().min(1),
+  "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
+})
 

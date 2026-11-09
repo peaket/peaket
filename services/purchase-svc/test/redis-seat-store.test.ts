@@ -88,12 +88,14 @@ describe('RedisSeatStore.expire(만료 Lua 한 번, expire-lua.ts 계약)', () =
       seatKeys.quota(E, ACCOUNT_B),
       seatKeys.rel(E, ACCOUNT_A),
       seatKeys.rel(E, ACCOUNT_B),
+      seatKeys.ordered(E),
     ]);
     expect(c.args).toEqual([
       String(REHOLD_WAIT_MS),
       seatKeys.section(E, ''),
       String(KEEP),
       '2',
+      '',
       ACCOUNT_A,
       ACCOUNT_B,
       ...['3', 'h3', '1700000000000003', '1', '0', '3', 'A04', 'R', 'SEC-A'],
@@ -102,8 +104,8 @@ describe('RedisSeatStore.expire(만료 Lua 한 번, expire-lua.ts 계약)', () =
       ...['4', 'h3', '1700000000000003', '1', '0', '4', 'A05', 'R', 'SEC-A'],
       ...['35', 'h35', '1700000000000035', '2', '', '', '', '', ''],
     ]);
-    expect(c.keys!.length).toBe(5 + 5 + 2 * 2);
-    expect(c.args.length).toBe(4 + 2 + 9 * 5);
+    expect(c.keys!.length).toBe(6 + 5 + 2 * 2);
+    expect(c.args.length).toBe(5 + 2 + 9 * 5);
   });
 
   test('ST6_ 결과 해석: OK는 µs·푼 수·건너뛴 수·고아 수와 좌석 차례의 (색인, 토큰)을 수로 바꾸고, NOT_READY는 그대로다', async () => {

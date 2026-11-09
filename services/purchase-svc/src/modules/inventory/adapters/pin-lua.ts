@@ -4,7 +4,7 @@
 // 형이 틀린 키·값이면 쓰지 않고 'ERR PEAKET_CORRUPT_KEY {키}' 스크립트 오류. 메모리 구현(memory-seat-store.ts)이 같은 계약을 따른다.
 //
 // PIN_LUA
-// KEYS(좌석 수 n = #KEYS − 8): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7 fence  8.. hold:{좌석 색인}(ARGV 좌석 차례)  끝 failed:{holdId}
+// KEYS(좌석 수 n = #KEYS − 10): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7 fence  8.. hold:{좌석 색인}(ARGV 좌석 차례)  그다음 failed:{holdId}, ordered, paused(BUILD_ORDER HOT-070)
 // ARGV: 1 계정  2 구매 세션 ID  3 holdId  4 1인 한도  5 orderGen  6 홀드 TTL ms(420000)  7 keepUntil ms  8 구역 채널 앞머리('s:{event:E}:sec:')
 //       9 + 6(i − 1) ..: 좌석 i의 좌석 색인, 구역 색인, 구역 안 거리, 좌석 ID, 등급 ID, 구역 ID(hold-lua.ts와 같다)
 // 검사 차례
@@ -81,7 +81,7 @@ const MAX_SAFE = '9007199254740991';
 /** 묶기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const PIN_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}${ENSURE_EPOCH}
-local n = #KEYS - 8
+local n = #KEYS - 10
 if n < 1 or #ARGV ~= 8 + 6 * n then
   return redis.error_reply('ERR PEAKET_PIN_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
@@ -104,8 +104,8 @@ local function decided(r)
   return r
 end
 
--- 1′ 실패 표시(KEYS 끝): 실패 해제가 먼저 돌았다. 늦은 묶기는 아무것도 쓰지 않는다(세대 확인만)
-if redis.call('EXISTS', KEYS[#KEYS]) == 1 then return decided({'FAILED_HOLD'}) end
+-- 1′ 실패 표시(KEYS 끝에서 셋째): 실패 해제가 먼저 돌았다. 늦은 묶기는 아무것도 쓰지 않는다(세대 확인만)
+if redis.call('EXISTS', KEYS[8 + n]) == 1 then return decided({'FAILED_HOLD'}) end
 
 -- 2 좌석마다 내 홀드(비트 1, holdId·owner 같음) · 빈 좌석(비트 0) · 남의 좌석(그 밖). 좌석 차례로 첫 남의 좌석이면 TAKEN
 for i = 1, n do
@@ -208,8 +208,10 @@ end
 for _, i in ipairs(mine) do
   redis.call('HSET', KEYS[7 + i], 'pin', '1')
 end
--- 모든 좌석을 만료 인덱스에서 뺀다(만료 Lua는 인덱스에 있는 좌석만 푼다)
+-- 모든 좌석을 만료 인덱스에서 뺀다(만료 Lua는 인덱스에 있는 좌석만 푼다). 결제 접수 뒤라 주문 뒤·정지 집합에서도 뺀다(BUILD_ORDER HOT-070)
 redis.call('ZREM', KEYS[2], unpack(idx))
+redis.call('ZREM', KEYS[9 + n], unpack(idx))
+redis.call('ZREM', KEYS[10 + n], unpack(idx))
 
 if k > 0 then
   redis.call('INCRBY', KEYS[3], int(k))
@@ -242,7 +244,7 @@ return {'OK', genText, k, tokText}
 `;
 
 // RELEASE_FAILED_LUA
-// KEYS(좌석 수 n = #KEYS − 7): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7.. hold:{좌석 색인}  끝 failed:{holdId}
+// KEYS(좌석 수 n = #KEYS − 9): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7.. hold:{좌석 색인}  그다음 failed:{holdId}, ordered, paused(BUILD_ORDER HOT-070)
 // ARGV: 1 계정  2 holdId  3 keepUntil ms  4 구역 채널 앞머리  5 + 6(i − 1) ..: 좌석 i의 6칸(PIN_LUA와 같다)
 // 검사: 1 세대 키(PIN_LUA와 같은 readEpoch. epoch 없음 → {'NOT_READY'}, 표시를 남기지 않는다. 망가진 세대 칸 → PEAKET_CORRUPT_KEY).
 //       그다음 좌석마다 홀드 Hash의 holdId·owner가 ARGV와 같은 좌석만 푼다 → {'OK', 푼 수}. 세대 확인(ensureEpoch, 장애 조치 뒤면 그 자리에서 올린다)은
@@ -264,13 +266,13 @@ return {'OK', genText, k, tokText}
 /** 결제 실패 해제 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const RELEASE_FAILED_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}${ENSURE_EPOCH}
-local n = #KEYS - 7
+local n = #KEYS - 9
 if n < 1 or #ARGV ~= 4 + 6 * n then
   return redis.error_reply('ERR PEAKET_RELEASE_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
--- 실패 표시(KEYS 끝): 늦은 묶기가 이 홀드의 좌석을 다시 잡지 않게 남긴다(PRF-165)
+-- 실패 표시(KEYS 끝에서 셋째): 늦은 묶기가 이 홀드의 좌석을 다시 잡지 않게 남긴다(PRF-165)
 local function markFailed()
-  redis.call('SET', KEYS[#KEYS], '1', 'PX', '${FAILED_HOLD_MARK_TTL_MS}')
+  redis.call('SET', KEYS[7 + n], '1', 'PX', '${FAILED_HOLD_MARK_TTL_MS}')
 end
 local function at(i, k)
   return ARGV[4 + 6 * (i - 1) + k]
@@ -360,6 +362,8 @@ end
 redis.call('BITFIELD', KEYS[1], unpack(clear))
 redis.call('DEL', unpack(dels))
 redis.call('ZREM', KEYS[2], unpack(members))
+redis.call('ZREM', KEYS[8 + n], unpack(members))
+redis.call('ZREM', KEYS[9 + n], unpack(members))
 local left = tonumber(heldText) - k
 if left <= 0 then
   redis.call('DEL', KEYS[3])

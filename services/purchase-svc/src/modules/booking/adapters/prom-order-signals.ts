@@ -46,6 +46,7 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
     registers: [],
   });
 
+  readonly #holdMarkFailed = new Counter({ name: 'purchase_order_hold_mark_failed_total', help: '주문 뒤 홀드 표시를 하지 못한 수(그 홀드는 정지 때 멈추지 않는다)', registers: [] });
   readonly #payingFailed = new Counter({
     name: 'purchase_order_paying_mark_failed_total',
     help: '주문을 커밋한 뒤 구매 세션 Paying 표시를 다시 불러도 하지 못한 수(결제 중 유휴로 끝날 수 있다, POL-009)',
@@ -110,6 +111,11 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
   /** purchase_order_paying_mark_failed_total(이름표 없음)을 1 올린다. 던지지 않는다(리뷰 고침 M3) */
   payingMarkFailed(): void {
     this.#payingFailed.inc();
+  }
+
+  /** purchase_order_hold_mark_failed_total(이름표 없음)을 1 올린다(BUILD_ORDER HOT-070). 던지지 않는다 */
+  holdMarkFailed(): void {
+    this.#holdMarkFailed.inc();
   }
 
   /** order_history_mismatch를 count로 둔다. 던지지 않는다(붙이기 전에도 값을 둔다) */

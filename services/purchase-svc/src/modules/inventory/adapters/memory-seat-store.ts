@@ -799,7 +799,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       .filter(([, score]) => score <= i.nowMs)
       .map(([index, score]) => ({ index, score, member: String(index) }))
       .sort((a, b) => a.score - b.score || (a.member < b.member ? -1 : a.member > b.member ? 1 : 0))
-      .slice(0, i.limit);
+      .slice(i.offset ?? 0, (i.offset ?? 0) + i.limit);
     for (const d of due) if (!Number.isSafeInteger(d.index) || d.index < 0) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.expiry(e)}`);
     return due.map(({ index, score }): DueExpiry => {
       const h = ev.holds.get(index) as Partial<Record<'holdId' | 'fence' | 'owner', unknown>> | undefined;

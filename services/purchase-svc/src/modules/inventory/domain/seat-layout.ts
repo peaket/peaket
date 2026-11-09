@@ -130,6 +130,8 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
   if (!Number.isFinite(saleEndsAtMs)) throw new SeatMapFileError('BAD_SALE_END');
   // 선택 칸 등급 가격(주문 생성의 금액, BUILD_ORDER PRF-161). 틀리면 그 파일 전체를 받지 않는다
   const tierPrices = parseTierPrices(raw.tierPrices);
+  // 선택 칸 등급 이름(홀드 응답의 tierName, BUILD_ORDER HOT-070). 모양이 틀린 값은 뺀다(표시 값이라 판을 막지 않는다)
+  const tierNames = isObject(raw.tierNames) ? Object.fromEntries(Object.entries(raw.tierNames).filter(([k, v]) => k.length > 0 && typeof v === 'string' && v.length > 0 && v.length <= 32)) as Record<string, string> : undefined;
   // 선택 칸 결제 시도의 주문명·입장 시각·가상계좌(BUILD_ORDER PRF-191). 틀리면 그 파일 전체를 받지 않는다
   const checkoutFields = parseCheckoutFields(raw);
   const layout = raw.layout;
@@ -164,7 +166,8 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
       const tier = seat.tierId ?? sectionTier;
       if (typeof tier !== 'string' || tier.length === 0) throw new SeatMapFileError('NO_TIER');
       if (byIndex.has(seat.index)) throw new SeatMapFileError('SEAT_INDEX_DUPLICATE');
-      const ref: SeatRef = { seatId: seat.seatId, index: seat.index, sectionId: sec.sectionId, sectionIndex, seatOffset: seat.index - from, tierId: tier };
+      const label = typeof seat.label === 'string' && seat.label.length > 0 && seat.label.length <= 64 ? seat.label : undefined;
+      const ref: SeatRef = { seatId: seat.seatId, index: seat.index, sectionId: sec.sectionId, sectionIndex, seatOffset: seat.index - from, tierId: tier, ...(label !== undefined ? { label } : {}) };
       if (seenIds.has(ref.seatId)) throw new SeatMapFileError('SEAT_ID_DUPLICATE');
       seenIds.add(ref.seatId);
       byIndex.set(seat.index, ref);
@@ -179,7 +182,7 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
 
   const seatCount = sorted[sorted.length - 1]!.to + 1;
   return {
-    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs, ...(tierPrices !== undefined ? { tierPrices } : {}), ...checkoutFields },
+    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs, ...(tierPrices !== undefined ? { tierPrices } : {}), ...(tierNames !== undefined ? { tierNames } : {}), ...checkoutFields },
     sections,
     byId,
     byIndex,

@@ -524,7 +524,7 @@ export const getDeleteEventPurchaseSessionUrl = (eventId: string,) => {
 }
 
 /**
- * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
+ * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 같은 처리에서 그 세션의 홀드를 푼다(묶인 홀드는 빼고. 추천 적용 2026-11-09, ADR-0254). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
  * @summary 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
  */
 export const deleteEventPurchaseSession = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteEventPurchaseSessionResponseSuccess> => {
@@ -737,6 +737,11 @@ export type deleteHoldResponse404 = {
   status: 404
 }
 
+export type deleteHoldResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type deleteHoldResponse503 = {
   data: ServiceUnavailableResponse
   status: 503
@@ -745,7 +750,7 @@ export type deleteHoldResponse503 = {
 export type deleteHoldResponseSuccess = (deleteHoldResponse204) & {
   headers: Headers;
 };
-export type deleteHoldResponseError = (deleteHoldResponse401 | deleteHoldResponse404 | deleteHoldResponse503) & {
+export type deleteHoldResponseError = (deleteHoldResponse401 | deleteHoldResponse404 | deleteHoldResponse409 | deleteHoldResponse503) & {
   headers: Headers;
 };
 
@@ -824,7 +829,7 @@ export const useDeleteHold = <TError = ErrorType<UnauthorizedResponse | ProblemR
       return useMutation(getDeleteHoldMutationOptions(options), queryClient);
     }
     export type createHoldExtensionResponse200 = {
-  data: void
+  data: Hold
   status: 200
 }
 

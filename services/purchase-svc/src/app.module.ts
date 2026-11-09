@@ -39,7 +39,7 @@ export class AppModule implements NestModule {
    */
   static register(
     o: (
-      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
+      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
       | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
     ) & {
       sessions: PurchaseSessionAccess;
@@ -68,6 +68,7 @@ export class AppModule implements NestModule {
             ...(o.signals ? { signals: o.signals } : {}),
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
+            ...(o.holdFreeze ? { holdFreeze: o.holdFreeze } : {}),
           })
         : InventoryModule.register({
             storage: 'memory',

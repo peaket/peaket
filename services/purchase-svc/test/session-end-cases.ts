@@ -55,7 +55,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     const { jti, i } = await opened(h, { eventId: 'ev-end-1', journeyId: OTHER_JOURNEY });
     expect(await h.store.advance(jti, 1)).toBe(true);
     expect(await h.store.recordHold(jti, 'hold-1', ['A01'])).toBe(true);
-    expect(await h.store.end(jti)).toEqual({ eventId: 'ev-end-1', journeyId: OTHER_JOURNEY });
+    expect(await h.store.end(jti)).toMatchObject({ eventId: 'ev-end-1', journeyId: OTHER_JOURNEY });
     expect(await h.store.read(jti)).toBeUndefined();
     expect(await h.store.advance(jti, 2)).toBe(false);
     expect(await h.store.recordHold(jti, 'hold-2', ['A02'])).toBeNull();

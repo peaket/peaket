@@ -15,6 +15,7 @@ import {
   type SeatRef,
   SeatStoreUnavailable,
 } from '../domain/hold.js';
+import { holdSeatsView } from '../domain/hold-lifecycle.js';
 import { seatLuaErrorOf } from '../domain/lua-errors.js';
 import {
   HOLD_ATTEMPTS,
@@ -76,6 +77,9 @@ export interface HoldResponse {
   extendable: boolean;
   /** 펜싱 토큰(양의 안전한 정수, 지금 시각으로 16자리. openapi Hold.fencingToken integer) */
   fencingToken: number;
+  /** 좌석 표시 값과 정가 합(가격이 없는 등급이 있으면 뺀다, BUILD_ORDER HOT-070) */
+  seats?: { seatId: string; label: string; tierId: string; tierName?: string; price: number }[];
+  totalAmount?: number;
 }
 
 @Injectable()
@@ -310,7 +314,7 @@ export class HoldSeats {
       case 'OK':
       case 'IDEM_REPLAY':
         if (r.kind === 'OK') record('HELD', r.heldAtMs, await this.#recordHold(c.purchaseSessionId, r.holdId, seatIds, c.deadline));
-        return responseOf(r, seatIds);
+        return responseOf(r, seatIds, holdSeatsView(seats, config));
       case 'NOT_READY':
         this.signals.luaError('hold', 'NOT_READY');
         // 세대 키가 없어 503으로 미룬다(다시 만들기 RB-06 전·도중, PRF-143). 좌석맵 판이 없어 내는 3의 503은 세지 않는다
@@ -338,6 +342,6 @@ const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0
 const sortedIds = (ids: readonly string[]): string[] => [...ids].sort(byCodeUnit);
 
 /** 201 본문(처음 응답이든 재생이든 저장소가 준 holdId·토큰·만료 시각) */
-function responseOf(h: HeldHold, seatIds: string[]): HoldResponse {
-  return { holdId: h.holdId, seatIds, expiresAt: new Date(h.expiresAtMs).toISOString(), extendable: true, fencingToken: h.fencingToken };
+function responseOf(h: HeldHold, seatIds: string[], view?: ReturnType<typeof holdSeatsView>): HoldResponse {
+  return { holdId: h.holdId, seatIds, expiresAt: new Date(h.expiresAtMs).toISOString(), extendable: true, fencingToken: h.fencingToken, ...(view ?? {}) };
 }

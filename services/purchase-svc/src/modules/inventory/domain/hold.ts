@@ -52,6 +52,8 @@ export interface SeatRef {
   seatOffset: number;
   /** 등급 ID(Stream tierId, HoldAttempt.tierId) */
   tierId: string;
+  /** 화면에 보이는 좌석 이름(판 파일의 선택 칸 label, 예 'A구역 3열 12'). 없으면 칸이 없다(BUILD_ORDER HOT-070) */
+  label?: string;
 }
 
 /**
