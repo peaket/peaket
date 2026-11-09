@@ -32,6 +32,14 @@ export const PAYMENT_STATUS_SLOW_AFTER_MS = 5_000;
 /** 오래 기다린 주문의 묶음 조회 간격 1초 [가정] */
 export const PAYMENT_STATUS_SLOW_POLL_INTERVAL_MS = 1_000;
 
+/** 입금 대기 응답의 은행·계좌번호·입금 기한을 읽는 GetPayment 데드라인 300ms [가정](docs/verification.md §4.1, BUILD_ORDER HOT-151) */
+export const PAYMENT_DEPOSIT_READ_DEADLINE_MS = 300;
+
+/** 입금 안내 읽기의 일시 실패(시간 초과·차단기·UNAVAILABLE·과부하). 다음 상태 요청이 다시 읽으면 될 수 있다(BUILD_ORDER HOT-151, 코드 리뷰) */
+export const PAYMENT_DEPOSIT_READ_TRANSIENT = 'TRANSIENT';
+/** 입금 안내 읽기의 결과: 안내, 없음(입금 대기가 아니거나 답할 안내가 없다), 일시 실패 */
+export type PaymentDepositRead = PaymentStatusVirtualAccount | undefined | typeof PAYMENT_DEPOSIT_READ_TRANSIENT;
+
 /** 응답 status 값(openapi PaymentStatus.status의 여덟 값과 같은 차례) */
 export const PAYMENT_STATUS_VALUES = ['ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'CONFIRMED', 'FAILED', 'UNKNOWN', 'COMPENSATED'] as const;
 export type PaymentStatusValue = (typeof PAYMENT_STATUS_VALUES)[number];
@@ -41,7 +49,7 @@ export const PAYMENT_STATUS_IMMEDIATE: ReadonlySet<OrderStatus> = new Set(['CONF
 /** 기다리는 상태(payment §2 '기다리는 상태'). APPROVED는 issueDelayed가 참이어도 기다린다(리뷰 고침 M2) */
 export const PAYMENT_STATUS_WAITING: ReadonlySet<OrderStatus> = new Set(['ACCEPTED', 'RESERVED', 'APPROVED']);
 
-/** 가상계좌 안내(openapi PaymentStatus.virtualAccount). 가상계좌 단계 전에는 늘 비운다(칸을 싣지 않는다) */
+/** 가상계좌 안내(openapi PaymentStatus.virtualAccount). payment-svc GetPayment에서 읽어 응답에만 싣는다(BUILD_ORDER HOT-151) */
 export interface PaymentStatusVirtualAccount {
   readonly bank?: string;
   readonly accountNumber?: string;
@@ -61,7 +69,7 @@ export interface PaymentStatusBody {
   readonly issueDelayed: boolean;
   /** 결제 접수에서 고정된 결제사(ACCEPTED 결제 시도의 pg) */
   readonly pg?: PaymentPg;
-  /** 가상계좌 단계 전에는 싣지 않는다 */
+  /** 입금 대기이고 읽었을 때만 싣는다. 쓰임새가 응답을 만들 때 붙인다 */
   readonly virtualAccount?: PaymentStatusVirtualAccount;
 }
 

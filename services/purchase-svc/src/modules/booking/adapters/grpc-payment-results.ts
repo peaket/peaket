@@ -180,6 +180,7 @@ export function orderPaymentStatesOf(v: Record<string, unknown>): OrderPaymentSt
     const pg = typeof p.pg === 'string' ? PG_OF.get(p.pg) : undefined;
     const approvedAtMs = timestampMsOf(p.approved_at);
     const failureCategory = typeof p.failure_category === 'string' ? FAILURE_OF.get(p.failure_category) : undefined;
+    const depositDueAtMs = timestampMsOf(p.deposit_due_at);
     // 칸을 하나씩 골라 옮긴다(받은 객체를 펼치지 않는다). 칸이 없는 값은 싣지 않는다
     return {
       orderId: p.order_id,
@@ -191,6 +192,7 @@ export function orderPaymentStatesOf(v: Record<string, unknown>): OrderPaymentSt
       ...(failureCategory !== undefined ? { failureCategory } : {}),
       eventKey: typeof p.event_key === 'string' ? p.event_key : '',
       eventSeq: int64Of(p.event_seq),
+      ...(depositDueAtMs !== undefined ? { depositDueAtMs } : {}),
     };
   });
 }

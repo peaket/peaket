@@ -36,6 +36,8 @@ export const payment = pgTable(
     amount: integer('amount').notNull(),
     status: text('status').notNull(),
     depositDueAt: at('deposit_due_at'),
+    // 입금 완료 통보를 처음 받은 시각(입금 대기 행은 짧은 간격 조회의 기준, FAILED 행은 늦은 입금 확인을 걸었다는 표시. BUILD_ORDER HOT-151 코드 리뷰, 마이그레이션 0006)
+    depositNotifiedAt: at('deposit_notified_at'),
     virtualAccountNo: text('virtual_account_no'),
     virtualAccountBank: text('virtual_account_bank'),
     // confirm-{orderId}
@@ -49,7 +51,7 @@ export const payment = pgTable(
     statusChangedAt: at('status_changed_at').notNull(),
     // 실패 범주. FAILED일 때만 채운다. ConfirmPayment 재전송의 답과 BatchGetPayments가 읽는다(BUILD_ORDER PRF-181, 마이그레이션 0001)
     failureCategory: text('failure_category'),
-    // 다음 단독 조회 시각. UNKNOWN일 때만 채운다(BUILD_ORDER PRF-182, 마이그레이션 0002)
+    // 다음 단독 조회 시각. UNKNOWN과 입금 대기일 때만 채운다(BUILD_ORDER PRF-182·HOT-151, 마이그레이션 0002·0006)
     nextQueryAt: at('next_query_at'),
     // UNKNOWN 조회 실행기가 잡은 횟수. 다음 간격을 정한다
     queryAttempts: integer('query_attempts').notNull().default(0),
@@ -64,14 +66,14 @@ export const payment = pgTable(
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
-    // UNKNOWN 조회 잡기. 끝난 행은 인덱스에 없다
-    index('payment_unknown_query_idx').on(t.nextQueryAt).where(sql`${t.status} = 'UNKNOWN'`),
+    // 단독 조회 잡기(UNKNOWN과 입금 대기, 늦은 입금 확인을 건 FAILED, BUILD_ORDER HOT-151, 마이그레이션 0006). 그 밖의 끝난 행은 인덱스에 없다
+    index('payment_query_due_idx').on(t.nextQueryAt).where(sql`${t.status} IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (${t.status} = 'FAILED' AND ${t.nextQueryAt} IS NOT NULL)`),
     // 1시간 표시(docs/data.md §5.1 상태 쓸기 작업)
     index('payment_unknown_status_changed_idx').on(t.statusChangedAt).where(sql`${t.status} = 'UNKNOWN'`),
     // 웹훅의 결제 참조로 원장 찾기(docs/data.md §5.1, BUILD_ORDER HOT-150, 마이그레이션 0005)
     index('payment_pg_ref_idx').on(t.pg, t.pgPaymentRef),
-    // UNKNOWN 행은 다음 조회 시각이 있어야 실행기가 잡는다(잡히지 않은 채 남는 행을 막는다)
-    check('payment_unknown_next_query_check', sql`${t.status} <> 'UNKNOWN' OR ${t.nextQueryAt} IS NOT NULL`),
+    // UNKNOWN과 입금 대기 행은 다음 조회 시각이 있어야 실행기가 잡는다(잡히지 않은 채 남는 행을 막는다, BUILD_ORDER HOT-151)
+    check('payment_next_query_check', sql`${t.status} NOT IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR ${t.nextQueryAt} IS NOT NULL`),
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
     check('payment_pg_check', sql`${t.pg} IN (${PG_LIST})`),
     check('payment_amount_check', sql`${t.amount} > 0`),

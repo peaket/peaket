@@ -11,7 +11,7 @@ import type {
   PaymentResultHoldSeverity,
   PaymentResultOrderView,
 } from './payment-result.js';
-import type { PaymentStatusBody, PaymentStatusView } from './payment-status.js';
+import type { PaymentDepositRead, PaymentStatusBody, PaymentStatusView } from './payment-status.js';
 import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './recheck.js';
 import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
 import type { IssuedTicketRef, TicketIssueAttemptResult, TicketIssueFailureCode, TicketIssueRunStage } from './ticket-issue.js';
@@ -913,6 +913,8 @@ export interface PaymentFailInput extends PaymentResultWriteBase {
 /** 상태만 바꾸는 쓰기 입력(T10·T12·T14) */
 export interface PaymentMarkInput extends PaymentResultWriteBase {
   readonly transition: 'T10' | 'T12' | 'T14';
+  /** 입금 대기 전이(T10·T14)이고 입금 기한을 알 때만: 판매 행 pending_until을 함께 쓴다(BUILD_ORDER HOT-151) */
+  readonly depositPending?: { readonly eventId: string; readonly seatIds: readonly string[]; readonly pendingUntilMs: number };
 }
 
 /**
@@ -995,6 +997,21 @@ export interface PaymentResultLog {
   }): void;
   /** 커밋 뒤 구매 세션 일이 실패했다(warn, 오류 이름만) */
   afterCommitFailed(e: { readonly orderId: string; readonly what: 'complete_session' | 'unmark_paying'; readonly errorName: string }): void;
+  /** 입금 대기 사건에 입금 기한이 없어 판매 행 pending_until을 비워 둔다(warn, kind payment-result-deposit-due-missing, 주문 ID만, BUILD_ORDER HOT-151). 없으면 부르지 않는다 */
+  depositDueMissing?(e: { readonly orderId: string }): void;
+}
+
+/**
+ * 입금 안내 읽기(payment-svc GetPayment, docs/features/payment.md §6 '결제 상태 응답', BUILD_ORDER HOT-151). 계좌번호는 응답에만 싣고 저장하지 않는다.
+ * 던지지 않는다(실패는 값으로 돌려준다).
+ */
+export interface PaymentDepositReader {
+  /**
+   * @param orderId 주문 ID
+   * @param o.deadlineMs 이 호출의 데드라인(ms). 어댑터가 상한 300ms [가정]로 자른다
+   * @returns 입금 안내. 안내가 없으면(입금 대기가 아님, 없는 결제, 답의 주문이 요청과 다름) undefined, 일시 실패면 PAYMENT_DEPOSIT_READ_TRANSIENT
+   */
+  read(orderId: string, o?: { readonly deadlineMs?: number }): Promise<PaymentDepositRead>;
 }
 
 // ---- 결제 결과 long polling GET /v1/orders/{orderId}/payment-status(docs/features/payment.md §2 '결제 결과 long polling의 첫 구현', BUILD_ORDER PRF-166) ----

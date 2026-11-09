@@ -267,7 +267,8 @@ function Body({ value, ctx, orderId, head, tickets, eventId }: { value: string; 
       );
     case 'awaitingDeposit': {
       const a = ctx.account;
-      const line = [a?.bank, a?.accountNumber].filter(Boolean).join(' ');
+      const accountNumber = a?.accountNumber;
+      const line = [a?.bank, accountNumber].filter(Boolean).join(' ');
       return center(
         'vb-h',
         'is-primary',
@@ -284,7 +285,7 @@ function Body({ value, ctx, orderId, head, tickets, eventId }: { value: string; 
             <dt>예매번호</dt>
             <dd className="mono">{orderId}</dd>
           </dl>
-          {line ? <CopyButton className="btn btn-outline btn-block" text={a?.accountNumber ?? line} label="계좌 복사" ariaLabel="가상계좌 번호 복사" done="계좌번호를 복사했습니다" /> : null}
+          {accountNumber ? <CopyButton className="btn btn-outline btn-block" text={accountNumber} label="계좌 복사" ariaLabel="가상계좌 번호 복사" done="계좌번호를 복사했습니다" /> : <p className="t-sm">계좌번호를 표시할 수 없습니다. 예매·주문 내역에서 결제 상태를 확인하거나 고객센터에 문의해 주세요</p>}
           <p className="t-sm muted">기한이 지나면 주문이 취소되고 좌석이 풀립니다</p>
           <Link className="link-more" href="/my/orders" style={{ alignSelf: 'center' }}>
             예매·주문 내역 보기

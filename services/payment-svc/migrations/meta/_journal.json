@@ -43,6 +43,13 @@
       "when": 1794188567321,
       "tag": "0005_payment_webhook_receipt",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794192197964,
+      "tag": "0006_payment_query_due",
+      "breakpoints": true
     }
   ]
 }

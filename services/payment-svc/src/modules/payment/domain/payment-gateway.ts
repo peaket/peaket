@@ -83,10 +83,26 @@ export interface ConfirmCard {
 /** 결제 수단 분류(asyncapi PaymentEvent.payMethodCategory와 같은 값) */
 export type PayMethodCategory = 'CARD' | 'EASY_PAY' | 'TRANSFER' | 'OTHER';
 
+/**
+ * 가상계좌 발급 정보(payment §6 '입금 확인의 첫 구현', BUILD_ORDER HOT-151). 어댑터가 결제사 공식 칸에서 채우고, 없거나 모양이 틀린 칸만 뺀다(코드 리뷰 M5).
+ * 계좌번호와 secret은 저장 앞에서만 쓰고 로그·사건·지표에 싣지 않는다
+ */
+export interface ConfirmVirtualAccount {
+  accountNumber?: string;
+  /** 결제사가 준 은행 코드·이름 */
+  bank?: string;
+  /** 입금 기한(ISO 8601). 결제사가 주지 않았으면 없다 */
+  dueAt?: string;
+  /** 입금 통보 대조용 값(토스 secret). 포트원은 없다 */
+  secret?: string;
+}
+
 export interface ConfirmResult {
   outcome: ConfirmOutcome;
   paymentRef: string;
   amount?: number;
+  /** 가상계좌 발급 정보(WAITING_FOR_DEPOSIT일 때만, BUILD_ORDER HOT-151) */
+  virtualAccount?: ConfirmVirtualAccount;
   /** 결제사가 준 승인 시각(ISO 8601, 결제사 오프셋 그대로) */
   approvedAt?: string;
   failureCategory?: FailureCategory;
@@ -112,6 +128,8 @@ export type QueryResult =
       method?: PayMethodCategory;
       /** 결제 수단 연결값 계산용 카드 정보(UNKNOWN을 조회로 승인 확정할 때 쓴다, BUILD_ORDER HOT-145) */
       card?: ConfirmCard;
+      /** 가상계좌 발급 정보(UNKNOWN을 조회로 입금 대기로 확정할 때 쓴다, BUILD_ORDER HOT-151) */
+      virtualAccount?: ConfirmVirtualAccount;
     }
   | { kind: 'NOT_FOUND' }
   /** throttled는 결제사가 429로 답했을 때만 참이다(pg_throttled_total에 세고 상한은 낮추지 않는다, BUILD_ORDER PRF-183) */
@@ -142,6 +160,10 @@ export interface WebhookTrigger {
   /** 토스 입금 통보는 결제 키 없이 주문 ID만 온다(BUILD_ORDER HOT-150) */
   paymentRef?: string;
   orderRef?: string;
+  /** 토스 입금 통보의 secret(원장의 해시와 대조한다, BUILD_ORDER HOT-151). 그 밖의 사건에는 없다. 로그에 싣지 않는다 */
+  depositSecret?: string;
+  /** 결제사가 입금 완료를 알렸다(토스 입금 통보 DONE, 포트원 Transaction.Paid, BUILD_ORDER HOT-151 코드 리뷰). 결과가 아니라 조회 간격을 정하는 신호다 */
+  depositDone?: true;
 }
 
 /** 웹훅을 거절한 까닭. 닫힌 값만 쓴다(보안 로그·지표에 원문이 실리지 않게, BUILD_ORDER HOT-150) */

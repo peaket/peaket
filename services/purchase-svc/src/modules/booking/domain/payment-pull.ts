@@ -106,6 +106,8 @@ export interface OrderPaymentState {
   readonly eventKey: string;
   /** 마지막 결제 사건의 순번(int64, 주문마다 늘어나기만 한다). 주문 payment_event_seq와 견준다 */
   readonly eventSeq: number;
+  /** 입금 기한(epoch ms, deposit_due_at, 입금 대기일 때만, BUILD_ORDER HOT-151). 칸이 없으면 undefined */
+  readonly depositDueAtMs?: number;
 }
 
 /** 답을 사건으로 바꿀 때 답 밖에서 채우는 값 */
@@ -174,6 +176,8 @@ export function paymentStateToResultEvent(state: OrderPaymentState, ctx: Payment
   const occurredAt = type === 'APPROVED' && approvedAtUsable(state.approvedAtMs, ctx.confirmSentAtMs) ? isoOf(state.approvedAtMs) : isoOf(ctx.pulledAtMs);
   if (occurredAt === undefined) return IGNORE_MALFORMED;
   const failureCategory = type === 'FAILED' && typeof state.failureCategory === 'string' && FAILURE_CATEGORIES.has(state.failureCategory) ? state.failureCategory : undefined;
+  // 입금 기한은 입금 대기 답에 있을 때만 싣는다(판매 행 기한을 쓴다, BUILD_ORDER HOT-151)
+  const depositDueAt = type === 'AWAITING_DEPOSIT' ? isoOf(state.depositDueAtMs) : undefined;
   // 사건 길에만 있는 칸(payMethodCategory·result·latencyMs)은 싣지 않는다. 실패 범주는 FAILED이고 값이 있을 때만
   const event: PaymentResultEvent = {
     eventId: ctx.eventId,
@@ -187,6 +191,7 @@ export function paymentStateToResultEvent(state: OrderPaymentState, ctx: Payment
     eventSeq: state.eventSeq,
     eventKey: state.eventKey,
     ...(failureCategory !== undefined ? { failureCategory } : {}),
+    ...(depositDueAt !== undefined ? { depositDueAt } : {}),
   };
   return { kind: 'APPLY', event };
 }

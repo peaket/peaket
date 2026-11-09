@@ -26,6 +26,13 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals {
     registers: [],
   });
 
+  readonly #depositReadFailures = new Counter({
+    name: 'purchase_payment_status_deposit_read_failures_total',
+    help: '입금 대기 응답의 은행·계좌번호·입금 기한을 payment-svc에서 읽지 못한 수(gRPC 코드)',
+    labelNames: ['code'] as const,
+    registers: [],
+  });
+
   readonly #waiters = new Gauge({
     name: 'purchase_payment_status_waiters',
     help: '이 파드에서 결제 결과 long polling(GET /v1/orders/{orderId}/payment-status)으로 기다리는 요청 수',
@@ -50,7 +57,13 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals {
     registry.registerMetric(this.#payingFailed);
     registry.registerMetric(this.#waiters);
     registry.registerMetric(this.#pollFailures);
+    registry.registerMetric(this.#depositReadFailures);
     return this;
+  }
+
+  /** purchase_payment_status_deposit_read_failures_total{code}를 1 올린다(입금 안내를 payment-svc에서 읽지 못함, BUILD_ORDER HOT-151). 던지지 않는다 */
+  depositReadFailed(code: string): void {
+    this.#depositReadFailures.inc({ code });
   }
 
   /**

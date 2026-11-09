@@ -22,6 +22,7 @@ const ERROR: ReadonlyMap<string, { status: number; type: string }> = new Map([
 const STATUS: ReadonlyMap<string, string> = new Map([
   ['READY', 'READY'],
   ['IN_PROGRESS', 'PAY_PENDING'],
+  ['WAITING_FOR_DEPOSIT', 'VIRTUAL_ACCOUNT_ISSUED'],
   ['DONE', 'PAID'],
   ['PARTIAL_CANCELED', 'PARTIAL_CANCELLED'],
   ['CANCELED', 'CANCELLED'],
@@ -30,6 +31,7 @@ const STATUS: ReadonlyMap<string, string> = new Map([
   ['EXPIRED', 'READY'],
 ]);
 const WEBHOOK_TYPE: ReadonlyMap<string, string> = new Map([
+  ['WAITING_FOR_DEPOSIT', 'Transaction.VirtualAccountIssued'],
   ['DONE', 'Transaction.Paid'],
   ['PARTIAL_CANCELED', 'Transaction.PartialCancelled'],
   ['CANCELED', 'Transaction.Cancelled'],
@@ -53,7 +55,8 @@ function translate(r: SimResponse, mapOk: (view: TossView) => unknown, invalidRe
 }
 
 export function portoneConfirmResponse(r: SimResponse): SimResponse {
-  return translate(r, (v) => ({ pgTxId: v.lastTransactionKey ?? v.txId, paidAt: v.approvedAt }), 'INFORMATION_MISMATCH');
+  // 입금 전 승인 답(가상계좌 발급)에는 결제 시각이 없다(BUILD_ORDER HOT-151, 코드 리뷰)
+  return translate(r, (v) => ({ pgTxId: v.lastTransactionKey ?? v.txId, ...(v.approvedAt === null || v.approvedAt === undefined ? {} : { paidAt: v.approvedAt }) }), 'INFORMATION_MISMATCH');
 }
 
 export function portoneAuthenticateResponse(r: SimResponse): SimResponse {
@@ -95,6 +98,12 @@ function portoneCard(card: Record<string, unknown>): Record<string, unknown> {
   return { number: card.number, ...(card.issuerCode === null || card.issuerCode === undefined ? {} : { issuer: card.issuerCode }), ...(type === undefined ? {} : { type }), ...(card.bin === undefined ? {} : { bin: card.bin }) };
 }
 
+/** 엔진의 가상계좌 칸 → 포트원 PaymentMethodVirtualAccount 칸(공식 스키마의 칸. 은행은 시뮬레이터 고정 값) */
+function portoneVirtualAccount(v: TossView): Record<string, unknown> {
+  const va = v.virtualAccount as { accountNumber: string; dueDate: string } | null | undefined;
+  return va ? { bank: 'WOORI', accountNumber: va.accountNumber, expiredAt: va.dueDate, accountType: 'NORMAL', remitteeName: '시뮬레이터' } : {};
+}
+
 /** 엔진의 결제 보기를 포트원 Payment 모양으로 바꾼다(필요한 칸만) */
 function portoneView(v: TossView): Record<string, unknown> {
   const total = v.totalAmount as number;
@@ -118,7 +127,7 @@ function portoneView(v: TossView): Record<string, unknown> {
     origin: {},
     disputes: [],
     ...(approved ? { paidAt: v.approvedAt, pgTxId: v.lastTransactionKey } : {}),
-    method: METHOD_TYPE.has(v.method) ? { type: METHOD_TYPE.get(v.method) } : { type: 'PaymentMethodCard', ...(card ? { card: portoneCard(card) } : {}) },
+    method: METHOD_TYPE.has(v.method) ? { type: METHOD_TYPE.get(v.method), ...portoneVirtualAccount(v) } : { type: 'PaymentMethodCard', ...(card ? { card: portoneCard(card) } : {}) },
   };
 }
 

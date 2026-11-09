@@ -7,6 +7,7 @@
 import type { Clock } from '@peaket/platform';
 import type { HeaderBag, PaymentGatewayPort, PgName } from '../domain/payment-gateway.js';
 import type { PaymentGateways, PaymentWebhookLog, PaymentWebhookSignals, PaymentWebhookStore, WebhookReceiveRequest } from '../domain/ports.js';
+import { depositSecretHashOf } from '../domain/virtual-account.js';
 import { type WebhookRoute, webhookRoutePgs, webhookRouteRejects, webhookRouteSigned } from '../domain/webhook-receipt.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
 
@@ -57,6 +58,9 @@ export class ReceivePaymentWebhook {
       allowedPgs: webhookRoutePgs(route, this.deps.allowSimulator),
       signed: webhookRouteSigned(route),
       nowMs: this.deps.clock.now(),
+      // secret은 여기서 해시로만 넘긴다(저장소·로그에 원문이 가지 않는다, BUILD_ORDER HOT-151)
+      ...(parsed.depositSecret === undefined ? {} : { depositSecretHash: depositSecretHashOf(parsed.depositSecret) }),
+      ...(parsed.depositDone === true ? { depositDone: true } : {}),
     };
     return this.#store(route, pg, request);
   }
@@ -90,6 +94,13 @@ export class ReceivePaymentWebhook {
         break;
       case 'STATE_IGNORED':
         signals.outcome(pg, 'state_ignored');
+        break;
+      case 'LATE_DEPOSIT_CHECK':
+        signals.outcome(pg, 'late_deposit_check');
+        break;
+      case 'DEPOSIT_SECRET_MISMATCH':
+        signals.outcome(pg, 'deposit_secret_mismatch');
+        log.depositSecretMismatch({ route, pg, orderId: result.orderId });
         break;
     }
     return 'ACCEPTED';

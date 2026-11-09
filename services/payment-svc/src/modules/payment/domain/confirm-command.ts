@@ -86,6 +86,48 @@ export interface PaymentState {
   readonly failureCategory?: FailureCategory;
   /** 마지막 수출 사건(exported = true이고 RESOLVED가 아닌 행 가운데 순번 최대). 없으면(아직 ACCEPTED) undefined라 답의 event_key·event_seq를 비운다 */
   readonly lastEvent?: { readonly eventKey: string; readonly eventSeq: number };
+  /** 입금 기한(epoch ms, 입금 대기일 때만, BUILD_ORDER HOT-151) */
+  readonly depositDueAtMs?: number;
+}
+
+/** GetPayment의 찾을 값(proto oneof key) */
+export type GetPaymentKey = { readonly kind: 'paymentId'; readonly paymentId: string } | { readonly kind: 'orderId'; readonly orderId: string };
+
+/** 저장소가 돌려주는 결제 상세(가상계좌 번호는 아직 암호문이다) */
+export interface PaymentDetailRow {
+  readonly paymentId: string;
+  readonly orderId: string;
+  readonly pg: PgName;
+  readonly status: PaymentLedgerStatus;
+  readonly amount: number;
+  readonly approvedAtMs?: number;
+  /** 입금 대기일 때만 */
+  readonly virtualAccountBank?: string;
+  readonly virtualAccountNoSealed?: string;
+  readonly depositDueAtMs?: number;
+}
+
+/** GetPayment 답 */
+export interface PaymentDetail {
+  readonly paymentId: string;
+  readonly orderId: string;
+  readonly pg: PgName;
+  readonly status: PaymentLedgerStatus;
+  readonly amount: number;
+  /** 취소를 만드는 단계 전에는 0이다 */
+  readonly cancelledAmount: number;
+  readonly approvedAtMs?: number;
+  /** 입금 대기일 때만. 계좌번호는 복호하지 못했거나 저장하지 않았으면 없다. 로그에 싣지 않는다 */
+  readonly virtualAccount?: { readonly bank?: string; readonly accountNumber?: string; readonly dueAtMs?: number };
+}
+
+/** 원장이 없다(gRPC NOT_FOUND). 글에는 값을 싣지 않는다 */
+export class PaymentNotFoundError extends Error {
+  readonly code = 'NOT_FOUND' as const;
+  constructor() {
+    super('결제를 찾지 못했다');
+    this.name = 'PaymentNotFoundError';
+  }
 }
 
 /** 입력이 틀렸다(gRPC INVALID_ARGUMENT). 글에는 칸 이름만 싣고 값을 싣지 않는다 */
@@ -175,6 +217,16 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
 export function parseBatchGetOrderIds(orderIds: readonly string[]): string[] {
   if (orderIds.length < 1 || orderIds.length > BATCH_GET_MAX_ORDERS || !orderIds.every(isLowerUuid)) throw new PaymentInputError('order_ids');
   return [...new Set(orderIds)];
+}
+
+/**
+ * GetPayment 입력 검사: payment_id·order_id 가운데 정확히 하나이고 소문자 UUID다.
+ * @throws PaymentInputError field = 'key'
+ */
+export function parseGetPaymentKey(paymentId: string | undefined, orderId: string | undefined): GetPaymentKey {
+  if ((paymentId === undefined) === (orderId === undefined)) throw new PaymentInputError('key');
+  if (paymentId !== undefined) return { kind: 'paymentId', paymentId: uuidOf(paymentId, 'payment_id') };
+  return { kind: 'orderId', orderId: uuidOf(orderId!, 'order_id') };
 }
 
 /** 이미 있는 결제와 같은 명령인가(attempt_id·pg·amount가 모두 같다) */

@@ -72,6 +72,7 @@ export { DrizzleRebuildOrders } from './adapters/db/drizzle-rebuild-orders.js';
 export { DrizzlePaymentStatus, type DrizzlePaymentStatusOptions } from './adapters/db/drizzle-payment-status.js';
 export { GetPaymentStatus, type GetPaymentStatusCommand, type GetPaymentStatusDeps, type GetPaymentStatusResult } from './application/get-payment-status.js';
 export { PaymentStatusWaitTable, type PaymentStatusWaitTableDeps, type WaitTableTimer } from './application/payment-status-waiters.js';
+export { depositInfoOf, GrpcPaymentDepositReader, type GrpcPaymentDepositReaderOptions, noPaymentDepositReader, PAYMENT_DEPOSIT_BREAKER, PAYMENT_DEPOSIT_CAP_MS, paymentDepositReaderFromEnv } from './adapters/grpc-payment-deposit.js';
 export {
   decidePaymentStatus,
   ISSUE_DELAYED_AFTER_MS,
@@ -90,6 +91,8 @@ export {
   paymentStatusWaitMs,
   paymentStatusWakes,
   type IssueJobView,
+  PAYMENT_DEPOSIT_READ_TRANSIENT,
+  type PaymentDepositRead,
   type PaymentStatusBody,
   type PaymentStatusDecision,
   type PaymentStatusProblem,
@@ -232,6 +235,8 @@ export {
   PAYMENT_RESULT_WRITES,
   TICKET_ISSUE_WINDOW_MS,
   approvalIssueDueAtMs,
+  DEPOSIT_PENDING_GRACE_MS,
+  depositPendingUntilMs,
   ticketIssueDueAtMs,
   type AppliedPaymentEventType,
   type PayMethodCategory,
@@ -447,6 +452,7 @@ export type {
   PaymentResultWriteBase,
   PaymentResultWriteOutcome,
   PaymentResultWrites,
+  PaymentDepositReader,
   PaymentStatusReads,
   PaymentStatusSignals,
   PaymentStatusWaiters,

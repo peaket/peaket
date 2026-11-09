@@ -30,6 +30,7 @@ import {
 } from '../../domain/payment-gateway.js';
 import { portoneCardOfMethod } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
+import { portoneVirtualAccountOf } from './virtual-account-fields.js';
 
 export interface PortoneGatewayOptions {
   /** 결제사 주소 */
@@ -217,13 +218,14 @@ export class PortoneGateway implements PaymentGatewayPort {
     const unknown: ConfirmResult = { outcome: 'UNKNOWN', paymentRef: c.paymentRef };
     if (r === 'NO_ANSWER' || r.status >= 500) return unknown;
     if (r.status === 200) {
-      // 승인 답에는 결제 ID·금액이 없다. pgTxId와 시각이 없으면 승인 모양이 아니라 조회도 하지 않는다
+      // 승인 답에는 결제 ID·금액이 없다. pgTxId가 없거나 시각이 시각 모양이 아니면 승인 모양이 아니라 조회도 하지 않는다
       const paidAt = str(r.json?.paidAt);
-      if (!str(r.json?.pgTxId) || paidAt === undefined || Number.isNaN(Date.parse(paidAt))) return unknown;
+      if (!str(r.json?.pgTxId) || (paidAt !== undefined && Number.isNaN(Date.parse(paidAt)))) return unknown;
       const q = await this.#followUp(c.paymentRef, startedMs, c.txId);
       if (!q || q.orderRef !== c.orderId) return unknown;
-      if (q.status === 'WAITING_FOR_DEPOSIT') return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: q.amount };
-      if (q.status !== 'APPROVED' && q.status !== 'PARTIAL_CANCELED') return unknown;
+      // 입금 전이라 결제 시각이 없어도 입금 대기는 받는다(BUILD_ORDER HOT-151, 코드 리뷰). 승인은 시각이 있어야 한다
+      if (q.status === 'WAITING_FOR_DEPOSIT') return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: q.amount, ...(q.virtualAccount ? { virtualAccount: q.virtualAccount } : {}) };
+      if (paidAt === undefined || (q.status !== 'APPROVED' && q.status !== 'PARTIAL_CANCELED')) return unknown;
       return { outcome: 'APPROVED', ...this.#approvedFields(c.paymentRef, q) };
     }
     const code = str(r.json?.type);
@@ -304,6 +306,7 @@ export class PortoneGateway implements PaymentGatewayPort {
       dedupKey: `PORTONE:${id}`,
       paymentRef,
       ...(paymentRef.startsWith(PAYMENT_ID_PREFIX) ? { orderRef: paymentRef.slice(PAYMENT_ID_PREFIX.length) } : {}),
+      ...(m.type === 'Transaction.Paid' ? { depositDone: true as const } : {}),
     };
   }
 
@@ -344,6 +347,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     const paymentMethod = json?.method as Record<string, unknown> | undefined;
     const method = METHOD_CATEGORY.get(str(paymentMethod?.type) ?? '');
     const card = portoneCardOfMethod(paymentMethod);
+    const virtualAccount = status === 'WAITING_FOR_DEPOSIT' ? portoneVirtualAccountOf(paymentMethod) : undefined;
     return {
       kind: 'FOUND',
       paymentRef,
@@ -354,6 +358,7 @@ export class PortoneGateway implements PaymentGatewayPort {
       ...(approvedAt ? { approvedAt } : {}),
       ...(method ? { method } : {}),
       ...(card ? { card } : {}),
+      ...(virtualAccount ? { virtualAccount } : {}),
     };
   }
 

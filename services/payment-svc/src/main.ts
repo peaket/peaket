@@ -20,9 +20,11 @@ import {
   DrizzleConfirmJobs,
   DrizzlePaymentStore,
   DrizzleWebhookStore,
+  GetPaymentDetail,
   type PaymentCommandLog,
   paymentCommandLog,
   paymentConfirmLog,
+  paymentDepositLog,
   PaymentConfirmRunner,
   paymentPackage,
   paymentServiceHandlers,
@@ -38,12 +40,14 @@ import {
   PortoneGateway,
   PromPaymentCommandSignals,
   PromPaymentConfirmSignals,
+  PromPaymentDepositSignals,
   PromPaymentMethodRefSignals,
   PromPaymentUnknownSignals,
   PromPaymentWebhookSignals,
   PromPgCallGuardSignals,
   StaticPaymentGateways,
   TossPaymentGateway,
+  virtualAccountCipherFromEnv,
   UNKNOWN_QUERY_CONCURRENCY,
   WEBHOOK_REQUEST_TIMEOUT_MS,
   webhookDatabaseOptions,
@@ -61,6 +65,8 @@ assertPgAdapters(process.env, { simulator: simulator !== undefined, toss: toss !
 const guardConfig = loadPgCallGuardConfig(process.env);
 // 결제 수단 연결값의 라벨 키 pay. 없으면 경고만 하고 칸을 비운다(결제는 막지 않는다, BUILD_ORDER HOT-145). 잘못된 설정은 듣기 전에 시작 실패다
 const { ring: methodRefs, warnings: methodRefWarnings } = PayRefKeyRing.fromEnv(process.env);
+// 가상계좌 번호 필드 암호화 키(local·ci·demo는 환경 값, 운영 KMS는 HOT-146). 없으면 경고만 하고 번호를 저장하지 않는다(결제는 막지 않는다, BUILD_ORDER HOT-151). 잘못된 설정은 듣기 전에 시작 실패다
+const { cipher: virtualAccountCipher, warnings: virtualAccountWarnings } = virtualAccountCipherFromEnv(process.env);
 // 어댑터마다 승인 묶음(연결 수 = 처음의 파드당 벌크헤드)과 조회 전용 묶음(연결 수 = 파드의 동시 조회 수) 둘. 승인 호출이 연결을 다 쥐어도 조회가 막히지 않는다. 연결 시간 초과 3초 [가정]. v0 모놀리스는 이 옵션을 쓰지 않는다(BUILD_ORDER PRF-183)
 const pgHttp = simulator ? createPgHttp({ connections: perPodBulkhead(PG_CHANNEL_BULKHEAD.SIMULATOR, guardConfig.podCount) }) : undefined;
 const pgQueryHttp = simulator ? createPgHttp({ connections: UNKNOWN_QUERY_CONCURRENCY }) : undefined;
@@ -85,6 +91,7 @@ const unknownSignals = new PromPaymentUnknownSignals();
 const guardSignals = new PromPgCallGuardSignals();
 const methodRefSignals = new PromPaymentMethodRefSignals();
 const webhookSignals = new PromPaymentWebhookSignals();
+const depositSignals = new PromPaymentDepositSignals();
 
 // 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC·앱 포트는 그 뒤에 열려 그 전에 불리지 않는다)
 let log: PaymentCommandLog | undefined;
@@ -94,6 +101,7 @@ const lateWebhookLog: PaymentWebhookLog = {
   invalid: (e) => webhookLog?.invalid(e),
   pgMismatch: (e) => webhookLog?.pgMismatch(e),
   storeFailed: (e) => webhookLog?.storeFailed(e),
+  depositSecretMismatch: (e) => webhookLog?.depositSecretMismatch(e),
 };
 
 const service = await createService({
@@ -116,7 +124,11 @@ unknownSignals.register(service.metrics.registry);
 guardSignals.register(service.metrics.registry);
 methodRefSignals.register(service.metrics.registry);
 webhookSignals.register(service.metrics.registry);
+depositSignals.register(service.metrics.registry);
 for (const warning of methodRefWarnings) service.logger.warn({ kind: 'payment-method-ref-key' }, warning);
+for (const warning of virtualAccountWarnings) service.logger.warn({ kind: 'payment-virtual-account-key' }, warning);
+const depositLog = paymentDepositLog(service.logger);
+const deposit = { cipher: virtualAccountCipher, log: depositLog, signals: depositSignals };
 service.readiness.register('grpc');
 if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
@@ -127,7 +139,7 @@ const grpc = await startGrpcServer({
   services: [
     {
       definition: paymentPackage().PaymentService.service,
-      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates) }, (method, err, orderId) =>
+      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }) }, (method, err, orderId) =>
         // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
         service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
       ),
@@ -142,9 +154,9 @@ const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: s
 const podId = process.env.PEAKET_POD?.trim() || hostname();
 // 채널별 호출 보호기는 두 실행기가 하나를 함께 쓴다(토큰 버킷은 승인과 단독 조회를 함께 센다, BUILD_ORDER PRF-183)
 const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger) });
-const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals });
+const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit });
 confirmRunner.start();
-const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals });
+const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit });
 unknownResolver.start();
 
 process.once('SIGTERM', () => {

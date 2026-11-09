@@ -223,6 +223,13 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     { schema: { querystring: { type: 'object', additionalProperties: false, properties: { paymentKey: KEY_PARAM.properties.paymentKey } } } },
     async (req) => engine.webhooks(req.query.paymentKey),
   );
+  app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.deposit(req.params.paymentKey)));
+  app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey/expire', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.expireDeposit(req.params.paymentKey)));
+  app.get<{ Querystring: { orderId?: string } }>(
+    '/sim/deposit-callbacks',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { orderId: ORDER } } } },
+    async (req) => engine.depositCallbacks(req.query.orderId),
+  );
   app.post('/sim/reset', async (_req, reply) => {
     engine.reset();
     return reply.code(204).send();

@@ -1,10 +1,11 @@
 // 승인 명령 접수와 결과 조회의 포트(docs/features/payment.md §2 '승인 명령 접수의 첫 구현', BUILD_ORDER PRF-180).
-import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
+import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { FailureCategory, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
+import type { VirtualAccountFieldReason } from './virtual-account.js';
 import type { PaymentWebhookOutcome, WebhookDecision, WebhookRoute } from './webhook-receipt.js';
 
 /** 새 결제를 쓸 때 쓰임새가 만들어 넘기는 값 */
@@ -47,6 +48,39 @@ export interface PaymentStateReader {
    * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(읽지 않는다)
    */
   batchGet(orderIds: readonly string[], budget?: CallBudget): Promise<PaymentState[]>;
+}
+
+/** GetPayment의 저장소(BUILD_ORDER HOT-151) */
+export interface PaymentDetailReader {
+  /**
+   * 결제 ID나 주문 ID로 한 행을 읽는다(쓰기 인스턴스, 일반 풀, 문장 시간 한도 min(400ms [가정], 연결을 받은 뒤 budget에 남은 시간)). 없으면 undefined. 결제사는 부르지 않는다.
+   * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(읽지 않는다)
+   */
+  getDetail(key: GetPaymentKey, budget?: CallBudget): Promise<PaymentDetailRow | undefined>;
+}
+
+/** payment_get_requests_total의 outcome */
+export type GetPaymentOutcome = 'ok' | 'not_found' | 'invalid' | 'error';
+
+/** GetPayment 지표. 던지지 않는다 */
+export interface PaymentGetSignals {
+  getPayment(outcome: GetPaymentOutcome): void;
+}
+
+/** 입금 대기 쓰기의 로그(주문 ID와 닫힌 까닭만 싣는다. 계좌번호·secret은 싣지 않는다). 던지지 않는다 */
+export interface PaymentDepositLog {
+  /** 입금 대기 답에 발급 정보나 기한이 없다(SEV2, kind payment-deposit-info-missing) */
+  infoMissing(e: { readonly orderId: string }): void;
+  /** 계좌번호를 저장하지 못했다(SEV2, kind payment-virtual-account-unsaved) */
+  accountUnsaved(e: { readonly orderId: string; readonly reason: VirtualAccountFieldReason }): void;
+  /** 저장한 계좌번호를 열지 못했다(SEV2, kind payment-virtual-account-unopened) */
+  accountUnopened(e: { readonly orderId: string; readonly reason: VirtualAccountFieldReason }): void;
+}
+
+/** 입금 대기 쓰기의 지표. 던지지 않는다 */
+export interface PaymentDepositSignals {
+  /** payment_virtual_account_field_failures_total{op, reason}를 1 올린다 */
+  fieldFailure(op: 'seal' | 'open', reason: VirtualAccountFieldReason): void;
 }
 
 /** 승인 명령 접수의 로그(주문 ID만 싣는다. 결제 키·토큰·금액은 싣지 않는다). 던지지 않는다 */
@@ -185,13 +219,13 @@ export interface PaymentConfirmSignals {
 
 // ---- UNKNOWN 해소(BUILD_ORDER PRF-182, docs/features/payment.md §2 'UNKNOWN 해소의 첫 구현') ----
 
-/** resolve 결과: APPLIED 원장·사건·Outbox를 커밋했다, STALE 원장이 UNKNOWN이 아니라 아무것도 쓰지 않았다 */
+/** resolve 결과: APPLIED 원장·사건·Outbox를 커밋했다, STALE 원장이 잡을 때의 상태(UNKNOWN·입금 대기)가 아니라 아무것도 쓰지 않았다 */
 export type ResolveUnknownResult = 'APPLIED' | 'STALE';
 
-/** UNKNOWN 조회 저장소(모든 쓰기는 READ COMMITTED, 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS) */
+/** 단독 조회 저장소(UNKNOWN과 입금 대기 행, BUILD_ORDER PRF-182·HOT-151. 모든 쓰기는 READ COMMITTED, 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS) */
 export interface PaymentUnknownQueries {
   /**
-   * 짧은 트랜잭션 하나에서 그 결제사의 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례),
+   * 짧은 트랜잭션 하나에서 그 결제사의 `(status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status = 'FAILED' AND next_query_at IS NOT NULL)) AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례. FAILED 행은 늦은 입금 확인 한 번이다),
    * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1, query_touched_at = 지금을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
    * @throws RangeError limit이 1 이상의 정수가 아님
    */
@@ -201,13 +235,17 @@ export interface PaymentUnknownQueries {
   hasDueQueries(pg: PgName): Promise<boolean>;
 
   /**
-   * 답을 본 뒤 그대로 둘 때의 다음 조회 시각을 쓴다. 조건은 `status = 'UNKNOWN' AND next_query_at = 이 잡기가 쓴 값`이다(늦은 답이 다른 파드의 잡기를 덮어쓰지 않는다). 썼으면 true.
-   * refundAttempt가 참이면 잡을 때 올린 query_attempts를 1 되돌린다(토큰이 없어 부르지 않은 행의 간격이 늘지 않게, BUILD_ORDER PRF-183)
+   * 답을 본 뒤 그대로 둘 때의 다음 조회 시각을 쓴다. 조건은 `status = 잡을 때의 상태 AND next_query_at = 이 잡기가 쓴 값`이다(늦은 답이 다른 파드의 잡기를 덮어쓰지 않는다). 썼으면 true.
+   * refundAttempt가 참이면 잡을 때 올린 query_attempts를 1 되돌린다(토큰이 없어 부르지 않은 행의 간격이 늘지 않게, BUILD_ORDER PRF-183).
+   * resetAttempts가 참이면 query_attempts를 0으로 둔다(입금 대기가 그대로라는 답, BUILD_ORDER HOT-151).
    */
-  rescheduleQuery(job: UnknownQueryJob, nextAtMs: number, o?: { readonly refundAttempt?: boolean }): Promise<boolean>;
+  rescheduleQuery(job: UnknownQueryJob, nextAtMs: number, o?: { readonly refundAttempt?: boolean; readonly resetAttempts?: boolean }): Promise<boolean>;
 
-  /** `status = 'UNKNOWN' AND anomaly_logged_at IS NULL` 조건으로 anomaly_logged_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다) */
+  /** `status = 잡을 때의 상태 AND anomaly_logged_at IS NULL` 조건으로 anomaly_logged_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다) */
   markAnomalyLogged(job: UnknownQueryJob): Promise<boolean>;
+
+  /** 늦은 입금 확인을 끝낸다: `status = 'FAILED' AND next_query_at = 이 잡기가 쓴 값` 조건으로 next_query_at을 비운다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다, 원장의 다른 칸은 바꾸지 않는다) */
+  finishLateDepositCheck(job: UnknownQueryJob): Promise<boolean>;
 
   /**
    * 잡기와 별개의 1시간 표시. 한 문장으로 `status = 'UNKNOWN' AND status_changed_at < 지금 − 1시간 AND overdue_at IS NULL`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개까지 골라 overdue_at = 지금을 쓴다.
@@ -217,9 +255,9 @@ export interface PaymentUnknownQueries {
   markOverdueBatch(limit: number): Promise<string[]>;
 
   /**
-   * 답 반영(명세 `query`). 한 트랜잭션: payment 행 FOR UPDATE → status가 UNKNOWN이 아니면 STALE
-   * → 다음 순번으로 결과 사건(exported true), 그다음 순번으로 RESOLVED 사건(exported true)
-   * → payment(status, status_changed_at = 지금, APPROVED는 approved_at, FAILED는 failure_category, pg_confirm_token 지움, next_query_at 비움)
+   * 답 반영(명세 `query`). 한 트랜잭션: payment 행 FOR UPDATE → status가 잡을 때의 상태가 아니면 STALE
+   * → 다음 순번으로 결과 사건(exported true), UNKNOWN을 떠날 때만 그다음 순번으로 RESOLVED 사건(exported true. 입금 대기의 T16·T17은 내지 않는다)
+   * → payment(status, status_changed_at = 지금, APPROVED는 approved_at, FAILED는 failure_category, pg_confirm_token 지움, next_query_at 비움. 입금 대기를 쓰면 가상계좌 칸과 입금 기한 + 10분의 next_query_at, 그 밖은 가상계좌 칸을 지운다)
    * → Outbox `trade.payments`(키 = 회차 ID, 결과 사건, RESOLVED 차례, 트랜잭션의 마지막 문장).
    */
   resolve(job: UnknownQueryJob, finish: ResolvedFinish): Promise<ResolveUnknownResult>;
@@ -233,6 +271,8 @@ export interface PaymentUnknownLog {
   orderMismatch(e: { readonly orderId: string }): void;
   /** 승인을 기록한 적 없는 결제를 결제사가 취소했다(SEV1, kind payment-unknown-cancelled-at-pg, csCase PAYMENT_UNKNOWN). 주문 ID만 싣고 결제마다 한 번이다 */
   cancelledAtPg(e: { readonly orderId: string }): void;
+  /** FAILED로 끝난 결제에 입금이 확인됐다(SEV1, kind payment-late-deposit, csCase PAYMENT_LATE_DEPOSIT). 주문 ID만 싣고 결제마다 한 번이다 */
+  lateDeposit(e: { readonly orderId: string }): void;
   /** UNKNOWN이 1시간 [가정] 넘었다(SEV2, kind payment-unknown-overdue, csCase PAYMENT_UNKNOWN). 주문 ID만 싣는다 */
   overdue(e: { readonly orderId: string }): void;
   /** 결제사 어댑터가 없다(파드당 1분에 경고 한 줄, 실행기가 조절한다) */
@@ -290,6 +330,10 @@ export interface WebhookReceiveRequest {
   readonly allowedPgs: readonly PgName[];
   /** 서명으로 보낸 쪽을 확인한 경로인가. 거짓이면 원장을 못 찾은 웹훅의 수신 기록을 쓰지 않는다 */
   readonly signed: boolean;
+  /** 토스 입금 통보의 secret을 해시한 값(BUILD_ORDER HOT-151). 있으면 대조를 지난 뒤에만 수신 기록을 쓴다 */
+  readonly depositSecretHash?: Uint8Array;
+  /** 결제사가 입금 완료를 알렸다(토스 입금 통보 DONE, 포트원 Transaction.Paid). 조회 간격과 끝난 원장의 늦은 입금 확인에만 쓴다 */
+  readonly depositDone?: boolean;
   /** 지금(epoch ms). received_at과 next_query_at */
   readonly nowMs: number;
 }
@@ -300,8 +344,11 @@ export type WebhookReceiveResult = { readonly kind: 'DUPLICATE' } | { readonly k
 export interface PaymentWebhookStore {
   /**
    * 한 트랜잭션(READ COMMITTED, 문장 시간 한도 WEBHOOK_STATEMENT_TIMEOUT_MS, 문장 셋): 원장 찾기 한 문장(주문 참조가 UUID 모양이면 order_id를 먼저, 다음 결제 참조로 결제사 셋 모두, 경로가 받는 결제사의 행을 먼저)
+   * 입금 통보(depositSecretHash가 있음)는 decideDepositCallback이고 secret 대조를 지난 뒤에만 수신 기록을 쓴다.
    * → decideWebhookLedger → 수신 기록 `INSERT … ON CONFLICT (pg, dedup_key) DO NOTHING`(0행이면 DUPLICATE. 서명 없는 경로에서 원장을 못 찾으면 쓰지 않고 LEDGER_NOT_FOUND)
-   * → QUERY_SIGNAL이면 `next_query_at = 지금`(status = 'UNKNOWN' AND next_query_at > 지금 AND 직전 신호·잡기로부터 WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS가 지남 조건, 0행이면 QUERY_SIGNAL_SKIPPED).
+   * → QUERY_SIGNAL이면 `next_query_at = 지금`(status IN ('UNKNOWN', 'AWAITING_DEPOSIT') AND next_query_at > 지금 AND 직전 신호·잡기로부터 WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS가 지남 조건, 0행이면 QUERY_SIGNAL_SKIPPED).
+   * 보낸 쪽을 확인한(수신 기록을 쓴) 입금 대기의 입금 완료 통보는 deposit_notified_at을 처음 한 번 쓰고 next_query_at = least(지금 값, greatest(지금, 직전 신호·잡기 + 5초))다(지금으로 못 당겼으면 QUERY_SIGNAL_SKIPPED).
+   * LATE_DEPOSIT_CHECK면 status = 'FAILED' AND deposit_notified_at IS NULL 조건으로 next_query_at·deposit_notified_at = 지금을 쓴다(0행이면 STATE_IGNORED).
    * 원장을 찾지 못했거나 PG_MISMATCH면 수신 기록의 payment_id는 비운다.
    */
   receive(request: WebhookReceiveRequest): Promise<WebhookReceiveResult>;
@@ -318,6 +365,8 @@ export interface PaymentWebhookLog {
   pgMismatch(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly ledgerPg: PgName; readonly orderId: string }): void;
   /** 수신 기록을 쓰지 못했다(kind payment-webhook-store-failed, 코드만) */
   storeFailed(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly code: string }): void;
+  /** 토스 입금 통보의 secret이 원장과 다르다(SEV3, kind payment-webhook-deposit-secret-mismatch, 경로·결제사·주문 ID만, BUILD_ORDER HOT-151) */
+  depositSecretMismatch(e: { readonly route: WebhookRoute; readonly pg: PgName; readonly orderId: string }): void;
 }
 
 /** 웹훅 받기 지표(docs/observability.md). 던지지 않는다 */

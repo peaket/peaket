@@ -18,7 +18,7 @@ export const PaymentStatus = zod.object({
   "bank": zod.string().optional(),
   "accountNumber": zod.string().optional(),
   "dueAt": zod.iso.datetime({"offset":true}).optional()
-}).optional().describe('가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062)'),
+}).optional().describe('가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062). 입금처 번호라 구매자의 계좌가 아니다. payment-svc에서 읽어 응답에만 싣고, 안내가 없으면 칸이 없다. 일시적으로 읽지 못하면 입금 대기 대신 처리 중인 RESERVED로 답한다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151, 코드 리뷰)'),
   "reason": zod.string().optional(),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional().describe('결제 접수에서 고정된 결제사(ADR-0044)')
 })

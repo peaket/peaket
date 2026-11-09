@@ -277,7 +277,6 @@ describe('P-T16 포트원 승인 답 읽기', () => {
 
   it.each<[string, Scripted]>([
     ['pgTxId 없음', { status: 200, body: { paidAt: '2026-11-09T01:00:00.000Z' } }],
-    ['paidAt 없음', { status: 200, body: { pgTxId: 'pg-1' } }],
     ['paidAt이 시각이 아님', { status: 200, body: { pgTxId: 'pg-1', paidAt: 'yesterday' } }],
     ['JSON이 아님', { status: 200, raw: 'ok' }],
     ['빈 답', { status: 200, raw: '' }],
@@ -516,7 +515,7 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
   const headersOf = (over: Record<string, string> = {}, ts = nowSec, b = body): Record<string, string> => ({ 'webhook-id': 'msg_1', 'webhook-timestamp': String(ts), 'webhook-signature': sign('msg_1', ts, b), ...over });
 
   it('P-T16_서명이 맞으면 webhook-id를 중복 제거 키로 쓰고 상태를 싣지 않는다 [ASVS v5.0.0-11.2.3]', () => {
-    expect(gatewayOf().parseWebhook(headersOf(), body)).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: PAYMENT_ID, orderRef: ORDER_ID });
+    expect(gatewayOf().parseWebhook(headersOf(), body)).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: PAYMENT_ID, orderRef: ORDER_ID, depositDone: true });
   });
 
   it('P-T16_머리 이름의 대소문자는 가리지 않는다', () => {
@@ -599,7 +598,7 @@ describe('P-T16 P-T17 포트원 웹훅 서명(Standard Webhooks)', () => {
   });
 
   it('P-T16_pay- 접두사가 없는 paymentId면 주문 ID를 싣지 않는다', () => {
-    expect(gatewayOf().parseWebhook(...signedBody({ type: 'Transaction.Paid', data: { paymentId: 'other-ref' } }))).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: 'other-ref' });
+    expect(gatewayOf().parseWebhook(...signedBody({ type: 'Transaction.Paid', data: { paymentId: 'other-ref' } }))).toEqual({ kind: 'TRIGGER', dedupKey: 'PORTONE:msg_1', paymentRef: 'other-ref', depositDone: true });
   });
 
   it('P-T17_웹훅 시크릿이 없으면 어떤 웹훅도 받지 않는다 [ASVS v5.0.0-16.5.3]', () => {

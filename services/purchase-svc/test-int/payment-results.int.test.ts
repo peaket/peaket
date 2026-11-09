@@ -149,6 +149,7 @@ function countingResults(s: Fresh, db: Database = database) {
       return inner.markSoldIn(tx, o);
     },
     releasePendingIn: (tx, r) => inner.releasePendingIn(tx, r),
+    setPendingUntilIn: (tx, o) => inner.setPendingUntilIn(tx, o),
   };
   return { results: new DrizzlePaymentResults({ database: db, store: s.store, sales, clock: s.clock }), calls };
 }

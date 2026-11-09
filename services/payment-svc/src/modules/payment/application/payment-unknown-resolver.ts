@@ -5,6 +5,7 @@
 //   ② gateway.query(결제 참조, 시간 한도 10초 [가정]). 실행기도 12초 [가정]로 감싼다. 어댑터가 던지거나 한도를 넘으면 조회 실패로 본다
 //   ③ 답 → decideQueryAnswer → RESOLVE면 resolve(한 트랜잭션, status = 'UNKNOWN' 조건)
 //      ASK_AGAIN이면 어긋난 답의 SEV1을 결제마다 한 번 내고(anomaly_logged_at 조건부 쓰기) 답을 본 시각 + 실제 간격을 쓴다
+// 입금 대기(AWAITING_DEPOSIT) 행도 같은 실행기가 잡는다(docs/features/payment.md §6 '입금 확인의 첫 구현', BUILD_ORDER HOT-151). 전이 표는 decideQueryAnswer이고, 답을 그대로 두는 간격만 입금 기한 + 10분 [가정]이다. 1시간 표시는 UNKNOWN만이다.
 // 1시간 [가정] 표시는 잡기와 별개의 1분 반복이다(markOverdueBatch 한 문장, 100건까지 [가정]). 빈자리가 없거나 잡기가 실패해도 돈다.
 // 틱·호출은 실행기를 만든 때(시작 파일, 요청 밖)의 비동기 맥락에서 돈다(PaymentConfirmRunner와 같은 까닭). 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
 // 구현에서 정한 것(정본·설계에 없다):
@@ -20,7 +21,7 @@
 // - 빈자리는 어댑터가 있는 채널끼리 나눈다(앞 채널이 뒤 채널을 굶기지 않게). 어댑터가 없는 채널은 그 뒤 남은 자리로 잡아 no_adapter로 드러낸다(운영에는 그런 행이 없다). 틱은 채널마다 독립이다(한 채널의 느린 잡기가 다른 채널을 막지 않는다).
 import { AsyncResource } from 'node:async_hooks';
 import type { Clock } from '@peaket/platform';
-import type { ConfirmCard, PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
+import type { ConfirmCard, ConfirmVirtualAccount, PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
 import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
 import type { PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
@@ -28,6 +29,7 @@ import {
   decideQueryAnswer,
   type PaymentUnknownQueryOutcome,
   type QueryDecision,
+  type ResolvedFinish,
   UNKNOWN_NO_ADAPTER_WARN_INTERVAL_MS,
   UNKNOWN_OVERDUE_BATCH,
   UNKNOWN_OVERDUE_SWEEP_INTERVAL_MS,
@@ -42,6 +44,7 @@ import {
   type UnknownRunOutcome,
 } from '../domain/unknown-resolver.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
+import { depositWriteOf, type DepositWriteDeps } from './deposit-write.js';
 
 /** 반복 타이머(시험이 손으로 부르는 대역을 꽂는다. 기본은 unref한 setInterval·clearInterval) */
 export interface UnknownResolverTimer {
@@ -69,6 +72,8 @@ export interface PaymentUnknownResolverDeps {
   /** 결제 수단 연결값(라벨 키 pay, BUILD_ORDER HOT-145). 없으면 카드 결제는 refMissing 참이다 */
   methodRefs?: PaymentMethodRefs;
   methodRefSignals?: PaymentMethodRefSignals;
+  /** 입금 대기 쓰기의 포트(BUILD_ORDER HOT-151). 없으면 발급 정보를 쓰지 않는다 */
+  deposit?: DepositWriteDeps;
 }
 
 /** 틱 하나의 결과 */
@@ -337,9 +342,9 @@ export class PaymentUnknownResolver {
       if (gateway !== undefined) guard = this.deps.guards.of(job.pg);
     } catch (err) {
       this.#runError('gateway', err, job.orderId);
-      return this.#askedAgain(job, 'query_failed');
+      return job.lateDepositCheck ? this.#lateDeposit(job, QUERY_UNKNOWN) : this.#askedAgain(job, 'query_failed');
     }
-    if (gateway === undefined) return this.#noAdapter(job);
+    if (gateway === undefined) return job.lateDepositCheck ? this.#lateDeposit(job, QUERY_UNKNOWN) : this.#noAdapter(job);
     if (this.#stopped) return STOPPED;
     // 토큰을 못 얻었거나 보호기가 없으면 상한 없이 부르지 않는다. 틱이 잡은 행은 토큰을 미리 뺐다
     if (guard === undefined || (!hold.held && !guard.tryTakeToken())) return this.#noToken(job);
@@ -348,14 +353,15 @@ export class PaymentUnknownResolver {
     const answer = await this.#query(gateway, job);
     // 조회의 429는 그 조회의 다음 시도만 늦추고 상한은 그대로다(지표로만 센다)
     if (answer.kind === 'UNKNOWN' && answer.throttled === true) guard.noteThrottled({ first: false });
+    if (job.lateDepositCheck) return this.#lateDeposit(job, answer);
     const card = answer.kind === 'FOUND' ? answer.card : undefined;
     const decision = decideQueryAnswer(answer, job, this.deps.clock.now(), () => this.#linkOf(card));
     if (decision.kind === 'ASK_AGAIN') {
       await this.#reportAnomaly(job, decision);
-      await this.#reschedule(job);
+      await this.#reschedule(job, decision.nextAtMs, decision.keepAttempts === true);
       return this.#askedAgain(job, decision.outcome);
     }
-    return this.#resolve(job, decision);
+    return this.#resolve(job, decision, answer.kind === 'FOUND' ? answer.virtualAccount : undefined);
   }
 
   /** 주문·금액 대조를 통과한 승인 답의 결제 수단 연결값(가린 번호를 넘기지 않는다. 던지지 않는다) */
@@ -363,10 +369,31 @@ export class PaymentUnknownResolver {
     return paymentMethodLinkOf(card, this.deps.methodRefs, (reason) => this.#safe(() => this.deps.methodRefSignals?.missing(reason)));
   }
 
-  /** 답을 본 시각 + 실제 간격을 쓴다(잡을 때 민 더 긴 시각을 줄인다). 던지지 않는다 */
-  async #reschedule(job: UnknownQueryJob): Promise<void> {
+  /**
+   * FAILED로 끝난 행의 늦은 입금 확인(조회 한 번, BUILD_ORDER HOT-151 코드 리뷰). 조회 시각을 비운 파드만 입금 완료를 SEV1·지표로 알린다. 원장은 바꾸지 않는다(HOT-153이 닫는다). 던지지 않는다.
+   * 조회가 실패해도 다시 묻지 않는다(한 번 규칙이다. 놓친 건은 대사가 찾는다)
+   */
+  async #lateDeposit(job: UnknownQueryJob, answer: QueryResult): Promise<UnknownRunOutcome> {
+    const paid = answer.kind === 'FOUND' && answer.orderRef === job.orderId && answer.status === 'APPROVED';
+    let finished = false;
     try {
-      await this.deps.queries.rescheduleQuery(job, this.deps.clock.now() + unknownQueryDelayMs(job.queryAttempts));
+      finished = await this.deps.queries.finishLateDepositCheck(job);
+    } catch (err) {
+      this.#runError('reschedule', err, job.orderId);
+    }
+    if (paid && finished) {
+      this.#safe(() => this.deps.log.lateDeposit({ orderId: job.orderId }));
+      this.#outcome(job, 'late_deposit');
+    }
+    return { kind: 'LATE_DEPOSIT', paid };
+  }
+
+  /** 답을 본 시각 + 실제 간격을 쓴다(잡을 때 민 더 긴 시각을 줄인다). 입금 대기가 그대로라는 답은 그 답이 정한 시각을 쓰고 조회 횟수를 비운다(통보 뒤 다시 묻는 동안은 횟수를 남겨 간격을 늘린다). 던지지 않는다 */
+  async #reschedule(job: UnknownQueryJob, nextAtMs?: number, keepAttempts = false): Promise<void> {
+    try {
+      if (nextAtMs === undefined) await this.deps.queries.rescheduleQuery(job, this.deps.clock.now() + unknownQueryDelayMs(job.queryAttempts));
+      else if (keepAttempts) await this.deps.queries.rescheduleQuery(job, nextAtMs);
+      else await this.deps.queries.rescheduleQuery(job, nextAtMs, { resetAttempts: true });
     } catch (err) {
       this.#runError('reschedule', err, job.orderId);
     }
@@ -444,9 +471,9 @@ export class PaymentUnknownResolver {
   }
 
   /** 답 반영(원장·사건·Outbox 한 트랜잭션). 던지면 다시 하지 않고 밀어 둔 간격 뒤의 조회에 맡긴다 */
-  async #resolve(job: UnknownQueryJob, decision: Extract<QueryDecision, { kind: 'RESOLVE' }>): Promise<UnknownRunOutcome> {
+  async #resolve(job: UnknownQueryJob, decision: Extract<QueryDecision, { kind: 'RESOLVE' }>, va: ConfirmVirtualAccount | undefined): Promise<UnknownRunOutcome> {
     try {
-      const result = await this.deps.queries.resolve(job, decision.finish);
+      const result = await this.deps.queries.resolve(job, await this.#withDeposit(job, decision.finish, va));
       if (result === 'STALE') {
         this.#safe(() => this.deps.log.staleAnswer({ orderId: job.orderId }));
         return STALE;
@@ -458,6 +485,13 @@ export class PaymentUnknownResolver {
       this.#safe(() => this.deps.log.writeFailed({ orderId: job.orderId, code: safeErrorCode(err) }));
       return WRITE_FAILED;
     }
+  }
+
+  /** 입금 대기 결과(T14)에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 던지지 않는다 */
+  async #withDeposit(job: UnknownQueryJob, finish: ResolvedFinish, va: ConfirmVirtualAccount | undefined): Promise<ResolvedFinish> {
+    if (finish.status !== 'AWAITING_DEPOSIT' || this.deps.deposit === undefined) return finish;
+    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va);
+    return deposit === undefined ? finish : { ...finish, deposit };
   }
 
   #outcome(job: UnknownQueryJob, outcome: PaymentUnknownQueryOutcome): void {

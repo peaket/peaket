@@ -29,8 +29,15 @@ export { TossPaymentGateway, type TossGatewayOptions } from './adapters/pg/toss-
 export { PortoneGateway, type PortoneGatewayOptions } from './adapters/pg/portone-gateway.js';
 export { AcceptPaymentCommand, type AcceptPaymentCommandDeps } from './application/accept-payment-command.js';
 export { BatchGetPaymentStates, type BatchGetPaymentStatesDeps } from './application/batch-get-payment-states.js';
+export { GetPaymentDetail, type GetPaymentDetailDeps } from './application/get-payment-detail.js';
+export { depositWriteOf, type DepositWriteDeps } from './application/deposit-write.js';
+export * from './domain/virtual-account.js';
+export { LocalVirtualAccountCipher, NoKeyVirtualAccountCipher, virtualAccountCipherFromEnv } from './adapters/virtual-account-cipher.js';
+export { paymentDepositLog } from './adapters/payment-deposit-log.js';
+export { PromPaymentDepositSignals } from './adapters/prom-payment-deposit-signals.js';
+export { portoneVirtualAccountOf, tossVirtualAccountOf } from './adapters/pg/virtual-account-fields.js';
 export { BATCH_GET_STATEMENT_TIMEOUT_MS, DrizzlePaymentStore, type DrizzlePaymentStoreOptions } from './adapters/db/drizzle-payment-store.js';
 export { paymentCommandLog } from './adapters/payment-command-log.js';
 export { PromPaymentCommandSignals } from './adapters/prom-payment-command-signals.js';
-export { confirmInputOf, confirmResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
+export { confirmInputOf, confirmResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
 export { PaymentModule, type PaymentModuleDeps } from './payment.module.js';

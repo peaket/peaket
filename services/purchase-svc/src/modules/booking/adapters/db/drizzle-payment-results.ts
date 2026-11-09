@@ -51,6 +51,8 @@ export interface PaymentResultSeatSales {
   markSoldIn(tx: DbTransaction, order: { eventId: string; orderId: string; seatIds: readonly string[] }): Promise<number>;
   /** 그 주문·계정의 PENDING 행을 지우고 한도를 되돌린다. 지운 행 수 */
   releasePendingIn(tx: DbTransaction, release: SagaSaleRelease): Promise<number>;
+  /** 그 주문의 PENDING 행을 좌석 ID 순으로 잠가 pending_until을 쓴다(입금 대기, BUILD_ORDER HOT-151). 바꾼 행 수 */
+  setPendingUntilIn(tx: DbTransaction, order: { eventId: string; orderId: string; seatIds: readonly string[]; pendingUntilMs: number }): Promise<number>;
 }
 
 export interface DrizzlePaymentResultsOptions {
@@ -118,6 +120,14 @@ function assertFail(i: PaymentFailInput): void {
 
 function assertMark(i: PaymentMarkInput): void {
   assertBase(i, MARK_TRANSITIONS, '상태만');
+  const d: unknown = i.depositPending;
+  if (d === undefined) return;
+  if (i.transition === 'T12') throw new RangeError('T12에는 판매 행 기한이 없다');
+  if (!isObject(d)) throw new RangeError('depositPending이 객체가 아니다');
+  if (!isUuid(d.eventId)) throw new RangeError('depositPending.eventId가 소문자 UUID가 아니다');
+  assertSeatIds(d.seatIds);
+  const until = d.pendingUntilMs;
+  if (typeof until !== 'number' || !Number.isSafeInteger(until) || Number.isNaN(new Date(until).getTime())) throw new RangeError(`pendingUntilMs가 날짜(유닉스 밀리초)가 아니다: ${String(until)}`);
 }
 
 // ---- 문장 ----
@@ -291,6 +301,8 @@ export class DrizzlePaymentResults implements PaymentResultReads, PaymentResultW
       if (stale) throw new PaymentResultRollback(stale);
       // 남은 결제 참조를 지운다(UNKNOWN·AWAITING_DEPOSIT 사건이 왔다는 것은 승인 명령이 접수됐다는 뜻, 리뷰 M1)
       await clearRefs(tx, input.orderId);
+      // 입금 대기면 판매 행에 입금 기한 + 10분 [가정]을 쓴다(사건에 기한이 없으면 칸 없이 온다, BUILD_ORDER HOT-151)
+      if (input.depositPending) await this.o.sales.setPendingUntilIn(tx, { eventId: input.depositPending.eventId, orderId: input.orderId, seatIds: input.depositPending.seatIds, pendingUntilMs: input.depositPending.pendingUntilMs });
       // T10·T14(AWAITING_DEPOSIT 사건)·T12(사건 없이 이력만)
       const t = await this.o.store.transition(tx, { orderId: input.orderId, transition: input.transition, actor: input.actor, paymentEventSeq: input.paymentEventSeq });
       if (t.status !== 'APPLIED') throw new PaymentResultRollback(staleOf(t));

@@ -42,5 +42,9 @@ export function paymentWebhookLog(logger: Pick<PlatformLogger, 'warn' | 'error'>
         else if (opens(`mismatch:${route}:${ledgerPg}`)) logger.warn({ ...fields, severity: 'SEV3' }, message);
       }),
     storeFailed: ({ route, pg, code }) => quietly(() => logger.error({ kind: 'payment-webhook-store-failed', route, pg, code }, '웹훅 수신 기록을 쓰지 못했다(결제사가 다시 보낸다)')),
+    depositSecretMismatch: ({ route, pg, orderId }) =>
+      quietly(() => {
+        if (opens(`deposit-secret:${route}`)) logger.warn({ kind: 'payment-webhook-deposit-secret-mismatch', severity: 'SEV3', route, pg, orderId }, '입금 통보의 secret이 원장과 달라 처리하지 않았다');
+      }),
   };
 }

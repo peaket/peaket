@@ -1,5 +1,5 @@
 // 받는 층: gRPC PaymentService(docs/api/proto/peaket/payment/v1/payment.proto)를 유스케이스에 잇는다(BUILD_ORDER PRF-180).
-// ConfirmPayment·BatchGetPayments만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
+// ConfirmPayment·BatchGetPayments·GetPayment(BUILD_ORDER HOT-151)만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
 // 업무 오류는 상태 코드로(PaymentInputError → INVALID_ARGUMENT, PaymentCommandMismatchError → FAILED_PRECONDITION), 저장소 오류는 statusOfStoreError로 고른 코드와 고정 문구로
 // 돌려주고 이유는 서버 쪽 기록에만 남긴다(docs/api/proto/README.md §2 'gRPC 상태 코드').
 // 데드라인: 처음에 call.getDeadline()을 보고 남은 시간이 MIN_CALL_REMAINING_MS보다 모자라면 시작하지 않고 DEADLINE_EXCEEDED다(같은 표 '데드라인'). 넉넉하면 남은 시간을 쓰임새에 넘긴다.
@@ -9,7 +9,8 @@ import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
 import type { AcceptPaymentCommand } from '../application/accept-payment-command.js';
 import type { BatchGetPaymentStates } from '../application/batch-get-payment-states.js';
-import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, PaymentInputError, type PaymentState } from '../domain/confirm-command.js';
+import type { GetPaymentDetail } from '../application/get-payment-detail.js';
+import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, type PaymentDetail, PaymentInputError, PaymentNotFoundError, type PaymentState } from '../domain/confirm-command.js';
 import type { CallBudget } from '../domain/ports.js';
 
 export interface PaymentPackage {
@@ -92,12 +93,32 @@ export function orderPaymentStateOf(state: PaymentState): Record<string, unknown
     ...(state.approvedAtMs === undefined ? {} : { approved_at: timestampOf(state.approvedAtMs) }),
     ...(state.failureCategory === undefined ? {} : { failure_category: `FAILURE_CATEGORY_${state.failureCategory}` }),
     ...(state.lastEvent ? { event_key: state.lastEvent.eventKey, event_seq: state.lastEvent.eventSeq } : {}),
+    ...(state.depositDueAtMs === undefined ? {} : { deposit_due_at: timestampOf(state.depositDueAtMs) }),
+  };
+}
+
+/** 결과 → GetPaymentResponse(proto 칸 이름). 값이 없는 칸은 싣지 않는다 */
+export function getPaymentResponseOf(detail: PaymentDetail): Record<string, unknown> {
+  const va = detail.virtualAccount;
+  return {
+    payment_id: detail.paymentId,
+    order_id: detail.orderId,
+    pg: `PG_PROVIDER_${detail.pg}`,
+    status: `PAYMENT_STATUS_${detail.status}`,
+    amount: { krw: detail.amount },
+    cancelled_amount: { krw: detail.cancelledAmount },
+    ...(detail.approvedAtMs === undefined ? {} : { approved_at: timestampOf(detail.approvedAtMs) }),
+    ...(va === undefined
+      ? {}
+      : { virtual_account: { ...(va.bank === undefined ? {} : { bank: va.bank }), ...(va.accountNumber === undefined ? {} : { account_number: va.accountNumber }), ...(va.dueAtMs === undefined ? {} : { due_at: timestampOf(va.dueAtMs) }) } }),
   };
 }
 
 export interface PaymentGrpcUseCases {
   accept: Pick<AcceptPaymentCommand, 'execute'>;
   batchGet: Pick<BatchGetPaymentStates, 'execute'>;
+  /** 없으면 GetPayment는 UNIMPLEMENTED다 */
+  getPayment?: Pick<GetPaymentDetail, 'execute'>;
 }
 
 /** 문장 시간 초과(statement_timeout)의 SQLSTATE */
@@ -151,7 +172,7 @@ export function paymentServiceHandlers(useCases: PaymentGrpcUseCases, onError: (
       fn(call.request, { remainingMs }).then(
         (v) => cb(null, v),
         (err: unknown) => {
-          if (err instanceof PaymentInputError || err instanceof PaymentCommandMismatchError) {
+          if (err instanceof PaymentInputError || err instanceof PaymentCommandMismatchError || err instanceof PaymentNotFoundError) {
             cb({ code: grpc.status[err.code], details: err.message });
             return;
           }
@@ -170,5 +191,14 @@ export function paymentServiceHandlers(useCases: PaymentGrpcUseCases, onError: (
     BatchGetPayments: unary('BatchGetPayments', async (r, budget) => ({
       payments: (await useCases.batchGet.execute(Array.isArray(r.order_ids) ? r.order_ids.map(text) : [], budget)).map(orderPaymentStateOf),
     })),
+    ...(useCases.getPayment === undefined
+      ? {}
+      : {
+          GetPayment: unary('GetPayment', async (r, budget) => {
+            // oneof key의 어느 칸인지는 oneofs 선택지의 이름 칸(key)으로 본다
+            const key = r.key === 'payment_id' ? { paymentId: text(r.payment_id) } : r.key === 'order_id' ? { orderId: text(r.order_id) } : {};
+            return getPaymentResponseOf(await useCases.getPayment!.execute(key, budget));
+          }),
+        }),
   };
 }

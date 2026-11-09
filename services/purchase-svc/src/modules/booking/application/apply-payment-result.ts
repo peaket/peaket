@@ -16,6 +16,7 @@ import {
   PAYMENT_RESULT_HOLD_LOG,
   PAYMENT_RESULT_SESSION_DONE_STATUSES,
   approvalIssueDueAtMs,
+  depositPendingUntilMs,
   type PaymentEventType,
   type PaymentResultDecision,
   type PaymentResultEvent,
@@ -25,6 +26,7 @@ import {
   type PaymentResultWrite,
 } from '../domain/payment-result.js';
 import type {
+  PaymentMarkInput,
   PaymentResultLog,
   PaymentResultOrder,
   PaymentResultReads,
@@ -57,7 +59,7 @@ export interface ApplyPaymentResultDeps {
   /** 커밋 뒤 Saga 실행기 깨우기(실패 반영 뒤 RELEASE 작업) */
   saga: SagaWake;
   log: PaymentResultLog;
-  /** 보류 로그를 다시 남기지 않는 시간 창의 '지금'과 T13 발권 기한의 반영 시각. T9·T16의 발권 기한에는 쓰지 않는다(사건의 occurredAt을 쓴다) */
+  /** 보류 로그를 다시 남기지 않는 시간 창의 '지금'과 T13·T16 발권 기한의 반영 시각. T9의 발권 기한에는 쓰지 않는다(사건의 occurredAt을 쓴다) */
   clock: Clock;
   /**
    * 전이를 커밋한 뒤 부를 것(결제 결과 long polling의 기다림 깨우기, PaymentStatusWaiters.notify, BUILD_ORDER PRF-166). 던지지 않는다.
@@ -179,8 +181,19 @@ export class ApplyPaymentResult {
           release: { eventId: o.eventId, orderId: o.orderId, accountId: o.accountId, seatIds: o.seatIds },
         });
       case 'MARK':
-        return this.deps.writes.mark({ ...base, transition: d.transition });
+        return this.deps.writes.mark({ ...base, transition: d.transition, ...this.#depositPending(d, event, o) });
     }
+  }
+
+  /** 입금 대기 전이(T10·T14)의 판매 행 기한. 사건에 기한이 없으면 비우고 경고 한 줄이다(지금처럼 판매 행 PENDING만 남는다, BUILD_ORDER HOT-151) */
+  #depositPending(d: Extract<ApplyDecision, { write: 'MARK' }>, event: PaymentResultEvent, o: PaymentResultOrder): Pick<PaymentMarkInput, 'depositPending'> {
+    if (d.transition === 'T12') return {};
+    const pendingUntilMs = depositPendingUntilMs(event.depositDueAt);
+    if (pendingUntilMs === undefined) {
+      this.deps.log.depositDueMissing?.({ orderId: o.orderId });
+      return {};
+    }
+    return { depositPending: { eventId: o.eventId, seatIds: o.seatIds, pendingUntilMs } };
   }
 
   /**

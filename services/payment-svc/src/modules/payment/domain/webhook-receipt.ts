@@ -2,6 +2,7 @@
 // 웹훅은 결제 결과가 아니라 단독 조회를 부르는 신호다. 여기의 판단은 원장의 값만 보고 본문의 상태·금액을 보지 않는다.
 import type { PaymentLedgerStatus } from './confirm-command.js';
 import type { PgName } from './payment-gateway.js';
+import { depositSecretMatches } from './virtual-account.js';
 
 /** 받는 경로(POST /v1/webhooks/{toss|portone}) */
 export type WebhookRoute = 'toss' | 'portone';
@@ -22,7 +23,7 @@ export const WEBHOOK_QUERY_SIGNAL_MIN_INTERVAL_MS = 5_000;
 export const WEBHOOK_REJECT_LOG_INTERVAL_MS = 60_000;
 
 /** payment_webhook_received_total의 outcome(docs/observability.md) */
-export const PAYMENT_WEBHOOK_OUTCOMES = ['query_signal', 'query_signal_skipped', 'state_ignored', 'duplicate', 'ledger_not_found', 'pg_mismatch', 'invalid', 'ignored', 'no_adapter', 'store_failed'] as const;
+export const PAYMENT_WEBHOOK_OUTCOMES = ['query_signal', 'query_signal_skipped', 'state_ignored', 'late_deposit_check', 'duplicate', 'ledger_not_found', 'pg_mismatch', 'deposit_secret_mismatch', 'invalid', 'ignored', 'no_adapter', 'store_failed'] as const;
 export type PaymentWebhookOutcome = (typeof PAYMENT_WEBHOOK_OUTCOMES)[number];
 
 /** 웹훅이 찾은 원장 행(판단에 쓰는 칸만) */
@@ -31,6 +32,8 @@ export interface WebhookLedgerRow {
   readonly orderId: string;
   readonly pg: PgName;
   readonly status: PaymentLedgerStatus;
+  /** 입금 통보 secret의 해시(payment.deposit_secret_hash). 없으면 undefined */
+  readonly depositSecretHash?: Uint8Array;
 }
 
 /** 원장을 본 판단 */
@@ -39,10 +42,20 @@ export type WebhookDecision =
   | { readonly kind: 'LEDGER_NOT_FOUND' }
   /** 경로의 결제사와 원장의 결제사가 다르다. 조회하지 않는다(서명을 본 경로면 SEV2, 서명 없는 경로면 SEV3) */
   | { readonly kind: 'PG_MISMATCH'; readonly orderId: string; readonly ledgerPg: PgName }
-  /** UNKNOWN이라 다음 조회를 지금으로 당긴다 */
+  /** 조회 대상이라 다음 조회를 지금으로 당긴다 */
   | { readonly kind: 'QUERY_SIGNAL'; readonly paymentId: string; readonly orderId: string }
-  /** 그 밖의 상태. 지표만 남긴다(가상계좌·취소는 HOT-151·152) */
-  | { readonly kind: 'STATE_IGNORED'; readonly paymentId: string; readonly orderId: string };
+  /** 그 밖의 상태. 지표만 남긴다(취소는 HOT-152) */
+  | { readonly kind: 'STATE_IGNORED'; readonly paymentId: string; readonly orderId: string }
+  /** FAILED로 끝난 원장에 입금 완료 통보가 왔다. 조회를 한 번 건다. 원장은 바꾸지 않는다(BUILD_ORDER HOT-151 코드 리뷰, 닫는 것은 HOT-153) */
+  | { readonly kind: 'LATE_DEPOSIT_CHECK'; readonly paymentId: string; readonly orderId: string }
+  /** 토스 입금 통보의 secret이 원장과 다르거나 대조할 해시가 없다. 수신 기록을 쓰지 않고 조회도 부르지 않는다(BUILD_ORDER HOT-151) */
+  | { readonly kind: 'DEPOSIT_SECRET_MISMATCH'; readonly orderId: string };
+
+/** 입금 통보의 판단. receipt가 거짓이면 수신 기록을 쓰지 않는다 */
+export interface DepositCallbackJudgement {
+  readonly decision: WebhookDecision;
+  readonly receipt: boolean;
+}
 
 const PORTONE_ONLY: readonly PgName[] = ['PORTONE'];
 const TOSS_ONLY: readonly PgName[] = ['TOSS'];
@@ -68,9 +81,43 @@ export function webhookRouteRejects(route: WebhookRoute): boolean {
  * 찾은 원장 행으로 할 일을 정한다. 경로 대조가 상태보다 먼저다.
  * @param row 찾은 원장 행. 없으면 undefined
  * @param allowedPgs 그 경로로 받는 결제사(webhookRoutePgs)
+ * @param signed 서명으로 보낸 쪽을 확인한 경로인가. 참이면 입금 대기에도 조회 신호를 낸다. 서명 없는 토스 경로의 입금 대기는 secret 대조(decideDepositCallback)를 지나야 한다(BUILD_ORDER HOT-151)
  */
-export function decideWebhookLedger(row: WebhookLedgerRow | undefined, allowedPgs: readonly PgName[]): WebhookDecision {
+export function decideWebhookLedger(row: WebhookLedgerRow | undefined, allowedPgs: readonly PgName[], signed = false): WebhookDecision {
   if (row === undefined) return { kind: 'LEDGER_NOT_FOUND' };
   if (!allowedPgs.includes(row.pg)) return { kind: 'PG_MISMATCH', orderId: row.orderId, ledgerPg: row.pg };
-  return { kind: row.status === 'UNKNOWN' ? 'QUERY_SIGNAL' : 'STATE_IGNORED', paymentId: row.paymentId, orderId: row.orderId };
+  const signal = row.status === 'UNKNOWN' || (signed && row.status === 'AWAITING_DEPOSIT');
+  return { kind: signal ? 'QUERY_SIGNAL' : 'STATE_IGNORED', paymentId: row.paymentId, orderId: row.orderId };
+}
+
+/**
+ * 토스 입금 통보(DEPOSIT_CALLBACK)의 판단(payment §6 '입금 통보').
+ * @param row 찾은 원장 행. 없으면 undefined
+ * @param allowedPgs 그 경로로 받는 결제사
+ * @param secretHash 통보에 온 secret의 SHA-256
+ */
+export function decideDepositCallback(row: WebhookLedgerRow | undefined, allowedPgs: readonly PgName[], secretHash: Uint8Array): DepositCallbackJudgement {
+  if (row === undefined) return { decision: { kind: 'LEDGER_NOT_FOUND' }, receipt: false };
+  if (!allowedPgs.includes(row.pg)) return { decision: { kind: 'PG_MISMATCH', orderId: row.orderId, ledgerPg: row.pg }, receipt: false };
+  const found = { paymentId: row.paymentId, orderId: row.orderId };
+  const mismatch: DepositCallbackJudgement = { decision: { kind: 'DEPOSIT_SECRET_MISMATCH', orderId: row.orderId }, receipt: false };
+  if (row.depositSecretHash === undefined) {
+    // 승인 답을 잃은 UNKNOWN과 발급 답에 secret이 없던 입금 대기는 대조할 해시가 없다. 조회가 결과를 정하고 신호는 결제마다 5초 간격이라 앞당기기만 하고 키는 쓰지 않는다(코드 리뷰 M5)
+    if (row.status === 'UNKNOWN' || row.status === 'AWAITING_DEPOSIT') return { decision: { kind: 'QUERY_SIGNAL', ...found }, receipt: false };
+    // 끝난 원장은 해시를 지웠다. 입금 확정 뒤 결제사의 재전송이 보안 사건으로 잡히지 않게 지표만 남긴다
+    return { decision: { kind: 'STATE_IGNORED', ...found }, receipt: false };
+  }
+  if (!depositSecretMatches(row.depositSecretHash, secretHash)) return mismatch;
+  return { decision: { kind: row.status === 'UNKNOWN' || row.status === 'AWAITING_DEPOSIT' ? 'QUERY_SIGNAL' : 'STATE_IGNORED', ...found }, receipt: true };
+}
+
+/**
+ * FAILED로 끝난 원장에 온 입금 완료 통보를 늦은 입금 확인으로 바꾼다(payment §6 '끝난 원장의 입금 통보'). 그 밖의 판단은 그대로다.
+ * @param row 찾은 원장 행
+ * @param depositDone 결제사가 입금 완료를 알린 통보인가
+ * @param judged 앞선 판단
+ */
+export function withLateDepositCheck(row: WebhookLedgerRow | undefined, depositDone: boolean, judged: DepositCallbackJudgement): DepositCallbackJudgement {
+  if (!depositDone || row?.status !== 'FAILED' || judged.decision.kind !== 'STATE_IGNORED') return judged;
+  return { decision: { kind: 'LATE_DEPOSIT_CHECK', paymentId: row.paymentId, orderId: row.orderId }, receipt: judged.receipt };
 }

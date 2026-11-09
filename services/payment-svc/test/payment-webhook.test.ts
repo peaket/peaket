@@ -79,6 +79,9 @@ class RecordingLog implements PaymentWebhookLog {
   storeFailed(e: RecordingLog['failures'][number]): void {
     this.failures.push(e);
   }
+  depositSecretMismatch(): void {
+    // 이 파일의 시험은 입금 통보를 보지 않는다(test/virtual-account-deposit.test.ts)
+  }
 }
 
 class RecordingStore implements PaymentWebhookStore {

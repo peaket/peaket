@@ -4,9 +4,9 @@
 // 모자라면 아무 문장도 보내지 않고 PaymentDeadlineError를 던지고, 넉넉하면 그 시간으로 문장 시간 한도를 건다(플랫폼 statementTimeoutMs는 연결을 받기 전에 값을 정해 풀 대기를 뺄 수 없다).
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { type ConfirmPaymentCommand, type ConfirmPaymentRef, MIN_CALL_REMAINING_MS, PaymentDeadlineError, type PaymentLedgerStatus, type PaymentRecord, type PaymentState } from '../../domain/confirm-command.js';
+import { type ConfirmPaymentCommand, type ConfirmPaymentRef, type GetPaymentKey, MIN_CALL_REMAINING_MS, PaymentDeadlineError, type PaymentLedgerStatus, type PaymentDetailRow, type PaymentRecord, type PaymentState } from '../../domain/confirm-command.js';
 import { confirmIdemKey, type FailureCategory, type PgName } from '../../domain/payment-gateway.js';
-import type { CallBudget, NewPaymentValues, PaymentCommandStore, PaymentStateReader, StoreCommandResult } from '../../domain/ports.js';
+import type { CallBudget, NewPaymentValues, PaymentCommandStore, PaymentDetailReader, PaymentStateReader, StoreCommandResult } from '../../domain/ports.js';
 import { payment, paymentConfirmJob, paymentEvent } from './schema.js';
 
 /** ConfirmPayment 문장 시간 한도 상한 200ms [가정](데드라인 200ms와 같다, docs/architecture.md §5) */
@@ -39,7 +39,7 @@ export interface DrizzlePaymentStoreOptions {
 const refColumnsOf = (ref: ConfirmPaymentRef): { pgPaymentRef: string; pgConfirmToken: string | null; pgTxId: string | null } =>
   ref.kind === 'toss' ? { pgPaymentRef: ref.paymentKey, pgConfirmToken: null, pgTxId: null } : { pgPaymentRef: ref.paymentId, pgConfirmToken: ref.paymentToken, pgTxId: ref.txId };
 
-export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateReader {
+export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateReader, PaymentDetailReader {
   constructor(private readonly o: DrizzlePaymentStoreOptions) {}
 
   async store(command: ConfirmPaymentCommand, values: NewPaymentValues, budget?: CallBudget): Promise<StoreCommandResult> {
@@ -91,6 +91,39 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
     }, CONFIRM_TRANSACTION);
   }
 
+  async getDetail(key: GetPaymentKey, budget?: CallBudget): Promise<PaymentDetailRow | undefined> {
+    const startedAt = performance.now();
+    const [r] = await this.o.batchDatabase.transaction(async (tx) => {
+      await armStatementLimit(tx, BATCH_GET_STATEMENT_TIMEOUT_MS, budget, startedAt);
+      return tx
+        .select({
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          pg: payment.pg,
+          status: payment.status,
+          amount: payment.amount,
+          approvedAt: payment.approvedAt,
+          bank: payment.virtualAccountBank,
+          accountNo: payment.virtualAccountNo,
+          dueAt: payment.depositDueAt,
+        })
+        .from(payment)
+        .where(key.kind === 'orderId' ? eq(payment.orderId, key.orderId) : eq(payment.id, key.paymentId));
+    });
+    if (r === undefined) return undefined;
+    return {
+      paymentId: r.paymentId,
+      orderId: r.orderId,
+      pg: r.pg as PgName,
+      status: r.status as PaymentLedgerStatus,
+      amount: r.amount,
+      ...(r.approvedAt ? { approvedAtMs: r.approvedAt.getTime() } : {}),
+      ...(r.bank === null ? {} : { virtualAccountBank: r.bank }),
+      ...(r.accountNo === null ? {} : { virtualAccountNoSealed: r.accountNo }),
+      ...(r.dueAt ? { depositDueAtMs: r.dueAt.getTime() } : {}),
+    };
+  }
+
   async batchGet(orderIds: readonly string[], budget?: CallBudget): Promise<PaymentState[]> {
     const startedAt = performance.now();
     const rows = await this.o.batchDatabase.transaction(
@@ -112,6 +145,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
             amount: payment.amount,
             approvedAt: payment.approvedAt,
             failureCategory: payment.failureCategory,
+            depositDueAt: payment.depositDueAt,
             eventKey: lastExported.eventKey,
             eventSeq: lastExported.eventSeq,
           })
@@ -130,6 +164,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       ...(r.approvedAt ? { approvedAtMs: r.approvedAt.getTime() } : {}),
       ...(r.failureCategory ? { failureCategory: r.failureCategory as FailureCategory } : {}),
       ...(r.eventKey !== null && r.eventSeq !== null ? { lastEvent: { eventKey: r.eventKey, eventSeq: r.eventSeq } } : {}),
+      ...(r.depositDueAt ? { depositDueAtMs: r.depositDueAt.getTime() } : {}),
     }));
   }
 }

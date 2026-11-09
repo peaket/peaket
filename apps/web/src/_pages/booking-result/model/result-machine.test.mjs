@@ -1,5 +1,6 @@
 // 결제 결과 기계(FE-T24, docs/frontend.md §3.6 '결제 결과 기계', ADR-0079 결정 8, ADR-0230). 모델 기반 시험: @xstate/graph로 모든 상태와 전이를 돈다.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { getAdjacencyMap, getShortestPaths } from '@xstate/graph';
 import { createActor } from 'xstate';
@@ -89,6 +90,21 @@ test('FE-T24 조회 실패 → 기계 이벤트(openapi getOrderPaymentStatus)',
   assert.deepEqual(statusOutcome({ status: 429 }), { kind: 'retry' });
   assert.deepEqual(statusOutcome({ status: 504 }), { kind: 'retry' });
   assert.deepEqual(statusOutcome({}), { kind: 'retry' });
+});
+
+test('P-T36_리뷰 고침 H2: 번호가 없는 입금 안내는 복사 버튼을 숨기고 안내 문구를 보인다(화면 부품은 node로 그리지 못해 소스로 본다)', () => {
+  const live = readFileSync(new URL('../ui/ResultLive.tsx', import.meta.url), 'utf8');
+  const part = live.slice(live.indexOf("case 'awaitingDeposit'"), live.indexOf("case 'notAccepted'"));
+  assert.match(part, /accountNumber \? <CopyButton/, '복사 버튼은 계좌번호가 있을 때만 보인다');
+  assert.doesNotMatch(part, /a\?\.accountNumber \?\? line/, '은행 이름을 계좌번호처럼 복사하지 않는다');
+  assert.match(part, /계좌번호를 표시할 수 없습니다/);
+});
+
+test('P-T36_리뷰 고침 H1: 처리 중 답(RESERVED)은 끝난 상태가 아니라 화면이 다시 묻는다', () => {
+  const s = send(start(), S('RESERVED'));
+  assert.equal(s.value, 'checking');
+  assert.equal(FINISHED.has(String(s.value)), false);
+  assert.equal(nextPollMs(String(s.value), 1000, true, () => 0), 500);
 });
 
 test('FE-T24 실패 문구는 사유별이고 모두 요금 안내를 담는다(d5 §9.2)', () => {

@@ -19,6 +19,7 @@ import type {
   OrderSessions,
   OrderSignals,
   OrderWrites,
+  PaymentDepositReader,
   PaymentStatusReads,
   PaymentStatusWaiters,
   SaleConfigs,
@@ -64,7 +65,7 @@ export interface BookingModuleDeps {
    * waiters = PaymentStatusWaitTable(시작 파일이 만들어 켜고 끈다. Saga 실행기·결제 결과 처리기의 onOrderChanged에도 그 notify를 넘긴다)을 넘긴다.
    * 없으면 GetPaymentStatus를 조립하지 않는다(처리기가 404 not-found로 답한다 [정함])
    */
-  paymentStatus?: { reads: PaymentStatusReads; waiters: PaymentStatusWaiters };
+  paymentStatus?: { reads: PaymentStatusReads; waiters: PaymentStatusWaiters; deposits?: PaymentDepositReader };
 }
 
 @Module({})
@@ -113,7 +114,7 @@ export class BookingModule {
       ? [
           {
             provide: GetPaymentStatus,
-            useFactory: (platformClock: Clock) => new GetPaymentStatus({ reads: paymentStatus.reads, waiters: paymentStatus.waiters, clock: clock ?? platformClock }),
+            useFactory: (platformClock: Clock) => new GetPaymentStatus({ reads: paymentStatus.reads, waiters: paymentStatus.waiters, clock: clock ?? platformClock, ...(paymentStatus.deposits ? { deposits: paymentStatus.deposits } : {}) }),
             inject: [CLOCK],
           },
         ]

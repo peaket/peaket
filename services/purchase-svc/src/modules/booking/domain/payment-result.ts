@@ -57,6 +57,8 @@ export interface PaymentResultEvent {
   readonly eventSeq: number;
   /** 중복 제거 키(ADR-0052). 키 단위 처리기의 eventKeyOf */
   readonly eventKey: string;
+  /** 입금 기한(ISO 8601, 입금 대기 사건에만, BUILD_ORDER HOT-151) */
+  readonly depositDueAt?: string;
 }
 
 /** 결정에 쓰는 주문 모습(주문 행 몇 칸과 접수한 결제 시도의 결제사) */
@@ -240,12 +242,24 @@ export function ticketIssueDueAtMs(occurredAt: string): number {
   return ms + TICKET_ISSUE_WINDOW_MS;
 }
 
+/** 입금 기한 뒤 판매 행을 잡아 두는 여유 10분 [가정](payment §6 '주문 쪽') */
+export const DEPOSIT_PENDING_GRACE_MS = 10 * 60_000;
+
 /**
- * 승인 전이의 발권 기한 시각(epoch ms). T9·T16은 ticketIssueDueAtMs(occurredAt)다.
- * T13(UNKNOWN → APPROVED)은 max(occurredAt, 반영 시각) + 30분이다: 결제사 승인 시각이 오래전이어도 우리가 승인을 안 것은 지금이라, 반영하자마자 기한 넘김이 되지 않게 한다(BUILD_ORDER PRF-182, 코드 리뷰).
+ * 판매 행 pending_until(epoch ms) = 입금 기한 + 10분 [가정]. 값이 없거나 날짜로 읽히지 않으면 undefined.
+ * @param depositDueAt 사건의 입금 기한(ISO 8601)
+ */
+export function depositPendingUntilMs(depositDueAt: string | undefined): number | undefined {
+  const ms = depositDueAt === undefined ? Number.NaN : Date.parse(depositDueAt);
+  return Number.isFinite(ms) ? ms + DEPOSIT_PENDING_GRACE_MS : undefined;
+}
+
+/**
+ * 승인 전이의 발권 기한 시각(epoch ms). T9는 ticketIssueDueAtMs(occurredAt)다.
+ * T13(UNKNOWN → APPROVED)과 T16(입금 대기 → APPROVED)은 max(occurredAt, 반영 시각) + 30분이다: 결제사 승인·입금 시각이 오래전이어도 우리가 안 것은 지금이라, 반영하자마자 기한 넘김이 되지 않게 한다(BUILD_ORDER PRF-182·HOT-151, 코드 리뷰).
  * @throws RangeError occurredAt이 날짜로 읽히지 않음
  */
 export function approvalIssueDueAtMs(transition: 'T9' | 'T13' | 'T16', occurredAt: string, appliedAtMs: number): number {
   const due = ticketIssueDueAtMs(occurredAt);
-  return transition === 'T13' ? Math.max(due, appliedAtMs + TICKET_ISSUE_WINDOW_MS) : due;
+  return transition === 'T9' ? due : Math.max(due, appliedAtMs + TICKET_ISSUE_WINDOW_MS);
 }

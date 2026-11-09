@@ -32,6 +32,7 @@ import {
 } from '../../domain/payment-gateway.js';
 import { tossCardOf } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
+import { tossVirtualAccountOf } from './virtual-account-fields.js';
 
 export interface TossShapedOptions {
   /** 결제사 주소 */
@@ -139,7 +140,10 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
       // 다른 주문의 답을 이 주문의 결과로 쓰지 않는다
       if (str(r.json?.orderId) !== c.orderId) return unknown;
       const status = str(r.json?.status);
-      if (status === 'WAITING_FOR_DEPOSIT') return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: num(r.json?.totalAmount) };
+      if (status === 'WAITING_FOR_DEPOSIT') {
+        const virtualAccount = tossVirtualAccountOf(r.json);
+        return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: num(r.json?.totalAmount), ...(virtualAccount ? { virtualAccount } : {}) };
+      }
       if (status !== 'DONE') return unknown;
       return { outcome: 'APPROVED', ...this.#approvedFields(c.paymentRef, r.json!) };
     }
@@ -182,7 +186,8 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     const approvedAt = str(r.json?.approvedAt);
     const method = METHOD_CATEGORY.get(str(r.json?.method) ?? '');
     const card = tossCardOf(r.json?.card);
-    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}), ...(card ? { card } : {}) };
+    const virtualAccount = status === 'WAITING_FOR_DEPOSIT' ? tossVirtualAccountOf(r.json) : undefined;
+    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}), ...(card ? { card } : {}), ...(virtualAccount ? { virtualAccount } : {}) };
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult> {
@@ -213,14 +218,14 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     }
     if (msg === null || typeof msg !== 'object') return { kind: 'INVALID', reason: 'BODY' };
     const m = msg as { eventType?: unknown; data?: { paymentKey?: unknown; orderId?: unknown }; secret?: unknown; orderId?: unknown; transactionKey?: unknown; status?: unknown };
-    // 입금 통보(DEPOSIT_CALLBACK)는 사건 이름 없이 본문 최상위에 secret·orderId가 있다. 주문 ID만 조회 신호로 싣고 secret은 HOT-151이 대조한다.
+    // 입금 통보(DEPOSIT_CALLBACK)는 사건 이름 없이 본문 최상위에 secret·orderId가 있다. 주문 ID와 대조할 secret을 싣는다(대조는 저장소가 원장의 해시와 한다, BUILD_ORDER HOT-151).
     // 중복 키는 거래 키와 상태다: 문서가 이 사건의 머리를 따로 적지 않고 전송 ID는 보낼 때마다 새로 나오므로 머리에 기대지 않는다
     if (m.eventType === undefined && typeof m.secret === 'string') {
       const depositOrderRef = str(m.orderId);
       const transactionKey = str(m.transactionKey);
       const depositStatus = str(m.status);
-      if (depositOrderRef === undefined || !WEBHOOK_REF.test(depositOrderRef) || transactionKey === undefined || !WEBHOOK_REF.test(transactionKey) || depositStatus === undefined || !WEBHOOK_REF.test(depositStatus)) return { kind: 'INVALID', reason: 'BODY' };
-      return { kind: 'TRIGGER', dedupKey: `${this.pg}:deposit:${transactionKey}:${depositStatus}`, orderRef: depositOrderRef };
+      if (depositOrderRef === undefined || !WEBHOOK_REF.test(depositOrderRef) || transactionKey === undefined || !WEBHOOK_REF.test(transactionKey) || depositStatus === undefined || !WEBHOOK_REF.test(depositStatus) || !WEBHOOK_REF.test(m.secret)) return { kind: 'INVALID', reason: 'BODY' };
+      return { kind: 'TRIGGER', dedupKey: `${this.pg}:deposit:${transactionKey}:${depositStatus}`, orderRef: depositOrderRef, depositSecret: m.secret, ...(depositStatus === 'DONE' ? { depositDone: true as const } : {}) };
     }
     let id: string | undefined;
     for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === TRANSMISSION_ID) id = typeof v === 'string' ? v : undefined;

@@ -58,8 +58,11 @@ import {
   OrderExpiry,
   orderExpiryDatabaseOptions,
   OrderSagaRunner,
+  noPaymentDepositReader,
+  PAYMENT_DEPOSIT_BREAKER,
   PAYMENT_PULL_BREAKER,
   paymentConfirmsFromEnv,
+  paymentDepositReaderFromEnv,
   paymentPullDatabaseOptions,
   paymentResultReaderFromEnv,
   PaymentResultPuller,
@@ -160,6 +163,9 @@ let sagaRunner: OrderSagaRunner | undefined;
 //   Saga 실행기와 결제 결과 처리기(ApplyPaymentResult, trade.payments 소비자, PRF-164)의 onOrderChanged에 그 notify를 넘긴다(같은 파드가 주문을 바로 답할 상태로
 //   바꾸면 곧바로 깨운다). 다른 파드가 반영한 주문은 묶음 조회가 깨운다.
 //   기다림 표는 듣기 시작한 뒤 200ms 반복을 켜고, SIGTERM에서 Saga 실행기와 함께 끈다(남은 기다림은 STOPPED로 깨어 다시 읽지 않고 마지막 본문으로 답한다)
+// 입금 대기의 은행·계좌번호·입금 기한은 payment-svc GetPayment에서 읽어 응답에만 싣는다(차단기 payment-svc-get, 서비스를 만든 뒤 잇는다. 그때까지는 칸 없이 답한다, BUILD_ORDER HOT-151)
+let depositReader: ReturnType<typeof paymentDepositReaderFromEnv> | undefined;
+let depositBreaker: CircuitBreaker | undefined;
 const paymentStatusReads = database ? new DrizzlePaymentStatus({ database }) : undefined;
 const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ reads: paymentStatusReads, clock: systemClock, signals: orderSignals }) : undefined;
 const booking: BookingModuleDeps | undefined = database
@@ -176,7 +182,7 @@ const booking: BookingModuleDeps | undefined = database
       signals: orderSignals,
       consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
       onAccepted: (orderId) => sagaRunner?.kick(orderId),
-      ...(paymentStatusReads && paymentStatusWaiters ? { paymentStatus: { reads: paymentStatusReads, waiters: paymentStatusWaiters } } : {}),
+      ...(paymentStatusReads && paymentStatusWaiters ? { paymentStatus: { reads: paymentStatusReads, waiters: paymentStatusWaiters, deposits: { read: (id, o) => (depositReader?.reader ?? noPaymentDepositReader).read(id, o) } } } : {}),
     }
   : undefined;
 // 주문 만료 고리(PRF-172): 판정기는 서비스 로거·지표로 만들므로 늦게 묶는다(그 전이면 부르지 않는다. 고리를 부르는 반복·요청은 듣기 시작한 뒤에만 돈다).
@@ -250,6 +256,14 @@ if (booking && database) {
   paymentBreaker = new CircuitBreaker({ service: SERVICE, dependency: 'payment-svc', registry: service.metrics.registry, logger: service.logger });
   payment = paymentConfirmsFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: paymentBreaker });
   for (const w of payment.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
+  depositBreaker = new CircuitBreaker({ service: SERVICE, dependency: PAYMENT_DEPOSIT_BREAKER, registry: service.metrics.registry, logger: service.logger });
+  depositReader = paymentDepositReaderFromEnv(process.env, {
+    profile: service.config.grpcLbProfile,
+    breaker: depositBreaker,
+    onFailure: (code) => orderSignals.depositReadFailed(code),
+    // 주문 ID만 싣는다. 답의 계좌 칸과 답의 주문 ID는 싣지 않는다
+    onOrderMismatch: (orderId) => service.logger.warn({ kind: 'payment-deposit-order-mismatch', orderId }, 'GetPayment 답의 주문 ID가 요청과 달라 계좌 칸을 버렸다'),
+  });
   const saga = new DrizzleSaga({ database, store: orderStore, sales: new DrizzleSeatSales(database), clock: systemClock });
   sagaRunner = new OrderSagaRunner({
     jobs: saga,
@@ -434,6 +448,8 @@ function shutdown(): void {
       try {
         payment?.close();
         paymentBreaker?.shutdown();
+        depositReader?.close();
+        depositBreaker?.shutdown();
       } catch (err) {
         service.logger.error({ err: errorSummary(err) }, 'payment-svc 클라이언트 닫기 실패');
       }

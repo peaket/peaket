@@ -1,5 +1,5 @@
 // UNKNOWN 해소의 값과 규칙(docs/features/payment.md §2 'UNKNOWN 해소의 첫 구현'·§4.2 14번, docs/data.md §2 payment, BUILD_ORDER PRF-182, 명세 specs/payment.qnt `query`).
-// 실행기(application/payment-unknown-resolver.ts)와 저장소가 쓴다. 프레임워크·저장소·계약 패키지를 모른다(순수 값과 함수).
+// 실행기(application/payment-unknown-resolver.ts)와 저장소가 쓴다. 프레임워크·저장소·계약 패키지를 모른다(순수 값과 함수). 입금 대기 행의 답도 여기서 정한다(§6 '입금 확인의 첫 구현', BUILD_ORDER HOT-151).
 // 구현에서 정한 것(정본·설계에 없다):
 // - 답의 주문 ID가 원장과 다르면 상태를 보기 전에 다시 묻는다(SEV1 로그, 지표 amount_mismatch). 다른 주문의 답을 이 주문의 결과로 쓰지 않는다.
 // - 취소 상태 답은 금액을 보지 않는다(승인을 기록한 적 없는 결제가 취소됐다는 사실만으로 사람이 본다).
@@ -7,8 +7,9 @@
 // - 승인 시각의 값이 없거나 읽지 못하면 지금이다(승인 실행기와 같다).
 import type { ConfirmFinish, ConfirmTarget, PaymentEventMessage } from './confirm-runner.js';
 import { paymentEventKey } from './confirm-runner.js';
-import type { QueryResult } from './payment-gateway.js';
+import type { PayMethodCategory, QueryResult } from './payment-gateway.js';
 import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
+import { depositExpired, depositNextQueryAtMs, depositNotifiedRecently } from './virtual-account.js';
 
 /** 잡기 주기 1초 [가정] */
 export const UNKNOWN_QUERY_POLL_INTERVAL_MS = 1_000;
@@ -43,7 +44,7 @@ export const UNKNOWN_QUERY_NO_TOKEN_DELAY_MS = 1_000;
 export const RESOLVED_EVENT_TYPE = 'RESOLVED';
 
 /** payment_unknown_query_total{outcome}의 값 */
-export const PAYMENT_UNKNOWN_QUERY_OUTCOMES = ['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter'] as const;
+export const PAYMENT_UNKNOWN_QUERY_OUTCOMES = ['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit'] as const;
 export type PaymentUnknownQueryOutcome = (typeof PAYMENT_UNKNOWN_QUERY_OUTCOMES)[number];
 
 /** 잡은 UNKNOWN 한 행(claimDueQueries의 결과). 답 반영에 필요한 원장 값을 함께 싣는다 */
@@ -54,6 +55,10 @@ export interface UnknownQueryJob extends Pick<ConfirmTarget, 'paymentId' | 'orde
   readonly claimedNextQueryAtMs: number;
   /** anomaly_logged_at이 이미 있는가(SEV1을 이미 냈다) */
   readonly anomalyLogged: boolean;
+  /** 입금 대기(AWAITING_DEPOSIT) 행일 때만 있다. notifiedAtMs는 입금 완료 통보를 처음 받은 시각이다(BUILD_ORDER HOT-151) */
+  readonly deposit?: { readonly dueAtMs?: number; readonly notifiedAtMs?: number };
+  /** FAILED로 끝난 행의 늦은 입금 확인 한 번일 때만 참이다(결과를 쓰지 않는다, BUILD_ORDER HOT-151 코드 리뷰) */
+  readonly lateDepositCheck?: true;
 }
 
 /** UNKNOWN을 떠나는 결과(UNKNOWN으로 끝나는 갈래는 없다) */
@@ -68,17 +73,21 @@ export type QueryAnomaly = 'amount' | 'order' | 'cancelled';
  * - ASK_AGAIN: 그대로 두고 다시 묻는다. anomaly가 있으면 결제마다 한 번 SEV1 로그를 남긴다
  */
 export type QueryDecision =
-  | { readonly kind: 'RESOLVE'; readonly finish: ResolvedFinish; readonly outcome: 'approved' | 'failed' | 'waiting' }
-  | { readonly kind: 'ASK_AGAIN'; readonly outcome: 'still_processing' | 'not_found' | 'amount_mismatch' | 'cancelled_at_pg' | 'query_failed'; readonly anomaly?: QueryAnomaly };
+  | { readonly kind: 'RESOLVE'; readonly finish: ResolvedFinish; readonly outcome: ResolveOutcome }
+  | { readonly kind: 'ASK_AGAIN'; readonly outcome: 'still_processing' | 'not_found' | 'amount_mismatch' | 'cancelled_at_pg' | 'query_failed' | 'deposit_waiting'; readonly anomaly?: QueryAnomaly; readonly nextAtMs?: number; readonly keepAttempts?: true };
 
-/** decideQueryAnswer가 보는 원장 값 */
-export type QueryLedger = Pick<UnknownQueryJob, 'orderId' | 'amount'>;
+/** 원장을 바꾸는 결과의 지표 값 */
+export type ResolveOutcome = 'approved' | 'failed' | 'waiting' | 'deposit_approved' | 'deposit_expired';
+
+/** decideQueryAnswer가 보는 원장 값. deposit이 있으면 입금 대기 행이다 */
+export type QueryLedger = Pick<UnknownQueryJob, 'orderId' | 'amount' | 'deposit'> & Partial<Pick<UnknownQueryJob, 'queryAttempts'>>;
 
 /** 실행기가 행 하나를 돈 결과(시험·로그용) */
 export type UnknownRunOutcome =
-  | { readonly kind: 'RESOLVED'; readonly status: ResolvedFinish['status']; readonly outcome: 'approved' | 'failed' | 'waiting' }
+  | { readonly kind: 'RESOLVED'; readonly status: ResolvedFinish['status']; readonly outcome: ResolveOutcome }
   | { readonly kind: 'ASKED_AGAIN'; readonly outcome: PaymentUnknownQueryOutcome }
   | { readonly kind: 'STALE' }
+  | { readonly kind: 'LATE_DEPOSIT'; readonly paid: boolean }
   | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' | 'NO_TOKEN' }
   | { readonly kind: 'WRITE_FAILED' };
 
@@ -114,6 +123,7 @@ function decideFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: Qu
   // 다른 주문의 답을 이 주문의 결과로 쓰지 않는다(상태를 보기 전에 본다)
   if (answer.orderRef !== ledger.orderId) return ORDER_MISMATCH;
   const method = answer.method === undefined ? {} : { payMethodCategory: answer.method };
+  if (ledger.deposit !== undefined) return decideDepositFound(answer, ledger, ledger.deposit, nowMs, method);
   switch (answer.status) {
     case 'APPROVED': {
       if (answer.amount !== ledger.amount) return AMOUNT_MISMATCH;
@@ -137,6 +147,49 @@ function decideFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: Qu
     default:
       return QUERY_FAILED;
   }
+}
+
+/**
+ * 입금 대기 행의 조회 답(payment §6 '조회와 전이'). 주문 대조는 부른 쪽이 먼저 했다.
+ * 입금 완료는 T16, 기한 + 10분 전의 입금 대기는 그대로, 기한 + 10분이 지난 입금 대기와 FAILED·EXPIRED·CANCELED는 T17(FAILED, EXPIRED)이다.
+ * 입금 완료 통보를 받은 지 10분 [가정] 안의 입금 대기는 결제사 조회 반영이 늦는 것으로 보고 만료로 쓰지 않으며 5초에서 두 배로(최대 60초 [가정]) 다시 묻는다(코드 리뷰 M3).
+ * @param deposit 원장의 입금 기한(없으면 답의 기한을 쓴다)과 입금 완료 통보 시각
+ */
+function decideDepositFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: QueryLedger, deposit: NonNullable<QueryLedger['deposit']>, nowMs: number, method: { payMethodCategory?: PayMethodCategory }): QueryDecision {
+  const ledgerAmount = ledger.amount;
+  const dueAtMs = deposit.dueAtMs;
+  const expired: QueryDecision = { kind: 'RESOLVE', finish: { status: 'FAILED', result: 'DECLINED', failureCategory: 'EXPIRED', ...method }, outcome: 'deposit_expired' };
+  switch (answer.status) {
+    case 'APPROVED': {
+      if (answer.amount !== ledgerAmount) return AMOUNT_MISMATCH;
+      const parsed = answer.approvedAt === undefined ? Number.NaN : Date.parse(answer.approvedAt);
+      return { kind: 'RESOLVE', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: Number.isNaN(parsed) ? nowMs : parsed, ...method }, outcome: 'deposit_approved' };
+    }
+    case 'WAITING_FOR_DEPOSIT': {
+      if (answer.amount !== ledgerAmount) return AMOUNT_MISMATCH;
+      if (depositNotifiedRecently(deposit.notifiedAtMs, nowMs)) return { kind: 'ASK_AGAIN', outcome: 'deposit_waiting', nextAtMs: nowMs + unknownQueryDelayMs(ledger.queryAttempts ?? 1), keepAttempts: true };
+      const due = dueAtMs ?? dueAtOf(answer.virtualAccount?.dueAt);
+      if (depositExpired(due, nowMs)) return expired;
+      return { kind: 'ASK_AGAIN', outcome: 'deposit_waiting', nextAtMs: depositNextQueryAtMs(due, nowMs) };
+    }
+    case 'FAILED':
+    case 'EXPIRED':
+    case 'CANCELED':
+      return expired;
+    case 'PARTIAL_CANCELED':
+      return CANCELLED_AT_PG;
+    case 'READY':
+    case 'IN_PROGRESS':
+      return STILL_PROCESSING;
+    default:
+      return QUERY_FAILED;
+  }
+}
+
+/** ISO 8601 → epoch ms. 없거나 읽지 못하면 undefined */
+function dueAtOf(raw: string | undefined): number | undefined {
+  const ms = raw === undefined ? Number.NaN : Date.parse(raw);
+  return Number.isNaN(ms) ? undefined : ms;
 }
 
 /**

@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { PaymentLedgerStatus } from './confirm-command.js';
 import type { ConfirmResult, FailureCategory, PayMethodCategory, PgName } from './payment-gateway.js';
 import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
+import type { DepositWrite } from './virtual-account.js';
 
 /** 잡기 주기 100ms [가정] */
 export const CONFIRM_RUNNER_POLL_INTERVAL_MS = 100;
@@ -129,7 +130,14 @@ export type ConfirmFinish =
       readonly payMethodCategory?: PayMethodCategory;
       readonly latencyMs?: number;
     }
-  | { readonly status: 'AWAITING_DEPOSIT'; readonly result: 'WAITING_FOR_DEPOSIT'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number }
+  | {
+      readonly status: 'AWAITING_DEPOSIT';
+      readonly result: 'WAITING_FOR_DEPOSIT';
+      readonly payMethodCategory?: PayMethodCategory;
+      readonly latencyMs?: number;
+      /** 가상계좌 발급 정보(답에 있을 때만 실행기가 채운다, BUILD_ORDER HOT-151) */
+      readonly deposit?: DepositWrite;
+    }
   | { readonly status: 'UNKNOWN'; readonly result: 'UNKNOWN'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number };
 
 /**
@@ -163,6 +171,8 @@ export interface PaymentEventMessage {
   readonly occurredAt: string;
   readonly eventSeq: number;
   readonly eventKey: string;
+  /** 입금 기한(ISO 8601, 입금 대기 사건에만, BUILD_ORDER HOT-151) */
+  readonly depositDueAt?: string;
 }
 
 export interface BuildPaymentEventInput {
@@ -316,5 +326,12 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventMe
     occurredAt,
     eventSeq: seq,
     eventKey,
+    ...depositDueAtField(finish),
   };
+}
+
+/** 입금 대기 사건의 입금 기한 칸(기한을 알 때만). 계좌번호는 사건에 싣지 않는다 */
+function depositDueAtField(finish: ConfirmFinish): { depositDueAt?: string } {
+  const dueAtMs = finish.status === 'AWAITING_DEPOSIT' ? finish.deposit?.dueAtMs : undefined;
+  return dueAtMs === undefined ? {} : { depositDueAt: new Date(dueAtMs).toISOString() };
 }

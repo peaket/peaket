@@ -12,6 +12,8 @@ export const IDEMPOTENCY_RETENTION_MS = 15 * 24 * 3_600_000;
 /** 포트원 모양 경로의 멱등키 보관 3시간(payment §2.1 멱등키 규격, BUILD_ORDER HOT-140) */
 export const PORTONE_IDEMPOTENCY_RETENTION_MS = 3 * 3_600_000;
 export const ORDER_ID = /^[A-Za-z0-9_-]{6,64}$/;
+/** 가상계좌 입금 기한 3일 [가정](시뮬레이터 고정 값) */
+export const DEPOSIT_WINDOW_MS = 3 * 86_400_000;
 
 /** 포트원 모양 경로가 엔진에 넘기는 값(토큰 대조, 멱등 보관 3시간, 취소 가능 금액 대조). 토스 모양 경로는 쓰지 않는다 */
 export interface PortoneCallOptions {
@@ -43,7 +45,7 @@ export interface SimResponse {
   drop?: boolean;
 }
 
-type PaymentStatus = 'READY' | 'IN_PROGRESS' | 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'ABORTED' | 'EXPIRED';
+type PaymentStatus = 'READY' | 'IN_PROGRESS' | 'WAITING_FOR_DEPOSIT' | 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'ABORTED' | 'EXPIRED';
 
 interface CancelRecord {
   cancelAmount: number;
@@ -71,6 +73,10 @@ interface Payment {
   method?: SimPayMethod;
   /** 결제창에서 고른 시험 카드. null이면 카드 정보가 없다(없으면 합성 카드) */
   testCard?: SimTestCard | null;
+  /** 발급한 가상계좌(계좌번호는 합성 값이다) */
+  virtualAccount?: { accountNumber: string; bankCode: string; dueAt: number };
+  /** 입금 통보 대조값 */
+  secret?: string;
 }
 
 /** 시험이 고르는 결제 수단(BUILD_ORDER HOT-145) */
@@ -107,6 +113,15 @@ export interface WebhookEvent {
   body: { eventType: 'PAYMENT_STATUS_CHANGED'; createdAt: string; data: unknown };
 }
 
+/** 토스 DEPOSIT_CALLBACK 본문 모양(docs/features/payment.md §2.1 '공식 문서 대조 결과') */
+export interface DepositCallback {
+  createdAt: string;
+  secret: string;
+  status: 'DONE' | 'WAITING_FOR_DEPOSIT' | 'CANCELED';
+  transactionKey: string;
+  orderId: string;
+}
+
 export interface EngineOptions {
   clock?: SimClock;
   sleep?: (ms: number) => Promise<void>;
@@ -137,6 +152,7 @@ export class PgSimulatorEngine {
   private idem = new Map<string, IdemEntry>();
   private faults: ArmedFault[] = [];
   private events: WebhookEvent[] = [];
+  private deposits: DepositCallback[] = [];
   private serial = 0;
 
   constructor(o: EngineOptions = {}) {
@@ -165,6 +181,7 @@ export class PgSimulatorEngine {
     this.idem.clear();
     this.faults = [];
     this.events = [];
+    this.deposits = [];
     this.nextLatency = latencySampler(this.initialLatency, this.random);
   }
 
@@ -222,7 +239,7 @@ export class PgSimulatorEngine {
       this.expireIfDue(p);
       if (p.status === 'EXPIRED' || p.status === 'ABORTED') return { response: err(400, 'NOT_FOUND_PAYMENT_SESSION', '결제 시간이 만료되어 결제 진행 데이터가 없습니다') };
       if (p.status === 'IN_PROGRESS') return { response: err(400, 'ALREADY_PROCESSING_REQUEST', '이미 처리 중인 요청입니다') };
-      if (APPROVED.has(p.status)) return { response: err(400, 'ALREADY_PROCESSED_PAYMENT', '이미 처리된 결제입니다') };
+      if (APPROVED.has(p.status) || p.status === 'WAITING_FOR_DEPOSIT') return { response: err(400, 'ALREADY_PROCESSED_PAYMENT', '이미 처리된 결제입니다') };
       if (portone?.token !== undefined && p.portoneToken !== portone.token) return { response: err(400, 'INVALID_PAYMENT_TOKEN', '결제 토큰이 올바르지 않습니다') };
       if (portone?.txId !== undefined && p.txId !== portone.txId) return { response: err(400, 'INVALID_REQUEST', '결제 시도 ID가 결제창 값과 다릅니다') };
       if (p.orderId !== c.orderId || p.amount !== c.amount) return { response: err(400, 'INVALID_REQUEST', '주문 ID나 금액이 결제창 값과 다릅니다') };
@@ -245,7 +262,8 @@ export class PgSimulatorEngine {
         p.status = 'READY';
         return { response: fault.kind === 'drop' ? { status: 0, drop: true } : err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다') };
       }
-      this.approve(p);
+      if (p.method === '가상계좌') this.issueVirtualAccount(p);
+      else this.approve(p);
       const ok: SimResponse = { status: 200, body: this.view(p) };
       if (fault?.kind === 'pg-error') return { response: err(500, 'FAILED_INTERNAL_SYSTEM_PROCESSING', '결제사 내부 오류입니다'), store: ok };
       if (fault?.kind === 'drop') return { response: { status: 0, drop: true }, store: ok };
@@ -315,6 +333,30 @@ export class PgSimulatorEngine {
       }));
   }
 
+  /** 입금을 흉내 낸다: 입금 대기면 DONE으로 바꾸고 입금 통보 본문을 쌓는다. 없는 결제는 404, 입금 대기가 아니면 400이다 */
+  deposit(paymentKey: string): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'WAITING_FOR_DEPOSIT') return err(400, 'NOT_WAITING_FOR_DEPOSIT', '입금 대기 결제가 아닙니다');
+    this.approve(p);
+    this.deposits.push({ createdAt: kstIso(this.clock.now()), secret: p.secret!, status: 'DONE', transactionKey: p.lastTransactionKey!, orderId: p.orderId });
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 결제사 쪽 입금 만료를 흉내 낸다. 토스는 기한이 지나도 상태가 그대로이므로(payment §6) 시험이 부를 때만 바뀐다. 입금 통보는 없다 */
+  expireDeposit(paymentKey: string): SimResponse {
+    const p = this.payments.get(paymentKey);
+    if (!p) return err(404, 'NOT_FOUND_PAYMENT', '결제를 찾을 수 없습니다');
+    if (p.status !== 'WAITING_FOR_DEPOSIT') return err(400, 'NOT_WAITING_FOR_DEPOSIT', '입금 대기 결제가 아닙니다');
+    this.setStatus(p, 'EXPIRED');
+    return { status: 200, body: this.view(p) };
+  }
+
+  /** 입금 통보 본문(DEPOSIT_CALLBACK). 시험이 받아 웹훅 경로로 보낸다 */
+  depositCallbacks(orderId?: string): DepositCallback[] {
+    return this.deposits.filter((d) => orderId === undefined || d.orderId === orderId);
+  }
+
   webhooks(paymentKey?: string): WebhookEvent[] {
     return this.events.filter((e) => paymentKey === undefined || e.paymentKey === paymentKey);
   }
@@ -381,6 +423,15 @@ export class PgSimulatorEngine {
     if (p.status === 'READY' && this.clock.now() - p.requestedAt > CONFIRM_DEADLINE_MS) this.setStatus(p, 'EXPIRED');
   }
 
+  /** 가상계좌를 발급해 입금 대기로 둔다(계좌번호·secret은 합성 값이다) */
+  private issueVirtualAccount(p: Payment): void {
+    const now = this.clock.now();
+    p.virtualAccount = { accountNumber: `562${String(p.serial).padStart(11, '0')}`, bankCode: '20', dueAt: now + DEPOSIT_WINDOW_MS };
+    p.secret = `ps_${randomBytes(12).toString('hex')}`;
+    p.lastTransactionKey = this.transactionKey();
+    this.setStatus(p, 'WAITING_FOR_DEPOSIT');
+  }
+
   private approve(p: Payment): void {
     p.approvedAt = this.clock.now();
     p.balance = p.amount;
@@ -444,6 +495,8 @@ export class PgSimulatorEngine {
       currency: 'KRW',
       method,
       card: approved && method === '카드' && p.testCard !== null ? this.cardView(p) : null,
+      virtualAccount: p.virtualAccount ? { accountType: '일반', accountNumber: p.virtualAccount.accountNumber, bankCode: p.virtualAccount.bankCode, customerName: '시뮬레이터', dueDate: kstIso(p.virtualAccount.dueAt), expired: false, settlementStatus: 'INCOMPLETED', refundStatus: 'NONE' } : null,
+      secret: p.secret ?? null,
       cancels: p.cancels.length
         ? p.cancels.map((c) => ({ cancelAmount: c.cancelAmount, cancelReason: c.cancelReason, canceledAt: kstIso(c.canceledAt), transactionKey: c.transactionKey }))
         : null,

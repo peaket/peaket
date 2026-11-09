@@ -134,6 +134,15 @@ export class LoggerPaymentResultLog implements PaymentResultLog {
     }
   }
 
+  /** 입금 대기 사건에 입금 기한이 없다(warn 한 줄 { kind: 'payment-result-deposit-due-missing', orderId }, 주문 ID만, BUILD_ORDER HOT-151) */
+  depositDueMissing(e: { readonly orderId: string }): void {
+    try {
+      this.logger.warn({ kind: 'payment-result-deposit-due-missing', orderId: e.orderId }, '입금 대기 사건에 입금 기한이 없어 판매 행 기한을 비워 두었다');
+    } catch {
+      // 로그 실패로 반영을 막지 않는다
+    }
+  }
+
   afterCommitFailed(e: Parameters<PaymentResultLog['afterCommitFailed']>[0]): void {
     try {
       this.logger.warn(

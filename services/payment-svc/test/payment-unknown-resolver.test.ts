@@ -103,6 +103,10 @@ class FakeQueries implements PaymentUnknownQueries {
     const next = this.anomalyResults.shift();
     return next === undefined ? true : play(next);
   }
+  async finishLateDepositCheck(_j: UnknownQueryJob): Promise<boolean> {
+    this.order.push('finishLateDeposit');
+    return true;
+  }
   async rescheduleQuery(j: UnknownQueryJob, nextAtMs: number, o?: unknown): Promise<boolean> {
     this.order.push('reschedule');
     this.rescheduled.push({ job: j, nextAtMs, ...(o === undefined ? {} : { o }) });
@@ -170,6 +174,9 @@ class FakeLog implements PaymentUnknownLog {
   }
   cancelledAtPg(e: { readonly orderId: string }): void {
     this.lines.push(['cancelledAtPg', e]);
+  }
+  lateDeposit(e: { readonly orderId: string }): void {
+    this.lines.push(['lateDeposit', e]);
   }
   overdue(e: { readonly orderId: string }): void {
     this.lines.push(['overdue', e]);

@@ -80,7 +80,8 @@ describe('포트원 모양 시험 카드', () => {
     ['계좌이체', 'PaymentMethodTransfer'],
     ['가상계좌', 'PaymentMethodVirtualAccount'],
   ])('결제 수단 %s는 %s이고 카드가 없다', async (method, type) => {
-    expect((await portonePay(await make(), { method, card: null })).method).toEqual({ type });
+    expect((await portonePay(await make(), { method, card: null })).method).toMatchObject({ type });
+    expect((await portonePay(await make(), { method, card: null })).method).not.toHaveProperty('card');
   });
 });
 

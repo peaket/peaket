@@ -87,6 +87,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     amount: ['integer', 'NO'],
     status: ['text', 'NO'],
     deposit_due_at: ['timestamp with time zone', 'YES'],
+    deposit_notified_at: ['timestamp with time zone', 'YES'],
     virtual_account_no: ['text', 'YES'],
     virtual_account_bank: ['text', 'YES'],
     idempotency_key: ['text', 'NO'],
@@ -143,14 +144,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0005)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 6개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0006)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 7개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('6');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('7');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -174,7 +175,7 @@ describe('마이그레이션과 표 모양', () => {
   });
 
   test('PRF180_CHECK: 상태 일곱 값과 결제사 셋만 받고, 금액 0 이하·순번 0·결제 수단 참조와 BIN의 짝이 어긋나면 23514로 거절한다 [ASVS v5.0.0-2.3.4]', async () => {
-    for (const status of ['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED']) await expect(insertPayment({ status, ...(status === 'UNKNOWN' ? { next_query_at: new Date() } : {}) }), status).resolves.toBeDefined();
+    for (const status of ['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED']) await expect(insertPayment({ status, ...(status === 'UNKNOWN' || status === 'AWAITING_DEPOSIT' ? { next_query_at: new Date() } : {}) }), status).resolves.toBeDefined();
     for (const p of ['TOSS', 'PORTONE', 'SIMULATOR']) await expect(insertPayment({ pg: p }), p).resolves.toBeDefined();
     await expect(insertPayment({ payment_method_ref: 'r', card_bin: '123456' })).resolves.toBeDefined();
     const bads: Record<string, unknown>[] = [
@@ -421,7 +422,7 @@ describe('승인 명령 접수 ConfirmPayment', () => {
     const f = tossConfirm();
     const first = await confirm(f.request);
     const approvedAtMs = Date.parse('2026-11-09T02:03:04.567Z');
-    await q(`update payment set status = $2::text, approved_at = $3, next_query_at = case when $2::text = 'UNKNOWN' then now() end where order_id = $1`, [f.orderId, status, approved ? new Date(approvedAtMs) : null]);
+    await q(`update payment set status = $2::text, approved_at = $3, next_query_at = case when $2::text in ('UNKNOWN', 'AWAITING_DEPOSIT') then now() end where order_id = $1`, [f.orderId, status, approved ? new Date(approvedAtMs) : null]);
     const before = await ledgerOf(admin, f.orderId);
 
     const reply = await confirm(f.request);

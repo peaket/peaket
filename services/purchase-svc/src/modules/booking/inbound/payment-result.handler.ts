@@ -90,5 +90,6 @@ function toEvent(e: PaymentEventOutput): PaymentResultEvent {
     occurredAt: e.occurredAt,
     eventSeq: e.eventSeq,
     eventKey: e.eventKey,
+    ...(e.depositDueAt !== undefined ? { depositDueAt: e.depositDueAt } : {}),
   };
 }

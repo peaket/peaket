@@ -890,7 +890,8 @@ describe('PaymentResultPuller + 실제 ApplyPaymentResult(사건과 같은 반�
     expect(await orderRow(a.o.id)).toEqual({ status: 'APPROVED', failure_reason: null, payment_event_seq: '2' });
     expect(await historyCauses(a.o.id)).toEqual([...BEFORE_RESULT, 'T10', 'T16']);
     expect(await jobOf(a.o.id)).toBeUndefined();
-    expect((await issueJobOf(a.o.id))?.issue_due_at).toEqual(new Date(approvedAt + ISSUE_WINDOW_MS));
+    // T16의 발권 기한은 max(입금 시각, 반영 시각) + 30분이다(리뷰 고침 M4)
+    expect((await issueJobOf(a.o.id))?.issue_due_at).toEqual(new Date(s.clock.now() + ISSUE_WINDOW_MS));
     expect(seen.pulled).toEqual(['AWAITING_DEPOSIT', 'APPROVED']);
   });
 

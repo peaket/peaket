@@ -180,6 +180,25 @@
         "type": "string",
         "logicalType": "uuid"
       }
+    },
+    {
+      "name": "depositDueAt",
+      "doc": "입금 대기 사건(AWAITING_DEPOSIT)에만 싣는 입금 기한. 결제사가 답에 주지 않았으면 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "AWAITING_DEPOSIT"
+          ]
+        }
+      ]
     }
   ]
 }

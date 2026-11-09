@@ -49,11 +49,12 @@ import {
   decideConfirmAnswer,
   type PaymentConfirmOutcome,
 } from '../domain/confirm-runner.js';
-import { confirmIdemKey, type ConfirmCard, type ConfirmResult, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
+import { confirmIdemKey, type ConfirmCard, type ConfirmResult, type ConfirmVirtualAccount, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
 import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
 import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs } from '../domain/ports.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
+import { depositWriteOf, type DepositWriteDeps } from './deposit-write.js';
 
 /** 반복 타이머(시험이 손으로 부르는 대역을 꽂는다. 기본은 unref한 setInterval·clearInterval) */
 export interface ConfirmRunnerTimer {
@@ -85,6 +86,8 @@ export interface PaymentConfirmRunnerDeps {
   /** 결제 수단 연결값(라벨 키 pay, BUILD_ORDER HOT-145). 없으면 카드 결제는 refMissing 참이다 */
   methodRefs?: PaymentMethodRefs;
   methodRefSignals?: PaymentMethodRefSignals;
+  /** 입금 대기 쓰기의 포트(BUILD_ORDER HOT-151). 없으면 발급 정보를 쓰지 않는다 */
+  deposit?: DepositWriteDeps;
 }
 
 /** 틱 하나의 결과 */
@@ -426,7 +429,7 @@ export class PaymentConfirmRunner {
     const decision = decideConfirmAnswer(answer, target.amount, this.deps.clock.now(), latencyMs, resend, () => this.#linkOf(card));
     if (decision.kind === 'RETRY') return this.#reschedule(job, target, decision.outcome, this.deps.clock.now() + confirmRetryDelayMs(job.attempts + 1));
     if (decision.amountMismatch) this.#safe(() => this.deps.log.amountMismatch({ orderId: target.orderId }));
-    return this.#finish(target, decision.finish, decision.outcome);
+    return this.#finish(target, await this.#withDeposit(target, decision.finish, answer.virtualAccount), decision.outcome);
   }
 
   /** 금액 대조를 통과한 승인 답의 결제 수단 연결값(가린 번호를 넘기지 않는다. 던지지 않는다) */
@@ -507,6 +510,13 @@ export class PaymentConfirmRunner {
   }
 
   /** 답 반영(원장·사건·Outbox·명령 행 지움 한 트랜잭션). 던지면 100ms·400ms 뒤 두 번 다시 한다 */
+  /** 입금 대기 결과에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 던지지 않는다 */
+  async #withDeposit(target: ConfirmTarget, finish: ConfirmFinish, va: ConfirmVirtualAccount | undefined): Promise<ConfirmFinish> {
+    if (finish.status !== 'AWAITING_DEPOSIT' || this.deps.deposit === undefined) return finish;
+    const deposit = await depositWriteOf(this.deps.deposit, { paymentId: target.paymentId, orderId: target.orderId }, va);
+    return deposit === undefined ? finish : { ...finish, deposit };
+  }
+
   async #finish(target: ConfirmTarget, finish: ConfirmFinish, outcome: PaymentConfirmOutcome): Promise<ConfirmRunOutcome> {
     for (let attempt = 0; ; attempt += 1) {
       try {

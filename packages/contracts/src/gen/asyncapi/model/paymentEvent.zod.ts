@@ -23,7 +23,8 @@ export const PaymentEvent = zod.object({
   "latencyMs": zod.int().optional().describe('결제사 승인 응답 시간'),
   "occurredAt": zod.iso.datetime({"offset":true}),
   "eventSeq": zod.int().describe('결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기로 받은 결과와 같은 사건인지 가린다(ADR-0140)'),
-  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값')
+  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값'),
+  "depositDueAt": zod.iso.datetime({"offset":true}).optional().describe('입금 대기 사건(AWAITING_DEPOSIT)에만 싣는 입금 기한. 결제사가 답에 주지 않았으면 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151)')
 })
 
 export type PaymentEvent = zod.input<typeof PaymentEvent>;

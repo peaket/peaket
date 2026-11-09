@@ -418,7 +418,8 @@ describe('조회가 결과를 정한 때', () => {
     await drive(h.resolver());
 
     const { p, events } = await ledger(f);
-    expect(p).toMatchObject({ status: ledgerStatus, failure_category: category, next_query_at: null, pg_confirm_token: null, approved_at: null });
+    // 입금 대기는 다음 조회 시각을 남긴다(BUILD_ORDER HOT-151, 조회 답에 기한이 없어 1시간 뒤다)
+    expect(p).toMatchObject({ status: ledgerStatus, failure_category: category, next_query_at: ledgerStatus === 'AWAITING_DEPOSIT' ? expect.any(Date) : null, pg_confirm_token: null, approved_at: null });
     expect(typesOf(events)).toEqual(['ACCEPTED', 'CONFIRM_SENT', 'UNKNOWN', ledgerStatus, 'RESOLVED']);
     const [, event, resolved] = await outboxOf(f);
     expect(valueOf(event!)).toMatchObject({ type: ledgerStatus, result, eventSeq: 4 });
@@ -781,7 +782,7 @@ describe('리뷰 고침', () => {
 
   test('P-T3_리뷰 고침 M7: UNKNOWN으로 쓰면서 다음 조회 시각을 비울 수 없다(CHECK) [ASVS v5.0.0-2.3.3]', async () => {
     await unknownPayment({ advance: false });
-    await expect(q(`update payment set next_query_at = null where status = 'UNKNOWN'`)).rejects.toMatchObject({ code: '23514', constraint: 'payment_unknown_next_query_check' });
+    await expect(q(`update payment set next_query_at = null where status = 'UNKNOWN'`)).rejects.toMatchObject({ code: '23514', constraint: 'payment_next_query_check' });
   });
 });
 
@@ -881,7 +882,7 @@ describe('문장', () => {
       await client.query('analyze payment');
       const r = await client.query<{ 'QUERY PLAN': [{ Plan: Record<string, unknown> }] }>(`explain (format json) ${claim!.text}`, claim!.values);
       const nodes = planNodes(r.rows[0]!['QUERY PLAN'][0].Plan);
-      expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_unknown_query_idx');
+      expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_query_due_idx');
       expect(nodes.filter((n) => n['Node Type'] === 'Seq Scan' && n['Relation Name'] === 'payment')).toEqual([]);
     } finally {
       await client.query('rollback').catch(() => {});

@@ -184,12 +184,16 @@ describe.each<[Pg, string, string]>([
     expect((await rowOf(b)).card_bin).toBe('433012');
   });
 
-  test.each(['계좌이체', '가상계좌'])(`P-T50_${pg}_③ %s 결제는 두 칸이 비고 refMissing 거짓이다 [ASVS v5.0.0-2.2.1]`, async (method) => {
+  // 시뮬레이터의 가상계좌는 승인이 아니라 입금 대기다(BUILD_ORDER HOT-151)
+  test.each([
+    ['계좌이체', 'APPROVED'],
+    ['가상계좌', 'AWAITING_DEPOSIT'],
+  ])(`P-T50_${pg}_③ %s 결제는 두 칸이 비고 refMissing 거짓이다 [ASVS v5.0.0-2.2.1]`, async (method, status) => {
     const f = await accepted(pg, { method, card: null });
     await drive(makeRunner(ring));
-    expect(await rowOf(f)).toEqual({ status: 'APPROVED', payment_method_ref: null, card_bin: null });
+    expect(await rowOf(f)).toEqual({ status, payment_method_ref: null, card_bin: null });
     const [event] = await eventsOf(f);
-    expect(event).toMatchObject({ type: 'APPROVED', refMissing: false });
+    expect(event).toMatchObject({ type: status, refMissing: false });
     expect(event).not.toHaveProperty('paymentMethodRef');
     expect(event).not.toHaveProperty('cardBin');
   });

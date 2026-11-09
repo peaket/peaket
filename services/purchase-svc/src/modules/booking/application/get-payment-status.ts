@@ -7,6 +7,8 @@
 import type { Clock, Deadline } from '@peaket/platform';
 import {
   decidePaymentStatus,
+  PAYMENT_DEPOSIT_READ_DEADLINE_MS,
+  PAYMENT_DEPOSIT_READ_TRANSIENT,
   PAYMENT_STATUS_WAIT_MAX_MS,
   type PaymentStatusBody,
   type PaymentStatusProblem,
@@ -14,7 +16,7 @@ import {
   paymentStatusWaitMs,
   paymentStatusWakes,
 } from '../domain/payment-status.js';
-import type { PaymentStatusReads, PaymentStatusWaiters } from '../domain/ports.js';
+import type { PaymentDepositReader, PaymentStatusReads, PaymentStatusWaiters } from '../domain/ports.js';
 
 /** 쓰임새가 쓰는 포트와 설정 */
 export interface GetPaymentStatusDeps {
@@ -22,6 +24,8 @@ export interface GetPaymentStatusDeps {
   waiters: PaymentStatusWaiters;
   /** issueDelayed 판정의 '지금'(벽시계 now) */
   clock: Clock;
+  /** 입금 대기의 은행·계좌번호·입금 기한 읽기(payment-svc GetPayment, BUILD_ORDER HOT-151). 없으면 그 칸을 싣지 않는다 */
+  deposits?: PaymentDepositReader;
 }
 
 /** 요청 하나 */
@@ -60,6 +64,32 @@ export class GetPaymentStatus {
    * @throws Error purchase DB 오류(읽기 실패는 그대로 던져 500. 기다리던 요청도 같다)
    */
   async execute(c: GetPaymentStatusCommand): Promise<GetPaymentStatusResult> {
+    const r = await this.answer(c);
+    return r.status === 200 && r.body.status === 'AWAITING_DEPOSIT' ? this.withDepositInfo(c, r.body) : r;
+  }
+
+  /**
+   * 입금 대기 본문에 은행·계좌번호·입금 기한을 붙인다(BUILD_ORDER HOT-151). 포트가 없거나 안내가 없으면 그 칸 없이 답한다. 던지지 않는다.
+   * 일시 실패(포트가 던진 경우와 남은 시간이 없어 부르지 못한 경우 포함)는 입금 대기로 답하지 않고 처리 중(RESERVED)으로 답한다(코드 리뷰 H1):
+   * 화면은 입금 대기를 끝난 상태로 보고 다시 묻지 않으므로, 계좌 없는 입금 대기로 답하면 입금할 수 없는 화면에서 끝난다. 일시 실패가 이어져도 답은 이어지고 상한은 화면의 long polling 규칙이다.
+   * 데드라인은 min(300ms [가정], 요청 남은 시간)이다
+   */
+  private async withDepositInfo(c: GetPaymentStatusCommand, body: PaymentStatusBody): Promise<GetPaymentStatusResult> {
+    const { deposits } = this.deps;
+    if (deposits === undefined) return { status: 200, body };
+    const stillProcessing: GetPaymentStatusResult = { status: 200, body: { ...body, status: 'RESERVED' } };
+    const deadlineMs = c.deadline ? Math.min(PAYMENT_DEPOSIT_READ_DEADLINE_MS, Math.floor(c.deadline.remainingMs())) : PAYMENT_DEPOSIT_READ_DEADLINE_MS;
+    if (deadlineMs <= 0) return stillProcessing;
+    try {
+      const virtualAccount = await deposits.read(c.orderId, { deadlineMs });
+      if (virtualAccount === PAYMENT_DEPOSIT_READ_TRANSIENT) return stillProcessing;
+      return { status: 200, body: virtualAccount === undefined ? body : { ...body, virtualAccount } };
+    } catch {
+      return stillProcessing;
+    }
+  }
+
+  private async answer(c: GetPaymentStatusCommand): Promise<GetPaymentStatusResult> {
     const { reads, waiters, clock } = this.deps;
     const first = this.judge(c, await reads.read(c.orderId), undefined);
     if (first.kind !== 'WAIT') return first.result;
