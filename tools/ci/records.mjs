@@ -22,8 +22,8 @@ const RANK = { 예정: 0, 진행: 1, 완료: 2 };
 const TASK_TABLE_HEADER = '| WBS ID | 작업 | 산출물 | 담당 | 추정(일) | 선행 | 관련 ID | 상태 |';
 export const LOG_FORMAT = '--format=%H%x1f%h%x1f%cs%x1f%s%x1f%b%x1e';
 
-// 표 행의 칸. '\|'와 코드 표시(`…`) 속 '|'는 칸 안의 글자다(문서 점검 check_all.py와 같은 셈)
-function cells(row) {
+// 표 행의 칸. '\|'와 코드 표시(`…`) 속 '|'는 칸 안의 글자다(문서 점검 check_all.py와 같은 셈). ledger.mjs도 쓴다
+export function cells(row) {
   const out = [];
   let cur = '';
   let code = false;

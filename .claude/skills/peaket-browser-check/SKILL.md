@@ -1,6 +1,6 @@
 ---
 name: peaket-browser-check
-description: PEAKET의 화면이 바뀌는 단계 하나를 대조(docs/architecture.md §8.6의 5단계) 뒤에 Claude in Chrome으로 눌러 보고 docs/review/browser-check/<단계 ID>.md에 결과를 남긴다. 사용자가 '브라우저 확인'을 하라고 하거나, 정본 기준 절차에서 대조가 끝난 그 단계일 때만 쓴다. 일반 웹 탐색이나 E2E 시험 작성에는 쓰지 않는다.
+description: PEAKET의 화면이 바뀌는 기능 묶음(ADR-0256)을 게이트(docs/architecture.md §8.6 묶음 절차의 8) 뒤에 Claude in Chrome으로 눌러 보고 docs/review/browser-check/<단계 ID>.md에 결과를 남긴다. 사용자가 '브라우저 확인'을 하라고 하거나, 정본 기준 절차에서 대조가 끝난 그 단계일 때만 쓴다. 일반 웹 탐색이나 E2E 시험 작성에는 쓰지 않는다.
 ---
 
 # 브라우저 확인(ADR-0178, 조건은 ADR-0167 결정 5)
@@ -11,7 +11,7 @@ description: PEAKET의 화면이 바뀌는 단계 하나를 대조(docs/architec
 
 ## 언제 하나
 
-- 화면이 바뀌는 단계에서, 대조(`node tools/ci/trace-check.mjs`)가 통과한 뒤에 한다.
+- 화면이 바뀌는 묶음에서, 게이트(시험 ID 대조 `node tools/ci/trace-check.mjs`, 장부 확인 `node tools/ci/ledger.mjs --batch <묶음> --require`)가 통과한 뒤에 한다.
 - 화면이 없는 단계(서버만, 도구만)는 누르지 않고 기록도 만들지 않는다.
 - E2E 시험을 쓰는 단계는 하지 않는다(E2E가 본다).
 
@@ -32,7 +32,7 @@ description: PEAKET의 화면이 바뀌는 단계 하나를 대조(docs/architec
 
 ## 절차
 
-1. **대본 만들기**: 그 단계의 범위 목록(`docs/PROGRESS.md` '다음 할 일'의 ID)에서 화면 번호(SCR)와 시험 ID를 고른다. 화면마다 `docs/design/d5-screen-blueprint.md`의 그 화면 절(상태·동작·문구)을, 시험 ID마다 정본 시험 표의 통과 기준을 읽어 '이렇게 하면 → 이렇게 보인다'로 시나리오를 세운다. 대본에는 ID와 시나리오 이름만 적고 정본의 문구를 옮겨 적지 않는다(누를 때 정본을 보고 견준다).
+1. **대본 만들기**: 그 묶음의 장부 범위(`node tools/ci/ledger.mjs --batch <묶음>`이 뽑은 항목)에서 화면 번호(SCR)와 시험 ID를 고른다. 화면마다 `docs/design/d5-screen-blueprint.md`의 그 화면 절(상태·동작·문구)을, 시험 ID마다 정본 시험 표의 통과 기준을 읽어 '이렇게 하면 → 이렇게 보인다'로 시나리오를 세운다. 대본에는 ID와 시나리오 이름만 적고 정본의 문구를 옮겨 적지 않는다(누를 때 정본을 보고 견준다).
 2. **브라우저 연결 확인**: `list_connected_browsers`로 시험용 프로필이 연결되어 있는지 본다. 없으면 결과 파일에 '못 함(연결 없음)'과 까닭을 적고 Playwright로 대신 본 뒤, 다음에 연결된 턴에 다시 누른다(docs/PROGRESS.md 턴 규칙).
 3. **탭 열기**: `tabs_context_mcp`로 탭 묶음을 확인하고 `tabs_create_mcp`로 새 탭을 연다.
 4. **시나리오마다 확인**:

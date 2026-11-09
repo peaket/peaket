@@ -35,7 +35,7 @@ python -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
 | `test_api_contract.py` | `api` 검사의 openapi 계약 부분(기술 검토 낮음-031·032): 처음 맞는 접두사 규칙과 경로·작업 `servers`로 정한 호스트, 호스트가 하나로 정해지지 않는 작업, `securitySchemes`에 없는 인증 방식 이름(작업·전역), `security`도 전역 `security`도 없는 작업(전역이 빈 목록일 때 포함), `security: []` 공개 작업, 보고 숫자(`api`·`api_hosts`·`api_problem_exempt`. Problem 선언은 `application/problem+json`, `components/responses` 참조, `Problem` 스키마 참조 셋 다), Problem 예외와 예외가 아닌 오류 응답, 줄 규칙과 YAML 읽기의 작업 수 대조, 읽지 못한 명세. openapi 글을 넣어 `main()`과 같은 순서(`check_yaml` → `check_api` → `check_api_contract`)로 돌린다 |
 | `test_yaml_docs.py` | `yaml` 검사의 여러 문서와 Helm 틀(BUILD_ORDER FND-110): `---`로 이은 쿠버네티스 매니페스트는 문서마다 따로 읽고(같은 키가 두 번인지는 문서 안에서만, 줄 번호는 파일 기준), Helm 차트(`Chart.yaml`이 있는 폴더)의 `templates/`는 건너뛴다 |
 
-새 검사를 더하거나 고칠 때는 같은 방식으로 시험을 먼저 쓴다(docs/architecture.md §8.6의 5).
+새 검사를 더하거나 고칠 때는 같은 방식으로 시험을 먼저 쓴다(docs/architecture.md §8.6의 7 시험 규칙).
 
 ## 검사 항목
 

@@ -25,6 +25,7 @@
 | `test-reports.mjs` | 시험 보고서 읽기(vitest JSON, JUnit XML). `trace-check.mjs`·`asvs-report.mjs`가 같이 쓴다 | — |
 | `trace-check.mjs` | 정본 ID 대조(docs/architecture.md §8.6의 5단계, ADR-0178). 범위 목록의 시험 ID마다 이름에 그 ID를 단 시험이 통과했는지 시험 보고서(vitest JSON, JUnit XML)로 봅니다. `X-T12`·`FR-073` 꼴은 가운데 `-`를 빼고 적은 이름(`FR073_…`)도 맞고, `S-T2`는 `S-T27`에 걸리지 않습니다. 통과한 시험이 없는 ID가 있으면 종료 코드 1입니다. ID는 시험 이름 자체에 답니다(`node --test`의 JUnit 보고서는 `describe` 이름을 싣지 않습니다). 같은 ID에 통과와 실패가 섞이면 통과로 세므로, 시험 실행 자체가 통과했는지는 따로 봅니다 | 단계를 끝낼 때(docs/PROGRESS.md 턴 규칙) |
 | `records.mjs` | 공용 기록 표 맞추기(ADR-0190 결정 3). 커밋 본문의 정합 점검 행(`정합 점검:`으로 시작하는 R 행)과 BUILD_ORDER 체크로 docs/review/consistency-review.md R 표, docs/00-summary.md §4, docs/wbs/wbs.md·wbs.csv 상태 칸을 맞춥니다. `--check`는 고칠 것이 있으면 1, 읽기·실행 오류는 2, `--next-r`는 다른 갈래의 작업 가지까지 본 다음 R 번호. 지난 커밋의 잘못된 행과 겹친 번호는 경고하고 건너뜁니다. 갈래 1(루프)만 돌립니다 | 루프 턴(손으로) |
+| `ledger.mjs` | 완성 장부(ADR-0256 결정 2, docs/architecture.md §8.6). 정본의 시험 시나리오 표 판정 기준을 ①②③ 단위로 나눈 항목, 시나리오가 가리키지 않는 FR·NFR·POL, ASVS 추적 표의 행마다 상태 하나(자동 시험·ID만·측정·사람 확인·미검증·다른 단계·없앰·해당 없음·빈칸)와 등급(A·B·C)을 정해 `docs/review/ledger/`에 씁니다. 자동 시험은 시험 이름에 ID와 바로 뒤 세부 번호(`S-T23 ①`)가 함께 있는 것이고, 손으로 정하는 상태·등급은 `docs/review/ledger-notes.md`에서 읽습니다. `--check`는 고칠 것이 있으면 1, `--scope`·`--batch <묶음> --require`는 범위에 빈칸이나 ID만이 있으면 1, notes·범위·인자 오류는 2. 시험 통과 여부는 보지 않습니다(`trace-check.mjs` 몫). 첫 줄이 `// asvs-report: ignore`인 `tools/ci` 아래 파일은 건너뜁니다 | 묶음을 끝낼 때(`--batch <묶음> --require`), 장부를 고칠 때 |
 | `git-fixture.mjs` | 시험용 임시 git 저장소. 시험만 씁니다 | `*.test.mjs` |
 
 ## 로컬에서 돌리기

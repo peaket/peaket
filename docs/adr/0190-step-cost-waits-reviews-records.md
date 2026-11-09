@@ -1,6 +1,6 @@
 # ADR-0190: 단계 하나의 값을 줄인다 — 단계 안 기다림을 겹치고, 리뷰는 한 바퀴, 기록은 한 번만 쓰고, 작은 이웃 단계는 합친다
 
-- **상태**: 채택(2026-11-04, 소유자 결정 "추천대로 적용"). ADR-0189(구간 넷 × 갈래 셋)를 보완한다. ADR-0189가 일의 순서를 고쳤다면, 이 ADR은 단계 하나에 드는 시간을 줄인다. 단계·시험·리뷰·측정은 빼지 않는다(같은 날 소유자 결정 "포트폴리오로서의 깊이는 살려야").
+- **상태**: 채택(2026-11-04, 소유자 결정 "추천대로 적용"). ADR-0189(구간 넷 × 갈래 셋)를 보완한다. ADR-0189가 일의 순서를 고쳤다면, 이 ADR은 단계 하나에 드는 시간을 줄인다. 단계·시험·리뷰·측정은 빼지 않는다(같은 날 소유자 결정 "포트폴리오로서의 깊이는 살려야"). 2026-11-10: 결정 1·2(단계 안 차례, 리뷰 한 바퀴)와 결정 5(작은 이웃 단계 합치기), 결정 6(감독 프롬프트의 '한 턴 = 한 단계'·삼자 절차)은 [ADR-0256](0256-feature-batches-completion-ledger-risk-grades.md)이 기능 묶음 절차로 바꿨다. 결정 3(기록은 한 번)·4(측정 중 겹치기)는 그대로다.
 - **관련**: [docs/PROGRESS.md](../PROGRESS.md) 턴 규칙, [docs/BUILD_ORDER.md](../BUILD_ORDER.md), [docs/lanes/lane2.md](../lanes/lane2.md)·[docs/lanes/lane3.md](../lanes/lane3.md), [docs/progress-archive.md](../progress-archive.md), [docs/architecture.md](../architecture.md) §8.6, ADR-0178(정본 기준 개발), ADR-0189, `tools/ci/records.mjs`
 - **관련 ID**: 없음(진행 절차만 바꾼다)
 

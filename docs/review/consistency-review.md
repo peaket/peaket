@@ -550,6 +550,8 @@
 | R-435 | 구간마다 해설서를 맞추는 규칙(ADR-0189 결정 5의 ②)을 소유자가 개발 완료 뒤 한 번으로 바꿨다 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/adr/0177·0189·0252, docs/architecture.md | 규칙 줄과 SEG 네 줄 고침, 새 ADR, 문서 점검 오류 0 | 수정 완료 |
 | R-436 | 해설서 개편 가지가 develop과 갈라져 메인 폴더로 합쳐지지 않았고, 개편본의 RB-05 건너뛰기 수가 ADR-0243 이전 값(12만)이었다 | docs/walkthrough/, tools/walkthrough/, docs/PROGRESS.md | 소유자 결정으로 커밋 하나로 합치고 충돌 파일 2개의 건너뛰기 수를 42만으로 고쳤다 | 수정 완료 |
 | R-437 | 덮개 표가 커밋되지 않은 docs/superpowers/ 두 파일을 가리켜 CI docs-check가 실패했다(CI 42627904390) | docs/walkthrough/coverage.md | 두 항목을 지웠다 | 수정 완료 |
+| R-438 | 구매 경로가 화면에서 실제 서버의 결제 승인까지 이어지지 않았다. 시범에서 찾은 것: 새로고침이 결제 시도 3회를 소모하고, 허용 결제 수단을 브라우저만 확인하고, 결제 정지 중 남은 시간을 응답이 무시하고, 좌석 스냅샷 바이트 순서가 서버와 화면에서 달랐고, 시험이 틀린 구현 26%를 놓쳤다 | services/purchase-svc, services/payment-svc, apps/web, packages/seatmap, specs/seat_lifecycle.qnt, loadtest/micro, docs/features/seat-hold.md, docs/features/payment.md, docs/frontend.md, docs/data.md, docs/observability.md, docs/verification.md, docs/security/asvs/payment.md, ADR-0253·0254·0255, docs/review/pilot-purchase-path-coverage.md | 기능 묶음 하나로 만들어 실제 서버로 잇고 재현 시험, 장애 주입, 규칙 모델, 틀린 구현 검사, 번갈아 재는 Lua 비교로 실패할 수 있음을 확인했다 | 수정 완료 |
+| R-439 | 시범 묶음(c9ddbb9c)이 결제 화면 첫 JS를 182.3kB로 늘려 §5.8 '결제 화면' 180kB를 넘었고, 대기 패널 시각 비교가 시계 멈춤 경쟁으로 한 번 멈췄다(CI 42697021230) | apps/web/src/_pages/checkout/ui/CheckoutLive.tsx, CheckoutClient.tsx, CheckoutPreview.tsx, HoldExpiredDialog.tsx(새 파일), tools/web-checks/visual/queue-panel.spec.mjs | 결제 시도 흐름과 홀드 만료 대화상자를 필요할 때 싣는다(이 PC 운영 빌드에서 결제 화면 첫 JS 182.3kB 상당 → 169.7kB, 다른 경로는 그대로). pauseAt이 지난 시각을 받으면 다시 읽어 멈춘다 | 수정 완료 |
 
 ## 4. 숫자 일치표
 
