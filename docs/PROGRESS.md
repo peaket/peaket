@@ -142,6 +142,8 @@
 - 시범 묶음(R-438): 결제 SDK 로딩 실패 `sdk_load_failed`가 콘솔 기록까지다(웹에 화면 관측 전송 경로가 아직 없다).
 - 시범 묶음(R-438): 포트원 결제창에 구매자 정보 `customer`를 아직 넘기지 않는다(서버가 보내지 않고, SDK 칸 이름은 openapi가 "연동 때 확인"으로 뒀다).
 - 시범 묶음(R-438): Valkey TIME에 묶인 `exp <= now` 1ms 경계는 틀린 구현 검사로 넣어 보지 못했다. purchase-svc 통합 시험 전체는 틀린 구현 검사 뒤 로컬에서 다시 돌리지 않았다(CI 몫).
+- CI 흔들림(214103ad, 실행 42707868451): 대기실 FE-T3 WebKit "T=0 두 호출(진입·입장 확정)과 대기열 파일 GET에 CORS 사전 요청(OPTIONS)이 없다"가 1.5분 만에 `page.evaluate: Target page, context or browser has been closed`로 실패했다가, 실패한 잡만 다시 돌려 통과했다. 대기실 코드는 바뀌지 않았다(tools/web-checks/queue-room/t0.spec.mjs).
+- CI 흔들림(c9ddbb9c, 실행 42697021230): 월렛 Lighthouse LCP 7,302ms가 한도 7,255ms(기준선 + 25%)를 넘었다가 다음 실행에서 통과했다. 월렛 화면은 바뀌지 않았다(tools/web-checks/budgets/lighthouse.spec.mjs).
 
 ## 미해결
 OPEN[28]: 실제 결제사를 부르는 시험의 범위를 정해 주세요(BUILD_ORDER HOT-145, 2026-11-09 갈래 1). 일은 막히지 않고 시뮬레이터로 계속합니다. (가) 토스 공개 시험 키 스모크를 켤까요? 추천: 켠다. 결제창 없이 되는 호출만 하고 결제는 만들지 않으며 응답 모양과 대응표를 공식 문서와 대조합니다(`tools/pg-smoke/toss-smoke.mjs`, 매일 1회). 켜려면 소유자가 저장소 변수 `PEAKET_PG_SMOKE_ENABLED=true`와 시크릿 `TOSS_DOCS_TEST_SECRET_KEY`를 등록합니다. 안 켜면 응답 모양이 바뀌어도 알 길이 없습니다. (나) 결제창 인증이 필요한 항목(정상 승인, 취소, 가상계좌, 가린 번호 실물: P-T16 샌드박스, P-T33, P-T50 ⑦)과 포트원 테스트 채널은 결제사 계정이 필요합니다. 계정을 만들까요? 추천: 지금은 만들지 않고 출시 전 단계로 미룬다(소유자 제약 '외부 계정 없음'). 미루면 실제 결제사 동작은 공식 문서 대조까지만 확인된 상태로 남습니다.
