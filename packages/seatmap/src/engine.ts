@@ -10,7 +10,7 @@ import { buildGrids, cameraFit, hitAtScreen, type Camera, type SectionGrid } fro
 import { FLAG, decodeLayout, sectionOf, seatIdOf, type DecodedLayout, type SeatMapColumnsFile } from './layout';
 import { overviewPalette, pointInPolygon, sectionStatus, sectionTierMask, sectionTiers, STATUS_LABEL, tierFace } from './overview';
 import { drawSeat, seatState, seatStyle, type ColorMode, type Ctx2D } from './paint';
-import { applyDelta, applySnapshot, decodeSnapshot, STATE, type DeltaDecision, type Frame, type SectionVersions } from './wire';
+import { applyDelta, applySnapshot, decodeSnapshot, STATE, type DeltaDecision, type Frame, type SectionVersions, type Snapshot } from './wire';
 
 /** 좌석 한 변(cm) [가정] */
 export const SEAT_CM = 50;
@@ -135,6 +135,27 @@ export class SeatMapEngine {
     if (d.kind === 'apply') for (const s of d.sections) this.cache.invalidate(s);
     else this.cache.clear();
     return d;
+  }
+
+  /** 구역 하나의 스냅샷을 반영한다(갭·세대 다시 맞추기, §4.4.1). 그 구역의 비트맵만 버린다 */
+  applySectionSnapshot(snap: Snapshot): void {
+    if (snap.layoutVersion !== this.L.layoutVersion) throw new Error(`스냅샷 layoutVersion ${snap.layoutVersion} ≠ 좌석맵 ${this.L.layoutVersion}`);
+    const head = snap.sections[0];
+    if ((snap.flags & 1) === 0 || snap.sections.length !== 1 || !head || head.sectionIndex >= this.L.S) throw new Error('구역 하나의 스냅샷이 아니다');
+    const from = this.L.sectionStart[head.sectionIndex]!;
+    const to = this.L.sectionEnd[head.sectionIndex]!;
+    const before = this.state.slice(from, to + 1);
+    applySnapshot(this.state, snap, (s) => (s < this.L.S ? [this.L.sectionStart[s]!, this.L.sectionEnd[s]!] : undefined));
+    // 스냅샷의 점유는 '선택 불가'뿐이다. 이미 아는 값(다른 분 선택·판매)은 지키고, 내 좌석은 내 표시가 남게 다른 분 선택으로 둔다(서버도 내 홀드를 홀드로 보낸다)
+    for (let k = from; k <= to; k++) {
+      if (this.state[k] !== STATE.UNAVAILABLE) continue;
+      const was = before[k - from]!;
+      if (was === STATE.HELD || was === STATE.SOLD) this.state[k] = was;
+      else if (this.isMine(k)) this.state[k] = STATE.HELD;
+    }
+    this.versions.seatEpoch = Math.max(this.versions.seatEpoch, snap.seatEpoch);
+    this.versions.version[head.sectionIndex] = head.sectionVersion;
+    this.cache.invalidate(head.sectionIndex);
   }
 
   setTheme(theme: ColorMode): void {

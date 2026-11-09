@@ -6,7 +6,10 @@
 // - POST /sink?d=<ms>     받은 X-Purchase-Seq를 받은 차례대로 적고 d밀리초 뒤 204로 답한다. 동시에 처리 중인 요청 수의 최댓값도 잰다
 //                         (잠금이 응답까지 쥐고 있으면 1이다)
 // - GET /sink · DELETE /sink  적은 차례와 최댓값 읽기·비우기
+// - WebSocket /ws/seats?mode=  하위 프로토콜 PoC(ADR-0240): ok(좌석 프로토콜을 골라 18바이트 프레임 하나), none(고르지 않음), reject(핸드셰이크 401), close4401(연 뒤 4401)
+// - GET /ws-log            마지막 핸드셰이크의 Sec-WebSocket-Protocol
 // 보안 맥락이어야 crypto.subtle·Web Locks가 있으므로 127.0.0.1에 붙는다(PEAKET_SERVE_HOST로 바꿀 수 있다: 컨테이너는 같은 곳에서 띄운다).
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
@@ -23,6 +26,7 @@ const MODULES = new Set(['crypto', 'store', 'signer', 'index']);
 let sink = [];
 let inflight = 0;
 let maxInflight = 0;
+let wsProtocols = '';
 
 // 타입 지우기는 실험 기능이라 경고를 한 번 낸다. 검사 출력에 섞이지 않게 그 경고만 끈다
 process.removeAllListeners('warning');
@@ -46,6 +50,7 @@ createServer(async (req, res) => {
       return send(res, 200, 'text/javascript; charset=utf-8', stripTypeScriptTypes(ts));
     }
     if (req.method === 'GET' && u.pathname === '/vectors.json') return send(res, 200, 'application/json', await readFile(fileURLToPath(VECTORS)));
+    if (req.method === 'GET' && u.pathname === '/ws-log') return send(res, 200, 'application/json', JSON.stringify({ protocols: wsProtocols }));
     if (u.pathname === '/sink') {
       if (req.method === 'DELETE') {
         sink = [];
@@ -69,4 +74,20 @@ createServer(async (req, res) => {
   } catch (e) {
     send(res, 500, 'text/plain', String(e));
   }
-}).listen(port, host, () => console.log(`purchase signer check server http://${host}:${port}/`));
+})
+  .on('upgrade', (req, socket) => {
+    const u = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    const mode = u.searchParams.get('mode');
+    if (u.pathname !== '/ws/seats') return socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    wsProtocols = String(req.headers['sec-websocket-protocol'] ?? '');
+    if (mode === 'reject') return socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    const accept = createHash('sha1').update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    const chosen = mode === 'none' ? '' : 'Sec-WebSocket-Protocol: peaket.seats.v1\r\n';
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${chosen}\r\n`);
+    socket.on('error', () => undefined);
+    // 브라우저가 보낸 닫힘에 답하고 끊는다(프레임을 풀 필요가 없다)
+    socket.on('data', () => socket.end());
+    if (mode === 'close4401') return socket.write(Buffer.from([0x88, 2, 4401 >> 8, 4401 & 255]));
+    if (mode === 'ok') socket.write(Buffer.concat([Buffer.from([0x82, 18]), Buffer.alloc(18, 1)]));
+  })
+  .listen(port, host, () => console.log(`purchase signer check server http://${host}:${port}/`));

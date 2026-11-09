@@ -605,7 +605,7 @@ components:
       payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 2, u64 serverTimeMs, u64 echoClientTimeMs. 서버가 15초 [가정]마다 보내고, TimeSync를 받으면 바로 보내며 받은 clientTimeMs를 echoClientTimeMs에 싣는다(그 밖에는 0, ADR-0110). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
     BatchInterval:
       contentType: application/octet-stream
-      payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 3, u16 intervalMs(100 또는 Degraded 1000). 묶음 간격이 바뀔 때만 보낸다. 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
+      payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 3, u16 intervalMs(100 또는 Degraded 1000). 연결 직후 한 번과 묶음 간격이 바뀔 때 보낸다(ADR-0240). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4.1' }
     TimeSync:
       contentType: application/octet-stream
       payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 18, u64 clientTimeMs(보낼 때의 단조 시계 값). 클라이언트가 연결 직후와 60초 [가정]마다 보내고, 서버는 바로 하트비트(type 2)의 echoClientTimeMs로 돌려준다. 클라이언트는 왕복으로 서버 시각 차를 잰다(추천 적용 2026-10-28, ADR-0110). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4' }

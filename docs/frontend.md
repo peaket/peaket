@@ -772,7 +772,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- |
 | 1 | 서버 → 클라이언트 | `SeatDeltaBatch` | `u64 serverTimeMs`(묶음을 보낸 서버 시각), `u16 maxWaitMs`(묶음 안에서 가장 먼저 바뀐 변경이 보내질 때까지 기다린 시간, ADR-0110), `u32 seatEpoch`(회차 세대. 한 묶음에는 한 세대만 싣는다, 기술 검토 중간-040), `u16 sectionCount`, 구역마다 `u16 sectionIndex`, `u32 sectionVersion`, `u16 count`, 그리고 `count`번 `u16 seatOffset`(그 구역 `seatIndexRange.from`에서의 거리), `u8 state` |
 | 2 | 서버 → 클라이언트 | `Heartbeat` | `u64 serverTimeMs`, `u64 echoClientTimeMs`(15초마다. `TimeSync`를 받으면 바로 보내고 받은 `clientTimeMs`를 싣는다. 그 밖에는 0, ADR-0110) |
-| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(100 또는 Degraded 1000, 바뀔 때만) |
+| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(100 또는 Degraded 1000, 연결 직후 한 번과 바뀔 때, ADR-0240) |
 | 16 | 클라이언트 → 서버 | `SubscribeSections` | `u16 count`, `count`번 `u16 sectionIndex`. 매번 지금 구독할 전체 집합을 보낸다(증분이 아니다) |
 | 18 | 클라이언트 → 서버 | `TimeSync` | `u64 clientTimeMs`(보낼 때의 `performance.now()`). 연결 직후와 60초 [가정]마다 보낸다(ADR-0110) |
 
@@ -794,6 +794,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
   - 4403과 4429로 닫힌 수는 텔레메트리(§5.16)에 닫힘 코드와 함께 보낸다. 정상 화면에서는 0이어야 한다. 지표 이름은 wbs 2.6.4에서 정한다 [가정]. 시험은 seat-hold S-T31이다.
 - **살아 있음**: 35초 동안 어떤 프레임도 없으면 끊고 다시 연결한다. 다시 붙으면 `SubscribeSections`를 먼저 보내고, 구독 구역의 스냅샷을 받는다.
 - **대체**: 게이트웨이가 하위 프로토콜 값을 읽어 검증하지 못하면(PoC wbs 2.6.4), 연결한 뒤 2초 안에 `type` 17 `Auth{u16 length, 토큰 바이트}`를 보내는 방식으로 바꾼다.
+- **핸드셰이크 거절(2026-11-09, ADR-0240)**: 게이트웨이가 핸드셰이크에서 토큰을 거절하면 브라우저에는 닫힘 코드 1006만 보인다(세 엔진 확인). 그래서 한 번도 열리지 못한 닫힘이 3번 [가정] 이어지면 HTTP로 토큰을 확인하고(스냅샷 경로), 401·403이면 `ended`로 간다. 4403은 좌석맵 파일과 스냅샷을 다시 받고 한 번만 새로 붙으며, 다시 4403이면 끝낸다. 실패 횟수는 10초 [가정] 붙어 있어야 처음으로 돌린다. 여는 중에 10초 [가정] 답이 없으면 포기하고 다시 붙는다.
+- **구현 위치(2026-11-09, ADR-0240)**: 연결·시계·다시 맞추기는 `packages/seatmap`의 `connection`·`clock`·`delta-sync`이고 Worker에서 돈다. 화면 상태 기계는 `apps/web _pages/seats/model/connection-machine`이다. 화면에 잇는 일은 HOT-357이다.
 
 #### 4.4.2 좌석 스냅샷 이진 형식
 

@@ -126,6 +126,19 @@ export function encodeSubscribe(sections: readonly number[]): Uint8Array {
   return u8;
 }
 
+/** 첫 메시지 인증(type 17, 게이트웨이가 하위 프로토콜을 못 읽을 때의 대체, docs/frontend.md §4.4.1) */
+export function encodeAuth(token: string): Uint8Array {
+  const bytes = new TextEncoder().encode(token);
+  if (bytes.byteLength > 65_535) throw new WireError('토큰이 너무 길다');
+  const u8 = new Uint8Array(4 + bytes.byteLength);
+  const v = new DataView(u8.buffer);
+  v.setUint8(0, 1);
+  v.setUint8(1, 17);
+  v.setUint16(2, bytes.byteLength, true);
+  u8.set(bytes, 4);
+  return u8;
+}
+
 /** 시계 맞추기 요청(10바이트) */
 export function encodeTimeSync(clientTimeMs: number): Uint8Array {
   const u8 = new Uint8Array(10);
