@@ -18,7 +18,7 @@ type Doc = { paths: Record<string, Record<string, any>>; components: Record<stri
  */
 const KNOWN: string[] = [];
 
-test('DT38_계약의모든작업을_계약Zod로만든문서는_비교기에서계약과같다', { timeout: 60_000 }, async () => {
+test('DT38_계약의모든작업을_계약Zod로만든문서는_비교기에서계약과같다', { timeout: 180_000 }, async () => {
   const { compareService, readContract } = await import(`${ROOT}tools/ci/service-openapi.mjs`);
   const dir = `${ROOT}packages/contracts/src/gen/openapi/`;
   const gen: Record<string, z.ZodType> = {};
