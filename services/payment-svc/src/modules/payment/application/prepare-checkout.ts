@@ -1,12 +1,13 @@
-// 결제창 준비 쓰임새(docs/features/payment.md §2.2 '선택기의 첫 구현', BUILD_ORDER PRF-190). 결제사를 부르지 않는다. 쓰기는 시험 재개의 payment_entry_trial뿐이고 PRF-202가 더한다.
+// 결제창 준비 쓰임새(docs/features/payment.md §2.2 '선택기의 첫 구현', BUILD_ORDER PRF-190). 결제사를 부르지 않는다. 쓰기는 시험 재개의 payment_entry_trial뿐이다(BUILD_ORDER PRF-202).
 // 새 결제 일시 정지(BUILD_ORDER PRF-201): 고른 결제사가 정지면 PaymentNewPausedError다. 재생은 정지를 읽지 않고, 시험 재개에서 받은 주문은 다시 통과한다.
 import type { Clock } from '@peaket/platform';
 import { PaymentInputError } from '../domain/confirm-command.js';
+import { admitsEntryTrial, entryTrialDraw } from '../domain/entry-pause-judge.js';
 import { LogGate } from '../domain/log-gate.js';
 import type { CheckoutValues, PayMethod, PgName } from '../domain/payment-gateway.js';
 import { type EntryPauses, isEntryPaused, PaymentNewPausedError } from '../domain/entry-pause.js';
 import { allowedPayMethods, checkoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
-import type { CallBudget, EntryPauseReader, EntryTrialReader, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
+import type { CallBudget, EntryPauseReader, EntryTrialSignals, EntryTrialStore, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
 import { checkoutDepositDueAtMs } from '../domain/virtual-account.js';
 
 /** 결제사를 고르지 못한 경보 로그의 간격 1분 [가정](결제사·까닭마다) */
@@ -16,8 +17,12 @@ export interface PrepareCheckoutDeps {
   selection: PgSelectionReader;
   /** 새 결제 일시 정지 행(파드 캐시, BUILD_ORDER PRF-201) */
   pauses: EntryPauseReader;
-  /** 시험 재개로 받은 주문(BUILD_ORDER PRF-201) */
-  trials: EntryTrialReader;
+  /** 시험 재개로 받은 주문(BUILD_ORDER PRF-201·PRF-202) */
+  trials: EntryTrialStore;
+  /** 시험 재개 추첨값(0~9999)을 주문과 정지 행 판 번호로 뽑는다. 없으면 entryTrialDraw다(BUILD_ORDER PRF-202) */
+  drawEntryTrial?: (orderId: string, version: number) => number;
+  /** 시험 재개 지표. 없으면 세지 않는다(BUILD_ORDER PRF-202) */
+  trialSignals?: EntryTrialSignals;
   gateways: PaymentGateways;
   channels: PgChannelTable;
   defaults: PgPlatformDefaults;
@@ -96,11 +101,12 @@ export class PrepareCheckout {
     }
   }
 
-  /** 고른 결제사가 정지면 던진다. 시험 재개에서 이미 받은 주문의 재호출만 지나간다(5% [가정] 추첨은 PRF-202). 시험 행을 읽지 못하면 통과시키지 않는다 */
+  /** 고른 결제사가 정지면 던진다. 시험 재개(5% [가정])에 뽑힌 주문만 지나간다. 뽑기는 시험마다 주문별로 고정이라 떨어진 주문은 시험 행을 읽거나 쓰지 않는다(BUILD_ORDER PRF-202 코드 리뷰). 시험 행을 읽지 못하면 통과시키지 않는다 */
   async #passPause(pg: PgName, pauses: EntryPauses, { orderId }: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<void> {
     const row = pauses.get(pg);
     if (!isEntryPaused(row)) return;
-    if (row.stage === 'TRIAL') {
+    if (row.stage === 'TRIAL' && this.#drawn(orderId, pg, row.version)) {
+      const startedAtMs = this.deps.clock.monotonicMs();
       let admitted: boolean;
       try {
         admitted = await this.deps.trials.isAdmitted(orderId, pg, budget);
@@ -108,10 +114,30 @@ export class PrepareCheckout {
         this.deps.signals.prepared(pg, 'error');
         throw err;
       }
-      if (admitted) return;
+      if (admitted || (await this.#admitTrial(orderId, pg, startedAtMs, budget))) return;
     }
     this.deps.signals.prepared(pg, 'new_payment_paused');
     throw new PaymentNewPausedError();
+  }
+
+  /** 시험 재개 추첨. 떨어지면 지표를 센다 */
+  #drawn(orderId: string, pg: PgName, version: number): boolean {
+    const admits = admitsEntryTrial((this.deps.drawEntryTrial ?? entryTrialDraw)(orderId, version));
+    if (!admits) this.deps.trialSignals?.trial(pg, 'rejected');
+    return admits;
+  }
+
+  /** 뽑힌 주문의 행을 쓴다(BUILD_ORDER PRF-202). 쓰기가 실패하면 받지 않는다(받았는데 세지 못하는 일을 만들지 않는다) */
+  async #admitTrial(orderId: string, pg: PgName, startedAtMs: number, budget: CallBudget | undefined): Promise<boolean> {
+    const { trials, trialSignals, clock } = this.deps;
+    try {
+      await trials.admit(orderId, pg, clock.now(), budget === undefined ? undefined : { remainingMs: budget.remainingMs - (clock.monotonicMs() - startedAtMs) });
+    } catch {
+      trialSignals?.trialWriteFailed('admit');
+      return false;
+    }
+    trialSignals?.trial(pg, 'admitted');
+    return true;
   }
 
   /**

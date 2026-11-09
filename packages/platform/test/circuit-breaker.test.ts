@@ -208,6 +208,25 @@ describe('반 열림과 닫힘', () => {
     expect(await metric('circuit_breaker_state', { dependency: 'trust-svc' })).toBe(0);
   });
 
+  test('[ASVS v5.0.0-16.5.3] P-T43_리뷰고침_close는_열린차단기를_시험호출없이닫고_창을비운다_닫혀있거나_끈뒤에는_아무것도하지않는다', async () => {
+    const b = breaker();
+    b.close();
+    expect(b.state).toBe('closed');
+    await calls(b, 20, 20);
+    expect(b.state).toBe('open');
+    b.close();
+    expect(b.state).toBe('closed');
+    expect(await metric('circuit_breaker_state', { dependency: 'trust-svc' })).toBe(0);
+    await expect(b.run(ok)).resolves.toBeDefined();
+    await calls(b, 1, 1);
+    expect(b.state).toBe('closed');
+    await calls(b, 20, 20);
+    expect(b.state).toBe('open');
+    b.shutdown();
+    b.close();
+    expect(b.acceptsCalls).toBe(false);
+  });
+
   test('FND100_닫힌뒤에는_창을비워_실패한번에_다시열리지않는다', async () => {
     const b = breaker();
     await calls(b, 20, 20);

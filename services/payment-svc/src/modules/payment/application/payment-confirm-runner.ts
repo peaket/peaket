@@ -12,6 +12,7 @@
 //   ⑦ 답 → decideConfirmAnswer(재전송 여부 포함) → 끝난 답은 finish(한 트랜잭션), IN_PROGRESS·THROTTLED는 reschedule(지금 + confirmRetryDelayMs(attempts + 1), 재전송 횟수를 올린다)
 //   ⑧ finish가 던지면 100ms·400ms [가정] 뒤 두 번 다시 하고, 그래도 안 되면 행을 그대로 둔다(임대가 끝나면 ②가 UNKNOWN으로 맞춘다)
 // 틱·호출은 실행기를 만든 때(시작 파일, 요청 밖)의 비동기 맥락에서 돈다(OrderSagaRunner와 같은 까닭). 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
+// 시험 재개의 첫 승인 호출(BUILD_ORDER PRF-202): 정지 캐시가 TRIAL인 결제사의 첫 승인 호출(재전송·재시도 큐 건 제외)은 시작 시각을 호출 전에, 결과를 원장 확정 뒤에 payment_entry_trial에 쓴다. 쓰기 실패는 흐름을 바꾸지 않는다.
 // 구현에서 정한 것(정본·설계에 없다):
 // - 어댑터 없음을 승인 기한보다 먼저 본다(기한은 어댑터 capabilities에서 받는다).
 // - 멈춘 뒤에는 새로 잡지 않고, 잡았지만 부르지 않은 행은 임대를 놓는다. stop은 돌던 호출과 그 뒤 쓰기를 기다린다. 종료 유예를 넘겨 프로세스가 끝나면 임대가 끝난 뒤 ②가 UNKNOWN으로 맞춘다.
@@ -49,11 +50,12 @@ import {
   decideConfirmAnswer,
   type PaymentConfirmOutcome,
 } from '../domain/confirm-runner.js';
+import { firstResultOf, isEntryTrialConclusion } from '../domain/entry-pause-judge.js';
 import { confirmIdemKey, type ConfirmCard, type ConfirmResult, type ConfirmVirtualAccount, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
 import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
 import { isConfirmOutage, PG_CIRCUIT_DEFER_MS, PgCircuitOpenError } from '../domain/pg-circuit.js';
-import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentResolutionSignals } from '../domain/ports.js';
+import type { EntryPauseReader, EntryTrialResults, EntryTrialSignals, MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentResolutionSignals } from '../domain/ports.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
 import { depositWriteOf, type DepositWriteDeps } from './deposit-write.js';
 
@@ -91,6 +93,11 @@ export interface PaymentConfirmRunnerDeps {
   deposit?: DepositWriteDeps;
   /** 결제 확정 소요 지표(BUILD_ORDER PRF-200). 없으면 재지 않는다 */
   resolution?: PaymentResolutionSignals;
+  /** 시험 재개의 첫 승인 호출 시작 시각과 결과 쓰기(BUILD_ORDER PRF-202). 없으면 쓰지 않는다 */
+  trialResults?: EntryTrialResults;
+  /** 정지 행(파드 캐시). TRIAL이 아니면 시험 행 문장을 내지 않는다(BUILD_ORDER PRF-202) */
+  pauses?: EntryPauseReader;
+  trialSignals?: EntryTrialSignals;
 }
 
 /** 틱 하나의 결과 */
@@ -402,6 +409,9 @@ export class PaymentConfirmRunner {
     if (this.#stopped) return this.#letGo(job);
     // 읽은 뒤 다른 실행이 표시를 썼으면(ALREADY) 앞선 요청이 있는 것이라 재전송으로 본다
     const resend = !markFirst || mark === 'ALREADY';
+    // 시험 재개는 첫 승인 호출만 본다: 재전송과 재시도 큐 건은 쓰지 않는다(BUILD_ORDER PRF-202)
+    const trialCall = !resend && job.queued !== true;
+    if (trialCall) await this.#noteTrialCall(target);
 
     hold.held = false;
     const startedMs = this.deps.clock.monotonicMs();
@@ -440,6 +450,14 @@ export class PaymentConfirmRunner {
     const latencyMs = Math.max(0, Math.round(this.deps.clock.monotonicMs() - startedMs));
     this.#safe(() => this.deps.signals.callSeconds(target.pg, latencyMs / 1000));
 
+    const settled = await this.#settle(job, target, answer, failure, latencyMs, resend);
+    // 원장을 확정한 뒤에 쓴다(시험 행 쓰기가 늦어도 승인 확정을 늦추지 않는다, BUILD_ORDER PRF-202 코드 리뷰)
+    if (trialCall) await this.#noteTrialResult(target, answer, latencyMs);
+    return settled;
+  }
+
+  /** 호출의 답을 원장·재시도에 반영한다 */
+  async #settle(job: ConfirmJob, target: ConfirmTarget, answer: ConfirmResult | undefined, failure: { err: unknown } | undefined, latencyMs: number, resend: boolean): Promise<ConfirmRunOutcome> {
     if (failure !== undefined || answer === undefined) {
       // 읽기 시간 초과·연결 실패 등: 결과를 가정하지 않는다
       this.#runError('call', failure?.err, target.orderId);
@@ -450,6 +468,43 @@ export class PaymentConfirmRunner {
     if (decision.kind === 'RETRY') return this.#reschedule(job, target, decision.outcome, this.deps.clock.now() + confirmRetryDelayMs(job.attempts + 1));
     if (decision.amountMismatch) this.#safe(() => this.deps.log.amountMismatch({ orderId: target.orderId }));
     return this.#finish(job, target, await this.#withDeposit(target, decision.finish, answer.virtualAccount), decision.outcome);
+  }
+
+  /** 이 파드의 정지 캐시가 그 결제사를 TRIAL로 보는가. 캐시를 오래 기다리지 않는다(시한이 끝나면 쓸 수 있는 마지막 값을 쓴다) */
+  async #inTrial(pg: PgName, pauses: EntryPauseReader): Promise<boolean> {
+    return (await pauses.read(TRIAL_PAUSE_READ_BUDGET)).get(pg)?.stage === 'TRIAL';
+  }
+
+  /**
+   * 첫 승인 호출을 시작한 시각을 시험 재개 행에 쓴다(판정자가 호출 시작 순으로 센다, BUILD_ORDER PRF-202 코드 리뷰). 실패해도 호출은 그대로 나가고 지표만 오른다. 던지지 않는다.
+   * 판단과 호출 사이에 서킷이 끊으면 시작 시각만 남아 5초 [가정] 뒤 실패로 세인다(서킷이 막 열린 때라 다시 멈추는 쪽이 맞다)
+   */
+  async #noteTrialCall(target: ConfirmTarget): Promise<void> {
+    const { trialResults, pauses, trialSignals, clock } = this.deps;
+    if (trialResults === undefined || pauses === undefined) return;
+    try {
+      if (await this.#inTrial(target.pg, pauses)) await trialResults.recordFirstCall(target.orderId, clock.now());
+    } catch {
+      this.#safe(() => trialSignals?.trialWriteFailed('call'));
+    }
+  }
+
+  /**
+   * 첫 승인 호출의 결과를 시험 재개 행에 쓴다(BUILD_ORDER PRF-202). 이 파드의 정지 캐시가 그 결제사를 TRIAL로 볼 때만 문장을 낸다(평상시 핫패스에 문장을 더하지 않는다).
+   * 시험 행이 없는 주문이면 0행이고 지표를 세지 않는다. 실패해도 승인 흐름을 바꾸지 않는다. 던지지 않는다
+   */
+  async #noteTrialResult(target: ConfirmTarget, answer: ConfirmResult | undefined, callMs: number): Promise<void> {
+    const { trialResults, pauses, trialSignals, clock } = this.deps;
+    if (trialResults === undefined || pauses === undefined) return;
+    const firstResult = firstResultOf(answer);
+    try {
+      if (!(await this.#inTrial(target.pg, pauses))) return;
+      if (!(await trialResults.recordFirstResult(target.orderId, { firstResult, atMs: clock.now(), callMs }))) return;
+    } catch {
+      this.#safe(() => trialSignals?.trialWriteFailed('result'));
+      return;
+    }
+    this.#safe(() => trialSignals?.trial(target.pg, isEntryTrialConclusion({ firstResult, firstCallMs: callMs }) ? 'success' : 'failure'));
   }
 
   /** 서킷이 끊어 부르지 않았다: 1초 [가정] 뒤로 미룬다(UNKNOWN으로 쓰지 않는다, attempts는 그대로, 큐 표시를 적는다, BUILD_ORDER PRF-200). clearSent가 참이면 이번에 쓴 CONFIRM_SENT를 함께 지운다 */
@@ -613,6 +668,8 @@ export class PaymentConfirmRunner {
 }
 
 const noop = (): undefined => undefined;
+/** 시험 결과를 쓸지 볼 때 정지 캐시를 기다리는 시간 50ms [가정](BUILD_ORDER PRF-202) */
+const TRIAL_PAUSE_READ_BUDGET = Object.freeze({ remainingMs: 50 });
 const NOTHING: ConfirmTickResult = Object.freeze({ claimed: 0 });
 const DROPPED: ConfirmRunOutcome = Object.freeze({ kind: 'DROPPED' });
 const STALE: ConfirmRunOutcome = Object.freeze({ kind: 'STALE' });

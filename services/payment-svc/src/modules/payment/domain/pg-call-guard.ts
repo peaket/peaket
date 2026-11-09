@@ -141,6 +141,11 @@ export class PgCallGuard {
     return this.#circuit === undefined || this.#circuit.admits();
   }
 
+  /** 이 채널의 서킷을 한 번 닫는다(사람이 푼 해제를 이 파드가 봤을 때, 서킷이 없으면 아무것도 하지 않는다, BUILD_ORDER PRF-202 코드 리뷰) */
+  closeCircuit(): void {
+    this.#circuit?.close();
+  }
+
   /** 반 열림이 시험 호출을 기다리는가(막는 시간이 지났고 아직 나가지 않았다). 잡을 UNKNOWN이 없을 때 없는 결제 조회를 보낼지 본다 */
   awaitsTrial(): boolean {
     return this.#circuit?.state() === 'half_open' && this.#queryRoom() > 0;

@@ -4,6 +4,7 @@
 import { type Clock, type Database, type DatabaseOptions, type LeaseApi, type OutboxPublisher, type OutboxRelayProcess, type OutboxRelayProcessOptions, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
 import { depositSecretHashDeleteTask, DrizzleReconciliation, reconSeenDeleteTask } from './modules/payment/adapters/db/drizzle-reconciliation.js';
 import { DrizzleConfirmJobs } from './modules/payment/adapters/db/drizzle-confirm-jobs.js';
+import { entryTrialsDeleteTask } from './modules/payment/adapters/db/drizzle-entry-pause.js';
 import { webhookReceiptsDeleteTask } from './modules/payment/adapters/db/drizzle-webhook-store.js';
 import { paymentReconciliationLog } from './modules/payment/adapters/payment-reconciliation-log.js';
 import { PromPaymentReconciliationSignals } from './modules/payment/adapters/prom-payment-reconciliation-signals.js';
@@ -90,12 +91,13 @@ export async function startPaymentRelay(o: PaymentRelayOptions): Promise<OutboxR
       }
       return [];
     },
-    // payment DB에 표가 있는 Outbox 파티션 일, 웹훅 수신 기록 지우기(정비 역할), 입금 해시·대사 작업 표 지우기와 일일 대사(서비스 역할, BUILD_ORDER HOT-150·HOT-153)가 돈다. 멱등 기록·보류 행·통계 스냅샷 표는 이 단계의 마이그레이션에 없어(payment §2 '만들지 않은 것') 돌리면 정비 시간마다 실패한다
+    // payment DB에 표가 있는 Outbox 파티션 일, 웹훅 수신 기록 지우기(정비 역할), 입금 해시·대사 작업 표·시험 재개 행 지우기와 일일 대사(서비스 역할, BUILD_ORDER HOT-150·HOT-153·PRF-202)가 돈다. 멱등 기록·보류 행·통계 스냅샷 표는 이 단계의 마이그레이션에 없어(payment §2 '만들지 않은 것') 돌리면 정비 시간마다 실패한다
     maintenanceTasks: [
       ...platformMaintenanceTasks(o.maintenanceDatabase, clock).filter((task) => task.name.startsWith('outbox-partitions-')),
       webhookReceiptsDeleteTask(o.maintenanceDatabase, clock),
       depositSecretHashDeleteTask(o.serviceDatabase, clock),
       reconSeenDeleteTask(o.serviceDatabase, clock),
+      entryTrialsDeleteTask(o.serviceDatabase, clock),
       ...(reconciliationOn ? [{ name: RECONCILIATION_TASK, when: 'daily' as const, run: (signal?: AbortSignal) => reconciliation!.runDaily(signal) }] : []),
     ],
   });

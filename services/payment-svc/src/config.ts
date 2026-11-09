@@ -157,6 +157,17 @@ export function assertPgAdapters(env: Record<string, string | undefined>, adapte
   if (!adapters.toss) throw new Error('PEAKET_PG_TOSS_SECRET_KEY가 없다(local·ci 밖에서는 토스 어댑터가 있어야 시작한다)');
 }
 
+/**
+ * 정지 판정자의 입력을 읽을 클러스터 Prometheus 주소(BUILD_ORDER PRF-202 코드 리뷰, admission-ctrl과 같은 조건). local·ci는 없으면 undefined이고 '입력 없음'으로 돈다.
+ * @throws Error local·ci 밖에서 비어 있음(시작 실패. 주소 없이 켜면 조용히 자동 재개가 꺼진다)
+ */
+export function loadEntryPausePrometheusUrl(env: Record<string, string | undefined>): string | undefined {
+  const url = env.PEAKET_PROMETHEUS_URL?.trim();
+  if (url) return url;
+  if (env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci') return undefined;
+  throw new Error('PEAKET_PROMETHEUS_URL이 없다(local·ci 밖에서는 정지 판정자가 입력을 읽을 클러스터 Prometheus 주소를 넣는다)');
+}
+
 /** 토스 경로의 웹훅으로 시뮬레이터 결제를 받는 환경인가(local·ci뿐, docs/features/payment.md §5 '웹훅 받기의 첫 구현', BUILD_ORDER HOT-150) */
 export function webhookAcceptsSimulator(env: Record<string, string | undefined>): boolean {
   return env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';

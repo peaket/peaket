@@ -421,6 +421,47 @@ test('PRF192_대상이나포트가없는내부대상은_렌더하지않는다(�
   }
 });
 
+test('PRF202_leaderLease를주면_그Lease하나의권한과토큰만_서비스파드에붙는다(만들기없음) [ASVS v5.0.0-13.2.2]', () => {
+  const { objects, error } = render([...BASE, 'service.leaderLease=payment-entry-pause'], 'payment');
+  assert.equal(error, undefined, error);
+  const lease = find(objects, 'Lease', 'payment-entry-pause');
+  assert.ok(lease, 'Lease');
+  // spec을 차트에 적지 않아 배포가 보유자를 지우지 않는다(릴레이와 같다)
+  assert.deepEqual(lease.spec, {});
+  const role = find(objects, 'Role', 'example-svc-leader-lease');
+  assert.deepEqual(role.rules, [{ apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['payment-entry-pause'], verbs: ['get', 'update'] }]);
+  const binding = find(objects, 'RoleBinding', 'example-svc-leader-lease');
+  assert.deepEqual(binding.subjects, [{ kind: 'ServiceAccount', name: 'example-svc', namespace: 'payment' }]);
+  const dep = find(objects, 'Deployment', 'example-svc');
+  assert.equal(dep.spec.template.spec.automountServiceAccountToken, true);
+  assert.equal(find(objects, 'ServiceAccount', 'example-svc').automountServiceAccountToken, false);
+});
+
+test('PRF202_leaderLease가없으면_Lease·권한이없고_토큰도없다(다른서비스출력불변) [ASVS v5.0.0-13.2.2]', () => {
+  const { objects, error } = render(BASE, 'example');
+  assert.equal(error, undefined, error);
+  assert.equal(all(objects, 'Lease').length, 0);
+  assert.equal(all(objects, 'Role').length, 0);
+  assert.equal(all(objects, 'RoleBinding').length, 0);
+  assert.equal(find(objects, 'Deployment', 'example-svc').spec.template.spec.automountServiceAccountToken, false);
+});
+
+test('PRF202_payment-svc값_정지판정자Lease이름과_정책을켤때적을API서버·Prometheus를값파일이알린다 [ASVS v5.0.0-13.2.4]', () => {
+  const file = join(REPO, 'deploy', 'workloads', 'payment-svc', 'values.yaml');
+  const sets = ['image.repository=peaket/payment-svc', 'image.tag=local', 'env.PEAKET_ENV=local'];
+  const { objects, error } = renderFiles([file], sets, 'payment');
+  assert.equal(error, undefined, error);
+  assert.ok(find(objects, 'Lease', 'payment-entry-pause'), 'Lease');
+  assert.equal(find(objects, 'Deployment', 'payment-svc').spec.template.spec.automountServiceAccountToken, true);
+  const text = repoText('deploy', 'workloads', 'payment-svc', 'values.yaml');
+  for (const want of ['PEAKET_PROMETHEUS_URL', 'Prometheus', 'API 서버']) assert.ok(text.includes(want), want);
+  const internal = 'service.networkPolicy.egress.internal[0].namespaces[0]=observability,service.networkPolicy.egress.internal[0].ports[0]=9090,service.networkPolicy.egress.internal[1].cidrs[0]=10.0.0.1/32,service.networkPolicy.egress.internal[1].ports[0]=443';
+  const on = renderFiles([file], [...sets, 'service.networkPolicy.enabled=true', internal], 'payment');
+  assert.equal(on.error, undefined, on.error);
+  const peers = find(on.objects, 'NetworkPolicy', 'payment-svc').spec.egress.flatMap((r) => (r.ports ?? []).map((p) => p.port));
+  for (const port of [9090, 443]) assert.ok(peers.includes(port), String(port));
+});
+
 test('PRF192_payment-svc값_결제사출구는DNS와공인주소443이고_정책을켜는것은환경값이다 [ASVS v5.0.0-13.2.4]', () => {
   const file = join(REPO, 'deploy', 'workloads', 'payment-svc', 'values.yaml');
   const sets = ['image.repository=peaket/payment-svc', 'image.tag=local', 'env.PEAKET_ENV=local'];

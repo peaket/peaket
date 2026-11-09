@@ -257,6 +257,8 @@ export const paymentEntryPause = pgTable(
     actor: text('actor').notNull(),
     since: at('since').notNull(),
     trialStartedAt: at('trial_started_at'),
+    // 마지막으로 모두 연 시각(다시 멈추는 p99를 이 시각 뒤의 표본만 본다, ADR-0105 결정 6, 마이그레이션 0011)
+    reopenedAt: at('reopened_at'),
     version: bigint('version', { mode: 'number' }).notNull(),
   },
   (t) => [
@@ -280,6 +282,8 @@ export const paymentEntryTrial = pgTable(
     firstResultAt: at('first_result_at'),
     // 첫 승인 호출에 걸린 시간(5초 [가정] 안 결론을 잰다)
     firstCallMs: integer('first_call_ms'),
+    // 첫 승인 호출을 시작한 시각. 호출 시작 순으로 앞 표본을 센다(느린 호출이 표본에서 빠지지 않게, BUILD_ORDER PRF-202 코드 리뷰, 마이그레이션 0011)
+    firstCallAt: at('first_call_at'),
   },
   (t) => [
     index('payment_entry_trial_pg_admitted_idx').on(t.pg, t.admittedAt),

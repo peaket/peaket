@@ -25,6 +25,7 @@ const TAG_0007 = '0007_payment_deposit_reversal';
 const TAG_0008 = '0008_payment_reconciliation';
 const TAG_0009 = '0009_payment_pg_selection';
 const TAG_0010 = '0010_payment_entry_pause';
+const TAG_0011 = '0011_payment_entry_pause_reopened';
 const ADDED_JOB_COLUMN_0010 = 'queued_at';
 const ADDED_COLUMN_0009 = 'entry_opens_at';
 const ADDED_COLUMN_0004 = 'pg_tx_id';
@@ -531,9 +532,20 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const eighth = snapshotOf('0007_snapshot.json');
   const ninth = snapshotOf('0008_snapshot.json');
   const tenth = snapshotOf('0009_snapshot.json');
-  const latest = snapshotOf('0010_snapshot.json');
+  const eleventh = snapshotOf('0010_snapshot.json');
+  const latest = snapshotOf('0011_snapshot.json');
 
-  test('PRF182_PRF183_기록은 0000~0010 차례이고 SQL 파일과 맞는다', () => {
+  test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
+    expect(latest.prevId).toBe(eleventh.id);
+    expect(Object.keys(eleventh.tables['public.payment_entry_pause']!.columns)).not.toContain('reopened_at');
+    expect(Object.keys(latest.tables['public.payment_entry_pause']!.columns)).toContain('reopened_at');
+    expect(Object.keys(eleventh.tables['public.payment_entry_trial']!.columns)).not.toContain('first_call_at');
+    expect(latest.tables['public.payment_entry_trial']!.columns['first_call_at']).toMatchObject({ type: 'timestamp with time zone', notNull: false });
+    const statements = readFileSync(join(MIGRATIONS, `${TAG_0011}.sql`), 'utf8').replace(/\r\n/g, '\n').replace(/^--.*$/gm, '').split(BREAKPOINT).map((s) => canon(s));
+    expect(statements).toEqual(['alter table payment_entry_pause add column reopened_at timestamp with time zone;', 'alter table payment_entry_trial add column first_call_at timestamp with time zone;']);
+  });
+
+  test('PRF182_PRF183_기록은 0000~0011 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -547,6 +559,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [8, TAG_0008],
       [9, TAG_0009],
       [10, TAG_0010],
+      [11, TAG_0011],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -563,11 +576,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[8]!.when).toBeGreaterThan(journal.entries[7]!.when);
     expect(journal.entries[9]!.when).toBeGreaterThan(journal.entries[8]!.when);
     expect(journal.entries[10]!.when).toBeGreaterThan(journal.entries[9]!.when);
+    expect(journal.entries[11]!.when).toBeGreaterThan(journal.entries[10]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {

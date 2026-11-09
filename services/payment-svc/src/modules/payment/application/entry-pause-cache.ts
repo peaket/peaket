@@ -1,9 +1,12 @@
 // 새 결제 일시 정지 행의 파드 메모리 캐시(docs/features/payment.md §2 '새 결제 일시 정지 읽기의 첫 구현', ADR-0105, BUILD_ORDER PRF-201).
 // 결제사 선택 캐시와 같은 꼴이고(겹친 호출은 읽기 하나를 함께 기다린다, 저장소 읽기는 고정 150ms [가정]) 다른 점은 읽기 실패다: 마지막 값을 쓰고 지표를 올린다.
 // 정지 행이 없으면 '열림'이므로, 한 번도 읽지 못했거나 마지막 값이 10초 [가정]를 넘은 파드는 값을 지어내지 않고 실패한다(ASVS v5.0.0-16.5.3, BUILD_ORDER PRF-201 코드 리뷰).
+// 이 파일의 EntryPauseReleaseWatcher는 캐시가 읽은 행에서 사람이 푼 해제를 보고 파드의 서킷을 닫는다(ADR-0105 결정 7 보완, BUILD_ORDER PRF-202 코드 리뷰).
 import type { Clock } from '@peaket/platform';
 import { PaymentDeadlineError } from '../domain/confirm-command.js';
 import type { EntryPauses } from '../domain/entry-pause.js';
+import { ENTRY_PAUSE_ACTOR_SYSTEM } from '../domain/entry-pause-judge.js';
+import type { PgName } from '../domain/payment-gateway.js';
 import type { CallBudget, EntryPauseReader, EntryPauseReadSignals } from '../domain/ports.js';
 
 /** 정지 행을 다시 읽는 간격 1초 [가정](ADR-0105) */
@@ -21,6 +24,42 @@ export interface CachedEntryPauseReaderOptions {
   readonly clock: Pick<Clock, 'monotonicMs'>;
   readonly signals: EntryPauseReadSignals;
   readonly ttlMs?: number;
+  /** 저장소에서 새로 읽은 행을 받는다(캐시로 답한 호출과 실패한 읽기에는 불리지 않는다). 던져도 읽기를 막지 않는다 */
+  readonly onLoaded?: (pauses: EntryPauses) => void;
+}
+
+export interface EntryPauseReleaseWatcherDeps {
+  /** 그 결제사의 이 파드 서킷을 닫는다. 던져도 읽기를 막지 않는다 */
+  readonly closeCircuit: (pg: PgName) => void;
+}
+
+/**
+ * 조회 경로만 고장이면 서킷이 스스로 닫히지 못해 사람이 풀어도 승인이 미뤄지고 곧바로 다시 멈춘다(ADR-0105 결정 7의 쓰는 때). 그래서 파드마다 사람이 푼 새 reopened_at을 보면 자기 서킷을 한 번 닫는다.
+ * 같은 값에는 두 번 하지 않고, 파드가 새로 떴을 때 오래된 해제로 닫지 않게 첫 읽기는 기록만 한다.
+ */
+export class EntryPauseReleaseWatcher {
+  #first = true;
+  readonly #seen = new Map<PgName, number>();
+
+  constructor(private readonly deps: EntryPauseReleaseWatcherDeps) {}
+
+  observe(pauses: EntryPauses): void {
+    const first = this.#first;
+    this.#first = false;
+    for (const [pg, row] of pauses) {
+      if (row.reopenedAtMs === undefined || row.actor === undefined || row.actor === ENTRY_PAUSE_ACTOR_SYSTEM || this.#seen.get(pg) === row.reopenedAtMs) continue;
+      this.#seen.set(pg, row.reopenedAtMs);
+      if (!first) this.#close(pg);
+    }
+  }
+
+  #close(pg: PgName): void {
+    try {
+      this.deps.closeCircuit(pg);
+    } catch {
+      // 삼킨다(서킷은 자기 시험 호출로도 닫힌다)
+    }
+  }
 }
 
 export class CachedEntryPauseReader implements EntryPauseReader {
@@ -60,6 +99,7 @@ export class CachedEntryPauseReader implements EntryPauseReader {
           this.#last = pauses;
           this.#lastAtMs = nowMs;
           this.#inFlight = undefined;
+          this.#notify(pauses);
         }
         return pauses;
       },
@@ -77,6 +117,14 @@ export class CachedEntryPauseReader implements EntryPauseReader {
     );
     this.#inFlight = value;
     return value;
+  }
+
+  #notify(pauses: EntryPauses): void {
+    try {
+      this.o.onLoaded?.(pauses);
+    } catch {
+      // 삼킨다(알림이 읽기를 막지 않는다)
+    }
   }
 
   /** 쓸 수 있는 마지막 값. 한 번도 읽지 못했거나 나이가 10초 [가정]를 넘으면 없다 */

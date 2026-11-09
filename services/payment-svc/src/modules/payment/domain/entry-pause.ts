@@ -11,7 +11,11 @@ export interface EntryPauseRow {
   readonly pg: PgName;
   readonly stage: EntryPauseStage;
   readonly reason: EntryPauseReason;
+  /** 마지막으로 쓴 쪽. 사람이 푼 해제를 알아보는 데 쓴다(BUILD_ORDER PRF-202 코드 리뷰) */
+  readonly actor?: string;
   readonly sinceMs: number;
+  /** 마지막으로 모두 연 시각(epoch ms). 연 적이 없으면 없다 */
+  readonly reopenedAtMs?: number;
   readonly version: number;
 }
 

@@ -1008,12 +1008,13 @@ erDiagram
     }
     payment_entry_pause {
         text pg PK "TOSS|PORTONE|SIMULATOR(새 결제 진입 정지 상태, ADR-0105)"
-        text channel PK "채널 상한 때문에 멈추면 채널, 결제사 장애면 ALL. 지금은 ALL만이다(CHECK, 채널별 정지를 쓰는 단계가 풀어 준다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
+        text channel PK "채널 상한 때문에 멈추면 채널, 결제사 장애면 ALL. 지금은 ALL만이다(CHECK, 채널별 정지를 쓰는 단계가 풀어 준다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200). 채널 상한 정지(CHANNEL_WAIT)도 결제사마다 이 ALL 행 하나에 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-202)"
         text stage "OPEN|PROBING|TRIAL(열림, 확인 호출, 시험 재개)"
         text reason "PG_FAILURE|CHANNEL_WAIT"
         text actor "SYSTEM 또는 명령 6 해제를 낸 commander 계정"
         timestamptz since "NOT NULL. 이번 정지 시작 시각(GetNewPaymentPause의 paused_since). 정지를 푼 뒤에도 마지막 값을 둔다(추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
         timestamptz trial_started_at "널 허용. 시험 재개를 시작한 시각(10분 [가정] 예외의 기준, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
+        timestamptz reopened_at "널 허용. 마지막으로 모두 연 시각. 다시 멈추는 p99를 이 시각 뒤의 표본만 보려고 둔다(ADR-0105 결정 6, 추천 적용 2026-11-09, BUILD_ORDER PRF-202, 마이그레이션 0011)"
         bigint version "판 번호. 읽은 판이 그대로일 때만 쓴다(옛 판정자의 늦은 쓰기 거절)"
     }
     payment_entry_trial {
@@ -1023,6 +1024,7 @@ erDiagram
         text first_result "APPROVED|DECLINED|FAILED|UNKNOWN(첫 승인 호출, 재시도 큐 건 제외)"
         timestamptz first_result_at "판정자가 20건을 센다. 행은 admitted_at 7일 [가정] 뒤 지운다(추천 적용 2026-11-09, BUILD_ORDER PRF-200, 코드 리뷰)"
         int first_call_ms "널 허용, 0 이상. 첫 승인 호출에 걸린 시간(5초 [가정] 안 결론을 잰다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
+        timestamptz first_call_at "널 허용. 첫 승인 호출을 시작한 시각. 판정자가 이 순서로 앞 20건 [가정]을 센다(느린 호출이 표본에서 빠지지 않게, 추천 적용 2026-11-09, BUILD_ORDER PRF-202, 코드 리뷰, 마이그레이션 0011)"
     }
     payment_cancel {
         uuid id PK
@@ -2476,6 +2478,7 @@ erDiagram
 - 입금 오류 되돌림과 입금 전 취소(추천 적용 2026-11-09, BUILD_ORDER HOT-152): 여덟 번째 마이그레이션(`services/payment-svc/migrations/0007_payment_deposit_reversal.sql`)이 `payment_query_due_idx`를 `status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status IN ('FAILED', 'APPROVED') AND next_query_at IS NOT NULL)`로 다시 만들고(되돌림 확인을 건 승인 행도 잡는다) CHECK `payment_failure_category_check`에 `DEPOSIT_CANCELED`를 더한다. 열네 번째 purchase 마이그레이션(`services/purchase-svc/migrations/0013_ticket_void_job.sql`)이 `ticket_issue_job.issue_generation`(`bigint NOT NULL DEFAULT 0`)과 `ticket_void_job`(위 ERD 칸 그대로, 쓸기 색인 `(next_attempt_at)`)을 더한다.
 - 결제사 선택 표(추천 적용 2026-11-09, BUILD_ORDER PRF-190): 열 번째 마이그레이션(`services/payment-svc/migrations/0009_payment_pg_selection.sql`)이 두 표와 `payment.entry_opens_at`(널 가능)을 더한다. 규칙의 정본은 docs/features/payment.md §2.2 '선택기의 첫 구현'이다.
 - 새 결제 진입 정지 표와 승인 경로 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-200): 열한 번째 마이그레이션(`services/payment-svc/migrations/0010_payment_entry_pause.sql`)이 `payment_entry_pause`(기본 키 `(pg, channel)`, CHECK 결제사 셋·`channel = 'ALL'`·`stage` 셋·`reason` 둘·`version >= 1`)와 `payment_entry_trial`(기본 키 `order_id`, CHECK 결제사 셋·`first_result` 넷·`first_call_ms >= 0`, 인덱스 `payment_entry_trial_pg_admitted_idx (pg, admitted_at)`)을 만들고, `payment_confirm_job.queued_at`(널 허용)을 더한다(리뷰 고침으로 결과 모름을 거친 건은 늘 `retry_queue`가 되어 `payment` 표에 칸을 더하지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200, 코드 리뷰). 두 표는 이 단계에서 표만 두고 쓰는 코드는 다음 단계(PRF-201·PRF-202)다. 칸의 정본은 §2 ERD이고, 규칙은 docs/features/payment.md §9, §2 '결제사 서킷의 첫 구현'이다.
+- 정지 판정자의 다시 연 시각(추천 적용 2026-11-09, BUILD_ORDER PRF-202): 열두 번째 마이그레이션(`services/payment-svc/migrations/0011_payment_entry_pause_reopened.sql`)이 `payment_entry_pause.reopened_at`(널 허용)과 `payment_entry_trial.first_call_at`(널 허용, 코드 리뷰)을 더한다. 다시 연 뒤의 p99 창을 `reopened_at`에서 재고(ADR-0105 결정 6), 시험 재개의 표본을 `first_call_at` 순서로 센다. 규칙은 docs/features/payment.md §2 '정지 판정자의 첫 구현'이다.
   - `pg_switch`: `scope text` 기본 키('PLATFORM' 또는 소문자 UUID 회차, CHECK), `active boolean NOT NULL`, `from_pg text`(전환해 떠나는 결제사, 비면 어느 기준이든), `to_pg text`(옮겨 갈 결제사, 비면 미리 지정한 대체), `version bigint NOT NULL`(1 이상), `changed_at timestamptz NOT NULL`. 두 결제사 칸은 CHECK 결제사 셋이다. 쓰기는 판 번호가 지금보다 클 때만이다.
   - `event_pg_config`: `event_id uuid` 기본 키, `pg_primary text NOT NULL`, `pg_fallback text`, `updated_at timestamptz NOT NULL`. CHECK 결제사 셋, 기본과 대체가 다름. core-svc 회차 칸(`event.pg_primary`·`pg_fallback`)의 사본이고 설정 사건 소비자는 OPS-290이다. 행이 없으면 플랫폼 기본을 쓴다.
 - 대사(추천 적용 2026-11-09, BUILD_ORDER HOT-153): 아홉 번째 마이그레이션(`services/payment-svc/migrations/0008_payment_reconciliation.sql`)이 `reconciliation_run`(결제사·대상 날짜 유일, 칸은 ERD), 작업 표 `reconciliation_seen`, 불일치 기록 `reconciliation_diff`(UNIQUE `(pg, payment_ref, kind)`, CHECK 세 가지)를 더하고, `payment`에 부분 인덱스 `payment_recon_approved_idx (pg, approved_at, id) WHERE status = 'APPROVED'`와 `payment_deposit_hash_idx (approved_at) WHERE deposit_secret_hash IS NOT NULL`을 더한다. payment 표가 아직 배포되지 않아 인덱스를 CONCURRENTLY로 만들지 않는다.

@@ -26,6 +26,8 @@ service:
   command: ["node", "--import", "@peaket/platform/telemetry/register", "template/dist/main.js"]
   # 서비스 Deployment만 받는 환경 변수
   env: {}
+  # 서비스 파드끼리 리더를 뽑을 Lease 이름(BUILD_ORDER PRF-202). 비우면 Lease·권한을 만들지 않고 토큰을 붙이지 않는다
+  leaderLease: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }

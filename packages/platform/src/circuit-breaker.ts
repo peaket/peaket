@@ -243,6 +243,11 @@ export class CircuitBreaker {
     return !this.#shutdown && (this.#impl.closed || this.#impl.pendingClose);
   }
 
+  /** 시험 호출 없이 닫는다(사람이 명령으로 푼 뒤 쓴다, ADR-0105 결정 7 보완, BUILD_ORDER PRF-202 코드 리뷰). 닫혀 있거나 끈 뒤에는 아무것도 하지 않는다. 판정 창은 닫힐 때 비운다 */
+  close(): void {
+    if (!this.#shutdown) this.#impl.close();
+  }
+
   /** 지금 의존성을 부르고 있는 수(떼어 냈거나 시험 한도를 넘겼어도 아직 도는 호출을 센다) */
   get inFlight(): number {
     return this.#inFlight;

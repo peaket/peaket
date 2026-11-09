@@ -49,6 +49,9 @@ interface Stack {
   close(): Promise<void>;
 }
 
+/** 시험 재개 추첨에 뽑힌 주문 */
+const drawn = new Set<string>();
+
 /** 파드 하나(재시작을 보려고 시험마다 새로 만든다). 어댑터는 TOSS·SIMULATOR뿐이라 PORTONE은 채널이 없다 */
 async function startPod(): Promise<Stack> {
   const clock = fakeClock({ now: Date.now() });
@@ -68,7 +71,8 @@ async function startPod(): Promise<Stack> {
     {
       accept: new AcceptPaymentCommand({ store, clock, log: paymentCommandLog(logger), signals }),
       batchGet: new BatchGetPaymentStates({ reader: store, signals }),
-      prepareCheckout: new PrepareCheckout({ selection, pauses, trials: entry, gateways, channels, defaults, webOrigin: 'https://www.it.example', virtualAccountReady: true, clock, log: paymentCheckoutLog(logger), signals: checkoutSignals }),
+      // 시험이 정한 주문만 뽑힌 값으로 둔다(같은 시험 안에서 추첨은 주문별로 고정이다. 5% [가정] 추첨을 도는 통합 시험은 payment-entry-pause-judge.int.test.ts다)
+      prepareCheckout: new PrepareCheckout({ selection, pauses, trials: entry, drawEntryTrial: (orderId) => (drawn.has(orderId) ? 0 : 9_999), gateways, channels, defaults, webOrigin: 'https://www.it.example', virtualAccountReady: true, clock, log: paymentCheckoutLog(logger), signals: checkoutSignals }),
       getNewPaymentPause: new GetNewPaymentPause({ selection: new DrizzlePgSelectionBatch({ database: batch }), pauses, channels, defaults }),
     },
     () => undefined,
@@ -156,6 +160,7 @@ describe('PrepareCheckout과 정지 행', () => {
   test('P-T43_시험 재개에서 받은 주문의 재호출만 다시 통과하고 받지 않은 주문은 503이다 [ASVS v5.0.0-2.3.2]', async () => {
     await putPause({ stage: 'TRIAL' });
     const orderId = newId();
+    drawn.add(orderId);
     await admit(orderId);
     const s = await pod();
     await expect(prepare(s, requestOf({ order_id: orderId }))).resolves.toMatchObject({ pg: 'PG_PROVIDER_TOSS' });
@@ -166,11 +171,13 @@ describe('PrepareCheckout과 정지 행', () => {
     await putPause({ stage: 'TRIAL', trialStartedAt: new Date(Date.now() - 60_000) });
     const stale = newId();
     const current = newId();
+    drawn.add(current);
     await admit(stale, 'TOSS', new Date(Date.now() - 120_000));
     await admit(current, 'TOSS', new Date(Date.now() - 1_000));
     const s = await pod();
     expect((await failure(prepare(s, requestOf({ order_id: stale })))).details).toBe('new-payment-paused');
     await expect(prepare(s, requestOf({ order_id: current }))).resolves.toMatchObject({ pg: 'PG_PROVIDER_TOSS' });
+    await expect(new DrizzleEntryPause({ database: hot }).isAdmitted(stale, 'TOSS')).resolves.toBe(false);
   });
 
   test('P-T43_리뷰 고침 L4: 시험 시작 시각이 비어 있으면 받은 주문이어도 통과시키지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
@@ -179,6 +186,7 @@ describe('PrepareCheckout과 정지 행', () => {
     await admit(orderId);
     const s = await pod();
     expect((await failure(prepare(s, requestOf({ order_id: orderId })))).details).toBe('new-payment-paused');
+    await expect(new DrizzleEntryPause({ database: hot }).isAdmitted(orderId, 'TOSS')).resolves.toBe(false);
   });
 
   test('P-T43_재생(pinned_pg)은 정지를 보지 않는다 [ASVS v5.0.0-16.5.2]', async () => {

@@ -51,6 +51,10 @@ export class BreakerPgCircuit implements PgCircuit {
     return this.#breaker.acceptsCalls;
   }
 
+  close(): void {
+    this.#breaker.close();
+  }
+
   async run<T>(action: () => Promise<T>, isOutage: (answer: T) => boolean, kind: PgCallKind): Promise<T> {
     const closed = this.#breaker.state === 'closed';
     if (kind === 'confirm' && !closed) throw new PgCircuitOpenError();

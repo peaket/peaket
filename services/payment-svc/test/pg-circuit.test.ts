@@ -20,6 +20,9 @@ const NOW = Date.parse('2026-11-09T01:00:00.000Z');
 
 class FakeCircuit implements PgCircuit {
   current: PgCircuitState = 'closed';
+  close(): void {
+    this.current = 'closed';
+  }
   /** 반 열림의 시험 호출이 남았는가 */
   trialLeft = true;
   /** true면 부르기 직전에 끊는다(판단과 호출 사이에 열린 틈) */

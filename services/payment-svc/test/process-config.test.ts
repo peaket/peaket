@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_PAYMENT_GRPC_PORT, loadPaymentServiceConfig, loadPgCallGuardConfig, loadSimulatorGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from '../src/config.js';
+import { DEFAULT_PAYMENT_GRPC_PORT, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadSimulatorGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from '../src/config.js';
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
 const URL_WITH_PASSWORD = 'postgres://payment_svc:hunter2@pgbouncer:6432/payment';
@@ -164,6 +164,55 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(warn, '경고 한 줄').not.toBeNull();
     expect(warn![1]).not.toMatch(/local·ci일 때만/);
     expect(m.match(/service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter'/g)).toHaveLength(1);
+  });
+
+  test('P-T43_main.ts는 Lease로 뽑은 판정자를 메인 프로세스에서 켜고 끝낼 때 멈추며, Lease는 쿠버네티스가 없으면 혼자 리더다 [ASVS v5.0.0-16.5.3]', () => {
+    const m = main();
+    expect(m).toMatch(/process\.env\.KUBERNETES_SERVICE_HOST \? inClusterLeaseApi\(ENTRY_PAUSE_LEASE_NAME\) : memoryLeaseApi\(\)/);
+    expect(m).toMatch(/new LeaseElector\(/);
+    const call = /new EntryPauseJudge\(\{([\s\S]*?)\}\)/.exec(m)![1]!;
+    for (const key of ['store', 'inputs', 'gateways', 'guards', 'leader', 'podCount', 'clock', 'signals', 'log']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
+    expect(m).toMatch(/new DrizzleEntryPause\(\{ database: batchDatabase \}\)/);
+    expect(m).toMatch(/entryPauseJudge\.start\(\)/);
+    expect(m).toMatch(/entryPauseElector\.start\(\)/);
+    expect(/stop: \(\) => \[([\s\S]*?)\],\n/.exec(m)![1]).toMatch(/entryPauseJudge\.stop\(\)/);
+    expect(m).toMatch(/PEAKET_PROMETHEUS_URL/);
+    expect(m).toMatch(/NO_ENTRY_PAUSE_CLUSTER_INPUTS/);
+  });
+
+  test.each([['local'], ['ci']])('P-T43_리뷰 고침 M6: %s에서는 Prometheus 주소가 없어도 켠다(입력 없음)', (PEAKET_ENV) => {
+    expect(loadEntryPausePrometheusUrl({ PEAKET_ENV })).toBeUndefined();
+    expect(loadEntryPausePrometheusUrl({ PEAKET_ENV, PEAKET_PROMETHEUS_URL: '  ' })).toBeUndefined();
+  });
+
+  test.each([['staging'], ['demo'], ['prod'], [undefined]])('P-T43_리뷰 고침 M6: PEAKET_ENV=%s에서 Prometheus 주소가 없으면 시작을 실패시킨다 [ASVS v5.0.0-16.5.3]', (PEAKET_ENV) => {
+    expect(() => loadEntryPausePrometheusUrl({ PEAKET_ENV })).toThrow(/PEAKET_PROMETHEUS_URL/);
+  });
+
+  test('P-T43_리뷰 고침 M6: 주소가 있으면 앞뒤 공백을 지워 돌려준다', () => {
+    expect(loadEntryPausePrometheusUrl({ PEAKET_ENV: 'prod', PEAKET_PROMETHEUS_URL: ' http://prometheus:9090 ' })).toBe('http://prometheus:9090');
+  });
+
+  test('P-T43_리뷰 고침 M6: main.ts는 듣기 전에 Prometheus 주소를 읽어 시작을 실패시킨다', () => {
+    const m = main();
+    expect(m).toMatch(/loadEntryPausePrometheusUrl\(process\.env\)/);
+    expect(m.indexOf('loadEntryPausePrometheusUrl(process.env)')).toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m).not.toMatch(/process\.env\.PEAKET_PROMETHEUS_URL/);
+  });
+
+  test('P-T43_리뷰 고침 M5·M8: main.ts는 캐시에 해제 감시를 잇고 Lease의 onChange로 판정자 표시를 낸다 [ASVS v5.0.0-16.5.3]', () => {
+    const m = main();
+    expect(/new CachedEntryPauseReader\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\bonLoaded\b/);
+    expect(m).toMatch(/new EntryPauseReleaseWatcher\(/);
+    expect(m).toMatch(/closeCircuit\(\)/);
+    expect(/new LeaseElector\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/onChange: \(leader\) => entryPauseSignals\.judgeLeader\(leader\)/);
+  });
+
+  test('P-T43_main.ts는 PrepareCheckout과 승인 실행기에 시험 재개의 받기·결과를 잇는다 [ASVS v5.0.0-2.3.2]', () => {
+    const m = main();
+    expect(/new PrepareCheckout\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\btrialSignals\b/);
+    const runner = /new PaymentConfirmRunner\(\{([\s\S]*?)\}\)/.exec(m)![1]!;
+    for (const key of ['trialResults', 'pauses', 'trialSignals']) expect(runner, key).toMatch(new RegExp(`\\b${key}\\b`));
   });
 
   test('PRF181_main.ts는 실행기에 포트 전부와 파드 이름을 넘긴다', () => {

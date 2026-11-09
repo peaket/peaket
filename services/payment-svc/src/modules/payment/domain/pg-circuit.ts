@@ -25,6 +25,8 @@ export interface PgCircuit {
   state(): PgCircuitState;
   /** 차단기가 지금 호출을 받는가(닫힘, 또는 시험 호출이 아직 나가지 않은 반 열림). 토큰·자리와 호출 종류는 보지 않는다 */
   admits(): boolean;
+  /** 서킷을 한 번 닫는다(사람이 푼 해제를 이 파드가 봤을 때, ADR-0105 결정 7 보완). 닫혀 있으면 아무것도 하지 않는다 */
+  close(): void;
   /**
    * 결제사 호출 하나를 서킷 안에서 돈다. 판정에 세는 호출에서 isOutage가 참인 답은 일시 장애로 세되 부른 쪽에는 답을 그대로 돌려준다. 던진 오류는 실패로 센다.
    * @throws PgCircuitOpenError 서킷이 끊어 action을 부르지 않았다(열림, 시험 호출이 이미 나간 반 열림, 반 열림의 승인)

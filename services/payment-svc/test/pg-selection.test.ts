@@ -551,7 +551,10 @@ describe('PrepareCheckout 쓰임새', () => {
           trialReads.push([orderId, pg]);
           return (o.admitted ?? []).includes(orderId);
         },
+        admit: async () => undefined,
       },
+      // 받은 주문만 뽑힌 값으로 둔다(같은 시험 안에서 추첨은 주문별로 고정이다. 5% [가정] 추첨은 test/entry-pause-judge.test.ts가 본다)
+      drawEntryTrial: (orderId) => ((o.admitted ?? []).includes(orderId) ? 0 : 9_999),
       gateways,
       channels: channelTableOf(gateways),
       defaults: DEFAULTS,
@@ -679,14 +682,11 @@ describe('PrepareCheckout 쓰임새', () => {
       await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
     });
 
-    test('P-T43_시험 재개에서 받지 않은 주문은 503이고 받은 주문의 재호출은 다시 통과한다 [ASVS v5.0.0-2.3.2]', async () => {
+    test('P-T43_시험 재개에서 떨어진 주문은 시험 행을 읽지 않고 503이며 받은 주문의 재호출은 다시 통과한다 [ASVS v5.0.0-2.3.2]', async () => {
       const s = setup({ pauses: [pausedRow({ stage: 'TRIAL' })], admitted: [ORDER] });
       await expect(s.uc.execute(raw({ orderId: ATTEMPT }))).rejects.toBeInstanceOf(PaymentNewPausedError);
       await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
-      expect(s.trialReads).toEqual([
-        [ATTEMPT, 'TOSS'],
-        [ORDER, 'TOSS'],
-      ]);
+      expect(s.trialReads).toEqual([[ORDER, 'TOSS']]);
     });
 
     test('P-T43_확인 호출 단계로 돌아가면 받은 주문이어도 통과하지 않고 시험 행을 읽지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
@@ -766,6 +766,7 @@ describe('PrepareCheckout 쓰임새', () => {
       const s = setup({
         pauses: [pausedRow({ stage: 'TRIAL' })],
         deps: {
+          drawEntryTrial: () => 0,
           selection: {
             read: async () => {
               s.clock.advance(120);
@@ -777,6 +778,7 @@ describe('PrepareCheckout 쓰임새', () => {
               seen.push(budget);
               return true;
             },
+            admit: async () => undefined,
           },
         },
       });
@@ -789,10 +791,12 @@ describe('PrepareCheckout 쓰임새', () => {
       const s = setup({
         pauses: [pausedRow({ stage: 'TRIAL' })],
         deps: {
+          drawEntryTrial: () => 0,
           trials: {
             isAdmitted: async () => {
               throw boom;
             },
+            admit: async () => undefined,
           },
         },
       });

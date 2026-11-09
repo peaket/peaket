@@ -27,7 +27,7 @@ const startedWith = async (o: Partial<Parameters<typeof startPaymentRelay>[0]>) 
 describe('startPaymentRelay', () => {
   test('P-T17_리뷰 고침 M8: 정비 일은 Outbox 파티션 만들기·지우기와 웹훅 수신 기록·입금 해시·대사 작업 표 지우기뿐이다(표가 없는 일은 돌리지 않는다, BUILD_ORDER HOT-153)', async () => {
     const names = ((await started()).maintenanceTasks ?? []).map((t) => t.name);
-    expect([...names].sort()).toEqual(['deposit-secret-hash-delete', 'outbox-partitions-drop', 'outbox-partitions-ensure', 'reconciliation-seen-delete', 'webhook-receipts-delete']);
+    expect([...names].sort()).toEqual(['deposit-secret-hash-delete', 'outbox-partitions-drop', 'outbox-partitions-ensure', 'payment-entry-trial-delete', 'reconciliation-seen-delete', 'webhook-receipts-delete']);
   });
 
   test('P-T32_결제사 어댑터를 넘기면 대사 일이 더해진다(매일 일, 시간 규칙은 일이 스스로 본다)', async () => {

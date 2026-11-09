@@ -3,7 +3,8 @@ import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentLed
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { FailureCategory, PayMethod, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
-import type { EntryPauses } from './entry-pause.js';
+import type { EntryPauseReason, EntryPauses, EntryPauseStage } from './entry-pause.js';
+import type { ClusterPauseReading, EntryPauseProbeOutcome, EntryPauseRecord, EntryPauseWrite, EntryTrialFirstResult, EntryTrialRow } from './entry-pause-judge.js';
 import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-selection.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
@@ -86,6 +87,82 @@ export interface EntryPauseReader {
 export interface EntryTrialReader {
   /** 그 결제사의 이번 시험 재개로 이미 받은 주문인가(admitted_at >= 정지 행의 trial_started_at. 앞 시험 재개의 행이나 시작 시각이 빈 행은 아니다, BUILD_ORDER PRF-201 코드 리뷰) */
   isAdmitted(orderId: string, pg: PgName, budget?: CallBudget): Promise<boolean>;
+}
+
+/** 시험 재개에서 받은 주문 쓰기(BUILD_ORDER PRF-202) */
+export interface EntryTrialStore extends EntryTrialReader {
+  /**
+   * 받은 주문을 적는다. 앞 시험의 행(admitted_at < 지금 정지 행의 trial_started_at)이 남아 있으면 이번 시험의 값으로 덮어쓴다. 이미 이번 시험의 행이면 그대로 둔다.
+   * @throws PaymentDeadlineError·저장소 오류(부르는 쪽이 받지 않는다)
+   */
+  admit(orderId: string, pg: PgName, nowMs: number, budget?: CallBudget): Promise<void>;
+}
+
+/** 첫 승인 호출의 결과 쓰기(BUILD_ORDER PRF-202) */
+export interface EntryTrialResults {
+  /** `first_call_at IS NULL` 조건으로 첫 승인 호출을 시작한 시각을 쓴다(호출을 늦추지 않게 짧은 문장 한도). 이번에 썼으면 참이다 */
+  recordFirstCall(orderId: string, atMs: number): Promise<boolean>;
+  /** `first_result IS NULL` 조건으로 쓴다. 이번에 썼으면 참이다(시험 행이 없거나 이미 있으면 거짓) */
+  recordFirstResult(orderId: string, result: { readonly firstResult: EntryTrialFirstResult; readonly atMs: number; readonly callMs: number }): Promise<boolean>;
+}
+
+/** 판정자·해제가 쓰는 저장소(BUILD_ORDER PRF-202). 캐시를 거치지 않는다 */
+export interface EntryPauseStore {
+  /** channel = 'ALL' 행. 없으면 undefined(열림) */
+  readRecord(pg: PgName): Promise<EntryPauseRecord | undefined>;
+  /** 앞 행이 없으면 판 번호 1의 INSERT(겨루면 거짓), 있으면 읽은 판 번호 조건의 UPDATE(판 번호 + 1). 썼으면 참이다 */
+  write(previous: EntryPauseRecord | undefined, next: EntryPauseWrite): Promise<boolean>;
+  /** 이번 시험에서 첫 승인 호출을 시작한 행(first_call_at >= 시험 시작)을 시작 순으로 limit개 읽는다. 결과가 없는 행도 읽는다 */
+  readTrialResults(pg: PgName, trialStartedAtMs: number, limit: number): Promise<EntryTrialRow[]>;
+  /** 그 결제사의 때가 된, 임대되지 않은 승인 명령 수(cap에서 멈춘다) */
+  countWaitingConfirms(pg: PgName, nowMs: number, cap: number): Promise<number>;
+}
+
+/** 클러스터 Prometheus 입력(BUILD_ORDER PRF-202) */
+export interface EntryPauseClusterInputs {
+  /** 값이 없으면(실패·빈 결과) undefined다. 던지지 않는다. p99WindowMs가 없으면 p99를 묻지 않는다 */
+  read(pg: PgName, o: { readonly p99WindowMs?: number }): Promise<ClusterPauseReading | undefined>;
+}
+
+/** 판정자를 돌려도 되는가(LeaseElector) */
+export interface EntryPauseLeadership {
+  isLeader(): boolean;
+}
+
+/** payment_entry_pause_judge_errors_total{what}의 값 */
+export type EntryPauseJudgeErrorWhat = 'read' | 'write' | 'channel' | 'trial';
+
+/** 판정자 지표. 던지지 않는다 */
+export interface EntryPauseJudgeSignals {
+  /** payment_pg_probe_total{pg, outcome} */
+  probe(pg: PgName, outcome: EntryPauseProbeOutcome): void;
+  /** payment_entry_pause_write_conflicts_total{pg} */
+  writeConflict(pg: PgName): void;
+  /** payment_entry_pause_judge_errors_total{what} */
+  judgeError(what: EntryPauseJudgeErrorWhat): void;
+}
+
+/** payment_entry_trial_total{outcome}의 값 */
+export type EntryTrialOutcome = 'admitted' | 'rejected' | 'success' | 'failure';
+
+/** 시험 재개 지표. 던지지 않는다 */
+export interface EntryTrialSignals {
+  /** payment_entry_trial_total{pg, outcome} */
+  trial(pg: PgName, outcome: EntryTrialOutcome): void;
+  /** payment_entry_trial_write_failed_total{step} */
+  trialWriteFailed(step: 'admit' | 'call' | 'result'): void;
+}
+
+/** 판정자·해제 로그(결제사·단계·행위자·오류 코드만 싣는다. 해제 사유 글과 확인 호출 응답은 싣지 않는다). 던지지 않는다 */
+export interface EntryPauseJudgeLog {
+  /** 단계가 바뀌었다(kind payment-entry-pause-transition) */
+  transition(e: { readonly pg: PgName; readonly from: EntryPauseStage; readonly to: EntryPauseStage; readonly reason: EntryPauseReason; readonly actor: string }): void;
+  /** 확인 호출의 고정 번호에 결제가 있다고 답했다(kind payment-entry-pause-probe-found) */
+  probeFound(e: { readonly pg: PgName }): void;
+  /** 판정 틱의 읽기·쓰기가 실패했다(kind payment-entry-pause-judge-error) */
+  judgeError(e: { readonly what: EntryPauseJudgeErrorWhat; readonly pg: PgName; readonly err: unknown }): void;
+  /** commander가 풀었다(kind payment-entry-pause-released) */
+  released(e: { readonly pg: PgName; readonly actor: string }): void;
 }
 
 /** 정지 행 읽기 지표. 던지지 않는다 */

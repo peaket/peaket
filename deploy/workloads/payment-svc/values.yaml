@@ -2,6 +2,8 @@
 name: payment-svc
 
 service:
+  # 새 결제 진입 정지 판정자를 뽑는 Lease(ADR-0105 결정 8, BUILD_ORDER PRF-202). 입력을 읽을 클러스터 Prometheus 주소 PEAKET_PROMETHEUS_URL은 환경 값이다(local·ci 밖에서 없으면 시작이 실패한다, 코드 리뷰)
+  leaderLease: payment-entry-pause
   networkPolicy:
     # 결제사 출구(docs/security/asvs/payment.md 13.2.4, BUILD_ORDER PRF-192). 표준 NetworkPolicy는 이름을 받지 못해 공인 주소의 443과 클러스터 DNS까지 좁힌다.
     # 호스트(api.tosspayments.com·api.portone.io)는 앱이 시작할 때 고정한다(services/payment-svc/src/config.ts). 이름 단위 장치는 wbs 0.4.2에서 정한다.
@@ -11,5 +13,6 @@ service:
     # - 앰비언트 메시 15008(메시를 거치는 서비스 사이 연결이 실제로 나가는 포트): gRPC로 부르는 서비스 쪽을 허용한다
     # - DB(PgBouncer·Aurora)와 텔레메트리 수집기
     # 릴레이 파드도 같은 값을 받으므로 릴레이가 닿는 Kafka와 쿠버네티스 API 서버(Lease로 리더를 뽑는다)도 함께 적는다
+    # 서비스 파드의 정지 판정자도 쿠버네티스 API 서버(Lease)와 클러스터 Prometheus(입력, PEAKET_PROMETHEUS_URL)에 닿아야 한다(BUILD_ORDER PRF-202). 닿지 못하면 판정자를 뽑지 못하거나 입력 없음으로 돈다
     egress:
       publicHttps: true
