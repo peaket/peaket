@@ -1,11 +1,9 @@
 'use client';
-// SCR-011 주문·결제의 움직이는 부분: 필수 동의 체크(③④) ↔ 결제 버튼(휴대폰·태블릿 아래 띠, 데스크톱 오른쪽 패널),
-// 홀드 만료 대화상자. 결제 버튼은 필수 동의가 빠지면 aria-disabled + 보이는 이유 글(버튼 앞, aria-describedby)이다.
+// SCR-011 주문·결제의 움직이는 부분: 필수 동의 체크(③④) ↔ 결제 버튼(휴대폰·태블릿 아래 띠, 데스크톱 오른쪽 패널).
+// 결제 버튼은 필수 동의가 빠지면 aria-disabled + 보이는 이유 글(버튼 앞, aria-describedby)이다. 홀드 만료 대화상자는 HoldExpiredDialog.tsx에 있다.
 // 미리보기(개발 서버)의 [결제하기]는 결제 복귀 화면으로 가고, 실제 화면은 onPay로 주문을 만든다(ADR-0228).
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Dialog } from '@peaket/ds/Dialog';
 import type { PayMode } from '../model/view';
 
 type ConsentKey = 'thirdParty' | 'terms';
@@ -187,25 +185,5 @@ export function PayAction({ layout, mode, amountText, holdText, holdAria, return
         </div>
       </div>
     </div>
-  );
-}
-
-/** 홀드 만료(결제창 열기 전): 휴대폰은 아래 시트, 태블릿·데스크톱은 가운데 대화상자 */
-export function HoldExpiredDialog({ seatsHref }: { seatsHref: string }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <Dialog
-      open={open}
-      onClose={() => setOpen(false)}
-      layout="auto"
-      icon="clock"
-      title="홀드 시간이 끝났습니다"
-      description="요금은 청구되지 않습니다"
-      actions={
-        <Link className="btn btn-primary btn-lg w-full md:w-auto" href={seatsHref}>
-          좌석 다시 고르기
-        </Link>
-      }
-    />
   );
 }

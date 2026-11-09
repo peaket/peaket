@@ -19,7 +19,8 @@ import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { checkoutView, type CheckoutView } from '../model/view';
-import { CheckoutConsentProvider, HoldExpiredDialog, PayAction } from './CheckoutClient';
+import { CheckoutConsentProvider, PayAction } from './CheckoutClient';
+import { HoldExpiredDialog } from './HoldExpiredDialog';
 import { CheckoutForm } from './CheckoutForm';
 
 type Props = PageProps<{ eventId: string }>;

@@ -13,7 +13,16 @@ const STORYBOOK = `http://127.0.0.1:${STORYBOOK_PORT}`;
  * 곧 입장의 남은 초는 시간에 따라 바뀌는 값이라 두 쪽 모두 5초로 맞춘다(이야기의 모델 값)
  */
 async function freeze(page) {
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1));
+  // 페이지 시계를 읽고 멈추기까지 시계가 흘러 읽은 값을 지나치면 pauseAt이 'Cannot fast-forward to the past'로 실패한다(몰린 CI 러너, 2026-11-10 c9ddbb9c).
+  // 그때는 다시 읽어 조금 더 앞에서 멈춘다(앞으로 넘기는 몇십 ms 안의 타이머만 돈다. 패널을 바꾸면 끝의 data-src 확인이 잡는다)
+  for (let tries = 0; ; tries++) {
+    try {
+      await page.clock.pauseAt(await page.evaluate((ahead) => Date.now() + ahead, 1 + tries * 20));
+      break;
+    } catch (e) {
+      if (tries >= 4 || !String(e).includes('Cannot fast-forward to the past')) throw e;
+    }
+  }
   await page.evaluate(() => {
     for (const el of document.querySelectorAll('.q-inqueue .q-center-block .num.fw-b')) el.textContent = '5초';
   });

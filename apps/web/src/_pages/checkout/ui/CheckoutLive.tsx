@@ -9,12 +9,19 @@ import { holdClock } from '@/shared/lib/hold-clock';
 import { AppShell } from '@/widgets/app-shell';
 import { buyerErrors, gradeLines, orderIdempotencyKey, orderOutcome, ORDER_CONSENT_VERSION, readCheckoutRefs, roundText, type OrderOutcome, type StoredAdmissionRef } from '../model/order';
 import type { PayMethod } from '../model/payment-attempt';
-import { createAttemptFlow, type AttemptFlow, type AttemptProblem, type AttemptView } from '../model/attempt-flow';
+import type { AttemptFlow, AttemptProblem, AttemptView } from '../model/attempt-flow';
 import type { PayMode } from '../model/view';
-import { CheckoutConsentProvider, HoldExpiredDialog, PayAction, useCheckoutConsent } from './CheckoutClient';
+import { CheckoutConsentProvider, PayAction, useCheckoutConsent } from './CheckoutClient';
 import { CheckoutForm, type CheckoutFormData, type SellerView } from './CheckoutForm';
 
 const VerifyIdentityButton = lazy(() => import('@/features/identity-verify').then((m) => ({ default: m.VerifyIdentityButton })));
+// 만료 때만 보이는 대화상자는 첫 화면 JS에 싣지 않는다(docs/frontend.md §5.8 '결제 화면' 첫 JS 180kB)
+const HoldExpiredDialogLazy = lazy(() => import('./HoldExpiredDialog').then((m) => ({ default: m.HoldExpiredDialog })));
+const HoldExpiredDialog = ({ seatsHref }: { seatsHref: string }) => (
+  <Suspense fallback={null}>
+    <HoldExpiredDialogLazy seatsHref={seatsHref} />
+  </Suspense>
+);
 
 /** 끝 안내를 보이는 시간(좌석 화면과 같다) */
 const LEAVE_AFTER_MS = 2500;
@@ -357,10 +364,44 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
             : 'consent';
   const shownNotice = notice ?? flowView?.notice ?? null;
 
-  // 주문이 생기면(새로고침으로 되찾은 주문 포함) 결제 시도를 시작한다
+  // 주문이 생기면(새로고침으로 되찾은 주문 포함) 결제 시도를 시작한다.
+  // 결제 시도 흐름은 주문 뒤에만 쓰여 첫 화면 JS에 싣지 않는다(docs/frontend.md §5.8 '결제 화면' 첫 JS 180kB)
   useEffect(() => {
     if (!orderId) return;
-    const f = createAttemptFlow({
+    let live = true;
+    let f: AttemptFlow | null = null;
+    let off = () => {};
+    // bfcache로 돌아오면 멈춘 버튼을 풀고 새 시도를 준비한다(L13)
+    const onShow = (e: PageTransitionEvent) => void f?.pageShown(e.persisted);
+    window.addEventListener('pageshow', onShow);
+    void Promise.all([import('../model/attempt-flow'), import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('../windows')]).then(
+      ([{ createAttemptFlow }, { ApiError }, { PurchaseKeyError }, { PaymentWindowError }]) => {
+        if (!live) return;
+        errorTypes.current = { ApiError, PurchaseKeyError, PaymentWindowError };
+        const flowNow = makeFlow(createAttemptFlow);
+        f = flowNow;
+        flow.current = flowNow;
+        off = flowNow.subscribe(() => setFlowView(flowNow.view()));
+        void flowNow.start();
+      },
+      () => {
+        if (live) setNotice({ text: '결제를 준비하지 못했습니다. 다시 시도해 주세요', tone: 'danger' });
+      },
+    );
+    return () => {
+      live = false;
+      window.removeEventListener('pageshow', onShow);
+      off();
+      f?.dispose();
+      flow.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 주문 ID가 바뀔 때만 시작한다
+  }, [orderId]);
+
+  /** 결제 시도 흐름을 만든다(주문 ID가 있을 때만 부른다) */
+  const makeFlow = (createAttemptFlow: typeof import('../model/attempt-flow').createAttemptFlow): AttemptFlow => {
+    if (!orderId) throw new Error('order');
+    return createAttemptFlow({
       orderId,
       storage: sessionStorage,
       makeKey: () => crypto.randomUUID(),
@@ -401,30 +442,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
         sdkLoadFailed: (pg) => console.warn('sdk_load_failed', { pg }),
       },
     });
-    flow.current = f;
-    const off = f.subscribe(() => setFlowView(f.view()));
-    let live = true;
-    void Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('../windows')]).then(
-      ([{ ApiError }, { PurchaseKeyError }, { PaymentWindowError }]) => {
-        errorTypes.current = { ApiError, PurchaseKeyError, PaymentWindowError };
-        if (live) void f.start();
-      },
-      () => {
-        if (live) setNotice({ text: '결제를 준비하지 못했습니다. 다시 시도해 주세요', tone: 'danger' });
-      },
-    );
-    // bfcache로 돌아오면 멈춘 버튼을 풀고 새 시도를 준비한다(L13)
-    const onShow = (e: PageTransitionEvent) => void f.pageShown(e.persisted);
-    window.addEventListener('pageshow', onShow);
-    return () => {
-      live = false;
-      window.removeEventListener('pageshow', onShow);
-      off();
-      f.dispose();
-      flow.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 주문 ID가 바뀔 때만 시작한다
-  }, [orderId]);
+  };
 
   // 판매 재개를 알려 주는 길이 아직 없어(실시간은 HOT-357) 잠시 뒤 다시 주문할 수 있게 한다. 여전히 정지면 서버가 423으로 답한다
   useEffect(() => {
