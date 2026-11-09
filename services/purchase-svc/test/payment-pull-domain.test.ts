@@ -148,8 +148,12 @@ describe('paymentStateToResultEvent: 반영하지 않는 상태(설계 5)', () =
     expect(paymentStateToResultEvent(state({ status: 'ACCEPTED', approvedAtMs: undefined }), ctx())).toEqual({ kind: 'WAIT' });
   });
 
-  test.each(['PARTIAL_CANCELED', 'CANCELED'] as const)('%s → IGNORE CANCELED(취소 흐름은 PRF-173·환불 단계 몫. 실행기가 경고 한 줄 뒤 60초 미룬다) (ADR0140)', (status) => {
-    expect(paymentStateToResultEvent(state({ status }), ctx())).toEqual({ kind: 'IGNORE', reason: 'CANCELED' });
+  test('PARTIAL_CANCELED → IGNORE CANCELED(취소 흐름은 PRF-173·환불 단계 몫. 실행기가 경고 한 줄 뒤 60초 미룬다) (ADR0140)', () => {
+    expect(paymentStateToResultEvent(state({ status: 'PARTIAL_CANCELED' }), ctx())).toEqual({ kind: 'IGNORE', reason: 'CANCELED' });
+  });
+
+  test('P-T32_리뷰 고침 M6: CANCELED는 사건과 같은 처리기로 반영한다(대사가 닫은 전액 취소, 당기기가 결과를 잃지 않는다)', () => {
+    expect(paymentStateToResultEvent(state({ status: 'CANCELED' }), ctx())).toMatchObject({ kind: 'APPLY', event: { type: 'CANCELED' } });
   });
 
   test.each<[string, Partial<OrderPaymentState>, Partial<PaymentPullContext>]>([
@@ -263,8 +267,8 @@ describe('상수(ADR-0140 결정 1·3, 설계 3·4·5·7)', () => {
     expect([...PAYMENT_PULL_OUTAGE_CODES].sort()).toEqual(['CIRCUIT_OPEN', 'DEADLINE_EXCEEDED', 'UNAVAILABLE']);
   });
 
-  test('당기기로 반영하는 종류(지표 payment_result_pulled_total{type})는 APPROVED·FAILED·AWAITING_DEPOSIT·UNKNOWN 넷이다 (ADR0140)', () => {
-    expect([...PAYMENT_PULL_TYPES]).toEqual(['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN']);
+  test('당기기로 반영하는 종류(지표 payment_result_pulled_total{type})는 APPROVED·FAILED·AWAITING_DEPOSIT·UNKNOWN·CANCELED 다섯이다 (ADR0140, HOT-153 리뷰 고침 M6)', () => {
+    expect([...PAYMENT_PULL_TYPES]).toEqual(['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN', 'CANCELED']);
     for (const type of PAYMENT_PULL_TYPES) {
       const status = type;
       expect(eventOf(state({ status, ...(type === 'FAILED' ? { failureCategory: 'PG_ERROR' as const } : {}) })).type, type).toBe(type);

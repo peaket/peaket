@@ -9,7 +9,7 @@ import type { AppliedPaymentEventType } from '../domain/payment-result.js';
 import type { PaymentPullSignals } from '../domain/ports.js';
 
 /**
- * - payment_result_pulled_total{type}(카운터, type: APPROVED·FAILED·AWAITING_DEPOSIT·UNKNOWN): 당기기로 반영한 주문 수(ApplyPaymentResult가 APPLIED)
+ * - payment_result_pulled_total{type}(카운터, type: APPROVED·FAILED·AWAITING_DEPOSIT·UNKNOWN·CANCELED): 당기기로 반영한 주문 수(ApplyPaymentResult가 APPLIED)
  * - payment_result_pull_failures_total(카운터, 이름표 없음): BatchGetPayments 실패 수(차단기 열림·데드라인 초과·gRPC 오류·답 모양 틀림)
  * - payment_result_pull_batches_total(카운터, 이름표 없음): BatchGetPayments를 부른 수(성패와 상관없이)
  */

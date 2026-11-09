@@ -2,9 +2,9 @@
 // 토스 모양·제어 API는 시험 키 기본 인증(`Authorization: Basic base64(키 + ':')`), 포트원 모양은 `Authorization: PortOne 키`가 있어야 한다(ASVS v5.0.0-8.2.1). 요청 로그는 남기지 않는다(16.2.5).
 import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, SIM_PAY_METHODS, type Fault, type SimInstrument, type SimResponse } from './engine.js';
+import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, SIM_PAY_METHODS, type Fault, type SeedTransaction, type SimInstrument, type SimResponse } from './engine.js';
 import { parseLatencySpec, type LatencySpec } from './latency.js';
-import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneWebhookEvents } from './portone-shape.js';
+import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneTransactionView, portoneWebhookEvents } from './portone-shape.js';
 import type { SimClock } from './time.js';
 
 export interface SimulatorAppOptions {
@@ -44,7 +44,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   const expectedPortone = Buffer.from(`PortOne ${o.secretKey}`);
   const portoneWebhookSecret = o.portoneWebhookSecret ?? defaultPortoneWebhookSecret(o.secretKey);
   const app = Fastify({ logger: false });
-  const isPortone = (req: FastifyRequest) => req.url.startsWith('/payments/');
+  const isPortone = (req: FastifyRequest) => req.url.startsWith('/payments/') || req.url.startsWith('/payments-by-cursor');
 
   app.addHook('onRequest', async (req, reply) => {
     const got = Buffer.from(req.headers.authorization ?? '');
@@ -104,6 +104,13 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
       },
     },
     async (req, reply) => send(req, reply, await engine.cancel(req.params.paymentKey, req.body, idemOf(req))),
+  );
+
+  // 거래 조회(대사, BUILD_ORDER HOT-153)
+  app.get<{ Querystring: { startDate: string; endDate: string; startingAfter?: string; limit?: number } }>(
+    '/v1/transactions',
+    { schema: { querystring: { type: 'object', required: ['startDate', 'endDate'], additionalProperties: false, properties: { startDate: { type: 'string', maxLength: 40 }, endDate: { type: 'string', maxLength: 40 }, startingAfter: { type: 'string', maxLength: 200 }, limit: { type: 'integer', minimum: 1, maximum: 10_000 } } } } },
+    async (req) => engine.transactions({ startDate: req.query.startDate, endDate: req.query.endDate, limit: req.query.limit ?? 100, ...(req.query.startingAfter === undefined ? {} : { startingAfter: req.query.startingAfter }) }),
   );
 
   // ---- 포트원 V2 모양 API(같은 원장, 같은 장애 넣기, BUILD_ORDER HOT-140) ----
@@ -170,7 +177,39 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     },
   );
 
+  // 포트원 결제 대용량 다건 조회(대사, BUILD_ORDER HOT-153). 다른 상점이면 빈 답이다(응답이 목록이라 404를 쓰지 않는다)
+  app.get<{ Querystring: { storeId?: string; from: string; until: string; cursor?: string; size?: number } }>(
+    '/payments-by-cursor',
+    { schema: { querystring: { type: 'object', required: ['from', 'until'], additionalProperties: false, properties: { storeId: { type: 'string', maxLength: 200 }, from: { type: 'string', maxLength: 40 }, until: { type: 'string', maxLength: 40 }, cursor: { type: 'string', maxLength: 40 }, size: { type: 'integer', minimum: 1, maximum: 10_000 } } } } },
+    async (req) => {
+      if (req.query.storeId !== undefined && req.query.storeId !== PORTONE_STORE_ID) return { items: [] };
+      const page = engine.portonePaymentsByCursor({ from: req.query.from, until: req.query.until, size: req.query.size ?? 1000, ...(req.query.cursor === undefined ? {} : { cursor: req.query.cursor }) });
+      return { items: page.items.map(portoneTransactionView), ...(page.cursor === undefined ? {} : { cursor: page.cursor }) };
+    },
+  );
+
   // ---- 시험용 제어 API ----
+  app.post<{ Body: { items: SeedTransaction[] } }>(
+    '/sim/transactions/seed',
+    {
+      // 측정(10만 건)의 씨앗이라 기본 본문 상한(1MB)을 넓힌다
+      bodyLimit: 64 * 1024 * 1024,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['items'],
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              items: { type: 'object', required: ['paymentKey', 'orderId', 'amount', 'status', 'atMs'], additionalProperties: false, properties: { paymentKey: { type: 'string', minLength: 1, maxLength: 200 }, orderId: ORDER, amount: AMOUNT, status: { type: 'string', enum: ['DONE', 'PARTIAL_CANCELED', 'CANCELED', 'WAITING_FOR_DEPOSIT'] }, atMs: { type: 'integer' } } },
+            },
+          },
+        },
+      },
+    },
+    async (req) => ({ inserted: engine.seedTransactions(req.body.items) }),
+  );
   app.post<{ Body: { orderId: string; amount: number; orderName?: string } & SimInstrument }>(
     '/sim/portone/authenticate',
     {

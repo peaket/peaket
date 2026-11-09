@@ -21,7 +21,11 @@ import {
   type ConfirmResult,
   type FailureCategory,
   type HeaderBag,
+  type ListTransactionsRequest,
+  type ListTransactionsResult,
   type PaymentGatewayPort,
+  type PgTransaction,
+  type PgUnreadableRow,
   type PayMethodCategory,
   type PgCapabilities,
   type PgName,
@@ -31,7 +35,7 @@ import {
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { tossCardOf } from './card-fields.js';
-import { num, pgRequest, str, type PgReply } from './pg-reply.js';
+import { num, pgRequest, str, unreadableRowOf, type PgReply } from './pg-reply.js';
 import { tossVirtualAccountOf } from './virtual-account-fields.js';
 
 export interface TossShapedOptions {
@@ -90,6 +94,8 @@ const TRANSIENT_CODES = new Set([
   'FAILED_METHOD_HANDLING_CANCEL',
   'FAILED_REFUND_PROCESS',
 ]);
+/** 토스 거래 조회의 시각 모양(KST, 초까지, 2026-11-09 공식 문서 확인. 오프셋을 받지 않는다) */
+const kstDateTime = (ms: number): string => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 19);
 /** 웹훅의 결제 키·주문 ID 모양: 공백·제어 문자가 없는 ASCII 1~200자 */
 const WEBHOOK_REF = /^[\x21-\x7e]{1,200}$/;
 /** 전송 ID는 저장하는 키라 글자와 길이만 묶는다: 공백·제어 문자가 없는 ASCII 1~128자 [가정]. 토스 문서가 불투명한 글이라고 적어 그 안의 형식은 보지 않는다 */
@@ -188,6 +194,41 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     const card = tossCardOf(r.json?.card);
     const virtualAccount = status === 'WAITING_FOR_DEPOSIT' ? tossVirtualAccountOf(r.json) : undefined;
     return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}), ...(card ? { card } : {}), ...(virtualAccount ? { virtualAccount } : {}) };
+  }
+
+  /** 거래 조회(토스 GET /v1/transactions, payment §8, BUILD_ORDER HOT-153) */
+  async listTransactions(req: ListTransactionsRequest): Promise<ListTransactionsResult> {
+    const r = await pgRequest(this.#queryHttp, {
+      method: 'GET',
+      path: '/v1/transactions',
+      params: {},
+      query: { startDate: kstDateTime(req.fromMs), endDate: kstDateTime(req.toMs), ...(req.cursor === undefined ? {} : { startingAfter: req.cursor }), limit: String(req.limit) },
+      headers: { authorization: this.#authorization },
+      ...(req.timeoutMs === undefined ? {} : { timeoutCapMs: Math.min(req.timeoutMs, this.#readTimeoutMs) }),
+    });
+    if (r === 'NO_ANSWER') return { kind: 'UNKNOWN' };
+    if (r.status === 429) return { kind: 'UNKNOWN', throttled: true };
+    if (r.status !== 200 || !Array.isArray(r.json)) return { kind: 'UNKNOWN' };
+    const rows = r.json as unknown[];
+    const items: PgTransaction[] = [];
+    const unreadable: PgUnreadableRow[] = [];
+    for (const raw of rows) {
+      const row = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+      const status = STATUS.get(str(row.status) ?? '');
+      const amount = num(row.amount);
+      const paymentRef = str(row.paymentKey);
+      const orderRef = str(row.orderId);
+      const atMs = Date.parse(str(row.transactionAt) ?? '');
+      // 못 읽는 줄 하나 때문에 묶음 전체를 실패시키지 않는다(BUILD_ORDER HOT-153 코드 리뷰 M13)
+      if (!status || amount === undefined || !paymentRef || !orderRef || Number.isNaN(atMs)) unreadable.push(unreadableRowOf(raw, (x) => x.paymentKey, (x) => x.orderId));
+      else items.push({ paymentRef, orderRef, status, amount, atMs });
+    }
+    const full = rows.length === req.limit;
+    const lastRow = rows[rows.length - 1] as Record<string, unknown> | null | undefined;
+    const last = full ? str(lastRow?.transactionKey) : undefined;
+    // 꽉 찬 묶음의 커서를 못 읽으면 끝으로 잘못 알고 뒤를 잃으므로 그 묶음을 일시 실패로 둔다
+    if (full && last === undefined) return { kind: 'UNKNOWN' };
+    return { kind: 'PAGE', items, ...(last === undefined ? {} : { nextCursor: last }), ...(unreadable.length === 0 ? {} : { unreadable }) };
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult> {

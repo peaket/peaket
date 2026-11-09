@@ -68,6 +68,7 @@ const APPLIED_OF: Record<AppliedPaymentEventType, ApplyPaymentResultOutcome> = {
   UNKNOWN: { status: 'APPLIED', transition: 'T12', write: 'MARK' },
   AWAITING_DEPOSIT: { status: 'APPLIED', transition: 'T10', write: 'MARK' },
   DEPOSIT_REVERSED: { status: 'APPLIED', transition: 'T21', write: 'REVERSE' },
+  CANCELED: { status: 'APPLIED', transition: 'T15', write: 'FAIL' },
 };
 
 type Call =
@@ -466,7 +467,6 @@ describe('tick: 답마다(설계 5·6·7)', () => {
   });
 
   test.each<[OrderPaymentState['status'], 'CANCELED' | 'MALFORMED']>([
-    ['CANCELED', 'CANCELED'],
     ['PARTIAL_CANCELED', 'CANCELED'],
     ['UNSPECIFIED', 'MALFORMED'],
   ])('%s 답은 반영하지 않고 경고 한 줄(log.ignored: 주문 ID·까닭 %s·상태)과 60초 미루기다(취소 흐름은 PRF-173 몫) (ADR0140)', async (status, reason) => {
@@ -522,7 +522,7 @@ describe('tick: 답마다(설계 5·6·7)', () => {
 
   test('섞인 묶음: 차례대로 보고, 미룰 주문은 간격마다 그 묶음의 defer 한 번에 모은다(보류·오래 기록 없음 지금 + 10분, 취소 상태 지금 + 60초) (ADR0140)', async () => {
     fx.claimQueue = [[target(ORDER_ID), target(ORDER_B), target(ORDER_C, { confirmSentAtMs: NOW - 15 * MIN }), target(ORDER_D)]];
-    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'CANCELED' }), answer(ORDER_D));
+    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'PARTIAL_CANCELED' }), answer(ORDER_D));
     fx.executeAnswers.set(ORDER_ID, throws(new PaymentResultHeld('PG_MISMATCH', ORDER_ID, 'APPROVED')));
     expect(await puller().tick()).toEqual({ ...ZERO, claimed: 4, batches: 1, applied: 1, deferred: 3 });
     expect(fx.defers).toEqual([
@@ -612,7 +612,7 @@ describe('tick: 실패(ADR-0140 결정 4)', () => {
 
   test('defer가 던지면 log.runError(defer) 한 줄이고 미룬 수에 세지 않는다(다음 점검 5초 뒤 다시 묻는다) [ASVS v5.0.0-16.5.2]', async () => {
     fx.claimQueue = [[target()]];
-    fx.answer(answer(ORDER_ID, { status: 'CANCELED' }));
+    fx.answer(answer(ORDER_ID, { status: 'PARTIAL_CANCELED' }));
     const down = new Error('db down');
     fx.deferError = down;
     expect(await puller().tick()).toEqual({ ...ZERO, claimed: 1, batches: 1, deferred: 0 });
@@ -622,7 +622,7 @@ describe('tick: 실패(ADR-0140 결정 4)', () => {
   test('지표·로그가 던져도 실행기를 막지 않는다: 반영·미루기를 이어 하고 틱은 던지지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
     fx.noisy = true;
     fx.claimQueue = [[target(ORDER_ID), target(ORDER_B), target(ORDER_C, { confirmSentAtMs: NOW - 20 * MIN })]];
-    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'CANCELED' }));
+    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'PARTIAL_CANCELED' }));
     const out = await puller().tick();
     expect(out).toEqual({ ...ZERO, claimed: 3, batches: 1, applied: 1, deferred: 2 });
     expect(fx.events.map((e) => e.orderId)).toEqual([ORDER_ID]);
@@ -686,7 +686,7 @@ describe('start·stop', () => {
 
   test('stop은 반복을 끄고(같은 handle로 clearInterval) 돌던 틱의 BatchGetPayments와 그 뒤 반영·미루기까지 기다린다. 멈춘 뒤의 start·tick은 아무것도 하지 않는다 (ADR0140)', async () => {
     fx.claimQueue = [[target(ORDER_ID), target(ORDER_B)]];
-    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'CANCELED' }));
+    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'PARTIAL_CANCELED' }));
     fx.holdBatch = true;
     const r = puller();
     r.start();
@@ -945,7 +945,7 @@ describe('리뷰 고침(2026-11-06 코드 리뷰, payment §2 \'중간 결과 �
 
   test('리뷰 고침 M3_반영이 보류(HOLD)로 끝난 주문도 다음 점검을 지금 + 10분으로 미룬다(같은 답은 다시 보류된다). 취소 상태·모양 틀림(IGNORE)은 60초 그대로다 (ADR0140) [ASVS v5.0.0-2.3.3]', async () => {
     fx.claimQueue = [[target(ORDER_ID), target(ORDER_B), target(ORDER_C)]];
-    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'CANCELED' }), answer(ORDER_C, { status: 'UNSPECIFIED' }));
+    fx.answer(answer(ORDER_ID), answer(ORDER_B, { status: 'PARTIAL_CANCELED' }), answer(ORDER_C, { status: 'UNSPECIFIED' }));
     fx.executeAnswers.set(ORDER_ID, throws(new PaymentResultHeld('AMOUNT_MISMATCH', ORDER_ID, 'APPROVED')));
     expect(await puller().tick()).toEqual({ ...ZERO, claimed: 3, batches: 1, deferred: 3 });
     expect([...fx.defers].sort((a, b) => a.untilMs - b.untilMs)).toEqual([

@@ -44,7 +44,8 @@ const skip = (reason: string) => ({ kind: 'SKIP', reason }) as PaymentResultDeci
 const hold = (reason: string) => ({ kind: 'HOLD', reason }) as PaymentResultDecision;
 
 /** 정본 표(payment §2 '사건 종류 × 지금 상태 → 전이')를 시험 쪽에 따로 적은 것. 코드 표(PAYMENT_RESULT_TABLE)와 견준다 */
-const CANON: Record<'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED', Partial<Record<OrderStatus, string>>> = {
+const CANON: Record<'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'CANCELED', Partial<Record<OrderStatus, string>>> = {
+  CANCELED: { RESERVED: 'T11', UNKNOWN: 'T15' },
   APPROVED: { RESERVED: 'T9', UNKNOWN: 'T13', AWAITING_DEPOSIT: 'T16' },
   FAILED: { RESERVED: 'T11', UNKNOWN: 'T15', AWAITING_DEPOSIT: 'T17' },
   UNKNOWN: { RESERVED: 'T12' },
@@ -53,6 +54,25 @@ const CANON: Record<'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DE
 };
 const APPLIED_TYPES = ['APPROVED', 'FAILED', 'UNKNOWN', 'AWAITING_DEPOSIT'] as const;
 const SOURCE_STATUSES = ['RESERVED', 'UNKNOWN', 'AWAITING_DEPOSIT'] as const;
+
+describe('decidePaymentResult: 대사가 닫은 결제의 CANCELED(BUILD_ORDER HOT-153)', () => {
+  test('P-T32_결과 모름 주문의 CANCELED는 T15다(실패 사유는 없음: 기본값 PG_ERROR). 돈이 나가지 않은 실패다', () => {
+    expect(decide('CANCELED', 'UNKNOWN')).toEqual({ kind: 'APPLY', write: 'FAIL', transition: 'T15', failureReason: 'PG_ERROR' });
+  });
+
+  test('P-T32_리뷰 고침 M6: 결과 모름이 아직 반영되지 않은 RESERVED 주문의 CANCELED도 보류하지 않고 실패로 끝낸다(명세 applyResult, 전이 표의 RESERVED → FAILED는 T11이다)', () => {
+    expect(decide('CANCELED', 'RESERVED')).toEqual({ kind: 'APPLY', write: 'FAIL', transition: 'T11', failureReason: 'PG_ERROR' });
+  });
+
+  test('P-T32_이미 FAILED인 주문에 온 CANCELED는 다시 온 사건이다', () => {
+    expect(decide('CANCELED', 'FAILED')).toEqual({ kind: 'SKIP', reason: 'ALREADY_THERE' });
+  });
+
+  test('P-T32_결과 모름 주문이어도 금액·결제사가 어긋나면 보류한다(다른 사건과 같다)', () => {
+    expect(decide('CANCELED', 'UNKNOWN', { event: { amount: AMOUNT + 1 } })).toEqual(hold('AMOUNT_MISMATCH'));
+    expect(decide('CANCELED', 'UNKNOWN', { event: { pg: 'PORTONE' } })).toEqual(hold('PG_MISMATCH'));
+  });
+});
 
 describe('decidePaymentResult: 전이 표의 칸(종류 넷 × 출발 상태 셋)', () => {
   test.each([
@@ -77,7 +97,7 @@ describe('decidePaymentResult: 전이 표의 칸(종류 넷 × 출발 상태 셋
 
   test('FR011_코드 표(PAYMENT_RESULT_TABLE)·도착 상태·쓰기 갈래가 정본 표와 같고, 표의 칸마다 결정이 그 전이·그 쓰기 갈래다', () => {
     expect(PAYMENT_RESULT_TABLE).toEqual(CANON);
-    expect(PAYMENT_RESULT_ARRIVAL).toEqual({ APPROVED: 'APPROVED', FAILED: 'FAILED', UNKNOWN: 'UNKNOWN', AWAITING_DEPOSIT: 'AWAITING_DEPOSIT', DEPOSIT_REVERSED: 'AWAITING_DEPOSIT' });
+    expect(PAYMENT_RESULT_ARRIVAL).toEqual({ APPROVED: 'APPROVED', FAILED: 'FAILED', UNKNOWN: 'UNKNOWN', AWAITING_DEPOSIT: 'AWAITING_DEPOSIT', DEPOSIT_REVERSED: 'AWAITING_DEPOSIT', CANCELED: 'FAILED' });
     expect(PAYMENT_RESULT_WRITES).toEqual({ T9: 'APPROVE', T13: 'APPROVE', T16: 'APPROVE', T11: 'FAIL', T15: 'FAIL', T17: 'FAIL', T10: 'MARK', T12: 'MARK', T14: 'MARK', T21: 'REVERSE' });
     for (const type of APPLIED_TYPES) {
       for (const status of SOURCE_STATUSES) {
@@ -221,11 +241,15 @@ describe('decidePaymentResult: 다시 온 사건과 건너뛰는 종류', () => 
   });
 
   test.each(['PARTIAL_CANCELED', 'CANCELED'] as const)(
-    'FR011_%s는 건너뛰지 않고 HOLD NOT_YET_SUPPORTED다(맡을 단계가 생기면 보류 표에서 다시 처리한다, 리뷰 M3. CONFIRMED·APPROVED·RESERVED 주문 모두)',
+    'FR011_%s는 건너뛰지 않고 HOLD NOT_YET_SUPPORTED다(맡을 단계가 생기면 보류 표에서 다시 처리한다, 리뷰 M3. CONFIRMED·APPROVED 주문 모두)',
     (type) => {
-      for (const status of ['CONFIRMED', 'APPROVED', 'RESERVED'] as const) expect(decide(type, status), status).toEqual(hold('NOT_YET_SUPPORTED'));
+      for (const status of ['CONFIRMED', 'APPROVED'] as const) expect(decide(type, status), status).toEqual(hold('NOT_YET_SUPPORTED'));
     },
   );
+
+  test('FR011_부분 취소는 RESERVED 주문에서도 보류한다(전액 취소만 실패로 끝낸다, HOT-153 리뷰 고침 M6)', () => {
+    expect(decide('PARTIAL_CANCELED', 'RESERVED')).toEqual(hold('NOT_YET_SUPPORTED'));
+  });
 
   test('FR011_사건 종류 목록은 계약(asyncapi PaymentEvent.type)과 같은 값·차례이고, 여덟 종류 모두 결정이 던지지 않는다', () => {
     expect([...PAYMENT_EVENT_TYPES]).toEqual(PaymentEvent.shape.type.options);

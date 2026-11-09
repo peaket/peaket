@@ -20,7 +20,7 @@ State 1: <Initial predicate>
 /\ payment_double_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0] @@ <<1, 2>> :> [st |-> "NONE", pg |-> 0])
 /\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 2: <payment_double_payment_newAttempt(1) line 1123, col 3 to line 1148, col 68 of module payment_double>
+State 2: <payment_double_payment_newAttempt(1) line 1147, col 3 to line 1172, col 68 of module payment_double>
 /\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_double_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -83,7 +83,7 @@ State 4: <payment_double_payment_toggleSwitch line 324, col 3 to line 340, col 6
   <<1, 2>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 5: <payment_double_payment_newAttempt(1) line 1123, col 3 to line 1148, col 68 of module payment_double>
+State 5: <payment_double_payment_newAttempt(1) line 1147, col 3 to line 1172, col 68 of module payment_double>
 /\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_double_payment_env = [ sw |-> TRUE,
   switches |-> 1,
@@ -167,7 +167,7 @@ State 8: <payment_double_payment_reserve(1) line 473, col 3 to line 499, col 68 
   <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
 /\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 9: <payment_double_payment_command(1) line 1162, col 3 to line 1182, col 43 of module payment_double>
+State 9: <payment_double_payment_command(1) line 1186, col 3 to line 1206, col 43 of module payment_double>
 /\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_double_payment_env = [ sw |-> TRUE,
   switches |-> 1,
@@ -209,7 +209,7 @@ State 10: <payment_double_payment_toggleSwitch line 324, col 3 to line 340, col 
   <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
 /\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "ACCEPTED")
 
-State 11: <payment_double_payment_command(1) line 1162, col 3 to line 1182, col 43 of module payment_double>
+State 11: <payment_double_payment_command(1) line 1186, col 3 to line 1206, col 43 of module payment_double>
 /\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_double_payment_env = [ sw |-> FALSE,
   switches |-> 2,

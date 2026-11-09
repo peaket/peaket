@@ -93,6 +93,15 @@ export interface SimTestCard {
   bin?: string | null;
 }
 
+/** 토스 모양 거래 목록의 한 줄(BUILD_ORDER HOT-153) */
+interface TransactionRow {
+  key: string;
+  p: Payment;
+  status: 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED';
+  amount: number;
+  atMs: number;
+}
+
 interface IdemEntry {
   fingerprint: string;
   at: number;
@@ -111,6 +120,15 @@ export interface WebhookEvent {
   txId?: string;
   headers: Record<string, string>;
   body: { eventType: 'PAYMENT_STATUS_CHANGED'; createdAt: string; data: unknown };
+}
+
+/** 대사 시험·측정이 넣는 결제 한 줄(BUILD_ORDER HOT-153). atMs는 그 상태가 된 시각이다 */
+export interface SeedTransaction {
+  paymentKey: string;
+  orderId: string;
+  amount: number;
+  status: 'DONE' | 'PARTIAL_CANCELED' | 'CANCELED' | 'WAITING_FOR_DEPOSIT';
+  atMs: number;
 }
 
 /** 토스 DEPOSIT_CALLBACK 본문 모양(docs/features/payment.md §2.1 '공식 문서 대조 결과') */
@@ -154,6 +172,7 @@ export class PgSimulatorEngine {
   private events: WebhookEvent[] = [];
   private deposits: DepositCallback[] = [];
   private serial = 0;
+  private transactionRows: { rows: TransactionRow[]; indexOf: Map<string, number> } | undefined;
 
   constructor(o: EngineOptions = {}) {
     this.clock = o.clock ?? systemClock;
@@ -176,6 +195,7 @@ export class PgSimulatorEngine {
   }
 
   reset(): void {
+    this.transactionRows = undefined;
     this.payments.clear();
     this.approvedByOrder.clear();
     this.idem.clear();
@@ -341,6 +361,63 @@ export class PgSimulatorEngine {
       }));
   }
 
+  /**
+   * 대사 시험·측정의 씨앗: 결제 줄을 바로 넣는다(결제창·승인을 거치지 않는다, BUILD_ORDER HOT-153).
+   * DONE은 approvedAt = atMs, CANCELED·PARTIAL_CANCELED는 승인(atMs − 1초) 뒤 취소(atMs, 부분이면 절반)이고, WAITING_FOR_DEPOSIT은 가상계좌 입금 대기다.
+   */
+  seedTransactions(items: readonly SeedTransaction[]): number {
+    for (const it of items) {
+      const serial = ++this.serial;
+      const base: Payment = { paymentKey: it.paymentKey, orderId: it.orderId, orderName: '씨앗 주문', amount: it.amount, status: 'READY', requestedAt: it.atMs, balance: it.amount, cancels: [], serial };
+      if (it.status === 'DONE') {
+        base.status = 'DONE';
+        base.approvedAt = it.atMs;
+      } else if (it.status === 'WAITING_FOR_DEPOSIT') {
+        base.method = '가상계좌';
+        base.status = 'WAITING_FOR_DEPOSIT';
+        base.virtualAccount = { accountNumber: `562${String(serial).padStart(11, '0')}`, bankCode: '20', dueAt: it.atMs + DEPOSIT_WINDOW_MS };
+      } else {
+        base.status = it.status;
+        base.approvedAt = it.atMs - 1_000;
+        const cancelAmount = it.status === 'CANCELED' ? it.amount : Math.floor(it.amount / 2);
+        base.balance = it.amount - cancelAmount;
+        base.cancels = [{ cancelAmount, cancelReason: '씨앗 취소', canceledAt: it.atMs, transactionKey: this.transactionKey() }];
+      }
+      base.lastTransactionKey = this.transactionKey();
+      this.payments.set(it.paymentKey, base);
+      if (base.approvedAt !== undefined) this.approvedByOrder.set(it.orderId, it.paymentKey);
+    }
+    this.transactionRows = undefined;
+    return items.length;
+  }
+
+  /** 토스 모양 거래 조회(GET /v1/transactions, BUILD_ORDER HOT-153): 승인과 취소가 거래마다 한 줄이고 시각 차례다. startDate·endDate는 KST다 */
+  transactions(q: { startDate: string; endDate: string; startingAfter?: string; limit: number }): Array<Record<string, unknown>> {
+    const fromMs = Date.parse(`${q.startDate}+09:00`);
+    const toMs = Date.parse(`${q.endDate}+09:00`);
+    const { rows, indexOf } = this.transactionIndex();
+    const start = q.startingAfter === undefined ? 0 : (indexOf.get(q.startingAfter) ?? -1) + 1;
+    const out: Array<Record<string, unknown>> = [];
+    for (let i = start; i < rows.length && out.length < q.limit; i += 1) {
+      const r = rows[i]!;
+      if (r.atMs < fromMs || r.atMs >= toMs) continue;
+      out.push({ mId: 'peaketsim', transactionKey: r.key, paymentKey: r.p.paymentKey, orderId: r.p.orderId, method: r.p.method ?? '카드', customerKey: null, useEscrow: false, receiptUrl: null, status: r.status, transactionAt: kstIso(r.atMs), currency: 'KRW', amount: r.amount });
+    }
+    return out;
+  }
+
+  /** 포트원 모양 결제 대용량 다건 조회(GET /payments-by-cursor, BUILD_ORDER HOT-153): 결제 한 건이 한 줄(최종 상태)이고 상태가 바뀐 시각이 범위 안인 건만 준다. items는 토스 모양 보기이고 경로가 포트원 모양으로 바꾼다. 커서는 줄 번호다 */
+  portonePaymentsByCursor(q: { from: string; until: string; cursor?: string; size: number }): { items: Array<Record<string, unknown>>; cursor?: string } {
+    const fromMs = Date.parse(q.from);
+    const toMs = Date.parse(q.until);
+    const changedAt = (p: Payment): number => p.cancels.at(-1)?.canceledAt ?? p.approvedAt ?? p.requestedAt;
+    const matches = [...this.payments.values()].filter((p) => p.status !== 'READY' && p.status !== 'IN_PROGRESS' && changedAt(p) >= fromMs && changedAt(p) < toMs).sort((a, b) => changedAt(a) - changedAt(b) || a.serial - b.serial);
+    const start = q.cursor === undefined ? 0 : Number(q.cursor);
+    const page = matches.slice(start, start + q.size);
+    const next = start + q.size;
+    return { items: page.map((p) => ({ ...this.view(p), statusChangedAt: kstIso(changedAt(p)) })), ...(next < matches.length ? { cursor: String(next) } : {}) };
+  }
+
   /** 입금을 흉내 낸다: 입금 대기면 DONE으로 바꾸고 입금 통보 본문을 쌓는다. 없는 결제는 404, 입금 대기가 아니면 400이다 */
   deposit(paymentKey: string): SimResponse {
     const p = this.payments.get(paymentKey);
@@ -465,6 +542,7 @@ export class PgSimulatorEngine {
 
   private setStatus(p: Payment, status: PaymentStatus): void {
     p.status = status;
+    this.transactionRows = undefined;
     const at = kstIso(this.clock.now());
     this.events.push({
       paymentKey: p.paymentKey,
@@ -476,6 +554,24 @@ export class PgSimulatorEngine {
       },
       body: { eventType: 'PAYMENT_STATUS_CHANGED', createdAt: at, data: this.view(p) },
     });
+  }
+
+  /** 거래 목록(시각 차례)과 거래 키 → 줄 번호. 측정 규모에서 호출마다 다시 만들지 않게 바뀔 때까지 담아 둔다 */
+  private transactionIndex(): { rows: TransactionRow[]; indexOf: Map<string, number> } {
+    if (this.transactionRows !== undefined) return this.transactionRows;
+    const rows: TransactionRow[] = [];
+    for (const p of this.payments.values()) {
+      if (p.approvedAt !== undefined) rows.push({ key: `${p.paymentKey}:approve`, p, status: 'DONE', amount: p.amount, atMs: p.approvedAt });
+      let balance = p.amount;
+      p.cancels.forEach((c) => {
+        balance -= c.cancelAmount;
+        rows.push({ key: c.transactionKey, p, status: balance === 0 ? 'CANCELED' : 'PARTIAL_CANCELED', amount: c.cancelAmount, atMs: c.canceledAt });
+      });
+    }
+    rows.sort((a, b) => a.atMs - b.atMs || a.p.serial - b.p.serial || (a.status === 'DONE' ? -1 : 1));
+    const indexOf = new Map(rows.map((r, i) => [r.key, i]));
+    this.transactionRows = { rows, indexOf };
+    return this.transactionRows;
   }
 
   private transactionKey(): string {

@@ -131,6 +131,11 @@ function portoneView(v: TossView): Record<string, unknown> {
   };
 }
 
+/** 거래 조회의 한 건(결제 건 모양, BUILD_ORDER HOT-153). view의 statusChangedAt을 그대로 싣는다 */
+export function portoneTransactionView(v: Record<string, unknown>): Record<string, unknown> {
+  return { ...portoneView(v as TossView), statusChangedAt: v.statusChangedAt, updatedAt: v.statusChangedAt };
+}
+
 /** 시뮬레이터 웹훅 시크릿 기본값(옵션을 주지 않았을 때 시험 키에서 만든다). whsec_ + base64다 */
 export function defaultPortoneWebhookSecret(secretKey: string): string {
   return `whsec_${createHash('sha256').update(`portone-webhook:${secretKey}`).digest('base64')}`;

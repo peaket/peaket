@@ -3,7 +3,7 @@
 // 다른 표(payment_entry_pause·payment_cancel 등)는 그 표를 쓰는 단계가 더한다.
 // drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다. 상태 목록은 도메인 상수와 같은 차례로 글로 적는다.
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, customType, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, date, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -72,6 +72,9 @@ export const payment = pgTable(
     index('payment_unknown_status_changed_idx').on(t.statusChangedAt).where(sql`${t.status} = 'UNKNOWN'`),
     // 웹훅의 결제 참조로 원장 찾기(docs/data.md §5.1, BUILD_ORDER HOT-150, 마이그레이션 0005)
     index('payment_pg_ref_idx').on(t.pg, t.pgPaymentRef),
+    // 대사의 원장 쪽 단계와 해시 지우기(docs/data.md §5.1, BUILD_ORDER HOT-153, 마이그레이션 0008)
+    index('payment_recon_approved_idx').on(t.pg, t.approvedAt, t.id).where(sql`${t.status} = 'APPROVED'`),
+    index('payment_deposit_hash_idx').on(t.approvedAt).where(sql`${t.depositSecretHash} IS NOT NULL`),
     // UNKNOWN과 입금 대기 행은 다음 조회 시각이 있어야 실행기가 잡는다(잡히지 않은 채 남는 행을 막는다, BUILD_ORDER HOT-151)
     check('payment_next_query_check', sql`${t.status} NOT IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR ${t.nextQueryAt} IS NOT NULL`),
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
@@ -122,6 +125,81 @@ export const paymentConfirmJob = pgTable(
     index('payment_confirm_job_claim_idx').on(t.pg, t.nextAttemptAt, t.paymentId),
     check('payment_confirm_job_attempts_check', sql`${t.attempts} >= 0`),
     check('payment_confirm_job_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+  ],
+);
+
+/** 대사 실행(docs/data.md §2, BUILD_ORDER HOT-153, 마이그레이션 0008). 결제사·대상 날짜마다 한 행이고 단계 커서로 이어 한다 */
+export const reconciliationRun = pgTable(
+  'reconciliation_run',
+  {
+    id: uuid('id').primaryKey(),
+    pg: text('pg').notNull(),
+    reconDate: date('recon_date', { mode: 'string' }).notNull(),
+    status: text('status').notNull(),
+    stage: text('stage').notNull(),
+    pgCursor: text('pg_cursor'),
+    compareAfter: text('compare_after'),
+    ledgerAfterAt: at('ledger_after_at'),
+    ledgerAfterId: uuid('ledger_after_id'),
+    listedCount: integer('listed_count').notNull().default(0),
+    matchedCount: integer('matched_count').notNull().default(0),
+    mismatchCount: integer('mismatch_count').notNull().default(0),
+    // 지금 도는 실행의 소유자(파드)와 세대. 시작마다 세대가 오르고 쓰기의 조건이다(BUILD_ORDER HOT-153 코드 리뷰 H1)
+    owner: text('owner').notNull(),
+    generation: integer('generation').notNull().default(1),
+    startedAt: at('started_at').notNull(),
+    finishedAt: at('finished_at'),
+  },
+  (t) => [
+    uniqueIndex('reconciliation_run_pg_date_key').on(t.pg, t.reconDate),
+    check('reconciliation_run_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check('reconciliation_run_status_check', sql`${t.status} IN ('RUNNING', 'DONE', 'FAILED')`),
+    check('reconciliation_run_stage_check', sql`${t.stage} IN ('LISTING', 'COMPARING', 'LEDGER', 'PULLING')`),
+  ],
+);
+
+/** 대사의 작업 표(받기 단계의 결제사 거래, 실행이 끝나면 지운다, BUILD_ORDER HOT-153) */
+export const reconciliationSeen = pgTable(
+  'reconciliation_seen',
+  {
+    runId: uuid('run_id').notNull(),
+    paymentRef: text('payment_ref').notNull(),
+    orderRef: text('order_ref').notNull(),
+    pgStatus: text('pg_status').notNull(),
+    amount: integer('amount').notNull(),
+    seenAt: at('seen_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.paymentRef] })],
+);
+
+/** 대사 불일치 기록(docs/data.md §2, BUILD_ORDER HOT-153, 마이그레이션 0008). 결제사·결제 참조·종류마다 한 행이다 */
+export const reconciliationDiff = pgTable(
+  'reconciliation_diff',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => reconciliationRun.id),
+    pg: text('pg').notNull(),
+    orderRef: text('order_ref').notNull(),
+    paymentRef: text('payment_ref').notNull(),
+    kind: text('kind').notNull(),
+    ledgerStatus: text('ledger_status'),
+    pgStatus: text('pg_status'),
+    ledgerAmount: integer('ledger_amount'),
+    pgAmount: integer('pg_amount'),
+    state: text('state').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('reconciliation_diff_pg_ref_kind_key').on(t.pg, t.paymentRef, t.kind),
+    index('reconciliation_diff_run_idx').on(t.runId),
+    check('reconciliation_diff_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check(
+      'reconciliation_diff_kind_check',
+      sql`${t.kind} IN ('PG_APPROVED_NO_LEDGER', 'PG_MISMATCH', 'AMOUNT_MISMATCH', 'ORDER_MISMATCH', 'LEDGER_APPROVED_PG_NOT_PAID', 'LEDGER_APPROVED_NO_PG_RECORD', 'LEDGER_FAILED_PG_APPROVED', 'PARTIAL_CANCELED_AT_PG', 'LEDGER_CANCELED_PG_APPROVED', 'UNKNOWN_HANDED_OFF', 'UNKNOWN_CANCELED_CLOSED', 'UNREADABLE')`,
+    ),
+    check('reconciliation_diff_state_check', sql`${t.state} IN ('OPEN', 'HANDED_OFF', 'CLOSED')`),
   ],
 );
 

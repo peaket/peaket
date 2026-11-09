@@ -60,6 +60,38 @@ function harness(tasks: MaintenanceTask[], o: { leader?: () => boolean; at?: str
 }
 
 describe('결정16 정비 반복', () => {
+  test('HOT153_리뷰 고침 H1: 일이 도는 동안 리더를 잃으면 멈춤 신호를 주고 성공으로 적지 않는다', async () => {
+    let leader = true;
+    let seen: AbortSignal | undefined;
+    const task: MaintenanceTask = {
+      name: 'long',
+      when: 'daily',
+      run: (signal) =>
+        new Promise((resolve) => {
+          seen = signal;
+          signal?.addEventListener('abort', () => resolve('stopped'));
+          setTimeout(() => (leader = false), 5);
+        }),
+    };
+    const clock = fakeClock({ now: KST('2026-11-02T03:00:00') });
+    const registry = new Registry();
+    const runner = new MaintenanceRunner({ service: 'purchase-svc', clock, leader: { isLeader: () => leader }, tasks: [task], registry, leaderPollMs: 2 });
+    expect(await runner.tick()).toEqual({ ran: [], failed: [] });
+    expect(seen?.aborted).toBe(true);
+    expect(await registry.metrics()).not.toContain('maintenance_task_last_success_timestamp_seconds{service="purchase-svc",task="long"}');
+  });
+
+  test('HOT153_일이 deferred로 돌아오면 성공으로 적지도 실패로 세지도 않고 같은 날 다시 깨어난다(시간 규칙으로 미룬 정비 일)', async () => {
+    let runs = 0;
+    const h = harness([{ name: 'recon', when: 'daily', run: async () => (runs += 1, { deferred: true as const }) }]);
+    expect(await h.runner.tick()).toEqual({ ran: [], failed: [] });
+    expect(await h.runner.tick()).toEqual({ ran: [], failed: [] });
+    expect(runs).toBe(2);
+    const text = await h.metrics();
+    expect(text).not.toContain('maintenance_task_last_success_timestamp_seconds{service="purchase-svc",task="recon"}');
+    expect(text).not.toContain('maintenance_task_failures_total{service="purchase-svc",task="recon"}');
+  });
+
   test('리더가 아니면 아무 일도 하지 않는다', async () => {
     let runs = 0;
     const h = harness([{ name: 'snapshot', when: 'daily', run: async () => void runs++ }], { leader: () => false });

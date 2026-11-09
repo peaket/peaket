@@ -435,7 +435,7 @@ describe('PromPaymentPullSignals(설계 8, ADR-0140 결정 4)', () => {
     return (await registry.metrics()).split('\n').filter((l) => l.startsWith(`${name} `) || l.startsWith(`${name}{`));
   }
 
-  test('register는 세 지표를 서비스 레지스트리에 붙이고 자신을 돌려준다. pulled_total{type}은 네 종류가 처음부터 0으로 보인다(경보식이 처음 당기기 전에도 값을 본다) (ADR0140)', async () => {
+  test('register는 세 지표를 서비스 레지스트리에 붙이고 자신을 돌려준다. pulled_total{type}은 다섯 종류가 처음부터 0으로 보인다(경보식이 처음 당기기 전에도 값을 본다) (ADR0140)', async () => {
     const metrics = new PlatformMetrics('purchase-svc');
     const prom = new PromPaymentPullSignals();
     expect(prom.register(metrics.registry)).toBe(prom);
@@ -445,7 +445,7 @@ describe('PromPaymentPullSignals(설계 8, ADR-0140 결정 4)', () => {
       expect(text, name).toContain(`# HELP ${name} `);
     }
     expect((await sampleLines(metrics.registry, 'payment_result_pulled_total')).sort()).toEqual(
-      ['APPROVED', 'AWAITING_DEPOSIT', 'FAILED', 'UNKNOWN'].map((t) => `payment_result_pulled_total{type="${t}"} 0`),
+      ['APPROVED', 'AWAITING_DEPOSIT', 'CANCELED', 'FAILED', 'UNKNOWN'].map((t) => `payment_result_pulled_total{type="${t}"} 0`),
     );
   });
 
@@ -455,12 +455,12 @@ describe('PromPaymentPullSignals(설계 8, ADR-0140 결정 4)', () => {
     s.pulled('APPROVED');
     s.pulled('APPROVED');
     s.pulled('UNKNOWN');
-    expect(() => s.pulled('CANCELED' as never)).not.toThrow();
+    expect(() => s.pulled('PARTIAL_CANCELED' as never)).not.toThrow();
     const lines = await sampleLines(metrics.registry, 'payment_result_pulled_total');
     expect(lines).toContain('payment_result_pulled_total{type="APPROVED"} 2');
     expect(lines).toContain('payment_result_pulled_total{type="UNKNOWN"} 1');
-    expect(lines).toHaveLength(4);
-    expect(lines.join('\n')).not.toContain('CANCELED');
+    expect(lines).toHaveLength(5);
+    expect(lines.join('\n')).not.toContain('PARTIAL_CANCELED');
   });
 
   test('batch는 부른 수, failure는 실패 수를 1씩 올린다(이름표 없음) (ADR0140) [ASVS v5.0.0-16.5.2]', async () => {

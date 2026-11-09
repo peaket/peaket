@@ -72,6 +72,7 @@ async function sharedRelay(): Promise<OutboxRelayProcess> {
     env: envOf(),
     database: relayDb,
     maintenanceDatabase: maintenanceDb,
+    serviceDatabase: maintenanceDb,
     outboxPublisher: kafkaOutboxPublisher(producer),
     leaseApi: memoryLeaseApi(),
     lease: LEASE,
@@ -136,10 +137,10 @@ describe('payment-svc 릴레이 프로세스', () => {
   test('PRF180_릴레이 설정이 빠지면 시작하지 않고 PlatformConfigError로 빠진 이름을 알린다', async () => {
     const { PEAKET_POD: _pod, ...rest } = envOf();
     await expect(
-      startPaymentRelay({ env: rest, database: relayDb, maintenanceDatabase: maintenanceDb, outboxPublisher: kafkaOutboxPublisher(producer), leaseApi: memoryLeaseApi(), logDestination: quietLogs }),
+      startPaymentRelay({ env: rest, database: relayDb, maintenanceDatabase: maintenanceDb, serviceDatabase: maintenanceDb, outboxPublisher: kafkaOutboxPublisher(producer), leaseApi: memoryLeaseApi(), logDestination: quietLogs }),
     ).rejects.toThrow(PlatformConfigError);
     await expect(
-      startPaymentRelay({ env: rest, database: relayDb, maintenanceDatabase: maintenanceDb, outboxPublisher: kafkaOutboxPublisher(producer), leaseApi: memoryLeaseApi(), logDestination: quietLogs }),
+      startPaymentRelay({ env: rest, database: relayDb, maintenanceDatabase: maintenanceDb, serviceDatabase: maintenanceDb, outboxPublisher: kafkaOutboxPublisher(producer), leaseApi: memoryLeaseApi(), logDestination: quietLogs }),
     ).rejects.toThrow(/PEAKET_POD/);
   });
 });

@@ -143,6 +143,40 @@ export interface QueryOptions {
   expectedTxId?: string;
 }
 
+/** 거래 조회 한 건(대사, payment §8, BUILD_ORDER HOT-153). 토스는 거래마다 한 줄(승인·취소), 포트원은 결제마다 한 줄이다 */
+export interface PgTransaction {
+  /** 결제 참조(토스 paymentKey, 포트원 paymentId) */
+  readonly paymentRef: string;
+  /** 결제사가 준 주문 참조(포트원은 pay- 앞머리를 뗀 값) */
+  readonly orderRef: string;
+  readonly status: QueryStatus;
+  readonly amount: number;
+  /** 거래 시각(epoch ms) */
+  readonly atMs: number;
+}
+
+/** 거래 조회의 못 읽는 줄(BUILD_ORDER HOT-153 코드 리뷰 M13). 모양을 믿을 수 있는 칸만 싣는다: paymentRef는 그 줄의 결제 참조 또는 줄의 해시(unreadable-…), orderRef는 없으면 빈 글이다 */
+export interface PgUnreadableRow {
+  readonly paymentRef: string;
+  readonly orderRef: string;
+}
+
+/** 거래 조회 결과. PAGE의 nextCursor가 없으면 끝이고 unreadable은 못 읽는 줄이다. UNKNOWN은 일시 실패(시간 초과·5xx·429·응답 전체의 모양 틀림)이고 throttled는 429일 때만 참이다 */
+export type ListTransactionsResult = { readonly kind: 'PAGE'; readonly items: readonly PgTransaction[]; readonly nextCursor?: string; readonly unreadable?: readonly PgUnreadableRow[] } | { readonly kind: 'UNKNOWN'; readonly throttled?: true };
+
+/** 거래 조회 한 번의 입력 */
+export interface ListTransactionsRequest {
+  /** 범위 시작(epoch ms) */
+  readonly fromMs: number;
+  /** 범위 끝(epoch ms, 그 시각은 빼지 않는다: 결제사 규격이 끝을 포함할 수 있어 호출자가 넓힌다) */
+  readonly toMs: number;
+  /** 앞 호출의 nextCursor */
+  readonly cursor?: string;
+  readonly limit: number;
+  /** 이 호출의 시간 한도(ms) */
+  readonly timeoutMs?: number;
+}
+
 /** 취소 표준 결과(payment §2.1 결제 취소 API) */
 export type CancelOutcome = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';
 
@@ -193,6 +227,8 @@ export interface PaymentGatewayPort {
   confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string; confirmToken?: string; txId?: string }): Promise<ConfirmResult>;
   /** NOT_FOUND는 결제사가 정해진 코드로 '없다'고 답했을 때만이다. 그 밖의 404·JSON이 아닌 답은 중간 장비의 답일 수 있어 UNKNOWN이다 */
   query(paymentRef: string, options?: QueryOptions): Promise<QueryResult>;
+  /** 기간 안의 거래를 한 묶음 읽는다(대사). 던지지 않는다(일시 실패는 UNKNOWN) */
+  listTransactions(r: ListTransactionsRequest): Promise<ListTransactionsResult>;
   /**
    * idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액.
    * expectedBalance는 이 취소 앞의 취소 가능 금액(포트원 currentCancellableAmount). 호출자가 첫 전송 전에 저장한 값을 재시도에도 그대로 넘긴다. 같은 멱등키의 본문이 달라지면 안 되기 때문이다(BUILD_ORDER HOT-140, 코드 리뷰)

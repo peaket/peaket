@@ -19,7 +19,10 @@ export interface MaintenanceTask {
   name: string;
   /** daily: 하루 한 번(시간 무관), window: 정비 시간(04:00~06:00 KST) 안에서 하루 한 번 */
   when: 'daily' | 'window';
-  /** signal: 반복을 멈출 때(프로세스 종료) 끊긴다. 나눠 지우는 일은 묶음 사이에 보고 멈춘다 */
+  /**
+   * signal: 반복을 멈출 때(프로세스 종료) 끊긴다. 나눠 지우는 일은 묶음 사이에 보고 멈춘다.
+   * 돌려준 값에 `deferred: true`가 있으면 아직 할 때가 아니라 미룬 것이다: 성공으로 적지도 실패로 세지도 않고 다음 깨어남에 다시 부른다(시간 규칙이 있는 일, BUILD_ORDER HOT-153)
+   */
   run(signal?: AbortSignal): Promise<unknown>;
 }
 
@@ -52,8 +55,13 @@ export interface MaintenanceRunnerOptions {
   registry?: Registry;
   metrics?: MaintenanceMetrics;
   everyMs?: number;
+  /** 일이 도는 동안 리더 여부를 다시 보는 간격(기본 1초 [가정], BUILD_ORDER HOT-153 코드 리뷰 H1). 시험이 줄인다 */
+  leaderPollMs?: number;
   logger?: { warn(o: object, msg?: string): void; info?(o: object, msg?: string): void };
 }
+
+/** 일이 도는 동안 리더 여부를 다시 보는 기본 간격 1초 [가정] */
+const LEADER_POLL_MS = 1_000;
 
 export class MaintenanceRunner {
   readonly metrics: MaintenanceMetrics | undefined;
@@ -65,7 +73,10 @@ export class MaintenanceRunner {
     this.metrics = o.metrics ?? (o.registry ? maintenanceMetrics(o.registry, o.service) : undefined);
   }
 
-  /** 한 번 깨어난다. 리더가 아니면 아무것도 하지 않는다. signal이 끊기면 남은 일을 하지 않고, 끊긴 뒤 끝난 일은 성공으로 적지 않는다 */
+  /**
+   * 한 번 깨어난다. 리더가 아니면 아무것도 하지 않는다. signal이 끊기면 남은 일을 하지 않고, 끊긴 뒤 끝난 일은 성공으로 적지 않는다.
+   * 일이 도는 동안 리더를 잃어도 그 일의 멈춤 신호가 끊긴다(옛 리더가 새 리더와 겹쳐 돌지 않게, BUILD_ORDER HOT-153 코드 리뷰 H1)
+   */
   async tick(signal?: AbortSignal): Promise<{ ran: string[]; failed: string[] }> {
     const out = { ran: [] as string[], failed: [] as string[] };
     if (!this.o.leader.isLeader()) return out;
@@ -75,18 +86,27 @@ export class MaintenanceRunner {
       const day = kstDayStart(now);
       if (this.#done.get(task.name) === day) continue;
       if (task.when === 'window' && !inMaintenanceWindow(now)) continue;
+      const leaderLost = new AbortController();
+      const taskSignal = signal ? AbortSignal.any([signal, leaderLost.signal]) : leaderLost.signal;
+      const watch = setInterval(() => {
+        if (!this.o.leader.isLeader()) leaderLost.abort();
+      }, this.o.leaderPollMs ?? LEADER_POLL_MS);
+      watch.unref?.();
       try {
-        const report = await task.run(signal);
-        if (signal?.aborted) break;
+        const report = await task.run(taskSignal);
+        if (taskSignal.aborted) break;
+        if ((report as { deferred?: unknown } | null | undefined)?.deferred === true) continue;
         this.#done.set(task.name, day);
         this.metrics?.lastSuccess.set({ service: this.o.service, task: task.name }, Math.floor(this.o.clock.now() / 1000));
         this.o.logger?.info?.({ kind: 'maintenance', task: task.name, report }, '정비 일 끝');
         out.ran.push(task.name);
       } catch (err) {
-        if (signal?.aborted) break;
+        if (taskSignal.aborted) break;
         this.metrics?.failures.inc({ service: this.o.service, task: task.name });
         this.o.logger?.warn({ kind: 'maintenance', task: task.name, err: err instanceof Error ? { type: err.name, message: err.message } : String(err) }, '정비 일 실패(다음에 다시 한다)');
         out.failed.push(task.name);
+      } finally {
+        clearInterval(watch);
       }
     }
     return out;

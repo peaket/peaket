@@ -142,7 +142,9 @@ export type ConfirmFinish =
       /** 입금 오류 되돌림이면 참이다(사건 종류가 DEPOSIT_REVERSED이고 저장한 해시를 지우지 않는다, BUILD_ORDER HOT-152) */
       readonly reversed?: true;
     }
-  | { readonly status: 'UNKNOWN'; readonly result: 'UNKNOWN'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number };
+  | { readonly status: 'UNKNOWN'; readonly result: 'UNKNOWN'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number }
+  /** 대사가 닫는 결제사 전액 취소(돈이 나가지 않았다, BUILD_ORDER HOT-153) */
+  | { readonly status: 'CANCELED'; readonly result: 'DECLINED'; readonly payMethodCategory?: PayMethodCategory; readonly latencyMs?: number };
 
 /**
  * 결제사 답 → 할 일.
@@ -158,7 +160,7 @@ export interface PaymentEventMessage {
   readonly eventId: string;
   readonly orderId: string;
   readonly pg: PgName;
-  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'UNKNOWN' | 'RESOLVED';
+  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'UNKNOWN' | 'RESOLVED' | 'CANCELED';
   readonly amount: number;
   readonly payMethodCategory?: PayMethodCategory;
   /** 결제 수단 연결값(cardBin과 늘 함께 있거나 함께 빈다, BUILD_ORDER HOT-145) */

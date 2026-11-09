@@ -5,6 +5,8 @@ import type { FailureCategory, PaymentGatewayPort, PgName, WebhookInvalidReason 
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
+import type { QueryStatus } from './payment-gateway.js';
+import type { ReconDiffKind, ReconDiffState, ReconLedger, ReconRunRef, ReconRunStatus, ReconSeen, ReconStage } from './reconciliation.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 import type { VirtualAccountFieldReason } from './virtual-account.js';
 import type { PaymentWebhookOutcome, WebhookDecision, WebhookRoute } from './webhook-receipt.js';
@@ -315,6 +317,148 @@ export interface PaymentUnknownSignals {
   inFlight(count: number): void;
   /** payment_unknown_write_failures_total을 1 올린다 */
   writeFailure(): void;
+}
+
+// ---- 일일 대사(BUILD_ORDER HOT-153, docs/features/payment.md §8 '대사의 첫 구현') ----
+
+/** 대사 실행 표 한 행(시작·이어 하기) */
+export interface ReconRun {
+  readonly id: string;
+  readonly pg: PgName;
+  /** 대상 날짜(KST) */
+  readonly date: string;
+  /** 이 실행의 세대. 시작(beginRun)마다 1 오르고 쓰기·작업 표 읽기의 조건이다(BUILD_ORDER HOT-153 코드 리뷰 H1) */
+  readonly generation: number;
+  readonly stage: ReconStage;
+  readonly pgCursor?: string;
+  readonly compareAfter?: string;
+  readonly ledgerAfter?: { readonly atMs: number; readonly id: string };
+  readonly listedCount: number;
+  readonly matchedCount: number;
+  readonly mismatchCount: number;
+}
+
+/** 맞추기 묶음 한 줄 */
+export interface ReconCompareRow extends ReconSeen {
+  readonly ledger?: ReconLedger;
+}
+
+/** 원장 쪽 묶음 한 줄 */
+export interface ReconLedgerRow extends ReconLedger {
+  readonly approvedAtMs: number;
+  /** 작업 표에 결제사 기록이 있다(불일치가 아니다). 승인 행을 먼저 잘라 읽으므로 묶음에 함께 온다(BUILD_ORDER HOT-153 코드 리뷰 M12) */
+  readonly seen?: boolean;
+}
+
+/** reconciliation_diff 한 행의 입력 */
+export interface ReconDiffInput {
+  readonly pg: PgName;
+  readonly orderRef: string;
+  readonly paymentRef: string;
+  readonly kind: ReconDiffKind;
+  readonly state: ReconDiffState;
+  readonly ledgerStatus?: PaymentLedgerStatus;
+  readonly pgStatus?: QueryStatus;
+  readonly ledgerAmount?: number;
+  readonly pgAmount?: number;
+}
+
+/**
+ * 대사 저장소(모든 문장이 READ COMMITTED 트랜잭션이고 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS, BUILD_ORDER HOT-153 코드 리뷰 M12).
+ * 실행의 쓰기는 세대를 조건으로 한다(H1): 세대가 다르면 ReconRunLostError를 던지고, 작업 표 읽기는 빈 답이다(지운 작업 표로 판단하지 않게).
+ */
+export interface PaymentReconciliationStore {
+  /** 되돌아보는 기간 안의 실행 행을 읽는다(DONE 포함) */
+  pendingDates(pg: PgName, fromDate: string): Promise<ReconRunRef[]>;
+  /** fromDate 앞의 날짜 가운데 DONE이 아닌 날과 행이 없는 날(그 결제사의 첫 실행 뒤)을 오래된 차례로 31개까지 돌려준다(H4) */
+  overdueDates(pg: PgName, fromDate: string): Promise<string[]>;
+  /**
+   * 그 날짜의 실행을 시작하거나 이어 간다(`status <> 'DONE'`이면 RUNNING으로 되돌리고 소유자를 쓰고 세대를 1 올린다). 이미 DONE이면 undefined.
+   * @returns 저장된 단계·커서와 새 세대
+   */
+  beginRun(pg: PgName, date: string, nowMs: number, owner: string): Promise<ReconRun | undefined>;
+  /**
+   * 받기 묶음 한 트랜잭션: 세대 조건으로 커서·건수 쓰기(nextCursor가 없으면 단계 COMPARING, mismatched는 못 읽는 줄 수) → 작업 표 쓰기(결제 참조마다 대상 날짜 안의 줄을 앞세우고 같은 쪽이면 더 늦은 거래를 남긴다, M9).
+   * @throws ReconRunLostError 세대가 다르다(아무것도 쓰지 않는다)
+   */
+  saveListedPage(run: ReconRun, items: readonly ReconSeenInput[], nextCursor: string | undefined, listed: number, mismatched?: number): Promise<void>;
+  /** 맞추기 묶음을 읽는다(결제 참조 차례, 대상 날짜 범위 안의 거래만). 결제 참조가 같은 원장은 결제사가 같은 행을 먼저 고른다. 세대가 다르면 빈 답이다 */
+  readCompareBatch(run: ReconRun, limit: number): Promise<ReconCompareRow[]>;
+  /** 원장의 지금 상태를 읽는다(닫기가 STALE일 때 다시 본다, M7). 없으면 undefined */
+  ledgerStatus(paymentId: string): Promise<PaymentLedgerStatus | undefined>;
+  /** 불일치 기록 쓰기(UNIQUE 충돌은 건너뛴다). 이번에 쓴 행을 돌려준다(그 건만 SEV1을 낸다) */
+  insertDiffs(run: ReconRun, diffs: readonly ReconDiffInput[]): Promise<ReconDiffInput[]>;
+  /** next_query_at = 지금(UNKNOWN·AWAITING_DEPOSIT 행, 더 이른 시각은 건드리지 않는다). 쓴 행 수 */
+  handOff(paymentIds: readonly string[], nowMs: number): Promise<number>;
+  /** 닫은 전액 취소 건의 처리 상태를 CLOSED로 쓴다 */
+  markClosed(pg: PgName, paymentRef: string, kind: ReconDiffKind): Promise<void>;
+  /**
+   * 맞추기 묶음 끝내기: 건수와 커서 쓰기(afterRef가 없으면 단계 LEDGER).
+   * @throws ReconRunLostError 세대가 다르다
+   */
+  finishCompareBatch(run: ReconRun, afterRef: string | undefined, matched: number, mismatched: number): Promise<void>;
+  /** 원장 쪽 묶음을 읽는다: 대상 날짜의 승인 행을 승인 시각·ID 차례로 limit개 잘라 읽고(M12) 행마다 작업 표에 있는지(seen)를 싣는다. 세대가 다르면 빈 답이다 */
+  readLedgerBatch(run: ReconRun, limit: number): Promise<ReconLedgerRow[]>;
+  /**
+   * 원장 쪽 묶음 끝내기: 건수와 커서 쓰기(after가 없으면 단계 PULLING).
+   * @throws ReconRunLostError 세대가 다르다
+   */
+  finishLedgerBatch(run: ReconRun, after: { readonly atMs: number; readonly id: string } | undefined, mismatched: number): Promise<void>;
+  /** 그 결제사의 UNKNOWN 행 가운데 nowMs 앞에 건드리지 않은 행을 limit개까지 골라 다음 조회를 nowMs로 당긴다(§4.2 14번, M10. nowMs를 묶음마다 같은 값으로 주면 한 행을 두 번 당기지 않는다). 쓴 행 수 */
+  pullUnknowns(pg: PgName, beforeMs: number, nowMs: number, limit: number): Promise<number>;
+  /**
+   * 실행을 끝낸다.
+   * @throws ReconRunLostError 세대가 다르다
+   */
+  finishRun(run: ReconRun, status: Exclude<ReconRunStatus, 'RUNNING'>, nowMs: number): Promise<void>;
+  /** 작업 표의 그 실행 행을 나눠 지운다 */
+  clearSeen(run: ReconRun): Promise<number>;
+}
+
+/** 작업 표 reconciliation_seen의 입력(받기 단계) */
+export interface ReconSeenInput {
+  readonly paymentRef: string;
+  readonly orderRef: string;
+  readonly pgStatus: QueryStatus;
+  readonly amount: number;
+  readonly atMs: number;
+}
+
+/** 대사 로그(주문 ID·결제사·종류만 싣는다. 금액·결제 키는 싣지 않는다). 던지지 않는다 */
+export interface PaymentReconciliationLog {
+  /** 불일치(SEV1, 건마다 한 줄, kind payment-reconciliation-mismatch). csCase는 늦은 입금에만 있다 */
+  mismatch(e: { readonly pg: PgName; readonly diffKind: ReconDiffKind; readonly orderId?: string; readonly csCase?: 'PAYMENT_LATE_DEPOSIT' }): void;
+  /** 실행 실패(SEV2, kind payment-reconciliation-failed) */
+  failed(e: { readonly pg: PgName; readonly date: string; readonly code: string }): void;
+  /** 실행 끝(kind payment-reconciliation-done) */
+  done(e: { readonly pg: PgName; readonly date: string; readonly listed: number; readonly matched: number; readonly mismatched: number; readonly seconds: number; readonly perSecond: number }): void;
+  /** 온세일 일정을 읽지 못했다(일정 없음으로 본다, kind payment-reconciliation-calendar) */
+  calendarUnavailable(e: { readonly code: string }): void;
+  /** 되돌아보는 기간 앞에 끝내지 못한 날이 있다(SEV2, 결제사마다 실행에 한 줄, kind payment-reconciliation-overdue) */
+  overdue(e: { readonly pg: PgName; readonly count: number; readonly oldest: string }): void;
+  /** 다른 실행이 세대를 올려 이 실행을 멈췄다(kind payment-reconciliation-run-lost) */
+  runLost(e: { readonly pg: PgName; readonly date: string }): void;
+  /** 다시 확인 조회가 '없음'이라고 답해 그 줄을 판단하지 않았다(kind payment-reconciliation-recheck-missing, 주문 ID만) */
+  recheckMissing(e: { readonly pg: PgName; readonly orderId: string }): void;
+  /** SEV1 상한을 넘겨 건마다 내지 못한 수(SEV1, 실행에 한 줄, kind payment-reconciliation-mismatch-suppressed) */
+  mismatchSuppressed(e: { readonly pg: PgName; readonly date: string; readonly suppressed: number }): void;
+}
+
+/** 대사 지표. 던지지 않는다 */
+export interface PaymentReconciliationSignals {
+  /** payment_reconciliation_runs_total{pg, result} */
+  run(pg: PgName, result: 'done' | 'failed'): void;
+  /** payment_reconciliation_last_transactions·last_mismatches·last_duration_seconds·last_throughput_per_second{pg} */
+  lastRun(pg: PgName, v: { readonly transactions: number; readonly mismatches: number; readonly seconds: number; readonly perSecond: number }): void;
+  /** payment_reconciliation_mismatches_total{pg, kind} */
+  mismatch(pg: PgName, kind: ReconDiffKind): void;
+  /** payment_reconciliation_overdue_dates{pg}를 그 수로 둔다 */
+  overdueDates(pg: PgName, count: number): void;
+}
+
+/** 대형·중형 온세일 윈도우(T-10분~T+60분) 안인가. 일정을 읽지 못하면 던진다(부르는 쪽이 일정 없음으로 본다) */
+export interface OnSaleCalendar {
+  active(nowMs: number): Promise<boolean>;
 }
 
 // ---- 입금 전 취소(BUILD_ORDER HOT-152, docs/features/payment.md §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현') ----

@@ -34,7 +34,7 @@ export const PAYMENT_PULL_CONCURRENCY = 4;
 /** BatchGetPayments 데드라인 500ms [가정](ADR-0140 결정 3) */
 export const PAYMENT_PULL_DEADLINE_MS = 500;
 /**
- * 반영하지 않는 답(IGNORE: PARTIAL_CANCELED·CANCELED(취소 흐름 PRF-173 몫)·모양 틀림)의 다음 점검 60초 [가정](설계 5): pull_next_at = 지금 + 이 값
+ * 반영하지 않는 답(IGNORE: PARTIAL_CANCELED(취소 흐름 PRF-173 몫)·모양 틀림)의 다음 점검 60초 [가정](설계 5): pull_next_at = 지금 + 이 값
  */
 export const PAYMENT_PULL_SLOW_REPEAT_MS = 60_000;
 /**
@@ -76,7 +76,7 @@ export const PAYMENT_PULL_MISSING_LOG_WINDOW_MS = 10 * 60_000;
 export const PAYMENT_PULL_DB_MAX = 2;
 
 /** 당기기가 반영하는 사건 종류(지표 payment_result_pulled_total{type}의 값, 차례는 설계 5) */
-export const PAYMENT_PULL_TYPES: readonly Exclude<AppliedPaymentEventType, 'DEPOSIT_REVERSED'>[] = ['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN'];
+export const PAYMENT_PULL_TYPES: readonly Exclude<AppliedPaymentEventType, 'DEPOSIT_REVERSED'>[] = ['APPROVED', 'FAILED', 'AWAITING_DEPOSIT', 'UNKNOWN', 'CANCELED'];
 
 /**
  * 결제 원장 상태(payment.proto PaymentStatus에서 앞머리 PAYMENT_STATUS_를 뗀 이름, docs/data.md payment.status).
@@ -122,7 +122,7 @@ export interface PaymentPullContext {
   readonly pulledAtMs: number;
 }
 
-/** 반영하지 않는 까닭. CANCELED: PARTIAL_CANCELED·CANCELED(취소 흐름은 PRF-173·환불 단계), MALFORMED: 반영할 수 없는 모양의 답 [정함] */
+/** 반영하지 않는 까닭. CANCELED: PARTIAL_CANCELED(취소 흐름은 PRF-173·환불 단계), MALFORMED: 반영할 수 없는 모양의 답 [정함] */
 export type PaymentPullIgnoreReason = 'CANCELED' | 'MALFORMED';
 
 /**
@@ -154,7 +154,7 @@ export type PaymentPullRunStage = 'claim' | 'batch_get' | 'apply' | 'defer';
  * - FAILED → APPLY type FAILED, failureCategory는 있으면 그대로(없으면 칸 없음: 반영이 PAYMENT_FAILURE_FALLBACK을 적는다)
  * - AWAITING_DEPOSIT → APPLY type AWAITING_DEPOSIT · UNKNOWN → APPLY type UNKNOWN(결제사 단독 조회 규칙은 payment-svc 몫, 주문은 T12 등 지금 전이 함수대로).
  *   occurredAt = ctx.pulledAtMs
- * - PARTIAL_CANCELED·CANCELED → IGNORE CANCELED
+ * - CANCELED → APPLY type CANCELED(대사가 닫은 전액 취소를 사건과 같은 처리기로 반영한다, BUILD_ORDER HOT-153 코드 리뷰 M6) · PARTIAL_CANCELED → IGNORE CANCELED
  * - UNSPECIFIED, 결제사 없음, amount가 0 이상의 안전한 정수가 아님, eventSeq가 1 이상의 안전한 정수가 아님, eventKey가 빈 글,
  *   ctx.attemptNo가 0 이상의 안전한 정수가 아님, 시각이 날짜 범위 밖 → IGNORE MALFORMED [정함]
  * 사건 칸: eventId = ctx.eventId, orderId·pg·amount·eventKey·eventSeq = 답의 값, attemptNo = ctx.attemptNo(반영에는 쓰지 않는다), refMissing false,
@@ -164,7 +164,7 @@ export function paymentStateToResultEvent(state: OrderPaymentState, ctx: Payment
   // 상태부터 가른다: 승인 중·취소 상태는 다른 칸을 보지 않는다(반영하지 않으므로)
   const status: unknown = state.status;
   if (status === 'ACCEPTED') return WAIT;
-  if (status === 'PARTIAL_CANCELED' || status === 'CANCELED') return IGNORE_CANCELED;
+  if (status === 'PARTIAL_CANCELED') return IGNORE_CANCELED;
   if (typeof status !== 'string' || !APPLIED_STATUSES.has(status)) return IGNORE_MALFORMED;
   const type = status as AppliedPaymentEventType;
   // 반영할 수 있는 모양인지(결정 함수·쓰기 어댑터가 받는 범위와 같다)

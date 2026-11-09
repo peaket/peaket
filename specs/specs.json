@@ -385,7 +385,8 @@
           "main": "payment_trust_webhook",
           "expect": "violate",
           "invariant": "inv_noTicketWithoutApproval",
-          "why": "V-T1: 웹훅 본문을 믿으면 서명 없는 '승인됨' 웹훅으로 결제사 승인 없이 발권한다"
+          "samples": 100000,
+          "why": "V-T1: 웹훅 본문을 믿으면 서명 없는 '승인됨' 웹훅으로 결제사 승인 없이 발권한다. 결제사 취소 걸음(pgCancel, HOT-153)이 더해져 기본 시뮬레이션 횟수로는 반례가 닿지 않아 10만 회로 늘렸다"
         },
         {
           "main": "payment_backward",

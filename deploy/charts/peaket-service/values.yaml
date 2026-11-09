@@ -54,7 +54,7 @@ outboxRelay:
   replicas: 2
   command: ["node", "--import", "@peaket/platform/telemetry/register", "template/dist/relay.js"]
   # 릴레이만 받는 환경 변수: PEAKET_OUTBOX_DATABASE_URL(릴레이 역할)·PEAKET_MAINTENANCE_DATABASE_URL(정비 역할, PgBouncer를 거치지 않는다)·
-  # PEAKET_KAFKA_BROKERS. 운영의 DB 주소는 secretEnvFrom/relaySecretEnvFrom으로 받는다
+  # PEAKET_KAFKA_BROKERS. 업무 데이터를 쓰는 릴레이(purchase·payment)는 PEAKET_DATABASE_URL(서비스 역할)도 받는다. 운영의 DB 주소는 secretEnvFrom/relaySecretEnvFrom으로 받는다
   env: {}
   secretEnvFrom: ""
   resources:

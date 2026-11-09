@@ -235,6 +235,9 @@ class FakeGateway implements PaymentGatewayPort {
   query(): never {
     throw new Error('조회는 PRF-182다');
   }
+  listTransactions(): never {
+    throw new Error('승인 실행기는 거래 조회를 부르지 않는다');
+  }
   cancel(): never {
     throw new Error('승인 실행기는 취소하지 않는다');
   }

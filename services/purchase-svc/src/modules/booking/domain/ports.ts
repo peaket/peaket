@@ -1444,7 +1444,7 @@ export interface PaymentPullLog {
    */
   missing(e: { readonly orderId: string }): void;
   /**
-   * 반영하지 않는 답(warn 한 줄 { kind: 'payment-result-pull', event: 'ignored', orderId, reason, status }). CANCELED는 취소 흐름(PRF-173·환불 단계) 몫,
+   * 반영하지 않는 답(warn 한 줄 { kind: 'payment-result-pull', event: 'ignored', orderId, reason, status }). CANCELED(부분 취소)는 취소 흐름(PRF-173·환불 단계) 몫,
    * MALFORMED는 반영할 수 없는 모양의 답이다 [정함]. 실행기가 그 주문의 다음 점검을 60초 [가정] 미룬다
    */
   ignored(e: { readonly orderId: string; readonly reason: PaymentPullIgnoreReason; readonly status: PaymentLedgerStatus }): void;

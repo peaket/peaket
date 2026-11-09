@@ -80,12 +80,13 @@ export type PaymentResultTransition = 'T9' | 'T10' | 'T11' | 'T12' | 'T13' | 'T1
 export type PaymentResultWrite = 'APPROVE' | 'FAIL' | 'MARK' | 'REVERSE';
 
 /** 전이 표에 있는 사건 종류(그 밖의 종류는 기록·아직 맡지 않음으로 건너뛴다) */
-export type AppliedPaymentEventType = 'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED';
+export type AppliedPaymentEventType = 'APPROVED' | 'FAILED' | 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'CANCELED';
 
 /**
  * 사건 종류 × 지금 상태 → 전이(payment §2 '사건 종류 × 지금 상태 → 전이'). 표 밖의 조합은 있을 수 없는 조합(HOLD IMPOSSIBLE)이다.
  * APPROVED: RESERVED→T9, UNKNOWN→T13, AWAITING_DEPOSIT→T16 · FAILED: RESERVED→T11, UNKNOWN→T15, AWAITING_DEPOSIT→T17
  * UNKNOWN: RESERVED→T12 · AWAITING_DEPOSIT: RESERVED→T10, UNKNOWN→T14 · DEPOSIT_REVERSED: CONFIRMED→T21
+ * CANCELED: UNKNOWN→T15, RESERVED→T11(대사가 닫은 결제의 전액 취소, 돈이 나가지 않았다, BUILD_ORDER HOT-153. RESERVED는 결과 모름 사건이 아직 반영되지 않은 주문이고 명세 applyResult와 같다. 전이 표에서 RESERVED → FAILED는 T11이다. 그 밖의 상태는 ③에서 보류한다, 코드 리뷰 M6)
  */
 export const PAYMENT_RESULT_TABLE: Readonly<Record<AppliedPaymentEventType, Readonly<Partial<Record<OrderStatus, PaymentResultTransition>>>>> = {
   APPROVED: { RESERVED: 'T9', UNKNOWN: 'T13', AWAITING_DEPOSIT: 'T16' },
@@ -93,6 +94,7 @@ export const PAYMENT_RESULT_TABLE: Readonly<Record<AppliedPaymentEventType, Read
   UNKNOWN: { RESERVED: 'T12' },
   AWAITING_DEPOSIT: { RESERVED: 'T10', UNKNOWN: 'T14' },
   DEPOSIT_REVERSED: { CONFIRMED: 'T21' },
+  CANCELED: { RESERVED: 'T11', UNKNOWN: 'T15' },
 };
 
 /** 사건 종류의 도착 상태(주문이 이미 이 상태면 다시 온 사건으로 건너뛴다, ALREADY_THERE) */
@@ -102,6 +104,7 @@ export const PAYMENT_RESULT_ARRIVAL: Readonly<Record<AppliedPaymentEventType, Or
   UNKNOWN: 'UNKNOWN',
   AWAITING_DEPOSIT: 'AWAITING_DEPOSIT',
   DEPOSIT_REVERSED: 'AWAITING_DEPOSIT',
+  CANCELED: 'FAILED',
 };
 
 /** 전이 → 쓰기 갈래: 승인(T9·T13·T16), 실패(T11·T15·T17), 상태만(T10·T12·T14), 입금 되돌림(T21) */
@@ -185,7 +188,7 @@ export const PAYMENT_RESULT_ACTOR = 'system:payment-result';
  * 보는 차례 [정함: 정본은 각 규칙만 적었고 차례는 없다]:
  *  ① 주문이 없음(order undefined) → HOLD IMPOSSIBLE
  *  ② event.eventSeq ≤ order.paymentEventSeq → SKIP DUPLICATE
- *  ③ RESOLVED → SKIP RECORD_ONLY, PARTIAL_CANCELED·CANCELED → HOLD NOT_YET_SUPPORTED(리뷰 M3)
+ *  ③ RESOLVED → SKIP RECORD_ONLY, PARTIAL_CANCELED → HOLD NOT_YET_SUPPORTED(리뷰 M3), CANCELED는 주문이 RESERVED·UNKNOWN·FAILED가 아니면 HOLD NOT_YET_SUPPORTED(결제사·금액을 보지 않는다, BUILD_ORDER HOT-153)
  *  ③-2 닫힌 주문(PAYMENT_RESULT_CLOSED_STATUSES)에 과금 사건(PAYMENT_RESULT_CHARGE_TYPES) → HOLD CHARGED_ON_CLOSED_ORDER
  *      (결제사 대조보다 먼저: 접수한 결제 시도가 없는 EXPIRED 주문도 이 까닭이다, 리뷰 M2)
  *  ④ 접수한 결제 시도가 없거나 그 결제사 ≠ event.pg → HOLD PG_MISMATCH
@@ -202,7 +205,7 @@ export function decidePaymentResult(event: PaymentResultEvent, order: PaymentRes
   if (event.eventSeq <= order.paymentEventSeq) return { kind: 'SKIP', reason: 'DUPLICATE' };
   // ③ 기록만 하는 종류는 건너뛰고, 아직 맡지 않은 종류는 보류 표에 남긴다(결제사·금액을 보지 않는다)
   if (event.type === 'RESOLVED') return { kind: 'SKIP', reason: 'RECORD_ONLY' };
-  if (!isAppliedType(event.type)) return { kind: 'HOLD', reason: 'NOT_YET_SUPPORTED' };
+  if (!isAppliedType(event.type) || (event.type === 'CANCELED' && order.status !== 'RESERVED' && order.status !== 'UNKNOWN' && order.status !== 'FAILED')) return { kind: 'HOLD', reason: 'NOT_YET_SUPPORTED' };
   // ③-2 닫힌 주문에 과금 사건(과금됐는데 주문이 닫혔다). 결제사 대조보다 먼저 본다
   if (PAYMENT_RESULT_CHARGE_TYPES.has(event.type) && PAYMENT_RESULT_CLOSED_STATUSES.has(order.status)) return { kind: 'HOLD', reason: 'CHARGED_ON_CLOSED_ORDER' };
   // ④ 결제사 고정(ADR-0044): 접수한 결제 시도가 없거나 결제사가 다르다

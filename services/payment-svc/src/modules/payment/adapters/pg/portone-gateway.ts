@@ -20,7 +20,11 @@ import {
   type ConfirmResult,
   type FailureCategory,
   type HeaderBag,
+  type ListTransactionsRequest,
+  type ListTransactionsResult,
   type PaymentGatewayPort,
+  type PgTransaction,
+  type PgUnreadableRow,
   type PayMethodCategory,
   type PgCapabilities,
   type QueryOptions,
@@ -29,7 +33,7 @@ import {
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { portoneCardOfMethod } from './card-fields.js';
-import { num, pgRequest, str, type PgReply } from './pg-reply.js';
+import { num, pgRequest, str, unreadableRowOf, type PgReply } from './pg-reply.js';
 import { portoneVirtualAccountOf } from './virtual-account-fields.js';
 
 export interface PortoneGatewayOptions {
@@ -135,11 +139,31 @@ const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountI
 type Found = Extract<QueryResult, { kind: 'FOUND' }>;
 
 const unknownQuery: QueryResult = { kind: 'UNKNOWN' };
+const unknownPage: ListTransactionsResult = { kind: 'UNKNOWN' };
 
 /** 멱등키를 머리 값으로 바꾼다(구조화 필드 sf-string). 규격에 맞지 않으면 던져 보내지 않는다. 글에 값을 싣지 않는다 */
 function idempotencyHeader(key: string): string {
   if (!IDEM_KEY.test(key)) throw new TypeError('포트원 멱등키는 16~256자의 ASCII여야 한다');
   return `"${key.replace(/[\\"]/g, '\\$&')}"`;
+}
+
+/** 결제 ID에서 주문 참조를 읽는다(pay- 앞머리를 뗀 값, 앞머리가 없으면 그대로) */
+const orderRefOfId = (paymentRef: string): string => (paymentRef.startsWith(PAYMENT_ID_PREFIX) ? paymentRef.slice(PAYMENT_ID_PREFIX.length) : paymentRef);
+
+/**
+ * 답의 customData(공식 스키마 PaidPayment의 '사용자 지정 데이터', v2.openapi.json 2026-11-09 확인)에 든 주문 ID. JSON이 아니거나 orderId 글이 없으면 undefined다.
+ * 공식 스키마에 주문을 가리키는 칸은 결제 ID 말고 이것뿐이다(BUILD_ORDER HOT-153 코드 리뷰). 결제창이 아직 이 칸을 보내지 않아 지금은 결제 ID에서 읽는 길로 간다(payment §8 '주문 참조').
+ */
+function customOrderRefOf(customData: unknown): string | undefined {
+  const text = str(customData);
+  if (text === undefined) return undefined;
+  try {
+    const value: unknown = JSON.parse(text);
+    const orderId = typeof value === 'object' && value !== null ? str((value as { orderId?: unknown }).orderId) : undefined;
+    return orderId === '' ? undefined : orderId;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 시작 때 부른다. 형식이 틀리면 던져 시작하지 않는다. 글에 값을 싣지 않는다 */
@@ -254,6 +278,36 @@ export class PortoneGateway implements PaymentGatewayPort {
     if (r.status === 404) return str(r.json?.type) === NOT_FOUND_PAYMENT ? { kind: 'NOT_FOUND' } : unknownQuery;
     if (r.status !== 200) return unknownQuery;
     return this.#foundOf(paymentRef, r.json, options?.expectedTxId) ?? unknownQuery;
+  }
+
+  /** 거래 조회(포트원 GET /payments-by-cursor, payment §8, BUILD_ORDER HOT-153) */
+  async listTransactions(req: ListTransactionsRequest): Promise<ListTransactionsResult> {
+    const r = await pgRequest(this.#queryHttp, {
+      method: 'GET',
+      path: '/payments-by-cursor',
+      params: {},
+      query: { storeId: this.#storeId, from: new Date(req.fromMs).toISOString(), until: new Date(req.toMs).toISOString(), size: String(req.limit), ...(req.cursor === undefined ? {} : { cursor: req.cursor }) },
+      headers: this.#headers(false),
+      ...(req.timeoutMs === undefined ? {} : { timeoutCapMs: Math.min(req.timeoutMs, this.#readTimeoutMs) }),
+    });
+    if (r === 'NO_ANSWER') return unknownPage;
+    if (r.status === 429) return { kind: 'UNKNOWN', throttled: true };
+    if (r.status !== 200 || !Array.isArray(r.json?.items)) return unknownPage;
+    const items: PgTransaction[] = [];
+    const unreadable: PgUnreadableRow[] = [];
+    for (const raw of r.json.items as unknown[]) {
+      const row = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+      const paymentRef = str(row.id);
+      const status = STATUS.get(str(row.status) ?? '');
+      const amount = num((row.amount as Record<string, unknown> | undefined)?.total);
+      // 상태가 바뀐 시각이 대상 날짜를 정한다(승인 뒤 취소된 결제는 취소 시각이다)
+      const atMs = Date.parse(str(row.statusChangedAt) ?? str(row.paidAt) ?? '');
+      // 못 읽는 줄 하나 때문에 묶음 전체를 실패시키지 않는다(BUILD_ORDER HOT-153 코드 리뷰 M13)
+      if (!paymentRef || !status || amount === undefined || Number.isNaN(atMs)) unreadable.push(unreadableRowOf(raw, (x) => x.id, (_x, ref) => (ref === undefined ? undefined : orderRefOfId(ref))));
+      else items.push({ paymentRef, orderRef: customOrderRefOf(row.customData) ?? orderRefOfId(paymentRef), status, amount, atMs });
+    }
+    const cursor = str(r.json?.cursor);
+    return { kind: 'PAGE', items, ...(cursor === undefined || cursor === '' ? {} : { nextCursor: cursor }), ...(unreadable.length === 0 ? {} : { unreadable }) };
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult> {

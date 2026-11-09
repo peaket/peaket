@@ -35,7 +35,7 @@ State 1: <Initial predicate>
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 2: <payment_canon_payment_newAttempt(1) line 1114, col 3 to line 1138, col 66 of module payment_canon>
+State 2: <payment_canon_payment_newAttempt(1) line 1138, col 3 to line 1162, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -179,7 +179,7 @@ State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 485, col 66 o
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 6: <payment_canon_payment_command(1) line 1152, col 3 to line 1172, col 42 of module payment_canon>
+State 6: <payment_canon_payment_command(1) line 1176, col 3 to line 1196, col 42 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -287,7 +287,7 @@ State 8: <payment_canon_payment_pgProcess(1,1) line 545, col 3 to line 574, col 
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 9: <payment_canon_payment_respond(1,1) line 604, col 3 to line 626, col 42 of module payment_canon>
+State 9: <payment_canon_payment_respond(1,1) line 628, col 3 to line 650, col 42 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -323,7 +323,7 @@ State 9: <payment_canon_payment_respond(1,1) line 604, col 3 to line 626, col 42
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 10: <payment_canon_payment_applyResult(1,1) line 711, col 3 to line 743, col 66 of module payment_canon>
+State 10: <payment_canon_payment_applyResult(1,1) line 735, col 3 to line 767, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -359,7 +359,7 @@ State 10: <payment_canon_payment_applyResult(1,1) line 711, col 3 to line 743, c
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 11: <payment_canon_payment_issue(1) line 749, col 3 to line 771, col 66 of module payment_canon>
+State 11: <payment_canon_payment_issue(1) line 773, col 3 to line 795, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -395,7 +395,7 @@ State 11: <payment_canon_payment_issue(1) line 749, col 3 to line 771, col 66 of
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 12: <payment_canon_payment_ticketSvc(1) line 799, col 3 to line 842, col 66 of module payment_canon>
+State 12: <payment_canon_payment_ticketSvc(1) line 823, col 3 to line 866, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -467,7 +467,7 @@ State 13: <payment_canon_payment_eventCancel line 307, col 3 to line 318, col 66
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 14: <payment_canon_payment_compStart(1) line 950, col 3 to line 972, col 66 of module payment_canon>
+State 14: <payment_canon_payment_compStart(1) line 974, col 3 to line 996, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -507,7 +507,7 @@ State 14: <payment_canon_payment_compStart(1) line 950, col 3 to line 972, col 6
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 15: <payment_canon_payment_compCancel(1) line 1271, col 3 to line 1295, col 62 of module payment_canon>
+State 15: <payment_canon_payment_compCancel(1) line 1295, col 3 to line 1319, col 62 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
