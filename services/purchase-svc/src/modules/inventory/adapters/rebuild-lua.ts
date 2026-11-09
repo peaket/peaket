@@ -140,7 +140,7 @@ end
 /** 다시 만들기 시작 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const BEGIN_REBUILD_LUA = `#!lua
 ${INT_TEXT}${GUARDS}${GEN_FENCE}
-if #KEYS ~= 4 or #ARGV ~= 2 then
+if #KEYS ~= 6 or #ARGV ~= 2 then
   return redis.error_reply('ERR PEAKET_BEGIN_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
 local genText = ARGV[1]
@@ -157,7 +157,8 @@ if g ~= nil and g > tonumber(genText) then return {'STALE'} end
 local now = nowMs()
 local keep = tonumber(ARGV[2])
 if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[2] .. ' now ' .. int(now)) end
-redis.call('DEL', KEYS[1], KEYS[2])
+-- ordered·paused(KEYS 5·6)도 함께 비운다: 다시 만든 홀드는 정지 칸이 없으니 낡은 멤버가 남으면 되돌리기가 그 홀드를 지금으로 끝낸다(ADR-0254)
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[5], KEYS[6])
 redis.call('SET', KEYS[4], genText, 'PXAT', int(keep))
 return {'OK'}
 `;

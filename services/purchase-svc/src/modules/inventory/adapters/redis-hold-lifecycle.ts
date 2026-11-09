@@ -37,7 +37,7 @@ export class RedisHoldLifecycle implements HoldLifecycle {
     const kind = str(r[0]);
     if (kind === 'NOT_READY' || kind === 'NOT_FOUND') return { kind };
     if (kind !== 'OK') throw new Error('홀드 읽기 Lua가 모르는 결과를 돌려줬다');
-    return { kind: 'OK', expiresAtMs: num(r[1], '만료 시각'), extended: str(r[2]) === '1', fencingToken: num(r[3], '토큰') };
+    return { kind: 'OK', expiresAtMs: num(r[1], '만료 시각'), extended: str(r[2]) === '1', fencingToken: num(r[3], '토큰'), frozen: str(r[4]) === '1' };
   }
 
   async release(t: HoldTarget, keepUntilMs: number, o?: SeatCallOptions): Promise<HoldReleaseResult> {

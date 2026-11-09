@@ -14,6 +14,8 @@ export interface HoldBody {
   expiresAt: string;
   extendable: boolean;
   fencingToken: number;
+  /** 시간이 흐르지 않는다(결제 정지로 멈췄거나 결제 접수 뒤 묶였다). 화면은 타이머로 만료 처리하지 않는다 */
+  frozen?: boolean;
   seats?: { seatId: string; label: string; tierId: string; tierName?: string; price: number }[];
   totalAmount?: number;
 }
@@ -95,7 +97,7 @@ export class ManageHolds {
     const r = await this.#guarded(this.d.lifecycle.read(target, this.#call(c.deadline)));
     if (r.kind === 'NOT_READY') throw new HoldError('NOT_READY', '세대 키가 없다');
     if (r.kind === 'NOT_FOUND') throw new HoldError('HOLD_NOT_FOUND', '홀드가 끝났거나 이 세션의 것이 아니다');
-    return this.#body(target, seatIds, config, r.expiresAtMs, !r.extended, r.fencingToken);
+    return { ...this.#body(target, seatIds, config, r.expiresAtMs, !r.extended, r.fencingToken), ...(r.frozen ? { frozen: true } : {}) };
   }
 
   /** DELETE /v1/holds/{holdId}(서명). 끝나면 돌아오고, 거절은 HoldError다 */

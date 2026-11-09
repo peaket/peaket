@@ -461,7 +461,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
   async begin(eventId: string, gen: number, keepUntilMs: number): Promise<RebuildStep> {
     assertRebuildBegin(eventId, gen, keepUntilMs);
     const e = eventId;
-    const keys = [seatKeys.bitmap(e), seatKeys.expiry(e), seatKeys.epoch(e), seatKeys.rebuild(e)];
+    const keys = [seatKeys.bitmap(e), seatKeys.expiry(e), seatKeys.epoch(e), seatKeys.rebuild(e), seatKeys.ordered(e), seatKeys.paused(e)];
     return rebuildStepOf(await guard(this.redis.evalScript(BEGIN_REBUILD, keys, [String(gen), String(keepUntilMs)])), '다시 만들기 시작').step;
   }
 

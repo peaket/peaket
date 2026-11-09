@@ -94,6 +94,8 @@ export interface ConfirmTarget {
   readonly confirmSent: boolean;
   /** 회차의 입장 시작 시각(epoch ms). 답의 입금 기한을 자른다. 승인 명령에 없었으면 없다(BUILD_ORDER PRF-190 코드 리뷰) */
   readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(H2). 거짓인데 답이 입금 대기면 입금 전 취소로 끝낸다 */
+  readonly virtualAccountAllowed?: boolean;
   /** 승인 접수 시각(epoch ms, ACCEPTED로 쓴 status_changed_at). 결제 확정 소요의 시작점이다(BUILD_ORDER PRF-200) */
   readonly acceptedAtMs?: number;
 }

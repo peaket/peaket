@@ -40,6 +40,8 @@ export interface ConfirmPaymentInput {
   readonly authenticatedAtMs?: number;
   /** 회차의 입장 시작 시각(epoch ms). 칸이 없으면 undefined(BUILD_ORDER PRF-190) */
   readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(POL-014, H2). 거짓인데 승인 답이 입금 대기면 입금 전 취소로 끝낸다. 없으면 지금처럼 받는다 */
+  readonly virtualAccountAllowed?: boolean;
 }
 
 /** 검사를 마친 승인 명령 */
@@ -54,6 +56,8 @@ export interface ConfirmPaymentCommand {
   readonly authenticatedAtMs: number;
   /** 회차의 입장 시작 시각(epoch ms). 입금 오류 되돌림의 새 기한을 자른다(BUILD_ORDER PRF-190) */
   readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(POL-014, H2). 거짓인데 승인 답이 입금 대기면 입금 전 취소로 끝낸다. 없으면 지금처럼 받는다 */
+  readonly virtualAccountAllowed?: boolean;
 }
 
 /** 저장소가 돌려주는 결제 원장 한 행(답과 대조에 쓰는 칸만) */
@@ -223,7 +227,7 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
   if (!isPgName(input.pg)) throw new PaymentInputError('pg');
   const { entryOpensAtMs } = input;
   checkEntryOpensAt(entryOpensAtMs);
-  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }) };
+  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
 }
 
 /**

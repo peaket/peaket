@@ -9,6 +9,7 @@ import {
   type BehaviorSummary,
   type CheckoutOutcome,
   type OrderHoldExpiries,
+  type OrderHoldMarks,
   type OrderRequestOnce,
   OrderSeatStoreUnavailable,
   type OrderSessions,
@@ -45,6 +46,8 @@ export interface StartPaymentDeps {
   log: StartPaymentLog;
   /** 시도 ID(UUIDv7)와 행동 신호 시각의 시계 */
   clock: Clock;
+  /** 주문 뒤 표시를 놓친 경우의 복구(BUILD_ORDER HOT-070). 없으면 하지 않는다 */
+  holdMarks?: Pick<OrderHoldMarks, 'markOrdered'>;
 }
 
 /** 쓰임새 입력 */
@@ -152,6 +155,8 @@ export class StartPayment {
     const sale = await d.saleConfigs.get(order.eventId);
     if (!sale) return rejected('SEAT_STORE_UNAVAILABLE');
     const holdExpiresAtMs = await this.#holdExpiry(order, c.deadline);
+    // 주문 뒤 표시를 놓쳤어도 여기서 다시 한다(멱등, 실패는 응답을 막지 않는다, L4)
+    if (d.holdMarks && order.holdId && order.seatIds.length > 0) await d.holdMarks.markOrdered({ eventId: order.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: order.holdId, seatIds: order.seatIds, ...(c.deadline ? { deadline: c.deadline } : {}) }).catch(() => false);
 
     // 7. 결제창 준비(트랜잭션 밖) → 한 트랜잭션
     if (this.#prepareTooLate(c.deadline)) return this.#tooLate();

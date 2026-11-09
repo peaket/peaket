@@ -72,6 +72,8 @@ export interface PaymentConfirmRunnerDeps {
   log: PaymentConfirmLog;
   signals: PaymentConfirmSignals;
   clock: Clock;
+  /** 가상계좌를 끈 회차의 입금 대기 답을 입금 전 취소로 끝낸다(HOT-358 리뷰 H2, HOT-152 경로). 던지지 않는 구현을 넘긴다. 없으면 하지 않는다 */
+  disallowedDeposit?: (t: { readonly paymentId: string; readonly orderId: string }) => Promise<void>;
   /** lease_owner에 적는 값(파드 이름) */
   podId: string;
   /** 없으면 전역 setInterval·clearInterval(unref) */
@@ -611,6 +613,7 @@ export class PaymentConfirmRunner {
           const seconds = Math.max(0, (this.deps.clock.now() - target.acceptedAtMs) / 1000);
           this.#safe(() => this.deps.resolution?.resolutionSeconds(target.pg, job.queued === true ? 'retry_queue' : 'direct', seconds));
         }
+        if (finish.status === 'AWAITING_DEPOSIT' && target.virtualAccountAllowed === false) await this.deps.disallowedDeposit?.({ paymentId: target.paymentId, orderId: target.orderId });
         return { kind: 'FINISHED', status: finish.status, outcome };
       } catch (err) {
         const delayMs = CONFIRM_FINISH_RETRY_DELAYS_MS[attempt];

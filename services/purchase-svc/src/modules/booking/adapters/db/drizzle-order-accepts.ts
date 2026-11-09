@@ -160,15 +160,16 @@ export class DrizzleOrderAccepts implements OrderAcceptReads, OrderAcceptWrites 
   async activeAttempt(orderId: string): Promise<ActiveAttemptView | undefined> {
     if (!isUuid(orderId)) return undefined;
     const r = await this.o.database.db.execute(sql`
-      select id, pg, status, pg_order_ref, created_at from payment_attempt
+      select id, pg, status, pg_order_ref, created_at, (select count(*)::int from payment_attempt a where a.order_id = ${orderId}::uuid) as attempt_count from payment_attempt
       where order_id = ${orderId}::uuid and status in ('READY', 'ACCEPTED')
       limit 1`);
-    const row = r.rows[0] as { id: string; pg: string; status: string; pg_order_ref: string | null; created_at: Date | string } | undefined;
+    const row = r.rows[0] as { id: string; pg: string; status: string; pg_order_ref: string | null; created_at: Date | string; attempt_count: number } | undefined;
     if (!row) return undefined;
     return {
       attemptId: row.id,
       pg: row.pg as PaymentPg,
       status: row.status as 'READY' | 'ACCEPTED',
+      attemptCount: Number(row.attempt_count),
       ...(row.pg_order_ref !== null ? { pgOrderRef: row.pg_order_ref } : {}),
       createdAtMs: new Date(row.created_at).getTime(),
     };

@@ -1,0 +1,1 @@
+ALTER TABLE "payment" ADD COLUMN "virtual_account_allowed" boolean;

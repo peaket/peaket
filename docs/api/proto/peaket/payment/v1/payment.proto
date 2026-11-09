@@ -168,6 +168,8 @@ message ConfirmPaymentRequest {
   int32 attempt_no = 9;
   // 회차의 입장 시작 시각(선택). 입금 오류 되돌림의 새 기한을 입장 시작 24시간 전으로 자른다(추천 적용 2026-11-09, BUILD_ORDER PRF-190).
   google.protobuf.Timestamp entry_opens_at = 10;
+  // 이 회차에서 가상계좌를 내도 되는가(선택, 칸이 없으면 지금처럼 받는다). 거짓인데 승인 답이 입금 대기면 payment-svc가 입금 전 취소로 끝낸다(POL-014, BUILD_ORDER HOT-358 리뷰 H2).
+  optional bool virtual_account_allowed = 11;
 }
 
 message TossPaymentRef {

@@ -59,6 +59,7 @@ local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local earliest = nil
 local extended = '0'
 local fence = nil
+local frozen = '0'
 for i = 2, #KEYS do
   if not typed(KEYS[i], 'hash') then return corrupt(KEYS[i]) end
   local h = redis.call('HMGET', KEYS[i], 'holdId', 'owner', 'psid', 'exp', 'ext', 'fence', 'pin', 'rem', 'kind')
@@ -70,14 +71,19 @@ for i = 2, #KEYS do
     local rem = msOf(h[8])
     if not rem then return corrupt(KEYS[i]) end
     at = now + rem
-  elseif h[7] ~= '1' and exp <= now then
+    frozen = '1'
+  elseif h[7] == '1' then
+    -- 결제 접수 뒤 묶인 홀드: 지난 exp로 화면이 만료 처리하지 않게 앞 시각으로 답한다(표시만, 만료 인덱스에 없다)
+    at = math.max(exp, now + 60000)
+    frozen = '1'
+  elseif exp <= now then
     return {'NOT_FOUND'}
   end
   if earliest == nil or at < earliest then earliest = at end
   if h[5] and h[5] ~= '0' then extended = '1' end
   fence = h[6]
 end
-return {'OK', int(earliest), extended, fence}
+return {'OK', int(earliest), extended, fence, frozen}
 `;
 
 /** 홀드 해제 Lua(위 계약) */
@@ -219,13 +225,12 @@ local ep = readEpoch(KEYS[2])
 if not ep then return {'NOT_READY'} end
 if not typed(KEYS[1], 'zset') then return corrupt(KEYS[1]) end
 local add = tonumber(ARGV[4])
-local earliest = nil
 local fence = nil
-local frozen = false
 local pinned = false
 local used = false
 local members = {}
 local rems = {}
+local exps = {}
 for i = 1, n do
   local hk = KEYS[2 + i]
   if not typed(hk, 'hash') then return corrupt(hk) end
@@ -238,12 +243,11 @@ for i = 1, n do
   if h[8] then
     local rem = msOf(h[8])
     if not rem then return corrupt(hk) end
-    frozen = true
     rems[i] = rem
   elseif exp <= now and h[7] ~= '1' then
     return {'NOT_FOUND'}
   end
-  if earliest == nil or exp < earliest then earliest = exp end
+  exps[i] = exp
   fence = h[6]
   members[i] = string.match(hk, '(%d+)$')
 end
@@ -254,25 +258,35 @@ end
 if pinned then return decided({'PINNED'}) end
 if used then return decided({'ALREADY'}) end
 ensureEpoch(ep, nowSec)
-if frozen then
-  local least = nil
-  for i = 1, n do
-    local v = rems[i] or 0
-    redis.call('HSET', KEYS[2 + i], 'rem', int(v + add), 'ext', '1')
-    if least == nil or v < least then least = v end
-  end
-  return {'OK', int(now + least + add), fence}
-end
-local nextExp = earliest + add
-local nextText = int(nextExp)
-local pairs_ = {}
+-- 좌석마다 갈라 처리한다: 멈춘 좌석은 남은 시간에, 안 멈춘 좌석은 만료 시각에 더한다(섞인 홀드의 안 멈춘 좌석이 먼저 풀리지 않게, ADR-0254)
+local soonest = nil
+local liveEarliest = nil
 for i = 1, n do
-  redis.call('HSET', KEYS[2 + i], 'exp', nextText, 'ext', '1')
-  pairs_[#pairs_ + 1] = nextText
-  pairs_[#pairs_ + 1] = members[i]
+  if rems[i] == nil then
+    local e = exps[i]
+    if liveEarliest == nil or e < liveEarliest then liveEarliest = e end
+  end
 end
-redis.call('ZADD', KEYS[1], 'XX', unpack(pairs_))
-return {'OK', nextText, fence}
+local pairs_ = {}
+local nextText = nil
+if liveEarliest ~= nil then
+  local nextExp = liveEarliest + add
+  nextText = int(nextExp)
+  soonest = nextExp
+end
+for i = 1, n do
+  if rems[i] ~= nil then
+    local v = rems[i] + add
+    redis.call('HSET', KEYS[2 + i], 'rem', int(v), 'ext', '1')
+    if soonest == nil or now + v < soonest then soonest = now + v end
+  else
+    redis.call('HSET', KEYS[2 + i], 'exp', nextText, 'ext', '1')
+    pairs_[#pairs_ + 1] = nextText
+    pairs_[#pairs_ + 1] = members[i]
+  end
+end
+if #pairs_ > 0 then redis.call('ZADD', KEYS[1], 'XX', unpack(pairs_)) end
+return {'OK', int(soonest), fence}
 `;
 
 /** 주문 표시 Lua(위 계약) */
@@ -326,8 +340,9 @@ for i = 1, n do
     redis.call('ZREM', KEYS[1], m)
     bad = bad + 1
   else
-    local h = redis.call('HMGET', hk, 'exp', 'ordAt', 'maxStay', 'pin', 'rem')
+    local h = redis.call('HMGET', hk, 'exp', 'ordAt', 'maxStay', 'pin', 'rem', 'thawAt')
     local exp, ordAt, maxStay = msOf(h[1]), msOf(h[2]), msOf(h[3])
+    local thawAt = msOf(h[6]) or 0
     if not exp or not ordAt or not maxStay then
       redis.call('ZREM', KEYS[1], m)
       bad = bad + 1
@@ -335,7 +350,8 @@ for i = 1, n do
       redis.call('ZREM', KEYS[1], m)
       dropped = dropped + 1
     else
-      local rem = exp - math.max(since, ordAt)
+      -- 같은 정지 안에서 되돌렸다 다시 멈추면 되돌린 뒤부터만 센다(남은 시간이 부풀지 않게, ADR-0254)
+      local rem = exp - math.max(since, ordAt, thawAt)
       if rem <= 0 then
         redis.call('ZREM', KEYS[1], m)
         dropped = dropped + 1
@@ -392,7 +408,7 @@ for i = 1, n do
       end
       if maxStay and maxStay < nextExp then nextExp = maxStay end
       local text = int(nextExp)
-      redis.call('HSET', hk, 'exp', text)
+      redis.call('HSET', hk, 'exp', text, 'thawAt', int(now))
       redis.call('HDEL', hk, 'rem')
       redis.call('ZADD', KEYS[2], text, m)
       if rem then moved = moved + 1 end

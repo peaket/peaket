@@ -29,6 +29,7 @@ describe('HoldPauseView', () => {
     const a = view([paused(5_000), OPEN, OPEN]);
     await state(a.v);
     expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(1_000);
     expect(await state(a.v)).toEqual({ kind: 'OPEN' });
   });
   test('S-T23 열림 다음 정지가 오면 연속이 끊긴다', async () => {
@@ -37,19 +38,20 @@ describe('HoldPauseView', () => {
     await state(a.v);
     expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 6_000 });
     expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 6_000 });
+    a.clock.advance(1_000);
     expect(await state(a.v)).toEqual({ kind: 'OPEN' });
   });
   test('처음부터 열린 회차는 한 번은 UNSETTLED다(되돌릴 것도 옮길 것도 없다)', async () => {
     const a = view([OPEN, OPEN]);
     expect(await state(a.v)).toEqual({ kind: 'UNSETTLED' });
+    a.clock.advance(1_000);
     expect(await state(a.v)).toEqual({ kind: 'OPEN' });
   });
   test('S-T23 ④ 답이 끊기면 10초까지 마지막 답을 쓰고 그 뒤에는 OPEN이다', async () => {
-    const a = view([paused(5_000), FAILED]);
+    const a = view([paused(5_000), FAILED, FAILED, FAILED]);
     await state(a.v);
-    a.clock.advance(10_000);
     expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
-    a.clock.advance(1);
+    a.clock.advance(10_001);
     expect(await state(a.v)).toEqual({ kind: 'OPEN' });
     expect(a.outcomes).toEqual(['ok', 'failed', 'stale']);
   });
@@ -63,5 +65,31 @@ describe('HoldPauseView', () => {
     const clock = fakeClock({ now: 1 });
     const v = new HoldPauseView({ read: async () => { throw new Error('x'); } }, clock);
     await expect(v.refresh(['e1'])).resolves.toBeInstanceOf(Map);
+  });
+  test('L6 연속 두 번 열림이어도 첫 열림부터 1초가 지나야 OPEN이다', async () => {
+    const a = view([paused(5_000), OPEN, OPEN, OPEN]);
+    await state(a.v);
+    await state(a.v);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(1_000);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
+  });
+  test('L6 조회 실패가 끼면 연속 열림을 처음부터 다시 센다', async () => {
+    const a = view([paused(5_000), OPEN, FAILED, OPEN, OPEN]);
+    await state(a.v);
+    await state(a.v);
+    a.clock.advance(2_000);
+    await state(a.v);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(2_000);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
+  });
+  test('L7 답 없음 10초는 연속 실패가 시작된 때부터 잰다', async () => {
+    const a = view([paused(5_000), FAILED, FAILED]);
+    await state(a.v);
+    a.clock.advance(60_000);
+    expect(await state(a.v)).toEqual({ kind: 'PAUSED', sinceMs: 5_000 });
+    a.clock.advance(10_001);
+    expect(await state(a.v)).toEqual({ kind: 'OPEN' });
   });
 });

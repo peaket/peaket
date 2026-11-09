@@ -58,6 +58,8 @@ export interface UnknownResolverTimer {
 
 /** 실행기가 쓰는 포트와 설정 */
 export interface PaymentUnknownResolverDeps {
+  /** 가상계좌를 끈 회차의 입금 대기를 입금 전 취소로 끝낸다(H2, HOT-152 경로). 던지지 않는 구현을 넘긴다 */
+  disallowedDeposit?: (t: { readonly paymentId: string; readonly orderId: string }) => Promise<void>;
   queries: PaymentUnknownQueries;
   gateways: PaymentGateways;
   log: PaymentUnknownLog;
@@ -611,6 +613,7 @@ export class PaymentUnknownResolver {
         const seconds = Math.max(0, (this.deps.clock.now() - job.acceptedAtMs) / 1000);
         this.#safe(() => this.deps.resolution?.resolutionSeconds(job.pg, 'retry_queue', seconds));
       }
+      if (decision.finish.status === 'AWAITING_DEPOSIT' && job.virtualAccountAllowed === false) await this.deps.disallowedDeposit?.({ paymentId: job.paymentId, orderId: job.orderId });
       return { kind: 'RESOLVED', status: decision.finish.status, outcome: decision.outcome };
     } catch (err) {
       this.#safe(() => this.deps.signals.writeFailure());

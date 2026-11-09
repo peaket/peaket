@@ -5,10 +5,11 @@ import { type HotRedis, redisScript } from '@peaket/platform';
 import { KEY_PART } from '../domain/hold.js';
 import type { SaleCountsRead, SaleCountsReader, SaleHoldPage } from '../domain/ports.js';
 import { SALE_TIER_SCAN_PAGE } from '../domain/sale-state.js';
-import { SALE_COUNT_LUA } from './sale-count-lua.js';
+import { HOLD_PAGE_LUA, SALE_COUNT_LUA } from './sale-count-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
 
 const SALE_COUNT = redisScript(SALE_COUNT_LUA);
+const HOLD_PAGE = redisScript(HOLD_PAGE_LUA);
 
 const text = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 
@@ -42,16 +43,9 @@ export class RedisSaleCounts implements SaleCountsReader {
     assertEventId(eventId);
     if (!Number.isInteger(start) || start < 0) throw new RangeError('시작 순위는 0 이상의 정수다');
     if (!Number.isInteger(count) || count < 1 || count > SALE_TIER_SCAN_PAGE) throw new RangeError(`읽을 수는 1~${SALE_TIER_SCAN_PAGE}의 정수다`);
-    // 만료 인덱스 다음에 멈춘 홀드를 잇는다(BUILD_ORDER HOT-070). 순위는 두 집합을 이어 붙인 것이다
-    const key = seatKeys.expiry(eventId);
-    const paused = seatKeys.paused(eventId);
-    const expiryLength = Number(await guard(this.redis.command(['ZCARD', key], { key })));
-    const fromExpiry = start < expiryLength ? await guard(this.redis.command(['ZRANGE', key, String(start), String(start + count - 1)], { key })) : [];
-    if (!Array.isArray(fromExpiry)) throw new Error('ZRANGE 답이 배열이 아니다');
-    const rest = count - fromExpiry.length;
-    const fromPaused = rest > 0 ? await guard(this.redis.command(['ZRANGE', paused, String(Math.max(0, start - expiryLength)), String(Math.max(0, start - expiryLength) + rest - 1)], { key: paused })) : [];
-    if (!Array.isArray(fromPaused)) throw new Error('ZRANGE 답이 배열이 아니다');
-    const r = [...fromExpiry, ...fromPaused];
+    // 만료 인덱스 다음에 멈춘 홀드를 잇는다(BUILD_ORDER HOT-070). Lua 한 번이라 옮기기와 겹쳐도 좌석이 빠지거나 겹치지 않는다
+    const r = await guard(this.redis.evalScript(HOLD_PAGE, [seatKeys.expiry(eventId), seatKeys.paused(eventId)], [String(start), String(count)]));
+    if (!Array.isArray(r)) throw new Error('홀드 쪽 Lua 답이 배열이 아니다');
     const indexes: number[] = [];
     let badMembers = 0;
     for (const member of r) {

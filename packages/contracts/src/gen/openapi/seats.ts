@@ -201,6 +201,7 @@ export const CreateEventHoldResponse = zod.object({
   "expiresAt": zod.iso.datetime({"offset":true}),
   "extendable": zod.boolean(),
   "fencingToken": zod.int().min(1),
+  "frozen": zod.boolean().optional().describe('참이면 시간이 흐르지 않는다(새 결제 일시 정지로 멈췄거나 결제 접수 뒤 묶였다). 화면은 타이머로 만료 처리하지 않고 다시 읽는다(ADR-0254, BUILD_ORDER HOT-358 리뷰 H3)'),
   "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
 })
 
@@ -247,6 +248,7 @@ export const GetHoldResponse = zod.object({
   "expiresAt": zod.iso.datetime({"offset":true}),
   "extendable": zod.boolean(),
   "fencingToken": zod.int().min(1),
+  "frozen": zod.boolean().optional().describe('참이면 시간이 흐르지 않는다(새 결제 일시 정지로 멈췄거나 결제 접수 뒤 묶였다). 화면은 타이머로 만료 처리하지 않고 다시 읽는다(ADR-0254, BUILD_ORDER HOT-358 리뷰 H3)'),
   "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
 })
 
@@ -301,6 +303,7 @@ export const CreateHoldExtensionResponse = zod.object({
   "expiresAt": zod.iso.datetime({"offset":true}),
   "extendable": zod.boolean(),
   "fencingToken": zod.int().min(1),
+  "frozen": zod.boolean().optional().describe('참이면 시간이 흐르지 않는다(새 결제 일시 정지로 멈췄거나 결제 접수 뒤 묶였다). 화면은 타이머로 만료 처리하지 않고 다시 읽는다(ADR-0254, BUILD_ORDER HOT-358 리뷰 H3)'),
   "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
 })
 

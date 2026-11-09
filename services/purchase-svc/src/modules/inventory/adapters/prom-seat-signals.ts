@@ -82,6 +82,12 @@ export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
       this.#relayDropped,
       this.#relayFailures,
       this.#epochBumps,
+      this.#released,
+      this.#extended,
+      this.#freezeTotal,
+      this.#freezeSeconds,
+      this.#pauseReads,
+      this.#frozen,
     ]) {
       registry.registerMetric(m);
     }

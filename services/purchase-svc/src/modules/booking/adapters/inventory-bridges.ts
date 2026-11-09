@@ -222,7 +222,7 @@ function callOptions(o: { deadlineMs?: number } | undefined): [] | [{ deadlineMs
 
 /** inventory SeatMap.config의 필요한 칸(EventSeatConfig의 perAccountLimit·saleEndsAtMs) */
 export interface SagaConfigSource {
-  config(eventId: string): Promise<{ readonly perAccountLimit: number; readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number } | undefined>;
+  config(eventId: string): Promise<{ readonly perAccountLimit: number; readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number; readonly virtualAccountAllowed?: boolean } | undefined>;
 }
 
 /** SagaEventConfigs의 좌석맵 판 구현: config가 없거나 읽기가 던지면 undefined. 던지지 않는다 */
@@ -232,7 +232,7 @@ export class SeatMapSagaConfigs implements SagaEventConfigs {
   async get(eventId: string): Promise<SagaEventConfig | undefined> {
     try {
       const c = await this.source.config(eventId);
-      return c ? { perAccountLimit: c.perAccountLimit, saleEndsAtMs: c.saleEndsAtMs, ...(c.entryOpensAtMs !== undefined ? { entryOpensAtMs: c.entryOpensAtMs } : {}) } : undefined;
+      return c ? { perAccountLimit: c.perAccountLimit, saleEndsAtMs: c.saleEndsAtMs, ...(c.entryOpensAtMs !== undefined ? { entryOpensAtMs: c.entryOpensAtMs } : {}), ...(c.virtualAccountAllowed !== undefined ? { virtualAccountAllowed: c.virtualAccountAllowed } : {}) } : undefined;
     } catch {
       // 판을 읽지 못했으면 판이 없는 것과 같게 본다(실행기가 설정 오류로 보고 다시 한다)
       return undefined;

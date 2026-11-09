@@ -68,6 +68,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
   const paymentRef = paymentRefOf(request);
   const authenticatedAtMs = msOf(request.authenticated_at);
   const entryOpensAtMs = msOf(request.entry_opens_at);
+  const virtualAccountAllowed = typeof request.virtual_account_allowed === 'boolean' ? request.virtual_account_allowed : undefined;
   return {
     orderId: text(request.order_id),
     attemptId: text(request.attempt_id),
@@ -78,6 +79,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
     amount: typeof krw === 'number' ? krw : Number.NaN,
     ...(authenticatedAtMs === undefined ? {} : { authenticatedAtMs }),
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
+    ...(virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed }),
   };
 }
 

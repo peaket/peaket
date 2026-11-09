@@ -94,6 +94,7 @@ function requestOf(c: ConfirmCommand): Record<string, unknown> {
     attempt_no: c.attemptNo,
     ...(at !== undefined ? { authenticated_at: { seconds: Math.floor(at / 1000), nanos: (at % 1000) * 1_000_000 } } : {}),
     ...(entry !== undefined ? { entry_opens_at: { seconds: Math.floor(entry / 1000), nanos: (entry % 1000) * 1_000_000 } } : {}),
+    ...(c.virtualAccountAllowed !== undefined ? { virtual_account_allowed: c.virtualAccountAllowed } : {}),
   };
 }
 

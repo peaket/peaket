@@ -12,6 +12,8 @@ export const FREEZE_MAX_BATCHES_PER_TICK = 20;
 export const PAUSE_READ_DEADLINE_MS = 500;
 /** 답을 받지 못했을 때 마지막 답을 쓰는 시간 10초 [가정](ADR-0085) */
 export const PAUSE_ANSWER_STALE_MS = 10_000;
+/** 열림이 연속 두 번이어도 첫 열림부터 이만큼 지나야 되돌린다 1초 [가정](틱이 바로 이어질 때 ms 사이에 끝나지 않게) */
+export const PAUSE_OPEN_MIN_MS = 1_000;
 /** 한 틱에서 만료 인덱스를 건너뛰어 읽는 수의 상한 2,000 [가정](ADR-0254 결정 6) */
 export const EXPIRY_MAX_OFFSET_PER_TICK = 2_000;
 
@@ -28,7 +30,8 @@ export interface HoldTarget {
   seats: readonly SeatRef[];
 }
 
-export type HoldReadResult = { kind: 'OK'; expiresAtMs: number; extended: boolean; fencingToken: number } | { kind: 'NOT_FOUND' } | { kind: 'NOT_READY' };
+/** frozen: 결제 정지로 멈췄거나 결제 접수 뒤 묶여 시간이 흐르지 않는다(화면이 타이머로 만료 처리하지 않는다) */
+export type HoldReadResult = { kind: 'OK'; expiresAtMs: number; extended: boolean; fencingToken: number; frozen: boolean } | { kind: 'NOT_FOUND' } | { kind: 'NOT_READY' };
 export type HoldReleaseResult = { kind: 'OK'; released: number } | { kind: 'NOT_FOUND' } | { kind: 'PINNED' } | { kind: 'NOT_READY' };
 export type HoldExtendResult = { kind: 'OK'; expiresAtMs: number; fencingToken: number } | { kind: 'NOT_FOUND' } | { kind: 'ALREADY' } | { kind: 'PINNED' } | { kind: 'NOT_READY' };
 export type HoldMarkResult = { kind: 'OK'; added: number } | { kind: 'NOT_FOUND' } | { kind: 'NOT_READY' };

@@ -6,10 +6,10 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { HoldError, throwHoldProblem } from '../application/hold-error.js';
 import { type HoldBody, ManageHolds } from '../application/manage-holds.js';
-import { KEY_PART } from '../domain/hold.js';
 import { HoldResponseBody, sanitizedStoreError } from './holds.controller.js';
 
-export const HoldIdParams = z.object({ holdId: z.string().regex(KEY_PART) }).strict();
+// 형식이 틀린 holdId도 없는 것과 같은 404다(BOLA 방지, 400으로 나누지 않는다, L14). 키에 넣기 전의 모양 확인은 쓰임새가 한다
+export const HoldIdParams = z.object({ holdId: z.string() }).strict();
 export const HoldSignedHeaders = z.object({ 'X-Purchase-Seq': z.int().min(1), 'X-Purchase-Mac': z.string() });
 
 @Controller('v1/holds/:holdId')

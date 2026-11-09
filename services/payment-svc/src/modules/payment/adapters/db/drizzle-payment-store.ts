@@ -62,6 +62,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
           idempotencyKey: confirmIdemKey(command.orderId),
           authenticatedAt: new Date(command.authenticatedAtMs),
           ...(command.entryOpensAtMs === undefined ? {} : { entryOpensAt: new Date(command.entryOpensAtMs) }),
+          ...(command.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: command.virtualAccountAllowed }),
           createdAt: now,
           statusChangedAt: now,
         })

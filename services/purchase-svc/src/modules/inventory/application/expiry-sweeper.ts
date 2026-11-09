@@ -238,13 +238,14 @@ export class ExpirySweeper {
     const ids = [...new Set(list)].sort(byCodeUnit);
     const reports = new Map<string, SweepEventReport>();
     const lags: number[] = [];
+    const frozen: number[] = [];
     // 정지 판단은 틱마다 한 번이다(던지지 않는다). 조회 실패는 HoldPauseView가 마지막 답·10초 규칙으로 흡수한다
     const pauses = this.deps.pauseView ? await this.deps.pauseView.refresh(ids) : undefined;
     let next = 0;
     const lane = async () => {
       while (next < ids.length && !stopped()) {
         const eventId = ids[next++]!;
-        reports.set(eventId, await this.#sweepEvent(eventId, stopped, lags, pauses?.get(eventId)));
+        reports.set(eventId, await this.#sweepEvent(eventId, stopped, lags, frozen, pauses?.get(eventId)));
       }
     };
     await Promise.all(Array.from({ length: Math.min(EXPIRY_CONCURRENCY, ids.length) }, lane));
@@ -252,22 +253,12 @@ export class ExpirySweeper {
     const signals = this.deps.signals ?? noSeatSignals;
     for (const e of events) signals.expiryTick?.(e.outcome);
     signals.expiryLag?.(lags.length > 0 ? Math.max(...lags) : 0);
-    if (this.deps.lifecycle && pauses) {
-      let frozen = 0;
-      for (const id of ids) {
-        try {
-          frozen += await this.deps.lifecycle.frozenCount(id);
-        } catch {
-          // 게이지만 비는다
-        }
-      }
-      signals.frozenHolds?.(frozen);
-    }
+    if (this.deps.lifecycle && pauses) signals.frozenHolds?.(frozen.reduce((n, x) => n + x, 0));
     return { overlapped: false, events };
   }
 
   /** 회차 하나를 이번 틱에 돈다(던지지 않는다). 첫 1단계 읽기의 밀림(초)을 lags에 더한다 */
-  async #sweepEvent(eventId: string, stopped: () => boolean, lags: number[], pause?: EventPauseState): Promise<SweepEventReport> {
+  async #sweepEvent(eventId: string, stopped: () => boolean, lags: number[], frozen: number[], pause?: EventPauseState): Promise<SweepEventReport> {
     const { expiries, seatMap, leases, clock, podId } = this.deps;
     const signals = this.deps.signals ?? noSeatSignals;
     const report: SweepEventReport = { eventId, outcome: 'DRAINED', batches: 0, released: 0, skipped: 0, orphans: 0, unknownSeats: 0, corrupt: 0 };
@@ -289,9 +280,21 @@ export class ExpirySweeper {
       // 결제 정지 옮기기·되돌리기(BUILD_ORDER HOT-070). 만료보다 먼저 해 이번 틱의 회수에 반영한다
       let pausedSinceMs: number | undefined;
       if (pause && this.deps.lifecycle) {
-        step = 'freeze';
-        await this.#settleFrozen(eventId, pause, keepUntilMs);
+        // 옮기기·되돌리기의 실패가 이 회차의 만료 회수까지 멈추지 않게 따로 받는다(L5). 다음 틱이 다시 한다
+        try {
+          await this.#settleFrozen(eventId, pause, keepUntilMs);
+        } catch (err) {
+          this.#log('warn', { eventId, step: 'freeze', ...this.#codeOf(err) }, '결제 정지 옮기기·되돌리기가 이번 틱에 실패했다');
+        }
+        // 정지 중이거나 아직 판단하지 못한 틱은 주문 뒤 홀드를 건너뛴다(UNSETTLED는 정지 시작을 모르므로 0이다. 조회가 멈춘 동안 풀어 버리지 않게, L8)
         if (pause.kind === 'PAUSED') pausedSinceMs = pause.sinceMs;
+        else if (pause.kind === 'UNSETTLED') pausedSinceMs = 0;
+        // 이 파드가 임대를 잡은 회차만 센다(§5 지표 뜻, L9)
+        try {
+          frozen.push(await this.deps.lifecycle.frozenCount(eventId));
+        } catch {
+          // 게이지만 비는다
+        }
       }
       let first = true;
       /** 이번 틱에서 풀지 못하고 앞줄에 남긴 좌석 수(ADR-0254 결정 6) */

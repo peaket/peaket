@@ -369,6 +369,8 @@ export interface ActiveAttemptView {
   readonly status: 'READY' | 'ACCEPTED';
   /** 토스 orderId 또는 포트원 paymentId(pay-{orderId}). 칸이 비었으면 undefined */
   readonly pgOrderRef?: string;
+  /** 그 주문의 시도 행 수(끝난 시도 포함). 2 이상이면 접수 본문의 attemptId가 필요하다(대체된 시도의 늦은 접수를 가른다, L1) */
+  readonly attemptCount?: number;
   /** 시도를 만든 시각(epoch ms). 40분 [가정](결제창 인증 유효 30분 + 승인 기한 10분)을 넘으면 없는 시도로 본다(ADR-0107) */
   readonly createdAtMs: number;
 }
@@ -1035,6 +1037,8 @@ export interface SagaEventConfig {
   readonly saleEndsAtMs: number;
   /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt). 승인 명령의 entry_opens_at이다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191) */
   readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(판 파일 virtualAccountAllowed). 없으면 칸이 없다(승인 명령 virtual_account_allowed, H2) */
+  readonly virtualAccountAllowed?: boolean;
 }
 
 /** 회차 설정 읽기(운영은 adapters/inventory-bridges.ts SeatMapSagaConfigs). 판이 없으면 undefined. 던지지 않는다 */
@@ -1065,6 +1069,8 @@ export interface ConfirmCommand {
   readonly amount: number;
   /** 회차의 입장 시작 시각(epoch ms, entry_opens_at). 판 파일에 없으면 칸을 싣지 않는다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191) */
   readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(판 파일 virtualAccountAllowed). 없으면 칸이 없다(승인 명령 virtual_account_allowed, H2) */
+  readonly virtualAccountAllowed?: boolean;
   /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 min(200ms, 승인 기한까지 남은 시간)으로 준다 */
   readonly deadlineMs: number;
 }

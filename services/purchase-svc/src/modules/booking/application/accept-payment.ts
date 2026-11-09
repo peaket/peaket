@@ -215,6 +215,8 @@ function attemptMismatchOf(attempt: ActiveAttemptView | undefined, body: Payment
   if (!attempt || attempt.status !== 'READY') return 'no_attempt';
   if (nowMs - attempt.createdAtMs >= ATTEMPT_ACCEPT_WINDOW_MS) return 'attempt_expired';
   if (body.attemptId !== undefined && body.attemptId !== attempt.attemptId) return 'attempt_id_mismatch';
+  // 시도가 둘 이상이면 attemptId가 없을 때 대체된 시도의 늦은 접수를 가를 수 없다(L1). 첫 시도뿐이면 지금처럼 받는다
+  if (body.attemptId === undefined && (attempt.attemptCount ?? 1) > 1) return 'attempt_id_mismatch';
   if (body.pg !== attempt.pg) return 'pg_mismatch';
   if (body.pg === 'PORTONE') return attempt.pgOrderRef !== undefined && body.paymentId === attempt.pgOrderRef ? undefined : 'payment_id_mismatch';
   return body.amount === orderAmount ? undefined : 'amount_mismatch';

@@ -65,6 +65,8 @@ export const payment = pgTable(
     queryTouchedAt: at('query_touched_at'),
     // 회차의 입장 시작 시각(승인 명령이 싣는다, 선택). 입금 오류 되돌림의 새 기한을 입장 24시간 전으로 자른다(BUILD_ORDER PRF-190, 마이그레이션 0009)
     entryOpensAt: at('entry_opens_at'),
+    // 가상계좌를 내도 되는가(승인 명령의 칸, 비면 지금처럼 받는다, POL-014, H2)
+    virtualAccountAllowed: boolean('virtual_account_allowed'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),

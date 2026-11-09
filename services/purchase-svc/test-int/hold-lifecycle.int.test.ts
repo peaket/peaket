@@ -3,7 +3,7 @@
 import 'reflect-metadata';
 import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { ExpirySweeper, HOLD_EXTENSION_MS, HoldPauseView, type HoldTarget, holdLifecycleKeys, MemorySeatMap, type PaymentPauseAnswer, RedisHoldLifecycle, RedisSeatStore, RedisSweepLeases, type SeatRef, seatKeys } from '../src/modules/inventory/index.js';
+import { ExpirySweeper, HOLD_EXTENSION_MS, RedisOrderHolds, HoldPauseView, type HoldTarget, holdLifecycleKeys, MemorySeatMap, type PaymentPauseAnswer, RedisHoldLifecycle, RedisSeatStore, RedisSweepLeases, type SeatRef, seatKeys } from '../src/modules/inventory/index.js';
 import { ACCOUNT_A, ACCOUNT_B, DAY, held, holdInput, idx, newEvent, ref, SEAT_COUNT, SEAT_DEFS } from '../test/hold-cases.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -389,6 +389,8 @@ describe('만료 반복과 결제 정지 S-T23', () => {
     answers.push({ status: 'OK', pauses: [] });
     await s.tick();
     expect(num(await cmd(paused(e), ['ZSCORE', paused(e), '0']))).not.toBeNull();
+    // 첫 열림부터 1초가 지나야 되돌린다(L6)
+    await new Promise((r) => setTimeout(r, 1_100));
     await s.tick();
     expect(num(await cmd(paused(e), ['ZSCORE', paused(e), '0']))).toBeNull();
     expect(num(await cmd(seatKeys.expiry(e), ['ZSCORE', seatKeys.expiry(e), '0']))).not.toBeNull();
@@ -435,3 +437,148 @@ describe('만료 반복과 결제 정지 S-T23', () => {
     expect(t.events.find((x) => x.eventId === e)).toMatchObject({ released: 1 });
   });
 });
+
+describe('리뷰 재현(H3·M3·M4·M5·L12)', () => {
+  const ordered = (e: string) => holdLifecycleKeys.ordered(e);
+  const paused = (e: string) => holdLifecycleKeys.paused(e);
+  const seatMap = new MemorySeatMap();
+  const seatDefs = SEAT_DEFS.map((d) => ({ ...d }));
+  async function frozenHold(e: string, seats = [S1]): Promise<HoldTarget & { exp: number }> {
+    seatMap.put({ eventId: e, layoutVersion: 'v1', seatCount: SEAT_COUNT, perAccountLimit: 4, saleEndsAtMs: Date.now() + DAY }, seatDefs);
+    const a = await holdOf(e, seats);
+    await life.markOrdered(a, Date.now() + 2_700_000, KEEP());
+    await life.freeze(e, Date.now(), KEEP(), seats.map(idx));
+    return a;
+  }
+  test('H3 S-T23 멈춘 홀드의 주문 좌석 만료 시각은 지금 + 남은 시간이다(hold exp가 지나도 줄지 않는다)', async () => {
+    const e = await openEvent();
+    const a = await frozenHold(e);
+    await setField(e, S1, 'exp', String(Date.now() - 60_000));
+    await setField(e, S1, 'rem', '100000');
+    const holds = new RedisOrderHolds(redis, seatMap);
+    const at = await holds.holdExpiry(e, a.holdId, [S1]);
+    expect(at).toBeGreaterThan(Date.now() + 90_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 100_000);
+  });
+  test('H3 S-T23 멈춘 홀드는 주문 생성의 홀드 확인에서 살아 있다(ADR-0255 재시도가 404가 되지 않는다)', async () => {
+    const e = await openEvent();
+    const a = await frozenHold(e);
+    await setField(e, S1, 'exp', String(Date.now() - 60_000));
+    const sk = `s:session:{${a.purchaseSessionId}}`;
+    await cmd(sk, ['HSET', sk, `h:${a.holdId}`, S1]);
+    const holds = new RedisOrderHolds(redis, seatMap);
+    expect(await holds.check({ eventId: e, purchaseSessionId: a.purchaseSessionId, accountId: a.accountId, holdId: a.holdId })).toMatchObject({ status: 'OK' });
+  });
+  test('H3 다시 읽기는 멈춘 홀드와 묶인 홀드를 frozen으로 알리고 만료를 앞에 둔다', async () => {
+    const e = await openEvent();
+    const a = await frozenHold(e);
+    expect(await life.read(a)).toMatchObject({ kind: 'OK', frozen: true });
+    const b = await holdOf(e, [S2]);
+    await setField(e, S2, 'pin', '1');
+    await setField(e, S2, 'exp', String(Date.now() - 60_000));
+    const r = await life.read(b);
+    expect(r).toMatchObject({ kind: 'OK', frozen: true });
+    expect(r.kind === 'OK' ? r.expiresAtMs : 0).toBeGreaterThan(Date.now());
+  });
+  test('M3 S-T23 ③ ordAt < 정지 시작 < 최대 체류 ≤ 지금 순서의 홀드는 되돌린 뒤 만료 Lua가 푼다', async () => {
+    const e = await openEvent();
+    const now = Date.now();
+    const a = await holdOf(e, [S1]);
+    await life.markOrdered(a, now + 2_700_000, KEEP());
+    await setField(e, S1, 'ordAt', String(now - 300_000));
+    await life.freeze(e, now - 200_000, KEEP(), [idx(S1)]);
+    const stay = now - 1_000;
+    await setField(e, S1, 'maxStay', String(stay));
+    await life.thaw(e, KEEP(), [idx(S1)]);
+    expect(await zscore(seatKeys.expiry(e), S1)).toBe(stay);
+    const due = await store.dueExpiries({ eventId: e, nowMs: Date.now() + 5_000, limit: 100 });
+    const r = await store.expire({ eventId: e, keepUntilMs: KEEP(), seats: due.map((d) => ({ index: d.index, expected: d.hold, seat: ref(S1) })), pausedSinceMs: now - 200_000 });
+    expect(r).toMatchObject({ kind: 'OK', released: 1, skipped: 0 });
+    expect(await bit(e, S1)).toBe(0);
+  });
+  test('M4 같은 정지 안에서 되돌렸다 다시 멈추면 남은 시간이 부풀지 않는다', async () => {
+    const e = await openEvent();
+    const a = await holdOf(e, [S1]);
+    await life.markOrdered(a, Date.now() + 2_700_000, KEEP());
+    const since = Date.now() - 120_000;
+    await setField(e, S1, 'ordAt', String(since - 60_000));
+    await life.freeze(e, since, KEEP(), [idx(S1)]);
+    const before = Number(await field(e, S1, 'rem'));
+    await life.thaw(e, KEEP(), [idx(S1)]);
+    await life.freeze(e, since, KEEP(), [idx(S1)]);
+    const after = Number(await field(e, S1, 'rem'));
+    expect(after).toBeLessThanOrEqual(before);
+    expect(after).toBeGreaterThan(before - 5_000);
+  });
+  test('M5 멈춘 좌석과 안 멈춘 좌석이 섞인 홀드를 연장하면 좌석마다 3분이 늘어난다', async () => {
+    const e = await openEvent();
+    const a = await holdOf(e, [S1, S2]);
+    await life.markOrdered(a, Date.now() + 2_700_000, KEEP());
+    await life.freeze(e, Date.now(), KEEP(), [idx(S1)]);
+    const remBefore = Number(await field(e, S1, 'rem'));
+    const r = await life.extend(a);
+    expect(r).toMatchObject({ kind: 'OK' });
+    expect(Number(await field(e, S1, 'rem'))).toBe(remBefore + 180_000);
+    expect(await zscore(seatKeys.expiry(e), S2)).toBe(a.exp + 180_000);
+    expect(await field(e, S2, 'exp')).toBe(String(a.exp + 180_000));
+  });
+  test('L12 다시 만들기를 시작하면 ordered·paused가 비워진다', async () => {
+    const e = await openEvent();
+    await frozenHold(e, [S1]);
+    await life.markOrdered(await holdOf(e, [S2]), Date.now() + 2_700_000, KEEP());
+    await cmd(seatKeys.epoch(e), ['DEL', seatKeys.epoch(e)]);
+    expect(await store.begin(e, 2, KEEP())).toMatchObject({ result: 'OK' });
+    expect(await zscore(paused(e), S1)).toBeNull();
+    expect(await zscore(ordered(e), S2)).toBeNull();
+  });
+});
+
+describe('리뷰 재현(L5·L8·L9)', () => {
+  const seatMap = new MemorySeatMap();
+  const refOf = (i: number): SeatRef => ({ seatId: `S${i}`, index: i, sectionId: 'A', sectionIndex: 0, seatOffset: i, tierId: 'R' });
+  async function big(count: number): Promise<string> {
+    const e = newEvent();
+    await store.openSale({ eventId: e, seatCount: count, keepUntilMs: KEEP() });
+    seatMap.put({ eventId: e, layoutVersion: 'v1', seatCount: count, perAccountLimit: 4, saleEndsAtMs: Date.now() + DAY }, Array.from({ length: count }, (_, i) => refOf(i)));
+    return e;
+  }
+  async function dueHold(e: string, i: number, ordered = false): Promise<void> {
+    const seats = [refOf(i)];
+    const acct = `acct-r-${i}`;
+    held(await store.hold({ eventId: e, accountId: acct, purchaseSessionId: `ps-r-${i}`, holdId: `h-r-${i}`, idempotencyKey: `0190f3a1-7c2e-4a00-8000-${String(i).padStart(12, '1')}`, fingerprint: `fr${i}`, seats, limit: 4, keepUntilMs: KEEP() }));
+    if (ordered) await life.markOrdered({ eventId: e, holdId: `h-r-${i}`, accountId: acct, purchaseSessionId: `ps-r-${i}`, seats }, Date.now() + 2_700_000, KEEP());
+    const past = String(Date.now() - 2_000);
+    await cmd(seatKeys.hold(e, i), ['HSET', seatKeys.hold(e, i), 'exp', past]);
+    await cmd(seatKeys.expiry(e), ['ZADD', seatKeys.expiry(e), past, String(i)]);
+  }
+  const sweeper = (over: Record<string, unknown>) => new ExpirySweeper({ expiries: store, seatMap, leases: new RedisSweepLeases(redis), clock: systemClock, podId: 'pod-r', ...over } as never);
+  test('L5 옮기기가 실패해도 그 회차의 만료 회수는 돈다', async () => {
+    const e = await big(5);
+    await dueHold(e, 0);
+    const broken = { ...life, orderedPage: async () => { throw new Error('boom'); }, frozenPage: life.frozenPage.bind(life), frozenCount: life.frozenCount.bind(life), freeze: life.freeze.bind(life), thaw: life.thaw.bind(life) };
+    const s = sweeper({ pauseView: new HoldPauseView({ read: async () => ({ status: 'OK', pauses: [{ eventId: e, pausedSinceMs: Date.now() - 1000 }] }) }, systemClock), lifecycle: broken });
+    const t = await s.tick();
+    expect(t.events.find((x) => x.eventId === e)).toMatchObject({ released: 1 });
+  });
+  test('L8 S-T23 정지를 모르는 틱에는 주문 뒤 홀드를 풀지 않는다(조회 실패 10초 안)', async () => {
+    const e = await big(5);
+    await dueHold(e, 1, true);
+    const s = sweeper({ pauseView: new HoldPauseView({ read: async () => ({ status: 'FAILED' }) }, systemClock), lifecycle: life });
+    await s.tick();
+    expect(Number(await cmd(seatKeys.bitmap(e), ['GETBIT', seatKeys.bitmap(e), '1']))).toBe(1);
+  });
+  test('L9 멈춘 좌석 게이지는 이 파드가 임대를 잡은 회차만 센다', async () => {
+    const e = await big(5);
+    const other = await big(5);
+    const counted: string[] = [];
+    const lifeCounted = { orderedPage: life.orderedPage.bind(life), frozenPage: life.frozenPage.bind(life), freeze: life.freeze.bind(life), thaw: life.thaw.bind(life), frozenCount: async (id: string) => { counted.push(id); return 1; } };
+    const values: number[] = [];
+    const leases = { acquire: async (id: string) => id === e };
+    const s = new ExpirySweeper({ expiries: store, seatMap, leases: leases as never, clock: systemClock, podId: 'pod-r', lifecycle: lifeCounted, pauseView: new HoldPauseView({ read: async () => ({ status: 'OK', pauses: [] }) }, systemClock), signals: { luaError: () => {}, frozenHolds: (n: number) => values.push(n) } as never });
+    await s.tick();
+    expect(counted.includes(e)).toBe(true);
+    expect(counted.includes(other)).toBe(false);
+    expect(values.length).toBe(1);
+  });
+});
+

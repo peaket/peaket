@@ -255,11 +255,14 @@ for i = 1, n do
     if (j and badAccount[j]) or (sec ~= '' and badSec[sec]) then
       kind = 'c'
     else
-      local h = redis.call('HMGET', hk, 'holdId', 'owner', 'psid', 'fence', 'exp', 'kind', 'ordAt', 'rem')
+      local h = redis.call('HMGET', hk, 'holdId', 'owner', 'psid', 'fence', 'exp', 'kind', 'ordAt', 'rem', 'maxStay')
       -- 정지 동안 아직 옮기지 못한 주문 뒤 홀드는 건너뛴다(남은 시간이 있던 홀드, BUILD_ORDER HOT-070)
       local frozenWait = false
       if pausedSince and h[7] and not h[8] and tonumber(h[7]) and tonumber(h[5] or '') then
-        frozenWait = tonumber(h[5]) > math.max(pausedSince, tonumber(h[7]))
+        -- 0은 '정지 여부를 아직 모른다'(조회 실패, L8): 주문 뒤 홀드는 시각과 상관없이 건너뛴다
+        frozenWait = pausedSince == 0 or tonumber(h[5]) > math.max(pausedSince, tonumber(h[7]))
+        -- 최대 체류에 닿은 홀드는 정지와 상관없이 푼다(되돌리기 Lua가 expiry에 돌려놓은 좌석, seat-hold §5 '최대 체류 회수')
+        if tonumber(h[9] or '') and tonumber(h[9]) <= now then frozenWait = false end
       end
       if not h[1] or not h[2] or not h[4] or not h[5] or not string.match(h[5], '^%d+$') or not safeFence(h[4]) then
         kind = 'c'

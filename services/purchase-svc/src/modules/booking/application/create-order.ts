@@ -30,6 +30,8 @@ export const CREATE_ORDER_OPERATION = 'CREATE_ORDER';
 export const IDENTITY_RECHECK_DEADLINE_MS = 150;
 /** 조사용 연락처 가명 gRPC 데드라인 50ms [가정](architecture 시간 초과 표, 다시 묻지 않는다) */
 export const CONTACT_REF_DEADLINE_MS = 50;
+/** 같은 홀드의 주문 ID 조회 상한 200ms [가정](ADR-0255) */
+const OWN_ORDER_LOOKUP_MS = 200;
 
 /** 쓰임새가 쓰는 포트와 설정 */
 export interface CreateOrderDeps {
@@ -255,14 +257,22 @@ export class CreateOrder {
     const outcome = await d.writes.create(c.idem, order, transactionCallOf(c.deadline));
     if (outcome.status === 'HOLD_ALREADY_ORDERED') {
       // 같은 계정·같은 구매 세션의 주문이면 그 ID를 함께 준다(응답을 잃은 화면이 이어 간다, ADR-0255)
-      const orderId = await d.writes.findOwnOrderId?.({ holdId: c.body.holdId, accountId: c.accountId, purchaseSessionId: c.purchaseSessionId });
+      // 조회는 시간 제한 안에서 한 번이다. 실패하면 칸 없이 답한다(409는 그대로, L11)
+      const orderId = await Promise.race([
+        (d.writes.findOwnOrderId?.({ holdId: c.body.holdId, accountId: c.accountId, purchaseSessionId: c.purchaseSessionId }) ?? Promise.resolve(undefined)).catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          const t = setTimeout(() => resolve(undefined), OWN_ORDER_LOOKUP_MS);
+          (t as { unref?: () => void }).unref?.();
+        }),
+      ]);
       return { status: 'REJECTED', reason: 'HOLD_ALREADY_ORDERED', ...(orderId ? { orderId } : {}) };
     }
 
     // 주문 뒤 표시(결제 정지 때 멈출 대상, seat-hold §5 '주문 표시'). 실패해도 201은 그대로다
     if (outcome.status === 'CREATED' && d.holdMarks) {
-      const marked = await d.holdMarks.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: c.body.holdId, seatIds: hold.seats.map((s) => s.seatId), ...(c.deadline ? { deadline: c.deadline } : {}) });
-      if (!marked) d.signals.holdMarkFailed?.();
+      const mark = () => d.holdMarks!.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: c.body.holdId, seatIds: hold.seats.map((s) => s.seatId), ...(c.deadline ? { deadline: c.deadline } : {}) });
+      // 일시 실패면 한 번 더 한다. 그래도 실패하면 결제 시도 시작이 다시 표시한다(L4)
+      if (!(await mark()) && !(await mark())) d.signals.holdMarkFailed?.();
     }
 
     // 11. 커밋 뒤 Paying 표시(실패해도 응답을 바꾸지 않는다), 12. 201

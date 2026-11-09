@@ -71,6 +71,7 @@ type TargetRow = {
   authenticated_at: Date | string;
   confirm_sent: boolean;
   entry_opens_at: Date | string | null;
+  virtual_account_allowed: boolean | null;
   status_changed_at: Date | string;
 };
 
@@ -90,6 +91,7 @@ type QueryRow = {
   deposit_notified_at: Date | string | null;
   reversed_at: Date | string | null;
   entry_opens_at: Date | string | null;
+  virtual_account_allowed: boolean | null;
   accepted_at: Date | string | null;
 };
 
@@ -198,7 +200,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
     const r = await this.o.database.db.execute(sql`
-      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at, p.entry_opens_at, p.status_changed_at,
+      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at, p.virtual_account_allowed, p.entry_opens_at, p.status_changed_at,
              exists (select 1 from payment_event e where e.payment_id = p.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent
       from payment p where p.id = ${paymentId}::uuid`);
     const row = r.rows[0] as TargetRow | undefined;
@@ -217,6 +219,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       authenticatedAtMs: msOf(row.authenticated_at),
       confirmSent: row.confirm_sent,
       ...(row.entry_opens_at === null ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
+      ...(row.virtual_account_allowed === null ? {} : { virtualAccountAllowed: row.virtual_account_allowed }),
       // ACCEPTED로 쓴 시각(이 행을 읽는 동안 다른 전이가 없다, 결제 확정 소요의 시작점)
       acceptedAtMs: msOf(row.status_changed_at),
     };
@@ -331,7 +334,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     return this.#tx(async (tx) => {
       // 상태 목록은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. RETURNING 차례가 정해지지 않아 고르기와 밀기를 나눈다(고른 차례를 지키고 간격 식은 도메인 하나다)
       const r = await tx.execute(sql`
-        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at, entry_opens_at,
+        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, virtual_account_allowed, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at, entry_opens_at,
                case when status = 'AWAITING_DEPOSIT' then (select max(e.occurred_at) from payment_event e where e.payment_id = payment.id and e.type = ${DEPOSIT_REVERSED_EVENT_TYPE}) end as reversed_at,
                case when status = 'UNKNOWN' then (select e.occurred_at from payment_event e where e.payment_id = payment.id and e.seq = 1) end as accepted_at
         from payment
@@ -361,6 +364,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
           ...(row.status === 'FAILED' ? { lateDepositCheck: true as const } : {}),
           ...(row.status === 'APPROVED' ? { reversalCheck: row.deposit_notified_at === null ? {} : { notifiedAtMs: msOf(row.deposit_notified_at) } } : {}),
           ...(row.entry_opens_at === null ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
+          ...(row.virtual_account_allowed === null ? {} : { virtualAccountAllowed: row.virtual_account_allowed }),
           ...(row.accepted_at === null ? {} : { acceptedAtMs: msOf(row.accepted_at) }),
         };
       });

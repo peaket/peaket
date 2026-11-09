@@ -174,6 +174,8 @@ const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: s
 // 결제사 서킷은 채널마다 하나이고 승인·조회·취소가 함께 쓴다. 값은 플랫폼 기본값 [가정](docs/features/payment.md §2 '결제사 서킷의 첫 구현', BUILD_ORDER PRF-200)
 const circuits = new BreakerPgCircuits({ service: SERVICE, registry: service.metrics.registry, logger: service.logger, clock: systemClock }).register(service.metrics.registry);
 const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger), circuits });
+const depositCancel = new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock });
+const VIRTUAL_ACCOUNT_DISALLOWED_REASON = '가상계좌를 받지 않는 공연의 입금 대기';
 entryPauseReleaseWatcher = new EntryPauseReleaseWatcher({ closeCircuit: (pg) => guards.of(pg)?.closeCircuit() });
 const resolutionSignals = new PromPaymentResolutionSignals().register(service.metrics.registry);
 service.readiness.register('grpc');
@@ -186,7 +188,7 @@ const grpc = await startGrpcServer({
   services: [
     {
       definition: paymentPackage().PaymentService.service,
-      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }), prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults }) }, (method, err, orderId) =>
+      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: depositCancel, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults }) }, (method, err, orderId) =>
         // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
         service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
       ),
@@ -201,9 +203,17 @@ const podId = process.env.PEAKET_POD?.trim() || hostname();
 // 채널별 호출 보호기는 두 실행기가 하나를 함께 쓴다(토큰 버킷은 승인과 단독 조회를 함께 센다, BUILD_ORDER PRF-183)
 // 시험 재개의 첫 승인 결과는 승인 실행기 풀에서 쓴다(BUILD_ORDER PRF-202)
 const entryTrialResults = new DrizzleEntryPause({ database: confirmDatabase });
-const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit, resolution: resolutionSignals, trialResults: entryTrialResults, pauses: entryPauses, trialSignals: entryPauseSignals });
+// 가상계좌를 끈 회차의 입금 대기 답을 입금 전 취소로 끝낸다(POL-014, H2, HOT-152 경로). 실패하면 입금 기한 경과가 받친다(T17)
+const disallowedDeposit = async (x: { readonly paymentId: string; readonly orderId: string }): Promise<void> => {
+  try {
+    await depositCancel.execute({ paymentId: x.paymentId, cancellationId: x.paymentId, reason: VIRTUAL_ACCOUNT_DISALLOWED_REASON });
+  } catch (err) {
+    service.logger.error({ orderId: x.orderId, code: safeErrorCode(err) }, '가상계좌를 끈 회차의 입금 전 취소 실패(입금 기한이 끝나면 풀린다)');
+  }
+};
+const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit, disallowedDeposit, resolution: resolutionSignals, trialResults: entryTrialResults, pauses: entryPauses, trialSignals: entryPauseSignals });
 confirmRunner.start();
-const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit, resolution: resolutionSignals });
+const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit, disallowedDeposit, resolution: resolutionSignals });
 unknownResolver.start();
 
 // 새 결제 진입 정지 판정자(BUILD_ORDER PRF-202, ADR-0105 결정 8): Lease로 뽑은 파드 하나가 돈다. 파드 밖(local·ci)은 이 프로세스 하나만 리더다

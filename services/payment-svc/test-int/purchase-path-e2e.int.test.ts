@@ -47,6 +47,7 @@ import {
   BatchGetPaymentStates,
   CachedEntryPauseReader,
   CachedPgSelectionReader,
+  CancelDepositPayment,
   channelTableOf,
   DrizzleConfirmJobs,
   DrizzleEntryPause,
@@ -159,14 +160,19 @@ beforeAll(async () => {
   const grpcServer = await startGrpcServer({ host: '127.0.0.1', port: 0, services: [{ definition: paymentPackage().PaymentService.service, handlers }] });
   closeAll.push(() => grpcServer.close());
   const address = `127.0.0.1:${grpcServer.port}`;
+  const guards = new PgCallGuards({ gateways, podCount: 1, clock: systemClock, signals: new PromPgCallGuardSignals().register(metrics.registry), log: pgCallGuardLog(logger) });
+  const confirmJobs = new DrizzleConfirmJobs({ database: payHot, clock: systemClock });
   confirmRunner = new PaymentConfirmRunner({
-    jobs: new DrizzleConfirmJobs({ database: payHot, clock: systemClock }),
+    jobs: confirmJobs,
     gateways,
     log: paymentConfirmLog(logger),
     signals: new PromPaymentConfirmSignals().register(metrics.registry),
     clock: systemClock,
     podId: 'e2e-pay',
-    guards: new PgCallGuards({ gateways, podCount: 1, clock: systemClock, signals: new PromPgCallGuardSignals().register(metrics.registry), log: pgCallGuardLog(logger) }),
+    guards,
+    disallowedDeposit: async (i: { paymentId: string }) => {
+      await new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: { cancel: () => {} } as never, clock: systemClock }).execute({ paymentId: i.paymentId, cancellationId: i.paymentId, reason: '가상계좌를 받지 않는 공연' });
+    },
     timer: { setInterval: () => 0, clearInterval: () => {} },
   } as never);
 
@@ -393,6 +399,66 @@ describe('실제 연결: 홀드 → 주문 → 결제 시도 → 결제창 준�
     expect(attemptRes.payload).not.toContain(SIM_KEY);
     expect(createHash('sha256').update(attemptRes.payload).digest('hex')).toHaveLength(64);
   }, 120_000);
+
+  test('H2 P-T9 POL-014 가상계좌를 끈 회차에서 SDK를 직접 불러 가상계좌로 승인되면 입금 전 취소로 주문을 끝내고 좌석을 푼다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[3]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    const holdId = String(json(held).holdId);
+    const ordered = await call(f, 'POST', '/v1/orders', { holdId, buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT } }, { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    const started = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(started.statusCode, started.payload).toBe(201);
+    const a = json(started) as { attemptId: string; checkout: { orderId: string; amount: number } };
+    // 브라우저 검사를 지나치고 시뮬레이터에 가상계좌로 인증한다(SDK 직접 호출과 같은 상황)
+    const { paymentKey } = (await sim_('/sim/authenticate', { orderId: a.checkout.orderId, amount: a.checkout.amount, method: '가상계좌' })) as { paymentKey: string };
+    const accepted = await call(f, 'POST', `/v1/orders/${orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey, amount: 150_000, attemptId: a.attemptId }, { idem: randomUUID() });
+    expect(accepted.statusCode, accepted.payload).toBe(202);
+    await until(async () => (await adminP.pool.query('select status from purchase_order where id = $1', [orderId])).rows[0]?.status === 'RESERVED', 'RESERVED', 20_000, 50);
+    await until(async () => {
+      await confirmRunner.tick();
+      await confirmRunner.whenIdle();
+      return (await adminPay.pool.query('select status from payment where order_id = $1', [orderId])).rows[0]?.status !== 'ACCEPTED';
+    }, '승인 처리', 20_000, 100);
+    await until(async () => (await adminPay.pool.query('select status from payment where order_id = $1', [orderId])).rows[0]?.status === 'FAILED', '입금 전 취소', 10_000, 100);
+    const rows = (await adminPay.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1 order by seq', [w.eventId])).rows;
+    let offset = 0n;
+    for (const r of rows) {
+      offset += 1n;
+      const m: ConsumedMessage = { topic: 'trade.payments', partition: 0, offset, key: w.eventId, value: r.payload, headers: {}, timestamp: Date.now() };
+      await results.handle(results.decode(m), m);
+    }
+    await until(async () => (await adminP.pool.query('select status from purchase_order where id = $1', [orderId])).rows[0]?.status === 'FAILED', '주문 실패', 10_000, 50);
+    expect((await adminP.pool.query("select count(*)::int n from seat_sale where event_id = $1 and status in ('PENDING','SOLD')", [w.eventId])).rows[0]).toEqual({ n: 0 });
+    await until(async () => Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '3'], { key: seatKeys.bitmap(w.eventId) })) === 0, '좌석 해제', 15_000, 100);
+  }, 120_000);
+
+  test('L1 시도가 둘 이상이면 attemptId 없는 접수를 받지 않는다. L4 결제 시도 시작이 주문 뒤 표시를 복구한다. L14 형식 틀린 holdId는 404다', async () => {
+    const w = await world();
+    const f = await fan(w.eventId);
+    const held = await call(f, 'POST', `/v1/events/${w.eventId}/holds`, { seatIds: [w.seats[4]] }, { idem: randomUUID() });
+    expect(held.statusCode, held.payload).toBe(201);
+    const holdId = String(json(held).holdId);
+    expect((await call(f, 'GET', '/v1/holds/bad~id', undefined, { unsigned: true })).statusCode).toBe(404);
+    expect((await call(f, 'DELETE', '/v1/holds/bad~id')).statusCode).toBe(404);
+    const ordered = await call(f, 'POST', '/v1/orders', { holdId, buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT } }, { idem: randomUUID() });
+    expect(ordered.statusCode, ordered.payload).toBe(201);
+    const orderId = String(json(ordered).orderId);
+    const key = seatKeys.ordered(w.eventId);
+    await redis.command(['ZREM', key, '4'], { key });
+    const first = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(first.statusCode, first.payload).toBe(201);
+    expect(await redis.command(['ZSCORE', key, '4'], { key })).not.toBeNull();
+    const second = await call(f, 'POST', `/v1/orders/${orderId}/payments`, {}, { idem: randomUUID() });
+    expect(second.statusCode, second.payload).toBe(201);
+    const a = json(second) as { checkout: { orderId: string; amount: number } };
+    const { paymentKey } = (await sim_('/sim/authenticate', { orderId: a.checkout.orderId, amount: a.checkout.amount })) as { paymentKey: string };
+    const noAttempt = await call(f, 'POST', `/v1/orders/${orderId}/payment-acceptance`, { pg: 'SIMULATOR', paymentKey, amount: a.checkout.amount }, { idem: randomUUID() });
+    expect(noAttempt.statusCode, noAttempt.payload).toBe(409);
+    expect(json(noAttempt).type).toBe('payment-attempt-mismatch');
+  }, 60_000);
 
   test('P-T49 HOT070_ 예매 제한 403은 그 세션의 홀드를 풀고 해제는 같은 계정의 재홀드를 30초 막는다', async () => {
     const w = await world();

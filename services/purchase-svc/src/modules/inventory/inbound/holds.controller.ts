@@ -86,6 +86,7 @@ export const HoldResponseBody = z.object({
   extendable: z.boolean(),
   fencingToken: z.int().min(1),
   assignResult: z.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional(),
+  frozen: z.boolean().optional(),
   seats: z.array(z.object({ seatId: z.string(), label: z.string(), tierId: z.string(), tierName: z.string().optional(), price: z.int().min(0) })).optional(),
   totalAmount: z.int().min(0).optional(),
 });

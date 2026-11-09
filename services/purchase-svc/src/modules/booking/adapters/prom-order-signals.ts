@@ -82,6 +82,7 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
     registry.registerMetric(this.#mismatch);
     registry.registerMetric(this.#fallback);
     registry.registerMetric(this.#payingFailed);
+    registry.registerMetric(this.#holdMarkFailed);
     registry.registerMetric(this.#waiters);
     registry.registerMetric(this.#pollFailures);
     registry.registerMetric(this.#depositReadFailures);

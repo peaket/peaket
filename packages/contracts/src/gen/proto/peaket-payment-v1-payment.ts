@@ -253,6 +253,11 @@ export const paymentV1Payment: Record<string, unknown> = {
                         "toss",
                         "portone"
                       ]
+                    },
+                    "_virtual_account_allowed": {
+                      "oneof": [
+                        "virtual_account_allowed"
+                      ]
                     }
                   },
                   "fields": {
@@ -295,6 +300,13 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "entry_opens_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 10
+                    },
+                    "virtual_account_allowed": {
+                      "type": "bool",
+                      "id": 11,
+                      "options": {
+                        "proto3_optional": true
+                      }
                     }
                   }
                 },

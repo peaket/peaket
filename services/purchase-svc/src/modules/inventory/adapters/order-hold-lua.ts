@@ -57,13 +57,19 @@ local earliest = nil
 for i = 1, #KEYS do
   local ty = redis.call('TYPE', KEYS[i]).ok
   if ty ~= 'none' and ty ~= 'hash' then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
-  local h = redis.call('HMGET', KEYS[i], 'holdId', 'exp')
+  local h = redis.call('HMGET', KEYS[i], 'holdId', 'exp', 'rem')
   if h[1] == ARGV[1] then
     local v = h[2]
     if not v or #v > 16 or not string.match(v, '^[0-9]+$') or (#v > 1 and string.sub(v, 1, 1) == '0') then
       return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i])
     end
     local n = tonumber(v)
+    -- 멈춘 좌석은 지금 + 남은 시간이다(HOT-070, 시간이 흐르지 않아 0까지 줄면 안 된다)
+    if h[3] then
+      if #h[3] > 16 or not string.match(h[3], '^[0-9]+$') then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
+      local t = redis.call('TIME')
+      n = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) + tonumber(h[3])
+    end
     if earliest == nil or n < earliest then earliest = n end
   end
 end
@@ -84,11 +90,12 @@ local function ms(v)
 end
 local heldAt = nil
 for i = 2, #KEYS do
-  local h = redis.call('HMGET', KEYS[i], 'holdId', 'owner', 'psid', 'heldAt', 'exp', 'kind')
+  local h = redis.call('HMGET', KEYS[i], 'holdId', 'owner', 'psid', 'heldAt', 'exp', 'kind', 'rem')
   if not h[1] or not h[2] or not h[3] or not h[4] or not h[5] or not h[6] then return {'NOT_FOUND'} end
   if h[1] ~= ARGV[1] or h[2] ~= ARGV[2] or h[3] ~= ARGV[3] or h[6] ~= 'FAN' then return {'NOT_FOUND'} end
   if not ms(h[4]) or not ms(h[5]) then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
-  if tonumber(h[5]) <= now then return {'NOT_FOUND'} end
+  -- 멈춘 좌석(rem)은 시간이 흐르지 않으니 살아 있다(HOT-070)
+  if not h[7] and tonumber(h[5]) <= now then return {'NOT_FOUND'} end
   if heldAt == nil then
     heldAt = h[4]
   elseif heldAt ~= h[4] then
