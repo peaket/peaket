@@ -48,6 +48,10 @@ export const ToWorker = z.discriminatedUnion('type', [
   z.object({ type: z.literal('focusSection'), section: nonNeg }),
   z.object({ type: z.literal('pointer'), kind: z.enum(['down', 'up', 'move', 'leave']), x: z.number().min(-16_384).max(16_384), y: z.number().min(-16_384).max(16_384) }),
   z.object({ type: z.literal('select'), seatIndex: nonNeg }),
+  /** 방금 놓은 좌석(30초 [가정] 흐리게 그리고 고르지 못하게 한다, docs/frontend.md §4.2.2 6행). untilMs는 벽시계 시각 */
+  z.object({ type: z.literal('released'), seats: z.array(z.object({ seatId: z.string().min(1), untilMs: z.number().nonnegative() })).max(64) }),
+  /** 다시 읽은 홀드의 좌석을 내 좌석으로 표시하거나 푼다(새로고침, docs/frontend.md §4.2.2 7행) */
+  z.object({ type: z.literal('setMine'), seatIds: z.array(z.string().min(1)).max(64), on: z.boolean() }),
   z.object({ type: z.literal('theme'), theme: z.enum(['light', 'dark']) }),
   /** 접근성 목록을 열었다: 구역 목록을 한 번 답한다 */
   z.object({ type: z.literal('listSections') }),

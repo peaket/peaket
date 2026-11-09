@@ -263,6 +263,53 @@ export class SeatMapEngine {
 
   // ── 좌석 ────────────────────────────────────────────────
 
+  /** 방금 놓은 좌석 → 다시 고를 수 있는 시각(벽시계 ms) */
+  readonly released = new Map<number, number>();
+  /** 좌석 ID → 색인(처음 부를 때 만든다) */
+  #idIndex: Map<string, number> | undefined;
+
+  seatIndexOf(seatId: string): number {
+    if (!this.#idIndex) {
+      this.#idIndex = new Map();
+      for (let s = 0; s < this.L.S; s++) {
+        const ids = this.L.seatIds[s]!;
+        for (let i = 0; i < ids.length; i++) this.#idIndex.set(ids[i]!, this.L.sectionStart[s]! + i);
+      }
+    }
+    return this.#idIndex.get(seatId) ?? -1;
+  }
+
+  /** 방금 놓은 좌석을 더한다. 바뀐 구역 그림을 지운다 */
+  markReleased(seatId: string, untilMs: number): void {
+    const k = this.seatIndexOf(seatId);
+    if (k < 0) return;
+    this.released.set(k, untilMs);
+    this.cache.invalidate(sectionOf(this.L, k).section);
+  }
+
+  isRecentlyReleased(k: number, nowMs: number): boolean {
+    const until = this.released.get(k);
+    return until !== undefined && until > nowMs;
+  }
+
+  /** 지난 항목을 지우고 다음에 풀릴 시각을 돌려준다(없으면 undefined) */
+  pruneReleased(nowMs: number): number | undefined {
+    let next: number | undefined;
+    for (const [k, until] of this.released) {
+      if (until <= nowMs) {
+        this.released.delete(k);
+        this.cache.invalidate(sectionOf(this.L, k).section);
+      } else if (next === undefined || until < next) next = until;
+    }
+    return next;
+  }
+
+  /** 내 좌석 표시를 켜거나 끈다(이미 그 상태면 그대로) */
+  setMine(seatId: string, on: boolean): void {
+    const k = this.seatIndexOf(seatId);
+    if (k >= 0 && this.isMine(k) !== on) this.toggleMine(k);
+  }
+
   isMine(k: number): boolean {
     return ((this.mine[k >> 3]! >> (k & 7)) & 1) === 1;
   }
@@ -286,6 +333,7 @@ export class SeatMapEngine {
   canSelect(k: number): boolean {
     if (k < 0 || k >= this.L.N) return false;
     if (this.isMine(k)) return true;
+    if (this.isRecentlyReleased(k, Date.now())) return false;
     return this.state[k] === STATE.AVAILABLE && ((this.L.attr[k]! >> 4) & FLAG.EXCLUDED) === 0;
   }
 
@@ -470,7 +518,7 @@ export class SeatMapEngine {
   }
 
   private paintSeat(ctx: Ctx2D, k: number, sx: number, sy: number, size: number, theme: ColorMode): void {
-    const st = seatStyle(seatState(this.state[k]!, this.L.attr[k]!, this.isMine(k)), theme);
+    const st = seatStyle(seatState(this.state[k]!, this.L.attr[k]!, this.isMine(k), this.isRecentlyReleased(k, Date.now())), theme);
     const wheelchair = ((this.L.attr[k]! >> 4) & FLAG.WHEELCHAIR) !== 0 && st.state !== 'wheelchair';
     drawSeat(ctx, st, sx, sy, size, wheelchair);
   }

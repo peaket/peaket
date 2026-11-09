@@ -55,7 +55,7 @@ export type OrderOutcome =
   | { kind: 'no-id' }
   | { kind: 'restricted' }
   | { kind: 'hold-gone' }
-  | { kind: 'other-tab' }
+  | { kind: 'other-tab'; orderId?: string }
   | { kind: 'sale-ended' }
   | { kind: 'sale-paused' }
   | { kind: 'consent' }
@@ -63,7 +63,7 @@ export type OrderOutcome =
   | { kind: 'retry' };
 
 /** 주문 실패 → 화면(createOrder 응답표, docs/frontend.md §5.3 '401') */
-export function orderOutcome(e: { status?: number; type?: string }): OrderOutcome {
+export function orderOutcome(e: { status?: number; type?: string; extensions?: Record<string, unknown> }): OrderOutcome {
   switch (e.status) {
     case 401:
       return !e.type || e.type === 'about:blank' || e.type.startsWith('http-') ? { kind: 'refresh' } : { kind: 'ended' };
@@ -75,7 +75,8 @@ export function orderOutcome(e: { status?: number; type?: string }): OrderOutcom
       return { kind: 'hold-gone' };
     case 409:
       // 같은 멱등 키의 앞 요청이 아직 처리 중이면(idempotency-request-in-progress) 다시 시도한다
-      return e.type === 'hold-already-ordered' ? { kind: 'other-tab' } : { kind: 'retry' };
+      if (e.type === 'hold-already-ordered') return typeof e.extensions?.orderId === 'string' ? { kind: 'other-tab', orderId: e.extensions.orderId } : { kind: 'other-tab' };
+      return { kind: 'retry' };
     case 410:
       return { kind: 'sale-ended' };
     case 423:

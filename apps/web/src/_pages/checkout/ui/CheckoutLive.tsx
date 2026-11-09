@@ -8,9 +8,11 @@ import { formatWon } from '@/entities/production';
 import { holdClock } from '@/shared/lib/hold-clock';
 import { AppShell } from '@/widgets/app-shell';
 import { buyerErrors, gradeLines, orderIdempotencyKey, orderOutcome, ORDER_CONSENT_VERSION, readCheckoutRefs, roundText, type OrderOutcome, type StoredAdmissionRef } from '../model/order';
+import { attemptIdempotencyKey, attemptOf, attemptOutcome, attemptStorageKey, type AttemptOutcome, type PayMethod, type PaymentAttempt } from '../model/payment-attempt';
 import type { PayMode } from '../model/view';
 import { CheckoutConsentProvider, HoldExpiredDialog, PayAction, useCheckoutConsent } from './CheckoutClient';
 import { CheckoutForm, type CheckoutFormData, type SellerView } from './CheckoutForm';
+import type { PaymentWindow } from '../windows';
 
 const VerifyIdentityButton = lazy(() => import('@/features/identity-verify').then((m) => ({ default: m.VerifyIdentityButton })));
 
@@ -33,7 +35,12 @@ interface HoldView {
 
 type Phase = 'loading' | 'ready' | 'ended' | 'failed' | 'restricted' | 'other-tab';
 
-const problemOf = (e: unknown, ApiError: typeof import('@peaket/api-client').ApiError) => (e instanceof ApiError ? { status: e.status, type: e.type } : {});
+const problemOf = (e: unknown, ApiError: typeof import('@peaket/api-client').ApiError) => (e instanceof ApiError ? { status: e.status, type: e.type, extensions: e.extensions } : {});
+/** 결제 일시 정지·일시 장애 뒤 결제 시도를 다시 하기까지 [가정](Retry-After가 없을 때) */
+const ATTEMPT_RETRY_MS = 5_000;
+const TOSS_METHODS = 'co-toss-methods';
+const TOSS_AGREEMENT = 'co-toss-agreement';
+const METHOD_LABEL: Record<PayMethod, string> = { CARD: '신용·체크카드', EASY_PAY: '간편결제', TRANSFER: '계좌이체', VIRTUAL_ACCOUNT: '가상계좌', MOBILE: '휴대폰' };
 
 /** 불러오기를 멈출 까닭 */
 class LoadStop extends Error {
@@ -279,6 +286,13 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: 'danger' | 'warning' } | null>(null);
   const [blocked, setBlocked] = useState<'sale-paused' | 'sale-ended' | 'no-id' | null>(null);
+  const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
+  const [attemptState, setAttemptState] = useState<'idle' | 'starting' | 'paused' | 'exceeded' | 'unavailable'>('idle');
+  const [method, setMethod] = useState<PayMethod | null>(null);
+  const paymentWindow = useRef<PaymentWindow | null>(null);
+  const attemptIdem = useRef<{ key: string; method: string } | null>(null);
+  const attemptRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptGeneration = useRef(0);
   // 주문을 만들었으면 새로고침해도 다시 만들지 않는다(값은 주문 ID뿐이다, docs/frontend.md §3.12)
   const orderKey = `peaket.checkout.${hold.holdId}.order`;
   const [orderId, setOrderId] = useState<string | null>(() => {
@@ -299,7 +313,117 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
   const seatText = seats.map((s) => s.label).join(', ');
   const hasErrors = Boolean(errors.name || errors.phone);
 
-  const mode: PayMode = orderId ? 'ordered' : expired ? 'expired' : blocked === 'sale-paused' ? 'sale-paused' : blocked === 'sale-ended' ? 'sale-ended' : blocked === 'no-id' ? 'no-id' : 'consent';
+  const payable = Boolean(orderId && attempt);
+  const mode: PayMode = orderId
+    ? attemptState === 'exceeded'
+      ? 'exceeded'
+      : attemptState === 'paused'
+        ? 'pay-paused'
+        : payable
+          ? 'consent'
+          : 'ordered'
+    : expired
+      ? 'expired'
+      : blocked === 'sale-paused'
+        ? 'sale-paused'
+        : blocked === 'sale-ended'
+          ? 'sale-ended'
+          : blocked === 'no-id'
+            ? 'no-id'
+            : 'consent';
+
+  /** 결제 시도 실패를 화면으로 옮긴다 */
+  const applyAttempt = (out: AttemptOutcome, restart: () => void): void => {
+    switch (out.kind) {
+      case 'ended':
+      case 'refresh':
+        setPhase('ended');
+        return;
+      case 'hold-gone':
+      case 'order-expired':
+        setAttemptState('idle');
+        setExpired(true);
+        setNotice({ text: '주문 시간이 끝났습니다. 요금은 청구되지 않았습니다', tone: 'warning' });
+        return;
+      case 'already-accepted':
+        window.location.replace(`/booking/${encodeURIComponent(eventId)}/result?order=${encodeURIComponent(orderId ?? '')}`);
+        return;
+      case 'exceeded':
+        setAttemptState('exceeded');
+        return;
+      case 'sale-paused':
+        setNotice({ text: '판매가 잠시 멈췄습니다. 고른 좌석은 홀드 시간 동안 유지됩니다', tone: 'danger' });
+        setAttemptState('unavailable');
+        return;
+      case 'pay-paused':
+        setNotice({ text: out.holdRemainingSeconds !== undefined ? `결제가 잠시 멈췄습니다. 홀드 남은 시간은 ${Math.ceil(out.holdRemainingSeconds / 60)}분이고 멈춘 동안 줄지 않습니다` : '결제가 잠시 멈췄습니다', tone: 'warning' });
+        setAttemptState('paused');
+        attemptRetry.current = setTimeout(restart, Math.max(ATTEMPT_RETRY_MS, (out.retryAfterSeconds ?? 0) * 1000));
+        return;
+      default:
+        setNotice({ text: '결제를 준비하지 못했습니다. 다시 시도해 주세요', tone: 'danger' });
+        setAttemptState('unavailable');
+    }
+  };
+
+  /** 결제 시도를 시작하고 결제창을 준비한다(주문 뒤 한 번, 수단을 바꾸거나 일시 장애 뒤 다시) */
+  const startAttempt = async (payMethod?: PayMethod): Promise<void> => {
+    if (!orderId) return;
+    const generation = ++attemptGeneration.current;
+    if (attemptRetry.current) clearTimeout(attemptRetry.current);
+    setAttemptState('starting');
+    setNotice(null);
+    try {
+      const [{ ApiError, OPERATIONS }, { PurchaseKeyError, openPurchaseSession }, api, windows] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api'), import('../windows')]);
+      const client = api.browserApiClient();
+      if (!client) return setAttemptState('unavailable');
+      attemptIdem.current = attemptIdempotencyKey(attemptIdem.current, payMethod ?? '', () => crypto.randomUUID());
+      signer.current ??= await openPurchaseSession({
+        admissionToken: admission.admissionToken,
+        ...(admission.serverEcdhPublicKey ? { serverEcdhPublicKey: admission.serverEcdhPublicKey } : {}),
+        ...(admission.purchaseSessionExpiresAt ? { purchaseSessionExpiresAt: admission.purchaseSessionExpiresAt } : {}),
+      });
+      const send = () => client.send<unknown>(OPERATIONS.createOrderPayment, { params: { orderId }, body: payMethod ? { payMethod } : {}, idempotencyKey: attemptIdem.current!.key, purchase: signer.current! });
+      let refreshed = false;
+      for (;;) {
+        try {
+          const r = await send();
+          if (generation !== attemptGeneration.current) return;
+          const a = attemptOf(r.data);
+          if (!a) return applyAttempt({ kind: 'unavailable' }, () => void startAttempt(payMethod));
+          setAttempt(a);
+          setAttemptState('idle');
+          sessionStorage.setItem(attemptStorageKey(orderId), a.attemptId);
+          const win = await windows.loadPaymentWindow(a);
+          if (generation !== attemptGeneration.current) return;
+          paymentWindow.current = win;
+          await win.mount({ methods: `#${TOSS_METHODS}`, agreement: `#${TOSS_AGREEMENT}` }).catch(() => undefined);
+          return;
+        } catch (e) {
+          if (generation !== attemptGeneration.current) return;
+          if (e instanceof PurchaseKeyError) return applyAttempt(e.reason === 'storage' ? { kind: 'retry' } : { kind: 'ended' }, () => void startAttempt(payMethod));
+          const out = attemptOutcome(e instanceof ApiError ? { status: e.status, type: e.type, extensions: e.extensions, ...(e.retryAfter !== null && Number.isFinite(Number(e.retryAfter)) ? { retryAfterSeconds: Number(e.retryAfter) } : {}) } : {});
+          if (out.kind !== 'refresh' || refreshed) return applyAttempt(out, () => void startAttempt(payMethod));
+          refreshed = true;
+          const r2 = await api.refreshFanToken();
+          if (r2 !== 'ok') return applyAttempt(r2 === 'rejected' ? { kind: 'ended' } : { kind: 'retry' }, () => void startAttempt(payMethod));
+        }
+      }
+    } catch {
+      if (generation === attemptGeneration.current) applyAttempt({ kind: 'retry' }, () => void startAttempt(payMethod));
+    }
+  };
+
+  // 주문이 생기면(새로고침으로 되찾은 주문 포함) 결제 시도를 시작한다
+  useEffect(() => {
+    if (orderId) void startAttempt();
+    const t = attemptGeneration;
+    return () => {
+      t.current += 1;
+      if (attemptRetry.current) clearTimeout(attemptRetry.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 주문 ID가 바뀔 때만 시작한다
+  }, [orderId]);
 
   // 판매 재개를 알려 주는 길이 아직 없어(실시간은 HOT-357) 잠시 뒤 다시 주문할 수 있게 한다. 여전히 정지면 서버가 423으로 답한다
   useEffect(() => {
@@ -324,6 +448,11 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
         sessionStorage.removeItem(`peaket.hold.${eventId}`);
         return setPhase('restricted');
       case 'other-tab':
+        // 같은 세션의 주문이면 주문 ID를 받아 잇는다(응답을 잃은 뒤 다시 누름, ADR-0255)
+        if (out.orderId) {
+          sessionStorage.setItem(orderKey, out.orderId);
+          return setOrderId(out.orderId);
+        }
         return setPhase('other-tab');
       case 'no-id':
         return setBlocked('no-id');
@@ -343,8 +472,32 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
     }
   };
 
+  const openWindow = async () => {
+    if (busy || !attempt || !paymentWindow.current) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      const allowed = attempt.allowedPayMethods;
+      if (attempt.pg === 'PORTONE' && method && allowed?.[0] !== method) {
+        // 다른 수단은 그 수단으로 시도를 한 번 더 시작한다(앞 시도는 대체된다, docs/frontend.md §5.3)
+        await startAttempt(method);
+        const a = paymentWindow.current;
+        if (a) await a.pay({ payMethod: method, buyerName: name.trim() });
+        return;
+      }
+      await paymentWindow.current.pay({ ...(method ? { payMethod: method } : {}), buyerName: name.trim() });
+    } catch (e) {
+      const { PaymentWindowError } = await import('../windows');
+      const reason = e instanceof PaymentWindowError ? e.reason : 'failed';
+      setNotice(reason === 'method-not-allowed' ? { text: '이 공연에서는 고를 수 없는 결제수단입니다. 다른 수단을 골라 주세요', tone: 'warning' } : reason === 'cancelled' ? { text: '결제를 취소했습니다. 요금은 청구되지 않았습니다', tone: 'warning' } : { text: '결제창을 열지 못했습니다. 다시 시도해 주세요', tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const pay = async () => {
-    if (busy || orderId) return;
+    if (busy) return;
+    if (orderId) return openWindow();
     setNotice(null);
     const errs = buyerErrors(name, phone);
     setErrors(errs);
@@ -379,7 +532,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
           return;
         } catch (e) {
           if (e instanceof PurchaseKeyError) return apply(e.reason === 'storage' ? { kind: 'retry' } : { kind: 'ended' });
-          const out = orderOutcome(e instanceof ApiError ? { status: e.status, type: e.type } : {});
+          const out = orderOutcome(e instanceof ApiError ? { status: e.status, type: e.type, extensions: e.extensions } : {});
           if (out.kind !== 'refresh' || refreshed) return apply(out);
           refreshed = true;
           const r2 = await api.refreshFanToken();
@@ -498,12 +651,39 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
               <h2 className="t-lg" id="co-pay-h">
                 결제수단
               </h2>
-              {/* 결제 시도와 결제사 위젯은 HOT-358이다. 그 전에는 주문까지만 만든다 */}
-              <p className="t-sm muted">{orderId ? '주문을 만들었습니다' : '결제수단은 주문을 만든 뒤 고릅니다'}</p>
-              {orderId ? (
-                <p className="t-sm" role="status">
-                  주문이 접수되었습니다. 결제창을 여는 기능은 아직 준비 중입니다
+              {!orderId ? <p className="t-sm muted">결제수단은 주문을 만든 뒤 고릅니다</p> : null}
+              {attempt?.switched ? (
+                <div className="banner banner-info" role="status">
+                  <i className="ic ic-info" aria-hidden="true" />
+                  <div className="banner-body">결제사 사정으로 다른 결제사로 결제합니다</div>
+                </div>
+              ) : null}
+              {orderId && !attempt ? (
+                <p className="t-sm muted" role="status">
+                  결제를 준비하고 있습니다
                 </p>
+              ) : null}
+              {attempt?.pg === 'TOSS' ? (
+                <>
+                  <div id={TOSS_METHODS} />
+                  <div id={TOSS_AGREEMENT} />
+                </>
+              ) : null}
+              {attempt?.pg === 'PORTONE' ? (
+                <div className="col" role="radiogroup" aria-label="결제수단" style={{ gap: 8 }}>
+                  {(attempt.allowedPayMethods ?? ['CARD']).map((m) => (
+                    <label className="row" key={m} style={{ gap: 8 }}>
+                      <input type="radio" name="co-pay-method" checked={(method ?? attempt.allowedPayMethods?.[0]) === m} onChange={() => setMethod(m)} />
+                      {METHOD_LABEL[m]}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              {attempt?.pg === 'SIMULATOR' ? <p className="t-sm muted">데모 결제창입니다. 실제 요금은 청구되지 않습니다</p> : null}
+              {attemptState === 'unavailable' ? (
+                <button className="btn btn-outline btn-sm self-start" type="button" onClick={() => void startAttempt(method ?? undefined)}>
+                  결제 준비 다시 시도
+                </button>
               ) : null}
             </section>
           }

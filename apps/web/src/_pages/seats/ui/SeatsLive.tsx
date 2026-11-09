@@ -42,6 +42,15 @@ function clearHold(eventId: string): void {
   }
 }
 
+function savedHoldId(eventId: string): string | undefined {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(holdKey(eventId)) ?? 'null') as { holdId?: unknown } | null;
+    return typeof v?.holdId === 'string' && v.holdId ? v.holdId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function saveHold(eventId: string, h: HoldResult): void {
   try {
     sessionStorage.setItem(holdKey(eventId), JSON.stringify({ holdId: h.holdId, seatIds: h.seatIds, expiresAt: h.expiresAt }));
@@ -131,7 +140,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const viewRef = useRef<View | null>(null);
   const sessionRef = useRef<PurchaseSigner | null>(null);
   const bookingRef = useRef<Booking | null>(null);
-  const [booking, setBooking] = useState<{ value: string; picks: SeatPick[]; notice: BookingNotice | null; limit: number } | null>(null);
+  const [booking, setBooking] = useState<{ value: string; picks: SeatPick[]; notice: BookingNotice | null; limit: number; extended: boolean } | null>(null);
   const [auto, setAuto] = useState<'assigning' | 'done' | 'unavailable' | 'no-match' | 'wish-error' | null>(null);
   const [heldLeft, setHeldLeft] = useState<number | null>(null);
   /** 이번 화면에서 401로 토큰을 갱신했는가(한 번만) */
@@ -192,11 +201,15 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         behaviorSummary: () => behaviorTracker?.summary(),
         saveHold: (h) => saveHold(eventId, h),
         clearHold: () => clearHold(eventId),
+        admissionToken: adm.admissionToken,
+        savedHoldId: () => savedHoldId(eventId),
+        setMineOnMap: (seatIds, on) => mapRef.current?.send({ type: 'setMine', seatIds: [...seatIds], on }),
+        markReleasedOnMap: (seats) => mapRef.current?.send({ type: 'released', seats: [...seats] }),
       });
       bookingRef.current = b;
       const sync = () => {
         const s = b.actor.getSnapshot();
-        setBooking({ value: String(s.value), picks: s.context.picks, notice: s.context.notice, limit: s.context.limit });
+        setBooking({ value: String(s.value), picks: s.context.picks, notice: s.context.notice, limit: s.context.limit, extended: s.context.extended });
         if (s.value === 'ended') setPhase('ended');
         const f = b.autoFailure();
         if (f) setAuto(f);
@@ -217,6 +230,12 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         if (!h?.auto) return setPhase('failed');
         setAuto('assigning');
         setPhase('ready');
+        // 저장한 홀드가 있으면 다시 읽어 잇는다(새로고침, docs/frontend.md §4.2.2 7행)
+        await b.restore();
+        if (b.actor.getSnapshot().value === 'held') {
+          setAuto('done');
+          return;
+        }
         await b.autoHold(readWish(eventId, localStorage));
         if (live && b.actor.getSnapshot().value === 'held') {
           setAuto('done');
@@ -269,6 +288,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         onMessage: (m) => {
           if (!live) return;
           if (m.type === 'ready') {
+            if (!drawn) void b.restore();
             drawn = true;
             if (!behaviorTracker) {
               behaviorTracker = createBehaviorTracker(() => performance.now());
@@ -481,6 +501,9 @@ export function SeatsLive({ eventId }: { eventId: string }) {
           oneMinute={heldLeft !== null && heldLeft <= 60_000}
           onHold={() => void bookingRef.current?.hold()}
           onLeave={leave}
+          extended={booking.extended}
+          onExtend={() => void bookingRef.current?.extend()}
+          onRelease={() => void bookingRef.current?.release()}
         />
       </div>
     ) : null;

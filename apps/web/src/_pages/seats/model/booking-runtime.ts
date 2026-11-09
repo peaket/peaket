@@ -16,6 +16,7 @@ export interface HoldResult {
   holdId: string;
   seatIds: string[];
   expiresAt: string;
+  extendable?: boolean;
   seats?: HeldSeat[];
   totalAmount?: number;
   assignResult?: string;
@@ -53,10 +54,29 @@ export interface BookingDeps {
   clearHold(): void;
   /** 시험에서 바꾼다 */
   now?: () => number;
+  /** 시험에서 바꾼다(벽시계) */
+  wall?: () => number;
+  /** 입장 토큰(다시 읽기 GET의 머리) */
+  admissionToken: string;
+  /** 저장한 홀드 ID(없으면 undefined) */
+  savedHoldId(): string | undefined;
+  /** 지도에 내 좌석 표시를 켜거나 끈다(새로고침으로 복원한 좌석) */
+  setMineOnMap(seatIds: readonly string[], on: boolean): void;
+  /** 방금 놓은 좌석을 지도에 알린다 */
+  markReleasedOnMap(seats: readonly { seatId: string; untilMs: number }[]): void;
 }
+
+/** 방금 놓은 좌석을 다시 고를 수 있을 때까지(서버와 같은 30초 [가정], docs/frontend.md §4.2.2 6행) */
+export const REHOLD_WAIT_MS = 30_000;
+/** 다시 읽기를 일시 오류 뒤 다시 하는 횟수와 간격 [가정] */
+const RESTORE_RETRIES = 3;
+const RESTORE_RETRY_MS = 2_000;
 
 const holdOp = OPERATIONS.createEventHold as Operation;
 const leaveOp = OPERATIONS.deleteEventPurchaseSession as Operation;
+const readOp = OPERATIONS.getHold as Operation;
+const releaseOp = OPERATIONS.deleteHold as Operation;
+const extendOp = OPERATIONS.createHoldExtension as Operation;
 
 const problemOf = (e: unknown) => (e instanceof ApiError ? { status: e.status, type: e.type, extensions: e.extensions } : {});
 
@@ -76,6 +96,70 @@ export function createBooking(d: BookingDeps) {
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((f) => f());
   const mono = d.now ?? (() => performance.now());
+  const wall = d.wall ?? (() => Date.now());
+  /** 방금 놓은 좌석 → 다시 고를 수 있는 시각 */
+  const released = new Map<string, number>();
+
+  /** 응답 하나를 held 값으로 */
+  const heldOf = (data: HoldResult, serverDate: string | null): HeldState => {
+    const left = remainingMs(data.expiresAt, serverDate, wall());
+    return { ...data, deadlineMono: mono() + left, deadlineWall: wall() + left };
+  };
+
+  /** 놓은 좌석을 표시한다(서버의 다시 잡기 대기와 같은 30초) */
+  const remember = (seatIds: readonly string[], untilMs: number) => {
+    for (const id of seatIds) released.set(id, untilMs);
+    d.markReleasedOnMap(seatIds.map((seatId) => ({ seatId, untilMs })));
+  };
+
+  /** 끝난 홀드를 비운다. 복원한 홀드는 indexes가 비어 있어 좌석 ID로 지도를 맞춘다 */
+  const dropHeld = (seatIds: readonly string[]) => {
+    if (indexes.size === 0 && seatIds.length > 0) d.setMineOnMap(seatIds, false);
+    held = null;
+    idem = null;
+    d.clearHold();
+  };
+
+  /** 서명한 요청 하나. 이름 없는 401이면 한 번 갱신하고 다시 보낸다 */
+  async function signed(op: Operation, params: Record<string, string>): Promise<{ data: unknown; headers: Headers } | { problem: ReturnType<typeof problemOf> } | 'ended'> {
+    let refreshed = false;
+    for (;;) {
+      try {
+        return await d.client.send(op, { params, purchase: d.session });
+      } catch (e) {
+        if (e instanceof PurchaseKeyError) return e.reason === 'storage' ? { problem: {} } : 'ended';
+        const p = problemOf(e);
+        if (holdOutcome(p).type === 'REFRESH' && !refreshed) {
+          refreshed = true;
+          if ((await d.refreshToken()) !== 'ok') return 'ended';
+          continue;
+        }
+        return { problem: p };
+      }
+    }
+  }
+
+  /** GET 홀드(서명 없음). 'gone' = 없음·끝남, 'ended' = 구매 세션 끝, 'failed' = 잠시 뒤 다시 */
+  async function readHold(holdId: string): Promise<{ data: HoldResult; date: string | null } | 'gone' | 'ended' | 'failed'> {
+    let refreshed = false;
+    for (;;) {
+      try {
+        const r = await d.client.send<HoldResult>(readOp, { params: { holdId }, headers: { 'X-Admission-Token': d.admissionToken } });
+        return { data: r.data, date: r.headers.get('date') };
+      } catch (e) {
+        const p = problemOf(e);
+        if (p.status === 404) return 'gone';
+        if (p.status === 401) {
+          if (holdOutcome(p).type === 'REFRESH' && !refreshed) {
+            refreshed = true;
+            if ((await d.refreshToken()) === 'ok') continue;
+          }
+          return 'ended';
+        }
+        return 'failed';
+      }
+    }
+  }
 
   /** 지도에 고른 표시를 지운다(경합 패배·홀드 만료) */
   const clearMap = () => {
@@ -93,8 +177,7 @@ export function createBooking(d: BookingDeps) {
     for (;;) {
       try {
         const r = await d.client.send<HoldResult>(holdOp, { params: { eventId: d.eventId }, body, idempotencyKey, purchase: d.session });
-        const left = remainingMs(r.data.expiresAt, r.headers.get('date'), Date.now());
-        held = { ...r.data, deadlineMono: mono() + left, deadlineWall: Date.now() + left };
+        held = heldOf(r.data, r.headers.get('date'));
         idem = null;
         d.saveHold(r.data);
         actor.send({ type: 'HOLD_OK', hold: r.data });
@@ -125,6 +208,11 @@ export function createBooking(d: BookingDeps) {
     autoFailure: () => autoFailure,
     /** 지도에서 누른 좌석. 한도를 넘으면 지도에 표시하지 않는다 */
     pick(seat: SeatPick, seatIndex: number) {
+      const until = released.get(seat.seatId);
+      if (until !== undefined && until > wall()) {
+        actor.send({ type: 'NOTICE', notice: { kind: 'recent-pick', until } });
+        return;
+      }
       const before = actor.getSnapshot().context.picks.some((p) => p.seatId === seat.seatId);
       actor.send({ type: 'TOGGLE', seat });
       const after = actor.getSnapshot().context.picks.some((p) => p.seatId === seat.seatId);
@@ -135,10 +223,82 @@ export function createBooking(d: BookingDeps) {
     },
     setLimit: (limit: number) => actor.send({ type: 'SET_LIMIT', limit }),
     expire() {
-      held = null;
-      idem = null;
-      d.clearHold();
+      const seatIds = held?.seatIds ?? [];
+      if (seatIds.length > 0) remember(seatIds, wall() + REHOLD_WAIT_MS);
+      dropHeld(seatIds);
       send({ type: 'EXPIRED' });
+    },
+    /** 새로고침·결제 화면에서 돌아옴: 저장한 홀드를 서버에서 다시 읽는다(docs/frontend.md §4.2.2 7행) */
+    async restore(): Promise<void> {
+      const holdId = d.savedHoldId();
+      if (!holdId || actor.getSnapshot().value !== 'selecting') return;
+      for (let i = 0; i <= RESTORE_RETRIES; i += 1) {
+        const r = await readHold(holdId);
+        if (actor.getSnapshot().value !== 'selecting') return;
+        if (r === 'ended') return send({ type: 'SESSION_ENDED' });
+        if (r === 'gone') return d.clearHold();
+        if (r !== 'failed') {
+          held = heldOf(r.data, r.date);
+          d.saveHold(r.data);
+          d.setMineOnMap(r.data.seatIds, true);
+          actor.send({ type: 'RESTORE', hold: r.data, extended: r.data.extendable === false });
+          return;
+        }
+        if (i < RESTORE_RETRIES) await new Promise((f) => setTimeout(f, RESTORE_RETRY_MS));
+      }
+      actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
+    },
+    /** 1회 연장(서명). 두 번째는 409이고 서버가 준 만료로 맞춘다 */
+    async extend(): Promise<void> {
+      const h = held;
+      if (!h || actor.getSnapshot().value !== 'held') return;
+      const r = await signed(extendOp, { holdId: h.holdId });
+      if (r === 'ended') return send({ type: 'SESSION_ENDED' });
+      if ('data' in r) {
+        held = heldOf(r.data as HoldResult, r.headers.get('date'));
+        d.saveHold(r.data as HoldResult);
+        actor.send({ type: 'EXTENDED' });
+        return notify();
+      }
+      const p = r.problem;
+      if (p.status === 409 && p.type === 'hold-already-extended') {
+        // 응답을 잃어 다시 누른 경우 등: 서버의 실제 만료를 다시 읽는다
+        const again = await readHold(h.holdId);
+        if (again !== 'gone' && again !== 'ended' && again !== 'failed') {
+          held = heldOf(again.data, again.date);
+          d.saveHold(again.data);
+        }
+        actor.send({ type: 'EXTENDED' });
+        return notify();
+      }
+      if (p.status === 409 && p.type === 'hold-in-payment') return actor.send({ type: 'NOTICE', notice: { kind: 'in-payment' } });
+      if (p.status === 404) {
+        dropHeld(h.seatIds);
+        return send({ type: 'HOLD_GONE' });
+      }
+      actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
+    },
+    /** 홀드 해제(서명). 204면 30초 동안 흐리게 그리고 다시 고르지 못하게 한다 */
+    async release(): Promise<void> {
+      const h = held;
+      if (!h || actor.getSnapshot().value !== 'held') return;
+      const r = await signed(releaseOp, { holdId: h.holdId });
+      if (r === 'ended') return send({ type: 'SESSION_ENDED' });
+      const untilMs = wall() + REHOLD_WAIT_MS;
+      if ('data' in r) {
+        clearMap();
+        remember(h.seatIds, untilMs);
+        dropHeld(h.seatIds);
+        return send({ type: 'RELEASED' });
+      }
+      const p = r.problem;
+      if (p.status === 404) {
+        clearMap();
+        dropHeld(h.seatIds);
+        return send({ type: 'HOLD_GONE' });
+      }
+      if (p.status === 409 && p.type === 'hold-in-payment') return actor.send({ type: 'NOTICE', notice: { kind: 'in-payment' } });
+      actor.send({ type: 'NOTICE', notice: { kind: 'error' } });
     },
     resume: () => actor.send({ type: 'RESUME' }),
     /** 좌석 홀드하기 */

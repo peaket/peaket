@@ -67,6 +67,14 @@ describe('소유 확인 S-T29', () => {
     expect(await bit(e, S1)).toBe(1);
     expect(await field(e, S1, 'ext')).toBe('0');
   });
+  test('S-T29 ① 구매 세션 ID가 같아도 계정이 다르면 놓거나 늘리지 못한다(소유 계정 대조)', async () => {
+    const e = await openEvent();
+    const a = await holdOf(e, [S1]);
+    const forged: HoldTarget = { ...a, accountId: ACCOUNT_B };
+    expect(await life.read(forged)).toEqual({ kind: 'NOT_FOUND' });
+    expect(await life.release(forged, KEEP())).toEqual({ kind: 'NOT_FOUND' });
+    expect(await bit(e, S1)).toBe(1);
+  });
   test('S-T29 ② 없는 holdId는 NOT_FOUND이고 아무것도 바꾸지 않는다', async () => {
     const e = await openEvent();
     const a = await holdOf(e, [S1]);

@@ -267,6 +267,23 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
             host.post({ type: 'hit', ...h, ...(h.seatIndex >= 0 ? { selectable: engine.canSelect(h.seatIndex) } : {}) });
           }
           break;
+        case 'released': {
+          for (const s of m.seats) engine.markReleased(s.seatId, s.untilMs);
+          draw();
+          // 풀리는 때에 맞춰 다시 그린다
+          const again = () => {
+            const next = engine?.pruneReleased(Date.now());
+            draw();
+            if (next !== undefined) setTimeout(again, Math.max(50, next - Date.now()));
+          };
+          const next = engine.pruneReleased(Date.now());
+          if (next !== undefined) setTimeout(again, Math.max(50, next - Date.now()));
+          break;
+        }
+        case 'setMine':
+          for (const id of m.seatIds) engine.setMine(id, m.on);
+          draw();
+          break;
         case 'select':
           // 고를 수 있는 좌석만(가능 상태, 판매 제외 아님). 이미 고른 좌석은 풀 수 있다
           if (engine.canSelect(m.seatIndex)) {

@@ -20,6 +20,10 @@ export interface SummaryProps {
   oneMinute: boolean;
   onHold(): void;
   onLeave(): void;
+  /** 1회 연장을 이미 썼다 */
+  extended: boolean;
+  onExtend(): void;
+  onRelease(): void;
 }
 
 export function noticeText(n: BookingNotice, limit: number): string {
@@ -32,12 +36,18 @@ export function noticeText(n: BookingNotice, limit: number): string {
       return `한 공연에서 최대 ${limit}매까지 구매할 수 있습니다`;
     case 'expired':
       return '홀드 시간이 끝나 좌석이 풀렸습니다. 요금은 청구되지 않습니다';
+    case 'released':
+      return '좌석을 놓았습니다. 방금 놓은 좌석은 30초 뒤에 다시 고를 수 있습니다';
+    case 'in-payment':
+      return '결제가 진행 중이라 좌석을 놓거나 시간을 늘릴 수 없습니다';
+    case 'recent-pick':
+      return `방금 놓은 좌석은 ${Math.max(1, Math.ceil((n.until - Date.now()) / 1000))}초 뒤에 다시 고를 수 있습니다`;
     default:
       return '요청을 처리하지 못했습니다. 다시 시도해 주세요';
   }
 }
 
-export function LiveSummary({ picks, prices, limit, phase, notice, held, checkoutHref, oneMinute, onHold, onLeave }: SummaryProps) {
+export function LiveSummary({ picks, prices, limit, phase, notice, held, checkoutHref, oneMinute, onHold, onLeave, extended, onExtend, onRelease }: SummaryProps) {
   const payRef = useRef<HTMLAnchorElement>(null);
   // 홀드가 되면 초점을 [결제하기]로 옮긴다(누른 버튼이 사라져 키보드 사용자가 초점을 잃지 않게)
   useEffect(() => {
@@ -82,6 +92,16 @@ export function LiveSummary({ picks, prices, limit, phase, notice, held, checkou
           <button className="btn btn-text btn-sm" type="button" onClick={onLeave}>
             예매 그만두기
           </button>
+          {phase === 'held' ? (
+            <>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={onRelease}>
+                좌석 놓기
+              </button>
+              <button className="btn btn-outline btn-sm" type="button" disabled={extended} onClick={onExtend}>
+                {extended ? '이미 연장했습니다' : '1회 연장'}
+              </button>
+            </>
+          ) : null}
           {phase === 'held' ? (
             <Link ref={payRef} className="btn btn-primary" href={checkoutHref}>
               결제하기

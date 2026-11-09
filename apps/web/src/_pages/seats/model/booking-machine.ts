@@ -13,7 +13,13 @@ export type BookingNotice =
   | { kind: 'recent'; seats: string[]; availableAt?: string }
   | { kind: 'limit' }
   | { kind: 'error' }
-  | { kind: 'expired' };
+  | { kind: 'expired' }
+  /** 직접 놓았다(30초 뒤 다시 고를 수 있다) */
+  | { kind: 'released' }
+  /** 결제가 진행 중이라 놓거나 늘릴 수 없다 */
+  | { kind: 'in-payment' }
+  /** 다시 고를 수 없는 좌석을 눌렀다 */
+  | { kind: 'recent-pick'; until: number };
 
 export type BookingEvent =
   | { type: 'TOGGLE'; seat: SeatPick }
@@ -33,13 +39,24 @@ export type BookingEvent =
   /** 홀드 시간이 끝났다 */
   | { type: 'EXPIRED' }
   /** 일시 정지 뒤 다시 홀드해 본다(재개를 알려 주는 길이 아직 없다, 서버가 다시 423이면 돌아온다) */
-  | { type: 'RESUME' };
+  | { type: 'RESUME' }
+  /** 다시 읽은 홀드로 되돌린다(새로고침, 결제 화면에서 돌아옴) */
+  | { type: 'RESTORE'; hold: unknown; extended: boolean }
+  /** 해제가 끝났다(204) */
+  | { type: 'RELEASED' }
+  /** 서버에 홀드가 없다(404) */
+  | { type: 'HOLD_GONE' }
+  /** 연장했다 */
+  | { type: 'EXTENDED' }
+  | { type: 'NOTICE'; notice: BookingNotice | null };
 
 export interface BookingContext {
   limit: number;
   picks: SeatPick[];
   notice: BookingNotice | null;
   hold: unknown;
+  /** 1회 연장을 썼다 */
+  extended: boolean;
 }
 
 const toggleCtx = ({ context, event }: { context: BookingContext; event: BookingEvent }): Partial<BookingContext> => {
@@ -67,10 +84,11 @@ export const bookingMachine = setup({
 }).createMachine({
   id: 'booking',
   initial: 'selecting',
-  context: ({ input }) => ({ limit: input.limit, picks: [], notice: null, hold: null }),
+  context: ({ input }) => ({ limit: input.limit, picks: [], notice: null, hold: null, extended: false }),
   on: {
     SESSION_ENDED: '.ended',
     SET_LIMIT: { actions: assign({ limit: ({ event }) => event.limit }) },
+    NOTICE: { actions: assign({ notice: ({ event }) => (event.type === 'NOTICE' ? event.notice : null) }) },
   },
   states: {
     selecting: {
@@ -78,11 +96,12 @@ export const bookingMachine = setup({
         TOGGLE: { actions: 'toggle' },
         HOLD: { guard: 'hasPicks', target: 'holding', actions: 'clearNotice' },
         AUTO: { target: 'holding', actions: 'clearNotice' },
+        RESTORE: { target: 'held', actions: assign({ hold: ({ event }) => (event.type === 'RESTORE' ? event.hold : null), extended: ({ event }) => event.type === 'RESTORE' && event.extended, notice: null }) },
       },
     },
     holding: {
       on: {
-        HOLD_OK: { target: 'held', actions: assign({ hold: ({ event }) => event.hold }) },
+        HOLD_OK: { target: 'held', actions: assign({ hold: ({ event }) => event.hold, extended: false }) },
         HOLD_LOST: { target: 'selecting', actions: assign({ picks: [], notice: ({ event }) => ({ kind: 'lost', suggested: event.suggested }) }) },
         HOLD_RECENT: {
           target: 'selecting',
@@ -94,7 +113,14 @@ export const bookingMachine = setup({
         HOLD_SALE_ENDED: 'saleEnded',
       },
     },
-    held: { on: { EXPIRED: { target: 'selecting', actions: assign({ picks: [], hold: null, notice: { kind: 'expired' } }) } } },
+    held: {
+      on: {
+        EXPIRED: { target: 'selecting', actions: assign({ picks: [], hold: null, extended: false, notice: { kind: 'expired' } }) },
+        HOLD_GONE: { target: 'selecting', actions: assign({ picks: [], hold: null, extended: false, notice: { kind: 'expired' } }) },
+        RELEASED: { target: 'selecting', actions: assign({ picks: [], hold: null, extended: false, notice: { kind: 'released' } }) },
+        EXTENDED: { actions: assign({ extended: true, notice: null }) },
+      },
+    },
     /** 판매 일시 정지(423): 홀드 버튼을 막는다 */
     paused: { on: { TOGGLE: { actions: 'toggle' }, RESUME: 'selecting' } },
     /** 판매 종료(410): 새로 고르지 못하고 고른 좌석을 풀 수만 있다(d5 §5.10) */
