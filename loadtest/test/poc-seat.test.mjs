@@ -147,17 +147,17 @@ test('ST27_NFR003_expireCall은 expire-lua.ts 계약의 KEYS·ARGV 차례를 따
   const x = expireCall(expireInputs[0]);
   const k = (s) => `s:{event:E1}:${s}`;
   assert.deepEqual(x.owners, ['a1', 'a2']);
-  assert.deepEqual(x.keys, [k('bitmap'), k('expiry'), k('stream'), k('epoch'), k('secver'), k('hold:5'), k('hold:7'), k('hold:9'), k('hold:11'), k('quota:a1'), k('quota:a2'), k('rel:a1'), k('rel:a2')]);
+  assert.deepEqual(x.keys, [k('bitmap'), k('expiry'), k('stream'), k('epoch'), k('secver'), k('hold:5'), k('hold:7'), k('hold:9'), k('hold:11'), k('quota:a1'), k('quota:a2'), k('rel:a1'), k('rel:a2'), k('ordered')]);
   assert.deepEqual(x.args, [
-    '30000', 's:{event:E1}:sec:', '1800000000000', '2', 'a1', 'a2',
+    '30000', 's:{event:E1}:sec:', '1800000000000', '2', '', 'a1', 'a2',
     '5', 'h1', '1730000000000001', '1', '0', '5', 'S000005', 'T0', 'SEC0',
     '7', '', '', '0', '0', '7', 'S000007', 'T0', 'SEC0',
     '9', 'h2', '1730000000000002', '2', '', '', '', '', '',
     '11', 'h3', '1730000000000003', '1', '1', '0', 'S000011', 'T1', 'SEC1',
   ]);
-  // #KEYS = 5 + n + 2m, #ARGV = 4 + m + 9n
-  assert.equal(x.keys.length, 5 + 4 + 2 * 2);
-  assert.equal(x.args.length, 4 + 2 + 9 * 4);
+  // #KEYS = 6 + n + 2m, #ARGV = 5 + m + 9n
+  assert.equal(x.keys.length, 6 + 4 + 2 * 2);
+  assert.equal(x.args.length, 5 + 2 + 9 * 4);
 });
 
 test('ST27_NFR003_expireCall은 운영 RedisSeatStore.expire와 같은 KEYS·ARGV를 낸다', () => {

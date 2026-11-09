@@ -6,6 +6,8 @@
 
 /** 좌석 키 이름(docs/data.md §3, redis-seat-store.ts seatKeys와 같은 규칙) */
 export const seatKeys = {
+  ordered: (e) => `s:{event:${e}}:ordered`,
+  paused: (e) => `s:{event:${e}}:paused`,
   bitmap: (e) => `s:{event:${e}}:bitmap`,
   hold: (e, index) => `s:{event:${e}}:hold:${index}`,
   expiry: (e) => `s:{event:${e}}:expiry`,
@@ -160,12 +162,14 @@ export function expireCall(i) {
     ...i.seats.map((s) => seatKeys.hold(e, s.index)),
     ...owners.map((a) => seatKeys.quota(e, a)),
     ...owners.map((a) => seatKeys.rel(e, a)),
+    seatKeys.ordered(e),
   ];
   const args = [
     String(i.reholdWaitMs ?? REHOLD_WAIT_MS),
     seatKeys.section(e, ''),
     String(i.keepUntilMs),
     String(owners.length),
+    '',
     ...owners,
     ...i.seats.flatMap((s) => [
       String(s.index),
