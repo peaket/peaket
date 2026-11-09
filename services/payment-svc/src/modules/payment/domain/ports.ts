@@ -2,6 +2,7 @@
 import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { FailureCategory, PaymentGatewayPort, PgName } from './payment-gateway.js';
+import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 
@@ -126,6 +127,18 @@ export interface PaymentConfirmJobs {
 
   /** 임대만 놓는다(lease_owner·lease_until 비움, 자기 임대 조건). 임대를 잃었으면 false */
   release(job: ConfirmJob): Promise<boolean>;
+}
+
+/** 결제 수단 연결값의 invRef 계산(라벨 키 pay, BUILD_ORDER HOT-145). 값은 로그에 싣지 않는다. 던지지 않는다 */
+export interface PaymentMethodRefs {
+  /** invRef("pay", 값). 라벨 키가 없으면 undefined */
+  ref(value: string): string | undefined;
+}
+
+/** 결제 수단 연결값 지표(inv_ref_missing_total{service, label, reason}). 던지지 않는다 */
+export interface PaymentMethodRefSignals {
+  /** 계산하지 못한 까닭을 1 올린다 */
+  missing(reason: PaymentMethodRefMissingReason): void;
 }
 
 /** 결제사 어댑터 등록부. 이 단계는 시뮬레이터 하나다(토스 PRF-184, 포트원 HOT-140) */

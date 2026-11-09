@@ -207,8 +207,20 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('PRF181_main.ts는 실행기 지표를 서비스 레지스트리에 붙이고 플랫폼 로거로 로그를 잇는다', () => {
     expect(main()).toMatch(/\bnew PromPaymentConfirmSignals\(/);
-    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(4);
+    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(5);
     expect(main()).toMatch(/\bpaymentConfirmLog\(service\.logger\)/);
+  });
+
+  test('P-T50_main.ts는 라벨 키와 연결값 지표를 두 실행기에 넘기고 라벨 키 경고를 로그로 남긴다 [ASVS v5.0.0-16.5.2]', () => {
+    const m = main();
+    expect(m).toMatch(/PayRefKeyRing\.fromEnv\(process\.env\)/);
+    for (const name of ['PaymentConfirmRunner', 'PaymentUnknownResolver']) {
+      const call = new RegExp(`new ${name}\\(\\{([\\s\\S]*?)\\}\\)`).exec(m)![1]!;
+      expect(call, name).toMatch(/\bmethodRefs\b/);
+      expect(call, name).toMatch(/\bmethodRefSignals\b/);
+    }
+    expect(m).toMatch(/methodRefSignals\.register\(service\.metrics\.registry\)/);
+    expect(m).toMatch(/for \(const warning of methodRefWarnings\) service\.logger\.warn/);
   });
 
   test('PRF182_main.ts는 UNKNOWN 조회 실행기에 승인 실행기의 저장소(전용 풀)와 포트 전부를 넘기고 지표·로그를 잇는다', () => {
@@ -245,7 +257,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new PaymentConfirmRunner('), '만들기 < 켜기').toBeLessThan(start);
     expect(m.indexOf('await service.listen()'), 'listen < 켜기').toBeLessThan(start);
     expect(m.lastIndexOf('.register(service.metrics.registry)', start), '지표 붙이기 < 켜기').toBeGreaterThan(-1);
-    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 넷 다 켜기 앞').toHaveLength(4);
+    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 다섯 다 켜기 앞').toHaveLength(5);
   });
 
   test('PRF181_SIGTERM: 준비 상태를 내린 뒤 실행기를 멈추고(돌던 호출을 기다린다), 그 뒤에 서비스와 전용 풀을 닫는다 [ASVS v5.0.0-2.3.3]', () => {

@@ -2407,7 +2407,7 @@ erDiagram
 - 마이그레이션 SQL은 `pnpm --filter @peaket/purchase-svc db:generate`(`scripts/db-generate.mjs`가 `tsconfig.drizzle.json`으로 drizzle-kit을 띄운다. 표 정의가 `@peaket/platform`의 `idempotencyRecordTable`을 가져와, 원본 경로를 읽으면 실패하므로 빌드된 패키지를 읽는다)로 만들고, 파티션·BRIN·트리거처럼 Drizzle 0.45가 나타내지 못하는 문장은 손으로 덧붙인다.
 
 **결제 표 마이그레이션(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0114)**: payment DB의 첫 마이그레이션(`services/payment-svc/migrations/0000_payment.sql`)이 승인 명령 접수의 표를 만든다. 접수 규칙의 정본은 docs/features/payment.md §2 '승인 명령 접수의 첫 구현'이다.
-- `payment`: 위 ERD 칸 그대로이고 `status`는 일곱 값만, `pg`는 셋만(`CHECK`), `amount > 0`, `attempt_no >= 1`, `order_id` 유일(주문당 결제 1건)이다. `payment_method_ref`와 `card_bin`은 함께 있거나 함께 빈다(`CHECK`). `event_id`·`attempt_id`·`pg_payment_ref`·`idempotency_key`·`authenticated_at`·`status_changed_at`은 `NOT NULL`이다(승인 명령이 그 값을 싣고 온다). 표는 나누지 않는다(ADR-0114).
+- `payment`: 위 ERD 칸 그대로이고 `status`는 일곱 값만, `pg`는 셋만(`CHECK`), `amount > 0`, `attempt_no >= 1`, `order_id` 유일(주문당 결제 1건)이다. `payment_method_ref`와 `card_bin`은 함께 있거나 함께 빈다(`CHECK`). 승인 답을 쓰는 트랜잭션에서 승인일 때만 채운다(docs/features/payment.md §2.1 '결제 수단 연결값의 첫 구현', 추천 적용 2026-11-09, BUILD_ORDER HOT-145). `event_id`·`attempt_id`·`pg_payment_ref`·`idempotency_key`·`authenticated_at`·`status_changed_at`은 `NOT NULL`이다(승인 명령이 그 값을 싣고 온다). 표는 나누지 않는다(ADR-0114).
 - `payment_event`: 기본 키 `(payment_id, seq)`, `seq >= 1`, 결제에 외래 키를 건다. 접수의 내부 표시 행(`ACCEPTED`, `exported = false`)이 순번 1이다.
 - `payment_confirm_job`: 위 ERD 칸, 잡기 인덱스 `payment_confirm_job_next_idx (next_attempt_at)`(0003이 채널별 색인으로 바꾼다, 아래 '승인 명령의 결제사 칸'), 결제에 외래 키를 건다. `order_saga_job`과 같은 꼴이고 끝난 명령은 행을 지워 작은 표로 둔다.
 - Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같은 문장을 `0000`에 손으로 덧붙였다(일 파티션은 `ensureOutboxPartitions`가 만든다).

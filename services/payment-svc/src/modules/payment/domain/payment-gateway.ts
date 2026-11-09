@@ -67,9 +67,15 @@ export type ConfirmOutcome = 'APPROVED' | 'ALREADY_APPROVED' | 'IN_PROGRESS' | '
 export const FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'] as const;
 export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
-/** 결제 수단 연결값 계산용 카드 정보(payment §2.1 '결제 수단 연결값'). 가린 번호는 계산에만 쓰고 저장하지 않는다 */
+/**
+ * 결제 수단 연결값 계산용 카드 정보(payment §2.1 '결제 수단 연결값'). 어댑터가 결제사 값을 공통 값으로 맞춰 싣는다.
+ * 가린 번호는 계산에만 쓰고 저장하거나 로그에 쓰지 않는다. 발급사·종류를 모르면 빈 글자다(BUILD_ORDER HOT-145)
+ */
 export interface ConfirmCard {
-  maskedNumber: string;
+  /** 결제사가 준 가린 번호. 없을 수 있다 */
+  maskedNumber?: string;
+  /** BIN(토스는 가린 번호의 앞 6자리, 포트원은 card.bin). 없을 수 있다 */
+  bin?: string;
   issuerCode: string;
   cardType: string;
 }
@@ -104,6 +110,8 @@ export type QueryResult =
       approvedAt?: string;
       /** 결제 수단 분류. 어댑터가 결제사 값을 분류해 싣는다. 모르면 비운다(BUILD_ORDER PRF-182, 코드 리뷰) */
       method?: PayMethodCategory;
+      /** 결제 수단 연결값 계산용 카드 정보(UNKNOWN을 조회로 승인 확정할 때 쓴다, BUILD_ORDER HOT-145) */
+      card?: ConfirmCard;
     }
   | { kind: 'NOT_FOUND' }
   /** throttled는 결제사가 429로 답했을 때만 참이다(pg_throttled_total에 세고 상한은 낮추지 않는다, BUILD_ORDER PRF-183) */

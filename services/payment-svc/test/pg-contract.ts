@@ -3,12 +3,12 @@
 // 토스·포트원은 wbs 2.7.1에서 붙인다(실제 샌드박스는 1일 1회 스모크).
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { CancelResult, CheckoutValues, ConfirmResult, PaymentGatewayPort } from '../src/modules/payment/domain/payment-gateway.js';
+import type { CancelResult, CheckoutValues, ConfirmCard, ConfirmResult, PaymentGatewayPort } from '../src/modules/payment/domain/payment-gateway.js';
 
 export interface PgContractHarness {
   gateway: PaymentGatewayPort;
-  /** 구매자가 결제창 인증을 마친 것. 성공 주소로 받을 결제 참조를 돌려준다 */
-  authenticate(orderId: string, amount: number): Promise<string>;
+  /** 구매자가 결제창 인증을 마친 것. 성공 주소로 받을 결제 참조를 돌려준다. instrument는 시험 카드·결제 수단을 고른다(시뮬레이터 결제창이 받는 값, HOT-145) */
+  authenticate(orderId: string, amount: number, instrument?: PgTestInstrument): Promise<string>;
   /** 다음 승인을 결제사가 한도 초과로 거절한다 */
   declineNextConfirm(): Promise<void>;
   /** 다음 승인을 처리하되 응답을 잃는다(시간 초과와 같다) */
@@ -27,10 +27,20 @@ export interface PgContractHarness {
   /**
    * 결제사에 그 뜻의 전용 코드가 없어 결과가 다른 항목의 기대값(없으면 묶음의 기본값). 항목을 건너뛰지 않고 값만 바꾼다(승인 0건은 그대로 본다, BUILD_ORDER HOT-140).
    * 포트원 공식 스키마의 승인 오류에는 카드 거절·승인 기한 만료 코드가 없고, 취소 답에는 남은 금액 칸이 없다(docs/features/payment.md §2.1 '포트원 어댑터의 첫 구현').
-   * cancelled는 취소 답의 기대값이고, 남은 금액은 이어지는 조회로 그대로 본다
+   * cancelled는 취소 답의 기대값이고, 남은 금액은 이어지는 조회로 그대로 본다. card는 시험 카드가 그 결제사에서 공통 값으로 바뀐 모습이다(기본은 토스 표)
    */
-  expectations?: { declined?: Partial<ConfirmResult>; expired?: Partial<ConfirmResult>; cancelled?: Partial<CancelResult> };
+  expectations?: { declined?: Partial<ConfirmResult>; expired?: Partial<ConfirmResult>; cancelled?: Partial<CancelResult>; card?: ConfirmCard };
 }
+
+/** 시뮬레이터 결제창이 받는 시험 결제 수단(HOT-145) */
+export interface PgTestInstrument {
+  method?: '카드' | '계좌이체' | '가상계좌';
+  card?: { number: string; issuerCode?: string | null; cardType?: string; bin?: string | null } | null;
+}
+
+/** 대응표 항목의 시험 카드와 토스 표의 공통 값 */
+const CONTRACT_CARD = { number: '43301234****123*', issuerCode: '61', cardType: '신용' };
+const CONTRACT_CARD_EXPECTED: ConfirmCard = { maskedNumber: '43301234****123*', bin: '433012', issuerCode: 'HYUNDAI', cardType: 'CREDIT' };
 
 const checkoutOrder = (v: CheckoutValues): { orderRef: string; amount: number } => {
   if ('portone' in v) return { orderRef: v.portone.paymentId, amount: v.portone.totalAmount };
@@ -149,6 +159,15 @@ export function pgAdapterContract(name: string, setup: () => Promise<PgContractH
       expect(a!.dedupKey.length).toBeGreaterThan(0);
       expect(a!.paymentRef).toBe(paymentRef);
       expect(a).not.toHaveProperty('status');
+    });
+
+    it('P-T16_카드 칸 대응표: 시험 카드의 승인 답과 조회 답이 같은 공통 값이다(열한째 항목, HOT-145) [ASVS v5.0.0-2.2.1]', async () => {
+      const orderId = randomUUID();
+      const paymentRef = await h.authenticate(orderId, 10_000, { card: CONTRACT_CARD });
+      const r = await confirm({ orderId, paymentRef, amount: 10_000, idemKey: `confirm-${orderId}` });
+      const expected = h.expectations?.card ?? CONTRACT_CARD_EXPECTED;
+      expect(r).toMatchObject({ outcome: 'APPROVED', card: expected });
+      expect(await h.gateway.query(paymentRef)).toMatchObject({ kind: 'FOUND', status: 'APPROVED', method: 'CARD', card: expected });
     });
   });
 }

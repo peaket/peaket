@@ -518,6 +518,8 @@
 | R-402 | 화면이 쓰는 굿즈 결제·대기열 식별자·읽기 경로가 계약에 없어 화면 단계를 시작할 수 없었다 | docs/api/openapi.yaml, docs/api/guidelines.md, tools/doc-check/check_all.py, packages/contracts, packages/api-client, docs/adr/0238 | 정본 대조 → 영역별 초안 → 합침 검산 → 깨짐 검사 → 새 맥락 리뷰 | 수정 완료 |
 | R-403 | 굿즈 주문 상세의 items 필수 표시가 계약과 생성 Zod에서 달라 CI가 실패했다 | docs/api/openapi.yaml, packages/api-client 생성물 | CI 로그 → 원인 확인 → 고침 → 시험 | 수정 완료 |
 | R-404 | 좌석 연결·재연결·다시 맞추기와 시계가 없고 핸드셰이크 거절이 정본에서 빠져 있었다 | packages/seatmap connection·clock·delta-sync·engine·wire, apps/web seats connection-machine, tools/web-checks/purchase, docs/adr/0240, docs/frontend.md §4.4.1, docs/api/asyncapi.yaml | 정본 대조 → 재현 시험 → 구현 → 세 엔진 PoC → 새 맥락 리뷰 | 수정 완료 |
+| R-407 | 조사에 쓸 결제 수단 연결값이 비어 있었고 계약 시험의 세 어댑터 대조와 실제 결제사 호출 범위가 정해지지 않았다. 만들며 찾은 것: 라벨 키가 없으면 출시 필수 신호가 조용히 빠졌고, 간편결제 카드 칸과 가린 번호 구분자가 값을 잃게 했으며, 결제창 인증이 필요한 항목은 계정 없이 할 수 없다 | docs/features/payment.md §2.1, docs/data.md, docs/observability.md, docs/security/asvs/payment.md, docs/security/secrets-and-keys.md, docs/api/avro/peaket/trade/PaymentEvent.avsc, docs/api/asyncapi.yaml, docs/BUILD_ORDER.md, docs/PROGRESS.md, services/payment-svc(연결값·어댑터·라벨 키), services/pg-simulator, packages/contracts(gen), tools/pg-smoke, .github/workflows | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 12개 → 새 맥락 리뷰 → 고침. 단위 1,903, 통합 238 | 수정 완료 |
+| R-406 | HOT-041 시드 KMS 봉인·drand 서명 검증·RB-35 CLI, OPEN[27] 닫음 | docs/adr/0239, docs/features/queue-admission.md Q-T27, docs/infra.md RB-35, docs/security/threat-model.md, docs/security/secrets-and-keys.md, docs/api/openapi.yaml | 재현 시험 먼저 → 구현 → 새 맥락 리뷰 → 재검토 → 수정 | 수정 완료 |
 
 ## 4. 숫자 일치표
 

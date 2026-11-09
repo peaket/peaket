@@ -16,7 +16,7 @@ interface Sim {
   clock: { now(): number; advance(ms: number): void };
   control(method: string, path: string, body?: unknown): Promise<Response>;
   gateway(o?: Partial<SimulatorGatewayOptions>): SimulatorPaymentGateway;
-  authenticate(orderId: string, amount: number): Promise<string>;
+  authenticate(orderId: string, amount: number, instrument?: Record<string, unknown>): Promise<string>;
 }
 
 async function startSim(): Promise<Sim> {
@@ -36,8 +36,8 @@ async function startSim(): Promise<Sim> {
     clock,
     control,
     gateway: (o = {}) => new SimulatorPaymentGateway({ baseUrl: url, secretKey: key, clientKey: 'sim_ck_test_client', ...o }),
-    async authenticate(orderId, amount) {
-      const r = await control('POST', '/sim/authenticate', { orderId, amount, orderName: '공연 티켓' });
+    async authenticate(orderId, amount, instrument) {
+      const r = await control('POST', '/sim/authenticate', { orderId, amount, orderName: '공연 티켓', ...instrument });
       expect(r.status).toBe(200);
       return ((await r.json()) as { paymentKey: string }).paymentKey;
     },
@@ -49,7 +49,7 @@ pgAdapterContract('시뮬레이터', async (): Promise<PgContractHarness> => {
   const fault = async (f: Record<string, unknown>) => expect((await sim.control('POST', '/sim/faults', { op: 'confirm', times: 1, ...f })).status).toBe(204);
   return {
     gateway: sim.gateway(),
-    authenticate: (orderId, amount) => sim.authenticate(orderId, amount),
+    authenticate: (orderId, amount, instrument) => sim.authenticate(orderId, amount, instrument as Record<string, unknown> | undefined),
     declineNextConfirm: () => fault({ kind: 'decline', code: 'REJECT_CARD_PAYMENT' }),
     dropNextConfirmAfterApply: () => fault({ kind: 'drop', applied: true }),
     delayNextConfirm: (ms) => fault({ kind: 'delay', ms }),
@@ -118,7 +118,7 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     const r = await ready();
     const c = await sim.gateway().confirm(r);
     expect(c).toMatchObject({ outcome: 'APPROVED', paymentRef: r.paymentRef, amount: r.amount, approvedAt: '2026-11-02T10:00:00.000+09:00' });
-    expect(c.card).toMatchObject({ issuerCode: '61', cardType: '신용', maskedNumber: expect.stringMatching(/^43301234\*{4}/) });
+    expect(c.card).toMatchObject({ issuerCode: 'HYUNDAI', cardType: 'CREDIT', bin: '433012', maskedNumber: expect.stringMatching(/^43301234\*{4}/) });
   });
 
   it('PRF181_승인 결과에 결제 수단 분류가 든다(시뮬레이터 method 카드 → CARD, 사건의 payMethodCategory)', async () => {

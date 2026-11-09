@@ -1,7 +1,7 @@
 // UNKNOWN 해소의 순수 규칙(domain/unknown-resolver.ts, docs/features/payment.md §2 'UNKNOWN 해소의 첫 구현', BUILD_ORDER PRF-182, 명세 specs/payment.qnt `query`).
 // 조회 답 → 할 일의 표(모든 상태·금액), 조회 간격과 잡을 때 미는 시간, RESOLVED 사건을 DB 없이 본다.
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { buildPaymentEvent, type PaymentEventMessage, paymentEventKey } from '../src/modules/payment/domain/confirm-runner.js';
 import type { QueryResult, QueryStatus } from '../src/modules/payment/domain/payment-gateway.js';
 import {
@@ -143,6 +143,21 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
     expect(unknownQueryClaimHoldMs(attempts)).toBe(ms);
   });
 
+  test('P-T50_승인 답에 연결값을 함께 싣는다', () => {
+    expect(decideQueryAnswer(found('APPROVED'), LEDGER, NOW, () => ({ kind: 'LINKED', paymentMethodRef: 'k1.abc', cardBin: '433012' }))).toMatchObject({ kind: 'RESOLVE', finish: { status: 'APPROVED', paymentMethodRef: 'k1.abc', cardBin: '433012' } });
+  });
+
+  test('P-T50_계산하지 못한 승인은 refMissing 참이고 두 칸이 없다', () => {
+    expect(decideQueryAnswer(found('APPROVED'), LEDGER, NOW, () => ({ kind: 'MISSING', reason: 'CARD_SHAPE' }))).toEqual({ kind: 'RESOLVE', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: NOW, refMissing: true }, outcome: 'approved' });
+  });
+
+  test('P-T50_리뷰 고침 L4: 승인이 아닌 답과 금액이 어긋난 답은 연결값을 계산하지 않는다', () => {
+    const linkOf = vi.fn(() => ({ kind: 'LINKED', paymentMethodRef: 'k1.abc', cardBin: '433012' }) as const);
+    expect(decideQueryAnswer(found('FAILED'), LEDGER, NOW, linkOf)).toEqual({ kind: 'RESOLVE', finish: { status: 'FAILED', result: 'DECLINED', failureCategory: 'PG_ERROR' }, outcome: 'failed' });
+    expect(decideQueryAnswer(found('APPROVED', { amount: AMOUNT + 1 }), LEDGER, NOW, linkOf)).toEqual({ kind: 'ASK_AGAIN', outcome: 'amount_mismatch', anomaly: 'amount' });
+    expect(linkOf).not.toHaveBeenCalled();
+  });
+
   test('P-T3_리뷰 고침 M6: 시간 한도의 차례는 어댑터 10초 < 실행기 < 잡을 때 민 최소 15초다 [가정]', () => {
     expect(UNKNOWN_QUERY_TIMEOUT_MS).toBe(10_000);
     expect(UNKNOWN_QUERY_GUARD_MS).toBeGreaterThan(UNKNOWN_QUERY_TIMEOUT_MS);
@@ -182,6 +197,23 @@ describe('buildResolvedEvent', () => {
     const e = buildResolvedEvent(PAYMENT_ID, approved, 5, NOW);
     expect(e).toMatchObject({ type: 'RESOLVED', result: 'APPROVED', eventSeq: 5, eventKey: paymentEventKey(PAYMENT_ID, 5), eventId: EVENT_ID, orderId: ORDER_ID, amount: AMOUNT, occurredAt: new Date(NOW).toISOString() });
     expect(PaymentEvent.safeParse(e).success, JSON.stringify(e)).toBe(true);
+  });
+
+  test('P-T50_승인 해소 기록에 결과 사건과 같은 연결값 두 칸을 싣는다', () => {
+    const linked = buildPaymentEvent({ target, finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: APPROVED_AT_MS, paymentMethodRef: 'k1.abc', cardBin: '433012' }, seq: 4, nowMs: NOW });
+    const e = buildResolvedEvent(PAYMENT_ID, linked, 5, NOW);
+    expect(e).toMatchObject({ type: 'RESOLVED', paymentMethodRef: 'k1.abc', cardBin: '433012', refMissing: false });
+    expect(PaymentEvent.safeParse(e).success, JSON.stringify(e)).toBe(true);
+    const keys = Object.keys(e);
+    expect(keys).toEqual(Object.keys(PaymentEvent.shape).filter((k) => keys.includes(k)));
+  });
+
+  test('P-T50_계산하지 못한 승인의 해소 기록은 refMissing이 그대로다', () => {
+    const missing = buildPaymentEvent({ target, finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: APPROVED_AT_MS, refMissing: true }, seq: 4, nowMs: NOW });
+    const e = buildResolvedEvent(PAYMENT_ID, missing, 5, NOW);
+    expect(e.refMissing).toBe(true);
+    expect(e).not.toHaveProperty('paymentMethodRef');
+    expect(e).not.toHaveProperty('cardBin');
   });
 
   test('P-T3_실패 해소 기록은 실패 범주를 싣지 않는다(FAILED 사건에만 싣는 칸이다) [ASVS v5.0.0-16.2.5]', () => {

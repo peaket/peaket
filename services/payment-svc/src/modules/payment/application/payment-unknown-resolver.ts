@@ -20,9 +20,10 @@
 // - 빈자리는 어댑터가 있는 채널끼리 나눈다(앞 채널이 뒤 채널을 굶기지 않게). 어댑터가 없는 채널은 그 뒤 남은 자리로 잡아 no_adapter로 드러낸다(운영에는 그런 행이 없다). 틱은 채널마다 독립이다(한 채널의 느린 잡기가 다른 채널을 막지 않는다).
 import { AsyncResource } from 'node:async_hooks';
 import type { Clock } from '@peaket/platform';
-import type { PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
+import type { ConfirmCard, PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
+import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
-import type { PaymentGateways, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
+import type { PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
 import {
   decideQueryAnswer,
   type PaymentUnknownQueryOutcome,
@@ -65,6 +66,9 @@ export interface PaymentUnknownResolverDeps {
   concurrency?: number;
   /** 실행기가 조회를 감싸는 한도(기본 UNKNOWN_QUERY_GUARD_MS 12초 [가정]) */
   queryGuardMs?: number;
+  /** 결제 수단 연결값(라벨 키 pay, BUILD_ORDER HOT-145). 없으면 카드 결제는 refMissing 참이다 */
+  methodRefs?: PaymentMethodRefs;
+  methodRefSignals?: PaymentMethodRefSignals;
 }
 
 /** 틱 하나의 결과 */
@@ -344,13 +348,19 @@ export class PaymentUnknownResolver {
     const answer = await this.#query(gateway, job);
     // 조회의 429는 그 조회의 다음 시도만 늦추고 상한은 그대로다(지표로만 센다)
     if (answer.kind === 'UNKNOWN' && answer.throttled === true) guard.noteThrottled({ first: false });
-    const decision = decideQueryAnswer(answer, job, this.deps.clock.now());
+    const card = answer.kind === 'FOUND' ? answer.card : undefined;
+    const decision = decideQueryAnswer(answer, job, this.deps.clock.now(), () => this.#linkOf(card));
     if (decision.kind === 'ASK_AGAIN') {
       await this.#reportAnomaly(job, decision);
       await this.#reschedule(job);
       return this.#askedAgain(job, decision.outcome);
     }
     return this.#resolve(job, decision);
+  }
+
+  /** 주문·금액 대조를 통과한 승인 답의 결제 수단 연결값(가린 번호를 넘기지 않는다. 던지지 않는다) */
+  #linkOf(card: ConfirmCard | undefined): PaymentMethodLink {
+    return paymentMethodLinkOf(card, this.deps.methodRefs, (reason) => this.#safe(() => this.deps.methodRefSignals?.missing(reason)));
   }
 
   /** 답을 본 시각 + 실제 간격을 쓴다(잡을 때 민 더 긴 시각을 줄인다). 던지지 않는다 */

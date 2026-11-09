@@ -79,8 +79,8 @@ async function startHarness(): Promise<PgContractHarness> {
   const tokens = new Map<string, string>();
   return {
     gateway: new PortoneGateway({ baseUrl: url, secret: key, storeId: 'store-sim', channelKey: 'channel-sim', webhookSecrets: [webhook], isTest: true, clock }),
-    async authenticate(orderId, amount) {
-      const r = await control('POST', '/sim/portone/authenticate', { orderId, amount, orderName: '공연 티켓' });
+    async authenticate(orderId, amount, instrument) {
+      const r = await control('POST', '/sim/portone/authenticate', { orderId, amount, orderName: '공연 티켓', ...instrument });
       expect(r.status).toBe(200);
       const { paymentId, paymentToken } = (await r.json()) as { paymentId: string; paymentToken: string };
       tokens.set(paymentId, paymentToken);
@@ -88,7 +88,8 @@ async function startHarness(): Promise<PgContractHarness> {
     },
     confirmTokenOf: (paymentRef) => tokens.get(paymentRef)!,
     // 공식 스키마에 전용 코드가 없다: 카드 거절은 502 PG_PROVIDER(UNKNOWN, 단독 조회가 정한다), 기한이 지난 토큰은 INVALID_PAYMENT_TOKEN(VALIDATION)이다. 취소 답에는 남은 금액 칸이 없다(이어지는 조회로 본다)
-    expectations: { declined: { outcome: 'UNKNOWN' }, expired: { outcome: 'DECLINED', failureCategory: 'VALIDATION' }, cancelled: { outcome: 'CANCELLED' } },
+    // 포트원 issuer는 공식 스키마에 값 목록이 없어 표로 바꾸지 않는다(시뮬레이터가 보낸 값 그대로다). bin은 시뮬레이터가 가린 번호의 앞 8자리로 보낸다
+    expectations: { declined: { outcome: 'UNKNOWN' }, expired: { outcome: 'DECLINED', failureCategory: 'VALIDATION' }, cancelled: { outcome: 'CANCELLED' }, card: { maskedNumber: '43301234****123*', bin: '43301234', issuerCode: '61', cardType: 'CREDIT' } },
     declineNextConfirm: () => fault({ kind: 'decline', code: 'PG_PROVIDER' }),
     dropNextConfirmAfterApply: () => fault({ kind: 'drop', applied: true }),
     delayNextConfirm: (ms) => fault({ kind: 'delay', ms }),

@@ -30,6 +30,7 @@ import {
   type QueryStatus,
   type WebhookTrigger,
 } from '../../domain/payment-gateway.js';
+import { tossCardOf } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
 
 export interface TossShapedOptions {
@@ -178,7 +179,8 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     if (r.status !== 200 || !status || amount === undefined || balanceAmount === undefined || !orderRef) return { kind: 'UNKNOWN' };
     const approvedAt = str(r.json?.approvedAt);
     const method = METHOD_CATEGORY.get(str(r.json?.method) ?? '');
-    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}) };
+    const card = tossCardOf(r.json?.card);
+    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}), ...(card ? { card } : {}) };
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult> {
@@ -222,14 +224,13 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
   }
 
   #approvedFields(paymentRef: string, json: Record<string, unknown>): Omit<ConfirmResult, 'outcome'> {
-    const card = json.card as Record<string, unknown> | null | undefined;
-    const maskedNumber = str(card?.number);
+    const card = tossCardOf(json.card);
     const method = METHOD_CATEGORY.get(str(json.method) ?? '');
     return {
       paymentRef,
       amount: num(json.totalAmount),
       approvedAt: str(json.approvedAt),
-      ...(card && maskedNumber ? { card: { maskedNumber, issuerCode: str(card.issuerCode) ?? '', cardType: str(card.cardType) ?? '' } } : {}),
+      ...(card ? { card } : {}),
       ...(method ? { method } : {}),
     };
   }

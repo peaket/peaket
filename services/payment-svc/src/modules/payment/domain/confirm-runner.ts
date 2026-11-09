@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { PaymentLedgerStatus } from './confirm-command.js';
 import type { ConfirmResult, FailureCategory, PayMethodCategory, PgName } from './payment-gateway.js';
+import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
 
 /** 잡기 주기 100ms [가정] */
 export const CONFIRM_RUNNER_POLL_INTERVAL_MS = 100;
@@ -114,6 +115,11 @@ export type ConfirmFinish =
       readonly approvedAtMs: number;
       readonly payMethodCategory?: PayMethodCategory;
       readonly latencyMs?: number;
+      /** 결제 수단 연결값(cardBin과 늘 함께, BUILD_ORDER HOT-145) */
+      readonly paymentMethodRef?: string;
+      readonly cardBin?: string;
+      /** 카드 정보가 있는데 연결값을 계산하지 못했다 */
+      readonly refMissing?: true;
     }
   | {
       readonly status: 'FAILED';
@@ -143,7 +149,10 @@ export interface PaymentEventMessage {
   readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'UNKNOWN' | 'RESOLVED';
   readonly amount: number;
   readonly payMethodCategory?: PayMethodCategory;
-  /** 결제 수단 연결값·라벨 키가 이 단계에 없어 늘 true(카드 BIN도 저장하지 않는다, BUILD_ORDER HOT-145) */
+  /** 결제 수단 연결값(cardBin과 늘 함께 있거나 함께 빈다, BUILD_ORDER HOT-145) */
+  readonly paymentMethodRef?: string;
+  readonly cardBin?: string;
+  /** 카드 정보가 있는데 연결값을 계산하지 못했으면 true(카드 아닌 결제와 승인이 아닌 사건은 false) */
   readonly refMissing: boolean;
   readonly result?: ConfirmFinish['result'];
   /** FAILED일 때만 */
@@ -218,8 +227,9 @@ export function confirmGateOf(target: ConfirmTarget, job: Pick<ConfirmJob, 'hadP
  * @param nowMs 지금(epoch ms). 답의 approvedAt이 없거나 읽지 못하면 approvedAtMs가 이 값이다
  * @param latencyMs 결제사 호출에 걸린 시간(ms). 있으면 finish에 그대로 싣는다
  * @param resend 이미 CONFIRM_SENT가 있는 명령을 다시 보낸 호출의 답인가
+ * @param linkOf 답의 카드 칸으로 결제 수단 연결값을 계산한다. 금액 대조를 통과해 승인으로 끝날 때만 부른다(어긋난 답은 계산하지 않는다, BUILD_ORDER HOT-145 코드 리뷰)
  */
-export function decideConfirmAnswer(answer: ConfirmResult, ledgerAmount: number, nowMs: number, latencyMs?: number, resend = false): ConfirmDecision {
+export function decideConfirmAnswer(answer: ConfirmResult, ledgerAmount: number, nowMs: number, latencyMs?: number, resend = false, linkOf?: () => PaymentMethodLink): ConfirmDecision {
   const extra = {
     ...(answer.method === undefined ? {} : { payMethodCategory: answer.method }),
     ...(latencyMs === undefined ? {} : { latencyMs }),
@@ -232,7 +242,7 @@ export function decideConfirmAnswer(answer: ConfirmResult, ledgerAmount: number,
       const parsed = answer.approvedAt === undefined ? Number.NaN : Date.parse(answer.approvedAt);
       return {
         kind: 'FINISH',
-        finish: { status: 'APPROVED', result: answer.outcome, approvedAtMs: Number.isNaN(parsed) ? nowMs : parsed, ...extra },
+        finish: { status: 'APPROVED', result: answer.outcome, approvedAtMs: Number.isNaN(parsed) ? nowMs : parsed, ...extra, ...linkFinishFields(linkOf?.()) },
         outcome: answer.outcome === 'APPROVED' ? 'approved' : 'already',
       };
     }
@@ -280,8 +290,8 @@ export function paymentEventKey(paymentId: string, seq: number): string {
 
 /**
  * 원장 결과 → trade.payments 값(asyncapi PaymentEvent. 칸 차례는 계약과 같다).
- * type = finish.status, eventKey = paymentEventKey(paymentId, seq), refMissing = true,
- * occurredAt = APPROVED면 approvedAtMs, 아니면 nowMs. result·failureCategory·latencyMs·payMethodCategory는 값이 있을 때만 싣는다.
+ * type = finish.status, eventKey = paymentEventKey(paymentId, seq), refMissing = 승인인데 연결값을 계산하지 못했을 때만 참,
+ * occurredAt = APPROVED면 approvedAtMs, 아니면 nowMs. result·failureCategory·latencyMs·payMethodCategory·paymentMethodRef·cardBin은 값이 있을 때만 싣는다.
  * @throws RangeError 시각이 날짜 범위 밖, seq가 틀림
  */
 export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventMessage {
@@ -297,7 +307,8 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventMe
     type: finish.status,
     amount: target.amount,
     ...(finish.payMethodCategory === undefined ? {} : { payMethodCategory: finish.payMethodCategory }),
-    refMissing: true,
+    ...(finish.status === 'APPROVED' && finish.paymentMethodRef !== undefined ? { paymentMethodRef: finish.paymentMethodRef, cardBin: finish.cardBin } : {}),
+    refMissing: finish.status === 'APPROVED' && finish.refMissing === true,
     ...(finish.result === undefined ? {} : { result: finish.result }),
     ...(finish.status === 'FAILED' ? { failureCategory: finish.failureCategory } : {}),
     attemptNo: target.attemptNo,

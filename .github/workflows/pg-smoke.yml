@@ -1,0 +1,29 @@
+# 토스 공개 시험 키 스모크(docs/features/payment.md §2.1 '계약 시험과 실제 결제사 호출의 몫', P-T16, BUILD_ORDER HOT-145).
+# 저장소 변수 PEAKET_PG_SMOKE_ENABLED가 'true'일 때만 돈다. 변수를 켰는데 키(저장소 시크릿 TOSS_DOCS_TEST_SECRET_KEY)가 없으면 스크립트가 실패로 끝난다(변수·시크릿 등록은 소유자 몫).
+# 실패하면 응답 모양이 공식 문서와 달라진 것이므로 대응표와 정본을 다시 본다. 예약 실행 실패 알림은 이 파일의 cron 줄을 마지막으로 고친 사용자에게 간다.
+name: pg-smoke
+
+on:
+  schedule:
+    - cron: '30 18 * * *' # 매일 03:30 KST [가정]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  toss:
+    if: ${{ vars.PEAKET_PG_SMOKE_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node tools/pg-smoke/toss-smoke.mjs
+        env:
+          PEAKET_PG_SMOKE_ENABLED: ${{ vars.PEAKET_PG_SMOKE_ENABLED }}
+          TOSS_DOCS_TEST_SECRET_KEY: ${{ secrets.TOSS_DOCS_TEST_SECRET_KEY }}

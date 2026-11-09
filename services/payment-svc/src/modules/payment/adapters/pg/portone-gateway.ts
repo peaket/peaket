@@ -17,7 +17,6 @@ import {
   type CheckoutAttempt,
   type CheckoutOrder,
   type CheckoutValues,
-  type ConfirmCard,
   type ConfirmResult,
   type FailureCategory,
   type HeaderBag,
@@ -29,6 +28,7 @@ import {
   type QueryStatus,
   type WebhookTrigger,
 } from '../../domain/payment-gateway.js';
+import { portoneCardOfMethod } from './card-fields.js';
 import { num, pgRequest, str, type PgReply } from './pg-reply.js';
 
 export interface PortoneGatewayOptions {
@@ -131,7 +131,7 @@ const CANCEL_REJECTED = new Set([
 /** 조회를 부를 결제 사건. 그 밖의 사건은 null로 무시한다(payment §5) */
 const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountIssued', 'Transaction.PartialCancelled', 'Transaction.Cancelled', 'Transaction.Failed', 'Transaction.PayPending', 'Transaction.CancelPending']);
 
-type Found = Extract<QueryResult, { kind: 'FOUND' }> & { card?: ConfirmCard };
+type Found = Extract<QueryResult, { kind: 'FOUND' }>;
 
 const unknownQuery: QueryResult = { kind: 'UNKNOWN' };
 
@@ -251,10 +251,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     // 결제사의 정해진 코드일 때만 없음이다. 그 밖의 404는 중간 장비의 답일 수 있다
     if (r.status === 404) return str(r.json?.type) === NOT_FOUND_PAYMENT ? { kind: 'NOT_FOUND' } : unknownQuery;
     if (r.status !== 200) return unknownQuery;
-    const found = this.#foundOf(paymentRef, r.json, options?.expectedTxId);
-    if (!found) return unknownQuery;
-    const { card: _card, ...result } = found;
-    return result;
+    return this.#foundOf(paymentRef, r.json, options?.expectedTxId) ?? unknownQuery;
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult> {
@@ -343,8 +340,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     const approvedAt = str(json?.paidAt);
     const paymentMethod = json?.method as Record<string, unknown> | undefined;
     const method = METHOD_CATEGORY.get(str(paymentMethod?.type) ?? '');
-    const card = paymentMethod?.card as Record<string, unknown> | undefined;
-    const maskedNumber = str(card?.number);
+    const card = portoneCardOfMethod(paymentMethod);
     return {
       kind: 'FOUND',
       paymentRef,
@@ -354,7 +350,7 @@ export class PortoneGateway implements PaymentGatewayPort {
       balanceAmount: paid - cancelled,
       ...(approvedAt ? { approvedAt } : {}),
       ...(method ? { method } : {}),
-      ...(card && maskedNumber ? { card: { maskedNumber, issuerCode: str(card.issuer) ?? '', cardType: str(card.type) ?? '' } } : {}),
+      ...(card ? { card } : {}),
     };
   }
 

@@ -26,6 +26,7 @@ import {
   paymentServiceHandlers,
   PaymentUnknownResolver,
   paymentUnknownLog,
+  PayRefKeyRing,
   perPodBulkhead,
   PG_CHANNEL_BULKHEAD,
   PgCallGuards,
@@ -33,6 +34,7 @@ import {
   PortoneGateway,
   PromPaymentCommandSignals,
   PromPaymentConfirmSignals,
+  PromPaymentMethodRefSignals,
   PromPaymentUnknownSignals,
   PromPgCallGuardSignals,
   StaticPaymentGateways,
@@ -49,6 +51,8 @@ const toss = loadTossGatewayConfig(process.env);
 const portone = loadPortoneGatewayConfig(process.env);
 assertPgAdapters(process.env, { simulator: simulator !== undefined, toss: toss !== undefined });
 const guardConfig = loadPgCallGuardConfig(process.env);
+// 결제 수단 연결값의 라벨 키 pay. 없으면 경고만 하고 칸을 비운다(결제는 막지 않는다, BUILD_ORDER HOT-145). 잘못된 설정은 듣기 전에 시작 실패다
+const { ring: methodRefs, warnings: methodRefWarnings } = PayRefKeyRing.fromEnv(process.env);
 // 어댑터마다 승인 묶음(연결 수 = 처음의 파드당 벌크헤드)과 조회 전용 묶음(연결 수 = 파드의 동시 조회 수) 둘. 승인 호출이 연결을 다 쥐어도 조회가 막히지 않는다. 연결 시간 초과 3초 [가정]. v0 모놀리스는 이 옵션을 쓰지 않는다(BUILD_ORDER PRF-183)
 const pgHttp = simulator ? createPgHttp({ connections: perPodBulkhead(PG_CHANNEL_BULKHEAD.SIMULATOR, guardConfig.podCount) }) : undefined;
 const pgQueryHttp = simulator ? createPgHttp({ connections: UNKNOWN_QUERY_CONCURRENCY }) : undefined;
@@ -70,6 +74,7 @@ const signals = new PromPaymentCommandSignals();
 const confirmSignals = new PromPaymentConfirmSignals();
 const unknownSignals = new PromPaymentUnknownSignals();
 const guardSignals = new PromPgCallGuardSignals();
+const methodRefSignals = new PromPaymentMethodRefSignals();
 
 // 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC 포트는 그 뒤에 열려 그 전에 불리지 않는다)
 let log: PaymentCommandLog | undefined;
@@ -81,6 +86,8 @@ signals.register(service.metrics.registry);
 confirmSignals.register(service.metrics.registry);
 unknownSignals.register(service.metrics.registry);
 guardSignals.register(service.metrics.registry);
+methodRefSignals.register(service.metrics.registry);
+for (const warning of methodRefWarnings) service.logger.warn({ kind: 'payment-method-ref-key' }, warning);
 service.readiness.register('grpc');
 if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
@@ -106,9 +113,9 @@ const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: s
 const podId = process.env.PEAKET_POD?.trim() || hostname();
 // 채널별 호출 보호기는 두 실행기가 하나를 함께 쓴다(토큰 버킷은 승인과 단독 조회를 함께 센다, BUILD_ORDER PRF-183)
 const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger) });
-const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId });
+const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals });
 confirmRunner.start();
-const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock });
+const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals });
 unknownResolver.start();
 
 process.once('SIGTERM', () => {

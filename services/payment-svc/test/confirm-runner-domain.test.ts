@@ -3,7 +3,7 @@
 // 실행기가 이 규칙을 어떻게 잇는지는 payment-confirm-runner.test.ts, 실제 PostgreSQL·시뮬레이터로 도는 것은 test-int가 본다.
 import { createHash } from 'node:crypto';
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { PaymentLedgerStatus } from '../src/modules/payment/domain/confirm-command.js';
 import {
   buildPaymentEvent,
@@ -251,6 +251,36 @@ describe('decideConfirmAnswer: 결제사 답 → 할 일', () => {
     expect(decision).toEqual({ kind: 'FINISH', outcome: 'approved', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: NOW } });
     expect(JSON.stringify(decision)).not.toMatch(/PG_RAW_CODE|12345678|tgen_/);
   });
+
+  test.each(['APPROVED', 'ALREADY_APPROVED'] as const)('P-T50_%s 답에 연결값을 함께 싣는다', (outcome) => {
+    const decision = decideConfirmAnswer(answer({ outcome, amount: AMOUNT }), AMOUNT, NOW, undefined, false, () => ({ kind: 'LINKED', paymentMethodRef: 'k1.abc', cardBin: '433012' }));
+    expect(decision).toMatchObject({ kind: 'FINISH', finish: { status: 'APPROVED', paymentMethodRef: 'k1.abc', cardBin: '433012' } });
+    expect(decision).not.toMatchObject({ finish: { refMissing: true } });
+  });
+
+  test('P-T50_계산하지 못한 승인은 refMissing 참이고 두 칸이 없다', () => {
+    const decision = decideConfirmAnswer(answer({ outcome: 'APPROVED', amount: AMOUNT }), AMOUNT, NOW, undefined, false, () => ({ kind: 'MISSING', reason: 'NO_KEY' }));
+    expect(decision).toEqual({ kind: 'FINISH', outcome: 'approved', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: NOW, refMissing: true } });
+  });
+
+  test('P-T50_카드 아닌 승인(NONE)은 두 칸도 refMissing도 없다', () => {
+    const decision = decideConfirmAnswer(answer({ outcome: 'APPROVED', amount: AMOUNT }), AMOUNT, NOW, undefined, false, () => ({ kind: 'NONE' }));
+    expect(decision).toEqual({ kind: 'FINISH', outcome: 'approved', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: NOW } });
+  });
+
+  test('P-T50_리뷰 고침 L4: 금액이 어긋나 UNKNOWN이 되는 승인은 연결값을 계산하지 않는다(뒤의 조회가 계산한다) [ASVS v5.0.0-16.5.3]', () => {
+    const linkOf = vi.fn(() => ({ kind: 'LINKED', paymentMethodRef: 'k1.abc', cardBin: '433012' }) as const);
+    const decision = decideConfirmAnswer(answer({ outcome: 'APPROVED', amount: AMOUNT + 1 }), AMOUNT, NOW, undefined, false, linkOf);
+    expect(decision).toEqual({ kind: 'FINISH', outcome: 'unknown', amountMismatch: true, finish: { status: 'UNKNOWN', result: 'UNKNOWN' } });
+    expect(linkOf).not.toHaveBeenCalled();
+  });
+
+  test('P-T50_리뷰 고침 L4: 승인이 아닌 답은 연결값을 계산하지 않는다', () => {
+    const linkOf = vi.fn(() => ({ kind: 'LINKED', paymentMethodRef: 'k1.abc', cardBin: '433012' }) as const);
+    expect(decideConfirmAnswer(answer({ outcome: 'DECLINED', failureCategory: 'CARD_DECLINED' }), AMOUNT, NOW, undefined, false, linkOf)).toEqual({ kind: 'FINISH', outcome: 'declined', finish: { status: 'FAILED', result: 'DECLINED', failureCategory: 'CARD_DECLINED' } });
+    expect(decideConfirmAnswer(answer({ outcome: 'WAITING_FOR_DEPOSIT' }), AMOUNT, NOW, undefined, false, linkOf)).toEqual({ kind: 'FINISH', outcome: 'waiting', finish: { status: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT' } });
+    expect(linkOf).not.toHaveBeenCalled();
+  });
 });
 
 describe('confirmRetryDelayMs: 처리 중 재전송 간격', () => {
@@ -324,7 +354,7 @@ describe('buildPaymentEvent: trade.payments 값(asyncapi PaymentEvent)', () => {
       type: 'APPROVED',
       amount: AMOUNT,
       payMethodCategory: 'CARD',
-      refMissing: true,
+      refMissing: false,
       result: 'APPROVED',
       attemptNo: 2,
       latencyMs: 321,
@@ -369,7 +399,7 @@ describe('buildPaymentEvent: trade.payments 값(asyncapi PaymentEvent)', () => {
   test.each(finishes)('PRF181_%s 사건이 asyncapi zod를 통과한다', (_name, finish) => {
     const msg = build(finish);
     const parsed = PaymentEvent.parse(msg);
-    expect(parsed.refMissing).toBe(true);
+    expect(parsed.refMissing).toBe(false);
     expect(parsed.type).toBe(finish.status);
     expect(parsed.eventKey).toBe(paymentEventKey(PAYMENT_ID, 4));
   });
@@ -379,8 +409,28 @@ describe('buildPaymentEvent: trade.payments 값(asyncapi PaymentEvent)', () => {
     expect(keys).toEqual(Object.keys(PaymentEvent.shape).filter((k) => keys.includes(k)));
   });
 
-  test('PRF181_refMissing은 늘 참이다(결제 수단 연결값은 HOT-145 몫이다)', () => {
-    for (const [name, finish] of finishes) expect(build(finish).refMissing, name).toBe(true);
+  test('P-T50_연결값이 없는 사건의 refMissing은 거짓이고 두 칸이 없다(HOT-145: 계산하지 못했을 때만 참이다)', () => {
+    for (const [name, finish] of finishes) {
+      const e = build(finish);
+      expect(e.refMissing, name).toBe(false);
+      expect(e, name).not.toHaveProperty('paymentMethodRef');
+      expect(e, name).not.toHaveProperty('cardBin');
+    }
+  });
+
+  test('P-T50_승인 사건에 연결값 두 칸을 함께 싣는다(칸 차례는 계약과 같다)', () => {
+    const e = build({ status: 'APPROVED', result: 'APPROVED', approvedAtMs: APPROVED_AT_MS, payMethodCategory: 'CARD', paymentMethodRef: 'k1.abc', cardBin: '433012' });
+    expect(e).toMatchObject({ paymentMethodRef: 'k1.abc', cardBin: '433012', refMissing: false });
+    expect(PaymentEvent.parse(e).cardBin).toBe('433012');
+    const keys = Object.keys(e);
+    expect(keys).toEqual(Object.keys(PaymentEvent.shape).filter((k) => keys.includes(k)));
+  });
+
+  test('P-T50_계산하지 못한 승인 사건은 refMissing 참이고 두 칸이 없다', () => {
+    const e = build({ status: 'APPROVED', result: 'APPROVED', approvedAtMs: APPROVED_AT_MS, refMissing: true });
+    expect(e.refMissing).toBe(true);
+    expect(e).not.toHaveProperty('paymentMethodRef');
+    expect(e).not.toHaveProperty('cardBin');
   });
 
   test('PRF181_사건에 결제사 결제 참조·결제 키를 싣지 않는다(ADR-0053) [ASVS v5.0.0-16.2.5]', () => {

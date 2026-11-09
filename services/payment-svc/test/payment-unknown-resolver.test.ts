@@ -458,6 +458,32 @@ describe('runJob', () => {
   });
 });
 
+describe('결제 수단 연결값 리뷰 고침(BUILD_ORDER HOT-145 코드 리뷰)', () => {
+  const BAD_CARD = { maskedNumber: 'not-a-card', bin: 'abcdef', issuerCode: '', cardType: '' };
+  const withRefs = () => {
+    const missing: string[] = [];
+    return { missing, f: setup({ methodRefs: { ref: () => 'k1.value' }, methodRefSignals: { missing: (reason) => missing.push(reason) } }) };
+  };
+
+  test.each<[string, Parameters<typeof approved>[0]]>([
+    ['금액이 어긋난 답', { amount: AMOUNT + 1 }],
+    ['주문이 어긋난 답', { orderRef: uuidAt(999) }],
+  ])('P-T50_리뷰 고침 L4: %s은 다시 물을 때마다 연결값을 계산하지 않아 지표가 늘지 않는다', async (_n, over) => {
+    const { f, missing } = withRefs();
+    f.gateway.fallback = () => approved({ ...over, card: BAD_CARD });
+    await f.resolver.runJob(job());
+    await f.resolver.runJob(job({ queryAttempts: 2, anomalyLogged: true }));
+    expect(missing).toEqual([]);
+  });
+
+  test('P-T50_리뷰 고침 L4: 승인으로 확정하는 답은 연결값을 계산해 모양 오류를 한 번 센다', async () => {
+    const { f, missing } = withRefs();
+    f.gateway.fallback = () => approved({ card: BAD_CARD });
+    await expect(f.resolver.runJob(job())).resolves.toMatchObject({ kind: 'RESOLVED', status: 'APPROVED' });
+    expect(missing).toEqual(['CARD_SHAPE']);
+  });
+});
+
 describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
   const answers: [string, 'amountMismatch' | 'orderMismatch' | 'cancelledAtPg', () => QueryResult][] = [
     ['금액 어긋남', 'amountMismatch', () => approved({ amount: AMOUNT + 1 })],

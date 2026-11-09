@@ -67,6 +67,24 @@ interface Payment {
   /** 포트원 모양 결제의 결제 토큰과 결제 시도 ID(결제창 인증이 준다) */
   portoneToken?: string;
   txId?: string;
+  /** 결제창에서 고른 결제 수단(없으면 카드) */
+  method?: SimPayMethod;
+  /** 결제창에서 고른 시험 카드. null이면 카드 정보가 없다(없으면 합성 카드) */
+  testCard?: SimTestCard | null;
+}
+
+/** 시험이 고르는 결제 수단(BUILD_ORDER HOT-145) */
+export const SIM_PAY_METHODS = ['카드', '계좌이체', '가상계좌'] as const;
+export type SimPayMethod = (typeof SIM_PAY_METHODS)[number];
+
+/** 시험이 고르는 카드(BUILD_ORDER HOT-145). 번호는 합성 값이다 */
+export interface SimTestCard {
+  number: string;
+  /** null이면 발급사 칸을 뺀다(포트원 모양) */
+  issuerCode?: string | null;
+  cardType?: string;
+  /** 포트원 모양의 bin. 없으면 번호의 앞 8자리, null이면 뺀다 */
+  bin?: string | null;
 }
 
 interface IdemEntry {
@@ -98,6 +116,13 @@ export interface EngineOptions {
 
 const err = (status: number, code: string, message: string): SimResponse => ({ status, body: { code, message } });
 const APPROVED: ReadonlySet<PaymentStatus> = new Set(['DONE', 'PARTIAL_CANCELED', 'CANCELED']);
+/** 결제창 인증이 받는 시험 결제 수단 */
+export interface SimInstrument {
+  method?: SimPayMethod;
+  card?: SimTestCard | null;
+}
+const instrumentOf = (a: SimInstrument): Pick<Payment, 'method' | 'testCard'> => ({ ...(a.method === undefined ? {} : { method: a.method }), ...(a.card === undefined ? {} : { testCard: a.card }) });
+
 /** 다시 보내면 결과가 달라질 수 있어 멱등 기록에 남기지 않는 응답 */
 const transient = (r: SimResponse) => r.drop === true || r.status >= 500 || r.status === 409 || r.status === 429 || (r.body as { code?: string } | undefined)?.code === 'ALREADY_PROCESSING_REQUEST';
 
@@ -144,7 +169,7 @@ export class PgSimulatorEngine {
   }
 
   /** 구매자가 결제창에서 인증을 마친 것을 흉내 낸다. 성공 주소가 받을 값(paymentKey·orderId·amount)을 준다 */
-  authenticate(a: { orderId: string; amount: number; orderName?: string }): SimResponse {
+  authenticate(a: { orderId: string; amount: number; orderName?: string } & SimInstrument): SimResponse {
     if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
     if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
     const serial = ++this.serial;
@@ -159,12 +184,13 @@ export class PgSimulatorEngine {
       balance: a.amount,
       cancels: [],
       serial,
+      ...instrumentOf(a),
     });
     return { status: 200, body: { paymentKey, orderId: a.orderId, amount: a.amount } };
   }
 
   /** 포트원 모양 결제창 인증. 결제 ID는 pay-{주문 ID}이고 같은 주문을 다시 인증하면 앞 시도를 대체한다(성공은 한 번). 승인된 주문은 다시 인증할 수 없다 */
-  authenticatePortone(a: { orderId: string; amount: number; orderName?: string }): SimResponse {
+  authenticatePortone(a: { orderId: string; amount: number; orderName?: string } & SimInstrument): SimResponse {
     if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
     if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
     const paymentKey = `pay-${a.orderId}`;
@@ -183,6 +209,7 @@ export class PgSimulatorEngine {
       serial,
       portoneToken,
       txId,
+      ...instrumentOf(a),
     });
     return { status: 200, body: { paymentId: paymentKey, paymentToken: portoneToken, txId, orderId: a.orderId, amount: a.amount } };
   }
@@ -381,9 +408,27 @@ export class PgSimulatorEngine {
     return `txsim_${randomBytes(10).toString('hex')}`;
   }
 
+  /** Payment.card 모양. 토스에는 bin 칸이 없어 포트원 모양 결제에만 싣는다 */
+  private cardView(p: Payment): Record<string, unknown> {
+    const t = p.testCard;
+    const number = t?.number ?? `43301234****${String(p.serial % 1000).padStart(3, '0')}*`;
+    const bin = t?.bin === undefined ? number.slice(0, 8) : t.bin;
+    return {
+      issuerCode: t?.issuerCode === undefined ? '61' : t.issuerCode,
+      acquirerCode: '31',
+      number,
+      cardType: t?.cardType ?? '신용',
+      ownerType: '개인',
+      approveNo: String(p.serial).padStart(8, '0'),
+      amount: p.amount,
+      ...(p.txId !== undefined && bin !== null ? { bin } : {}),
+    };
+  }
+
   /** 토스페이먼츠 Payment 객체 모양(필요한 칸만). 카드 정보는 합성 값이다 */
   private view(p: Payment): Record<string, unknown> {
     const approved = p.approvedAt !== undefined;
+    const method = p.method ?? '카드';
     return {
       mId: 'peaketsim',
       version: '2022-11-16',
@@ -397,10 +442,8 @@ export class PgSimulatorEngine {
       totalAmount: p.amount,
       balanceAmount: p.balance,
       currency: 'KRW',
-      method: '카드',
-      card: approved
-        ? { issuerCode: '61', acquirerCode: '31', number: `43301234****${String(p.serial % 1000).padStart(3, '0')}*`, cardType: '신용', ownerType: '개인', approveNo: String(p.serial).padStart(8, '0'), amount: p.amount }
-        : null,
+      method,
+      card: approved && method === '카드' && p.testCard !== null ? this.cardView(p) : null,
       cancels: p.cancels.length
         ? p.cancels.map((c) => ({ cancelAmount: c.cancelAmount, cancelReason: c.cancelReason, canceledAt: kstIso(c.canceledAt), transactionKey: c.transactionKey }))
         : null,

@@ -8,6 +8,7 @@
 import type { ConfirmFinish, ConfirmTarget, PaymentEventMessage } from './confirm-runner.js';
 import { paymentEventKey } from './confirm-runner.js';
 import type { QueryResult } from './payment-gateway.js';
+import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
 
 /** 잡기 주기 1초 [가정] */
 export const UNKNOWN_QUERY_POLL_INTERVAL_MS = 1_000;
@@ -96,11 +97,12 @@ const DELAY_EXPONENT_CAP = 5;
  * @param answer 어댑터 query의 답
  * @param ledger 원장의 주문 ID·금액
  * @param nowMs 지금(epoch ms). 답의 승인 시각이 없거나 읽지 못하면 이 값이다
+ * @param linkOf 답의 카드 칸으로 결제 수단 연결값을 계산한다. 주문·금액 대조를 통과해 승인으로 끝날 때만 부른다(어긋난 답은 다시 물을 때마다 계산하지 않는다, BUILD_ORDER HOT-145 코드 리뷰)
  */
-export function decideQueryAnswer(answer: QueryResult, ledger: QueryLedger, nowMs: number): QueryDecision {
+export function decideQueryAnswer(answer: QueryResult, ledger: QueryLedger, nowMs: number, linkOf?: () => PaymentMethodLink): QueryDecision {
   switch (answer.kind) {
     case 'FOUND':
-      return decideFound(answer, ledger, nowMs);
+      return decideFound(answer, ledger, nowMs, linkOf);
     case 'NOT_FOUND':
       return NOT_FOUND;
     default:
@@ -108,7 +110,7 @@ export function decideQueryAnswer(answer: QueryResult, ledger: QueryLedger, nowM
   }
 }
 
-function decideFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: QueryLedger, nowMs: number): QueryDecision {
+function decideFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: QueryLedger, nowMs: number, linkOf: (() => PaymentMethodLink) | undefined): QueryDecision {
   // 다른 주문의 답을 이 주문의 결과로 쓰지 않는다(상태를 보기 전에 본다)
   if (answer.orderRef !== ledger.orderId) return ORDER_MISMATCH;
   const method = answer.method === undefined ? {} : { payMethodCategory: answer.method };
@@ -116,7 +118,7 @@ function decideFound(answer: Extract<QueryResult, { kind: 'FOUND' }>, ledger: Qu
     case 'APPROVED': {
       if (answer.amount !== ledger.amount) return AMOUNT_MISMATCH;
       const parsed = answer.approvedAt === undefined ? Number.NaN : Date.parse(answer.approvedAt);
-      return { kind: 'RESOLVE', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: Number.isNaN(parsed) ? nowMs : parsed, ...method }, outcome: 'approved' };
+      return { kind: 'RESOLVE', finish: { status: 'APPROVED', result: 'APPROVED', approvedAtMs: Number.isNaN(parsed) ? nowMs : parsed, ...method, ...linkFinishFields(linkOf?.()) }, outcome: 'approved' };
     }
     case 'PARTIAL_CANCELED':
     case 'CANCELED':
@@ -159,7 +161,7 @@ export function unknownQueryClaimHoldMs(attempts: number): number {
 
 /**
  * 결과 사건 → RESOLVED 사건(ADR-0073). 해소 결과는 result에 그대로 실린다.
- * type = RESOLVED, eventSeq = seq, eventKey = paymentEventKey(paymentId, seq), occurredAt = nowMs이고, 실패 범주·지연 시간은 싣지 않는다.
+ * type = RESOLVED, eventSeq = seq, eventKey = paymentEventKey(paymentId, seq), occurredAt = nowMs이고, 실패 범주·지연 시간은 싣지 않는다. 결제 수단 연결값은 결과 사건과 같다(BUILD_ORDER HOT-145).
  * @throws RangeError 시각이 날짜 범위 밖, seq가 틀림
  */
 export function buildResolvedEvent(paymentId: string, result: PaymentEventMessage, seq: number, nowMs: number): PaymentEventMessage {
@@ -172,6 +174,7 @@ export function buildResolvedEvent(paymentId: string, result: PaymentEventMessag
     type: RESOLVED_EVENT_TYPE,
     amount: result.amount,
     ...(result.payMethodCategory === undefined ? {} : { payMethodCategory: result.payMethodCategory }),
+    ...(result.paymentMethodRef === undefined ? {} : { paymentMethodRef: result.paymentMethodRef, cardBin: result.cardBin }),
     refMissing: result.refMissing,
     ...(result.result === undefined ? {} : { result: result.result }),
     attemptNo: result.attemptNo,

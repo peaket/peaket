@@ -368,6 +368,32 @@ const expectNoGatewayCall = (f: Fixture): void => {
   expect(f.signals.seconds).toEqual([]);
 };
 
+describe('결제 수단 연결값 리뷰 고침(BUILD_ORDER HOT-145 코드 리뷰)', () => {
+  const BAD_CARD = { maskedNumber: 'not-a-card', bin: 'abcdef', issuerCode: '', cardType: '' };
+  const withRefs = () => {
+    const missing: string[] = [];
+    const f = setup({ methodRefs: { ref: () => 'k1.value' }, methodRefSignals: { missing: (reason) => missing.push(reason) } });
+    f.jobs.put(target());
+    return { f, missing };
+  };
+
+  test('P-T50_리뷰 고침 L4: 금액이 어긋난 답은 연결값을 계산하지 않아 지표가 늘지 않는다', async () => {
+    const { f, missing } = withRefs();
+    f.gateway.answers = [answer({ outcome: 'APPROVED', amount: AMOUNT + 1, approvedAt: APPROVED_AT, card: BAD_CARD })];
+    await f.runner.runJob(job());
+    expect(f.jobs.finished[0]?.finish).toMatchObject({ status: 'UNKNOWN' });
+    expect(missing).toEqual([]);
+  });
+
+  test('P-T50_리뷰 고침 L4: 금액이 맞는 승인은 연결값을 계산해 모양 오류를 한 번 센다', async () => {
+    const { f, missing } = withRefs();
+    f.gateway.answers = [answer({ outcome: 'APPROVED', amount: AMOUNT, approvedAt: APPROVED_AT, card: BAD_CARD })];
+    await f.runner.runJob(job());
+    expect(f.jobs.finished[0]?.finish).toMatchObject({ status: 'APPROVED', refMissing: true });
+    expect(missing).toEqual(['CARD_SHAPE']);
+  });
+});
+
 describe('포트원 리뷰 고침(BUILD_ORDER HOT-140 코드 리뷰)', () => {
   test('P-T16_리뷰 고침 H4: 원장의 결제 시도 ID를 승인 호출에 넘긴다 [ASVS v5.0.0-2.2.3]', async () => {
     const f = setup();

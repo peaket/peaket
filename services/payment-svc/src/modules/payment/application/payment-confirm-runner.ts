@@ -49,9 +49,10 @@ import {
   decideConfirmAnswer,
   type PaymentConfirmOutcome,
 } from '../domain/confirm-runner.js';
-import { confirmIdemKey, type ConfirmResult, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
+import { confirmIdemKey, type ConfirmCard, type ConfirmResult, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
+import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
-import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways } from '../domain/ports.js';
+import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs } from '../domain/ports.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
 
 /** 반복 타이머(시험이 손으로 부르는 대역을 꽂는다. 기본은 unref한 setInterval·clearInterval) */
@@ -81,6 +82,9 @@ export interface PaymentConfirmRunnerDeps {
   sleep?: (ms: number) => Promise<void>;
   /** 실행기가 승인 호출을 감싸는 한도(기본 CONFIRM_CALL_GUARD_MS 72초 [가정]) */
   confirmGuardMs?: number;
+  /** 결제 수단 연결값(라벨 키 pay, BUILD_ORDER HOT-145). 없으면 카드 결제는 refMissing 참이다 */
+  methodRefs?: PaymentMethodRefs;
+  methodRefSignals?: PaymentMethodRefSignals;
 }
 
 /** 틱 하나의 결과 */
@@ -418,10 +422,16 @@ export class PaymentConfirmRunner {
       this.#runError('call', failure?.err, target.orderId);
       return this.#finish(target, { status: 'UNKNOWN', result: 'UNKNOWN', latencyMs }, 'unknown');
     }
-    const decision = decideConfirmAnswer(answer, target.amount, this.deps.clock.now(), latencyMs, resend);
+    const { card } = answer;
+    const decision = decideConfirmAnswer(answer, target.amount, this.deps.clock.now(), latencyMs, resend, () => this.#linkOf(card));
     if (decision.kind === 'RETRY') return this.#reschedule(job, target, decision.outcome, this.deps.clock.now() + confirmRetryDelayMs(job.attempts + 1));
     if (decision.amountMismatch) this.#safe(() => this.deps.log.amountMismatch({ orderId: target.orderId }));
     return this.#finish(target, decision.finish, decision.outcome);
+  }
+
+  /** 금액 대조를 통과한 승인 답의 결제 수단 연결값(가린 번호를 넘기지 않는다. 던지지 않는다) */
+  #linkOf(card: ConfirmCard | undefined): PaymentMethodLink {
+    return paymentMethodLinkOf(card, this.deps.methodRefs, (reason) => this.#safe(() => this.deps.methodRefSignals?.missing(reason)));
   }
 
   /** 실행기 한도로 감싼다(어댑터가 한도를 지키지 않아도 자리를 영구히 쥐지 않게). 한도를 넘기면 ConfirmCallGuardTimeout으로 거절한다 */

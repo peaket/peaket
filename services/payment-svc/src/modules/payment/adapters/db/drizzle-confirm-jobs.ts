@@ -246,10 +246,14 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     const clearToken = finish.status !== 'UNKNOWN';
     // UNKNOWN으로 쓰는 전이가 첫 단독 조회 시각을 함께 쓰고, UNKNOWN을 떠나는 전이가 비운다(BUILD_ORDER PRF-182)
     const nextQueryAt = finish.status === 'UNKNOWN' ? new Date(now + UNKNOWN_QUERY_BASE_MS) : null;
+    // 결제 수단 연결값은 승인을 쓸 때만 채운다(둘은 함께 있거나 함께 빈다, CHECK. BUILD_ORDER HOT-145)
+    const paymentMethodRef = message.paymentMethodRef ?? null;
+    const cardBin = message.cardBin ?? null;
     await tx.execute(sql`
       update payment
       set status = ${finish.status}, status_changed_at = ${new Date(now)}::timestamptz,
           approved_at = ${approvedAt}::timestamptz, failure_category = ${failureCategory},
+          payment_method_ref = ${paymentMethodRef}, card_bin = ${cardBin},
           pg_confirm_token = case when ${clearToken}::boolean then null else pg_confirm_token end,
           next_query_at = ${nextQueryAt}::timestamptz
       where id = ${target.paymentId}::uuid`);

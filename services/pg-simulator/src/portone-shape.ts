@@ -75,6 +75,26 @@ export function portoneQueryResponse(r: SimResponse): SimResponse {
   return translate(r, portoneView, 'INVALID_REQUEST');
 }
 
+/** 토스 모양 카드 종류 → 포트원 CardType(공식 스키마 열거값) */
+const CARD_TYPE: ReadonlyMap<unknown, string> = new Map([
+  ['신용', 'CREDIT'],
+  ['체크', 'DEBIT'],
+  ['기프트', 'GIFT'],
+]);
+const METHOD_TYPE: ReadonlyMap<unknown, string> = new Map([
+  ['계좌이체', 'PaymentMethodTransfer'],
+  ['가상계좌', 'PaymentMethodVirtualAccount'],
+]);
+
+/**
+ * 엔진의 카드 칸 → 포트원 Card(공식 스키마의 칸. 값이 없는 칸은 빠진다).
+ * issuer는 시험 카드의 값을 그대로 보낸다. 공식 스키마에 값 목록이 없어 실제 모양을 모르므로, 합성 카드에서는 토스 코드 61이 나간다(docs/features/payment.md §2.1, BUILD_ORDER HOT-145 코드 리뷰)
+ */
+function portoneCard(card: Record<string, unknown>): Record<string, unknown> {
+  const type = CARD_TYPE.get(card.cardType);
+  return { number: card.number, ...(card.issuerCode === null || card.issuerCode === undefined ? {} : { issuer: card.issuerCode }), ...(type === undefined ? {} : { type }), ...(card.bin === undefined ? {} : { bin: card.bin }) };
+}
+
 /** 엔진의 결제 보기를 포트원 Payment 모양으로 바꾼다(필요한 칸만) */
 function portoneView(v: TossView): Record<string, unknown> {
   const total = v.totalAmount as number;
@@ -98,7 +118,7 @@ function portoneView(v: TossView): Record<string, unknown> {
     origin: {},
     disputes: [],
     ...(approved ? { paidAt: v.approvedAt, pgTxId: v.lastTransactionKey } : {}),
-    method: { type: 'PaymentMethodCard', ...(card ? { card: { number: card.number, issuer: card.issuerCode, type: card.cardType } } : {}) },
+    method: METHOD_TYPE.has(v.method) ? { type: METHOD_TYPE.get(v.method) } : { type: 'PaymentMethodCard', ...(card ? { card: portoneCard(card) } : {}) },
   };
 }
 

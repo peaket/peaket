@@ -71,8 +71,8 @@ pgAdapterContract('P-T16 토스페이먼츠(시뮬레이터 주소)', async (): 
   const fault = async (f: Record<string, unknown>) => expect((await sim.control('POST', '/sim/faults', { op: 'confirm', times: 1, ...f })).status).toBe(204);
   return {
     gateway: new TossPaymentGateway({ baseUrl: sim.url, secretKey: sim.key, clientKey: CLIENT }),
-    async authenticate(orderId, amount) {
-      const r = await sim.control('POST', '/sim/authenticate', { orderId, amount, orderName: '공연 티켓' });
+    async authenticate(orderId, amount, instrument) {
+      const r = await sim.control('POST', '/sim/authenticate', { orderId, amount, orderName: '공연 티켓', ...instrument });
       expect(r.status).toBe(200);
       return ((await r.json()) as { paymentKey: string }).paymentKey;
     },
@@ -148,9 +148,20 @@ describe.each<[string, Make]>([
       paymentRef: C.paymentRef,
       amount: C.amount,
       approvedAt: '2026-11-09T10:00:00.000+09:00',
-      card: { maskedNumber: card.number, issuerCode: '61', cardType: '신용' },
+      card: { maskedNumber: card.number, bin: '433012', issuerCode: 'HYUNDAI', cardType: 'CREDIT' },
       method: 'CARD',
     });
+  });
+
+  it('P-T50_단독 조회 답에도 카드 칸을 싣는다(UNKNOWN을 조회로 확정할 때 쓴다)', async () => {
+    const card = { number: '43301234****123*', issuerCode: '61', cardType: '신용' };
+    await expect(scripted([payment({ method: '카드', card })]).gateway.query(C.paymentRef)).resolves.toMatchObject({ kind: 'FOUND', status: 'APPROVED', card: { maskedNumber: card.number, bin: '433012', issuerCode: 'HYUNDAI', cardType: 'CREDIT' } });
+  });
+
+  it('P-T50_카드 정보가 없는 결제의 답에는 card가 없다(계좌이체·가상계좌)', async () => {
+    const q = await scripted([payment({ method: '계좌이체', card: null })]).gateway.query(C.paymentRef);
+    expect(q).toMatchObject({ kind: 'FOUND', status: 'APPROVED', method: 'TRANSFER' });
+    expect(q).not.toHaveProperty('card');
   });
 
   it('P-T16_승인 200이 입금 대기면 WAITING_FOR_DEPOSIT이다', async () => {

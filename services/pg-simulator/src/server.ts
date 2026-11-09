@@ -2,7 +2,7 @@
 // 토스 모양·제어 API는 시험 키 기본 인증(`Authorization: Basic base64(키 + ':')`), 포트원 모양은 `Authorization: PortOne 키`가 있어야 한다(ASVS v5.0.0-8.2.1). 요청 로그는 남기지 않는다(16.2.5).
 import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, type Fault, type SimResponse } from './engine.js';
+import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, SIM_PAY_METHODS, type Fault, type SimInstrument, type SimResponse } from './engine.js';
 import { parseLatencySpec, type LatencySpec } from './latency.js';
 import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneWebhookEvents } from './portone-shape.js';
 import type { SimClock } from './time.js';
@@ -27,6 +27,16 @@ const KEY_PARAM = { type: 'object', required: ['paymentKey'], properties: { paym
 const IDEM_HEADER = { type: 'object', properties: { 'idempotency-key': { type: 'string', minLength: 1, maxLength: 300 } } } as const;
 const AMOUNT = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } as const;
 const ORDER = { type: 'string', pattern: '^[A-Za-z0-9_-]{6,64}$' } as const;
+/** 결제창 인증이 받는 시험 결제 수단(BUILD_ORDER HOT-145) */
+const INSTRUMENT = {
+  method: { type: 'string', enum: SIM_PAY_METHODS },
+  card: {
+    type: ['object', 'null'],
+    required: ['number'],
+    additionalProperties: false,
+    properties: { number: { type: 'string', minLength: 1, maxLength: 20 }, issuerCode: { type: ['string', 'null'], maxLength: 40 }, cardType: { type: 'string', maxLength: 10 }, bin: { type: ['string', 'null'], maxLength: 8 } },
+  },
+} as const;
 
 export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   const engine = new PgSimulatorEngine({ clock: o.clock, sleep: o.sleep, seed: o.seed, confirmLatency: o.confirmLatency });
@@ -161,11 +171,11 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   );
 
   // ---- 시험용 제어 API ----
-  app.post<{ Body: { orderId: string; amount: number; orderName?: string } }>(
+  app.post<{ Body: { orderId: string; amount: number; orderName?: string } & SimInstrument }>(
     '/sim/portone/authenticate',
     {
       schema: {
-        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 } } },
+        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 }, ...INSTRUMENT } },
       },
     },
     async (req, reply) => send(req, reply, portoneAuthenticateResponse(engine.authenticatePortone(req.body))),
@@ -175,11 +185,11 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     { schema: { querystring: { type: 'object', additionalProperties: false, properties: { paymentId: PAYMENT_ID_PARAM.properties.paymentId } } } },
     async (req) => portoneWebhookEvents(engine.webhooks(req.query.paymentId), portoneWebhookSecret),
   );
-  app.post<{ Body: { orderId: string; amount: number; orderName?: string } }>(
+  app.post<{ Body: { orderId: string; amount: number; orderName?: string } & SimInstrument }>(
     '/sim/authenticate',
     {
       schema: {
-        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 } } },
+        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 }, ...INSTRUMENT } },
       },
     },
     async (req, reply) => send(req, reply, engine.authenticate(req.body)),

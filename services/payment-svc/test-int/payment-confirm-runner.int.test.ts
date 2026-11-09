@@ -509,7 +509,7 @@ describe('결제사의 답', () => {
       ['FAILED', true],
     ]);
     expect(jobs).toEqual([]);
-    expect(valueOf((await outboxOf(f))[0]!)).toMatchObject({ type: 'FAILED', result: 'DECLINED', failureCategory: category, eventSeq: 3, refMissing: true });
+    expect(valueOf((await outboxOf(f))[0]!)).toMatchObject({ type: 'FAILED', result: 'DECLINED', failureCategory: category, eventSeq: 3, refMissing: false });
     expect(await sim.approvals(f.orderId)).toBe(0);
     expect(confirmCount(await h.metrics(), 'declined') - confirmCount(before, 'declined')).toBe(1);
   });
@@ -1124,7 +1124,8 @@ describe('사건 값과 결과 조회', () => {
     const handler = new PaymentResultHandler({ execute } as unknown as ConstructorParameters<typeof PaymentResultHandler>[0]);
     const message: ConsumedMessage = { topic: row!.topic, partition: 0, offset: 0n, key: row!.msg_key, value: row!.payload, headers: {}, timestamp: h.clock.now() };
     const record = handler.decode(message);
-    expect(record).toMatchObject({ kind: 'event', event: { eventId: f.eventId, orderId: f.orderId, pg: 'SIMULATOR', type, amount: f.amount, refMissing: true, attemptNo: 1, eventSeq: 3, eventKey: paymentEventKey(f.paymentId, 3) } });
+    // 이 하네스에는 라벨 키가 없다. 시뮬레이터 카드 승인만 계산하지 못해 참이고, 카드 정보가 없는 나머지는 거짓이다(BUILD_ORDER HOT-145)
+    expect(record).toMatchObject({ kind: 'event', event: { eventId: f.eventId, orderId: f.orderId, pg: 'SIMULATOR', type, amount: f.amount, refMissing: type === 'APPROVED', attemptNo: 1, eventSeq: 3, eventKey: paymentEventKey(f.paymentId, 3) } });
     expect(handler.keyOf(record)).toBe(f.orderId);
     expect(handler.eventKeyOf(record)).toBe(paymentEventKey(f.paymentId, 3));
     await handler.handle(record);
