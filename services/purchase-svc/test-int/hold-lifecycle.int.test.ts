@@ -1,9 +1,9 @@
 // 홀드 해제·연장·다시 읽기와 결제 정지 멈춤을 실제 Valkey 8.1로 돈다(docs/features/seat-hold.md §5, BUILD_ORDER HOT-070, ADR-0254).
 // 시간은 Redis TIME이라, 지난 시각은 홀드 Hash와 만료 인덱스 값을 직접 고쳐 만든다.
 import 'reflect-metadata';
-import { createHotRedis, type HotRedis } from '@peaket/platform';
+import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { HOLD_EXTENSION_MS, type HoldTarget, holdLifecycleKeys, RedisHoldLifecycle, RedisSeatStore, seatKeys } from '../src/modules/inventory/index.js';
+import { ExpirySweeper, HOLD_EXTENSION_MS, HoldPauseView, type HoldTarget, holdLifecycleKeys, MemorySeatMap, type PaymentPauseAnswer, RedisHoldLifecycle, RedisSeatStore, RedisSweepLeases, type SeatRef, seatKeys } from '../src/modules/inventory/index.js';
 import { ACCOUNT_A, ACCOUNT_B, DAY, held, holdInput, idx, newEvent, ref, SEAT_COUNT, SEAT_DEFS } from '../test/hold-cases.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -334,5 +334,96 @@ describe('정지 집합 전이 S-T23', () => {
     const { a } = await orderedHold(e, [S1]);
     await store.releaseFailed({ eventId: e, holdId: a.holdId, accountId: a.accountId, seats: a.seats, keepUntilMs: KEEP() });
     expect(await zscore(ordered(e), S1)).toBeNull();
+  });
+});
+
+describe('만료 반복과 결제 정지 S-T23', () => {
+  const ordered = (e: string) => holdLifecycleKeys.ordered(e);
+  const paused = (e: string) => holdLifecycleKeys.paused(e);
+  const seatMap = new MemorySeatMap();
+  const put = (e: string, count: number) => seatMap.put({ eventId: e, layoutVersion: 'v1', seatCount: count, perAccountLimit: 4, saleEndsAtMs: Date.now() + DAY }, Array.from({ length: count }, (_, i) => ({ seatId: `S${i}`, index: i, sectionId: 'A', sectionIndex: 0, seatOffset: i, tierId: 'R' })));
+  const refOf = (i: number): SeatRef => ({ seatId: `S${i}`, index: i, sectionId: 'A', sectionIndex: 0, seatOffset: i, tierId: 'R' });
+  function sweeperOf(source: { read(): Promise<PaymentPauseAnswer> }) {
+    const pauseView = new HoldPauseView({ read: () => source.read() }, systemClock);
+    return new ExpirySweeper({ expiries: store, seatMap, leases: new RedisSweepLeases(redis), clock: systemClock, podId: 'pod-a', pauseView, lifecycle: life });
+  }
+  async function bigEvent(count: number): Promise<string> {
+    const e = newEvent();
+    await store.openSale({ eventId: e, seatCount: count, keepUntilMs: KEEP() });
+    put(e, count);
+    return e;
+  }
+  async function holdAt(e: string, i: number, account: string): Promise<HoldTarget> {
+    const seats = [refOf(i)];
+    const h = held(await store.hold({ eventId: e, accountId: account, purchaseSessionId: `ps-${i}`, holdId: `h-${i}`, idempotencyKey: `0190f3a1-7c2e-4a00-8000-${String(i).padStart(12, '0')}`, fingerprint: `f${i}`, seats, limit: 4, keepUntilMs: KEEP() }));
+    return { eventId: e, holdId: h.holdId, accountId: account, purchaseSessionId: `ps-${i}`, seats };
+  }
+  const due = async (t: HoldTarget) => {
+    const past = String(Date.now() - 2_000);
+    for (const s of t.seats) {
+      await cmd(seatKeys.hold(t.eventId, s.index), ['HSET', seatKeys.hold(t.eventId, s.index), 'exp', past]);
+      await cmd(seatKeys.expiry(t.eventId), ['ZADD', seatKeys.expiry(t.eventId), past, String(s.index)]);
+    }
+  };
+  const acct = (i: number) => `acct${String(i).padStart(4, '0')}`;
+
+  test('S-T23 ① 정지면 틱이 주문 뒤 홀드를 옮기고 시간이 지나도 회수하지 않으며, 열림은 연속 두 번째에 되돌린다', async () => {
+    const e = await bigEvent(10);
+    const a = await holdAt(e, 0, acct(0));
+    await life.markOrdered(a, Date.now() + 2_700_000, KEEP());
+    const answers: PaymentPauseAnswer[] = [{ status: 'OK', pauses: [{ eventId: e, pausedSinceMs: Date.now() - 1_000 }] }];
+    const source = { read: async () => answers[answers.length - 1]! };
+    const s = sweeperOf(source);
+    await s.tick();
+    expect(num(await cmd(paused(e), ['ZSCORE', paused(e), '0']))).not.toBeNull();
+    expect(num(await cmd(seatKeys.expiry(e), ['ZSCORE', seatKeys.expiry(e), '0']))).toBeNull();
+    expect(Number(await cmd(seatKeys.bitmap(e), ['GETBIT', seatKeys.bitmap(e), '0']))).toBe(1);
+    answers.push({ status: 'OK', pauses: [] });
+    await s.tick();
+    expect(num(await cmd(paused(e), ['ZSCORE', paused(e), '0']))).not.toBeNull();
+    await s.tick();
+    expect(num(await cmd(paused(e), ['ZSCORE', paused(e), '0']))).toBeNull();
+    expect(num(await cmd(seatKeys.expiry(e), ['ZSCORE', seatKeys.expiry(e), '0']))).not.toBeNull();
+    expect(num(await cmd(ordered(e), ['ZSCORE', ordered(e), '0']))).not.toBeNull();
+  });
+  test('S-T23 ⑤ 주문 뒤 홀드 230개를 한 틱에 옮겨 만료 인덱스에 남지 않고, 버린 주문 전 홀드는 그 틱에 회수된다', async () => {
+    const e = await bigEvent(240);
+    for (let i = 0; i < 230; i += 1) await life.markOrdered(await holdAt(e, i, acct(i)), Date.now() + 2_700_000, KEEP());
+    const abandoned = await holdAt(e, 230, acct(230));
+    await due(abandoned);
+    const s = sweeperOf({ read: async () => ({ status: 'OK', pauses: [{ eventId: e, pausedSinceMs: Date.now() - 500 }] }) });
+    const t = await s.tick();
+    expect(num(await cmd(paused(e), ['ZCARD', paused(e)]))).toBe(230);
+    expect(num(await cmd(ordered(e), ['ZCARD', ordered(e)]))).toBe(0);
+    expect(num(await cmd(seatKeys.expiry(e), ['ZCARD', seatKeys.expiry(e)]))).toBe(0);
+    expect(t.events.find((x) => x.eventId === e)).toMatchObject({ released: 1 });
+    expect(Number(await cmd(seatKeys.bitmap(e), ['GETBIT', seatKeys.bitmap(e), '230']))).toBe(0);
+  }, 30_000);
+  test('S-T23 ③ 정지 중 최대 체류에 닿으면 expiry로 돌려놓아 같은 틱에 풀린다', async () => {
+    const e = await bigEvent(10);
+    const a = await holdAt(e, 1, acct(1));
+    await life.markOrdered(a, Date.now() + 2_700_000, KEEP());
+    await life.freeze(e, Date.now(), KEEP(), [1]);
+    const past = Date.now() - 1_000;
+    await cmd(seatKeys.hold(e, 1), ['HSET', seatKeys.hold(e, 1), 'maxStay', String(past)]);
+    await cmd(paused(e), ['ZADD', paused(e), String(past), '1']);
+    const s = sweeperOf({ read: async () => ({ status: 'OK', pauses: [{ eventId: e, pausedSinceMs: Date.now() - 5_000 }] }) });
+    await s.tick();
+    expect(Number(await cmd(seatKeys.bitmap(e), ['GETBIT', seatKeys.bitmap(e), '1']))).toBe(0);
+    expect(num(await cmd(paused(e), ['ZCARD', paused(e)]))).toBe(0);
+  });
+  test('망가진 좌석 100개가 앞줄에 있어도 뒤의 정상 홀드를 그 틱에 푼다(ADR-0254 결정 6)', async () => {
+    const e = await bigEvent(150);
+    const past = Date.now() - 60_000;
+    for (let i = 0; i < 120; i += 1) {
+      await cmd(seatKeys.hold(e, i), ['HSET', seatKeys.hold(e, i), 'holdId', `bad-${i}`]);
+      await cmd(seatKeys.expiry(e), ['ZADD', seatKeys.expiry(e), String(past + i), String(i)]);
+    }
+    const good = await holdAt(e, 140, acct(140));
+    await due(good);
+    const s = new ExpirySweeper({ expiries: store, seatMap, leases: new RedisSweepLeases(redis), clock: systemClock, podId: 'pod-a' });
+    const t = await s.tick();
+    expect(Number(await cmd(seatKeys.bitmap(e), ['GETBIT', seatKeys.bitmap(e), '140']))).toBe(0);
+    expect(t.events.find((x) => x.eventId === e)).toMatchObject({ released: 1 });
   });
 });

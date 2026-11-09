@@ -21,7 +21,7 @@ interface EventEntry {
 const isNonNegativeInt = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 
 /** 판매 제외 표시를 뺀 좌석 사본 */
-const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId });
+const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId, ...(s.label !== undefined ? { label: s.label } : {}) });
 
 /** SeatMap·SeatMapIndex의 메모리 구현. 시험이 put으로 회차를 넣는다 */
 export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
