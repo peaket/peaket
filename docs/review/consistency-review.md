@@ -547,6 +547,7 @@
 | R-432 | 로비 게시 시험 5건이 진짜 시계를 써서 2026-11-09 11:00 UTC 뒤로 영구히 실패했다(CI 42608431030) | services/admission-ctrl/test/publish.test.ts | 저장소 시계를 목록 고정 시각에 묶음, 단정 그대로. 그 파일 40건 통과 | 수정 완료 |
 | R-433 | BOT-060 즉시 피처와 기기 라벨 키 통일 | docs/adr/0251, docs/features/bot-defense.md §4.1·§4.9, docs/data.md, docs/security/secrets-and-keys.md, docs/security/data-classification.md, docs/security/asvs/bot-defense.md | 재현 시험 먼저 → 구현 → 새 맥락 리뷰 → 지적 수정 → 재검토 | 수정 완료 |
 | R-434 | 새 결제 진입 정지를 정하고 다시 여는 코드가 없어 결제사 장애 뒤 자동으로 열리지 않았다. 만들며 찾은 것: 재호출마다 뽑으면 5% 제한이 뚫리고, p99 표본 하한이 없으면 느린 1건으로 결제사 전체가 멈추며, 확인 호출이 파드 몫 토큰에 묶이면 정지에 갇히고, 먼저 끝난 순으로 세면 느린 호출이 빠지고, 조회만 고장이면 사람이 푼 해제가 1초 안에 되돌려졌다 | docs/features/payment.md, docs/data.md, docs/observability.md, docs/infra.md, docs/verification.md, docs/security/asvs/payment.md, docs/adr/0105·0250, docs/BUILD_ORDER.md, services/payment-svc(판정자·확인 호출·시험 재개·해제·마이그레이션 0011), packages/platform(차단기 close), deploy(Lease 권한) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 30개 → 새 맥락 리뷰 → 고침. 단위 2,813, 통합 415 | 수정 완료 |
+| R-435 | 구간마다 해설서를 맞추는 규칙(ADR-0189 결정 5의 ②)을 소유자가 개발 완료 뒤 한 번으로 바꿨다 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/adr/0177·0189·0252, docs/architecture.md | 규칙 줄과 SEG 네 줄 고침, 새 ADR, 문서 점검 오류 0 | 수정 완료 |
 
 ## 4. 숫자 일치표
 
