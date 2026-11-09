@@ -10,7 +10,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
 import { createPlatformLogger, type Database, type FakeClock, fakeClock, PlatformMetrics, systemClock, uuidv7 } from '@peaket/platform';
 import { startGrpcServer } from '../src/grpc-server.js';
-import { AcceptPaymentCommand, BatchGetPaymentStates, DrizzlePaymentStore, paymentCommandLog, paymentPackage, paymentServiceHandlers, PromPaymentCommandSignals } from '../src/modules/payment/server.js';
+import { AcceptPaymentCommand, BatchGetPaymentStates, CachedEntryPauseReader, DrizzleEntryPause, DrizzlePaymentStore, DrizzlePgSelectionBatch, GetNewPaymentPause, paymentCommandLog, paymentPackage, paymentServiceHandlers, PromPaymentCommandSignals } from '../src/modules/payment/server.js';
 
 /** 설명자를 읽는 선택지(purchase-svc 클라이언트와 같다: 필드 이름은 proto 그대로, enum은 이름, int64는 숫자, oneof 이름 칸) */
 const LOAD: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -148,7 +148,7 @@ export async function startGrpcStack(o: { hot: Database; batch: Database }): Pro
   const server = await startGrpcServer({
     host: '127.0.0.1',
     port: 0,
-    services: [{ definition: paymentPackage().PaymentService.service, handlers: paymentServiceHandlers({ accept, batchGet }, (method, err) => errors.push({ method, err })) }],
+    services: [{ definition: paymentPackage().PaymentService.service, handlers: paymentServiceHandlers({ accept, batchGet, getNewPaymentPause: new GetNewPaymentPause({ selection: new DrizzlePgSelectionBatch({ database: o.batch }), pauses: new CachedEntryPauseReader({ reader: new DrizzleEntryPause({ database: o.hot }), clock, signals: { entryPauseReadFailed: () => {} } }), channels: new Map([['TOSS', { active: true, payMethods: new Set(['CARD']) }]]), defaults: { primary: 'TOSS' } }) }, (method, err) => errors.push({ method, err })) }],
   });
   const address = `127.0.0.1:${server.port}`;
   const client = paymentClient(address);

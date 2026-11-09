@@ -26,6 +26,8 @@ export const PREPARE_CHECKOUT_MAX_CONCURRENT = 100;
 
 /** payment-svc가 결제사를 고르지 못했을 때 UNAVAILABLE에 싣는 글(살아서 답한 업무 답이다) */
 const PG_UNAVAILABLE_DETAILS = 'pg-unavailable';
+/** payment-svc가 새 결제 일시 정지일 때 FAILED_PRECONDITION에 싣는 글(BUILD_ORDER PRF-201) */
+const NEW_PAYMENT_PAUSED_DETAILS = 'new-payment-paused';
 const DEPENDENCY = 'payment-svc';
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 
@@ -128,9 +130,10 @@ export function checkoutAnswerOf(v: Record<string, unknown>, q: Pick<PrepareChec
 
 /**
  * gRPC 상태 코드와 글 → 결과: UNAVAILABLE(글 pg-unavailable이면 결제사를 고르지 못한 것)·DEADLINE_EXCEEDED → PG_UNAVAILABLE,
- * INVALID_ARGUMENT 글이 pay_method로 끝나면 PAY_METHOD_INVALID, 그 밖 → MISCONFIGURED(상태 이름 소문자, 모르는 코드는 unexpected)
+ * INVALID_ARGUMENT 글이 pay_method로 끝나면 PAY_METHOD_INVALID, FAILED_PRECONDITION 글이 new-payment-paused면 NEW_PAYMENT_PAUSED(BUILD_ORDER PRF-201), 그 밖 → MISCONFIGURED(상태 이름 소문자, 모르는 코드는 unexpected)
  */
 export function checkoutFailureOf(grpcCode: number, details: string): Exclude<CheckoutOutcome, { status: 'OK' }> {
+  if (grpcCode === grpc.status.FAILED_PRECONDITION && details === NEW_PAYMENT_PAUSED_DETAILS) return { status: 'NEW_PAYMENT_PAUSED' };
   if (grpcCode === grpc.status.DEADLINE_EXCEEDED) return { status: 'PG_UNAVAILABLE', reason: 'deadline' };
   if (grpcCode === grpc.status.UNAVAILABLE) return { status: 'PG_UNAVAILABLE', reason: details === PG_UNAVAILABLE_DETAILS ? 'pg_unavailable' : 'unavailable' };
   if (grpcCode === grpc.status.INVALID_ARGUMENT && details.endsWith('pay_method')) return { status: 'PAY_METHOD_INVALID' };
@@ -150,7 +153,8 @@ function outcomeOfError(e: unknown): Exclude<CheckoutOutcome, { status: 'OK' }> 
 
 /**
  * 결제창 준비 차단기의 실패 분류: UNAVAILABLE 글 pg-unavailable은 payment-svc가 살아서 답한 업무 답(이 회차에 쓸 결제사·채널이 없음)이라 세지 않는다(리뷰 고침 H1).
- * 세면 어느 회차 하나의 설정 때문에 차단기가 열려 다른 회차의 정상 요청까지 막는다. 그 밖은 플랫폼 기본 분류다(데드라인·연결 실패·그 밖의 UNAVAILABLE은 실패)
+ * 세면 어느 회차 하나의 설정 때문에 차단기가 열려 다른 회차의 정상 요청까지 막는다. 그 밖은 플랫폼 기본 분류다(데드라인·연결 실패·그 밖의 UNAVAILABLE은 실패).
+ * 새 결제 일시 정지(FAILED_PRECONDITION 글 new-payment-paused)도 업무 답이고 기본 분류가 세지 않는다(BUILD_ORDER PRF-201)
  */
 export function isCheckoutBreakerFailure(err: unknown): boolean {
   if (isServiceError(err) && err.code === grpc.status.UNAVAILABLE && err.details === PG_UNAVAILABLE_DETAILS) return false;

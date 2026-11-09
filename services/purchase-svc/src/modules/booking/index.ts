@@ -87,6 +87,18 @@ export {
   PREPARE_CHECKOUT_MAX_CONCURRENT,
   simulatorPaymentCheckouts,
 } from './adapters/grpc-payment-checkout.js';
+export {
+  GrpcNewPaymentPauses,
+  type GrpcNewPaymentPausesOptions,
+  NEW_PAYMENT_PAUSE_CAP_MS,
+  NEW_PAYMENT_PAUSE_MAX_EVENTS,
+  newPaymentPausesFromEnv,
+  newPaymentPausesOf,
+  noNewPaymentPauses,
+  PAYMENT_PAUSE_BREAKER,
+  PAYMENT_PAUSE_BREAKER_MIN_CALLS,
+  PAYMENT_PAUSE_BREAKER_OPTIONS,
+} from './adapters/grpc-new-payment-pause.js';
 export { type BehaviorSignalProducer, discardBehaviorSignals, KafkaBehaviorSignals, TELEMETRY_BEHAVIOR_TOPIC } from './adapters/behavior-signals.js';
 export {
   START_PAYMENT_OPERATION,
@@ -547,6 +559,9 @@ export type {
   CheckoutOutcome,
   CheckoutValues,
   CommittedStartLookup,
+  NewPaymentPause,
+  NewPaymentPauseOutcome,
+  NewPaymentPauses,
   OrderHoldExpiries,
   PaymentCheckouts,
   PgUnavailableReason,

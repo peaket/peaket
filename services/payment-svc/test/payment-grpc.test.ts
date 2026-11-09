@@ -8,6 +8,7 @@ import { AcceptPaymentCommand } from '../src/modules/payment/application/accept-
 import { type ConfirmAnswer, type ConfirmPaymentInput, PAYMENT_LEDGER_STATUSES, PaymentCommandMismatchError, PaymentDeadlineError, PaymentInputError, type PaymentState } from '../src/modules/payment/domain/confirm-command.js';
 import { type PaymentGrpcUseCases, paymentPackage, paymentServiceHandlers } from '../src/modules/payment/inbound/payment.grpc.js';
 import type { PrepareCheckoutAnswer } from '../src/modules/payment/application/prepare-checkout.js';
+import { PaymentNewPausedError } from '../src/modules/payment/domain/entry-pause.js';
 import { PaymentPgUnavailableError, type PrepareCheckoutInput } from '../src/modules/payment/domain/pg-selection.js';
 import { startGrpcServer } from '../src/grpc-server.js';
 import {
@@ -79,6 +80,7 @@ async function serve(useCases: Partial<PaymentGrpcUseCases> = {}) {
           return PREPARE_ANSWER;
         },
       },
+      ...(useCases.getNewPaymentPause ? { getNewPaymentPause: useCases.getNewPaymentPause } : {}),
     },
     (method, err) => errors.push([method, err]),
   );
@@ -452,9 +454,74 @@ describe('오류 → gRPC 상태', () => {
     expect(s.errors).toHaveLength(1);
   });
 
-  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'] as const)('PRF180_구현하지 않은 %s는 UNIMPLEMENTED다', async (rpc) => {
+  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch'] as const)('PRF180_구현하지 않은 %s는 UNIMPLEMENTED다', async (rpc) => {
     const s = await serve();
     expect((await failureOf(s.call(rpc, {}))).code).toBe('UNIMPLEMENTED');
+    expect(s.errors).toEqual([]);
+  });
+});
+
+describe('GetNewPaymentPause(P-T43, BUILD_ORDER PRF-201)', () => {
+  const EVENT_A = EVENT_ID;
+  const EVENT_B = uuidAt(9);
+
+  test('P-T43_요청의 회차를 넘기고 답은 회차와 paused_since다(채널 문제는 0) [ASVS v5.0.0-15.3.1]', async () => {
+    const seen: (readonly string[])[] = [];
+    const s = await serve({
+      getNewPaymentPause: {
+        execute: async (ids) => {
+          seen.push(ids);
+          return [
+            { eventId: EVENT_A, pausedSinceMs: APPROVED_MS },
+            { eventId: EVENT_B, pausedSinceMs: 0 },
+          ];
+        },
+      },
+    });
+    const v = await s.call('GetNewPaymentPause', { event_ids: [EVENT_A, EVENT_B] });
+    expect(seen).toEqual([[EVENT_A, EVENT_B]]);
+    expect(v).toEqual({
+      pauses: [
+        { event_id: EVENT_A, paused_since: APPROVED_TS },
+        { event_id: EVENT_B, paused_since: { seconds: 0, nanos: 0 } },
+      ],
+    });
+  });
+
+  test('P-T43_입력 오류는 INVALID_ARGUMENT이고 처리 오류로 세지 않는다 [ASVS v5.0.0-2.2.1]', async () => {
+    const s = await serve({
+      getNewPaymentPause: {
+        execute: async () => {
+          throw new PaymentInputError('event_ids');
+        },
+      },
+    });
+    expect(await failureOf(s.call('GetNewPaymentPause', { event_ids: ['x'] }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(s.errors).toEqual([]);
+  });
+
+  test('P-T43_저장소 오류는 UNAVAILABLE이고 처리 오류로 센다 [ASVS v5.0.0-16.5.3]', async () => {
+    const boom = new Error('읽기 실패');
+    const s = await serve({
+      getNewPaymentPause: {
+        execute: async () => {
+          throw boom;
+        },
+      },
+    });
+    expect((await failureOf(s.call('GetNewPaymentPause', { event_ids: [EVENT_A] }))).code).toBe('UNAVAILABLE');
+    expect(s.errors).toEqual([['GetNewPaymentPause', boom]]);
+  });
+
+  test('P-T43_PrepareCheckout의 새 결제 일시 정지는 FAILED_PRECONDITION이고 글이 new-payment-paused이며 처리 오류로 세지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+    const s = await serve({
+      prepareCheckout: {
+        execute: async () => {
+          throw new PaymentNewPausedError();
+        },
+      },
+    });
+    expect(await failureOf(s.call('PrepareCheckout', { order_id: ORDER_ID }))).toEqual({ code: 'FAILED_PRECONDITION', details: 'new-payment-paused' });
     expect(s.errors).toEqual([]);
   });
 });

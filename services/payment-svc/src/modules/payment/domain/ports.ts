@@ -3,6 +3,7 @@ import type { ConfirmPaymentCommand, GetPaymentKey, PaymentDetailRow, PaymentLed
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { FailureCategory, PayMethod, PaymentGatewayPort, PgName, WebhookInvalidReason } from './payment-gateway.js';
 import type { PaymentMethodRefMissingReason } from './payment-method-ref.js';
+import type { EntryPauses } from './entry-pause.js';
 import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-selection.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
@@ -63,6 +64,36 @@ export interface PgSelectionReader {
   read(eventId: string, budget?: CallBudget): Promise<PgSelectionState>;
 }
 
+/** 여러 회차의 결제사 선택 재료 읽기(GetNewPaymentPause, BUILD_ORDER PRF-201 코드 리뷰). 파드 캐시를 거치지 않는다 */
+export interface PgSelectionBatchReader {
+  /**
+   * 회차 목록의 지정 사본·회차 전환 행과 플랫폼 전환 행 하나를 한 문장으로 읽어 회차마다 돌려준다. 행이 없는 회차도 키는 있다. 결제사는 부르지 않는다.
+   * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(읽지 않는다)
+   */
+  readMany(eventIds: readonly string[], budget?: CallBudget): Promise<ReadonlyMap<string, PgSelectionState>>;
+}
+
+/** 새 결제 일시 정지 행 읽기(BUILD_ORDER PRF-201) */
+export interface EntryPauseReader {
+  /**
+   * 결제사별 정지 행(channel = 'ALL')을 읽는다. 결제사는 부르지 않는다.
+   * @throws PaymentDeadlineError 연결을 받고 보니 남은 시간이 MIN_CALL_REMAINING_MS보다 모자람(읽지 않는다)
+   */
+  read(budget?: CallBudget): Promise<EntryPauses>;
+}
+
+/** 시험 재개로 받은 주문 읽기(BUILD_ORDER PRF-201). 쓰기는 PRF-202다 */
+export interface EntryTrialReader {
+  /** 그 결제사의 이번 시험 재개로 이미 받은 주문인가(admitted_at >= 정지 행의 trial_started_at. 앞 시험 재개의 행이나 시작 시각이 빈 행은 아니다, BUILD_ORDER PRF-201 코드 리뷰) */
+  isAdmitted(orderId: string, pg: PgName, budget?: CallBudget): Promise<boolean>;
+}
+
+/** 정지 행 읽기 지표. 던지지 않는다 */
+export interface EntryPauseReadSignals {
+  /** 읽기가 실패했다(마지막 값을 썼는지와 상관없이 한 번) */
+  entryPauseReadFailed(): void;
+}
+
 /** 전환 쓰기(제어 수신 OPS-310과 재생 시험 PRF-210이 쓴다, BUILD_ORDER PRF-190) */
 export interface PgSwitchStore {
   /** 판 번호가 지금보다 클 때만 쓴다. 썼으면 참, 옛 판이면 거짓이다 */
@@ -70,7 +101,7 @@ export interface PgSwitchStore {
 }
 
 /** payment_checkout_prepared_total의 outcome */
-export type PrepareCheckoutOutcome = 'ok' | 'switched' | 'invalid' | 'pg_unavailable' | 'method_unsupported' | 'error';
+export type PrepareCheckoutOutcome = 'ok' | 'switched' | 'invalid' | 'pg_unavailable' | 'method_unsupported' | 'new_payment_paused' | 'error';
 
 /** 결제창 준비 지표. 던지지 않는다 */
 export interface PrepareCheckoutSignals {

@@ -511,9 +511,14 @@ describe('승인 명령 접수 ConfirmPayment', () => {
     expect(await tableCounts(admin)).toEqual(before);
   });
 
-  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch', 'GetNewPaymentPause'])('PRF180_이 단계에 만들지 않은 RPC %s는 UNIMPLEMENTED다', async (method) => {
+  test.each(['GetPayment', 'CancelPayment', 'RegisterPayoutSeller', 'ApprovePayoutBatch'])('PRF180_이 단계에 만들지 않은 RPC %s는 UNIMPLEMENTED다', async (method) => {
     const s = await stack();
     expect((await failure(unary(s.client, method, {}))).code).toBe(grpc.status.UNIMPLEMENTED);
+  });
+
+  test('P-T43_GetNewPaymentPause는 정지가 없으면 빈 답이다(BUILD_ORDER PRF-201, 넘긴 RPC가 UNIMPLEMENTED였던 시험의 새 동작)', async () => {
+    const s = await stack();
+    expect(await unary(s.client, 'GetNewPaymentPause', { event_ids: [newId()] })).toEqual({ pauses: [] });
   });
 
   test('PRF180_저장소를 직접 부르면 처음은 CREATED, 다시는 EXISTING이고 있는 행의 시도·결제사·금액·상태를 돌려주며 더 쓰지 않는다 [ASVS v5.0.0-2.3.4]', async () => {

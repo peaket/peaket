@@ -69,7 +69,7 @@ export interface StartPaymentCommand {
  * 거절 까닭(받는 층의 START_PAYMENT_PROBLEMS가 HTTP로 바꾼다):
  * - SESSION_ENDED 401 · IDEM_REUSED 422 · NOT_FOUND 404 · ORDER_EXPIRED 409 order-expired · ALREADY_ACCEPTED 409 payment-already-accepted
  * - ATTEMPTS_EXCEEDED 409 payment-attempts-exceeded · SALE_PAUSED 423 · SEAT_STORE_UNAVAILABLE 503
- * - PG_UNAVAILABLE 503 pg-unavailable · CHECKOUT_MISCONFIGURED 503 dependency-unavailable · PAY_METHOD_INVALID 400(첫 요청만, 재생은 PG_UNAVAILABLE) · DEADLINE_EXCEEDED 504
+ * - PG_UNAVAILABLE 503 pg-unavailable · NEW_PAYMENT_PAUSED 503 new-payment-paused(BUILD_ORDER PRF-201) · CHECKOUT_MISCONFIGURED 503 dependency-unavailable · PAY_METHOD_INVALID 400(첫 요청만, 재생은 PG_UNAVAILABLE) · DEADLINE_EXCEEDED 504
  */
 export type StartPaymentRejection =
   | 'SESSION_ENDED'
@@ -83,6 +83,7 @@ export type StartPaymentRejection =
   | 'PG_UNAVAILABLE'
   | 'CHECKOUT_MISCONFIGURED'
   | 'PAY_METHOD_INVALID'
+  | 'NEW_PAYMENT_PAUSED'
   | 'DEADLINE_EXCEEDED';
 
 /** 201 본문의 재료 */
@@ -93,7 +94,10 @@ export interface StartedPayment extends PreparedCheckout {
 }
 
 /** 쓰임새 결과. replayed: 이번에 시도를 만들지 않고 처음 시도로 값을 다시 만들었다 */
-export type StartPaymentResult = { readonly status: 201; readonly replayed: boolean; readonly attempt: StartedPayment } | { readonly status: 'REJECTED'; readonly reason: StartPaymentRejection };
+export type StartPaymentResult =
+  | { readonly status: 201; readonly replayed: boolean; readonly attempt: StartedPayment }
+  /** holdRemainingSeconds: NEW_PAYMENT_PAUSED이고 홀드 만료를 읽었을 때만 있다(ADR-0085) */
+  | { readonly status: 'REJECTED'; readonly reason: StartPaymentRejection; readonly holdRemainingSeconds?: number };
 
 const rejected = (reason: StartPaymentRejection): StartPaymentResult => ({ status: 'REJECTED', reason });
 
@@ -153,7 +157,7 @@ export class StartPayment {
     if (this.#prepareTooLate(c.deadline)) return this.#tooLate();
     const attemptId = uuidv7(d.clock);
     const prepared = await d.checkouts.prepare(this.#query(c, order, sale, attemptId));
-    if (prepared.status !== 'OK') return this.#prepareFailed(prepared);
+    if (prepared.status !== 'OK') return this.#prepareFailed(prepared, holdExpiresAtMs);
 
     const outcome = await d.writes.start(
       c.idem,
@@ -197,7 +201,7 @@ export class StartPayment {
     if (this.#prepareTooLate(c.deadline)) return this.#tooLate();
     const prepared = await d.checkouts.prepare(this.#query(c, order, sale, attempt.attemptId, attempt.pg));
     if (prepared.status !== 'OK') {
-      const failed = this.#prepareFailed(prepared);
+      const failed = this.#prepareFailed(prepared, holdExpiresAtMs);
       return prepared.status === 'PAY_METHOD_INVALID' ? rejected('PG_UNAVAILABLE') : failed;
     }
     d.signals.paymentAttempt(prepared.pg, 'replayed');
@@ -259,9 +263,9 @@ export class StartPayment {
     return rejected('ATTEMPTS_EXCEEDED');
   }
 
-  /** 결제창 준비 실패 → 거절(시도를 만들지 않는다, ASVS 16.5.3) */
-  #prepareFailed(prepared: Exclude<CheckoutOutcome, { status: 'OK' }>): StartPaymentResult {
-    const { signals, log } = this.deps;
+  /** 결제창 준비 실패 → 거절(시도를 만들지 않는다, ASVS 16.5.3). 새 결제 일시 정지는 홀드 만료를 읽었을 때만 남은 초를 싣는다(ADR-0085, 실제로 멈추는 일은 HOT-070) */
+  #prepareFailed(prepared: Exclude<CheckoutOutcome, { status: 'OK' }>, holdExpiresAtMs: number | undefined): StartPaymentResult {
+    const { signals, log, clock } = this.deps;
     switch (prepared.status) {
       case 'PG_UNAVAILABLE':
         signals.paymentAttempt('none', prepared.reason === 'deadline' ? 'deadline' : 'pg_unavailable');
@@ -269,6 +273,9 @@ export class StartPayment {
       case 'PAY_METHOD_INVALID':
         signals.paymentAttempt('none', 'pay_method_invalid');
         return rejected('PAY_METHOD_INVALID');
+      case 'NEW_PAYMENT_PAUSED':
+        signals.paymentAttempt('none', 'new_payment_paused');
+        return { status: 'REJECTED', reason: 'NEW_PAYMENT_PAUSED', ...(holdExpiresAtMs === undefined ? {} : { holdRemainingSeconds: Math.max(0, Math.ceil((holdExpiresAtMs - clock.now()) / 1000)) }) };
       default:
         signals.paymentAttempt('none', 'misconfigured');
         log.checkoutMisconfigured({ reason: prepared.reason });

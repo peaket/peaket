@@ -618,16 +618,38 @@ export type PgUnavailableReason = 'pg_unavailable' | 'unavailable' | 'deadline' 
  * - PG_UNAVAILABLE: 503 pg-unavailable(gRPC UNAVAILABLE·DEADLINE_EXCEEDED·차단기 열림·과부하)
  * - PAY_METHOD_INVALID: payment-svc가 수단 값을 거절했다(가상계좌를 끈 회차 포함, 400)
  * - MISCONFIGURED: 그 밖의 gRPC 코드·gRPC가 아닌 예외·모양이 틀린 답(503 dependency-unavailable, SEV2)
+ * - NEW_PAYMENT_PAUSED: 새 결제 일시 정지거나 채널이 없거나 비활성(FAILED_PRECONDITION 글 new-payment-paused, 503, BUILD_ORDER PRF-201)
  */
 export type CheckoutOutcome =
   | ({ readonly status: 'OK' } & PreparedCheckout)
   | { readonly status: 'PG_UNAVAILABLE'; readonly reason: PgUnavailableReason }
   | { readonly status: 'PAY_METHOD_INVALID' }
+  | { readonly status: 'NEW_PAYMENT_PAUSED' }
   | { readonly status: 'MISCONFIGURED'; readonly reason: string };
 
 /** payment-svc PaymentService.PrepareCheckout(adapters/grpc-payment-checkout.ts). 결제사를 부르지 않는다. 차단기·gRPC 상태 바꾸기는 어댑터가 한다 */
 export interface PaymentCheckouts {
   prepare(q: PrepareCheckoutQuery): Promise<CheckoutOutcome>;
+}
+
+/** 일시 정지 중인 회차 하나 */
+export interface NewPaymentPause {
+  readonly eventId: string;
+  /** 정지 시작 시각(epoch ms). 채널이 없거나 비활성이면 0 */
+  readonly pausedSinceMs: number;
+}
+
+/**
+ * 일시 정지 조회 결과. 던지지 않는다.
+ * - OK: 일시 정지 중인 회차만 담는다
+ * - UNAVAILABLE: 답을 받지 못했다(시간 초과·차단기·장애). 만료 작업(HOT-070)은 마지막 답을 10초 [가정] 쓰고 그 뒤 다시 열린 것으로 본다(ADR-0085, docs/features/seat-hold.md §5)
+ * - REJECTED: payment-svc가 요청을 거절했다(INVALID_ARGUMENT, 부르는 쪽의 결함이라 다시 물어도 낫지 않는다). 답을 받지 못한 것과 같이 다루되 UNAVAILABLE에 뭉개지 않고 따로 경보한다(BUILD_ORDER PRF-201 코드 리뷰)
+ */
+export type NewPaymentPauseOutcome = { readonly status: 'OK'; readonly pauses: readonly NewPaymentPause[] } | { readonly status: 'UNAVAILABLE'; readonly reason: string } | { readonly status: 'REJECTED'; readonly reason: string };
+
+/** payment-svc PaymentService.GetNewPaymentPause(adapters/grpc-new-payment-pause.ts). 만료 작업의 조립은 HOT-070이다(BUILD_ORDER PRF-201) */
+export interface NewPaymentPauses {
+  read(eventIds: readonly string[], o: { readonly deadlineMs: number }): Promise<NewPaymentPauseOutcome>;
 }
 
 /** 주문 좌석의 홀드 만료 시각 읽기(운영은 adapters/inventory-bridges.ts InventoryOrderHoldExpiries) */
@@ -670,7 +692,7 @@ export interface BehaviorSignalPublisher {
 }
 
 /** purchase_payment_attempts_total의 outcome 값 */
-export type StartPaymentMetricOutcome = 'started' | 'replayed' | 'exceeded' | 'pg_unavailable' | 'deadline' | 'misconfigured' | 'pay_method_invalid';
+export type StartPaymentMetricOutcome = 'started' | 'replayed' | 'exceeded' | 'pg_unavailable' | 'new_payment_paused' | 'deadline' | 'misconfigured' | 'pay_method_invalid';
 
 /** 결제 시도 시작의 지표. 던지지 않는다 */
 export interface StartPaymentSignals {

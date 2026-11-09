@@ -16,15 +16,19 @@ import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
   BreakerPgCircuits,
+  CachedEntryPauseReader,
   CachedPgSelectionReader,
   CancelDepositPayment,
   channelTableOf,
   confirmRunnerDatabaseOptions,
   createPgHttp,
   DrizzleConfirmJobs,
+  DrizzleEntryPause,
   DrizzlePaymentStore,
   DrizzlePgSelection,
+  DrizzlePgSelectionBatch,
   DrizzleWebhookStore,
+  GetNewPaymentPause,
   GetPaymentDetail,
   paymentCheckoutLog,
   type PaymentCommandLog,
@@ -108,6 +112,12 @@ const depositSignals = new PromPaymentDepositSignals();
 const checkoutSignals = new PromPaymentCheckoutSignals();
 // 전환·회차 지정 읽기는 핫패스 풀이고 회차마다 1초 [가정] 캐시한다(BUILD_ORDER PRF-190)
 const pgSelection = new CachedPgSelectionReader({ reader: new DrizzlePgSelection({ database }), clock: systemClock });
+// GetNewPaymentPause의 회차 목록은 일반 풀의 한 문장으로 읽는다(BUILD_ORDER PRF-201 코드 리뷰)
+const pgSelectionBatch = new DrizzlePgSelectionBatch({ database: batchDatabase });
+// 새 결제 일시 정지 행은 핫패스 풀에서 1초 [가정]마다 읽어 파드 메모리에 둔다. 시험 재개 행은 정지 때만 기본 키로 읽는다(BUILD_ORDER PRF-201)
+const entryPauseStore = new DrizzleEntryPause({ database });
+const entryPauses = new CachedEntryPauseReader({ reader: entryPauseStore, clock: systemClock, signals: checkoutSignals });
+const channels = channelTableOf(gateways);
 
 // 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC·앱 포트는 그 뒤에 열려 그 전에 불리지 않는다)
 let log: PaymentCommandLog | undefined;
@@ -162,7 +172,7 @@ const grpc = await startGrpcServer({
   services: [
     {
       definition: paymentPackage().PaymentService.service,
-      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }), prepareCheckout: new PrepareCheckout({ selection: pgSelection, gateways, channels: channelTableOf(gateways), defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals }) }, (method, err, orderId) =>
+      handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock }), prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults }) }, (method, err, orderId) =>
         // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
         service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
       ),

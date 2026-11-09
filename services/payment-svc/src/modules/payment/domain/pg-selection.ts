@@ -128,10 +128,16 @@ export function selectPg(input: PgSelectionInput): PgSelection {
 const switchApplies = (row: PgSwitchRow | undefined, base: PgName): row is PgSwitchRow => row?.active === true && (row.fromPg === undefined || row.fromPg === base);
 
 /** 전환이 옮겨 갈 결제사. 회차 행이 맞지 않으면 플랫폼 행으로 내려간다(BUILD_ORDER PRF-190 코드 리뷰). 맞는 행이 없거나 대체가 없으면 undefined다 */
-function switchTargetOf(input: PgSelectionInput, base: PgName): PgName | undefined {
+function switchTargetOf(input: PgSelectionState & { readonly defaults: PgPlatformDefaults }, base: PgName): PgName | undefined {
   const row = [input.eventSwitch, input.platformSwitch].find((r) => switchApplies(r, base));
   if (row === undefined) return undefined;
   return row.toPg ?? (input.assignment ? input.assignment.fallback : input.defaults.fallback);
+}
+
+/** 그 회차가 쓸 결제사(전환 → 회차 지정 → 플랫폼 기본). 수단·채널 상태는 보지 않는다(BUILD_ORDER PRF-201) */
+export function basePgOf(input: PgSelectionState & { readonly defaults: PgPlatformDefaults }): PgName {
+  const base = input.assignment?.primary ?? input.defaults.primary;
+  return switchTargetOf(input, base) ?? base;
 }
 
 /** 어댑터 등록부에서 채널 표를 만든다 */

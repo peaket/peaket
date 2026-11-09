@@ -16,7 +16,7 @@ import { FALLBACK_REASONS, type FallbackReason } from '../domain/recheck.js';
 export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, StartPaymentSignals {
   readonly #paymentAttempts = new Counter({
     name: 'purchase_payment_attempts_total',
-    help: '결제 시도 시작의 결과(pg: 결제사, 고르기 전이면 none. outcome: started·replayed·exceeded·pg_unavailable·deadline·misconfigured·pay_method_invalid)',
+    help: '결제 시도 시작의 결과(pg: 결제사, 고르기 전이면 none. outcome: started·replayed·exceeded·pg_unavailable·new_payment_paused·deadline·misconfigured·pay_method_invalid)',
     labelNames: ['pg', 'outcome'] as const,
     registers: [],
   });

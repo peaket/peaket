@@ -86,11 +86,15 @@ async function paymentServer() {
   const def = protoLoader.fromJSON(paymentV1Payment as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
   const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { payment: { v1: { PaymentService: grpc.ServiceClientConstructor } } } }).peaket.payment.v1;
   const srv = new grpc.Server();
-  const state = { switchTo: undefined as 'PORTONE' | undefined, requests: [] as Record<string, unknown>[] };
+  const state = { switchTo: undefined as 'PORTONE' | undefined, pausedDetails: undefined as string | undefined, requests: [] as Record<string, unknown>[] };
   srv.addService(pkg.PaymentService.service, {
     PrepareCheckout: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
       const r = call.request;
       state.requests.push(r);
+      if (state.pausedDetails !== undefined) {
+        cb({ code: grpc.status.FAILED_PRECONDITION, details: state.pausedDetails });
+        return;
+      }
       const pinned = r.pinned_pg === 'PG_PROVIDER_UNSPECIFIED' ? undefined : String(r.pinned_pg).replace('PG_PROVIDER_', '');
       const pg = pinned ?? state.switchTo ?? 'TOSS';
       const krw = (r.amount as { krw: number }).krw;
@@ -534,6 +538,23 @@ describe('StartPayment + 실제 PostgreSQL·gRPC', () => {
       expect(await attemptsOf(o.id)).toMatchObject([{ id: started.attempt.attemptId, pg, status: 'ACCEPTED' }]);
       const again = await w.start.execute(w.command());
       expect(again).toEqual({ status: 'REJECTED', reason: 'ALREADY_ACCEPTED' });
+    } finally {
+      w.close();
+      srv.close();
+    }
+  });
+
+  test('P-T43_payment-svc가 새 결제 일시 정지면 503 쪽 결과이고 시도·이력·멱등 기록이 남지 않으며 홀드 남은 초를 싣는다(BUILD_ORDER PRF-201) [ASVS v5.0.0-16.5.3]', async () => {
+    const srv = await paymentServer();
+    srv.state.pausedDetails = 'new-payment-paused';
+    const s = fresh();
+    const o = await placed(s);
+    const w = world(s, o, srv.address);
+    try {
+      expect(await w.start.execute(w.command())).toEqual({ status: 'REJECTED', reason: 'NEW_PAYMENT_PAUSED', holdRemainingSeconds: 420 });
+      expect(await attemptsOf(o.id)).toHaveLength(0);
+      expect((await orderRow(o.id))!.event_seq).toBe(1);
+      expect(await idemRows(o.accountId)).toHaveLength(0);
     } finally {
       w.close();
       srv.close();

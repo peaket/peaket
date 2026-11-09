@@ -64,11 +64,11 @@ docs/api/proto/
 
 | 부르는 쪽 → 받는 쪽 | 호출 | 하는 일 | 멱등 키 | 정본 흐름 | 통신 표 |
 | --- | --- | --- | --- | --- | --- |
-| purchase-svc → payment-svc | `PrepareCheckout` | 결제창 준비. 데드라인 300ms [가정], 고른 결제사를 쓸 수 없으면 `UNAVAILABLE`(글 `pg-unavailable`, 추천 적용 2026-11-09, BUILD_ORDER PRF-190) | 읽기라 없음(시도의 결제사는 부르는 쪽이 고정한다) | docs/features/payment.md §2·§2.2 | 있음 |
+| purchase-svc → payment-svc | `PrepareCheckout` | 결제창 준비. 데드라인 300ms [가정], 고른 결제사를 쓸 수 없으면 `UNAVAILABLE`(글 `pg-unavailable`, 추천 적용 2026-11-09, BUILD_ORDER PRF-190), 새 결제 일시 정지와 채널 없음·비활성이면 `FAILED_PRECONDITION`(글 `new-payment-paused`, 재생은 정지를 보지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-201) | 읽기라 없음(시도의 결제사는 부르는 쪽이 고정한다) | docs/features/payment.md §2·§2.2 | 있음 |
 | purchase-svc → payment-svc | `ConfirmPayment` | 승인 명령(접수만 기다리고 결과는 `trade.payments`) | `confirm-{order_id}` | docs/features/payment.md §2·§2.1 | 있음 |
 | purchase-svc → payment-svc | `BatchGetPayments` | 결과 당기기: 결과 사건이 5초 [가정] 안에 오지 않은 주문을 최대 100건 [가정]씩 묻는다(점검은 1초 [가정]마다, 같은 주문은 5초 [가정]에 한 번. 쓰기 인스턴스 읽기, 결제사 호출 없음, ADR-0140) | 읽기라 없음 | docs/features/payment.md §2 | 있음 |
 | purchase-svc → payment-svc | `GetPayment`, `CancelPayment` | 조회, 취소(예매 취소·발권 실패 보상·일괄 환불) | `cancel-{cancellation_id}` | docs/features/payment.md §2.1, docs/features/transfer-refund.md §5 | 있음 |
-| purchase-svc → payment-svc | `GetNewPaymentPause` | 새 결제 일시 정지 조회(홀드 만료 작업이 1초마다) | — | docs/features/payment.md §9, docs/features/seat-hold.md §5, ADR-0085 | 있음 |
+| purchase-svc → payment-svc | `GetNewPaymentPause` | 새 결제 일시 정지 조회(홀드 만료 작업이 1초마다. 데드라인 500ms [가정], 회차 1~200개 [가정], 추천 적용 2026-11-09, BUILD_ORDER PRF-201) | 읽기라 없음 | docs/features/payment.md §9, docs/features/seat-hold.md §5, ADR-0085 | 있음 |
 | core-svc shop → payment-svc | `PrepareCheckout`, `ConfirmPayment`, `CancelPayment` | 굿즈·부가 상품 결제 | 같음 | docs/architecture.md §3.2 | 있음 |
 | core-svc → payment-svc | `RegisterPayoutSeller` | 판매 승인 때 지급대행 판매자 등록 | — | docs/features/settlement.md | 있음 |
 | ops-svc → payment-svc | `ApprovePayoutBatch` | 지급 묶음 승인 뒤 지급 요청 시작 | `batch_id` | docs/features/settlement.md | 있음 |

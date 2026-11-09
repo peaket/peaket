@@ -285,7 +285,7 @@ export type PaymentAttemptResponse = z.output<typeof PaymentAttemptBody>;
 
 /**
  * 거절 → HTTP 문제 상세 대응표(openapi POST /v1/orders/{orderId}/payments 응답 설명과 x-peaket-problem-types의 status·title).
- * 503의 Retry-After는 2초 [가정]이다. PAY_METHOD_INVALID는 요청 검사 실패와 같은 400(about:blank)이다
+ * 503의 Retry-After는 2초 [가정]이고 새 결제 일시 정지만 5초 [가정]이다(BUILD_ORDER PRF-201). PAY_METHOD_INVALID는 요청 검사 실패와 같은 400(about:blank)이다
  */
 export const START_PAYMENT_PROBLEMS: Readonly<Record<StartPaymentRejection, OrderProblemSpec>> = {
   SESSION_ENDED: { status: 401, type: 'purchase-session-ended', title: '예매 시간이 끝났습니다' },
@@ -297,6 +297,7 @@ export const START_PAYMENT_PROBLEMS: Readonly<Record<StartPaymentRejection, Orde
   SALE_PAUSED: { status: 423, type: 'sale-paused', title: '판매가 잠시 멈췄습니다' },
   SEAT_STORE_UNAVAILABLE: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 },
   PG_UNAVAILABLE: { status: 503, type: 'pg-unavailable', title: '결제를 잠시 시작할 수 없습니다', retryAfterSeconds: 2 },
+  NEW_PAYMENT_PAUSED: { status: 503, type: 'new-payment-paused', title: '새 결제를 잠시 멈췄습니다', retryAfterSeconds: 5 },
   CHECKOUT_MISCONFIGURED: { status: 503, type: 'dependency-unavailable', title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 },
   PAY_METHOD_INVALID: { status: 400, type: 'about:blank', title: 'Bad Request' },
   DEADLINE_EXCEEDED: DEADLINE_EXCEEDED_PROBLEM,
@@ -307,7 +308,7 @@ export const START_PAYMENT_PROBLEMS: Readonly<Record<StartPaymentRejection, Orde
  * - SESSION_ENDED: reply에 WWW-Authenticate: Cookie realm="peaket"을 단다.
  * - PAY_METHOD_INVALID: 플랫폼 RequestValidationError(400 about:blank). 받은 값은 싣지 않는다
  */
-export function throwStartPaymentProblem(reason: StartPaymentRejection, reply: { header(name: string, value: string): unknown }): never {
+export function throwStartPaymentProblem(reason: StartPaymentRejection, reply: { header(name: string, value: string): unknown }, o: { readonly holdRemainingSeconds?: number } = {}): never {
   if (reason === 'PAY_METHOD_INVALID') throw new RequestValidationError('이 회차에서 쓸 수 없는 결제수단이다');
   if (reason === 'SESSION_ENDED') reply.header('www-authenticate', COOKIE_CHALLENGE);
   const spec = START_PAYMENT_PROBLEMS[reason];
@@ -317,6 +318,7 @@ export function throwStartPaymentProblem(reason: StartPaymentRejection, reply: {
     title: spec.title,
     ...(spec.retryAfterSeconds !== undefined ? { retryAfterSeconds: spec.retryAfterSeconds } : {}),
     ...(spec.normalBranch ? { normalBranch: true } : {}),
+    ...(o.holdRemainingSeconds !== undefined ? { extensions: { holdRemainingSeconds: o.holdRemainingSeconds } } : {}),
   });
 }
 
@@ -446,7 +448,7 @@ export class OrdersController {
       ...(deadline ? { deadline } : {}),
     });
     if (r.status === 201) return paymentAttemptResponseOf(r.attempt);
-    throwStartPaymentProblem(r.reason, reply);
+    throwStartPaymentProblem(r.reason, reply, r.holdRemainingSeconds === undefined ? {} : { holdRemainingSeconds: r.holdRemainingSeconds });
   }
 
   /**

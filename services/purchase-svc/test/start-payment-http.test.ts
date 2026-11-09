@@ -240,6 +240,7 @@ const REJECTIONS: Record<StartPaymentRejection, { arrange?: () => void; headers?
   SALE_PAUSED: { arrange: () => (fx.slot = { status: 'PAUSED' }) },
   SEAT_STORE_UNAVAILABLE: { arrange: () => (fx.slot = { status: 'NOT_READY' }) },
   PG_UNAVAILABLE: { arrange: () => (fx.checkoutAnswers = [{ status: 'PG_UNAVAILABLE', reason: 'pg_unavailable' }]) },
+  NEW_PAYMENT_PAUSED: { arrange: () => (fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }]) },
   CHECKOUT_MISCONFIGURED: { arrange: () => (fx.checkoutAnswers = [{ status: 'MISCONFIGURED', reason: 'unimplemented' }]) },
   PAY_METHOD_INVALID: { arrange: () => (fx.checkoutAnswers = [{ status: 'PAY_METHOD_INVALID' }]) },
   DEADLINE_EXCEEDED: { headers: { [DEADLINE_HEADER]: '4' } },
@@ -280,6 +281,23 @@ describe('거절 → 문제 상세(START_PAYMENT_PROBLEMS 전부)', () => {
     else expect(json(r)).toMatchObject({ type: problem(spec.type), status: spec.status, title: spec.title });
     expect(r.headers['retry-after']).toBe(spec.retryAfterSeconds === undefined ? undefined : String(spec.retryAfterSeconds));
     expect(fx.started).toHaveLength(0);
+  });
+
+  test('P-T43_새 결제 일시 정지는 503 new-payment-paused, Retry-After 5초이고 본문에 홀드 남은 시간만 더 싣는다(BUILD_ORDER PRF-201) [ASVS v5.0.0-15.3.1] [ASVS v5.0.0-16.5.3]', async () => {
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    const r = await post({});
+    expect(r.statusCode).toBe(503);
+    expect(r.headers['retry-after']).toBe('5');
+    expect(json(r)).toEqual({ type: problem('new-payment-paused'), title: '새 결제를 잠시 멈췄습니다', status: 503, holdRemainingSeconds: Math.ceil((HOLD_EXPIRES_AT_MS - NOW) / 1000), instance: pathOf(ORDER_ID), traceId: expect.any(String) });
+    expect(fx.started).toHaveLength(0);
+  });
+
+  test('P-T43_홀드 만료를 읽지 못하면 holdRemainingSeconds 칸이 없다', async () => {
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    fx.holdExpiry = undefined;
+    const r = await post({});
+    expect(r.statusCode).toBe(503);
+    expect(json(r)).not.toHaveProperty('holdRemainingSeconds');
   });
 
   test('FR011_구매 세션이 끝났으면 WWW-Authenticate: Cookie realm="peaket"이다', async () => {

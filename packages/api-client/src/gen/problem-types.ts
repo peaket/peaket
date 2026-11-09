@@ -82,6 +82,7 @@ export type ProblemType =
   | 'merge-check-unavailable'
   | 'merge-invariant-violated'
   | 'merge-proposal-not-found'
+  | 'new-payment-paused'
   | 'next-invalid'
   | 'nickname-check-limited'
   | 'nickname-invalid'
@@ -266,6 +267,7 @@ export const PROBLEM_TYPES = {
   'merge-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
   'merge-proposal-not-found': { status: 404, title: "병합 제안이 없거나 시간이 지났습니다" },
+  'new-payment-paused': { status: 503, title: "새 결제를 잠시 멈췄습니다" },
   'next-invalid': { status: 400, title: "돌아갈 주소가 같은 출처 경로가 아닙니다" },
   'nickname-check-limited': { status: 429, title: "닉네임 확인을 너무 많이 했습니다. 잠시 뒤 다시 시도해 주세요" },
   'nickname-invalid': { status: 400, title: "닉네임 꼴이 맞지 않습니다" },

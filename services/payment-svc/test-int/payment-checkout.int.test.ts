@@ -15,10 +15,12 @@ import { startGrpcServer } from '../src/grpc-server.js';
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  CachedEntryPauseReader,
   CachedPgSelectionReader,
   CancelDepositPayment,
   channelTableOf,
   DrizzleConfirmJobs,
+  DrizzleEntryPause,
   DrizzlePaymentStore,
   DrizzlePgSelection,
   PG_SELECTION_CACHE_TTL_MS,
@@ -85,8 +87,11 @@ async function startStack(): Promise<Stack> {
   const store = new DrizzlePaymentStore({ database: hot, batchDatabase: hot });
   const selection = new DrizzlePgSelection({ database: hot });
   const gateways = realGateways();
+  const entry = new DrizzleEntryPause({ database: hot });
   const prepareCheckout = new PrepareCheckout({
     selection: new CachedPgSelectionReader({ reader: selection, clock }),
+    pauses: new CachedEntryPauseReader({ reader: entry, clock, signals: checkoutSignals }),
+    trials: entry,
     gateways,
     channels: channelTableOf(gateways),
     defaults: { primary: 'TOSS', fallback: 'PORTONE' },

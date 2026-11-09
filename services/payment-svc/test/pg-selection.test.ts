@@ -11,6 +11,7 @@ import { ENTRY_OPENS_AT_MAX_MS, parseConfirmPaymentInput, PaymentDeadlineError, 
 import { type CheckoutAttempt, type CheckoutOrder, type CheckoutValues, PAY_METHODS, type PayMethod, type PaymentGatewayPort, type PgCapabilities, type PgName } from '../src/modules/payment/domain/payment-gateway.js';
 import { allowedPayMethods, channelOf, channelTableOf, checkoutReturnUrls, type PgChannel, type PgChannelTable, type PgSelectionInput, type PgSelectionState, PaymentPgUnavailableError, parsePrepareCheckoutInput, type PgSwitchRow, type PrepareCheckoutInput, selectPg } from '../src/modules/payment/domain/pg-selection.js';
 import type { PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutOutcome, PrepareCheckoutSignals } from '../src/modules/payment/domain/ports.js';
+import { type EntryPauseRow, PaymentNewPausedError } from '../src/modules/payment/domain/entry-pause.js';
 import { capDepositDueAtEntry, checkoutDepositDueAtMs, reversalDueAtMs } from '../src/modules/payment/domain/virtual-account.js';
 import { checkoutAdapterWarnings, loadCheckoutConfig, loadPortoneGatewayConfig } from '../src/config.js';
 import { DrizzlePgSelection } from '../src/modules/payment/adapters/db/drizzle-pg-selection.js';
@@ -519,7 +520,9 @@ describe('DrizzlePgSelection', () => {
 });
 
 describe('PrepareCheckout 쓰임새', () => {
-  const setup = (o: { state?: PgSelectionState; gateways?: readonly FakeGateway[]; deps?: Partial<PrepareCheckoutDeps> } = {}) => {
+  const setup = (o: { state?: PgSelectionState; gateways?: readonly FakeGateway[]; deps?: Partial<PrepareCheckoutDeps>; pauses?: readonly EntryPauseRow[]; admitted?: readonly string[] } = {}) => {
+    const pauseReads: unknown[] = [];
+    const trialReads: [string, PgName][] = [];
     const toss = new FakeGateway('TOSS');
     const portone = new FakeGateway('PORTONE');
     const gateways = new Registry(o.gateways ?? [toss, portone]);
@@ -537,6 +540,18 @@ describe('PrepareCheckout 쓰임새', () => {
           return o.state ?? {};
         },
       },
+      pauses: {
+        read: async (b) => {
+          pauseReads.push(b);
+          return new Map((o.pauses ?? []).map((r) => [r.pg, r]));
+        },
+      },
+      trials: {
+        isAdmitted: async (orderId, pg) => {
+          trialReads.push([orderId, pg]);
+          return (o.admitted ?? []).includes(orderId);
+        },
+      },
       gateways,
       channels: channelTableOf(gateways),
       defaults: DEFAULTS,
@@ -547,8 +562,10 @@ describe('PrepareCheckout 쓰임새', () => {
       signals,
       ...o.deps,
     });
-    return { uc, toss, portone, outcomes, unavailable, unsupported, clock, budgets };
+    return { uc, toss, portone, outcomes, unavailable, unsupported, clock, budgets, pauseReads, trialReads };
   };
+
+  const pausedRow = (o: Partial<EntryPauseRow> = {}): EntryPauseRow => ({ pg: 'TOSS', stage: 'PROBING', reason: 'PG_FAILURE', sinceMs: NOW, version: 1, ...o });
 
   const cardOnly = () => [new FakeGateway('TOSS', { payMethods: ['CARD'] }), new FakeGateway('PORTONE')];
 
@@ -618,11 +635,11 @@ describe('PrepareCheckout 쓰임새', () => {
     expect(s.outcomes).toEqual([['PORTONE', 'switched']]);
   });
 
-  test('P-T26_쓸 수 없으면 값을 만들지 않고 pg-unavailable이며 경보 로그는 까닭마다 1분에 한 번이다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-16.2.5]', async () => {
+  test('P-T26_채널이 없으면 값을 만들지 않고 new-payment-paused이며 경보 로그는 까닭마다 1분에 한 번이다(PRF-201로 답이 바뀜) [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-16.2.5]', async () => {
     const portone = new FakeGateway('PORTONE');
     const s = setup({ gateways: [portone] });
-    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentPgUnavailableError);
-    await expect(s.uc.execute(raw())).rejects.toThrow('pg-unavailable');
+    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentNewPausedError);
+    await expect(s.uc.execute(raw())).rejects.toThrow('new-payment-paused');
     expect(portone.checkouts).toEqual([]);
     expect(s.unavailable).toEqual([{ pg: 'TOSS', reason: 'NO_CHANNEL', eventId: EVENT }]);
     expect(s.outcomes).toEqual([
@@ -630,16 +647,158 @@ describe('PrepareCheckout 쓰임새', () => {
       ['TOSS', 'pg_unavailable'],
     ]);
     s.clock.advance(60_000);
-    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentPgUnavailableError);
+    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentNewPausedError);
     expect(s.unavailable).toHaveLength(2);
   });
 
-  test('P-T26_서버 승인을 못 하는 어댑터는 고르지 않는다 [ASVS v5.0.0-2.2.3]', async () => {
+  test('P-T26_서버 승인을 못 하는 어댑터는 고르지 않고 new-payment-paused다(PRF-201로 답이 바뀜) [ASVS v5.0.0-2.2.3]', async () => {
     const toss = new FakeGateway('TOSS', { serverConfirm: false });
     const s = setup({ gateways: [toss, new FakeGateway('PORTONE')] });
-    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentPgUnavailableError);
+    await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentNewPausedError);
     expect(s.unavailable).toEqual([{ pg: 'TOSS', reason: 'INACTIVE', eventId: EVENT }]);
     expect(toss.checkouts).toEqual([]);
+  });
+
+  describe('새 결제 일시 정지(P-T43, BUILD_ORDER PRF-201)', () => {
+    test('P-T43_고른 결제사가 확인 호출 단계면 값을 만들지 않고 new-payment-paused이며 지표가 오른다 [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-2.3.2]', async () => {
+      const s = setup({ pauses: [pausedRow()] });
+      await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentNewPausedError);
+      expect(s.toss.checkouts).toEqual([]);
+      expect(s.outcomes).toEqual([['TOSS', 'new_payment_paused']]);
+      expect(s.trialReads).toEqual([]);
+    });
+
+    test('P-T43_다른 결제사가 멈춰도 고른 결제사가 열려 있으면 값을 만든다', async () => {
+      const s = setup({ pauses: [pausedRow({ pg: 'PORTONE' })] });
+      await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
+      expect(s.toss.checkouts).toHaveLength(1);
+    });
+
+    test('P-T43_OPEN 행은 열림이다', async () => {
+      const s = setup({ pauses: [pausedRow({ stage: 'OPEN' })] });
+      await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
+    });
+
+    test('P-T43_시험 재개에서 받지 않은 주문은 503이고 받은 주문의 재호출은 다시 통과한다 [ASVS v5.0.0-2.3.2]', async () => {
+      const s = setup({ pauses: [pausedRow({ stage: 'TRIAL' })], admitted: [ORDER] });
+      await expect(s.uc.execute(raw({ orderId: ATTEMPT }))).rejects.toBeInstanceOf(PaymentNewPausedError);
+      await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
+      expect(s.trialReads).toEqual([
+        [ATTEMPT, 'TOSS'],
+        [ORDER, 'TOSS'],
+      ]);
+    });
+
+    test('P-T43_확인 호출 단계로 돌아가면 받은 주문이어도 통과하지 않고 시험 행을 읽지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+      const s = setup({ pauses: [pausedRow({ stage: 'PROBING' })], admitted: [ORDER] });
+      await expect(s.uc.execute(raw())).rejects.toBeInstanceOf(PaymentNewPausedError);
+      expect(s.trialReads).toEqual([]);
+    });
+
+    test('P-T43_재생은 정지를 읽지 않고 값을 다시 만든다 [ASVS v5.0.0-16.5.2]', async () => {
+      const s = setup({ pauses: [pausedRow()] });
+      await expect(s.uc.execute(raw({ pinnedPg: 'TOSS' }))).resolves.toMatchObject({ pg: 'TOSS' });
+      expect(s.pauseReads).toEqual([]);
+      expect(s.toss.checkouts).toHaveLength(1);
+    });
+
+    test('P-T43_재생에서 채널이 없으면 new-payment-paused가 아니라 pg-unavailable이다(처음 201을 준 요청이다)', async () => {
+      const s = setup({ gateways: [new FakeGateway('PORTONE')] });
+      await expect(s.uc.execute(raw({ pinnedPg: 'TOSS' }))).rejects.toBeInstanceOf(PaymentPgUnavailableError);
+    });
+
+    test('P-T43_수단 미지원은 정지가 아니라 pg-unavailable 그대로다', async () => {
+      const s = setup({ gateways: cardOnly(), pauses: [pausedRow()] });
+      await expect(s.uc.execute(raw({ payMethod: 'EASY_PAY' }))).rejects.toBeInstanceOf(PaymentPgUnavailableError);
+    });
+
+    test('P-T43_정지 중이어도 틀린 수단은 입력 오류가 먼저다 [ASVS v5.0.0-2.2.1]', async () => {
+      const s = setup({ pauses: [pausedRow()] });
+      await expect(s.uc.execute(raw({ payMethod: 'VIRTUAL_ACCOUNT', virtualAccountAllowed: false }))).rejects.toBeInstanceOf(PaymentInputError);
+    });
+
+    test('P-T43_정지 행 읽기와 선택 읽기는 함께 돌아 이 호출의 시한을 두 번 쓰지 않는다', async () => {
+      const order: string[] = [];
+      let releaseSelection = (): void => {};
+      const gate = new Promise<void>((r) => {
+        releaseSelection = r;
+      });
+      const s = setup({
+        deps: {
+          selection: {
+            read: async () => {
+              order.push('selection');
+              await gate;
+              return {};
+            },
+          },
+          pauses: {
+            read: async () => {
+              order.push('pauses');
+              releaseSelection();
+              return new Map();
+            },
+          },
+        },
+      });
+      await expect(s.uc.execute(raw())).resolves.toMatchObject({ pg: 'TOSS' });
+      expect(order).toEqual(['selection', 'pauses']);
+    });
+
+    test('P-T43_정지 행을 읽지 못하면 그대로 던지고 error로 한 번만 센다(값을 지어내지 않는다) [ASVS v5.0.0-16.5.3]', async () => {
+      const boom = new Error('읽기 실패');
+      const s = setup({
+        deps: {
+          pauses: {
+            read: async () => {
+              throw boom;
+            },
+          },
+        },
+      });
+      await expect(s.uc.execute(raw())).rejects.toBe(boom);
+      expect(s.outcomes).toEqual([['none', 'error']]);
+      expect(s.toss.checkouts).toEqual([]);
+    });
+
+    test('P-T43_리뷰 고침 L3: 시험 행 읽기에는 앞의 읽기에 쓴 시간을 뺀 시한을 준다 [ASVS v5.0.0-16.5.2]', async () => {
+      const seen: unknown[] = [];
+      const s = setup({
+        pauses: [pausedRow({ stage: 'TRIAL' })],
+        deps: {
+          selection: {
+            read: async () => {
+              s.clock.advance(120);
+              return {};
+            },
+          },
+          trials: {
+            isAdmitted: async (_orderId, _pg, budget) => {
+              seen.push(budget);
+              return true;
+            },
+          },
+        },
+      });
+      await expect(s.uc.execute(raw(), { remainingMs: 300 })).resolves.toMatchObject({ pg: 'TOSS' });
+      expect(seen).toEqual([{ remainingMs: 180 }]);
+    });
+
+    test('P-T43_시험 행을 읽지 못하면 통과시키지 않고 던진다 [ASVS v5.0.0-16.5.3]', async () => {
+      const boom = new Error('시험 행 읽기 실패');
+      const s = setup({
+        pauses: [pausedRow({ stage: 'TRIAL' })],
+        deps: {
+          trials: {
+            isAdmitted: async () => {
+              throw boom;
+            },
+          },
+        },
+      });
+      await expect(s.uc.execute(raw())).rejects.toBe(boom);
+      expect(s.toss.checkouts).toEqual([]);
+    });
   });
 
   test('P-T26_허용 수단과 입금 기한을 답에 싣는다(입장 시각 상한 포함)', async () => {

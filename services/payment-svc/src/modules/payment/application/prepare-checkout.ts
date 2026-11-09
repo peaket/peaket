@@ -1,10 +1,12 @@
-// 결제창 준비 쓰임새(docs/features/payment.md §2.2 '선택기의 첫 구현', BUILD_ORDER PRF-190). 결제사를 부르지 않고 쓰기가 없다.
+// 결제창 준비 쓰임새(docs/features/payment.md §2.2 '선택기의 첫 구현', BUILD_ORDER PRF-190). 결제사를 부르지 않는다. 쓰기는 시험 재개의 payment_entry_trial뿐이고 PRF-202가 더한다.
+// 새 결제 일시 정지(BUILD_ORDER PRF-201): 고른 결제사가 정지면 PaymentNewPausedError다. 재생은 정지를 읽지 않고, 시험 재개에서 받은 주문은 다시 통과한다.
 import type { Clock } from '@peaket/platform';
 import { PaymentInputError } from '../domain/confirm-command.js';
 import { LogGate } from '../domain/log-gate.js';
 import type { CheckoutValues, PayMethod, PgName } from '../domain/payment-gateway.js';
+import { type EntryPauses, isEntryPaused, PaymentNewPausedError } from '../domain/entry-pause.js';
 import { allowedPayMethods, checkoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
-import type { CallBudget, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
+import type { CallBudget, EntryPauseReader, EntryTrialReader, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
 import { checkoutDepositDueAtMs } from '../domain/virtual-account.js';
 
 /** 결제사를 고르지 못한 경보 로그의 간격 1분 [가정](결제사·까닭마다) */
@@ -12,6 +14,10 @@ const PG_UNAVAILABLE_LOG_INTERVAL_MS = 60_000;
 
 export interface PrepareCheckoutDeps {
   selection: PgSelectionReader;
+  /** 새 결제 일시 정지 행(파드 캐시, BUILD_ORDER PRF-201) */
+  pauses: EntryPauseReader;
+  /** 시험 재개로 받은 주문(BUILD_ORDER PRF-201) */
+  trials: EntryTrialReader;
   gateways: PaymentGateways;
   channels: PgChannelTable;
   defaults: PgPlatformDefaults;
@@ -40,12 +46,13 @@ export class PrepareCheckout {
   constructor(private readonly deps: PrepareCheckoutDeps) {}
 
   /**
-   * @throws PaymentInputError 입력이 틀림 · PaymentPgUnavailableError 고른 결제사를 쓸 수 없음 · PaymentDeadlineError·저장소 오류
+   * @throws PaymentInputError 입력이 틀림 · PaymentPgUnavailableError 고른 결제사가 수단을 받지 않거나 재생에서 쓸 수 없음 · PaymentNewPausedError 새 결제 일시 정지(채널 없음·비활성 포함) · PaymentDeadlineError·저장소 오류
    */
   async execute(input: PrepareCheckoutInput, budget?: CallBudget): Promise<PrepareCheckoutAnswer> {
     const { signals, gateways, channels, defaults, webOrigin, virtualAccountReady, clock } = this.deps;
+    const startedAtMs = clock.monotonicMs();
     const command = this.#parse(input);
-    const state = await this.#read(command, budget);
+    const [state, pauses] = await this.#read(command, budget);
     const selection = selectPg({ ...state, defaults, channels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) });
     if (selection.kind === 'UNAVAILABLE') throw this.#unavailable(selection.pg, selection.reason, command);
     const gateway = gateways.of(selection.pg);
@@ -58,6 +65,8 @@ export class PrepareCheckout {
       signals.prepared('none', 'invalid');
       throw new PaymentInputError('pay_method');
     }
+    // 시험 행 읽기는 앞의 읽기가 쓴 시간을 뺀 시한으로 한다(BUILD_ORDER PRF-201 코드 리뷰)
+    if (pauses !== undefined) await this.#passPause(selection.pg, pauses, command, budget === undefined ? undefined : { remainingMs: budget.remainingMs - (clock.monotonicMs() - startedAtMs) });
     const urls = checkoutReturnUrls(webOrigin, command.eventId, command.orderId, selection.pg);
     const checkout = gateway.checkout(
       { orderId: command.orderId, orderName: command.orderName, amount: command.amount, ...(command.customerKey === undefined ? {} : { customerKey: command.customerKey }) },
@@ -77,24 +86,46 @@ export class PrepareCheckout {
     }
   }
 
-  async #read(command: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<PgSelectionState> {
+  /** 재생은 정지를 읽지 않는다(처음 201을 준 요청이다). 두 읽기를 함께 돌려 호출의 시한을 두 번 쓰지 않는다 */
+  async #read(command: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<[PgSelectionState, EntryPauses | undefined]> {
     try {
-      return await this.deps.selection.read(command.eventId, budget);
+      return await Promise.all([this.deps.selection.read(command.eventId, budget), command.pinnedPg === undefined ? this.deps.pauses.read(budget) : undefined]);
     } catch (err) {
       this.deps.signals.prepared('none', 'error');
       throw err;
     }
   }
 
-  /** 답은 까닭과 상관없이 pg-unavailable이다. 수단 미지원은 결제사 장애가 아니라서 SEV2 경보(pg_unavailable)와 오류 로그에 세지 않는다(BUILD_ORDER PRF-190 코드 리뷰) */
-  #unavailable(pg: PgName, reason: PgUnavailableReason, { eventId, payMethod }: PrepareCheckoutCommand): PaymentPgUnavailableError {
+  /** 고른 결제사가 정지면 던진다. 시험 재개에서 이미 받은 주문의 재호출만 지나간다(5% [가정] 추첨은 PRF-202). 시험 행을 읽지 못하면 통과시키지 않는다 */
+  async #passPause(pg: PgName, pauses: EntryPauses, { orderId }: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<void> {
+    const row = pauses.get(pg);
+    if (!isEntryPaused(row)) return;
+    if (row.stage === 'TRIAL') {
+      let admitted: boolean;
+      try {
+        admitted = await this.deps.trials.isAdmitted(orderId, pg, budget);
+      } catch (err) {
+        this.deps.signals.prepared(pg, 'error');
+        throw err;
+      }
+      if (admitted) return;
+    }
+    this.deps.signals.prepared(pg, 'new_payment_paused');
+    throw new PaymentNewPausedError();
+  }
+
+  /**
+   * 채널 없음·비활성은 새 결제 일시 정지와 같은 답이고 수단 미지원·재생은 pg-unavailable이다(BUILD_ORDER PRF-201). 경보와 로그는 까닭을 그대로 센다.
+   * 수단 미지원은 결제사 장애가 아니라서 SEV2 경보(pg_unavailable)와 오류 로그에 세지 않는다(BUILD_ORDER PRF-190 코드 리뷰)
+   */
+  #unavailable(pg: PgName, reason: PgUnavailableReason, { eventId, payMethod, pinnedPg }: PrepareCheckoutCommand): PaymentPgUnavailableError | PaymentNewPausedError {
     this.deps.signals.prepared(pg, reason === 'METHOD_UNSUPPORTED' ? 'method_unsupported' : 'pg_unavailable');
     const allowed = this.#gateOf(reason === 'METHOD_UNSUPPORTED' ? `${pg}:${reason}:${payMethod}` : `${pg}:${reason}`).allow();
     if (allowed) {
       if (reason === 'METHOD_UNSUPPORTED') this.deps.log.methodUnsupported({ pg, payMethod, eventId });
       else this.deps.log.pgUnavailable({ pg, reason, eventId });
     }
-    return new PaymentPgUnavailableError();
+    return reason === 'METHOD_UNSUPPORTED' || pinnedPg !== undefined ? new PaymentPgUnavailableError() : new PaymentNewPausedError();
   }
 
   #gateOf(key: string): LogGate {

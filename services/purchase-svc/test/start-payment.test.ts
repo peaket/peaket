@@ -254,6 +254,28 @@ describe('결제창 준비 실패(결제 시도를 만들지 않는다)', () => 
     expect(fx.metrics).toEqual([{ pg: 'none', outcome }]);
   });
 
+  test('P-T43_새 결제 일시 정지면 시도 행을 쓰지 않고 지금부터 홀드 만료까지의 초를 싣는다(BUILD_ORDER PRF-201) [ASVS v5.0.0-16.5.3]', async () => {
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    expect(await run()).toEqual({ status: 'REJECTED', reason: 'NEW_PAYMENT_PAUSED', holdRemainingSeconds: Math.ceil((HOLD_EXPIRES_AT_MS - NOW) / 1000) });
+    expect(fx.started).toHaveLength(0);
+    expect(fx.metrics).toEqual([{ pg: 'none', outcome: 'new_payment_paused' }]);
+  });
+
+  test('P-T43_남은 시간은 초로 올림하고 이미 지났으면 0이다', async () => {
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    fx.holdExpiry = NOW + 1_001;
+    expect(await run()).toMatchObject({ holdRemainingSeconds: 2 });
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    fx.holdExpiry = NOW - 5_000;
+    expect(await run()).toMatchObject({ holdRemainingSeconds: 0 });
+  });
+
+  test('P-T43_홀드 만료를 읽지 못하면 칸을 뺀다(화면이 칸 없음을 다룬다) [ASVS v5.0.0-16.5.2]', async () => {
+    fx.checkoutAnswers = [{ status: 'NEW_PAYMENT_PAUSED' }];
+    fx.holdExpiry = undefined;
+    expect(await run()).toEqual({ status: 'REJECTED', reason: 'NEW_PAYMENT_PAUSED' });
+  });
+
   test('PT26_예상 밖의 답은 CHECKOUT_MISCONFIGURED이고 SEV2 설정 로그 한 줄이다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3]', async () => {
     fx.checkoutAnswers = [{ status: 'MISCONFIGURED', reason: 'permission_denied' }];
     expect(await run()).toEqual(rejected('CHECKOUT_MISCONFIGURED'));
