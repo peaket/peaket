@@ -543,6 +543,8 @@
 | R-428 | 결제사 장애 때 호출을 멈추는 서킷의 소유 단계가 없어 장애 중에도 승인이 나가 UNKNOWN이 쌓였다. 만들며 찾은 것: 반 열림에서 승인과 조회가 서로를 굶겼고, 시험 호출이 멈추면 회복 감지가 크게 늦었으며, 조회 실패가 승인을 막고 실제 승인이 시험으로 나갔다 | docs/features/payment.md, docs/data.md, docs/api/guidelines.md, docs/verification.md §4.1, docs/observability.md, docs/security/asvs/payment.md, docs/BUILD_ORDER.md, services/payment-svc(서킷·실행기 둘·마이그레이션 0010), packages/platform(acceptsCalls) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 10개 → 새 맥락 리뷰 → 고침. 단위 2,502, 통합 379 | 수정 완료 |
 | R-430 | 새 결제 일시 정지를 읽는 길이 없어 결제사 장애 때 새 결제를 막지 못했다. 만들며 찾은 것: 회차마다 트랜잭션을 열면 승인 명령과 풀을 다투고, 맡은 회차가 200개를 넘으면 조회가 영구히 실패하며, 앞 시험의 행이 다음 시험을 통과시킬 수 있었고, 정본의 최대 1초는 실제로 약 2초였다 | docs/features/payment.md, docs/api(openapi·proto·guidelines), docs/verification.md §4.1, docs/observability.md, docs/security/asvs/payment.md, docs/adr/0085, docs/BUILD_ORDER.md, services/payment-svc(정지 읽기·GetNewPaymentPause·PrepareCheckout), services/purchase-svc(503·클라이언트), packages/contracts·api-client(gen) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 8개 → 새 맥락 리뷰 → 고침. 단위 2,564, 통합 391 | 수정 완료 |
 | R-429 | BOT-055 최초 방문 쿠키·행동 신호·허니팟 기록 | docs/adr/0249, docs/features/bot-defense.md §4.4·§4.8, docs/features/queue-admission.md, docs/data.md §5, docs/infra.md, docs/security/asvs/bot-defense.md | 재현 시험 먼저 → 구현 → 새 맥락 리뷰 → 지적 수정 → 재검토 → 수정 → 브라우저 확인 | 수정 완료 |
+| R-431 | 공연 상세 그리기 중 시계 읽기로 ISR 저장 실패 | apps/web/src/_pages/event-detail/ui/Booking.tsx, tools/web-checks/budgets/isr.spec.mjs, docs/frontend.md §5.8 | CI 실패 조사 → 재현 → 고침 → 재현 시험 통과 | 수정 완료 |
+| R-432 | 로비 게시 시험 5건이 진짜 시계를 써서 2026-11-09 11:00 UTC 뒤로 영구히 실패했다(CI 42608431030) | services/admission-ctrl/test/publish.test.ts | 저장소 시계를 목록 고정 시각에 묶음, 단정 그대로. 그 파일 40건 통과 | 수정 완료 |
 
 ## 4. 숫자 일치표
 

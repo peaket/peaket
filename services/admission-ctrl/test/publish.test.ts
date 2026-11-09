@@ -323,7 +323,8 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
 
   async function lobby(o: { members?: string[]; verifying?: string[]; beacon?: Buffer | null; now?: number; round?: number; noRecord?: boolean; commitOffsetMs?: number } = {}) {
     const clock = fakeClock({ now: o.now ?? drandRoundTimeMs(ROUND) + 1_000 });
-    const store = new MemoryBatchStore();
+    // 저장소 시계는 목록을 고정한 시각(비콘 라운드 전)에 묶는다. 진짜 시계를 쓰면 OPENS가 지난 뒤부터 조기 루트 시각이 라운드보다 늦어 late_root로 멈춘다
+    const store = new MemoryBatchStore({ now: () => OPENS });
     const members = o.members ?? ['p', 'q', 'r'].map(hash);
     store.setForTest(E, { startsAtMs: START, opensAtMs: OPENS, members, closed: { first: 1, size: members.length, gen: 1 }, group: 'lobby', verifying: o.verifying ?? [] });
     const records = new MemoryShuffleRecords();
