@@ -3,6 +3,9 @@
 // 오류 문구에는 칸의 이름만 싣는다(값을 싣지 않는다).
 import { z } from 'zod';
 
+/** 회차별 기기 공유 수의 원소 상한 [가정](bot-defense §3.2 tr:devshare). 저장소가 이 수를 넘겨 세지 않는다 */
+export const DEV_SHARE_CAP = 20;
+
 const positive = z.number().finite().positive();
 const notNegative = z.number().finite().nonnegative();
 
@@ -54,7 +57,8 @@ const params = z
         ['sharedFrom', 'sharedAt'],
         ['failuresFrom', 'failuresAt'],
       ],
-    ),
+      // 공유 수는 상한까지만 세므로 끝값이 상한을 넘으면 위험이 끝값에 닿지 못한다
+    ).refine((d) => d.sharedAt <= DEV_SHARE_CAP, { message: '공유 수 끝값이 상한을 넘는다' }),
     behavior: ordered({ entropyLow: notNegative, entropyHigh: positive, intervalStdLow: notNegative, intervalStdHigh: positive, minPointerMoves: z.int().positive(), minWindowMs: z.int().positive() }, [
       ['entropyLow', 'entropyHigh'],
       ['intervalStdLow', 'intervalStdHigh'],

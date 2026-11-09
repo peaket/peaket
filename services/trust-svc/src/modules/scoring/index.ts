@@ -2,7 +2,8 @@
 export { ScoreRisk } from './application/score-risk.js';
 export { RecordHoneypot } from './application/record-honeypot.js';
 export { TrustError } from './application/trust-error.js';
-export { hmacDeviceRefsFromEnv } from './adapters/hmac-device-refs.js';
+export { deviceRefsFromEnv } from './adapters/device-refs.js';
+export { kmsMacClient } from './adapters/kms-mac-client.js';
 export { JsonTelemetryRecorder } from './adapters/json-telemetry-recorder.js';
 export { LogVerdictRecorder, PromTrustSignals } from './adapters/prom-trust-signals.js';
 export { RedisFeatureStore } from './adapters/redis-feature-store.js';

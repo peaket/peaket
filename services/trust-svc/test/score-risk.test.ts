@@ -159,10 +159,14 @@ describe('기록과 응답 범위', () => {
 
   test('B-T17③_로그인은여정ID·회차가없어도판정하고_사람확인토큰이없어도degraded가아니다', async () => {
     const w = world();
+    // 이력이 있는 기기로 본다(로그인 근거는 기기 이력이다, ADR-0251 결정 7)
+    await w.score.run(request());
+    await w.flush();
+    w.human.calls.length = 0;
     const r = await w.score.run(request({ context: 'LOGIN', journeyId: '', eventId: '', pid: '', humanCheckToken: '', shuffle: 'NONE', behavior: undefined }));
     expect(r).toEqual({ verdict: 'ALLOW', degraded: false });
     expect(w.human.calls).toHaveLength(0);
-    expect(w.recorder.records[0]!.missingScorers).toContain('HumanCheck');
+    expect(w.recorder.records.at(-1)!.missingScorers).toContain('HumanCheck');
   });
 
   test('B-T17④_사전검증의행동신호는screen이EVENT_DETAIL이고_여정ID를싣는다', async () => {
@@ -348,6 +352,7 @@ describe('리뷰2 피처 읽기 실패', () => {
     const w = world();
     w.features.failFeature('accounts');
     w.features.failFeature('history');
+    w.features.failFeature('shared');
     await w.score.run(request());
     expect(w.recorder.records[0]!.missingScorers).toContain('DeviceTrust');
     expect(w.signals.seen).toContain('missing:DeviceTrust:dependency');

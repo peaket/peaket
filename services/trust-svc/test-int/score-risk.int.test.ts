@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { keys, RedisFeatureStore } from '../src/modules/scoring/adapters/redis-feature-store.js';
 import { LogVerdictRecorder } from '../src/modules/scoring/adapters/prom-trust-signals.js';
-import { hmacDeviceRefsFromEnv } from '../src/modules/scoring/adapters/hmac-device-refs.js';
+import { deviceRefsFromEnv } from '../src/modules/scoring/adapters/device-refs.js';
 import { TurnstileHumanCheck } from '../src/modules/scoring/adapters/turnstile-human-check.js';
 import { ScoreRisk } from '../src/modules/scoring/application/score-risk.js';
 import { parseRuleSet } from '../src/modules/scoring/domain/rules.js';
@@ -24,7 +24,7 @@ const slow = (key: string) => ({ key, deadlineMs: 5_000 });
 type Unary = (r: object, md: grpc.Metadata, o: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => void;
 const clientPkg = grpc.loadPackageDefinition(protoLoader.fromJSON(trustV1Trust as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true })) as unknown as { peaket: { trust: { v1: { TrustService: grpc.ServiceClientConstructor } } } };
 
-const deviceRef = hmacDeviceRefsFromEnv({ PEAKET_ENV: 'ci', PEAKET_INV_REF_DEVICE_KEY: Buffer.alloc(32, 9).toString('base64') }).refs;
+const deviceRef = deviceRefsFromEnv({ PEAKET_ENV: 'ci', PEAKET_INV_REF_DEVICE_KEY: Buffer.alloc(32, 9).toString('base64') }, systemClock).refs;
 /** 형식에 맞는 기기 식별값(base64url 22자) */
 const dev = (name: string) => `D${name.replace(/[^A-Za-z0-9]/g, '').padEnd(21, '0').slice(0, 21)}`;
 

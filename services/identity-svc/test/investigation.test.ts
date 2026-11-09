@@ -1,7 +1,7 @@
 // 부정 예매 조사용 값(docs/features/identity.md §9.1 '조사용 값의 첫 구현', BUILD_ORDER BOT-045, I-T63·I-T64·I-T67, ADR-0171).
 // 라벨 키 링(10분 캐시·축소 동작), 기기·연락처 가명, ComputeContactRef·BatchGetInvestigationRefs를 메모리 저장소와 가짜 KMS로 본다. PostgreSQL·KMS 흉내 서버는 test-int/investigation.int.test.ts.
 import { createHmac } from 'node:crypto';
-import { fakeClock } from '@peaket/platform';
+import { fakeClock, invRef, labelKeyMessage } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { InvRefKeyRing } from '../src/modules/session/adapters/inv-ref-key-ring.js';
 import { MemoryMergeProposals } from '../src/modules/session/adapters/memory-merge-proposals.js';
@@ -13,7 +13,7 @@ import { ConfirmMerge } from '../src/modules/session/application/confirm-merge.j
 import { GetInvestigationRefs } from '../src/modules/session/application/get-investigation-refs.js';
 import { InvRefError } from '../src/modules/session/application/inv-ref-error.js';
 import { MergePlanner } from '../src/modules/session/application/plan-merge.js';
-import { contactEmail, invRef, labelKeyMessage, toE164 } from '../src/modules/session/domain/inv-ref.js';
+import { contactEmail, toE164 } from '../src/modules/session/domain/inv-ref.js';
 import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-verifier.js';
 import { noBlockChecker } from '../src/modules/session/adapters/grpc-merge-checkers.js';
 import { HmacIdentityHashers } from '../src/modules/verification/adapters/hmac-identity-hashers.js';
@@ -137,6 +137,18 @@ async function setup(o: { contactKey?: boolean } = {}) {
 }
 
 describe('기기·연락처 가명 쓰기(I-T63·I-T64)', () => {
+  test('B-T16①_고정입력의기기가명과지문은trust-svc시험과같은기대값이다', async () => {
+    // 같은 키·같은 입력·같은 기대값을 services/trust-svc/test/device-refs.test.ts의 B-T16① 시험이 trust 쪽에서 본다(합성 키)
+    const ring = new InvRefKeyRing({ sources: [{ label: 'device', version: 1, key: Buffer.alloc(32, 0x42) }], clock: fakeClock({ now: 0 }) });
+    const sessions = new MemorySessionStore();
+    const k = await kit(sessions, { invRefs: ring });
+    const a = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'k-fixture', email: null, emailVerified: false, deviceId: 'AQEBAQEBAQEBAQEBAQEBAQ' });
+    expect(sessions.devicesOf(a.accountId)).toEqual(['k1.tmaIWF02-3cggEEHWYvtRa8r4f1TGjEqHEI0Q8746v8']);
+    const seen: string[] = [];
+    ring.onFingerprint((label, version, fingerprint) => seen.push(`${label}:${version}:${fingerprint}`));
+    expect(seen).toEqual(['device:1:k1.iD-0b']);
+  });
+
   test('I-T63_로그인기기행은기기라벨키의invRef이고_I-T64가입이메일은맞춘값의EMAIL행이다', async () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-a', '  Fan@Example.com ', 'dev-1');

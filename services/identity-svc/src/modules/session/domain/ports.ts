@@ -302,7 +302,7 @@ export interface SessionSignals {
   reverifyRequired(provider: Provider): void;
   refreshed(aud: 'fan', result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
   /** 조사용 가명을 계산해야 하는데 라벨 키가 없었다(inv_ref_missing_total, SEV3, identity §9.1) */
-  invRefMissing(label: InvRefLabel, reason: 'THROTTLED' | 'KMS_ERROR'): void;
+  invRefMissing(label: InvRefLabel, reason: 'THROTTLED' | 'KMS_ERROR' | 'NO_KEY'): void;
   /** 병합 불변식 위반: 흡수 계정에 티켓·후기가 있다(SEV3, I-T32, BOT-042) */
   mergeInvariantViolated(): void;
   /** 다른 기기의 세션을 끝냈다: 원격 로그아웃, 로그인 수단을 바꾼 뒤(identity_other_sessions_ended_total, ADR-0209 결정 6) */

@@ -20,6 +20,7 @@ export { APP_HEADER, APPS } from './http-hooks.js';
 export { NestPinoLogger, PLATFORM_LOGGER, REDACTED_KEYS, createPlatformLogger, kstIso, type PlatformLogger, type PlatformLoggerOptions } from './log.js';
 export { LogPolicy, requestLog, type QueuePhase, type RequestLog, type RequestLogFields, type RouteLogPolicy } from './request-log.js';
 export { parseAsnTable, ReloadingAsnTable, type AsnClassifier, type AsnTableData, type NetClass } from './asn-table.js';
+export { INV_REF_KEY_TTL_MS, INV_REF_RETRY_DELAYS_MS, InvRefKeyRing, invRef, invRefEnvPrefix, invRefKeyInfoGauge, invRefSourcesFromEnv, KMS_ENDPOINT_ENV, labelKeyMessage, type LabelMacClient, type LabelSource, type MissingReason } from './inv-ref.js';
 export { kafkaTelemetrySend, TELEMETRY_BATCH_SIZE, TELEMETRY_BUFFER_CAPACITY, TELEMETRY_CONNECT_TIMEOUT_MS, TELEMETRY_LINGER_MS, TELEMETRY_RETRY_AFTER_MS, TELEMETRY_SEND_TIMEOUT_MS, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink, type KafkaTelemetrySender, type KafkaTelemetrySendOptions, type TelemetryDropped, type TelemetryKafkaConfig, type TelemetryMessage, type TelemetryProducer, type TelemetrySend, type TelemetrySinkOptions } from './telemetry-sink.js';
 export { TRACE_PROPAGATION_HEADERS, createExternalHttpClient, type ExternalHttpClient, type ExternalHttpClientOptions, type ExternalRequest } from './http-client.js';
 export { BoundaryPropagator, BoundarySpanProcessor, withoutTracePropagation, type InboundTrust } from './trace-boundary.js';

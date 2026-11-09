@@ -60,8 +60,14 @@ export class ScoreRisk {
     const refMissing = req.deviceId !== '' && deviceRef === undefined;
     const netClass = asn.classify(req.client.asn);
 
+    // 회차 피처는 로비 입장·사전 검증에만 있다(§3.1). 호스팅·프록시 대역만 진입 수를 센다
+    const perEvent = req.context === 'LOBBY_ENTRY' || req.context === 'PREVERIFY';
+    const hostEntry = perEvent && (netClass === 'HOSTING' || netClass === 'PROXY') ? { asn: req.client.asn, eventId: req.eventId } : undefined;
+    // 기기 공유 수는 사람 확인 결과와 상관없이 넣고 센다. 일부러 사람 확인에 실패해 세지 않게 피하지 못한다(§4.9, ADR-0251 결정 1)
+    const shareEventId = perEvent && deviceRef && req.pid !== '' ? req.eventId : undefined;
+
     // ②·③의 입력을 함께 모은다: 사람 확인과 Redis 읽기는 서로 기다릴 까닭이 없다(§4.6의 시간 안에 끝나게). 토큰은 1회용이라 확정 신호가 있어도 검증한다
-    const [human, read] = await Promise.all([this.#humanCheck(req), this.#read(deviceRef, req.pid, now)]);
+    const [human, read] = await Promise.all([this.#humanCheck(req), this.#read(deviceRef, req.pid, now, hostEntry, shareEventId)]);
     if (human !== 'ABSENT') signals.humanCheck(human);
     for (const f of read.failed) signals.featureFailed(f);
 
@@ -70,7 +76,7 @@ export class ScoreRisk {
     if (hard !== 'NONE') signals.hardSignal(hard);
 
     // ③ 점수기 여섯을 모두 돌린다
-    const device: DeviceSignals = req.deviceId === '' ? { state: 'NONE' } : !deviceRef || (read.accounts === undefined && read.history === undefined) ? { state: 'FAILED' } : { state: 'READ', accounts: read.accounts, shared: undefined, history: read.history };
+    const device: DeviceSignals = req.deviceId === '' ? { state: 'NONE' } : !deviceRef || (read.accounts === undefined && read.history === undefined && read.shared === undefined) ? { state: 'FAILED' } : { state: 'READ', accounts: read.accounts, shared: read.shared, history: read.history };
     const outcomes: ScorerOutcome[] = this.#scorers.map((s) =>
       s.score(
         {
@@ -78,7 +84,7 @@ export class ScoreRisk {
           human,
           device,
           behavior: req.behavior,
-          network: { netClass, entries10s: undefined },
+          network: { netClass, entries10s: read.hostEntries },
           firstVisitAtMs: req.firstVisitAtMs,
           sessionCreatedAtMs: req.sessionCreatedAtMs,
           client: req.client,
@@ -88,7 +94,7 @@ export class ScoreRisk {
     );
 
     // ④ 가중합과 기준값(값 없음은 0으로 더한다)
-    const decision = decide(outcomes, profile, hard, { featureFailed: read.failed.length > 0, noEvidence: req.context === 'LOGIN' && !hasLoginEvidence(outcomes, device) });
+    const decision = decide(outcomes, profile, hard, { featureFailed: read.failed.length > 0, noEvidence: req.context === 'LOGIN' && !hasDeviceHistory(device) });
     for (const o of outcomes) if (o.risk === null) signals.scorerMissing(o.name, o.missing ?? 'absent');
     signals.verdict(req.context, decision.verdict);
 
@@ -196,12 +202,12 @@ export class ScoreRisk {
     return this.#d.human.verify({ token: req.humanCheckToken, action: ACTION[req.context], remoteIp: req.client.ip, deadlineAtMs: req.deadlineAtMs });
   }
 
-  /** 피처 읽기 실패는 값 없음이다(§4.4·§18). 판정을 막지 않고, 저장소 전체가 던지면 모든 칸을 실패로 둔다 */
-  async #read(deviceRef: string | undefined, pid: string, now: number): Promise<FeatureRead> {
+  /** 피처 읽기 실패는 값 없음이다(§4.4·§18). 판정을 막지 않고, 저장소 전체가 던지면 물어본 칸을 실패로 둔다 */
+  async #read(deviceRef: string | undefined, pid: string, now: number, hostEntry: { asn: number; eventId: string } | undefined, shareEventId: string | undefined): Promise<FeatureRead> {
     try {
-      return await this.#d.features.read({ deviceRef, pid, now });
+      return await this.#d.features.read({ deviceRef, pid, now, hostEntry, shareEventId });
     } catch {
-      return { blocked: undefined, honeypot: undefined, accounts: undefined, history: undefined, failed: FEATURE_NAMES };
+      return { blocked: undefined, honeypot: undefined, accounts: undefined, history: undefined, shared: undefined, hostEntries: undefined, failed: FEATURE_NAMES.filter((f) => (f !== 'shared' || shareEventId !== undefined) && (f !== 'entries' || hostEntry !== undefined)) };
     }
   }
 }
@@ -217,13 +223,10 @@ function validate(r: ScoreRequest): void {
   if (r.humanCheckToken.length > HUMAN_TOKEN_MAX) throw new TrustError('INVALID_ARGUMENT', '사람 확인 토큰이 너무 길다');
 }
 
-/** 이력이 있는 기기인가(지난 30일 사람 확인을 통과한 계정이나 추가 검증 기록이 있다) */
-const hasDeviceHistory = (d: DeviceSignals): boolean => d.state === 'READ' && ((d.accounts ?? 0) > 0 || (d.history !== undefined && d.history.sent + d.history.passed + d.history.failed > 0));
-
 /**
- * 로그인 판정의 근거가 있는가. 처음 보는 기기의 DeviceTrust는 위험 0이지만 '이 기기를 안다'는 근거가 아니다(훔친 비밀번호로 새 기기에서 로그인해도 같다).
- * 그래서 로그인에서는 이력이 없는 기기를 근거로 세지 않는다. 로비·사전 검증은 사람 확인이 근거라 이 규칙을 쓰지 않는다(identity §7, ADR-0248 결정 4)
+ * 이력이 있는 기기인가(지난 30일 사람 확인을 통과한 계정이나 추가 검증 기록이 있다). 로그인 판정의 근거는 이것 하나다.
+ * 처음 보는 기기는 위험 0이어도 '이 기기를 안다'는 근거가 아니고(훔친 비밀번호로 새 기기에서 로그인해도 같다), 망·브라우저 정보·나이의 값도 근거가 아니다. 기준값을 넘으면 decide가 CHALLENGE를 낸다(identity §7, ADR-0248 결정 4, ADR-0251 결정 7)
  */
-const hasLoginEvidence = (outcomes: readonly ScorerOutcome[], device: DeviceSignals): boolean => outcomes.some((o) => o.risk !== null && (o.name !== 'DeviceTrust' || hasDeviceHistory(device)));
+const hasDeviceHistory = (d: DeviceSignals): boolean => d.state === 'READ' && ((d.accounts ?? 0) > 0 || (d.history !== undefined && d.history.sent + d.history.passed + d.history.failed > 0));
 
 const shuffleOf = (r: ScoreRequest): ShuffleMode => (r.context === 'LOGIN' || r.context === 'VERIFICATION' ? 'NONE' : r.shuffle);

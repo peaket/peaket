@@ -1,10 +1,11 @@
 // 판정 피처 Redis 저장소(docs/features/bot-defense.md §3.2·§4.1, docs/data.md §3). 세션·캐시 클러스터, 핫패스 시간 초과 100ms(플랫폼 createHotRedis).
 // 키의 해시 태그는 기기 가명 또는 pid다. 키마다 슬롯이 달라 한 Lua로 묶지 않고 명령을 따로 보내고, 키마다 성공·실패를 따로 받는다(실패한 피처만 값 없음, §18).
 // tr:devacct는 정렬 집합(점수는 마지막으로 본 시각)이고 쓸 때 30일 지난 사람을 지운다. tr:devhist는 날짜 칸(`sent:{일}` 등)으로 나눠 지난 30일만 더한다.
-// 회차별 기기 공유 수·호스팅 대역 진입 수(tr:devshare·tr:asnhost)는 BUILD_ORDER BOT-060이다. 허니팟 적중 표시(tr:hp)의 쓰기는 BOT-055가 더했다.
+// 회차별 기기 공유 수(tr:devshare)와 호스팅·프록시 대역 진입 수(tr:asnhost)는 다른 키 읽기와 함께 넣고 센다(§4.9, ADR-0251). 허니팟 적중 표시(tr:hp)의 쓰기는 BOT-055가 더했다.
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
 import type { FeatureName, FeatureRead, FeatureStore, VerdictEvidence } from '../domain/ports.js';
+import { DEV_SHARE_CAP } from '../domain/rules.js';
 import type { DeviceHistory } from '../domain/types.js';
 
 const DAY_MS = 86_400_000;
@@ -19,6 +20,12 @@ const HONEYPOT_TTL_MS = DAY_MS;
 const NEW_DEVICES_TTL_MS = 2 * DAY_MS;
 /** 기기 하나의 본인확인 계정 수 상한 [가정](§3.2 tr:devacct) */
 export const DEV_ACCOUNT_CAP = 20;
+/** 회차별 기기 공유 수의 수명 10분 [가정]. 첫 원소를 넣을 때만 정한다 */
+const DEV_SHARE_TTL_MS = 600_000;
+/** 호스팅·프록시 대역 진입 수의 칸(§3.2 tr:asnhost) */
+const ASN_HOST_BUCKET_MS = 10_000;
+/** 호스팅·프록시 대역 진입 수 키의 수명 30초 [가정] */
+const ASN_HOST_TTL_MS = 30_000;
 
 export const keys = {
   devAccounts: (ref: string) => `tr:devacct:{${ref}}`,
@@ -28,6 +35,8 @@ export const keys = {
   honeypotEvents: (pid: string) => `tr:hp:{${pid}}:ev`,
   evidence: (pid: string, eventId: string) => `tr:vb:{${pid}}:${eventId}`,
   newDevices: (pid: string, day: number) => `tr:pidnew:{${pid}}:${day}`,
+  devShare: (ref: string, eventId: string) => `tr:devshare:{${ref}}:${eventId}`,
+  asnHost: (asn: number, eventId: string, bucket: number) => `tr:asnhost:{${asn}}:${eventId}:${bucket}`,
 };
 
 const dayOf = (ms: number): number => Math.floor(ms / DAY_MS);
@@ -102,6 +111,27 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 };
 
+/**
+ * 회차별 기기 공유 수에 pid를 넣고 센다. 키 하나만 쓴다(클러스터 슬롯을 넘지 않는다). 있는 사람이면 지금 수, 상한이면 상한(상한 이상은 같게 본다), 새 사람이면 넣고 지금 수 + 1이다.
+ * 수명은 첫 원소를 넣을 때만 정해 뒤 원소가 늘리지 않는다
+ */
+const COUNT_SHARE_LUA = redisScript(`
+local key, pid, cap, ttl = KEYS[1], ARGV[1], tonumber(ARGV[2]), ARGV[3]
+local n = redis.call('SCARD', key)
+if redis.call('SISMEMBER', key, pid) == 1 then return n end
+if n >= cap then return n end
+redis.call('SADD', key, pid)
+if n == 0 then redis.call('PEXPIRE', key, ttl) end
+return n + 1
+`);
+
+/** 호스팅·프록시 대역의 이번 칸 진입 수를 올린다. 수명은 칸의 첫 진입에만 정한다 */
+const COUNT_HOST_ENTRY_LUA = redisScript(`
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+return n
+`);
+
 /** HGETALL 응답을 더한다(node-redis는 RESP2에서 필드·값이 번갈아 오는 배열이다). 지난 30일 칸만 센다 */
 function historyOf(raw: unknown, minDay: number): DeviceHistory {
   const fields: Record<string, unknown> = {};
@@ -116,19 +146,22 @@ function historyOf(raw: unknown, minDay: number): DeviceHistory {
   return out;
 }
 
-/** 반드시 부르는 읽기 넷의 결과를 키마다 받는다. deviceRef가 없으면 기기 키는 묻지 않는다(값 없음이지만 실패는 아니다) */
+/** 읽기의 결과를 키마다 받는다. deviceRef가 없으면 기기 키는 묻지 않고, hostEntry·shareEventId가 없으면 그 키를 세지 않는다(값 없음이지만 실패는 아니다) */
 export class RedisFeatureStore implements FeatureStore {
   constructor(private readonly redis: HotRedis) {}
 
-  async read(i: { deviceRef: string | undefined; pid: string; now: number }): Promise<FeatureRead> {
+  async read(i: { deviceRef: string | undefined; pid: string; now: number; hostEntry?: { asn: number; eventId: string } | undefined; shareEventId?: string | undefined }): Promise<FeatureRead> {
     const ref = i.deviceRef;
     const cutoff = String(i.now - WINDOW_MS);
     const minDay = dayOf(i.now) - WINDOW_DAYS + 1;
-    const [accounts, history, blocked, honeypot] = await Promise.allSettled([
+    const host = i.hostEntry;
+    const [accounts, history, blocked, honeypot, entries, shared] = await Promise.allSettled([
       ref ? this.redis.evalScript(COUNT_ACCOUNTS_LUA, [keys.devAccounts(ref)], [cutoff, i.pid]) : Promise.resolve(undefined),
       ref ? this.redis.command(['HGETALL', keys.devHistory(ref)], { key: keys.devHistory(ref) }) : Promise.resolve(undefined),
       ref ? this.redis.command(['EXISTS', keys.block(ref)], { key: keys.block(ref) }) : Promise.resolve(undefined),
       i.pid ? this.redis.command(['EXISTS', keys.honeypot(i.pid)], { key: keys.honeypot(i.pid) }) : Promise.resolve(undefined),
+      host ? this.redis.evalScript(COUNT_HOST_ENTRY_LUA, [keys.asnHost(host.asn, host.eventId, Math.floor(i.now / ASN_HOST_BUCKET_MS))], [String(ASN_HOST_TTL_MS)]) : Promise.resolve(undefined),
+      ref && i.pid && i.shareEventId ? this.redis.evalScript(COUNT_SHARE_LUA, [keys.devShare(ref, i.shareEventId)], [i.pid, String(DEV_SHARE_CAP), String(DEV_SHARE_TTL_MS)]) : Promise.resolve(undefined),
     ]);
     const failed: FeatureName[] = [];
     const value = (r: PromiseSettledResult<unknown>, name: FeatureName): unknown => {
@@ -140,11 +173,15 @@ export class RedisFeatureStore implements FeatureStore {
     const h = value(history, 'history');
     const b = value(blocked, 'block');
     const p = value(honeypot, 'honeypot');
+    const e = value(entries, 'entries');
+    const c = value(shared, 'shared');
     return {
       accounts: a === undefined ? undefined : num(a),
       history: h === undefined ? undefined : historyOf(h, minDay),
       blocked: b === undefined ? undefined : num(b) > 0,
       honeypot: p === undefined ? undefined : num(p) > 0,
+      hostEntries: e === undefined ? undefined : num(e),
+      shared: c === undefined ? undefined : num(c),
       failed,
     };
   }

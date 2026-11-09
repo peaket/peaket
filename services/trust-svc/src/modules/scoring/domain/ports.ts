@@ -16,7 +16,7 @@ export interface HumanCheckPort {
 }
 
 /** 판정 피처 하나의 이름(읽기 실패를 칸마다 구분한다, §18) */
-export const FEATURE_NAMES = ['block', 'honeypot', 'accounts', 'history'] as const;
+export const FEATURE_NAMES = ['block', 'honeypot', 'accounts', 'history', 'shared', 'entries'] as const;
 export type FeatureName = (typeof FEATURE_NAMES)[number];
 
 /** 읽은 값. 칸이 undefined면 그 키를 읽지 못했거나 묻지 않은 것이다(값 없음, §4.4) */
@@ -26,6 +26,10 @@ export interface FeatureRead {
   /** 지난 30일 그 기기에서 판정받은 사람 수(이번 요청의 pid를 넣어 센 값) */
   accounts: number | undefined;
   history: DeviceHistory | undefined;
+  /** 회차별 기기 공유 수(이번 요청의 pid를 넣어 센 값). 세지 않았거나 실패하면 undefined */
+  shared: number | undefined;
+  /** 호스팅·프록시 대역의 이번 10초 칸 진입 수(이번 요청을 넣어 센 값). 세지 않았거나 실패하면 undefined */
+  hostEntries: number | undefined;
   /** 읽기가 실패한 피처 */
   failed: readonly FeatureName[];
 }
@@ -42,7 +46,8 @@ export interface VerdictEvidence {
 
 /** 판정 피처 저장소(세션·캐시 Redis). 실패는 던진다(호출 쪽이 값 없음으로 둔다) */
 export interface FeatureStore {
-  read(i: { deviceRef: string | undefined; pid: string; now: number }): Promise<FeatureRead>;
+  /** shareEventId를 주면 그 회차의 기기 공유 수(tr:devshare)에 pid를 넣고 센다. hostEntry를 주면 대역 진입 수(tr:asnhost)를 올리고 센다 */
+  read(i: { deviceRef: string | undefined; pid: string; now: number; hostEntry?: { asn: number; eventId: string } | undefined; shareEventId?: string | undefined }): Promise<FeatureRead>;
   /** 사람 확인을 통과한 판정의 계정을 기기 집합에 넣는다. pid마다 하루 새 기기 수에 상한이 있다(기기 이력 오염을 막는다) */
   addAccount(i: { deviceRef: string; pid: string; now: number; newDevicesPerDay: number }): Promise<void>;
   /** 추가 검증으로 보낸 판정: 기기의 보냄 수와 판정 근거 키(첫 판정의 근거를 덮지 않는다) */
@@ -53,7 +58,7 @@ export interface FeatureStore {
   recordHoneypot(i: { pid: string; eventId: string; now: number }): Promise<boolean>;
 }
 
-/** 기기 가명. 라벨 키를 받지 못하면 undefined */
+/** 기기 가명(invRef("device", deviceId)). 라벨 키를 받지 못하면 undefined. 요청 처리 중에 KMS를 부르지 않는다 */
 export interface DeviceRefs {
   ref(deviceId: string): string | undefined;
 }
@@ -139,4 +144,6 @@ export interface TrustSignals {
   afterFailed(work: 'challenge' | 'verification' | 'account' | 'honeypot'): void;
   /** 허니팟 적중 하나(§7). 기록 조건을 만족한 요청만 부른다 */
   honeypotHit(signedIn: boolean): void;
+  /** 기기 라벨 키를 받지 못해 가명을 계산하지 못했다 */
+  invRefMissing(label: string, reason: 'THROTTLED' | 'KMS_ERROR' | 'NO_KEY'): void;
 }

@@ -9,9 +9,10 @@ export class PromTrustSignals implements TrustSignals {
   readonly #human = new Counter({ name: 'trust_human_check_total', help: '사람 확인 서버 검증 결과(PASSED·FAILED·PENDING)', labelNames: ['result'] as const, registers: [] });
   readonly #missing = new Counter({ name: 'trust_scorer_missing_total', help: '값 없음이 된 점수기(cause: dependency 의존성 장애, absent 원래 없는 값)', labelNames: ['scorer', 'cause'] as const, registers: [] });
   readonly #hard = new Counter({ name: 'trust_block_list_hits_total', help: '확정 신호로 판정을 앞에서 정한 수(signal: BLOCK_LIST·HONEYPOT)', labelNames: ['signal'] as const, registers: [] });
-  readonly #feature = new Counter({ name: 'trust_feature_read_failures_total', help: '판정 피처 키를 읽지 못한 수(feature: block·honeypot·accounts·history)', labelNames: ['feature'] as const, registers: [] });
+  readonly #feature = new Counter({ name: 'trust_feature_read_failures_total', help: '판정 피처 키를 읽거나 쓰지 못한 수(feature: block·honeypot·accounts·history·shared·entries)', labelNames: ['feature'] as const, registers: [] });
   readonly #after = new Counter({ name: 'trust_after_response_failures_total', help: '응답 뒤로 미룬 쓰기 실패', labelNames: ['work'] as const, registers: [] });
   readonly #honeypot = new Counter({ name: 'trust_honeypot_hits_total', help: '허니팟 기록 조건을 만족한 적중(signed_in: 로그인한 요청)', labelNames: ['signed_in'] as const, registers: [] });
+  readonly #invRef = new Counter({ name: 'inv_ref_missing_total', help: '라벨 키가 없어 계산하지 못한 조사용 가명(SEV3, docs/observability.md §5)', labelNames: ['service', 'label', 'reason'] as const, registers: [] });
 
   register(registry: Registry): void {
     registry.registerMetric(this.#verdicts);
@@ -21,6 +22,7 @@ export class PromTrustSignals implements TrustSignals {
     registry.registerMetric(this.#feature);
     registry.registerMetric(this.#after);
     registry.registerMetric(this.#honeypot);
+    registry.registerMetric(this.#invRef);
   }
 
   verdict(context: ScoreContext, verdict: Verdict): void {
@@ -49,6 +51,10 @@ export class PromTrustSignals implements TrustSignals {
 
   honeypotHit(signedIn: boolean): void {
     this.#honeypot.inc({ signed_in: signedIn ? 'true' : 'false' });
+  }
+
+  invRefMissing(label: string, reason: 'THROTTLED' | 'KMS_ERROR' | 'NO_KEY'): void {
+    this.#invRef.inc({ service: 'trust-svc', label, reason });
   }
 }
 

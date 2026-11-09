@@ -18,18 +18,19 @@ async function freePort(): Promise<number> {
   });
 }
 
-export async function bootMain(extraEnv: Record<string, string>): Promise<{ valkey: ValkeyContainer; managementPort: number }> {
+export async function bootMain(extraEnv: Record<string, string>): Promise<{ valkey: ValkeyContainer; managementPort: number; grpcPort: number }> {
   const valkey = startValkey();
   const dir = mkdtempSync(join(tmpdir(), 'trust-main-'));
   const rulesFile = join(dir, 'rules.json');
   writeFileSync(rulesFile, SYNTHETIC_RULES_JSON);
   const managementPort = await freePort();
+  const grpcPort = await freePort();
   delete process.env.PEAKET_TELEMETRY_KAFKA_BROKERS;
   Object.assign(process.env, {
     PEAKET_ENV: 'prod',
     PEAKET_TRUST_REDIS_URL: valkey.url,
     PEAKET_TRUST_RULES_FILE: rulesFile,
-    PEAKET_GRPC_PORT: String(await freePort()),
+    PEAKET_GRPC_PORT: String(grpcPort),
     PEAKET_GRPC_HOST: '127.0.0.1',
     PORT: String(await freePort()),
     PEAKET_MANAGEMENT_PORT: String(managementPort),
@@ -44,5 +45,5 @@ export async function bootMain(extraEnv: Record<string, string>): Promise<{ valk
     valkey.stop();
     throw err;
   }
-  return { valkey, managementPort };
+  return { valkey, managementPort, grpcPort };
 }

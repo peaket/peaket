@@ -28,6 +28,14 @@ export const SYNTHETIC_RULES_JSON = JSON.stringify({
 });
 export const SYNTHETIC_RULES: RuleSet = parseRuleSet(SYNTHETIC_RULES_JSON);
 
+/** 합성 규칙의 점수기 매개변수 일부만 바꾼 판 */
+export function rulesWith(over: { device?: Record<string, number>; network?: Record<string, number> }): RuleSet {
+  const base = JSON.parse(SYNTHETIC_RULES_JSON) as { params: { device: Record<string, number>; network: Record<string, number> } };
+  Object.assign(base.params.device, over.device);
+  Object.assign(base.params.network, over.network);
+  return parseRuleSet(JSON.stringify(base));
+}
+
 /** 정본의 deviceId 형식(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12) */
 export const DEVICE_ID = 'AQEBAQEBAQEBAQEBAQEBAQ';
 /** 형식에 맞는 다른 기기 식별값 */
@@ -65,6 +73,7 @@ export function recordingSignals(): TrustSignals & { seen: string[] } {
     featureFailed: (f) => seen.push(`feature:${f}`),
     afterFailed: (w) => seen.push(`after:${w}`),
     honeypotHit: (signedIn) => seen.push(`honeypot:${signedIn}`),
+    invRefMissing: (label, reason) => seen.push(`invref:${label}:${reason}`),
   };
 }
 

@@ -3,10 +3,10 @@
 // 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(ScoreRisk)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
-import { CircuitBreaker, createHotRedis, createService, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createHotRedis, createService, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
-import { hmacDeviceRefsFromEnv, JsonTelemetryRecorder, LogVerdictRecorder, PromTrustSignals, RecordHoneypot, RedisFeatureStore, RuleBook, ScoreRisk, startRuleRefresh, TURNSTILE_BREAKER, trustPackage, trustServiceHandlers, turnstileFromEnv } from './modules/scoring/index.js';
+import { deviceRefsFromEnv, JsonTelemetryRecorder, kmsMacClient, LogVerdictRecorder, PromTrustSignals, RecordHoneypot, RedisFeatureStore, RuleBook, ScoreRisk, startRuleRefresh, TURNSTILE_BREAKER, trustPackage, trustServiceHandlers, turnstileFromEnv } from './modules/scoring/index.js';
 
 const SERVICE = 'trust-svc';
 /** 업무 gRPC 포트 [가정](identity-svc와 같은 기본값, BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
@@ -28,7 +28,8 @@ const redisUrl = env.PEAKET_TRUST_REDIS_URL;
 if (!redisUrl && clusterUrls.length === 0) throw new Error('PEAKET_TRUST_REDIS_URL이나 PEAKET_TRUST_REDIS_CLUSTER_URLS가 없다(비밀 관리에서 넣는다)');
 const rulesFile = env.PEAKET_TRUST_RULES_FILE;
 if (!rulesFile) throw new Error('PEAKET_TRUST_RULES_FILE이 없다(비공개 규칙 설정 파일 경로, 비밀 관리에서 넣는다)');
-const devices = hmacDeviceRefsFromEnv(env);
+// 기기 라벨 키: 운영은 KMS GenerateMac, local·ci·demo는 설정값. identity-svc와 같은 키여야 같은 기기 가명이 나온다(§4.9, B-T16)
+const devices = deviceRefsFromEnv(env, systemClock, (endpoint) => kmsMacClient({ region: env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
 const asnFile = env.PEAKET_ASN_TABLE_FILE;
 // 판정 기록·행동 신호(텔레메트리 클러스터, ADR-0249 결정 4). 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
 const telemetryKafka = telemetryKafkaFromEnv(SERVICE, env);
@@ -72,7 +73,18 @@ if (telemetryKafka.enabled) {
 } else {
   telemetryOff(telemetryKafka.warning);
 }
-for (const w of devices.warning ? [devices.warning] : []) service.logger.warn({ dep: 'inv-ref-key-device' }, w);
+for (const w of devices.warnings) service.logger.warn({ dep: 'inv-ref-key-device' }, w);
+devices.ring.onMissing((label, reason) => signals.invRefMissing(label, reason));
+devices.ring.onRefreshError((label, reason, err) => service.logger.warn({ dep: 'inv-ref-key-device', label, reason, err }, '조사용 가명 라벨 키를 다시 받지 못했다(§4.9)'));
+// 라벨 키의 지문(키 값이 아니다): identity-svc의 device 지문과 같아야 한다(B-T16, ADR-0251 배포 조건)
+const invRefKeyInfo = invRefKeyInfoGauge(service.metrics.registry, SERVICE);
+devices.ring.onFingerprint((label, version, fingerprint) => {
+  invRefKeyInfo(label, version, fingerprint);
+  service.logger.info({ dep: 'inv-ref-key-device', label, version, fingerprint }, '조사용 가명 라벨 키 지문');
+});
+// 뜰 때 2초 [가정]까지 먼저 받아 본다. 받지 못해도 시작은 막지 않는다(기기 칸이 비고 degraded로 드러난다)
+const deviceKeys = devices.ring.start();
+await deviceKeys.ready;
 
 const breaker = new CircuitBreaker({ service: SERVICE, dependency: 'turnstile', registry: service.metrics.registry, logger: service.logger, ...TURNSTILE_BREAKER });
 const rules = new RuleBook(rulesFile, { warn: (m) => service.logger.warn({ dep: 'trust-rules' }, m) });
@@ -117,6 +129,7 @@ service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 process.once('SIGTERM', () => {
   rulesLoop.stop();
   asn.stop();
+  deviceKeys.stop();
   // 받는 호출을 먼저 닫고, 처리 중인 일과 응답 뒤로 미룬 쓰기가 끝나면 연결을 닫는다
   void grpc
     .close()

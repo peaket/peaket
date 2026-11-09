@@ -3,7 +3,7 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
 import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
@@ -197,6 +197,12 @@ if (adminPepper && !adminMailer) service.logger.warn('관리 계정 메일 포�
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 for (const w of invRefs.warnings) service.logger.warn(w);
+// 라벨 키의 지문(키 값이 아니다): trust-svc의 device 지문과 같아야 한다(B-T16, ADR-0251 배포 조건)
+const invRefKeyInfo = invRefKeyInfoGauge(service.metrics.registry, SERVICE);
+invRefs.ring.onFingerprint((label, version, fingerprint) => {
+  invRefKeyInfo(label, version, fingerprint);
+  service.logger.info({ label, version, fingerprint }, '조사용 가명 라벨 키 지문');
+});
 for (const e of earlyInvRefErrors) service.logger.warn(e, '조사용 가명 라벨 키를 받지 못했다(identity §9.1)');
 invRefs.ring.onRefreshError((label, reason, err) => service.logger.warn({ label, reason, err }, '조사용 가명 라벨 키를 다시 받지 못했다(identity §9.1)'));
 for (const w of merge.warnings) service.logger.warn(w);

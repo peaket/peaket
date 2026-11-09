@@ -14,6 +14,16 @@ interface Broken {
 const parse = (): Broken => JSON.parse(SYNTHETIC_RULES_JSON) as Broken;
 
 describe('규칙 형식', () => {
+  test('B-T22③_sharedAt이공유수상한20을넘는판은읽지않는다_위험이기준끝에닿을수없다', () => {
+    const withSharedAt = (sharedAt: number) => {
+      const raw = JSON.parse(SYNTHETIC_RULES_JSON) as { params: { device: { sharedAt: number } } };
+      raw.params.device.sharedAt = sharedAt;
+      return JSON.stringify(raw);
+    };
+    expect(() => parseRuleSet(withSharedAt(21))).toThrow(/params\.device/);
+    expect(parseRuleSet(withSharedAt(20)).params.device.sharedAt).toBe(20);
+  });
+
   test('강도 셋·정렬 셋·점수기 여섯의 가중치가 모두 있어야 한다', () => {
     const broken = parse();
     delete broken.intensities.BASE.ON.weights.HumanCheck;
