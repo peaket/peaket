@@ -225,6 +225,20 @@ describe('GrpcPaymentConfirms와 가짜 payment-svc(리뷰 고침 H1·낮음)', 
     }
   });
 
+  test('PT26_입장 시각이 있으면 entry_opens_at을 싣고 없으면 칸이 없다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191)', async () => {
+    const srv = await fakePaymentServer(() => ({ result: 'CONFIRM_RESULT_IN_PROGRESS', payment_id: 'p1' }));
+    const c = new GrpcPaymentConfirms({ address: srv.address });
+    try {
+      await c.confirm({ ...tossCommand(), entryOpensAtMs: 1_800_000_000_123 });
+      expect(srv.requests[0]).toMatchObject({ entry_opens_at: { seconds: 1_800_000_000, nanos: 123_000_000 } });
+      await c.confirm(tossCommand());
+      expect(srv.requests[1]!.entry_opens_at).toBeNull();
+    } finally {
+      c.close();
+      srv.close();
+    }
+  });
+
   test.each(['CONFIRM_RESULT_UNKNOWN', 'CONFIRM_RESULT_UNSPECIFIED'])('낮음_답의 결과가 %s면 받아 적었다고 볼 수 없어 ACCEPTED가 아니라 REJECTED unexpected다(결제 참조를 지우지 않게)', async (result) => {
     const srv = await fakePaymentServer(() => ({ result }));
     const c = new GrpcPaymentConfirms({ address: srv.address });

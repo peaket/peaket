@@ -20,6 +20,7 @@ import {
   OrdersController,
   PromOrderSignals,
   SeatMapSaleConfigs,
+  InventoryOrderHoldExpiries,
   type SeatSlotRead,
 } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessionStore, MemorySeatMap, SeatStoreUnavailable, SESSION_IDLE_MS, StoredPurchaseSessions } from '../src/modules/inventory/index.js';
@@ -30,11 +31,45 @@ import { newJti, openInput } from './purchase-session-cases.js';
 const NOW = Date.parse('2026-11-05T03:00:00.000Z');
 const EVENT = 'ev-order-adapters';
 
+describe('InventoryOrderHoldExpiries(주문 좌석의 홀드 만료, BUILD_ORDER PRF-191)', () => {
+  const query = { eventId: EVENT, holdId: 'h1', seatIds: ['A01'] };
+
+  test('FR011_값과 마감을 그대로 넘긴다', async () => {
+    const calls: unknown[][] = [];
+    const bridge = new InventoryOrderHoldExpiries({
+      holdExpiry: async (...args: unknown[]) => {
+        calls.push(args);
+        return NOW + 1;
+      },
+    });
+    expect(await bridge.expiresAt(query, { deadlineMs: 30 })).toBe(NOW + 1);
+    expect(calls).toEqual([[EVENT, 'h1', ['A01'], { deadlineMs: 30 }]]);
+  });
+
+  test('FR011_좌석 Redis 장애(SeatStoreUnavailable)는 OrderSeatStoreUnavailable로 바꿔 던지고 그 밖은 그대로 던진다', async () => {
+    const down = new InventoryOrderHoldExpiries({ holdExpiry: async () => Promise.reject(new SeatStoreUnavailable()) });
+    await expect(down.expiresAt(query)).rejects.toBeInstanceOf(OrderSeatStoreUnavailable);
+    const bug = new Error('corrupt');
+    const broken = new InventoryOrderHoldExpiries({ holdExpiry: async () => Promise.reject(bug) });
+    await expect(broken.expiresAt(query)).rejects.toBe(bug);
+  });
+});
+
 describe('SeatMapSaleConfigs(좌석맵 판의 판매 설정)', () => {
   test('FR011_판의 saleEndsAtMs·tierPrices를 그대로 준다', async () => {
     const m = new MemorySeatMap();
     m.put({ eventId: EVENT, layoutVersion: 'v1', seatCount: 4, perAccountLimit: 4, saleEndsAtMs: NOW + 1, tierPrices: { R: 1_000, S: 0 } }, []);
     expect(await new SeatMapSaleConfigs(m).get(EVENT)).toEqual({ saleEndsAtMs: NOW + 1, tierPrices: { R: 1_000, S: 0 } });
+  });
+
+  test('PT26_판의 주문명·입장 시각·가상계좌를 넘기고 없으면 칸을 만들지 않는다(BUILD_ORDER PRF-191)', async () => {
+    const m = new MemorySeatMap();
+    m.put({ eventId: EVENT, layoutVersion: 'v1', seatCount: 4, perAccountLimit: 4, saleEndsAtMs: NOW + 1, orderName: '공연', entryOpensAtMs: NOW + 2, virtualAccountAllowed: false }, []);
+    expect(await new SeatMapSaleConfigs(m).get(EVENT)).toMatchObject({ orderName: '공연', entryOpensAtMs: NOW + 2, virtualAccountAllowed: false });
+    const bare = new MemorySeatMap();
+    bare.put({ eventId: EVENT, layoutVersion: 'v1', seatCount: 4, perAccountLimit: 4, saleEndsAtMs: NOW + 1 }, []);
+    const c = await new SeatMapSaleConfigs(bare).get(EVENT);
+    for (const k of ['orderName', 'entryOpensAtMs', 'virtualAccountAllowed']) expect(c).not.toHaveProperty(k);
   });
 
   test('FR011_판 파일에 tierPrices가 없으면 빈 가격 표(모든 등급의 가격이 없다)이고, 그 표는 고칠 수 없다', async () => {

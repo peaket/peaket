@@ -94,7 +94,7 @@ export const ListOrdersResponse = zod.object({
 })
 
 /**
- * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 구매 세션 요청 서명 필수
+ * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 같은 멱등 키의 재생은 처음 시도의 결제사로 결제창 값을 다시 만든다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, guidelines §4). 구매 세션 요청 서명 필수
  * @summary 결제 시도 시작(결제사 선택, 결제창 값 발급)
  */
 export const CreateOrderPaymentParams = zod.object({
@@ -128,7 +128,7 @@ export const createOrderPaymentBodyBehaviorScrollDistancePxMin = 0;
 
 
 export const CreateOrderPaymentBody = zod.object({
-  "payMethod": zod.string().optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략'),
+  "payMethod": zod.string().optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략. CARD·EASY_PAY·TRANSFER·VIRTUAL_ACCOUNT·MOBILE만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-09, BUILD_ORDER PRF-191). 본문이 없으면 400이라 칸이 없어도 빈 객체를 보낸다'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
   "windowMs": zod.int().min(createOrderPaymentBodyBehaviorWindowMsMin).max(createOrderPaymentBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),
@@ -198,12 +198,14 @@ export const CreateOrderPaymentAcceptanceHeader = zod.object({
 export const CreateOrderPaymentAcceptanceBody = zod.union([zod.object({
   "pg": zod.enum(['TOSS', 'SIMULATOR']),
   "paymentKey": zod.string().describe('토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식). 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
-  "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조')
+  "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조'),
+  "attemptId": zod.uuid().optional().describe('결제창을 연 결제 시도의 ID(선택, `PaymentAttempt.attemptId`). 있으면 지금 READY 시도와 같아야 하고 다르면 409 payment-attempt-mismatch다. 대체된 시도의 늦은 접수를 같은 결제사에서도 막는다. 없으면 결제사만 대조한다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, 코드 리뷰). 표 주문 접수만 본다(굿즈 접수는 구현 전)')
 }).strict(),zod.object({
   "pg": zod.enum(['PORTONE']),
   "paymentId": zod.string().describe('결제 시도 응답의 paymentId와 같아야 한다. 세 칸 모두 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
   "paymentToken": zod.string().describe('수동 승인 API용 결제 토큰. 승인 결과가 정해지면 서버에서 지운다'),
-  "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다')
+  "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다'),
+  "attemptId": zod.uuid().optional().describe('결제창을 연 결제 시도의 ID(선택, `PaymentAttempt.attemptId`. 포트원의 txId와 다른 값이다). 있으면 지금 READY 시도와 같아야 하고 다르면 409 payment-attempt-mismatch다. 없으면 결제사·paymentId만 대조한다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, 코드 리뷰). 표 주문 접수만 본다(굿즈 접수는 구현 전)')
 }).strict()]).describe('결제 접수 본문. pg 값으로 갈린다(ADR-0044 결정 7). 허용 필드 밖의 값은 400')
 
 export const CreateOrderPaymentAcceptanceResponse = zod.void()

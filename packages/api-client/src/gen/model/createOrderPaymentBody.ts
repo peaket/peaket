@@ -12,7 +12,7 @@
 import type { BehaviorSummary } from './behaviorSummary';
 
 export type CreateOrderPaymentBody = {
-  /** 포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략 */
+  /** 포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략. CARD·EASY_PAY·TRANSFER·VIRTUAL_ACCOUNT·MOBILE만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-09, BUILD_ORDER PRF-191). 본문이 없으면 400이라 칸이 없어도 빈 객체를 보낸다 */
   payMethod?: string;
   /** 결제 화면에서 잰 행동 요약(선택). purchase-svc가 BehaviorSignal(screen PAYMENT)로 내고 실시간 판정에는 쓰지 않는다. 같은 주문의 두 번째 시도부터는 싣지 않는다(추천 적용 2026-10-31, ADR-0171 결정 4) */
   behavior?: BehaviorSummary;

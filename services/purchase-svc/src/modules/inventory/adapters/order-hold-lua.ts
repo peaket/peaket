@@ -44,6 +44,33 @@ end
 return left
 `;
 
+// 결제 시도의 홀드 만료 시각 Lua 계약(docs/features/payment.md §2 '결제 시도 시작의 첫 구현' 응답, BUILD_ORDER PRF-191).
+// 첫 줄은 `#!lua flags=no-writes`다. KEYS는 모두 회차 해시 태그 {event:E} 하나의 슬롯이다.
+//   KEYS 1.. hold:{좌석 색인}(주문 항목의 좌석마다, 하나 이상)   ARGV 1 주문의 holdId
+// holdId가 같은 좌석의 exp 가운데 가장 이른 값을 글로 돌려주고, 그런 좌석이 없으면 nil이다. 시각은 보지 않는다(풀리기 전이면 남은 것이다).
+// 홀드 키가 hash가 아니거나 exp가 앞 0 없는 0 이상 10진 정수 글(16자리까지)이 아니면 'ERR PEAKET_CORRUPT_KEY {키}'다. 좌석 키가 하나도 없으면 'ERR PEAKET_BAD_INPUT'이다.
+
+/** 주문 좌석의 홀드 만료 Lua 원문(위 계약). 첫 줄이 `#!lua flags=no-writes`다 */
+export const ORDER_HOLD_EXPIRY_LUA = `#!lua flags=no-writes
+if #KEYS < 1 then return redis.error_reply('ERR PEAKET_BAD_INPUT hold-expiry seats') end
+local earliest = nil
+for i = 1, #KEYS do
+  local ty = redis.call('TYPE', KEYS[i]).ok
+  if ty ~= 'none' and ty ~= 'hash' then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
+  local h = redis.call('HMGET', KEYS[i], 'holdId', 'exp')
+  if h[1] == ARGV[1] then
+    local v = h[2]
+    if not v or #v > 16 or not string.match(v, '^[0-9]+$') or (#v > 1 and string.sub(v, 1, 1) == '0') then
+      return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i])
+    end
+    local n = tonumber(v)
+    if earliest == nil or n < earliest then earliest = n end
+  end
+end
+if earliest == nil then return false end
+return string.format('%.0f', earliest)
+`;
+
 /** 홀드 확인 Lua 원문(위 계약). 첫 줄이 `#!lua flags=no-writes`다 */
 export const ORDER_HOLD_LUA = `#!lua flags=no-writes
 if #KEYS < 2 then return redis.error_reply('ERR PEAKET_BAD_INPUT order-hold seats') end

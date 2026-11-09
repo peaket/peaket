@@ -143,6 +143,14 @@ describe('PrepareCheckout: 선 위의 값', () => {
     expect(s.prepareInputs[0]).toMatchObject({ customerKey: 'cust-key-1', virtualAccountAllowed: false, entryOpensAtMs: 1_794_200_000_005 });
   });
 
+  test('P-T27_pinned_pg는 앞머리를 떼고 넘기고, 비면(UNSPECIFIED) 칸이 없다 [ASVS v5.0.0-2.2.3]', async () => {
+    const s = await serve();
+    await s.call('PrepareCheckout', { ...REQUEST, pinned_pg: 'PG_PROVIDER_PORTONE' });
+    expect(s.prepareInputs[0]).toMatchObject({ pinnedPg: 'PORTONE' });
+    await s.call('PrepareCheckout', REQUEST);
+    expect(s.prepareInputs[1]).not.toHaveProperty('pinnedPg');
+  });
+
   test('P-T26_virtual_account_allowed 참도 값으로 온다', async () => {
     const s = await serve();
     await s.call('PrepareCheckout', { ...REQUEST, virtual_account_allowed: true });

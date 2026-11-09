@@ -168,6 +168,47 @@ describe('RedisOrderHolds.check: 맞는 홀드', () => {
   });
 });
 
+describe('RedisOrderHolds.holdExpiry: 결제 시도의 홀드 만료 시각(BUILD_ORDER PRF-191)', () => {
+  test('FR011_좌석들의 홀드 exp 가운데 가장 이른 값이다', async () => {
+    const w = await heldWorld({ seatIds: ['A10', 'A11'] });
+    const holds = new RedisOrderHolds(redis, seatMapWith(w.eventId));
+    const key = seatKeys.hold(w.eventId, idx('A11'));
+    const exp = Number(await cmd(key, ['HGET', key, 'exp']));
+    await cmd(key, ['HSET', key, 'exp', String(exp - 5_000)]);
+    expect(await holds.holdExpiry(w.eventId, w.holdId, w.seatIds)).toBe(exp - 5_000);
+  });
+
+  test('FR011_그 holdId가 아닌 좌석은 빼고, 남은 좌석이 없으면 undefined다', async () => {
+    const w = await heldWorld({ seatIds: ['A12', 'A13'] });
+    const holds = new RedisOrderHolds(redis, seatMapWith(w.eventId));
+    const gone = seatKeys.hold(w.eventId, idx('A12'));
+    const kept = seatKeys.hold(w.eventId, idx('A13'));
+    const exp = Number(await cmd(kept, ['HGET', kept, 'exp']));
+    await cmd(gone, ['DEL', gone]);
+    expect(await holds.holdExpiry(w.eventId, w.holdId, w.seatIds)).toBe(exp);
+    await cmd(kept, ['HSET', kept, 'holdId', uuidv7(systemClock)]);
+    expect(await holds.holdExpiry(w.eventId, w.holdId, w.seatIds)).toBeUndefined();
+  });
+
+  test('FR011_좌석을 모르거나 판에 없는 좌석이면 부르지 않고 undefined다', async () => {
+    const rec = recording(redis);
+    const w = await heldWorld({ seatIds: ['A14'] });
+    const holds = new RedisOrderHolds(rec.redis, seatMapWith(w.eventId));
+    expect(await holds.holdExpiry(w.eventId, w.holdId, [])).toBeUndefined();
+    expect(await holds.holdExpiry(w.eventId, w.holdId, ['A14', 'Z99'])).toBeUndefined();
+    expect(rec.scripts).toHaveLength(0);
+  });
+
+  test('FR011_키 형이 틀리면 PEAKET_CORRUPT_KEY 오류다(풀린 것으로 숨기지 않는다)', async () => {
+    const w = await heldWorld({ seatIds: ['A15'] });
+    const holds = new RedisOrderHolds(redis, seatMapWith(w.eventId));
+    const key = seatKeys.hold(w.eventId, idx('A15'));
+    await cmd(key, ['DEL', key]);
+    await cmd(key, ['SET', key, 'x']);
+    await expect(holds.holdExpiry(w.eventId, w.holdId, w.seatIds)).rejects.toThrow(/PEAKET_CORRUPT_KEY/);
+  });
+});
+
 describe('RedisOrderHolds.check: 남의 것·없는 것·끝난 것은 가리지 않고 NOT_FOUND', () => {
   test('ST28_다른 구매 세션(같은 계정이 연 다른 세션)으로 물으면 그 세션의 목록에 없어 NOT_FOUND다 [ASVS v5.0.0-8.2.2]', async () => {
     const w = await heldWorld();

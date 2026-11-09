@@ -348,6 +348,11 @@ export type createOrderPaymentResponse201 = {
   status: 201
 }
 
+export type createOrderPaymentResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createOrderPaymentResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -383,10 +388,15 @@ export type createOrderPaymentResponse503 = {
   status: 503
 }
 
+export type createOrderPaymentResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type createOrderPaymentResponseSuccess = (createOrderPaymentResponse201) & {
   headers: Headers;
 };
-export type createOrderPaymentResponseError = (createOrderPaymentResponse401 | createOrderPaymentResponse404 | createOrderPaymentResponse409 | createOrderPaymentResponse415 | createOrderPaymentResponse423 | createOrderPaymentResponse429 | createOrderPaymentResponse503) & {
+export type createOrderPaymentResponseError = (createOrderPaymentResponse400 | createOrderPaymentResponse401 | createOrderPaymentResponse404 | createOrderPaymentResponse409 | createOrderPaymentResponse415 | createOrderPaymentResponse423 | createOrderPaymentResponse429 | createOrderPaymentResponse503 | createOrderPaymentResponse504) & {
   headers: Headers;
 };
 
@@ -399,7 +409,7 @@ export const getCreateOrderPaymentUrl = (orderId: string,) => {
 }
 
 /**
- * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 구매 세션 요청 서명 필수
+ * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 같은 멱등 키의 재생은 처음 시도의 결제사로 결제창 값을 다시 만든다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, guidelines §4). 구매 세션 요청 서명 필수
  * @summary 결제 시도 시작(결제사 선택, 결제창 값 발급)
  */
 export const createOrderPayment = async (orderId: string,
@@ -434,7 +444,7 @@ return orvalFetch<createOrderPaymentResponseSuccess>(getCreateOrderPaymentUrl(or
 
 export const getCreateOrderPaymentMutationKey = () => ['createOrderPayment'] as const;
 
-export const getCreateOrderPaymentMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+export const getCreateOrderPaymentMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOrderPayment>>, TError,CreateOrderPaymentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createOrderPayment>>, TError,CreateOrderPaymentMutationVariables, TContext> => {
 
@@ -463,13 +473,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateOrderPaymentMutationResult = NonNullable<Awaited<ReturnType<typeof createOrderPayment>>>
     export type CreateOrderPaymentMutationBody = BodyType<CreateOrderPaymentBody> | undefined
-    export type CreateOrderPaymentMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOrderPaymentMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreateOrderPaymentMutationVariables = {orderId: string;data?: BodyType<CreateOrderPaymentBody>}
 
     /**
  * @summary 결제 시도 시작(결제사 선택, 결제창 값 발급)
  */
-export const useCreateOrderPayment = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+export const useCreateOrderPayment = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOrderPayment>>, TError,CreateOrderPaymentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createOrderPayment>>,

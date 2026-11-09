@@ -30,13 +30,17 @@
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, systemClock } from '@peaket/platform';
+import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import {
+  type BehaviorSignalPublisher,
   type BookingModuleDeps,
   CONSENT_VERSION_ENV,
   type ContactRefs,
+  discardBehaviorSignals,
   DrizzleOrderAccepts,
+  DrizzleOrderStarts,
   DrizzleOrderExpiry,
   DrizzleOrderStore,
   DrizzleOrderWrites,
@@ -51,6 +55,8 @@ import {
   InventoryOrderSessions,
   InventoryOrderExpiry,
   InventorySeatSlots,
+  InventoryOrderHoldExpiries,
+  KafkaBehaviorSignals,
   LoggerPaymentPullLog,
   LoggerSagaLog,
   LoggerTicketIssueLog,
@@ -61,6 +67,10 @@ import {
   noPaymentDepositReader,
   PAYMENT_DEPOSIT_BREAKER,
   PAYMENT_PULL_BREAKER,
+  PAYMENT_CHECKOUT_BREAKER,
+  PAYMENT_CHECKOUT_BREAKER_OPTIONS,
+  type PaymentCheckouts,
+  paymentCheckoutsFromEnv,
   paymentConfirmsFromEnv,
   paymentDepositReaderFromEnv,
   paymentPullDatabaseOptions,
@@ -74,6 +84,7 @@ import {
   RedisBookingRestrictions,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
+  simulatorPaymentCheckouts,
   TICKET_DEPENDENCY,
   ticketIssueDatabaseOptions,
   ticketIssuerFromEnv,
@@ -172,8 +183,18 @@ let depositReader: ReturnType<typeof paymentDepositReaderFromEnv> | undefined;
 let depositBreaker: CircuitBreaker | undefined;
 const paymentStatusReads = database ? new DrizzlePaymentStatus({ database }) : undefined;
 const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ reads: paymentStatusReads, clock: systemClock, signals: orderSignals }) : undefined;
+// 결제 시도 시작(POST /v1/orders/{orderId}/payments, BUILD_ORDER PRF-191): 결제창 준비 클라이언트와 행동 신호 생산자는 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 묶는다.
+// 그 전이면(듣기 전) 불리지 않는다. 행동 신호는 브로커 주소가 없으면(local·ci) 버린다
+const startLate: { checkouts?: PaymentCheckouts; behavior?: BehaviorSignalPublisher } = {};
 const booking: BookingModuleDeps | undefined = database
   ? {
+      startPayment: {
+        starts: new DrizzleOrderStarts({ database, store: orderStore, clock: systemClock }),
+        checkouts: { prepare: (q) => (startLate.checkouts ?? simulatorPaymentCheckouts).prepare(q) },
+        holdExpiries: new InventoryOrderHoldExpiries(new RedisOrderHolds(redis, seatMap)),
+        behavior: { publish: (m) => (startLate.behavior ?? discardBehaviorSignals).publish(m) },
+        signals: orderSignals,
+      },
       writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
       accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
       slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
@@ -256,6 +277,8 @@ if (database && databaseUrl) {
 // 그 밖의 환경은 주소가 없으면 여기서 던진다(시작 실패, 듣기 전). 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 끈다
 let payment: ReturnType<typeof paymentConfirmsFromEnv> | undefined;
 let paymentBreaker: CircuitBreaker | undefined;
+let paymentCheckouts: ReturnType<typeof paymentCheckoutsFromEnv> | undefined;
+let checkoutBreaker: CircuitBreaker | undefined;
 if (booking && database) {
   paymentBreaker = new CircuitBreaker({ service: SERVICE, dependency: 'payment-svc', registry: service.metrics.registry, logger: service.logger });
   payment = paymentConfirmsFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: paymentBreaker });
@@ -268,6 +291,11 @@ if (booking && database) {
     // 주문 ID만 싣는다. 답의 계좌 칸과 답의 주문 ID는 싣지 않는다
     onOrderMismatch: (orderId) => service.logger.warn({ kind: 'payment-deposit-order-mismatch', orderId }, 'GetPayment 답의 주문 ID가 요청과 달라 계좌 칸을 버렸다'),
   });
+  // 결제창 준비(PrepareCheckout, PRF-191): 승인 명령과 따로인 차단기(payment-svc-checkout, 실패 분류·파드당 동시 상한은 옵션에 있다)이고, 주소가 없으면 local·ci만 시뮬레이터 대역과 경고 한 줄이다(그 밖은 여기서 던진다)
+  checkoutBreaker = new CircuitBreaker({ service: SERVICE, ...PAYMENT_CHECKOUT_BREAKER_OPTIONS, registry: service.metrics.registry, logger: service.logger });
+  paymentCheckouts = paymentCheckoutsFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: checkoutBreaker });
+  for (const w of paymentCheckouts.warnings) service.logger.warn({ dep: PAYMENT_CHECKOUT_BREAKER }, w);
+  startLate.checkouts = paymentCheckouts.checkouts;
   const saga = new DrizzleSaga({ database, store: orderStore, sales: new DrizzleSeatSales(database), clock: systemClock });
   sagaRunner = new OrderSagaRunner({
     jobs: saga,
@@ -317,6 +345,7 @@ if (booking && database && databaseUrl) {
 // 결제 결과 반영은 paymentResultApply로 조립한다(test-int/consumers.int.test.ts와 같은 함수. onOrderChanged = 이 파드의 기다림 표 notify, 필수.
 // onApproved = 이 파드의 발권 실행기 kick: 승인 커밋 뒤 그 주문을 곧바로 발권한다, PRF-170)
 let consumerOptions: PurchaseConsumersOptions | undefined;
+let behaviorProducer: KafkaProducer | undefined;
 let consumerDatabase: Database | undefined;
 let applyPaymentResult: ReturnType<typeof paymentResultApply> | undefined;
 if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiters) {
@@ -342,6 +371,11 @@ if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiter
     ...(voidRunner ? { onDepositReversed: (orderId: string) => voidRunner.kick(orderId) } : {}),
   });
   if (kafka.enabled) {
+    // 행동 신호 생산자(telemetry.behavior, PRF-191). 메시지 값은 JSON 대역이고, 연결 실패는 시작을 막지 않는다(보내기가 실패하면 telemetry_dropped_total만 오른다)
+    const producer = createKafkaProducer({ kind: 'default', brokers: kafka.brokers, clientId: `${SERVICE}-telemetry-${kafka.env}-${podId}`, auth: kafka.auth });
+    behaviorProducer = producer;
+    producer.connect().catch((err: unknown) => service.logger.warn({ dep: 'kafka', err: errorSummary(err) }, '행동 신호 생산자를 잇지 못했다(요약은 버려진다)'));
+    startLate.behavior = new KafkaBehaviorSignals(producer);
     consumerOptions = {
       env: kafka.env,
       brokers: kafka.brokers,
@@ -460,6 +494,9 @@ function shutdown(): void {
         paymentBreaker?.shutdown();
         depositReader?.close();
         depositBreaker?.shutdown();
+        paymentCheckouts?.close();
+        checkoutBreaker?.shutdown();
+        void behaviorProducer?.disconnect().catch(() => {});
       } catch (err) {
         service.logger.error({ err: errorSummary(err) }, 'payment-svc 클라이언트 닫기 실패');
       }

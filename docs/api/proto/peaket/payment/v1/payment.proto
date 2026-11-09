@@ -85,6 +85,9 @@ message PrepareCheckoutRequest {
   optional bool virtual_account_allowed = 10;
   // 회차의 입장 시작 시각. 있으면 입금 기한이 입장 시작 24시간 전을 넘지 않는다.
   google.protobuf.Timestamp entry_opens_at = 11;
+  // 멱등 재생에서 그 시도의 결제사로 고정한다. 값이 있으면 전환·지정을 보지 않고 이 결제사로 값을 만들고, 쓸 수 없으면 UNAVAILABLE이다.
+  // 비우면(UNSPECIFIED) 평소처럼 고른다(추천 적용 2026-11-09, BUILD_ORDER PRF-191).
+  peaket.common.v1.PgProvider pinned_pg = 12;
 }
 
 message BuyerContact {

@@ -44,12 +44,12 @@ export const SEAT_GEN = 3;
 export const MIN = 60_000;
 
 /** 토스 본문(정상: 주문 금액과 같다) */
-export function tossBody(over: Partial<{ pg: 'TOSS' | 'SIMULATOR'; paymentKey: string; amount: number }> = {}): PaymentAcceptBody {
+export function tossBody(over: Partial<{ pg: 'TOSS' | 'SIMULATOR'; paymentKey: string; amount: number; attemptId: string }> = {}): PaymentAcceptBody {
   return { pg: 'TOSS', paymentKey: PAYMENT_KEY, amount: AMOUNT, ...over };
 }
 
 /** 포트원 본문(정상: paymentId = 시도의 pg_order_ref) */
-export function portoneBody(over: Partial<{ paymentId: string; paymentToken: string; txId: string }> = {}): PaymentAcceptBody {
+export function portoneBody(over: Partial<{ paymentId: string; paymentToken: string; txId: string; attemptId: string }> = {}): PaymentAcceptBody {
   return { pg: 'PORTONE', paymentId: PORTONE_PAYMENT_ID, paymentToken: PAYMENT_TOKEN, txId: TX_ID, ...over };
 }
 

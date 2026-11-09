@@ -25,9 +25,11 @@ import { z } from 'zod';
 import { ACCEPT_PAYMENT_OPERATION, AcceptPayment, type AcceptPaymentRejection } from '../application/accept-payment.js';
 import { CREATE_ORDER_OPERATION, CreateOrder, type CreateOrderRejection } from '../application/create-order.js';
 import { GetPaymentStatus } from '../application/get-payment-status.js';
+import { START_PAYMENT_OPERATION, type StartedPayment, StartPayment, type StartPaymentRejection } from '../application/start-payment.js';
 import { ORDER_STATUSES } from '../domain/order.js';
+import { START_PAY_METHODS } from '../domain/payment-attempt.js';
 import { PAYMENT_STATUS_MAX_DEADLINE_MS, PAYMENT_STATUS_VALUES, type PaymentStatusProblem } from '../domain/payment-status.js';
-import type { OrderView } from '../domain/ports.js';
+import type { CheckoutValues, OrderView } from '../domain/ports.js';
 
 // openapi 모양을 여기 둔다(좌석 홀드·queue-svc와 같은 방식). 요청 본문은 계약처럼 모든 층을 닫는다(.strict(), docs/api/guidelines.md §1 '요청은 닫고 응답은 연다').
 
@@ -168,11 +170,12 @@ const paymentRef = () => z.string().min(1).max(PAYMENT_REF_MAX).regex(PAYMENT_RE
 /**
  * 본문 PaymentAccept(openapi, pg로 갈리는 oneOf. 갈래마다 허용 밖 칸은 400, packages/contracts CreateOrderPaymentAcceptanceBody와 같은 모양).
  * 결제 참조 칸은 계약의 글 칸보다 좁게 1~200자의 보이는 ASCII만 받는다(리뷰 고침 M1. 계약 스키마는 넓은 그대로 두고 설명 글로 적는다).
+ * 선택 칸 attemptId는 결제창을 연 시도의 ID(UUID, 리뷰 고침 M2 2026-11-09)이고 있으면 쓰임새가 지금 READY 시도와 대조한다.
  * 금액 대조(400)·시도 대조(409)는 쓰임새가 검사 차례대로 가린다
  */
 export const PaymentAcceptRequest = z.union([
-  z.object({ pg: z.enum(['TOSS', 'SIMULATOR']), paymentKey: paymentRef(), amount: z.int() }).strict(),
-  z.object({ pg: z.enum(['PORTONE']), paymentId: paymentRef(), paymentToken: paymentRef(), txId: paymentRef() }).strict(),
+  z.object({ pg: z.enum(['TOSS', 'SIMULATOR']), paymentKey: paymentRef(), amount: z.int(), attemptId: z.uuid().optional() }).strict(),
+  z.object({ pg: z.enum(['PORTONE']), paymentId: paymentRef(), paymentToken: paymentRef(), txId: paymentRef(), attemptId: z.uuid().optional() }).strict(),
 ]);
 export type PaymentAcceptRequest = z.output<typeof PaymentAcceptRequest>;
 
@@ -220,6 +223,120 @@ export function throwAcceptProblem(reason: AcceptPaymentRejection, reply: { head
     ...(spec.retryAfterSeconds !== undefined ? { retryAfterSeconds: spec.retryAfterSeconds } : {}),
     ...(spec.normalBranch ? { normalBranch: true } : {}),
   });
+}
+
+// ---- 결제 시도 시작 POST /v1/orders/{orderId}/payments(docs/features/payment.md §2 '결제 시도 시작의 첫 구현', BUILD_ORDER PRF-191) ----
+
+/** 경로 값(결제 접수와 같다. 모양은 보지 않는다) */
+export const StartPaymentParams = z.object({ orderId: z.string() }).strict();
+
+/** 행동 요약(openapi BehaviorSummary. 요약값만이고 허용 밖 칸은 400이다) */
+const BehaviorSummaryBody = z
+  .object({
+    v: z.literal(1),
+    windowMs: z.int().min(0).max(3_600_000),
+    pointerMoves: z.int().min(0).optional(),
+    pointerEntropy: z.number().min(0).optional(),
+    inputIntervalMeanMs: z.number().min(0).optional(),
+    inputIntervalStdMs: z.number().min(0).optional(),
+    scrollEvents: z.int().min(0).optional(),
+    scrollDistancePx: z.int().min(0).optional(),
+  })
+  .strict();
+
+/** 본문(openapi createOrderPayment. payMethod는 계약의 글 칸보다 좁게 허용 목록만 받는다, 틀리면 400) */
+export const StartPaymentRequest = z.object({ payMethod: z.enum(START_PAY_METHODS).optional(), behavior: BehaviorSummaryBody.optional() }).strict();
+export type StartPaymentRequest = z.output<typeof StartPaymentRequest>;
+
+/** 응답의 토스·시뮬레이터 결제창 값(openapi TossCheckout) */
+const TossCheckoutBody = z.object({
+  clientKey: z.string(),
+  customerKey: z.string(),
+  orderId: z.string(),
+  orderName: z.string(),
+  amount: z.int(),
+  successUrl: z.string(),
+  failUrl: z.string(),
+});
+
+/** 응답의 포트원 결제창 값(openapi PortoneCheckout) */
+const PortoneCheckoutBody = z.object({
+  storeId: z.string(),
+  channelKey: z.string(),
+  paymentId: z.string(),
+  orderName: z.string(),
+  totalAmount: z.int(),
+  currency: z.string(),
+  redirectUrl: z.string(),
+  customData: z.object({ orderId: z.string() }),
+});
+
+/** 201 응답 PaymentAttempt(직렬화 스키마. 스키마에 없는 칸은 내보내지 않는다) */
+export const PaymentAttemptBody = z.object({
+  attemptId: z.string(),
+  pg: z.enum(['TOSS', 'PORTONE', 'SIMULATOR']),
+  switched: z.boolean(),
+  holdExpiresAt: z.iso.datetime({ offset: true }).optional(),
+  allowedPayMethods: z.array(z.string()),
+  depositDueAt: z.iso.datetime({ offset: true }).optional(),
+  checkout: z.union([TossCheckoutBody, PortoneCheckoutBody]),
+});
+export type PaymentAttemptResponse = z.output<typeof PaymentAttemptBody>;
+
+/**
+ * 거절 → HTTP 문제 상세 대응표(openapi POST /v1/orders/{orderId}/payments 응답 설명과 x-peaket-problem-types의 status·title).
+ * 503의 Retry-After는 2초 [가정]이다. PAY_METHOD_INVALID는 요청 검사 실패와 같은 400(about:blank)이다
+ */
+export const START_PAYMENT_PROBLEMS: Readonly<Record<StartPaymentRejection, OrderProblemSpec>> = {
+  SESSION_ENDED: { status: 401, type: 'purchase-session-ended', title: '예매 시간이 끝났습니다' },
+  IDEM_REUSED: { status: 422, type: 'idempotency-key-reused', title: '같은 멱등 키를 다른 요청에 썼습니다' },
+  NOT_FOUND: { status: 404, type: 'not-found', title: '찾을 수 없습니다' },
+  ORDER_EXPIRED: { status: 409, type: 'order-expired', title: '결제하지 않아 끝난 주문입니다' },
+  ALREADY_ACCEPTED: { status: 409, type: 'payment-already-accepted', title: '이 주문의 결제를 이미 접수했습니다', normalBranch: true },
+  ATTEMPTS_EXCEEDED: { status: 409, type: 'payment-attempts-exceeded', title: '결제 시도 횟수를 넘었습니다' },
+  SALE_PAUSED: { status: 423, type: 'sale-paused', title: '판매가 잠시 멈췄습니다' },
+  SEAT_STORE_UNAVAILABLE: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 },
+  PG_UNAVAILABLE: { status: 503, type: 'pg-unavailable', title: '결제를 잠시 시작할 수 없습니다', retryAfterSeconds: 2 },
+  CHECKOUT_MISCONFIGURED: { status: 503, type: 'dependency-unavailable', title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 },
+  PAY_METHOD_INVALID: { status: 400, type: 'about:blank', title: 'Bad Request' },
+  DEADLINE_EXCEEDED: DEADLINE_EXCEEDED_PROBLEM,
+};
+
+/**
+ * 결제 시도 시작 거절을 대응표대로 HTTP 오류로 바꿔 던진다(돌아오지 않는다).
+ * - SESSION_ENDED: reply에 WWW-Authenticate: Cookie realm="peaket"을 단다.
+ * - PAY_METHOD_INVALID: 플랫폼 RequestValidationError(400 about:blank). 받은 값은 싣지 않는다
+ */
+export function throwStartPaymentProblem(reason: StartPaymentRejection, reply: { header(name: string, value: string): unknown }): never {
+  if (reason === 'PAY_METHOD_INVALID') throw new RequestValidationError('이 회차에서 쓸 수 없는 결제수단이다');
+  if (reason === 'SESSION_ENDED') reply.header('www-authenticate', COOKIE_CHALLENGE);
+  const spec = START_PAYMENT_PROBLEMS[reason];
+  throw new ProblemError({
+    type: spec.type,
+    status: spec.status,
+    title: spec.title,
+    ...(spec.retryAfterSeconds !== undefined ? { retryAfterSeconds: spec.retryAfterSeconds } : {}),
+    ...(spec.normalBranch ? { normalBranch: true } : {}),
+  });
+}
+
+/** 결제창 값 → 응답 칸. 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 계약 밖 칸이 섞여 들지 않게, ASVS 15.3.1) */
+function checkoutBodyOf(c: CheckoutValues): PaymentAttemptResponse['checkout'] {
+  if (c.shape === 'TOSS') return { clientKey: c.clientKey, customerKey: c.customerKey, orderId: c.orderId, orderName: c.orderName, amount: c.amount, successUrl: c.successUrl, failUrl: c.failUrl };
+  return { storeId: c.storeId, channelKey: c.channelKey, paymentId: c.paymentId, orderName: c.orderName, totalAmount: c.totalAmount, currency: c.currency, redirectUrl: c.redirectUrl, customData: { orderId: c.customData.orderId } };
+}
+
+/** 쓰임새의 결과 → 201 본문. 시각은 ISO 8601(UTC, 밀리초) */
+export function paymentAttemptResponseOf(a: StartedPayment): PaymentAttemptResponse {
+  return {
+    attemptId: a.attemptId,
+    pg: a.pg,
+    switched: a.switched,
+    ...(a.holdExpiresAtMs !== undefined ? { holdExpiresAt: new Date(a.holdExpiresAtMs).toISOString() } : {}),
+    allowedPayMethods: [...a.allowedPayMethods],
+    ...(a.depositDueAtMs !== undefined ? { depositDueAt: new Date(a.depositDueAtMs).toISOString() } : {}),
+    checkout: checkoutBodyOf(a.checkout),
+  };
 }
 
 // ---- 결제 결과 long polling GET /v1/orders/{orderId}/payment-status(docs/features/payment.md §2 '결제 결과 long polling의 첫 구현', BUILD_ORDER PRF-166) ----
@@ -294,7 +411,43 @@ export class OrdersController {
     @Inject(AcceptPayment) private readonly acceptPayment: AcceptPayment,
     /** 결제 결과 long polling(PRF-166). BookingModuleDeps.paymentStatus가 없으면 조립하지 않아 undefined다 */
     @Optional() @Inject(GetPaymentStatus) private readonly getPaymentStatus?: GetPaymentStatus,
+    /** 결제 시도 시작(PRF-191). BookingModuleDeps.startPayment가 없으면 조립하지 않아 undefined다 */
+    @Optional() @Inject(StartPayment) private readonly startPayment?: StartPayment,
   ) {}
+
+  /**
+   * 결제 시도 시작(201 PaymentAttempt). 처리는 StartPayment.execute 하나다.
+   * [정함] 쓰임새가 조립되지 않았으면(this.startPayment 없음) 404 not-found로 답한다(결제 결과 long polling과 같다)
+   */
+  @Post(':orderId/payments')
+  @HttpCode(201)
+  @Roles(['fan'], { scopes: ['ticket:buy'] })
+  @Idempotent({ operation: START_PAYMENT_OPERATION })
+  @PurchaseSigned()
+  @ContractRouteSchema({ params: StartPaymentParams, headers: OrderHeaders, body: StartPaymentRequest, responses: { 201: PaymentAttemptBody } })
+  async start(
+    @Param('orderId') orderId: string,
+    @Body() body: StartPaymentRequest,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() idem: IdempotencyRequest,
+    @CurrentPurchaseSession() purchaseSessionId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<PaymentAttemptResponse> {
+    void reply.header('cache-control', 'no-store');
+    if (!this.startPayment) throwStartPaymentProblem('NOT_FOUND', reply);
+    const deadline = requestContext()?.deadline;
+    const r = await this.startPayment.execute({
+      accountId: me.accountId,
+      ...(me.pid !== undefined ? { pid: me.pid } : {}),
+      purchaseSessionId,
+      orderId,
+      idem,
+      body,
+      ...(deadline ? { deadline } : {}),
+    });
+    if (r.status === 201) return paymentAttemptResponseOf(r.attempt);
+    throwStartPaymentProblem(r.reason, reply);
+  }
 
   /**
    * 주문 생성. 처리는 CreateOrder.execute 하나다: 201이면 orderResponseOf(order), 거절이면 throwOrderProblem. 그 밖의 오류는 그대로(500·플랫폼 Problem).

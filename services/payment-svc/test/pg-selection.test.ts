@@ -199,7 +199,35 @@ test('복귀 주소는 웹 함수 paymentReturnUrls와 같은 모양이다 [ASVS
 
 const raw = (o: Partial<PrepareCheckoutInput> = {}): PrepareCheckoutInput => ({ orderKind: 'TICKET', orderId: ORDER, attemptId: ATTEMPT, eventId: EVENT, amount: 55_000, orderName: '공연 티켓', payMethod: '', ...o });
 
+describe('selectPg: 멱등 재생의 결제사 고정(P-T27, BUILD_ORDER PRF-191)', () => {
+  test('P-T27_고정하면 전환이 켜져도 그 결제사다 [ASVS v5.0.0-2.2.3]', () => {
+    const r = selectPg(input({ pinnedPg: 'TOSS', platformSwitch: sw({ toPg: 'PORTONE' }) }));
+    expect(r).toMatchObject({ kind: 'SELECTED', pg: 'TOSS', switched: false });
+  });
+
+  test('P-T27_고정한 결제사가 회차 기준과 다르면 switched는 참이다(처음 시도가 전환으로 골랐다)', () => {
+    expect(selectPg(input({ pinnedPg: 'PORTONE' }))).toMatchObject({ kind: 'SELECTED', pg: 'PORTONE', switched: true });
+    expect(selectPg(input({ pinnedPg: 'PORTONE', assignment: { primary: 'PORTONE' } }))).toMatchObject({ kind: 'SELECTED', pg: 'PORTONE', switched: false });
+  });
+
+  test.each<[string, Partial<PgSelectionInput>, string]>([
+    ['채널에 없다', { channels: new Map([['PORTONE', ON]]) }, 'NO_CHANNEL'],
+    ['비활성이다', { channels: new Map([['TOSS', { active: false, payMethods: ALL_METHODS }]]) }, 'INACTIVE'],
+    ['수단을 받지 않는다', { channels: new Map([['TOSS', { active: true, payMethods: new Set<PayMethod>(['MOBILE']) }]]) }, 'METHOD_UNSUPPORTED'],
+  ])('P-T27_고정한 결제사가 %s면 UNAVAILABLE이고 다른 결제사로 넘기지 않는다 [ASVS v5.0.0-16.5.3]', (_name, o, reason) => {
+    expect(selectPg(input({ pinnedPg: 'TOSS', ...o }))).toEqual({ kind: 'UNAVAILABLE', pg: 'TOSS', reason });
+  });
+});
+
 describe('parsePrepareCheckoutInput', () => {
+  test('P-T27_pinned_pg 이름을 받고 비면 칸이 없다, 모르는 이름은 입력 오류다 [ASVS v5.0.0-2.2.1]', () => {
+    expect(parsePrepareCheckoutInput(raw({ pinnedPg: 'PORTONE' }))).toMatchObject({ pinnedPg: 'PORTONE' });
+    expect(parsePrepareCheckoutInput(raw())).not.toHaveProperty('pinnedPg');
+    expect(parsePrepareCheckoutInput(raw({ pinnedPg: '' }))).not.toHaveProperty('pinnedPg');
+    expect(parsePrepareCheckoutInput(raw({ pinnedPg: 'UNSPECIFIED' }))).not.toHaveProperty('pinnedPg');
+    expect(() => parsePrepareCheckoutInput(raw({ pinnedPg: 'KCP' }))).toThrow('입력이 틀렸다: pinned_pg');
+  });
+
   test('P-T26_비어 있는 수단은 CARD이고 가상계좌 허용 기본은 참이다', () => {
     expect(parsePrepareCheckoutInput(raw())).toEqual({ orderId: ORDER, attemptId: ATTEMPT, eventId: EVENT, amount: 55_000, orderName: '공연 티켓', payMethod: 'CARD', virtualAccountAllowed: true });
   });

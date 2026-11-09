@@ -1,7 +1,7 @@
 // booking 모듈 지표(docs/observability.md '주문 상태와 상태 이력이 어긋나지 않는다', BUILD_ORDER PRF-160). PromSeatSignals와 같은 꼴이다:
 // 지표는 registers: []로 만들고 register(registry)로 서비스 레지스트리에 붙인다.
 import { Counter, Gauge, type Registry } from '@peaket/platform';
-import type { OrderSignals, PaymentStatusSignals } from '../domain/ports.js';
+import type { OrderSignals, PaymentStatusSignals, StartPaymentSignals } from '../domain/ports.js';
 import { FALLBACK_REASONS, type FallbackReason } from '../domain/recheck.js';
 
 /**
@@ -10,8 +10,34 @@ import { FALLBACK_REASONS, type FallbackReason } from '../domain/recheck.js';
  * - purchase_order_paying_mark_failed_total(카운터, 이름표 없음): 커밋 뒤 Paying 표시를 다시 불러도 하지 못한 수(PRF-161 리뷰 고침 M3)
  * - purchase_payment_status_waiters(게이지, 이름표 없음): 이 파드에서 결제 결과 long polling으로 기다리는 요청 수(PRF-166)
  * - purchase_payment_status_poll_failures_total(카운터, 이름표 없음): 기다림 표의 묶음 조회가 읽기 실패한 틱 수(PRF-166 리뷰 고침 L6)
+ * - purchase_payment_attempts_total{pg, outcome}(카운터): 결제 시도 시작의 결과(PRF-191)
+ * - telemetry_dropped_total{record}(카운터): 텔레메트리 전송 실패로 버린 수(PRF-191, docs/architecture.md §5)
  */
-export class PromOrderSignals implements OrderSignals, PaymentStatusSignals {
+export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, StartPaymentSignals {
+  readonly #paymentAttempts = new Counter({
+    name: 'purchase_payment_attempts_total',
+    help: '결제 시도 시작의 결과(pg: 결제사, 고르기 전이면 none. outcome: started·replayed·exceeded·pg_unavailable·deadline·misconfigured·pay_method_invalid)',
+    labelNames: ['pg', 'outcome'] as const,
+    registers: [],
+  });
+
+  readonly #telemetryDropped = new Counter({
+    name: 'telemetry_dropped_total',
+    help: '텔레메트리 전송 실패로 버린 수(record: behavior_signal)',
+    labelNames: ['record'] as const,
+    registers: [],
+  });
+
+  /** purchase_payment_attempts_total{pg, outcome}을 1 올린다(BUILD_ORDER PRF-191). 던지지 않는다 */
+  paymentAttempt(pg: Parameters<StartPaymentSignals['paymentAttempt']>[0], outcome: Parameters<StartPaymentSignals['paymentAttempt']>[1]): void {
+    this.#paymentAttempts.inc({ pg, outcome });
+  }
+
+  /** telemetry_dropped_total{record}를 1 올린다(BUILD_ORDER PRF-191). 던지지 않는다 */
+  telemetryDropped(record: Parameters<StartPaymentSignals['telemetryDropped']>[0]): void {
+    this.#telemetryDropped.inc({ record });
+  }
+
   readonly #mismatch = new Gauge({ name: 'order_history_mismatch', help: '마지막 매일 주문 상태·이력 검사에서 어긋난 주문 수(1 이상이면 SEV3 hygiene)', registers: [] });
   readonly #fallback = new Counter({
     name: 'purchase_identity_recheck_fallback_total',
@@ -58,6 +84,8 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals {
     registry.registerMetric(this.#waiters);
     registry.registerMetric(this.#pollFailures);
     registry.registerMetric(this.#depositReadFailures);
+    registry.registerMetric(this.#paymentAttempts);
+    registry.registerMetric(this.#telemetryDropped);
     return this;
   }
 

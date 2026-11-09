@@ -998,7 +998,70 @@ describe('LayoutSeatMap.saleLayout: 판매 상태 판정의 판매 대상 좌석
   });
 });
 
+describe('parseEventSeatMapFile: 결제 시도의 선택 칸 셋(BUILD_ORDER PRF-191)', () => {
+  const ENTRY = '2026-12-20T10:00:00.000Z';
+
+  test('PT26_세 칸이 없으면 config에 칸이 없다(기존 판 파일 그대로)', () => {
+    const c = parseEventSeatMapFile(EVENT, validFile()).config;
+    for (const k of ['orderName', 'entryOpensAtMs', 'virtualAccountAllowed']) expect(c).not.toHaveProperty(k);
+  });
+
+  test('PT26_세 칸을 읽는다: 주문명 글, 입장 시각 밀리초, 가상계좌 불리언(거짓도 값이다)', () => {
+    const c = parseEventSeatMapFile(EVENT, file([secA(), secB()], { orderName: '2026 피켓 콘서트', entryOpensAt: ENTRY, virtualAccountAllowed: false })).config;
+    expect(c).toEqual({ ...CONFIG_V7, orderName: '2026 피켓 콘서트', entryOpensAtMs: Date.parse(ENTRY), virtualAccountAllowed: false });
+  });
+
+  test('PT26_경계: 주문명 100자는 받는다, 입장 시각은 9999년 끝까지 받는다', () => {
+    expect(codeOf(file([secA(), secB()], { orderName: 'a'.repeat(100) }))).toBe('ok');
+    expect(codeOf(file([secA(), secB()], { orderName: '한'.repeat(100) }))).toBe('ok');
+    expect(codeOf(file([secA(), secB()], { entryOpensAt: '9999-12-31T23:59:59.999Z' }))).toBe('ok');
+  });
+
+  test.each([
+    ['글이 아님', 1],
+    ['빈 글', ''],
+    ['101자', 'a'.repeat(101)],
+    ['줄바꿈', '공연\n티켓'],
+    ['양방향 제어', '공연‮티켓'],
+    ['폭 없는 공백', '공연​티켓'],
+    ['줄 구분자', '공연 티켓'],
+    ['한글 채움 문자', '공연ㅤ티켓'],
+    ['공백뿐', '   '],
+  ])('PT26_주문명 %s는 파일 전체를 받지 않는다(BAD_CHECKOUT_FIELDS) [ASVS v5.0.0-2.2.1]', (_name, orderName) => {
+    expect(codeOf(file([secA(), secB()], { orderName }))).toBe('BAD_CHECKOUT_FIELDS');
+  });
+
+  test.each([
+    ['글이 아님', 1_800_000_000_000],
+    ['날짜가 아닌 글', 'tomorrow'],
+    ['시간대 없음', '2026-12-20T10:00:00'],
+    ['0 이하', '1970-01-01T00:00:00.000Z'],
+    ['9999년 넘김', '+010000-01-01T00:00:00.000Z'],
+  ])('PT26_입장 시각 %s는 파일 전체를 받지 않는다 [ASVS v5.0.0-2.2.1]', (_name, entryOpensAt) => {
+    expect(codeOf(file([secA(), secB()], { entryOpensAt }))).toBe('BAD_CHECKOUT_FIELDS');
+  });
+
+  test.each(['true', 1, null])('PT26_가상계좌 값 %s는 불리언이 아니라 받지 않는다 [ASVS v5.0.0-2.2.1]', (virtualAccountAllowed) => {
+    expect(codeOf(file([secA(), secB()], { virtualAccountAllowed }))).toBe('BAD_CHECKOUT_FIELDS');
+  });
+});
+
 describe('LayoutSeatMap: 가격만 바뀐 판 파일도 새 판으로 본다', () => {
+  test('PT26_세 선택 칸만 바뀐 파일도 판 서명이 달라 다시 읽으면 새 값이다(BUILD_ORDER PRF-191)', async () => {
+    const { source, map } = setup();
+    source.files.set(EVENT, file([secA(), secB()], { orderName: '처음 이름' }));
+    expect((await map.config(EVENT))?.orderName).toBe('처음 이름');
+    source.files.set(EVENT, file([secA(), secB()], { orderName: '바뀐 이름' }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.orderName).toBe('바뀐 이름');
+    source.files.set(EVENT, file([secA(), secB()], { orderName: '바뀐 이름', entryOpensAt: '2026-12-20T10:00:00.000Z' }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.entryOpensAtMs).toBe(Date.parse('2026-12-20T10:00:00.000Z'));
+    source.files.set(EVENT, file([secA(), secB()], { orderName: '바뀐 이름', entryOpensAt: '2026-12-20T10:00:00.000Z', virtualAccountAllowed: false }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.virtualAccountAllowed).toBe(false);
+  });
+
   test('FR011_NFR003_판 번호·1인 한도·판매 종료가 같고 tierPrices만 바뀐 파일을 다시 읽으면 config.tierPrices가 새 값이다', async () => {
     const { source, map } = setup();
     source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 110_000, VIP: 150_000, S: 88_000 } }));

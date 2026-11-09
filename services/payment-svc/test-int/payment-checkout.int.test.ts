@@ -352,6 +352,19 @@ describe('재생과 쓰기 없음', () => {
     await clearPlatform();
   });
 
+  test('P-T27_pinned_pg면 전환이 켜져도 그 결제사로 값을 만든다(멱등 재생, BUILD_ORDER PRF-191) [ASVS v5.0.0-2.2.3]', async () => {
+    await clearPlatform();
+    await putSwitch('PLATFORM', { to: 'PORTONE', version: 4 });
+    await passCache();
+    const req = requestOf();
+    expect((await prepare(req)).pg).toBe('PG_PROVIDER_PORTONE');
+    const replay = await prepare({ ...req, pinned_pg: 'PG_PROVIDER_TOSS' });
+    expect(replay.pg).toBe('PG_PROVIDER_TOSS');
+    expect(replay.switched).toBe(false);
+    expect(replay).toHaveProperty('toss');
+    await clearPlatform();
+  });
+
   test('P-T26_전환 쓰기 함수는 판 번호가 클 때만 쓴다(같은 판을 다시 보내도 그대로다)', async () => {
     const { selection, clock } = await stack();
     const scope = newId();

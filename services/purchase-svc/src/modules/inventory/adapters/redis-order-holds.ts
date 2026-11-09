@@ -5,12 +5,13 @@
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
 import type { OrderHoldCheck, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
-import { ORDER_HOLD_LEFT_LUA, ORDER_HOLD_LUA } from './order-hold-lua.js';
+import { ORDER_HOLD_EXPIRY_LUA, ORDER_HOLD_LEFT_LUA, ORDER_HOLD_LUA } from './order-hold-lua.js';
 import { sessionKeys } from './redis-purchase-sessions.js';
 import { guard, seatKeys } from './redis-seat-store.js';
 
 const ORDER_HOLD = redisScript(ORDER_HOLD_LUA);
 const ORDER_HOLD_LEFT = redisScript(ORDER_HOLD_LEFT_LUA);
+const ORDER_HOLD_EXPIRY = redisScript(ORDER_HOLD_EXPIRY_LUA);
 
 const NOT_FOUND: OrderHoldCheck = { status: 'NOT_FOUND' };
 const STORE_UNAVAILABLE: OrderHoldCheck = { status: 'STORE_UNAVAILABLE' };
@@ -103,5 +104,23 @@ export class RedisOrderHolds implements OrderHoldReader {
     const left = Number(await guard(this.redis.evalScript(ORDER_HOLD_LEFT, keys, [holdId], {})));
     if (!Number.isSafeInteger(left) || left < 0) throw new Error('홀드 남음 Lua가 0 이상 정수가 아닌 값을 돌려줬다');
     return left > 0;
+  }
+
+  /**
+   * 주문 좌석 가운데 그 holdId가 남은 좌석의 홀드 exp 중 가장 이른 값(결제 시도 응답의 holdExpiresAt, Lua 계약은 order-hold-lua.ts ORDER_HOLD_EXPIRY_LUA, BUILD_ORDER PRF-191).
+   * 좌석을 모르거나 좌석맵 판에 없는 좌석이 있거나 남은 좌석이 없으면 undefined다(칸을 뺀다, 앞의 둘은 좌석 Redis를 부르지 않는다).
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   * @throws Error 키 형이 틀림(PEAKET_CORRUPT_KEY)·스크립트가 모르는 값을 돌려줌
+   */
+  async holdExpiry(eventId: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<number | undefined> {
+    if (seatIds.length === 0) return undefined;
+    const refs = await this.seatMap.resolve(eventId, seatIds);
+    if (refs.some((r) => r === undefined)) return undefined;
+    const keys = (refs as SeatRef[]).map((s) => seatKeys.hold(eventId, s.index));
+    const r = await guard(this.redis.evalScript(ORDER_HOLD_EXPIRY, keys, [holdId], deadlineOf(o)));
+    if (r === null || r === undefined) return undefined;
+    const expiresAtMs = Number(str(r));
+    if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs < 0) throw new Error('홀드 만료 Lua가 0 이상 정수가 아닌 값을 돌려줬다');
+    return expiresAtMs;
   }
 }

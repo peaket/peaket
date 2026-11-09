@@ -17,4 +17,6 @@ export interface PaymentAcceptToss {
   paymentKey: string;
   /** 성공 URL의 금액. 서버 주문 금액과 대조 */
   amount: number;
+  /** 결제창을 연 결제 시도의 ID(선택, `PaymentAttempt.attemptId`). 있으면 지금 READY 시도와 같아야 하고 다르면 409 payment-attempt-mismatch다. 대체된 시도의 늦은 접수를 같은 결제사에서도 막는다. 없으면 결제사만 대조한다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, 코드 리뷰). 표 주문 접수만 본다(굿즈 접수는 구현 전) */
+  attemptId?: string;
 }

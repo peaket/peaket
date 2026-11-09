@@ -46,7 +46,7 @@ export class PrepareCheckout {
     const { signals, gateways, channels, defaults, webOrigin, virtualAccountReady, clock } = this.deps;
     const command = this.#parse(input);
     const state = await this.#read(command, budget);
-    const selection = selectPg({ ...state, defaults, channels, payMethod: command.payMethod });
+    const selection = selectPg({ ...state, defaults, channels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) });
     if (selection.kind === 'UNAVAILABLE') throw this.#unavailable(selection.pg, selection.reason, command);
     const gateway = gateways.of(selection.pg);
     // 채널 표는 같은 등록부에서 만들어 비지 않는다. 비었으면 고를 수 없는 것과 같게 다룬다

@@ -14,12 +14,14 @@ import * as zod from 'zod';
 export const CreateShopOrderPaymentAcceptanceBody = zod.union([zod.object({
   "pg": zod.enum(['TOSS', 'SIMULATOR']),
   "paymentKey": zod.string().describe('토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식). 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
-  "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조')
+  "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조'),
+  "attemptId": zod.uuid().optional().describe('결제창을 연 결제 시도의 ID(선택, `PaymentAttempt.attemptId`). 있으면 지금 READY 시도와 같아야 하고 다르면 409 payment-attempt-mismatch다. 대체된 시도의 늦은 접수를 같은 결제사에서도 막는다. 없으면 결제사만 대조한다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, 코드 리뷰). 표 주문 접수만 본다(굿즈 접수는 구현 전)')
 }).strict(),zod.object({
   "pg": zod.enum(['PORTONE']),
   "paymentId": zod.string().describe('결제 시도 응답의 paymentId와 같아야 한다. 세 칸 모두 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
   "paymentToken": zod.string().describe('수동 승인 API용 결제 토큰. 승인 결과가 정해지면 서버에서 지운다'),
-  "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다')
+  "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다'),
+  "attemptId": zod.uuid().optional().describe('결제창을 연 결제 시도의 ID(선택, `PaymentAttempt.attemptId`. 포트원의 txId와 다른 값이다). 있으면 지금 READY 시도와 같아야 하고 다르면 409 payment-attempt-mismatch다. 없으면 결제사·paymentId만 대조한다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, 코드 리뷰). 표 주문 접수만 본다(굿즈 접수는 구현 전)')
 }).strict()]).describe('결제 접수 본문. pg 값으로 갈린다(ADR-0044 결정 7). 허용 필드 밖의 값은 400')
 
 export type CreateShopOrderPaymentAcceptanceBody = zod.input<typeof CreateShopOrderPaymentAcceptanceBody>;

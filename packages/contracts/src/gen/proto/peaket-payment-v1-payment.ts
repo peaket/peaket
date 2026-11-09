@@ -105,6 +105,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "entry_opens_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 11
+                    },
+                    "pinned_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 12
                     }
                   }
                 },

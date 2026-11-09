@@ -117,6 +117,14 @@ describe('InventoryOrderSeatPins.releaseFailed', () => {
   });
 });
 
+describe('SeatMapSagaConfigs: 입장 시각(BUILD_ORDER PRF-191)', () => {
+  test('PT26_판의 입장 시각을 넘기고 없으면 칸을 만들지 않는다', async () => {
+    const full = { perAccountLimit: 4, saleEndsAtMs: NOW + DAY, entryOpensAtMs: NOW + 2 * DAY };
+    expect(await new SeatMapSagaConfigs({ config: async () => full }).get(EVENT)).toEqual(full);
+    expect(await new SeatMapSagaConfigs({ config: async () => ({ perAccountLimit: 4, saleEndsAtMs: NOW + DAY }) }).get(EVENT)).not.toHaveProperty('entryOpensAtMs');
+  });
+});
+
 describe('SeatMapSagaConfigs', () => {
   test('FR011_좌석맵 판의 1인 한도·판매 종료 두 칸만 돌려주고, 판이 없거나 읽기가 던지면 undefined다(던지지 않는다)', async () => {
     const full = { perAccountLimit: 4, saleEndsAtMs: NOW + DAY, tierPrices: { R: 1 } };

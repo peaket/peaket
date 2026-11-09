@@ -316,6 +316,11 @@ export class OrderSagaRunner {
     // 승인 기한을 넘겼고 한 번도 보내지 않았다(차단기 열림만 계속 등): 혼자 T11(판매 행 PENDING 지우기·한도 되돌리기)과 실패 해제
     if (past && job.confirmSentAtMs === undefined) return this.#fail(job, order, await this.#configOf(order), 'T11', 'EXPIRED');
     if (attempt === undefined) throw new Error('승인 명령을 보낸 주문에 ACCEPTED 결제 시도가 없다');
+    // 회차의 입장 시각(선택 칸, HOT-152가 넘긴 것, BUILD_ORDER PRF-191). 판을 읽지 못해도 승인 명령은 보낸다(입금 기한 상한이 빠질 뿐이다. 좌석맵 판이 승인을 막지 않게 던져도 삼킨다)
+    const entryOpensAtMs = await this.deps.configs.get(order.eventId).then(
+      (c) => c?.entryOpensAtMs,
+      () => undefined,
+    );
     let outcome;
     try {
       outcome = await this.deps.confirms.confirm(
@@ -328,6 +333,7 @@ export class OrderSagaRunner {
           pg: attempt.pg,
           refs: confirmRefsOf(attempt),
           amount: order.amount,
+          ...(entryOpensAtMs !== undefined ? { entryOpensAtMs } : {}),
           // min(200ms, 승인 기한까지 남은 시간). 기한이 지났으면(이미 보낸 명령을 다시 보낸다) 200ms
           deadlineMs: past || authenticatedAtMs === undefined ? CONFIRM_CALL_DEADLINE_MS : Math.min(CONFIRM_CALL_DEADLINE_MS, confirmDeadlineAtMs(authenticatedAtMs) - now),
         },

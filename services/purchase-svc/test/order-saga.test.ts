@@ -865,6 +865,22 @@ describe('CONFIRM 승인 명령', () => {
     notCalled('failures.fail', 'pins.releaseFailed', 'jobs.reschedule', 'pins.pin', 'reserve.reserve', 'jobs.delete');
   });
 
+  test('PT26_회차 판의 입장 시각을 승인 명령에 싣는다. 판에 없거나 판을 읽지 못해도 승인 명령은 보낸다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191)', async () => {
+    const order = reserved();
+    fx.put(order, confirmJob());
+    fx.config = { perAccountLimit: 4, saleEndsAtMs: NOW + 86_400_000, entryOpensAtMs: NOW + 172_800_000 };
+    await runner().confirmStep(confirmJob(), order);
+    expect(fx.confirmCommands[0]).toMatchObject({ entryOpensAtMs: NOW + 172_800_000 });
+  });
+
+  test('PT26_판이 없어도 승인 명령은 보내고 입장 시각 칸만 뺀다', async () => {
+    const order = reserved();
+    fx.put(order, confirmJob());
+    fx.config = undefined;
+    expect(await runner().confirmStep(confirmJob(), order)).toEqual({ kind: 'DONE' });
+    expect(fx.confirmCommands[0]).not.toHaveProperty('entryOpensAtMs');
+  });
+
   test('FR011_시뮬레이터는 토스 칸(paymentKey)을 쓴다', async () => {
     const order = reserved({ attempt: tossAttempt({ pg: 'SIMULATOR', refs: { pg: 'SIMULATOR', paymentKey: PAYMENT_KEY } }) });
     fx.put(order, confirmJob());

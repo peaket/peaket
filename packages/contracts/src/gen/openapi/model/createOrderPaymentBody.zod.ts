@@ -28,7 +28,7 @@ export const createOrderPaymentBodyBehaviorScrollDistancePxMin = 0;
 
 
 export const CreateOrderPaymentBody = zod.object({
-  "payMethod": zod.string().optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략'),
+  "payMethod": zod.string().optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 생략. CARD·EASY_PAY·TRANSFER·VIRTUAL_ACCOUNT·MOBILE만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-09, BUILD_ORDER PRF-191). 본문이 없으면 400이라 칸이 없어도 빈 객체를 보낸다'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
   "windowMs": zod.int().min(createOrderPaymentBodyBehaviorWindowMsMin).max(createOrderPaymentBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),

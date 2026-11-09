@@ -7,23 +7,31 @@ import { LoggerOrderLog } from './adapters/order-log.js';
 import { AcceptPayment } from './application/accept-payment.js';
 import { CreateOrder } from './application/create-order.js';
 import { GetPaymentStatus } from './application/get-payment-status.js';
+import { StartPayment } from './application/start-payment.js';
 import type {
   AcceptLog,
+  BehaviorSignalPublisher,
   BookingRestrictions,
   ContactRefs,
   IdentityRecheck,
   OrderAcceptReads,
   OrderAcceptWrites,
+  OrderHoldExpiries,
   OrderHolds,
   OrderLog,
   OrderSessions,
   OrderSignals,
   OrderWrites,
+  PaymentCheckouts,
   PaymentDepositReader,
   PaymentStatusReads,
   PaymentStatusWaiters,
   SaleConfigs,
   SeatSlotReads,
+  StartPaymentLog,
+  StartPaymentReads,
+  StartPaymentSignals,
+  StartPaymentWrites,
 } from './domain/ports.js';
 import { CONSENT_VERSION_PATTERN, OrdersController } from './inbound/orders.controller.js';
 
@@ -66,6 +74,20 @@ export interface BookingModuleDeps {
    * 없으면 GetPaymentStatus를 조립하지 않는다(처리기가 404 not-found로 답한다 [정함])
    */
   paymentStatus?: { reads: PaymentStatusReads; waiters: PaymentStatusWaiters; deposits?: PaymentDepositReader };
+  /**
+   * 결제 시도 시작 POST /v1/orders/{orderId}/payments(PRF-191). 운영(main.ts)은 starts = DrizzleOrderStarts(purchase DB), checkouts = paymentCheckoutsFromEnv,
+   * holdExpiries = InventoryOrderHoldExpiries, behavior = KafkaBehaviorSignals(브로커가 없으면 버리는 대역), signals = PromOrderSignals를 넘긴다.
+   * 없으면 StartPayment를 조립하지 않는다(처리기가 404 not-found로 답한다 [정함])
+   */
+  startPayment?: {
+    starts: StartPaymentReads & StartPaymentWrites;
+    checkouts: PaymentCheckouts;
+    holdExpiries: OrderHoldExpiries;
+    behavior: BehaviorSignalPublisher;
+    signals: StartPaymentSignals;
+    /** 없으면 서비스 로거의 LoggerOrderLog */
+    log?: StartPaymentLog;
+  };
 }
 
 @Module({})
@@ -83,7 +105,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -119,7 +141,30 @@ export class BookingModule {
           },
         ]
       : [];
-    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus], exports: [] };
+    // 결제 시도 시작(PRF-191). 넘긴 것이 있을 때만 조립한다(처리기는 @Optional로 받는다)
+    const startPaymentProvider: Provider[] = startPayment
+      ? [
+          {
+            provide: StartPayment,
+            useFactory: (platformClock: Clock, logger?: PlatformLogger) =>
+              new StartPayment({
+                sessions: ports.sessions,
+                reads: startPayment.starts,
+                writes: startPayment.starts,
+                slots,
+                saleConfigs: ports.saleConfigs,
+                holdExpiries: startPayment.holdExpiries,
+                checkouts: startPayment.checkouts,
+                behavior: startPayment.behavior,
+                signals: startPayment.signals,
+                log: startPayment.log ?? (logger ? new LoggerOrderLog(logger) : silentStartLog),
+                clock: clock ?? platformClock,
+              }),
+            inject: [CLOCK, { token: PLATFORM_LOGGER, optional: true }],
+          },
+        ]
+      : [];
+    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider], exports: [] };
   }
 }
 
@@ -130,6 +175,8 @@ export const CONSENT_VERSION_ENV = 'PEAKET_ORDER_CONSENT_VERSION';
 const silentOrderLog: OrderLog = { identityFallback: () => {}, configError: () => {}, payingMarkFailed: () => {} };
 /** 결제 접수 보안 로그의 같은 대역 */
 const silentAcceptLog: AcceptLog = { attemptMismatch: () => {} };
+/** 결제 시도 시작 로그의 같은 대역 */
+const silentStartLog: StartPaymentLog = { attemptsExceeded: () => {}, checkoutMisconfigured: () => {}, holdExpiryUnreadable: () => {} };
 
 /** 넘긴 주문 로그가 결제 접수 보안 로그도 구현하는가(LoggerOrderLog·시험 기록 대역) */
 const isAcceptLog = (l: OrderLog | undefined): l is OrderLog & AcceptLog => typeof (l as Partial<AcceptLog> | undefined)?.attemptMismatch === 'function';

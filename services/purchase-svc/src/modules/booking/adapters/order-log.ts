@@ -1,7 +1,7 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import { errorSummary, type PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog, PaymentPullLog, PaymentResultLog, SagaLog, TicketIssueLog, TicketVoidLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog, PaymentPullLog, PaymentResultLog, SagaLog, StartPaymentLog, TicketIssueLog, TicketVoidLog } from '../domain/ports.js';
 import { TICKET_ISSUE_CS_CASE } from '../domain/ticket-issue.js';
 
 /**
@@ -12,8 +12,39 @@ import { TICKET_ISSUE_CS_CASE } from '../domain/ticket-issue.js';
  *   금액 불일치(400)도 같은 줄이고 reason이 amount_mismatch다
  * 로거가 던져도 삼킨다(부른 쪽을 막지 않는다)
  */
-export class LoggerOrderLog implements OrderLog, AcceptLog {
+export class LoggerOrderLog implements OrderLog, AcceptLog, StartPaymentLog {
   constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  /** 결제 시도 상한 초과 warn 한 줄(payment §4.2 7, ASVS 16.3.3). 계정·주문 두 칸만 싣는다 */
+  attemptsExceeded(e: Parameters<StartPaymentLog['attemptsExceeded']>[0]): void {
+    // 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 결제창 값·금액이 섞여 들지 않게)
+    const line = { kind: 'security', event: 'payment_attempts_exceeded', accountId: e.accountId, orderId: e.orderId };
+    try {
+      this.logger.warn(line, '결제 시도 횟수를 넘어 받지 않았다');
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
+
+  /** PrepareCheckout의 예상 밖 답 error 한 줄(SEV2, kind config). 까닭만 싣는다 */
+  checkoutMisconfigured(e: Parameters<StartPaymentLog['checkoutMisconfigured']>[0]): void {
+    const line = { kind: 'config', what: 'checkout_misconfigured', reason: e.reason, severity: 'SEV2' };
+    try {
+      this.logger.error(line, '결제창 준비의 답을 쓸 수 없어 결제 시도를 만들지 않았다');
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
+
+  /** 홀드 만료를 읽지 못한 error 한 줄(SEV2, kind config, 리뷰 고침 L7). 회차만 싣는다(오류 글·홀드·좌석은 싣지 않는다) */
+  holdExpiryUnreadable(e: Parameters<StartPaymentLog['holdExpiryUnreadable']>[0]): void {
+    const line = { kind: 'config', what: 'hold_expiry_unreadable', eventId: e.eventId, severity: 'SEV2' };
+    try {
+      this.logger.error(line, '좌석 Redis의 홀드 키를 읽지 못해 결제 시도 응답에서 홀드 만료 칸을 뺐다');
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
 
   identityFallback(e: Parameters<OrderLog['identityFallback']>[0]): void {
     // 칸을 하나씩 골라 싣는다(받은 객체를 그대로 펼치지 않아 다른 칸이 섞여 들지 않게)

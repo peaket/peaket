@@ -273,6 +273,12 @@ export interface EventSeatConfig {
    * docs/features/payment.md §2 '주문 생성의 첫 구현' 금액, BUILD_ORDER PRF-161). 해석은 seat-layout.ts parseTierPrices다
    */
   tierPrices?: Readonly<Record<string, number>>;
+  /** 주문명(판 파일의 선택 칸 orderName, 결제 시도가 쓴다, BUILD_ORDER PRF-191). 없으면 칸도 없다 */
+  orderName?: string;
+  /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt, BUILD_ORDER PRF-191). 없으면 칸도 없다 */
+  entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(판 파일의 선택 칸 virtualAccountAllowed, BUILD_ORDER PRF-191). 없으면 칸도 없다(참으로 본다) */
+  virtualAccountAllowed?: boolean;
 }
 
 export const SEAT_MAP = Symbol('purchase.SeatMap');

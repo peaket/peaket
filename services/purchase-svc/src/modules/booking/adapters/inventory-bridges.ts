@@ -3,6 +3,7 @@
 import type { Clock } from '@peaket/platform';
 import {
   type OrderExpiryInventory,
+  type OrderHoldExpiries,
   type OrderHoldQuery,
   type OrderPinInput,
   type OrderPinResult,
@@ -23,7 +24,10 @@ import {
 
 /** inventory SeatMap.config의 필요한 칸(EventSeatConfig의 saleEndsAtMs·tierPrices) */
 export interface SaleConfigSource {
-  config(eventId: string): Promise<{ readonly saleEndsAtMs: number; readonly tierPrices?: Readonly<Record<string, number>> } | undefined>;
+  config(eventId: string): Promise<
+    | { readonly saleEndsAtMs: number; readonly tierPrices?: Readonly<Record<string, number>>; readonly orderName?: string; readonly entryOpensAtMs?: number; readonly virtualAccountAllowed?: boolean }
+    | undefined
+  >;
 }
 
 /** SaleConfigs의 좌석맵 판 구현: config가 없으면 undefined, tierPrices가 없으면 빈 객체. 던지지 않는다(읽기 실패는 undefined) */
@@ -39,7 +43,13 @@ export class SeatMapSaleConfigs implements SaleConfigs {
       return undefined;
     }
     if (!c) return undefined;
-    return { saleEndsAtMs: c.saleEndsAtMs, tierPrices: c.tierPrices ?? NO_PRICES };
+    return {
+      saleEndsAtMs: c.saleEndsAtMs,
+      tierPrices: c.tierPrices ?? NO_PRICES,
+      ...(c.orderName !== undefined ? { orderName: c.orderName } : {}),
+      ...(c.entryOpensAtMs !== undefined ? { entryOpensAtMs: c.entryOpensAtMs } : {}),
+      ...(c.virtualAccountAllowed !== undefined ? { virtualAccountAllowed: c.virtualAccountAllowed } : {}),
+    };
   }
 }
 
@@ -212,7 +222,7 @@ function callOptions(o: { deadlineMs?: number } | undefined): [] | [{ deadlineMs
 
 /** inventory SeatMap.config의 필요한 칸(EventSeatConfig의 perAccountLimit·saleEndsAtMs) */
 export interface SagaConfigSource {
-  config(eventId: string): Promise<{ readonly perAccountLimit: number; readonly saleEndsAtMs: number } | undefined>;
+  config(eventId: string): Promise<{ readonly perAccountLimit: number; readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number } | undefined>;
 }
 
 /** SagaEventConfigs의 좌석맵 판 구현: config가 없거나 읽기가 던지면 undefined. 던지지 않는다 */
@@ -222,7 +232,7 @@ export class SeatMapSagaConfigs implements SagaEventConfigs {
   async get(eventId: string): Promise<SagaEventConfig | undefined> {
     try {
       const c = await this.source.config(eventId);
-      return c ? { perAccountLimit: c.perAccountLimit, saleEndsAtMs: c.saleEndsAtMs } : undefined;
+      return c ? { perAccountLimit: c.perAccountLimit, saleEndsAtMs: c.saleEndsAtMs, ...(c.entryOpensAtMs !== undefined ? { entryOpensAtMs: c.entryOpensAtMs } : {}) } : undefined;
     } catch {
       // 판을 읽지 못했으면 판이 없는 것과 같게 본다(실행기가 설정 오류로 보고 다시 한다)
       return undefined;
@@ -257,6 +267,26 @@ export class InventoryPaymentResultSessions implements PaymentResultSessions {
   async unmarkPaying(purchaseSessionId: string): Promise<boolean> {
     try {
       return await this.source.store.setPaying(purchaseSessionId, false);
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+  }
+}
+
+// ---- 결제 시도 시작의 홀드 만료 시각(BUILD_ORDER PRF-191) ----
+
+/** 주문 좌석의 홀드 만료 읽기(운영 RedisOrderHolds.holdExpiry)의 모양 */
+export interface OrderHoldExpirySource {
+  holdExpiry(eventId: string, holdId: string, seatIds: readonly string[], o?: { deadlineMs?: number }): Promise<number | undefined>;
+}
+
+/** OrderHoldExpiries의 inventory 구현. 좌석 Redis 장애(SeatStoreUnavailable)는 OrderSeatStoreUnavailable로 던지고, 그 밖의 오류는 그대로 던진다 */
+export class InventoryOrderHoldExpiries implements OrderHoldExpiries {
+  constructor(private readonly source: OrderHoldExpirySource) {}
+
+  async expiresAt(q: Parameters<OrderHoldExpiries['expiresAt']>[0], o?: { deadlineMs?: number }): Promise<number | undefined> {
+    try {
+      return await this.source.holdExpiry(q.eventId, q.holdId, q.seatIds, o);
     } catch (e) {
       throw seatStoreErrorOf(e);
     }

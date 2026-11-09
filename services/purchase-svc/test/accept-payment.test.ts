@@ -532,6 +532,35 @@ describe('PT28 활성 결제 시도 대조(409 payment-attempt-mismatch, 보안 
     expect(await run(acceptCommand({ body: portoneBody({ paymentId: 'pay-0190f3a1-7c2e-7f00-8000-0000000000ff' }) }))).toEqual(rejected('ATTEMPT_MISMATCH'));
     noAccept();
   });
+
+  // 리뷰 고침 M2(2026-11-09, PRF-191): 새 시도가 같은 결제사면 결제사·paymentId 대조로는 대체된 시도의 늦은 접수를 가를 수 없다. 본문의 선택 칸 attemptId로 가른다
+  const SUPERSEDED_ATTEMPT = '0190f3a1-7c2e-7f00-8000-0000000000b1';
+
+  test.each([
+    ['토스', 'TOSS', () => tossBody({ attemptId: SUPERSEDED_ATTEMPT })],
+    ['포트원', 'PORTONE', () => portoneBody({ attemptId: SUPERSEDED_ATTEMPT })],
+  ] as const)('PT27_리뷰 고침 M2: %s 본문의 attemptId가 지금 READY 시도와 다르면 결제사가 같아도 ATTEMPT_MISMATCH이고 attempt_id_mismatch다 [ASVS v5.0.0-2.3.4]', async (_label, pg, body) => {
+    fx.attempt = okAttempt({ pg });
+    expect(await run(acceptCommand({ body: body() }))).toEqual(rejected('ATTEMPT_MISMATCH'));
+    mismatched('attempt_id_mismatch');
+  });
+
+  test('PT27_리뷰 고침 M2: attemptId 대조가 금액 대조보다 먼저라 대체된 시도의 금액이 달라도 409다', async () => {
+    fx.attempt = okAttempt({ pg: 'TOSS' });
+    expect(await run(acceptCommand({ body: tossBody({ attemptId: SUPERSEDED_ATTEMPT, amount: AMOUNT + 1 }) }))).toEqual(rejected('ATTEMPT_MISMATCH'));
+    mismatched('attempt_id_mismatch');
+  });
+
+  test('PT27_리뷰 고침 M2: attemptId가 지금 READY 시도와 같으면 202이고 그 시도로 접수한다', async () => {
+    fx.attempt = okAttempt({ pg: 'TOSS' });
+    expect(await run(acceptCommand({ body: tossBody({ attemptId: ATTEMPT_ID }) }))).toEqual(ACCEPTED);
+    expect(fx.lastInput().attemptId).toBe(ATTEMPT_ID);
+  });
+
+  test('PT27_리뷰 고침 M2: attemptId가 없으면 지금처럼 결제사만 대조해 202다', async () => {
+    fx.attempt = okAttempt({ pg: 'TOSS' });
+    expect(await run(acceptCommand({ body: tossBody() }))).toEqual(ACCEPTED);
+  });
 });
 
 describe('PT7 금액 대조(400, 토스·시뮬레이터)', () => {

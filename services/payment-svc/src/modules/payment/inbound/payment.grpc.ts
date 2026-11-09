@@ -147,6 +147,8 @@ export function prepareCheckoutInputOf(request: Record<string, unknown>): Prepar
   const krw = childOf(request.amount)?.krw;
   const customerKey = text(request.customer_key);
   const entryOpensAtMs = msOf(request.entry_opens_at);
+  // UNSPECIFIED(칸 없음)는 입력 검사가 '고정 안 함'으로 읽는다
+  const pinnedPg = text(request.pinned_pg).replace(/^PG_PROVIDER_/, '');
   return {
     orderKind: text(request.order_kind).replace(/^ORDER_KIND_/, '') || 'UNSPECIFIED',
     orderId: text(request.order_id),
@@ -159,6 +161,7 @@ export function prepareCheckoutInputOf(request: Record<string, unknown>): Prepar
     // proto3 optional: 칸이 없으면 undefined로 온다
     ...(typeof request.virtual_account_allowed === 'boolean' ? { virtualAccountAllowed: request.virtual_account_allowed } : {}),
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
+    ...(pinnedPg === '' || pinnedPg === 'UNSPECIFIED' ? {} : { pinnedPg }),
   };
 }
 

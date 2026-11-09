@@ -22,7 +22,9 @@ export type SeatMapFileErrorCode =
   | 'NO_TIER'
   | 'BAD_SECTION_ID'
   /** tierPrices가 객체가 아니거나 값이 0 이상 안전한 정수가 아니거나 등급 ID가 비었다(BUILD_ORDER PRF-161) */
-  | 'BAD_TIER_PRICES';
+  | 'BAD_TIER_PRICES'
+  /** 결제 시도의 선택 칸(orderName·entryOpensAt·virtualAccountAllowed)이 규칙에 맞지 않는다(BUILD_ORDER PRF-191) */
+  | 'BAD_CHECKOUT_FIELDS';
 
 export class SeatMapFileError extends Error {
   constructor(readonly code: SeatMapFileErrorCode) {
@@ -77,6 +79,36 @@ export function parseTierPrices(raw: unknown): Readonly<Record<string, number>> 
   return Object.freeze(out);
 }
 
+/** 주문명 길이 상한 100자 [가정](payment-svc ORDER_NAME_MAX_LENGTH와 같은 값) */
+const ORDER_NAME_MAX = 100;
+/** 주문명에서 받지 않는 글자: 제어(Cc), 양방향 제어·폭 없는 문자를 포함한 서식(Cf), 줄·문단 구분자(Zl·Zp), 글자처럼 보이는 빈칸인 한글 채움 문자(payment-svc와 같은 규칙) */
+const ORDER_NAME_FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0]/u;
+/** 입장 시각 상한(9999년의 끝, payment-svc ENTRY_OPENS_AT_MAX_MS와 같은 값) */
+const ENTRY_OPENS_AT_MAX_MS = 253_402_300_799_999;
+
+/**
+ * 판 파일의 결제 시도 선택 칸 셋(docs/features/seat-hold.md §2 '운영 좌석맵 판', BUILD_ORDER PRF-191). 없는 칸은 결과에 없다.
+ * @throws SeatMapFileError('BAD_CHECKOUT_FIELDS') 주문명이 1~100자의 글이 아니거나 금지 문자가 있거나 공백뿐, 입장 시각이 ISO 8601이 아니거나 범위 밖, 가상계좌가 불리언이 아님
+ */
+function parseCheckoutFields(raw: Record<string, unknown>): { orderName?: string; entryOpensAtMs?: number; virtualAccountAllowed?: boolean } {
+  const { orderName, entryOpensAt, virtualAccountAllowed } = raw;
+  if (orderName !== undefined) {
+    const valid = typeof orderName === 'string' && [...orderName].length >= 1 && [...orderName].length <= ORDER_NAME_MAX && orderName.trim() !== '' && !ORDER_NAME_FORBIDDEN.test(orderName);
+    if (!valid) throw new SeatMapFileError('BAD_CHECKOUT_FIELDS');
+  }
+  let entryOpensAtMs: number | undefined;
+  if (entryOpensAt !== undefined) {
+    entryOpensAtMs = typeof entryOpensAt === 'string' && ISO_DATE_TIME.test(entryOpensAt) ? Date.parse(entryOpensAt) : Number.NaN;
+    if (!(Number.isFinite(entryOpensAtMs) && entryOpensAtMs > 0 && entryOpensAtMs <= ENTRY_OPENS_AT_MAX_MS)) throw new SeatMapFileError('BAD_CHECKOUT_FIELDS');
+  }
+  if (virtualAccountAllowed !== undefined && typeof virtualAccountAllowed !== 'boolean') throw new SeatMapFileError('BAD_CHECKOUT_FIELDS');
+  return {
+    ...(typeof orderName === 'string' ? { orderName } : {}),
+    ...(entryOpensAtMs !== undefined ? { entryOpensAtMs } : {}),
+    ...(typeof virtualAccountAllowed === 'boolean' ? { virtualAccountAllowed } : {}),
+  };
+}
+
 /** 가격 상한(PostgreSQL int4, 주문 금액·항목 가격 칸) */
 const INT4_MAX = 2_147_483_647;
 /** 등급 ID 글 길이 상한(주문 항목 tier 칸과 같은 64자) */
@@ -84,7 +116,7 @@ const TIER_ID_MAX = 64;
 
 /**
  * 판 파일(JSON을 읽은 값)을 해석한다. 규칙은 docs/features/seat-hold.md §2 '운영 좌석맵 판'이다:
- * { perAccountLimit(1~4 정수), saleEndsAt(ISO 8601 날짜), layout(SeatMapLayout: layoutVersion u32 정수, sections[] 각 {sectionId, tierId?, seatIndexRange{from,to}, seats[] {seatId, index, tierId?, unavailable?}}) }.
+ * { perAccountLimit(1~4 정수), saleEndsAt(ISO 8601 날짜), 선택 칸 tierPrices·orderName·entryOpensAt·virtualAccountAllowed, layout(SeatMapLayout: layoutVersion u32 정수, sections[] 각 {sectionId, tierId?, seatIndexRange{from,to}, seats[] {seatId, index, tierId?, unavailable?}}) }.
  * 구역 색인 = sections 배열 차례, seatOffset = index − from, 등급 = 좌석 tierId ?? 구역 tierId, 판매 제외 = unavailable === true, seatCount = 가장 큰 to + 1.
  * seatIndexRange가 없는 구역은 건너뛴다(구역 색인은 배열 차례 그대로). 하나라도 어기면 SeatMapFileError.
  * @throws SeatMapFileError 위 규칙을 어김
@@ -98,6 +130,8 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
   if (!Number.isFinite(saleEndsAtMs)) throw new SeatMapFileError('BAD_SALE_END');
   // 선택 칸 등급 가격(주문 생성의 금액, BUILD_ORDER PRF-161). 틀리면 그 파일 전체를 받지 않는다
   const tierPrices = parseTierPrices(raw.tierPrices);
+  // 선택 칸 결제 시도의 주문명·입장 시각·가상계좌(BUILD_ORDER PRF-191). 틀리면 그 파일 전체를 받지 않는다
+  const checkoutFields = parseCheckoutFields(raw);
   const layout = raw.layout;
   if (!isObject(layout)) throw new SeatMapFileError('NOT_OBJECT');
   const version = layout.layoutVersion;
@@ -145,7 +179,7 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
 
   const seatCount = sorted[sorted.length - 1]!.to + 1;
   return {
-    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs, ...(tierPrices !== undefined ? { tierPrices } : {}) },
+    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs, ...(tierPrices !== undefined ? { tierPrices } : {}), ...checkoutFields },
     sections,
     byId,
     byIndex,

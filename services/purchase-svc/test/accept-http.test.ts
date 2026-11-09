@@ -11,7 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { AppModule } from '../src/app.module.js';
 import { ACCEPT_PROBLEMS, type AcceptPaymentRejection, PaymentAcceptRequest, throwAcceptProblem } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
-import { AcceptFakes, okAttempt, okOrder, ORDER_ID, PAYMENT_KEY, PAYMENT_TOKEN, PORTONE_PAYMENT_ID, TX_ID } from './accept-cases.js';
+import { AcceptFakes, ATTEMPT_ID, okAttempt, okOrder, ORDER_ID, PAYMENT_KEY, PAYMENT_TOKEN, PORTONE_PAYMENT_ID, TX_ID } from './accept-cases.js';
 import { ACCOUNT, AMOUNT, CONSENT_VERSION, EVENT, IDEM_KEY, JOURNEY, LOGIN, NOW, OrderFakes, PID, PSID } from './order-cases.js';
 
 const KEY = Buffer.alloc(32, 9);
@@ -267,6 +267,29 @@ describe('거절 → 문제 상세(ACCEPT_PROBLEMS 전부)', () => {
     expect(r.statusCode).toBe(409);
     expect(json(r)).toMatchObject({ type: problem('payment-attempt-mismatch') });
     expect(fx.mismatchLogs.map((l) => l.reason)).toEqual(['payment_id_mismatch']);
+  });
+
+  test('PT27_리뷰 고침 M2: 본문의 attemptId가 지금 READY 시도와 다르면 409 payment-attempt-mismatch이고 보안 로그(attempt_id_mismatch) 한 줄이다', async () => {
+    fx.attempt = okAttempt({ pg: 'TOSS' });
+    const r = await post(toss({ attemptId: '0190f3a1-7c2e-7f00-8000-0000000000b1' }));
+    expect(r.statusCode).toBe(409);
+    expect(json(r)).toMatchObject({ type: problem('payment-attempt-mismatch'), status: 409 });
+    expect(fx.mismatchLogs).toEqual([{ accountId: ACCOUNT, orderId: ORDER_ID, reason: 'attempt_id_mismatch' }]);
+    noSecrets(r);
+  });
+
+  test.each([
+    ['토스', 'TOSS', () => toss({ attemptId: ATTEMPT_ID })],
+    ['포트원', 'PORTONE', () => portone({ attemptId: ATTEMPT_ID })],
+  ] as const)('PT27_리뷰 고침 M2: %s 본문에 지금 시도의 attemptId를 실으면 202다', async (_label, pg, body) => {
+    fx.attempt = okAttempt({ pg });
+    expect((await post(body())).statusCode).toBe(202);
+  });
+
+  test('PT27_리뷰 고침 M2: attemptId가 UUID 모양이 아니면 400이고 쓰임새를 부르지 않는다 [ASVS v5.0.0-2.2.1]', async () => {
+    const r = await post(toss({ attemptId: 'not-a-uuid' }));
+    expect(r.statusCode).toBe(400);
+    expect(fx.calls).toEqual([]);
   });
 
   test('PT23_②_다른 탭이 먼저 접수했으면(트랜잭션 T3가 0행, ORDER_STATE ACCEPTED) 409 payment-already-accepted다', async () => {

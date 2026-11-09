@@ -64,6 +64,8 @@ export interface PgSelectionInput extends PgSelectionState {
   readonly defaults: PgPlatformDefaults;
   readonly channels: PgChannelTable;
   readonly payMethod: PayMethod;
+  /** 있으면 전환·지정을 보지 않고 이 결제사로 간다(멱등 재생, BUILD_ORDER PRF-191) */
+  readonly pinnedPg?: PgName;
 }
 
 /** 고른 결제사를 쓸 수 없다(gRPC UNAVAILABLE, 글은 부르는 쪽이 가르는 이름 그대로) */
@@ -89,6 +91,8 @@ export interface PrepareCheckoutInput {
   readonly customerKey?: string;
   readonly virtualAccountAllowed?: boolean;
   readonly entryOpensAtMs?: number;
+  /** PgProvider에서 PG_PROVIDER_를 뗀 이름. 멱등 재생에서 그 시도의 결제사로 고정한다(BUILD_ORDER PRF-191). 비었으면 평소처럼 고른다 */
+  readonly pinnedPg?: string;
 }
 
 /** 검사를 마친 결제창 준비 명령 */
@@ -102,6 +106,8 @@ export interface PrepareCheckoutCommand {
   readonly customerKey?: string;
   readonly virtualAccountAllowed: boolean;
   readonly entryOpensAtMs?: number;
+  /** 멱등 재생의 결제사 고정(BUILD_ORDER PRF-191) */
+  readonly pinnedPg?: PgName;
 }
 
 /**
@@ -109,7 +115,8 @@ export interface PrepareCheckoutCommand {
  */
 export function selectPg(input: PgSelectionInput): PgSelection {
   const base = input.assignment?.primary ?? input.defaults.primary;
-  const pg = switchTargetOf(input, base) ?? base;
+  // 멱등 재생의 고정(BUILD_ORDER PRF-191): 전환·지정을 보지 않는다. switched는 기준 결제사와 다른지로 정해 처음 응답과 같게 둔다
+  const pg = input.pinnedPg ?? switchTargetOf(input, base) ?? base;
   const channel = input.channels.get(pg);
   if (channel === undefined) return { kind: 'UNAVAILABLE', pg, reason: 'NO_CHANNEL' };
   if (!channel.active) return { kind: 'UNAVAILABLE', pg, reason: 'INACTIVE' };
@@ -180,6 +187,8 @@ export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareC
   const payMethod = input.payMethod === '' ? 'CARD' : input.payMethod;
   if (!isPayMethod(payMethod)) throw new PaymentInputError('pay_method');
   const { customerKey, entryOpensAtMs } = input;
+  const pinned = input.pinnedPg === undefined || input.pinnedPg === '' || input.pinnedPg === 'UNSPECIFIED' ? undefined : input.pinnedPg;
+  if (pinned !== undefined && !(PG_NAMES as readonly string[]).includes(pinned)) throw new PaymentInputError('pinned_pg');
   if (customerKey !== undefined && (!CUSTOMER_KEY.test(customerKey) || customerKey === ANONYMOUS_CUSTOMER_KEY)) throw new PaymentInputError('customer_key');
   checkEntryOpensAt(entryOpensAtMs);
   return {
@@ -192,5 +201,6 @@ export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareC
     ...(customerKey === undefined ? {} : { customerKey }),
     virtualAccountAllowed: input.virtualAccountAllowed ?? true,
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
+    ...(pinned === undefined ? {} : { pinnedPg: pinned as PgName }),
   };
 }

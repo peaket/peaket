@@ -57,6 +57,8 @@ export {
   InventorySeatSlots,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
+  InventoryOrderHoldExpiries,
+  type OrderHoldExpirySource,
   type OrderExpirySource,
   type PaymentSessionSource,
   type PinResultShape,
@@ -71,6 +73,42 @@ export { DrizzleSaga, SagaRollback, type DrizzleSagaOptions, type SagaSeatSales 
 export { DrizzleRebuildOrders } from './adapters/db/drizzle-rebuild-orders.js';
 export { DrizzlePaymentStatus, type DrizzlePaymentStatusOptions } from './adapters/db/drizzle-payment-status.js';
 export { GetPaymentStatus, type GetPaymentStatusCommand, type GetPaymentStatusDeps, type GetPaymentStatusResult } from './application/get-payment-status.js';
+export { DrizzleOrderStarts, type DrizzleOrderStartsOptions } from './adapters/db/drizzle-order-starts.js';
+export {
+  checkoutAnswerOf,
+  checkoutFailureOf,
+  GrpcPaymentCheckouts,
+  type GrpcPaymentCheckoutsOptions,
+  PAYMENT_CHECKOUT_BREAKER,
+  PAYMENT_CHECKOUT_BREAKER_OPTIONS,
+  paymentCheckoutsFromEnv,
+  prepareCheckoutRequestOf,
+  PREPARE_CHECKOUT_CAP_MS,
+  PREPARE_CHECKOUT_MAX_CONCURRENT,
+  simulatorPaymentCheckouts,
+} from './adapters/grpc-payment-checkout.js';
+export { type BehaviorSignalProducer, discardBehaviorSignals, KafkaBehaviorSignals, TELEMETRY_BEHAVIOR_TOPIC } from './adapters/behavior-signals.js';
+export {
+  START_PAYMENT_OPERATION,
+  StartPayment,
+  type StartedPayment,
+  type StartPaymentCommand,
+  type StartPaymentDeps,
+  type StartPaymentRejection,
+  type StartPaymentResult,
+} from './application/start-payment.js';
+export {
+  behaviorSignalKey,
+  buildBehaviorSignal,
+  DEFAULT_ORDER_NAME,
+  PAYMENT_ATTEMPTS_MAX,
+  pgOrderRefOf,
+  PREPARE_CHECKOUT_DEADLINE_MS,
+  PREPARE_CHECKOUT_MIN_REMAINING_MS,
+  START_PAY_METHODS,
+  type StartPayMethod,
+} from './domain/payment-attempt.js';
+export { PaymentAttemptBody, type PaymentAttemptResponse, paymentAttemptResponseOf, START_PAYMENT_PROBLEMS, StartPaymentParams, StartPaymentRequest, throwStartPaymentProblem } from './inbound/orders.controller.js';
 export { PaymentStatusWaitTable, type PaymentStatusWaitTableDeps, type WaitTableTimer } from './application/payment-status-waiters.js';
 export { depositInfoOf, GrpcPaymentDepositReader, type GrpcPaymentDepositReaderOptions, noPaymentDepositReader, PAYMENT_DEPOSIT_BREAKER, PAYMENT_DEPOSIT_CAP_MS, paymentDepositReaderFromEnv } from './adapters/grpc-payment-deposit.js';
 export {
@@ -503,4 +541,24 @@ export type {
   TransactionCallOptions,
   TransitionInput,
   TransitionResult,
+  BehaviorSignalMessage,
+  BehaviorSignalPublisher,
+  BehaviorSummary,
+  CheckoutOutcome,
+  CheckoutValues,
+  CommittedStartLookup,
+  OrderHoldExpiries,
+  PaymentCheckouts,
+  PgUnavailableReason,
+  PrepareCheckoutQuery,
+  PreparedCheckout,
+  StartedAttemptView,
+  StartInput,
+  StartOrderView,
+  StartOutcome,
+  StartPaymentLog,
+  StartPaymentMetricOutcome,
+  StartPaymentReads,
+  StartPaymentSignals,
+  StartPaymentWrites,
 } from './domain/ports.js';

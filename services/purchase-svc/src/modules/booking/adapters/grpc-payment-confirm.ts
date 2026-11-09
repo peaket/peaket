@@ -1,7 +1,7 @@
 // payment-svc 승인 명령 gRPC 클라이언트(PaymentService.ConfirmPayment, docs/api/proto/peaket/payment/v1/payment.proto, docs/architecture.md 시간 초과 표
 // '승인 명령 gRPC' 데드라인 200ms [가정], docs/features/payment.md §2 'Saga 1단계의 첫 구현', BUILD_ORDER PRF-165).
 // - 요청: order_id·attempt_id·pg(PgProvider)·payment_ref(toss{payment_key} | portone{payment_id, tx_id, payment_token})·amount(Money{krw})·
-//   event_id(주문의 회차)·authenticated_at(결제 시도의 인증 시각, Timestamp)·attempt_no(결제 시도 순번, BUILD_ORDER PRF-180).
+//   event_id(주문의 회차)·authenticated_at(결제 시도의 인증 시각, Timestamp)·attempt_no(결제 시도 순번, BUILD_ORDER PRF-180)·entry_opens_at(회차의 입장 시각, 있을 때만, BUILD_ORDER PRF-191).
 //   시뮬레이터는 toss 칸을 쓴다 [가정](proto에 시뮬레이터 전용 칸이 없다).
 // - 결과: 답을 받으면 ACCEPTED(결과가 UNSPECIFIED·UNKNOWN이면 받아 적었다고 볼 수 없어 REJECTED unexpected, 리뷰 낮음),
 //   DEADLINE_EXCEEDED 4·UNAVAILABLE 14·차단기 열림이면 RETRYABLE, 그 밖은 REJECTED. 던지지 않는다.
@@ -83,6 +83,7 @@ function requestOf(c: ConfirmCommand): Record<string, unknown> {
   const paymentRef =
     r.pg === 'PORTONE' ? { portone: { payment_id: r.paymentId, tx_id: r.txId, payment_token: r.paymentToken } } : { toss: { payment_key: r.paymentKey } };
   const at = c.authenticatedAtMs;
+  const entry = c.entryOpensAtMs;
   return {
     order_id: c.orderId,
     attempt_id: c.attemptId,
@@ -92,6 +93,7 @@ function requestOf(c: ConfirmCommand): Record<string, unknown> {
     event_id: c.eventId,
     attempt_no: c.attemptNo,
     ...(at !== undefined ? { authenticated_at: { seconds: Math.floor(at / 1000), nanos: (at % 1000) * 1_000_000 } } : {}),
+    ...(entry !== undefined ? { entry_opens_at: { seconds: Math.floor(entry / 1000), nanos: (entry % 1000) * 1_000_000 } } : {}),
   };
 }
 
@@ -170,8 +172,8 @@ function outcomeOfError(e: unknown): Exclude<ConfirmOutcome, { status: 'ACCEPTED
   return isServiceError(e) ? confirmOutcomeOf(e.code) : { status: 'REJECTED', reason: 'unexpected' };
 }
 
-/** gRPC 상태 코드 → 소문자 이름(DEADLINE_EXCEEDED·UNAVAILABLE은 다시 보내기라 여기 없어도 된다) */
-const STATUS_NAMES: Readonly<Record<number, string>> = {
+/** gRPC 상태 코드 → 소문자 이름(DEADLINE_EXCEEDED·UNAVAILABLE은 다시 보내기라 여기 없어도 된다). 결제창 준비 클라이언트도 같은 표를 쓴다 */
+export const STATUS_NAMES: Readonly<Record<number, string>> = {
   1: 'cancelled',
   2: 'unknown',
   3: 'invalid_argument',

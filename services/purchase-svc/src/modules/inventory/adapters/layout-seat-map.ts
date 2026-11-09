@@ -102,15 +102,17 @@ const MISSING_MAX = 1024;
 
 /**
  * 파일 값에서 같은 판인지 가르는 표시를 싸게 뽑는다(틀린 모양이면 undefined).
- * 선택 칸 tierPrices(등급 가격, config.tierPrices, BUILD_ORDER PRF-161)도 표시에 든다: 가격만 바꾼 파일도 다시 해석된다(틀린 가격이면 이전 판을 둔다)
+ * 선택 칸 tierPrices(등급 가격, config.tierPrices, BUILD_ORDER PRF-161)와 결제 시도의 세 칸(PRF-191)도 표시에 든다: 그 칸만 바꾼 파일도 다시 해석된다(틀린 값이면 이전 판을 둔다)
  */
 function signatureOf(raw: unknown): string | undefined {
-  const o = raw as { perAccountLimit?: unknown; saleEndsAt?: unknown; tierPrices?: unknown; layout?: { layoutVersion?: unknown } } | null;
+  const o = raw as { perAccountLimit?: unknown; saleEndsAt?: unknown; tierPrices?: unknown; orderName?: unknown; entryOpensAt?: unknown; virtualAccountAllowed?: unknown; layout?: { layoutVersion?: unknown } } | null;
   const v = o?.layout?.layoutVersion;
   if (typeof v !== 'number' || typeof o?.perAccountLimit !== 'number' || typeof o?.saleEndsAt !== 'string') return undefined;
   // 가격 칸이 없으면 빈 글. 있으면 JSON 글 그대로(칸 차례만 바뀐 파일은 다시 해석될 뿐이다)
   const prices = o.tierPrices === undefined ? '' : JSON.stringify(o.tierPrices);
-  return `${v}|${o.perAccountLimit}|${o.saleEndsAt}|${prices}`;
+  // 결제 시도의 선택 칸 셋도 같은 방식이다(BUILD_ORDER PRF-191). 없는 칸은 null로 든다
+  const checkout = JSON.stringify([o.orderName ?? null, o.entryOpensAt ?? null, o.virtualAccountAllowed ?? null]);
+  return `${v}|${o.perAccountLimit}|${o.saleEndsAt}|${prices}|${checkout}`;
 }
 
 /** 판의 판매 대상 좌석(byId, 판매 제외석 없음)을 등급별로 모은다. 등급은 등급 ID 문자 코드 순, 색인은 오름차순이다 */

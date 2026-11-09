@@ -67,7 +67,7 @@ export interface AcceptPaymentCommand {
  * - NOT_FOUND: 주문이 없거나, 계정·구매 세션이 다름(가리지 않는다) → 404 not-found
  * - ORDER_EXPIRED: 주문이 EXPIRED(트랜잭션의 T3가 0행이고 지금 상태가 EXPIRED인 것 포함) → 409 order-expired
  * - ALREADY_ACCEPTED: 주문이 CREATED·EXPIRED가 아님(AUTHENTICATED부터), 또는 트랜잭션에서 주문이 그사이 먼저 접수됨(T3 0행) → 409 payment-already-accepted
- * - ATTEMPT_MISMATCH: 활성 시도가 없음·READY가 아님·40분 넘음, pg가 다름, 포트원 paymentId가 pg_order_ref와 다름, 트랜잭션에서 시도가 그사이 대체·만료됨
+ * - ATTEMPT_MISMATCH: 활성 시도가 없음·READY가 아님·40분 넘음, 본문 attemptId가 지금 시도와 다름, pg가 다름, 포트원 paymentId가 pg_order_ref와 다름, 트랜잭션에서 시도가 그사이 대체·만료됨
  *   → 409 payment-attempt-mismatch(보안 로그)
  * - AMOUNT_MISMATCH: 토스·시뮬레이터 본문 amount가 주문 금액과 다름 → 400(about:blank, P-T7. 보안 로그 amount_mismatch, ASVS 16.3.3)
  * - SALE_PAUSED: 회차 슬롯 읽기 PAUSED → 423 sale-paused
@@ -99,7 +99,7 @@ export type AcceptPaymentResult =
  * 3. reads.order(orderId): 없음, accountId ≠ 요청 계정, purchaseSessionId ≠ 요청 구매 세션 → NOT_FOUND(같은 답)
  * 4. 상태 표: CREATED만 받는다. EXPIRED → ORDER_EXPIRED, 그 밖 → ALREADY_ACCEPTED
  * 5. reads.activeAttempt(orderId)로 대조(실패면 log.attemptMismatch(계정·주문·까닭) 한 번 뒤 ATTEMPT_MISMATCH):
- *    없음·READY 아님 → no_attempt, clock.now() − createdAtMs ≥ 40분 → attempt_expired, body.pg ≠ 시도 pg → pg_mismatch,
+ *    없음·READY 아님 → no_attempt, clock.now() − createdAtMs ≥ 40분 → attempt_expired, body.attemptId(있을 때만) ≠ 시도 ID → attempt_id_mismatch, body.pg ≠ 시도 pg → pg_mismatch,
  *    포트원이면 body.paymentId ≠ pgOrderRef(없음 포함) → payment_id_mismatch.
  *    토스·시뮬레이터면 body.amount ≠ 주문 금액 → log.attemptMismatch(까닭 amount_mismatch, 금액은 싣지 않는다) 한 번 뒤 AMOUNT_MISMATCH(400).
  *    금액 변조도 보안 사건이라 같은 줄을 남긴다(payment §2 '활성 결제 시도 대조', ASVS 16.3.3, 2026-11-05 정본 바로잡음)
@@ -208,12 +208,13 @@ const rejected = (reason: AcceptPaymentRejection): AcceptPaymentResult => ({ sta
 
 /**
  * 활성 결제 시도 대조(payment §2 '활성 결제 시도 대조'). 맞으면 undefined, 아니면 보안 로그 까닭.
- * 차례: 없음·READY 아님(no_attempt) → 만든 지 40분 이상(attempt_expired) → 본문 pg가 시도와 다름(pg_mismatch)
+ * 차례: 없음·READY 아님(no_attempt) → 만든 지 40분 이상(attempt_expired) → 본문에 attemptId가 있는데 지금 시도와 다름(attempt_id_mismatch, 대체된 시도의 늦은 접수, 리뷰 고침 M2) → 본문 pg가 시도와 다름(pg_mismatch)
  * → 포트원 paymentId가 pg_order_ref와 다름(없음 포함, 글자 그대로 견준다, payment_id_mismatch) → 토스·시뮬레이터 amount가 주문 금액과 다름(amount_mismatch)
  */
 function attemptMismatchOf(attempt: ActiveAttemptView | undefined, body: PaymentAcceptBody, orderAmount: number, nowMs: number): AttemptMismatchReason | undefined {
   if (!attempt || attempt.status !== 'READY') return 'no_attempt';
   if (nowMs - attempt.createdAtMs >= ATTEMPT_ACCEPT_WINDOW_MS) return 'attempt_expired';
+  if (body.attemptId !== undefined && body.attemptId !== attempt.attemptId) return 'attempt_id_mismatch';
   if (body.pg !== attempt.pg) return 'pg_mismatch';
   if (body.pg === 'PORTONE') return attempt.pgOrderRef !== undefined && body.paymentId === attempt.pgOrderRef ? undefined : 'payment_id_mismatch';
   return body.amount === orderAmount ? undefined : 'amount_mismatch';

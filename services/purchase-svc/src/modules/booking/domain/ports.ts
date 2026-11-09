@@ -214,6 +214,12 @@ export interface SaleConfig {
   readonly saleEndsAtMs: number;
   /** 등급 ID → 가격(원, 0 이상 정수). 판 파일에 tierPrices가 없으면 빈 객체다(모든 등급의 가격이 없다) */
   readonly tierPrices: Readonly<Record<string, number>>;
+  /** 주문명(판 파일의 선택 칸 orderName, 결제 시도가 쓴다, BUILD_ORDER PRF-191). 없으면 칸이 없다 */
+  readonly orderName?: string;
+  /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt). 없으면 칸이 없다 */
+  readonly entryOpensAtMs?: number;
+  /** 가상계좌를 내도 되는가(판 파일의 선택 칸 virtualAccountAllowed). 없으면 칸이 없다(참으로 본다) */
+  readonly virtualAccountAllowed?: boolean;
 }
 
 /** 회차 판매 설정 읽기(운영은 inventory의 좌석맵 판(LayoutSeatMap.config)을 잇는다, adapters/seat-map-sale-configs.ts) */
@@ -330,8 +336,8 @@ export type PaymentPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
  * 포트원은 결제창 응답의 paymentId·paymentToken·txId다(payment §2.2 '결제사별 접수 계약')
  */
 export type PaymentAcceptBody =
-  | { readonly pg: 'TOSS' | 'SIMULATOR'; readonly paymentKey: string; readonly amount: number }
-  | { readonly pg: 'PORTONE'; readonly paymentId: string; readonly paymentToken: string; readonly txId: string };
+  | { readonly pg: 'TOSS' | 'SIMULATOR'; readonly paymentKey: string; readonly amount: number; readonly attemptId?: string | undefined }
+  | { readonly pg: 'PORTONE'; readonly paymentId: string; readonly paymentToken: string; readonly txId: string; readonly attemptId?: string | undefined };
 
 /** 결제 접수가 보는 주문 모습(주문 행의 칸 몇 개) */
 export interface AcceptOrderView {
@@ -454,6 +460,8 @@ export type AttemptMismatchReason =
   | 'no_attempt'
   /** READY 시도가 만든 지 40분 [가정]을 넘음 */
   | 'attempt_expired'
+  /** 본문 attemptId(선택 칸)가 지금 READY 시도와 다름: 대체된 시도의 늦은 접수(리뷰 고침 M2) */
+  | 'attempt_id_mismatch'
   /** 본문 pg가 시도의 결제사와 다름 */
   | 'pg_mismatch'
   /** 포트원 본문 paymentId가 시도의 pg_order_ref와 다름 */
@@ -468,6 +476,218 @@ export interface AcceptLog {
    * 금액 불일치는 까닭 amount_mismatch로 같은 줄을 쓴다(2026-11-05 정본 바로잡음)
    */
   attemptMismatch(e: { readonly accountId: string; readonly orderId: string; readonly reason: AttemptMismatchReason }): void;
+}
+
+// ---- 결제 시도 시작 POST /v1/orders/{orderId}/payments(docs/features/payment.md §2 '결제 시도 시작의 첫 구현', docs/data.md §5 '결제 시도 시작', BUILD_ORDER PRF-191) ----
+// 검사 차례: (플랫폼 가드) → OrderSessions.get → StartPaymentReads.findCommitted → StartPaymentReads.order → 상태 표 → StartPaymentReads.attemptCount
+// → SeatSlotReads.read → SaleConfigs.get → OrderHoldExpiries.expiresAt → PaymentCheckouts.prepare(트랜잭션 밖) → StartPaymentWrites.start(한 트랜잭션) → 201.
+
+/** 결제 시도 시작이 보는 주문 모습 */
+export interface StartOrderView extends AcceptOrderView {
+  /** 주문을 만든 홀드(purchase_order.hold_id) */
+  readonly holdId: string;
+  /** 주문 항목의 좌석 ID(줄 번호 차례) */
+  readonly seatIds: readonly string[];
+}
+
+/** 멱등 재생에 쓰는 결제 시도 모습 */
+export interface StartedAttemptView {
+  readonly attemptId: string;
+  readonly orderId: string;
+  readonly pg: PaymentPg;
+}
+
+/** 커밋된 결제 시도 시작 멱등 기록 읽기 결과(트랜잭션 밖, 범위 계정 × START_PAYMENT × 키) */
+export type CommittedStartLookup =
+  /** 같은 키·같은 지문으로 커밋한 시도가 있다: 그 시도로 결제창 값을 다시 만든다. attemptId = result_ref */
+  | { readonly status: 'COMMITTED'; readonly attemptId: string }
+  /** 같은 키에 다른 지문(422 idempotency-key-reused) */
+  | { readonly status: 'MISMATCH' }
+  /** 기록이 없거나, 처리 중(result_ref 비어 있음)이거나, 보관 기간이 지났다 */
+  | { readonly status: 'NONE' };
+
+/** 결제 시도 시작의 읽기(트랜잭션 밖). 아무것도 쓰지 않는다 */
+export interface StartPaymentReads {
+  /** 커밋된 멱등 기록. 지문은 상수 시간으로 견준다 */
+  findCommitted(once: OrderRequestOnce): Promise<CommittedStartLookup>;
+  /** 주문 하나. 없거나 orderId가 소문자 UUID가 아니면 undefined */
+  order(orderId: string): Promise<StartOrderView | undefined>;
+  /** 그 주문의 결제 시도 행 수(끝난 시도 포함). 3회 상한의 미리 보기다(정답은 트랜잭션 안에서 다시 센다) */
+  attemptCount(orderId: string): Promise<number>;
+  /** 결제 시도 하나(재생). 없으면 undefined */
+  attempt(attemptId: string): Promise<StartedAttemptView | undefined>;
+}
+
+/** 한 트랜잭션의 입력 */
+export interface StartInput {
+  readonly orderId: string;
+  /** 쓰임새가 만든 UUIDv7(READY 시도 만료 쓸기가 기본 키 범위로 찾는다, PRF-172가 넘긴 것) */
+  readonly attemptId: string;
+  readonly pg: PaymentPg;
+  /** 토스 orderId 또는 포트원 paymentId */
+  readonly pgOrderRef: string;
+  /** 행위자(ACTOR_PATTERN). 결제 시도 시작은 account:<계정 ID> */
+  readonly actor: string;
+}
+
+/** 한 트랜잭션 결과 */
+export type StartOutcome =
+  /** 이번에 만들었다. attemptNo = 그 주문의 시도 순번(1부터. 1이면 첫 시도) */
+  | { readonly status: 'STARTED'; readonly attemptNo: number }
+  /** 그사이 같은 키·같은 지문의 요청이 먼저 커밋했다: 그 시도로 값을 다시 만든다 */
+  | { readonly status: 'REPLAYED'; readonly attemptId: string }
+  /** T2가 0행이라 트랜잭션째 되돌렸다. current = 주문의 지금 상태 */
+  | { readonly status: 'STALE'; readonly reason: 'ORDER_STATE'; readonly current?: OrderStatus }
+  /** 주문 행을 잡은 뒤 센 시도 행이 상한 이상이라 트랜잭션째 되돌렸다 */
+  | { readonly status: 'ATTEMPTS_EXCEEDED' }
+  /** 활성 시도 부분 유일 인덱스 위반(23505, 마지막 안전망)이라 트랜잭션째 되돌렸다 */
+  | { readonly status: 'ACTIVE_CONFLICT' };
+
+/** 결제 시도 시작 쓰기(운영은 adapters/db/drizzle-order-starts.ts: purchase DB 트랜잭션 하나, read committed) */
+export interface StartPaymentWrites {
+  /**
+   * 한 트랜잭션: 멱등 기록 잡기(범위 계정 × START_PAYMENT, 결과 참조 = 시도 ID) → 주문 T2(주문 행 잠금, 이력 한 행, Outbox 없음)
+   * → 시도 행 수 세기 → 이전 READY 시도 SUPERSEDED → 새 READY 시도 INSERT.
+   * @throws ProblemError 409 idempotency-request-in-progress, 422 idempotency-key-reused — 플랫폼 IdempotencyStore가 던지는 그대로
+   * @throws RangeError 입력이 틀림(코드 오류, DB에 가지 않는다)
+   * @throws Error 그 밖의 DB 오류(트랜잭션째 되돌렸다)
+   */
+  start(once: OrderRequestOnce, input: StartInput, o?: TransactionCallOptions): Promise<StartOutcome>;
+}
+
+/** 결제창 값. 'TOSS'는 토스·시뮬레이터 모양(TossCheckout), 'PORTONE'은 포트원 모양(PortoneCheckout)이다 */
+export type CheckoutValues =
+  | {
+      readonly shape: 'TOSS';
+      readonly clientKey: string;
+      readonly customerKey: string;
+      readonly orderId: string;
+      readonly orderName: string;
+      readonly amount: number;
+      readonly successUrl: string;
+      readonly failUrl: string;
+    }
+  | {
+      readonly shape: 'PORTONE';
+      readonly storeId: string;
+      readonly channelKey: string;
+      readonly paymentId: string;
+      readonly orderName: string;
+      readonly totalAmount: number;
+      readonly currency: string;
+      readonly redirectUrl: string;
+      readonly customData: { readonly orderId: string };
+    };
+
+/** 결제창 준비 질의(PrepareCheckoutRequest) */
+export interface PrepareCheckoutQuery {
+  readonly orderId: string;
+  readonly attemptId: string;
+  readonly eventId: string;
+  /** 서버가 계산한 금액(원) */
+  readonly amount: number;
+  readonly orderName: string;
+  /** 비우면 payment-svc가 CARD로 본다 */
+  readonly payMethod?: string;
+  /** 이 회차에 가상계좌를 내도 되는가. 없으면 칸을 싣지 않는다(참으로 본다) */
+  readonly virtualAccountAllowed?: boolean;
+  /** 회차의 입장 시작 시각(epoch ms) */
+  readonly entryOpensAtMs?: number;
+  /** 멱등 재생에서 그 시도의 결제사로 고정한다 */
+  readonly pinnedPg?: PaymentPg;
+  /** 이 호출의 데드라인(ms, 1 이상 정수) */
+  readonly deadlineMs: number;
+}
+
+/** 결제창 준비 성공 값(PrepareCheckoutResponse) */
+export interface PreparedCheckout {
+  readonly pg: PaymentPg;
+  readonly switched: boolean;
+  readonly checkout: CheckoutValues;
+  readonly allowedPayMethods: readonly string[];
+  /** 가상계좌를 낼 수 있을 때만 있다 */
+  readonly depositDueAtMs?: number;
+}
+
+/** 결제사를 못 쓴 까닭: 결제사를 고르지 못함·UNAVAILABLE·데드라인·차단기 열림 */
+export type PgUnavailableReason = 'pg_unavailable' | 'unavailable' | 'deadline' | 'circuit_open';
+
+/**
+ * 결제창 준비 결과. 던지지 않는다.
+ * - OK: 값을 받았다
+ * - PG_UNAVAILABLE: 503 pg-unavailable(gRPC UNAVAILABLE·DEADLINE_EXCEEDED·차단기 열림·과부하)
+ * - PAY_METHOD_INVALID: payment-svc가 수단 값을 거절했다(가상계좌를 끈 회차 포함, 400)
+ * - MISCONFIGURED: 그 밖의 gRPC 코드·gRPC가 아닌 예외·모양이 틀린 답(503 dependency-unavailable, SEV2)
+ */
+export type CheckoutOutcome =
+  | ({ readonly status: 'OK' } & PreparedCheckout)
+  | { readonly status: 'PG_UNAVAILABLE'; readonly reason: PgUnavailableReason }
+  | { readonly status: 'PAY_METHOD_INVALID' }
+  | { readonly status: 'MISCONFIGURED'; readonly reason: string };
+
+/** payment-svc PaymentService.PrepareCheckout(adapters/grpc-payment-checkout.ts). 결제사를 부르지 않는다. 차단기·gRPC 상태 바꾸기는 어댑터가 한다 */
+export interface PaymentCheckouts {
+  prepare(q: PrepareCheckoutQuery): Promise<CheckoutOutcome>;
+}
+
+/** 주문 좌석의 홀드 만료 시각 읽기(운영은 adapters/inventory-bridges.ts InventoryOrderHoldExpiries) */
+export interface OrderHoldExpiries {
+  /**
+   * 그 holdId가 남은 좌석의 홀드 Hash exp 가운데 가장 이른 값(epoch ms). 남은 좌석이 없으면 undefined.
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(쓰임새는 칸을 빼고 응답을 막지 않는다)
+   */
+  expiresAt(q: { readonly eventId: string; readonly holdId: string; readonly seatIds: readonly string[] }, o?: { deadlineMs?: number }): Promise<number | undefined>;
+}
+
+/** 브라우저가 잰 행동 요약(openapi BehaviorSummary, 요약값만. 원시 좌표·키 값은 없다) */
+export interface BehaviorSummary {
+  readonly v: 1;
+  readonly windowMs: number;
+  readonly pointerMoves?: number;
+  readonly pointerEntropy?: number;
+  readonly inputIntervalMeanMs?: number;
+  readonly inputIntervalStdMs?: number;
+  readonly scrollEvents?: number;
+  readonly scrollDistancePx?: number;
+}
+
+/** telemetry.behavior BehaviorSignal(asyncapi, screen PAYMENT). 망 정보·기기 가명은 싣지 않는다 */
+export interface BehaviorSignalMessage {
+  readonly pid: string;
+  readonly refMissing: false;
+  readonly eventId: string;
+  readonly journeyId: string;
+  readonly screen: 'PAYMENT';
+  readonly features: BehaviorSummary;
+  /** ISO 8601(UTC, 밀리초) */
+  readonly ts: string;
+  readonly eventKey: string;
+}
+
+/** 행동 신호 보내기(운영은 adapters/behavior-signals.ts). 실패는 던지고, 쓰임새가 세고 삼킨다 */
+export interface BehaviorSignalPublisher {
+  publish(message: BehaviorSignalMessage): Promise<void>;
+}
+
+/** purchase_payment_attempts_total의 outcome 값 */
+export type StartPaymentMetricOutcome = 'started' | 'replayed' | 'exceeded' | 'pg_unavailable' | 'deadline' | 'misconfigured' | 'pay_method_invalid';
+
+/** 결제 시도 시작의 지표. 던지지 않는다 */
+export interface StartPaymentSignals {
+  /** purchase_payment_attempts_total{pg, outcome}(pg는 고르기 전이면 'none') */
+  paymentAttempt(pg: PaymentPg | 'none', outcome: StartPaymentMetricOutcome): void;
+  /** telemetry_dropped_total{record}(텔레메트리 전송 실패로 버린 수) */
+  telemetryDropped(record: 'behavior_signal'): void;
+}
+
+/** 결제 시도 시작의 보안·설정 로그(서비스 로그 한 줄씩. 결제창 값·구매자 키·요약은 싣지 않는다). 던지지 않는다 */
+export interface StartPaymentLog {
+  /** 시도 상한 초과(payment §4.2 7, ASVS 16.3.3): 계정·주문만 */
+  attemptsExceeded(e: { readonly accountId: string; readonly orderId: string }): void;
+  /** PrepareCheckout의 예상 밖 답(SEV2): 까닭만 */
+  checkoutMisconfigured(e: { readonly reason: string }): void;
+  /** 홀드 만료를 읽지 못했다(망가진 키. 응답은 칸만 뺀다, 리뷰 고침 L7): SEV2, 회차만 */
+  holdExpiryUnreadable(e: { readonly eventId: string }): void;
 }
 
 // ---- Saga 1단계(docs/features/payment.md §2 'Saga 1단계의 첫 구현', docs/data.md §5 'Saga 1단계', BUILD_ORDER PRF-165) ----
@@ -780,6 +1000,8 @@ export interface SagaEventConfig {
   readonly perAccountLimit: number;
   /** 판매 종료 시각(epoch ms) */
   readonly saleEndsAtMs: number;
+  /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt). 승인 명령의 entry_opens_at이다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191) */
+  readonly entryOpensAtMs?: number;
 }
 
 /** 회차 설정 읽기(운영은 adapters/inventory-bridges.ts SeatMapSagaConfigs). 판이 없으면 undefined. 던지지 않는다 */
@@ -808,6 +1030,8 @@ export interface ConfirmCommand {
   readonly refs: ConfirmRefs;
   /** 서버 금액(원, Money.krw) */
   readonly amount: number;
+  /** 회차의 입장 시작 시각(epoch ms, entry_opens_at). 판 파일에 없으면 칸을 싣지 않는다(HOT-152가 넘긴 것, BUILD_ORDER PRF-191) */
+  readonly entryOpensAtMs?: number;
   /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 min(200ms, 승인 기한까지 남은 시간)으로 준다 */
   readonly deadlineMs: number;
 }
