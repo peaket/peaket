@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getAdjacencyMap, getShortestPaths } from '@xstate/graph';
 import { createActor } from 'xstate';
-import { bookingMachine, holdIdempotencyKey, holdOutcome } from './booking-machine.ts';
+import { behaviorForHold, bookingMachine, holdIdempotencyKey, holdOutcome } from './booking-machine.ts';
 import { holdClock } from '../../../shared/lib/hold-clock.ts';
 
 const seat = (n) => ({ seatId: `A-1-${n}`, label: `A구역 1열 ${n}번`, tier: 'tier-r' });
@@ -172,4 +172,21 @@ test('SCR-010 멱등 키: 같은 좌석을 다시 시도하면 같은 키, 좌�
   assert.deepEqual(a, { key: 'k1', seats: 'A,B' });
   assert.equal(holdIdempotencyKey(a, ['A', 'B'], make), a);
   assert.deepEqual(holdIdempotencyKey(a, ['A'], make), { key: 'k2', seats: 'A' });
+});
+
+test('[B-T19] 행동 요약은 첫 직접 선택 홀드에만 싣고, 같은 키의 재전송은 같은 값이며, 다음 좌석은 싣지 않는다', () => {
+  let taken = 0;
+  const take = () => {
+    taken += 1;
+    return { v: 1, windowMs: taken };
+  };
+  const a = behaviorForHold(null, 'k1', take);
+  assert.deepEqual(a.behavior, { v: 1, windowMs: 1 });
+  const again = behaviorForHold(a.first, 'k1', take);
+  assert.equal(again.behavior, a.behavior);
+  const next = behaviorForHold(again.first, 'k2', take);
+  assert.equal(next.behavior, undefined);
+  assert.equal(taken, 1);
+  // 요약을 재지 못한 첫 요청 뒤에도 뒤 좌석에 싣지 않는다
+  assert.equal(behaviorForHold(behaviorForHold(null, 'k1', () => undefined).first, 'k2', take).behavior, undefined);
 });

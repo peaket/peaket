@@ -1,8 +1,9 @@
 // 판정 피처 Redis 저장소(docs/features/bot-defense.md §3.2·§4.1, docs/data.md §3). 세션·캐시 클러스터, 핫패스 시간 초과 100ms(플랫폼 createHotRedis).
 // 키의 해시 태그는 기기 가명 또는 pid다. 키마다 슬롯이 달라 한 Lua로 묶지 않고 명령을 따로 보내고, 키마다 성공·실패를 따로 받는다(실패한 피처만 값 없음, §18).
 // tr:devacct는 정렬 집합(점수는 마지막으로 본 시각)이고 쓸 때 30일 지난 사람을 지운다. tr:devhist는 날짜 칸(`sent:{일}` 등)으로 나눠 지난 30일만 더한다.
-// 회차별 기기 공유 수·호스팅 대역 진입 수(tr:devshare·tr:asnhost)는 BUILD_ORDER BOT-060이다.
+// 회차별 기기 공유 수·호스팅 대역 진입 수(tr:devshare·tr:asnhost)는 BUILD_ORDER BOT-060이다. 허니팟 적중 표시(tr:hp)의 쓰기는 BOT-055가 더했다.
 import { type HotRedis, redisScript } from '@peaket/platform';
+import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
 import type { FeatureName, FeatureRead, FeatureStore, VerdictEvidence } from '../domain/ports.js';
 import type { DeviceHistory } from '../domain/types.js';
 
@@ -12,6 +13,8 @@ const WINDOW_DAYS = 30;
 const WINDOW_MS = WINDOW_DAYS * DAY_MS;
 /** 판정 근거 키 30일 [가정] */
 const EVIDENCE_TTL_MS = 30 * DAY_MS;
+/** 허니팟 적중 표시 24시간 [가정](§3.2) */
+const HONEYPOT_TTL_MS = DAY_MS;
 /** pid별 하루 새 기기 수 키의 수명: 하루 칸이 끝나고 지워질 때까지 */
 const NEW_DEVICES_TTL_MS = 2 * DAY_MS;
 /** 기기 하나의 본인확인 계정 수 상한 [가정](§3.2 tr:devacct) */
@@ -22,6 +25,7 @@ export const keys = {
   devHistory: (ref: string) => `tr:devhist:{${ref}}`,
   block: (ref: string) => `tr:block:{${ref}}`,
   honeypot: (pid: string) => `tr:hp:{${pid}}`,
+  honeypotEvents: (pid: string) => `tr:hp:{${pid}}:ev`,
   evidence: (pid: string, eventId: string) => `tr:vb:{${pid}}:${eventId}`,
   newDevices: (pid: string, day: number) => `tr:pidnew:{${pid}}:${day}`,
 };
@@ -62,6 +66,22 @@ local n = tonumber(redis.call('GET', key) or '0')
 if n >= cap then return 0 end
 redis.call('INCR', key)
 redis.call('PEXPIRE', key, ttl)
+return 1
+`);
+
+/**
+ * 적중 표시를 쓰고(수명을 다시 시작한다), 회차가 있으면 pid의 회차 집합(정렬 집합, 점수는 시각)에 넣는다. 처음 넣었으면 1.
+ * 24시간 지난 칸을 지우고, 이미 있거나 상한에 닿았으면 넣지 않는다. 세기와 넣기가 Lua 한 번이라 겹쳐도 상한을 넘지 않는다. 두 키는 해시 태그(pid)가 같다
+ */
+const RECORD_HONEYPOT_LUA = redisScript(`
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+if #KEYS < 2 then return 0 end
+local now, ttl = tonumber(ARGV[4]), tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - ttl)
+if redis.call('ZSCORE', KEYS[2], ARGV[3]) then return 0 end
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[5]) then return 0 end
+redis.call('ZADD', KEYS[2], now, ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ttl)
 return 1
 `);
 
@@ -150,6 +170,12 @@ export class RedisFeatureStore implements FeatureStore {
       i.deviceRef ? this.#bump(i.deviceRef, 'sent', i.now) : Promise.resolve(0),
       i.pid && i.eventId ? this.redis.command(['SET', e, JSON.stringify(i.evidence), 'NX', 'PX', String(EVIDENCE_TTL_MS)], { key: e }) : Promise.resolve('OK'),
     ]);
+  }
+
+  /** 다음 판정이 확정 신호로 쓴다. 값은 적중 시각과 회차다(§3.2). 같은 사람의 뒤 적중은 수명을 다시 시작한다 */
+  async recordHoneypot(i: { pid: string; eventId: string; now: number }): Promise<boolean> {
+    const k = [keys.honeypot(i.pid), ...(i.eventId ? [keys.honeypotEvents(i.pid)] : [])];
+    return Number(await this.redis.evalScript(RECORD_HONEYPOT_LUA, k, [JSON.stringify({ atMs: i.now, eventId: i.eventId }), String(HONEYPOT_TTL_MS), i.eventId, String(i.now), String(HONEYPOT_EVENTS_PER_PID)])) === 1;
   }
 
   async recordVerification(i: { deviceRef: string; passed: boolean; now: number }): Promise<void> {

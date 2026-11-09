@@ -11,6 +11,7 @@ export class PromTrustSignals implements TrustSignals {
   readonly #hard = new Counter({ name: 'trust_block_list_hits_total', help: '확정 신호로 판정을 앞에서 정한 수(signal: BLOCK_LIST·HONEYPOT)', labelNames: ['signal'] as const, registers: [] });
   readonly #feature = new Counter({ name: 'trust_feature_read_failures_total', help: '판정 피처 키를 읽지 못한 수(feature: block·honeypot·accounts·history)', labelNames: ['feature'] as const, registers: [] });
   readonly #after = new Counter({ name: 'trust_after_response_failures_total', help: '응답 뒤로 미룬 쓰기 실패', labelNames: ['work'] as const, registers: [] });
+  readonly #honeypot = new Counter({ name: 'trust_honeypot_hits_total', help: '허니팟 기록 조건을 만족한 적중(signed_in: 로그인한 요청)', labelNames: ['signed_in'] as const, registers: [] });
 
   register(registry: Registry): void {
     registry.registerMetric(this.#verdicts);
@@ -19,6 +20,7 @@ export class PromTrustSignals implements TrustSignals {
     registry.registerMetric(this.#hard);
     registry.registerMetric(this.#feature);
     registry.registerMetric(this.#after);
+    registry.registerMetric(this.#honeypot);
   }
 
   verdict(context: ScoreContext, verdict: Verdict): void {
@@ -41,13 +43,17 @@ export class PromTrustSignals implements TrustSignals {
     this.#feature.inc({ feature });
   }
 
-  afterFailed(work: 'challenge' | 'verification' | 'account'): void {
+  afterFailed(work: 'challenge' | 'verification' | 'account' | 'honeypot'): void {
     this.#after.inc({ work });
+  }
+
+  honeypotHit(signedIn: boolean): void {
+    this.#honeypot.inc({ signed_in: signedIn ? 'true' : 'false' });
   }
 }
 
 /**
- * 판정 기록의 첫 구현: 정규 로그 줄 trust_score만 쓴다(§15). Kafka 판정 기록(telemetry.trust-verdicts)은 BUILD_ORDER BOT-055·BOT-060이다.
+ * 정규 로그 줄 trust_score(§15). Kafka 판정 기록은 json-telemetry-recorder.ts가 함께 낸다.
  * 로그에는 사람·기기 식별값과 확정 신호 종류를 싣지 않는다. 사유 범주는 이 줄에서만 본다(§16)
  */
 export class LogVerdictRecorder implements VerdictRecorder {

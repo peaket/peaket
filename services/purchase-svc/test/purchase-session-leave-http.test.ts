@@ -60,6 +60,7 @@ const store: PurchaseSessionStore = {
   read: (jti) => mem.read(jti),
   advance: (jti, seq) => mem.advance(jti, seq),
   markStarted: (jti) => mem.markStarted(jti),
+  claimSeatBehavior: async () => null,
   recordHold: (jti, holdId, seatIds, o) => mem.recordHold(jti, holdId, seatIds, o),
   end: async (jti, o) => {
     if (faults.end !== undefined) throw faults.end;

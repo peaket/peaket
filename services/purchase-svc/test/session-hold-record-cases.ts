@@ -34,6 +34,16 @@ let n = 0;
 const holdIdOf = () => `hold-${process.pid}-${Date.now().toString(36)}-${n++}`;
 
 export function sessionHoldRecordCases(make: () => Promise<HoldRecordHarness> | HoldRecordHarness): void {
+  test('[B-T19] claimSeatBehavior는_처음한번만true이고_세션이없으면null이며_다른세션과나뉜다', async () => {
+    const h = await make();
+    const a1 = await opened(h);
+    const a2 = await opened(h);
+    expect(await h.store.claimSeatBehavior(a1)).toBe(true);
+    expect(await h.store.claimSeatBehavior(a1)).toBe(false);
+    expect(await h.store.claimSeatBehavior(a2)).toBe(true);
+    expect(await h.store.claimSeatBehavior(newJti())).toBeNull();
+  });
+
   test('ST35_ADR0171_세션이 있으면 첫 호출은 true, 둘째부터는 false이다(첫 홀드 표시 fh는 처음 한 번만). 홀드마다 좌석 ID들이 기록한 차례 그대로 한 칸씩 남는다', async () => {
     const h = await make();
     const jti = await opened(h);

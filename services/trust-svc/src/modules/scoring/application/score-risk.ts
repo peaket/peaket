@@ -3,7 +3,7 @@
 // 추가 검증 제출(VERIFICATION)은 HumanCheck만 보고 가중합을 하지 않는다(§3.1·§5.2, FR-020).
 import { type Clock, uuidv7 } from '@peaket/platform';
 import { decide } from '../domain/pipeline.js';
-import { type DeviceRefs, type AsnClassifier, FEATURE_NAMES, type FeatureRead, type FeatureStore, type HumanCheckPort, type RuleSource, type TrustSignals, type VerdictRecorder } from '../domain/ports.js';
+import { type BehaviorRecorder, type DeviceRefs, type AsnClassifier, FEATURE_NAMES, type FeatureRead, type FeatureStore, type HumanCheckPort, type RuleSource, type TrustSignals, type VerdictRecorder } from '../domain/ports.js';
 import { type DeviceSignals, type Scorer, SCORER_LIST, type ScorerOutcome } from '../domain/scorers.js';
 import type { HardSignal, HumanAction, HumanCheckResult, ScoreContext, ScoreRequest, ScoreResult, ShuffleMode } from '../domain/types.js';
 import { TrustError } from './trust-error.js';
@@ -23,6 +23,7 @@ export interface ScoreRiskDeps {
   devices: DeviceRefs;
   asn: AsnClassifier;
   recorder: VerdictRecorder;
+  behaviors: BehaviorRecorder;
   signals: TrustSignals;
   clock: Clock;
   /** 응답 뒤로 미룰 일을 맡긴다 */
@@ -48,7 +49,7 @@ export class ScoreRisk {
   }
 
   async #score(req: ScoreRequest, now: number, startedAt: number): Promise<ScoreResult> {
-    const { rules, features, devices, asn, signals, recorder, clock } = this.#d;
+    const { rules, features, devices, asn, signals, recorder, behaviors, clock } = this.#d;
     const current = rules.current();
     // 처음부터 읽지 못한 파드는 준비 상태가 되지 않는다(§4.4). 그래도 불렸으면 통과로 보지 않고 UNAVAILABLE이다
     if (!current) throw new TrustError('UNAVAILABLE', '비공개 규칙 설정을 읽지 못했다');
@@ -111,6 +112,22 @@ export class ScoreRisk {
       decidedAtMs: now,
       durationMs: Math.max(0, clock.monotonicMs() - startedAt),
     });
+    // 행동 신호는 로비 입장과 사전 검증에서만 낸다. 로비에는 요약이 없다(§4.1)
+    if (req.context === 'LOBBY_ENTRY' || req.context === 'PREVERIFY') {
+      behaviors.behavior({
+        eventKey,
+        eventId: req.eventId,
+        pid: req.pid,
+        journeyId: req.journeyId,
+        screen: req.context === 'LOBBY_ENTRY' ? 'LOBBY' : 'EVENT_DETAIL',
+        ...(deviceRef ? { deviceRef } : {}),
+        refMissing,
+        netClass,
+        asn: req.client.asn,
+        ...(req.behavior ? { features: req.behavior } : {}),
+        tsMs: now,
+      });
+    }
     if (decision.verdict === 'CHALLENGE' && req.context !== 'LOGIN') {
       const reason = decision.reason!;
       this.#d.after(async () => {

@@ -29,7 +29,7 @@
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
-import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, systemClock } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
@@ -119,12 +119,18 @@ import {
   SessionSweeper,
   ServerEcdhKey,
   StoredPurchaseSessions,
+  discardBehaviorSignals as discardSeatBehaviorSignals,
   discardHoldAttempts,
+  JsonBehaviorSignals,
+  SeatBehaviorReporter,
+  type BehaviorSignals,
   parseAdmissionJwks,
   podIdFrom,
 } from './modules/inventory/index.js';
 
 const SERVICE = 'purchase-svc';
+/** 종료 때 남은 텔레메트리를 보내는 시간 [가정] */
+const TELEMETRY_CLOSE_MS = 2_000;
 /** 좌석맵 판 파일을 다시 읽는 주기 30초 [가정](docs/features/seat-hold.md §2 '운영 좌석맵 판') */
 const SEATMAP_REFRESH_MS = 30_000;
 
@@ -159,6 +165,20 @@ const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot'
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
 const sessionStore = new RedisPurchaseSessionStore(redis);
 const sessions = new StoredPurchaseSessions({ store: sessionStore, ecdh, clock: systemClock });
+// 좌석 화면 행동 요약(BUILD_ORDER BOT-055, ADR-0249): 텔레메트리 클러스터로 낸다. 주소가 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
+const telemetryKafka = telemetryKafkaFromEnv(SERVICE, process.env);
+let behaviorSignals: BehaviorSignals = discardSeatBehaviorSignals;
+const behaviorPending = new Set<Promise<void>>();
+const seatBehavior = new SeatBehaviorReporter({
+  claims: sessionStore,
+  signals: { record: (r) => behaviorSignals.record(r) },
+  clock: systemClock,
+  after: (work) => {
+    const p = work().finally(() => behaviorPending.delete(p));
+    behaviorPending.add(p);
+  },
+  onFailed: (err) => service.logger.warn({ err: errorSummary(err) }, '좌석 행동 요약 표시를 잡지 못했다(요약은 잃는다, 홀드는 그대로다)'),
+});
 const signals = new PromSeatSignals();
 // 서비스 로거는 서비스를 만든 뒤에야 생기므로, 좌석맵 판은 늦게 묶는 로거로 경고를 남긴다(판 파일은 처음 요청 때 읽는다)
 let log: { warn(obj: object, msg: string): void } | undefined;
@@ -220,6 +240,7 @@ const service = await createService({
     redis,
     seatMap,
     attempts: discardHoldAttempts,
+    seatBehavior,
     sessions,
     podId,
     signals,
@@ -435,6 +456,38 @@ if (database && databaseUrl) {
     logger: service.logger,
   });
 }
+// 꺼져 있어도 낼 기록은 버린 수로 센다(지표로 드러난다)
+const telemetryDropped = telemetryDroppedCounter(service.metrics.registry);
+let telemetrySink: TelemetrySink | undefined;
+let telemetrySender: KafkaTelemetrySender | undefined;
+const telemetryOff = (warning: string): void => {
+  behaviorSignals = new JsonBehaviorSignals({ offer: (record) => telemetryDropped(record, 1) });
+  service.logger.warn({ dep: 'telemetry-kafka' }, warning);
+};
+if (telemetryKafka.enabled) {
+  try {
+    // 네이티브 모듈은 켤 때만 싣는다. 싣지 못해도 시작은 막지 않는다
+    const { createKafkaProducer } = await import('@peaket/platform/stream-worker');
+    // 연결은 보낼 때 맺고, 실패하면 새 생산자로 다시 잇는다: 브로커가 멈춰도 파드는 뜨고 홀드는 이어진다
+    const { brokers, auth, env: kafkaEnv } = telemetryKafka;
+    const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
+    const sender = kafkaTelemetrySend(() => createKafkaProducer({ kind: 'default', brokers, clientId: `${SERVICE}-${kafkaEnv}-${pod}`, auth }));
+    telemetrySender = sender;
+    const sink = new TelemetrySink({ send: sender, onDropped: telemetryDropped });
+    telemetrySink = sink;
+    behaviorSignals = new JsonBehaviorSignals({ offer: (record, topic, m) => sink.offer(record, topic, m) });
+  } catch {
+    telemetryOff('Kafka 클라이언트를 싣지 못해 좌석 행동 요약을 Kafka로 보내지 않는다');
+  }
+} else {
+  telemetryOff(telemetryKafka.warning);
+}
+// 서비스 닫기가 실패해도 남은 기록은 닫는다(시간 안에서만)
+const closeTelemetry = async (): Promise<void> => {
+  await Promise.all(behaviorPending);
+  await telemetrySink?.close(TELEMETRY_CLOSE_MS);
+  await telemetrySender?.disconnect(TELEMETRY_CLOSE_MS);
+};
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
@@ -477,6 +530,7 @@ function shutdown(): void {
   ])
     .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
+    .finally(closeTelemetry)
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
     // 주문 만료 판정기는 고리를 부르는 것들(만료·정리 반복, 소비자, 나가기 경로)이 멈춘 뒤에 멈춘다. 돌던 판정만 기다리고 줄에 남은 일은 버린다(안전망이 받친다). 전용 풀은 그 뒤에 닫는다
     .then(() => orderExpiry?.stop())

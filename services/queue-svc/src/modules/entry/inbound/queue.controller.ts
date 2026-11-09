@@ -11,7 +11,7 @@ import { IssuePreverification } from '../application/issue-preverification.js';
 import { JoinLobby } from '../application/join-lobby.js';
 import { LeaveQueue } from '../application/leave-queue.js';
 import type { RiskClient } from '../domain/ports.js';
-import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, QueueStoreUnavailable } from '../domain/queue.js';
+import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, FIRST_VISIT_COOKIE_NAME, QueueStoreUnavailable } from '../domain/queue.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
 const BehaviorSummary = z
@@ -98,6 +98,12 @@ function clientOf(reply: FastifyReply): RiskClient {
   return { ip, userAgent: (headerOf(h['user-agent']) ?? '').slice(0, 512), asn: ASN.test(asnRaw) ? Number(asnRaw) : 0, clientHints };
 }
 
+/** 최초 방문 쿠키 값(위험 판정 입력, 있을 때만) */
+function firstVisitOf(reply: FastifyReply): { firstVisitCookie?: string } {
+  const v = cookieValue(reply.request.headers.cookie, FIRST_VISIT_COOKIE_NAME);
+  return v ? { firstVisitCookie: v } : {};
+}
+
 @Controller('v1/queues/:eventId')
 export class QueueController {
   constructor(
@@ -129,7 +135,7 @@ export class QueueController {
   @HttpCode(201)
   async lobby(@Param('eventId') eventId: string, @ContractBody(LobbyBody) body: z.output<typeof LobbyBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    return problem((async () => this.joinLobby.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply) }))());
+    return problem((async () => this.joinLobby.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply), ...firstVisitOf(reply) }))());
   }
 
   @Post('pre-verifications')
@@ -137,7 +143,7 @@ export class QueueController {
   @HttpCode(201)
   async preverify(@Param('eventId') eventId: string, @ContractBody(PreverifyBody) body: z.output<typeof PreverifyBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    return problem((async () => this.issuePreverification.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply) }))());
+    return problem((async () => this.issuePreverification.run({ accountId: me.accountId, eventId, body, ...who(eventId, me), client: clientOf(reply), ...firstVisitOf(reply) }))());
   }
 
   @Post('entries')

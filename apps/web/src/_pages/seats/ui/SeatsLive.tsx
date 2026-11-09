@@ -175,7 +175,9 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       const headLoad = loadHead(eventId, abort.signal);
       void headLoad.then((h) => live && h && setHead(h));
       // 예매 흐름(요청·기계)도 늦게 가져온다
-      const [{ createBooking, readWish }, api] = await Promise.all([import('../model/booking-runtime'), import('@/shared/api')]);
+      const [{ createBooking, readWish }, api, { createBehaviorTracker, listenBehavior }] = await Promise.all([import('../model/booking-runtime'), import('@/shared/api'), import('@/features/behavior-summary/tracker')]);
+      // 행동 요약은 좌석맵을 처음 그린 때부터 잰다(좌표·본 좌석은 남기지 않는다, ADR-0171 결정 4). 첫 직접 선택 홀드에만 싣는다
+      let behaviorTracker: ReturnType<typeof createBehaviorTracker> | undefined;
       const client = api.browserApiClient();
       if (!live) return;
       if (!client) return setPhase('failed');
@@ -187,6 +189,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         toggleOnMap: (i) => toggle(i),
         refreshToken: api.refreshFanToken,
         limit: DEFAULT_LIMIT,
+        behaviorSummary: () => behaviorTracker?.summary(),
         saveHold: (h) => saveHold(eventId, h),
         clearHold: () => clearHold(eventId),
       });
@@ -267,6 +270,10 @@ export function SeatsLive({ eventId }: { eventId: string }) {
           if (!live) return;
           if (m.type === 'ready') {
             drawn = true;
+            if (!behaviorTracker) {
+              behaviorTracker = createBehaviorTracker(() => performance.now());
+              cleanups.push(listenBehavior(window, behaviorTracker));
+            }
             setPhase('ready');
           } else if (m.type === 'view') {
             viewRef.current = m;

@@ -51,6 +51,17 @@ function make(breaker?: Pick<CircuitBreaker, 'run'>) {
 }
 
 describe('GrpcTrustRisk', () => {
+  test('[Q-T39] 최초방문쿠키의발급시각은_first_visit_at으로_밀리초까지넘긴다', async () => {
+    seen.length = 0;
+    behave = (_r, cb) => cb(null, { verdict: 'VERDICT_ALLOW' });
+    const { risk } = make();
+    await risk.score(input({ firstVisitAtMs: 1_800_000_000_123 }));
+    expect(seen[0]!.first_visit_at).toMatchObject({ seconds: 1_800_000_000, nanos: 123_000_000 });
+    seen.length = 0;
+    await risk.score(input());
+    expect(seen[0]!.first_visit_at).toBeNull();
+  });
+
   test('HOT-040·BOT-050_로비는맥락LOBBY_ENTRY이고_journey_id·회차정렬·토큰·클라이언트신호를싣는다', async () => {
     seen.length = 0;
     behave = (_r, cb) => cb(null, { verdict: 'VERDICT_ALLOW' });

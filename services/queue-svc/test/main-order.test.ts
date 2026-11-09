@@ -10,3 +10,9 @@ test('낮음9_ASN분류표읽기는경고함수를단뒤에시작한다', () => 
   expect(warn).toBeGreaterThan(-1);
   expect(start).toBeGreaterThan(warn);
 });
+
+test('[Q-T39] 최초방문쿠키키가없거나틀려도_시작을막지않고경고로끝낸다', () => {
+  const main = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+  expect(main).toMatch(/HmacFirstVisitCookies\.fromEnv\(process\.env, \(m\) => firstVisitWarnings\.push\(m\)\)/);
+  expect(main).toMatch(/for \(const w of firstVisitWarnings\) service\.logger\.warn/);
+});

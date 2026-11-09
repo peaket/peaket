@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // 엣지 키 값 저장소의 도착 시각 쿠키 서명 키 항목을 Secrets Manager 값과 맞춘다(docs/security/secrets-and-keys.md, ADR-0223 결정 10, BUILD_ORDER HOT-020).
-// 배포 파이프라인이 배포 역할로 돌린다. 키 이름은 arr:cur, arr:key:{kid}만 다룬다(sale:·mode: 키는 건드리지 않는다, ADR-0219 결정 4).
+// 배포 파이프라인이 배포 역할로 돌린다. 키 이름은 {접두사}:cur, {접두사}:key:{kid}만 다룬다(sale:·mode: 키는 건드리지 않는다, ADR-0219 결정 4).
+// 접두사는 arr(진입 함수의 저장소, 도착 시각 쿠키)와 fv(사전 검증 함수의 저장소, 최초 방문 쿠키, ADR-0249 결정 1)다. 두 저장소는 따로라 저장소마다 한 번씩 돌린다.
 // 값은 어디에도 찍지 않고 명령줄에도 싣지 않는다(권한 좁은 임시 파일을 --cli-input-json으로 넘기고 지운다). 오류 문구는 고정 글과 AWS 오류 이름만이다.
 // 종료 코드: 0 같음·없어서 넣음·교체, 3 달라서 다시 넣음(경보), 2 인자·호출 실패.
-//   node tools/edge/sync-kvs-keys.mjs --kvs-arn <저장소 ARN> --entries <항목 JSON 파일> [--rotate]
+//   node tools/edge/sync-kvs-keys.mjs --kvs-arn <저장소 ARN> --entries <항목 JSON 파일> [--rotate] [--prefix arr|fv]
 // --rotate: 이번 배포가 지금 kid를 바꾸는 정상 교체다(arr:cur가 달라도 경보하지 않는다. 서명 키 값이 다르면 그래도 경보한다).
 // 항목 JSON: { "arr:cur": "k2", "arr:key:k1": "<키 글자>", "arr:key:k2": "<키 글자>" }
 // 실제 저장소는 aws cloudfront-keyvaluestore CLI로 부른다(AWS 계정이 생겨 배포할 때 동작을 확인한다, HOT-012).
@@ -14,8 +15,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
-const CUR = 'arr:cur';
-const KEY_NAME = /^arr:key:([A-Za-z0-9_-]{1,32})$/;
+const PREFIXES = ['arr', 'fv'];
+const namesOf = (prefix) => ({ cur: `${prefix}:cur`, key: new RegExp(`^${prefix}:key:([A-Za-z0-9_-]{1,32})$`), keyOf: (kid) => `${prefix}:key:${kid}` });
 const KID = /^[A-Za-z0-9_-]{1,32}$/;
 const KEY_VALUE = /^[A-Za-z0-9_-]+$/;
 const MIN_KEY_BYTES = 32;
@@ -74,23 +75,26 @@ export const awsDriver = (arn, exec = promisify(execFile)) => {
 };
 
 /** 항목의 이름·꼴을 본다(값은 문구에 싣지 않는다). 지금 kid는 그 키가 항목에 있어야 한다 */
-function validate(entries) {
+function validate(entries, names) {
   for (const [k, v] of Object.entries(entries)) {
-    if (k !== CUR && !KEY_NAME.test(k)) throw new KvsError('저장소 키 이름이 규칙에 맞지 않는다');
+    if (k !== names.cur && !names.key.test(k)) throw new KvsError('저장소 키 이름이 규칙에 맞지 않는다');
     if (typeof v !== 'string' || v.length === 0) throw new KvsError('저장소 키의 값이 비었다');
-    if (k === CUR && !KID.test(v)) throw new KvsError('arr:cur의 꼴이 kid가 아니다');
-    if (k !== CUR && (!KEY_VALUE.test(v) || Buffer.from(v, 'base64url').length < MIN_KEY_BYTES)) throw new KvsError('서명 키는 base64url 글자로 32바이트 이상이어야 한다');
+    if (k === names.cur && !KID.test(v)) throw new KvsError(`${names.cur}의 꼴이 kid가 아니다`);
+    if (k !== names.cur && (!KEY_VALUE.test(v) || Buffer.from(v, 'base64url').length < MIN_KEY_BYTES)) throw new KvsError('서명 키는 base64url 글자로 32바이트 이상이어야 한다');
   }
-  const cur = entries[CUR];
-  if (cur !== undefined && entries[`arr:key:${cur}`] === undefined) throw new KvsError('arr:cur가 가리키는 키가 항목에 없다');
+  const cur = entries[names.cur];
+  if (cur !== undefined && entries[names.keyOf(cur)] === undefined) throw new KvsError(`${names.cur}가 가리키는 키가 항목에 없다`);
 }
 
 /**
- * 원하는 항목을 저장소와 맞춘다. 서명 키를 먼저 넣고 arr:cur를 마지막에 넣는다(엣지가 없는 키를 가리키지 않게).
- * 없는 키는 missing, 다른 키는 changed(경보), arr:cur만 다르고 교체 뜻이 있으면 rotated다.
+ * 원하는 항목을 저장소와 맞춘다. 서명 키를 먼저 넣고 {접두사}:cur를 마지막에 넣는다(엣지가 없는 키를 가리키지 않게).
+ * 없는 키는 missing, 다른 키는 changed(경보), {접두사}:cur만 다르고 교체 뜻이 있으면 rotated다.
  */
-export async function syncEntries(driver, entries, { rotating = false } = {}) {
-  validate(entries);
+export async function syncEntries(driver, entries, { rotating = false, prefix = 'arr' } = {}) {
+  if (!PREFIXES.includes(prefix)) throw new KvsError('--prefix는 arr이나 fv여야 한다');
+  const named = namesOf(prefix);
+  const CUR = named.cur;
+  validate(entries, named);
   const names = Object.keys(entries).sort((a, b) => (a === CUR) - (b === CUR));
   const report = { missing: [], changed: [], same: [], rotated: [] };
   let etag = await driver.etag();
@@ -126,7 +130,7 @@ export async function main(argv, { exec, console: log = console } = {}) {
   const arn = at('--kvs-arn');
   const file = at('--entries');
   if (!arn || !file) {
-    log.error('쓰는 법: node tools/edge/sync-kvs-keys.mjs --kvs-arn <저장소 ARN> --entries <항목 JSON 파일> [--rotate]');
+    log.error('쓰는 법: node tools/edge/sync-kvs-keys.mjs --kvs-arn <저장소 ARN> --entries <항목 JSON 파일> [--rotate] [--prefix arr|fv]');
     return 2;
   }
   let entries;
@@ -137,7 +141,7 @@ export async function main(argv, { exec, console: log = console } = {}) {
     return 2;
   }
   try {
-    const report = await syncEntries(awsDriver(arn, exec), entries, { rotating: argv.includes('--rotate') });
+    const report = await syncEntries(awsDriver(arn, exec), entries, { rotating: argv.includes('--rotate'), prefix: at('--prefix') ?? 'arr' });
     for (const line of reportLines(report)) log.error(line);
     return report.changed.length > 0 ? 3 : 0;
   } catch (e) {

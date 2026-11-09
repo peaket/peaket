@@ -6,7 +6,8 @@
 // - 오픈 뒤 [대기열 들어가기]: 이미 줄을 섰거나 유효한 토큰이 있으면 바로 대기실로, 없으면 사람 확인 대화상자를 거친다.
 // 위젯은 대화상자 안 자리 하나와 조용한 갱신용 숨긴 자리 하나에만 그린다(카드는 휴대폰 히어로와 데스크톱 패널에 둘이라 위젯을 갖지 않는다).
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { createBehaviorTracker, readPreverify, type KV, type Preverify } from '@/features/preverify/model';
+import { createBehaviorTracker, listenBehavior } from '@/features/behavior-summary/tracker';
+import { readPreverify, type KV, type Preverify } from '@/features/preverify/model';
 import { browserClock } from '@/shared/lib/clock';
 
 const PreverifyHost = lazy(() => import('./PreverifyHost'));
@@ -61,27 +62,7 @@ export function PreverifyProvider({ eventId, loginHref, children }: { eventId: s
     setView((v) => ({ ...v, token: readPreverify(preverifyStorage(), eventId, browserClock().now()) }));
     const t = createBehaviorTracker(() => performance.now());
     tracker.current = t;
-    let lastY = window.scrollY;
-    const move = (e: PointerEvent) => t.move(e.clientX, e.clientY);
-    const tap = () => t.input();
-    // 키를 누르고 있을 때의 자동 반복은 입력 간격에 넣지 않는다
-    const key = (e: KeyboardEvent) => {
-      if (!e.repeat) t.input();
-    };
-    const scroll = () => {
-      t.scroll(window.scrollY - lastY);
-      lastY = window.scrollY;
-    };
-    window.addEventListener('pointermove', move, { passive: true });
-    window.addEventListener('pointerdown', tap, { passive: true });
-    window.addEventListener('keydown', key);
-    window.addEventListener('scroll', scroll, { passive: true });
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerdown', tap);
-      window.removeEventListener('keydown', key);
-      window.removeEventListener('scroll', scroll);
-    };
+    return listenBehavior(window, t);
   }, [eventId]);
 
   const bind = useCallback((a: PreverifyActions | null) => {

@@ -96,6 +96,7 @@ function requestOf(i: RiskInput): object {
     ...(i.humanCheckToken ? { human_check_token: i.humanCheckToken } : {}),
     ...(i.behaviorSummary ? { behavior: behaviorOf(i.behaviorSummary) } : {}),
     ...(i.client ? { client: { ip: i.client.ip, user_agent: i.client.userAgent ?? '', client_hints: i.client.clientHints, asn: i.client.asn } } : {}),
+    ...(i.firstVisitAtMs !== undefined ? { first_visit_at: { seconds: Math.floor(i.firstVisitAtMs / 1000), nanos: (i.firstVisitAtMs % 1000) * 1_000_000 } } : {}),
   };
 }
 

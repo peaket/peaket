@@ -8,7 +8,7 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
@@ -49,15 +49,20 @@ const kafka = kafkaConsumersFromEnv(process.env);
 // 도착 시각 쿠키 키(ADR-0223): 없으면 쿠키를 읽지 않는다(그 환경은 쿠키 없는 일반 진입뿐이다, 시작에는 실패하지 않는다)
 const arrivals = HmacArrivalCookies.fromEnv(process.env);
 const arrivalSignals = new PromArrivalSignals();
+// 최초 방문 쿠키 키(ADR-0249): 없거나 틀리면 경고하고 쿠키를 읽지 않는다(시작은 막지 않는다. 값 있음은 배포 검사가 막는다)
+const firstVisitWarnings: string[] = [];
+const firstVisit = HmacFirstVisitCookies.fromEnv(process.env, (m) => firstVisitWarnings.push(m));
+const firstVisitSignals = new PromFirstVisitSignals();
 // 시드 봉인(ADR-0239 결정 5): 운영은 KMS Encrypt이고 키가 없으면 시작하지 않는다. local·ci·demo는 시험 봉인(admission-ctrl과 같은 PEAKET_TEST_BATCH_RANDOMNESS)이고, 값이 없으면 봉인 없이 시작해 로비 참가와 공시는 503이다
 const sealer = seedSealerFromEnv(process.env, (endpoint, region) => kmsSealClient({ region, ...(endpoint ? { endpoint } : {}) }));
 const lobbySignals = new PromLobbySignals();
 const leaveSignals = new PromLeaveSignals();
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: trustRisk ?? unavailableRisk, degradedLimits, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
+  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: trustRisk ?? unavailableRisk, degradedLimits, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals, ...(firstVisit ? { firstVisit } : {}), firstVisitSignals }),
 });
 arrivalSignals.register(service.metrics.registry);
+firstVisitSignals.register(service.metrics.registry);
 riskSignals.register(service.metrics.registry);
 trustBreakerHolder.b = new CircuitBreaker({ service: SERVICE, dependency: 'trust-svc', registry: service.metrics.registry, logger: service.logger, ...TRUST_BREAKER });
 if (!trustRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 위험 판정이 늘 축소 운영이다(local·ci·demo)');
@@ -66,6 +71,7 @@ asnLog.warn = (reason) => service.logger.warn({ dep: 'asn-table', reason }, 'ASN
 // 경고 함수를 단 뒤에 읽기 시작한다(첫 읽기 실패 경고를 잃지 않게). 파드가 요청을 받기 전이라 그 사이 축소 운영은 IP 한도 없이 간다
 asnTable.start();
 if (!arrivals) service.logger.warn({ dep: 'edge-arrival-key' }, '도착 시각 쿠키 키(PEAKET_ARRIVAL_COOKIE_KEY)가 없어 진입 Degraded의 쿠키를 읽지 않는다');
+for (const w of firstVisitWarnings) service.logger.warn({ dep: 'edge-first-visit-key' }, w);
 signals.register(service.metrics.registry);
 lobbySignals.register(service.metrics.registry);
 leaveSignals.register(service.metrics.registry);

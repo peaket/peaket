@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryDegradedLimits } from '../src/modules/entry/adapters/memory-degraded-limits.js';
 import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
+import { createHmac } from 'node:crypto';
+import { HmacFirstVisitCookies } from '../src/modules/entry/adapters/first-visit-cookie.js';
 import { ACCOUNT, DEVICE, newEvent, openSchedule, PID, recordingRisk, tokens } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
@@ -15,6 +17,11 @@ const schedules = new MemoryEventSchedules();
 const NOW = Date.parse('2026-11-03T03:00:00Z');
 const risk = recordingRisk({ kind: 'UNAVAILABLE' });
 const clock = fakeClock({ now: NOW });
+const FIRST_VISIT_KEY = 'F'.repeat(43);
+const firstVisitCookie = (t: number) => {
+  const head = `v1.k1.${t}.${Buffer.from('REQ==').toString('base64url')}`;
+  return `${head}.${createHmac('sha256', FIRST_VISIT_KEY).update(`PEAKET-firstvisit-v1.${head}`).digest('base64url')}`;
+};
 
 beforeAll(async () => {
   svc = await createService({
@@ -25,6 +32,7 @@ beforeAll(async () => {
       tokens,
       risk,
       degradedLimits: new MemoryDegradedLimits(clock, { classify: () => 'OTHER' }),
+      firstVisit: new HmacFirstVisitCookies([{ kid: 'k1', key: FIRST_VISIT_KEY }]),
       sealer: new TestSeedSealer(Buffer.alloc(32, 4)),
     }),
     env: { PEAKET_ENV: 'ci' },
@@ -65,6 +73,39 @@ const preverify = (id: string, headers: Record<string, string>, body: object = {
   svc.http.inject({ method: 'POST', url: `/v1/queues/${id}/pre-verifications`, headers: { ...fan(), ...headers, 'content-type': 'application/json' }, payload: JSON.stringify({ humanCheckToken: 't', deviceId: DEVICE, ...body }) });
 
 describe('위험 판정 입력', () => {
+  test('[Q-T39] 최초방문쿠키는_사전검증과로비참가의위험판정입력으로넘어가고_응답은그대로다', async () => {
+    risk.seen.length = 0;
+    const issuedAt = NOW - 3 * 86_400_000;
+    const id = await event({ lobbyShuffle: false });
+    const r = await preverify(id, { cookie: `other=1; __Host-peaket_fv=${firstVisitCookie(issuedAt)}` });
+    expect(r.statusCode).toBe(201);
+    expect(risk.seen[0]!.firstVisitAtMs).toBe(issuedAt);
+    const lobbyId = await event({ lobbyShuffle: true, opensAtMs: NOW + 5 * 60_000 });
+    const lobby = await svc.http.inject({ method: 'POST', url: `/v1/queues/${lobbyId}/lobby-participants`, headers: { ...fan(), 'content-type': 'application/json', cookie: `__Host-peaket_fv=${firstVisitCookie(issuedAt)}` }, payload: JSON.stringify({ humanCheckToken: 't', deviceId: device() }) });
+    expect(lobby.statusCode).toBe(201);
+    expect(risk.seen[1]).toMatchObject({ context: 'LOBBY', firstVisitAtMs: issuedAt });
+  });
+
+  test('[Q-T39] 행동요약은_범위밖값이나정의밖칸이면400이고_맞으면위험판정입력으로넘어간다', async () => {
+    const id = await event({ lobbyShuffle: false });
+    for (const behaviorSummary of [{ v: 2, windowMs: 1 }, { v: 1, windowMs: 3_600_001 }, { v: 1, windowMs: 1, pointerMoves: -1 }, { v: 1, windowMs: 1, pointerPath: [[1, 2]] }, { v: 1, windowMs: 1, typed: 'abc' }]) {
+      const r = await preverify(id, {}, { behaviorSummary });
+      expect(r.statusCode, JSON.stringify(behaviorSummary)).toBe(400);
+    }
+    risk.seen.length = 0;
+    const ok = await preverify(id, {}, { behaviorSummary: { v: 1, windowMs: 2_000, pointerMoves: 4, pointerEntropy: 1.2, scrollEvents: 1, scrollDistancePx: 80 } });
+    expect(ok.statusCode).toBe(201);
+    expect(risk.seen[0]!.behaviorSummary).toEqual({ v: 1, windowMs: 2_000, pointerMoves: 4, pointerEntropy: 1.2, scrollEvents: 1, scrollDistancePx: 80 });
+  });
+
+  test('[Q-T39] 틀린쿠키는_없는것으로처리되고_사전검증은그대로201이다', async () => {
+    risk.seen.length = 0;
+    const id = await event({ lobbyShuffle: false });
+    const r = await preverify(id, { cookie: '__Host-peaket_fv=v1.k1.1.a.b' });
+    expect(r.statusCode).toBe(201);
+    expect(risk.seen[0]!.firstVisitAtMs).toBeUndefined();
+  });
+
   test('BOT-050_게이트웨이가넘긴IP·ASN·UA·ClientHints를위험판정에싣는다', async () => {
     risk.seen.length = 0;
     const id = await event({ lobbyShuffle: false });

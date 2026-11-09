@@ -137,6 +137,26 @@ export interface LeaveSignals {
 }
 export const noLeaveSignals: LeaveSignals = { left: () => undefined };
 
+/** 최초 방문 쿠키에서 읽은 칸(ADR-0249 결정 1) */
+export interface FirstVisitClaims {
+  kid: string;
+  /** 엣지가 찍은 발급 시각(밀리초) */
+  issuedAtMs: number;
+}
+export const FIRST_VISIT_COOKIES = Symbol('queue.FirstVisitCookies');
+/** 최초 방문 쿠키 읽기. MAC·형식이 맞을 때만 칸을 주고 아니면 null */
+export interface FirstVisitCookies {
+  read(value: string): FirstVisitClaims | null;
+}
+
+/** 읽기 결과: ok 신호로 씀, absent 쿠키 없음, invalid 서명·모양이 틀림, stale 시각이 범위 밖, disabled 키가 없어 기능을 껐다 */
+export type FirstVisitResult = 'ok' | 'absent' | 'invalid' | 'stale' | 'disabled';
+export const FIRST_VISIT_SIGNALS = Symbol('queue.FirstVisitSignals');
+export interface FirstVisitSignals {
+  cookie(result: FirstVisitResult): void;
+}
+export const noFirstVisitSignals: FirstVisitSignals = { cookie: () => undefined };
+
 /** 게이트웨이가 넘긴 요청 정보(trust.proto ClientSignals). asn이 없으면 0이다 */
 export interface RiskClient {
   ip: string;
@@ -156,6 +176,8 @@ export interface RiskInput {
   humanCheckToken?: string;
   behaviorSummary?: Record<string, unknown>;
   client?: RiskClient;
+  /** 서명을 확인한 최초 방문 쿠키의 발급 시각(밀리초). 쿠키가 없으면 비운다 */
+  firstVisitAtMs?: number;
 }
 /** OK: 통과, HELD: 통과했지만 trust-svc 의존성 일부가 멈춰 사람 확인을 보류함(degraded), VERIFY: 추가 검증, UNAVAILABLE: 판정을 받지 못함(축소 운영) */
 export type RiskVerdict = { kind: 'OK' } | { kind: 'HELD' } | { kind: 'VERIFY'; reason: ReasonCategory } | { kind: 'UNAVAILABLE' };

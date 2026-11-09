@@ -1,7 +1,7 @@
-// 위험 판정의 포트: 사람 확인, 판정 피처 저장소, 기기 가명, ASN 분류표, 규칙, 판정 기록, 운영 신호.
+// 위험 판정의 포트: 사람 확인, 판정 피처 저장소, 기기 가명, ASN 분류표, 규칙, 판정 기록, 행동 신호, 운영 신호.
 import type { RuleSet } from './rules.js';
 import type { MissingCause } from './scorers.js';
-import type { DeviceHistory, HardSignal, HumanAction, HumanCheckResult, Intensity, NetClass, ReasonCategory, ScoreContext, ScorerName, Verdict } from './types.js';
+import type { BehaviorSummary, DeviceHistory, HardSignal, HumanAction, HumanCheckResult, Intensity, NetClass, ReasonCategory, ScoreContext, ScorerName, Verdict } from './types.js';
 
 export interface HumanCheckRequest {
   token: string;
@@ -49,6 +49,8 @@ export interface FeatureStore {
   recordChallenge(i: { deviceRef: string | undefined; pid: string; eventId: string; evidence: VerdictEvidence; now: number }): Promise<void>;
   /** 추가 검증 제출의 결과: 기기의 통과·실패 수 */
   recordVerification(i: { deviceRef: string; passed: boolean; now: number }): Promise<void>;
+  /** 허니팟 적중 표시(tr:hp, 24시간 [가정], §7). 값은 적중 시각과 회차다. 이 (pid, 회차)에서 24시간 안의 첫 적중이고 pid당 회차 수 상한 안이면 true(회차를 모르면 false). 표시는 상한과 상관없이 쓴다 */
+  recordHoneypot(i: { pid: string; eventId: string; now: number }): Promise<boolean>;
 }
 
 /** 기기 가명. 라벨 키를 받지 못하면 undefined */
@@ -91,6 +93,40 @@ export interface VerdictRecorder {
   record(r: VerdictRecord): void;
 }
 
+/** 행동 신호 한 건(§4.1 ⑤). screen은 로비 입장 LOBBY, 사전 검증 EVENT_DETAIL이다 */
+export interface BehaviorRecord {
+  eventKey: string;
+  eventId: string;
+  pid: string;
+  journeyId: string;
+  screen: 'LOBBY' | 'EVENT_DETAIL';
+  deviceRef?: string;
+  refMissing: boolean;
+  netClass: NetClass;
+  /** ASN. netClass가 HOSTING·PROXY일 때만 내보낸다 */
+  asn: number;
+  /** 로비 입장에는 없다 */
+  features?: BehaviorSummary;
+  tsMs: number;
+}
+
+/** 행동 신호를 내보낸다. 던지지 않는다 */
+export interface BehaviorRecorder {
+  behavior(r: BehaviorRecord): void;
+}
+
+/** 허니팟 적중의 판정 기록(§7). 사람 식별값은 싣지 않는다 */
+export interface HoneypotRecord {
+  eventKey: string;
+  eventId: string;
+  occurredAtMs: number;
+}
+
+/** 허니팟 적중의 판정 기록을 내보낸다. 던지지 않는다 */
+export interface HoneypotRecorder {
+  honeypot(r: HoneypotRecord): void;
+}
+
 /** 운영 신호(§15·§16) */
 export interface TrustSignals {
   verdict(context: ScoreContext, verdict: Verdict): void;
@@ -100,5 +136,7 @@ export interface TrustSignals {
   /** 피처 키 읽기가 실패했다(그 피처는 값 없음이다) */
   featureFailed(feature: FeatureName): void;
   /** 응답 뒤로 미룬 쓰기가 실패했다 */
-  afterFailed(work: 'challenge' | 'verification' | 'account'): void;
+  afterFailed(work: 'challenge' | 'verification' | 'account' | 'honeypot'): void;
+  /** 허니팟 적중 하나(§7). 기록 조건을 만족한 요청만 부른다 */
+  honeypotHit(signedIn: boolean): void;
 }

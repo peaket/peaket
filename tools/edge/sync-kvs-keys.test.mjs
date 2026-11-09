@@ -125,6 +125,15 @@ const exec = (o = {}) => {
   return { fn, calls };
 };
 
+test('[ASVS v5.0.0-13.3.2] [Q-T39] 접두사fv는_최초방문쿠키저장소의키만다루고_다른접두사의키를거절한다(ADR-0249 결정 1)', async () => {
+  const d = fake({});
+  const report = await syncEntries(d, { 'fv:cur': 'k1', 'fv:key:k1': KEY_A }, { prefix: 'fv' });
+  assert.deepEqual(report.missing, ['fv:key:k1', 'fv:cur']);
+  assert.deepEqual(d.puts, ['fv:key:k1', 'fv:cur']);
+  await assert.rejects(() => syncEntries(fake({}), { 'arr:cur': 'k1', 'arr:key:k1': KEY_A }, { prefix: 'fv' }), /규칙/);
+  await assert.rejects(() => syncEntries(fake({}), { 'fv:cur': 'k1', 'fv:key:k1': KEY_A }, { prefix: 'sale' }), /--prefix/);
+});
+
 test('[ASVS v5.0.0-13.3.2] 값은명령줄에실리지않고_권한좁은임시파일로넘기며_끝나면지운다', async () => {
   let path;
   let mode;

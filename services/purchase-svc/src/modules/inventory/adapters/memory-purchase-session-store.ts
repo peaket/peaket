@@ -24,6 +24,8 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
   readonly #holds = new Map<string, Map<string, string[]>>();
   /** 첫 홀드 표시 fh가 쓰인 세션 */
   readonly #firstHeld = new Set<string>();
+  /** 좌석 화면 행동 요약을 낸 세션(bs 칸) */
+  readonly #behaviorClaimed = new Set<string>();
   /** Paying 표시 pay가 쓰인 세션(BUILD_ORDER PRF-138) */
   readonly #paying = new Set<string>();
 
@@ -152,6 +154,15 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
       this.#paying.delete(jti);
       s.idleUntilMs = now + SESSION_IDLE_MS;
     }
+    return true;
+  }
+
+  async claimSeatBehavior(jti: string, _o?: SeatCallOptions): Promise<boolean | null> {
+    assertJti(jti);
+    this.#expire(jti, this.clock.now());
+    if (!this.#sessions.has(jti)) return null;
+    if (this.#behaviorClaimed.has(jti)) return false;
+    this.#behaviorClaimed.add(jti);
     return true;
   }
 

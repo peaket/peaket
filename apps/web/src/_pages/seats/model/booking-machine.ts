@@ -127,6 +127,21 @@ export function holdOutcome(e: { status?: number; type?: string; extensions?: Re
   }
 }
 
+/** 첫 직접 선택 홀드의 행동 요약. 그 요청의 멱등 키와 값이다 */
+export interface FirstHoldBehavior {
+  key: string;
+  behavior: object | undefined;
+}
+
+/**
+ * 좌석 화면 행동 요약은 구매 세션의 첫 직접 선택 홀드 본문에만 싣는다(docs/features/seat-hold.md §3 '좌석 화면 행동 요약', ADR-0171 결정 4).
+ * 같은 멱등 키의 재전송은 같은 값을 다시 싣고, 좌석이 바뀌어 새 키가 되면 싣지 않는다
+ */
+export function behaviorForHold(first: FirstHoldBehavior | null, key: string, take: () => object | undefined): { first: FirstHoldBehavior; behavior: object | undefined } {
+  const f = first ?? { key, behavior: take() };
+  return { first: f, behavior: f.key === key ? f.behavior : undefined };
+}
+
 /** 멱등 키: 같은 좌석을 다시 시도하면 같은 키, 좌석이 바뀌면 새 키(docs/frontend.md §4.1 '멱등키', 서버 지문은 정렬한 seatIds) */
 export function holdIdempotencyKey(prev: { key: string; seats: string } | null, seatIds: readonly string[], make: () => string): { key: string; seats: string } {
   const seats = [...seatIds].sort().join(',');

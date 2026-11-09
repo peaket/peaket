@@ -10,6 +10,7 @@ import type { AdmissionKeys } from './domain/admission-token.js';
 import { MemorySeatMap } from './adapters/memory-seat-map.js';
 import { MemorySeatStore } from './adapters/memory-seat-store.js';
 import { RecordingHoldAttempts } from './adapters/recording-hold-attempts.js';
+import { SEAT_BEHAVIOR, type SeatBehaviorReporter } from './application/seat-behavior.js';
 import { RedisSeatStore, SEAT_REDIS } from './adapters/redis-seat-store.js';
 import { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 import { ExpirySweeper, type ExpirySweeperDeps } from './application/expiry-sweeper.js';
@@ -72,12 +73,12 @@ export type InventoryModuleOptions = (
    * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop).
    * onHoldsExpired는 만료로 푼 홀드를 알리는 고리다(BUILD_ORDER PRF-172. 운영은 purchase DB가 있을 때 booking OrderExpiry.onHoldsExpired를 잇는다)
    */
-  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
+  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
   /**
    * 시험: 넘기지 않은 것은 새로 만든다(저장소 MemorySeatStore(주입 Clock), 좌석맵 MemorySeatMap, 시도 기록 RecordingHoldAttempts, 지표 버림).
    * 만료 반복은 만들지 않는다(시험은 ExpirySweeper를 직접 만들어 손으로 tick한다)
    */
-  | { storage: 'memory'; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals }
+  | { storage: 'memory'; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
 ) & {
   /** 스냅샷 API·홀드 기록. 없으면 스냅샷 경로를 열지 않는다(기존 시험·조립) */
   admission?: AdmissionOptions;
@@ -91,6 +92,7 @@ export type InventoryModuleOptions = (
 export class InventoryModule {
   static register(o: InventoryModuleOptions): DynamicModule {
     const signals: Provider = { provide: SEAT_SIGNALS, useValue: o.signals ?? noSeatSignals };
+    const seatBehavior: Provider[] = o.seatBehavior ? [{ provide: SEAT_BEHAVIOR, useValue: o.seatBehavior }] : [];
     // 메모리 부족 경고 문: 받는 층과 만료 반복이 나눈다(파드마다 1초에 한 줄, L6)
     const oomGate: Provider = { provide: OOM_WARN_GATE, useFactory: (clock: Clock) => new LogGate(clock), inject: [CLOCK] };
     const optionalLogger = { token: PLATFORM_LOGGER, optional: true };
@@ -169,7 +171,7 @@ export class InventoryModule {
     return {
       module: InventoryModule,
       controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
-      providers: [HoldSeats, ...storage, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      providers: [HoldSeats, ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
       exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
     };
   }

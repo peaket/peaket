@@ -3,7 +3,7 @@
 // 화면 값은 상태 기계(src/live/controller.ts)가 낸다(ADR-0208): lobby-join(not-yet·checking·failed), lobby(countdown·reveal·calculating·delayed),
 // 로비 참가의 다른 기기·다른 기기에서 취소됨, ⑧ 희망 조건(자동 배정 공연)과 ⑩ [차례 알림 받기](ADR-0212). ⑤ 운영 공지는 OPS-410이 잇는다(ADR-0208 결정 8).
 import { KEEP_LOBBY, LEGAL_POL024, LOBBY_PRINCIPLE, ORDERING_TEXT, AUTO_ASSIGN_TEXT, REVEAL_GUIDE } from '../copy';
-import { links } from '../config';
+import { HIDDEN_LINK_PATH, links } from '../config';
 import type { LiveCtx } from '../ctx';
 import { cx, h, ic } from '../dom';
 import { clock } from '../queue-math';
@@ -12,6 +12,7 @@ import { steadyNow } from '../live/steady.ts';
 import { focusHeader, offlineStrip } from './shell';
 import { prefEditor } from './preference';
 import { defaultPreference } from '../live/preference.ts';
+import { hiddenLinkHref } from '../live/hidden-link.ts';
 
 const hhmm = (ms: number): string => {
   const d = new Date(ms + 9 * 3600_000);
@@ -33,6 +34,8 @@ export function lobbyScreen(c: LiveCtx): HTMLElement[] {
   const main = h('main', { class: 'page-main q-main q-lobby', id: 'main' });
   const frame = h('div', { class: 'col q-frame q-lobby-frame' }, h('h1', { class: 'sr-only', tabindex: '-1' }, '오픈 전 대기실(로비)'));
   main.append(frame);
+  const extraHref = hiddenLinkHref(ev.id, HIDDEN_LINK_PATH);
+  if (extraHref) frame.append(h('a', { href: extraHref, hidden: true, tabindex: '-1', rel: 'nofollow' }, '전체 일정'));
 
   if (v.state === 'cancelled-elsewhere') {
     frame.append(

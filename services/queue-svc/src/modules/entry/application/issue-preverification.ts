@@ -2,9 +2,10 @@
 // 만료 전 갱신은 최초 발급 시각과 여정 ID(jny)를 옮기고, 그 밖은 새 여정이다. 위험 판정을 받지 못하면 축소 운영(사람 확인 보류)으로 발급한다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
-import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, EVENT_SCHEDULES, type EventSchedules, noDegradedLimits, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
+import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, noDegradedLimits, noFirstVisitSignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
 import { PREVERIFY_TTL_MS, type PreverifyClaims } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
+import { firstVisitAtMs } from './first-visit.js';
 
 export interface PreverifyInput {
   accountId: string;
@@ -15,6 +16,8 @@ export interface PreverifyInput {
   body: { humanCheckToken?: string; deviceId?: string; preverifyToken?: string; behaviorSummary?: Record<string, unknown> };
   /** 게이트웨이가 넘긴 IP·ASN·UA·Client Hints(위험 판정 입력) */
   client?: RiskClient;
+  /** 최초 방문 쿠키 값(있을 때만) */
+  firstVisitCookie?: string;
 }
 
 export interface PreverifyResult {
@@ -31,6 +34,8 @@ export class IssuePreverification {
     @Inject(RISK) private readonly risk: RiskPort,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(DEGRADED_LIMITS) private readonly limits: DegradedLimits = noDegradedLimits,
+    @Optional() @Inject(FIRST_VISIT_COOKIES) private readonly firstVisit?: FirstVisitCookies,
+    @Optional() @Inject(FIRST_VISIT_SIGNALS) private readonly visitSignals: FirstVisitSignals = noFirstVisitSignals,
   ) {}
 
   async run(i: PreverifyInput): Promise<PreverifyResult> {
@@ -41,6 +46,8 @@ export class IssuePreverification {
     const carried = this.#carry(i, device, now);
     const jny = carried?.jny ?? uuidv7(this.clock);
     const i0 = carried?.i0 ?? now;
+
+    const firstVisitAt = firstVisitAtMs(this.firstVisit, i.firstVisitCookie, now, this.visitSignals);
 
     let verdict: RiskVerdict;
     try {
@@ -55,6 +62,7 @@ export class IssuePreverification {
         ...(i.body.humanCheckToken ? { humanCheckToken: i.body.humanCheckToken } : {}),
         ...(i.body.behaviorSummary ? { behaviorSummary: i.body.behaviorSummary } : {}),
         ...(i.client ? { client: i.client } : {}),
+        ...(firstVisitAt !== undefined ? { firstVisitAtMs: firstVisitAt } : {}),
       });
     } catch {
       // 오류·데드라인 넘김·차단기 열림은 축소 운영이다(docs/features/bot-defense.md §11). 진입은 막지 않는다

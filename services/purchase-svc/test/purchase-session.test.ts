@@ -121,6 +121,7 @@ function world(): World {
       return mem.advance(jti, seq);
     },
     markStarted: (jti) => mem.markStarted(jti),
+    claimSeatBehavior: async () => null,
     recordHold: (jti, holdId, seatIds) => mem.recordHold(jti, holdId, seatIds),
     end: (jti) => mem.end(jti),
     sweep: (jti) => mem.sweep(jti),

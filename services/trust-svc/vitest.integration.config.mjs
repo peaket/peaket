@@ -7,7 +7,10 @@ const src = (p) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: [{ find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') }],
+    alias: [
+      { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
+      { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+    ],
   },
   test: {
     // CI가 PEAKET_TEST_REPORT를 주면 JSON 보고서도 남긴다(ASVS 태그 리포트, BOT-162)

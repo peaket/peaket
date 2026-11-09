@@ -77,6 +77,13 @@ describe('NetworkScore', () => {
 });
 
 describe('AgeScore', () => {
+  test('[Q-T39] 쿠키없음은값없음이라0으로더해지고_갓받은쿠키만위험이다(소유자결정전의동작을고정한다,ADR-0249남는한계)', () => {
+    const noCookie = run('AgeScore', {});
+    const young = run('AgeScore', { firstVisitAtMs: NOW - 1 });
+    expect(noCookie).toMatchObject({ risk: null, missing: 'absent' });
+    expect(young).toMatchObject({ risk: 1 });
+  });
+
   test('쿠키·세션이없으면값없음이고_젊을수록위험이크다', () => {
     expect(run('AgeScore', {})).toMatchObject({ risk: null, missing: 'absent' });
     expect(run('AgeScore', { firstVisitAtMs: NOW - 500 })).toMatchObject({ risk: 1, reason: 'DEVICE_HISTORY' });

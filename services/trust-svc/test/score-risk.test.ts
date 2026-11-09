@@ -165,6 +165,41 @@ describe('기록과 응답 범위', () => {
     expect(w.recorder.records[0]!.missingScorers).toContain('HumanCheck');
   });
 
+  test('B-T17④_사전검증의행동신호는screen이EVENT_DETAIL이고_여정ID를싣는다', async () => {
+    const w = world();
+    await w.score.run(request());
+    expect(w.behaviors.records).toHaveLength(1);
+    expect(w.behaviors.records[0]).toMatchObject({ screen: 'EVENT_DETAIL', journeyId: JOURNEY, eventId: EVENT, pid: PID, deviceRef: DEVICE_REF, refMissing: false, netClass: 'OTHER', asn: 64512 });
+    expect(w.behaviors.records[0]!.features).toEqual(request().behavior);
+    expect(w.behaviors.records[0]!.eventKey).toBe(w.recorder.records[0]!.eventKey);
+  });
+
+  test('B-T17④_B-T13_로비입장의행동신호는screen이LOBBY이고_요약이없다', async () => {
+    const w = world();
+    await w.score.run(request({ context: 'LOBBY_ENTRY', behavior: undefined }));
+    expect(w.behaviors.records).toHaveLength(1);
+    expect(w.behaviors.records[0]).toMatchObject({ screen: 'LOBBY', journeyId: JOURNEY });
+    expect(w.behaviors.records[0]!.features).toBeUndefined();
+  });
+
+  test('B-T17③_로그인·추가검증제출은_행동신호를내지않는다', async () => {
+    const w = world();
+    await w.score.run(request({ context: 'LOGIN', journeyId: '', eventId: '', pid: '', humanCheckToken: '', shuffle: 'NONE', behavior: undefined }));
+    await w.score.run(request({ context: 'VERIFICATION', journeyId: '', behavior: undefined }));
+    expect(w.behaviors.records).toEqual([]);
+  });
+
+  test('B-T17_기기식별값이없거나_라벨키가없으면_행동신호의deviceRef를비우고refMissing을가른다', async () => {
+    const noDevice = world();
+    await noDevice.score.run(request({ deviceId: '' }));
+    expect(noDevice.behaviors.records[0]).toMatchObject({ refMissing: false });
+    expect(noDevice.behaviors.records[0]!.deviceRef).toBeUndefined();
+    const noKey = world({ deviceRef: () => undefined });
+    await noKey.score.run(request());
+    expect(noKey.behaviors.records[0]).toMatchObject({ refMissing: true });
+    expect(noKey.behaviors.records[0]!.deviceRef).toBeUndefined();
+  });
+
   test('B-T14_CHALLENGE면기기이력의보냄수와판정근거키를쓰고_ALLOW면쓰지않는다', async () => {
     const w = world();
     w.human.set('FAILED');

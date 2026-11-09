@@ -165,6 +165,13 @@ export const ARRIVAL_COOKIE_NAME = '__Host-peaket_arr';
 /** 엣지가 Degraded인데 서명 없이 원본으로 보낸 요청에 다는 머리. 값 unsigned(바깥이 보낸 같은 머리는 엣지가 지운다, ADR-0223) */
 export const ARRIVAL_UNSIGNED_HEADER = 'x-peaket-arrival';
 
+/** 최초 방문 쿠키 이름(__Host-: Domain 없음·Path=/·Secure, ASVS v5.0.0-3.3.3) */
+export const FIRST_VISIT_COOKIE_NAME = '__Host-peaket_fv';
+/** 발급 시각이 지금보다 이만큼 넘게 앞서면 없는 것으로 본다 [가정](도착 시각 쿠키와 같은 값) */
+export const FIRST_VISIT_FUTURE_MS = 5_000;
+/** 쿠키 수명 1년 [가정, wbs 3.2.1에서 확정]에 하루를 더한 값. 넘으면 없는 것으로 본다 */
+export const FIRST_VISIT_MAX_AGE_MS = 366 * 86_400_000;
+
 /** Cookie 머리에서 쿠키 값 하나를 찾는다(같은 이름이 여럿이면 앞의 것). 없으면 undefined */
 export function cookieValue(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;

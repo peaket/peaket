@@ -6,10 +6,11 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- 구간 2: BOT-055 → 이어서 BUILD_ORDER 차례, 구간 끝에 정리 목록. HOT-012 엣지 KeyValueStore·S3 실제 어댑터와 권한은 AWS 계정이 생겨 배포하는 단계까지 건너뛴다(ADR-0234) → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 미룸이라 건너뛴다). 구간 1의 정리 목록과 BOT-122(패스키), 구간 2의 BOT-044(2026-11-05)·HOT-010·HOT-011(2026-11-06)·HOT-020·HOT-030·HOT-040 ①·HOT-050·HOT-060·BOT-047·HOT-041·HOT-061·HOT-042·BAS-260·BOT-050(2026-11-09)은 끝냈다. 건너뛴 구간 1 단계: BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
+- 구간 2: BOT-060 → 이어서 BUILD_ORDER 차례, 구간 끝에 정리 목록. HOT-012 엣지 KeyValueStore·S3 실제 어댑터와 권한은 AWS 계정이 생겨 배포하는 단계까지 건너뛴다(ADR-0234) → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 미룸이라 건너뛴다). 구간 1의 정리 목록과 BOT-122(패스키), 구간 2의 BOT-044(2026-11-05)·HOT-010·HOT-011(2026-11-06)·HOT-020·HOT-030·HOT-040 ①·HOT-050·HOT-060·BOT-047·HOT-041·HOT-061·HOT-042·BAS-260·BOT-050·BOT-055(2026-11-09)은 끝냈다. 건너뛴 구간 1 단계: BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 미룬다(OPEN[23] (다), 소유자 결정 2026-11-05). 이 세션은 만들지 않는다(2026-11-03 안전 분류기에 막힘). K6 측정(BOT-170) 전에 소유자가 만들 길을 정한다.
 
 ## 구간 끝 정리 목록
+- BOT-055 브라우저 확인: 좌석 화면을 열 때마다 CSP 위반 `script-src eval`이 1건 생긴다. 화면 묶음의 zod 4가 `Function("")`로 평가 가능 여부를 시험하기 때문이다. 콘솔에 찍히지 않고 동작도 막히지 않는다(zod의 `jitless` 설정을 볼 것, apps/web 좌석 화면).
 - HOT-042 브라우저 확인: 검증 화면의 토큰 해시 칸에서 Enter를 눌러도 실행되지 않는다(`ShuffleVerifier.tsx`의 `onSubmit`이 기본 동작만 막는다, HOT-050부터). 입력 칸의 Enter로 다시 계산이 돌게 한다.
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
 - HOT-011: queue-svc 통합 전체 실행 때만 시간에 기댄 묶음 시험 Q-T52③(test/batch-cases.ts)이 한 번 흔들렸다(따로 돌리면 통과). 부하가 겹쳐 시간이 밀린 것으로 보이나 원인은 확인하지 않았다.
@@ -67,3 +68,4 @@
 - 2026-11-09 BAS-260 사람 쪽 측정 자료 도구(R-420, V-T25·V-T45, ADR-0246): `tools/perf-ledger/human_data.py`(공개 자료 변환·사람 단위 나눔·사전 등록·`verify`), `collect.py`의 원천 칸과 판정 게이트. 실제 공개 자료(Aalto)는 소유자 허락 전이라 받지 않았고 합성 표본으로만 시험했다. 자료 고정값이 없어 지금 `public` 측정은 합격을 낼 수 없다. 모의 사람 생성기는 `D:\peaket-bots/mock-human`에 커밋하지 않고 두었다. 공개 장부에는 값 없이 소금 넣은 해시만 남긴다(ADR-0246, 소유자 확인 대기). 새 맥락 리뷰 높음 4·중간 8과 재검토 높음 2·중간 4를 고쳤다.
 - 2026-11-09 BOT-050 trust-svc 첫 판정 파이프라인(R-424, B-T 등, ADR-0248): 새 서비스 `services/trust-svc`(점수기 여섯, Turnstile 즉시 검증, 기기·ASN 신뢰도), queue-svc `GrpcTrustRisk`와 축소 운영 한도(5회/10초, 429 `queue-request-limited`), identity 로그인 판정(세션 커밋 뒤 판정, 못 받거나 근거가 없으면 `UNKNOWN`). 기준값·가중치는 저장소에 없다. 새 맥락 리뷰 높음 1·중간 4·낮음 9와 재검토 중간·낮음을 고쳤다. 소유자 몫: ASN 분류표의 S3 읽기는 `@aws-sdk/client-s3` 허락이 필요해 파일 읽기로 대신했고, 분류표의 원천 자료를 정해야 한다. 비공개 규칙 파일에 `params.device.newDevicesPerDay`·`params.behavior.minPointerMoves`·`minWindowMs`가 꼭 있어야 한다. queue-svc 통합 전체 실행의 Q-T29·Q-T45① 2건은 파일 단독으로는 통과(원인 못 잡음, 다른 컨테이너와 겹침).
 - 2026-11-09 CI 고침(R-426): BOT-050이 `packages/platform`을 고쳐 그 시험이 CI에서 돌자, 계약 전수 비교 시험(DT38)이 몰린 러너에서 60초 한도를 넘겼다(f7d7b9a8, 870e6224). 로컬에서는 약 5초다. 한도를 180초로 늘렸다.
+- 2026-11-09 BOT-055 최초 방문 쿠키·행동 신호·허니팟(R-429, Q-T39·Q-T40·B-T17·B-T19·S-T36, ADR-0249): 시청자 응답 함수 `services/queue-svc/edge/preverify-viewer-response.js`와 쿠키 확인, 공용 텔레메트리 버퍼 `packages/platform/src/telemetry-sink.ts`, trust-svc 판정 기록·행동 신호·허니팟 처리기, 좌석 첫 홀드의 행동 요약. 결제 화면 요약은 PRF-191·HOT-358이 잇는다. 새 맥락 리뷰 높음 3·중간 5·낮음과 재검토를 고쳤고, 브라우저 확인은 docs/review/browser-check/BOT-055.md(Playwright). 소유자 질문은 PROGRESS OPEN에 적었다.

@@ -1,4 +1,5 @@
 // 시험·로컬용 판정 피처 저장소. 운영은 redis-feature-store.ts. 지난 30일 규칙은 같게 둔다.
+import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
 import { FEATURE_NAMES, type FeatureName, type FeatureRead, type FeatureStore, type VerdictEvidence } from '../domain/ports.js';
 import type { DeviceHistory } from '../domain/types.js';
 
@@ -12,7 +13,9 @@ export class MemoryFeatureStore implements FeatureStore {
   /** 기기 → `{kind}:{day}` → 수 */
   readonly #history = new Map<string, Map<string, number>>();
   readonly #blocked = new Set<string>();
-  readonly #honeypot = new Set<string>();
+  readonly #honeypot = new Map<string, { atMs: number; eventId: string }>();
+  /** pid → 회차 → 기록한 시각 */
+  readonly #honeypotEvents = new Map<string, Map<string, number>>();
   readonly #evidence = new Map<string, VerdictEvidence>();
   readonly #newDevices = new Map<string, number>();
   readonly #failing = new Set<FeatureName>();
@@ -68,6 +71,21 @@ export class MemoryFeatureStore implements FeatureStore {
     this.#bump(i.deviceRef, i.passed ? 'passed' : 'failed', i.now);
   }
 
+  async recordHoneypot(i: { pid: string; eventId: string; now: number }): Promise<boolean> {
+    if (this.#failingWrites) throw new Error('피처 저장소 쓰기 오류');
+    this.#honeypot.set(i.pid, { atMs: i.now, eventId: i.eventId });
+    if (i.eventId === '') return false;
+    let events = this.#honeypotEvents.get(i.pid);
+    if (!events) {
+      events = new Map();
+      this.#honeypotEvents.set(i.pid, events);
+    }
+    for (const [e, at] of events) if (i.now - at >= DAY_MS) events.delete(e);
+    if (events.has(i.eventId) || events.size >= HONEYPOT_EVENTS_PER_PID) return false;
+    events.set(i.eventId, i.now);
+    return true;
+  }
+
   #bump(ref: string, kind: keyof DeviceHistory, now: number): void {
     let days = this.#history.get(ref);
     if (!days) {
@@ -84,7 +102,26 @@ export class MemoryFeatureStore implements FeatureStore {
   }
 
   markHoneypot(pid: string): void {
-    this.#honeypot.add(pid);
+    this.#honeypot.set(pid, { atMs: 0, eventId: '' });
+  }
+
+  /** 허니팟 적중 표시의 값 */
+  async honeypotOf(pid: string): Promise<{ atMs: number; eventId: string } | undefined> {
+    return this.#honeypot.get(pid);
+  }
+
+  /** 기록을 비운다(시험 사이) */
+  clear(): void {
+    this.#accounts.clear();
+    this.#history.clear();
+    this.#blocked.clear();
+    this.#honeypot.clear();
+    this.#honeypotEvents.clear();
+    this.#evidence.clear();
+    this.#newDevices.clear();
+    this.#failing.clear();
+    this.#failingAll = false;
+    this.#failingWrites = false;
   }
 
   /** 지난 30일 사람 수(pid를 주면 그 사람을 넣어 센 값) */

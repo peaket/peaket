@@ -12,7 +12,7 @@ import { IssuePreverification } from './application/issue-preverification.js';
 import { JoinLobby } from './application/join-lobby.js';
 import { LeaveQueue } from './application/leave-queue.js';
 import { ShuffleCommits } from './application/shuffle-commits.js';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
 import { QueueController } from './inbound/queue.controller.js';
 
 /** waitRedis: RB-05 복제 확인(WAIT) 전용 연결(ADR-0186). 없으면 공유 연결 */
@@ -23,6 +23,8 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   /** 도착 시각 쿠키 읽기(키 환경 값이 없으면 넘기지 않는다: 쿠키 없는 일반 진입뿐이다, ADR-0223) */
   arrivals?: ArrivalCookies;
   arrivalSignals?: ArrivalSignals;
+  firstVisit?: FirstVisitCookies;
+  firstVisitSignals?: FirstVisitSignals;
   /** 시드 봉인(운영 KMS 어댑터 전에는 local·ci·demo의 시험 봉인만, 없으면 공시 때 503) */
   sealer?: SeedSealer;
   lobbySignals?: LobbySignals;
@@ -71,6 +73,8 @@ export class EntryModule {
         ...(o.leaveSignals ? [{ provide: LEAVE_SIGNALS, useValue: o.leaveSignals }] : []),
         ...(o.arrivals ? [{ provide: ARRIVAL_COOKIES, useValue: o.arrivals }] : []),
         ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),
+        ...(o.firstVisit ? [{ provide: FIRST_VISIT_COOKIES, useValue: o.firstVisit }] : []),
+        ...(o.firstVisitSignals ? [{ provide: FIRST_VISIT_SIGNALS, useValue: o.firstVisitSignals }] : []),
       ],
       exports: [PurgeWithdrawnKeys, ShuffleCommits],
     };

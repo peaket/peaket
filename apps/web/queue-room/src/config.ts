@@ -24,6 +24,9 @@ export const HUMAN_CHECK = {
   siteKey: typeof env.VITE_PEAKET_TURNSTILE_SITEKEY === 'string' ? env.VITE_PEAKET_TURNSTILE_SITEKEY : '',
 };
 
+/** 로비의 숨긴 링크 경로(저장소에 두지 않는다, 빌드 값 없으면 그리지 않는다, ADR-0249) */
+export const HIDDEN_LINK_PATH: string | undefined = typeof env.VITE_PEAKET_HONEYPOT_PATH === 'string' ? env.VITE_PEAKET_HONEYPOT_PATH : undefined;
+
 export const links = {
   home: () => `${WEB}/`,
   /** 로그아웃 처리기(웹 앱 서버, 같은 출처). 개발 서버는 vite.config.ts가 흉내 낸다(ADR-0208 결정 7) */

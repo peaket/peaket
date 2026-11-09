@@ -36,6 +36,7 @@ import {
   OPEN_SESSION_LUA,
   PAY_SESSION_LUA,
   RECORD_HOLD_LUA,
+  CLAIM_SEAT_BEHAVIOR_LUA,
   SWEEP_SESSION_LUA,
 } from './purchase-session-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
@@ -54,6 +55,7 @@ const ADVANCE = redisScript(ADVANCE_SESSION_LUA);
 const APPEND = redisScript(APPEND_SESSION_STARTED_LUA);
 const MARK = redisScript(MARK_SESSION_STARTED_LUA);
 const RECORD = redisScript(RECORD_HOLD_LUA);
+const CLAIM_BEHAVIOR = redisScript(CLAIM_SEAT_BEHAVIOR_LUA);
 const END = redisScript(END_SESSION_LUA);
 const SWEEP = redisScript(SWEEP_SESSION_LUA);
 const PAY = redisScript(PAY_SESSION_LUA);
@@ -175,6 +177,15 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
     if (r === '1') return true;
     if (r === '0') return false;
     throw new Error(`홀드 기록 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
+  async claimSeatBehavior(jti: string, o?: SeatCallOptions): Promise<boolean | null> {
+    assertJti(jti);
+    const r = str(await guard(this.redis.evalScript(CLAIM_BEHAVIOR, [sessionKeys.session(jti)], [], o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {})));
+    if (r === '-1') return null;
+    if (r === '1') return true;
+    if (r === '0') return false;
+    throw new Error(`행동 요약 표시 Lua가 모르는 값을 돌려줬다: ${r}`);
   }
 
   async markStarted(jti: string): Promise<boolean> {

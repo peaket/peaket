@@ -2,7 +2,7 @@
 import { ApiError, OPERATIONS, type ApiClient, type Operation } from '@peaket/api-client';
 import { PurchaseKeyError, type PurchaseSigner } from '@peaket/api-client/purchase';
 import { createActor } from 'xstate';
-import { bookingMachine, holdIdempotencyKey, holdOutcome, type BookingEvent, type SeatPick } from './booking-machine';
+import { behaviorForHold, bookingMachine, holdIdempotencyKey, holdOutcome, type BookingEvent, type FirstHoldBehavior, type SeatPick } from './booking-machine';
 
 export interface HeldSeat {
   seatId: string;
@@ -45,6 +45,8 @@ export interface BookingDeps {
   toggleOnMap(seatIndex: number): void;
   refreshToken(): Promise<'ok' | 'rejected' | 'unavailable'>;
   limit: number;
+  /** 첫 직접 선택 홀드에 실을 행동 요약(openapi BehaviorSummary). 없으면 싣지 않는다 */
+  behaviorSummary?(): object | undefined;
   /** 홀드를 저장한다(결제 화면이 읽는다) */
   saveHold(h: HoldResult): void;
   /** 저장한 홀드를 지운다(만료·나가기) */
@@ -69,6 +71,7 @@ export function createBooking(d: BookingDeps) {
   const indexes = new Map<string, number>();
   let idem: { key: string; seats: string } | null = null;
   let held: HeldState | null = null;
+  let firstBehavior: FirstHoldBehavior | null = null;
   let autoFailure: AutoFailure | null = null;
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((f) => f());
@@ -146,7 +149,9 @@ export function createBooking(d: BookingDeps) {
       if (s.value !== 'holding') return;
       const seatIds = s.context.picks.map((p) => p.seatId).sort();
       idem = holdIdempotencyKey(idem, seatIds, () => crypto.randomUUID());
-      await request({ seatIds }, idem.key);
+      const b = behaviorForHold(firstBehavior, idem.key, () => d.behaviorSummary?.());
+      firstBehavior = b.first;
+      await request({ seatIds, ...(b.behavior ? { behavior: b.behavior } : {}) }, idem.key);
     },
     /** 자동 배정 공연: 희망 조건으로 첫 홀드를 보낸다 */
     async autoHold(wish: Wish | null) {

@@ -564,6 +564,14 @@ export interface PurchaseSessionStore {
   recordHold(jti: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<boolean | null>;
 
   /**
+   * 좌석 화면 행동 요약을 냈다는 표시 bs를 처음 한 번만 잡는다(한 원자 연산, ADR-0249 결정 6). 세션이 없으면 아무것도 만들지 않는다.
+   * @returns 이번에 처음 잡았으면 true, 이미 있으면 false, 세션이 없으면 null
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   */
+  claimSeatBehavior(jti: string, o?: SeatCallOptions): Promise<boolean | null>;
+
+  /**
    * 구매 세션을 끝낸다(BUILD_ORDER PRF-138, 한 원자 연산): 세션 상태 s:session:{jti}를 지우고(재사용 차단 표지는 남긴다) 그 세션의 회차 ID·여정 ID를 돌려준다.
    * 세션이 없으면 아무것도 만들지 않고 null이다(두 번 불러도 한 번만 끝난다). Active·Paying 모두 끝낸다. 끝낸 뒤 일련번호 올리기는 거짓이다.
    * @throws RangeError jti가 키 조각 모양이 아님
@@ -654,6 +662,25 @@ export interface HoldAttemptRecord {
   /** HoldSeats.execute 시작부터 결과까지 걸린 시간(주입 Clock의 단조 시계 차이, ms, 0 이상) */
   latencyMs: number;
 }
+
+/** 좌석·결제 화면의 행동 신호 한 건(asyncapi BehaviorSignal, screen SEAT·PAYMENT). netClass·asn·기기 가명은 싣지 않는다 */
+export interface BehaviorSignalRecord {
+  eventKey: string;
+  screen: 'SEAT' | 'PAYMENT';
+  pid: string;
+  eventId: string;
+  journeyId: string;
+  /** 경로 스키마가 칸을 닫아 둔 요약(openapi BehaviorSummary) */
+  features: Record<string, unknown>;
+  tsMs: number;
+}
+
+export const BEHAVIOR_SIGNALS = Symbol('purchase.BehaviorSignals');
+/** 행동 신호 내보내기(텔레메트리라 버려질 수 있다). 부른 쪽을 막거나 던지지 않는다 */
+export interface BehaviorSignals {
+  record(r: BehaviorSignalRecord): void;
+}
+export const discardBehaviorSignals: BehaviorSignals = { record: () => undefined };
 
 export const HOLD_ATTEMPTS = Symbol('purchase.HoldAttempts');
 /** 홀드 시도 기록(텔레메트리라 버려질 수 있다). 부른 쪽을 막거나 던지지 않는다 */

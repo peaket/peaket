@@ -34,13 +34,16 @@ import {
   type SeatStore,
 } from '../domain/ports.js';
 import { HoldError, type HoldErrorCode, type HoldErrorDetails, storeUnavailableError } from './hold-error.js';
+import { SEAT_BEHAVIOR, type SeatBehaviorReporter } from './seat-behavior.js';
 
-/** 경로 스키마가 확인한 본문에서 쓰임새가 보는 칸(나머지 칸 behavior·clientEphemeralPublicKey는 PRF-130 ①에서 보지 않고 버린다) */
+/** 경로 스키마가 확인한 본문에서 쓰임새가 보는 칸(clientEphemeralPublicKey는 PRF-130 ①에서 보지 않고 버린다) */
 export interface HoldBody {
   /** 직접 선택 좌석 ID(1~10개, 겹침 없음, 좌석 ID 모양은 경로 스키마가 확인했다) */
   seatIds?: readonly string[];
   /** 자동 배정 희망 조건(모양만 확인했다). PRF-130 ①은 받지 않는다 */
   auto?: object;
+  /** 좌석 화면 행동 요약(모양은 경로 스키마가 확인했다. 홀드 판정에 쓰지 않는다, BUILD_ORDER BOT-055) */
+  behavior?: Record<string, unknown>;
 }
 
 export interface HoldCommand {
@@ -50,6 +53,8 @@ export interface HoldCommand {
   accountId: string;
   /** 플랫폼 구매 요청 인증 훅이 확인한 구매 세션 참조(@CurrentPurchaseSession()) */
   purchaseSessionId: string;
+  /** 사람 식별값(Principal.pid). 없으면 행동 요약을 내지 않는다 */
+  pid?: string;
   /** 플랫폼 멱등 모듈이 형식을 확인한 키(@IdempotencyRequest().key, 소문자 UUID v4). 플랫폼의 requestHash는 쓰지 않는다 */
   idempotencyKey: string;
   body: HoldBody;
@@ -87,6 +92,8 @@ export class HoldSeats {
     @Optional() @Inject(SESSION_HOLDS) private readonly holds?: SessionHolds,
     /** 서비스 로거(구매 세션 홀드 기록 실패 경고, 선택) */
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
+    /** 좌석 화면 행동 요약(BUILD_ORDER BOT-055). 주입하지 않으면 내지 않는다 */
+    @Optional() @Inject(SEAT_BEHAVIOR) private readonly seatBehavior?: SeatBehaviorReporter,
   ) {}
 
   /** 좌석 Redis 일시 장애(SeatStoreUnavailable)로 503을 낼 때: 미룸 지표 seat_hold_deferred_total{reason="store_unavailable"}을 올리고 503 오류를 돌려준다(PRF-143) */
@@ -214,6 +221,9 @@ export class HoldSeats {
     // 2 본문(기록 없음)
     if (c.body.auto !== undefined) throw new HoldError('AUTO_NOT_SUPPORTED', '자동 배정은 아직 받지 않는다(wbs 2.5.4)');
     if (requested.length === 0) throw new HoldError('SEATS_REQUIRED', '본문에 seatIds가 없다');
+
+    // 좌석 화면 행동 요약: 홀드 결과와 상관없이 세션마다 처음 것 하나만 낸다(기다리지 않는다, 판정에 쓰지 않는다)
+    if (c.body.behavior !== undefined && c.pid !== undefined) this.seatBehavior?.report({ purchaseSessionId: c.purchaseSessionId, pid: c.pid, eventId: c.eventId, journeyId: session.journeyId, behavior: c.body.behavior });
 
     /** 좌석 Redis를 부르기 바로 전의 마감 확인: 모자라면 504(시도 기록 ERROR), 있으면 그 호출의 선택값(마감이 없으면 undefined) */
     const callOptions = (): SeatCallOptions | undefined => {

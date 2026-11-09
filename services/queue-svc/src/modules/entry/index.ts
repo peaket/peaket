@@ -1,9 +1,11 @@
 // 진입 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { HmacQueueTokens, QUEUE_TOKEN_KEY_ENV, QUEUE_TOKEN_KEY_PREVIOUS_ENV } from './adapters/hmac-tokens.js';
 export { HmacArrivalCookies } from './adapters/arrival-cookie.js';
+export { HmacFirstVisitCookies } from './adapters/first-visit-cookie.js';
+export { PromFirstVisitSignals } from './adapters/prom-first-visit-signals.js';
 export { KmsSeedSealer, kmsSealClient, SeedSealUnavailable, seedSealerFromEnv } from './adapters/kms-seed-sealer.js';
 export { PromArrivalSignals } from './adapters/prom-arrival-signals.js';
-export type { ArrivalCookies, ArrivalSignals } from './domain/ports.js';
+export type { ArrivalCookies, ArrivalSignals, FirstVisitCookies, FirstVisitSignals } from './domain/ports.js';
 export { MemoryEventSchedules } from './adapters/memory-entry-store.js';
 export { guard, keys, QUEUE_REDIS } from './adapters/redis-entry-store.js';
 export { RedisEventSchedules } from './adapters/redis-event-schedules.js';

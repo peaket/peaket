@@ -123,6 +123,13 @@ redis.call('HSET', KEYS[1], 'h:' .. ARGV[1], ARGV[2])
 return redis.call('HSETNX', KEYS[1], 'fh', '1')
 `;
 
+// ── 좌석 화면 행동 요약 표시(CLAIM_SEAT_BEHAVIOR_LUA, BUILD_ORDER BOT-055, ADR-0249 결정 6) ──
+// KEYS: 1 세션 상태 s:session:{jti}. 세션이 없으면 아무것도 만들지 않고 -1. 있으면 HSETNX bs '1'의 결과(처음이면 1, 이미 있으면 0)를 돌려준다.
+export const CLAIM_SEAT_BEHAVIOR_LUA = `#!lua
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+return redis.call('HSETNX', KEYS[1], 'bs', '1')
+`;
+
 // ── 구매 세션 종료와 정리(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리') ───────────────────────
 // 모두 첫 줄이 `#!lua`이고 allow-oom 표시가 없다. 시각은 Redis TIME을 한 번 읽은 값(밀리초)이다.
 //

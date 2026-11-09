@@ -2,7 +2,7 @@
 import { fakeClock, type FakeClock } from '@peaket/platform';
 import { MemoryFeatureStore } from '../src/modules/scoring/adapters/memory-feature-store.js';
 import { ScoreRisk } from '../src/modules/scoring/application/score-risk.js';
-import type { HumanCheckPort, HumanCheckRequest, TrustSignals, VerdictRecord, VerdictRecorder } from '../src/modules/scoring/domain/ports.js';
+import type { BehaviorRecord, BehaviorRecorder, HumanCheckPort, HumanCheckRequest, TrustSignals, VerdictRecord, VerdictRecorder } from '../src/modules/scoring/domain/ports.js';
 import { parseRuleSet, type RuleSet } from '../src/modules/scoring/domain/rules.js';
 import type { Scorer } from '../src/modules/scoring/domain/scorers.js';
 import type { HumanCheckResult, NetClass, ScoreRequest } from '../src/modules/scoring/domain/types.js';
@@ -64,6 +64,7 @@ export function recordingSignals(): TrustSignals & { seen: string[] } {
     hardSignal: (h) => seen.push(`hard:${h}`),
     featureFailed: (f) => seen.push(`feature:${f}`),
     afterFailed: (w) => seen.push(`after:${w}`),
+    honeypotHit: (signedIn) => seen.push(`honeypot:${signedIn}`),
   };
 }
 
@@ -72,12 +73,18 @@ export function recordingRecorder(): VerdictRecorder & { records: VerdictRecord[
   return { records, record: (r) => void records.push(r) };
 }
 
+export function recordingBehaviors(): BehaviorRecorder & { records: BehaviorRecord[] } {
+  const records: BehaviorRecord[] = [];
+  return { records, behavior: (r) => void records.push(r) };
+}
+
 export interface World {
   clock: FakeClock;
   human: ReturnType<typeof recordingHuman>;
   features: MemoryFeatureStore;
   signals: ReturnType<typeof recordingSignals>;
   recorder: ReturnType<typeof recordingRecorder>;
+  behaviors: ReturnType<typeof recordingBehaviors>;
   score: ScoreRisk;
   /** 응답 뒤로 미룬 일을 끝까지 기다린다 */
   flush(): Promise<void>;
@@ -89,6 +96,7 @@ export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; 
   const features = new MemoryFeatureStore();
   const signals = recordingSignals();
   const recorder = recordingRecorder();
+  const behaviors = recordingBehaviors();
   const pending: Promise<unknown>[] = [];
   const score = new ScoreRisk({
     rules: { current: () => (o.rules === null ? null : (o.rules ?? SYNTHETIC_RULES)), intensity: () => 'BASE' },
@@ -97,6 +105,7 @@ export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; 
     devices: { ref: (id) => (o.deviceRef ? o.deviceRef() : id === DEVICE_ID ? DEVICE_REF : `k1.ref-of-${id}`) },
     asn: { classify: (asn) => (o.netClass ? o.netClass(asn) : 'OTHER') },
     recorder,
+    behaviors,
     signals,
     clock,
     after: (w) => void pending.push(w()),
@@ -108,6 +117,7 @@ export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; 
     features,
     signals,
     recorder,
+    behaviors,
     score,
     flush: async () => {
       await Promise.all(pending.splice(0));

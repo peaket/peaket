@@ -6,6 +6,7 @@ import {
   type AdmissionOptions,
   type ExpirySweeperDeps,
   type HoldAttempts,
+  type SeatBehaviorReporter,
   InventoryModule,
   type PurchaseSessionAccess,
   type SeatMap,
@@ -38,8 +39,8 @@ export class AppModule implements NestModule {
    */
   static register(
     o: (
-      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
-      | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals }
+      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
+      | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
     ) & {
       sessions: PurchaseSessionAccess;
       /** 스냅샷 API·홀드 기록(BUILD_ORDER PRF-137). 없으면 스냅샷 경로를 열지 않는다 */
@@ -65,6 +66,7 @@ export class AppModule implements NestModule {
             ...(o.admission ? { admission: o.admission } : {}),
             ...(o.seatSales ? { seatSales: o.seatSales } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
+            ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
           })
         : InventoryModule.register({
@@ -76,6 +78,7 @@ export class AppModule implements NestModule {
             ...(o.seatMap ? { seatMap: o.seatMap } : {}),
             ...(o.attempts ? { attempts: o.attempts } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
+            ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
           });
     return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : [])] };
   }

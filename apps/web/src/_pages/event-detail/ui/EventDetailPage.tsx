@@ -11,8 +11,10 @@ import type { ReactNode } from 'react';
 import { SEAT_MODE_LABEL, SORT_MODE_LABEL } from '@/entities/production';
 import { CopyTextButton, ShareButton } from '@/features/copy-share';
 import { GENRES, searchHref } from '@/shared/config/genres';
+import { hiddenLinkHref } from '@/shared/config/hidden-link';
 import { SITE_ORIGIN } from '@/shared/config/origins';
 import { cx } from '@/shared/lib/cx';
+import { hiddenLink } from '@/shared/ui/hidden-link';
 import { derivativeUrl } from '@/shared/lib/image-loader';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
 import { AppShell } from '@/widgets/app-shell';
@@ -56,6 +58,7 @@ export async function EventDetailPage({ params }: Props) {
   if (r.kind === 'suspended') return <SuspendedNotice />;
   const d = r.detail;
   const path = `/events/${d.eventId}`;
+  const extraHref = hiddenLinkHref(d.eventId);
   const loginHref = `/login?next=${encodeURIComponent(path)}`;
   const sort = SORT_NOTICE[d.sortMode];
   // 계약의 장르는 정본 이름(한글)이고 검색 주소는 영문 키다(docs/features/search.md §5.4)
@@ -98,6 +101,7 @@ export async function EventDetailPage({ params }: Props) {
               <main className="page-main pb-6 lg:pb-0" id="main" tabIndex={-1}>
                 <div className="mx-auto w-full max-w-[1280px] lg:grid lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
                   <div className="col min-w-0 lg:col-span-8">
+                    {extraHref ? hiddenLink(extraHref) : null}
                     <Hero d={d} booking={booking} loginHref={loginHref} />
                     <SectionTabs items={tabs} initial="sec-info" />
 

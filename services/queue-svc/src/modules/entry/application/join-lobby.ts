@@ -5,9 +5,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ALGORITHM, DRAND_CHAIN, drandRoundTimeMs } from '@peaket/shuffle';
-import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noDegradedLimits, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
+import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LOBBY_SIGNALS, type LobbySignals, noDegradedLimits, noFirstVisitSignals, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
 import { BATCH_SPREAD_SEC, LOBBY_UNLOCK_SPREAD_MS, lobbyOpensAtOf, PENDING_TTL_MS, type ReasonCategory, saleEndOf, SHUFFLE_PUBLISH_MS } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
+import { firstVisitAtMs } from './first-visit.js';
 import { ShuffleCommits } from './shuffle-commits.js';
 
 export interface JoinLobbyInput {
@@ -17,6 +18,8 @@ export interface JoinLobbyInput {
   /** pid 키 전환 기간의 옛 pid(X-User-Pid-Prev). 위험 판정의 사람 식별값은 옛 pid다 */
   pidPrev?: string;
   body: { humanCheckToken?: string; deviceId?: string };
+  /** 최초 방문 쿠키 값(있을 때만) */
+  firstVisitCookie?: string;
   /** 게이트웨이가 넘긴 IP·ASN·UA·Client Hints(위험 판정 입력) */
   client?: RiskClient;
 }
@@ -47,6 +50,8 @@ export class JoinLobby {
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(LOBBY_SIGNALS) private readonly signals: LobbySignals = noLobbySignals,
     @Optional() @Inject(DEGRADED_LIMITS) private readonly limits: DegradedLimits = noDegradedLimits,
+    @Optional() @Inject(FIRST_VISIT_COOKIES) private readonly firstVisit?: FirstVisitCookies,
+    @Optional() @Inject(FIRST_VISIT_SIGNALS) private readonly visitSignals: FirstVisitSignals = noFirstVisitSignals,
   ) {}
 
   async run(i: JoinLobbyInput): Promise<JoinLobbyResult> {
@@ -151,7 +156,8 @@ export class JoinLobby {
 
   async #score(i: JoinLobbyInput, deviceId: string, journeyId: string, lobbyShuffle: boolean): Promise<RiskVerdict> {
     try {
-      return await this.risk.score({ context: 'LOBBY', eventId: i.eventId, accountId: i.accountId, pid: i.pidPrev ?? i.pid, deviceId, journeyId, lobbyShuffle, ...(i.body.humanCheckToken ? { humanCheckToken: i.body.humanCheckToken } : {}), ...(i.client ? { client: i.client } : {}) });
+      const firstVisitAt = firstVisitAtMs(this.firstVisit, i.firstVisitCookie, this.clock.now(), this.visitSignals);
+      return await this.risk.score({ context: 'LOBBY', eventId: i.eventId, accountId: i.accountId, pid: i.pidPrev ?? i.pid, deviceId, journeyId, lobbyShuffle, ...(firstVisitAt !== undefined ? { firstVisitAtMs: firstVisitAt } : {}), ...(i.body.humanCheckToken ? { humanCheckToken: i.body.humanCheckToken } : {}), ...(i.client ? { client: i.client } : {}) });
     } catch {
       // 받지 못하면 축소 운영이다(docs/features/bot-defense.md §11). 로비 참가는 막지 않는다
       return { kind: 'UNAVAILABLE' };

@@ -149,7 +149,7 @@ export class HoldsController {
     void reply.header('cache-control', 'no-store');
     try {
       const deadline = requestContext()?.deadline;
-      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, idempotencyKey: idem.key, body, ...(deadline ? { deadline } : {}) });
+      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, ...(me.pid !== undefined ? { pid: me.pid } : {}), idempotencyKey: idem.key, body, ...(deadline ? { deadline } : {}) });
     } catch (e) {
       if (e instanceof HoldError) {
         if (e.code === 'STORE_UNAVAILABLE' && e.details.storeReason === 'oom' && (this.oomGate?.allow() ?? true)) {

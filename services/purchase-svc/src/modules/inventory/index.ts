@@ -82,6 +82,9 @@ export {
   SWEEP_SESSION_LUA,
 } from './adapters/purchase-session-lua.js';
 export { RecordingHoldAttempts, discardHoldAttempts } from './adapters/recording-hold-attempts.js';
+export { JsonBehaviorSignals } from './adapters/json-behavior-signals.js';
+export { BEHAVIOR_SIGNALS, type BehaviorSignalRecord, type BehaviorSignals, discardBehaviorSignals } from './domain/ports.js';
+export { SeatBehaviorReporter, type SeatBehaviorDeps } from './application/seat-behavior.js';
 export { RedisPurchaseSessionStore, RedisSessionEndedLog, RedisSessionIndex, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
 export { RedisSeatStreamSource } from './adapters/redis-seat-stream.js';

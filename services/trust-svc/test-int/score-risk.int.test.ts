@@ -44,6 +44,7 @@ async function world(url: string) {
     devices: deviceRef,
     asn: { classify: () => 'OTHER' },
     recorder: new LogVerdictRecorder({ info: () => undefined }),
+    behaviors: { behavior: () => undefined },
     signals: recordingSignals(),
     clock: systemClock,
     after: (w) => {
@@ -240,6 +241,33 @@ describe('ScoreRisk 통합', () => {
     expect(ref).toMatch(/^k1\.[A-Za-z0-9_-]{43}$/);
     expect(await w.redis.command(['EXISTS', keys.devAccounts(ref)], slow(keys.devAccounts(ref)))).toBe(1);
     expect(await w.redis.command(['EXISTS', `tr:devacct:{${dev('ref')}}`], slow(`tr:devacct:{${dev('ref')}}`))).toBe(0);
+  });
+
+  test('[Q-T40] 허니팟적중표시는_tr:hp에24시간쓰이고_다음사전검증의확정신호가된다', async () => {
+    const pid = 'pid-honeypot';
+    await new RedisFeatureStore(w.redis).recordHoneypot({ pid, eventId: 'ev-1', now: Date.now() });
+    expect(await w.redis.command(['GET', keys.honeypot(pid)], slow(keys.honeypot(pid)))).toMatch(/"eventId":"ev-1"/);
+    const ttl = Number(await w.redis.command(['PTTL', keys.honeypot(pid)], slow(keys.honeypot(pid))));
+    expect(ttl).toBeGreaterThan(DAY - 60_000);
+    expect(ttl).toBeLessThanOrEqual(DAY);
+    await expect(w.call({ pid, device_id: dev('hp') })).resolves.toMatchObject({ verdict: 'VERDICT_CHALLENGE', reason: 'REASON_CATEGORY_INTERACTION' });
+  });
+
+  test('[Q-T40] 허니팟회차기록은_pid당20개까지_한키안에서원자적으로세고_표시는상한과상관없이쓴다', async () => {
+    const pid = 'pid-honeypot-cap';
+    const store = new RedisFeatureStore(w.redis);
+    const now = Date.now();
+    const events = Array.from({ length: 30 }, (_, n) => `0190f3a1-7c2e-7a00-8000-${n.toString(16).padStart(12, '0')}`);
+    const firsts = await Promise.all(events.map((eventId) => store.recordHoneypot({ pid, eventId, now })));
+    expect(firsts.filter(Boolean)).toHaveLength(20);
+    expect(await w.redis.command(['ZCARD', keys.honeypotEvents(pid)], slow(keys.honeypotEvents(pid)))).toBe(20);
+    expect(await w.redis.command(['EXISTS', keys.honeypot(pid)], slow(keys.honeypot(pid)))).toBe(1);
+    // 기록한 회차를 다시 불러도 처음이 아니고, 24시간이 지난 칸은 지워 다시 센다
+    const recorded = events.find((_, i) => firsts[i])!;
+    expect(await store.recordHoneypot({ pid, eventId: recorded, now })).toBe(false);
+    expect(await store.recordHoneypot({ pid, eventId: recorded, now: now + DAY })).toBe(true);
+    const ttl = Number(await w.redis.command(['PTTL', keys.honeypotEvents(pid)], slow(keys.honeypotEvents(pid))));
+    expect(ttl).toBeGreaterThan(DAY - 60_000);
   });
 
   test('B-T6①_시험빈틈_실제Valkey를끊으면degraded가참이고_판정은계속한다', async () => {

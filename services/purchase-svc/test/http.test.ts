@@ -20,6 +20,8 @@ import {
   MemorySeatMap,
   MemorySeatStore,
   RecordingHoldAttempts,
+  SeatBehaviorReporter,
+  type BehaviorSignalRecord,
   type SeatCallOptions,
   type SeatStore,
   SeatStoreUnavailable,
@@ -41,6 +43,9 @@ const inner = new MemorySeatStore(clock);
 const seatMap = new MemorySeatMap();
 const sessions = new MemoryPurchaseSessions();
 const attempts = new RecordingHoldAttempts();
+const behaviorSignals: BehaviorSignalRecord[] = [];
+// 좌석 화면 행동 요약(B-T19): 표시는 늘 처음이고, 내보낸 것을 모은다
+const seatBehavior = new SeatBehaviorReporter({ claims: { claimSeatBehavior: async () => true }, signals: { record: (r) => void behaviorSignals.push(r) }, clock: fakeClock({ now: Date.UTC(2026, 10, 9, 3, 0, 0) }), after: (w) => void w() });
 /** 홀드 Lua 호출 수(S-T30: 잘못된 입력은 저장소에 닿지 않는다) */
 const holdCalls: HoldInput[] = [];
 /** 홀드 Lua 호출의 둘째 인자(호출 마감, PRF-135) */
@@ -71,7 +76,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   svc = await createService({
     name: 'purchase-svc',
-    module: AppModule.register({ memory: true, store, seatMap, attempts, sessions }),
+    module: AppModule.register({ memory: true, store, seatMap, attempts, sessions, seatBehavior }),
     purchaseSessions: sessions,
     env: { PEAKET_ENV: 'ci' },
     clock,
@@ -152,6 +157,21 @@ describe('201 홀드', () => {
     expect(r.payload).toContain(`"fencingToken":${NOW * 1000}`);
     expect(body.fencingToken).toBe(NOW * 1000);
     expect(String(body.expiresAt)).toMatch(/T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  test('[B-T19] ⑥ 게이트웨이가 넘긴 pid로 행동 요약을 BehaviorSignal로 내고, 정해지지 않은 칸은 400이다', async () => {
+    const { eventId, fan } = await world();
+    const f = fan(1);
+    behaviorSignals.length = 0;
+    const payload = JSON.stringify({ seatIds: ['A01'], behavior: { v: 1, windowMs: 1_000, pointerMoves: 3 } });
+    const ok = await post(eventId, payload, f, { headers: { 'x-user-pid': 'pid-b19' } });
+    expect(ok.statusCode).toBe(201);
+    await new Promise((r) => setImmediate(r));
+    expect(behaviorSignals).toHaveLength(1);
+    expect(behaviorSignals[0]).toMatchObject({ screen: 'SEAT', pid: 'pid-b19', eventId, features: { v: 1, windowMs: 1_000, pointerMoves: 3 } });
+    const bad = await post(eventId, JSON.stringify({ seatIds: ['A02'], behavior: { v: 1, windowMs: 1, path: [[1, 2]] } }), f, { headers: { 'x-user-pid': 'pid-b19' } });
+    expect(bad.statusCode).toBe(400);
+    expect(behaviorSignals).toHaveLength(1);
   });
 
   test('ST24_① 같은 키로 다시 보내면 같은 201이고(행동 요약이 달라도) 좌석·보유 수·Stream·시도 기록이 늘지 않는다', async () => {
