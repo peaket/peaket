@@ -52,7 +52,8 @@ import {
 import { confirmIdemKey, type ConfirmCard, type ConfirmResult, type ConfirmVirtualAccount, type PaymentGatewayPort, type PgName } from '../domain/payment-gateway.js';
 import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
-import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs } from '../domain/ports.js';
+import { isConfirmOutage, PG_CIRCUIT_DEFER_MS, PgCircuitOpenError } from '../domain/pg-circuit.js';
+import type { MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentResolutionSignals } from '../domain/ports.js';
 import { safeErrorCode } from '../../../safe-error-code.js';
 import { depositWriteOf, type DepositWriteDeps } from './deposit-write.js';
 
@@ -88,6 +89,8 @@ export interface PaymentConfirmRunnerDeps {
   methodRefSignals?: PaymentMethodRefSignals;
   /** 입금 대기 쓰기의 포트(BUILD_ORDER HOT-151). 없으면 발급 정보를 쓰지 않는다 */
   deposit?: DepositWriteDeps;
+  /** 결제 확정 소요 지표(BUILD_ORDER PRF-200). 없으면 재지 않는다 */
+  resolution?: PaymentResolutionSignals;
 }
 
 /** 틱 하나의 결과 */
@@ -252,6 +255,8 @@ export class PaymentConfirmRunner {
 
   /** 기다리는 행이 있을 때만 상한에 막힌 것으로 센다. 확인이 실패하면 세지 않는다 */
   async #noteBlockedIfWaiting(pg: PgName, guard: PgCallGuard): Promise<void> {
+    // 서킷 때문이면 어차피 세지 않으므로 틱마다 표를 묻지 않는다(코드 리뷰)
+    if (!guard.circuitClosed()) return;
     try {
       if (await this.deps.jobs.hasDue(pg)) guard.noteBlocked();
     } catch (err) {
@@ -368,11 +373,11 @@ export class PaymentConfirmRunner {
       case 'DROP_JOB':
         return this.#drop(job, target);
       case 'UNKNOWN':
-        return this.#finish(target, { status: 'UNKNOWN', result: 'UNKNOWN' }, gate.cause === 'restart' ? 'restart' : 'unknown');
+        return this.#finish(job, target, { status: 'UNKNOWN', result: 'UNKNOWN' }, gate.cause === 'restart' ? 'restart' : 'unknown');
       case 'NO_ADAPTER':
         return this.#noAdapter(job, target);
       case 'EXPIRE':
-        return this.#finish(target, { status: 'FAILED', failureCategory: 'EXPIRED' }, 'expired');
+        return this.#finish(job, target, { status: 'FAILED', failureCategory: 'EXPIRED' }, 'expired');
       case 'SEND':
         return this.#send(job, target, gateway!, guard, gate.markFirst, hold);
     }
@@ -383,6 +388,8 @@ export class PaymentConfirmRunner {
     // 표시를 쓰기 전에 토큰을 얻는다(먼저 쓰면 부르지 않았는데 다음 시도가 재전송이 된다). 보호기가 없으면 상한 없이 부르지 않는다. 틱이 잡은 행은 토큰을 미리 뺐다
     if (guard === undefined || (!hold.held && !guard.tryTakeConfirmTokens())) return this.#noToken(job);
     hold.held = true;
+    // 서킷이 닫혀 있지 않으면 표시를 쓰기 전에 미룬다(부르지 않았으므로 UNKNOWN으로 쓰지 않는다. 표시가 있는 재전송도 같다, 반 열림의 시험 호출은 단독 조회다, 토큰·자리는 #runHeld가 돌려준다, BUILD_ORDER PRF-200)
+    if (!guard.circuitClosed()) return this.#circuitOpen(job, target);
     let mark: MarkConfirmSentResult;
     try {
       mark = await this.deps.jobs.markSent(job);
@@ -403,16 +410,29 @@ export class PaymentConfirmRunner {
     guard.callStarted();
     let answer: ConfirmResult | undefined;
     let failure: { err: unknown } | undefined;
+    let notCalled = false;
     try {
-      answer = await this.#guarded(
-        gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId), ...(target.confirmToken === undefined ? {} : { confirmToken: target.confirmToken }), ...(target.txId === undefined ? {} : { txId: target.txId }) }),
+      answer = await guard.run(
+        () =>
+          this.#guarded(
+            gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId), ...(target.confirmToken === undefined ? {} : { confirmToken: target.confirmToken }), ...(target.txId === undefined ? {} : { txId: target.txId }) }),
+          ),
+        isConfirmOutage,
+        'confirm',
       );
     } catch (err) {
-      failure = { err };
+      // 서킷이 끊어 부르지 않았다(판단과 호출 사이에 열렸다): 결과를 가정하지 않고 미룬다
+      if (err instanceof PgCircuitOpenError) notCalled = true;
+      else failure = { err };
     } finally {
       this.#calls -= 1;
       this.#safe(() => this.deps.signals.inFlight(this.#calls));
       guard.callFinished();
+    }
+    if (notCalled) {
+      hold.held = true;
+      // 이번에 쓴 표시는 같은 임대 조건으로 함께 지운다(남기면 부른 적 없는 다음 호출이 재전송으로 판정된다, 코드 리뷰)
+      return this.#circuitOpen(job, target, mark === 'MARKED');
     }
     // 429: 첫 승인 호출만 상한을 낮춘다(낮추기 전에 나간 호출의 429는 옛 상한의 결과라 보지 않는다). 다시 보낸 호출은 그 호출의 다음 시도만 늦춘다(아래 RETRY)
     if (answer?.outcome === 'DECLINED' && answer.failureCategory === 'THROTTLED') guard.noteThrottled({ first: !resend, startedAtMs: startedMs });
@@ -423,13 +443,18 @@ export class PaymentConfirmRunner {
     if (failure !== undefined || answer === undefined) {
       // 읽기 시간 초과·연결 실패 등: 결과를 가정하지 않는다
       this.#runError('call', failure?.err, target.orderId);
-      return this.#finish(target, { status: 'UNKNOWN', result: 'UNKNOWN', latencyMs }, 'unknown');
+      return this.#finish(job, target, { status: 'UNKNOWN', result: 'UNKNOWN', latencyMs }, 'unknown');
     }
     const { card } = answer;
     const decision = decideConfirmAnswer(answer, target.amount, this.deps.clock.now(), latencyMs, resend, () => this.#linkOf(card));
     if (decision.kind === 'RETRY') return this.#reschedule(job, target, decision.outcome, this.deps.clock.now() + confirmRetryDelayMs(job.attempts + 1));
     if (decision.amountMismatch) this.#safe(() => this.deps.log.amountMismatch({ orderId: target.orderId }));
-    return this.#finish(target, await this.#withDeposit(target, decision.finish, answer.virtualAccount), decision.outcome);
+    return this.#finish(job, target, await this.#withDeposit(target, decision.finish, answer.virtualAccount), decision.outcome);
+  }
+
+  /** 서킷이 끊어 부르지 않았다: 1초 [가정] 뒤로 미룬다(UNKNOWN으로 쓰지 않는다, attempts는 그대로, 큐 표시를 적는다, BUILD_ORDER PRF-200). clearSent가 참이면 이번에 쓴 CONFIRM_SENT를 함께 지운다 */
+  #circuitOpen(job: ConfirmJob, target: ConfirmTarget, clearSent = false): Promise<ConfirmRunOutcome> {
+    return this.#reschedule(job, target, 'circuit_open', this.deps.clock.now() + PG_CIRCUIT_DEFER_MS, clearSent);
   }
 
   /** 금액 대조를 통과한 승인 답의 결제 수단 연결값(가린 번호를 넘기지 않는다. 던지지 않는다) */
@@ -483,10 +508,10 @@ export class PaymentConfirmRunner {
     return this.#reschedule(job, target, 'no_adapter', now + CONFIRM_NO_ADAPTER_DELAY_MS);
   }
 
-  async #reschedule(job: ConfirmJob, target: ConfirmTarget, outcome: 'in_progress' | 'no_adapter', nextAtMs: number): Promise<ConfirmRunOutcome> {
+  async #reschedule(job: ConfirmJob, target: ConfirmTarget, outcome: 'in_progress' | 'no_adapter' | 'circuit_open', nextAtMs: number, clearSent = false): Promise<ConfirmRunOutcome> {
     let ok: boolean;
     try {
-      ok = await this.deps.jobs.reschedule(job, nextAtMs, { countRetry: outcome === 'in_progress' });
+      ok = await this.deps.jobs.reschedule(job, nextAtMs, { countRetry: outcome === 'in_progress', ...(outcome === 'circuit_open' ? { queued: true } : {}), ...(clearSent ? { clearSent: true } : {}) });
     } catch (err) {
       return this.#writeFailed(target, 'reschedule', err);
     }
@@ -517,7 +542,7 @@ export class PaymentConfirmRunner {
     return deposit === undefined ? finish : { ...finish, deposit };
   }
 
-  async #finish(target: ConfirmTarget, finish: ConfirmFinish, outcome: PaymentConfirmOutcome): Promise<ConfirmRunOutcome> {
+  async #finish(job: ConfirmJob, target: ConfirmTarget, finish: ConfirmFinish, outcome: PaymentConfirmOutcome): Promise<ConfirmRunOutcome> {
     for (let attempt = 0; ; attempt += 1) {
       try {
         const result = await this.deps.jobs.finish(target, finish);
@@ -526,6 +551,11 @@ export class PaymentConfirmRunner {
           return STALE;
         }
         this.#outcome(target, outcome);
+        // 결제 확정 소요: 결과가 정해진 전이만 잰다(UNKNOWN은 단독 조회가 정할 때 잰다, BUILD_ORDER PRF-200)
+        if (finish.status !== 'UNKNOWN' && target.acceptedAtMs !== undefined) {
+          const seconds = Math.max(0, (this.deps.clock.now() - target.acceptedAtMs) / 1000);
+          this.#safe(() => this.deps.resolution?.resolutionSeconds(target.pg, job.queued === true ? 'retry_queue' : 'direct', seconds));
+        }
         return { kind: 'FINISHED', status: finish.status, outcome };
       } catch (err) {
         const delayMs = CONFIRM_FINISH_RETRY_DELAYS_MS[attempt];

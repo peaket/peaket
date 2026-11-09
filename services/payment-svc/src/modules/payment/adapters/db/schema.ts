@@ -120,6 +120,8 @@ export const paymentConfirmJob = pgTable(
     leaseOwner: text('lease_owner'),
     leaseUntil: at('lease_until'),
     attempts: integer('attempts').notNull().default(0),
+    // 여유 부족으로 처음 미뤄진 시각(잡을 때 때가 된 지 1초 [가정] 넘었거나 서킷으로 미룸). 있으면 경로 지표의 retry_queue다(BUILD_ORDER PRF-200, 마이그레이션 0010)
+    queuedAt: at('queued_at'),
     createdAt: at('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -240,6 +242,50 @@ export const eventPgConfig = pgTable(
     check('event_pg_config_primary_check', sql`${t.pgPrimary} IN (${PG_LIST})`),
     check('event_pg_config_fallback_check', sql`${t.pgFallback} IN (${PG_LIST})`),
     check('event_pg_config_distinct_check', sql`${t.pgFallback} IS NULL OR ${t.pgFallback} <> ${t.pgPrimary}`),
+  ],
+);
+
+/** 새 결제 진입 정지 상태(docs/data.md §2·§4, ADR-0105, BUILD_ORDER PRF-200, 마이그레이션 0010). 결제사·채널마다 한 행이고 판 번호로 옛 판정자의 쓰기를 거절한다. 쓰는 코드는 PRF-201·PRF-202다 */
+export const paymentEntryPause = pgTable(
+  'payment_entry_pause',
+  {
+    pg: text('pg').notNull(),
+    // 지금은 ALL(결제사 장애)만이다. 채널 상한 정지를 쓰는 단계가 CHECK를 풀어 준다
+    channel: text('channel').notNull(),
+    stage: text('stage').notNull(),
+    reason: text('reason').notNull(),
+    actor: text('actor').notNull(),
+    since: at('since').notNull(),
+    trialStartedAt: at('trial_started_at'),
+    version: bigint('version', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pg, t.channel] }),
+    check('payment_entry_pause_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check('payment_entry_pause_channel_check', sql`${t.channel} = 'ALL'`),
+    check('payment_entry_pause_stage_check', sql`${t.stage} IN ('OPEN', 'PROBING', 'TRIAL')`),
+    check('payment_entry_pause_reason_check', sql`${t.reason} IN ('PG_FAILURE', 'CHANNEL_WAIT')`),
+    check('payment_entry_pause_version_check', sql`${t.version} >= 1`),
+  ],
+);
+
+/** 시험 재개로 받은 결제와 첫 승인 결과(docs/data.md §2, ADR-0105, BUILD_ORDER PRF-200, 마이그레이션 0010). 쓰는 코드는 PRF-202다 */
+export const paymentEntryTrial = pgTable(
+  'payment_entry_trial',
+  {
+    orderId: uuid('order_id').primaryKey(),
+    pg: text('pg').notNull(),
+    admittedAt: at('admitted_at').notNull(),
+    firstResult: text('first_result'),
+    firstResultAt: at('first_result_at'),
+    // 첫 승인 호출에 걸린 시간(5초 [가정] 안 결론을 잰다)
+    firstCallMs: integer('first_call_ms'),
+  },
+  (t) => [
+    index('payment_entry_trial_pg_admitted_idx').on(t.pg, t.admittedAt),
+    check('payment_entry_trial_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check('payment_entry_trial_first_result_check', sql`${t.firstResult} IN ('APPROVED', 'DECLINED', 'FAILED', 'UNKNOWN')`),
+    check('payment_entry_trial_first_call_ms_check', sql`${t.firstCallMs} >= 0`),
   ],
 );
 

@@ -65,6 +65,8 @@ export interface UnknownQueryJob extends Pick<ConfirmTarget, 'paymentId' | 'orde
   readonly reversalCheck?: { readonly notifiedAtMs?: number };
   /** 회차의 입장 시작 시각(epoch ms). 되돌림의 새 입금 기한을 자른다. 승인 명령에 없었으면 없다(BUILD_ORDER PRF-190) */
   readonly entryOpensAtMs?: number;
+  /** 승인 접수 시각(epoch ms, payment_event 첫 행). UNKNOWN 행의 결제 확정 소요 시작점이다(BUILD_ORDER PRF-200) */
+  readonly acceptedAtMs?: number;
 }
 
 /** UNKNOWN을 떠나는 결과(UNKNOWN으로 끝나는 갈래는 없다) */
@@ -112,7 +114,7 @@ export type UnknownRunOutcome =
   /** 되돌렸지만 입장이 2시간 [가정] 안이라 재입금 없이 실패로 끝냈다(BUILD_ORDER PRF-190 코드 리뷰) */
   | { readonly kind: 'REVERSAL_CLOSED' }
   | { readonly kind: 'REVERSAL_ENDED' }
-  | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' | 'NO_TOKEN' }
+  | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' | 'NO_TOKEN' | 'CIRCUIT_OPEN' }
   | { readonly kind: 'WRITE_FAILED' };
 
 const STILL_PROCESSING: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'still_processing' };

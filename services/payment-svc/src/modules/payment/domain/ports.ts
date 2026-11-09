@@ -192,15 +192,25 @@ export interface PaymentConfirmJobs {
 
   /**
    * 명령 행을 자기 임대 조건으로 미룬다: next_attempt_at = nextAtMs, lease_owner·lease_until 비움. 임대를 잃었으면 false.
-   * countRetry가 참이면(결제사 답이 처리 중·한도 초과) attempts를 1 올린다. 어댑터 없음으로 미룰 때는 거짓이다
+   * countRetry가 참이면(결제사 답이 처리 중·한도 초과) attempts를 1 올린다. 어댑터 없음·서킷으로 미룰 때는 거짓이다.
+   * queued가 참이면(서킷이 열려 미룸, BUILD_ORDER PRF-200) queued_at을 처음 한 번 지금으로 적는다.
+   * clearSent가 참이면 같은 트랜잭션에서 CONFIRM_SENT 표시를 지운다(이번에 쓴 표시 뒤 서킷이 끊어 부르지 않았을 때, 코드 리뷰)
    */
-  reschedule(job: ConfirmJob, nextAtMs: number, o: { readonly countRetry: boolean }): Promise<boolean>;
+  reschedule(job: ConfirmJob, nextAtMs: number, o: { readonly countRetry: boolean; readonly queued?: boolean; readonly clearSent?: boolean }): Promise<boolean>;
 
   /** 자기 임대 조건으로 명령 행을 지운다(원장이 ACCEPTED가 아닐 때). 임대를 잃었으면 false */
   dropJob(job: ConfirmJob): Promise<boolean>;
 
   /** 임대만 놓는다(lease_owner·lease_until 비움, 자기 임대 조건). 임대를 잃었으면 false */
   release(job: ConfirmJob): Promise<boolean>;
+}
+
+/** 승인의 경로(BUILD_ORDER PRF-200): direct 재시도 큐를 거치지 않음, retry_queue 여유 부족으로 미뤄진 적이 있음 */
+export type ConfirmPath = 'direct' | 'retry_queue';
+
+/** 결제 확정 소요(접수부터 승인 결과가 정해질 때까지, payment_confirm_resolution_seconds{pg, path}, docs/observability.md). 던지지 않는다 */
+export interface PaymentResolutionSignals {
+  resolutionSeconds(pg: PgName, path: ConfirmPath, seconds: number): void;
 }
 
 /** 결제 수단 연결값의 invRef 계산(라벨 키 pay, BUILD_ORDER HOT-145). 값은 로그에 싣지 않는다. 던지지 않는다 */

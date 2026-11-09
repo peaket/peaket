@@ -24,7 +24,8 @@ import type { Clock } from '@peaket/platform';
 import type { ConfirmCard, ConfirmVirtualAccount, PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
 import { type PaymentMethodLink, paymentMethodLinkOf } from '../domain/payment-method-ref.js';
 import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
-import type { PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
+import { isProbeFailure, isQueryOutage, PG_CIRCUIT_DEFER_MS, PG_CIRCUIT_PROBE_PAYMENT_REF, PG_CIRCUIT_PROBE_TIMEOUT_MS, PgCircuitOpenError } from '../domain/pg-circuit.js';
+import type { PaymentGateways, PaymentMethodRefSignals, PaymentMethodRefs, PaymentResolutionSignals, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
 import {
   decideQueryAnswer,
   decideReversalAnswer,
@@ -77,6 +78,8 @@ export interface PaymentUnknownResolverDeps {
   methodRefSignals?: PaymentMethodRefSignals;
   /** 입금 대기 쓰기의 포트(BUILD_ORDER HOT-151). 없으면 발급 정보를 쓰지 않는다 */
   deposit?: DepositWriteDeps;
+  /** 결제 확정 소요 지표(BUILD_ORDER PRF-200). 없으면 재지 않는다 */
+  resolution?: PaymentResolutionSignals;
 }
 
 /** 틱 하나의 결과 */
@@ -274,8 +277,31 @@ export class PaymentUnknownResolver {
     }
     const jobs = await this.#claim(pg, reserved);
     guard.refundTokens(Math.max(0, reserved - jobs.length));
+    guard.noteTrialClaimed(jobs.length);
     for (const job of jobs) void this.#startHeld(job, { held: true });
+    if (jobs.length === 0) this.#probeIfTrialWaits(pg, guard);
     return jobs.length;
+  }
+
+  /** 잡을 UNKNOWN이 없는 반 열림: 없는 결제 조회를 시험 호출로 보낸다(고객 승인을 시험으로 내보내지 않는다, 코드 리뷰). 토큰이 없으면 다음 틱에 다시 본다 */
+  #probeIfTrialWaits(pg: PgName, guard: PgCallGuard): void {
+    if (this.#stopped || !guard.awaitsTrial() || !guard.tryTakeToken()) return;
+    this.#held += 1;
+    const p = this.#scope.runInAsyncScope(() => this.#probe(pg, guard)).finally(() => {
+      this.#held -= 1;
+    });
+    this.#track(p);
+  }
+
+  /** 없는 결제 조회 한 번. 원장을 바꾸지 않고 서킷만 판정한다. 던지지 않는다 */
+  async #probe(pg: PgName, guard: PgCallGuard): Promise<void> {
+    try {
+      const gateway = this.deps.gateways.of(pg);
+      if (gateway !== undefined) await guard.run(() => this.#guarded(gateway.query(PG_CIRCUIT_PROBE_PAYMENT_REF, { timeoutMs: PG_CIRCUIT_PROBE_TIMEOUT_MS })), isProbeFailure, 'query');
+    } catch (err) {
+      if (err instanceof PgCircuitOpenError) guard.refundTokens();
+      else this.#runError('call', err);
+    }
   }
 
   /** 어댑터가 없는 채널 하나: 몫만큼 잡아 지표로 드러낸다(부르지 않으므로 토큰을 쓰지 않는다) */
@@ -302,6 +328,8 @@ export class PaymentUnknownResolver {
 
   /** 기다리는 행이 있을 때만 토큰에 막힌 것으로 센다. 확인이 실패하면 세지 않는다 */
   async #noteBlockedIfWaiting(pg: PgName, guard: PgCallGuard): Promise<void> {
+    // 서킷 때문이면 어차피 세지 않으므로 표를 묻지 않는다(코드 리뷰)
+    if (!guard.circuitClosed()) return;
     try {
       if (await this.deps.queries.hasDueQueries(pg)) guard.noteBlocked('token');
     } catch (err) {
@@ -349,11 +377,17 @@ export class PaymentUnknownResolver {
     }
     if (gateway === undefined) return job.lateDepositCheck ? this.#lateDeposit(job, QUERY_UNKNOWN) : this.#noAdapter(job);
     if (this.#stopped) return STOPPED;
+    // 서킷이 열렸으면 조회를 건너뛰고 간격만 민다(토큰은 #runHeld가 돌려준다, BUILD_ORDER PRF-200)
+    if (guard !== undefined && !guard.admitsQuery()) return this.#circuitSkipped(job);
     // 토큰을 못 얻었거나 보호기가 없으면 상한 없이 부르지 않는다. 틱이 잡은 행은 토큰을 미리 뺐다
     if (guard === undefined || (!hold.held && !guard.tryTakeToken())) return this.#noToken(job);
 
     hold.held = false;
-    const answer = await this.#query(gateway, job);
+    const answer = await this.#query(gateway, guard, job);
+    if (answer === CIRCUIT_OPEN) {
+      hold.held = true;
+      return this.#circuitSkipped(job);
+    }
     // 조회의 429는 그 조회의 다음 시도만 늦추고 상한은 그대로다(지표로만 센다)
     if (answer.kind === 'UNKNOWN' && answer.throttled === true) guard.noteThrottled({ first: false });
     if (job.lateDepositCheck) return this.#lateDeposit(job, answer);
@@ -491,13 +525,24 @@ export class PaymentUnknownResolver {
     return NO_TOKEN;
   }
 
-  /** 단독 조회 한 번. 어댑터가 던지거나 실행기 한도를 넘으면 조회 실패 답으로 바꾼다 */
-  async #query(gateway: PaymentGatewayPort, job: UnknownQueryJob): Promise<QueryResult> {
+  /** 서킷이 열려 조회를 건너뛴다: 다음 조회 시각을 1초 [가정] 뒤로 밀고 잡을 때 올린 횟수를 되돌린다(부르지 않았다, BUILD_ORDER PRF-200). 던지지 않는다 */
+  async #circuitSkipped(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    try {
+      await this.deps.queries.rescheduleQuery(job, this.deps.clock.now() + PG_CIRCUIT_DEFER_MS, { refundAttempt: true });
+    } catch (err) {
+      this.#runError('reschedule', err, job.orderId);
+    }
+    return CIRCUIT_SKIPPED;
+  }
+
+  /** 단독 조회 한 번(서킷 안에서). 어댑터가 던지거나 실행기 한도를 넘으면 조회 실패 답으로 바꾼다. 서킷이 끊어 부르지 않았으면 CIRCUIT_OPEN이다 */
+  async #query(gateway: PaymentGatewayPort, guard: PgCallGuard, job: UnknownQueryJob): Promise<QueryResult | typeof CIRCUIT_OPEN> {
     this.#calls += 1;
     this.#safe(() => this.deps.signals.inFlight(this.#calls));
     try {
-      return await this.#guarded(gateway.query(job.paymentRef, { timeoutMs: UNKNOWN_QUERY_TIMEOUT_MS, ...(job.txId === undefined ? {} : { expectedTxId: job.txId }) }));
+      return await guard.run(() => this.#guarded(gateway.query(job.paymentRef, { timeoutMs: UNKNOWN_QUERY_TIMEOUT_MS, ...(job.txId === undefined ? {} : { expectedTxId: job.txId }) })), isQueryOutage, 'query');
     } catch (err) {
+      if (err instanceof PgCircuitOpenError) return CIRCUIT_OPEN;
       this.#runError('call', err, job.orderId);
       return QUERY_UNKNOWN;
     } finally {
@@ -561,6 +606,11 @@ export class PaymentUnknownResolver {
         return STALE;
       }
       this.#outcome(job, decision.outcome);
+      // 결제 확정 소요: 승인이 UNKNOWN을 지나 결과가 정해진 때만 잰다(입금 대기 등은 승인 확정 소요가 아니다). UNKNOWN을 거친 건은 늘 retry_queue다(다시 연 직후 재정지 방지, ADR-0105 결정 5·6, BUILD_ORDER PRF-200 코드 리뷰)
+      if (job.deposit === undefined && job.lateDepositCheck !== true && job.reversalCheck === undefined && job.acceptedAtMs !== undefined) {
+        const seconds = Math.max(0, (this.deps.clock.now() - job.acceptedAtMs) / 1000);
+        this.#safe(() => this.deps.resolution?.resolutionSeconds(job.pg, 'retry_queue', seconds));
+      }
       return { kind: 'RESOLVED', status: decision.finish.status, outcome: decision.outcome };
     } catch (err) {
       this.#safe(() => this.deps.signals.writeFailure());
@@ -607,6 +657,9 @@ const NOTHING: UnknownTickResult = Object.freeze({ claimed: 0 });
 const NOTHING_SWEPT: UnknownSweepResult = Object.freeze({ marked: 0 });
 const STOPPED: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'STOPPED' });
 const NO_TOKEN: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+const CIRCUIT_SKIPPED: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'CIRCUIT_OPEN' });
+/** #query가 돌려주는 '서킷이 끊어 부르지 않음' 표시 */
+const CIRCUIT_OPEN = Symbol('circuit-open');
 const STALE: UnknownRunOutcome = Object.freeze({ kind: 'STALE' });
 const WRITE_FAILED: UnknownRunOutcome = Object.freeze({ kind: 'WRITE_FAILED' });
 const REVERSED: UnknownRunOutcome = Object.freeze({ kind: 'REVERSED' });

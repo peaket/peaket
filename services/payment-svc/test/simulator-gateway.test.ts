@@ -191,7 +191,7 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     expect(await sim.gateway().query('tsim_none')).toEqual({ kind: 'NOT_FOUND' });
     const r = await ready();
     await fault({ op: 'query', kind: 'pg-error', applied: false });
-    expect(await sim.gateway().query(r.paymentRef)).toEqual({ kind: 'UNKNOWN' });
+    expect(await sim.gateway().query(r.paymentRef)).toEqual({ kind: 'UNKNOWN', outage: true });
     expect(await sim.gateway({ secretKey: 'sim_sk_wrong_wrong_wrong_wrong' }).query(r.paymentRef)).toEqual({ kind: 'UNKNOWN' });
   });
 
@@ -320,7 +320,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
     };
     const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300 });
     const started = performance.now();
-    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(gateway.confirm(C)).resolves.toEqual({ ...UNKNOWN, outage: true });
     expect(performance.now() - started).toBeLessThan(1_500);
   });
 
@@ -406,7 +406,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
 
   it('P-T40_조회의 5xx는 한도 초과 표시 없이 결과 모름이다', async () => {
     const { gateway } = scripted([{ status: 503, body: { code: 'PG_ERROR', message: '오류' } }]);
-    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN', outage: true });
   });
 
   it('P-T3_리뷰 고침 H1: 결제사의 정해진 코드(NOT_FOUND_PAYMENT)인 404만 NOT_FOUND다', async () => {
@@ -418,7 +418,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
     const fetchStub: typeof fetch = async (_input, init) => new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
     const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, readTimeoutMs: 5_000 });
     const started = performance.now();
-    await expect(gateway.query(C.paymentRef, { timeoutMs: 50 })).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(gateway.query(C.paymentRef, { timeoutMs: 50 })).resolves.toEqual({ kind: 'UNKNOWN', outage: true });
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 

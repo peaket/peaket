@@ -108,6 +108,8 @@ export interface ConfirmVirtualAccount {
 export interface ConfirmResult {
   outcome: ConfirmOutcome;
   paymentRef: string;
+  /** 일시 장애(연결 실패·읽기 시간 초과·5xx, 승인 뒤 조회 포함)로 답을 받지 못했다. 서킷 판정에만 쓴다(UNKNOWN일 때만 참이다, BUILD_ORDER PRF-200) */
+  outage?: true;
   amount?: number;
   /** 가상계좌 발급 정보(WAITING_FOR_DEPOSIT일 때만, BUILD_ORDER HOT-151) */
   virtualAccount?: ConfirmVirtualAccount;
@@ -140,8 +142,8 @@ export type QueryResult =
       virtualAccount?: ConfirmVirtualAccount;
     }
   | { kind: 'NOT_FOUND' }
-  /** throttled는 결제사가 429로 답했을 때만 참이다(pg_throttled_total에 세고 상한은 낮추지 않는다, BUILD_ORDER PRF-183) */
-  | { kind: 'UNKNOWN'; throttled?: true };
+  /** throttled는 결제사가 429로 답했을 때만 참이다(pg_throttled_total에 세고 상한은 낮추지 않는다, BUILD_ORDER PRF-183). outage는 일시 장애(연결 실패·읽기 시간 초과·5xx)일 때만 참이다(서킷 판정, BUILD_ORDER PRF-200) */
+  | { kind: 'UNKNOWN'; throttled?: true; outage?: true };
 
 /** 단독 조회 한 번의 선택(BUILD_ORDER PRF-182, 코드 리뷰) */
 export interface QueryOptions {

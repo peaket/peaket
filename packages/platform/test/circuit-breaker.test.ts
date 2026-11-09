@@ -46,6 +46,52 @@ function breaker(extra: Partial<Parameters<typeof createCircuitBreaker>[0]> = {}
   return b;
 }
 
+describe('acceptsCalls: 지금 run이 의존성을 부를 수 있는가', () => {
+  const failed = async (b: CircuitBreaker) => {
+    for (let i = 0; i < CIRCUIT_BREAKER_DEFAULTS.minCalls; i += 1) await expect(b.run(() => Promise.reject(new Error('x')))).rejects.toThrow('x');
+  };
+
+  test('P-T43_리뷰 고침 H2: 닫힘은 참, 열림은 거짓이고 반 열림은 시험 호출이 나가기 전까지만 참이다', async () => {
+    const b = breaker();
+    expect(b.acceptsCalls).toBe(true);
+    await failed(b);
+    expect(b.state).toBe('open');
+    expect(b.acceptsCalls).toBe(false);
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_DEFAULTS.openMs);
+    expect(b.state).toBe('half_open');
+    expect(b.acceptsCalls).toBe(true);
+    let release!: (v: string) => void;
+    const trial = b.run(() => new Promise<string>((r) => (release = r)));
+    expect(b.acceptsCalls).toBe(false);
+    release('ok');
+    await trial;
+    expect(b.state).toBe('closed');
+    expect(b.acceptsCalls).toBe(true);
+  });
+
+  test('P-T43_리뷰 고침 H2: 시험 호출이 판정 한도를 넘겨 다시 열린 뒤 반 열림이 되면 앞 호출이 끝나지 않아도 참이다', async () => {
+    const b = breaker();
+    await failed(b);
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_DEFAULTS.openMs);
+    let release!: (v: string) => void;
+    const hanging = b.run(() => new Promise<string>((r) => (release = r)));
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_DEFAULTS.trialTimeoutMs);
+    expect(b.state).toBe('open');
+    expect(b.acceptsCalls).toBe(false);
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_DEFAULTS.openMs);
+    expect(b.state).toBe('half_open');
+    expect(b.acceptsCalls).toBe(true);
+    release('late');
+    await hanging;
+  });
+
+  test('P-T43_리뷰 고침 H2: 끈 뒤에는 거짓이다', () => {
+    const b = breaker();
+    b.shutdown();
+    expect(b.acceptsCalls).toBe(false);
+  });
+});
+
 const ok = () => Promise.resolve('ok');
 const down = () => Promise.reject(Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:50051'), { code: 'ECONNREFUSED' }));
 const grpcError = (code: number) => Object.assign(new Error(`${code} grpc`), { code, details: 'x', metadata: {} });

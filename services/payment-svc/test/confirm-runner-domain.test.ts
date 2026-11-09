@@ -67,7 +67,7 @@ describe('값(설계 §1·§4)', () => {
     expect(CONFIRM_FINISH_RETRY_DELAYS_MS).toEqual([100, 400]);
     expect(CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS).toBe(5000);
     expect(CONFIRM_SENT_EVENT_TYPE).toBe('CONFIRM_SENT');
-    expect(PAYMENT_CONFIRM_OUTCOMES).toEqual(['approved', 'already', 'declined', 'waiting', 'in_progress', 'unknown', 'expired', 'restart', 'no_adapter']);
+    expect(PAYMENT_CONFIRM_OUTCOMES).toEqual(['approved', 'already', 'declined', 'waiting', 'in_progress', 'unknown', 'expired', 'restart', 'no_adapter', 'circuit_open']);
   });
 });
 

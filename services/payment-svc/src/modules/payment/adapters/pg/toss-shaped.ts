@@ -141,7 +141,8 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     const startedMs = this.#clock.monotonicMs();
     const r = await this.#call('POST', '/v1/payments/confirm', {}, { paymentKey: c.paymentRef, orderId: c.orderId, amount: c.amount }, c.idemKey);
     const unknown: ConfirmResult = { outcome: 'UNKNOWN', paymentRef: c.paymentRef };
-    if (r === 'NO_ANSWER' || r.status >= 500) return unknown;
+    const outage: ConfirmResult = { ...unknown, outage: true };
+    if (r === 'NO_ANSWER' || r.status >= 500) return outage;
     if (r.status === 200) {
       // 다른 주문의 답을 이 주문의 결과로 쓰지 않는다
       if (str(r.json?.orderId) !== c.orderId) return unknown;
@@ -164,7 +165,8 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
       const leftMs = this.#confirmBudgetMs - (this.#clock.monotonicMs() - startedMs);
       if (leftMs < 1) return unknown;
       const q = await this.#call('GET', '/v1/payments/{paymentKey}', { paymentKey: c.paymentRef }, undefined, undefined, Math.min(leftMs, this.#readTimeoutMs));
-      if (q === 'NO_ANSWER' || q.status !== 200) return unknown;
+      if (q === 'NO_ANSWER' || q.status >= 500) return outage;
+      if (q.status !== 200) return unknown;
       // 결제사가 이 주문을 승인한 것을 확인했을 때만 ALREADY_APPROVED다. 금액은 조회 값을 그대로 실어, 다르면 실행기가 UNKNOWN + SEV1을 쓴다(승인된 결제를 FAILED로 쓰지 않는다, payment §2.1 ALREADY_APPROVED)
       const s = str(q.json?.status);
       if ((s !== 'DONE' && s !== 'PARTIAL_CANCELED') || str(q.json?.orderId) !== c.orderId) return unknown;
@@ -179,7 +181,7 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
   async query(paymentRef: string, options?: QueryOptions): Promise<QueryResult> {
     const timeoutCapMs = options?.timeoutMs === undefined ? undefined : Math.min(options.timeoutMs, this.#readTimeoutMs);
     const r = await this.#call('GET', '/v1/payments/{paymentKey}', { paymentKey: paymentRef }, undefined, undefined, timeoutCapMs);
-    if (r === 'NO_ANSWER') return { kind: 'UNKNOWN' };
+    if (r === 'NO_ANSWER' || r.status >= 500) return { kind: 'UNKNOWN', outage: true };
     // 조회의 429는 다음 시도만 늦춘다. 표시만 실어 지표에 세게 한다(BUILD_ORDER PRF-183)
     if (r.status === 429) return { kind: 'UNKNOWN', throttled: true };
     // 결제사의 정해진 코드일 때만 없음이다. 그 밖의 404는 중간 장비의 답일 수 있다(PRF-182 코드 리뷰)

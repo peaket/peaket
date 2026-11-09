@@ -334,7 +334,8 @@ describe('입금 전 취소 쓰임새', () => {
         },
       },
       gateways: { of: () => gateway },
-      guards: { of: () => ({ tryTakeToken: () => tokens-- > 0 }) as never },
+      // 서킷 없는 채널의 보호기(서킷 열림은 test/pg-circuit.test.ts가 본다)
+      guards: { of: () => ({ tryTakeToken: () => tokens-- > 0, circuitClosed: () => true, admitsQuery: () => true, run: <T>(action: () => Promise<T>) => action() }) as never },
       signals: { cancel: (x) => void outcomes.push(x) },
       clock,
     });

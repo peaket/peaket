@@ -20,6 +20,9 @@ const ATTEMPT = { attemptId: 'attempt-1', successUrl: 'https://peaket.example/s'
 
 const C = { orderId: 'order-toss-1', paymentRef: 'tgen_toss_1', amount: 10_000, idemKey: 'confirm-order-toss-1' };
 const UNKNOWN = { outcome: 'UNKNOWN', paymentRef: C.paymentRef };
+// 일시 장애(연결 실패·시간 초과·5xx)는 서킷이 세도록 표시를 싣는다(BUILD_ORDER PRF-200)
+const OUTAGE = { ...UNKNOWN, outage: true };
+const OUTAGE_QUERY = { kind: 'UNKNOWN', outage: true };
 
 type Scripted = { status: number; body?: unknown; raw?: string };
 const already: Scripted = { status: 400, body: { code: 'ALREADY_PROCESSED_PAYMENT', message: '이미 처리된 결제입니다' } };
@@ -124,13 +127,13 @@ describe.each<[string, Make]>([
     ['500 결제사 오류', { status: 500, body: { code: 'FAILED_INTERNAL_SYSTEM_PROCESSING' } }],
     ['503', { status: 503, raw: '' }],
   ])('P-T16_승인의 %s는 거절로 가정하지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (_n, reply) => {
-    await expect(scripted([reply]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(scripted([reply]).gateway.confirm(C)).resolves.toEqual(reply.status >= 500 ? OUTAGE : UNKNOWN);
   });
 
   it('P-T16_연결이 끊기면 UNKNOWN이고 던지지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
     const gateway = make({ fetch: (async () => Promise.reject(new TypeError('끊김'))) as typeof fetch });
-    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
-    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(gateway.confirm(C)).resolves.toEqual(OUTAGE);
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual(OUTAGE_QUERY);
     await expect(gateway.cancel({ paymentRef: C.paymentRef, amount: 'ALL', reason: '고객 요청', idemKey: 'cancel-a1' })).resolves.toEqual({ outcome: 'UNKNOWN' });
   });
 
@@ -235,7 +238,7 @@ describe.each<[string, Make]>([
 
   it('P-T16_이미 처리됨 뒤 조회의 주문 ID가 다르거나 조회가 실패하면 UNKNOWN이다 [ASVS v5.0.0-2.2.3]', async () => {
     await expect(scripted([already, payment({ orderId: 'order-other' })]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
-    await expect(scripted([already, { status: 500, raw: '' }]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(scripted([already, { status: 500, raw: '' }]).gateway.confirm(C)).resolves.toEqual(OUTAGE);
   });
 
   it('P-T16_승인에 시간 몫을 다 썼으면 뒤따르는 조회를 보내지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
@@ -259,7 +262,7 @@ describe.each<[string, Make]>([
       return new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
     };
     const started = performance.now();
-    await expect(make({ fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300 }).confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(make({ fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300 }).confirm(C)).resolves.toEqual(OUTAGE);
     expect(performance.now() - started).toBeLessThan(1_500);
   });
 
@@ -278,7 +281,7 @@ describe.each<[string, Make]>([
     ['모르는 상태의 200', payment({ status: 'SOMETHING_NEW' })],
     ['JSON이 아닌 200', { status: 200, raw: 'ok' }],
   ])('P-T16_조회의 %s는 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (_n, reply) => {
-    await expect(scripted([reply]).gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(scripted([reply]).gateway.query(C.paymentRef)).resolves.toEqual(reply.status >= 500 ? OUTAGE_QUERY : { kind: 'UNKNOWN' });
   });
 
   it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])('P-T16_리뷰 고침 낮음: 조회 상태가 객체 내장 이름 %s여도 모르는 상태라 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (status) => {
@@ -321,7 +324,7 @@ describe.each<[string, Make]>([
   it('P-T16_조회는 넘긴 시간 한도까지만 기다린다 [ASVS v5.0.0-16.5.2]', async () => {
     const fetchStub: typeof fetch = async (_input, init) => new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
     const started = performance.now();
-    await expect(make({ fetch: fetchStub, readTimeoutMs: 5_000 }).query(C.paymentRef, { timeoutMs: 50 })).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(make({ fetch: fetchStub, readTimeoutMs: 5_000 }).query(C.paymentRef, { timeoutMs: 50 })).resolves.toEqual(OUTAGE_QUERY);
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 

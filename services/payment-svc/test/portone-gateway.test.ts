@@ -24,6 +24,9 @@ const BASE: PortoneGatewayOptions = { baseUrl: 'http://pg.test', secret: SECRET,
 const ATTEMPT = { attemptId: 'attempt-1', successUrl: 'https://peaket.example/s', failUrl: 'https://peaket.example/f' };
 const C = { orderId: ORDER_ID, paymentRef: PAYMENT_ID, amount: 10_000, idemKey: `confirm-${ORDER_ID}`, confirmToken: TOKEN };
 const UNKNOWN = { outcome: 'UNKNOWN', paymentRef: C.paymentRef };
+// 일시 장애(연결 실패·시간 초과·5xx)는 서킷이 세도록 표시를 싣는다(BUILD_ORDER PRF-200)
+const OUTAGE = { ...UNKNOWN, outage: true };
+const OUTAGE_QUERY = { kind: 'UNKNOWN', outage: true };
 
 type Scripted = { status: number; body?: unknown; raw?: string };
 interface Seen {
@@ -267,7 +270,7 @@ describe('P-T16 포트원 승인 답 읽기', () => {
     ['조회 실패', { status: 500, raw: '' }],
     ['조회 404', { status: 404, body: { type: 'PAYMENT_NOT_FOUND' } }],
   ])('P-T16_승인 200 뒤 조회가 %s이면 승인을 가정하지 않고 UNKNOWN이다 [ASVS v5.0.0-2.2.3] [ASVS v5.0.0-16.5.3]', async (_n, q) => {
-    await expect(scripted([paid, q]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(scripted([paid, q]).gateway.confirm(C)).resolves.toEqual(q.status >= 500 ? OUTAGE : UNKNOWN);
   });
 
   it('P-T16_승인 200 뒤 조회의 결제가 이 주문의 것이 아니면(참조와 결제 ID는 같아도) UNKNOWN이다 [ASVS v5.0.0-2.2.3] [ASVS v5.0.0-16.5.3]', async () => {
@@ -307,13 +310,13 @@ describe('P-T16 포트원 승인 답 읽기', () => {
     ['표에 없는 type', { status: 400, body: { type: 'SOMETHING_NEW' } }],
     ['객체 내장 이름 type', { status: 400, body: { type: 'constructor' } }],
   ])('P-T16_승인의 %s는 거절로 가정하지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (_n, reply) => {
-    await expect(scripted([reply]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(scripted([reply]).gateway.confirm(C)).resolves.toEqual(reply.status >= 500 ? OUTAGE : UNKNOWN);
   });
 
   it('P-T16_연결이 끊기면 UNKNOWN이고 던지지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
     const gateway = gatewayOf({ fetch: (async () => Promise.reject(new TypeError('끊김'))) as typeof fetch });
-    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
-    await expect(gateway.query(PAYMENT_ID)).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(gateway.confirm(C)).resolves.toEqual(OUTAGE);
+    await expect(gateway.query(PAYMENT_ID)).resolves.toEqual(OUTAGE_QUERY);
     await expect(gateway.cancel({ paymentRef: PAYMENT_ID, amount: 'ALL', reason: '고객 요청', idemKey: `cancel-${randomUUID()}` })).resolves.toEqual({ outcome: 'UNKNOWN' });
   });
 
@@ -351,7 +354,7 @@ describe('P-T16 포트원 승인 답 읽기', () => {
 
   it('P-T16_ALREADY_PAID 뒤 조회의 결제 ID가 다르거나 조회가 실패하면 UNKNOWN이다 [ASVS v5.0.0-2.2.3]', async () => {
     await expect(scripted([alreadyPaid, viewOf({ id: 'pay-other' })]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
-    await expect(scripted([alreadyPaid, { status: 500, raw: '' }]).gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(scripted([alreadyPaid, { status: 500, raw: '' }]).gateway.confirm(C)).resolves.toEqual(OUTAGE);
   });
 
   it('P-T16_승인에 시간 몫을 다 썼으면 뒤따르는 조회를 보내지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
@@ -375,7 +378,7 @@ describe('P-T16 포트원 승인 답 읽기', () => {
       return new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
     };
     const started = performance.now();
-    await expect(gatewayOf({ fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300, clock: undefined }).confirm(C)).resolves.toEqual(UNKNOWN);
+    await expect(gatewayOf({ fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300, clock: undefined }).confirm(C)).resolves.toEqual(OUTAGE);
     expect(performance.now() - started).toBeLessThan(1_500);
   });
 });
@@ -433,7 +436,7 @@ describe('P-T16 포트원 조회 답 읽기', () => {
     ['JSON이 아닌 200', { status: 200, raw: 'ok' }],
   ])('P-T16_조회의 %s는 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (_n, reply) => {
     const ref = _n === 'pay- 접두사가 없는 결제 ID' ? ORDER_ID : PAYMENT_ID;
-    await expect(scripted([reply]).gateway.query(ref)).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(scripted([reply]).gateway.query(ref)).resolves.toEqual(reply.status >= 500 ? OUTAGE_QUERY : { kind: 'UNKNOWN' });
   });
 
   it.each(['constructor', 'toString', '__proto__'])('P-T16_조회 상태가 객체 내장 이름 %s여도 모르는 상태라 UNKNOWN이다 [ASVS v5.0.0-15.3.6]', async (status) => {
@@ -447,7 +450,7 @@ describe('P-T16 포트원 조회 답 읽기', () => {
   it('P-T16_조회는 넘긴 시간 한도까지만 기다린다 [ASVS v5.0.0-16.5.2]', async () => {
     const fetchStub: typeof fetch = async (_input, init) => new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
     const started = performance.now();
-    await expect(gatewayOf({ fetch: fetchStub, readTimeoutMs: 5_000 }).query(PAYMENT_ID, { timeoutMs: 50 })).resolves.toEqual({ kind: 'UNKNOWN' });
+    await expect(gatewayOf({ fetch: fetchStub, readTimeoutMs: 5_000 }).query(PAYMENT_ID, { timeoutMs: 50 })).resolves.toEqual(OUTAGE_QUERY);
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 });
@@ -748,7 +751,7 @@ describe('P-T16 리뷰 고침(BUILD_ORDER HOT-140 코드 리뷰)', () => {
         return new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
       };
       const started = performance.now();
-      await expect(gatewayOf({ fetch: confirmFetch, queryFetch, readTimeoutMs: 3_000, confirmBudgetMs: 4_000, followUpTimeoutMs: 50, clock: undefined }).confirm(C)).resolves.toEqual(UNKNOWN);
+      await expect(gatewayOf({ fetch: confirmFetch, queryFetch, readTimeoutMs: 3_000, confirmBudgetMs: 4_000, followUpTimeoutMs: 50, clock: undefined }).confirm(C)).resolves.toEqual(OUTAGE);
       expect(performance.now() - started).toBeLessThan(1_500);
       expect(routed).toEqual(['승인 POST', '조회 GET']);
     });

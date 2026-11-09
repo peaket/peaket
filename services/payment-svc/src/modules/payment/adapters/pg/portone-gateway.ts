@@ -142,6 +142,10 @@ const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountI
 type Found = Extract<QueryResult, { kind: 'FOUND' }>;
 
 const unknownQuery: QueryResult = { kind: 'UNKNOWN' };
+/** 일시 장애(연결 실패·시간 초과·5xx)로 답을 받지 못한 조회(서킷이 센다, BUILD_ORDER PRF-200) */
+const outageQuery: QueryResult = { kind: 'UNKNOWN', outage: true };
+/** 승인 뒤 조회가 일시 장애였다는 표시(#followUp) */
+const FOLLOW_UP_OUTAGE = Symbol('follow-up-outage');
 const unknownPage: ListTransactionsResult = { kind: 'UNKNOWN' };
 
 /** 멱등키를 머리 값으로 바꾼다(구조화 필드 sf-string). 규격에 맞지 않으면 던져 보내지 않는다. 글에 값을 싣지 않는다 */
@@ -250,12 +254,14 @@ export class PortoneGateway implements PaymentGatewayPort {
     const body = { storeId: this.#storeId, paymentToken: c.confirmToken, ...(c.txId === undefined ? {} : { txId: c.txId }), totalAmount: c.amount, currency: CURRENCY, isTest: this.#isTest };
     const r = await this.#post('/payments/{paymentId}/confirm', c.paymentRef, body, idem);
     const unknown: ConfirmResult = { outcome: 'UNKNOWN', paymentRef: c.paymentRef };
-    if (r === 'NO_ANSWER' || r.status >= 500) return unknown;
+    const outage: ConfirmResult = { ...unknown, outage: true };
+    if (r === 'NO_ANSWER' || r.status >= 500) return outage;
     if (r.status === 200) {
       // 승인 답에는 결제 ID·금액이 없다. pgTxId가 없거나 시각이 시각 모양이 아니면 승인 모양이 아니라 조회도 하지 않는다
       const paidAt = str(r.json?.paidAt);
       if (!str(r.json?.pgTxId) || (paidAt !== undefined && Number.isNaN(Date.parse(paidAt)))) return unknown;
       const q = await this.#followUp(c.paymentRef, startedMs, c.txId);
+      if (q === FOLLOW_UP_OUTAGE) return outage;
       if (!q || q.orderRef !== c.orderId) return unknown;
       // 입금 전이라 결제 시각이 없어도 입금 대기는 받는다(BUILD_ORDER HOT-151, 코드 리뷰). 승인은 시각이 있어야 한다
       if (q.status === 'WAITING_FOR_DEPOSIT') return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: q.amount, ...(q.virtualAccount ? { virtualAccount: q.virtualAccount } : {}) };
@@ -270,6 +276,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     if (code === OUTSTANDING) return { outcome: 'IN_PROGRESS', paymentRef: c.paymentRef, pgCode: code };
     if (code === ALREADY_PAID) {
       const q = await this.#followUp(c.paymentRef, startedMs, c.txId);
+      if (q === FOLLOW_UP_OUTAGE) return outage;
       // 결제사가 이 결제를 승인한 것을 확인했을 때만 ALREADY_APPROVED다. 금액은 조회 값을 그대로 실어, 다르면 실행기가 UNKNOWN + SEV1을 쓴다
       if (!q || q.orderRef !== c.orderId || (q.status !== 'APPROVED' && q.status !== 'PARTIAL_CANCELED')) return unknown;
       return { outcome: 'ALREADY_APPROVED', ...this.#approvedFields(c.paymentRef, q) };
@@ -282,7 +289,7 @@ export class PortoneGateway implements PaymentGatewayPort {
   async query(paymentRef: string, options?: QueryOptions): Promise<QueryResult> {
     const timeoutCapMs = options?.timeoutMs === undefined ? undefined : Math.min(options.timeoutMs, this.#readTimeoutMs);
     const r = await this.#get(paymentRef, timeoutCapMs);
-    if (r === 'NO_ANSWER') return unknownQuery;
+    if (r === 'NO_ANSWER' || r.status >= 500) return outageQuery;
     if (r.status === 429) return { kind: 'UNKNOWN', throttled: true };
     // 결제사의 정해진 코드일 때만 없음이다. 그 밖의 404는 중간 장비의 답일 수 있다
     if (r.status === 404) return str(r.json?.type) === NOT_FOUND_PAYMENT ? { kind: 'NOT_FOUND' } : unknownQuery;
@@ -389,12 +396,13 @@ export class PortoneGateway implements PaymentGatewayPort {
     return false;
   }
 
-  /** 승인·이미 결제됨 뒤의 조회(조회 전용 연결 묶음). 승인 호출에 쓴 시간을 뺀 몫과 조회 상한 10초 [가정] 가운데 짧은 쪽만 기다리고, 몫을 다 썼으면 부르지 않는다 */
-  async #followUp(paymentRef: string, startedMs: number, expectedTxId: string | undefined): Promise<Found | undefined> {
+  /** 승인·이미 결제됨 뒤의 조회(조회 전용 연결 묶음). 승인 호출에 쓴 시간을 뺀 몫과 조회 상한 10초 [가정] 가운데 짧은 쪽만 기다리고, 몫을 다 썼으면 부르지 않는다. 일시 장애(연결 실패·시간 초과·5xx)는 FOLLOW_UP_OUTAGE다 */
+  async #followUp(paymentRef: string, startedMs: number, expectedTxId: string | undefined): Promise<Found | undefined | typeof FOLLOW_UP_OUTAGE> {
     const leftMs = this.#confirmBudgetMs - (this.#clock.monotonicMs() - startedMs);
     if (leftMs < 1) return undefined;
     const r = await this.#get(paymentRef, Math.min(leftMs, this.#followUpTimeoutMs, this.#readTimeoutMs));
-    if (r === 'NO_ANSWER' || r.status !== 200) return undefined;
+    if (r === 'NO_ANSWER' || r.status >= 500) return FOLLOW_UP_OUTAGE;
+    if (r.status !== 200) return undefined;
     return this.#foundOf(paymentRef, r.json, expectedTxId);
   }
 

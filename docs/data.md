@@ -997,6 +997,7 @@ erDiagram
         text lease_owner "실행기가 잡은 파드. 널 허용"
         timestamptz lease_until "잡은 동안의 임대 끝. 널 허용"
         int attempts "NOT NULL DEFAULT 0, 0 이상. 결제사 답(처리 중·한도 초과)으로 다시 미룬 횟수. 잡기·어댑터 없음·읽기 실패로는 오르지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰)"
+        timestamptz queued_at "널 허용. 여유 부족으로 처음 미뤄진 시각(잡을 때 때가 된 지 1초 [가정] 넘었거나 서킷으로 미룸). 있으면 경로 지표의 retry_queue다(추천 적용 2026-11-09, BUILD_ORDER PRF-200, 마이그레이션 0010)"
         timestamptz created_at "NOT NULL DEFAULT now()"
     }
     webhook_receipt {
@@ -1007,11 +1008,12 @@ erDiagram
     }
     payment_entry_pause {
         text pg PK "TOSS|PORTONE|SIMULATOR(새 결제 진입 정지 상태, ADR-0105)"
-        text channel PK "채널 상한 때문에 멈추면 채널, 결제사 장애면 ALL"
+        text channel PK "채널 상한 때문에 멈추면 채널, 결제사 장애면 ALL. 지금은 ALL만이다(CHECK, 채널별 정지를 쓰는 단계가 풀어 준다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
         text stage "OPEN|PROBING|TRIAL(열림, 확인 호출, 시험 재개)"
         text reason "PG_FAILURE|CHANNEL_WAIT"
         text actor "SYSTEM 또는 명령 6 해제를 낸 commander 계정"
-        timestamptz since "이번 정지 시작 시각(GetNewPaymentPause의 paused_since)"
+        timestamptz since "NOT NULL. 이번 정지 시작 시각(GetNewPaymentPause의 paused_since). 정지를 푼 뒤에도 마지막 값을 둔다(추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
+        timestamptz trial_started_at "널 허용. 시험 재개를 시작한 시각(10분 [가정] 예외의 기준, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
         bigint version "판 번호. 읽은 판이 그대로일 때만 쓴다(옛 판정자의 늦은 쓰기 거절)"
     }
     payment_entry_trial {
@@ -1019,7 +1021,8 @@ erDiagram
         text pg
         timestamptz admitted_at
         text first_result "APPROVED|DECLINED|FAILED|UNKNOWN(첫 승인 호출, 재시도 큐 건 제외)"
-        timestamptz first_result_at "판정자가 20건을 센다. 회차 판매 종료 뒤 지운다"
+        timestamptz first_result_at "판정자가 20건을 센다. 행은 admitted_at 7일 [가정] 뒤 지운다(추천 적용 2026-11-09, BUILD_ORDER PRF-200, 코드 리뷰)"
+        int first_call_ms "널 허용, 0 이상. 첫 승인 호출에 걸린 시간(5초 [가정] 안 결론을 잰다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200)"
     }
     payment_cancel {
         uuid id PK
@@ -2462,7 +2465,7 @@ erDiagram
 - `payment_event`: 기본 키 `(payment_id, seq)`, `seq >= 1`, 결제에 외래 키를 건다. 접수의 내부 표시 행(`ACCEPTED`, `exported = false`)이 순번 1이다.
 - `payment_confirm_job`: 위 ERD 칸, 잡기 인덱스 `payment_confirm_job_next_idx (next_attempt_at)`(0003이 채널별 색인으로 바꾼다, 아래 '승인 명령의 결제사 칸'), 결제에 외래 키를 건다. `order_saga_job`과 같은 꼴이고 끝난 명령은 행을 지워 작은 표로 둔다.
 - Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같은 문장을 `0000`에 손으로 덧붙였다(일 파티션은 `ensureOutboxPartitions`가 만든다).
-- 다른 표(`payment_entry_pause`·`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
+- 다른 표(`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
 - 마이그레이션 SQL은 `pnpm --filter @peaket/payment-svc db:generate`(purchase-svc와 같은 `scripts/db-generate.mjs`)로 만들었다.
 - `failure_category`(추천 적용 2026-11-09, BUILD_ORDER PRF-181): 두 번째 마이그레이션(`services/payment-svc/migrations/0001_payment_failure_category.sql`)이 `payment`에 `text`(널 허용) 칸과 여섯 값 `CHECK`(`payment_failure_category_check`)를 더한다. 값은 `FAILED`일 때만 채운다. 표가 아직 배포되지 않아 행이 없으므로 제약을 나눠 검증하지 않는다.
 - UNKNOWN 조회 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-182): 세 번째 마이그레이션(`services/payment-svc/migrations/0002_payment_unknown_query.sql`)이 `payment`에 `next_query_at`(`timestamptz`, 널 허용)·`query_attempts`(`int NOT NULL DEFAULT 0`)·`overdue_at`·`anomaly_logged_at`(`timestamptz`, 널 허용)을 더하고 부분 인덱스 `payment_unknown_query_idx ON payment (next_query_at) WHERE status = 'UNKNOWN'`과 `payment_unknown_status_changed_idx ON payment (status_changed_at) WHERE status = 'UNKNOWN'`(끝난 행은 인덱스에 없다), CHECK `status <> 'UNKNOWN' OR next_query_at IS NOT NULL`(`payment_unknown_next_query_check`, 잡히지 않은 채 남는 UNKNOWN을 막는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-182, 코드 리뷰)을 만든다. 표가 아직 배포되지 않아 행이 없으므로 기존 행을 채우는 문장이 없다.
@@ -2471,6 +2474,7 @@ erDiagram
 - 웹훅 수신 기록(추천 적용 2026-11-09, BUILD_ORDER HOT-150): 여섯 번째 마이그레이션(`services/payment-svc/migrations/0005_payment_webhook_receipt.sql`)이 `webhook_receipt`(기본 키 `(pg, dedup_key)`, CHECK `webhook_receipt_pg_check` 결제사 셋, 지우기 인덱스 `webhook_receipt_received_at_idx (received_at)`)를 만들고 `payment`에 참조로 원장을 찾는 인덱스 `payment_pg_ref_idx (pg, pg_payment_ref)`를 더한다. 웹훅은 승인 명령보다 먼저 올 수 있어 `payment_id`에 외래 키를 걸지 않고 ERD에서도 관계선을 뺐다. 표가 아직 배포되지 않아 행이 없으므로 인덱스를 `CONCURRENTLY`로 만들지 않는다. 같은 마이그레이션이 조회 신호의 결제별 최소 간격을 재는 `payment.query_touched_at`(비울 수 있음, 기본값 없음)을 더한다(추천 적용 2026-11-09, BUILD_ORDER HOT-150, 코드 리뷰).
 - 입금 오류 되돌림과 입금 전 취소(추천 적용 2026-11-09, BUILD_ORDER HOT-152): 여덟 번째 마이그레이션(`services/payment-svc/migrations/0007_payment_deposit_reversal.sql`)이 `payment_query_due_idx`를 `status IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (status IN ('FAILED', 'APPROVED') AND next_query_at IS NOT NULL)`로 다시 만들고(되돌림 확인을 건 승인 행도 잡는다) CHECK `payment_failure_category_check`에 `DEPOSIT_CANCELED`를 더한다. 열네 번째 purchase 마이그레이션(`services/purchase-svc/migrations/0013_ticket_void_job.sql`)이 `ticket_issue_job.issue_generation`(`bigint NOT NULL DEFAULT 0`)과 `ticket_void_job`(위 ERD 칸 그대로, 쓸기 색인 `(next_attempt_at)`)을 더한다.
 - 결제사 선택 표(추천 적용 2026-11-09, BUILD_ORDER PRF-190): 열 번째 마이그레이션(`services/payment-svc/migrations/0009_payment_pg_selection.sql`)이 두 표와 `payment.entry_opens_at`(널 가능)을 더한다. 규칙의 정본은 docs/features/payment.md §2.2 '선택기의 첫 구현'이다.
+- 새 결제 진입 정지 표와 승인 경로 칸(추천 적용 2026-11-09, BUILD_ORDER PRF-200): 열한 번째 마이그레이션(`services/payment-svc/migrations/0010_payment_entry_pause.sql`)이 `payment_entry_pause`(기본 키 `(pg, channel)`, CHECK 결제사 셋·`channel = 'ALL'`·`stage` 셋·`reason` 둘·`version >= 1`)와 `payment_entry_trial`(기본 키 `order_id`, CHECK 결제사 셋·`first_result` 넷·`first_call_ms >= 0`, 인덱스 `payment_entry_trial_pg_admitted_idx (pg, admitted_at)`)을 만들고, `payment_confirm_job.queued_at`(널 허용)을 더한다(리뷰 고침으로 결과 모름을 거친 건은 늘 `retry_queue`가 되어 `payment` 표에 칸을 더하지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200, 코드 리뷰). 두 표는 이 단계에서 표만 두고 쓰는 코드는 다음 단계(PRF-201·PRF-202)다. 칸의 정본은 §2 ERD이고, 규칙은 docs/features/payment.md §9, §2 '결제사 서킷의 첫 구현'이다.
   - `pg_switch`: `scope text` 기본 키('PLATFORM' 또는 소문자 UUID 회차, CHECK), `active boolean NOT NULL`, `from_pg text`(전환해 떠나는 결제사, 비면 어느 기준이든), `to_pg text`(옮겨 갈 결제사, 비면 미리 지정한 대체), `version bigint NOT NULL`(1 이상), `changed_at timestamptz NOT NULL`. 두 결제사 칸은 CHECK 결제사 셋이다. 쓰기는 판 번호가 지금보다 클 때만이다.
   - `event_pg_config`: `event_id uuid` 기본 키, `pg_primary text NOT NULL`, `pg_fallback text`, `updated_at timestamptz NOT NULL`. CHECK 결제사 셋, 기본과 대체가 다름. core-svc 회차 칸(`event.pg_primary`·`pg_fallback`)의 사본이고 설정 사건 소비자는 OPS-290이다. 행이 없으면 플랫폼 기본을 쓴다.
 - 대사(추천 적용 2026-11-09, BUILD_ORDER HOT-153): 아홉 번째 마이그레이션(`services/payment-svc/migrations/0008_payment_reconciliation.sql`)이 `reconciliation_run`(결제사·대상 날짜 유일, 칸은 ERD), 작업 표 `reconciliation_seen`, 불일치 기록 `reconciliation_diff`(UNIQUE `(pg, payment_ref, kind)`, CHECK 세 가지)를 더하고, `payment`에 부분 인덱스 `payment_recon_approved_idx (pg, approved_at, id) WHERE status = 'APPROVED'`와 `payment_deposit_hash_idx (approved_at) WHERE deposit_secret_hash IS NOT NULL`을 더한다. payment 표가 아직 배포되지 않아 인덱스를 CONCURRENTLY로 만들지 않는다.
@@ -2554,7 +2558,7 @@ erDiagram
 | 판매 확정·결제 접수(purchase) | 멱등 기록 표·주문·`seat_sale` INSERT, `purchase_quota` 조건부 UPDATE, 결제 시도 전이 | 정본 멱등 기록 표, 활성 부분 유일 둘. 새로 `purchase_quota` 기본 키 | 표에 바로 INSERT(주문 표는 나누지 않는다, ADR-0114), `Update → Index Scan using purchase_quota_pkey`(HOT 갱신) | 유일 위반(23505) 수를 표별 지표로, `n_tup_hot_upd / n_tup_upd` |
 | 결제 결과 조회(purchase·payment) | `WHERE id = $1`, `payment WHERE order_id = $1`, 결과 당기기 `payment WHERE order_id = ANY($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, ADR-0140) | 기본 키, `payment (order_id)` 유일 인덱스(ADR-0114) | `Index Scan`(표를 나누지 않아 가지치기가 필요 없다) | 계획 시간(`track_planning`), long polling 동안 트랜잭션을 열지 않음. 당기기가 쓰기 인스턴스 CPU를 5%p [가정] 넘게 올리면 읽기 복제본 + 순번 확인으로 바꾼다(ADR-0140 되돌릴 조건) |
 | 승인 명령 접수(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180) | `INSERT INTO payment … ON CONFLICT (order_id) DO NOTHING RETURNING id`, 처음이면 `payment_event`·`payment_confirm_job` INSERT, 0행이면 `payment WHERE order_id = $1` | `payment (order_id)` 유일 인덱스, 잡기 `payment_confirm_job (pg, next_attempt_at, payment_id)`(실행기가 쓴다, PRF-181·PRF-183) | 표에 바로 INSERT(표를 나누지 않는다, ADR-0114) | 다시 받은 수(`payment_confirm_commands_total{outcome="replayed"}`), 실행 시간 |
-| 승인 명령 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-181) | 100ms [가정]마다 어댑터가 있는 결제사 채널마다 `with picked as (select payment_id, lease_owner from payment_confirm_job where pg = $5 and next_attempt_at <= $1 and (lease_until is null or lease_until < $1) order by next_attempt_at, payment_id limit $2 for update skip locked) update payment_confirm_job j set lease_owner = $3, lease_until = $4 from picked p where j.payment_id = p.payment_id returning j.*, p.lease_owner as previous_owner`(채널의 여유만큼, 어댑터가 없는 채널은 1초 [가정]에 한 번 채널마다 8건 [가정]까지, 추천 적용 2026-11-09, BUILD_ORDER PRF-183. `attempts`는 잡을 때 올리지 않고 처리 중·한도 초과로 다시 미룰 때 올린다, 추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰). 기한 지난 행은 틱마다 채널당 50건 [가정]까지 따로 잡는다: 그 채널의 앞쪽 500행 [가정]을 고른 뒤 `payment`와 조인해 `authenticated_at <= 지금 − 기한`인 행만 `for update of j skip locked`로 잠근다(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰) | `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`(기한 지난 행은 `payment` 기본 키도) | `Limit → LockRows → Index Scan` | 잡은 행 수, 실행 시간, `payment_confirm_in_flight`, `payment_pg_saturated_total{reason}` |
+| 승인 명령 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-181) | 100ms [가정]마다 어댑터가 있는 결제사 채널마다 `with picked as (select payment_id, lease_owner from payment_confirm_job where pg = $5 and next_attempt_at <= $1 and (lease_until is null or lease_until < $1) order by next_attempt_at, payment_id limit $2 for update skip locked) update payment_confirm_job j set lease_owner = $3, lease_until = $4 from picked p where j.payment_id = p.payment_id returning j.*, p.lease_owner as previous_owner`(채널의 여유만큼, 어댑터가 없는 채널은 1초 [가정]에 한 번 채널마다 8건 [가정]까지, 추천 적용 2026-11-09, BUILD_ORDER PRF-183. `attempts`는 잡을 때 올리지 않고 처리 중·한도 초과로 다시 미룰 때 올린다, 추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰. 때가 된 지 1초 [가정] 넘은 행은 같은 문장에서 `queued_at`을 처음 한 번 적는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-200). 기한 지난 행은 틱마다 채널당 50건 [가정]까지 따로 잡는다: 그 채널의 앞쪽 500행 [가정]을 고른 뒤 `payment`와 조인해 `authenticated_at <= 지금 − 기한`인 행만 `for update of j skip locked`로 잠근다(추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰) | `payment_confirm_job_claim_idx (pg, next_attempt_at, payment_id)`(기한 지난 행은 `payment` 기본 키도) | `Limit → LockRows → Index Scan` | 잡은 행 수, 실행 시간, `payment_confirm_in_flight`, `payment_pg_saturated_total{reason}` |
 | 승인 명령 읽기와 답 반영(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-181) | 읽기 `select … , exists (select 1 from payment_event e where e.payment_id = p.id and e.type = 'CONFIRM_SENT') from payment p where p.id = $1`. 답 반영 `select … from payment where id = $1 for update` → `select coalesce(max(seq), 0) + 1 from payment_event where payment_id = $1` → `insert payment_event` → `update payment` → `delete from payment_confirm_job where payment_id = $1` → Outbox(문장 시간 한도 5초 [가정]) | `payment` 기본 키, `payment_event` 기본 키 `(payment_id, seq)`(결제 한 건의 이력은 몇 줄뿐이다) | `Index Scan`, `Index Only Scan Backward`(`max`) | 실행 시간, `payment_confirm_write_failures_total` |
 | 단독 조회 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-182·HOT-151) | 1초 [가정]마다 `select … from payment where status in ('UNKNOWN', 'AWAITING_DEPOSIT') and next_query_at <= $1 order by next_query_at limit $2 for update skip locked`, 같은 트랜잭션에서 행마다 `next_query_at`·`query_attempts` UPDATE | `payment_query_due_idx (next_query_at) WHERE status IN ('UNKNOWN', 'AWAITING_DEPOSIT')` | `Limit → LockRows → Index Scan`(끝난 행은 인덱스에 없다) | 잡은 행 수, 실행 시간, `payment_unknown_in_flight` |
 | 되돌림 확인 잡기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-152) | 단독 조회 잡기와 같은 문장과 인덱스(`payment_query_due_idx`)다. `APPROVED` 행은 되돌림 통보를 받은 동안만 `next_query_at`이 차 있어 인덱스에 들어간다 | `payment_query_due_idx` | `Limit → LockRows → Index Scan` | `payment_unknown_query_total{outcome}`의 `deposit_reversed`·`reversal_waiting`·`reversal_unconfirmed` |

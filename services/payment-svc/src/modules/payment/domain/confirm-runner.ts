@@ -44,14 +44,16 @@ export const CONFIRM_CALL_GUARD_MS = 72_000;
 export const CONFIRM_EXPIRED_BATCH = 50;
 /** 기한 지난 행을 찾으려고 표 앞쪽에서 살펴보는 행 수 500건 [가정](밀린 표에서 틱마다 표 전체를 조인하지 않게) */
 export const CONFIRM_EXPIRED_SCAN = 500;
+/** 잡을 때 때가 된 지 이만큼 넘게 지난 명령은 여유 부족으로 재시도 큐에서 기다린 것으로 본다 1초 [가정](잡기 주기 100ms보다 충분히 길다, 경로 지표 retry_queue, BUILD_ORDER PRF-200) */
+export const CONFIRM_QUEUED_AFTER_MS = 1_000;
 
 /** payment_event의 내부 표시: 결제사 승인 호출 앞에 남긴다(exported = false, payment §4.2 5번) */
 export const CONFIRM_SENT_EVENT_TYPE = 'CONFIRM_SENT';
 /** payment_event·trade.payments의 입금 오류 되돌림(T21) 사건 종류(BUILD_ORDER HOT-152) */
 export const DEPOSIT_REVERSED_EVENT_TYPE = 'DEPOSIT_REVERSED';
 
-/** payment_confirm_total{outcome}의 값 */
-export const PAYMENT_CONFIRM_OUTCOMES = ['approved', 'already', 'declined', 'waiting', 'in_progress', 'unknown', 'expired', 'restart', 'no_adapter'] as const;
+/** payment_confirm_total{outcome}의 값. circuit_open은 서킷이 열려 부르지 않고 미룬 명령이다(BUILD_ORDER PRF-200) */
+export const PAYMENT_CONFIRM_OUTCOMES = ['approved', 'already', 'declined', 'waiting', 'in_progress', 'unknown', 'expired', 'restart', 'no_adapter', 'circuit_open'] as const;
 export type PaymentConfirmOutcome = (typeof PAYMENT_CONFIRM_OUTCOMES)[number];
 
 /** 잡은 승인 명령 한 행(claimDue의 결과) */
@@ -67,6 +69,8 @@ export interface ConfirmJob {
   readonly leaseUntilMs: number;
   /** 잡기 전에 lease_owner가 차 있었는가(앞 실행이 임대를 끊긴 채 남긴 행) */
   readonly hadPreviousOwner: boolean;
+  /** 이 명령이 여유 부족이나 서킷으로 미뤄진 적이 있다(경로 지표 retry_queue, BUILD_ORDER PRF-200) */
+  readonly queued?: true;
 }
 
 /** 승인 호출에 필요한 원장 값(read의 결과) */
@@ -90,6 +94,8 @@ export interface ConfirmTarget {
   readonly confirmSent: boolean;
   /** 회차의 입장 시작 시각(epoch ms). 답의 입금 기한을 자른다. 승인 명령에 없었으면 없다(BUILD_ORDER PRF-190 코드 리뷰) */
   readonly entryOpensAtMs?: number;
+  /** 승인 접수 시각(epoch ms, ACCEPTED로 쓴 status_changed_at). 결제 확정 소요의 시작점이다(BUILD_ORDER PRF-200) */
+  readonly acceptedAtMs?: number;
 }
 
 /**
@@ -205,7 +211,7 @@ export type ConfirmRunOutcome =
   | { readonly kind: 'DROPPED' }
   | { readonly kind: 'FINISHED'; readonly status: ConfirmFinish['status']; readonly outcome: PaymentConfirmOutcome }
   | { readonly kind: 'STALE' }
-  | { readonly kind: 'RETRY'; readonly outcome: 'in_progress' | 'no_adapter'; readonly nextAtMs: number }
+  | { readonly kind: 'RETRY'; readonly outcome: 'in_progress' | 'no_adapter' | 'circuit_open'; readonly nextAtMs: number }
   | { readonly kind: 'SKIPPED'; readonly reason: 'LEASE_LOST' | 'RELEASED' | 'READ_FAILED' | 'NO_TOKEN' }
   | { readonly kind: 'WRITE_FAILED'; readonly stage: 'mark' | 'finish' | 'reschedule' | 'drop' };
 

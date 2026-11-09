@@ -5,7 +5,8 @@ import type { Clock } from '@peaket/platform';
 import { MIN_CALL_REMAINING_MS, PaymentInputError, PaymentNotFoundError } from '../domain/confirm-command.js';
 import { type DepositCancelAnswer, type DepositCancelInput, type DepositCancelOutcome, type DepositCancelResult, DEPOSIT_CANCEL_CALL_TIMEOUT_MS, decideDepositCancel, depositCancelIdemKey, depositCancelStaleResult, parseDepositCancel, PaymentCancelStateError } from '../domain/deposit-cancel.js';
 import type { CancelResult, PaymentGatewayPort, QueryResult } from '../domain/payment-gateway.js';
-import type { PgCallGuards } from '../domain/pg-call-guard.js';
+import type { PgCallGuard, PgCallGuards } from '../domain/pg-call-guard.js';
+import { isQueryOutage } from '../domain/pg-circuit.js';
 import type { CallBudget, PaymentDepositCancels, PaymentDepositSignals, PaymentGateways } from '../domain/ports.js';
 
 export interface CancelDepositPaymentDeps {
@@ -74,10 +75,11 @@ export class CancelDepositPayment {
     const gateway = gateways.of(target.pg);
     const guard = gateway === undefined ? undefined : guards.of(target.pg);
     // 토큰이 없으면 상한 없이 부르지 않는다. 표시는 남아 있고 부른 쪽이 같은 취소 ID로 다시 보낸다
-    if (gateway === undefined || guard === undefined || leftMs() < MIN_CALL_REMAINING_MS || !guard.tryTakeToken()) return this.#answer('UNKNOWN');
+    // 서킷이 닫혀 있지 않으면 부르지 않고 결과 모름으로 답한다(표시는 남고 부른 쪽이 같은 취소 ID로 다시 보낸다. 시험 호출은 취소가 아니라 단독 조회다, BUILD_ORDER PRF-200)
+    if (gateway === undefined || guard === undefined || leftMs() < MIN_CALL_REMAINING_MS || !guard.circuitClosed() || !guard.tryTakeToken()) return this.#answer('UNKNOWN');
     const cancel = await this.#cancel(gateway, target.paymentRef, parsed, leftMs());
     if (leftMs() < MIN_CALL_REMAINING_MS) return this.#answer('UNKNOWN');
-    const query = guard.tryTakeToken() ? await this.#query(gateway, target.paymentRef, target.txId, leftMs()) : QUERY_UNKNOWN;
+    const query = guard.admitsQuery() && guard.tryTakeToken() ? await this.#query(gateway, guard, target.paymentRef, target.txId, leftMs) : QUERY_UNKNOWN;
     const decision = decideDepositCancel(cancel, query, target);
     if (decision.kind === 'ANSWER') return this.#answer(decision.result);
     if (leftMs() < MIN_CALL_REMAINING_MS) return this.#answer('UNKNOWN');
@@ -87,7 +89,7 @@ export class CancelDepositPayment {
     return this.#answer(depositCancelStaleResult(await store.readCancelStatus(target.paymentId, left())));
   }
 
-  /** 결제사 취소 한 번. 던지거나 한도를 넘으면 결과 모름이다 */
+  /** 결제사 취소 한 번(닫힌 서킷에서만 오고 서킷 판정에 세지 않는다). 던지거나 한도를 넘으면 결과 모름이다 */
   async #cancel(gateway: PaymentGatewayPort, paymentRef: string, input: DepositCancelInput, leftMs: number): Promise<CancelResult> {
     try {
       return await withTimeout(gateway.cancel({ paymentRef, amount: 'ALL', reason: input.reason, idemKey: depositCancelIdemKey(input.cancellationId) }), Math.min(DEPOSIT_CANCEL_CALL_TIMEOUT_MS, leftMs));
@@ -96,11 +98,23 @@ export class CancelDepositPayment {
     }
   }
 
-  /** 단독 조회 한 번. 던지거나 한도를 넘으면 결과 모름이다 */
-  async #query(gateway: PaymentGatewayPort, paymentRef: string, txId: string | undefined, leftMs: number): Promise<QueryResult> {
-    const limitMs = Math.min(DEPOSIT_CANCEL_CALL_TIMEOUT_MS, leftMs);
+  /**
+   * 단독 조회 한 번(서킷 안에서). 던지거나 한도를 넘거나 서킷이 끊으면 결과 모름이다.
+   * 부른 쪽의 남은 시간이 다해 끊긴 호출은 결제사 장애가 아니므로 서킷 실패로 세지 않는다(반 열림의 시험 호출이 된 때 다시 열지 않게, 코드 리뷰)
+   */
+  async #query(gateway: PaymentGatewayPort, guard: PgCallGuard, paymentRef: string, txId: string | undefined, leftMs: () => number): Promise<QueryResult> {
+    const limitMs = Math.min(DEPOSIT_CANCEL_CALL_TIMEOUT_MS, leftMs());
+    const outOfTime = (): boolean => leftMs() < MIN_CALL_REMAINING_MS;
     try {
-      return await withTimeout(gateway.query(paymentRef, { timeoutMs: limitMs, ...(txId === undefined ? {} : { expectedTxId: txId }) }), limitMs);
+      return await guard.run(
+        () =>
+          withTimeout(gateway.query(paymentRef, { timeoutMs: limitMs, ...(txId === undefined ? {} : { expectedTxId: txId }) }), limitMs).catch((err: unknown) => {
+            if (outOfTime()) return QUERY_UNKNOWN;
+            throw err;
+          }),
+        (answer) => isQueryOutage(answer) && !outOfTime(),
+        'query',
+      );
     } catch {
       return QUERY_UNKNOWN;
     }

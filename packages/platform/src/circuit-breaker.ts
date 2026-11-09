@@ -235,6 +235,14 @@ export class CircuitBreaker {
     return 'closed';
   }
 
+  /**
+   * 지금 run이 의존성을 부를 수 있는가: 닫힘, 또는 시험 호출이 아직 나가지 않은 반 열림이면 참이고 끈 뒤에는 거짓이다. 동시 호출 상한·남은 시간은 보지 않는다.
+   * 시험 호출이 판정 한도를 넘겨 다시 열린 뒤 반 열림이 되면 앞 호출이 끝나지 않아도 참이다(코드 리뷰 2026-11-09, BUILD_ORDER PRF-200)
+   */
+  get acceptsCalls(): boolean {
+    return !this.#shutdown && (this.#impl.closed || this.#impl.pendingClose);
+  }
+
   /** 지금 의존성을 부르고 있는 수(떼어 냈거나 시험 한도를 넘겼어도 아직 도는 호출을 센다) */
   get inFlight(): number {
     return this.#inFlight;

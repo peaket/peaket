@@ -207,7 +207,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('PRF181_main.ts는 실행기 지표를 서비스 레지스트리에 붙이고 플랫폼 로거로 로그를 잇는다', () => {
     expect(main()).toMatch(/\bnew PromPaymentConfirmSignals\(/);
-    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(8);
+    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(10);
     expect(main()).toMatch(/\bpaymentConfirmLog\(service\.logger\)/);
   });
 
@@ -257,7 +257,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new PaymentConfirmRunner('), '만들기 < 켜기').toBeLessThan(start);
     expect(m.indexOf('await service.listen()'), 'listen < 켜기').toBeLessThan(start);
     expect(m.lastIndexOf('.register(service.metrics.registry)', start), '지표 붙이기 < 켜기').toBeGreaterThan(-1);
-    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 여덟 다 켜기 앞').toHaveLength(8);
+    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 열 다 켜기 앞').toHaveLength(10);
   });
 
   test('PRF181_SIGTERM: 준비 상태를 내린 뒤 실행기를 멈추고(돌던 호출을 기다린다), 그 뒤에 서비스와 전용 풀을 닫는다 [ASVS v5.0.0-2.3.3]', () => {

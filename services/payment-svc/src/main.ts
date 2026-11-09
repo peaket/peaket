@@ -15,6 +15,7 @@ import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  BreakerPgCircuits,
   CachedPgSelectionReader,
   CancelDepositPayment,
   channelTableOf,
@@ -49,6 +50,7 @@ import {
   PromPaymentConfirmSignals,
   PromPaymentDepositSignals,
   PromPaymentMethodRefSignals,
+  PromPaymentResolutionSignals,
   PromPaymentUnknownSignals,
   PromPaymentWebhookSignals,
   PromPgCallGuardSignals,
@@ -146,7 +148,10 @@ for (const warning of checkoutWarnings) service.logger.warn({ kind: 'payment-che
 const depositLog = paymentDepositLog(service.logger);
 const deposit = { cipher: virtualAccountCipher, log: depositLog, signals: depositSignals };
 const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: systemClock });
-const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger) });
+// 결제사 서킷은 채널마다 하나이고 승인·조회·취소가 함께 쓴다. 값은 플랫폼 기본값 [가정](docs/features/payment.md §2 '결제사 서킷의 첫 구현', BUILD_ORDER PRF-200)
+const circuits = new BreakerPgCircuits({ service: SERVICE, registry: service.metrics.registry, logger: service.logger, clock: systemClock }).register(service.metrics.registry);
+const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger), circuits });
+const resolutionSignals = new PromPaymentResolutionSignals().register(service.metrics.registry);
 service.readiness.register('grpc');
 if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
@@ -170,9 +175,9 @@ service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 // lease_owner에 적는 파드 이름(쿠버네티스가 PEAKET_POD를 넣는다. 없으면 호스트 이름)
 const podId = process.env.PEAKET_POD?.trim() || hostname();
 // 채널별 호출 보호기는 두 실행기가 하나를 함께 쓴다(토큰 버킷은 승인과 단독 조회를 함께 센다, BUILD_ORDER PRF-183)
-const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit });
+const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit, resolution: resolutionSignals });
 confirmRunner.start();
-const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit });
+const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit, resolution: resolutionSignals });
 unknownResolver.start();
 
 process.once('SIGTERM', () => {
@@ -181,7 +186,7 @@ process.once('SIGTERM', () => {
   void shutdownInOrder({
     stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop()],
     closeService: () => service.close(),
-    closeConnections: () => [database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()],
+    closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()],
     onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
   });
 });

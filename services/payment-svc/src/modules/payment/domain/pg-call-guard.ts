@@ -10,6 +10,7 @@
 // - 승인의 몫은 버킷의 90% [가정]이고 나머지 10%는 단독 조회가 쓴다. 조회는 버킷 전체를 쓴다(몰린 승인이 조회를 굶겨 UNKNOWN이 풀리지 않는 일을 막는다).
 // - 승인 한 건의 토큰 수는 어댑터의 capabilities().confirmCallCost다(없으면 1, BUILD_ORDER HOT-140 코드 리뷰). 묶음의 최소 크기도 비용 배로 늘린다(그래야 작은 채널에서 승인 몫이 한 건 값에 닿는다).
 import type { PgName } from './payment-gateway.js';
+import { PG_CIRCUIT_TRIAL_HOLD_MS, type PgCallKind, type PgCircuit, type PgCircuits } from './pg-circuit.js';
 import type { PaymentGateways, PgCallGuardLog, PgCallGuardSignals } from './ports.js';
 
 /** 결제사 채널 전부(어댑터가 없는 채널까지 틱이 본다) */
@@ -78,6 +79,8 @@ export interface PgCallGuardOptions {
   readonly log: PgCallGuardLog;
   /** capabilities().confirmCallCost(승인 한 건의 토큰 수). 없으면 1 */
   readonly confirmCallCost?: number;
+  /** 채널 서킷(BUILD_ORDER PRF-200). 없으면 서킷 없이 부른다 */
+  readonly circuit?: PgCircuit;
 }
 
 /** 채널 하나의 호출 보호기. 던지지 않는다(지표·로그가 던져도 삼킨다) */
@@ -100,11 +103,15 @@ export class PgCallGuard {
   /** 돌고 있는 승인 호출 수(지표) */
   #inflight = 0;
   #loweredAtMs: number | undefined;
+  readonly #circuit: PgCircuit | undefined;
+  /** 반 열림의 시험 호출을 잡은 뒤 다음 틱이 또 잡지 않는 끝 시각(단조, 없으면 0) */
+  #trialHoldUntilMs = 0;
 
   /** @throws RangeError 초당 상한·파드 수·벌크헤드가 틀림, confirmCallCost가 1 이상의 정수가 아님 */
   constructor(o: PgCallGuardOptions) {
     if (o.confirmCallCost !== undefined && !isPositiveInt(o.confirmCallCost)) throw new RangeError(`승인 호출 비용은 1 이상의 정수다: ${String(o.confirmCallCost)}`);
     this.pg = o.pg;
+    this.#circuit = o.circuit;
     this.#clock = o.clock;
     this.#signals = o.signals;
     this.#log = o.log;
@@ -124,8 +131,32 @@ export class PgCallGuard {
     return { rps: this.#rps, concurrency: this.#concurrency };
   }
 
-  /** 승인이 지금 잡을 수 있는 수 = min(벌크헤드 빈자리, 조회 몫을 뺀 토큰으로 낼 수 있는 승인 건수) */
+  /** 서킷이 닫혀 있는가(서킷이 없으면 참이다). 승인과 취소는 닫혔을 때만 부른다(승인은 CONFIRM_SENT를 쓰기 전에 본다, BUILD_ORDER PRF-200, 코드 리뷰) */
+  circuitClosed(): boolean {
+    return this.#circuit === undefined || this.#circuit.state() === 'closed';
+  }
+
+  /** 서킷이 지금 단독 조회를 받는가(닫힘, 또는 시험 호출이 아직 나가지 않은 반 열림. 서킷이 없으면 참이다) */
+  admitsQuery(): boolean {
+    return this.#circuit === undefined || this.#circuit.admits();
+  }
+
+  /** 반 열림이 시험 호출을 기다리는가(막는 시간이 지났고 아직 나가지 않았다). 잡을 UNKNOWN이 없을 때 없는 결제 조회를 보낼지 본다 */
+  awaitsTrial(): boolean {
+    return this.#circuit?.state() === 'half_open' && this.#queryRoom() > 0;
+  }
+
+  /**
+   * 결제사 호출 하나를 서킷 안에서 돈다(kind의 뜻은 PgCallKind). 서킷이 없으면 그대로 부른다. 판정에 세는 호출에서 isOutage가 참인 답은 일시 장애로 세되 답을 그대로 돌려준다.
+   * @throws PgCircuitOpenError 서킷이 끊어 부르지 않았다
+   */
+  run<T>(action: () => Promise<T>, isOutage: (answer: T) => boolean, kind: PgCallKind): Promise<T> {
+    return this.#circuit === undefined ? action() : this.#circuit.run(action, isOutage, kind);
+  }
+
+  /** 승인이 지금 잡을 수 있는 수 = min(벌크헤드 빈자리, 조회 몫을 뺀 토큰으로 낼 수 있는 승인 건수). 서킷이 닫혀 있지 않으면 0이다(시험 호출은 단독 조회다) */
   available(): number {
+    if (!this.circuitClosed()) return 0;
     this.#refill();
     return Math.min(this.#freeSlots(), this.#confirmsByTokens());
   }
@@ -138,8 +169,9 @@ export class PgCallGuard {
     return n;
   }
 
-  /** 상한에 막혀 표의 행을 잡지 못했다(지표). reason을 주지 않으면 자리가 없을 때 bulkhead, 아니면 token이다 */
+  /** 상한에 막혀 표의 행을 잡지 못했다(지표). reason을 주지 않으면 자리가 없을 때 bulkhead, 아니면 token이다. 서킷이 닫혀 있지 않을 때는 상한 때문이 아니라 세지 않는다 */
   noteBlocked(reason: PgSaturationReason = this.#freeSlots() === 0 ? 'bulkhead' : 'token'): void {
+    if (!this.circuitClosed()) return;
     this.#saturated(reason);
   }
 
@@ -166,9 +198,14 @@ export class PgCallGuard {
   /** 단독 조회가 쓸 토큰을 max까지 미리 빼고 뺀 수를 돌려준다(버킷 전체에서, 쓰지 않은 만큼 refundTokens로 돌려준다) */
   takeQueryTokens(max: number): number {
     this.#refill();
-    const n = Math.max(0, Math.min(max, Math.floor(this.#tokens)));
+    const n = Math.max(0, Math.min(max, Math.floor(this.#tokens), this.#queryRoom()));
     this.#tokens -= n;
     return n;
+  }
+
+  /** 단독 조회 틱이 count건을 실제로 잡았다: 반 열림이면 잡은 뒤 부르기까지의 틈에 다음 틱이 또 잡지 않게 잠시 막는다. 잡을 행이 없으면(count 0) 막지 않는다(코드 리뷰) */
+  noteTrialClaimed(count: number): void {
+    if (count > 0 && this.#circuit?.state() === 'half_open') this.#trialHoldUntilMs = this.#clock.monotonicMs() + PG_CIRCUIT_TRIAL_HOLD_MS;
   }
 
   /** 미리 뺐지만 호출하지 않은 토큰을 돌려준다(묶음 크기를 넘지 않는다) */
@@ -224,6 +261,14 @@ export class PgCallGuard {
   }
 
   // ---- 안쪽 ----
+
+  /** 서킷이 지금 받는 단독 조회 수: 닫힘(또는 서킷 없음)은 제한 없음, 열림은 0, 반 열림은 시험 호출이 남았으면 하나(행을 잡은 뒤 부르기까지의 틈은 PG_CIRCUIT_TRIAL_HOLD_MS 막는다) */
+  #queryRoom(): number {
+    const c = this.#circuit;
+    if (c === undefined || c.state() === 'closed') return Number.POSITIVE_INFINITY;
+    if (!c.admits()) return 0;
+    return this.#clock.monotonicMs() < this.#trialHoldUntilMs ? 0 : 1;
+  }
 
   #burst(): number {
     return Math.max(PG_MIN_TOKEN_BURST * this.#confirmCost, (this.#rps * PG_TOKEN_BURST_MS) / 1000);
@@ -287,6 +332,8 @@ export interface PgCallGuardsOptions {
   readonly log: PgCallGuardLog;
   /** 채널 벌크헤드를 바꾼다(시험용. 기본 PG_CHANNEL_BULKHEAD) */
   readonly bulkheads?: Partial<Record<PgName, number>>;
+  /** 채널별 서킷(BUILD_ORDER PRF-200). 없으면 서킷 없이 부른다 */
+  readonly circuits?: PgCircuits;
 }
 
 /** 채널별 보호기 등록부. 어댑터의 capabilities를 처음 부를 때 읽어 만들고 파드가 살아 있는 동안 같은 것을 돌려준다 */
@@ -305,10 +352,12 @@ export class PgCallGuards {
     const gateway = this.o.gateways.of(pg);
     if (gateway === undefined) return undefined;
     const { callsPerSecond, confirmCallCost } = gateway.capabilities();
+    const circuit = this.o.circuits?.of(pg);
     const guard = new PgCallGuard({
       pg,
       callsPerSecond,
       ...(confirmCallCost === undefined ? {} : { confirmCallCost }),
+      ...(circuit === undefined ? {} : { circuit }),
       channelBulkhead: this.o.bulkheads?.[pg] ?? PG_CHANNEL_BULKHEAD[pg],
       podCount: this.o.podCount,
       clock: this.o.clock,
