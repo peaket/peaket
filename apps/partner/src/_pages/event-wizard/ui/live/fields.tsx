@@ -20,6 +20,7 @@ const FIELD_IDS: Record<string, string> = {
   aliases: 'w-alias',
   notice: 'w-notice',
   description: 'w-desc',
+  images: 'w-images',
   rounds: 'r-add',
   queueOrder: 'n-ord',
   perPersonLimit: 'n-limit-l',

@@ -80,6 +80,7 @@ jobs:
         env:
           PEAKET_TEST_REPORT: test-report-int.json
       # core-svc의 catalog 표를 실제 PostgreSQL 18로: 마이그레이션, 회차 → 공연 → 판매자 읽기, 표 제약, 회차 공개 요약 경로(BUILD_ORDER HOT-170 ①)
+      # 공연 이미지 올리기(ImageService 대역 gRPC)와 좌석맵 가져오기: 시험이 tsc로 dist를 만들어 seatmap-worker 프로세스(dist/seatmap-worker/main.js)를 띄운다(HOT-190·HOT-210, ADR-0257)
       # 범위를 고른 실행(--affected)에서는 의존 패키지(@peaket/search-normalize 등)의 dist가 없을 수 있어 먼저 빌드한다
       - run: pnpm exec turbo run build --filter=@peaket/core-svc^...
       - run: pnpm --filter @peaket/core-svc test:integration

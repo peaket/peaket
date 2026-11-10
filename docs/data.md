@@ -426,6 +426,7 @@ erDiagram
     production ||--|{ event : "회차(ADR-0093)"
     place ||--o{ production : "공연장(실제 장소)"
     production ||--o{ production_artist : ""
+    production ||--o{ production_image : "포스터 1장·상세 0~10장(ADR-0062 결정 38, ADR-0257)"
     artist ||--o{ production_artist : ""
     production ||--o| search_document : "검색 읽기 모델(ADR-0094)"
     venue ||--o{ section : has
@@ -486,6 +487,19 @@ erDiagram
         jsonb requested_artists "새 아티스트 이름 요청(이름과 보이는 순서). 기존 아티스트는 production_artist로 잇는다. 판매 승인 때 운영자가 잇거나 만들고 비운다(ADR-0093 결정 4, ADR-0198 결정 4)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
         timestamptz created_at
+    }
+    production_image {
+        uuid id PK "서버가 만든 이미지 ID(UUIDv7). 원본 키·파생본 경로는 이 값으로만 만든다(원본 파일 이름은 버린다, ADR-0257)"
+        uuid production_id FK
+        uuid promoter_id FK "테넌트(행 보안, 공연의 promoter_id와 같다)"
+        text kind "POSTER|DETAIL. 공연마다 POSTER는 하나(부분 유일 인덱스)"
+        text alt "대체 텍스트 1~300자(필수)"
+        int display_order "상세 이미지 순서 0~9(포스터는 0). 지우거나 옮기면 0부터 빈틈 없이 다시 매긴다"
+        int width "image-worker가 디코딩한 원본 폭(px). core-svc가 범위를 다시 본다"
+        int height
+        int version "고치기 If-Match의 판(1부터)"
+        timestamptz created_at
+        timestamptz updated_at
     }
     production_artist {
         uuid production_id PK
@@ -2556,6 +2570,7 @@ erDiagram
 | 승인 실행기(추천 적용 2026-11-09, BUILD_ORDER PRF-181, ADR-0180): 두 파드가 같은 승인 명령을 잡음, 처리 중 재전송과 늦게 온 답이 겹침, 임대가 끝난 뒤 앞 파드의 답과 다음 실행기의 `UNKNOWN`이 겹침 | 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 임대(`lease_owner`·`lease_until`, 지금 + 75초 [가정])를 쓰고 커밋한 뒤 잠금 밖에서 결제사를 부르므로 살아 있는 임대의 행은 한 파드만 돈다. `CONFIRM_SENT`는 `payment` 행 → 명령 행 차례로 잠그고 자기 임대일 때만 커밋한다(임대를 잃었으면 부르지 않는다. 표시가 이미 있는 재전송도 호출 앞에서 같은 확인을 거친다, 추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰). 답 반영은 `payment` 행을 `FOR UPDATE`로 잠근 뒤 `status = 'ACCEPTED'`일 때만 원장·이력·Outbox를 쓰고 명령 행을 지우므로(잠금 차례는 `payment` → 명령 행) 겹친 쪽은 0건을 쓰고 명령 행만 치운다. 앞 소유자가 있고 `CONFIRM_SENT`가 있는 행은 결제사를 다시 부르지 않고 `UNKNOWN`으로 끝내고, 멱등키 `confirm-{orderId}`가 결제사 쪽 이중 승인을 막는다. 잡기는 명령 행의 결제사 칸으로 채널의 행만 골라 명령 행만 잠근다(잠금 차례는 그대로다. 기한 지난 행만 잡는 길은 `payment`와 조인해 기한을 보되 `FOR UPDATE OF j`로 명령 행만 잠근다, 추천 적용 2026-11-09, BUILD_ORDER PRF-183, 코드 리뷰) | P-T6·P-T24 통합 시험(실제 PostgreSQL + 시뮬레이터: 두 파드가 하나만 잡음, 임대가 끊긴 잔해를 시계로 만들어 다른 실행기가 잡아도 승인 호출이 더 나가지 않음). 프로세스를 실제로 강제 종료하는 시험은 PRF-182의 P-T24 몫이다(추천 적용 2026-11-09, BUILD_ORDER PRF-181, 코드 리뷰) |
 | 승인 명령 접수(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0180): 같은 주문의 `ConfirmPayment` 두 개가 겹침(Saga가 데드라인 뒤 다시 보냄, 두 파드), 한 주문을 다른 결제사로 부름 | `INSERT payment … ON CONFLICT (order_id) DO NOTHING`의 유일 제약이 하나만 받는다. 뒤 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 0행이라 있는 행을 읽어 같은 답을 준다. 원장·이력 첫 행·승인 명령은 한 트랜잭션이라 진 쪽은 아무것도 쓰지 않는다. 있는 행의 시도·결제사·금액이 요청과 다르면 `FAILED_PRECONDITION`으로 거절하고 SEV2 로그를 남긴다(결제사를 바꾸지 않는다) | P-T53(실제 PostgreSQL로 동시 두 요청 → 원장 1행·승인 명령 1행과 같은 답, 다른 결제사 거절) |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
+| 같은 공연의 이미지를 두 요청이 함께 올리거나 고침(추천 적용 2026-11-10, BUILD_ORDER HOT-190, ADR-0257): 상세 이미지 9장일 때 두 장이 함께 와 11장이 됨, 포스터 두 장이 함께 와 포스터가 둘이 됨, 순서 고치기와 지우기가 겹쳐 순서에 빈틈·겹침이 생김, 같은 이미지를 두 사람이 고쳐 한쪽 변경이 사라짐 | 올리기·고치기·지우기는 공연 행을 `SELECT … FOR NO KEY UPDATE`로 잡은 트랜잭션 안에서(등록 경로와 같은 잠금. 공연 행끼리는 줄을 세우고 찜·회차의 외래키 잠금은 막지 않는다) 장수를 세고 순서를 다시 매긴다. 공연마다 포스터 하나는 부분 유일 인덱스(`kind = 'POSTER'`)가 한 번 더 막는다. 고치기는 `If-Match`의 `version`을 대조한다(412). 처리(디코딩)는 잠금 밖에서 먼저 하고, 잠금 안에서는 장수·순서만 다시 본다 | core-svc 통합 시험(이미지 올리기 동시 요청, 실제 PostgreSQL. `[ASVS v5.0.0-2.3.2]` 태그) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
 

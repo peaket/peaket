@@ -117,7 +117,7 @@ export function toProductionInput(b: z.output<typeof PartnerProductionBody>): Pr
 }
 
 /** 파트너 역할의 테넌트. identity가 파트너 세션에는 늘 채운다. 없으면 권한을 확인하지 못한 것으로 닫는다(503 authz-unavailable, authz-matrix §3.1) */
-function tenantOf(me: Principal): string {
+export function tenantOf(me: Principal): string {
   if (!me.tenantId) throw new ProblemError({ type: 'authz-unavailable', status: 503, title: '권한을 확인하지 못했습니다', retryAfterSeconds: 1 });
   return me.tenantId;
 }

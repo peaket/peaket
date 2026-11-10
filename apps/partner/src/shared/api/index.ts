@@ -4,7 +4,7 @@
 import { createApiClient, type ApiClient } from '@peaket/api-client';
 import { PARTNER_API_ORIGIN } from '@/shared/config/origins';
 
-export { OPERATIONS } from '@peaket/api-client';
+export { OPERATIONS, parseRetryAfter } from '@peaket/api-client';
 
 let client: ApiClient | null = null;
 

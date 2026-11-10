@@ -4729,6 +4729,11 @@ export const useCreatePartnerProductionSeatmap = <TError = ErrorType<ProblemResp
   status: 200
 }
 
+export type createPartnerProductionSeatmapImportResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createPartnerProductionSeatmapImportResponse413 = {
   data: ProblemResponse
   status: 413
@@ -4739,6 +4744,11 @@ export type createPartnerProductionSeatmapImportResponse422 = {
   status: 422
 }
 
+export type createPartnerProductionSeatmapImportResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
 export type createPartnerProductionSeatmapImportResponse503 = {
   data: ServiceUnavailableResponse
   status: 503
@@ -4747,7 +4757,7 @@ export type createPartnerProductionSeatmapImportResponse503 = {
 export type createPartnerProductionSeatmapImportResponseSuccess = (createPartnerProductionSeatmapImportResponse200) & {
   headers: Headers;
 };
-export type createPartnerProductionSeatmapImportResponseError = (createPartnerProductionSeatmapImportResponse413 | createPartnerProductionSeatmapImportResponse422 | createPartnerProductionSeatmapImportResponse503) & {
+export type createPartnerProductionSeatmapImportResponseError = (createPartnerProductionSeatmapImportResponse404 | createPartnerProductionSeatmapImportResponse413 | createPartnerProductionSeatmapImportResponse422 | createPartnerProductionSeatmapImportResponse429 | createPartnerProductionSeatmapImportResponse503) & {
   headers: Headers;
 };
 
@@ -4760,7 +4770,7 @@ export const getCreatePartnerProductionSeatmapImportUrl = (productionId: string,
 }
 
 /**
- * FR-023. SVG는 구역 도형(polygon·path·rect, id·data 속성으로 구역 이름)과 좌석 원(circle의 중심 좌표, data 속성으로 열·번호), JSON은 SeatMapLayout, CSV는 좌석 행(구역·열·번호·x·y·등급·휠체어석·게이트 구역)과 구역 첫 행의 shape 열(꼭짓점 'x y;x y;…')로 받는다(추천 적용 2026-10-14, ADR-0063). 검증만 하고 저장하지 않는다(저장은 PUT …/seatmap). 파일 해석은 core-svc가 하지 않고 DB 자격 증명이 없는 별도 작업 seatmap-worker에 gRPC로 맡긴다(seatmap.proto ParseSeatmapImport). core-svc는 돌려받은 배치를 스키마·개수 상한·업무 경고로 다시 본 뒤 결과를 만든다(소유자 결정 2026-10-30, open-items 70번 ②, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §10)
+ * FR-023. SVG는 구역 도형(polygon·path·rect, id·data 속성으로 구역 이름)과 좌석 원(circle의 중심 좌표, data 속성으로 열·번호), JSON은 SeatMapLayout, CSV는 좌석 행(구역·열·번호·x·y·등급·휠체어석·게이트 구역)과 구역 첫 행의 shape 열(꼭짓점 'x y;x y;…')로 받는다(추천 적용 2026-10-14, ADR-0063). 검증만 하고 저장하지 않는다(저장은 PUT …/seatmap). 파일 해석은 core-svc가 하지 않고 DB 자격 증명이 없는 별도 작업 seatmap-worker에 gRPC로 맡긴다(seatmap.proto ParseSeatmapImport). core-svc는 돌려받은 배치를 스키마·개수 상한·업무 경고로 다시 본 뒤 결과를 만든다(소유자 결정 2026-10-30, open-items 70번 ②, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §10). 사전 요청이 생기도록 X-Requested-With 헤더가 있어야 받는다(공연 이미지 올리기와 같다, ADR-0257 결정 8)
  * @summary 좌석맵 가져오기(SVG/JSON/CSV, 구역 도형과 좌석 좌표를 함께, 행별 검증 결과)
  */
 export const createPartnerProductionSeatmapImport = async (productionId: string,
@@ -4784,7 +4794,7 @@ formData.append(`format`, createPartnerProductionSeatmapImportBody.format);
 
 export const getCreatePartnerProductionSeatmapImportMutationKey = () => ['createPartnerProductionSeatmapImport'] as const;
 
-export const getCreatePartnerProductionSeatmapImportMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
+export const getCreatePartnerProductionSeatmapImportMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionSeatmapImport>>, TError,CreatePartnerProductionSeatmapImportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionSeatmapImport>>, TError,CreatePartnerProductionSeatmapImportMutationVariables, TContext> => {
 
@@ -4813,13 +4823,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerProductionSeatmapImportMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProductionSeatmapImport>>>
     export type CreatePartnerProductionSeatmapImportMutationBody = BodyType<CreatePartnerProductionSeatmapImportBody>
-    export type CreatePartnerProductionSeatmapImportMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
+    export type CreatePartnerProductionSeatmapImportMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreatePartnerProductionSeatmapImportMutationVariables = {productionId: string;data: BodyType<CreatePartnerProductionSeatmapImportBody>}
 
     /**
  * @summary 좌석맵 가져오기(SVG/JSON/CSV, 구역 도형과 좌석 좌표를 함께, 행별 검증 결과)
  */
-export const useCreatePartnerProductionSeatmapImport = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
+export const useCreatePartnerProductionSeatmapImport = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionSeatmapImport>>, TError,CreatePartnerProductionSeatmapImportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerProductionSeatmapImport>>,
@@ -5063,9 +5073,9 @@ export type createPartnerProductionImageResponse201 = {
   status: 201
 }
 
-export type createPartnerProductionImageResponse403 = {
+export type createPartnerProductionImageResponse404 = {
   data: ProblemResponse
-  status: 403
+  status: 404
 }
 
 export type createPartnerProductionImageResponse409 = {
@@ -5088,10 +5098,25 @@ export type createPartnerProductionImageResponse422 = {
   status: 422
 }
 
+export type createPartnerProductionImageResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerProductionImageResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerProductionImageResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type createPartnerProductionImageResponseSuccess = (createPartnerProductionImageResponse201) & {
   headers: Headers;
 };
-export type createPartnerProductionImageResponseError = (createPartnerProductionImageResponse403 | createPartnerProductionImageResponse409 | createPartnerProductionImageResponse413 | createPartnerProductionImageResponse415 | createPartnerProductionImageResponse422) & {
+export type createPartnerProductionImageResponseError = (createPartnerProductionImageResponse404 | createPartnerProductionImageResponse409 | createPartnerProductionImageResponse413 | createPartnerProductionImageResponse415 | createPartnerProductionImageResponse422 | createPartnerProductionImageResponse429 | createPartnerProductionImageResponse503 | createPartnerProductionImageResponse504) & {
   headers: Headers;
 };
 
@@ -5104,7 +5129,7 @@ export const getCreatePartnerProductionImageUrl = (productionId: string,) => {
 }
 
 /**
- * FR-022, SCR-021 1단계 CMP-069, ADR-0062 결정 38(추천 적용 2026-10-14, ADR-0063). JPEG·PNG·WebP만, 한 장 10MB, 포스터 1장(가로 800·세로 1,000px 이상 세로형), 상세 0~10장(가로 800px 이상), 긴 변 20,000px·4,000만 화소 상한(수치는 [가정]). 서버가 확장자와 파일 앞부분(매직 바이트)을 함께 보고 디코딩해 화소 수를 확인한 뒤 다시 인코딩해 메타데이터(EXIF·GPS 등)를 지운 파생본만 S3 공개 정적 객체로 낸다. 원본은 공개하지 않는다. 원본 파일 이름은 버리고 서버가 만든 ID로 저장한다. 출연자 사진의 처리 근거는 docs/security/data-classification.md 법률 질문 23번(확인 필요)이다. 포스터를 다시 올리면 이전 포스터를 바꾼다. 판매 승인 뒤 바꿔도 재승인 대상이 아니다(재승인 대상은 가격·회차·좌석 등급·좌석맵·판매 정책, docs/planning/03 §2.14). 파트너 소속 공연만(공연 이미지는 공연에 딸린다, ADR-0093)
+ * FR-022, SCR-021 1단계 CMP-069, ADR-0062 결정 38(추천 적용 2026-10-14, ADR-0063). JPEG·PNG·WebP만, 한 장 10MB, 포스터 1장(가로 800·세로 1,000px 이상 세로형), 상세 0~10장(가로 800px 이상), 긴 변 20,000px·4,000만 화소 상한(수치는 [가정]). 서버가 확장자와 파일 앞부분(매직 바이트)을 함께 보고 디코딩해 화소 수를 확인한 뒤 다시 인코딩해 메타데이터(EXIF·GPS 등)를 지운 파생본만 S3 공개 정적 객체로 낸다. 원본은 공개하지 않는다. 원본 파일 이름은 버리고 서버가 만든 ID로 저장한다. 출연자 사진의 처리 근거는 docs/security/data-classification.md 법률 질문 23번(확인 필요)이다. 포스터를 다시 올리면 이전 포스터를 바꾼다. 판매 승인 뒤 바꿔도 재승인 대상이 아니다(재승인 대상은 가격·회차·좌석 등급·좌석맵·판매 정책, docs/planning/03 §2.14). 파트너 소속 공연만(공연 이미지는 공연에 딸린다, ADR-0093). 디코딩·다시 인코딩은 core-svc가 하지 않고 image-worker(ImageService.ProcessImage)에 맡기며, 처리가 끝난 뒤 응답한다(검사 차례·결과 다시 검사·파생본 게시는 ADR-0257 결정 1~3). 원본은 받지 않으면 바로 지운다
  * @summary 공연 이미지 올리기(포스터·상세 이미지, 한 장씩)
  */
 export const createPartnerProductionImage = async (productionId: string,
@@ -5132,7 +5157,7 @@ if(createPartnerProductionImageBody.order !== undefined) {
 
 export const getCreatePartnerProductionImageMutationKey = () => ['createPartnerProductionImage'] as const;
 
-export const getCreatePartnerProductionImageMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreatePartnerProductionImageMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionImage>>, TError,CreatePartnerProductionImageMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionImage>>, TError,CreatePartnerProductionImageMutationVariables, TContext> => {
 
@@ -5161,13 +5186,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerProductionImageMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProductionImage>>>
     export type CreatePartnerProductionImageMutationBody = BodyType<CreatePartnerProductionImageBody>
-    export type CreatePartnerProductionImageMutationError = ErrorType<ProblemResponse>
+    export type CreatePartnerProductionImageMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreatePartnerProductionImageMutationVariables = {productionId: string;data: BodyType<CreatePartnerProductionImageBody>}
 
     /**
  * @summary 공연 이미지 올리기(포스터·상세 이미지, 한 장씩)
  */
-export const useCreatePartnerProductionImage = <TError = ErrorType<ProblemResponse>,
+export const useCreatePartnerProductionImage = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionImage>>, TError,CreatePartnerProductionImageMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerProductionImage>>,
@@ -5180,11 +5205,6 @@ export const useCreatePartnerProductionImage = <TError = ErrorType<ProblemRespon
     export type updatePartnerProductionImageResponse200 = {
   data: ProductionImage
   status: 200
-}
-
-export type updatePartnerProductionImageResponse403 = {
-  data: ProblemResponse
-  status: 403
 }
 
 export type updatePartnerProductionImageResponse404 = {
@@ -5205,7 +5225,7 @@ export type updatePartnerProductionImageResponse428 = {
 export type updatePartnerProductionImageResponseSuccess = (updatePartnerProductionImageResponse200) & {
   headers: Headers;
 };
-export type updatePartnerProductionImageResponseError = (updatePartnerProductionImageResponse403 | updatePartnerProductionImageResponse404 | updatePartnerProductionImageResponse412 | updatePartnerProductionImageResponse428) & {
+export type updatePartnerProductionImageResponseError = (updatePartnerProductionImageResponse404 | updatePartnerProductionImageResponse412 | updatePartnerProductionImageResponse428) & {
   headers: Headers;
 };
 
@@ -5219,7 +5239,7 @@ export const getUpdatePartnerProductionImageUrl = (productionId: string,
 }
 
 /**
- * FR-022(추천 적용 2026-10-14, ADR-0063). 판매 승인 뒤 바꿔도 재승인 대상이 아니다(docs/planning/03 §2.14)
+ * FR-022(추천 적용 2026-10-14, ADR-0063). 판매 승인 뒤 바꿔도 재승인 대상이 아니다(docs/planning/03 §2.14). If-Match는 올리기·고치기 응답의 ETag(version)다. 상세 이미지의 order를 바꾸면 같은 공연의 다른 상세 이미지를 밀어 0부터 빈틈 없이 다시 매긴다. 포스터의 order는 0 그대로다(ADR-0257 결정 3)
  * @summary 공연 이미지 대체 텍스트·순서 고치기
  */
 export const updatePartnerProductionImage = async (productionId: string,
@@ -5305,9 +5325,9 @@ export const useUpdatePartnerProductionImage = <TError = ErrorType<ProblemRespon
   status: 204
 }
 
-export type deletePartnerProductionImageResponse403 = {
+export type deletePartnerProductionImageResponse404 = {
   data: ProblemResponse
-  status: 403
+  status: 404
 }
 
 export type deletePartnerProductionImageResponse409 = {
@@ -5318,7 +5338,7 @@ export type deletePartnerProductionImageResponse409 = {
 export type deletePartnerProductionImageResponseSuccess = (deletePartnerProductionImageResponse204) & {
   headers: Headers;
 };
-export type deletePartnerProductionImageResponseError = (deletePartnerProductionImageResponse403 | deletePartnerProductionImageResponse409) & {
+export type deletePartnerProductionImageResponseError = (deletePartnerProductionImageResponse404 | deletePartnerProductionImageResponse409) & {
   headers: Headers;
 };
 

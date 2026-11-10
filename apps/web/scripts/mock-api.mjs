@@ -653,14 +653,14 @@ export function startMockApi({
     // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
     // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다
     const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin || req.headers.origin === partnerOrigin;
-    const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' } : {};
+    const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After, ETag', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
       res.end(body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body));
     };
     if (req.method === 'OPTIONS') {
       send(204, undefined, undefined, {
-        'access-control-allow-methods': 'GET, POST, PUT, DELETE',
+        'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE',
         'access-control-allow-headers': req.headers['access-control-request-headers'] ?? 'content-type',
         'access-control-max-age': '60',
       });
@@ -669,7 +669,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', 'partnerImage', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }

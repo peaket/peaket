@@ -48,9 +48,11 @@ export const PartnerProductionDetail = zod.object({
   "kind": zod.enum(['POSTER', 'DETAIL']).optional(),
   "alt": zod.string().optional().describe('대체 텍스트(필수). 이미지에만 있는 정보는 공연 설명 글에도 적는다'),
   "order": zod.int().optional().describe('상세 이미지 순서(0부터)'),
-  "width": zod.int().optional(),
+  "width": zod.int().optional().describe('image-worker가 디코딩한 원본 폭(px)'),
   "height": zod.int().optional(),
-  "derivatives": zod.record(zod.string(), zod.url()).optional().describe('파생본 주소(크기별 WebP·JPEG, 이름은 서버가 만든 ID)')
+  "version": zod.int().optional().describe('고치기(PATCH)의 If-Match에 쓰는 판. 응답의 ETag와 같다(ADR-0257)'),
+  "url": zod.url().optional().describe('파생본 묶음의 기준 주소({이미지 출처}/production/{imageId}). 공연 상세의 posterUrl·detailImages[].url과 같은 규칙(ADR-0199 결정 4, ADR-0257)'),
+  "derivatives": zod.record(zod.string(), zod.url()).optional().describe('파생본 주소 표. 키는 \'{폭}.{avif|webp}\'(폭 320·640·960·1280 [가정]의 여덟 개), 값은 {기준 주소}/{폭}.{형식}이다. JPEG 파생본은 만들지 않는다(catalog-review 3.2.1, ADR-0257)')
 }).describe('공연 이미지(포스터 1장, 상세 0~10장, ADR-0062 결정 38). 서버가 다시 검사하고 메타데이터를 지운 파생본만 공개한다. 원본 파일 이름은 쓰지 않는다')),
   "events": zod.array(zod.object({
   "eventId": zod.uuid(),

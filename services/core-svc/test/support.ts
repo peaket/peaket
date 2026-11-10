@@ -1,5 +1,6 @@
 // 시험 공용: identity GetAdminAuthz 대역, 팬·파트너 신원 머리, 등록 본문(BUILD_ORDER HOT-171)
 import type { AdminAuthz, AdminAuthzPort } from '@peaket/platform';
+import { MemoryCdnInvalidation, MemoryImageObjectStore, type MediaWiring } from '../src/modules/catalog/index.js';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 
@@ -33,3 +34,17 @@ export function productionBody(placeId: string, o: Record<string, unknown> = {})
 }
 
 export const NOW_MS = Date.parse('2026-11-05T00:00:00.000Z');
+
+export const IMAGE_ORIGIN_TEST = 'https://img.peaket.test';
+
+/** DB 모드 시험의 이미지·좌석맵 잇기 기본값(처리·해석 작업은 잇지 않아 늘 503이다) */
+export function testMedia(o: Partial<MediaWiring> = {}): MediaWiring {
+  return {
+    imageOrigin: IMAGE_ORIGIN_TEST,
+    processing: { process: () => Promise.reject(new Error('잇지 않았다')) },
+    seatmap: { parse: () => Promise.reject(new Error('잇지 않았다')) },
+    store: new MemoryImageObjectStore(),
+    cdn: new MemoryCdnInvalidation(),
+    ...o,
+  };
+}

@@ -159,6 +159,38 @@ export const event = pgTable(
   ],
 );
 
+/**
+ * 공연 이미지(포스터 1장·상세 0~10장, ADR-0062 결정 38, ADR-0257, docs/data.md production_image). 처리가 끝나 받은 것만 행이 된다(상태 칸이 없다).
+ * 원본 키·파생본 경로는 서버가 만든 id로만 만든다. 공연마다 포스터 하나는 부분 유일 인덱스가 막고, 장수·순서는 공연 행 잠금 안에서 본다(data.md §5)
+ */
+export const productionImage = pgTable(
+  'production_image',
+  {
+    id: uuid('id').primaryKey(),
+    productionId: uuid('production_id').notNull(),
+    // 테넌트(행 보안). 아래 묶음 외래키가 공연의 판매자와 다르게 들어가지 못하게 막는다
+    promoterId: uuid('promoter_id').notNull(),
+    kind: text('kind').notNull(),
+    alt: text('alt').notNull(),
+    displayOrder: integer('display_order').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    version: integer('version').notNull().default(1),
+    createdAt: at('created_at').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    foreignKey({ name: 'production_image_production_promoter_fk', columns: [t.productionId, t.promoterId], foreignColumns: [production.id, production.promoterId] }),
+    check('production_image_kind_check', sql`${t.kind} in ('POSTER', 'DETAIL')`),
+    check('production_image_alt_check', sql`char_length(${t.alt}) between 1 and 300`),
+    check('production_image_order_check', sql`${t.displayOrder} between 0 and 9 and (${t.kind} <> 'POSTER' or ${t.displayOrder} = 0)`),
+    check('production_image_size_check', sql`${t.width} between 1 and 20000 and ${t.height} between 1 and 20000`),
+    check('production_image_version_check', sql`${t.version} >= 1`),
+    uniqueIndex('production_image_poster_uq').on(t.productionId).where(sql`${t.kind} = 'POSTER'`),
+    index('production_image_production_idx').on(t.productionId, t.displayOrder),
+  ],
+);
+
 /** 찜(공연 단위, ADR-0093). account_id는 identity 논리 DB라 외래키가 없다. 같은 찜은 처음 시각을 둔다(ADR-0198 결정 5) */
 export const wish = pgTable(
   'wish',

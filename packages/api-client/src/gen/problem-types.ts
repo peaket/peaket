@@ -63,6 +63,11 @@ export type ProblemType =
   | 'idempotency-request-in-progress'
   | 'identity-required'
   | 'identity-verification-required'
+  | 'image-limit-exceeded'
+  | 'image-processing-unavailable'
+  | 'image-spec-invalid'
+  | 'image-too-large'
+  | 'image-type-unsupported'
   | 'inquiry-closed'
   | 'invalid-seat'
   | 'investigation-source-expired'
@@ -116,6 +121,7 @@ export type ProblemType =
   | 'pg-unavailable'
   | 'pickup-slot-unavailable'
   | 'place-exists'
+  | 'poster-not-deletable'
   | 'precondition-failed'
   | 'precondition-required'
   | 'preverify-invalid'
@@ -165,8 +171,11 @@ export type ProblemType =
   | 'seat-recently-released'
   | 'seat-store-unavailable'
   | 'seatmap-geometry-locked'
+  | 'seatmap-import-rejected'
+  | 'seatmap-import-too-large'
   | 'seatmap-invalid'
   | 'seatmap-replace-required'
+  | 'seatmap-worker-unavailable'
   | 'self-target-forbidden'
   | 'server-busy'
   | 'session-not-found'
@@ -251,6 +260,11 @@ export const PROBLEM_TYPES = {
   'idempotency-request-in-progress': { status: 409, title: "같은 요청을 아직 처리하고 있습니다" },
   'identity-required': { status: 403, title: "휴대폰 본인확인을 먼저 해 주세요" },
   'identity-verification-required': { status: 403, title: "휴대폰 본인확인을 먼저 해 주세요" },
+  'image-limit-exceeded': { status: 409, title: "포스터 1장과 상세 이미지 10장까지 올릴 수 있습니다" },
+  'image-processing-unavailable': { status: 503, title: "이미지를 잠시 확인할 수 없습니다" },
+  'image-spec-invalid': { status: 422, title: "이미지 기준에 맞지 않습니다" },
+  'image-too-large': { status: 413, title: "한 장에 10MB까지 올릴 수 있습니다" },
+  'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
@@ -304,6 +318,7 @@ export const PROBLEM_TYPES = {
   'pg-unavailable': { status: 503, title: "결제를 잠시 시작할 수 없습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },
+  'poster-not-deletable': { status: 409, title: "포스터는 지우지 않고 바꿉니다" },
   'precondition-failed': { status: 412, title: "다른 사람이 먼저 고쳤습니다" },
   'precondition-required': { status: 428, title: "고칠 판(If-Match)을 보내 주세요" },
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
@@ -353,8 +368,11 @@ export const PROBLEM_TYPES = {
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },
   'seat-store-unavailable': { status: 503, title: "좌석 정보를 잠시 쓸 수 없습니다" },
   'seatmap-geometry-locked': { status: 409, title: "판매가 시작되어 좌석 배치는 바꿀 수 없습니다" },
+  'seatmap-import-rejected': { status: 422, title: "좌석맵 파일을 읽지 않았습니다" },
+  'seatmap-import-too-large': { status: 413, title: "좌석맵 파일은 10MB까지 올릴 수 있습니다" },
   'seatmap-invalid': { status: 422, title: "좌석맵에 고칠 곳이 있습니다" },
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
+  'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },

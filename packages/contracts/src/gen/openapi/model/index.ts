@@ -270,6 +270,7 @@ export * from './createPartnerProductionImageHeaders.zod.js';
 export * from './createPartnerProductionSaleReviewBody.zod.js';
 export * from './createPartnerProductionSeatmapBody.zod.js';
 export * from './createPartnerProductionSeatmapImportBody.zod.js';
+export * from './createPartnerProductionSeatmapImportHeaders.zod.js';
 export * from './createPartnerSellerProfileChangeRequestBody.zod.js';
 export * from './createPartnerSellerProfileChangeRequestHeaders.zod.js';
 export * from './createPartnerSettlementDisputeBody.zod.js';

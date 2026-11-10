@@ -3,10 +3,13 @@
 // 변형: single(포스터 한 장) · multiple(포스터 + 상세). 상태: idle · uploading(progressbar) · done · error(기준별 문구).
 // 순서는 CMP-050처럼 장마다 [위로]·[아래로] 버튼으로 바꾸고 끌어 놓기 라이브러리는 두지 않는다(기술 검토 낮음-098).
 // 첫 이미지가 포스터다(순서를 바꾸면 '포스터' 배지가 맨 위 줄로 옮겨 간다). 대체 텍스트는 필수다(WCAG 1.1.1).
-// 퍼블리싱 단계: 실제로 올리지 않는다. 파일을 고르면 안내만 알린다. 화면 검사는 안내용이고 서버가 다시 검사한다.
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+// 두 쓰임: (가) 퍼블리싱 화면은 items를 처음 값으로만 읽고 순서를 부품 안에서 바꾼다(파일을 고르면 안내만 알린다).
+// (나) 실제 위저드(ADR-0257 결정 4)는 onPick을 넘겨 제어형으로 쓴다. 그때는 items가 정본이고 고르기·대체 텍스트·옮기기·빼기를 바깥에 알린다.
+//     제어형에서는 오류 줄에도 대체 텍스트 칸이 남고(복원한 줄의 글을 보이게), 아직 올리지 않은 줄(ready)은 배지가 없다.
+// 화면 검사는 안내용이고 서버가 다시 검사한다.
+import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from "react";
 
-export type MediaStatus = "done" | "uploading" | "error";
+export type MediaStatus = "done" | "uploading" | "error" | "ready";
 
 export interface MediaItem {
   id: string;
@@ -18,6 +21,10 @@ export interface MediaItem {
   alt?: string;
   /** 기준 위반 문구(status 'error') */
   error?: string;
+  /** 대체 텍스트 칸의 오류(제어형) */
+  altError?: string;
+  /** 파일이 없는 줄(임시저장에서 되돌린 줄). 제어형에서 그 줄만 채우는 [파일 고르기]를 둔다(장수 상한에 막히지 않는다) */
+  refill?: boolean;
   /** 작은 미리보기(없으면 뼈대 상자) */
   preview?: ReactNode;
 }
@@ -33,6 +40,13 @@ export interface MediaUploaderProps {
   disabled?: boolean;
   /** 받는 형식(input accept) */
   accept?: string;
+  /** 제어형: 고른 파일(끌어 놓기 포함). 이것을 넘기면 items가 정본이다 */
+  onPick?: (files: File[]) => void;
+  onAltChange?: (id: string, alt: string) => void;
+  onMove?: (id: string, dir: "up" | "down") => void;
+  onRemove?: (id: string) => void;
+  /** 제어형: 그 줄의 [파일 고르기]로 고른 파일 한 장 */
+  onRefill?: (id: string, file: File) => void;
 }
 
 const DEFAULT_HINT =
@@ -45,17 +59,31 @@ export function MediaUploader({
   maxDetail = 10,
   disabled = false,
   accept = "image/jpeg,image/png,image/webp",
+  onPick,
+  onAltChange,
+  onMove,
+  onRemove,
+  onRefill,
 }: MediaUploaderProps) {
   const uid = useId();
-  const [order, setOrder] = useState<MediaItem[]>(() => [...items]);
+  const controlled = onPick !== undefined;
+  const [own, setOwn] = useState<MediaItem[]>(() => [...items]);
+  const order = controlled ? items : own;
   const [moved, setMoved] = useState<{ id: string; dir: "up" | "down" } | null>(null);
   const [message, setMessage] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const refillRef = useRef<HTMLInputElement>(null);
+  /** [파일 고르기]를 누른 줄 */
+  const refillFor = useRef<string | null>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const hintId = `${uid}-hint`;
 
+  /** 옮긴 직후 한 번만 초점을 옮긴다(제어형은 바깥이 items를 새로 만들 때마다 효과가 다시 돌아, 지우지 않으면 다른 칸을 칠 때 초점이 버튼으로 끌려간다) */
+  const focusPending = useRef(false);
+
   useEffect(() => {
-    if (!moved) return;
+    if (!moved || !focusPending.current) return;
+    focusPending.current = false;
     const btn = listRef.current?.querySelector<HTMLButtonElement>(`[data-media="${moved.id}-${moved.dir}"]`);
     if (btn && !btn.disabled) btn.focus();
     else listRef.current?.querySelector<HTMLButtonElement>(`[data-media="${moved.id}-${moved.dir === "up" ? "down" : "up"}"]`)?.focus();
@@ -64,18 +92,29 @@ export function MediaUploader({
   function move(index: number, dir: "up" | "down") {
     const to = dir === "up" ? index - 1 : index + 1;
     if (to < 0 || to >= order.length) return;
-    const next = [...order];
-    const [item] = next.splice(index, 1);
-    next.splice(to, 0, item!);
-    setOrder(next);
-    setMoved({ id: item!.id, dir });
-    setMessage(`${item!.fileName}을(를) ${to + 1}번째로 옮겼습니다${to === 0 ? ". 이제 포스터입니다" : ""}`);
+    const item = order[index]!;
+    if (controlled) onMove?.(item.id, dir);
+    else {
+      const next = [...order];
+      next.splice(index, 1);
+      next.splice(to, 0, item);
+      setOwn(next);
+    }
+    focusPending.current = true;
+    setMoved({ id: item.id, dir });
+    setMessage(`${item.fileName}을(를) ${to + 1}번째로 옮겼습니다${to === 0 ? ". 이제 포스터입니다" : ""}`);
   }
 
   function remove(index: number) {
     const item = order[index]!;
-    setOrder(order.filter((_, i) => i !== index));
+    if (controlled) onRemove?.(item.id);
+    else setOwn(order.filter((_, i) => i !== index));
     setMessage(`${item.fileName}을(를) 뺐습니다`);
+  }
+
+  function pick(files: File[]) {
+    onPick?.(files);
+    setMessage(`이미지 ${files.length}장을 골랐습니다`);
   }
 
   const count = order.length;
@@ -92,6 +131,20 @@ export function MediaUploader({
           borderRadius: "var(--r-lg)",
           background: "var(--surface-muted)",
         }}
+        {...(controlled
+          ? {
+              onDragOver: (e: DragEvent<HTMLDivElement>) => {
+                if (disabled || full) return;
+                e.preventDefault();
+              },
+              onDrop: (e: DragEvent<HTMLDivElement>) => {
+                e.preventDefault();
+                if (disabled || full) return;
+                const files = [...e.dataTransfer.files];
+                if (files.length > 0) pick(files);
+              },
+            }
+          : {})}
       >
         <i className="ic ic-upload ic-24 muted" aria-hidden="true" />
         <div className="col grow" style={{ gap: 2 }}>
@@ -107,11 +160,33 @@ export function MediaUploader({
           tabIndex={-1}
           aria-hidden="true"
           onChange={(e) => {
-            const n = e.currentTarget.files?.length ?? 0;
-            if (n > 0) setMessage(`이미지 ${n}장을 골랐습니다. 퍼블리싱 화면이라 실제로 올리지 않습니다`);
+            const files = [...(e.currentTarget.files ?? [])];
+            if (controlled) {
+              if (files.length > 0) pick(files);
+            } else if (files.length > 0) setMessage(`이미지 ${files.length}장을 골랐습니다. 퍼블리싱 화면이라 실제로 올리지 않습니다`);
             e.currentTarget.value = "";
           }}
         />
+        {controlled ? (
+          <input
+            ref={refillRef}
+            className="sr-only"
+            type="file"
+            accept={accept}
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              const file = e.currentTarget.files?.[0];
+              const id = refillFor.current;
+              refillFor.current = null;
+              if (file && id) {
+                onRefill?.(id, file);
+                setMessage(`${file.name}을(를) 골랐습니다`);
+              }
+              e.currentTarget.value = "";
+            }}
+          />
+        ) : null}
         <button
           className="btn btn-outline btn-sm"
           type="button"
@@ -176,12 +251,37 @@ export function MediaUploader({
                       <span style={{ width: `${m.progress ?? 0}%` }} />
                     </div>
                   )}
-                  {m.status === "error" ? (
+                  {m.status === "error" && (
                     <span className="error-msg" id={errId} role="alert">
                       <i className="ic ic-alert-circle" aria-hidden="true" />
                       {m.error}
                     </span>
-                  ) : (
+                  )}
+                  {controlled ? (
+                    <div className="field" style={{ gap: 4 }}>
+                      <label className="label" htmlFor={altId}>
+                        대체 텍스트 <span className="opt">(필수)</span>
+                      </label>
+                      <input
+                        className={m.altError ? "input input-sm is-error" : "input input-sm"}
+                        id={altId}
+                        type="text"
+                        maxLength={300}
+                        value={m.alt ?? ""}
+                        placeholder="이미지에 담긴 내용을 글로 적어 주세요"
+                        disabled={disabled}
+                        aria-invalid={m.altError ? true : undefined}
+                        aria-describedby={m.altError ? `${altId}-e` : undefined}
+                        onChange={(e) => onAltChange?.(m.id, e.target.value)}
+                      />
+                      {m.altError ? (
+                        <span className="error-msg" id={`${altId}-e`}>
+                          <i className="ic ic-alert-circle" aria-hidden="true" />
+                          {m.altError}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : m.status === "error" ? null : (
                     <div className="field" style={{ gap: 4 }}>
                       <label className="label" htmlFor={altId}>
                         대체 텍스트 <span className="opt">(필수)</span>
@@ -198,6 +298,21 @@ export function MediaUploader({
                     </div>
                   )}
                   <div className="row" style={{ gap: 2 }}>
+                    {controlled && m.refill ? (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        type="button"
+                        aria-label={`${i + 1}번째 이미지 파일 고르기`}
+                        disabled={disabled}
+                        onClick={() => {
+                          refillFor.current = m.id;
+                          refillRef.current?.click();
+                        }}
+                      >
+                        <i className="ic ic-image" aria-hidden="true" />
+                        파일 고르기
+                      </button>
+                    ) : null}
                     <button
                       className="btn btn-ghost btn-sm"
                       type="button"

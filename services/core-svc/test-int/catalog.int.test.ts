@@ -9,7 +9,7 @@ import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleCatalogRepository } from '../src/modules/catalog/adapters/db/drizzle-catalog-repository.js';
 import { event, place, production, promoter, searchAlias } from '../src/modules/catalog/adapters/db/schema.js';
-import { FakeIdentity } from '../test/support.js';
+import { FakeIdentity, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 let pg: PostgresContainer;
@@ -128,7 +128,7 @@ describe('서비스 전체 경로(DB 저장소)', () => {
   let svc: Awaited<ReturnType<typeof createService>>;
   beforeAll(async () => {
     const quiet = new Writable({ write: (_c, _e, cb) => cb() });
-    svc = await createService({ name: 'core-svc', module: AppModule.register({ database, partnerDatabase: database }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet, adminAuthz: new FakeIdentity() });
+    svc = await createService({ name: 'core-svc', module: AppModule.register({ database, partnerDatabase: database, media: testMedia() }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet, adminAuthz: new FakeIdentity() });
   });
   afterAll(async () => {
     await svc?.close();

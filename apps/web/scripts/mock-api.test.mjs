@@ -26,6 +26,8 @@ import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews
 import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/support';
 import { CreateEventHoldResponse, GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
+import { CreatePartnerProductionImageResponse, UpdatePartnerProductionImageResponse } from '@peaket/contracts/openapi/partner';
+import { productionImage } from './mock-api/partner.mjs';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
 const ORIGIN = 'http://127.0.0.1:4010';
@@ -671,6 +673,167 @@ test('좌석맵 파일(ADR-0216 결정 7): 대기 상태 파일이 주는 경로
     assert.equal(body.layoutVersion, 1);
     assert.equal((await fetch(`${base}/v1/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04/seatmap-layouts/0.json`)).status, 404);
     assert.equal((await fetch(`${base}/v1/events/no-such/seatmap-layouts/1.json`)).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('가짜 API의 공연 이미지 고정 자료가 계약 Zod(ProductionImage)를 지난다(모르는 칸 없음, 파생본 여덟 개, ADR-0257)', () => {
+  for (const row of [
+    { imageId: '0190f3a1-7c2e-7a00-8000-000000000301', kind: 'POSTER', alt: '포스터', order: 0, width: 1200, height: 1600, version: 1 },
+    { imageId: '0190f3a1-7c2e-7a00-8000-000000000302', kind: 'DETAIL', alt: '상세', order: 3, width: 800, height: 600, version: 4 },
+  ]) {
+    const v = productionImage(ORIGIN, row);
+    assert.deepEqual(CreatePartnerProductionImageResponse.parse(v), v);
+    assert.deepEqual(UpdatePartnerProductionImageResponse.parse(v), v);
+    assert.deepEqual(Object.keys(v.derivatives), ['320.avif', '320.webp', '640.avif', '640.webp', '960.avif', '960.webp', '1280.avif', '1280.webp']);
+    assert.equal(v.derivatives['640.webp'], `${v.url}/640.webp`);
+  }
+});
+
+test('가짜 API의 공연 이미지 경로: 올리기 201·ETag, X-Requested-With 없으면 400, 고치기 If-Match 428·412·200, 포스터 지우기 409·상세 지우기 204와 순서 다시 매기기', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const prod = await createdProduction(base);
+    const png = (w, h) => {
+      const b = Buffer.alloc(40);
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b);
+      b.writeUInt32BE(w, 16);
+      b.writeUInt32BE(h, 20);
+      return b;
+    };
+    const up = async (fields, headers = { 'x-requested-with': 'peaket-partner' }) => {
+      const fd = new FormData();
+      fd.append('file', new Blob([png(900, 1300)], { type: 'image/png' }), 'a.png');
+      for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+      return fetch(`${base}/v1/partner/productions/${prod}/images`, { method: 'POST', body: fd, headers });
+    };
+    assert.equal((await up({ kind: 'POSTER', alt: '포스터' }, {})).status, 400);
+    const poster = await up({ kind: 'POSTER', alt: '포스터' });
+    assert.equal(poster.status, 201);
+    assert.equal(poster.headers.get('etag'), '"1"');
+    const pv = CreatePartnerProductionImageResponse.parse(await poster.json());
+    assert.deepEqual([pv.kind, pv.order, pv.width, pv.height], ['POSTER', 0, 900, 1300]);
+    const d = [];
+    for (const alt of ['하나', '둘', '셋']) d.push(await (await up({ kind: 'DETAIL', alt })).json());
+    const mid = await (await up({ kind: 'DETAIL', alt: '가운데', order: '1' })).json();
+    assert.equal(mid.order, 1);
+    const patch = (id, body, ifMatch) => fetch(`${base}/v1/partner/productions/${prod}/images/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json', ...(ifMatch ? { 'if-match': ifMatch } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await patch(d[0].imageId, { alt: '새' })).status, 428);
+    assert.equal((await patch(d[0].imageId, { alt: '새' }, '"9"')).status, 412);
+    const ok = await patch(d[0].imageId, { alt: '새 글' }, '"1"');
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('etag'), '"2"');
+    assert.equal(UpdatePartnerProductionImageResponse.parse(await ok.json()).alt, '새 글');
+    const del = (id) => fetch(`${base}/v1/partner/productions/${prod}/images/${id}`, { method: 'DELETE' });
+    assert.equal((await del(pv.imageId)).status, 409);
+    assert.equal((await del(mid.imageId)).status, 204);
+    assert.equal((await del(mid.imageId)).status, 404);
+    // 서버 쪽 기록: 올리기 차례와 칸
+    const last = await (await fetch(`${base}/__mock/state?partnerImage=spec`)).json();
+    assert.equal(last.partnerImage, 'spec');
+    const rejected = await up({ kind: 'DETAIL', alt: 'x' });
+    assert.equal(rejected.status, 422);
+    assert.equal((await rejected.json()).reason, 'DETAIL_SPEC');
+  } finally {
+    server.close();
+  }
+});
+
+/** 가짜 API로 공연 하나를 등록하고 그 ID를 돌려준다 */
+async function createdProduction(base) {
+  const r = await fetch(`${base}/v1/partner/productions`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ title: 't', events: [{ openAt: '2027-01-05T11:00:00Z' }] }) });
+  return (await r.json()).productionId;
+}
+
+function pngBytes(w, h) {
+  const b = Buffer.alloc(40);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b);
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+}
+
+async function mockUpload(base, prod, { fields = { kind: 'DETAIL', alt: '상세' }, file = { bytes: pngBytes(1000, 800), type: 'image/png', name: 'a.png' }, extra = [] } = {}) {
+  const fd = new FormData();
+  if (file) fd.append('file', new Blob([file.bytes], { type: file.type }), file.name);
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  for (const [k, v] of extra) fd.append(k, v);
+  return fetch(`${base}/v1/partner/productions/${prod}/images`, { method: 'POST', body: fd, headers: { 'x-requested-with': 'peaket-partner' } });
+}
+
+test('HOT-190 가짜 API 공연 이미지 올리기는 실서버처럼 거절한다: 없는 공연 404, 형식 불일치 415, 대체 텍스트 길이 422 ALT_INVALID, 칸 구조 400', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const prod = await createdProduction(base);
+    assert.equal((await mockUpload(base, '0190f3a1-7c2e-7a00-8000-000000000998')).status, 404);
+    for (const file of [
+      { bytes: pngBytes(1000, 800), type: 'image/png', name: 'a.jpg' },
+      { bytes: pngBytes(1000, 800), type: 'image/jpeg', name: 'a.png' },
+      { bytes: Buffer.from('GIF89a......'), type: 'image/gif', name: 'a.gif' },
+    ]) {
+      const r = await mockUpload(base, prod, { file });
+      assert.equal(r.status, 415, file.name);
+      assert.equal((await r.json()).type, 'https://peaket.example/problems/image-type-unsupported');
+    }
+    for (const alt of ['', '가'.repeat(301)]) {
+      const r = await mockUpload(base, prod, { fields: { kind: 'DETAIL', alt } });
+      assert.equal(r.status, 422);
+      assert.equal((await r.json()).reason, 'ALT_INVALID');
+    }
+    assert.equal((await mockUpload(base, prod, { fields: { kind: 'DETAIL' } })).status, 400, 'alt 칸 없음');
+    assert.equal((await mockUpload(base, prod, { extra: [['url', 'http://x']] })).status, 400, '모르는 칸');
+    assert.equal((await mockUpload(base, prod, { extra: [['kind', 'DETAIL']] })).status, 400, '겹친 칸');
+    assert.equal((await mockUpload(base, prod, { fields: { kind: 'DETAIL', alt: 'x', order: '10' } })).status, 400, 'order 범위 밖');
+    assert.equal((await mockUpload(base, prod, { file: null })).status, 400, '파일 없음');
+    assert.equal((await mockUpload(base, prod, { fields: { kind: 'DETAIL', alt: '가'.repeat(300) } })).status, 201);
+  } finally {
+    server.close();
+  }
+});
+
+test('HOT-190 가짜 API는 10MB를 넘는 본문에 응답(413)을 보낸 뒤 끊고, 응답 주소는 실서버처럼 경로 없는 출처 + /production/{id}다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const prod = await createdProduction(base);
+    const big = await mockUpload(base, prod, { file: { bytes: Buffer.alloc(11 * 1024 * 1024), type: 'image/png', name: 'a.png' } });
+    assert.equal(big.status, 413);
+    assert.equal((await big.json()).type, 'https://peaket.example/problems/image-too-large');
+    const ok = await (await mockUpload(base, prod)).json();
+    assert.match(ok.url, /^https?:\/\/[^/]+\/production\/[0-9a-f-]{36}$/);
+    assert.equal(ok.derivatives['320.avif'], `${ok.url}/320.avif`);
+  } finally {
+    server.close();
+  }
+});
+
+test('HOT-190 가짜 API PATCH는 바뀐 것이 없으면 판을 올리지 않고, 순서가 밀린 다른 행도 판을 올리며, 428·412를 이미지 404보다 먼저 본다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const prod = await createdProduction(base);
+    const ids = [];
+    for (const alt of ['a', 'b', 'c']) ids.push((await (await mockUpload(base, prod, { fields: { kind: 'DETAIL', alt } })).json()).imageId);
+    const patch = (id, body, ifMatch) => fetch(`${base}/v1/partner/productions/${prod}/images/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json', ...(ifMatch ? { 'if-match': ifMatch } : {}) }, body: JSON.stringify(body) });
+    const same = await patch(ids[0], { alt: 'a' }, '"1"');
+    assert.equal(same.status, 200);
+    assert.equal(same.headers.get('etag'), '"1"');
+    assert.equal((await same.json()).version, 1);
+    const moved = await (await patch(ids[2], { order: 0 }, '"1"')).json();
+    assert.deepEqual([moved.order, moved.version], [0, 2]);
+    // 밀린 a(0→1)·b(1→2)도 판이 올랐다
+    assert.equal((await patch(ids[0], { alt: 'a2' }, '"1"')).status, 412);
+    assert.equal((await patch(ids[0], { alt: 'a2' }, '"2"')).status, 200);
+    const missing = '0190f3a1-7c2e-7a00-8000-000000000777';
+    assert.equal((await patch(missing, { alt: 'x' })).status, 428);
+    assert.equal((await patch(missing, { alt: 'x' }, '"1"')).status, 404);
   } finally {
     server.close();
   }

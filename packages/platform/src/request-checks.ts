@@ -2,7 +2,8 @@
 // - 일반 경로: 계약 생성 Zod를 받는 매개변수 장식자(Zod 파이프). nestjs-zod 5.5.0은 peer가 NestJS 11까지라 같은 일을 여기서 한다
 // - 핫패스: 같은 Zod를 z.toJSONSchema()로 바꾼 Fastify 경로 스키마와 플랫폼 검사기(Ajv, 형 바꾸기·칸 지우기 없음)
 // - 두 길 모두 쿼리·경로·머리의 문자열을 같은 함수로 바꾸고(http-values.ts), 실패는 같은 Problem 400이다
-// - 본문은 application/json만, @AcceptTextPlain()을 단 경로만 text/plain도 JSON으로 읽는다(그 밖은 415, asvs/delivery.md 3.5.2)
+// - 본문은 application/json만, @AcceptTextPlain()을 단 경로만 text/plain도 JSON으로 읽는다(그 밖은 415, asvs/delivery.md 3.5.2).
+//   @AcceptMultipart()를 단 올리기 경로만 multipart/form-data를 바이트로 받는다(ADR-0257)
 import { BadRequestException, Body, createParamDecorator, type ExecutionContext, Param, type PipeTransform, Query } from '@nestjs/common';
 import { FASTIFY_ROUTE_CONFIG_METADATA, FASTIFY_ROUTE_SCHEMA_METADATA } from '@nestjs/platform-fastify/constants.js';
 import { Ajv, type ValidateFunction } from 'ajv';
@@ -11,6 +12,7 @@ import type { FastifyInstance, FastifyRequest, FastifySchema } from 'fastify';
 import { z } from 'zod';
 import { type HttpPart, type JsonSchema, httpValueCoercer } from './http-values.js';
 import { keepRawBody } from './raw-body.js';
+import { ProblemError } from './problem.js';
 import { PURCHASE_MAC_HEADER, PURCHASE_SEQ_HEADER } from './purchase-auth.js';
 
 /** 검사 실패. 전역 필터가 about:blank 400으로 바꾼다(결정 5: 두 길의 본문이 같도록 설명을 싣지 않는다) */
@@ -239,6 +241,85 @@ export function AcceptTextPlain(): MethodDecorator {
   };
 }
 
+export const MULTIPART_KEY = 'peaketMultipart';
+
+export interface AcceptMultipartOptions {
+  /** 본문 전체(파일과 multipart 봉투)의 상한(바이트). 넘으면 읽기를 멈추고 tooLarge()로 답한다 */
+  maxBytes: number;
+  /** 상한을 넘었을 때 낼 이름 붙은 413(경로마다 이름이 다르다, 예 image-too-large) */
+  tooLarge: () => ProblemError;
+  /**
+   * 같은 이름의 경로들이 함께 쓰는 동시 처리 칸막이(벌크헤드, 서비스 인스턴스마다 하나). 자리는 본문을 읽기 전(그 경로의 onRequest)에 잡고
+   * 응답이 끝나거나 연결이 끊기면 놓는다. 차면 본문을 읽지 않고 429 server-busy와 Retry-After(초)다(ADR-0257 결정 2)
+   */
+  bulkhead?: { name: string; limit: number; retryAfterSeconds: number };
+}
+
+/**
+ * multipart/form-data 본문을 받는 경로에 단다(올리기, ADR-0257 결정 2·8). 해석기는 바이트를 모으기만 하고(Buffer가 request.body가 된다),
+ * 칸 해석은 처리기가 Node 내장 Response.formData()로 한다(새 패키지를 들이지 않는다). 표시하지 않은 경로의 multipart는 그대로 415다.
+ * 상한은 이 경로만의 값이고 플랫폼 기본 상한(1MiB)보다 클 수 있다. Content-Length가 상한보다 크면 읽지 않고, 읽다가 넘으면 그 자리에서 멈춘다
+ * @throws RangeError 양의 정수가 아님
+ */
+export function AcceptMultipart(o: AcceptMultipartOptions): MethodDecorator {
+  if (!Number.isInteger(o.maxBytes) || o.maxBytes <= 0) throw new RangeError(`multipart 본문 상한은 양의 정수다: ${String(o.maxBytes)}`);
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [MULTIPART_KEY]: { maxBytes: o.maxBytes, tooLarge: o.tooLarge, ...(o.bulkhead ? { bulkhead: o.bulkhead } : {}) } }, fn);
+    return descriptor;
+  };
+}
+
+/** multipart 바이트 모으기(Fastify 기본 rawBody와 같은 차례: 길이 머리 먼저, 읽는 중 상한, 끝에서 길이 대조) */
+function collectMultipart(request: FastifyRequest, payload: NodeJS.ReadableStream & { resume(): void }, done: (err: Error | null, body?: unknown) => void): void {
+  const config = request.routeOptions?.config as unknown as Record<string, unknown> | undefined;
+  const opts = config?.[MULTIPART_KEY] as AcceptMultipartOptions | undefined;
+  if (!opts) {
+    done(unsupportedMediaType(), undefined);
+    return;
+  }
+  const declared = Number(request.headers['content-length']);
+  if (declared > opts.maxBytes) {
+    done(opts.tooLarge(), undefined);
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let received = 0;
+  const stop = () => {
+    payload.removeListener('data', onData);
+    payload.removeListener('end', onEnd);
+    payload.removeListener('error', onEnd);
+  };
+  function onData(chunk: Buffer | string) {
+    const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    received += b.length;
+    if (received > opts!.maxBytes) {
+      stop();
+      done(opts!.tooLarge(), undefined);
+      return;
+    }
+    chunks.push(b);
+  }
+  function onEnd(err?: Error) {
+    stop();
+    if (err) {
+      done(Object.assign(err, { statusCode: 400 }), undefined);
+      return;
+    }
+    if (!Number.isNaN(declared) && declared !== received) {
+      done(Object.assign(new Error('Content-Length와 본문 길이가 다르다'), { statusCode: 400, code: 'FST_ERR_CTP_INVALID_CONTENT_LENGTH' }), undefined);
+      return;
+    }
+    // 받은 본문은 한 벌만 쥔다: 원시 본문 사본을 따로 남기지 않는다(올리기 경로는 멱등 지문·요청 서명을 쓰지 않는다, ADR-0257 결정 2)
+    done(null, Buffer.concat(chunks, received));
+  }
+  payload.on('data', onData);
+  payload.on('end', onEnd);
+  payload.on('error', onEnd);
+  payload.resume();
+}
+
 const BODY_LIMIT_KEY = 'peaketBodyLimit';
 
 /**
@@ -269,10 +350,35 @@ function unsupportedMediaType(): Error {
  */
 export function installRequestChecks(http: FastifyInstance): void {
   http.setValidatorCompiler(platformValidatorCompiler());
+  /** 칸막이 이름 → 쓰는 자리 수(이 서비스 인스턴스 안에서만 나눈다) */
+  const inUse = new Map<string, number>();
   http.addHook('onRoute', (route) => {
     const config = route.config as Record<string, unknown> | undefined;
     if (config?.[DEFER_VALIDATION_KEY] === true && route.schema) route.attachValidation = true;
     if (typeof config?.[BODY_LIMIT_KEY] === 'number') route.bodyLimit = config[BODY_LIMIT_KEY];
+    const bulkhead = (config?.[MULTIPART_KEY] as AcceptMultipartOptions | undefined)?.bulkhead;
+    if (bulkhead) {
+      const hook = (_request: FastifyRequest, reply: { raw: NodeJS.EventEmitter }, done: (err?: Error) => void) => {
+        const used = inUse.get(bulkhead.name) ?? 0;
+        if (used >= bulkhead.limit) {
+          done(new ProblemError({ type: 'server-busy', status: 429, title: '요청이 많아 잠시 처리하지 못했습니다', retryAfterSeconds: bulkhead.retryAfterSeconds }));
+          return;
+        }
+        inUse.set(bulkhead.name, used + 1);
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          inUse.set(bulkhead.name, (inUse.get(bulkhead.name) ?? 1) - 1);
+        };
+        // 응답이 끝나거나(finish) 연결이 먼저 끊기면(close) 놓는다. 요청 본문의 close는 본문을 다 읽은 때라 쓰지 않는다
+        reply.raw.once('finish', release);
+        reply.raw.once('close', release);
+        done();
+      };
+      const prev = route.onRequest;
+      route.onRequest = (prev === undefined ? [] : Array.isArray(prev) ? prev : [prev]).concat(hook as never) as typeof route.onRequest;
+    }
   });
   const json = http.getDefaultJsonParser('error', 'error');
   // 해석기는 바이트로 받아 해석 전 바이트를 남기고(요청 지문·요청 서명, add-idempotency-and-outbox 결정 4), 해석은 기본 JSON 해석기에 맡긴다
@@ -290,4 +396,6 @@ export function installRequestChecks(http: FastifyInstance): void {
     keepRawBody(request, body as Buffer);
     json(request, (body as Buffer).toString('utf8'), done);
   });
+  // multipart는 @AcceptMultipart()를 단 경로만 받는다(그 밖은 415). 해석기가 스트림을 받아 상한을 스스로 센다(Fastify bodyLimit 밖)
+  http.addContentTypeParser('multipart/form-data', (request, payload, done) => collectMultipart(request, payload as unknown as NodeJS.ReadableStream & { resume(): void }, done));
 }

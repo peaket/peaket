@@ -36,6 +36,8 @@ export interface EventSummaryRow {
   artists: { artistId: string; name: string }[];
   /** 같은 공연의 회차(취소 포함, 시작 순이 아니어도 된다) */
   rounds: RoundRow[];
+  /** 공연 이미지(포스터 하나와 상세 이미지, 차례는 정하지 않는다, ADR-0257 결정 3) */
+  images: { id: string; kind: 'POSTER' | 'DETAIL'; alt: string; order: number }[];
 }
 
 /**

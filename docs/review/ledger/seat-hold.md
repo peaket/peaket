@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 52 | 13 | 12 | 2 | 0 | 35 | 1 | 0 | 0 | 115 |
-| B | 54 | 32 | 0 | 0 | 0 | 3 | 0 | 15 | 44 | 148 |
-| 합계 | 106 | 45 | 12 | 2 | 0 | 38 | 1 | 15 | 44 | 263 |
+| A | 64 | 13 | 12 | 2 | 0 | 23 | 1 | 0 | 0 | 115 |
+| B | 71 | 28 | 0 | 0 | 0 | 3 | 0 | 15 | 31 | 148 |
+| 합계 | 135 | 41 | 12 | 2 | 0 | 26 | 1 | 15 | 31 | 263 |
 
 ## docs/features/seat-hold.md
 
@@ -85,14 +85,14 @@
 | S-T31 | ④ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ④는 4403이다 | 다른 단계 | A | 미정 · 좌석 구독 상한과 프레임 검사 |
 | S-T31 | ⑤ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ⑤는 두 번째 `TimeSync`에 답이 없다 | 다른 단계 | A | 미정 · 좌석 구독 상한과 프레임 검사 |
 | S-T31 | ⑥ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ⑥은 상한에 닿지 않아 닫힘이 0번이다. 4429로 닫힌 화면은 10초 넘게 지난 뒤 다시 붙는다(docs/frontend.md §4.4.1) | 다른 단계 | A | 미정 · 좌석 구독 상한과 프레임 검사 |
-| S-T32 | ① | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ①는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ② | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ②는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ③ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ③은 정한 도형만 읽고 나머지는 검증 결과의 경고로 나온다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ④ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ④는 413·422다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ⑤ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑤은 422다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ⑥ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑥은 422다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ⑦ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑦은 422다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
-| S-T32 | ⑧ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑧은 그 문자를 지운 이름으로 읽는다. 어느 경우든 원본 파일이 저장소에 남지 않는다 | 다른 단계 | A | 미정 · 좌석맵 가져오기 공격 파일 |
+| S-T32 | ① | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ①는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| S-T32 | ② | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ②는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| S-T32 | ③ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ③은 정한 도형만 읽고 나머지는 검증 결과의 경고로 나온다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| S-T32 | ④ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ④는 413·422다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T32 | ⑤ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑤은 422다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| S-T32 | ⑥ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑥은 422다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| S-T32 | ⑦ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑦은 422다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T32 | ⑧ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ⑧은 그 문자를 지운 이름으로 읽는다. 어느 경우든 원본 파일이 저장소에 남지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 |
 | S-T33 | ① | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ① 409 `seat-recently-released`이고 `reholdAvailableAt`이 해제 시각 + 30초(±1초)다. 좌석·보유 수에 변화가 없다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/hold-lifecycle-edge.int.test.ts, services/purchase-svc/test-int/hold-lifecycle.int.te… |
 | S-T33 | ② | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ② B는 201 | 자동 시험 | A | 시험: services/purchase-svc/test-int/hold-lifecycle.int.test.ts |
 | S-T33 | ③ | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ③ 29초는 409, 31초는 201 | 자동 시험 | A | 시험: services/purchase-svc/test/expiry-cases.ts, services/purchase-svc/test/expiry-sweeper.test.ts |
@@ -101,13 +101,13 @@
 | S-T33 | ⑥ | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ⑥ 409(계정 단위) | 자동 시험 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts, services/purchase-svc/test/manage-holds.test.ts 외 2곳 |
 | S-T33 | ⑦ | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ⑦ 409 `seat-already-held`(경합이 먼저) | 자동 시험 | A | 시험: services/purchase-svc/test/hold-cases.ts, services/purchase-svc/test/hold-seats.test.ts 외 1곳 |
 | S-T33 | ⑧ | 방금 놓은 좌석 다시 잡기(소유자 결정 2026-10-30… | ⑧ 홀드 p99가 50ms 이하이고, 홀드 Lua 실행 p99가 이 확인을 넣기 전보다 나빠진 값을 적는다 | ID만 | A | 시험: apps/web/src/_pages/seats/model/hold-lifecycle.test.mjs, services/payment-svc/test-int/purchase-path-e2e.int.test.ts… |
-| S-T34 | ① | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ① DB·Kafka·Redis 자격 증명과 AWS 권한이 0개다 | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ② | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ② 모든 연결이 막힌다 | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ③ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ③ `PERMISSION_DENIED` | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ⑤ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑤ 503과 `Retry-After` | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ⑥ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑥ core-svc가 422로 거절한다(다시 검사) | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
-| S-T34 | ⑦ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑦ 413이고 작업을 부르지 않는다 | 다른 단계 | A | 미정 · 좌석맵 해석 작업 격리 |
+| S-T34 | ① | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ① DB·Kafka·Redis 자격 증명과 AWS 권한이 0개다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
+| S-T34 | ② | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ② 모든 연결이 막힌다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
+| S-T34 | ③ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ③ `PERMISSION_DENIED` | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
+| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T34 | ⑤ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑤ 503과 `Retry-After` | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T34 | ⑥ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑥ core-svc가 422로 거절한다(다시 검사) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T34 | ⑦ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑦ 413이고 작업을 부르지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | S-T35 | ① | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ①은 `seatIds`가 잡은 좌석이고 `heldAt`이 같은 홀드의 SeatEvent HELD `occurredAt`·`seat_hold.held_at`과 같다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-cases.ts, services/purchase-svc/test/hold-seats.test.ts |
 | S-T35 | ② | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ②는 `seatIds`가 요청한 좌석이고 `heldAt`이 없다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-seats.test.ts |
 | S-T35 | ③ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ③는 `seatIds`가 요청한 좌석이고 `heldAt`이 없다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-seats.test.ts |
@@ -132,11 +132,11 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | 빈칸 | B | 영역: services/purchase-svc, services/seatmap-worker |
+| v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 |
 | v5.0.0-1.1.2 | — | L2 | 출력 인코딩·이스케이프는 그 값을 쓰는 해석기 바로 앞의 마지막 단계에서 하거나 해석기가 직접 한다. | 빈칸 | B | 영역: apps/partner, apps/web |
 | v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/event-detail/model/detail.test.mjs, apps/web/src/_pages/search/model/search.test.mjs 외 1곳 |
 | v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | 자동 시험 | B | 시험: apps/web/queue-room/test/preload.test.mjs |
-| v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/event-detail/model/detail.test.mjs (영역: services/core-svc, services/purchase-svc) |
+| v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 자동 시험 | B | 시험: services/purchase-svc/test-int/booking-restrictions.int.test.ts, services/purchase-svc/test-int/order-holds.int.test… |
 | v5.0.0-1.2.5 | — | L1 | OS 명령 주입을 막고 OS 호출은 파라미터화하거나 명령줄 인코딩을 쓴다. | 해당 없음 | B | 해당 없음(이 기능은 OS 명령을 부르지 않는다) |
 | v5.0.0-1.2.6 | — | L2 | LDAP 주입을 막는다. | 해당 없음 | B | 해당 없음(LDAP을 쓰지 않는다) |
@@ -146,9 +146,9 @@
 | v5.0.0-1.3.1 | — | L1 | WYSIWYG 편집기 등에서 오는 신뢰하지 않는 HTML 입력은 모두 잘 알려진 안전한 HTML 정화 라이브러리나 프레임워크 기능으로 정화한다. | 해당 없음 | B | 해당 없음(HTML 입력을 받지 않는다. 좌석맵 SVG는 HTML로 다루지 않고 도형 데이터만 뽑는다, 1.3.4) |
 | v5.0.0-1.3.2 | — | L1 | `eval()` 같은 동적 코드 실행을 피하고, 불가피하면 사용자 입력을 실행 전에 정화한다. | 빈칸 | B | 영역: apps/partner, apps/web |
 | v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts 외 2곳 |
-| v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | 빈칸 | B | 영역: services/seatmap-worker |
-| v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | 빈칸 | B | 영역: apps/partner, apps/web |
-| v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | 빈칸 | B | 영역: services/payment-svc, services/purchase-svc, services/seatmap-worker |
+| v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 |
+| v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-1.3.7 | — | L2 | 신뢰하지 않는 입력으로 템플릿을 만들지 않아 템플릿 주입을 막고, 불가피하면 템플릿에 넣는 신뢰하지 않는 입력을 정화하거나 엄격히 검증한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-1.3.8 | — | L2 | JNDI 조회에 넣기 전에 입력을 정화하고 JNDI를 안전하게 설정한다. | 해당 없음 | B | 해당 없음(JNDI를 쓰지 않는다) |
 | v5.0.0-1.3.9 | — | L2 | memcache로 보내기 전에 내용을 정화한다. | 해당 없음 | B | 해당 없음(memcache를 쓰지 않는다. 좌석 Redis 키는 서버가 정한 회차 ID·계정 ID·좌석 색인과, UUID 형식을 확인한 멱등키로만 만든다(UUID가 아니면 400… |
@@ -157,12 +157,12 @@
 | v5.0.0-1.4.1 | — | L2 | 메모리 안전한 문자열·메모리 복사·포인터 연산으로 스택·버퍼·힙 오버플로를 찾아내거나 막는다. | 해당 없음 | B | 해당 없음(애플리케이션 코드는 메모리 관리 언어(TypeScript)다. Lua는 관리형 Valkey 엔진 안에서 돌고, 엔진은 공급자가 관리하는 구성 요소라 조치 기한(15.1.1, 공통)으로 관리한다) |
 | v5.0.0-1.4.2 | — | L2 | 부호·범위·입력 검증으로 정수 오버플로를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-1.4.3 | — | L2 | 할당한 메모리와 자원을 해제하고 해제된 참조를 지워 use-after-free를 막는다. | 해당 없음 | B | 해당 없음(메모리 관리 언어만 쓴다) |
-| v5.0.0-1.5.1 | — | L1 | XML 파서를 제한적으로 설정하고 외부 엔터티 해석 같은 위험 기능을 꺼 XXE를 막는다. | 빈칸 | B | 영역: services/seatmap-worker |
-| v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/http.test.ts |
+| v5.0.0-1.5.1 | — | L1 | XML 파서를 제한적으로 설정하고 외부 엔터티 해석 같은 위험 기능을 꺼 XXE를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
+| v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 2곳 |
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/end-purchase-session.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 3곳 |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/consumers.int.test.ts 외 29곳 |
+| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 34곳 |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
@@ -199,22 +199,22 @@
 | v5.0.0-4.4.2 | — | L2 | WebSocket 첫 HTTP 핸드셰이크에서 `Origin`을 허용 출처 목록과 대조한다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat-review.int.test.ts, services/v0-monolith/test-int/seat.int.test.ts (영역:… |
 | v5.0.0-4.4.3 | — | L2 | 표준 세션 관리를 쓸 수 없으면 세션 관리 요구사항을 따르는 전용 토큰을 쓴다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-4.4.4 | — | L2 | 전용 WebSocket 세션 토큰은 인증된 HTTPS 세션으로 처음 받거나 검증한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-5.1.1 | — | L2 | 업로드 기능마다 허용 파일 형식·확장자·최대 크기(풀린 크기 포함)와, 최종 사용자가 내려받아 처리해도 안전하게 만드는 방법(악성 파일을 찾았을 때의 동작… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-5.2.1 | — | L1 | 성능 저하나 서비스 거부 없이 처리할 수 있는 크기의 파일만 받는다. | 빈칸 | B | 영역: services/core-svc |
-| v5.0.0-5.2.2 | — | L1 | 단독이든 zip 같은 압축 파일 안이든 받는 파일의 확장자가 기대한 것인지와 내용이 그 형식과 맞는지(매직 바이트, 이미지 다시 쓰기 등) 검증하고, L1은… | 빈칸 | B | 영역: services/seatmap-worker |
+| v5.0.0-5.1.1 | — | L2 | 업로드 기능마다 허용 파일 형식·확장자·최대 크기(풀린 크기 포함)와, 최종 사용자가 내려받아 처리해도 안전하게 만드는 방법(악성 파일을 찾았을 때의 동작… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 |
+| v5.0.0-5.2.1 | — | L1 | 성능 저하나 서비스 거부 없이 처리할 수 있는 크기의 파일만 받는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts |
+| v5.0.0-5.2.2 | — | L1 | 단독이든 zip 같은 압축 파일 안이든 받는 파일의 확장자가 기대한 것인지와 내용이 그 형식과 맞는지(매직 바이트, 이미지 다시 쓰기 등) 검증하고, L1은… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 3곳 |
 | v5.0.0-5.2.3 | — | L2 | 압축 파일은 풀기 전에 풀린 크기와 파일 수 상한을 확인한다. | 해당 없음 | B | 해당 없음(압축 파일을 받지 않는다, 5.1.1) |
-| v5.0.0-5.3.1 | — | L1 | 신뢰하지 않는 입력으로 올라오거나 만들어져 공개 폴더에 저장된 파일은 HTTP 요청으로 직접 열어도 서버 쪽 코드로 실행되지 않게 한다. | 빈칸 | B | 영역: services/core-svc |
-| v5.0.0-5.3.2 | — | L1 | 파일 작업 경로는 사용자가 보낸 파일 이름 대신 내부에서 만들거나 믿을 수 있는 값으로 만들고, 사용자 파일 이름·메타데이터를 써야 하면 엄격히 검증·정화해… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-5.4.1 | — | L2 | JSON·JSONP·URL 파라미터에 담긴 것을 포함해 사용자가 보낸 파일 이름은 검증하거나 무시하고, 응답의 `Content-Disposition`에 파일… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
+| v5.0.0-5.3.1 | — | L1 | 신뢰하지 않는 입력으로 올라오거나 만들어져 공개 폴더에 저장된 파일은 HTTP 요청으로 직접 열어도 서버 쪽 코드로 실행되지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| v5.0.0-5.3.2 | — | L1 | 파일 작업 경로는 사용자가 보낸 파일 이름 대신 내부에서 만들거나 믿을 수 있는 값으로 만들고, 사용자 파일 이름·메타데이터를 써야 하면 엄격히 검증·정화해… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 |
+| v5.0.0-5.4.1 | — | L2 | JSON·JSONP·URL 파라미터에 담긴 것을 포함해 사용자가 보낸 파일 이름은 검증하거나 무시하고, 응답의 `Content-Disposition`에 파일… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-5.4.2 | — | L2 | 내주는 파일 이름을 인코딩·정화해 문서 구조를 지키고 주입을 막는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-5.4.3 | — | L2 | 신뢰하지 않는 출처의 파일은 백신으로 검사해 알려진 악성 파일을 내려주지 않는다. | 해당 없음 | B | 해당 없음(신뢰하지 않는 출처의 파일을 내려주지 않는다. 가져오기 원본은 저장하지 않고, 공개 좌석맵 파일은 서버가 검증한 데이터로 만든다) |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/purchase-svc/test/purchase-session-leave-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test/partner-directory.http.test.ts, services/purchase-svc/test-int/purchase-session.int.test.ts… |
+| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/partner-directory.http.test.ts 외 12곳 |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 20곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/start-payment-http.test.ts, services/purchase-svc/test/start-payment.test.ts |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/rls.int.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts (영역:… |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-server.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
@@ -229,7 +229,7 @@
 | v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/seat-store.int.test.ts, services/purchase-svc/test/consumers.test.ts |
 | v5.0.0-13.2.3 | — | L2 | 서비스 인증에 기본 자격 증명을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/portone-config.test.ts, services/payment-svc/test/toss-config.test.ts (영역:… |
 | v5.0.0-13.2.4 | — | L2 | 애플리케이션이 통신할 수 있는 외부 자원의 허용 목록을 정의한다. | 자동 시험 | B | 시험: services/payment-svc/test/portone-config.test.ts, services/payment-svc/test/toss-config.test.ts |
-| v5.0.0-13.2.5 | — | L2 | 서버가 요청을 보내거나 자원을 불러올 수 있는 대상의 허용 목록을 설정한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/portone-config.test.ts, services/payment-svc/test/toss-config.test.ts 외 1곳 (영역:… |
+| v5.0.0-13.2.5 | — | L2 | 서버가 요청을 보내거나 자원을 불러올 수 있는 대상의 허용 목록을 설정한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, loadtest/test/runner.test.mjs 외 10곳 (영역: apps/partner, apps/web… |
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳… |
 | v5.0.0-13.4.1 | — | L1 | 배포물에 `.git`·`.svn` 같은 소스 관리 메타데이터가 없거나, 있어도 외부와 애플리케이션 모두 접근할 수 없다. | ID만 | B | 다른 곳 시험: tools/web-checks/static/assets.test.mjs (영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc) |
@@ -246,9 +246,9 @@
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 1곳 |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | 빈칸 | B | 영역: services/seatmap-worker |
+| v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | 빈칸 | B | 영역: services/core-svc |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | ID만 | B | 다른 곳 시험: tools/web-checks/static/assets.test.mjs (영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc) |
-| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-confirm-run… |
+| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-15.2.1 | — | L1 | 문서에 정한 갱신·조치 기한을 넘긴 구성요소가 없다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-15.2.2 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능에 문서대로 가용성 방어를 구현한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/seat-stream-relay.int.test.ts, services/purchase-svc/test/seat-stream-relay.test.ts |
 | v5.0.0-15.2.3 | — | L2 | 운영 환경에는 필요한 기능만 두고 시험 코드·예제·개발 기능을 노출하지 않는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
@@ -259,8 +259,8 @@
 | v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-15.3.6 | — | L2 | 프로토타입 오염을 막도록 JavaScript를 작성한다(객체 리터럴 대신 `Set`·`Map` 등). | ID만 | B | 다른 곳 시험: packages/api-client/test/policy.test.ts, packages/validation/test/validation.test.ts 외 2곳 (영역: function… |
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/read-seat-snapshot.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
-| v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
-| v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
+| v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/production-image.int.test.ts (영역:… |
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
@@ -269,7 +269,7 @@
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | 자동 시험 | B | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/accept-payment.test.ts 외 1곳 |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts 외 2곳 |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/sale-state.int.test.ts, services/purchase-svc/test-int/seat-snapshot.int.test.ts 외… |
-| v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
+| v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-recheck.test.ts |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/problem.test.ts (영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc) |
@@ -279,4 +279,4 @@
 | v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/payment-result-e2e.int.test.ts, services/purchase-svc/test-int/pin-failed-mark.int.te… |
 | v5.0.0-15.4.3 | — | L3 | 서로 기다리거나 끝없이 다시 시도하다 멈추지 않도록 잠금을 일관되게 쓰고, 잠금 처리는 그 자원을 맡은 코드 안에만 두어 바깥 코드가 잠금을 실수나 악의로… | 자동 시험 | B | 시험: services/purchase-svc/test-int/seat-sales.int.test.ts |
 | v5.0.0-15.4.4 | — | L3 | 스레드 풀 같은 자원 배분 규칙으로 자원을 공정하게 나눠, 우선순위가 낮은 스레드도 알맞은 시간 안에 나아가게 하고 스레드 굶주림을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/sale-state.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 4곳 |
-| v5.0.0-15.2.5 | — | L3 | 문서에 '위험한 기능'이 있거나 '위험 구성 요소'를 쓴다고 적은 부분에 샌드박스·캡슐화·컨테이너·네트워크 격리 같은 추가 보호를 둬, 한 부분을 뚫은 공격자가… | 빈칸 | B | 영역: services/core-svc, services/seatmap-worker |
+| v5.0.0-15.2.5 | — | L3 | 문서에 '위험한 기능'이 있거나 '위험 구성 요소'를 쓴다고 적은 부분에 샌드박스·캡슐화·컨테이너·네트워크 격리 같은 추가 보호를 둬, 한 부분을 뚫은 공격자가… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 1곳 |

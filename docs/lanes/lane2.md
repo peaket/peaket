@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- **2026-11-10 기능 묶음으로 재개(ADR-0256)**: 다음 묶음은 BAT-145(HOT-190·HOT-210). BAT-040(HOT-305·HOT-346·HOT-357)은 비고의 선행(HOT-090 등)이 `develop`에 들어올 때까지 건너뛴다. 아래 줄의 단계 메모는 묶음을 시작할 때 범위에 넣는다.
+- **2026-11-10 기능 묶음으로 재개(ADR-0256)**: BAT-145(HOT-190·HOT-210)는 끝났다. 다음 묶음은 감독 세션의 "계속"을 받은 뒤 BAT-150(HOT-220·HOT-230)이고, 시작할 때 지시서(`node tools/ci/brief.mjs --batch BAT-150 --out <scratchpad 파일>`)와 계획 담당의 작업 목록(docs/review/plans 폴더의 BAT-150 파일)을 먼저 만든다(ADR-0256 결정 9·10). BAT-040(HOT-305·HOT-346·HOT-357)은 비고의 선행(HOT-090 등)이 `develop`에 들어올 때까지 건너뛴다. 아래 줄의 단계 메모는 묶음을 시작할 때 범위에 넣는다.
 - **HOT-350 나눔(2026-11-09, ADR-0221)**: 열셋으로 나눴고 구매 세션 서명기 핵심 HOT-360 ①과 좌석 화면 엔진 HOT-350 ①(ADR-0224)·입장 확정의 좌석맵 경로 HOT-351·좌석 화면 자산 목록 HOT-352·좌석 고르기와 홀드 HOT-353(ADR-0225)·구매 세션 401과 복제 탭 HOT-361·접근성 좌석 목록 HOT-354(ADR-0227)·결제 화면 주문 만들기 HOT-355(ADR-0228)·결제창 복귀와 접수 HOT-362(ADR-0229)·결제 결과 HOT-363(ADR-0230)은 끝났다. HOT-306(공연 상세 응답)도 끝났다. 구간 1에서 갈래 2가 지금 할 수 있는 단계는 모두 끝났고, 남은 HOT-356·357·358은 서버 단계(HOT-070·HOT-090·PRF-190)를, HOT-305는 HOT-270·OPS-410을, HOT-346은 HOT-250을 기다린다. BAS-043(ADR-0238)과 HOT-100(ADR-0240)은 끝났고, HOT-172(ADR-0241)와 HOT-180 ①(ADR-0242)도 끝났고, HOT-183(ADR-0244)도 끝났다. 다음은 HOT-184 → HOT-185다(SEG-010은 끝나지 않았으면 건너뛰는 단계라 기다리지 않는다). 조사로 안 것: 좌석 화면 `?state=` 미리보기는 개발 서버에만 남겼고, 하위 단계가 잇는 대로 걷어 낸다(ADR-0224 결정 2). SDK 창 메시지 규칙이 docs/frontend.md §5.3('받지 않는다')과 docs/features/payment.md·ASVS 3.5.5 사이에서 엇갈린다(HOT-358의 ADR로 정한다). XState·`@xstate/graph`·결제사 SDK는 이미 ADR이 고른 것이라(ADR-0024·0135, docs/frontend.md §5.14.5) 새 패키지 승인 대상이 아니고 신뢰 정책만 지킨다.
 - 소유자 결정(2026-11-05 '선행 단계 먼저')대로 홈(HOT-300)의 선행 단계를 먼저 한다: HOT-170 ①(core-svc 공연 표·회차 공개 요약)과 HOT-171(공연 등록·회차 더하기·찜 API)은 끝났다. HOT-300(홈)도 끝났다(소유자 결정 '화면 먼저': 서버가 없는 화면은 계약 모양 가짜 API로 띄운다, ADR-0199). HOT-310은 넷으로 나눴다(①공연 상세 계약·②상세 화면 HOT-311·③검색 결과 HOT-312·④머리 자동완성 HOT-313, 모두 끝). HOT-320은 넷으로 나눴다(①공급자 호출 보호, ②로그인 화면·셸 로그인 표시·상세 개인 상태 HOT-321은 끝, ③가입 완료·동의·본인확인 흐름 HOT-323도 끝, ④서식 글 편집기 PoC HOT-322도 끝, Lexical로 정함 ADR-0204). 서버 몫(팬 계정 요약·가입 세 경로)은 갈래 3의 BOT-047. HOT-340은 셋으로 나눴다(①대기실 오픈 뒤 경로는 끝, ADR-0207. ②로비·여러 탭 HOT-341, ③공연 상세 진입 상태·사전 사람 확인 카드·브라우저 검사 HOT-342). HOT-341은 둘로 나눴다(①로비 경로·여러 탭·차례 도래 유예·로그아웃은 끝, ADR-0208. ②자동 배정 희망 조건·차례 직전 확인·[차례 알림 받기]는 HOT-343). HOT-342 ①(ADR-0211)·HOT-343(ADR-0212)·HOT-344(ADR-0213)도 끝났다. HOT-345 ①(ADR-0216)도 끝났고, 나머지는 HOT-347(같은 출처 검사 틀·T=0 세 엔진)·HOT-348(여러 탭 세 엔진)·HOT-349(ds QueuePanel 비교)로 나눴다. HOT-347(ADR-0217)·HOT-348(ADR-0218)·HOT-349(ADR-0220)도 끝났다. HOT-350 나눔과 차례는 위 줄이다. HOT-344에서 나눈 HOT-346(선예매·판매 정책 표시·공연 상세 매진)은 HOT-250·HOT-010 뒤에 한다. 공연 상세 응답 채우기는 새 단계 HOT-306(core-svc). 홈 피드 서버 HOT-305는 HOT-270·OPS-410 뒤에 한다. BAS-041·BAS-042는 끝났고, BAS-043(굿즈 결제 경로·인기 MD 대기열·빠진 읽기 경로 초안)도 끝났다. 그 뒤 구간 1 갈래 2의 남은 단계 HOT-340·350·360, 이어서 구간 2의 갈래 2 단계로 간다. 화면이 바뀌는 단계는 브라우저 확인을 한다. SEED 스타일 부품(`@seed-design/react`)을 처음 쓰는 단계는 ADR-0192 결정 5와 ADR-0191 결정 3을 먼저 한다. 캐시 화면 묶음 A의 화면은 응답 때 해시 서버(ADR-0193)를 거쳐야 막는 CSP가 붙으므로, 검사는 `tools/web-checks`의 서버 명령(`apps/web/server/start.mjs`)으로 띄운다.
 
@@ -49,6 +49,19 @@
 - HOT-355: 앱 셸 계정 버튼 `.acct`의 보이는 글이 접근성 이름에 그대로 들지 않는다(axe label-content-name-mismatch, 실험 규칙). 예매자 자동 입력은 이름·번호를 주는 API가 생기면 한다(ADR-0228)
 - HOT-354: 좌석 목록의 NVDA 키보드 완주는 소유자가 확인했다(2026-11-09). VoiceOver·TalkBack은 기기가 있을 때 사람이 한다. [자동 좌석 배정] 버튼은 HOT-080 뒤, 실시간 델타의 `stateChanged`는 HOT-357이다(ADR-0227)
 - 성능 예산(R-374): 검사 틀의 홈은 빌드 때 원본이 없어 빈 피드이고 브라우저가 랭킹 파일을 못 받아 섹션이 접혀 CLS 0.144가 난다(실제 데이터에서는 그 섹션이 화면 아래다). 빌드 때 가짜 API를 붙이거나 랭킹 파일을 같은 출처로 주면 기준선을 뺀다. CI 러너에서 같은 빌드의 한 주소가 세 번 사이에 ±20% 흔들려(결제 데모 6.8~8.1초, R-376) 여유를 25%로 넓혔다(R-380). wbs 7.5.2에서 재는 횟수나 여유를 다시 정한다(tools/web-checks/budgets/lighthouse-baseline.json)
+- HOT-190: 올리기 422 ALT_INVALID를 늘 "대체 텍스트를 적어 주세요"로 보인다. 서버는 NUL·짝 깨진 서로게이트도 ALT_INVALID로 거절하니 화면도 그 글자를 검사하거나 문구를 나눈다(apps/partner event-wizard model/images.ts)
+- HOT-190: 같은 파일이면 같은 답이 나오는 거절(413·415·409·422)에도 [다시 올리기]를 보이고, "다른 파일로 다시 올려 주세요"를 따를 길(파일 다시 고르기)이 없다. 포스터가 거절되면 공연 수정 화면(SCR-063) 전까지 넣을 수 없다(apps/partner LiveWizard.tsx)
+- HOT-190: 이미지 줄 접근성: 오류 요약이 보내는 #w-images가 이름·역할 없는 div, 줄 오류가 칸·버튼 aria-describedby에 안 이어짐, 복원 줄 버튼 이름이 서로 구별 안 됨(apps/partner ImageField.tsx, packages/ds MediaUploader)
+- HOT-190: 올리는 중 [새 공연 등록]·새로고침·탭 닫기 경고가 없고 등록 직후 임시저장을 지워, 새로고침하면 완료 화면·오류 줄·'포스터 필요' 안내가 사라진다. 앞 공연의 남은 이미지는 뒤에서 계속 올라간다(apps/partner LiveWizard.tsx)
+- HOT-190: [다시 올리기]·올리기 결과 반영이 함수형 상태 갱신이 아니라 대기 중인 앞 줄 결과를 덮을 수 있다(apps/partner LiveWizard.tsx)
+- HOT-190: ds MediaUploader의 대체 텍스트 maxLength 300은 UTF-16 단위라 이모지가 든 글은 150자에서 잘린다(서버는 코드 포인트 300, packages/ds MediaUploader.tsx)
+- HOT-190: 올리기 계약에 멱등 키가 없어 응답을 못 받은 상세 이미지를 다시 올리면 두 장이 될 수 있다. 작업 원장이 생기는 HOT-200에서 `Idempotency-Key`를 더할지 정한다(docs/api/openapi.yaml createPartnerProductionImage, ADR-0257 결정 3)
+- HOT-190: 포스터 부분 유일 인덱스 위반(23505)과 COMMIT 응답만 잃은 경우의 답이 정해지지 않았다(지금은 500이고 게시본을 지울 수 있다, services/core-svc production-images.ts)
+- HOT-190: 포스터를 바꾸면 옛 파생본을 지운 뒤 무효화하고 무효화 실패는 기록만 한다. 웹 공연 상세는 300초 캐시라 그동안 지운 주소를 그리고 PicturePoster에 onError 대체가 없다(services/core-svc production-images.ts, apps/web event-detail)
+- HOT-190: 선언 길이가 본문 상한을 넘으면 413만 보내고 연결을 닫지 않아 Node가 남은 본문을 읽는다(chunked도 계속 읽음, packages/platform request-checks.ts)
+- HOT-210: seatmap-worker 메모리 셈(스레드 384MiB + 대기 5개 × 12MiB 버퍼)이 컨테이너 512MiB에 붙어 있고 terminate 끝을 기다리지 않고 다음 스레드를 띄운다. S-T34 ④를 5만 석 파일로 잴 때 함께 본다(services/core-svc seatmap-worker pool.ts, seat-hold §13)
+- HOT-210: gRPC 채널에 keepalive가 없어 반쯤 열린 연결에서는 호출마다 데드라인까지 기다린다(메시가 있으면 해당 없음, services/core-svc seatmap-worker-client.ts·image-processing-client.ts)
+- 확인 필요(HOT-200): image.proto width·height가 EXIF 회전을 반영한 크기인지 정하기. core-svc가 30초에 준비 위치를 지운 뒤 늦게 끝난 image-worker가 파생본을 쓰면 기록 없는 객체가 남는다(준비 위치 수명 규칙). 파생본 Content-Disposition·nosniff를 실을 칸이 putPublic 포트에 없다
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -118,3 +131,4 @@
 - 2026-11-09 HOT-183 공연 설명·전산망 항목(R-417, ADR-0244): 구조 문서와 글자판을 저장하고 공연 상세가 구조 문서를 준다. 등록 본문의 글자 칸은 저장할 수 없는 글자를 400으로 막는다. 화면 그리기는 HOT-185다.
 - 2026-11-09 HOT-184 공연 등록 위저드 잇기(R-421, ADR-0245): 입력을 브라우저에 임시저장하고 4단계 끝에서 한 번에 초안으로 등록한다. 서버 판정은 그 회차 칸으로 돌아온다. 공연 설명은 HOT-185, 이미지는 HOT-190이다.
 - 2026-11-09 HOT-185 공연 설명 편집기와 공연 상세 그리기(R-423, ADR-0247): 위저드에 Lexical을 붙이고 팬 화면이 구조 문서를 그린다. FE-T41을 위저드로 옮겨 CI 잡을 올리고 PoC·Tiptap을 걷었다.
+- 2026-11-10 BAT-145 공연 이미지 올리기·좌석맵 가져오기(HOT-190·HOT-210, ADR-0257): 이미지는 core-svc가 받아 검사하고 처리 결과를 다시 본 뒤 게시하며 위저드가 등록 뒤 올린다. 좌석맵 파일은 자격 증명 없는 seatmap-worker가 제한된 읽개로 해석하고 core-svc가 다시 본다. 장부 범위 53개 빈칸·ID만 0.

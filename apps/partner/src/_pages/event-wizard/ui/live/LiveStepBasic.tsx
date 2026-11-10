@@ -1,4 +1,4 @@
-// 1단계 기본 정보(실제 입력, ADR-0245). 배치는 퍼블리싱 화면(StepBasic)과 같다. 공연 설명은 HOT-185, 이미지는 HOT-190이 잇는다.
+// 1단계 기본 정보(실제 입력, ADR-0245). 배치는 퍼블리싱 화면(StepBasic)과 같다. 공연 설명은 HOT-185, 포스터·상세 이미지는 HOT-190(ADR-0257 결정 4)이 잇는다.
 import dynamic from 'next/dynamic';
 import { useCallback, useState, type KeyboardEvent } from 'react';
 import { isEmptyDoc, type PeaketDoc } from '@/features/rich-text/doc';
@@ -7,6 +7,7 @@ import { ALIAS_MAX, ARTIST_MAX, kopisStatus, type PlaceChoice } from '../../mode
 import { searchArtists, searchPlaces, type NameHit } from '../../model/wizard-api';
 import { NameSearch } from '../parts/NameSearch';
 import { errorAttrs, FieldLabel, FieldMessage, TextField, type StepProps } from './fields';
+import { ImageField, type ImageFieldProps } from './ImageField';
 
 // 편집기는 이 단계에 들어올 때 늦게 싣는다(docs/frontend.md §5.6, 90KB)
 const DescriptionEditor = dynamic(() => import('@/features/rich-text/LexicalEditor'), {
@@ -253,8 +254,11 @@ function AliasField({ draft, update, errorOf }: StepProps) {
   );
 }
 
-export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => void; editorKey: number }) {
-  const { draft, update, errorOf, editorKey } = props;
+/** 위저드가 들고 있는 이미지 파일 상태(탭 메모리) */
+export type ImageMedia = Pick<ImageFieldProps, 'files' | 'attach' | 'drop' | 'overflow' | 'onOverflow'>;
+
+export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => void; editorKey: number; media: ImageMedia }) {
+  const { draft, update, errorOf, editorKey, media } = props;
   const onDescription = useCallback((doc: PeaketDoc) => update({ description: isEmptyDoc(doc) ? null : doc }, 'description'), [update]);
   const status = kopisStatus(draft);
   const genreError = errorOf('genre');
@@ -320,7 +324,7 @@ export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => v
           </span>
           <FieldMessage id="w-notice" error={noticeError} />
         </div>
-        <p className="hint">포스터·상세 이미지는 아직 이 화면에서 입력할 수 없습니다. 판매 승인을 요청하기 전에 넣게 됩니다.</p>
+        <ImageField images={draft.images} onImages={(images) => update({ images }, 'images')} error={errorOf('images')} {...media} />
       </section>
 
       <section className="card pad-lg col lg:col-span-6 xl:col-span-1" style={{ gap: 12 }} aria-labelledby="h-kopis">

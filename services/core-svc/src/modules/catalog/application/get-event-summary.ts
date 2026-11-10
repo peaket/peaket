@@ -5,7 +5,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { lobbyOpensAt, MAX_ARTISTS, MAX_DESCRIPTION_TEXT, publicRounds, queueOrder, sellerInfo, type PublicRound, type QueueOrder, type SellerInfo } from '../domain/event-detail.js';
 import type { DescriptionDoc } from '../domain/description.js';
+import { IMAGE_ORIGIN } from '../domain/media-ports.js';
 import { CATALOG_REPOSITORY, type CatalogRepository } from '../domain/ports.js';
+import { DETAIL_MAX, imageBaseUrl } from '../domain/production-image.js';
 import { type EventStatus, type Genre, isPublic, saleEndsAt } from '../domain/production.js';
 
 export interface EventPublicSummary {
@@ -17,8 +19,11 @@ export interface EventPublicSummary {
   genre: Genre;
   ageRating?: string;
   runningMinutes?: number;
+  posterUrl?: string;
+  posterAlt?: string;
   descriptionText?: string;
   description?: DescriptionDoc;
+  detailImages: { url: string; alt: string }[];
   artists: { artistId: string; name: string }[];
   placeId?: string;
   placeName?: string;
@@ -43,6 +48,7 @@ export class GetEventSummary {
   constructor(
     @Inject(CATALOG_REPOSITORY) private readonly repo: CatalogRepository,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(IMAGE_ORIGIN) private readonly imageOrigin: string,
   ) {}
 
   async run(eventId: string): Promise<EventPublicSummary | 'suspended' | undefined> {
@@ -53,6 +59,13 @@ export class GetEventSummary {
     const order = queueOrder(e.lobbyShuffle, e.openBatch);
     const lobby = lobbyOpensAt(e.openAt, e.lobbyMinutes, e.lobbyShuffle);
     const seller = sellerInfo(row.seller);
+    // 포스터와 상세 이미지(순서대로)는 production_image 표에서 채운다. 주소는 파생본 묶음의 기준 주소다(ADR-0257 결정 3)
+    const poster = row.images.find((i) => i.kind === 'POSTER');
+    const details = row.images
+      .filter((i) => i.kind === 'DETAIL')
+      .sort((a, b) => a.order - b.order)
+      .slice(0, DETAIL_MAX)
+      .map((i) => ({ url: imageBaseUrl(this.imageOrigin, i.id), alt: i.alt }));
     return {
       eventId: e.id,
       productionId: p.id,
@@ -62,8 +75,10 @@ export class GetEventSummary {
       genre: p.genre,
       ...(p.ageRating ? { ageRating: p.ageRating } : {}),
       ...(p.runningMinutes ? { runningMinutes: p.runningMinutes } : {}),
+      ...(poster ? { posterUrl: imageBaseUrl(this.imageOrigin, poster.id), posterAlt: poster.alt } : {}),
       ...(p.description ? { descriptionText: p.description.slice(0, MAX_DESCRIPTION_TEXT) } : {}),
       ...(p.descriptionDoc ? { description: p.descriptionDoc } : {}),
+      detailImages: details,
       artists: row.artists.slice(0, MAX_ARTISTS),
       ...(place ? { placeId: place.id, placeName: place.name, placeAddress: place.address } : {}),
       openAt: e.openAt.toISOString(),

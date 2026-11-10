@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
 import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
 import { type CatalogEvent, isPublic, type Production } from '../domain/production.js';
+import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
+import type { ProductionImageRow } from '../domain/production-image.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
 
 export class MemoryCatalogRepository implements CatalogRepository {
@@ -24,6 +26,8 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly pending = new Map<string, PendingEvent[]>();
   /** 계정 → (공연 → 처음 찜한 시각) */
   readonly wishes = new Map<string, Map<string, Date>>();
+  /** 공연 이미지 행(이미지 ID → 행) */
+  readonly images = new Map<string, ProductionImageRow>();
   readonly #once = new Map<string, { hash: Buffer; result: string }>();
   /** 등록 쓰기를 한 줄로 세운다(시험이 늘 같은 결과를 보게) */
   #queue: Promise<unknown> = Promise.resolve();
@@ -50,6 +54,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
       place: d?.place ?? null,
       artists: d?.artists ?? [],
       rounds: [...this.events.values()].filter((e) => e.productionId === event.productionId).map((e) => ({ id: e.id, startsAt: e.startsAt, openAt: e.openAt, status: e.status })),
+      images: [...this.images.values()].filter((i) => i.productionId === event.productionId).map((i) => ({ id: i.id, kind: i.kind, alt: i.alt, order: i.order })),
     };
   }
 
@@ -132,5 +137,44 @@ export class MemoryCatalogRepository implements CatalogRepository {
 
   async deleteWish(accountId: string, productionId: string): Promise<void> {
     this.wishes.get(accountId)?.delete(productionId);
+  }
+}
+
+/** 메모리 공연 이미지 저장소: 메모리 카탈로그의 공연·이미지 지도를 함께 쓴다. 공연마다 한 줄로 세워 잠금을 흉내 낸다 */
+export class MemoryProductionMedia implements PartnerProductionMedia {
+  readonly #locks = new Map<string, Promise<unknown>>();
+
+  constructor(private readonly repo: MemoryCatalogRepository) {}
+
+  async owns(productionId: string, tenantId: string): Promise<boolean> {
+    return this.repo.productions.get(productionId)?.promoterId === tenantId;
+  }
+
+  async detailCount(productionId: string, tenantId: string): Promise<number> {
+    return [...this.repo.images.values()].filter((i) => i.productionId === productionId && i.promoterId === tenantId && i.kind === 'DETAIL').length;
+  }
+
+  withLockedProduction<T>(productionId: string, tenantId: string, fn: (tx: ProductionImageTx) => Promise<T>): Promise<T | 'not-found'> {
+    const prev = this.#locks.get(productionId) ?? Promise.resolve();
+    const run = prev.then(async () => {
+      if (!(await this.owns(productionId, tenantId))) return 'not-found' as const;
+      const writes: (() => void)[] = [];
+      const mine = () => [...this.repo.images.values()].filter((i) => i.productionId === productionId);
+      const tx: ProductionImageTx = {
+        images: async () => mine().map((i) => ({ ...i })),
+        insert: async (r) => void writes.push(() => this.repo.images.set(r.id, { ...r })),
+        remove: async (id) => void writes.push(() => this.repo.images.delete(id)),
+        update: async (id, patch) =>
+          void writes.push(() => {
+            const cur = this.repo.images.get(id);
+            if (cur) this.repo.images.set(id, { ...cur, ...(patch.alt !== undefined ? { alt: patch.alt } : {}), ...(patch.order !== undefined ? { order: patch.order } : {}), version: patch.version, updatedAt: patch.updatedAt });
+          }),
+      };
+      const value = await fn(tx);
+      for (const w of writes) w();
+      return value;
+    });
+    this.#locks.set(productionId, run.catch(() => undefined));
+    return run;
   }
 }

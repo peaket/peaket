@@ -289,6 +289,8 @@ const CODE_PATH = new RegExp(`(?<![\\w./-])((?:${CODE_TOPS.join('|')})/[\\w.-]+)
 const SERVICE_NAME = /(?<![\w/@.-])([a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:svc|ctrl|checker|simulator|monolith|worker|ingest|rt))(?![\w-])/g;
 /** 구현 위치 칸이 폴더 이름과 다르게 부르는 이름 */
 const NAME_ALIAS = { identity: 'services/identity-svc', 'web bff': 'apps/web', console: 'apps/console-host', 'queue-room': 'apps/web' };
+/** 다른 서비스의 같은 코드에서 다른 진입점으로 띄우는 작업(docs/architecture.md §3.1, ADR-0257 결정 5): 그 서비스 폴더의 시험을 센다 */
+const ENTRYPOINT_OF = { 'seatmap-worker': 'services/core-svc', 'image-worker': 'services/core-svc' };
 
 /** 구현 위치 칸이 가리키는 코드: 경로의 앞 두 마디(둘째가 파일이면 첫 마디), @peaket/x, 서비스 이름, 코드 표시 속 이름('name:…', 폴더를 보고 푼다) */
 function codeRefsIn(cell) {
@@ -298,7 +300,7 @@ function codeRefsIn(cell) {
     refs.add(/\.[a-z]+$/i.test(second) ? top : `${top}/${second}`);
   }
   for (const m of cell.matchAll(/@peaket\/([\w-]+)/g)) refs.add(`packages/${m[1]}`);
-  for (const m of cell.matchAll(SERVICE_NAME)) refs.add(`services/${m[1]}`);
+  for (const m of cell.matchAll(SERVICE_NAME)) refs.add(ENTRYPOINT_OF[m[1]] ?? `services/${m[1]}`);
   for (const m of cell.matchAll(/`([^`]+)`/g)) {
     const t = m[1].trim().toLowerCase();
     if (/^[a-z][a-z0-9 -]*$/.test(t)) refs.add(`name:${t}`);

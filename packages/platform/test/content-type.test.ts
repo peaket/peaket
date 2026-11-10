@@ -2,8 +2,11 @@
 import 'reflect-metadata';
 import { Body, Controller, Get, HttpCode, Module, Post } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { AcceptTextPlain, Roles, createService, fakeClock } from '../src/index.js';
+import { AcceptMultipart, AcceptTextPlain, ProblemError, Roles, createService, fakeClock } from '../src/index.js';
 import { collector } from './fixture.js';
+
+/** 칸막이 시험: 처리기 안에서 기다리게 하는 문 */
+const heldGate = { current: { promise: Promise.resolve(), open: () => {} } };
 
 @Controller('v1/ct')
 class CtController {
@@ -20,6 +23,31 @@ class CtController {
   @AcceptTextPlain()
   text(@Body() body: unknown) {
     return { body: body ?? null, type: typeof body };
+  }
+
+  @HttpCode(200)
+  @Post('upload')
+  @Roles(['public'])
+  @AcceptMultipart({ maxBytes: 64, tooLarge: () => new ProblemError({ type: 'image-too-large', status: 413, title: '한 장에 10MB까지 올릴 수 있습니다' }) })
+  upload(@Body() body: unknown) {
+    return { isBuffer: Buffer.isBuffer(body), length: Buffer.isBuffer(body) ? body.length : -1 };
+  }
+
+  @HttpCode(200)
+  @Post('held')
+  @Roles(['public'])
+  @AcceptMultipart({ maxBytes: 64, tooLarge: () => new ProblemError({ type: 'image-too-large', status: 413, title: '한 장에 10MB까지 올릴 수 있습니다' }), bulkhead: { name: 'shared', limit: 1, retryAfterSeconds: 7 } })
+  async held() {
+    await heldGate.current.promise;
+    return { ok: true };
+  }
+
+  @HttpCode(200)
+  @Post('held2')
+  @Roles(['public'])
+  @AcceptMultipart({ maxBytes: 64, tooLarge: () => new ProblemError({ type: 'image-too-large', status: 413, title: '한 장에 10MB까지 올릴 수 있습니다' }), bulkhead: { name: 'shared', limit: 1, retryAfterSeconds: 7 } })
+  held2() {
+    return { ok: true };
   }
 
   @Get('read')
@@ -84,5 +112,48 @@ describe('본문 형식', () => {
   test('FND070_본문없는요청은_형식검사를받지않는다', async () => {
     const r = await svc.http.inject({ method: 'GET', url: '/v1/ct/read', headers: { 'content-type': 'text/plain' } });
     expect(r.statusCode).toBe(200);
+  });
+});
+
+describe('multipart 올리기 경로(ADR-0257)', () => {
+  const mp = { 'content-type': 'multipart/form-data; boundary=x' };
+
+  test('ADR0257_표시한경로는_multipart본문을_바이트그대로받는다(상한과 같은 길이까지)', async () => {
+    const at = await post('/v1/ct/upload', mp, 'a'.repeat(64));
+    expect(at.statusCode).toBe(200);
+    expect(JSON.parse(at.payload)).toEqual({ isBuffer: true, length: 64 });
+  });
+
+  test('ADR0257_상한을_1바이트넘으면_이름붙은413이고_JSON경로의multipart는_그대로415다', async () => {
+    const over = await post('/v1/ct/upload', mp, 'a'.repeat(65));
+    expect(over.statusCode).toBe(413);
+    expect(JSON.parse(over.payload)).toMatchObject({ type: 'https://peaket.example/problems/image-too-large', status: 413 });
+    const json = await post('/v1/ct/json', mp, 'a');
+    expect(json.statusCode).toBe(415);
+  });
+
+  test('ADR0257_길이머리가_상한보다크면_본문을읽지않고413이다', async () => {
+    const r = await svc.http.inject({ method: 'POST', url: '/v1/ct/upload', headers: { ...mp, 'content-length': '1000' }, payload: 'a'.repeat(1000) });
+    expect(r.statusCode).toBe(413);
+  });
+});
+
+describe('multipart 칸막이(ADR-0257 결정 2)', () => {
+  test('ADR0257_같은 이름의 칸막이를 쓰는 경로는 자리가 차면 본문을 읽지 않고 429 server-busy와 Retry-After이고 응답이 끝나면 자리를 놓는다', async () => {
+    let open!: () => void;
+    heldGate.current = { promise: new Promise<void>((r) => (open = r)), open: () => open() };
+    const mp = { 'content-type': 'multipart/form-data; boundary=x' };
+    // inject는 then을 불러야 보낸다
+    const first = post('/v1/ct/held', mp, 'a').then((r) => r);
+    await new Promise((r) => setTimeout(r, 50));
+    const busy = await post('/v1/ct/held2', mp, 'a');
+    expect(busy.statusCode).toBe(429);
+    expect(busy.headers['retry-after']).toBe('7');
+    expect(JSON.parse(busy.payload)).toMatchObject({ type: 'https://peaket.example/problems/server-busy', status: 429 });
+    // 칸막이가 없는 multipart 경로는 막지 않는다
+    expect((await post('/v1/ct/upload', mp, 'a')).statusCode).toBe(200);
+    heldGate.current.open();
+    expect((await first).statusCode).toBe(200);
+    expect((await post('/v1/ct/held2', mp, 'a')).statusCode).toBe(200);
   });
 });

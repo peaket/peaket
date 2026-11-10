@@ -9,7 +9,7 @@ import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUp
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
-import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from './schema.js';
+import { artist, event, place, production, productionArtist, productionImage, promoter, searchAlias, wish } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 찜 잠금의 종류 번호(계정마다 따로 잠근다) */
@@ -110,7 +110,7 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       .limit(1);
     const r = rows[0];
     if (!r) return undefined;
-    const [artists, rounds] = await Promise.all([
+    const [artists, rounds, images] = await Promise.all([
       this.db.db
         .select({ artistId: artist.id, name: artist.name })
         .from(productionArtist)
@@ -125,6 +125,13 @@ export class DrizzleCatalogRepository implements CatalogRepository {
         .where(and(eq(event.productionId, r.p.id), ne(event.status, 'CANCELLED'), gte(event.startsAt, new Date(this.clock.now() + SALE_END_BEFORE_START_MS))))
         .orderBy(event.startsAt, event.id)
         .limit(MAX_PUBLIC_ROUNDS),
+      // 포스터 하나와 상세 이미지 열 장까지(ADR-0257 결정 3)
+      this.db.db
+        .select({ id: productionImage.id, kind: productionImage.kind, alt: productionImage.alt, order: productionImage.displayOrder })
+        .from(productionImage)
+        .where(eq(productionImage.productionId, r.p.id))
+        .orderBy(productionImage.kind, productionImage.displayOrder)
+        .limit(11),
     ]);
     const self = { id: r.e.id, startsAt: r.e.startsAt, openAt: r.e.openAt, status: r.e.status };
     return {
@@ -150,6 +157,7 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       place: r.place ? { id: r.place.id, name: r.place.name, address: r.place.address } : null,
       artists,
       rounds: (rounds.some((x) => x.id === self.id) ? rounds : [...rounds, self]).map((x) => ({ ...x, status: x.status as EventStatus })),
+      images: images.map((i) => ({ ...i, kind: i.kind as 'POSTER' | 'DETAIL' })),
     };
   }
 

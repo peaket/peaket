@@ -11,6 +11,6 @@
  */
 
 /**
- * 파생본 주소(크기별 WebP·JPEG, 이름은 서버가 만든 ID)
+ * 파생본 주소 표. 키는 '{폭}.{avif|webp}'(폭 320·640·960·1280 [가정]의 여덟 개), 값은 {기준 주소}/{폭}.{형식}이다. JPEG 파생본은 만들지 않는다(catalog-review 3.2.1, ADR-0257)
  */
 export type ProductionImageDerivatives = {[key: string]: string};

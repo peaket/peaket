@@ -1,6 +1,7 @@
 // 공연 등록 위저드의 입력 값과 규칙(SCR-021, d5 §6.4, ADR-0118, ADR-0198, ADR-0245). React·브라우저를 모르는 순수 함수만 둔다.
 // 서버가 다시 검사한다. 여기 검사는 등록 전에 그 칸에서 바로 알려 주려는 것이다.
 import { validateDoc, type PeaketDoc } from '../../../features/rich-text/doc.ts';
+import { isImageList, type ImageDraft } from './images.ts';
 
 export type QueueOrder = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SeatAssignment = 'PICK' | 'AUTO';
@@ -35,6 +36,8 @@ export interface WizardDraft {
   notice: string;
   /** 공연 설명 구조 문서. 글자가 없으면 null(ADR-0247) */
   description: PeaketDoc | null;
+  /** 포스터(첫 줄)·상세 이미지 줄의 대체 텍스트와 순서. 파일은 탭 메모리에만 있다(ADR-0257 결정 4) */
+  images: ImageDraft[];
   rounds: RoundDraft[];
   queueOrder: QueueOrder;
   seatAssignment: SeatAssignment;
@@ -70,6 +73,7 @@ export function emptyDraft(): WizardDraft {
     producer: '',
     notice: '',
     description: null,
+    images: [],
     rounds: [blankRound('r1')],
     queueOrder: 'HYBRID',
     seatAssignment: 'PICK',
@@ -332,6 +336,7 @@ function isDraft(v: unknown): v is WizardDraft {
   if (!isRecord(v)) return false;
   return (
     isDescription(v.description) &&
+    isImageList(v.images) &&
     [v.title, v.genre, v.ageRating, v.runningMinutes, v.producer, v.notice].every(isStr) &&
     isPlace(v.place) &&
     Array.isArray(v.artists) &&
@@ -355,7 +360,7 @@ export function parseDraft(raw: string | null): WizardDraft | null {
   if (raw === null) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return isRecord(parsed) && parsed.v === DRAFT_VERSION && isDraft(parsed.draft) ? { ...parsed.draft, description: parsed.draft.description ?? null } : null;
+    return isRecord(parsed) && parsed.v === DRAFT_VERSION && isDraft(parsed.draft) ? { ...parsed.draft, description: parsed.draft.description ?? null, images: parsed.draft.images ?? [] } : null;
   } catch {
     return null;
   }

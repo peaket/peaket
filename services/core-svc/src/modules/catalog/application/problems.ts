@@ -18,3 +18,17 @@ export const wishLimit = () => new ProblemError({ type: 'wish-limit', status: 42
 function suggestion(eventIndex: number, at?: Date): Record<string, unknown> {
   return at ? { eventIndex, suggestedOpenAt: at.toISOString() } : { eventIndex };
 }
+
+// 공연 이미지·좌석맵 가져오기(ADR-0257). 제목은 계약 목록과 같다
+export const imageTooLarge = () => new ProblemError({ type: 'image-too-large', status: 413, title: '한 장에 10MB까지 올릴 수 있습니다' });
+export const imageTypeUnsupported = () => new ProblemError({ type: 'image-type-unsupported', status: 415, title: 'JPEG, PNG, WebP 이미지만 올릴 수 있습니다' });
+export const imageLimitExceeded = () => new ProblemError({ type: 'image-limit-exceeded', status: 409, title: '포스터 1장과 상세 이미지 10장까지 올릴 수 있습니다' });
+export const imageSpecInvalid = (reason: 'PIXEL_LIMIT' | 'POSTER_SPEC' | 'DETAIL_SPEC' | 'MALWARE' | 'ALT_INVALID') =>
+  new ProblemError({ type: 'image-spec-invalid', status: 422, title: '이미지 기준에 맞지 않습니다', extensions: { reason } });
+export const imageProcessingUnavailable = (retryAfterSeconds: number) => new ProblemError({ type: 'image-processing-unavailable', status: 503, title: '이미지를 잠시 확인할 수 없습니다', retryAfterSeconds });
+export const posterNotDeletable = () => new ProblemError({ type: 'poster-not-deletable', status: 409, title: '포스터는 지우지 않고 바꿉니다' });
+export const preconditionFailed = () => new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
+export const preconditionRequired = () => new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
+export const seatmapImportTooLarge = () => new ProblemError({ type: 'seatmap-import-too-large', status: 413, title: '좌석맵 파일은 10MB까지 올릴 수 있습니다' });
+export const seatmapImportRejected = (code: string) => new ProblemError({ type: 'seatmap-import-rejected', status: 422, title: '좌석맵 파일을 읽지 않았습니다', detail: code });
+export const seatmapWorkerUnavailable = () => new ProblemError({ type: 'seatmap-worker-unavailable', status: 503, title: '좌석맵 파일을 잠시 확인할 수 없습니다', retryAfterSeconds: 10 });

@@ -8,7 +8,7 @@ import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from '../src/modules/catalog/adapters/db/schema.js';
 import { WISH_LIMIT } from '../src/modules/catalog/domain/registration.js';
-import { eventBody, FakeIdentity, fan, NOW_MS, productionBody, quiet } from '../test/support.js';
+import { eventBody, FakeIdentity, fan, NOW_MS, productionBody, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -38,7 +38,7 @@ beforeAll(async () => {
   ]);
   await database.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: ACTOR });
   await database.db.insert(artist).values({ id: ARTIST, name: '피켓밴드', createdBy: ACTOR });
-  svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
+  svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia() }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
 });
 afterAll(async () => {
   await svc?.close();

@@ -1,18 +1,22 @@
 'use client';
 // SCR-021 새 공연 등록의 실제 위저드(/events/new, ADR-0245). ?state=가 있으면 퍼블리싱 화면을 그리고 이 부품은 쓰지 않는다.
 // 입력은 브라우저에 임시저장하고(1초 뒤·단계를 옮길 때·페이지를 떠날 때), 4단계 끝에서 POST /v1/partner/productions 한 번으로 등록한다.
+// 고른 이미지 파일은 탭 메모리에만 있고, 등록이 성공한 바로 뒤에 포스터부터 한 장씩 올린다(올리기 코드는 그때 늦게 싣는다, ADR-0257 결정 4).
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { routes } from '@/shared/config/routes';
 import { DraftKeeper } from '../../model/draft-keeper';
 import { clearFieldErrors, emptyDraft, problemToErrors, toCreateBody, validateStep, warningText, type FieldError, type InputStep, type WizardDraft } from '../../model/form';
-import { createProduction, type ProductionCreated } from '../../model/wizard-api';
+import type { UploadOutcome } from '../../model/image-upload';
+import { canRetry, imageErrors, runUploads, type ImageDraft } from '../../model/images';
+import { createProduction, uploadProductionImage, type ProductionCreated } from '../../model/wizard-api';
 import type { WizardStep } from '../../model/view';
 import { WizardStepper } from '../parts/WizardStepper';
 import { ErrorSummary } from './fields';
 import { LiveStepBasic } from './LiveStepBasic';
 import { LiveStepPolicy } from './LiveStepPolicy';
 import { LiveStepRounds } from './LiveStepRounds';
+import { fileState, type PickedImage, useImageFiles } from './image-files';
 import { browserDraftStore, watchOtherTabs } from './storage';
 
 type LiveStep = 1 | 2 | 3 | 4;
@@ -49,7 +53,83 @@ function SeatmapNotice() {
   );
 }
 
-function DonePanel({ created, onAgain }: { created: ProductionCreated; onAgain: () => void }) {
+/** 등록 뒤 올리기의 줄마다 상태 */
+type UploadRow = UploadOutcome | { key: string; status: 'uploading' };
+interface Uploads {
+  images: ImageDraft[];
+  files: ReadonlyMap<string, PickedImage>;
+  rows: ReadonlyMap<string, UploadRow>;
+}
+
+function ImageResults({ uploads, onRetry }: { uploads: Uploads; onRetry: (key: string) => void }) {
+  // 서버가 준 다시 시도 하한이 지나면 [다시 올리기]를 다시 연다
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const waits = [...uploads.rows.values()].flatMap((r) => ('retryAt' in r && r.retryAt !== undefined && r.retryAt > now ? [r.retryAt - now] : []));
+    if (waits.length === 0) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(...waits) + 50);
+    return () => clearTimeout(timer);
+  }, [uploads, now]);
+  const poster = uploads.images[0];
+  const posterRow = poster ? uploads.rows.get(poster.key) : undefined;
+  const posterMissing = !poster || posterRow?.status === 'error';
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <h3 className="t-md fw-b" id="h-images-done">
+        포스터·상세 이미지
+      </h3>
+      {uploads.images.length > 0 ? (
+        <ul className="col" style={{ gap: 6 }} aria-labelledby="h-images-done">
+          {uploads.images.map((img, i) => {
+            const row = uploads.rows.get(img.key);
+            const name = uploads.files.get(img.key)?.file.name ?? '고른 파일 없음';
+            return (
+              <li key={img.key} className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <span className={i === 0 ? 'badge badge-primary' : 'badge'}>{i === 0 ? '포스터' : '상세'}</span>
+                <span className="t-sm ellipsis grow">{name}</span>
+                {row?.status === 'done' ? (
+                  <span className="badge badge-success">
+                    <i className="ic ic-check" aria-hidden="true" />
+                    올림 완료
+                  </span>
+                ) : row?.status === 'error' ? (
+                  <>
+                    <span className="error-msg" role="alert">
+                      <i className="ic ic-alert-circle" aria-hidden="true" />
+                      {row.message}
+                    </span>
+                    {uploads.files.has(img.key) ? (
+                      <button className="btn btn-outline btn-sm" type="button" disabled={!canRetry(row, now)} onClick={() => onRetry(img.key)}>
+                        다시 올리기
+                      </button>
+                    ) : null}
+                    {!canRetry(row, now) ? (
+                      <span className="t-xs muted" role="status">
+                        잠시 뒤 다시 올릴 수 있습니다
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span className="t-xs muted" role="status">
+                    올리는 중
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {posterMissing ? (
+        <div className="banner banner-warning" role="status">
+          <i className="ic ic-alert" aria-hidden="true" />
+          <div className="banner-body">판매 승인을 요청하려면 포스터가 있어야 합니다</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DonePanel({ created, onAgain, uploads, onRetry }: { created: ProductionCreated; onAgain: () => void; uploads: Uploads; onRetry: (key: string) => void }) {
   return (
     <section className="card pad-lg col" style={{ gap: 16 }} aria-labelledby="h-done">
       <div className="section-title">
@@ -71,6 +151,7 @@ function DonePanel({ created, onAgain }: { created: ProductionCreated; onAgain: 
           </div>
         </div>
       ))}
+      <ImageResults uploads={uploads} onRetry={onRetry} />
       <div className="row" style={{ gap: 8 }}>
         <Link className="btn btn-primary" href={routes.events()}>
           공연 관리로 가기
@@ -93,6 +174,9 @@ export function LiveWizard() {
   const [restored, setRestored] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<ProductionCreated | null>(null);
+  const media = useImageFiles();
+  const [overflow, setOverflow] = useState(0);
+  const [uploads, setUploads] = useState<Uploads | null>(null);
   /** 다른 탭이 등록했거나 초안을 지웠다 */
   const [closed, setClosed] = useState(false);
   const sending = useRef(false);
@@ -191,8 +275,15 @@ export function LiveWizard() {
     setFocusTick((t) => t + 1);
   }
 
+  /** 1단계 이미지 줄의 오류(파일 없는 줄·화면 검사·대체 텍스트·장수)를 칸 오류 하나로 모은다 */
+  function imageFieldErrors(): FieldError[] {
+    const errs = imageErrors(draft.images, fileState(media.files, draft.images.map((x) => x.key)));
+    if (errs.length === 0) return [];
+    return [{ step: 1, field: 'images', message: errs.length === 1 ? errs[0]!.message : `이미지 ${errs.length}장을 확인해 주세요` }];
+  }
+
   function goNext() {
-    const errs = step === 3 ? [] : validateStep(draft, step as InputStep, Date.now());
+    const errs = step === 3 ? [] : [...validateStep(draft, step as InputStep, Date.now()), ...(step === 1 ? imageFieldErrors() : [])];
     if (errs.length > 0) show(step, errs);
     else show((step + 1) as LiveStep, []);
   }
@@ -200,7 +291,7 @@ export function LiveWizard() {
   async function submit() {
     if (sending.current) return;
     const now = Date.now();
-    const errs = [...validateStep(draft, 1), ...validateStep(draft, 2, now), ...validateStep(draft, 4)];
+    const errs = [...validateStep(draft, 1), ...imageFieldErrors(), ...validateStep(draft, 2, now), ...validateStep(draft, 4)];
     if (errs.length > 0) {
       const first = errs[0]!.step;
       show(first, errs.filter((e) => e.step === first));
@@ -216,6 +307,7 @@ export function LiveWizard() {
       keeper.finish();
       setCreated(done);
       setFocusTick((t) => t + 1);
+      startUploads(done.productionId, { images: draft.images, files: media.files, rows: new Map() });
     } catch (e) {
       if (isUnauthorized(e)) {
         leaveForLogin();
@@ -229,7 +321,37 @@ export function LiveWizard() {
     }
   }
 
+  /** 등록 뒤 올리기(포스터부터 한 장씩). only를 주면 그 줄만 다시 올린다 */
+  function startUploads(productionId: string, base: Uploads, only?: string[]) {
+    if (base.images.length === 0) {
+      setUploads(base);
+      return;
+    }
+    const mark = new Map(base.rows);
+    for (const img of base.images) if (!only || only.includes(img.key)) mark.set(img.key, { key: img.key, status: 'uploading' });
+    setUploads({ ...base, rows: mark });
+    // 올리기 코드는 이때 늦게 싣는다. 덩어리를 받지 못하면 줄마다 오류(다시 올리기 가능)가 된다(runUploads)
+    const done = [...base.rows.values()].filter((r) => r.status === 'done').map((r) => r.key);
+    void runUploads({
+      load: () => import('../../model/image-upload'),
+      productionId,
+      images: base.images,
+      fileOf: (k) => base.files.get(k)?.file,
+      send: uploadProductionImage,
+      done,
+      ...(only ? { only } : {}),
+      onEach: (r) => {
+        setUploads((u) => (u ? { ...u, rows: new Map(u.rows).set(r.key, r) } : u));
+        // 로그인이 끝났으면 등록 경로처럼 로그인으로 보낸다
+        if (r.unauthorized) leaveForLogin();
+      },
+    });
+  }
+
   function startOver() {
+    media.clear();
+    setOverflow(0);
+    setUploads(null);
     const fresh = emptyDraft();
     keeper.reset(fresh);
     setDraft(fresh);
@@ -264,7 +386,10 @@ export function LiveWizard() {
   if (created) {
     return (
       <div className="col max-md:hidden" style={{ gap: 20 }} ref={body} tabIndex={-1}>
-        <DonePanel created={created} onAgain={startOver} />
+        <DonePanel created={created} onAgain={startOver} uploads={uploads ?? { images: [], files: media.files, rows: new Map() }} onRetry={(k) => {
+            const row = uploads?.rows.get(k);
+            if (uploads && row && canRetry(row, Date.now())) startUploads(created.productionId, uploads, [k]);
+          }} />
       </div>
     );
   }
@@ -296,7 +421,7 @@ export function LiveWizard() {
         {/* 하단 고정 막대에 초점 칸이 가리지 않게 여유를 둔다(WCAG 2.4.11). 등록 중에는 입력을 잠근다 */}
         <div ref={body} tabIndex={-1} className="[&_:is(input,select,textarea,button,a)]:scroll-mb-28 [&_[contenteditable]]:scroll-mb-28" style={{ outline: 'none' }} onFocusCapture={(e) => e.target.scrollIntoView({ block: 'nearest' })}>
           <fieldset disabled={submitting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-            {step === 1 ? <LiveStepBasic {...props} onApiError={onApiError} editorKey={editorKey} /> : step === 2 ? <LiveStepRounds {...props} /> : step === 3 ? <SeatmapNotice /> : <LiveStepPolicy {...props} />}
+            {step === 1 ? <LiveStepBasic {...props} onApiError={onApiError} editorKey={editorKey} media={{ files: media.files, attach: media.attach, drop: media.drop, overflow, onOverflow: setOverflow }} /> : step === 2 ? <LiveStepRounds {...props} /> : step === 3 ? <SeatmapNotice /> : <LiveStepPolicy {...props} />}
           </fieldset>
         </div>
       </div>

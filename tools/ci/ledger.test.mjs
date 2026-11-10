@@ -247,6 +247,9 @@ test('ASVS 코드 영역: 구현 위치의 경로(앞 두 마디)·서비스·�
   assert.deepEqual(codeArea(c, dirs), ASVS_DEFAULT_AREA['seat-hold']);
   assert.ok(!ASVS_DEFAULT_AREA['seat-hold'].includes('packages/platform'), '공용 영역은 기본 영역에 넣지 않는다');
   assert.deepEqual(codeArea(d, dirs), ['apps/partner', 'apps/web', 'services/identity-svc']);
+  // 같은 코드의 다른 진입점(seatmap-worker·image-worker)은 core-svc 폴더의 시험을 센다(ADR-0257 결정 5)
+  const [w] = asvsItems('docs/security/asvs/seat-hold.md', `${ASVS_HEAD}| v5.0.0-1.5.1 | L1 | 가 | 적용 | \`seatmap-worker\`: 나. image-worker도 같다 | 미실행 | — |\n`);
+  assert.deepEqual(codeArea(w, [...dirs, 'services/core-svc']), ['services/core-svc']);
   const [e] = asvsItems('docs/security/asvs/analytics.md', `${ASVS_HEAD}| v5.0.0-1.2.1 | L1 | 가 | 적용 | 공통 | 미실행 | — |\n`);
   assert.deepEqual(codeArea(e, dirs), []);
   // 아직 코드가 없는 기능은 구현 위치 칸이 다른 기능의 폴더를 가리켜도 영역이 비어 있다(남의 시험 태그로 부풀지 않게)
