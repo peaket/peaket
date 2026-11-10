@@ -4,15 +4,15 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 80 | 13 | 12 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
+| A | 79 | 13 | 13 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
 | B | 73 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 34 | 156 |
-| 합계 | 153 | 43 | 12 | 2 | 0 | 27 | 1 | 15 | 34 | 287 |
+| 합계 | 152 | 43 | 13 | 2 | 0 | 27 | 1 | 15 | 34 | 287 |
 
 ## docs/features/seat-hold.md
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| S-T1 | — | 1개 좌석 1,000명 동시 경합 | 단 1명만 홀드에 성공(201)하고, 나머지 999명은 ≤ 50ms 이내에 409 Conflict를 받는다. 초과 판매 0건, p99 50ms 및 p99.9… | 측정 | A | 구간 측정 · 1개 좌석 1,000명 동시 경합. 이름을 단 시험은 있으나 판정이 부하 수치다 (이름을 단 시험도 있다) |
+| S-T1 | — | 1개 좌석 1,000명 동시 경합 | 단 1명만 홀드에 성공(201)하고, 나머지 999명은 ≤ 50ms 이내에 409 Conflict를 받는다. 초과 판매 0건, p99 50ms 및 p99.9… | 측정 | A | PRF-220 · 1개 좌석 1,000명 동시 경합. v1 K2 TLS 켬 3·끔 1(2026-11-11-k2-v1-hot-tls-r1~r3·notls-r1)은 발생기 놓침 920~1,504로 모두 무효, p99… |
 | S-T2 | — | 데이터베이스 불변식 검사기 | 무결성 위반 0건을 검증한다. | 자동 시험 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts |
 | S-T3 | — | 다중 탭 및 분산 기기 한도 검증 | 1인당 매수 한도 초과 0건을 입증한다. 한도 초과로 실패한 요청은 어떤 좌석도 홀드하지 않는다. | 자동 시험 | A | 시험: services/purchase-svc/test/hold-cases.ts, services/v0-monolith/test-int/seat.int.test.ts |
 | S-T4 | — | 다중 좌석 원자적 홀드 검증 | 요청 전체가 한꺼번에 실패(409)하고 부분 홀드가 0건임을 입증한다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/seat-snapshot.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 8곳 |
@@ -113,7 +113,7 @@
 | S-T35 | ③ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ③는 `seatIds`가 요청한 좌석이고 `heldAt`이 없다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-seats.test.ts |
 | S-T35 | ④ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ④는 `seatIds`가 요청한 좌석이고 `heldAt`이 없다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-seats.test.ts |
 | S-T35 | ⑤ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ⑤ 성공은 `seatIds`·`heldAt`이 잡은 좌석·시각이고, 실패는 둘 다 없다 | ID만 | A | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/purchase-session.int.test.ts 외… |
-| S-T35 | ⑥ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ⑥ 홀드 p99가 50ms 이하이고, 홀드 Lua 실행 p99가 칸을 더하기 전보다 나빠진 값을 적는다 | 자동 시험 | A | 시험: services/purchase-svc/test/read-seat-snapshot.test.ts, services/purchase-svc/test/seat-snapshot-cases.ts 외 1곳 |
+| S-T35 | ⑥ | 홀드 시도의 조사용 칸(추천 적용 2026-10-31… | ⑥ 홀드 p99가 50ms 이하이고, 홀드 Lua 실행 p99가 칸을 더하기 전보다 나빠진 값을 적는다 | 측정 | A | PRF-220 · `lua-compare` A/A p50 ±2.1~6.7%·p99 ±4.6~15.9%. `end-session` p50 1.583/1.769, `order-hold` p99 1.216로 A/A 폭을… |
 | S-T36 | ① | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ① `BehaviorSignal`(screen `SEAT`, `journeyId`, pid, 회차) 1건이고 `netClass`·`asn`·기기 가명·좌석… | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |
 | S-T36 | ② | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ② 그 구매 세션의 신호는 1건 그대로다 | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |
 | S-T36 | ③ | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ③ 처음 응답(201)을 받고 신호가 늘지 않는다 | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |

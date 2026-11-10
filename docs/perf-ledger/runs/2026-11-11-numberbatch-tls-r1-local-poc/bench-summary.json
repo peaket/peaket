@@ -1,0 +1,174 @@
+{
+  "test": "INCR-single-key",
+  "client": "node-redis",
+  "tls": true,
+  "op": "number-batch",
+  "model": "open",
+  "procs": 4,
+  "offered_rate": 200000,
+  "batch_ms": null,
+  "duration_s": 60,
+  "warmup_s": 15,
+  "key_owner": "valkey-1:6379",
+  "latency": {
+    "count": 12000000,
+    "p50_ms": 2.542,
+    "p90_ms": 3.748,
+    "p99_ms": 4.308,
+    "p999_ms": 5.923,
+    "max_ms": 16.672
+  },
+  "throughput_per_s": null,
+  "issued": 15000000,
+  "errors": 0,
+  "dropped": 0,
+  "error_kinds": {},
+  "measured": 12000000,
+  "per_proc": [
+    {
+      "cpu_pct": 15.4,
+      "issued": 3750000,
+      "measured": 3000000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 711,
+      "batches": 34176,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.531,
+        "p90_ms": 3.737,
+        "p99_ms": 4.321,
+        "p999_ms": 6.249,
+        "max_ms": 13.162,
+        "mean_ms": 2.599
+      },
+      "latency_from_send": {
+        "count": 3000000,
+        "p50_ms": 1.727,
+        "p90_ms": 2.955,
+        "p99_ms": 3.357,
+        "p999_ms": 5.309,
+        "max_ms": 11.96,
+        "mean_ms": 1.972
+      }
+    },
+    {
+      "cpu_pct": 13.1,
+      "issued": 3750000,
+      "measured": 3000000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 823,
+      "batches": 34117,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.527,
+        "p90_ms": 3.73,
+        "p99_ms": 4.306,
+        "p999_ms": 5.794,
+        "max_ms": 11.504,
+        "mean_ms": 2.592
+      },
+      "latency_from_send": {
+        "count": 3000000,
+        "p50_ms": 1.725,
+        "p90_ms": 2.949,
+        "p99_ms": 3.348,
+        "p999_ms": 4.443,
+        "max_ms": 10.209,
+        "mean_ms": 1.966
+      }
+    },
+    {
+      "cpu_pct": 13.1,
+      "issued": 3750000,
+      "measured": 3000000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 634,
+      "batches": 34078,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.531,
+        "p90_ms": 3.733,
+        "p99_ms": 4.299,
+        "p999_ms": 5.653,
+        "max_ms": 13.576,
+        "mean_ms": 2.596
+      },
+      "latency_from_send": {
+        "count": 3000000,
+        "p50_ms": 1.727,
+        "p90_ms": 2.952,
+        "p99_ms": 3.341,
+        "p999_ms": 4.378,
+        "max_ms": 11.128,
+        "mean_ms": 1.969
+      }
+    },
+    {
+      "cpu_pct": 13.2,
+      "issued": 3750000,
+      "measured": 3000000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 829,
+      "batches": 34126,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.525,
+        "p90_ms": 3.726,
+        "p99_ms": 4.289,
+        "p999_ms": 5.708,
+        "max_ms": 16.647,
+        "mean_ms": 2.59
+      },
+      "latency_from_send": {
+        "count": 3000000,
+        "p50_ms": 1.724,
+        "p90_ms": 2.945,
+        "p99_ms": 3.334,
+        "p999_ms": 4.443,
+        "max_ms": 15.528,
+        "mean_ms": 1.963
+      }
+    }
+  ],
+  "engine": {
+    "incr": null,
+    "incrby": {
+      "p50_us": 0.001,
+      "p99_us": 1.003,
+      "p999_us": 7.007
+    },
+    "evalsha": {
+      "p50_us": 64.255,
+      "p99_us": 148.479,
+      "p999_us": 296.959
+    },
+    "main_thread_cpu_pct": 26.6
+  },
+  "final_counter": 15000000,
+  "host": {
+    "cpu_pct": 4.9,
+    "procs_running_end": 5,
+    "vm_cpus": 32
+  },
+  "wait_probe": {
+    "interval_ms": 10,
+    "count": 6223,
+    "timeouts": 0,
+    "errors": 0,
+    "p50_ms": 0.487,
+    "p99_ms": 1.236,
+    "p999_ms": 3.476,
+    "max_ms": 5.78
+  },
+  "bench": {
+    "p99_ms": 4.308,
+    "error_rate": 0,
+    "requests": 12000000,
+    "dropped": 0,
+    "throughput_per_s": null
+  }
+}

@@ -405,6 +405,22 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-04 | 2026-11-04-st27-prod-b-one-same-notls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.98 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-one-same-notls-r1-local-poc/ |
 | 2026-11-04 | 2026-11-04-st27-prod-b-one-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.08 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-one-same-tls-r1-local-poc/ |
 | 2026-11-04 | 2026-11-04-st27-prod-five-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 12 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-five-same-tls-r1-local-poc/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-10k-r1 | K1 | v1 | local-10k | 10,000명 | 2.51 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-10k-r1/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-10k-r2 | K1 | v1 | local-10k | 10,000명 | 2.39 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-10k-r2/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-10k-r3 | K1 | v1 | local-10k | 10,000명 | 2.36 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-10k-r3/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-1k-r1 | K1 | v1 | local-1k | 1,000명 | 2.53 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-1k-r1/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-1k-r2 | K1 | v1 | local-1k | 1,000명 | 2.43 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-1k-r2/ |
+| 2026-11-11 | 2026-11-11-k1-v1-local-1k-r3 | K1 | v1 | local-1k | 1,000명 | 6.69 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-11-k1-v1-local-1k-r3/ |
+| 2026-11-11 | 2026-11-11-k2-v1-hot-notls-r1 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 297 | 1.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-11-k2-v1-hot-notls-r1/ |
+| 2026-11-11 | 2026-11-11-k2-v1-hot-tls-r1 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 318 | 2.4% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-11-k2-v1-hot-tls-r1/ |
+| 2026-11-11 | 2026-11-11-k2-v1-hot-tls-r2 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 271 | 1.3% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-11-k2-v1-hot-tls-r2/ |
+| 2026-11-11 | 2026-11-11-k2-v1-hot-tls-r3 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 294 | 1.3% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-11-k2-v1-hot-tls-r3/ |
+| 2026-11-11 | 2026-11-11-k7-v1-fault-r1 | K7 | v1 | local-10k | 11,002명, 100 RPS | 25,060 | 11.4% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-11-k7-v1-fault-r1/ |
+| 2026-11-11 | 2026-11-11-k7-v1-fault-r2 | K7 | v1 | local-10k | 11,002명, 100 RPS | 25,080 | 15.2% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-11-k7-v1-fault-r2/ |
+| 2026-11-11 | 2026-11-11-numberbatch-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.18 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-11-numberbatch-notls-r1-local-poc/ |
+| 2026-11-11 | 2026-11-11-numberbatch-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.31 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-11-numberbatch-tls-r1-local-poc/ |
+| 2026-11-11 | 2026-11-11-numberbatch-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.31 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-11-numberbatch-tls-r2-local-poc/ |
+| 2026-11-11 | 2026-11-11-numberbatch-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.26 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-11-numberbatch-tls-r3-local-poc/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

@@ -1,0 +1,10 @@
+{
+  "name": "bundle-6d66968754-2v888",
+  "atMs": 1794350211563,
+  "leaseHolders": {
+    "admission-ctrl": "bundle-6d66968754-659kb",
+    "payment-entry-pause": "bundle-6d66968754-659kb"
+  },
+  "heldLeases": [],
+  "leaseErrors": []
+}

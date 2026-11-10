@@ -1,0 +1,102 @@
+{
+  "run_id": "2026-11-11-k2-v1-hot-tls-r3",
+  "kpi": "K2",
+  "version": "v1",
+  "profile": "local-1k",
+  "scale": {
+    "users": 1000,
+    "arrival_rps": 2000.0,
+    "duration_s": 60,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-seat-hold.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "a8f70c6b766b670120cfac015a090d6cbf447d69",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-11-k2-v1-hot-tls-r3/",
+  "redis_tls": true,
+  "paired_run": "2026-11-11-k2-v1-hot-notls-r1",
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 2·메모리 1024Mi씩, kind 안, k6 실행 구간으로 나눔)",
+    "dropped_iterations": 925
+  },
+  "started_at": "2026-11-10T21:09:40Z",
+  "ended_at": "2026-11-10T21:11:10Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 25.186446,
+    "p95_ms": 211.02485544999993,
+    "p99_ms": 294.0352306000001,
+    "error_rate": 0.013183794151890041,
+    "requests": 119389,
+    "rps": 1989.8166666666666,
+    "dropped_iterations": 925
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "invariants": "invariants.csv",
+    "extra": [
+      "invariants-detail.ndjson"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 478); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 447)",
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 119389,
+      "violations": 30250,
+      "cp_upper": 0.255453,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 119389,
+      "violations": 10935,
+      "cp_upper": 0.092976,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "hold_server_p99_50ms",
+      "allowed": 0.01,
+      "trials": 119274,
+      "violations": 22420,
+      "cp_upper": 0.189841,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "서버 hold p99 ≤ 50ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:hold}",
+    "k6_p99_ms": 294.0352306000001,
+    "check": "hold_server_p99_50ms",
+    "server_p99_ms": 250.013,
+    "server_within_ratio": 0.812029,
+    "diff_ms": 44.022,
+    "target_ms": 50.0,
+    "suspect": false
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 2대 CPU 평균 최고 49.1%·메모리 최대 67.2%, VU 최대 합 705, 시나리오 오류 0건, 계획 최고 도착률 2000/s(docs/verification.md §3.9·§3.10); hold: 119389건, p99 290.2~294.0ms, 실패 1574건; v1 한 프로세스 합본(queue-svc·admission-ctrl·purchase-svc·payment-svc, OTel 서비스 이름 bundle 하나), Redis TLS 켬; 넣지 않은 서비스의 대역: trust-svc 위험 판정 늘 축소 운영, identity-svc 재확인 토큰 판정, ticket-svc 늘 발권, core-svc 대신 시드(회차 일정·좌석 판매·좌석맵 판); 게이트웨이 없음: k6가 합본 Service와 대기 상태 파일 앞 nginx 캐시로 바로 보내고 신원 머리를 넣는다(입구 IP 한도 없음); 불변식 SKIPPED: M1·M2·M3·M4·M5·P5·S3(기대 S3·P5·M1~M5, 티켓 원본·정산 표 없음, 결제 취소는 빈 검사 뷰)",
+  "collected_at": "2026-11-10T21:12:52Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

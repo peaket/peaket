@@ -1,0 +1,123 @@
+{
+  "run_id": "2026-11-11-k1-v1-local-10k-r2",
+  "kpi": "K1",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": 10000,
+    "arrival_rps": null,
+    "duration_s": 120,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "a8f70c6b766b670120cfac015a090d6cbf447d69",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-11-k1-v1-local-10k-r2/",
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 6대(CPU 2·메모리 1024Mi씩, kind 안, k6 실행 구간으로 나눔)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-10T22:05:59Z",
+  "ended_at": "2026-11-10T22:08:29Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0.23399150000000002,
+    "p95_ms": 0.45559340000000004,
+    "p99_ms": 2.388039999999995,
+    "error_rate": 0,
+    "requests": 570271,
+    "rps": 4752.258333333333,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "invariants": "invariants.csv",
+    "extra": [
+      "invariants-detail.ndjson"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "entry_p99_200ms",
+      "allowed": 0.01,
+      "trials": 10000,
+      "violations": 185,
+      "cp_upper": 0.020874,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "entry p99 ≤ 200ms"
+    },
+    {
+      "name": "entry_errors",
+      "allowed": 0.001,
+      "trials": 10000,
+      "violations": 46,
+      "cp_upper": 0.005878,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "entry 오류율 < 0.1%"
+    },
+    {
+      "name": "status_p99_200ms",
+      "allowed": 0.01,
+      "trials": 568846,
+      "violations": 0,
+      "cp_upper": 5e-06,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "status p99 ≤ 200ms"
+    },
+    {
+      "name": "status_errors",
+      "allowed": 0.001,
+      "trials": 568846,
+      "violations": 0,
+      "cp_upper": 5e-06,
+      "min_trials": 2995,
+      "result": "pass",
+      "target": "status 오류율 < 0.1%"
+    },
+    {
+      "name": "admission_p99_200ms",
+      "allowed": 0.01,
+      "trials": 1425,
+      "violations": 0,
+      "cp_upper": 0.0021,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "admission p99 ≤ 200ms"
+    },
+    {
+      "name": "admission_errors",
+      "allowed": 0.001,
+      "trials": 1425,
+      "violations": 0,
+      "cp_upper": 0.0021,
+      "min_trials": 2995,
+      "result": "observed",
+      "target": "admission 오류율 < 0.1%"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 6대 CPU 평균 최고 25.8%·메모리 최대 13.9%, VU 최대 합 602, 시나리오 오류 0건, 계획 최고 도착률 5052/s(docs/verification.md §3.9·§3.10); status: 568846건, p99 1.8~2.0ms, 실패 0건; admission: 1425건, p99 28.4~87.2ms, 실패 0건; v1 한 프로세스 합본(queue-svc·admission-ctrl·purchase-svc·payment-svc, OTel 서비스 이름 bundle 하나), Redis TLS 켬; 넣지 않은 서비스의 대역: trust-svc 위험 판정 늘 축소 운영, identity-svc 재확인 토큰 판정, ticket-svc 늘 발권, core-svc 대신 시드(회차 일정·좌석 판매·좌석맵 판); 게이트웨이 없음: k6가 합본 Service와 대기 상태 파일 앞 nginx 캐시로 바로 보내고 신원 머리를 넣는다(입구 IP 한도 없음); 불변식 SKIPPED: M1·M2·M3·M4·M5·P5·S3(기대 S3·P5·M1~M5, 티켓 원본·정산 표 없음, 결제 취소는 빈 검사 뷰); K1: 로비 없이 오픈 뒤 진입, 입장 속도는 시험 회차의 결제사 승인 상한 28/s로 시드(실행마다 다른 묶음 이름, 동시 입장 목표 상한 2520명, docs/verification.md §3.9 'K1의 입장 속도'); 진입 시행 10000건(사전 검증 실패 포함 실패 46건); Q1은 서버의 1초 칸 serving 기록으로 견준다(같은 초 안에서 차례보다 이른 입장은 놓친다, v0보다 약하다); admission_errors: 관측값(시행 1425번, 최소 시행 수 미달)",
+  "collected_at": "2026-11-10T22:08:40Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

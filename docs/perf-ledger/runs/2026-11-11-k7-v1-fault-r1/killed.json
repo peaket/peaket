@@ -1,0 +1,10 @@
+{
+  "name": "bundle-545d679bdf-4nnzw",
+  "atMs": 1794349389201,
+  "leaseHolders": {
+    "admission-ctrl": "bundle-545d679bdf-drrhz",
+    "payment-entry-pause": "bundle-545d679bdf-drrhz"
+  },
+  "heldLeases": [],
+  "leaseErrors": []
+}
