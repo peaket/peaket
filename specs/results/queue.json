@@ -298,7 +298,7 @@
       "main": "queue_no_rb05_wait",
       "expect": "violate",
       "targetInvariant": "inv_noDuplicateNumberInGeneration",
-      "why": "OPEN[13]을 끄면(RB-05 전에도 번호를 냄, 2026-11-02 정본 그대로) 장애 전환 뒤 같은 세대 안에서 번호가 겹친다(TLC 깊이 10). 짧은 시뮬레이션으로는 반례가 나온다는 보장이 없어 전수 검사에서만 돈다(ADR-0181)",
+      "why": "OPEN[13]을 끄면(RB-05 전에도 번호를 냄, 2026-11-02 정본 그대로) 장애 전환 뒤 같은 세대 안에서 번호가 겹친다(TLC 탐색 깊이 11). 짧은 시뮬레이션으로는 반례가 나온다는 보장이 없어 전수 검사에서만 돈다(ADR-0181)",
       "invariants": [
         "inv_noDuplicateNumberInGeneration"
       ],
@@ -466,7 +466,7 @@
       "main": "queue_arrival_skip_short",
       "expect": "violate",
       "targetInvariant": "inv_receivedNumberNotRemoved",
-      "why": "V-T1(ADR-0243, 전제를 끈 변형): RB-05 건너뛰기가 복제 지연 안에 잃는 번호를 덮는다는 전제(구현은 칸 떼기 시간 창이 보증한다)를 끄면, 건너뛴 구간 밖에서 세대만 다른 같은 번호가 생기고 세대를 보지 않는 빠진 번호 비트 때문에 받은 번호가 빠진 번호가 된다. 칸 셋과 깊이 16이 필요해 PR 시뮬레이션이 닿는다는 보장이 없어 전수 검사에서만 본다",
+      "why": "V-T1(ADR-0243, 전제를 끈 변형): RB-05 건너뛰기가 복제 지연 안에 잃는 번호를 덮는다는 전제(구현은 칸 떼기 시간 창이 보증한다)를 끄면, 건너뛴 구간 밖에서 세대만 다른 같은 번호가 생기고 세대를 보지 않는 빠진 번호 비트 때문에 받은 번호가 빠진 번호가 된다. 칸 셋과 TLC 탐색 깊이 15가 필요해 PR 시뮬레이션이 닿는다는 보장이 없어 전수 검사에서만 본다",
       "invariants": [
         "inv_receivedNumberNotRemoved"
       ],

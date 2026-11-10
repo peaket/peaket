@@ -109,7 +109,7 @@
       "main": "payment_canon",
       "expect": "violate",
       "targetInvariant": "inv_noTicketWithoutApproval",
-      "why": "정본에 적힌 그대로(보상은 발권 재시도를 멈추고 결제를 취소)는 응답을 잃은 발권이나 진행 중인 발권 호출이 만든 티켓이 결제 취소 뒤에도 남는다. 소유자 결정 전까지 남는 반례(PROGRESS OPEN[17])",
+      "why": "정본에 적힌 그대로(보상은 발권 재시도를 멈추고 결제를 취소)는 응답을 잃은 발권이나 진행 중인 발권 호출이 만든 티켓이 결제 취소 뒤에도 남는다. 정본에 적힌 그대로를 남겨 둔 반례다(옛 OPEN[17]은 2026-11-02 소유자 결정으로 결제사 취소 전에 ticket-svc의 발권을 막는 추천안을 골랐다, docs/features/payment.md §3·§11)",
       "invariants": [
         "inv_noTicketWithoutApproval"
       ],
