@@ -12,7 +12,7 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| P-T1 | — | K7 카오스 장애 주입 1만 건 | 이중 결제 0건, 승인 뒤 60초 안에 발권되지도 발권 재시도 큐에 들어가지도 않은 결제 0건, 큐의 건은 발권 기한(30분 [가정]) 안에 모두 발권… | 측정 | A | 구간 측정 · K7 카오스 장애 주입 1만 건. 판정이 부하 수치다 (이름을 단 시험도 있다) |
+| P-T1 | — | K7 카오스 장애 주입 1만 건 | 이중 결제 0건, P3 시작 시각 뒤 60초 안에 발권되지도 발권 재시도 큐에 들어가지도 않은 결제 0건, 큐의 건은 발권 기한(30분 [가정]) 안에 모두… | 측정 | A | HOT-470 · K7 카오스 장애 주입 1만 건. 판정이 부하 수치다. PRF-220의 v1 합본 K7 ② 측정 ID를 근거로 남긴다. P3 시작 시각은 결제사 승인과 결과 모름 해소 가운데 늦은… |
 | P-T2 | — | 승인 실패 모의 검증 | DB PENDING 레코드 삭제, 좌석 비트맵 해제, 금융 과금 0건, 사용자 안내가 정상인지 확인한다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/payment-result-e2e.int.test.ts… |
 | P-T3 | — | 승인 응답 유실 및 재전송 | 결제가 단 1건만 최종 체결되고 중복 승인이 0건임을 입증한다. `drop`(응답 버림)으로 `UNKNOWN`이 된 결제가 단독 조회로 승인되는 동안 승인… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-unknown-resolver.int.test.ts, services/payment-svc/test/payment-schema.test.ts… |
 | P-T4 | — | 결제 접수 p99 지연시간 | 202 Accepted 응답의 p99 지연시간 < 150ms와, 서비스를 멈춤 없이 쓸 수 있는 정도인 가용성 99.95%를 유지한다. | 측정 | A | 구간 측정 · 결제 접수 p99 |
@@ -60,7 +60,7 @@
 | P-T39 | ② | 승인 뒤 발권 재시도와 발권 기한 | ② SEV1과 CS 처리함 `TICKET_NOT_ISSUED` 건, 재시도는 이어 간다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts 외… |
 | P-T39 | ③ | 승인 뒤 발권 재시도와 발권 기한 | ③ 일괄 환불 작업이 발권을 멈추고 결제를 취소해 COMPENSATED, 좌석 반환 | ID만 | A | 시험: services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts 외… |
 | P-T39 | ④ | 승인 뒤 발권 재시도와 발권 기한 | ④ 자동 재시도를 멈추고 SEV2와 `TICKET_NOT_ISSUED` 건, 결제 취소 0건 | 자동 시험 | A | 시험: services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts 외… |
-| P-T39 | ⑤ | 승인 뒤 발권 재시도와 발권 기한 | ⑤ 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | ID만 | A | 시험: services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts 외… |
+| P-T39 | ⑤ | 승인 뒤 발권 재시도와 발권 기한 | ⑤ 불변식 SEV1(P3 시작 시각 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | ID만 | A | 시험: services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts 외… |
 | P-T40 | ① | 결제사 지연과 읽기 시간 초과 | ① 끊지 않고 결과를 받아 확정, 다시 보낸 호출 0건, 1분 창 p99 2초 초과로 SEV2 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ② | 결제사 지연과 읽기 시간 초과 | ② 60초 [가정]에서 끊고 결과를 가정하지 않고 `UNKNOWN`으로 쓴 뒤 단독 조회로 확정한다(같은 멱등키로 다시 보내지 않는다, 명세 `timeout`… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ③ | 결제사 지연과 읽기 시간 초과 | ③ 상한을 넘는 승인 명령은 재시도 큐에서 승인 기한 안에 처리되고, 동시 승인 호출 수가 벌크헤드를 넘지 않으며 열린 승인 연결 수는 처음의 벌크헤드를 넘지… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
@@ -94,7 +94,7 @@
 | P-T46 | ③ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ③ 배포 검사가 실패한다 … 을 시작 설정 검사로, | 자동 시험 | A | 시험: services/payment-svc/test/pg-sub-provider.test.ts, services/payment-svc/test/process-config.test.ts |
 | P-T46 | ④ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ④ SEV2가 뜨고 그 채널이 대체 후보에서 빠진다 … 를 포트원형 시뮬레이터의 채널 표와 PostgreSQL로(빠진 뒤에는 전환해도 기준 결제사로 간다. 설정… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-channel-sync.test.ts 외… |
 | P-T46 | ⑤ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ⑤ 새 결제 시도가 포트원형으로 열리고 승인된다. 이 단계(PRF-203) 몫은 … 를 토스형·포트원형 시뮬레이터 둘과 PostgreSQL로 본다. 명령 12의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-sub-provider.test.ts |
-| P-T47 | — | 결제 결과 당기기(추천 적용 2026-10-29, ADR-0140) | 막힌 동안에도 당기기로 결제 확정이 p99 10초 [가정] 안에 끝나고, 60초 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제)이… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 5곳 |
+| P-T47 | — | 결제 결과 당기기(추천 적용 2026-10-29, ADR-0140) | 막힌 동안에도 당기기로 결제 확정이 p99 10초 [가정] 안에 끝나고, 60초 불변식 SEV1(P3 시작 시각 뒤 60초 안에 발권도 큐 등록도 안 된… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 5곳 |
 | P-T48 | — | 인기 회차 결제 결과의 키 단위 동시 처리(추천 적용… | 결제 확정 p99 3초 안이다. 같은 주문의 사건은 순서대로 반영되고, 소비 지연(lag)이 늘기만 하지 않는다. 통과하지 못하면 결제 토픽을 주문 키 새… | 자동 시험 | A | 시험: services/purchase-svc/test/payment-result-handler.test.ts |
 | P-T49 | ① | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ① 403 `booking-restricted`, 주문 행 0건, 두 좌석이 바로 풀려 다른 계정이 잡을 수 있다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/booking-restrictions.int.test.ts, services/purchase-svc/test-int/orders-e2e.int.test… |
 | P-T49 | ② | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ② 홀드는 201, 주문은 다시 403 | 자동 시험 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts |

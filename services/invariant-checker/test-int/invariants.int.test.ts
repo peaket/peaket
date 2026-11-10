@@ -58,6 +58,9 @@ const payment = async (o: { orderId: string; status?: string; approvedAt?: strin
   await ins('payment', 'payment', { id, order_id: o.orderId, event_id: o.event ?? EVENT, pg: o.pg ?? 'SIMULATOR', amount: o.amount ?? 10_000, status: o.status ?? 'APPROVED', approved_at: o.approvedAt === undefined ? '2026-11-02T10:00:00+09:00' : o.approvedAt });
   return id;
 };
+/** 결제 사건(UNKNOWN 해소 기록 RESOLVED 등). P3는 RESOLVED가 있으면 그 시각을 시작 시각의 늦은 쪽으로 쓴다 */
+const paymentEvent = (paymentId: string, seq: number, type: string, at: string) =>
+  ins('payment', 'payment_event', { payment_id: paymentId, seq, type, occurred_at: at });
 
 describe('원본·기록이 없을 때', () => {
   it('비어 있으면 17개가 모두 PASS다', async () => {
@@ -262,6 +265,22 @@ describe('결제(K7, NFR-005·006, ADR-0106)', () => {
     // 승인 뒤 60초가 아직 안 지났으면 없는 등록을 위반으로 보지 않는다
     r = (await check({ asOf: '2026-11-02T10:00:45+09:00' })).run;
     expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([late]);
+  });
+
+  it('P3 시작 시각은 결제사 승인과 결과 모름 해소 가운데 늦은 쪽이다', async () => {
+    const approvedAt = '2026-11-02T10:00:00+09:00';
+    const passed = await order();
+    const passedPayment = await payment({ orderId: passed, approvedAt });
+    // 승인 T, 원장이 T+81초에 앎, 주문이 T+100초에 APPROVED → 늦은 쪽(T+81)+60초 안이라 통과
+    await paymentEvent(passedPayment, 2, 'RESOLVED', '2026-11-02T10:01:21+09:00');
+    await event(passed, 1, 'APPROVED', '2026-11-02T10:01:40+09:00');
+    const failed = await order();
+    const failedPayment = await payment({ orderId: failed, approvedAt });
+    // 원장이 안 뒤( T+81초 ) 60초를 넘겨 T+142초에 APPROVED → 실패
+    await paymentEvent(failedPayment, 2, 'RESOLVED', '2026-11-02T10:01:21+09:00');
+    await event(failed, 1, 'APPROVED', '2026-11-02T10:02:22+09:00');
+    const r = (await check()).run;
+    expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([failed]);
   });
 
   it('P4 승인 뒤 30분 안에 발권·보상으로 끝나지 않음, 기한이 지난 발권 큐 행', async () => {

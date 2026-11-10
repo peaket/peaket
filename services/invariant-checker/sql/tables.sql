@@ -12,6 +12,7 @@ CREATE TEMP TABLE event_sale (event_id uuid, sellable_seats int);
 CREATE TEMP TABLE ticket_issue_job (order_id uuid, event_id uuid, issue_due_at timestamptz, created_at timestamptz);
 
 CREATE TEMP TABLE payment (id uuid, order_id uuid, event_id uuid, pg text, amount bigint, status text, approved_at timestamptz);
+CREATE TEMP TABLE payment_event (payment_id uuid, seq bigint, type text, occurred_at timestamptz);
 CREATE TEMP TABLE payment_cancel (id uuid, payment_id uuid, amount bigint, status text, canceled_at timestamptz);
 CREATE TEMP TABLE settlement_statement (id uuid, kind text, event_id uuid, pg text, gross_amount bigint, refund_amount bigint, payout_amount bigint, revision int, excluded_payments jsonb, status text);
 CREATE TEMP TABLE statement_source (statement_id uuid, source_id uuid, kind text, payment_id uuid, amount bigint);

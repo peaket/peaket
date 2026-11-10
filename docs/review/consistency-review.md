@@ -576,6 +576,7 @@
 | R-461 | 비밀 검사가 이력 전체를 훑게 되자 BAT-022의 오탐 4건이 develop의 secrets 잡을 막게 됐다 | tools/ci/gitleaks.toml | 값 꼴로 좁힌 허용 블록(2026-11-10, 갈래 3 알림) | 적용 |
 | R-462 | v1 실행 도구가 발생기 둘 이상에서 사용자 몫을 나누지 않았고, k6를 돌리는 v1 시험이 Linux 러너에서 결과를 쓰지 못했다 | loadtest/lib/v1.mjs, loadtest/scenarios/v1-seat-hold.js, loadtest/scenarios/v1-queue.js, loadtest/scenarios/v1-payment.js, loadtest/test/v1.test.mjs, loadtest/e2e/v1-rehearsal.e2e.mjs, docs/verification.md §3.9 | 재현 시험부터 고침(2026-11-10, BAT-025 측정·CI) | 적용 |
 | R-463 | Claude Code 주간 한도로 이어서 하는 작업을 다른 모델로 해야 한다 | docs/PROGRESS.md | 소유자 결정 2026-11-11을 진행 로그에 적고 커밋 본문에 작업 모델을 남긴다 | 완료 |
+| R-464 | P3의 60초 약속과 승인 실행기 임대 75초가 어긋나 K7 ②를 잴 수 없었다 | services/invariant-checker(P3 SQL·표 목록·시험), docs/verification.md §2.5·§3.9, docs/features/payment.md, docs/BUILD_ORDER.md, docs/review/ledger-notes.md, docs/review/plans/BAT-025.md, docs/adr/0266, docs/PROGRESS.md | P3 시작 시각을 결제사 승인과 결과 모름 해소 가운데 늦은 쪽으로 바꾸고, 시험을 먼저 실패시킨 뒤 검사기를 고쳤다 | 완료 |
 
 ## 4. 숫자 일치표
 

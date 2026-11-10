@@ -69,6 +69,7 @@ export const SCHEMA: Record<'purchase' | 'payment' | 'ticket', string> = {
   payment: `
     CREATE TABLE payment (id uuid PRIMARY KEY, order_id uuid NOT NULL, event_id uuid NOT NULL, attempt_id uuid, pg text NOT NULL, pg_payment_ref text, pg_confirm_token text, amount int NOT NULL,
       status text NOT NULL, virtual_account_no text, idempotency_key text, card_bin text, created_at timestamptz NOT NULL DEFAULT now(), approved_at timestamptz, status_changed_at timestamptz);
+    CREATE TABLE payment_event (payment_id uuid NOT NULL, seq bigint NOT NULL, type text NOT NULL, occurred_at timestamptz NOT NULL, PRIMARY KEY (payment_id, seq));
     CREATE TABLE payment_cancel (id uuid PRIMARY KEY, payment_id uuid NOT NULL, amount int NOT NULL, idempotency_key text, status text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), canceled_at timestamptz);
     CREATE TABLE settlement_statement (id uuid PRIMARY KEY, promoter_id uuid NOT NULL, kind text NOT NULL, event_id uuid, pg text NOT NULL, pg_store text, period_start date, period_end date,
       gross_amount bigint NOT NULL, refund_amount bigint NOT NULL, commission_amount bigint NOT NULL, commission_vat bigint NOT NULL, offset_amount bigint NOT NULL, payout_amount bigint NOT NULL,
@@ -86,6 +87,6 @@ export const SCHEMA: Record<'purchase' | 'payment' | 'ticket', string> = {
 
 export const TABLES: Record<'purchase' | 'payment' | 'ticket', string[]> = {
   purchase: ['purchase_order', 'order_event', 'order_item', 'order_cancellation', 'seat_sale', 'purchase_quota', 'event_sale', 'ticket_issue_job'],
-  payment: ['payment', 'payment_cancel', 'settlement_statement', 'statement_source', 'payout', 'partner_receivable', 'receivable_movement', 'reconciliation_run'],
+  payment: ['payment', 'payment_event', 'payment_cancel', 'settlement_statement', 'statement_source', 'payout', 'partner_receivable', 'receivable_movement', 'reconciliation_run'],
   ticket: ['ticket'],
 };

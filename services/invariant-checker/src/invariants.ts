@@ -36,7 +36,7 @@ export const INVARIANTS: readonly InvariantDef[] = [
   { id: 'S4', name: '1인 한도 초과', file: 's4_quota_exceeded.sql', requires: ['seat_sale', 'purchase_order', 'purchase_quota'] },
   { id: 'P1', name: '이중 결제(결제 원장)', file: 'p1_double_payment_ledger.sql', requires: ['payment'] },
   { id: 'P2', name: '이중 결제(결제사 원장)', file: 'p2_double_payment_pg.sql', requires: [], records: true },
-  { id: 'P3', name: '결제-발권 불일치(승인 뒤 큐 등록 시한 초과)', file: 'p3_approved_not_enqueued.sql', requires: ['payment', 'payment_cancel', 'order_event'] },
+  { id: 'P3', name: '결제-발권 불일치(승인 뒤 큐 등록 시한 초과)', file: 'p3_approved_not_enqueued.sql', requires: ['payment', 'payment_event', 'payment_cancel', 'order_event'] },
   { id: 'P4', name: '결제-발권 불일치(발권 기한 초과)', file: 'p4_issue_deadline_exceeded.sql', requires: ['payment', 'order_event', 'ticket_issue_job'] },
   { id: 'P5', name: '결제-발권 불일치(승인 없는 발권)', file: 'p5_ticket_without_approval.sql', requires: ['ticket', 'order_item', 'order_cancellation', 'payment'] },
   { id: 'P6', name: '결제-발권 불일치(원장이 모르는 결제사 승인)', file: 'p6_pg_charge_unknown_to_ledger.sql', requires: ['payment'], records: true },

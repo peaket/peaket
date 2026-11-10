@@ -20,6 +20,7 @@ export const SOURCE_TABLES: readonly SourceTable[] = [
   { name: 'event_sale', source: 'purchase', columns: ['event_id', 'sellable_seats'] },
   { name: 'ticket_issue_job', source: 'purchase', columns: ['order_id', 'event_id', 'issue_due_at', 'created_at'] },
   { name: 'payment', source: 'payment', columns: ['id', 'order_id', 'event_id', 'pg', 'amount', 'status', 'approved_at'] },
+  { name: 'payment_event', source: 'payment', columns: ['payment_id', 'seq', 'type', 'occurred_at'] },
   { name: 'payment_cancel', source: 'payment', columns: ['id', 'payment_id', 'amount', 'status', 'canceled_at'] },
   {
     name: 'settlement_statement',
