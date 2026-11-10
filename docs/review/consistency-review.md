@@ -560,6 +560,7 @@
 | R-445 | 좌석맵 에디터 캔버스 라이브러리(Konva)가 설치되지 않았고 HOT-230이 HOT-240의 배치본 표를 기다린다 | docs/PROGRESS.md 미해결, docs/BUILD_ORDER.md BAT-150 | 감독 결정으로 묶음을 미루고 소유자 허락을 OPEN으로 물음 | 대기 |
 | R-446 | 기계적인 담당의 생각 강도를 medium으로 낮추게 했으나 소유자가 Opus 5.5 high를 쓰라고 정했다 | docs/adr/0256 결정 9, docs/architecture.md §8.6, docs/PROGRESS.md 턴 규칙 | medium을 high로 바꾸고 모델은 Opus 5.5 그대로라고 적었다 | 수정 완료 |
 | R-447 | 소유자 확인을 기다리던 OPEN[28]~[31]이 남아 HOT-220·BAS-011과 측정·결제사 시험 범위가 막혀 있었다 | docs/PROGRESS.md 미해결·진행 로그 | 소유자 결정 "모두 추천대로"를 적고 OPEN 줄을 지웠다 | 수정 완료 |
+| R-448 | BAT-020: 429로 낮춘 채널 상한이 파드 안에만 있어 회차 유지·파드 사이 전파·회복이 없었고, 포트원 대체 채널의 하위 결제사를 대조하지 않았으며, 결제 모델 기반 시험이 없고 명세가 정본의 승인 기한 확인을 빠뜨렸다 | docs/features/payment.md, docs/data.md, docs/verification.md, docs/observability.md, docs/api/guidelines.md, docs/api/openapi.yaml, docs/api/proto/peaket/payment/v1/payment.proto, docs/security/asvs/payment.md, docs/architecture.md §8.6, docs/BUILD_ORDER.md, specs/payment.qnt, specs/specs.json, services/payment-svc, services/pg-simulator, services/purchase-svc/test-int, tools/spec-check, .github/workflows/ci-node.yml | 추천 적용(2026-11-10, BUILD_ORDER PRF-203·PRF-210, 코드 리뷰) | 적용 |
 
 ## 4. 숫자 일치표
 
