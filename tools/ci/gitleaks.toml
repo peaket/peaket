@@ -39,6 +39,7 @@ regexes = [
   '''^sk_live_REALSECRET\d{10}$''',
   '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4In0\.sig\-_A1$''',
   '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJTRUNSRVRQQVlMT0FEIn0\.SIGsecretSIG$''',
+  '''^lt\-mwah7w0a30bd$''',
 ]
 
 [[allowlists]]
@@ -53,4 +54,18 @@ description = '''추첨 증명 화면의 표본 자료(예시 토큰 해시). �
 condition = 'AND'
 targetRules = ['generic-api-key']
 paths = ['''^apps/web/src/entities/shuffle-proof/model\.ts$''']
+regexes = ['''^[0-9a-f]{64}$''']
+
+[[allowlists]]
+description = '''로컬 v1 측정 무대 값 파일의 Secret 이름 참조(secretEnvFrom). 비밀 값이 아니라 쿠버네티스 Secret의 이름이다(BUILD_ORDER PRF-215)'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^deploy/envs/local/v1\-purchase\-relay\.yaml$''']
+regexes = ['''^v1\-relay\-purchase$''']
+
+[[allowlists]]
+description = '''v1 실행 도구 시험의 가짜 공유 비밀(구매 요청 인증 MAC 계산을 정해진 값으로 견주는 16진 64자). 어느 무대의 키도 아니다(BUILD_ORDER PRF-215)'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^loadtest/test/v1\.test\.mjs$''']
 regexes = ['''^[0-9a-f]{64}$''']
