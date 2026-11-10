@@ -145,6 +145,29 @@ describe('대기열(기록, 결과 모름은 위반을 확정하지 않는다)',
     expect(res(run, 'Q1').details.every((d) => /ended_at=2026-11-02 10:00:0[27]\+09$/.test(d.detail))).toBe(true);
   });
 
+  it('PRF215_재확인9_v1 serving 1초 칸 기록을 실행 도구의 변환 그대로(servingLogFromZset → servingRecords → 기록 파일) Q1에 넣으면 칸 값 + 1 순번 입장은 위반이고 칸 값 이하는 아니다', async () => {
+    // 실행 도구 쪽 변환(loadtest/runner/v1.mjs·results.mjs, lib/records.mjs)을 그대로 불러 기록 파일 글을 만들고, 검사기의 기록 읽기(parseRecords)와 Q1 SQL로 판정한다
+    const root = new URL('../../../loadtest/', import.meta.url);
+    const { servingLogFromZset } = (await import(new URL('runner/v1.mjs', root).href)) as { servingLogFromZset: (raw: unknown) => { atMs: number; serving: number }[] };
+    const { servingRecords } = (await import(new URL('runner/results.mjs', root).href)) as { servingRecords: (e: string, log: { atMs: number; serving: number }[]) => string[] };
+    const { queueOpRecord } = (await import(new URL('lib/records.mjs', root).href)) as { queueOpRecord: (kind: string, o: Record<string, unknown>) => Record<string, unknown> };
+    const { parseRecords } = await import('../src/records.js');
+    const slot = 1_794_302_809; // 이 초 칸의 마지막 serving 6, 다음 칸 36
+    const lines = servingRecords(EVENT, servingLogFromZset([String(slot), '6', String(slot + 1), '36']));
+    const admit = (account: string, seqNo: number, endedMs: number) =>
+      JSON.stringify(queueOpRecord('queue_admit', { eventId: EVENT, accountRef: account, requestId: `adm-${account}`, result: 'ok', seq: seqNo, generation: 1, startedMs: endedMs - 5, endedMs }));
+    lines.push(
+      admit('a7', 7, slot * 1000 + 500), // 칸 값 + 1: 같은 칸 안에서도 위반
+      admit('a6', 6, slot * 1000 + 500), // 칸 값: 위반 아님
+      admit('a36', 36, (slot + 1) * 1000 + 1), // 다음 칸 값, 그 칸 시작 뒤: 위반 아님(같은 초 안의 이른 입장은 놓친다)
+      admit('a37', 37, (slot + 1) * 1000 + 900), // 다음 칸 값 + 1: 위반
+    );
+    const records = parseRecords(`${lines.join('\n')}\n`);
+    const { run } = await check({ records });
+    expect(res(run, 'Q1')).toMatchObject({ violations: 2, result: 'FAIL' });
+    expect(res(run, 'Q1').details.map((d) => d.subject).sort()).toEqual([`${EVENT}:37`, `${EVENT}:7`].sort());
+  });
+
   it('Q2 같은 세대 순번 중복: 다른 사람 둘이 성공으로 받으면 위반, 하나가 결과 모름이면 아님', async () => {
     const records = emptyRecords();
     records.queue_entry.push(op({ seq: 7 }), op({ seq: 7, account_ref: 'a2', result: 'unknown' }), op({ seq: 7, request_id: 'retry' }), op({ seq: 7, generation: 2, account_ref: 'a3' }));

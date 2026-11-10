@@ -5,6 +5,10 @@
   "description": "payment-svc. 결제 모듈의 결제 포트·시뮬레이터 어댑터·공통 계약 시험, 프로세스(gRPC·릴레이), 승인 명령 접수 ConfirmPayment와 결과 조회 BatchGetPayments(BUILD_ORDER PRF-180)가 있다. 승인 실행기와 결제사 호출은 PRF-181~184다. 결제 포트·시뮬레이터는 공개 파일(index.ts)로 v0 모놀리스가 가져다 쓴다(@peaket/payment-svc/payment, docs/features/payment.md §13)",
   "type": "module",
   "exports": {
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
     "./payment": {
       "types": "./dist/modules/payment/index.d.ts",
       "default": "./dist/modules/payment/index.js"

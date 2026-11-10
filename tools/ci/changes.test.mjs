@@ -87,7 +87,9 @@ test('GITHUB_OUTPUT이 있으면 범위마다 한 줄씩 쓴다', () => {
 
 test('DT38_서비스와_계약깨짐검사도구를바꾸면_contracts를고른다', () => {
   // 서비스가 openapi:emit을 갖추는 PR에서 계약 잡(서비스 OpenAPI 차이의 자리)이 돌아야 한다(openspec 변경 add-contract-breaking-check)
-  assert.deepEqual(scopes({ 'services/queue-svc/src/main.ts': 'x\n' }), ['contracts', 'js']);
+  assert.deepEqual(scopes({ 'services/trust-svc/src/main.ts': 'x\n' }), ['contracts', 'js']);
+  // 한 프로세스 합본 이미지에 드는 서비스는 이미지 빌드 시험도 고른다(BUILD_ORDER PRF-215)
+  assert.deepEqual(scopes({ 'services/queue-svc/src/main.ts': 'x\n' }), ['contracts', 'js', 'image']);
   assert.deepEqual(scopes({ 'tools/ci/contract-breaking.mjs': 'x\n' }), ['contracts', 'tools']);
   assert.deepEqual(scopes({ 'tools/ci/release-tags.mjs': 'x\n' }), ['contracts', 'tools']);
   assert.deepEqual(scopes({ '.github/workflows/contract-check.yml': 'x\n' }), ['contracts', 'ci']);
@@ -219,6 +221,13 @@ test('BSL050_이미지에드는곳·작업공간파일·이미지워크플로와
     'tools/ci/image-build.mjs',
     'tools/ci/image-smoke.mjs',
     'tools/ci/verify-native-binding.mjs',
+    // 한 프로세스 합본 이미지(services/bundle/Dockerfile, BUILD_ORDER PRF-215)와 그것이 담는 서비스·패키지
+    'services/bundle/Dockerfile',
+    'services/bundle/src/bundle.ts',
+    'services/queue-svc/src/main.ts',
+    'services/admission-ctrl/src/start.ts',
+    'services/purchase-svc/src/start.ts',
+    'packages/shuffle/src/index.ts',
   ]) {
     assert.ok(scopes({ [f]: '바꿈\n' }).includes('image'), f);
   }
@@ -244,8 +253,9 @@ test('BSL050_문서·화면·이미지없는서비스·로컬도구만바꾸면_
     'apps/web/x',
     'apps/web/src/a.ts',
     'services/invariant-checker/x',
-    'services/queue-svc/src/main.ts',
+    'services/trust-svc/src/main.ts',
     // 이름 앞머리만 같은 다른 서비스·패키지
+    'services/bundle2/x',
     'services/v0-monolith-next/x',
     'services/payment-svc2/x',
     'packages/platformx/x',
@@ -398,4 +408,10 @@ test('BAS180_작업공간파일이나devops문서를바꾸면_tools를고른다'
 
 test('BAS170_비교기준을읽지못하면_web도고른다', () => {
   assert.ok(scopes({ 'docs/a.md': '글\n' }, 'no-such-ref').includes('web'));
+});
+
+// v1 경로(BUILD_ORDER PRF-215, 코드 리뷰): loadtest 시험이 견주는 v1 무대 도구(키·환경 파일·객체)와 구매 요청 서명 시험 벡터가 바뀌어도 loadtest를 고른다
+test('PRF215_코드리뷰_v1무대도구와_구매요청서명벡터를바꾸면_loadtest를고르고_이름만비슷한파일은_고르지않는다', () => {
+  for (const f of ['tools/local/v1-stage.mjs', 'tools/local/v1-objects.mjs', 'docs/api/vectors/purchase-request-mac.v1.json']) assert.ok(scopes({ [f]: 'x\n' }).includes('loadtest'), f);
+  for (const f of ['tools/local/v1-stage.test.mjs', 'docs/api/vectors/purchase-request-mac.v2.json', 'docs/api/vectors/other.v1.json']) assert.ok(!scopes({ [f]: 'x\n' }).includes('loadtest'), f);
 });

@@ -368,6 +368,10 @@ def evaluate_checks(a):
 
 def collect(a, root):
     lines = []
+    tls_arg = getattr(a, 'redis_tls', None)
+    tls_problem, _ = tls_pairing(a.version, a.kpi, None if tls_arg is None else str(tls_arg).lower() == 'true', getattr(a, 'paired_run', None))
+    if tls_problem:
+        raise SystemExit(tls_problem)
     run_dir = os.path.join(root, L.RUNS, a.run_id)
     if os.path.exists(run_dir) and not a.force:
         raise SystemExit(f'이미 있는 측정 폴더입니다: {run_dir} (--force로 덮어쓰기)')
@@ -470,8 +474,9 @@ def collect(a, root):
     redis_tls = getattr(a, 'redis_tls', None)
     redis_tls = None if redis_tls is None else str(redis_tls).lower() == 'true'
     paired_run = getattr(a, 'paired_run', None)
-    if redis_tls is not None and not paired_run:
-        log(lines, 'Redis TLS 짝 실행(--paired-run)이 없다. TLS 켬·끔을 한 번씩 재어 짝을 적는다(docs/verification.md §3.5 7번)')
+    _, tls_warn = tls_pairing(a.version, a.kpi, redis_tls, paired_run)
+    if tls_warn:
+        log(lines, tls_warn)
     if redis_tls is False and a.verdict in ('pass', 'fail'):
         log(lines, 'TLS를 끈 실행이다. 판정은 TLS를 켠 짝 실행으로 한다(docs/perf-ledger.md §2.2)')
 
@@ -606,6 +611,37 @@ def selftest_bot_outcomes(conf, path):
                 w.writerow([tier, rnd, s, sess, di, di // 2, vpass, sess - di + vpass])
 
 
+# v1 합본 무대의 K1·K7 ②는 운영과 같은 Redis TLS 켬 하나로만 재고 짝 실행을 두지 않는다(docs/verification.md §3.10 'v1 합본 측정 규칙', 코드 리뷰 M9)
+TLS_ON_ONLY = frozenset({('v1', 'K1'), ('v1', 'K7')})
+
+
+def tls_pairing(version, kpi, redis_tls, paired_run):
+    """Redis TLS 칸의 (거부 사유, 경고). 거부 사유가 있으면 기록하지 않는다. TLS 칸이 없으면 둘 다 None"""
+    if redis_tls is None:
+        return None, None
+    if (version, kpi) in TLS_ON_ONLY:
+        if redis_tls is False:
+            return (f'{version} {kpi}는 Redis TLS를 켠 무대에서만 기록한다(짝 실행 없음, docs/verification.md §3.10 \'v1 합본 측정 규칙\')', None)
+        return None, None
+    if not paired_run:
+        return None, 'Redis TLS 짝 실행(--paired-run)이 없다. TLS 켬·끔을 한 번씩 재어 짝을 적는다(docs/verification.md §3.5 7번)'
+    return None, None
+
+
+def selftest_tls_pairing():
+    """v1 합본의 K1·K7 ②는 TLS 켬 하나로만 기록하고 짝 경고를 내지 않는다. 다른 Redis 측정은 짝이 없으면 경고한다
+    (docs/verification.md §3.10 'v1 합본 측정 규칙', 코드 리뷰 M9)."""
+    for kpi in ('K1', 'K7'):
+        assert tls_pairing('v1', kpi, True, None) == (None, None), (kpi, '켬 짝 없음')
+        problem, warn = tls_pairing('v1', kpi, False, None)
+        assert problem and 'TLS' in problem and warn is None, (kpi, '끔 거부', problem)
+        assert tls_pairing('v1', kpi, False, '2026-11-10-x')[0], (kpi, '끔은 짝이 있어도 거부')
+    assert tls_pairing('v1', 'K2', True, None) == (None, tls_pairing('v1', 'K2', False, None)[1]) and tls_pairing('v1', 'K2', True, None)[1], 'K2 짝 경고'
+    assert tls_pairing('v1', 'K2', False, '2026-11-10-k2-tls') == (None, None), 'K2 짝 있음'
+    assert tls_pairing('v0', 'K1', True, None)[1], 'v0 K1은 짝 경고 그대로'
+    assert tls_pairing('v1', 'K1', None, None) == (None, None), 'TLS 칸 없음'
+
+
 def selftest_raw_and_stamp(tmp, IDX, CH):
     """원본 버킷 나눠 두기, metrics-summary.json, Redis TLS 짝 칸, 하루 해시 고정(낮음-056·072)을 확인한다.
 
@@ -670,7 +706,7 @@ def selftest_raw_and_stamp(tmp, IDX, CH):
         rid2 = rid + '-retry'
         state['fail'] = True
         try:
-            collect(raw_args(rid2, redis_tls='false', paired_run=None, verdict='baseline'), tmp)
+            collect(raw_args(rid2, kpi='K2', redis_tls='false', paired_run=None, verdict='baseline'), tmp)
             raise AssertionError('올리기 실패를 넘겼다')
         except SystemExit as e:
             assert '--upload-raw' in str(e), str(e)
@@ -906,6 +942,7 @@ def selftest():
     assert kr[('replay-L3', 3)]['per_ticket_krw'] == 56556, ('1장당 비용 오류', kr[('replay-L3', 3)])
     cs = {(x['premium_krw'], x['catch_prob']): x for x in kr[('replay-L3', 3)]['cases']}
     assert cs[(200000, 0.01)]['bot_profitable'] is False and cs[(900000, 0.01)]['bot_profitable'] is True, ('손익 오류', cs)
+    selftest_tls_pairing()
     selftest_raw_and_stamp(tmp, IDX, CH)
     # k6가 아닌 측정 도구의 요약(wbs 0.5.1 PoC): p99·오류율·요청 수를 장부 칸에, 못 보낸 요청이 있으면 무효
     def bench_args(run_id, path):

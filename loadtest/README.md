@@ -51,6 +51,7 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `v0 payment` | K7: 홀드 → 주문 → 시뮬레이터 인증 → 결제 확정 → 주문 보기 | `--users` `--rate`(필수) `--seats-per-order 2`, rate × (warm + main) + 2 ≤ users(가상 사용자 하나가 결제 하나, 도착률 실행기는 구간마다 한 번 더 시작할 수 있다) |
 | `v0 seat-deltas` | K4(S-T12의 v0 쪽): 변경분 연결 C개(받는 파드가 맺는다)와 홀드 도착률. 받은 메시지·바이트·종단 지연 | `--users` `--rate` `--connections`(필수) `--listener-pods`(⌈연결 ÷ 500⌉) `--hold-size 2` |
 | `v0 gate` | K10(O-T1의 v0 한계): 온라인 검표 중 입구를 끊었다 되돌린다. 구간별 분당 판정과 멈춘 시간 | `--scanners` `--rate`(필수) `--cut-at 60` `--cut-s 60`, `--main` 기본 180 |
+| `v1 queue`·`v1 seat-hold`·`v1 payment` | K1·K2·K7의 v1 쪽(docs/verification.md §3.9 'v1 경로', BUILD_ORDER PRF-215): 한 프로세스 합본(`node tools/local/cluster.mjs v1`)으로 보낸다. 게이트웨이가 없어 신원 머리를 넣고 구매 요청은 서명한다(`lib/purchase-auth.mjs`). K1은 입장 속도를 시험 회차의 결제사 승인 상한으로 시드하고, K7 ②는 반복 안에서 입장한 뒤 결제한다 | v0와 같다. `--namespace`·`--settle`·`--hpa-timeline`은 없다 |
 | 공통 | — | `--warm 30` `--main 60` `--cpus 4` `--memory-mi 4096` `--generators`(최고 도착률 ÷ 1,000, 나누면 CPU 2·메모리 1GiB씩) `--namespace v0` `--settle` `--hpa-timeline` `--record --run-id` `--profile`(사용자 수로 local-1k·10k·100k) `--prom-url` `--invariants` `--out` |
 | seat-hold·payment만 | — | seat-hold `--keep`(놓지 않기), `--db-stats`(교착·HOT 통계), payment `--fault-drop-pct` `--fault-delay-pct` `--kill-app-at` |
 
@@ -67,6 +68,8 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `runner/args.mjs`·`manifests.mjs`·`results.mjs` | 인자 검사, 발생기 파드·빈 응답 대역 객체, 발생기 지표·판정·보정 용량·기록 나누기·장부 인자 |
 | `run.mjs` | 실행 도구 |
 | `test/*.test.mjs` | 계산·실행 도구 시험과 시나리오 형식 검사(`node --test "loadtest/test/*.test.mjs"`, CI `loadtest-check.yml`) |
+| `scenarios/v1-*.js`·`v1-common.js`, `lib/v1.mjs`·`lib/purchase-auth.mjs`, `queries/v1.txt` | v1 경로의 시나리오와 계산(신원·좌석 UUID·시각 기반 일련번호·VU별 사용자 나누기, k6·Node 공용 구매 요청 인증), 합본 서버 지표 질의(BUILD_ORDER PRF-215) |
+| `e2e/v1-rehearsal.e2e.mjs` | v1 합본 리허설(K1·K2·K7 ② 작은 규모 한 번씩, 장부에 남기지 않음, `node --test loadtest/e2e/v1-rehearsal.e2e.mjs`) |
 | `e2e/v0-rehearsal.e2e.mjs` | 실제 kind에서 시나리오마다 작은 규모로 끝까지 돌려 보는 리허설(docs/perf-ledger.md §3 1번, `node --test loadtest/e2e/v0-rehearsal.e2e.mjs`) |
 
 ## 알아 둘 것

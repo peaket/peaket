@@ -35,9 +35,13 @@ node tools/local/cluster.mjs prometheus
 ```bash
 node tools/local/cluster.mjs v0
 node tools/local/cluster.mjs v0-forward
+node tools/local/cluster.mjs v1 [--redis-tls on|off] [--replicas N]
+node tools/local/cluster.mjs v1-down
 ```
 
 v0 배포(K6·K9의 비교 기준, docs/infra.md §3 'v0 배포')를 네임스페이스 `v0`에 올립니다. 이미지 둘(`peaket/v0-monolith:local`·`peaket/pg-simulator:local`)을 만들어 싣고, Valkey 8.1·metrics-server(CPU HPA의 지표)·DB `v0`·Secret(처음 한 번 만든 시험 키, 입구 TLS 인증서)·마이그레이션 잡·PG 시뮬레이터·앱(CPU HPA, 앱 포트는 입구만)·입구(HTTPS 8443, IP 레이트 리밋)를 차례로 올립니다. 토큰 서명 개인키는 이 PC의 `.cache/peaket-tools/v0-token-key.json`에만 두고 클러스터에는 공개키 목록만 넣습니다(`node tools/local/v0-token.mjs sign <계정>`이 시험 토큰을 찍습니다). `v0-forward`는 입구를 `https://127.0.0.1:8443`에 포트 전달합니다(자체 서명 인증서). 확인: `node --test tools/local/e2e/v0-deploy.e2e.mjs`(입구를 거친 v0 흐름, 머리 지우기·토큰·출처·레이트 리밋, 앱 포트 막기, CPU 부하에 HPA가 복제본을 늘리는 것).
+
+`v1`은 증명 핵심 측정의 무대(docs/verification.md §3.8 '합본의 v1 무대')를 네임스페이스 `v1`에 올리고, `v1-down`은 그 네임스페이스와 kind 노드 폴더를 지웁니다(클러스터는 그대로). 전제: 대기 상태 파일 앞 캐시의 고정 판 nginx(`nginxinc/nginx-unprivileged:1.29.3-alpine@sha256:5aea7cc5…`, `v1-objects.mjs`의 `V1_NGINX_IMAGE`)가 이 PC의 Docker에 미리 받아져 있어야 합니다(`docker pull <그 판>`. `v1`은 이미지를 받지 않고, 태그의 이미지 ID가 고정 다이제스트와 같고 Docker 엔진 아키텍처의 매니페스트가 있는지 본 뒤 그 플랫폼 하나만 싣습니다). 같은 클러스터에 다시 올리면 합본·릴레이를 먼저 0개로 줄이고 전용 PostgreSQL·Valkey·시험 키를 새로 만듭니다. 확인: `node --test --test-concurrency=1 loadtest/e2e/v1-rehearsal.e2e.mjs`(무대를 `--replicas 2`로 올린 뒤).
 
 ```bash
 node tools/local/cluster.mjs down
@@ -54,7 +58,7 @@ node --test "tools/local/*.test.mjs"
 | 파일 | 하는 일 |
 | --- | --- |
 | `tools.mjs` | kind·kubectl·helm을 공식 주소에서 받아 표의 SHA-256과 견주고, 맞을 때만 `.cache/peaket-tools`(커밋하지 않음)에 둡니다. 압축으로 받는 helm은 푼 실행 파일의 해시도 표에 있습니다. 받아 둔 것도 쓸 때마다 표의 해시와 다시 견줍니다 |
-| `cluster.mjs` | `up [--v0-only]`·`image`·`observability`·`grafana`·`prometheus`·`v0`·`v0-forward`·`status`·`down`. Strimzi 설치 파일은 받아 해시를 본 뒤 네임스페이스·운영자 메모리(512Mi)·운영자 이미지 다이제스트(운영자와 엔티티 운영자·초기화 컨테이너)를 고쳐 올립니다. 설치 파일의 이미지 표 가운데 쓰지 않는 것(Kafka Connect 빌드·브리지 등)은 태그로 남고, 쓰는 Kafka 이미지는 `deploy/local/kafka.yaml`에서 다이제스트로 고정합니다 |
+| `cluster.mjs` | `up [--v0-only]`·`image`·`observability`·`grafana`·`prometheus`·`v0`·`v0-forward`·`v1`·`v1-down`·`status`·`down`. `v1`은 증명 핵심 측정의 무대(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215)다: 합본 이미지(`services/bundle/Dockerfile`)·시뮬레이터를 싣고, 네임스페이스 `v1`에 대기열·좌석 Valkey(TLS 켬이 기본)·전용 PostgreSQL(연결 한도 600, DB `v1_purchase`·`v1_payment`, 새로 만듦)·시험 키 Secret(이 PC에서 새로 만듦)·무대 공개 값 ConfigMap `v1-stage-public`·마이그레이션 잡·Kafka 토픽·합본(복제 3)과 릴레이 둘·대기 상태 파일 앞 nginx 캐시를 올린다. 객체는 `v1-objects.mjs`, 키와 서비스별 환경 파일은 `v1-stage.mjs`가 만든다(시험 `v1-stage.test.mjs`). Strimzi 설치 파일은 받아 해시를 본 뒤 네임스페이스·운영자 메모리(512Mi)·운영자 이미지 다이제스트(운영자와 엔티티 운영자·초기화 컨테이너)를 고쳐 올립니다. 설치 파일의 이미지 표 가운데 쓰지 않는 것(Kafka Connect 빌드·브리지 등)은 태그로 남고, 쓰는 Kafka 이미지는 `deploy/local/kafka.yaml`에서 다이제스트로 고정합니다 |
 | `chart.test.mjs` | 공용 차트(`deploy/charts/peaket-service`) 렌더 시험 |
 | `dashboards.mjs` | 서비스마다 템플릿 대시보드 JSON을 만든다(첫 행 네 신호). `--check`는 커밋된 파일과 견준다 |
 | `observability.test.mjs` | 대시보드 생성기, Prometheus·Grafana 매니페스트(다이제스트·권한·익명 보기·클러스터 안 주소), 차트의 수집 주석 시험 |

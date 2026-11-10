@@ -1,0 +1,48 @@
+# v1 한 프로세스 합본의 로컬 kind 값(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215, ADR-0262 결정 4). 공용 차트의 릴리스 bundle.
+# 올리는 법: node tools/local/cluster.mjs v1 [--redis-tls on|off] (네임스페이스 v1). 서비스별 환경 파일(키·주소)은 Secret v1-bundle-env에만 있다.
+# 시험 도구다: 합본은 PEAKET_ENV local·ci에서만 시작한다. 운영 배포 단위가 아니다
+name: bundle
+
+image:
+  repository: peaket/bundle
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+  # 대기열·좌석 Valkey의 TLS 시험 인증 기관(Secret v1-redis-tls, TLS를 끈 무대에도 붙여 둔다. 그때는 쓰지 않는다)
+  NODE_EXTRA_CA_CERTS: /etc/peaket/redis-tls/ca.crt
+
+service:
+  # 복제 3개 고정 [가정], HPA는 끈다(K9는 범위 밖). K7 ②에서 하나를 강제로 끝내도 둘이 남는다
+  replicas: 3
+  # queue-svc 앱 포트. Service에는 k6가 부르는 purchase-svc 앱 포트만 더 연다(서비스별 환경 파일의 PORT와 같다, tools/local/v1-stage.mjs V1_PORTS).
+  # admission-ctrl·payment-svc 앱 포트는 파드 밖에서 부르지 않고, 결제 업무 gRPC(50051)와 queue-svc 업무 gRPC(50052, VerificationAppealService)는
+  # 파드 안 127.0.0.1에만 연다(Service에 열지 않는다. 서로 겹치면 합본이 시작하지 않는다, tools/local/v1-stage.mjs V1_PORTS)
+  port: 8080
+  extraPorts:
+    - { name: purchase, port: 8081 }
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  env:
+    PEAKET_BUNDLE_SERVICES: payment-svc,purchase-svc,admission-ctrl,queue-svc
+    PEAKET_BUNDLE_ENV_DIR: /etc/peaket/bundle
+  # 한 파드가 둘을 잡는다: 입장 제어 리더(admission-ctrl), 새 결제 진입 정지 판정자(payment-entry-pause)
+  leaderLease: [admission-ctrl, payment-entry-pause]
+  # 복제마다 진입 서버 1대 몫 CPU 1개 [가정](docs/verification.md §3.3). 메모리는 리허설에서 잰 파드 최대 약 226Mi(2026-11-10)의 두 배를 올린 512Mi [가정]
+  resources:
+    requests: { cpu: "1", memory: 512Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # 종료: 입구부터 반대 차례로 닫는다(서비스마다 진행 중 요청 마감)
+  terminationGracePeriodSeconds: 60
+  volumes:
+    - { name: bundle-env, secret: { secretName: v1-bundle-env } }
+    - { name: redis-tls, secret: { secretName: v1-redis-tls, items: [{ key: ca.crt, path: ca.crt }] } }
+    # 실행 도구가 실행마다 회차 좌석맵 판을 둔다(kind 노드 폴더, docker cp)
+    - { name: seatmaps, hostPath: { path: /var/local/peaket-v1/seatmaps, type: Directory } }
+    # 묶음 결과 파일: admission-ctrl 리더가 쓰고 모든 복제의 queue-svc가 읽는다(운영은 회차별 S3, BUILD_ORDER HOT-012)
+    - { name: batch-results, hostPath: { path: /var/local/peaket-v1/batch-results, type: Directory } }
+  volumeMounts:
+    - { name: bundle-env, mountPath: /etc/peaket/bundle, readOnly: true }
+    - { name: redis-tls, mountPath: /etc/peaket/redis-tls, readOnly: true }
+    - { name: seatmaps, mountPath: /etc/peaket/seatmaps, readOnly: true }
+    - { name: batch-results, mountPath: /var/peaket/batch-results }

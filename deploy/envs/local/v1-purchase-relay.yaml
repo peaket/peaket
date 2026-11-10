@@ -1,0 +1,32 @@
+# v1 무대의 purchase-svc 릴레이(Outbox·좌석 Stream, docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215). 합본과 같은 이미지의 따로 뜬 릴레이 파드다.
+# 올리는 법: node tools/local/cluster.mjs v1. DB·Kafka·좌석 Redis 주소는 Secret v1-relay-purchase에만 있다
+name: purchase-svc
+
+image:
+  repository: peaket/bundle
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+  NODE_EXTRA_CA_CERTS: /etc/peaket/redis-tls/ca.crt
+
+service:
+  enabled: false
+
+outboxRelay:
+  enabled: true
+  replicas: 2
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "node_modules/@peaket/purchase-svc/dist/relay.js"]
+  secretEnvFrom: v1-relay-purchase
+  env:
+    PEAKET_SEATMAP_DIR: /etc/peaket/seatmaps
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  volumes:
+    - { name: redis-tls, secret: { secretName: v1-redis-tls, items: [{ key: ca.crt, path: ca.crt }] } }
+    - { name: seatmaps, hostPath: { path: /var/local/peaket-v1/seatmaps, type: Directory } }
+  volumeMounts:
+    - { name: redis-tls, mountPath: /etc/peaket/redis-tls, readOnly: true }
+    - { name: seatmaps, mountPath: /etc/peaket/seatmaps, readOnly: true }

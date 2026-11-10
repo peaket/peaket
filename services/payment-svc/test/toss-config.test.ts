@@ -261,14 +261,14 @@ describe('assertPgAdapters', () => {
 });
 
 describe('운영 조립: 토스 어댑터(글 검사)', () => {
-  const main = (): string => code('main.ts');
-  const shutdown = (): string => main().slice(main().indexOf("process.once('SIGTERM'"));
+  const main = (): string => code('start.ts');
+  const shutdown = (): string => main().slice(main().indexOf('const shutdown = (): Promise<void> => {'));
 
   test('P-T16_main.ts는 토스 설정을 읽고 시작 조건을 듣기 전에 본다 [ASVS v5.0.0-16.5.3]', () => {
     const m = main();
-    expect(m).toMatch(/\bloadTossGatewayConfig\(process\.env\)/);
-    expect(m).toMatch(/\bassertPgAdapters\(process\.env,/);
-    expect(m.indexOf('assertPgAdapters(process.env'), '시작 조건 < listen').toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m).toMatch(/\bloadTossGatewayConfig\(env\)/);
+    expect(m).toMatch(/\bassertPgAdapters\(env,/);
+    expect(m.indexOf('assertPgAdapters(env'), '시작 조건 < listen').toBeLessThan(m.indexOf('await service.listen()'));
     expect(m.indexOf('new TossPaymentGateway('), '어댑터 < listen').toBeLessThan(m.indexOf('await service.listen()'));
   });
 

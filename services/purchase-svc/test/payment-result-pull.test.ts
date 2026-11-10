@@ -957,7 +957,8 @@ describe('리뷰 고침(2026-11-06 코드 리뷰, payment §2 \'중간 결과 �
 
 describe('운영 조립(main.ts)', () => {
   test('리뷰 고침 L1_종료(SIGTERM) 때 당기기 실행기는 Kafka 소비자와 함께 먼저 멈추고, 그 뒤에 Saga·발권 실행기·기다림 표를 멈춘다(당기기의 반영이 그 셋을 깨우므로) (ADR0140)', () => {
-    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+    // 운영 조립은 start.ts에 있다(main.ts는 환경 값과 SIGTERM만 잇는다, BUILD_ORDER PRF-215)
+    const main = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
     const at = main.indexOf('function shutdown(');
     expect(at, 'main.ts에 function shutdown이 있다').toBeGreaterThan(-1);
     const body = main.slice(at);
@@ -977,7 +978,8 @@ describe('운영 조립(main.ts)', () => {
 
   test('변이 검토 PRF-171_운영 main.ts는 당기기 실행기를 만들고, 듣기 시작한 뒤 start()로 켜며, 종료 때 stop()으로 끈다(빠뜨려도 형 오류가 없어 글로 본다) (ADR0140)', () => {
     // 줄 주석은 뺀다(주석으로 막은 줄이 통과하지 않게)
-    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+    // 운영 조립은 start.ts에 있다(main.ts는 환경 값과 SIGTERM만 잇는다, BUILD_ORDER PRF-215)
+    const main = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
     expect(main).toMatch(/\bpaymentPuller = new PaymentResultPuller\(\{/);
     const listenAt = main.indexOf('await service.listen();');
     expect(listenAt, 'main.ts에 await service.listen()이 있다').toBeGreaterThan(-1);

@@ -26,8 +26,14 @@ service:
   command: ["node", "--import", "@peaket/platform/telemetry/register", "template/dist/main.js"]
   # 서비스 Deployment만 받는 환경 변수
   env: {}
-  # 서비스 파드끼리 리더를 뽑을 Lease 이름(BUILD_ORDER PRF-202). 비우면 Lease·권한을 만들지 않고 토큰을 붙이지 않는다
+  # 서비스 파드끼리 리더를 뽑을 Lease 이름(BUILD_ORDER PRF-202). 이름 하나(글)나 이름 목록(한 파드가 여러 Lease를 잡는 합본, BUILD_ORDER PRF-215)을 받는다.
+  # 비우면 Lease·권한을 만들지 않고 토큰을 붙이지 않는다
   leaderLease: ""
+  # 앱 포트(port) 밖의 포트(BUILD_ORDER PRF-215: 합본은 서비스마다 앱 포트가 다르다). 칸마다 { name, port }이고 컨테이너 포트와 Service 포트가 함께 열린다
+  extraPorts: []
+  # 서비스 파드에 더 붙일 볼륨과 붙일 자리(쿠버네티스 볼륨·volumeMount 꼴 그대로. 합본의 서비스별 환경 파일 Secret·좌석맵 판 ConfigMap, BUILD_ORDER PRF-215)
+  volumes: []
+  volumeMounts: []
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }
@@ -70,6 +76,9 @@ outboxRelay:
   # PEAKET_KAFKA_BROKERS. 업무 데이터를 쓰는 릴레이(purchase·payment)는 PEAKET_DATABASE_URL(서비스 역할)도 받는다. 운영의 DB 주소는 secretEnvFrom/relaySecretEnvFrom으로 받는다
   env: {}
   secretEnvFrom: ""
+  # 릴레이 파드에 더 붙일 볼륨과 붙일 자리(서비스 파드의 service.volumes와 같은 꼴. purchase-svc 릴레이는 좌석맵 판 폴더를 읽는다, BUILD_ORDER PRF-215)
+  volumes: []
+  volumeMounts: []
   resources:
     requests: { cpu: 50m, memory: 192Mi }
     limits: { memory: 384Mi }

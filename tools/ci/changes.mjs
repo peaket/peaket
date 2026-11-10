@@ -38,13 +38,13 @@ const RULES = [
   // 이미지 빌드 시험(build-image.yml, docs/devops.md §3.2 '이미지 빌드 시험(푸시 없이)'): 이미지가 있는 배포 단위와 그 Dockerfile이 담는
   // 작업 공간 패키지, 작업 공간 파일, 빌드 맥락 규칙(.dockerignore)·Node 판, 이 워크플로와 그 스크립트(BSL-050)
   [
-    /^(services\/(v0-monolith|pg-simulator|payment-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding)\.mjs$)/,
+    /^(services\/(v0-monolith|pg-simulator|payment-svc|bundle|queue-svc|admission-ctrl|purchase-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts|shuffle)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding)\.mjs$)/,
     ['image'],
   ],
   // 부하 시험 점검(loadtest-check.yml, docs/verification.md §3.9, BSL-060): 시나리오와 실행 도구, 그리고 그 시험이 견주는 것
-  // (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구)과 이 워크플로
+  // (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구, v1 무대 도구·구매 요청 서명 벡터)과 이 워크플로
   [
-    /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|tools|v0-token)\.mjs$|\.github\/workflows\/loadtest-check\.yml$)/,
+    /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|tools|v0-token|v1-stage|v1-objects)\.mjs$|docs\/api\/vectors\/purchase-request-mac\.v1\.json$|\.github\/workflows\/loadtest-check\.yml$)/,
     ['loadtest'],
   ],
   // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2).

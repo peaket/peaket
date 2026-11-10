@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 
-const src = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+// 운영 조립은 start.ts에 있다(main.ts는 환경 값과 SIGTERM만 잇는다, BUILD_ORDER PRF-215)
+const src = readFileSync(fileURLToPath(new URL('../src/start.ts', import.meta.url)), 'utf8');
 
 test('텔레메트리설정이없으면_경고하고_낼기록은버린수로세며_시작을막지않는다', () => {
   expect(src).toMatch(/service\.logger\.warn\(\{ dep: 'telemetry-kafka' \}, warning\)/);

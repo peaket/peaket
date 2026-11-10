@@ -569,3 +569,83 @@ test('BSL050_v0값서로맞음_입구파드라벨이앱NetworkPolicy허용라벨
     assert.equal(k in gwEnv || k in appEnv, false, k);
   }
 });
+
+test('PRF215_leaderLease에_목록을주면_Lease마다_만들고_Role이_그이름들만_읽고고친다(합본은 둘을 잡는다) [ASVS v5.0.0-13.2.2]', () => {
+  const { objects, error } = render([...BASE, 'service.leaderLease={admission-ctrl,payment-entry-pause}'], 'v1');
+  assert.equal(error, undefined, error);
+  assert.deepEqual(all(objects, 'Lease').map((l) => l.metadata.name).sort(), ['admission-ctrl', 'payment-entry-pause']);
+  for (const l of all(objects, 'Lease')) assert.deepEqual(l.spec, {});
+  assert.equal(all(objects, 'Role').length, 1);
+  assert.deepEqual(find(objects, 'Role', 'example-svc-leader-lease').rules, [{ apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['admission-ctrl', 'payment-entry-pause'], verbs: ['get', 'update'] }]);
+  assert.equal(find(objects, 'Deployment', 'example-svc').spec.template.spec.automountServiceAccountToken, true);
+});
+
+test('PRF215_leaderLease_빈목록은_없는것과같고_겹친이름·틀린이름은_렌더하지_않는다 [ASVS v5.0.0-13.2.2]', () => {
+  const empty = render([...BASE, 'service.leaderLease=null'], 'v1');
+  assert.equal(empty.error, undefined, empty.error);
+  assert.equal(all(empty.objects, 'Lease').length, 0);
+  assert.equal(find(empty.objects, 'Deployment', 'example-svc').spec.template.spec.automountServiceAccountToken, false);
+  assert.match(render([...BASE, 'service.leaderLease={a-lease,a-lease}']).error ?? '(렌더됨)', /두 번/);
+  assert.match(render([...BASE, 'service.leaderLease={Bad_Name}']).error ?? '(렌더됨)', /DNS-1123/);
+});
+
+test('PRF215_extraPorts는_컨테이너포트와_Service포트를_함께열고_앱·관리포트나_서로와_겹치면_렌더하지_않는다', () => {
+  const { objects, error } = render([...BASE, 'service.extraPorts[0].name=purchase', 'service.extraPorts[0].port=8081', 'service.extraPorts[1].name=admission', 'service.extraPorts[1].port=8082']);
+  assert.equal(error, undefined, error);
+  const c = find(objects, 'Deployment', 'example-svc').spec.template.spec.containers[0];
+  assert.deepEqual(c.ports, [{ name: 'http', containerPort: 8080 }, { name: 'management', containerPort: 9464 }, { name: 'purchase', containerPort: 8081 }, { name: 'admission', containerPort: 8082 }]);
+  assert.deepEqual(find(objects, 'Service', 'example-svc').spec.ports, [{ name: 'http', port: 8080, targetPort: 'http' }, { name: 'purchase', port: 8081, targetPort: 'purchase' }, { name: 'admission', port: 8082, targetPort: 'admission' }]);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=dup', 'service.extraPorts[0].port=8080']).error ?? '(렌더됨)', /service\.port와 겹친다/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=dup', 'service.extraPorts[0].port=9464']).error ?? '(렌더됨)', /managementPort와 겹친다/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=a', 'service.extraPorts[0].port=8090', 'service.extraPorts[1].name=b', 'service.extraPorts[1].port=8090']).error ?? '(렌더됨)', /a와 겹친다/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=a', 'service.extraPorts[0].port=8090', 'service.extraPorts[1].name=a', 'service.extraPorts[1].port=8091']).error ?? '(렌더됨)', /name a가 겹친다/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=management', 'service.extraPorts[0].port=8090']).error ?? '(렌더됨)', /name management가 겹친다/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=a', 'service.extraPorts[0].port=0']).error ?? '(렌더됨)', /1~65535/);
+  assert.match(render([...BASE, 'service.extraPorts[0].name=Upper', 'service.extraPorts[0].port=8090']).error ?? '(렌더됨)', /소문자/);
+  // 주지 않으면 지금과 같다
+  assert.deepEqual(find(render(BASE).objects, 'Service', 'example-svc').spec.ports, [{ name: 'http', port: 8080, targetPort: 'http' }]);
+});
+
+test('PRF215_volumes·volumeMounts를_주면_tmp뒤에_그대로붙이고_주지않으면_tmp하나다', () => {
+  const { objects, error } = render([...BASE, 'service.volumes[0].name=envs', 'service.volumes[0].secret.secretName=v1-bundle-env', 'service.volumeMounts[0].name=envs', 'service.volumeMounts[0].mountPath=/etc/peaket/bundle', 'service.volumeMounts[0].readOnly=true']);
+  assert.equal(error, undefined, error);
+  const spec = find(objects, 'Deployment', 'example-svc').spec.template.spec;
+  assert.deepEqual(spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'envs', secret: { secretName: 'v1-bundle-env' } }]);
+  assert.deepEqual(spec.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'envs', mountPath: '/etc/peaket/bundle', readOnly: true }]);
+  const plain = find(render(BASE).objects, 'Deployment', 'example-svc').spec.template.spec;
+  assert.deepEqual(plain.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }]);
+});
+
+test('PRF215_outboxRelay.volumes·volumeMounts를_주면_릴레이파드에만_tmp뒤로붙인다', () => {
+  const sets = [...BASE, 'outboxRelay.enabled=true', 'outboxRelay.volumes[0].name=seatmaps', 'outboxRelay.volumes[0].hostPath.path=/var/local/x', 'outboxRelay.volumeMounts[0].name=seatmaps', 'outboxRelay.volumeMounts[0].mountPath=/etc/peaket/seatmaps'];
+  const { objects, error } = render(sets, 'v1');
+  assert.equal(error, undefined, error);
+  const relay = find(objects, 'Deployment', 'example-svc-outbox-relay').spec.template.spec;
+  assert.deepEqual(relay.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'seatmaps', hostPath: { path: '/var/local/x' } }]);
+  assert.deepEqual(relay.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'seatmaps', mountPath: '/etc/peaket/seatmaps' }]);
+  assert.deepEqual(find(objects, 'Deployment', 'example-svc').spec.template.spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }]);
+});
+
+test('PRF215_코드리뷰S1_볼륨은_secret·configMap·emptyDir만받고_hostPath는_PEAKET_ENV_local·ci에서만이며_projected·그밖의종류는_렌더하지_않는다 [ASVS v5.0.0-13.2.2]', () => {
+  const PROD = ['name=example-svc', 'image.repository=peaket/example-svc', `image.digest=sha256:${'a'.repeat(64)}`, 'env.PEAKET_ENV=staging'];
+  const vol = (where, i, kind, field, value) => [`${where}[${i}].name=v${i}`, `${where}[${i}].${kind}.${field}=${value}`];
+  for (const where of ['service.volumes', 'outboxRelay.volumes']) {
+    const relay = where.startsWith('outboxRelay') ? ['outboxRelay.enabled=true'] : [];
+    // 받는 종류: secret·configMap·emptyDir(운영 환경 값에서도)
+    const ok = render([...PROD, ...relay, ...vol(where, 0, 'secret', 'secretName', 's'), ...vol(where, 1, 'configMap', 'name', 'c'), ...vol(where, 2, 'emptyDir', 'sizeLimit', '1Mi')]);
+    assert.equal(ok.error, undefined, ok.error);
+    // hostPath는 local·ci에서만
+    assert.equal(render([...BASE, ...relay, ...vol(where, 0, 'hostPath', 'path', '/var/local/x')]).error, undefined, `${where} local hostPath`);
+    // local·ci 밖은 모두 거부한다(staging 하나만 보면 prod·demo를 허용 목록에 더한 결함을 놓친다, 변이 검토 PRF-215)
+    for (const env of ['staging', 'prod', 'demo', 'dev']) {
+      const sets = [...PROD.filter((s) => !s.startsWith('env.PEAKET_ENV=')), `env.PEAKET_ENV=${env}`, ...relay, ...vol(where, 0, 'hostPath', 'path', '/var/local/x')];
+      assert.match(render(sets).error ?? '(렌더됨)', /hostPath.*local·ci/, `${where} ${env} hostPath`);
+    }
+    // 받지 않는 종류: projected(서비스 계정 토큰을 붙일 수 있다)·PVC·그밖
+    assert.match(render([...BASE, ...relay, `${where}[0].name=p`, `${where}[0].projected.sources[0].serviceAccountToken.path=token`]).error ?? '(렌더됨)', /projected/, `${where} projected`);
+    assert.match(render([...BASE, ...relay, ...vol(where, 0, 'persistentVolumeClaim', 'claimName', 'x')]).error ?? '(렌더됨)', /persistentVolumeClaim/, `${where} pvc`);
+    // 종류 둘을 한 칸에 적거나 이름이 없으면 렌더하지 않는다
+    assert.match(render([...BASE, ...relay, ...vol(where, 0, 'secret', 'secretName', 's'), `${where}[0].emptyDir.sizeLimit=1Mi`]).error ?? '(렌더됨)', /종류 하나/, `${where} 둘`);
+    assert.match(render([...BASE, ...relay, `${where}[0].secret.secretName=s`]).error ?? '(렌더됨)', /name/, `${where} 이름 없음`);
+  }
+});

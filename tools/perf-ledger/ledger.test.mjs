@@ -1199,3 +1199,21 @@ test('BSL090_ADR-0077: 창 안의 파드 재시작으로 히스토그램을 셀 
     }
   }
 });
+
+test('PRF215_변이검토_코드리뷰M9: v1 K1·K7 ②는 Redis TLS를 끈 실행을 측정 폴더를 만들기 전에 거부하고, 켠 실행과 v1 K2의 끈 실행(짝 경고)은 기록한다', () => {
+  const root = newRoot();
+  const args = (runId, kpi, tls) => ['--root', root, '--run-id', runId, '--kpi', kpi, '--version', 'v1', '--profile', 'local-1k', '--commit', 'abc123', '--redis-tls', tls];
+  for (const kpi of ['K1', 'K7']) {
+    const id = `m9-${kpi.toLowerCase()}-off`;
+    const r = py(COLLECT, args(id, kpi, 'false'));
+    assert.notEqual(r.code, 0, `${kpi}: ${r.out}`);
+    assert.match(r.out, /Redis TLS를 켠 무대에서만 기록한다/, kpi);
+    assert.equal(runExists(root, id), false, `${kpi} 측정 폴더를 만들지 않는다`);
+  }
+  const on = py(COLLECT, args('m9-k1-on', 'K1', 'true'));
+  assert.equal(on.code, 0, on.out);
+  assert.equal(manifestOf(root, 'm9-k1-on').redis_tls, true);
+  const k2 = py(COLLECT, args('m9-k2-off', 'K2', 'false'));
+  assert.equal(k2.code, 0, k2.out);
+  assert.equal(runExists(root, 'm9-k2-off'), true);
+});

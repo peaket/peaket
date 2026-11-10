@@ -209,11 +209,12 @@ test('BSL090_P-T1_결제사장애배정_칸마다drop·delay·null이정해지�
   }
 });
 
-test('BSL090_P-T1_결제사장애배정_i는0이상정수_비율은0~100정수이고합이100이하가아니면_RangeError', () => {
+test('BSL090_P-T1_결제사장애배정_i는0이상정수_비율은0~100(소수 한 자리까지)이고합이100이하가아니면_RangeError', () => {
   assert.equal(faultFor(0, 60, 40), 'drop'); // 기준: 합이 100이면 받는다
   for (const i of [-1, 1.5, NaN, Infinity, '3', null, undefined]) rangeErr(() => faultFor(i, 5, 2), `i=${String(i)}`);
-  for (const d of [-1, 101, 2.5, NaN, Infinity, -Infinity, '5', null, undefined]) rangeErr(() => faultFor(0, d, 0), `dropPct=${String(d)}`);
-  for (const l of [-1, 101, 0.5, NaN, Infinity, '2', null, undefined]) rangeErr(() => faultFor(0, 0, l), `delayPct=${String(l)}`);
+  // 소수 둘째 자리는 받지 않는다(소수 한 자리는 받는다, BUILD_ORDER PRF-215)
+  for (const d of [-1, -0.1, 100.1, 101, 2.55, 0.05, NaN, Infinity, -Infinity, '5', null, undefined]) rangeErr(() => faultFor(0, d, 0), `dropPct=${String(d)}`);
+  for (const l of [-1, 101, 0.25, 0.01, NaN, Infinity, '2', null, undefined]) rangeErr(() => faultFor(0, 0, l), `delayPct=${String(l)}`);
   rangeErr(() => faultFor(0, 60, 41), '합 101');
   rangeErr(() => faultFor(0, 100, 1), '합 101');
   rangeErr(() => faultFor(7, 1, 100), '합 101');

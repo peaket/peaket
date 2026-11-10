@@ -8,6 +8,8 @@
 //   node tools/local/cluster.mjs prometheus  Prometheus를 127.0.0.1:9090으로 연다(collect.py --prom-url)
 //   node tools/local/cluster.mjs v0      v0 배포(이미지 둘·Valkey·metrics-server·Secret·마이그레이션·앱(CPU HPA)·입구, docs/infra.md §3 'v0 배포')
 //   node tools/local/cluster.mjs v0-forward  v0 입구를 127.0.0.1:8443으로 연다(포트 전달)
+//   node tools/local/cluster.mjs v1 [--redis-tls on|off] [--replicas N]  v1 측정 무대(한 프로세스 합본·릴레이·Valkey 둘·전용 PostgreSQL·DB 마이그레이션·Kafka 토픽·nginx 캐시, docs/verification.md §3.8 '합본의 v1 무대')
+//   node tools/local/cluster.mjs v1-down   v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더. 클러스터는 그대로)
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 도구(kind·kubectl·helm)는 tools.mjs가 고정 판으로 받는다. 사용자의 ~/.kube/config는 건드리지 않고 전용 kubeconfig를 쓴다
@@ -16,10 +18,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { loadOrCreateV0TokenKey } from './v0-token.mjs';
+import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
+import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CLUSTER = 'peaket';
@@ -488,6 +492,137 @@ export async function v0() {
   console.log('시험 토큰: node tools/local/v0-token.mjs sign <계정> [pid]');
 }
 
+// --- v1 측정 무대(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215, ADR-0262 결정 4) ---
+
+/** Valkey TLS 시험 인증서(인증 기관·서버). 키 파일은 임시 폴더에만 두고 바로 지운다 */
+function redisTlsCertificate() {
+  const dir = mkdtempSync(join(tmpdir(), 'v1-redis-tls-'));
+  try {
+    for (const args of redisTlsCertArgs(dir.split(sep).join('/'))) execFileSync('openssl', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    return { ca: readFileSync(join(dir, 'ca.crt'), 'utf8'), cert: readFileSync(join(dir, 'tls.crt'), 'utf8'), key: readFileSync(join(dir, 'tls.key'), 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * kind 노드에서 명령 하나(경로를 Git Bash가 Windows 경로로 바꾸지 않게 MSYS_NO_PATHCONV)
+ * @param {string[]} args
+ */
+const onKindNode = (args) => execFileSync('docker', ['exec', `${CLUSTER}-control-plane`, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MSYS_NO_PATHCONV: '1' } });
+
+/**
+ * 로컬 Docker에 있는 고정 판 이미지를 kind에 싣는다(새로 받지 않는다, 코드 리뷰). 태그의 이미지 ID가 고정 다이제스트와 같고 Docker 엔진 아키텍처(docker info)의
+ * 플랫폼 매니페스트가 로컬에 있어야 한다(pinnedImagePlan). 여러 플랫폼 이미지는 그 플랫폼 하나만 묶음으로 내보내 싣고, 실은 뒤 노드의 다이제스트가 그 매니페스트인지 본다.
+ * 실은 것(ID·플랫폼·매니페스트)은 무대 공개 값에 적는다(실행 도구가 infra.txt에 옮긴다)
+ * @param {string} pinned <이름>:<태그>@sha256:<다이제스트>
+ */
+async function loadPinnedImage(pinned) {
+  const tag = pinned.split('@')[0];
+  const platform = dockerPlatform(run('docker', ['info', '--format', '{{.Architecture}}'], { quiet: true }));
+  /** @type {string} */
+  let imageId;
+  /** @type {Parameters<typeof pinnedImagePlan>[0]['descriptor']} */
+  let descriptor;
+  try {
+    imageId = run('docker', ['image', 'inspect', tag, '--format', '{{.Id}}'], { quiet: true }).trim();
+    descriptor = JSON.parse(run('docker', ['image', 'inspect', '--platform', platform, tag, '--format', '{{json .Descriptor}}'], { quiet: true }));
+  } catch {
+    throw new Error(`로컬 Docker에 ${tag}(${platform})이 없다. 이 명령은 이미지를 받지 않는다: 먼저 docker pull ${pinned}(tools/local/README.md)`);
+  }
+  const plan = pinnedImagePlan({ pinned, imageId, descriptor, platform });
+  const dir = mkdtempSync(join(tmpdir(), 'v1-image-'));
+  try {
+    const archive = join(dir, 'image.tar');
+    execFileSync('docker', ['save', '--platform', platform, tag, '-o', archive], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await kind(['load', 'image-archive', archive, '--name', CLUSTER]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const onNode = nodeImageDigest(onKindNode(['ctr', '-n', 'k8s.io', 'images', 'ls']), tag);
+  if (onNode !== plan.manifest) throw new Error(`kind 노드의 ${tag}(${onNode ?? '없음'})가 실은 매니페스트(${plan.manifest})가 아니다`);
+  return plan;
+}
+
+/**
+ * v1 측정 무대를 올린다(같은 클러스터에 다시 올리면 DB·Valkey·키를 새로 만든다. 측정은 새 클러스터에서 한다, docs/verification.md §3.10 공통 규칙).
+ * 클러스터(up)와 관측 최소(observability)가 먼저 올라와 있어야 한다
+ * @param {string[]} [argv]
+ */
+export async function v1(argv = []) {
+  const plan = v1Plan(argv);
+  const layout = v1Layout({ redisTls: plan.redisTls });
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
+  if (!existsSync(KUBECONFIG)) await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
+  step(`이미지 ${V1_IMAGES.bundle}·${V1_IMAGES.simulator}`);
+  execFileSync('docker', ['build', '-f', join(REPO, 'services', 'bundle', 'Dockerfile'), '-t', V1_IMAGES.bundle, REPO], { stdio: 'inherit' });
+  execFileSync('docker', ['build', '-f', join(REPO, 'services', 'pg-simulator', 'Dockerfile'), '-t', V1_IMAGES.simulator, REPO], { stdio: 'inherit' });
+  for (const img of Object.values(V1_IMAGES)) await kind(['load', 'docker-image', img, '--name', CLUSTER]);
+  const nginx = await loadPinnedImage(V1_NGINX_IMAGE);
+  step(`네임스페이스 ${V1_NAMESPACE}와 노드 폴더`);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: V1_NAMESPACE } }) });
+  // 다시 올리면 합본·릴레이를 먼저 0개로 줄인다(DB·Valkey·키를 새로 만드는 동안 옛 키·옛 DB로 돌며 다시 시작하지 않게, 코드 리뷰)
+  const scaleDown = v1ScaleDownArgs((await kubectl(['-n', V1_NAMESPACE, 'get', 'deploy', '-o', 'name'], { quiet: true })).split(/\s+/).filter(Boolean));
+  if (scaleDown) {
+    await kubectl(scaleDown);
+    await kubectl(['-n', V1_NAMESPACE, 'wait', '--for=delete', 'pod', '-l', 'app.kubernetes.io/name in (bundle,purchase-svc,payment-svc)', '--timeout=180s'], { quiet: true }).catch((e) => {
+      if (!/no matching resources/i.test(String(e.stderr ?? e.message))) throw e;
+    });
+  }
+  for (const dir of Object.values(V1_HOST_DIRS)) onKindNode(['sh', '-c', `mkdir -p ${dir} && rm -rf ${dir}/* && chown 1000:1000 ${dir} && chmod 0755 ${dir}`]);
+  const replicas = plan.replicas ?? 3;
+  step(`시험 키와 Secret·무대 공개 값(Redis TLS ${plan.redisTls ? '켬' : '끔'}, 합본 복제 ${replicas})`);
+  // 시험 키는 무대를 올릴 때마다 새로 만든다. 개인 성분은 Secret에만 넣는다(이 PC에 파일로 두지 않는다)
+  const keys = v1Keys();
+  const secrets = v1Secrets({ keys, layout, tls: redisTlsCertificate(), replicas });
+  for (const secret of secrets) {
+    await kubectl(['-n', V1_NAMESPACE, 'delete', 'secret', secret.metadata.name, '--ignore-not-found']);
+    // create는 last-applied 주석을 남기지 않는다(apply는 비밀 값을 주석에 평문으로 남긴다)
+    await kubectl(['create', '-f', '-'], { input: JSON.stringify(secret) });
+  }
+  // 실행 도구가 읽는 공개 값(개인 성분 없음). 실행 도구는 환경 파일 Secret을 읽지 않는다
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify(v1PublicConfigMap({ keys, redisTls: plan.redisTls, replicas, nginx })) });
+  step(`전용 PostgreSQL과 DB ${V1_DATABASES.purchase}·${V1_DATABASES.payment}(새로 만든다)`);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: v1PostgresObjects() }) });
+  // 임시 저장소라 다시 띄우면 새 비밀번호로 처음부터 만든다
+  await kubectl(['-n', V1_NAMESPACE, 'rollout', 'restart', 'deploy/postgres']);
+  await kubectl(['-n', V1_NAMESPACE, 'rollout', 'status', 'deploy/postgres', '--timeout=300s']);
+  for (const db of Object.values(V1_DATABASES)) await kubectl(['-n', V1_NAMESPACE, 'exec', 'deploy/postgres', '--', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `create database ${db}`]);
+  step('Valkey 둘(대기열·좌석)과 결제 시뮬레이터');
+  const objs = [...v1ValkeyObjects('valkey-queue', { tls: plan.redisTls }), ...v1ValkeyObjects('valkey-seat', { tls: plan.redisTls }), ...v1SimulatorObjects()];
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: objs }) });
+  for (const d of ['valkey-queue', 'valkey-seat', 'pg-simulator']) {
+    await kubectl(['-n', V1_NAMESPACE, 'rollout', 'restart', `deploy/${d}`]);
+    await kubectl(['-n', V1_NAMESPACE, 'rollout', 'status', `deploy/${d}`, '--timeout=300s']);
+  }
+  step(`Kafka 토픽 ${V1_KAFKA_TOPICS.length}개`);
+  await kubectl(['-n', 'kafka', 'wait', 'kafka/peaket', '--for=condition=Ready', '--timeout=600s']);
+  for (const topic of V1_KAFKA_TOPICS) await kubectl(kafkaTopicArgs(topic));
+  step('마이그레이션 잡(purchase·payment)');
+  for (const svc of /** @type {const} */ (['purchase', 'payment'])) {
+    const job = v1MigrationJob(svc);
+    await kubectl(['-n', V1_NAMESPACE, 'delete', 'job', job.metadata.name, '--ignore-not-found', '--wait=true']);
+    await kubectl(['create', '-f', '-'], { input: JSON.stringify(job) });
+    await waitJob(V1_NAMESPACE, job.metadata.name);
+  }
+  step('합본·릴레이(공용 차트)');
+  await helm(v1HelmArgs('v1-bundle', REPO, plan.replicas === undefined ? {} : { replicas: plan.replicas }));
+  for (const r of /** @type {const} */ (['v1-purchase-relay', 'v1-payment-relay'])) await helm(v1HelmArgs(r, REPO));
+  // 새 Secret 값(키·주소)과 새 이미지를 읽게 다시 띄운다
+  const deploys = ['bundle', 'purchase-svc-outbox-relay', 'payment-svc-outbox-relay'];
+  await kubectl(['-n', V1_NAMESPACE, 'rollout', 'restart', ...deploys.map((d) => `deploy/${d}`)]);
+  for (const d of deploys) await kubectl(['-n', V1_NAMESPACE, 'rollout', 'status', `deploy/${d}`, '--timeout=600s']);
+  step('대기 상태 파일 앞 nginx 캐시');
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: v1StateCacheObjects() }) });
+  await kubectl(['-n', V1_NAMESPACE, 'rollout', 'restart', 'deploy/queue-state-cache']);
+  await kubectl(['-n', V1_NAMESPACE, 'rollout', 'status', 'deploy/queue-state-cache', '--timeout=300s']);
+  step('준비됨');
+  console.log(`v1 무대: 합본 ${layout.queueUrl}·${layout.purchaseUrl}, 대기 상태 캐시 ${layout.stateUrl}, Redis TLS ${plan.redisTls ? '켬' : '끔'}, 합본 복제 ${replicas}`);
+  console.log("측정: node loadtest/run.mjs v1 queue|seat-hold|payment …(docs/verification.md §3.9 'v1 경로')");
+}
+
 async function v0Forward() {
   const k = await ensureTool('kubectl');
   execFileSync(k, ['--kubeconfig', KUBECONFIG, ...v0ForwardArgs()], { stdio: 'inherit' });
@@ -503,25 +638,33 @@ async function grafana() {
   execFileSync(k, ['--kubeconfig', KUBECONFIG, ...grafanaForwardArgs()], { stdio: 'inherit' });
 }
 
+/** v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더, 코드 리뷰). 클러스터·관측·Kafka는 그대로 둔다 */
+async function v1Down() {
+  await kubectl(['delete', 'namespace', V1_NAMESPACE, '--ignore-not-found', '--wait=true', '--timeout=300s']);
+  // 노드 폴더 둘과 그 부모(/var/local/peaket-v1)
+  for (const dir of new Set(Object.values(V1_HOST_DIRS).map((d) => d.slice(0, d.lastIndexOf('/'))))) onKindNode(['sh', '-c', `rm -rf ${dir}`]);
+  console.log(`v1 무대를 내렸다(네임스페이스 ${V1_NAMESPACE})`);
+}
+
 async function down() {
   await kind(['delete', 'cluster', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N]|v1-down|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();
-  if (cmd === 'up') {
+  if (cmd === 'up' || cmd === 'v1') {
     try {
-      upPlan(process.argv.slice(3));
+      (cmd === 'up' ? upPlan : v1Plan)(process.argv.slice(3));
     } catch (e) {
       console.error(e.message);
       usage();
     }
   }
-  await (cmd === 'up' ? up(process.argv.slice(3)) : cmds[cmd]());
+  await (cmd === 'up' ? up(process.argv.slice(3)) : cmd === 'v1' ? v1(process.argv.slice(3)) : cmds[cmd]());
 }

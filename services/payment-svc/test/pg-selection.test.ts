@@ -912,17 +912,17 @@ describe('loadCheckoutConfig', () => {
 });
 
 test('운영 조립: 설정 읽기는 듣기 전이고 PrepareCheckout을 처리기에 잇는다(글 검사)', () => {
-  const m = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  expect(m.indexOf('loadCheckoutConfig(process.env)')).toBeGreaterThan(-1);
-  expect(m.indexOf('loadCheckoutConfig(process.env)')).toBeLessThan(m.indexOf('await service.listen()'));
+  const m = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8');
+  expect(m.indexOf('loadCheckoutConfig(env)')).toBeGreaterThan(-1);
+  expect(m.indexOf('loadCheckoutConfig(env)')).toBeLessThan(m.indexOf('await service.listen()'));
   expect(m).toMatch(/prepareCheckout: new PrepareCheckout\(/);
   expect(m).toMatch(/new CachedPgSelectionReader\(/);
   expect(m).toMatch(/virtualAccountReady: virtualAccountCipher\.ready/);
 });
 
 test('P-T26_리뷰 고침 6: 운영 조립: 어댑터 확인은 듣기 전이고 경고는 로그로 낸다(글 검사)', () => {
-  const m = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  const at = m.indexOf('checkoutAdapterWarnings(process.env');
+  const m = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8');
+  const at = m.indexOf('checkoutAdapterWarnings(env');
   expect(at).toBeGreaterThan(-1);
   expect(at).toBeLessThan(m.indexOf('await service.listen()'));
   expect(at).toBeGreaterThan(m.indexOf('const gateways = new StaticPaymentGateways'));

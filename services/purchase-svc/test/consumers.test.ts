@@ -169,7 +169,8 @@ describe('결제 결과 반영 조립(paymentResultApply, 리뷰 고침 변이 �
   });
 
   test('변이 검토 PRF-170_운영 main.ts는 paymentResultApply에 onApproved로 이 파드의 발권 실행기 kick을 넘긴다(선택 인자라 빠뜨려도 형 오류가 없어 글로 본다) (ADR0106)', () => {
-    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    // 운영 조립은 start.ts에 있다(main.ts는 환경 값과 SIGTERM만 잇는다, BUILD_ORDER PRF-215)
+    const main = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8');
     // paymentResultApply({ … }) 호출 몸통(줄 주석은 뺀다: 주석으로 막은 줄이 통과하지 않게)
     const call = /paymentResultApply\(\{([\s\S]*?)\n\s*\}\);/.exec(main)?.[1]?.replace(/\/\/.*$/gm, '');
     expect(call, 'main.ts에 paymentResultApply({ … }) 호출이 있다').toBeDefined();

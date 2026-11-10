@@ -184,3 +184,29 @@ test('DT32_하드링크한_같은애드온둘도_기본열기로_모두열린다
   assert.deepEqual(r.failures, []);
   assert.equal(r.ok, true);
 });
+
+// 합본 이미지는 네 서비스의 start 모듈을 불러오기만 해 본다(코드 리뷰, BUILD_ORDER PRF-215). 목록은 이미지 뿌리 package.json의 peaket.smokeImports다
+test('PRF215_코드리뷰_스모크_뿌리package.json의_smokeImports를_뿌리에서불러오기만해보고_못불러오면_실패에적는다', () => {
+  const root = tempDir('smoke-imports-');
+  writeTree(root, {
+    'package.json': JSON.stringify({ name: 'x', peaket: { smokeImports: ['good-pkg/start', 'bad-pkg/start', 'missing-pkg/start'] } }),
+    [join('node_modules', 'good-pkg', 'package.json')]: JSON.stringify({ name: 'good-pkg', type: 'module', exports: { './start': './start.js' } }),
+    [join('node_modules', 'good-pkg', 'start.js')]: 'export function start() {}\n',
+    [join('node_modules', 'bad-pkg', 'package.json')]: JSON.stringify({ name: 'bad-pkg', type: 'module', exports: { './start': './start.js' } }),
+    [join('node_modules', 'bad-pkg', 'start.js')]: "throw new Error('시작 모듈이 깨졌다');\n",
+  });
+  const r = smoke({ expectedArch: 'x64', root, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} });
+  assert.deepEqual(r.imports, ['good-pkg/start', 'bad-pkg/start', 'missing-pkg/start']);
+  assert.equal(r.ok, false);
+  assert.ok(r.failures.some((f) => f.includes('bad-pkg/start') && f.includes('시작 모듈이 깨졌다')), JSON.stringify(r.failures));
+  assert.ok(r.failures.some((f) => f.includes('missing-pkg/start')), JSON.stringify(r.failures));
+  assert.ok(!r.failures.some((f) => f.includes('good-pkg')), JSON.stringify(r.failures));
+  // 목록이 없으면 불러오지 않는다(다른 이미지는 그대로)
+  assert.deepEqual(smoke({ expectedArch: 'x64', root: tempDir('smoke-noimports-'), runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} }).imports, []);
+});
+
+test('PRF215_코드리뷰_합본package.json은_네서비스의_start모듈을_스모크목록에둔다', async () => {
+  const { readFileSync } = await import('node:fs');
+  const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'services', 'bundle', 'package.json'), 'utf8'));
+  assert.deepEqual(pkg.peaket?.smokeImports, ['@peaket/payment-svc/start', '@peaket/purchase-svc/start', '@peaket/admission-ctrl/start', '@peaket/queue-svc/start']);
+});

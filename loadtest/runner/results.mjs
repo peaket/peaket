@@ -238,6 +238,12 @@ export function collectArgs(o) {
   if (o.promUrl !== undefined) a.push('--prom-url', o.promUrl, '--queries', o.queries);
   if (o.rawBucket !== undefined) a.push('--raw-bucket', o.rawBucket);
   if (o.rawOutbox !== undefined) a.push('--raw-outbox', o.rawOutbox);
+  // 대기열·좌석 Redis TLS 켬·끔과 짝 실행(docs/perf-ledger.md §2.2 redis_tls·paired_run). v1 합본 실행이 준다(K1·K7 ②는 켬 하나, docs/verification.md §3.10 'v1 합본 측정 규칙')
+  if (o.redisTls !== undefined) {
+    if (typeof o.redisTls !== 'boolean') throw new Error('collect.py 인자 redisTls는 참·거짓이다');
+    a.push('--redis-tls', String(o.redisTls));
+  }
+  if (o.pairedRun !== undefined) a.push('--paired-run', str('pairedRun', o.pairedRun));
   return a;
 }
 

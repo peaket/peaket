@@ -477,7 +477,7 @@ test('DT32_빌드잡에_--push없이레지스트리로올리는단계도실패�
 /** 행렬 조합 하나로 ${{ matrix.x }}를 채운다 */
 const fillMatrix = (v, combo) => (typeof v === 'string' ? v.replace(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g, (_, k) => String(combo[k] ?? `<없는 칸 ${k}>`)) : v);
 
-test('BSL050_실제ci.yml_잡image는_범위image일때_이미지셋을build-image.yml로_푸시없이빌드한다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+test('BSL050_실제ci.yml_잡image는_범위image일때_이미지넷을build-image.yml로_푸시없이빌드한다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const doc = YAML.parse(readFileSync(join(REPO, '.github', 'workflows', 'ci.yml'), 'utf8'));
   // 범위 image를 changes 잡의 출력으로 낸다
   assert.match(String(doc.jobs.changes.outputs?.image ?? ''), /steps\.scope\.outputs\.image/, 'changes.outputs.image');
@@ -492,12 +492,12 @@ test('BSL050_실제ci.yml_잡image는_범위image일때_이미지셋을build-ima
   // 부르는 잡이 권한을 넓히지 않는다(맨 위 contents: read를 물려준다)
   assert.ok(job.permissions === undefined || JSON.stringify(job.permissions) === JSON.stringify({ contents: 'read' }), JSON.stringify(job.permissions));
   assert.equal(JSON.stringify(job.secrets ?? null).includes('inherit'), false, '비밀을 물려주지 않는다');
-  // 이미지 셋: 행렬 조합마다 build-image.yml의 Dockerfile 입력을 채워 본다
+  // 이미지 넷(한 프로세스 합본은 BUILD_ORDER PRF-215, docs/devops.md §3.1): 행렬 조합마다 build-image.yml의 Dockerfile 입력을 채워 본다
   const combos = job.strategy?.matrix ? matrixCombos(job.strategy.matrix) : [{}];
   const dockerKey = Object.keys(job.with ?? {}).find((k) => /dockerfile/i.test(k));
   assert.ok(dockerKey, `with에 Dockerfile 입력이 없다: ${Object.keys(job.with ?? {})}`);
   const dockerfiles = combos.map((c) => fillMatrix(job.with[dockerKey], c)).sort();
-  assert.deepEqual(dockerfiles, ['packages/platform/template/Dockerfile', 'services/pg-simulator/Dockerfile', 'services/v0-monolith/Dockerfile']);
+  assert.deepEqual(dockerfiles, ['packages/platform/template/Dockerfile', 'services/bundle/Dockerfile', 'services/pg-simulator/Dockerfile', 'services/v0-monolith/Dockerfile']);
   // 올리기를 켜는 입력이 없다
   assert.equal(Object.entries(job.with).some(([k, v]) => /push|publish|registry/i.test(k) && String(v) !== 'false'), false, JSON.stringify(job.with));
   // 필수 검사(ci-summary)가 이 잡을 기다린다

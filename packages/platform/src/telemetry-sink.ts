@@ -143,9 +143,13 @@ export class TelemetrySink {
   }
 }
 
-/** telemetry_dropped_total{record}를 레지스트리에 붙이고 버린 수를 받는 함수를 돌려준다 */
+/**
+ * telemetry_dropped_total{record}를 레지스트리에 붙이고 버린 수를 받는 함수를 돌려준다. 같은 레지스트리에 이미 그 이름이 붙어 있으면(purchase-svc는
+ * 결제 시도 지표 묶음이 행동 신호 몫으로 먼저 붙인다) 새로 붙이지 않고 그 묶음에 더한다(두 번 붙이면 던져 시작 파일이 뜨지 못했다, BUILD_ORDER PRF-215)
+ */
 export function telemetryDroppedCounter(registry: Registry): TelemetryDropped {
-  const counter = new Counter({ name: 'telemetry_dropped_total', help: '버퍼가 차거나 보내기에 실패해 버린 텔레메트리 기록 수', labelNames: ['record'] as const, registers: [registry] });
+  const existing = registry.getSingleMetric('telemetry_dropped_total') as Counter<'record'> | undefined;
+  const counter = existing ?? new Counter({ name: 'telemetry_dropped_total', help: '버퍼가 차거나 보내기에 실패해 버린 텔레메트리 기록 수', labelNames: ['record'] as const, registers: [registry] });
   return (record, count) => counter.inc({ record }, count);
 }
 

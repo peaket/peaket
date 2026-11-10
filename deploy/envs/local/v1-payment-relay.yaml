@@ -1,0 +1,23 @@
+# v1 무대의 payment-svc 릴레이(Outbox, docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215). 합본과 같은 이미지의 따로 뜬 릴레이 파드다.
+# 올리는 법: node tools/local/cluster.mjs v1. DB·Kafka 주소와 시뮬레이터 시험 키는 Secret v1-relay-payment에만 있다
+name: payment-svc
+
+image:
+  repository: peaket/bundle
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+
+service:
+  enabled: false
+
+outboxRelay:
+  enabled: true
+  replicas: 2
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "node_modules/@peaket/payment-svc/dist/relay.js"]
+  secretEnvFrom: v1-relay-payment
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

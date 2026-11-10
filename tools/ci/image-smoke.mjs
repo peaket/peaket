@@ -3,9 +3,10 @@
 //   docker run --rm --network none -v <이 파일>:/smoke.mjs:ro <이미지> node /smoke.mjs <x64|arm64> [뿌리 폴더, 기본 /app]
 // 1. process.platform이 linux이고 process.arch가 기대한 값인가
 // 2. 뿌리 폴더 아래(node_modules/.pnpm 포함)의 네이티브 모듈(.node)이 모두 열리는가(모듈마다 새 node 프로세스의 process.dlopen)
+// 3. 뿌리 package.json의 peaket.smokeImports(합본 이미지의 네 서비스 start 모듈, BUILD_ORDER PRF-215 코드 리뷰)를 뿌리에서 불러오기만 해 보는가(모듈마다 새 node 프로세스)
 // 결과를 한 줄 JSON으로 찍고, 하나라도 틀리면 종료 코드 1이다. 의존성 없이 node: 모듈만 쓴다.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,9 +36,25 @@ export function findNativeModules(root) {
 }
 
 /**
+ * 뿌리 package.json의 peaket.smokeImports(없거나 읽지 못하면 빈 목록)
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function smokeImports(root) {
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  } catch {
+    return [];
+  }
+  const list = pkg?.peaket?.smokeImports;
+  return Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [];
+}
+
+/**
  * 스모크 판정
- * @param {{ expectedArch: string, root: string, runtime?: { platform: string, arch: string }, dlopen?: (file: string) => void }} o
- * @returns {{ ok: boolean, platform: string, arch: string, nativeModules: string[], failures: string[] }}
+ * @param {{ expectedArch: string, root: string, runtime?: { platform: string, arch: string }, dlopen?: (file: string) => void, importModule?: (spec: string) => void }} o
+ * @returns {{ ok: boolean, platform: string, arch: string, nativeModules: string[], imports: string[], failures: string[] }}
  */
 export function smoke(o) {
   const runtime = o.runtime ?? { platform: process.platform, arch: process.arch };
@@ -62,7 +79,26 @@ export function smoke(o) {
       failures.push(`네이티브 모듈을 열지 못했다: ${file} (${err instanceof Error ? err.message : String(err)})`);
     }
   }
-  return { ok: failures.length === 0, platform: runtime.platform, arch: runtime.arch, nativeModules, failures };
+  // 불러오기만 한다(start를 부르지 않는다). 뿌리를 작업 폴더로 두어 이름(@peaket/...)을 뿌리의 node_modules에서 찾는다
+  const importModule =
+    o.importModule ??
+    ((spec) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(spec)})`], { cwd: o.root, encoding: 'utf8', timeout: 60_000 });
+      if (r.status !== 0) {
+        // 오류 줄(Error: …·Error [ERR_…]: …)을 고른다. 없으면 마지막 세 줄
+        const lines = (r.stderr || r.error?.message || `종료 코드 ${r.status}`).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        throw new Error(lines.find((l) => /^[A-Za-z]*Error\b/.test(l)) ?? lines.slice(-3).join(' '));
+      }
+    });
+  const imports = smokeImports(o.root);
+  for (const spec of imports) {
+    try {
+      importModule(spec);
+    } catch (err) {
+      failures.push(`모듈을 불러오지 못했다: ${spec} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  return { ok: failures.length === 0, platform: runtime.platform, arch: runtime.arch, nativeModules, imports, failures };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

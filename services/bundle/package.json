@@ -1,0 +1,32 @@
+{
+  "name": "@peaket/bundle",
+  "private": true,
+  "version": "0.0.0",
+  "description": "한 프로세스 합본(docs/verification.md §3.8 (가), BUILD_ORDER PRF-215, ADR-0262 결정 4). queue-svc·admission-ctrl·purchase-svc·payment-svc의 start()를 Node 프로세스 하나에 띄운다. 증명 핵심 측정(PRF-220)과 서비스 분리 비교(HOT-500)의 무대이고 PEAKET_ENV local·ci에서만 시작한다",
+  "type": "module",
+  "peaket": {
+    "smokeImports": ["@peaket/payment-svc/start", "@peaket/purchase-svc/start", "@peaket/admission-ctrl/start", "@peaket/queue-svc/start"]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/admission-ctrl": "workspace:*",
+    "@peaket/payment-svc": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "@peaket/purchase-svc": "workspace:*",
+    "@peaket/queue-svc": "workspace:*"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

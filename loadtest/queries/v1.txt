@@ -1,0 +1,11 @@
+# v1 합본 서버 지표 질의(collect.py --queries, docs/verification.md §3.10 '서버 지표'·'v1 합본 측정 규칙', BUILD_ORDER PRF-215). 이름은 docs/perf-ledger.md §2.3의 규약을 따른다.
+# 꼬리표 namespace·app은 로컬 Prometheus가 파드에서 붙이고(deploy/local/observability.yaml), service는 합본 관리 포트가 서비스마다 단다(services/bundle/src/management.ts).
+# 게이트웨이가 없어 origin_rps는 대기 상태 파일 앞 nginx 캐시를 지나 원본(queue-svc)에 닿은 대기 상태 파일 요청률이다. 증가율 창은 20초다(v0와 같다).
+origin_rps=sum(rate(http_server_request_duration_seconds_count{namespace="v1",app="bundle",service="queue-svc",route=~".*segment-states.*"}[20s]))
+app_rps=sum(rate(http_server_request_duration_seconds_count{namespace="v1",app="bundle"}[20s]))
+p99_ms=histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{namespace="v1",app="bundle"}[20s])) by (le)) * 1000
+error_rate=sum(rate(http_server_errors_total{namespace="v1",app="bundle"}[20s])) / sum(rate(http_server_request_duration_seconds_count{namespace="v1",app="bundle"}[20s]))
+event_loop_lag_ms=max(nodejs_eventloop_lag_p99_seconds{namespace="v1",app="bundle"}) * 1000
+app_cpu_cores=sum(rate(process_cpu_seconds_total{namespace="v1",app="bundle"}[20s]))
+hold_p99_ms=histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{namespace="v1",app="bundle",service="purchase-svc",route="/v1/events/{eventId}/holds"}[20s])) by (le)) * 1000
+payment_new_paused_rps=sum(rate(purchase_payment_attempts_total{namespace="v1",app="bundle",outcome="new_payment_paused"}[20s]))

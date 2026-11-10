@@ -943,6 +943,43 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(msw@2.15.0(@types/node@24.19.2)(typescript@7.0.2))(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  services/bundle:
+    dependencies:
+      '@peaket/admission-ctrl':
+        specifier: workspace:*
+        version: link:../admission-ctrl
+      '@peaket/payment-svc':
+        specifier: workspace:*
+        version: link:../payment-svc
+      '@peaket/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
+      '@peaket/purchase-svc':
+        specifier: workspace:*
+        version: link:../purchase-svc
+      '@peaket/queue-svc':
+        specifier: workspace:*
+        version: link:../queue-svc
+    devDependencies:
+      '@peaket/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(msw@2.15.0(@types/node@24.19.2)(typescript@7.0.2))(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
   services/core-svc:
     dependencies:
       '@grpc/grpc-js':

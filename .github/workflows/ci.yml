@@ -102,6 +102,9 @@ jobs:
             image: pg-simulator
           - dockerfile: packages/platform/template/Dockerfile
             image: example-svc
+          # 한 프로세스 합본(증명 핵심 측정의 무대, BUILD_ORDER PRF-215). 서비스 넷과 릴레이가 같은 이미지다
+          - dockerfile: services/bundle/Dockerfile
+            image: bundle
     uses: ./.github/workflows/build-image.yml
     with:
       dockerfile: ${{ matrix.dockerfile }}

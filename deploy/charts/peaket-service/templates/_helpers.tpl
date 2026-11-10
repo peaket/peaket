@@ -162,3 +162,62 @@ startupProbe:
   periodSeconds: 2
   failureThreshold: 30
 {{- end -}}
+
+{{/* 서비스 파드가 잡는 리더 임대 이름 목록(BUILD_ORDER PRF-202, 목록은 PRF-215). service.leaderLease는 이름 하나(글)나 이름 목록을 받는다.
+    빈 글·빈 목록이면 빈 목록이다. 이름은 DNS-1123 이름이고 겹치면 렌더를 멈춘다(합본 파드는 admission-ctrl·payment-entry-pause 둘을 잡는다, docs/verification.md §3.8 '합본의 v1 무대') */}}
+{{- define "peaket.leaderLeases" -}}
+{{- $raw := .Values.service.leaderLease -}}
+{{- $names := list -}}
+{{- if kindIs "string" $raw -}}
+{{- if ne $raw "" -}}{{- $names = list $raw -}}{{- end -}}
+{{- else if kindIs "slice" $raw -}}
+{{- $names = $raw -}}
+{{- else if $raw -}}
+{{- fail "service.leaderLease는 이름 하나(글)나 이름 목록이다" -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range $names -}}
+{{- if not (kindIs "string" .) -}}{{- fail "service.leaderLease의 이름은 글이다" -}}{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" .) -}}{{- fail (printf "service.leaderLease의 이름은 DNS-1123 이름이다(%s)" .) -}}{{- end -}}
+{{- if hasKey $seen . -}}{{- fail (printf "service.leaderLease에 같은 이름이 두 번 있다(%s)" .) -}}{{- end -}}
+{{- $_ := set $seen . true -}}
+{{- end -}}
+{{- toJson $names -}}
+{{- end -}}
+
+{{/* 값으로 받는 볼륨(service.volumes·outboxRelay.volumes, BUILD_ORDER PRF-215 코드 리뷰 S1). 칸마다 name과 종류 하나이고, 종류는 secret·configMap·emptyDir만 받는다.
+    hostPath(노드 폴더)는 PEAKET_ENV local·ci에서만 받는다(합본 v1 무대의 좌석맵·묶음 결과 폴더). projected(서비스 계정 토큰을 붙일 수 있다)·PVC 등 그밖의 종류는 렌더를 멈춘다(ASVS v5.0.0-13.2.2).
+    인자: dict "volumes" 목록 "env" PEAKET_ENV "where" 값 이름 */}}
+{{- define "peaket.volumes" -}}
+{{- $env := .env | default "" | toString -}}
+{{- $where := .where -}}
+{{- range .volumes -}}
+{{- if not (kindIs "map" .) -}}{{- fail (printf "%s: 칸마다 name과 종류 하나를 적는다" $where) -}}{{- end -}}
+{{- if not .name -}}{{- fail (printf "%s: 칸마다 name이 있어야 한다" $where) -}}{{- end -}}
+{{- $kinds := keys (omit . "name") | sortAlpha -}}
+{{- if ne (len $kinds) 1 -}}{{- fail (printf "%s: 볼륨 %v는 종류 하나만 적는다(%s)" $where .name (join "·" $kinds)) -}}{{- end -}}
+{{- $kind := first $kinds -}}
+{{- if eq $kind "hostPath" -}}
+{{- if not (has $env (list "local" "ci")) -}}{{- fail (printf "%s: hostPath 볼륨 %v는 PEAKET_ENV local·ci에서만 쓴다(%s)" $where .name $env) -}}{{- end -}}
+{{- else if not (has $kind (list "secret" "configMap" "emptyDir")) -}}
+{{- fail (printf "%s: 볼륨 %v의 종류 %s는 받지 않는다(secret·configMap·emptyDir, local·ci의 hostPath만)" $where .name $kind) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml .volumes -}}
+{{- end -}}
+
+{{/* 서비스 파드의 앱 포트 밖 포트(service.extraPorts, BUILD_ORDER PRF-215: 합본은 서비스마다 앱 포트가 다르다). 칸마다 name(소문자·숫자·-, 15자 안)·port(1~65535)이고
+    앱 포트·관리 포트나 서로와 겹치면 렌더를 멈춘다 */}}
+{{- define "peaket.extraPorts" -}}
+{{- $used := dict (toString .Values.service.port) "service.port" (toString .Values.managementPort) "managementPort" -}}
+{{- $names := dict "http" true "management" true -}}
+{{- range .Values.service.extraPorts -}}
+{{- if not (regexMatch "^[a-z]([-a-z0-9]{0,13}[a-z0-9])?$" (toString .name)) -}}{{- fail (printf "service.extraPorts의 name은 소문자·숫자·-로 15자 안이다(%v)" .name) -}}{{- end -}}
+{{- $port := int .port -}}
+{{- if or (lt $port 1) (gt $port 65535) -}}{{- fail (printf "service.extraPorts의 port는 1~65535다(%v)" .port) -}}{{- end -}}
+{{- if hasKey $used (toString $port) -}}{{- fail (printf "service.extraPorts의 port %d가 %s와 겹친다" $port (get $used (toString $port))) -}}{{- end -}}
+{{- if hasKey $names (toString .name) -}}{{- fail (printf "service.extraPorts의 name %s가 겹친다" .name) -}}{{- end -}}
+{{- $_ := set $used (toString $port) (toString .name) -}}
+{{- $_ := set $names (toString .name) true -}}
+{{- end -}}
+{{- end -}}

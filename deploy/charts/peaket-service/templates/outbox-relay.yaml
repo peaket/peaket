@@ -103,6 +103,12 @@ spec:
           securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            {{- with .Values.outboxRelay.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+        {{- with .Values.outboxRelay.volumes }}
+        {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "outboxRelay.volumes") | nindent 8 }}
+        {{- end }}
 {{- end }}

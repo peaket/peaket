@@ -144,12 +144,12 @@ describe('assertPgAdapters: 포트원을 더해도 조건은 그대로다', () =
 });
 
 describe('운영 조립: 포트원 어댑터(글 검사)', () => {
-  const main = (): string => code('main.ts');
-  const shutdown = (): string => main().slice(main().indexOf("process.once('SIGTERM'"));
+  const main = (): string => code('start.ts');
+  const shutdown = (): string => main().slice(main().indexOf('const shutdown = (): Promise<void> => {'));
 
   test('P-T16_main.ts는 포트원 설정을 읽고 등록부에 어댑터를 듣기 전에 넣는다 [ASVS v5.0.0-16.5.3]', () => {
     const m = main();
-    expect(m).toMatch(/\bloadPortoneGatewayConfig\(process\.env\)/);
+    expect(m).toMatch(/\bloadPortoneGatewayConfig\(env\)/);
     expect(m.indexOf('new PortoneGateway('), '어댑터 < listen').toBeGreaterThan(-1);
     expect(m.indexOf('new PortoneGateway('), '어댑터 < listen').toBeLessThan(m.indexOf('await service.listen()'));
   });

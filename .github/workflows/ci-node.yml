@@ -121,6 +121,19 @@ jobs:
       - run: pnpm --filter @peaket/purchase-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # 시작 파일 시험(BUILD_ORDER PRF-215): 서비스 넷(queue-svc·admission-ctrl·purchase-svc·payment-svc)의 dist/main.js와 한 프로세스 합본의 dist/main.js를
+      # 운영 시작 명령 그대로 띄워 실제 Valkey·PostgreSQL 18에 붙이고 준비·종료 차례를 본다(시험 조립과 따로, docs/architecture.md §8.6 '자주 놓친 결함')
+      # 앞 단계가 만든 서비스 넷·합본의 dist를 그대로 쓴다(시험은 다시 빌드하지 않고 dist가 src보다 새로운지만 본다, 코드 리뷰)
+      - run: pnpm exec turbo run build --filter=@peaket/bundle...
+      - run: pnpm --filter @peaket/bundle test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
+      # 불변식 검사기(wbs 1.2.3)의 SQL을 실제 PostgreSQL 18로 본다. 측정의 판정(Q1 차례 전 입장·P3 승인 뒤 발권 대기 등)이 이 SQL을 쓴다(BUILD_ORDER PRF-215, 코드 리뷰)
+      - run: pnpm exec turbo run build --filter=@peaket/invariant-checker^...
+      - run: pnpm --filter @peaket/invariant-checker test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
+          PEAKET_START_FILES_PREBUILT: '1'
       # ASVS 추적 시험 태그 리포트(tools/ci/asvs-report.mjs, docs/architecture.md §8.2 4번, BOT-162): 위 시험들이 남긴 보고서를 모아
       # ASVS 추적 표의 행마다 결과를 작업 요약에 쓴다. 판정은 시험 자체가 하므로 이 단계는 막지 않는다
       - if: always()

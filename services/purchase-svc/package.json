@@ -4,6 +4,16 @@
   "version": "0.0.0",
   "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①), 1초 만료 반복(PRF-135), 구매 세션 열기·확인(입장 토큰 확인, s:jti·s:session, 요청 인증 키, PRF-136)이 있다. 좌석 Redis와, 판매 확정 저장소 `SeatSales`가 쓰는 purchase DB(PostgreSQL, Drizzle, BUILD_ORDER PRF-140 ①)를 쓴다",
   "type": "module",
+  "exports": {
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
+    "./stage": {
+      "types": "./dist/stage.d.ts",
+      "default": "./dist/stage.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",

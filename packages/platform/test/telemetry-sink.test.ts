@@ -1,7 +1,8 @@
 // 텔레메트리 보내기 버퍼(docs/streaming.md §2.6 '생산자(텔레메트리)', ADR-0141 결정 6, ADR-0249 결정 4).
 // 요청 처리를 막지 않는다: offer는 기다리지 않고 던지지 않으며, 버퍼가 차거나 보내기에 실패한 기록은 버리고 센다.
 import { describe, expect, test } from 'vitest';
-import { kafkaTelemetrySend, TelemetrySink, telemetryKafkaFromEnv, type TelemetryProducer } from '../src/telemetry-sink.js';
+import { Counter, Registry } from '@prometheus-io/client';
+import { kafkaTelemetrySend, TelemetrySink, telemetryDroppedCounter, telemetryKafkaFromEnv, type TelemetryProducer } from '../src/telemetry-sink.js';
 
 interface Sent {
   topic: string;
@@ -252,5 +253,26 @@ describe('telemetryKafkaFromEnv', () => {
     const r = telemetryKafkaFromEnv('trust-svc', { PEAKET_ENV: 'prod', PEAKET_TELEMETRY_KAFKA_BROKERS: 'a:9092', PEAKET_KAFKA_AUTH: '모르는값' });
     expect(r).toMatchObject({ enabled: false, warning: expect.any(String) });
     expect((r as { warning: string }).warning).not.toContain('모르는값');
+  });
+});
+
+describe('telemetryDroppedCounter', () => {
+  test('PRF215_빈 레지스트리에 telemetry_dropped_total{record}를 붙이고 받은 수만큼 더한다', async () => {
+    const registry = new Registry();
+    const dropped = telemetryDroppedCounter(registry);
+    dropped('seat_behavior', 3);
+    dropped('seat_behavior', 2);
+    expect(await registry.getMetricsAsJSON()).toEqual([expect.objectContaining({ name: 'telemetry_dropped_total', values: [expect.objectContaining({ labels: { record: 'seat_behavior' }, value: 5 })] })]);
+  });
+
+  test('PRF215_같은 레지스트리에 이미 같은 이름이 붙어 있으면 던지지 않고 그 묶음에 더한다(purchase-svc는 결제 시도 지표가 먼저 붙인다, 시작 파일이 DB와 함께 뜨지 못하던 결함)', async () => {
+    const registry = new Registry();
+    const first = new Counter({ name: 'telemetry_dropped_total', help: '먼저 붙인 것', labelNames: ['record'] as const, registers: [registry] });
+    first.inc({ record: 'behavior_signal' });
+    const dropped = telemetryDroppedCounter(registry);
+    dropped('seat_behavior', 4);
+    const json = await registry.getMetricsAsJSON();
+    expect(json).toHaveLength(1);
+    expect(json[0]!.values).toEqual(expect.arrayContaining([expect.objectContaining({ labels: { record: 'behavior_signal' }, value: 1 }), expect.objectContaining({ labels: { record: 'seat_behavior' }, value: 4 })]));
   });
 });

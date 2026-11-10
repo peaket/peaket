@@ -1,5 +1,7 @@
 {{- if .Values.service.enabled }}
 {{- $name := include "peaket.name" . }}
+{{- $leases := include "peaket.leaderLeases" . | fromJsonArray }}
+{{- include "peaket.extraPorts" . }}
 # 서비스 파드. 쿠버네티스 API를 부르지 않으므로 서비스 계정 토큰을 붙이지 않는다(ASVS v5.0.0-13.2.2)
 apiVersion: v1
 kind: ServiceAccount
@@ -38,7 +40,7 @@ spec:
     spec:
       serviceAccountName: {{ $name }}
       {{- /* 리더를 뽑는 파드만 Lease API를 부르므로 토큰을 붙인다(BUILD_ORDER PRF-202) */}}
-      automountServiceAccountToken: {{ if .Values.service.leaderLease }}true{{ else }}false{{ end }}
+      automountServiceAccountToken: {{ if $leases }}true{{ else }}false{{ end }}
       terminationGracePeriodSeconds: {{ .Values.service.terminationGracePeriodSeconds }}
       securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
       containers:
@@ -49,6 +51,9 @@ spec:
           ports:
             - { name: http, containerPort: {{ .Values.service.port }} }
             - { name: management, containerPort: {{ .Values.managementPort }} }
+            {{- range .Values.service.extraPorts }}
+            - { name: {{ .name }}, containerPort: {{ int .port }} }
+            {{- end }}
           env:
             {{- include "peaket.commonEnv" . | nindent 12 }}
             - name: PORT
@@ -69,8 +74,14 @@ spec:
           securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            {{- with .Values.service.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+        {{- with .Values.service.volumes }}
+        {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "service.volumes") | nindent 8 }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -83,4 +94,7 @@ spec:
     app.kubernetes.io/component: service
   ports:
     - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+    {{- range .Values.service.extraPorts }}
+    - { name: {{ .name }}, port: {{ int .port }}, targetPort: {{ .name }} }
+    {{- end }}
 {{- end }}

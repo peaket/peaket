@@ -1532,7 +1532,8 @@ describe('PromSaleStateSignals(지표 이름·이름표, docs/observability.md)'
 describe('운영 조립(main.ts): 판정기는 조립에서 빠뜨려도 형 오류가 없어 소스 글로 본다', () => {
   /** 주석을 뺀 소스(주석으로 막은 줄이 통과하지 않게). 줄바꿈은 LF로 맞춘다 */
   const source = (): string =>
-    readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
+    // 운영 조립은 start.ts에 있다(main.ts는 환경 값과 SIGTERM만 잇는다, BUILD_ORDER PRF-215)
+    readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8')
       .replace(/\r\n/g, '\n')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');

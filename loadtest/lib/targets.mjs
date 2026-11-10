@@ -54,10 +54,19 @@ export function targetThresholds(routes) {
 
 const isInt = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
 
+/** 비율(0~100, 소수 한 자리까지)의 10배 정수. 소수 둘째 자리가 있거나 범위 밖·숫자가 아니면 NaN */
+function tenthsOf(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return NaN;
+  const t = Math.round(v * 10);
+  return Math.abs(v * 10 - t) < 1e-9 && t >= 0 && t <= 1000 ? t : NaN;
+}
+
 /**
- * 결제 하나(가상 사용자 번호 i)에 넣을 결제사 장애(§3.10 K7 ②). i % 100을 칸으로 보고
- * 칸 < dropPct면 'drop'(승인한 뒤 응답을 버림), dropPct ≤ 칸 < dropPct + delayPct면 'delay'(승인을 늦춤), 아니면 null.
- * 그래서 100명마다 정확히 dropPct명·delayPct명이다. i는 0 이상 정수, dropPct·delayPct는 0~100 정수이고 합이 100 이하(아니면 RangeError)
+ * 결제 하나(가상 사용자 번호 i)에 넣을 결제사 장애(§3.10 K7 ②, 소수 비율은 §3.9 'v1 경로' 추천 적용 2026-11-10, BUILD_ORDER PRF-215).
+ * 순위 = (i mod 100) × 10 + ⌊(i mod 1000) ÷ 100⌋(1,000명마다 0~999가 한 번씩)이 dropPct × 10보다 작으면 'drop'(승인한 뒤 응답을 버림),
+ * (dropPct + delayPct) × 10보다 작으면 'delay'(승인을 늦춤), 아니면 null. 그래서 1,000명마다 정확히 dropPct × 10명·delayPct × 10명이고,
+ * 정수 비율이면 'i mod 100 < 비율'(v0, 100명마다 그 수)과 같은 사람을 고른다.
+ * i는 0 이상 정수, dropPct·delayPct는 0~100의 소수 한 자리까지이고 합이 100 이하(아니면 RangeError)
  * @param {number} i
  * @param {number} dropPct
  * @param {number} delayPct
@@ -65,9 +74,11 @@ const isInt = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
  */
 export function faultFor(i, dropPct, delayPct) {
   if (!isInt(i, 0, Number.MAX_SAFE_INTEGER)) throw new RangeError(`가상 사용자 번호는 0 이상 정수다: ${i}`);
-  if (!isInt(dropPct, 0, 100) || !isInt(delayPct, 0, 100) || dropPct + delayPct > 100) throw new RangeError('장애 비율은 0~100 정수이고 합이 100 이하다');
-  const slot = i % 100;
-  if (slot < dropPct) return 'drop';
-  if (slot < dropPct + delayPct) return 'delay';
+  const drop = tenthsOf(dropPct);
+  const delay = tenthsOf(delayPct);
+  if (Number.isNaN(drop) || Number.isNaN(delay) || drop + delay > 1000) throw new RangeError('장애 비율은 0~100의 소수 한 자리까지이고 합이 100 이하다');
+  const rank = (i % 100) * 10 + Math.floor((i % 1000) / 100);
+  if (rank < drop) return 'drop';
+  if (rank < drop + delay) return 'delay';
   return null;
 }

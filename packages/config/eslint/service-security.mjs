@@ -342,6 +342,11 @@ export const OUTBOUND_HTTP_EXCEPTIONS = [
     allow: ['node-http-request'],
     reason: 'v0 게이트웨이 대역이 받은 요청을 클러스터 안 앱(설정의 upstream)으로 넘기는 역방향 프록시다. 바깥 주소를 부르지 않는다(docs/infra.md §3 v0 배포)',
   },
+  {
+    file: 'services/bundle/src/management.ts',
+    allow: ['fetch'],
+    reason: '한 프로세스 합본의 관리 포트가 같은 프로세스 안 서비스 관리 포트(127.0.0.1 고정)의 /ready·/metrics를 모은다. 바깥 주소를 부르지 않는 시험 도구다(PEAKET_ENV local·ci에서만 시작, docs/verification.md §3.8 합본의 v1 무대, BUILD_ORDER PRF-215)',
+  },
 ];
 
 /** 기준선: HEAD 320e213a의 라우트 처리기 가운데 응답 스키마 표시가 없는 것('파일 경로#클래스.메서드') */

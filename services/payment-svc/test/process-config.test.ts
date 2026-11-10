@@ -134,8 +134,8 @@ describe('loadSimulatorGatewayConfig', () => {
 });
 
 describe('운영 조립: 승인 실행기(글 검사)', () => {
-  const main = (): string => code('main.ts');
-  const shutdown = (): string => main().slice(main().indexOf("process.once('SIGTERM'"));
+  const main = (): string => code('start.ts');
+  const shutdown = (): string => main().slice(main().indexOf('const shutdown = (): Promise<void> => {'));
   const RUNNER_START = /\b\w*[Rr]unner\w*\??\.start\(\)/;
   const RUNNER_STOP = /\b\w*[Rr]unner\w*\??\.stop\(\)/;
   const poolName = (): string => /(?:const|let)\s+(\w+)\s*=\s*createDatabase\(confirmRunnerDatabaseOptions\(/.exec(main())?.[1] ?? '';
@@ -147,7 +147,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
   });
 
   test('PRF181_main.ts는 어댑터 등록부를 시뮬레이터 설정으로 조립한다(설정이 없으면 빈 등록부)', () => {
-    expect(main()).toMatch(/\bloadSimulatorGatewayConfig\(process\.env\)/);
+    expect(main()).toMatch(/\bloadSimulatorGatewayConfig\(env\)/);
     expect(main()).toMatch(/\bnew StaticPaymentGateways\(/);
     expect(main()).toMatch(/\bnew SimulatorPaymentGateway\(/);
   });
@@ -168,7 +168,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('P-T43_main.ts는 Lease로 뽑은 판정자를 메인 프로세스에서 켜고 끝낼 때 멈추며, Lease는 쿠버네티스가 없으면 혼자 리더다 [ASVS v5.0.0-16.5.3]', () => {
     const m = main();
-    expect(m).toMatch(/process\.env\.KUBERNETES_SERVICE_HOST \? inClusterLeaseApi\(ENTRY_PAUSE_LEASE_NAME\) : memoryLeaseApi\(\)/);
+    expect(m).toMatch(/env\.KUBERNETES_SERVICE_HOST \? inClusterLeaseApi\(ENTRY_PAUSE_LEASE_NAME, env\) : memoryLeaseApi\(\)/);
     expect(m).toMatch(/new LeaseElector\(/);
     const call = /new EntryPauseJudge\(\{([\s\S]*?)\}\)/.exec(m)![1]!;
     for (const key of ['store', 'inputs', 'gateways', 'guards', 'leader', 'podCount', 'clock', 'signals', 'log']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
@@ -195,9 +195,9 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('P-T43_리뷰 고침 M6: main.ts는 듣기 전에 Prometheus 주소를 읽어 시작을 실패시킨다', () => {
     const m = main();
-    expect(m).toMatch(/loadEntryPausePrometheusUrl\(process\.env\)/);
-    expect(m.indexOf('loadEntryPausePrometheusUrl(process.env)')).toBeLessThan(m.indexOf('await service.listen()'));
-    expect(m).not.toMatch(/process\.env\.PEAKET_PROMETHEUS_URL/);
+    expect(m).toMatch(/loadEntryPausePrometheusUrl\(env\)/);
+    expect(m.indexOf('loadEntryPausePrometheusUrl(env)')).toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m).not.toMatch(/\benv\.PEAKET_PROMETHEUS_URL/);
   });
 
   test('P-T43_리뷰 고침 M5·M8: main.ts는 캐시에 해제 감시를 잇고 Lease의 onChange로 판정자 표시를 낸다 [ASVS v5.0.0-16.5.3]', () => {
@@ -242,8 +242,8 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('P-T40_리뷰 고침 H2: 파드 수는 듣기 전에 읽는다(local·ci 밖에서 비어 있으면 듣기 전에 시작 실패) [ASVS v5.0.0-16.5.3]', () => {
     const m = main();
-    expect(m.indexOf('loadPgCallGuardConfig(process.env)'), '설정 읽기').toBeGreaterThan(-1);
-    expect(m.indexOf('loadPgCallGuardConfig(process.env)'), '설정 읽기 < listen').toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m.indexOf('loadPgCallGuardConfig(env)'), '설정 읽기').toBeGreaterThan(-1);
+    expect(m.indexOf('loadPgCallGuardConfig(env)'), '설정 읽기 < listen').toBeLessThan(m.indexOf('await service.listen()'));
     expect(m).not.toMatch(/warnPodCountMissing/);
   });
 
@@ -262,7 +262,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('P-T50_main.ts는 라벨 키와 연결값 지표를 두 실행기에 넘기고 라벨 키 경고를 로그로 남긴다 [ASVS v5.0.0-16.5.2]', () => {
     const m = main();
-    expect(m).toMatch(/PayRefKeyRing\.fromEnv\(process\.env\)/);
+    expect(m).toMatch(/PayRefKeyRing\.fromEnv\(env\)/);
     for (const name of ['PaymentConfirmRunner', 'PaymentUnknownResolver']) {
       const call = new RegExp(`new ${name}\\(\\{([\\s\\S]*?)\\}\\)`).exec(m)![1]!;
       expect(call, name).toMatch(/\bmethodRefs\b/);
@@ -342,7 +342,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
   test('P-T46 ③ main.ts는 듣기 전에 포트원 채널의 하위 결제사 표를 읽고 플랫폼 기본값을 하위 결제사 규칙으로 검사한다 [ASVS v5.0.0-16.5.3]', () => {
     const m = main();
     const check = m.indexOf('assertPlatformSubProviders(checkoutConfig.defaults, portoneChannels);');
-    expect(check).toBeGreaterThan(m.indexOf('const portoneChannels = loadPortoneChannelMap(process.env, portone);'));
+    expect(check).toBeGreaterThan(m.indexOf('const portoneChannels = loadPortoneChannelMap(env, portone);'));
     expect(check, '듣기 전').toBeLessThan(m.indexOf('await service.listen()'));
     expect(m).toMatch(/onChannel: \(c\) => channelObserver\?\.observe\(c\)/);
     expect(m).toMatch(/const fallbackExclusions = portoneChannels \? new PortoneFallbackExclusions\(\{ portone: portoneChannels, observations: channelObservations \}\) : undefined;/);
@@ -362,7 +362,7 @@ describe('운영 조립(글 검사)', () => {
   const databaseCalls = (main: string): string[] => [...main.matchAll(/createDatabase\(\{([\s\S]*?)\}\)/g)].map((m) => m[1]!);
 
   test('PRF180_main.ts는 핫패스 풀과 일반 풀을 따로 만든다(이름 payment-svc·payment-svc-batch, 크기는 config 상수)', () => {
-    const calls = databaseCalls(code('main.ts'));
+    const calls = databaseCalls(code('start.ts'));
     expect(calls).toHaveLength(2);
     const batch = calls.find((c) => /-batch/.test(c));
     expect(batch, '일반 풀(payment-svc-batch)').toBeDefined();
@@ -375,23 +375,23 @@ describe('운영 조립(글 검사)', () => {
   });
 
   test('PRF180_main.ts는 저장소 하나에 두 풀을 다 넘긴다(결과 조회가 핫패스 풀을 쓰지 않게)', () => {
-    expect(code('main.ts')).toMatch(/new DrizzlePaymentStore\(\{[\s\S]*?\bbatchDatabase\b[\s\S]*?\}\)/);
+    expect(code('start.ts')).toMatch(/new DrizzlePaymentStore\(\{[\s\S]*?\bbatchDatabase\b[\s\S]*?\}\)/);
   });
 
   test('PRF180_main.ts는 지표를 서비스 레지스트리에 붙이고 PaymentService에 처리기를 묶는다', () => {
-    const main = code('main.ts');
+    const main = code('start.ts');
     expect(main).toMatch(/\bnew PromPaymentCommandSignals\(/);
     expect(main).toMatch(/\.register\(service\.metrics\.registry\)/);
     expect(main).toMatch(/\bstartGrpcServer\(/);
     expect(main).toMatch(/\bpaymentPackage\(\)/);
     expect(main).toMatch(/\bPaymentService\.service\b/);
     expect(main).toMatch(/\bpaymentServiceHandlers\(/);
-    expect(main).toMatch(/\bloadPaymentServiceConfig\(process\.env\)/);
+    expect(main).toMatch(/\bloadPaymentServiceConfig\(env\)/);
   });
 
   test('PRF181_main.ts의 SIGTERM은 gRPC 포트 → 서비스 → DB 풀 넷(핫패스·일반·실행기 전용·웹훅 전용) 차례로 닫는다', () => {
-    const main = code('main.ts');
-    const at = main.indexOf('SIGTERM');
+    const main = code('start.ts');
+    const at = main.indexOf('const shutdown = (): Promise<void> => {');
     expect(at, 'main.ts에 SIGTERM 처리가 있다').toBeGreaterThan(-1);
     const closes = [...main.slice(at).matchAll(/(\w+)\s*\??\.close\(\)/g)].map((m) => m[1]!);
     expect(closes.length, closes.join(',')).toBeGreaterThanOrEqual(5);
@@ -401,16 +401,16 @@ describe('운영 조립(글 검사)', () => {
   });
 
   test('P-T17_main.ts는 웹훅 전용 풀과 어댑터 등록부·지표·늦게 잇는 로그를 모듈에 넘긴다(시뮬레이터 허용은 환경 값으로)', () => {
-    const main = code('main.ts');
+    const main = code('start.ts');
     expect(main).toMatch(/createDatabase\(webhookDatabaseOptions\(config\.databaseUrl\)\)/);
     expect(main).toMatch(/new DrizzleWebhookStore\(\{ database: webhookDatabase \}\)/);
-    expect(main).toMatch(/webhook: \{ store: new DrizzleWebhookStore\(\{ database: webhookDatabase \}\), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator\(process\.env\) \}/);
+    expect(main).toMatch(/webhook: \{ store: new DrizzleWebhookStore\(\{ database: webhookDatabase \}\), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator\(env\) \}/);
     expect(main).toMatch(/webhookSignals\.register\(service\.metrics\.registry\)/);
     expect(main).toMatch(/webhookLog = paymentWebhookLog\(service\.logger, systemClock\)/);
   });
 
   test('P-T17_리뷰 고침 M4: main.ts는 앱 포트에 웹훅 요청 받기 시한을 건다 [ASVS v5.0.0-2.4.1]', () => {
-    expect(code('main.ts')).toMatch(/requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS/);
+    expect(code('start.ts')).toMatch(/requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS/);
   });
 
   test('PRF180_relay.ts는 릴레이·정비 역할 연결과 Kafka 생산자로 startPaymentRelay를 띄우고 SIGTERM에 멈춘다', () => {
@@ -438,7 +438,7 @@ describe('운영 조립(글 검사)', () => {
   });
 
   test("P-T53_리뷰 고침 L6: gRPC 포트를 열 때까지 준비 상태가 아니다(readiness.register('grpc')가 listen 앞, complete가 포트를 연 뒤)", () => {
-    const main = code('main.ts');
+    const main = code('start.ts');
     const register = main.indexOf("readiness.register('grpc')");
     const listen = main.indexOf('service.listen()');
     const open = main.indexOf('await startGrpcServer(');
@@ -450,8 +450,8 @@ describe('운영 조립(글 검사)', () => {
   });
 
   test('P-T53_리뷰 고침 L6: SIGTERM의 첫 줄에서 준비 상태를 내린다(docs/devops.md §6.4)', () => {
-    const main = code('main.ts');
-    const handler = main.slice(main.indexOf("process.once('SIGTERM'"));
+    const main = code('start.ts');
+    const handler = main.slice(main.indexOf('const shutdown = (): Promise<void> => {'));
     const firstStatement = handler
       .split('\n')
       .slice(1)

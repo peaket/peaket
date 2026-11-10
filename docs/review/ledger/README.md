@@ -83,7 +83,7 @@
 - docs/frontend.md:1614: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1619: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:334: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
-- docs/verification.md:589: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/verification.md:620: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 
 ## 이 도구의 한계
 

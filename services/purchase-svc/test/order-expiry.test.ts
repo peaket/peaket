@@ -771,17 +771,17 @@ describe('운영 조립(main.ts·relay-app.ts): 고리와 반복은 선택 인�
       .replace(/^\s*\/\/.*$/gm, '');
 
   test('변이 검토 PRF-172_운영 main.ts는 홀드 만료 고리와 세션 종료 고리(조립·나가기 경로 둘 다)를 판정기에 잇는다 (ADR0107) [ASVS v5.0.0-2.3.1]', () => {
-    const main = source('../src/main.ts');
-    const register = /AppModule\.register\(\{([\s\S]*?)\n {2}\}\),/.exec(main)?.[1];
+    const main = source('../src/start.ts');
+    const register = /AppModule\.register\(\{([\s\S]*?)\n {4}\}\),/.exec(main)?.[1];
     expect(register, 'main.ts에 AppModule.register({ … })가 있다').toBeDefined();
     expect(register).toMatch(/\bonHoldsExpired:\s*\((\w+)\)\s*=>\s*orderExpiry\?\.onHoldsExpired\(\1\)/);
-    expect(/\badmission:\s*\{([\s\S]*?)\n {4}\},/.exec(register!)?.[1], 'admission 조립이 세션 종료 고리를 넘긴다').toMatch(/\bonSessionEnded\b/);
+    expect(/\badmission:\s*\{([\s\S]*?)\n {6}\},/.exec(register!)?.[1], 'admission 조립이 세션 종료 고리를 넘긴다').toMatch(/\bonSessionEnded\b/);
     expect(main).toMatch(/\bconst onSessionEnded = \(e[^)]*\)[^=]*=>\s*orderExpiry\?\.onSessionEnded\(e\)/);
     expect(main).toMatch(/new EndPurchaseSession\(\{[^}]*\bonEnded: onSessionEnded\b/);
   });
 
   test('변이 검토 PRF-172_운영 main.ts는 판정기를 전용 풀로 만들고, 고리를 부르는 것들이 멈춘 뒤에 멈추고 풀을 닫는다 (ADR0107) [ASVS v5.0.0-16.5.2]', () => {
-    const main = source('../src/main.ts');
+    const main = source('../src/start.ts');
     expect(main).toMatch(/\bcreateDatabase\(orderExpiryDatabaseOptions\(databaseUrl\)\)/);
     expect(main).toMatch(/\borderExpiry = new OrderExpiry\(\{/);
     const closing = main.slice(main.indexOf('function shutdown'));

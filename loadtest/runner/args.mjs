@@ -6,6 +6,7 @@
 //   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [--fault-drop-pct 0] [--fault-delay-pct 0] [--kill-app-at S] [공통]
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통, --main 기본 180]
+//   node loadtest/run.mjs v1 queue|seat-hold|payment …(v0와 같은 인자, docs/verification.md §3.9 'v1 경로'. --namespace·--settle·--hpa-timeline은 없다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 //   seat-hold만: [--keep] [--db-stats], payment만: [--db-stats]
@@ -19,6 +20,10 @@ export const GATEWAY_RATE_PER_IP = 10;
 
 /** 시나리오 이름 → 파일 */
 export const SCENARIOS = Object.freeze({ queue: 'v0-queue.js', 'seat-hold': 'v0-seat-hold.js', payment: 'v0-payment.js', 'seat-deltas': 'v0-seat-hold.js', gate: 'v0-gate.js' });
+/** v1 시나리오 이름 → 파일(§3.8 합본으로 보낸다, BUILD_ORDER PRF-215) */
+export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js' });
+/** v1 입장 토큰의 최대 체류 45분 [가정](queue-svc MAX_STAY_MS). 준비부터 본구간 끝까지가 이 안이어야 구매 세션이 끝나지 않는다 */
+export const V1_ADMISSION_STAY_S = 45 * 60;
 
 /** 기본값 [가정](docs/verification.md §3.9) */
 export const DEFAULTS = Object.freeze({
@@ -56,8 +61,6 @@ const INTS = {
   '--release-ms': ['releaseMs', 0, 600000],
   '--seats-per-order': ['seatsPerOrder', 1, 4],
   '--generators': ['generators', 1, 64],
-  '--fault-drop-pct': ['faultDropPct', 0, 100],
-  '--fault-delay-pct': ['faultDelayPct', 0, 100],
   '--kill-app-at': ['killAppAtS', 1, 7200],
   '--connections': ['connections', 1, 20000],
   '--listener-pods': ['listenerPods', 1, 64],
@@ -68,7 +71,13 @@ const INTS = {
 
 const BOOLS = { '--record': 'record', '--invariants': 'invariants', '--settle': 'settle', '--hpa-timeline': 'hpaTimeline', '--keep': 'keep', '--db-stats': 'dbStats' };
 
-const STRINGS = { '--run-id': 'runId', '--profile': 'profile', '--mode': 'mode', '--out': 'out', '--rates': 'rates', '--namespace': 'namespace', '--prom-url': 'promUrl' };
+/** 소수 한 자리까지 받는 비율(§3.9 'v1 경로' 비율 소수 한 자리, BUILD_ORDER PRF-215): 플래그 → [칸, 하한, 상한] */
+const DECIMALS = {
+  '--fault-drop-pct': ['faultDropPct', 0, 100],
+  '--fault-delay-pct': ['faultDelayPct', 0, 100],
+};
+
+const STRINGS = { '--paired-run': 'pairedRun', '--run-id': 'runId', '--profile': 'profile', '--mode': 'mode', '--out': 'out', '--rates': 'rates', '--namespace': 'namespace', '--prom-url': 'promUrl' };
 
 const COMMON_RUN = ['--warm', '--main', '--cpus', '--memory-mi', '--record', '--run-id', '--profile', '--invariants', '--out', '--generators', '--namespace', '--settle', '--hpa-timeline', '--prom-url'];
 const COMMON_V0 = ['--users', ...COMMON_RUN];
@@ -82,6 +91,12 @@ const ALLOWED = {
   gate: [...COMMON_RUN, '--scanners', '--rate', '--cut-at', '--cut-s'],
 };
 
+// v1: 합본으로 보내 네임스페이스는 v1 하나이고, HPA가 없어 --settle·--hpa-timeline이 없다(§3.8 '합본의 v1 무대')
+const V1_DROPPED = new Set(['--namespace', '--settle', '--hpa-timeline']);
+for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`] = ALLOWED[k].filter((f) => !V1_DROPPED.has(f));
+// 좌석 Redis TLS 짝 실행(K2, docs/verification.md §3.5 7번)은 v1 좌석 홀드만 받는다(K1·K7 ②는 TLS 켬 하나, §3.10 'v1 합본 측정 규칙', 코드 리뷰 M9)
+ALLOWED['v1:seat-hold'].push('--paired-run');
+
 const REQUIRED = {
   queue: ['--users', '--entry-rate', '--admit-per-second'],
   'seat-hold': ['--users', '--rate'],
@@ -89,6 +104,7 @@ const REQUIRED = {
   'seat-deltas': ['--users', '--rate', '--connections'],
   gate: ['--scanners', '--rate'],
 };
+for (const k of ['queue', 'seat-hold', 'payment']) REQUIRED[`v1:${k}`] = REQUIRED[k];
 
 const NAMESPACES = ['v0', 'v0-base'];
 const PROM_URL = /^http:\/\/(127\.0\.0\.1|localhost):(\d{1,5})$/;
@@ -109,6 +125,14 @@ function decimal(flag, raw, lo, hi) {
   if (!/^\d+$/.test(raw)) fail(`${flag}는 10진수 정수다: ${raw}`);
   const n = Number(raw);
   if (!Number.isSafeInteger(n) || n < lo || n > hi) fail(`${flag}는 ${lo}~${hi}다: ${raw}`);
+  return n;
+}
+
+/** 0~상한의 소수 한 자리까지(예: 0.5, 5, 100). 부호·지수·소수 둘째 자리·공백은 받지 않는다 */
+function decimal1(flag, raw, lo, hi) {
+  if (!/^\d+(\.\d)?$/.test(raw)) fail(`${flag}는 소수 한 자리까지의 10진수다: ${raw}`);
+  const n = Number(raw);
+  if (!(n >= lo && n <= hi)) fail(`${flag}는 ${lo}~${hi}다: ${raw}`);
   return n;
 }
 
@@ -184,12 +208,18 @@ export function parseArgs(argv) {
     if (!Object.hasOwn(SCENARIOS, scenario ?? '')) fail(`v0 시나리오는 ${Object.keys(SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = scenario;
     rest = rest0.slice(1);
-  } else fail(`명령은 calibrate·v0·cleanup 가운데 하나다: ${command ?? '(없음)'}`);
+  } else if (command === 'v1') {
+    const scenario = rest0[0];
+    if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
+    kind = `v1:${scenario}`;
+    rest = rest0.slice(1);
+  } else fail(`명령은 calibrate·v0·v1·cleanup 가운데 하나다: ${command ?? '(없음)'}`);
+  const v1 = command === 'v1';
 
   const seen = new Map();
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (!ALLOWED[kind].includes(flag)) fail(Object.hasOwn(INTS, flag) || Object.hasOwn(BOOLS, flag) || Object.hasOwn(STRINGS, flag) ? `${flag}는 ${kind}에 없는 인자다` : `모르는 인자: ${flag}`);
+    if (!ALLOWED[kind].includes(flag)) fail(Object.hasOwn(INTS, flag) || Object.hasOwn(DECIMALS, flag) || Object.hasOwn(BOOLS, flag) || Object.hasOwn(STRINGS, flag) ? `${flag}는 ${kind}에 없는 인자다` : `모르는 인자: ${flag}`);
     if (seen.has(flag)) fail(`${flag}를 두 번 줬다`);
     if (Object.hasOwn(BOOLS, flag)) {
       seen.set(flag, true);
@@ -206,6 +236,10 @@ export function parseArgs(argv) {
     if (Object.hasOwn(INTS, flag)) {
       const [key, lo, hi] = INTS[flag];
       o[key] = decimal(flag, raw, lo, hi);
+    } else if (Object.hasOwn(DECIMALS, flag)) {
+      const [key, lo, hi] = DECIMALS[flag];
+      // 소수 한 자리는 v1만 받는다(v0 행은 정수 비율 그대로, 코드 리뷰 낮음)
+      o[key] = v1 ? decimal1(flag, raw, lo, hi) : decimal(flag, raw, lo, hi);
     } else if (Object.hasOwn(BOOLS, flag)) o[BOOLS[flag]] = true;
     else if (flag === '--rates') o.rates = parseRates(raw);
     else o[STRINGS[flag]] = raw;
@@ -237,9 +271,13 @@ export function parseArgs(argv) {
   }
 
   for (const flag of REQUIRED[kind]) if (!seen.has(flag)) fail(`${kind}에는 ${flag}가 꼭 있어야 한다`);
+  if (v1) kind = kind.slice(3);
   const record = o.record ?? false;
-  if (!record && (o.runId !== undefined || o.profile !== undefined || o.promUrl !== undefined)) fail('--run-id·--profile·--prom-url은 --record와 함께만 준다');
+  if (!record && (o.runId !== undefined || o.profile !== undefined || o.promUrl !== undefined || o.pairedRun !== undefined)) fail('--run-id·--profile·--prom-url·--paired-run은 --record와 함께만 준다');
+  if (o.pairedRun !== undefined && !RUN_ID.test(o.pairedRun)) fail(`--paired-run 꼴이 틀렸다(YYYY-MM-DD-영소문자·숫자·-): ${o.pairedRun}`);
   if (record && o.runId === undefined) fail('--record에는 --run-id가 꼭 있어야 한다');
+  // v1 기록은 불변식 검사와 SKIPPED 목록 판정을 거쳐야 장부에 남긴다(재확인 리뷰 10)
+  if (v1 && record && !o.invariants) fail('v1의 --record는 --invariants와 함께만 준다(불변식과 SKIPPED 목록을 판정한 실행만 장부에 남긴다)');
   if (o.runId !== undefined && !RUN_ID.test(o.runId)) fail(`--run-id 꼴이 틀렸다(YYYY-MM-DD-영소문자·숫자·-): ${o.runId}`);
   if (o.profile !== undefined && !PROFILE.test(o.profile)) fail(`--profile 꼴이 틀렸다(local-…): ${o.profile}`);
 
@@ -248,20 +286,24 @@ export function parseArgs(argv) {
   // 준비 구간에서 진입·입장시키는 가상 사용자 수(seat-deltas는 연결 쪽까지, gate는 스캐너 계정)
   const prepUsers = kind === 'seat-deltas' ? o.users + o.connections : kind === 'gate' ? o.scanners : o.users;
   const prepS = kind === 'queue' ? Math.ceil(o.users / o.entryRate) : 2 * Math.ceil(prepUsers / Math.min(prepUsers, 200)) + 3;
-  if (prepS + warmS + mainS + 60 + 600 > TOKEN_TTL_MAX_S) fail(`예상 시간(${prepS + warmS + mainS + 60}초)에 10분을 더한 토큰 수명이 3시간을 넘는다`);
+  if (!v1 && prepS + warmS + mainS + 60 + 600 > TOKEN_TTL_MAX_S) fail(`예상 시간(${prepS + warmS + mainS + 60}초)에 10분을 더한 토큰 수명이 3시간을 넘는다`);
+  // v1은 계정 토큰이 없고(신원 머리), 준비 구간에 받은 입장 토큰의 최대 체류(45분 [가정]) 안에 본구간이 끝나야 한다(구매 세션이 끝나 401이 되지 않게)
+  if (v1 && kind === 'seat-hold' && prepS + warmS + mainS + 60 > V1_ADMISSION_STAY_S) fail(`예상 시간(${prepS + warmS + mainS + 60}초)이 입장 토큰의 최대 체류 ${V1_ADMISSION_STAY_S}초를 넘는다`);
   if (o.keep && seen.has('--release-ms')) fail('--keep(놓지 않음)과 --release-ms는 함께 줄 수 없다');
   // 정수로 견준다: rate × 2 ≤ 0.6 × 한도 × users  ⇔  rate × 20 ≤ 6 × 한도 × users(놓지 않으면 rate × 10 ≤ 6 × 한도 × users)
-  if ((kind === 'seat-hold' || kind === 'seat-deltas') && o.rate * (o.keep ? 10 : 20) > 6 * GATEWAY_RATE_PER_IP * o.users) {
+  // v1은 입구(게이트웨이)가 없어 IP 한도가 걸리지 않는다(§3.8 '게이트웨이 없음')
+  if (!v1 && (kind === 'seat-hold' || kind === 'seat-deltas') && o.rate * (o.keep ? 10 : 20) > 6 * GATEWAY_RATE_PER_IP * o.users) {
     fail(`가상 사용자 한 명의 요청(${o.rate} × ${o.keep ? 1 : 2} ÷ ${o.users})이 입구의 IP당 한도(초당 ${GATEWAY_RATE_PER_IP})의 60%를 넘는다`);
   }
   if (kind === 'gate' && o.rate > 1000) fail(`gate의 --rate는 1~1,000이다: ${o.rate}`);
   if (kind === 'gate' && o.rate * 10 > 6 * GATEWAY_RATE_PER_IP * o.scanners) fail(`스캐너 한 대의 요청(${o.rate} ÷ ${o.scanners})이 입구의 IP당 한도(초당 ${GATEWAY_RATE_PER_IP})의 60%를 넘는다`);
   if (o.killAppAtS !== undefined && o.killAppAtS > mainS) fail(`--kill-app-at(${o.killAppAtS})은 본구간(${mainS}초) 안이어야 한다`);
-  if ((o.faultDropPct ?? 0) + (o.faultDelayPct ?? 0) > 100) fail('--fault-drop-pct와 --fault-delay-pct의 합은 100 이하다');
+  // 합은 10배 정수로 견준다(0.1 + 0.2 같은 소수 오차 없이)
+  if (Math.round((o.faultDropPct ?? 0) * 10) + Math.round((o.faultDelayPct ?? 0) * 10) > 1000) fail('--fault-drop-pct와 --fault-delay-pct의 합은 100 이하다');
 
   const users = kind === 'gate' ? o.scanners : o.users;
   const base = {
-    command: 'v0',
+    command: v1 ? 'v1' : 'v0',
     scenario: kind,
     users,
     warmS,
@@ -270,13 +312,14 @@ export function parseArgs(argv) {
     memoryMi: o.memoryMi ?? DEFAULTS.memoryMi,
     record,
     invariants: o.invariants ?? false,
-    namespace: o.namespace ?? DEFAULTS.namespace,
+    namespace: v1 ? 'v1' : (o.namespace ?? DEFAULTS.namespace),
     settle: o.settle ?? false,
     hpaTimeline: o.hpaTimeline ?? false,
     ...(o.generators !== undefined ? { generators: o.generators } : {}),
     ...(o.runId !== undefined ? { runId: o.runId } : {}),
     ...(record ? { profile: o.profile ?? (users <= 1000 ? 'local-1k' : users <= 10000 ? 'local-10k' : 'local-100k') } : {}),
     ...(o.promUrl !== undefined ? { promUrl: o.promUrl } : {}),
+    ...(o.pairedRun !== undefined ? { pairedRun: o.pairedRun } : {}),
     ...(o.out !== undefined ? { out: o.out } : {}),
   };
   if (kind === 'queue') return { ...base, entryRate: o.entryRate, admitPerSecond: o.admitPerSecond };
