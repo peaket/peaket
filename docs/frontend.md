@@ -390,7 +390,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- | --- |
 | 홈 피드 `HomeFeed`, 공연 카드 `ProductionCard`(공연 단위, ADR-0093) | `GET /v1/home`(CDN 30초), ISR | 배너·오픈 예정·판매 중·테마·공연장, `saleStatus`·`saleEndsAt`·`badges` | 홈 서버 컴포넌트 | ISR 태그 무효화 |
 | 랭킹 파일 `RankingFile` | www 정적 JSON | `basisDate`, `overall`, `genres` | 홈 랭킹 섹션(클라이언트) | `basisDate`가 2일 [가정] 넘게 지나면 섹션을 숨긴다(정본) |
-| 공연 상세 `EventPublicSummary`(ADR-0200) | `GET /v1/events/{eventId}`(CDN 300초, 태그 `event:{eventId}`·`production:{productionId}`, 판매 중지 410) | 공연·회차 칸, 회차 목록 `rounds`, 등급별 정가 `priceTiers`, 판매자 정보 `seller`. 등급별 판매 상태(HOT-010)·후기 요약·개인 값·판매 정책 요약(HOT-250)·셔플 커밋·좌석맵 판은 각자 출처 | 상세 서버 컴포넌트 | ISR(`cacheTag('event:{id}')`, 300초) |
+| 공연 상세 `EventPublicSummary`(ADR-0200) | `GET /v1/events/{eventId}`(CDN 300초, 태그 `event:{eventId}`·`production:{productionId}`, 판매 중지 410) | 공연·회차 칸, 회차 목록 `rounds`, 등급별 정가 `priceTiers`, 판매자 정보 `seller`, 판매 단계 요약 `salePhases`·공제율 구간 `refundFees`·배지 `PRESALE`(HOT-250, ADR-0261 결정 5). 등급별 판매 상태(HOT-010)·후기 요약·개인 값·셔플 커밋·좌석맵 판은 각자 출처 | 상세 서버 컴포넌트 | ISR(`cacheTag('event:{id}')`, 300초) |
+| 팬별 판매 자격 `FanSaleEligibility`(ADR-0261 결정 5) | `GET /v1/events/{eventId}/sale-eligibility`(팬 로그인, no-store, 비로그인 401) | 단계마다 이 계정이 대상인지 `eligible`·한도, 이 계정이 든 명단의 표시 이름·파기 예정 시각(명단 키는 없다) | 예매 버튼·선예매 안내(HOT-346) | 캐시 없음. 공개 요약에 `PRESALE` 조각이 있을 때만 문서마다 한 번(추천 적용, 2026-11-10, 리뷰) |
 | 참가 토큰 `LobbyToken` | `POST …/lobby-participants` 201 | `lobbyToken`, `seedHash`, `drand*`, `shuffleResultAt`, `shuffleSpreadSec`, `verification`(ADR-0079 결정 4) | 대기실 상태표 | localStorage(§3.12) |
 | 사전 검증 토큰 `PreverifyResult` | `POST …/pre-verifications` 201 | `preverifyToken`, `expiresAt`, `serverTimeMs` | 공연 상세 진입 도우미 | localStorage, 만료 2분 [가정] 전에 갱신 |
 | 대기표 `QueueTicket` | `POST …/entries` 201 | `queueTicket`, `seq`, `generation`, `segment`, `verification` | 대기실 상태표 | localStorage |
@@ -433,10 +434,10 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 상태 | 화면(SCR) | 들어오는 조건 | 하는 일 | 나가는 조건 → 다음 상태 |
 | --- | --- | --- | --- | --- |
 | `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표(참가 토큰과 셔플 순번 포함)가 있으면 → `waiting` / 진입 요청 ID와 묶음 응답만 있으면 → `batching`(ADR-0207) / 둘 다 없고 오픈 전이며 로비가 열렸으면 → `lobby-join` / 오픈 뒤 → `enter`(사전 검증 토큰이 없으면 공연 상세로). 오픈 시각·로비 개방 시각은 공연 공개 요약의 `openAt`·`lobbyOpensAt`이다(참가 토큰 응답에는 오픈 시각이 없다). 사전 검증 토큰이 있는데 오픈 전이고 로비가 없으면 진입을 보내 서버의 409 `queue-not-open`으로 공연 상세에 간다. 로비 개방 전이면 공연 상세로 간다(ADR-0208 결정 2) |
-| `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 사람 확인 위젯을 카드 안에 늦게 싣고(`action` `lobby`), 토큰을 받으면 `POST …/lobby-participants`(JSON) | 201 → `lobby` / `verification: REQUIRED` → 참가 토큰을 저장한 뒤 `verify-redirect` / 401 → 갱신 한 번 뒤 같은 토큰으로, 또 401이면 `login-expired` / 403 `identity-verification-required` → 공연 상세(본인확인 흐름은 공연 상세가 갖는다) / 그 밖 403·428 → '사람 확인 실패'와 [다시 시도] / 409 → 다른 탭이 받은 참가 토큰이 저장소에 있으면 `lobby`, 없으면 `other-device` / 429 → `Retry-After` 뒤 같은 토큰으로 / 503·연결 실패 → 기다린 뒤 새 사람 확인 토큰으로(ADR-0208 결정 3) |
+| `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 사람 확인 위젯을 카드 안에 늦게 싣고(`action` `lobby`), 토큰을 받으면 `POST …/lobby-participants`(JSON) | 201 → `lobby` / `verification: REQUIRED` → 참가 토큰을 저장한 뒤 `verify-redirect` / 401 → 갱신 한 번 뒤 같은 토큰으로, 또 401이면 `login-expired` / 403 `identity-verification-required` → 공연 상세(본인확인 흐름은 공연 상세가 갖는다) / 그 밖 403·428 → '사람 확인 실패'와 [다시 시도] / 409 → 다른 탭이 받은 참가 토큰이 저장소에 있으면 `lobby`, 없으면 `other-device` / 429 → `Retry-After` 뒤 같은 토큰으로 / 503·연결 실패 → 기다린 뒤 새 사람 확인 토큰으로(ADR-0208 결정 3) | / 403 `sale-eligibility-required` → 참가 실패가 아니라 공연 상세의 예매 제한 안내(Q-T36 ①, 추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 10)
 | `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(남은 5분·1분·10초에 낭독, §4.8), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
 | `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) / 200인데 내 해시가 두 번 연달아 없음 → `cancelled-elsewhere`(목록 고정 뒤 파일은 바뀌지 않는다, ADR-0208 결정 4) |
-| `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 429·503 → `Retry-After` 뒤 같은 요청 ID로 다시 보내기 / 403 `preverify-invalid`·`identity-verification-required`, 404, 409 `queue-not-open` → 공연 상세(ADR-0207) |
+| `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 429·503 → `Retry-After` 뒤 같은 요청 ID로 다시 보내기 / 403 `preverify-invalid`·`identity-verification-required`, 404, 409 `queue-not-open` → 공연 상세(ADR-0207) / 403 `sale-eligibility-required` → 공연 상세의 예매 제한 안내(번호를 받지 않았다, Q-T36 ①, 추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 10) |
 | `batching` | 008 '순서를 정하는 중' | 202 | 묶음 결과 파일을 같은 규칙으로 받기 | 순번 받음 → `waiting` |
 | `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → 리더 탭이면 `turn`, 아니면 `grace`(ADR-0208 결정 6) / `PAUSED` → `paused` / `ALL_HELD` → `all-held` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
 | `stale` | 008 '연결 확인 중' | 연속 3회 [가정] 실패 또는 30초 [가정] 무응답 | 마지막 값을 그대로 두기, 실패 뒤 대기 간격 늘리기 | 성공 → 이전 상태 |
@@ -1193,7 +1194,7 @@ sequenceDiagram
 | 부분 | 화면 | 싣는 때 | 덩어리 예산(gzip) |
 | --- | --- | --- | --- |
 | 좌석맵 에디터 캔버스·에디터 Worker·도구 | SCR-022 | 에디터 경로에서 계층 트리와 뼈대를 그린 뒤(`ssr: false`) | 300KB [가정](§5.8) |
-| 판매 정책 시뮬레이터(DSL AST 평가기, `@peaket/validation/dsl` 하위 진입점) | SCR-024 | [시뮬레이션]을 열 때 | 30KB [가정] |
+| 판매 정책 시뮬레이터(DSL AST 평가기, `@peaket/validation/sale-policy` 하위 진입점, ADR-0261 결정 11, 추천 적용, 2026-11-10, 리뷰) | SCR-024 | [시뮬레이션]을 열 때 | 30KB [가정] |
 | 서식 글 편집기(CMP-070, Lexical, 기술 검토 낮음-100, ADR-0204) | SCR-021 공연 설명 칸 | 그 단계에 들어올 때 | 90KB(FE-T41로 확정, 2026-11-05 잰 값 88.5kB) |
 | 그래프·히트맵(Chart.js, CMP-033·034) | SCR-023·026·027 | 숫자 타일을 먼저 그린 뒤 | 60KB [가정] |
 

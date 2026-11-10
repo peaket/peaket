@@ -2,18 +2,25 @@
   "name": "@peaket/validation",
   "private": true,
   "version": "0.0.0",
-  "description": "요청·응답 Zod(계약 생성 스키마를 다시 내보냄)와 계약에 적을 수 없는 규칙(docs/frontend.md §2.2)",
+  "description": "요청·응답 Zod(계약 생성 스키마를 다시 내보냄)와 계약에 적을 수 없는 규칙(docs/frontend.md §2.2). 하위 경로 ./sale-policy는 판매 정책 규칙 문법 1판의 읽기·평가 함수(화면과 서버가 같이 씀, ADR-0261 결정 3·11)이고, 서비스는 빌드한 dist를 쓴다",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./safe-json": "./src/safe-json.ts"
+    "./safe-json": "./src/safe-json.ts",
+    "./sale-policy": {
+      "types": "./src/sale-policy/index.ts",
+      "development": "./src/sale-policy/index.ts",
+      "default": "./dist/sale-policy/index.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@peaket/contracts": "workspace:*"
+    "@peaket/contracts": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",

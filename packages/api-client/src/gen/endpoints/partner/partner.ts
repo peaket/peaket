@@ -62,6 +62,7 @@ import type {
   CreatePartnerProductionSaleReviewBody,
   CreatePartnerProductionSeatmapBody,
   CreatePartnerProductionSeatmapImportBody,
+  CreatePartnerSaleEligibilityListBody,
   CreatePartnerSettlementDisputeBody,
   CreatePartnerWebhook201,
   CreatePartnerWebhookBody,
@@ -124,6 +125,12 @@ import type {
   PromoterFraudReport,
   PutPartnerEventEntryPolicyBody,
   PutPartnerProductionSeatmap422,
+  PutPartnerSalePolicy422,
+  SaleEligibilityListPage,
+  SaleEligibilityUploadResult,
+  SalePolicyDocument,
+  SalePolicyPut,
+  SalePolicySaved,
   ScannerPlacementInput,
   SeatMapImportResult,
   SeatMapLayout,
@@ -4879,6 +4886,632 @@ export const useCreatePartnerProductionSeatmapImport = <TError = ErrorType<Probl
       > => {
       return useMutation(getCreatePartnerProductionSeatmapImportMutationOptions(options), queryClient);
     }
+    export type getPartnerSalePolicyResponse200 = {
+  data: SalePolicyDocument
+  status: 200
+}
+
+export type getPartnerSalePolicyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerSalePolicyResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerSalePolicyResponseSuccess = (getPartnerSalePolicyResponse200) & {
+  headers: Headers;
+};
+export type getPartnerSalePolicyResponseError = (getPartnerSalePolicyResponse401 | getPartnerSalePolicyResponse404) & {
+  headers: Headers;
+};
+
+export const getGetPartnerSalePolicyUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-policy`
+}
+
+/**
+ * FR-022, POL-011, POL-032, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 1·2). 공연 단위 규칙 배열(문법 1판, docs/design/d5 §6.7)을 준다. 승인 이력이 있고 재승인 대기 변경분에 규칙이 있으면 그 규칙과 pending true다. 소속 파트너의 공연만 준다(다른 파트너 공연과 없는 공연은 같은 404). ETag는 규칙의 판(production.sale_policy_version)이다. Cache-Control: no-store
+ * @summary 판매 정책 규칙 읽기(SCR-024)
+ */
+export const getPartnerSalePolicy = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerSalePolicyResponseSuccess> => {
+
+  return orvalFetch<getPartnerSalePolicyResponseSuccess>(getGetPartnerSalePolicyUrl(productionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerSalePolicyQueryKey = (productionId: string,) => {
+    return [
+    `/v1/partner/productions/${productionId}/sale-policy`
+    ] as const;
+    }
+
+
+export const getGetPartnerSalePolicyQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerSalePolicyQueryKey(productionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerSalePolicy>>> = ({ signal }) => getPartnerSalePolicy(productionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productionId !== null && productionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerSalePolicyQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerSalePolicy>>>
+export type GetPartnerSalePolicyQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerSalePolicy<TData = Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerSalePolicy>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerSalePolicy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerSalePolicy<TData = Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerSalePolicy>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerSalePolicy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerSalePolicy<TData = Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 판매 정책 규칙 읽기(SCR-024)
+ */
+
+export function useGetPartnerSalePolicy<TData = Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerSalePolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerSalePolicyQueryOptions(productionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type putPartnerSalePolicyResponse200 = {
+  data: SalePolicySaved
+  status: 200
+}
+
+export type putPartnerSalePolicyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type putPartnerSalePolicyResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type putPartnerSalePolicyResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type putPartnerSalePolicyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type putPartnerSalePolicyResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type putPartnerSalePolicyResponse422 = {
+  data: PutPartnerSalePolicy422
+  status: 422
+}
+
+export type putPartnerSalePolicyResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type putPartnerSalePolicyResponseSuccess = (putPartnerSalePolicyResponse200) & {
+  headers: Headers;
+};
+export type putPartnerSalePolicyResponseError = (putPartnerSalePolicyResponse401 | putPartnerSalePolicyResponse403 | putPartnerSalePolicyResponse404 | putPartnerSalePolicyResponse409 | putPartnerSalePolicyResponse412 | putPartnerSalePolicyResponse422 | putPartnerSalePolicyResponse428) & {
+  headers: Headers;
+};
+
+export const getPutPartnerSalePolicyUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-policy`
+}
+
+/**
+ * FR-022, POL-011, POL-032, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 1~3·7). 모양은 이 계약이, 뜻 규칙(사실과 연산자 짝, 조건 10·깊이 3·규칙 8KB·공연당 20개 [가정], 회차·등급 참조, 1인 한도가 회차 한도 이하, 공제율 구간 겹침과 POL-032 상한)은 @peaket/validation/sale-policy가 정하고 화면과 서버가 같은 함수를 쓴다. 판정 차례: 404 → 409 production-suspended → 403 partner-admin-required(승인 이력이 있는데 파트너 실무자) → 428·412 → 422 sale-policy-invalid. 승인 이력이 없으면 production.sale_policy를 바로 고치고, 있으면 재승인 대상이라 변경분(production.pending_revision.salePolicy)에만 두고 pending true이며 APPROVED는 SUBMITTED로 바뀐다(ADR-0198 결정 3과 같은 규칙). 같은 트랜잭션에서 그 공연 판매 자격 명단의 잠금 시각을 다시 계산한다(이미 지난 잠금은 늦추지 않는다). 본문 상한은 플랫폼 기본(1MiB)이다. 성공·오류 모두 Cache-Control: no-store
+ * @summary 판매 정책 규칙 저장(규칙 배열 통째로, SCR-024)
+ */
+export const putPartnerSalePolicy = async (productionId: string,
+    salePolicyPut: SalePolicyPut, options?: Parameters<typeof orvalFetch>[1]): Promise<putPartnerSalePolicyResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<putPartnerSalePolicyResponseSuccess>(getPutPartnerSalePolicyUrl(productionId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(salePolicyPut)
+  }
+);}
+
+
+
+
+
+export const getPutPartnerSalePolicyMutationKey = () => ['putPartnerSalePolicy'] as const;
+
+export const getPutPartnerSalePolicyMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerSalePolicy422>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerSalePolicy>>, TError,PutPartnerSalePolicyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putPartnerSalePolicy>>, TError,PutPartnerSalePolicyMutationVariables, TContext> => {
+
+const mutationKey = getPutPartnerSalePolicyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putPartnerSalePolicy>>, PutPartnerSalePolicyMutationVariables> = (props) => {
+          const {productionId,data} = props ?? {};
+
+          return  putPartnerSalePolicy(productionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutPartnerSalePolicyMutationResult = NonNullable<Awaited<ReturnType<typeof putPartnerSalePolicy>>>
+    export type PutPartnerSalePolicyMutationBody = BodyType<SalePolicyPut>
+    export type PutPartnerSalePolicyMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerSalePolicy422>
+    export type PutPartnerSalePolicyMutationVariables = {productionId: string;data: BodyType<SalePolicyPut>}
+
+    /**
+ * @summary 판매 정책 규칙 저장(규칙 배열 통째로, SCR-024)
+ */
+export const usePutPartnerSalePolicy = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerSalePolicy422>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerSalePolicy>>, TError,PutPartnerSalePolicyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putPartnerSalePolicy>>,
+        TError,
+        PutPartnerSalePolicyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutPartnerSalePolicyMutationOptions(options), queryClient);
+    }
+    export type listPartnerSaleEligibilityListsResponse200 = {
+  data: SaleEligibilityListPage
+  status: 200
+}
+
+export type listPartnerSaleEligibilityListsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerSaleEligibilityListsResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listPartnerSaleEligibilityListsResponseSuccess = (listPartnerSaleEligibilityListsResponse200) & {
+  headers: Headers;
+};
+export type listPartnerSaleEligibilityListsResponseError = (listPartnerSaleEligibilityListsResponse401 | listPartnerSaleEligibilityListsResponse404) & {
+  headers: Headers;
+};
+
+export const getListPartnerSaleEligibilityListsUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-eligibility-lists`
+}
+
+/**
+ * FR-022, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 6·7). 명단 정보만 주고 구성원(회원 코드·계정)은 주지 않는다. 공연당 10개 [가정]까지라 나누지 않는다. 소속 파트너의 공연만(다른 파트너 공연과 없는 공연은 같은 404). Cache-Control: no-store
+ * @summary 판매 자격 명단 목록(키·이름·구성원 수·잠금·파기 시각, SCR-024)
+ */
+export const listPartnerSaleEligibilityLists = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerSaleEligibilityListsResponseSuccess> => {
+
+  return orvalFetch<listPartnerSaleEligibilityListsResponseSuccess>(getListPartnerSaleEligibilityListsUrl(productionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerSaleEligibilityListsQueryKey = (productionId: string,) => {
+    return [
+    `/v1/partner/productions/${productionId}/sale-eligibility-lists`
+    ] as const;
+    }
+
+
+export const getListPartnerSaleEligibilityListsQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerSaleEligibilityListsQueryKey(productionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>> = ({ signal }) => listPartnerSaleEligibilityLists(productionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productionId !== null && productionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerSaleEligibilityListsQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>>
+export type ListPartnerSaleEligibilityListsQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useListPartnerSaleEligibilityLists<TData = Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerSaleEligibilityLists<TData = Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerSaleEligibilityLists<TData = Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 판매 자격 명단 목록(키·이름·구성원 수·잠금·파기 시각, SCR-024)
+ */
+
+export function useListPartnerSaleEligibilityLists<TData = Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerSaleEligibilityLists>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerSaleEligibilityListsQueryOptions(productionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerSaleEligibilityListResponse200 = {
+  data: SaleEligibilityUploadResult
+  status: 200
+}
+
+export type createPartnerSaleEligibilityListResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerSaleEligibilityListResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerSaleEligibilityListResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerSaleEligibilityListResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerSaleEligibilityListResponse413 = {
+  data: ProblemResponse
+  status: 413
+}
+
+export type createPartnerSaleEligibilityListResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerSaleEligibilityListResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerSaleEligibilityListResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerSaleEligibilityListResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
+export type createPartnerSaleEligibilityListResponseSuccess = (createPartnerSaleEligibilityListResponse200) & {
+  headers: Headers;
+};
+export type createPartnerSaleEligibilityListResponseError = (createPartnerSaleEligibilityListResponse401 | createPartnerSaleEligibilityListResponse403 | createPartnerSaleEligibilityListResponse404 | createPartnerSaleEligibilityListResponse409 | createPartnerSaleEligibilityListResponse413 | createPartnerSaleEligibilityListResponse422 | createPartnerSaleEligibilityListResponse429 | createPartnerSaleEligibilityListResponse503 | createPartnerSaleEligibilityListResponse504) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerSaleEligibilityListUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-eligibility-lists`
+}
+
+/**
+ * FR-022, POL-011, SCR-024, ADR-0062 결정 35·37(세부는 추천 적용 2026-11-10, ADR-0261 결정 6~9). 파트너 관리자만 한다(실무자 403). 파일은 UTF-8 CSV·텍스트이고 한 줄에 회원 코드(ADR-0235 결정 4의 XXX-XXXX) 하나다. 줄마다 끝의 CR·앞뒤 공백·겹따옴표 한 쌍을 버리고 대문자로 바꾼 뒤 모양을 본다. 빈 줄은 건너뛰고 행 번호는 센다(1부터). 같은 코드는 한 번만 반영한다. 회원 코드는 identity MemberCodeService.ResolveMemberCodes로 계정 ID로 바꾸고 가입을 마친 계정만 반영한다. 올린 파일은 저장하지 않고(메모리에서만 읽는다) 계정 ID 집합만 둔다. 결과는 반영 수와 형식 오류·없는 코드 줄의 수·행 번호(각 1,000개 [가정]까지), 파일 SHA-256만이고 계정 이름·연락처·계정 ID는 싣지 않는다. 감사 기록은 올린 계정·시각·건수·파일 SHA-256만이다. 그 명단 키를 쓰는 규칙의 판매 시작 24시간 전 [가정](잠금 시각)부터는 409다. 사전 요청이 생기도록 X-Requested-With 헤더가 있어야 받는다(ADR-0257 결정 8). 성공·오류 모두 Cache-Control: no-store
+ * @summary 판매 자격 명단 올리기(한 줄에 회원 코드 하나, 같은 키면 바꿔 넣기)
+ */
+export const createPartnerSaleEligibilityList = async (productionId: string,
+    createPartnerSaleEligibilityListBody: CreatePartnerSaleEligibilityListBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerSaleEligibilityListResponseSuccess> => {
+    const formData = new FormData();
+formData.append(`key`, createPartnerSaleEligibilityListBody.key);
+formData.append(`name`, createPartnerSaleEligibilityListBody.name);
+formData.append(`file`, createPartnerSaleEligibilityListBody.file);
+
+  return orvalFetch<createPartnerSaleEligibilityListResponseSuccess>(getCreatePartnerSaleEligibilityListUrl(productionId),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerSaleEligibilityListMutationKey = () => ['createPartnerSaleEligibilityList'] as const;
+
+export const getCreatePartnerSaleEligibilityListMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>, TError,CreatePartnerSaleEligibilityListMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>, TError,CreatePartnerSaleEligibilityListMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerSaleEligibilityListMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>, CreatePartnerSaleEligibilityListMutationVariables> = (props) => {
+          const {productionId,data} = props ?? {};
+
+          return  createPartnerSaleEligibilityList(productionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerSaleEligibilityListMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>>
+    export type CreatePartnerSaleEligibilityListMutationBody = BodyType<CreatePartnerSaleEligibilityListBody>
+    export type CreatePartnerSaleEligibilityListMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerSaleEligibilityListMutationVariables = {productionId: string;data: BodyType<CreatePartnerSaleEligibilityListBody>}
+
+    /**
+ * @summary 판매 자격 명단 올리기(한 줄에 회원 코드 하나, 같은 키면 바꿔 넣기)
+ */
+export const useCreatePartnerSaleEligibilityList = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>, TError,CreatePartnerSaleEligibilityListMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerSaleEligibilityList>>,
+        TError,
+        CreatePartnerSaleEligibilityListMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerSaleEligibilityListMutationOptions(options), queryClient);
+    }
+    export type deletePartnerSaleEligibilityListResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deletePartnerSaleEligibilityListResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deletePartnerSaleEligibilityListResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deletePartnerSaleEligibilityListResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deletePartnerSaleEligibilityListResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type deletePartnerSaleEligibilityListResponseSuccess = (deletePartnerSaleEligibilityListResponse204) & {
+  headers: Headers;
+};
+export type deletePartnerSaleEligibilityListResponseError = (deletePartnerSaleEligibilityListResponse401 | deletePartnerSaleEligibilityListResponse403 | deletePartnerSaleEligibilityListResponse404 | deletePartnerSaleEligibilityListResponse409) & {
+  headers: Headers;
+};
+
+export const getDeletePartnerSaleEligibilityListUrl = (productionId: string,
+    listKey: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-eligibility-lists/${encodeURIComponent(String(listKey))}`
+}
+
+/**
+ * FR-022, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 6·9). 파트너 관리자만 한다. 명단 행과 구성원을 지우고 대기열 사본 지우기를 넘긴다. 잠금 시각부터는 409다. 감사 기록은 지운 계정·시각·명단 키만이다. Cache-Control: no-store
+ * @summary 판매 자격 명단 지우기(잠금 전만)
+ */
+export const deletePartnerSaleEligibilityList = async (productionId: string,
+    listKey: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deletePartnerSaleEligibilityListResponseSuccess> => {
+
+  return orvalFetch<deletePartnerSaleEligibilityListResponseSuccess>(getDeletePartnerSaleEligibilityListUrl(productionId,listKey),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeletePartnerSaleEligibilityListMutationKey = () => ['deletePartnerSaleEligibilityList'] as const;
+
+export const getDeletePartnerSaleEligibilityListMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>, TError,DeletePartnerSaleEligibilityListMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>, TError,DeletePartnerSaleEligibilityListMutationVariables, TContext> => {
+
+const mutationKey = getDeletePartnerSaleEligibilityListMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>, DeletePartnerSaleEligibilityListMutationVariables> = (props) => {
+          const {productionId,listKey} = props ?? {};
+
+          return  deletePartnerSaleEligibilityList(productionId,listKey,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePartnerSaleEligibilityListMutationResult = NonNullable<Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>>
+
+    export type DeletePartnerSaleEligibilityListMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type DeletePartnerSaleEligibilityListMutationVariables = {productionId: string;listKey: string}
+
+    /**
+ * @summary 판매 자격 명단 지우기(잠금 전만)
+ */
+export const useDeletePartnerSaleEligibilityList = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>, TError,DeletePartnerSaleEligibilityListMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deletePartnerSaleEligibilityList>>,
+        TError,
+        DeletePartnerSaleEligibilityListMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeletePartnerSaleEligibilityListMutationOptions(options), queryClient);
+    }
     export type getPartnerSeatmapTemplatesResponse200 = {
   data: GetPartnerSeatmapTemplates200
   status: 200
@@ -7289,7 +7922,7 @@ export const getUpdatePartnerEventUrl = (eventId: string,) => {
 }
 
 /**
- * FR-022, FR-052, POL-003·011·030·035·041, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 회차만 고친다(다른 파트너 회차는 404). 재입장은 PUT /v1/partner/events/{eventId}/entry-policy를 쓴다(구매자에게 불리한 변경 금지 규칙이 그 경로에 있다). 승인 이력이 없는 공연의 회차는 event 행을 바로 고친다. 승인 이력이 있는 공연의 회차는 재승인 대상이라 파트너 관리자만 고치고(docs/planning/03 §3 첫 행), event 행을 그대로 둔 채 production.pending_revision에 두며 응답 pending이 true다. APPROVED면 SUBMITTED로 바뀐다(§2.14 T7, 회차 더하기와 같은 규칙, ADR-0198 결정 3). 판정 순서와 오류는 PartnerEventCreate와 같다(바뀌는 값으로 다시 본다). 오픈 뒤에는 정렬 설정과 좌석 배정 방식을 바꾸지 못한다(SCR-021, POL-035 예외 열). [가정] 오픈 뒤의 오픈 시각·공연 시각 변경도 409이고, 연기는 POST /v1/partner/events/{eventId}/cancellation(kind POSTPONE)으로 한다. If-Match 값은 GET /v1/partner/productions/{productionId}의 그 회차 version이다
+ * FR-022, FR-052, POL-003·011·030·035·041, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 회차만 고친다(다른 파트너 회차는 404). 재입장은 PUT /v1/partner/events/{eventId}/entry-policy를 쓴다(구매자에게 불리한 변경 금지 규칙이 그 경로에 있다). 승인 이력이 없는 공연의 회차는 event 행을 바로 고친다. 승인 이력이 있는 공연의 회차는 재승인 대상이라 파트너 관리자만 고치고(docs/planning/03 §3 첫 행), event 행을 그대로 둔 채 production.pending_revision에 두며 응답 pending이 true다. APPROVED면 SUBMITTED로 바뀐다(§2.14 T7, 회차 더하기와 같은 규칙, ADR-0198 결정 3). 판정 순서와 오류는 PartnerEventCreate와 같다(바뀌는 값으로 다시 본다). 오픈 뒤에는 정렬 설정과 좌석 배정 방식을 바꾸지 못한다(SCR-021, POL-035 예외 열). [가정] 오픈 뒤의 오픈 시각·공연 시각 변경도 409이고, 연기는 POST /v1/partner/events/{eventId}/cancellation(kind POSTPONE)으로 한다. If-Match 값은 GET /v1/partner/productions/{productionId}의 그 회차 version이다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-250, ADR-0261 결정 4): 판은 event.version(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다)이고 응답 ETag다. 오픈 뒤(지금 ≥ 오픈 시각)에 lobbyShuffle·openBatch·seatAssignment·openAt·startsAt을 바꾸면 409 sale-setting-locked다. 승인 이력이 있으면 바뀐 칸을 production.pending_revision.eventChanges[회차 ID]에 합쳐 둔다. 1인 한도를 그 회차에 걸린 판매 정책 규칙의 limitPerPerson보다 작게 바꾸면 422 sale-policy-invalid다. 지금 값과 같은 칸은 바꾸기가 아니다: 같은 값만 보내면 아무것도 바꾸지 않고 판도 올리지 않으며(200, 지금 판), 변경분에는 바뀐 칸만 둔다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)
  * @summary 회차 일정·정렬·배정·1인 한도 임시저장·수정(SCR-021 2·4단계)
  */
 export const updatePartnerEvent = async (eventId: string,

@@ -1,14 +1,18 @@
 // 유스케이스: 회차 공개 요약(openapi GET /v1/events/{eventId}, EventPublicSummary, BUILD_ORDER HOT-170 ①).
 // 판매 승인되고 판매 중지가 아닌 공연의 회차만 답한다. 승인 이력이 없는 회차와 없는 회차는 같은 '없음'이고, 한 번 공개된 뒤 판매 중지된 회차는
 // '판매 중지'다(사유는 싣지 않는다, docs/security/authz-matrix.md §3.5, ADR-0200 결정 3).
+// 판매 단계 요약(salePhases)·공제율 구간(refundFees)과 PRESALE 배지는 마지막 승인 내용의 판매 정책 규칙으로 계산한다(ADR-0261 결정 3·5, BUILD_ORDER HOT-250).
+// 명단 키는 싣지 않는다(팬마다 대상인지는 팬별 자격 경로다).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
+import { salePhases } from '@peaket/validation/sale-policy';
 import { lobbyOpensAt, MAX_ARTISTS, MAX_DESCRIPTION_TEXT, publicRounds, queueOrder, sellerInfo, type PublicRound, type QueueOrder, type SellerInfo } from '../domain/event-detail.js';
 import type { DescriptionDoc } from '../domain/description.js';
 import { IMAGE_ORIGIN } from '../domain/media-ports.js';
 import { CATALOG_REPOSITORY, type CatalogRepository } from '../domain/ports.js';
 import { DETAIL_MAX, imageBaseUrl } from '../domain/production-image.js';
 import { type EventStatus, type Genre, isPublic, saleEndsAt } from '../domain/production.js';
+import { refundBandsFor } from '../domain/sale-eligibility.js';
 
 export interface EventPublicSummary {
   eventId: string;
@@ -38,11 +42,15 @@ export interface EventPublicSummary {
   seatAssignment: 'PICK' | 'AUTO';
   perPersonLimit: number;
   reentryAllowed: boolean;
-  badges: (QueueOrder | 'AUTO_SEAT')[];
+  badges: (QueueOrder | 'PRESALE' | 'AUTO_SEAT')[];
   rounds: PublicRound[];
   /** 등급별 정가(보이는 순서, 마지막 승인 내용, ADR-0200 결정 4·ADR-0260 결정 12). 배치본이 없으면 빈 목록 */
   priceTiers: { tierId: string; name: string; price: number }[];
   seller?: SellerInfo;
+  /** 이 회차의 판매 단계 요약(오픈부터 판매 종료까지, 시작 순, 명단 키 없음) */
+  salePhases: { kind: 'PRESALE' | 'GENERAL'; startsAt: string; endsAt: string; limitPerPerson: number }[];
+  /** 이 회차에 걸리는 공제율 구간. 빈 목록이면 POL-032 기본표 */
+  refundFees: { daysLeft: { gte: number; lte: number }; rate: number }[];
 }
 
 @Injectable()
@@ -62,6 +70,10 @@ export class GetEventSummary {
     const lobby = lobbyOpensAt(e.openAt, e.lobbyMinutes, e.lobbyShuffle);
     const seller = sellerInfo(row.seller);
     // 포스터와 상세 이미지(순서대로)는 production_image 표에서 채운다. 주소는 파생본 묶음의 기준 주소다(ADR-0257 결정 3)
+    const now = new Date(this.clock.now());
+    const phases = salePhases(p.salePolicy, e.id, { openAt: e.openAt, saleEndsAt: saleEndsAt(e), perPersonLimit: e.perPersonLimit });
+    // 아직 끝나지 않은 선예매 조각이 있으면 PRESALE 배지(ADR-0261 결정 5)
+    const presale = phases.some((x) => x.kind === 'PRESALE' && x.endsAt.getTime() > now.getTime());
     const poster = row.images.find((i) => i.kind === 'POSTER');
     const details = row.images
       .filter((i) => i.kind === 'DETAIL')
@@ -93,10 +105,12 @@ export class GetEventSummary {
       seatAssignment: e.seatAssignment,
       perPersonLimit: e.perPersonLimit,
       reentryAllowed: e.reentryAllowed,
-      badges: [order, ...(e.seatAssignment === 'AUTO' ? (['AUTO_SEAT'] as const) : [])],
-      rounds: publicRounds(row.rounds, e.id, new Date(this.clock.now())),
+      badges: [order, ...(presale ? (['PRESALE'] as const) : []), ...(e.seatAssignment === 'AUTO' ? (['AUTO_SEAT'] as const) : [])],
+      rounds: publicRounds(row.rounds, e.id, now),
       priceTiers: row.priceTiers.map((t) => ({ tierId: t.tierId, name: t.name, price: t.price })),
       ...(seller ? { seller } : {}),
+      salePhases: phases.map((x) => ({ kind: x.kind, startsAt: x.startsAt.toISOString(), endsAt: x.endsAt.toISOString(), limitPerPerson: x.limitPerPerson })),
+      refundFees: refundBandsFor(p.salePolicy, e.id),
     };
   }
 }

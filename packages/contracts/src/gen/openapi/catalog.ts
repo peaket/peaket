@@ -313,6 +313,12 @@ export const getEventResponseRoundsMax = 60;
 
 export const getEventResponsePriceTiersMax = 20;
 
+export const getEventResponseSalePhasesItemLimitPerPersonMax = 10;
+
+export const getEventResponseSalePhasesMax = 10;
+
+export const getEventResponseRefundFeesMax = 20;
+
 
 
 export const GetEventResponse = zod.object({
@@ -402,6 +408,50 @@ export const GetEventResponse = zod.object({
   "businessRegNo": zod.string(),
   "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
   "exemptionBasis": zod.string().optional()
-}).optional().describe('판매자 신원정보(전자상거래법 §20②, POL-037)')
+}).optional().describe('판매자 신원정보(전자상거래법 §20②, POL-037)'),
+  "salePhases": zod.array(zod.object({
+  "kind": zod.enum(['PRESALE', 'GENERAL']),
+  "startsAt": zod.iso.datetime({"offset":true}),
+  "endsAt": zod.iso.datetime({"offset":true}),
+  "limitPerPerson": zod.int().min(1).max(getEventResponseSalePhasesItemLimitPerPersonMax)
+}).describe('판매 단계 한 조각(ADR-0261 결정 3). PRESALE은 명단이 없는 사람이 들어갈 수 없는 창이다. limitPerPerson은 표시용이고 강제는 홀드 때의 평가다. 이웃한 조각은 종류와 창을 여는 명단 키 집합이 같을 때만 합친다(한도는 작은 값, 추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).max(getEventResponseSalePhasesMax).optional().describe('이 회차의 판매 단계 요약(오픈부터 판매 종료까지, 시작 순). 마지막 승인 내용의 판매 정책 규칙으로 core-svc가 계산한다(@peaket/validation salePhases, 추천 적용 2026-11-10, ADR-0261 결정 3·5). 규칙이 없으면 GENERAL 하나다. 명단 키는 싣지 않는다. 팬마다 대상인지는 GET /v1/events/{eventId}/sale-eligibility다'),
+  "refundFees": zod.array(zod.object({
+  "daysLeft": zod.object({
+  "gte": zod.int(),
+  "lte": zod.int()
+}),
+  "rate": zod.int()
+}).describe('취소 공제율 구간 하나의 응답 모양(SalePolicyRefundBandInput과 같은 칸)')).max(getEventResponseRefundFeesMax).optional().describe('이 회차에 걸리는 판매 정책의 취소 공제율 구간(공연일까지 남은 달력일 기준, 남은 날이 많은 차례). 빈 목록이면 POL-032 기본 공제표다. 적지 않은 날도 POL-032 기본 공제율이다(ADR-0261 결정 5). 한 회차에 걸리는 구간이 20개를 넘는 규칙은 저장 때 422 TOO_MANY_REFUND_BANDS이고, 여기는 방어로 20개까지만 싣는다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')
 }).describe('회차 공개 요약과 공연 상세(GET /v1/events/{eventId}). 처음 다섯 칸은 소유자 결정 2026-10-30(open-items 78번, 칸은 추천 적용 2026-10-30)이고, 스캐너 승인 화면(SCR-051)은 그 가운데 title·startsAt·sellerName을 읽는다. 나머지는 공연 상세(SCR-002) 정적 셸이 읽는 칸이다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다(실시간 값은 대기 상태 파일, 후기는 review-summary, 개인 값은 화면 스크립트)')
+
+/**
+ * FR-022, POL-011, SCR-002(추천 적용 2026-11-10, ADR-0261 결정 5, ADR-0213 결정 1). 이 회차의 판매 단계(공개 요약 salePhases와 같은 조각)마다 이 계정이 진입 판정을 지나는지와 한도, 이 계정이 든 이 공연의 판매 자격 명단의 표시 이름·파기 예정 시각을 준다. 명단 키·다른 사람의 정보는 싣지 않는다. 공개 요약에 PRESALE 조각이 있을 때만 화면이 문서마다 한 번 부른다(HOT-346). 공개되지 않은 회차와 없는 회차는 같은 404, 판매 중지는 410 event-suspended다(GET /v1/events/{eventId}와 같다). 표시용이고 집행은 진입·로비(403 sale-eligibility-required)와 홀드(403 sale-policy-denied)가 한다. Cache-Control: no-store
+ * @summary 팬별 판매 자격(선예매 대상 여부·단계별 시작 시각·1인 한도, SCR-002 ⑦)
+ */
+export const GetFanSaleEligibilityParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const getFanSaleEligibilityResponsePhasesItemLimitPerPersonMax = 10;
+
+export const getFanSaleEligibilityResponsePhasesMax = 10;
+
+export const getFanSaleEligibilityResponseListsMax = 10;
+
+
+
+export const GetFanSaleEligibilityResponse = zod.object({
+  "eventId": zod.uuid(),
+  "phases": zod.array(zod.object({
+  "kind": zod.enum(['PRESALE', 'GENERAL']),
+  "startsAt": zod.iso.datetime({"offset":true}),
+  "endsAt": zod.iso.datetime({"offset":true}),
+  "eligible": zod.boolean().describe('이 계정이 그 단계의 진입 판정을 지나는가(명단 대상 여부)'),
+  "limitPerPerson": zod.int().min(1).max(getFanSaleEligibilityResponsePhasesItemLimitPerPersonMax).describe('이 계정에게 나올 수 있는 한도 가운데 가장 작은 값(표시용)')
+})).max(getFanSaleEligibilityResponsePhasesMax),
+  "lists": zod.array(zod.object({
+  "name": zod.string().describe('명단 표시 이름'),
+  "destroyAt": zod.iso.datetime({"offset":true}).describe('명단 파기 예정 시각(판매 기간 끝 + 1일 [가정])')
+})).max(getFanSaleEligibilityResponseListsMax).describe('이 계정이 든 이 공연의 판매 자격 명단. 공연 상세의 명단 출처·목적·파기 고지(d5 §5.2 \'선예매 대상\')에 쓴다')
+}).describe('팬별 판매 자격(GET /v1/events/{eventId}/sale-eligibility, Cache-Control: no-store, ADR-0261 결정 5, ADR-0213 결정 1). phases는 공개 요약 salePhases와 같은 차례·시각이다')
 

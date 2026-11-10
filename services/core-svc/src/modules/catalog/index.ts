@@ -2,6 +2,13 @@
 export { CatalogModule, type MediaWiring } from './catalog.module.js';
 export { MemoryCatalogRepository } from './adapters/memory-catalog-repository.js';
 export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
+export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
+export { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
+export { MemorySaleEligibilityCopy, SaleEligibilityCopyUnwired, UnwiredSaleEligibilityCopy } from './adapters/sale-eligibility-copy.js';
+export { DrizzleSaleMaintenanceStore } from './adapters/db/drizzle-sale-store.js';
+export { saleEligibilityMaintenanceTasks } from './application/eligibility-maintenance.js';
+export type { EligibilityCopyPut, MemberCodeDirectory, SaleEligibilityCopy } from './domain/eligibility-ports.js';
+export { MemberCodeLookupFailed } from './domain/eligibility-ports.js';
 export { GrpcImageProcessing } from './adapters/image-processing-client.js';
 export { GrpcSeatmapParser } from './adapters/seatmap-worker-client.js';
 export { LocalFolderImageStore, MemoryImageObjectStore } from './adapters/image-store.js';

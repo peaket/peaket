@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 89 | 49 | 0 | 0 | 0 | 1 | 0 | 0 | 49 | 188 |
-| B | 33 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 9 | 59 |
-| 합계 | 122 | 61 | 0 | 0 | 0 | 4 | 0 | 2 | 58 | 247 |
+| A | 92 | 49 | 0 | 0 | 0 | 5 | 0 | 0 | 43 | 189 |
+| B | 32 | 12 | 0 | 0 | 0 | 4 | 0 | 2 | 9 | 59 |
+| 합계 | 124 | 61 | 0 | 0 | 0 | 9 | 0 | 2 | 52 | 248 |
 
 ## docs/features/queue-admission.md
 
@@ -58,12 +58,13 @@
 | Q-T35 | ② | 만료 뒤 다시 줄 서기 | ② 409(이미 대기 중), 대기 취소 뒤 맨 뒤 새 번호 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T35 | ③ | 만료 뒤 다시 줄 서기 | ③ 409 ALREADY_ADMITTED, 번호 발급 없음 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts |
 | Q-T35 | ④ | 만료 뒤 다시 줄 서기 | ④ 410(rejoinAllowed=true) 뒤 맨 뒤 새 번호(ADR-0064) | ID만 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
-| Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 대기열에 들지 않고(번호 발급 0) 예매 제한 안내를 받는다 | 빈칸 | A | — |
-| Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰에 명단 키가 실린다 | 빈칸 | A | — |
-| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 빈칸 | A | — |
-| Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일에 명단(DB 행)과 명단 사본(대기열 Redis)이 지워진다 | 빈칸 | A | — |
-| Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 빈칸 | A | — |
-| Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 빈칸 | A | — |
+| Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 대기열에 들지 않고(번호 발급 0) 예매 제한 안내를 받는다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
+| Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰에 명단 키가 실린다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
+| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 다른 단계 | A | 미정 · 홀드 때의 판매 정책 평가(`lst`·등급·매수, 403 `sale-policy-denied`, 규칙 한도를 홀드 Lua 한도로)는 purchase-svc 몫이다. 감독이 갈래 1 새 단계를 만든다. 평가… |
+| Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
+| Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
+| Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
+| Q-T36 | ⑦ | 판매 자격 명단 | ⑦ 명단 사본(대기열 Redis `q:{event:E}:elig:{listKey}`)이 그 수명에 지워진다( | 다른 단계 | A | 미정 · 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 쪽이 본다. 쓰는 쪽은 소유자 결정 대기다(docs/review/plans/BAT-157.md §7 OPEN 초안). 사본에 넘기는… |
 | Q-T37 | — | 대기 화면 진행 막대 | 진행률이 0~100% 안에서 계산식대로 움직이고, 오래된 파일은 버려져 막대가 물러나지 않고 앞 인원도 늘지 않는다. serving이 작은 새 파일은 판매… | 빈칸 | A | — |
 | Q-T38 | ① | 판매 종료와 사전 셔플 공연의 오픈 뒤 진입 | ① 410 없이 모두 1,001번부터 도착 순 번호, 202 BATCHING 없음 | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T38 | ② | 판매 종료와 사전 셔플 공연의 오픈 뒤 진입 | ② 앞은 201, 뒤는 410 sale-ended이고 번호 발급 없음 | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts |
@@ -257,7 +258,7 @@
 | v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | B | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
 | v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | B | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 5곳 |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 다른 단계 | B | 미정 · 이 행의 판매 자격 명단 몫(진입 대조·`lst`, HOT-250이 더함)은 Q-T36 ①②와 같은 갈래 3 새 단계가 시험한다. 이름을 단 기존 시험(admission-ctrl 입장 목표 한도 등)은 이… |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |

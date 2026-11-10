@@ -2,15 +2,18 @@
 // catalog 모듈의 공연(회차 묶음)·공연장·아티스트·다른 이름·회차와 판매자(docs/data.md ②, ADR-0093, BUILD_ORDER HOT-170 ①).
 // 회차(event)는 공연 칸을 옮긴 뒤의 모양이다: 공연 정보(이름·장르·이미지·공연장)는 production에 있고 회차는 일정·상태와 판매 설정만 갖는다.
 // data.md의 칸은 그 칸을 처음 쓰는 단계가 더한다. 공개 요약·대표 회차 칸은 HOT-170, 등록 칸(event.reentry_allowed·lobby_minutes·lobby_shuffle·
-// open_batch·seat_assignment·per_person_limit·sale_policy, production.kopis_fields·pending_revision·requested_place·requested_artists)과 찜·멱등 기록 표는
-// HOT-171이 더했다(ADR-0198). 배치본 표(venue·section·seat·price_tier)와 회차의 배치본 외래키는 HOT-240이 더했다(ADR-0260). 남은 칸: LCH-080·LCH-090(판매 승인)의 event.pg_primary·pg_fallback·scale·commission_rate_bp, production.accessible_seating_check
+// open_batch·seat_assignment·per_person_limit, production.kopis_fields·pending_revision·requested_place·requested_artists)과 찜·멱등 기록 표는
+// HOT-171이 더했다(ADR-0198). 배치본 표(venue·section·seat·price_tier)와 회차의 배치본 외래키는 HOT-240이 더했다(ADR-0260). 판매 정책 규칙(공연 단위
+// production.sale_policy·sale_policy_version, event.sale_policy는 없앰)·회차 판 event.version·판매 자격 명단 두 표는 HOT-250이 더했다(ADR-0261 결정 1·4·8).
+// 남은 칸: LCH-080·LCH-090(판매 승인)의 event.pg_primary·pg_fallback·scale·commission_rate_bp, production.accessible_seating_check
 // - 판매자(promoter)는 공개 신원정보 칸만 둔다. 지급대행·정산 계좌·수수료율 칸은 파트너 등록·정산 단계가 더한다.
 // 공개 판단의 전제: production·event 행은 늘 마지막 승인 내용(공개본)이다. 승인 뒤 바꾼 것은 승인 때까지 pending_revision에만 둔다(domain/production.ts isPublic).
 import { heldEventTable, idempotencyRecordTable, statSnapshotTable } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, foreignKey, index, integer, jsonb, pgSequence, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 
 export const promoter = pgTable('promoter', {
   id: uuid('id').primaryKey(),
@@ -56,8 +59,12 @@ export const production = pgTable(
     saleApprovedAt: at('sale_approved_at'),
     /** 공연예술통합전산망 항목 가운데 공연에 딸린 것(HOT-180이 채운다) */
     kopisFields: jsonb('kopis_fields'),
-    /** 재승인 대기 변경분. 승인 뒤 더한 회차는 addedEvents에만 둔다(ADR-0198 결정 3) */
+    /** 재승인 대기 변경분. 승인 뒤 더한 회차는 addedEvents, 고친 판매 정책 규칙은 salePolicy, 고친 회차 칸은 eventChanges[회차 ID]에만 둔다(ADR-0198 결정 3, ADR-0261 결정 1·4) */
     pendingRevision: jsonb('pending_revision'),
+    /** 판매 정책 규칙 배열(문법 1판, 공연 단위 한 칸, 승인 이력이 있으면 마지막 승인 내용, ADR-0261 결정 1). 없으면 규칙 없음 */
+    salePolicy: jsonb('sale_policy'),
+    /** 규칙 고치기 If-Match의 판(1부터, 저장마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 2) */
+    salePolicyVersion: integer('sale_policy_version').notNull().default(1),
     /** 새 공연장 요청 { name, address } */
     requestedPlace: jsonb('requested_place'),
     /** 새 아티스트 이름 요청 [{ name, sortOrder }] */
@@ -74,6 +81,7 @@ export const production = pgTable(
     // 공연장은 등록된 공연장과 새 공연장 요청 가운데 꼭 하나다. 승인 이력이 있으면 등록된 공연장이다(ADR-0198 결정 4)
     check('production_place_check', sql`(${t.placeId} is null) <> (${t.requestedPlace} is null)`),
     check('production_approved_place_check', sql`${t.saleApprovedAt} is null or ${t.placeId} is not null`),
+    check('production_sale_policy_version_check', sql`${t.salePolicyVersion} >= 1`),
     // 회차의 판매자 사본이 공연의 판매자와 같게 묶는 외래키의 대상
     unique('production_id_promoter_uq').on(t.id, t.promoterId),
     index('production_promoter_idx').on(t.promoterId),
@@ -270,8 +278,8 @@ export const event = pgTable(
     openBatch: boolean('open_batch').notNull().default(true),
     seatAssignment: text('seat_assignment').notNull().default('PICK'),
     perPersonLimit: integer('per_person_limit').notNull().default(4),
-    /** 판매 정책 DSL AST(HOT-250이 채운다) */
-    salePolicy: jsonb('sale_policy'),
+    /** 회차 고치기 If-Match의 판(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 4) */
+    version: integer('version').notNull().default(1),
   },
   (t) => [
     check('event_status_check', sql`${t.status} in ('SCHEDULED', 'CANCELLED', 'POSTPONED')`),
@@ -283,6 +291,7 @@ export const event = pgTable(
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),
     check('event_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
     check('event_per_person_limit_check', sql`${t.perPersonLimit} between 1 and 10`),
+    check('event_version_check', sql`${t.version} >= 1`),
     index('event_production_idx').on(t.productionId),
     // 오픈 간격 판정(다른 공연의 오픈 시각 범위 읽기)
     index('event_open_at_idx').on(t.openAt),
@@ -318,6 +327,106 @@ export const productionImage = pgTable(
     check('production_image_version_check', sql`${t.version} >= 1`),
     uniqueIndex('production_image_poster_uq').on(t.productionId).where(sql`${t.kind} = 'POSTER'`),
     index('production_image_production_idx').on(t.productionId, t.displayOrder),
+  ],
+);
+
+/**
+ * 판매 자격 명단 사본의 판(전역에서 늘기만 하는 번호, 리뷰 H1·D3). 사본에 닿는 일(올리기·규칙 저장·회차 더하기·고치기·파기 시각 변경)마다 그 공연 명단에 새 번호를 매기고,
+ * 지우기·파기도 새 번호를 실어 넘긴다. 지웠다 같은 키로 다시 올려도 번호가 계속 커서 받는 쪽의 '판이 클 때만'에 걸리지 않는다
+ */
+export const saleEligibilityCopySeq = pgSequence('sale_eligibility_copy_seq');
+
+/**
+ * 판매 자격 명단(docs/data.md sale_eligibility_list, ADR-0062 결정 35·37, ADR-0261 결정 6~9). 공연마다 키가 유일하고 10개 [가정]까지(공연 행 잠금 안에서 센다).
+ * 올린 파일은 두지 않고 SHA-256만 둔다. 잠금·파기 시각은 규칙 저장·명단 올리기·회차 더하기·고치기 때 다시 계산한다
+ */
+export const saleEligibilityList = pgTable(
+  'sale_eligibility_list',
+  {
+    id: uuid('id').primaryKey(),
+    productionId: uuid('production_id').notNull(),
+    // 테넌트(행 보안). 아래 묶음 외래키가 공연의 판매자와 다르게 들어가지 못하게 막는다
+    promoterId: uuid('promoter_id').notNull(),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    memberCount: integer('member_count').notNull(),
+    fileSha256: bytea('file_sha256').notNull(),
+    /** 올릴 때마다 +1(1부터). 사본은 이 판으로 넘긴다 */
+    version: integer('version').notNull(),
+    /** 사본 판(sale_eligibility_copy_seq에서 받는다). 사본에 닿는 일마다 새 번호다 */
+    copySeq: bigint('copy_seq', { mode: 'number' })
+      .notNull()
+      .default(sql`nextval('sale_eligibility_copy_seq')`),
+    /** 사본으로 넘긴 마지막 판(못 넘겼으면 copy_seq보다 작거나 NULL, 정비 일 sale-eligibility-copy가 다시 넘긴다) */
+    copiedSeq: bigint('copied_seq', { mode: 'number' }),
+    uploadedAt: at('uploaded_at').notNull(),
+    uploadedBy: uuid('uploaded_by').notNull(),
+    /** 그 키를 쓰는 규칙의 가장 이른 during.from − 24시간 [가정]. 쓰는 규칙이 없으면 NULL */
+    lockedAt: at('locked_at'),
+    /** 공연의 취소되지 않은 회차 가운데 가장 늦은 판매 종료 + 1일 [가정] */
+    destroyDueAt: at('destroy_due_at').notNull(),
+  },
+  (t) => [
+    foreignKey({ name: 'sale_eligibility_list_production_promoter_fk', columns: [t.productionId, t.promoterId], foreignColumns: [production.id, production.promoterId] }),
+    unique('sale_eligibility_list_key_uq').on(t.productionId, t.key),
+    // 구성원의 판매자 사본이 명단의 판매자와 같게 묶는 외래키의 대상
+    unique('sale_eligibility_list_id_promoter_uq').on(t.id, t.promoterId),
+    check('sale_eligibility_list_key_check', sql`${t.key} ~ '^[a-z0-9-]{3,32}$'`),
+    check('sale_eligibility_list_name_check', sql`char_length(${t.name}) between 1 and 40`),
+    check('sale_eligibility_list_count_check', sql`${t.memberCount} between 0 and 500000`),
+    check('sale_eligibility_list_sha_check', sql`octet_length(${t.fileSha256}) = 32`),
+    check('sale_eligibility_list_version_check', sql`${t.version} >= 1 and (${t.copiedSeq} is null or ${t.copiedSeq} <= ${t.copySeq})`),
+    // 파기 정비가 파기 시각이 지난 명단을 찾는다
+    index('sale_eligibility_list_destroy_idx').on(t.destroyDueAt),
+  ],
+);
+
+/** 판매 자격 명단 구성원(회원 코드를 바꾼 계정 ID만, docs/data.md sale_eligibility_member). account_id는 identity 논리 DB라 외래키가 없다 */
+export const saleEligibilityMember = pgTable(
+  'sale_eligibility_member',
+  {
+    listId: uuid('list_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listId, t.accountId] }),
+    foreignKey({ name: 'sale_eligibility_member_list_promoter_fk', columns: [t.listId, t.promoterId], foreignColumns: [saleEligibilityList.id, saleEligibilityList.promoterId] }),
+  ],
+);
+
+/**
+ * 지운 명단의 사본 지우기 기록(리뷰 S1·D4). 명단 지우기·파기가 같은 트랜잭션에 남기고, 사본 지우기가 성공하면 지운다. 정비 일이 성공할 때까지 다시 지운다(판 copy_seq를 실어
+ * 받는 쪽은 그 판 이하만 지운다)
+ */
+export const saleEligibilityDrop = pgTable(
+  'sale_eligibility_drop',
+  {
+    productionId: uuid('production_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    listKey: text('list_key').notNull(),
+    copySeq: bigint('copy_seq', { mode: 'number' }).notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.productionId, t.listKey, t.copySeq] }),
+    foreignKey({ name: 'sale_eligibility_drop_production_promoter_fk', columns: [t.productionId, t.promoterId], foreignColumns: [production.id, production.promoterId] }),
+    index('sale_eligibility_drop_created_idx').on(t.createdAt),
+  ],
+);
+
+/** 명단 올리기 기록(공연마다 시간당 횟수 한도, 리뷰 S5). 정비 일이 두 시간 [가정] 지난 행을 지운다 */
+export const saleEligibilityUpload = pgTable(
+  'sale_eligibility_upload',
+  {
+    id: uuid('id').primaryKey(),
+    productionId: uuid('production_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    at: at('at').notNull(),
+  },
+  (t) => [
+    foreignKey({ name: 'sale_eligibility_upload_production_promoter_fk', columns: [t.productionId, t.promoterId], foreignColumns: [production.id, production.promoterId] }),
+    index('sale_eligibility_upload_production_at_idx').on(t.productionId, t.at),
   ],
 );
 

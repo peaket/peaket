@@ -26,6 +26,7 @@ import type {
 
 import type {
   EventPublicSummary,
+  FanSaleEligibility,
   GetSearchSuggestionsParams,
   HomeFeed,
   ListSearchResultsParams,
@@ -33,7 +34,8 @@ import type {
   RankingFile,
   SearchResultPage,
   ServiceUnavailableResponse,
-  SuggestResult
+  SuggestResult,
+  UnauthorizedResponse
 } from '../../model';
 
 import { orvalFetch } from '../../../orval-fetch';
@@ -648,6 +650,134 @@ export function useGetEvent<TData = Awaited<ReturnType<typeof getEvent>>, TError
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetEventQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getFanSaleEligibilityResponse200 = {
+  data: FanSaleEligibility
+  status: 200
+}
+
+export type getFanSaleEligibilityResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getFanSaleEligibilityResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getFanSaleEligibilityResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type getFanSaleEligibilityResponseSuccess = (getFanSaleEligibilityResponse200) & {
+  headers: Headers;
+};
+export type getFanSaleEligibilityResponseError = (getFanSaleEligibilityResponse401 | getFanSaleEligibilityResponse404 | getFanSaleEligibilityResponse410) & {
+  headers: Headers;
+};
+
+export const getGetFanSaleEligibilityUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/events/${encodeURIComponent(String(eventId))}/sale-eligibility`
+}
+
+/**
+ * FR-022, POL-011, SCR-002(추천 적용 2026-11-10, ADR-0261 결정 5, ADR-0213 결정 1). 이 회차의 판매 단계(공개 요약 salePhases와 같은 조각)마다 이 계정이 진입 판정을 지나는지와 한도, 이 계정이 든 이 공연의 판매 자격 명단의 표시 이름·파기 예정 시각을 준다. 명단 키·다른 사람의 정보는 싣지 않는다. 공개 요약에 PRESALE 조각이 있을 때만 화면이 문서마다 한 번 부른다(HOT-346). 공개되지 않은 회차와 없는 회차는 같은 404, 판매 중지는 410 event-suspended다(GET /v1/events/{eventId}와 같다). 표시용이고 집행은 진입·로비(403 sale-eligibility-required)와 홀드(403 sale-policy-denied)가 한다. Cache-Control: no-store
+ * @summary 팬별 판매 자격(선예매 대상 여부·단계별 시작 시각·1인 한도, SCR-002 ⑦)
+ */
+export const getFanSaleEligibility = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getFanSaleEligibilityResponseSuccess> => {
+
+  return orvalFetch<getFanSaleEligibilityResponseSuccess>(getGetFanSaleEligibilityUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFanSaleEligibilityQueryKey = (eventId: string,) => {
+    return [
+    `/v1/events/${eventId}/sale-eligibility`
+    ] as const;
+    }
+
+
+export const getGetFanSaleEligibilityQueryOptions = <TData = Awaited<ReturnType<typeof getFanSaleEligibility>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFanSaleEligibilityQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFanSaleEligibility>>> = ({ signal }) => getFanSaleEligibility(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFanSaleEligibilityQueryResult = NonNullable<Awaited<ReturnType<typeof getFanSaleEligibility>>>
+export type GetFanSaleEligibilityQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetFanSaleEligibility<TData = Awaited<ReturnType<typeof getFanSaleEligibility>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFanSaleEligibility>>,
+          TError,
+          Awaited<ReturnType<typeof getFanSaleEligibility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFanSaleEligibility<TData = Awaited<ReturnType<typeof getFanSaleEligibility>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFanSaleEligibility>>,
+          TError,
+          Awaited<ReturnType<typeof getFanSaleEligibility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFanSaleEligibility<TData = Awaited<ReturnType<typeof getFanSaleEligibility>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 팬별 판매 자격(선예매 대상 여부·단계별 시작 시각·1인 한도, SCR-002 ⑦)
+ */
+
+export function useGetFanSaleEligibility<TData = Awaited<ReturnType<typeof getFanSaleEligibility>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFanSaleEligibility>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetFanSaleEligibilityQueryOptions(eventId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

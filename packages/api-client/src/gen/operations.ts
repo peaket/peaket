@@ -146,6 +146,7 @@ export type OperationId =
   | 'createPartnerProductionSaleReview'
   | 'createPartnerProductionSeatmap'
   | 'createPartnerProductionSeatmapImport'
+  | 'createPartnerSaleEligibilityList'
   | 'createPartnerSellerProfileChangeRequest'
   | 'createPartnerSettlementDispute'
   | 'createPartnerStaffInvitation'
@@ -204,6 +205,7 @@ export type OperationId =
   | 'deletePartnerAuthPasskey'
   | 'deletePartnerProductionImage'
   | 'deletePartnerProductionSaleReview'
+  | 'deletePartnerSaleEligibilityList'
   | 'deletePartnerStaff'
   | 'deleteProductionWish'
   | 'deletePushSubscription'
@@ -215,6 +217,7 @@ export type OperationId =
   | 'getEventReviewSummary'
   | 'getEventSeatmapLayout'
   | 'getEventSeatmapSnapshot'
+  | 'getFanSaleEligibility'
   | 'getHold'
   | 'getHome'
   | 'getHomeRankings'
@@ -268,6 +271,7 @@ export type OperationId =
   | 'getPartnerMerchOrderDelivery'
   | 'getPartnerProduction'
   | 'getPartnerProductionSeatmap'
+  | 'getPartnerSalePolicy'
   | 'getPartnerSeatmapTemplate'
   | 'getPartnerSeatmapTemplates'
   | 'getPartnerSellerProfile'
@@ -338,6 +342,7 @@ export type OperationId =
   | 'listPartnerProductSettlements'
   | 'listPartnerProductions'
   | 'listPartnerProducts'
+  | 'listPartnerSaleEligibilityLists'
   | 'listPartnerTeamAccounts'
   | 'listPartnerWebhookDeliveries'
   | 'listPartnerWebhooks'
@@ -363,6 +368,7 @@ export type OperationId =
   | 'putPartnerMerchOrderItemShipment'
   | 'putPartnerPayoutAccount'
   | 'putPartnerProductionSeatmap'
+  | 'putPartnerSalePolicy'
   | 'putProductionWish'
   | 'putScannerEventDevicePlacement'
   | 'putScannerShiftReadiness'
@@ -524,6 +530,7 @@ export const OPERATIONS = {
   createPartnerProductionSaleReview: {operationId: "createPartnerProductionSaleReview",method: "POST",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "write",cookie: true},
   createPartnerProductionSeatmap: {operationId: "createPartnerProductionSeatmap",method: "POST",path: "/v1/partner/productions/{productionId}/seatmap",host: "partner-api",kind: "write",cookie: true},
   createPartnerProductionSeatmapImport: {operationId: "createPartnerProductionSeatmapImport",method: "POST",path: "/v1/partner/productions/{productionId}/seatmap-imports",host: "partner-api",kind: "upload",cookie: true},
+  createPartnerSaleEligibilityList: {operationId: "createPartnerSaleEligibilityList",method: "POST",path: "/v1/partner/productions/{productionId}/sale-eligibility-lists",host: "partner-api",kind: "upload",cookie: true},
   createPartnerSellerProfileChangeRequest: {operationId: "createPartnerSellerProfileChangeRequest",method: "POST",path: "/v1/partner/seller-profile/change-requests",host: "partner-api",kind: "write",idempotent: true,cookie: true},
   createPartnerSettlementDispute: {operationId: "createPartnerSettlementDispute",method: "POST",path: "/v1/partner/settlements/{statementId}/disputes",host: "partner-api",kind: "write",idempotent: true,cookie: true},
   createPartnerStaffInvitation: {operationId: "createPartnerStaffInvitation",method: "POST",path: "/v1/partner/staff/{assignmentId}/invitation",host: "partner-api",kind: "write",cookie: true},
@@ -582,6 +589,7 @@ export const OPERATIONS = {
   deletePartnerAuthPasskey: {operationId: "deletePartnerAuthPasskey",method: "DELETE",path: "/v1/partner/auth/passkeys/{passkeyId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionImage: {operationId: "deletePartnerProductionImage",method: "DELETE",path: "/v1/partner/productions/{productionId}/images/{imageId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionSaleReview: {operationId: "deletePartnerProductionSaleReview",method: "DELETE",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "write",cookie: true},
+  deletePartnerSaleEligibilityList: {operationId: "deletePartnerSaleEligibilityList",method: "DELETE",path: "/v1/partner/productions/{productionId}/sale-eligibility-lists/{listKey}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerStaff: {operationId: "deletePartnerStaff",method: "DELETE",path: "/v1/partner/staff/{assignmentId}",host: "partner-api",kind: "write",cookie: true},
   deleteProductionWish: {operationId: "deleteProductionWish",method: "DELETE",path: "/v1/productions/{productionId}/wish",host: "api",kind: "write",cookie: true},
   deletePushSubscription: {operationId: "deletePushSubscription",method: "DELETE",path: "/v1/push-subscriptions/{subscriptionKey}",host: "api",kind: "write",cookie: true},
@@ -593,6 +601,7 @@ export const OPERATIONS = {
   getEventReviewSummary: {operationId: "getEventReviewSummary",method: "GET",path: "/v1/events/{eventId}/review-summary",host: "api",kind: "read",cookie: false},
   getEventSeatmapLayout: {operationId: "getEventSeatmapLayout",method: "GET",path: "/v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json",host: "www",kind: "read",cookie: false},
   getEventSeatmapSnapshot: {operationId: "getEventSeatmapSnapshot",method: "GET",path: "/v1/events/{eventId}/seatmap-snapshot",host: "api",kind: "read",cookie: true,query: ["section"]},
+  getFanSaleEligibility: {operationId: "getFanSaleEligibility",method: "GET",path: "/v1/events/{eventId}/sale-eligibility",host: "api",kind: "read",cookie: true},
   getHold: {operationId: "getHold",method: "GET",path: "/v1/holds/{holdId}",host: "api",kind: "read",cookie: true},
   getHome: {operationId: "getHome",method: "GET",path: "/v1/home",host: "api",kind: "read",cookie: false},
   getHomeRankings: {operationId: "getHomeRankings",method: "GET",path: "/v1/home/rankings.json",host: "www",kind: "read",cookie: false},
@@ -646,6 +655,7 @@ export const OPERATIONS = {
   getPartnerMerchOrderDelivery: {operationId: "getPartnerMerchOrderDelivery",method: "GET",path: "/v1/partner/merch-orders/{orderId}/delivery",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduction: {operationId: "getPartnerProduction",method: "GET",path: "/v1/partner/productions/{productionId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProductionSeatmap: {operationId: "getPartnerProductionSeatmap",method: "GET",path: "/v1/partner/productions/{productionId}/seatmap",host: "partner-api",kind: "read",cookie: true,query: ["fromTemplate"]},
+  getPartnerSalePolicy: {operationId: "getPartnerSalePolicy",method: "GET",path: "/v1/partner/productions/{productionId}/sale-policy",host: "partner-api",kind: "read",cookie: true},
   getPartnerSeatmapTemplate: {operationId: "getPartnerSeatmapTemplate",method: "GET",path: "/v1/partner/seatmap-templates/{templateId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerSeatmapTemplates: {operationId: "getPartnerSeatmapTemplates",method: "GET",path: "/v1/partner/seatmap-templates",host: "partner-api",kind: "read",cookie: true},
   getPartnerSellerProfile: {operationId: "getPartnerSellerProfile",method: "GET",path: "/v1/partner/seller-profile",host: "partner-api",kind: "read",cookie: true},
@@ -716,6 +726,7 @@ export const OPERATIONS = {
   listPartnerProductSettlements: {operationId: "listPartnerProductSettlements",method: "GET",path: "/v1/partner/product-settlements",host: "partner-api",kind: "read",cookie: true,query: ["cursor","from","limit","pgStore","to"]},
   listPartnerProductions: {operationId: "listPartnerProductions",method: "GET",path: "/v1/partner/productions",host: "partner-api",kind: "read",cookie: true,query: ["cursor","from","hasApprovalHistory","limit","q","saleReview","saleStatus","to"]},
   listPartnerProducts: {operationId: "listPartnerProducts",method: "GET",path: "/v1/partner/products",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit","linkedProductionId","q","status","ticketLinked"]},
+  listPartnerSaleEligibilityLists: {operationId: "listPartnerSaleEligibilityLists",method: "GET",path: "/v1/partner/productions/{productionId}/sale-eligibility-lists",host: "partner-api",kind: "read",cookie: true},
   listPartnerTeamAccounts: {operationId: "listPartnerTeamAccounts",method: "GET",path: "/v1/partner/team-accounts",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listPartnerWebhookDeliveries: {operationId: "listPartnerWebhookDeliveries",method: "GET",path: "/v1/partner/webhooks/{endpointId}/deliveries",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit","status"]},
   listPartnerWebhooks: {operationId: "listPartnerWebhooks",method: "GET",path: "/v1/partner/webhooks",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit"]},
@@ -741,6 +752,7 @@ export const OPERATIONS = {
   putPartnerMerchOrderItemShipment: {operationId: "putPartnerMerchOrderItemShipment",method: "PUT",path: "/v1/partner/merch-order-items/{itemId}/shipment",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   putPartnerPayoutAccount: {operationId: "putPartnerPayoutAccount",method: "PUT",path: "/v1/partner/payout-account",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   putPartnerProductionSeatmap: {operationId: "putPartnerProductionSeatmap",method: "PUT",path: "/v1/partner/productions/{productionId}/seatmap",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
+  putPartnerSalePolicy: {operationId: "putPartnerSalePolicy",method: "PUT",path: "/v1/partner/productions/{productionId}/sale-policy",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   putProductionWish: {operationId: "putProductionWish",method: "PUT",path: "/v1/productions/{productionId}/wish",host: "api",kind: "write",cookie: true},
   putScannerEventDevicePlacement: {operationId: "putScannerEventDevicePlacement",method: "PUT",path: "/v1/scanner/events/{eventId}/device-placements/{deviceId}",host: "scanner-api",kind: "write",cookie: false,ifMatch: true},
   putScannerShiftReadiness: {operationId: "putScannerShiftReadiness",method: "PUT",path: "/v1/scanner/shift/readiness",host: "scanner-api",kind: "write",cookie: false},

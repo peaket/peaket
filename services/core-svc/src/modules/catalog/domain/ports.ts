@@ -1,4 +1,5 @@
 // 도메인 층: 카탈로그 저장소 포트(어댑터가 구현한다).
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { RoundRow, SellerRow } from './event-detail.js';
 import type { CatalogEvent, Genre, Production } from './production.js';
 import type { EventDraft, PendingEvent } from './registration.js';
@@ -23,6 +24,8 @@ export interface ProductionPublicFields {
   runningMinutes: number | null;
   description: string | null;
   descriptionDoc: DescriptionDoc | null;
+  /** 판매 정책 규칙(production.sale_policy, 마지막 승인 내용, ADR-0261 결정 1·5). 없으면 빈 목록 */
+  salePolicy: SalePolicyRule[];
 }
 
 /** 회차 공개 요약·공연 상세에 쓰는 한 벌(회차·공연·판매자·공연장·아티스트·같은 공연의 회차) */
@@ -102,6 +105,8 @@ export interface ProductionForUpdate {
   /** 그 공연 회차들의 배치본(아직 없으면 null) */
   venueId: string | null;
   pendingEvents: PendingEvent[];
+  /** 지금 고치는 판매 정책 규칙(재승인 대기 변경분이 있으면 그것, 리뷰 A5) */
+  rules: SalePolicyRule[];
 }
 
 /** 등록·회차 더하기 트랜잭션 안에서 쓰는 일(오픈 간격 판정과 쓰기가 같은 잠금 안에 있다) */
@@ -119,6 +124,28 @@ export interface RegistrationTx {
   layoutFiles(venueId: string, tenantId: string): Promise<LayoutFile[]>;
   /** 변경분의 더한 회차 목록과 판매 승인 상태를 바꾼다 */
   savePending(productionId: string, pendingEvents: PendingEvent[], saleReview: Production['saleReview']): Promise<void>;
+  /** 그 공연 판매 자격 명단의 잠금·파기 시각을 지금 event 행과 규칙으로 다시 계산하고 새 사본 판을 매긴다(승인 이력이 없는 공연의 회차 더하기, ADR-0261 결정 7, 리뷰 H1) */
+  refreshEligibility(productionId: string, now: Date): Promise<void>;
+}
+
+/** 팬별 판매 자격의 회차 칸(ADR-0261 결정 5) */
+export interface SaleEligibilityEvent {
+  eventId: string;
+  productionId: string;
+  openAt: Date;
+  startsAt: Date;
+  perPersonLimit: number;
+  saleReview: Production['saleReview'];
+  saleApprovedAt: Date | null;
+  salePolicy: SalePolicyRule[];
+  grades: string[];
+}
+
+/** 팬이 든 판매 자격 명단 하나(팬별 자격, ADR-0261 결정 5) */
+export interface MemberList {
+  key: string;
+  name: string;
+  destroyDueAt: Date;
 }
 
 /** 찾기 목록의 이름 하나(지우지 않은 다른 이름과 함께) */
@@ -146,6 +173,10 @@ export interface CatalogRepository {
   registerOnce<T>(once: RequestOnce, tenantId: string, fn: (tx: RegistrationTx) => Promise<T>): Promise<T>;
   /** 그 테넌트 공연의 배치본과 게시한 판(잠금 없이 읽는다). 없거나 남의 공연이면 undefined */
   layoutFilesFor(productionId: string, tenantId: string): Promise<LayoutPreview | undefined>;
+  /** 그 계정이 든 그 공연의 판매 자격 명단(파기 시각이 지나지 않은 것, 키 차례). 팬 경로(core_app) */
+  memberLists(productionId: string, accountId: string, now: Date): Promise<MemberList[]>;
+  /** 팬별 판매 자격에 쓰는 칸만(회차 일정·1인 한도·공연 공개 상태·공개본 규칙·배치본 등급 ID). 쿼리 하나다(리뷰 C3) */
+  findSaleEligibilityEvent(eventId: string): Promise<SaleEligibilityEvent | undefined>;
   /** 찜. 공개 공연이 아니면 'not-found', 상한을 넘으면 'limit'. 같은 찜은 처음 시각을 둔다. 계정 단위 잠금 안에서 센다 */
   putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'>;
   deleteWish(accountId: string, productionId: string): Promise<void>;

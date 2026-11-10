@@ -1,8 +1,8 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-import { createDatabase, createService, loadPlatformConfig } from '@peaket/platform';
+import { createDatabase, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore } from './modules/catalog/index.js';
+import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, SaleEligibilityMetrics, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -19,6 +19,14 @@ if (!identityGrpc) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity 
 // 부하 분산 프로필은 다른 서비스와 같은 설정(PEAKET_GRPC_LB_PROFILE)을 따른다
 const lbProfile = loadPlatformConfig(process.env).grpcLbProfile;
 const adminAuthz = new GrpcAdminAuthz(identityGrpc, lbProfile);
+// 판매 자격 명단의 회원 코드 변환(identity MemberCodeService)도 같은 주소다(ADR-0261 결정 6). 서버(GAT-050) 전에는 UNIMPLEMENTED라 올리기가 503이다
+const memberCodes = new GrpcMemberCodeDirectory(identityGrpc, lbProfile);
+// 명단 사본을 대기열 Redis에 쓰는 쪽은 소유자 결정 대기다. 그때까지 늘 실패하고 sale_eligibility_copy_unwired_total을 올린다(ADR-0261 결정 9)
+const eligibilityCopy = new UnwiredSaleEligibilityCopy();
+// 명단 감사 줄의 올린 계정은 로그 가명이다. 서비스 뼈대와 같은 키(PEAKET_LOG_PSEUDONYM_KEY)로 만들어 정규 로그 줄의 accountRef와 같은 값이 된다(ADR-0053 결정 1)
+const { pseudonymizer: pseudonym } = loadLogPseudonymizer(process.env);
+// 명단 운영 지표(올리기 결과·사본 넘기기 결과, docs/features/queue-admission.md §3 운영 확인 표)
+const eligibilityMetrics = new SaleEligibilityMetrics();
 
 // 공연 이미지·좌석맵 가져오기의 바깥 잇기(ADR-0257). 하나라도 없으면 시작하지 않는다(대역으로 통과시키지 않는다).
 // 개발 실행: image-worker(HOT-200)가 생기기 전에는 ImageService 대역 gRPC 서버를, 좌석맵은 node dist/seatmap-worker/main.js를 띄워 주소를 넣는다.
@@ -53,9 +61,11 @@ const service = await createService({
   module: AppModule.register({
     database,
     partnerDatabase,
-    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir) },
+    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics },
   }),
 });
+eligibilityCopy.register(service.metrics.registry);
+eligibilityMetrics.register(service.metrics.registry);
 await service.listen();
 
 process.once('SIGTERM', () => {
@@ -65,6 +75,7 @@ process.once('SIGTERM', () => {
     .catch((err: unknown) => service.logger.error({ err }, 'core-svc 종료 실패'))
     .finally(() => {
       adminAuthz.close();
+      memberCodes.close();
       imageProcessing.close();
       seatmapParser.close();
       return Promise.all([database.close(), partnerDatabase.close()]);

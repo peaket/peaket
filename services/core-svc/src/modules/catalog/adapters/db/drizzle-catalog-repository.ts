@@ -3,14 +3,16 @@
 // 오픈 간격은 공개 중인 공연과만 견주고 새 등록은 DRAFT라, 동시에 온 두 등록이 서로를 놓쳐도 공개 전 판매 승인(LCH-080)이 다시 본다. 그래서 전역 잠금을 두지 않는다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
-import { and, asc, eq, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { DescriptionDoc } from '../../domain/description.js';
-import type { CatalogRepository, EventSummaryRow, LayoutPreview, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry } from '../../domain/ports.js';
+import type { CatalogRepository, EventSummaryRow, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry, SaleEligibilityEvent } from '../../domain/ports.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
+import { destroyTime, lockTime } from '../../domain/sale-eligibility.js';
 import { readLayoutFiles } from './layout-rows.js';
-import { artist, event, place, priceTier, production, productionArtist, productionImage, promoter, searchAlias, wish } from './schema.js';
+import { artist, event, place, priceTier, production, productionArtist, productionImage, promoter, saleEligibilityList, saleEligibilityMember, searchAlias, wish } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 찜 잠금의 종류 번호(계정마다 따로 잠근다) */
@@ -161,7 +163,21 @@ export class DrizzleCatalogRepository implements CatalogRepository {
         seatAssignment: r.e.seatAssignment as 'PICK' | 'AUTO',
         perPersonLimit: r.e.perPersonLimit,
       },
-      production: { id: r.p.id, promoterId: r.p.promoterId, placeId: r.p.placeId, title: r.p.title, genre: r.p.genre as Genre, saleReview: r.p.saleReview as SaleReview, saleApprovedAt: r.p.saleApprovedAt, ageRating: r.p.ageRating, runningMinutes: r.p.runningMinutes, description: r.p.description, descriptionDoc: r.p.descriptionDoc as DescriptionDoc | null },
+      production: {
+        id: r.p.id,
+        promoterId: r.p.promoterId,
+        placeId: r.p.placeId,
+        title: r.p.title,
+        genre: r.p.genre as Genre,
+        saleReview: r.p.saleReview as SaleReview,
+        saleApprovedAt: r.p.saleApprovedAt,
+        ageRating: r.p.ageRating,
+        runningMinutes: r.p.runningMinutes,
+        description: r.p.description,
+        descriptionDoc: r.p.descriptionDoc as DescriptionDoc | null,
+        // 공개본(마지막 승인 내용)의 규칙. 재승인 대기 변경분(pending_revision.salePolicy)은 읽지 않는다(ADR-0261 결정 5)
+        salePolicy: Array.isArray(r.p.salePolicy) ? (r.p.salePolicy as SalePolicyRule[]) : [],
+      },
       sellerName: r.s.legalName,
       seller: { legalName: r.s.legalName, representative: r.s.representative, address: r.s.address, phone: r.s.phone, email: r.s.email, businessRegNo: r.s.businessRegNo, mailOrderReportNo: r.s.mailOrderReportNo, exemptionBasis: r.s.exemptionBasis },
       place: r.place ? { id: r.place.id, name: r.place.name, address: r.place.address } : null,
@@ -234,8 +250,11 @@ export class DrizzleCatalogRepository implements CatalogRepository {
           .from(event)
           .where(and(eq(event.productionId, id), isNotNull(event.venueId)))
           .limit(1);
-        const added = ((p.pendingRevision as { addedEvents?: StoredPendingEvent[] } | null)?.addedEvents ?? []).map(fromStored);
-        return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview as SaleReview, saleApprovedAt: p.saleApprovedAt, venueId: v?.venueId ?? null, pendingEvents: added };
+        const rev = (p.pendingRevision ?? {}) as { addedEvents?: StoredPendingEvent[]; salePolicy?: unknown };
+        const added = (rev.addedEvents ?? []).map(fromStored);
+        // 지금 고치는 규칙(재승인 대기 변경분이 있으면 그것). 회차 더하기가 1인 한도를 규칙 한도와 견준다(리뷰 A5)
+        const rules = (Array.isArray(rev.salePolicy) ? rev.salePolicy : Array.isArray(p.salePolicy) ? p.salePolicy : []) as SalePolicyRule[];
+        return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview as SaleReview, saleApprovedAt: p.saleApprovedAt, venueId: v?.venueId ?? null, pendingEvents: added, rules };
       },
       insertEvent: async (productionId, promoterId, venueId, e) => {
         await tx.insert(event).values(eventRow(productionId, promoterId, venueId, e));
@@ -248,7 +267,47 @@ export class DrizzleCatalogRepository implements CatalogRepository {
           .set({ saleReview, pendingRevision: sql`coalesce(${production.pendingRevision}, '{}'::jsonb) || jsonb_build_object('addedEvents', ${added}::jsonb)` })
           .where(eq(production.id, productionId));
       },
+      // 회차 행과 공개본 규칙으로 잠금·파기 시각을 다시 계산하고 새 사본 판을 매긴다(사본의 회차·수명이 바뀐다, 리뷰 H1). 테넌트는 트랜잭션의 행 보안과 공연 조건이 함께 막는다
+      refreshEligibility: async (productionId, now) => {
+        const lists = await tx.select().from(saleEligibilityList).where(eq(saleEligibilityList.productionId, productionId));
+        if (lists.length === 0) return;
+        const rounds = (await tx.select({ eventId: event.id, startsAt: event.startsAt, openAt: event.openAt, status: event.status }).from(event).where(eq(event.productionId, productionId))).map((r) => ({ ...r, status: r.status as EventStatus }));
+        const [p] = await tx.select({ salePolicy: production.salePolicy }).from(production).where(eq(production.id, productionId));
+        const rules = (Array.isArray(p?.salePolicy) ? p.salePolicy : []) as SalePolicyRule[];
+        const due = destroyTime(rounds);
+        for (const l of lists) {
+          await tx
+            .update(saleEligibilityList)
+            .set({ destroyDueAt: due, lockedAt: lockTime(rules, l.key, l.lockedAt, now, rounds), copySeq: sql`nextval('sale_eligibility_copy_seq')` })
+            .where(and(eq(saleEligibilityList.id, l.id), eq(saleEligibilityList.productionId, productionId)));
+        }
+      },
     };
+  }
+
+  async findSaleEligibilityEvent(eventId: string): Promise<SaleEligibilityEvent | undefined> {
+    if (!UUID.test(eventId)) return undefined;
+    // 쿼리 하나: 회차·공연의 필요한 칸과 배치본 등급 ID(마지막 승인 내용, 보이는 순서). 공개 요약 전체 조회를 쓰지 않는다(리뷰 C3, docs/verification.md §4.1)
+    const tiers = sql<string[]>`coalesce((select array_agg(${priceTier.tierId} order by ${priceTier.displayOrder}) from ${priceTier} where ${priceTier.venueId} = ${event.venueId} and ${priceTier.promoterId} = ${event.promoterId}), '{}')`;
+    const [r] = await this.db.db
+      .select({ eventId: event.id, productionId: event.productionId, openAt: event.openAt, startsAt: event.startsAt, perPersonLimit: event.perPersonLimit, saleReview: production.saleReview, saleApprovedAt: production.saleApprovedAt, salePolicy: production.salePolicy, grades: tiers })
+      .from(event)
+      .innerJoin(production, eq(production.id, event.productionId))
+      .where(eq(event.id, eventId))
+      .limit(1);
+    if (!r) return undefined;
+    return { ...r, saleReview: r.saleReview as SaleReview, salePolicy: Array.isArray(r.salePolicy) ? (r.salePolicy as SalePolicyRule[]) : [], grades: r.grades ?? [] };
+  }
+
+  async memberLists(productionId: string, accountId: string, now: Date): Promise<MemberList[]> {
+    if (!UUID.test(productionId) || !UUID.test(accountId)) return [];
+    // 공연의 명단(10개 [가정]까지)에서 그 계정의 구성원 행을 기본 키로 찾는다. 파기 시각이 지난 명단은 뺀다(정비가 아직 지우지 않았어도)
+    return this.db.db
+      .select({ key: saleEligibilityList.key, name: saleEligibilityList.name, destroyDueAt: saleEligibilityList.destroyDueAt })
+      .from(saleEligibilityList)
+      .innerJoin(saleEligibilityMember, and(eq(saleEligibilityMember.listId, saleEligibilityList.id), eq(saleEligibilityMember.accountId, accountId)))
+      .where(and(eq(saleEligibilityList.productionId, productionId), gt(saleEligibilityList.destroyDueAt, now)))
+      .orderBy(asc(saleEligibilityList.key));
   }
 
   async layoutFilesFor(productionId: string, tenantId: string): Promise<LayoutPreview | undefined> {

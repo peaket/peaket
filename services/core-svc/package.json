@@ -2,7 +2,7 @@
   "name": "@peaket/core-svc",
   "private": true,
   "version": "0.0.0",
-  "description": "core-svc. 지금은 catalog 모듈의 공연(회차 묶음)·공연장·아티스트·다른 이름·회차 데이터와 회차 공개 요약(GET /v1/events/{eventId}), 대표 회차·카드 판매 상태 계산(ADR-0093, BUILD_ORDER HOT-170 ①), 공연 등록·회차 더하기·찜(ADR-0198, HOT-171), 공연 이미지 올리기와 좌석맵 가져오기(ADR-0257, HOT-190·HOT-210), 공연용 배치본 저장·불러오기와 팬 좌석맵 파일 게시·가격 등급(ADR-0260, HOT-240)이 있다. 좌석맵 해석 작업 seatmap-worker는 같은 패키지의 다른 진입점이다(npm run start:seatmap-worker, PEAKET_GRPC_PORT 필수, 자격 증명 환경 값이 있으면 뜨지 않는다). 개발 실행에는 PEAKET_IMAGE_GRPC_URL(image-worker 대역)·PEAKET_SEATMAP_GRPC_URL·PEAKET_IMAGE_BASE_URL·PEAKET_IMAGE_STORE_DIR·PEAKET_PUBLIC_FILE_DIR(팬 좌석맵 파일 폴더)가 더 있어야 한다. notify·shop·review·support 모듈과 좌석맵 템플릿·판매 승인 경로는 뒤 단계가 더한다",
+  "description": "core-svc. 지금은 catalog 모듈의 공연(회차 묶음)·공연장·아티스트·다른 이름·회차 데이터와 회차 공개 요약(GET /v1/events/{eventId}), 대표 회차·카드 판매 상태 계산(ADR-0093, BUILD_ORDER HOT-170 ①), 공연 등록·회차 더하기·찜(ADR-0198, HOT-171), 공연 이미지 올리기와 좌석맵 가져오기(ADR-0257, HOT-190·HOT-210), 공연용 배치본 저장·불러오기와 팬 좌석맵 파일 게시·가격 등급(ADR-0260, HOT-240), 판매 정책 규칙·회차 고치기·판매 자격 명단·공개 요약의 판매 단계·팬별 판매 자격(ADR-0261, HOT-250, 규칙 평가는 @peaket/validation/sale-policy의 빌드한 dist)이 있다. 좌석맵 해석 작업 seatmap-worker는 같은 패키지의 다른 진입점이다(npm run start:seatmap-worker, PEAKET_GRPC_PORT 필수, 자격 증명 환경 값이 있으면 뜨지 않는다). 개발 실행에는 PEAKET_IMAGE_GRPC_URL(image-worker 대역)·PEAKET_SEATMAP_GRPC_URL·PEAKET_IMAGE_BASE_URL·PEAKET_IMAGE_STORE_DIR·PEAKET_PUBLIC_FILE_DIR(팬 좌석맵 파일 폴더)가 더 있어야 한다. notify·shop·review·support 모듈과 좌석맵 템플릿·판매 승인 경로는 뒤 단계가 더한다",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -22,6 +22,7 @@
     "@peaket/contracts": "workspace:*",
     "@peaket/platform": "workspace:*",
     "@peaket/search-normalize": "workspace:*",
+    "@peaket/validation": "workspace:*",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
     "pg": "^8.23.1",

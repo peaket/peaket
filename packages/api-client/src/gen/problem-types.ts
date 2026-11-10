@@ -83,6 +83,7 @@ export type ProblemType =
   | 'lobby-participant-not-found'
   | 'login-provider-not-linked'
   | 'manual-selection-required'
+  | 'member-code-lookup-unavailable'
   | 'merch-cancel-not-allowed'
   | 'merch-item-state-conflict'
   | 'merch-return-not-allowed'
@@ -165,9 +166,17 @@ export type ProblemType =
   | 'review-not-purchaser'
   | 'role-group-mismatch'
   | 'rotation-too-soon'
+  | 'sale-eligibility-list-limit'
+  | 'sale-eligibility-list-locked'
+  | 'sale-eligibility-required'
+  | 'sale-eligibility-upload-limited'
+  | 'sale-eligibility-upload-rejected'
+  | 'sale-eligibility-upload-too-large'
   | 'sale-ended'
   | 'sale-not-suspended'
   | 'sale-paused'
+  | 'sale-policy-denied'
+  | 'sale-policy-invalid'
   | 'sale-setting-locked'
   | 'scale-change-closed'
   | 'seat-already-held'
@@ -285,6 +294,7 @@ export const PROBLEM_TYPES = {
   'lobby-participant-not-found': { status: 404, title: "로비 참가 기록이 없습니다" },
   'login-provider-not-linked': { status: 404, title: "연결된 로그인 수단이 아닙니다" },
   'manual-selection-required': { status: 409, title: "좌석을 직접 골라 주세요" },
+  'member-code-lookup-unavailable': { status: 503, title: "회원 코드를 잠시 확인할 수 없습니다" },
   'merch-cancel-not-allowed': { status: 409, title: "이미 보냈거나 받은 상품은 취소할 수 없습니다" },
   'merch-item-state-conflict': { status: 409, title: "지금 주문 상태에서는 할 수 없습니다" },
   'merch-return-not-allowed': { status: 409, title: "반품할 수 없는 상품이 있습니다" },
@@ -367,9 +377,17 @@ export const PROBLEM_TYPES = {
   'review-not-purchaser': { status: 403, title: "이 회차를 예매한 분만 후기를 쓸 수 있습니다" },
   'role-group-mismatch': { status: 422, title: "파트너 역할과 관제 역할 사이는 바꿀 수 없습니다" },
   'rotation-too-soon': { status: 409, title: "비밀을 방금 바꿨습니다. 잠시 뒤 다시 시도해 주세요" },
+  'sale-eligibility-list-limit': { status: 409, title: "판매 자격 명단은 공연마다 10개까지 둘 수 있습니다" },
+  'sale-eligibility-list-locked': { status: 409, title: "판매 자격 명단이 잠겨 바꿀 수 없습니다" },
+  'sale-eligibility-required': { status: 403, title: "이 판매 단계의 예매 대상이 아닙니다" },
+  'sale-eligibility-upload-limited': { status: 429, title: "명단을 너무 자주 올렸습니다. 잠시 뒤 다시 올려 주세요" },
+  'sale-eligibility-upload-rejected': { status: 422, title: "명단 파일을 읽지 않았습니다" },
+  'sale-eligibility-upload-too-large': { status: 413, title: "명단 파일은 8MB까지 올릴 수 있습니다" },
   'sale-ended': { status: 410, title: "판매 시간이 끝났습니다" },
   'sale-not-suspended': { status: 409, title: "판매 중지된 공연이 아닙니다" },
   'sale-paused': { status: 423, title: "판매가 잠시 멈췄습니다" },
+  'sale-policy-denied': { status: 403, title: "판매 정책에 따라 지금은 예매할 수 없습니다" },
+  'sale-policy-invalid': { status: 422, title: "판매 정책 규칙에 고칠 곳이 있습니다" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },

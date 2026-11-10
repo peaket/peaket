@@ -57,6 +57,13 @@
       "when": 1794291172480,
       "tag": "0007_layout_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794302864853,
+      "tag": "0008_sale_policy_eligibility",
+      "breakpoints": true
     }
   ]
 }

@@ -39,3 +39,14 @@ export const seatmapInvalid = (errors: { line: number; field: string; code: stri
 export const seatmapGeometryLocked = () => new ProblemError({ type: 'seatmap-geometry-locked', status: 409, title: '판매가 시작되어 좌석 배치는 바꿀 수 없습니다' });
 export const saleSettingLocked = () => new ProblemError({ type: 'sale-setting-locked', status: 409, title: '지금은 바꿀 수 없는 항목입니다' });
 export const seatmapPublishUnavailable = (retryAfterSeconds: number) => new ProblemError({ type: 'seatmap-publish-unavailable', status: 503, title: '좌석맵 파일을 잠시 게시할 수 없습니다', retryAfterSeconds });
+
+// 판매 정책 규칙·판매 자격 명단(ADR-0261). 제목은 계약 목록과 같다
+export const salePolicyInvalid = (errors: { rule: number; path: string; code: string }[]) =>
+  new ProblemError({ type: 'sale-policy-invalid', status: 422, title: '판매 정책 규칙에 고칠 곳이 있습니다', extensions: { errors: errors.slice(0, 50) } });
+export const saleEligibilityListLimit = () => new ProblemError({ type: 'sale-eligibility-list-limit', status: 409, title: '판매 자격 명단은 공연마다 10개까지 둘 수 있습니다' });
+export const saleEligibilityListLocked = () => new ProblemError({ type: 'sale-eligibility-list-locked', status: 409, title: '판매 자격 명단이 잠겨 바꿀 수 없습니다' });
+export const saleEligibilityUploadRejected = (reason: string) => new ProblemError({ type: 'sale-eligibility-upload-rejected', status: 422, title: '명단 파일을 읽지 않았습니다', detail: reason });
+export const saleEligibilityUploadLimited = (retryAfterSeconds: number) =>
+  new ProblemError({ type: 'sale-eligibility-upload-limited', status: 429, title: '명단을 너무 자주 올렸습니다. 잠시 뒤 다시 올려 주세요', retryAfterSeconds });
+export const saleEligibilityUploadTooLarge = () => new ProblemError({ type: 'sale-eligibility-upload-too-large', status: 413, title: '명단 파일은 8MB까지 올릴 수 있습니다' });
+export const memberCodeLookupUnavailable = (retryAfterSeconds: number) => new ProblemError({ type: 'member-code-lookup-unavailable', status: 503, title: '회원 코드를 잠시 확인할 수 없습니다', retryAfterSeconds });

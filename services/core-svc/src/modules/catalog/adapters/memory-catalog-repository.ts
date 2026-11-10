@@ -1,11 +1,14 @@
 // 메모리 저장소(시험·로컬). 운영은 Drizzle 저장소다. 등록 쓰기는 fn이 끝난 뒤에만 반영해(던지면 버린다) DB 트랜잭션과 같게 답한다.
 import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
-import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
+import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce, SaleEligibilityEvent } from '../domain/ports.js';
 import { type CatalogEvent, isPublic, type Production } from '../domain/production.js';
 import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
 import type { ProductionImageRow } from '../domain/production-image.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
+import { destroyTime, lockTime } from '../domain/sale-eligibility.js';
+import type { EventEditable, StoredList } from '../domain/sale-ports.js';
 import type { LayoutDoc } from '../domain/seatmap-layout.js';
 
 /** 공연 하나의 배치본(메모리, ADR-0260): 판 차례·행 판·대기 판·복제한 틀 */
@@ -17,6 +20,24 @@ export interface MemoryLayout {
   publishedVersion: number | null;
   pending: { version: number; doc: LayoutDoc; staged: boolean } | null;
   templateVenueId: string | null;
+}
+
+/** 공연 하나의 판매 정책 규칙(메모리, ADR-0261 결정 1·2) */
+export interface MemorySalePolicy {
+  /** production.sale_policy(공개본) */
+  rules: SalePolicyRule[];
+  version: number;
+  /** pending_revision.salePolicy */
+  pending?: SalePolicyRule[];
+}
+
+/** 판매 자격 명단 하나(메모리). 구성원은 계정 ID 집합이다 */
+export interface MemorySaleList extends StoredList {
+  productionId: string;
+  promoterId: string;
+  fileSha256: Uint8Array;
+  uploadedBy: string;
+  members: Set<string>;
 }
 
 export class MemoryCatalogRepository implements CatalogRepository {
@@ -44,6 +65,24 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly layouts = new Map<string, MemoryLayout>();
   /** 공연장 틀(TEMPLATE) ID → 판 0 초안과 공개 표시(시험이 넣는다) */
   readonly templates = new Map<string, { doc: LayoutDoc; published: boolean }>();
+  /** 공연 ID → 판매 정책 규칙(없으면 규칙 없음·판 1) */
+  readonly salePolicies = new Map<string, MemorySalePolicy>();
+  /** 회차 ID → 회차 고치기 판(없으면 1) */
+  readonly eventVersions = new Map<string, number>();
+  /** 공연 ID → pending_revision.eventChanges */
+  readonly eventChanges = new Map<string, Record<string, Partial<EventEditable>>>();
+  /** 명단 ID → 판매 자격 명단 */
+  readonly saleLists = new Map<string, MemorySaleList>();
+  /** 지운 명단의 사본 지우기 기록(리뷰 S1) */
+  readonly saleDrops: { productionId: string; promoterId: string; listKey: string; copySeq: number; createdAt: Date }[] = [];
+  /** 공연 ID → 올리기 시각(시간당 횟수 한도, 리뷰 S5) */
+  readonly saleUploads = new Map<string, Date[]>();
+  #copySeq = 0;
+
+  /** 사본 판(DB 순번 sale_eligibility_copy_seq와 같은 뜻) */
+  nextCopySeq(): number {
+    return ++this.#copySeq;
+  }
   readonly #once = new Map<string, { hash: Buffer; result: string }>();
   /** 등록 쓰기를 한 줄로 세운다(시험이 늘 같은 결과를 보게) */
   #queue: Promise<unknown> = Promise.resolve();
@@ -64,7 +103,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
     const d = this.details.get(eventId);
     return {
       event: { entryOpensAt: null, endsAt: new Date(event.startsAt.getTime() + 2 * 3_600_000), reentryAllowed: false, lobbyMinutes: 10, lobbyShuffle: true, openBatch: true, seatAssignment: 'PICK', perPersonLimit: 4, ...event, ...d?.event },
-      production: { ageRating: null, runningMinutes: null, description: null, descriptionDoc: null, ...production, ...d?.production },
+      production: { ageRating: null, runningMinutes: null, description: null, descriptionDoc: null, salePolicy: this.salePolicies.get(production.id)?.rules ?? [], ...production, ...d?.production },
       sellerName,
       seller: { legalName: sellerName, representative: null, address: null, phone: null, email: null, businessRegNo: null, mailOrderReportNo: null, exemptionBasis: null, ...d?.seller },
       place: d?.place ?? null,
@@ -123,6 +162,9 @@ export class MemoryCatalogRepository implements CatalogRepository {
           if (p) this.productions.set(productionId, { ...p, saleReview });
         });
       },
+      refreshEligibility: async (productionId, now) => {
+        writes.push(() => this.refreshEligibility(productionId, now));
+      },
     };
     const value = await fn(tx);
     for (const w of writes) w();
@@ -155,7 +197,46 @@ export class MemoryCatalogRepository implements CatalogRepository {
     const p = this.productions.get(id);
     if (!p) return undefined;
     const venue = [...this.events.values()].find((e) => e.productionId === id && e.venueId !== null)?.venueId ?? null;
-    return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, venueId: venue, pendingEvents: this.pending.get(id) ?? [] };
+    const policy = this.salePolicies.get(id);
+    return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, venueId: venue, pendingEvents: this.pending.get(id) ?? [], rules: policy?.pending ?? policy?.rules ?? [] };
+  }
+
+  /** 그 공연 명단의 잠금·파기 시각을 회차와 공개본 규칙으로 다시 계산하고 새 사본 판을 매긴다 */
+  refreshEligibility(productionId: string, now: Date): void {
+    const rounds = [...this.events.values()].filter((e) => e.productionId === productionId).map((e) => ({ eventId: e.id, startsAt: e.startsAt, openAt: e.openAt, status: e.status }));
+    if (rounds.length === 0) return;
+    const due = destroyTime(rounds);
+    const rules = this.salePolicies.get(productionId)?.rules ?? [];
+    for (const l of this.saleLists.values()) {
+      if (l.productionId !== productionId) continue;
+      Object.assign(l, { destroyDueAt: due, lockedAt: lockTime(rules, l.key, l.lockedAt, now, rounds), copySeq: this.nextCopySeq() });
+    }
+  }
+
+  async findSaleEligibilityEvent(eventId: string): Promise<SaleEligibilityEvent | undefined> {
+    const e = this.events.get(eventId);
+    const p = e && this.productions.get(e.productionId);
+    if (!e || !p) return undefined;
+    const d = this.details.get(eventId)?.event;
+    const layout = e.venueId ? [...this.layouts.values()].find((l) => l.venueId === e.venueId) : undefined;
+    return {
+      eventId: e.id,
+      productionId: p.id,
+      openAt: e.openAt,
+      startsAt: e.startsAt,
+      perPersonLimit: d?.perPersonLimit ?? this.eventDrafts.get(eventId)?.perPersonLimit ?? 4,
+      saleReview: p.saleReview,
+      saleApprovedAt: p.saleApprovedAt,
+      salePolicy: this.salePolicies.get(p.id)?.rules ?? [],
+      grades: layout?.rows?.doc.priceTiers.map((t) => t.tierId) ?? [],
+    };
+  }
+
+  async memberLists(productionId: string, accountId: string, now: Date): Promise<MemberList[]> {
+    return [...this.saleLists.values()]
+      .filter((l) => l.productionId === productionId && l.members.has(accountId) && l.destroyDueAt.getTime() > now.getTime())
+      .sort((a, b) => (a.key < b.key ? -1 : 1))
+      .map((l) => ({ key: l.key, name: l.name, destroyDueAt: l.destroyDueAt }));
   }
 
   async putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'> {

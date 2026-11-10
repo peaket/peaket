@@ -1,22 +1,30 @@
 // 모듈 조립 파일: 포트에 어댑터를 묶는다(층 규칙의 밖. 모든 층을 가져온다).
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, type Provider, RequestMethod } from '@nestjs/common';
-import { type Database } from '@peaket/platform';
+import { randomBytes } from 'node:crypto';
+import { type Database, LogPseudonymizer } from '@peaket/platform';
 import { LogCdnInvalidation, MemoryCdnInvalidation, unavailableImageProcessing, unavailableSeatmapParser } from './adapters/cdn-invalidation.js';
 import { DrizzleCatalogRepository, PARTNER_DATABASE } from './adapters/db/drizzle-catalog-repository.js';
 import { DrizzleProductionMedia } from './adapters/db/drizzle-production-media.js';
+import { DrizzleSaleStore } from './adapters/db/drizzle-sale-store.js';
 import { DrizzleSeatmapLayoutStore } from './adapters/db/drizzle-seatmap-layout.js';
 import { MemoryImageObjectStore } from './adapters/image-store.js';
 import { MemoryCatalogRepository, MemoryProductionMedia } from './adapters/memory-catalog-repository.js';
+import { MemorySaleStore } from './adapters/memory-sale-store.js';
 import { MemorySeatmapLayoutStore } from './adapters/memory-seatmap-layout.js';
 import { MemoryPublicFileStore } from './adapters/public-file-store.js';
+import { MemorySaleEligibilityCopy, unavailableMemberCodes } from './adapters/sale-eligibility-copy.js';
 import { AddProductionEvent } from './application/add-production-event.js';
 import { CreateProduction } from './application/create-production.js';
+import { FanSaleEligibility } from './application/fan-sale-eligibility.js';
 import { FanFilePublisher } from './application/fan-file-publisher.js';
 import { GetEventSummary } from './application/get-event-summary.js';
 import { ImportSeatmap } from './application/import-seatmap.js';
 import { PartnerDirectory } from './application/partner-directory.js';
 import { ProductionImages } from './application/production-images.js';
+import { SaleEligibilityLists } from './application/sale-eligibility-lists.js';
+import { SalePolicies } from './application/sale-policy.js';
 import { SeatmapLayouts } from './application/seatmap-layouts.js';
+import { UpdateProductionEvent } from './application/update-production-event.js';
 import { Wishes } from './application/wish.js';
 import {
   CDN_INVALIDATION,
@@ -30,12 +38,18 @@ import {
   SEATMAP_PARSER,
   type SeatmapParser,
 } from './domain/media-ports.js';
+import { LOG_PSEUDONYM, type LogPseudonym, MEMBER_CODE_DIRECTORY, type MemberCodeDirectory, SALE_ELIGIBILITY_COPY, SALE_ELIGIBILITY_METRICS, type SaleEligibilityCopy } from './domain/eligibility-ports.js';
+import { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
 import { CATALOG_REPOSITORY } from './domain/ports.js';
+import { SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
 import { PartnerDirectoryController } from './inbound/partner-directory.controller.js';
+import { PartnerEventController } from './inbound/partner-event.controller.js';
 import { PartnerMediaController } from './inbound/partner-media.controller.js';
 import { PartnerProductionController } from './inbound/partner-production.controller.js';
+import { PartnerSaleEligibilityController } from './inbound/partner-sale-eligibility.controller.js';
+import { PartnerSalePolicyController } from './inbound/partner-sale-policy.controller.js';
 import { PartnerSeatmapController } from './inbound/partner-seatmap.controller.js';
 import { WishController } from './inbound/wish.controller.js';
 
@@ -52,6 +66,14 @@ export interface MediaWiring {
   publicFiles: PublicFileStore;
   /** 게시의 동시 쓰기 수·전체 시한. 없으면 8개·20초 [가정] */
   publishLimits?: PublishLimits;
+  /** 판매 자격 명단의 회원 코드 변환(identity MemberCodeService, ADR-0261 결정 6). 메모리 시험에서 없으면 늘 503 */
+  memberCodes: MemberCodeDirectory;
+  /** 판매 자격 명단 사본 넘기기(ADR-0261 결정 9). 운영은 쓰는 쪽이 정해질 때까지 늘 실패하는 어댑터. 메모리 시험에서 없으면 기록하는 어댑터 */
+  eligibilityCopy: SaleEligibilityCopy;
+  /** 감사 줄의 로그 가명(서비스와 같은 PEAKET_LOG_PSEUDONYM_KEY로 만든 것, main.ts). 없으면 프로세스마다 무작위 키 */
+  pseudonym?: LogPseudonym;
+  /** 판매 자격 명단 운영 지표(서비스 등록부에 다는 것은 main.ts). 없으면 등록하지 않은 묶음 */
+  eligibilityMetrics?: SaleEligibilityMetrics;
 }
 
 /** 시험 기본값: 처리·해석 작업을 잇지 않았으면 늘 503(조용히 통과시키지 않는다) */
@@ -65,13 +87,17 @@ function mediaProviders(m: Partial<MediaWiring>, memory: boolean): Provider[] {
     { provide: SEATMAP_PARSER, useValue: m.seatmap ?? unavailableSeatmapParser },
     m.cdn ? { provide: CDN_INVALIDATION, useValue: m.cdn } : memory ? { provide: CDN_INVALIDATION, useValue: new MemoryCdnInvalidation() } : { provide: CDN_INVALIDATION, useClass: LogCdnInvalidation },
     { provide: PUBLIC_FILE_STORE, useValue: m.publicFiles ?? new MemoryPublicFileStore() },
+    { provide: MEMBER_CODE_DIRECTORY, useValue: m.memberCodes ?? unavailableMemberCodes },
+    { provide: SALE_ELIGIBILITY_COPY, useValue: m.eligibilityCopy ?? new MemorySaleEligibilityCopy() },
+    { provide: LOG_PSEUDONYM, useValue: m.pseudonym ?? new LogPseudonymizer(randomBytes(32)) },
+    { provide: SALE_ELIGIBILITY_METRICS, useValue: m.eligibilityMetrics ?? new SaleEligibilityMetrics() },
     ...(m.publishLimits ? [{ provide: PUBLISH_LIMITS, useValue: m.publishLimits }] : []),
   ];
 }
 
 /**
  * 좌석맵 불러오기·저장 응답은 성공·오류 모두 Cache-Control: no-store다(ADR-0260 결정 5, seat-hold ASVS 14.2.2). 처리기 앞의 인증 가드·본문 검사·본문 상한이
- * 내는 거절(401·400·413·429)도 포함해 요청이 처리기에 닿기 전에 머리를 단다
+ * 내는 거절(401·400·413·429)도 포함해 요청이 처리기에 닿기 전에 머리를 단다. 판매 정책 규칙·판매 자격 명단·회차 고치기·팬별 판매 자격도 같다(ADR-0261 결정 2·5·6)
  */
 const noStore = (_req: unknown, res: { setHeader(name: string, value: string): unknown }, next: () => void): void => {
   res.setHeader('cache-control', 'no-store');
@@ -82,7 +108,21 @@ const noStore = (_req: unknown, res: { setHeader(name: string, value: string): u
 export class CatalogModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     const path = 'v1/partner/productions/:productionId/seatmap';
-    consumer.apply(noStore).forRoutes({ path, method: RequestMethod.GET }, { path, method: RequestMethod.PUT });
+    const policy = 'v1/partner/productions/:productionId/sale-policy';
+    const lists = 'v1/partner/productions/:productionId/sale-eligibility-lists';
+    consumer
+      .apply(noStore)
+      .forRoutes(
+        { path, method: RequestMethod.GET },
+        { path, method: RequestMethod.PUT },
+        { path: policy, method: RequestMethod.GET },
+        { path: policy, method: RequestMethod.PUT },
+        { path: lists, method: RequestMethod.GET },
+        { path: lists, method: RequestMethod.POST },
+        { path: lists + '/:listKey', method: RequestMethod.DELETE },
+        { path: 'v1/partner/events/:eventId', method: RequestMethod.PATCH },
+        { path: 'v1/events/:eventId/sale-eligibility', method: RequestMethod.GET },
+      );
   }
 
   /**
@@ -90,8 +130,8 @@ export class CatalogModule implements NestModule {
    * media는 database면 꼭 넘기고, memory면 시험이 필요한 것만 넘긴다
    */
   static register(o: { storage: 'database'; partnerDatabase: Database; media: MediaWiring } | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring> }): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -102,6 +142,7 @@ export class CatalogModule implements NestModule {
           { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository },
           { provide: PARTNER_PRODUCTION_MEDIA, useClass: DrizzleProductionMedia },
           { provide: SEATMAP_LAYOUT_STORE, useClass: DrizzleSeatmapLayoutStore },
+          { provide: SALE_STORE, useClass: DrizzleSaleStore },
           ...mediaProviders(o.media, false),
         ],
       };
@@ -115,6 +156,7 @@ export class CatalogModule implements NestModule {
         { provide: CATALOG_REPOSITORY, useValue: repo },
         { provide: PARTNER_PRODUCTION_MEDIA, useValue: new MemoryProductionMedia(repo) },
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
+        { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },
         ...mediaProviders(o.media ?? {}, true),
       ],
     };

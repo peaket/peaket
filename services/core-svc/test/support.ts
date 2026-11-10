@@ -1,6 +1,6 @@
 // 시험 공용: identity GetAdminAuthz 대역, 팬·파트너 신원 머리, 등록 본문(BUILD_ORDER HOT-171)
 import type { AdminAuthz, AdminAuthzPort } from '@peaket/platform';
-import { MemoryCdnInvalidation, MemoryImageObjectStore, MemoryPublicFileStore, type MediaWiring } from '../src/modules/catalog/index.js';
+import { MemberCodeLookupFailed, MemoryCdnInvalidation, MemoryImageObjectStore, MemoryPublicFileStore, MemorySaleEligibilityCopy, type MediaWiring } from '../src/modules/catalog/index.js';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 
@@ -24,6 +24,23 @@ export const fan = (accountId: string = randomUUID()): Record<string, string> =>
 
 export const quiet = () => new Writable({ write: (_c, _e, cb) => cb() });
 
+/** 서비스 로거 목적지: 줄을 모아 JSON으로 읽는다(단위 시험용) */
+export function logSinkUnit(): { stream: Writable; lines: () => Record<string, unknown>[]; text: () => string } {
+  let text = '';
+  const stream = new Writable({
+    write(chunk, _enc, cb) {
+      text += String(chunk);
+      cb();
+    },
+  });
+  const lines = () =>
+    text
+      .split('\n')
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+  return { stream, lines, text: () => text };
+}
+
 /** 기본 시계(2026-11-05 00:00 UTC) 뒤의 정상 회차 하나. 2026-11-20(금) 20:00 KST 오픈 */
 export function eventBody(o: Record<string, unknown> = {}): Record<string, unknown> {
   return { openAt: '2026-11-20T11:00:00Z', startsAt: '2026-12-24T10:00:00Z', endsAt: '2026-12-24T12:30:00Z', ...o };
@@ -46,6 +63,9 @@ export function testMedia(o: Partial<MediaWiring> = {}): MediaWiring {
     store: new MemoryImageObjectStore(),
     cdn: new MemoryCdnInvalidation(),
     publicFiles: new MemoryPublicFileStore(),
+    // 회원 코드 변환은 잇지 않아 늘 실패하고, 사본은 넘긴 값을 모은다
+    memberCodes: { resolve: () => Promise.reject(new MemberCodeLookupFailed('UNAVAILABLE')) },
+    eligibilityCopy: new MemorySaleEligibilityCopy(),
     ...o,
   };
 }

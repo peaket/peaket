@@ -1718,6 +1718,483 @@ export const CreatePartnerProductionSeatmapImportResponse = zod.object({
 }).describe('좌석맵 가져오기 검증 결과. 오류가 하나라도 있으면 반영하지 않는다(FR-023)')
 
 /**
+ * FR-022, POL-011, POL-032, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 1·2). 공연 단위 규칙 배열(문법 1판, docs/design/d5 §6.7)을 준다. 승인 이력이 있고 재승인 대기 변경분에 규칙이 있으면 그 규칙과 pending true다. 소속 파트너의 공연만 준다(다른 파트너 공연과 없는 공연은 같은 404). ETag는 규칙의 판(production.sale_policy_version)이다. Cache-Control: no-store
+ * @summary 판매 정책 규칙 읽기(SCR-024)
+ */
+export const GetPartnerSalePolicyParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const getPartnerSalePolicyResponseRulesMax = 20;
+
+
+
+
+export const GetPartnerSalePolicyResponse = zod.object({
+  "rules": zod.array(zod.object({
+  "version": zod.int(),
+  "name": zod.string(),
+  "rounds": zod.union([zod.enum(['ALL']),zod.array(zod.string())]),
+  "during": zod.object({
+  "from": zod.iso.datetime({"offset":true}).optional(),
+  "to": zod.iso.datetime({"offset":true}).optional()
+}).optional(),
+  "rule": zod.looseObject({
+
+}).optional().describe('SalePolicyRuleInput.rule과 같은 모양(if·then·else)'),
+  "refundFee": zod.array(zod.object({
+  "daysLeft": zod.object({
+  "gte": zod.int(),
+  "lte": zod.int()
+}),
+  "rate": zod.int()
+}).describe('취소 공제율 구간 하나의 응답 모양(SalePolicyRefundBandInput과 같은 칸)')).optional()
+}).describe('판매 정책 규칙 하나의 응답 모양(저장 때의 SalePolicyRuleInput과 같은 칸, 문법 1판 docs/design/d5 §6.7). 응답이라 열려 있다')).max(getPartnerSalePolicyResponseRulesMax),
+  "version": zod.int().min(1),
+  "pending": zod.boolean()
+}).describe('판매 정책 규칙과 판(GET …/sale-policy). pending이 true면 재승인 대기 변경분의 규칙이다')
+
+/**
+ * FR-022, POL-011, POL-032, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 1~3·7). 모양은 이 계약이, 뜻 규칙(사실과 연산자 짝, 조건 10·깊이 3·규칙 8KB·공연당 20개 [가정], 회차·등급 참조, 1인 한도가 회차 한도 이하, 공제율 구간 겹침과 POL-032 상한)은 @peaket/validation/sale-policy가 정하고 화면과 서버가 같은 함수를 쓴다. 판정 차례: 404 → 409 production-suspended → 403 partner-admin-required(승인 이력이 있는데 파트너 실무자) → 428·412 → 422 sale-policy-invalid. 승인 이력이 없으면 production.sale_policy를 바로 고치고, 있으면 재승인 대상이라 변경분(production.pending_revision.salePolicy)에만 두고 pending true이며 APPROVED는 SUBMITTED로 바뀐다(ADR-0198 결정 3과 같은 규칙). 같은 트랜잭션에서 그 공연 판매 자격 명단의 잠금 시각을 다시 계산한다(이미 지난 잠금은 늦추지 않는다). 본문 상한은 플랫폼 기본(1MiB)이다. 성공·오류 모두 Cache-Control: no-store
+ * @summary 판매 정책 규칙 저장(규칙 배열 통째로, SCR-024)
+ */
+export const PutPartnerSalePolicyParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const PutPartnerSalePolicyHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
+})
+
+export const putPartnerSalePolicyBodyRulesItemNameMax = 40;
+
+export const putPartnerSalePolicyBodyRulesItemRoundsTwoMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfTwoAllMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneInMax = 60;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneLteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneGteMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleThenOneLimitPerPersonMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRuleElseOneLimitPerPersonMax = 10;
+
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftGteMin = 0;
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftGteMax = 365;
+
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftLteMin = 0;
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftLteMax = 365;
+
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemRateMin = 0;
+export const putPartnerSalePolicyBodyRulesItemRefundFeeItemRateMax = 100;
+
+export const putPartnerSalePolicyBodyRulesItemRefundFeeMax = 10;
+
+
+
+export const PutPartnerSalePolicyBody = zod.object({
+  "rules": zod.array(zod.object({
+  "version": zod.literal(1),
+  "name": zod.string().min(1).max(putPartnerSalePolicyBodyRulesItemNameMax),
+  "rounds": zod.union([zod.enum(['ALL']),zod.array(zod.uuid()).min(1).max(putPartnerSalePolicyBodyRulesItemRoundsTwoMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true })]),
+  "during": zod.object({
+  "from": zod.iso.datetime({"offset":true}),
+  "to": zod.iso.datetime({"offset":true}).optional()
+}).strict().optional().describe('from 포함·to 제외. 시간대를 붙인 ISO 8601만 받는다'),
+  "rule": zod.object({
+  "if": zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.object({
+  "all": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.object({
+  "all": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemTwoAllMax)
+}).strict(),zod.object({
+  "any": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemThreeAnyMax)
+}).strict(),zod.object({
+  "not": zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllItemFourNotOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')
+}).strict()]).describe('조건의 둘째 층. 깊이 3을 생성기가 다루게 재귀 대신 층으로 펼쳤다(ADR-0261 결정 3). 셋째 층은 잎이거나 객체다: 깊이 4 이상은 계약이 막지 않고 평가 함수가 422 TOO_DEEP(칸 위치)로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfTwoAllMax)
+}).strict(),zod.object({
+  "any": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.object({
+  "all": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemTwoAllMax)
+}).strict(),zod.object({
+  "any": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemThreeAnyMax)
+}).strict(),zod.object({
+  "not": zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyItemFourNotOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')
+}).strict()]).describe('조건의 둘째 층. 깊이 3을 생성기가 다루게 재귀 대신 층으로 펼쳤다(ADR-0261 결정 3). 셋째 층은 잎이거나 객체다: 깊이 4 이상은 계약이 막지 않고 평가 함수가 422 TOO_DEEP(칸 위치)로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfThreeAnyMax)
+}).strict(),zod.object({
+  "not": zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.object({
+  "all": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotTwoAllMax)
+}).strict(),zod.object({
+  "any": zod.array(zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyItemOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotThreeAnyMax)
+}).strict(),zod.object({
+  "not": zod.union([zod.object({
+  "fact": zod.string().describe('사실 이름(buyer.lists·round·grade·quantity). 목록 밖이면 422 UNKNOWN_FACT'),
+  "has": zod.string().optional().describe('판매 자격 명단 키(영문 소문자·숫자·하이픈 3~32자). 모양이 틀리면 422 LIST_KEY_INVALID'),
+  "eq": zod.union([zod.string().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),zod.int().describe('회차 ID·등급 ID(글) 또는 매수(정수)')]).optional().describe('회차 ID·등급 ID(글) 또는 매수(정수)'),
+  "in": zod.array(zod.string()).min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneInMax).optional(),
+  "lte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneLteMax).optional(),
+  "gte": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleIfFourNotFourNotOneGteMax).optional()
+}).strict().refine((() => {
+  const maxProperties = 2;
+  return ((v) => Object.keys(v).length <= maxProperties);
+})()).meta({ "maxProperties": 2 }).describe('조건의 잎: 사실 하나와 연산자 하나(docs/design/d5 §6.7 문법 1판). 사실 이름(buyer.lists·round·grade·quantity), 사실과 연산자의 짝(buyer.lists는 has, round·grade는 eq·in, quantity는 eq·lte·gte), 명단 키 모양과 값의 참조는 @peaket/validation/sale-policy가 보고 422 errors에 칸 위치와 코드(UNKNOWN_FACT·OPERATOR_MISMATCH·LIST_KEY_INVALID)로 알린다(ADR-0261 결정 3·13, 추천 적용, 2026-11-10, 리뷰)'),zod.looseObject({
+
+}).describe('깊이 4 이상의 조건(평가 함수가 TOO_DEEP)')]).describe('조건의 셋째 층: 잎(SalePolicyFactInput)이 맞는 자리다. 더 깊은 조건(all·any·not)도 계약은 받고 평가 함수가 422 TOO_DEEP로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')
+}).strict()]).describe('조건의 둘째 층. 깊이 3을 생성기가 다루게 재귀 대신 층으로 펼쳤다(ADR-0261 결정 3). 셋째 층은 잎이거나 객체다: 깊이 4 이상은 계약이 막지 않고 평가 함수가 422 TOO_DEEP(칸 위치)로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)')
+}).strict()]).optional().describe('규칙의 조건 if(깊이 3까지, 잎 10개 [가정]까지). 사실·연산자는 목록에 있는 것만이다'),
+  "then": zod.union([zod.object({
+  "limitPerPerson": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleThenOneLimitPerPersonMax)
+}).strict(),zod.object({
+  "deny": zod.enum(['PRESALE_ONLY', 'GRADE_NOT_ON_SALE'])
+}).strict(),zod.object({
+  "allow": zod.literal(true)
+}).strict()]).describe('규칙의 결과 then·else(셋 가운데 하나). limitPerPerson은 규칙이 걸리는 회차 1인 한도 이하다'),
+  "else": zod.union([zod.object({
+  "limitPerPerson": zod.int().min(1).max(putPartnerSalePolicyBodyRulesItemRuleElseOneLimitPerPersonMax)
+}).strict(),zod.object({
+  "deny": zod.enum(['PRESALE_ONLY', 'GRADE_NOT_ON_SALE'])
+}).strict(),zod.object({
+  "allow": zod.literal(true)
+}).strict()]).optional().describe('규칙의 결과 then·else(셋 가운데 하나). limitPerPerson은 규칙이 걸리는 회차 1인 한도 이하다')
+}).strict().optional(),
+  "refundFee": zod.array(zod.object({
+  "daysLeft": zod.object({
+  "gte": zod.int().min(putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftGteMin).max(putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftGteMax),
+  "lte": zod.int().min(putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftLteMin).max(putPartnerSalePolicyBodyRulesItemRefundFeeItemDaysLeftLteMax)
+}).strict(),
+  "rate": zod.int().min(putPartnerSalePolicyBodyRulesItemRefundFeeItemRateMin).max(putPartnerSalePolicyBodyRulesItemRefundFeeItemRateMax)
+}).strict().describe('취소 공제율 구간 하나. daysLeft는 공연일까지 남은 달력일(공연장 현지, payment §4.1), rate는 정수 %이고 구간 안 모든 날의 POL-032 상한 이하다. 구간은 겹치지 않는다')).min(1).max(putPartnerSalePolicyBodyRulesItemRefundFeeMax).optional()
+}).strict().describe('판매 정책 규칙 하나(문법 1판, docs/design/d5 §6.7). rule과 refundFee 가운데 꼭 하나이고 during은 rule에만 쓴다. JSON으로 직렬화한 UTF-8이 8KB [가정] 이하다(ADR-0261 결정 3)'))
+}).strict().describe('판매 정책 규칙 저장 본문(규칙 배열 통째로). 공연당 20개 [가정]를 넘으면 계약이 아니라 평가 함수가 422 TOO_MANY_RULES로 알린다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13). 본문은 1MiB까지다')
+
+
+
+
+export const PutPartnerSalePolicyResponse = zod.object({
+  "version": zod.int().min(1),
+  "pending": zod.boolean()
+})
+
+/**
+ * FR-022, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 6·7). 명단 정보만 주고 구성원(회원 코드·계정)은 주지 않는다. 공연당 10개 [가정]까지라 나누지 않는다. 소속 파트너의 공연만(다른 파트너 공연과 없는 공연은 같은 404). Cache-Control: no-store
+ * @summary 판매 자격 명단 목록(키·이름·구성원 수·잠금·파기 시각, SCR-024)
+ */
+export const ListPartnerSaleEligibilityListsParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const listPartnerSaleEligibilityListsResponseItemsItemMemberCountMin = 0;
+
+
+export const listPartnerSaleEligibilityListsResponseItemsMax = 10;
+
+
+
+export const ListPartnerSaleEligibilityListsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string(),
+  "name": zod.string(),
+  "memberCount": zod.int().min(listPartnerSaleEligibilityListsResponseItemsItemMemberCountMin),
+  "lockedAt": zod.iso.datetime({"offset":true}).nullable().describe('잠금 시각(그 키를 쓰는 규칙의 가장 이른 during.from − 24시간 [가정]). 쓰는 규칙이 없으면 null'),
+  "destroyDueAt": zod.iso.datetime({"offset":true}).describe('파기 시각(공연의 마지막 판매 종료 + 1일 [가정])'),
+  "uploadedAt": zod.iso.datetime({"offset":true}),
+  "version": zod.int().min(1)
+}).describe('판매 자격 명단 하나의 정보(구성원은 싣지 않는다, ADR-0261 결정 6·7)')).max(listPartnerSaleEligibilityListsResponseItemsMax)
+})
+
+/**
+ * FR-022, POL-011, SCR-024, ADR-0062 결정 35·37(세부는 추천 적용 2026-11-10, ADR-0261 결정 6~9). 파트너 관리자만 한다(실무자 403). 파일은 UTF-8 CSV·텍스트이고 한 줄에 회원 코드(ADR-0235 결정 4의 XXX-XXXX) 하나다. 줄마다 끝의 CR·앞뒤 공백·겹따옴표 한 쌍을 버리고 대문자로 바꾼 뒤 모양을 본다. 빈 줄은 건너뛰고 행 번호는 센다(1부터). 같은 코드는 한 번만 반영한다. 회원 코드는 identity MemberCodeService.ResolveMemberCodes로 계정 ID로 바꾸고 가입을 마친 계정만 반영한다. 올린 파일은 저장하지 않고(메모리에서만 읽는다) 계정 ID 집합만 둔다. 결과는 반영 수와 형식 오류·없는 코드 줄의 수·행 번호(각 1,000개 [가정]까지), 파일 SHA-256만이고 계정 이름·연락처·계정 ID는 싣지 않는다. 감사 기록은 올린 계정·시각·건수·파일 SHA-256만이다. 그 명단 키를 쓰는 규칙의 판매 시작 24시간 전 [가정](잠금 시각)부터는 409다. 사전 요청이 생기도록 X-Requested-With 헤더가 있어야 받는다(ADR-0257 결정 8). 성공·오류 모두 Cache-Control: no-store
+ * @summary 판매 자격 명단 올리기(한 줄에 회원 코드 하나, 같은 키면 바꿔 넣기)
+ */
+export const CreatePartnerSaleEligibilityListParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const CreatePartnerSaleEligibilityListHeader = zod.object({
+  "X-Requested-With": zod.string()
+})
+
+export const createPartnerSaleEligibilityListBodyKeyRegExp = new RegExp('^[a-z0-9-]{3,32}$');
+export const createPartnerSaleEligibilityListBodyNameMax = 40;
+
+
+
+export const CreatePartnerSaleEligibilityListBody = zod.object({
+  "key": zod.string().regex(createPartnerSaleEligibilityListBodyKeyRegExp).describe('명단 키(규칙의 buyer.lists 값)'),
+  "name": zod.string().min(1).max(createPartnerSaleEligibilityListBodyNameMax).describe('표시 이름(팬에게 보이는 명단 이름)'),
+  "file": zod.instanceof(Blob)
+}).strict()
+
+
+export const createPartnerSaleEligibilityListResponseAppliedMin = 0;
+
+export const createPartnerSaleEligibilityListResponseInvalidLineCountMin = 0;
+
+
+export const createPartnerSaleEligibilityListResponseInvalidLinesMax = 1000;
+
+export const createPartnerSaleEligibilityListResponseUnknownLineCountMin = 0;
+
+
+export const createPartnerSaleEligibilityListResponseUnknownLinesMax = 1000;
+
+export const createPartnerSaleEligibilityListResponseFileSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+
+
+export const CreatePartnerSaleEligibilityListResponse = zod.object({
+  "listKey": zod.string(),
+  "version": zod.int().min(1),
+  "applied": zod.int().min(createPartnerSaleEligibilityListResponseAppliedMin).describe('반영한 계정 수(같은 코드는 한 번)'),
+  "invalidLineCount": zod.int().min(createPartnerSaleEligibilityListResponseInvalidLineCountMin),
+  "invalidLines": zod.array(zod.int().min(1)).max(createPartnerSaleEligibilityListResponseInvalidLinesMax).describe('형식 오류 줄의 행 번호(앞에서부터 1,000개 [가정]까지)'),
+  "unknownLineCount": zod.int().min(createPartnerSaleEligibilityListResponseUnknownLineCountMin),
+  "unknownLines": zod.array(zod.int().min(1)).max(createPartnerSaleEligibilityListResponseUnknownLinesMax).describe('없는 회원 코드 줄의 행 번호(앞에서부터 1,000개 [가정]까지)'),
+  "fileSha256": zod.string().regex(createPartnerSaleEligibilityListResponseFileSha256RegExp)
+}).describe('판매 자격 명단 올리기 결과(Q-T36 ⑥). 계정 이름·연락처·계정 ID는 싣지 않는다')
+
+/**
+ * FR-022, SCR-024(추천 적용 2026-11-10, ADR-0261 결정 6·9). 파트너 관리자만 한다. 명단 행과 구성원을 지우고 대기열 사본 지우기를 넘긴다. 잠금 시각부터는 409다. 감사 기록은 지운 계정·시각·명단 키만이다. Cache-Control: no-store
+ * @summary 판매 자격 명단 지우기(잠금 전만)
+ */
+export const deletePartnerSaleEligibilityListPathListKeyRegExp = new RegExp('^[a-z0-9-]{3,32}$');
+
+
+export const DeletePartnerSaleEligibilityListParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)'),
+  "listKey": zod.string().regex(deletePartnerSaleEligibilityListPathListKeyRegExp)
+})
+
+export const DeletePartnerSaleEligibilityListHeader = zod.object({
+  "X-Requested-With": zod.string()
+})
+
+export const DeletePartnerSaleEligibilityListResponse = zod.void()
+
+/**
  * FR-023, 소유자 요청 2026-10-19(목록 10종은 추천 적용 2026-10-19), ADR-0066. 흔한 공연장 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니며 특정 공연장 이름은 쓰지 않는다. 템플릿은 저장소의 정적 파일을 배포 때 넣고(published인 것만 보인다) 파트너는 읽기만 한다. 기본 좌석 수는 모두 [가정]이다. 스탠딩(정리번호 입장) 구역은 지원하지 않아 플로어는 지정석이다(ADR-0051). 10종이라 페이지를 나누지 않는다. 파트너 소속 계정이면 관리자·실무자 모두
  * @summary 좌석맵 템플릿 목록(코드·이름·계열·기본 좌석·층·구역 수·변형·개략도 주소)
  */
@@ -2487,7 +2964,7 @@ export const UpdatePartnerProductionResponse = zod.object({
 }).describe('공연 개요·등록 정보(SCR-063·021). 승인 이력이 있으면 등록 칸은 지금 고치는 내용이다')
 
 /**
- * FR-022, FR-052, POL-003·011·030·035·041, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 회차만 고친다(다른 파트너 회차는 404). 재입장은 PUT /v1/partner/events/{eventId}/entry-policy를 쓴다(구매자에게 불리한 변경 금지 규칙이 그 경로에 있다). 승인 이력이 없는 공연의 회차는 event 행을 바로 고친다. 승인 이력이 있는 공연의 회차는 재승인 대상이라 파트너 관리자만 고치고(docs/planning/03 §3 첫 행), event 행을 그대로 둔 채 production.pending_revision에 두며 응답 pending이 true다. APPROVED면 SUBMITTED로 바뀐다(§2.14 T7, 회차 더하기와 같은 규칙, ADR-0198 결정 3). 판정 순서와 오류는 PartnerEventCreate와 같다(바뀌는 값으로 다시 본다). 오픈 뒤에는 정렬 설정과 좌석 배정 방식을 바꾸지 못한다(SCR-021, POL-035 예외 열). [가정] 오픈 뒤의 오픈 시각·공연 시각 변경도 409이고, 연기는 POST /v1/partner/events/{eventId}/cancellation(kind POSTPONE)으로 한다. If-Match 값은 GET /v1/partner/productions/{productionId}의 그 회차 version이다
+ * FR-022, FR-052, POL-003·011·030·035·041, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 회차만 고친다(다른 파트너 회차는 404). 재입장은 PUT /v1/partner/events/{eventId}/entry-policy를 쓴다(구매자에게 불리한 변경 금지 규칙이 그 경로에 있다). 승인 이력이 없는 공연의 회차는 event 행을 바로 고친다. 승인 이력이 있는 공연의 회차는 재승인 대상이라 파트너 관리자만 고치고(docs/planning/03 §3 첫 행), event 행을 그대로 둔 채 production.pending_revision에 두며 응답 pending이 true다. APPROVED면 SUBMITTED로 바뀐다(§2.14 T7, 회차 더하기와 같은 규칙, ADR-0198 결정 3). 판정 순서와 오류는 PartnerEventCreate와 같다(바뀌는 값으로 다시 본다). 오픈 뒤에는 정렬 설정과 좌석 배정 방식을 바꾸지 못한다(SCR-021, POL-035 예외 열). [가정] 오픈 뒤의 오픈 시각·공연 시각 변경도 409이고, 연기는 POST /v1/partner/events/{eventId}/cancellation(kind POSTPONE)으로 한다. If-Match 값은 GET /v1/partner/productions/{productionId}의 그 회차 version이다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-250, ADR-0261 결정 4): 판은 event.version(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다)이고 응답 ETag다. 오픈 뒤(지금 ≥ 오픈 시각)에 lobbyShuffle·openBatch·seatAssignment·openAt·startsAt을 바꾸면 409 sale-setting-locked다. 승인 이력이 있으면 바뀐 칸을 production.pending_revision.eventChanges[회차 ID]에 합쳐 둔다. 1인 한도를 그 회차에 걸린 판매 정책 규칙의 limitPerPerson보다 작게 바꾸면 422 sale-policy-invalid다. 지금 값과 같은 칸은 바꾸기가 아니다: 같은 값만 보내면 아무것도 바꾸지 않고 판도 올리지 않으며(200, 지금 판), 변경분에는 바뀐 칸만 둔다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)
  * @summary 회차 일정·정렬·배정·1인 한도 임시저장·수정(SCR-021 2·4단계)
  */
 export const UpdatePartnerEventParams = zod.object({

@@ -16,7 +16,7 @@ export function assertDraft(e: EventDraft, eventIndex: number, now: Date): void 
  * 공개 공연의 오픈 시각은 이미 공개된 값이라 드러날 것이 없고, 승인 전 공연이 인기 시각을 차지해 남을 막지 못한다.
  * 승인 전 공연끼리의 간격은 판매 승인(LCH-080)이 다시 본다. 등록 잠금 안에서 부른다
  */
-export async function assertOpenSlot(tx: RegistrationTx, e: EventDraft, eventIndex: number, productionId: string): Promise<void> {
+export async function assertOpenSlot(tx: Pick<RegistrationTx, 'otherOpenTimes'>, e: EventDraft, eventIndex: number, productionId: string): Promise<void> {
   const t = e.openAt.getTime();
   const others = await tx.otherOpenTimes(new Date(t - OPEN_GAP_MS), new Date(t + SUGGEST_HORIZON_MS + OPEN_GAP_MS), productionId);
   const r = checkOpenSlot(e.openAt, others, new Date(e.startsAt.getTime() - SALE_END_BEFORE_START_MS - 1));

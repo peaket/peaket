@@ -6,14 +6,16 @@
 // 파일은 트랜잭션을 연 채 쓰지 않는다(core 역할 idle_in_transaction 10초, 추천 적용 2026-11-10 리뷰 C2·D7): 회차 ID를 먼저 만들어 잠금 밖에서 쓰고,
 // 트랜잭션 안에서 게시한 판이 그대로인지 다시 본 뒤 넣는다. 판이 바뀌었으면 되돌리고 다시 하며(최대 2번 [가정]), 그래도 바뀌면 503 Retry-After 1이다.
 // 쓰지 못하면 회차를 더하지 않고 503 seatmap-publish-unavailable이다. 회차를 더하지 않게 되면 쓴 파일을 지운다(못 지우면 기록).
+// 승인 이력이 없는 공연은 같은 트랜잭션에서 판매 자격 명단의 파기 시각을 다시 계산한다(ADR-0261 결정 7, BUILD_ORDER HOT-250).
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, uuidv7 } from '@peaket/platform';
+import { parseSalePolicy } from '@peaket/validation/sale-policy';
 import { CATALOG_REPOSITORY, type CatalogRepository, type LayoutFile, type RequestOnce } from '../domain/ports.js';
 import type { EventDraft } from '../domain/registration.js';
 import { COMMIT_RETRIES, fanFile, fanFileBytes, fanFileKey, PUBLISH_RETRY_AFTER_S, ROUNDS_CHANGED_RETRY_AFTER_S } from '../domain/seatmap-layout.js';
 import type { OpenWarning } from './create-production.js';
 import { FanFilePublisher, PublishFailed } from './fan-file-publisher.js';
-import { notFound, partnerAdminRequired, productionSuspended, seatmapPublishUnavailable } from './problems.js';
+import { notFound, partnerAdminRequired, productionSuspended, salePolicyInvalid, seatmapPublishUnavailable } from './problems.js';
 import { assertDraft, assertOpenSlot } from './schedule-checks.js';
 
 export interface EventAdded {
@@ -65,11 +67,19 @@ export class AddProductionEvent {
         const now = new Date(this.clock.now());
         assertDraft(c.input, 0, now);
         await assertOpenSlot(tx, c.input, 0, p.id);
+        // 새 회차는 ALL 규칙에만 걸린다. 그 한도보다 1인 한도가 작으면 422(회차 고치기와 같은 판정, 리뷰 A5)
+        if (p.rules.length > 0) {
+          const r = parseSalePolicy(p.rules, { rounds: [{ eventId, perPersonLimit: c.input.perPersonLimit }], grades: [] });
+          const over = r.ok ? [] : r.errors.filter((e) => e.code === 'LIMIT_ABOVE_EVENT');
+          if (over.length > 0) throw salePolicyInvalid(over);
+        }
         // 미리 쓴 파일의 판이 지금 게시한 판과 같아야 한다(그 사이 좌석맵 저장이 커밋되면 다시 한다)
         const current = p.venueId ? await tx.layoutFiles(p.venueId, c.tenantId) : [];
         if (signature(current) !== signature(files) || (pre?.venueId ?? null) !== p.venueId) throw new LayoutChanged();
         if (!approvedBefore) {
           await tx.insertEvent(p.id, p.promoterId, p.venueId, { ...c.input, id: eventId });
+          // 마지막 판매 종료·가장 이른 오픈이 바뀔 수 있어 그 공연 명단의 잠금·파기 시각을 다시 계산하고 새 사본 판을 매긴다(ADR-0261 결정 7·9, 리뷰 H1). 승인 이력이 있으면 판매 승인(LCH-080)이 한다
+          await tx.refreshEligibility(p.id, now);
           return { eventId, pending: false, warnings: [] };
         }
         await tx.savePending(p.id, [...p.pendingEvents, { ...c.input, eventId, addedAt: now, venueId: p.venueId }], p.saleReview === 'APPROVED' ? 'SUBMITTED' : p.saleReview);

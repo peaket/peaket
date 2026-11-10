@@ -1,5 +1,5 @@
 // 테넌트 표의 행 보안(2차 방어) 통합 시험(실제 PostgreSQL 18 컨테이너, AZ-T5, FR-021, docs/security/authz-matrix.md §5.3, ADR-0198 결정 8, ADR-0241, BUILD_ORDER HOT-172).
-// 배치본·구역·좌석·가격 등급 표(0007)는 HOT-240이 더했다(ADR-0260 결정 2)
+// 배치본·구역·좌석·가격 등급 표(0007)는 HOT-240이 더했다(ADR-0260 결정 2). 판매 자격 명단·구성원 표와 규칙·회차 고치기 칸 권한(0008)은 HOT-250이 더했다(ADR-0261 결정 8)
 import 'reflect-metadata';
 import { createDatabase, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { assertDatabaseRole } from '../src/modules/catalog/adapters/db/database-role.js';
-import { event, place, priceTier, production, productionArtist, promoter, searchAlias, seat, section, venue } from '../src/modules/catalog/adapters/db/schema.js';
+import { event, place, priceTier, production, productionArtist, promoter, saleEligibilityList, saleEligibilityMember, searchAlias, seat, section, venue } from '../src/modules/catalog/adapters/db/schema.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -164,11 +164,11 @@ describe('AZ-T5 파트너 전용 DB 사용자', () => {
       { tenantId: A },
     );
     expect(seen).toEqual({ v: [LA, T].sort(), s: [T], t: [] });
-    // 판매자·종류·공개 표시는 고치지 못하고, 회차는 배치본 칸만 고친다
+    // 판매자·종류·공개 표시는 고치지 못하고, 회차는 정한 칸(배치본, 0008부터 일정·정렬·배정·1인 한도·판)만 고친다
     await denied(async (tx) => tx.update(venue).set({ promoterId: B }));
     await denied(async (tx) => tx.update(venue).set({ kind: 'TEMPLATE' }));
     await denied(async (tx) => tx.update(venue).set({ published: true }));
-    await denied(async (tx) => tx.update(event).set({ openAt: new Date('2027-01-05T11:00:00Z') }));
+    await denied(async (tx) => tx.update(event).set({ entryClosedAt: new Date('2027-01-05T11:00:00Z') }));
     // 다른 테넌트의 배치본을 회차에 잇지 못한다(묶음 외래키)
     await expect(partner.transaction(async (tx) => tx.update(event).set({ venueId: LB }).where(sql`${event.id} = ${EVENT_A}`), { tenantId: A })).rejects.toMatchObject({ cause: { code: '23503' } });
     // 팬·관제 사용자는 공연 상세의 가격 등급만 읽고(리뷰 S5) 배치본·구역·좌석은 읽지도 쓰지도 못한다
@@ -177,6 +177,82 @@ describe('AZ-T5 파트너 전용 DB 사용자', () => {
     await expect(app.db.update(venue).set({ versionSeq: 1 })).rejects.toMatchObject({ cause: { code: '42501' } });
     await expect(app.db.delete(seat)).rejects.toMatchObject({ cause: { code: '42501' } });
     await expect(app.db.delete(priceTier)).rejects.toMatchObject({ cause: { code: '42501' } });
+  });
+
+  test('다른 파트너 공연의 규칙·명단은 파트너 역할 행 보안이 남의 명단·구성원을 0건으로 보고 쓰지 못하게 하며, 팬 경로는 자격에 쓰는 칸만 읽는다 [ASVS v5.0.0-8.2.2] [ASVS v5.0.0-8.4.1]', async () => {
+    const LIST_B = randomUUID();
+    const MEMBER_B = randomUUID();
+    const due = new Date('2027-02-01T10:00:00Z');
+    const row = (id: string, productionId: string, promoterId: string, key: string) => ({ id, productionId, promoterId, key, name: '명단', memberCount: 1, fileSha256: Buffer.alloc(32, 1), version: 1, uploadedAt: new Date(), uploadedBy: randomUUID(), destroyDueAt: due });
+    await admin.db.insert(saleEligibilityList).values(row(LIST_B, PROD_B, B, 'fanclub-b'));
+    await admin.db.insert(saleEligibilityMember).values({ listId: LIST_B, promoterId: B, accountId: MEMBER_B });
+    const denied = async (fn: Parameters<Database['transaction']>[0]) => expect(partner.transaction(fn, { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
+    // 조건 없는 읽기·고치기·지우기도 B의 행을 보지도 건드리지도 않는다
+    const seen = await partner.transaction(async (tx) => ({ l: await tx.select({ id: saleEligibilityList.id }).from(saleEligibilityList), m: await tx.select({ a: saleEligibilityMember.accountId }).from(saleEligibilityMember) }), { tenantId: A });
+    expect(seen).toEqual({ l: [], m: [] });
+    const touched = await partner.transaction(
+      async (tx) => ({
+        u: await tx.update(saleEligibilityList).set({ name: '바꿈' }).where(sql`true`).returning({ id: saleEligibilityList.id }),
+        d: await tx.delete(saleEligibilityMember).returning({ a: saleEligibilityMember.accountId }),
+        p: await tx.update(production).set({ salePolicy: [] }).where(sql`${production.id} = ${PROD_B}`).returning({ id: production.id }),
+      }),
+      { tenantId: A },
+    );
+    expect(touched).toEqual({ u: [], d: [], p: [] });
+    expect(await admin.db.select({ a: saleEligibilityMember.accountId }).from(saleEligibilityMember)).toEqual([{ a: MEMBER_B }]);
+    // B의 명단·구성원으로 넣지 못한다(행 보안). 자기 공연에 B의 판매자로 넣어도 막힌다
+    await denied(async (tx) => tx.insert(saleEligibilityList).values(row(randomUUID(), PROD_B, B, 'sneak')));
+    await denied(async (tx) => tx.insert(saleEligibilityMember).values({ listId: LIST_B, promoterId: B, accountId: randomUUID() }));
+    await denied(async (tx) => tx.insert(saleEligibilityList).values(row(randomUUID(), PROD_A, B, 'sneak')));
+    // 칸 권한: 명단 키·공연·판매자는 고치지 못하고, 회차는 정한 칸만 고친다
+    const LIST_A = randomUUID();
+    await partner.transaction(async (tx) => tx.insert(saleEligibilityList).values(row(LIST_A, PROD_A, A, 'fanclub-a')), { tenantId: A });
+    await denied(async (tx) => tx.update(saleEligibilityList).set({ key: 'other-key' }));
+    await denied(async (tx) => tx.update(saleEligibilityList).set({ productionId: PROD_B }));
+    await denied(async (tx) => tx.update(saleEligibilityList).set({ promoterId: B }));
+    await denied(async (tx) => tx.update(event).set({ status: 'CANCELLED' }));
+    const edited = await partner.transaction(async (tx) => tx.update(event).set({ lobbyMinutes: 5, version: 2 }).where(sql`true`).returning({ id: event.id }), { tenantId: A });
+    expect(edited.map((r) => r.id)).toEqual([EVENT_A]);
+    // 팬 경로: 명단 키·이름·파기 시각과 구성원 계정만 읽고 SHA-256·올린 사람은 읽지 못하며 쓰지 못한다
+    expect(await app.db.select({ key: saleEligibilityList.key, name: saleEligibilityList.name }).from(saleEligibilityList).where(sql`${saleEligibilityList.id} = ${LIST_B}`)).toEqual([{ key: 'fanclub-b', name: '명단' }]);
+    expect(await app.db.select({ a: saleEligibilityMember.accountId }).from(saleEligibilityMember)).toEqual([{ a: MEMBER_B }]);
+    await expect(app.db.select({ s: saleEligibilityList.fileSha256 }).from(saleEligibilityList)).rejects.toMatchObject({ cause: { code: '42501' } });
+    await expect(app.db.select({ s: saleEligibilityList.uploadedBy }).from(saleEligibilityList)).rejects.toMatchObject({ cause: { code: '42501' } });
+    await expect(app.db.delete(saleEligibilityMember)).rejects.toMatchObject({ cause: { code: '42501' } });
+    await expect(app.db.update(production).set({ salePolicy: [] })).rejects.toMatchObject({ cause: { code: '42501' } });
+    const tables = rows<{ relname: string; relrowsecurity: boolean }>(await admin.db.execute(sql`select relname, relrowsecurity from pg_class where relname in ('sale_eligibility_list', 'sale_eligibility_member') and relkind = 'r' order by relname`));
+    expect(tables).toEqual([
+      { relname: 'sale_eligibility_list', relrowsecurity: true },
+      { relname: 'sale_eligibility_member', relrowsecurity: true },
+    ]);
+    await admin.db.execute(sql`delete from sale_eligibility_member; delete from sale_eligibility_list; update event set lobby_minutes = 10, version = 1`);
+  });
+
+  test('리뷰 재현(S6): 파트너 연결은 승인 이력이 있는 공연의 공개본 판매 정책과 회차 일정·판매 설정을 바로 고치지 못한다(판·변경분 칸만) [ASVS v5.0.0-8.4.1]', async () => {
+    const PROD_C = randomUUID();
+    const EVENT_C = randomUUID();
+    const times = { startsAt: new Date('2027-02-01T10:00:00Z'), endsAt: new Date('2027-02-01T12:00:00Z') };
+    await admin.db.insert(production).values({ id: PROD_C, promoterId: A, placeId: PLACE, title: '승인된 A 공연', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date('2026-11-01T00:00:00Z') });
+    await admin.db.insert(event).values({ id: EVENT_C, productionId: PROD_C, promoterId: A, venueId: null, openAt: new Date('2027-01-07T11:00:00Z'), ...times });
+    const denied = async (fn: Parameters<Database['transaction']>[0]) => expect(partner.transaction(fn, { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
+    await denied(async (tx) => tx.update(production).set({ salePolicy: [] }).where(sql`${production.id} = ${PROD_C}`));
+    await denied(async (tx) => tx.update(event).set({ openAt: new Date('2027-01-08T11:00:00Z') }).where(sql`${event.id} = ${EVENT_C}`));
+    await denied(async (tx) => tx.update(event).set({ perPersonLimit: 1 }).where(sql`${event.id} = ${EVENT_C}`));
+    // 판·변경분·판매 승인 상태 칸은 고친다(재승인 대기로 두는 길)
+    const ok = await partner.transaction(
+      async (tx) => ({
+        p: await tx.update(production).set({ salePolicyVersion: 2, pendingRevision: { salePolicy: [] }, saleReview: 'SUBMITTED' }).where(sql`${production.id} = ${PROD_C}`).returning({ id: production.id }),
+        e: await tx.update(event).set({ version: 2 }).where(sql`${event.id} = ${EVENT_C}`).returning({ id: event.id }),
+      }),
+      { tenantId: A },
+    );
+    expect(ok).toEqual({ p: [{ id: PROD_C }], e: [{ id: EVENT_C }] });
+    // 승인 이력이 없는 공연은 바로 고친다
+    const draft = await partner.transaction(async (tx) => tx.update(event).set({ perPersonLimit: 3 }).where(sql`${event.id} = ${EVENT_A}`).returning({ id: event.id }), { tenantId: A });
+    expect(draft).toEqual([{ id: EVENT_A }]);
+    await admin.db.execute(sql`update event set per_person_limit = 4 where id = ${EVENT_A}`);
+    await admin.db.execute(sql`delete from event where id = ${EVENT_C}`);
+    await admin.db.execute(sql`delete from production where id = ${PROD_C}`);
   });
 
   test('오픈 간격 함수는 공개 공연의 오픈 시각만 준다(다른 칸은 볼 길이 없다)', async () => {

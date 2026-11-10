@@ -894,3 +894,28 @@ enum RestrictedCiHoldResult {
 message SetRestrictedCiHoldResponse {
   RestrictedCiHoldResult result = 1;
 }
+
+// 부르는 쪽: core-svc만(판매 자격 명단 올리기, docs/design/d5 §6.7, 추천 적용 2026-11-10, ADR-0261 결정 6).
+// 파트너가 올린 회원 코드(ADR-0235 결정 4의 XXX-XXXX, core-svc가 모양을 본 뒤 대문자로 보낸다)를 계정 ID로 바꾼다. 한 번에 10,000개 [가정]까지이고
+// 넘으면 INVALID_ARGUMENT다. 답에는 찾은 것만 싣는다: 가입을 마친 ACTIVE 계정의 회원 코드만 찾고(탈퇴·흡수·가입 전 계정은 없는 코드), 같은 코드는 한 번이다.
+// 응답과 로그에 이름·연락처를 싣지 않고, 로그에는 건수만 남긴다(회원 코드·계정 ID는 넣지 않는다, ASVS 16.2.5).
+// 데드라인은 2초 [가정]이고 core-svc는 실패(UNAVAILABLE·DEADLINE_EXCEEDED·UNIMPLEMENTED·INTERNAL)하면 명단을 반영하지 않고 503 member-code-lookup-unavailable로 답한다.
+// 서버 구현은 BUILD_ORDER GAT-050(양도 받는 사람 찾기와 같은 회원 코드 찾기)이 한다. 그 전에는 이 서비스를 등록하지 않아 UNIMPLEMENTED다.
+service MemberCodeService {
+  rpc ResolveMemberCodes(ResolveMemberCodesRequest) returns (ResolveMemberCodesResponse);
+}
+
+message ResolveMemberCodesRequest {
+  // 대문자 XXX-XXXX, 1~10,000개 [가정]
+  repeated string member_codes = 1;
+}
+
+message ResolvedMemberCode {
+  string member_code = 1;
+  string account_id = 2;
+}
+
+message ResolveMemberCodesResponse {
+  // 찾은 회원 코드만(차례는 요청과 같지 않아도 된다)
+  repeated ResolvedMemberCode resolved = 1;
+}

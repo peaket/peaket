@@ -19,6 +19,8 @@ import type { EventPublicSummarySeatAssignment } from './eventPublicSummarySeatA
 import type { EventStatus } from './eventStatus';
 import type { Genre } from './genre';
 import type { ProductionDescriptionDoc } from './productionDescriptionDoc';
+import type { SalePhase } from './salePhase';
+import type { SalePolicyRefundBand } from './salePolicyRefundBand';
 import type { SellerInfo } from './sellerInfo';
 
 /**
@@ -95,4 +97,14 @@ export interface EventPublicSummary {
      */
   priceTiers?: EventPublicSummaryPriceTiersItem[];
   seller?: SellerInfo;
+  /**
+     * 이 회차의 판매 단계 요약(오픈부터 판매 종료까지, 시작 순). 마지막 승인 내용의 판매 정책 규칙으로 core-svc가 계산한다(@peaket/validation salePhases, 추천 적용 2026-11-10, ADR-0261 결정 3·5). 규칙이 없으면 GENERAL 하나다. 명단 키는 싣지 않는다. 팬마다 대상인지는 GET /v1/events/{eventId}/sale-eligibility다
+     * @maxItems 10
+     */
+  salePhases?: SalePhase[];
+  /**
+     * 이 회차에 걸리는 판매 정책의 취소 공제율 구간(공연일까지 남은 달력일 기준, 남은 날이 많은 차례). 빈 목록이면 POL-032 기본 공제표다. 적지 않은 날도 POL-032 기본 공제율이다(ADR-0261 결정 5). 한 회차에 걸리는 구간이 20개를 넘는 규칙은 저장 때 422 TOO_MANY_REFUND_BANDS이고, 여기는 방어로 20개까지만 싣는다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13)
+     * @maxItems 20
+     */
+  refundFees?: SalePolicyRefundBand[];
 }

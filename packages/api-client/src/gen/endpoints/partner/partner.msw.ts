@@ -62,6 +62,7 @@ import type {
   CreatePartnerProductionSaleReviewBody,
   CreatePartnerProductionSeatmapBody,
   CreatePartnerProductionSeatmapImportBody,
+  CreatePartnerSaleEligibilityListBody,
   CreatePartnerSettlementDisputeBody,
   CreatePartnerWebhook201,
   CreatePartnerWebhookBody,
@@ -108,6 +109,11 @@ import type {
   ProductionImage,
   PromoterFraudReport,
   PutPartnerEventEntryPolicyBody,
+  SaleEligibilityListPage,
+  SaleEligibilityUploadResult,
+  SalePolicyDocument,
+  SalePolicyPut,
+  SalePolicySaved,
   ScannerPlacementInput,
   SeatMapImportResult,
   SeatMapLayout,
@@ -195,6 +201,14 @@ export const getPutPartnerProductionSeatmapResponseMock = (overrideResponse: Par
 export const getCreatePartnerProductionSeatmapResponseMock = (overrideResponse: Partial<Extract<SeatMapLayout, object>> = {}): SeatMapLayout => ({layoutVersion: faker.helpers.arrayElement([faker.number.int(), undefined]), templateVenueId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), priceTiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 16}) }, (_, i) => i + 1).map(() => ({tierId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), price: faker.number.int()})), undefined]), fanFilePublished: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), canvas: {width: faker.number.int(), height: faker.number.int()}, stage: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), sections: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({sectionId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), level: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), shape: {kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, label: faker.helpers.arrayElement([{x: faker.helpers.arrayElement([faker.number.int(), undefined]), y: faker.helpers.arrayElement([faker.number.int(), undefined])}, undefined]), tierId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatIndexRange: faker.helpers.arrayElement([{from: faker.helpers.arrayElement([faker.number.int(), undefined]), to: faker.helpers.arrayElement([faker.number.int(), undefined])}, undefined]), fillRule: faker.helpers.arrayElement([{method: faker.helpers.arrayElement(['COUNT','GRID'] as const), targetCount: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rows: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), seatsPerRow: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowShape: faker.helpers.arrayElement([faker.helpers.arrayElement(['STRAIGHT','CURVED'] as const), undefined]), seatSpacingCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowSpacingCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), aisles: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), aisleWidthCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowLabel: faker.helpers.arrayElement([faker.helpers.arrayElement(['NUMBER','ALPHA'] as const), undefined]), firstNumber: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), numberFrom: faker.helpers.arrayElement([faker.helpers.arrayElement(['LEFT','RIGHT'] as const), undefined])}, undefined]), seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), index: faker.helpers.arrayElement([faker.number.int(), undefined]), row: faker.string.alpha({length: {min: 10, max: 20}}), number: faker.number.int(), x: faker.number.int(), y: faker.number.int(), tierId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), wheelchair: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), unavailable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined])})), ...overrideResponse})
 
 export const getCreatePartnerProductionSeatmapImportResponseMock = (overrideResponse: Partial<Extract<SeatMapImportResult, object>> = {}): SeatMapImportResult => ({ok: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), layout: faker.helpers.arrayElement([{layoutVersion: faker.helpers.arrayElement([faker.number.int(), undefined]), templateVenueId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), priceTiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 16}) }, (_, i) => i + 1).map(() => ({tierId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), price: faker.number.int()})), undefined]), fanFilePublished: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), canvas: {width: faker.number.int(), height: faker.number.int()}, stage: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), sections: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({sectionId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), level: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), shape: {kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, label: faker.helpers.arrayElement([{x: faker.helpers.arrayElement([faker.number.int(), undefined]), y: faker.helpers.arrayElement([faker.number.int(), undefined])}, undefined]), tierId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatIndexRange: faker.helpers.arrayElement([{from: faker.helpers.arrayElement([faker.number.int(), undefined]), to: faker.helpers.arrayElement([faker.number.int(), undefined])}, undefined]), fillRule: faker.helpers.arrayElement([{method: faker.helpers.arrayElement(['COUNT','GRID'] as const), targetCount: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rows: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), seatsPerRow: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowShape: faker.helpers.arrayElement([faker.helpers.arrayElement(['STRAIGHT','CURVED'] as const), undefined]), seatSpacingCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowSpacingCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), aisles: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), aisleWidthCm: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), rowLabel: faker.helpers.arrayElement([faker.helpers.arrayElement(['NUMBER','ALPHA'] as const), undefined]), firstNumber: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), numberFrom: faker.helpers.arrayElement([faker.helpers.arrayElement(['LEFT','RIGHT'] as const), undefined])}, undefined]), seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), index: faker.helpers.arrayElement([faker.number.int(), undefined]), row: faker.string.alpha({length: {min: 10, max: 20}}), number: faker.number.int(), x: faker.number.int(), y: faker.number.int(), tierId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), wheelchair: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), unavailable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined])}))}, undefined]), errors: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({line: faker.helpers.arrayElement([faker.number.int(), undefined]), field: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), warnings: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({code: faker.helpers.arrayElement([faker.helpers.arrayElement(['W1','W2','W3','SEAT_OVERLAP','SVG_IGNORED'] as const), undefined]), seatIds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), ignored: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined]), ...overrideResponse})
+
+export const getGetPartnerSalePolicyResponseMock = (overrideResponse: Partial<Extract<SalePolicyDocument, object>> = {}): SalePolicyDocument => ({rules: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({version: faker.number.int(), name: faker.string.alpha({length: {min: 10, max: 20}}), rounds: faker.helpers.arrayElement([faker.helpers.arrayElement(['ALL'] as const),Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))),]), during: faker.helpers.arrayElement([{from: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), to: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])}, undefined]), rule: faker.helpers.arrayElement([{}, undefined]), refundFee: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({daysLeft: {gte: faker.number.int(), lte: faker.number.int()}, rate: faker.number.int()})), undefined])})), version: faker.number.int({min: 1}), pending: faker.datatype.boolean(), ...overrideResponse})
+
+export const getPutPartnerSalePolicyResponseMock = (overrideResponse: Partial<Extract<SalePolicySaved, object>> = {}): SalePolicySaved => ({version: faker.number.int({min: 1}), pending: faker.datatype.boolean(), ...overrideResponse})
+
+export const getListPartnerSaleEligibilityListsResponseMock = (overrideResponse: Partial<Extract<SaleEligibilityListPage, object>> = {}): SaleEligibilityListPage => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), memberCount: faker.number.int({min: 0}), lockedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), destroyDueAt: faker.date.past().toISOString().slice(0, 19) + 'Z', uploadedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', version: faker.number.int({min: 1})})), ...overrideResponse})
+
+export const getCreatePartnerSaleEligibilityListResponseMock = (overrideResponse: Partial<Extract<SaleEligibilityUploadResult, object>> = {}): SaleEligibilityUploadResult => ({listKey: faker.string.alpha({length: {min: 10, max: 20}}), version: faker.number.int({min: 1}), applied: faker.number.int({min: 0}), invalidLineCount: faker.number.int({min: 0}), invalidLines: Array.from({ length: faker.number.int({min: 1, max: 1000}) }, (_, i) => i + 1).map(() => (faker.number.int({min: 1}))), unknownLineCount: faker.number.int({min: 0}), unknownLines: Array.from({ length: faker.number.int({min: 1, max: 1000}) }, (_, i) => i + 1).map(() => (faker.number.int({min: 1}))), fileSha256: faker.helpers.fromRegExp("^[0-9a-f]{64}$"), ...overrideResponse})
 
 export const getGetPartnerSeatmapTemplatesResponseMock = (overrideResponse: Partial<Extract<GetPartnerSeatmapTemplates200, object>> = {}): GetPartnerSeatmapTemplates200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({templateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), code: faker.helpers.arrayElement([faker.helpers.arrayElement(['ARENA-END','ARENA-THRUST','ARENA-CENTER','DOME','STADIUM','THEATER-L','THEATER-M','THEATER-S','HALL','FLAT'] as const), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), family: faker.helpers.arrayElement([faker.helpers.arrayElement(['ARENA','DOME','STADIUM','THEATER','HALL','FLAT'] as const), undefined]), defaultCapacity: faker.helpers.arrayElement([faker.number.int(), undefined]), levelCount: faker.helpers.arrayElement([faker.number.int(), undefined]), sectionCount: faker.helpers.arrayElement([faker.number.int(), undefined]), summary: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), variants: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), label: faker.string.alpha({length: {min: 10, max: 20}}), kind: faker.helpers.arrayElement(['CHOICE','NUMBER','BOOLEAN'] as const), options: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), min: faker.helpers.arrayElement([faker.number.int(), undefined]), max: faker.helpers.arrayElement([faker.number.int(), undefined]), defaultValue: faker.helpers.arrayElement([{}, undefined])})), undefined]), schematicUrl: faker.helpers.arrayElement([faker.internet.url(), undefined]), version: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), ...overrideResponse})
 
@@ -725,6 +739,64 @@ export const getCreatePartnerProductionSeatmapImportMockHandler = (overrideRespo
   }, options)
 }
 
+export const getGetPartnerSalePolicyMockHandler = (overrideResponse?: SalePolicyDocument | ((info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => Promise<SalePolicyDocument> | SalePolicyDocument), options?: RequestHandlerOptions) => {
+  return http.get<{ productionId: string }>('*/v1/partner/productions/:productionId/sale-policy', async (info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerSalePolicyResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getPutPartnerSalePolicyMockHandler = (overrideResponse?: SalePolicySaved | ((info: Parameters<HttpResponseResolver<{ productionId: string }, SalePolicyPut>>[0]) => Promise<SalePolicySaved> | SalePolicySaved), options?: RequestHandlerOptions) => {
+  return http.put<{ productionId: string }, SalePolicyPut>('*/v1/partner/productions/:productionId/sale-policy', async (info: Parameters<HttpResponseResolver<{ productionId: string }, SalePolicyPut>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getPutPartnerSalePolicyResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getListPartnerSaleEligibilityListsMockHandler = (overrideResponse?: SaleEligibilityListPage | ((info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => Promise<SaleEligibilityListPage> | SaleEligibilityListPage), options?: RequestHandlerOptions) => {
+  return http.get<{ productionId: string }>('*/v1/partner/productions/:productionId/sale-eligibility-lists', async (info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListPartnerSaleEligibilityListsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreatePartnerSaleEligibilityListMockHandler = (overrideResponse?: SaleEligibilityUploadResult | ((info: Parameters<HttpResponseResolver<{ productionId: string }, CreatePartnerSaleEligibilityListBody>>[0]) => Promise<SaleEligibilityUploadResult> | SaleEligibilityUploadResult), options?: RequestHandlerOptions) => {
+  return http.post<{ productionId: string }, CreatePartnerSaleEligibilityListBody>('*/v1/partner/productions/:productionId/sale-eligibility-lists', async (info: Parameters<HttpResponseResolver<{ productionId: string }, CreatePartnerSaleEligibilityListBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerSaleEligibilityListResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getDeletePartnerSaleEligibilityListMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ productionId: string; listKey: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete<{ productionId: string; listKey: string }>('*/v1/partner/productions/:productionId/sale-eligibility-lists/:listKey', async (info: Parameters<HttpResponseResolver<{ productionId: string; listKey: string }>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
 export const getGetPartnerSeatmapTemplatesMockHandler = (overrideResponse?: GetPartnerSeatmapTemplates200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<GetPartnerSeatmapTemplates200> | GetPartnerSeatmapTemplates200), options?: RequestHandlerOptions) => {
   return http.get('*/v1/partner/seatmap-templates', async (info: Parameters<HttpResponseResolver>[0]) => {
 
@@ -1221,6 +1293,11 @@ export const getPartnerMock = () => [
   getPutPartnerProductionSeatmapMockHandler(),
   getCreatePartnerProductionSeatmapMockHandler(),
   getCreatePartnerProductionSeatmapImportMockHandler(),
+  getGetPartnerSalePolicyMockHandler(),
+  getPutPartnerSalePolicyMockHandler(),
+  getListPartnerSaleEligibilityListsMockHandler(),
+  getCreatePartnerSaleEligibilityListMockHandler(),
+  getDeletePartnerSaleEligibilityListMockHandler(),
   getGetPartnerSeatmapTemplatesMockHandler(),
   getGetPartnerSeatmapTemplateMockHandler(),
   getCreatePartnerProductionImageMockHandler(),

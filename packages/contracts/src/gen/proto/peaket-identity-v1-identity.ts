@@ -1351,6 +1351,44 @@ export const identityV1Identity: Record<string, unknown> = {
                       "id": 1
                     }
                   }
+                },
+                "MemberCodeService": {
+                  "methods": {
+                    "ResolveMemberCodes": {
+                      "requestType": "ResolveMemberCodesRequest",
+                      "responseType": "ResolveMemberCodesResponse"
+                    }
+                  }
+                },
+                "ResolveMemberCodesRequest": {
+                  "fields": {
+                    "member_codes": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "ResolvedMemberCode": {
+                  "fields": {
+                    "member_code": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "ResolveMemberCodesResponse": {
+                  "fields": {
+                    "resolved": {
+                      "rule": "repeated",
+                      "type": "ResolvedMemberCode",
+                      "id": 1
+                    }
+                  }
                 }
               }
             }

@@ -1,8 +1,9 @@
 // 서비스별 Outbox 릴레이 프로세스 시작(ADR-0116 결정 1·2, BUILD_ORDER FND-110).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, startOutboxRelayProcess } from '@peaket/platform';
+import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
+import { coreMaintenanceTasks } from './maintenance-tasks.js';
 
 const SERVICE = 'core-svc';
 const config = loadOutboxRelayProcessConfig(SERVICE, process.env);
@@ -15,13 +16,18 @@ const maintenanceDatabase = createDatabase({ url: config.maintenanceDatabaseUrl,
 const producer = createKafkaProducer({ kind: 'outbox-relay', brokers: config.kafkaBrokers, clientId: `${SERVICE}-${env}-${config.pod}`, auth: kafkaAuthFromEnv(`${SERVICE}-outbox-relay`) });
 await producer.connect();
 
+// 공용 정비 일과 core-svc의 일(판매 자격 명단 파기·사본 다시 넘기기, ADR-0261 결정 7·9)
+const core = coreMaintenanceTasks(maintenanceDatabase, systemClock);
 const relay = await startOutboxRelayProcess({
   service: SERVICE,
   database,
   maintenanceDatabase,
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
+  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...core.tasks],
 });
+core.copy.register(relay.registry);
+core.metrics.register(relay.registry);
 
 // 종료: 보내던 묶음을 마치고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).
 // 처리기는 시작 바로 뒤에 붙인다(관리 포트를 여는 중에 SIGTERM이 와도 Lease를 놓고 끝나게, 코드 리뷰 2026-11-01)

@@ -6,11 +6,13 @@
 // 200은 CDN 태그 머리 x-peaket-cache-tag: event:{회차 ID}(DB의 소문자 값)를 싣는다. 판매 승인·판매 중지·회차 변경 때 core-svc가 이 태그로
 // 무효화하므로, 대문자로 부른 주소의 사본도 함께 지워진다(docs/infra.md §4.1, docs/frontend.md §2.5 /events/[id] 행).
 // 404는 no-store [가정]: 판매 승인 직후 공개가 캐시된 404에 늦게 보이지 않게 한다.
+// 팬별 판매 자격(GET /v1/events/{eventId}/sale-eligibility, 팬 로그인, ADR-0261 결정 5)은 같은 404·410 규칙이고 성공·오류 모두 no-store다(비로그인 401도 모듈 미들웨어가 단다).
 import { Controller, Get, Res } from '@nestjs/common';
-import { ContractParams, Roles } from '@peaket/platform';
+import { ContractParams, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { type EventPublicSummary, GetEventSummary } from '../application/get-event-summary.js';
+import { FanSaleEligibility, type FanSaleEligibilityView } from '../application/fan-sale-eligibility.js';
 import { eventSuspended, notFound } from '../application/problems.js';
 
 /** 계약의 EventId 경로 칸(문자열). 모양이 틀린 ID는 저장소가 없는 회차로 답한다(같은 404) */
@@ -25,7 +27,18 @@ export const cacheTags = (s: { eventId: string; productionId: string }) => `${ev
 
 @Controller('v1/events')
 export class EventSummaryController {
-  constructor(private readonly summary: GetEventSummary) {}
+  constructor(
+    private readonly summary: GetEventSummary,
+    private readonly eligibility: FanSaleEligibility,
+  ) {}
+
+  @Get(':eventId/sale-eligibility')
+  @Roles(['fan'])
+  async saleEligibility(@ContractParams(EventParams) params: z.output<typeof EventParams>, @CurrentPrincipal() me: Principal): Promise<FanSaleEligibilityView> {
+    const found = await this.eligibility.run(params.eventId, me.accountId);
+    if (!found || found === 'suspended') throw found ? eventSuspended() : notFound();
+    return found;
+  }
 
   @Get(':eventId')
   @Roles(['public'])
