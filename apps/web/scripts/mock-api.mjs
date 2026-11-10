@@ -446,14 +446,20 @@ export function seatmapLayout() {
 }
 
 /** 자리 그림: 이름마다 다른 색과 이름 글자 */
+const XML_TEXT = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
+/** SVG 글자에 넣을 값을 XML 글자 참조로 바꾼다(주소의 이름이 꼬리표로 해석되지 않게) */
+const xmlText = (s) => String(s).replace(/[&<>"']/g, (c) => XML_TEXT[c]);
+
 export function placeholderSvg(name, width) {
-  const banner = name.startsWith('banner-');
-  const h = banner ? Math.round((width * 400) / 1240) : Math.round((width * 4) / 3);
+  const n = String(name);
+  const w = Math.max(1, Math.min(1280, Math.round(Number(width) || 0)));
+  const banner = n.startsWith('banner-');
+  const h = banner ? Math.round((w * 400) / 1240) : Math.round((w * 4) / 3);
   let hash = 0;
-  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  for (const ch of n) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   const hue = hash % 360;
-  const label = name.replace(/^(banner|poster)-/, '').toUpperCase();
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 60% 38%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 65% 22%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="${banner ? '50%' : '42%'}" fill="#fff" font-family="sans-serif" font-size="${Math.round(width / (banner ? 14 : 7))}" font-weight="700" text-anchor="middle">${label}</text></svg>`;
+  const label = xmlText(n.replace(/^(banner|poster)-/, '').toUpperCase());
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 60% 38%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 65% 22%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="${banner ? '50%' : '42%'}" fill="#fff" font-family="sans-serif" font-size="${Math.round(w / (banner ? 14 : 7))}" font-weight="700" text-anchor="middle">${label}</text></svg>`;
 }
 
 const ID = /^[A-Za-z0-9-]{1,64}$/;

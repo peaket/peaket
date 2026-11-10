@@ -169,9 +169,12 @@ export function createWorkerFetch(post: (m: { fetch: { id: number; url: string }
         post({ fetch: { id, url } });
       }),
     receive: ({ id, status, buffer }) => {
-      const resolve = waiting.get(id);
-      waiting.delete(id);
-      resolve?.(status === 200 && buffer ? parsedFile(buffer) : { status });
+      // 받은 id는 숫자만 받는다(문자열·큰 수가 Map 조회와 호출로 새지 않게, CodeQL js/unvalidated-dynamic-method-call)
+      const key = typeof id === 'number' && Number.isSafeInteger(id) ? id : -1;
+      const resolve = waiting.get(key);
+      if (typeof resolve !== 'function') return;
+      waiting.delete(key);
+      resolve(status === 200 && buffer ? parsedFile(buffer) : { status });
     },
   };
 }

@@ -818,7 +818,8 @@ function cellText(s, max = 0) {
     const k = t.lastIndexOf('`');
     t = t.slice(0, k) + t.slice(k + 1);
   }
-  return t.replace(/\|/g, '\\|') || '—';
+  // 역슬래시를 먼저 이스케이프해야 | 앞의 역슬래시가 원문의 것과 섞이지 않는다(CodeQL js/incomplete-sanitization)
+  return t.replace(/\\/g, '\\\\').replace(/\|/g, '\\|') || '—';
 }
 
 const countBy = (items, f) => {

@@ -1,7 +1,7 @@
 # CodeQL 설정(docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 3, BUILD_ORDER BAS-011 ②). security-scan.yml codeql 잡이 config-file로 준다.
 # 기본 쿼리 묶음을 그대로 쓴다(쿼리를 더하거나 빼지 않는다. 프로토타입 오염 쿼리 셋이 돈 흔적은 tools/ci/scan-gate.mjs가 본다).
-# 화면·서비스·패키지·도구 코드를 보고, 빼는 것은 시험·생성물·빌드 결과뿐이다(tools/ci/security-scan-workflow.test.mjs가 본다).
-# 부하 시험(loadtest/)과 규칙 모델(specs/)은 운영 코드가 아니라 보지 않는다.
+# 화면·서비스·패키지·도구 코드를 보고, 빼는 것은 시험·생성물·빌드 결과와 운영에 배포하지 않는 결제 시뮬레이터뿐이다(tools/ci/security-scan-workflow.test.mjs가 본다).
+# 부하 시험(loadtest/)과 규칙 모델(specs/)은 운영 코드가 아니라 보지 않고, 결제 시뮬레이터(services/pg-simulator)도 운영에 배포하지 않아 보지 않는다(ADR-0263 결정 14).
 name: peaket-codeql
 paths:
   - apps
@@ -27,3 +27,5 @@ paths-ignore:
   - '**/.turbo'
   - '**/coverage'
   - '**/storybook-static'
+  # 운영에 배포하지 않는 결제 시뮬레이터(ADR-0263 결정 14)
+  - 'services/pg-simulator'

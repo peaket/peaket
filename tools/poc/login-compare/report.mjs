@@ -29,8 +29,11 @@ const FILES = {
 const codeLines = (f) => read(f).split('\n').filter((l) => l.trim() && !/^\s*(\/\/|\*|\/\*)/.test(l)).length;
 
 const xml = read('junit.xml');
+/** XML 글자 참조를 한 번에 푼다(차례로 바꾸면 &amp;lt;가 두 번 풀려 <가 된다, CodeQL js/double-escaping) */
+const XML_ENTITIES = { quot: '"', amp: '&', lt: '<', gt: '>', apos: "'" };
+const unxml = (s) => s.replace(/&(quot|amp|lt|gt|apos);/g, (_m, e) => XML_ENTITIES[e]);
 const cases = [...xml.matchAll(/<testcase\b[^>]*\bname="([^"]*)"[^>]*?(\/>|>([\s\S]*?)<\/testcase>)/g)].map((m) => ({
-  name: m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+  name: unxml(m[1]),
   ok: !/<(failure|error)\b/.test(m[3] ?? ''),
 }));
 const counts = JSON.parse(read('cookie-counts.json'));
@@ -108,7 +111,7 @@ const md = `# I-T51 로그인 구현 비교 결과
 
 | 시나리오 | 이유 |
 | --- | --- |
-${Object.entries(rows[pick ?? 'C1'].reasons).map(([l, r]) => `| ${l} | ${r.join(' ; ').replace(/\|/g, '\\|').replace(/^callback: /, '') || '(없음)'} |`).join('\n')}
+${Object.entries(rows[pick ?? 'C1'].reasons).map(([l, r]) => `| ${l} | ${r.join(' ; ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/^callback: /, '') || '(없음)'} |`).join('\n')}
 ${Object.values(rows).some((r) => r.failedTests.length) ? `\n## 실패한 시험\n\n${Object.entries(rows).flatMap(([k, r]) => r.failedTests.map((t) => `- ${k}: ${t}`)).join('\n')}\n` : ''}`;
 writeFileSync(here('RESULT.md'), md);
 console.log(md);

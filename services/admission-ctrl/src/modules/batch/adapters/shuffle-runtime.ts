@@ -28,13 +28,20 @@ export interface ShuffleRuntimeDeps {
   http?: (relays: readonly string[]) => BeaconHttp;
 }
 
+/** 끝의 /를 지운다(긴 / 줄에서 정규식 되짚기가 늘지 않게 글자로 센다, CodeQL js/polynomial-redos) */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === '/') end--;
+  return s.slice(0, end);
+}
+
 /** 중계 주소 읽기: 쿼리·조각·사용자 정보가 없는 주소만 받는다. 운영은 https만이고 2개 이상이다 */
 function relaysOf(raw: string | undefined, peaketEnv: string): string[] {
   const relays = [
     ...new Set(
       (raw ?? '')
         .split(',')
-        .map((s) => s.trim().replace(/\/+$/, ''))
+        .map((s) => trimTrailingSlashes(s.trim()))
         .filter(Boolean),
     ),
   ];

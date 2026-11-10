@@ -22,6 +22,9 @@ const host = process.env.PEAKET_SERVE_HOST ?? '127.0.0.1';
 const SRC = new URL('../../../packages/api-client/src/purchase/', import.meta.url);
 const VECTORS = new URL('../../../docs/api/vectors/purchase-request-mac.v1.json', import.meta.url);
 const MODULES = new Set(['crypto', 'store', 'signer', 'index']);
+/** 동시에 처리 중인 요청과 적어 두는 차례의 상한(검사 도구라 작게 둔다) */
+const MAX_INFLIGHT = 200;
+const MAX_SINK = 10_000;
 /** @type {string[]} */
 let sink = [];
 let inflight = 0;
@@ -60,8 +63,14 @@ createServer(async (req, res) => {
       }
       if (req.method === 'GET') return send(res, 200, 'application/json', JSON.stringify({ seqs: sink, maxInflight }));
       if (req.method === 'POST') {
+        // 요청이 쌓여 메모리·타이머가 끝없이 늘지 않게 상한을 둔다(CodeQL js/resource-exhaustion)
+        if (inflight >= MAX_INFLIGHT) {
+          req.resume();
+          return send(res, 429, 'text/plain', 'too many in flight');
+        }
+        if (sink.length >= MAX_SINK) sink.shift();
         sink.push(String(req.headers['x-purchase-seq'] ?? ''));
-        const d = Math.min(200, Math.max(0, Number(u.searchParams.get('d')) || 0));
+        const d = Math.min(200, Math.max(0, Math.trunc(Number(u.searchParams.get('d'))) || 0));
         req.resume();
         maxInflight = Math.max(maxInflight, ++inflight);
         return setTimeout(() => {

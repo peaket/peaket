@@ -8,11 +8,14 @@ const BLOCK_NAMES = ['style', 'script', 'template', 'noscript', 'iframe', 'objec
 const BLOCK_OPEN = new RegExp(`<(${BLOCK_NAMES.join('|')})\\b`, 'gi');
 const BLOCK_CLOSE = new Map(BLOCK_NAMES.map((n) => [n, new RegExp(`</${n}\\s*>`, 'gi')]));
 const COMMENT_OPEN = /<!--/g;
-const COMMENT_CLOSE = /-->/g;
+/** 주석 끝은 --!>도 된다(HTML 해석기 규칙, CodeQL js/bad-tag-filter) */
+const COMMENT_CLOSE = /--!?>/g;
 /** 짝 없이 남은 여는·닫는 꼬리표(<scr<script></script>ipt> 같은 것을 걷은 뒤 남는 것)와 빈 꼬리표 */
-const LONE = /<\/?(?:style|script|template|noscript|iframe|object|meta|link|img|base|input)\b(?:"[^"]*"|'[^']*'|[^'"<>])*>/gi;
-/** 여는 꼬리표(따옴표 안의 >는 꼬리표 끝이 아니다) */
-const TAG = /<([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^'"<>])*)>/gi;
+const LONE_NAMES = new Set([...BLOCK_NAMES, 'meta', 'link', 'img', 'base', 'input']);
+/** 여는 꼬리표 전체(따옴표 안의 >는 꼬리표 끝이 아니다). 닫는 꼬리표(이름 앞이 /)는 맞지 않는다 */
+const TAG = /^<([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^'"<>])*)>$/i;
+/** 닫는 꼬리표(걸러야 할 이름이면 통째로 지운다) */
+const CLOSE_TAG = /^<\/([a-z][a-z0-9-]*)\s*>$/i;
 /** 꼬리표 안의 속성 하나(따옴표 값을 통째로) */
 const ATTR = /\s+([^\s"'=<>\/]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
 /** 이만큼 되풀이해도 바뀌면 멈춘다(걷은 자리에서 꼬리표가 되살아나는 것을 막는다) */
@@ -50,11 +53,49 @@ function removeBetween(html: string, open: RegExp, closeFor: (m: RegExpExecArray
   return out + html.slice(at);
 }
 
+/** start의 <부터 짝이 되는 >까지(따옴표 안의 >는 건너뛴다). 없으면 -1 */
+function tagEndAt(html: string, start: number): number {
+  let quote = '';
+  for (let i = start + 1; i < html.length; i++) {
+    const ch = html[i]!;
+    if (quote) {
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '>') return i;
+  }
+  return -1;
+}
+
+/**
+ * 꼬리표를 한 번 훑어 걸러야 할 꼬리표(짝 없이 남은 것 포함)는 지우고, 남는 여는 꼬리표는 속성을 거른다.
+ * replace 사슬 대신 앞에서부터 읽어 새 꼬리표가 되살아나는 자리를 다시 보지 않는다(걷은 자리는 바깥 되풀이가 다시 본다)
+ */
+function rewriteTags(html: string): string {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const lt = html.indexOf('<', at);
+    if (lt < 0) return out + html.slice(at);
+    out += html.slice(at, lt);
+    const end = tagEndAt(html, lt);
+    if (end < 0) return out + html.slice(lt);
+    const raw = html.slice(lt, end + 1);
+    const m = TAG.exec(raw);
+    const close = m ? null : CLOSE_TAG.exec(raw);
+    if (m) {
+      if (!LONE_NAMES.has(m[1]!.toLowerCase())) out += `<${m[1]}${keepAttrs(m[2]!)}>`;
+    } else if (close && LONE_NAMES.has(close[1]!.toLowerCase())) {
+      // 걸러야 할 닫는 꼬리표는 지운다
+    } else out += raw;
+    at = end + 1;
+  }
+}
+
 function strip(html: string): string {
   const noComments = removeBetween(html, COMMENT_OPEN, () => COMMENT_CLOSE);
-  return removeBetween(noComments, BLOCK_OPEN, (m) => BLOCK_CLOSE.get(m[1]!.toLowerCase())!)
-    .replace(LONE, '')
-    .replace(TAG, (_m: string, name: string, attrs: string) => `<${name}${keepAttrs(attrs)}>`);
+  return rewriteTags(removeBetween(noComments, BLOCK_OPEN, (m) => BLOCK_CLOSE.get(m[1]!.toLowerCase())!));
 }
 
 export function precleanPastedHtml(html: string): string {

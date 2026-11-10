@@ -94,7 +94,8 @@ export function isFrameworkScript(content, runtime = []) {
 /** HTML의 실행되는 인라인 스크립트 가운데 Next.js·React 모양인 것마다 'sha256-…'(나온 차례, 같은 것은 한 번) */
 export function inlineScriptHashes(html, runtime = []) {
   const out = [];
-  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+  // 속성 값 안의 >를 꼬리표 끝으로 보지 않게 따옴표를 인정한다(CodeQL js/bad-tag-filter). 끝 꼬리표는 이름 뒤에 공백·속성이 와도 받는다
+  for (const m of html.matchAll(/<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script\b[^>]*>/gi)) {
     const attrs = m[1];
     if (/\ssrc\s*=/i.test(attrs)) continue;
     const type = /\stype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);

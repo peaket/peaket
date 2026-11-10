@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tempDir } from './git-fixture.mjs';
-import { judge, main, parseScanExceptions, readFindings } from './scan-gate.mjs';
+import { judge, main, markdownCell, parseScanExceptions, readFindings } from './scan-gate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'scan-gate.mjs');
@@ -616,4 +616,17 @@ test('IaC 설정 검사의 여러 결과 파일에 같은 (규칙, 경로, 줄) 
   // 다른 도구는 합치지 않는다(같은 줄의 비밀 둘은 둘이다)
   const g = gitleaks([gitleaksResult('a.ts', 1, 'c'.repeat(40)), gitleaksResult('a.ts', 1, 'c'.repeat(40))]);
   assert.equal(readFindings([{ file: 'g.sarif', text: g }], 'gitleaks').findings.length, 2);
+});
+
+test('잡 요약 표 칸은 역슬래시를 먼저 이스케이프한 뒤 | 를 이스케이프해 칸이 나뉘지 않는다(CodeQL js/incomplete-sanitization)', () => {
+  // 원문 a\|b: 역슬래시를 그대로 두면 a\\|b가 되어 \\가 역슬래시 하나로 읽히고 |가 칸을 나눈다
+  assert.equal(markdownCell('a\\|b'), 'a\\\\\\|b');
+  assert.equal(markdownCell('C:\\x|y'), 'C:\\\\x\\|y');
+  assert.equal(markdownCell('줄\n바꿈\r\n둘'), '줄 바꿈 둘');
+  assert.equal(markdownCell(undefined), '');
+  // 이스케이프한 칸은 이스케이프되지 않은 | 가 없다(표 칸이 하나로 남는다)
+  for (const raw of ['a\\|b', 'a\\\\|b', '\\|\\|', 'x|y\\']) {
+    const c = markdownCell(raw);
+    assert.equal(c.replace(/\\\\/g, '').replace(/\\\|/g, '').includes('|'), false, raw);
+  }
 });

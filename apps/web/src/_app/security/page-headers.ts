@@ -202,11 +202,17 @@ export function socialAuthOrigins(env: Readonly<Record<string, string | undefine
   return out;
 }
 
+/** 정규식 글자로 해석되는 문자를 모두 이스케이프한다(경로 틀은 정적이지만, 틀에 든 .·+ 같은 글자가 뜻을 바꾸지 않게) */
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** 경로 틀의 동적 조각([id])만 [^/]+로 바꾸고 나머지 조각은 글자 그대로 본다 */
+const routeRegExp = (pattern: string): RegExp =>
+  new RegExp(`^${pattern.split('/').map((seg) => (/^\[[^\]]+\]$/.test(seg) ? '[^/]+' : escapeRegExp(seg))).join('\\/')}$`);
+
 const compiled = ROUTES.map((r) => ({
   rule: r,
   // 고정 조각이 많은 틀이 먼저 맞게 한다(/login/link가 /login/[provider]보다 먼저)
   fixed: r.pattern.split('/').filter((s) => s && !s.startsWith('[')).length,
-  re: new RegExp(`^${r.pattern === '/' ? '/' : r.pattern.replace(/\[[^\]]+\]/g, '[^/]+').replace(/\//g, '\\/')}$`),
+  re: routeRegExp(r.pattern),
 })).sort((a, b) => b.fixed - a.fixed);
 
 /** 주소(경로만, 끝 / 없이)에 맞는 규칙. 없으면 undefined */

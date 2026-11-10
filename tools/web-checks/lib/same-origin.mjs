@@ -5,7 +5,7 @@
 // 쓰는 법: node lib/same-origin.mjs [--port 4130] [--queue-room <폴더>] [--web http://127.0.0.1:4101] [--static http://127.0.0.1:4011]
 import { createServer, request } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DEFAULT_HOST, PRESETS, fileFor } from './serve.mjs';
@@ -29,16 +29,42 @@ export function routeFor(path) {
   return 'web';
 }
 
-async function isFile(p) {
+/** 폴더 안의 경로만 돌려준다(CodeQL js/path-injection) */
+function within(root, p) {
+  const rootAbs = resolve(root);
+  const abs = resolve(rootAbs, p);
+  const rel = relative(rootAbs, abs);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? abs : null;
+}
+
+async function isFile(root, p) {
+  const abs = within(root, p);
+  if (!abs) return false;
   try {
-    return (await stat(p)).isFile();
+    return (await stat(abs)).isFile();
   } catch {
     return false;
   }
 }
 
+/** root 안의 파일만 읽는다(검사와 읽기를 같은 함수에서 한다) */
+async function readWithin(root, p) {
+  const abs = within(root, p);
+  if (!abs) throw new Error('폴더 밖의 파일은 읽지 않는다');
+  return readFile(abs);
+}
+
+/** 넘길 곳의 출처를 바꾸지 않고 경로만 바꾼다(CodeQL js/request-forgery) */
+function targetOf(target, url) {
+  const base = new URL(target);
+  if ((base.protocol !== 'http:' && base.protocol !== 'https:') || base.username || base.password) throw new Error('넘길 곳이 http·https 주소가 아니다');
+  const dest = new URL(url ?? '/', base.origin);
+  if (dest.origin !== base.origin) throw new Error('넘길 곳의 출처가 바뀌었다');
+  return dest;
+}
+
 function proxy(req, res, target) {
-  const up = request(new URL(req.url ?? '/', target), { method: req.method, headers: { ...req.headers, host: new URL(target).host } }, (r) => {
+  const up = request(targetOf(target, req.url), { method: req.method, headers: { ...req.headers, host: new URL(target).host } }, (r) => {
     res.writeHead(r.statusCode ?? 502, r.headers);
     r.pipe(res);
   });
@@ -67,15 +93,16 @@ export function startSameOrigin({ port = SAME_ORIGIN_PORT, host = DEFAULT_HOST, 
     if (route === 'static') return proxy(req, res, staticOrigin);
     const rewrite = QR.rewrites.find(([re]) => re.test(path));
     // 좌석 화면 자산 목록은 웹 빌드가 만든다(운영에서는 배포가 /_q/로 올린다, HOT-352). 웹을 빌드하지 않은 검사에서는 없고 대기실은 건너뛴다
-    const file = path === SEAT_PRELOAD_PATH ? SEAT_PRELOAD_FILE : rewrite ? resolve(queueRoomRoot, rewrite[1]) : fileFor(queueRoomRoot, path, QR.base);
-    if (!file || !(await isFile(file))) {
+    const root = path === SEAT_PRELOAD_PATH ? dirname(SEAT_PRELOAD_FILE) : queueRoomRoot;
+    const file = path === SEAT_PRELOAD_PATH ? within(root, SEAT_PRELOAD_FILE) : rewrite ? within(root, resolve(root, rewrite[1])) : fileFor(root, path, QR.base);
+    if (!file || !(await isFile(root, file))) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       res.end('없음');
       return;
     }
     const type = TYPES[extname(file)] ?? 'application/octet-stream';
     res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', ...(type.startsWith('text/html') ? shellHeaders : {}) });
-    res.end(await readFile(file));
+    res.end(await readWithin(root, file));
   });
   return new Promise((ok) => server.listen(port, host, () => ok(server)));
 }

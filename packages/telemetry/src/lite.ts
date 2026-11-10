@@ -36,15 +36,18 @@ export const ATTRIBUTION_NUMBERS = [
   'largestShiftValue',
   'largestShiftTime',
 ] as const;
-/** 주소처럼 보이는 값(선택자에는 없다) */
-const URL_LIKE = /:\/\/|^\/\/|[?&][^=\s]*=/;
+/**
+ * 주소처럼 보이는 값(선택자에는 없다). 긴 값에서 되짚기가 늘지 않게 정규식의 겹친 반복 대신 글자 찾기로 본다(CodeQL js/polynomial-redos).
+ * `?`·`&` 뒤에 `=`가 있는지로 쿼리 꼴을 본다
+ */
+const urlLike = (v: string): boolean => v.includes('://') || v.startsWith('//') || (/[?&]/.test(v) && v.includes('='));
 
 function safeAttribution(a: Record<string, unknown> | undefined): Record<string, string | number> | undefined {
   if (!a) return undefined;
   const out: Record<string, string | number> = {};
   for (const k of ATTRIBUTION_STRINGS) {
     const v = a[k];
-    if (typeof v === 'string' && !URL_LIKE.test(v)) out[k] = v;
+    if (typeof v === 'string' && !urlLike(v)) out[k] = v;
   }
   for (const k of ATTRIBUTION_NUMBERS) {
     const v = a[k];

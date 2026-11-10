@@ -316,7 +316,8 @@ function readInputs(target) {
 // GitHub 작업 명령의 값·속성 이스케이프(@actions/core와 같다)
 const escData = (s) => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 const escProp = (s) => escData(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+/** 잡 요약(마크다운 표)의 칸: 역슬래시를 먼저 이스케이프한 뒤 |를 이스케이프하고 줄바꿈을 띄어 쓴다(CodeQL js/incomplete-sanitization) */
+export const markdownCell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n|\r/g, ' ');
 const where = (f) => `${f.path}${f.line ? `:${f.line}` : ''}`;
 const acceptedLabel = (f) => `받아들인 결과 ${f.accepted.adr}(다시 볼 날 ${f.accepted.reviewOn})`;
 const detail = (f) => [f.severity !== undefined ? `등급 ${f.severity}` : null, f.commit ? `커밋 ${f.commit.slice(0, 12)}` : null, f.suppressed ? '억제 주석 있음(예외 아님)' : null].filter(Boolean).join(', ');
@@ -393,11 +394,11 @@ export async function main(argv = process.argv.slice(2), { env = process.env, lo
   if (reportFile) writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
   if (env.GITHUB_STEP_SUMMARY) {
     const lines = [`## 보안 검사 판정: ${tool ?? '(도구 모름)'}${report.today ? `(${report.today}, 한국 날짜)` : ''}`, '', ok ? '통과' : `막음: 결과 ${report.blocking.length}건, 판정 오류 ${errors.length}건, 쓰이지 않는 예외 ${report.unusedExceptions.length}건`, ''];
-    for (const e of errors) lines.push(`- 판정 오류: ${cell(e)}`);
+    for (const e of errors) lines.push(`- 판정 오류: ${markdownCell(e)}`);
     const rows = [...report.blocking.map((f) => ['막음', f]), ...report.excepted.map((f) => [`예외 #${f.exception.issue}`, f]), ...report.accepted.map((f) => [`알림(${acceptedLabel(f)})`, f]), ...report.notices.map((f) => ['알림', f])];
     if (rows.length > 0) {
       lines.push('', '| 판정 | 규칙 | 파일 | 줄 | 더 |', '| --- | --- | --- | --- | --- |');
-      for (const [what, f] of rows.slice(0, 300)) lines.push(`| ${what} | \`${cell(f.rule)}\` | \`${cell(f.path)}\` | ${f.line ?? ''} | ${cell(detail(f))} |`);
+      for (const [what, f] of rows.slice(0, 300)) lines.push(`| ${what} | \`${markdownCell(f.rule)}\` | \`${markdownCell(f.path)}\` | ${f.line ?? ''} | ${markdownCell(detail(f))} |`);
       if (rows.length > 300) lines.push('', `(표는 300줄까지. 나머지 ${rows.length - 300}줄은 판정 보고서에 있다)`);
     }
     appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);

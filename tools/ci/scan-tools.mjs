@@ -19,8 +19,8 @@
 //   node tools/ci/scan-tools.mjs trivy-config --out <폴더> [--repo <저장소>]   → <폴더>/<대상 이름>.sarif
 //   node tools/ci/scan-tools.mjs trivy-image --input <OCI 묶음 tar> --sarif <결과 파일> [--work <미끼 폴더>]
 import { spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomInt } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -442,7 +442,8 @@ export function gitleaksDecoyArgs({ config = GITLEAKS_CONFIG, sarif, dir }) {
 const BASE62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 /** 실행 때 만든 미끼 비밀. 저장소에 비밀 꼴 글자를 두지 않도록 조각을 이어 만든다 */
 export function decoySecret() {
-  return ['g', 'h', 'p', '_'].join('') + [...randomBytes(36)].map((b) => BASE62[b % BASE62.length]).join('');
+  // randomInt는 고르게 뽑는다(안전한 난수 바이트에 나머지 연산을 쓰면 앞 글자가 더 자주 나온다, CodeQL js/biased-cryptographic-random)
+  return ['g', 'h', 'p', '_'].join('') + Array.from({ length: 36 }, () => BASE62[randomInt(BASE62.length)]).join('');
 }
 
 /** SARIF 글에서 그 규칙의 결과가 있는가(미끼 확인용. 판정은 scan-gate.mjs) */
@@ -705,11 +706,12 @@ export const IMAGE_DECOY_ALLOW_PATH = 'usr/lib/peaket-decoy/test/';
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /**
- * 이미지 비밀 검사 미끼: 실행 때 조립한 가짜 비밀(AWS 접근 키 ID, GitHub 개인 토큰)을 층 하나에 담은 docker save 꼴 묶음 <dir>/decoy.tar
+ * 이미지 비밀 검사 미끼: 실행 때 조립한 가짜 비밀(AWS 접근 키 ID, GitHub 개인 토큰)을 층 하나에 담은 OCI 레이아웃 묶음 tar <dir>/decoy.oci.tar.
+ * BuildKit type=oci 출력(빌드 잡의 실제 묶음)과 같은 꼴이라 미끼도 실제 묶음과 같은 풀기·입력 길을 지난다(첫 CI 42826751275)
  * @returns {string} 묶음 경로
  */
 export function writeImageDecoy(dir) {
-  const aws = `${['A', 'K', 'I', 'A'].join('')}${[...randomBytes(16)].map((b) => BASE32[b % 32]).join('')}`;
+  const aws = `${['A', 'K', 'I', 'A'].join('')}${Array.from({ length: 16 }, () => BASE32[randomInt(BASE32.length)]).join('')}`;
   const settings = `AWS_ACCESS_KEY_ID=${aws}\nGITHUB_TOKEN=${decoySecret()}\n`;
   const layer = makeTar([
     ['srv/', '', '5'],
@@ -721,13 +723,77 @@ export function writeImageDecoy(dir) {
     [IMAGE_DECOY_ALLOW_PATH, '', '5'],
     [`${IMAGE_DECOY_ALLOW_PATH}token.env`, `GITHUB_TOKEN=${decoySecret()}\n`],
   ]);
-  const config = JSON.stringify({ architecture: 'amd64', os: 'linux', config: {}, rootfs: { type: 'layers', diff_ids: [`sha256:${sha256(layer)}`] }, history: [{ created_by: 'peaket image secret decoy' }] });
-  const configName = `${sha256(config)}.json`;
-  const manifest = JSON.stringify([{ Config: configName, RepoTags: ['peaket-decoy:latest'], Layers: ['layer.tar'] }]);
+  const blob = (bytes, mediaType) => ({ bytes: Buffer.from(bytes), descriptor: { mediaType, digest: `sha256:${sha256(bytes)}`, size: Buffer.byteLength(bytes) } });
+  const layerBlob = blob(layer, 'application/vnd.oci.image.layer.v1.tar');
+  const configBlob = blob(
+    JSON.stringify({ architecture: 'amd64', os: 'linux', config: {}, rootfs: { type: 'layers', diff_ids: [layerBlob.descriptor.digest] }, history: [{ created_by: 'peaket image secret decoy' }] }),
+    'application/vnd.oci.image.config.v1+json',
+  );
+  const manifestBlob = blob(
+    JSON.stringify({ schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: configBlob.descriptor, layers: [layerBlob.descriptor] }),
+    'application/vnd.oci.image.manifest.v1+json',
+  );
+  const index = { schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [{ ...manifestBlob.descriptor, platform: { architecture: 'amd64', os: 'linux' } }] };
+  const path = (b) => `blobs/sha256/${b.descriptor.digest.slice('sha256:'.length)}`;
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, 'decoy.tar');
-  writeFileSync(file, makeTar([['manifest.json', manifest], [configName, config], ['layer.tar', layer]]));
+  const file = join(dir, 'decoy.oci.tar');
+  writeFileSync(
+    file,
+    makeTar([
+      ['oci-layout', JSON.stringify({ imageLayoutVersion: '1.0.0' })],
+      ['index.json', JSON.stringify(index)],
+      ['blobs/', '', '5'],
+      ['blobs/sha256/', '', '5'],
+      ...[manifestBlob, configBlob, layerBlob].map((b) => [path(b), b.bytes]),
+    ]),
+  );
   return file;
+}
+
+/**
+ * OCI 레이아웃 묶음 tar(BuildKit type=oci 출력)를 폴더로 푼다. Trivy 0.76.1의 image --input은 OCI 묶음 tar를 열지 못하고 레이아웃 폴더(index.json이
+ * 든)만 연다(첫 CI 42826751275). 일반 파일·폴더만 받고, 위로 가는 경로·절대 경로·링크·장치 항목이 있거나 index.json·oci-layout이 없으면 던진다
+ * @returns {string} 푼 폴더
+ */
+export function unpackOciLayout(tarFile, dir) {
+  const tar = readFileSync(tarFile);
+  const entries = [];
+  let longName = null;
+  for (let off = 0; off + 512 <= tar.length; ) {
+    const h = tar.subarray(off, off + 512);
+    if (h.every((b) => b === 0)) break;
+    const str = (a, b) => h.subarray(a, b).toString('utf8').replace(/\0.*$/s, '');
+    const size = Number.parseInt(str(124, 136).trim() || '0', 8);
+    if (!Number.isFinite(size) || size < 0) throw new Error('OCI 묶음 tar 머리의 크기를 읽지 못했다');
+    const type = str(156, 157) || '0';
+    const prefix = str(345, 500);
+    const body = tar.subarray(off + 512, off + 512 + size);
+    const name = longName ?? (prefix ? `${prefix}/${str(0, 100)}` : str(0, 100));
+    longName = null;
+    off += 512 + Math.ceil(size / 512) * 512;
+    if (type === 'L') {
+      longName = body.toString('utf8').replace(/\0.*$/s, '');
+      continue;
+    }
+    if (type === 'x' || type === 'g') continue;
+    const rel = name.replace(/^\.\//, '').replace(/\/$/, '');
+    if (rel === '' || rel === '.') continue;
+    if (rel.startsWith('/') || /^[A-Za-z]:/.test(rel) || rel.includes('\\') || rel.split('/').includes('..')) throw new Error(`OCI 묶음 tar에 묶음 밖을 가리키는 경로가 있다: ${name}`);
+    if (type !== '0' && type !== '5') throw new Error(`OCI 묶음 tar에 받지 않는 항목 종류가 있다(${type}): ${name}`);
+    entries.push({ rel, type, body });
+  }
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  for (const e of entries) {
+    const target = join(dir, e.rel);
+    if (e.type === '5') mkdirSync(target, { recursive: true });
+    else {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, e.body);
+    }
+  }
+  for (const must of ['index.json', 'oci-layout']) if (!existsSync(join(dir, must))) throw new Error(`OCI 레이아웃에 ${must}가 없다: ${tarFile}`);
+  return dir;
 }
 
 /** 이미지 비밀 검사 미끼 결과에서 두 내장 규칙이 모두 걸렸는가 */
@@ -745,17 +811,20 @@ export function imageDecoyProblems(text) {
  */
 export function runTrivyImage({ input, sarif, work, docker = dockerStdout }) {
   rmSync(work, { recursive: true, force: true });
+  mkdirSync(work, { recursive: true });
   try {
-    const decoy = writeImageDecoy(work);
+    // 미끼와 실제 묶음 모두 tar를 OCI 레이아웃 폴더로 풀어 그 폴더를 준다(같은 입력 모양)
+    const decoy = unpackOciLayout(writeImageDecoy(join(work, 'decoy-tar')), join(work, 'decoy-oci'));
     const problems = imageDecoyProblems(docker(trivyImageArgs({ input: decoy })));
     if (problems.length > 0) throw new DecoyError(problems.join('; '));
+    const layout = statSync(input).isDirectory() ? input : unpackOciLayout(input, join(work, 'image-oci'));
+    const out = docker(trivyImageArgs({ input: layout }));
+    mkdirSync(dirname(sarif), { recursive: true });
+    writeFileSync(sarif, out);
+    return sarif;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-  const out = docker(trivyImageArgs({ input }));
-  mkdirSync(dirname(sarif), { recursive: true });
-  writeFileSync(sarif, out);
-  return sarif;
 }
 
 // ---------- 명령줄 ----------

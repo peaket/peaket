@@ -73,7 +73,8 @@ const toPr = (repo, raw, files = []) => ({
   files,
 });
 
-const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
+/** 잡 요약(마크다운 표)의 칸: 역슬래시를 먼저 이스케이프한 뒤 |를 이스케이프하고 줄바꿈을 띄어 쓴다(CodeQL js/incomplete-sanitization) */
+const cell = (s) => String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
 
 /**
  * CODEOWNERS 글 → 규칙 목록 [{ pattern, owners }](파일의 줄 차례 그대로). 빈 줄과 '#'로 시작하는 줄은 건너뛴다.

@@ -128,6 +128,10 @@ export async function startLocalFanGateway(o) {
     if (UNSAFE.has(method) && !allowed) return problem(403, 'Forbidden', cors);
     const upstream = targetOf(url.pathname);
     if (!upstream) return problem(404, 'Not Found', cors);
+    // 넘길 곳은 설정한 원본 하나뿐이다. 경로만 바꿔 그 원본 안에 머물게 하고, 다른 출처·사용자 정보가 붙은 주소는 받지 않는다(CodeQL js/request-forgery)
+    if ((upstream.protocol !== 'http:' && upstream.protocol !== 'https:') || upstream.username || upstream.password) return problem(400, 'Bad Request', cors);
+    const target = new URL(`${url.pathname}${url.search}`, upstream.origin);
+    if (target.origin !== upstream.origin) return problem(400, 'Bad Request', cors);
     /** @type {Buffer[]} */
     const chunks = [];
     let size = 0;
@@ -145,7 +149,6 @@ export async function startLocalFanGateway(o) {
     if (url.pathname === REFRESH_PATH && req.headers.cookie) headers.cookie = req.headers.cookie;
     // 신원 머리는 위에서 지웠다. 쿠키가 없고 대역 신원을 켰으면 그 값을 싣는다(local·ci 전용)
     Object.assign(headers, (await identityOf(cookieOf(req.headers.cookie, ACCESS_COOKIE))) ?? o.devIdentity ?? {});
-    const target = new URL(`${url.pathname}${url.search}`, upstream);
     let res;
     try {
       res = await fetch(target, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : Buffer.concat(chunks), redirect: 'manual' });

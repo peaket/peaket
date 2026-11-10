@@ -29,7 +29,9 @@ import {
   gitleaksDecoyArgs,
   gitleaksHistoryArgs,
   gitleaksIgnoreProblems,
+  makeTar,
   missingIacTargets,
+  unpackOciLayout,
   runGitleaks,
   trivyConfigArgs,
   trivyImageArgs,
@@ -478,22 +480,32 @@ test('Trivy 설정 검사는 미끼(높음이 나와야 할 Dockerfile·Terrafor
   }
 });
 
-test('[ASVS v5.0.0-13.3.1] 이미지 비밀 검사는 실행 때 조립한 가짜 비밀을 담은 작은 이미지 묶음을 같은 설정으로 먼저 검사해 못 찾으면 실제 묶음을 보지 않고 실패한다', () => {
+/** OCI 레이아웃 묶음 tar의 blob을 다이제스트로 읽는다 */
+const ociBlob = (bytes, digest) => extractTarMember(bytes, `blobs/sha256/${digest.replace(/^sha256:/, '')}`);
+
+test('[ASVS v5.0.0-13.3.1] 이미지 비밀 검사는 실행 때 조립한 가짜 비밀을 담은 작은 OCI 묶음을 실제 묶음과 같은 꼴(OCI 레이아웃 폴더)로 풀어 같은 설정으로 먼저 검사해 못 찾으면 실제 묶음을 보지 않고 실패한다', () => {
   const dir = tempDir('trivy-image-decoy-');
   const tar = writeImageDecoy(dir);
-  // docker save 꼴 묶음: manifest.json → 설정·층. 층 안에 가짜 비밀 파일이 있고, 저장소에는 그 글자가 없다(실행 때 조립)
+  assert.equal(tar, join(dir, 'decoy.oci.tar'));
+  // BuildKit type=oci 출력과 같은 꼴: oci-layout·index.json·blobs/sha256/<다이제스트>. 층 안에 가짜 비밀 파일(실행 때 조립)
   const bytes = readFileSync(tar);
-  const manifest = JSON.parse(extractTarMember(bytes, 'manifest.json').toString('utf8'));
-  assert.equal(manifest.length, 1);
-  const layer = extractTarMember(bytes, manifest[0].Layers[0]);
-  const config = JSON.parse(extractTarMember(bytes, manifest[0].Config).toString('utf8'));
-  assert.deepEqual(config.rootfs.diff_ids, [`sha256:${hash(layer)}`]);
+  assert.deepEqual(JSON.parse(extractTarMember(bytes, 'oci-layout').toString('utf8')), { imageLayoutVersion: '1.0.0' });
+  const index = JSON.parse(extractTarMember(bytes, 'index.json').toString('utf8'));
+  assert.equal(index.schemaVersion, 2);
+  assert.equal(index.manifests.length, 1);
+  const manifestBytes = ociBlob(bytes, index.manifests[0].digest);
+  assert.equal(`sha256:${hash(manifestBytes)}`, index.manifests[0].digest);
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
+  assert.equal(manifest.mediaType, 'application/vnd.oci.image.manifest.v1+json');
+  const config = JSON.parse(ociBlob(bytes, manifest.config.digest).toString('utf8'));
+  const layer = ociBlob(bytes, manifest.layers[0].digest);
+  assert.equal(`sha256:${hash(layer)}`, manifest.layers[0].digest);
+  assert.deepEqual(config.rootfs.diff_ids, [manifest.layers[0].digest]);
   const secretFile = extractTarMember(layer, 'srv/decoy/settings.env').toString('utf8');
   // 내장 허용 규칙(usr-dirs·tests)이 건너뛰는 자리 아래의 가짜 비밀: 그 규칙을 끈 설정이어야 찾는다(다시 보기 6)
   assert.match(extractTarMember(layer, 'usr/lib/peaket-decoy/test/token.env').toString('utf8'), new RegExp(`${'gh'}${'p_'}[0-9A-Za-z]{36}`));
-  assert.match(secretFile, new RegExp(`${'AK'}${'IA'}[A-Z2-7]{16}`));
-  assert.match(secretFile, new RegExp(`${'gh'}${'p_'}[0-9A-Za-z]{36}`));
-  assert.equal(tar, join(dir, 'decoy.tar'));
+  assert.match(secretFile, new RegExp(`^AWS_ACCESS_KEY_ID=${'AK'}${'IA'}[A-Z2-7]{16}$`, 'm'));
+  assert.match(secretFile, new RegExp(`^GITHUB_TOKEN=${'gh'}${'p_'}[0-9A-Za-z]{36}$`, 'm'));
   // 미끼 판정: 두 내장 규칙(AWS 접근 키 ID, GitHub 개인 토큰)이 모두 걸려야 한다
   const at = (id, uri) => ({ ruleId: id, locations: [{ physicalLocation: { artifactLocation: { uri }, region: { startLine: 1 } } }] });
   const found = (ids, extra = [at('github-pat', '/usr/lib/peaket-decoy/test/token.env')]) =>
@@ -504,34 +516,81 @@ test('[ASVS v5.0.0-13.3.1] 이미지 비밀 검사는 실행 때 조립한 가�
   // 허용 경로 아래 미끼를 못 찾으면(내장 허용 규칙이 켜져 있으면) 막는다
   assert.ok(imageDecoyProblems(found(['aws-access-key-id', 'github-pat'], [])).some((m) => m.includes('usr/lib/peaket-decoy/test')));
   assert.ok(imageDecoyProblems('{').length > 0);
-  // 실행: 미끼를 같은 설정(--secret-config, 네트워크 없음)으로 먼저 보고, 못 찾으면 실제 묶음은 보지 않는다
+  // 실행: 미끼와 실제 묶음 모두 tar가 아니라 푼 OCI 레이아웃 폴더(index.json이 있는)를 --input으로 준다(Trivy 0.76.1은 OCI 묶음 tar를 열지 못한다, 첫 CI 42826751275)
   for (const [what, decoyIds, ok] of [
     ['찾음', ['aws-access-key-id', 'github-pat'], true],
     ['못 찾음', [], false],
   ]) {
     const calls = [];
-    const docker = (args) => {
-      calls.push(args);
-      return Buffer.from(args.includes('/in/decoy.tar') ? found(decoyIds) : found([]));
-    };
     const work = tempDir('trivy-image-work-');
-    const input = join(work, 'v0-monolith-amd64.oci.tar');
-    writeFileSync(input, 'oci');
+    const docker = (args) => {
+      const input = args[args.indexOf('--input') + 1];
+      const mount = args.find((a) => a.endsWith(':/in:ro')).slice(0, -':/in:ro'.length);
+      const folder = join(mount, input.replace(/^\/in\//, ''));
+      calls.push({ input, layout: existsSync(join(folder, 'index.json')) && existsSync(join(folder, 'oci-layout')), args });
+      return Buffer.from(input.includes('decoy') ? found(decoyIds) : found([]));
+    };
+    const input = writeImageDecoy(join(work, 'real'));
     const sarif = join(work, 'out', 'image.sarif');
     if (ok) {
-      runTrivyImage({ input, sarif, work: join(work, 'decoy'), docker });
+      runTrivyImage({ input, sarif, work: join(work, 'scan'), docker });
       assert.equal(calls.length, 2);
-      assert.ok(calls[1].includes('/in/v0-monolith-amd64.oci.tar'));
       assert.ok(existsSync(sarif));
     } else {
-      assert.throws(() => runTrivyImage({ input, sarif, work: join(work, 'decoy'), docker }), DecoyError, what);
+      assert.throws(() => runTrivyImage({ input, sarif, work: join(work, 'scan'), docker }), DecoyError, what);
       assert.equal(calls.length, 1);
       assert.equal(existsSync(sarif), false);
     }
-    for (const a of ['--network', 'none', TRIVY, '--scanners', 'secret', '--secret-config', '/cfg/trivy-secret.yaml', '--skip-db-update', '--offline-scan']) assert.ok(calls[0].includes(a), `${what} ${a}`);
+    for (const c of calls) {
+      assert.equal(c.layout, true, `${what}: ${c.input}는 OCI 레이아웃 폴더가 아니다`);
+      assert.doesNotMatch(c.input, /\.tar$/, `${what}: tar를 그대로 준다`);
+    }
+    assert.match(calls[0].input, /decoy/);
+    for (const a of ['--network', 'none', TRIVY, '--scanners', 'secret', '--secret-config', '/cfg/trivy-secret.yaml', '--skip-db-update', '--offline-scan']) assert.ok(calls[0].args.includes(a), `${what} ${a}`);
+    assert.equal(existsSync(join(work, 'scan')), false, '푼 폴더는 지운다');
   }
 });
 
+test('OCI 묶음 tar 풀기는 index.json·oci-layout이 있는 레이아웃만 받고, 위로 가는 경로·절대 경로·링크·장치 항목이 있으면 풀지 않는다', () => {
+  const ok = unpackOciLayout(writeImageDecoy(tempDir('oci-ok-')), join(tempDir('oci-ok-out-'), 'layout'));
+  assert.ok(existsSync(join(ok, 'index.json')) && existsSync(join(ok, 'oci-layout')));
+  const base = [['oci-layout', '{"imageLayoutVersion":"1.0.0"}'], ['index.json', '{"schemaVersion":2,"manifests":[]}'], ['blobs/', '', '5'], ['blobs/sha256/', '', '5']];
+  for (const [what, entries, re] of [
+    ['위로 가는 경로', [...base, ['../evil', 'x']], /경로/],
+    ['안쪽에서 위로', [...base, ['blobs/../../evil', 'x']], /경로/],
+    ['절대 경로', [...base, ['/etc/evil', 'x']], /경로/],
+    ['심볼릭 링크', [...base, ['blobs/link', '', '2']], /종류/],
+    ['하드 링크', [...base, ['blobs/hard', '', '1']], /종류/],
+    ['index.json 없음', base.filter(([n]) => n !== 'index.json'), /index\.json/],
+    ['oci-layout 없음', base.filter(([n]) => n !== 'oci-layout'), /oci-layout/],
+  ]) {
+    const d = tempDir('oci-bad-');
+    const f = join(d, 'x.oci.tar');
+    writeFileSync(f, makeTar(entries));
+    const out = join(d, 'layout');
+    assert.throws(() => unpackOciLayout(f, out), re, what);
+    assert.equal(existsSync(join(d, 'evil')) || existsSync('/etc/evil-peaket-test'), false, what);
+  }
+});
+
+test('[ASVS v5.0.0-13.3.1] 미끼 비밀은 나머지 연산 없이 고르게 뽑은 글자로 만들고 탐지 규칙 꼴(GitHub 개인 토큰 36자, AWS 접근 키 ID 16자)에 맞는다', () => {
+  const pat = new RegExp(`^${'gh'}${'p_'}[0-9A-Za-z]{36}$`);
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const s = decoySecret();
+    assert.match(s, pat);
+    seen.add(s);
+  }
+  assert.equal(seen.size, 200, '실행마다 다른 값');
+  // 글자가 고르게 나온다(62자 모두, 7,200자 표본에서 어느 글자도 지나치게 많지 않다)
+  const counts = new Map();
+  for (const s of seen) for (const ch of s.slice(4)) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  assert.equal(counts.size, 62);
+  assert.ok(Math.max(...counts.values()) < 7200 / 62 * 2, JSON.stringify([...counts]));
+  // CodeQL js/biased-cryptographic-random: 안전한 난수 바이트에 나머지(%)를 쓰지 않는다
+  const src = readFileSync(join(HERE, 'scan-tools.mjs'), 'utf8');
+  assert.doesNotMatch(src, /randomBytes\([^)]*\)\][^\n]*%|randomBytes\([^)]*\)[^\n]*\bb\s*%/);
+});
 /**
  * 차트 도우미 peaket.leaderLeases와 같은 계산: service.leaderLease가 비지 않은 글이면 [글], 목록이면 그 목록, 그 밖(빈 글·없음)은 [](_helpers.tpl,
  * 갈래 1 PRF-215가 글·목록 둘 다 받게 바꿨다). 템플릿의 $leases := include "peaket.leaderLeases" . | fromJsonArray를 이것으로 푼다

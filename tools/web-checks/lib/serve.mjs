@@ -10,7 +10,7 @@
 // 미리 압축한 <파일>.br이 있고 요청의 Accept-Encoding이 br을 받으면 그것을 Content-Encoding: br로 준다(CDN의 brotli 전송 흉내).
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -40,6 +40,14 @@ export const PRESETS = {
   'queue-room': { base: '/_q/', rewrites: [[/^\/(?:(?:en|ja|zh)\/)?queue\/[^/]+\/?$/, 'shell.ko.html'], [/^\/shop\/[^/]+\/queue\/?$/, 'shell.ko.html']] },
 };
 
+/** 폴더 안의 경로만 돌려준다(상대 경로가 ..로 시작하거나 절대 경로면 null). CodeQL js/path-injection */
+function within(root, p) {
+  const rootAbs = resolve(root);
+  const abs = resolve(rootAbs, p);
+  const rel = relative(rootAbs, abs);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? abs : null;
+}
+
 /** 주소 경로를 폴더 안의 파일 경로로. 폴더 밖으로 나가면 null */
 export function fileFor(root, urlPath, base = '/') {
   let p;
@@ -50,17 +58,25 @@ export function fileFor(root, urlPath, base = '/') {
   }
   if (base !== '/' && p.startsWith(base)) p = `/${p.slice(base.length)}`;
   if (p.endsWith('/')) p += 'index.html';
-  const abs = resolve(root, `.${p}`);
-  const rootAbs = resolve(root);
-  return abs === rootAbs || abs.startsWith(rootAbs + sep) ? abs : null;
+  return within(root, `.${p}`);
 }
 
-async function isFile(p) {
+/** root 안의 파일인지(경로 검사와 stat을 같은 함수에서 한다) */
+async function isFile(root, p) {
+  const abs = within(root, p);
+  if (!abs) return false;
   try {
-    return (await stat(p)).isFile();
+    return (await stat(abs)).isFile();
   } catch {
     return false;
   }
+}
+
+/** root 안의 파일만 읽는다(검사와 읽기를 같은 함수에서 한다) */
+async function readWithin(root, p) {
+  const abs = within(root, p);
+  if (!abs) throw new Error('폴더 밖의 파일은 읽지 않는다');
+  return readFile(abs);
 }
 
 /** 요청의 Accept-Encoding이 br을 받는가(q=0은 받지 않는다는 뜻이다) */
@@ -80,9 +96,9 @@ export function serveStatic({ root, port, host = DEFAULT_HOST, base = '/', rewri
   const server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     const rewrite = rewrites.find(([re]) => re.test(path));
-    let file = rewrite ? resolve(root, rewrite[1]) : fileFor(root, path, base);
-    if (file && !(await isFile(file)) && spa) file = resolve(root, spa);
-    if (!file || !(await isFile(file))) {
+    let file = rewrite ? within(root, resolve(root, rewrite[1])) : fileFor(root, path, base);
+    if (file && !(await isFile(root, file)) && spa) file = within(root, resolve(root, spa));
+    if (!file || !(await isFile(root, file))) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('없음');
       return;
@@ -90,14 +106,14 @@ export function serveStatic({ root, port, host = DEFAULT_HOST, base = '/', rewri
     const headers = { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': cacheControl };
     // 미리 압축한 짝(<파일>.br)이 있으면 그것을 준다. 형식은 원래 파일의 것이고, 캐시가 섞지 않게 Vary를 단다
     let send = file;
-    if (await isFile(`${file}.br`)) {
+    if (await isFile(root, `${file}.br`)) {
       headers.vary = 'accept-encoding';
       if (acceptsBrotli(req.headers['accept-encoding'])) {
         send = `${file}.br`;
         headers['content-encoding'] = 'br';
       }
     }
-    const body = await readFile(send);
+    const body = await readWithin(root, send);
     res.writeHead(200, headers);
     res.end(body);
   });

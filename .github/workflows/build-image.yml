@@ -51,7 +51,8 @@ jobs:
           IMAGE: ${{ inputs.image }}
           PLATFORM: ${{ matrix.platform }}
         run: node tools/ci/image-build.mjs --dockerfile "$DOCKERFILE" --image "$IMAGE" --platform "$PLATFORM" --out image-out
-      # 이미지 비밀 검사: 실행 때 조립한 가짜 비밀 묶음(미끼)을 같은 설정으로 먼저 찾게 한 뒤 실제 묶음을 본다. 비밀 규칙 설정(tools/ci/trivy-secret.yaml)은
+      # 이미지 비밀 검사: 실행 때 조립한 가짜 비밀 묶음(미끼)을 같은 설정으로 먼저 찾게 한 뒤 실제 묶음을 본다. 둘 다 OCI 묶음 tar를 OCI 레이아웃 폴더로
+      # 풀어 그 폴더를 Trivy --input에 준다(Trivy 0.76.1은 OCI 묶음 tar를 열지 못한다, 첫 CI 42826751275). 비밀 규칙 설정(tools/ci/trivy-secret.yaml)은
       # Trivy 내장 허용 규칙을 끄고 그 파일의 허용 규칙만 오탐으로 받는다. 취약점 자료·검사 규칙을 받지 않는다(ADR-0263 결정 7·13)
       - name: 이미지 비밀 검사(Trivy)
         env:

@@ -247,14 +247,19 @@ test('ci.yml은 푸시에서 sast를 늘 켠다', { skip }, () => {
   assert.equal(evalOr(job.with.licenses, ctx({ 'needs.changes.outputs.js': 'true' })), true);
 });
 
-test('codeql-config는 apps·services·packages·tools를 보고 빼는 것은 시험·생성물·빌드 결과뿐이다', { skip }, () => {
+test('codeql-config는 apps·services·packages·tools를 보고 빼는 것은 시험·생성물·빌드 결과와 운영에 배포하지 않는 결제 시뮬레이터뿐이다', { skip }, () => {
   const cfg = load('tools/ci/codeql-config.yml');
   assert.deepEqual(Object.keys(cfg).sort(), ['name', 'paths', 'paths-ignore'], '쿼리를 빼거나 바꾸는 키(queries·query-filters·disable-default-queries)가 없다');
   assert.deepEqual([...cfg.paths].sort(), ['apps', 'packages', 'services', 'tools']);
   const TEST = /^\*\*\/(?:test|test-int|tests|__tests__|e2e)$|^\*\*\/\*\.(?:test|spec)\.\*$|^\*\*\/\*\.test\.harness\.\*$/;
   const GEN = /^\*\*\/gen$|^packages\/contracts\/src\/gen$/;
   const BUILD = /^\*\*\/(?:node_modules|dist|dist-poc|\.next|\.next-\*|\.turbo|coverage|storybook-static|out)$/;
+  // 운영에 배포하지 않는 결제 시뮬레이터(ADR-0263 결정 14) 하나만 서비스 폴더로 뺄 수 있다. 다른 서비스를 빼면 실패한다
+  const NOT_DEPLOYED = new Set(['services/pg-simulator']);
+  const allowed = (p) => TEST.test(p) || GEN.test(p) || BUILD.test(p) || NOT_DEPLOYED.has(p);
+  for (const p of ['services/payment-svc', 'services/pg-simulator/src', 'services/*', 'services', 'apps/web', 'packages/platform', 'tools/ci', 'services/pg-simulator-x']) assert.equal(allowed(p), false, `뺄 수 없는 곳을 받는다: ${p}`);
+  assert.ok(cfg['paths-ignore'].includes('services/pg-simulator'), '결제 시뮬레이터를 뺀다');
   assert.ok(cfg['paths-ignore'].length > 0);
-  for (const p of cfg['paths-ignore']) assert.ok(TEST.test(p) || GEN.test(p) || BUILD.test(p), `시험·생성물·빌드 결과가 아닌 것을 뺀다: ${p}`);
+  for (const p of cfg['paths-ignore']) assert.ok(allowed(p), `시험·생성물·빌드 결과·시뮬레이터가 아닌 것을 뺀다: ${p}`);
   for (const must of ['**/node_modules', '**/dist', '**/test', '**/*.test.*']) assert.ok(cfg['paths-ignore'].includes(must), must);
 });
