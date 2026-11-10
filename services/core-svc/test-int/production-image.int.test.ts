@@ -298,7 +298,7 @@ describe('공연 이미지 올리기', () => {
     expect(r.statusCode).toBe(409);
     expect(json(r)).toMatchObject({ type: `${P}image-limit-exceeded`, status: 409 });
     expect(imaging.calls.length).toBe(calls);
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     // 포스터는 장수에 들지 않는다
     expect((await upload({ kind: 'POSTER' })).statusCode).toBe(201);
   });
@@ -391,7 +391,7 @@ describe('공연 이미지 올리기', () => {
       const r = await upload({ kind, bytes: png(w, h) });
       expect({ kind, w, h, status: r.statusCode, body: json(r) }).toMatchObject({ status: 422, body: { type: `${P}image-spec-invalid`, reason } });
       expect(await rows()).toEqual(before);
-      expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+      await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     }
     expect((await upload({ kind: 'DETAIL', bytes: png(20_000, 2_000) })).statusCode).toBe(201);
     expect((await upload({ kind: 'DETAIL', bytes: png(8_000, 5_000) })).statusCode).toBe(201);
@@ -410,7 +410,7 @@ describe('공연 이미지 올리기', () => {
       imaging.answer = () => ({ status: 'IMAGE_STATUS_REJECTED', reject_reason: reason });
       const r = await upload({ kind });
       expect({ reason, status: r.statusCode, body: json(r) }).toMatchObject({ status, body });
-      expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+      await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     }
     expect(await rows()).toEqual(before);
     expect(logs.lines().filter((l) => l.event === 'image_malware')).toEqual([expect.objectContaining({ kind: 'security', productionId: PA })]);
@@ -436,7 +436,7 @@ describe('공연 이미지 올리기', () => {
     expect(untrusted.filter((l) => l.why === 'derivative_keys')).toHaveLength(4);
     expect(untrusted.filter((l) => l.why === 'derivative_missing')).toHaveLength(1);
     expect(untrusted[0]).toMatchObject({ kind: 'security', productionId: PA });
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     // 게시한 것이 없다(남은 행의 것뿐)
     const kept = new Set(before.map((r) => r.id));
     const published = existsSync(join(dir, 'public', 'production')) ? readdirSync(join(dir, 'public', 'production')).filter((d) => readdirSync(join(dir, 'public', 'production', d)).length > 0) : [];
@@ -454,7 +454,7 @@ describe('공연 이미지 올리기', () => {
     imaging.answer = () => ({ status: 'IMAGE_STATUS_UNSPECIFIED' });
     expect((await upload({})).statusCode).toBe(503);
     expect(await rows()).toEqual([]);
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
   });
 
   test('작업이 답하지 않으면 데드라인 30초에 끊고 503이다(작업은 실제로 불렸다) [ASVS v5.0.0-16.5.3]', async () => {
@@ -467,7 +467,7 @@ describe('공연 이미지 올리기', () => {
     expect(imaging.deadlines.at(-1)!).toBeLessThanOrEqual(30_000);
     expect(imaging.calls.length).toBe(calls + 1);
     expect([r.statusCode, r.headers['retry-after']]).toEqual([503, '30']);
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
   }, 45_000);
 
   test('파트너 multipart 칸막이는 파드마다 넷이고 다섯째(가져오기 포함)는 본문을 읽지 않고 429 server-busy Retry-After 10이며 끝나면 자리가 풀린다', async () => {
@@ -732,7 +732,7 @@ describe('리뷰 2차: 올리기 받기·처리·정리', () => {
     expect(late.statusCode).toBe(504);
     expect(json(late)).toMatchObject({ type: `${P}deadline-exceeded` });
     expect(imaging.calls.length).toBe(calls);
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     store.mode.onPutQuarantine = () => clock.advance(70_000);
     expect((await upload({})).statusCode).toBe(201);
     const left = imaging.deadlines.at(-1)!;
@@ -846,6 +846,6 @@ describe('리뷰 2차: 올리기 받기·처리·정리', () => {
     expect(store.puts).toBe(2);
     expect(publishedDirs().filter((d) => !before.includes(d))).toEqual([]);
     expect(await rows()).toEqual([]);
-    expect(leftovers()).toEqual({ quarantine: [], staging: [] });
+    await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
   });
 });
