@@ -4,7 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 115 | 67 | 0 | 0 | 0 | 4 | 0 | 2 | 53 | 241 |
+| A | 82 | 55 | 0 | 0 | 0 | 1 | 0 | 0 | 44 | 182 |
+| B | 33 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 9 | 59 |
 | 합계 | 115 | 67 | 0 | 0 | 0 | 4 | 0 | 2 | 53 | 241 |
 
 ## docs/features/queue-admission.md
@@ -198,62 +199,62 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | A | 시험: services/admission-ctrl/test/result-files.test.ts, services/queue-svc/test/sale-state.test.ts 외 1곳 |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | A | 시험: apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs |
-| v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | A | 시험: services/queue-svc/test/edge-entry-function.test.ts, services/queue-svc/test/edge-first-visit-function.test.ts |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | A | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
-| v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | A | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
-| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | A | 시험: services/queue-svc/test/edge-first-visit-function.test.ts, services/queue-svc/test/first-visit-cookie.test.ts |
-| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | A | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
-| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | 자동 시험 | A | 시험: services/queue-svc/test/state-http.test.ts |
-| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | A | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 1곳 |
-| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | A | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
-| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | A | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
-| v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | A | 시험: apps/web/src/_app/security/page-headers.test.mjs |
-| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | A | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | A | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 1곳 |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | A | 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts |
-| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | A | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
-| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | A | 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs 외 1곳 |
-| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외… |
-| v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | A | 시험: services/purchase-svc/test/admission-token.test.ts |
-| v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | A | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/tokens.test.ts |
-| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | A | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 5곳 |
-| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | A | 시험: services/purchase-svc/test/admission-token.test.ts |
-| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | A | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/entry-cases.ts |
-| v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | A | 다른 곳 시험: packages/platform/test/token-verify.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | A | 영역: services/queue-svc |
-| v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | A | 시험: services/admission-ctrl/test/quicknet-verifier.test.ts |
-| v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | ID만 | A | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
-| v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | A | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
-| v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | A | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: apps/web, packages/shuffle… |
-| v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | 자동 시험 | A | 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 1곳 |
-| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | A | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.te… |
-| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | A | 시험: packages/shuffle/test/shuffle.test.ts |
-| v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | A | 해당 없음: 이 기능에는 비밀번호가 없다 |
-| v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | 자동 시험 | A | 시험: packages/shuffle/test/shuffle.test.ts |
-| v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | A | 해당 없음: 비밀번호에서 키를 만들지 않는다. 구매 세션 키는 ECDH 공유 비밀에서 HKDF로 만든다 |
-| v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | 자동 시험 | A | 시험: services/queue-svc/test/commit-worker.test.ts |
-| v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/kms-seed.int.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 3곳 |
-| v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | A | 다른 곳 시험: services/v0-monolith/test/gateway-server.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
-| v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | A | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
-| v5.0.0-12.2.1 | — | L1 | 클라이언트와 외부에 노출된 HTTP 서비스 사이의 모든 연결에 TLS를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | ID만 | A | 다른 곳 시험: services/v0-monolith/test/gateway-config.test.ts, services/v0-monolith/test/gateway-server.test.ts 외 1곳 (영역:… |
-| v5.0.0-12.2.2 | — | L1 | 외부에 노출된 서비스는 공인 TLS 인증서를 쓴다. | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-12.3.1 | — | L2 | 애플리케이션에 들어오고 나가는 모든 연결(모니터링·관리 도구, 원격 접속, 미들웨어, DB, 파트너 시스템, 외부 API 등)에 TLS 같은 암호화 프로토콜을… | ID만 | A | 다른 곳 시험: services/payment-svc/test/portone-config.test.ts, services/payment-svc/test/toss-config.test.ts (영역: apps/web… |
-| v5.0.0-12.3.2 | — | L2 | TLS 클라이언트가 서버 인증서를 검증한 뒤 통신한다. | 빈칸 | A | 영역: services/admission-ctrl |
-| v5.0.0-12.3.3 | — | L2 | 애플리케이션 안 내부 HTTP 서비스 사이의 모든 연결에 TLS 같은 전송 암호화를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | 다른 단계 | A | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
-| v5.0.0-12.3.4 | — | L2 | 내부 서비스 사이 TLS는 신뢰한 인증서를 쓰고, 내부 발급·자체 서명 인증서를 쓰면 받는 서비스가 지정한 내부 CA와 지정한 자체 서명 인증서만 신뢰하게 한다. | 다른 단계 | A | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
-| v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | A | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
-| v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | A | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
-| v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | A | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | A | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts |
-| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | A | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
-| v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | A | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | A | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-11.2.4 | — | L3 | 모든 암호 연산을 상수 시간으로 하고 비교·계산·반환에서 조기 종료하지 않아 정보가 새지 않게 한다. | 자동 시험 | A | 시험: services/queue-svc/test/arrival-cookie.test.ts |
-| v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | 자동 시험 | A | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test-int/leader-store.int.test.ts… |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/admission-ctrl/test/result-files.test.ts, services/queue-svc/test/sale-state.test.ts 외 1곳 |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs |
+| v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-entry-function.test.ts, services/queue-svc/test/edge-first-visit-function.test.ts |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
+| v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
+| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts, services/queue-svc/test/first-visit-cookie.test.ts |
+| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
+| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | 자동 시험 | B | 시험: services/queue-svc/test/state-http.test.ts |
+| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 1곳 |
+| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
+| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
+| v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
+| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 1곳 |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts |
+| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
+| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs 외 1곳 |
+| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외… |
+| v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
+| v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/tokens.test.ts |
+| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 5곳 |
+| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
+| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/entry-cases.ts |
+| v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | B | 다른 곳 시험: packages/platform/test/token-verify.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: services/queue-svc |
+| v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/admission-ctrl/test/quicknet-verifier.test.ts |
+| v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
+| v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
+| v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: apps/web, packages/shuffle… |
+| v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | 자동 시험 | B | 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 1곳 |
+| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.te… |
+| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: packages/shuffle/test/shuffle.test.ts |
+| v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | B | 해당 없음: 이 기능에는 비밀번호가 없다 |
+| v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | 자동 시험 | B | 시험: packages/shuffle/test/shuffle.test.ts |
+| v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | B | 해당 없음: 비밀번호에서 키를 만들지 않는다. 구매 세션 키는 ECDH 공유 비밀에서 HKDF로 만든다 |
+| v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | 자동 시험 | B | 시험: services/queue-svc/test/commit-worker.test.ts |
+| v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | 자동 시험 | B | 시험: services/admission-ctrl/test-int/kms-seed.int.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 3곳 |
+| v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-server.test.ts (영역: apps/web, packages/shuffle, services/admission-ctrl… |
+| v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
+| v5.0.0-12.2.1 | — | L1 | 클라이언트와 외부에 노출된 HTTP 서비스 사이의 모든 연결에 TLS를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-config.test.ts, services/v0-monolith/test/gateway-server.test.ts 외 1곳 (영역:… |
+| v5.0.0-12.2.2 | — | L1 | 외부에 노출된 서비스는 공인 TLS 인증서를 쓴다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-12.3.1 | — | L2 | 애플리케이션에 들어오고 나가는 모든 연결(모니터링·관리 도구, 원격 접속, 미들웨어, DB, 파트너 시스템, 외부 API 등)에 TLS 같은 암호화 프로토콜을… | ID만 | B | 다른 곳 시험: services/payment-svc/test/portone-config.test.ts, services/payment-svc/test/toss-config.test.ts (영역: apps/web… |
+| v5.0.0-12.3.2 | — | L2 | TLS 클라이언트가 서버 인증서를 검증한 뒤 통신한다. | 빈칸 | B | 영역: services/admission-ctrl |
+| v5.0.0-12.3.3 | — | L2 | 애플리케이션 안 내부 HTTP 서비스 사이의 모든 연결에 TLS 같은 전송 암호화를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
+| v5.0.0-12.3.4 | — | L2 | 내부 서비스 사이 TLS는 신뢰한 인증서를 쓰고, 내부 발급·자체 서명 인증서를 쓰면 받는 서비스가 지정한 내부 CA와 지정한 자체 서명 인증서만 신뢰하게 한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
+| v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | B | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
+| v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | B | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
+| v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
+| v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-11.2.4 | — | L3 | 모든 암호 연산을 상수 시간으로 하고 비교·계산·반환에서 조기 종료하지 않아 정보가 새지 않게 한다. | 자동 시험 | B | 시험: services/queue-svc/test/arrival-cookie.test.ts |
+| v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test-int/leader-store.int.test.ts… |

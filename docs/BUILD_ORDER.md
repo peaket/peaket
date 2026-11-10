@@ -17,30 +17,30 @@
 ## 기능 묶음(ADR-0256)
 
 - **읽는 법**: 갈래 세션은 자기 갈래의 첫 미완 묶음을 한 번에 만들고, 묶음을 끝내면 그 묶음의 단계 줄을 함께 체크한다(ADR-0256 결정 1. 이 표에는 체크 칸이 없다). 묶음은 같은 갈래·같은 구간의 이웃한 빈 칸 단계를 위에서 아래 차례로 묶은 것이고, 비고의 선행이 `develop`에 없으면 그 묶음을 건너뛴다.
-- **칸**: 'WBS 일'은 단계 줄 괄호 일수의 합이다(합친 줄은 두 일수를 더함). 등급은 ADR-0256 결정 3, '장부 범위'는 완성 장부가 판정 항목을 뽑을 정본 문서·시험 ID·요구사항 ID다(결정 2). 범위는 묶음을 시작할 때 갈래가 바로잡고, `-`는 뽑을 정본이 없는 문서 묶음이다.
+- **칸**: 'WBS 일'은 단계 줄 괄호 일수의 합이다(합친 줄은 두 일수를 더함). 등급은 ADR-0256 결정 10(A는 돈·좌석·대기 순번의 핵심 로직과 그 데이터의 복구, 2026-11-10 다시 매김), '장부 범위'는 완성 장부가 판정 항목을 뽑을 정본 문서·시험 ID·요구사항 ID다(결정 2). 범위는 묶음을 시작할 때 갈래가 바로잡고, `-`는 뽑을 정본이 없는 문서 묶음이다.
 - **번호**: 묶음 ID는 BAT-010부터 5씩 올리고 구간이 바뀌어도 이어 쓴다. 묶음을 나누거나 더할 때는 앞뒤 번호 사이의 빈 번호(예: BAT-012)를 쓴다.
 - **고칠 때**: 단계를 나누거나 더하거나 합치면 이 표도 같은 커밋에서 고친다.
 
 | 묶음 | 갈래 | 구간 | 등급 | 단계 | WBS 일 | 장부 범위 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | BAT-010 | 1 | 1 | A | PRF-169·PRF-173 | 0.45 | docs/features/payment.md, I-T26, I-T43, docs/security/asvs/payment.md | PRF-169는 줄기 뒤로 미룸(docs/PROGRESS.md 갈래 1). GAT-280은 PRF-173의 CS 건 요청 계약 몫. 선행 GAT-280(갈래 3), HOT-160(같은 갈래 구간 2) |
-| BAT-015 | 1 | 1 | A | HOT-146 | 0.25 | docs/features/payment.md, docs/security/asvs/payment.md | 혼자: 클라우드 계정(소유자 몫인 외부 서비스 계정)이 생길 때까지 뺌(docs/PROGRESS.md 갈래 1) |
+| BAT-015 | 1 | 1 | B | HOT-146 | 0.25 | docs/features/payment.md, docs/security/asvs/payment.md | 혼자: 클라우드 계정(소유자 몫인 외부 서비스 계정)이 생길 때까지 뺌(docs/PROGRESS.md 갈래 1) |
 | BAT-020 | 1 | 1 | A | PRF-203·PRF-210 | 1.65 | docs/features/payment.md, P-T46, docs/security/asvs/payment.md |  |
 | BAT-025 | 1 | 1 | B | PRF-220 | 1.5 | NFR-001, Q-T2, S-T1, S-T2, S-T11, P-T1, P-T15 | 혼자: 측정 창 1 |
 | BAT-030 | 1 | 1 | C | BAS-240 | 1 | - | 혼자: 측정 창 1 |
 | BAT-035 | 1 | 1 | C | SEG-010 | 0.5 | - | 혼자: 구간 마무리 |
-| BAT-040 | 2 | 1 | A | HOT-305·HOT-346·HOT-357 | 2 | docs/security/asvs/catalog-review.md, FE-T11, FE-T18, Q-T36, S-T13, S-T21, S-T31, docs/security/asvs/frontend.md | 선행 HOT-090(갈래 1), HOT-270·HOT-250(같은 갈래 구간 2), OPS-410(같은 갈래 구간 3) |
-| BAT-045 | 3 | 1 | A | BOT-132·BOT-140·BOT-152·BOT-161 | 4 | I-T46, I-T52, I-T53, I-T61, AZ-T14, C-T69, docs/security/auth-controls.md, docs/security/asvs/auth.md, docs/security/asvs/delivery.md | BOT-140의 AWS 자원은 클라우드 계정 뒤, BOT-161의 ZAP 이미지 받기는 소유자 허락. 선행 HOT-400·BAS-140(갈래 1), OPS-260(갈래 2), BAS-010(같은 갈래 구간 2) |
+| BAT-040 | 2 | 1 | B | HOT-305·HOT-346·HOT-357 | 2 | docs/security/asvs/catalog-review.md, FE-T11, FE-T18, Q-T36, S-T13, S-T21, S-T31, docs/security/asvs/frontend.md | 선행 HOT-090(갈래 1), HOT-270·HOT-250(같은 갈래 구간 2), OPS-410(같은 갈래 구간 3) |
+| BAT-045 | 3 | 1 | B | BOT-132·BOT-140·BOT-152·BOT-161 | 4 | I-T46, I-T52, I-T53, I-T61, AZ-T14, C-T69, docs/security/auth-controls.md, docs/security/asvs/auth.md, docs/security/asvs/delivery.md | BOT-140의 AWS 자원은 클라우드 계정 뒤, BOT-161의 ZAP 이미지 받기는 소유자 허락. 선행 HOT-400·BAS-140(갈래 1), OPS-260(갈래 2), BAS-010(같은 갈래 구간 2) |
 | BAT-050 | 1 | 2 | A | HOT-160·HOT-090 | 4 | P-T15, P-T39, I-T26, I-T43, S-T12, S-T13, S-T14, S-T21, S-T31, docs/security/asvs/payment.md, docs/security/asvs/seat-hold.md |  |
-| BAT-055 | 1 | 2 | A | BAS-090·HOT-400 | 3.5 | B-T18, V-T31, I-T3, I-T36, Q-T41, FR-017, docs/infra.md, docs/security/asvs/auth.md, docs/security/asvs/delivery.md |  |
-| BAT-060 | 1 | 2 | A | HOT-410·HOT-420 | 3.25 | D-T36, docs/infra.md, docs/security/asvs/delivery.md |  |
-| BAT-065 | 1 | 2 | A | HOT-430·HOT-440 | 4.75 | D-T30, D-T34, docs/data.md, docs/security/secrets-and-keys.md, docs/security/asvs/delivery.md |  |
-| BAT-070 | 1 | 2 | A | HOT-450·BAS-050·BAS-060 | 5 | D-T37, D-T44, docs/infra.md, docs/devops.md, docs/data.md, docs/security/asvs/delivery.md |  |
+| BAT-055 | 1 | 2 | B | BAS-090·HOT-400 | 3.5 | B-T18, V-T31, I-T3, I-T36, Q-T41, FR-017, docs/infra.md, docs/security/asvs/auth.md, docs/security/asvs/delivery.md |  |
+| BAT-060 | 1 | 2 | B | HOT-410·HOT-420 | 3.25 | D-T36, docs/infra.md, docs/security/asvs/delivery.md |  |
+| BAT-065 | 1 | 2 | B | HOT-430·HOT-440 | 4.75 | D-T30, D-T34, docs/data.md, docs/security/secrets-and-keys.md, docs/security/asvs/delivery.md |  |
+| BAT-070 | 1 | 2 | B | HOT-450·BAS-050·BAS-060 | 5 | D-T37, D-T44, docs/infra.md, docs/devops.md, docs/data.md, docs/security/asvs/delivery.md |  |
 | BAT-075 | 1 | 2 | B | BAS-080·BAS-120 | 4 | D-T19, D-T27, docs/devops.md, docs/infra.md, docs/security/asvs/delivery.md |  |
-| BAT-080 | 1 | 2 | A | BAS-130·BAS-140 | 4.25 | D-T46, I-T15, I-T50, docs/infra.md, docs/devops.md, docs/security/asvs/delivery.md |  |
-| BAT-085 | 1 | 2 | A | BAS-150·BAS-160 | 3.5 | D-T28, D-T32, D-T33, docs/devops.md, docs/security/asvs/delivery.md |  |
+| BAT-080 | 1 | 2 | B | BAS-130·BAS-140 | 4.25 | D-T46, I-T15, I-T50, docs/infra.md, docs/devops.md, docs/security/asvs/delivery.md |  |
+| BAT-085 | 1 | 2 | B | BAS-150·BAS-160 | 3.5 | D-T28, D-T32, D-T33, docs/devops.md, docs/security/asvs/delivery.md |  |
 | BAT-090 | 1 | 2 | A | HOT-080·BOT-100 | 4.75 | docs/features/seat-hold.md, S-T16, S-T19, S-T20, docs/security/asvs/seat-hold.md |  |
-| BAT-095 | 1 | 2 | A | HOT-460 | 2.25 | Q-T2, S-T1, S-T2, S-T10, S-T11, S-T12, S-T15, docs/verification.md | 혼자: 측정 창 2 |
+| BAT-095 | 1 | 2 | B | HOT-460 | 2.25 | Q-T2, S-T1, S-T2, S-T10, S-T11, S-T12, S-T15, docs/verification.md | 혼자: 측정 창 2 |
 | BAT-100 | 1 | 2 | B | HOT-470 | 1 | P-T1, P-T15, P-T31, P-T34 | 혼자: 측정 창 2 |
 | BAT-105 | 1 | 2 | B | HOT-480 | 2.5 | V-T27, V-T28, P-T1, docs/security/asvs/verification-tools.md | 혼자: 측정 창 2 |
 | BAT-110 | 1 | 2 | B | HOT-490 | 1.5 | NFR-028, docs/features/search.md | 혼자: 측정 창 2 |
@@ -55,32 +55,32 @@
 | BAT-155 | 2 | 2 | A | HOT-240·HOT-250 | 4.5 | docs/features/seat-hold.md, docs/features/queue-admission.md, Q-T36, docs/security/asvs/catalog-review.md, docs/security/asvs/queue-admission.md |  |
 | BAT-160 | 2 | 2 | B | HOT-260·HOT-200 | 3.5 | D-T35, docs/frontend.md, docs/security/asvs/catalog-review.md |  |
 | BAT-165 | 2 | 2 | B | HOT-270·HOT-280 | 4 | docs/features/search.md, docs/security/asvs/catalog-review.md |  |
-| BAT-170 | 2 | 2 | A | HOT-380·HOT-390 | 4 | FE-T18, FE-T31, NFR-019, docs/frontend.md, docs/security/asvs/frontend.md, docs/security/asvs/auth.md |  |
-| BAT-175 | 2 | 2 | A | HOT-370·HOT-130 | 4 | S-T18, S-T19, docs/frontend.md, docs/security/asvs/frontend.md, docs/security/asvs/seat-hold.md |  |
+| BAT-170 | 2 | 2 | B | HOT-380·HOT-390 | 4 | FE-T18, FE-T31, NFR-019, docs/frontend.md, docs/security/asvs/frontend.md, docs/security/asvs/auth.md |  |
+| BAT-175 | 2 | 2 | B | HOT-370·HOT-130 | 4 | S-T18, S-T19, docs/frontend.md, docs/security/asvs/frontend.md, docs/security/asvs/seat-hold.md |  |
 | BAT-180 | 2 | 2 | B | BAS-200·BAS-100 | 2.5 | docs/design/d1-brief.md, docs/infra.md |  |
-| BAT-185 | 3 | 2 | A | HOT-012 | 0.25 | Q-T56, Q-T63, docs/infra.md, docs/security/asvs/queue-admission.md | 혼자: AWS 계정이 생겨 배포하는 단계까지 건너뜀(소유자 결정 2026-11-09, ADR-0234) |
+| BAT-185 | 3 | 2 | B | HOT-012 | 0.25 | Q-T56, Q-T63, docs/infra.md, docs/security/asvs/queue-admission.md | 혼자: AWS 계정이 생겨 배포하는 단계까지 건너뜀(소유자 결정 2026-11-09, ADR-0234) |
 | BAT-190 | 3 | 2 | B | BAS-250 | 2.5 | docs/features/bot-defense.md | 혼자: 대기 OPEN[23] (다)(소유자 결정 2026-11-05) |
-| BAT-195 | 3 | 2 | A | BOT-065 | 3 | B-T4, B-T6, B-T9, B-T20, B-T21, B-T26, B-T27, Q-T48, bot-defense:v5.0.0-16.3.3, bot-defense:v5.0.0-16.3.4 | 2026-11-10 시작 때 범위를 좁힘: bot-defense.md 전체에서 이 묶음이 고치는 차단 기기 목록·라벨 반영·그림자 판·키 회전 이음 행만 남김. BOT-080은 선행이 없어 BAT-197로 옮김 |
-| BAT-197 | 3 | 2 | A | BOT-080 | 1 | FR-049, docs/security/asvs/bot-defense.md | 혼자: 선행 OPS-260(갈래 2, 관제 서버 ops-svc)·HOT-400(갈래 1, 관제 게이트웨이). 표본 검토 REST가 ops-svc 몫이라 화면을 실제 서버에 잇지 못한다(2026-11-10 BAT-195에서 옮김) |
-| BAT-200 | 3 | 2 | A | BOT-090·BAS-010 | 3.75 | docs/features/bot-defense.md, V-T31, docs/security/asvs/bot-defense.md, docs/security/asvs/delivery.md |  |
-| BAT-205 | 3 | 2 | A | BAS-020·BAS-030 | 4.25 | D-T32, docs/devops.md, docs/streaming.md, docs/security/asvs/delivery.md |  |
+| BAT-195 | 3 | 2 | B | BOT-065 | 3 | B-T4, B-T6, B-T9, B-T20, B-T21, B-T26, B-T27, Q-T48, bot-defense:v5.0.0-16.3.3, bot-defense:v5.0.0-16.3.4 | 2026-11-10 시작 때 범위를 좁힘: bot-defense.md 전체에서 이 묶음이 고치는 차단 기기 목록·라벨 반영·그림자 판·키 회전 이음 행만 남김. BOT-080은 선행이 없어 BAT-197로 옮김 |
+| BAT-197 | 3 | 2 | B | BOT-080 | 1 | FR-049, docs/security/asvs/bot-defense.md | 혼자: 선행 OPS-260(갈래 2, 관제 서버 ops-svc)·HOT-400(갈래 1, 관제 게이트웨이). 표본 검토 REST가 ops-svc 몫이라 화면을 실제 서버에 잇지 못한다(2026-11-10 BAT-195에서 옮김) |
+| BAT-200 | 3 | 2 | B | BOT-090·BAS-010 | 3.75 | docs/features/bot-defense.md, V-T31, docs/security/asvs/bot-defense.md, docs/security/asvs/delivery.md |  |
+| BAT-205 | 3 | 2 | B | BAS-020·BAS-030 | 4.25 | D-T32, docs/devops.md, docs/streaming.md, docs/security/asvs/delivery.md |  |
 | BAT-210 | 3 | 2 | B | BAS-070·BAS-110·BAS-230 | 4.5 | NFR-007, docs/architecture.md, docs/verification.md |  |
-| BAT-215 | 1 | 3 | A | OPS-010·OPS-020·OPS-030 | 4.75 | AC-T7, docs/observability.md, docs/security/asvs/delivery.md |  |
+| BAT-215 | 1 | 3 | B | OPS-010·OPS-020·OPS-030 | 4.75 | AC-T7, docs/observability.md, docs/security/asvs/delivery.md |  |
 | BAT-220 | 1 | 3 | B | OPS-150·OPS-160 | 4.75 | ST-T15, ST-T16, docs/streaming.md, docs/features/analytics.md, docs/features/control-tower.md |  |
-| BAT-225 | 1 | 3 | A | OPS-190·OPS-200 | 4.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md |  |
-| BAT-230 | 1 | 3 | A | OPS-205·OPS-220 | 4.5 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md |  |
+| BAT-225 | 1 | 3 | B | OPS-190·OPS-200 | 4.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md |  |
+| BAT-230 | 1 | 3 | B | OPS-205·OPS-220 | 4.5 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md |  |
 | BAT-235 | 1 | 3 | B | OPS-230 | 3 | docs/features/analytics.md, A-T25 | 혼자: 이웃과 합치면 5일을 넘음(OPS-220과 6일, OPS-240과 5.25일) |
-| BAT-240 | 1 | 3 | A | OPS-240·OPS-040 | 4.25 | docs/features/analytics.md, docs/features/settlement.md, docs/observability.md, docs/security/asvs/analytics.md |  |
-| BAT-245 | 1 | 3 | A | OPS-050·OPS-060 | 3.5 | docs/observability.md, docs/security/data-classification.md |  |
-| BAT-250 | 1 | 3 | A | OPS-070·OPS-080 | 5 | V-T21, V-T22, V-T23, V-T30, Q-T61, docs/observability.md, docs/security/asvs/delivery.md |  |
-| BAT-255 | 1 | 3 | A | OPS-090·OPS-100 | 4.5 | docs/observability.md, Q-T42, Q-T49 |  |
+| BAT-240 | 1 | 3 | B | OPS-240·OPS-040 | 4.25 | docs/features/analytics.md, docs/features/settlement.md, docs/observability.md, docs/security/asvs/analytics.md |  |
+| BAT-245 | 1 | 3 | B | OPS-050·OPS-060 | 3.5 | docs/observability.md, docs/security/data-classification.md |  |
+| BAT-250 | 1 | 3 | B | OPS-070·OPS-080 | 5 | V-T21, V-T22, V-T23, V-T30, Q-T61, docs/observability.md, docs/security/asvs/delivery.md |  |
+| BAT-255 | 1 | 3 | B | OPS-090·OPS-100 | 4.5 | docs/observability.md, Q-T42, Q-T49 |  |
 | BAT-260 | 1 | 3 | B | OPS-110·OPS-120·OPS-130 | 4.75 | V-T20, docs/observability.md, docs/devops.md |  |
-| BAT-265 | 1 | 3 | A | OPS-140·OPS-250 | 4.5 | V-T16, docs/observability.md, docs/features/analytics.md, docs/features/bot-defense.md |  |
+| BAT-265 | 1 | 3 | B | OPS-140·OPS-250 | 4.5 | V-T16, docs/observability.md, docs/features/analytics.md, docs/features/bot-defense.md |  |
 | BAT-270 | 1 | 3 | B | OPS-430 | 2.5 | docs/infra.md, docs/devops.md | 혼자: 이웃과 합치면 5일을 넘음(OPS-250과 5.5일, OPS-440과 5.5일) |
 | BAT-275 | 1 | 3 | B | OPS-440 | 3 | D-T6, D-T7, docs/devops.md | 혼자: 이웃 OPS-430과 합치면 5.5일 |
 | BAT-280 | 1 | 3 | B | OPS-170 | 1.75 | NFR-009, V-T19 | 혼자: 측정 창 3 |
 | BAT-285 | 1 | 3 | B | OPS-370 | 1.5 | FE-T29 | 혼자: 측정 창 3. 선행 OPS-350·OPS-360(갈래 2) |
-| BAT-290 | 1 | 3 | A | OPS-450 | 2.75 | docs/observability.md | 혼자: 측정 창 3. 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
+| BAT-290 | 1 | 3 | B | OPS-450 | 2.75 | docs/observability.md | 혼자: 측정 창 3. 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
 | BAT-295 | 1 | 3 | B | OPS-460 | 2.25 | docs/observability.md | 혼자: 측정 창 3. 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
 | BAT-300 | 1 | 3 | B | OPS-470 | 2.25 | docs/observability.md | 혼자: 측정 창 3. 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
 | BAT-305 | 1 | 3 | B | OPS-480 | 2.25 | docs/observability.md | 혼자: 측정 창 3. 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
@@ -92,38 +92,38 @@
 | BAT-335 | 1 | 3 | B | GAT-350 | 1.25 | O-T40, O-T41, docs/features/offline-gate.md | 혼자: 측정 창 3. 선행 GAT-230(갈래 2) |
 | BAT-340 | 1 | 3 | C | GAT-370 | 1 | - | 혼자: 측정 창 3 |
 | BAT-345 | 1 | 3 | C | SEG-030 | 0.5 | - | 혼자: 구간 마무리 |
-| BAT-350 | 2 | 3 | A | GAT-010 | 2.5 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md | 혼자: 짝이 맞지 않음(이웃 OPS-260과 묶으면 OPS-310이 혼자 남는다). 선행 HOT-160(갈래 1) |
-| BAT-355 | 2 | 3 | A | OPS-260·OPS-270 | 4.25 | docs/features/control-tower.md, I-T53, docs/security/authz-matrix.md, docs/security/asvs/control-tower.md |  |
-| BAT-360 | 2 | 3 | A | OPS-280·OPS-290 | 3.25 | docs/features/control-tower.md, C-T47, docs/security/asvs/control-tower.md |  |
-| BAT-365 | 2 | 3 | A | OPS-300·OPS-310 | 5 | docs/features/control-tower.md, C-T50, C-T51, C-T53, C-T54, Q-T12, Q-T30, docs/security/asvs/control-tower.md |  |
+| BAT-350 | 2 | 3 | B | GAT-010 | 2.5 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md | 혼자: 짝이 맞지 않음(이웃 OPS-260과 묶으면 OPS-310이 혼자 남는다). 선행 HOT-160(갈래 1) |
+| BAT-355 | 2 | 3 | B | OPS-260·OPS-270 | 4.25 | docs/features/control-tower.md, I-T53, docs/security/authz-matrix.md, docs/security/asvs/control-tower.md |  |
+| BAT-360 | 2 | 3 | B | OPS-280·OPS-290 | 3.25 | docs/features/control-tower.md, C-T47, docs/security/asvs/control-tower.md |  |
+| BAT-365 | 2 | 3 | B | OPS-300·OPS-310 | 5 | docs/features/control-tower.md, C-T50, C-T51, C-T53, C-T54, Q-T12, Q-T30, docs/security/asvs/control-tower.md |  |
 | BAT-370 | 2 | 3 | B | OPS-340·OPS-380 | 5 | docs/features/control-tower.md, FE-T41, docs/security/asvs/frontend.md |  |
-| BAT-375 | 2 | 3 | A | OPS-390·OPS-400 | 4.5 | docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md |  |
+| BAT-375 | 2 | 3 | B | OPS-390·OPS-400 | 4.5 | docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md |  |
 | BAT-380 | 2 | 3 | B | OPS-410·OPS-420 | 4 | docs/features/control-tower.md, docs/security/asvs/catalog-review.md |  |
 | BAT-385 | 2 | 3 | B | OPS-350·OPS-360 | 3.5 | FE-T25, FE-T26, docs/frontend.md, docs/security/asvs/frontend.md |  |
 | BAT-390 | 2 | 3 | B | OPS-320 | 2.75 | docs/devops.md, docs/infra.md | 혼자: 이웃 OPS-330과 합치면 5.25일이고, OPS-360과 묶으면 OPS-340이 혼자 남음 |
-| BAT-395 | 2 | 3 | A | OPS-330·GAT-020 | 5 | docs/observability.md, docs/security/data-classification.md, docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
-| BAT-400 | 2 | 3 | A | GAT-040·GAT-230·GAT-240·GAT-260 | 4.5 | FE-T43, docs/features/offline-gate.md, docs/features/notify.md, docs/security/asvs/offline-gate.md, docs/security/asvs/auth.md | 선행 GAT-220·GAT-250(갈래 3) |
+| BAT-395 | 2 | 3 | B | OPS-330·GAT-020 | 5 | docs/observability.md, docs/security/data-classification.md, docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
+| BAT-400 | 2 | 3 | B | GAT-040·GAT-230·GAT-240·GAT-260 | 4.5 | FE-T43, docs/features/offline-gate.md, docs/features/notify.md, docs/security/asvs/offline-gate.md, docs/security/asvs/auth.md | 선행 GAT-220·GAT-250(갈래 3) |
 | BAT-405 | 2 | 3 | B | GAT-340·GAT-360 | 2.5 | docs/frontend.md, docs/features/offline-gate.md | 선행 GAT-320·GAT-330·GAT-190(갈래 3) |
-| BAT-410 | 3 | 3 | A | GAT-050·GAT-055·GAT-060 | 5 | docs/features/transfer-refund.md, R-T31, O-T43, I-T43, I-T54, docs/security/asvs/transfer-refund.md | 선행 GAT-010(갈래 2) |
+| BAT-410 | 3 | 3 | B | GAT-050·GAT-055·GAT-060 | 5 | docs/features/transfer-refund.md, R-T31, O-T43, I-T43, I-T54, docs/security/asvs/transfer-refund.md | 선행 GAT-010(갈래 2) |
 | BAT-415 | 3 | 3 | A | GAT-070·GAT-080 | 3.75 | docs/features/transfer-refund.md, docs/security/asvs/transfer-refund.md |  |
 | BAT-420 | 3 | 3 | A | GAT-090·GAT-110 | 3.5 | docs/features/transfer-refund.md, R-T24, I-T43, docs/security/asvs/transfer-refund.md |  |
 | BAT-425 | 3 | 3 | A | GAT-120·GAT-130 | 4 | docs/features/transfer-refund.md, R-T9, R-T22, docs/features/settlement.md, docs/security/asvs/transfer-refund.md |  |
 | BAT-430 | 3 | 3 | A | GAT-135·GAT-140 | 5 | Q-T62, S-T37, docs/features/offline-gate.md, docs/security/asvs/offline-gate.md, docs/security/asvs/queue-admission.md | 선행 GAT-010(갈래 2) |
-| BAT-435 | 3 | 3 | A | GAT-160·GAT-170 | 4.5 | docs/features/offline-gate.md, docs/security/authz-matrix.md, docs/security/asvs/offline-gate.md |  |
-| BAT-440 | 3 | 3 | A | GAT-180·GAT-190 | 4.25 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
-| BAT-445 | 3 | 3 | A | GAT-200·GAT-150 | 2.75 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
-| BAT-450 | 3 | 3 | A | GAT-210·GAT-220 | 4 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md, docs/security/asvs/auth.md |  |
-| BAT-455 | 3 | 3 | A | GAT-250·GAT-270 | 4.75 | docs/features/notify.md, I-T34, POL-034, docs/security/asvs/notify.md | 선행 HOT-420·HOT-430·HOT-440·HOT-450(갈래 1) |
-| BAT-460 | 3 | 3 | A | GAT-280·GAT-290 | 4 | docs/features/transfer-refund.md, R-T29, docs/security/asvs/transfer-refund.md | 선행 OPS-260·OPS-270·OPS-280·OPS-290(갈래 2) |
+| BAT-435 | 3 | 3 | B | GAT-160·GAT-170 | 4.5 | docs/features/offline-gate.md, docs/security/authz-matrix.md, docs/security/asvs/offline-gate.md |  |
+| BAT-440 | 3 | 3 | B | GAT-180·GAT-190 | 4.25 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
+| BAT-445 | 3 | 3 | B | GAT-200·GAT-150 | 2.75 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md |  |
+| BAT-450 | 3 | 3 | B | GAT-210·GAT-220 | 4 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md, docs/security/asvs/auth.md |  |
+| BAT-455 | 3 | 3 | B | GAT-250·GAT-270 | 4.75 | docs/features/notify.md, I-T34, POL-034, docs/security/asvs/notify.md | 선행 HOT-420·HOT-430·HOT-440·HOT-450(갈래 1) |
+| BAT-460 | 3 | 3 | B | GAT-280·GAT-290 | 4 | docs/features/transfer-refund.md, R-T29, docs/security/asvs/transfer-refund.md | 선행 OPS-260·OPS-270·OPS-280·OPS-290(갈래 2) |
 | BAT-465 | 3 | 3 | A | GAT-300·GAT-310 | 3.25 | docs/features/transfer-refund.md, R-T32, R-T34, Q-T59, docs/security/asvs/transfer-refund.md |  |
-| BAT-470 | 3 | 3 | A | GAT-320·GAT-330 | 3.75 | docs/features/transfer-refund.md, docs/security/data-classification.md, docs/security/asvs/support.md |  |
+| BAT-470 | 3 | 3 | B | GAT-320·GAT-330 | 3.75 | docs/features/transfer-refund.md, docs/security/data-classification.md, docs/security/asvs/support.md |  |
 | BAT-475 | 1 | 4 | B | LCH-210·LCH-215 | 3.25 | docs/features/forensic-replay.md, FX-T1, FX-T2, FX-T3 |  |
-| BAT-480 | 1 | 4 | A | LCH-240 | 3 | docs/features/forensic-replay.md, ST-T21, ST-T24, docs/security/asvs/forensic-replay.md | 혼자: 이웃 LCH-250과 합치면 6일이고, LCH-215와 묶으면 LCH-210이 혼자 남음 |
-| BAT-485 | 1 | 4 | A | LCH-250 | 3 | docs/features/forensic-replay.md, FX-T11, FX-T14, docs/security/asvs/forensic-replay.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-240·LCH-260과 6일). 선행 OPS-260·OPS-270·OPS-280·OPS-290(갈래 2) |
-| BAT-490 | 1 | 4 | A | LCH-260·LCH-270 | 5 | docs/features/forensic-replay.md, FX-T12, FX-T15, FX-T16, FX-T18, C-T63, docs/features/settlement.md, docs/security/asvs/forensic-replay.md | 선행 GAT-050·GAT-055·GAT-310·BOT-152·GAT-135·GAT-290·GAT-300(갈래 3) |
-| BAT-495 | 1 | 4 | A | LCH-280·LCH-290 | 3.75 | docs/features/forensic-replay.md, FX-T13, FX-T23, R-T35, C-T72, docs/security/asvs/forensic-replay.md | 선행 GAT-135·GAT-290·GAT-300(갈래 3) |
-| BAT-500 | 1 | 4 | A | LCH-300·LCH-310 | 5 | docs/features/forensic-replay.md, FX-T19, FX-T20, C-T70, C-T71, docs/security/asvs/forensic-replay.md | 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
-| BAT-505 | 1 | 4 | A | LCH-320·LCH-330 | 4 | docs/features/forensic-replay.md, FX-T10, FX-T17, FX-T21, A-T23, A-T24, docs/security/asvs/forensic-replay.md | 선행 LCH-230(갈래 2) |
+| BAT-480 | 1 | 4 | B | LCH-240 | 3 | docs/features/forensic-replay.md, ST-T21, ST-T24, docs/security/asvs/forensic-replay.md | 혼자: 이웃 LCH-250과 합치면 6일이고, LCH-215와 묶으면 LCH-210이 혼자 남음 |
+| BAT-485 | 1 | 4 | B | LCH-250 | 3 | docs/features/forensic-replay.md, FX-T11, FX-T14, docs/security/asvs/forensic-replay.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-240·LCH-260과 6일). 선행 OPS-260·OPS-270·OPS-280·OPS-290(갈래 2) |
+| BAT-490 | 1 | 4 | B | LCH-260·LCH-270 | 5 | docs/features/forensic-replay.md, FX-T12, FX-T15, FX-T16, FX-T18, C-T63, docs/features/settlement.md, docs/security/asvs/forensic-replay.md | 선행 GAT-050·GAT-055·GAT-310·BOT-152·GAT-135·GAT-290·GAT-300(갈래 3) |
+| BAT-495 | 1 | 4 | B | LCH-280·LCH-290 | 3.75 | docs/features/forensic-replay.md, FX-T13, FX-T23, R-T35, C-T72, docs/security/asvs/forensic-replay.md | 선행 GAT-135·GAT-290·GAT-300(갈래 3) |
+| BAT-500 | 1 | 4 | B | LCH-300·LCH-310 | 5 | docs/features/forensic-replay.md, FX-T19, FX-T20, C-T70, C-T71, docs/security/asvs/forensic-replay.md | 선행 OPS-380·OPS-390·OPS-400(갈래 2) |
+| BAT-505 | 1 | 4 | B | LCH-320·LCH-330 | 4 | docs/features/forensic-replay.md, FX-T10, FX-T17, FX-T21, A-T23, A-T24, docs/security/asvs/forensic-replay.md | 선행 LCH-230(갈래 2) |
 | BAT-510 | 1 | 4 | C | MSR-010 | 2.25 | docs/verification.md | 혼자: 측정 창 4 |
 | BAT-515 | 1 | 4 | B | MSR-020 | 2 | docs/verification.md | 혼자: 측정 창 4 |
 | BAT-520 | 1 | 4 | C | MSR-030 | 1 | - | 혼자: 측정 창 4 |
@@ -133,20 +133,20 @@
 | BAT-540 | 1 | 4 | C | MSR-080 | 2.5 | - | 혼자: 측정 창 4 |
 | BAT-545 | 1 | 4 | B | MSR-050 | 1.5 | NFR-027, V-T10 | 혼자: 측정 창 4 |
 | BAT-550 | 1 | 4 | B | LCH-200 | 3 | FE-T10, docs/frontend.md | 혼자: 측정 창 4. 선행 LCH-190(갈래 2) |
-| BAT-555 | 1 | 4 | A | LCH-340 | 1.75 | docs/features/forensic-replay.md, FX-T22, docs/security/asvs/forensic-replay.md | 혼자: 측정 창 4 |
+| BAT-555 | 1 | 4 | B | LCH-340 | 1.75 | docs/features/forensic-replay.md, FX-T22, docs/security/asvs/forensic-replay.md | 혼자: 측정 창 4 |
 | BAT-560 | 1 | 4 | C | LCH-350 | 1.5 | - | 혼자: 측정 창 4 |
 | BAT-565 | 1 | 4 | C | SEG-040 | 0.5 | - | 혼자: 구간 마무리 |
 | BAT-570 | 2 | 4 | B | LCH-220 | 3 | docs/features/forensic-replay.md, FX-T4, FX-T8 | 혼자: 이웃 LCH-230과 합치면 5.25일. 선행 LCH-210·LCH-215(갈래 1) |
 | BAT-575 | 2 | 4 | B | LCH-230 | 2.25 | docs/features/forensic-replay.md, FX-T5, FX-T9 | 혼자: 이웃과 합치면 5일을 넘음(LCH-220·LCH-190과 5.25일) |
 | BAT-580 | 2 | 4 | B | LCH-190 | 3 | docs/frontend.md, docs/security/asvs/frontend.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-230과 5.25일, LCH-150과 5.5일) |
-| BAT-585 | 2 | 4 | A | LCH-150·LCH-160 | 5 | docs/security/asvs/catalog-review.md, docs/features/control-tower.md |  |
-| BAT-590 | 2 | 4 | A | LCH-180·LCH-185 | 3.5 | POL-027, docs/security/data-classification.md, docs/security/internal-management-plan.md |  |
-| BAT-595 | 2 | 4 | A | LCH-040·LCH-130 | 3.5 | docs/features/transfer-refund.md, docs/features/settlement.md, docs/frontend.md | 선행 LCH-010·LCH-020·LCH-030·LCH-120(갈래 3) |
+| BAT-585 | 2 | 4 | B | LCH-150·LCH-160 | 5 | docs/security/asvs/catalog-review.md, docs/features/control-tower.md |  |
+| BAT-590 | 2 | 4 | B | LCH-180·LCH-185 | 3.5 | POL-027, docs/security/data-classification.md, docs/security/internal-management-plan.md |  |
+| BAT-595 | 2 | 4 | B | LCH-040·LCH-130 | 3.5 | docs/features/transfer-refund.md, docs/features/settlement.md, docs/frontend.md | 선행 LCH-010·LCH-020·LCH-030·LCH-120(갈래 3) |
 | BAT-600 | 3 | 4 | A | LCH-010·LCH-020 | 4 | docs/features/payment.md, V-T26, docs/features/settlement.md, docs/security/asvs/payment.md |  |
 | BAT-605 | 3 | 4 | A | LCH-030 | 2 | docs/features/payment.md, docs/features/transfer-refund.md, docs/security/asvs/payment.md | 혼자: 7.1.1 셋을 묶으면 6일이고, 이웃 LCH-050과 묶으면 LCH-080이 혼자 남음 |
-| BAT-610 | 3 | 4 | A | LCH-050·LCH-060 | 4.5 | docs/features/settlement.md, I-T53, docs/security/asvs/settlement.md |  |
-| BAT-615 | 3 | 4 | A | LCH-070·LCH-080 | 4.25 | docs/features/settlement.md, docs/features/seat-hold.md, docs/features/queue-admission.md, docs/security/asvs/settlement.md |  |
-| BAT-620 | 3 | 4 | A | LCH-090 | 2.75 | docs/features/control-tower.md, docs/security/asvs/control-tower.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-080과 5.5일, LCH-100과 5.25일) |
+| BAT-610 | 3 | 4 | B | LCH-050·LCH-060 | 4.5 | docs/features/settlement.md, I-T53, docs/security/asvs/settlement.md |  |
+| BAT-615 | 3 | 4 | B | LCH-070·LCH-080 | 4.25 | docs/features/settlement.md, docs/features/seat-hold.md, docs/features/queue-admission.md, docs/security/asvs/settlement.md |  |
+| BAT-620 | 3 | 4 | B | LCH-090 | 2.75 | docs/features/control-tower.md, docs/security/asvs/control-tower.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-080과 5.5일, LCH-100과 5.25일) |
 | BAT-625 | 3 | 4 | A | LCH-100 | 2.5 | docs/features/settlement.md, docs/security/asvs/settlement.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-090·LCH-110과 5.25일) |
 | BAT-630 | 3 | 4 | A | LCH-110 | 2.75 | docs/features/settlement.md, docs/security/asvs/settlement.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-100과 5.25일, LCH-120과 5.5일) |
 | BAT-635 | 3 | 4 | A | LCH-120·LCH-170 | 4.75 | docs/features/settlement.md, I-T53, docs/features/transfer-refund.md, docs/security/asvs/settlement.md, docs/security/asvs/transfer-refund.md |  |

@@ -54,13 +54,17 @@ const JUDGE_COLS = ['합격 판정 기준', '통과 기준', '합격 기준', '�
 const TITLE_COLS = ['테스트 시나리오', '시나리오', '무엇', '대상', '상황', '확인할 것'];
 /** 세부 번호를 찾지 않는 칸(요구사항 연결, 시기) */
 const LINK_COLS = new Set(['#', 'ID', '연결', '관련', '연결 요구사항', '관련 FR', '언제']);
-/** 원천 문서로 정하는 기본 등급. 앞의 것이 먼저다. 항목마다 notes의 등급 칸으로 바꾼다 */
+/**
+ * 원천 문서로 정하는 기본 등급. 앞의 것이 먼저다. 항목마다 notes의 등급 칸으로 바꾼다.
+ * 2026-11-10 ADR-0256 결정 10: A는 돈·좌석·대기 순번의 핵심 로직과 그 데이터의 복구뿐이다(항목마다 실패 증명).
+ * 권한·개인정보·법정 의무·입장·보안 통제는 B다(표본 20~30개로 증명하고, 그 항목은 표본에 꼭 넣는다)
+ */
 export const GRADE_BY_DOC = [
-  [/^docs\/security\//, 'A', '보안 통제(권한·개인정보)'],
-  [/^docs\/features\/(payment|seat-hold|queue-admission|identity|bot-defense|transfer-refund|offline-gate|settlement)\.md$/, 'A', '돈·좌석·대기 순번·권한·입장'],
-  [/^docs\/features\//, 'B', '관제·분석·알림·검색·사후 조사'],
+  [/^docs\/features\/(payment|seat-hold|queue-admission|transfer-refund|settlement)\.md$/, 'A', '돈·좌석·대기 순번(결정 10)'],
+  [/^docs\/security\//, 'B', '보안 통제(권한·개인정보, 표본으로 증명)'],
+  [/^docs\/features\//, 'B', '권한·입장·봇 방어·관제·분석·알림·검색·사후 조사'],
   [/^docs\/(frontend|devops|streaming|verification)\.md$/, 'B', '화면·운영·검증 도구'],
-  [/^docs\/planning\//, 'B', '요구사항·정책(법정 의무·개인정보는 notes로 A)'],
+  [/^docs\/planning\//, 'B', '요구사항·정책(대기 순번 정책은 notes로 A)'],
 ];
 const DEFAULT_GRADE = 'B';
 /** ASVS 문서 이름 → 분야(기능 문서 이름과 다른 것만) */
@@ -68,7 +72,7 @@ const ASVS_AREA = { auth: 'identity' };
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'out', 'test-results', 'playwright-report', '_apalache-out', 'docs']);
 const TEST_EXT = /\.(m?[jt]sx?|c[jt]s)$/;
 /** 이 표시가 첫 줄에 있는 tools/ci 아래 파일은 읽지 않는다(도구 자신의 시험 자료. asvs-report.mjs와 같은 표시) */
-const IGNORE = /^\/\/ asvs-report: ignore/;
+export const IGNORE = /^\/\/ asvs-report: ignore/;
 
 const ROW = /^\| (?:\*\*)?([A-Z]{1,3}-T\d+)(?:\*\*)? \|/;
 const SCEN_ID = /^[A-Z]{1,3}-T\d+$/;
@@ -117,10 +121,10 @@ export function splitCriterion(text) {
 }
 
 // ---------- 표 읽기 ----------
-const plain = (s) => s.replace(/\*\*/g, '').replace(/`/g, '').trim();
+export const plain = (s) => s.replace(/\*\*/g, '').replace(/`/g, '').trim();
 
 /** 표 블록을 차례로 준다: { head(칸 이름), headLine, rows: [{ line, text, cells }] }. 코드 펜스 안은 건너뛴다 */
-function* tables(text) {
+export function* tables(text) {
   const lines = text.replaceAll('\r\n', '\n').split('\n');
   let fence = false;
   let cur = null;
@@ -149,7 +153,7 @@ function* tables(text) {
 const REQ_TOKEN = /(?<![A-Za-z])(N?FR|POL)-(\d{3})((?:\s*[~·,]\s*(?:\1-)?\d{3}(?!\d))*)/g;
 
 /** 글이 가리키는 FR·NFR·POL. '~'는 범위, '·'와 ','는 낱개다(문서 점검의 FR 연결 셈과 같다) */
-function refsIn(text) {
+export function refsIn(text) {
   const out = new Set();
   for (const m of text.matchAll(REQ_TOKEN)) {
     let prev = Number(m[2]);
@@ -511,7 +515,7 @@ export function marksIn(title) {
   return scanMarks(title).map(({ id, subs }) => ({ id, subs }));
 }
 
-function isTestFile(rel) {
+export function isTestFile(rel) {
   return TEST_EXT.test(rel) && (/\.(test|spec)\.[^/]+$/.test(rel) || /(^|\/)(test|test-int|test-sim|e2e)\//.test(rel));
 }
 

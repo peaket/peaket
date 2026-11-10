@@ -19,6 +19,7 @@ import {
   batchScope,
   codeArea,
   ASVS_DEFAULT_AREA,
+  gradeOf,
 } from './ledger.mjs';
 import { tempDir } from './git-fixture.mjs';
 
@@ -516,4 +517,9 @@ test('끝 코드 2: notes 오류(사유 없는 미검증), 모르는 범위 토�
   const ok = fixtureRepo();
   assert.equal(run(ok, '--scope', 'Z-T').status, 2);
   assert.equal(run(ok, '--nope').status, 2);
+});
+
+test('원천 문서의 기본 등급(ADR-0256 결정 10): 돈·좌석·대기 순번 문서만 A, 권한·개인정보·입장·보안 통제는 B', () => {
+  for (const d of ['docs/features/payment.md', 'docs/features/seat-hold.md', 'docs/features/queue-admission.md', 'docs/features/settlement.md', 'docs/features/transfer-refund.md']) assert.equal(gradeOf(d), 'A', d);
+  for (const d of ['docs/features/identity.md', 'docs/features/bot-defense.md', 'docs/features/offline-gate.md', 'docs/security/asvs/payment.md', 'docs/security/authz-matrix.md', 'docs/frontend.md', 'docs/planning/02-requirements.md']) assert.equal(gradeOf(d), 'B', d);
 });
