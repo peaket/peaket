@@ -66,6 +66,7 @@ export function setup() {
 const sim = (path, body, route, expected) => http.post(`${SIM_URL}${path}`, JSON.stringify(body), { headers: { authorization: SIM_AUTH, 'content-type': 'application/json' }, tags: { route }, responseCallback: http.expectedStatuses(expected) });
 
 export function pay() {
+  // 반복 번호는 발생기를 나눠도(k6 실행 구간) 겹치지 않는다(줄무늬로 나뉜다). 사람마다 결제는 한 번이다
   const it = exec.scenario.iterationInTest;
   const i = exec.scenario.name === 'main' ? it : USERS - 1 - it;
   if (i < 0 || i >= USERS) return;

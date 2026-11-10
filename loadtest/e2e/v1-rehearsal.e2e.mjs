@@ -2,6 +2,8 @@
 // 실행 도구 `node loadtest/run.mjs v1 …`를 셸 없이 불러 작은 규모로 끝까지 돌리고 산출물과 v1 DB를 본다. 장부에 남기지 않는다(--record 없음).
 // - K1(Q-T2 v1 쪽): 진입이 모두 성공해 순번이 겹치지 않고, 입장 확정이 일어나며 Q1·Q2가 PASS, 본구간 조회 실패 0, 발생기 판정 유효
 // - K2(S-T1 v1 쪽, 인기 좌석 하나·놓지 않음): 본구간 홀드가 도착률 × 본구간만큼이고, 그 좌석의 홀드는 회차 전체에서 하나이며 S1·S2·S4가 PASS
+// - K2를 발생기 둘로 나눠도(k6 실행 구간) 발생기마다 제 몫의 사용자만 준비해 진입이 사람마다 한 번이고(already-waiting 409 없음) 준비가 성공한다
+//   (BAT-025 측정에서 찾은 결함: setup()이 발생기마다 모든 사용자를 진입시켰다)
 // - K7 ②(P-T1 v1 쪽, 응답 버림 5%·늦춤 0.5%·합본 복제 하나 강제 종료): 결제 결과가 남고 P1~P4·P6·S1·S4가 정확히 PASS이며 SKIPPED는 정본의 기대 목록(S3·P5·M1~M5)뿐,
 //   (OPEN[34] 결정 전까지 K7 ②는 P3에서 실패할 수 있다: 승인 실행기 임대 75초 + 첫 조회 5초 + 틱이 P3의 60초 [가정]보다 길어, 강제 종료 직후 승인된 결제가
 //    발권 대기 등록 시한을 넘는다(2026-11-10 리허설 2건, 64초·80초). 정본 수치의 어긋남이라 단언은 그대로 둔다)
@@ -151,6 +153,24 @@ test('PRF215_K2 S-T1 v1 인기 좌석 홀드 리허설: 본구간 홀드가 도�
   const inv = csv(join(out, 'invariants.csv'));
   for (const id of ['S1', 'S2', 'S4']) assert.equal(inv[id], 'PASS', id);
   assert.deepEqual(skippedOf(inv), [...V1_EXPECTED_SKIPPED].sort());
+  assert.equal(JSON.parse(readFileSync(join(out, 'generator.json'), 'utf8')).judge.valid, true);
+});
+
+test('PRF215_발생기나누기_K2 인기 좌석을 발생기 둘로 나눠도 발생기마다 제 몫만 준비해 진입이 사람마다 한 번이고 본구간 홀드가 도착률 × 본구간만큼이다', SLOW, async () => {
+  const out = join(OUT, 'k2-split');
+  const rate = 100;
+  const mainS = 15;
+  const r = await runTool(['v1', 'seat-hold', '--users', '200', '--rate', String(rate), '--mode', 'hot', '--hot-count', '1', '--keep', '--generators', '2', '--warm', '5', '--main', String(mainS), '--cpus', '1', '--memory-mi', '1024', '--out', out]);
+  runs.push({ name: 'k2-split', out, text: r.text });
+  assert.equal(r.code, 0, r.text.slice(-3000));
+  assert.match(r.text, /발생기 2대/);
+  const s = JSON.parse(readFileSync(join(out, 'summary.json'), 'utf8'));
+  // 준비 진입은 사람마다 한 번(두 발생기 합 200건, already-waiting 409 없음)
+  assert.equal(metric(s, 'http_reqs{phase:prep,route:entry}').count ?? 0, 200);
+  assert.equal(metric(s, 'http_req_failed{phase:prep,route:entry}').passes ?? 0, 0);
+  const holds = metric(s, 'http_reqs{phase:main,route:hold}').count ?? 0;
+  assert.ok(Math.abs(holds - rate * mainS) <= rate * mainS * 0.02 + 2, `본구간 홀드 ${holds}건(계획 ${rate * mainS})`);
+  assert.equal(metric(s, 'scenario_errors').count ?? 0, 0);
   assert.equal(JSON.parse(readFileSync(join(out, 'generator.json'), 'utf8')).judge.valid, true);
 });
 

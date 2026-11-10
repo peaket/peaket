@@ -3,6 +3,8 @@
 // 동시 입장 목표가 5,000명이라(v1 입장 제어, §3.9 '준비 구간의 입장') USERS는 5,000명 이하다.
 // 그 뒤 홀드를 정한 도착률로 보낸다(route:hold, phase:warm → main). 좌석 고르기는 v0와 같다(spread·hot·crossed, lib/seats.mjs의 격자를 v1 좌석 UUID로 바꾼다).
 // 구매 요청은 서명한다(일련번호는 시각 기반, lib/v1.mjs). 같은 구매 세션을 두 VU가 함께 쓰지 않게 사용자 u는 u mod USERS == VU 번호 mod USERS인 VU만 쓴다.
+// 발생기를 나누면(k6 실행 구간) setup()이 발생기마다 따로 돈다. 그래서 준비는 그 발생기의 사용자 몫(lib/v1.mjs segmentUsers)만 하고, 홀드도 그 몫의 사용자를
+// 발생기 안 VU 번호(idInInstance)로 고른다(VU 번호 idInTest는 발생기 사이에 줄무늬로 나뉘어 몫과 맞지 않는다, BAT-025 측정에서 찾은 결함).
 // 잡은 홀드는 정한 시간(기본 0초) 뒤 놓는다(route:release, DELETE /v1/holds/{holdId}). --keep이면 놓지 않는다.
 // 환경 값: EVENT_ID USERS RATE WARM_S MAIN_S MODE HOLD_SIZE HOT_COUNT PAIRS RELEASE_MS KEEP SECTIONS ROWS PER_ROW PRE_VUS MAX_VUS PREP_BATCH PREP_TIMEOUT_S
 import http from 'k6/http';
@@ -10,7 +12,7 @@ import exec from 'k6/execution';
 import { check, sleep } from 'k6';
 import { openPhases } from '../lib/model.mjs';
 import { pickHoldSeats } from '../lib/seats.mjs';
-import { ownedUser, v1Headers, v1SeatIds } from '../lib/v1.mjs';
+import { ownedUser, segmentUsers, v1Headers, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
 import { envInt, envStr, jsonOf, markScenarios, PURCHASE_BASE, QUEUE_BASE, RUN_TAG, scenarioErrors, STATE_BASE, V1Session, writeSummary } from './v1-common.js';
 
@@ -33,6 +35,9 @@ const MAX_VUS = envInt('MAX_VUS', 500);
 const PREP_BATCH = envInt('PREP_BATCH', 100);
 const PREP_TIMEOUT_S = envInt('PREP_TIMEOUT_S', 900);
 const CLIENT_KEY = envStr('CLIENT_KEY');
+/** 이 발생기가 맡는 사용자 [MINE_FROM, MINE_TO)(실행 구간이 없으면 전체) */
+const [MINE_FROM, MINE_TO] = segmentUsers(USERS, __ENV.K6_EXECUTION_SEGMENT);
+const MINE = MINE_TO - MINE_FROM;
 
 const holds = openPhases({ exec: 'hold', rate: RATE, warmS: WARM_S, mainS: MAIN_S, startS: 0, preVUs: PRE_VUS, maxVUs: MAX_VUS });
 
@@ -40,16 +45,20 @@ export const options = {
   ...baseOptions({ warm: holds.warm, main: holds.main, ...markScenarios(WARM_S, WARM_S + MAIN_S) }, ['hold', 'release']),
   setupTimeout: `${PREP_TIMEOUT_S}s`,
 };
+// 준비 진입의 시행·실패(발생기를 나눠도 사람마다 한 번인지 실행 도구·리허설이 요약에서 본다)
+options.thresholds['http_reqs{phase:prep,route:entry}'] = ['count>=0'];
+options.thresholds['http_req_failed{phase:prep,route:entry}'] = ['rate>=0'];
 
 const json = (i) => ({ headers: v1Headers(RUN_TAG, i, { json: true }), tags: { phase: 'prep' } });
 const post = (url, i, body, route) => ['POST', url, JSON.stringify(body), { ...json(i), tags: { phase: 'prep', route } }];
 
-/** 준비: 묶음마다 사전 검증 → 진입 → 차례 → 입장 확정 → 구매 세션 열기. 입장 토큰 목록(번호 = 가상 사용자)을 돌려준다 */
+/** 준비: 이 발생기의 사용자 몫을 묶음마다 사전 검증 → 진입 → 차례 → 입장 확정 → 구매 세션 열기. 입장 토큰 목록(번호 = 가상 사용자, 몫 밖은 null)을 돌려준다 */
 export function setup() {
   if (USERS > 5000) throw new Error('USERS는 5,000명 이하다(동시 입장 목표 5,000명)');
+  if (MINE < 1) throw new Error(`이 발생기의 사용자 몫이 비었다(${MINE_FROM}~${MINE_TO})`);
   const tokens = new Array(USERS).fill(null);
-  for (let from = 0; from < USERS; from += PREP_BATCH) {
-    const ids = Array.from({ length: Math.min(PREP_BATCH, USERS - from) }, (_, k) => from + k);
+  for (let from = MINE_FROM; from < MINE_TO; from += PREP_BATCH) {
+    const ids = Array.from({ length: Math.min(PREP_BATCH, MINE_TO - from) }, (_, k) => from + k);
     const pv = http.batch(ids.map((i) => post(`${QUEUE_BASE}/v1/queues/${EVENT_ID}/pre-verifications`, i, {}, 'preverify')));
     const en = http.batch(ids.map((i, k) => post(`${QUEUE_BASE}/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv[k])?.preverifyToken ?? '' }, 'entry')));
     const entries = en.map((r) => (r.status === 201 ? jsonOf(r) : undefined));
@@ -80,7 +89,7 @@ export function setup() {
     });
   }
   const ready = tokens.filter(Boolean).length;
-  if (ready < USERS) throw new Error(`준비 구간에 구매 세션을 연 가상 사용자가 ${ready}/${USERS}명이다`);
+  if (ready < MINE) throw new Error(`준비 구간에 구매 세션을 연 가상 사용자가 ${ready}/${MINE}명이다(이 발생기 몫 ${MINE_FROM}~${MINE_TO})`);
   return { tokens };
 }
 
@@ -88,8 +97,10 @@ export function setup() {
 const sessions = new Map();
 
 export function hold(data) {
-  const u = ownedUser(USERS, USERS, exec.vu.idInTest, Math.random());
-  if (u < 0) return;
+  // 사용자는 이 발생기가 준비한 몫 안에서만, 발생기 안 VU 번호로 고른다
+  const k = ownedUser(MINE, MINE, exec.vu.idInInstance, Math.random());
+  if (k < 0) return;
+  const u = MINE_FROM + k;
   let s = sessions.get(u);
   if (!s) sessions.set(u, (s = new V1Session(u, data.tokens[u])));
   const seatIds = v1SeatIds(GRID, pickHoldSeats(GRID, { mode: MODE, size: HOLD_SIZE, hotCount: HOT_COUNT, pairs: PAIRS, u1: Math.random(), u2: Math.random() }));

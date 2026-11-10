@@ -122,6 +122,35 @@ export function nextPurchaseSeq(last, nowMs) {
 }
 
 /**
+ * k6 실행 구간(K6_EXECUTION_SEGMENT 'a:b', a·b는 0·1·'i/n'·소수, loadtest/runner/merge.mjs executionSegments)이 맡는 사용자 몫 [from, to).
+ * 발생기를 나누면 setup()은 발생기마다 따로 돌고 VU 번호(exec.vu.idInTest)는 발생기마다 1부터라, 사용자를 이 몫으로 나눠야 발생기 사이에서 겹치거나
+ * 빠지지 않는다(BAT-025 측정에서 찾은 결함: 두 발생기가 저마다 모든 사용자를 진입시켰다). 구간이 없으면(발생기 하나) [0, users)
+ * @param {number} users @param {string | undefined} segment
+ * @returns {[number, number]}
+ */
+// 반복 번호(exec.scenario.iterationInTest)와 VU 번호(exec.vu.idInTest)는 실행 구간(--execution-segment)으로 나눈 발생기 사이에서도 겹치지 않는다(줄무늬로 나뉜다,
+// k6 1.4.2에서 2026-11-10 확인). 겹치는 것은 발생기마다 따로 도는 setup()이다. setup이 준비한 사용자만 그 발생기의 VU가 쓰게 VU 번호는 발생기 안 번호(idInInstance)로 고른다
+export function segmentUsers(users, segment) {
+  if (!Number.isSafeInteger(users) || users < 0) throw new RangeError(`사용자 수는 0 이상 정수다: ${users}`);
+  if (segment === undefined || segment === '') return [0, users];
+  const parts = String(segment).split(':');
+  if (parts.length !== 2) throw new RangeError(`실행 구간은 'a:b'다: ${segment}`);
+  /** @param {string} t @returns {[number, number]} 분자·분모 */
+  const frac = (t) => {
+    const m = /^(\d+)\/(\d+)$/.exec(t);
+    if (m) return [Number(m[1]), Number(m[2])];
+    if (/^\d+(\.\d+)?$/.test(t)) {
+      const d = (t.split('.')[1] ?? '').length;
+      return [Math.round(Number(t) * 10 ** d), 10 ** d];
+    }
+    throw new RangeError(`실행 구간 경계가 수가 아니다: ${t}`);
+  };
+  const [[an, ad], [bn, bd]] = parts.map(frac);
+  if (ad === 0 || bd === 0 || an * bd >= bn * ad || an < 0 || bn > bd) throw new RangeError(`실행 구간은 0 ≤ a < b ≤ 1이다: ${segment}`);
+  return [Math.floor((users * an) / ad), Math.floor((users * bn) / bd)];
+}
+
+/**
  * VU 하나가 맡는 가상 사용자(같은 구매 세션을 두 VU가 동시에 쓰지 않게): 사용자 u는 u mod groups == vu mod groups인 VU만 쓴다.
  * groups는 min(사용자 수, VU 수)다. 그 무리에서 k번째 사람(0 ≤ k)을 돌려주고, 무리에 사람이 없으면 -1
  * @param {number} users @param {number} groups @param {number} vu VU 번호(1부터) @param {number} u1 [0, 1) 난수

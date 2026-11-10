@@ -158,6 +158,8 @@ describe('runner/args.mjs v1', () => {
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOST_REPO = process.platform === 'win32' ? REPO.replaceAll('\\', '/') : REPO;
 const DOCKER_ENV = { ...process.env, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' };
+// Linux 러너에서는 임시 폴더(mkdtemp, 0700)에 k6가 쓰도록 이 프로세스의 사용자로 돈다(Docker Desktop에서는 이미지 사용자. manifests090.test.mjs runArgs와 같다, CI 42826751275)
+const K6_USER = typeof process.getuid === 'function' ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
 const docker = (args, timeout) => execFileSync('docker', args, { encoding: 'utf8', env: DOCKER_ENV, timeout, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 let SKIP = false;
 try {
@@ -427,7 +429,7 @@ describe('v1-payment.js 결제 확정 시간(코드 리뷰 M6, k6를 가짜 서�
     try {
       const base = `http://host.docker.internal:${port}`;
       const env = { ...ENV, QUEUE_BASE: base, STATE_BASE: base, PURCHASE_BASE: base, SIM_URL: base, OUT_DIR: '/out', USERS: 40, RATE: 2, WARM_S: 1, MAIN_S: 5, PRE_VUS: 4, MAX_VUS: 8, FAULT_DROP_PCT: '0', FAULT_DELAY_PCT: '0', ADMIT_WAIT_S: 10 };
-      const args = ['run', '--rm', '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo', K6_IMAGE, 'run', '--quiet', '--no-usage-report'];
+      const args = ['run', '--rm', ...K6_USER, '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo', K6_IMAGE, 'run', '--quiet', '--no-usage-report'];
       for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
       args.push('loadtest/scenarios/v1-payment.js');
       await new Promise((ok, no) => {
@@ -575,7 +577,7 @@ describe('재확인 리뷰: v1-payment.js가 UNKNOWN 뒤에도 끝 상태까지 
     try {
       const base = `http://host.docker.internal:${port}`;
       const env = { ...ENV, QUEUE_BASE: base, STATE_BASE: base, PURCHASE_BASE: base, SIM_URL: base, OUT_DIR: '/out', USERS: 40, RATE: 2, WARM_S: 1, MAIN_S: 5, PRE_VUS: 4, MAX_VUS: 8, FAULT_DROP_PCT: '0', FAULT_DELAY_PCT: '0', ADMIT_WAIT_S: 10 };
-      const args = ['run', '--rm', '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo', K6_IMAGE, 'run', '--quiet', '--no-usage-report'];
+      const args = ['run', '--rm', ...K6_USER, '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo', K6_IMAGE, 'run', '--quiet', '--no-usage-report'];
       for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
       args.push('loadtest/scenarios/v1-payment.js');
       await new Promise((ok, no) => {
@@ -593,5 +595,174 @@ describe('재확인 리뷰: v1-payment.js가 UNKNOWN 뒤에도 끝 상태까지 
       server.close();
       rmSync(out, { recursive: true, force: true });
     }
+  });
+});
+
+// ─────────── 발생기 나누기(k6 실행 구간, BAT-025 측정에서 찾은 결함) ───────────
+
+describe('발생기 나누기: 사용자 몫(lib/v1.mjs segmentUsers)', async () => {
+  const lib = await import('../lib/v1.mjs');
+  const { executionSegments } = await import('../runner/merge.mjs');
+
+  test('PRF215_발생기나누기_실행 구간마다 사용자 몫이 겹치지 않고 빠짐없이 0~USERS를 덮는다(실행 도구가 주는 구간 글 그대로)', () => {
+    assert.equal(typeof lib.segmentUsers, 'function', 'segmentUsers');
+    for (const [users, n] of [[1000, 2], [1000, 3], [7, 3], [200, 2], [5, 1], [2, 2]]) {
+      const ranges = executionSegments(n).map((s) => lib.segmentUsers(users, s.segment));
+      assert.deepEqual(ranges[0][0], 0, `${users}/${n} 처음`);
+      assert.deepEqual(ranges.at(-1)[1], users, `${users}/${n} 끝`);
+      for (let k = 1; k < ranges.length; k++) assert.equal(ranges[k][0], ranges[k - 1][1], `${users}/${n} 이어짐`);
+      const sizes = ranges.map(([a, b]) => b - a);
+      assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `${users}/${n} 고르게 ${sizes}`);
+    }
+    // 구간이 없으면(발생기 하나) 전체
+    assert.deepEqual(lib.segmentUsers(300, undefined), [0, 300]);
+    assert.deepEqual(lib.segmentUsers(300, ''), [0, 300]);
+    assert.deepEqual(lib.segmentUsers(300, '0.5:1'), [150, 300]);
+    for (const bad of ['1/2', '1:1/2', '0:3/2', 'x:1', '-1/2:1']) assert.throws(() => lib.segmentUsers(300, bad), RangeError, bad);
+  });
+});
+
+describe('발생기 나누기: v1-seat-hold.js를 실행 구간 둘로 돌린다(k6를 가짜 서버에)', { skip: SKIP }, () => {
+  test('PRF215_발생기나누기_실행 구간 둘이 setup에서 저마다 제 몫의 사용자만 진입·입장시키고 홀드도 제 몫의 사용자로만 보낸다', async () => {
+    const { createServer } = await import('node:http');
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const USERS_N = 20;
+    const jwt = `${Buffer.from('{"alg":"ES256"}').toString('base64url')}.${Buffer.from(JSON.stringify({ jti: '01934b2e-7c1a-7d3e-9f40-6b2a8c1d5e70' })).toString('base64url')}.c2ln`;
+    const byAccount = new Map(Array.from({ length: USERS_N }, (_, i) => [v1AccountId(ENV.RUN_TAG, i), i]));
+    /** 실행 구간 → { entries: 사용자 번호 목록, holds: 사용자 번호 집합 } */
+    const seen = { g0: { entries: [], holds: new Set() }, g1: { entries: [], holds: new Set() } };
+    let current = 'g0';
+    let seq = 0;
+    const server = createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        const u = req.url ?? '';
+        const who = byAccount.get(String(req.headers['x-user-id']));
+        const send = (code, obj) => {
+          res.writeHead(code, { 'content-type': 'application/json' });
+          res.end(obj === undefined ? '' : JSON.stringify(obj));
+        };
+        if (u.includes('pre-verifications')) return send(201, { preverifyToken: 'pv' });
+        if (u.includes('/entries')) {
+          seen[current].entries.push(who);
+          return send(201, { queueTicket: `t${++seq}`, seq, generation: 1, segment: 0 });
+        }
+        if (u.includes('segment-states')) return send(200, { serving: 1_000_000, pollHintMs: 200 });
+        if (u.includes('/admission')) return send(200, { status: 'ADMITTED', admissionToken: jwt });
+        if (u.includes('seatmap-snapshot')) return send(200, {});
+        if (u.includes('/holds')) {
+          seen[current].holds.add(who);
+          return send(201, { holdId: 'h1' });
+        }
+        return send(404, {});
+      });
+    });
+    await new Promise((r) => server.listen(0, '0.0.0.0', r));
+    const port = server.address().port;
+    const out = mkdtempSync(join(tmpdir(), 'v1-seg-'));
+    try {
+      const base = `http://host.docker.internal:${port}`;
+      for (const [g, segment] of [['g0', '0:1/2'], ['g1', '1/2:1']]) {
+        current = g;
+        const env = { ...ENV, QUEUE_BASE: base, STATE_BASE: base, PURCHASE_BASE: base, OUT_DIR: '/out', USERS: USERS_N, RATE: 8, WARM_S: 1, MAIN_S: 3, PRE_VUS: 4, MAX_VUS: 8, K6_EXECUTION_SEGMENT: segment, K6_EXECUTION_SEGMENT_SEQUENCE: '0,1/2,1' };
+        const args = ['run', '--rm', ...K6_USER, '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo'];
+        for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
+        // 실행 도구(runner/manifests.mjs RUN_SCRIPT_SPLIT)처럼 명령줄 인자로 준다(k6는 이 둘을 환경 값으로 읽지 않는다)
+        args.push(K6_IMAGE, 'run', '--quiet', '--no-usage-report', '--execution-segment', segment, '--execution-segment-sequence', '0,1/2,1', 'loadtest/scenarios/v1-seat-hold.js');
+        const code = await new Promise((ok) => {
+          const child = spawn('docker', args, { env: DOCKER_ENV, stdio: ['ignore', 'ignore', 'pipe'] });
+          child.stderr.on('data', () => {});
+          child.on('exit', ok);
+        });
+        assert.ok(code === 0 || code === 99, `${g} k6 종료 코드 ${code}`);
+      }
+      const all = [...seen.g0.entries, ...seen.g1.entries].sort((a, b) => a - b);
+      assert.deepEqual(all, Array.from({ length: USERS_N }, (_, i) => i), '사용자마다 진입 한 번(두 구간 합)');
+      assert.deepEqual([...new Set(seen.g0.entries)].sort((a, b) => a - b), Array.from({ length: USERS_N / 2 }, (_, i) => i));
+      for (const u of seen.g0.holds) assert.ok(u < USERS_N / 2, `g0 홀드 사용자 ${u}`);
+      for (const u of seen.g1.holds) assert.ok(u >= USERS_N / 2, `g1 홀드 사용자 ${u}`);
+      assert.ok(seen.g0.holds.size > 0 && seen.g1.holds.size > 0, '두 구간 모두 홀드를 보냈다');
+    } finally {
+      server.close();
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('발생기 나누기: v1-queue.js·v1-payment.js도 실행 구간 둘이 사용자를 겹치지 않게 나눈다(k6를 가짜 서버에)', { skip: SKIP }, () => {
+  /** 시나리오를 실행 구간 둘로 차례로 돌리고 구간마다 진입한 사용자 번호를 돌려준다 */
+  async function entriesBySegment(script, users, extra) {
+    const { createServer } = await import('node:http');
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const jwt = `${Buffer.from('{"alg":"ES256"}').toString('base64url')}.${Buffer.from(JSON.stringify({ jti: '01934b2e-7c1a-7d3e-9f40-6b2a8c1d5e70' })).toString('base64url')}.c2ln`;
+    const byAccount = new Map(Array.from({ length: users }, (_, i) => [v1AccountId(ENV.RUN_TAG, i), i]));
+    const seen = { g0: [], g1: [] };
+    let current = 'g0';
+    let seq = 0;
+    let orderNo = 0;
+    const server = createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        const u = req.url ?? '';
+        const send = (code, obj) => {
+          res.writeHead(code, { 'content-type': 'application/json' });
+          res.end(obj === undefined ? '' : JSON.stringify(obj));
+        };
+        if (u.includes('pre-verifications')) return send(201, { preverifyToken: 'pv' });
+        if (u.includes('/entries')) {
+          seen[current].push(byAccount.get(String(req.headers['x-user-id'])));
+          return send(201, { queueTicket: `t${++seq}`, seq, generation: 1, segment: 0 });
+        }
+        if (u.includes('segment-states')) return send(200, { serving: 1_000_000, pollHintMs: 200 });
+        if (u.includes('/admission')) return send(200, { status: 'ADMITTED', admissionToken: jwt });
+        if (u.includes('seatmap-snapshot')) return send(200, {});
+        if (u.includes('/holds')) return send(201, { holdId: 'h1' });
+        if (u.endsWith('/v1/orders')) return send(201, { orderId: `o${++orderNo}`, amount: 1000 });
+        if (u.endsWith('/payments')) return send(201, { attemptId: 'a1', pg: 'SIMULATOR', checkout: { orderId: 'o', amount: 1000, orderName: 'x' } });
+        if (u.includes('/sim/authenticate')) return send(200, { paymentKey: 'pk' });
+        if (u.includes('/sim/faults')) return send(204);
+        if (u.includes('payment-acceptance')) return send(202);
+        if (u.includes('payment-status')) return send(200, { status: 'CONFIRMED' });
+        return send(404, {});
+      });
+    });
+    await new Promise((r) => server.listen(0, '0.0.0.0', r));
+    const port = server.address().port;
+    const out = mkdtempSync(join(tmpdir(), 'v1-seg2-'));
+    try {
+      const base = `http://host.docker.internal:${port}`;
+      for (const [g, segment] of [['g0', '0:1/2'], ['g1', '1/2:1']]) {
+        current = g;
+        const env = { ...ENV, QUEUE_BASE: base, STATE_BASE: base, PURCHASE_BASE: base, SIM_URL: base, OUT_DIR: '/out', USERS: users, ...extra, K6_EXECUTION_SEGMENT: segment, K6_EXECUTION_SEGMENT_SEQUENCE: '0,1/2,1' };
+        const args = ['run', '--rm', ...K6_USER, '--add-host=host.docker.internal:host-gateway', '--mount', `type=bind,source=${HOST_REPO},target=/repo,readonly`, '--mount', `type=bind,source=${out.replaceAll('\\', '/')},target=/out`, '-w', '/repo'];
+        for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
+        args.push(K6_IMAGE, 'run', '--quiet', '--no-usage-report', '--execution-segment', segment, '--execution-segment-sequence', '0,1/2,1', script);
+        const code = await new Promise((ok) => {
+          const child = spawn('docker', args, { env: DOCKER_ENV, stdio: ['ignore', 'ignore', 'ignore'] });
+          child.on('exit', ok);
+        });
+        assert.ok(code === 0 || code === 99, `${script} ${g} k6 종료 코드 ${code}`);
+      }
+      return seen;
+    } finally {
+      server.close();
+      rmSync(out, { recursive: true, force: true });
+    }
+  }
+
+  test('PRF215_발생기나누기_v1-queue.js는 실행 구간 둘이 사용자를 한 번씩만 진입시킨다', async () => {
+    const seen = await entriesBySegment('loadtest/scenarios/v1-queue.js', 20, { ENTRY_RATE: 10, ADMIT_PER_SECOND: 5, WARM_S: 1, MAIN_S: 2, PRE_VUS: 4, MAX_VUS: 8 });
+    assert.deepEqual([...seen.g0, ...seen.g1].sort((a, b) => a - b), Array.from({ length: 20 }, (_, i) => i));
+    assert.ok(seen.g0.length > 0 && seen.g1.length > 0, '두 구간 모두 진입시켰다');
+  });
+
+  test('PRF215_발생기나누기_v1-payment.js는 실행 구간 둘이 같은 사용자를 두 번 쓰지 않는다', async () => {
+    const seen = await entriesBySegment('loadtest/scenarios/v1-payment.js', 40, { RATE: 4, WARM_S: 1, MAIN_S: 4, PRE_VUS: 4, MAX_VUS: 8, FAULT_DROP_PCT: '0', FAULT_DELAY_PCT: '0', ADMIT_WAIT_S: 10 });
+    const all = [...seen.g0, ...seen.g1];
+    assert.ok(all.length >= 10, `진입 ${all.length}건`);
+    assert.equal(new Set(all).size, all.length, `두 구간에서 겹친 사용자가 없다: g0 ${seen.g0.join(',')} g1 ${seen.g1.join(',')}`);
+    assert.ok(!all.includes(undefined), '모든 진입이 사용자 번호로 읽힌다');
   });
 });

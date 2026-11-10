@@ -56,6 +56,7 @@ for (const t of ROUTE_TARGETS.entry) options.thresholds[`over_target{phase:prep,
 const mine = [];
 
 export function flow() {
+  // 반복 번호는 발생기를 나눠도(k6 실행 구간) 겹치지 않는다(줄무늬로 나뉜다). 그래서 사람마다 진입은 한 번이다
   const it = exec.scenario.iterationInTest;
   if (it < Q.users) {
     const entry = enterV1(EVENT_ID, it, { phase: 'prep', record: true });
