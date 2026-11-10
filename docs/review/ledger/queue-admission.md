@@ -60,7 +60,7 @@
 | Q-T35 | ④ | 만료 뒤 다시 줄 서기 | ④ 410(rejoinAllowed=true) 뒤 맨 뒤 새 번호(ADR-0064) | ID만 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 대기열에 들지 않고(번호 발급 0) 예매 제한 안내를 받는다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
 | Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰에 명단 키가 실린다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
-| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 다른 단계 | A | 미정 · 홀드 때의 판매 정책 평가(`lst`·등급·매수, 403 `sale-policy-denied`, 규칙 한도를 홀드 Lua 한도로)는 purchase-svc 몫이다. 감독이 갈래 1 새 단계를 만든다. 평가… |
+| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 다른 단계 | A | HOT-252 · 홀드 때의 판매 정책 평가(`lst`·등급·매수, 403 `sale-policy-denied`, 규칙 한도를 홀드 Lua 한도로)는 purchase-svc 몫이다. 감독이 갈래 1 새 단계를… |
 | Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
