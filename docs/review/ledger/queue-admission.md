@@ -64,7 +64,7 @@
 | Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
-| Q-T36 | ⑦ | 판매 자격 명단 | ⑦ 명단 사본(대기열 Redis `q:{event:E}:elig:{listKey}`)이 그 수명에 지워진다( | 다른 단계 | A | 미정 · 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 쪽이 본다. 쓰는 쪽은 소유자 결정 대기다(docs/review/plans/BAT-157.md §7 OPEN 초안). 사본에 넘기는… |
+| Q-T36 | ⑦ | 판매 자격 명단 | ⑦ 명단 사본(대기열 Redis `q:{event:E}:elig:{listKey}`)이 그 수명에 지워진다( | 다른 단계 | A | HOT-251 · 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 core-svc 어댑터가 본다(소유자 결정 2026-11-10, OPEN[33] (가), ADR-0261 결정 9). 어댑터는… |
 | Q-T37 | — | 대기 화면 진행 막대 | 진행률이 0~100% 안에서 계산식대로 움직이고, 오래된 파일은 버려져 막대가 물러나지 않고 앞 인원도 늘지 않는다. serving이 작은 새 파일은 판매… | 빈칸 | A | — |
 | Q-T38 | ① | 판매 종료와 사전 셔플 공연의 오픈 뒤 진입 | ① 410 없이 모두 1,001번부터 도착 순 번호, 202 BATCHING 없음 | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T38 | ② | 판매 종료와 사전 셔플 공연의 오픈 뒤 진입 | ② 앞은 201, 뒤는 410 sale-ended이고 번호 발급 없음 | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts |
