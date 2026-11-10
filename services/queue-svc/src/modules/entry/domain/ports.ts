@@ -211,6 +211,18 @@ export interface RecordedEntry {
   jny: string;
   vr?: ReasonCategory;
 }
+
+/** 판매 자격 대조 한 번의 결과(ADR-0265 결정 9) */
+export type EligibilityCheck = 'allowed' | 'denied' | 'copy_missing' | 'config_invalid';
+export const ELIGIBILITY_SIGNALS = Symbol('queue.EligibilitySignals');
+/** queue_sale_eligibility_checks_total{path,result}. 창 안 판정과 설정 틀림만 센다 */
+export interface EligibilitySignals {
+  check(i: { path: 'lobby' | 'entry'; result: EligibilityCheck }): void;
+}
+export const noEligibilitySignals: EligibilitySignals = { check: () => undefined };
+
+/** 로비 창 보기 결과(ADR-0265 결정 1·5): OPEN·NOT_OPEN·CLOSED, 또는 창 안인데 명단 밖(DENIED)·사본 표지 없음(COPY_MISSING) */
+export type LobbyWindow = { kind: 'OPEN' } | { kind: 'NOT_OPEN' } | { kind: 'CLOSED' } | { kind: 'DENIED' } | { kind: 'COPY_MISSING'; listKeys: string[] };
 /** 사람 슬롯의 묶음 기록(OPEN[14]): 묶음에 넣은 사전 검증 토큰 해시와 처음 진입의 jny·vr */
 export interface BatchedEntry {
   tokenHash: string;
@@ -239,7 +251,9 @@ export type NumberResult =
   | { kind: 'RECOVERING' }
   /** notice의 회차 판매 상태가 매진·판매 종료라 번호를 내지 않았다(HOT-010, ADR-0214) */
   | { kind: 'SOLD_OUT' }
-  | { kind: 'ENDED' };
+  | { kind: 'ENDED' }
+  /** 창 안인데 명단 밖이거나 사본 표지가 없어 번호·묶음 자리를 쓰지 않았다(ADR-0265 결정 5) */
+  | { kind: 'ELIGIBILITY_REQUIRED'; cause: 'denied' | 'copy_missing' };
 
 /** RB-05(ADR-0181): 세대 키가 지금 노드 ID와 다를 때만 건너뛰고 skipped에 한 줄을 더한 뒤 세대 키를 바꾼다 */
 export interface Rb05Input {
@@ -279,6 +293,10 @@ export interface NumberInput {
   arrivalSlot?: number;
   /** 도착 시각 칸의 첫 크기 */
   arrivalInitial?: number;
+  /** 판매 자격 대조의 계정 ID(창 안일 때만) */
+  accountId?: string;
+  /** 창 안일 때 고른 명단 키(빈 배열이면 그 시간에 아무도 지나지 못하는 창이다). 없으면 대조하지 않는다 */
+  eligibility?: { listKeys: readonly string[] };
 }
 
 /** ② 파드별 묶음의 요청 하나(ADR-0179) */
@@ -287,9 +305,11 @@ export interface NumberItem {
   tokenHash?: string;
   /** 쿠키를 받은 요청의 도착 시각 칸(없으면 일반 번호) */
   arrivalSlot?: number;
+  /** 판매 자격 대조의 계정 ID(창 안일 때만). 본문·pid·기기 값은 쓰지 않는다(ADR-0265 결정 3) */
+  accountId?: string;
 }
-/** ② 파드별 묶음: 회차 공통 값과 요청들(묶음 안 순서대로 번호를 나눠 준다) */
-export type NumberBatchInput = Omit<NumberInput, 'eligible' | 'tokenHash' | 'arrivalSlot'> & { items: NumberItem[] };
+/** ② 파드별 묶음: 회차 공통 값과 요청들(묶음 안 순서대로 번호를 나눠 준다). 고른 명단 키가 같을 때만 한 묶음이다 */
+export type NumberBatchInput = Omit<NumberInput, 'eligible' | 'tokenHash' | 'arrivalSlot' | 'accountId'> & { items: NumberItem[] };
 
 export const ENTRY_STORE = Symbol('queue.EntryStore');
 /**
@@ -351,8 +371,11 @@ export interface EntryStore {
   markVerifying(i: { eventId: string; seq: number; ticketHash: string; atMs: number; reason: ReasonCategory; expireAtMs: number; verifyExpireAtMs: number }): Promise<void>;
   /** 로비 참가 ③: 서버 시각과 로비 표시를 같은 Lua에서 본 뒤 참가자에 넣는다(추가 검증이면 verify에 값을 쓴다). 표시가 섰거나 오픈이 지났으면 CLOSED, 로비 개방 전이면 NOT_OPEN */
   addLobbyMember(i: { eventId: string; tokenHash: string; opensAtMs: number; lobbyOpensAtMs: number; expireAtMs: number; verify?: { value: string; expireAtMs: number } }): Promise<'ADDED' | 'NOT_OPEN' | 'CLOSED'>;
-  /** 로비 창 보기(읽기만): 서버 시각과 로비 표시로 OPEN·NOT_OPEN·CLOSED를 준다. 공시 기록·위험 판정 전에 부른다 */
-  lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number }): Promise<'OPEN' | 'NOT_OPEN' | 'CLOSED'>;
+  /**
+   * 로비 창 보기(읽기만): 서버 시각과 로비 표시로 OPEN·NOT_OPEN·CLOSED를 준다. 공시 기록·위험 판정 전에 부른다.
+   * eligibility가 있으면 같은 Lua에서 창 안 명단 사본도 대조한다(ADR-0265 결정 2)
+   */
+  lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number; eligibility?: { accountId: string; listKeys: readonly string[] } }): Promise<LobbyWindow>;
   /** 로비 참가 되돌리기: 참가자와 verify 기록을 뺀다. 로비 표시가 선 뒤에는 목록을 바꾸지 않고 verify에 ORPHAN을 적어 게시 때 빠진 번호가 되게 한다(수명 = 판매 종료) */
   removeLobbyMember(i: { eventId: string; tokenHash: string; expireAtMs: number }): Promise<void>;
   /** 로비 참가 ④: q:dup이 내 PENDING이거나 비었으면 LOBBY:{토큰 해시}:{요청 ID}로 바꾸고 수명을 판매 종료로. 다른 요청의 값이면 TAKEN, q:adm이 있으면 ADMITTED */

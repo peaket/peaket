@@ -1,11 +1,13 @@
 // 진입 규칙을 메모리 저장소로 돈다(같은 사례를 test-int가 실제 Valkey Lua로 돈다)
 import { fakeClock } from '@peaket/platform';
 import { expect, test } from 'vitest';
+import { MemoryAdmissionStore } from '../src/modules/admission/adapters/memory-admission-store.js';
 import { MemoryEntryStore, MemoryEventSchedules, MemoryShuffleCommits } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
 import { ARRIVAL_CARVE_WINDOW_MS, segmentOf } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from './arrival-slot-cases.js';
 import { batchCases } from './batch-cases.js';
+import { eligibilityCases } from './eligibility-cases.js';
 import { leaveCases } from './leave-cases.js';
 import { lobbyCases } from './lobby-cases.js';
 import { entryCases } from './entry-cases.js';
@@ -39,6 +41,25 @@ const memoryWorld = async (): Promise<PidWorld> => {
 };
 
 entryCases('메모리', memoryWorld);
+eligibilityCases('메모리', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 11, 1, 0, 0) });
+  const store = new MemoryEntryStore(clock);
+  const admission = new MemoryAdmissionStore(clock);
+  return {
+    store,
+    commits: new MemoryShuffleCommits(clock),
+    schedules: new MemoryEventSchedules(),
+    clock,
+    admission,
+    copy: async (eventId, listKey, accountIds, marker = true) => store.setEligibilityCopyForTest(eventId, listKey, accountIds, marker),
+    dropMarker: async (eventId, listKey) => store.dropEligibilityMarkerForTest(eventId, listKey),
+    counter: async (eventId) => store.counterOf(eventId),
+    lobbyMembers: async (eventId) => store.lobbyMembersForTest(eventId),
+    batchMembers: async (eventId) => store.membersOf(eventId),
+    dupValue: async (pid, eventId) => store.dupForTest(pid, eventId).value,
+    setServing: async (eventId, seq) => void admission.db.ev(eventId).set('serving', seq),
+  };
+});
 arrivalSlotCases('메모리', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 1, 0, 0) });
   const store = new MemoryEntryStore(clock);

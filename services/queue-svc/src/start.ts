@@ -11,7 +11,7 @@ import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { startGrpcServer } from './grpc-server.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromEligibilitySignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
 
@@ -113,6 +113,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const sealer = seedSealerFromEnv(env, (endpoint, region) => kmsSealClient({ region, ...(endpoint ? { endpoint } : {}) }));
   const lobbySignals = new PromLobbySignals();
   const leaveSignals = new PromLeaveSignals();
+  const eligibilitySignals = new PromEligibilitySignals();
   const service = await createService({
     name: SERVICE,
     env,
@@ -126,6 +127,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(sealer ? { sealer } : {}),
       lobbySignals,
       leaveSignals,
+      eligibilitySignals,
       state: { ...(webOrigin ? { webOrigin } : {}), ...(env.PEAKET_BATCH_RESULT_DIR ? { resultDir: env.PEAKET_BATCH_RESULT_DIR } : {}) },
       admission: { signer, signals },
       ...(arrivals ? { arrivals } : {}),
@@ -156,6 +158,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   signals.register(service.metrics.registry);
   lobbySignals.register(service.metrics.registry);
   leaveSignals.register(service.metrics.registry);
+  eligibilitySignals.register(service.metrics.registry);
   await service.listen();
 
   // 업무 gRPC 포트(VerificationAppealService): 부르는 쪽을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(HOT-400).

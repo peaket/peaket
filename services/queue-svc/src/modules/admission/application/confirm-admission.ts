@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
+import { candidateEligibilityLists, type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS, TURN_GRACE_MS } from '../domain/admission.js';
 import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
 import { AdmissionError } from './admission-error.js';
@@ -128,6 +128,8 @@ export class ConfirmAdmission {
         }
         if (claim.kind === 'NEW') claimed.push(pid);
       }
+      // 입장 토큰 `lst`의 후보(eligLists와 모든 창 lists의 합). 설정이 틀리면 undefined라 싣지 않는다(ADR-0265 결정 7)
+      const candidates = candidateEligibilityLists(schedule);
       const r = await this.store.admit({
         eventId: i.eventId,
         seq: t.s,
@@ -137,6 +139,7 @@ export class ConfirmAdmission {
         skipped: pre.skipped,
         keepUntilMs: keepUntil,
         soonExpireAtMs: saleEnd,
+        ...(candidates && candidates.length > 0 ? { eligibility: { accountId: i.accountId, listKeys: candidates } } : {}),
       });
       if ('arrivalDelayMs' in r && r.arrivalDelayMs !== undefined) this.signals.arrivalDelay(r.arrivalDelayMs / 1000);
       if (r.kind === 'ADMITTED') {
@@ -148,7 +151,7 @@ export class ConfirmAdmission {
         if (t.s > r.serving) this.signals.admittedBeforeTurn();
         if (r.soonWaitMs !== undefined) this.signals.soonWait(r.soonWaitMs / 1000);
         if (r.firstSlot) this.#eta(b, pre.turnAtMs, now);
-        const { token, expiresAtMs } = this.signer.sign({ jti: r.jti, accountId: i.accountId, sessionId: i.sessionId, eventId: i.eventId, jny: t.jny, nowMs: now, ...(r.issuedAtMs !== undefined ? { firstIssuedAtMs: r.issuedAtMs } : {}) });
+        const { token, expiresAtMs } = this.signer.sign({ jti: r.jti, accountId: i.accountId, sessionId: i.sessionId, eventId: i.eventId, jny: t.jny, nowMs: now, ...(r.issuedAtMs !== undefined ? { firstIssuedAtMs: r.issuedAtMs } : {}), ...(r.lists && r.lists.length > 0 ? { lists: r.lists } : {}) });
         const ecdh = this.signer.serverEcdhPublicKey();
         // 입장 토큰의 exp(구매 세션이 끝나는 가장 늦은 때)를 화면이 토큰을 읽지 않고 알게 싣는다(BAS-042, ADR-0214 결정 8)
         const purchaseSessionExpiresAt = new Date(expiresAtMs).toISOString();

@@ -23,7 +23,7 @@ export interface AdmissionResult {
   verificationReason?: AdmissionResultVerificationReason;
   /** 만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104) */
   status?: AdmissionResultStatus;
-  /** ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183) */
+  /** ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·lst(그 계정이 든 판매 자격 명단 키 배열 1~10개, 든 것이 없으면 뺌, 추천 적용 2026-11-10, ADR-0265)·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183) */
   admissionToken?: string;
   /** SOON일 때 다시 시도까지의 초(1~5 [가정]. 곧 입장 대기열에서 내 앞 수와 최근 자리가 비는 속도로 계산, ADR-0104). 브라우저는 이 값을 하한으로 지키고 위쪽으로만 0~20% 지터를 더한다(추천 적용 2026-10-28, 기술 검토 중간-038) */
   retryAfterSeconds?: number;

@@ -81,6 +81,23 @@ export interface TicketClaims {
   vr?: ReasonCategory;
 }
 
+/** 판매 자격 명단 키 모양(ADR-0265 결정 6) */
+export const ELIG_LIST_KEY = /^[a-z0-9-]{3,32}$/;
+/** 공연 하나의 명단 키 상한 [가정](단계 요약 상한, ADR-0265 결정 6) */
+export const MAX_ELIG_LISTS = 10;
+/** 회차 하나의 진입 자격 창 상한 [가정](ADR-0265 결정 6) */
+export const MAX_ELIG_GATES = 10;
+
+/** 회차 일정 사본의 진입 자격 창 하나(ADR-0265 결정 1·6) */
+export interface EligibilityGate {
+  fromMs: number;
+  toMs: number;
+  lists: string[];
+}
+
+/** 회차 일정 사본의 판매 자격 설정: 창 없음, 창 있음(명단 키는 유효한 사본만), 모양 틀림(닫힌 쪽) */
+export type EligibilityConfig = { kind: 'NONE' } | { kind: 'GATED'; gates: EligibilityGate[]; lists: string[] } | { kind: 'INVALID' };
+
 /** 회차 일정·정렬 설정 사본(q:{event:E}:cfg) */
 export interface EventSchedule {
   opensAtMs: number;
@@ -93,6 +110,70 @@ export interface EventSchedule {
   layoutVersion?: number;
   /** 오픈 전 로비를 여는 분(0~60, 없으면 LOBBY_DEFAULT_MINUTES [가정]) */
   lobbyMinutes?: number;
+  /** 판매 자격 창과 후보 명단 키(없으면 창 없음). 모양이 틀리면 INVALID(로비·진입을 모두 막는다, ADR-0265 결정 5·6) */
+  eligibility?: EligibilityConfig;
+}
+
+/** 판정 시각의 판매 자격: 창 없음, 창 안(합친 명단 키), 설정 틀림 */
+export function eligibilityAt(s: Pick<EventSchedule, 'eligibility'>, atMs: number): EligibilityConfig {
+  const c = s.eligibility ?? { kind: 'NONE' };
+  if (c.kind !== 'GATED') return c;
+  const gates = c.gates.filter((g) => g.fromMs <= atMs && atMs < g.toMs);
+  if (gates.length === 0) return { kind: 'NONE' };
+  return { kind: 'GATED', gates, lists: [...new Set(gates.flatMap((g) => g.lists))].sort() };
+}
+
+/** 입장 토큰 `lst`의 후보 명단 키(eligLists와 모든 창 lists의 합). 설정이 틀리면 undefined(싣지 않는다), 창·명단이 없으면 빈 배열 */
+export function candidateEligibilityLists(s: Pick<EventSchedule, 'eligibility'>): string[] | undefined {
+  const c = s.eligibility ?? { kind: 'NONE' };
+  if (c.kind === 'INVALID') return undefined;
+  if (c.kind === 'NONE') return [];
+  return [...new Set([...c.lists, ...c.gates.flatMap((g) => g.lists)])].sort();
+}
+
+const listKeys = (v: unknown): string[] | null => {
+  if (!Array.isArray(v) || v.length > MAX_ELIG_LISTS) return null;
+  const out: string[] = [];
+  for (const k of v) {
+    if (typeof k !== 'string' || !ELIG_LIST_KEY.test(k) || out.includes(k)) return null;
+    out.push(k);
+  }
+  return out;
+};
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const intAt = (v: unknown): number | null => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null);
+
+/**
+ * q:{event:E}:cfg의 eligGates·eligLists 모양을 읽는다(ADR-0265 결정 6). 둘 다 없으면 창 없음.
+ * 모양이 틀리면 INVALID이고, queue-svc는 그 회차의 로비·진입을 모두 403으로 막는다(열린 쪽으로 버리지 않는다)
+ */
+export function parseEligibility(rawGates: string | undefined, rawLists: string | undefined): EligibilityConfig {
+  if (rawGates === undefined && rawLists === undefined) return { kind: 'NONE' };
+  let gatesRaw: unknown = [];
+  let listsRaw: unknown = [];
+  try {
+    gatesRaw = rawGates === undefined ? [] : JSON.parse(rawGates);
+    listsRaw = rawLists === undefined ? [] : JSON.parse(rawLists);
+  } catch {
+    return { kind: 'INVALID' };
+  }
+  if (!Array.isArray(gatesRaw) || gatesRaw.length > MAX_ELIG_GATES) return { kind: 'INVALID' };
+  const gates: EligibilityGate[] = [];
+  for (const g of gatesRaw) {
+    if (!isPlainObject(g)) return { kind: 'INVALID' };
+    const keys = Object.keys(g).sort();
+    if (keys.length !== 3 || keys[0] !== 'fromMs' || keys[1] !== 'lists' || keys[2] !== 'toMs') return { kind: 'INVALID' };
+    const fromMs = intAt(g.fromMs);
+    const toMs = intAt(g.toMs);
+    const lists = listKeys(g.lists);
+    if (fromMs === null || toMs === null || fromMs >= toMs || lists === null) return { kind: 'INVALID' };
+    gates.push({ fromMs, toMs, lists });
+  }
+  const lists = listKeys(listsRaw);
+  if (lists === null) return { kind: 'INVALID' };
+  const union = new Set([...lists, ...gates.flatMap((g) => g.lists)]);
+  if (union.size > MAX_ELIG_LISTS) return { kind: 'INVALID' };
+  return { kind: 'GATED', gates, lists };
 }
 
 /** 참가 토큰 클레임(종류 문자열 PEAKET-lobby-v1, ADR-0231 결정 2). 만료 칸은 두지 않는다(q:dup과 셔플 결과가 판매 종료까지 남는다) */

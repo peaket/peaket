@@ -4,7 +4,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, type RedisScript, redisScript } from '@peaket/platform';
 import { ALGORITHM, DRAND_CHAIN, type ShuffleGroup } from '@peaket/shuffle';
-import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, LobbyWindow, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
 import { ARRIVAL_SLOT_INITIAL, BATCH_NO, type HeldRecord, parseHeld, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   ADD_LOBBY_MEMBER_LUA,
@@ -73,6 +73,9 @@ export const keys = {
   lobbyResult: (tokenHash: string) => `q:lobby:{${tokenHash}}`,
   /** 셔플 공시 기록(ADR-0231 결정 6) */
   shuffle: (e: string) => `q:{event:${e}}:shuffle`,
+  /** 판매 자격 명단 사본(계정 ID, ADR-0261 결정 10·ADR-0265 결정 4)과 그 표지(사본 판) */
+  elig: (e: string, listKey: string) => `q:{event:${e}}:elig:${listKey}`,
+  eligMarker: (e: string, listKey: string) => `q:{event:${e}}:eligv:${listKey}`,
   /** 곧 입장 대기열 셋(ADR-0104·0183). 입장 확정이 쓰고 대기 취소가 뺀다(ADR-0233) */
   soon: (e: string) => `q:{event:${e}}:soon`,
   soonAt: (e: string) => `q:{event:${e}}:soon_at`,
@@ -194,6 +197,7 @@ export class RedisEntryStore implements EntryStore {
   async numberBatch(i: NumberBatchInput): Promise<NumberResult[]> {
     const e = i.eventId;
     const arrival = i.items.some((it) => it.arrivalSlot !== undefined);
+    const lists = i.eligibility?.listKeys;
     const args = [
       String(i.expireAtMs),
       String(i.opensAtMs ?? 0),
@@ -203,10 +207,32 @@ export class RedisEntryStore implements EntryStore {
       String(i.batchExpireAtMs ?? i.expireAtMs),
       String(i.items.length),
       ...i.items.flatMap((it) => [it.eligible ? '1' : '0', it.tokenHash ?? '']),
-      // 쿠키가 있는 요청이 있을 때만 칸 인수를 뒤에 붙인다(ADR-0223 결정 6)
-      ...(arrival ? [String(i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL), ...i.items.map((it) => (it.arrivalSlot === undefined ? '' : String(it.arrivalSlot)))] : []),
+      // 창 안일 때만 자격 인수를 붙인다(ADR-0265 결정 2). 'E' 표지가 없으면 옛 측정 도구와 같은 인수다
+      ...(lists
+        ? [
+            'E',
+            String(lists.length),
+            ...lists,
+            ...i.items.map((it) => it.accountId ?? ''),
+            arrival ? '1' : '0',
+            ...(arrival ? [String(i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL), ...i.items.map((it) => (it.arrivalSlot === undefined ? '' : String(it.arrivalSlot)))] : []),
+          ]
+        : []),
+      // 쿠키가 있는 요청이 있을 때만 칸 인수를 뒤에 붙인다(ADR-0223 결정 6). 자격 인수가 있으면 그 뒤에 붙는다
+      ...(!lists && arrival ? [String(i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL), ...i.items.map((it) => (it.arrivalSlot === undefined ? '' : String(it.arrivalSlot)))] : []),
     ];
-    const ks = [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e), keys.notice(e), ...(arrival ? [keys.arrSlots(e)] : [])];
+    const ks = [
+      keys.seq(e),
+      keys.skipped(e),
+      keys.batchDone(e),
+      keys.batchMembers(e),
+      keys.lobbyMembers(e),
+      keys.epoch(e),
+      keys.notice(e),
+      ...(arrival ? [keys.arrSlots(e)] : []),
+      // 판매 자격 창이면 명단 키마다 표지·Set 두 키를 뒤에 붙인다(모두 같은 회차 슬롯이다)
+      ...(lists ? lists.flatMap((k) => [keys.eligMarker(e, k), keys.elig(e, k)]) : []),
+    ];
     const r = (await guard(this.redis.evalScript(NUMBER_BATCH, ks, args))) as unknown[];
     const head = str(r[0]);
     if (head === 'RB05') return i.items.map(() => ({ kind: 'RECOVERING' }));
@@ -216,6 +242,7 @@ export class RedisEntryStore implements EntryStore {
     const gen = Number(r[1]);
     return i.items.map((_, k): NumberResult => {
       const kind = str(r[2 + 2 * k]);
+      if (kind === 'E') return { kind: 'ELIGIBILITY_REQUIRED', cause: str(r[3 + 2 * k]) === 'M' ? 'copy_missing' : 'denied' };
       const v = Number(r[3 + 2 * k]);
       if (kind === 'N') return { kind: 'NUMBERED', seq: v, gen };
       if (kind === 'S') return { kind: 'NUMBERED', seq: v, gen, arrival: 'slot' };
@@ -242,8 +269,8 @@ export class RedisEntryStore implements EntryStore {
   }
 
   async number(i: NumberInput): Promise<NumberResult> {
-    const { eligible, tokenHash, ...common } = i;
-    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
+    const { eligible, tokenHash, accountId, ...common } = i;
+    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash, ...(accountId ? { accountId } : {}) }] }))[0]!;
   }
 
   async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number; ticketHash?: string }): Promise<RecordResult> {
@@ -339,9 +366,15 @@ export class RedisEntryStore implements EntryStore {
     return r === 'ADDED' || r === 'NOT_OPEN' || r === 'CLOSED' ? r : 'CLOSED';
   }
 
-  async lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number }): Promise<'OPEN' | 'NOT_OPEN' | 'CLOSED'> {
-    const r = str(await guard(this.redis.evalScript(LOBBY_WINDOW, [keys.batchDone(i.eventId)], [String(i.opensAtMs), String(i.lobbyOpensAtMs)])));
-    return r === 'OPEN' || r === 'NOT_OPEN' ? r : 'CLOSED';
+  async lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number; eligibility?: { accountId: string; listKeys: readonly string[] } }): Promise<LobbyWindow> {
+    const lists = i.eligibility?.listKeys;
+    const ks = [keys.batchDone(i.eventId), ...(lists ? lists.flatMap((k) => [keys.eligMarker(i.eventId, k), keys.elig(i.eventId, k)]) : [])];
+    const args = [String(i.opensAtMs), String(i.lobbyOpensAtMs), ...(lists ? [i.eligibility!.accountId, ...lists] : [])];
+    const r = (await guard(this.redis.evalScript(LOBBY_WINDOW, ks, args))) as unknown[];
+    const kind = str(r[0]);
+    if (kind === 'OPEN' || kind === 'NOT_OPEN' || kind === 'CLOSED' || kind === 'DENIED') return { kind };
+    if (kind === 'COPY_MISSING') return { kind, listKeys: r.slice(1).map(str) };
+    throw new Error(`로비 창 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
   async removeLobbyMember(i: { eventId: string; tokenHash: string; expireAtMs: number }): Promise<void> {

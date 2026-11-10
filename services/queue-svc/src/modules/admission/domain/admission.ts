@@ -49,7 +49,7 @@ export type AdmitResult =
   /** again: 이 대기표의 살아 있는 자리를 같은 jti로 다시 준 것(입장 수·처음 요청을 다시 세지 않음). firstSlot: 이 대기표가 처음 잡은 자리(회수 뒤 다시 잡은 것이 아님).
    * serving은 Lua가 본 값 */
   /** issuedAtMs: 이 자리를 처음 잡은 시각(같은 jti를 다시 줄 때 입장 토큰의 만료를 첫 발급과 같게 한다. 모르면 없음) */
-  | { kind: 'ADMITTED'; jti: string; again: boolean; firstSlot: boolean; serving: number; arrivalDelayMs?: number; soonWaitMs?: number; issuedAtMs?: number }
+  | { kind: 'ADMITTED'; jti: string; again: boolean; firstSlot: boolean; serving: number; arrivalDelayMs?: number; soonWaitMs?: number; issuedAtMs?: number; lists?: string[] }
   | { kind: 'SOON'; retryAfterSeconds: number; arrivalDelayMs?: number }
   /** 확인 뒤 빠진 번호가 됐거나(REMOVED) serving이 모자라다(NOT_YET, 장애 전환으로 serving이 되돌아감). 확인과 입장 사이의 경합 */
   | { kind: 'REMOVED'; removeReason?: RemoveReason }

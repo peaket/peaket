@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- **2026-11-10 기능 묶음으로 재개(ADR-0256)**: BAT-195(BOT-065), BAT-200(BOT-090·BAS-010 ①), BAT-202(BAS-011)는 끝났다. 다음 묶음은 BAT-203(HOT-253: 갈래 2 HOT-250에서 나눈 queue-svc 로비·진입의 판매 자격 대조와 입장 토큰 `lst`, Q-T36 ①②). BOT-080은 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다.
+- **2026-11-11 BAT-203(HOT-253)까지 끝냈다**: 다음 묶음은 BAT-205(BAS-020·BAS-030, 4.25일)다. BAT-203의 실제 Valkey 통합 시험(`test-int/entry-store.int.test.ts`의 `eligibilityCases`)은 감독 허가 뒤 돌린다(갈래 2가 먼저 통합 시험을 쓴다). BAT-195(BOT-065), BAT-200(BOT-090·BAS-010 ①), BAT-202(BAS-011)는 끝났다. BOT-080은 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다.
 - 구간 2: 소유자 결정(2026-11-09)으로 BOT-060에서 멈췄다. 재개는 소유자 지시 뒤 BOT-065부터 BUILD_ORDER 차례이고, 구간 끝에 정리 목록. HOT-012 엣지 KeyValueStore·S3 실제 어댑터와 권한은 AWS 계정이 생겨 배포하는 단계까지 건너뛴다(ADR-0234) → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 미룸이라 건너뛴다). 구간 1의 정리 목록과 BOT-122(패스키), 구간 2의 BOT-044(2026-11-05)·HOT-010·HOT-011(2026-11-06)·HOT-020·HOT-030·HOT-040 ①·HOT-050·HOT-060·BOT-047·HOT-041·HOT-061·HOT-042·BAS-260·BOT-050·BOT-055·BOT-060(2026-11-09)은 끝냈다. 건너뛴 구간 1 단계: BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 미룬다(OPEN[23] (다), 소유자 결정 2026-11-05). 이 세션은 만들지 않는다(2026-11-03 안전 분류기에 막힘). K6 측정(BOT-170) 전에 소유자가 만들 길을 정한다.
 
@@ -37,6 +37,10 @@
 - BOT-044 뒤처리: 본인확인 복귀·탈퇴·로그인 수단 흐름의 손으로 쓴 fetch도 `fetchOnce`(시간 한도, 쓰지 않는 본문 버리기)로 바꾼다(docs/frontend.md §4.1 'api-client 밖의 호출'의 남는 한계, apps/web features/identity-verify·account-withdraw·login-methods).
 - BOT-047 브라우저 확인: 만 14세 미만 가입 취소 화면의 [홈으로]가 d5 §5.5의 보조 버튼이 아니라 글자 링크다(HOT-323부터, apps/web signup-consent)
 - BOT-047 브라우저 확인: 공연 상세의 콘솔 오류 한 줄. CSP의 `frame-src 'none' https://challenges.cloudflare.com`은 'none'과 출처를 함께 적은 것이다(HOT-290, apps/web security-headers.mjs)
+- BAT-203: 실제 Valkey 통합 시험(`test-int/entry-store.int.test.ts`의 `eligibilityCases`)을 아직 돌리지 않았다. 감독 허가 뒤 갈래 2와 겹치지 않게 돌린다. 사본 쓰기 어댑터(HOT-251)가 없어 시험이 `q:{event:E}:elig:*`·`eligv`를 직접 넣는다
+- BAT-203: 바꾼 Lua(진입 번호 묶음·로비 창·입장)의 옛·새 성능 비교(ADR-0265 결정 10)는 갈래 1 몫이다. `loadtest/micro/lua-compare.mjs`의 `queue` 묶음에 `entry-lua.ts` 원문을 더하는 일을 감독이 갈래 1과 맞춘다
+- BAT-203: 화면이 403 `sale-eligibility-required`를 공연 상세의 예매 제한 안내로 돌리는 Q-T36 ⑧은 HOT-346이다. 이 묶음은 정본(docs/frontend.md §3.4)만 맞췄다
+- BAT-203: queue-svc 전체 시험을 두 번 돌리는 가운데 `GrpcTrustRisk.verify(VERIFICATION)`의 B-T11 시험이 한 번 UNAVAILABLE/ALLOW로 흔들렸다(바로 다시 돌려 665개 통과, 이번 변경과 닿지 않는 trust gRPC 시험)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -94,3 +98,4 @@
 - 2026-11-10 BAT-195 BOT-065 차단 기기 목록·라벨 반영·그림자 판·기기 키 회전 이음(R-441, B-T4·B-T9·B-T20·B-T21·B-T26·B-T27·Q-T48, ADR-0258): trust-svc `TrustLabelService.ApplyLabel`(멱등 기록과 판 가드), 규칙 파일 `shadow`·`stage: "LAUNCH"`, 이음 기간 옮기기와 이어 달기. 장부 범위 빈칸 33 → 0, 독립 틀린 구현 70개 중 12개 놓침 → 시험 더함. BOT-080은 BAT-197로 옮김
 - 2026-11-10 BAT-200 BOT-090 추가 검증 제출·이의 접수·SCR-009와 BAS-010 ① 보안 린트(R-454, Q-T34·B-T10·B-T11·B-T15·I-T56·V-T31, ADR-0259): queue-svc 제출·이의·상태 읽기와 첫 gRPC 서버, identity `CheckReverification`, trust `GetVerdictEvidence`, 입장 확정 통과자 예외, ESLint 보안 규칙·끄기 거절·응답 스키마 기준선, 조치 기한 판정. 리뷰 높음 1·보안 5 고침, 틀린 구현 40개 중 4개 놓침 → 시험 더함, 브라우저 확인 통과
 - 2026-11-10 BAT-202 BAS-011 외부 보안 검사 게이트(R-460, delivery 13.3.1·13.4.1·15.3.6·D-T12, ADR-0263): gitleaks(CI만, 미끼·허용 블록 검사)·CodeQL(프로토타입 오염 셋은 등급과 상관없이 막음)·Trivy 설정·이미지 비밀(미끼, 내장 허용 끔)·Scorecard(따로 된 워크플로, 게시 끔), 판정 도구 scan-gate(결과 수·받아들인 결과), ESLint sql.raw·원형 규칙. 리뷰 높음 2 고침
+- 2026-11-11 BAT-203 HOT-253 queue-svc 판매 자격 대조·입장 토큰 `lst`(R-466, Q-T36 ①②, queue-admission:v5.0.0-2.3.2, ADR-0265): 로비는 오픈 시각, 진입은 지금으로 `eligGates` 창을 고르고, 표지 `eligv`가 있는 사본만 계정 ID로 대조한다. 사본 없음·설정 틀림은 닫힌 쪽 403 `sale-eligibility-required`와 SEV2 지표·경고, 입장 확정은 후보 명단에서 그 계정이 든 키만 `lst`에 싣는다. 메모리 시험 665·통합 시험 328 통과

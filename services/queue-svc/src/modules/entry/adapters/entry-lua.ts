@@ -89,10 +89,13 @@ return 0
 // 맨 앞에서 세대 키(KEYS[6])의 주 노드 ID를 지금 노드 ID와 견준다. 없으면 쓰고, 다르면 장애 전환 뒤 RB-05 전이라 아무것도 쓰지 않는다(ADR-0181).
 // RB-05가 건너뛰었지만 복제 확인 전(pend)이어도 쓰지 않는다(ADR-0186).
 // 오픈 뒤 번호를 내기 전에 notice의 회차 판매 상태를 본다: SOLD_OUT·ENDED면 아무것도 쓰지 않는다(확인과 번호 내기가 한 Lua라 매진 판이 선 뒤에는 번호가 나가지 않는다, HOT-010, ADR-0214).
-// KEYS: 1 seq, 2 skipped, 3 batch_done, 4 batch_members:1, 5 lobby_members, 6 epoch, 7 notice
+// KEYS: 1 seq, 2 skipped, 3 batch_done, 4 batch_members:1, 5 lobby_members, 6 epoch, 7 notice, (진입 Degraded면 8 arr_slots),
+//       그 뒤 판매 자격 창이면 명단 키마다 (eligv, elig)(ADR-0265 결정 2)
 // ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
-// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
-// 진입 Degraded(ADR-0223 결정 6): KEYS[8] = arr_slots이고, 요청 인수 뒤에 ARGV[8 + 2n] = 칸의 첫 크기, 그 뒤 요청마다 칸 번호(없으면 빈 글). 둘 다 없으면(측정 도구, 쿠키 없는 묶음) 예전과 같다.
+// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초), E = 자격 없음(값 = D 명단 밖·M 사본 없음, 번호·묶음 자리를 쓰지 않는다)
+// 진입 Degraded(ADR-0223 결정 6): 요청 인수 뒤에 ARGV[8 + 2n] = 칸의 첫 크기, 그 뒤 요청마다 칸 번호(없으면 빈 글). 둘 다 없으면(측정 도구, 쿠키 없는 묶음) 예전과 같다.
+// 판매 자격(ADR-0265 결정 2·5): 요청 인수 뒤에 'E', 명단 키 수 m, 명단 키 이름 m개, 요청마다 계정 ID n개, 칸이 있는지('1'/'0')가 오고,
+// 그 뒤에 진입 Degraded 칸 인수가 온다. 'E'가 없으면(옛 측정 도구) 자격 대조를 하지 않는다. 대조는 계정 ID로만 하고, 창 밖·명단 없음이면 사본을 읽지 않는다.
 // 쿠키가 있는 요청의 종류: S = 칸 안의 번호, L = 칸이 닫혔거나 없어 카운터 끝, O = 구간이 차서 카운터 끝(값은 모두 번호).
 // 세대가 바뀌면(장애 전환) lost_upto를 적어 옛 칸을 쓰지 않는다. 칸의 used를 잃었을 수 있어 그 칸에서 번호를 다시 주면 이미 나간 번호를 새 세대로 다시 내게 되고, 그 번호가 빠진 번호가 되면 다른 사람의 번호까지 빠진 번호가 된다.
 // 한 Lua에서 떼는 양은 ARRIVAL_CARVE_MAX까지이고, 서버 시각을 ARRIVAL_CARVE_WINDOW_MS로 나눈 시간 창 하나에서 떼는 양은 ARRIVAL_CARVE_WINDOW_MAX까지다(ADR-0243. 복제 지연 안에 잃는 번호가 RB-05의 건너뛰기 안에 들게 한다).
@@ -119,6 +122,37 @@ local sale = redis.call('HGET', KEYS[7], 'saleState')
 if sale == 'SOLD_OUT' or sale == 'ENDED' then return {sale} end
 local gen = redis.call('LLEN', KEYS[2]) + 1
 local n = tonumber(ARGV[7])
+-- 판매 자격 대조(ADR-0265 결정 2·5): 번호·묶음 자리를 쓰기 전에 요청마다 계정 ID로 본다. 표지가 없는 명단이 하나라도 있고 어느 사본에도 없으면 M, 명단 밖이면 D다
+local denied = {}
+local gateAt = 8 + 2 * n
+local gate = ARGV[gateAt] == 'E'
+local m = 0
+local arrAt = gateAt
+local hasArr = KEYS[8] ~= nil
+if gate then
+  m = tonumber(ARGV[gateAt + 1]) or 0
+  arrAt = gateAt + 2 + m + n
+  hasArr = ARGV[arrAt] == '1'
+end
+if gate then
+  local kb = #KEYS - 2 * m + 1
+  for i = 1, n do
+    local acct = ARGV[gateAt + 2 + m + i - 1]
+    local allowed = false
+    local missing = false
+    for j = 1, m do
+      local marker = KEYS[kb + 2 * (j - 1)]
+      local set = KEYS[kb + 2 * (j - 1) + 1]
+      if redis.call('EXISTS', marker) == 0 then
+        missing = true
+      elseif redis.call('SISMEMBER', set, acct) == 1 then
+        allowed = true
+        break
+      end
+    end
+    if not allowed then denied[i] = missing and 'M' or 'D' end
+  end
+end
 local out = {'OK', gen}
 if ARGV[4] == '1' and redis.call('HEXISTS', KEYS[3], 'lobby') == 0 then
   local size = redis.call('SCARD', KEYS[5])
@@ -132,7 +166,10 @@ if ARGV[5] == '1' then
   if not closed and now < closeAt then
     local added = false
     for i = 1, n do
-      if ARGV[6 + 2 * i] == '1' then
+      if denied[i] then
+        out[#out + 1] = 'E'
+        out[#out + 1] = denied[i]
+      elseif ARGV[6 + 2 * i] == '1' then
         redis.call('SADD', KEYS[4], ARGV[7 + 2 * i])
         added = true
         out[#out + 1] = 'B'
@@ -155,13 +192,23 @@ if ARGV[5] == '1' then
     if size > 0 then redis.call('INCRBY', KEYS[1], size) end
   end
 end
-local arr = KEYS[8]
-local initial = arr and tonumber(ARGV[8 + 2 * n])
+local arr = hasArr and KEYS[8] or nil
+local slotAt = gate and (arrAt + 1) or gateAt
+local initial = arr and tonumber(ARGV[slotAt])
 local kinds = {}
 local values = {}
-local tail = n
-if initial then
-  tail = 0
+local tail = 0
+if not initial then
+  for i = 1, n do
+    if denied[i] then
+      kinds[i] = 'E'
+      values[i] = denied[i]
+    else
+      tail = tail + 1
+      kinds[i] = 'N'
+    end
+  end
+else
   local a = redis.call('HMGET', arr, 'next', 'gen', 'closed_upto', 'first', 'lost_upto', 'cw', 'cn')
   local nxt, agen, closed, first, lost = tonumber(a[1]), tonumber(a[2]), tonumber(a[3]) or -1, tonumber(a[4]), tonumber(a[5]) or -1
   -- 칸 떼기 시간 창(ADR-0243): cw = 창 번호, cn = 그 창에서 지금까지 뗀 번호 수. 창이 바뀌면 0부터 센다
@@ -221,8 +268,11 @@ if initial then
     redis.call('HSET', arr, 'next', nxt)
   end
   for i = 1, n do
-    local slot = tonumber(ARGV[8 + 2 * n + i])
-    if not slot then
+    local slot = tonumber(ARGV[slotAt + i])
+    if denied[i] then
+      kinds[i] = 'E'
+      values[i] = denied[i]
+    elseif not slot then
       tail = tail + 1
       kinds[i] = 'N'
     elseif slot <= closed or slot <= lost or slot * ${ARRIVAL_SLOT_MS} > now + ${ARRIVAL_FUTURE_MS} or (slot + 1) * ${ARRIVAL_SLOT_MS} + ${ARRIVAL_CLOSE_AFTER_MS} <= now then
@@ -253,6 +303,9 @@ local at = last - tail
 for i = 1, n do
   if kinds[i] == 'S' then
     out[#out + 1] = 'S'
+    out[#out + 1] = values[i]
+  elseif kinds[i] == 'E' then
+    out[#out + 1] = 'E'
     out[#out + 1] = values[i]
   else
     at = at + 1
@@ -488,13 +541,32 @@ if ARGV[5] ~= '' then
 end
 return 'ADDED'
 `;
-// 로비 창 보기(읽기만, ADR-0231 결정 3): 공시 기록을 만들거나 위험 판정을 부르기 전에 서버 시각으로 창을 본다. KEYS: 1 batch_done. ARGV: 1 오픈 시각, 2 로비 개방 시각
+// 로비 창 보기(읽기만, ADR-0231 결정 3): 공시 기록을 만들거나 위험 판정을 부르기 전에 서버 시각으로 창을 본다.
+// 판매 자격(ADR-0265 결정 2·5): 창 안이면 같은 Lua에서 고른 명단 키의 표지·구성원을 계정 ID로 대조한다. 표지가 없는 명단이 하나라도 있고 그 계정이 어느 사본에도 없으면
+// COPY_MISSING(없는 명단 키를 함께 돌려준다), 명단 밖이면 DENIED다. 구성원 0명인 명단은 표지만 있으므로 DENIED다.
+// KEYS: 1 batch_done, 그 뒤 명단 키마다 (eligv, elig). ARGV: 1 오픈 시각, 2 로비 개방 시각, 3 계정 ID(없으면 대조하지 않음), 그 뒤 명단 키 이름(KEYS와 같은 차례)
 export const LOBBY_WINDOW_LUA = `
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return 'CLOSED' end
-if now < tonumber(ARGV[2]) then return 'NOT_OPEN' end
-return 'OPEN'
+if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return {'CLOSED'} end
+if now < tonumber(ARGV[2]) then return {'NOT_OPEN'} end
+if ARGV[3] then
+  local allowed = false
+  local missing = {}
+  for i = 2, #KEYS, 2 do
+    if redis.call('EXISTS', KEYS[i]) == 0 then
+      missing[#missing + 1] = ARGV[3 + math.floor(i / 2)]
+    elseif redis.call('SISMEMBER', KEYS[i + 1], ARGV[3]) == 1 then
+      allowed = true
+    end
+  end
+  if allowed then return {'OPEN'} end
+  local out = {'COPY_MISSING'}
+  for _, k in ipairs(missing) do out[#out + 1] = k end
+  if #missing == 0 then out[1] = 'DENIED' end
+  return out
+end
+return {'OPEN'}
 `;
 // 되돌리기: 표시가 선 뒤에는 고정한 목록을 바꾸지 않는다(§3 '표시가 선 뒤에는'). 대신 주인 없는 자리임을 verify에 ORPHAN으로 적어 게시 때 빠진 번호가 되게 한다(추가 검증 값이 있으면 그대로 둔다. 그 값도 게시 때 빠진 번호가 된다).
 // KEYS: 1 batch_done, 2 lobby_members, 3 verify. ARGV: 1 토큰 해시, 2 verify 수명(판매 종료)

@@ -117,14 +117,28 @@ return 'DUP'
 // 처음 요청이면(번호 비트맵 req가 0) 그 번호를 부른 전진에 센다. 빈자리(지금 목표 − 만료 전 자리) > 곧 입장 대기열에서 내 앞 번호 수면 자리를 잡고,
 // 아니면 곧 입장 대기열에 넣는다(ADR-0104 결정 5). 한 대기표의 요청이 동시에 와도 이 Lua 하나가 가르므로 자리는 하나다(ADR-0183 결정 2)
 // 빠진 번호 비트가 켜졌으면 verify가 PASSED일 때만 받는다(확인과 입장 사이에 대기 취소·1인 1순번 위반이 칸을 지웠으면 REMOVED, queue-admission §7, ADR-0259)
-// KEYS: 1 serving, 2 removed, 3 slots, 4 soon, 5 soon_at, 6 soon_first, 7 admitted, 8 calls, 9 call_req, 10 ctl, 11 admits, 12 slot_of, 13 req, 14 verify
+// KEYS: 1 serving, 2 removed, 3 slots, 4 soon, 5 soon_at, 6 soon_first, 7 admitted, 8 calls, 9 call_req, 10 ctl, 11 admits, 12 slot_of, 13 req, 14 verify,
+//       그 뒤 입장 토큰 후보 명단마다 그 명단 Set(ADR-0265 결정 7)
 // ARGV: 1 번호, 2 해시, 3 새 jti, 4 차례 시각(없으면 -1), 5 건너뛴 구간 1/0, 6 첫 사용 기한(ms), 7 지금 목표가 없을 때의 목표,
-//       8 회차 키 수명, 9 곧 입장 키·처음 요청 키 수명(판매 종료), 10·11 다시 시도 하한·상한(초), 12 속도 창(초), 13 최대 체류(ms)
+//       8 회차 키 수명, 9 곧 입장 키·처음 요청 키 수명(판매 종료), 10·11 다시 시도 하한·상한(초), 12 속도 창(초), 13 최대 체류(ms),
+//       14 계정 ID(후보가 있을 때만), 15.. 후보 명단 키 이름(KEYS 15..와 같은 차례)
 // 자리를 처음 잡을 때 그 시각을 slot_of의 '<해시>:at' 칸에 둔다. 같은 jti를 다시 줄 때 그 시각을 돌려줘 입장 토큰의 만료(exp)를 첫 발급과 같게 한다(HOT-010 리뷰).
 // 돌려주는 값: {'ADMITTED', jti, 다시 줌 1/0, serving, 도착 지연(없으면 -1), 곧 입장 대기(없으면 -1), 이 대기표의 첫 자리 1/0, 첫 발급 시각(ms, 모르면 -1)}
+//             그 뒤에 그 계정이 든 후보 명단 키가 글자 차례대로 붙는다(`lst`, 없으면 붙지 않는다)
 //             {'SOON', 다시 시도 초, 도착 지연} {'REMOVED', 'BLOCKED' 또는 ''} {'NOT_YET'}
 //             {'EXPIRED'}: 같은 jti를 다시 줄 자리지만 첫 발급 + 최대 체류가 지났다(exp < iat 토큰을 내지 않는다, HOT-010 리뷰)
 export const ADMIT_LUA = `${EXTEND}${NOW}
+-- 입장 토큰 lst(ADR-0265 결정 7): 후보 명단 Set마다 그 계정이 들었는지 보고, 든 키만 글자 차례로 돌려준다. 설정이 틀리면 호출 쪽이 후보를 넘기지 않는다
+local function eligKeys()
+  local out = {}
+  if ARGV[14] then
+    for i = 15, #KEYS do
+      if redis.call('SISMEMBER', KEYS[i], ARGV[14]) == 1 then out[#out + 1] = ARGV[i] end
+    end
+    table.sort(out)
+  end
+  return out
+end
 local seq = tonumber(ARGV[1])
 local serving = tonumber(redis.call('GET', KEYS[1]) or '0')
 if seq > serving then return {'NOT_YET'} end
@@ -141,7 +155,7 @@ if prev then
     local at = tonumber(redis.call('HGET', KEYS[12], ARGV[2] .. ':at') or '')
     if at and now >= at + tonumber(ARGV[13]) then return {'EXPIRED'} end
     redis.call('ZADD', KEYS[3], 'XX', 'GT', now + tonumber(ARGV[6]), prev)
-    return {'ADMITTED', prev, 1, serving, -1, -1, 0, tonumber(redis.call('HGET', KEYS[12], ARGV[2] .. ':at') or '-1')}
+    return {'ADMITTED', prev, 1, serving, -1, -1, 0, tonumber(redis.call('HGET', KEYS[12], ARGV[2] .. ':at') or '-1'), unpack(eligKeys())}
   end
 end
 local inSoon = redis.call('ZSCORE', KEYS[4], ARGV[2])
@@ -190,7 +204,7 @@ if free > ahead then
   extend(KEYS[12], ARGV[8])
   local firstSlot = 1
   if prev then firstSlot = 0 end
-  return {'ADMITTED', ARGV[3], 0, serving, delay, wait, firstSlot, now}
+  return {'ADMITTED', ARGV[3], 0, serving, delay, wait, firstSlot, now, unpack(eligKeys())}
 end
 redis.call('ZADD', KEYS[4], seq, ARGV[2])
 redis.call('ZADD', KEYS[5], now, ARGV[2])

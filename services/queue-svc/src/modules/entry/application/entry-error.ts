@@ -12,6 +12,8 @@ export type EntryErrorCode =
   | 'LOBBY_CLOSED'
   | 'LOBBY_PARTICIPANT_NOT_FOUND'
   | 'ENTRY_CANCELLED'
+  /** 창 안인데 판매 자격 명단 밖이거나 사본·설정이 없다(ADR-0265 결정 5·8) */
+  | 'SALE_ELIGIBILITY_REQUIRED'
   /** 위험 판정을 받지 못할 때 파드 메모리 한도를 넘었다(docs/features/bot-defense.md §11.2) */
   | 'DEGRADED_LIMITED'
   | 'IDENTITY_VERIFICATION_REQUIRED';

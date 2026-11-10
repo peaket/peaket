@@ -3,7 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, type HotRedis, redisScript } from '@peaket/platform';
 import type { EventSchedules } from '../domain/ports.js';
-import type { EventSchedule } from '../domain/queue.js';
+import { type EventSchedule, parseEligibility } from '../domain/queue.js';
 import { QUEUE_REDIS, guard, keys } from './redis-entry-store.js';
 import { SCHEDULE_LUA } from './entry-lua.js';
 
@@ -48,7 +48,9 @@ export function parseSchedule(raw: unknown): EventSchedule | null {
   const layoutVersion = layout !== undefined && layout <= U32_MAX ? layout : undefined;
   // 로비 분은 선택 칸이다(없으면 10분 [가정]). 0~60만 받고 틀리면 그 칸을 버린다(ADR-0231 결정 4, core-svc의 lobby_minutes 범위)
   const lobbyMinutes = int(f.lobbyMinutes);
-  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}), ...(layoutVersion !== undefined ? { layoutVersion } : {}), ...(lobbyMinutes !== null && lobbyMinutes <= 60 ? { lobbyMinutes } : {}) };
+  // 판매 자격 창·후보 명단은 선택 칸이다. 모양이 틀리면 그 칸만 버리지 않고 INVALID로 두어 로비·진입을 막는다(열린 쪽으로 열지 않는다, ADR-0265 결정 5·6)
+  const eligibility = parseEligibility(f.eligGates, f.eligLists);
+  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, eligibility, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}), ...(layoutVersion !== undefined ? { layoutVersion } : {}), ...(lobbyMinutes !== null && lobbyMinutes <= 60 ? { lobbyMinutes } : {}) };
 }
 
 @Injectable()
@@ -79,5 +81,10 @@ export class RedisEventSchedules implements EventSchedules {
 
   cachedForTest(): number {
     return this.#cache.size;
+  }
+
+  /** 시험이 일정 사본을 바꾼 뒤 1초 캐시를 비운다(Lua는 서버 시각을 쓰므로 실제 Valkey 시험에서 필요하다) */
+  clearForTest(): void {
+    this.#cache.clear();
   }
 }

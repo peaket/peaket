@@ -5,8 +5,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ALGORITHM, DRAND_CHAIN, drandRoundTimeMs } from '@peaket/shuffle';
-import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LOBBY_SIGNALS, type LobbySignals, noDegradedLimits, noFirstVisitSignals, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
-import { BATCH_SPREAD_SEC, LOBBY_UNLOCK_SPREAD_MS, lobbyOpensAtOf, PENDING_TTL_MS, type ReasonCategory, saleEndOf, SHUFFLE_PUBLISH_MS } from '../domain/queue.js';
+import { DEGRADED_LIMITS, DEGRADED_RETRY_AFTER_SECONDS, type DegradedLimits, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LOBBY_SIGNALS, type LobbySignals, noDegradedLimits, noEligibilitySignals, noFirstVisitSignals, noLobbySignals, QUEUE_TOKENS, type QueueTokens, RISK, type RiskClient, type RiskPort, type RiskVerdict } from '../domain/ports.js';
+import { BATCH_SPREAD_SEC, eligibilityAt, LOBBY_UNLOCK_SPREAD_MS, lobbyOpensAtOf, PENDING_TTL_MS, type ReasonCategory, saleEndOf, SHUFFLE_PUBLISH_MS } from '../domain/queue.js';
+import { EligibilityLog } from './eligibility-log.js';
 import { EntryError } from './entry-error.js';
 import { firstVisitAtMs } from './first-visit.js';
 import { ShuffleCommits } from './shuffle-commits.js';
@@ -52,6 +53,8 @@ export class JoinLobby {
     @Optional() @Inject(DEGRADED_LIMITS) private readonly limits: DegradedLimits = noDegradedLimits,
     @Optional() @Inject(FIRST_VISIT_COOKIES) private readonly firstVisit?: FirstVisitCookies,
     @Optional() @Inject(FIRST_VISIT_SIGNALS) private readonly visitSignals: FirstVisitSignals = noFirstVisitSignals,
+    @Optional() @Inject(ELIGIBILITY_SIGNALS) private readonly eligibilitySignals: EligibilitySignals = noEligibilitySignals,
+    @Optional() private readonly eligibilityLog?: EligibilityLog,
   ) {}
 
   async run(i: JoinLobbyInput): Promise<JoinLobbyResult> {
@@ -63,9 +66,29 @@ export class JoinLobby {
 
     let recorded: string[] = [];
     try {
+      // 판매 자격(ADR-0265 결정 1·5): 로비 참가는 오픈 시각으로 창을 고른다(오픈 10분 전에 와도 오픈에 시작하는 창이면 명단 대조를 지난다).
+      // 설정 모양이 틀리면 창을 알 수 없으므로 그 회차 로비를 모두 403으로 막는다
+      const checkedAt = this.clock.now();
+      const elig = eligibilityAt(schedule, schedule.opensAtMs);
+      if (elig.kind === 'INVALID') {
+        this.eligibilitySignals.check({ path: 'lobby', result: 'config_invalid' });
+        this.eligibilityLog?.warn('config_invalid', i.eventId, [], checkedAt);
+        throw new EntryError('SALE_ELIGIBILITY_REQUIRED', '판매 자격 설정이 틀렸다');
+      }
       // 공시 기록을 만들거나 판정을 부르기 전에 서버 시각으로 창을 본다. 창 밖 요청이 시드·라운드를 그때 일정으로 굳히거나 사람 확인 토큰을 쓰지 않게 한다(ADR-0231 결정 3)
-      const window = await this.store.lobbyWindow({ eventId: i.eventId, opensAtMs: schedule.opensAtMs, lobbyOpensAtMs: lobbyOpensAtOf(schedule) });
-      if (window !== 'OPEN') throw new EntryError(window === 'NOT_OPEN' ? 'NOT_OPEN' : 'LOBBY_CLOSED', '로비 창 밖의 참가');
+      const window = await this.store.lobbyWindow({
+        eventId: i.eventId,
+        opensAtMs: schedule.opensAtMs,
+        lobbyOpensAtMs: lobbyOpensAtOf(schedule),
+        ...(elig.kind === 'GATED' ? { eligibility: { accountId: i.accountId, listKeys: elig.lists } } : {}),
+      });
+      if (window.kind === 'DENIED' || window.kind === 'COPY_MISSING') {
+        this.eligibilitySignals.check({ path: 'lobby', result: window.kind === 'DENIED' ? 'denied' : 'copy_missing' });
+        if (window.kind === 'COPY_MISSING') this.eligibilityLog?.warn('copy_missing', i.eventId, window.listKeys, checkedAt);
+        throw new EntryError('SALE_ELIGIBILITY_REQUIRED', '이 판매 단계의 예매 대상이 아니다');
+      }
+      if (window.kind !== 'OPEN') throw new EntryError(window.kind === 'NOT_OPEN' ? 'NOT_OPEN' : 'LOBBY_CLOSED', '로비 창 밖의 참가');
+      if (elig.kind === 'GATED') this.eligibilitySignals.check({ path: 'lobby', result: 'allowed' });
       const rec = await this.commits.ensure(i.eventId, 'lobby', schedule);
       const now = this.clock.now();
       const device = i.body.deviceId ?? '';

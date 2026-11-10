@@ -11,10 +11,14 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-/** 공통 값의 모든 칸이 같은가(칸이 늘어도 빠뜨리지 않게 이름을 나열하지 않는다) */
+/** 명단 키 목록이 같은가(창 경계를 걸친 묶음은 나뉜다, ADR-0265 결정 2) */
+const sameLists = (a: Common['eligibility'], b: Common['eligibility']) =>
+  a === b || (a !== undefined && b !== undefined && a.listKeys.length === b.listKeys.length && a.listKeys.every((k, i) => k === b.listKeys[i]));
+
+/** 공통 값의 모든 칸이 같은가(칸이 늘어도 빠뜨리지 않게 이름을 나열하지 않는다. 배열 칸은 값으로 견준다) */
 const same = (a: Common, b: Common) => {
   const ka = Object.keys(a) as (keyof Common)[];
-  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+  return ka.length === Object.keys(b).length && ka.every((k) => (k === 'eligibility' ? sameLists(a.eligibility, b.eligibility) : a[k] === b[k]));
 };
 
 export class NumberBatcher {

@@ -30,6 +30,8 @@ export interface AdmissionStore {
     /** 회차 키 수명(판매 종료 + 1일)과 곧 입장 키 수명(판매 종료) */
     keepUntilMs: number;
     soonExpireAtMs: number;
+    /** 입장 토큰 `lst`의 후보 명단 키와 계정 ID(설정이 틀리면 넘기지 않는다). ADMITTED일 때 그 계정이 든 키만 돌려준다 */
+    eligibility?: { accountId: string; listKeys: readonly string[] };
   }): Promise<AdmitResult>;
   /** ④ ADMITTED: q:adm이 없거나 같은 대기표면 이 요청의 표지로 다시 쓰고(없으면 수명 = 판매 종료) q:dup을 지운다. RELEASE: 값이 이 요청이 채운 그대로일 때만 지운다 */
   settle(i: { pid: string; eventId: string; ticketHash: string; outcome: 'ADMITTED' | 'RELEASE'; nonce: string; expireAtMs: number }): Promise<void>;
@@ -58,8 +60,9 @@ export interface AdmissionPolicy {
 export const ADMISSION_TOKENS = Symbol('queue.AdmissionTokens');
 /** 입장 토큰 서명(ES256, typ admission+jwt, aud purchase). exp = iat + 최대 체류 */
 export interface AdmissionTokens {
-  /** firstIssuedAtMs: 같은 jti를 다시 줄 때 첫 발급 시각. exp를 그 시각 + 최대 체류로 둔다(없으면 nowMs 기준). iat는 늘 nowMs다 */
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number }): { token: string; expiresAtMs: number };
+  /** firstIssuedAtMs: 같은 jti를 다시 줄 때 첫 발급 시각. exp를 그 시각 + 최대 체류로 둔다(없으면 nowMs 기준). iat는 늘 nowMs다.
+   * lists: 판매 자격 명단 키(그 계정이 든 것만). 있으면 클레임 `lst`에 싣는다(ADR-0265 결정 7) */
+  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number; lists?: string[] }): { token: string; expiresAtMs: number };
   /** 입장 확정 응답의 서버 ECDH 공개키(설정이 없으면 undefined, BOT-100) */
   serverEcdhPublicKey(): Record<string, string> | undefined;
 }

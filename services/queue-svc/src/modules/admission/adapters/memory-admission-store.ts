@@ -37,6 +37,8 @@ export class MemoryAdmissionDb {
   slotOf = (e: string) => this.#of('slotOf', e, () => new Map<string, string>());
   /** 처음 요청을 센 번호 */
   req = (e: string) => this.#of('req', e, () => new Set<number>());
+  /** 판매 자격 명단 사본: 명단 키 → 계정 ID 집합(입장 토큰 `lst` 시험용, ADR-0265 결정 7) */
+  elig = (e: string) => this.#of('elig', e, () => new Map<string, Set<string>>());
   /** 로비 셔플 결과 q:lobby:{토큰 해시} */
   readonly lobbyResults = new Map<string, string>();
   lobbyMembers = (e: string) => this.#of('lobbyMembers', e, () => new Set<string>());
@@ -138,6 +140,8 @@ export class MemoryAdmissionStore implements AdmissionStore {
     const e = i.eventId;
     const now = this.clock.now();
     const serving = this.db.ev(e).get('serving') ?? 0;
+    const lists = i.eligibility ? i.eligibility.listKeys.filter((listKey) => this.db.elig(e).get(listKey)?.has(i.eligibility!.accountId)) : [];
+    const withLists = lists.length > 0 ? { lists } : {};
     if (i.seq > serving) return { kind: 'NOT_YET' };
     if (this.db.removed(e).has(i.seq)) {
       const st = verifyState(this.db.verify(e).get(i.ticketHash))?.st;
@@ -152,7 +156,7 @@ export class MemoryAdmissionStore implements AdmissionStore {
         slots.set(prev, Math.max(sc, now + FIRST_USE_MS));
         const issuedAtMs = this.#issuedAt.get(`${e}|${i.ticketHash}`);
         if (issuedAtMs !== undefined && now >= issuedAtMs + MAX_STAY_MS) return { kind: 'EXPIRED' };
-        return { kind: 'ADMITTED', jti: prev, again: true, firstSlot: false, serving, ...(issuedAtMs !== undefined ? { issuedAtMs } : {}) };
+        return { kind: 'ADMITTED', jti: prev, again: true, firstSlot: false, serving, ...(issuedAtMs !== undefined ? { issuedAtMs } : {}), ...withLists };
       }
     }
     const inSoon = this.db.soon(e).has(i.ticketHash);
@@ -187,7 +191,7 @@ export class MemoryAdmissionStore implements AdmissionStore {
         this.db.soonAt(e).delete(i.ticketHash);
         this.db.soonFirst(e).delete(i.ticketHash);
       }
-      return { kind: 'ADMITTED', jti: i.freshJti, again: false, firstSlot: prev === undefined, serving, issuedAtMs: now, ...delay, ...(soonWaitMs !== undefined ? { soonWaitMs } : {}) };
+      return { kind: 'ADMITTED', jti: i.freshJti, again: false, firstSlot: prev === undefined, serving, issuedAtMs: now, ...delay, ...(soonWaitMs !== undefined ? { soonWaitMs } : {}), ...withLists };
     }
     this.db.soon(e).set(i.ticketHash, i.seq);
     this.db.soonAt(e).set(i.ticketHash, now);

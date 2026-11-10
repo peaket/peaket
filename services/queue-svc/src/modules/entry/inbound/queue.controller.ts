@@ -54,6 +54,8 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   // 취소한 참가의 재전송(처음 기기, ADR-0233). 입장 확정의 빠진 번호와 같은 type이라 화면은 '다른 기기에서 취소'로 끝낸다
   ENTRY_CANCELLED: { status: 410, type: 'queue-ticket-removed', title: '이 대기표는 더 쓸 수 없습니다' },
   IDENTITY_VERIFICATION_REQUIRED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
+  // 창 안인데 명단 밖·사본 없음·설정 틀림을 같은 본문으로 답한다(확장 칸 없음, ADR-0265 결정 8)
+  SALE_ELIGIBILITY_REQUIRED: { status: 403, type: 'sale-eligibility-required', title: '이 판매 단계의 예매 대상이 아닙니다' },
   // 위험 판정을 받지 못할 때의 파드 메모리 한도(docs/features/bot-defense.md §11.2). 축소 운영 중임을 드러내지 않는다
   DEGRADED_LIMITED: { status: 429, type: 'queue-request-limited', title: '요청이 많아 잠시 뒤 다시 시도해 주세요' },
 };

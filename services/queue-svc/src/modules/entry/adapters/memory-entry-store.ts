@@ -2,7 +2,7 @@
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
 import type { ShuffleGroup } from '@peaket/shuffle';
-import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, EventSchedules, LobbyWindow, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
 import { ARRIVAL_CARVE_MAX, ARRIVAL_CARVE_WINDOW_MAX, ARRIVAL_CARVE_WINDOW_MS, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type HeldRecord, parseHeld, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)(?::[0-9a-f]*)?$/;
@@ -50,6 +50,9 @@ export class MemoryEntryStore implements EntryStore {
   readonly #done = new Map<string, Map<string, string>>();
   readonly #members = new Map<string, Set<string>>();
   readonly #lobby = new Map<string, Set<string>>();
+  /** 판매 자격 명단 사본(회차 → 명단 키 → 계정 ID)과 표지(회차 → 사본이 있는 명단 키). 시험이 직접 넣는다 */
+  readonly #elig = new Map<string, Map<string, Set<string>>>();
+  readonly #eligMarker = new Map<string, Set<string>>();
   readonly #results = new Map<string, string>();
   /** 곧 입장 대기열(회차 → 해시 → 번호). 입장 확정 메모리 저장소와는 따로이고 대기 취소 시험만 쓴다 */
   readonly #soon = new Map<string, Map<string, number>>();
@@ -124,6 +127,23 @@ export class MemoryEntryStore implements EntryStore {
     const sale = this.#saleState.get(i.eventId);
     if (sale === 'SOLD_OUT' || sale === 'ENDED') return i.items.map(() => ({ kind: sale }));
     const gen = (this.#skipped.get(i.eventId)?.length ?? 0) + 1;
+    // 판매 자격(ADR-0265 결정 2·5): 창 안이면 계정 ID로 사본을 보고, 표지가 없는 명단이 있으면 copy_missing이다
+    const lists = i.eligibility?.listKeys;
+    const denied = new Map<number, 'denied' | 'copy_missing'>();
+    if (lists) {
+      i.items.forEach((it, k) => {
+        let allowed = false;
+        let missing = false;
+        for (const listKey of lists) {
+          if (!this.#eligMarker.get(i.eventId)?.has(listKey)) missing = true;
+          else if (this.#elig.get(i.eventId)?.get(listKey)?.has(it.accountId ?? '')) {
+            allowed = true;
+            break;
+          }
+        }
+        if (!allowed) denied.set(k, missing ? 'copy_missing' : 'denied');
+      });
+    }
     const done = this.#doneOf(i.eventId);
     const seqOf = () => this.#seq.get(i.eventId) ?? 0;
     if (i.lobbyShuffle && !done.has('lobby')) {
@@ -137,7 +157,9 @@ export class MemoryEntryStore implements EntryStore {
       const members = this.#members.get(i.eventId) ?? new Set<string>();
       this.#members.set(i.eventId, members);
       if (!closed && now < (i.closeAtMs ?? 0)) {
-        return i.items.map((it): NumberResult => {
+        return i.items.map((it, k): NumberResult => {
+          const why = denied.get(k);
+          if (why) return { kind: 'ELIGIBILITY_REQUIRED', cause: why };
           if (!it.eligible) return { kind: 'WAIT', retryAfterSeconds: Math.ceil(((i.closeAtMs ?? 0) - now) / 1000) };
           members.add(it.tokenHash ?? '');
           return { kind: 'BATCHING' };
@@ -150,9 +172,14 @@ export class MemoryEntryStore implements EntryStore {
     }
     const arrival = i.items.some((it) => it.arrivalSlot !== undefined);
     if (!arrival) {
-      const first = seqOf() + 1;
-      this.#seq.set(i.eventId, seqOf() + i.items.length);
-      return i.items.map((_, k) => ({ kind: 'NUMBERED', seq: first + k, gen }));
+      const out = i.items.map((_, k): NumberResult => {
+        const why = denied.get(k);
+        if (why) return { kind: 'ELIGIBILITY_REQUIRED', cause: why };
+        const seq = seqOf() + 1;
+        this.#seq.set(i.eventId, seq);
+        return { kind: 'NUMBERED', seq, gen };
+      });
+      return out;
     }
     // 진입 Degraded의 도착 시각 칸(Lua NUMBER_BATCH_LUA와 같은 규칙, ADR-0223 결정 6)
     const initial = i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL;
@@ -167,7 +194,9 @@ export class MemoryEntryStore implements EntryStore {
       st.cw = cw;
       st.cn = 0;
     }
-    const out: (NumberResult | null)[] = i.items.map((it) => {
+    const out: (NumberResult | null)[] = i.items.map((it, idx) => {
+      const why = denied.get(idx);
+      if (why) return { kind: 'ELIGIBILITY_REQUIRED', cause: why };
       const k = it.arrivalSlot;
       if (k === undefined) return null;
       if (k <= st.closed || k <= st.lost || k * ARRIVAL_SLOT_MS > now + ARRIVAL_FUTURE_MS || (k + 1) * ARRIVAL_SLOT_MS + ARRIVAL_CLOSE_AFTER_MS <= now) return { kind: 'NUMBERED', seq: 0, gen, arrival: 'late' };
@@ -180,6 +209,7 @@ export class MemoryEntryStore implements EntryStore {
       return { kind: 'NUMBERED', seq, gen, arrival: 'slot' };
     });
     return out.map((r) => {
+      if (r && r.kind === 'ELIGIBILITY_REQUIRED') return r;
       if (r && r.kind === 'NUMBERED' && r.arrival === 'slot') return r;
       const seq = seqOf() + 1;
       this.#seq.set(i.eventId, seq);
@@ -270,8 +300,8 @@ export class MemoryEntryStore implements EntryStore {
   }
 
   async number(i: NumberInput): Promise<NumberResult> {
-    const { eligible, tokenHash, ...common } = i;
-    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
+    const { eligible, tokenHash, accountId, ...common } = i;
+    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash, ...(accountId ? { accountId } : {}) }] }))[0]!;
   }
 
   async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number; ticketHash?: string }): Promise<RecordResult> {
@@ -395,10 +425,25 @@ export class MemoryEntryStore implements EntryStore {
     return 'ADDED';
   }
 
-  async lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number }): Promise<'OPEN' | 'NOT_OPEN' | 'CLOSED'> {
+  async lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number; eligibility?: { accountId: string; listKeys: readonly string[] } }): Promise<LobbyWindow> {
     const now = this.clock.now();
-    if (now >= i.opensAtMs || this.#doneOf(i.eventId).has('lobby')) return 'CLOSED';
-    return now < i.lobbyOpensAtMs ? 'NOT_OPEN' : 'OPEN';
+    if (now >= i.opensAtMs || this.#doneOf(i.eventId).has('lobby')) return { kind: 'CLOSED' };
+    if (now < i.lobbyOpensAtMs) return { kind: 'NOT_OPEN' };
+    if (i.eligibility) {
+      const missing: string[] = [];
+      let allowed = false;
+      for (const listKey of i.eligibility.listKeys) {
+        if (!this.#eligMarker.get(i.eventId)?.has(listKey)) missing.push(listKey);
+        else if (this.#elig.get(i.eventId)?.get(listKey)?.has(i.eligibility.accountId)) {
+          allowed = true;
+          break;
+        }
+      }
+      if (allowed) return { kind: 'OPEN' };
+      if (missing.length > 0) return { kind: 'COPY_MISSING', listKeys: missing };
+      return { kind: 'DENIED' };
+    }
+    return { kind: 'OPEN' };
   }
 
   async removeLobbyMember(i: { eventId: string; tokenHash: string; expireAtMs: number }): Promise<void> {
@@ -497,6 +542,23 @@ export class MemoryEntryStore implements EntryStore {
   }
   lobbyMembersForTest(eventId: string): string[] {
     return [...(this.#lobby.get(eventId) ?? [])];
+  }
+  /** 판매 자격 사본을 넣는다(구성원 0명이면 표지만). 표지를 지우면 사본 없음(copy_missing)이다 */
+  setEligibilityCopyForTest(eventId: string, listKey: string, accountIds: readonly string[], marker = true): void {
+    if (marker) {
+      const m = this.#eligMarker.get(eventId) ?? new Set<string>();
+      m.add(listKey);
+      this.#eligMarker.set(eventId, m);
+    }
+    const perEvent = this.#elig.get(eventId) ?? new Map<string, Set<string>>();
+    perEvent.set(listKey, new Set(accountIds));
+    this.#elig.set(eventId, perEvent);
+  }
+  dropEligibilityMarkerForTest(eventId: string, listKey: string): void {
+    this.#eligMarker.get(eventId)?.delete(listKey);
+  }
+  eligibilityMembersForTest(eventId: string, listKey: string): string[] {
+    return [...(this.#elig.get(eventId)?.get(listKey) ?? [])];
   }
 
   // 시험 도구

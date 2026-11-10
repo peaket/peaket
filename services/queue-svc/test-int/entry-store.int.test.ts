@@ -1,11 +1,13 @@
 // 진입 3단계 Lua를 실제 Valkey 8.1로 돈다(test/entry-cases.ts의 사례를 메모리 저장소와 똑같이). 선점 수명은 300ms로 줄여 실제로 기다린다.
 import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { RedisAdmissionStore } from '../src/modules/admission/adapters/redis-admission-store.js';
 import { RedisEntryStore, RedisShuffleCommits, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
 import { ARRIVAL_CARVE_WINDOW_MS, type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
+import { eligibilityCases } from '../test/eligibility-cases.js';
 import { leaveCases } from '../test/leave-cases.js';
 import { lobbyCases } from '../test/lobby-cases.js';
 import { entryCases } from '../test/entry-cases.js';
@@ -83,6 +85,44 @@ const valkeyWorld = async (): Promise<PidWorld> => {
 };
 
 entryCases('Valkey Lua', valkeyWorld);
+eligibilityCases('Valkey Lua', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  const set = async (eventId: string, s: EventSchedule): Promise<void> => {
+    const key = keys.cfg(eventId);
+    const fields = ['opensAtMs', String(s.opensAtMs), 'startsAtMs', String(s.startsAtMs), 'lobbyShuffle', s.lobbyShuffle ? '1' : '0', 'openBatch', s.openBatch ? '1' : '0', 'rev', '1'];
+    if (s.batchWindowMs !== undefined) fields.push('batchWindowMs', String(s.batchWindowMs));
+    if (s.lobbyMinutes !== undefined) fields.push('lobbyMinutes', String(s.lobbyMinutes));
+    if (s.eligibility?.kind === 'GATED') fields.push('eligGates', JSON.stringify(s.eligibility.gates), 'eligLists', JSON.stringify(s.eligibility.lists));
+    else if (s.eligibility?.kind === 'INVALID') fields.push('eligGates', '{');
+    await cmd(key, ['HSET', key, ...fields]);
+    schedules.clearForTest();
+  };
+  return {
+    store: new RedisEntryStore(redis),
+    commits: new RedisShuffleCommits(redis),
+    schedules: Object.assign(schedules, { set }),
+    clock: systemClock,
+    admission: new RedisAdmissionStore(redis),
+    copy: async (eventId, listKey, accountIds, marker = true) => {
+      if (marker) await cmd(keys.eligMarker(eventId, listKey), ['SET', keys.eligMarker(eventId, listKey), '1']);
+      // core-svc의 사본 갈아끼우기와 같게 옛 구성원을 지우고 새 구성원을 넣는다(메모리 저장소의 replace와 같은 뜻)
+      await cmd(keys.elig(eventId, listKey), ['DEL', keys.elig(eventId, listKey)]);
+      if (accountIds.length > 0) await cmd(keys.elig(eventId, listKey), ['SADD', keys.elig(eventId, listKey), ...accountIds]);
+    },
+    dropMarker: async (eventId, listKey) => void (await cmd(keys.eligMarker(eventId, listKey), ['DEL', keys.eligMarker(eventId, listKey)])),
+    counter: async (eventId) => Number((await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])) ?? 0),
+    lobbyMembers: async (eventId) => (await cmd(keys.lobbyMembers(eventId), ['SMEMBERS', keys.lobbyMembers(eventId)])) as string[],
+    batchMembers: async (eventId) => (await cmd(keys.batchMembers(eventId), ['SMEMBERS', keys.batchMembers(eventId)])) as string[],
+    dupValue: async (pid, eventId) => {
+      const v = await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)]);
+      return v === null ? null : String(v);
+    },
+    setServing: async (eventId, seq) => {
+      const key = `q:{event:${eventId}}:serving`;
+      await cmd(key, ['SET', key, String(seq)]);
+    },
+  };
+});
 arrivalSlotCases('Valkey Lua', async () => ({
   store: new RedisEntryStore(redis),
   now: () => Date.now(),

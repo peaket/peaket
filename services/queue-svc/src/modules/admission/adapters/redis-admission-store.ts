@@ -92,7 +92,8 @@ export class RedisAdmissionStore implements AdmissionStore {
 
   async admit(i: Parameters<AdmissionStore['admit']>[0]): Promise<AdmitResult> {
     const e = i.eventId;
-    const ks = [k.serving(e), k.removed(e), k.slots(e), k.soon(e), k.soonAt(e), k.soonFirst(e), k.admitted(e), k.calls(e), k.callReq(e), k.ctl(e), k.admits(e), k.slotOf(e), k.req(e), k.verify(e)];
+    const lists = i.eligibility?.listKeys;
+    const ks = [k.serving(e), k.removed(e), k.slots(e), k.soon(e), k.soonAt(e), k.soonFirst(e), k.admitted(e), k.calls(e), k.callReq(e), k.ctl(e), k.admits(e), k.slotOf(e), k.req(e), k.verify(e), ...(lists ? lists.map((listKey) => k.elig(e, listKey)) : [])];
     const args = [
       i.seq,
       i.ticketHash,
@@ -107,6 +108,7 @@ export class RedisAdmissionStore implements AdmissionStore {
       SOON_RETRY_MAX_SEC,
       RATE_WINDOW_SEC,
       MAX_STAY_MS,
+      ...(lists ? [i.eligibility!.accountId, ...lists] : []),
     ].map(String);
     const r = (await guard(this.redis.evalScript(ADMIT, ks, args))) as unknown[];
     const kind = str(r[0]);
@@ -114,6 +116,7 @@ export class RedisAdmissionStore implements AdmissionStore {
       const arrivalDelayMs = opt(r[4]);
       const soonWaitMs = opt(r[5]);
       const issuedAtMs = opt(r[7]);
+      const lists = r.slice(8).map(str);
       return {
         kind,
         jti: str(r[1]),
@@ -123,6 +126,7 @@ export class RedisAdmissionStore implements AdmissionStore {
         ...(arrivalDelayMs !== undefined ? { arrivalDelayMs } : {}),
         ...(soonWaitMs !== undefined ? { soonWaitMs } : {}),
         ...(issuedAtMs !== undefined ? { issuedAtMs } : {}),
+        ...(lists.length > 0 ? { lists } : {}),
       };
     }
     if (kind === 'SOON') {

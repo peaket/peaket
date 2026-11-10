@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { drandRoundTimeMs } from '@peaket/shuffle';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, noEligibilitySignals, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
   ARRIVAL_COOKIE_TTL_MS,
   ARRIVAL_FUTURE_MS,
@@ -17,6 +17,7 @@ import {
   BATCH_RESULT_DELAY_MS,
   BATCH_SPREAD_SEC,
   batchCloseAtOf,
+  eligibilityAt,
   type EventSchedule,
   keepUntilOf,
   NUMBER_BATCH_MAX,
@@ -31,6 +32,7 @@ import {
   saleEndOf,
   segmentOf,
 } from '../domain/queue.js';
+import { EligibilityLog } from './eligibility-log.js';
 import { EntryError } from './entry-error.js';
 import { ShuffleCommits } from './shuffle-commits.js';
 import { NumberBatcher } from './number-batcher.js';
@@ -117,6 +119,8 @@ export class EnterQueue {
     @Optional() @Inject(ARRIVAL_COOKIES) private readonly arrivals?: ArrivalCookies,
     @Optional() @Inject(ARRIVAL_SIGNALS) private readonly signals?: ArrivalSignals,
     @Optional() private readonly commits?: ShuffleCommits,
+    @Optional() @Inject(ELIGIBILITY_SIGNALS) private readonly eligibilitySignals: EligibilitySignals = noEligibilitySignals,
+    @Optional() private readonly eligibilityLog?: EligibilityLog,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
   }
@@ -228,9 +232,19 @@ export class EnterQueue {
     if (pre1.kind === 'RECORDED') return this.#issue(c, pre1.seq, pre1.gen, pre1.jny, pre1.vr);
     if (pre1.kind === 'BATCH') return this.#batched(c, pre1, jny, vr, eligible, tokenHash, firstTry);
 
+    // 판매 자격(ADR-0265 결정 1·5): 진입은 요청을 받은 지금으로 창을 고르고, 번호를 내는 묶음 Lua 안에서 계정 ID로 대조한다.
+    // 설정 모양이 틀리면 창을 알 수 없으므로 번호를 내지 않고 선점을 푼다. 이미 기록된 재시도(위)가 이 판정보다 앞선다
+    const checkedAt = this.clock.now();
+    const elig = eligibilityAt(schedule, checkedAt);
+    if (elig.kind === 'INVALID') {
+      await this.#release(c);
+      this.eligibilitySignals.check({ path: 'entry', result: 'config_invalid' });
+      this.eligibilityLog?.warn('config_invalid', i.eventId, [], checkedAt);
+      throw new EntryError('SALE_ELIGIBILITY_REQUIRED', '판매 자격 설정이 틀렸다');
+    }
     // 진입 Degraded의 도착 시각 쿠키는 번호를 받기 직전에 한 번만 받는다(응답을 잃은 재시도는 RECORDED로 위에서 끝났다)
     const arrivalSlot = await this.#arrivalSlot(c);
-    // ②는 파드별 묶음으로 보낸다(같은 회차의 요청을 2ms 모아 Lua 한 번, ADR-0179)
+    // ②는 파드별 묶음으로 보낸다(같은 회차의 요청을 2ms 모아 Lua 한 번, ADR-0179). 고른 명단 키가 같은 요청끼리만 모은다
     const num = await this.#numbers.take(
       {
         eventId: i.eventId,
@@ -241,10 +255,20 @@ export class EnterQueue {
         openBatch: schedule.openBatch,
         batchExpireAtMs: saleEnd,
         arrivalInitial: this.options.arrivalSlotInitial ?? ARRIVAL_SLOT_INITIAL,
+        ...(elig.kind === 'GATED' ? { eligibility: { listKeys: elig.lists } } : {}),
       },
-      { eligible, tokenHash, ...(arrivalSlot !== undefined ? { arrivalSlot } : {}) },
+      { eligible, tokenHash, ...(arrivalSlot !== undefined ? { arrivalSlot } : {}), ...(elig.kind === 'GATED' ? { accountId: i.accountId } : {}) },
     );
     if (num.kind === 'NUMBERED' && num.arrival) this.signals?.number(num.arrival);
+    if (num.kind === 'ELIGIBILITY_REQUIRED') {
+      // 번호·묶음 자리를 쓰지 않았다. 선점을 풀어 같은 사람이 바로 다시 시도할 수 있게 한다(ADR-0265 결정 5·8)
+      await this.#release(c);
+      this.eligibilitySignals.check({ path: 'entry', result: num.cause });
+      if (num.cause === 'copy_missing') this.eligibilityLog?.warn('copy_missing', i.eventId, elig.kind === 'GATED' ? elig.lists : [], checkedAt);
+      throw new EntryError('SALE_ELIGIBILITY_REQUIRED', '이 판매 단계의 예매 대상이 아니다');
+    }
+    // 창 안 대조를 지나 번호·묶음·기다림으로 간 요청만 allowed다(회복 중·매진·판매 종료는 대조 전에 끝난다)
+    if (elig.kind === 'GATED' && (num.kind === 'NUMBERED' || num.kind === 'BATCHING' || num.kind === 'WAIT')) this.eligibilitySignals.check({ path: 'entry', result: 'allowed' });
     if (num.kind === 'RECOVERING') {
       // 장애 전환 뒤 RB-05 전이라 번호를 받지 않았다(OPEN[13], ADR-0181). 선점을 풀고 RB-05를 돈 뒤 다시 오게 한다
       await this.#release(c);
