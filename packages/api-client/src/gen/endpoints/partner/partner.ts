@@ -5073,6 +5073,11 @@ export type createPartnerProductionImageResponse201 = {
   status: 201
 }
 
+export type createPartnerProductionImageResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type createPartnerProductionImageResponse404 = {
   data: ProblemResponse
   status: 404
@@ -5116,7 +5121,7 @@ export type createPartnerProductionImageResponse504 = {
 export type createPartnerProductionImageResponseSuccess = (createPartnerProductionImageResponse201) & {
   headers: Headers;
 };
-export type createPartnerProductionImageResponseError = (createPartnerProductionImageResponse404 | createPartnerProductionImageResponse409 | createPartnerProductionImageResponse413 | createPartnerProductionImageResponse415 | createPartnerProductionImageResponse422 | createPartnerProductionImageResponse429 | createPartnerProductionImageResponse503 | createPartnerProductionImageResponse504) & {
+export type createPartnerProductionImageResponseError = (createPartnerProductionImageResponse403 | createPartnerProductionImageResponse404 | createPartnerProductionImageResponse409 | createPartnerProductionImageResponse413 | createPartnerProductionImageResponse415 | createPartnerProductionImageResponse422 | createPartnerProductionImageResponse429 | createPartnerProductionImageResponse503 | createPartnerProductionImageResponse504) & {
   headers: Headers;
 };
 
@@ -5207,6 +5212,11 @@ export const useCreatePartnerProductionImage = <TError = ErrorType<ProblemRespon
   status: 200
 }
 
+export type updatePartnerProductionImageResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type updatePartnerProductionImageResponse404 = {
   data: ProblemResponse
   status: 404
@@ -5225,7 +5235,7 @@ export type updatePartnerProductionImageResponse428 = {
 export type updatePartnerProductionImageResponseSuccess = (updatePartnerProductionImageResponse200) & {
   headers: Headers;
 };
-export type updatePartnerProductionImageResponseError = (updatePartnerProductionImageResponse404 | updatePartnerProductionImageResponse412 | updatePartnerProductionImageResponse428) & {
+export type updatePartnerProductionImageResponseError = (updatePartnerProductionImageResponse403 | updatePartnerProductionImageResponse404 | updatePartnerProductionImageResponse412 | updatePartnerProductionImageResponse428) & {
   headers: Headers;
 };
 
@@ -5325,6 +5335,11 @@ export const useUpdatePartnerProductionImage = <TError = ErrorType<ProblemRespon
   status: 204
 }
 
+export type deletePartnerProductionImageResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type deletePartnerProductionImageResponse404 = {
   data: ProblemResponse
   status: 404
@@ -5338,7 +5353,7 @@ export type deletePartnerProductionImageResponse409 = {
 export type deletePartnerProductionImageResponseSuccess = (deletePartnerProductionImageResponse204) & {
   headers: Headers;
 };
-export type deletePartnerProductionImageResponseError = (deletePartnerProductionImageResponse404 | deletePartnerProductionImageResponse409) & {
+export type deletePartnerProductionImageResponseError = (deletePartnerProductionImageResponse403 | deletePartnerProductionImageResponse404 | deletePartnerProductionImageResponse409) & {
   headers: Headers;
 };
 

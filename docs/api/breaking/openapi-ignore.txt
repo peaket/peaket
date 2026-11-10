@@ -21,3 +21,4 @@ GET /v1/identity/merge-proposals/{proposalId} added the new `SAME_PROVIDER_KIND`
 POST /v1/partner/productions added the new required `header` request parameter `idempotency-key`  # 이유: 공연 등록·회차 더하기의 본문과 멱등키를 계약에 처음 적는다(HOT-171, ADR-0198). v0.2.0까지 이 경로를 구현한 서비스가 없어 깨질 클라이언트가 없다
 POST /v1/partner/productions added required request body  # 이유: 공연 등록·회차 더하기의 본문과 멱등키를 계약에 처음 적는다(HOT-171, ADR-0198). v0.2.0까지 이 경로를 구현한 서비스가 없어 깨질 클라이언트가 없다
 POST /v1/partner/productions/{productionId}/events added required request body  # 이유: 공연 등록·회차 더하기의 본문과 멱등키를 계약에 처음 적는다(HOT-171, ADR-0198). v0.2.0까지 이 경로를 구현한 서비스가 없어 깨질 클라이언트가 없다
+POST /v1/partner/productions/{productionId}/seatmap-imports added the new required `header` request parameter `x-requested-with`  # 이유: multipart 쓰기 요청이 사전 요청을 만들게 공연 이미지 올리기와 같은 머리를 요구한다(catalog-review 3.5.1, ADR-0257 결정 8). 이 경로는 v0.2.0까지 구현한 서비스가 없었고 지금도 부르는 화면이 없어(에디터 잇기는 HOT-220) 깨지는 클라이언트가 없다(BAT-145, 2026-11-10)

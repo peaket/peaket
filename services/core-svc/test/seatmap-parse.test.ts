@@ -126,7 +126,8 @@ describe('SVG 읽기', () => {
     const ok = parsed(parse(svg(head + seats(50_000), 'viewBox="0 0 1000 100"'), 'SVG'));
     expect(ok.layout.sections[0]!.seats).toHaveLength(50_000);
     expect(parse(svg(head + seats(50_001), 'viewBox="0 0 1000 100"'), 'SVG')).toEqual({ status: 'REJECTED', errors: [{ line: 50_004, field: 'seat', code: 'TOO_MANY_SEATS' }], ignored: [] });
-  });
+    // 5만 석 파일을 두 번 만들고 읽는다. CI 러너는 이 PC보다 느려 기본 5초를 넘긴 적이 있다(CI 42751316042)
+  }, 30_000);
 
   test('S-T32 ⑤ 구역 500개는 읽고 501개면, 꼭짓점 1,000개는 읽고 1,001개면 해석하지 않는다', () => {
     const areas = (n: number) => Array.from({ length: n }, (_, i) => `<rect data-section="S${i}" x="${i}" y="0" width="1" height="1"/>`).join('');
@@ -217,7 +218,7 @@ describe('CSV 읽기', () => {
     const rows = (n: number) => [HEADER, ...Array.from({ length: n }, (_, i) => `A,${Math.floor(i / 1000)},${i % 1000},${i % 1000},${Math.floor(i / 1000)},,,,${i === 0 ? '"0 0;1000 0;1000 100"' : ''}`)].join('\n');
     expect(parsed(parse(rows(50_000), 'CSV')).layout.sections[0]!.seats).toHaveLength(50_000);
     expect(parse(rows(50_001), 'CSV')).toEqual({ status: 'REJECTED', errors: [{ line: 50_002, field: 'seat', code: 'TOO_MANY_SEATS' }], ignored: [] });
-  });
+  }, 30_000);
 });
 
 describe('JSON 읽기', () => {
@@ -258,5 +259,5 @@ describe('JSON 읽기', () => {
     const pts = (n: number) => Array.from({ length: n }, (_, i) => [i, i % 2]);
     expect(parsed(parse(doc([sec([], pts(1000))]), 'JSON')).layout.sections[0]!.shape.points).toHaveLength(1000);
     expect(parse(doc([sec([], pts(1001))]), 'JSON')).toMatchObject({ status: 'REJECTED', errors: [{ code: 'TOO_MANY_POINTS' }] });
-  });
+  }, 30_000);
 });
