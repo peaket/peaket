@@ -1,0 +1,600 @@
+{
+  "plan": "bat025-window-1",
+  "title": "BAT-025 측정 창 1: A/A 두 쌍, Q-T5 numberbatch, K2 인기 좌석, K1 1천·1만, (OPEN[34] 뒤) K7 ②, 규칙 검사",
+  "created": "2026-11-11",
+  "basis": [
+    "docs/review/plans/BAT-025.md §2.3·§4·§6.2",
+    "docs/verification.md §3.9~§3.10",
+    "docs/perf-ledger.md §2.2·§3·§4",
+    "docs/PROGRESS.md 턴 규칙 '측정이 도는 동안'·'갈래'",
+    "docs/adr/0190-step-cost-waits-reviews-records.md 결정 4"
+  ],
+  "state_file": ".cache/peaket-bat025/state.json",
+  "decisions": {
+    "OPEN[34]": "소유자 결정 (가)(2026-11-11, ADR-0266): P3 시작 시각을 '결제사 승인 시각과 결과 모름 해소 시각 가운데 늦은 쪽'으로 바꾼다. 운영 결제 경로 코드는 바꾸지 않고, '승인 → 원장이 앎' 간격은 약 81초 상한으로 따로 본다. K7 ②를 이 계획에 포함한다."
+  },
+  "start_gate": "감독이 '측정 시작'을 보낼 때까지 어떤 run도 시작하지 않는다. 이 계획 파일은 준비만 한다.",
+  "rules": [
+    "한 번에 한 run만 돈다. run 사이에 앞 run의 발생기 파드·실행 잠금이 정리됐는지 본다(loadtest/run.mjs가 자동으로 잡고 놓는다).",
+    "실패·무효·SKIPPED는 통과가 아니다. done의 result는 pass·fail·invalid 가운데 하나이고, pass만 통과로 센다.",
+    "SKIPPED가 정본의 기대 목록(S3·P5·M1~M5)과 다르면 그 run은 invalid다.",
+    "A/A 두 쌍이 끝나기 전에는 정밀 측정(K1·K2·K7 ②)을 시작하지 않는다. A/A 결과는 ADR-0190 '확인'에 적는다.",
+    "측정 중에는 시험·빌드를 하지 않는다. 다음 묶음(BAT-030)의 글만 작업 트리에 쓴다.",
+    "kind와 성능 측정은 이 세션만 한다. 다른 갈래의 kind 시험이 돌고 있으면 기다린다.",
+    "측정 단계 커밋에서는 node tools/ci/records.mjs를 돌리지 않는다(docs/PROGRESS.md 턴 규칙 '측정이 도는 동안' 둘째 줄)."
+  ],
+  "environment": {
+    "stage": "kind peaket 하나. node tools/local/cluster.mjs up → observability → v1 --redis-tls on --replicas 3. K7 ②는 회마다 down/up으로 새 클러스터.",
+    "prometheus": "node tools/local/cluster.mjs prometheus (127.0.0.1:9090, 따로 띄워 둔다)",
+    "invariant_checker": "pnpm --filter @peaket/invariant-checker build (v1 --record는 --invariants와 함께만 받는다)",
+    "generator": "k6 1.4.2, 발생기 1대 CPU 2·1GiB(나눌 때) 기준 1,000/s. 2026-11-03 보정값을 쓴다. 발생기 파드 모양이 바뀌면 calibrate --cpus 2를 다시 한다.",
+    "profiles": "K1 1천 local-1k, K1 1만 local-10k, Q-T5 local-poc, K2·K7은 사용자 수로 정해지는 기본 프로파일(local-1k·local-10k)",
+    "pc": "Docker Desktop 29.8.1, CPU 32, 메모리 약 15.5GiB. C: 여유 200GB 이상, D: 여유 100GB 이상을 측정 전에 확인한다."
+  },
+  "preconditions": [
+    {
+      "id": "start-signal",
+      "when": "감독이 '측정 시작'을 알릴 때",
+      "text": "이 신호 전에는 kind를 새로 올리거나 측정 명령을 실행하지 않는다."
+    },
+    {
+      "id": "ci",
+      "when": "시작 직전",
+      "text": "직전 develop CI가 실패면 그것부터 고친다. 이 계획의 측정 커밋은 5953104c 이후여야 한다.",
+      "commands": [
+        { "label": "직전 CI", "argv": ["gh", "run", "list", "--repo", "peaket/peaket", "--branch", "develop", "--workflow", "ci", "--limit", "3"] }
+      ]
+    },
+    {
+      "id": "docker",
+      "when": "시작 직전",
+      "text": "bench-*·다른 갈래 시험 컨테이너·발생기 파드가 없어야 한다. peaket-control-plane은 이 측정이 쓴다. 남은 시험 컨테이너는 docker rm -f -v로 지운다(다른 갈래가 쓰는 것은 건드리지 않는다).",
+      "commands": [
+        { "label": "컨테이너", "argv": ["docker", "ps", "-a", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}"] },
+        { "label": "Docker 자원", "argv": ["docker", "system", "df"] }
+      ]
+    },
+    {
+      "id": "stage",
+      "when": "시작 직전, kind를 이 세션만 쓸 때",
+      "text": "새 클러스터를 올린다. 현재 떠 있는 v1 무대는 5시간 넘게 쓴 것이므로 K1·K2 측정에는 쓰지 않는다.",
+      "commands": [
+        { "label": "내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
+        { "label": "올리기", "argv": ["node", "tools/local/cluster.mjs", "up"] },
+        { "label": "관측", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
+        { "label": "v1 무대(TLS 켬, 복제 3)", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3"] },
+        { "label": "Prometheus(따로 띄움)", "argv": ["node", "tools/local/cluster.mjs", "prometheus"], "background": true },
+        { "label": "불변식 검사기", "argv": ["pnpm", "--filter", "@peaket/invariant-checker", "build"] },
+        { "label": "남은 실행 정리", "argv": ["node", "loadtest/run.mjs", "cleanup"] }
+      ]
+    },
+    {
+      "id": "calibration",
+      "when": "발생기 파드 모양이 바뀌었을 때만",
+      "text": "2026-11-03 보정(CPU 2 발생기 1,000/s, CPU 4 발생기 1,000/s)을 그대로 쓴다. 파드 CPU·메모리나 k6 판이 바뀌면 node loadtest/run.mjs calibrate --cpus 2 --rates 1000 --record로 다시 재고, 그 결과를 notes에 적는다."
+    }
+  ],
+  "gates": {
+    "LANE-LOAD": {
+      "title": "A/A 다른 갈래 시험 함께 돌리는 쌍",
+      "reason": "A/A의 noisy 쌍은 갈래 2·3의 시험·빌드가 실제로 도는 동안 재야 한다. 감독이 시각을 정한다.",
+      "cleared_when": "감독이 갈래 2·3의 시험·빌드가 도는 것을 확인해 알릴 때"
+    }
+  },
+  "runs": [
+    {
+      "n": 1,
+      "key": "aa-quiet-r1",
+      "group": "A/A",
+      "title": "A/A 조용한 쌍 1번째 (K2 인기 좌석 TLS 켬과 같은 조건)",
+      "estimate_min": 8,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "새 클러스터(v1 TLS 켬, 복제 3). 다른 갈래 시험·빌드 없음. 인기 좌석 하나, 1,000명, 2,000/s, 예열 30초·본구간 60초, 잡은 홀드는 놓지 않음. A/A는 장부에 넣지 않는다.",
+      "commands": [
+        {
+          "label": "A/A 조용 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--out", ".cache/peaket-bat025/aa/{day}-aa-quiet-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "generator.json의 judge.valid=true, dropped_iterations=0",
+        "본구간 hold 요청 수가 2,000 × 60 = 120,000건의 ±2% 안",
+        "홀드 201은 1건, 나머지는 업무상 기대한 409(오류율에 넣지 않음)",
+        "summary.json의 http_req_duration{phase:main,route:hold} p99·p99.9를 적는다"
+      ],
+      "ledger": "없음(A/A는 성능 장부에 넣지 않는다). 결과는 .cache/peaket-bat025/aa/aa-summary.json에 적고 ADR-0190 '확인'에 글로 남긴다.",
+      "artifact": ".cache/peaket-bat025/aa/{day}-aa-quiet-r1{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않고 같은 조건으로 다시 잰다."
+    },
+    {
+      "n": 2,
+      "key": "aa-quiet-r2",
+      "group": "A/A",
+      "title": "A/A 조용한 쌍 2번째",
+      "estimate_min": 8,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "aa-quiet-r1과 같은 조건. run 사이에 앞 실행의 부하가 가라앉도록 2분 쉰다.",
+      "commands": [
+        {
+          "label": "A/A 조용 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--out", ".cache/peaket-bat025/aa/{day}-aa-quiet-r2{suffix}"]
+        }
+      ],
+      "criteria": [
+        "aa-quiet-r1과 같다",
+        "두 실행의 p99 비율(r2÷r1)과 p99.9 비율을 낸다"
+      ],
+      "ledger": "없음. aa-summary.json의 quiet 쌍에 적는다.",
+      "artifact": ".cache/peaket-bat025/aa/{day}-aa-quiet-r2{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않는다."
+    },
+    {
+      "n": 3,
+      "key": "aa-noisy-r1",
+      "group": "A/A",
+      "title": "A/A 다른 갈래 시험과 함께 1번째",
+      "estimate_min": 8,
+      "gate": "LANE-LOAD",
+      "stage": "v1-tls-on",
+      "conditions": "aa-quiet와 같은 조건이되, 갈래 2·3의 시험·빌드가 실제로 도는 동안 잰다. 어떤 시험이 도는지(실행 이름·시작 시각)를 기록한다.",
+      "commands": [
+        {
+          "label": "A/A 함께 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--out", ".cache/peaket-bat025/aa/{day}-aa-noisy-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "aa-quiet-r1과 같은 판정",
+        "다른 갈래 실행 이름·시작 시각을 notes에 적는다"
+      ],
+      "ledger": "없음. aa-summary.json의 noisy 쌍에 적는다.",
+      "artifact": ".cache/peaket-bat025/aa/{day}-aa-noisy-r1{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않는다."
+    },
+    {
+      "n": 4,
+      "key": "aa-noisy-r2",
+      "group": "A/A",
+      "title": "A/A 다른 갈래 시험과 함께 2번째",
+      "estimate_min": 8,
+      "gate": "LANE-LOAD",
+      "stage": "v1-tls-on",
+      "conditions": "aa-noisy-r1과 같은 조건·같은 다른 갈래 실행. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "A/A 함께 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--out", ".cache/peaket-bat025/aa/{day}-aa-noisy-r2{suffix}"]
+        }
+      ],
+      "criteria": [
+        "aa-noisy-r1과 같다",
+        "quiet 쌍과 noisy 쌍의 p99 비율 차이를 낸다"
+      ],
+      "ledger": "없음. aa-summary.json의 noisy 쌍에 적는다.",
+      "artifact": ".cache/peaket-bat025/aa/{day}-aa-noisy-r2{suffix}/summary.json, generator.json, run.json",
+      "result_note": "aa-summary.json의 verdict가 '잡음 폭 안'이면 정밀 측정 동안 다른 갈래 시험을 풀 수 있다. '잡음 폭 밖'이면 정밀 측정은 조용할 때만 한다."
+    },
+    {
+      "n": 5,
+      "key": "qt5-numberbatch",
+      "group": "Q-T5",
+      "title": "Q-T5 진입 ② 묶음 Lua 다시 재기(numberbatch, TLS 켬 3·끔 1)",
+      "estimate_min": 20,
+      "gate": null,
+      "stage": "poc",
+      "conditions": "kind가 아니라 Docker 측정망 peaket-poc(loadtest/poc/stack.mjs). 측정 전에 services/queue-svc/src/modules/entry/adapters/entry-lua.ts의 SHA-256을 적는다. rate 200,000/s, 예열 15초·본구간 60초, 진입 서버 4대 흉내(프로세스 4), 2ms 묶음, TLS 켬 3회·끔 1회.",
+      "commands": [
+        { "label": "실행(Lua 원문 자동 내보냄)", "argv": ["node", "loadtest/poc/run.mjs", "numberbatch"] },
+        { "label": "장부 옮기기", "argv": ["node", "loadtest/poc/record.mjs", "--only", "{day}-numberbatch-tls-r1,{day}-numberbatch-tls-r2,{day}-numberbatch-tls-r3,{day}-numberbatch-notls-r1"] }
+      ],
+      "criteria": [
+        "판정은 TLS 켬 3회의 p99 ≤ 200ms(docs/features/queue-admission.md:630, docs/verification.md §3.5 7번)",
+        "TLS 끔은 짝으로만 적고 판정에 쓰지 않는다",
+        "묶음 모드 채택은 2026-11-03 결과(TLS 켬 p99 4.35·4.31·4.31ms)와 같은 방향이어야 한다. 실패·무효는 통과가 아니다"
+      ],
+      "ledger": "kpi NFR-001, profile local-poc, redis_tls(켬/끔), paired_run, run_id {day}-numberbatch-tls-r1~r3·notls-r1. notes에 entry-lua.ts SHA-256, TLS 켬 3·끔 1, Q-T5 재측정(PRF-220), 2026-11-03 값과 대조를 적는다.",
+      "artifact": ".cache/peaket-poc/out/*.json, docs/perf-ledger/runs/{day}-numberbatch-*/",
+      "result_note": "3회 TLS 켬 값의 중앙값과 범위를 적는다. 하나라도 무효면 그 실행을 빼고 나머지로 판정하지 않고, 같은 조건으로 다시 잰다."
+    },
+    {
+      "n": 6,
+      "key": "k2-tls-r1",
+      "group": "K2",
+      "title": "K2 인기 좌석 홀드 TLS 켬 1회 (S-T1·S-T35 ⑥)",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3, 새 클러스터. 인기 좌석 하나(hot 1), 1,000명, 2,000/s, 예열 30초·본구간 60초, 잡은 홀드는 놓지 않음. S-T35 ⑥은 이 실행의 p99를 기준으로 하고 Lua 전후 비교는 k2-lua-compare run이 한다.",
+      "commands": [
+        {
+          "label": "K2 TLS 켬 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--record", "--run-id", "{day}-k2-v1-hot-tls-r1{suffix}", "--profile", "local-1k", "--paired-run", "{day}-k2-v1-hot-notls-r1{suffix}", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k2/{day}-k2-tls-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "홀드 201=1건, 나머지는 409, 홀드 p99 ≤ 50ms·p99.9 ≤ 150ms(S-T1)",
+        "불변식 S1·S2·S4 PASS, 초과 판매 0",
+        "generator.json judge.valid=true, dropped=0",
+        "SKIPPED가 기대 목록(S3·P5·M1~M5)과 다르면 invalid"
+      ],
+      "ledger": "kpi K2, redis_tls=true, paired_run={day}-k2-v1-hot-notls-r1{suffix}, invariants.csv, notes에 TLS 켬 3·끔 1·판정은 켬, hot-count 1, keep, S-T35 ⑥은 lua-compare 결과와 함께 적는다.",
+      "artifact": ".cache/peaket-bat025/k2/{day}-k2-tls-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "3회 가운데 pass만 통과로 센다. 한 번이라도 fail·invalid면 3회 중앙값으로 통과를 만들지 않는다."
+    },
+    {
+      "n": 7,
+      "key": "k2-tls-r2",
+      "group": "K2",
+      "title": "K2 인기 좌석 홀드 TLS 켬 2회",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k2-tls-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K2 TLS 켬 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--record", "--run-id", "{day}-k2-v1-hot-tls-r2{suffix}", "--profile", "local-1k", "--paired-run", "{day}-k2-v1-hot-notls-r1{suffix}", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k2/{day}-k2-tls-r2{suffix}"]
+        }
+      ],
+      "criteria": ["k2-tls-r1과 같다"],
+      "ledger": "kpi K2, redis_tls=true, paired_run={day}-k2-v1-hot-notls-r1{suffix}, invariants.csv, notes에 3회 가운데 2번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k2/{day}-k2-tls-r2{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "k2-tls-r1과 같다."
+    },
+    {
+      "n": 8,
+      "key": "k2-tls-r3",
+      "group": "K2",
+      "title": "K2 인기 좌석 홀드 TLS 켬 3회",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k2-tls-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K2 TLS 켬 3",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--record", "--run-id", "{day}-k2-v1-hot-tls-r3{suffix}", "--profile", "local-1k", "--paired-run", "{day}-k2-v1-hot-notls-r1{suffix}", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k2/{day}-k2-tls-r3{suffix}"]
+        }
+      ],
+      "criteria": ["k2-tls-r1과 같다"],
+      "ledger": "kpi K2, redis_tls=true, paired_run={day}-k2-v1-hot-notls-r1{suffix}, invariants.csv, notes에 3회 가운데 3번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k2/{day}-k2-tls-r3{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "3회의 중앙값과 범위를 적는다. pass가 3회 미만이면 K2 판정은 fail이다."
+    },
+    {
+      "n": 9,
+      "key": "k2-notls-r1",
+      "group": "K2",
+      "title": "K2 인기 좌석 홀드 TLS 끔 1회(판정은 켬)",
+      "estimate_min": 8,
+      "gate": null,
+      "stage": "v1-tls-off",
+      "conditions": "v1 무대를 --redis-tls off로 다시 올린 뒤 같은 조건으로 1회. TLS 짝으로만 쓰고 판정에는 쓰지 않는다. 측정 뒤 다시 TLS 켬으로 올려 다음 run을 준비한다.",
+      "commands": [
+        { "label": "무대 TLS 끔", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "off", "--replicas", "3"] },
+        {
+          "label": "K2 TLS 끔 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "seat-hold", "--users", "1000", "--rate", "2000", "--mode", "hot", "--hot-count", "1", "--keep", "--warm", "30", "--main", "60", "--record", "--run-id", "{day}-k2-v1-hot-notls-r1{suffix}", "--profile", "local-1k", "--paired-run", "{day}-k2-v1-hot-tls-r1{suffix}", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k2/{day}-k2-notls-r1{suffix}"]
+        },
+        { "label": "무대 TLS 켬으로 되돌리기", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3"] }
+      ],
+      "criteria": [
+        "TLS 짝 기록이 있다(collect.py 경고 없음)",
+        "판정에는 쓰지 않는다. TLS 켬 3회가 판정이다."
+      ],
+      "ledger": "kpi K2, redis_tls=false, paired_run={day}-k2-v1-hot-tls-r1{suffix}, invariants.csv, notes에 TLS 끔 짝임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k2/{day}-k2-notls-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "끔 실행이 무효여도 켬 3회 판정을 막지 않는다. 다만 짝 기록이 없으면 collect.py 경고가 남는다."
+    },
+    {
+      "n": 10,
+      "key": "k2-lua-compare",
+      "group": "K2",
+      "title": "S-T35 ⑥ 홀드 경로 Lua 전후 비교(구매 세션 칸을 더하기 전 판 af7ceef7 ↔ 지금)",
+      "estimate_min": 20,
+      "gate": null,
+      "stage": "poc",
+      "conditions": "Docker 측정망에서 Valkey 8.1 하나를 띄워 Lua 실행 시간만 견준다. 옛 판은 PRF-136 바로 앞 커밋 af7ceef7, 새 판은 측정 커밋(HEAD). A/A(같은 판 둘)를 먼저 재고, 일부러 느리게 한 판을 잡는지 확인한 뒤 판정한다.",
+      "commands": [
+        {
+          "label": "Lua 전후 비교",
+          "argv": ["node", "loadtest/micro/lua-compare.mjs", "--suite", "seat", "--base", "af7ceef7", "--head", "HEAD", "--blocks", "40", "--calls", "100", "--seed", "1", "--slow-tiers", "3,5,10,30,100", "--only", "expire-4,expire-100,pin-4,release-failed-4,order-hold-4,order-hold-expiry-4,sale-count,end-session-1hold,end-session-5holds,sweep-live,sweep-idle,begin-rebuild", "--out", ".cache/peaket-bat025/k2/{day}-lua-compare{suffix}.json", "--md", ".cache/peaket-bat025/k2/{day}-lua-compare{suffix}.md"]
+        }
+      ],
+      "criteria": [
+        "A/A 두 판의 p99 차이가 A/A 잡음 폭 안",
+        "일부러 느리게 한 판(3·5·10·30·100%)을 도구가 잡는다",
+        "PRF-136 앞뒤에서 바뀐 홀드 경로 Lua의 실행 p99 전후 차이를 적는다(S-T35 ⑥). 차이가 잡음 폭을 넘으면 원인을 적고 판정은 보류한다"
+      ],
+      "ledger": "성능 장부 실행이 아니다(local-poc 마이크로 측정). 결과 JSON·표를 .cache에 두고 K2 실행 notes에 경로와 요약을 적는다.",
+      "artifact": ".cache/peaket-bat025/k2/{day}-lua-compare{suffix}.json, .md",
+      "result_note": "이 run은 S-T35 ⑥의 근거다. 실패하면 K2의 S-T1 판정은 그대로 두고 S-T35 ⑥만 fail로 남긴다."
+    },
+    {
+      "n": 11,
+      "key": "k1-1k-r1",
+      "group": "K1",
+      "title": "K1 대기열 1천 명 1회",
+      "estimate_min": 6,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 새 클러스터. 로비 없이 오픈 뒤 진입. 사용자 1,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초, 발생기 3대(나누기 규칙 2대 + 1대).",
+      "commands": [
+        {
+          "label": "K1 1천 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "1000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "3", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-1k-r1{suffix}", "--profile", "local-1k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-1k-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%(Q-T2 1천 몫)",
+        "진입 시행 수 = 1,000, 진입 실패 0, Q1·Q2 PASS",
+        "generator.json judge.valid=true, dropped=0",
+        "origin_rps와 설계 식의 비를 적는다(10만·외삽은 HOT-460)"
+      ],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 로비 없음, 입장 속도 28/s, 발생기 3대, 진입 시행/실패, Q1의 1초 칸, SKIPPED, 무대 사실을 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-1k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 다시 잰다."
+    },
+    {
+      "n": 12,
+      "key": "k1-1k-r2",
+      "group": "K1",
+      "title": "K1 대기열 1천 명 2회",
+      "estimate_min": 6,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k1-1k-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K1 1천 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "1000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "3", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-1k-r2{suffix}", "--profile", "local-1k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-1k-r2{suffix}"]
+        }
+      ],
+      "criteria": ["k1-1k-r1과 같다"],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 3회 가운데 2번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-1k-r2{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "k1-1k-r1과 같다."
+    },
+    {
+      "n": 13,
+      "key": "k1-1k-r3",
+      "group": "K1",
+      "title": "K1 대기열 1천 명 3회",
+      "estimate_min": 6,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k1-1k-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K1 1천 3",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "1000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "3", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-1k-r3{suffix}", "--profile", "local-1k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-1k-r3{suffix}"]
+        }
+      ],
+      "criteria": ["k1-1k-r1과 같다"],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 3회 가운데 3번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-1k-r3{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "3회의 중앙값과 범위를 적는다. pass가 3회 미만이면 K1 1천 판정은 fail이다."
+    },
+    {
+      "n": 14,
+      "key": "k1-10k-r1",
+      "group": "K1",
+      "title": "K1 대기열 1만 명 1회",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k1-1k와 같되 사용자 10,000명, 발생기 6대(나누기 규칙 5대 + 1대). 메모리가 빠듯하므로 다른 갈래 시험이 없어야 한다.",
+      "commands": [
+        {
+          "label": "K1 1만 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "10000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "6", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-10k-r1{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-10k-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "k1-1k와 같은 목표(대기열 p99 200ms, 오류율 0.1% 미만)",
+        "목표를 못 지키면 그 결과를 fail로 남기고 2천·4천·6천으로 한계점을 좁히는 추가 실행은 감독과 상의한다",
+        "발생기 놓침·메모리 무효가 하나라도 있으면 그 실행은 invalid다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 1만 명·발생기 6대·메모리 압박·한계점 좁히기 여부를 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-10k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효를 통과로 세지 않는다. 1만 명이 목표를 못 지키는 것 자체는 정직한 결과다."
+    },
+    {
+      "n": 15,
+      "key": "k1-10k-r2",
+      "group": "K1",
+      "title": "K1 대기열 1만 명 2회",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k1-10k-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K1 1만 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "10000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "6", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-10k-r2{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-10k-r2{suffix}"]
+        }
+      ],
+      "criteria": ["k1-10k-r1과 같다"],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 3회 가운데 2번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-10k-r2{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "k1-10k-r1과 같다."
+    },
+    {
+      "n": 16,
+      "key": "k1-10k-r3",
+      "group": "K1",
+      "title": "K1 대기열 1만 명 3회",
+      "estimate_min": 7,
+      "gate": null,
+      "stage": "v1-tls-on",
+      "conditions": "k1-10k-r1과 같다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "K1 1만 3",
+          "argv": ["node", "loadtest/run.mjs", "v1", "queue", "--users", "10000", "--entry-rate", "1000", "--admit-per-second", "28", "--generators", "6", "--warm", "30", "--main", "120", "--record", "--run-id", "{day}-k1-v1-local-10k-r3{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k1/{day}-k1-10k-r3{suffix}"]
+        }
+      ],
+      "criteria": ["k1-10k-r1과 같다"],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 3회 가운데 3번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k1/{day}-k1-10k-r3{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "3회의 중앙값과 범위를 적는다. pass가 3회 미만이면 K1 1만 판정은 fail이다."
+    },
+    {
+      "n": 17,
+      "key": "k7-r1",
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 1회(새 클러스터)",
+      "estimate_min": 28,
+      "gate": null,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "회마다 새 클러스터(v1 TLS 켬, 복제 3). 10,000 결제(100/s × 100초), 가상 사용자 11,002명, 응답 버림 5%, 승인 늦춤 0.5%, 본구간 50초에 합본 파드 하나를 강제로 끝냄. 반복 안에서 입장한 뒤 결제한다.",
+      "commands": [
+        { "label": "내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
+        { "label": "올리기", "argv": ["node", "tools/local/cluster.mjs", "up"] },
+        { "label": "관측", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
+        { "label": "v1 무대", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3"] },
+        { "label": "Prometheus(따로 띄움)", "argv": ["node", "tools/local/cluster.mjs", "prometheus"], "background": true },
+        { "label": "불변식 검사기", "argv": ["pnpm", "--filter", "@peaket/invariant-checker", "build"] },
+        { "label": "남은 실행 정리", "argv": ["node", "loadtest/run.mjs", "cleanup"] },
+        {
+          "label": "K7 ② 1",
+          "argv": ["node", "loadtest/run.mjs", "v1", "payment", "--users", "11002", "--rate", "100", "--seats-per-order", "2", "--warm", "10", "--main", "100", "--fault-drop-pct", "5", "--fault-delay-pct", "0.5", "--kill-app-at", "50", "--record", "--run-id", "{day}-k7-v1-fault-r1{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k7/{day}-k7-r1{suffix}"]
+        }
+      ],
+      "criteria": [
+        "P1·P2·P4·P6·S1·S4 PASS. P3은 시작 시각(결제사 승인과 결과 모름 해소 가운데 늦은 쪽) 뒤 60초 기준으로 본다(2026-11-11, ADR-0266)",
+        "SKIPPED는 S3·P5·M1~M5만. 다르면 invalid",
+        "이중 결제 0, 좌석 누수 0, 멈춘 주문 0",
+        "Pause 기록: pause-transitions.json의 error=null, 입력 유무·전이·503 수, killed.json의 끝낸 파드·임대 보유자",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, notes에 5%/0.5%, 강제 종료 50초, P3 시작 시각 = 승인·결과 모름 해소 가운데 늦은 쪽(ADR-0266), 정지 기록, SKIPPED, 반복 안 입장을 적는다.",
+      "artifact": ".cache/peaket-bat025/k7/{day}-k7-r1{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, generator.json",
+      "result_note": "P3이 fail이면 그 run은 fail이고 K7 ② 판정은 보류다. 무효면 새 클러스터에서 다시 잰다."
+    },
+    {
+      "n": 18,
+      "key": "k7-r2",
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 2회(새 클러스터)",
+      "estimate_min": 28,
+      "gate": null,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "k7-r1과 같다. 회마다 새 클러스터.",
+      "commands": [
+        { "label": "내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
+        { "label": "올리기", "argv": ["node", "tools/local/cluster.mjs", "up"] },
+        { "label": "관측", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
+        { "label": "v1 무대", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3"] },
+        { "label": "Prometheus(따로 띄움)", "argv": ["node", "tools/local/cluster.mjs", "prometheus"], "background": true },
+        { "label": "불변식 검사기", "argv": ["pnpm", "--filter", "@peaket/invariant-checker", "build"] },
+        { "label": "남은 실행 정리", "argv": ["node", "loadtest/run.mjs", "cleanup"] },
+        {
+          "label": "K7 ② 2",
+          "argv": ["node", "loadtest/run.mjs", "v1", "payment", "--users", "11002", "--rate", "100", "--seats-per-order", "2", "--warm", "10", "--main", "100", "--fault-drop-pct", "5", "--fault-delay-pct", "0.5", "--kill-app-at", "50", "--record", "--run-id", "{day}-k7-v1-fault-r2{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k7/{day}-k7-r2{suffix}"]
+        }
+      ],
+      "criteria": ["k7-r1과 같다"],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, notes에 3회 가운데 2번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k7/{day}-k7-r2{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, generator.json",
+      "result_note": "k7-r1과 같다."
+    },
+    {
+      "n": 19,
+      "key": "k7-r3",
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 3회(새 클러스터)",
+      "estimate_min": 28,
+      "gate": null,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "k7-r1과 같다. 회마다 새 클러스터.",
+      "commands": [
+        { "label": "내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
+        { "label": "올리기", "argv": ["node", "tools/local/cluster.mjs", "up"] },
+        { "label": "관측", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
+        { "label": "v1 무대", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3"] },
+        { "label": "Prometheus(따로 띄움)", "argv": ["node", "tools/local/cluster.mjs", "prometheus"], "background": true },
+        { "label": "불변식 검사기", "argv": ["pnpm", "--filter", "@peaket/invariant-checker", "build"] },
+        { "label": "남은 실행 정리", "argv": ["node", "loadtest/run.mjs", "cleanup"] },
+        {
+          "label": "K7 ② 3",
+          "argv": ["node", "loadtest/run.mjs", "v1", "payment", "--users", "11002", "--rate", "100", "--seats-per-order", "2", "--warm", "10", "--main", "100", "--fault-drop-pct", "5", "--fault-delay-pct", "0.5", "--kill-app-at", "50", "--record", "--run-id", "{day}-k7-v1-fault-r3{suffix}", "--profile", "local-10k", "--invariants", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-bat025/k7/{day}-k7-r3{suffix}"]
+        }
+      ],
+      "criteria": ["k7-r1과 같다"],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, notes에 3회 가운데 3번째임을 적는다.",
+      "artifact": ".cache/peaket-bat025/k7/{day}-k7-r3{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, generator.json",
+      "result_note": "3회의 중앙값과 범위를 적는다. pass가 3회 미만이면 K7 ② 판정은 fail이다."
+    },
+    {
+      "n": 20,
+      "key": "rules-spec-pr",
+      "group": "규칙 검사",
+      "title": "규칙 모델 검사 pr(측정한 커밋)",
+      "estimate_min": 30,
+      "gate": null,
+      "stage": "any",
+      "conditions": "측정이 모두 끝난 뒤. 측정한 커밋에서 돈다. 먼저 specs/*.qnt의 SHA-256이 specs/results/<명세>.json의 specSha256과 같은지 본다. 같으면 전수 검사 결과를 인용하고, 다르면 그 명세만 full --write를 한다.",
+      "commands": [
+        { "label": "규칙 검사 pr", "argv": ["node", "tools/spec-check/run-local.mjs", "pr"] }
+      ],
+      "criteria": [
+        "종료 코드 0, 명세별 결과 파일의 ok=true, 기대와 다른 검사 0",
+        "결과 파일과 명세 해시를 K 실행 notes에 한 줄로 적는다"
+      ],
+      "ledger": "성능 장부 필드가 아니다. 각 K 실행의 notes에 '규칙 검사: 명세별 결과 파일·명세 해시·측정 커밋의 pr 결과'를 한 줄로 적는다.",
+      "artifact": "specs/results/<명세>.json, 시험 보고서",
+      "result_note": "실패면 통과가 아니다. 측정 결과는 남기되 규칙 검사 줄은 fail로 적는다."
+    },
+    {
+      "n": 21,
+      "key": "rules-model-admission",
+      "group": "규칙 검사",
+      "title": "규칙 모델 기반 시험 admission-ctrl(queue-model)",
+      "estimate_min": 10,
+      "gate": null,
+      "stage": "any",
+      "conditions": "측정이 모두 끝난 뒤. 실제 Valkey·PostgreSQL 통합 시험이다.",
+      "commands": [
+        { "label": "queue-model", "argv": ["pnpm", "--filter", "@peaket/admission-ctrl", "test:integration", "--", "queue-model"] }
+      ],
+      "criteria": ["종료 코드 0, 실패·건너뜀 0"],
+      "ledger": "각 K 실행 notes의 규칙 검사 줄에 보고서 경로를 적는다.",
+      "artifact": "시험 보고서(PEAKET_TEST_REPORT가 있으면 그 파일)",
+      "result_note": "실패면 통과가 아니다."
+    },
+    {
+      "n": 22,
+      "key": "rules-model-purchase",
+      "group": "규칙 검사",
+      "title": "규칙 모델 기반 시험 purchase-svc(seat-model·payment-model)",
+      "estimate_min": 20,
+      "gate": null,
+      "stage": "any",
+      "conditions": "측정이 모두 끝난 뒤. 실제 Valkey·PostgreSQL·결제 시뮬레이터 통합 시험이다.",
+      "commands": [
+        { "label": "seat-model·payment-model", "argv": ["pnpm", "--filter", "@peaket/purchase-svc", "test:integration", "--", "seat-model", "payment-model"] }
+      ],
+      "criteria": ["종료 코드 0, 실패·건너뜀 0"],
+      "ledger": "각 K 실행 notes의 규칙 검사 줄에 보고서 경로를 적는다.",
+      "artifact": "시험 보고서",
+      "result_note": "실패면 통과가 아니다."
+    }
+  ],
+  "post": [
+    "Q-T5는 node loadtest/poc/record.mjs --only <ID…>로 성능 장부에 옮긴다(K 실행은 --record가 이미 옮긴다).",
+    "python tools/perf-ledger/index.py로 장부 표를 다시 만들고, 그날 python tools/perf-ledger/index.py --stamp --no-ots로 하루 해시 묶음을 만든다.",
+    "docs/verification.md §3.10에 'v1 합본 결과' 문단을 v0 결과와 같은 꼴로 더한다.",
+    "docs/review/ledger-notes.md의 다섯 줄(Q-T2·Q-T5·S-T1·S-T35 ⑥·P-T1)에 측정 ID와 정할 곳을 적는다.",
+    "BUILD_ORDER PRF-220 체크, PROGRESS 진행 로그 한 줄, 장부 다시 쓰기, 기록 커밋은 측정이 끝난 뒤 별도 턴에서 한다.",
+    "ADR-0190 '확인'에 A/A 결과(조용한 쌍·다른 갈래 함께 쌍의 p99 비율과 판정)를 적는다."
+  ],
+  "not_included": [
+    "K7 ①(300/s)은 이 창의 단계 줄에 없다(HOT-470).",
+    "S-T27 다시 재기(loadtest/poc/run.mjs st27, 약 1시간 30분)는 지시서의 실행 목록에 없어 이 계획에 넣지 않았다. 감독이 원하면 별도 run으로 더한다.",
+    "S-T35 ⑥의 '일부러 느리게 한 판'은 k2-lua-compare run이 확인한다.",
+    "K7 ②는 OPEN[34] 소유자 결정 (가)(2026-11-11, ADR-0266)로 이 계획에 포함했다. 검사기 P3이 새 정의로 바뀐 뒤 잰다."
+  ]
+}

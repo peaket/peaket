@@ -1,7 +1,7 @@
 # ADR-0266: P3 시작 시각을 결제사 승인과 결과 모름 해소 가운데 늦은 쪽으로 바꾼다
 
 - **상태**: 채택(2026-11-11, 소유자 결정 "가", OPEN[34]). BUILD_ORDER BAT-025(PRF-220) 측정 무대 리허설에서 나온 물음이다.
-- **관련**: [docs/verification.md](../verification.md) §2.5·§3.9~§3.10, [docs/features/payment.md](../features/payment.md) §2 'UNKNOWN 해소의 첫 구현'·§3·§4, [ADR-0106](0106-payment-issue-retry-idempotency-and-ticket-issue-deadline.md)(결제 뒤 발권 재시도·기한), [ADR-0073](0073-unknown-payment-state-and-recovery-actions.md)(결제 결과 모름), [ADR-0262](0262-proof-core-measurement-stage-before-prf220.md)(측정 무대)
+- **관련**: [docs/verification.md](../verification.md) §2.5·§3.9~§3.10, [docs/features/payment.md](../features/payment.md) §2 'UNKNOWN 해소의 첫 구현'·§3·§4, [ADR-0106](0106-forward-recovery-after-payment-approval-ticket-issue-retry.md)(결제 뒤 발권 재시도·기한), [ADR-0262](0262-proof-core-measurement-stage-before-prf220.md)(측정 무대)
 - **관련 ID**: P-T1, P-T39, P-T47, NFR-006, K7, S-T2, P3
 
 ## 맥락

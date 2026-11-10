@@ -71,6 +71,7 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `scenarios/v1-*.js`·`v1-common.js`, `lib/v1.mjs`·`lib/purchase-auth.mjs`, `queries/v1.txt` | v1 경로의 시나리오와 계산(신원·좌석 UUID·시각 기반 일련번호·VU별 사용자 나누기, k6·Node 공용 구매 요청 인증), 합본 서버 지표 질의(BUILD_ORDER PRF-215) |
 | `e2e/v1-rehearsal.e2e.mjs` | v1 합본 리허설(K1·K2·K7 ② 작은 규모 한 번씩, 장부에 남기지 않음, `node --test loadtest/e2e/v1-rehearsal.e2e.mjs`) |
 | `e2e/v0-rehearsal.e2e.mjs` | 실제 kind에서 시나리오마다 작은 규모로 끝까지 돌려 보는 리허설(docs/perf-ledger.md §3 1번, `node --test loadtest/e2e/v0-rehearsal.e2e.mjs`) |
+| `plan/bat025-plan.json`·`plan/bat025-plan.mjs` | BAT-025(PRF-220) 측정 창 1의 실행 목록(A/A·Q-T5·K2·K1·K7 ②·규칙 검사)과 상태 파일로 이어 돌기(`.cache/peaket-bat025/state.json`, 쓰는 법은 [plan/README.md](plan/README.md)) |
 
 ## 알아 둘 것
 
