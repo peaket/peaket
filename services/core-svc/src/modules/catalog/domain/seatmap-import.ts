@@ -28,6 +28,8 @@ export const SEATMAP_TAG_MAX = 30;
 export const SEATMAP_INDEX_MAX = 999_999;
 /** 좌석 번호 상한(8자리) */
 export const SEAT_NUMBER_MAX = 99_999_999;
+/** 구역 ID 꼴: purchase-svc 판 해석의 키 조각(seat-hold §2 '판 해석', 좌석 Redis 키에 든다). 가져오기는 이 꼴이 아니면 s{구역 순번}으로 바꾸고 저장은 422다(ADR-0257 결정 8, ADR-0260 결정 2) */
+export const SECTION_ID_KEY = /^[A-Za-z0-9_-]{1,64}$/;
 
 export type SeatmapFormat = 'SVG' | 'JSON' | 'CSV';
 
@@ -178,6 +180,8 @@ export function recheckLayout(layout: CheckedLayout): SeatmapIssue[] {
     text(`${at}.level`, s.level, SECTION_NAME_MAX);
     text(`${at}.tierId`, s.tierId, SEATMAP_TAG_MAX);
     text(`${at}.gateZone`, s.gateZone, SEATMAP_TAG_MAX);
+    // 도형 이름은 에디터 값 칸(editor_meta, jsonb)에 들어간다. NUL·제어 문자를 막는다(추천 적용 2026-11-10 리뷰 S2)
+    text(`${at}.shape.name`, s.shape.name, SECTION_NAME_MAX);
     if (sectionIds.has(s.sectionId)) add(`${at}.sectionId`, 'SECTION_ID_DUPLICATE');
     sectionIds.add(s.sectionId);
     if (canvasOk && pointsOut(s.shape.points)) add(`${at}.shape`, 'OUT_OF_CANVAS');

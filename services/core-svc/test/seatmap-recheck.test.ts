@@ -37,6 +37,12 @@ describe('작업 응답 다시 보기(강화)', () => {
     ]);
   });
 
+  test('S-T38 ① 구역 도형 이름(shape.name)도 글자 칸 규칙이다(NUL·제어 문자·30자) [ASVS v5.0.0-2.2.1]', () => {
+    const named = (name: string) => recheckLayout(base({ sections: [sec({ shape: { kind: 'POLYGON', points: [[0, 0], [10, 0], [10, 10]], name } })] }));
+    expect(named('무대 앞')).toEqual([]);
+    for (const bad of ['A\u0000', 'B\u0007', 'C\u202e', 'x'.repeat(31)]) expect(named(bad).map((e) => [e.field, e.code]), JSON.stringify(bad)).toEqual([['sections[0].shape.name', 'TEXT_INVALID']]);
+  });
+
   test('라벨 x·y는 하나만 있어도 캔버스 안이어야 하고, seatIndexRange·index는 0~999,999(from ≤ to), 좌석 번호는 1 이상이다 [ASVS v5.0.0-1.4.2]', () => {
     const r = recheckLayout(
       base({

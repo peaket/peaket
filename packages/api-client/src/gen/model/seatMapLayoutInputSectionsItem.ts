@@ -16,6 +16,7 @@ import type { SeatMapLayoutInputSectionsItemSeatsItem } from './seatMapLayoutInp
 import type { SeatMapShapeInput } from './seatMapShapeInput';
 
 export type SeatMapLayoutInputSectionsItem = {
+  /** 구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2) */
   sectionId: string;
   name: string;
   level?: string;

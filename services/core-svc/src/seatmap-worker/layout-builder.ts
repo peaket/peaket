@@ -7,6 +7,7 @@ import {
   SEATMAP_MAX_POINTS,
   SEATMAP_MAX_SEATS,
   SEATMAP_MAX_SECTIONS,
+  SECTION_ID_KEY,
   SECTION_NAME_MAX,
   type LayoutShape,
   type Point,
@@ -233,7 +234,9 @@ export class LayoutBuilder {
       stage: this.#stage,
       sections: this.#sections.map((s, i) => {
         const { sectionId, ...extra } = s.extra;
-        return { sectionId: sectionId ?? String(i + 1), name: s.name, shape: s.shape, ...extra, seats: s.seats };
+        // 구역 ID는 purchase-svc 판 해석의 키 조각 꼴이어야 한다. 아니면 s{구역 순번}으로 바꾼다(추천 적용 2026-11-10, ADR-0257 결정 8, ADR-0260 결정 2)
+        const id = sectionId === undefined ? String(i + 1) : SECTION_ID_KEY.test(sectionId) ? sectionId : `s${i + 1}`;
+        return { sectionId: id, name: s.name, shape: s.shape, ...extra, seats: s.seats };
       }),
     };
   }

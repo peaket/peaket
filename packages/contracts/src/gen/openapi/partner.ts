@@ -546,7 +546,7 @@ export const ListPartnerProductionsResponse = zod.object({
 })
 
 /**
- * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05)
+ * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05). 배치본이 있으면 커밋 전에 새 회차의 팬 좌석맵 파일을 쓰고, 쓰지 못하면 회차를 더하지 않고 503이다(추천 적용 2026-11-10, ADR-0260 결정 8)
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
 export const CreatePartnerProductionEventParams = zod.object({
@@ -1191,7 +1191,7 @@ export const ListPartnerEventFlagsResponse = zod.object({
 })
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다. 승인 이력이 있는 공연은 재승인 대기 판이 있으면 그 판을 준다. 배치본이 있으면 fromTemplate는 보지 않는다. ETag는 지금 판이고 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 9·10)
  * @summary 좌석맵 불러오기(SCR-022 에디터, 배치 층·좌석 층)
  */
 export const GetPartnerProductionSeatmapParams = zod.object({
@@ -1201,6 +1201,8 @@ export const GetPartnerProductionSeatmapParams = zod.object({
 export const GetPartnerProductionSeatmapQueryParams = zod.object({
   "fromTemplate": zod.string().optional().describe('복제할 공연장 틀(venue kind TEMPLATE) ID')
 })
+
+export const getPartnerProductionSeatmapResponsePriceTiersMax = 16;
 
 export const getPartnerProductionSeatmapResponseStageItemPointsItemMin = 2;
 export const getPartnerProductionSeatmapResponseStageItemPointsItemMax = 2;
@@ -1225,8 +1227,14 @@ export const getPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberM
 
 
 export const GetPartnerProductionSeatmapResponse = zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().describe('등급 ID(좌석·구역의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().describe('등급 이름(예: R석)'),
+  "price": zod.int().describe('정가(원)')
+}).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(getPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
+  "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1285,7 +1293,7 @@ export const GetPartnerProductionSeatmapResponse = zod.object({
 }).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-240, ADR-0260): 색인은 서버가 구역 차례대로 매기고 보낸 seatIndexRange·index가 그와 다르면 422(INDEX_MISMATCH)다. 모든 좌석의 등급(좌석 tierId, 없으면 구역 tierId)이 가격 등급 priceTiers에 있어야 한다(보내지 않으면 지금 가격 등급). 판 번호는 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호). 팬 좌석맵 파일은 그 공연의 모든 회차마다 새 판 경로에 쓰고, 모든 구역에 좌석이 있을 때만 게시한다(응답 fanFilePublished). 잠금은 승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지났을 때다. 잠긴 뒤 받는 것은 좌석의 unavailable·wheelchair·gateZone과 구역의 gateZone뿐이고, 가격 등급을 바꾸면 409 sale-setting-locked다. 승인 이력이 있는 공연은 파트너 관리자만 저장하고, 재승인 대기 판에만 두어 공개본은 판매 승인 때까지 그대로다(APPROVED면 SUBMITTED). 그 판의 팬 좌석맵 파일은 공개 위치가 아니라 준비 위치에 쓰고 판매 승인(LCH-080)이 공개 위치로 옮긴다. 좌석 ID는 서버가 정한다(이 배치본에 이미 있는 소문자 UUID는 그대로, 아니면 새 UUIDv7, 잠긴 뒤 모르는 ID는 좌석 추가라 409). 본문은 12MiB [가정]까지이고 좌석맵 저장 칸막이(파드당 2 [가정])가 차면 429다. 성공·오류 모두 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 2·6·11·15, 리뷰)
  * @summary 좌석맵 저장(배치 층과 좌석 층을 함께, If-Match의 layoutVersion으로 동시 수정 방지)
  */
 export const PutPartnerProductionSeatmapParams = zod.object({
@@ -1295,6 +1303,14 @@ export const PutPartnerProductionSeatmapParams = zod.object({
 export const PutPartnerProductionSeatmapHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
+
+export const putPartnerProductionSeatmapBodyPriceTiersItemTierIdMax = 30;
+
+export const putPartnerProductionSeatmapBodyPriceTiersItemNameMax = 30;
+
+export const putPartnerProductionSeatmapBodyPriceTiersItemPriceMax = 10000000;
+
+export const putPartnerProductionSeatmapBodyPriceTiersMax = 16;
 
 export const putPartnerProductionSeatmapBodyStageItemPointsItemMin = 2;
 export const putPartnerProductionSeatmapBodyStageItemPointsItemMax = 2;
@@ -1319,8 +1335,13 @@ export const putPartnerProductionSeatmapBodySectionsItemFillRuleFirstNumberMin =
 
 
 export const PutPartnerProductionSeatmapBody = zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().min(1).max(putPartnerProductionSeatmapBodyPriceTiersItemTierIdMax).describe('등급 ID. 제어 문자 없음'),
+  "name": zod.string().min(1).max(putPartnerProductionSeatmapBodyPriceTiersItemNameMax).describe('등급 이름'),
+  "price": zod.int().min(1).max(putPartnerProductionSeatmapBodyPriceTiersItemPriceMax).describe('정가(원) 1~10,000,000 [가정]')
+}).strict().describe('SeatMapPriceTier의 요청용(정의 밖 칸을 400으로 거절한다)')).max(putPartnerProductionSeatmapBodyPriceTiersMax).optional().describe('가격 등급(보이는 순서). 보내지 않으면 지금 가격 등급을 그대로 쓴다. 빈 목록은 등급 없이 저장한다(좌석이 있으면 TIER_UNKNOWN, 불러오기가 준 빈 목록을 그대로 다시 보낼 수 있다, 추천 적용 2026-11-10 리뷰). tierId는 겹치지 않는다(ADR-0260 결정 4)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1331,7 +1352,7 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "name": zod.string().optional()
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
-  "sectionId": zod.string(),
+  "sectionId": zod.string().describe('구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
   "name": zod.string(),
   "level": zod.string().optional(),
   "shape": zod.object({
@@ -1364,7 +1385,7 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).strict().optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
-  "seatId": zod.string(),
+  "seatId": zod.string().describe('좌석 ID. 이 배치본에 이미 있는 소문자 UUID면 그대로 두고, 아니면(가져오기의 자리표시 등) 서버가 새 UUIDv7을 매긴다. 응답은 서버 ID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
   "index": zod.int().optional().describe('비트맵 인덱스'),
   "row": zod.string(),
   "number": zod.int(),
@@ -1378,7 +1399,95 @@ export const PutPartnerProductionSeatmapBody = zod.object({
 }).strict())
 }).strict().describe('SeatMapLayout의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapLayout)와 같고 응답은 SeatMapLayout(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')
 
-export const PutPartnerProductionSeatmapResponse = zod.unknown()
+export const putPartnerProductionSeatmapResponsePriceTiersMax = 16;
+
+export const putPartnerProductionSeatmapResponseStageItemPointsItemMin = 2;
+export const putPartnerProductionSeatmapResponseStageItemPointsItemMax = 2;
+
+export const putPartnerProductionSeatmapResponseStageItemPointsMin = 3;
+
+export const putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin = 2;
+export const putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax = 2;
+
+export const putPartnerProductionSeatmapResponseSectionsItemShapePointsMin = 3;
+
+
+
+
+
+
+export const putPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin = 0;
+
+
+export const putPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin = 0;
+
+
+
+export const PutPartnerProductionSeatmapResponse = zod.object({
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
+  "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().describe('등급 ID(좌석·구역의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().describe('등급 이름(예: R석)'),
+  "price": zod.int().describe('정가(원)')
+}).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(putPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
+  "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "canvas": zod.object({
+  "width": zod.int(),
+  "height": zod.int()
+}),
+  "stage": zod.array(zod.object({
+  "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
+  "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapResponseStageItemPointsItemMin).max(putPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(putPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "name": zod.string().optional()
+}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
+  "sections": zod.array(zod.object({
+  "sectionId": zod.string(),
+  "name": zod.string(),
+  "level": zod.string().optional(),
+  "shape": zod.object({
+  "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
+  "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(putPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "name": zod.string().optional()
+}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
+  "label": zod.object({
+  "x": zod.int().optional(),
+  "y": zod.int().optional()
+}).optional().describe('구역 라벨 위치'),
+  "tierId": zod.string().optional().describe('구역 기본 등급. 회차 판매 등급은 좌석의 tierId'),
+  "gateZone": zod.string().optional(),
+  "seatIndexRange": zod.object({
+  "from": zod.int().optional(),
+  "to": zod.int().optional()
+}).optional().describe('이 구역 좌석의 비트맵 인덱스 범위. 브라우저가 스냅샷에서 구역별 남은 좌석을 센다(추천 적용 2026-10-14, ADR-0063)'),
+  "fillRule": zod.object({
+  "method": zod.enum(['COUNT', 'GRID']).describe('COUNT 좌석 수로 채우기, GRID 행 수 × 행마다 좌석 수'),
+  "targetCount": zod.int().min(1).optional().describe('COUNT일 때 목표 좌석 수(예 600)'),
+  "rows": zod.int().min(1).optional().describe('GRID일 때 행 수(예 20)'),
+  "seatsPerRow": zod.int().min(1).optional().describe('GRID일 때 행마다 좌석 수(예 30)'),
+  "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
+  "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
+  "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
+  "aisles": zod.int().min(putPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
+  "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
+  "firstNumber": zod.int().min(putPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
+}).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
+  "seats": zod.array(zod.object({
+  "seatId": zod.string(),
+  "index": zod.int().optional().describe('비트맵 인덱스'),
+  "row": zod.string(),
+  "number": zod.int(),
+  "x": zod.int(),
+  "y": zod.int(),
+  "tierId": zod.string().optional(),
+  "wheelchair": zod.boolean().optional(),
+  "unavailable": zod.boolean().optional().describe('판매 제외'),
+  "gateZone": zod.string().optional()
+})).optional()
+}))
+}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 /**
  * FR-023, 소유자 요청 2026-10-19(세부는 추천 적용 2026-10-19), ADR-0066. variant는 템플릿 variants에서 고른 값이고, 서버가 targetCapacity(목표 좌석 수)를 구역 비율대로 나눠 구역별 채우기 규칙(fillRule)의 목표 수로 넣는다. 좌석 배치(자동 채우기)는 에디터가 계산해 PUT …/seatmap으로 저장하고 서버가 그때 도형 안·번호 중복을 다시 검사한다(겹침과 도형 밖 좌석은 경고만). 대상은 이 공연의 배치본이고 편집은 그 배치본에만 미친다. templateId는 TEMPLATE 행만 받으므로 다른 파트너의 배치본은 복제할 수 없다. 이미 좌석이 있는 배치본은 replace가 true가 아니면 409이고 화면은 지우고 다시 만들지 확인을 받는다. 배치본을 쓰는 회차가 오픈한 뒤에는 replace와 상관없이 409 seatmap-geometry-locked다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 템플릿은 흔한 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다. 파트너 소속 공연만
@@ -1397,6 +1506,8 @@ export const CreatePartnerProductionSeatmapBody = zod.object({
   "targetCapacity": zod.int().min(1).describe('목표 좌석 수'),
   "replace": zod.boolean().default(createPartnerProductionSeatmapBodyReplaceDefault).describe('이미 좌석이 있는 배치본을 지우고 다시 만들 때 true')
 }).strict()
+
+export const createPartnerProductionSeatmapResponsePriceTiersMax = 16;
 
 export const createPartnerProductionSeatmapResponseStageItemPointsItemMin = 2;
 export const createPartnerProductionSeatmapResponseStageItemPointsItemMax = 2;
@@ -1421,8 +1532,14 @@ export const createPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumb
 
 
 export const CreatePartnerProductionSeatmapResponse = zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().describe('등급 ID(좌석·구역의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().describe('등급 이름(예: R석)'),
+  "price": zod.int().describe('정가(원)')
+}).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(createPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
+  "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1497,6 +1614,8 @@ export const CreatePartnerProductionSeatmapImportBody = zod.object({
   "format": zod.enum(['SVG', 'JSON', 'CSV'])
 }).strict()
 
+export const createPartnerProductionSeatmapImportResponseLayoutPriceTiersMax = 16;
+
 export const createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMin = 2;
 export const createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMax = 2;
 
@@ -1522,8 +1641,14 @@ export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemFillR
 export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "ok": zod.boolean().optional(),
   "layout": zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().describe('등급 ID(좌석·구역의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().describe('등급 이름(예: R석)'),
+  "price": zod.int().describe('정가(원)')
+}).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(createPartnerProductionSeatmapImportResponseLayoutPriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
+  "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1628,6 +1753,8 @@ export const GetPartnerSeatmapTemplateParams = zod.object({
   "templateId": zod.string()
 })
 
+export const getPartnerSeatmapTemplateResponseTwoLayoutPriceTiersMax = 16;
+
 export const getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMin = 2;
 export const getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMax = 2;
 
@@ -1672,8 +1799,14 @@ export const GetPartnerSeatmapTemplateResponse = zod.object({
   "version": zod.int().optional().describe('템플릿 판')
 }).describe('좌석맵 템플릿 카드(템플릿 고르기, 소유자 요청 2026-10-19, 목록은 추천 적용 2026-10-19, ADR-0066). 흔한 공연장 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다').and(zod.object({
   "layout": zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().describe('등급 ID(좌석·구역의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().describe('등급 이름(예: R석)'),
+  "price": zod.int().describe('정가(원)')
+}).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(getPartnerSeatmapTemplateResponseTwoLayoutPriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
+  "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()

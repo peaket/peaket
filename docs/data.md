@@ -55,7 +55,7 @@ PostgreSQL은 연결 하나마다 서버 프로세스 하나를 띄우고 그만
 
 ## 2. ERD (PostgreSQL 주요 엔티티)
 
-ERD는 한 그림에 담으면 mermaid의 그림 글자 수 한도(그림 하나에 50,000자)를 넘어 그려지지 않아서, 업무 묶음별로 일곱 그림으로 나눈다(2026-10-28, docs/planning/03 §5.5, ADR-0138). 표마다 컬럼은 한 그림에만 적는다. 다른 그림에서 컬럼을 적은 표는 이름만 있는 상자로 보인다. 관계선은 '여럿' 쪽 표가 있는 그림에 둔다. 표가 실제로 어느 DB에 있는지는 §1 저장소 지도가 정본이다. 두 표가 §1에서 다른 DB에 있으면 그 관계선은 외래키가 아니라 ID만 담는 연결이다. 선에 '외래키 없음'이 적혀 있지 않아도 같다(2026-11-02 정합 점검, §1 공유 클러스터 행). 관계선에만 나오고 어느 그림에도 칸을 적지 않은 표가 다섯 있다: ② `price_tier`·`event_seat_price`, ④ `webhook_receipt`, ⑤ `ticket_addon`, ⑥ `product_stock`. 이 다섯 표의 칸은 아직 정하지 않았다(docs/review/open-items.md 101번, 2026-11-02 정합 점검). 그림에 없는 표와 보기도 있다: 대체 결제사 전환 상태 `pg_switch`와 회차 지정 사본 `event_pg_config`(payment DB, §1·§4의 3과 '결제사 선택 표', 추천 적용 2026-11-09, BUILD_ORDER PRF-190), 명령 상태 표와 만료 차단 정리 작업이 읽는 읽기 전용 보기 `waf_block_expiry_v`(ops DB, §4의 6, docs/features/control-tower.md §5·§7, ADR-0113·0162), Outbox 표(§4의 7), 멱등 기록 표 `idempotency_record`(아래 '서비스마다 둔 멱등 기록 표'), 처리 못 한 사건의 보류 표 `held_event`(Kafka를 소비하는 서비스의 DB마다, §4의 15), 계정 병합 대응표 `merged_account`(§4의 9 ②의 기록을 가진 서비스의 DB마다)(2026-11-02 정합 점검).
+ERD는 한 그림에 담으면 mermaid의 그림 글자 수 한도(그림 하나에 50,000자)를 넘어 그려지지 않아서, 업무 묶음별로 일곱 그림으로 나눈다(2026-10-28, docs/planning/03 §5.5, ADR-0138). 표마다 컬럼은 한 그림에만 적는다. 다른 그림에서 컬럼을 적은 표는 이름만 있는 상자로 보인다. 관계선은 '여럿' 쪽 표가 있는 그림에 둔다. 표가 실제로 어느 DB에 있는지는 §1 저장소 지도가 정본이다. 두 표가 §1에서 다른 DB에 있으면 그 관계선은 외래키가 아니라 ID만 담는 연결이다. 선에 '외래키 없음'이 적혀 있지 않아도 같다(2026-11-02 정합 점검, §1 공유 클러스터 행). 관계선에만 나오고 어느 그림에도 칸을 적지 않은 표가 셋 있다: ④ `webhook_receipt`, ⑤ `ticket_addon`, ⑥ `product_stock`. 이 세 표의 칸은 아직 정하지 않았다(docs/review/open-items.md 101번, 2026-11-02 정합 점검). ② `price_tier`는 칸을 적었고, `event_seat_price`는 지금 만들지 않아 그림에서 뺐다(추천 적용 2026-11-10, ADR-0260 결정 2). 그림에 없는 표와 보기도 있다: 대체 결제사 전환 상태 `pg_switch`와 회차 지정 사본 `event_pg_config`(payment DB, §1·§4의 3과 '결제사 선택 표', 추천 적용 2026-11-09, BUILD_ORDER PRF-190), 명령 상태 표와 만료 차단 정리 작업이 읽는 읽기 전용 보기 `waf_block_expiry_v`(ops DB, §4의 6, docs/features/control-tower.md §5·§7, ADR-0113·0162), Outbox 표(§4의 7), 멱등 기록 표 `idempotency_record`(아래 '서비스마다 둔 멱등 기록 표'), 처리 못 한 사건의 보류 표 `held_event`(Kafka를 소비하는 서비스의 DB마다, §4의 15), 계정 병합 대응표 `merged_account`(§4의 9 ②의 기록을 가진 서비스의 DB마다)(2026-11-02 정합 점검).
 
 **① 계정과 관리 계정**
 
@@ -433,9 +433,7 @@ erDiagram
     promoter ||--o{ venue : "배치본 소유(LAYOUT)"
     venue ||--o{ event : "회차가 쓰는 배치본"
     section ||--o{ seat : has
-    event ||--o{ price_tier : defines
-    event ||--o{ event_seat_price : "maps seat to tier"
-    seat ||--o{ event_seat_price : ""
+    venue ||--o{ price_tier : "가격 등급(배치본 단위 = 공연 단위, ADR-0260)"
     production ||--o{ home_banner : "배너 대상"
     home_theme ||--o{ home_theme_item : ""
     production ||--o{ home_theme_item : ""
@@ -482,7 +480,7 @@ erDiagram
         jsonb kopis_fields "공연예술통합전산망 항목 가운데 공연에 딸린 것(명칭·종류, 관람 가능 연령, 출연진·제작진 등)"
         text sale_review "DRAFT|SUBMITTED|APPROVED|REJECTED|SUSPENDED, 판매 승인(POL-037, docs/planning/03 §2.14). 공연마다 하나(ADR-0093). SUSPENDED는 운영자의 판매 중지(2인 승인, 비공개·새 판매 막음·판 티켓 유지, 추천 적용 2026-10-28, ADR-0123)"
         timestamptz sale_approved_at "마지막 판매 승인 시각. NULL이면 비공개"
-        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093). 승인 뒤 더한 회차는 addedEvents에 회차 ID와 함께 두고 event 행으로 넣지 않는다. production·event 행은 늘 마지막 승인 내용이다(ADR-0198 결정 3)"
+        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093). 승인 뒤 더한 회차는 addedEvents에 회차 ID(배치본이 있으면 venueId도, ADR-0260 결정 8)와 함께 두고 event 행으로 넣지 않는다. production·event 행은 늘 마지막 승인 내용이다(ADR-0198 결정 3)"
         jsonb requested_place "새 공연장 요청(이름·주소). 판매 승인 때 운영자가 기존 공연장에 잇거나 새로 만들고 비운다(ADR-0093 결정 3, ADR-0198 결정 4)"
         jsonb requested_artists "새 아티스트 이름 요청(이름과 보이는 순서). 기존 아티스트는 production_artist로 잇는다. 판매 승인 때 운영자가 잇거나 만들고 비운다(ADR-0093 결정 4, ADR-0198 결정 4)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
@@ -569,16 +567,18 @@ erDiagram
         bigint version "검색 읽기 모델(search_document·search_term·search_removal)을 바꾸는 트랜잭션마다 UPDATE … RETURNING으로 1 올린다. 시퀀스 금지(ADR-0086). 자동완성 사전이 10초 [가정]마다 판·바뀐 줄·지운 표시를 한 읽기 전용 트랜잭션에서 읽는다(ADR-0094, search §2.3)"
     }
     venue {
-        uuid id PK
-        text name
+        uuid id PK "LAYOUT은 공연 ID에서 정한 UUIDv5(첫 저장이 회차에 잇기 전에 실패해도 다음 저장이 같은 행의 판 차례를 잇는다, ADR-0260 결정 15)"
+        text name "TEMPLATE의 이름. LAYOUT은 비워 둔다"
         text kind "TEMPLATE(공연장 틀)|LAYOUT(틀을 복제한 공연용 배치본)"
         uuid template_venue_id "LAYOUT일 때 복제한 틀"
-        uuid promoter_id "LAYOUT일 때 배치본을 가진 파트너. TEMPLATE은 NULL"
+        uuid promoter_id "LAYOUT일 때 배치본을 가진 파트너(테넌트, 행 보안). TEMPLATE은 NULL"
         int canvas_width "공연장 좌표계 폭(좌석맵 에디터 배치 층의 캔버스)"
         int canvas_height
         jsonb stage_shapes "무대·통로 등 판매하지 않는 도형 목록(종류 RECT|POLYGON|SECTOR|ARC_BAND, 공연장 좌표계 꼭짓점, 이름)"
-        int layout_version "배치본을 저장할 때마다 올린다. 좌석맵 파일 이름에 든다"
-        timestamptz geometry_locked_at "이 배치본을 쓰는 회차 중 가장 이른 오픈 시각. 그 뒤 도형·좌표·좌석 추가·삭제 잠금"
+        int layout_version "행(section·seat·price_tier·캔버스·무대)에 있는 배치의 판. 승인 이력이 없으면 마지막 저장, 있으면 마지막 승인. 좌석맵 파일 이름에 든다. 0은 아직 저장한 배치가 없음(ADR-0260 결정 5)"
+        int version_seq "마지막으로 잡은 판 번호. 저장마다 1 올려 잡고 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호로 남는다, ADR-0260 결정 5)"
+        int published_version "행 판의 팬 좌석맵 파일을 공개 위치에 게시했으면 그 판(= layout_version), 아니면 NULL. 판매 승인(LCH-080)·회차 더하기가 게시 여부를 다시 계산하지 않고 읽는다(ADR-0260 결정 6, 추천 적용 2026-11-10 리뷰)"
+        jsonb pending_layout "승인 이력이 있는 공연의 재승인 대기 배치 문서(SeatMapLayout과 가격 등급, 판, 준비 위치에 팬 파일을 썼는지 staged). 판매 승인(LCH-080)이 행으로 옮기고 준비 위치 파일을 공개 위치로 옮긴 뒤 비운다(ADR-0260 결정 6·9, 추천 적용 2026-11-10 리뷰). 오픈 뒤 잠금은 칸 없이 계산한다(승인 이력 + 이 배치본을 쓰는 취소되지 않은 회차의 open_at ≤ 지금, 결정 7)"
         text template_code "TEMPLATE만. ARENA-END|ARENA-THRUST|ARENA-CENTER|DOME|STADIUM|THEATER-L|THEATER-M|THEATER-S|HALL|FLAT(좌석맵 템플릿 10종, ADR-0066). TEMPLATE의 name은 템플릿 이름이고 특정 공연장 이름을 쓰지 않는다"
         text template_family "TEMPLATE만. ARENA|DOME|STADIUM|THEATER|HALL|FLAT"
         jsonb variants "TEMPLATE만. 고를 수 있는 것(돌출 길이, 그라운드 구역 수, 오케스트라 피트 있음·없음, 합창석 판매 여부, 블록 수)의 키·값 범위·기본값"
@@ -588,8 +588,12 @@ erDiagram
         text schematic_key "TEMPLATE만. 개략도(SVG) 파일 키. 템플릿과 함께 배포 때 넣는다"
     }
     section {
-        uuid id PK
-        uuid venue_id FK
+        uuid venue_id PK "배치본(또는 TEMPLATE) 행"
+        text section_key PK "계약의 sectionId. 판 해석 키 조각 꼴(영문·숫자·_·-, 1~64자)이어야 한다(ADR-0260 결정 2, 추천 적용 2026-11-10 리뷰)"
+        uuid promoter_id "테넌트(행 보안, 배치본의 promoter_id와 같다). TEMPLATE은 NULL"
+        int sort_order "구역 차례(0부터). 색인 차례와 같다"
+        int seat_index_from "이 구역 좌석의 비트맵 색인 범위 시작. 첫 구역 0, 다음 구역은 앞 구역 끝 + 1(빈틈 없음, ADR-0260 결정 3)"
+        int seat_index_to "범위 끝(포함). 좌석이 없는 구역은 둘 다 NULL"
         text name "구역 이름"
         text level "층"
         jsonb shape "공연장 좌표계 다각형 꼭짓점 목록. 사각형·부채꼴도 저장 때 다각형으로 바꾸고 그린 도구 값은 editor_meta에 둔다"
@@ -648,14 +652,27 @@ erDiagram
         int commission_rate_bp "계약 중개수수료율(만분율). 지금 계약값이고, 판매 승인 때 event.commission_rate_bp로 복사한다(ADR-0060)"
     }
     seat {
-        uuid id PK
-        uuid section_id FK
-        text row_label
+        uuid venue_id PK
+        uuid seat_key PK "계약의 seatId. 판매·홀드 기록의 좌석 ID(소문자 UUID, docs/features/seat-hold.md §5 '좌석 ID 글')와 같은 값이라 저장마다 행을 바꿔 넣어도 그대로다. 서버가 정한다(이 배치본에 이미 있는 UUID는 그대로, 아니면 새 UUIDv7, ADR-0260 결정 2, 추천 적용 2026-11-10 리뷰)"
+        text section_key FK "(venue_id, section_key) → section"
+        uuid promoter_id "테넌트(행 보안). TEMPLATE은 NULL"
+        int seat_index "비트맵 색인. 배치본 안에서 유일하고 구역 범위 안에서 구역 안 차례와 같다(ADR-0260 결정 3)"
+        text row_label "UNIQUE (venue_id, section_key, row_label, number)"
         int number
+        text tier_id "좌석 등급. 없으면 구역 default_tier. 가격 등급에 있어야 한다(ADR-0260 결정 4)"
+        bool unavailable "판매 제외"
         bool wheelchair
         text gate_zone
         int x "좌석 중심 x(공연장 좌표계)"
         int y "좌석 중심 y"
+    }
+    price_tier {
+        uuid venue_id PK "배치본. 같은 공연의 회차는 같은 배치본이라 공연 단위다(ADR-0093 결정 1, ADR-0260 결정 2)"
+        text tier_id PK "등급 ID(좌석의 tier_id, 팬 파일 tiers, 대기 상태 파일 soldOutTiers와 같은 값). 30자, 제어 문자 없음"
+        uuid promoter_id "테넌트(행 보안)"
+        text name "등급 이름 1~30자(예: R석)"
+        int price "정가(원) 1~10,000,000 [가정]"
+        int display_order "보이는 순서(0부터 빈틈 없이). 팬 파일 tiers 차례와 공연 상세 priceTiers 차례"
     }
     kopis_report {
         date report_date
@@ -2224,11 +2241,11 @@ erDiagram
 
 회차의 판매 종료는 공연 시작 24시간 전이다(소유자 결정 2026-10-14, ADR-0064). 새 칸을 두지 않고 `starts_at - interval '24 hours'`로 계산한다(추천 적용 2026-10-14, ADR-0064). 대기열 진입·입장 확정(queue-svc), 좌석 홀드·주문 생성(purchase-svc), 취소표 알림 신청, 홈·검색의 판매 상태와 남은 판매 기간(core-svc catalog), 대기열 회차 키의 TTL이 모두 이 한 식을 쓴다. 회차가 연기되면 바뀐 `starts_at`을 따른다. 판매 종료 뒤에는 그 회차의 새 홀드·주문(판매 종료 전 홀드의 주문은 제외)을 받지 않는다. 그래서 판매 종료 뒤 취소로 `RETURNED`가 된 좌석은 다시 팔지 않고 빈 좌석으로 남는다(ADR-0064 남는 한계). 예매 취소 기한(`starts_at`, POL-032)과 양도 마감은 이 식과 별개다.
 
-좌석맵은 두 층으로 저장한다(추천 적용 2026-10-14, ADR-0063). 배치 층은 `venue`의 캔버스 크기·무대 도형과 `section`의 도형(공연장 좌표계 다각형)·라벨 위치·기본 등급이다. 좌석 층은 `seat`의 열·번호·속성과 좌표(x·y)다. 팬 화면은 전체 배치를 먼저 그리고, 확대하면 그 범위 구역의 좌석을 그린다(docs/features/seat-hold.md §10). 회차별 좌석맵 파일은 이 두 층과 등급(`event_seat_price`)을 한 파일에 싣고 `layout_version`을 이름에 넣는다. 좌석 인덱스는 구역마다 좌석이 비트맵 인덱스의 한 범위를 차지하도록 매기고, 그 범위를 파일에 적는다. 그러면 브라우저가 스냅샷 비트맵에서 구역별 남은 좌석을 셀 수 있다.
+좌석맵은 두 층으로 저장한다(추천 적용 2026-10-14, ADR-0063). 배치 층은 `venue`의 캔버스 크기·무대 도형과 `section`의 도형(공연장 좌표계 다각형)·라벨 위치·기본 등급이다. 좌석 층은 `seat`의 열·번호·속성과 좌표(x·y)다. 팬 화면은 전체 배치를 먼저 그리고, 확대하면 그 범위 구역의 좌석을 그린다(docs/features/seat-hold.md §10). 회차별 좌석맵 파일은 이 두 층과 등급(좌석의 `tier_id`, 차례는 가격 등급 `price_tier`의 보이는 순서)을 한 파일에 싣고 판을 이름에 넣는다(추천 적용 2026-11-10, ADR-0260 결정 6). 좌석 인덱스는 구역마다 좌석이 비트맵 인덱스의 한 범위를 차지하도록 매기고, 그 범위를 파일에 적는다. 그러면 브라우저가 스냅샷 비트맵에서 구역별 남은 좌석을 셀 수 있다.
 
-좌석맵의 소유 단위(추천 적용 2026-10-14, ADR-0063): `venue`의 TEMPLATE 행은 공연장 틀이다. 파트너가 공연(`production`, 같은 공연의 회차 묶음, ADR-0093)의 좌석맵을 만들 때 틀을 복제해 그 공연용 배치본(LAYOUT 행, 자기 `section`·`seat`, `layout_version`)을 만든다. 같은 공연의 회차들은 같은 배치본을 가리키고(`event.venue_id`), 편집은 그 배치본에만 미친다. 틀을 고쳐도 이미 만든 배치본은 바뀌지 않고, 다른 파트너의 배치본은 보이지도 고쳐지지도 않는다. 판매 승인 뒤 배치본을 바꾸면 그 공연이 다시 승인 대기 상태가 된다(docs/planning/03 §2.14, 지금 규칙). 배치본을 쓰는 회차 중 하나라도 오픈(판매 시작)하면(`geometry_locked_at`) 도형·좌표·좌석 추가·삭제는 바꾸지 않는다. 기존 좌석의 속성 변경(판매 제외 등)만 지금 규칙대로 받는다. 좌석 ID와 비트맵 인덱스가 판매·홀드 기록과 이어져 있기 때문이다.
+좌석맵의 소유 단위(추천 적용 2026-10-14, ADR-0063): `venue`의 TEMPLATE 행은 공연장 틀이다. 파트너가 공연(`production`, 같은 공연의 회차 묶음, ADR-0093)의 좌석맵을 만들 때 틀을 복제해 그 공연용 배치본(LAYOUT 행, 자기 `section`·`seat`, `layout_version`)을 만든다. 같은 공연의 회차들은 같은 배치본을 가리키고(`event.venue_id`), 편집은 그 배치본에만 미친다. 틀을 고쳐도 이미 만든 배치본은 바뀌지 않고, 다른 파트너의 배치본은 보이지도 고쳐지지도 않는다. 판매 승인 뒤 배치본을 바꾸면 그 공연이 다시 승인 대기 상태가 된다(docs/planning/03 §2.14, 지금 규칙). 배치본을 쓰는 회차 중 하나라도 오픈(판매 시작)하면 도형·좌표·좌석 추가·삭제는 바꾸지 않는다. 기존 좌석의 속성 변경(판매 제외 등)만 지금 규칙대로 받는다. 잠금은 칸 없이 계산하고(승인 이력 + 취소되지 않은 회차의 `open_at` ≤ 지금), 잠긴 뒤 받는 속성은 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트다(추천 적용 2026-11-10, ADR-0260 결정 7). 승인 이력이 있는 공연의 배치 변경은 행을 그대로 두고 `venue.pending_layout`에 둔다(결정 9). 좌석 ID와 비트맵 인덱스가 판매·홀드 기록과 이어져 있기 때문이다.
 
-좌석맵 템플릿(소유자 요청 2026-10-19, 목록과 세부는 추천 적용 2026-10-19, ADR-0066): 국내에서 흔한 공연장 모양 10종(실내 아레나 엔드 스테이지·돌출 무대·센터 무대, 돔 구장, 종합운동장, 대극장(3층), 중극장(2층), 소극장, 콘서트홀(합창석), 평면 블록)을 `venue` TEMPLATE 행으로 둔다. 기본 좌석 수는 모두 [가정]이고 파트너가 바꾼다. 템플릿은 저장소의 정적 파일(`seed/seatmap-templates/*.json`, 예정)을 배포 때 넣는다. 파트너는 읽기만 하고, 운영자 편집 화면은 없다(바꿀 때는 배포한다). [템플릿에서 만들기]는 고른 템플릿의 도형(변형 반영)과 구역별 채우기 규칙(목표 좌석 수를 구역 비율대로 나눈 값, `section.editor_meta`)을 그 공연의 배치본(LAYOUT)으로 복제한다. 이미 좌석이 있는 배치본은 바꾸겠다는 확인(`replace`) 없이는 덮어쓰지 않고, 오픈 뒤 잠긴 배치본(`geometry_locked_at`)은 바꾸지 않는다. 자동 채우기 계산은 에디터(브라우저)가 한다. 서버는 저장할 때 좌석이 구역 도형 안에 있는지, 같은 구역·열·번호가 겹치지 않는지 다시 검사한다. 좌석끼리 겹치거나(중심 사이가 좌석 간격의 절반보다 가까움 [가정]) 구역 도형 밖에 있으면 경고만 한다. 템플릿은 흔한 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다. 실제 공연장 배치도는 공연장이 준 공식 자료와 허락이 있어야 쓸 수 있으므로 넣지 않는다. 특정 공연장 이름과 다른 예매처·공연장 누리집의 배치도는 쓰지 않는다. 스탠딩(정리번호 입장) 구역은 범위 밖이라 플로어는 지정석이다(ADR-0051).
+좌석맵 템플릿(소유자 요청 2026-10-19, 목록과 세부는 추천 적용 2026-10-19, ADR-0066): 국내에서 흔한 공연장 모양 10종(실내 아레나 엔드 스테이지·돌출 무대·센터 무대, 돔 구장, 종합운동장, 대극장(3층), 중극장(2층), 소극장, 콘서트홀(합창석), 평면 블록)을 `venue` TEMPLATE 행으로 둔다. 기본 좌석 수는 모두 [가정]이고 파트너가 바꾼다. 템플릿은 저장소의 정적 파일(`seed/seatmap-templates/*.json`, 예정)을 배포 때 넣는다. 파트너는 읽기만 하고, 운영자 편집 화면은 없다(바꿀 때는 배포한다). [템플릿에서 만들기]는 고른 템플릿의 도형(변형 반영)과 구역별 채우기 규칙(목표 좌석 수를 구역 비율대로 나눈 값, `section.editor_meta`)을 그 공연의 배치본(LAYOUT)으로 복제한다. 이미 좌석이 있는 배치본은 바꾸겠다는 확인(`replace`) 없이는 덮어쓰지 않고, 오픈 뒤 잠긴 배치본(ADR-0260 결정 7)은 바꾸지 않는다. 자동 채우기 계산은 에디터(브라우저)가 한다. 서버는 저장할 때 좌석이 구역 도형 안에 있는지, 같은 구역·열·번호가 겹치지 않는지 다시 검사한다. 좌석끼리 겹치거나(중심 사이가 좌석 간격의 절반보다 가까움 [가정]) 구역 도형 밖에 있으면 경고만 한다. 템플릿은 흔한 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다. 실제 공연장 배치도는 공연장이 준 공식 자료와 허락이 있어야 쓸 수 있으므로 넣지 않는다. 특정 공연장 이름과 다른 예매처·공연장 누리집의 배치도는 쓰지 않는다. 스탠딩(정리번호 입장) 구역은 범위 밖이라 플로어는 지정석이다(ADR-0051).
 
 관람 후기(`review`)에는 기대평 종류를 두지 않는다(소유자 결정 2026-10-14, ADR-0063). 작성 자격은 그 회차의 `event.ends_at`이 지났고, 그 회차 티켓의 결제자이며, 취소·환불·무효가 아닌 티켓이 하나 이상 남은 계정이다. 양도받은 보유자는 쓰지 않는다. 한 계정은 한 회차에 후기 하나이고, 고치거나 지울 수 있다. 별점이 낮다는 이유로 숨기지 않는다(ADR-0063). core-svc review 모듈은 후기를 쓸 때마다 ticket-svc에 결제자 티켓을 물어 확인하고(논리 DB 간 조인 금지), 확인한 주문을 `basis_order_id`로 남긴다. 취소된 회차(`status` CANCELLED)에는 쓸 수 없고, 연기된 회차는 바뀐 `ends_at`을 따른다. 공개 응답의 작성자 표시는 닉네임 첫 글자와 '**'(예: '김**'), 관람 회차 일시뿐이다. 이메일·전화번호·실명·계정 ID는 싣지 않고, 본인 후기인지는 `mine` 불리언으로만 알린다. 계정 병합 때 흡수 계정에 후기가 있으면 병합을 막는다(불변식 위반, POL-034, §4의 9. 2026-10-14의 '흡수 계정 후기는 DELETED로 바꾼다'(ADR-0063)를 고쳤다, 2026-11-02 정합 점검, ADR-0148 결정 3). 후기 목록과 요약(평균 별점·후기 수)은 그 회차가 속한 공연의 모든 회차 후기를 모아 보이고, 후기마다 관람 회차 일시를 보인다. 쓰기 자격과 '한 계정 한 회차 하나'는 회차 단위 그대로다(추천 적용 2026-10-27, ADR-0093).
 
@@ -2587,8 +2604,9 @@ erDiagram
 | 승인 명령 접수(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0180): 같은 주문의 `ConfirmPayment` 두 개가 겹침(Saga가 데드라인 뒤 다시 보냄, 두 파드), 한 주문을 다른 결제사로 부름 | `INSERT payment … ON CONFLICT (order_id) DO NOTHING`의 유일 제약이 하나만 받는다. 뒤 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 0행이라 있는 행을 읽어 같은 답을 준다. 원장·이력 첫 행·승인 명령은 한 트랜잭션이라 진 쪽은 아무것도 쓰지 않는다. 있는 행의 시도·결제사·금액이 요청과 다르면 `FAILED_PRECONDITION`으로 거절하고 SEV2 로그를 남긴다(결제사를 바꾸지 않는다) | P-T53(실제 PostgreSQL로 동시 두 요청 → 원장 1행·승인 명령 1행과 같은 답, 다른 결제사 거절) |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 | 같은 공연의 이미지를 두 요청이 함께 올리거나 고침(추천 적용 2026-11-10, BUILD_ORDER HOT-190, ADR-0257): 상세 이미지 9장일 때 두 장이 함께 와 11장이 됨, 포스터 두 장이 함께 와 포스터가 둘이 됨, 순서 고치기와 지우기가 겹쳐 순서에 빈틈·겹침이 생김, 같은 이미지를 두 사람이 고쳐 한쪽 변경이 사라짐 | 올리기·고치기·지우기는 공연 행을 `SELECT … FOR NO KEY UPDATE`로 잡은 트랜잭션 안에서(등록 경로와 같은 잠금. 공연 행끼리는 줄을 세우고 찜·회차의 외래키 잠금은 막지 않는다) 장수를 세고 순서를 다시 매긴다. 공연마다 포스터 하나는 부분 유일 인덱스(`kind = 'POSTER'`)가 한 번 더 막는다. 고치기는 `If-Match`의 `version`을 대조한다(412). 처리(디코딩)는 잠금 밖에서 먼저 하고, 잠금 안에서는 장수·순서만 다시 본다 | core-svc 통합 시험(이미지 올리기 동시 요청, 실제 PostgreSQL. `[ASVS v5.0.0-2.3.2]` 태그) |
+| 같은 공연의 좌석맵을 두 요청이 함께 저장함, 저장과 회차 더하기가 겹침, 저장 중에 회차 오픈 시각이 지남(추천 적용 2026-11-10, BUILD_ORDER HOT-240, ADR-0260 결정 5·7·8): 진 저장이 같은 판 번호로 이긴 저장의 팬 파일을 덮어씀(받아 둔 장기 캐시가 틀린 색인을 냄), 첫 배치본을 만드는 동안 더한 회차의 `venue_id`가 비어 남음, 잠금 판정 뒤 오픈한 회차의 도형이 바뀜 | 판 번호는 다시 쓰지 않는다. 트랜잭션 ①이 공연 행을 `SELECT … FOR NO KEY UPDATE`로 잡고(등록·회차 더하기·이미지와 같은 잠금) `If-Match`와 잠금을 본 뒤 `venue.version_seq + 1`을 새 판으로 잡아 커밋한다. 팬 파일은 잠금 밖에서 그 새 판 이름으로만 쓴다. 트랜잭션 ②가 공연 행을 다시 잡고 지금 판이 그대로일 때만 행(또는 `pending_layout`)을 바꾸고, 첫 배치본이면 모든 회차의 `venue_id`를 채운다. 잠금은 결정 7대로 본다: 잠겼으면 승인된 판과 견줘 받는 속성(좌석의 판매 제외·휠체어석·게이트, 구역의 게이트)만 바뀐 저장만 받고, 잠금 판정은 ②의 쓰기 뒤 커밋 바로 앞에 회차를 다시 읽어 한다. 아니면 412·409이고 그 판의 파일을 지운다(커밋 결과를 모르면 지우지 않고 `seatmap_commit_unknown`을 남긴다). 파일은 트랜잭션을 연 채 쓰지 않는다: ① 뒤에 더한 회차가 있으면 ②를 되돌리고 그 회차의 파일을 잠금 밖에서 쓴 뒤 ②를 다시 한다(최대 2번 [가정], 그래도 늘면 503 `Retry-After: 1` [가정]). 회차 더하기는 회차 ID를 먼저 만들어 잠금 밖에서 게시한 판(`published_version`·`pending_layout.staged`)의 파일을 쓰고, 공연 행 잠금 안에서 게시한 판이 그대로인지 다시 본 뒤 넣는다(바뀌었으면 되돌리고 다시) (추천 적용 2026-11-10, 리뷰) | S-T38 ③④⑤ core-svc 통합 시험(실제 PostgreSQL, 동시 저장 둘, 두 트랜잭션 사이에 끼워 넣은 저장·회차 더하기·오픈 시각 넘기기. `[ASVS v5.0.0-2.2.3]` 태그) |
 
-데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
+데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(지금은 표를 만들지 않고 배치본 좌석의 `tier_id`를 쓴다, ADR-0260 결정 2. 2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
 
 - 알려진 한계(2026-10-22, ADR-0083)와 바꾼 것(2026-10-27, ADR-0094): `pg_trgm`은 3글자 조각을 뽑지 못하는 패턴이면 인덱스 전체를 훑고, DB 문자 분류 설정(LC_CTYPE)이 C면 한글을 단어 글자로 보지 않는다(PostgreSQL 18 소스 `ts_locale.c`). 짧은 한글 이름의 오타에도 약하다('루멘'과 '루맨'의 유사도 0.2, 기본 기준 0.3). 그래서 검색은 pg_trgm을 쓰지 않고, 앱이 미리 계산한 정규화·낱자·초성 칸의 앞부분 일치로 찾는다(docs/features/search.md §2.2). 중간 일치는 행이 수만 개라 훑기로 하고, NFR-028을 넘으면 두 글자 조각 확장(pg_bigm, Aurora PostgreSQL 18.3~18.6 지원, 2026-10-22 확인, ADR-0086)을 먼저 넣는다. DB를 만들 때 LC_CTYPE을 C·POSIX로 두지 않고, 조각 확장을 넣으면 한글 조각이 나오는지 시험한다(search SR-T7). 검색 질의는 읽기 전용 복제본과 검색 전용 연결 묶음으로 보내 같은 클러스터의 로그인 쓰기를 지킨다(ADR-0094).
 - 엔진 판(추천 적용 2026-10-22, ADR-0086): Aurora PostgreSQL 18.x, 18.6.1 이상이다. 이 절의 스킵 스캔, EXPLAIN 출력, `uuidv7()`, 기간 키는 18에 기댄다.

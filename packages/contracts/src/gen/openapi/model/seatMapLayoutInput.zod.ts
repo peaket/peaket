@@ -11,6 +11,14 @@
  */
 import * as zod from 'zod';
 
+export const seatMapLayoutInputPriceTiersItemTierIdMax = 30;
+
+export const seatMapLayoutInputPriceTiersItemNameMax = 30;
+
+export const seatMapLayoutInputPriceTiersItemPriceMax = 10000000;
+
+export const seatMapLayoutInputPriceTiersMax = 16;
+
 export const seatMapLayoutInputStageItemPointsItemMin = 2;
 export const seatMapLayoutInputStageItemPointsItemMax = 2;
 
@@ -33,8 +41,13 @@ export const seatMapLayoutInputSectionsItemFillRuleFirstNumberMin = 0;
 
 
 export const SeatMapLayoutInput = zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
+  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().min(1).max(seatMapLayoutInputPriceTiersItemTierIdMax).describe('등급 ID. 제어 문자 없음'),
+  "name": zod.string().min(1).max(seatMapLayoutInputPriceTiersItemNameMax).describe('등급 이름'),
+  "price": zod.int().min(1).max(seatMapLayoutInputPriceTiersItemPriceMax).describe('정가(원) 1~10,000,000 [가정]')
+}).strict().describe('SeatMapPriceTier의 요청용(정의 밖 칸을 400으로 거절한다)')).max(seatMapLayoutInputPriceTiersMax).optional().describe('가격 등급(보이는 순서). 보내지 않으면 지금 가격 등급을 그대로 쓴다. 빈 목록은 등급 없이 저장한다(좌석이 있으면 TIER_UNKNOWN, 불러오기가 준 빈 목록을 그대로 다시 보낼 수 있다, 추천 적용 2026-11-10 리뷰). tierId는 겹치지 않는다(ADR-0260 결정 4)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -45,7 +58,7 @@ export const SeatMapLayoutInput = zod.object({
   "name": zod.string().optional()
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
-  "sectionId": zod.string(),
+  "sectionId": zod.string().describe('구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
   "name": zod.string(),
   "level": zod.string().optional(),
   "shape": zod.object({
@@ -78,7 +91,7 @@ export const SeatMapLayoutInput = zod.object({
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).strict().optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
-  "seatId": zod.string(),
+  "seatId": zod.string().describe('좌석 ID. 이 배치본에 이미 있는 소문자 UUID면 그대로 두고, 아니면(가져오기의 자리표시 등) 서버가 새 UUIDv7을 매긴다. 응답은 서버 ID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
   "index": zod.int().optional().describe('비트맵 인덱스'),
   "row": zod.string(),
   "number": zod.int(),

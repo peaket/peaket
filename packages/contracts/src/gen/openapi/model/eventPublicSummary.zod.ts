@@ -115,7 +115,7 @@ export const EventPublicSummary = zod.object({
   "tierId": zod.string().optional().describe('등급 ID(좌석맵 판의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
   "name": zod.string().optional().describe('등급 이름(예: R석)'),
   "price": zod.int().optional().describe('정가(원). 예매 수수료가 없어 소비자가 내는 총금액이다(POL-032)')
-})).max(eventPublicSummaryPriceTiersMax).optional().describe('등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2)'),
+})).max(eventPublicSummaryPriceTiersMax).optional().describe('등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2). core-svc가 회차 배치본의 가격 등급(마지막 승인 내용)으로 채우고 배치본이 없으면 빈 목록이다. 배치본 하나에 16개까지다(추천 적용 2026-11-10, ADR-0260 결정 12)'),
   "seller": zod.object({
   "legalName": zod.string(),
   "representative": zod.string(),

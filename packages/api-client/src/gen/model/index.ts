@@ -1007,6 +1007,8 @@ export * from './seatMapLayoutSectionsItem';
 export * from './seatMapLayoutSectionsItemLabel';
 export * from './seatMapLayoutSectionsItemSeatIndexRange';
 export * from './seatMapLayoutSectionsItemSeatsItem';
+export * from './seatMapPriceTier';
+export * from './seatMapPriceTierInput';
 export * from './seatMapShape';
 export * from './seatMapShapeInput';
 export * from './seatMapShapeInputKind';

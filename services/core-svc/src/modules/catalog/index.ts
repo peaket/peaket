@@ -5,6 +5,8 @@ export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { GrpcImageProcessing } from './adapters/image-processing-client.js';
 export { GrpcSeatmapParser } from './adapters/seatmap-worker-client.js';
 export { LocalFolderImageStore, MemoryImageObjectStore } from './adapters/image-store.js';
+export { LocalFolderPublicFileStore, MemoryPublicFileStore } from './adapters/public-file-store.js';
+export type { PublicFileStore, PublishLimits } from './domain/seatmap-ports.js';
 export { MemoryCdnInvalidation } from './adapters/cdn-invalidation.js';
 export { cardSaleStatus, isPublic, opensAsScheduled, representativeEvent, sameVenue } from './domain/production.js';
 export type { CardSaleStatus, CatalogEvent, EventSaleState, Production, SaleReview } from './domain/production.js';

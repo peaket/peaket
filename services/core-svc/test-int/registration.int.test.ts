@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from '../src/modules/catalog/adapters/db/schema.js';
+import { artist, event, place, production, productionArtist, promoter, searchAlias, venue, wish } from '../src/modules/catalog/adapters/db/schema.js';
 import { WISH_LIMIT } from '../src/modules/catalog/domain/registration.js';
 import { eventBody, FakeIdentity, fan, NOW_MS, productionBody, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -127,12 +127,14 @@ describe('회차 더하기(DB)', () => {
   test('승인 뒤 더한 회차는 변경분 JSON에만 두고 SUBMITTED가 되며, 승인 이력이 없으면 같은 배치본으로 event 행에 넣는다', async () => {
     const r = await post('/v1/partner/productions', identity.partner(TENANT), productionBody(PLACE, { title: '승인됨', events: [eventBody({ openAt: '2026-12-05T11:00:00Z' })] }));
     const { productionId } = JSON.parse(r.payload);
-    const venue = randomUUID();
-    await database.db.update(event).set({ venueId: venue }).where(eq(event.productionId, productionId));
+    // 배치본 행이 있어야 잇는다(배치본 외래키, ADR-0260). 판 0이라 팬 파일은 쓰지 않는다
+    const venueId = randomUUID();
+    await database.db.insert(venue).values({ id: venueId, kind: 'LAYOUT', promoterId: TENANT });
+    await database.db.update(event).set({ venueId }).where(eq(event.productionId, productionId));
     const direct = await post(`/v1/partner/productions/${productionId}/events`, identity.partner(TENANT, 'partner_member'), eventBody({ openAt: '2026-12-05T11:00:00Z', startsAt: '2026-12-29T10:00:00Z', endsAt: '2026-12-29T12:00:00Z' }));
     expect(direct.statusCode).toBe(201);
     const [d] = await database.db.select().from(event).where(eq(event.id, JSON.parse(direct.payload).eventId));
-    expect(d?.venueId).toBe(venue);
+    expect(d?.venueId).toBe(venueId);
 
     await database.db.update(production).set({ saleReview: 'APPROVED', saleApprovedAt: new Date('2026-11-04T00:00:00Z') }).where(eq(production.id, productionId));
     const added = await post(`/v1/partner/productions/${productionId}/events`, identity.partner(TENANT, 'partner_admin'), eventBody({ openAt: '2026-12-06T11:00:00Z', startsAt: '2026-12-30T10:00:00Z', endsAt: '2026-12-30T12:00:00Z', perPersonLimit: 2 }));

@@ -3,6 +3,7 @@ import type { RoundRow, SellerRow } from './event-detail.js';
 import type { CatalogEvent, Genre, Production } from './production.js';
 import type { EventDraft, PendingEvent } from './registration.js';
 import type { DescriptionDoc, KopisFields } from './description.js';
+import type { LayoutDoc, PriceTier } from './seatmap-layout.js';
 
 /** 회차 공개 요약에 쓰는 회차 칸 */
 export interface EventPublicFields {
@@ -38,6 +39,8 @@ export interface EventSummaryRow {
   rounds: RoundRow[];
   /** 공연 이미지(포스터 하나와 상세 이미지, 차례는 정하지 않는다, ADR-0257 결정 3) */
   images: { id: string; kind: 'POSTER' | 'DETAIL'; alt: string; order: number }[];
+  /** 회차 배치본의 가격 등급(행 = 마지막 승인 내용, 보이는 순서). 배치본이 없으면 빈 목록(ADR-0260 결정 12) */
+  priceTiers: PriceTier[];
 }
 
 /**
@@ -75,6 +78,21 @@ export interface NewProduction {
   createdBy: string;
 }
 
+/** 게시한 판 하나의 팬 파일 출처(where: 공개 위치 public·준비 위치 staging) */
+export interface LayoutFile {
+  version: number;
+  where: 'public' | 'staging';
+  doc: LayoutDoc;
+}
+
+/** 회차 더하기가 잠금 밖에서 먼저 읽는 것(새 회차의 팬 파일을 트랜잭션 밖에서 쓰려고, 리뷰 C2·D7) */
+export interface LayoutPreview {
+  venueId: string | null;
+  approvedBefore: boolean;
+  suspended: boolean;
+  files: LayoutFile[];
+}
+
 /** 회차 더하기에서 읽는 공연 한 줄 */
 export interface ProductionForUpdate {
   id: string;
@@ -97,6 +115,8 @@ export interface RegistrationTx {
   /** 그 테넌트의 공연을 줄 잠금으로 읽는다(범위 인자, authz-matrix §5.2). 없거나 다른 테넌트 공연이면 undefined */
   productionForUpdate(productionId: string, tenantId: string): Promise<ProductionForUpdate | undefined>;
   insertEvent(productionId: string, promoterId: string, venueId: string | null, e: EventDraft & { id: string }): Promise<void>;
+  /** 게시한 판의 팬 파일 출처(공개 위치의 행 판, 준비 위치의 대기 판). 회차 더하기가 잠금 안에서 미리 쓴 파일과 같은지 다시 본다(ADR-0260 결정 8) */
+  layoutFiles(venueId: string, tenantId: string): Promise<LayoutFile[]>;
   /** 변경분의 더한 회차 목록과 판매 승인 상태를 바꾼다 */
   savePending(productionId: string, pendingEvents: PendingEvent[], saleReview: Production['saleReview']): Promise<void>;
 }
@@ -124,6 +144,8 @@ export interface CatalogRepository {
    * fn이 던지면 되돌린다. 같은 요청이 다시 오면 fn을 부르지 않고 처음 결과(JSON 직렬화한 값)를 돌려준다
    */
   registerOnce<T>(once: RequestOnce, tenantId: string, fn: (tx: RegistrationTx) => Promise<T>): Promise<T>;
+  /** 그 테넌트 공연의 배치본과 게시한 판(잠금 없이 읽는다). 없거나 남의 공연이면 undefined */
+  layoutFilesFor(productionId: string, tenantId: string): Promise<LayoutPreview | undefined>;
   /** 찜. 공개 공연이 아니면 'not-found', 상한을 넘으면 'limit'. 같은 찜은 처음 시각을 둔다. 계정 단위 잠금 안에서 센다 */
   putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'>;
   deleteWish(accountId: string, productionId: string): Promise<void>;

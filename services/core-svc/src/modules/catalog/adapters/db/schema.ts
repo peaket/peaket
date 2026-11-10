@@ -3,7 +3,7 @@
 // 회차(event)는 공연 칸을 옮긴 뒤의 모양이다: 공연 정보(이름·장르·이미지·공연장)는 production에 있고 회차는 일정·상태와 판매 설정만 갖는다.
 // data.md의 칸은 그 칸을 처음 쓰는 단계가 더한다. 공개 요약·대표 회차 칸은 HOT-170, 등록 칸(event.reentry_allowed·lobby_minutes·lobby_shuffle·
 // open_batch·seat_assignment·per_person_limit·sale_policy, production.kopis_fields·pending_revision·requested_place·requested_artists)과 찜·멱등 기록 표는
-// HOT-171이 더했다(ADR-0198). 남은 칸: LCH-080·LCH-090(판매 승인)의 event.pg_primary·pg_fallback·scale·commission_rate_bp, production.accessible_seating_check
+// HOT-171이 더했다(ADR-0198). 배치본 표(venue·section·seat·price_tier)와 회차의 배치본 외래키는 HOT-240이 더했다(ADR-0260). 남은 칸: LCH-080·LCH-090(판매 승인)의 event.pg_primary·pg_fallback·scale·commission_rate_bp, production.accessible_seating_check
 // - 판매자(promoter)는 공개 신원정보 칸만 둔다. 지급대행·정산 계좌·수수료율 칸은 파트너 등록·정산 단계가 더한다.
 // 공개 판단의 전제: production·event 행은 늘 마지막 승인 내용(공개본)이다. 승인 뒤 바꾼 것은 승인 때까지 pending_revision에만 둔다(domain/production.ts isPublic).
 import { heldEventTable, idempotencyRecordTable, statSnapshotTable } from '@peaket/platform';
@@ -120,6 +120,134 @@ export const searchAlias = pgTable(
   ],
 );
 
+/**
+ * 공연장 틀(TEMPLATE)과 틀을 복제한 공연용 배치본(LAYOUT, docs/data.md venue, ADR-0063·ADR-0260 결정 2). 이 단계는 배치본 저장에 쓰는 칸과
+ * 틀의 공개 표시(published)만 둔다. 템플릿 자료 칸(template_code·template_family·variants·default_capacity·template_version·schematic_key)은 HOT-230이 더한다.
+ * 배치본 ID는 공연 ID에서 정해진 값(domain/seatmap-layout.ts layoutVenueId)이라, 첫 저장이 판을 잡은 뒤 실패해도 다음 저장이 같은 행의 판 차례를 잇는다
+ */
+export const venue = pgTable(
+  'venue',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name'),
+    kind: text('kind').notNull(),
+    templateVenueId: uuid('template_venue_id'),
+    // LAYOUT일 때 배치본을 가진 파트너(테넌트, 행 보안). TEMPLATE은 NULL
+    promoterId: uuid('promoter_id').references(() => promoter.id),
+    canvasWidth: integer('canvas_width'),
+    canvasHeight: integer('canvas_height'),
+    stageShapes: jsonb('stage_shapes'),
+    /** 행(section·seat·price_tier·캔버스·무대)에 있는 배치의 판. 0은 아직 저장한 배치가 없음 */
+    layoutVersion: integer('layout_version').notNull().default(0),
+    /** 마지막으로 잡은 판 번호(다시 쓰지 않는다, ADR-0260 결정 5) */
+    versionSeq: integer('version_seq').notNull().default(0),
+    /** 행 판의 팬 좌석맵 파일을 공개 위치에 게시했으면 그 판(= layout_version), 아니면 NULL. LCH-080이 게시 여부를 다시 계산하지 않게 남긴다(ADR-0260 결정 6) */
+    publishedVersion: integer('published_version'),
+    /** 승인 이력이 있는 공연의 재승인 대기 배치 문서와 판(ADR-0260 결정 9) */
+    pendingLayout: jsonb('pending_layout'),
+    /** TEMPLATE만. 파트너 템플릿 목록에 보이는지 */
+    published: boolean('published').notNull().default(false),
+  },
+  (t) => [
+    check('venue_kind_check', sql`${t.kind} in ('TEMPLATE', 'LAYOUT')`),
+    // 배치본은 파트너가 가지고 틀은 아무도 가지지 않는다. 틀 복제 표시는 배치본에만 있다
+    check('venue_owner_check', sql`(${t.kind} = 'LAYOUT') = (${t.promoterId} is not null) and (${t.kind} = 'LAYOUT' or ${t.templateVenueId} is null)`),
+    check('venue_version_check', sql`${t.layoutVersion} >= 0 and ${t.versionSeq} >= ${t.layoutVersion}`),
+    check('venue_published_check', sql`${t.publishedVersion} is null or ${t.publishedVersion} = ${t.layoutVersion}`),
+    check('venue_canvas_check', sql`(${t.canvasWidth} is null or ${t.canvasWidth} between 1 and 100000) and (${t.canvasHeight} is null or ${t.canvasHeight} between 1 and 100000)`),
+    foreignKey({ name: 'venue_template_fk', columns: [t.templateVenueId], foreignColumns: [t.id] }),
+    // 구역·좌석·가격 등급·회차의 판매자 사본이 배치본의 판매자와 같게 묶는 외래키의 대상
+    unique('venue_id_promoter_uq').on(t.id, t.promoterId),
+  ],
+);
+
+/** 배치본(또는 틀)의 구역(docs/data.md section). 차례 sort_order가 곧 색인 차례다(ADR-0260 결정 3) */
+export const section = pgTable(
+  'section',
+  {
+    venueId: uuid('venue_id').notNull(),
+    sectionKey: text('section_key').notNull(),
+    // 테넌트(행 보안, 배치본의 promoter_id와 같다). TEMPLATE은 NULL
+    promoterId: uuid('promoter_id'),
+    sortOrder: integer('sort_order').notNull(),
+    seatIndexFrom: integer('seat_index_from'),
+    seatIndexTo: integer('seat_index_to'),
+    name: text('name').notNull(),
+    level: text('level'),
+    /** 공연장 좌표계 다각형 꼭짓점 목록 */
+    shape: jsonb('shape').notNull(),
+    /** 그린 도구(kind)·도형 이름·좌석 채우기 규칙(fillRule). 팬 화면은 쓰지 않는다 */
+    editorMeta: jsonb('editor_meta'),
+    labelX: integer('label_x'),
+    labelY: integer('label_y'),
+    defaultTier: text('default_tier'),
+    gateZone: text('gate_zone'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.venueId, t.sectionKey] }),
+    foreignKey({ name: 'section_venue_fk', columns: [t.venueId], foreignColumns: [venue.id] }),
+    foreignKey({ name: 'section_venue_promoter_fk', columns: [t.venueId, t.promoterId], foreignColumns: [venue.id, venue.promoterId] }),
+    check('section_order_check', sql`${t.sortOrder} >= 0`),
+    // 좌석이 없는 구역은 범위가 둘 다 없다
+    check('section_range_check', sql`(${t.seatIndexFrom} is null) = (${t.seatIndexTo} is null) and (${t.seatIndexFrom} is null or (${t.seatIndexFrom} >= 0 and ${t.seatIndexFrom} <= ${t.seatIndexTo}))`),
+    unique('section_order_uq').on(t.venueId, t.sortOrder),
+  ],
+);
+
+/**
+ * 배치본의 좌석(docs/data.md seat). seat_key는 판매·홀드 기록의 좌석 ID(소문자 UUID, seat-hold §5 '좌석 ID 글')와 같은 값이라 저장마다 행을 바꿔 넣어도 그대로다.
+ * 서버가 매긴다(보낸 값이 이 배치본에 이미 있는 UUID면 그대로, 아니면 새 UUIDv7, ADR-0260 결정 2)
+ */
+export const seat = pgTable(
+  'seat',
+  {
+    venueId: uuid('venue_id').notNull(),
+    seatKey: uuid('seat_key').notNull(),
+    sectionKey: text('section_key').notNull(),
+    promoterId: uuid('promoter_id'),
+    seatIndex: integer('seat_index').notNull(),
+    rowLabel: text('row_label').notNull(),
+    number: integer('number').notNull(),
+    /** 좌석 등급. 없으면 구역 default_tier */
+    tierId: text('tier_id'),
+    unavailable: boolean('unavailable').notNull().default(false),
+    wheelchair: boolean('wheelchair').notNull().default(false),
+    gateZone: text('gate_zone'),
+    x: integer('x').notNull(),
+    y: integer('y').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.venueId, t.seatKey] }),
+    foreignKey({ name: 'seat_section_fk', columns: [t.venueId, t.sectionKey], foreignColumns: [section.venueId, section.sectionKey] }),
+    foreignKey({ name: 'seat_venue_promoter_fk', columns: [t.venueId, t.promoterId], foreignColumns: [venue.id, venue.promoterId] }),
+    check('seat_index_check', sql`${t.seatIndex} >= 0`),
+    unique('seat_index_uq').on(t.venueId, t.seatIndex),
+    unique('seat_place_uq').on(t.venueId, t.sectionKey, t.rowLabel, t.number),
+  ],
+);
+
+/** 가격 등급(배치본 단위 = 공연 단위, docs/data.md price_tier, ADR-0260 결정 2). 보이는 순서가 팬 파일 tiers와 공연 상세 priceTiers의 차례다 */
+export const priceTier = pgTable(
+  'price_tier',
+  {
+    venueId: uuid('venue_id').notNull(),
+    tierId: text('tier_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    name: text('name').notNull(),
+    price: integer('price').notNull(),
+    displayOrder: integer('display_order').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.venueId, t.tierId] }),
+    foreignKey({ name: 'price_tier_venue_promoter_fk', columns: [t.venueId, t.promoterId], foreignColumns: [venue.id, venue.promoterId] }),
+    check('price_tier_tier_id_check', sql`char_length(${t.tierId}) between 1 and 30`),
+    check('price_tier_name_check', sql`char_length(${t.name}) between 1 and 30`),
+    check('price_tier_price_check', sql`${t.price} between 1 and 10000000`),
+    check('price_tier_order_check', sql`${t.displayOrder} between 0 and 15`),
+    unique('price_tier_order_uq').on(t.venueId, t.displayOrder),
+  ],
+);
+
 export const event = pgTable(
   'event',
   {
@@ -127,7 +255,8 @@ export const event = pgTable(
     productionId: uuid('production_id').notNull(),
     // 공연의 파트너와 같은 값(테넌트 검사용 사본). 아래 묶음 외래키가 공연의 판매자와 다르게 들어가지 못하게 막는다
     promoterId: uuid('promoter_id').notNull(),
-    // 한 공연의 회차는 모두 같은 배치본을 쓴다(ADR-0093 결정 1). 배치본 표와 값은 좌석맵 단계(HOT-240)가 더하고, 그 전에는 비어 있다(ADR-0198 결정 4)
+    // 한 공연의 회차는 모두 같은 배치본을 쓴다(ADR-0093 결정 1). 첫 배치본을 커밋할 때 그 공연의 모든 회차에 같은 값을 넣고 그 전에는 비어 있다
+    // (ADR-0198 결정 4, ADR-0260 결정 8). 아래 묶음 외래키가 다른 판매자의 배치본을 가리키지 못하게 막는다
     venueId: uuid('venue_id'),
     openAt: at('open_at').notNull(),
     entryOpensAt: at('entry_opens_at'),
@@ -148,6 +277,7 @@ export const event = pgTable(
     check('event_status_check', sql`${t.status} in ('SCHEDULED', 'CANCELLED', 'POSTPONED')`),
     check('event_times_check', sql`${t.openAt} < ${t.startsAt} and ${t.startsAt} < ${t.endsAt}`),
     foreignKey({ name: 'event_production_promoter_fk', columns: [t.productionId, t.promoterId], foreignColumns: [production.id, production.promoterId] }),
+    foreignKey({ name: 'event_venue_promoter_fk', columns: [t.venueId, t.promoterId], foreignColumns: [venue.id, venue.promoterId] }),
     check('event_lobby_minutes_check', sql`${t.lobbyMinutes} between 0 and 60`),
     // 정렬 설정 두 값을 둘 다 끈 조합은 받지 않는다(POL-003, ADR-0118)
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),

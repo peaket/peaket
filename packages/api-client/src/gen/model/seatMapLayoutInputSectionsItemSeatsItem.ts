@@ -11,6 +11,7 @@
  */
 
 export type SeatMapLayoutInputSectionsItemSeatsItem = {
+  /** 좌석 ID. 이 배치본에 이미 있는 소문자 UUID면 그대로 두고, 아니면(가져오기의 자리표시 등) 서버가 새 UUIDv7을 매긴다. 응답은 서버 ID다(추천 적용 2026-11-10, ADR-0260 결정 2) */
   seatId: string;
   /** 비트맵 인덱스 */
   index?: number;

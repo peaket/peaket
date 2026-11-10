@@ -1864,10 +1864,15 @@ export type createPartnerProductionEventResponse422 = {
   status: 422
 }
 
+export type createPartnerProductionEventResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createPartnerProductionEventResponseSuccess = (createPartnerProductionEventResponse201) & {
   headers: Headers;
 };
-export type createPartnerProductionEventResponseError = (createPartnerProductionEventResponse403 | createPartnerProductionEventResponse404 | createPartnerProductionEventResponse409 | createPartnerProductionEventResponse422) & {
+export type createPartnerProductionEventResponseError = (createPartnerProductionEventResponse403 | createPartnerProductionEventResponse404 | createPartnerProductionEventResponse409 | createPartnerProductionEventResponse422 | createPartnerProductionEventResponse503) & {
   headers: Headers;
 };
 
@@ -1880,7 +1885,7 @@ export const getCreatePartnerProductionEventUrl = (productionId: string,) => {
 }
 
 /**
- * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05)
+ * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05). 배치본이 있으면 커밋 전에 새 회차의 팬 좌석맵 파일을 쓰고, 쓰지 못하면 회차를 더하지 않고 503이다(추천 적용 2026-11-10, ADR-0260 결정 8)
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
 export const createPartnerProductionEvent = async (productionId: string,
@@ -1915,7 +1920,7 @@ return orvalFetch<createPartnerProductionEventResponseSuccess>(getCreatePartnerP
 
 export const getCreatePartnerProductionEventMutationKey = () => ['createPartnerProductionEvent'] as const;
 
-export const getCreatePartnerProductionEventMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreatePartnerProductionEventMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionEvent>>, TError,CreatePartnerProductionEventMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionEvent>>, TError,CreatePartnerProductionEventMutationVariables, TContext> => {
 
@@ -1944,13 +1949,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerProductionEventMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProductionEvent>>>
     export type CreatePartnerProductionEventMutationBody = BodyType<PartnerEventCreate>
-    export type CreatePartnerProductionEventMutationError = ErrorType<ProblemResponse>
+    export type CreatePartnerProductionEventMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type CreatePartnerProductionEventMutationVariables = {productionId: string;data: BodyType<PartnerEventCreate>}
 
     /**
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
-export const useCreatePartnerProductionEvent = <TError = ErrorType<ProblemResponse>,
+export const useCreatePartnerProductionEvent = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProductionEvent>>, TError,CreatePartnerProductionEventMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerProductionEvent>>,
@@ -4354,6 +4359,11 @@ export type getPartnerProductionSeatmapResponse200 = {
   status: 200
 }
 
+export type getPartnerProductionSeatmapResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
 export type getPartnerProductionSeatmapResponse404 = {
   data: ProblemResponse
   status: 404
@@ -4362,7 +4372,7 @@ export type getPartnerProductionSeatmapResponse404 = {
 export type getPartnerProductionSeatmapResponseSuccess = (getPartnerProductionSeatmapResponse200) & {
   headers: Headers;
 };
-export type getPartnerProductionSeatmapResponseError = (getPartnerProductionSeatmapResponse404) & {
+export type getPartnerProductionSeatmapResponseError = (getPartnerProductionSeatmapResponse401 | getPartnerProductionSeatmapResponse404) & {
   headers: Headers;
 };
 
@@ -4383,7 +4393,7 @@ export const getGetPartnerProductionSeatmapUrl = (productionId: string,
 }
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다. 승인 이력이 있는 공연은 재승인 대기 판이 있으면 그 판을 준다. 배치본이 있으면 fromTemplate는 보지 않는다. ETag는 지금 판이고 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 9·10)
  * @summary 좌석맵 불러오기(SCR-022 에디터, 배치 층·좌석 층)
  */
 export const getPartnerProductionSeatmap = async (productionId: string,
@@ -4410,7 +4420,7 @@ export const getGetPartnerProductionSeatmapQueryKey = (productionId: string,
     }
 
 
-export const getGetPartnerProductionSeatmapQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<ProblemResponse>>(productionId: string,
+export const getGetPartnerProductionSeatmapQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string,
     params?: GetPartnerProductionSeatmapParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
@@ -4430,10 +4440,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetPartnerProductionSeatmapQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>>
-export type GetPartnerProductionSeatmapQueryError = ErrorType<ProblemResponse>
+export type GetPartnerProductionSeatmapQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
 
 
-export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<ProblemResponse>>(
+export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
  productionId: string,
     params: undefined |  GetPartnerProductionSeatmapParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -4444,7 +4454,7 @@ export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<ProblemResponse>>(
+export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
  productionId: string,
     params?: GetPartnerProductionSeatmapParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -4455,7 +4465,7 @@ export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<ProblemResponse>>(
+export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
  productionId: string,
     params?: GetPartnerProductionSeatmapParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -4464,7 +4474,7 @@ export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof
  * @summary 좌석맵 불러오기(SCR-022 에디터, 배치 층·좌석 층)
  */
 
-export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<ProblemResponse>>(
+export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
  productionId: string,
     params?: GetPartnerProductionSeatmapParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSeatmap>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -4483,8 +4493,23 @@ export function useGetPartnerProductionSeatmap<TData = Awaited<ReturnType<typeof
 
 
 export type putPartnerProductionSeatmapResponse200 = {
-  data: void
+  data: SeatMapLayout
   status: 200
+}
+
+export type putPartnerProductionSeatmapResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type putPartnerProductionSeatmapResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type putPartnerProductionSeatmapResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type putPartnerProductionSeatmapResponse409 = {
@@ -4507,10 +4532,25 @@ export type putPartnerProductionSeatmapResponse428 = {
   status: 428
 }
 
+export type putPartnerProductionSeatmapResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type putPartnerProductionSeatmapResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type putPartnerProductionSeatmapResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type putPartnerProductionSeatmapResponseSuccess = (putPartnerProductionSeatmapResponse200) & {
   headers: Headers;
 };
-export type putPartnerProductionSeatmapResponseError = (putPartnerProductionSeatmapResponse409 | putPartnerProductionSeatmapResponse412 | putPartnerProductionSeatmapResponse422 | putPartnerProductionSeatmapResponse428) & {
+export type putPartnerProductionSeatmapResponseError = (putPartnerProductionSeatmapResponse401 | putPartnerProductionSeatmapResponse403 | putPartnerProductionSeatmapResponse404 | putPartnerProductionSeatmapResponse409 | putPartnerProductionSeatmapResponse412 | putPartnerProductionSeatmapResponse422 | putPartnerProductionSeatmapResponse428 | putPartnerProductionSeatmapResponse429 | putPartnerProductionSeatmapResponse503 | putPartnerProductionSeatmapResponse504) & {
   headers: Headers;
 };
 
@@ -4523,7 +4563,7 @@ export const getPutPartnerProductionSeatmapUrl = (productionId: string,) => {
 }
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-240, ADR-0260): 색인은 서버가 구역 차례대로 매기고 보낸 seatIndexRange·index가 그와 다르면 422(INDEX_MISMATCH)다. 모든 좌석의 등급(좌석 tierId, 없으면 구역 tierId)이 가격 등급 priceTiers에 있어야 한다(보내지 않으면 지금 가격 등급). 판 번호는 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호). 팬 좌석맵 파일은 그 공연의 모든 회차마다 새 판 경로에 쓰고, 모든 구역에 좌석이 있을 때만 게시한다(응답 fanFilePublished). 잠금은 승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지났을 때다. 잠긴 뒤 받는 것은 좌석의 unavailable·wheelchair·gateZone과 구역의 gateZone뿐이고, 가격 등급을 바꾸면 409 sale-setting-locked다. 승인 이력이 있는 공연은 파트너 관리자만 저장하고, 재승인 대기 판에만 두어 공개본은 판매 승인 때까지 그대로다(APPROVED면 SUBMITTED). 그 판의 팬 좌석맵 파일은 공개 위치가 아니라 준비 위치에 쓰고 판매 승인(LCH-080)이 공개 위치로 옮긴다. 좌석 ID는 서버가 정한다(이 배치본에 이미 있는 소문자 UUID는 그대로, 아니면 새 UUIDv7, 잠긴 뒤 모르는 ID는 좌석 추가라 409). 본문은 12MiB [가정]까지이고 좌석맵 저장 칸막이(파드당 2 [가정])가 차면 429다. 성공·오류 모두 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 2·6·11·15, 리뷰)
  * @summary 좌석맵 저장(배치 층과 좌석 층을 함께, If-Match의 layoutVersion으로 동시 수정 방지)
  */
 export const putPartnerProductionSeatmap = async (productionId: string,
@@ -4558,7 +4598,7 @@ return orvalFetch<putPartnerProductionSeatmapResponseSuccess>(getPutPartnerProdu
 
 export const getPutPartnerProductionSeatmapMutationKey = () => ['putPartnerProductionSeatmap'] as const;
 
-export const getPutPartnerProductionSeatmapMutationOptions = <TError = ErrorType<ProblemResponse | PutPartnerProductionSeatmap422>,
+export const getPutPartnerProductionSeatmapMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerProductionSeatmap422 | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerProductionSeatmap>>, TError,PutPartnerProductionSeatmapMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof putPartnerProductionSeatmap>>, TError,PutPartnerProductionSeatmapMutationVariables, TContext> => {
 
@@ -4587,13 +4627,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PutPartnerProductionSeatmapMutationResult = NonNullable<Awaited<ReturnType<typeof putPartnerProductionSeatmap>>>
     export type PutPartnerProductionSeatmapMutationBody = BodyType<SeatMapLayoutInput>
-    export type PutPartnerProductionSeatmapMutationError = ErrorType<ProblemResponse | PutPartnerProductionSeatmap422>
+    export type PutPartnerProductionSeatmapMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerProductionSeatmap422 | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type PutPartnerProductionSeatmapMutationVariables = {productionId: string;data: BodyType<SeatMapLayoutInput>}
 
     /**
  * @summary 좌석맵 저장(배치 층과 좌석 층을 함께, If-Match의 layoutVersion으로 동시 수정 방지)
  */
-export const usePutPartnerProductionSeatmap = <TError = ErrorType<ProblemResponse | PutPartnerProductionSeatmap422>,
+export const usePutPartnerProductionSeatmap = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | PutPartnerProductionSeatmap422 | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerProductionSeatmap>>, TError,PutPartnerProductionSeatmapMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putPartnerProductionSeatmap>>,

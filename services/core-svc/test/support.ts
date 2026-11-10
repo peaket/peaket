@@ -1,6 +1,6 @@
 // 시험 공용: identity GetAdminAuthz 대역, 팬·파트너 신원 머리, 등록 본문(BUILD_ORDER HOT-171)
 import type { AdminAuthz, AdminAuthzPort } from '@peaket/platform';
-import { MemoryCdnInvalidation, MemoryImageObjectStore, type MediaWiring } from '../src/modules/catalog/index.js';
+import { MemoryCdnInvalidation, MemoryImageObjectStore, MemoryPublicFileStore, type MediaWiring } from '../src/modules/catalog/index.js';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 
@@ -45,6 +45,7 @@ export function testMedia(o: Partial<MediaWiring> = {}): MediaWiring {
     seatmap: { parse: () => Promise.reject(new Error('잇지 않았다')) },
     store: new MemoryImageObjectStore(),
     cdn: new MemoryCdnInvalidation(),
+    publicFiles: new MemoryPublicFileStore(),
     ...o,
   };
 }

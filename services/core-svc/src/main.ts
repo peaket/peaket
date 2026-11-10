@@ -2,7 +2,7 @@
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 import { createDatabase, createService, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcSeatmapParser, LocalFolderImageStore } from './modules/catalog/index.js';
+import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore } from './modules/catalog/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -33,6 +33,9 @@ const seatmapGrpc = need('PEAKET_SEATMAP_GRPC_URL', 'seatmap-worker SeatmapImpor
 const imageOrigin = need('PEAKET_IMAGE_BASE_URL', '이미지 출처, 운영 https://img.peaket.example');
 if (!/^https?:\/\/[^/?#]+$/.test(imageOrigin)) throw new Error(`PEAKET_IMAGE_BASE_URL은 경로 없는 출처여야 한다: ${imageOrigin}`);
 const imageStoreDir = need('PEAKET_IMAGE_STORE_DIR', '개발용 이미지 폴더. S3 어댑터는 HOT-200');
+// 팬 좌석맵 파일(v1/events/{회차}/seatmap-layouts/{판}.json)을 두는 폴더(ADR-0260 결정 6). 공개 위치는 public/, 재승인 대기 판의 준비 위치는 staging/ 아래이고
+// 개발 서버는 public/만 정적 파일로 내준다. S3 어댑터는 HOT-200
+const publicFileDir = need('PEAKET_PUBLIC_FILE_DIR', '개발용 팬 좌석맵 파일 폴더. S3 어댑터는 HOT-200');
 const imageProcessing = new GrpcImageProcessing(imageGrpc, lbProfile);
 const seatmapParser = new GrpcSeatmapParser(seatmapGrpc, lbProfile);
 
@@ -47,7 +50,11 @@ const service = await createService({
   name: SERVICE,
   adminAuthz,
   requestTimeoutMs: REQUEST_TIMEOUT_MS,
-  module: AppModule.register({ database, partnerDatabase, media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser } }),
+  module: AppModule.register({
+    database,
+    partnerDatabase,
+    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir) },
+  }),
 });
 await service.listen();
 

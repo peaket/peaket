@@ -3,13 +3,14 @@
 // 오픈 간격은 공개 중인 공연과만 견주고 새 등록은 DRAFT라, 동시에 온 두 등록이 서로를 놓쳐도 공개 전 판매 승인(LCH-080)이 다시 본다. 그래서 전역 잠금을 두지 않는다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
-import { and, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { DescriptionDoc } from '../../domain/description.js';
-import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry } from '../../domain/ports.js';
+import type { CatalogRepository, EventSummaryRow, LayoutPreview, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry } from '../../domain/ports.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
-import { artist, event, place, production, productionArtist, productionImage, promoter, searchAlias, wish } from './schema.js';
+import { readLayoutFiles } from './layout-rows.js';
+import { artist, event, place, priceTier, production, productionArtist, productionImage, promoter, searchAlias, wish } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 찜 잠금의 종류 번호(계정마다 따로 잠근다) */
@@ -110,7 +111,7 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       .limit(1);
     const r = rows[0];
     if (!r) return undefined;
-    const [artists, rounds, images] = await Promise.all([
+    const [artists, rounds, images, tiers] = await Promise.all([
       this.db.db
         .select({ artistId: artist.id, name: artist.name })
         .from(productionArtist)
@@ -132,6 +133,15 @@ export class DrizzleCatalogRepository implements CatalogRepository {
         .where(eq(productionImage.productionId, r.p.id))
         .orderBy(productionImage.kind, productionImage.displayOrder)
         .limit(11),
+      // 회차 배치본의 가격 등급 행(마지막 승인 내용, 보이는 순서). 재승인 대기 가격(venue.pending_layout)은 읽지 않는다(ADR-0260 결정 12)
+      r.e.venueId
+        ? this.db.db
+            .select({ tierId: priceTier.tierId, name: priceTier.name, price: priceTier.price })
+            .from(priceTier)
+            // 판매자 조건도 넣는다(묶음 외래키가 막지만 조회가 그 하나에 기대지 않게, 리뷰 S1)
+            .where(and(eq(priceTier.venueId, r.e.venueId), eq(priceTier.promoterId, r.e.promoterId)))
+            .orderBy(asc(priceTier.displayOrder))
+        : Promise.resolve([]),
     ]);
     const self = { id: r.e.id, startsAt: r.e.startsAt, openAt: r.e.openAt, status: r.e.status };
     return {
@@ -158,6 +168,7 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       artists,
       rounds: (rounds.some((x) => x.id === self.id) ? rounds : [...rounds, self]).map((x) => ({ ...x, status: x.status as EventStatus })),
       images: images.map((i) => ({ ...i, kind: i.kind as 'POSTER' | 'DETAIL' })),
+      priceTiers: tiers,
     };
   }
 
@@ -217,13 +228,19 @@ export class DrizzleCatalogRepository implements CatalogRepository {
           .where(and(eq(production.id, id), eq(production.promoterId, tenantId)))
           .for('no key update');
         if (!p) return undefined;
-        const [v] = await tx.select({ venueId: event.venueId }).from(event).where(eq(event.productionId, id)).limit(1);
+        // 한 공연의 회차는 모두 같은 배치본이다. 배치본을 잇는 중(첫 저장의 두 트랜잭션 사이)에 더한 회차가 비어 있을 수 있어 찬 값을 읽는다
+        const [v] = await tx
+          .select({ venueId: event.venueId })
+          .from(event)
+          .where(and(eq(event.productionId, id), isNotNull(event.venueId)))
+          .limit(1);
         const added = ((p.pendingRevision as { addedEvents?: StoredPendingEvent[] } | null)?.addedEvents ?? []).map(fromStored);
         return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview as SaleReview, saleApprovedAt: p.saleApprovedAt, venueId: v?.venueId ?? null, pendingEvents: added };
       },
       insertEvent: async (productionId, promoterId, venueId, e) => {
         await tx.insert(event).values(eventRow(productionId, promoterId, venueId, e));
       },
+      layoutFiles: (venueId, tenantId) => readLayoutFiles(tx, venueId, tenantId),
       savePending: async (productionId, events, saleReview) => {
         const added = JSON.stringify(events.map(toStored));
         await tx
@@ -232,6 +249,24 @@ export class DrizzleCatalogRepository implements CatalogRepository {
           .where(eq(production.id, productionId));
       },
     };
+  }
+
+  async layoutFilesFor(productionId: string, tenantId: string): Promise<LayoutPreview | undefined> {
+    if (!UUID.test(productionId)) return undefined;
+    return this.partnerDb.transaction(
+      async (tx) => {
+        const [p] = await tx.select({ saleReview: production.saleReview, approvedAt: production.saleApprovedAt }).from(production).where(and(eq(production.id, productionId), eq(production.promoterId, tenantId)));
+        if (!p) return undefined;
+        const [v] = await tx
+          .select({ venueId: event.venueId })
+          .from(event)
+          .where(and(eq(event.productionId, productionId), isNotNull(event.venueId)))
+          .limit(1);
+        const venueId = v?.venueId ?? null;
+        return { venueId, approvedBefore: p.approvedAt !== null, suspended: p.saleReview === 'SUSPENDED', files: venueId ? await readLayoutFiles(tx, venueId, tenantId) : [] };
+      },
+      { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
   }
 
   async putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'> {

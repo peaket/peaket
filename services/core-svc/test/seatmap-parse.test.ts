@@ -233,6 +233,11 @@ describe('JSON 읽기', () => {
     expect(r.layout).toEqual({ canvas: { width: 100, height: 100 }, stage: [], sections: [{ sectionId: 'A-1', name: 'A', shape: { kind: 'RECT', points: [[0, 0], [50, 0], [50, 50], [0, 50]] }, seats: [{ seatId: 'a-1', row: '1', number: 1, x: 10, y: 10, wheelchair: true }] }] });
   });
 
+  test('S-T38 ① 구역 ID가 판 해석 키 조각 꼴(영문·숫자·_·-)이 아니면 s{구역 순번}으로 바꾼다(ADR-0257 결정 8)', () => {
+    const r = parsed(parse(JSON.stringify(layout({ sections: [{ ...layout().sections[0], sectionId: '가구역' }, { ...layout().sections[0], sectionId: 'B 1', seats: [] }, { ...layout().sections[0], sectionId: 'C_3', seats: [] }] })), 'JSON'));
+    expect((r.layout as { sections: { sectionId: string }[] }).sections.map((s) => s.sectionId)).toEqual(['s1', 's2', 'C_3']);
+  });
+
   test('S-T32 ⑥ format이 JSON인데 내용이 SVG면 형식 불일치로 해석하지 않는다 [ASVS v5.0.0-5.2.2]', () => {
     expect(parse(svg('<polygon data-section="A" points="0,0 1,0 1,1"/>'), 'JSON')).toEqual({ status: 'REJECTED', errors: [{ line: 0, field: 'json', code: 'FORMAT_MISMATCH' }], ignored: [] });
     // 반대로 SVG라 하고 JSON을 보내도, CSV라 하고 JSON을 보내도 같다

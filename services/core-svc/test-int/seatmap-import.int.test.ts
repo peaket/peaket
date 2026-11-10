@@ -12,7 +12,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
-import { GrpcSeatmapParser, MemoryImageObjectStore } from '../src/modules/catalog/index.js';
+import { GrpcSeatmapParser, MemoryImageObjectStore, MemoryPublicFileStore } from '../src/modules/catalog/index.js';
+import { SEAT_ID_PATTERN } from '../../purchase-svc/src/modules/inventory/domain/hold.js';
+import { parseEventSeatMapFile } from '../../purchase-svc/src/modules/inventory/domain/seat-layout.js';
+import { event } from '../src/modules/catalog/adapters/db/schema.js';
 import { seatmapServiceDefinition } from '../src/seatmap-worker/server.js';
 import { FakeIdentity, testMedia } from '../test/support.js';
 import { DrizzleProductionMedia } from '../src/modules/catalog/adapters/db/drizzle-production-media.js';
@@ -49,6 +52,7 @@ interface App {
   logs: ReturnType<typeof logSink>;
   store: MemoryImageObjectStore;
   parser: GrpcSeatmapParser;
+  publicFiles: MemoryPublicFileStore;
 }
 const apps: App[] = [];
 let main: App;
@@ -60,8 +64,9 @@ async function app(address: string): Promise<App> {
   const logs = logSink();
   const store = new MemoryImageObjectStore();
   const parser = new GrpcSeatmapParser(address);
-  const svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ store, seatmap: parser }) }), env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' }, logDestination: logs.stream, adminAuthz: identity });
-  const a = { svc, logs, store, parser };
+  const publicFiles = new MemoryPublicFileStore();
+  const svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ store, seatmap: parser, publicFiles }) }), env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' }, logDestination: logs.stream, adminAuthz: identity });
+  const a = { svc, logs, store, parser, publicFiles };
   apps.push(a);
   return a;
 }
@@ -285,6 +290,35 @@ describe('S-T32 좌석맵 가져오기 공격 파일', () => {
       errors: [],
       warnings: [],
     });
+  });
+
+  test('S-T38 ② 한글 열 이름 CSV를 가져와 저장하면 팬 파일 좌석 ID가 모두 소문자 UUID이고 purchase-svc 판 해석기와 홀드 좌석 ID 꼴을 지난다 [ASVS v5.0.0-2.2.2]', async () => {
+    const eventId = randomUUID();
+    await admin.db.insert(event).values({ id: eventId, productionId: PROD_A, promoterId: A, openAt: new Date('2026-11-20T11:00:00Z'), startsAt: new Date('2026-12-24T10:00:00Z'), endsAt: new Date('2026-12-24T12:00:00Z') });
+    const csv = ['section,row,number,x,y,tier,wheelchair,gate,shape', '가구역,가,1,10,10,R,,,"0 0;100 0;100 100;0 100"', '가구역,가,2,20,10,R,,,', '가구역,나,1,10,20,R,,,', '나구역,다,1,110,10,R,,,"100 0;200 0;200 100;100 100"'].join('\n');
+    const r = await importFile(main, { format: 'CSV', file: enc(csv) });
+    expect(r.statusCode).toBe(200);
+    const layout = json(r).layout as Record<string, unknown>;
+    const saved = await main.svc.http.inject({
+      method: 'PUT',
+      url: `/v1/partner/productions/${PROD_A}/seatmap`,
+      headers: { ...partnerA(), 'content-type': 'application/json', 'if-match': '"0"' },
+      payload: JSON.stringify({ ...layout, priceTiers: [{ tierId: 'R', name: 'R석', price: 50_000 }] }),
+    });
+    expect(saved.statusCode).toBe(200);
+    const out = json(saved) as unknown as { layoutVersion: number; sections: { sectionId: string; seats: { seatId: string }[] }[] };
+    const file = main.publicFiles.files.get(`v1/events/${eventId}/seatmap-layouts/1.json`);
+    expect(file).toBeDefined();
+    const fan = JSON.parse(new TextDecoder().decode(file!.bytes)) as { sections: { sectionId: string; seats: { seatId: string[] } }[] };
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const ids = fan.sections.flatMap((s) => s.seats.seatId);
+    expect(ids).toHaveLength(4);
+    for (const id of ids) expect([id, uuid.test(id), SEAT_ID_PATTERN.test(id)]).toEqual([id, true, true]);
+    for (const s of fan.sections) expect(SEAT_ID_PATTERN.test(s.sectionId)).toBe(true);
+    // purchase-svc의 운영 좌석맵 판 해석기가 저장 응답(SeatMapLayout)을 그대로 받는다
+    const parsedMap = parseEventSeatMapFile(eventId, { perAccountLimit: 4, saleEndsAt: '2026-12-23T10:00:00Z', layout: out });
+    expect(parsedMap.byId.size).toBe(4);
+    expect([...parsedMap.byId.keys()].sort()).toEqual([...ids].sort());
   });
 
   test('S-T32 ①~⑧ 어느 경우든 원본 파일이 저장소에 남지 않는다 [ASVS v5.0.0-5.3.1] [ASVS v5.0.0-5.3.2] [ASVS v5.0.0-5.4.1]', async () => {

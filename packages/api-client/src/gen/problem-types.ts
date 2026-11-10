@@ -175,6 +175,7 @@ export type ProblemType =
   | 'seatmap-import-rejected'
   | 'seatmap-import-too-large'
   | 'seatmap-invalid'
+  | 'seatmap-publish-unavailable'
   | 'seatmap-replace-required'
   | 'seatmap-worker-unavailable'
   | 'self-target-forbidden'
@@ -373,6 +374,7 @@ export const PROBLEM_TYPES = {
   'seatmap-import-rejected': { status: 422, title: "좌석맵 파일을 읽지 않았습니다" },
   'seatmap-import-too-large': { status: 413, title: "좌석맵 파일은 10MB까지 올릴 수 있습니다" },
   'seatmap-invalid': { status: 422, title: "좌석맵에 고칠 곳이 있습니다" },
+  'seatmap-publish-unavailable': { status: 503, title: "좌석맵 파일을 잠시 게시할 수 없습니다" },
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },

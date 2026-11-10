@@ -11,16 +11,22 @@
  */
 import type { SeatMapLayoutInputCanvas } from './seatMapLayoutInputCanvas';
 import type { SeatMapLayoutInputSectionsItem } from './seatMapLayoutInputSectionsItem';
+import type { SeatMapPriceTierInput } from './seatMapPriceTierInput';
 import type { SeatMapShapeInput } from './seatMapShapeInput';
 
 /**
  * SeatMapLayout의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapLayout)와 같고 응답은 SeatMapLayout(열림)다(guidelines §1 '요청은 닫고 응답은 연다', BAS-040).
  */
 export interface SeatMapLayoutInput {
-  /** 저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본 */
+  /** 저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본 */
   layoutVersion?: number;
   /** 복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063) */
   templateVenueId?: string;
+  /**
+     * 가격 등급(보이는 순서). 보내지 않으면 지금 가격 등급을 그대로 쓴다. 빈 목록은 등급 없이 저장한다(좌석이 있으면 TIER_UNKNOWN, 불러오기가 준 빈 목록을 그대로 다시 보낼 수 있다, 추천 적용 2026-11-10 리뷰). tierId는 겹치지 않는다(ADR-0260 결정 4)
+     * @maxItems 16
+     */
+  priceTiers?: SeatMapPriceTierInput[];
   canvas: SeatMapLayoutInputCanvas;
   /** 무대·통로 등 판매하지 않는 도형 */
   stage?: SeatMapShapeInput[];

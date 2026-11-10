@@ -32,3 +32,10 @@ export const preconditionRequired = () => new ProblemError({ type: 'precondition
 export const seatmapImportTooLarge = () => new ProblemError({ type: 'seatmap-import-too-large', status: 413, title: '좌석맵 파일은 10MB까지 올릴 수 있습니다' });
 export const seatmapImportRejected = (code: string) => new ProblemError({ type: 'seatmap-import-rejected', status: 422, title: '좌석맵 파일을 읽지 않았습니다', detail: code });
 export const seatmapWorkerUnavailable = () => new ProblemError({ type: 'seatmap-worker-unavailable', status: 503, title: '좌석맵 파일을 잠시 확인할 수 없습니다', retryAfterSeconds: 10 });
+
+// 공연용 배치본 저장(ADR-0260). 제목은 계약 목록과 같다
+export const seatmapInvalid = (errors: { line: number; field: string; code: string }[]) =>
+  new ProblemError({ type: 'seatmap-invalid', status: 422, title: '좌석맵에 고칠 곳이 있습니다', extensions: { result: { ok: false, errors, warnings: [] } } });
+export const seatmapGeometryLocked = () => new ProblemError({ type: 'seatmap-geometry-locked', status: 409, title: '판매가 시작되어 좌석 배치는 바꿀 수 없습니다' });
+export const saleSettingLocked = () => new ProblemError({ type: 'sale-setting-locked', status: 409, title: '지금은 바꿀 수 없는 항목입니다' });
+export const seatmapPublishUnavailable = (retryAfterSeconds: number) => new ProblemError({ type: 'seatmap-publish-unavailable', status: 503, title: '좌석맵 파일을 잠시 게시할 수 없습니다', retryAfterSeconds });

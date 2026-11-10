@@ -96,6 +96,8 @@ export function checkOpenSlot(t: Date, others: readonly Date[], latest?: Date): 
 export interface PendingEvent extends EventDraft {
   eventId: string;
   addedAt: Date;
+  /** 그 공연의 배치본(첫 배치본을 커밋할 때 채운다, ADR-0260 결정 8). 아직 없으면 null */
+  venueId?: string | null;
 }
 
 /** 찜 상한(계정마다, openapi wish-limit) [가정] */

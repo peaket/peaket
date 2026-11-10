@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 64 | 13 | 12 | 2 | 0 | 23 | 1 | 0 | 0 | 115 |
-| B | 71 | 28 | 0 | 0 | 0 | 3 | 0 | 15 | 31 | 148 |
-| 합계 | 135 | 41 | 12 | 2 | 0 | 26 | 1 | 15 | 31 | 263 |
+| A | 74 | 13 | 12 | 2 | 0 | 23 | 1 | 0 | 0 | 125 |
+| B | 72 | 28 | 0 | 0 | 0 | 3 | 0 | 15 | 30 | 148 |
+| 합계 | 146 | 41 | 12 | 2 | 0 | 26 | 1 | 15 | 30 | 273 |
 
 ## docs/features/seat-hold.md
 
@@ -127,6 +127,16 @@
 | S-T37 | ⑤ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑤ 실패 뒤 권리는 OFFERED 그대로이고 좌석이 PRIORITY로 돌아가며, 다시 사서 결제를 마치면 USED | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
 | S-T37 | ⑥ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑥ 409 `priority-seat-only` | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
 | S-T37 | ⑦ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑦ 좌석이 풀리고 권리는 EXPIRED, 보상 건은 생기지 않는다 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
+| S-T38 | ① | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ① 모두 422 `seatmap-invalid`(`INDEX_MISMATCH`)이고 판이 오르지 않고 파일이 0개다 | 자동 시험 | A | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 |
+| S-T38 | ② | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ② 판 1이 되고 세 회차 모두 같은 `venue_id`를 가지며, 회차마다 `seatmap-layouts/1.json`이 하나씩 생기고(승인 이력이 있는… | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 2곳 |
+| S-T38 | ③ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ③ 412·428이고, 동시 둘은 하나만 200이며 진 쪽이 잡은 판 번호는 다음 저장에도 쓰이지 않고 이긴 판의 파일 바이트가 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts |
+| S-T38 | ④ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ④ 503 `seatmap-publish-unavailable`이고 판·행이 그대로이며 그 판의 파일이 남지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts |
+| S-T38 | ⑤ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑤도형·좌석 쪽은 409 `seatmap-geometry-locked`이고 보안 사건이 남으며, 가격은 409 `sale-setting-locked`이고… | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts |
+| S-T38 | ⑥ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑥ 실무자는 403 `partner-admin-required`, 관리자는 200이고 구역·좌석·가격 행과 승인된 판의 파일이 그대로이며 판매 승인이… | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/public-file-store.test.ts |
+| S-T38 | ⑦ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑦ 404이고 행 보안이 다른 테넌트 행을 0건으로 읽으며, 정의 밖 칸은 400이다 | 자동 시험 | A | 시험: services/core-svc/test-int/rls.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts |
+| S-T38 | ⑧ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑧ 공연 상세 `priceTiers`가 보이는 순서의 `tierId`·`name`·`price`이고 팬 파일에 판매 상태·개인정보 칸이 없으며 불러오기·저장… | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/partner-seatmap.http.test.ts 외 1곳 |
+| S-T38 | ⑨ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑨ 판 0 초안이 틀의 구역을 담고 저장 뒤 틀 행은 바뀌지 않으며, 배치본 ID를 틀로 넣으면 불러오기는 404·저장은 422다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/partner-seatmap.http.test.ts |
+| S-T38 | ⑩ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ⑩ 저장은 200이고 `fanFilePublished`가 false이며 파일이 0개다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts |
 
 ## docs/security/asvs/seat-hold.md
 
@@ -163,7 +173,7 @@
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 34곳 |
-| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
+| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/purchase-migration.int.test.t… |
@@ -203,8 +213,8 @@
 | v5.0.0-5.2.1 | — | L1 | 성능 저하나 서비스 거부 없이 처리할 수 있는 크기의 파일만 받는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts |
 | v5.0.0-5.2.2 | — | L1 | 단독이든 zip 같은 압축 파일 안이든 받는 파일의 확장자가 기대한 것인지와 내용이 그 형식과 맞는지(매직 바이트, 이미지 다시 쓰기 등) 검증하고, L1은… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 3곳 |
 | v5.0.0-5.2.3 | — | L2 | 압축 파일은 풀기 전에 풀린 크기와 파일 수 상한을 확인한다. | 해당 없음 | B | 해당 없음(압축 파일을 받지 않는다, 5.1.1) |
-| v5.0.0-5.3.1 | — | L1 | 신뢰하지 않는 입력으로 올라오거나 만들어져 공개 폴더에 저장된 파일은 HTTP 요청으로 직접 열어도 서버 쪽 코드로 실행되지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
-| v5.0.0-5.3.2 | — | L1 | 파일 작업 경로는 사용자가 보낸 파일 이름 대신 내부에서 만들거나 믿을 수 있는 값으로 만들고, 사용자 파일 이름·메타데이터를 써야 하면 엄격히 검증·정화해… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 |
+| v5.0.0-5.3.1 | — | L1 | 신뢰하지 않는 입력으로 올라오거나 만들어져 공개 폴더에 저장된 파일은 HTTP 요청으로 직접 열어도 서버 쪽 코드로 실행되지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 |
+| v5.0.0-5.3.2 | — | L1 | 파일 작업 경로는 사용자가 보낸 파일 이름 대신 내부에서 만들거나 믿을 수 있는 값으로 만들고, 사용자 파일 이름·메타데이터를 써야 하면 엄격히 검증·정화해… | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 4곳 |
 | v5.0.0-5.4.1 | — | L2 | JSON·JSONP·URL 파라미터에 담긴 것을 포함해 사용자가 보낸 파일 이름은 검증하거나 무시하고, 응답의 `Content-Disposition`에 파일… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-5.4.2 | — | L2 | 내주는 파일 이름을 인코딩·정화해 문서 구조를 지키고 주입을 막는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-5.4.3 | — | L2 | 신뢰하지 않는 출처의 파일은 백신으로 검사해 알려진 악성 파일을 내려주지 않는다. | 해당 없음 | B | 해당 없음(신뢰하지 않는 출처의 파일을 내려주지 않는다. 가져오기 원본은 저장하지 않고, 공개 좌석맵 파일은 서버가 검증한 데이터로 만든다) |
@@ -214,7 +224,7 @@
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 20곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/start-payment-http.test.ts, services/purchase-svc/test/start-payment.test.ts |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts (영역:… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-server.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
@@ -240,7 +250,7 @@
 | v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/gate.int.test.ts, services/v0-monolith/test-int/queue.int.test.ts 외 3곳 (영역:… |
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
-| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
+| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/telemetry.test.ts, services/payment-svc/test/portone-gateway.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 5곳 |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web |

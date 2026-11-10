@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleCatalogRepository } from '../src/modules/catalog/adapters/db/drizzle-catalog-repository.js';
-import { event, place, production, promoter, searchAlias } from '../src/modules/catalog/adapters/db/schema.js';
+import { event, place, priceTier, production, promoter, searchAlias, seat, section, venue } from '../src/modules/catalog/adapters/db/schema.js';
 import { FakeIdentity, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -48,7 +48,7 @@ async function seed(o: { saleReview?: string; saleApprovedAt?: Date | null } = {
     id: eventId,
     productionId,
     promoterId,
-    venueId: randomUUID(),
+    venueId: null,
     openAt: new Date('2026-12-01T03:00:00Z'),
     startsAt: new Date('2026-12-24T10:00:00Z'),
     endsAt: new Date('2026-12-24T12:30:00Z'),
@@ -89,9 +89,9 @@ describe('표 제약', () => {
   test('회차는_오픈<시작<끝이고_없는공연에는_달수없다', async () => {
     const s = await seed();
     const times = { openAt: new Date('2026-12-01T03:00:00Z'), startsAt: new Date('2026-12-24T10:00:00Z'), endsAt: new Date('2026-12-24T09:00:00Z') };
-    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: s.productionId, promoterId: s.promoterId, venueId: randomUUID(), ...times })).rejects.toThrow();
+    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: s.productionId, promoterId: s.promoterId, venueId: null, ...times })).rejects.toThrow();
     const ok = { ...times, endsAt: new Date('2026-12-24T12:00:00Z') };
-    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: randomUUID(), promoterId: s.promoterId, venueId: randomUUID(), ...ok })).rejects.toThrow();
+    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: randomUUID(), promoterId: s.promoterId, venueId: null, ...ok })).rejects.toThrow();
   });
 
   test('판매승인상태와승인시각이맞아야한다(초안은승인이력없음·승인과판매중지는있음)', async () => {
@@ -109,8 +109,61 @@ describe('표 제약', () => {
     const mine = await seed();
     const other = await seed();
     const times = { openAt: new Date('2026-12-01T03:00:00Z'), startsAt: new Date('2026-12-24T10:00:00Z'), endsAt: new Date('2026-12-24T12:00:00Z') };
-    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: other.promoterId, venueId: randomUUID(), ...times })).rejects.toThrow();
-    await database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: mine.promoterId, venueId: randomUUID(), ...times });
+    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: other.promoterId, venueId: null, ...times })).rejects.toThrow();
+    await database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: mine.promoterId, venueId: null, ...times });
+  });
+
+  test('S-T38 ① 배치본 표는 구역 범위·좌석 색인·가격 범위를 지키고 회차는 같은 판매자의 배치본만 가리킨다 [ASVS v5.0.0-2.2.3]', async () => {
+    const mine = await seed();
+    const other = await seed();
+    const L = randomUUID();
+    const O = randomUUID();
+    await database.db.insert(venue).values([
+      { id: L, kind: 'LAYOUT', promoterId: mine.promoterId },
+      { id: O, kind: 'LAYOUT', promoterId: other.promoterId },
+    ]);
+    // 배치본은 판매자가 있고 틀은 없다, 판 차례는 행의 판보다 작지 않다
+    await expect(database.db.insert(venue).values({ id: randomUUID(), kind: 'LAYOUT' })).rejects.toThrow();
+    await expect(database.db.insert(venue).values({ id: randomUUID(), kind: 'TEMPLATE', promoterId: mine.promoterId })).rejects.toThrow();
+    await expect(database.db.insert(venue).values({ id: randomUUID(), kind: 'LAYOUT', promoterId: mine.promoterId, layoutVersion: 3, versionSeq: 2 })).rejects.toThrow();
+    const tri: [number, number][] = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ];
+    const sec = { venueId: L, promoterId: mine.promoterId, name: 'A', shape: tri };
+    await expect(database.db.insert(section).values({ ...sec, sectionKey: 'X', sortOrder: 0, seatIndexFrom: 0, seatIndexTo: null })).rejects.toThrow();
+    await expect(database.db.insert(section).values({ ...sec, sectionKey: 'X', sortOrder: 0, seatIndexFrom: 3, seatIndexTo: 2 })).rejects.toThrow();
+    // 구역의 판매자는 배치본의 판매자와 같아야 한다
+    await expect(database.db.insert(section).values({ ...sec, sectionKey: 'X', sortOrder: 0, promoterId: other.promoterId })).rejects.toThrow();
+    await database.db.insert(section).values([
+      { ...sec, sectionKey: 'A', sortOrder: 0, seatIndexFrom: 0, seatIndexTo: 1 },
+      { ...sec, sectionKey: 'E', sortOrder: 1 },
+    ]);
+    await expect(database.db.insert(section).values({ ...sec, sectionKey: 'B', sortOrder: 1 })).rejects.toThrow();
+    const st = { venueId: L, sectionKey: 'A', promoterId: mine.promoterId, rowLabel: '1', x: 0, y: 0 };
+    const S1 = randomUUID();
+    // 좌석 ID는 uuid 칸이다(판매·홀드 기록의 좌석 ID, 소문자 UUID, ADR-0260 결정 2)
+    await expect(database.db.insert(seat).values({ ...st, seatKey: 'A-1-1', seatIndex: 0, number: 1 })).rejects.toThrow();
+    await database.db.insert(seat).values({ ...st, seatKey: S1, seatIndex: 0, number: 1 });
+    // 같은 색인·같은 열·번호·같은 좌석 ID는 하나뿐이고, 없는 구역에는 좌석을 두지 못한다
+    await expect(database.db.insert(seat).values({ ...st, seatKey: randomUUID(), seatIndex: 0, number: 2 })).rejects.toThrow();
+    await expect(database.db.insert(seat).values({ ...st, seatKey: randomUUID(), seatIndex: 1, number: 1 })).rejects.toThrow();
+    await expect(database.db.insert(seat).values({ ...st, seatKey: S1, seatIndex: 1, number: 2 })).rejects.toThrow();
+    await expect(database.db.insert(seat).values({ ...st, sectionKey: 'Z', seatKey: randomUUID(), seatIndex: 1, number: 1 })).rejects.toThrow();
+    const tier = { venueId: L, promoterId: mine.promoterId, name: 'R석' };
+    for (const price of [0, 10_000_001]) await expect(database.db.insert(priceTier).values({ ...tier, tierId: 'R', price, displayOrder: 0 })).rejects.toThrow();
+    await expect(database.db.insert(priceTier).values({ ...tier, tierId: 'R', price: 1, displayOrder: 16 })).rejects.toThrow();
+    await database.db.insert(priceTier).values([
+      { ...tier, tierId: 'R', price: 1, displayOrder: 0 },
+      { ...tier, tierId: 'S', price: 10_000_000, displayOrder: 1 },
+    ]);
+    await expect(database.db.insert(priceTier).values({ ...tier, tierId: 'A', price: 5, displayOrder: 1 })).rejects.toThrow();
+    // 회차는 같은 판매자의 배치본만 가리킨다
+    const times = { openAt: new Date('2026-12-01T03:00:00Z'), startsAt: new Date('2026-12-24T10:00:00Z'), endsAt: new Date('2026-12-24T12:00:00Z') };
+    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: mine.promoterId, venueId: O, ...times })).rejects.toThrow();
+    await expect(database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: mine.promoterId, venueId: randomUUID(), ...times })).rejects.toThrow();
+    await database.db.insert(event).values({ id: randomUUID(), productionId: mine.productionId, promoterId: mine.promoterId, venueId: L, ...times });
   });
 
   test('다른이름은_지우지않은같은대상의같은이름이하나뿐이고_지운뒤에는다시달수있다', async () => {

@@ -40,6 +40,8 @@ export interface EventPublicSummary {
   reentryAllowed: boolean;
   badges: (QueueOrder | 'AUTO_SEAT')[];
   rounds: PublicRound[];
+  /** 등급별 정가(보이는 순서, 마지막 승인 내용, ADR-0200 결정 4·ADR-0260 결정 12). 배치본이 없으면 빈 목록 */
+  priceTiers: { tierId: string; name: string; price: number }[];
   seller?: SellerInfo;
 }
 
@@ -93,6 +95,7 @@ export class GetEventSummary {
       reentryAllowed: e.reentryAllowed,
       badges: [order, ...(e.seatAssignment === 'AUTO' ? (['AUTO_SEAT'] as const) : [])],
       rounds: publicRounds(row.rounds, e.id, new Date(this.clock.now())),
+      priceTiers: row.priceTiers.map((t) => ({ tierId: t.tierId, name: t.name, price: t.price })),
       ...(seller ? { seller } : {}),
     };
   }

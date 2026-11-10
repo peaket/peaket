@@ -321,17 +321,32 @@ function collectMultipart(request: FastifyRequest, payload: NodeJS.ReadableStrea
 }
 
 const BODY_LIMIT_KEY = 'peaketBodyLimit';
+/** 표시하지 않은 경로의 본문 상한(Fastify 기본 bodyLimit 1MiB, 서비스가 바꾸지 않는다) */
+export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
+const BULKHEAD_KEY = 'peaketBulkhead';
+/** 칸막이 자리를 잡은 요청에 다는 '처리기가 끝났다' 표시 함수 */
+const BULKHEAD_DONE = Symbol('peaket.bulkhead.done');
+
+/** 같은 이름의 경로들이 함께 쓰는 동시 처리 칸막이(AcceptMultipartOptions.bulkhead와 같은 뜻, ADR-0257 결정 2) */
+export interface RouteBulkhead {
+  name: string;
+  limit: number;
+  retryAfterSeconds: number;
+}
 
 /**
- * 그 경로만 본문 상한을 줄인다(바이트). 본문 해석기가 읽기 전에 413으로 막는다(BUILD_ORDER HOT-150 코드 리뷰). 플랫폼 기본 상한(1MiB)보다 크게 쓰지 않는다.
- * @throws RangeError 양의 정수가 아님
+ * 그 경로의 본문 상한(바이트). 본문 해석기가 읽기 전에 413으로 막는다(BUILD_ORDER HOT-150 코드 리뷰). 줄이는 데 쓰고, 플랫폼 기본 상한(1MiB)보다 크게 쓰는
+ * 경로는 칸막이(bulkhead)를 함께 달아 큰 본문을 동시에 쥐는 수를 묶는다(좌석맵 저장 12MiB, ADR-0260 결정 11). 칸막이는 @AcceptMultipart의 것과 같은
+ * 이름이면 같은 자리를 함께 쓰고, 자리는 본문을 읽기 전(onRequest)에 잡는다
+ * @throws RangeError 양의 정수가 아님, 기본 상한보다 큰데 칸막이가 없음
  */
-export function BodyLimit(bytes: number): MethodDecorator {
+export function BodyLimit(bytes: number, o: { bulkhead?: RouteBulkhead } = {}): MethodDecorator {
   if (!Number.isInteger(bytes) || bytes <= 0) throw new RangeError(`본문 상한은 양의 정수다: ${String(bytes)}`);
+  if (bytes > DEFAULT_BODY_LIMIT_BYTES && !o.bulkhead) throw new RangeError(`기본 상한(${DEFAULT_BODY_LIMIT_BYTES})보다 큰 본문 상한에는 칸막이를 단다: ${bytes}`);
   return (_target, _key, descriptor) => {
     const fn = descriptor.value as object;
     const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
-    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [BODY_LIMIT_KEY]: bytes }, fn);
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [BODY_LIMIT_KEY]: bytes, ...(o.bulkhead ? { [BULKHEAD_KEY]: o.bulkhead } : {}) }, fn);
     return descriptor;
   };
 }
@@ -356,9 +371,9 @@ export function installRequestChecks(http: FastifyInstance): void {
     const config = route.config as Record<string, unknown> | undefined;
     if (config?.[DEFER_VALIDATION_KEY] === true && route.schema) route.attachValidation = true;
     if (typeof config?.[BODY_LIMIT_KEY] === 'number') route.bodyLimit = config[BODY_LIMIT_KEY];
-    const bulkhead = (config?.[MULTIPART_KEY] as AcceptMultipartOptions | undefined)?.bulkhead;
+    const bulkhead = (config?.[MULTIPART_KEY] as AcceptMultipartOptions | undefined)?.bulkhead ?? (config?.[BULKHEAD_KEY] as RouteBulkhead | undefined);
     if (bulkhead) {
-      const hook = (_request: FastifyRequest, reply: { raw: NodeJS.EventEmitter }, done: (err?: Error) => void) => {
+      const hook = (request: FastifyRequest, reply: { raw: NodeJS.EventEmitter }, done: (err?: Error) => void) => {
         const used = inUse.get(bulkhead.name) ?? 0;
         if (used >= bulkhead.limit) {
           done(new ProblemError({ type: 'server-busy', status: 429, title: '요청이 많아 잠시 처리하지 못했습니다', retryAfterSeconds: bulkhead.retryAfterSeconds }));
@@ -366,18 +381,34 @@ export function installRequestChecks(http: FastifyInstance): void {
         }
         inUse.set(bulkhead.name, used + 1);
         let released = false;
+        let handled = false;
+        let closed = false;
         const release = () => {
           if (released) return;
           released = true;
           inUse.set(bulkhead.name, (inUse.get(bulkhead.name) ?? 1) - 1);
         };
-        // 응답이 끝나거나(finish) 연결이 먼저 끊기면(close) 놓는다. 요청 본문의 close는 본문을 다 읽은 때라 쓰지 않는다
+        // 응답이 끝나면(finish) 놓는다. 연결이 먼저 끊기면(close) 처리기가 끝난 뒤(응답을 보내기 시작한 때, onSend)에 놓는다:
+        // 손님이 끊어도 처리기는 본문을 쥐고 일하고 있으므로 그 자리를 다른 요청에 주지 않는다(ADR-0260 결정 11). 요청 본문의 close는 본문을 다 읽은 때라 쓰지 않는다
+        (request as unknown as Record<symbol, () => void>)[BULKHEAD_DONE] = () => {
+          handled = true;
+          if (closed) release();
+        };
         reply.raw.once('finish', release);
-        reply.raw.once('close', release);
+        reply.raw.once('close', () => {
+          closed = true;
+          if (handled) release();
+        });
         done();
+      };
+      const sent = (request: FastifyRequest, _reply: unknown, payload: unknown, done: (err: Error | null, payload?: unknown) => void) => {
+        (request as unknown as Record<symbol, (() => void) | undefined>)[BULKHEAD_DONE]?.();
+        done(null, payload);
       };
       const prev = route.onRequest;
       route.onRequest = (prev === undefined ? [] : Array.isArray(prev) ? prev : [prev]).concat(hook as never) as typeof route.onRequest;
+      const prevSend = route.onSend;
+      route.onSend = (prevSend === undefined ? [] : Array.isArray(prevSend) ? prevSend : [prevSend]).concat(sent as never) as typeof route.onSend;
     }
   });
   const json = http.getDefaultJsonParser('error', 'error');

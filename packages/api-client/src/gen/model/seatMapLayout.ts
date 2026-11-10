@@ -11,16 +11,24 @@
  */
 import type { SeatMapLayoutCanvas } from './seatMapLayoutCanvas';
 import type { SeatMapLayoutSectionsItem } from './seatMapLayoutSectionsItem';
+import type { SeatMapPriceTier } from './seatMapPriceTier';
 import type { SeatMapShape } from './seatMapShape';
 
 /**
  * 좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)
  */
 export interface SeatMapLayout {
-  /** 저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본 */
+  /** 저장할 때 읽은 판. 서버 판과 다르면 412(추천 적용 2026-11-10, 리뷰). 0이면 새 배치본 */
   layoutVersion?: number;
   /** 복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063) */
   templateVenueId?: string;
+  /**
+     * 가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다
+     * @maxItems 16
+     */
+  priceTiers?: SeatMapPriceTier[];
+  /** 저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6) */
+  fanFilePublished?: boolean;
   canvas: SeatMapLayoutCanvas;
   /** 무대·통로 등 판매하지 않는 도형 */
   stage?: SeatMapShape[];

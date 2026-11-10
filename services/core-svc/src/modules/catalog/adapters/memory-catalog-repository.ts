@@ -1,11 +1,23 @@
 // 메모리 저장소(시험·로컬). 운영은 Drizzle 저장소다. 등록 쓰기는 fn이 끝난 뒤에만 반영해(던지면 버린다) DB 트랜잭션과 같게 답한다.
 import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
-import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
+import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce } from '../domain/ports.js';
 import { type CatalogEvent, isPublic, type Production } from '../domain/production.js';
 import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
 import type { ProductionImageRow } from '../domain/production-image.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
+import type { LayoutDoc } from '../domain/seatmap-layout.js';
+
+/** 공연 하나의 배치본(메모리, ADR-0260): 판 차례·행 판·대기 판·복제한 틀 */
+export interface MemoryLayout {
+  venueId: string;
+  versionSeq: number;
+  rows: { version: number; doc: LayoutDoc } | null;
+  /** 행 판을 공개 위치에 게시했으면 그 판 */
+  publishedVersion: number | null;
+  pending: { version: number; doc: LayoutDoc; staged: boolean } | null;
+  templateVenueId: string | null;
+}
 
 export class MemoryCatalogRepository implements CatalogRepository {
   readonly productions = new Map<string, Production>();
@@ -28,6 +40,10 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly wishes = new Map<string, Map<string, Date>>();
   /** 공연 이미지 행(이미지 ID → 행) */
   readonly images = new Map<string, ProductionImageRow>();
+  /** 공연 ID → 배치본(메모리 배치본 저장소가 쓴다) */
+  readonly layouts = new Map<string, MemoryLayout>();
+  /** 공연장 틀(TEMPLATE) ID → 판 0 초안과 공개 표시(시험이 넣는다) */
+  readonly templates = new Map<string, { doc: LayoutDoc; published: boolean }>();
   readonly #once = new Map<string, { hash: Buffer; result: string }>();
   /** 등록 쓰기를 한 줄로 세운다(시험이 늘 같은 결과를 보게) */
   #queue: Promise<unknown> = Promise.resolve();
@@ -55,6 +71,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
       artists: d?.artists ?? [],
       rounds: [...this.events.values()].filter((e) => e.productionId === event.productionId).map((e) => ({ id: e.id, startsAt: e.startsAt, openAt: e.openAt, status: e.status })),
       images: [...this.images.values()].filter((i) => i.productionId === event.productionId).map((i) => ({ id: i.id, kind: i.kind, alt: i.alt, order: i.order })),
+      priceTiers: event.venueId ? ([...this.layouts.values()].find((l) => l.venueId === event.venueId)?.rows?.doc.priceTiers.map((t) => ({ ...t })) ?? []) : [],
     };
   }
 
@@ -98,6 +115,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
       insertEvent: async (productionId, _promoterId, venueId, e) => {
         writes.push(() => this.#putEvent(productionId, venueId, e));
       },
+      layoutFiles: async (venueId) => this.#layoutFiles(venueId),
       savePending: async (productionId, events, saleReview) => {
         writes.push(() => {
           this.pending.set(productionId, events);
@@ -112,6 +130,22 @@ export class MemoryCatalogRepository implements CatalogRepository {
     return JSON.parse(JSON.stringify(value)) as T;
   }
 
+  async layoutFilesFor(productionId: string, tenantId: string): Promise<LayoutPreview | undefined> {
+    const p = this.productions.get(productionId);
+    if (!p || p.promoterId !== tenantId) return undefined;
+    const venueId = this.#forUpdate(productionId)?.venueId ?? null;
+    return { venueId, approvedBefore: p.saleApprovedAt !== null, suspended: p.saleReview === 'SUSPENDED', files: venueId ? this.#layoutFiles(venueId) : [] };
+  }
+
+  #layoutFiles(venueId: string): LayoutFile[] {
+    const l = [...this.layouts.values()].find((x) => x.venueId === venueId);
+    if (!l) return [];
+    return [
+      ...(l.rows && l.publishedVersion === l.rows.version ? [{ version: l.rows.version, where: 'public' as const, doc: structuredClone(l.rows.doc) }] : []),
+      ...(l.pending?.staged ? [{ version: l.pending.version, where: 'staging' as const, doc: structuredClone(l.pending.doc) }] : []),
+    ];
+  }
+
   #putEvent(productionId: string, venueId: string | null, e: EventDraft & { id: string }): void {
     this.events.set(e.id, { id: e.id, productionId, venueId, openAt: e.openAt, startsAt: e.startsAt, status: 'SCHEDULED' });
     this.eventDrafts.set(e.id, e);
@@ -120,7 +154,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
   #forUpdate(id: string): ProductionForUpdate | undefined {
     const p = this.productions.get(id);
     if (!p) return undefined;
-    const venue = [...this.events.values()].find((e) => e.productionId === id)?.venueId ?? null;
+    const venue = [...this.events.values()].find((e) => e.productionId === id && e.venueId !== null)?.venueId ?? null;
     return { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, venueId: venue, pendingEvents: this.pending.get(id) ?? [] };
   }
 

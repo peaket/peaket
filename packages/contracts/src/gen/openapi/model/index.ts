@@ -681,6 +681,8 @@ export * from './seatMapColumns.zod.js';
 export * from './seatMapImportResult.zod.js';
 export * from './seatMapLayout.zod.js';
 export * from './seatMapLayoutInput.zod.js';
+export * from './seatMapPriceTier.zod.js';
+export * from './seatMapPriceTierInput.zod.js';
 export * from './seatMapShape.zod.js';
 export * from './seatMapShapeInput.zod.js';
 export * from './seatmapTemplate.zod.js';
