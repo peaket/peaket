@@ -20,6 +20,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { runIfMain } from './entry.mjs';
 
 /** 기한(일)과 예외 최대 일수. 시험이 다른 값을 넣을 수 있게 인자로 받는다 */
 export const POLICY = Object.freeze({ days: Object.freeze({ critical: 7, high: 30, moderate: 90 }), exceptionMaxDays: 30, utcOffsetMinutes: 9 * 60 });
@@ -37,8 +38,8 @@ const fail = (msg) => {
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // 날짜: 'YYYY-MM-DD' 달력 날짜끼리 견준다
-const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
-const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+export const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+export const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const diffDays = (a, b) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY);
 /** 그 시각의 달력 날짜(정책의 시간대) */
 export const localDay = (date, policy = POLICY) => new Date(date.getTime() + policy.utcOffsetMinutes * 60_000).toISOString().slice(0, 10);
@@ -425,4 +426,5 @@ export async function main(argv = process.argv.slice(2), { env = process.env, fe
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exitCode = await main();
+// 직접 실행 판별이 틀리면 통과가 아니라 실패로 끝낸다(ADR-0263 결정 13 ⑦)
+await runIfMain(import.meta.url, () => main());

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tempDir } from './git-fixture.mjs';
@@ -33,11 +33,34 @@ jobs:
     uses: ./.github/workflows/docs-check.yml
 `;
 
-function run(text, name = 'ci.yml') {
+/** GOOD가 부르는 재사용 워크플로의 자리 채움(규칙 10이 부른 워크플로의 잡 권한을 읽는다) */
+const CALLED_STUB = `name: docs-check
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+`;
+
+function run(text, name = 'ci.yml', { allowlist, called = {} } = {}) {
   const dir = tempDir('check-workflows-');
-  const file = join(dir, name);
+  const wf = join(dir, '.github', 'workflows');
+  mkdirSync(wf, { recursive: true });
+  for (const [n, t] of Object.entries({ 'docs-check.yml': CALLED_STUB, ...called })) writeFileSync(join(wf, n), t);
+  const file = join(wf, name);
   writeFileSync(file, text);
-  const r = spawnSync(process.execPath, [script, file], { encoding: 'utf8' });
+  const extra = [];
+  if (allowlist !== undefined) {
+    const tf = join(dir, 'variables.tf');
+    if (allowlist !== null) writeFileSync(tf, allowlist);
+    extra.push('--allowlist', tf);
+  }
+  const r = spawnSync(process.execPath, [script, ...extra, file], { encoding: 'utf8' });
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
@@ -50,12 +73,94 @@ test('CRLF 줄바꿈도 같은 결과다', () => {
   assert.equal(run(GOOD.replace(/\n/g, '\r\n')).code, 0);
 });
 
-test('태그·가지·짧은 SHA로 부른 액션은 실패한다', () => {
+test('D-T12 ① 태그·가지·짧은 SHA로 부른 액션은 실패한다', () => {
   for (const ref of ['actions/checkout@v7', 'actions/checkout@main', 'actions/checkout@3d3c42e']) {
     const r = run(GOOD.replace(`actions/checkout@${SHA}`, ref));
     assert.equal(r.code, 1, ref);
     assert.match(r.out, /고정하지 않았다/);
   }
+  // 허용 목록에 든 서드파티 액션도 태그로 부르면 실패한다(허용 목록은 판을 묶지 않는다)
+  const tf = allowlistTf(['ossf/scorecard-action@*']);
+  for (const ref of ['ossf/scorecard-action@v2.5.0', 'ossf/scorecard-action@main', `ossf/scorecard-action@${'f'.repeat(39)}`]) {
+    const r = run(withCiStep(`- uses: ${ref}`), 'ci.yml', { allowlist: tf });
+    assert.equal(r.code, 1, ref);
+    assert.match(r.out, /고정하지 않았다/);
+  }
+  assert.equal(run(withCiStep(`- uses: ossf/scorecard-action@${SHA} # v2.5.0`), 'ci.yml', { allowlist: tf }).code, 0);
+});
+
+/** 조직 허용 목록 스택의 variables.tf(actions_patterns_allowed 기본값) */
+const allowlistTf = (patterns, { multiline = false } = {}) => `variable "owner_login" {
+  type = string
+}
+
+variable "actions_patterns_allowed" {
+  description = "허용할 제3자 액션 패턴. 판은 조직 정책의 SHA 고정 요구가 따로 막는다"
+  type        = list(string)
+  default     = [${multiline ? `\n    ${patterns.map((p) => `"${p}", # 까닭`).join('\n    ')}\n  ` : patterns.map((p) => `"${p}"`).join(', ')}]
+}
+`;
+const withCiStep = (step) => GOOD.replace('      - run: node tools/ci/changes.mjs', `      ${step}\n      - run: node tools/ci/changes.mjs`);
+
+test('D-T12 ① GitHub 소유(actions/·github/)가 아닌데 actions_patterns_allowed에 없는 액션은 실패하고, 목록의 꼴(소유자/저장소@*)에 맞으면 통과한다(github-x/ 같은 이름은 GitHub 소유가 아니다)', () => {
+  const tf = allowlistTf(['hashicorp/setup-terraform@*', 'ossf/scorecard-action@*', 'example-org/*']);
+  const ok = [`actions/setup-node@${SHA}`, `github/codeql-action/init@${SHA}`, `GitHub/codeql-action/analyze@${SHA}`, `hashicorp/setup-terraform@${SHA}`, `ossf/scorecard-action@${SHA}`, `example-org/any-action@${SHA}`];
+  for (const ref of ok) {
+    const r = run(withCiStep(`- uses: ${ref}`), 'ci.yml', { allowlist: tf });
+    assert.equal(r.code, 0, `${ref}: ${r.out}`);
+  }
+  const blocked = [
+    `docker/login-action@${SHA}`,
+    `github-x/tool@${SHA}`,
+    `githubactions/tool@${SHA}`,
+    `actions-x/checkout@${SHA}`,
+    `hashicorp/other-action@${SHA}`,
+    `ossf/scorecard-action-fork@${SHA}`,
+    `other-org/repo/.github/workflows/reuse.yml@${SHA}`,
+  ];
+  for (const ref of blocked) {
+    const r = run(withCiStep(`- uses: ${ref}`), 'ci.yml', { allowlist: tf });
+    assert.equal(r.code, 1, ref);
+    assert.match(r.out, /actions_patterns_allowed/, ref);
+    assert.match(r.out, /ci\.yml:\d+:/, '줄 번호를 낸다');
+  }
+  // 여러 줄 목록(줄 끝 주석 포함)도 읽는다
+  assert.equal(run(withCiStep(`- uses: ossf/scorecard-action@${SHA}`), 'ci.yml', { allowlist: allowlistTf(['ossf/scorecard-action@*'], { multiline: true }) }).code, 0);
+  // 같은 저장소 경로(./)와 다이제스트 고정 컨테이너는 허용 목록과 상관없다
+  assert.equal(run(withCiStep('- uses: ./.github/actions/local'), 'ci.yml', { allowlist: allowlistTf([]) }).code, 0);
+  assert.equal(run(withCiStep(`- uses: docker://alpine@sha256:${'b'.repeat(64)}`), 'ci.yml', { allowlist: allowlistTf([]) }).code, 0);
+});
+
+test('D-T12 ① variables.tf를 읽지 못하거나 기본값 목록이 없으면 실패한다', () => {
+  // GitHub 소유 액션만 쓰는 워크플로라도 허용 목록을 읽지 못하면 통과로 보지 않는다
+  const cases = [
+    ['파일 없음', null],
+    ['변수 없음', 'variable "owner_login" {\n  type = string\n}\n'],
+    ['기본값 없음', 'variable "actions_patterns_allowed" {\n  type = list(string)\n}\n'],
+    ['목록 아님', 'variable "actions_patterns_allowed" {\n  type    = list(string)\n  default = "ossf/scorecard-action@*"\n}\n'],
+    ['글자 아닌 항목', 'variable "actions_patterns_allowed" {\n  type    = list(string)\n  default = [var.extra]\n}\n'],
+    ['닫히지 않음', 'variable "actions_patterns_allowed" {\n  default = ["a/b@*"\n'],
+  ];
+  for (const [what, tf] of cases) {
+    const r = run(GOOD, 'ci.yml', { allowlist: tf });
+    assert.equal(r.code, 1, `${what}: ${r.out}`);
+    assert.match(r.out, /허용 목록/, what);
+  }
+  // 빈 목록은 읽힌다(GitHub 소유 액션만 쓰면 통과)
+  assert.equal(run(GOOD, 'ci.yml', { allowlist: allowlistTf([]) }).code, 0);
+});
+
+test('D-T12 ① 실제 저장소 워크플로가 실제 조직 허용 목록(infra/stacks/global/github/variables.tf)으로 검사를 통과하고, 거기서 Scorecard 액션을 빼면 scorecard.yml이 실패한다', () => {
+  const all = spawnSync(process.execPath, [script], { encoding: 'utf8', cwd: REPO });
+  assert.equal(all.status, 0, all.stdout + all.stderr);
+  const real = readFileSync(join(REPO, 'infra', 'stacks', 'global', 'github', 'variables.tf'), 'utf8');
+  assert.match(real, /"ossf\/scorecard-action@\*"/);
+  const dir = tempDir('check-workflows-real-');
+  const tf = join(dir, 'variables.tf');
+  writeFileSync(tf, real.replace(/\s*"ossf\/scorecard-action@\*",?/, ''));
+  const r = spawnSync(process.execPath, [script, '--allowlist', tf, join(REPO, '.github', 'workflows', 'scorecard.yml')], { encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /scorecard\.yml.*ossf\/scorecard-action/);
 });
 
 test('하위 경로 액션과 다이제스트 고정 컨테이너는 통과하고, 태그 컨테이너는 실패한다', () => {
@@ -297,6 +402,8 @@ const PUBLISH_JOB = `  publish:
       - uses: actions/attest-build-provenance@${SHA}
       - uses: actions/attest@${SHA}
 `;
+/** 게시 잡 표본이 쓰는 서드파티 액션을 든 조직 허용 목록(D-T12 ①이 이 표본을 막지 않게 한다. 게시 잡을 만들 때 실제 목록에도 더한다) */
+const PUBLISH_ALLOWLIST = allowlistTf(['docker/login-action@*', 'sigstore/cosign-installer@*']);
 const UPLOAD = '      - uses: actions/upload-artifact@';
 /** 빌드 잡의 업로드 단계 앞에 단계를 넣는다 */
 const withStep = (step) => BUILD_GOOD.replace(UPLOAD, `${step}\n${UPLOAD}`);
@@ -358,12 +465,12 @@ test('DT32_build-image.yml에_빌드잡build가없으면실패한다', () => {
 
 test('DT32_같은파일의_다른잡(게시잡)은_서명신원·푸시·서명·출처증명을둘수있다', () => {
   // 게시 잡이 빌드 잡 뒤에 있든 앞에 있든 빌드 잡만 본다
-  const after = run(`${BUILD_GOOD}${PUBLISH_JOB}`, 'build-image.yml');
+  const after = run(`${BUILD_GOOD}${PUBLISH_JOB}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(after.code, 0, after.out);
-  const before = run(BUILD_GOOD.replace('jobs:\n', `jobs:\n${PUBLISH_JOB.replace('    needs: build\n', '')}`), 'build-image.yml');
+  const before = run(BUILD_GOOD.replace('jobs:\n', `jobs:\n${PUBLISH_JOB.replace('    needs: build\n', '')}`), 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(before.code, 0, before.out);
   // 게시 잡이 있어도 빌드 잡의 위반은 잡는다
-  const bad = run(`${withStep('      - run: docker push ghcr.io/peaket/v0-monolith:x')}${PUBLISH_JOB}`, 'build-image.yml');
+  const bad = run(`${withStep('      - run: docker push ghcr.io/peaket/v0-monolith:x')}${PUBLISH_JOB}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(bad.code, 1, bad.out);
   assert.match(bad.out, /D-T32/);
 });
@@ -383,7 +490,7 @@ test('DT32_빌드잡규칙은_build-image.yml에만건다', () => {
     assert.equal(r.code, 0, r.out);
     assert.doesNotMatch(r.out, /D-T32/);
     // 같은 내용이 build-image.yml이면 실패한다
-    const same = run(text, 'build-image.yml');
+    const same = run(text, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
     assert.equal(same.code, 1, same.out);
     assert.match(same.out, /D-T32/);
   }
@@ -439,10 +546,10 @@ test('DT32_실제build-image.yml은_재사용워크플로이고_빌드잡은플�
 test('DT32_빌드잡이_다른잡뒤에있어도_그위반을잡는다', () => {
   // 게시 잡을 앞에, 위반이 있는 빌드 잡을 뒤에 둔다(첫 잡만 보는 검사를 잡는다)
   const publishFirst = (text) => text.replace('jobs:\n', `jobs:\n${PUBLISH_JOB.replace('    needs: build\n', '')}`);
-  const good = run(publishFirst(BUILD_GOOD), 'build-image.yml');
+  const good = run(publishFirst(BUILD_GOOD), 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(good.code, 0, good.out);
   for (const text of [publishFirst(withStep('      - run: docker push ghcr.io/peaket/v0-monolith:x')), publishFirst(withPerms(`${JOB_PERMS}      id-token: write\n`))]) {
-    const r = run(text, 'build-image.yml');
+    const r = run(text, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /D-T32/);
   }
@@ -530,4 +637,76 @@ test('tools-check는_잠금파일대로_의존성을설치한뒤에_시험을돈
 
 test('CI에서는_yaml패키지가있어_YAML시험을건너뛰지않는다', { skip: !process.env.CI && 'CI 밖(로컬은 pnpm install 전이면 건너뛴다)' }, () => {
   assert.ok(YAML, 'CI에서 yaml 패키지를 읽지 못했다');
+});
+
+// ---------- 규칙 10: 부른 워크플로의 잡 권한은 부르는 잡 권한 안(docs/devops.md §4.4 '리뷰 뒤 더한 규칙' ①, ADR-0263 결정 13) ----------
+// 부른 워크플로의 잡이 부르는 잡보다 넓은 권한을 달라고 하면 GitHub은 그 실행을 시작하지 않는다(리뷰 H1: scorecard 잡의 actions: read)
+
+const caller = (perms) => `name: ci
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  scan:
+${perms ? `    permissions:\n${perms}` : ''}    uses: ./.github/workflows/called.yml
+`;
+const called = (top, jobPerms) => `name: called
+on:
+  workflow_call:
+${top === null ? '' : `permissions:${/^ \S/.test(top) ? top : `\n${top}`}\n`}jobs:
+  a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+${jobPerms ? `    permissions:\n${jobPerms}` : ''}    steps:
+      - run: echo ok
+`;
+const perm = (o) => Object.entries(o).map(([k, v]) => `      ${k}: ${v}\n`).join('');
+
+test('BAS011_규칙10 부른 워크플로의 모든 잡 권한은 부르는 잡 권한 안이다(적지 않은 것은 none, 읽기 < 쓰기)', () => {
+  const check = (callerPerms, top, jobPerms) => run(caller(callerPerms), 'ci.yml', { called: { 'called.yml': called(top, jobPerms) } });
+  // 부르는 잡이 권한을 적지 않으면 그 워크플로 맨 위 권한(contents: read)이다
+  assert.equal(check(null, '  contents: read', null).code, 0);
+  const actions = check(null, '  contents: read', perm({ contents: 'read', actions: 'read' }));
+  assert.equal(actions.code, 1, actions.out);
+  assert.match(actions.out, /called\.yml.*잡 a.*actions: read.*none/);
+  // 부르는 잡이 준 쓰기 안에서 읽기·쓰기는 받는다
+  const cw = perm({ contents: 'read', 'security-events': 'write' });
+  assert.equal(check(cw, '  contents: read', perm({ contents: 'read', 'security-events': 'write' })).code, 0);
+  assert.equal(check(cw, '  contents: read', perm({ 'security-events': 'read' })).code, 0);
+  const up = check(cw, '  contents: read', perm({ contents: 'write' }));
+  assert.equal(up.code, 1);
+  assert.match(up.out, /contents: write.*read/);
+  // 잡 권한이 없으면 부른 워크플로 맨 위 권한을 본다
+  assert.equal(check(cw, '  contents: write', null).code, 1);
+  assert.equal(check(cw, ' write-all', null).code, 1);
+  assert.equal(check(cw, ' {}', null).code, 0);
+  // read-all을 준 부르는 잡은 읽기는 모두 받고 쓰기는 받지 않는다
+  assert.equal(check(null, '  actions: read', null).code, 1, '맨 위 contents: read만 준다');
+  const readAll = (top, job) => run(caller(null).replace('    uses:', '    permissions: read-all\n    uses:'), 'ci.yml', { called: { 'called.yml': called(top, job) } });
+  assert.equal(readAll('  actions: read', perm({ actions: 'read', checks: 'read' })).code, 0);
+  assert.equal(readAll('  contents: read', perm({ issues: 'write' })).code, 1);
+  // 빈 권한({})을 준 부르는 잡에는 읽기도 넘지 못한다
+  assert.equal(run(caller(null).replace('    uses:', '    permissions: {}\n    uses:'), 'ci.yml', { called: { 'called.yml': called('  contents: read', null) } }).code, 1);
+  // 부른 워크플로 파일이 없으면 실패한다
+  const missing = run(caller(null), 'ci.yml', { called: {} });
+  assert.equal(missing.code, 1);
+  assert.match(missing.out, /called\.yml/);
+});
+
+test('BAS011_규칙10 실제 ci.yml이 부르는 워크플로는 모두 부르는 잡 권한 안이고, security-scan.yml에 actions: read 잡을 더하면 실패한다(리뷰 H1 재현)', () => {
+  const ci = join(REPO, '.github', 'workflows', 'ci.yml');
+  const ok = spawnSync(process.execPath, [script, ci], { encoding: 'utf8', cwd: REPO });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  const dir = tempDir('check-workflows-h1-');
+  const wf = join(dir, '.github', 'workflows');
+  mkdirSync(wf, { recursive: true });
+  const sources = readFileSync(ci, 'utf8').match(/\.\/\.github\/workflows\/[\w.-]+\.ya?ml/g).map((p) => p.split('/').pop());
+  for (const f of new Set(sources)) writeFileSync(join(wf, f), readFileSync(join(REPO, '.github', 'workflows', f), 'utf8'));
+  writeFileSync(join(wf, 'ci.yml'), readFileSync(ci, 'utf8'));
+  const scan = readFileSync(join(wf, 'security-scan.yml'), 'utf8');
+  writeFileSync(join(wf, 'security-scan.yml'), `${scan.trimEnd()}\n\n  scorecard:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n    permissions:\n      contents: read\n      actions: read\n    steps:\n      - run: echo scorecard\n`);
+  const r = spawnSync(process.execPath, [script, join(wf, 'ci.yml')], { encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /security-scan\.yml.*잡 scorecard.*actions: read/);
 });

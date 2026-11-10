@@ -1,0 +1,39 @@
+# OpenSSF Scorecard(docs/devops.md §3.1 security-scan.yml 행·§4.4 '외부 보안 검사 게이트'·'리뷰 뒤 더한 규칙' ①, ADR-0263 결정 8·13, BUILD_ORDER BAS-011 ②).
+# 주 1회(월요일 09:00 KST)와 수동 실행에서만 돌고 결과 파일(SARIF)만 잡 산출물로 남긴다. 공개 게시(publish_results)를 끄고 코드 스캐닝에도 올리지 않으며
+# PR을 막지 않는다. ci.yml이 부르는 security-scan.yml에 두지 않는다: 이 잡이 달라는 actions: read를 ci.yml의 부르는 잡이 주지 않으면 GitHub이 CI 실행을
+# 시작하지 않고(리뷰 H1), 조직 허용 목록에 이 액션을 적용하기 전의 실패도 PR 검사를 막지 않게 한다(D-T12, 적용은 소유자 몫).
+# 이 액션은 안에서 ghcr.io/ossf/scorecard-action:v2.5.0을 태그로 부른다(남는 위험, devops §4.5). 비밀 값을 쓰지 않는다.
+name: scorecard
+
+on:
+  # 매주 월요일 00:00 UTC(09:00 KST)
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard
+          path: scorecard.sarif
+          if-no-files-found: ignore
+          retention-days: 30

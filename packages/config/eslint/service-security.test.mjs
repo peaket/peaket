@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { ESLint, Linter } from 'eslint';
-import { OUTBOUND_HTTP_EXCEPTIONS, RESPONSE_SCHEMA_BASELINE, serviceSecurityConfigs } from './service-security.mjs';
+import { OUTBOUND_HTTP_EXCEPTIONS, RESPONSE_SCHEMA_BASELINE, SQL_RAW_ALLOWLIST, serviceSecurityConfigs } from './service-security.mjs';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const OUTBOUND = 'peaket-service/no-direct-outbound-http';
@@ -301,4 +301,139 @@ test('V-T31 ③ [ASVS v5.0.0-15.3.2] node:http(s) 모듈을 다시 내보내는 
   for (const code of blockedCases) assert.ok(ids(code).includes(OUTBOUND), `막아야 한다: ${code}`);
   // 형만 다시 내보내기와 서버 쪽 이름은 막지 않는다
   for (const code of ["export type { IncomingMessage } from 'node:http';", "export { createServer, STATUS_CODES } from 'node:http';"]) assert.deepEqual(ids(code), [], `막지 않아야 한다: ${code}`);
+});
+
+// ---------- sql.raw 허용 목록(ADR-0037, ADR-0263 결정 6, architecture §8.3 SQL 주입 행) ----------
+
+const SQL_RULE = 'peaket-service/sql-raw-allowlist';
+const DB_FILE = 'services/demo-svc/src/modules/note/adapters/db/drizzle-note-store.ts';
+const sqlErrors = (code, { filename = DB_FILE, configs = serviceSecurityConfigs(['services/*/src'], { sqlRawAllowlist: [] }) } = {}) => errorsOf(code, { filename, configs }).filter((m) => m.ruleId === SQL_RULE);
+const DRIZZLE = "import { sql } from 'drizzle-orm';\n";
+
+test('ADR-0037 sql.raw에 식이 든 템플릿·변수·함수 결과를 넘기면 막고, 글자 그대로의 문자열과 같은 파일의 그런 const는 받는다', () => {
+  const blockedCases = [
+    'export const f = (col: string) => sql.raw(`order by ${col}`);',
+    'export const f = (col: string) => sql.raw(col);',
+    "export const f = (cols: string[]) => sql.raw(cols.join(', '));",
+    "export const f = (col: string) => sql.raw('order by ' + col);",
+    "let dir = 'asc';\nexport const f = () => sql.raw(dir);",
+    "import { ORDER } from './order';\nexport const f = () => sql.raw(ORDER);",
+    'const PARTS = [`a`, `b`];\nexport const f = () => sql.raw(PARTS[0]);',
+    'export const f = () => sql.raw();',
+    // 부르지 않고 값으로 넘기거나 떼어 내면 무엇이 들어갈지 볼 수 없다
+    "export const f = (xs: string[]) => xs.map(sql.raw);",
+    'const { raw } = sql;\nexport const f = (s: string) => raw(s);',
+    // 리뷰 뒤 더한 규칙 ⑥: sql을 다시 담은 별칭, 배열에 넣어 꺼내기
+    'export const f = (c: string) => { const s = sql; return s.raw(c); };',
+    'const q = sql;\nexport const f = (c: string) => q.raw(c);',
+    'export const f = (c: string) => [sql][0].raw(c);',
+    'export const f = (c: string) => (sql as any).raw(c);',
+  ];
+  for (const code of blockedCases) assert.ok(sqlErrors(`${DRIZZLE}${code}`).length > 0, `막아야 한다: ${code}`);
+  const allowedCases = [
+    "export const COLUMNS = sql.raw('id, status, version');",
+    'export const COLUMNS = sql.raw(`id, status`);',
+    "const LIST = \"'A', 'B'\";\nexport const IN = sql.raw(LIST);",
+    'const COND = `status in (\'OPEN\')`;\nexport const q = sql`select 1 where ${sql.raw(COND)}`;',
+    "export const COLS = sql.raw('a, ' + 'b');",
+    // 매개변수로 묶는 보통 템플릿은 이 규칙이 보지 않는다
+    'export const q = (id: string) => sql`select * from t where id = ${id}`;',
+  ];
+  for (const code of allowedCases) assert.deepEqual(sqlErrors(`${DRIZZLE}${code}`), [], `받아야 한다: ${code}`);
+  const [m] = sqlErrors(`${DRIZZLE}export const f = (c: string) => sql.raw(c);`);
+  assert.match(m.message, /sql-raw-allowlist\.json/);
+});
+
+test('ADR-0037 drizzle-orm에서 이름을 바꿔 가져온 sql도 보고 다른 곳의 sql은 보지 않는다', () => {
+  for (const code of [
+    // 이름공간 가져오기를 구조 분해한 별칭(리뷰 뒤 더한 규칙 ⑥)
+    "import * as d from 'drizzle-orm';\nconst { sql: s } = d;\nexport const f = (c: string) => s.raw(c);",
+    "import * as d from 'drizzle-orm';\nconst { sql } = d;\nexport const f = (c: string) => sql.raw(c);",
+    "import { sql as rawSql } from 'drizzle-orm';\nexport const f = (c: string) => rawSql.raw(c);",
+    "import { sql as q } from 'drizzle-orm/sql';\nexport const f = (c: string) => q.raw(c);",
+    "import * as d from 'drizzle-orm';\nexport const f = (c: string) => d.sql.raw(c);",
+    "import { eq, sql } from 'drizzle-orm';\nexport const f = (c: string) => (sql as any).raw(c);",
+    // 가져오기가 쓰는 곳 뒤에 있어도 본다
+    "export const f = (c: string) => sql.raw(c);\nimport { sql } from 'drizzle-orm';",
+  ]) {
+    assert.ok(sqlErrors(code).length > 0, `막아야 한다: ${code}`);
+  }
+  for (const code of [
+    "import { sql } from './fake-sql';\nexport const f = (c: string) => sql.raw(c);",
+    'const sql = { raw: (s: string) => s };\nexport const f = (c: string) => sql.raw(c);',
+    "import { sql } from 'drizzle-orm';\nexport const f = (sql: { raw(s: string): string }, c: string) => sql.raw(c);",
+    "import type { sql } from 'drizzle-orm';\nexport type T = typeof sql;",
+    "export const f = (s: { raw(x: string): string }, c: string) => s.raw(c);",
+  ]) {
+    assert.deepEqual(sqlErrors(code), [], `받아야 한다: ${code}`);
+  }
+});
+
+test('ADR-0037 허용 목록의 파일만 동적 인자를 받고 목록 줄에 까닭이 없거나 없는 파일을 가리키면 실패한다', () => {
+  const dynamic = `${DRIZZLE}export const f = (ops: string[]) => sql.raw(ops.map((o) => \`'\${o}'\`).join(', '));`;
+  const listed = [{ file: DB_FILE, reason: '작업 이름은 코드의 상수 목록에서만 오고 글자 꼴을 미리 본다(시험용 줄)' }];
+  assert.deepEqual(sqlErrors(dynamic, { configs: serviceSecurityConfigs(['services/*/src'], { sqlRawAllowlist: listed }) }), []);
+  // 같은 목록이라도 다른 파일은 막는다
+  assert.equal(sqlErrors(dynamic, { filename: 'services/demo-svc/src/modules/note/adapters/db/other.ts', configs: serviceSecurityConfigs(['services/*/src'], { sqlRawAllowlist: listed }) }).length, 1);
+  // 목록 줄의 꼴: 까닭, 파일 하나(글롭 없이), 있는 파일(root를 주면 본다), 겹침 없음
+  const cfg = (list, root) => () => serviceSecurityConfigs(['services/*/src'], { sqlRawAllowlist: list, root });
+  assert.throws(cfg([{ file: DB_FILE, reason: ' ' }]), /까닭/);
+  assert.throws(cfg([{ file: DB_FILE }]), /까닭/);
+  assert.throws(cfg([{ file: 'services/*/src/x.ts', reason: '까닭이 있는 줄이지만 글롭이다' }]), /파일 하나/);
+  assert.throws(cfg([{ file: 'services/demo-svc/src/none.ts', reason: '없는 파일을 가리키는 줄(시험)' }], ROOT), /없다/);
+  assert.throws(cfg([listed[0], listed[0]]), /겹친다/);
+  // 저장소의 목록: 줄마다 까닭이 있고 있는 파일이며, 그 파일에 정말 동적 sql.raw가 있다(쓰이지 않는 줄을 남기지 않는다)
+  assert.ok(SQL_RAW_ALLOWLIST.length > 0);
+  serviceSecurityConfigs(['services/*/src'], { root: ROOT });
+  const strict = serviceSecurityConfigs(['services/*/src', 'packages/platform/src'], { sqlRawAllowlist: [] });
+  for (const e of SQL_RAW_ALLOWLIST) {
+    assert.ok(existsSync(`${ROOT}${e.file}`), e.file);
+    assert.ok(e.reason.trim().length >= 20, e.file);
+    const errs = sqlErrors(readFileSync(`${ROOT}${e.file}`, 'utf8'), { filename: e.file, configs: strict });
+    assert.ok(errs.length > 0, `목록에서 지울 줄(동적 sql.raw가 없다): ${e.file}`);
+  }
+});
+
+test('ADR-0037 sql 규칙이 packages/platform/src에도 걸린다', async () => {
+  const eslint = new ESLint({ cwd: ROOT });
+  const code = `${DRIZZLE}export const f = (c: string) => sql.raw(c);\n`;
+  const at = async (path) => {
+    const [r] = await eslint.lintText(code, { filePath: `${ROOT}${path}` });
+    return r.messages.filter((m) => m.ruleId === SQL_RULE).length;
+  };
+  assert.equal(await at('packages/platform/src/_probe.ts'), 1);
+  assert.equal(await at('services/demo-svc/src/modules/note/adapters/db/x.ts'), 1);
+  assert.equal(await at('packages/platform/template/src/modules/example/adapters/db/x.ts'), 1);
+  // 공용 패키지에는 서비스 전용 규칙(외부 호출·응답 스키마)을 걸지 않는다: 공용 외부 호출 클라이언트 자신이 fetch를 쓴다
+  const [r] = await eslint.lintText('export const f = (u: string) => fetch(u);\n', { filePath: `${ROOT}packages/platform/src/_probe.ts` });
+  assert.deepEqual(r.messages.filter((m) => m.ruleId === OUTBOUND), []);
+  // 시험 파일과 화면 코드는 보지 않는다
+  assert.equal(await at('packages/platform/test/x.test.ts'), 0);
+  assert.equal(await at('apps/web/src/x.ts'), 0);
+});
+
+test('ADR-0037 execute·query에 ${…}를 끼운 템플릿 글자를 넘기면 막고, 매개변수 템플릿·같은 파일 const만 끼운 글자는 받는다(리뷰 뒤 더한 규칙 ⑥)', () => {
+  const blockedCases = [
+    "import { sql } from 'drizzle-orm';\nexport const f = (db: any, c: string) => db.execute(`select * from t order by ${c}`);",
+    "export const f = (client: any, c: string) => client.query(`select * from t where id = '${c}'`);",
+    'export const f = async (c: any, t: string) => { await c.query(`drop table "${t}"`); };',
+    "export const f = (pool: any, c: string) => pool['query'](`select ${c}`);",
+    'export const f = (client: any, c: string) => client?.query(`select ${c}`);',
+  ];
+  for (const code of blockedCases) assert.equal(sqlErrors(code).length, 1, `막아야 한다: ${code}`);
+  const allowedCases = [
+    // 매개변수로 묶는 sql 템플릿, 식 없는 글자, 같은 파일 const 글자만 끼운 글자, $1 매개변수
+    "import { sql } from 'drizzle-orm';\nexport const f = (db: any, id: string) => db.execute(sql`select * from t where id = ${id}`);",
+    'export const f = (client: any) => client.query(`select 1`);',
+    "const TIMEOUT = '2s';\nexport const f = (client: any) => client.query(`set lock_timeout = '${TIMEOUT}'`);",
+    "export const CHANNEL = 'v0_seat_delta';\nexport const f = (c: any) => c.query(`LISTEN ${CHANNEL}`);",
+    "export const f = (client: any, id: string) => client.query('select * from t where id = $1', [id]);",
+    // 다른 이름의 함수는 보지 않는다
+    'export const f = (u: URLSearchParams, c: string) => u.get(`a${c}`);',
+  ];
+  for (const code of allowedCases) assert.deepEqual(sqlErrors(code), [], `받아야 한다: ${code}`);
+  // 허용 목록에 retention·invariant-checker run이 까닭과 함께 든다(지금 있는 동적 DDL·임시 표 넣기)
+  for (const f of ['packages/platform/src/retention.ts', 'services/invariant-checker/src/run.ts', 'packages/platform/src/outbox.ts', 'packages/platform/src/partitions.ts']) {
+    assert.ok(SQL_RAW_ALLOWLIST.some((e) => e.file === f), f);
+  }
 });

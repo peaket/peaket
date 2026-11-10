@@ -1,0 +1,15 @@
+{
+  "$comment": "외부 보안 검사 예외와 받아들인 결과(docs/devops.md §4.4 외부 보안 검사 게이트 '예외 파일', ADR-0263 결정 5·12). 예외 줄: tool(codeql·trivy-config), rule(규칙 ID), path(저장소 기준 파일 경로 하나), reason(영향과 완화), issue(이슈 번호), createdOn·expiresOn(YYYY-MM-DD, 만료일은 만든 날부터 30일 [가정]을 넘지 못한다). 받아들인 결과 줄(고칠 것이 아니라 설계로 받아들인 결과, trivy-config만): issue 대신 adr(근거 ADR 번호, docs/adr의 그 파일 본문에 그 규칙 ID가 적혀 있어야 한다), expiresOn 대신 reviewOn(다시 볼 날, 만든 날부터 1년 [가정] 안). 두 줄 모두 count(이 줄이 맞을 결과 수, 더 많이 맞으면 막는다)를 적는다(ADR-0263 결정 13). 비밀 검사의 오탐은 여기가 아니라 tools/ci/gitleaks.toml·trivy-secret.yaml의 허용 목록에 둔다. 판정은 tools/ci/scan-gate.mjs",
+  "exceptions": [
+    {
+      "tool": "trivy-config",
+      "rule": "GIT-0001",
+      "path": "infra/stacks/global/github/repositories.tf",
+      "reason": "저장소 peaket은 소유자가 정한 공개 모노레포다(포트폴리오, ADR-0169. 받아들인 근거는 그 결과를 적은 ADR-0263 결정 12). 완화: 봇 시뮬레이터처럼 공개하면 안 되는 코드는 비공개 저장소 peaket-bots로 나눈다(POL-026), 비밀은 저장소에 두지 않고 GitHub 환경 비밀·Secrets Manager에만 둔다(docs/security/secrets-and-keys.md), 커밋 이력은 PR·푸시·주 1회 gitleaks 검사가 본다(ADR-0263 결정 2)",
+      "adr": "ADR-0263",
+      "count": 1,
+      "createdOn": "2026-11-10",
+      "reviewOn": "2027-11-10"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# gitleaks 이력 지문 무시 목록(docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 2). gitleaks --gitleaks-ignore-path로 읽는다.
+# 교체(폐기·재발급, RB-26)를 마친 실제 누출의 지문만 둔다. 오탐은 tools/ci/gitleaks.toml 허용 목록에 둔다.
+# 지문 줄(커밋 40자리:파일:규칙:줄)마다 바로 앞 줄에 '# #<이슈 번호> <교체한 날 YYYY-MM-DD> <무엇>' 주석을 둔다(tools/ci/scan-tools.mjs가 본다).

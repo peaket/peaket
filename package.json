@@ -10,7 +10,7 @@
     "test": "turbo run test",
     "asvs:report": "node tools/ci/asvs-report.mjs --scan services --scan packages --scan apps --scan tools --scan loadtest",
     "typecheck": "turbo run typecheck",
-    "lint": "eslint --no-error-on-unmatched-pattern services packages/platform/template apps packages/ds/src packages/api-client/src packages/telemetry/src packages/validation/src packages/console-contract/src packages/seatmap/src"
+    "lint": "eslint --no-error-on-unmatched-pattern services packages/platform/template packages/platform/src packages/shuffle/src packages/search-normalize/src apps packages/ds/src packages/api-client/src packages/telemetry/src packages/validation/src packages/console-contract/src packages/seatmap/src"
   },
   "devDependencies": {
     "eslint": "^10.13.0",

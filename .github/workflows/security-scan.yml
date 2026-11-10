@@ -1,8 +1,12 @@
-# 보안 검사 게이트의 새 도구 없이 되는 몫(docs/devops.md §3.1 security-scan.yml 행·§4.4, ADR-0259 결정 10, BUILD_ORDER BAS-010 ①).
-# ci.yml이 PR과 푸시(develop 등)마다 부른다. 새 취약점은 코드가 바뀌지 않아도 공개되므로 바뀐 범위와 상관없이 돈다.
-# pnpm 내장 검사(pnpm audit --json, pnpm licenses list --json)의 결과를 tools/ci/vuln-deadline.mjs가 판정한다: 유효한 예외
-# (tools/ci/vuln-exceptions.json)가 없는 치명·높음은 막고, 중간 이하와 허용 목록 밖 라이선스는 알림만 남긴다. 결과를 읽지 못하면 막는다(ASVS 16.5.3).
-# 외부 도구(gitleaks·CodeQL·OpenSSF Scorecard·Trivy)는 BAS-011 ②가 더한다(PROGRESS OPEN[31]).
+# 보안 검사 게이트(docs/devops.md §3.1 security-scan.yml 행·§4.4 '조치 기한 판정'·'외부 보안 검사 게이트', ADR-0259 결정 10, ADR-0263).
+# ci.yml이 PR과 푸시(develop 등)마다 부르고, 이 파일 스스로 매주 월요일 09:00 KST 예약 실행과 수동 실행을 받는다.
+# - dependencies(BAS-010 ①): pnpm 내장 검사(pnpm audit --json, pnpm licenses list --json)의 결과를 tools/ci/vuln-deadline.mjs가 판정한다. 유효한 예외
+#   (tools/ci/vuln-exceptions.json)가 없는 치명·높음은 막고, 중간 이하와 허용 목록 밖 라이선스는 알림만 남긴다. 결과를 읽지 못하면 막는다(ASVS 16.5.3).
+# - secrets·codeql·iac-config(BAS-011 ②, ADR-0263): 외부 도구(gitleaks CLI, CodeQL 액션, Trivy 이미지)가 낸 SARIF를 tools/ci/scan-gate.mjs가 판정한다.
+#   OpenSSF Scorecard는 ci.yml이 부르지 않는 따로 된 scorecard.yml에 둔다(그 잡의 actions: read가 ci.yml 실행을 막지 않게, devops §4.4 '리뷰 뒤 더한 규칙' ①). 판·체크섬·다이제스트는 tools/ci/scan-tools.mjs의 고정 표, 액션은 아래 uses: 줄의 커밋이다.
+#   Semgrep은 쓰지 않는다(소유자 결정 OPEN[31], 2026-11-10). 그 몫은 ESLint 규칙(ci-node의 린트)과 CodeQL 프로토타입 오염 쿼리가 맡는다.
+# 권한: 맨 위는 contents: read이고 security-events: write는 codeql 잡만 받는다(ci.yml의 부르는 잡이 그만큼만 허락한다). 비밀 값을 쓰지 않는다.
+# 예약 실행은 ci.yml 밖이라 ci-summary가 보지 않는다. 실패는 GitHub 기본 알림에 기댄다(계획 BAT-202 8장 6).
 name: security-scan
 
 on:
@@ -13,6 +17,15 @@ on:
         type: boolean
         required: false
         default: true
+      sast:
+        description: CodeQL 정적 분석을 돈다(화면·서비스·패키지·도구 코드가 바뀐 PR, 모든 푸시)
+        type: boolean
+        required: false
+        default: true
+  # 매주 월요일 00:00 UTC(09:00 KST). 비밀 탐지(모든 가지·태그)·정적 분석·IaC 설정·의존성 판정을 코드가 바뀌지 않아도 다시 본다
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +55,7 @@ jobs:
           code=$?
           set -e
           echo "pnpm audit 종료 코드: $code"
-      # 라이선스 목록은 설치한 패키지의 정보를 읽는다. 설치 스크립트는 돌리지 않는다
+      # 라이선스 목록은 설치한 패키지의 정보를 읽는다. 설치 스크립트는 돌리지 않는다. 예약·수동 실행에는 입력이 없어 건너뛴다(취약점 판정만 한다)
       - name: 라이선스 목록(pnpm licenses list)
         if: ${{ inputs.licenses }}
         run: |
@@ -62,5 +75,111 @@ jobs:
         with:
           name: vuln-report
           path: ${{ runner.temp }}/vuln-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # 비밀 탐지(ASVS 13.3.1, ADR-0263 결정 2·13): 지금 커밋에서 닿는 전체 이력(예약 실행은 모든 가지·태그)을 병합 커밋의 차이까지 본다.
+  # 미끼를 먼저 찾게 하고, 못 찾으면 이력을 보지 않고 실패한다
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # GitHub 릴리스의 linux 묶음을 받아 고정 표의 SHA-256과 같을 때만 실행 파일을 꺼낸다
+      - name: gitleaks 받기
+        run: node tools/ci/scan-tools.mjs fetch-gitleaks --out "$RUNNER_TEMP/gitleaks"
+      # 누출이면 gitleaks가 0이 아닌 코드로 끝나므로 코드는 남기기만 하고 통과 여부는 판정 단계가 정한다. 보고서는 가린다(--redact)
+      - name: 비밀 탐지(gitleaks)
+        id: gitleaks
+        run: |
+          extra=()
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then extra+=(--all-refs); fi
+          set +e
+          node tools/ci/scan-tools.mjs gitleaks --bin "$RUNNER_TEMP/gitleaks/gitleaks" --sarif "$RUNNER_TEMP/gitleaks.sarif" --work "$RUNNER_TEMP/gitleaks-decoy" "${extra[@]}"
+          code=$?
+          set -e
+          echo "gitleaks 종료 코드: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: 비밀 탐지 판정
+        if: ${{ !cancelled() }}
+        env:
+          GITLEAKS_EXIT: ${{ steps.gitleaks.outputs.code }}
+        run: node tools/ci/scan-gate.mjs --tool gitleaks --sarif "$RUNNER_TEMP/gitleaks.sarif" --exit-code "$GITLEAKS_EXIT" --report "$RUNNER_TEMP/secrets-gate.json" --event "$GITHUB_EVENT_NAME"
+      # 판정 보고서(규칙·파일·줄·커밋만)만 남긴다. 도구 원본 보고서(작성자·커밋 메시지가 든다)는 올리지 않는다
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secrets-gate
+          path: ${{ runner.temp }}/secrets-gate.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # 정적 분석(ASVS 15.3.6 외, ADR-0263 결정 3·4·13): JS·TS를 빌드 없이 기본 쿼리 묶음으로 본다. 받은 SARIF로 판정하고, 코드 스캐닝에 올리는 것은
+  # develop 푸시와 예약 실행뿐이다(PR·다른 가지 푸시·수동 실행은 올리지 않는다). CodeQL 묶음은 액션 판이 정한 것을 쓴다(tools를 주지 않는다)
+  codeql:
+    if: ${{ inputs.sast || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config-file: tools/ci/codeql-config.yml
+          trap-caching: false
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:javascript-typescript
+          output: ${{ runner.temp }}/codeql
+          upload: ${{ (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) && 'always' || 'never' }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: 정적 분석 판정
+        run: node tools/ci/scan-gate.mjs --tool codeql --sarif "$RUNNER_TEMP/codeql" --report "$RUNNER_TEMP/codeql-gate.json" --event "$GITHUB_EVENT_NAME"
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-gate
+          path: ${{ runner.temp }}/codeql-gate.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # IaC 설정 검사(ADR-0263 결정 7 ①·13): 다이제스트 고정 Trivy 이미지를 네트워크 없이, 저장소를 읽기 전용으로 붙여 내장 검사 규칙으로만 돌린다.
+  # 미끼(높음이 나와야 할 설정)를 먼저 찾게 하고, 줄 안 무시 주석은 막는다. 공개 모노레포(GIT-0001)는 받아들인 결과로 두므로 봇 저장소가 비공개인지 따로 본다
+  iac-config:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: 봇 저장소 비공개 검사(POL-026)
+        run: node tools/ci/check-repo-visibility.mjs
+      - name: IaC 설정 검사(Trivy config)
+        run: node tools/ci/scan-tools.mjs trivy-config --out "$RUNNER_TEMP/trivy-config"
+      - name: IaC 설정 판정
+        if: ${{ !cancelled() }}
+        run: node tools/ci/scan-gate.mjs --tool trivy-config --sarif "$RUNNER_TEMP/trivy-config" --report "$RUNNER_TEMP/trivy-config/gate.json" --event "$GITHUB_EVENT_NAME"
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iac-config
+          path: ${{ runner.temp }}/trivy-config/
           if-no-files-found: ignore
           retention-days: 30

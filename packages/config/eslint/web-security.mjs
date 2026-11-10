@@ -6,8 +6,10 @@
 //   insertAdjacentHTML·document.write(ln), setHTMLUnsafe·parseHTMLUnsafe·createContextualFragment·DOMParser.parseFromString 호출, iframe srcdoc, setAttribute의 srcdoc·on…).
 //   글은 textContent나 React 글자 자식으로 그린다.
 // - peaket-web/no-window-message: 창 message 수신기(addEventListener('message')·onmessage). 처음에는 뿌리 eslint.config.mjs의 NO_WINDOW_MESSAGE였다.
+// - peaket-web/no-prototype-mutation: 프로토타입 오염 꼴(ASVS 15.3.6, ADR-0263 결정 6). js-security.mjs의 규칙을 이 이름으로 싣는다(서비스는 peaket-service/).
 // 이 규칙을 줄 안 주석(eslint-disable 등)으로 끄면 tools/ci/check-lint-disables.mjs가 막는다. 예외는 아래 허용 목록(파일과 까닭)으로만 둔다.
 import tsParser from '@typescript-eslint/parser';
+import { prototypeMutationRule } from './js-security.mjs';
 
 const WHY_HTML = 'HTML을 넣지 않는다. 글은 textContent나 React 글자 자식으로 그린다(ASVS 3.2.2, ADR-0259)';
 const WHY_MESSAGE = '창 메시지(message) 수신기를 두지 않는다. 결제 결과 등은 복귀 주소의 값을 서버가 대조해 정한다(ASVS 3.5.5, ADR-0253)';
@@ -139,6 +141,7 @@ export const webSecurityPlugin = {
   rules: {
     'no-html-injection': sinkRule(HTML_INJECTION_SINKS, '화면 코드가 HTML을 넣는 곳을 막는다(ASVS 3.2.2)', htmlVisitors),
     'no-window-message': sinkRule(WINDOW_MESSAGE_LISTENERS, '화면 코드의 창 메시지 수신기를 막는다(ASVS 3.5.5)', messageVisitors),
+    'no-prototype-mutation': prototypeMutationRule,
   },
 };
 
@@ -194,7 +197,7 @@ export function webSecurityConfigs(files, { exceptions = WEB_SECURITY_EXCEPTIONS
       ignores,
       languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' } },
       plugins: { 'peaket-web': webSecurityPlugin },
-      rules: { 'peaket-web/no-html-injection': 'error', 'peaket-web/no-window-message': 'error' },
+      rules: { 'peaket-web/no-html-injection': 'error', 'peaket-web/no-window-message': 'error', 'peaket-web/no-prototype-mutation': 'error' },
     },
     ...checked.map(({ file, byRule }) => ({
       files: [file],

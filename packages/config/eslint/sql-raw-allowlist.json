@@ -1,0 +1,29 @@
+{
+  "$comment": "sql.raw()에 동적 글자를 넘겨도 되는 파일(ADR-0037, ADR-0263 결정 6, docs/architecture.md §8.3 SQL 주입 행). 규칙 peaket-service/sql-raw-allowlist(service-security.mjs)가 읽는다. 줄: file(저장소 기준 파일 하나, 글롭 없이), reason(무엇이 들어가고 어떻게 걸렀는지). 동적 인자가 없어진 파일의 줄은 지운다(그 폴더의 시험이 본다). 처음 목록은 2026-11-10 규칙을 지금 코드 전체에 돌려 나온 네 곳이고, 같은 날 execute·query 템플릿 글자 규칙(리뷰 뒤 더한 규칙 ⑥)으로 retention·invariant-checker run을 더했다. outbox·partitions는 두 규칙 모두에 걸린다",
+  "files": [
+    {
+      "file": "packages/platform/src/idempotency.ts",
+      "reason": "멱등 기록 표의 CHECK 정의(drizzle 표 정의, 마이그레이션 생성용)에 작업 이름 목록을 넣는다. 작업 이름은 서비스 코드의 상수이고 바로 위에서 대문자·숫자·밑줄 꼴(OPERATION)로 거른다. CHECK 정의에는 매개변수를 쓸 수 없다"
+    },
+    {
+      "file": "packages/platform/src/outbox.ts",
+      "reason": "아웃박스 파티션을 만드는 DDL의 범위 경계(FROM … TO …). 경계는 uuidLowerBound가 시각으로 만든 16진수·하이픈 문자열뿐이고 DDL이라 매개변수로 넘길 수 없다. 표 이름은 sql.identifier로 따옴표를 친다"
+    },
+    {
+      "file": "packages/platform/src/partitions.ts",
+      "reason": "월 파티션을 만드는 DDL의 범위 경계(FROM … TO …). 경계는 이 파일의 함수가 시각으로 만든 UUID·시각 문자열뿐이고 DDL이라 매개변수로 넘길 수 없다. 표 이름은 sql.identifier로 따옴표를 친다"
+    },
+    {
+      "file": "services/purchase-svc/src/modules/booking/adapters/db/drizzle-payment-pull.ts",
+      "reason": "결제 끌어오기의 단계 조건 step in (…)을 이 파일의 상수 PULL_STEPS(사가 단계 이름 형으로 묶은 글자 목록)에서 만든다. 바깥 값이 들어가지 않는다"
+    },
+    {
+      "file": "packages/platform/src/retention.ts",
+      "reason": "정비 작업의 reindex index concurrently 문(DDL)에 색인 이름을 넣는다. 이름은 pg_class에서 읽은 그 표의 색인 이름이고 큰따옴표로 묶는다. DDL이라 매개변수로 넘길 수 없다"
+    },
+    {
+      "file": "services/invariant-checker/src/run.ts",
+      "reason": "검사기 임시 표(pg_temp)에 원본 행을 넣는 INSERT 문의 표·열 이름. 이름은 검사기 코드의 고정 목록에서 오고 ident()가 큰따옴표로 묶어 안의 큰따옴표를 겹친다. 값은 $1 매개변수(json)로 넘긴다"
+    }
+  ]
+}

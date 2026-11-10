@@ -36,9 +36,10 @@ const RULES = [
   // v0 배포(docs/infra.md §3 'v0 배포', BUILD_ORDER BSL-050): v0 이미지에 드는 배포 단위와 로컬 환경 값, 이미지 빌드 단계의 바인딩 대조
   [/^(services\/(v0-monolith|pg-simulator|payment-svc)\/|deploy\/envs\/local\/|tools\/ci\/verify-native-binding\.mjs$)/, ['kind']],
   // 이미지 빌드 시험(build-image.yml, docs/devops.md §3.2 '이미지 빌드 시험(푸시 없이)'): 이미지가 있는 배포 단위와 그 Dockerfile이 담는
-  // 작업 공간 패키지, 작업 공간 파일, 빌드 맥락 규칙(.dockerignore)·Node 판, 이 워크플로와 그 스크립트(BSL-050)
+  // 작업 공간 패키지, 작업 공간 파일, 빌드 맥락 규칙(.dockerignore)·Node 판, 이 워크플로와 그 스크립트(BSL-050). 빌드 잡의 이미지 비밀 검사가 쓰는
+  // 고정 표·판정 도구·비밀 규칙 설정도 그 스크립트다(BAS-011 ②, ADR-0263 결정 7)
   [
-    /^(services\/(v0-monolith|pg-simulator|payment-svc|bundle|queue-svc|admission-ctrl|purchase-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts|shuffle)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding)\.mjs$)/,
+    /^(services\/(v0-monolith|pg-simulator|payment-svc|bundle|queue-svc|admission-ctrl|purchase-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts|shuffle)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding|scan-tools|scan-gate|vuln-deadline|entry)\.mjs$|tools\/ci\/(trivy-secret\.yaml|scan-exceptions\.json)$)/,
     ['image'],
   ],
   // 부하 시험 점검(loadtest-check.yml, docs/verification.md §3.9, BSL-060): 시나리오와 실행 도구, 그리고 그 시험이 견주는 것

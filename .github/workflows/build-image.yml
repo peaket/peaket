@@ -1,6 +1,8 @@
 # 이미지 빌드(docs/devops.md §3.1 build-image.yml, 추천 적용 2026-11-03, BUILD_ORDER BSL-050). ci.yml의 잡 image가 부른다.
 # 지금은 ① 빌드 잡만 있다: 플랫폼마다 그 아키텍처의 GitHub 호스트 러너에서(에뮬레이션 없이) OCI 묶음과 다이제스트를 만들고,
 # 같은 러너에서 네트워크 없이 스모크한다(tools/ci/image-build.mjs). 운영 노드는 Graviton(arm64), 로컬 kind·데모는 amd64라 둘 다 만든다.
+# 스모크는 이미지 안 소스 관리 폴더(.git·.svn·.hg)도 막고(ASVS 13.4.1), 이어서 OCI 묶음을 다이제스트 고정 Trivy로 네트워크 없이 비밀 검사만 해
+# 하나라도 찾으면 묶음을 올리지 않고 실패한다(ASVS 13.3.1, ADR-0263 결정 7·9, tools/ci/scan-tools.mjs·scan-gate.mjs).
 # 빌드 잡은 레지스트리·서명·출처 증명 권한이 없다(잡 권한은 contents: read뿐, D-T32 ①, tools/ci/check-workflows.mjs가 지킨다).
 # ② 게시 잡(이미지 인덱스, SBOM·취약점 검사, 푸시, cosign 서명, SLSA 출처 증명)은 wbs 0.1.5에서 더한다.
 name: build-image
@@ -49,6 +51,24 @@ jobs:
           IMAGE: ${{ inputs.image }}
           PLATFORM: ${{ matrix.platform }}
         run: node tools/ci/image-build.mjs --dockerfile "$DOCKERFILE" --image "$IMAGE" --platform "$PLATFORM" --out image-out
+      # 이미지 비밀 검사: 실행 때 조립한 가짜 비밀 묶음(미끼)을 같은 설정으로 먼저 찾게 한 뒤 실제 묶음을 본다. 비밀 규칙 설정(tools/ci/trivy-secret.yaml)은
+      # Trivy 내장 허용 규칙을 끄고 그 파일의 허용 규칙만 오탐으로 받는다. 취약점 자료·검사 규칙을 받지 않는다(ADR-0263 결정 7·13)
+      - name: 이미지 비밀 검사(Trivy)
+        env:
+          IMAGE: ${{ inputs.image }}
+          ARCH: ${{ matrix.arch }}
+        run: node tools/ci/scan-tools.mjs trivy-image --input "image-out/$IMAGE-$ARCH.oci.tar" --sarif "$RUNNER_TEMP/trivy-secret.sarif" --work "$RUNNER_TEMP/trivy-image-decoy"
+      - name: 이미지 비밀 판정
+        if: ${{ !cancelled() }}
+        run: node tools/ci/scan-gate.mjs --tool trivy-secret --sarif "$RUNNER_TEMP/trivy-secret.sarif" --report "$RUNNER_TEMP/image-secret-gate.json"
+      # 판정 보고서(규칙·파일·줄만)는 묶음과 같이 7일 둔다. 도구 원본 보고서는 올리지 않는다
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-secret-gate-${{ inputs.image }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image-secret-gate.json
+          if-no-files-found: ignore
+          retention-days: 7
       # OCI 묶음과 다이제스트는 게시 잡(wbs 0.1.5)이 다이제스트를 다시 계산해 맞춘 뒤 쓴다
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

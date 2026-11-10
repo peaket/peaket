@@ -15,9 +15,9 @@
 | `service-openapi.mjs` | 서비스 OpenAPI 차이(D-T38). `services/<이름>/package.json`에 `openapi:emit`이 있는 서비스마다 문서를 뽑아(`pnpm --dir services/<이름> run openapi:emit`, 환경 변수 `OPENAPI_OUT`), `peaket.contractOperations`에 적은 계약 작업만 경로·메서드·매개변수·요청과 응답 본문의 모양으로 `docs/api/openapi.yaml`과 견줍니다. 목록이 없거나 문서를 못 만들면 실패합니다(규칙은 docs/devops.md §3.1 `contract-check.yml` 행). 계약 YAML은 계약 패키지의 `yaml`로 읽어 작업 공간 설치가 필요하고, 시험은 JSON 계약으로 설치 없이 돕니다 | `contract-breaking.mjs services` |
 | `release-tags.mjs` | 출시 태그 규칙(`vX.Y.Z`)과 SemVer 정렬. `release-plan.mjs`와 `contract-breaking.mjs`가 함께 씁니다 | 스크립트 |
 | `check-merge-tree.mjs` | 후보를 대상에 병합한 결과 트리가 후보의 트리와 같은지 봅니다(§2.2.4, D-T22) | `merge-tree.yml`(`main` 필수 검사) |
-| `check-workflows.mjs` | 워크플로 규칙: 액션 SHA 고정, `pull_request_target` 금지, 맨 위 `permissions:`, 사용자 입력을 식에 쓰지 않기, 체크아웃의 `persist-credentials: false`, 잡마다 `timeout-minutes`(§4.5). `build-image.yml`의 빌드 잡은 잡 권한이 `contents: read`뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없어야 합니다(D-T32 ①) | `tools-check.yml` |
+| `check-workflows.mjs` | 워크플로 규칙: 액션 SHA 고정, `pull_request_target` 금지, 맨 위 `permissions:`, 사용자 입력을 식에 쓰지 않기, 체크아웃의 `persist-credentials: false`, 잡마다 `timeout-minutes`(§4.5). `build-image.yml`의 빌드 잡은 잡 권한이 `contents: read`뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없어야 합니다(D-T32 ①). GitHub 소유(`actions/`·`github/`)가 아닌 액션은 조직 허용 목록 `infra/stacks/global/github/variables.tf`의 `actions_patterns_allowed` 기본값의 꼴에 맞아야 하고, 그 목록을 읽지 못하면 실패합니다(D-T12 ①, `--allowlist`로 다른 파일을 줄 수 있습니다). 같은 저장소의 재사용 워크플로를 부르는 잡은 부른 워크플로의 모든 잡 권한이 부르는 잡이 준 권한 안이어야 합니다(규칙 10, 적지 않은 것은 none, none < read < write. 넘으면 GitHub이 실행을 시작하지 않습니다) | `tools-check.yml` |
 | `image-build.mjs` | 이미지 빌드 잡의 본체(§3.1 `build-image.yml` ①). 플랫폼 하나를 BuildKit(`docker-container` 빌더, 이미지 다이제스트 고정)으로 빌드해 OCI 묶음과 다이제스트를 만들고(`--provenance=false --sbom=false`, 푸시 없음), 같은 이미지를 실어 네트워크 없이 스모크합니다 | `build-image.yml` |
-| `image-smoke.mjs` | 이미지 안에서 그 이미지의 node로 돕니다. 플랫폼·아키텍처가 맞는지, 네이티브 모듈(`.node`)이 모두 열리는지 봅니다(arm64 러너 스모크) | `image-build.mjs` |
+| `image-smoke.mjs` | 이미지 안에서 그 이미지의 node로 돕니다. 이미지 사용자로는 플랫폼·아키텍처가 맞는지와 네이티브 모듈(`.node`)이 모두 열리는지(arm64 러너 스모크), 루트로 따로(`--scm`) 이미지 안 전체에 소스 관리 메타데이터(`.git`·`.svn`·`.hg`·`.bzr`·`CVS`)가 없는지 봅니다(ASVS 13.4.1, 맨 위 `/proc`·`/sys`·`/dev`는 보지 않고 심볼릭 링크는 따라가지 않습니다, ADR-0263 결정 9·13) | `image-build.mjs` |
 | `verify-native-binding.mjs` | 미리 빌드한 Kafka 바인딩 대조(§4.4, ADR-0176 결정 5). 설치가 끝난 파일 묶음에서 그 패키지를 찾아 고정 표의 다이제스트로 다시 받은 묶음을 견주고, 묶음과 설치된 `build/` 파일이 같은지 봅니다. 판을 올리면 고정 표부터 고칩니다 | 이미지 Dockerfile의 빌드 단계 |
 | `check-codeowners.mjs` | `.github/CODEOWNERS`의 팀이 `teams.json`에 있는지, 첫 줄이 `*`인지, 같은 경로가 두 번 없는지 봅니다(§2.3) | `tools-check.yml` |
 | `check-workspace-protocol.mjs` | `@peaket/*`을 `workspace:` 밖의 판으로 적은 곳을 막습니다(§4.4) | `tools-check.yml` |
@@ -28,6 +28,10 @@
 | `ledger.mjs` | 완성 장부(ADR-0256 결정 2, docs/architecture.md §8.6). 정본의 시험 시나리오 표 판정 기준을 ①②③ 단위로 나눈 항목, 시나리오가 가리키지 않는 FR·NFR·POL, ASVS 추적 표의 행마다 상태 하나(자동 시험·ID만·측정·사람 확인·미검증·다른 단계·없앰·해당 없음·빈칸)와 등급(A·B·C)을 정해 `docs/review/ledger/`에 씁니다. 자동 시험은 시험 이름에 ID와 바로 뒤 세부 번호(`S-T23 ①`)가 함께 있는 것이고, 손으로 정하는 상태·등급은 `docs/review/ledger-notes.md`에서 읽습니다. `--check`는 고칠 것이 있으면 1, `--scope`·`--batch <묶음> --require`는 범위에 빈칸이나 ID만이 있으면 1, notes·범위·인자 오류는 2. 시험 통과 여부는 보지 않습니다(`trace-check.mjs` 몫). 첫 줄이 `// asvs-report: ignore`인 `tools/ci` 아래 파일은 건너뜁니다 | 묶음을 끝낼 때(`--batch <묶음> --require`), 장부를 고칠 때 |
 | `brief.mjs` | 묶음 지시서(ADR-0256 결정 9, docs/architecture.md §8.6 묶음 절차 1). `--batch <묶음>`이면 묶음 표 행, 단계 줄 원문, 장부 범위의 판정 항목, 묶음 ID가 나오는 정본 자리(문서:줄과 가까운 제목), 코드 자리, 닿을 CI 잡, 자주 놓친 결함, 읽기 규칙을 한 장(6만 자 안)으로 뽑는다. 정본에서 그때마다 뽑으므로 사본이 아니다. `--out <파일>`로 저장소 밖에 쓰고 담당에게 그 경로를 준다. 끝 코드 0·2 |
 | `vuln-deadline.mjs` | 취약점 조치 기한과 예외 만료 판정(docs/devops.md §4.4 '조치 기한 판정', BUILD_ORDER BAS-010 ①, ADR-0259 결정 10). pnpm 내장 의존성 검사(`pnpm audit --json`)·라이선스 검사(`pnpm licenses list --json`) 결과와 예외 파일 `vuln-exceptions.json`을 읽어, 유효한 예외가 없는 치명·높음이면 실패하고 중간 이하는 알림만 남깁니다. 검사 결과를 읽지 못하거나 형식이 틀리면 막고, pnpm `auditConfig`의 무시 설정이 있어도 막습니다 | `security-scan.yml` |
+| `scan-tools.mjs` | 외부 보안 검사 도구의 고정 표(gitleaks 판·주소·SHA-256, Trivy 이미지 다이제스트)와 실행(docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 1·2·7). `fetch-gitleaks`는 GitHub 릴리스 묶음을 받아 SHA-256이 맞을 때만 실행 파일 하나를 꺼내고(받아 둔 묶음도 다시 잽니다), `gitleaks`는 설정(`gitleaks.toml`)·무시 목록(`gitleaks-ignore`)의 꼴(허용 블록의 `targetRules`, `^…$`로 묶은 좁은 값 꼴, 8자 이상 `stopwords`)을 본 뒤 실행 때 만든 미끼 비밀을 먼저 찾게 하고 못 찾으면 이력을 보지 않고 끝내며, 찾으면 지금 커밋에서 닿는 전체 이력(`--all-refs`면 모든 가지·태그)을 병합 커밋의 차이(`-m`)까지 가려(`--redact`) SARIF로 냅니다. `trivy-config`·`trivy-image`는 다이제스트 고정 Trivy(GHCR)를 `docker run --network none`으로 띄워 IaC 설정 검사·이미지 비밀 검사만 합니다(검사 규칙·취약점 자료를 받지 않습니다). 두 검사 모두 실행 때 만든 미끼(높음이 나와야 할 Dockerfile·Terraform·값 파일로만 그려지는 작은 차트, 내장 허용 경로 아래 것까지 가짜 비밀을 담은 작은 이미지 묶음)를 같은 인자로 먼저 돌려 못 찾으면 대상을 보지 않고 끝내고, 설정 검사는 대상 안의 줄 안 무시 주석(`trivy:ignore`·`tfsec:ignore`)을 막으며 공용 차트를 CI 값 파일(`trivy-chart-values.yaml`)로도 그립니다. 판정은 하지 않습니다 | `security-scan.yml`(`secrets`·`iac-config`), `build-image.yml`(`build`) |
+| `scan-gate.mjs` | 외부 보안 검사 판정(ADR-0263 결정 4·5, ASVS 13.3.1·15.3.6·16.5.3). gitleaks·CodeQL·Trivy의 SARIF를 읽어 비밀은 하나라도, CodeQL·Trivy 설정 검사는 보안 등급 7.0 이상과 CodeQL 프로토타입 오염 쿼리 셋을 막고 나머지는 알림만 남깁니다. 그 쿼리 셋이 돈 흔적이 없거나, 결과 파일이 없거나 틀리거나, gitleaks가 누출 아닌 까닭으로 끝나면 막습니다. 예외는 `scan-exceptions.json`(도구·규칙·경로·사유·이슈·맞을 결과 수 `count`·만든 날·만료일, 만료 30일 [가정])뿐이고 비밀 검사 결과는 예외로 풀지 않습니다. 설계로 받아들인 결과(IaC 설정 검사만)는 같은 파일에 이슈 대신 근거 ADR(`adr`, `docs/adr`의 그 파일 본문에 그 규칙 ID가 있어야 합니다)과 다시 볼 날(`reviewOn`, 1년 [가정] 안)을 적은 줄로 두고, 알림 줄에 '받아들인 결과 ADR-…(다시 볼 날 …)'로 남깁니다(ADR-0263 결정 12·13). 한 줄에 `count`보다 많은 결과가 맞으면 막고, 쓰이지 않는 줄은 푸시·예약 실행에서 막고 PR(`--event pull_request`)에서는 알림만 남깁니다. 보고서·잡 요약에는 규칙·파일·줄(·커밋)만 적습니다 | `security-scan.yml`, `build-image.yml` |
+| `check-repo-visibility.mjs` | 봇 저장소 `peaket-bots`가 `infra/stacks/global/github/repositories.tf`에서 글자 그대로 `visibility = "private"`인지 봅니다(POL-026, ADR-0263 결정 13). 저장소 리소스의 visibility가 맵 값(each.value.visibility)을 그대로 쓰는지도 봅니다. 공개 모노레포(GIT-0001)를 받아들인 결과로 두는 대신 따로 막습니다 | `security-scan.yml`(`iac-config`) |
+| `entry.mjs` | 판정 도구의 직접 실행 판별(실제 경로로 견줌). 이름은 같은데 경로가 맞지 않으면 통과가 아니라 실패로 끝냅니다(ADR-0263 결정 13 ⑦) | `scan-gate.mjs`·`scan-tools.mjs`·`vuln-deadline.mjs`·`check-repo-visibility.mjs` |
 | `check-lint-disables.mjs` | 보안 린트 규칙(`peaket-web/*`·`peaket-service/*`)이나 모든 규칙을 끄는 `eslint-disable` 주석을 찾아 거절합니다. 이름을 단 예외는 `lint-disable-exceptions.json`(파일·까닭)에만 둡니다(디자인 캔버스 보드 파일 54곳). docs/devops.md §4.4, BUILD_ORDER BAS-010 ①, ADR-0259 결정 12 | `ci.yml`의 `lint-guard` |
 | `git-fixture.mjs` | 시험용 임시 git 저장소. 시험만 씁니다 | `*.test.mjs` |
 
@@ -45,6 +49,13 @@ node tools/ci/changes.mjs --base develop
 
 ```bash
 node tools/ci/check-workflows.mjs
+```
+
+외부 보안 검사 판정은 결과 파일만 있으면 로컬에서도 돕니다(gitleaks·CodeQL은 이 PC에서 돌리지 않고 CI가 냅니다, ADR-0263 결정 11).
+
+```bash
+node tools/ci/scan-tools.mjs trivy-config --out out/trivy-config
+node tools/ci/scan-gate.mjs --tool trivy-config --sarif out/trivy-config
 ```
 
 ```bash

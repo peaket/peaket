@@ -146,14 +146,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node tools/ci/check-lint-disables.mjs
 
-  # 보안 검사 게이트(docs/devops.md §3.1 security-scan.yml, BUILD_ORDER BAS-010 ①): 새 취약점은 코드가 바뀌지 않아도 공개되므로 범위와
-  # 상관없이 늘 돈다(잠금 파일만 읽는다). 의존성을 설치하는 라이선스 목록은 의존성이 바뀔 수 있는 범위(js)일 때만 본다
+  # 보안 검사 게이트(docs/devops.md §3.1 security-scan.yml, BUILD_ORDER BAS-010 ①·BAS-011 ②): 새 취약점은 코드가 바뀌지 않아도 공개되므로 범위와
+  # 상관없이 늘 돈다(잠금 파일만 읽는다). 의존성을 설치하는 라이선스 목록은 의존성이 바뀔 수 있는 범위(js)일 때만 본다. 비밀 탐지·IaC 설정 검사는
+  # 늘, CodeQL은 화면·서비스·패키지·도구 코드(js·tools·ci)가 바뀐 PR과 모든 푸시에서 돈다(ADR-0263 결정 3). 부른 워크플로의 잡 권한 상한은
+  # 이 잡의 권한이라 codeql 잡이 결과를 올릴 security-events: write를 여기서 준다(그 잡에만 넘어간다)
   security-scan:
     needs: changes
     if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/security-scan.yml
     with:
       licenses: ${{ needs.changes.result != 'success' || needs.changes.outputs.js == 'true' }}
+      sast: ${{ needs.changes.result != 'success' || needs.changes.outputs.js == 'true' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push' }}
 
   iac-check:
     needs: changes

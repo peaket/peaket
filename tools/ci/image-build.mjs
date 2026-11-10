@@ -91,12 +91,21 @@ export function loadBuildArgs(o) {
 }
 
 /**
- * 스모크 실행 인자: 네트워크 없이, 스모크 스크립트를 읽기 전용으로 붙여 그 이미지의 node로 돌린다
+ * 스모크 실행 인자: 네트워크 없이, 스모크 스크립트를 읽기 전용으로 붙여 그 이미지의 node로 돌린다. 네이티브 모듈 열기는 앱이 도는 이미지 사용자로 본다
  * @param {{ tag: string, platform: string, smokeScript: string, nodeArch: string }} o
  * @returns {string[]}
  */
 export function smokeRunArgs(o) {
   return ['run', '--rm', '--network', 'none', '--platform', o.platform, '-v', `${o.smokeScript}:/smoke.mjs:ro`, o.tag, 'node', '/smoke.mjs', o.nodeArch];
+}
+
+/**
+ * 이미지 안 소스 관리 메타데이터 검사 인자(ASVS 13.4.1, ADR-0263 결정 9·13 ⑦): 이미지 사용자가 못 읽는 폴더(/root 등)도 보도록 이 검사만 루트로 띄운다
+ * @param {{ tag: string, platform: string, smokeScript: string }} o
+ * @returns {string[]}
+ */
+export function scmRunArgs(o) {
+  return ['run', '--rm', '--network', 'none', '--platform', o.platform, '--user', '0:0', '-v', `${o.smokeScript}:/smoke.mjs:ro`, o.tag, 'node', '/smoke.mjs', '--scm', '/'];
 }
 
 /**
@@ -222,5 +231,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     docker(loadBuildArgs({ dockerfile: o.dockerfile, platform: o.platform, tag }));
     const smokeScript = resolve(dirname(fileURLToPath(import.meta.url)), 'image-smoke.mjs');
     docker(smokeRunArgs({ tag, platform: o.platform, smokeScript, nodeArch }));
+    docker(scmRunArgs({ tag, platform: o.platform, smokeScript }));
   }
 }

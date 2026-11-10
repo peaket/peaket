@@ -1,0 +1,56 @@
+# gitleaks 설정(docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 2, BUILD_ORDER BAS-011 ②).
+# 기본 규칙을 그대로 잇는다(useDefault = true. 규칙을 끄거나 사용자 규칙을 더하지 않는다). tools/ci/scan-tools.mjs가 이 꼴을 지키는지 본다.
+# 허용 목록([[allowlists]])은 오탐만 둔다: 블록마다 까닭(description)과 좁은 꼴(값 그대로나 값의 모양, 필요하면 경로와 함께).
+# 모든 파일·폴더를 통째로 가리키는 꼴과 커밋 통째 허용은 두지 않는다. 경로만으로 푸는 블록도 두지 않는다(그 파일의 진짜 비밀까지 지나간다).
+# 교체를 마친 실제 누출의 이력 지문은 여기가 아니라 tools/ci/gitleaks-ignore에 이슈 번호·교체한 날과 함께 둔다.
+# 줄 안 허용 주석(gitleaks:allow)은 받지 않는다(--ignore-gitleaks-allow).
+# 처음 목록(2026-11-10): 저장소 전체 이력(341커밋)을 v8.30.1 기본 규칙으로 돌려 나온 51건을 모두 손으로 보고 오탐으로 분류했다.
+# 값 꼴은 그 꼴이 이 설정 파일 자체에서 다시 걸리지 않게 일부 글자를 정규식 이스케이프로 적었다.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = '''RFC 6455 §1.3의 예시 WebSocket 키(the sample nonce를 base64로 쓴 것). 게이트웨이 시험이 업그레이드 요청 머리에 싣는 공개 값이다'''
+targetRules = ['generic-api-key']
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ\=\=$''']
+
+[[allowlists]]
+description = '''비밀이 아닌 공개 상수: 구매 요청 인증 키를 끌어내는 HKDF info 이름표(서버·화면이 같은 글을 쓴다), 모의 본인확인 기관의 개발용 기본값(운영은 환경 비밀로 준다), 부하 시험 사례 이름, 문서의 폴더 경로'''
+targetRules = ['generic-api-key']
+regexes = [
+  '''^PEAKET\-purchase\-v1$''',
+  '''^peaket\-test\-verification\-secret\-v1$''',
+  '''^five\-same\-notls\-r1$''',
+  '''^docs/planning/0[1-4]$''',
+]
+
+[[allowlists]]
+description = '''시험 코드의 가짜 값: 멱등 키·사건 키 UUID, 결제 시뮬레이터 시험 키, 취소·환불 멱등 키 고정 값, 부하 시험이 가림·거절을 보려고 넣는 가짜 토큰·키. 시험 폴더와 시험 파일에서만 받는다'''
+condition = 'AND'
+targetRules = ['generic-api-key', 'jwt', 'stripe-access-token']
+paths = ['''(?:^|/)(?:test|test-int)/[^/].*|\.test\.(?:ts|mjs)$''']
+regexes = [
+  '''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''',
+  '''^(?:sim_sk_test_|test_sk_)0123456789abcdef$''',
+  '''^(?:cancel\-12345678901234|cancel\-fixture\-0001|refund\-0123456789abcdef)$''',
+  '''^tok_SECRET_9f8e7d6c5b4a3921$''',
+  '''^PRIVATE\-MATERIAL\-7f3a9c2e1b$''',
+  '''^sk_live_REALSECRET\d{10}$''',
+  '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4In0\.sig\-_A1$''',
+  '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJTRUNSRVRQQVlMT0FEIn0\.SIGsecretSIG$''',
+]
+
+[[allowlists]]
+description = '''알려진 답 시험 벡터(추첨 셔플·구매 요청 인증 MAC)의 16진 값. 서버와 화면이 같은 결과를 내는지 견주려고 공개한 고정 입력이다'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^packages/(?:shuffle/test/vectors\.json|platform/test/vectors/[\w.-]+\.json)$''']
+regexes = ['''^[0-9a-f]{64}$''']
+
+[[allowlists]]
+description = '''추첨 증명 화면의 표본 자료(예시 토큰 해시). 화면을 그려 보려는 값이고 어느 계정의 것도 아니다'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^apps/web/src/entities/shuffle-proof/model\.ts$''']
+regexes = ['''^[0-9a-f]{64}$''']

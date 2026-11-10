@@ -53,6 +53,16 @@ resource "github_repository" "this" {
   archive_on_destroy = true
 }
 
+# Dependabot 취약점 알림을 켠다(Trivy 설정 검사 GIT-0003, docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 12). 비공개 봇 저장소도 같다.
+# provider 6.13의 github_repository.vulnerability_alerts 속성은 사라질 예정(DEPRECATED)이라 그 문서가 권하는 따로 된 리소스로 둔다.
+# 조직 수준에서 알림을 따로 정해 두었으면 적용이 실패한다. 적용(terraform apply)은 소유자가 한다
+resource "github_repository_vulnerability_alerts" "this" {
+  for_each = local.repositories
+
+  repository = github_repository.this[each.key].name
+  enabled    = true
+}
+
 resource "github_branch" "develop" {
   for_each = local.develop_from_main
 

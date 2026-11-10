@@ -1,0 +1,29 @@
+# CodeQL 설정(docs/devops.md §4.4 '외부 보안 검사 게이트', ADR-0263 결정 3, BUILD_ORDER BAS-011 ②). security-scan.yml codeql 잡이 config-file로 준다.
+# 기본 쿼리 묶음을 그대로 쓴다(쿼리를 더하거나 빼지 않는다. 프로토타입 오염 쿼리 셋이 돈 흔적은 tools/ci/scan-gate.mjs가 본다).
+# 화면·서비스·패키지·도구 코드를 보고, 빼는 것은 시험·생성물·빌드 결과뿐이다(tools/ci/security-scan-workflow.test.mjs가 본다).
+# 부하 시험(loadtest/)과 규칙 모델(specs/)은 운영 코드가 아니라 보지 않는다.
+name: peaket-codeql
+paths:
+  - apps
+  - services
+  - packages
+  - tools
+paths-ignore:
+  # 시험
+  - '**/test'
+  - '**/test-int'
+  - '**/e2e'
+  - '**/*.test.*'
+  - '**/*.spec.*'
+  - '**/*.test.harness.*'
+  # 생성물(계약 생성기·토큰 생성기의 결과)
+  - '**/gen'
+  # 빌드 결과와 설치물
+  - '**/node_modules'
+  - '**/dist'
+  - '**/dist-poc'
+  - '**/.next'
+  - '**/.next-*'
+  - '**/.turbo'
+  - '**/coverage'
+  - '**/storybook-static'

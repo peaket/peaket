@@ -1,0 +1,54 @@
+# Trivy 설정 검사가 공용 차트(deploy/charts/peaket-service)를 모든 템플릿을 켠 채로 그려 보는 CI 값 파일(docs/devops.md §4.4 '리뷰 뒤 더한 규칙' ④,
+# ADR-0263 결정 13, BUILD_ORDER BAS-011 ②). 배포에는 쓰지 않는다. tools/ci/scan-tools.mjs의 대상 chart-ci가 --helm-values로 주고,
+# tools/ci/scan-tools.test.mjs가 템플릿마다 맨 위 if 조건(service.enabled, autoscaling, leaderLease, networkPolicy, outboxRelay)이 켜지는지,
+# required를 채우고 fail 조건(볼륨 종류, 추가 포트, Lease 이름 등)에 걸리지 않는지 본다. 값으로 켜는 갈래(추가 포트·볼륨·붙일 자리)도 작은 예를 둬 그린다.
+# 운영 환경처럼 이미지를 다이제스트로 고정하고, 차트가 필수로 묻는 값(이름·이미지·환경)만 채운다. 비밀 값은 없다(Secret 이름만).
+name: trivy-ci
+
+image:
+  repository: ghcr.io/peaket/trivy-ci
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # 다이제스트가 있으면 쓰지 않지만, 템플릿의 required(태그 갈래)도 채워 둔다(scan-tools.test.mjs가 required를 모두 본다)
+  tag: ci
+
+env:
+  PEAKET_ENV: ci
+
+secretEnvFrom: trivy-ci
+
+service:
+  enabled: true
+  leaderLease: trivy-ci-leader
+  extraPorts:
+    - name: grpc
+      port: 9090
+  volumes:
+    - name: trivy-ci-config
+      configMap:
+        name: trivy-ci-config
+  volumeMounts:
+    - name: trivy-ci-config
+      mountPath: /etc/trivy-ci
+      readOnly: true
+  autoscaling:
+    enabled: true
+  networkPolicy:
+    enabled: true
+    appFromPodLabels: { app.kubernetes.io/name: trivy-ci-gateway }
+    egress:
+      publicHttps: true
+      internal:
+        - cidrs: [10.20.0.0/16]
+          ports: [5432]
+
+outboxRelay:
+  enabled: true
+  secretEnvFrom: trivy-ci-relay
+  volumes:
+    - name: trivy-ci-relay-config
+      configMap:
+        name: trivy-ci-relay-config
+  volumeMounts:
+    - name: trivy-ci-relay-config
+      mountPath: /etc/trivy-ci-relay
+      readOnly: true

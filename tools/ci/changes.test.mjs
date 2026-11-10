@@ -228,6 +228,13 @@ test('BSL050_이미지에드는곳·작업공간파일·이미지워크플로와
     'services/admission-ctrl/src/start.ts',
     'services/purchase-svc/src/start.ts',
     'packages/shuffle/src/index.ts',
+    // 빌드 잡의 이미지 비밀 검사(BAS-011 ②)
+    'tools/ci/scan-tools.mjs',
+    'tools/ci/scan-gate.mjs',
+    'tools/ci/vuln-deadline.mjs',
+    'tools/ci/trivy-secret.yaml',
+    'tools/ci/scan-exceptions.json',
+    'tools/ci/entry.mjs',
   ]) {
     assert.ok(scopes({ [f]: '바꿈\n' }).includes('image'), f);
   }
@@ -266,6 +273,9 @@ test('BSL050_문서·화면·이미지없는서비스·로컬도구만바꾸면_
     'tools/ci/changes.test.mjs',
     'tools/ci/image-build.test.mjs',
     'tools/ci/check-workflows.mjs',
+    'tools/ci/scan-tools.test.mjs',
+    'tools/ci/gitleaks.toml',
+    'tools/ci/codeql-config.yml',
     // 이미지 빌드 맥락이 담지 않는 뿌리 파일과 다른 워크플로, 배포 값
     'turbo.json',
     'eslint.config.mjs',

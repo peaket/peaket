@@ -43,8 +43,9 @@ variable "require_code_owner_review" {
   default     = false
 }
 
+# ossf/scorecard-action: security-scan.yml의 주 1회 Scorecard(ADR-0263 결정 8). 조직에 적용(terraform apply)하는 것은 소유자다
 variable "actions_patterns_allowed" {
-  description = "허용할 제3자 액션 패턴. 워크플로가 쓰는 것만 더한다(docs/devops.md §4.5). 판은 조직 정책의 SHA 고정 요구가 따로 막는다"
+  description = "허용할 제3자 액션 패턴. 워크플로가 쓰는 것만 더한다(docs/devops.md §4.5). 판은 조직 정책의 SHA 고정 요구가 따로 막는다. tools/ci/check-workflows.mjs가 이 기본값으로 워크플로를 본다(D-T12 ①)"
   type        = list(string)
-  default     = ["hashicorp/setup-terraform@*"]
+  default     = ["hashicorp/setup-terraform@*", "ossf/scorecard-action@*"]
 }

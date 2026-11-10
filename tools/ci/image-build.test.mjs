@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempDir } from './git-fixture.mjs';
-import { BUILDER, BUILDKIT_IMAGE, PLATFORMS, loadBuildArgs, ociBuildArgs, ociManifestDigest, parseImageArgs, smokeRunArgs } from './image-build.mjs';
+import { BUILDER, BUILDKIT_IMAGE, PLATFORMS, loadBuildArgs, ociBuildArgs, ociManifestDigest, parseImageArgs, scmRunArgs, smokeRunArgs } from './image-build.mjs';
 
 const VALID = ['--dockerfile', 'services/v0-monolith/Dockerfile', '--image', 'v0-monolith', '--platform', 'linux/arm64', '--out', 'out/images'];
 const without = (flag) => {
@@ -102,6 +102,10 @@ test('DT32_스모크실행인자_네트워크없이·스모크스크립트읽기
   const script = '/home/runner/work/peaket/peaket/tools/ci/image-smoke.mjs';
   assert.deepEqual(smokeRunArgs({ tag: 'peaket-smoke/v0-monolith:arm64', platform: 'linux/arm64', smokeScript: script, nodeArch: 'arm64' }), [
     'run', '--rm', '--network', 'none', '--platform', 'linux/arm64', '-v', `${script}:/smoke.mjs:ro`, 'peaket-smoke/v0-monolith:arm64', 'node', '/smoke.mjs', 'arm64',
+  ]);
+  // 네이티브 모듈 열기는 이미지 사용자로(--user를 주지 않는다), 소스 관리 폴더 검사만 루트로 이미지 안 전체를 본다(ASVS 13.4.1, devops §4.4 '리뷰 뒤 더한 규칙' ⑦)
+  assert.deepEqual(scmRunArgs({ tag: 'peaket-smoke/v0-monolith:arm64', platform: 'linux/arm64', smokeScript: script }), [
+    'run', '--rm', '--network', 'none', '--platform', 'linux/arm64', '--user', '0:0', '-v', `${script}:/smoke.mjs:ro`, 'peaket-smoke/v0-monolith:arm64', 'node', '/smoke.mjs', '--scm', '/',
   ]);
   assert.equal(smokeRunArgs({ tag: 't:x64', platform: 'linux/amd64', smokeScript: script, nodeArch: 'x64' }).at(-1), 'x64');
 });

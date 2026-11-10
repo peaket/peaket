@@ -58,8 +58,8 @@
 | Q-T35 | ② | 만료 뒤 다시 줄 서기 | ② 409(이미 대기 중), 대기 취소 뒤 맨 뒤 새 번호 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T35 | ③ | 만료 뒤 다시 줄 서기 | ③ 409 ALREADY_ADMITTED, 번호 발급 없음 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts |
 | Q-T35 | ④ | 만료 뒤 다시 줄 서기 | ④ 410(rejoinAllowed=true) 뒤 맨 뒤 새 번호(ADR-0064) | ID만 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
-| Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 대기열에 들지 않고(번호 발급 0) 예매 제한 안내를 받는다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
-| Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰에 명단 키가 실린다 | 다른 단계 | A | 미정 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는 queue-svc… |
+| Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 대기열에 들지 않고(번호 발급 0) 예매 제한 안내를 받는다 | 다른 단계 | A | HOT-253 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는… |
+| Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰에 명단 키가 실린다 | 다른 단계 | A | HOT-253 · 로비·진입의 판매 자격 대조(진입 자격 창 `eligGates`와 명단 사본, 403 `sale-eligibility-required`, 번호 발급 0)와 입장 토큰 클레임 `lst`는… |
 | Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 다른 단계 | A | HOT-252 · 홀드 때의 판매 정책 평가(`lst`·등급·매수, 403 `sale-policy-denied`, 규칙 한도를 홀드 Lua 한도로)는 purchase-svc 몫이다. 감독이 갈래 1 새 단계를… |
 | Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
@@ -258,7 +258,7 @@
 | v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | B | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
 | v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | B | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 다른 단계 | B | 미정 · 이 행의 판매 자격 명단 몫(진입 대조·`lst`, HOT-250이 더함)은 Q-T36 ①②와 같은 갈래 3 새 단계가 시험한다. 이름을 단 기존 시험(admission-ctrl 입장 목표 한도 등)은 이… |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 다른 단계 | B | HOT-253 · 이 행의 판매 자격 명단 몫(진입 대조·`lst`, HOT-250이 더함)은 Q-T36 ①②와 같은 갈래 3 새 단계가 시험한다. 이름을 단 기존 시험(admission-ctrl 입장 목표 한도… |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |

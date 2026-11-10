@@ -3,11 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tempDir } from './git-fixture.mjs';
-import { findNativeModules, smoke } from './image-smoke.mjs';
+import { cliOptions, findNativeModules, findScmMetadata, smoke } from './image-smoke.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'image-smoke.mjs');
 
@@ -209,4 +209,121 @@ test('PRF215_코드리뷰_합본package.json은_네서비스의_start모듈을_�
   const { readFileSync } = await import('node:fs');
   const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'services', 'bundle', 'package.json'), 'utf8'));
   assert.deepEqual(pkg.peaket?.smokeImports, ['@peaket/payment-svc/start', '@peaket/purchase-svc/start', '@peaket/admission-ctrl/start', '@peaket/queue-svc/start']);
+});
+
+// ---------- 이미지 안 소스 관리 폴더(ASVS 13.4.1, ADR-0263 결정 9) ----------
+
+/** 이미지 뿌리(/)처럼 생긴 폴더: 앱, 깊은 의존성, 시스템 폴더, 걸리면 안 되는 비슷한 이름 */
+function imageRoot(files) {
+  const root = tempDir('smoke-scm-');
+  writeTree(root, { [join('app', 'dist', 'main.js')]: '', [join('usr', 'local', 'bin', 'node')]: '', ...files });
+  return root;
+}
+
+test('[ASVS v5.0.0-13.4.1] 이미지 안 어디든 .git·.svn·.hg·.bzr·CVS 폴더나 .git 파일이 있으면 스모크가 실패한다(node_modules 안 깊은 곳 포함)', () => {
+  const deep = join('app', 'node_modules', '.pnpm', 'dep@1.0.0', 'node_modules', 'dep');
+  const root = imageRoot({
+    [join('app', '.git', 'HEAD')]: 'ref: refs/heads/develop\n',
+    [join(deep, '.git')]: 'gitdir: ../../.git/modules/dep\n',
+    [join('srv', 'legacy', '.svn', 'entries')]: '12\n',
+    [join('opt', 'tool', '.hg', 'requires')]: 'store\n',
+    [join('opt', 'bzr-tool', '.bzr', 'branch-format')]: 'Bazaar-NG meta directory, format 1\n',
+    [join('usr', 'src', 'old', 'CVS', 'Root')]: ':pserver:x\n',
+  });
+  const expected = [join(root, 'app', '.git'), join(root, deep, '.git'), join(root, 'opt', 'bzr-tool', '.bzr'), join(root, 'opt', 'tool', '.hg'), join(root, 'srv', 'legacy', '.svn'), join(root, 'usr', 'src', 'old', 'CVS')].sort();
+  assert.deepEqual(findScmMetadata(root), expected);
+  const r = smoke({ expectedArch: 'x64', root: join(root, 'app'), scmRoot: root, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.scmMetadata, expected);
+  for (const p of expected) assert.ok(r.failures.some((f) => f.includes(p) && f.includes('소스 관리')), `${p}: ${JSON.stringify(r.failures)}`);
+  assert.equal(r.failures.length, 6, '아키텍처·네이티브 모듈은 맞다');
+  // 하나만 있어도(뿌리 바로 아래 .git 파일) 실패한다
+  const one = imageRoot({ '.git': 'gitdir: /elsewhere\n' });
+  assert.deepEqual(findScmMetadata(one), [join(one, '.git')]);
+  assert.equal(smoke({ expectedArch: 'x64', root: join(one, 'app'), scmRoot: one, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} }).ok, false);
+  // 없으면 통과한다
+  const clean = imageRoot({});
+  const ok = smoke({ expectedArch: 'x64', root: join(clean, 'app'), scmRoot: clean, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} });
+  assert.equal(ok.ok, true, JSON.stringify(ok.failures));
+  assert.deepEqual(ok.scmMetadata, []);
+  // 명령줄도 세 번째 인자(이미지 뿌리)를 보고 실패한다
+  const cli = spawnSync(process.execPath, [script, '--scm', root], { encoding: 'utf8' });
+  assert.equal(cli.status, 1, cli.stdout + cli.stderr);
+  assert.deepEqual(JSON.parse(cli.stdout.trim()).scmMetadata.map((p) => realpathSync(p)), expected.map((p) => realpathSync(p)));
+});
+
+test('[ASVS v5.0.0-13.4.1] /proc·/sys·/dev는 보지 않고 심볼릭 링크는 따라가지 않으며 .gitignore·.github 같은 이름은 걸리지 않는다', () => {
+  const outside = tempDir('smoke-scm-outside-');
+  writeTree(outside, { [join('repo', '.git', 'HEAD')]: 'ref\n' });
+  const root = imageRoot({
+    [join('proc', '1', 'cwd', '.git', 'HEAD')]: '',
+    [join('sys', 'x', '.hg', 'store')]: '',
+    [join('dev', 'shm', '.svn', 'entries')]: '',
+    [join('app', '.gitignore')]: 'node_modules\n',
+    [join('app', '.github', 'workflows', 'ci.yml')]: '',
+    [join('app', '.gitattributes')]: '',
+    [join('app', '.hgignore')]: '',
+    [join('app', 'docs', 'git')]: '',
+    [join('app', '.git-credentials.example')]: '',
+  });
+  symlinkSync(join(outside, 'repo'), join(root, 'app', 'linked'), 'junction');
+  assert.deepEqual(findScmMetadata(root), []);
+  // 맨 위의 proc·sys·dev만 건너뛴다. 더 깊은 같은 이름 폴더는 본다
+  writeTree(root, { [join('app', 'proc', '.git', 'HEAD')]: '' });
+  assert.deepEqual(findScmMetadata(root), [join(root, 'app', 'proc', '.git')]);
+  // 명령줄의 기본 뿌리: 앱은 /app, 소스 관리 폴더 검사는 / 전체다
+  // 명령줄: 네이티브 모듈 열기(이미지 사용자로 띄운다)와 소스 관리 폴더 검사(--scm, 루트로 띄운다)는 따로 돈다(devops §4.4 '리뷰 뒤 더한 규칙' ⑦)
+  assert.deepEqual(cliOptions(['arm64']), { mode: 'native', expectedArch: 'arm64', root: '/app' });
+  assert.deepEqual(cliOptions(['x64', '/srv']), { mode: 'native', expectedArch: 'x64', root: '/srv' });
+  assert.deepEqual(cliOptions(['--scm']), { mode: 'scm', scmRoot: '/' });
+  assert.deepEqual(cliOptions(['--scm', '/mnt']), { mode: 'scm', scmRoot: '/mnt' });
+  // 네이티브 모듈 쪽 명령줄은 소스 관리 폴더를 보지 않는다(이미지 사용자로 돌아 다 읽지 못한다)
+  const tree = imageRoot({ [join('app', '.git', 'HEAD')]: '' });
+  const native = spawnSync(process.execPath, [script, process.arch, join(tree, 'app')], { encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(native.stdout.trim()).scmMetadata, []);
+  const scm = spawnSync(process.execPath, [script, '--scm', tree], { encoding: 'utf8' });
+  assert.equal(scm.status, 1, scm.stdout);
+  assert.deepEqual(JSON.parse(scm.stdout.trim()).nativeModules, []);
+});
+
+test('[ASVS v5.0.0-13.4.1] 소스 관리 폴더를 찾다가 읽지 못한 폴더가 있으면 스모크가 실패한다(닫힘 실패)', async (t) => {
+  const { chmodSync } = await import('node:fs');
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.skip('권한으로 폴더를 못 읽게 하는 것은 리눅스 비루트 사용자에서만 재현된다(CI tools-check)');
+    return;
+  }
+  const root = imageRoot({ [join('root', 'secret', '.git', 'HEAD')]: '' });
+  chmodSync(join(root, 'root'), 0o000);
+  try {
+    const unreadable = [];
+    assert.deepEqual(findScmMetadata(root, unreadable), []);
+    assert.deepEqual(unreadable, [join(root, 'root')]);
+    const r = smoke({ expectedArch: 'x64', root: join(root, 'app'), scmRoot: root, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {} });
+    assert.equal(r.ok, false);
+    assert.ok(r.failures.some((f) => f.includes('읽지 못한 폴더') && f.includes(join(root, 'root'))), JSON.stringify(r.failures));
+  } finally {
+    chmodSync(join(root, 'root'), 0o755);
+  }
+});
+
+test('DT32_네이티브모듈찾기_이미지사용자로_읽지못한폴더는_건너뛰지않고_스모크실패로센다(다시 보기 3)', () => {
+  const { root } = appRoot();
+  const locked = join(root, 'node_modules', '.pnpm', 'other@1.0.0');
+  const readdir = (dir, o) => {
+    if (dir === locked) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    return readdirSync(dir, o);
+  };
+  const unreadable = [];
+  const found = findNativeModules(root, unreadable, { readdir });
+  assert.deepEqual(unreadable, [locked]);
+  assert.equal(found.some((f) => f.includes('other.node')), false);
+  const r = smoke({ expectedArch: 'x64', root, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {}, readdir });
+  assert.equal(r.ok, false);
+  assert.ok(r.failures.some((f) => f.includes('읽지 못한 폴더') && f.includes(locked)), JSON.stringify(r.failures));
+  // 사라진 폴더(ENOENT)는 실패가 아니다
+  const gone = (dir, o) => {
+    if (dir === locked) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    return readdirSync(dir, o);
+  };
+  assert.equal(smoke({ expectedArch: 'x64', root, runtime: { platform: 'linux', arch: 'x64' }, dlopen: () => {}, readdir: gone }).ok, true);
 });
