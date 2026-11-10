@@ -5,7 +5,7 @@ import { ScoreRisk } from '../src/modules/scoring/application/score-risk.js';
 import type { BehaviorRecord, BehaviorRecorder, HumanCheckPort, HumanCheckRequest, TrustSignals, VerdictRecord, VerdictRecorder } from '../src/modules/scoring/domain/ports.js';
 import { parseRuleSet, type RuleSet } from '../src/modules/scoring/domain/rules.js';
 import type { Scorer } from '../src/modules/scoring/domain/scorers.js';
-import type { HumanCheckResult, NetClass, ScoreRequest } from '../src/modules/scoring/domain/types.js';
+import type { HumanCheckResult, Intensity, NetClass, ScoreRequest } from '../src/modules/scoring/domain/types.js';
 
 const profile = (threshold: number, weight = 1) => ({
   threshold,
@@ -27,6 +27,29 @@ export const SYNTHETIC_RULES_JSON = JSON.stringify({
   },
 });
 export const SYNTHETIC_RULES: RuleSet = parseRuleSet(SYNTHETIC_RULES_JSON);
+
+interface RawRules {
+  version: number;
+  intensities: Record<string, Record<string, { threshold: number; weights: Record<string, number> }>>;
+  params: Record<string, Record<string, number>>;
+  shadow?: RawRules;
+  stage?: string;
+}
+
+/**
+ * 출시 첫 판 합성 규칙(§10.1·§10.4, B-T21): 적용 판(판 7)은 모든 강도·정렬에서 BehaviorScore 가중치 0, 그림자 판(판 8)은 합성 값 그대로다.
+ * edit로 일부를 바꿔 거부되는 판을 만든다
+ */
+export function launchRulesJson(edit?: (r: RawRules) => void): string {
+  const shadow = JSON.parse(SYNTHETIC_RULES_JSON) as RawRules;
+  shadow.version = 8;
+  const active = JSON.parse(SYNTHETIC_RULES_JSON) as RawRules;
+  for (const byShuffle of Object.values(active.intensities)) for (const p of Object.values(byShuffle)) p.weights.BehaviorScore = 0;
+  const raw: RawRules = { ...active, shadow, stage: 'LAUNCH' };
+  edit?.(raw);
+  return JSON.stringify(raw);
+}
+export const LAUNCH_RULES: RuleSet = parseRuleSet(launchRulesJson());
 
 /** 합성 규칙의 점수기 매개변수 일부만 바꾼 판 */
 export function rulesWith(over: { device?: Record<string, number>; network?: Record<string, number> }): RuleSet {
@@ -74,6 +97,9 @@ export function recordingSignals(): TrustSignals & { seen: string[] } {
     afterFailed: (w) => seen.push(`after:${w}`),
     honeypotHit: (signedIn) => seen.push(`honeypot:${signedIn}`),
     invRefMissing: (label, reason) => seen.push(`invref:${label}:${reason}`),
+    shadowDisagreement: (direction) => seen.push(`shadow:${direction}`),
+    invRefMigration: (feature, result) => seen.push(`migrate:${feature}:${result}`),
+    blockListChange: (op, source) => seen.push(`blocklist:${op}:${source}`),
   };
 }
 
@@ -99,7 +125,7 @@ export interface World {
   flush(): Promise<void>;
 }
 
-export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; deviceRef?: () => string | undefined; netClass?: (asn: number) => NetClass } = {}): World {
+export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; deviceRef?: () => string | undefined; netClass?: (asn: number) => NetClass; intensity?: () => Intensity } = {}): World {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 1, 0, 0) });
   const human = recordingHuman();
   const features = new MemoryFeatureStore();
@@ -108,7 +134,7 @@ export function world(o: { scorers?: readonly Scorer[]; rules?: RuleSet | null; 
   const behaviors = recordingBehaviors();
   const pending: Promise<unknown>[] = [];
   const score = new ScoreRisk({
-    rules: { current: () => (o.rules === null ? null : (o.rules ?? SYNTHETIC_RULES)), intensity: () => 'BASE' },
+    rules: { current: () => (o.rules === null ? null : (o.rules ?? SYNTHETIC_RULES)), intensity: o.intensity ?? (() => 'BASE') },
     human,
     features,
     devices: { ref: (id) => (o.deviceRef ? o.deviceRef() : id === DEVICE_ID ? DEVICE_REF : `k1.ref-of-${id}`) },

@@ -68,6 +68,16 @@ describe('정규 로그 줄의 필드', () => {
     for (const raw of ['p-123', 's-456', 'a-789']) expect(text).not.toContain(raw);
   });
 
+  test('ADR0053_서비스뼈대의가명함수는_정규로그줄과같은키로_같은가명을준다', async () => {
+    s = await start(BASE);
+    await s.inject({ method: 'GET', url: '/v1/demo/events/e-1/rich' });
+    const line = only(s.requests());
+    // 업무 로그 줄(예: trust-svc 보안 로그의 처리자)이 원문 대신 쓰는 가명이 정규 로그 줄의 accountRef와 이어진다
+    expect(s.svc.pseudonymizer.ref('a-789')).toBe(line.accountRef);
+    expect(s.svc.pseudonymizer.ref('p-123')).toBe(line.pidRef);
+    expect(JSON.stringify(s.svc.pseudonymizer)).toBe('"[LogPseudonymizer]"');
+  });
+
   test('ADR0069_모르는값은_칸을뺀다', async () => {
     s = await start({ PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' });
     await s.inject({ method: 'GET', url: '/v1/demo/items/a1', headers: { 'x-peaket-app': 'evil<script>' } });

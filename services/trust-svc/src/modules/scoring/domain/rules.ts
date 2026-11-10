@@ -1,7 +1,10 @@
 // 비공개 규칙 설정의 형식(docs/features/bot-defense.md §4.4, docs/security/secrets-and-keys.md '봇 탐지 규칙 매개변수', POL-006·POL-026).
 // 공개 저장소에는 형식과 이름만 둔다. 기준값·가중치 값은 Secrets Manager에서 주입하고 코드에 쓰지 않는다.
 // 오류 문구에는 칸의 이름만 싣는다(값을 싣지 않는다).
+// 그림자 판(§10.4): 선택 칸 shadow는 적용 판과 같은 모양이고 판 번호가 달라야 한다. stage "LAUNCH"(출시 첫 판)면 그림자 판이 있어야 하고,
+// 모든 강도·정렬 방식에서 적용 판의 BehaviorScore 가중치가 0, 그림자 판은 0보다 크며, 나머지 가중치·기준값·매개변수는 두 판이 같아야 읽는다(§10.1, B-T21 ①③).
 import { z } from 'zod';
+import { INTENSITIES, SCORER_NAMES } from './types.js';
 
 /** 회차별 기기 공유 수의 원소 상한 [가정](bot-defense §3.2 tr:devshare). 저장소가 이 수를 넘겨 세지 않는다 */
 export const DEV_SHARE_CAP = 20;
@@ -72,16 +75,50 @@ const params = z
   })
   .strict();
 
+const core = {
+  /** 바뀔 때마다 하나씩 늘어나는 판 번호(판정 기록의 profileVersion) */
+  version: z.int().positive(),
+  intensities: z.object({ RELAXED: byShuffle, BASE: byShuffle, STRICT: byShuffle }).strict(),
+  params,
+};
+
+/** 그림자 판: 적용 판과 같은 모양(판 번호, 강도 셋 × 정렬 방식 셋의 기준값·가중치, 점수기 매개변수) */
+const shadowSet = z.object(core).strict();
+
+const SHUFFLE_KEYS = ['ON', 'OFF', 'NONE'] as const;
+
+/** 키 차례와 상관없이 같은 값인가(매개변수 견주기) */
+const canonical = (v: unknown): string =>
+  JSON.stringify(v, (_k, x: unknown) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
+
 const ruleSet = z
-  .object({
-    /** 바뀔 때마다 하나씩 늘어나는 판 번호(판정 기록의 profileVersion) */
-    version: z.int().positive(),
-    intensities: z.object({ RELAXED: byShuffle, BASE: byShuffle, STRICT: byShuffle }).strict(),
-    params,
-  })
-  .strict();
+  .object({ ...core, shadow: shadowSet.optional(), stage: z.literal('LAUNCH').optional() })
+  .strict()
+  .superRefine((r, ctx) => {
+    const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
+    if (r.shadow && r.shadow.version === r.version) issue(['shadow', 'version'], '그림자 판 번호가 적용 판과 같다');
+    if (r.stage !== 'LAUNCH') return;
+    const shadow = r.shadow;
+    if (!shadow) {
+      issue(['shadow'], '출시 첫 판에는 그림자 판이 있어야 한다');
+      return;
+    }
+    for (const i of INTENSITIES) {
+      for (const s of SHUFFLE_KEYS) {
+        const active = r.intensities[i][s];
+        const other = shadow.intensities[i][s];
+        if (active.weights.BehaviorScore !== 0) issue(['intensities', i, s, 'weights', 'BehaviorScore'], '출시 첫 판의 적용 판 BehaviorScore 가중치는 0이다');
+        if (!(other.weights.BehaviorScore > 0)) issue(['shadow', 'intensities', i, s, 'weights', 'BehaviorScore'], '출시 첫 판의 그림자 판 BehaviorScore 가중치는 0보다 크다');
+        if (active.threshold !== other.threshold) issue(['shadow', 'intensities', i, s, 'threshold'], '출시 첫 판의 두 판 기준값이 다르다');
+        for (const n of SCORER_NAMES) if (n !== 'BehaviorScore' && active.weights[n] !== other.weights[n]) issue(['shadow', 'intensities', i, s, 'weights', n], '출시 첫 판의 두 판 가중치가 다르다');
+      }
+    }
+    if (canonical(r.params) !== canonical(shadow.params)) issue(['shadow', 'params'], '출시 첫 판의 두 판 매개변수가 다르다');
+  });
 
 export type RuleSet = z.output<typeof ruleSet>;
+/** 그림자 판(§10.4) */
+export type ShadowRuleSet = NonNullable<RuleSet['shadow']>;
 export type Profile = z.output<typeof profile>;
 export type ScorerParams = RuleSet['params'];
 

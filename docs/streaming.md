@@ -598,7 +598,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 원천 | 초당 | 근거 |
 | --- | --- | --- |
 | `HoldAttempt` | 약 2,000 | NFR-003 홀드 피크 초당 2,000건 |
-| `TrustVerdict` | 약 1,700 | 로비 사람 확인 검증 초당 1,700건(architecture §9.4) |
+| `TrustVerdict` | 약 1,700(그림자 판이 도는 동안 약 3,400) | 로비 사람 확인 검증 초당 1,700건(architecture §9.4). 그림자 판(bot-defense §10.4)은 판정마다 `shadow` true 기록을 하나 더 낸다. 출시 첫 온세일은 그림자 판이 필수다(`stage: "LAUNCH"`, 추천 적용 2026-11-10) |
 | `SeatEvent`(홀드 쪽 포함, 거르기 전) | 약 3,000 | 홀드 피크 + 판매 |
 | `OrderEvent` | 약 1,500 | 결제 300 TPS × 주문 상태 약 5개(TPS: 초당 처리 건수) |
 | `TicketEvent`, `PaymentEvent` | 약 1,800 | 발권(주문당 1~4매)과 결제 사건 |

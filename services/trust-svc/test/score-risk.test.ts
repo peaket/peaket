@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { TrustError } from '../src/modules/scoring/application/trust-error.js';
 import { SCORER_LIST, type Scorer, type ScorerOutcome } from '../src/modules/scoring/domain/scorers.js';
-import { deviceId, DEVICE_REF, EVENT, JOURNEY, PID, request, world } from './support.js';
+import { deviceId, DEVICE_ID, DEVICE_REF, EVENT, JOURNEY, PID, request, world } from './support.js';
 
 const DAY = 86_400_000;
 
@@ -138,7 +138,17 @@ describe('기록과 응답 범위', () => {
     await w.score.run(request());
     const rec = w.recorder.records[0]!;
     expect(rec.profileVersion).toBe(7);
+    // 값 없음 점수기: 사전 검증의 이 요청은 쿠키·세션 나이가 없어 AgeScore 하나다. 로비 입장은 행동 요약도 없다(점수기 차례대로)
+    expect(rec.missingScorers).toEqual(['AgeScore']);
+    const lobby = world();
+    await lobby.score.run(request({ context: 'LOBBY_ENTRY', behavior: undefined }));
+    expect(lobby.recorder.records[0]!.missingScorers).toEqual(['BehaviorScore', 'AgeScore']);
+    const failing = world();
+    failing.features.fail(true);
+    await failing.score.run(request());
+    expect(failing.recorder.records[0]!.missingScorers).toEqual(['DeviceTrust', 'AgeScore']);
     const blob = JSON.stringify(rec);
+    expect(blob).not.toContain(DEVICE_ID);
     expect(blob).not.toContain('device-id-01');
     expect(blob).not.toContain('198.51.100.7');
     expect(blob).not.toContain('turnstile-token-1');

@@ -244,7 +244,26 @@ export const trustV1Trust: Record<string, unknown> = {
                     "device_ref": {
                       "type": "string",
                       "id": 9
+                    },
+                    "review_batch": {
+                      "type": "ReviewBatch",
+                      "id": 10
+                    },
+                    "applied_verdict": {
+                      "type": "Verdict",
+                      "id": 11
+                    },
+                    "verdict_event_key": {
+                      "type": "string",
+                      "id": 12
                     }
+                  }
+                },
+                "ReviewBatch": {
+                  "values": {
+                    "REVIEW_BATCH_UNSPECIFIED": 0,
+                    "REVIEW_BATCH_PASSED": 1,
+                    "REVIEW_BATCH_SHADOW_CHALLENGED": 2
                   }
                 },
                 "BlockListChange": {

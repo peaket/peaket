@@ -6055,7 +6055,7 @@ paths:
       tags: [ops]
       x-peaket-roles: [cs_agent, cs_lead]
       summary: "표본 판정 기록(세션 ID와 판정 결과·근거 종류만)"
-      description: "FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 라벨을 만들지 않고 장부 계산에만 쓴다(판단 불가 라벨의 proto 반영은 wbs 3.2.3, ADR-0174) [가정]"
+      description: "FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174)"
       security:
         - opsCookie: []
       parameters:

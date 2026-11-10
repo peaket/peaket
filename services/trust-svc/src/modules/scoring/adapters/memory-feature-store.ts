@@ -1,6 +1,6 @@
 // 시험·로컬용 판정 피처 저장소. 운영은 redis-feature-store.ts. 지난 30일 규칙은 같게 둔다.
 import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
-import { FEATURE_NAMES, type FeatureName, type FeatureRead, type FeatureStore, type VerdictEvidence } from '../domain/ports.js';
+import { FEATURE_NAMES, type FeatureName, type FeatureRead, type FeatureStore, MIGRATION_FEATURES, type MigrationResult, type VerdictEvidence } from '../domain/ports.js';
 import { DEV_SHARE_CAP } from '../domain/rules.js';
 import type { DeviceHistory } from '../domain/types.js';
 
@@ -29,6 +29,9 @@ export class MemoryFeatureStore implements FeatureStore {
   readCalls = 0;
   shareCalls = 0;
   hostEntryCalls = 0;
+  /** 키 회전 이음의 부른 기록과 돌려줄 결과(시험 도구). 메모리 저장소는 옛 판 키를 두지 않아 기본은 모두 none이다 */
+  readonly migrateCalls: { from: string; to: string; eventId: string; until: number; now: number }[] = [];
+  migrationResult: Partial<MigrationResult> = {};
   readonly #failing = new Set<FeatureName>();
   #failingAll = false;
   #failingWrites = false;
@@ -118,6 +121,11 @@ export class MemoryFeatureStore implements FeatureStore {
     return true;
   }
 
+  async migrate(i: { from: string; to: string; eventId: string; until: number; now: number }): Promise<MigrationResult> {
+    this.migrateCalls.push(i);
+    return Object.fromEntries(MIGRATION_FEATURES.map((f) => [f, this.migrationResult[f] ?? 'none'])) as MigrationResult;
+  }
+
   #bump(ref: string, kind: keyof DeviceHistory, now: number): void {
     let days = this.#history.get(ref);
     if (!days) {
@@ -156,6 +164,8 @@ export class MemoryFeatureStore implements FeatureStore {
     this.readCalls = 0;
     this.shareCalls = 0;
     this.hostEntryCalls = 0;
+    this.migrateCalls.length = 0;
+    this.migrationResult = {};
     this.#failing.clear();
     this.#failingAll = false;
     this.#failingWrites = false;

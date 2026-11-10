@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 61 | 21 | 0 | 0 | 0 | 0 | 0 | 0 | 41 | 123 |
-| 합계 | 61 | 21 | 0 | 0 | 0 | 0 | 0 | 0 | 41 | 123 |
+| A | 103 | 19 | 0 | 0 | 0 | 4 | 0 | 0 | 23 | 149 |
+| 합계 | 103 | 19 | 0 | 0 | 0 | 4 | 0 | 0 | 23 | 149 |
 
 ## docs/features/bot-defense.md
 
@@ -14,7 +14,7 @@
 | B-T1 | — | 점수기 목록 파이프라인: 차단 목록 기기와 허니팟 적중 세션은 가중합과… | 점수기 목록 파이프라인: 차단 목록 기기와 허니팟 적중 세션은 가중합과 관계없이 `CHALLENGE`이고, 그때도 `HumanCheck` 검증과 그림자 판… | 자동 시험 | A | 시험: services/trust-svc/test-int/score-risk.int.test.ts, services/trust-svc/test/score-risk.test.ts 외 1곳 |
 | B-T2 | — | 값 없음: 피처 Redis 시간 초과, 사람 확인 보류, 로비… | 값 없음: 피처 Redis 시간 초과, 사람 확인 보류, 로비 입장(행동 요약 없음)에서 그 점수기는 0으로 더해지고 다른 가중치는 바뀌지 않는다. 응답의… | 자동 시험 | A | 시험: services/trust-svc/test/score-risk.test.ts |
 | B-T3 | — | 응답과 기록에 점수 원값·가중치·기준값·확정 신호 종류가 없다. 사유… | 응답과 기록에 점수 원값·가중치·기준값·확정 신호 종류가 없다. 사유 범주는 하나다. 공개 저장소 `peaket`의 trust-svc 코드·설정… | 자동 시험 | A | 시험: services/trust-svc/test/grpc.test.ts, services/trust-svc/test/rules.test.ts 외 2곳 |
-| B-T4 | — | 그림자 판: 그림자 판을 켜고 끄며 같은 합성 트래픽 1만 세션을 두… | 그림자 판: 그림자 판을 켜고 끄며 같은 합성 트래픽 1만 세션을 두 번 넣는다. 적용 판정이 두 번 모두 같고, 그림자 판의 `shadow` true 기록… | 빈칸 | A | — |
+| B-T4 | — | 그림자 판: 그림자 판을 켜고 끄며 같은 합성 트래픽 1만 세션을 두… | 그림자 판: 그림자 판을 켜고 끄며 같은 합성 트래픽 1만 세션을 두 번 넣는다. 적용 판정이 두 번 모두 같고, 그림자 판의 `shadow` true 기록… | 자동 시험 | A | 시험: services/trust-svc/test-int/shadow.int.test.ts, services/trust-svc/test/telemetry-recorder.test.ts |
 | B-T5 | ① | 사람 확인 서버 검증: ① 검증 API가 600ms 늦게 답하면 같은… | ① 검증 API가 600ms 늦게 답하면 같은 `idempotency_key`로 한 번 다시 묻고 | 자동 시험 | A | 시험: services/trust-svc/test/turnstile.test.ts |
 | B-T5 | ② | 사람 확인 서버 검증: ① 검증 API가 600ms 늦게 답하면 같은… | ② 두 번 모두 늦으면 '검증 보류'이며 | 자동 시험 | A | 시험: services/trust-svc/test/turnstile.test.ts |
 | B-T5 | ③ | 사람 확인 서버 검증: ① 검증 API가 600ms 늦게 답하면 같은… | ③ `hostname`이나 `action`이 다른 토큰은 실패이고 | 자동 시험 | A | 시험: services/trust-svc/test/turnstile.test.ts |
@@ -22,9 +22,9 @@
 | B-T5 | ⑤ | 사람 확인 서버 검증: ① 검증 API가 600ms 늦게 답하면 같은… | ⑤ 검증 API 서킷이 열리면 호출하지 않고 보류다 | 자동 시험 | A | 시험: services/trust-svc/test/turnstile.test.ts |
 | B-T6 | ① | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ① 피처 Redis를 멈추면 trust-svc가 `degraded` 참으로 답하고 진입이 이어진다 | 자동 시험 | A | 시험: services/queue-svc/test/trust-risk.test.ts, services/trust-svc/test-int/score-risk.int.test.ts 외 1곳 |
 | B-T6 | ② | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ② trust-svc 파드를 모두 멈추면 queue-svc 서킷이 열리고 기기·계정 한도(5회/10초)가 걸리며, 호스팅 대역 IP에는 IP 한도가, 통신사… | 자동 시험 | A | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/risk-http.test.ts 외 1곳 |
-| B-T6 | ③ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ③ 그동안 받은 사전 검증 토큰에 '검증 보류'가 있고, 되살린 뒤 토큰 갱신에서 다시 판정된다 | 자동 시험 | A | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/risk-http.test.ts |
-| B-T6 | ④ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ④ 그동안 추가 검증 제출은 통과로 처리되지 않는다 | ID만 | A | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/risk-http.test.ts 외 3곳 |
-| B-T6 | ⑤ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ⑤ 서킷이 열리고 닫힐 때 운영 사건 줄과 경보가 남는다(FR-039, NFR-001) | ID만 | A | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/risk-http.test.ts 외 3곳 |
+| B-T6 | ③ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ③ 그동안 받은 사전 검증 토큰에 '검증 보류'가 있고, 되살린 뒤 토큰 갱신에서 다시 판정된다 | 자동 시험 | A | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/preverify.test.ts 외 1곳 |
+| B-T6 | ④ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ④ 그동안 추가 검증 제출은 통과로 처리되지 않는다 | 다른 단계 | A | BOT-090 · trust-svc가 멈춘 동안의 추가 검증 제출은 queue-svc의 추가 검증 제출 경로(wbs 3.3.1)가 생길 때 본다(BAT-195에서 정함, 2026-11-10) |
+| B-T6 | ⑤ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ⑤ 서킷이 열리고 닫힐 때 운영 사건 줄과 경보가 남는다(FR-039, NFR-001) | 다른 단계 | A | OPS-290 · 서킷이 열리고 닫힐 때의 운영 사건 줄(`ops_event`)은 ops-svc 몫이다. queue-svc의 서킷 지표와 보안 로그는 BOT-050 시험이 본다(B-T6 ②) |
 | B-T7 | ① | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ① 새 판을 S3에 두면 1시간 안에 두 서비스가 읽는다 | ID만 | A | 시험: packages/platform/test/asn-table.test.ts, services/queue-svc/test/degraded-limits.test.ts 외 1곳 |
 | B-T7 | ② | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ② S3를 막으면 마지막 판으로 판정하고 7일 [가정] 넘게 새 판이 없으면 SEV3 | 자동 시험 | A | 시험: packages/platform/test/asn-table.test.ts |
 | B-T7 | ③ | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ③ `CloudFront-Viewer-ASN`이 없는 요청은 그 밖으로 보고 IP 한도를 걸지 않는다 | 자동 시험 | A | 시험: packages/platform/test/asn-table.test.ts, services/queue-svc/test/degraded-limits.test.ts 외 1곳 |
@@ -33,9 +33,10 @@
 | B-T8 | ③ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ③이미 판정을 통과해 기다리는 사람의 적중은 격리를 만들지 않는다 | 빈칸 | A | — |
 | B-T8 | ④ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ④ 24시간 [가정] 뒤 표시가 사라진다 | 빈칸 | A | — |
 | B-T8 | ⑤ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ⑤ 모든 경우 응답은 204·빈 본문이다(FR-049, NFR-020) | 빈칸 | A | — |
-| B-T9 | ① | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ① 추가 검증 실패, 허니팟 적중, 재평가 후보만으로는 키가 생기지 않는다 | 빈칸 | A | — |
-| B-T9 | ② | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ② 표본 검토 '봇' 판정과 부정구매 확인 라벨 반영으로만 키가 생기고 값에 확정 출처가 있다 | 빈칸 | A | — |
-| B-T9 | ③ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ③ 표본 검토 '사람' 재판정과 이의 인정은 키를 지운다 | 빈칸 | A | — |
+| B-T9 | ① | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ① 추가 검증 실패, 허니팟 적중, 재평가 후보만으로는 키가 생기지 않는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/block-list-source.test.ts |
+| B-T9 | ② | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ② 표본 검토 '봇' 판정과 부정구매 확인 라벨 반영으로만 키가 생기고 값에 확정 출처가 있다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T9 | ③ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ③ 표본 검토 '사람' 재판정과 이의 인정은 키를 지운다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T9 | ④ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ④ 표본 검토 HUMAN은 부정 예매 조치(`FRAUD_ACTIONED`)가 올린 키를 지우지 않고, 표본 검토는 뽑힌 판정의 사건 키가 맞는 판정 근거의… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | B-T10 | ① | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ①이의를 보내면 202이고 처리함에 `VERIFICATION_APPEAL` 건이 하나 생긴다(같은 요청을 다시 보내도 하나) | 빈칸 | A | — |
 | B-T10 | ② | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ② 건 요청 발행을 실패시키면 503이고 다시 보내면 건이 생긴다 | 빈칸 | A | — |
 | B-T10 | ③ | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ③ 인정하면 queue-svc `PASSED`와 trust-svc `LABELED_HUMAN`이 남고 근거에 차단 목록이 있었으면 키가 지워진다 | 빈칸 | A | — |
@@ -64,20 +65,23 @@
 | B-T19 | ④ | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ④ `SEAT`·`PAYMENT` 신호 1만 건을 넣어도 `trust.behavior_raw` 행 수와 재평가 후보 수가 늘지 않는다 | ID만 | A | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
 | B-T19 | ⑤ | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ⑤ 홀드·결제 경로에서 trust-svc `ScoreRisk` 호출이 0건이다 | ID만 | A | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
 | B-T19 | ⑥ | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ⑥ 요약 본문에 정해지지 않은 칸(좌표 배열 등)을 넣으면 400이다. 연결: FR-072, NFR-020 | ID만 | A | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
-| B-T20 | ① | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ① `FRAUD_ACTIONED` BOT이면 `tr:block` 키가 생기고 값에 확정 출처와 건 ID가 있다 … 의 기기에… | 빈칸 | A | — |
-| B-T20 | ② | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ② 외부 게시물 대조만 있는 계정은 `tr:block` 키가 생기지 않는다(라벨 출처가 아니다) | 빈칸 | A | — |
-| B-T20 | ③ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ③의 기기에 `FRAUD_APPEAL_ACCEPTED` HUMAN을 보내면 키가 지워진다(`REMOVED`) | 빈칸 | A | — |
-| B-T20 | ④ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ④ 판정 근거에 차단 목록이 있던 사람의 `FRAUD_APPEAL_ACCEPTED`도 키를 지운다 | 빈칸 | A | — |
-| B-T20 | ⑤ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑤ `FRAUD_ACTIONED`에 HUMAN, `FRAUD_APPEAL_ACCEPTED`에 BOT이면 `INVALID_ARGUMENT`다 | 빈칸 | A | — |
-| B-T20 | ⑥ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑥ 같은 건 ID·판을 다시 보내면 `changed` false다 | 빈칸 | A | — |
-| B-T20 | ⑦ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑦ 두 출처 모두 `telemetry.trust-verdicts`에 사건이 0건이다 | 빈칸 | A | — |
-| B-T20 | ⑧ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑧ 판정이 30일 지난 사람이면 요청의 `device_ref`로 키를 올리고, `device_ref`도 없으면 `DEVICE_NOT_FOUND`다 | 빈칸 | A | — |
-| B-T20 | ⑨ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑨ 한 사건 ID로 계정 둘을 차례로 보내면 둘 다 반영된다 | 빈칸 | A | — |
-| B-T20 | ⑩ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑩ ops-svc 밖의 신원은 거부된다. 연결: FR-072·FR-073, POL-046 | 빈칸 | A | — |
-| B-T21 | ① | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ① 첫 온세일 설정 판에서 `BehaviorScore`의 적용 판 가중치가 0이고 그림자 판에서는 원래 가중치다 | 빈칸 | A | — |
-| B-T21 | ② | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ② 같은 합성 트래픽에서 `BehaviorScore`만 높은 세션은 적용 판 `ALLOW`, 그림자 판 `CHALLENGE`(`shadow` true)다 | 빈칸 | A | — |
-| B-T21 | ③ | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ③ 나머지 다섯 점수기와 확정 신호는 두 판에 같게 더해진다 | 빈칸 | A | — |
-| B-T21 | ④ | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ④ 분석의 봇 지표는 그림자 판정을 세지 않는다. 연결: FR-039, NFR-022 | 빈칸 | A | — |
+| B-T20 | ① | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ① `FRAUD_ACTIONED` BOT이면 `tr:block` 키가 생기고 값에 확정 출처와 건 ID가 있다 … 의 기기에… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts |
+| B-T20 | ② | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ② 외부 게시물 대조만 있는 계정은 `tr:block` 키가 생기지 않는다(라벨 출처가 아니다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ③ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ③의 기기에 `FRAUD_APPEAL_ACCEPTED` HUMAN을 보내면 키가 지워진다(`REMOVED`) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ④ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ④ 판정 근거에 차단 목록이 있던 사람의 `FRAUD_APPEAL_ACCEPTED`도 키를 지운다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑤ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑤ `FRAUD_ACTIONED`에 HUMAN, `FRAUD_APPEAL_ACCEPTED`에 BOT이면 `INVALID_ARGUMENT`다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑥ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑥ 같은 건 ID·판을 다시 보내면 `changed` false다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑦ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑦ 두 출처 모두 `telemetry.trust-verdicts`에 사건이 0건이다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑧ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑧ 판정이 30일 지난 사람이면 요청의 `device_ref`로 키를 올리고, `device_ref`도 없으면 `DEVICE_NOT_FOUND`다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑨ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑨ 한 사건 ID로 계정 둘을 차례로 보내면 둘 다 반영된다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑩ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑩ ops-svc 밖의 신원은 거부된다. | 다른 단계 | A | HOT-400 · `ApplyLabel`을 부르는 신원을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(identity-svc gRPC와 같다, docs/features/bot-defense.md §9 '첫… |
+| B-T20 | ⑪ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑪ 한 사건의 두 계정이 같은 기기로 조치되면 한 계정의 `FRAUD_APPEAL_ACCEPTED`로는 키가 지워지지 않고, 둘 다 인정되면 지워진다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑫ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑫ 같은 (사건, pid)에서 더 큰 판의 `FRAUD_APPEAL_ACCEPTED`가 반영된 뒤 늦게 온 작은 판의 `FRAUD_ACTIONED`는 키를… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T20 | ⑬ | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9):… | ⑬ 지금 판도 이음 중인 옛 판도 아닌 `device_ref`는 `DEVICE_NOT_FOUND`다(추천 적용 2026-11-10) 연결:… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/device-refs.test.ts |
+| B-T21 | ① | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ① 첫 온세일 설정 판에서 `BehaviorScore`의 적용 판 가중치가 0이고 그림자 판에서는 원래 가중치다 | 자동 시험 | A | 시험: services/trust-svc/test/shadow.test.ts |
+| B-T21 | ② | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ② 같은 합성 트래픽에서 `BehaviorScore`만 높은 세션은 적용 판 `ALLOW`, 그림자 판 `CHALLENGE`(`shadow` true)다 | 자동 시험 | A | 시험: services/trust-svc/test/shadow.test.ts, services/trust-svc/test/telemetry-recorder.test.ts |
+| B-T21 | ③ | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ③ 나머지 다섯 점수기와 확정 신호는 두 판에 같게 더해진다 | 자동 시험 | A | 시험: services/trust-svc/test/shadow.test.ts |
+| B-T21 | ④ | 출시 첫 판의 행동 신호(추천 적용 2026-10-31… | ④ 분석의 봇 지표는 그림자 판정을 세지 않는다. 연결: FR-039, NFR-022 | 다른 단계 | A | OPS-220 · 분석의 봇 지표(F6 `fct_bot_outcome`)가 그림자 판정을 세지 않는 것은 분석 골드 사실을 만드는 단계에서 본다. trust-svc는 그림자 판정에 `shadow` true를… |
 | B-T22 | ① | 기기 공유 수(추천 적용 2026-11-09, ADR-0251): ①… | ① 서로 다른 pid를 세고 같은 pid는 한 번이다 | 자동 시험 | A | 시험: services/trust-svc/test-int/instant-features.int.test.ts, services/trust-svc/test/instant-features.test.ts |
 | B-T22 | ② | 기기 공유 수(추천 적용 2026-11-09, ADR-0251): ①… | ② 사람 확인이 실패·보류이거나 토큰이 없어도 넣는다(일부러 실패해 피하지 못한다). 사람 확인을 기다리지 않고 세고, 사람 확인 뒤에는 요청 경로의 Redis… | 자동 시험 | A | 시험: services/trust-svc/test-int/instant-features.int.test.ts, services/trust-svc/test/instant-features.test.ts |
 | B-T22 | ③ | 기기 공유 수(추천 적용 2026-11-09, ADR-0251): ①… | ③ 원소는 20개를 넘지 않고 상한 이상은 같게 본다. `sharedAt`이 20을 넘는 규칙 판은 읽지 않는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/instant-features.int.test.ts, services/trust-svc/test/rules.test.ts |
@@ -101,6 +105,28 @@
 | B-T24 | ⑦ | 기기 라벨 키(추천 적용 2026-11-09, ADR-0251): ①… | ⑦ 값 라벨 키는 local·ci·demo에서만 받는다 | 자동 시험 | A | 시험: packages/platform/test/inv-ref.test.ts, services/trust-svc/test/device-refs.test.ts |
 | B-T24 | ⑧ | 기기 라벨 키(추천 적용 2026-11-09, ADR-0251): ①… | ⑧ 운영에 키 설정이 없으면 시작은 하고 `NO_KEY`로 센다. 연결: NFR-022, ASVS 16.3.4 | ID만 | A | 시험: packages/platform/test/inv-ref.test.ts, services/trust-svc/test-int/device-key.int.test.ts 외 3곳 |
 | B-T25 | — | 로그인 판정의 근거(추천 적용 2026-11-09, ADR-0251):… | 로그인 판정의 근거(추천 적용 2026-11-09, ADR-0251): 이력이 없는 새 기기의 로그인은 통신사 대역 ASN이 있어도, 호스팅 대역의 위험이 기준… | 자동 시험 | A | 시험: services/trust-svc/test/instant-features.test.ts |
+| B-T26 | ① | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ①이음 기간의 사전 검증은 새 판 키가 없고 옛 판 키가 있는 `tr:devacct`·`tr:devhist`·`tr:block`·`tr:devshare`(그… | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts, services/trust-svc/test/device-refs.test.ts |
+| B-T26 | ② | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ② 새 판 키가 이미 있으면 옛 판 키로 덮지 않는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ③ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ③이음 끝이 지났거나 옛 판이 없으면 옛 판 키를 보지 않는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts, services/trust-svc/test/device-refs.test.ts |
+| B-T26 | ④ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ④ 옮기기가 실패하면 그 피처는 값 없음이고 `degraded`가 참이며 판정은 이어진다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑤ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑤ 옮긴 기기는 옛 판 값의 이어 달기가 이음 끝까지 있고, 옛 판 기기 가명의 판정 근거로 온 이의 인정이 새 판 차단 키를 지운다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑥ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑥로그인·추가 검증 제출은 옮기지 않는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑦ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑦ 옮기는 사이 라벨 반영이 옛 판 차단 키를 지우면 되살린 새 판 키를 되돌린다(그 사람은 다시 걸리지 않는다) | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑧ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑧ 새 판 차단 키가 이미 있으면 옛 판 차단 키를 지우고 이어 달기를 둔다. 이의 인정 뒤 다음 판정이 옛 판 키로 다시 걸리지 않는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑨ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑨ 옮기기가 실패한 피처는 그 판정의 응답 뒤 쓰기를 하지 않아, 장애가 풀린 다음 판정에서 옮겨진다 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T26 | ⑩ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑩ 남은 수명이 0인 옛 판 키는 옮기지 않는다(수명 없는 키가 생기지 않는다) | 자동 시험 | A | 시험: services/trust-svc/test/redis-feature-store.test.ts |
+| B-T26 | ⑪ | 기기 라벨 키 회전 이음(추천 적용 2026-11-10, §4.10):… | ⑪ 같은 기기의 판정 둘이 겹쳐도 새 판 키는 하나이고 옛 판 키는 지워진다 연결: NFR-022 | 자동 시험 | A | 시험: services/trust-svc/test-int/rotation.int.test.ts |
+| B-T27 | ① | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ① 같은 건 ID·판을 다시 보내거나 작은 판을 보내면 `changed` false이고 아무것도 바뀌지 않는다. 큰 판은 반영하고 라벨이 바뀔 수 있다(표본… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T27 | ② | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ② 같은 건 ID에 다른 출처면 `ALREADY_EXISTS`다(부정 예매 출처 둘끼리는 아니다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/label-grpc.test.ts |
+| B-T27 | ③ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ③ `APPEAL_ACCEPTED`에 BOT, 모양이 틀린 값, 부정 예매 밖의 `device_ref`, 표본 검토의 묶음 표시 빠짐은… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/label-grpc.test.ts |
+| B-T27 | ④ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ④ 표본 검토 라벨은 `TrustVerdict`(source `SAMPLE_REVIEW`, category… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/telemetry-recorder.test.ts |
+| B-T27 | ⑤ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑤ 차단 키를 바꾸면 보안 로그 줄(건 ID, 출처, 바뀐 것, 처리자의 로그 가명, 시각)과 지표가 남는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T27 | ⑥ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑥ 차단 키를 바꾼 뒤 끝남을 적기 전에 피처 Redis를 끊으면 `UNAVAILABLE`이고, 같은 판을 다시 보내면 한 번만 반영되고 같은 사건 키로 낸다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/label-grpc.test.ts |
+| B-T27 | ⑦ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑦ 판이 다른 두 호출이 겹쳐도 마지막 상태는 큰 판의 결과다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/rotation.int.test.ts |
+| B-T27 | ⑧ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑧ 끝난 판을 다시 보내도 같은 사건 키로 라벨을 다시 낸다. 차단 키 Lua의 답만 잃고 다시 보내면 보안 로그 줄이 남는다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T27 | ⑨ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑨ 같은 건 ID에 처음과 다른 사람·회차가 오면 `ALREADY_EXISTS`다. `tr:lbl`·`tr:blkv`의 칸 이름과 값에 pid 원문이 없고… | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts |
+| B-T27 | ⑩ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑩ 표본 검토의 첫째 묶음에 적용 판 `CHALLENGE`, 판 0은 `INVALID_ARGUMENT`다 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T27 | ⑪ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑪ 같은 라벨의 정정(BOT → HUMAN)은 판정 근거 키가 사라진 뒤에도 앞 판이 찾은 기기의 키를 지운다 연결: FR-049, POL-006 | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 
 ## docs/security/asvs/bot-defense.md
 
@@ -137,5 +163,5 @@
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 빈칸 | A | 영역: services/trust-svc |
 | v5.0.0-5.2.3 | — | L2 | 압축 파일은 풀기 전에 풀린 크기와 파일 수 상한을 확인한다. | 자동 시험 | A | 시험: tools/perf-ledger/human-data.test.mjs |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 빈칸 | A | 영역: services/ops-svc |
-| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | A | 시험: services/trust-svc/test/score-risk.test.ts |
-| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | A | 시험: services/queue-svc/test/trust-risk.test.ts, services/trust-svc/test-int/device-key.int.test.ts 외 5곳 |
+| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts 외 2곳 |
+| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | A | 시험: services/queue-svc/test/trust-risk.test.ts, services/trust-svc/test-int/apply-label.int.test.ts 외 8곳 |

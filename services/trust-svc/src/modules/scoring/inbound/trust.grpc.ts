@@ -1,10 +1,12 @@
-// 받는 층: gRPC TrustService(docs/api/proto/peaket/trust/v1/trust.proto)를 유스케이스에 잇는다.
-// 응답에는 판정·사유 범주·degraded만 싣는다(점수 원값·가중치·기준값·확정 신호 종류는 싣지 않는다, POL-006).
+// 받는 층: gRPC TrustService·TrustLabelService(docs/api/proto/peaket/trust/v1/trust.proto)를 유스케이스에 잇는다.
+// ScoreRisk 응답에는 판정·사유 범주·degraded만 싣는다(점수 원값·가중치·기준값·확정 신호 종류는 싣지 않는다, POL-006).
 // 부르는 쪽 신원 확인은 아직 이 저장소의 배포 설정(deploy·infra)에 없다. 호출자를 queue-svc·identity-svc로 줄이는 메시 허용 정책은 배포 단계의 필수 조건이다(ADR-0248).
+// ApplyLabel을 ops-svc로 줄이는 것도 메시 L7 허용 목록이 한다(docs/features/bot-defense.md §9 '첫 구현', B-T20 ⑩은 BUILD_ORDER HOT-400).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { trustV1Trust } from '@peaket/contracts/proto';
 import { TrustError } from '../application/trust-error.js';
+import { type AppliedVerdict, type Label, type LabelRequest, type LabelResult, type LabelSource, type ReviewBatch, UNKNOWN } from '../domain/labels.js';
 import type { BehaviorSummary, ScoreContext, ScoreRequest, ScoreResult, ShuffleMode } from '../domain/types.js';
 
 /**
@@ -16,6 +18,7 @@ const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number,
 
 export interface TrustPackage {
   TrustService: grpc.ServiceClientConstructor;
+  TrustLabelService: grpc.ServiceClientConstructor;
 }
 
 let pkg: TrustPackage | undefined;
@@ -129,4 +132,73 @@ export function trustServiceHandlers(uc: { run(i: ScoreRequest): Promise<ScoreRe
     );
   };
   return { ScoreRisk };
+}
+
+const LABEL_SOURCE: Record<string, LabelSource> = {
+  LABEL_SOURCE_SAMPLE_REVIEW: 'SAMPLE_REVIEW',
+  LABEL_SOURCE_FRAUD_CONFIRMED: 'FRAUD_CONFIRMED',
+  LABEL_SOURCE_APPEAL_ACCEPTED: 'APPEAL_ACCEPTED',
+  LABEL_SOURCE_FRAUD_ACTIONED: 'FRAUD_ACTIONED',
+  LABEL_SOURCE_FRAUD_APPEAL_ACCEPTED: 'FRAUD_APPEAL_ACCEPTED',
+};
+const LABEL: Record<string, Label> = { LABEL_BOT: 'BOT', LABEL_HUMAN: 'HUMAN' };
+const REVIEW_BATCH: Record<string, ReviewBatch> = { REVIEW_BATCH_PASSED: 'PASSED', REVIEW_BATCH_SHADOW_CHALLENGED: 'SHADOW_CHALLENGED' };
+const APPLIED_VERDICT: Record<string, AppliedVerdict | 'BLOCK'> = { VERDICT_ALLOW: 'ALLOW', VERDICT_CHALLENGE: 'CHALLENGE', VERDICT_BLOCK: 'BLOCK' };
+
+/**
+ * enum 칸: 보내지 않았거나 0(…_UNSPECIFIED)이면 undefined, 계약의 이름이면 그 값, 그 밖(계약에 없는 번호 등)은 UNKNOWN(검사가 INVALID_ARGUMENT로 막는다).
+ * proto3는 0을 보내지 않으므로 UNSPECIFIED와 보내지 않음을 가르지 않는다
+ */
+function enumOf<T extends string>(map: Record<string, T>, v: unknown): T | typeof UNKNOWN | undefined {
+  if (v === undefined || v === null || v === 0) return undefined;
+  if (typeof v === 'string' && v.endsWith('_UNSPECIFIED')) return undefined;
+  return typeof v === 'string' && Object.hasOwn(map, v) ? map[v]! : UNKNOWN;
+}
+
+/** source_version(int64)은 숫자로 읽는다(longs: Number). 안전한 정수가 아니면 검사가 막는다 */
+const version = (v: unknown): number => (typeof v === 'number' ? v : typeof v === 'string' && /^-?\d+$/.test(v) ? Number(v) : Number.NaN);
+
+function toLabelRequest(r: Req): LabelRequest {
+  return {
+    sourceRef: text(r.source_ref),
+    sourceVersion: r.source_version === undefined ? 0 : version(r.source_version),
+    source: enumOf(LABEL_SOURCE, r.source),
+    label: enumOf(LABEL, r.label),
+    eventId: text(r.event_id),
+    pid: text(r.pid),
+    queueEntryId: text(r.queue_entry_id),
+    actedBy: text(r.acted_by),
+    deviceRef: text(r.device_ref),
+    reviewBatch: enumOf(REVIEW_BATCH, r.review_batch),
+    appliedVerdict: enumOf(APPLIED_VERDICT, r.applied_verdict),
+    verdictEventKey: text(r.verdict_event_key),
+  };
+}
+
+const labelResponseOf = (r: LabelResult): object => ({ changed: r.changed, block_list: `BLOCK_LIST_CHANGE_${r.blockList}` });
+
+/** TrustLabelService. 업무 오류는 상태 코드로, 예상 못 한 오류는 고정 문구 INTERNAL로 답한다(오류 문구에 받은 값을 싣지 않는다) */
+export function trustLabelServiceHandlers(uc: { run(i: LabelRequest): Promise<LabelResult> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const ApplyLabel: grpc.handleUnaryCall<Req, object> = (call, cb) => {
+    let input: LabelRequest;
+    try {
+      input = toLabelRequest(call.request);
+    } catch (err) {
+      onError('ApplyLabel', err);
+      cb({ code: grpc.status.INTERNAL, details: '처리하지 못했다' });
+      return;
+    }
+    uc.run(input).then(
+      (v) => cb(null, labelResponseOf(v)),
+      (err: unknown) => {
+        if (err instanceof TrustError) {
+          cb({ code: grpc.status[err.code], details: err.message });
+          return;
+        }
+        onError('ApplyLabel', err);
+        cb({ code: grpc.status.INTERNAL, details: '처리하지 못했다' });
+      },
+    );
+  };
+  return { ApplyLabel };
 }

@@ -17,7 +17,7 @@ import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLog
 import { PlatformMetrics, statusClass } from './metrics.js';
 import { PROBLEM_CONTENT_TYPE } from './problem.js';
 import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
-import { loadLogPseudonymizer } from './pseudonym.js';
+import { loadLogPseudonymizer, type LogPseudonymizer } from './pseudonym.js';
 import { CanonicalLog, errorInfoOf } from './request-log.js';
 import { installRequestChecks } from './request-checks.js';
 import { Readiness } from './readiness.js';
@@ -74,6 +74,11 @@ export interface PlatformService {
   metrics: PlatformMetrics;
   /** 서비스 로거(Pino). 처리기는 @Inject(PLATFORM_LOGGER)로도 받는다 */
   logger: PlatformLogger;
+  /**
+   * 로그 가명 함수(정규 로그 줄의 pidRef·sidRef·accountRef와 같은 키, ADR-0053 결정 1). 업무 로그 줄에 사람 식별값을 남길 때 원문 대신 쓴다
+   * (예: trust-svc 보안 로그 줄의 처리자 accountRef, docs/observability.md §7 '선택적 비즈니스 필드')
+   */
+  pseudonymizer: LogPseudonymizer;
   /** 정규 로그 줄 표본 비율 바꾸기(온세일 구간 등, FND-090의 제어 상태 소비가 부른다) */
   logs: { setSampleOneIn(oneIn: number): void; readonly sampleOneIn: number };
   app: NestFastifyApplication;
@@ -190,6 +195,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     config,
     metrics,
     logger,
+    pseudonymizer,
     logs: {
       setSampleOneIn: (n: number) => canonical.setSampleOneIn(n),
       get sampleOneIn() {

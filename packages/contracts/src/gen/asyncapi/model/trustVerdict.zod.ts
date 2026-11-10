@@ -19,8 +19,11 @@ export const TrustVerdict = zod.object({
   "action": zod.enum(['ALLOW', 'CHALLENGE', 'BLOCK', 'NONE']).describe('BLOCK은 내지 않는다. 대기열 경로의 판정은 ALLOW·CHALLENGE뿐이다(ADR-0156 결정 1. trust.proto VERDICT_BLOCK처럼 기호는 남긴다, 추천 적용 2026-10-30)'),
   "source": zod.enum(['REALTIME', 'HONEYPOT', 'SAMPLE_REVIEW', 'POST_LABEL', 'REASSESS']).describe('REASSESS는 대기 중 재평가(ADR-0071)'),
   "shadow": zod.boolean().default(trustVerdictShadowDefault).describe('그림자 실행 결과면 true(집행 없음, action NONE). 분석의 봇 지표는 false만 센다(ADR-0071)'),
+  "reviewBatch": zod.enum(['PASSED', 'SHADOW_CHALLENGED']).optional().describe('표본 검토 라벨의 묶음(trust.proto ReviewBatch). PASSED는 적용 판과 그림자 판이 모두 통과시킨 세션(그림자 판이 돌지 않은 회차는 판정을 통과한 세션), SHADOW_CHALLENGED는 그림자 판이 추가 검증으로 보낸 세션이다. 분석이 놓친 봇 비율을 층별로 추정하는 데 쓴다(추천 적용 2026-11-10, docs/features/bot-defense.md §13, ADR-0174)'),
+  "appliedVerdict": zod.enum(['ALLOW', 'CHALLENGE']).optional().describe('표본 검토 라벨이 붙은 세션의 적용 판 판정(추천 적용 2026-11-10, docs/features/bot-defense.md §13)'),
+  "pairedEventKey": zod.uuid().optional().describe('그림자 판정(shadow true)이 짝을 이루는 같은 요청의 적용 판정 기록 eventKey. 분석이 두 판의 판정을 세션마다 잇고(층별 추정), 표본 검토가 그림자 판이 추가 검증으로 보낸 세션을 뽑는 데 쓴다(추천 적용 2026-11-10, docs/features/bot-defense.md §10.4·§13)'),
   "occurredAt": zod.iso.datetime({"offset":true}),
-  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값')
+  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 라벨(LABELED_BOT·LABELED_HUMAN)은 (건 ID, pid, 출처, 판)으로 정해 다시 보낸 같은 판도 같은 값이다(추천 적용 2026-11-10)')
 }).describe('봇 판정과 사후 라벨(ADR-0052). 점수 원값·규칙 가중치는 싣지 않는다')
 
 export type TrustVerdict = zod.input<typeof TrustVerdict>;

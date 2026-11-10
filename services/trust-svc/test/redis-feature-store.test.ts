@@ -113,3 +113,28 @@ describe('RedisFeatureStore.read 키별 실패', () => {
     expect(r.honeypot).toBe(true);
   });
 });
+
+describe('키 회전 이음의 남은 수명', () => {
+  test('B-T26⑩_남은수명이0인옛판키는옮기지않고_-1(수명없음)일때만수명0으로되살린다', async () => {
+    const restores: string[][] = [];
+    const redis = {
+      evalScript: async (_s: unknown, k: string[], a: string[], o?: { binary?: boolean }) => {
+        // 옛 판 키 다섯을 읽는 Lua: 기기 집합(남은 수명 0), 기기 이력(수명 없음), 차단 키(없음), 공유 수(5초), 판 가드(이미 사라짐)
+        if (k.length === 5 && o?.binary) return [[Buffer.from([0x80, 1]), 0], [Buffer.from([0x81, 2]), -1], null, [Buffer.from([0x82, 3]), 5_000], [Buffer.from([0x83, 4]), -2]];
+        // 옛 판 키 지우기: 읽은 때와 같다
+        if (k.length === 2 && a.length === 4) return 1;
+        throw new Error(`모르는 스크립트 ${k.join(',')}`);
+      },
+      command: async (args: unknown[]) => {
+        if (args[0] === 'RESTORE') restores.push([String(args[1]), String(args[2]), Buffer.isBuffer(args[3]) ? (args[3] as Buffer).toString('hex') : 'not-bytes']);
+        return 'OK';
+      },
+    } as unknown as HotRedis;
+    const r = await new RedisFeatureStore(redis).migrate({ from: 'k1.old', to: 'k2.new', eventId: 'ev-1', until: NOW + 60_000, now: NOW });
+    expect(r).toEqual({ accounts: 'none', history: 'moved', block: 'none', shared: 'moved', block_version: 'none' });
+    expect(restores).toEqual([
+      [keys.devHistory('k2.new'), '0', '8102'],
+      [keys.devShare('k2.new', 'ev-1'), '5000', '8203'],
+    ]);
+  });
+});

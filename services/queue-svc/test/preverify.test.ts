@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { EntryError } from '../src/modules/entry/application/entry-error.js';
 import { IssuePreverification } from '../src/modules/entry/application/issue-preverification.js';
+import type { RiskVerdict } from '../src/modules/entry/domain/ports.js';
 import { PREVERIFY_TTL_MS } from '../src/modules/entry/domain/queue.js';
 import { ACCOUNT, DEVICE, newEvent, openSchedule, OTHER_ACCOUNT, PID, recordingRisk, tokens } from './support.js';
 
@@ -97,6 +98,25 @@ describe('사전 검증', () => {
       expect(c.hd).toBe(true);
       expect(c.vr).toBeUndefined();
     }
+  });
+
+  test('B-T6③_판정을받지못해hd가있는토큰을_판정이돌아온뒤갱신하면_새토큰에hd가없고_VERIFY면vr이있다', async () => {
+    let verdict: RiskVerdict = { kind: 'UNAVAILABLE' };
+    const { clock, run } = await setup(recordingRisk(async () => verdict));
+    const held = (await run()).preverifyToken;
+    const first = tokens.readPreverify(held)!;
+    expect(first.hd).toBe(true);
+    // 되살린 뒤 같은 토큰으로 갱신한다: 다시 판정받은 결과만 서명한다(옛 토큰의 hd를 이어 싣지 않는다)
+    clock.advance(60_000);
+    verdict = { kind: 'OK' };
+    const ok = tokens.readPreverify((await run({ preverifyToken: held })).preverifyToken)!;
+    expect(ok.jny).toBe(first.jny);
+    expect(ok.hd).toBeUndefined();
+    expect(ok.vr).toBeUndefined();
+    verdict = { kind: 'VERIFY', reason: 'NETWORK' };
+    const verify = tokens.readPreverify((await run({ preverifyToken: held })).preverifyToken)!;
+    expect(verify.hd).toBeUndefined();
+    expect(verify.vr).toBe('NETWORK');
   });
 
   test('회차일정사본이없으면_404NOT_FOUND', async () => {

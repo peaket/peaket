@@ -187,3 +187,53 @@ describe('행동 신호(telemetry.behavior)', () => {
     expect(offered).toEqual([]);
   });
 });
+
+describe('그림자 판정과 라벨(telemetry.trust-verdicts)', () => {
+  test('B-T4_B-T21②_그림자판정은shadow참·action NONE·category PASS·CHALLENGED로따로내고_짝적용판정의사건키를실으며_계약(Avro)의칸만싣는다', () => {
+    const { offered, rec } = recorder();
+    const SHADOW_KEY = '0190f3a1-7c2e-7a00-8000-000000000ccc';
+    rec.record(verdict({ shadow: { eventKey: SHADOW_KEY, verdict: 'CHALLENGE', reason: 'INTERACTION', profileVersion: 8 } }));
+    rec.record(verdict({ verdict: 'CHALLENGE', reason: 'NETWORK', shadow: { eventKey: SHADOW_KEY, verdict: 'ALLOW', profileVersion: 8 } }));
+    expect(offered.map((o) => [o.value.category, o.value.action, o.value.shadow])).toEqual([
+      ['PASS', 'ALLOW', false],
+      ['CHALLENGED', 'NONE', true],
+      ['CHALLENGED', 'CHALLENGE', false],
+      ['PASS', 'NONE', true],
+    ]);
+    expect(offered[1]!.value).toMatchObject({ eventKey: SHADOW_KEY, pairedEventKey: KEY, source: 'REALTIME', journeyId: JOURNEY, deviceRef: DEVICE_REF });
+    // 짝 사건 키는 그림자 판정에만 있다(적용 판정에는 없다, asyncapi x-present-when shadow true)
+    expect(offered.filter((o) => o.value.shadow === true).map((o) => o.value.pairedEventKey)).toEqual([KEY, KEY]);
+    expect(offered.filter((o) => o.value.shadow === false).some((o) => 'pairedEventKey' in o.value)).toBe(false);
+    const fields = new Set(avroFields('TrustVerdict'));
+    for (const o of offered) {
+      expect(TrustVerdict.safeParse(o.value).success).toBe(true);
+      for (const k of Object.keys(o.value)) expect(fields.has(k), k).toBe(true);
+      // 그림자 판 번호와 사유 범주는 판정 기록에 없다(정규 로그 줄에만)
+      expect(JSON.stringify(o.value)).not.toMatch(/profileVersion|INTERACTION|"reason"/);
+    }
+  });
+
+  test('그림자판정도여정ID가틀리면내지않고_버린수를둘다센다', () => {
+    const drops: string[] = [];
+    const rec = new JsonTelemetryRecorder({ offer: () => undefined, dropped: (r) => drops.push(r) });
+    rec.record(verdict({ journeyId: '', shadow: { eventKey: KEY, verdict: 'ALLOW', profileVersion: 8 } }));
+    expect(drops).toEqual(['TrustVerdict', 'TrustVerdict']);
+  });
+
+  test('B-T27④_라벨은계약모양이고_키는대기기록ID이며_처리자·pid·기기가명칸이없다', () => {
+    const { offered, rec } = recorder();
+    rec.label({ eventKey: KEY, eventId: EVENT, queueEntryId: 'qe-1', category: 'LABELED_BOT', source: 'SAMPLE_REVIEW', reviewBatch: 'PASSED', appliedVerdict: 'CHALLENGE', occurredAtMs: AT });
+    rec.label({ eventKey: KEY, eventId: EVENT, category: 'LABELED_HUMAN', source: 'POST_LABEL', occurredAtMs: AT });
+    expect(offered.map((o) => [o.topic, o.key])).toEqual([
+      ['telemetry.trust-verdicts', 'qe-1'],
+      ['telemetry.trust-verdicts', null],
+    ]);
+    expect(offered[0]!.value).toEqual({ eventId: EVENT, queueEntryId: 'qe-1', refMissing: false, category: 'LABELED_BOT', action: 'NONE', source: 'SAMPLE_REVIEW', shadow: false, reviewBatch: 'PASSED', appliedVerdict: 'CHALLENGE', occurredAt: new Date(AT).toISOString(), eventKey: KEY });
+    expect(offered[1]!.value).toEqual({ eventId: EVENT, refMissing: false, category: 'LABELED_HUMAN', action: 'NONE', source: 'POST_LABEL', shadow: false, occurredAt: new Date(AT).toISOString(), eventKey: KEY });
+    const fields = new Set(avroFields('TrustVerdict'));
+    for (const o of offered) {
+      expect(TrustVerdict.safeParse(o.value).success).toBe(true);
+      for (const k of Object.keys(o.value)) expect(fields.has(k), k).toBe(true);
+    }
+  });
+});

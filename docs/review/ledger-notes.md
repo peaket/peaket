@@ -61,6 +61,11 @@
 | P-T49 ⑤⑥ | 다른 단계 |  | GAT-310 | `SetBookingRestriction`을 받는 쪽이 생기는 GAT-310 뒤에 본다(시범 범위 표의 끝 문단) |
 | O-T23 | 다른 단계 |  | BAT-350 | v0 모놀리스의 입장 시험(services/v0-monolith/test-int/gate.int.test.ts)만 있다. 목표 구조의 오프라인 게이트는 그 묶음(GAT-010)에서 다시 판정한다(2026-11-10 감독 결정) |
 | FE-T9 | 다른 단계 |  | 미정 | 이진 해독기 경계는 좌석맵 패키지 단계 몫이다. 시범에서는 서버와의 맞물림 시험만 더했다 |
+| B-T6 ④ | 다른 단계 |  | BOT-090 | trust-svc가 멈춘 동안의 추가 검증 제출은 queue-svc의 추가 검증 제출 경로(wbs 3.3.1)가 생길 때 본다(BAT-195에서 정함, 2026-11-10) |
+| B-T6 ⑤ | 다른 단계 |  | OPS-290 | 서킷이 열리고 닫힐 때의 운영 사건 줄(`ops_event`)은 ops-svc 몫이다. queue-svc의 서킷 지표와 보안 로그는 BOT-050 시험이 본다(B-T6 ②) |
+| B-T20 ⑩ | 다른 단계 |  | HOT-400 | `ApplyLabel`을 부르는 신원을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(identity-svc gRPC와 같다, docs/features/bot-defense.md §9 '첫 구현') |
+| B-T21 ④ | 다른 단계 |  | OPS-220 | 분석의 봇 지표(F6 `fct_bot_outcome`)가 그림자 판정을 세지 않는 것은 분석 골드 사실을 만드는 단계에서 본다. trust-svc는 그림자 판정에 `shadow` true를 싣는다(B-T4) |
+| Q-T48 ② | 다른 단계 |  | BOT-090 | 지운 기록이 CS 처리함 건에 남는 것은 ops-svc 처리함 몫이다. trust-svc 쪽(차단 키 지우기, 보안 로그 줄, 라벨 판정 기록)은 B-T9 ③·B-T27 ④⑤가 본다 |
 
 ## 사람 확인
 

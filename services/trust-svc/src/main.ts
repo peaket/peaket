@@ -1,12 +1,31 @@
 // trust-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-// 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(ScoreRisk)는 이 파일이 연다.
+// 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
 import { CircuitBreaker, createHotRedis, createService, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
-import { deviceRefsFromEnv, JsonTelemetryRecorder, kmsMacClient, LogVerdictRecorder, PromTrustSignals, RecordHoneypot, RedisFeatureStore, RuleBook, ScoreRisk, startRuleRefresh, TURNSTILE_BREAKER, trustPackage, trustServiceHandlers, turnstileFromEnv } from './modules/scoring/index.js';
+import {
+  ApplyLabel,
+  deviceRefsFromEnv,
+  JsonTelemetryRecorder,
+  kmsMacClient,
+  LogBlockListChange,
+  LogVerdictRecorder,
+  PromTrustSignals,
+  RecordHoneypot,
+  RedisFeatureStore,
+  RedisLabelStore,
+  RuleBook,
+  ScoreRisk,
+  startRuleRefresh,
+  TURNSTILE_BREAKER,
+  trustLabelServiceHandlers,
+  trustPackage,
+  trustServiceHandlers,
+  turnstileFromEnv,
+} from './modules/scoring/index.js';
 
 const SERVICE = 'trust-svc';
 /** 업무 gRPC 포트 [가정](identity-svc와 같은 기본값, BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
@@ -28,7 +47,8 @@ const redisUrl = env.PEAKET_TRUST_REDIS_URL;
 if (!redisUrl && clusterUrls.length === 0) throw new Error('PEAKET_TRUST_REDIS_URL이나 PEAKET_TRUST_REDIS_CLUSTER_URLS가 없다(비밀 관리에서 넣는다)');
 const rulesFile = env.PEAKET_TRUST_RULES_FILE;
 if (!rulesFile) throw new Error('PEAKET_TRUST_RULES_FILE이 없다(비공개 규칙 설정 파일 경로, 비밀 관리에서 넣는다)');
-// 기기 라벨 키: 운영은 KMS GenerateMac, local·ci·demo는 설정값. identity-svc와 같은 키여야 같은 기기 가명이 나온다(§4.9, B-T16)
+// 기기 라벨 키: 운영은 KMS GenerateMac, local·ci·demo는 설정값. identity-svc와 같은 키여야 같은 기기 가명이 나온다(§4.9, B-T16).
+// 키 회전의 이음 기간에는 옛 판(PEAKET_INV_REF_DEVICE_PREVIOUS_*)과 이음 끝(PEAKET_INV_REF_DEVICE_BRIDGE_UNTIL)도 같은 이름으로 읽는다(§4.10)
 const devices = deviceRefsFromEnv(env, systemClock, (endpoint) => kmsMacClient({ region: env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
 const asnFile = env.PEAKET_ASN_TABLE_FILE;
 // 판정 기록·행동 신호(텔레메트리 클러스터, ADR-0249 결정 4). 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
@@ -114,6 +134,17 @@ const score = new ScoreRisk({
   after,
 });
 
+// 라벨 반영(§9 '첫 구현'): 차단 기기 목록을 바꾸는 유일한 길이다. 부르는 쪽을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다
+const applyLabel = new ApplyLabel({
+  store: new RedisLabelStore(redis),
+  recorder: { label: (r) => telemetry?.label(r) },
+  // 처리자는 서비스 뼈대의 로그 가명(정규 로그 줄의 accountRef와 같은 키)으로만 남긴다
+  log: new LogBlockListChange(service.logger, service.pseudonymizer),
+  signals,
+  devices: devices.refs,
+  clock: systemClock,
+});
+
 // 설정을 읽어야 준비 상태가 된다(§4.4). 처음에 못 읽었으면 5초마다, 읽은 뒤에는 5분마다 다시 읽는다(실패하면 마지막 판을 쓴다)
 const rulesLoop = startRuleRefresh({ rules, readiness: service.readiness, task: RULES_READY_TASK });
 await rulesLoop.first;
@@ -122,7 +153,10 @@ await service.listen();
 const grpc = await startGrpcServer({
   host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
   port: grpcPort,
-  services: [{ definition: trustPackage().TrustService.service, handlers: trustServiceHandlers(score, (method, err) => service.logger.error({ err, method }, 'TrustService 처리 실패')) }],
+  services: [
+    { definition: trustPackage().TrustService.service, handlers: trustServiceHandlers(score, (method, err) => service.logger.error({ err, method }, 'TrustService 처리 실패')) },
+    { definition: trustPackage().TrustLabelService.service, handlers: trustLabelServiceHandlers(applyLabel, (method, err) => service.logger.error({ err, method }, 'TrustLabelService 처리 실패')) },
+  ],
 });
 service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 

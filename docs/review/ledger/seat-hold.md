@@ -266,7 +266,7 @@
 | v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | A | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test-int/sale-state.int.test.ts… |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | 자동 시험 | A | 시험: services/purchase-svc/test/open-purchase-session.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | 자동 시험 | A | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/accept-payment.test.ts 외 1곳 |
-| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | A | 시험: services/trust-svc/test/score-risk.test.ts |
+| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts 외 2곳 |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/sale-state.int.test.ts, services/purchase-svc/test-int/seat-snapshot.int.test.ts 외… |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | A | 다른 곳 시험: packages/platform/test/request-log.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | A | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
