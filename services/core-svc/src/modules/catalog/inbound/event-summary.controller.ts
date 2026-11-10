@@ -8,7 +8,8 @@
 // 404는 no-store [가정]: 판매 승인 직후 공개가 캐시된 404에 늦게 보이지 않게 한다.
 // 팬별 판매 자격(GET /v1/events/{eventId}/sale-eligibility, 팬 로그인, ADR-0261 결정 5)은 같은 404·410 규칙이고 성공·오류 모두 no-store다(비로그인 401도 모듈 미들웨어가 단다).
 import { Controller, Get, Res } from '@nestjs/common';
-import { ContractParams, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
+import { GetFanSaleEligibilityResponse } from '@peaket/contracts/openapi/catalog';
+import { ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { type EventPublicSummary, GetEventSummary } from '../application/get-event-summary.js';
@@ -33,6 +34,7 @@ export class EventSummaryController {
   ) {}
 
   @Get(':eventId/sale-eligibility')
+  @ContractRouteSchema({ responses: { 200: GetFanSaleEligibilityResponse } })
   @Roles(['fan'])
   async saleEligibility(@ContractParams(EventParams) params: z.output<typeof EventParams>, @CurrentPrincipal() me: Principal): Promise<FanSaleEligibilityView> {
     const found = await this.eligibility.run(params.eventId, me.accountId);

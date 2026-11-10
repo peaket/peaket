@@ -2,8 +2,8 @@
 // 파트너 관리자·실무자(승인 이력이 있으면 관리자만, 유스케이스가 본다). 본문은 계약 PartnerEventUpdate(닫힘, 칸 하나 이상, 정의 밖 칸 400)이다.
 // If-Match는 회차의 판(event.version)이고 응답 ETag는 새 판이다. 응답은 성공·오류 모두 Cache-Control: no-store다(모듈의 미들웨어).
 import { Controller, Patch, Req, Res } from '@nestjs/common';
-import { UpdatePartnerEventBody } from '@peaket/contracts/openapi/partner';
-import { ContractBody, ContractParams, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
+import { UpdatePartnerEventBody, UpdatePartnerEventResponse } from '@peaket/contracts/openapi/partner';
+import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { type EventUpdated, UpdateProductionEvent } from '../application/update-production-event.js';
@@ -37,6 +37,7 @@ export class PartnerEventController {
   constructor(private readonly update: UpdateProductionEvent) {}
 
   @Patch(':eventId')
+  @ContractRouteSchema({ responses: { 200: UpdatePartnerEventResponse } })
   @Roles(['partner_admin', 'partner_member'])
   async patch(
     @ContractParams(EventParams) params: z.output<typeof EventParams>,

@@ -3,8 +3,8 @@
 // 본문 상한은 플랫폼 기본(1MiB)이다. 뜻 규칙은 유스케이스가 @peaket/validation/sale-policy로 본다(같은 검사를 겹쳐 지킨다).
 // 응답은 성공·오류 모두 Cache-Control: no-store다(모듈의 미들웨어가 단다). ETag는 규칙의 판이다.
 import { Controller, Get, Put, Req, Res } from '@nestjs/common';
-import { PutPartnerSalePolicyBody } from '@peaket/contracts/openapi/partner';
-import { ContractBody, ContractParams, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
+import { GetPartnerSalePolicyResponse, PutPartnerSalePolicyBody, PutPartnerSalePolicyResponse } from '@peaket/contracts/openapi/partner';
+import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { SalePolicies, type SalePolicyView } from '../application/sale-policy.js';
@@ -16,6 +16,7 @@ export class PartnerSalePolicyController {
   constructor(private readonly policies: SalePolicies) {}
 
   @Get(':productionId/sale-policy')
+  @ContractRouteSchema({ responses: { 200: GetPartnerSalePolicyResponse } })
   @Roles(['partner_admin', 'partner_member'])
   async read(@ContractParams(ProductionParams) params: z.output<typeof ProductionParams>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<SalePolicyView> {
     const out = await this.policies.read({ productionId: params.productionId.toLowerCase(), who: { tenantId: tenantOf(me), accountId: me.accountId } });
@@ -24,6 +25,7 @@ export class PartnerSalePolicyController {
   }
 
   @Put(':productionId/sale-policy')
+  @ContractRouteSchema({ responses: { 200: PutPartnerSalePolicyResponse } })
   @Roles(['partner_admin', 'partner_member'])
   async save(
     @ContractParams(ProductionParams) params: z.output<typeof ProductionParams>,
