@@ -9,11 +9,15 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { SeatMapImportResultWarningsItemCode } from './seatMapImportResultWarningsItemCode';
 
-export type SeatMapImportResultWarningsItem = {
-  code?: SeatMapImportResultWarningsItemCode;
-  seatIds?: string[];
-  /** SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다) */
-  ignored?: string[];
-};
+export type SeatMapWarningCode = typeof SeatMapWarningCode[keyof typeof SeatMapWarningCode];
+
+
+export const SeatMapWarningCode = {
+  W1: 'W1',
+  W2: 'W2',
+  W3: 'W3',
+  SEAT_OVERLAP: 'SEAT_OVERLAP',
+  SEAT_OUTSIDE_SHAPE: 'SEAT_OUTSIDE_SHAPE',
+  SVG_IGNORED: 'SVG_IGNORED',
+} as const;

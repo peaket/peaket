@@ -1,0 +1,945 @@
+{
+  "layoutVersion": 0,
+  "priceTiers": [
+    {
+      "tierId": "S",
+      "name": "S석",
+      "price": 99000
+    },
+    {
+      "tierId": "R",
+      "name": "R석",
+      "price": 150000
+    },
+    {
+      "tierId": "A",
+      "name": "A석",
+      "price": 70000
+    }
+  ],
+  "canvas": {
+    "width": 8000,
+    "height": 6000
+  },
+  "stage": [
+    {
+      "kind": "RECT",
+      "points": [
+        [
+          3000,
+          200
+        ],
+        [
+          5000,
+          200
+        ],
+        [
+          5000,
+          800
+        ],
+        [
+          3000,
+          800
+        ]
+      ],
+      "name": "무대"
+    }
+  ],
+  "sections": [
+    {
+      "sectionId": "s1",
+      "name": "A구역",
+      "level": "1층",
+      "shape": {
+        "kind": "RECT",
+        "points": [
+          [
+            2600,
+            1400
+          ],
+          [
+            3800,
+            1400
+          ],
+          [
+            3800,
+            2100
+          ],
+          [
+            2600,
+            2100
+          ]
+        ]
+      },
+      "tierId": "R",
+      "fillRule": {
+        "method": "COUNT",
+        "targetCount": 36,
+        "aisles": 1
+      },
+      "seats": [
+        {
+          "seatId": "new-gold-1",
+          "row": "1",
+          "number": 1,
+          "x": 3763,
+          "y": 1536,
+          "wheelchair": true
+        },
+        {
+          "seatId": "new-gold-2",
+          "row": "2",
+          "number": 1,
+          "x": 3462,
+          "y": 1451,
+          "tierId": "S"
+        },
+        {
+          "seatId": "new-gold-3",
+          "row": "2",
+          "number": 2,
+          "x": 3505,
+          "y": 1478
+        },
+        {
+          "seatId": "new-gold-4",
+          "row": "2",
+          "number": 3,
+          "x": 3678,
+          "y": 1589
+        },
+        {
+          "seatId": "new-gold-5",
+          "row": "2",
+          "number": 4,
+          "x": 3721,
+          "y": 1617
+        },
+        {
+          "seatId": "new-gold-6",
+          "row": "2",
+          "number": 5,
+          "x": 3764,
+          "y": 1644
+        },
+        {
+          "seatId": "new-gold-7",
+          "row": "3",
+          "number": 1,
+          "x": 3293,
+          "y": 1450
+        },
+        {
+          "seatId": "new-gold-8",
+          "row": "3",
+          "number": 2,
+          "x": 3336,
+          "y": 1477
+        },
+        {
+          "seatId": "new-gold-9",
+          "row": "3",
+          "number": 3,
+          "x": 3380,
+          "y": 1505
+        },
+        {
+          "seatId": "new-gold-10",
+          "row": "3",
+          "number": 4,
+          "x": 3423,
+          "y": 1533
+        },
+        {
+          "seatId": "new-gold-11",
+          "row": "3",
+          "number": 5,
+          "x": 3592,
+          "y": 1641
+        },
+        {
+          "seatId": "new-gold-12",
+          "row": "3",
+          "number": 6,
+          "x": 3636,
+          "y": 1669
+        },
+        {
+          "seatId": "new-gold-13",
+          "row": "3",
+          "number": 7,
+          "x": 3679,
+          "y": 1697
+        },
+        {
+          "seatId": "new-gold-14",
+          "row": "3",
+          "number": 8,
+          "x": 3723,
+          "y": 1724
+        },
+        {
+          "seatId": "new-gold-15",
+          "row": "3",
+          "number": 9,
+          "x": 3766,
+          "y": 1752
+        },
+        {
+          "seatId": "new-gold-16",
+          "row": "4",
+          "number": 1,
+          "x": 3124,
+          "y": 1449
+        },
+        {
+          "seatId": "new-gold-17",
+          "row": "4",
+          "number": 2,
+          "x": 3168,
+          "y": 1476
+        },
+        {
+          "seatId": "new-gold-18",
+          "row": "4",
+          "number": 3,
+          "x": 3211,
+          "y": 1504
+        },
+        {
+          "seatId": "new-gold-19",
+          "row": "4",
+          "number": 4,
+          "x": 3255,
+          "y": 1532
+        },
+        {
+          "seatId": "new-gold-20",
+          "row": "4",
+          "number": 5,
+          "x": 3298,
+          "y": 1560
+        },
+        {
+          "seatId": "new-gold-21",
+          "row": "4",
+          "number": 6,
+          "x": 3341,
+          "y": 1587
+        },
+        {
+          "seatId": "new-gold-22",
+          "row": "4",
+          "number": 7,
+          "x": 3507,
+          "y": 1694
+        },
+        {
+          "seatId": "new-gold-23",
+          "row": "4",
+          "number": 8,
+          "x": 3551,
+          "y": 1721
+        },
+        {
+          "seatId": "new-gold-24",
+          "row": "4",
+          "number": 9,
+          "x": 3594,
+          "y": 1749
+        },
+        {
+          "seatId": "new-gold-25",
+          "row": "4",
+          "number": 10,
+          "x": 3637,
+          "y": 1777
+        },
+        {
+          "seatId": "new-gold-26",
+          "row": "4",
+          "number": 11,
+          "x": 3681,
+          "y": 1805
+        },
+        {
+          "seatId": "new-gold-27",
+          "row": "4",
+          "number": 12,
+          "x": 3724,
+          "y": 1832
+        },
+        {
+          "seatId": "new-gold-28",
+          "row": "4",
+          "number": 13,
+          "x": 3768,
+          "y": 1860
+        },
+        {
+          "seatId": "new-gold-29",
+          "row": "5",
+          "number": 1,
+          "x": 3129,
+          "y": 1559
+        },
+        {
+          "seatId": "new-gold-30",
+          "row": "5",
+          "number": 2,
+          "x": 3173,
+          "y": 1586
+        },
+        {
+          "seatId": "new-gold-31",
+          "row": "5",
+          "number": 3,
+          "x": 3216,
+          "y": 1614
+        },
+        {
+          "seatId": "new-gold-32",
+          "row": "5",
+          "number": 4,
+          "x": 3260,
+          "y": 1642
+        },
+        {
+          "seatId": "new-gold-33",
+          "row": "5",
+          "number": 5,
+          "x": 3422,
+          "y": 1746
+        },
+        {
+          "seatId": "new-gold-34",
+          "row": "5",
+          "number": 6,
+          "x": 3466,
+          "y": 1774
+        },
+        {
+          "seatId": "new-gold-35",
+          "row": "5",
+          "number": 7,
+          "x": 3509,
+          "y": 1801
+        },
+        {
+          "seatId": "new-gold-36",
+          "row": "5",
+          "number": 8,
+          "x": 3552,
+          "y": 1829
+        }
+      ]
+    },
+    {
+      "sectionId": "s2",
+      "name": "<img src=x onerror=alert(1)>",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            4200,
+            1400
+          ],
+          [
+            5400,
+            1400
+          ],
+          [
+            5600,
+            1900
+          ],
+          [
+            4800,
+            2300
+          ],
+          [
+            4200,
+            1900
+          ]
+        ]
+      },
+      "tierId": "S",
+      "fillRule": {
+        "method": "GRID",
+        "rows": 2,
+        "seatsPerRow": 5,
+        "aisles": 0
+      },
+      "seats": [
+        {
+          "seatId": "new-gold-37",
+          "row": "1",
+          "number": 1,
+          "x": 4240,
+          "y": 1427
+        },
+        {
+          "seatId": "new-gold-38",
+          "row": "2",
+          "number": 1,
+          "x": 4235,
+          "y": 1539,
+          "unavailable": true
+        },
+        {
+          "seatId": "new-gold-39",
+          "row": "2",
+          "number": 2,
+          "x": 4278,
+          "y": 1510
+        },
+        {
+          "seatId": "new-gold-40",
+          "row": "2",
+          "number": 3,
+          "x": 4321,
+          "y": 1481
+        },
+        {
+          "seatId": "new-gold-41",
+          "row": "2",
+          "number": 4,
+          "x": 4363,
+          "y": 1453
+        }
+      ]
+    },
+    {
+      "sectionId": "s3",
+      "name": "C구역",
+      "shape": {
+        "kind": "SECTOR",
+        "points": [
+          [
+            500,
+            4500
+          ],
+          [
+            504,
+            4413
+          ],
+          [
+            515,
+            4326
+          ],
+          [
+            534,
+            4241
+          ],
+          [
+            560,
+            4158
+          ],
+          [
+            594,
+            4077
+          ],
+          [
+            634,
+            4000
+          ],
+          [
+            681,
+            3926
+          ],
+          [
+            734,
+            3857
+          ],
+          [
+            793,
+            3793
+          ],
+          [
+            857,
+            3734
+          ],
+          [
+            926,
+            3681
+          ],
+          [
+            1000,
+            3634
+          ],
+          [
+            1077,
+            3594
+          ],
+          [
+            1158,
+            3560
+          ],
+          [
+            1241,
+            3534
+          ],
+          [
+            1326,
+            3515
+          ],
+          [
+            1413,
+            3504
+          ],
+          [
+            1500,
+            3500
+          ],
+          [
+            1500,
+            4500
+          ]
+        ],
+        "arc": {
+          "cx": 1500,
+          "cy": 4500,
+          "innerRadius": 0,
+          "outerRadius": 1000,
+          "startAngle": 180,
+          "endAngle": 270
+        }
+      },
+      "tierId": "A",
+      "fillRule": {
+        "method": "COUNT",
+        "targetCount": 12,
+        "aisles": 0,
+        "rowLabel": "ALPHA"
+      },
+      "seats": [
+        {
+          "seatId": "new-gold-42",
+          "row": "A",
+          "number": 1,
+          "x": 1466,
+          "y": 3531
+        },
+        {
+          "seatId": "new-gold-43",
+          "row": "B",
+          "number": 1,
+          "x": 1345,
+          "y": 3548
+        },
+        {
+          "seatId": "new-gold-44",
+          "row": "B",
+          "number": 2,
+          "x": 1385,
+          "y": 3580
+        },
+        {
+          "seatId": "new-gold-45",
+          "row": "B",
+          "number": 3,
+          "x": 1425,
+          "y": 3613
+        },
+        {
+          "seatId": "new-gold-46",
+          "row": "B",
+          "number": 4,
+          "x": 1465,
+          "y": 3645
+        },
+        {
+          "seatId": "new-gold-47",
+          "row": "C",
+          "number": 1,
+          "x": 1231,
+          "y": 3571
+        },
+        {
+          "seatId": "new-gold-48",
+          "row": "C",
+          "number": 2,
+          "x": 1271,
+          "y": 3603
+        },
+        {
+          "seatId": "new-gold-49",
+          "row": "C",
+          "number": 3,
+          "x": 1311,
+          "y": 3636
+        },
+        {
+          "seatId": "new-gold-50",
+          "row": "C",
+          "number": 4,
+          "x": 1351,
+          "y": 3669
+        },
+        {
+          "seatId": "new-gold-51",
+          "row": "C",
+          "number": 5,
+          "x": 1391,
+          "y": 3701
+        },
+        {
+          "seatId": "new-gold-52",
+          "row": "C",
+          "number": 6,
+          "x": 1430,
+          "y": 3734
+        },
+        {
+          "seatId": "new-gold-53",
+          "row": "C",
+          "number": 7,
+          "x": 1470,
+          "y": 3766
+        }
+      ]
+    },
+    {
+      "sectionId": "s4",
+      "name": "D구역",
+      "shape": {
+        "kind": "ARC_BAND",
+        "points": [
+          [
+            5600,
+            3271
+          ],
+          [
+            5352,
+            3400
+          ],
+          [
+            5094,
+            3507
+          ],
+          [
+            4828,
+            3591
+          ],
+          [
+            4556,
+            3651
+          ],
+          [
+            4279,
+            3688
+          ],
+          [
+            4000,
+            3700
+          ],
+          [
+            3721,
+            3688
+          ],
+          [
+            3444,
+            3651
+          ],
+          [
+            3172,
+            3591
+          ],
+          [
+            2906,
+            3507
+          ],
+          [
+            2648,
+            3400
+          ],
+          [
+            2400,
+            3271
+          ],
+          [
+            2750,
+            2665
+          ],
+          [
+            2943,
+            2766
+          ],
+          [
+            3145,
+            2849
+          ],
+          [
+            3353,
+            2915
+          ],
+          [
+            3566,
+            2962
+          ],
+          [
+            3782,
+            2990
+          ],
+          [
+            4000,
+            3000
+          ],
+          [
+            4218,
+            2990
+          ],
+          [
+            4434,
+            2962
+          ],
+          [
+            4647,
+            2915
+          ],
+          [
+            4855,
+            2849
+          ],
+          [
+            5057,
+            2766
+          ],
+          [
+            5250,
+            2665
+          ]
+        ],
+        "arc": {
+          "cx": 4000,
+          "cy": 500,
+          "innerRadius": 2500,
+          "outerRadius": 3200,
+          "startAngle": 60,
+          "endAngle": 120
+        }
+      },
+      "tierId": "A",
+      "gateZone": "G2",
+      "fillRule": {
+        "method": "COUNT",
+        "targetCount": 30,
+        "rowShape": "CURVED",
+        "aisles": 2,
+        "numberFrom": "RIGHT"
+      },
+      "seats": [
+        {
+          "seatId": "new-gold-54",
+          "row": "1",
+          "number": 1,
+          "x": 4859,
+          "y": 2893,
+          "gateZone": "G3"
+        },
+        {
+          "seatId": "new-gold-55",
+          "row": "1",
+          "number": 2,
+          "x": 4810,
+          "y": 2910
+        },
+        {
+          "seatId": "new-gold-56",
+          "row": "1",
+          "number": 3,
+          "x": 4761,
+          "y": 2926
+        },
+        {
+          "seatId": "new-gold-57",
+          "row": "1",
+          "number": 4,
+          "x": 4712,
+          "y": 2941
+        },
+        {
+          "seatId": "new-gold-58",
+          "row": "1",
+          "number": 5,
+          "x": 4662,
+          "y": 2955
+        },
+        {
+          "seatId": "new-gold-59",
+          "row": "1",
+          "number": 6,
+          "x": 4612,
+          "y": 2968
+        },
+        {
+          "seatId": "new-gold-60",
+          "row": "1",
+          "number": 7,
+          "x": 4562,
+          "y": 2979
+        },
+        {
+          "seatId": "new-gold-61",
+          "row": "1",
+          "number": 8,
+          "x": 4359,
+          "y": 3017
+        },
+        {
+          "seatId": "new-gold-62",
+          "row": "1",
+          "number": 9,
+          "x": 4308,
+          "y": 3024
+        },
+        {
+          "seatId": "new-gold-63",
+          "row": "1",
+          "number": 10,
+          "x": 4257,
+          "y": 3029
+        },
+        {
+          "seatId": "new-gold-64",
+          "row": "1",
+          "number": 11,
+          "x": 4206,
+          "y": 3034
+        },
+        {
+          "seatId": "new-gold-65",
+          "row": "1",
+          "number": 12,
+          "x": 4154,
+          "y": 3038
+        },
+        {
+          "seatId": "new-gold-66",
+          "row": "1",
+          "number": 13,
+          "x": 4103,
+          "y": 3040
+        },
+        {
+          "seatId": "new-gold-67",
+          "row": "1",
+          "number": 14,
+          "x": 4051,
+          "y": 3042
+        },
+        {
+          "seatId": "new-gold-68",
+          "row": "1",
+          "number": 15,
+          "x": 4000,
+          "y": 3042
+        },
+        {
+          "seatId": "new-gold-69",
+          "row": "1",
+          "number": 16,
+          "x": 3949,
+          "y": 3042
+        },
+        {
+          "seatId": "new-gold-70",
+          "row": "1",
+          "number": 17,
+          "x": 3897,
+          "y": 3040
+        },
+        {
+          "seatId": "new-gold-71",
+          "row": "1",
+          "number": 18,
+          "x": 3846,
+          "y": 3038
+        },
+        {
+          "seatId": "new-gold-72",
+          "row": "1",
+          "number": 19,
+          "x": 3794,
+          "y": 3034
+        },
+        {
+          "seatId": "new-gold-73",
+          "row": "1",
+          "number": 20,
+          "x": 3743,
+          "y": 3029
+        },
+        {
+          "seatId": "new-gold-74",
+          "row": "1",
+          "number": 21,
+          "x": 3692,
+          "y": 3024
+        },
+        {
+          "seatId": "new-gold-75",
+          "row": "1",
+          "number": 22,
+          "x": 3641,
+          "y": 3017
+        },
+        {
+          "seatId": "new-gold-76",
+          "row": "1",
+          "number": 23,
+          "x": 3438,
+          "y": 2979
+        },
+        {
+          "seatId": "new-gold-77",
+          "row": "1",
+          "number": 24,
+          "x": 3388,
+          "y": 2968
+        },
+        {
+          "seatId": "new-gold-78",
+          "row": "1",
+          "number": 25,
+          "x": 3338,
+          "y": 2955
+        },
+        {
+          "seatId": "new-gold-79",
+          "row": "1",
+          "number": 26,
+          "x": 3288,
+          "y": 2941
+        },
+        {
+          "seatId": "new-gold-80",
+          "row": "1",
+          "number": 27,
+          "x": 3239,
+          "y": 2926
+        },
+        {
+          "seatId": "new-gold-81",
+          "row": "1",
+          "number": 28,
+          "x": 3190,
+          "y": 2910
+        },
+        {
+          "seatId": "new-gold-82",
+          "row": "1",
+          "number": 29,
+          "x": 3141,
+          "y": 2893
+        },
+        {
+          "seatId": "new-gold-83",
+          "row": "1",
+          "number": 30,
+          "x": 3093,
+          "y": 2875
+        }
+      ]
+    }
+  ]
+}

@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { SeatMapShapeArc } from './seatMapShapeArc';
 import type { SeatMapShapeKind } from './seatMapShapeKind';
 
 /**
@@ -25,4 +26,5 @@ export interface SeatMapShape {
      */
   points: number[][];
   name?: string;
+  arc?: SeatMapShapeArc;
 }

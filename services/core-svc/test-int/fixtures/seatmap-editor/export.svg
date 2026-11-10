@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8000 6000" width="8000" height="6000">
+<polygon data-kind="stage" data-section="무대" points="3000,200 5000,200 5000,800 3000,800"/>
+<polygon data-section="A구역" points="2600,1400 3800,1400 3800,2100 2600,2100"/>
+<polygon data-section="&lt;img src=x onerror=alert(1)&gt;" points="4200,1400 5400,1400 5600,1900 4800,2300 4200,1900"/>
+<polygon data-section="C구역" points="500,4500 504,4413 515,4326 534,4241 560,4158 594,4077 634,4000 681,3926 734,3857 793,3793 857,3734 926,3681 1000,3634 1077,3594 1158,3560 1241,3534 1326,3515 1413,3504 1500,3500 1500,4500"/>
+<polygon data-section="D구역" points="5600,3271 5352,3400 5094,3507 4828,3591 4556,3651 4279,3688 4000,3700 3721,3688 3444,3651 3172,3591 2906,3507 2648,3400 2400,3271 2750,2665 2943,2766 3145,2849 3353,2915 3566,2962 3782,2990 4000,3000 4218,2990 4434,2962 4647,2915 4855,2849 5057,2766 5250,2665"/>
+<circle cx="3763" cy="1536" r="20" data-section="A구역" data-row="1" data-number="1" data-tier="R" data-wheelchair="true"/>
+<circle cx="3462" cy="1451" r="20" data-section="A구역" data-row="2" data-number="1" data-tier="S"/>
+<circle cx="3505" cy="1478" r="20" data-section="A구역" data-row="2" data-number="2" data-tier="R"/>
+<circle cx="3678" cy="1589" r="20" data-section="A구역" data-row="2" data-number="3" data-tier="R"/>
+<circle cx="3721" cy="1617" r="20" data-section="A구역" data-row="2" data-number="4" data-tier="R"/>
+<circle cx="3764" cy="1644" r="20" data-section="A구역" data-row="2" data-number="5" data-tier="R"/>
+<circle cx="3293" cy="1450" r="20" data-section="A구역" data-row="3" data-number="1" data-tier="R"/>
+<circle cx="3336" cy="1477" r="20" data-section="A구역" data-row="3" data-number="2" data-tier="R"/>
+<circle cx="3380" cy="1505" r="20" data-section="A구역" data-row="3" data-number="3" data-tier="R"/>
+<circle cx="3423" cy="1533" r="20" data-section="A구역" data-row="3" data-number="4" data-tier="R"/>
+<circle cx="3592" cy="1641" r="20" data-section="A구역" data-row="3" data-number="5" data-tier="R"/>
+<circle cx="3636" cy="1669" r="20" data-section="A구역" data-row="3" data-number="6" data-tier="R"/>
+<circle cx="3679" cy="1697" r="20" data-section="A구역" data-row="3" data-number="7" data-tier="R"/>
+<circle cx="3723" cy="1724" r="20" data-section="A구역" data-row="3" data-number="8" data-tier="R"/>
+<circle cx="3766" cy="1752" r="20" data-section="A구역" data-row="3" data-number="9" data-tier="R"/>
+<circle cx="3124" cy="1449" r="20" data-section="A구역" data-row="4" data-number="1" data-tier="R"/>
+<circle cx="3168" cy="1476" r="20" data-section="A구역" data-row="4" data-number="2" data-tier="R"/>
+<circle cx="3211" cy="1504" r="20" data-section="A구역" data-row="4" data-number="3" data-tier="R"/>
+<circle cx="3255" cy="1532" r="20" data-section="A구역" data-row="4" data-number="4" data-tier="R"/>
+<circle cx="3298" cy="1560" r="20" data-section="A구역" data-row="4" data-number="5" data-tier="R"/>
+<circle cx="3341" cy="1587" r="20" data-section="A구역" data-row="4" data-number="6" data-tier="R"/>
+<circle cx="3507" cy="1694" r="20" data-section="A구역" data-row="4" data-number="7" data-tier="R"/>
+<circle cx="3551" cy="1721" r="20" data-section="A구역" data-row="4" data-number="8" data-tier="R"/>
+<circle cx="3594" cy="1749" r="20" data-section="A구역" data-row="4" data-number="9" data-tier="R"/>
+<circle cx="3637" cy="1777" r="20" data-section="A구역" data-row="4" data-number="10" data-tier="R"/>
+<circle cx="3681" cy="1805" r="20" data-section="A구역" data-row="4" data-number="11" data-tier="R"/>
+<circle cx="3724" cy="1832" r="20" data-section="A구역" data-row="4" data-number="12" data-tier="R"/>
+<circle cx="3768" cy="1860" r="20" data-section="A구역" data-row="4" data-number="13" data-tier="R"/>
+<circle cx="3129" cy="1559" r="20" data-section="A구역" data-row="5" data-number="1" data-tier="R"/>
+<circle cx="3173" cy="1586" r="20" data-section="A구역" data-row="5" data-number="2" data-tier="R"/>
+<circle cx="3216" cy="1614" r="20" data-section="A구역" data-row="5" data-number="3" data-tier="R"/>
+<circle cx="3260" cy="1642" r="20" data-section="A구역" data-row="5" data-number="4" data-tier="R"/>
+<circle cx="3422" cy="1746" r="20" data-section="A구역" data-row="5" data-number="5" data-tier="R"/>
+<circle cx="3466" cy="1774" r="20" data-section="A구역" data-row="5" data-number="6" data-tier="R"/>
+<circle cx="3509" cy="1801" r="20" data-section="A구역" data-row="5" data-number="7" data-tier="R"/>
+<circle cx="3552" cy="1829" r="20" data-section="A구역" data-row="5" data-number="8" data-tier="R"/>
+<circle cx="4240" cy="1427" r="20" data-section="&lt;img src=x onerror=alert(1)&gt;" data-row="1" data-number="1" data-tier="S"/>
+<circle cx="4235" cy="1539" r="20" data-section="&lt;img src=x onerror=alert(1)&gt;" data-row="2" data-number="1" data-tier="S"/>
+<circle cx="4278" cy="1510" r="20" data-section="&lt;img src=x onerror=alert(1)&gt;" data-row="2" data-number="2" data-tier="S"/>
+<circle cx="4321" cy="1481" r="20" data-section="&lt;img src=x onerror=alert(1)&gt;" data-row="2" data-number="3" data-tier="S"/>
+<circle cx="4363" cy="1453" r="20" data-section="&lt;img src=x onerror=alert(1)&gt;" data-row="2" data-number="4" data-tier="S"/>
+<circle cx="1466" cy="3531" r="20" data-section="C구역" data-row="A" data-number="1" data-tier="A"/>
+<circle cx="1345" cy="3548" r="20" data-section="C구역" data-row="B" data-number="1" data-tier="A"/>
+<circle cx="1385" cy="3580" r="20" data-section="C구역" data-row="B" data-number="2" data-tier="A"/>
+<circle cx="1425" cy="3613" r="20" data-section="C구역" data-row="B" data-number="3" data-tier="A"/>
+<circle cx="1465" cy="3645" r="20" data-section="C구역" data-row="B" data-number="4" data-tier="A"/>
+<circle cx="1231" cy="3571" r="20" data-section="C구역" data-row="C" data-number="1" data-tier="A"/>
+<circle cx="1271" cy="3603" r="20" data-section="C구역" data-row="C" data-number="2" data-tier="A"/>
+<circle cx="1311" cy="3636" r="20" data-section="C구역" data-row="C" data-number="3" data-tier="A"/>
+<circle cx="1351" cy="3669" r="20" data-section="C구역" data-row="C" data-number="4" data-tier="A"/>
+<circle cx="1391" cy="3701" r="20" data-section="C구역" data-row="C" data-number="5" data-tier="A"/>
+<circle cx="1430" cy="3734" r="20" data-section="C구역" data-row="C" data-number="6" data-tier="A"/>
+<circle cx="1470" cy="3766" r="20" data-section="C구역" data-row="C" data-number="7" data-tier="A"/>
+<circle cx="4859" cy="2893" r="20" data-section="D구역" data-row="1" data-number="1" data-tier="A" data-gate="G3"/>
+<circle cx="4810" cy="2910" r="20" data-section="D구역" data-row="1" data-number="2" data-tier="A" data-gate="G2"/>
+<circle cx="4761" cy="2926" r="20" data-section="D구역" data-row="1" data-number="3" data-tier="A" data-gate="G2"/>
+<circle cx="4712" cy="2941" r="20" data-section="D구역" data-row="1" data-number="4" data-tier="A" data-gate="G2"/>
+<circle cx="4662" cy="2955" r="20" data-section="D구역" data-row="1" data-number="5" data-tier="A" data-gate="G2"/>
+<circle cx="4612" cy="2968" r="20" data-section="D구역" data-row="1" data-number="6" data-tier="A" data-gate="G2"/>
+<circle cx="4562" cy="2979" r="20" data-section="D구역" data-row="1" data-number="7" data-tier="A" data-gate="G2"/>
+<circle cx="4359" cy="3017" r="20" data-section="D구역" data-row="1" data-number="8" data-tier="A" data-gate="G2"/>
+<circle cx="4308" cy="3024" r="20" data-section="D구역" data-row="1" data-number="9" data-tier="A" data-gate="G2"/>
+<circle cx="4257" cy="3029" r="20" data-section="D구역" data-row="1" data-number="10" data-tier="A" data-gate="G2"/>
+<circle cx="4206" cy="3034" r="20" data-section="D구역" data-row="1" data-number="11" data-tier="A" data-gate="G2"/>
+<circle cx="4154" cy="3038" r="20" data-section="D구역" data-row="1" data-number="12" data-tier="A" data-gate="G2"/>
+<circle cx="4103" cy="3040" r="20" data-section="D구역" data-row="1" data-number="13" data-tier="A" data-gate="G2"/>
+<circle cx="4051" cy="3042" r="20" data-section="D구역" data-row="1" data-number="14" data-tier="A" data-gate="G2"/>
+<circle cx="4000" cy="3042" r="20" data-section="D구역" data-row="1" data-number="15" data-tier="A" data-gate="G2"/>
+<circle cx="3949" cy="3042" r="20" data-section="D구역" data-row="1" data-number="16" data-tier="A" data-gate="G2"/>
+<circle cx="3897" cy="3040" r="20" data-section="D구역" data-row="1" data-number="17" data-tier="A" data-gate="G2"/>
+<circle cx="3846" cy="3038" r="20" data-section="D구역" data-row="1" data-number="18" data-tier="A" data-gate="G2"/>
+<circle cx="3794" cy="3034" r="20" data-section="D구역" data-row="1" data-number="19" data-tier="A" data-gate="G2"/>
+<circle cx="3743" cy="3029" r="20" data-section="D구역" data-row="1" data-number="20" data-tier="A" data-gate="G2"/>
+<circle cx="3692" cy="3024" r="20" data-section="D구역" data-row="1" data-number="21" data-tier="A" data-gate="G2"/>
+<circle cx="3641" cy="3017" r="20" data-section="D구역" data-row="1" data-number="22" data-tier="A" data-gate="G2"/>
+<circle cx="3438" cy="2979" r="20" data-section="D구역" data-row="1" data-number="23" data-tier="A" data-gate="G2"/>
+<circle cx="3388" cy="2968" r="20" data-section="D구역" data-row="1" data-number="24" data-tier="A" data-gate="G2"/>
+<circle cx="3338" cy="2955" r="20" data-section="D구역" data-row="1" data-number="25" data-tier="A" data-gate="G2"/>
+<circle cx="3288" cy="2941" r="20" data-section="D구역" data-row="1" data-number="26" data-tier="A" data-gate="G2"/>
+<circle cx="3239" cy="2926" r="20" data-section="D구역" data-row="1" data-number="27" data-tier="A" data-gate="G2"/>
+<circle cx="3190" cy="2910" r="20" data-section="D구역" data-row="1" data-number="28" data-tier="A" data-gate="G2"/>
+<circle cx="3141" cy="2893" r="20" data-section="D구역" data-row="1" data-number="29" data-tier="A" data-gate="G2"/>
+<circle cx="3093" cy="2875" r="20" data-section="D구역" data-row="1" data-number="30" data-tier="A" data-gate="G2"/>
+</svg>

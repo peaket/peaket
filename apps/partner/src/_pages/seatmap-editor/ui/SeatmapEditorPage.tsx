@@ -1,12 +1,13 @@
 // SCR-022 좌석맵 에디터(/events/[id]/seatmap). 보드 SCR-022-m·t·d를 한 페이지 반응형으로 합쳤다(d5 §6.5, §3.9).
 // 데스크톱(lg 이상): 도구 막대 + [계층 트리 | 캔버스 | 속성] + 요약 줄 / 태블릿: 캔버스 전체 폭 + 트리·속성 시트 /
 // 휴대폰: 배치 미리보기와 좌석 요약만(편집·템플릿 자리에는 안내 카드).
-// 캔버스는 보드가 그린 SVG 미리보기다. Konva 편집·채우기 Worker는 HOT-220(add-screen-publishing design.md 결정 8).
+// 캔버스는 보드가 그린 SVG 미리보기다. 소문자 UUID 공연이고 ?state=가 없으면 실제 에디터(Konva 편집 캔버스·저장소·Worker, ADR-0264 결정 2)를 그린다.
+// 목업 공연 ID와 ?state= 상태 보기는 지금까지의 퍼블리싱 화면이다(ADR-0170).
 import { requireProduction } from '@/entities/production';
 import { TemplateStart } from '@peaket/ds/TemplatePicker';
 import { routes } from '@/shared/config/routes';
 import { SEATMAP_STATES } from '@/shared/config/states/scr022';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
 import { treeOf } from '../model/tree';
@@ -16,6 +17,7 @@ import { MODAL, SeatmapDialogs } from './Dialogs';
 import { DismissBanner } from './EditorChrome';
 import { EditorWorkspace } from './EditorWorkspace';
 import { HierarchyTree } from './HierarchyTree';
+import { LiveSeatmapPage } from './live/LiveSeatmapPage';
 import { MobileSeatmap } from './MobileSeatmap';
 import { PropsPanel } from './PropsPanel';
 import { SummaryCard } from './SummaryCard';
@@ -27,9 +29,14 @@ function sheetLabel(step: 1 | 2 | 3 | 4): string | null {
   return step === 1 ? '구역 속성' : step === 2 ? '좌석 채우기' : step === 3 ? '좌석 속성' : null;
 }
 
+/** 실제 공연 ID(소문자 UUID). 목업 ID(evt-…)는 퍼블리싱 화면으로 본다 */
+const PRODUCTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export default async function SeatmapEditorPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
-  const pv = readPreview(await searchParams, SEATMAP_STATES, '배치 그리기');
+  const sp = await searchParams;
+  if (readParam(sp, 'state') === undefined && PRODUCTION_ID.test(id)) return <LiveSeatmapPage productionId={id} />;
+  const pv = readPreview(sp, SEATMAP_STATES, '배치 그리기');
   const production = requireProduction(id);
   const v = viewOf(pv.state);
   const label = sheetLabel(v.step);

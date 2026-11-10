@@ -10,8 +10,8 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { SeatMapImportResultErrorsItem } from './seatMapImportResultErrorsItem';
-import type { SeatMapImportResultWarningsItem } from './seatMapImportResultWarningsItem';
 import type { SeatMapLayout } from './seatMapLayout';
+import type { SeatMapWarning } from './seatMapWarning';
 
 /**
  * 좌석맵 가져오기 검증 결과. 오류가 하나라도 있으면 반영하지 않는다(FR-023)
@@ -21,6 +21,6 @@ export interface SeatMapImportResult {
   /** ok일 때 에디터에 올릴 배치. 저장은 PUT /v1/partner/productions/{productionId}/seatmap */
   layout?: SeatMapLayout;
   errors?: SeatMapImportResultErrorsItem[];
-  /** 휠체어석 기준 경고 W1~W3(FR-023)와 좌석 겹침 경고 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다 */
-  warnings?: SeatMapImportResultWarningsItem[];
+  /** 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석)와 SVG에서 읽지 않고 넘긴 요소·속성(SVG_IGNORED). 모두 막지 않는다 */
+  warnings?: SeatMapWarning[];
 }

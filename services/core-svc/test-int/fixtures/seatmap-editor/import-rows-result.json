@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "errors": [
+    {
+      "line": 5,
+      "field": "x",
+      "code": "COORD_INVALID"
+    },
+    {
+      "line": 6,
+      "field": "wheelchair",
+      "code": "WHEELCHAIR_INVALID"
+    },
+    {
+      "line": 4,
+      "field": "number",
+      "code": "NUMBER_INVALID"
+    }
+  ],
+  "warnings": []
+}

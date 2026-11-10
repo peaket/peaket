@@ -63,6 +63,11 @@ export interface SeatmapLayoutStore {
   ownerView(productionId: string, tenantId: string): Promise<{ approvedBefore: boolean } | undefined>;
   /** 지금 판(대기 판이 있으면 그 판)과 그 배치. 저장한 배치가 없으면 undefined, 공연이 없거나 남의 것이면 'not-found' */
   current(productionId: string, tenantId: string): Promise<{ version: number; doc: LayoutDoc } | undefined | 'not-found'>;
+  /**
+   * 오픈 뒤 잠금 판정에 쓰는 값(승인 시각과 그 공연의 회차: event 행과 변경분의 더한 회차). 불러오기 응답 geometryLocked(ADR-0264 결정 13)가 쓴다.
+   * 공연이 없거나 남의 것이면 undefined
+   */
+  lockFacts(productionId: string, tenantId: string): Promise<{ saleApprovedAt: Date | null; rounds: LayoutRound[] } | undefined>;
   /** 공개된 TEMPLATE 행의 캔버스·무대·구역(좌석 없음)을 판 0 초안으로. 없거나 공개되지 않았거나 LAYOUT이면 undefined */
   templateDraft(templateVenueId: string, tenantId: string): Promise<LayoutDoc | undefined>;
   /** 공연 행을 잠근 트랜잭션에서 fn을 부른다. 공연이 없거나 남의 것이면 'not-found'이고 fn을 부르지 않는다 */

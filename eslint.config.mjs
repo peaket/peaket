@@ -8,7 +8,7 @@
 // devops §4.4 '리뷰 뒤 더한 규칙' ⑥, ADR-0263 결정 13).
 import { serviceLayerConfigs } from './packages/config/eslint/service-layers.mjs';
 import { serviceSecurityConfigs, serviceSecurityPlugin } from './packages/config/eslint/service-security.mjs';
-import { webCompatConfigs } from './packages/config/eslint/web-compat.mjs';
+import { webCompatConfigs, tsParser } from './packages/config/eslint/web-compat.mjs';
 import { webSecurityConfigs, webSecurityPlugin } from './packages/config/eslint/web-security.mjs';
 
 /** 화면 코드(앱과 화면용 패키지의 소스). 브라우저 지원 린트를 건다(docs/frontend.md §1.5, BAS-210) */
@@ -68,6 +68,44 @@ const NO_MOCKS_IN_APPS = {
 /** setOrvalClient를 꽂는 한 곳(ADR-0199 결정 3) */
 const API_CLIENT_HOME = { files: ['apps/web/src/shared/api/index.ts'], rules: { 'no-restricted-imports': 'off' } };
 
+/** 앱 코드의 동적 코드 실행 금지: eval·new Function·문자열 타이머(setTimeout('…'))(asvs/seat-hold.md 1.3.2, ADR-0264, BUILD_ORDER HOT-220) */
+// no-implied-eval은 전역으로 선언된 타이머만 본다. 그래서 타이머 이름을 전역으로 둔다(값은 바꾸지 않는다)
+export const NO_DYNAMIC_CODE = {
+  // 앱 운영 코드에 더해 화면용 패키지와 서비스 소스까지 넓힌다(asvs/seat-hold.md 1.3.2, ADR-0264 결정 2, 리뷰 S3).
+  // 시험 폴더(test/·test-int/)와 이야기는 넣지 않는다
+  files: [...APP_RUNTIME_FILES, 'packages/*/src/**/*.{ts,tsx,js,mjs}', 'services/*/src/**/*.{ts,tsx,js,mjs}'],
+  languageOptions: { globals: { setTimeout: 'readonly', setInterval: 'readonly', execScript: 'readonly', window: 'readonly', self: 'readonly', globalThis: 'readonly' } },
+  rules: { 'no-eval': 'error', 'no-implied-eval': 'error', 'no-new-func': 'error' },
+};
+
+/**
+ * 파트너 콘솔은 Konva(위험 구성 요소, asvs/frontend.md 15.1.4)를 CMP-051 폴더(apps/partner/src/widgets/seatmap-canvas)에서만 가져온다(ADR-0264 결정 2).
+ * 같은 규칙 이름의 설정은 뒤 것이 앞 것을 통째로 덮으므로 목업 금지(NO_MOCKS_IN_APPS)의 목록을 함께 싣는다. 그 폴더는 목업 금지만 받는다
+ */
+export const KONVA_HOME = 'apps/partner/src/widgets/seatmap-canvas/**';
+const KONVA_MESSAGE = 'Konva는 CMP-051 폴더(apps/partner/src/widgets/seatmap-canvas)에서만 가져온다(ADR-0264 결정 2, asvs/frontend.md 15.1.4)';
+const [MOCK_IMPORTS] = NO_MOCKS_IN_APPS.rules['no-restricted-imports'].slice(1);
+const [MOCK_SYNTAX] = NO_MOCKS_IN_APPS.rules['no-restricted-syntax'].slice(1);
+/** Konva 모듈 이름(작은·큰따옴표, require, 식 없는 템플릿 글자) */
+const KONVA_SOURCE = String.raw`/^konva(?:\/.*)?$/`;
+export const PARTNER_KONVA_OUTSIDE = {
+  // apps/partner/msw 뿌리 파일(proxy.ts·next.config.ts)과 .jsx·.cjs·.mts·.cts까지 덮는다(리뷰 S1). 운영 코드가 아닌 scripts 폴더는 뺀다
+  files: ['apps/partner/src/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}', 'apps/partner/app/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}', 'apps/partner/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'],
+  ignores: [KONVA_HOME, '**/*.test.*', '**/*.spec.*', '**/*.stories.*', '**/scripts/**'],
+  languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' } },
+  rules: {
+    'no-restricted-imports': ['error', { paths: MOCK_IMPORTS.paths, patterns: [...MOCK_IMPORTS.patterns, { group: ['konva', 'konva/*'], message: KONVA_MESSAGE }] }],
+    'no-restricted-syntax': [
+      'error',
+      MOCK_SYNTAX,
+      { selector: `ImportExpression[source.value=${KONVA_SOURCE}]`, message: KONVA_MESSAGE },
+      { selector: `ImportExpression[source.type='TemplateLiteral'][source.quasis.0.value.cooked=${KONVA_SOURCE}]`, message: KONVA_MESSAGE },
+      { selector: `CallExpression[callee.name='require'][arguments.0.value=${KONVA_SOURCE}]`, message: KONVA_MESSAGE },
+      { selector: `CallExpression[callee.name='require'][arguments.0.type='TemplateLiteral'][arguments.0.quasis.0.value.cooked=${KONVA_SOURCE}]`, message: KONVA_MESSAGE },
+    ],
+  },
+};
+
 // 계약 생성물(packages/contracts/src/gen)만 뺀다. 화면이 묶는 생성물(packages/ds/src/gen 토큰, BAS-040의 packages/api-client/src/gen orval 호출 함수)은
 // 브라우저 지원 린트를 받는다(구간 1 끝 정리)
 export default [
@@ -80,4 +118,6 @@ export default [
   NO_MOCKS_IN_APPS,
   API_CLIENT_HOME,
   ...PROTOTYPE_EVERYWHERE,
+  PARTNER_KONVA_OUTSIDE,
+  NO_DYNAMIC_CODE,
 ];

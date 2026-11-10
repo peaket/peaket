@@ -24,10 +24,44 @@ export const putPartnerProductionSeatmapBodyStageItemPointsItemMax = 2;
 
 export const putPartnerProductionSeatmapBodyStageItemPointsMin = 3;
 
+export const putPartnerProductionSeatmapBodyStageItemArcCxMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcCxMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcCyMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcCyMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcOuterRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcStartAngleMin = -360;
+export const putPartnerProductionSeatmapBodyStageItemArcStartAngleMax = 360;
+
+export const putPartnerProductionSeatmapBodyStageItemArcEndAngleMin = -360;
+export const putPartnerProductionSeatmapBodyStageItemArcEndAngleMax = 720;
+
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin = 2;
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax = 2;
 
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsMin = 3;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCxMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCxMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCyMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCyMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcOuterRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMin = -360;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMax = 360;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMin = -360;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMax = 720;
 
 
 
@@ -55,7 +89,15 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodyStageItemPointsItemMin).max(putPartnerProductionSeatmapBodyStageItemPointsItemMax)).min(putPartnerProductionSeatmapBodyStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcCxMin).max(putPartnerProductionSeatmapBodyStageItemArcCxMax),
+  "cy": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcCyMin).max(putPartnerProductionSeatmapBodyStageItemArcCyMax),
+  "innerRadius": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMin).max(putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(putPartnerProductionSeatmapBodyStageItemArcOuterRadiusMax),
+  "startAngle": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcStartAngleMin).max(putPartnerProductionSeatmapBodyStageItemArcStartAngleMax),
+  "endAngle": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcEndAngleMin).max(putPartnerProductionSeatmapBodyStageItemArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string().describe('구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
@@ -64,7 +106,15 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin).max(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax)).min(putPartnerProductionSeatmapBodySectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcCxMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcCxMax),
+  "cy": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcCyMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcCyMax),
+  "innerRadius": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(putPartnerProductionSeatmapBodySectionsItemShapeArcOuterRadiusMax),
+  "startAngle": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMax),
+  "endAngle": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "label": zod.object({
   "x": zod.int().optional(),

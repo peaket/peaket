@@ -24,10 +24,44 @@ export const seatMapLayoutInputStageItemPointsItemMax = 2;
 
 export const seatMapLayoutInputStageItemPointsMin = 3;
 
+export const seatMapLayoutInputStageItemArcCxMin = 0;
+export const seatMapLayoutInputStageItemArcCxMax = 100000;
+
+export const seatMapLayoutInputStageItemArcCyMin = 0;
+export const seatMapLayoutInputStageItemArcCyMax = 100000;
+
+export const seatMapLayoutInputStageItemArcInnerRadiusMin = 0;
+export const seatMapLayoutInputStageItemArcInnerRadiusMax = 100000;
+
+export const seatMapLayoutInputStageItemArcOuterRadiusMax = 100000;
+
+export const seatMapLayoutInputStageItemArcStartAngleMin = -360;
+export const seatMapLayoutInputStageItemArcStartAngleMax = 360;
+
+export const seatMapLayoutInputStageItemArcEndAngleMin = -360;
+export const seatMapLayoutInputStageItemArcEndAngleMax = 720;
+
 export const seatMapLayoutInputSectionsItemShapePointsItemMin = 2;
 export const seatMapLayoutInputSectionsItemShapePointsItemMax = 2;
 
 export const seatMapLayoutInputSectionsItemShapePointsMin = 3;
+
+export const seatMapLayoutInputSectionsItemShapeArcCxMin = 0;
+export const seatMapLayoutInputSectionsItemShapeArcCxMax = 100000;
+
+export const seatMapLayoutInputSectionsItemShapeArcCyMin = 0;
+export const seatMapLayoutInputSectionsItemShapeArcCyMax = 100000;
+
+export const seatMapLayoutInputSectionsItemShapeArcInnerRadiusMin = 0;
+export const seatMapLayoutInputSectionsItemShapeArcInnerRadiusMax = 100000;
+
+export const seatMapLayoutInputSectionsItemShapeArcOuterRadiusMax = 100000;
+
+export const seatMapLayoutInputSectionsItemShapeArcStartAngleMin = -360;
+export const seatMapLayoutInputSectionsItemShapeArcStartAngleMax = 360;
+
+export const seatMapLayoutInputSectionsItemShapeArcEndAngleMin = -360;
+export const seatMapLayoutInputSectionsItemShapeArcEndAngleMax = 720;
 
 
 
@@ -55,7 +89,15 @@ export const SeatMapLayoutInput = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(seatMapLayoutInputStageItemPointsItemMin).max(seatMapLayoutInputStageItemPointsItemMax)).min(seatMapLayoutInputStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(seatMapLayoutInputStageItemArcCxMin).max(seatMapLayoutInputStageItemArcCxMax),
+  "cy": zod.int().min(seatMapLayoutInputStageItemArcCyMin).max(seatMapLayoutInputStageItemArcCyMax),
+  "innerRadius": zod.int().min(seatMapLayoutInputStageItemArcInnerRadiusMin).max(seatMapLayoutInputStageItemArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(seatMapLayoutInputStageItemArcOuterRadiusMax),
+  "startAngle": zod.int().min(seatMapLayoutInputStageItemArcStartAngleMin).max(seatMapLayoutInputStageItemArcStartAngleMax),
+  "endAngle": zod.int().min(seatMapLayoutInputStageItemArcEndAngleMin).max(seatMapLayoutInputStageItemArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string().describe('구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
@@ -64,7 +106,15 @@ export const SeatMapLayoutInput = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(seatMapLayoutInputSectionsItemShapePointsItemMin).max(seatMapLayoutInputSectionsItemShapePointsItemMax)).min(seatMapLayoutInputSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(seatMapLayoutInputSectionsItemShapeArcCxMin).max(seatMapLayoutInputSectionsItemShapeArcCxMax),
+  "cy": zod.int().min(seatMapLayoutInputSectionsItemShapeArcCyMin).max(seatMapLayoutInputSectionsItemShapeArcCyMax),
+  "innerRadius": zod.int().min(seatMapLayoutInputSectionsItemShapeArcInnerRadiusMin).max(seatMapLayoutInputSectionsItemShapeArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(seatMapLayoutInputSectionsItemShapeArcOuterRadiusMax),
+  "startAngle": zod.int().min(seatMapLayoutInputSectionsItemShapeArcStartAngleMin).max(seatMapLayoutInputSectionsItemShapeArcStartAngleMax),
+  "endAngle": zod.int().min(seatMapLayoutInputSectionsItemShapeArcEndAngleMin).max(seatMapLayoutInputSectionsItemShapeArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "label": zod.object({
   "x": zod.int().optional(),

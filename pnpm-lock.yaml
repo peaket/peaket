@@ -315,6 +315,12 @@ importers:
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
+      '@peaket/seatmap':
+        specifier: workspace:*
+        version: link:../../packages/seatmap
+      konva:
+        specifier: 10.9.1
+        version: 10.9.1
       lexical:
         specifier: 0.53.0
         version: 0.53.0(typescript@7.0.2)
@@ -5350,6 +5356,17 @@ packages:
   kind-of@6.0.3:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
     engines: {node: '>=0.10.0'}
+
+  konva@10.9.1:
+    resolution: {integrity: sha512-m49x+GatSxEUSvqahYhxpTjgKbtrLtw4P4o4B4iux953ZFpceaK52Ea+CFsAsd7W4I0Y5u6mMoRUsY/eltNZmw==}
+    peerDependencies:
+      canvas: ^3.0.0
+      skia-canvas: ^3.0.0
+    peerDependenciesMeta:
+      canvas:
+        optional: true
+      skia-canvas:
+        optional: true
 
   launch-editor@2.14.2:
     resolution: {integrity: sha512-NHJEb30MGBCkmZXLZwz25t37QR4aY03ZzPYUJXOJaOa92uWwExI9SBQUuIznBYc1xkD7cJNGX7oc3Nl3sq2kQQ==}
@@ -10785,6 +10802,8 @@ snapshots:
       '@keyv/serialize': 1.1.1
 
   kind-of@6.0.3: {}
+
+  konva@10.9.1: {}
 
   launch-editor@2.14.2:
     dependencies:

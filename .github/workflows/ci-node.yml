@@ -65,6 +65,9 @@ jobs:
             # purchase-svc의 결제 모델 기반 시험은 payment-svc·pg-simulator 소스를 상대 경로로 가져온다(의존 선언 없음). --affected는 패키지 밖 파일 변경을
             # 그 패키지 변경으로 보지 않아, 그 둘만 바뀐 PR에서도 purchase-svc 타입 검사를 늘 돌린다(입력 해시가 같으면 캐시라 싸다, BUILD_ORDER PRF-210 코드 리뷰)
             pnpm exec turbo run typecheck --filter=@peaket/purchase-svc
+            # 좌석맵 에디터 통합 시험(core-svc test-int/seatmap-editor.int.test.ts)은 packages/seatmap/src를 상대 경로로 가져와 팬 파일을 푼다(의존 선언 밖).
+            # --affected가 그 변경을 core-svc 변경으로 보지 않으므로, 좌석맵 패키지만 바뀐 PR에서도 core-svc 타입 검사를 한 번 더 돈다(입력 해시가 같으면 캐시라 싸다, ADR-0264 결정 40)
+            pnpm exec turbo run typecheck --filter=@peaket/core-svc
           else
             echo "전체를 돈다(넓게 쓰이는 것이 바뀌었거나 기준이 없다)"
             pnpm exec turbo run typecheck test build

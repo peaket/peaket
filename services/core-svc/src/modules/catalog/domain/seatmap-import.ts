@@ -41,10 +41,32 @@ export interface SeatmapIssue {
 
 export type Point = [number, number];
 
+/** 부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, openapi SeatMapShapeArc, ADR-0264 결정 12). 팬 좌석맵 파일에는 싣지 않는다 */
+export interface ShapeArc {
+  cx: number;
+  cy: number;
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  endAngle: number;
+}
+
 export interface LayoutShape {
   kind: 'RECT' | 'POLYGON' | 'SECTOR' | 'ARC_BAND';
   points: Point[];
   name?: string;
+  arc?: ShapeArc;
+}
+
+/**
+ * arc의 관계 검사(ADR-0264 결정 12): 범위는 계약 Zod(400)가 보고, 여기서는 innerRadius ≥ outerRadius·endAngle ≤ startAngle·
+ * endAngle − startAngle > 360·SECTOR·ARC_BAND가 아닌 도형의 arc를 본다. 맞으면 true
+ */
+export function arcOk(s: Pick<LayoutShape, 'kind' | 'arc'>): boolean {
+  const a = s.arc;
+  if (a === undefined) return true;
+  if (s.kind !== 'SECTOR' && s.kind !== 'ARC_BAND') return false;
+  return a.innerRadius < a.outerRadius && a.endAngle > a.startAngle && a.endAngle - a.startAngle <= 360;
 }
 
 export interface LayoutSeat {
@@ -169,6 +191,7 @@ export function recheckLayout(layout: CheckedLayout): SeatmapIssue[] {
   (layout.stage ?? []).forEach((s, i) => {
     text(`stage[${i}].name`, s.name, SECTION_NAME_MAX);
     if (canvasOk && pointsOut(s.points)) add(`stage[${i}]`, 'OUT_OF_CANVAS');
+    if (!arcOk(s)) add(`stage[${i}].arc`, 'SHAPE_PARAMS_INVALID');
   });
   const seatKeys = new Set<string>();
   const seatIds = new Set<string>();
@@ -185,6 +208,7 @@ export function recheckLayout(layout: CheckedLayout): SeatmapIssue[] {
     if (sectionIds.has(s.sectionId)) add(`${at}.sectionId`, 'SECTION_ID_DUPLICATE');
     sectionIds.add(s.sectionId);
     if (canvasOk && pointsOut(s.shape.points)) add(`${at}.shape`, 'OUT_OF_CANVAS');
+    if (!arcOk(s.shape)) add(`${at}.shape.arc`, 'SHAPE_PARAMS_INVALID');
     const l = s.label;
     if (canvasOk && l && ((l.x !== undefined && (l.x < 0 || l.x > c.width)) || (l.y !== undefined && (l.y < 0 || l.y > c.height)))) add(`${at}.label`, 'OUT_OF_CANVAS');
     const r = s.seatIndexRange;

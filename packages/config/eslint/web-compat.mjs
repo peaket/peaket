@@ -7,6 +7,9 @@ import compat from 'eslint-plugin-compat';
 import tsParser from '@typescript-eslint/parser';
 import { bcdPlugin } from './bcd-rule.mjs';
 
+/** 뿌리 ESLint 설정이 TypeScript 뿌리 파일(proxy.ts 등)을 직접 볼 때 쓴다(ADR-0264 결정 2, 리뷰 S1) */
+export { tsParser };
+
 /**
  * 목표 브라우저(browserslist 질의, NFR-019: 주요 브라우저의 최신 2개 판과 iOS·iPadOS Safari 16.4 이상).
  * 앱 빌드의 변환 대상은 바꾸지 않으려고 뿌리 .browserslistrc 대신 이 린트에만 준다(빌드는 각 프레임워크의 기본 대상을 쓴다)

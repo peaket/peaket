@@ -111,6 +111,12 @@ const BOOL = new Map([
   ['false', false],
 ]);
 
+/**
+ * 수식 방지 작은따옴표 하나를 벗긴다(내보내기가 =·+·-·@·탭·CR로 시작하는 칸 앞에 붙인다, ADR-0264 결정 41).
+ * 작은따옴표 다음이 그 글자가 아니면 그대로 둔다(사용자가 쓴 작은따옴표다)
+ */
+export const unguardCell = (v: string): string => (v.length >= 2 && v[0] === "'" && /^[=+\-@\t\r]$/.test(v[1]!) ? v.slice(1) : v);
+
 /** CSV 글 → 배치. 해석하지 않는 파일이면 Rejected를 던진다 */
 export function readCsv(text: string): { layout: ParsedLayout; builder: LayoutBuilder } {
   const b = new LayoutBuilder();
@@ -132,7 +138,7 @@ export function readCsv(text: string): { layout: ParsedLayout; builder: LayoutBu
       b.issue(r.line, 'csv', 'COLUMN_COUNT');
       continue;
     }
-    const [section, row, number, xs, ys, tier, wheel, gate, shape] = r.fields as [string, string, string, string, string, string, string, string, string];
+    const [section, row, number, xs, ys, tier, wheel, gate, shape] = r.fields.map(unguardCell) as [string, string, string, string, string, string, string, string, string];
     const key = cleanLabel(section);
     if (!seen.has(key)) {
       seen.add(key);

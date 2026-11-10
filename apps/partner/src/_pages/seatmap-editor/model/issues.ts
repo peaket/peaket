@@ -1,0 +1,52 @@
+// 좌석맵 오류 코드 → 쉬운 문구(CMP-031 오류 행 표, 가져오기·저장 422). 서버 원문(title·detail)은 보이지 않고 코드로 고른다.
+// 모르는 코드는 '값이 올바르지 않습니다'와 코드를 글자로 보인다.
+const TEXT: Record<string, string> = {
+  FORMAT_MISMATCH: '고른 형식과 파일 내용이 다릅니다',
+  DOCTYPE_PRESENT: 'SVG에 DOCTYPE이 있어 읽지 않았습니다',
+  CSV_QUOTE: '따옴표가 맞지 않습니다',
+  COLUMN_COUNT: '칸 수가 머리와 다릅니다',
+  SHAPE_MISSING: '구역 첫 행에 도형(shape)이 없습니다',
+  SHAPE_INVALID: '도형 꼭짓점을 읽지 못했습니다',
+  SHAPE_REPEATED: '도형은 구역 첫 행에만 적습니다',
+  PATH_UNSUPPORTED: '곡선이나 여러 갈래 경로는 읽지 않습니다',
+  COORD_INVALID: '좌표가 숫자가 아닙니다',
+  WHEELCHAIR_INVALID: '휠체어석 칸은 true·false입니다',
+  SEAT_FIELDS_MISSING: '좌석에 구역·열·번호가 모두 있어야 합니다',
+  NAME_EMPTY: '구역 이름이 비었습니다',
+  NAME_TOO_LONG: '구역 이름은 30자까지입니다',
+  SECTION_DUPLICATE: '구역 이름이 겹칩니다',
+  SECTION_UNKNOWN: '도형이 없는 구역의 좌석입니다',
+  SECTION_ID_INVALID: '구역 ID는 영문·숫자·_·- 64자까지입니다',
+  SECTION_ID_DUPLICATE: '구역 ID가 겹칩니다',
+  ROW_EMPTY: '열이 비었습니다',
+  ROW_TOO_LONG: '열은 8자까지입니다',
+  NUMBER_INVALID: '좌석 번호는 1 이상 숫자 8자리까지입니다',
+  SEAT_ID_INVALID: '좌석 ID가 올바르지 않습니다',
+  DUPLICATE_SEAT: '좌석 번호가 겹칩니다',
+  DUPLICATE_SEAT_ID: '좌석 ID가 겹칩니다',
+  TEXT_INVALID: '쓸 수 없는 글자가 있거나 너무 깁니다',
+  OUT_OF_CANVAS: '캔버스 밖에 있습니다',
+  CANVAS_INVALID: '캔버스 크기가 올바르지 않습니다',
+  RANGE_INVALID: '좌석 색인 범위가 올바르지 않습니다',
+  INDEX_MISMATCH: '좌석 색인이 서버 규칙과 다릅니다',
+  SECTION_TOO_LARGE: '구역 하나에 좌석이 너무 많습니다',
+  TIER_MISSING: '좌석 등급이 없습니다',
+  TIER_UNKNOWN: '가격 등급에 없는 등급입니다',
+  TIER_DUPLICATE: '등급 ID가 겹칩니다',
+  TEMPLATE_INVALID: '템플릿이 올바르지 않습니다',
+  SHAPE_PARAMS_INVALID: '부채꼴·곡선 띠의 반지름·각도가 맞지 않습니다',
+  NO_SECTIONS: '구역이 하나도 없습니다',
+  TOO_MANY_SEATS: '좌석이 5만 석을 넘습니다',
+  TOO_MANY_SECTIONS: '구역이 500개를 넘습니다',
+  TOO_MANY_POINTS: '도형 꼭짓점이 1,000개를 넘습니다',
+  TOO_MANY_STAGE: '무대 도형이 너무 많습니다',
+  TIER_TOO_LONG: '등급은 30자까지입니다',
+  GATE_TOO_LONG: '게이트는 30자까지입니다',
+  LEVEL_TOO_LONG: '층은 30자까지입니다',
+  LAYOUT_TOO_LARGE: '좌석맵이 너무 큽니다',
+};
+
+export function issueText(code: string): string {
+  // 코드는 서버가 준 글자라 자기 칸만 읽는다('constructor' 같은 이름이 물려받은 값을 돌려주지 않게)
+  return Object.hasOwn(TEXT, code) ? TEXT[code]! : `값이 올바르지 않습니다(${code})`;
+}

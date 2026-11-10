@@ -1,6 +1,6 @@
 // 메모리 배치본 저장소(시험·로컬, ADR-0260). 운영은 Drizzle 저장소다. 메모리 카탈로그의 공연·회차·변경분을 함께 쓰고, 공연마다 한 줄로 세워 잠금을 흉내 낸다.
 // 쓰기는 fn이 끝난 뒤에만 반영한다(던지면 버린다, DB 트랜잭션과 같게).
-import { type LayoutDoc, layoutVenueId } from '../domain/seatmap-layout.js';
+import { type LayoutDoc, type LayoutRound, layoutVenueId } from '../domain/seatmap-layout.js';
 import type { LayoutState, LayoutTx, SeatmapLayoutStore } from '../domain/seatmap-ports.js';
 import type { MemoryCatalogRepository, MemoryLayout } from './memory-catalog-repository.js';
 
@@ -25,6 +25,18 @@ export class MemorySeatmapLayoutStore implements SeatmapLayoutStore {
     const l = this.repo.layouts.get(productionId);
     const cur = l?.pending ?? l?.rows ?? undefined;
     return cur ? copy({ version: cur.version, doc: cur.doc }) : undefined;
+  }
+
+  async lockFacts(productionId: string, tenantId: string): Promise<{ saleApprovedAt: Date | null; rounds: LayoutRound[] } | undefined> {
+    const p = this.repo.productions.get(productionId);
+    if (!p || p.promoterId !== tenantId) return undefined;
+    return {
+      saleApprovedAt: p.saleApprovedAt,
+      rounds: [
+        ...[...this.repo.events.values()].filter((e) => e.productionId === productionId).map((e) => ({ eventId: e.id, openAt: e.openAt, cancelled: e.status === 'CANCELLED' })),
+        ...(this.repo.pending.get(productionId) ?? []).map((e) => ({ eventId: e.eventId, openAt: e.openAt, cancelled: false })),
+      ],
+    };
   }
 
   async templateDraft(templateVenueId: string): Promise<LayoutDoc | undefined> {

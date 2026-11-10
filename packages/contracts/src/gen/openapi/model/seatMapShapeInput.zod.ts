@@ -16,11 +16,36 @@ export const seatMapShapeInputPointsItemMax = 2;
 
 export const seatMapShapeInputPointsMin = 3;
 
+export const seatMapShapeInputArcCxMin = 0;
+export const seatMapShapeInputArcCxMax = 100000;
+
+export const seatMapShapeInputArcCyMin = 0;
+export const seatMapShapeInputArcCyMax = 100000;
+
+export const seatMapShapeInputArcInnerRadiusMin = 0;
+export const seatMapShapeInputArcInnerRadiusMax = 100000;
+
+export const seatMapShapeInputArcOuterRadiusMax = 100000;
+
+export const seatMapShapeInputArcStartAngleMin = -360;
+export const seatMapShapeInputArcStartAngleMax = 360;
+
+export const seatMapShapeInputArcEndAngleMin = -360;
+export const seatMapShapeInputArcEndAngleMax = 720;
+
 
 export const SeatMapShapeInput = zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(seatMapShapeInputPointsItemMin).max(seatMapShapeInputPointsItemMax)).min(seatMapShapeInputPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(seatMapShapeInputArcCxMin).max(seatMapShapeInputArcCxMax),
+  "cy": zod.int().min(seatMapShapeInputArcCyMin).max(seatMapShapeInputArcCyMax),
+  "innerRadius": zod.int().min(seatMapShapeInputArcInnerRadiusMin).max(seatMapShapeInputArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(seatMapShapeInputArcOuterRadiusMax),
+  "startAngle": zod.int().min(seatMapShapeInputArcStartAngleMin).max(seatMapShapeInputArcStartAngleMax),
+  "endAngle": zod.int().min(seatMapShapeInputArcEndAngleMin).max(seatMapShapeInputArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')
 
 export type SeatMapShapeInput = zod.input<typeof SeatMapShapeInput>;

@@ -380,6 +380,7 @@ test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표�
     'docs/design/d2-design-system.md',
     'docs/frontend.md',
     'tools/web-checks/seed-css/check-css.mjs',
+    'services/core-svc/test-int/fixtures/seatmap-editor/fan-file.json',
     'tools/storybook/.storybook/main.ts',
     '.github/workflows/ci-web.yml',
     'pnpm-lock.yaml',

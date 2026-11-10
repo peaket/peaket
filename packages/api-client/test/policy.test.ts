@@ -251,6 +251,25 @@ describe('createApiClient', () => {
     expect(reported).toHaveLength(1);
   });
 
+  it('FE-T46 ⑦ 호출마다 넘긴 시간 한도(timeoutMs)가 작업 종류의 한도를 바꾼다(좌석맵 저장 65초: 64,999ms에는 기다리고 65,000ms에 끊는다)', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))));
+    const client = createApiClient({ fetch, baseUrls, maxRetries: 0 });
+    let settled = false;
+    const p = client.request(appeal, { body: {}, timeoutMs: 65_000 });
+    p.catch(() => undefined).finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(64_999);
+    expect(settled).toBe(false);
+    const done = expect(p).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(1);
+    await done;
+    // 넘기지 않으면 쓰기 15초 그대로
+    const q = client.request(appeal, { body: {} });
+    const done2 = expect(q).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await done2;
+  });
+
   it('FE-T4 시간 초과는 작업 종류별(읽기 10초)로 걸고 화면을 떠날 때의 신호와 묶는다', async () => {
     vi.useFakeTimers();
     const fetch = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))));

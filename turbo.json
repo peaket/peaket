@@ -35,7 +35,8 @@
         "$TURBO_ROOT$/tools/ci/service-openapi.mjs",
         "$TURBO_ROOT$/docs/design/tokens.json",
         "$TURBO_ROOT$/docs/design/d2-design-system.md",
-        "$TURBO_ROOT$/docs/frontend.md"
+        "$TURBO_ROOT$/docs/frontend.md",
+        "$TURBO_ROOT$/services/core-svc/test-int/fixtures/seatmap-editor/**"
       ],
       "outputs": [
         "test-report.json",

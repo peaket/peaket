@@ -28,6 +28,7 @@ import {
   sameTiers,
   type SeatMapLayoutView,
   sectionIdIssues,
+  shapeOf,
   tierIssues,
   versionOfEtag,
 } from '../domain/seatmap-layout.js';
@@ -62,7 +63,7 @@ interface Reserved {
 type SaveQuery = { productionId: string; who: Caller; role: string; ifMatch: string | undefined; body: LayoutInput };
 
 /** 트랜잭션 ②의 결과: 쓰기를 마쳤거나, ① 뒤 더한 회차가 있어 아무것도 쓰지 않고 되돌렸다 */
-type Second = { kind: 'done'; previous: number; keep: number | undefined; rounds: string[]; approvedBefore: boolean } | { kind: 'added'; added: string[] };
+type Second = { kind: 'done'; previous: number; keep: number | undefined; rounds: string[]; approvedBefore: boolean; locked: boolean } | { kind: 'added'; added: string[] };
 
 @Injectable()
 export class SeatmapLayouts {
@@ -73,17 +74,24 @@ export class SeatmapLayouts {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
   ) {}
 
-  /** 불러오기(ADR-0260 결정 10): 지금 판(대기 판 우선). 배치본이 없으면 공개된 틀의 판 0 초안, 그것도 아니면 404 */
+  /**
+   * 불러오기(ADR-0260 결정 10): 지금 판(대기 판 우선). 배치본이 없으면 공개된 틀의 판 0 초안, 그것도 아니면 404.
+   * geometryLocked는 저장 경로와 같은 판정 함수(오픈 시각 ≤ 지금)다(ADR-0264 결정 13). 화면 표시용이고 서버의 409가 최종이다
+   */
   async load(q: { productionId: string; who: Caller; fromTemplate?: string }): Promise<SeatMapLayoutView> {
     const cur = await this.store.current(q.productionId, q.who.tenantId);
     if (cur === 'not-found') {
       this.#denied(q.productionId, q.who, 'load');
       throw notFound();
     }
-    if (cur) return layoutView(cur.doc, cur.version);
+    const locked = async () => {
+      const f = await this.store.lockFacts(q.productionId, q.who.tenantId);
+      return f !== undefined && geometryLocked({ saleApprovedAt: f.saleApprovedAt, rounds: f.rounds, now: new Date(this.clock.now()) });
+    };
+    if (cur) return layoutView(cur.doc, cur.version, { geometryLocked: await locked() });
     if (q.fromTemplate !== undefined) {
       const draft = await this.store.templateDraft(q.fromTemplate, q.who.tenantId);
-      if (draft) return layoutView(draft, 0);
+      if (draft) return layoutView(draft, 0, { geometryLocked: await locked() });
     }
     throw notFound();
   }
@@ -105,7 +113,7 @@ export class SeatmapLayouts {
     const sentTiers = q.body.priceTiers;
     const issues = [...recheckLayout(q.body), ...sectionIdIssues(indexed.sections), ...indexed.issues, ...(sentTiers ? [...priceTierIssues(sentTiers), ...tierIssues(indexed.sections, sentTiers)] : [])];
     if (issues.length > 0) throw this.#invalid(at, issues);
-    const draft: LayoutDoc = { canvas: { width: q.body.canvas.width, height: q.body.canvas.height }, stage: (q.body.stage ?? []).map((s) => ({ ...s })), sections: indexed.sections, priceTiers: sentTiers ?? [] };
+    const draft: LayoutDoc = { canvas: { width: q.body.canvas.width, height: q.body.canvas.height }, stage: (q.body.stage ?? []).map(shapeOf), sections: indexed.sections, priceTiers: sentTiers ?? [] };
     const ifMatch = q.ifMatch === undefined ? undefined : versionOfEtag(q.ifMatch);
 
     // 트랜잭션 ①: 판정 → 좌석 ID → If-Match → 틀·등급 → 잠금 → 새 판을 잡아 커밋
@@ -186,7 +194,7 @@ export class SeatmapLayouts {
           const lock = await this.#lockProbe(tx, last, doc);
           if (lock) this.#enforceLock(at, last, lock, doc);
           reachedCommit = true;
-          return { kind: 'done', previous: currentVersion(st), keep: approvedBefore ? st.venue?.layoutVersion : undefined, rounds: last.rounds.map((x) => x.eventId), approvedBefore };
+          return { kind: 'done', previous: currentVersion(st), keep: approvedBefore ? st.venue?.layoutVersion : undefined, rounds: last.rounds.map((x) => x.eventId), approvedBefore, locked: lock !== undefined };
         });
       } catch (e) {
         if (reachedCommit) {
@@ -221,7 +229,7 @@ export class SeatmapLayouts {
     }
     const seats = doc.sections.reduce((n, s) => n + s.seats.length, 0);
     this.#info({ event: 'seatmap_saved', ...at, version, seats, sections: doc.sections.length, published: bytes !== undefined, where, rounds: second.rounds.length }, '좌석맵을 저장했다');
-    return layoutView(doc, version, { fanFilePublished: bytes !== undefined });
+    return layoutView(doc, version, { fanFilePublished: bytes !== undefined, geometryLocked: second.locked });
   }
 
   /** 판매 중지·승인 이력의 관리자 판정(트랜잭션 ①·② 모두, 결정 5). logged면 실패한 인가 시도를 다시 남기지 않는다 */

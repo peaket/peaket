@@ -1,0 +1,6 @@
+section,row,number,x,y,tier,wheelchair,gate,shape
+A구역,1,1,100,100,R,,,"0 0;1000 0;1000 1000;0 1000"
+A구역,1,2,150,100,R,,,
+A구역,1,x,200,100,R,,,
+A구역,2,3,abc,100,R,,,
+A구역,2,4,300,100,R,maybe,,

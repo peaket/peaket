@@ -7,7 +7,7 @@ import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Production } from '../../domain/production.js';
 import type { LayoutShape } from '../../domain/seatmap-import.js';
-import { type LayoutDoc, layoutVenueId } from '../../domain/seatmap-layout.js';
+import { type LayoutDoc, type LayoutRound, layoutVenueId } from '../../domain/seatmap-layout.js';
 import type { LayoutState, LayoutTx, SeatmapLayoutStore } from '../../domain/seatmap-ports.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { opt, pendingOf, readRowLayout, sectionDoc, type StoredAdded } from './layout-rows.js';
@@ -47,6 +47,23 @@ export class DrizzleSeatmapLayoutStore implements SeatmapLayoutStore {
         return pending ? { version: pending.version, doc: pending.doc } : await readRowLayout(tx, vid, tenantId);
       },
       { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
+  async lockFacts(productionId: string, tenantId: string): Promise<{ saleApprovedAt: Date | null; rounds: LayoutRound[] } | undefined> {
+    if (!UUID.test(productionId)) return undefined;
+    return this.db.transaction(
+      async (tx) => {
+        const [p] = await tx.select({ approvedAt: production.saleApprovedAt, rev: production.pendingRevision }).from(production).where(and(eq(production.id, productionId), eq(production.promoterId, tenantId)));
+        if (!p) return undefined;
+        const events = await tx.select({ openAt: event.openAt, status: event.status, id: event.id }).from(event).where(and(eq(event.productionId, productionId), eq(event.promoterId, tenantId)));
+        const added = (p.rev as { addedEvents?: StoredAdded[] } | null)?.addedEvents ?? [];
+        return {
+          saleApprovedAt: p.approvedAt,
+          rounds: [...events.map((e) => ({ eventId: e.id, openAt: e.openAt, cancelled: e.status === 'CANCELLED' })), ...added.map((e) => ({ eventId: e.eventId, openAt: new Date(e.openAt), cancelled: false }))],
+        };
+      },
+      { tenantId, accessMode: 'read only' },
     );
   }
 
@@ -132,7 +149,7 @@ export class DrizzleSeatmapLayoutStore implements SeatmapLayoutStore {
               name: s.name,
               level: s.level ?? null,
               shape: s.shape.points,
-              editorMeta: { tool: s.shape.kind, ...opt('shapeName', s.shape.name), ...opt('fillRule', s.fillRule) },
+              editorMeta: { tool: s.shape.kind, ...opt('shapeName', s.shape.name), ...opt('fillRule', s.fillRule), ...opt('arc', s.shape.arc) },
               labelX: s.label?.x ?? null,
               labelY: s.label?.y ?? null,
               defaultTier: s.tierId ?? null,

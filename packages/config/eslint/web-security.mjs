@@ -154,6 +154,11 @@ export const webSecurityPlugin = {
  */
 export const WEB_SECURITY_EXCEPTIONS = [
   {
+    file: 'apps/partner/src/_pages/seatmap-editor/model/editor.worker.ts',
+    allow: ['windowMessage'],
+    reason: '좌석맵 에디터 Worker 엔트리(ADR-0264 결정 5)가 같은 출처의 메인 스레드에서 보낸 메시지만 받는다. window가 아니라 Worker 전역 self.onmessage이고, 출처 확인은 Worker 자체 동일 출처 부트스트랩(CSP worker-src \'self\')이 한다. 메시지는 worker-jobs.ts가 형을 보고 계산만 하며 DOM을 건드리지 않는다',
+  },
+  {
     file: 'apps/partner/src/features/rich-text/LexicalEditor.tsx',
     allow: ['domParser'],
     reason: '공연 설명 편집기(catalog-review 1.3.1, HOT-185)가 붙여넣은 HTML을 걷어 낸 뒤(paste.ts의 pasteHtml, Trusted Types 정책 peaket-paste) 해석해 등록한 Lexical 노드만 넣는다. 해석한 문서는 화면에 붙이지 않는다',

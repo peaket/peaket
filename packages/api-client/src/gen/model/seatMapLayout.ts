@@ -13,6 +13,7 @@ import type { SeatMapLayoutCanvas } from './seatMapLayoutCanvas';
 import type { SeatMapLayoutSectionsItem } from './seatMapLayoutSectionsItem';
 import type { SeatMapPriceTier } from './seatMapPriceTier';
 import type { SeatMapShape } from './seatMapShape';
+import type { SeatMapWarning } from './seatMapWarning';
 
 /**
  * 좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)
@@ -29,6 +30,10 @@ export interface SeatMapLayout {
   priceTiers?: SeatMapPriceTier[];
   /** 저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6) */
   fanFilePublished?: boolean;
+  /** 불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13) */
+  geometryLocked?: boolean;
+  /** 저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230) */
+  warnings?: SeatMapWarning[];
   canvas: SeatMapLayoutCanvas;
   /** 무대·통로 등 판매하지 않는 도형 */
   stage?: SeatMapShape[];

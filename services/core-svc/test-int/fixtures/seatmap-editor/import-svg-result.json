@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "layout": {
+    "canvas": {
+      "width": 2000,
+      "height": 1500
+    },
+    "stage": [],
+    "sections": [
+      {
+        "sectionId": "1",
+        "name": "A구역",
+        "shape": {
+          "kind": "POLYGON",
+          "points": [
+            [
+              0,
+              0
+            ],
+            [
+              1000,
+              0
+            ],
+            [
+              1000,
+              1000
+            ],
+            [
+              0,
+              1000
+            ]
+          ]
+        },
+        "seats": [
+          {
+            "seatId": "#1",
+            "row": "1",
+            "number": 1,
+            "x": 100,
+            "y": 100
+          },
+          {
+            "seatId": "#2",
+            "row": "1",
+            "number": 2,
+            "x": 150,
+            "y": 100
+          }
+        ]
+      }
+    ]
+  },
+  "errors": [],
+  "warnings": [
+    {
+      "code": "SVG_IGNORED",
+      "ignored": [
+        "script",
+        "image"
+      ]
+    }
+  ]
+}

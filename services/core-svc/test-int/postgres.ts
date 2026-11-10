@@ -17,8 +17,11 @@ export interface PostgresContainer {
 
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-export async function startPostgres(): Promise<PostgresContainer> {
-  const id = docker(['run', '-d', '--rm', '-e', 'POSTGRES_PASSWORD=peaket-test', '-e', 'POSTGRES_DB=peaket', '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);
+/** name을 주거나 PEAKET_TEST_CONTAINER_PREFIX가 있으면 컨테이너에 이름을 붙인다(여러 작업 갈래가 한 PC에서 돌 때 누구의 컨테이너인지 보이게) */
+export async function startPostgres(o: { name?: string } = {}): Promise<PostgresContainer> {
+  const prefix = process.env.PEAKET_TEST_CONTAINER_PREFIX;
+  const name = o.name ?? (prefix ? `${prefix}pg-${Math.random().toString(36).slice(2, 8)}` : undefined);
+  const id = docker(['run', '-d', '--rm', ...(name ? ['--name', name] : []), '-e', 'POSTGRES_PASSWORD=peaket-test', '-e', 'POSTGRES_DB=peaket', '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);
   const mapped = docker(['port', id, '5432/tcp']).split('\n')[0]!;
   const port = Number(mapped.slice(mapped.lastIndexOf(':') + 1));
   const host = '127.0.0.1';

@@ -10,13 +10,38 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type SeatMapImportResultWarningsItemCode = typeof SeatMapImportResultWarningsItemCode[keyof typeof SeatMapImportResultWarningsItemCode];
-
-
-export const SeatMapImportResultWarningsItemCode = {
-  W1: 'W1',
-  W2: 'W2',
-  W3: 'W3',
-  SEAT_OVERLAP: 'SEAT_OVERLAP',
-  SVG_IGNORED: 'SVG_IGNORED',
-} as const;
+/**
+ * SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)
+ */
+export interface SeatMapShapeArcInput {
+  /**
+     * @minimum 0
+     * @maximum 100000
+     */
+  cx: number;
+  /**
+     * @minimum 0
+     * @maximum 100000
+     */
+  cy: number;
+  /**
+     * @minimum 0
+     * @maximum 100000
+     */
+  innerRadius: number;
+  /**
+     * @minimum 1
+     * @maximum 100000
+     */
+  outerRadius: number;
+  /**
+     * @minimum -360
+     * @maximum 360
+     */
+  startAngle: number;
+  /**
+     * @minimum -360
+     * @maximum 720
+     */
+  endAngle: number;
+}

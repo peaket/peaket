@@ -20,7 +20,15 @@ export const seatMapShapePointsMin = 3;
 export const SeatMapShape = zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(seatMapShapePointsItemMin).max(seatMapShapePointsItemMax)).min(seatMapShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')
 
 export type SeatMapShape = zod.input<typeof SeatMapShape>;

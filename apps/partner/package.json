@@ -19,6 +19,8 @@
     "@lexical/selection": "0.53.0",
     "@peaket/api-client": "workspace:*",
     "@peaket/ds": "workspace:*",
+    "@peaket/seatmap": "workspace:*",
+    "konva": "10.9.1",
     "lexical": "0.53.0",
     "next": "^16.4.3",
     "react": "^19.3.1",

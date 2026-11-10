@@ -712,6 +712,8 @@ describe('S-T38 배치본 저장과 팬 좌석맵 파일', () => {
       layoutVersion: 0,
       templateVenueId: T,
       priceTiers: [],
+      // 응답 전용 잠금 표시(ADR-0264 결정 13). 승인 이력이 없어 거짓이다
+      geometryLocked: false,
       canvas: { width: 2000, height: 1500 },
       stage: [{ kind: 'RECT', points: sq(900, 1000, 200), name: '무대' }],
       sections: [
@@ -1328,7 +1330,8 @@ describe('리뷰 재현: 정확성(A1·A2·A6·H1)', () => {
     await admin.db.insert(section).values({ venueId: T, sectionKey: 'F1', sortOrder: 0, name: '플로어', shape: sq(0, 0, 500), editorMeta: { tool: 'RECT' } });
     const m = await makeProduction({ rows: 1 });
     const draft = json(await get(m.id, memberOf(A), `?fromTemplate=${T}`));
-    const { layoutVersion: _v, ...rest } = draft;
+    // 응답 전용 칸(geometryLocked, ADR-0264 결정 13)은 닫힌 저장 본문에 싣지 않는다(에디터도 뺀다)
+    const { layoutVersion: _v, geometryLocked: _g, ...rest } = draft;
     const r = await put(m.id, memberOf(A), rest, '"0"');
     expect(r.statusCode).toBe(200);
     expect(json(r)).toMatchObject({ layoutVersion: 1, priceTiers: [], fanFilePublished: false, templateVenueId: T });

@@ -31,7 +31,11 @@ export const APPS = [
     kind: 'next',
     port: 4102,
     probe: '/poc/seed-css',
-    pages: [{ path: '/events', row: '파트너 콘솔' }],
+    pages: [
+      { path: '/events', row: '파트너 콘솔' },
+      // 좌석맵 에디터(실제 공연 ID 꼴, ?state= 없음): 첫 화면은 뼈대만이고 캔버스·Konva·Worker는 늦게 싣는다(BUILD_ORDER HOT-220, FE-T46 ⑬)
+      { path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01/seatmap', row: '파트너 콘솔' },
+    ],
   },
   {
     name: 'console',

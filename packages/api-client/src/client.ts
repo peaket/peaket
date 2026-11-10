@@ -84,6 +84,11 @@ export interface RequestOptions {
   ifMatch?: string;
   /** 구매 세션 서명기(@peaket/api-client/purchase의 openPurchaseSession). purchaseSigned 작업에 필수이고, 그 밖의 작업에는 넘기지 않는다 */
   purchase?: PurchaseSigner;
+  /**
+   * 이 호출의 시도 한 번 시간 한도(ms). 없으면 작업 종류의 기본값(TIMEOUT_MS). 서버 경로 한도가 기본값보다 긴 작업(좌석맵 저장 등)은
+   * 서버 한도보다 길게 넘긴다(화면이 먼저 끊으면 서버가 끝낸 쓰기를 '모름'으로 본다)
+   */
+  timeoutMs?: number;
 }
 
 /** 응답 상태·머리와 읽은 본문(orval 생성 함수의 반환 모양, ETag는 headers.get('etag')) */
@@ -173,6 +178,8 @@ export function createApiClient(opts: ClientOptions) {
     // 구매 세션 쓰기는 서명기 없이 보내지 않는다(빠뜨리면 401이 아니라 개발 중에 바로 드러나게, ADR-0221 결정 5)
     if (op.purchaseSigned && !o.purchase) throw new TypeError(`구매 세션 서명기(purchase)가 있어야 한다: ${opKey(op)}`);
     if (!op.purchaseSigned && o.purchase) throw new TypeError(`서명하지 않는 작업에 구매 세션 서명기를 넘겼다: ${opKey(op)}`);
+    if (o.timeoutMs !== undefined && !(Number.isSafeInteger(o.timeoutMs) && o.timeoutMs > 0)) throw new TypeError(`시간 한도(timeoutMs)는 양의 정수 ms다: ${opKey(op)}`);
+    const limitMs = o.timeoutMs ?? TIMEOUT_MS[op.kind];
     const base = opts.baseUrls[op.host];
     if (!base) throw new TypeError(`호스트 ${op.host}의 기본 주소가 없다`);
     const url = buildUrl(base, op, o);
@@ -216,7 +223,7 @@ export function createApiClient(opts: ClientOptions) {
         const sent = signAttempt ? await signAttempt(new Headers(headers)) : headers;
         // 시간 초과 신호: AbortSignal.timeout과 같은 TimeoutError를 내되, 요청이 끝나면 타이머를 지운다(가짜 시계로 시험할 수 있다)
         const timeout = new AbortController();
-        const timer = setTimeout(() => timeout.abort(new DOMException('시간 초과', 'TimeoutError')), TIMEOUT_MS[op.kind]);
+        const timer = setTimeout(() => timeout.abort(new DOMException('시간 초과', 'TimeoutError')), limitMs);
         const signals = [timeout.signal];
         if (o.signal) signals.push(o.signal);
         const signal = anySignal(signals);

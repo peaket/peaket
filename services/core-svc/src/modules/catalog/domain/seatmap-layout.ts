@@ -97,7 +97,13 @@ const issueList = () => {
 };
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-const shapeOf = (s: LayoutShape): LayoutShape => ({ kind: s.kind, points: s.points.map(([x, y]) => [x, y] as [number, number]), ...(s.name !== undefined ? { name: s.name } : {}) });
+/** 도형 하나(꼭짓점·이름과 에디터 값 arc, ADR-0264 결정 12). arc는 저장·불러오기를 지나고 팬 파일(fanFile)에는 싣지 않는다 */
+export const shapeOf = (s: LayoutShape): LayoutShape => ({
+  kind: s.kind,
+  points: s.points.map(([x, y]) => [x, y] as [number, number]),
+  ...(s.name !== undefined ? { name: s.name } : {}),
+  ...(s.arc !== undefined ? { arc: { cx: s.arc.cx, cy: s.arc.cy, innerRadius: s.arc.innerRadius, outerRadius: s.arc.outerRadius, startAngle: s.arc.startAngle, endAngle: s.arc.endAngle } } : {}),
+});
 
 /**
  * 색인을 매긴다(ADR-0260 결정 3): 첫 구역 0부터 구역마다 앞 구역 to + 1부터 좌석 수만큼, 구역 안 좌석 차례대로. 좌석이 없는 구역은 범위가 없다.
@@ -365,17 +371,20 @@ export interface SeatMapLayoutView {
   templateVenueId?: string;
   priceTiers: PriceTier[];
   fanFilePublished?: boolean;
+  /** 오픈 뒤 도형 잠금(불러오기·저장 응답, geometryLocked 판정 함수, ADR-0264 결정 13) */
+  geometryLocked: boolean;
   canvas: { width: number; height: number };
   stage: LayoutShape[];
   sections: (Omit<DocSection, 'seats'> & { seats: DocSeat[] })[];
 }
 
-export function layoutView(doc: LayoutDoc, version: number, extra: { fanFilePublished?: boolean } = {}): SeatMapLayoutView {
+export function layoutView(doc: LayoutDoc, version: number, extra: { fanFilePublished?: boolean; geometryLocked: boolean }): SeatMapLayoutView {
   return {
     layoutVersion: version,
     ...(doc.templateVenueId !== undefined ? { templateVenueId: doc.templateVenueId } : {}),
     priceTiers: doc.priceTiers.map((t) => ({ tierId: t.tierId, name: t.name, price: t.price })),
-    ...extra,
+    ...(extra.fanFilePublished !== undefined ? { fanFilePublished: extra.fanFilePublished } : {}),
+    geometryLocked: extra.geometryLocked,
     canvas: { width: doc.canvas.width, height: doc.canvas.height },
     stage: doc.stage,
     sections: doc.sections,

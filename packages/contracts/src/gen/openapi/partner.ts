@@ -1191,7 +1191,7 @@ export const ListPartnerEventFlagsResponse = zod.object({
 })
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다. 승인 이력이 있는 공연은 재승인 대기 판이 있으면 그 판을 준다. 배치본이 있으면 fromTemplate는 보지 않는다. ETag는 지금 판이고 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 9·10)
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다. 승인 이력이 있는 공연은 재승인 대기 판이 있으면 그 판을 준다. 배치본이 있으면 fromTemplate는 보지 않는다. ETag는 지금 판이고 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 9·10). 응답 geometryLocked는 오픈 뒤 도형 잠금이고, 부채꼴·곡선 띠 도형은 저장한 arc 매개변수를 함께 돌려준다(추천 적용 2026-11-10, ADR-0264 결정 12·13)
  * @summary 좌석맵 불러오기(SCR-022 에디터, 배치 층·좌석 층)
  */
 export const GetPartnerProductionSeatmapParams = zod.object({
@@ -1235,6 +1235,13 @@ export const GetPartnerProductionSeatmapResponse = zod.object({
   "price": zod.int().describe('정가(원)')
 }).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(getPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
   "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "geometryLocked": zod.boolean().optional().describe('불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13)'),
+  "warnings": zod.array(zod.object({
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
+  "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1242,7 +1249,15 @@ export const GetPartnerProductionSeatmapResponse = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getPartnerProductionSeatmapResponseStageItemPointsItemMin).max(getPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(getPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
@@ -1251,7 +1266,15 @@ export const GetPartnerProductionSeatmapResponse = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(getPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int().optional(),
@@ -1293,7 +1316,7 @@ export const GetPartnerProductionSeatmapResponse = zod.object({
 }).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 /**
- * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-240, ADR-0260): 색인은 서버가 구역 차례대로 매기고 보낸 seatIndexRange·index가 그와 다르면 422(INDEX_MISMATCH)다. 모든 좌석의 등급(좌석 tierId, 없으면 구역 tierId)이 가격 등급 priceTiers에 있어야 한다(보내지 않으면 지금 가격 등급). 판 번호는 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호). 팬 좌석맵 파일은 그 공연의 모든 회차마다 새 판 경로에 쓰고, 모든 구역에 좌석이 있을 때만 게시한다(응답 fanFilePublished). 잠금은 승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지났을 때다. 잠긴 뒤 받는 것은 좌석의 unavailable·wheelchair·gateZone과 구역의 gateZone뿐이고, 가격 등급을 바꾸면 409 sale-setting-locked다. 승인 이력이 있는 공연은 파트너 관리자만 저장하고, 재승인 대기 판에만 두어 공개본은 판매 승인 때까지 그대로다(APPROVED면 SUBMITTED). 그 판의 팬 좌석맵 파일은 공개 위치가 아니라 준비 위치에 쓰고 판매 승인(LCH-080)이 공개 위치로 옮긴다. 좌석 ID는 서버가 정한다(이 배치본에 이미 있는 소문자 UUID는 그대로, 아니면 새 UUIDv7, 잠긴 뒤 모르는 ID는 좌석 추가라 409). 본문은 12MiB [가정]까지이고 좌석맵 저장 칸막이(파드당 2 [가정])가 차면 429다. 성공·오류 모두 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 2·6·11·15, 리뷰)
+ * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다. 세부(추천 적용 2026-11-10, BUILD_ORDER HOT-240, ADR-0260): 색인은 서버가 구역 차례대로 매기고 보낸 seatIndexRange·index가 그와 다르면 422(INDEX_MISMATCH)다. 모든 좌석의 등급(좌석 tierId, 없으면 구역 tierId)이 가격 등급 priceTiers에 있어야 한다(보내지 않으면 지금 가격 등급). 판 번호는 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호). 팬 좌석맵 파일은 그 공연의 모든 회차마다 새 판 경로에 쓰고, 모든 구역에 좌석이 있을 때만 게시한다(응답 fanFilePublished). 잠금은 승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지났을 때다. 잠긴 뒤 받는 것은 좌석의 unavailable·wheelchair·gateZone과 구역의 gateZone뿐이고, 가격 등급을 바꾸면 409 sale-setting-locked다. 승인 이력이 있는 공연은 파트너 관리자만 저장하고, 재승인 대기 판에만 두어 공개본은 판매 승인 때까지 그대로다(APPROVED면 SUBMITTED). 그 판의 팬 좌석맵 파일은 공개 위치가 아니라 준비 위치에 쓰고 판매 승인(LCH-080)이 공개 위치로 옮긴다. 좌석 ID는 서버가 정한다(이 배치본에 이미 있는 소문자 UUID는 그대로, 아니면 새 UUIDv7, 잠긴 뒤 모르는 ID는 좌석 추가라 409). 본문은 12MiB [가정]까지이고 좌석맵 저장 칸막이(파드당 2 [가정])가 차면 429다. 성공·오류 모두 Cache-Control: no-store다(추천 적용 2026-11-10, ADR-0260 결정 2·6·11·15, 리뷰). 200 응답의 warnings는 가져오기 결과와 같은 검사기의 경고(W1~W3·SEAT_OVERLAP·SEAT_OUTSIDE_SHAPE)이고 geometryLocked는 불러오기와 같다. 도형의 arc(부채꼴·곡선 띠 매개변수)는 에디터 값으로 저장하고 팬 좌석맵 파일에는 싣지 않는다(추천 적용 2026-11-10, ADR-0264 결정 12·13·15)
  * @summary 좌석맵 저장(배치 층과 좌석 층을 함께, If-Match의 layoutVersion으로 동시 수정 방지)
  */
 export const PutPartnerProductionSeatmapParams = zod.object({
@@ -1317,10 +1340,44 @@ export const putPartnerProductionSeatmapBodyStageItemPointsItemMax = 2;
 
 export const putPartnerProductionSeatmapBodyStageItemPointsMin = 3;
 
+export const putPartnerProductionSeatmapBodyStageItemArcCxMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcCxMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcCyMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcCyMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMin = 0;
+export const putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcOuterRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodyStageItemArcStartAngleMin = -360;
+export const putPartnerProductionSeatmapBodyStageItemArcStartAngleMax = 360;
+
+export const putPartnerProductionSeatmapBodyStageItemArcEndAngleMin = -360;
+export const putPartnerProductionSeatmapBodyStageItemArcEndAngleMax = 720;
+
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin = 2;
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax = 2;
 
 export const putPartnerProductionSeatmapBodySectionsItemShapePointsMin = 3;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCxMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCxMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCyMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcCyMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcOuterRadiusMax = 100000;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMin = -360;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMax = 360;
+
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMin = -360;
+export const putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMax = 720;
 
 
 
@@ -1349,7 +1406,15 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodyStageItemPointsItemMin).max(putPartnerProductionSeatmapBodyStageItemPointsItemMax)).min(putPartnerProductionSeatmapBodyStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcCxMin).max(putPartnerProductionSeatmapBodyStageItemArcCxMax),
+  "cy": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcCyMin).max(putPartnerProductionSeatmapBodyStageItemArcCyMax),
+  "innerRadius": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMin).max(putPartnerProductionSeatmapBodyStageItemArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(putPartnerProductionSeatmapBodyStageItemArcOuterRadiusMax),
+  "startAngle": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcStartAngleMin).max(putPartnerProductionSeatmapBodyStageItemArcStartAngleMax),
+  "endAngle": zod.int().min(putPartnerProductionSeatmapBodyStageItemArcEndAngleMin).max(putPartnerProductionSeatmapBodyStageItemArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string().describe('구역 ID. 영문·숫자·_·- 1~64자(판 해석 키 조각 꼴)이고 아니면 422 SECTION_ID_INVALID다(추천 적용 2026-11-10, ADR-0260 결정 2)'),
@@ -1358,7 +1423,15 @@ export const PutPartnerProductionSeatmapBody = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin).max(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax)).min(putPartnerProductionSeatmapBodySectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcCxMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcCxMax),
+  "cy": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcCyMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcCyMax),
+  "innerRadius": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcInnerRadiusMax),
+  "outerRadius": zod.int().min(1).max(putPartnerProductionSeatmapBodySectionsItemShapeArcOuterRadiusMax),
+  "startAngle": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcStartAngleMax),
+  "endAngle": zod.int().min(putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMin).max(putPartnerProductionSeatmapBodySectionsItemShapeArcEndAngleMax)
+}).strict().optional().describe('SeatMapShapeArc의 요청용(정의 밖 칸을 400으로 거절한다). 범위 밖 값은 400이고, innerRadius ≥ outerRadius, endAngle ≤ startAngle, endAngle − startAngle > 360이거나 kind가 SECTOR·ARC_BAND가 아닌 도형에 있으면 422 seatmap-invalid(항목 코드 SHAPE_PARAMS_INVALID)다(추천 적용 2026-11-10, ADR-0264 결정 12)')
 }).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "label": zod.object({
   "x": zod.int().optional(),
@@ -1432,6 +1505,13 @@ export const PutPartnerProductionSeatmapResponse = zod.object({
   "price": zod.int().describe('정가(원)')
 }).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(putPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
   "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "geometryLocked": zod.boolean().optional().describe('불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13)'),
+  "warnings": zod.array(zod.object({
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
+  "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1439,7 +1519,15 @@ export const PutPartnerProductionSeatmapResponse = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapResponseStageItemPointsItemMin).max(putPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(putPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
@@ -1448,7 +1536,15 @@ export const PutPartnerProductionSeatmapResponse = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(putPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(putPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int().optional(),
@@ -1540,6 +1636,13 @@ export const CreatePartnerProductionSeatmapResponse = zod.object({
   "price": zod.int().describe('정가(원)')
 }).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(createPartnerProductionSeatmapResponsePriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
   "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "geometryLocked": zod.boolean().optional().describe('불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13)'),
+  "warnings": zod.array(zod.object({
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
+  "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1547,7 +1650,15 @@ export const CreatePartnerProductionSeatmapResponse = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapResponseStageItemPointsItemMin).max(createPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(createPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
@@ -1556,7 +1667,15 @@ export const CreatePartnerProductionSeatmapResponse = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(createPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int().optional(),
@@ -1649,6 +1768,13 @@ export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "price": zod.int().describe('정가(원)')
 }).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(createPartnerProductionSeatmapImportResponseLayoutPriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
   "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "geometryLocked": zod.boolean().optional().describe('불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13)'),
+  "warnings": zod.array(zod.object({
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
+  "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -1656,7 +1782,15 @@ export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMin).max(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMax)).min(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
@@ -1665,7 +1799,15 @@ export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMin).max(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMax)).min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int().optional(),
@@ -1711,10 +1853,11 @@ export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "code": zod.string().optional()
 })).optional(),
   "warnings": zod.array(zod.object({
-  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SVG_IGNORED']).optional(),
-  "seatIds": zod.array(zod.string()).optional(),
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
   "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
-})).optional().describe('휠체어석 기준 경고 W1~W3(FR-023)와 좌석 겹침 경고 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석)와 SVG에서 읽지 않고 넘긴 요소·속성(SVG_IGNORED). 모두 막지 않는다')
 }).describe('좌석맵 가져오기 검증 결과. 오류가 하나라도 있으면 반영하지 않는다(FR-023)')
 
 /**
@@ -2284,6 +2427,13 @@ export const GetPartnerSeatmapTemplateResponse = zod.object({
   "price": zod.int().describe('정가(원)')
 }).describe('가격 등급 하나(docs/data.md price_tier, ADR-0260 결정 2)')).max(getPartnerSeatmapTemplateResponseTwoLayoutPriceTiersMax).optional().describe('가격 등급(보이는 순서, 배치본 단위 = 공연 단위, 추천 적용 2026-11-10, ADR-0260 결정 2·4). 팬 좌석맵 파일 tiers와 공연 상세 priceTiers의 차례다'),
   "fanFilePublished": zod.boolean().optional().describe('저장 응답에서만: 이 판의 팬 좌석맵 파일을 회차마다 게시했는지. 좌석이 없는 구역이 있으면 false다(ADR-0260 결정 6)'),
+  "geometryLocked": zod.boolean().optional().describe('불러오기·저장 응답에서만: 오픈 뒤 도형 잠금(승인 이력이 있고 이 배치본의 취소되지 않은 회차 하나의 오픈 시각이 지남, ADR-0260 결정 7과 같은 판정 함수). 참이면 에디터는 도형·좌석 더하기·지우기·옮기기·채우기와 가격 등급 고치기를 끄고, 좌석의 판매 제외·휠체어석·게이트와 구역의 게이트만 받는다(추천 적용 2026-11-10, ADR-0264 결정 13)'),
+  "warnings": zod.array(zod.object({
+  "code": zod.enum(['W1', 'W2', 'W3', 'SEAT_OVERLAP', 'SEAT_OUTSIDE_SHAPE', 'SVG_IGNORED']).optional(),
+  "seatIds": zod.array(zod.string()).optional().describe('걸린 좌석 ID(경고마다 100개까지 [가정], ADR-0264 결정 15)'),
+  "seatCount": zod.int().optional().describe('걸린 좌석 수(seatIds가 잘렸어도 전체 수, 추천 적용 2026-11-10, ADR-0264 결정 15)'),
+  "ignored": zod.array(zod.string()).optional().describe('SVG_IGNORED에만. 읽지 않고 넘긴 요소·속성 이름(값과 바깥 주소는 싣지 않는다)')
+}).describe('좌석맵 경고 하나. 휠체어석 기준 경고 W1~W3(FR-023, docs/design/d5 §6.5), 좌석 겹침 SEAT_OVERLAP(좌석 중심 사이가 좌석 간격의 절반보다 가까움 [가정], ADR-0066), 구역 도형 밖 좌석 SEAT_OUTSIDE_SHAPE(좌석 중심이 그 구역 다각형 밖, ADR-0063, 추천 적용 2026-11-10, ADR-0264 결정 15), SVG에서 읽지 않고 넘긴 요소·속성 SVG_IGNORED(script·foreignObject·image·use·style·바깥 href 등. 가져오기만, seatmap-worker 응답의 ignored를 옮긴다, docs/features/seat-hold.md §10, 추천 적용 2026-10-30). 모두 막지 않는다')).optional().describe('저장 응답에서만: 저장한 배치의 업무 경고(휠체어석 W1~W3, 좌석 겹침, 도형 밖 좌석). 가져오기 결과와 같은 검사기·같은 모양이고 저장을 막지 않는다(추천 적용 2026-11-10, ADR-0264 결정 15, BUILD_ORDER HOT-230)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
@@ -2291,7 +2441,15 @@ export const GetPartnerSeatmapTemplateResponse = zod.object({
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMin).max(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMax)).min(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
@@ -2300,7 +2458,15 @@ export const GetPartnerSeatmapTemplateResponse = zod.object({
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMin).max(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMax)).min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
-  "name": zod.string().optional()
+  "name": zod.string().optional(),
+  "arc": zod.object({
+  "cx": zod.int().describe('중심 x(cm)'),
+  "cy": zod.int().describe('중심 y(cm)'),
+  "innerRadius": zod.int().describe('안쪽 반지름(cm). 부채꼴은 0'),
+  "outerRadius": zod.int().describe('바깥 반지름(cm)'),
+  "startAngle": zod.int().describe('시작각(도). 화면 오른쪽이 0이고 시계 방향으로 는다'),
+  "endAngle": zod.int().describe('끝각(도)')
+}).optional().describe('부채꼴·곡선 띠를 그린 원래 매개변수(에디터 전용, 추천 적용 2026-11-10, ADR-0264 결정 12). 저장 값은 points이고, 이 값은 에디터가 다시 열 때 반지름·각도 손잡이를 되살리는 데만 쓴다(구역은 section.editor_meta, 무대는 venue.stage_shapes). 팬 좌석맵 파일에는 싣지 않는다')
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int().optional(),

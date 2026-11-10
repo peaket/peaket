@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 51 | 48 | 5 | 2 | 0 | 1 | 0 | 22 | 58 | 187 |
-| 합계 | 51 | 48 | 5 | 2 | 0 | 1 | 0 | 22 | 58 | 187 |
+| B | 75 | 44 | 8 | 2 | 0 | 1 | 0 | 22 | 51 | 203 |
+| 합계 | 75 | 44 | 8 | 2 | 0 | 1 | 0 | 22 | 51 | 203 |
 
 ## docs/frontend.md
 
@@ -50,9 +50,9 @@
 | FE-T32 | ② | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ② `serverTimeMs`로만 바뀐다 | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
 | FE-T32 | ③ | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ③ 보정 시계가 흔들리지 않는다 | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
 | FE-T32 | ④ | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ④ 29분 뒤에는 저장한 보정값을 쓰고, 31분 뒤에는 다음 대기열 API 응답 전까지 `queue_reflect_ms`를 보내지 않는다… | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
-| FE-T33 | ① | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ① 구역 하나를 5초 끌기 → 끌기·돌리기 중 프레임 시간 p95 16.7ms 가정·50ms 가정, 조작 INP 200ms(NFR-012), 스로틀 없음에서 긴… | 빈칸 | B | — |
-| FE-T33 | ② | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ② 회전 손잡이로 5초 돌리기 → 끌기·돌리기 중 프레임 시간 p95 16.7ms 가정·50ms 가정, 조작 INP 200ms(NFR-012), 스로틀 없음에서… | 빈칸 | B | — |
-| FE-T33 | ③ | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ③ 좌석 다듬기에서 상자로 1,000석 [가정]을 골라 화살표로 옮기기를 CPU 스로틀 없이 한 번, 4배 느린 CPU로 한 번 한다. 장면의 노드 수와… | 빈칸 | B | — |
+| FE-T33 | ① | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ① 구역 하나를 5초 끌기 → 끌기·돌리기 중 프레임 시간 p95 16.7ms 가정·50ms 가정, 조작 INP 200ms(NFR-012), 스로틀 없음에서 긴… | 측정 | B | LCH-200 · 좌석맵 에디터 편집 캔버스(Konva)의 끌기·돌리기 프레임과 INP(측정 캠페인 wbs 7.5.2). BAT-150(HOT-220)은 같은 조작을 로컬에서 한 번 재어 커밋 본문에 적고, 결과를… |
+| FE-T33 | ② | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ② 회전 손잡이로 5초 돌리기 → 끌기·돌리기 중 프레임 시간 p95 16.7ms 가정·50ms 가정, 조작 INP 200ms(NFR-012), 스로틀 없음에서… | 측정 | B | LCH-200 · 좌석맵 에디터 편집 캔버스(Konva)의 끌기·돌리기 프레임과 INP(측정 캠페인 wbs 7.5.2). BAT-150(HOT-220)은 같은 조작을 로컬에서 한 번 재어 커밋 본문에 적고, 결과를… |
+| FE-T33 | ③ | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28… | ③ 좌석 다듬기에서 상자로 1,000석 [가정]을 골라 화살표로 옮기기를 CPU 스로틀 없이 한 번, 4배 느린 CPU로 한 번 한다. 장면의 노드 수와… | 측정 | B | LCH-200 · 좌석맵 에디터 편집 캔버스(Konva)의 끌기·돌리기 프레임과 INP(측정 캠페인 wbs 7.5.2). BAT-150(HOT-220)은 같은 조작을 로컬에서 한 번 재어 커밋 본문에 적고, 결과를… |
 | FE-T34 | ① | 로그아웃 쿠키 격리(추천 적용 2026-10-28, 기술 검토… | ① 뒤 월렛 입장 키는 기본으로 남는다 | 빈칸 | B | — |
 | FE-T34 | ③ | 로그아웃 쿠키 격리(추천 적용 2026-10-28, 기술 검토… | ③ 뒤 관제 출처의 `peaket.console.ui`가 지워지고, | 빈칸 | B | — |
 | FE-T35 | — | Cache Components와 nonce 화면 묶음(추천 적용… | `(request)` 경로의 정적 셸 0, nonce 없는 `<script>` 0, CSP 위반 보고 0, `(cached)` 화면은 CDN 캐시 적중… | 자동 시험 | B | 시험: tools/web-checks/csp/theme.spec.mjs, tools/web-checks/csp/web.spec.mjs |
@@ -61,7 +61,10 @@
 | FE-T36 | ③ | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술… | ③ 모두 맞고, 크기는 §5.8 CSS 열 안. 예산을 넘은 경로는 예산을 다시 정하는 wbs 7.5.2까지 잰… | 자동 시험 | B | 시험: tools/web-checks/seed-css/css.spec.mjs |
 | FE-T36 | ④ | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술… | ④ 모두 맞고, 크기는 §5.8 CSS 열 안. 예산을 넘은 경로는 예산을 다시 정하는 wbs 7.5.2까지 잰… | 자동 시험 | B | 시험: tools/web-checks/seed-css/layers.spec.mjs |
 | FE-T37 | — | 찜 오프라인 동기화(추천 적용 2026-10-28, 기술 검토… | 오프라인에서 화면이 바로 바뀌고, 온라인이 된 뒤 백그라운드에서 서버 저장이 끝나 서버 찜 목록이 화면과 같다(공연 둘). 같은 공연의 중복 저장은 0건이다… | 빈칸 | B | — |
-| FE-T38 | — | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | JSON으로 다시 가져온 배치의 구역·좌석 수와 좌표가 내보낸 것과 같고, SVG·CSV 가져오기도 같은 구역·좌석 수를 만든다. 도형 밖 좌석과 겹침은 경고가… | 빈칸 | B | — |
+| FE-T38 | ① | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ① JSON으로 다시 가져온 배치의 구역·좌석 수와 좌표가 내보낸 것과 같다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, services/core-svc/test-int/seatmap-editor.int.test.ts… |
+| FE-T38 | ② | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ② SVG·CSV 가져오기도 같은 구역·좌석 수를 만든다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/export.test.mjs, apps/partner/src/_pages/seatmap-editor/model/golden.te… |
+| FE-T38 | ③ | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ③도형 밖 좌석과 겹침은 경고가 글자로 보이고 저장은 막지 않는다(ADR-0063·0066) | ID만 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/export.test.mjs, apps/partner/src/_pages/seatmap-editor/model/golden.te… |
+| FE-T38 | ④ | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ④ 미리보기는 전체 → 확대 순서다. 연결: FR-023 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
 | FE-T39 | — | 관제 Trusted Types 보고 모드 시작 조건(추천 적용… | 덩어리·원격 적재에서 나온 Trusted Types 위반 보고 0, 만든 정책 이름이 모두 `trusted-types` 목록에 있고 이름이 겹치지 않는다… | 빈칸 | B | — |
 | FE-T40 | — | 시각 회귀(추천 적용 2026-10-28, 기술 검토 낮음-100) | 픽셀 차이 비율이 문턱 0.1% [가정] 이하. 대기실 셸과 React 대기 화면의 같은 상태 사이도 같은 문턱(§6.3) | 자동 시험 | B | 시험: packages/ds/src/components/QueuePanel/roll.test.mjs, tools/web-checks/visual/ds-stories.spec.mjs 외 2곳 |
 | FE-T41 | — | 서식 글 편집기 PoC(추천 적용 2026-10-28, 기술 검토… | CSP·Trusted Types 위반 보고 0(Tiptap은 기본으로 `<style>` 요소를 넣으므로 `injectCSS: false`나 nonce 설정으로… | 자동 시험 | B | 시험: tools/web-checks/rich-text/rich-text.spec.mjs |
@@ -75,14 +78,27 @@
 | FE-T45 | ⑤ | 토큰 형식 검사(추천 적용 2026-11-04, 기술 검토… | ⑤ `$extensions.seed`가 가리키는 SEED 이름이 붙인 `@seed-design/css` 판의 변수(`--seed-*`)나 중단점에 있는지 →… | 자동 시험 | B | 시험: packages/ds/test/token-rules.test.mjs |
 | FE-T45 | ⑥ | 토큰 형식 검사(추천 적용 2026-11-04, 기술 검토… | ⑥ 중단점 값이 `@seed-design/css/breakpoints`와 같은지 → 위반 0 | 자동 시험 | B | 시험: packages/ds/test/token-rules.test.mjs |
 | FE-T45 | ⑦ | 토큰 형식 검사(추천 적용 2026-11-04, 기술 검토… | ⑦ 토큰 빌드가 SEED 색 변수를 덮을 때 쓰는 라이트·다크 선택자가 SEED base의 색 모드 선택자를 모두 담는지(피켓이 더한 `.pk.dark`는… | 자동 시험 | B | 시험: packages/ds/test/token-rules.test.mjs |
+| FE-T46 | ① | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ① 있는 공연은 서버 판(`ETag`)의 구역·좌석 수로 그리고 없는 공연은 시작 화면이다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save-answ… |
+| FE-T46 | ② | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ② 저장 문서의 도형은 캔버스 안의 정수 꼭짓점 목록이고 손잡이로 바꾼 값과 숫자로 넣은 값이 같다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, apps/partner/src/_pages/seatmap-editor/model/shapes.te… |
+| FE-T46 | ③ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ③ 꼭짓점이 격자·안내선 위로 맞고, 복제본은 대칭축의 거울 꼴이며, 이동 폭은 10cm·1m다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, apps/partner/src/_pages/seatmap-editor/model/shapes.te… |
+| FE-T46 | ④ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ④ 흐린 좌석과 결과 줄(놓은 수·목표와의 차이)이 보이고, 놓은 좌석은 모두 도형 안이고 중심 사이가 좌석 간격 이상이며 수는 목표와 도형이 받는 수 가운데… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/fill.test.mjs, apps/partner/src/_pages/seatmap-editor/model/review.test… |
+| FE-T46 | ⑤ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑤ 고른 좌석 수와 바뀐 좌표·번호가 ADR-0264 결정 6·7의 규칙과 같다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/refine.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
+| FE-T46 | ⑥ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑥ 10단계 전 문서와 정확히 같고(FR-023), 201번째에는 가장 오래된 한 단계가 버려진다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/store.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
+| FE-T46 | ⑦ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑦ 판 0은 `If-Match: "0"`으로 보내 판 1·서버 색인·서버 좌석 ID로 갈아끼우고 변경 수가 0이 된다. 412는 '다른 곳에서 바뀌었습니다'와… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/review.te… |
+| FE-T46 | ⑧ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑧ 행 오류 표(줄·칸·쉬운 문구)가 보이고 반영하지 않는다. SVG는 읽지 않은 요소 이름이 글자로 보이고 반영할 수 있다. 10MB·압축 파일은 보내지… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, services/core-svc/test-int/seatmap-editor.int.te… |
+| FE-T46 | ⑨ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑨ 저장 본문 `priceTiers` 차례가 화면 차례와 같고 17번째는 더할 수 없다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/price-tiers.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mj… |
+| FE-T46 | ⑩ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑩ 다시 연 부채꼴에 같은 반지름·각도 손잡이 값이 있다(`arc`) | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, services/core-svc/test-int/seatmap-editor.int.test.ts… |
+| FE-T46 | ⑪ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑪이름이 글자로만 그려지고 문서에 그 요소가 생기지 않는다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
+| FE-T46 | ⑫ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑫도형·좌석 더하기·지우기·옮기기·채우기·가격 등급이 꺼지고 좌석의 판매 제외·휠체어석·게이트만 바꿀 수 있다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/store.test.mjs, services/core-svc/test-int/seatmap-editor.int.test.ts… |
+| FE-T46 | ⑬ | 좌석맵 에디터 편집과 저장(추천 적용 2026-11-10… | ⑬ 첫 화면 JS에 Konva와 에디터 덩어리가 없고(§5.8 파트너 콘솔 행), 늦게 싣는 에디터 덩어리(캔버스·도구·Worker) 합이 300KB [가정]… | 자동 시험 | B | 시험: tools/web-checks/budgets/js.spec.mjs |
 
 ## docs/security/asvs/frontend.md
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 (영역:… |
-| v5.0.0-1.1.2 | — | L2 | 출력 인코딩·이스케이프는 그 값을 쓰는 해석기 바로 앞의 마지막 단계에서 하거나 해석기가 직접 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/scanner, apps/web |
-| v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/event-detail/model/detail.test.mjs, apps/web/src/_pages/search/model/search.test.mjs 외 1곳 |
+| v5.0.0-1.1.2 | — | L2 | 출력 인코딩·이스케이프는 그 값을 쓰는 해석기 바로 앞의 마지막 단계에서 하거나 해석기가 직접 한다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs |
+| v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, apps/web/src/_pages/event-detail/model/detail.te… |
 | v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | 자동 시험 | B | 시험: apps/web/queue-room/test/preload.test.mjs, packages/api-client/test/policy.test.ts |
 | v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/event-detail/model/detail.test.mjs |
 | v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 해당 없음 | B | 해당 없음: 브라우저 코드와 BFF에 데이터베이스 질의가 없다. 서버 질의는 기능 표가 판정한다 |
@@ -92,10 +108,10 @@
 | v5.0.0-1.2.8 | — | L2 | LaTeX 처리기를 안전하게 설정하고(`--shell-escape` 금지) 명령 허용 목록을 쓴다. | 해당 없음 | B | 해당 없음: LaTeX을 쓰지 않는다 |
 | v5.0.0-1.2.9 | — | L2 | 정규식의 특수 문자를 이스케이프해 메타 문자로 해석되지 않게 한다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-1.3.1 | — | L1 | WYSIWYG 편집기 등에서 오는 신뢰하지 않는 HTML 입력은 모두 잘 알려진 안전한 HTML 정화 라이브러리나 프레임워크 기능으로 정화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/production-description.http.test.ts (영역: apps/web) |
-| v5.0.0-1.3.2 | — | L1 | `eval()` 같은 동적 코드 실행을 피하고, 불가피하면 사용자 입력을 실행 전에 정화한다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
+| v5.0.0-1.3.2 | — | L1 | `eval()` 같은 동적 코드 실행을 피하고, 불가피하면 사용자 입력을 실행 전에 정화한다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs |
 | v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts 외 2곳 (영역:… |
-| v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 (영역:… |
-| v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts (영역:… |
+| v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | 자동 시험 | B | 시험: tools/web-checks/rich-text/seatmap-editor.spec.mjs |
+| v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | 자동 시험 | B | 시험: tools/web-checks/rich-text/seatmap-editor.spec.mjs |
 | v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts… |
 | v5.0.0-1.3.7 | — | L2 | 신뢰하지 않는 입력으로 템플릿을 만들지 않아 템플릿 주입을 막고, 불가피하면 템플릿에 넣는 신뢰하지 않는 입력을 정화하거나 엄격히 검증한다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-1.3.8 | — | L2 | JNDI 조회에 넣기 전에 입력을 정화하고 JNDI를 안전하게 설정한다. | 해당 없음 | B | 해당 없음: Java를 쓰지 않는다 |
@@ -106,25 +122,25 @@
 | v5.0.0-1.4.2 | — | L2 | 부호·범위·입력 검증으로 정수 오버플로를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test/media-rules.test.ts 외 3곳 (영역:… |
 | v5.0.0-1.4.3 | — | L2 | 할당한 메모리와 자원을 해제하고 해제된 참조를 지워 use-after-free를 막는다. | 해당 없음 | B | 해당 없음: 관리되는 언어만 쓴다 |
 | v5.0.0-1.5.1 | — | L1 | XML 파서를 제한적으로 설정하고 외부 엔터티 해석 같은 위험 기능을 꺼 XXE를 막는다. | 해당 없음 | B | 해당 없음: 브라우저 코드가 XML을 파싱하지 않는다. 좌석맵 SVG 가져오기의 서버 파서는 좌석 추적 표 1.5.1이 판정한다 |
-| v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 4곳 (영역:… |
+| v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외… |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 3곳 (영역:… |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, apps/web/src/_pages/queue-verify/model/verify-fl… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/console-host, apps/forensics… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: services/queue-svc/test/state-http.test.ts (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
-| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 2곳 |
+| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/server/csp-hash-server.test.mjs 외 3곳 |
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: packages/platform/test/content-type.test.ts, services/queue-svc/test/admission.test.ts 외 3곳 (영역:… |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save-answ… |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 (영역:… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/scanner |
-| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
+| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 4곳 |
 | v5.0.0-3.1.1 | — | L3 | 앱이 쓰는 브라우저가 지원해야 할 보안 기능(HTTPS, HSTS, CSP 등)과, 없을 때 앱이 어떻게 동작해야 하는지(경고, 차단)를 문서에 적는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
@@ -174,7 +190,7 @@
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | ID만 | B | 다른 곳 시험: tools/ci/vuln-deadline.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web… |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | 자동 시험 | B | 시험: tools/web-checks/static/assets.test.mjs |
-| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/payment-svc/test-int/payment-call-guard.int.tes… |
+| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, apps/partner/src/_pages/seatmap-editor/model/worker.te… |
 | v5.0.0-15.2.1 | — | L1 | 문서에 정한 갱신·조치 기한을 넘긴 구성요소가 없다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-15.2.2 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능에 문서대로 가용성 방어를 구현한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/maintenance.int.test.ts, packages/platform/test/circuit-breaker.test.ts 외 6곳 (영역:… |
 | v5.0.0-15.2.3 | — | L2 | 운영 환경에는 필요한 기능만 두고 시험 코드·예제·개발 기능을 노출하지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
@@ -185,7 +201,7 @@
 | v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: apps/console-host… |
 | v5.0.0-15.3.6 | — | L2 | 프로토타입 오염을 막도록 JavaScript를 작성한다(객체 리터럴 대신 `Set`·`Map` 등). | ID만 | B | 다른 곳 시험: packages/api-client/test/policy.test.ts, packages/config/eslint/js-security.test.mjs 외 4곳 (영역: function… |
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-checks.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 1곳 (영역:… |
-| v5.0.0-15.1.4 | — | L3 | 위험 구성 요소로 보는 서드파티 라이브러리를 문서에서 드러낸다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
+| v5.0.0-15.1.4 | — | L3 | 위험 구성 요소로 보는 서드파티 라이브러리를 문서에서 드러낸다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs |
 | v5.0.0-15.2.4 | — | L3 | 서드파티 구성 요소와 모든 전이 의존성이 기대한 저장소에서 오고 의존성 혼동 위험이 없게 한다. | 자동 시험 | B | 시험: tools/ci/check-trust-exceptions.test.mjs |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts (영역: apps/console-host, apps/forensics, apps/partner… |
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/production-image.int.test.ts (영역:… |

@@ -2,7 +2,7 @@
 // 문서 모양과 칸 차례는 domain/seatmap-layout.ts assignIndexes와 같다(같은 배치는 같은 팬 파일 바이트).
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, eq } from 'drizzle-orm';
-import type { LayoutShape, Point } from '../../domain/seatmap-import.js';
+import type { LayoutShape, Point, ShapeArc } from '../../domain/seatmap-import.js';
 import { type DocSeat, type DocSection, docFromJson, type LayoutDoc, type PriceTier } from '../../domain/seatmap-layout.js';
 import { priceTier, seat, section, venue } from './schema.js';
 
@@ -20,13 +20,14 @@ export const opt = <K extends string, V>(k: K, v: V | null | undefined): { [P in
 
 /** 구역 행 + 좌석 행 → 문서의 구역(seatmap-layout.ts assignIndexes와 같은 모양·같은 칸 차례) */
 export function sectionDoc(s: typeof section.$inferSelect, seats: DocSeat[]): DocSection {
-  const meta = (s.editorMeta ?? {}) as { tool?: LayoutShape['kind']; shapeName?: string; fillRule?: Record<string, unknown> };
+  const meta = (s.editorMeta ?? {}) as { tool?: LayoutShape['kind']; shapeName?: string; fillRule?: Record<string, unknown>; arc?: ShapeArc };
   const label = s.labelX !== null || s.labelY !== null ? { ...opt('x', s.labelX), ...opt('y', s.labelY) } : undefined;
   return {
     sectionId: s.sectionKey,
     name: s.name,
     ...opt('level', s.level),
-    shape: { kind: meta.tool ?? 'POLYGON', points: (s.shape as Point[]).map(([x, y]) => [x, y] as Point), ...opt('name', meta.shapeName) },
+    // 부채꼴·곡선 띠의 원래 매개변수(editor_meta.arc, ADR-0264 결정 12)는 에디터가 손잡이를 되살리는 값이다
+    shape: { kind: meta.tool ?? 'POLYGON', points: (s.shape as Point[]).map(([x, y]) => [x, y] as Point), ...opt('name', meta.shapeName), ...opt('arc', meta.arc) },
     ...(label ? { label } : {}),
     ...opt('tierId', s.defaultTier),
     ...opt('gateZone', s.gateZone),

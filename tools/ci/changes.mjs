@@ -56,7 +56,7 @@ const RULES = [
   // 좌석맵 패키지는 세 엔진 검사(seatmap-pkg 잡, BUILD_ORDER HOT-120)가 본다. 구매 세션 서명기 원본과 서버와 같은 시험 벡터는
   // 서명기 세 엔진 검사(purchase 잡, HOT-360 ①, ADR-0221 결정 7)가 본다
   [
-    /^(apps\/|packages\/(ds|config|seatmap)\/|packages\/api-client\/src\/purchase\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
+    /^(apps\/|packages\/(ds|config|seatmap)\/|packages\/api-client\/src\/purchase\/|services\/core-svc\/test-int\/fixtures\/seatmap-editor\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
     ['web'],
   ],
   // 신뢰 정책 예외 검사(tools-check, check-trust-exceptions.mjs, ADR-0191)가 보는 작업 공간 파일과 그 예외 표가 바뀌어도 돌린다

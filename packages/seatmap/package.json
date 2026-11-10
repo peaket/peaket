@@ -6,7 +6,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./grid": "./src/grid.ts",
+    "./engine": "./src/engine.ts",
+    "./layout": "./src/layout.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
