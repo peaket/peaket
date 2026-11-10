@@ -11,4 +11,6 @@ export { DrizzleVerificationStore } from './adapters/db/drizzle-verification-sto
 export { VerificationEraser } from './adapters/verification-eraser.js';
 export { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
 export { restrictedCiHoldHandlers } from './inbound/restricted-ci-hold.grpc.js';
+export { CheckReverification } from './application/check-reverification.js';
+export { reverificationCheckHandlers } from './inbound/reverification.grpc.js';
 export { parsePidRotationArgs, PidRotation, PidRotationError } from './application/pid-rotation.js';

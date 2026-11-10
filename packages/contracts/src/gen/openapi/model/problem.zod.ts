@@ -26,6 +26,7 @@ export const Problem = zod.object({
   "recentlyReleasedSeats": zod.array(zod.string()).optional().describe('홀드 409(seat-recently-released)에만. 요청 좌석 가운데 같은 계정이 방금 놓아 아직 다시 잡을 수 없는 좌석 ID(seat-hold §5, 추천 적용 2026-10-30)'),
   "reholdAvailableAt": zod.iso.datetime({"offset":true}).optional().describe('홀드 409(seat-recently-released)에만. recentlyReleasedSeats를 모두 다시 잡을 수 있게 되는 시각(놓은 시각 + 30초 [가정], seat-hold §5, 추천 적용 2026-10-30)'),
   "rejoinAllowed": zod.boolean().optional().describe('입장 확정의 대기표 만료 410에만. 다시 줄 서기 가능 여부(이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·0064)'),
+  "removeReason": zod.enum(['BLOCKED']).optional().describe('입장 확정·추가 검증 제출의 410 queue-ticket-removed에만, 이의 기각으로 끝난 대기 참여일 때. 대기실·SCR-009가 \'기각\' 문구를 고른다. 이름과 값은 asyncapi의 대기 기록 removeReason과 같다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)'),
   "holdRemainingSeconds": zod.int().optional().describe('결제 시도 시작의 503(새 결제 일시 정지)에만. 주문을 만들고 결제 접수 전인 홀드의 멈춘 남은 시간(초). 다시 열리면 이어 센다(ADR-0085)'),
   "myReviewId": zod.string().optional().describe('후기 쓰기의 409 review-already-written에만. 이 계정이 이 회차에 이미 쓴 후기 ID(수정으로 안내)'),
   "ended": zod.enum(['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE', 'LOGIN_METHOD_CHANGED']).optional().describe('토큰 갱신(POST /v1/identity/access-tokens)의 401 refresh-token-invalid에만. 쿠키의 토큰이 끝난 세션의 것이고 끝난 까닭을 알 때 그 까닭을 싣는다(세션 종료 사건 SessionTerminated.reason 가운데 팬에게 보이는 것, d5 §3.5, 추천 적용 2026-11-09, ADR-0235). 모르는 토큰·모양이 틀린 토큰·유휴·절대 만료에는 없다'),

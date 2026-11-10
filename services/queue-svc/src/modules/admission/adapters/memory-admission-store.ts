@@ -1,7 +1,7 @@
 // 시험용 입장 저장소. Valkey의 Lua(admission-lua.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/admission-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다). 사람 키(q:adm·q:dup)는 진입 메모리 저장소와 나누지 않는다(진입과 함께 보는 시험은 Valkey로 한다).
 import type { Clock } from '@peaket/platform';
-import { DEFAULT_TARGET, FIRST_USE_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type LobbySeat, type Precheck, MAX_STAY_MS } from '../domain/admission.js';
+import { DEFAULT_TARGET, FIRST_USE_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, type AdmitResult, type Claim, type LobbySeat, type Precheck, MAX_STAY_MS } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
 
 /** 회차 키들의 메모리 모양(시험이 직접 채운다) */
@@ -23,6 +23,7 @@ export class MemoryAdmissionDb {
   calls = (e: string) => this.#of('calls', e, () => new Map<string, number>());
   callReq = (e: string) => this.#of('callReq', e, () => new Map<string, number>());
   removed = (e: string) => this.#of('removed', e, () => new Set<number>());
+  /** q:{event:E}:verify: 대기표(로비 진입자는 참가 토큰) 해시 → VERIFYING:{ms}:{사유}·PASSED:{ms}:{사유}·BLOCKED:{ms}:{사유}·ORPHAN:{ms}. 추가 검증 저장소가 같은 db를 넘겨받아 바꾼다 */
   verify = (e: string) => this.#of('verify', e, () => new Map<string, string>());
   skipped = (e: string) => this.#of('skipped', e, () => [] as string[]);
   notice = (e: string) => this.#of('notice', e, () => new Map<string, string>());
@@ -49,9 +50,13 @@ const num = (v: string | undefined): number | undefined => {
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
 };
+/** verify 값 {상태}:{시각}[:{사유}](Lua의 '^(%u+):(%d+):?(.*)$'와 같다) */
+const verifyState = (v: string | undefined): { st: string; at: number; why: string } | null => {
+  const m = /^([A-Z]+):(\d+):?(.*)$/.exec(v ?? '');
+  return m ? { st: m[1]!, at: Number(m[2]), why: m[3] ?? '' } : null;
+};
 
 export class MemoryAdmissionStore implements AdmissionStore {
-  readonly db = new MemoryAdmissionDb();
   /** 자리를 처음 잡은 시각(Lua의 slot_of '<해시>:at' 칸) */
   readonly #issuedAt = new Map<string, number>();
 
@@ -59,9 +64,13 @@ export class MemoryAdmissionStore implements AdmissionStore {
     this.#issuedAt.set(`${eventId}|${ticketHash}`, atMs);
   }
 
-  constructor(private readonly clock: Clock) {}
+  /** db를 넘기면 같은 회차 키를 다른 메모리 저장소(추가 검증)와 나눈다 */
+  constructor(
+    private readonly clock: Clock,
+    readonly db: MemoryAdmissionDb = new MemoryAdmissionDb(),
+  ) {}
 
-  async precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string }): Promise<Precheck> {
+  async precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string; graceMs: number }): Promise<Precheck> {
     const e = i.eventId;
     const now = this.clock.now();
     const state = this.db.notice(e).get('saleState');
@@ -69,10 +78,13 @@ export class MemoryAdmissionStore implements AdmissionStore {
     if (state === 'ENDED') return { kind: 'ENDED' };
     const sold = num(this.db.notice(e).get('soldOutLastSeq'));
     if (sold !== undefined && i.seq <= sold) return { kind: 'SOLD_OUT' };
+    let passedAt = -1;
     if (this.db.removed(e).has(i.seq)) {
-      const m = /^([A-Z]+):(\d+):?(.*)$/.exec(this.db.verify(e).get(i.ticketHash) ?? '');
-      if (m && m[1] === 'VERIFYING') return { kind: 'VERIFYING', reason: m[3] ?? '' };
-      return { kind: 'REMOVED' };
+      const v = verifyState(this.db.verify(e).get(i.ticketHash));
+      if (v?.st === 'VERIFYING') return { kind: 'VERIFYING', reason: v.why };
+      if (v?.st === 'BLOCKED') return { kind: 'REMOVED', removeReason: 'BLOCKED' };
+      if (v?.st !== 'PASSED') return { kind: 'REMOVED' };
+      passedAt = v.at;
     }
     let skipped = false;
     for (const line of this.db.skipped(e)) {
@@ -96,12 +108,19 @@ export class MemoryAdmissionStore implements AdmissionStore {
     const first = log.find(([, v]) => v >= i.seq);
     const turnAtMs = first ? Number(first[0]) * 1000 : undefined;
     const inSoon = this.db.soon(e).has(i.ticketHash);
-    if (!inSoon && turnAtMs !== undefined && now - turnAtMs > TURN_GRACE_MS) {
-      const j = this.db.slotOf(e).get(i.ticketHash);
-      const sc = j === undefined ? undefined : this.db.slots(e).get(j);
-      if (!(sc !== undefined && sc > now)) return { kind: 'EXPIRED', turnAtMs };
+    // 유예는 차례와 통과 가운데 늦은 때부터 센다. 비트가 꺼진 통과자(셔플 전 통과)는 유예가 지났을 때만 통과 시각을 읽는다
+    if (!inSoon && turnAtMs !== undefined && now - Math.max(turnAtMs, passedAt) > i.graceMs) {
+      if (passedAt < 0) {
+        const v = verifyState(this.db.verify(e).get(i.ticketHash));
+        if (v?.st === 'PASSED') passedAt = v.at;
+      }
+      if (now - Math.max(turnAtMs, passedAt) > i.graceMs) {
+        const j = this.db.slotOf(e).get(i.ticketHash);
+        const sc = j === undefined ? undefined : this.db.slots(e).get(j);
+        if (!(sc !== undefined && sc > now)) return { kind: 'EXPIRED', turnAtMs, ...(passedAt >= 0 ? { passedAtMs: passedAt } : {}) };
+      }
     }
-    return { kind: 'OK', serving, ...(turnAtMs !== undefined ? { turnAtMs } : {}), inSoon, skipped };
+    return { kind: 'OK', serving, ...(turnAtMs !== undefined ? { turnAtMs } : {}), inSoon, skipped, ...(passedAt >= 0 ? { passedAtMs: passedAt } : {}) };
   }
 
   async claim(i: { pid: string; eventId: string; ticketHash: string; nonce: string; expireAtMs: number }): Promise<Claim> {
@@ -120,7 +139,11 @@ export class MemoryAdmissionStore implements AdmissionStore {
     const now = this.clock.now();
     const serving = this.db.ev(e).get('serving') ?? 0;
     if (i.seq > serving) return { kind: 'NOT_YET' };
-    if (this.db.removed(e).has(i.seq)) return { kind: 'REMOVED' };
+    if (this.db.removed(e).has(i.seq)) {
+      const st = verifyState(this.db.verify(e).get(i.ticketHash))?.st;
+      if (st === 'BLOCKED') return { kind: 'REMOVED', removeReason: 'BLOCKED' };
+      if (st !== 'PASSED') return { kind: 'REMOVED' };
+    }
     const slots = this.db.slots(e);
     const prev = this.db.slotOf(e).get(i.ticketHash);
     if (prev !== undefined) {
@@ -207,8 +230,12 @@ export class MemoryAdmissionStore implements AdmissionStore {
     return { admittedBefore: this.db.adm.has(key) };
   }
 
-  async markRemoved(i: { eventId: string; seq: number }): Promise<void> {
+  async markRemoved(i: { eventId: string; seq: number; ticketHash: string }): Promise<{ verifyCleared: boolean }> {
     this.db.removed(i.eventId).add(i.seq);
+    const v = this.db.verify(i.eventId).get(i.ticketHash);
+    if (!(v?.startsWith('PASSED:') || v?.startsWith('VERIFYING:'))) return { verifyCleared: false };
+    this.db.verify(i.eventId).delete(i.ticketHash);
+    return { verifyCleared: true };
   }
 
   async sessionStarted(i: { eventId: string; jti: string; maxStayUntilMs: number }): Promise<boolean> {

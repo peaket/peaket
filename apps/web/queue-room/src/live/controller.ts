@@ -813,7 +813,9 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
           end('expired', { rejoinAllowed });
         } else if (reply.problem === 'queue-ticket-removed') {
           clearAllMine();
-          end('cancelled-elsewhere', { via: 'queue' });
+          // 이의 기각으로 끝난 대기표는 추가 검증 화면이 '기각' 문구와 사유 범주를 보인다(같은 410의 확장 칸, ADR-0259 결정 4)
+          if (field(reply, 'removeReason') === 'BLOCKED') leave(urls.verify, sig);
+          else end('cancelled-elsewhere', { via: 'queue' });
         } else finish(reply.problem === 'sold-out' ? 'sold-out' : 'ended', true);
         return 'done';
       }

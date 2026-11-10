@@ -34,7 +34,6 @@ import type {
   BatchingResponse,
   CreateQueueLobbyParticipantBody,
   CreateQueuePreVerificationBody,
-  CreateQueueVerificationBody,
   LobbyToken,
   PreverifyResult,
   Problem,
@@ -44,6 +43,10 @@ import type {
   QueueShuffleProof,
   QueueState,
   QueueTicket,
+  QueueVerificationAppealReceipt,
+  QueueVerificationResult,
+  QueueVerificationState,
+  QueueVerificationSubmitRequest,
   ServiceUnavailableResponse,
   TooManyRequestsResponse
 } from '../../model';
@@ -1275,14 +1278,182 @@ export const useCreateQueueAdmission = <TError = ErrorType<ProblemResponse | Ser
       > => {
       return useMutation(getCreateQueueAdmissionMutationOptions(options), queryClient);
     }
-    export type createQueueVerificationResponse200 = {
-  data: void
+    export type getQueueVerificationResponse200 = {
+  data: QueueVerificationState
+  status: 200
+}
+
+export type getQueueVerificationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getQueueVerificationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getQueueVerificationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type getQueueVerificationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type getQueueVerificationResponseSuccess = (getQueueVerificationResponse200) & {
+  headers: Headers;
+};
+export type getQueueVerificationResponseError = (getQueueVerificationResponse403 | getQueueVerificationResponse404 | getQueueVerificationResponse409 | getQueueVerificationResponse503) & {
+  headers: Headers;
+};
+
+export const getGetQueueVerificationUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/queues/${encodeURIComponent(String(eventId))}/verification`
+}
+
+/**
+ * FR-020, POL-006. 이 계정의 이 회차 대기 참여(q:dup:{pid}:E의 대기표)가 지금 추가 검증 중인지·통과했는지·기각됐는지, 사유 범주, 이의 접수 여부를 준다. 화면은 몇 초 [가정] 간격으로 묻는다. 새로고침 뒤 화면은 이 탭의 본인확인 기억에 기대지 않는다: VERIFYING이면 바로 제출해 보고, 200 REVERIFY_REQUIRED면 본인확인 창을 연다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). '검토 중' 배지는 이의 심사를 하는 ops-svc가 생기는 BUILD_ORDER GAT-280 전까지 '접수됨'으로만 보인다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12)
+ * @summary 추가 검증 상태 읽기(SCR-009 새로고침 뒤 되살리기)
+ */
+export const getQueueVerification = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getQueueVerificationResponseSuccess> => {
+
+  return orvalFetch<getQueueVerificationResponseSuccess>(getGetQueueVerificationUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQueueVerificationQueryKey = (eventId: string,) => {
+    return [
+    `/v1/queues/${eventId}/verification`
+    ] as const;
+    }
+
+
+export const getGetQueueVerificationQueryOptions = <TData = Awaited<ReturnType<typeof getQueueVerification>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQueueVerificationQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQueueVerification>>> = ({ signal }) => getQueueVerification(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQueueVerificationQueryResult = NonNullable<Awaited<ReturnType<typeof getQueueVerification>>>
+export type GetQueueVerificationQueryError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
+
+
+export function useGetQueueVerification<TData = Awaited<ReturnType<typeof getQueueVerification>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
+ eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQueueVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getQueueVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQueueVerification<TData = Awaited<ReturnType<typeof getQueueVerification>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQueueVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getQueueVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQueueVerification<TData = Awaited<ReturnType<typeof getQueueVerification>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 추가 검증 상태 읽기(SCR-009 새로고침 뒤 되살리기)
+ */
+
+export function useGetQueueVerification<TData = Awaited<ReturnType<typeof getQueueVerification>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQueueVerificationQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createQueueVerificationResponse200 = {
+  data: QueueVerificationResult
   status: 200
 }
 
 export type createQueueVerificationResponse202 = {
-  data: void
+  data: QueueVerificationAppealReceipt
   status: 202
+}
+
+export type createQueueVerificationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createQueueVerificationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createQueueVerificationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createQueueVerificationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createQueueVerificationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createQueueVerificationResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type createQueueVerificationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
 }
 
 export type createQueueVerificationResponse503 = {
@@ -1293,7 +1464,7 @@ export type createQueueVerificationResponse503 = {
 export type createQueueVerificationResponseSuccess = (createQueueVerificationResponse200 | createQueueVerificationResponse202) & {
   headers: Headers;
 };
-export type createQueueVerificationResponseError = (createQueueVerificationResponse503) & {
+export type createQueueVerificationResponseError = (createQueueVerificationResponse400 | createQueueVerificationResponse403 | createQueueVerificationResponse404 | createQueueVerificationResponse409 | createQueueVerificationResponse410 | createQueueVerificationResponse415 | createQueueVerificationResponse429 | createQueueVerificationResponse503) & {
   headers: Headers;
 };
 
@@ -1306,11 +1477,11 @@ export const getCreateQueueVerificationUrl = (eventId: string,) => {
 }
 
 /**
- * FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. challengeToken은 queue-svc가 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡기고, 휴대폰 본인확인 재통과는 identity-svc 결과로 따로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14)
+ * FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. 서버는 먼저 휴대폰 본인확인 재통과를 identity-svc 결과로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). 재통과가 있을 때만 challengeToken을 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡겨 한 번 쓰기 토큰을 태우지 않는다(재통과가 없으면 200 REVERIFY_REQUIRED, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14). 대기 참여는 이 계정의 q:dup:{pid}:E가 가리키는 대기표이고 본문으로 받지 않는다
  * @summary 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
  */
 export const createQueueVerification = async (eventId: string,
-    createQueueVerificationBody?: CreateQueueVerificationBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createQueueVerificationResponseSuccess> => {
+    queueVerificationSubmitRequest?: QueueVerificationSubmitRequest, options?: Parameters<typeof orvalFetch>[1]): Promise<createQueueVerificationResponseSuccess> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1331,7 +1502,7 @@ return orvalFetch<createQueueVerificationResponseSuccess>(getCreateQueueVerifica
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(createQueueVerificationBody)
+    body: JSON.stringify(queueVerificationSubmitRequest)
   }
 );}
 
@@ -1341,7 +1512,7 @@ return orvalFetch<createQueueVerificationResponseSuccess>(getCreateQueueVerifica
 
 export const getCreateQueueVerificationMutationKey = () => ['createQueueVerification'] as const;
 
-export const getCreateQueueVerificationMutationOptions = <TError = ErrorType<ServiceUnavailableResponse>,
+export const getCreateQueueVerificationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueVerification>>, TError,CreateQueueVerificationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createQueueVerification>>, TError,CreateQueueVerificationMutationVariables, TContext> => {
 
@@ -1369,14 +1540,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateQueueVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof createQueueVerification>>>
-    export type CreateQueueVerificationMutationBody = BodyType<CreateQueueVerificationBody> | undefined
-    export type CreateQueueVerificationMutationError = ErrorType<ServiceUnavailableResponse>
-    export type CreateQueueVerificationMutationVariables = {eventId: string;data?: BodyType<CreateQueueVerificationBody>}
+    export type CreateQueueVerificationMutationBody = BodyType<QueueVerificationSubmitRequest> | undefined
+    export type CreateQueueVerificationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateQueueVerificationMutationVariables = {eventId: string;data?: BodyType<QueueVerificationSubmitRequest>}
 
     /**
  * @summary 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
  */
-export const useCreateQueueVerification = <TError = ErrorType<ServiceUnavailableResponse>,
+export const useCreateQueueVerification = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueVerification>>, TError,CreateQueueVerificationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createQueueVerification>>,

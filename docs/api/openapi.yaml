@@ -131,6 +131,7 @@ x-peaket-problem-types:
     no-placement: { status: 409, title: "배치되지 않은 기기입니다" }
     not-found: { status: 404, title: "찾을 수 없습니다" }
     not-payer: { status: 403, title: "결제한 분만 할 수 있습니다" }
+    not-verifying: { status: 409, title: "추가 검증 중인 대기표가 아닙니다" }
     open-interval-conflict: { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" }
     open-maintenance-window: { status: 409, title: "정비 시간에는 오픈할 수 없습니다" }
     open-passed: { status: 410, title: "오픈 시각이 지났습니다" }
@@ -174,6 +175,7 @@ x-peaket-problem-types:
     push-key-invalid: { status: 422, title: "웹 푸시 키가 맞지 않습니다" }
     push-service-not-allowed: { status: 422, title: "받지 않는 웹 푸시 서비스입니다" }
     query-too-short: { status: 400, title: "검색어가 너무 짧습니다" }
+    queue-entry-not-found: { status: 404, title: "이 회차에 대기 참여가 없습니다" }
     queue-not-found: { status: 404, title: "이 회차의 대기열이 열리지 않았습니다" }
     queue-not-open: { status: 409, title: "아직 예매가 열리지 않았습니다" }
     queue-order-invalid: { status: 422, title: "로비 셔플과 오픈 직후 묶음을 둘 다 끌 수는 없습니다" }
@@ -226,6 +228,7 @@ x-peaket-problem-types:
     unlock-link-invalid: { status: 410, title: "이 링크는 더 쓸 수 없습니다" }
     unlock-link-resend-limit: { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" }
     verification-not-found: { status: 404, title: "본인확인 건을 찾을 수 없습니다" }
+    verification-submit-limited: { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" }
     webhook-url-not-allowed: { status: 400, title: "받지 않는 웹훅 주소입니다" }
     wish-limit: { status: 422, title: "찜 수를 넘었습니다" }
     withdrawal-confirmation-required: { status: 409, title: "탈퇴 전에 확인해 주세요" }
@@ -284,6 +287,7 @@ components:
         recentlyReleasedSeats: { type: array, items: { type: string }, description: "홀드 409(seat-recently-released)에만. 요청 좌석 가운데 같은 계정이 방금 놓아 아직 다시 잡을 수 없는 좌석 ID(seat-hold §5, 추천 적용 2026-10-30)" }
         reholdAvailableAt: { type: string, format: date-time, description: "홀드 409(seat-recently-released)에만. recentlyReleasedSeats를 모두 다시 잡을 수 있게 되는 시각(놓은 시각 + 30초 [가정], seat-hold §5, 추천 적용 2026-10-30)" }
         rejoinAllowed: { type: boolean, description: "입장 확정의 대기표 만료 410에만. 다시 줄 서기 가능 여부(이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·0064)" }
+        removeReason: { type: string, enum: [BLOCKED], description: "입장 확정·추가 검증 제출의 410 queue-ticket-removed에만, 이의 기각으로 끝난 대기 참여일 때. 대기실·SCR-009가 '기각' 문구를 고른다. 이름과 값은 asyncapi의 대기 기록 removeReason과 같다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
         holdRemainingSeconds: { type: integer, description: "결제 시도 시작의 503(새 결제 일시 정지)에만. 주문을 만들고 결제 접수 전인 홀드의 멈춘 남은 시간(초). 다시 열리면 이어 센다(ADR-0085)" }
         myReviewId: { type: string, description: "후기 쓰기의 409 review-already-written에만. 이 계정이 이 회차에 이미 쓴 후기 ID(수정으로 안내)" }
         ended: { type: string, enum: [LOGOUT, ADMIN_FORCE, REFRESH_REUSE, DEVICE_LIMIT, MERGED, DELETE, LOGIN_METHOD_CHANGED], description: "토큰 갱신(POST /v1/identity/access-tokens)의 401 refresh-token-invalid에만. 쿠키의 토큰이 끝난 세션의 것이고 끝난 까닭을 알 때 그 까닭을 싣는다(세션 종료 사건 SessionTerminated.reason 가운데 팬에게 보이는 것, d5 §3.5, 추천 적용 2026-11-09, ADR-0235). 모르는 토큰·모양이 틀린 토큰·유휴·절대 만료에는 없다" }
@@ -327,6 +331,39 @@ components:
         retryAfterMs: { type: integer, description: "NOT_YET일 때 예상 도래까지 남은 시간(밀리초)" }
         serverEcdhPublicKey: { type: object, description: "구매 세션 요청 인증 키를 합의하는 서버 고정 ECDH P-256 공개키. JWK(kty EC, crv P-256, x, y, kid) 형식(ADR-0050 결정 8, 추천 적용 2026-10-21, ADR-0079 결정 6)", properties: { kty: { type: string }, crv: { type: string }, x: { type: string }, y: { type: string }, kid: { type: string } } }
         seatmapLayoutPath: { type: string, description: "직접 선택 공연의 좌석맵 파일 경로(/v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중 미리 받은 판과 다르면 다시 받는다(추천 적용 2026-10-14, ADR-0063)" }
+    QueueVerificationSubmitRequest:
+      additionalProperties: false
+      type: object
+      description: "추가 검증 제출 본문. challengeToken과 appeal 가운데 정확히 하나만 보낸다(둘 다 있거나 둘 다 없으면 400, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)"
+      properties:
+        challengeToken: { type: string, description: "심층 챌린지(CMP-047)의 사람 확인 토큰(action verify, 300초 한 번 쓰기)" }
+        appeal: { type: string, maxLength: 4000, description: "설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 빈 문자열이면 설명 요청(추천 적용 2026-10-14, ADR-0062). NUL(U+0000)·양방향 제어 글자(U+202A~U+202E, U+2066~U+2069)·0폭 글자(U+200B~U+200D, U+FEFF)가 있으면 400이다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12 '접수')" }
+        deviceId: { type: string, description: "기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12, 로비 입장·사전 검증과 같은 모양). trust-svc가 기기 이력과 차단 기기 목록을 볼 때 쓴다. 선택이고 형식이 다르면 400(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+    QueueVerificationResult:
+      type: object
+      required: [result]
+      description: "추가 검증 제출 결과(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §5.2)"
+      properties:
+        result: { type: string, enum: [PASSED, CHALLENGE_FAILED, REVERIFY_REQUIRED, PERSON_MISMATCH], description: "PASSED 통과. CHALLENGE_FAILED 사람 확인 실패(다시 할 수 있다). REVERIFY_REQUIRED 추가 검증을 시작한 뒤의 본인확인 재통과가 없음(trust-svc를 부르지 않았다). PERSON_MISMATCH 재확인한 사람이 이 계정의 사람과 다름" }
+        queueNumber: { type: integer, description: "PASSED일 때만: 원래 번호" }
+        graceUntil: { type: [string, 'null'], format: date-time, description: "PASSED이고 차례가 이미 지났을 때만: 입장 확정을 받는 마지막 시각. 차례와 통과 시각 가운데 늦은 때 + 유예 15분이다. 이미 통과한 대기 참여가 다시 보내도 같은 규칙으로 계산한다(처음 통과 시각 기준, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 차례 전이면 null이고 원래 번호의 차례에 입장한다(queue-admission §7)" }
+    QueueVerificationAppealReceipt:
+      type: object
+      required: [appealId, receivedAt]
+      description: "이의 접수(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 이미 접수했으면 처음 값이다"
+      properties:
+        appealId: { type: string, format: uuid, description: "이의 ID(asyncapi CaseRequested.sourceId)" }
+        receivedAt: { type: string, format: date-time }
+    QueueVerificationState:
+      type: object
+      required: [state]
+      description: "추가 검증 상태(GET /v1/queues/{eventId}/verification, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)"
+      properties:
+        state: { type: string, enum: [VERIFYING, PASSED, BLOCKED], description: "VERIFYING 추가 검증 중. PASSED 통과(제출 또는 이의 인정). BLOCKED 이의 기각으로 대기 참여가 끝남" }
+        passedVia: { type: [string, 'null'], enum: [CHALLENGE, APPEAL, null], description: "PASSED일 때만: CHALLENGE 추가 검증 제출로 통과, APPEAL 이의 인정으로 통과. 그 밖에는 null(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        graceUntil: { type: [string, 'null'], format: date-time, description: "PASSED이고 차례가 지났을 때만: 입장 확정을 받는 마지막 시각(차례와 통과 시각 가운데 늦은 때 + 유예 15분, QueueVerificationResult.graceUntil과 같은 계산). 그 밖에는 null(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        verificationReason: { type: [string, 'null'], enum: [RAPID_REQUESTS, DEVICE_HISTORY, NETWORK, INTERACTION, HUMAN_CHECK, SHARED_PATTERN, null], description: "이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름, AdmissionResult.verificationReason과 같다)" }
+        appeal: { type: [object, 'null'], description: "이의를 접수했으면 그 값, 아니면 null", properties: { appealId: { type: string, format: uuid }, receivedAt: { type: string, format: date-time }, text: { type: string, description: "본인이 보낸 이의 글(NFC 정규화 뒤 값, 비었으면 설명 요구). 본인에게만 돌려준다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" } } }
     HoldRequest:
       additionalProperties: false
       type: object
@@ -3701,20 +3738,44 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: "본문에 queueTicket·lobbyToken·priorityGrantId가 하나도 없음(추천 적용 2026-11-03, ADR-0183)" }
         '403': { $ref: '#/components/responses/Problem', description: "대기표(또는 참가 토큰)의 서명·회차·계정이 맞지 않음(Problem type queue-ticket-invalid, 추천 적용 2026-11-03, ADR-0183). 또는 본인확인 전이라 pid가 없음(identity-verification-required, 진입과 같다). 또는 예매 제한 중인 계정(Problem type booking-restricted). queue-svc가 입장 확정 Lua를 부르기 전에 그 계정의 예매 제한 사본(대기열 Redis q:rst:{account})을 읽어, ACTIVE이고 끝 시각 전이면 입장 자리와 곧 입장 대기열을 건드리지 않고 거절한다. 대기표는 그대로 두므로 차례 뒤 15분 안에 제한이 풀리면 같은 대기표로 입장할 수 있다. 사본이 없으면 제한이 없는 것으로 본다. 화면은 폴링을 멈추고 소명 화면(SCR-042)으로 잇는다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6 '예매 제한 확인', Q-T59)" }
         '409': { $ref: '#/components/responses/Problem', description: "같은 사람이 이 회차에 다른 대기표로 이미 입장함(DUPLICATE_ADMISSION, ADR-0056). 이 대기표의 번호는 빠진 번호로 처리" }
-        '410': { $ref: '#/components/responses/Problem', description: "대기표 만료(15분 경과, Problem type queue-ticket-expired, 추천 적용 2026-11-03, ADR-0183). 이 대기표의 1인 1순번 중복 확인 키를 지우고 rejoinAllowed(다시 줄 서기 가능 여부. 이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·ADR-0064)를 싣는다(ADR-0062). 또는 그 회차의 판매 종료(공연 시작 24시간 전) 뒤의 입장 확정(Problem type sale-ended, 입장 자리를 주지 않음, ADR-0064), 또는 매진(SOLD_OUT) 뒤의 입장 확정(Problem type sold-out, 대기 참여는 매진으로 끝남, ADR-0122. 매진이 풀린 뒤에도 매진 때의 마지막 발급 번호 이하 대기표는 같은 sold-out). 또는 빠진 번호(추가 검증 중이 아닌 대기 취소·중복·기각 등)나 장애 전환으로 건너뛴 구간의 새 세대 번호(Problem type queue-ticket-removed, 추천 적용 2026-11-03, ADR-0183). priorityGrantId로 온 입장 확정은 판매 종료·매진에도 410이 아니고, 권리가 없거나 남의 것·만료·이미 산 것이면 같은 404 priority-grant-not-found다(추천 적용 2026-10-31, ADR-0171)" }
+        '410': { $ref: '#/components/responses/Problem', description: "대기표 만료(15분 경과, Problem type queue-ticket-expired, 추천 적용 2026-11-03, ADR-0183). 이 대기표의 1인 1순번 중복 확인 키를 지우고 rejoinAllowed(다시 줄 서기 가능 여부. 이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·ADR-0064)를 싣는다(ADR-0062). 또는 그 회차의 판매 종료(공연 시작 24시간 전) 뒤의 입장 확정(Problem type sale-ended, 입장 자리를 주지 않음, ADR-0064), 또는 매진(SOLD_OUT) 뒤의 입장 확정(Problem type sold-out, 대기 참여는 매진으로 끝남, ADR-0122. 매진이 풀린 뒤에도 매진 때의 마지막 발급 번호 이하 대기표는 같은 sold-out). 또는 빠진 번호(추가 검증 중이 아닌 대기 취소·중복·기각 등)나 장애 전환으로 건너뛴 구간의 새 세대 번호(Problem type queue-ticket-removed, 추천 적용 2026-11-03, ADR-0183). 이의 기각으로 끝난 대기표면 확장 칸 removeReason BLOCKED를 싣는다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). priorityGrantId로 온 입장 확정은 판매 종료·매진에도 410이 아니고, 권리가 없거나 남의 것·만료·이미 산 것이면 같은 404 priority-grant-not-found다(추천 적용 2026-10-31, ADR-0171)" }
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "대기열 Redis가 잠시 안 되면 503 dependency-unavailable, Retry-After 1초 [가정]이다. 화면은 같은 대기표로 다시 보낸다(진입과 같다, 추천 적용 2026-11-03, ADR-0183). 참가 토큰인데 셔플 결과 키를 잃었으면 503 batching(Retry-After 2초 [가정])이고, 다시 쓰기를 기다려 같은 토큰으로 다시 보낸다(ADR-0231)" }
         '404': { $ref: '#/components/responses/Problem', description: "그 회차의 대기열이 열리지 않았음(queue-not-found, 일정 사본이 없거나 회차 ID 모양이 틀림, 추천 적용 2026-11-03, ADR-0183). 또는 priority-grant-not-found(priorityGrantId가 이 계정의 살아 있는 우선 구매 권리가 아님. 없음·남의 것·만료·이미 삼을 가리지 않는다, 추천 적용 2026-10-31, ADR-0171)" }
   /v1/queues/{eventId}/verification:
+    get:
+      operationId: getQueueVerification
+      tags: [queue]
+      x-peaket-roles: [fan]
+      summary: 추가 검증 상태 읽기(SCR-009 새로고침 뒤 되살리기)
+      description: "FR-020, POL-006. 이 계정의 이 회차 대기 참여(q:dup:{pid}:E의 대기표)가 지금 추가 검증 중인지·통과했는지·기각됐는지, 사유 범주, 이의 접수 여부를 준다. 화면은 몇 초 [가정] 간격으로 묻는다. 새로고침 뒤 화면은 이 탭의 본인확인 기억에 기대지 않는다: VERIFYING이면 바로 제출해 보고, 200 REVERIFY_REQUIRED면 본인확인 창을 연다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). '검토 중' 배지는 이의 심사를 하는 ops-svc가 생기는 BUILD_ORDER GAT-280 전까지 '접수됨'으로만 보인다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12)"
+      security: [{ fanCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses:
+        '200': { description: "추가 검증 상태", content: { application/json: { schema: { $ref: '#/components/schemas/QueueVerificationState' } } } }
+        '403': { $ref: '#/components/responses/Problem', description: "본인확인 전이라 pid가 없음(identity-verification-required, 진입과 같다)" }
+        '404': { $ref: '#/components/responses/Problem', description: "이 회차의 대기열이 열리지 않았음(queue-not-found), 또는 이 계정의 이 회차 대기 참여가 없음(queue-entry-not-found). 대기 참여가 있으면 404가 아니다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '409': { $ref: '#/components/responses/Problem', description: "대기 참여는 있는데 추가 검증 칸이 없음(추가 검증으로 보내지 않았거나 대기 취소·1인 1순번 위반으로 지워짐). 제출과 같은 not-verifying이다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "대기열 Redis가 잠시 안 됨(dependency-unavailable, Retry-After 1초 [가정])" }
     post:
       operationId: createQueueVerification
       tags: [queue]
       x-peaket-roles: [fan]
       summary: 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
-      description: "FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. challengeToken은 queue-svc가 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡기고, 휴대폰 본인확인 재통과는 identity-svc 결과로 따로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14)"
+      description: "FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. 서버는 먼저 휴대폰 본인확인 재통과를 identity-svc 결과로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). 재통과가 있을 때만 challengeToken을 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡겨 한 번 쓰기 토큰을 태우지 않는다(재통과가 없으면 200 REVERIFY_REQUIRED, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14). 대기 참여는 이 계정의 q:dup:{pid}:E가 가리키는 대기표이고 본문으로 받지 않는다"
       security: [{ fanCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }]
-      requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, properties: { challengeToken: { type: string }, appeal: { type: string, maxLength: 4000, description: "설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)" } } } } } }
-      responses: { '200': { description: "통과·대기 상태. 통과면 원래 번호와, 차례가 지났을 때의 입장 유예 마감 시각(graceUntil)" }, '202': { description: "이의 제기 접수(사람 처리). CS 처리함 건 요청을 보낸 뒤 답한다. 이의는 한 대기 참여에 한 번이고, 이미 접수했으면 새 건을 만들지 않고 같은 202를 준다(건 요청의 eventKey로 중복을 지운다, B-T10, 추천 적용 2026-10-30, docs/features/bot-defense.md §12)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "추가 검증 제출: trust-svc가 응답하지 않아(서킷 열림·데드라인 넘김) 사람 확인을 확인하지 못했거나, identity-svc가 응답하지 않아 본인확인 재통과를 확인하지 못했다(뒤의 것은 추천 적용 2026-10-30). 통과로 보지 않으며 화면은 '확인하지 못했습니다. 다시 시도해 주세요'(docs/design/d5 §5.9 '챌린지 실패')를 보인다. 이의 제기: 건 요청 발행에 실패했다. 화면이 Retry-After를 지켜 다시 보낸다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12)" } }
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/QueueVerificationSubmitRequest' } } } }
+      responses:
+        '200': { description: "제출 결과(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 이미 통과한 대기 참여가 다시 보내면 같은 PASSED를 다시 준다", content: { application/json: { schema: { $ref: '#/components/schemas/QueueVerificationResult' } } } }
+        '202': { description: "이의 제기 접수(사람 처리). CS 처리함 건 요청을 보낸 뒤 답한다. 이의는 한 대기 참여에 한 번이고, 이미 접수했으면 새 건을 만들지 않고 처음 값으로 같은 202를 준다(건 요청의 eventKey로 중복을 지운다, B-T10, 추천 적용 2026-10-30, docs/features/bot-defense.md §12. 본문은 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)", content: { application/json: { schema: { $ref: '#/components/schemas/QueueVerificationAppealReceipt' } } } }
+        '400': { $ref: '#/components/responses/Problem', description: "본문 형식이 틀림(about:blank): challengeToken과 appeal이 둘 다 있거나 둘 다 없음, appeal이 NFC 정규화 뒤 grapheme 1,000자를 넘음, appeal에 NUL(U+0000)·양방향 제어 글자(U+202A~U+202E, U+2066~U+2069)·0폭 글자(U+200B~U+200D, U+FEFF)가 있음(뒤의 것은 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259), deviceId 형식이 다름, 정하지 않은 칸(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '403': { $ref: '#/components/responses/Problem', description: "본인확인 전이라 pid가 없음(identity-verification-required, 진입과 같다)" }
+        '404': { $ref: '#/components/responses/Problem', description: "이 회차의 대기열이 열리지 않았음(queue-not-found), 또는 이 계정의 이 회차 대기 참여가 없음(queue-entry-not-found)(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '409': { $ref: '#/components/responses/Problem', description: "추가 검증 중인 대기 참여가 아님(not-verifying). 이미 통과했으면 409가 아니라 200 PASSED를 다시 준다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '410': { $ref: '#/components/responses/Problem', description: "그 회차의 판매 종료 뒤(sale-ended), 또는 이의 기각으로 끝난 대기 참여(queue-ticket-removed, 확장 칸 removeReason BLOCKED)(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '415': { $ref: '#/components/responses/Problem', description: "application/json이 아닌 본문" }
+        '429': { $ref: '#/components/responses/TooManyRequests', description: "한 대기 참여의 challengeToken 제출이 10분에 5회 [가정]를 넘음(verification-submit-limited, Retry-After). 이의는 세지 않는다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). trust-svc 검증을 실제로 부를 때만 센다: 본인확인 재통과 확인이 통과한 뒤 ScoreRisk(VERIFICATION) 바로 앞에서 세고, trust-svc가 응답하지 않아 부르지 못한 503(서킷 열림·데드라인 넘김)과 사람 확인 서버 검증이 보류된 503이면 센 것을 되돌린다(REVERIFY_REQUIRED·PERSON_MISMATCH·400·409·410은 세지 않는다, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "추가 검증 제출: trust-svc가 응답하지 않아(서킷 열림·데드라인 넘김) 사람 확인을 확인하지 못했거나, identity-svc가 응답하지 않아 본인확인 재통과를 확인하지 못했다(뒤의 것은 추천 적용 2026-10-30). 통과로 보지 않으며 화면은 '확인하지 못했습니다. 다시 시도해 주세요'(docs/design/d5 §5.9 '챌린지 실패')를 보인다. 화면은 받았던 challengeToken을 버리고 위젯을 다시 돌린 새 토큰으로만 다시 보낸다(쓴 토큰을 다시 보내면 Turnstile이 중복으로 거절해 실패가 기록된다). 자동 다시 보내기는 Retry-After 하한 위로 3번 [가정]까지이고 그 뒤에는 '다시 시도' 버튼을 보인다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 이의 제기: 건 요청 발행에 실패했거나 발행 확인이 2초 [가정] 안에 오지 않았다(뒤의 것은 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 화면이 Retry-After를 지켜 다시 보낸다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12)" }
   /v1/events/{eventId}/seatmap-snapshot:
     get:
       operationId: getEventSeatmapSnapshot

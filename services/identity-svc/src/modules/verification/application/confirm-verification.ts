@@ -5,6 +5,8 @@
 // - pid는 계정의 첫 본인확인 때 한 번 계산하고 다시 본인확인해도 바꾸지 않는다. 기록이 쓰기 판보다 옛 판이면 그 자리에서 쓰기 판 값으로 바꾼다(ADR-0050 결정 5)
 // - 만 14세 미만이면 연계정보를 계산·저장하지 않고 UNDER_14(403)이며 계정 정리를 시작한다(ADR-0062). 생년월일은 계산에만 쓴다
 // - 기관이나 연계정보 키(KMS)를 쓸 수 없으면 그 건을 PROVIDER_DOWN으로 마친다(503)
+// - 본인확인한 계정의 다시 본인확인이 다른 사람이면(기록과 다른 연계정보, 다른 계정의 연계정보, 만 14세 미만) 그 건에 '다른 사람' 표시를 남긴다.
+//   본인확인 재통과 확인(CheckReverification)의 PERSON_MISMATCH가 읽는다(I-T56 ③). 연계정보·HMAC은 건에 남기지 않는다
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ACCOUNT_CLOSURE, type AccountClosure } from '../../session/index.js';
@@ -48,7 +50,7 @@ export async function restrictedUntilFor(store: Pick<VerificationStore, 'restric
 
 /** 기관 확인과 키 계산을 마친 값(트랜잭션 안에서 쓴다). pid는 새로 저장할 때만 계산해 채운다 */
 type Checked =
-  | { outcome: 'CANCELLED' | 'FAILED' }
+  | { outcome: 'CANCELLED' | 'FAILED'; personMismatch?: true }
   | { outcome: 'UNDER_14' }
   | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string; phoneRefPrev?: string };
 
@@ -82,7 +84,10 @@ export class ConfirmVerification {
     let done: Attempt;
     try {
       const checked = await this.#check(seen, i.providerResult, now);
-      done = checked.outcome === 'VERIFIED' ? await this.#confirm(i.verificationId, checked, now) : await this.#settle(i.verificationId, checked.outcome, now);
+      done =
+        checked.outcome === 'VERIFIED'
+          ? await this.#confirm(i.verificationId, checked, now)
+          : await this.#settle(i.verificationId, checked.outcome, now, 'personMismatch' in checked && checked.personMismatch === true);
     } catch (e) {
       if (!(e instanceof ProviderUnavailable || e instanceof KeyServiceUnavailable)) throw e;
       // 기관·연계정보·pid 키 장애(첫 저장의 pid 계산 포함): 그 건을 PROVIDER_DOWN으로 마친다(결과 조회가 같은 값을 주고, 다시 보내도 503이다)
@@ -106,7 +111,8 @@ export class ConfirmVerification {
     const age = ageOnKst(outcome.birthDate, now);
     if (age === null) return { outcome: 'FAILED' };
     // 이미 본인확인한 계정의 기록은 그때 만 14세 이상이었던 사람이다. 지금 미만이면 다른 사람이므로 정리하지 않고 FAILED다(새 맥락 리뷰 높음 1)
-    if (age < MIN_AGE) return verified ? { outcome: 'FAILED' } : { outcome: 'UNDER_14' };
+    // 그래서 다시 본인확인의 다른 사람 결과로도 남긴다(I-T56 ③)
+    if (age < MIN_AGE) return verified ? { outcome: 'FAILED', personMismatch: true } : { outcome: 'UNDER_14' };
     const hmacs = await this.hashers.ciAll(outcome.ci);
     if (hmacs.length === 0) throw new Error('연계정보 HMAC 판이 없다');
     // pid는 트랜잭션이 새로 저장할 때만 계산한다(NeedPid로 한 번 더 돈다). 중복·다시 본인확인에는 pid 키를 부르지 않는다
@@ -165,11 +171,15 @@ export class ConfirmVerification {
       const owner = await tx.accountByCiHmac(checked.hmacs.map((h) => h.hmac), a.accountId);
       const mine = await tx.verificationOf(a.accountId);
       let status: Exclude<AttemptStatus, 'PENDING'>;
+      /** 결과가 이 계정의 본인과 다른 사람이었다(본인확인한 계정만, I-T56 ③) */
+      let personMismatch = false;
       // 주인이 탈퇴한 계정이면 남은 기록이다(파기가 실패해 정비를 기다린다). DELETED는 되돌아가지 않아 잠그지 않고 읽는다
       // (공유 잠금이면 두 계정을 ID 순으로 쓰기 잠금하는 병합 확정과 교착할 수 있다, 재검토 2026-11-05)
       if (owner && owner !== a.accountId && (await tx.accountStatusOf(owner)) === 'DELETED') throw new OwnerWithdrawn(owner);
       if (owner && owner !== a.accountId) {
         status = 'DUPLICATE_ACCOUNT';
+        // 이미 본인확인한 계정이면 다른 계정의 사람으로 다시 본인확인한 것이다
+        personMismatch = mine !== null;
         // 부정 예매 후보 묶음의 연결 신호(identity §9.1). 연계정보와 HMAC은 싣지 않는다
         await tx.insertConflictAttempt({ id: uuidv7(this.clock), attemptedAccountId: a.accountId, existingAccountId: owner, attemptedAt: now });
       } else if (mine) {
@@ -178,6 +188,7 @@ export class ConfirmVerification {
         // 이미 본인확인한 계정의 다시 본인확인(REVERIFY 등)은 같은 사람이어야 하고, pid는 그대로 둔다. 옛 판 기록은 쓰기 판 값으로 바꾼다
         const same = checked.hmacs.some((h) => h.version === mine.ciHmacKeyVersion && h.hmac.equals(mine.ciHmac));
         status = same ? 'VERIFIED' : 'FAILED';
+        personMismatch = !same;
         // 다시 본인확인한 같은 사람이 이용 제한을 받은 연계정보면 이 계정에 잇는다(identity §8 '대조값 보관의 첫 구현')
         if (same) await tx.carryHolds(checked.hmacs.map((h) => h.hmac), a.accountId, now);
         if (same && mine.ciHmacKeyVersion < write.version) await tx.updateCiHmac(a.accountId, write.hmac, write.version);
@@ -201,18 +212,18 @@ export class ConfirmVerification {
       }
       // 본인확인이 이 계정의 것으로 끝났을 때만 번호의 연락처 가명을 쓴다(다른 사람·중복은 쓰지 않는다)
       if (status === 'VERIFIED' && checked.phoneRef) await tx.setPhoneRef({ accountId: a.accountId, ref: checked.phoneRef, refPrev: checked.phoneRefPrev ?? null, now });
-      await tx.completeAttempt(a.id, status, now);
+      await tx.completeAttempt(a.id, status, now, personMismatch);
       return { ...a, status, completedAt: now };
     });
   }
 
-  /** 처리 중인 건만 그 상태로 마친다(이미 마쳤으면 그 결과) */
-  #settle(verificationId: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number): Promise<Attempt> {
+  /** 처리 중인 건만 그 상태로 마친다(이미 마쳤으면 그 결과). personMismatch: 결과가 이 계정의 본인과 다른 사람이었다 */
+  #settle(verificationId: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number, personMismatch = false): Promise<Attempt> {
     return this.store.transaction(async (tx) => {
       const a = await tx.attemptForUpdate(verificationId);
       if (!a) throw new VerificationError('NOT_FOUND', '없는 건이다');
       if (a.status !== 'PENDING') return a;
-      await tx.completeAttempt(a.id, status, now);
+      await tx.completeAttempt(a.id, status, now, personMismatch);
       return { ...a, status, completedAt: now };
     });
   }

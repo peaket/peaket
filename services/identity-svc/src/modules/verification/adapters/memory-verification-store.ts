@@ -1,6 +1,7 @@
 // 메모리 저장소(시험·로컬 시제품용). 트랜잭션은 한 번에 하나씩 돌고 실패하면 되돌린다(PostgreSQL 저장소와 같은 규칙).
 // pid 키 전환 저장소(PidRotationStore)도 함께 구현한다(identity §5 'pid 키 전환의 첫 구현').
 import type { ConflictAttempt, HoldRow, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
+import type { ReverificationSummary } from '../domain/reverification.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear } from '../domain/verification.js';
 
 /** 저장한 본인확인 기록(pid 판과 전환 기간의 옛 pid까지) */
@@ -26,6 +27,8 @@ interface State {
   holds: Map<string, HoldRow>;
   /** 본인확인 번호의 연락처 가명(account_contact_ref의 PHONE 행, BOT-045). 시험이 읽는다 */
   phones: Map<string, { ref: string; refPrev: string | null; updatedAt: number }>;
+  /** 결과가 그 계정의 본인과 다른 사람이었던 건 ID(verification_attempt.person_mismatch) */
+  mismatches: Set<string>;
 }
 
 const clone = (s: State): State => ({
@@ -34,11 +37,12 @@ const clone = (s: State): State => ({
   conflicts: s.conflicts.map((c) => ({ ...c })),
   holds: new Map([...s.holds].map(([k, v]) => [k, { ...v }])),
   phones: new Map([...s.phones].map(([k, v]) => [k, { ...v }])),
+  mismatches: new Set(s.mismatches),
 });
 const holdKey = (sourceAccountId: string, caseId: string) => `${sourceAccountId}|${caseId}`;
 
 export class MemoryVerificationStore implements VerificationStore, PidRotationStore {
-  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map(), phones: new Map() };
+  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map(), phones: new Map(), mismatches: new Set() };
   #queue: Promise<unknown> = Promise.resolve();
   readonly #rotations: PidRotationRecord[] = [];
   readonly #retention = new Map<string, RetainedRecord>();
@@ -72,9 +76,11 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
           const a = s.attempts.get(id);
           return a ? { ...a } : null;
         },
-        completeAttempt: async (id, status, now) => {
+        completeAttempt: async (id, status, now, personMismatch) => {
           const a = s.attempts.get(id);
-          if (a) Object.assign(a, { status, completedAt: now });
+          if (!a) return;
+          Object.assign(a, { status, completedAt: now });
+          if (personMismatch) s.mismatches.add(id);
         },
         verificationOf: async (accountId) => {
           const v = s.verifications.get(accountId);
@@ -140,6 +146,12 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
     return [...this.#state.attempts.values()].some(
       (a) => a.accountId === accountId && a.sessionId === sessionId && a.purpose === 'REVERIFY' && a.status === 'VERIFIED' && a.completedAt !== null && a.completedAt >= since,
     );
+  }
+
+  async reverificationSince(accountId: string, notBefore: number): Promise<ReverificationSummary> {
+    const done = [...this.#state.attempts.values()].filter((a) => a.accountId === accountId && a.purpose === 'REVERIFY' && a.completedAt !== null && a.completedAt >= notBefore);
+    const verified = done.filter((a) => a.status === 'VERIFIED').map((a) => a.completedAt as number);
+    return { lastVerifiedAt: verified.length ? Math.max(...verified) : null, personMismatch: done.some((a) => this.#state.mismatches.has(a.id)) };
   }
 
   async purgeConflictAttempts(before: number): Promise<number> {
@@ -258,6 +270,7 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
       for (const [id, a] of s.attempts) {
         if (a.accountId === accountId && a.status !== 'UNDER_14') {
           s.attempts.delete(id);
+          s.mismatches.delete(id);
           erased = true;
         }
       }

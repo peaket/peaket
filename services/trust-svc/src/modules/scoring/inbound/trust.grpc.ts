@@ -19,6 +19,8 @@ const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number,
 export interface TrustPackage {
   TrustService: grpc.ServiceClientConstructor;
   TrustLabelService: grpc.ServiceClientConstructor;
+  /** 판정 근거 조회(evidence.grpc.ts) */
+  TrustEvidenceService: grpc.ServiceClientConstructor;
 }
 
 let pkg: TrustPackage | undefined;

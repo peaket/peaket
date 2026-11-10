@@ -1,7 +1,9 @@
 // 입장 확정 컨텍스트의 규칙 값(docs/features/queue-admission.md §6 '입장 확정의 첫 구현', docs/data.md §3, ADR-0005·0104·0183).
 
-/** 차례가 온 뒤 입장 확정을 받는 시간 15분(POL-008) */
+/** 차례가 온 뒤 입장 확정을 받는 시간 15분(POL-008). 추가 검증을 통과해 돌아온 대기표는 차례와 통과 가운데 늦은 때부터 센다(queue-admission §7, ADR-0259) */
 export const TURN_GRACE_MS = 15 * 60_000;
+/** 이의 기각으로 끝난 대기 참여의 410 확장 칸 removeReason 값(openapi Problem.removeReason, ADR-0259 결정 4) */
+export type RemoveReason = 'BLOCKED';
 /** 입장 자리의 첫 사용 기한 5분(ADR-0005). 구매 세션 시작 사건이 오면 최대 체류 시각으로 올린다 */
 export const FIRST_USE_MS = 5 * 60_000;
 /** 최대 체류 시각 = 입장 + 45분(처음 값, POL-009). 입장 토큰 exp */
@@ -25,11 +27,14 @@ export type Precheck =
   | { kind: 'SOLD_OUT' }
   | { kind: 'ENDED' }
   | { kind: 'VERIFYING'; reason?: string }
-  | { kind: 'REMOVED' }
+  /** removeReason BLOCKED: verify가 BLOCKED(이의 기각). 그 밖의 빠진 번호는 칸이 없다 */
+  | { kind: 'REMOVED'; removeReason?: RemoveReason }
   | { kind: 'NOT_YET'; serving: number; retryAfterMs: number }
-  | { kind: 'EXPIRED'; turnAtMs: number }
-  /** 차례가 왔고 15분 안(또는 곧 입장 대기열에 있음). turnAtMs는 serving_log 칸(없으면 undefined), skipped는 건너뛴 구간 안의 옛 세대 번호 */
-  | { kind: 'OK'; serving: number; turnAtMs?: number; inSoon: boolean; skipped: boolean };
+  /** passedAtMs: 추가 검증을 통과한 대기표의 통과 시각(유예는 차례와 통과 가운데 늦은 때부터) */
+  | { kind: 'EXPIRED'; turnAtMs: number; passedAtMs?: number }
+  /** 차례가 왔고 유예 안(또는 곧 입장 대기열에 있음). turnAtMs는 serving_log 칸(없으면 undefined), skipped는 건너뛴 구간 안의 옛 세대 번호.
+   * passedAtMs는 빠진 번호지만 verify가 PASSED라 받은 대기표의 통과 시각(ADR-0259) */
+  | { kind: 'OK'; serving: number; turnAtMs?: number; inSoon: boolean; skipped: boolean; passedAtMs?: number };
 
 /** 로비 셔플 결과 읽기(HOT-040, ADR-0231 결정 10) */
 export type LobbySeat = { kind: 'SEAT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'GONE' };
@@ -47,7 +52,7 @@ export type AdmitResult =
   | { kind: 'ADMITTED'; jti: string; again: boolean; firstSlot: boolean; serving: number; arrivalDelayMs?: number; soonWaitMs?: number; issuedAtMs?: number }
   | { kind: 'SOON'; retryAfterSeconds: number; arrivalDelayMs?: number }
   /** 확인 뒤 빠진 번호가 됐거나(REMOVED) serving이 모자라다(NOT_YET, 장애 전환으로 serving이 되돌아감). 확인과 입장 사이의 경합 */
-  | { kind: 'REMOVED' }
+  | { kind: 'REMOVED'; removeReason?: RemoveReason }
   | { kind: 'NOT_YET' }
   /** 같은 jti를 다시 줄 자리지만 첫 발급 + 최대 체류가 지났다(다시 주지 않고 만료로 본다, HOT-010 리뷰) */
   | { kind: 'EXPIRED' };

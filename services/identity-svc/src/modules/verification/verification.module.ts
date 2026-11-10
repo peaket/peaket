@@ -8,6 +8,7 @@ import { VerificationClaims } from './adapters/verification-claims.js';
 import { VerificationEraser } from './adapters/verification-eraser.js';
 import { VerificationHolds } from './adapters/verification-holds.js';
 import { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
+import { CheckReverification } from './application/check-reverification.js';
 import { ConfirmVerification } from './application/confirm-verification.js';
 import { GetVerificationResult } from './application/get-verification-result.js';
 import { StartVerification } from './application/start-verification.js';
@@ -38,12 +39,14 @@ export class VerificationModule {
         { provide: IDENTITY_HASHERS, useValue: o.hashers },
         ...(o.phoneRefs ? [{ provide: PHONE_REFS, useValue: o.phoneRefs }] : []),
         SetRestrictedCiHold,
+        // 추가 검증 제출의 본인확인 재통과 확인(gRPC, queue-svc만, BOT-090)
+        CheckReverification,
         { provide: ACCOUNT_CLAIMS, useFactory: (store: VerificationStore, closure: AccountClosure, clock: Clock) => new VerificationClaims(store, closure, clock), inject: [VERIFICATION_STORE, ACCOUNT_CLOSURE, CLOCK] },
         { provide: FRAUD_HOLDS, useFactory: (store: VerificationStore) => new VerificationHolds(store), inject: [VERIFICATION_STORE] },
         { provide: ACCOUNT_ERASER, useFactory: (store: VerificationStore) => new VerificationEraser(store), inject: [VERIFICATION_STORE] },
         { provide: REVERIFICATIONS, useExisting: ACCOUNT_CLAIMS },
       ],
-      exports: [ACCOUNT_CLAIMS, REVERIFICATIONS, ACCOUNT_ERASER, FRAUD_HOLDS, SetRestrictedCiHold],
+      exports: [ACCOUNT_CLAIMS, REVERIFICATIONS, ACCOUNT_ERASER, FRAUD_HOLDS, SetRestrictedCiHold, CheckReverification],
     };
   }
 }

@@ -20,6 +20,8 @@ export const APPS = [
       { path: '/my/tickets', row: '월렛' },
       { path: '/search', row: '그 밖 소비자 화면' },
       { path: '/login', row: '그 밖 소비자 화면' },
+      // 추가 검증(SCR-009, 요청마다 셸·nonce 화면). 서버는 값을 읽지 않고 실제 화면을 내며, 위젯·본인확인 흐름은 늦게 싣는다(BUILD_ORDER BOT-090, ADR-0259)
+      { path: '/queue/evt-lumen-1025/verify', row: '그 밖 소비자 화면' },
     ],
   },
   {

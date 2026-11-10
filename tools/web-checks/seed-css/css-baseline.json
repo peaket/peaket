@@ -11,6 +11,7 @@
     "web /events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01": 49.1,
     "web /login": 49.1,
     "web /my/tickets": 49.1,
+    "web /queue/evt-lumen-1025/verify": 49.1,
     "web /search": 49.1
   }
 }

@@ -6,7 +6,8 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- **2026-11-10 기능 묶음으로 재개(ADR-0256)**: BAT-195(BOT-065)는 끝났다. BOT-080은 표본 검토 REST가 ops-svc 몫이라 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. 다음 묶음은 BAT-200(BOT-090·BAS-010). BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다. 아래 줄의 단계 메모는 묶음을 시작할 때 범위에 넣는다.
+- **갈래 2가 넘긴 것(2026-11-10, BAT-157 계획 §8.2 ①, 갈래 2 커밋으로 `docs/review/plans/`에 들어온다)**: BAT-157이 develop에 들어오면 queue-svc 로비·진입의 판매 자격 대조와 입장 토큰 명단 키 `lst`(Q-T36 ①②, queue-admission ASVS 2.3.2, 0.75일 [어림], 선행 BOT-090·BAT-157) 단계 줄과 묶음 행을 BUILD_ORDER에 빈 번호로 더하고, `docs/review/ledger-notes.md`의 Q-T36 ①② '정할 곳'을 새 ID로 바꾼다. 대기열 명단 사본을 누가 쓸지는 OPEN[33] 답에 따라 몫이 더 생길 수 있다.
+- **2026-11-10 기능 묶음으로 재개(ADR-0256)**: BAT-195(BOT-065)와 BAT-200(BOT-090·BAS-010 ①)은 끝났다. BAS-010을 나눠 외부 도구 게이트는 BAS-011(BAT-202)이고, OPEN[31] 결정(2026-11-10 "모두 추천대로")으로 막힘이 풀려 다음 묶음은 BAT-202다. BOT-080은 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다.
 - 구간 2: 소유자 결정(2026-11-09)으로 BOT-060에서 멈췄다. 재개는 소유자 지시 뒤 BOT-065부터 BUILD_ORDER 차례이고, 구간 끝에 정리 목록. HOT-012 엣지 KeyValueStore·S3 실제 어댑터와 권한은 AWS 계정이 생겨 배포하는 단계까지 건너뛴다(ADR-0234) → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 미룸이라 건너뛴다). 구간 1의 정리 목록과 BOT-122(패스키), 구간 2의 BOT-044(2026-11-05)·HOT-010·HOT-011(2026-11-06)·HOT-020·HOT-030·HOT-040 ①·HOT-050·HOT-060·BOT-047·HOT-041·HOT-061·HOT-042·BAS-260·BOT-050·BOT-055·BOT-060(2026-11-09)은 끝냈다. 건너뛴 구간 1 단계: BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 미룬다(OPEN[23] (다), 소유자 결정 2026-11-05). 이 세션은 만들지 않는다(2026-11-03 안전 분류기에 막힘). K6 측정(BOT-170) 전에 소유자가 만들 길을 정한다.
 
@@ -14,6 +15,15 @@
 - BOT-055 브라우저 확인: 좌석 화면을 열 때마다 CSP 위반 `script-src eval`이 1건 생긴다. 화면 묶음의 zod 4가 `Function("")`로 평가 가능 여부를 시험하기 때문이다. 콘솔에 찍히지 않고 동작도 막히지 않는다(zod의 `jitless` 설정을 볼 것, apps/web 좌석 화면).
 - HOT-042 브라우저 확인: 검증 화면의 토큰 해시 칸에서 Enter를 눌러도 실행되지 않는다(`ShuffleVerifier.tsx`의 `onSubmit`이 기본 동작만 막는다, HOT-050부터). 입력 칸의 Enter로 다시 계산이 돌게 한다.
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
+- BAT-200(BOT-090): 같은 회차를 취소하고 다시 줄 선 뒤 또 격리되어 이의를 보내면 앞 대기 참여의 이의를 지우고 새로 쓴다(정본 `q:appeal`은 처음 것만). ops-svc가 글을 옮기기 전이면 첫 건의 내용 읽기·결과 반영이 NOT_FOUND가 된다(services/queue-svc `verification-lua.ts`)
+- BAT-200(BOT-090): 이의 결과 반영의 진행 표지가 건·판 하나만 담아, 끊긴 결과 반영과 본인 제출 통과가 겹치면 APPLIED로 잘못 답하고, 한 이의에 다른 건 둘이 겹치면 기록이 섞인다(`appeals.ts`·`verification-lua.ts` BEGIN/COMMIT_RESOLVE)
+- BAT-200(BAS-010): 창 메시지 규칙이 `const w = window; w.addEventListener(…)`·`document.defaultView.addEventListener(…)` 같은 별칭을 잡지 못한다(`packages/config/eslint/web-security.mjs`)
+- BAT-200(BOT-090): 로컬 게이트웨이 대역이 `x-forwarded-for`를 다시 채우지 않아 queue-svc가 빈 IP를 받는다(local 전용, `apps/web/scripts/local-fan-gateway.mjs`). queue-svc `q:dup` 해석이 verification 모듈에 복제됐다(`entry/index.ts`가 `parseHeld`를 내보내게)
+- BAT-200: 화면에서 queue-svc·trust-svc·identity-svc까지 띄우는 로컬 실제 스택 스크립트(세션 scratchpad `realstack/`)를 `tools/local/`에 둘지 감독과 정한다
+- BAT-200(BOT-090): 소셜 로그인 제공자 주소(`PEAKET_OIDC_*_ISSUER`)가 운영에서 틀린 꼴이면 CSP 헤더 만들기가 던져 그 화면이 500이 된다. 본인확인기관 출처처럼 틀린 꼴만 빼고 경고하게 감쌀지 본다(`apps/web/src/_app/security/page-headers.ts`·`proxy.ts`)
+- BAT-200(BAS-010): 응답 스키마 표시가 `z.array(z.any())`·`z.object().passthrough()`처럼 안쪽에서 칸을 거르지 않는 꼴은 아직 막지 않는다. 화면·외부 호출 규칙의 이름 단 예외 목록은 부분집합 고정 시험이 없다(`packages/config/eslint`)
+- BAT-200: queue-svc `entry-store.int`의 `Q-T45④`가 PC 부하로 한 번 대기열 Redis 마감 초과로 흔들렸다(다시 돌려 통과, 이번 변경과 닿지 않는 길)
+- BAT-200 브라우저 확인: 기각 뒤에도 셸의 닫기 링크 이름이 '…(대기는 유지됩니다)'로 남아 대기 참여가 끝난 상황과 맞지 않는다(apps/web SCR-009 셸)
 - BAT-195(BOT-065): 키 회전 이음 기간의 옮기기 왕복(옮길 키 보기·되살리기·마무리)이 요청 데드라인(`deadlineAtMs`)과 묶이지 않아, 이음 기간 판정이 최악 약 400ms 늘 수 있다(services/trust-svc `score-risk.ts`·`redis-feature-store.ts` migrate)
 - BAT-195(BOT-065): 판정 근거 키 `tr:vb`가 회차의 첫 `CHALLENGE`만 담아(`SET NX`), 뒤에 차단 목록으로 다시 걸린 사람의 이의 인정(`APPEAL_ACCEPTED`)은 차단 키를 지우지 않는다(BOT-050부터의 설계, bot-defense §9·§12. 근거 키에 확정 신호를 더해 적을지 볼 것)
 - BAT-195(BOT-065): 회전 이음에서 새 판 판 가드 `tr:blkv`가 먼저 생긴 기기는 옛 판 판 가드를 합치지 않아, 늦게 온 옛 판 라벨이 새 판에서 다시 반영될 수 있다(`redis-feature-store.ts`)
@@ -80,3 +90,4 @@
 - 2026-11-09 공연 상세 ISR 저장 실패 고침(R-431): `Booking.tsx`가 서버 그리기 중 `Date.now()`를 읽어 미리 그리기가 멈췄다(255cc2fa부터). `budgets/isr.spec.mjs`·`no-render-clock.test.mjs`를 더했다. CI의 공연 상세 LCP 실패(edd7778d)와의 관계는 다음 CI로 본다.
 - 2026-11-09 BOT-060 즉시 피처와 기기 라벨 키 통일(R-433, B-T16·B-T22~25, ADR-0251): `tr:devshare`(사람 확인 결과와 상관없이 넣음, 상한 20·10분)와 `tr:asnhost`(10초 칸), 키 고리 `packages/platform/src/inv-ref.ts`를 identity와 trust-svc가 함께 쓰고, 지문을 시작 로그와 `inv_ref_key_info`에 낸다. 로그인 근거는 기기 이력 하나다. 새 맥락 리뷰 높음 2·중간 3·낮음 7을 고치거나 한계로 적었다. 소유자 결정으로 이 단계에서 갈래 3을 멈춘다.
 - 2026-11-10 BAT-195 BOT-065 차단 기기 목록·라벨 반영·그림자 판·기기 키 회전 이음(R-441, B-T4·B-T9·B-T20·B-T21·B-T26·B-T27·Q-T48, ADR-0258): trust-svc `TrustLabelService.ApplyLabel`(멱등 기록과 판 가드), 규칙 파일 `shadow`·`stage: "LAUNCH"`, 이음 기간 옮기기와 이어 달기. 장부 범위 빈칸 33 → 0, 독립 틀린 구현 70개 중 12개 놓침 → 시험 더함. BOT-080은 BAT-197로 옮김
+- 2026-11-10 BAT-200 BOT-090 추가 검증 제출·이의 접수·SCR-009와 BAS-010 ① 보안 린트(R-454, Q-T34·B-T10·B-T11·B-T15·I-T56·V-T31, ADR-0259): queue-svc 제출·이의·상태 읽기와 첫 gRPC 서버, identity `CheckReverification`, trust `GetVerdictEvidence`, 입장 확정 통과자 예외, ESLint 보안 규칙·끄기 거절·응답 스키마 기준선, 조치 기한 판정. 리뷰 높음 1·보안 5 고침, 틀린 구현 40개 중 4개 놓침 → 시험 더함, 브라우저 확인 통과

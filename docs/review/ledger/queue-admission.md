@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 82 | 55 | 0 | 0 | 0 | 1 | 0 | 0 | 49 | 187 |
+| A | 89 | 49 | 0 | 0 | 0 | 1 | 0 | 0 | 49 | 188 |
 | B | 33 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 9 | 59 |
-| 합계 | 115 | 67 | 0 | 0 | 0 | 4 | 0 | 2 | 58 | 246 |
+| 합계 | 122 | 61 | 0 | 0 | 0 | 4 | 0 | 2 | 58 | 247 |
 
 ## docs/features/queue-admission.md
 
@@ -46,13 +46,14 @@
 | Q-T31 | — | 장애 전환으로 생긴 대기표 두 장 | 먼저 입장 확정한 대기표만 입장하고, 다른 대기표는 409 `DUPLICATE_ADMISSION`을 받으며 그 번호가 빠진 번호로 기록된다. 같은 대기표로 다시… | 자동 시험 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T32 | — | 셔플 결과 분산 조회 | 게시 전 조회가 0건이고, 조회가 분산 창 8초에 고르게 퍼진다(1초 단위 최대가 평균의 1.3배 [가정] 이하). 게시가 늦으면 404 재시도 간격이… | 자동 시험 | A | 시험: services/queue-svc/test/shuffle-proof.test.ts |
 | Q-T33 | — | 첫 전진 시각 | 분산 창이 지나기 전에는 serving이 각 구간의 첫 번호를 넘지 않고, 지난 뒤 정상 전진한다. 게시를 공개 예정 시각보다 5초 늦춘 실행에서는 게시 뒤… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/leader-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts |
-| Q-T34 | ① | 추가 검증 통과자의 입장 | ① 빠진 번호가 되지 않는다 | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ② | 추가 검증 통과자의 입장 | ② 원래 번호의 차례에 ADMITTED | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ③ | 추가 검증 통과자의 입장 | ③ 통과 즉시 ADMITTED(15분은 통과 시각부터) | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ④ | 추가 검증 통과자의 입장 | ④ 원래 번호의 차례에 ADMITTED | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ⑤ | 추가 검증 통과자의 입장 | ⑤ VERIFYING | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ⑥ | 추가 검증 통과자의 입장 | ⑥ 거절. 모든 경우에 다른 대기자의 앞 인원이 바뀌지 않고, 차례 전 입장은 0건이다 | ID만 | A | 시험: services/admission-ctrl/test/publish.test.ts, services/queue-svc/test-int/admission-store.int.test.ts 외 2곳 |
-| Q-T34 | ⑦ | 추가 검증 통과자의 입장 | ⑦ 거절. 모든 경우에 다른 대기자의 앞 인원이 바뀌지 않고, 차례 전 입장은 0건이다 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts |
+| Q-T34 | ① | 추가 검증 통과자의 입장 | ① 빠진 번호가 되지 않는다 | 자동 시험 | A | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/publish.test.ts 외 1곳 |
+| Q-T34 | ② | 추가 검증 통과자의 입장 | ② 원래 번호의 차례에 ADMITTED | 자동 시험 | A | 시험: services/queue-svc/test-int/verification-admission.int.test.ts, services/queue-svc/test/admission-cases.ts |
+| Q-T34 | ③ | 추가 검증 통과자의 입장 | ③ 통과 즉시 ADMITTED(15분은 통과 시각부터) | 자동 시험 | A | 시험: services/queue-svc/test-int/verification-admission.int.test.ts, services/queue-svc/test/admission-cases.ts |
+| Q-T34 | ④ | 추가 검증 통과자의 입장 | ④ 원래 번호의 차례에 ADMITTED | 자동 시험 | A | 시험: services/queue-svc/test-int/verification-admission.int.test.ts, services/queue-svc/test/admission-cases.ts |
+| Q-T34 | ⑤ | 추가 검증 통과자의 입장 | ⑤ VERIFYING | 자동 시험 | A | 시험: services/queue-svc/test/admission-cases.ts, services/queue-svc/test/admission.test.ts |
+| Q-T34 | ⑥ | 추가 검증 통과자의 입장 | ⑥ 거절 | 자동 시험 | A | 시험: services/queue-svc/test-int/verification-admission.int.test.ts, services/queue-svc/test/admission-cases.ts 외 1곳 |
+| Q-T34 | ⑦ | 추가 검증 통과자의 입장 | ⑦ 거절 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts |
+| Q-T34 | ⑧ | 추가 검증 통과자의 입장 | ⑧ `verify` 칸이 지워지고 다음 입장 확정은 410이다. 모든 경우에 다른 대기자의 앞 인원이 바뀌지 않고, 차례 전 입장은 0건이다 | 자동 시험 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T35 | ① | 만료 뒤 다시 줄 서기 | ① 410(rejoinAllowed=true) 뒤 맨 뒤 새 번호 | ID만 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T35 | ② | 만료 뒤 다시 줄 서기 | ② 409(이미 대기 중), 대기 취소 뒤 맨 뒤 새 번호 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T35 | ③ | 만료 뒤 다시 줄 서기 | ③ 409 ALREADY_ADMITTED, 번호 발급 없음 | 자동 시험 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts |
@@ -99,7 +100,7 @@
 | Q-T46 | — | 도착 지연을 넣은 입장 제어 루프(추천 적용 2026-10-28… | 곧 입장 응답이 입장 확정 요청의 1% [가정] 이하, 곧 입장으로 기다린 시간 p99 5초 [가정] 이하, 바꾸기 전 식보다 입장 수 감소 2% [가정]… | 자동 시험 | A | 시험: services/admission-ctrl/test-sim/admission-loop.sim.test.ts |
 | Q-T47 | — | 입장 임박 구간 반영 지연(추천 적용 2026-10-28… | 차례 반영 지연(serving이 내 번호를 넘은 전진 시각 → 화면에 그린 시각) p99 2.8초 [가정] 이하다(3초에서 CDN 계층 몫 0.2초를 남긴다… | 자동 시험 | A | 시험: services/queue-svc/test-sim/nginx-expiry.sim.test.ts, services/queue-svc/test-sim/reflect.sim.test.ts |
 | Q-T48 | ① | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ① 세 기기 모두 '차단 목록에 있음' 신호가 붙는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
-| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록(기기 가명·이의 건 ID·처리자·시각)이 CS 처리함 건과 판정 기록에 남는다. | 다른 단계 | A | BOT-090 · 지운 기록이 CS 처리함 건에 남는 것은 ops-svc 처리함 몫이다. trust-svc 쪽(차단 키 지우기, 보안 로그 줄, 라벨 판정 기록)은 B-T9 ③·B-T27 ④⑤가 본다 |
+| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록(기기 가명·이의 건 ID·처리자·시각)이 CS 처리함 건과 판정 기록에 남는다. | 다른 단계 | A | GAT-280 · 지운 기록이 CS 처리함 건에 남는 것은 CS 처리함(SCR-045) 몫이고 ops-svc가 아직 없다. trust-svc 쪽(차단 키 지우기, 보안 로그 줄, 라벨 판정 기록)은 B-T9… |
 | Q-T48 | ③ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ③ 차단 목록 신호가 붙지 않는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ④ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ④ 남은 두 키가 TTL로 사라진다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ⑤ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ⑤ 차단 목록 신호가 붙은 기기가 0개다(틀린 '있다'가 없다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
@@ -204,8 +205,8 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/admission-ctrl/test/result-files.test.ts, services/queue-svc/test/sale-state.test.ts 외 1곳 |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/admission-ctrl/test/result-files.test.ts, services/queue-svc/test/sale-state.test.ts 외 2곳 |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-entry-function.test.ts, services/queue-svc/test/edge-first-visit-function.test.ts |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
@@ -217,12 +218,12 @@
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 1곳 |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 2곳 |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 1곳 |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs 외 1곳 |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 4곳 |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외… |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/tokens.test.ts |
@@ -256,7 +257,7 @@
 | v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | B | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
 | v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | B | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 1곳 |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 5곳 |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |

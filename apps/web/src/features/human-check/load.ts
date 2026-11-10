@@ -2,13 +2,16 @@
 // 스크립트는 버전 없는 주소라 SRI를 걸 수 없다(§5.14.2 외부 스크립트 결정). 사이트 키는 공개 값 NEXT_PUBLIC_PEAKET_TURNSTILE_SITEKEY다.
 // 개발 서버(`next dev`)는 같은 함수 모양의 시뮬레이터를 쓴다(대기실 src/dev/human-check-sim.ts와 같다). 운영 빌드에서는 그 분기가 지워진다.
 // 개발에서도 실제 위젯을 보려면 NEXT_PUBLIC_PEAKET_HUMAN_CHECK=turnstile로 띄운다.
+// action은 서버가 토큰을 검증할 때 맞춰 보는 이름이다: 공연 상세 사전 검증 preverify, 추가 검증(SCR-009) 심층 챌린지 verify(bot-defense §5.2, ADR-0259).
+// nonce 화면('strict-dynamic', 추가 검증 SCR-009)에서는 위젯 스크립트에 그 페이지의 nonce를 붙인다(Turnstile이 그 nonce를 동적으로 싣는 자원에 이어 붙인다,
+// asvs/bot-defense 3.4.3). 해시·'self' 화면(공연 상세)은 nonce가 없어 붙이지 않고 호스트 허용으로 싣는다.
 
 export interface WidgetApi {
   render(el: HTMLElement, o: Record<string, unknown>): string | undefined;
   remove(id: string): void;
 }
 
-export type HumanCheckAction = 'preverify';
+export type HumanCheckAction = 'preverify' | 'verify';
 
 const SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 const SITE_KEY = process.env.NEXT_PUBLIC_PEAKET_TURNSTILE_SITEKEY ?? '';
@@ -25,6 +28,9 @@ function loadTurnstile(): Promise<WidgetApi | null> {
     const s = document.createElement('script');
     s.src = SCRIPT;
     s.async = true;
+    // 프레임워크 스크립트에 붙은 이 응답의 nonce(브라우저는 속성 값을 숨기고 nonce 속성으로만 준다)
+    const nonce = document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce;
+    if (nonce) s.nonce = nonce;
     s.onload = () => {
       const api = w.turnstile ?? null;
       if (!api) loading = null;

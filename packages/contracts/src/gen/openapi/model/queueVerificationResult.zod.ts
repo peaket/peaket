@@ -9,12 +9,13 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import * as zod from 'zod';
 
-export type CreateQueueVerificationBody = {
-  challengeToken?: string;
-  /**
-     * 설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)
-     * @maxLength 4000
-     */
-  appeal?: string;
-};
+export const QueueVerificationResult = zod.object({
+  "result": zod.enum(['PASSED', 'CHALLENGE_FAILED', 'REVERIFY_REQUIRED', 'PERSON_MISMATCH']).describe('PASSED 통과. CHALLENGE_FAILED 사람 확인 실패(다시 할 수 있다). REVERIFY_REQUIRED 추가 검증을 시작한 뒤의 본인확인 재통과가 없음(trust-svc를 부르지 않았다). PERSON_MISMATCH 재확인한 사람이 이 계정의 사람과 다름'),
+  "queueNumber": zod.int().optional().describe('PASSED일 때만: 원래 번호'),
+  "graceUntil": zod.iso.datetime({"offset":true}).nullish().describe('PASSED이고 차례가 이미 지났을 때만: 입장 확정을 받는 마지막 시각. 차례와 통과 시각 가운데 늦은 때 + 유예 15분이다. 이미 통과한 대기 참여가 다시 보내도 같은 규칙으로 계산한다(처음 통과 시각 기준, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 차례 전이면 null이고 원래 번호의 차례에 입장한다(queue-admission §7)')
+}).describe('추가 검증 제출 결과(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §5.2)')
+
+export type QueueVerificationResult = zod.input<typeof QueueVerificationResult>;
+export type QueueVerificationResultOutput = zod.output<typeof QueueVerificationResult>;

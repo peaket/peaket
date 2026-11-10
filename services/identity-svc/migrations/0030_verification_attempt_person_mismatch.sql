@@ -1,0 +1,3 @@
+-- 본인확인 건의 '다른 사람' 표시(verification_attempt.person_mismatch, identity.proto ReverificationCheckService의 PERSON_MISMATCH, docs/features/identity.md I-T56 ③, BUILD_ORDER BOT-090, ADR-0259).
+-- 본인확인한 계정의 다시 본인확인 결과가 계정의 사람과 다르면 true다(연계정보·HMAC은 남기지 않는다). 상수 기본값이 있는 NOT NULL 칸이라 표를 다시 쓰지 않는다(PostgreSQL 11 이상).
+ALTER TABLE "verification_attempt" ADD COLUMN "person_mismatch" boolean DEFAULT false NOT NULL;

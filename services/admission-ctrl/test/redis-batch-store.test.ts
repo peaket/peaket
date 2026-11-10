@@ -35,14 +35,20 @@ describe('게시 때 돌릴 번호 찾기(Q-T68④, ADR-0233)', () => {
     expect(seen).toEqual([['HLEN', keys.verify('e1')]]);
   });
 
-  test('표시가 있으면 나눠 읽고 VERIFYING·ORPHAN·BLOCKED를 고른다', async () => {
+  test('Q-T34 ① 표시가 있으면 나눠 읽고 VERIFYING·ORPHAN·BLOCKED만 고르며 셔플 전에 통과한 PASSED는 고르지 않는다', async () => {
+    const reads: number[] = [];
     const store = new RedisBatchStore(
       fake(async (args) => {
-        if (args[0] === 'HEXISTS') return 1;
-        return args.slice(2).map((h) => (h === 'h0' ? 'ORPHAN:1' : h === 'h1' ? 'BLOCKED:1:NETWORK' : h === 'h2' ? 'VERIFYING:1:NETWORK' : h === 'h3' ? 'PASSED:1' : null));
+        if (args[0] === 'HEXISTS' || args[0] === 'HLEN') return 1;
+        reads.push(args.length - 2);
+        return args.slice(2).map((h) =>
+          h === 'h0' ? 'ORPHAN:1' : h === 'h1' ? 'BLOCKED:1:NETWORK' : h === 'h2' ? 'VERIFYING:1:NETWORK' : h === 'h3' ? 'PASSED:1' : h === 'h4' ? 'PASSED:1762743600000:SHARED_PATTERN' : h === 'h2400' ? 'VERIFYING:9:HUMAN_CHECK' : null,
+        );
       }),
     );
-    expect(await store.toRemoveAmong('e1', 1, hashes)).toEqual(['h0', 'h1', 'h2']);
+    expect(await store.toRemoveAmong('e1', 1, hashes)).toEqual(['h0', 'h1', 'h2', 'h2400']);
+    expect(await store.toRemoveAmong('e1', 'lobby', hashes)).toEqual(['h0', 'h1', 'h2', 'h2400']);
+    expect(reads).toEqual([1000, 1000, 500, 1000, 1000, 500]);
   });
 });
 

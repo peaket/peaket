@@ -5,6 +5,7 @@ import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
 import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { writeContactRef } from '../../../session/index.js';
 import type { HoldRow, PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
+import type { ReverificationSummary } from '../../domain/reverification.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear, VerificationRaced } from '../../domain/verification.js';
 import { identityConflictAttempt, identityVerification, pidKeyRotation, restrictedCiHold, verificationAttempt, verificationRecord } from './schema.js';
 
@@ -59,8 +60,8 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
         const [r] = await tx.select().from(verificationAttempt).where(eq(verificationAttempt.id, id)).for('update');
         return r ? attemptOf(r) : null;
       },
-      completeAttempt: async (id, status, now) => {
-        await tx.update(verificationAttempt).set({ status, completedAt: new Date(now) }).where(eq(verificationAttempt.id, id));
+      completeAttempt: async (id, status, now, personMismatch = false) => {
+        await tx.update(verificationAttempt).set({ status, completedAt: new Date(now), personMismatch }).where(eq(verificationAttempt.id, id));
       },
       verificationOf: async (accountId) => {
         const [r] = await tx
@@ -165,6 +166,18 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
       )
       .limit(1);
     return Boolean(r);
+  }
+
+  async reverificationSince(accountId: string, notBefore: number): Promise<ReverificationSummary> {
+    // 계정 인덱스(verification_attempt_account_idx)로 그 계정의 건만 읽는다. 확정 시각이 시작 시각과 같아도 센다(gte)
+    const [r] = await this.database.db
+      .select({
+        lastVerifiedAt: sql<Date | string | null>`max(${verificationAttempt.completedAt}) filter (where ${verificationAttempt.status} = 'VERIFIED')`,
+        personMismatch: sql<boolean | null>`bool_or(${verificationAttempt.personMismatch})`,
+      })
+      .from(verificationAttempt)
+      .where(and(eq(verificationAttempt.accountId, accountId), eq(verificationAttempt.purpose, 'REVERIFY'), gte(verificationAttempt.completedAt, new Date(notBefore))));
+    return { lastVerifiedAt: r?.lastVerifiedAt ? new Date(r.lastVerifiedAt).getTime() : null, personMismatch: r?.personMismatch === true };
   }
 
   async purgeConflictAttempts(before: number): Promise<number> {

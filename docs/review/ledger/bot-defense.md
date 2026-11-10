@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 103 | 20 | 0 | 0 | 0 | 4 | 0 | 0 | 22 | 149 |
-| 합계 | 103 | 20 | 0 | 0 | 0 | 4 | 0 | 0 | 22 | 149 |
+| B | 111 | 19 | 0 | 0 | 0 | 6 | 0 | 0 | 16 | 152 |
+| 합계 | 111 | 19 | 0 | 0 | 0 | 6 | 0 | 0 | 16 | 152 |
 
 ## docs/features/bot-defense.md
 
@@ -23,7 +23,7 @@
 | B-T6 | ① | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ① 피처 Redis를 멈추면 trust-svc가 `degraded` 참으로 답하고 진입이 이어진다 | 자동 시험 | B | 시험: services/queue-svc/test/trust-risk.test.ts, services/trust-svc/test-int/score-risk.int.test.ts 외 1곳 |
 | B-T6 | ② | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ② trust-svc 파드를 모두 멈추면 queue-svc 서킷이 열리고 기기·계정 한도(5회/10초)가 걸리며, 호스팅 대역 IP에는 IP 한도가, 통신사… | 자동 시험 | B | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/risk-http.test.ts 외 1곳 |
 | B-T6 | ③ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ③ 그동안 받은 사전 검증 토큰에 '검증 보류'가 있고, 되살린 뒤 토큰 갱신에서 다시 판정된다 | 자동 시험 | B | 시험: services/queue-svc/test/degraded-limits.test.ts, services/queue-svc/test/preverify.test.ts 외 1곳 |
-| B-T6 | ④ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ④ 그동안 추가 검증 제출은 통과로 처리되지 않는다 | 다른 단계 | B | BOT-090 · trust-svc가 멈춘 동안의 추가 검증 제출은 queue-svc의 추가 검증 제출 경로(wbs 3.3.1)가 생길 때 본다(BAT-195에서 정함, 2026-11-10) |
+| B-T6 | ④ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ④ 그동안 추가 검증 제출은 통과로 처리되지 않는다 | 자동 시험 | B | 시험: services/queue-svc/test-int/verification-store.int.test.ts, services/queue-svc/test/verification-cases.ts 외 2곳 |
 | B-T6 | ⑤ | 축소 운영 두 층: ① 피처 Redis를 멈추면 trust-svc가… | ⑤ 서킷이 열리고 닫힐 때 운영 사건 줄과 경보가 남는다(FR-039, NFR-001) | 다른 단계 | B | OPS-290 · 서킷이 열리고 닫힐 때의 운영 사건 줄(`ops_event`)은 ops-svc 몫이다. queue-svc의 서킷 지표와 보안 로그는 BOT-050 시험이 본다(B-T6 ②) |
 | B-T7 | ① | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ① 새 판을 S3에 두면 1시간 안에 두 서비스가 읽는다 | ID만 | B | 시험: packages/platform/test/asn-table.test.ts, services/queue-svc/test/degraded-limits.test.ts 외 1곳 |
 | B-T7 | ② | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ② S3를 막으면 마지막 판으로 판정하고 7일 [가정] 넘게 새 판이 없으면 SEV3 | 자동 시험 | B | 시험: packages/platform/test/asn-table.test.ts |
@@ -37,16 +37,19 @@
 | B-T9 | ② | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ② 표본 검토 '봇' 판정과 부정구매 확인 라벨 반영으로만 키가 생기고 값에 확정 출처가 있다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | B-T9 | ③ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ③ 표본 검토 '사람' 재판정과 이의 인정은 키를 지운다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | B-T9 | ④ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ④ 표본 검토 HUMAN은 부정 예매 조치(`FRAUD_ACTIONED`)가 올린 키를 지우지 않고, 표본 검토는 뽑힌 판정의 사건 키가 맞는 판정 근거의… | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
-| B-T10 | ① | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ①이의를 보내면 202이고 처리함에 `VERIFICATION_APPEAL` 건이 하나 생긴다(같은 요청을 다시 보내도 하나) | 빈칸 | B | — |
-| B-T10 | ② | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ② 건 요청 발행을 실패시키면 503이고 다시 보내면 건이 생긴다 | 빈칸 | B | — |
-| B-T10 | ③ | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ③ 인정하면 queue-svc `PASSED`와 trust-svc `LABELED_HUMAN`이 남고 근거에 차단 목록이 있었으면 키가 지워진다 | 빈칸 | B | — |
-| B-T10 | ④ | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ④ 기각하면 대기 참여가 `BLOCKED`로 끝나고 trust-svc 라벨은 없다 | 빈칸 | B | — |
-| B-T10 | ⑤ | 이의 제기 경로: ① 이의를 보내면 202이고 처리함에… | ⑤ 결과 반영 호출을 한 번 실패시키면 작업 워커가 다시 보내 한 번만 반영된다(FR-020, POL-006) | 빈칸 | B | — |
-| B-T11 | — | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는… | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는 기기라도 심층 챌린지와 본인확인 재통과면 `PASSED`다. 심층 챌린지 토큰의… | 자동 시험 | B | 시험: services/trust-svc/test/score-risk.test.ts |
+| B-T10 | ① | 이의 제기 경로: ① 이의를 보내면 202이고… | ①이의를 보내면 202이고 `VERIFICATION_APPEAL` 건 요청이 한 건 나간다(같은 요청을 다시 보내도 같은 `eventKey` 하나다) … 는… | 자동 시험 | B | 시험: services/queue-svc/test-int/case-requests.int.test.ts, services/queue-svc/test-int/verification-store.int.test.ts 외… |
+| B-T10 | ② | 이의 제기 경로: ① 이의를 보내면 202이고… | ② 건 요청 발행을 실패시키면 503이고 다시 보내면 같은 `eventKey`로 나간다 … 는 queue-svc·trust-svc 몫, 추천 적용… | 자동 시험 | B | 시험: services/queue-svc/test-int/case-requests.int.test.ts, services/queue-svc/test/verification-cases.ts 외 2곳 |
+| B-T10 | ③ | 이의 제기 경로: ① 이의를 보내면 202이고… | ③ 인정하면 queue-svc `PASSED`와 trust-svc `LABELED_HUMAN`이 남고 근거에 차단 목록이 있었으면 키가 지워진다 … 는… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test/verification-cases.ts 외 1곳 |
+| B-T10 | ④ | 이의 제기 경로: ① 이의를 보내면 202이고… | ④ 기각하면 대기 참여가 `BLOCKED`로 끝나고 trust-svc 라벨은 없다 … 는 queue-svc·trust-svc 몫, 추천 적용… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test/appeal-grpc.test.ts 외 2곳 |
+| B-T10 | ⑤ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑤ 같은 건 ID·판 번호로 결과 반영을 두 번 부르면 한 번만 반영된다 … 는 queue-svc·trust-svc 몫, 추천 적용 2026-11-10… | 자동 시험 | B | 시험: services/queue-svc/test/appeal-grpc.test.ts, services/queue-svc/test/verification-cases.ts |
+| B-T10 | ⑥ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑥ 처리함에 건이 하나 생기고, 결과 반영 호출이 실패하면 ops-svc 작업 워커가 다시 보낸다(ops-svc 몫, | 다른 단계 | B | GAT-280 · 처리함에 건이 하나 생기는 것, 결과 반영 호출을 작업 워커가 다시 보내는 것, 건이 열린 동안의 `SetAccountHold`는 ops-svc 몫이다. queue-svc·trust-svc 쪽… |
+| B-T10 | ⑦ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑦ ops-svc 밖의 신원이 `VerificationAppealService`를 부르면 거부된다(메시 L7 허용 목록, HOT-400 몫)(추천 적용… | 다른 단계 | B | HOT-400 · 메시 L7 허용 목록이 `VerificationAppealService`를 부르는 신원을 ops-svc로 줄인다(B-T20 ⑩과 같다). queue-svc 처리기는 그 신원을 따로 보지… |
+| B-T11 | — | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는… | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는 기기라도 심층 챌린지와 본인확인 재통과면 `PASSED`다. 심층 챌린지 토큰의… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test-int/verification-store.int.test.ts… |
 | B-T12 | — | 재평가 격리 상한의 분모: 대기 인원 1만 명 회차에 10분 안 후보… | 재평가 격리 상한의 분모: 대기 인원 1만 명 회차에 10분 안 후보 80명을 적용 모드로 넣으면 50명(0.5%)까지 격리되고 나머지는 '상한 도달'로… | 빈칸 | B | — |
 | B-T13 | — | 로비 입장의 행동 신호: 로비 입장 판정도 `BehaviorSignal`… | 로비 입장의 행동 신호: 로비 입장 판정도 `BehaviorSignal`(`features` 비움)을 내고, 한 기기 가명으로 로비 참가자 pid 6명이 10분… | 자동 시험 | B | 시험: services/trust-svc/test/score-risk.test.ts, services/trust-svc/test/telemetry-recorder.test.ts |
 | B-T14 | — | 판정 근거 키: `CHALLENGE` 판정과 재평가 격리에만… | 판정 근거 키: `CHALLENGE` 판정과 재평가 격리에만 `tr:vb`가 생기고 `ALLOW`에는 생기지 않는다. 30일 [가정] 뒤 사라지고, 사라진 뒤의… | 자동 시험 | B | 시험: services/trust-svc/test-int/score-risk.int.test.ts, services/trust-svc/test/score-risk.test.ts |
-| B-T15 | — | 판정 근거 조회(`GetVerdictEvidence`, 추천 적용… | 판정 근거 조회(`GetVerdictEvidence`, 추천 적용 2026-10-30, §12): 이의 심사 화면이 판정 근거를 읽는다. ops-svc 밖의… | 빈칸 | B | — |
+| B-T15 | ① | 판정 근거 조회(`GetVerdictEvidence`, 추천 적용… | ① 응답에 사유 범주, 확정 신호 종류, 판정 출처, 시각, 프로필 판, 그 기기의 30일 추가 검증 수만 있고 점수·가중치·기기 가명은 없다. 근거 키가… | 자동 시험 | B | 시험: services/trust-svc/test-int/main-evidence.int.test.ts, services/trust-svc/test-int/verdict-evidence.int.test.ts 외 1곳 |
+| B-T15 | ② | 판정 근거 조회(`GetVerdictEvidence`, 추천 적용… | ② ops-svc 밖의 신원으로도 불러 보면 거부된다(메시 L7 허용 목록 몫)(세부 나눔은 추천 적용 2026-11-10, BUILD_ORDER… | 다른 단계 | B | HOT-400 · `GetVerdictEvidence`를 부르는 신원을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(B-T20 ⑩과 같다, BAT-200에서 정함, 2026-11-10) |
 | B-T16 | ① | 기기 키 통일(추천 적용 2026-10-31, ADR-0171… | ①로그인(identity-svc `CreateSession`) | 자동 시험 | B | 시험: services/identity-svc/test/investigation.test.ts, services/trust-svc/test-int/main-key-info.int.test.ts 외 1곳 |
 | B-T16 | ② | 기기 키 통일(추천 적용 2026-10-31, ADR-0171… | ②로비 입장 | ID만 | B | 시험: packages/platform/test/inv-ref.test.ts, services/identity-svc/test/investigation.test.ts 외 4곳 |
 | B-T16 | ③ | 기기 키 통일(추천 적용 2026-10-31, ADR-0171… | ③ 사전 검증을 한다. identity `device.device_ref`, `BehaviorSignal.deviceRef`… | ID만 | B | 시험: packages/platform/test/inv-ref.test.ts, services/identity-svc/test/investigation.test.ts 외 4곳 |
@@ -133,16 +136,16 @@
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: services/trust-svc |
-| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/consumers.int.test.ts 외 29곳 |
+| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/consumers.int.test.ts 외 32곳 |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |
-| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 9곳 |
-| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts, services/identity-svc/test/trust-login-risk.test.ts 외 6곳 |
+| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 26곳 |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 13곳 |
+| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts, services/identity-svc/test/trust-login-risk.test.ts 외 7곳 |
 | v5.0.0-2.4.2 | — | L3 | 비즈니스 업무 로직 흐름이 물리적 인간의 현실적인 동작 타이밍을 요구하도록 설계하여 비정상적으로 빠른 기계적 제출을 방어한다. | 빈칸 | B | 영역: services/trust-svc |
 | v5.0.0-6.1.1 | — | L1 | 레이트 리밋·자동화 방지·적응형 대응 같은 통제가 크리덴셜 스터핑과 비밀번호 무차별 대입을 어떻게 막는지 문서에 정한다. 통제를 어떻게 설정하는지와 악의적 계정… | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-login.test.ts (영역: services/trust-svc) |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/queue-svc/test/sale-state.test.ts, services/queue-svc/test/shuffle-proof.test.ts |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/queue-svc/test/sale-state.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 1곳 |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-entry-function.test.ts, services/queue-svc/test/edge-first-visit-function.test.ts |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: services/trust-svc) |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
@@ -154,14 +157,14 @@
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 1곳 |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 2곳 |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: services/trust-svc |
-| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs (영역: services/trust-svc) |
+| v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, packages/config/eslint/web-security.test.mjs (영역:… |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: services/trust-svc |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs 외 5곳 (영역:… |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 4곳 |
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 빈칸 | B | 영역: services/trust-svc |
 | v5.0.0-5.2.3 | — | L2 | 압축 파일은 풀기 전에 풀린 크기와 파일 수 상한을 확인한다. | 자동 시험 | B | 시험: tools/perf-ledger/human-data.test.mjs |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts (영역: services/ops-svc) |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts 외 2곳 |
-| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: services/queue-svc/test/trust-risk.test.ts, services/trust-svc/test-int/apply-label.int.test.ts 외 8곳 |
+| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: services/queue-svc/test/trust-risk.test.ts, services/queue-svc/test/verification-cases.ts 외 9곳 |

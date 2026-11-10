@@ -3,7 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { guard, keys, QUEUE_REDIS } from '../../entry/index.js';
-import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type LobbySeat, type Precheck } from '../domain/admission.js';
+import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, type AdmitResult, type Claim, type LobbySeat, type Precheck } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
 import { ADMIT_LUA, CLAIM_LUA, EXPIRE_LUA, LOBBY_STATE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
 
@@ -40,31 +40,44 @@ const opt = (v: unknown): number | undefined => {
   const n = Number(str(v));
   return n >= 0 ? n : undefined;
 };
+/** REMOVED의 둘째 칸: 'BLOCKED'면 확장 칸, 빈 글자(또는 없음)면 칸 없음 */
+const removed = (why: unknown): { kind: 'REMOVED'; removeReason?: 'BLOCKED' } => (why !== undefined && str(why) === 'BLOCKED' ? { kind: 'REMOVED', removeReason: 'BLOCKED' } : { kind: 'REMOVED' });
 
 @Injectable()
 export class RedisAdmissionStore implements AdmissionStore {
   constructor(@Inject(QUEUE_REDIS) private readonly redis: HotRedis) {}
 
-  async precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string }): Promise<Precheck> {
+  async precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string; graceMs: number }): Promise<Precheck> {
     const e = i.eventId;
     const ks = [k.serving(e), k.servingLog(e), k.removed(e), k.skipped(e), k.verify(e), k.notice(e), k.soon(e), k.slotOf(e), k.slots(e)];
-    const args = [i.seq, i.gen, i.ticketHash, TURN_GRACE_MS, NOT_YET_MIN_MS, NOT_YET_MAX_MS, RATE_WINDOW_SEC].map(String);
+    const args = [i.seq, i.gen, i.ticketHash, i.graceMs, NOT_YET_MIN_MS, NOT_YET_MAX_MS, RATE_WINDOW_SEC].map(String);
     const r = (await guard(this.redis.evalScript(PRECHECK, ks, args))) as unknown[];
     const kind = str(r[0]);
     switch (kind) {
       case 'SOLD_OUT':
       case 'ENDED':
-      case 'REMOVED':
         return { kind };
+      case 'REMOVED':
+        return removed(r[1]);
       case 'VERIFYING':
         return { kind, reason: str(r[1] ?? '') };
       case 'NOT_YET':
         return { kind, serving: Number(str(r[1])), retryAfterMs: Number(str(r[2])) };
-      case 'EXPIRED':
-        return { kind, turnAtMs: Number(str(r[1])) };
+      case 'EXPIRED': {
+        const passedAtMs = opt(r[2]);
+        return { kind, turnAtMs: Number(str(r[1])), ...(passedAtMs !== undefined ? { passedAtMs } : {}) };
+      }
       case 'OK': {
         const turnAtMs = opt(r[2]);
-        return { kind, serving: Number(str(r[1])), ...(turnAtMs !== undefined ? { turnAtMs } : {}), inSoon: str(r[3]) === '1', skipped: str(r[4]) === '1' };
+        const passedAtMs = opt(r[5]);
+        return {
+          kind,
+          serving: Number(str(r[1])),
+          ...(turnAtMs !== undefined ? { turnAtMs } : {}),
+          inSoon: str(r[3]) === '1',
+          skipped: str(r[4]) === '1',
+          ...(passedAtMs !== undefined ? { passedAtMs } : {}),
+        };
       }
       default:
         throw new Error(`입장 확인 Lua가 모르는 값을 돌려줬다: ${kind}`);
@@ -79,7 +92,7 @@ export class RedisAdmissionStore implements AdmissionStore {
 
   async admit(i: Parameters<AdmissionStore['admit']>[0]): Promise<AdmitResult> {
     const e = i.eventId;
-    const ks = [k.serving(e), k.removed(e), k.slots(e), k.soon(e), k.soonAt(e), k.soonFirst(e), k.admitted(e), k.calls(e), k.callReq(e), k.ctl(e), k.admits(e), k.slotOf(e), k.req(e)];
+    const ks = [k.serving(e), k.removed(e), k.slots(e), k.soon(e), k.soonAt(e), k.soonFirst(e), k.admitted(e), k.calls(e), k.callReq(e), k.ctl(e), k.admits(e), k.slotOf(e), k.req(e), k.verify(e)];
     const args = [
       i.seq,
       i.ticketHash,
@@ -116,7 +129,8 @@ export class RedisAdmissionStore implements AdmissionStore {
       const arrivalDelayMs = opt(r[2]);
       return { kind, retryAfterSeconds: Number(str(r[1])), ...(arrivalDelayMs !== undefined ? { arrivalDelayMs } : {}) };
     }
-    if (kind === 'REMOVED' || kind === 'NOT_YET' || kind === 'EXPIRED') return { kind };
+    if (kind === 'REMOVED') return removed(r[1]);
+    if (kind === 'NOT_YET' || kind === 'EXPIRED') return { kind };
     throw new Error(`입장 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
@@ -145,8 +159,9 @@ export class RedisAdmissionStore implements AdmissionStore {
     return (await readSeat()) ?? { kind: 'REPAIRING' };
   }
 
-  async markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void> {
-    await guard(this.redis.evalScript(MARK_REMOVED, [k.removed(i.eventId)], [String(i.seq), String(i.expireAtMs)]));
+  async markRemoved(i: { eventId: string; seq: number; ticketHash: string; expireAtMs: number }): Promise<{ verifyCleared: boolean }> {
+    const r = await guard(this.redis.evalScript(MARK_REMOVED, [k.removed(i.eventId), k.verify(i.eventId)], [String(i.seq), String(i.expireAtMs), i.ticketHash]));
+    return { verifyCleared: Number(str(r)) === 1 };
   }
 
   async sessionStarted(i: { eventId: string; jti: string; maxStayUntilMs: number }): Promise<boolean> {

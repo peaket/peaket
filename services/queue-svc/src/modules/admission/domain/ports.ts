@@ -7,8 +7,11 @@ export const ADMISSION_STORE = Symbol('queue.AdmissionStore');
  * 사람 키(q:adm·q:dup)와 회차 키는 해시 슬롯이 달라 한 Lua로 묶지 못한다. 이름은 명세 specs/queue.qnt의 admit을 나눈 것이다
  */
 export interface AdmissionStore {
-  /** ① 읽기만: 판매 상태, 빠진 번호·추가 검증, 건너뛴 구간 세대, 차례 전, 차례 시각과 15분(곧 입장 대기열에 있으면 세지 않음) */
-  precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string }): Promise<Precheck>;
+  /**
+   * ① 읽기만: 판매 상태, 빠진 번호·추가 검증(VERIFYING이면 VERIFYING, PASSED면 받음, BLOCKED면 removeReason을 단 REMOVED), 건너뛴 구간 세대, 차례 전,
+   * 차례 시각과 유예 graceMs(차례와 통과 가운데 늦은 때부터, 곧 입장 대기열에 있거나 이 대기표의 자리가 살아 있으면 세지 않음)
+   */
+  precheck(i: { eventId: string; seq: number; gen: number; ticketHash: string; graceMs: number }): Promise<Precheck>;
   /** ② q:adm이 비었으면 {해시}:{요청 표지}로 채운다(수명 = 판매 종료). 같은 대기표면 SAME, 다른 대기표면 DUP */
   claim(i: { pid: string; eventId: string; ticketHash: string; nonce: string; expireAtMs: number }): Promise<Claim>;
   /**
@@ -34,12 +37,22 @@ export interface AdmissionStore {
   expire(i: { pid: string; eventId: string; seq: number; gen: number; dupPrefix?: string }): Promise<{ admittedBefore: boolean }>;
   /** 로비 셔플 결과 q:lobby:{토큰 해시}. 없으면 회차 슬롯의 pub:lobby와 참가자 목록을 본다. 게시 전 PENDING, 참가자인데 결과가 없으면 repair:lobby를 쓰고 REPAIRING, 참가자가 아니면 GONE */
   lobbySeat(i: { eventId: string; tokenHash: string; nowMs: number }): Promise<LobbySeat>;
-  /** 1인 1순번 위반으로 거절한 번호를 빠진 번호 비트맵에 켠다 */
-  markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void>;
+  /**
+   * 1인 1순번 위반으로 거절한 번호를 빠진 번호 비트맵에 켜고, 그 대기표의 verify 칸이 PASSED·VERIFYING이면 지운다(queue-admission §7, docs/data.md §5 경합 ④).
+   * BLOCKED·ORPHAN과 다른 대기표의 칸은 두며, 지운 칸이 있으면 verifyCleared
+   */
+  markRemoved(i: { eventId: string; seq: number; ticketHash: string; expireAtMs: number }): Promise<{ verifyCleared: boolean }>;
   /** 구매 세션 시작: jti 자리가 남아 있을 때만 점수를 최대 체류 시각으로 올린다(ZADD XX GT). 바꿨으면 true */
   sessionStarted(i: { eventId: string; jti: string; maxStayUntilMs: number }): Promise<boolean>;
   /** 구매 세션 종료: 자리를 뺀다. 뺐으면 true */
   sessionEnded(i: { eventId: string; jti: string }): Promise<boolean>;
+}
+
+/** 입장 확정 규칙 값(조립에서 바꿀 수 있다. 시험은 기본값과 다른 값으로도 돈다) */
+export const ADMISSION_POLICY = Symbol('queue.AdmissionPolicy');
+export interface AdmissionPolicy {
+  /** 차례(또는 추가 검증 통과) 뒤 입장 확정을 받는 시간(기본 TURN_GRACE_MS) */
+  turnGraceMs?: number;
 }
 
 export const ADMISSION_TOKENS = Symbol('queue.AdmissionTokens');

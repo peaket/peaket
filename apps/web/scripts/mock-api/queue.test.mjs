@@ -15,6 +15,9 @@ import {
   GetQueueBatchResultResponse,
   GetQueueSegmentStateResponse,
   GetQueueShuffleProofResponse,
+  GetQueueVerificationResponse,
+  CreateQueueVerificationBody,
+  CreateQueueVerificationResponse,
 } from '@peaket/contracts/openapi/queue';
 import { startMockApi } from '../mock-api.mjs';
 import { EMERGENCY_BEACON_HEX } from '../../src/_pages/shuffle-proof/model/recompute.ts';
@@ -431,6 +434,178 @@ test('200 대기 상태 파일의 Retry-After(queueStateRetryAfter, ADR-0217): �
     assert.equal(f.headers.get('retry-after'), '30');
     await m.state('queueStateRetryAfter=');
     assert.equal((await fetch(`${m.base}/v1/queues/${EVENT}/segment-states/${r.body.segment}.json`)).headers.get('retry-after'), null);
+  } finally {
+    m.server.close();
+  }
+});
+
+const verifyPath = `/v1/queues/${EVENT}/verification`;
+const verifyJson = async (m, body) => {
+  const r = await fetch(`${m.base}${verifyPath}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return { status: r.status, retryAfter: r.headers.get('retry-after'), body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined };
+};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+test('추가 검증(ADR-0259): 상태 읽기·제출이 계약 Zod를 지나고, 제출 결과 상태 바꾸기대로 통과(차례 전·지남)·위젯 실패·본인확인 다시·다른 분·429·503(한 번)·409·410을 낸다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1');
+    const s0 = await m.get(verifyPath);
+    assert.equal(s0.status, 200);
+    assert.deepEqual(GetQueueVerificationResponse.parse(s0.body), s0.body);
+    assert.deepEqual([s0.body.state, s0.body.verificationReason, s0.body.appeal], ['VERIFYING', 'RAPID_REQUESTS', null]);
+    const body = CreateQueueVerificationBody.parse({ challengeToken: 'sim.verify.1', deviceId: 'AAAAAAAAAAAAAAAAAAAAAA' });
+    const cases = [
+      ['challenge-failed', 200, 'CHALLENGE_FAILED'],
+      ['reverify', 200, 'REVERIFY_REQUIRED'],
+      ['mismatch', 200, 'PERSON_MISMATCH'],
+      ['not-verifying', 409, 'not-verifying'],
+      ['blocked', 410, 'queue-ticket-removed'],
+      ['ended', 410, 'sale-ended'],
+    ];
+    for (const [mode, status, kind] of cases) {
+      await m.state(`queueVerifySubmit=${mode}`);
+      const r = await verifyJson(m, body);
+      assert.equal(r.status, status, mode);
+      if (status === 200) assert.deepEqual(CreateQueueVerificationResponse.parse(r.body), r.body, mode);
+      if (status === 200) assert.equal(r.body.result, kind, mode);
+      else assert.match(r.body.type, new RegExp(`${kind}$`), mode);
+      if (mode === 'blocked') assert.equal(r.body.removeReason, 'BLOCKED');
+    }
+    // 429·503은 회차마다 한 번(다시 보내면 지나간다), Retry-After를 싣는다
+    for (const [mode, status, ra] of [['limited', 429, '5'], ['down', 503, '2']]) {
+      await m.state(`queueVerifySubmit=${mode}`);
+      const r = await verifyJson(m, body);
+      assert.deepEqual([r.status, r.retryAfter], [status, ra], mode);
+      // 다음은 재통과 전 첫 제출(REVERIFY_REQUIRED), 그다음이 통과
+      assert.equal((await verifyJson(m, body)).body.result, 'REVERIFY_REQUIRED', `${mode} 두 번째`);
+      assert.equal((await verifyJson(m, body)).body.result, 'PASSED', `${mode} 세 번째`);
+      await m.state('queueReset=1');
+    }
+    // 통과(차례 전): 재통과 전 첫 제출은 REVERIFY_REQUIRED, 다시 보내면 graceUntil null, 상태 읽기도 PASSED. 또 보내면 같은 PASSED
+    await m.state('queueVerifySubmit=normal');
+    assert.equal((await verifyJson(m, body)).body.result, 'REVERIFY_REQUIRED');
+    const p = await verifyJson(m, body);
+    assert.deepEqual(CreateQueueVerificationResponse.parse(p.body), p.body);
+    assert.deepEqual([p.body.result, p.body.graceUntil], ['PASSED', null]);
+    assert.equal((await m.get(verifyPath)).body.state, 'PASSED');
+    assert.equal((await verifyJson(m, body)).body.result, 'PASSED');
+    // 통과(차례 지남): graceUntil = 지금 + 15분
+    await m.state('queueReset=1&queueVerifySubmit=after');
+    await verifyJson(m, body);
+    const a = await verifyJson(m, body);
+    assert.equal(Date.parse(a.body.graceUntil), m.now() + 15 * 60_000);
+    // 본문 형식: 둘 다·둘 다 없음·정하지 않은 칸·deviceId 모양·1,001자는 400
+    await m.state('queueReset=1&queueVerifySubmit=normal');
+    for (const bad of [{ challengeToken: 't', appeal: '' }, {}, { challengeToken: 't', extra: 1 }, { challengeToken: 't', deviceId: 'short' }, { appeal: 'e\u0301'.repeat(1001) }]) {
+      assert.equal((await verifyJson(m, bad)).status, 400, JSON.stringify(bad).slice(0, 40));
+    }
+  } finally {
+    m.server.close();
+  }
+});
+
+test('추가 검증 이의(ADR-0259): 202 {appealId, receivedAt}, 다시 보내면 처음 값, 상태 읽기가 접수를 되살린다. 503(한 번)·인정(accepted)·기각(rejected)·대기 참여 없음(none)·본인확인 전(identity)', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueVerifyAppeal=down');
+    const down = await verifyJson(m, { appeal: '설명을 부탁합니다' });
+    assert.deepEqual([down.status, down.retryAfter], [503, '3']);
+    assert.equal((await m.get(verifyPath)).body.appeal, null, '발행에 실패한 이의는 접수로 보이지 않는다');
+    const r1 = await verifyJson(m, { appeal: '설명을 부탁합니다' });
+    assert.equal(r1.status, 202);
+    assert.match(r1.body.appealId, UUID_RE);
+    assert.ok(!Number.isNaN(Date.parse(r1.body.receivedAt)));
+    m.tick(5000);
+    const r2 = await verifyJson(m, { appeal: '다른 글' });
+    assert.deepEqual(r2.body, r1.body, '이미 접수했으면 처음 값');
+    const s = await m.get(verifyPath);
+    assert.deepEqual(GetQueueVerificationResponse.parse(s.body), s.body);
+    assert.deepEqual(s.body.appeal, { ...r1.body, text: '설명을 부탁합니다' }, '상태 읽기는 보낸 글도 준다(본인에게만)');
+    await m.state('queueVerify=accepted');
+    assert.equal((await m.get(verifyPath)).body.state, 'PASSED');
+    await m.state('queueVerify=rejected');
+    const rej = await m.get(verifyPath);
+    assert.equal(rej.body.state, 'BLOCKED');
+    // 기각된 대기 참여의 입장 확정은 410 queue-ticket-removed + removeReason BLOCKED
+    await m.state('queueReset=1&queueVerify=verifying&queueAhead=0');
+    const t = (await enter(m, { preverifyToken: 'pv-v', entryRequestId: '66666666-6666-4666-8666-666666666666' })).body;
+    m.tick(1000);
+    await m.state('queueVerify=rejected');
+    await m.get(verifyPath);
+    const adm = await admit(m, { queueTicket: t.queueTicket });
+    assert.deepEqual([adm.status, adm.body.removeReason], [410, 'BLOCKED']);
+    assert.match(adm.body.type, /queue-ticket-removed$/);
+    for (const [mode, status, kind] of [['none', 404, 'queue-entry-not-found'], ['identity', 403, 'identity-verification-required']]) {
+      await m.state(`queueReset=1&queueVerify=${mode}`);
+      const g = await m.get(verifyPath);
+      assert.equal(g.status, status, mode);
+      assert.match(g.body.type, new RegExp(`${kind}$`), mode);
+    }
+  } finally {
+    m.server.close();
+  }
+});
+
+test('입장 확정 queueAdmit=verifying은 추가 검증 중일 때만 VERIFYING이고, 통과(차례 지남) 뒤에는 차례를 기다리지 않고 ADMITTED다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueVerify=verifying&queueAhead=30&queueRate=0&queueAdmit=verifying');
+    const t = (await enter(m, { preverifyToken: 'pv-w', entryRequestId: '77777777-7777-4777-8777-777777777777' })).body;
+    assert.equal((await admit(m, { queueTicket: t.queueTicket })).body.status, 'VERIFYING');
+    await m.state('queueVerifySubmit=after');
+    assert.equal((await verifyJson(m, { challengeToken: 'sim.verify.2' })).body.result, 'REVERIFY_REQUIRED');
+    assert.equal((await verifyJson(m, { challengeToken: 'sim.verify.3' })).body.result, 'PASSED');
+    const a = await admit(m, { queueTicket: t.queueTicket });
+    assert.equal(a.body.status, 'ADMITTED');
+  } finally {
+    m.server.close();
+  }
+});
+
+test('추가 검증 상태 읽기(ADR-0259 결정 12): passedVia·graceUntil·appeal.text를 싣고 계약 Zod를 지난다. 제출 통과는 CHALLENGE, 인정은 APPEAL이다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueVerify=verifying&queueVerifySubmit=after');
+    const appeal = await verifyJson(m, { appeal: 'e\u0301 설명' });
+    assert.equal(appeal.status, 202);
+    assert.deepEqual(Object.keys(appeal.body).sort(), ['appealId', 'receivedAt'], '접수 응답에는 글을 싣지 않는다');
+    const s0 = await m.get(verifyPath);
+    assert.deepEqual(GetQueueVerificationResponse.parse(s0.body), s0.body);
+    assert.equal(s0.body.appeal.text, '\u00e9 설명', 'NFC 정규화 뒤 글');
+    assert.deepEqual([s0.body.passedVia, s0.body.graceUntil], [null, null]);
+    // 재통과 전 첫 제출은 REVERIFY_REQUIRED, 다시 보내면 통과(차례 지남이면 graceUntil)
+    assert.equal((await verifyJson(m, { challengeToken: 'sim.verify.1' })).body.result, 'REVERIFY_REQUIRED');
+    const p = await verifyJson(m, { challengeToken: 'sim.verify.2' });
+    assert.equal(p.body.result, 'PASSED');
+    const s1 = await m.get(verifyPath);
+    assert.deepEqual(GetQueueVerificationResponse.parse(s1.body), s1.body);
+    assert.deepEqual([s1.body.state, s1.body.passedVia, s1.body.graceUntil], ['PASSED', 'CHALLENGE', p.body.graceUntil]);
+    assert.equal(Date.parse(s1.body.graceUntil), m.now() + 15 * 60_000);
+    // CS 인정: passedVia APPEAL(차례 전 graceUntil null, accepted-after면 지금 + 15분)
+    await m.state('queueReset=1&queueVerify=accepted');
+    const a = await m.get(verifyPath);
+    assert.deepEqual([a.body.state, a.body.passedVia, a.body.graceUntil], ['PASSED', 'APPEAL', null]);
+    await m.state('queueReset=1&queueVerify=accepted-after');
+    const b = await m.get(verifyPath);
+    assert.deepEqual(GetQueueVerificationResponse.parse(b.body), b.body);
+    assert.deepEqual([b.body.passedVia, Date.parse(b.body.graceUntil)], ['APPEAL', m.now() + 15 * 60_000]);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('queueVerify=not-verifying면 상태 읽기·제출이 409 not-verifying이고, 이의 글의 NUL·양방향 제어·0폭 글자는 400이다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueVerify=not-verifying');
+    const g = await m.get(verifyPath);
+    assert.equal(g.status, 409);
+    assert.match(g.body.type, /not-verifying$/);
+    assert.equal((await verifyJson(m, { challengeToken: 'sim.verify.1' })).status, 409);
+    await m.state('queueReset=1&queueVerify=verifying');
+    for (const bad of ['a\u0000b', 'a\u202Eb', 'a\u2066b', 'a\u200Bb', 'a\uFEFFb']) assert.equal((await verifyJson(m, { appeal: bad })).status, 400, JSON.stringify(bad));
+    assert.equal((await verifyJson(m, { appeal: '보통 글' })).status, 202);
   } finally {
     m.server.close();
   }

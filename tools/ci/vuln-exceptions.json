@@ -1,0 +1,4 @@
+{
+  "$comment": "취약점 예외(docs/devops.md §4.4 조치 기한 판정, ADR-0259 결정 10). 한 줄: package(이름@정확한 판), advisory(GHSA ID), reason(영향 분석·완화 방법), issue(이슈 번호), createdOn·expiresOn(YYYY-MM-DD, 만료일은 만든 날부터 30일 [가정]을 넘지 못한다). 판정은 tools/ci/vuln-deadline.mjs",
+  "exceptions": []
+}

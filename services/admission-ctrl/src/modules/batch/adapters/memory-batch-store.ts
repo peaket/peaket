@@ -1,5 +1,6 @@
 // 시험용 묶음 기록과 결과 파일(Valkey 어댑터 redis-batch-store.ts와 같은 규칙). 구간(묶음 1·로비)마다 기록을 따로 둔다.
 import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, PublishedBatch, ResultFiles, ResultObjectStore, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
+import { removedAtPublish } from '../domain/verify-state.js';
 
 interface GroupState {
   startsAtMs: number;
@@ -10,13 +11,13 @@ interface GroupState {
   root: string | null;
   rootAtMs: number | null;
   repairAt: number | null;
-  verifying: Set<string>;
 }
 
 export class MemoryBatchStore implements BatchStore {
   readonly #groups = new Map<string, GroupState>();
   readonly #removed = new Map<string, number[]>();
-  readonly #orphans = new Map<string, Set<string>>();
+  /** 회차마다 q:{event:E}:verify(해시 → 값) */
+  readonly #verify = new Map<string, Map<string, string>>();
   readonly #results = new Map<string, { value: string; expireAtMs: number }>();
   #replicated = true;
   #writeCalls = 0;
@@ -54,14 +55,18 @@ export class MemoryBatchStore implements BatchStore {
     this.#removed.set(eventId, [...(this.#removed.get(eventId) ?? []), ...seqs]);
   }
   async toRemoveAmong(eventId: string, _group: ShuffleGroup, hashes: readonly string[]): Promise<string[]> {
-    const lobby = this.#of(eventId, 'lobby')?.verifying;
-    return hashes.filter((h) => lobby?.has(h) || this.#orphans.get(eventId)?.has(h));
+    const verify = this.#verify.get(eventId);
+    return hashes.filter((h) => removedAtPublish(verify?.get(h)));
+  }
+  /** q:{event:E}:verify 칸을 쓴다(VERIFYING:{ms}:{사유}·PASSED:{ms}:{사유}·BLOCKED:{ms}:{사유}·ORPHAN:{ms}) */
+  verifyForTest(eventId: string, hash: string, value: string): void {
+    const m = this.#verify.get(eventId) ?? new Map<string, string>();
+    m.set(hash, value);
+    this.#verify.set(eventId, m);
   }
   /** 대기 취소가 남긴 주인 없는 자리(verify의 ORPHAN)를 흉내 낸다 */
   orphanForTest(eventId: string, hash: string): void {
-    const s = this.#orphans.get(eventId) ?? new Set<string>();
-    s.add(hash);
-    this.#orphans.set(eventId, s);
+    this.verifyForTest(eventId, hash, `ORPHAN:${this.clock.now()}`);
   }
   async confirmReplicated(): Promise<boolean> {
     return this.#replicated;
@@ -89,9 +94,11 @@ export class MemoryBatchStore implements BatchStore {
   }
 
   // 시험 도구
+  /** verifying: 추가 검증 중(VERIFYING)인 참가자 해시(verifyForTest의 줄임) */
   setForTest(eventId: string, s: { startsAtMs: number; opensAtMs?: number; members: string[]; closed: ClosedBatch | null; group?: ShuffleGroup; verifying?: string[] }): void {
     const { group = 1, verifying = [], opensAtMs = 0, ...rest } = s;
-    this.#groups.set(this.#key(eventId, group), { ...rest, opensAtMs, publishedAt: null, root: null, rootAtMs: null, repairAt: null, verifying: new Set(verifying) });
+    this.#groups.set(this.#key(eventId, group), { ...rest, opensAtMs, publishedAt: null, root: null, rootAtMs: null, repairAt: null });
+    for (const h of verifying) this.verifyForTest(eventId, h, `VERIFYING:${this.clock.now()}:NETWORK`);
   }
   /** queue-svc가 결과 키를 잃은 참가자를 보고 쓰는 다시 쓰기 표시(HSETNX) */
   requestRepairForTest(eventId: string, atMs: number): void {

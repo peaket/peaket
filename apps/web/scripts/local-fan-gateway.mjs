@@ -8,8 +8,11 @@
 // - 기본은 /v1/identity/ 경로만 넘긴다. purchaseUrl을 주면 구매 경로(홀드·주문·결제·스냅샷·구매 세션)를 purchase-svc로 넘긴다(BUILD_ORDER HOT-358 리뷰 V2)
 //   fallbackUrl을 주면 나머지는 가짜 API로 넘기고, localAdmissionUrl을 주면 POST /v1/local-dev/admission을 그리로 넘긴다(local·ci 전용, 대기실을 거치지 않고 입장 토큰을 받는다)
 //   devIdentity를 주면 쿠키가 없는 요청에 그 신원 머리를 싣는다(local·ci 전용, identity-svc 없이 구매 경로를 볼 때)
+// - queueUrl을 주면 대기열 API 출처의 /v1/queues/ 경로(진입·입장 확정·추가 검증 등, 로컬에서는 앱 포트가 내는 대기 상태 파일도)를 같은 신원 머리·
+//   같은 출처·Origin 규칙으로 queue-svc로 넘긴다(ADR-0259 결정 8). 화면은 대기열 출처 NEXT_PUBLIC_QUEUE_ORIGIN(대기실은 VITE_PEAKET_QUEUE_ORIGIN)에 이 대역 주소를 넣는다
 // 실행: PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=http://localhost:3000 \
 //       PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=… node scripts/local-fan-gateway.mjs [포트]
+//       (대기열까지: PEAKET_QUEUE_HTTP=http://127.0.0.1:<queue-svc 앱 포트>)
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose';
@@ -17,6 +20,8 @@ import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose';
 const ACCESS_COOKIE = '__Secure-peaket_at';
 const REFRESH_PATH = '/v1/identity/access-tokens';
 const ROUTE = '/v1/identity/';
+/** 대기열 API(openapi 호스트 queue). 로컬은 queue-svc 앱 포트가 대기 상태 파일(queue-files)도 낸다 */
+const QUEUE_ROUTE = /^\/v1\/queues\/[^/]+\//;
 const PURCHASE_ROUTE = /^\/v1\/(holds(\/|$)|orders(\/|$)|events\/[^/]+\/(holds|purchase-session|seatmap-snapshot)(\/|$))/;
 const LOCAL_ADMISSION = '/v1/local-dev/admission';
 /** 로컬 스택은 좌석맵 파일도 그 판의 좌석 ID로 낸다 */
@@ -55,7 +60,7 @@ const problem = (status, title, headers = {}) => ({
 
 /**
  * 게이트웨이 대역을 띄운다
- * @param {{ port?: number, identityUrl: string, webOrigin: string, jwks?: import('jose').JSONWebKeySet, jwksUrl?: string, issuer: string, env?: Record<string, string | undefined>, purchaseUrl?: string, fallbackUrl?: string, localAdmissionUrl?: string, devIdentity?: Record<string, string> }} o
+ * @param {{ port?: number, identityUrl: string, webOrigin: string, jwks?: import('jose').JSONWebKeySet, jwksUrl?: string, issuer: string, env?: Record<string, string | undefined>, purchaseUrl?: string, queueUrl?: string, fallbackUrl?: string, localAdmissionUrl?: string, devIdentity?: Record<string, string> }} o
  * @returns {Promise<{ url: string, close: () => Promise<void> }>}
  */
 export async function startLocalFanGateway(o) {
@@ -65,7 +70,18 @@ export async function startLocalFanGateway(o) {
   const identity = new URL(o.identityUrl);
   if (!o.jwks && !o.jwksUrl) throw new Error('팬 토큰 공개키 묶음(jwks 또는 jwksUrl)이 없다');
   /** @param {string} pathname */
-  const targetOf = (pathname) => ((pathname === LOCAL_ADMISSION || LOCAL_LAYOUT.test(pathname)) && o.localAdmissionUrl ? new URL(o.localAdmissionUrl) : pathname.startsWith(ROUTE) ? identity : o.purchaseUrl && PURCHASE_ROUTE.test(pathname) ? new URL(o.purchaseUrl) : o.fallbackUrl ? new URL(o.fallbackUrl) : undefined);
+  const targetOf = (pathname) =>
+    (pathname === LOCAL_ADMISSION || LOCAL_LAYOUT.test(pathname)) && o.localAdmissionUrl
+      ? new URL(o.localAdmissionUrl)
+      : pathname.startsWith(ROUTE)
+        ? identity
+        : o.purchaseUrl && PURCHASE_ROUTE.test(pathname)
+          ? new URL(o.purchaseUrl)
+          : o.queueUrl && QUEUE_ROUTE.test(pathname)
+            ? new URL(o.queueUrl)
+            : o.fallbackUrl
+              ? new URL(o.fallbackUrl)
+              : undefined;
   const keys = o.jwks ? createLocalJWKSet(o.jwks) : createRemoteJWKSet(new URL(/** @type {string} */ (o.jwksUrl)), { cacheMaxAge: 5 * 60_000, cooldownDuration: 30_000 });
 
   /** @param {string | undefined} token */
@@ -189,10 +205,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     issuer: need('PEAKET_TOKEN_ISSUER'),
     env: process.env,
     ...(process.env.PEAKET_PURCHASE_HTTP ? { purchaseUrl: process.env.PEAKET_PURCHASE_HTTP } : {}),
+    ...(process.env.PEAKET_QUEUE_HTTP ? { queueUrl: process.env.PEAKET_QUEUE_HTTP } : {}),
     ...(process.env.PEAKET_MOCK_HTTP ? { fallbackUrl: process.env.PEAKET_MOCK_HTTP } : {}),
     ...(process.env.PEAKET_LOCAL_ADMISSION_HTTP ? { localAdmissionUrl: process.env.PEAKET_LOCAL_ADMISSION_HTTP } : {}),
     ...(process.env.PEAKET_LOCAL_DEV_IDENTITY ? { devIdentity: JSON.parse(process.env.PEAKET_LOCAL_DEV_IDENTITY) } : {}),
   });
-  // 소비자 웹의 NEXT_PUBLIC_API_ORIGIN에 이 값을 넣는다(빌드 때 들어간다)
+  // 소비자 웹의 NEXT_PUBLIC_API_ORIGIN(대기열을 넘기면 NEXT_PUBLIC_QUEUE_ORIGIN·NEXT_PUBLIC_QUEUE_FILES_ORIGIN도)에 이 값을 넣는다(빌드 때 들어간다)
   console.log(`게이트웨이 대역: ${started.url} → ${process.env.PEAKET_IDENTITY_HTTP}`);
 }

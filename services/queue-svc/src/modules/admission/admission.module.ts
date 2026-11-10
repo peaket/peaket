@@ -8,7 +8,7 @@ import { MemoryAdmissionStore } from './adapters/memory-admission-store.js';
 import { RedisAdmissionStore } from './adapters/redis-admission-store.js';
 import { ADMISSION_SCHEDULES, ADMISSION_TICKETS, ConfirmAdmission } from './application/confirm-admission.js';
 import { PurchaseSessionSlots } from './application/purchase-session-slots.js';
-import { ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, noSignals } from './domain/ports.js';
+import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, noSignals } from './domain/ports.js';
 import { AdmissionController } from './inbound/admission.controller.js';
 
 export type AdmissionModuleOptions = (
@@ -18,6 +18,8 @@ export type AdmissionModuleOptions = (
 ) & {
   tokens: QueueTokens;
   signals?: AdmissionSignals;
+  /** 입장 확정 규칙 값(유예 등). 넘기지 않으면 정본의 기본값이다 */
+  policy?: AdmissionPolicy;
 };
 
 /** 메모리(시험) 조립에서 서명기를 넘기지 않았을 때 쓰는 일회용 키 */
@@ -50,6 +52,7 @@ export class AdmissionModule {
         { provide: ADMISSION_TICKETS, useValue: o.tokens },
         { provide: ADMISSION_TOKENS, useValue: o.signer ?? testSigner() },
         { provide: ADMISSION_SIGNALS, useValue: o.signals ?? noSignals },
+        { provide: ADMISSION_POLICY, useValue: o.policy ?? {} },
       ],
       exports: [PurchaseSessionSlots],
     };

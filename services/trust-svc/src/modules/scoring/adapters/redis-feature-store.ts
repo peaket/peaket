@@ -3,9 +3,12 @@
 // tr:devacct는 정렬 집합(점수는 마지막으로 본 시각)이고 쓸 때 30일 지난 사람을 지운다. tr:devhist는 날짜 칸(`sent:{일}` 등)으로 나눠 지난 30일만 더한다.
 // 회차별 기기 공유 수(tr:devshare)와 호스팅·프록시 대역 진입 수(tr:asnhost)는 다른 키 읽기와 함께 넣고 센다(§4.9, ADR-0251). 허니팟 적중 표시(tr:hp)의 쓰기는 BOT-055가 더했다.
 // 차단 키(tr:block)는 여기서 읽기(EXISTS)와 키 회전 이음의 옮기기(있는 키를 새 판 이름으로 되살리기)만 한다. 새로 올리는 곳은 라벨 반영 저장소(redis-label-store.ts) 하나다(§9, B-T9 ①).
+// 판정 근거 조회(§12, B-T15 ①)는 근거 키(tr:vb) → 그 근거의 기기 가명(키 회전의 이어 달기 tr:refnext를 따라) → 그 기기의 tr:devhist를 읽기만 한다.
 import { type HotRedis, redisScript } from '@peaket/platform';
+import { type EvidenceRead, evidenceReadOf, NO_DEVICE_HISTORY, parseStoredEvidence } from '../domain/evidence.js';
 import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
-import { type FeatureName, type FeatureRead, type FeatureStore, MIGRATION_FEATURES, type MigrationFeature, type MigrationOutcome, type MigrationResult, type VerdictEvidence } from '../domain/ports.js';
+import { DEVICE_REF } from '../domain/labels.js';
+import { type EvidenceStore, type FeatureName, type FeatureRead, type FeatureStore, MIGRATION_FEATURES, type MigrationFeature, type MigrationOutcome, type MigrationResult, type VerdictEvidence } from '../domain/ports.js';
 import { DEV_SHARE_CAP } from '../domain/rules.js';
 import type { DeviceHistory } from '../domain/types.js';
 
@@ -27,6 +30,8 @@ const DEV_SHARE_TTL_MS = 600_000;
 const ASN_HOST_BUCKET_MS = 10_000;
 /** 호스팅·프록시 대역 진입 수 키의 수명 30초 [가정] */
 const ASN_HOST_TTL_MS = 30_000;
+/** 판정 근거 조회가 키 회전의 이어 달기를 따라가는 상한(라벨 반영 저장소와 같다) */
+const FOLLOW_MAX = 3;
 
 export const keys = {
   devAccounts: (ref: string) => `tr:devacct:{${ref}}`,
@@ -199,7 +204,7 @@ function historyOf(raw: unknown, minDay: number): DeviceHistory {
 }
 
 /** 읽기의 결과를 키마다 받는다. deviceRef가 없으면 기기 키는 묻지 않고, hostEntry·shareEventId가 없으면 그 키를 세지 않는다(값 없음이지만 실패는 아니다) */
-export class RedisFeatureStore implements FeatureStore {
+export class RedisFeatureStore implements FeatureStore, EvidenceStore {
   constructor(private readonly redis: HotRedis) {}
 
   async read(i: { deviceRef: string | undefined; pid: string; now: number; hostEntry?: { asn: number; eventId: string } | undefined; shareEventId?: string | undefined }): Promise<FeatureRead> {
@@ -330,6 +335,31 @@ export class RedisFeatureStore implements FeatureStore {
     } catch {
       return 'failed';
     }
+  }
+
+  /**
+   * 판정 근거 조회(§12): 근거 키를 읽고, 그 근거의 기기 가명으로 지난 30일 기기 이력을 읽는다. 같은 사람의 다른 기기 이력은 읽지 않는다.
+   * 키 회전의 이음으로 그 기기의 키가 새 판 값으로 옮겨졌으면 이어 달기를 따라 새 판 값의 이력을 읽는다(§4.10).
+   * 근거 키·이어 달기·기기 이력은 해시 태그가 달라 차례로 읽는다. 근거 키를 읽은 뒤 어느 하나라도 읽지 못하면 던진다(기기 수를 0으로 보이지 않게).
+   * 근거 키가 없거나 읽을 수 없는 값이면 undefined다
+   */
+  async verdictEvidence(i: { pid: string; eventId: string; now: number }): Promise<EvidenceRead | undefined> {
+    const k = keys.evidence(i.pid, i.eventId);
+    const raw = await this.redis.command(['GET', k], { key: k });
+    if (raw === null || raw === undefined) return undefined;
+    const e = parseStoredEvidence(String(raw));
+    if (!e) return undefined;
+    if (!e.deviceRef) return evidenceReadOf(e, NO_DEVICE_HISTORY);
+    let ref = e.deviceRef;
+    for (let n = 0; n < FOLLOW_MAX; n++) {
+      const nk = keys.refNext(ref);
+      const next = await this.redis.command(['GET', nk], { key: nk });
+      if (typeof next !== 'string' || !DEVICE_REF.test(next) || next === ref) break;
+      ref = next;
+    }
+    const h = keys.devHistory(ref);
+    const history = await this.redis.command(['HGETALL', h], { key: h });
+    return evidenceReadOf(e, historyOf(history, dayOf(i.now) - WINDOW_DAYS + 1));
   }
 
   async recordVerification(i: { deviceRef: string; passed: boolean; now: number }): Promise<void> {

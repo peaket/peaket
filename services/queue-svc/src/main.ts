@@ -1,17 +1,24 @@
 // queue-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-// 앱 포트(REST: 사전 검증 POST /v1/queues/{eventId}/pre-verifications, 진입 POST …/entries, 대기 상태 파일 GET …/segment-states/{segment}.json, 입장 확정 POST …/admission)
-// ·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
+// 앱 포트(REST: 사전 검증 POST /v1/queues/{eventId}/pre-verifications, 진입 POST …/entries, 대기 상태 파일 GET …/segment-states/{segment}.json, 입장 확정 POST …/admission,
+// 추가 검증 POST·GET …/verification)·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 업무 gRPC 포트(VerificationAppealService, BOT-090)는 이 파일이 연다.
+// 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
 import { CircuitBreaker, Counter, createHotRedis, createService, errorSummary, Gauge, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
+import { startGrpcServer } from './grpc-server.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
 import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
+import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
 
 const SERVICE = 'queue-svc';
+/** 업무 gRPC 포트 [가정](trust-svc·identity-svc와 같은 기본값, BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
+const DEFAULT_GRPC_PORT = 50051;
+const grpcPort = Number(process.env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
+if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${process.env.PEAKET_GRPC_PORT}`);
 
 // 대기열 Redis: 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표)
 const clusterUrls = (process.env.PEAKET_QUEUE_REDIS_CLUSTER_URLS ?? '')
@@ -42,10 +49,42 @@ const asnFile = process.env.PEAKET_ASN_TABLE_FILE;
 const asnLog: { warn?: (reason: string) => void } = {};
 const asnTable = new ReloadingAsnTable({ load: asnFile ? () => import('node:fs/promises').then((f) => f.readFile(asnFile, 'utf8')) : async () => undefined, clock: systemClock, onError: (reason) => asnLog.warn?.(reason) });
 const degradedLimits = new MemoryDegradedLimits(systemClock, asnTable);
+// 추가 검증 제출의 본인확인 재통과(BOT-090, identity.proto CheckReverification). 주소가 없으면 local·ci·demo만 늘 503으로 시작하고, 그 밖은 시작하지 않는다(trust-svc 주소와 같은 규칙)
+const identityGrpc = process.env.PEAKET_IDENTITY_GRPC_URL;
+if (!identityGrpc && !['local', 'ci', 'demo'].includes(SERVICE_ENV)) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity-svc host:port)');
+const identityBreakerHolder: { b?: CircuitBreaker } = {};
+const reverification = identityGrpc ? new GrpcReverification(identityGrpc, loadPlatformConfig(process.env).grpcLbProfile, { run: (a) => (identityBreakerHolder.b ? identityBreakerHolder.b.run(a) : a()) }) : undefined;
+const verificationSignals = new PromVerificationSignals();
 // 대기열 파일의 교차 출처 허용: 소비자 웹 하나(환경마다 주소가 다르다, 없으면 운영 주소)
 const webOrigin = process.env.PEAKET_WEB_ORIGIN;
 // Kafka 소비자 설정은 듣기 전에 읽는다(브로커 주소가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다)
 const kafka = kafkaConsumersFromEnv(process.env);
+// 이의 건 요청(support.cases-requested, 거래·제어 클러스터 = 소비자와 같은 PEAKET_KAFKA_BROKERS, ADR-0259 결정 6). queue-svc의 첫 Kafka 생산자다.
+// 브로커가 없으면(local·ci만 허락) 이의만 503이다. Kafka를 띄우지 못하는 PC의 화면 연결은 '발행 성공' 대역(PEAKET_CASE_REQUESTS_STUB=accept, local·ci 전용)을 쓴다
+const caseStub = process.env.PEAKET_CASE_REQUESTS_STUB;
+if (caseStub !== undefined && (caseStub !== 'accept' || !['local', 'ci'].includes(SERVICE_ENV))) throw new Error('PEAKET_CASE_REQUESTS_STUB는 local·ci에서 accept만 쓴다');
+const caseWarnings: string[] = [];
+/** 발행 대역의 로그는 서비스 로거가 생긴 뒤 단다 */
+const caseLog: { warn?: (fields: Record<string, unknown>, message: string) => void } = {};
+let kafkaCases: KafkaCaseRequests | undefined;
+let cases: CaseRequestPublisher | undefined;
+if (kafka.enabled) {
+  try {
+    // 네이티브 모듈은 켤 때만 싣는다(시험과 Kafka 없는 환경은 모듈 없이 돈다). 싣지 못해도 시작은 막지 않는다(이의만 503)
+    const { createKafkaProducer, withTraceHeaders } = await import('@peaket/platform/stream-worker');
+    const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
+    const { brokers, auth, env: kafkaEnv } = kafka;
+    kafkaCases = new KafkaCaseRequests(() => createKafkaProducer({ kind: 'default', brokers, clientId: `queue-svc-${kafkaEnv}-${pod}`, auth }), () => withTraceHeaders());
+    cases = kafkaCases;
+  } catch {
+    caseWarnings.push('Kafka 클라이언트를 싣지 못해 이의 접수가 503이다');
+  }
+} else if (caseStub === 'accept') {
+  cases = new LocalCaseRequests((c) => caseLog.warn?.({ dep: 'kafka', appealId: c.sourceId, eventKey: c.eventKey }, '건 요청 발행 대역(local·ci): 내지 않고 받은 것으로 친다'));
+  caseWarnings.push('이의 건 요청이 발행 대역이다(PEAKET_CASE_REQUESTS_STUB=accept, local·ci 전용)');
+} else {
+  caseWarnings.push('PEAKET_KAFKA_BROKERS가 없어 이의 접수가 503이다(추가 검증 제출은 그대로다)');
+}
 // 도착 시각 쿠키 키(ADR-0223): 없으면 쿠키를 읽지 않는다(그 환경은 쿠키 없는 일반 진입뿐이다, 시작에는 실패하지 않는다)
 const arrivals = HmacArrivalCookies.fromEnv(process.env);
 const arrivalSignals = new PromArrivalSignals();
@@ -59,12 +98,35 @@ const lobbySignals = new PromLobbySignals();
 const leaveSignals = new PromLeaveSignals();
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: trustRisk ?? unavailableRisk, degradedLimits, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals, ...(firstVisit ? { firstVisit } : {}), firstVisitSignals }),
+  module: AppModule.register({
+    redis,
+    ...(waitRedis ? { waitRedis } : {}),
+    tokens,
+    risk: trustRisk ?? unavailableRisk,
+    degradedLimits,
+    ...(sealer ? { sealer } : {}),
+    lobbySignals,
+    leaveSignals,
+    state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) },
+    admission: { signer, signals },
+    ...(arrivals ? { arrivals } : {}),
+    arrivalSignals,
+    ...(firstVisit ? { firstVisit } : {}),
+    firstVisitSignals,
+    // trust-svc 클라이언트 하나가 진입 판정과 추가 검증(VERIFICATION)을 함께 맡는다(같은 차단기: 서킷이 열리면 제출도 503, B-T6 ④)
+    verification: { ...(reverification ? { reverification } : {}), ...(trustRisk ? { risk: trustRisk } : {}), ...(cases ? { cases } : {}), signals: verificationSignals },
+  }),
 });
 arrivalSignals.register(service.metrics.registry);
 firstVisitSignals.register(service.metrics.registry);
 riskSignals.register(service.metrics.registry);
 trustBreakerHolder.b = new CircuitBreaker({ service: SERVICE, dependency: 'trust-svc', registry: service.metrics.registry, logger: service.logger, ...TRUST_BREAKER });
+identityBreakerHolder.b = new CircuitBreaker({ service: SERVICE, dependency: 'identity-svc', registry: service.metrics.registry, logger: service.logger });
+verificationSignals.register(service.metrics.registry);
+caseLog.warn = (fields, message) => service.logger.warn(fields, message);
+if (!reverification) service.logger.warn({ dep: 'identity-svc' }, 'PEAKET_IDENTITY_GRPC_URL이 없어 추가 검증 제출이 늘 503이다(local·ci·demo)');
+for (const w of caseWarnings) service.logger.warn({ dep: 'kafka' }, w);
+kafkaCases?.warm();
 if (!trustRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 위험 판정이 늘 축소 운영이다(local·ci·demo)');
 if (!asnFile) service.logger.warn({ dep: 'asn-table' }, 'PEAKET_ASN_TABLE_FILE이 없어 축소 운영의 IP 한도를 걸지 않는다');
 asnLog.warn = (reason) => service.logger.warn({ dep: 'asn-table', reason }, 'ASN 분류표를 읽지 못해 마지막 판을 쓴다');
@@ -76,6 +138,21 @@ signals.register(service.metrics.registry);
 lobbySignals.register(service.metrics.registry);
 leaveSignals.register(service.metrics.registry);
 await service.listen();
+
+// 업무 gRPC 포트(VerificationAppealService): 부르는 쪽을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(HOT-400)
+const grpc = await startGrpcServer({
+  host: process.env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+  port: grpcPort,
+  services: [
+    {
+      definition: queuePackage().VerificationAppealService.service,
+      handlers: verificationAppealHandlers({ get: service.app.get(GetVerificationAppeal), resolve: service.app.get(ResolveVerificationAppeal) }, (method, err) =>
+        service.logger.error({ err: errorSummary(err), method }, 'VerificationAppealService 처리 실패'),
+      ),
+    },
+  ],
+});
+service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 
 // 셔플 커밋 공시 일꾼(ADR-0231 결정 6): 봉인이 있으면 파드마다 돈다. 먼저 쓴 값 하나로 남는다
 const commitWorker = sealer ? new ShuffleCommitWorker(service.app.get(ShuffleCommits), new RedisEventSchedules(redis, systemClock), (now) => new RedisWithdrawnKeys(redis).activeEvents(now), systemClock, service.logger) : undefined;
@@ -148,7 +225,10 @@ function shutdown(): void {
   // Kafka 소비자를 먼저 멈추고(받기를 멈추고 처리 중인 키를 마친 뒤 커밋), 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   commitWorker?.stop();
   asnTable.stop();
-  void (consumers?.stop() ?? Promise.resolve())
+  // 받는 gRPC 호출을 먼저 닫고(처리 중인 결과 반영은 마친다), Kafka 소비자를 멈춘다
+  void grpc
+    .close()
+    .then(() => consumers?.stop())
     .then(() => dueWorker?.stop())
     .then(() => edgeSync?.stop())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
@@ -156,8 +236,10 @@ function shutdown(): void {
     .catch((err: unknown) => service.logger.error({ err }, 'queue-svc 종료 실패'))
     .finally(() => {
       trustBreakerHolder.b?.shutdown();
+      identityBreakerHolder.b?.shutdown();
       trustRisk?.close();
-      return Promise.all([redis.close(), waitRedis?.close()]);
+      reverification?.close();
+      return Promise.all([redis.close(), waitRedis?.close(), kafkaCases?.close()]);
     });
 }
 process.once('SIGTERM', shutdown);

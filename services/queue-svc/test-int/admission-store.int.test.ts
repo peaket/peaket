@@ -26,6 +26,8 @@ afterAll(async () => {
 });
 
 const cmd = (key: string, args: string[]) => redis.command(args, { key });
+/** 다른 대기자의 앞 인원: 내 번호와 serving 사이에서 빠진 번호를 뺀 수(대기 상태 파일과 같은 셈, admission-cases의 aheadOf와 같다) */
+const aheadOf = (seq: number, serving: number, removed: readonly number[]) => seq - serving - 1 - removed.filter((n) => n > serving && n < seq).length;
 const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
 
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
@@ -51,6 +53,14 @@ function harness() {
     setRemoved: async (e: string, seq: number) => void (await cmd(k.removed(e), ['SETBIT', k.removed(e), String(seq), '1'])),
     isRemoved: async (e: string, seq: number) => Number(await cmd(k.removed(e), ['GETBIT', k.removed(e), String(seq)])) === 1,
     setVerify: async (e: string, h: string, v: string) => void (await cmd(k.verify(e), ['HSET', k.verify(e), h, v])),
+    verifyOf: async (e: string, h: string) => str(await cmd(k.verify(e), ['HGET', k.verify(e), h])),
+    removedList: async (e: string) => {
+      // 비트맵을 바이트로 읽어 켜진 번호를 센다(바이트 안 높은 비트부터, SETBIT과 같은 차례)
+      const raw = (await redis.command(['GET', k.removed(e)], { key: k.removed(e), binary: true })) as Buffer | null;
+      const out: number[] = [];
+      if (raw) for (let i = 0; i < raw.length; i++) for (let b = 0; b < 8; b++) if ((raw[i]! >> (7 - b)) & 1) out.push(i * 8 + b);
+      return out;
+    },
     addSkipped: async (e: string, line: string) => void (await cmd(k.skipped(e), ['RPUSH', k.skipped(e), line])),
     setNotice: async (e: string, f: Record<string, string>) => void (await cmd(k.notice(e), ['HSET', k.notice(e), ...Object.entries(f).flat()])),
     setTarget: async (e: string, n: number) => void (await cmd(k.ctl(e), ['HSET', k.ctl(e), 'targetNow', String(n)])),
@@ -113,15 +123,55 @@ test('[Valkey Lua] Q-T34⑦ 추가 검증 중인 대기표도 취소하면 입�
   const now = Date.now();
   await writeSchedule(eventId, openSchedule(now));
   await h.setServing(eventId, 200);
-  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, recordingSignals(), systemClock);
+  const signals = recordingSignals();
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, signals, systemClock);
   const t = tokens.ticket({ e: eventId, a: ACCOUNT, d: DEVICE, s: 150, g: 1, seg: 0, rq: 'rq-1', jny: JNY, vr: 'NETWORK' });
   const hash = tokens.hash(t);
   await h.setDup(PID, eventId, `150:1:rq-1:${JNY}:NETWORK:${hash}`);
   await h.setRemoved(eventId, 150);
   await h.setVerify(eventId, hash, `VERIFYING:${now}:NETWORK`);
+  // 뒤 대기자 260의 앞 인원(공통 조건). 격리 때 켠 150의 비트는 취소해도 그대로라 앞 인원이 바뀌지 않는다
+  const removedBefore = await h.removedList(eventId);
+  const aheadBefore = aheadOf(260, 200, removedBefore);
   expect((await app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).status).toBe('VERIFYING');
   await new LeaveQueue(new RedisEntryStore(redis), h.schedules).entry({ eventId, pid: PID });
   await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).rejects.toMatchObject({ code: 'REMOVED' });
+  expect(await h.removedList(eventId)).toEqual(removedBefore);
+  expect(aheadOf(260, 200, await h.removedList(eventId))).toBe(aheadBefore);
+  expect(await h.admitted(eventId)).toBe(0);
+  expect(signals.seen.beforeTurn).toHaveLength(0);
+});
+
+test('[Valkey Lua] Q-T34 ⑦ 통과한 대기표도 취소하면 같은 대기표의 입장 확정이 410 REMOVED이고 PASSED 칸이 없다', async () => {
+  const h = harness();
+  const eventId = newEvent();
+  const now = Date.now();
+  await writeSchedule(eventId, openSchedule(now));
+  // 차례 전(serving 100)이라 취소 전에는 NOT_YET으로 PASSED가 받아들여진 것을 본다
+  await h.setServing(eventId, 100);
+  const signals = recordingSignals();
+  const app = new ConfirmAdmission(h.store, h.schedules, tokens, signer, signals, systemClock);
+  const t = tokens.ticket({ e: eventId, a: ACCOUNT, d: DEVICE, s: 150, g: 1, seg: 0, rq: 'rq-1', jny: JNY, vr: 'NETWORK' });
+  const hash = tokens.hash(t);
+  await h.setDup(PID, eventId, `150:1:rq-1:${JNY}:NETWORK:${hash}`);
+  await h.setRemoved(eventId, 150);
+  await h.setVerify(eventId, hash, `PASSED:${now - 1_000}:NETWORK`);
+  // 뒤 대기자 160의 앞 인원(공통 조건): 150은 격리 때부터 빠진 번호라 통과·취소 어느 때에도 바뀌지 않는다
+  const removedBefore = await h.removedList(eventId);
+  const aheadBefore = aheadOf(160, 100, removedBefore);
+  // 차례 전 통과자는 확인 Lua가 센 NOT_YET(serving 기록이 없어 상한 60초)이고 자리가 없다
+  expect(await app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).toMatchObject({ status: 'NOT_YET', retryAfterMs: 60_000 });
+  expect(await h.admitted(eventId)).toBe(0);
+  await new LeaveQueue(new RedisEntryStore(redis), h.schedules).entry({ eventId, pid: PID });
+  expect(await h.verifyOf(eventId, hash)).toBeNull();
+  expect(await h.removedList(eventId)).toEqual(removedBefore);
+  expect(aheadOf(160, 100, await h.removedList(eventId))).toBe(aheadBefore);
+  await h.setServing(eventId, 200);
+  await h.logServing(eventId, now - 10_000, 200);
+  await expect(app.run({ accountId: ACCOUNT, sessionId: 's', pid: PID, eventId, body: { queueTicket: t } })).rejects.toMatchObject({ code: 'REMOVED' });
+  expect(await h.slots(eventId)).toEqual(new Map());
+  expect(await h.admitted(eventId)).toBe(0);
+  expect(signals.seen.beforeTurn).toHaveLength(0);
 });
 
 test('[Valkey Lua] Q-T68① 목록을 고정하기 전에 취소한 참가 토큰은 게시 뒤 입장 확정이 403이다', async () => {

@@ -1,6 +1,6 @@
 // trust-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-// 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel)는 이 파일이 연다.
+// 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel, TrustEvidenceService.GetVerdictEvidence)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
 import { CircuitBreaker, createHotRedis, createService, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
@@ -9,6 +9,7 @@ import { startGrpcServer } from './grpc-server.js';
 import {
   ApplyLabel,
   deviceRefsFromEnv,
+  GetVerdictEvidence,
   JsonTelemetryRecorder,
   kmsMacClient,
   LogBlockListChange,
@@ -21,6 +22,7 @@ import {
   ScoreRisk,
   startRuleRefresh,
   TURNSTILE_BREAKER,
+  trustEvidenceServiceHandlers,
   trustLabelServiceHandlers,
   trustPackage,
   trustServiceHandlers,
@@ -145,6 +147,9 @@ const applyLabel = new ApplyLabel({
   clock: systemClock,
 });
 
+// 판정 근거 조회(§12 '판정에 쓰는 자료'): 이의 심사가 판정 근거 키와 그 기기의 이력을 읽기만 한다. 부르는 쪽을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(B-T15 ②)
+const verdictEvidence = new GetVerdictEvidence({ store: features, clock: systemClock });
+
 // 설정을 읽어야 준비 상태가 된다(§4.4). 처음에 못 읽었으면 5초마다, 읽은 뒤에는 5분마다 다시 읽는다(실패하면 마지막 판을 쓴다)
 const rulesLoop = startRuleRefresh({ rules, readiness: service.readiness, task: RULES_READY_TASK });
 await rulesLoop.first;
@@ -156,6 +161,7 @@ const grpc = await startGrpcServer({
   services: [
     { definition: trustPackage().TrustService.service, handlers: trustServiceHandlers(score, (method, err) => service.logger.error({ err, method }, 'TrustService 처리 실패')) },
     { definition: trustPackage().TrustLabelService.service, handlers: trustLabelServiceHandlers(applyLabel, (method, err) => service.logger.error({ err, method }, 'TrustLabelService 처리 실패')) },
+    { definition: trustPackage().TrustEvidenceService.service, handlers: trustEvidenceServiceHandlers(verdictEvidence, (method, err) => service.logger.error({ err, method }, 'TrustEvidenceService 처리 실패')) },
   ],
 });
 service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');

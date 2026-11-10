@@ -1,0 +1,66 @@
+# 보안 검사 게이트의 새 도구 없이 되는 몫(docs/devops.md §3.1 security-scan.yml 행·§4.4, ADR-0259 결정 10, BUILD_ORDER BAS-010 ①).
+# ci.yml이 PR과 푸시(develop 등)마다 부른다. 새 취약점은 코드가 바뀌지 않아도 공개되므로 바뀐 범위와 상관없이 돈다.
+# pnpm 내장 검사(pnpm audit --json, pnpm licenses list --json)의 결과를 tools/ci/vuln-deadline.mjs가 판정한다: 유효한 예외
+# (tools/ci/vuln-exceptions.json)가 없는 치명·높음은 막고, 중간 이하와 허용 목록 밖 라이선스는 알림만 남긴다. 결과를 읽지 못하면 막는다(ASVS 16.5.3).
+# 외부 도구(gitleaks·CodeQL·OpenSSF Scorecard·Trivy)는 BAS-011 ②가 더한다(PROGRESS OPEN[31]).
+name: security-scan
+
+on:
+  workflow_call:
+    inputs:
+      licenses:
+        description: 의존성을 설치해 라이선스 목록을 본다(의존성이 바뀔 수 있는 범위일 때)
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # pnpm은 package.json의 packageManager 판으로 받는다(ci-node.yml과 같다)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      # 잠금 파일만 읽어 공개 레지스트리에 묻는다(설치하지 않는다). 취약점이 있으면 pnpm이 0이 아닌 코드로 끝나므로 코드는 적기만 하고,
+      # 통과 여부는 판정 단계가 결과 파일로 정한다(파일이 비었거나 오류면 거기서 막는다)
+      - name: 취약점 검사(pnpm audit)
+        run: |
+          set +e
+          pnpm audit --json > "$RUNNER_TEMP/audit.json"
+          code=$?
+          set -e
+          echo "pnpm audit 종료 코드: $code"
+      # 라이선스 목록은 설치한 패키지의 정보를 읽는다. 설치 스크립트는 돌리지 않는다
+      - name: 라이선스 목록(pnpm licenses list)
+        if: ${{ inputs.licenses }}
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm licenses list --json --recursive > "$RUNNER_TEMP/licenses.json"
+      # 수정본 공개일(기한의 시작)은 pnpm audit 결과에 없어 공개 레지스트리의 게시 시각에서 읽는다
+      - name: 조치 기한·예외 만료 판정
+        env:
+          LICENSES: ${{ inputs.licenses }}
+        run: |
+          extra=()
+          if [ "$LICENSES" = "true" ]; then extra+=(--licenses "$RUNNER_TEMP/licenses.json"); fi
+          node tools/ci/vuln-deadline.mjs --audit "$RUNNER_TEMP/audit.json" --exceptions tools/ci/vuln-exceptions.json --registry https://registry.npmjs.org --report "$RUNNER_TEMP/vuln-report.json" "${extra[@]}"
+      # 판정 보고서(발견마다 기한·예외 상태)는 승격 자동화(BAS-140, D-T13)와 사람이 본다
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vuln-report
+          path: ${{ runner.temp }}/vuln-report.json
+          if-no-files-found: ignore
+          retention-days: 30

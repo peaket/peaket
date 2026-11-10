@@ -6,6 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
 import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, EmergencyMark, PublishedBatch, RecommitMark, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
+import { removedAtPublish } from '../domain/verify-state.js';
 
 export const ADMISSION_REDIS = Symbol('admission.QueueRedis');
 /** 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], PEAKET_QUEUE_REDIS_MIN_REPLICAS) */
@@ -212,7 +213,7 @@ export class RedisBatchStore implements BatchStore {
       const chunk = hashes.slice(i, i + CHUNK);
       const vals = (await this.redis.command(['HMGET', k, ...chunk], { key: k })) as unknown[];
       chunk.forEach((h, j) => {
-        if (/^(VERIFYING|ORPHAN|BLOCKED):/.test(str(vals[j]) ?? '')) out.push(h);
+        if (removedAtPublish(str(vals[j]))) out.push(h);
       });
     }
     return out;

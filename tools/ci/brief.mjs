@@ -291,6 +291,7 @@ export const JOBS = {
   'web / seed-css': { file: 'ci-web.yml', what: 'SEED CSS 층(FE-T36, 앱 다섯 PoC 빌드)' },
   'web / budgets': { file: 'ci-web.yml', what: '운영 빌드의 경로별 첫 JS 예산·Lighthouse·대기실 FE-T1·CSP(FE-T35·FE-T30)·정적 자산, @peaket/config 정본 대조' },
   'web / seatmap-pkg': { file: 'ci-web.yml', what: '좌석맵 패키지 세 엔진' },
+  'security-scan / dependencies': { file: 'security-scan.yml', what: 'pnpm 내장 의존성 취약점·라이선스 검사와 조치 기한·예외 만료 판정(tools/ci/vuln-deadline.mjs, BAS-010 ①)' },
 };
 
 /** ci-node.yml이 통합 시험(pnpm --filter @peaket/<이름> test:integration)을 따로 도는 패키지 */

@@ -12,6 +12,7 @@
 import type { ProblemEnded } from './problemEnded';
 import type { ProblemFraudHold } from './problemFraudHold';
 import type { ProblemLock } from './problemLock';
+import type { ProblemRemoveReason } from './problemRemoveReason';
 
 /**
  * RFC 9457 Problem Details(guidelines §2). 오류 식별자는 type URI다. 아래 선택 확장 필드는 적힌 응답에만 싣는다
@@ -31,6 +32,8 @@ export interface Problem {
   reholdAvailableAt?: string;
   /** 입장 확정의 대기표 만료 410에만. 다시 줄 서기 가능 여부(이 회차에 입장한 적이 있거나 판매 종료가 지났으면 false, 사전 셔플 공연도 같은 규칙, ADR-0062·0064) */
   rejoinAllowed?: boolean;
+  /** 입장 확정·추가 검증 제출의 410 queue-ticket-removed에만, 이의 기각으로 끝난 대기 참여일 때. 대기실·SCR-009가 '기각' 문구를 고른다. 이름과 값은 asyncapi의 대기 기록 removeReason과 같다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259) */
+  removeReason?: ProblemRemoveReason;
   /** 결제 시도 시작의 503(새 결제 일시 정지)에만. 주문을 만들고 결제 접수 전인 홀드의 멈춘 남은 시간(초). 다시 열리면 이어 센다(ADR-0085) */
   holdRemainingSeconds?: number;
   /** 후기 쓰기의 409 review-already-written에만. 이 계정이 이 회차에 이미 쓴 후기 ID(수정으로 안내) */

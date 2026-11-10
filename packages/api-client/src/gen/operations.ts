@@ -276,6 +276,7 @@ export type OperationId =
   | 'getQueueSegmentState'
   | 'getQueueShuffleProof'
   | 'getQueueShuffleResult'
+  | 'getQueueVerification'
   | 'getReview'
   | 'getScannerEventChanges'
   | 'getScannerEventDevices'
@@ -653,6 +654,7 @@ export const OPERATIONS = {
   getQueueSegmentState: {operationId: "getQueueSegmentState",method: "GET",path: "/v1/queues/{eventId}/segment-states/{segment}.json",host: "queue-files",kind: "queue-file",cookie: false,cache: "no-store"},
   getQueueShuffleProof: {operationId: "getQueueShuffleProof",method: "GET",path: "/v1/queues/{eventId}/shuffle-proof",host: "queue",kind: "read",cookie: false},
   getQueueShuffleResult: {operationId: "getQueueShuffleResult",method: "GET",path: "/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json",host: "queue-files",kind: "queue-file",cookie: false},
+  getQueueVerification: {operationId: "getQueueVerification",method: "GET",path: "/v1/queues/{eventId}/verification",host: "queue",kind: "read",cookie: true},
   getReview: {operationId: "getReview",method: "GET",path: "/v1/reviews/{reviewId}",host: "api",kind: "read",cookie: true},
   getScannerEventChanges: {operationId: "getScannerEventChanges",method: "GET",path: "/v1/scanner/events/{eventId}/changes",host: "scanner-api",kind: "read",cookie: false,query: ["after","limit"]},
   getScannerEventDevices: {operationId: "getScannerEventDevices",method: "GET",path: "/v1/scanner/events/{eventId}/devices",host: "scanner-api",kind: "read",cookie: false},

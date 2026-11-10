@@ -11,24 +11,13 @@
 //    판매 중지(410)는 화면이 안내와 상태 표시를 그리고 앞 서버가 상태를 맞춘다(server/csp-hash-server.mjs).
 import { NextResponse, type NextRequest } from 'next/server';
 import { canonicalEventPath, createEventGate, eventCacheTags, eventIdFromPath } from './src/_app/routing/event-gate.ts';
-import { NONCE_HEADER, cachedCsp, matchRoute, newNonce, pageHeaders, socialAuthOrigins } from './src/_app/security/page-headers.ts';
+import { NONCE_HEADER, cachedCsp, cspOriginsFromEnv, matchRoute, newNonce, pageHeaders } from './src/_app/security/page-headers.ts';
 import { verifyReturnProxy } from './src/features/identity-verify/server/return-post.ts';
 
 const dev = process.env.NODE_ENV === 'development';
 
-/**
- * 환경마다 다른 출처(로컬 실행 등). 없으면 운영 출처(security-headers.mjs PROD_ORIGINS).
- * 로컬·CI에서 바꾼 제공자 issuer는 로그인·재인증 화면의 form-action 출처로 쓴다(ADR-0215). PEAKET_CSP_ORIGINS가 그보다 앞선다
- */
-function cspOrigins(): Record<string, string> | undefined {
-  const social = socialAuthOrigins(process.env);
-  const raw = process.env.PEAKET_CSP_ORIGINS;
-  if (!raw) return Object.keys(social).length > 0 ? social : undefined;
-  const o: unknown = JSON.parse(raw);
-  if (typeof o !== 'object' || o === null || Array.isArray(o)) throw new TypeError('PEAKET_CSP_ORIGINS는 JSON 객체여야 한다');
-  return { ...social, ...(o as Record<string, string>) };
-}
-const origins = cspOrigins();
+/** 환경마다 다른 출처(로컬 실행 등, page-headers.ts cspOriginsFromEnv). 본인확인기관 출처가 틀린 꼴이면 그 출처만 빼고 경고한다(웹 전체가 500이 되지 않게) */
+const origins = cspOriginsFromEnv(process.env);
 
 /** 서버 API(gw-fan)에 묻는 앞 거르기. 주소가 없으면(개발·CI) 모양이 틀린 ID만 거른다 */
 const eventGate = createEventGate({ apiOrigin: process.env.PEAKET_API_ORIGIN?.trim() || undefined });

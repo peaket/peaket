@@ -33,6 +33,8 @@ function memoryHarness(): AdmissionHarness {
     setRemoved: async (e, seq) => void db.removed(e).add(seq),
     isRemoved: async (e, seq) => db.removed(e).has(seq),
     setVerify: async (e, h, v) => void db.verify(e).set(h, v),
+    verifyOf: async (e, h) => db.verify(e).get(h) ?? null,
+    removedList: async (e) => [...db.removed(e)].sort((a, b) => a - b),
     addSkipped: async (e, line) => void db.skipped(e).push(line),
     setNotice: async (e, f) => void Object.entries(f).forEach(([k, v]) => db.notice(e).set(k, v)),
     setTarget: async (e, n) => void db.ctl(e).set('targetNow', String(n)),
@@ -216,6 +218,42 @@ describe('받는 층: POST /v1/queues/{eventId}/admission', () => {
     expect(gone.statusCode).toBe(410);
     expect(JSON.parse(gone.payload)).toMatchObject({ rejoinAllowed: true });
     expect(JSON.parse(gone.payload).type).toContain('queue-ticket-expired');
+  });
+
+  test('Q-T34 ⑥ 기각된 대기표의 입장 확정은 410 queue-ticket-removed와 확장 칸 removeReason BLOCKED이고, 다른 빠진 번호는 그 칸이 없다', async () => {
+    const { eventId, ticket } = await world();
+    const blocked = ticket(150);
+    store.db.removed(eventId).add(150);
+    store.db.verify(eventId).set(tokens.hash(blocked), `BLOCKED:${Date.now()}:NETWORK`);
+    const res = await post(eventId, JSON.stringify({ queueTicket: blocked }), 'text/plain;charset=UTF-8', fan({ pid: 'pid-blocked' }));
+    expect(res.statusCode).toBe(410);
+    expect(res.headers['content-type']).toContain('application/problem+json');
+    const body = JSON.parse(res.payload) as Record<string, unknown>;
+    expect(body.type).toMatch(/queue-ticket-removed$/);
+    expect(body.removeReason).toBe('BLOCKED');
+    expect('rejoinAllowed' in body).toBe(false);
+    // 취소·중복으로 빠진 번호는 확장 칸 없이 같은 410이다(어떤 대기표가 왜 빠졌는지 더 드러내지 않는다)
+    const left = ticket(151);
+    store.db.removed(eventId).add(151);
+    const other = await post(eventId, JSON.stringify({ queueTicket: left }), 'text/plain;charset=UTF-8', fan({ pid: 'pid-left' }));
+    expect(other.statusCode).toBe(410);
+    const otherBody = JSON.parse(other.payload) as Record<string, unknown>;
+    expect(otherBody.type).toMatch(/queue-ticket-removed$/);
+    expect('removeReason' in otherBody).toBe(false);
+  });
+
+  test('Q-T34 ⑤ 통과 전 입장 확정은 200 VERIFYING과 사유 범주이고, 통과하면 빠진 번호여도 200 ADMITTED다', async () => {
+    const { eventId, ticket } = await world();
+    const t = ticket(160);
+    store.db.removed(eventId).add(160);
+    store.db.verify(eventId).set(tokens.hash(t), `VERIFYING:${Date.now()}:INTERACTION`);
+    const res = await post(eventId, JSON.stringify({ queueTicket: t }), 'text/plain;charset=UTF-8', fan({ pid: 'pid-verifying' }));
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.payload)).toMatchObject({ status: 'VERIFYING', verificationReason: 'INTERACTION' });
+    store.db.verify(eventId).set(tokens.hash(t), `PASSED:${Date.now()}:INTERACTION`);
+    const passed = await post(eventId, JSON.stringify({ queueTicket: t }), 'text/plain;charset=UTF-8', fan({ pid: 'pid-verifying' }));
+    expect(passed.statusCode).toBe(200);
+    expect(JSON.parse(passed.payload)).toMatchObject({ status: 'ADMITTED', verificationReason: null });
   });
 
   test('[Q-T45] 옛 pid 머리(X-User-Pid-Prev)가 오면 옛 pid 키로도 1인 1순번을 보고, 키에 넣을 수 없는 모양이면 403 본인확인 필요다', async () => {

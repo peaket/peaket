@@ -193,12 +193,25 @@ export function leaveCases(name: string, setup: () => Promise<LeaveWorld>): void
   });
 
   test(`[${name}] Q-T34⑦ Q-T68③ 통과한 대기표를 취소하면 PASSED를 지우고 BLOCKED는 그대로 둔다`, async () => {
-    const a = await queued();
+    // 격리된 진입(vr)이라 빠진 번호 비트가 이미 켜져 있다. 통과한 뒤 취소해도 비트는 그대로라 뒤 대기자의 앞 인원이 바뀌지 않는다(Q-T34 공통 조건)
+    const a = await queued({ vr: 'NETWORK' });
     const t = await a.join();
+    const back = await a.join(PID2);
+    expect(back.seq).toBeGreaterThan(t.seq);
     const hash = tokens.hash(t.queueTicket);
     await a.w.setVerify(a.eventId, hash, 'PASSED:1');
+    /** 아무도 부르지 않은 회차(serving 0)에서 뒤 대기자 앞의 빠진 번호를 뺀 인원 */
+    const aheadOfBack = async () => {
+      let n = back.seq - 1;
+      for (let s = 1; s < back.seq; s += 1) if (await a.w.removed(a.eventId, s)) n -= 1;
+      return n;
+    };
+    expect(await a.w.removed(a.eventId, t.seq)).toBe(true);
+    const aheadBefore = await aheadOfBack();
     await a.leave.entry({ eventId: a.eventId, pid: PID });
     expect(await a.w.verifyOf(a.eventId, hash)).toBeNull();
+    expect(await a.w.removed(a.eventId, t.seq)).toBe(true);
+    expect(await aheadOfBack()).toBe(aheadBefore);
     const b = await queued();
     const u = await b.join();
     const h = tokens.hash(u.queueTicket);

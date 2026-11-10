@@ -358,7 +358,27 @@ export const CreateQueueAdmissionResponse = zod.object({
 })
 
 /**
- * FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. challengeToken은 queue-svc가 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡기고, 휴대폰 본인확인 재통과는 identity-svc 결과로 따로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14)
+ * FR-020, POL-006. 이 계정의 이 회차 대기 참여(q:dup:{pid}:E의 대기표)가 지금 추가 검증 중인지·통과했는지·기각됐는지, 사유 범주, 이의 접수 여부를 준다. 화면은 몇 초 [가정] 간격으로 묻는다. 새로고침 뒤 화면은 이 탭의 본인확인 기억에 기대지 않는다: VERIFYING이면 바로 제출해 보고, 200 REVERIFY_REQUIRED면 본인확인 창을 연다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). '검토 중' 배지는 이의 심사를 하는 ops-svc가 생기는 BUILD_ORDER GAT-280 전까지 '접수됨'으로만 보인다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12)
+ * @summary 추가 검증 상태 읽기(SCR-009 새로고침 뒤 되살리기)
+ */
+export const GetQueueVerificationParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const GetQueueVerificationResponse = zod.object({
+  "state": zod.enum(['VERIFYING', 'PASSED', 'BLOCKED']).describe('VERIFYING 추가 검증 중. PASSED 통과(제출 또는 이의 인정). BLOCKED 이의 기각으로 대기 참여가 끝남'),
+  "passedVia": zod.union([zod.literal('CHALLENGE'),zod.literal('APPEAL'),zod.literal(null)]).nullish().describe('PASSED일 때만: CHALLENGE 추가 검증 제출로 통과, APPEAL 이의 인정으로 통과. 그 밖에는 null(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)'),
+  "graceUntil": zod.iso.datetime({"offset":true}).nullish().describe('PASSED이고 차례가 지났을 때만: 입장 확정을 받는 마지막 시각(차례와 통과 시각 가운데 늦은 때 + 유예 15분, QueueVerificationResult.graceUntil과 같은 계산). 그 밖에는 null(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)'),
+  "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름, AdmissionResult.verificationReason과 같다)'),
+  "appeal": zod.object({
+  "appealId": zod.uuid().optional(),
+  "receivedAt": zod.iso.datetime({"offset":true}).optional(),
+  "text": zod.string().optional().describe('본인이 보낸 이의 글(NFC 정규화 뒤 값, 비었으면 설명 요구). 본인에게만 돌려준다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
+}).nullish().describe('이의를 접수했으면 그 값, 아니면 null')
+}).describe('추가 검증 상태(GET /v1/queues/{eventId}/verification, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
+
+/**
+ * FR-020, POL-006. 통과하면 원래 순번의 차례, 지났으면 다음 빈자리. 서버는 먼저 휴대폰 본인확인 재통과를 identity-svc 결과로 본다(identity.proto CheckReverification: 추가 검증을 시작한 뒤 같은 사람으로 확정된 REVERIFY 본인확인이 있는지, 추천 적용 2026-10-30). 재통과가 있을 때만 challengeToken을 trust-svc ScoreRisk(맥락 VERIFICATION, 사람 확인만, action verify)로 서버 검증을 맡겨 한 번 쓰기 토큰을 태우지 않는다(재통과가 없으면 200 REVERIFY_REQUIRED, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). trust-svc나 identity-svc가 답하지 않으면 통과로 보지 않고 503으로 답한다(축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다). appeal은 trust-svc 없이도 받는다: queue-svc가 이의 내용을 대기열 Redis에 두고 CS 처리함 건 요청(asyncapi support.cases-requested, kind VERIFICATION_APPEAL)을 낸 뒤 202로 답한다(추천 적용 2026-10-30, docs/features/bot-defense.md §5.2·§12, ADR-0156 결정 8·14). 대기 참여는 이 계정의 q:dup:{pid}:E가 가리키는 대기표이고 본문으로 받지 않는다
  * @summary 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
  */
 export const CreateQueueVerificationParams = zod.object({
@@ -370,9 +390,14 @@ export const createQueueVerificationBodyAppealMax = 4000;
 
 
 export const CreateQueueVerificationBody = zod.object({
-  "challengeToken": zod.string().optional(),
-  "appeal": zod.string().max(createQueueVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)')
-}).strict()
+  "challengeToken": zod.string().optional().describe('심층 챌린지(CMP-047)의 사람 확인 토큰(action verify, 300초 한 번 쓰기)'),
+  "appeal": zod.string().max(createQueueVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 빈 문자열이면 설명 요청(추천 적용 2026-10-14, ADR-0062). NUL(U+0000)·양방향 제어 글자(U+202A~U+202E, U+2066~U+2069)·0폭 글자(U+200B~U+200D, U+FEFF)가 있으면 400이다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12 \'접수\')'),
+  "deviceId": zod.string().optional().describe('기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12, 로비 입장·사전 검증과 같은 모양). trust-svc가 기기 이력과 차단 기기 목록을 볼 때 쓴다. 선택이고 형식이 다르면 400(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
+}).strict().describe('추가 검증 제출 본문. challengeToken과 appeal 가운데 정확히 하나만 보낸다(둘 다 있거나 둘 다 없으면 400, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
 
-export const CreateQueueVerificationResponse = zod.unknown()
+export const CreateQueueVerificationResponse = zod.object({
+  "result": zod.enum(['PASSED', 'CHALLENGE_FAILED', 'REVERIFY_REQUIRED', 'PERSON_MISMATCH']).describe('PASSED 통과. CHALLENGE_FAILED 사람 확인 실패(다시 할 수 있다). REVERIFY_REQUIRED 추가 검증을 시작한 뒤의 본인확인 재통과가 없음(trust-svc를 부르지 않았다). PERSON_MISMATCH 재확인한 사람이 이 계정의 사람과 다름'),
+  "queueNumber": zod.int().optional().describe('PASSED일 때만: 원래 번호'),
+  "graceUntil": zod.iso.datetime({"offset":true}).nullish().describe('PASSED이고 차례가 이미 지났을 때만: 입장 확정을 받는 마지막 시각. 차례와 통과 시각 가운데 늦은 때 + 유예 15분이다. 이미 통과한 대기 참여가 다시 보내도 같은 규칙으로 계산한다(처음 통과 시각 기준, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259). 차례 전이면 null이고 원래 번호의 차례에 입장한다(queue-admission §7)')
+}).describe('추가 검증 제출 결과(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §5.2)')
 

@@ -1,12 +1,14 @@
 // trust-svc ScoreRisk 호출(docs/api/proto/peaket/trust/v1/trust.proto, docs/features/bot-defense.md §4.6·§11.3, BUILD_ORDER BOT-050).
 // 데드라인 800ms [가정], 호출 차단기(10초 창 20건·실패 50%·5초 열림, 공용 기본값). 판정을 받지 못하면(오류·데드라인 넘김·차단기 열림·알 수 없는 응답) 던지지 않고 UNAVAILABLE이다.
 // 통과로 보지 않는다: 부르는 쪽이 토큰에 hd를 서명하고 파드 메모리 한도를 건다(§11.2).
+// 추가 검증 제출(verify, BUILD_ORDER BOT-090, §5.2·B-T11)은 맥락 SCORE_CONTEXT_VERIFICATION으로만 부른다: trust-svc는 HumanCheck만 돌리고 가중합을 하지 않아
+// 차단 기기 목록 기기도 사람 확인이 성공이면 ALLOW다. 같은 차단기를 쓴다(trust-svc 서킷이 열리면 제출도 UNAVAILABLE, B-T6 ④). 여정 ID·회차 정렬은 싣지 않는다.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { trustV1Trust } from '@peaket/contracts/proto';
 import { type CircuitBreaker, type CircuitBreakerOptions, createGrpcClient, type GrpcLbProfile, ProblemError } from '@peaket/platform';
 import { Counter, type Registry } from '@peaket/platform';
-import { noRiskSignals, type RiskFallbackReason, type RiskInput, type RiskPort, type RiskSignals, type RiskVerdict } from '../domain/ports.js';
+import { noRiskSignals, type RiskClient, type RiskFallbackReason, type RiskInput, type RiskPort, type RiskSignals, type RiskVerdict } from '../domain/ports.js';
 import { REASONS, type ReasonCategory } from '../domain/queue.js';
 
 export const TRUST_RISK_DEADLINE_MS = 800;
@@ -73,10 +75,27 @@ export class GrpcTrustRisk implements RiskPort {
   }
 
   async #call(i: RiskInput): Promise<RiskVerdict> {
-    const v = await new Promise<Record<string, unknown> | undefined>((res, rej) => {
-      this.#client.ScoreRisk(requestOf(i), new grpc.Metadata(), { deadline: Date.now() + TRUST_RISK_DEADLINE_MS }, (e, r) => (e ? rej(e) : res(r)));
+    return verdictOf(await this.#unary(requestOf(i)));
+  }
+
+  /**
+   * 추가 검증 제출의 사람 확인 검증(맥락 VERIFICATION). ALLOW 성공, CHALLENGE 실패, HELD trust-svc가 사람 확인을 검증하지 못함(degraded),
+   * UNAVAILABLE 판정을 받지 못함. 던지지 않는다. 부르는 쪽은 ALLOW만 통과로 본다
+   */
+  async verify(i: VerificationRiskInput): Promise<'ALLOW' | 'CHALLENGE' | 'HELD' | 'UNAVAILABLE'> {
+    try {
+      const call = async () => humanVerdictOf(await this.#unary(verificationRequestOf(i)));
+      return await (this.breaker ? this.breaker.run(call) : call());
+    } catch (e) {
+      this.signals.fallback(reasonFromError(e));
+      return 'UNAVAILABLE';
+    }
+  }
+
+  #unary(req: object): Promise<Record<string, unknown>> {
+    return new Promise<Record<string, unknown>>((res, rej) => {
+      this.#client.ScoreRisk(req, new grpc.Metadata(), { deadline: Date.now() + TRUST_RISK_DEADLINE_MS }, (e, r) => (e ? rej(e) : res(r ?? {})));
     });
-    return verdictOf(v ?? {});
   }
 
   close(): void {
@@ -98,6 +117,35 @@ function requestOf(i: RiskInput): object {
     ...(i.client ? { client: { ip: i.client.ip, user_agent: i.client.userAgent ?? '', client_hints: i.client.clientHints, asn: i.client.asn } } : {}),
     ...(i.firstVisitAtMs !== undefined ? { first_visit_at: { seconds: Math.floor(i.firstVisitAtMs / 1000), nanos: (i.firstVisitAtMs % 1000) * 1_000_000 } } : {}),
   };
+}
+
+/** 추가 검증 제출의 입력(verification 컨텍스트의 VerificationRiskPort와 같은 모양) */
+export interface VerificationRiskInput {
+  eventId: string;
+  accountId: string;
+  pid: string;
+  deviceId?: string;
+  humanCheckToken: string;
+  client?: RiskClient;
+}
+
+function verificationRequestOf(i: VerificationRiskInput): object {
+  return {
+    context: 'SCORE_CONTEXT_VERIFICATION',
+    event_id: i.eventId,
+    pid: i.pid,
+    account_id: i.accountId,
+    device_id: i.deviceId ?? '',
+    human_check_token: i.humanCheckToken,
+    ...(i.client ? { client: { ip: i.client.ip, user_agent: i.client.userAgent ?? '', client_hints: i.client.clientHints, asn: i.client.asn } } : {}),
+  };
+}
+
+/** 추가 검증 응답을 결과로. degraded면 사람 확인을 검증하지 못한 것이라 HELD다. 모르는 값은 던져 받지 못함으로 처리한다 */
+function humanVerdictOf(r: Record<string, unknown>): 'ALLOW' | 'CHALLENGE' | 'HELD' {
+  if (r.verdict !== 'VERDICT_ALLOW' && r.verdict !== 'VERDICT_CHALLENGE') throw new InvalidVerdict(`모르는 판정 ${String(r.verdict)}`);
+  if (r.degraded === true) return 'HELD';
+  return r.verdict === 'VERDICT_ALLOW' ? 'ALLOW' : 'CHALLENGE';
 }
 
 /** 응답을 판정으로. 모르는 값은 던져 받지 못함으로 처리한다(통과로 보지 않는다) */

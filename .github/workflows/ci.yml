@@ -121,13 +121,44 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     uses: ./.github/workflows/ci-web.yml
 
+  # 보안 린트 끄기 검사(docs/devops.md §4.4 '보안 린트' ①, ADR-0259 결정 12): 뿌리 lint 범위에서 보안 규칙(peaket-web/*·peaket-service/*)을 끄는
+  # 줄 안 주석을 막고, 줄 안 설정을 무시한 채 보안 규칙만 다시 돌린다. 린트 범위(js)나 이 검사(tools)가 바뀌면 돈다
+  lint-guard:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.js == 'true' || needs.changes.outputs.tools == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # ESLint와 설정 패키지의 해석기를 쓴다. pnpm은 package.json의 packageManager 판으로 받고, 설치는 잠금 파일대로만 한다(ci-node.yml과 같다)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      - run: node tools/ci/check-lint-disables.mjs
+
+  # 보안 검사 게이트(docs/devops.md §3.1 security-scan.yml, BUILD_ORDER BAS-010 ①): 새 취약점은 코드가 바뀌지 않아도 공개되므로 범위와
+  # 상관없이 늘 돈다(잠금 파일만 읽는다). 의존성을 설치하는 라이선스 목록은 의존성이 바뀔 수 있는 범위(js)일 때만 본다
+  security-scan:
+    needs: changes
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      licenses: ${{ needs.changes.result != 'success' || needs.changes.outputs.js == 'true' }}
+
   iac-check:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, loadtest-check, contract-check, node, iac-check, kind, spec-check, image, web]
+    needs: [changes, docs-check, tools-check, loadtest-check, contract-check, node, iac-check, kind, spec-check, image, web, security-scan, lint-guard]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

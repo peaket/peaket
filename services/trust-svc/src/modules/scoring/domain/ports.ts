@@ -1,4 +1,5 @@
 // 위험 판정의 포트: 사람 확인, 판정 피처 저장소, 기기 가명, ASN 분류표, 규칙, 판정 기록, 행동 신호, 운영 신호.
+import type { EvidenceRead, StoredVerdictEvidence } from './evidence.js';
 import type { BlockListChange, BlockOp, Label, LabelEvidence, LabelSource, ReviewBatch, AppliedVerdict } from './labels.js';
 import type { RuleSet } from './rules.js';
 import type { MissingCause } from './scorers.js';
@@ -35,15 +36,8 @@ export interface FeatureRead {
   failed: readonly FeatureName[];
 }
 
-/** 판정 근거 키의 값(tr:vb, §3.2) */
-export interface VerdictEvidence {
-  eventKey: string;
-  deviceRef: string | undefined;
-  hardSignal: HardSignal;
-  reason: ReasonCategory;
-  profileVersion: number;
-  decidedAtMs: number;
-}
+/** 판정 근거 키의 값(tr:vb, §3.2). 실시간 판정은 source를 쓰지 않는다(없으면 실시간이다) */
+export type VerdictEvidence = StoredVerdictEvidence;
 
 /** 판정 피처 저장소(세션·캐시 Redis). 실패는 던진다(호출 쪽이 값 없음으로 둔다) */
 export interface FeatureStore {
@@ -62,6 +56,15 @@ export interface FeatureStore {
    * 무엇이든 옮겼으면 옛 판 값 → 새 판 값의 이어 달기를 until까지 둔다. 키마다 결과를 따로 주고 던지지 않는다
    */
   migrate(i: { from: string; to: string; eventId: string; until: number; now: number }): Promise<MigrationResult>;
+}
+
+/** 판정 근거 조회의 저장소(세션·캐시 Redis, §12 '판정에 쓰는 자료'). 읽기만 한다. 실패는 던진다(유스케이스가 UNAVAILABLE로 답한다) */
+export interface EvidenceStore {
+  /**
+   * 판정 근거 키(tr:vb:{pid}:E)를 읽고, 그 근거에 남은 기기 가명의 지난 30일 기기 이력(tr:devhist)을 읽는다(같은 사람의 다른 기기 이력은 읽지 않는다).
+   * 근거 키가 없거나 읽을 수 없는 값이면 undefined. 근거 키는 읽었는데 기기 이력을 읽지 못하면 던진다(0으로 보이지 않게)
+   */
+  verdictEvidence(i: { pid: string; eventId: string; now: number }): Promise<EvidenceRead | undefined>;
 }
 
 /** 이음에서 옮기는 키(tr:devacct·tr:devhist·tr:block·tr:devshare 그 회차·차단 키의 판 가드 tr:blkv) */

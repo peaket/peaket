@@ -78,6 +78,26 @@ test('Q-T6 로비 게시: lobby_members·batch_done의 lobby를 읽어 q:lobby·
   expect(await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'pub:lobby'])).not.toBeNull();
 });
 
+test('Q-T34 ① 실제 Valkey: 셔플 전에 통과한 로비 참가자(PASSED)는 게시 때 빠진 번호가 되지 않고 추가 검증 중·기각만 돌린다', async () => {
+  const E = `evt-passed-int-${Date.now()}`;
+  const startsAt = Date.now() + 3 * 24 * 3600_000;
+  const members = ['v1', 'v2', 'v3', 'v4'].map(hash);
+  const opensAt = Date.now() - 1_000;
+  await cmd(keys.cfg(E), ['HSET', keys.cfg(E), 'opensAtMs', String(opensAt), 'startsAtMs', String(startsAt), 'lobbyShuffle', '1', 'openBatch', '0', 'rev', '1']);
+  await cmd(keys.lobbyMembers(E), ['SADD', keys.lobbyMembers(E), ...members]);
+  await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), 'lobby', '1:4:1']);
+  await cmd(keys.verify(E), ['HSET', keys.verify(E), members[0]!, `PASSED:${Date.now() - 5_000}:NETWORK`, members[1]!, `VERIFYING:${Date.now() - 9_000}:NETWORK`, members[2]!, `BLOCKED:${Date.now()}:DEVICE_HISTORY`]);
+  await cmd(keys.shuffle(E), ['HSET', keys.shuffle(E), 'commit:lobby', '00'.repeat(32), 'round:lobby', String(drandRoundAfter(opensAt)), 'sealed:lobby', 'x', 'at:lobby', '0']);
+  const randomness = new TestRandomness(Buffer.alloc(32, 5));
+  const publish = new PublishBatchResults(new RedisBatchStore(redis), new RedisShuffleRecords(redis), randomness, randomness, new LocalResultFiles(mkdtempSync(join(tmpdir(), 'shuffle-results-'))), fakeClock({ now: Date.now() }));
+  expect(await publish.run({ eventId: E, group: 'lobby' })).toMatchObject({ status: 'PUBLISHED', count: 4 });
+  const seqOf = async (m: string) => String(await cmd(keys.lobbyResult(m), ['GET', keys.lobbyResult(m)])).split(':')[0]!;
+  const bit = async (m: string) => Number(await cmd(keys.removed(E), ['GETBIT', keys.removed(E), await seqOf(m)]));
+  expect([await bit(members[0]!), await bit(members[1]!), await bit(members[2]!), await bit(members[3]!)]).toEqual([0, 1, 1, 0]);
+  // 게시는 verify 칸을 바꾸지 않는다(통과 칸은 입장 확정이 읽는다)
+  expect(String(await cmd(keys.verify(E), ['HGET', keys.verify(E), members[0]!]))).toMatch(/^PASSED:/);
+});
+
 test('Q-T68④ Q-T68⑦ 묶음 게시: 구간이 닫힌 뒤의 취소가 남긴 자리(ORPHAN)는 번호를 빠진 번호로 돌린다', async () => {
   const E = `evt-orphan-int-${Date.now()}`;
   const members = ['o1', 'o2', 'o3'].map(hash);

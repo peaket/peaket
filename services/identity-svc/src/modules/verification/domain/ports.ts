@@ -1,4 +1,5 @@
 // 본인확인 컨텍스트의 포트: 본인확인기관, 연계정보·pid 해시, 저장소.
+import type { ReverificationSummary } from './reverification.js';
 import type { Attempt, AttemptStatus } from './verification.js';
 
 export const VERIFICATION_PROVIDER = Symbol('identity.VerificationProvider');
@@ -65,7 +66,11 @@ export interface VerificationTx {
   setPhoneRef(i: { accountId: string; ref: string; refPrev?: string | null; now: number }): Promise<void>;
   /** 건(쓰기 잠금). 없으면 null */
   attemptForUpdate(id: string): Promise<Attempt | null>;
-  completeAttempt(id: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number): Promise<void>;
+  /**
+   * personMismatch: 결과가 이 계정의 본인과 다른 사람이었다(본인확인한 계정의 다시 본인확인이 FAILED·DUPLICATE_ACCOUNT로 끝난 까닭).
+   * 본인확인 재통과 확인(CheckReverification)의 PERSON_MISMATCH가 읽는다. 연계정보·HMAC은 남기지 않는다
+   */
+  completeAttempt(id: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number, personMismatch?: boolean): Promise<void>;
   /** 그 계정의 본인확인 기록(쓰기 잠금) */
   verificationOf(accountId: string): Promise<VerificationRecord | null>;
   /** 그 연계정보 HMAC 가운데 하나를 가진 계정. exceptAccountId가 아닌 계정을 먼저 찾는다(보존 중인 모든 판의 값을 함께 준다) */
@@ -125,6 +130,11 @@ export interface VerificationStore {
   claimsOf(accountId: string): Promise<{ pid: string; pidPrev?: string } | null>;
   /** 그 세션에서 목적 REVERIFY 건이 since 뒤에 VERIFIED로 확정됐는가(고위험 재인증의 재통과, I-T55 ④) */
   recentlyReverified(accountId: string, sessionId: string, since: number): Promise<boolean>;
+  /**
+   * 그 계정의 목적 REVERIFY 건 가운데 확정 시각이 notBefore와 같거나 뒤인 것의 요약(본인확인 재통과 확인, identity.proto CheckReverification, I-T56).
+   * 세션을 가리지 않는다(추가 검증은 계정 단위다)
+   */
+  reverificationSince(accountId: string, notBefore: number): Promise<ReverificationSummary>;
   /** before보다 앞서 남긴 다른 계정 시도 기록을 지우고 지운 줄 수(1년 [가정], 일정은 정비 잡 BAS-060) */
   purgeConflictAttempts(before: number): Promise<number>;
   /** 기록이 쓰는 연계정보 키 판들(시작할 때 설정과 견준다) */

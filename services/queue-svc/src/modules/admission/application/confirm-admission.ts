@@ -3,12 +3,14 @@
 // ①에서 걸리는 대기표(만료·빠진 번호·차례 전)는 q:adm을 건드리지 않는다. ②가 새로 채운 값은 입장하지 않으면(SOON·장애) 지운다(ADR-0183 결정 3).
 // 요청마다 표지(fresh) 하나를 만들어 q:adm 값의 표지와 새 자리의 jti로 함께 쓴다. 같은 대기표가 받은 자리는 회차 슬롯 slot_of가 가린다(결정 2).
 // pid 키 전환 기간에는 ②·④와 15분 만료를 옛 pid → 새 pid 두 키에 차례로 한다(§3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025, Q-T45).
+// 추가 검증(§7, ADR-0259): 빠진 번호라도 verify가 PASSED면 받고(차례 전이면 NOT_YET), 유예는 차례와 통과 가운데 늦은 때부터 센다. BLOCKED는 410에 removeReason을 단다.
+// 1인 1순번 위반(②의 DUP)으로 거절하는 대기표는 회차 슬롯에서 빠진 번호를 켜며 그 verify 칸(PASSED·VERIFYING)을 지운다(사람 슬롯이 먼저 정한다, docs/data.md §5 경합 ④).
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
-import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS } from '../domain/admission.js';
-import { ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
+import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS, TURN_GRACE_MS } from '../domain/admission.js';
+import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
 import { AdmissionError } from './admission-error.js';
 
 export const ADMISSION_SCHEDULES = Symbol('queue.AdmissionSchedules');
@@ -35,6 +37,9 @@ export type ConfirmResult =
 
 @Injectable()
 export class ConfirmAdmission {
+  /** 차례(또는 통과) 뒤 유예(기본 15분) */
+  readonly #graceMs: number;
+
   constructor(
     @Inject(ADMISSION_STORE) private readonly store: AdmissionStore,
     @Inject(ADMISSION_SCHEDULES) private readonly schedules: EventSchedules,
@@ -42,7 +47,12 @@ export class ConfirmAdmission {
     @Inject(ADMISSION_TOKENS) private readonly signer: AdmissionTokens,
     @Inject(ADMISSION_SIGNALS) private readonly signals: AdmissionSignals,
     @Inject(CLOCK) private readonly clock: Clock,
-  ) {}
+    @Optional() @Inject(ADMISSION_POLICY) policy?: AdmissionPolicy,
+  ) {
+    const g = policy?.turnGraceMs ?? TURN_GRACE_MS;
+    if (!Number.isInteger(g) || g <= 0) throw new Error(`입장 확정 유예는 양의 정수(ms)여야 한다: ${g}`);
+    this.#graceMs = g;
+  }
 
   async run(i: ConfirmInput): Promise<ConfirmResult> {
     const now = this.clock.now();
@@ -78,14 +88,14 @@ export class ConfirmAdmission {
     // 사람 키를 부를 pid들(옛 pid부터, 교체 직전 토큰과 두 pid 토큰이 옛 키에서 만나게)
     const persons = i.pidPrev && i.pidPrev !== i.pid ? [i.pidPrev, i.pid] : [i.pid];
 
-    const pre = await this.store.precheck({ eventId: i.eventId, seq: t.s, gen: t.g, ticketHash: hash });
+    const pre = await this.store.precheck({ eventId: i.eventId, seq: t.s, gen: t.g, ticketHash: hash, graceMs: this.#graceMs });
     switch (pre.kind) {
       case 'SOLD_OUT':
         throw new AdmissionError('SOLD_OUT', '매진으로 끝난 대기');
       case 'ENDED':
         throw new AdmissionError('SALE_ENDED', '판매 상태가 ENDED다');
       case 'REMOVED':
-        throw new AdmissionError('REMOVED', '빠진 번호');
+        throw new AdmissionError('REMOVED', pre.removeReason ? '이의 기각으로 끝난 대기 참여' : '빠진 번호', undefined, pre.removeReason);
       case 'VERIFYING': {
         const reason = REASONS.find((r) => r === pre.reason) ?? null;
         return { status: 'VERIFYING', verificationReason: reason, serverTimeMs: now };
@@ -112,7 +122,8 @@ export class ConfirmAdmission {
         if (claim.kind === 'DUP') {
           await this.#release(i, claimed, hash, fresh, saleEnd);
           claimed = [];
-          await this.store.markRemoved({ eventId: i.eventId, seq: t.s, expireAtMs: keepUntil });
+          // 거절하는 이 대기표의 번호를 빠진 번호로 켜고 verify 칸(통과·추가 검증 중)을 지운다. 여기서 끊기면 503이고, 다시 오면 사람 슬롯이 또 DUP을 정한다
+          await this.store.markRemoved({ eventId: i.eventId, seq: t.s, ticketHash: hash, expireAtMs: keepUntil });
           throw new AdmissionError('DUPLICATE_ADMISSION', '같은 사람이 다른 대기표로 이미 입장했다');
         }
         if (claim.kind === 'NEW') claimed.push(pid);
@@ -153,8 +164,8 @@ export class ConfirmAdmission {
         for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g, ...(t.dupPrefix ? { dupPrefix: t.dupPrefix } : {}) })).admittedBefore || admittedBefore;
         throw new AdmissionError('EXPIRED', '첫 발급 뒤 최대 체류가 지났다', !admittedBefore && now < saleEnd);
       }
-      // 확인과 입장 사이에 빠진 번호가 됐거나 serving이 모자라다(장애 전환으로 serving이 되돌아감)
-      if (r.kind === 'REMOVED') throw new AdmissionError('REMOVED', '확인 뒤 빠진 번호가 됐다');
+      // 확인과 입장 사이에 빠진 번호가 됐거나(대기 취소·1인 1순번 위반이 통과 칸을 지움) serving이 모자라다(장애 전환으로 serving이 되돌아감)
+      if (r.kind === 'REMOVED') throw new AdmissionError('REMOVED', '확인 뒤 빠진 번호가 됐다', undefined, r.removeReason);
       return { status: 'NOT_YET', retryAfterMs: 1_000, serverTimeMs: now, verificationReason: null };
     } catch (e) {
       if (e instanceof QueueStoreUnavailable) {

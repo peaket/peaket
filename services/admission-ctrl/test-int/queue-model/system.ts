@@ -18,6 +18,7 @@ import { Es256AdmissionTokens } from '../../../queue-svc/src/modules/admission/a
 import { RedisAdmissionStore } from '../../../queue-svc/src/modules/admission/adapters/redis-admission-store.js';
 import { AdmissionError } from '../../../queue-svc/src/modules/admission/application/admission-error.js';
 import { ConfirmAdmission } from '../../../queue-svc/src/modules/admission/application/confirm-admission.js';
+import { TURN_GRACE_MS } from '../../../queue-svc/src/modules/admission/domain/admission.js';
 import type { AdmissionSignals } from '../../../queue-svc/src/modules/admission/domain/ports.js';
 import { HmacQueueTokens, QUEUE_TOKEN_KEY_ENV } from '../../../queue-svc/src/modules/entry/adapters/hmac-tokens.js';
 import { keys as entryKeys, RedisEntryStore } from '../../../queue-svc/src/modules/entry/adapters/redis-entry-store.js';
@@ -828,7 +829,7 @@ export class QueueSystem {
   }
   async admitCheck(k: K): Promise<string> {
     const t = this.tab(k);
-    const r = await this.#adm.precheck({ eventId: this.eventId, seq: t.seq, gen: t.gen, ticketHash: t.hash! });
+    const r = await this.#adm.precheck({ eventId: this.eventId, seq: t.seq, gen: t.gen, ticketHash: t.hash!, graceMs: TURN_GRACE_MS });
     if (r.kind === 'OK') Object.assign(t, { phase: 'CHECKED', turnAtMs: r.turnAtMs, skipped: r.skipped });
     else if (r.kind === 'REMOVED') t.phase = 'DONE';
     return r.kind;
@@ -838,7 +839,7 @@ export class QueueSystem {
     t.nonce = randomUUID();
     const r = await this.#adm.claim({ pid: `p${k[0]}`, eventId: this.eventId, ticketHash: t.hash!, nonce: t.nonce, expireAtMs: this.#saleEnd });
     if (r.kind === 'DUP') {
-      await this.#adm.markRemoved({ eventId: this.eventId, seq: t.seq, expireAtMs: this.#keepUntil });
+      await this.#adm.markRemoved({ eventId: this.eventId, seq: t.seq, ticketHash: t.hash!, expireAtMs: this.#keepUntil });
       t.phase = 'DONE';
     } else Object.assign(t, { phase: 'CLAIMED', own: r.kind === 'NEW' });
     return r.kind;

@@ -1,6 +1,6 @@
 // 본인확인 표(docs/data.md §2 identity_verification·verification_attempt, docs/features/identity.md §5).
 import { sql } from 'drizzle-orm';
-import { bigint, check, customType, index, integer, pgSchema, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, pgSchema, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -30,6 +30,9 @@ export const verificationAttempt = pgTable(
     expiresAt: at('expires_at').notNull(),
     createdAt: at('created_at').notNull(),
     completedAt: at('completed_at'),
+    // 결과가 이 계정의 본인과 다른 사람이었다(본인확인한 계정의 다시 본인확인이 FAILED·DUPLICATE_ACCOUNT로 끝난 까닭). 연계정보·HMAC은 두지 않는다.
+    // 본인확인 재통과 확인(CheckReverification)의 PERSON_MISMATCH가 읽는다(I-T56 ③, BUILD_ORDER BOT-090)
+    personMismatch: boolean('person_mismatch').notNull().default(false),
   },
   (t) => [
     index('verification_attempt_account_idx').on(t.accountId),

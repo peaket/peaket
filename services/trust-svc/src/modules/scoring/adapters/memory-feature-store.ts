@@ -1,6 +1,7 @@
-// 시험·로컬용 판정 피처 저장소. 운영은 redis-feature-store.ts. 지난 30일 규칙은 같게 둔다.
+// 시험·로컬용 판정 피처 저장소와 판정 근거 조회 저장소. 운영은 redis-feature-store.ts. 지난 30일 규칙은 같게 둔다(키 회전의 이어 달기는 두지 않는다).
 import { HONEYPOT_EVENTS_PER_PID } from '../domain/honeypot.js';
-import { FEATURE_NAMES, type FeatureName, type FeatureRead, type FeatureStore, MIGRATION_FEATURES, type MigrationResult, type VerdictEvidence } from '../domain/ports.js';
+import { type EvidenceRead, evidenceReadOf, NO_DEVICE_HISTORY } from '../domain/evidence.js';
+import { type EvidenceStore, FEATURE_NAMES, type FeatureName, type FeatureRead, type FeatureStore, MIGRATION_FEATURES, type MigrationResult, type VerdictEvidence } from '../domain/ports.js';
 import { DEV_SHARE_CAP } from '../domain/rules.js';
 import type { DeviceHistory } from '../domain/types.js';
 
@@ -11,7 +12,7 @@ const dayOf = (ms: number): number => Math.floor(ms / DAY_MS);
 const ASN_BUCKET_MS = 10_000;
 const hostKey = (asn: number, eventId: string, bucket: number) => `${asn}:${eventId}:${bucket}`;
 
-export class MemoryFeatureStore implements FeatureStore {
+export class MemoryFeatureStore implements FeatureStore, EvidenceStore {
   readonly #accounts = new Map<string, Map<string, number>>();
   /** 기기 → `{kind}:{day}` → 수 */
   readonly #history = new Map<string, Map<string, number>>();
@@ -99,6 +100,14 @@ export class MemoryFeatureStore implements FeatureStore {
     if (i.deviceRef) this.#bump(i.deviceRef, 'sent', i.now);
     const k = `${i.pid}:${i.eventId}`;
     if (!this.#evidence.has(k)) this.#evidence.set(k, i.evidence);
+  }
+
+  /** 판정 근거 키 → 그 근거의 기기 가명 → 그 기기의 지난 30일 이력(같은 사람의 다른 기기는 읽지 않는다) */
+  async verdictEvidence(i: { pid: string; eventId: string; now: number }): Promise<EvidenceRead | undefined> {
+    if (this.#failingAll) throw new Error('피처 저장소 오류');
+    const e = this.#evidence.get(`${i.pid}:${i.eventId}`);
+    if (!e) return undefined;
+    return evidenceReadOf(e, e.deviceRef ? this.history(e.deviceRef, i.now) : NO_DEVICE_HISTORY);
   }
 
   async recordVerification(i: { deviceRef: string; passed: boolean; now: number }): Promise<void> {
@@ -207,6 +216,11 @@ export class MemoryFeatureStore implements FeatureStore {
 
   evidence(pid: string, eventId: string): VerdictEvidence | undefined {
     return this.#evidence.get(`${pid}:${eventId}`);
+  }
+
+  /** 판정 근거 키를 바로 넣는다(시험 도구: 아직 없는 재평가 작업자의 격리 근거 등). 있던 값을 덮는다 */
+  putEvidence(pid: string, eventId: string, evidence: VerdictEvidence): void {
+    this.#evidence.set(`${pid}:${eventId}`, evidence);
   }
 
   /** 모든 읽기 실패 */

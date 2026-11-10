@@ -4,7 +4,11 @@
 import { ORIGINS } from './origins';
 import type { WebScreen } from './screens.types';
 
-/** SCR-009 추가 검증: 보드 상태 8 */
+/**
+ * SCR-009 추가 검증: 보드 상태 8 + 제출 응답 상태 3. ?state= 없이 열면 데이터에 잇는 화면(상태 읽기 GET …/verification)이다.
+ * 뒤의 셋은 d5 §5.9 '제출 차례와 되살리기'와 docs/frontend.md §4.2.1 8번(REVERIFY_REQUIRED·PERSON_MISMATCH·429·503)에서 더했다(BUILD_ORDER BOT-090, ADR-0259).
+ * 문구가 d5에 없는 둘('본인확인 다시 필요'·'다른 분으로 확인됨')은 화면이 둔 글이다(model/view.ts COPY)
+ */
 export const SCR009_STATES = [
   '검증 중',
   '챌린지 실패',
@@ -14,6 +18,9 @@ export const SCR009_STATES = [
   '재검토 결과 인정(차례 전)',
   '재검토 결과 인정(차례 지남)',
   '재검토 결과 기각',
+  '본인확인 다시 필요',
+  '다른 분으로 확인됨',
+  '잠시 뒤 다시 시도',
 ] as const;
 export type Scr009State = (typeof SCR009_STATES)[number];
 

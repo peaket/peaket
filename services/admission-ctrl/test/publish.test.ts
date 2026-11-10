@@ -352,12 +352,53 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     expect(Object.keys(all).sort()).toEqual(sorted);
   });
 
-  test('Q-T34 게시 때 VERIFYING인 참가자의 번호는 빠진 번호로 돌리고 나머지는 그대로다', async () => {
+  test('Q-T34 ① 셔플 전에 통과한 참가자는 게시 때 빠진 번호가 되지 않는다', async () => {
+    // p는 셔플 전에 통과(PASSED), q는 아직 추가 검증 중(VERIFYING), r은 이의 기각(BLOCKED), s는 평범한 참가자
+    const m = ['p', 'q', 'r', 's'].map(hash);
+    const w = await lobby({ members: m });
+    w.store.verifyForTest(E, m[0]!, 'PASSED:1762743600000:NETWORK');
+    w.store.verifyForTest(E, m[1]!, 'VERIFYING:1762743500000:NETWORK');
+    w.store.verifyForTest(E, m[2]!, 'BLOCKED:1762743600000:DEVICE_HISTORY');
+    expect(await w.publish.run({ eventId: E, group: 'lobby' })).toMatchObject({ status: 'PUBLISHED', count: 4 });
+    const seqOf = (h: string) => Number(w.store.resultOf(h, 'lobby')!.value.split(':')[0]);
+    expect(w.store.removedOf(E).sort((a, b) => a - b)).toEqual([seqOf(m[1]!), seqOf(m[2]!)].sort((a, b) => a - b));
+    expect(w.store.removedOf(E)).not.toContain(seqOf(m[0]!));
+    // 통과자도 결과 키·결과 파일에 번호를 받는다(원래 순번 위치로 돌아간다)
+    const all = Object.assign({}, ...[...w.files.written(E, 'lobby').values()]) as Record<string, number>;
+    expect(all[m[0]!]).toBe(seqOf(m[0]!));
+  });
+
+  test('Q-T34 ① 게시 도중 회차 슬롯 장애 전환이 있어도 셔플 전에 통과한 참가자는 빠진 번호가 되지 않는다', async () => {
+    // 장애 전환으로 SADD 하나를 잃어 닫힌 크기(4)보다 참가자(3)가 적고, 빠진 번호를 쓰는 도중 대기열 Redis가 한 번 끊긴다. 리더가 다시 부르면 같은 결과로 마저 쓴다
     const m = ['p', 'q', 'r'].map(hash);
-    const w = await lobby({ members: m, verifying: [m[1]!] });
-    await w.publish.run({ eventId: E, group: 'lobby' });
-    const seq = Number(w.store.resultOf(m[1]!, 'lobby')!.value.split(':')[0]);
-    expect(w.store.removedOf(E)).toEqual([seq]);
+    const w = await lobby({ members: m });
+    w.store.setClosedForTest(E, { first: 1, size: 4, gen: 1 }, 'lobby');
+    w.store.verifyForTest(E, m[0]!, 'PASSED:1762743600000:NETWORK');
+    w.store.verifyForTest(E, m[1]!, 'VERIFYING:1762743500000:NETWORK');
+    let cut = 0;
+    const store = new Proxy(w.store, {
+      get(target, k) {
+        const f = Reflect.get(target, k) as unknown;
+        if (k === 'markRemoved') {
+          return async (...a: Parameters<typeof target.markRemoved>) => {
+            // 두 번째 빠진 번호 쓰기(추가 검증 참가자 몫)에서 끊는다. 잃은 자리 몫은 이미 썼다
+            cut += 1;
+            if (cut === 2) throw new Error('대기열 Redis 장애 전환(READONLY)');
+            return target.markRemoved(...a);
+          };
+        }
+        return typeof f === 'function' ? (f as (...a: unknown[]) => unknown).bind(target) : f;
+      },
+    });
+    const publish = new PublishBatchResults(store, w.records, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }), verifyStored: () => true }, w.files, w.clock);
+    await expect(publish.run({ eventId: E, group: 'lobby' })).rejects.toThrow('READONLY');
+    expect(cut).toBe(2);
+    expect(w.store.publishedForTest(E, 'lobby')).toBeNull();
+    expect(await publish.run({ eventId: E, group: 'lobby' })).toMatchObject({ status: 'PUBLISHED', count: 3 });
+    const seqOf = (h: string) => Number(w.store.resultOf(h, 'lobby')!.value.split(':')[0]);
+    const removed = [...new Set(w.store.removedOf(E))].sort((a, b) => a - b);
+    expect(removed).toEqual([4, seqOf(m[1]!)].sort((a, b) => a - b));
+    expect(removed).not.toContain(seqOf(m[0]!));
   });
 
   test('Q-T68② 게시 때 주인 없는 자리(ORPHAN)인 로비 참가자의 번호는 빠진 번호로 돌린다', async () => {

@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-// 좌석 홀드 경로 Lua의 서버 쪽 실행 시간을 옛 코드와 새 코드로 견준다(방법과 결과: docs/review/pilot-purchase-path-perf.md).
+// 좌석 홀드 경로 Lua와 대기열 입장 확정 Lua의 서버 쪽 실행 시간을 옛 코드와 새 코드로 견준다(방법과 결과: docs/review/pilot-purchase-path-perf.md,
+// 대기열 Lua는 docs/architecture.md §8.6 4의 7·ADR-0259 결정 8).
 // 통합 시험과 같은 Valkey 이미지를 하나 띄우고, SLOWLOG가 명령마다 적은 마이크로초로 p50·p99를 구한다. 네트워크와 대기 시간은 이 값에 들어가지 않는다.
-// Lua 원문은 seat-lua.mjs처럼 TS 모듈을 그대로 가져온다(git show로 그 커밋의 글을 임시 폴더에 내려 읽는다). 원문을 고치지 않고, 느려진 판만 첫 줄 뒤에 빈 반복을 끼운다.
+// Lua 원문은 seat-lua.mjs처럼 TS 모듈을 그대로 가져온다(git show로 그 커밋의 글을 임시 폴더에 내려 읽는다. 판 이름이 worktree면 작업 트리의 파일을 읽는다).
+// 원문을 고치지 않고, 느려진 판만 첫 줄(shebang이 없으면 맨 앞)에 빈 반복을 끼운다.
 //
 // 쓰는 법(저장소 뿌리에서, 측정 중에는 시험·빌드를 돌리지 않는다):
-//   node loadtest/micro/lua-compare.mjs [--base 1a85da7a] [--head HEAD] [--blocks 40] [--calls 100] [--big-calls 100]
+//   node loadtest/micro/lua-compare.mjs [--suite seat|queue|all] [--base 1a85da7a] [--head HEAD|worktree] [--blocks 40] [--calls 100] [--big-calls 100]
 //                                       [--only 이름,이름] [--slow 이름,이름] [--slow-tiers 10,30,100] [--seed 1] [--reverse] [--slowlog-us 5] [--out 결과.json] [--md 표.md] [--raw] [--keep]
+//   node loadtest/micro/lua-compare.mjs --help            (시나리오 이름만 보이고 끝낸다)
+//   node loadtest/micro/lua-compare.mjs --suite queue --base HEAD --head worktree --dry   (두 판의 Lua를 읽어 시나리오마다 스크립트가 있는지만 보고 끝낸다. 컨테이너를 띄우지 않는다)
+// --suite는 고를 Lua 묶음이다: seat(좌석 홀드, 기본), queue(대기열 입장 확정: 회차 슬롯 확인·입장·1인 1순번 위반 표시), all(둘 다).
 // --raw는 호출 하나하나의 µs를 차례대로 JSON에 남긴다(Lua 가비지 수거가 도는 자리처럼 호출 위치별로 볼 때).
 // 끝나면 쓴 컨테이너를 docker rm -f -v로 지운다(--keep이면 남긴다).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -17,6 +22,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INVENTORY = 'services/purchase-svc/src/modules/inventory';
+/** 대기열 입장 확정 Lua(queue-svc). 가져오는 것이 없는 글 모듈이다 */
+const QUEUE_ADMISSION = 'services/queue-svc/src/modules/admission/adapters';
 /** 통합 시험의 valkey/valkey:8.1-alpine을 deploy/local/valkey.yaml과 같은 다이제스트로 고정한다 */
 const IMAGE = 'valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a';
 const { createClient } = createRequire(join(ROOT, 'packages', 'platform', 'package.json'))('redis');
@@ -26,13 +33,15 @@ const opt = (name, fallback) => {
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
 const flag = (name) => process.argv.includes(`--${name}`);
+const SUITE = opt('suite', 'seat');
+if (!['seat', 'queue', 'all'].includes(SUITE)) throw new Error('--suite는 seat·queue·all 가운데 하나다');
 const BASE = opt('base', '1a85da7a');
 const HEAD = opt('head', 'HEAD');
 const BLOCKS = Number(opt('blocks', '40'));
 const CALLS = Number(opt('calls', '100'));
 const BIG_CALLS = Number(opt('big-calls', '100'));
 const ONLY = opt('only', '') ? new Set(opt('only', '').split(',')) : null;
-const SLOW = new Set(opt('slow', 'sale-count,pin-4,release-failed-4,expire-100').split(',').filter(Boolean));
+const SLOW = new Set(opt('slow', 'sale-count,pin-4,release-failed-4,expire-100,precheck-ok,admit-ok').split(',').filter(Boolean));
 const SLOW_TIERS = opt('slow-tiers', '10,30,100').split(',').map(Number); // 일부러 느리게 만드는 정도(%)
 const SEED = Number(opt('seed', '1'));
 const OUT = opt('out', join(ROOT, '.cache', 'peaket-loadtest', `lua-compare-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
@@ -55,21 +64,28 @@ function rng(seed) {
 const DITHER = rng(SEED);
 
 // ── Lua 원문 ─────────────────────────────────────────────────────────────────────────────────────────────────────
-const MODULES = ['hold-lua.ts', 'expire-lua.ts', 'pin-lua.ts', 'purchase-session-lua.ts', 'sale-count-lua.ts', 'order-hold-lua.ts', 'rebuild-lua.ts', 'hold-lifecycle-lua.ts'];
+// 모듈 이름은 묶음 사이에 겹치지 않는다(시나리오는 파일 이름으로 고른다)
+const SOURCES = [
+  ...['hold-lua.ts', 'expire-lua.ts', 'pin-lua.ts', 'purchase-session-lua.ts', 'sale-count-lua.ts', 'order-hold-lua.ts', 'rebuild-lua.ts', 'hold-lifecycle-lua.ts'].map((file) => ({ suite: 'seat', dir: `${INVENTORY}/adapters`, file })),
+  // 추가 검증 통과 Lua(queue-svc modules/verification, BAT-200)가 생기면 여기에 그 파일을 더하고 아래 대기열 시나리오처럼 add한다
+  { suite: 'queue', dir: QUEUE_ADMISSION, file: 'admission-lua.ts' },
+];
+const wanted = (suite) => SUITE === 'all' || SUITE === suite;
 const tempDirs = [];
 
-/** 그 커밋의 Lua 모듈을 임시 폴더에 내려 읽어 {모듈: 이름들}을 돌려준다. 옛 커밋에 없는 모듈(hold-lifecycle-lua.ts)은 건너뛴다 */
+/** 그 판의 Lua 모듈을 임시 폴더에 내려 읽어 {모듈: 이름들}을 돌려준다. 그 판에 없는 모듈(옛 커밋의 hold-lifecycle-lua.ts 같은)은 건너뛴다. 판이 worktree면 작업 트리를 읽는다 */
 async function loadLua(rev) {
   const dir = mkdtempSync(join(tmpdir(), 'lua-compare-'));
   tempDirs.push(dir);
-  const show = (p) => execFileSync('git', ['-C', ROOT, 'show', `${rev}:${p}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 });
+  const show = (p) => (rev === 'worktree' ? readFileSync(join(ROOT, p), 'utf8') : execFileSync('git', ['-C', ROOT, 'show', `${rev}:${p}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 }));
   // pin-lua.ts는 domain/pin.ts의 상수 하나만 가져온다(그 모듈은 다른 도메인을 줄줄이 가져오므로 값만 옮겨 적는다)
-  const ttl = /export const FAILED_HOLD_MARK_TTL_MS = (.+?);/.exec(show(`${INVENTORY}/domain/pin.ts`))[1];
+  const ttl = wanted('seat') ? /export const FAILED_HOLD_MARK_TTL_MS = (.+?);/.exec(show(`${INVENTORY}/domain/pin.ts`))[1] : '0';
   const present = [];
-  for (const m of MODULES) {
+  for (const { suite, dir: from, file: m } of SOURCES) {
+    if (!wanted(suite)) continue;
     let text;
     try {
-      text = show(`${INVENTORY}/adapters/${m}`);
+      text = show(`${from}/${m}`);
     } catch {
       continue;
     }
@@ -125,7 +141,7 @@ function baseState(ctx) {
 
 // ── 시나리오: 부를 때마다 상태를 만들고(each), 대상 스크립트만 잰다 ───────────────────────────────────────────────────
 const scenarios = [];
-const add = (s) => scenarios.push({ big: false, ...s });
+const add = (s) => scenarios.push({ big: false, suite: 'seat', ...s });
 
 function expireScenario(name, n, m) {
   const S = seats(n);
@@ -313,6 +329,88 @@ add({
   },
 });
 
+// ── 대기열 입장 확정 Lua(docs/features/queue-admission.md §6 '입장 확정의 첫 구현', docs/data.md §3의 q:{event:E} 키) ─────────────────────────
+// 오픈 10분 뒤 회차: serving 100,000, serving_log 600칸(초마다), 빠진 번호 비트맵 12.5KB, verify 1,000칸, 자리 3,000개, 곧 입장 200명, 전진 기록 60칸.
+// 잴 번호(50,000)의 차례는 약 5분 전이라 유예(15분) 안이다
+const QE = 'perf-queue-1';
+const QP = `q:{event:${QE}}`;
+const QK = {
+  serving: `${QP}:serving`, servingLog: `${QP}:serving_log`, removed: `${QP}:removed`, skipped: `${QP}:skipped`, verify: `${QP}:verify`, notice: `${QP}:notice`,
+  soon: `${QP}:soon`, soonAt: `${QP}:soon_at`, soonFirst: `${QP}:soon_first`, slotOf: `${QP}:slot_of`, slots: `${QP}:slots`, admitted: `${QP}:admitted`,
+  calls: `${QP}:calls`, callReq: `${QP}:call_req`, ctl: `${QP}:ctl`, admits: `${QP}:admits`, req: `${QP}:req`,
+};
+const QSEQ = 50000;
+const QHASH = 'ab'.repeat(32);
+const QJTI = '99999999-9999-4999-8999-999999999999';
+// 유예는 정본 값(15분) 대신 6시간을 넘긴다: 긴 측정 도중 잴 번호의 차례(약 5분 전)가 유예를 넘겨 EXPIRED로 바뀌지 않게. 값은 셈의 비용에 들지 않는다
+const GRACE_MS = 6 * 3600_000;
+function queueState(ctx) {
+  const now = ctx.now();
+  const nowS = Math.floor(now / 1000);
+  const log = Array.from({ length: 600 }, (_, i) => [String(40000 + i * 100), String(nowS - 600 + i)]).flat();
+  const verify = Array.from({ length: 1000 }, (_, i) => [`${String(i).padStart(4, '0')}${'cd'.repeat(30)}`, `VERIFYING:${now - 60000}:NETWORK`]).flat();
+  const slots = Array.from({ length: 3000 }, (_, i) => [String(now + 300000), `slot-${i}`]).flat();
+  const slotOf = Array.from({ length: 3000 }, (_, i) => [`${String(i).padStart(4, '0')}${'ef'.repeat(30)}`, `slot-${i}`]).flat();
+  const soon = Array.from({ length: 200 }, (_, i) => [String(60000 + i), `${String(i).padStart(4, '0')}${'aa'.repeat(30)}`]).flat();
+  const calls = Array.from({ length: 60 }, (_, i) => [String(94000 + i * 100), `${now - (60 - i) * 1000}:100`]).flat();
+  return [
+    ['FLUSHALL'],
+    ['SET', QK.serving, '100000'],
+    ['ZADD', QK.servingLog, ...log],
+    ['SET', QK.removed, Buffer.alloc(12500, 0)],
+    ['SETBIT', QK.removed, '41234', '1'],
+    ['RPUSH', QK.skipped, '1:10:1', '20000:20010:1'],
+    ['HSET', QK.verify, ...verify],
+    ['HSET', QK.notice, 'saleState', 'ON_SALE'],
+    ['HSET', QK.ctl, 'targetNow', '5000'],
+    ['ZADD', QK.slots, ...slots],
+    ['HSET', QK.slotOf, ...slotOf],
+    ['ZADD', QK.soon, ...soon],
+    ['ZADD', QK.calls, ...calls],
+    ['HSET', QK.admits, ...Array.from({ length: 16 }, (_, i) => [String(i), `${nowS - i}:30`]).flat()],
+  ];
+}
+const precheckCall = () => ({ keys: [QK.serving, QK.servingLog, QK.removed, QK.skipped, QK.verify, QK.notice, QK.soon, QK.slotOf, QK.slots], args: [String(QSEQ), '1', QHASH, String(GRACE_MS), '1000', '60000', '10'] });
+/** 잴 대기표의 verify 칸과 빠진 번호 비트(다리마다 같은 상태) */
+const ticketState = (verify) => (ctx) => (verify === null ? [['HDEL', QK.verify, QHASH], ['SETBIT', QK.removed, String(QSEQ), '0']] : [['HSET', QK.verify, QHASH, verify(ctx)], ['SETBIT', QK.removed, String(QSEQ), '1']]);
+const addQueue = (s) => add({ suite: 'queue', seats: 0, base: queueState, ...s });
+addQueue({
+  name: 'precheck-ok', title: '회차 슬롯 확인 Lua(차례가 온 평범한 대기표)', module: 'admission-lua.ts', script: 'PRECHECK_LUA', old: true,
+  expect: (r) => r[0] === 'OK', setup: ticketState(null), call: precheckCall,
+});
+addQueue({
+  name: 'precheck-verifying', title: '회차 슬롯 확인 Lua(추가 검증 중)', module: 'admission-lua.ts', script: 'PRECHECK_LUA', old: true,
+  expect: (r) => r[0] === 'VERIFYING', setup: ticketState((ctx) => `VERIFYING:${ctx.now() - 60000}:NETWORK`), call: precheckCall,
+});
+// 옛 판은 PASSED를 받지 않고(REMOVED) 일이 달라 절대값만 잰다
+addQueue({
+  name: 'precheck-passed', title: '회차 슬롯 확인 Lua(빠진 번호지만 통과, 유예는 통과부터)', module: 'admission-lua.ts', script: 'PRECHECK_LUA', old: false,
+  expect: (r) => r[0] === 'OK', setup: ticketState((ctx) => `PASSED:${ctx.now() - 30000}:NETWORK`), call: precheckCall,
+});
+{
+  const keys = [QK.serving, QK.removed, QK.slots, QK.soon, QK.soonAt, QK.soonFirst, QK.admitted, QK.calls, QK.callReq, QK.ctl, QK.admits, QK.slotOf, QK.req];
+  const admitCall = (ctx, side) => ({
+    keys: side === 'old' ? keys : [...keys, QK.verify],
+    args: [String(QSEQ), QHASH, QJTI, String(Math.floor((ctx.now() - 300000) / 1000) * 1000), '0', '300000', '5000', String(ctx.keep), String(ctx.keep), '1', '5', '10', '2700000'],
+  });
+  // 다리마다 같은 일: 앞 호출이 잡은 자리·처음 요청 비트를 지운다
+  const fresh = () => [['ZREM', QK.slots, QJTI], ['HDEL', QK.slotOf, QHASH, `${QHASH}:at`], ['SETBIT', QK.req, String(QSEQ), '0']];
+  addQueue({
+    name: 'admit-ok', title: '회차 슬롯 입장 Lua(빈자리, 평범한 대기표)', module: 'admission-lua.ts', script: 'ADMIT_LUA', old: true,
+    expect: (r) => r[0] === 'ADMITTED', setup: ticketState(null), each: fresh, call: admitCall,
+  });
+  addQueue({
+    name: 'admit-passed', title: '회차 슬롯 입장 Lua(빠진 번호지만 통과)', module: 'admission-lua.ts', script: 'ADMIT_LUA', old: false,
+    expect: (r) => r[0] === 'ADMITTED', setup: ticketState((ctx) => `PASSED:${ctx.now() - 30000}:NETWORK`), each: fresh, call: admitCall,
+  });
+}
+addQueue({
+  name: 'mark-removed', title: '1인 1순번 위반 표시 Lua(통과 칸 지우기)', module: 'admission-lua.ts', script: 'MARK_REMOVED_LUA', old: true,
+  expect: (r) => Number(r) === 1,
+  each: (ctx) => [['HSET', QK.verify, QHASH, `PASSED:${ctx.now() - 30000}:NETWORK`], ['SETBIT', QK.removed, String(QSEQ), '0']],
+  call: (ctx, side) => (side === 'old' ? { keys: [QK.removed], args: [String(QSEQ), String(ctx.keep)] } : { keys: [QK.removed, QK.verify], args: [String(QSEQ), String(ctx.keep), QHASH] }),
+});
+
 // ── 재기: SLOWLOG가 적은 EVALSHA 시간만 쓴다 ──────────────────────────────────────────────────────────────────────
 const docker = (...a) => execFileSync('docker', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const containerName = `peaket-lua-compare-${process.pid}`;
@@ -332,7 +430,7 @@ const pipe = (cmds) => Promise.all(cmds.map(cmd));
 async function runLeg(s, ctx, variant, calls, where = {}) {
   const fill = Math.floor(DITHER() * 50);
   for (let f = 0; f < fill; f++) await cmd(['EVALSHA', fillerSha, '0']);
-  await cmd(['XTRIM', K.stream, 'MAXLEN', '1000']);
+  if (s.suite === 'seat') await cmd(['XTRIM', K.stream, 'MAXLEN', '1000']);
   await cmd(['SLOWLOG', 'RESET']);
   for (let i = 0; i < calls; i++) {
     if (s.each) await pipe(s.each(ctx, i));
@@ -421,7 +519,11 @@ function thresholds(blocks) {
   return line;
 }
 const verdict = (ratio, line) => (ratio > line.ratio ? '느림' : ratio < 1 / line.ratio ? '빠름' : '안');
-const wasteLua = (text, count) => text.replace(/^(#!lua[^\n]*)\n/, `$1\nfor __waste_i = 1, ${count} do redis.call('EXISTS', KEYS[1]) end\n`);
+// shebang이 있으면 그 줄 뒤에, 없으면(대기열 Lua) 맨 앞에 끼운다
+const wasteLua = (text, count) => {
+  const loop = `for __waste_i = 1, ${count} do redis.call('EXISTS', KEYS[1]) end\n`;
+  return /^#!lua/.test(text) ? text.replace(/^(#!lua[^\n]*)\n/, `$1\n${loop}`) : `${loop}${text}`;
+};
 
 async function scriptVariants(lua, s) {
   const vars = {};
@@ -452,7 +554,7 @@ async function calibrateSlow(s, ctx, loaded, calls) {
 }
 
 async function runScenario(s, ctx, lua) {
-  await pipe(baseState(ctx));
+  await pipe((s.base ?? baseState)(ctx));
   if (s.setup) await pipe(s.setup(ctx));
   const calls = s.big ? BIG_CALLS : CALLS;
   const loaded = await scriptVariants(lua, s);
@@ -537,9 +639,37 @@ function report(results, meta) {
   return lines.join('\n');
 }
 
+const pickScenarios = () => {
+  const inSuite = scenarios.filter((s) => wanted(s.suite));
+  return ONLY ? inSuite.filter((s) => ONLY.has(s.name)) : inSuite;
+};
+
+/** --help: 시나리오 이름과 묶음만 보인다(Lua를 읽지 않고 컨테이너도 띄우지 않는다) */
+function help() {
+  console.log('node loadtest/micro/lua-compare.mjs [--suite seat|queue|all] [--base 판] [--head 판|worktree] [--only 이름,…] [--slow 이름,…] [--dry] …(머리 주석 참고)');
+  for (const s of scenarios) console.log(`  [${s.suite}] ${s.name}  ${s.title}  (${s.module} ${s.script}, ${s.old ? '옛 판과 견줌' : '절대값만'})`);
+}
+
+/** --dry: 두 판의 Lua를 읽어 고른 시나리오마다 스크립트가 있는지만 본다 */
+function dryRun(lua) {
+  let missing = 0;
+  for (const s of pickScenarios()) {
+    const has = (side) => typeof lua[side][s.module]?.[s.script] === 'string';
+    const ok = has('new') && (!s.old || has('old'));
+    if (!ok) missing += 1;
+    console.log(`${ok ? '있음' : '없음'} [${s.suite}] ${s.name}: 새 판(${HEAD}) ${has('new') ? 'O' : 'X'}${s.old ? `, 옛 판(${BASE}) ${has('old') ? 'O' : 'X'}` : ''}`);
+  }
+  if (missing > 0) process.exitCode = 1;
+}
+
+let started = false;
+
 async function main() {
+  if (flag('help')) return help();
   const lua = { old: await loadLua(BASE), new: await loadLua(HEAD) };
+  if (flag('dry')) return dryRun(lua);
   const startedAt = new Date().toISOString();
+  started = true;
   docker('run', '-d', '--name', containerName, '-p', '127.0.0.1::6379', IMAGE, 'valkey-server', '--save', '', '--appendonly', 'no');
   const mapped = docker('port', containerName, '6379/tcp').split('\n')[0];
   const port = Number(mapped.slice(mapped.lastIndexOf(':') + 1));
@@ -564,12 +694,12 @@ async function main() {
   const [sec, us] = await cmd(['TIME']);
   const offset = Number(sec) * 1000 + Math.floor(Number(us) / 1000) - Date.now();
   const ctx = { now: () => Date.now() + offset, keep: Date.now() + offset + 7 * 86400000 };
-  const picked = ONLY ? scenarios.filter((s) => ONLY.has(s.name)) : [...scenarios];
+  const picked = pickScenarios();
   if (flag('reverse')) picked.reverse(); // 앞 시나리오가 남긴 Lua 상태의 영향을 보려고 순서를 뒤집는다
   console.log(`시나리오 ${picked.length}개, 묶음 ${BLOCKS}, Valkey ${serverVersion}`);
   const results = [];
   for (const s of picked) results.push(await runScenario(s, ctx, lua));
-  const meta = { startedAt, endedAt: new Date().toISOString(), blocks: BLOCKS, calls: CALLS, bigCalls: BIG_CALLS, base: BASE, head: HEAD, image: IMAGE, serverVersion, monotonicClock, slowlogConfig: { 'slowlog-log-slower-than': SLOWLOG_US, 'slowlog-max-len': 200000 }, slowlogMeasured: tally.measured, slowlogMissing: tally.missing };
+  const meta = { startedAt, endedAt: new Date().toISOString(), suite: SUITE, blocks: BLOCKS, calls: CALLS, bigCalls: BIG_CALLS, base: BASE, head: HEAD, image: IMAGE, serverVersion, monotonicClock, slowlogConfig: { 'slowlog-log-slower-than': SLOWLOG_US, 'slowlog-max-len': 200000 }, slowlogMeasured: tally.measured, slowlogMissing: tally.missing };
   const table = report(results, meta);
   console.log(table);
   mkdirSync(dirname(OUT), { recursive: true });
@@ -580,7 +710,7 @@ async function main() {
 
 function cleanup() {
   for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
-  if (!flag('keep')) {
+  if (started && !flag('keep')) {
     try {
       docker('rm', '-f', '-v', containerName);
     } catch {

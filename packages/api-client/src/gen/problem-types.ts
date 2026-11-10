@@ -98,6 +98,7 @@ export type ProblemType =
   | 'no-placement'
   | 'not-found'
   | 'not-payer'
+  | 'not-verifying'
   | 'open-interval-conflict'
   | 'open-maintenance-window'
   | 'open-passed'
@@ -141,6 +142,7 @@ export type ProblemType =
   | 'push-key-invalid'
   | 'push-service-not-allowed'
   | 'query-too-short'
+  | 'queue-entry-not-found'
   | 'queue-not-found'
   | 'queue-not-open'
   | 'queue-order-invalid'
@@ -193,6 +195,7 @@ export type ProblemType =
   | 'unlock-link-invalid'
   | 'unlock-link-resend-limit'
   | 'verification-not-found'
+  | 'verification-submit-limited'
   | 'webhook-url-not-allowed'
   | 'wish-limit'
   | 'withdrawal-confirmation-required';
@@ -297,6 +300,7 @@ export const PROBLEM_TYPES = {
   'no-placement': { status: 409, title: "배치되지 않은 기기입니다" },
   'not-found': { status: 404, title: "찾을 수 없습니다" },
   'not-payer': { status: 403, title: "결제한 분만 할 수 있습니다" },
+  'not-verifying': { status: 409, title: "추가 검증 중인 대기표가 아닙니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },
   'open-maintenance-window': { status: 409, title: "정비 시간에는 오픈할 수 없습니다" },
   'open-passed': { status: 410, title: "오픈 시각이 지났습니다" },
@@ -340,6 +344,7 @@ export const PROBLEM_TYPES = {
   'push-key-invalid': { status: 422, title: "웹 푸시 키가 맞지 않습니다" },
   'push-service-not-allowed': { status: 422, title: "받지 않는 웹 푸시 서비스입니다" },
   'query-too-short': { status: 400, title: "검색어가 너무 짧습니다" },
+  'queue-entry-not-found': { status: 404, title: "이 회차에 대기 참여가 없습니다" },
   'queue-not-found': { status: 404, title: "이 회차의 대기열이 열리지 않았습니다" },
   'queue-not-open': { status: 409, title: "아직 예매가 열리지 않았습니다" },
   'queue-order-invalid': { status: 422, title: "로비 셔플과 오픈 직후 묶음을 둘 다 끌 수는 없습니다" },
@@ -392,6 +397,7 @@ export const PROBLEM_TYPES = {
   'unlock-link-invalid': { status: 410, title: "이 링크는 더 쓸 수 없습니다" },
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },
   'verification-not-found': { status: 404, title: "본인확인 건을 찾을 수 없습니다" },
+  'verification-submit-limited': { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" },
   'webhook-url-not-allowed': { status: 400, title: "받지 않는 웹훅 주소입니다" },
   'wish-limit': { status: 422, title: "찜 수를 넘었습니다" },
   'withdrawal-confirmation-required': { status: 409, title: "탈퇴 전에 확인해 주세요" },

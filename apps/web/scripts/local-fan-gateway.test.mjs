@@ -191,3 +191,69 @@ test('V2 구매 경로는 purchaseUrl로, 나머지는 fallbackUrl로 가고 대
   }
 });
 
+
+test('[ASVS v5.0.0-3.5.1] 대기열 주소(queueUrl)를 주면 /v1/queues/ 경로를 신원 머리와 함께 queue-svc로 넘기고, 바깥에서 온 같은 이름 머리는 지우며, 쓰기 요청은 Origin을 대조한다(ADR-0259 결정 8)', async () => {
+  const queue = [];
+  const other = [];
+  const mk = (sink, answer) =>
+    createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        sink.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString() });
+        const [status, headers, body] = answer(req);
+        res.writeHead(status, headers);
+        res.end(body);
+      });
+    });
+  const q = mk(queue, (req) => (req.url.endsWith('/admission') ? [503, { 'content-type': 'application/problem+json', 'retry-after': '2', 'access-control-allow-origin': '*' }, '{"status":503}'] : [200, { 'content-type': 'application/json' }, '{"state":"VERIFYING"}']));
+  const f = mk(other, () => [200, { 'content-type': 'application/json' }, '{}']);
+  await Promise.all([q, f].map((s) => new Promise((r) => s.listen(0, '127.0.0.1', r))));
+  const url = (s) => `http://127.0.0.1:${s.address().port}`;
+  const g = await startLocalFanGateway({ identityUrl: 'http://127.0.0.1:1', webOrigin: WEB, jwks: keys.jwks, issuer: ISSUER, env: { PEAKET_ENV: 'local' }, queueUrl: url(q), fallbackUrl: url(f) });
+  try {
+    const at = await token();
+    const forged = { 'x-user-id': 'attacker', 'x-user-pid': 'pid-evil', x_user_pid: 'pid-evil', 'x-session-id': 'evil', 'x-user-scope': 'admin' };
+    // 쓰기: 웹 출처의 Origin이면 넘기고, 신원 머리는 쿠키에서 다시 만든다(쿠키 자체는 넘기지 않는다)
+    const post = await fetch(`${g.url}/v1/queues/e1/verification`, { method: 'POST', headers: { origin: WEB, cookie: `__Secure-peaket_at=${at}`, 'content-type': 'application/json', ...forged }, body: JSON.stringify({ challengeToken: 't', deviceId: 'AAAAAAAAAAAAAAAAAAAAAA' }) });
+    assert.equal(post.status, 200);
+    assert.equal(post.headers.get('access-control-allow-origin'), WEB);
+    assert.equal(post.headers.get('access-control-allow-credentials'), 'true');
+    const h = queue.at(-1).headers;
+    assert.deepEqual([queue.at(-1).method, queue.at(-1).url], ['POST', '/v1/queues/e1/verification']);
+    assert.deepEqual([h['x-user-id'], h['x-user-pid'], h['x-session-id'], h['x-user-scope'], h['x-user-aud']], ['acc-1', 'pid-1', 's-1', 'ticket:buy', 'fan']);
+    assert.equal(h.x_user_pid, undefined);
+    assert.equal(h.cookie, undefined);
+    assert.equal(queue.at(-1).body, JSON.stringify({ challengeToken: 't', deviceId: 'AAAAAAAAAAAAAAAAAAAAAA' }));
+    // 쿠키가 없거나 틀리면 바깥 신원 머리는 지운 채 신원 없이 넘긴다(queue-svc가 401로 답한다)
+    await fetch(`${g.url}/v1/queues/e1/verification`, { headers: { cookie: '__Secure-peaket_at=not-a-jwt', ...forged } });
+    for (const k of ['x-user-id', 'x-user-pid', 'x-session-id', 'x-user-scope', 'x_user_pid']) assert.equal(queue.at(-1).headers[k], undefined, k);
+    // 쓰기 요청의 Origin 대조(text/plain 단순 요청도): 없거나 다른 출처면 403이고 넘기지 않는다
+    const n = queue.length;
+    for (const origin of [undefined, 'https://evil.example', 'null']) {
+      const r = await fetch(`${g.url}/v1/queues/e1/entries`, { method: 'POST', headers: { ...(origin ? { origin } : {}), 'content-type': 'text/plain;charset=UTF-8' }, body: '{}' });
+      assert.equal(r.status, 403, String(origin));
+    }
+    assert.equal(queue.length, n, '막은 요청은 넘기지 않는다');
+    // 대기열 경로는 가짜 API로 가지 않는다. 대기 상태 파일도 queue-svc가 낸다(로컬은 앱 포트가 파일을 준다)
+    await fetch(`${g.url}/v1/queues/e1/segment-states/0.json`);
+    assert.equal(queue.at(-1).url, '/v1/queues/e1/segment-states/0.json');
+    assert.equal(other.length, 0);
+    await fetch(`${g.url}/v1/events/e1`);
+    assert.equal(other.length, 1, '대기열이 아닌 경로는 그대로 가짜 API로');
+    // queue-svc의 503·Retry-After를 그대로 돌려주고, 화면이 읽게 Retry-After를 노출한다. queue-svc의 CORS 머리는 쓰지 않는다
+    const busy = await fetch(`${g.url}/v1/queues/e1/admission`, { method: 'POST', headers: { origin: WEB, 'content-type': 'text/plain;charset=UTF-8' }, body: '{}' });
+    assert.deepEqual([busy.status, busy.headers.get('retry-after')], [503, '2']);
+    assert.match(busy.headers.get('access-control-expose-headers') ?? '', /Retry-After/);
+    assert.equal(busy.headers.get('access-control-allow-origin'), WEB);
+    // 사전 요청: JSON 제출의 content-type을 연다
+    const pre = await fetch(`${g.url}/v1/queues/e1/verification`, { method: 'OPTIONS', headers: { origin: WEB, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' } });
+    assert.equal(pre.status, 204);
+    assert.match(pre.headers.get('access-control-allow-headers'), /content-type/);
+  } finally {
+    await g.close();
+    for (const s of [q, f]) s.close();
+  }
+  // queueUrl이 없으면 대기열 경로를 넘기지 않는다(identity 경로만)
+  assert.equal((await call('/v1/queues/e1/verification')).status, 404);
+});

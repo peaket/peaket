@@ -211,6 +211,13 @@
       "when": 1794177333633,
       "tag": "0029_fan_summary_signup",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794286730426,
+      "tag": "0030_verification_attempt_person_mismatch",
+      "breakpoints": true
     }
   ]
 }

@@ -18,6 +18,8 @@ export class AdmissionError extends Error {
     message: string,
     /** 410 만료의 다시 줄 서기 가능 여부(ADR-0062) */
     readonly rejoinAllowed?: boolean,
+    /** 410 빠진 번호의 확장 칸: 이의 기각으로 끝난 대기 참여면 BLOCKED(ADR-0259 결정 4) */
+    readonly removeReason?: 'BLOCKED',
   ) {
     super(message);
     this.name = 'AdmissionError';

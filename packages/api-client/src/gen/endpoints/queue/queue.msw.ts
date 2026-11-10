@@ -28,7 +28,6 @@ import type {
   BatchingResponse,
   CreateQueueLobbyParticipantBody,
   CreateQueuePreVerificationBody,
-  CreateQueueVerificationBody,
   LobbyToken,
   PreverifyResult,
   QueueEntryRequest,
@@ -36,7 +35,11 @@ import type {
   QueueShuffleProof,
   QueueShuffleProofGroup,
   QueueState,
-  QueueTicket
+  QueueTicket,
+  QueueVerificationAppealReceipt,
+  QueueVerificationResult,
+  QueueVerificationState,
+  QueueVerificationSubmitRequest
 } from '../../model';
 
 
@@ -61,6 +64,10 @@ export const getGetQueueShuffleProofResponseQueueShuffleProofGroupMock = (overri
 export const getGetQueueShuffleProofResponseMock = (overrideResponse: Partial<Extract<QueueShuffleProof, object>> = {}): QueueShuffleProof => ({eventId: faker.string.alpha({length: {min: 10, max: 20}}), opensAt: faker.date.past().toISOString().slice(0, 19) + 'Z', seedRevealAt: faker.date.past().toISOString().slice(0, 19) + 'Z', lobby: faker.helpers.arrayElement([{...getGetQueueShuffleProofResponseQueueShuffleProofGroupMock()},null,]), batch: faker.helpers.arrayElement([{...getGetQueueShuffleProofResponseQueueShuffleProofGroupMock()},null,]), ...overrideResponse})
 
 export const getCreateQueueAdmissionResponseMock = (overrideResponse: Partial<Extract<AdmissionResult, object>> = {}): AdmissionResult => ({purchaseSessionExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_YET','ADMITTED','SOON','VERIFYING'] as const), undefined]), admissionToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), retryAfterSeconds: faker.helpers.arrayElement([faker.number.int(), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), retryAfterMs: faker.helpers.arrayElement([faker.number.int(), undefined]), serverEcdhPublicKey: faker.helpers.arrayElement([{kty: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), crv: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), x: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), y: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kid: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), seatmapLayoutPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
+
+export const getGetQueueVerificationResponseMock = (overrideResponse: Partial<Extract<QueueVerificationState, object>> = {}): QueueVerificationState => ({state: faker.helpers.arrayElement(['VERIFYING','PASSED','BLOCKED'] as const), passedVia: faker.helpers.arrayElement([faker.helpers.arrayElement(['CHALLENGE','APPEAL'] as const), null]), graceUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), appeal: faker.helpers.arrayElement([{appealId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), receivedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), text: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},null,]), ...overrideResponse})
+
+export const getCreateQueueVerificationResponseMock = (overrideResponse: Partial<Extract<QueueVerificationResult | QueueVerificationAppealReceipt, object>> = {}): QueueVerificationResult | QueueVerificationAppealReceipt => (faker.helpers.arrayElement([{result: faker.helpers.arrayElement(['PASSED','CHALLENGE_FAILED','REVERIFY_REQUIRED','PERSON_MISMATCH'] as const), queueNumber: faker.helpers.arrayElement([faker.number.int(), undefined]), graceUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse}, {appealId: faker.string.uuid(), receivedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', ...overrideResponse}]))
 
 
 export const getCreateQueueLobbyParticipantMockHandler = (overrideResponse?: LobbyToken | ((info: Parameters<HttpResponseResolver<{ eventId: string }, CreateQueueLobbyParticipantBody>>[0]) => Promise<LobbyToken> | LobbyToken), options?: RequestHandlerOptions) => {
@@ -179,11 +186,25 @@ export const getCreateQueueAdmissionMockHandler = (overrideResponse?: AdmissionR
   }, options)
 }
 
-export const getCreateQueueVerificationMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string }, CreateQueueVerificationBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
-  return http.post<{ eventId: string }, CreateQueueVerificationBody>('*/v1/queues/:eventId/verification', async (info: Parameters<HttpResponseResolver<{ eventId: string }, CreateQueueVerificationBody>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+export const getGetQueueVerificationMockHandler = (overrideResponse?: QueueVerificationState | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<QueueVerificationState> | QueueVerificationState), options?: RequestHandlerOptions) => {
+  return http.get<{ eventId: string }>('*/v1/queues/:eventId/verification', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetQueueVerificationResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateQueueVerificationMockHandler = (overrideResponse?: QueueVerificationResult | QueueVerificationAppealReceipt | ((info: Parameters<HttpResponseResolver<{ eventId: string }, QueueVerificationSubmitRequest>>[0]) => Promise<QueueVerificationResult | QueueVerificationAppealReceipt> | QueueVerificationResult | QueueVerificationAppealReceipt), options?: RequestHandlerOptions) => {
+  return http.post<{ eventId: string }, QueueVerificationSubmitRequest>('*/v1/queues/:eventId/verification', async (info: Parameters<HttpResponseResolver<{ eventId: string }, QueueVerificationSubmitRequest>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateQueueVerificationResponseMock(),
       { status: 200
       })
   }, options)
@@ -199,5 +220,6 @@ export const getQueueMock = () => [
   getGetQueueBatchResultMockHandler(),
   getGetQueueShuffleProofMockHandler(),
   getCreateQueueAdmissionMockHandler(),
+  getGetQueueVerificationMockHandler(),
   getCreateQueueVerificationMockHandler()
 ]

@@ -15,9 +15,10 @@ export const createQueueVerificationBodyAppealMax = 4000;
 
 
 export const CreateQueueVerificationBody = zod.object({
-  "challengeToken": zod.string().optional(),
-  "appeal": zod.string().max(createQueueVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 비우면 설명 요청(추천 적용 2026-10-14, ADR-0062)')
-}).strict()
+  "challengeToken": zod.string().optional().describe('심층 챌린지(CMP-047)의 사람 확인 토큰(action verify, 300초 한 번 쓰기)'),
+  "appeal": zod.string().max(createQueueVerificationBodyAppealMax).optional().describe('설명·재검토 요청 내용. 화면·서버는 NFC 정규화 뒤 grapheme 1,000자로 센다. 빈 문자열이면 설명 요청(추천 적용 2026-10-14, ADR-0062). NUL(U+0000)·양방향 제어 글자(U+202A~U+202E, U+2066~U+2069)·0폭 글자(U+200B~U+200D, U+FEFF)가 있으면 400이다(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259, docs/features/bot-defense.md §12 \'접수\')'),
+  "deviceId": zod.string().optional().describe('기기 식별값(CSPRNG 128비트, base64url 22자, docs/frontend.md §3.12, 로비 입장·사전 검증과 같은 모양). trust-svc가 기기 이력과 차단 기기 목록을 볼 때 쓴다. 선택이고 형식이 다르면 400(추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
+}).strict().describe('추가 검증 제출 본문. challengeToken과 appeal 가운데 정확히 하나만 보낸다(둘 다 있거나 둘 다 없으면 400, 추천 적용 2026-11-10, BUILD_ORDER BOT-090, ADR-0259)')
 
 export type CreateQueueVerificationBody = zod.input<typeof CreateQueueVerificationBody>;
 export type CreateQueueVerificationBodyOutput = zod.output<typeof CreateQueueVerificationBody>;

@@ -42,11 +42,13 @@ import {
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
+  CheckReverification,
   DrizzleVerificationStore,
   HmacIdentityHashers,
   KmsIdentityHashers,
   kmsMacClient,
   restrictedCiHoldHandlers,
+  reverificationCheckHandlers,
   SetRestrictedCiHold,
   TestVerificationProvider,
   unavailableHashers,
@@ -254,6 +256,11 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().RestrictedCiHoldService.service,
       handlers: restrictedCiHoldHandlers({ hold: service.app.get(SetRestrictedCiHold) }, (method, err) => service.logger.error({ err, method }, 'RestrictedCiHoldService 처리 실패')),
+    },
+    // 추가 검증 제출의 본인확인 재통과 확인(queue-svc만, bot-defense §5.2 3단계, BOT-090). 신원은 메시 L7 허용 목록(I-T56 ⑤, HOT-400)
+    {
+      definition: identityPackage().ReverificationCheckService.service,
+      handlers: reverificationCheckHandlers({ check: service.app.get(CheckReverification) }, (method, err) => service.logger.error({ err, method }, 'ReverificationCheckService 처리 실패')),
     },
   ],
 });

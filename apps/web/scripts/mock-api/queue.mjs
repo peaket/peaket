@@ -1,4 +1,5 @@
-// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207·0208·0211): 사전 검증(공연 상세), 로비 참가·참가 취소·셔플 결과 파일, 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소.
+// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207·0208·0211): 사전 검증(공연 상세), 로비 참가·참가 취소·셔플 결과 파일, 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소,
+// 추가 검증 상태 읽기·제출·이의(SCR-009, ADR-0259).
 // queue-svc를 단순하게 흉내 낸 모형이다: 진입한 차례대로 순번을 주고, serving은 판매 중일 때만 queueRate(1초에 지나는 번호)로 나아간다.
 // 운영·CI에서는 쓰지 않는다(ADR-0199 결정 2). 상태 바꾸기는 /__mock/state의 queue* 칸이다(scripts/mock-api.mjs 머리 주석).
 import { createHash, randomUUID } from 'node:crypto';
@@ -46,7 +47,26 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueSoldOutTiers: '',
   /** 200 대기 상태 파일에 실을 Retry-After 초(브라우저는 무시해야 한다, FE-T4, ADR-0217). 빈 값이면 싣지 않는다 */
   queueStateRetryAfter: '',
+  /**
+   * 추가 검증 상태(GET …/verification, ADR-0259): verifying(추가 검증 중)|accepted(CS 인정: PASSED·passedVia APPEAL, 차례 전)|accepted-after(인정, 차례 지남: graceUntil)
+   * |rejected(CS 기각: BLOCKED)|not-verifying(대기 참여는 있지만 추가 검증 중이 아님 409)|none(대기 참여 없음 404)|identity(본인확인 전 403).
+   * 입장 확정 queueAdmit=verifying은 추가 검증 중일 때만 VERIFYING이고, 기각이면 입장 확정·제출이 410 queue-ticket-removed + removeReason BLOCKED다
+   */
+  queueVerify: 'verifying',
+  /**
+   * 추가 검증 제출(challengeToken): normal(통과, 차례 전)|after(통과, 차례 지남: graceUntil, 입장 확정이 차례를 기다리지 않는다)|challenge-failed|reverify|mismatch|limited(429 한 번)|down(503 한 번)|not-verifying(409)|blocked|ended(410).
+   * normal·after의 첫 제출은 REVERIFY_REQUIRED다(이 가짜 API는 본인확인 재통과를 모른다: 화면은 토큰을 받자마자 보내 보고, ③을 마친 뒤 다시 보낸다, ADR-0259 결정 12)
+   */
+  queueVerifySubmit: 'normal',
+  /** 이의(appeal): normal(202, 처음 값)|down(건 요청 발행 실패 503 한 번) */
+  queueVerifyAppeal: 'normal',
 });
+
+/** NFC 정규화 뒤 grapheme 수(화면·queue-svc와 같은 규칙, d2 §3.1) */
+const graphemes = (t) => [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(t.normalize('NFC'))].length;
+const DEVICE_ID = /^[A-Za-z0-9_-]{22}$/;
+/** 이의 글에 두지 않는 글자: NUL·양방향 제어(U+202A~U+202E, U+2066~U+2069)·0폭(U+200B~U+200D, U+FEFF)(ASVS 2.2.1, bot-defense §12 '접수') */
+const APPEAL_FORBIDDEN = /[\u0000\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/;
 
 /**
  * @param {{ now: () => number, state: Record<string, string>, schedule?: (eventId: string) => ({ openAtMs: number, lobbyOpensAtMs: number | null } | null) }} o
@@ -68,6 +88,19 @@ export function createQueueMock({ now, state, schedule = () => null }) {
     return Number.isFinite(v) && v >= 0 ? v : Number(QUEUE_DEFAULTS[k]);
   };
   const sale = () => SALE[state.queue] ?? 'ON_SALE';
+  /** 추가 검증 기록(회차마다 하나, 이 가짜 API의 손님은 한 사람이다). CS 결과는 상태 바꾸기 queueVerify가 정한다 */
+  const vstate = (e) => {
+    e.verify ??= { state: 'VERIFYING', reason: 'RAPID_REQUESTS', appeal: null, after: false, passedAt: 0, via: null, askedReverify: false };
+    const v = e.verify;
+    if (state.queueVerify === 'accepted' || state.queueVerify === 'accepted-after') {
+      if (v.state !== 'PASSED') Object.assign(v, { state: 'PASSED', via: 'APPEAL', after: state.queueVerify === 'accepted-after', passedAt: now() });
+      v.appeal ??= { appealId: randomUUID(), receivedAt: new Date(now()).toISOString(), text: '' };
+    } else if (state.queueVerify === 'rejected') v.state = 'BLOCKED';
+    return v;
+  };
+  const startVerify = (e, reason) => {
+    e.verify = { state: 'VERIFYING', reason, appeal: null, after: false, passedAt: 0, via: null, askedReverify: false };
+  };
   /** 판매 중이고 오픈이 지났을 때만 serving이 나아간다(일시정지·일시 매진은 멈춤) */
   const advance = (e) => {
     const t = now();
@@ -110,7 +143,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
      * @param {{ send: Function, problem: Function, readJson: (req: any) => Promise<any>, badRequest: () => void }} io
      */
     handle(req, p, io) {
-      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|pre-verifications|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json|shuffle-proof)$/.exec(p);
+      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|pre-verifications|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json|shuffle-proof|verification)$/.exec(p);
       if (!m) return false;
       const e = ev(m[1]);
       const [, eventId, kind, segment, prefix, shufflePrefix] = m;
@@ -164,6 +197,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           // 다른 기기가 먼저 참가했다(로비 참가 취소 뒤에는 지나간다). 이 기기·다른 탭이 이미 받은 참가 토큰도 409다(pid당 1장)
           if ((mode === 'other-device' && !e.otherCleared) || e.lobby) return problem(409, 'already-waiting', '이미 다른 곳에서 로비에 들어와 있습니다');
           advance(e);
+          if (mode === 'verify') startVerify(e, 'NETWORK');
           const token = `lt.${randomUUID()}`;
           e.lobby = token;
           e.tickets.set(token, { seq: e.nextSeq++, admitted: false, soonShown: false });
@@ -289,6 +323,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           const seq = e.nextSeq++;
           const ticket = issue(e, seq);
           e.entries.set(id, { token: b.preverifyToken, seq, ticket });
+          if (mode === 'verify') startVerify(e, 'RAPID_REQUESTS');
           return send(201, ticketBody(ticket, seq, mode === 'verify'));
         });
         return true;
@@ -352,6 +387,82 @@ export function createQueueMock({ now, state, schedule = () => null }) {
         return true;
       }
 
+      if (kind === 'verification' && req.method === 'GET') {
+        if (state.queueVerify === 'none') return problem(404, 'queue-entry-not-found', '이 회차에 대기 참여가 없습니다'), true;
+        if (state.queueVerify === 'identity') return problem(403, 'identity-verification-required', '휴대폰 본인확인을 먼저 해 주세요'), true;
+        if (state.queueVerify === 'not-verifying') return problem(409, 'not-verifying', '추가 검증 중인 대기표가 아닙니다'), true;
+        const v = vstate(e);
+        const passed = v.state === 'PASSED';
+        send(200, {
+          state: v.state,
+          verificationReason: v.reason,
+          passedVia: passed ? v.via : null,
+          graceUntil: passed && v.after ? new Date(v.passedAt + 15 * 60_000).toISOString() : null,
+          appeal: v.appeal,
+        });
+        return true;
+      }
+
+      if (kind === 'verification' && req.method === 'POST') {
+        void io.readJson(req).then((b) => {
+          const keys = b && typeof b === 'object' ? Object.keys(b) : [];
+          const hasToken = typeof b?.challengeToken === 'string' && b.challengeToken.length > 0;
+          const hasAppeal = typeof b?.appeal === 'string';
+          // 본문 형식(openapi QueueVerificationSubmitRequest): 둘 가운데 정확히 하나, 정하지 않은 칸 없음, deviceId 모양, 이의 1,000자(NFC grapheme)
+          if (
+            !b ||
+            typeof b !== 'object' ||
+            keys.some((k) => !['challengeToken', 'appeal', 'deviceId'].includes(k)) ||
+            hasToken === hasAppeal ||
+            (b.challengeToken !== undefined && !hasToken) ||
+            (b.deviceId !== undefined && !(typeof b.deviceId === 'string' && DEVICE_ID.test(b.deviceId))) ||
+            (hasAppeal && (graphemes(b.appeal) > 1000 || APPEAL_FORBIDDEN.test(b.appeal)))
+          )
+            return io.badRequest();
+          if (state.queueVerify === 'none') return problem(404, 'queue-entry-not-found', '이 회차에 대기 참여가 없습니다');
+          if (state.queueVerify === 'identity') return problem(403, 'identity-verification-required', '휴대폰 본인확인을 먼저 해 주세요');
+          if (state.queueVerify === 'not-verifying') return problem(409, 'not-verifying', '추가 검증 중인 대기표가 아닙니다');
+          const v = vstate(e);
+          if (v.state === 'BLOCKED') return problem(410, 'queue-ticket-removed', '이 대기표는 더 쓸 수 없습니다', {}, { removeReason: 'BLOCKED' });
+          const passedBody = () => ({ result: 'PASSED', queueNumber: Math.max(1, e.nextSeq - 1), graceUntil: v.after ? new Date(v.passedAt + 15 * 60_000).toISOString() : null });
+          // 이미 통과한 대기 참여는 제출·이의 모두 같은 200 PASSED(openapi 200 설명)
+          if (v.state === 'PASSED') return send(200, passedBody());
+          if (hasAppeal) {
+            if (state.queueVerifyAppeal === 'down' && !e.once.has('va:down')) {
+              e.once.add('va:down');
+              return problem(503, 'dependency-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '3' });
+            }
+            // 한 대기 참여에 한 번: 이미 접수했으면 처음 값(B-T10 ①)
+            v.appeal ??= { appealId: randomUUID(), receivedAt: new Date(now()).toISOString(), text: b.appeal.normalize('NFC') };
+            return send(202, { appealId: v.appeal.appealId, receivedAt: v.appeal.receivedAt });
+          }
+          const mode = state.queueVerifySubmit;
+          if (mode === 'not-verifying') return problem(409, 'not-verifying', '추가 검증 중인 대기표가 아닙니다');
+          if (mode === 'blocked') return problem(410, 'queue-ticket-removed', '이 대기표는 더 쓸 수 없습니다', {}, { removeReason: 'BLOCKED' });
+          if (mode === 'ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
+          if ((mode === 'limited' || mode === 'down') && !e.once.has(`vs:${mode}`)) {
+            e.once.add(`vs:${mode}`);
+            return mode === 'limited'
+              ? problem(429, 'verification-submit-limited', '확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요', { 'retry-after': '5' })
+              : problem(503, 'dependency-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '2' });
+          }
+          if (mode === 'challenge-failed') return send(200, { result: 'CHALLENGE_FAILED' });
+          if (mode === 'reverify') return send(200, { result: 'REVERIFY_REQUIRED' });
+          if (mode === 'mismatch') return send(200, { result: 'PERSON_MISMATCH' });
+          // 첫 제출은 재통과 전으로 본다(화면이 토큰을 받자마자 보내 본 것)
+          if (!v.askedReverify) {
+            v.askedReverify = true;
+            return send(200, { result: 'REVERIFY_REQUIRED' });
+          }
+          v.state = 'PASSED';
+          v.via = 'CHALLENGE';
+          v.after = mode === 'after';
+          v.passedAt = now();
+          return send(200, passedBody());
+        });
+        return true;
+      }
+
       if (kind === 'admission' && req.method === 'POST') {
         void io.readJson(req).then((b) => {
           const keys = b && typeof b === 'object' ? Object.keys(b) : [];
@@ -362,6 +473,9 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           const t = e.tickets.get(key);
           if (!t) return problem(403, 'queue-ticket-invalid', '대기표가 맞지 않습니다');
           const mode = state.queueAdmit;
+          // 추가 검증 기록: 기각이면 410 + removeReason BLOCKED, 통과(차례 지남)면 차례를 기다리지 않는다(ADR-0259 결정 4, queue-admission §7)
+          const vs = e.verify || mode === 'verifying' || state.queueVerify === 'rejected' ? vstate(e) : null;
+          if (vs?.state === 'BLOCKED') return problem(410, 'queue-ticket-removed', '이 대기표는 더 쓸 수 없습니다', {}, { removeReason: 'BLOCKED' });
           if (mode === 'unauthorized') return send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
           if (mode === 'restricted') return problem(403, 'booking-restricted', '예매가 제한되어 있습니다');
           if (mode === 'duplicate') return problem(409, 'duplicate-admission', '다른 곳에서 이미 입장했습니다');
@@ -370,10 +484,10 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           if (mode === 'sold-out') return problem(410, 'sold-out', '매진입니다');
           if (mode === 'ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
           if (mode === 'down') return problem(503, 'dependency-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
-          if (mode === 'verifying') return send(200, { status: 'VERIFYING', verificationReason: 'RAPID_REQUESTS', serverTimeMs: now() });
+          if (mode === 'verifying' && vs?.state === 'VERIFYING') return send(200, { status: 'VERIFYING', verificationReason: vs.reason, serverTimeMs: now() });
           // 같은 대기표로 다시 오면(응답을 잃고 다시 보냄) queue-svc처럼 ADMITTED를 다시 준다
           const serving = advance(e);
-          if (serving < t.seq) {
+          if (serving < t.seq && !(vs?.state === 'PASSED' && vs.after)) {
             const rate = Math.max(num('queueRate'), 0.001);
             return send(200, { status: 'NOT_YET', retryAfterMs: Math.min(60_000, Math.max(1000, Math.ceil(((t.seq - serving) / rate) * 1000))), serverTimeMs: now() });
           }

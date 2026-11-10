@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 213 | 55 | 0 | 0 | 0 | 4 | 0 | 7 | 100 | 379 |
-| 합계 | 213 | 55 | 0 | 0 | 0 | 4 | 0 | 7 | 100 | 379 |
+| B | 217 | 55 | 0 | 0 | 0 | 5 | 0 | 7 | 96 | 380 |
+| 합계 | 217 | 55 | 0 | 0 | 0 | 5 | 0 | 7 | 96 | 380 |
 
 ## docs/features/identity.md
 
@@ -112,10 +112,11 @@
 | I-T55 | ② | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ②은 재인증 강도가 '요청만 함'이면 재인증 토큰을 주지 않고 재통과를 요구한다. 로그인 자체는 막히지 않았다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts |
 | I-T55 | ③ | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ③은 재인증 강도가 '요청만 함'이면 재인증 토큰을 주지 않고 재통과를 요구한다. 로그인 자체는 막히지 않았다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts |
 | I-T55 | ④ | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ④는 재인증 토큰이 나온다. 세션의 `login_verdict`가 판정마다 남는다 | 자동 시험 | B | 시험: services/identity-svc/test-int/verification-keys.int.test.ts, services/identity-svc/test/verification-keys.test.ts |
-| I-T56 | ① | 본인확인 재통과 확인(`CheckReverification`, 추천… | ①만 재통과로 답한다. | 빈칸 | B | — |
-| I-T56 | ② | 본인확인 재통과 확인(`CheckReverification`, 추천… | ②은 재통과 아님이다. | 빈칸 | B | — |
-| I-T56 | ③ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ③은 재통과 아님이다. | 빈칸 | B | — |
-| I-T56 | ④ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ④는 queue-svc가 추가 검증 제출에 503을 돌려주고 통과로 보지 않는다. queue-svc 밖의 신원이 부르면 거부된다 | 빈칸 | B | — |
+| I-T56 | ① | 본인확인 재통과 확인(`CheckReverification`, 추천… | ①만 재통과로 답한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/main-reverification.int.test.ts, services/identity-svc/test-int/reverification-check… |
+| I-T56 | ② | 본인확인 재통과 확인(`CheckReverification`, 추천… | ②은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
+| I-T56 | ③ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ③은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
+| I-T56 | ④ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ④는 queue-svc가 추가 검증 제출에 503을 돌려주고 통과로 보지 않는다. … 에서 떼어 냄은 추천 적용 2026-11-10, BUILD_ORDER… | 자동 시험 | B | 시험: services/queue-svc/test/verification-cases.ts, services/queue-svc/test/verification-clients.test.ts |
+| I-T56 | ⑤ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ⑤는 거부된다(메시 L7 허용 목록 몫, | 다른 단계 | B | HOT-400 · `CheckReverification`을 queue-svc 신원으로만 받는 것은 메시 L7 허용 목록이다(BAT-200에서 정함, 2026-11-10) |
 | I-T57 | ① | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ①은 승인 화면에 기기 이름이 보이고 토큰이 나온다. | 빈칸 | B | — |
 | I-T57 | ② | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ②는 토큰 발급이 거부된다(캐시하지 않는다). | 빈칸 | B | — |
 | I-T57 | ③ | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ③은 503이고 기기를 승인하지 않는다 | 빈칸 | B | — |
@@ -262,8 +263,8 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 2곳 (영역:… |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 3곳 (영역:… |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/console-host, apps/partner, apps/web… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -275,12 +276,12 @@
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: packages/platform/test/content-type.test.ts, services/queue-svc/test/admission.test.ts 외 2곳 (영역:… |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 1곳 (영역:… |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: packages/platform/test/content-type.test.ts, services/queue-svc/test/admission.test.ts 외 3곳 (영역:… |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 (영역:… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음: 로그인은 창을 열지 않고 리디렉션(브라우저를 다른 주소로 보내는 응답)으로 이동하므로 받는 창 메시지가 없다(docs/features/identity.md §2). 로그인에 팝업 창을 쓰게 되면 다시… |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs 외 1곳 |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 4곳 |
 | v5.0.0-3.3.5 | — | L3 | 쿠키를 쓸 때 쿠키 이름과 값의 길이 합이 4,096바이트를 넘지 않게 한다(넘으면 브라우저가 저장하지 않아 그 쿠키에 기대는 기능을 쓸 수 없다). | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-6.1.1 | — | L1 | 레이트 리밋·자동화 방지·적응형 대응 같은 통제가 크리덴셜 스터핑과 비밀번호 무차별 대입을 어떻게 막는지 문서에 정한다. 통제를 어떻게 설정하는지와 악의적 계정… | 자동 시험 | B | 시험: services/identity-svc/test/admin-login.test.ts |
 | v5.0.0-6.1.2 | — | L2 | 비밀번호로 쓸 수 없는 서비스 관련 단어 목록을 문서화한다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-password.test.ts |
