@@ -40,7 +40,7 @@
 - 작업자마다 Deployment를 하나씩 두고 복제는 2개다 [가정]. PodDisruptionBudget(자발적 중단 때 남길 최소 파드 수)은 1이다. 두 파드는 같은 소비자 그룹에서 파티션을 나눠 읽고, 한 파드가 죽으면 남은 파드가 재조정으로 그 파티션을 넘겨받는다. 재조정은 소비자 그룹 안에서 파티션을 다시 나누는 일이다.
 - 판 올리기는 롤링이다(새 파드 1개를 먼저 띄우고, 옛 파드를 하나씩 멈춘다). 옛 파드는 우아한 종료를 한다. 새로 가져오기를 멈추고, 처리 중인 묶음을 마쳐 커밋한 뒤 그룹에서 나간다. 종료 유예는 30초 [가정]이고, NestJS 종료 설정은 devops §6.4를 따른다.
 - 자동 확장은 켜지 않고 복제 수를 고정한다. 소비자 수는 파티션 수를 넘어도 늘지 않고, 늘리고 줄일 때마다 재조정이 일어나기 때문이다. 복제 수를 바꿀 때는 업그레이드와 같은 규칙(동결 창·마감 실행 중 금지, POL-028)을 따른다.
-- 네임스페이스는 `ops-rt`·`analytics-ingest`가 `data`, `trust-reassess`가 `trust`이다. 매니페스트는 서비스와 같은 공용 차트(§13)가 만든다.
+- 네임스페이스는 `ops-rt`·`analytics-ingest`가 `data`, `trust-reassess`·`inv-ingest`가 `trust`이다(소유자 결정 2026-11-11, open-items 98번). 매니페스트는 서비스와 같은 공용 차트(§13)가 만든다.
 
 ### 2.3 권한·네트워크
 
@@ -103,10 +103,11 @@
 | `ops-rt` | 2 | 1 · 1GiB | 데이터 노드 풀, 온디맨드 |
 | `analytics-ingest` | 2 | 1 · 1GiB | 데이터 노드 풀, Spot 허용 |
 | `trust-reassess` | 2 | 0.5 · 512MiB | 일반 노드 풀, 온디맨드 |
+| `inv-ingest` | 2 | 0.5/1 · 1Gi/2Gi | 일반 노드 풀, Spot 허용 |
 
-- `inv-ingest`의 복제·자원·노드와 네임스페이스(§2.2), 소비자 그룹과 시작 위치(§2.6)는 아직 정하지 않았다(docs/review/open-items.md 98번, 2026-11-01 정합 점검).
-- 숫자는 [가정, 4.3.9 측정에서 확정]이고, 근거는 §11에 있다. 자원 요청과 한도는 같은 값으로 둔다(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 Kyverno가 둘 다 요구한다, devops §4.3).
-- 합은 CPU 5개·메모리 5GiB다. Flink로 짠 설계(CPU 15.5개·메모리 31GiB)의 약 3분의 1이다 [가정].
+- `inv-ingest`의 값은 소유자 결정 2026-11-11(open-items 98번)이다. 네임스페이스·AppProject는 `trust`, 복제 2, CPU 요청 500m·한도 1, 메모리 요청 1Gi·한도 2Gi, 일반 노드 풀, Spot 허용이고, 구현 직전에 자원 값과 Spot 회수 영향을 한 번 더 확인한다.
+- 숫자는 [가정, 4.3.9 측정에서 확정]이고, 근거는 §11에 있다. 자원 요청과 한도는 같은 값으로 둔다(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 Kyverno가 둘 다 요구한다, devops §4.3). `inv-ingest`만 예외로 요청 500m·1Gi, 한도 1·2Gi다(소유자 결정 2026-11-11, open-items 98번).
+- 합은 요청 기준 CPU 6개·메모리 7GiB다(숫자는 반올림한 요청 값). Flink로 짠 설계(CPU 15.5개·메모리 31GiB)의 약 3분의 1이다 [가정].
 - `ops-rt`·`trust-reassess`는 온디맨드로 둔다. Spot이 회수되면 관제 신선도와 재평가가 잠깐 끊기기 때문이다. `analytics-ingest`는 지연을 견디고, 빠진 것은 커버리지 대조(§6)가 찾으므로 Spot을 허용한다.
 
 ### 2.6 Kafka 연결
@@ -116,6 +117,7 @@
 | `ops-rt` | 거래·제어 클러스터 4개 토픽, 텔레메트리 클러스터 3개 토픽 | `peaket.ops-rt.<환경>` | 가장 이른 곳(EARLIEST). 누적은 원시 행이 다 있어야 맞는다. 보관 기간(7일)보다 오래된 판매류 사건은 브론즈에서 채운다(§4.7) |
 | `analytics-ingest` | 거래·제어 7개, 텔레메트리 3개 | `peaket.analytics-ingest.<환경>` | EARLIEST(보관된 7일 치 전부) |
 | `trust-reassess` | 텔레메트리 클러스터 `telemetry.behavior` | `peaket.trust-reassess.<환경>` | 가장 늦은 곳(LATEST). 상태가 10분이라 지난 사건이 필요 없다 |
+| `inv-ingest` | 거래·제어 5개, 텔레메트리 5개(`investigation.requests` 포함, §1) | `inv-ingest`(소유자 결정 2026-11-11, open-items 98번) | 가장 이른 곳(EARLIEST) |
 
 - 인증은 MSK IAM이다. 클라이언트에 `security.protocol=SASL_SSL`, `sasl.mechanism=OAUTHBEARER`를 두고, 토큰 함수가 서명 도구(§2.1)로 토큰을 만든다.
 - 토큰 함수는 `generateAuthTokenFromRole({ region: 'ap-northeast-2', awsRoleArn: <작업자별 MSK 전용 역할>, awsRoleSessionName: '<작업자>-<환경>' })`를 부른다(추천 적용 2026-10-28, 기술 검토 높음-26). 세션 이름이 바뀌지 않으므로 재인증 때 주체가 같다. 이 함수는 Pod Identity 자격으로 그 역할을 맡는다(AWS SDK `fromTemporaryCredentials`가 기본 자격 사슬로 STS를 부른다). 역할을 맡지 못하면 예외를 던져 연결이 실패하고, 기본 자격으로 넘어가 다른 신원으로 붙지 않는다(서명 도구 1.0.3과 AWS SDK 소스, 2026-10-28 확인). 그 실패는 소비 밀림 경보와 재시작 수로 드러난다(§9).
@@ -556,7 +558,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 작업자가 멈추거나 되풀이 실패하지 않음 | 재시작 수, 파드 상태 | — | '스트림 작업자' 화면 | 10분 안 재시작 3회 [가정] SEV3 | 롤링 뒤 준비 상태 |
 | 삽입이 이어짐 | `stream_insert_retries_total`, `stream_paused_partitions`, `stream_insert_seconds` | — | 작업자별 삽입 | 재시도가 5분 [가정] 넘게 이어지면 SEV3 | 배포 뒤 첫 묶음 성공 |
 | 소비가 밀리지 않음 | `stream_consumer_lag_records` | — | '스트림 작업자' 화면 | 10분 동안 계속 늘면 SEV3 | 배포 전후 비교 |
-| 조회 시점 집계가 가벼움 | `rt_query_seconds{view}` | 회차당 조회 p95 0.25초 미만 [가정] | '실시간 표' | 10분 넘게 0.25초 초과 SEV3 | 카나리 동안 비교 |
+| 조회 시점 집계가 가벼움 | `rt_query_seconds{view}` | 회차당 조회 p95 0.25초 미만 [가정] | '실시간 표' | 10분 넘게 0.25초 초과 SEV3 | 카나리 동안 비교. 0.25초는 2026-11-11부터 표준 지연 칸의 경계다(open-items 99번) |
 | 재평가가 사람을 한꺼번에 격리하지 않음 | `trust_reassess_candidates_total{pattern}`, `trust_reassess_isolations_total{mode}` | — | 봇 패널 '재평가' | 격리 상한 도달 SEV3 | 그림자 기간 표본 검토 |
 | 원본 적재가 빠짐없음 | 마감 커버리지 대조, 적재 거절 기록 | — | 리포트 '데이터 품질' | 마감 보류(analytics §7), 거절 > 0 SEV3 | 마감 리포트 |
 | 조사 적재가 기록 고정 전에 따라옴(추천 적용 2026-10-31, ADR-0171) | `stream_consumer_lag_records{worker="inv-ingest"}`, 고정 판의 '늦은 적재' 표시(`fraud_snapshot.late`), `inv_ingest_ref_lookup_failures_total` | — | '스트림 작업자' 화면 '조사 적재' | 고정 대기 30분 [가정] 초과 SEV3, 계정 연결 값 묻기 실패가 10분 [가정] 이어지면 SEV3 | 온세일 뒤 첫 고정 판에 '늦은 적재' 표시가 없는지 |
@@ -641,7 +643,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 - **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`·`services/inv-ingest`(`inv-ingest`는 2026-11-01 정합 점검, §1)에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`(하위 내보내기 `@peaket/platform/stream-worker`)이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
 - **이미지**: 서비스와 같은 Node.js 기본 이미지(다이제스트 고정)를 쓴다. 공용 빌드 워크플로가 SBOM(소프트웨어에 들어간 부품 목록)·서명·출처 증명(어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 기록)을 붙인다(devops §4). 클러스터 입장 정책이 그 서명을 확인한다.
-- **차트**: 서비스와 같은 공용 차트가 Deployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor, PodDisruptionBudget을 만든다. 환경 값은 `envs/<환경>/<작업자>.yaml`(이미지 다이제스트, 복제 수, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2).
+- **차트**: 서비스와 같은 공용 차트가 Deployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor, PodDisruptionBudget을 만든다. 환경 값은 `envs/<환경>/<작업자>.yaml`(이미지 다이제스트, 복제 수, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2). `inv-ingest`는 `trust`에 든다(소유자 결정 2026-11-11, open-items 98번).
 - **배포 흐름**: 작업자 코드를 바꾸는 `peaket` PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 바뀐 범위의 단위·통합·계약 시험, ADR-0165) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → 롤링 → 확인(준비 상태, 첫 묶음 성공, 신선도, 누락률).
 - **시험**:
   1. 단위: 소비 모듈의 커밋 순서(쓰기 성공 전에는 커밋하지 않는다), 다시 시도와 멈춤, 거절, 재조정 중 처리를 본다. 재평가 Lua 스크립트(문턱, 넘음 표시, 다시 읽을 때 다시 내기)는 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄운 실제 Redis로 본다.
@@ -653,7 +655,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 ## 14. 대시보드·경보·런북
 
 - **대시보드 '스트림 작업자'**(지표와 로그를 그래프로 보여 주는 도구 Grafana, 작업자마다): 파드 상태와 재시작 수, 파티션별 소비 밀림(`stream_consumer_lag_records`), 멈춘 파티션 수(`stream_paused_partitions`), 묶음 삽입 시간·재시도(`stream_insert_seconds`·`stream_insert_retries_total`), 거절 수(`stream_rejected_total`), 뷰별 조회 시간(`rt_query_seconds`), 신선도(`rt_freshness_seconds{path}`), 파티션별 심장 박동 수, 재평가(후보·격리·상한).
-- **경보**: §9 표의 경보를 observability §5의 '스트림 작업자 신호'로 둔다. 모두 SEV3(`kind` hygiene, 재평가 상한만 control)이다. 운영 명령이 아니라 엔지니어 호출과 런북으로 이어진다. 관제 실시간 표가 낡으면 Degraded 전환은 자동으로 일어난다.
+- **경보**: §9 표의 경보를 observability §5의 '스트림 작업자 신호'로 둔다. 모두 SEV3(`kind` hygiene, 재평가 상한만 control)이다. 운영 명령이 아니라 엔지니어 호출과 런북으로 이어진다. 관제 실시간 표가 낡으면 Degraded 전환은 자동으로 일어난다. 지연 경보의 `le` 값은 표준 지연 칸 목록(observability §8, 0.25·0.6 포함)을 쓴다(소유자 결정 2026-11-11, open-items 99번).
 - **런북**: RB-34 '스트림 작업자 복구'(infra §10): ① 파드 상태, 재시작, 소비 밀림, 삽입 재시도, 거절 수로 멈춤·되풀이 실패·의존성 장애를 가른다 ② 의존성 장애면 회복을 기다린다. 작업자는 커밋하지 않고 멈춰 기다린다(표 §12) ③ 코드 문제면 이전 이미지로 되돌린다. 상태가 없어 그대로 이어 간다 ④ 원본 적재의 빈 구간과 거절 구간을 Kafka 보관 기간 안에 다시 적재하고, 실시간 원시 표를 잃었으면 다시 채운다(§4.7) ⑤ 마감 리포트의 실시간 대비 대조와 커버리지를 확인한다.
 
 ## 15. 남는 한계

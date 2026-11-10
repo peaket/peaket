@@ -121,6 +121,13 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | 회차 기준 자료(회차, 공연 ID·공연명·장르(ADR-0093), 공연장, 구역, 좌석 수, 등급·가격, 좌석-등급 대응, 판매 정책 요약, 파트너 상호, 공연 규모 등급) | core-svc, 오픈 30분 전(Go/No-Go 점검 시각)과 판매 승인·회차 취소 같은 상태 변화 때 | JSON, 50MB [가정] | `brz_ref_event`, `brz_ref_seat_map` |
 | 운영 기록 코드(명령 종류·시각·결과, 경보 종류, CS 처리함 유형·결과, 이의 제기 결과, 수요 예측(계산 시각·계기, 구독 수, 비율, 비율에 쓴 지난 회차 수, 예상 진입 인원, 제안 등급)과 규모 올리기 기록, ADR-0078) | ops-svc, 온세일 윈도우 종료 때(명령·경보·수요 예측), 하루 1회와 R2 때(CS·이의 제기). 자유 텍스트와 계정 ID는 쓰지 않는다 | JSON | `brz_ops_command`, `brz_ops_case`, `brz_ops_forecast` |
 | 부정 예매 사건 집계(회차 × 사유 범주마다 사건 수, 소명(의심받은 사람이 정상 구매라고 해명하는 절차) 요청·인정 계정 수, 이의 인정 계정 수, 조치한 계정 수·표 수. 계정 수가 5 [가정] 미만인 사유 범주 칸은 '기타'로 합친다. 계정 ID·사건 ID·묶음 근거·시각은 쓰지 않는다. 연구 갈래가 조사 갈래에서 받는 정답 라벨은 이 집계뿐이다. 조사 갈래가 아닌 사후 라벨은 실버 `slv_trust_label`로 받는다(§3.3·§11, 2026-11-01 정합 점검), 추천 적용 2026-10-31, ADR-0171 결정 6) | ops-svc 조사 모듈, 하루 1회와 R3 때 | JSON | `brz_ops_fraud_summary` |
+
+브론즈 표의 칸 이름은 아래와 같다(소유자 결정 2026-11-11, open-items 101번 ⑽). 개인정보·계정 ID·자유 텍스트는 넣지 않는다.
+- `brz_ops_command`: `command_id`, `seq`, `command_kind`, `type`, `actor_role`, `event_id`, `reason_code`, `occurred_at`, `result`, `dry_run`.
+- `brz_ops_case`: `case_id`, `kind`, `status`, `event_id`, `reason_code`, `opened_at`, `due_at`, `closed_at`, `outcome`.
+- `brz_ops_forecast`: `event_id`, `computed_at`, `basis`, `subscriptions`, `ratio`, `past_rounds`, `expected_entries`, `proposed_tier`.
+- `brz_ref_event`: `event_id`, `production_id`, `production_name`, `genre`, `venue_id`, `venue_name`, `starts_at`, `open_at`, `sale_end_at`, `seat_count`, `sale_policy`, `promoter_name`, `size_grade`.
+- `brz_ref_seat_map`: `event_id`, `layout_version`, `section_id`, `section_name`, `tier_id`, `price`, `seat_count`, `seat_index_from`, `seat_index_to`.
 | 비용(네임스페이스·라벨별 할당 비용, 비용 할당 태그별 일 비용) | 비용 내보내기 잡, 하루 1회 | CSV·Parquet(gzip 가능), 200MB [가정] | `brz_cost` |
 | SLO 결과(여정별 좋은·전체 이벤트 수, 에러 버짓 사용, 결제사 한도 응답 수, CloudFront 배포별 한도 사용률 최대값(ADR-0058), 예상 대기 오차 히스토그램, 경보 발생 수, 체감 성능 p75, 텔레메트리 생산자가 레코드별로 버린 수(`telemetry_dropped_total{record}`, §7 커버리지, 추천 적용 2026-10-29, ADR-0141 결정 6)) | 마감 실행기, R0에 Prometheus(지표 장기 저장소인 Mimir)에서 회차 단위로 | JSON | `brz_slo_snapshot` |
 
@@ -191,7 +198,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 ### 4.3 재실행·동결·늦은 이벤트
 
 - 재실행 단위는 회차다. 실버는 각 마감에서 그 회차 행을 지우고 다시 넣고, 골드는 새 판을 넣은 뒤 현재 판을 바꾼다. 그래서 여러 번 돌려도 결과가 같다.
-- 원시 데이터(브론즈·실버)는 적재 뒤 90일에 지워진다. 오픈과 공연 사이가 90일보다 긴 회차는 공연 무렵에 오픈 때의 원시 데이터가 없다. 그래서 온세일 사실(F1~F7)은 R2에 동결하고, R3 이후 계산은 동결된 골드를 읽는다.
+- 원시 데이터(브론즈·실버)는 적재 뒤 90일에 지워진다. 실버의 TTL 기준은 브론즈 `loaded_at`을 옮긴 `source_loaded_at`이고, 원본 적재 시각이 없는 행은 `open_date` + 90일이다(소유자 결정 2026-11-11, open-items 95번). 오픈과 공연 사이가 90일보다 긴 회차는 공연 무렵에 오픈 때의 원시 데이터가 없다. 그래서 온세일 사실(F1~F7)은 R2에 동결하고, R3 이후 계산은 동결된 골드를 읽는다.
 - 날짜별 사실(F8 환불, F9 양도, F13 CS, F14 비용, F15 판매)은 날짜 단위로 쌓으므로 회차 동결과 무관하게 이어진다. 동결 뒤 생긴 예외 환불은 날짜별 환불에만 더하고, 동결된 회차 요약은 고치지 않는다.
 - **판매 기간이 긴 회차(추천 적용 2026-10-28, 기술 검토 높음-23)**: 매진되지 않은 회차는 R2(오픈 + 7일) 뒤에도 몇 주~몇 달 판다. 온세일 판매 사실(F2)은 R2에 동결되므로 그 뒤 판매가 F2에 쌓이지 않는다. 그래서 날짜별 판매 사실 F15(`fct_sales_daily`)를 환불 사실처럼 매일 쌓는다. 마감 실행기가 하루 한 번 전날(KST 00:00~24:00) 판매분을 넣는다. 장르별 랭킹 일 집계(§8.5)와 같은 매일 실행에서 만들고, 전날 사건은 실버에 아직 있으므로(적재 뒤 90일) 오픈에서 공연까지가 90일을 넘어도 빠지는 날이 없다. R3의 판매 대금(지표 26)과 공연 전날 판매율(지표 7)은 F2가 아니라 F15의 합으로 구한다. F2는 온세일 분석(오픈 기준 분의 판매 곡선, 매진 시각)에만 쓴다.
 - 오프라인 스캔처럼 늦게 올라오는 기록은 R3 전이면 반영하고, 그 뒤면 날짜별 사실에만 쌓는다.
@@ -282,7 +289,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | 층 | 엔진과 정렬 | 파티션과 TTL | 쓰기 방식 |
 | --- | --- | --- | --- |
 | 브론즈 | ReplicatedMergeTree, `ORDER BY (event_id, occurred_at)`. 적재 거절 기록 `brz_rejected`만 `ORDER BY (topic, partition, offset)`(docs/streaming.md §6.3) | `toYYYYMMDD(loaded_at)`, `loaded_at + 90일`(`brz_rejected`도 `loaded_at + 90일`) | 적재 잡 비동기 일괄 삽입. 중복 허용 |
-| 실버 | ReplicatedMergeTree, `ORDER BY (event_id, event_key)` | `toYYYYMM(open_date)`, 적재 뒤 90일(§4.3). TTL을 거는 칸은 정하지 않았다(docs/review/open-items.md 95번, 2026-11-01 정합 점검) | dbt delete+insert. 중복 제거는 SQL(`LIMIT 1 BY event_key`)로 한다 |
+| 실버 | ReplicatedMergeTree, `ORDER BY (event_id, event_key)` | `toYYYYMM(open_date)`, `source_loaded_at + 90일`(브론즈 `loaded_at`을 옮긴 칸, 원본이 없으면 `open_date` + 90일. 소유자 결정 2026-11-11, open-items 95번) | dbt delete+insert. 중복 제거는 SQL(`LIMIT 1 BY event_key`)로 한다 |
 | 골드 | ReplicatedMergeTree, 회차가 앞에 오는 정렬 키 | `toYYYYMM(open_date)`, 2년 | dbt 판 바꾸기(회차 단위 `run_id`, 현재 판 표 `gold.current_run`, ADR-0086) |
 | 실시간 표 | ReplicatedMergeTree 원시 표 다섯: `rt.sale_event`(판매류 사건), `rt.queue_aggregate`, `rt.hold_attempt`, `rt.verdict`, `rt.pulse`(심장 박동). 정렬은 회차가 앞에 온다(심장 박동 `rt.pulse`만 토픽·파티션·발행 시각 순). 누적과 1초 칸은 매개변수 뷰가 읽을 때 센다(ADR-0099) | 사건 시각 월 파티션(심장 박동 `rt.pulse`만 발행 시각 일 파티션, docs/streaming.md §4.3). 판매류·대기열·홀드 400일, 판정 90일, 심장 박동 7일 [가정] | `ops-rt` 원시 적재. 중복을 허용하고, 0.25초 [가정] 묶음을 비동기로 삽입한다(docs/streaming.md §4.3·§4.4) |
 
@@ -449,7 +456,7 @@ ops-svc는 마감 상태가 '완료'가 된 단계를 1분마다 [가정] 확인
 
 ### 8.4 파트너 판매 요약
 
-- R3에서 확정된 뒤 게시한다(control-tower §11). 내용은 판매량, 매진 시각, 등급별 판매·매출, 환불 집계, 그리고 PEAKET의 권고 문장(있을 때)이다.
+- R3에서 확정된 뒤 게시한다(control-tower §11). 내용은 판매량, 매진 시각, 등급별 판매·매출, 환불 집계, 그리고 PEAKET의 권고 문장(있을 때)이다. 파트너가 읽는 골드 뷰의 이름은 `partner_sales_gold`다(소유자 결정 2026-11-11, open-items 101번 ⑼).
 - 판매 5건 [가정] 미만인 칸(구역 × 시간대)은 옆 칸과 합쳐 보인다.
 - 봇 범주, 가명 값, 내부 규칙 수치, 다른 파트너와의 비교는 넣지 않는다. 자기가 속한 테넌트의 회차만 조회할 수 있다(POL-037·040).
 
@@ -556,7 +563,7 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 - **추가 정보 분리**: 분석 가명 키는 KMS에 두고, 원본 적재 잡만 이 키를 쓴다. 분석 담당은 키와 운영 DB에 접근하지 못한다(§28의4①, 시행령 §29의5①).
 - **처리 기간과 기록**: 처리 기간은 적재 뒤 90일이다(§28의4②). ops-svc가 회차마다 가명정보 처리 기록(`pseudonymization_log`: 목적, 항목, 회차, 키 버전, 이용 내역, 처리 기간, 파기 시각)을 남기고, 이 기록은 파기 뒤 3년 이상 보관한다(§28의4③, 시행령 §29의5②).
   - 목적마다 줄을 나눈다(추천 적용 2026-10-31, ADR-0173 결정 8). 브론즈·실버 적재와 골드 집계는 통계작성(`STATISTICS`) 줄이고, 연구 갈래 내보내기는 과학적 연구(`SCIENTIFIC_RESEARCH`) 줄이다. 같은 실버 사건을 쓰더라도 목적·이용 내역·처리 기간을 따로 적어, 한 목적의 기록으로 다른 목적의 처리를 덮지 않는다(가이드라인 p.32). 과학적 연구 줄의 처리 기간도 적재 뒤 90일이다.
-  - 연구 갈래의 가명처리 적정성 검토 서류(활용 계획서, 위험성 검토서, 가명처리 계획·결과서, 적정성 검토 결과서, 서약서)는 이 기록과 같이 파기 뒤 3년 이상 둔다. 관리대장은 이 기록으로 대신한다. 결과서 승인 전에는 연구 내보내기가 403 `pseudonymization-review-pending`이다(forensic-replay §6.1).
+  - 연구 갈래의 가명처리 적정성 검토 서류(활용 계획서, 위험성 검토서, 가명처리 계획·결과서, 적정성 검토 결과서, 서약서)는 이 기록과 같이 파기 뒤 3년 이상 둔다. 관리대장은 이 기록으로 대신한다. 결과서 승인 전에는 연구 내보내기가 403 `pseudonymization-review-pending`이다(forensic-replay §6.1). 실버의 처리 기간 기준은 `source_loaded_at`(브론즈 `loaded_at`을 옮긴 시각) + 90일이고, 원본이 없으면 `open_date` + 90일이다(소유자 결정 2026-11-11, open-items 95번).
 - **재식별 금지**: 분석 계정에는 운영 DB 읽기 권한이 없다. 실버를 대량으로 조회하거나 금지된 필드가 들어오면 보안 이벤트로 기록하고 경보를 낸다. 특정 개인을 알아볼 수 있는 정보가 생기면 그 처리를 멈추고 지운다(§28의5).
 - **두 갈래를 잇지 않는다(추천 적용 2026-10-31, ADR-0171 결정 2·7)**: 분석 저장소는 연구 갈래의 원천이고, 조사 저장소 `inv`는 조사 갈래의 원천이다. 둘을 잇는 키(§3.3 조사 칸), 한 사용자가 두 DB를 함께 읽는 권한, 한 갈래에서 내보낸 파일을 다른 갈래에 넣는 길을 두지 않는다. 그래서 아래 표의 분석 사용자는 모두 `inv` 권한이 없고, 조사 저장소 사용자는 분석 DB 권한이 없다. ops-svc는 조사 모듈(`inv_reader`)과 연구 갈래 내보내기(`an_forensic_reader`)를 함께 가지므로, 한 요청이 두 사용자를 함께 쓰지 못하게 모듈과 연결 설정을 나눈다. 사람 쪽에서는 한 계정에 가명정보 취급자와 부정 거래 조사관(조사 갈래를 쓰도록 commander나 `cs_lead`에게 붙이는 지정) 지정을 함께 두지 않는다(409 `designation-conflict`, docs/features/control-tower.md §9.2).
 
@@ -569,7 +576,7 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | 마감 실행기 | `an_transform` | `bronze`, `silver`, `gold`, `rt` 뷰(마감 대조, §4.4) | `silver`, `gold`, `rt.sale_event`(원시 표 다시 채우기, docs/streaming.md §4.7), S3 아카이브 파일과 `gold.archive_manifest`(쓰기만, 지우기 없음, ADR-0115) |
 | ops-svc(공연 리포트) | `an_ops_reader` | `gold`의 지표 뷰·F11·F12, `archive.<표>` 뷰(2년보다 오래된 회차 비교, ADR-0115) | 없다 |
 | ops-svc(관제 실시간) | `an_rt_reader`(설정 프로필 `force_primary_key = 1`과 조회마다 실행 시간 상한 `max_execution_time` 1초 [가정]. 아래 '읽기 사용자의 상한'의 10초가 아니다, docs/streaming.md §4.3, 추천 적용 2026-10-22, ADR-0086) | `rt`, `bronze.brz_ref_seat_map`(회차 기준 자료라 개인정보가 없다. 잔여석 계산용, ADR-0073) | 없다 |
-| 파트너 판매 요약 API | `an_partner_reader` | `gold`의 파트너 뷰(테넌트 필터는 서버가 강제한다) | 없다 |
+| 파트너 판매 요약 API | `an_partner_reader` | `gold`의 파트너 뷰 `partner_sales_gold`(테넌트 필터는 서버가 강제한다) | 없다 |
 | 랭킹 게시 잡(§8.5) | `an_ranking_reader` | `gold`의 `mtr_genre_ranking_daily`만 | 없다 |
 | 비교 대시보드(Grafana 'PEAKET 관측' 조직, ADR-0078) | `an_grafana_reader` | `gold`의 지표 뷰·F11·F12, `archive.<표>` 뷰(사람 단위 행이 없다) | 없다 |
 | 포렌식 리플레이 연구 갈래 내보내기(docs/features/forensic-replay.md. 2026-10-21 ADR-0080의 '2단계, 출시 뒤 선택'을 2026-10-31 출시 범위로 바꿨다, ADR-0171 결정 1·2) | `an_forensic_reader` | `silver`의 `slv_queue_entry`·`slv_purchase_session`·`slv_hold_attempt`·`slv_seat_change`·`slv_payment_attempt`·`slv_ticket`·`slv_trust_label`만. `trust.behavior_raw`는 읽지 않는다(회차 가명과 이을 키가 없고, 분석 저장소는 행동 신호를 싣지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-093). 조사 저장소 `inv` 권한은 없다(추천 적용 2026-10-31, ADR-0171 결정 2). 가명정보 취급자가 `POST /v1/ops/research-exports`로 요청할 때만 부르고, 가명처리 적정성 검토 결과서가 승인되기 전에는 부르지 않는다(403 `pseudonymization-review-pending`, ADR-0173 결정 8). 이용 내역은 `pseudonymization_log`의 과학적 연구 줄에 남는다. 처음에는 '2단계를 시작할 때 만든다(ADR-0080)'였고, 2026-10-31부터 연구 갈래 내보내기와 함께 만든다 | 없다 |

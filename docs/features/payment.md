@@ -523,7 +523,7 @@ stateDiagram-v2
 | T8 | ACCEPTED | FAILED | 예약 실패(좌석 이미 팔림), 과금 없음 |
 | T9 | RESERVED | APPROVED | 고정된 결제사 승인 성공(승인 기한 안, 토스 10분·포트원 추정 10분) |
 | T10 | RESERVED | AWAITING_DEPOSIT | 가상계좌 발급(승인 응답이 입금 대기). 구매 세션은 끝나고 좌석은 PENDING 유지 |
-| T11 | RESERVED | FAILED | 승인 실패·기한 초과, PENDING 삭제·좌석 해제 |
+| T11 | RESERVED | FAILED | 승인 실패·기한 초과, PENDING 삭제·좌석 해제. PENDING을 지우는 같은 트랜잭션에서 `purchase_quota.used`를 지운 좌석 수만큼 되돌린다(0 밑으로 내려가지 않는다, 소유자 결정 2026-11-11, open-items 88번) |
 | T12 | RESERVED | UNKNOWN | 승인 응답 유실 |
 | T13 | UNKNOWN | APPROVED | 조회 API로 확정 |
 | T14 | UNKNOWN | AWAITING_DEPOSIT | 조회 결과 가상계좌 발급됨 |

@@ -75,10 +75,10 @@ flowchart LR
 | `notification_subscription` | 오픈 알림·취소표 알림 신청(계정, 회차, 종류, 밤 웹 푸시 여부, 보낸 횟수, 상태) | docs/data.md §2 ⑥, ADR-0089 |
 | `wish` | 찜(계정, 공연) | docs/data.md §2 ⑥, ADR-0093 |
 | `push_subscription` | 웹 푸시 구독 정보. 이번에 구독 주소 해시·푸시 서비스 종류·만료 칸을 더했다 | docs/data.md §2 ⑥ |
-| `notification_job` | 낱건 발송 작업(보낼 때까지만) | ADR-0109 |
+| `notification_job` | 낱건 발송 작업(보낼 때까지만. DEAD는 마지막 시도 뒤 30일 [가정]에 지운다, 소유자 결정 2026-11-11, open-items 103번) | ADR-0109 |
 | `notification_dedup` | 중복 키 유일 확인(7일 [가정]) | ADR-0086 |
 | `fraud_appeal_notice` | 부정 예매 소명 알림을 마지막으로 보낸 상태(계정·사건, 판, 사본 갈래 `party`(결제자 PAYER·받은 사람 HOLDER), 소명·이의 상태, 알린 취소 티켓 수, 알린 '취소 대상에서 빠짐' 티켓 수, 알린 이용 제한 끝, 알린 우선 구매 권리 ID, 알린 잠금 상태 `notified_lock_active`). Redis 사본이 지워져도 알림을 다시 보내지 않게 한다(추천 적용 2026-10-31, ADR-0171, FRN-070. 갈래·잠금 상태·빠진 티켓 수는 ADR-0173) | docs/data.md §2 ⑥, §4.5 |
-| `notification_delivery` | 낱건 발송 기록(월 파티션, 90일 [가정]) | ADR-0062·0086 |
+| `notification_delivery` | 낱건 발송 기록(월 파티션, 90일 [가정]). `status`는 `PENDING|SENT|FAILED|DEAD`다(소유자 결정 2026-11-11, open-items 101번 ⑻) | ADR-0062·0086 |
 | `notification_broadcast` | 대량 발송 한 번(회차·단계·판, 창, 쓸모 기한, 합계)(추천 적용 2026-10-30) | §4.2 |
 | `notification_broadcast_chunk` | 대량 발송의 조각(신청 ID 범위, 보낼 시각, 임대, 체크포인트, 조각 합계)(추천 적용 2026-10-30) | §4.2 |
 | `webhook_endpoint`·`webhook_delivery` | 파트너 웹훅 주소와 발송 원장. 이번에 비밀 교체 칸과 다시 보내기 경로의 ID를 더했다 | ADR-0109, §9 |
@@ -141,7 +141,7 @@ flowchart LR
 
 ### 4.1 낱건 발송
 
-ADR-0109의 규칙 그대로다. 사건을 받은 트랜잭션에서 `notification_dedup`에 중복 키를 먼저 넣고(`INSERT … ON CONFLICT DO NOTHING`), 들어갔을 때만 `notification_job`에 작업을 적는다. 워커는 보낼 때가 된 행을 50개씩 `FOR UPDATE SKIP LOCKED`로 골라 임대 2분 [가정]을 걸고 커밋한 뒤 보낸다. 결과는 다른 짧은 트랜잭션에서 `notification_delivery`에 쓰고 작업 행을 지운다. 쓸모 기한(`expires_at`)이 지나면 보내지 않고 EXPIRED로 기록한다. 마지막 시도까지 실패하면 DEAD이고 SEV3(장애 심각도 등급. 숫자가 작을수록 심각하다, `kind` hygiene)다(ADR-0078).
+ADR-0109의 규칙 그대로다. 사건을 받은 트랜잭션에서 `notification_dedup`에 중복 키를 먼저 넣고(`INSERT … ON CONFLICT DO NOTHING`), 들어갔을 때만 `notification_job`에 작업을 적는다. 워커는 보낼 때가 된 행을 50개씩 `FOR UPDATE SKIP LOCKED`로 골라 임대 2분 [가정]을 걸고 커밋한 뒤 보낸다. 결과는 다른 짧은 트랜잭션에서 `notification_delivery`에 쓰고 작업 행을 지운다. 쓸모 기한(`expires_at`)이 지나면 보내지 않고 EXPIRED로 기록한다. 마지막 시도까지 실패하면 DEAD이고 SEV3(장애 심각도 등급. 숫자가 작을수록 심각하다, `kind` hygiene)다(ADR-0078). DEAD 작업 행은 마지막 시도 뒤 30일 [가정]에 정비 잡이 지운다(소유자 결정 2026-11-11, open-items 103번).
 
 - 중복 키: `{알림 종류}:{대상 ID}:{사건 ID 또는 상태 버전}:{받는 계정 ID}:{채널}`(docs/design/d5 §9.1.1).
 - 시각을 잡는 안내(공연 전날 18:00 등)와 60초 모아 보내기는 `next_attempt_at`으로 미룬다.

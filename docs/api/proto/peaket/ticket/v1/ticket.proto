@@ -83,6 +83,9 @@ message IssuedTicket {
   string ticket_id = 1;
   string seat_id = 2;
   TicketStatus status = 3;
+  // 이 티켓을 발권한 주문(purchase 논리 DB라 외래키 없음). ticket-svc가 티켓 행에 같은 값을 두고,
+  // CheckReviewEligibility가 이 칸으로 근거 주문을 찾는다(소유자 결정 2026-11-11, open-items 92번).
+  string order_id = 4;
 }
 
 message IssueTicketsResponse {
