@@ -79,7 +79,8 @@ module payment {
   type Env = { sw: bool, switches: int, timeouts: int, restarts: int, hooks: int, canceled: bool }
   // 검사에만 쓰는 기록(시스템이 아는 값이 아니다). offPg: 접수 뒤 고정한 결제사가 아닌 곳으로 결제 원장을 만들거나 호출함,
   // badRefund: 회차 취소 확정도 CS 확인도 없이 결제사 취소가 일어남
-  type Ghost = { offPg: bool, badRefund: bool }
+  // expiredCommand: 승인 기한이 지나 승인 명령 없이 실패한(T11) 주문이 있었다. 재생 기록의 목표 상태만 본다(불변식이 보지 않는다, 코드 리뷰 2026-11-10)
+  type Ghost = { offPg: bool, badRefund: bool, expiredCommand: bool }
 
   var ord: int -> Ord
   var att: (int, int) -> Att      // (주문, 시도 번호)
@@ -108,7 +109,7 @@ module payment {
     late' = ORDERS.mapBy(o => false),
     tks' = ORDERS.mapBy(o => TK0),
     env' = { sw: false, switches: 0, timeouts: 0, restarts: 0, hooks: 0, canceled: false },
-    ghost' = { offPg: false, badRefund: false },
+    ghost' = { offPg: false, badRefund: false, expiredCommand: false },
   }
 
   def o_(o: int): Ord = ord.get(o)
@@ -176,22 +177,29 @@ module payment {
   }
 
   // ---- purchase-svc Saga 1: 판매 예약(T7) 또는 좌석이 이미 팔려 과금 없이 실패(T8) ----
+  // 승인 기한(인증 + 10분)이 지났으면 묶지 않고 과금 없이 실패한다(T8 사유 EXPIRED, payment §2 'Saga 1단계의 첫 구현' RESERVE ①,
+  // 추천 적용 2026-11-10, BUILD_ORDER PRF-210, 코드 리뷰)
   action reserve(o: int): bool = all {
     o_(o).st == "ACCEPTED",
-    any { ord' = ord.set(o, o_(o).with("st", "RESERVED")), ord' = ord.set(o, o_(o).with("st", "FAILED")) },
+    if (late.get(o)) ord' = ord.set(o, o_(o).with("st", "FAILED"))
+    else any { ord' = ord.set(o, o_(o).with("st", "RESERVED")), ord' = ord.set(o, o_(o).with("st", "FAILED")) },
     att' = att, pgs' = pgs, req' = req, pay' = pay, late' = late, tks' = tks, env' = env, ghost' = ghost,
   }
 
   // 승인 명령(gRPC, 접수만 기다림): payment-svc가 결제 원장에 ACCEPTED와 승인 명령을 한 트랜잭션으로 적는다. 접수되지 않은 명령은
   // 같은 주문 ID로 다시 보내고, payment-svc는 주문 ID로 멱등하다(이미 결제가 있으면 그대로 둔다, §9 'payment-svc 내부 지연')
+  // 승인 기한이 지났는데 한 번도 보내지 못한 주문(결제 원장 행이 없음)은 보내지 않고 과금 없이 실패한다(T11 사유 EXPIRED와 판매 예약 풀기,
+  // payment §2 'Saga 1단계의 첫 구현' CONFIRM, 추천 적용 2026-11-10, BUILD_ORDER PRF-210, 코드 리뷰). 한 번이라도 보낸 주문은 이 걸음이 이미 끝났다
   action command(o: int): bool = {
     val p = route(o, o_(o).apg)
     all {
       o_(o).st == "RESERVED", pay.get((o, p)) == "NONE",
       not(ONE_PAYMENT_PER_ORDER) or rows(o) == Set(),
-      pay' = pay.set((o, p), "ACCEPTED"),
-      ghost' = noteRoute(ghost, o_(o).apg, p),
-      pgs' = pgs, req' = req, env' = env, keepOrderSide,
+      if (late.get(o) and rows(o) == Set())
+        all { ord' = ord.set(o, o_(o).with("st", "FAILED")), pay' = pay, ghost' = ghost.with("expiredCommand", true), att' = att, late' = late, tks' = tks }
+      else
+        all { pay' = pay.set((o, p), "ACCEPTED"), ghost' = noteRoute(ghost, o_(o).apg, p), keepOrderSide },
+      pgs' = pgs, req' = req, env' = env,
     }
   }
 
@@ -454,6 +462,17 @@ module payment {
 
   val safety = inv_noDoublePayment and inv_pgPinnedAfterAccept and inv_noTicketWithoutApproval and inv_noRefundWithoutCause
                and inv_noChargeOnFailedOrder and inv_confirmedHasTicket
+
+  // ---- 재생 기록의 목표 상태(모델 기반 시험 전용, docs/verification.md §2.4, specs.json mbt.modules의 goal) ----
+  // 지켜짐 시뮬레이션의 기록은 표본 가운데 긴 것이 남아(quint), 짧게 끝나는 길(승인 응답, 발권 완료 뒤 회차 취소 환불)이 늘 더 긴 길(결과 모름 → 조회,
+  // 보상)에 밀려 기록에 남지 않는다. 그 끝에 닿지 않음을 '불변식'으로 두고 깨는 기록을 재생 기록으로 쓴다. 검사 목록의 불변식이 아니다
+  // (추천 적용 2026-11-10, BUILD_ORDER PRF-210, 코드 리뷰)
+  // 회차 취소 환불(eventRefund)에 닿지 않음
+  val goal_notRefunded = ORDERS.forall(o => o_(o).st != "REFUNDED")
+  // 승인 응답(respond)으로 승인이 정해지지 않음: 시간 초과·재시작이 없는데 결제 원장이 승인이면 응답이 정했다(웹훅 걸음은 정본에서 막혔고 조회는 결과 모름 뒤에만)
+  val goal_noApprovedByResponse = not(env.timeouts == 0 and env.restarts == 0 and OP_KEYS.exists(k => pay.get(k) == "APPROVED"))
+  // 승인 기한이 지나 승인 명령 없이 실패(T11)하는 갈래에 닿지 않음(판매 예약 뒤 기한 지남 → 승인 명령, 코드 리뷰 2026-11-10)
+  val goal_noExpiredCommand = not(ghost.expiredCommand)
 
   // ---- 결국 일어남(docs/verification.md §2.1 `payment`): 공정성 가정 아래에서 ----
   val vars = (ord, att, pgs, req, pay, late, tks, env, ghost)

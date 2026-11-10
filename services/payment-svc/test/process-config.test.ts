@@ -256,7 +256,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
 
   test('PRF181_main.ts는 실행기 지표를 서비스 레지스트리에 붙이고 플랫폼 로거로 로그를 잇는다', () => {
     expect(main()).toMatch(/\bnew PromPaymentConfirmSignals\(/);
-    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(10);
+    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(11);
     expect(main()).toMatch(/\bpaymentConfirmLog\(service\.logger\)/);
   });
 
@@ -306,7 +306,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new PaymentConfirmRunner('), '만들기 < 켜기').toBeLessThan(start);
     expect(m.indexOf('await service.listen()'), 'listen < 켜기').toBeLessThan(start);
     expect(m.lastIndexOf('.register(service.metrics.registry)', start), '지표 붙이기 < 켜기').toBeGreaterThan(-1);
-    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 열 다 켜기 앞').toHaveLength(10);
+    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 열하나 다 켜기 앞').toHaveLength(11);
   });
 
   test('PRF181_SIGTERM: 준비 상태를 내린 뒤 실행기를 멈추고(돌던 호출을 기다린다), 그 뒤에 서비스와 전용 풀을 닫는다 [ASVS v5.0.0-2.3.3]', () => {
@@ -319,6 +319,36 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(stop, '실행기 stop').toBeGreaterThan(down);
     expect(close, 'stop < service.close').toBeGreaterThan(stop);
     expect(pool, 'stop < 전용 풀 닫기').toBeGreaterThan(stop);
+  });
+
+  test('P-T34 main.ts는 보호기의 낮춤을 표 맞추기에 잇고, 승인 실행기를 켜기 전에 표를 한 번 읽은 뒤 1초 맞추기를 켜며 멈출 때 기다린다', () => {
+    const m = main();
+    expect(/new PgCallGuards\(\{([\s\S]*?)\}\);/.exec(m)![1]).toMatch(/share:\s*\{\s*lowered:\s*\(e\)\s*=>\s*limitSync\?\.lowered\(e\)\s*\}/);
+    expect(m).toMatch(/new PgChannelLimitSync\(\{ store: new DrizzlePgChannelLimit\(\{ database: batchDatabase \}\), guards,/);
+    const refresh = m.indexOf('await limitSync.refresh();');
+    expect(refresh, '시작 읽기').toBeGreaterThan(-1);
+    expect(m.indexOf('limitSync.start();'), '읽은 뒤 맞추기').toBeGreaterThan(refresh);
+    expect(m.search(RUNNER_START), '읽은 뒤 실행기').toBeGreaterThan(refresh);
+    expect(shutdown()).toMatch(/limitSync!\.stop\(\)/);
+    // 표 맞추기와 관측기는 실행기가 멈춘 뒤(drain)에 멈춘다: 마무리 중 받은 첫 429의 낮춤도 표에 쓴다(코드 리뷰 F5, 차례는 test/pg-channel-sync.test.ts)
+    const stopList = /stop: \(\) => \[([\s\S]*?)\],\n/.exec(shutdown())![1]!;
+    const drainList = /drain: \(\) => \[([\s\S]*?)\],\n/.exec(shutdown())![1]!;
+    expect(stopList).toMatch(/confirmRunner\.stop\(\)/);
+    expect(stopList).not.toMatch(/limitSync|channelObserver/);
+    expect(drainList).toMatch(/limitSync!\.stop\(\)/);
+    expect(drainList).toMatch(/channelObserver\?\.whenIdle\(\)/);
+  });
+
+  test('P-T46 ③ main.ts는 듣기 전에 포트원 채널의 하위 결제사 표를 읽고 플랫폼 기본값을 하위 결제사 규칙으로 검사한다 [ASVS v5.0.0-16.5.3]', () => {
+    const m = main();
+    const check = m.indexOf('assertPlatformSubProviders(checkoutConfig.defaults, portoneChannels);');
+    expect(check).toBeGreaterThan(m.indexOf('const portoneChannels = loadPortoneChannelMap(process.env, portone);'));
+    expect(check, '듣기 전').toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m).toMatch(/onChannel: \(c\) => channelObserver\?\.observe\(c\)/);
+    expect(m).toMatch(/const fallbackExclusions = portoneChannels \? new PortoneFallbackExclusions\(\{ portone: portoneChannels, observations: channelObservations \}\) : undefined;/);
+    // 결제창 준비와 정지 조회가 같은 빼기 읽기를 쓴다(코드 리뷰 F2)
+    expect(/new PrepareCheckout\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\.\.\.\(fallbackExclusions \? \{ fallbackExclusions \}/);
+    expect(/new GetNewPaymentPause\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\.\.\.\(fallbackExclusions \? \{ fallbackExclusions \}/);
   });
 });
 

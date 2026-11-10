@@ -7,6 +7,7 @@ import type { EntryPauseReason, EntryPauses, EntryPauseStage } from './entry-pau
 import type { ClusterPauseReading, EntryPauseProbeOutcome, EntryPauseRecord, EntryPauseWrite, EntryTrialFirstResult, EntryTrialRow } from './entry-pause-judge.js';
 import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-selection.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
+import type { PgChannelLimitRow, PgLimitLowering } from './pg-channel-limit.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
 import type { QueryStatus } from './payment-gateway.js';
 import type { ReconDiffKind, ReconDiffState, ReconLedger, ReconRunRef, ReconRunStatus, ReconSeen, ReconStage } from './reconciliation.js';
@@ -649,12 +650,99 @@ export interface PgCallGuardSignals {
   inflight(pg: PgName, count: number): void;
   /** payment_pg_saturated_total{pg, reason}를 1 올린다 */
   saturated(pg: PgName, reason: PgSaturationReason): void;
+  /** payment_pg_limit_ratio{pg}를 유효 비율(퍼센트)로 둔다(BUILD_ORDER PRF-203). 없으면 내지 않는다 */
+  ratio?(pg: PgName, percent: number): void;
 }
 
 /** 호출 보호의 로그(결제사와 낮춘 뒤 상한만 싣는다). 던지지 않는다 */
 export interface PgCallGuardLog {
   /** 첫 승인 호출이 429를 받아 상한을 낮췄다(SEV2, kind pg-throttled-first) */
   throttledFirst(e: { readonly pg: PgName; readonly rps: number; readonly concurrency: number }): void;
+  /** 낮춘 상한이 만료돼 처음 상한으로 돌아갔다(INFO, kind pg-limit-restored, BUILD_ORDER PRF-203). 없으면 내지 않는다 */
+  limitRestored?(e: { readonly pg: PgName; readonly rps: number; readonly concurrency: number }): void;
+}
+
+// ---- 낮춘 채널 상한의 표(BUILD_ORDER PRF-203, docs/features/payment.md §2 '낮춘 상한의 유지·전파·회복') ----
+
+/** payment_channel_limit 읽기·쓰기(channel = 'ALL') */
+export interface PgChannelLimitStore {
+  /** 모든 결제사의 행(결제사 셋 이하) */
+  readAll(budget?: CallBudget): Promise<ReadonlyMap<PgName, PgChannelLimitRow>>;
+  /** 그 결제사의 행 하나. 없으면 undefined */
+  read(pg: PgName): Promise<PgChannelLimitRow | undefined>;
+  /**
+   * 낮춘 값을 판 번호 조건으로 쓴다. basis가 없으면 판 번호 1의 INSERT(행이 있으면 0행), 있으면 basis.version이 그대로일 때만 UPDATE.
+   * @returns 쓴 행. 0행이면 undefined
+   */
+  write(basis: PgChannelLimitRow | undefined, next: Pick<PgLimitLowering, 'pg' | 'ratioPercent' | 'loweredAtMs' | 'expiresAtMs'>, nowMs: number): Promise<PgChannelLimitRow | undefined>;
+}
+
+/** 표 맞추기 실패의 단계(read 읽기, write 쓰기, conflict 판 번호에 더 져서 그만둔 쓰기) */
+export type PgChannelLimitSyncStep = 'read' | 'write' | 'conflict';
+
+/** 표 맞추기 지표(payment_pg_limit_sync_failures_total{step}). 던지지 않는다 */
+export interface PgChannelLimitSyncSignals {
+  limitSyncFailed(step: PgChannelLimitSyncStep): void;
+}
+
+/** 표 맞추기 로그(kind pg-limit-sync-failed, 단계·결제사·안전한 오류 코드만). 던지지 않는다 */
+export interface PgChannelLimitSyncLog {
+  limitSyncFailed(e: { readonly step: PgChannelLimitSyncStep; readonly pg?: PgName; readonly code: string }): void;
+}
+
+// ---- 포트원 채널의 하위 결제사(BUILD_ORDER PRF-203, docs/features/payment.md §2.2 '하위 결제사 검사의 첫 구현') ----
+
+/** 회차 지정 쓰기(event_pg_config) */
+export interface EventPgAssignmentWrite {
+  readonly eventId: string;
+  readonly primary: PgName;
+  readonly fallback?: PgName;
+  readonly updatedAtMs: number;
+}
+
+/** 회차 지정 저장소. updatedAtMs가 표의 값보다 늦을 때만 쓴다 */
+export interface EventPgAssignmentStore {
+  /** @returns 썼으면 true(행이 없거나 표의 시각이 더 이르다) */
+  assignEvent(w: EventPgAssignmentWrite): Promise<boolean>;
+}
+
+/** 관측 하위 결제사 표(payment_pg_channel_observed) */
+export interface PgChannelObservationReader {
+  /** 채널 키 → 관측 하위 결제사 */
+  readAll(budget?: CallBudget): Promise<ReadonlyMap<string, string>>;
+}
+
+export interface PgChannelObservationStore {
+  /** 표의 값이 다를 때만 쓴다. @returns 썼으면 true */
+  upsert(channelKey: string, pgProvider: string, atMs: number): Promise<boolean>;
+}
+
+/** 관측 결과(payment_pg_channel_observed_total{outcome}) */
+export type PgChannelObservedOutcome = 'match' | 'mismatch' | 'unattributed' | 'unconfigured';
+
+/** 관측 지표. 던지지 않는다 */
+export interface PgChannelObservedSignals {
+  channelObserved(outcome: PgChannelObservedOutcome): void;
+  /** payment_pg_channel_observed_failures_total{step} */
+  channelObservedFailed(step: 'read' | 'write'): void;
+}
+
+/** 관측 로그. 던지지 않는다 */
+export interface PgChannelObserverLog {
+  /** 설정 값과 다른 하위 결제사를 봤다(SEV2, kind pg-channel-provider-mismatch, 설정 값·관측 값·수단만) */
+  providerMismatch(e: { readonly configured: string; readonly observed: string; readonly payMethods: readonly PayMethod[] }): void;
+  /** 관측 표 쓰기·읽기 실패(경고, 안전한 오류 코드만) */
+  observedFailed(e: { readonly step: 'read' | 'write'; readonly code: string }): void;
+}
+
+/**
+ * 전환의 대체 후보에서 뺄 수단(결제창 준비가 전환으로 이 결제사를 고른 때와, 정지 조회가 전환 대상이 이 결제사인 회차를 볼 때만 읽는다).
+ * pg가 판단하는 결제사이고, 다른 결제사로의 전환에는 읽지 않는다(코드 리뷰 F1)
+ */
+export interface FallbackExclusionReader {
+  readonly pg: PgName;
+  /** @param base 그 회차의 기준 결제사(회차 지정 → 플랫폼 기본). 하위 결제사 규칙이 이 결제사와 견준다 */
+  read(base: PgName, budget?: CallBudget): Promise<ReadonlySet<PayMethod>>;
 }
 
 // ---- 웹훅 받기(BUILD_ORDER HOT-150, docs/features/payment.md §5 '웹훅 받기의 첫 구현') ----

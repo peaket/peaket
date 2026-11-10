@@ -97,7 +97,7 @@ const finish = (s: SeatSystem = last!) => {
 // 명령 순서: 한 걸음에서 할 수 있는 명령은 몇 개뿐이라(나머지는 check가 건너뛴다) 길게 만든다. 실패하면 fast-check가 배열을 줄인다
 const plan = (scope: Scope, length = { minLength: 600, maxLength: 1000 }) => fc.array(fc.oneof(...commandArbs(scope)), length);
 
-test('V-T40 명령 모음의 열쇠가 명령 이름(SPEC_ACTIONS)과 같다(14개)', () => {
+test('V-T40 ② 명령 모음의 열쇠가 명령 이름(SPEC_ACTIONS)과 같다(14개)', () => {
   expect(Object.keys(COMMANDS).sort()).toEqual([...SPEC_ACTIONS].sort());
   expect(SPEC_ACTIONS).toHaveLength(14);
 });
@@ -432,7 +432,7 @@ test('재현_장애 두 번(PRF-167 리뷰 고침 M2): A가 묶은 뒤 승격이
 });
 
 // ---- 동작 기록 재생 ----
-test.each(manifest.files)('V-T40 재생 %s: 걸음마다 운영 코드가 명세와 같은 상태에 닿는다', async (file) => {
+test.each(manifest.files)('V-T40 ③ 재생 %s: 걸음마다 운영 코드가 명세와 같은 상태에 닿는다', async (file) => {
   const { module, states } = readTrace(join(TRACES, file));
   const s = new SeatSystem(redis, db, admin, scopeOf(specText, module));
   await s.init();

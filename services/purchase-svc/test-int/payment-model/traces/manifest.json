@@ -1,0 +1,64 @@
+{
+  "$comment": "재생용 동작 기록(wbs 2.3.4, V-T40). node tools/spec-check/run-local.mjs traces --spec payment가 만든다. 손으로 고치지 않는다",
+  "spec": "specs/payment.qnt",
+  "specSha256": "98209fd19bb224feb69ad185b7e0ca9c080408da4a05e1eecc8102cc94cadbdd",
+  "quint": "0.33.1",
+  "modules": [
+    {
+      "main": "payment_proposed",
+      "traces": 8,
+      "samples": 10000
+    },
+    {
+      "main": "payment_proposed_attempts",
+      "traces": 4,
+      "samples": 10000
+    },
+    {
+      "main": "payment_proposed_full",
+      "traces": 4,
+      "samples": 10000
+    },
+    {
+      "main": "payment_proposed",
+      "traces": 1,
+      "samples": 200000,
+      "goal": "goal_notRefunded"
+    },
+    {
+      "main": "payment_proposed",
+      "traces": 1,
+      "samples": 200000,
+      "goal": "goal_noApprovedByResponse"
+    },
+    {
+      "main": "payment_proposed",
+      "traces": 1,
+      "samples": 10000,
+      "goal": "goal_noExpiredCommand"
+    }
+  ],
+  "seed": "0x5eed",
+  "maxSteps": 40,
+  "files": [
+    "payment_proposed_0.itf.json",
+    "payment_proposed_1.itf.json",
+    "payment_proposed_2.itf.json",
+    "payment_proposed_3.itf.json",
+    "payment_proposed_4.itf.json",
+    "payment_proposed_5.itf.json",
+    "payment_proposed_6.itf.json",
+    "payment_proposed_7.itf.json",
+    "payment_proposed_attempts_0.itf.json",
+    "payment_proposed_attempts_1.itf.json",
+    "payment_proposed_attempts_2.itf.json",
+    "payment_proposed_attempts_3.itf.json",
+    "payment_proposed_full_0.itf.json",
+    "payment_proposed_full_1.itf.json",
+    "payment_proposed_full_2.itf.json",
+    "payment_proposed_full_3.itf.json",
+    "payment_proposed_goal_notRefunded_0.itf.json",
+    "payment_proposed_goal_noApprovedByResponse_0.itf.json",
+    "payment_proposed_goal_noExpiredCommand_0.itf.json"
+  ]
+}

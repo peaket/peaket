@@ -1,5 +1,7 @@
 // 결제창 준비 쓰임새(docs/features/payment.md §2.2 '선택기의 첫 구현', BUILD_ORDER PRF-190). 결제사를 부르지 않는다. 쓰기는 시험 재개의 payment_entry_trial뿐이다(BUILD_ORDER PRF-202).
 // 새 결제 일시 정지(BUILD_ORDER PRF-201): 고른 결제사가 정지면 PaymentNewPausedError다. 재생은 정지를 읽지 않고, 시험 재개에서 받은 주문은 다시 통과한다.
+// 대체 후보 빼기(BUILD_ORDER PRF-203): 전환이 포트원을 고르면(재생은 빼고) 그 수단 채널의 관측 하위 결제사가 설정과 다르거나 실제 하위 결제사가 기준 결제사와 규칙에 걸리는지 읽어,
+// 그렇다면 대체가 없을 때처럼 기준 결제사로 다시 고른다. 평소 길과 포트원이 아닌 전환 대상에는 읽기를 더하지 않는다(코드 리뷰 F1).
 import type { Clock } from '@peaket/platform';
 import { PaymentInputError } from '../domain/confirm-command.js';
 import { admitsEntryTrial, entryTrialDraw } from '../domain/entry-pause-judge.js';
@@ -7,7 +9,7 @@ import { LogGate } from '../domain/log-gate.js';
 import type { CheckoutValues, PayMethod, PgName } from '../domain/payment-gateway.js';
 import { type EntryPauses, isEntryPaused, PaymentNewPausedError } from '../domain/entry-pause.js';
 import { allowedPayMethods, checkoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
-import type { CallBudget, EntryPauseReader, EntryTrialSignals, EntryTrialStore, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
+import type { CallBudget, EntryPauseReader, EntryTrialSignals, EntryTrialStore, FallbackExclusionReader, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
 import { checkoutDepositDueAtMs } from '../domain/virtual-account.js';
 
 /** 결제사를 고르지 못한 경보 로그의 간격 1분 [가정](결제사·까닭마다) */
@@ -33,6 +35,8 @@ export interface PrepareCheckoutDeps {
   clock: Clock;
   log: PrepareCheckoutLog;
   signals: PrepareCheckoutSignals;
+  /** 전환의 대체 후보에서 뺄 수단(포트원 채널의 하위 결제사, BUILD_ORDER PRF-203). 없으면 빼지 않는다 */
+  fallbackExclusions?: FallbackExclusionReader;
 }
 
 /** PrepareCheckout 답 */
@@ -58,7 +62,15 @@ export class PrepareCheckout {
     const startedAtMs = clock.monotonicMs();
     const command = this.#parse(input);
     const [state, pauses] = await this.#read(command, budget);
-    const selection = selectPg({ ...state, defaults, channels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) });
+    const selectionInput = { ...state, defaults, channels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) };
+    let selection = selectPg(selectionInput);
+    const exclusions = this.deps.fallbackExclusions;
+    // 빼기는 전환이 그 판단 결제사(포트원)를 고른 때만 읽는다(코드 리뷰 F1). 기준 결제사는 회차 지정 → 플랫폼 기본이다(selectPg와 같다)
+    if (selection.kind === 'SELECTED' && selection.switched && command.pinnedPg === undefined && exclusions !== undefined && selection.pg === exclusions.pg) {
+      const base = state.assignment?.primary ?? defaults.primary;
+      const excluded = await this.#exclusions(exclusions, base, budget === undefined ? undefined : { remainingMs: budget.remainingMs - (clock.monotonicMs() - startedAtMs) });
+      if (excluded.has(command.payMethod)) selection = selectPg({ ...selectionInput, fallbackExcluded: new Map([[exclusions.pg, excluded]]) });
+    }
     if (selection.kind === 'UNAVAILABLE') throw this.#unavailable(selection.pg, selection.reason, command);
     const gateway = gateways.of(selection.pg);
     // 채널 표는 같은 등록부에서 만들어 비지 않는다. 비었으면 고를 수 없는 것과 같게 다룬다
@@ -95,6 +107,16 @@ export class PrepareCheckout {
   async #read(command: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<[PgSelectionState, EntryPauses | undefined]> {
     try {
       return await Promise.all([this.deps.selection.read(command.eventId, budget), command.pinnedPg === undefined ? this.deps.pauses.read(budget) : undefined]);
+    } catch (err) {
+      this.deps.signals.prepared('none', 'error');
+      throw err;
+    }
+  }
+
+  /** 대체 후보에서 뺄 채널을 읽는다. 읽지 못하면 값을 지어내지 않고 실패한다(BUILD_ORDER PRF-203) */
+  async #exclusions(reader: FallbackExclusionReader, base: PgName, budget: CallBudget | undefined) {
+    try {
+      return await reader.read(base, budget);
     } catch (err) {
       this.deps.signals.prepared('none', 'error');
       throw err;

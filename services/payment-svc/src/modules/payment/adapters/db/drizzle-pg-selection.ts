@@ -3,7 +3,7 @@ import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { PgName } from '../../domain/payment-gateway.js';
 import type { PgSelectionState, PgSwitchRow } from '../../domain/pg-selection.js';
-import type { CallBudget, PgSelectionBatchReader, PgSelectionReader, PgSwitchStore } from '../../domain/ports.js';
+import type { CallBudget, EventPgAssignmentStore, EventPgAssignmentWrite, PgSelectionBatchReader, PgSelectionReader, PgSwitchStore } from '../../domain/ports.js';
 import { armStatementLimit } from './drizzle-payment-store.js';
 import { pgSwitch } from './schema.js';
 
@@ -101,7 +101,7 @@ export class DrizzlePgSelectionBatch implements PgSelectionBatchReader {
   }
 }
 
-export class DrizzlePgSelection implements PgSelectionReader, PgSwitchStore {
+export class DrizzlePgSelection implements PgSelectionReader, PgSwitchStore, EventPgAssignmentStore {
   constructor(private readonly o: { readonly database: Database }) {}
 
   /** 세 행을 한 문장으로 읽는다. 문장 시간 한도가 읽기 전체에 걸리고, 세 행이 같은 시점의 값이다(BUILD_ORDER PRF-190 코드 리뷰) */
@@ -138,5 +138,16 @@ export class DrizzlePgSelection implements PgSelectionReader, PgSwitchStore {
         .returning({ scope: pgSwitch.scope }),
     );
     return written.length > 0;
+  }
+
+  /** 회차 지정 쓰기(쓰임새 AssignEventPg, BUILD_ORDER PRF-203). 지정 시각이 표의 값보다 늦을 때만 쓰는 UPSERT 한 문장이다(늦게 온 옛 지정이 새 지정을 덮지 않는다) */
+  async assignEvent(w: EventPgAssignmentWrite): Promise<boolean> {
+    const r = await this.o.database.transaction((tx) =>
+      tx.execute(sql`
+        insert into event_pg_config (event_id, pg_primary, pg_fallback, updated_at) values (${w.eventId}::uuid, ${w.primary}, ${w.fallback ?? null}, ${new Date(w.updatedAtMs)}::timestamptz)
+        on conflict (event_id) do update set pg_primary = excluded.pg_primary, pg_fallback = excluded.pg_fallback, updated_at = excluded.updated_at
+        where event_pg_config.updated_at < excluded.updated_at`),
+    );
+    return (r.rowCount ?? 0) > 0;
   }
 }

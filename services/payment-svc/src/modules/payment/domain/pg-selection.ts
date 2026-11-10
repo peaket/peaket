@@ -66,6 +66,8 @@ export interface PgSelectionInput extends PgSelectionState {
   readonly payMethod: PayMethod;
   /** 있으면 전환·지정을 보지 않고 이 결제사로 간다(멱등 재생, BUILD_ORDER PRF-191) */
   readonly pinnedPg?: PgName;
+  /** 전환의 대체 후보에서 뺄 결제사·수단(관측 하위 결제사가 설정과 다른 포트원 채널, BUILD_ORDER PRF-203). 빠지면 대체가 없을 때처럼 기준 결제사로 간다 */
+  readonly fallbackExcluded?: ReadonlyMap<PgName, ReadonlySet<PayMethod>>;
 }
 
 /** 고른 결제사를 쓸 수 없다(gRPC UNAVAILABLE, 글은 부르는 쪽이 가르는 이름 그대로) */
@@ -116,7 +118,10 @@ export interface PrepareCheckoutCommand {
 export function selectPg(input: PgSelectionInput): PgSelection {
   const base = input.assignment?.primary ?? input.defaults.primary;
   // 멱등 재생의 고정(BUILD_ORDER PRF-191): 전환·지정을 보지 않는다. switched는 기준 결제사와 다른지로 정해 처음 응답과 같게 둔다
-  const pg = input.pinnedPg ?? switchTargetOf(input, base) ?? base;
+  const target = input.pinnedPg === undefined ? switchTargetOf(input, base) : undefined;
+  // 대체 후보에서 빠진 채널은 고르지 않는다(대체가 없을 때와 같다, BUILD_ORDER PRF-203)
+  const usable = target !== undefined && input.fallbackExcluded?.get(target)?.has(input.payMethod) !== true ? target : undefined;
+  const pg = input.pinnedPg ?? usable ?? base;
   const channel = input.channels.get(pg);
   if (channel === undefined) return { kind: 'UNAVAILABLE', pg, reason: 'NO_CHANNEL' };
   if (!channel.active) return { kind: 'UNAVAILABLE', pg, reason: 'INACTIVE' };

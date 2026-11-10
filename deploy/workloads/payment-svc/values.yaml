@@ -4,6 +4,8 @@ name: payment-svc
 service:
   # 새 결제 진입 정지 판정자를 뽑는 Lease(ADR-0105 결정 8, BUILD_ORDER PRF-202). 입력을 읽을 클러스터 Prometheus 주소 PEAKET_PROMETHEUS_URL은 환경 값이다(local·ci 밖에서 없으면 시작이 실패한다, 코드 리뷰)
   leaderLease: payment-entry-pause
+  # 포트원 어댑터를 켜는 환경(PEAKET_PG_PORTONE_SECRET 등을 주는 곳)은 local·ci 밖이면 PEAKET_PG_PORTONE_CHANNEL_PROVIDERS(쓰는 채널 키마다 하위 결제사, JSON)도 환경 값에 꼭 적는다.
+  # 없거나 쓰지 않는 키가 있으면 시작이 실패한다(docs/features/payment.md §2.2 '하위 결제사 검사의 첫 구현', 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰)
   networkPolicy:
     # 결제사 출구(docs/security/asvs/payment.md 13.2.4, BUILD_ORDER PRF-192). 표준 NetworkPolicy는 이름을 받지 못해 공인 주소의 443과 클러스터 DNS까지 좁힌다.
     # 호스트(api.tosspayments.com·api.portone.io)는 앱이 시작할 때 고정한다(services/payment-svc/src/config.ts). 이름 단위 장치는 wbs 0.4.2에서 정한다.

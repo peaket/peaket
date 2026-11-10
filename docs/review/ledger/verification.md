@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 31 | 8 | 5 | 0 | 0 | 0 | 0 | 0 | 59 | 103 |
-| 합계 | 31 | 8 | 5 | 0 | 0 | 0 | 0 | 0 | 59 | 103 |
+| B | 34 | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 59 | 103 |
+| 합계 | 34 | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 59 | 103 |
 
 ## docs/verification.md
 
@@ -85,9 +85,9 @@
 | V-T33 | ③ | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ③은 스크립트를 다시 싣고 한 번에 성공한다. … 에서 ioredis와 같고 | 빈칸 | B | — |
 | V-T33 | ④ | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ④는 구독이 새 샤드로 이어진다. … 에서 ioredis와 같고 … (약 26% 잃음)에서 더 나쁘다. 셋 모두 규칙을 다 채우지 못해 판정… | 빈칸 | B | — |
 | V-T33 | ⑤ | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ⑤는 100ms [가정] 안에 실패하고 쌓인 명령이 없다. node-redis가 … 에서 ioredis와 같고 … 노드 죽이기에서 가장 낫고 … 응답 없이… | 빈칸 | B | — |
-| V-T40 | ① | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ①는 이름 목록 검사가 PR을 막는다. … 만 남는다. 2026-11-05: `seat`의 이름 목록 검사가 이어져(`specs/specs.json`의… | ID만 | B | 시험: services/admission-ctrl/test-int/queue-model.int.test.ts, services/purchase-svc/test-int/saga-db.int.test.ts 외 3곳 |
-| V-T40 | ② | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ②는 이름 목록 검사가 PR을 막는다. … 만 남는다. 2026-11-05: `seat`의 이름 목록 검사가 이어져(`specs/specs.json`의… | ID만 | B | 시험: services/admission-ctrl/test-int/queue-model.int.test.ts, services/purchase-svc/test-int/saga-db.int.test.ts 외 3곳 |
-| V-T40 | ③ | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ③은 기록의 모든 단계가 같은 결과(성공·거절과 불변식)로 끝난다. … 을 건너뛰었다고 표시하고 … 은 2026-11-05 `seat` 기록… | ID만 | B | 시험: services/admission-ctrl/test-int/queue-model.int.test.ts, services/purchase-svc/test-int/saga-db.int.test.ts 외 3곳 |
+| V-T40 | ① | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ①는 이름 목록 검사가 PR을 막는다. … 만 남는다. 2026-11-05: `seat`의 이름 목록 검사가 이어져(`specs/specs.json`의… | 자동 시험 | B | 시험: tools/spec-check/spec-check.test.mjs |
+| V-T40 | ② | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ②는 이름 목록 검사가 PR을 막는다. … 만 남는다. 2026-11-05: `seat`의 이름 목록 검사가 이어져(`specs/specs.json`의… | 자동 시험 | B | 시험: services/admission-ctrl/test-int/queue-model.int.test.ts, services/purchase-svc/test-int/payment-model-spec.int.test… |
+| V-T40 | ③ | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ③은 기록의 모든 단계가 같은 결과(성공·거절과 불변식)로 끝난다. … 을 건너뛰었다고 표시하고 … 은 2026-11-05 `seat` 기록… | 자동 시험 | B | 시험: services/admission-ctrl/test-int/queue-model.int.test.ts, services/purchase-svc/test-int/payment-model.int.test.ts… |
 | V-T40 | ④ | 명세와 시험 모델 잇기(추천 적용 2026-10-28, 기술 검토… | ④는 재생이 처음 어긋나는 단계에서 실패하고 그 단계 번호를 남긴다. Quint 판을 올려 `mbt::` 칸이 없어지면 … 는 판매 커밋의 판 번호 대조를… | 자동 시험 | B | 시험: services/purchase-svc/test-int/saga-db.int.test.ts, services/purchase-svc/test-int/seat-model.int.test.ts |
 | V-T41 | ① | 핫패스 HTTP 어댑터와 검사 방식(추천 적용 2026-10-28… | ① 보다 낫지 않으면 ADR-0023을 다시 본다. 표본 묶음의 받기·거르기와 Problem 400 본문이 … 104.3·102.7µs … 2.34·2.74ms… | ID만 | B | 시험: packages/platform/test/request-checks.test.ts |
 | V-T41 | ② | 핫패스 HTTP 어댑터와 검사 방식(추천 적용 2026-10-28… | ② 보다 요청당 CPU를 5% [가정] 넘게 줄이지 못하면 핫패스도 Zod 파이프 하나로 되돌리고, … 가 … 와 … 90.2·88.7µs …… | ID만 | B | 시험: packages/platform/test/request-checks.test.ts |

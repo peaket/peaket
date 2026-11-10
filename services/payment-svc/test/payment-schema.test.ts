@@ -9,7 +9,7 @@ import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { payment, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig, paymentEntryPause, paymentEntryTrial } from '../src/modules/payment/adapters/db/schema.js';
+import { payment, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig, paymentEntryPause, paymentEntryTrial, paymentChannelLimit, paymentPgChannelObserved } from '../src/modules/payment/adapters/db/schema.js';
 import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-command.js';
 
 const SERVICE = fileURLToPath(new URL('..', import.meta.url));
@@ -27,6 +27,7 @@ const TAG_0009 = '0009_payment_pg_selection';
 const TAG_0010 = '0010_payment_entry_pause';
 const TAG_0011 = '0011_payment_entry_pause_reopened';
 const TAG_0012 = '0012_payment_virtual_account_allowed';
+const TAG_0013 = '0013_payment_channel_limit';
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
 const ADDED_JOB_COLUMN_0010 = 'queued_at';
 const ADDED_COLUMN_0009 = 'entry_opens_at';
@@ -67,6 +68,7 @@ const receiptShape = shapeOf(webhookReceipt);
 const reconShapes = [shapeOf(reconciliationRun), shapeOf(reconciliationSeen), shapeOf(reconciliationDiff)];
 const selectionShapes = [shapeOf(pgSwitch), shapeOf(eventPgConfig)];
 const entryShapes = [shapeOf(paymentEntryPause), shapeOf(paymentEntryTrial)];
+const limitShapes = [shapeOf(paymentChannelLimit), shapeOf(paymentPgChannelObserved)];
 const TABLES = [payment, paymentEvent, paymentConfirmJob];
 const SHAPES = [paymentShape, eventShape, jobShape];
 const cols = (s: ReturnType<typeof shapeOf>): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
@@ -537,7 +539,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const tenth = snapshotOf('0009_snapshot.json');
   const eleventh = snapshotOf('0010_snapshot.json');
   const twelfth = snapshotOf('0011_snapshot.json');
-  const latest = snapshotOf('0012_snapshot.json');
+  const thirteenth = snapshotOf('0012_snapshot.json');
+  const latest = snapshotOf('0013_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -549,7 +552,44 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(statements).toEqual(['alter table payment_entry_pause add column reopened_at timestamp with time zone;', 'alter table payment_entry_trial add column first_call_at timestamp with time zone;']);
   });
 
-  test('PRF182_PRF183_기록은 0000~0012 차례이고 SQL 파일과 맞는다', () => {
+  test('P-T34 0013 스냅샷의 앞은 0012 스냅샷이고, SQL은 낮춘 채널 상한 표와 관측 하위 결제사 표 둘만 만든다', () => {
+    expect(latest.prevId).toBe(thirteenth.id);
+    for (const name of ['payment_channel_limit', 'payment_pg_channel_observed']) expect(Object.keys(thirteenth.tables)).not.toContain(`public.${name}`);
+    const statements = readFileSync(join(MIGRATIONS, `${TAG_0013}.sql`), 'utf8').replace(/\r\n/g, '\n').replace(/^-- .*$/gm, '').split(BREAKPOINT).map((x) => canon(x));
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toMatch(/^create table payment_channel_limit\(/);
+    expect(statements[0]).toContain('constraint payment_channel_limit_pg_channel_pk primary key(pg,channel)');
+    expect(statements[0]).toContain('check(ratio_percent between 25 and 99)');
+    expect(statements[0]).toContain('check(expires_at > lowered_at)');
+    expect(statements[0]).toContain("check(channel = 'ALL')");
+    expect(statements[0]).toContain('check(version >= 1)');
+    expect(statements[1]).toBe('create table payment_pg_channel_observed(channel_key text primary key not null,pg_provider text not null,observed_at timestamp with time zone not null);');
+  });
+
+  test('P-T34 낮춘 채널 상한 표의 칸과 CHECK가 정본(docs/data.md §2 ④)과 같다', () => {
+    const [limit, observed] = limitShapes;
+    expect(cols(limit!)).toEqual([
+      ['pg', 'text', true],
+      ['channel', 'text', true],
+      ['ratio_percent', 'integer', true],
+      ['lowered_at', TZ, true],
+      ['expires_at', TZ, true],
+      ['version', 'bigint', true],
+      ['updated_at', TZ, true],
+    ]);
+    expect(limit!.primaryKeys).toEqual([{ name: 'payment_channel_limit_pg_channel_pk', columns: ['pg', 'channel'] }]);
+    expect(limit!.indexes).toEqual([]);
+    expect(checkOf(limit!, 'payment_channel_limit_ratio_check')).toBe('ratio_percent between 25 and 99');
+    expect(checkOf(limit!, 'payment_channel_limit_expires_check')).toBe('expires_at > lowered_at');
+    expect(literalsOf(checkOf(limit!, 'payment_channel_limit_pg_check'))).toEqual(['TOSS', 'PORTONE', 'SIMULATOR']);
+    expect(cols(observed!)).toEqual([
+      ['channel_key', 'text', true],
+      ['pg_provider', 'text', true],
+      ['observed_at', TZ, true],
+    ]);
+  });
+
+  test('PRF182_PRF183_기록은 0000~0013 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -565,6 +605,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [10, TAG_0010],
       [11, TAG_0011],
       [12, TAG_0012],
+      [13, TAG_0013],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -582,11 +623,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[9]!.when).toBeGreaterThan(journal.entries[8]!.when);
     expect(journal.entries[10]!.when).toBeGreaterThan(journal.entries[9]!.when);
     expect(journal.entries[11]!.when).toBeGreaterThan(journal.entries[10]!.when);
+    expect(journal.entries[13]!.when).toBeGreaterThan(journal.entries[12]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -675,7 +717,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
-    const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes];
+    const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes];
     expect(Object.keys(latest.tables).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
       const t = latest.tables[`public.${s.name}`]!;

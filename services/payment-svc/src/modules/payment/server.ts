@@ -67,3 +67,13 @@ export { paymentCommandLog } from './adapters/payment-command-log.js';
 export { PromPaymentCommandSignals } from './adapters/prom-payment-command-signals.js';
 export { cancelInputOf, cancelResponseOf, confirmInputOf, confirmResponseOf, getNewPaymentPauseResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, prepareCheckoutInputOf, prepareCheckoutResponseOf, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
 export { PaymentModule, type PaymentModuleDeps } from './payment.module.js';
+// 낮춘 채널 상한의 유지·전파·회복과 포트원 채널의 하위 결제사 검사(BUILD_ORDER PRF-203)
+export * from './domain/pg-channel-limit.js';
+export * from './domain/pg-sub-provider.js';
+export { PgChannelLimitSync, type PgChannelLimitSyncDeps, type PgChannelLimitSyncTimer } from './application/pg-channel-limit-sync.js';
+export { DrizzlePgChannelLimit, DrizzlePgChannelObserved, PG_CHANNEL_LIMIT_READ_TIMEOUT_MS, PG_CHANNEL_LIMIT_WRITE_TIMEOUT_MS, PG_CHANNEL_OBSERVED_READ_TIMEOUT_MS } from './adapters/db/drizzle-pg-channel-limit.js';
+export { PromPgChannelSignals } from './adapters/prom-pg-channel-signals.js';
+export { pgChannelLog } from './adapters/pg-channel-log.js';
+export { AssignEventPg, type AssignEventPgDeps, type AssignEventPgInput } from './application/assign-event-pg.js';
+export { CachedPgChannelObservations, type CachedPgChannelObservationsOptions, PG_CHANNEL_OBSERVED_MAX_STALE_MS, PG_CHANNEL_OBSERVED_READ_BUDGET_MS, PG_CHANNEL_OBSERVED_TTL_MS, PortoneFallbackExclusions } from './application/pg-channel-observations.js';
+export { PgChannelObserver, type PgChannelObserverDeps, type PortoneObservedChannel } from './application/pg-channel-observer.js';

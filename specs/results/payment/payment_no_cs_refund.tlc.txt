@@ -11,7 +11,7 @@ State 1: <Initial predicate>
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -22,7 +22,7 @@ State 1: <Initial predicate>
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
 
-State 2: <payment_no_cs_refund_payment_newAttempt(1) line 1311, col 3 to line 1349, col 80 of module payment_no_cs_refund>
+State 2: <payment_no_cs_refund_payment_newAttempt(1) line 1324, col 3 to line 1362, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -31,7 +31,7 @@ State 2: <payment_no_cs_refund_payment_newAttempt(1) line 1311, col 3 to line 13
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -51,7 +51,7 @@ State 3: <payment_no_cs_refund_payment_auth(1,1) line 405, col 3 to line 429, co
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -71,7 +71,7 @@ State 4: <payment_no_cs_refund_payment_accept(1,1) line 443, col 3 to line 479, 
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -82,7 +82,7 @@ State 4: <payment_no_cs_refund_payment_accept(1,1) line 443, col 3 to line 479, 
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 5: <payment_no_cs_refund_payment_reserve(1) line 519, col 3 to line 548, col 80 of module payment_no_cs_refund>
+State 5: <payment_no_cs_refund_payment_reserve(1) line 519, col 3 to line 559, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -91,7 +91,7 @@ State 5: <payment_no_cs_refund_payment_reserve(1) line 519, col 3 to line 548, c
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -102,7 +102,7 @@ State 5: <payment_no_cs_refund_payment_reserve(1) line 519, col 3 to line 548, c
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 6: <payment_no_cs_refund_payment_command(1) line 1363, col 3 to line 1388, col 49 of module payment_no_cs_refund>
+State 6: <payment_no_cs_refund_payment_command(1) line 1376, col 3 to line 1423, col 76 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -111,7 +111,7 @@ State 6: <payment_no_cs_refund_payment_command(1) line 1363, col 3 to line 1388,
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "ACCEPTED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -122,7 +122,7 @@ State 6: <payment_no_cs_refund_payment_command(1) line 1363, col 3 to line 1388,
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 7: <payment_no_cs_refund_payment_send(1,1) line 562, col 3 to line 586, col 49 of module payment_no_cs_refund>
+State 7: <payment_no_cs_refund_payment_send(1,1) line 573, col 3 to line 597, col 49 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -131,7 +131,7 @@ State 7: <payment_no_cs_refund_payment_send(1,1) line 562, col 3 to line 586, co
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -142,7 +142,7 @@ State 7: <payment_no_cs_refund_payment_send(1,1) line 562, col 3 to line 586, co
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 8: <payment_no_cs_refund_payment_pgProcess(1,1) line 615, col 3 to line 654, col 49 of module payment_no_cs_refund>
+State 8: <payment_no_cs_refund_payment_pgProcess(1,1) line 628, col 3 to line 667, col 49 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -151,7 +151,7 @@ State 8: <payment_no_cs_refund_payment_pgProcess(1,1) line 615, col 3 to line 65
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<FALSE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -162,7 +162,7 @@ State 8: <payment_no_cs_refund_payment_pgProcess(1,1) line 615, col 3 to line 65
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 9: <payment_no_cs_refund_payment_deadlinePasses(1) line 818, col 3 to line 840, col 80 of module payment_no_cs_refund>
+State 9: <payment_no_cs_refund_payment_deadlinePasses(1) line 831, col 3 to line 853, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -171,7 +171,7 @@ State 9: <payment_no_cs_refund_payment_deadlinePasses(1) line 818, col 3 to line
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -182,7 +182,7 @@ State 9: <payment_no_cs_refund_payment_deadlinePasses(1) line 818, col 3 to line
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 10: <payment_no_cs_refund_payment_respond(1,1) line 720, col 3 to line 750, col 49 of module payment_no_cs_refund>
+State 10: <payment_no_cs_refund_payment_respond(1,1) line 733, col 3 to line 763, col 49 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -191,7 +191,7 @@ State 10: <payment_no_cs_refund_payment_respond(1,1) line 720, col 3 to line 750
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -202,7 +202,7 @@ State 10: <payment_no_cs_refund_payment_respond(1,1) line 720, col 3 to line 750
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 11: <payment_no_cs_refund_payment_applyResult(1,1) line 846, col 3 to line 885, col 80 of module payment_no_cs_refund>
+State 11: <payment_no_cs_refund_payment_applyResult(1,1) line 859, col 3 to line 898, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -211,7 +211,7 @@ State 11: <payment_no_cs_refund_payment_applyResult(1,1) line 846, col 3 to line
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -222,16 +222,16 @@ State 11: <payment_no_cs_refund_payment_applyResult(1,1) line 846, col 3 to line
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 12: <payment_no_cs_refund_payment_overdue(1) line 1056, col 3 to line 1081, col 80 of module payment_no_cs_refund>
-/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
+State 12: <payment_no_cs_refund_payment_issue(1) line 904, col 3 to line 933, col 80 of module payment_no_cs_refund>
+/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
-     req |-> FALSE,
-     wait |-> "NONE",
+     req |-> TRUE,
+     wait |-> "WAIT",
      broken |-> FALSE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -242,16 +242,16 @@ State 12: <payment_no_cs_refund_payment_overdue(1) line 1056, col 3 to line 1081
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 13: <payment_no_cs_refund_payment_ticketBreaks(1) line 1025, col 3 to line 1050, col 80 of module payment_no_cs_refund>
-/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
+State 13: <payment_no_cs_refund_payment_ticketBreaks(1) line 1038, col 3 to line 1063, col 80 of module payment_no_cs_refund>
+/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
-     req |-> FALSE,
-     wait |-> "NONE",
+     req |-> TRUE,
+     wait |-> "WAIT",
      broken |-> TRUE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -262,7 +262,7 @@ State 13: <payment_no_cs_refund_payment_ticketBreaks(1) line 1025, col 3 to line
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 14: <payment_no_cs_refund_payment_issue(1) line 891, col 3 to line 920, col 80 of module payment_no_cs_refund>
+State 14: <payment_no_cs_refund_payment_overdue(1) line 1069, col 3 to line 1094, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -271,7 +271,7 @@ State 14: <payment_no_cs_refund_payment_issue(1) line 891, col 3 to line 920, co
      broken |-> TRUE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -282,7 +282,7 @@ State 14: <payment_no_cs_refund_payment_issue(1) line 891, col 3 to line 920, co
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 15: <payment_no_cs_refund_payment_ticketSvc(1) line 948, col 3 to line 991, col 80 of module payment_no_cs_refund>
+State 15: <payment_no_cs_refund_payment_ticketSvc(1) line 961, col 3 to line 1004, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -291,7 +291,7 @@ State 15: <payment_no_cs_refund_payment_ticketSvc(1) line 948, col 3 to line 991
      broken |-> TRUE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
-/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_no_cs_refund_payment_late = <<TRUE>>
 /\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
@@ -302,4 +302,44 @@ State 15: <payment_no_cs_refund_payment_ticketSvc(1) line 948, col 3 to line 991
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-Back to state 13: <payment_no_cs_refund_payment_issueAck(1) line 1627, col 3 to line 1688, col 76 of module payment_no_cs_refund>
+State 16: <payment_no_cs_refund_payment_issueAck(1) line 1662, col 3 to line 1723, col 76 of module payment_no_cs_refund>
+/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
+/\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> TRUE ] >>
+/\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
+/\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_cs_refund_payment_late = <<TRUE>>
+/\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
+
+State 17: <payment_no_cs_refund_payment_issue(1) line 904, col 3 to line 933, col 80 of module payment_no_cs_refund>
+/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
+/\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> TRUE,
+     wait |-> "WAIT",
+     broken |-> TRUE ] >>
+/\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
+/\ payment_no_cs_refund_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_cs_refund_payment_late = <<TRUE>>
+/\ payment_no_cs_refund_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
+
+Back to state 15: <payment_no_cs_refund_payment_ticketSvc(1) line 961, col 3 to line 1004, col 80 of module payment_no_cs_refund>

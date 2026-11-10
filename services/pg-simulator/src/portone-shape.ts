@@ -5,6 +5,11 @@ import type { SimResponse, WebhookEvent } from './engine.js';
 
 /** 시뮬레이터의 상점 ID. 요청의 storeId가 다르면 404 PAYMENT_NOT_FOUND다(BUILD_ORDER HOT-140, 코드 리뷰) */
 export const PORTONE_STORE_ID = 'store-sim';
+/** 채널 표에 없는 키나 키를 받지 않은 결제의 하위 결제사 */
+export const PORTONE_DEFAULT_PG_PROVIDER = 'SIMULATOR';
+
+/** 채널 키 → 하위 결제사(포트원 V2 PgProvider 값, BUILD_ORDER PRF-203). 결제창 인증이 받은 채널 키로 답의 channel을 만든다 */
+export type PortoneChannelTable = ReadonlyMap<string, string>;
 
 /** 토스 모양 오류 코드 → 포트원 상태 코드와 type */
 const ERROR: ReadonlyMap<string, { status: number; type: string }> = new Map([
@@ -74,8 +79,8 @@ export function portoneCancelResponse(r: SimResponse): SimResponse {
   );
 }
 
-export function portoneQueryResponse(r: SimResponse): SimResponse {
-  return translate(r, portoneView, 'INVALID_REQUEST');
+export function portoneQueryResponse(r: SimResponse, channels: PortoneChannelTable = new Map()): SimResponse {
+  return translate(r, (v) => portoneView(v, channels), 'INVALID_REQUEST');
 }
 
 /** 토스 모양 카드 종류 → 포트원 CardType(공식 스키마 열거값) */
@@ -104,8 +109,14 @@ function portoneVirtualAccount(v: TossView): Record<string, unknown> {
   return va ? { bank: 'WOORI', accountNumber: va.accountNumber, expiredAt: va.dueDate, accountType: 'NORMAL', remitteeName: '시뮬레이터' } : {};
 }
 
+/** 답의 channel(공식 스키마 SelectedChannel: type·pgProvider·pgMerchantId 필수, key 선택). 채널 키를 받은 결제만 key를 싣는다 */
+function channelView(channelKey: unknown, channels: PortoneChannelTable): Record<string, unknown> {
+  if (typeof channelKey !== 'string') return { type: 'TEST', pgProvider: PORTONE_DEFAULT_PG_PROVIDER, pgMerchantId: 'sim-merchant' };
+  return { type: 'TEST', id: `sim-${channelKey}`, key: channelKey, name: '시뮬레이터 채널', pgProvider: channels.get(channelKey) ?? PORTONE_DEFAULT_PG_PROVIDER, pgMerchantId: 'sim-merchant' };
+}
+
 /** 엔진의 결제 보기를 포트원 Payment 모양으로 바꾼다(필요한 칸만) */
-function portoneView(v: TossView): Record<string, unknown> {
+function portoneView(v: TossView, channels: PortoneChannelTable): Record<string, unknown> {
   const total = v.totalAmount as number;
   const balance = v.balanceAmount as number;
   const approved = v.approvedAt !== null && v.approvedAt !== undefined;
@@ -115,7 +126,7 @@ function portoneView(v: TossView): Record<string, unknown> {
     id: v.paymentKey,
     transactionId: v.txId,
     storeId: PORTONE_STORE_ID,
-    channel: { type: 'TEST', pgProvider: 'SIMULATOR' },
+    channel: channelView(v.portoneChannelKey, channels),
     version: 'V2',
     requestedAt: v.requestedAt,
     updatedAt: v.requestedAt,
@@ -132,8 +143,8 @@ function portoneView(v: TossView): Record<string, unknown> {
 }
 
 /** 거래 조회의 한 건(결제 건 모양, BUILD_ORDER HOT-153). view의 statusChangedAt을 그대로 싣는다 */
-export function portoneTransactionView(v: Record<string, unknown>): Record<string, unknown> {
-  return { ...portoneView(v as TossView), statusChangedAt: v.statusChangedAt, updatedAt: v.statusChangedAt };
+export function portoneTransactionView(v: Record<string, unknown>, channels: PortoneChannelTable = new Map()): Record<string, unknown> {
+  return { ...portoneView(v as TossView, channels), statusChangedAt: v.statusChangedAt, updatedAt: v.statusChangedAt };
 }
 
 /** 시뮬레이터 웹훅 시크릿 기본값(옵션을 주지 않았을 때 시험 키에서 만든다). whsec_ + base64다 */

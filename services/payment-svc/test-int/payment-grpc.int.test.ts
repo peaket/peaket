@@ -123,6 +123,21 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     attempts: ['integer', 'NO'],
     created_at: ['timestamp with time zone', 'NO'],
   },
+  // 낮춘 결제사 채널 상한과 관측 하위 결제사(마이그레이션 0013, BUILD_ORDER PRF-203)
+  payment_channel_limit: {
+    pg: ['text', 'NO'],
+    channel: ['text', 'NO'],
+    ratio_percent: ['integer', 'NO'],
+    lowered_at: ['timestamp with time zone', 'NO'],
+    expires_at: ['timestamp with time zone', 'NO'],
+    version: ['bigint', 'NO'],
+    updated_at: ['timestamp with time zone', 'NO'],
+  },
+  payment_pg_channel_observed: {
+    channel_key: ['text', 'NO'],
+    pg_provider: ['text', 'NO'],
+    observed_at: ['timestamp with time zone', 'NO'],
+  },
 };
 
 /** 제약을 시험할 원장 행(칸을 덮어 쓴다) */
@@ -147,14 +162,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0012)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 13개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0013)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 14개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(['event_pg_config', 'outbox', 'payment', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'pg_switch', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'webhook_receipt']);
+    expect(before).toEqual(['event_pg_config', 'outbox', 'payment', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'pg_switch', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('13');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('14');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {

@@ -44,10 +44,14 @@ export function isEntryPaused(row: EntryPauseRow | undefined): row is EntryPause
  * 시험 재개도 정지다(ADR-0105). 채널 쪽 원인은 시작 시각이 정해지지 않아 0이다.
  */
 export function eventPausedSinceMs(input: PgSelectionState & { readonly defaults: PgPlatformDefaults; readonly channels: PgChannelTable; readonly pauses: EntryPauses }): number | undefined {
-  const pg = basePgOf(input);
-  const channel = input.channels.get(pg);
+  return pgPausedSinceMs(basePgOf(input), input.channels, input.pauses);
+}
+
+/** 그 결제사로 새 결제를 열면 새 결제 일시 정지와 같은 답인가: 정지면 시작 시각, 채널이 없거나 비활성이면 0, 열려 있으면 undefined */
+export function pgPausedSinceMs(pg: PgName, channels: PgChannelTable, pauses: EntryPauses): number | undefined {
+  const channel = channels.get(pg);
   if (channel === undefined || !channel.active) return 0;
-  const row = input.pauses.get(pg);
+  const row = pauses.get(pg);
   return isEntryPaused(row) ? row.sinceMs : undefined;
 }
 

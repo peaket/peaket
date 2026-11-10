@@ -30,7 +30,7 @@ function make(sleep: (ms: number) => Promise<void> = async () => {}) {
       return s;
     }
   };
-  const call = async (method: 'GET' | 'POST', url: string, body?: unknown, headers: Record<string, string> = PORTONE) => {
+  const call = async (method: 'GET' | 'POST' | 'PUT', url: string, body?: unknown, headers: Record<string, string> = PORTONE) => {
     const r = await app.inject({ method, url, headers, ...(body === undefined ? {} : { payload: body as object }) });
     return { status: r.statusCode, body: r.body ? parse(r.body) : undefined, raw: r.body };
   };
@@ -334,5 +334,36 @@ describe('포트원 웹훅 사건(Standard Webhooks 서명)', () => {
       expect(JSON.parse(e.body)).toMatchObject({ data: { paymentId: a.paymentId, storeId: expect.any(String) } });
     }
     expect(events[0]!.headers['webhook-id']).not.toBe(events[1]!.headers['webhook-id']);
+  });
+});
+
+describe('포트원 채널 표(BUILD_ORDER PRF-203)', () => {
+  const channelOf = async (s: ReturnType<typeof make>, paymentId: string) => ((await s.call('GET', `/payments/${paymentId}?storeId=store-sim`)).body as { channel: Record<string, unknown> }).channel;
+
+  it('P-T46 결제창 인증이 받은 채널 키와 그 하위 결제사를 답의 channel에 싣고, 채널 키가 없으면 SIMULATOR다(필수 칸 type·pgProvider·pgMerchantId)', async () => {
+    const s = make();
+    const plain = await s.authenticate();
+    expect(await channelOf(s, plain.paymentId)).toEqual({ type: 'TEST', pgProvider: 'SIMULATOR', pgMerchantId: 'sim-merchant' });
+
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: { 'channel-kcp': 'KCP_V2' } }, BASIC)).status).toBe(204);
+    const order = '0195f3a0-0000-7000-8000-000000000002';
+    const r = await s.call('POST', '/sim/portone/authenticate', { orderId: order, amount: 10_000, channelKey: 'channel-kcp' }, BASIC);
+    expect(r.status).toBe(200);
+    expect(await channelOf(s, `pay-${order}`)).toEqual({ type: 'TEST', id: 'sim-channel-kcp', key: 'channel-kcp', name: '시뮬레이터 채널', pgProvider: 'KCP_V2', pgMerchantId: 'sim-merchant' });
+
+    // 표를 바꾸면 이미 인증한 결제의 답에도 새 하위 결제사가 실린다(P-T46 ④의 '설정과 다른 답'을 만든다)
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: { 'channel-kcp': 'TOSSPAYMENTS' } }, BASIC)).status).toBe(204);
+    expect(await channelOf(s, `pay-${order}`)).toMatchObject({ key: 'channel-kcp', pgProvider: 'TOSSPAYMENTS' });
+    // 표에 없는 키는 SIMULATOR다
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: {} }, BASIC)).status).toBe(204);
+    expect(await channelOf(s, `pay-${order}`)).toMatchObject({ key: 'channel-kcp', pgProvider: 'SIMULATOR' });
+  });
+
+  it('P-T46 채널 표 제어 API는 기본 인증만 받고 틀린 모양은 400이다', async () => {
+    const s = make();
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: { 'channel-kcp': 'KCP_V2' } })).status).toBe(401);
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: { 'channel-kcp': 'kcp' } }, BASIC)).status).toBe(400);
+    expect((await s.call('PUT', '/sim/portone/channels', { channels: { 'bad key': 'KCP_V2' } }, BASIC)).status).toBe(400);
+    expect((await s.call('POST', '/sim/portone/authenticate', { orderId: ORDER, amount: 10_000, channelKey: 'bad key' }, BASIC)).status).toBe(400);
   });
 });

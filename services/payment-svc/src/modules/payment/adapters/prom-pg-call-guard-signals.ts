@@ -12,6 +12,7 @@ const FIRSTS = ['true', 'false'] as const;
  * - payment_pg_limit{pg, kind}: 파드의 지금 상한(게이지). kind는 rps·concurrency
  * - payment_pg_inflight{pg}: 돌고 있는 승인 호출 수(게이지)
  * - payment_pg_saturated_total{pg, reason}: 상한에 막힌 횟수. reason은 token·bulkhead. 값을 0으로 미리 보인다
+ * - payment_pg_limit_ratio{pg}: 파드의 유효 비율 퍼센트(게이지, 처음은 100, BUILD_ORDER PRF-203)
  */
 export class PromPgCallGuardSignals implements PgCallGuardSignals {
   readonly #throttled = new Counter({
@@ -35,6 +36,13 @@ export class PromPgCallGuardSignals implements PgCallGuardSignals {
     registers: [],
   });
 
+  readonly #ratio = new Gauge({
+    name: 'payment_pg_limit_ratio',
+    help: '파드의 결제사 채널 상한 유효 비율(처음 상한 대비 퍼센트, 결제사)',
+    labelNames: ['pg'] as const,
+    registers: [],
+  });
+
   readonly #saturated = new Counter({
     name: 'payment_pg_saturated_total',
     help: '결제사 호출 상한에 막힌 횟수(결제사·까닭)',
@@ -51,12 +59,13 @@ export class PromPgCallGuardSignals implements PgCallGuardSignals {
     }
   }
 
-  /** 지표 넷을 registry에 붙이고 자신을 돌려준다 */
+  /** 지표 다섯을 registry에 붙이고 자신을 돌려준다 */
   register(registry: Registry): this {
     registry.registerMetric(this.#throttled);
     registry.registerMetric(this.#limit);
     registry.registerMetric(this.#inflight);
     registry.registerMetric(this.#saturated);
+    registry.registerMetric(this.#ratio);
     return this;
   }
 
@@ -74,5 +83,9 @@ export class PromPgCallGuardSignals implements PgCallGuardSignals {
 
   saturated(pg: PgName, reason: PgSaturationReason): void {
     this.#saturated.inc({ pg, reason });
+  }
+
+  ratio(pg: PgName, percent: number): void {
+    this.#ratio.set({ pg }, percent);
   }
 }

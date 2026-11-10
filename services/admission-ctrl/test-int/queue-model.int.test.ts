@@ -55,7 +55,7 @@ const finish = async () => {
 // 명령 순서: 한 걸음에서 할 수 있는 명령은 몇 개뿐이라(나머지는 check가 건너뛴다) 길게 만든다. 실패하면 fast-check가 배열을 줄인다
 const plan = (scope: Scope, length = { minLength: 600, maxLength: 1000 }) => fc.array(fc.oneof(...commandArbs(scope)), length);
 
-test('V-T40 명령 이름이 명세 동작 이름(SPEC_ACTIONS)과 같다', () => {
+test('V-T40 ② 명령 이름이 명세 동작 이름(SPEC_ACTIONS)과 같다', () => {
   expect(Object.keys(COMMANDS).sort()).toEqual([...SPEC_ACTIONS].sort());
 });
 
@@ -199,7 +199,7 @@ test('V-T40 재생 기록이 지금 명세로 만든 것이다(아니면 node to
   expect(manifest.specSha256).toBe(createHash('sha256').update(readFileSync(SPEC_FILE)).digest('hex'));
 });
 
-test.each(manifest.files)('V-T40 재생 %s: 걸음마다 구현이 명세와 같은 상태에 닿는다', async (file) => {
+test.each(manifest.files)('V-T40 ③ 재생 %s: 걸음마다 구현이 명세와 같은 상태에 닿는다', async (file) => {
   const { module, states } = readTrace(join(TRACES, file));
   const s = new QueueSystem(redis, scopeOf(specText, module), `${process.pid}r${++runNo}`, { specRanks: true });
   await s.init();

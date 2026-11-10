@@ -333,6 +333,46 @@
       "temporal": [
         "fairLiveness"
       ],
+      "mbt": {
+        "$comment": "모델 기반 시험(wbs 2.7.6, docs/verification.md §2.4, V-T40, BUILD_ORDER PRF-210): actions의 SPEC_ACTIONS가 명세 step의 동작 이름과 같아야 하고(31개), traces의 동작 기록은 modules마다 samples개 표본의 지켜짐 시뮬레이션에서 긴 것부터 traces개를 남기고, goal이 있는 줄은 그 목표 상태(명세의 val, 닿지 않음)를 깨는 기록을 남긴다(spec-check.mjs traces, 코드 리뷰 2026-11-10. 목표 줄의 모듈은 전수 검사로 지켜짐을 보는 모듈이다). 하네스·명령·재생은 services/purchase-svc/test-int/payment-model/",
+        "actions": "services/purchase-svc/test-int/payment-model/actions.ts",
+        "traces": "services/purchase-svc/test-int/payment-model/traces",
+        "modules": [
+          {
+            "main": "payment_proposed",
+            "traces": 8,
+            "samples": 10000
+          },
+          {
+            "main": "payment_proposed_attempts",
+            "traces": 4,
+            "samples": 10000
+          },
+          {
+            "main": "payment_proposed_full",
+            "traces": 4,
+            "samples": 10000
+          },
+          {
+            "main": "payment_proposed",
+            "goal": "goal_notRefunded",
+            "traces": 1,
+            "samples": 200000
+          },
+          {
+            "main": "payment_proposed",
+            "goal": "goal_noApprovedByResponse",
+            "traces": 1,
+            "samples": 200000
+          },
+          {
+            "main": "payment_proposed",
+            "goal": "goal_noExpiredCommand",
+            "traces": 1,
+            "samples": 10000
+          }
+        ]
+      },
       "checks": [
         {
           "main": "payment_proposed",

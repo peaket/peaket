@@ -17,6 +17,8 @@ service PaymentService {
   // 고른 결제사를 쓸 수 없으면 UNAVAILABLE이고 글은 pg-unavailable이다(다른 결제사로 넘기지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-190).
   // 고른 결제사가 새 결제 일시 정지거나 채널이 없거나 비활성이면 FAILED_PRECONDITION이고 글은 new-payment-paused다. 이미 받은 시험 재개 주문의 재호출은 다시 통과하고,
   // 멱등 재생(pinned_pg)은 정지를 보지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-201).
+  // 전환이 포트원을 고르면 두 번째 읽기로 포트원 채널의 관측 하위 결제사 표(파드 캐시, 읽지 못하면 10초 안의 마지막 값, 그런 값이 없으면 실패)를 보고,
+  // 그 수단의 채널이 하위 결제사 검사로 빠지면 대체가 없을 때처럼 기준 결제사로 간다(switched 거짓, 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   rpc PrepareCheckout(PrepareCheckoutRequest) returns (PrepareCheckoutResponse);
 
   // 승인 명령. 결제 시도에 기록된 결제사로만 승인 API를 부른다. 같은 주문의 결제사 멱등키는 confirm-{order_id}다.
@@ -56,6 +58,8 @@ service PaymentService {
   // 정지 판정자가 payment DB payment_entry_pause에 쓴 상태를 모든 파드가 1초마다 읽어 답한다(ADR-0105).
   // 확인 호출 단계와 시험 재개 단계는 모두 일시 정지로 돌려준다. 모두 열거나 commander가 명령 6 해제로 열면 빠진다.
   // 읽기만 한다. 회차 1~200개 [가정], 틀리면 INVALID_ARGUMENT. 부르는 쪽 데드라인 500ms [가정](추천 적용 2026-11-09, BUILD_ORDER PRF-201).
+  // 전환 대상이 포트원인데 쓰는 포트원 채널 가운데 하나라도 하위 결제사 검사로 빠졌고 기준 결제사가 정지면 그 회차도 돌려준다(수단을 모르므로 좌석을 지키는 쪽,
+  // 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   rpc GetNewPaymentPause(GetNewPaymentPauseRequest) returns (GetNewPaymentPauseResponse);
 }
 
@@ -102,6 +106,7 @@ message BuyerContact {
 message PrepareCheckoutResponse {
   peaket.common.v1.PgProvider pg = 1;
   // 결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다.
+  // 전환 중이어도 대체 채널이 하위 결제사 검사로 빠져 기준 결제사로 갔으면 false다(추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   bool switched = 2;
   // 결제사 SDK에 넘길 값. 결제사마다 메시지를 따로 두어 키 이름 실수를 컴파일과 buf가 잡게 한다(openapi `PaymentAttempt.checkout`과 같은 칸).
   // 2026-10-28에 map<string, string>에서 바꿨다. 계약 검사(wbs 0.2.2)를 붙이기 전 초안이라 번호 3을 다시 썼다(README §2 '버전', 기술 검토 낮음-028).

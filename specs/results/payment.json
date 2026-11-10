@@ -1,12 +1,12 @@
 {
   "spec": "payment",
   "file": "specs/payment.qnt",
-  "specSha256": "8a77ea7cfa9499bfbf40e8bac95cd2a399abf13253055e897669830d1d6236a6",
+  "specSha256": "98209fd19bb224feb69ad185b7e0ca9c080408da4a05e1eecc8102cc94cadbdd",
   "commit": {
-    "sha": "5105d7160cb991e45717ef8c223d37009853fd21",
+    "sha": "b576870a364aff1021fb24cdd0421ca41ac6fd23",
     "dirty": true
   },
-  "date": "2026-11-09T15:47:21+09:00",
+  "date": "2026-11-10T14:04:21+09:00",
   "scope": "정본 범위(docs/verification.md §2.1): 주문 2건(결제 시도 2번씩), 결제사 2곳(기본 토스페이먼츠·대체 포트원, 전환 1회), 승인 시간 초과 1회, payment-svc 재시작 1회, 회차 취소 확정, ticket-svc가 끝내 발권하지 못하는 주문, 웹훅 중복 2회. 웹훅은 정본대로 조회를 부르는 신호라 조회가 언제든 몇 번이든 일어날 수 있음이 중복·지연·순서 바뀜을 덮는다(웹훅 걸음은 본문을 믿는 변형에만). 전수 검사는 두 범위로 나눈다: 주문 2건 결제 시도 1번씩과 주문 1건 결제 시도 2번. 정본 범위 전체는 시뮬레이션으로 본다. 진행성은 주문 1건 결제 시도 2번(주문 둘은 서로를 기다리지 않는다). 변형은 반례가 나오는 작은 범위로 줄였다",
   "adrs": [
     "0015",
@@ -39,11 +39,11 @@
       "method": "tlc",
       "result": "hold",
       "ok": true,
-      "statesGenerated": 129482897,
-      "distinctStates": 6249680,
+      "statesGenerated": 129927105,
+      "distinctStates": 6293528,
       "depth": 47,
       "fingerprintCollision": "4.2E-5",
-      "seconds": 207.931
+      "seconds": 210.622
     },
     {
       "main": "payment_proposed_attempts",
@@ -60,11 +60,11 @@
       "method": "tlc",
       "result": "hold",
       "ok": true,
-      "statesGenerated": 683577,
-      "distinctStates": 30700,
+      "statesGenerated": 683585,
+      "distinctStates": 30760,
       "depth": 29,
       "fingerprintCollision": "1.1E-9",
-      "seconds": 14.288
+      "seconds": 13.821
     },
     {
       "main": "payment_proposed_full",
@@ -88,7 +88,7 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 17.394
+      "seconds": 14.525
     },
     {
       "main": "payment_live",
@@ -99,11 +99,11 @@
       "method": "tlc",
       "result": "hold",
       "ok": true,
-      "statesGenerated": 683577,
-      "distinctStates": 30700,
+      "statesGenerated": 683585,
+      "distinctStates": 30760,
       "depth": 29,
       "fingerprintCollision": "1.1E-9",
-      "seconds": 17.708
+      "seconds": 15.471
     },
     {
       "main": "payment_canon",
@@ -116,11 +116,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 141001,
-      "distinctStates": 11182,
+      "statesGenerated": 141645,
+      "distinctStates": 11580,
       "depth": 15,
       "fingerprintCollision": null,
-      "seconds": 12.725,
+      "seconds": 13.333,
       "tlcTrace": "specs/results/payment/payment_canon.tlc.txt",
       "counterexample": "specs/results/payment/payment_canon.itf.json"
     },
@@ -135,11 +135,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 562,
-      "distinctStates": 113,
+      "statesGenerated": 520,
+      "distinctStates": 111,
       "depth": 12,
       "fingerprintCollision": null,
-      "seconds": 11.983,
+      "seconds": 10.59,
       "tlcTrace": "specs/results/payment/payment_no_pin.tlc.txt",
       "counterexample": "specs/results/payment/payment_no_pin.itf.json"
     },
@@ -154,11 +154,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 31934,
-      "distinctStates": 2678,
+      "statesGenerated": 31282,
+      "distinctStates": 2713,
       "depth": 16,
       "fingerprintCollision": null,
-      "seconds": 12.082,
+      "seconds": 11.047,
       "tlcTrace": "specs/results/payment/payment_double.tlc.txt"
     },
     {
@@ -172,11 +172,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 775,
-      "distinctStates": 136,
-      "depth": 17,
+      "statesGenerated": 645,
+      "distinctStates": 125,
+      "depth": 16,
       "fingerprintCollision": null,
-      "seconds": 11.08,
+      "seconds": 10.686,
       "tlcTrace": "specs/results/payment/payment_assume.tlc.txt",
       "counterexample": "specs/results/payment/payment_assume.itf.json"
     },
@@ -191,11 +191,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 625,
-      "distinctStates": 141,
+      "statesGenerated": 677,
+      "distinctStates": 151,
       "depth": 14,
       "fingerprintCollision": null,
-      "seconds": 11.654,
+      "seconds": 11.566,
       "tlcTrace": "specs/results/payment/payment_trust_webhook.tlc.txt",
       "counterexample": "specs/results/payment/payment_trust_webhook.itf.json"
     },
@@ -210,11 +210,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 295,
-      "distinctStates": 83,
+      "statesGenerated": 293,
+      "distinctStates": 86,
       "depth": 15,
       "fingerprintCollision": null,
-      "seconds": 10.7,
+      "seconds": 10.678,
       "tlcTrace": "specs/results/payment/payment_backward.tlc.txt",
       "counterexample": "specs/results/payment/payment_backward.itf.json"
     },
@@ -229,11 +229,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 2389,
-      "distinctStates": 303,
-      "depth": 17,
+      "statesGenerated": 2458,
+      "distinctStates": 316,
+      "depth": 18,
       "fingerprintCollision": null,
-      "seconds": 10.775,
+      "seconds": 11.298,
       "tlcTrace": "specs/results/payment/payment_unconditional_ack.tlc.txt",
       "counterexample": "specs/results/payment/payment_unconditional_ack.itf.json"
     },
@@ -246,11 +246,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 707,
-      "distinctStates": 120,
+      "statesGenerated": 701,
+      "distinctStates": 122,
       "depth": 19,
       "fingerprintCollision": null,
-      "seconds": 10.978,
+      "seconds": 11.587,
       "tlcTrace": "specs/results/payment/payment_no_issue_retry.tlc.txt"
     },
     {
@@ -262,11 +262,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 907,
-      "distinctStates": 116,
+      "statesGenerated": 901,
+      "distinctStates": 118,
       "depth": 18,
       "fingerprintCollision": null,
-      "seconds": 11.512,
+      "seconds": 11.804,
       "tlcTrace": "specs/results/payment/payment_no_cs_refund.tlc.txt"
     }
   ]

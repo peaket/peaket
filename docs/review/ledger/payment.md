@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 65 | 26 | 6 | 0 | 2 | 17 | 0 | 0 | 0 | 116 |
-| B | 53 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 17 | 89 |
-| 합계 | 118 | 45 | 6 | 0 | 2 | 17 | 0 | 0 | 17 | 205 |
+| A | 70 | 26 | 6 | 0 | 2 | 12 | 0 | 0 | 0 | 116 |
+| B | 56 | 16 | 0 | 0 | 0 | 0 | 0 | 0 | 17 | 89 |
+| 합계 | 126 | 42 | 6 | 0 | 2 | 12 | 0 | 0 | 17 | 205 |
 
 ## docs/features/payment.md
 
@@ -45,7 +45,7 @@
 | P-T31 | — | 결제사 전환 훈련과 결제사별 동시 입장 목표 상한 | 전환 뒤 공연의 serving 전진 속도 상한이 초당 50번호로, 동시 입장 목표가 채널 상한 기준(4,500명 [가정])으로 바로 낮아지고, 포트원 승인… | 측정 | A | 구간 측정 · 결제사 전환 훈련과 결제사별 동시 입장 목표 상한 |
 | P-T32 | — | 결제사별 대사 | 결제사별 대사가 모든 불일치를 찾아 UNKNOWN 해소 경로로 넘긴다. 대사 실행은 다시 시작해도 같은 불일치를 한 번만 기록하고(이어 하기), 원장을 임의로… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-reconciliation.int.test.ts, services/payment-svc/test/payment-reconciliation.t… |
 | P-T33 | — | 포트원 리디렉션 결제 토큰 | 리디렉션 쿼리에 `paymentId`·`txId`·`paymentToken`이 오고, 수동 승인이 성공한다. 오지 않으면 능력 플래그로 포트원을 고르지 않고… | 미검증 | A | 포트원 테스트 채널 · 실제 포트원 리디렉션 결제가 필요한데 포트원 테스트 채널 계정이 없다(HOT-145) |
-| P-T34 | — | 결제사 한도 초과 응답과 결제 확정 임박 원인 경고 | 첫 429에 SEV2가 나고, `pg_throttled_total`이 늘며, 채널 상한이 바로 낮아진다. 공연 리포트에 피크 한도 사용률과 429 건수가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test/payment-confirm-runner.test… |
+| P-T34 | — | 결제사 한도 초과 응답과 결제 확정 임박 원인 경고 | 첫 429에 SEV2가 나고, `pg_throttled_total`이 늘며, 채널 상한이 바로 낮아진다. 공연 리포트에 피크 한도 사용률과 429 건수가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-channel-limit.in… |
 | P-T35 | — | identity-svc 중단 중 주문 생성 | 첫째만 주문이 만들어지고 나머지는 거부된다. 대체 판정 지표가 사유별로 늘고, 보안 이벤트 로그에 주문 ID가 남는다… | 자동 시험 | A | 시험: services/purchase-svc/test-int/identity-grpc.int.test.ts, services/purchase-svc/test-int/orders-e2e.int.test.ts 외 5곳 |
 | P-T36 | ① | 가상계좌 입금 대기 | ① 발권 … 을 payment-svc 원장·사건과 주문 전이까지 보고, 입금 대기 동안 결제 상태 응답의 은행·계좌번호·입금 기한도 본다(추천 적용… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts |
 | P-T36 | ② | 가상계좌 입금 대기 | ② 주문 FAILED·좌석 반환·한도 복구, 웹훅 없이 조회로 판정 … 을 payment-svc 원장·사건과 주문 전이까지 보고, 입금 대기 동안 결제 상태… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.test.ts… |
@@ -64,7 +64,7 @@
 | P-T40 | ① | 결제사 지연과 읽기 시간 초과 | ① 끊지 않고 결과를 받아 확정, 다시 보낸 호출 0건, 1분 창 p99 2초 초과로 SEV2 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ② | 결제사 지연과 읽기 시간 초과 | ② 60초 [가정]에서 끊고 결과를 가정하지 않고 `UNKNOWN`으로 쓴 뒤 단독 조회로 확정한다(같은 멱등키로 다시 보내지 않는다, 명세 `timeout`… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ③ | 결제사 지연과 읽기 시간 초과 | ③ 상한을 넘는 승인 명령은 재시도 큐에서 승인 기한 안에 처리되고, 동시 승인 호출 수가 벌크헤드를 넘지 않으며 열린 승인 연결 수는 처음의 벌크헤드를 넘지… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
-| P-T40 | ④ | 결제사 지연과 읽기 시간 초과 | ④ 채널 상한이 낮아지지 않고 그 호출만 다음 시도가 늦춰진다. 승인 명령 접수 gRPC는 모든 경우에 데드라인(200ms [가정]) 안에 답한다. 호출 보호… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
+| P-T40 | ④ | 결제사 지연과 읽기 시간 초과 | ④ 채널 상한이 낮아지지 않고 그 호출만 다음 시도가 늦춰진다. 승인 명령 접수 gRPC는 모든 경우에 데드라인(200ms [가정]) 안에 답한다. 호출 보호… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test/pg-channel-limit.test.ts |
 | P-T41 | ① | 결제하지 않은 티켓 주문의 만료 | ① 세 조건이 모두 끝난 때 주문 EXPIRED와 `trade.orders` EXPIRED, 결제사 호출 0건 | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ② | 결제하지 않은 티켓 주문의 만료 | ② 세션 종료와 홀드 해제 뒤 EXPIRED | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ③ | 결제하지 않은 티켓 주문의 만료 | ③ 접수가 먼저면 만료하지 않고 지금 규칙대로 처리, 만료 뒤의 시도·접수는 409 `order-expired` | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
@@ -76,7 +76,7 @@
 | P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
 | P-T43 | ① | 새 결제 진입 정지와 다시 열기 | ① 시험 재개에서 정지로 돌아가고, 시험 결제의 과금은 0원이다 … , PromQL의 `path="direct"`를 본다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T43 | ② | 새 결제 진입 정지와 다시 열기 | ② 바로 모두 열리고, 감사 로그에 사유와 commander가 남는다. 실패가 이어지면 연 뒤의 표본으로 다시 멈춘다 … , PromQL의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
-| P-T43 | ③ | 새 결제 진입 정지와 다시 열기 | ③ 예상 대기가 10초 아래로 1분 이어지면 열리고, 확인 호출은 나가지 않는다 … , PromQL의 `path="direct"`를 본다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
+| P-T43 | ③ | 새 결제 진입 정지와 다시 열기 | ③ 예상 대기가 10초 아래로 1분 이어지면 열리고, 확인 호출은 나가지 않는다 … , PromQL의 `path="direct"`를 본다. … 의 예상 대기를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-channel-limit.int.test.ts, services/payment-svc/test-int/payment-entry-pause-j… |
 | P-T43 | ④ | 새 결제 진입 정지와 다시 열기 | ④ 옛 판정자의 늦은 쓰기는 판 번호로 거절된다. 재시도 큐 건의 긴 확정 소요는 시작·해제 판정에 들어가지 않고, NFR-006 Degraded 측정에는… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T44 | ① | 결제 결과 롱 폴링의 시간 초과 순서(추천 적용 2026-10-28… | ① 3초에 확정으로 답한다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/payment-status-e2e.int.test.ts |
 | P-T44 | ② | 결제 결과 롱 폴링의 시간 초과 순서(추천 적용 2026-10-28… | ② 25초에 '확정 전' 상태로 답하고, 브라우저가 다시 물어 두 번째 응답에서 확정을 받는다 | ID만 | A | 시험: services/purchase-svc/test-int/payment-status-e2e.int.test.ts |
@@ -89,11 +89,11 @@
 | P-T45 | ⑤ | 주문·결제 멱등키의 범위·지문·처리 중·보관(추천 적용… | ⑤ 서로 다른 작업으로 따로 처리된다( … 는 PRF-191: 멱등 범위가 계정 × 작업이라 같은 키의 주문 생성과 결제 시도 시작이 부딪치지 않는다, 추천… | 자동 시험 | A | 시험: services/purchase-svc/test-int/start-payment.int.test.ts |
 | P-T45 | ⑥ | 주문·결제 멱등키의 범위·지문·처리 중·보관(추천 적용… | ⑥ 새 요청으로 처리된다(주문은 이미 있으므로 홀드 상태에 따라 409 등 업무 규칙대로 끝난다) | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-writes.int.test.ts, services/purchase-svc/test-int/start-payment.int.test.ts 외… |
 | P-T45 | ⑦ | 주문·결제 멱등키의 범위·지문·처리 중·보관(추천 적용… | ⑦ 둘 다 400 `idempotency-key-invalid` | 자동 시험 | A | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/orders-http.test.ts |
-| P-T46 | ① | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ① 422이고 지정이 바뀌지 않는다 | 다른 단계 | A | PRF-203 · 대체 채널의 하위 결제사 |
-| P-T46 | ② | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ② 둘 다 422다(브랜드페이는 토스페이먼츠 상품, 토스페이는 확인 전) | 다른 단계 | A | PRF-203 · 대체 채널의 하위 결제사 |
-| P-T46 | ③ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ③ 배포 검사가 실패한다 | 다른 단계 | A | PRF-203 · 대체 채널의 하위 결제사 |
-| P-T46 | ④ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ④ SEV2가 뜨고 그 채널이 대체 후보에서 빠진다 | 다른 단계 | A | PRF-203 · 대체 채널의 하위 결제사 |
-| P-T46 | ⑤ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ⑤ 새 결제 시도가 포트원형으로 열리고 승인된다 | 다른 단계 | A | PRF-203 · 대체 채널의 하위 결제사 |
+| P-T46 | ① | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ① 422이고 지정이 바뀌지 않는다 … 와 그 반대 방향(기본이 포트원)을 쓰임새 `AssignEventPg`와 PostgreSQL로, | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-sub-provider.test.ts |
+| P-T46 | ② | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ② 둘 다 422다(브랜드페이는 토스페이먼츠 상품, 토스페이는 확인 전) … 와 그 반대 방향(기본이 포트원)을 쓰임새 `AssignEventPg`와… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-sub-provider.test.ts |
+| P-T46 | ③ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ③ 배포 검사가 실패한다 … 을 시작 설정 검사로, | 자동 시험 | A | 시험: services/payment-svc/test/pg-sub-provider.test.ts, services/payment-svc/test/process-config.test.ts |
+| P-T46 | ④ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ④ SEV2가 뜨고 그 채널이 대체 후보에서 빠진다 … 를 포트원형 시뮬레이터의 채널 표와 PostgreSQL로(빠진 뒤에는 전환해도 기준 결제사로 간다. 설정… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-channel-sync.test.ts 외… |
+| P-T46 | ⑤ | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토… | ⑤ 새 결제 시도가 포트원형으로 열리고 승인된다. 이 단계(PRF-203) 몫은 … 를 토스형·포트원형 시뮬레이터 둘과 PostgreSQL로 본다. 명령 12의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-sub-provider.int.test.ts, services/payment-svc/test/pg-sub-provider.test.ts |
 | P-T47 | — | 결제 결과 당기기(추천 적용 2026-10-29, ADR-0140) | 막힌 동안에도 당기기로 결제 확정이 p99 10초 [가정] 안에 끝나고, 60초 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제)이… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 5곳 |
 | P-T48 | — | 인기 회차 결제 결과의 키 단위 동시 처리(추천 적용… | 결제 확정 p99 3초 안이다. 같은 주문의 사건은 순서대로 반영되고, 소비 지연(lag)이 늘기만 하지 않는다. 통과하지 못하면 결제 토픽을 주문 키 새… | 자동 시험 | A | 시험: services/purchase-svc/test/payment-result-handler.test.ts |
 | P-T49 | ① | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ① 403 `booking-restricted`, 주문 행 0건, 두 좌석이 바로 풀려 다른 계정이 잡을 수 있다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/booking-restrictions.int.test.ts, services/purchase-svc/test-int/orders-e2e.int.test… |
@@ -198,7 +198,7 @@
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | B | 영역: apps/web, services/payment-svc, services/pg-simulator, services/purchase-svc |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | 빈칸 | B | 영역: apps/web, services/payment-svc, services/pg-simulator, services/purchase-svc |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | ID만 | B | 다른 곳 시험: tools/web-checks/static/assets.test.mjs (영역: apps/web, services/payment-svc, services/pg-simulator… |
-| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/payment-svc/test-int/payment-call-guard.int.tes… |
+| v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-channel-limit.in… |
 | v5.0.0-15.3.1 | — | L1 | 데이터 객체에서 필요한 필드만 돌려준다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-new-pause.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 4곳 |
 | v5.0.0-15.3.2 | — | L2 | 백엔드가 외부 URL을 부를 때 의도하지 않은 리디렉션을 따라가지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/portone-gateway.test.ts, services/payment-svc/test/toss-gateway.test.ts |
 | v5.0.0-15.3.3 | — | L2 | 컨트롤러·액션마다 허용 필드를 제한해 대량 할당 공격을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/http.test.ts |
@@ -217,8 +217,8 @@
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.i… |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/problem.test.ts (영역: apps/web, services/payment-svc, services/pg-simulator… |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/kms-hashers.int.test.ts, services/payment-svc/test-int/payment-call-guard.int.test.ts… |
-| v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 65곳… |
+| v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-channel-limit.in… |
 | v5.0.0-2.3.5 | — | L3 | 고가치 업무 흐름에는 여러 사람의 승인을 요구한다. | 빈칸 | B | 영역: apps/web, services/payment-svc, services/pg-simulator, services/purchase-svc |
 | v5.0.0-3.4.7 | — | L3 | CSP가 위반 보고 위치를 정한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web, services/payment-svc, services/pg-simulator… |
-| v5.0.0-13.2.6 | — | L3 | 외부 서비스 연결마다 최대 동시 연결, 한도 도달 시 동작, 연결 타임아웃, 재시도 전략 같은 문서화된 설정을 따른다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test/payment-confirm-runner… |
+| v5.0.0-13.2.6 | — | L3 | 외부 서비스 연결마다 최대 동시 연결, 한도 도달 시 동작, 연결 타임아웃, 재시도 전략 같은 문서화된 설정을 따른다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-channel-limit.in… |
 | v5.0.0-14.2.7 | — | L3 | 민감 정보에 보존 등급을 매기고, 쓸모없어진 데이터를 정한 일정이나 상황에 따라 자동으로 지운다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-confirm-runner.int.test.ts, services/payment-svc/test-int/payment-deposit.int… |

@@ -6,7 +6,7 @@ import { PINS } from './fetch-tools.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_SHARD, extractTlcTrace, judge, kstTimestamp, loadManifest, matrixFor, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resolveRun, resultRecord, runsInSimulation, safeOut, shardOf, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
+import { DEFAULT_SHARD, extractTlcTrace, goalReached, judge, kstTimestamp, loadManifest, matrixFor, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resolveRun, resultRecord, runsInSimulation, safeOut, shardOf, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -526,10 +526,12 @@ test('V-T40 이름목록_명세와 시험 명령 이름이 같고 기록이 지�
   assert.equal(m.specs[0].mbt.actions, 'test/actions.ts');
 });
 
-test('V-T40 이름목록_명세에만 있거나 시험에만 있거나 두 번 적힌 이름이 있으면 병합을 막는다', () => {
+test('V-T40 ①② 이름목록_명세에만 있거나 시험에만 있거나 두 번 적힌 이름이 있으면 병합을 막는다', () => {
   assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit'])), /명세에만: rb05/);
   assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'leave'])), /시험에만: leave/);
   assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'admit'])), /두 번: admit/);
+  // ② 명령 이름 하나를 바꾼 PR: 명세의 옛 이름과 시험의 새 이름이 함께 보인다(틀린 구현 검사로 더함)
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb5'])), /명세에만: rb05, 시험에만: rb5/);
 });
 
 test('V-T40 재생_동작 기록이 다른 명세(해시)로 만든 것이거나 목록이 없으면 다시 만들라고 거절하고, traces 명령은 해시를 보지 않는다', () => {
@@ -546,6 +548,38 @@ test('V-T40 목록_mbt는 시험 파일·기록 폴더·기록을 낼 모듈(명
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [] } }), files), /mbt는/);
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_none', traces: 2 }] } }), files), /queue_none가/);
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', traces: 0 }] } }), files), /양의 정수/);
+});
+
+test('V-T40 목록_mbt 모듈의 표본 수(samples)는 기록 수 이상의 정수이고, 목표(goal)는 명세의 val 이름이며, 둘 다 기록 목록에 적혀야 받는다(코드 리뷰 2026-11-10)', () => {
+  const ok = ['enterNumber', 'admit', 'rb05'];
+  const goalSpec = MBT_SPEC.replace('  action evKeep', '  val goal_never = true' + String.fromCharCode(10) + '  action evKeep');
+  const mods = [{ main: 'queue_ok', traces: 2, samples: 500 }, { main: 'queue_ok', traces: 1, samples: 900, goal: 'goal_never' }];
+  const files = mbtFiles(ok, goalSpec, createHash('sha256').update(goalSpec).digest('hex'), { modules: mods });
+  assert.equal(load(manifest({ mbt: { ...MBT, modules: mods } }), files).specs[0].mbt.modules.length, 2);
+  // 기록 목록에 표본 수·목표가 다르면 다시 만들라고 거절한다
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: mods } }), mbtFiles(ok, goalSpec, createHash('sha256').update(goalSpec).digest('hex'), { modules: [{ main: 'queue_ok', traces: 2 }, { main: 'queue_ok', traces: 1, samples: 900, goal: 'goal_never' }] })), /모듈 목록이/);
+  for (const bad of [1, 2.5, '600', 0]) {
+    assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', traces: 2, samples: bad }] } }), files), /samples는/);
+  }
+  for (const bad of ['goal_missing', 'bad name', 7]) {
+    assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', goal: bad, traces: 1 }] } }), files), /goal/);
+  }
+});
+
+test('V-T40 목록_목표 기록(goal)은 검사 목록에서 expect hold이고 전수 검사를 하는 모듈에만 두고, 목표에 닿았는지는 위반 표시로만 본다(코드 리뷰 2026-11-10)', () => {
+  const ok = ['enterNumber', 'admit', 'rb05'];
+  const goalSpec = MBT_SPEC.replace('  action evKeep', '  val goal_never = true' + String.fromCharCode(10) + '  action evKeep');
+  const filesFor = (mods) => mbtFiles(ok, goalSpec, createHash('sha256').update(goalSpec).digest('hex'), { modules: mods });
+  // queue_bad는 검사 목록에서 반례 변형(violate)이다
+  const onBad = [{ main: 'queue_bad', traces: 1, goal: 'goal_never' }];
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: onBad } }), filesFor(onBad)), /goal은 검사 목록에서 expect hold/);
+  const onSim = [{ main: 'queue_ok', traces: 1, goal: 'goal_never' }];
+  const simOnly = manifest({ mbt: { ...MBT, modules: onSim } });
+  simOnly.specs[0].checks[0].tlc = false;
+  assert.throws(() => load(simOnly, filesFor(onSim)), /전수 검사\(tlc\)/);
+  assert.equal(goalReached('[violation] Found an issue (12ms).'), true);
+  assert.equal(goalReached('[ok] No violation found (12ms).'), false);
+  assert.throws(() => goalReached('error: [QNT404] Name not found'), /읽지 못했다/);
 });
 
 // ---- 전수 검사를 CI 잡으로 나누기(ADR-0187) ----

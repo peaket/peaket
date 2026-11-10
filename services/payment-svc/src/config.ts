@@ -4,6 +4,7 @@ import type { SimulatorGatewayOptions } from './modules/payment/adapters/pg/simu
 import type { TossGatewayOptions } from './modules/payment/adapters/pg/toss-gateway.js';
 import { PAY_METHODS, type PayMethod, type PgName } from './modules/payment/domain/payment-gateway.js';
 import type { PgPlatformDefaults } from './modules/payment/domain/pg-selection.js';
+import { channelKeysInUse, isPortonePgProvider, type PortoneChannelMap, portoneChannelMapOf } from './modules/payment/domain/pg-sub-provider.js';
 
 /** 업무 gRPC 포트 [가정](identity-svc와 같다. BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
 export const DEFAULT_PAYMENT_GRPC_PORT = 50051;
@@ -144,6 +145,39 @@ export function loadPortoneGatewayConfig(env: Record<string, string | undefined>
   const previous = env.PEAKET_PG_PORTONE_WEBHOOK_SECRET_PREVIOUS?.trim();
   const channelKeys = portoneChannelKeysOf(env.PEAKET_PG_PORTONE_CHANNEL_KEYS);
   return { baseUrl, secret, storeId, channelKey, ...(channelKeys === undefined ? {} : { channelKeys }), webhookSecrets: previous ? [webhookSecret, previous] : [webhookSecret], isTest: test };
+}
+
+/**
+ * 포트원 채널의 하위 결제사 표를 읽는다(PEAKET_PG_PORTONE_CHANNEL_PROVIDERS: 채널 키 → 포트원 V2 PgProvider JSON, BUILD_ORDER PRF-203, docs/features/payment.md §2.2 '하위 결제사 검사의 첫 구현').
+ * 포트원 설정이 없으면 undefined다. 값은 공식 목록 가운데 하나여야 하고, 쓰지 않는 채널 키는 받지 않는다(오타). local·ci 밖에서는 쓰는 채널 키마다 값이 있어야 한다.
+ * @throws Error 포트원 설정 없이 값만 있음, JSON 객체가 아님, 쓰지 않는 키, 목록 밖이거나 빈 값, local·ci 밖에서 값이 빠진 채널(시작 실패). 글에 키·값을 싣지 않는다
+ */
+export function loadPortoneChannelMap(env: Record<string, string | undefined>, portone: Pick<PortoneGatewayOptions, 'channelKey' | 'channelKeys'> | undefined): PortoneChannelMap | undefined {
+  const raw = env.PEAKET_PG_PORTONE_CHANNEL_PROVIDERS?.trim();
+  if (portone === undefined) {
+    if (raw) throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS가 있는데 포트원 설정이 없다');
+    return undefined;
+  }
+  const inUse = channelKeysInUse(portoneChannelMapOf(portone, undefined));
+  const providers: Record<string, string> = {};
+  if (raw) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS가 JSON이 아니다');
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS는 채널 키 → 하위 결제사 객체여야 한다');
+    for (const [key, provider] of Object.entries(parsed)) {
+      if (!inUse.has(key)) throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS에 쓰지 않는 채널 키가 있다(PEAKET_PG_PORTONE_CHANNEL_KEY·PEAKET_PG_PORTONE_CHANNEL_KEYS와 맞춘다)');
+      if (typeof provider !== 'string' || !isPortonePgProvider(provider)) throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS의 값이 포트원 V2 PgProvider 목록에 없다');
+      providers[key] = provider;
+    }
+  }
+  if (env.PEAKET_ENV !== 'local' && env.PEAKET_ENV !== 'ci') {
+    for (const key of inUse) if (providers[key] === undefined) throw new Error('PEAKET_PG_PORTONE_CHANNEL_PROVIDERS에 쓰는 포트원 채널의 하위 결제사가 빠졌다(local·ci 밖에서는 채널마다 적는다)');
+  }
+  return portoneChannelMapOf(portone, providers);
 }
 
 /**

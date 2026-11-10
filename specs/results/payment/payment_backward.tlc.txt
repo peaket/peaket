@@ -8,7 +8,7 @@ State 1: <Initial predicate>
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -20,7 +20,7 @@ State 1: <Initial predicate>
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 2: <payment_backward_payment_newAttempt(1) line 1170, col 3 to line 1198, col 72 of module payment_backward>
+State 2: <payment_backward_payment_newAttempt(1) line 1181, col 3 to line 1209, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -28,7 +28,7 @@ State 2: <payment_backward_payment_newAttempt(1) line 1170, col 3 to line 1198, 
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -48,7 +48,7 @@ State 3: <payment_backward_payment_auth(1,1) line 370, col 3 to line 392, col 72
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -68,7 +68,7 @@ State 4: <payment_backward_payment_accept(1,1) line 406, col 3 to line 437, col 
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -80,7 +80,7 @@ State 4: <payment_backward_payment_accept(1,1) line 406, col 3 to line 437, col 
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 5: <payment_backward_payment_reserve(1) line 474, col 3 to line 501, col 72 of module payment_backward>
+State 5: <payment_backward_payment_reserve(1) line 474, col 3 to line 511, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -88,7 +88,7 @@ State 5: <payment_backward_payment_reserve(1) line 474, col 3 to line 501, col 7
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -100,7 +100,7 @@ State 5: <payment_backward_payment_reserve(1) line 474, col 3 to line 501, col 7
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
 
-State 6: <payment_backward_payment_command(1) line 1212, col 3 to line 1233, col 45 of module payment_backward>
+State 6: <payment_backward_payment_command(1) line 1223, col 3 to line 1261, col 68 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -108,7 +108,7 @@ State 6: <payment_backward_payment_command(1) line 1212, col 3 to line 1233, col
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -120,7 +120,7 @@ State 6: <payment_backward_payment_command(1) line 1212, col 3 to line 1233, col
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "ACCEPTED" @@ <<1, 2>> :> "NONE")
 
-State 7: <payment_backward_payment_send(1,1) line 515, col 3 to line 535, col 45 of module payment_backward>
+State 7: <payment_backward_payment_send(1,1) line 525, col 3 to line 545, col 45 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -128,7 +128,7 @@ State 7: <payment_backward_payment_send(1,1) line 515, col 3 to line 535, col 45
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -140,7 +140,7 @@ State 7: <payment_backward_payment_send(1,1) line 515, col 3 to line 535, col 45
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
 
-State 8: <payment_backward_payment_pgProcess(1,1) line 562, col 3 to line 595, col 45 of module payment_backward>
+State 8: <payment_backward_payment_pgProcess(1,1) line 572, col 3 to line 605, col 45 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -148,7 +148,7 @@ State 8: <payment_backward_payment_pgProcess(1,1) line 562, col 3 to line 595, c
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -160,7 +160,7 @@ State 8: <payment_backward_payment_pgProcess(1,1) line 562, col 3 to line 595, c
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
 
-State 9: <payment_backward_payment_respond(1,1) line 649, col 3 to line 673, col 45 of module payment_backward>
+State 9: <payment_backward_payment_respond(1,1) line 659, col 3 to line 683, col 45 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -168,7 +168,7 @@ State 9: <payment_backward_payment_respond(1,1) line 649, col 3 to line 673, col
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -180,7 +180,7 @@ State 9: <payment_backward_payment_respond(1,1) line 649, col 3 to line 673, col
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 10: <payment_backward_payment_applyResult(1,1) line 759, col 3 to line 794, col 72 of module payment_backward>
+State 10: <payment_backward_payment_applyResult(1,1) line 769, col 3 to line 804, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -188,7 +188,7 @@ State 10: <payment_backward_payment_applyResult(1,1) line 759, col 3 to line 794
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -200,7 +200,7 @@ State 10: <payment_backward_payment_applyResult(1,1) line 759, col 3 to line 794
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 11: <payment_backward_payment_issue(1) line 800, col 3 to line 824, col 72 of module payment_backward>
+State 11: <payment_backward_payment_issue(1) line 810, col 3 to line 834, col 72 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -208,7 +208,7 @@ State 11: <payment_backward_payment_issue(1) line 800, col 3 to line 824, col 72
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_backward_payment_tks = << [ tk |-> "NONE",
@@ -220,7 +220,7 @@ State 11: <payment_backward_payment_issue(1) line 800, col 3 to line 824, col 72
 /\ payment_backward_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_backward_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 
-State 12: <payment_backward_payment_issueAck(1) line 1422, col 3 to line 1476, col 68 of module payment_backward>
+State 12: <payment_backward_payment_issueAck(1) line 1450, col 3 to line 1504, col 68 of module payment_backward>
 /\ payment_backward_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 /\ payment_backward_payment_env = [ sw |-> FALSE,
   switches |-> 0,
@@ -228,7 +228,7 @@ State 12: <payment_backward_payment_issueAck(1) line 1422, col 3 to line 1476, c
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> TRUE]
+/\ payment_backward_payment_ghost = [offPg |-> FALSE, badRefund |-> TRUE, expiredCommand |-> FALSE]
 /\ payment_backward_payment_pgs = (<<1, 1>> :> "CANCELED" @@ <<2, 1>> :> "NONE")
 /\ payment_backward_payment_ord = << [ st |-> "COMPENSATED",
      apg |-> 1,

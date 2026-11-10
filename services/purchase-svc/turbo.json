@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/services/payment-svc/src/**",
+        "$TURBO_ROOT$/services/payment-svc/scripts/**",
+        "$TURBO_ROOT$/services/pg-simulator/src/**"
+      ]
+    }
+  }
+}

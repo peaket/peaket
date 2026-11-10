@@ -1,7 +1,7 @@
 Error: Invariant q_inv is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -20,8 +20,8 @@ State 1: <Initial predicate>
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
 
-State 2: <payment_unconditional_ack_payment_newAttempt(1) line 1510, col 3 to line 1559, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 2: <payment_unconditional_ack_payment_newAttempt(1) line 1523, col 3 to line 1572, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -41,7 +41,7 @@ State 2: <payment_unconditional_ack_payment_newAttempt(1) line 1510, col 3 to li
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
 
 State 3: <payment_unconditional_ack_payment_auth(1,1) line 413, col 3 to line 447, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -61,7 +61,7 @@ State 3: <payment_unconditional_ack_payment_auth(1,1) line 413, col 3 to line 44
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
 State 4: <payment_unconditional_ack_payment_accept(1,1) line 464, col 3 to line 512, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -80,8 +80,8 @@ State 4: <payment_unconditional_ack_payment_accept(1,1) line 464, col 3 to line 
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 5: <payment_unconditional_ack_payment_reserve(1) line 562, col 3 to line 601, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 5: <payment_unconditional_ack_payment_reserve(1) line 562, col 3 to line 614, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -100,8 +100,8 @@ State 5: <payment_unconditional_ack_payment_reserve(1) line 562, col 3 to line 6
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 6: <payment_unconditional_ack_payment_command(1) line 1574, col 3 to line 1606, col 54 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 6: <payment_unconditional_ack_payment_command(1) line 1587, col 3 to line 1647, col 46 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -120,8 +120,8 @@ State 6: <payment_unconditional_ack_payment_command(1) line 1574, col 3 to line 
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 7: <payment_unconditional_ack_payment_send(1,1) line 616, col 3 to line 647, col 54 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 7: <payment_unconditional_ack_payment_send(1,1) line 629, col 3 to line 660, col 54 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -140,8 +140,8 @@ State 7: <payment_unconditional_ack_payment_send(1,1) line 616, col 3 to line 64
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 
-State 8: <payment_unconditional_ack_payment_pgProcess(1,1) line 686, col 3 to line 729, col 54 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 8: <payment_unconditional_ack_payment_pgProcess(1,1) line 699, col 3 to line 742, col 54 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -160,8 +160,8 @@ State 8: <payment_unconditional_ack_payment_pgProcess(1,1) line 686, col 3 to li
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 9: <payment_unconditional_ack_payment_respond(1,1) line 808, col 3 to line 842, col 54 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 9: <payment_unconditional_ack_payment_respond(1,1) line 821, col 3 to line 855, col 54 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -180,8 +180,8 @@ State 9: <payment_unconditional_ack_payment_respond(1,1) line 808, col 3 to line
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 10: <payment_unconditional_ack_payment_applyResult(1,1) line 958, col 3 to line 1007, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 10: <payment_unconditional_ack_payment_applyResult(1,1) line 971, col 3 to line 1020, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -200,8 +200,8 @@ State 10: <payment_unconditional_ack_payment_applyResult(1,1) line 958, col 3 to
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 11: <payment_unconditional_ack_payment_issue(1) line 1013, col 3 to line 1052, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 11: <payment_unconditional_ack_payment_issue(1) line 1026, col 3 to line 1065, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -220,8 +220,8 @@ State 11: <payment_unconditional_ack_payment_issue(1) line 1013, col 3 to line 1
   canceled |-> FALSE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 12: <payment_unconditional_ack_payment_ticketSvc(1) line 1080, col 3 to line 1137, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 12: <payment_unconditional_ack_payment_ticketSvc(1) line 1093, col 3 to line 1150, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "ISSUED",
      closed |-> FALSE,
@@ -241,7 +241,7 @@ State 12: <payment_unconditional_ack_payment_ticketSvc(1) line 1080, col 3 to li
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
 State 13: <payment_unconditional_ack_payment_eventCancel line 340, col 3 to line 359, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "ISSUED",
      closed |-> FALSE,
@@ -260,8 +260,8 @@ State 13: <payment_unconditional_ack_payment_eventCancel line 340, col 3 to line
   canceled |-> TRUE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 14: <payment_unconditional_ack_payment_compStart(1) line 1298, col 3 to line 1334, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 14: <payment_unconditional_ack_payment_compStart(1) line 1311, col 3 to line 1347, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = << [ st |-> "COMPENSATING",
      apg |-> 1,
      job |-> FALSE,
@@ -284,8 +284,8 @@ State 14: <payment_unconditional_ack_payment_compStart(1) line 1298, col 3 to li
   canceled |-> TRUE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 15: <payment_unconditional_ack_payment_compFence(1) line 1340, col 3 to line 1384, col 48 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 15: <payment_unconditional_ack_payment_compFence(1) line 1353, col 3 to line 1397, col 48 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = << [ st |-> "COMPENSATING",
      apg |-> 1,
      job |-> FALSE,
@@ -308,8 +308,8 @@ State 15: <payment_unconditional_ack_payment_compFence(1) line 1340, col 3 to li
   canceled |-> TRUE ]
 /\ payment_unconditional_ack_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 16: <payment_unconditional_ack_payment_issueAck(1) line 1847, col 3 to line 1919, col 46 of module payment_unconditional_ack>
-/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+State 16: <payment_unconditional_ack_payment_issueAck(1) line 1888, col 3 to line 1960, col 46 of module payment_unconditional_ack>
+/\ payment_unconditional_ack_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_unconditional_ack_payment_ord = <<[st |-> "CONFIRMED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_unconditional_ack_payment_tks = << [ tk |-> "REVOKED",
      closed |-> TRUE,

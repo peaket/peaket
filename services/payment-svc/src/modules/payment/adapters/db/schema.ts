@@ -295,6 +295,39 @@ export const paymentEntryTrial = pgTable(
   ],
 );
 
+/** 첫 승인 호출 429로 낮춘 결제사 채널 상한(docs/data.md §2 ④, docs/features/payment.md §2 '낮춘 상한의 유지·전파·회복', BUILD_ORDER PRF-203, 마이그레이션 0013). 모든 파드가 1초 [가정]마다 읽는다 */
+export const paymentChannelLimit = pgTable(
+  'payment_channel_limit',
+  {
+    pg: text('pg').notNull(),
+    // 지금은 ALL만이다(정지 표와 같은 꼴)
+    channel: text('channel').notNull(),
+    // 처음 상한(파드당) 대비 퍼센트
+    ratioPercent: integer('ratio_percent').notNull(),
+    // 마지막으로 낮춘 시각(쓴 파드의 벽시계). 쿨다운과 낮추기 전 호출 무시의 기준
+    loweredAt: at('lowered_at').notNull(),
+    // 이 시각부터 처음 상한이다(lowered_at + 70분 [추측])
+    expiresAt: at('expires_at').notNull(),
+    version: bigint('version', { mode: 'number' }).notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pg, t.channel] }),
+    check('payment_channel_limit_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check('payment_channel_limit_channel_check', sql`${t.channel} = 'ALL'`),
+    check('payment_channel_limit_ratio_check', sql`${t.ratioPercent} BETWEEN 25 AND 99`),
+    check('payment_channel_limit_expires_check', sql`${t.expiresAt} > ${t.loweredAt}`),
+    check('payment_channel_limit_version_check', sql`${t.version} >= 1`),
+  ],
+);
+
+/** 포트원 채널의 관측 하위 결제사(결제 답의 channel.pgProvider, docs/data.md §2 ④, BUILD_ORDER PRF-203, 마이그레이션 0013). 설정 값과 다르면 그 채널을 대체 후보에서 뺀다 */
+export const paymentPgChannelObserved = pgTable('payment_pg_channel_observed', {
+  channelKey: text('channel_key').primaryKey(),
+  pgProvider: text('pg_provider').notNull(),
+  observedAt: at('observed_at').notNull(),
+});
+
 /** 웹훅 수신 기록(docs/data.md §2·§4 '웹훅 수신 기록', BUILD_ORDER HOT-150, 마이그레이션 0005). 중복만 거른다. 본문·상태를 두지 않는다 */
 export const webhookReceipt = pgTable(
   'webhook_receipt',

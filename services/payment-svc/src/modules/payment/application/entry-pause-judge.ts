@@ -223,7 +223,7 @@ export class EntryPauseJudge {
     if (!(row === undefined || row.stage === 'OPEN' || row.reason === 'CHANNEL_WAIT')) return undefined;
     try {
       const waiting = await this.deps.store.countWaitingConfirms(pg, this.deps.clock.now(), ENTRY_PAUSE_WAITING_COUNT_CAP);
-      // 채널의 초당 승인 수 = 파드당 초당 상한 × 파드 수 ÷ 승인 호출 비용(낮춘 상한은 이 파드의 값이다)
+      // 채널의 초당 승인 수 = 파드당 초당 상한 × 파드 수 ÷ 승인 호출 비용. 상한은 표 payment_channel_limit의 유효 비율을 1초 [가정] 안에 건 값이다(P-T43 ③, BUILD_ORDER PRF-203)
       const approvalsPerSecond = (guard.limits().rps * this.deps.podCount) / (gateway.capabilities().confirmCallCost ?? 1);
       return channelWaitSeconds(waiting, approvalsPerSecond);
     } catch (err) {

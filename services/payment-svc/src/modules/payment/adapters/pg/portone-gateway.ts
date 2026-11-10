@@ -63,6 +63,8 @@ export interface PortoneGatewayOptions {
   fetch?: typeof fetch;
   /** 조회(GET) 전용 연결 묶음의 fetch. 없으면 fetch를 쓴다 */
   queryFetch?: typeof fetch;
+  /** 승인 뒤 조회·단독 조회의 200 답에서 읽은 channel(키·하위 결제사)을 받는다(하위 결제사 대조, BUILD_ORDER PRF-203). 던져도 답을 바꾸지 않는다 */
+  onChannel?: (c: { readonly key?: string; readonly pgProvider: string }) => void;
 }
 
 /** 승인 200·이미 결제됨 뒤따르는 조회의 시간 상한 10초 [가정](단독 조회 한도와 같다) */
@@ -195,8 +197,10 @@ export class PortoneGateway implements PaymentGatewayPort {
   readonly #confirmBudgetMs: number;
   readonly #followUpTimeoutMs: number;
   readonly #callsPerSecond: number;
+  readonly #onChannel: PortoneGatewayOptions['onChannel'];
 
   constructor(o: PortoneGatewayOptions) {
+    this.#onChannel = o.onChannel;
     this.#clock = o.clock ?? systemClock;
     this.#readTimeoutMs = o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS;
     this.#confirmBudgetMs = o.confirmBudgetMs ?? CONFIRM_CALL_BUDGET_MS;
@@ -422,6 +426,7 @@ export class PortoneGateway implements PaymentGatewayPort {
     const method = METHOD_CATEGORY.get(str(paymentMethod?.type) ?? '');
     const card = portoneCardOfMethod(paymentMethod);
     const virtualAccount = status === 'WAITING_FOR_DEPOSIT' ? portoneVirtualAccountOf(paymentMethod) : undefined;
+    this.#reportChannel(json?.channel);
     return {
       kind: 'FOUND',
       paymentRef,
@@ -434,6 +439,19 @@ export class PortoneGateway implements PaymentGatewayPort {
       ...(card ? { card } : {}),
       ...(virtualAccount ? { virtualAccount } : {}),
     };
+  }
+
+  /** 이 결제의 답이 맞은 뒤에만 부른다(다른 결제의 답은 알리지 않는다). 하위 결제사 글이 없으면 알리지 않는다 */
+  #reportChannel(channel: unknown): void {
+    if (this.#onChannel === undefined || typeof channel !== 'object' || channel === null) return;
+    const pgProvider = str((channel as { pgProvider?: unknown }).pgProvider);
+    if (!pgProvider) return;
+    const key = str((channel as { key?: unknown }).key);
+    try {
+      this.#onChannel({ ...(key ? { key } : {}), pgProvider });
+    } catch {
+      // 관측이 결제 답을 바꾸지 않는다
+    }
   }
 
   #approvedFields(paymentRef: string, q: Found): Omit<ConfirmResult, 'outcome'> {

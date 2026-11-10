@@ -28,14 +28,14 @@ State 1: <Initial predicate>
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0] @@ <<2, 1>> :> [st |-> "NONE", pg |-> 0])
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
   <<1, 2>> :> "NONE" @@
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 2: <payment_canon_payment_newAttempt(1) line 1138, col 3 to line 1162, col 66 of module payment_canon>
+State 2: <payment_canon_payment_newAttempt(1) line 1149, col 3 to line 1173, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -63,7 +63,7 @@ State 2: <payment_canon_payment_newAttempt(1) line 1138, col 3 to line 1162, col
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
@@ -99,7 +99,7 @@ State 3: <payment_canon_payment_auth(1,1) line 360, col 3 to line 379, col 66 of
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
@@ -135,7 +135,7 @@ State 4: <payment_canon_payment_accept(1,1) line 393, col 3 to line 423, col 66 
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
@@ -143,7 +143,7 @@ State 4: <payment_canon_payment_accept(1,1) line 393, col 3 to line 423, col 66 
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 485, col 66 of module payment_canon>
+State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 495, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -171,7 +171,7 @@ State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 485, col 66 o
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
@@ -179,7 +179,7 @@ State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 485, col 66 o
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 6: <payment_canon_payment_command(1) line 1176, col 3 to line 1196, col 42 of module payment_canon>
+State 6: <payment_canon_payment_command(1) line 1187, col 3 to line 1224, col 62 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -207,7 +207,7 @@ State 6: <payment_canon_payment_command(1) line 1176, col 3 to line 1196, col 42
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "ACCEPTED" @@
@@ -215,7 +215,7 @@ State 6: <payment_canon_payment_command(1) line 1176, col 3 to line 1196, col 42
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 7: <payment_canon_payment_send(1,1) line 499, col 3 to line 518, col 42 of module payment_canon>
+State 7: <payment_canon_payment_send(1,1) line 509, col 3 to line 528, col 42 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> TRUE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -243,7 +243,7 @@ State 7: <payment_canon_payment_send(1,1) line 499, col 3 to line 518, col 42 of
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "SENT" @@
@@ -251,7 +251,7 @@ State 7: <payment_canon_payment_send(1,1) line 499, col 3 to line 518, col 42 of
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 8: <payment_canon_payment_pgProcess(1,1) line 545, col 3 to line 574, col 42 of module payment_canon>
+State 8: <payment_canon_payment_pgProcess(1,1) line 555, col 3 to line 584, col 42 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -279,7 +279,7 @@ State 8: <payment_canon_payment_pgProcess(1,1) line 545, col 3 to line 574, col 
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "SENT" @@
@@ -287,7 +287,7 @@ State 8: <payment_canon_payment_pgProcess(1,1) line 545, col 3 to line 574, col 
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 9: <payment_canon_payment_respond(1,1) line 628, col 3 to line 650, col 42 of module payment_canon>
+State 9: <payment_canon_payment_respond(1,1) line 638, col 3 to line 660, col 42 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -315,7 +315,7 @@ State 9: <payment_canon_payment_respond(1,1) line 628, col 3 to line 650, col 42
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -323,7 +323,7 @@ State 9: <payment_canon_payment_respond(1,1) line 628, col 3 to line 650, col 42
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 10: <payment_canon_payment_applyResult(1,1) line 735, col 3 to line 767, col 66 of module payment_canon>
+State 10: <payment_canon_payment_applyResult(1,1) line 745, col 3 to line 777, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -351,7 +351,7 @@ State 10: <payment_canon_payment_applyResult(1,1) line 735, col 3 to line 767, c
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -359,7 +359,7 @@ State 10: <payment_canon_payment_applyResult(1,1) line 735, col 3 to line 767, c
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 11: <payment_canon_payment_issue(1) line 773, col 3 to line 795, col 66 of module payment_canon>
+State 11: <payment_canon_payment_issue(1) line 783, col 3 to line 805, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -387,7 +387,7 @@ State 11: <payment_canon_payment_issue(1) line 773, col 3 to line 795, col 66 of
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -395,7 +395,7 @@ State 11: <payment_canon_payment_issue(1) line 773, col 3 to line 795, col 66 of
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 12: <payment_canon_payment_ticketSvc(1) line 823, col 3 to line 866, col 66 of module payment_canon>
+State 12: <payment_canon_payment_ticketSvc(1) line 833, col 3 to line 876, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -423,7 +423,7 @@ State 12: <payment_canon_payment_ticketSvc(1) line 823, col 3 to line 866, col 6
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -459,7 +459,7 @@ State 13: <payment_canon_payment_eventCancel line 307, col 3 to line 318, col 66
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -467,7 +467,7 @@ State 13: <payment_canon_payment_eventCancel line 307, col 3 to line 318, col 66
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 14: <payment_canon_payment_compStart(1) line 974, col 3 to line 996, col 66 of module payment_canon>
+State 14: <payment_canon_payment_compStart(1) line 984, col 3 to line 1006, col 66 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -499,7 +499,7 @@ State 14: <payment_canon_payment_compStart(1) line 974, col 3 to line 996, col 6
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
@@ -507,7 +507,7 @@ State 14: <payment_canon_payment_compStart(1) line 974, col 3 to line 996, col 6
   <<2, 1>> :> "NONE" @@
   <<2, 2>> :> "NONE" )
 
-State 15: <payment_canon_payment_compCancel(1) line 1295, col 3 to line 1319, col 62 of module payment_canon>
+State 15: <payment_canon_payment_compCancel(1) line 1323, col 3 to line 1347, col 62 of module payment_canon>
 /\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
   <<1, 2>> :> FALSE @@
   <<2, 1>> :> FALSE @@
@@ -539,7 +539,7 @@ State 15: <payment_canon_payment_compCancel(1) line 1295, col 3 to line 1319, co
      req |-> FALSE,
      wait |-> "NONE",
      broken |-> FALSE ] >>
-/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE, expiredCommand |-> FALSE]
 /\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
   <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
 /\ payment_canon_payment_pay = ( <<1, 1>> :> "CANCELED" @@

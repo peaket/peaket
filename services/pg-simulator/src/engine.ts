@@ -69,6 +69,8 @@ interface Payment {
   /** 포트원 모양 결제의 결제 토큰과 결제 시도 ID(결제창 인증이 준다) */
   portoneToken?: string;
   txId?: string;
+  /** 포트원 결제창이 받은 채널 키(답의 channel, BUILD_ORDER PRF-203) */
+  channelKey?: string;
   /** 결제창에서 고른 결제 수단(없으면 카드) */
   method?: SimPayMethod;
   /** 결제창에서 고른 시험 카드. null이면 카드 정보가 없다(없으면 합성 카드) */
@@ -235,7 +237,7 @@ export class PgSimulatorEngine {
   }
 
   /** 포트원 모양 결제창 인증. 결제 ID는 pay-{주문 ID}이고 같은 주문을 다시 인증하면 앞 시도를 대체한다(성공은 한 번). 승인된 주문은 다시 인증할 수 없다 */
-  authenticatePortone(a: { orderId: string; amount: number; orderName?: string } & SimInstrument): SimResponse {
+  authenticatePortone(a: { orderId: string; amount: number; orderName?: string; channelKey?: string } & SimInstrument): SimResponse {
     if (!ORDER_ID.test(a.orderId) || !Number.isSafeInteger(a.amount) || a.amount <= 0) return err(400, 'INVALID_REQUEST', '주문 ID나 금액이 틀렸습니다');
     if (this.approvedByOrder.has(a.orderId)) return err(400, 'DUPLICATED_ORDER_ID', '이미 승인된 주문 ID입니다');
     const paymentKey = `pay-${a.orderId}`;
@@ -254,6 +256,7 @@ export class PgSimulatorEngine {
       serial,
       portoneToken,
       txId,
+      ...(a.channelKey === undefined ? {} : { channelKey: a.channelKey }),
       ...instrumentOf(a),
     });
     return { status: 200, body: { paymentId: paymentKey, paymentToken: portoneToken, txId, orderId: a.orderId, amount: a.amount } };
@@ -629,6 +632,7 @@ export class PgSimulatorEngine {
         : null,
       lastTransactionKey: p.lastTransactionKey ?? null,
       ...(p.txId === undefined ? {} : { txId: p.txId }),
+      ...(p.channelKey === undefined ? {} : { portoneChannelKey: p.channelKey }),
     };
   }
 }

@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, SIM_PAY_METHODS, type Fault, type SeedTransaction, type SimInstrument, type SimResponse } from './engine.js';
 import { parseLatencySpec, type LatencySpec } from './latency.js';
-import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneTransactionView, portoneWebhookEvents } from './portone-shape.js';
+import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, type PortoneChannelTable, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneTransactionView, portoneWebhookEvents } from './portone-shape.js';
 import type { SimClock } from './time.js';
 
 export interface SimulatorAppOptions {
@@ -17,10 +17,15 @@ export interface SimulatorAppOptions {
   confirmLatency?: LatencySpec;
   /** 포트원 모양 웹훅 서명 시크릿(whsec_ + base64). 없으면 시험 키에서 만든다 */
   portoneWebhookSecret?: string;
+  /** 포트원 채널 표(채널 키 → 하위 결제사, BUILD_ORDER PRF-203). 제어 API PUT /sim/portone/channels로 바꾼다. 표에 없는 키는 SIMULATOR다 */
+  portoneChannels?: Readonly<Record<string, string>>;
 }
 
 export type SimulatorApp = FastifyInstance;
 
+/** 포트원 채널 키와 하위 결제사 값(시뮬레이터가 받는 모양, BUILD_ORDER PRF-203) */
+const CHANNEL_KEY = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,100}$' } as const;
+const PG_PROVIDER = { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,39}$' } as const;
 const PAYMENT_ID_PARAM = { type: 'object', required: ['paymentId'], properties: { paymentId: { type: 'string', minLength: 1, maxLength: 200 } } } as const;
 
 const KEY_PARAM = { type: 'object', required: ['paymentKey'], properties: { paymentKey: { type: 'string', minLength: 1, maxLength: 200 } } } as const;
@@ -43,6 +48,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   const expected = Buffer.from(`Basic ${Buffer.from(`${o.secretKey}:`).toString('base64')}`);
   const expectedPortone = Buffer.from(`PortOne ${o.secretKey}`);
   const portoneWebhookSecret = o.portoneWebhookSecret ?? defaultPortoneWebhookSecret(o.secretKey);
+  let portoneChannels: PortoneChannelTable = new Map(Object.entries(o.portoneChannels ?? {}));
   const app = Fastify({ logger: false });
   const isPortone = (req: FastifyRequest) => req.url.startsWith('/payments/') || req.url.startsWith('/payments-by-cursor');
 
@@ -153,7 +159,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   app.get<{ Params: { paymentId: string }; Querystring: { storeId?: string } }>(
     '/payments/:paymentId',
     { schema: { params: PAYMENT_ID_PARAM, querystring: { type: 'object', additionalProperties: false, properties: { storeId: { type: 'string', maxLength: 200 } } } } },
-    async (req, reply) => (wrongStore(req.query.storeId, reply) ? reply : send(req, reply, portoneQueryResponse(await engine.query(req.params.paymentId)))),
+    async (req, reply) => (wrongStore(req.query.storeId, reply) ? reply : send(req, reply, portoneQueryResponse(await engine.query(req.params.paymentId), portoneChannels))),
   );
   app.post<{ Params: { paymentId: string }; Body: { reason: string; amount?: number; currentCancellableAmount?: number; storeId?: string } }>(
     '/payments/:paymentId/cancel',
@@ -184,7 +190,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     async (req) => {
       if (req.query.storeId !== undefined && req.query.storeId !== PORTONE_STORE_ID) return { items: [] };
       const page = engine.portonePaymentsByCursor({ from: req.query.from, until: req.query.until, size: req.query.size ?? 1000, ...(req.query.cursor === undefined ? {} : { cursor: req.query.cursor }) });
-      return { items: page.items.map(portoneTransactionView), ...(page.cursor === undefined ? {} : { cursor: page.cursor }) };
+      return { items: page.items.map((v) => portoneTransactionView(v, portoneChannels)), ...(page.cursor === undefined ? {} : { cursor: page.cursor }) };
     },
   );
 
@@ -210,14 +216,23 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     },
     async (req) => ({ inserted: engine.seedTransactions(req.body.items) }),
   );
-  app.post<{ Body: { orderId: string; amount: number; orderName?: string } & SimInstrument }>(
+  app.post<{ Body: { orderId: string; amount: number; orderName?: string; channelKey?: string } & SimInstrument }>(
     '/sim/portone/authenticate',
     {
       schema: {
-        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 }, ...INSTRUMENT } },
+        body: { type: 'object', required: ['orderId', 'amount'], additionalProperties: false, properties: { orderId: ORDER, amount: AMOUNT, orderName: { type: 'string', minLength: 1, maxLength: 100 }, channelKey: CHANNEL_KEY, ...INSTRUMENT } },
       },
     },
     async (req, reply) => send(req, reply, portoneAuthenticateResponse(engine.authenticatePortone(req.body))),
+  );
+  // 포트원 채널 표를 바꾼다(채널 키 → 하위 결제사, BUILD_ORDER PRF-203). 이미 인증한 결제의 답에도 새 표가 실린다
+  app.put<{ Body: { channels: Record<string, string> } }>(
+    '/sim/portone/channels',
+    { schema: { body: { type: 'object', required: ['channels'], additionalProperties: false, properties: { channels: { type: 'object', maxProperties: 50, propertyNames: CHANNEL_KEY, additionalProperties: PG_PROVIDER } } } } },
+    async (req, reply) => {
+      portoneChannels = new Map(Object.entries(req.body.channels));
+      return reply.code(204).send();
+    },
   );
   app.get<{ Querystring: { paymentId?: string } }>(
     '/sim/portone/webhooks',

@@ -57,7 +57,10 @@ export function mbtActions(src) {
   return [...m[1].replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'|"([^"]+)"/g)].map((x) => x[1] ?? x[2]);
 }
 
-// mbt: { actions: 시험 명령 이름 파일, traces: 재생용 동작 기록 폴더, modules: [{ main, traces: 기록 수 }] }.
+// mbt: { actions: 시험 명령 이름 파일, traces: 재생용 동작 기록 폴더, modules: [{ main, traces: 기록 수, samples?: 표본 수, goal?: 목표 상태 val }] }.
+// samples는 기록을 고를 지켜짐 시뮬레이션의 표본 수다(없으면 기록 수와 같다). Quint는 표본 가운데 위반이 없는 것은 긴 것부터 n-traces개를 남기므로
+// (quint 0.33.1 runtime/trace.js compareTracesByQuality), 표본을 기록 수보다 많이 두면 흐름 끝까지 간 긴 기록이 남는다(추천 적용 2026-11-10, BUILD_ORDER PRF-210, 코드 리뷰).
+// 긴 길에 늘 밀리는 짧은 끝은 goal(명세의 val, '그 끝에 닿지 않음')을 불변식으로 돌려 깨는 기록을 남긴다(위반 기록은 짧은 것부터 남는다). 위반이 없으면 실패다
 // 이름 목록이 다르면 명세가 바뀌었는데 시험이 따라가지 않은 것이라 병합을 막는다(이름만 같고 뜻이 다른 것은 재생 시험이 잡는다)
 function checkMbt(s, src, readFile, fail, { traceHash = true } = {}) {
   const mb = s.mbt;
@@ -66,6 +69,12 @@ function checkMbt(s, src, readFile, fail, { traceHash = true } = {}) {
   }
   for (const x of mb.modules) {
     if (!NAME.test(x?.main ?? '') || !Number.isInteger(x.traces) || x.traces <= 0) fail(`${s.name}: mbt.modules는 { main: 모듈, traces: 양의 정수 } 목록이다`);
+    if (x.samples !== undefined && (!Number.isInteger(x.samples) || x.samples < x.traces)) fail(`${s.name}: mbt.modules ${x.main}의 samples는 traces(${x.traces}) 이상의 정수다`);
+    if (x.goal !== undefined && (!NAME.test(x.goal) || !new RegExp(`^\\s*val\\s+${x.goal}\\s*=`, 'm').test(src))) fail(`${s.name}: mbt.modules ${x.main}의 goal(${x.goal})은 ${s.file}의 val 이름이다`);
+    // 목표 기록은 지켜짐을 전수 검사로 본 모듈에서만 남긴다(기록이 불변식을 깨지 않는 길이라는 근거, 코드 리뷰 2026-11-10)
+    if (x.goal !== undefined && !(s.checks ?? []).some((c) => c.main === x.main && c.expect === 'hold' && c.tlc !== false && c.temporal === undefined)) {
+      fail(`${s.name}: mbt.modules ${x.main}의 goal은 검사 목록에서 expect hold이고 전수 검사(tlc)를 하는 모듈에만 둔다`);
+    }
     if (!new RegExp(`^\\s*module\\s+${x.main}\\s*\\{`, 'm').test(src)) fail(`${s.name}: mbt 모듈 ${x.main}가 ${s.file}에 없다`);
   }
   let have;
@@ -93,8 +102,19 @@ function checkMbt(s, src, readFile, fail, { traceHash = true } = {}) {
   if (man.specSha256 !== sha256(src)) fail(`${s.name}: 재생용 동작 기록(${mb.traces})이 지금 명세로 만든 것이 아니다. ${again}`);
   // 기록 형식(mbt::)은 Quint의 실험 기능이라 판이 바뀌면 다시 만들고 재생이 읽는지 본다(docs/verification.md §2.4)
   if (man.quint !== PINS.quint) fail(`${s.name}: 재생용 동작 기록을 Quint ${man.quint}로 만들었다(지금 ${PINS.quint}). ${again}`);
-  if (JSON.stringify(man.modules) !== JSON.stringify(mb.modules.map(({ main, traces }) => ({ main, traces })))) fail(`${s.name}: 재생용 동작 기록의 모듈 목록이 specs.json의 mbt.modules와 다르다. ${again}`);
+  if (JSON.stringify(man.modules) !== JSON.stringify(mbtModules(mb))) fail(`${s.name}: 재생용 동작 기록의 모듈 목록이 specs.json의 mbt.modules와 다르다. ${again}`);
 }
+
+/**
+ * 목표 기록 시뮬레이션의 출력이 목표에 닿았는가: 위반 표시([violation] Found an issue)가 있어야 참이고, 위반 없음은 거짓이다.
+ * 둘 다 아닌 출력(오류 등)은 던진다(위반 없음이 안 보인다는 것만으로 받지 않는다, 코드 리뷰 2026-11-10)
+ */
+export function goalReached(out) {
+  return parseSimulation(out).violated;
+}
+
+/** 기록 목록(manifest.json)에 적는 모듈 칸: 기록 수와 표본 수(적었을 때만. 없으면 표본 수는 기록 수다) */
+const mbtModules = (mb) => mb.modules.map(({ main, traces, samples, goal }) => ({ main, traces, ...(samples === undefined ? {} : { samples }), ...(goal === undefined ? {} : { goal }) }));
 
 /** specs/specs.json을 읽고 명세 파일과 맞는지 본다. readFile(경로)는 저장소 기준 경로를 받는다. traceHash가 거짓이면 재생용 기록의 명세 해시를 보지 않는다 */
 export function loadManifest(text, readFile, { traceHash = true } = {}) {
@@ -511,12 +531,16 @@ function writeTraces(m, s) {
   for (const f of readdirSync(dir)) if (f.endsWith('.itf.json')) rmSync(join(dir, f));
   const files = [];
   for (const x of mb.modules) {
-    const out = `${mb.traces}/${x.main}_{seq}.itf.json`;
-    const r = quint(['run', s.file, `--main=${x.main}`, '--invariants', ...s.invariants, `--max-samples=${x.traces}`, `--n-traces=${x.traces}`,
+    const base = x.goal ? `${x.main}_${x.goal}` : x.main;
+    const out = `${mb.traces}/${base}_{seq}.itf.json`;
+    const invariants = x.goal ? ['--invariant', x.goal] : ['--invariants', ...s.invariants];
+    const r = quint(['run', s.file, `--main=${x.main}`, ...invariants, `--max-samples=${x.samples ?? x.traces}`, `--n-traces=${x.traces}`,
       `--max-steps=${m.simulation.maxSteps}`, `--seed=${m.simulation.seed}`, '--n-threads=1', '--mbt', `--out-itf=${out}`, '--verbosity=2'], { allowFail: true });
-    if (!/No violation found/.test(r.out)) throw new Error(`${s.name}/${x.main}: 지켜짐 시뮬레이션이 아니다(기록을 남기지 않는다):\n${r.out.slice(-2000)}`);
+    if (x.goal) {
+      if (!goalReached(r.out)) throw new Error(`${s.name}/${x.main}: 목표 ${x.goal}에 닿은 기록이 없다(표본을 늘린다):\n${r.out.slice(-2000)}`);
+    } else if (!/No violation found/.test(r.out)) throw new Error(`${s.name}/${x.main}: 지켜짐 시뮬레이션이 아니다(기록을 남기지 않는다):\n${r.out.slice(-2000)}`);
     // queue_proposed_가 queue_proposed_full_*까지 잡지 않게 번호만 붙은 이름으로 고른다
-    const own = new RegExp(`^${x.main}_\\d+\\.itf\\.json$`);
+    const own = new RegExp(`^${base}_\\d+\\.itf\\.json$`);
     const made = readdirSync(dir).filter((f) => own.test(f)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
     if (made.length !== x.traces) throw new Error(`${s.name}/${x.main}: 동작 기록이 ${x.traces}개가 아니라 ${made.length}개 생겼다`);
     files.push(...made);
@@ -527,7 +551,7 @@ function writeTraces(m, s) {
     spec: s.file,
     specSha256: createHash('sha256').update(readFileSync(join(REPO, s.file))).digest('hex'),
     quint: PINS.quint,
-    modules: mb.modules.map(({ main, traces }) => ({ main, traces })),
+    modules: mbtModules(mb),
     seed: m.simulation.seed,
     maxSteps: m.simulation.maxSteps,
     files,
