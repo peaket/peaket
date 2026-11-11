@@ -15,7 +15,6 @@ import { buildSimulatorApp } from '@peaket/pg-simulator';
 import { createDatabase, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePayment } from '../scripts/migrate.mjs';
-import { freePort } from './kafka.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { failure, issuedSecrets, ledgerOf, newId, outcomeCount, paymentClient, type PaymentClient, portoneConfirm, tossConfirm, unary, until } from './support.js';
 
@@ -58,11 +57,19 @@ function build(): void {
   built = true;
 }
 
+interface Ports {
+  appPort: number;
+  managementPort: number;
+  grpcPort: number;
+}
+
 interface Running {
   child: ChildProcess;
   /** 표준 출력·오류를 받은 차례대로 이은 글 */
   output: () => string;
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  /** 자식이 알린 실제 포트(PORT=0 등). 시작에 실패해 끝나면 undefined */
+  ports: Promise<Ports | undefined>;
 }
 
 /** dist/main.js를 운영 시작 명령 그대로 띄운다 */
@@ -78,7 +85,16 @@ function spawnMain(env: Record<string, string | undefined>): Running {
   child.stdout!.on('data', (d) => (text += String(d)));
   child.stderr!.on('data', (d) => (text += String(d)));
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
-  return { child, output: () => text, exited };
+  let resolvePorts!: (p: Ports | undefined) => void;
+  const ports = new Promise<Ports | undefined>((resolve) => (resolvePorts = resolve));
+  child.on('message', (m) => {
+    if (m !== null && typeof m === 'object' && (m as { type?: string }).type === 'peaket-ports') {
+      const { appPort, managementPort, grpcPort } = m as Ports & { type: string };
+      resolvePorts({ appPort, managementPort, grpcPort });
+    }
+  });
+  void exited.then(() => resolvePorts(undefined));
+  return { child, output: () => text, exited, ports };
 }
 
 interface Service extends Running {
@@ -92,18 +108,21 @@ interface Service extends Running {
 let started: Promise<Service> | undefined;
 
 async function startService(extra: Record<string, string> = {}): Promise<Service> {
-  const [appPort, managementPort, grpcPort] = [await freePort(), await freePort(), await freePort()];
   const running = spawnMain({
     PEAKET_DATABASE_URL: pgc!.url,
-    PORT: String(appPort),
-    PEAKET_MANAGEMENT_PORT: String(managementPort),
+    PORT: '0',
+    PEAKET_MANAGEMENT_PORT: '0',
     PEAKET_GRPC_HOST: '127.0.0.1',
-    PEAKET_GRPC_PORT: String(grpcPort),
+    PEAKET_GRPC_PORT: '0',
     PEAKET_LOG_LEVEL: 'info',
     ...extra,
   });
   let gone: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   void running.exited.then((e) => (gone = e));
+  // 포트 0으로 띄우고 자식이 알린 실제 포트를 쓴다(고정·빈 포트 재사용 경합을 없앤다)
+  const ports = await Promise.race([running.ports, running.exited.then(() => undefined)]);
+  if (!ports) throw new Error(`프로세스가 일찍 끝났다(${JSON.stringify(gone)}): ${running.output().slice(-2000)}`);
+  const { appPort, managementPort, grpcPort } = ports;
   const live = async () => {
     if (gone) throw new Error(`프로세스가 일찍 끝났다(${JSON.stringify(gone)}): ${running.output().slice(-2000)}`);
     try {

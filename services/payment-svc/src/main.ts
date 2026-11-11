@@ -5,4 +5,6 @@
 import { start } from './start.js';
 
 const service = await start({ env: process.env });
+// 시험 대역이 PORT=0·PEAKET_MANAGEMENT_PORT=0·PEAKET_GRPC_PORT=0으로 띄웠을 때 실제로 연 포트를 부모에 알린다(운영에는 IPC 채널이 없다)
+if (process.send) process.send({ type: 'peaket-ports', ...service.ports });
 process.once('SIGTERM', () => void service.close());

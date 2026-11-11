@@ -652,9 +652,9 @@ export function startMockApi({
       return;
     }
     // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
-    // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다
-    const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin || req.headers.origin === partnerOrigin;
-    const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After, ETag', vary: 'Origin' } : {};
+    // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다. 응답에는 요청 헤더가 아니라 허용 목록의 상수를 쓴다(CodeQL js/reflected-xss)
+    const allowedOrigin = [webOrigin, queueRoomOrigin, partnerOrigin].find((o) => o === req.headers.origin);
+    const cors = allowedOrigin ? { 'access-control-allow-origin': allowedOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After, ETag', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
       // 문자열을 그대로 res.end에 넘기지 않는다(반사 XSS). JSON은 객체에서 만들고, 그림은 Buffer로 받는다(CodeQL js/reflected-xss)

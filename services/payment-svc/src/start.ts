@@ -96,6 +96,8 @@ export interface StartOptions {
 export interface StartedService {
   /** 종료 차례대로 닫는다. 여러 번 불러도 한 번만 닫고 같은 약속을 돌려준다 */
   close(): Promise<void>;
+  /** 실제로 연 포트(PORT·PEAKET_MANAGEMENT_PORT·PEAKET_GRPC_PORT=0일 때 시험이 읽는다) */
+  ports: { appPort: number; managementPort: number; grpcPort: number };
 }
 
 export async function start(o: StartOptions): Promise<StartedService> {
@@ -227,7 +229,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   service.readiness.register('grpc');
   if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
-  await service.listen();
+  const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,
     port: config.grpcPort,
@@ -290,5 +292,5 @@ export async function start(o: StartOptions): Promise<StartedService> {
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
     });
   };
-  return { close: () => (closing ??= shutdown()) };
+  return { close: () => (closing ??= shutdown()), ports: { appPort: httpPorts.port, managementPort: httpPorts.managementPort, grpcPort: grpc.port } };
 }

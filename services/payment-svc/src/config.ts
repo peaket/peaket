@@ -51,12 +51,12 @@ export interface PaymentServiceConfig {
 
 /**
  * 환경 값을 읽는다.
- * @throws Error PEAKET_DATABASE_URL이 없음, PEAKET_GRPC_PORT가 1~65535 정수가 아님(시작 실패)
+ * @throws Error PEAKET_DATABASE_URL이 없음, PEAKET_GRPC_PORT가 1~65535 정수가 아님(시작 실패. local·ci에서는 0=빈 포트 허용)
  */
 export function loadPaymentServiceConfig(env: Record<string, string | undefined>): PaymentServiceConfig {
   const databaseUrl = env.PEAKET_DATABASE_URL;
   if (!databaseUrl) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
-  return { databaseUrl, grpcHost: env.PEAKET_GRPC_HOST ?? '0.0.0.0', grpcPort: grpcPortOf(env.PEAKET_GRPC_PORT) };
+  return { databaseUrl, grpcHost: env.PEAKET_GRPC_HOST ?? '0.0.0.0', grpcPort: grpcPortOf(env.PEAKET_GRPC_PORT, isTestEnv(env)) };
 }
 
 /**
@@ -322,9 +322,9 @@ function isTestEnv(env: Record<string, string | undefined>): boolean {
   return TEST_ENVS.has(env.PEAKET_ENV ?? '');
 }
 
-function grpcPortOf(raw: string | undefined): number {
+function grpcPortOf(raw: string | undefined, allowZero: boolean): number {
   if (raw === undefined) return DEFAULT_PAYMENT_GRPC_PORT;
   const port = Number(raw);
-  if (!/^[0-9]+$/.test(raw) || port < 1 || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
+  if (!/^[0-9]+$/.test(raw) || port < (allowZero ? 0 : 1) || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
   return port;
 }
