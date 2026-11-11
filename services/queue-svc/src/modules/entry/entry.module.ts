@@ -1,6 +1,6 @@
 // 모듈 조립 파일: 진입 포트에 어댑터를 묶는다.
 import { type DynamicModule, Module } from '@nestjs/common';
-import { CLOCK, type Clock, type HotRedis } from '@peaket/platform';
+import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis } from '@peaket/platform';
 import { MemoryEntryStore, MemoryEventSchedules, MemoryShuffleCommits } from './adapters/memory-entry-store.js';
 import { QUEUE_REDIS, QUEUE_WAIT_REDIS, RedisEntryStore, RedisShuffleCommits } from './adapters/redis-entry-store.js';
 import { RedisEventSchedules } from './adapters/redis-event-schedules.js';
@@ -34,6 +34,8 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   degradedLimits?: DegradedLimits;
   /** 판매 자격 대조 지표(ADR-0265 결정 9). 없으면 세지 않는다 */
   eligibilitySignals?: EligibilitySignals;
+  /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 };
 
 @Module({})
@@ -72,6 +74,7 @@ export class EntryModule {
         { provide: QUEUE_TOKENS, useValue: o.tokens },
         { provide: RISK, useValue: o.risk },
         { provide: ENTRY_OPTIONS, useValue: { ...DEFAULT_ENTRY_OPTIONS, ...o.options } },
+        ...(o.hotPath ? [{ provide: HOT_PATH_METRICS, useValue: o.hotPath }] : []),
         { provide: SEED_SEALER, useValue: o.sealer ?? noSealer },
         ...(o.lobbySignals ? [{ provide: LOBBY_SIGNALS, useValue: o.lobbySignals }] : []),
         ...(o.degradedLimits ? [{ provide: DEGRADED_LIMITS, useValue: o.degradedLimits }] : []),

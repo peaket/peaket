@@ -2,7 +2,7 @@
 // 주문 생성 POST /v1/orders와 결제 접수 POST /v1/orders/{orderId}/payment-acceptance다. purchase DB가 없이 뜬 파드는 이 모듈을 넣지 않는다
 // (주문 경로를 열지 않는다, payment §2 '넘긴 것').
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { CLOCK, type Clock, type HotPathMetrics, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { LoggerOrderLog } from './adapters/order-log.js';
 import { AcceptPayment } from './application/accept-payment.js';
 import { CreateOrder } from './application/create-order.js';
@@ -90,6 +90,8 @@ export interface BookingModuleDeps {
     /** 없으면 서비스 로거의 LoggerOrderLog */
     log?: StartPaymentLog;
   };
+  /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 @Module({})
@@ -107,7 +109,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, hotPath, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -138,7 +140,8 @@ export class BookingModule {
       ? [
           {
             provide: GetPaymentStatus,
-            useFactory: (platformClock: Clock) => new GetPaymentStatus({ reads: paymentStatus.reads, waiters: paymentStatus.waiters, clock: clock ?? platformClock, ...(paymentStatus.deposits ? { deposits: paymentStatus.deposits } : {}) }),
+            useFactory: (platformClock: Clock) =>
+              new GetPaymentStatus({ reads: paymentStatus.reads, waiters: paymentStatus.waiters, clock: clock ?? platformClock, ...(paymentStatus.deposits ? { deposits: paymentStatus.deposits } : {}), ...(hotPath ? { hotPath } : {}) }),
             inject: [CLOCK],
           },
         ]

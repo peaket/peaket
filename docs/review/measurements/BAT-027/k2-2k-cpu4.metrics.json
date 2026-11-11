@@ -1,0 +1,91 @@
+{
+  "run": "2026-11-11-k2-v1-hot-2k-cpu4-instrumented",
+  "condition": "v1 bundle 3 replicas, CPU request/limit 4, memory 512Mi, Redis TLS on, K2 hot seat 1, users 1000, rate 2000/s, keep, warm 30s/main 60s, generators 4",
+  "startedAt": "2026-11-11T11:47:27.411+09:00",
+  "endedAt": "2026-11-11T11:51:47.765+09:00",
+  "mainWindow": "2026-11-11T11:48:30+09:00/2026-11-11T11:49:30+09:00",
+  "k6": {
+    "hold_requests": 120000,
+    "p99_ms": 47.54491008,
+    "p99_9_ms": 81.35666111100022,
+    "avg_ms": 12.694350737324502,
+    "median_ms": 10.111987,
+    "max_ms": 120.132254,
+    "failed_rate": 0,
+    "failures": 0,
+    "seat_hold_201_rows": 1,
+    "dropped_iterations": 143,
+    "dropped_by_generator": { "0": 0, "1": 0, "2": 59, "3": 84 },
+    "dropped_by_scenario": { "warm": 143, "main": 0 },
+    "generator_valid": false,
+    "generator_reasons": [
+      "발생기 2: dropped_iterations 59(웜 구간)",
+      "발생기 3: dropped_iterations 84(웜 구간)"
+    ]
+  },
+  "generator": {
+    "count": 4,
+    "cpu_mean_pct_max": 28.3,
+    "memory_max_pct_max": 28.9,
+    "vus_max": 812
+  },
+  "http": {
+    "route": "/v1/events/{eventId}/holds",
+    "count": 119922,
+    "status": { "4xx": 119922, "2xx": 0 },
+    "mean_ms": 10.554657631656346,
+    "p50_ms": 8.572025336469228,
+    "p90_ms": 24.461008634922468,
+    "p95_ms": 37.6380808297873,
+    "p99_ms": 48.179738585679175,
+    "p99_9_ms": 84.86015404359328,
+    "over_50ms": 371,
+    "over_50ms_ratio": 0.00309,
+    "active_requests_max_per_pod": [13, 13, 16],
+    "business_rejections": 119922,
+    "errors": 0
+  },
+  "stages": {
+    "hold.total": { "count": 119922, "mean_ms": 4.955971294176494, "p99_ms": 22.59935911944698, "over_50ms": 40, "share_of_inner_mean": 1.0 },
+    "hold.session": { "count": 119923, "mean_ms": 2.3569687140606863, "p99_ms": 11.423752998035077, "over_50ms": 0, "share_of_inner_mean": 0.4755815912070029 },
+    "hold.lua": { "count": 119922, "mean_ms": 2.0366960271778867, "p99_ms": 9.758306835171384, "over_50ms": 0, "share_of_inner_mean": 0.4109579951706143 },
+    "hold.seat_config": { "count": 119923, "mean_ms": 0.04291967878253774, "p99_ms_note": "<5ms(첫 칸)", "over_50ms": 0, "share_of_inner_mean": 0.008660195193820117 },
+    "hold.seat_resolve": { "count": 119923, "mean_ms": 0.03789101899506098, "p99_ms_note": "<5ms(첫 칸)", "over_50ms": 0, "share_of_inner_mean": 0.007645528342665091 },
+    "hold.attempts": { "count": 119922, "mean_ms": 0.002652458088709063, "p99_ms_note": "<5ms(첫 칸)", "over_50ms": 0, "share_of_inner_mean": 0.0005352044899505026 },
+    "hold.session_record": { "count": 0, "note": "K2 409 경로는 새 홀드가 아니라 부르지 않는다" }
+  },
+  "outcomes": { "conflict": 119922, "ok": 0 },
+  "gap": {
+    "outside_execute_mean_ms": 5.598686337479852,
+    "outside_execute_p99_ms": 25.580379466232195,
+    "note": "HTTP 서버 지연 − HoldSeats.execute(hold.total). 인증·본문 검사·409 문제 변환·정규 로그·응답 직렬화·이벤트 루프 대기가 여기에 있다"
+  },
+  "bundle": {
+    "app_cpu_cores_prom": 3.0698706823409645,
+    "app_cpu_pct_crictl": { "min": 8.92, "max": 336.83, "mean": 124.59 },
+    "event_loop_lag_p99_ms": { "max": 19.562495, "by_pod": [19.562495, 16.211967, 18.120703] },
+    "event_loop_lag_p90_ms_max": 11.984895,
+    "event_loop_lag_max_ms": 33.652735,
+    "postgres_connections": { "max": 41, "limit": 600 }
+  },
+  "other": {
+    "valkey_cpu_pct_crictl": { "max": 29.75, "mean": 10.351904761904766 },
+    "postgres_cpu_pct_crictl": { "max": 19.18, "mean": 12.10404761904762 },
+    "kafka_cpu_pct_crictl": { "max": 4.81, "mean": 2.139047619047619 },
+    "nginx_cpu_pct_crictl": { "max": 0.12, "mean": 0.008809523809523812 },
+    "relay_cpu_pct_crictl": { "max": 10.86, "mean": 3.392380952380953 }
+  },
+  "instrumentation": {
+    "payment_confirm_claim_samples_per_second": 65.6,
+    "queue_entry_samples": 0,
+    "note": "K2에는 결제·대기열 진입 부하가 없어 payment.confirm.claim(100ms 틱)만 돌았고 queue-svc 구간은 0이다. 두 경로는 단위 시험으로 계측을 확인했다."
+  },
+  "verdict": {
+    "pass": false,
+    "reasons": [
+      "p99 47.54ms는 목표 50ms 안이지만, 발생기 웜 구간 놓침 143건으로 실행이 무효다",
+      "본구간 놓침은 0건이고 오류·201·자원은 목표 안이다"
+    ],
+    "conclusion": "계측 실행의 p99는 목표 안(47.54ms)이었지만 웜 구간 놓침 143건 때문에 정본 통과로 세지 않는다. 안쪽 HoldSeats.execute p99는 22.6ms이고 HTTP p99 48.18ms와의 25.58ms 차이가 가장 큰 단일 몫이다. 안쪽에서는 hold.session(평균 2.36ms·47.6%)과 hold.lua(2.04ms·41.1%)가 대부분이고 DB 기록(hold.attempts)은 0.003ms로 무시할 수 있다. 웜 구간 놓침은 발생기 2·3대의 시작 구간에만 있고 본구간은 0이며 발생기 CPU 28.3%·오류 0이라 대상 p99 원인이 아니다."
+  }
+}

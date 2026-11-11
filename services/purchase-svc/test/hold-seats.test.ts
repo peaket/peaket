@@ -3,7 +3,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { ForbiddenException, HttpException } from '@nestjs/common';
-import { COOKIE_CHALLENGE, Deadline, type FakeClock, fakeClock, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
+import { COOKIE_CHALLENGE, Deadline, type FakeClock, fakeClock, HotPathMetrics, PlatformMetrics, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, test } from 'vitest';
 import {
@@ -190,6 +190,8 @@ interface WorldOptions {
   hold?: (i: HoldInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<HoldResult>;
   /** 저장소 replay 대역(기본은 메모리 저장소) */
   replay?: (i: ReplayInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<ReplayResult>;
+  /** 핫패스 구간 진단(BAT-027) */
+  hotPath?: HotPathMetrics;
 }
 
 async function world(o: WorldOptions = {}) {
@@ -230,7 +232,7 @@ async function world(o: WorldOptions = {}) {
   await inner.openSale({ eventId: otherEvent, seatCount: 10, keepUntilMs: NOW + 2 * DAY });
   sessions.open({ sessionId: 'ps-a', accountId: ACCOUNT_A, eventId, journeyId: JNY_A, loginSessionId: 'ls-a', key: KEY });
   sessions.open({ sessionId: 'ps-b', accountId: ACCOUNT_B, eventId, journeyId: JNY_B, loginSessionId: 'ls-b', key: KEY });
-  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock, signals);
+  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock, signals, undefined, undefined, undefined, o.hotPath);
   /** A의 요청(c로 바꾼다). seatIds가 undefined면 본문은 c.body 또는 {} */
   const run = (seatIds: readonly string[] | undefined, c: Partial<HoldCommand> = {}) =>
     uc.execute({ eventId, accountId: ACCOUNT_A, purchaseSessionId: 'ps-a', idempotencyKey: randomUUID(), body: seatIds === undefined ? {} : { seatIds }, ...c });
@@ -1129,5 +1131,32 @@ describe('시험 대역의 계약', () => {
       ['CONFLICT', 1],
     ]);
     expect(r.records[0]).not.toBe(a);
+  });
+});
+
+describe('HoldSeats.execute: 핫패스 구간 진단(BAT-027, HOT-462)', () => {
+  test('BAT027_ 성공과 409 경합을 각각 outcome으로 세고, 구간 시간(hold.total·hold.lua)을 남긴다', async () => {
+    const registry = new PlatformMetrics('purchase-svc').registry;
+    const hotPath = new HotPathMetrics('purchase-svc').register(registry);
+    let conflict = false;
+    const w = await world({
+      hotPath,
+      hold: async (i, { inner }) => (conflict ? { kind: 'CONFLICT', seatId: i.seats[0]!.seatId } : inner.hold(i)),
+    });
+
+    await w.run([SEAT_DEFS[0]!.seatId]);
+    conflict = true;
+    await rejects(w.run([SEAT_DEFS[0]!.seatId]), 'CONFLICT');
+
+    const text = await registry.metrics();
+    expect(text).toContain('hot_path_outcomes_total{service="purchase-svc",outcome="ok"} 1');
+    expect(text).toContain('hot_path_outcomes_total{service="purchase-svc",outcome="conflict"} 1');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="hold.total"} 2');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="hold.lua"} 2');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="hold.session"} 2');
+    // 계정·회차·좌석 ID는 이름표에 없다(카디널리티 규칙, docs/observability.md §8)
+    expect(text).not.toContain(ACCOUNT_A);
+    expect(text).not.toContain(w.eventId);
+    expect(text).not.toContain(SEAT_DEFS[0]!.seatId);
   });
 });

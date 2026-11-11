@@ -15,7 +15,7 @@
 // - M3 기다림 표가 가득 차면(FULL) 기다리지 않고 지금 상태로 200(다시 읽지 않는다).
 // - M4 묶음 조회가 깨우며 넘긴 주문 모습(CHANGED의 view)이 있으면 다시 읽지 않는다. notify로 깬 경우(모습 없음)만 한 건 다시 읽는다.
 //   stop()으로 깬 기다림(STOPPED)은 ABORTED처럼 다시 읽지 않고 마지막 본문으로 답한다.
-import { Deadline, fakeClock } from '@peaket/platform';
+import { Deadline, fakeClock, HotPathMetrics, PlatformMetrics } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
   GetPaymentStatus,
@@ -423,5 +423,26 @@ describe('기다림', () => {
     expect(waiters.notifies).toEqual([]);
     expect(calls.filter((c) => c.startsWith('readMany'))).toEqual([]);
     expect(waiters.pendingCount).toBe(0);
+  });
+});
+
+describe('GetPaymentStatus: 핫패스 구간 진단(BAT-027, HOT-462)', () => {
+  test('BAT027_ 기다린 요청은 read·wait·total 구간과 ok 결과를 남긴다', async () => {
+    const registry = new PlatformMetrics('purchase-svc').registry;
+    const hotPath = new HotPathMetrics('purchase-svc').register(registry);
+    const uc = new GetPaymentStatus({ reads, waiters, clock, hotPath });
+    put({ status: 'ACCEPTED' });
+
+    const run = uc.execute(cmd());
+    await waiters.arrived(1);
+    waiters.wake('TIMEOUT');
+    await run;
+
+    const text = await registry.metrics();
+    expect(text).toContain('hot_path_outcomes_total{service="purchase-svc",outcome="ok"} 1');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="payment.status.total"} 1');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="payment.status.wait"} 1');
+    expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="payment.status.read"} 2');
+    expect(text).not.toContain(ORDER);
   });
 });

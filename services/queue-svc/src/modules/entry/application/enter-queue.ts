@@ -4,7 +4,7 @@
 // pid 키 전환 기간에는 옛 pid → 새 pid 차례로 선점하고, 앞 키의 기록을 다른 키에 옮겨 쓴다(§3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025, Q-T45).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotPathOutcome, PLATFORM_LOGGER, type PlatformLogger, timeHotPath } from '@peaket/platform';
 import { drandRoundTimeMs } from '@peaket/shuffle';
 import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, noEligibilitySignals, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
@@ -121,6 +121,8 @@ export class EnterQueue {
     @Optional() private readonly commits?: ShuffleCommits,
     @Optional() @Inject(ELIGIBILITY_SIGNALS) private readonly eligibilitySignals: EligibilitySignals = noEligibilitySignals,
     @Optional() private readonly eligibilityLog?: EligibilityLog,
+    /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+    @Optional() @Inject(HOT_PATH_METRICS) private readonly hotPath?: HotPathMetrics,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
   }
@@ -154,8 +156,26 @@ export class EnterQueue {
     return claimed ? arrivalSlotOf(v.t) : undefined;
   }
 
+  /**
+   * 진입 요청 하나를 계측하고 #run으로 넘긴다(BAT-027, HOT-462).
+   * 전체 시간(queue.entry.total)과 최종 결과(queue.entry.outcomes)만 여기서 남기고, 구간 시간은 #run 안에서 남긴다.
+   */
   async run(i: EnterInput): Promise<EnterOutcome> {
-    const schedule = await this.schedules.get(i.eventId);
+    const done = this.hotPath?.start('queue.entry.total');
+    try {
+      const out = await this.#run(i);
+      this.hotPath?.outcome(out.kind === 'TICKET' ? 'ticket' : 'batching');
+      return out;
+    } catch (err) {
+      this.hotPath?.outcome(entryOutcomeOf(err));
+      throw err;
+    } finally {
+      done?.();
+    }
+  }
+
+  async #run(i: EnterInput): Promise<EnterOutcome> {
+    const schedule = await timeHotPath(this.hotPath, 'queue.entry.schedule', () => this.schedules.get(i.eventId));
     if (!schedule) throw new EntryError('NOT_FOUND', '이 회차의 대기열이 열리지 않았다');
     const now = this.clock.now();
     if (now >= saleEndOf(schedule)) throw new EntryError('SALE_ENDED', '판매가 끝났다(공연 시작 24시간 전)');
@@ -179,13 +199,13 @@ export class EnterQueue {
    */
   async #enterTwoKeys(c: Ctx, old: string, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string): Promise<EnterOutcome> {
     const { i, requestId } = c;
-    const p1 = await this.store.preempt({ pid: old, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
+    const p1 = await timeHotPath(this.hotPath, 'queue.entry.preempt', () => this.store.preempt({ pid: old, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs }));
     if (p1.kind === 'ADMITTED') throw new EntryError('ALREADY_ADMITTED', '이 회차에 이미 입장했다(옛 pid)');
     if (p1.kind === 'BUSY') throw new EntryError('ALREADY_WAITING', '이미 대기 중이다(옛 pid)');
     if (p1.kind === 'LEFT') throw new EntryError('ENTRY_CANCELLED', '이 요청 ID의 참가는 취소됐다(옛 pid)');
     let p2: PreemptResult;
     try {
-      p2 = await this.store.preempt({ pid: i.pid, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
+      p2 = await timeHotPath(this.hotPath, 'queue.entry.preempt', () => this.store.preempt({ pid: i.pid, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs }));
     } catch (e) {
       // 새 pid 쪽 오류: 옛 선점을 지우고 503(같은 요청 ID로 다시 보내면 처음부터 한다)
       await this.#release(c, old);
@@ -208,7 +228,7 @@ export class EnterQueue {
       throw e;
     }
     // 대기표·202를 주기 전에 앞 키의 값과 수명을 다른 키에 옮겨 쓴다. 오류면 503이고, 같은 요청 ID로 다시 보내면 같은 대기표와 옮겨 쓰기를 다시 한다
-    const m = await this.store.mirror({ from: lead, to: other, eventId: i.eventId, requestId });
+    const m = await timeHotPath(this.hotPath, 'queue.entry.mirror', () => this.store.mirror({ from: lead, to: other, eventId: i.eventId, requestId }));
     if (m === 'COPIED') return out;
     // 다른 키에 다른 요청의 값이나 입장 키가 있다: 한 사람이 번호 둘을 갖지 않게 앞 키의 이 요청 값을 지우고 받은 번호를 빠진 번호로 돌린다
     await this.store.dropOwn({ pid: lead, eventId: i.eventId, requestId });
@@ -217,7 +237,7 @@ export class EnterQueue {
   }
 
   async #enter(c: Ctx, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string, firstTry: boolean): Promise<EnterOutcome> {
-    const pre1 = await this.store.preempt({ pid: c.pid, eventId: c.i.eventId, requestId: c.requestId, pendingTtlMs: this.options.pendingTtlMs });
+    const pre1 = await timeHotPath(this.hotPath, 'queue.entry.preempt', () => this.store.preempt({ pid: c.pid, eventId: c.i.eventId, requestId: c.requestId, pendingTtlMs: this.options.pendingTtlMs }));
     return this.#after(c, pre1, jny, vr, eligible, tokenHash, firstTry);
   }
 
@@ -243,21 +263,23 @@ export class EnterQueue {
       throw new EntryError('SALE_ELIGIBILITY_REQUIRED', '판매 자격 설정이 틀렸다');
     }
     // 진입 Degraded의 도착 시각 쿠키는 번호를 받기 직전에 한 번만 받는다(응답을 잃은 재시도는 RECORDED로 위에서 끝났다)
-    const arrivalSlot = await this.#arrivalSlot(c);
+    const arrivalSlot = await timeHotPath(this.hotPath, 'queue.entry.arrival', () => this.#arrivalSlot(c));
     // ②는 파드별 묶음으로 보낸다(같은 회차의 요청을 2ms 모아 Lua 한 번, ADR-0179). 고른 명단 키가 같은 요청끼리만 모은다
-    const num = await this.#numbers.take(
-      {
-        eventId: i.eventId,
-        expireAtMs: keepUntil,
-        opensAtMs: schedule.opensAtMs,
-        closeAtMs: batchCloseAtOf(schedule),
-        lobbyShuffle: schedule.lobbyShuffle,
-        openBatch: schedule.openBatch,
-        batchExpireAtMs: saleEnd,
-        arrivalInitial: this.options.arrivalSlotInitial ?? ARRIVAL_SLOT_INITIAL,
-        ...(elig.kind === 'GATED' ? { eligibility: { listKeys: elig.lists } } : {}),
-      },
-      { eligible, tokenHash, ...(arrivalSlot !== undefined ? { arrivalSlot } : {}), ...(elig.kind === 'GATED' ? { accountId: i.accountId } : {}) },
+    const num = await timeHotPath(this.hotPath, 'queue.entry.number', () =>
+      this.#numbers.take(
+        {
+          eventId: i.eventId,
+          expireAtMs: keepUntil,
+          opensAtMs: schedule.opensAtMs,
+          closeAtMs: batchCloseAtOf(schedule),
+          lobbyShuffle: schedule.lobbyShuffle,
+          openBatch: schedule.openBatch,
+          batchExpireAtMs: saleEnd,
+          arrivalInitial: this.options.arrivalSlotInitial ?? ARRIVAL_SLOT_INITIAL,
+          ...(elig.kind === 'GATED' ? { eligibility: { listKeys: elig.lists } } : {}),
+        },
+        { eligible, tokenHash, ...(arrivalSlot !== undefined ? { arrivalSlot } : {}), ...(elig.kind === 'GATED' ? { accountId: i.accountId } : {}) },
+      ),
     );
     if (num.kind === 'NUMBERED' && num.arrival) this.signals?.number(num.arrival);
     if (num.kind === 'ELIGIBILITY_REQUIRED') {
@@ -290,7 +312,7 @@ export class EnterQueue {
       throw new EntryError('BATCHING', '오픈 직후 묶음 구간이다', num.retryAfterSeconds);
     }
     if (num.kind === 'BATCHING') {
-      const br = await this.store.batchRecord({ pid: c.pid, eventId: i.eventId, requestId, tokenHash, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
+      const br = await timeHotPath(this.hotPath, 'queue.entry.batch_record', () => this.store.batchRecord({ pid: c.pid, eventId: i.eventId, requestId, tokenHash, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd }));
       // 같은 요청이 다른 토큰으로 먼저 기록했으면 그 토큰의 결과 파일을 알려 준다(이 토큰의 자리는 아무도 갖지 않는 번호가 된다)
       if (br.kind === 'BATCHED') return this.#batching(c, br.tokenHash);
       // 같은 요청이 구간 끝을 걸쳐 둘로 와서 뒤 요청이 먼저 번호를 기록했다: 그 대기표를 준다(이 토큰의 묶음 자리는 아무도 갖지 않는 번호가 된다)
@@ -302,7 +324,9 @@ export class EnterQueue {
 
     const { seq, gen } = num;
     // 대기 취소에는 대기표가 없어, 대기표 해시를 사람 키의 번호 기록에 둔다(ADR-0233)
-    const rec = await this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, seq, gen, jny, vr)) });
+    const rec = await timeHotPath(this.hotPath, 'queue.entry.record', () =>
+      this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, seq, gen, jny, vr)) }),
+    );
     if (rec.kind === 'RECORDED') return this.#issue(c, seq, gen, jny, vr);
     // 기록하지 못한 번호는 아무도 갖지 않으므로 빠진 번호로 돌린다
     await this.store.markRemoved({ eventId: i.eventId, seq, expireAtMs: keepUntil });
@@ -317,7 +341,7 @@ export class EnterQueue {
    * 참가자 목록에 없으면(batchMissing, 장애 전환으로 SADD를 잃음) 기록을 지우고 일반 진입 */
   async #batched(c: Ctx, rec: BatchedEntry, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string, firstTry: boolean): Promise<EnterOutcome> {
     const { i, requestId, saleEnd } = c;
-    const res = await this.store.batchResult({ eventId: i.eventId, tokenHash: rec.tokenHash });
+    const res = await timeHotPath(this.hotPath, 'queue.entry.batch_result', () => this.store.batchResult({ eventId: i.eventId, tokenHash: rec.tokenHash }));
     if (res.kind === 'PENDING') return this.#batching(c, rec.tokenHash);
     // 묶음 기록은 그대로 두고 잠시 뒤 다시 오게 한다. admission-ctrl이 같은 입력으로 결과를 다시 쓴다
     if (res.kind === 'REPAIRING') throw new EntryError('BATCHING', '묶음 결과를 다시 쓰는 중이다', BATCH_REPAIR_RETRY_SEC);
@@ -389,7 +413,7 @@ export class EnterQueue {
   /** 선점 풀기는 덤이다: 대기열 Redis가 잠시 안 되면 선점 수명이 지나 풀린다. pid를 주지 않으면 앞 키 */
   async #release(c: Ctx, pid: string = c.pid): Promise<void> {
     try {
-      await this.store.release({ pid, eventId: c.i.eventId, requestId: c.requestId });
+      await timeHotPath(this.hotPath, 'queue.entry.release', () => this.store.release({ pid, eventId: c.i.eventId, requestId: c.requestId }));
     } catch (e) {
       if (!(e instanceof QueueStoreUnavailable)) throw e;
     }
@@ -442,5 +466,44 @@ export class EnterQueue {
       verificationReason: vr ?? null,
       serverTimeMs: now,
     };
+  }
+}
+
+/** EntryError를 핫패스 결과 이름으로 바꾼다(고정 목록, 카디널리티 낮춤). 모르는 오류는 error다 */
+function entryOutcomeOf(err: unknown): HotPathOutcome {
+  if (!(err instanceof EntryError)) return 'error';
+  switch (err.code) {
+    case 'NOT_FOUND':
+      return 'not_found';
+    case 'NOT_OPEN':
+      return 'not_open';
+    case 'SALE_ENDED':
+      return 'sale_ended';
+    case 'SOLD_OUT':
+      return 'sold_out';
+    case 'BATCHING':
+      return 'batching';
+    case 'QUEUE_RECOVERING':
+      return 'queue_recovering';
+    case 'PREVERIFY_INVALID':
+      return 'preverify_invalid';
+    case 'ALREADY_ADMITTED':
+      return 'already_admitted';
+    case 'ALREADY_WAITING':
+      return 'already_waiting';
+    case 'LOBBY_CLOSED':
+      return 'lobby_closed';
+    case 'LOBBY_PARTICIPANT_NOT_FOUND':
+      return 'lobby_participant_not_found';
+    case 'ENTRY_CANCELLED':
+      return 'entry_cancelled';
+    case 'SALE_ELIGIBILITY_REQUIRED':
+      return 'eligibility_required';
+    case 'DEGRADED_LIMITED':
+      return 'degraded_limited';
+    case 'IDENTITY_VERIFICATION_REQUIRED':
+      return 'identity_verification_required';
+    default:
+      return 'error';
   }
 }

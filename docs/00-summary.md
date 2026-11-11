@@ -518,6 +518,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - BAT-025 측정 결과(2026-11-11, R-469): Q-T5·규칙 통과, K1 목표 미달, K2·K7 무효, A/A 미성립, P3 새 정의 PASS를 기록한다.
 - BAT-026 진단 결과(합본 CPU가 K2·K7 첫 병목, K1은 진입 경로/측정, A/A 미성립, S-T35 ⑥는 코드 차이)와 다음 배치 OPEN[35]를 기록한다(R-470).
 - K2 2,000/s CPU 4/replica 확인(p99 53.6ms·놓침 12로 미달, CPU/event loop 여유)과 다음 코드 계측 방향을 기록한다(R-471).
+- BAT-027 핫패스 구간 계측(HotPathMetrics)과 K2 2,000/s CPU 4/replica 1회 측정을 더한다. 계측 실행은 p99 47.54ms·놓침 143으로 무효, 안쪽은 hold.session·hold.lua가 88.7%, HTTP와 execute 차이 25.58ms를 다음 표적으로 남긴다(R-472).
 
 ## 5. [충돌] 결정 결과
 

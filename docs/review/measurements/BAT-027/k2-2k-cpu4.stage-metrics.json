@@ -1,0 +1,188 @@
+{
+  "run": "2026-11-11-k2-v1-hot-2k-cpu4-instrumented",
+  "window": "2026-11-11T02:48:30Z/2026-11-11T02:49:30Z",
+  "queryTime": "2026-11-11T02:49:30Z",
+  "condition": "v1 bundle 3 replicas, CPU request/limit 4, memory 512Mi, Redis TLS on, K2 hot seat 1, users 1000, rate 2000/s, keep, warm 30s/main 60s, generators 4",
+  "k6": {
+    "hold_requests": 120000,
+    "p99_ms": 47.54491008,
+    "p99_9_ms": 81.35666111100022,
+    "avg_ms": 12.694350737324502,
+    "med_ms": 10.111987,
+    "max_ms": 120.132254,
+    "failures": 0,
+    "successful_samples": 120000,
+    "dropped_iterations": 143,
+    "dropped_by_scenario": {
+      "0": {},
+      "1": {},
+      "2": {
+        "warm": 59
+      },
+      "3": {
+        "warm": 84
+      }
+    },
+    "generator_valid": false,
+    "generator_reasons": [
+      "발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 59)",
+      "발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 84)"
+    ]
+  },
+  "outcomes": {
+    "conflict": 119921.76020645494,
+    "ok": 0
+  },
+  "stages": [
+    {
+      "count": 119922.85115521672,
+      "sumSeconds": 282.65440827380223,
+      "meanMs": 2.3569687140606863,
+      "p99Ms": 11.423752998035077,
+      "over50ms": 0,
+      "over50msRatio": 0,
+      "shareOfTotalMean": 0.4755815912070029,
+      "name": "hold.session"
+    },
+    {
+      "count": 119922.85115521672,
+      "sumSeconds": 5.147050250267986,
+      "meanMs": 0.04291967878253774,
+      "p99Ms": 4.95,
+      "over50ms": 0,
+      "over50msRatio": 0,
+      "shareOfTotalMean": 0.008660195193820117,
+      "name": "hold.seat_config"
+    },
+    {
+      "count": 119922.85115521672,
+      "sumSeconds": 4.543999031064187,
+      "meanMs": 0.03789101899506098,
+      "p99Ms": 4.95,
+      "over50ms": 0,
+      "over50msRatio": 0,
+      "shareOfTotalMean": 0.007645528342665091,
+      "name": "hold.seat_resolve"
+    },
+    {
+      "count": 119921.76020645494,
+      "sumSeconds": 244.244172584666,
+      "meanMs": 2.0366960271778867,
+      "p99Ms": 9.758306835171384,
+      "over50ms": 0,
+      "over50msRatio": 0,
+      "shareOfTotalMean": 0.4109579951706143,
+      "name": "hold.lua"
+    },
+    {
+      "count": 119921.76020645494,
+      "sumSeconds": 0.31808744287184004,
+      "meanMs": 0.002652458088709063,
+      "p99Ms": 4.95,
+      "over50ms": 0,
+      "over50msRatio": 0,
+      "shareOfTotalMean": 0.0005352044899505026,
+      "name": "hold.attempts"
+    },
+    {
+      "count": 119921.76020645494,
+      "sumSeconds": 594.3288011303076,
+      "meanMs": 4.955971294176494,
+      "p99Ms": 22.59935911944698,
+      "over50ms": 40.36581830010982,
+      "over50msRatio": 0.00033660128262474485,
+      "shareOfTotalMean": 1,
+      "name": "hold.total"
+    }
+  ],
+  "http": {
+    "count": 119921.76020645494,
+    "meanMs": 10.554657631656346,
+    "p50Ms": 8.572025336469228,
+    "p90Ms": 24.461008634922468,
+    "p95Ms": 37.6380808297873,
+    "p99Ms": 48.179738585679175,
+    "p999Ms": 84.86015404359328,
+    "over50ms": 370.9268041803589,
+    "status": {
+      "4xx": 119921.76020645494,
+      "2xx": 0
+    },
+    "activeMaxByPod": [
+      {
+        "pod": "bundle-575cd6b796-dn6l9",
+        "value": 13
+      },
+      {
+        "pod": "bundle-575cd6b796-njkg2",
+        "value": 13
+      },
+      {
+        "pod": "bundle-575cd6b796-m6s4p",
+        "value": 16
+      }
+    ],
+    "businessRejections": 119921.76020645494,
+    "outsideExecuteMeanMs": 5.598686337479852,
+    "outsideExecuteP99GapMs": 25.580379466232195
+  },
+  "eventLoop": {
+    "p99MaxMs": 19.562495,
+    "p90MaxMs": 11.984895,
+    "maxMs": 33.652735,
+    "byPodP99Ms": [
+      {
+        "pod": "bundle-575cd6b796-dn6l9",
+        "value": 19.562495
+      },
+      {
+        "pod": "bundle-575cd6b796-njkg2",
+        "value": 16.211967
+      },
+      {
+        "pod": "bundle-575cd6b796-m6s4p",
+        "value": 18.120703
+      }
+    ]
+  },
+  "appCpuCores": 3.0698706823409645,
+  "resources": {
+    "samples": 42,
+    "app": {
+      "min": 8.92,
+      "max": 336.83,
+      "mean": 124.58928571428571
+    },
+    "valkey": {
+      "min": 0.41000000000000003,
+      "max": 29.75,
+      "mean": 10.351904761904766
+    },
+    "postgres": {
+      "min": 7.79,
+      "max": 19.18,
+      "mean": 12.10404761904762
+    },
+    "kafka": {
+      "min": 1.14,
+      "max": 4.81,
+      "mean": 2.139047619047619
+    },
+    "nginx": {
+      "min": 0,
+      "max": 0.12,
+      "mean": 0.008809523809523812
+    },
+    "relay": {
+      "min": 2.35,
+      "max": 10.86,
+      "mean": 3.392380952380953
+    }
+  },
+  "postgresConnections": {
+    "max": 41,
+    "limit": 600,
+    "note": "loadtest infra.txt의 5초 표본 최대(19표본)"
+  },
+  "seatHoldRows": 1
+}

@@ -5,7 +5,7 @@
 // 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, Counter, createHotRedis, createService, errorSummary, Gauge, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
+import { CircuitBreaker, Counter, createHotRedis, createService, errorSummary, Gauge, HotPathMetrics, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
@@ -114,6 +114,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const lobbySignals = new PromLobbySignals();
   const leaveSignals = new PromLeaveSignals();
   const eligibilitySignals = new PromEligibilitySignals();
+  // 핫패스 구간 진단(BAT-027): 레지스트리는 createService 뒤에 생기므로 지표 객체만 먼저 만들고, 듣기 전에 붙인다
+  const hotPath = new HotPathMetrics(SERVICE);
   const service = await createService({
     name: SERVICE,
     env,
@@ -124,6 +126,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       tokens,
       risk: trustRisk ?? unavailableRisk,
       degradedLimits,
+      hotPath,
       ...(sealer ? { sealer } : {}),
       lobbySignals,
       leaveSignals,
@@ -139,6 +142,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     }),
   });
   arrivalSignals.register(service.metrics.registry);
+  hotPath.register(service.metrics.registry);
   firstVisitSignals.register(service.metrics.registry);
   riskSignals.register(service.metrics.registry);
   trustBreakerHolder.b = new CircuitBreaker({ service: SERVICE, dependency: 'trust-svc', registry: service.metrics.registry, logger: service.logger, ...TRUST_BREAKER });

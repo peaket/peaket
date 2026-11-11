@@ -1,6 +1,6 @@
 // 모듈 조립 파일: inventory 포트에 어댑터를 묶는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 import { OpenPurchaseSession } from './application/open-purchase-session.js';
 import { EndPurchaseSession, type EndPurchaseSessionDeps } from './application/end-purchase-session.js';
@@ -90,6 +90,8 @@ export type InventoryModuleOptions = (
   sessions: PurchaseSessionAccess;
   /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①, 운영은 DrizzleSeatSales). 부르는 쪽(결제 접수 Saga)은 PRF-160이다. 없으면 SEAT_SALES를 내놓지 않는다 */
   seatSales?: SeatSales;
+  /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 };
 
 @Module({})
@@ -175,7 +177,7 @@ export class InventoryModule {
     return {
       module: InventoryModule,
       controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.manageHolds ? [HoldLifecycleController] : []), ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
-      providers: [HoldSeats, ...(o.admission?.manageHolds ? [{ provide: ManageHolds, useValue: o.admission.manageHolds }] : []), ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      providers: [HoldSeats, ...(o.admission?.manageHolds ? [{ provide: ManageHolds, useValue: o.admission.manageHolds }] : []), ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, ...(o.hotPath ? [{ provide: HOT_PATH_METRICS, useValue: o.hotPath }] : []), { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
       exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
     };
   }

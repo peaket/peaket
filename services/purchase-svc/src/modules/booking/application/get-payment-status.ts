@@ -4,7 +4,7 @@
 // → 깨면 넘겨받은 모습(없으면 reads.read 한 건)으로 정한다 → 시간이 다 되면 그때의 상태로 200(WAIT의 body).
 // 구매 세션 서명은 보지 않는다(결제창에서 돌아온 탭이 묻는다).
 // 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
-import type { Clock, Deadline } from '@peaket/platform';
+import { type Clock, type Deadline, type HotPathMetrics, type HotPathOutcome, timeHotPath } from '@peaket/platform';
 import {
   decidePaymentStatus,
   PAYMENT_DEPOSIT_READ_DEADLINE_MS,
@@ -26,6 +26,8 @@ export interface GetPaymentStatusDeps {
   clock: Clock;
   /** 입금 대기의 은행·계좌번호·입금 기한 읽기(payment-svc GetPayment, BUILD_ORDER HOT-151). 없으면 그 칸을 싣지 않는다 */
   deposits?: PaymentDepositReader;
+  /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 /** 요청 하나 */
@@ -64,8 +66,18 @@ export class GetPaymentStatus {
    * @throws Error purchase DB 오류(읽기 실패는 그대로 던져 500. 기다리던 요청도 같다)
    */
   async execute(c: GetPaymentStatusCommand): Promise<GetPaymentStatusResult> {
-    const r = await this.answer(c);
-    return r.status === 200 && r.body.status === 'AWAITING_DEPOSIT' ? this.withDepositInfo(c, r.body) : r;
+    const done = this.deps.hotPath?.start('payment.status.total');
+    try {
+      const r = await this.answer(c);
+      const result = r.status === 200 && r.body.status === 'AWAITING_DEPOSIT' ? await this.withDepositInfo(c, r.body) : r;
+      this.deps.hotPath?.outcome(paymentStatusOutcome(result));
+      return result;
+    } catch (err) {
+      this.deps.hotPath?.outcome('error');
+      throw err;
+    } finally {
+      done?.();
+    }
   }
 
   /**
@@ -81,7 +93,7 @@ export class GetPaymentStatus {
     const deadlineMs = c.deadline ? Math.min(PAYMENT_DEPOSIT_READ_DEADLINE_MS, Math.floor(c.deadline.remainingMs())) : PAYMENT_DEPOSIT_READ_DEADLINE_MS;
     if (deadlineMs <= 0) return stillProcessing;
     try {
-      const virtualAccount = await deposits.read(c.orderId, { deadlineMs });
+      const virtualAccount = await timeHotPath(this.deps.hotPath, 'payment.status.deposit_read', () => deposits.read(c.orderId, { deadlineMs }));
       if (virtualAccount === PAYMENT_DEPOSIT_READ_TRANSIENT) return stillProcessing;
       return { status: 200, body: virtualAccount === undefined ? body : { ...body, virtualAccount } };
     } catch {
@@ -90,8 +102,9 @@ export class GetPaymentStatus {
   }
 
   private async answer(c: GetPaymentStatusCommand): Promise<GetPaymentStatusResult> {
-    const { reads, waiters, clock } = this.deps;
-    const first = this.judge(c, await reads.read(c.orderId), undefined);
+    const { reads, waiters, clock, hotPath } = this.deps;
+    const read = (): Promise<PaymentStatusView | undefined> => timeHotPath(hotPath, 'payment.status.read', () => reads.read(c.orderId));
+    const first = this.judge(c, await read(), undefined);
     if (first.kind !== 'WAIT') return first.result;
     // 깨울지 견줄 기준: 기다림 시작 때 본문(다시 기다려도 바꾸지 않는다)
     const since = first.body;
@@ -102,10 +115,10 @@ export class GetPaymentStatus {
     let budget = waitMs;
     while (budget > 0) {
       // 기다리는 동안에는 아무 포트도 부르지 않는다(DB 연결을 쥐지 않는다)
-      const up = await waiters.wait(c.orderId, budget, { ...(c.signal ? { signal: c.signal } : {}), since });
+      const up = await timeHotPath(hotPath, 'payment.status.wait', () => waiters.wait(c.orderId, budget, { ...(c.signal ? { signal: c.signal } : {}), since }));
       // 받을 쪽이 없거나 파드가 멈췄거나 표가 가득 찼다: 다시 읽지 않고 마지막 본문 [정함]
       if (up.wake === 'ABORTED' || up.wake === 'STOPPED' || up.wake === 'FULL') return { status: 200, body: last };
-      const again = this.judge(c, up.view ?? (await reads.read(c.orderId)), since);
+      const again = this.judge(c, up.view ?? (await read()), since);
       if (again.kind !== 'WAIT') return again.result;
       last = again.body;
       // 시간이 다 됐으면 그때의 상태로 답한다(다시 기다리지 않는다)
@@ -134,4 +147,11 @@ export class GetPaymentStatus {
     if (since && paymentStatusWakes(view, since, now)) return { kind: 'DONE', result: { status: 200, body: d.body } };
     return { kind: 'WAIT', body: d.body };
   }
+}
+
+/** 결과를 핫패스 결과 이름으로 바꾼다(고정 목록, 카디널리티 낮춤) */
+function paymentStatusOutcome(result: GetPaymentStatusResult): HotPathOutcome {
+  if (result.status === 404) return 'not_found';
+  if (result.status === 409) return 'rejected';
+  return 'ok';
 }

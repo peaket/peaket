@@ -583,6 +583,7 @@
 | R-469 | BAT-025 측정 창 1이 v1 합본에서 목표를 못 지키거나 무효였다 | docs/perf-ledger/runs/2026-11-11-*, docs/perf-ledger.md, docs/verification.md §3.10, docs/review/ledger-notes.md, docs/review/ledger/*, docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/perf-ledger/timestamps/2026-11-10.txt | 22 run을 계획 순서로 돌리고 실패·무효·SKIPPED를 통과로 세지 않고 원인과 측정 ID를 적었다 | 완료 |
 | R-470 | BAT-025 측정 창 1의 v1 합본이 K2·K7에서 무효·목표 미달이고 K1 진입도 목표 미달인데 원인을 모른다 | docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/verification.md §3.10, docs/review/plans/BAT-026.md, docs/review/measurements/BAT-026-v1-bundle-diagnosis.md·BAT-026/*.json | 기존 장부 16개를 다시 읽고 K2 1,000/s CPU 1↔2·2,000/s CPU 2 실험으로 자원·코드·측정 방법을 갈랐다 | 완료 |
 | R-471 | K2 2,000/s가 CPU 4/replica에서도 정본 목표를 통과하는지 몰랐다 | docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/verification.md §3.10, docs/review/measurements/BAT-026-v1-bundle-diagnosis.md·BAT-026/k2-2k-cpu4.* | 같은 클러스터에서 CPU만 4/replica로 올려 한 번 재고 p99·오류·놓침·자원 지표를 목표와 견줬다 | 완료 |
+| R-472 | K2 p99 53.6ms와 웜 구간 놓침 12건의 원인 구간을 몰랐다 | packages/platform/src/hot-path.ts, purchase-svc HoldSeats·GetPaymentStatus, payment-svc PaymentConfirmRunner, queue-svc EnterQueue, docs/observability.md §3·§8, docs/review/measurements/BAT-027-hot-path-instrumentation.md | 낮은 카디널리티 구간 지표를 넣고 단위 시험·변이 검사·K2 2,000/s CPU 4/replica 1회로 상위 구간을 쟀다 | 완료(측정 실행은 웜 구간 놓침으로 무효, p99 47.54ms) |
 
 ## 4. 숫자 일치표
 

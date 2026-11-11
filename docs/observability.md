@@ -164,6 +164,17 @@ flowchart LR
 - 처리 중 요청 게이지는 응답을 보냈을 때와 연결이 끊겼을 때(본문을 다 받은 뒤 끊긴 경우 포함) 한 번만 내린다. 끊긴 요청은 지연 히스토그램에 들지 않는다.
 - 지연은 서비스에 주입한 시계(단조 시계)로 잰다. 시험은 `packages/platform/test/metrics.test.ts`(5xx는 오류 카운터, 409 경합 패배는 정상 분기 카운터, docs/verification.md §2.7의 지표 내보내기 층)다.
 
+**핫패스 구간 진단 지표(추천 적용 2026-11-11, BAT-027·HOT-462, R-472)**: K2 2,000/s의 p99 꼬리와 홀드 409 경로, 결제 확정·`payment_status` 롱 폴링, 대기열 진입의 시간을 코드 안 구간별로 가르기 위한 진단 지표다. 동작을 바꾸지 않고, 지표가 던져도 요청을 막지 않는다. 계정·주문·좌석·회차 ID는 이름표에 싣지 않는다(§8).
+
+| 지표 | 종류 | 라벨 | 뜻 |
+| --- | --- | --- | --- |
+| `hot_path_stage_seconds` | 히스토그램(§8 표준 칸) | `service`·`stage` | 코드 구간 하나의 시간(초). `stage`는 고정 목록이다 |
+| `hot_path_outcomes_total` | 카운터 | `service`·`outcome` | 요청 하나의 최종 결과. `outcome`은 고정 목록이다 |
+
+- 구간 이름: `hold.session`·`hold.seat_config`·`hold.seat_resolve`·`hold.replay`·`hold.lua`·`hold.attempts`·`hold.session_record`·`hold.total`, `payment.confirm.claim`·`read`·`mark`·`gateway`·`finish`·`reschedule`·`drop`·`release`, `payment.status.read`·`deposit_read`·`wait`·`total`, `queue.entry.schedule`·`preempt`·`arrival`·`number`·`batch_record`·`record`·`batch_result`·`mirror`·`release`·`total`.
+- 결과 이름: `ok`·`conflict`·`quota_exceeded`·`rehold_wait`·`paused`·`not_ready`·`idem_reused`·`invalid_seat`·`sale_ended`·`session_not_found`·`event_mismatch`·`deadline_exceeded`·`store_unavailable`·`invalid_request`·`error`, `ticket`·`batching`·`already_admitted`·`already_waiting`·`entry_cancelled`·`preverify_invalid`·`not_open`·`not_found`·`sold_out`·`queue_recovering`·`lobby_closed`·`lobby_participant_not_found`·`eligibility_required`·`degraded_limited`·`identity_verification_required`, `approved`·`already`·`declined`·`waiting`·`in_progress`·`unknown`·`expired`·`restart`·`no_adapter`·`circuit_open`·`rejected`.
+- 합본은 서비스마다 논리 이름(`purchase-svc`·`payment-svc`·`queue-svc`)을 `service` 라벨로 두어 관리 포트에서 합쳐도 구분된다. 구간·결과 목록을 늘리면 이 표와 `packages/platform/src/hot-path.ts`의 형을 함께 고친다.
+
 **서비스 템플릿의 운영 확인(docs/architecture.md §8.4, 추천 적용 2026-11-01)**: 기능 설계서 9편의 표는 wbs 0.3.5에서 채운다. 아래는 템플릿 자체의 표다.
 
 | 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보 | 배포 뒤 확인 방법 |
@@ -478,7 +489,7 @@ flowchart LR
 
 ## 8. 메트릭 카디널리티 규칙 [보완]
 
-- 허용 라벨(Label): `service`, `route`(동적 매개변수를 치환한 URL 템플릿, 실제 자원 ID 사용 금지), `method`, `status_class`, `event_id`(동시에 진행 중인 온세일 공연만, 동시 최대 10개 이하로 유지 [가정, Phase 4 관측 비용 측정에서 확정]), `pod`, `az`, `dependency`(외부 호출 의존성), `tier`(좌석 가격 등급).
+- 허용 라벨(Label): `service`, `route`(동적 매개변수를 치환한 URL 템플릿, 실제 자원 ID 사용 금지), `method`, `status_class`, `event_id`(동시에 진행 중인 온세일 공연만, 동시 최대 10개 이하로 유지 [가정, Phase 4 관측 비용 측정에서 확정]), `pod`, `az`, `dependency`(외부 호출 의존성), `tier`(좌석 가격 등급), `stage`·`outcome`(핫패스 구간 진단의 고정 목록만, §3).
 - 사용 금지 라벨: 사용자 계정 ID, 주민번호/연계정보, 세션 토큰, 대기 순번, 좌석 고유번호, 클라이언트 IP 주소, User-Agent 원문, 주문 번호 같은 고유 식별자.
 - 히스토그램 버킷 구성(추천 적용 2026-10-21, ADR-0077 결정 1): 지연 히스토그램은 서비스 템플릿과 Envoy(`histogram_bucket_settings`, 밀리초)가 같은 표준 칸 목록을 쓴다. 목록(초)은 0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 0.6, 0.8, 1, 1.5, 1.8, 2, 2.5, 3, 5, 10, 30, 60(+Inf)이다(0.25·0.6은 소유자 결정 2026-11-11, open-items 99번: 관제 실시간 표 조회 p95 0.25초와 검색 원본 p95 목표의 2배 600ms를 칸 경계로 담는다). 이 목록은 §4의 SLO 기준값과 경보·자동 전환 기준값을 모두 칸 경계로 담는다. 고전 히스토그램의 비율 식은 그 경계가 없으면 결과를 내지 않거나 경고 없이 틀린 값을 내기 때문이다(Prometheus 문서). 지연 기준 경보와 자동 전환은 `histogram_quantile` 대신 경계 칸의 비율로 쓴다(예: 'p99 > 150ms'는 '150ms 넘은 비율 > 1%'). 기준값을 새로 만들거나 바꿀 때는 목록을 먼저 고친다. 경보 시험 CI(docs/verification.md §2.7)가 규칙의 `le` 값·SLO 기준값·Envoy 설정이 목록과 맞는지 검사한다. 개별 서비스가 칸을 마음대로 바꾸지 않는다. 서비스 파드 하나당 활성 시계열 수 상한(최대 5만 개 [가정, Phase 4 관측 비용 측정에서 확정])을 두고, 이를 초과하면 CI 파이프라인의 린트 단계에서 배포를 막는다.
 - 쿼리 통계 예외(ADR-0067): PostgreSQL 쿼리 통계는 `queryid` 라벨을 쓰되, DB마다 실행 시간 상위 20개 [가정]로 묶는다. 쿼리 문장은 라벨에 싣지 않는다(`include_query`를 꺼 둔다). pg_stat_statements는 항목이 자주 밀려나면 상수를 그대로 보여 줄 수 있어 개인정보가 섞일 수 있기 때문이다. 쿼리 문장을 보는 곳은 환경마다 다르다(추천 적용 2026-10-28, 기술 검토 낮음-160).

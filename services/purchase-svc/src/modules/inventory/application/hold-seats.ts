@@ -1,7 +1,7 @@
 // 좌석 홀드 쓰임새(docs/features/seat-hold.md §3~§5, openapi POST /v1/events/{eventId}/holds, BUILD_ORDER PRF-130 ①).
 // 받는 층(HoldsController)이 신원·멱등 키 형식·구매 요청 서명·본문 모양을 확인한 뒤 부른다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { CLOCK, type Clock, type Deadline, PLATFORM_LOGGER, type PlatformLogger, uuidv7 } from '@peaket/platform';
+import { CLOCK, type Clock, type Deadline, HOT_PATH_METRICS, type HotPathMetrics, type HotPathOutcome, PLATFORM_LOGGER, type PlatformLogger, timeHotPath, timeHotPathSync, uuidv7 } from '@peaket/platform';
 import {
   type HeldHold,
   type HoldResult,
@@ -98,6 +98,8 @@ export class HoldSeats {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
     /** 좌석 화면 행동 요약(BUILD_ORDER BOT-055). 주입하지 않으면 내지 않는다 */
     @Optional() @Inject(SEAT_BEHAVIOR) private readonly seatBehavior?: SeatBehaviorReporter,
+    /** 핫패스 구간 진단(BAT-027). 주입하지 않으면 계측하지 않는다 */
+    @Optional() @Inject(HOT_PATH_METRICS) private readonly hotPath?: HotPathMetrics,
   ) {}
 
   /** 좌석 Redis 일시 장애(SeatStoreUnavailable)로 503을 낼 때: 미룸 지표 seat_hold_deferred_total{reason="store_unavailable"}을 올리고 503 오류를 돌려준다(PRF-143) */
@@ -113,10 +115,28 @@ export class HoldSeats {
     if (deadline && deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS) return undefined;
     const deadlineMs = Math.max(1, Math.floor(deadline ? deadline.budgetFor(SESSION_RECORD_CAP_MS) : SESSION_RECORD_CAP_MS));
     try {
-      return (await this.holds.recordHold(sessionId, holdId, seatIds, { deadlineMs })) ?? undefined;
+      return (await timeHotPath(this.hotPath, 'hold.session_record', () => this.holds!.recordHold(sessionId, holdId, seatIds, { deadlineMs }))) ?? undefined;
     } catch (err) {
       this.logger?.warn({ errorName: err instanceof Error ? err.name : typeof err }, '구매 세션의 홀드 기록 실패');
       return undefined;
+    }
+  }
+
+  /**
+   * 좌석 홀드 요청 하나를 계측하고 #execute로 넘긴다(BAT-027, HOT-462).
+   * 전체 시간(hold.total)과 최종 결과(hold.outcomes)만 여기서 남기고, 구간 시간은 #execute 안에서 남긴다.
+   */
+  async execute(c: HoldCommand): Promise<HoldResponse> {
+    const done = this.hotPath?.start('hold.total');
+    try {
+      const response = await this.#execute(c);
+      this.hotPath?.outcome('ok');
+      return response;
+    } catch (err) {
+      this.hotPath?.outcome(holdOutcomeOf(err));
+      throw err;
+    } finally {
+      done?.();
     }
   }
 
@@ -180,14 +200,14 @@ export class HoldSeats {
    * 구매 세션 읽기·replay·hold가 SeatStoreUnavailable이라 503(STORE_UNAVAILABLE)이면 signals.holdDeferred('store_unavailable')를 한 번 부른다.
    * 좌석맵 판이 없어 내는 3의 503(NOT_READY)은 세지 않는다(좌석 저장소가 아니라 판 문제다).
    */
-  async execute(c: HoldCommand): Promise<HoldResponse> {
+  async #execute(c: HoldCommand): Promise<HoldResponse> {
     const started = this.clock.monotonicMs();
 
     // 1 구매 세션(계정 ID는 Redis 키에 들어가므로 모양부터 본다)
     if (!KEY_PART.test(c.accountId)) throw new HoldError('SESSION_NOT_FOUND', '계정 ID 모양이 키 조각이 아니다');
     let session;
     try {
-      session = await this.sessions.get(c.purchaseSessionId);
+      session = await timeHotPath(this.hotPath, 'hold.session', () => this.sessions.get(c.purchaseSessionId));
     } catch (err) {
       // 구매 세션 저장소(좌석 Redis)의 일시 장애·메모리 부족도 503이다. 아직 시도 기록을 남기기 전이다(PRF-136 리뷰)
       if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
@@ -199,20 +219,22 @@ export class HoldSeats {
     const requested = [...(c.body.seatIds ?? [])];
     let first: SeatRef | undefined;
     const record = (result: HoldAttemptResult, heldAtMs?: number, firstHeldInSession?: boolean): void => {
-      this.attempts.record({
-        eventId: c.eventId,
-        accountId: c.accountId,
-        purchaseSessionId: c.purchaseSessionId,
-        journeyId: session.journeyId,
-        mode: 'PICK',
-        seatIds: requested,
-        ...(first ? { tierId: first.tierId, sectionId: first.sectionId } : {}),
-        result,
-        ...(heldAtMs !== undefined ? { heldAtMs } : {}),
-        ...(firstHeldInSession !== undefined ? { firstHeldInSession } : {}),
-        occurredAtMs: this.clock.now(),
-        latencyMs: Math.max(0, this.clock.monotonicMs() - started),
-      });
+      timeHotPathSync(this.hotPath, 'hold.attempts', () =>
+        this.attempts.record({
+          eventId: c.eventId,
+          accountId: c.accountId,
+          purchaseSessionId: c.purchaseSessionId,
+          journeyId: session.journeyId,
+          mode: 'PICK',
+          seatIds: requested,
+          ...(first ? { tierId: first.tierId, sectionId: first.sectionId } : {}),
+          result,
+          ...(heldAtMs !== undefined ? { heldAtMs } : {}),
+          ...(firstHeldInSession !== undefined ? { firstHeldInSession } : {}),
+          occurredAtMs: this.clock.now(),
+          latencyMs: Math.max(0, this.clock.monotonicMs() - started),
+        }),
+      );
     };
     /** ERROR를 남기고 던질 오류를 돌려준다 */
     const refuse = (code: HoldErrorCode, message: string, details?: HoldErrorDetails): HoldError => {
@@ -245,7 +267,9 @@ export class HoldSeats {
       const opt = callOptions();
       let r: ReplayResult;
       try {
-        r = await this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) }, opt);
+        r = await timeHotPath(this.hotPath, 'hold.replay', () =>
+          this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) }, opt),
+        );
       } catch (err) {
         record('ERROR');
         if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
@@ -257,7 +281,7 @@ export class HoldSeats {
     };
 
     // 3 회차 설정, 4 판매 종료(주입 시계)
-    const config = await this.seatMap.config(c.eventId);
+    const config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
     if (!config) {
       const replayed = await replayOrRefuse();
       if (replayed) return replayed;
@@ -270,7 +294,7 @@ export class HoldSeats {
     }
 
     // 5 좌석 확인(Lua 전에. 없는 좌석·다른 회차·판매 제외석·겹침)
-    const refs = await this.seatMap.resolve(c.eventId, requested);
+    const refs = await timeHotPath(this.hotPath, 'hold.seat_resolve', () => this.seatMap.resolve(c.eventId, requested));
     first = refs[0];
     const seats = refs.filter((r): r is SeatRef => r !== undefined);
     if (seats.length !== requested.length || new Set(requested).size !== requested.length) {
@@ -285,19 +309,21 @@ export class HoldSeats {
     const opt = callOptions();
     let r: HoldResult;
     try {
-      r = await this.store.hold(
-        {
-          eventId: c.eventId,
-          accountId: c.accountId,
-          purchaseSessionId: c.purchaseSessionId,
-          holdId: uuidv7(this.clock),
-          idempotencyKey: c.idempotencyKey,
-          fingerprint: holdFingerprint(seatIds),
-          seats,
-          limit: config.perAccountLimit,
-          keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
-        },
-        opt,
+      r = await timeHotPath(this.hotPath, 'hold.lua', () =>
+        this.store.hold(
+          {
+            eventId: c.eventId,
+            accountId: c.accountId,
+            purchaseSessionId: c.purchaseSessionId,
+            holdId: uuidv7(this.clock),
+            idempotencyKey: c.idempotencyKey,
+            fingerprint: holdFingerprint(seatIds),
+            seats,
+            limit: config.perAccountLimit,
+            keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
+          },
+          opt,
+        ),
       );
     } catch (err) {
       record('ERROR');
@@ -344,4 +370,40 @@ const sortedIds = (ids: readonly string[]): string[] => [...ids].sort(byCodeUnit
 /** 201 본문(처음 응답이든 재생이든 저장소가 준 holdId·토큰·만료 시각) */
 function responseOf(h: HeldHold, seatIds: string[], view?: ReturnType<typeof holdSeatsView>): HoldResponse {
   return { holdId: h.holdId, seatIds, expiresAt: new Date(h.expiresAtMs).toISOString(), extendable: true, fencingToken: h.fencingToken, ...(view ?? {}) };
+}
+
+/** HoldError를 핫패스 결과 이름으로 바꾼다(고정 목록, 카디널리티 낮춤). 모르는 오류는 error다 */
+function holdOutcomeOf(err: unknown): HotPathOutcome {
+  if (!(err instanceof HoldError)) return 'error';
+  switch (err.code) {
+    case 'CONFLICT':
+      return 'conflict';
+    case 'QUOTA_EXCEEDED':
+      return 'quota_exceeded';
+    case 'REHOLD_WAIT':
+      return 'rehold_wait';
+    case 'PAUSED':
+      return 'paused';
+    case 'NOT_READY':
+      return 'not_ready';
+    case 'IDEM_REUSED':
+      return 'idem_reused';
+    case 'INVALID_SEAT':
+      return 'invalid_seat';
+    case 'SALE_ENDED':
+      return 'sale_ended';
+    case 'SESSION_NOT_FOUND':
+      return 'session_not_found';
+    case 'EVENT_MISMATCH':
+      return 'event_mismatch';
+    case 'DEADLINE_EXCEEDED':
+      return 'deadline_exceeded';
+    case 'STORE_UNAVAILABLE':
+      return 'store_unavailable';
+    case 'AUTO_NOT_SUPPORTED':
+    case 'SEATS_REQUIRED':
+      return 'invalid_request';
+    default:
+      return 'error';
+  }
 }

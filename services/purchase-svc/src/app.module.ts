@@ -1,6 +1,6 @@
 // 뿌리 모듈: 컨텍스트 모듈을 모은다. inventory(좌석 홀드·1초 만료 반복·구매 세션)와, 조립 값을 넘겼을 때만 booking(주문 생성 POST /v1/orders, BUILD_ORDER PRF-161)이다.
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
-import type { HotRedis } from '@peaket/platform';
+import type { HotPathMetrics, HotRedis } from '@peaket/platform';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
 import {
   type AdmissionOptions,
@@ -52,6 +52,8 @@ export class AppModule implements NestModule {
        * 운영은 purchase DB가 있을 때만 넘긴다(main.ts)
        */
       booking?: BookingModuleDeps;
+      /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+      hotPath?: HotPathMetrics;
     },
   ): DynamicModule {
     const inventory =
@@ -69,6 +71,7 @@ export class AppModule implements NestModule {
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
             ...(o.holdFreeze ? { holdFreeze: o.holdFreeze } : {}),
+            ...(o.hotPath ? { hotPath: o.hotPath } : {}),
           })
         : InventoryModule.register({
             storage: 'memory',
@@ -80,6 +83,7 @@ export class AppModule implements NestModule {
             ...(o.attempts ? { attempts: o.attempts } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
+            ...(o.hotPath ? { hotPath: o.hotPath } : {}),
           });
     return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : [])] };
   }

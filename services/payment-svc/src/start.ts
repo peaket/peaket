@@ -8,7 +8,7 @@
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
-import { createDatabase, createService, inClusterLeaseApi, type LeaseApi, LeaseElector, memoryLeaseApi, systemClock } from '@peaket/platform';
+import { createDatabase, createService, HotPathMetrics, inClusterLeaseApi, type LeaseApi, LeaseElector, memoryLeaseApi, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
@@ -149,6 +149,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const depositSignals = new PromPaymentDepositSignals();
   const checkoutSignals = new PromPaymentCheckoutSignals();
   const channelSignals = new PromPgChannelSignals();
+  // 핫패스 구간 진단(BAT-027): 레지스트리는 createService 뒤에 생기므로 지표 객체만 먼저 만들고, 듣기 전에 붙인다
+  const hotPath = new HotPathMetrics(SERVICE);
   // 포트원 채널의 관측 하위 결제사 표는 핫패스 풀에서 1초 [가정] 캐시로 읽는다(전환으로 포트원을 고른 결제창 준비와 관측기만, BUILD_ORDER PRF-203)
   const channelObservations = new CachedPgChannelObservations({ reader: new DrizzlePgChannelObserved({ database }), clock: systemClock, signals: channelSignals });
   // 전환의 대체 후보 빼기: 결제창 준비와 정지 조회가 같은 읽기를 쓴다(BUILD_ORDER PRF-203 코드 리뷰 F2)
@@ -192,6 +194,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   log = paymentCommandLog(service.logger);
   webhookLog = paymentWebhookLog(service.logger, systemClock);
   signals.register(service.metrics.registry);
+  hotPath.register(service.metrics.registry);
   confirmSignals.register(service.metrics.registry);
   unknownSignals.register(service.metrics.registry);
   guardSignals.register(service.metrics.registry);
@@ -256,7 +259,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 다시 띄운 파드는 승인 실행기를 켜기 전에 표를 한 번 읽어 낮춘 상한으로 이어 간다. 읽지 못하면 경고 한 줄(맞추기가 남긴다)이고 1초 [가정] 뒤 다시 읽는다(BUILD_ORDER PRF-203)
   await limitSync.refresh();
   limitSync.start();
-  const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, methodRefs, methodRefSignals, deposit, disallowedDeposit, resolution: resolutionSignals, trialResults: entryTrialResults, pauses: entryPauses, trialSignals: entryPauseSignals });
+  const confirmRunner = new PaymentConfirmRunner({ jobs: confirmJobs, gateways, guards, log: paymentConfirmLog(service.logger), signals: confirmSignals, clock: systemClock, podId, hotPath, methodRefs, methodRefSignals, deposit, disallowedDeposit, resolution: resolutionSignals, trialResults: entryTrialResults, pauses: entryPauses, trialSignals: entryPauseSignals });
   confirmRunner.start();
   const unknownResolver = new PaymentUnknownResolver({ queries: confirmJobs, gateways, guards, log: paymentUnknownLog(service.logger), signals: unknownSignals, clock: systemClock, methodRefs, methodRefSignals, deposit, disallowedDeposit, resolution: resolutionSignals });
   unknownResolver.start();

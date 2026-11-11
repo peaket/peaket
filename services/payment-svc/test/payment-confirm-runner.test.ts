@@ -4,7 +4,7 @@
 // - tick: 채널의 여유만큼 잡기, 호출을 기다리지 않음, 동시 상한(이 파일의 시험용 벌크헤드 32)
 // - start·stop·whenIdle: 100ms 반복, 틱 겹침 없음, stop이 돌던 호출과 그 뒤 쓰기를 기다림, 멈춘 뒤 임대 놓기
 // 실제 PostgreSQL·시뮬레이터로 도는 것(한 트랜잭션, SKIP LOCKED, 임대 잔해)은 test-int가 본다.
-import { Deadline, fakeClock, type FakeClock, type RequestContext, requestContext, runInRequestContext } from '@peaket/platform';
+import { Deadline, fakeClock, type FakeClock, HotPathMetrics, PlatformMetrics, type RequestContext, requestContext, runInRequestContext } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { type ConfirmRunnerTimer, PaymentConfirmRunner, type PaymentConfirmRunnerDeps } from '../src/modules/payment/application/payment-confirm-runner.js';
 import type { PaymentLedgerStatus } from '../src/modules/payment/domain/confirm-command.js';
@@ -2052,5 +2052,24 @@ describe('start·stop·whenIdle', () => {
     await waiting;
     expect(idle).toBe(true);
     expect(f.jobs.finished).toHaveLength(1);
+  });
+});
+
+describe('PaymentConfirmRunner: 핫패스 구간 진단(BAT-027, HOT-462)', () => {
+  test('BAT027_ 승인 한 건의 read·mark·gateway·finish 구간과 approved 결과를 남긴다', async () => {
+    const registry = new PlatformMetrics('payment-svc').registry;
+    const hotPath = new HotPathMetrics('payment-svc').register(registry);
+    const f = setup({ hotPath });
+    f.jobs.put(target());
+
+    await f.runner.runJob(job());
+
+    const text = await registry.metrics();
+    expect(text).toContain('hot_path_outcomes_total{service="payment-svc",outcome="approved"} 1');
+    for (const stage of ['payment.confirm.read', 'payment.confirm.mark', 'payment.confirm.gateway', 'payment.confirm.finish']) {
+      expect(text).toContain(`hot_path_stage_seconds_count{service="payment-svc",stage="${stage}"} 1`);
+    }
+    expect(text).not.toContain(ORDER_ID);
+    expect(text).not.toContain(SECRET_PAYMENT_KEY);
   });
 });

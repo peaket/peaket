@@ -29,7 +29,7 @@
 // - 기한 지난 행은 벌크헤드·토큰과 상관없이 채널당 50건 [가정]까지 따로 잡아 부르지 않고 끝낸다(여유가 없어도 끝나지 않고 쌓이지 않게). 그 행이 어쩌다 호출 갈래로 가도 보호기 없이는 부르지 않고 임대를 놓는다.
 // - 여유가 0인 틱은 표에 기다리는 행이 있을 때만 상한에 막힌 것으로 센다(표 없는 틱에서 지표가 오르지 않게).
 import { AsyncResource } from 'node:async_hooks';
-import type { Clock } from '@peaket/platform';
+import { type Clock, type HotPathMetrics, timeHotPath } from '@peaket/platform';
 import {
   CONFIRM_CALL_GUARD_MS,
   CONFIRM_EXPIRED_BATCH,
@@ -76,6 +76,8 @@ export interface PaymentConfirmRunnerDeps {
   disallowedDeposit?: (t: { readonly paymentId: string; readonly orderId: string }) => Promise<void>;
   /** lease_owner에 적는 값(파드 이름) */
   podId: string;
+  /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
   /** 없으면 전역 setInterval·clearInterval(unref) */
   timer?: ConfirmRunnerTimer;
   /** 잡기 주기(기본 CONFIRM_RUNNER_POLL_INTERVAL_MS 100ms [가정]) */
@@ -251,7 +253,7 @@ export class PaymentConfirmRunner {
     }
     let jobs: ConfirmJob[] = [];
     try {
-      jobs = await this.deps.jobs.claimDue(pg, reserved, this.deps.podId, this.deps.leaseMs ?? CONFIRM_LEASE_MS);
+      jobs = await timeHotPath(this.deps.hotPath, 'payment.confirm.claim', () => this.deps.jobs.claimDue(pg, reserved, this.deps.podId, this.deps.leaseMs ?? CONFIRM_LEASE_MS));
     } catch (err) {
       this.#runError('claim', err);
     }
@@ -313,7 +315,7 @@ export class PaymentConfirmRunner {
     this.#addHeld(held, pg, reserved);
     let jobs: ConfirmJob[] = [];
     try {
-      jobs = await claim();
+      jobs = await timeHotPath(this.deps.hotPath, 'payment.confirm.claim', claim);
     } catch (err) {
       this.#runError('claim', err);
     }
@@ -361,7 +363,7 @@ export class PaymentConfirmRunner {
     let gateway: PaymentGatewayPort | undefined;
     let deadlineMs: number | undefined;
     try {
-      target = await this.deps.jobs.read(job.paymentId);
+      target = await timeHotPath(this.deps.hotPath, 'payment.confirm.read', () => this.deps.jobs.read(job.paymentId));
       if (target !== undefined) {
         gateway = this.deps.gateways.of(target.pg);
         deadlineMs = gateway?.capabilities().confirmDeadlineMs;
@@ -401,7 +403,7 @@ export class PaymentConfirmRunner {
     if (!guard.circuitClosed()) return this.#circuitOpen(job, target);
     let mark: MarkConfirmSentResult;
     try {
-      mark = await this.deps.jobs.markSent(job);
+      mark = await timeHotPath(this.deps.hotPath, 'payment.confirm.mark', () => this.deps.jobs.markSent(job));
     } catch (err) {
       // 표시 없이 보낸 호출은 재시작 때 가려낼 수 없고, 재전송은 임대를 확인하지 못했으므로 부르지 않는다
       return this.#writeFailed(target, 'mark', err);
@@ -424,13 +426,15 @@ export class PaymentConfirmRunner {
     let failure: { err: unknown } | undefined;
     let notCalled = false;
     try {
-      answer = await guard.run(
-        () =>
-          this.#guarded(
-            gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId), ...(target.confirmToken === undefined ? {} : { confirmToken: target.confirmToken }), ...(target.txId === undefined ? {} : { txId: target.txId }) }),
-          ),
-        isConfirmOutage,
-        'confirm',
+      answer = await timeHotPath(this.deps.hotPath, 'payment.confirm.gateway', () =>
+        guard.run(
+          () =>
+            this.#guarded(
+              gateway.confirm({ orderId: target.orderId, paymentRef: target.paymentRef, amount: target.amount, idemKey: confirmIdemKey(target.orderId), ...(target.confirmToken === undefined ? {} : { confirmToken: target.confirmToken }), ...(target.txId === undefined ? {} : { txId: target.txId }) }),
+            ),
+          isConfirmOutage,
+          'confirm',
+        ),
       );
     } catch (err) {
       // 서킷이 끊어 부르지 않았다(판단과 호출 사이에 열렸다): 결과를 가정하지 않고 미룬다
@@ -536,7 +540,7 @@ export class PaymentConfirmRunner {
   /** 토큰이 없다(경합): 부르지 않았으므로 임대만 놓고 다음 틱으로 넘긴다(attempts는 오르지 않는다). 놓기가 실패해도 임대가 끝나면 다시 잡힌다 */
   async #noToken(job: ConfirmJob): Promise<ConfirmRunOutcome> {
     try {
-      await this.deps.jobs.release(job);
+      await timeHotPath(this.deps.hotPath, 'payment.confirm.release', () => this.deps.jobs.release(job));
     } catch {
       // 삼킨다
     }
@@ -568,7 +572,9 @@ export class PaymentConfirmRunner {
   async #reschedule(job: ConfirmJob, target: ConfirmTarget, outcome: 'in_progress' | 'no_adapter' | 'circuit_open', nextAtMs: number, clearSent = false): Promise<ConfirmRunOutcome> {
     let ok: boolean;
     try {
-      ok = await this.deps.jobs.reschedule(job, nextAtMs, { countRetry: outcome === 'in_progress', ...(outcome === 'circuit_open' ? { queued: true } : {}), ...(clearSent ? { clearSent: true } : {}) });
+      ok = await timeHotPath(this.deps.hotPath, 'payment.confirm.reschedule', () =>
+        this.deps.jobs.reschedule(job, nextAtMs, { countRetry: outcome === 'in_progress', ...(outcome === 'circuit_open' ? { queued: true } : {}), ...(clearSent ? { clearSent: true } : {}) }),
+      );
     } catch (err) {
       return this.#writeFailed(target, 'reschedule', err);
     }
@@ -581,7 +587,7 @@ export class PaymentConfirmRunner {
   async #drop(job: ConfirmJob, target: ConfirmTarget | undefined): Promise<ConfirmRunOutcome> {
     let ok: boolean;
     try {
-      ok = await this.deps.jobs.dropJob(job);
+      ok = await timeHotPath(this.deps.hotPath, 'payment.confirm.drop', () => this.deps.jobs.dropJob(job));
     } catch (err) {
       if (target !== undefined) return this.#writeFailed(target, 'drop', err);
       this.#runError('read', err);
@@ -602,7 +608,7 @@ export class PaymentConfirmRunner {
   async #finish(job: ConfirmJob, target: ConfirmTarget, finish: ConfirmFinish, outcome: PaymentConfirmOutcome): Promise<ConfirmRunOutcome> {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const result = await this.deps.jobs.finish(target, finish);
+        const result = await timeHotPath(this.deps.hotPath, 'payment.confirm.finish', () => this.deps.jobs.finish(target, finish));
         if (result === 'STALE') {
           this.#safe(() => this.deps.log.staleAnswer({ orderId: target.orderId }));
           return STALE;
@@ -630,7 +636,7 @@ export class PaymentConfirmRunner {
   async #letGo(job: ConfirmJob): Promise<ConfirmRunOutcome> {
     if (!job.hadPreviousOwner) {
       try {
-        await this.deps.jobs.release(job);
+        await timeHotPath(this.deps.hotPath, 'payment.confirm.release', () => this.deps.jobs.release(job));
       } catch {
         // 삼킨다
       }
@@ -646,6 +652,7 @@ export class PaymentConfirmRunner {
 
   #outcome(target: ConfirmTarget, outcome: PaymentConfirmOutcome): void {
     this.#safe(() => this.deps.signals.outcome(target.pg, outcome));
+    this.#safe(() => this.deps.hotPath?.outcome(outcome));
   }
 
   #runError(what: 'claim' | 'read' | 'call', err: unknown, orderId?: string): void {

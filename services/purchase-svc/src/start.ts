@@ -30,7 +30,7 @@
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
@@ -212,6 +212,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // - identity-svc 클라이언트(재확인·가명)는 차단기가 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 만든다. 그때까지(듣기 전) 부르면 '답 없음'과 같다
   // - 로그는 넘기지 않는다(모듈이 서비스 로거로 LoggerOrderLog를 만든다). 지표 PromOrderSignals는 서비스 레지스트리에 붙인다
   const orderSignals = new PromOrderSignals();
+  // 핫패스 구간 진단(BAT-027): 서비스 레지스트리는 createService 뒤에 생기므로 지표 객체만 먼저 만들고, 듣기 전에 붙인다
+  const hotPath = new HotPathMetrics(SERVICE);
   const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {};
   // - 결제 접수(POST /v1/orders/{orderId}/payment-acceptance, PRF-162)는 주문 생성과 같은 주문 전이 함수(DrizzleOrderStore)를 쓰고, 회차 슬롯 읽기는 좌석 Redis(RedisSeatSlots)다
   // - 접수를 커밋한 직후 Saga 실행기를 한 번 깨운다(onAccepted → OrderSagaRunner.kick, PRF-165). 실행기는 서비스 로거로 만들므로 늦게 묶는다(그 전이면 부르지 않는다)
@@ -257,6 +259,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
         onAccepted: (orderId) => sagaRunner?.kick(orderId),
         ...(paymentStatusReads && paymentStatusWaiters ? { paymentStatus: { reads: paymentStatusReads, waiters: paymentStatusWaiters, deposits: { read: (id, o) => (depositReader?.reader ?? noPaymentDepositReader).read(id, o) } } } : {}),
+        hotPath,
       }
     : undefined;
   // 주문 만료 고리(PRF-172): 판정기는 서비스 로거·지표로 만들므로 늦게 묶는다(그 전이면 부르지 않는다. 고리를 부르는 반복·요청은 듣기 시작한 뒤에만 돈다).
@@ -279,6 +282,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       holdFreeze: { pauseView: holdPauseView, lifecycle: holdLifecycle },
       ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
       ...(booking ? { booking } : {}),
+      hotPath,
       admission: {
         store: sessionStore,
         startedLog: new RedisSessionStartedLog(redis),
@@ -296,6 +300,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // DB 없이 뜬 것을 시작 로그에 남긴다(운영에서 비밀이 빠진 것을 결제 접수 연결(PRF-160) 전에도 알아채게, PRF-140 ① 리뷰)
   if (!database) service.logger.warn({ dep: 'postgres' }, 'PEAKET_DATABASE_URL이 없어 purchase DB 없이 떴다(판매 확정 저장소 SeatSales와 주문 생성 POST /v1/orders를 내놓지 않는다)');
   signals.register(service.metrics.registry);
+  hotPath.register(service.metrics.registry);
   // 주문 생성의 identity-svc 클라이언트(듣기 전에 붙인다). 재확인은 차단기로 감싼다(열리면 부르지 않고 토큰 판정, ADR-0055). 주소가 없으면 대역과 경고 한 줄
   // 가명 계산은 재확인과 따로인 차단기다(identity-svc-contact-ref: 가명이 막혀도 재확인 차단기를 열지 않는다). local·ci가 아닌데 주소가 없으면 여기서 던진다(시작 실패, 듣기 전)
   let identity: ReturnType<typeof identityClientsFromEnv> | undefined;
