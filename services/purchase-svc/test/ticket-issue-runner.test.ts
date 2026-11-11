@@ -3,7 +3,7 @@
 // - runJob: IssueTickets 입력, 성공 → complete·지표 issued·onOrderChanged, STALE → 경고·지표 stale, LEASE_LOST → 아무것도 하지 않음,
 //   다시 보낼 실패 → retry(다음 시각 = 지금 + 늘려 쉬기), 다시 보내지 않을 실패·맞지 않는 답 → stop·SEV2 로그, 쓰기 실패 → ERROR·임대 그대로
 // - runOne·kick: 그 주문을 곧바로 잡아 돈다(NO_JOB·LEASED 가름), 요청 맥락을 물려받지 않는다
-// - tick: ISSUE_DELAYED·기한 넘김을 틱마다, 게이지 10초마다, 50건 잡기, 파드 동시 8개, 남은 임대 5초 미만이면 놓기, 단계끼리 막지 않음
+// - tick: ISSUE_DELAYED·기한 넘김을 틱마다, 게이지 10초마다, 50건 잡기, 파드 동시 24개(BAT-029), 남은 임대 5초 미만이면 놓기, 단계끼리 막지 않음
 // - start·stop: 1초 반복 하나, 틱이 겹치지 않음, 예상 밖 오류에 반복이 죽지 않음, stop이 돌던 호출을 기다리고 시작하지 않은 행의 임대를 놓음
 // 가짜는 DB가 할 일을 흉내 낸다: claim은 임대 중이 아니면 지금 + 임대로 잡고, complete CONFIRMED·STALE이면 큐 행을 지운다.
 // 실제 PostgreSQL로 도는 잡기·성공 트랜잭션·ISSUE_DELAYED 한 번은 test-int/ticket-issue.int.test.ts(다른 담당)다.
@@ -612,12 +612,12 @@ describe('runOne·kick(승인 반영 커밋 직후 그 주문을 곧바로 깨�
 });
 
 describe('tick: 신호·게이지·잡기(설계 1·7·8·9)', () => {
-  test('틱 하나가 markDelayed(100)·markOverdue(100)·gauges·claimDue(min(50, 빈자리 8) = 8, 30초)를 부르고, 잡은 행을 모두 돌린 뒤 수를 돌려준다(리뷰 고침 H1) (ADR0106)', async () => {
+  test('틱 하나가 markDelayed(100)·markOverdue(100)·gauges·claimDue(min(50, 빈자리 24) = 24, 30초)를 부르고, 잡은 행을 모두 돌린 뒤 수를 돌려준다(리뷰 고침 H1) (ADR0106, BAT-029)', async () => {
     fx.due = [issueJob(), issueJob({ orderId: ORDER_B })];
     expect(await runner().tick()).toEqual({ claimed: 2, delayed: 0, overdue: 0, measured: true });
     expect(fx.delayedArgs).toEqual([100]);
     expect(fx.overdueArgs).toEqual([100]);
-    expect(fx.claimDueArgs).toEqual([[8, 30_000]]);
+    expect(fx.claimDueArgs).toEqual([[24, 30_000]]);
     expect(fx.completes.map((c) => c.orderId).sort()).toEqual([ORDER_ID, ORDER_B].sort());
   });
 
@@ -733,22 +733,22 @@ describe('tick: 신호·게이지·잡기(설계 1·7·8·9)', () => {
     expect(TICKET_ISSUE_LEASE_MIN_REMAINING_MS).toBe(5000);
   });
 
-  test('파드마다 동시 발권 호출은 8개까지다: 20건을 잡으면 8개만 먼저 부르고 끝나는 대로 이어 부른다 (ADR0106)', async () => {
-    fx.due = Array.from({ length: 20 }, (_, i) => issueJob({ orderId: orderN(i) }));
+  test('파드마다 동시 발권 호출은 24개까지다: 40건을 잡으면 24개만 먼저 부르고 끝나는 대로 이어 부른다 (ADR0106, BAT-029)', async () => {
+    fx.due = Array.from({ length: 40 }, (_, i) => issueJob({ orderId: orderN(i) }));
     fx.holdIssue = true;
     const p = later(runner().tick());
     await flush();
-    expect(fx.issueCommands).toHaveLength(8);
+    expect(fx.issueCommands).toHaveLength(24);
     fx.held.shift()!.resolve();
     await flush();
-    expect(fx.issueCommands).toHaveLength(9);
+    expect(fx.issueCommands).toHaveLength(25);
     while (fx.held.length > 0) {
       fx.releaseHeld();
       await flush();
     }
-    expect(await p).toMatchObject({ claimed: 20 });
-    expect(fx.maxInFlight).toBe(8);
-    expect(new Set(fx.completes.map((c) => c.orderId)).size).toBe(20);
+    expect(await p).toMatchObject({ claimed: 40 });
+    expect(fx.maxInFlight).toBe(24);
+    expect(new Set(fx.completes.map((c) => c.orderId)).size).toBe(40);
   });
 
   test('concurrency를 주면 그 수가 상한이다', async () => {
@@ -968,18 +968,18 @@ describe('리뷰 고침(2026-11-05 코드 리뷰)', () => {
     return { jobs, writes };
   }
 
-  test('리뷰 고침 H1_늘 CIRCUIT_OPEN인 ticket-svc에서 큐 행 50건이 기한이 돼도 한 틱이 잡는 수는 빈자리(8) 이하이고 동시 쓰기(retry)도 8 이하다(자리는 호출과 그 뒤 쓰기가 끝날 때까지 쥔다) (P-T39 ①, ADR0106) [ASVS v5.0.0-16.5.2]', async () => {
+  test('리뷰 고침 H1_늘 CIRCUIT_OPEN인 ticket-svc에서 큐 행 50건이 기한이 돼도 한 틱이 잡는 수는 빈자리(24) 이하이고 동시 쓰기(retry)도 24 이하다(자리는 호출과 그 뒤 쓰기가 끝날 때까지 쥔다) (P-T39 ①, ADR0106, BAT-029) [ASVS v5.0.0-16.5.2]', async () => {
     const pool = Array.from({ length: 50 }, (_, i) => issueJob({ orderId: orderN(i) }));
     const gate = deferred();
     const { jobs, writes } = countingJobs(pool, gate.promise);
     const p = later(runner({ jobs, issuer: circuitOpen }).tick());
     await flush();
-    expect(writes.max, '쓰기를 막아 둔 동안의 동시 쓰기').toBeLessThanOrEqual(8);
+    expect(writes.max, '쓰기를 막아 둔 동안의 동시 쓰기').toBeLessThanOrEqual(24);
     gate.resolve();
     const out = await p;
-    expect(out.claimed).toBeLessThanOrEqual(8);
-    expect(fx.claimDueArgs).toEqual([[8, 30_000]]);
-    expect(writes.max).toBeLessThanOrEqual(8);
+    expect(out.claimed).toBeLessThanOrEqual(24);
+    expect(fx.claimDueArgs).toEqual([[24, 30_000]]);
+    expect(writes.max).toBeLessThanOrEqual(24);
     expect(fx.retries).toHaveLength(out.claimed);
     expect(new Set(fx.retries.map((x) => x.code))).toEqual(new Set(['CIRCUIT_OPEN']));
     // 잡지 않은 행은 큐에 남아 다음 틱을 기다린다

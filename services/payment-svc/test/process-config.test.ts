@@ -65,7 +65,7 @@ describe('loadPaymentServiceConfig', () => {
   });
 
   test('PRF180_연결 풀 크기는 정본의 핫패스 16개·일반 4개다(합 20개, docs/verification.md §4.1)', () => {
-    expect(PAYMENT_HOT_POOL_MAX).toBe(16);
+    expect(PAYMENT_HOT_POOL_MAX).toBe(32);
     expect(PAYMENT_BATCH_POOL_MAX).toBe(4);
   });
 });

@@ -56,11 +56,11 @@ describe('ConfirmPayment 트랜잭션', () => {
     expect(d.options[0]).toMatchObject({ isolationLevel: 'read committed' });
   });
 
-  test('P-T53_리뷰 고침 M4: 남은 시간이 넉넉하면 문장 시간 한도는 상한 200ms다', async () => {
-    expect(CONFIRM_STATEMENT_TIMEOUT_MS).toBe(200);
+  test('P-T53_리뷰 고침 M4: 남은 시간이 넉넉하면 문장 시간 한도는 상한 400ms다(BAT-029)', async () => {
+    expect(CONFIRM_STATEMENT_TIMEOUT_MS).toBe(400);
     const d = fakeDatabase(0);
     await rejectedBy(storeOf(d).store(commandOf(), VALUES, { remainingMs: 5_000 }));
-    expect(limitOf(d)).toBe(200);
+    expect(limitOf(d)).toBe(400);
   });
 
   test('P-T53_리뷰 고침 M4: 남은 시간이 상한보다 짧으면 그 시간이 한도다', async () => {
@@ -73,7 +73,7 @@ describe('ConfirmPayment 트랜잭션', () => {
   test('P-T53_리뷰 고침 M4: 남은 시간 없는 호출(시험·내부 호출)은 상한을 쓴다', async () => {
     const d = fakeDatabase(0);
     await rejectedBy(storeOf(d).store(commandOf(), VALUES));
-    expect(limitOf(d)).toBe(200);
+    expect(limitOf(d)).toBe(400);
   });
 
   test('P-T53_리뷰 고침 M4: 연결을 기다린 시간은 남은 시간에서 뺀다', async () => {

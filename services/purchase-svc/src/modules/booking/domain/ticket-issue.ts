@@ -24,8 +24,8 @@ export const TICKET_ISSUE_POLL_INTERVAL_MS = 1000;
 export const TICKET_ISSUE_CLAIM_LIMIT = 50;
 /** 임대 30초 [가정](lease_until = 지금 + 이 값. 끝나기 전에는 다른 파드가 잡지 않는다) */
 export const TICKET_ISSUE_LEASE_MS = 30_000;
-/** 파드마다 동시에 부르는 발권 호출 수 8개 [가정] */
-export const TICKET_ISSUE_CONCURRENCY = 8;
+/** 파드마다 동시에 부르는 발권 호출 수 24개 [가정](BAT-029: 승인 100/s를 따라가도록 8에서 올렸다) */
+export const TICKET_ISSUE_CONCURRENCY = 24;
 /** 발권 호출 gRPC 데드라인 2초 [가정](docs/architecture.md 시간 초과 표 '발권 gRPC' 행) */
 export const TICKET_ISSUE_CALL_DEADLINE_MS = 2000;
 /**

@@ -69,9 +69,9 @@ export {
   type SeatRefShape,
   type SeatSlotSource,
 } from './adapters/inventory-bridges.js';
-export { DrizzleSaga, SagaRollback, type DrizzleSagaOptions, type SagaSeatSales } from './adapters/db/drizzle-saga.js';
+export { DrizzleSaga, SagaRollback, sagaDatabaseOptions, type DrizzleSagaOptions, type SagaSeatSales } from './adapters/db/drizzle-saga.js';
 export { DrizzleRebuildOrders } from './adapters/db/drizzle-rebuild-orders.js';
-export { DrizzlePaymentStatus, type DrizzlePaymentStatusOptions } from './adapters/db/drizzle-payment-status.js';
+export { DrizzlePaymentStatus, paymentStatusWaitTableDatabaseOptions, type DrizzlePaymentStatusOptions } from './adapters/db/drizzle-payment-status.js';
 export { GetPaymentStatus, type GetPaymentStatusCommand, type GetPaymentStatusDeps, type GetPaymentStatusResult } from './application/get-payment-status.js';
 export { DrizzleOrderStarts, type DrizzleOrderStartsOptions } from './adapters/db/drizzle-order-starts.js';
 export {

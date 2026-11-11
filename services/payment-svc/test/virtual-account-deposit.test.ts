@@ -442,11 +442,12 @@ describe('입금 대기 행의 조회 답', () => {
   });
 
   test.each([
-    [1, 5_000],
-    [2, 10_000],
-    [3, 20_000],
-    [4, 40_000],
-    [5, 60_000],
+    [1, 1_000],
+    [2, 2_000],
+    [3, 4_000],
+    [4, 8_000],
+    [5, 16_000],
+    [6, 32_000],
     [9, 60_000],
   ])('P-T36_리뷰 고침 M3: 입금 완료 통보 뒤에도 입금 대기면 %d번째 조회 다음은 %dms 뒤다', (queryAttempts, delay) => {
     expect(decideQueryAnswer(found('WAITING_FOR_DEPOSIT'), { ...ledger({ dueAtMs: DUE, notifiedAtMs: NOW - 1_000 }), queryAttempts }, NOW)).toEqual({ kind: 'ASK_AGAIN', outcome: 'deposit_waiting', nextAtMs: NOW + delay, keepAttempts: true });
@@ -459,7 +460,7 @@ describe('입금 대기 행의 조회 답', () => {
 
   test('P-T36_리뷰 고침 M3: 통보 뒤 10분 안이면 기한 + 10분이 지났어도 만료로 쓰지 않는다 [ASVS v5.0.0-2.3.3]', () => {
     const now = DUE + DEPOSIT_QUERY_GRACE_MS + 1;
-    expect(decideQueryAnswer(found('WAITING_FOR_DEPOSIT'), { ...ledger({ dueAtMs: DUE, notifiedAtMs: now - 1_000 }), queryAttempts: 1 }, now)).toEqual({ kind: 'ASK_AGAIN', outcome: 'deposit_waiting', nextAtMs: now + 5_000, keepAttempts: true });
+    expect(decideQueryAnswer(found('WAITING_FOR_DEPOSIT'), { ...ledger({ dueAtMs: DUE, notifiedAtMs: now - 1_000 }), queryAttempts: 1 }, now)).toEqual({ kind: 'ASK_AGAIN', outcome: 'deposit_waiting', nextAtMs: now + 1_000, keepAttempts: true });
   });
 
   test('P-T36_원장에 기한이 없으면 답의 기한으로 만료를 정한다', () => {

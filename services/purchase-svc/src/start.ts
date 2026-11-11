@@ -33,7 +33,7 @@ import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
-import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
+import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import {
   type BehaviorSignalPublisher,
   type BookingModuleDeps,
@@ -77,9 +77,11 @@ import {
   paymentConfirmsFromEnv,
   paymentDepositReaderFromEnv,
   paymentPullDatabaseOptions,
+  paymentStatusWaitTableDatabaseOptions,
   paymentResultReaderFromEnv,
   PaymentResultPuller,
   PaymentStatusWaitTable,
+  sagaDatabaseOptions,
   PromOrderExpirySignals,
   PromOrderSignals,
   PromPaymentPullSignals,
@@ -184,7 +186,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // purchase DB(PostgreSQL): 판매 확정 저장소 SeatSales의 연결(BUILD_ORDER PRF-140 ①). 핫패스 풀(대기 100ms)이다. 홀드 원장 적재(PRF-141)와 결제 접수 Saga(PRF-160)가 필수로 만들 때까지
   // PEAKET_DATABASE_URL이 없으면 DB 없이 뜬다(좌석 홀드·구매 세션은 좌석 Redis만 쓴다). 풀 크기는 PgBouncer 배치와 함께 정한다(wbs 2.11.2)
   const databaseUrl = env.PEAKET_DATABASE_URL;
-  const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE }) : undefined;
+  // 핫패스 풀 16개 [가정](BAT-029: 10개에서 올려 홀드·주문·결제 접수·상태 읽기가 서로의 연결을 덜 기다리게 한다)
+  const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE, max: 16 }) : undefined;
   const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
   const sessionStore = new RedisPurchaseSessionStore(redis);
   const sessions = new StoredPurchaseSessions({ store: sessionStore, ecdh, clock: systemClock });
@@ -227,7 +230,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let depositReader: ReturnType<typeof paymentDepositReaderFromEnv> | undefined;
   let depositBreaker: CircuitBreaker | undefined;
   const paymentStatusReads = database ? new DrizzlePaymentStatus({ database }) : undefined;
-  const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ reads: paymentStatusReads, clock: systemClock, signals: orderSignals }) : undefined;
+  // 기다림 표의 200ms 묶음 조회는 전용 일반 풀을 쓴다(BAT-029): 기다리는 주문이 많을 때 묶음 조회가 핫패스 풀(홀드·주문·상태 단건 읽기)을 빼앗지 않게.
+  // 요청 경로의 단건 읽기(paymentStatusReads)는 핫패스 풀 그대로다
+  let paymentStatusWaitDatabase: Database | undefined;
+  let paymentStatusWaiters: PaymentStatusWaitTable | undefined;
+  if (databaseUrl) {
+    const waitDb = createDatabase(paymentStatusWaitTableDatabaseOptions(databaseUrl));
+    paymentStatusWaitDatabase = waitDb;
+    paymentStatusWaiters = new PaymentStatusWaitTable({ reads: new DrizzlePaymentStatus({ database: waitDb }), clock: systemClock, signals: orderSignals, hotPath });
+  }
   // 결제 시도 시작(POST /v1/orders/{orderId}/payments, BUILD_ORDER PRF-191): 결제창 준비 클라이언트와 행동 신호 생산자는 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 묶는다.
   // 그 전이면(듣기 전) 불리지 않는다. 행동 신호는 브로커 주소가 없으면(local·ci) 버린다
   const startLate: { checkouts?: PaymentCheckouts; behavior?: BehaviorSignalPublisher } = {};
@@ -337,6 +348,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 그 밖의 환경은 주소가 없으면 여기서 던진다(시작 실패, 듣기 전). 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 끈다
   let payment: ReturnType<typeof paymentConfirmsFromEnv> | undefined;
   let paymentBreaker: CircuitBreaker | undefined;
+  let sagaDatabase: Database | undefined;
   // 새 결제 일시 정지 조회(GetNewPaymentPause, BUILD_ORDER HOT-070). 주소가 없으면 local·ci만 '정지 없음' 대역이고 그 밖의 환경은 시작을 실패시킨다
   const pauseBreaker = new CircuitBreaker({ service: SERVICE, ...PAYMENT_PAUSE_BREAKER_OPTIONS, registry: service.metrics.registry, logger: service.logger });
   const pauseClient = newPaymentPausesFromEnv(env, { profile: service.config.grpcLbProfile, breaker: pauseBreaker, onRejected: (reason) => service.logger.error({ dep: 'payment-svc', reason }, 'GetNewPaymentPause가 요청을 거절했다(부르는 쪽 결함)') });
@@ -344,7 +356,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   pauseLate.source = { read: async (ids, o) => { const r = await pauseClient.pauses.read(ids, o); return r.status === 'OK' ? { status: 'OK', pauses: r.pauses } : { status: 'FAILED' }; } };
   let paymentCheckouts: ReturnType<typeof paymentCheckoutsFromEnv> | undefined;
   let checkoutBreaker: CircuitBreaker | undefined;
-  if (booking && database) {
+  if (booking && database && databaseUrl) {
     paymentBreaker = new CircuitBreaker({ service: SERVICE, dependency: 'payment-svc', registry: service.metrics.registry, logger: service.logger });
     payment = paymentConfirmsFromEnv(env, { profile: service.config.grpcLbProfile, breaker: paymentBreaker });
     for (const w of payment.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
@@ -361,7 +373,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     paymentCheckouts = paymentCheckoutsFromEnv(env, { profile: service.config.grpcLbProfile, breaker: checkoutBreaker });
     for (const w of paymentCheckouts.warnings) service.logger.warn({ dep: PAYMENT_CHECKOUT_BREAKER }, w);
     startLate.checkouts = paymentCheckouts.checkouts;
-    const saga = new DrizzleSaga({ database, store: orderStore, sales: new DrizzleSeatSales(database), clock: systemClock });
+    // Saga 실행기는 전용 일반 풀을 쓴다(BAT-029): 예약·승인 명령·실패 기록 트랜잭션이 HTTP 요청의 핫패스 풀을 기다리지 않게
+    const sagaDb = createDatabase(sagaDatabaseOptions(databaseUrl));
+    sagaDatabase = sagaDb;
+    const saga = new DrizzleSaga({ database: sagaDb, store: orderStore, sales: new DrizzleSeatSales(sagaDb), clock: systemClock });
     sagaRunner = new OrderSagaRunner({
       jobs: saga,
       orders: saga,
@@ -373,6 +388,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       configs: new SeatMapSagaConfigs(seatMap),
       log: new LoggerSagaLog(service.logger),
       clock: systemClock,
+      hotPath,
       ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
     });
   }
@@ -412,16 +428,20 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let consumerOptions: PurchaseConsumersOptions | undefined;
   let behaviorProducer: KafkaProducer | undefined;
   let consumerDatabase: Database | undefined;
+  let paymentConsumerDatabase: Database | undefined;
   let applyPaymentResult: ReturnType<typeof paymentResultApply> | undefined;
   if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiters) {
     const issueRunner = ticketRunner;
     const voidRunner = ticketVoidRunner;
     const kafka = kafkaConsumersFromEnv(env, SERVICE);
     if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
+    // 홀드 원장 소비자와 결제 결과 소비자의 풀을 나눈다(BAT-029): 회차 키 하나에 결제 사건이 몰려도 서로의 연결을 기다리지 않는다
     const consumerDb = createDatabase(consumerDatabaseOptions(databaseUrl));
     consumerDatabase = consumerDb;
+    const paymentConsumerDb = createDatabase(paymentConsumerDatabaseOptions(databaseUrl));
+    paymentConsumerDatabase = paymentConsumerDb;
     applyPaymentResult = paymentResultApply({
-      database: consumerDb,
+      database: paymentConsumerDb,
       store: orderStore,
       sessions: {
         // 결제 확정(COMPLETED)도 모듈의 끝내기와 같은 고리를 지난다(그 세션의 다른 열린 주문을 다시 본다, PRF-172)
@@ -434,6 +454,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       onOrderChanged: (orderId) => paymentStatusWaiters.notify(orderId),
       onApproved: (orderId) => issueRunner.kick(orderId),
       ...(voidRunner ? { onDepositReversed: (orderId: string) => voidRunner.kick(orderId) } : {}),
+      hotPath,
     });
     if (kafka.enabled) {
       // 행동 신호 생산자(telemetry.behavior, PRF-191). 메시지 값은 JSON 대역이고, 연결 실패는 시작을 막지 않는다(보내기가 실패하면 telemetry_dropped_total만 오른다)
@@ -448,6 +469,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         clientId: `${SERVICE}-${kafka.env}-${podId}`,
         auth: kafka.auth,
         database: consumerDb,
+        paymentDatabase: paymentConsumerDb,
         ledger: new DrizzleSeatHoldLedger(consumerDb),
         applyPaymentResult,
         registry: service.metrics.registry,
@@ -612,7 +634,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           service.logger.error({ err: errorSummary(err) }, 'payment-svc 결과 당기기 클라이언트 닫기 실패');
         }
         // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
-        return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);
+        return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), paymentConsumerDatabase?.close(), paymentStatusWaitDatabase?.close(), sagaDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);
       })
       .then(() => undefined);
     return closing;

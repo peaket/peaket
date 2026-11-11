@@ -52,7 +52,8 @@ import { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from '../order-events.js';
 import type { DrizzleOrderStore } from './drizzle-orders.js';
 
 /** 발권 실행기 전용 DB 풀의 연결 수 4개 [가정](docs/features/payment.md §2 '발권 호출과 재시도 큐의 첫 구현' 실행기) */
-const TICKET_ISSUE_DB_MAX = 4;
+/** 발권 실행기 전용 풀의 연결 수 24개 [가정](BAT-029: 승인 100/s의 발권 완료 트랜잭션을 따라가도록 4에서 올렸다) */
+const TICKET_ISSUE_DB_MAX = 24;
 
 /**
  * 발권 실행기의 purchase DB(PEAKET_DATABASE_URL) 풀 설정(main.ts가 createDatabase에 넘기고 종료 때 닫는다, 리뷰 고침 H1).

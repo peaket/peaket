@@ -7,7 +7,7 @@
 // 보류(HOLD)는 PaymentResultHeld를 던진다: 같은 결과일 실패라 키 단위 소비자가 5회 [가정] 해 본 뒤 held_event로 옮기고 같은 주문의 뒤 사건도 보류한다.
 // purchase DB 연결 실패·시간 초과는 그대로 던진다: 플랫폼 isTransientError가 일시 실패로 보고 파티션을 멈춰 기다린다(packages/platform keyed-consumer.ts).
 // 이 층은 어댑터·계약 패키지를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
-import type { Clock } from '@peaket/platform';
+import { type Clock, type HotPathMetrics, type HotPathOutcome, timeHotPath } from '@peaket/platform';
 import { transitionById } from '../domain/order.js';
 import { PAYMENT_STATUS_IMMEDIATE } from '../domain/payment-status.js';
 import {
@@ -75,6 +75,8 @@ export interface ApplyPaymentResultDeps {
   onApproved?: (orderId: string) => void;
   /** 입금 오류 되돌림(T21)을 커밋한 뒤 부를 것(티켓 무효 실행기 깨우기, TicketVoidRunner.kick, BUILD_ORDER HOT-152). 던지지 않는다. 없으면 부르지 않는다 */
   onDepositReversed?: (orderId: string) => void;
+  /** 결제 결과 반영 구간 진단(BAT-029). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 /**
@@ -130,7 +132,24 @@ export class ApplyPaymentResult {
    * @throws Error purchase DB 오류(연결 실패·시간 초과는 처리기가 일시 실패로 본다)
    */
   async execute(event: PaymentResultEvent): Promise<ApplyPaymentResultOutcome> {
-    let order = await this.deps.reads.read(event.orderId);
+    const done = this.deps.hotPath?.start('payment.result.total');
+    let outcome: HotPathOutcome = 'error';
+    try {
+      const result = await this.#execute(event);
+      outcome = result.status === 'APPLIED' ? 'applied' : 'skipped';
+      return result;
+    } catch (err) {
+      if (err instanceof PaymentResultHeld) outcome = 'held';
+      else if (err instanceof PaymentResultConflict) outcome = 'conflict';
+      throw err;
+    } finally {
+      this.deps.hotPath?.outcome(outcome);
+      done?.();
+    }
+  }
+
+  async #execute(event: PaymentResultEvent): Promise<ApplyPaymentResultOutcome> {
+    let order = await timeHotPath(this.deps.hotPath, 'payment.result.read', () => this.deps.reads.read(event.orderId));
     for (let retry = 0; ; retry += 1) {
       const d = decidePaymentResult(event, order);
       if (d.kind === 'SKIP') {
@@ -150,9 +169,9 @@ export class ApplyPaymentResult {
       // APPLY는 주문이 있을 때만 나온다(결정 ①)
       const o = order;
       if (o === undefined) throw new Error('주문 없이 반영 결정이 나왔다(코드 오류)');
-      const out = await this.#write(d, event, o);
+      const out = await timeHotPath(this.deps.hotPath, 'payment.result.write', () => this.#write(d, event, o));
       if (out.status === 'APPLIED') {
-        await this.#afterCommit(d, o);
+        await timeHotPath(this.deps.hotPath, 'payment.result.after_commit', () => this.#afterCommit(d, o));
         // 바로 답할 상태로 갔으면(실패·입금 대기·UNKNOWN) 구매 세션 일(끝내기·Paying 풀기)을 마친 뒤 이 주문을 기다리는 long polling을 깨운다
         // (브라우저가 결과를 받고 움직일 때 세션이 정리돼 있게). APPROVED(T9·T13·T16)는 기다리는 상태라 깨우지 않는다(PRF-166 리뷰 고침 L3)
         const to = transitionById(d.transition)?.to;
@@ -171,7 +190,7 @@ export class ApplyPaymentResult {
       if (out.reason === 'NOT_FOUND') throw this.#held(event, 'IMPOSSIBLE');
       // 지금 상태가 출발이 아니다: 다시 읽어 한 번 더 정한다. 그래도면 경합으로 끝낸다
       if (retry >= PAYMENT_RESULT_STALE_RETRIES) throw new PaymentResultConflict(event.orderId);
-      order = await this.deps.reads.read(event.orderId);
+      order = await timeHotPath(this.deps.hotPath, 'payment.result.read', () => this.deps.reads.read(event.orderId));
     }
   }
 

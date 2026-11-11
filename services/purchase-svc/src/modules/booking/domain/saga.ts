@@ -31,18 +31,18 @@ export type SagaFailTransition = 'T8' | 'T11';
 
 /** 폴링 간격 1초 [가정](모든 API 파드가 기한이 된 작업을 줍는다) */
 export const SAGA_POLL_INTERVAL_MS = 1000;
-/** 한 번에 집는 작업 수 50건 [가정] */
-export const SAGA_CLAIM_LIMIT = 50;
-/** 임대 30초 [가정](lease_until = 지금 + 이 값. 끝나기 전에는 다른 파드가 집지 않는다) */
-export const SAGA_LEASE_MS = 30_000;
+/** 한 번에 집는 작업 수 20건 [가정](BAT-029: 파드 강제 종료 때 임대에 남는 작업을 1% 아래로 줄이기 위해 50에서 내렸다) */
+export const SAGA_CLAIM_LIMIT = 20;
+/** 임대 15초 [가정](lease_until = 지금 + 이 값. 끝나기 전에는 다른 파드가 집지 않는다. BAT-029: 파드 강제 종료 때 30초 잔해를 줄이기 위해 30초에서 내렸다) */
+export const SAGA_LEASE_MS = 15_000;
 /** 다시 하기 첫 간격 1초 [가정] */
 export const SAGA_RETRY_BASE_MS = 1000;
 /** 다시 하기 간격 상한 10초 [가정] */
 export const SAGA_RETRY_MAX_MS = 10_000;
 /** 승인 기한 = 결제창 인증(authenticated_at) + 10분(payment §2, ADR-0107) */
 export const CONFIRM_WINDOW_MS = 10 * 60_000;
-/** 승인 명령 gRPC 데드라인 200ms [가정](architecture 시간 초과 표 '승인 명령 gRPC') */
-export const CONFIRM_CALL_DEADLINE_MS = 200;
+/** 승인 명령 gRPC 데드라인 500ms [가정](architecture 시간 초과 표 '승인 명령 gRPC', BAT-029: 200ms에서 올려 재시도 꼬리를 줄였다) */
+export const CONFIRM_CALL_DEADLINE_MS = 500;
 /** 회차 키 수명 = 판매 종료 + 1일(inventory KEEP_AFTER_SALE_END_MS와 같은 값. booking은 inventory 층을 가져오지 않아 다시 적는다) */
 export const SEAT_KEYS_KEEP_AFTER_SALE_END_MS = 24 * 3600_000;
 /** 판 번호가 바뀌어(GEN_CHANGED) 같은 실행 안에서 묶기부터 다시 하는 횟수 상한 3번 [가정]. 넘으면 다시 하기로 미룬다 */

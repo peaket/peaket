@@ -533,9 +533,9 @@ describe('LoggerTicketIssueLog', () => {
 });
 
 describe('발권 실행기 전용 DB 풀(리뷰 고침 H1)', () => {
-  test('리뷰 고침 H1_발권 실행기의 큐 쓰기는 핫패스 풀과 따로인 전용 일반 풀(profile general, 연결 4개 [가정], 이름 purchase-svc-ticket-issue)을 쓴다. 주소는 받은 그대로다 (ADR0106) [ASVS v5.0.0-16.5.2]', () => {
+  test('리뷰 고침 H1_발권 실행기의 큐 쓰기는 핫패스 풀과 따로인 전용 일반 풀(profile general, 연결 24개 [가정], 이름 purchase-svc-ticket-issue)을 쓴다. 주소는 받은 그대로다 (ADR0106, BAT-029) [ASVS v5.0.0-16.5.2]', () => {
     const url = 'postgres://purchase:secret@db.internal:5432/purchase';
-    expect(ticketIssueDatabaseOptions(url)).toEqual({ url, profile: 'general', max: 4, applicationName: 'purchase-svc-ticket-issue' });
+    expect(ticketIssueDatabaseOptions(url)).toEqual({ url, profile: 'general', max: 24, applicationName: 'purchase-svc-ticket-issue' });
   });
 });
 

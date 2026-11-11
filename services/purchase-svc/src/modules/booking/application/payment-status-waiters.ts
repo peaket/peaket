@@ -13,7 +13,7 @@
 //   멈춘 뒤의 wait()은 표에 넣지 않고 곧바로 TIMEOUT이다(리뷰 고침 L1).
 // 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
 import { AsyncResource } from 'node:async_hooks';
-import type { Clock } from '@peaket/platform';
+import { type Clock, type HotPathMetrics, timeHotPath } from '@peaket/platform';
 import {
   PAYMENT_STATUS_BATCH_MAX,
   PAYMENT_STATUS_POLL_INTERVAL_MS,
@@ -49,6 +49,8 @@ export interface PaymentStatusWaitTableDeps {
   batchMax?: number;
   /** 함께 붙잡는 기다림 수 상한(기본 PAYMENT_STATUS_WAITERS_MAX 2,000건 [가정]) */
   maxWaiters?: number;
+  /** 묶음 조회 구간 진단(BAT-029). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 /** 기다리는 요청 하나 */
@@ -150,6 +152,15 @@ export class PaymentStatusWaitTable implements PaymentStatusWaiters {
    */
   async pollOnce(): Promise<number> {
     if (this.#byOrder.size === 0) return 0;
+    const done = this.deps.hotPath?.start('payment.status.poll');
+    try {
+      return await this.#pollDue();
+    } finally {
+      done?.();
+    }
+  }
+
+  async #pollDue(): Promise<number> {
     const nowMono = this.deps.clock.monotonicMs();
     const ids: string[] = [];
     for (const [id, entry] of this.#byOrder) {
@@ -162,9 +173,11 @@ export class PaymentStatusWaitTable implements PaymentStatusWaiters {
     const views = new Map<string, PaymentStatusView>();
     try {
       // 같은 틱에 차례로 읽는다(한 번에 batchMax건 넘게 묻지 않는다)
-      for (let i = 0; i < ids.length; i += max) {
-        for (const v of await this.deps.reads.readMany(ids.slice(i, i + max))) views.set(v.orderId, v);
-      }
+      await timeHotPath(this.deps.hotPath, 'payment.status.poll.read', async () => {
+        for (let i = 0; i < ids.length; i += max) {
+          for (const v of await this.deps.reads.readMany(ids.slice(i, i + max))) views.set(v.orderId, v);
+        }
+      });
     } catch {
       // purchase DB를 잠시 못 쓴다: 아무도 깨우지 않고 다음 틱에 다시 읽는다
       this.#signal((s) => s.paymentStatusPollFailed());

@@ -383,21 +383,21 @@ describe('응답 유실 뒤 단독 조회', () => {
     expect(await drive(h.resolver())).toBe(1);
     let l = await ledger(f);
     expect(l.p).toMatchObject({ status: 'UNKNOWN', query_attempts: 1 });
-    expect(l.p.next_query_at!.getTime()).toBe(first + 5_000);
+    expect(l.p.next_query_at!.getTime()).toBe(first + UNKNOWN_QUERY_BASE_MS);
 
-    h.clock.advance(5_000);
+    h.clock.advance(UNKNOWN_QUERY_BASE_MS);
     const second = h.clock.now();
     expect(await drive(h.resolver())).toBe(1);
     l = await ledger(f);
     expect(l.p).toMatchObject({ status: 'UNKNOWN', query_attempts: 2 });
-    expect(l.p.next_query_at!.getTime()).toBe(second + 10_000);
+    expect(l.p.next_query_at!.getTime()).toBe(second + UNKNOWN_QUERY_BASE_MS * 2);
     expect(typesOf(l.events)).toEqual(['ACCEPTED', 'CONFIRM_SENT', 'UNKNOWN']);
     expect((await outboxOf(f)).map((r) => valueOf(r).type)).toEqual(['UNKNOWN']);
     const text = await h.metrics();
     expect(queryCount(text, 'still_processing') - queryCount(before, 'still_processing')).toBe(2);
 
     sim.patchQuery(f.paymentKey, { status: 'DONE', approvedAt: new Date(SIM_NOW_MS).toISOString() });
-    h.clock.advance(10_000);
+    h.clock.advance(UNKNOWN_QUERY_BASE_MS * 2);
     expect(await drive(h.resolver())).toBe(1);
     expect((await ledger(f)).p.status).toBe('APPROVED');
     expect(queriesOf(f)).toHaveLength(3);
@@ -440,7 +440,7 @@ describe('조회가 결과를 정한 때', () => {
 
     const { p, events } = await ledger(f);
     expect(p).toMatchObject({ status: 'UNKNOWN', approved_at: null });
-    expect(p.next_query_at!.getTime()).toBe(now + 5_000);
+    expect(p.next_query_at!.getTime()).toBe(now + UNKNOWN_QUERY_BASE_MS);
     expect(typesOf(events)).toEqual(['ACCEPTED', 'CONFIRM_SENT', 'UNKNOWN']);
     const lines = logLines(h, 'payment-unknown-amount-mismatch', f.orderId);
     expect(lines).toHaveLength(1);
@@ -683,7 +683,7 @@ describe('리뷰 고침', () => {
     expect(valueOf(resolved!)).toMatchObject({ type: 'RESOLVED', payMethodCategory: 'EASY_PAY' });
   });
 
-  test('P-T3_리뷰 고침 M6: 잡을 때는 최소 15초 [가정]를 밀어 두고 답을 본 뒤 실제 간격(5초)으로 다시 쓴다', async () => {
+  test('P-T3_리뷰 고침 M6: 잡을 때는 최소 15초 [가정]를 밀어 두고 답을 본 뒤 실제 간격(1초)으로 다시 쓴다', async () => {
     const h = await harness();
     const f = await unknownPayment();
     let during: number | undefined;
@@ -696,7 +696,7 @@ describe('리뷰 고침', () => {
     await drive(h.resolver());
 
     expect(during).toBe(now + 15_000);
-    expect((await ledger(f)).p.next_query_at!.getTime()).toBe(now + 5_000);
+    expect((await ledger(f)).p.next_query_at!.getTime()).toBe(now + UNKNOWN_QUERY_BASE_MS);
   });
 
   test('P-T3_리뷰 고침 M6: 다른 파드가 다시 잡은 뒤의 늦은 답은 간격을 덮어쓰지 않는다 [ASVS v5.0.0-2.3.4]', async () => {

@@ -1,6 +1,6 @@
 // 주문 Saga 1단계 실행기(docs/features/payment.md §2 'Saga 1단계의 첫 구현', docs/data.md §5 'Saga 1단계', BUILD_ORDER PRF-165).
 // 결제 접수가 커밋된 직후 같은 파드가 그 주문의 작업을 비동기로 한 번 돌리고(kick), 모든 API 파드가 1초 [가정]마다 기한이 된 작업을
-// 짧은 트랜잭션으로 50건 [가정]까지 집어(임대 30초 [가정]) 커밋한 뒤 돈다(pollOnce). 잠금을 쥔 채 바깥 호출(좌석 Redis·payment-svc)을 하지 않는다.
+// 짧은 트랜잭션으로 20건 [가정]까지 집어(임대 15초 [가정]) 커밋한 뒤 돈다(pollOnce). 잠금을 쥔 채 바깥 호출(좌석 Redis·payment-svc)을 하지 않는다.
 // 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
 //
 // 단계 RESERVE(reserveStep):
@@ -29,7 +29,7 @@
 // 정함(정본에 없다): kick·틱은 실행기를 만든 때(시작 파일, 요청 밖)의 비동기 맥락에서 돈다. 결제 접수 요청의 맥락(남은 시간·요청 로그)을 물려받으면
 //   202를 보낸 뒤 남은 시간이 0이라 차단기·gRPC가 승인 명령을 부르지 않는다. 회차 좌석맵 판이 없으면 설정 오류로 보고 오류 로그 뒤 다시 한다.
 import { AsyncResource } from 'node:async_hooks';
-import type { Clock } from '@peaket/platform';
+import { type Clock, type HotPathMetrics, timeHotPath } from '@peaket/platform';
 import {
   type ConfirmRefs,
   type ConfirmSent,
@@ -88,6 +88,8 @@ export interface OrderSagaDeps {
   configs: SagaEventConfigs;
   log: SagaLog;
   clock: Clock;
+  /** Saga 예약·승인 명령 구간 진단(BAT-029). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
   /** 없으면 전역 setInterval·clearInterval(unref) */
   timer?: SagaTimer;
   /** 폴링 간격(기본 SAGA_POLL_INTERVAL_MS 1초 [가정]) */
@@ -206,6 +208,15 @@ export class OrderSagaRunner {
    * 집은 작업 하나를 돈다: 주문을 읽고 step에 따라 reserveStep·confirmStep·releaseStep(RESERVE가 ADVANCED면 CONFIRM을 이어서). 예상 밖 예외는 다시 하기
    */
   async runJob(job: SagaJob): Promise<SagaStepOutcome> {
+    const done = this.deps.hotPath?.start('saga.total');
+    try {
+      return await this.#runJob(job);
+    } finally {
+      done?.();
+    }
+  }
+
+  async #runJob(job: SagaJob): Promise<SagaStepOutcome> {
     // 예외가 났을 때 다시 하기의 기준이 되는 지금 단계의 작업(RESERVE를 마치면 CONFIRM, attempts 0)
     let current = job;
     try {
@@ -239,16 +250,18 @@ export class OrderSagaRunner {
       // ② 좌석 묶기
       let pinned;
       try {
-        pinned = await this.deps.pins.pin({
-          eventId: order.eventId,
-          accountId: order.accountId,
-          holdId: order.holdId,
-          purchaseSessionId: order.purchaseSessionId,
-          seatIds,
-          limit: config.perAccountLimit,
-          orderGen,
-          keepUntilMs,
-        });
+        pinned = await timeHotPath(this.deps.hotPath, 'saga.pin', () =>
+          this.deps.pins.pin({
+            eventId: order.eventId,
+            accountId: order.accountId,
+            holdId: order.holdId,
+            purchaseSessionId: order.purchaseSessionId,
+            seatIds,
+            limit: config.perAccountLimit,
+            orderGen,
+            keepUntilMs,
+          }),
+        );
       } catch (err) {
         // 좌석 Redis 일시 장애는 다시 한다(쓰였는지 몰라도 같은 입력으로 다시 부르면 모두 내 홀드라 OK다). 그 밖(설정 오류·망가진 키)은 runJob이 받는다
         if (err instanceof OrderSeatStoreUnavailable) return this.#retry(job, 'seat_store_unavailable');
@@ -277,16 +290,18 @@ export class OrderSagaRunner {
       if (!(await this.deps.orders.recordPinned(order.orderId, orderGen, pinned.gen))) return this.#skipOrderState(job);
       orderGen = pinned.gen;
       // ③ 판매 예약 트랜잭션(판 번호 대조 → 판매 행 PENDING·한도 → 작업 CONFIRM → T7)
-      const reserved = await this.deps.reserve.reserve({
-        orderId: order.orderId,
-        eventId: order.eventId,
-        accountId: order.accountId,
-        seatIds,
-        limit: config.perAccountLimit,
-        orderGen,
-        actor: ORDER_SAGA_ACTOR,
-        ...leaseOf(job),
-      });
+      const reserved = await timeHotPath(this.deps.hotPath, 'saga.reserve', () =>
+        this.deps.reserve.reserve({
+          orderId: order.orderId,
+          eventId: order.eventId,
+          accountId: order.accountId,
+          seatIds,
+          limit: config.perAccountLimit,
+          orderGen,
+          actor: ORDER_SAGA_ACTOR,
+          ...leaseOf(job),
+        }),
+      );
       switch (reserved.status) {
         case 'RESERVED':
           // T7(RESERVED)은 기다리는 상태라 long polling을 깨우지 않는다(PRF-166 리뷰 고침 L3)
@@ -323,27 +338,29 @@ export class OrderSagaRunner {
     const virtualAccountAllowed = sagaConfig?.virtualAccountAllowed;
     let outcome;
     try {
-      outcome = await this.deps.confirms.confirm(
-        {
-          orderId: order.orderId,
-          attemptId: attempt.attemptId,
-          eventId: order.eventId,
-          attemptNo: attempt.attemptNo,
-          ...(authenticatedAtMs !== undefined ? { authenticatedAtMs } : {}),
-          pg: attempt.pg,
-          refs: confirmRefsOf(attempt),
-          amount: order.amount,
-          ...(entryOpensAtMs !== undefined ? { entryOpensAtMs } : {}),
-          ...(virtualAccountAllowed !== undefined ? { virtualAccountAllowed } : {}),
-          // min(200ms, 승인 기한까지 남은 시간). 기한이 지났으면(이미 보낸 명령을 다시 보낸다) 200ms
-          deadlineMs: past || authenticatedAtMs === undefined ? CONFIRM_CALL_DEADLINE_MS : Math.min(CONFIRM_CALL_DEADLINE_MS, confirmDeadlineAtMs(authenticatedAtMs) - now),
-        },
-        {
-          // 보내기 바로 전에 보낸 시각을 적고 커밋한다(차단기가 들여보낸 때만 불린다). 적지 못하면 보내지 않는다
-          beforeSend: async () => {
-            if (!(await this.deps.jobs.markConfirmSent(order.orderId, job.leaseUntilMs))) throw new LeaseLost();
+      outcome = await timeHotPath(this.deps.hotPath, 'saga.confirm', () =>
+        this.deps.confirms.confirm(
+          {
+            orderId: order.orderId,
+            attemptId: attempt.attemptId,
+            eventId: order.eventId,
+            attemptNo: attempt.attemptNo,
+            ...(authenticatedAtMs !== undefined ? { authenticatedAtMs } : {}),
+            pg: attempt.pg,
+            refs: confirmRefsOf(attempt),
+            amount: order.amount,
+            ...(entryOpensAtMs !== undefined ? { entryOpensAtMs } : {}),
+            ...(virtualAccountAllowed !== undefined ? { virtualAccountAllowed } : {}),
+            // min(500ms, 승인 기한까지 남은 시간). 기한이 지났으면(이미 보낸 명령을 다시 보낸다) 500ms
+            deadlineMs: past || authenticatedAtMs === undefined ? CONFIRM_CALL_DEADLINE_MS : Math.min(CONFIRM_CALL_DEADLINE_MS, confirmDeadlineAtMs(authenticatedAtMs) - now),
           },
-        },
+          {
+            // 보내기 바로 전에 보낸 시각을 적고 커밋한다(차단기가 들여보낸 때만 불린다). 적지 못하면 보내지 않는다
+            beforeSend: async () => {
+              if (!(await this.deps.jobs.markConfirmSent(order.orderId, job.leaseUntilMs))) throw new LeaseLost();
+            },
+          },
+        ),
       );
     } catch (err) {
       if (err instanceof LeaseLost) return { kind: 'SKIPPED', reason: 'LEASED' };

@@ -16,7 +16,7 @@
 //   (주문의 나이 = 그 주문을 가장 늦게 기다리기 시작한 요청부터, [정함]: 새로 온 탭은 빠른 간격을 받는다). 나이는 deps.clock의 단조 시계로 잰다.
 // - M4 묶음 조회가 깨울 때 읽은 주문 모습을 CHANGED와 함께 넘긴다(notify·없어진 주문은 모습 없음). stop()은 남은 기다림을 STOPPED로 깨운다.
 // - L1 멈춘 뒤의 wait()은 표에 넣지 않고 곧바로 TIMEOUT. L6 묶음 조회 실패는 signals.paymentStatusPollFailed()로 한 번씩 센다.
-import { fakeClock } from '@peaket/platform';
+import { fakeClock, type HotPathMetrics } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
   type PaymentStatusBody,
@@ -596,5 +596,23 @@ describe('size와 게이지(purchase_payment_status_waiters)', () => {
     expect(table.size()).toBe(1);
     table.notify(A);
     expect(await a.p).toBe('CHANGED');
+  });
+});
+
+describe('계측(BAT-029)', () => {
+  test('pollOnce는 payment.status.poll·payment.status.poll.read 구간을 남긴다', async () => {
+    const stages: string[] = [];
+    const hotPath = {
+      start: (stage: string) => {
+        stages.push(stage);
+        return () => undefined;
+      },
+    } as unknown as HotPathMetrics;
+    table = make({ hotPath });
+    put(A, { status: 'CONFIRMED' });
+    const a = waitOn(A);
+    await table.pollOnce();
+    expect(await a.p).toBe('CHANGED');
+    expect(stages).toEqual(['payment.status.poll', 'payment.status.poll.read']);
   });
 });

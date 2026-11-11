@@ -1,5 +1,5 @@
 // payment-svc 승인 명령 gRPC 클라이언트(PaymentService.ConfirmPayment, docs/api/proto/peaket/payment/v1/payment.proto, docs/architecture.md 시간 초과 표
-// '승인 명령 gRPC' 데드라인 200ms [가정], docs/features/payment.md §2 'Saga 1단계의 첫 구현', BUILD_ORDER PRF-165).
+// '승인 명령 gRPC' 데드라인 500ms [가정](BAT-029), docs/features/payment.md §2 'Saga 1단계의 첫 구현', BUILD_ORDER PRF-165).
 // - 요청: order_id·attempt_id·pg(PgProvider)·payment_ref(toss{payment_key} | portone{payment_id, tx_id, payment_token})·amount(Money{krw})·
 //   event_id(주문의 회차)·authenticated_at(결제 시도의 인증 시각, Timestamp)·attempt_no(결제 시도 순번, BUILD_ORDER PRF-180)·entry_opens_at(회차의 입장 시각, 있을 때만, BUILD_ORDER PRF-191).
 //   시뮬레이터는 toss 칸을 쓴다 [가정](proto에 시뮬레이터 전용 칸이 없다).
@@ -18,8 +18,8 @@ import type { ConfirmCallOptions, ConfirmCommand, ConfirmOutcome, ConfirmResultN
 
 /** 주소 환경 값(host:port) */
 export const PAYMENT_GRPC_ADDR_ENV = 'PEAKET_PAYMENT_GRPC_ADDR';
-/** 승인 명령 데드라인 상한 200ms [가정](architecture 시간 초과 표. domain/saga.ts CONFIRM_CALL_DEADLINE_MS와 같은 값) */
-export const CONFIRM_CAP_MS = 200;
+/** 승인 명령 데드라인 상한 500ms [가정](architecture 시간 초과 표. domain/saga.ts CONFIRM_CALL_DEADLINE_MS와 같은 값, BAT-029) */
+export const CONFIRM_CAP_MS = 500;
 
 /** 의존성 이름(span·의존 로그·차단기 지표) */
 const DEPENDENCY = 'payment-svc';

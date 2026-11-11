@@ -27,6 +27,7 @@ import {
   type PaymentStatusWaiters,
   type PaymentStatusWake,
   type PaymentStatusWakeUp,
+  paymentStatusWaitTableDatabaseOptions,
 } from '../src/modules/booking/index.js';
 import { ACCOUNT, NOW } from './order-cases.js';
 
@@ -444,5 +445,9 @@ describe('GetPaymentStatus: 핫패스 구간 진단(BAT-027, HOT-462)', () => {
     expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="payment.status.wait"} 1');
     expect(text).toContain('hot_path_stage_seconds_count{service="purchase-svc",stage="payment.status.read"} 2');
     expect(text).not.toContain(ORDER);
+  });
+
+  test('BAT-029: 기다림 표 묶음 조회 전용 풀은 일반 프로필 2연결이다', () => {
+    expect(paymentStatusWaitTableDatabaseOptions('postgres://x')).toMatchObject({ profile: 'general', max: 2, applicationName: 'purchase-svc-payment-status' });
   });
 });

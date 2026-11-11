@@ -8,8 +8,8 @@ import { channelKeysInUse, isPortonePgProvider, type PortoneChannelMap, portoneC
 
 /** 업무 gRPC 포트 [가정](identity-svc와 같다. BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
 export const DEFAULT_PAYMENT_GRPC_PORT = 50051;
-/** 파드마다 핫패스 풀 연결 16개 [가정](ConfirmPayment) */
-export const PAYMENT_HOT_POOL_MAX = 16;
+/** 파드마다 핫패스 풀 연결 32개 [가정](ConfirmPayment. BAT-029: 승인 명령 저장이 200ms 예산을 넘지 않게 16에서 올렸다) */
+export const PAYMENT_HOT_POOL_MAX = 32;
 /** 파드마다 일반 풀 연결 4개 [가정](BatchGetPayments, applicationName payment-svc-batch) */
 export const PAYMENT_BATCH_POOL_MAX = 4;
 /** local·ci에서 PEAKET_PAYMENT_POD_COUNT가 비었을 때의 파드 수 1개 [가정] */

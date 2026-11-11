@@ -1,5 +1,5 @@
 // 발권 호출과 재시도 큐의 값과 규칙(booking domain/ticket-issue.ts, docs/features/payment.md §2 '발권 호출과 재시도 큐의 첫 구현', ADR-0106 결정 2, BUILD_ORDER PRF-170).
-// - 상수: 1초 반복·50건·임대 30초·동시 8개·데드라인 2초·남은 임대 5초·늘려 쉬기(1초·2배·60초·±20%)·ISSUE_DELAYED 60초·신호 100건·게이지 10초
+// - 상수: 1초 반복·50건·임대 30초·동시 24개(BAT-029)·데드라인 2초·남은 임대 5초·늘려 쉬기(1초·2배·60초·±20%)·ISSUE_DELAYED 60초·신호 100건·게이지 10초
 // - 실패 분류: 다시 보낼 실패(설계 5)와 다시 보내지 않을 실패(설계 6)가 겹치지 않고 모든 코드를 덮는다(CANCELLED·UNKNOWN·CIRCUIT_OPEN은 다시, BAD_ANSWER는 멈춤)
 // - 늘려 쉬기: min(1초 × 2^(attempts − 1), 60초), 흔들기 0.8~1.2배를 정수로 내림
 // - issuedTicketsMatch: 답의 티켓이 주문 좌석마다 정확히 하나이고 티켓 ID가 비지 않은 소문자 UUID이며 서로 다른지
@@ -95,7 +95,7 @@ const STOP_EXPECTED: readonly TicketIssueFailureCode[] = [
 const ALL_CODES: readonly TicketIssueFailureCode[] = [...GRPC_STATUS_NAMES.filter((n) => n !== 'OK'), 'CIRCUIT_OPEN', 'BAD_ANSWER'] as TicketIssueFailureCode[];
 
 describe('상수(설계 1~3·7·9의 [가정]·[정함] 값)', () => {
-  test('반복 1초·한 번에 50건·임대 30초·파드 동시 8개·데드라인 2초·부르기 전 남은 임대 5초 (ADR0106)', () => {
+  test('반복 1초·한 번에 50건·임대 30초·파드 동시 24개·데드라인 2초·부르기 전 남은 임대 5초 (ADR0106, BAT-029)', () => {
     expect({
       poll: TICKET_ISSUE_POLL_INTERVAL_MS,
       claim: TICKET_ISSUE_CLAIM_LIMIT,
@@ -103,7 +103,7 @@ describe('상수(설계 1~3·7·9의 [가정]·[정함] 값)', () => {
       concurrency: TICKET_ISSUE_CONCURRENCY,
       deadline: TICKET_ISSUE_CALL_DEADLINE_MS,
       minRemaining: TICKET_ISSUE_LEASE_MIN_REMAINING_MS,
-    }).toEqual({ poll: 1000, claim: 50, lease: 30_000, concurrency: 8, deadline: 2000, minRemaining: 5000 });
+    }).toEqual({ poll: 1000, claim: 50, lease: 30_000, concurrency: 24, deadline: 2000, minRemaining: 5000 });
     // 데드라인 2초 + 성공 반영이 임대 안에 끝나게 남은 임대가 데드라인보다 길다
     expect(TICKET_ISSUE_LEASE_MIN_REMAINING_MS).toBeGreaterThan(TICKET_ISSUE_CALL_DEADLINE_MS);
   });

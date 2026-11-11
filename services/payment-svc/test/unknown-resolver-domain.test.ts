@@ -45,7 +45,7 @@ const decide = (answer: QueryResult, nowMs = NOW) => decideQueryAnswer(answer, L
 describe('상수', () => {
   test('PRF182_가정 값이 정본과 같다(주기 1초·동시 16·묶음 50·5초에서 두 배 최대 60초·1시간)', () => {
     expect([UNKNOWN_QUERY_POLL_INTERVAL_MS, UNKNOWN_QUERY_CONCURRENCY, UNKNOWN_QUERY_BATCH]).toEqual([1_000, 16, 50]);
-    expect([UNKNOWN_QUERY_BASE_MS, UNKNOWN_QUERY_FACTOR, UNKNOWN_QUERY_MAX_MS]).toEqual([5_000, 2, 60_000]);
+    expect([UNKNOWN_QUERY_BASE_MS, UNKNOWN_QUERY_FACTOR, UNKNOWN_QUERY_MAX_MS]).toEqual([1_000, 2, 60_000]);
     expect(UNKNOWN_OVERDUE_MS).toBe(3_600_000);
     expect(PAYMENT_UNKNOWN_QUERY_OUTCOMES).toEqual(['approved', 'failed', 'waiting', 'still_processing', 'not_found', 'amount_mismatch', 'cancelled_at_pg', 'query_failed', 'no_adapter', 'deposit_approved', 'deposit_expired', 'deposit_waiting', 'late_deposit', 'deposit_reversed', 'reversal_waiting', 'reversal_unconfirmed', 'reversal_no_time']);
     expect(RESOLVED_EVENT_TYPE).toBe('RESOLVED');
@@ -136,9 +136,10 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
   test.each([
     [1, 15_000],
     [2, 15_000],
-    [3, 20_000],
-    [4, 40_000],
-    [5, 60_000],
+    [3, 15_000],
+    [4, 15_000],
+    [5, 16_000],
+    [6, 32_000],
   ])('P-T3_리뷰 고침 M6: %i번째 잡기는 최소 15초 [가정]를 민다(%ims, 조회가 도는 동안 다시 잡히지 않게)', (attempts, ms) => {
     expect(unknownQueryClaimHoldMs(attempts)).toBe(ms);
   });
@@ -173,12 +174,13 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
 
 describe('unknownQueryDelayMs', () => {
   test.each([
-    [1, 5_000],
-    [2, 10_000],
-    [3, 20_000],
-    [4, 40_000],
-    [5, 60_000],
-    [6, 60_000],
+    [1, 1_000],
+    [2, 2_000],
+    [3, 4_000],
+    [4, 8_000],
+    [5, 16_000],
+    [6, 32_000],
+    [7, 60_000],
     [1_000_000, 60_000],
   ])('P-T3_%i번째 조회 뒤 간격은 %ims다', (attempts, ms) => {
     expect(unknownQueryDelayMs(attempts)).toBe(ms);

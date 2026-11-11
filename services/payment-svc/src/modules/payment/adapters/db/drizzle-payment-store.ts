@@ -9,8 +9,8 @@ import { confirmIdemKey, type FailureCategory, type PgName } from '../../domain/
 import type { CallBudget, NewPaymentValues, PaymentCommandStore, PaymentDetailReader, PaymentStateReader, StoreCommandResult } from '../../domain/ports.js';
 import { payment, paymentConfirmJob, paymentEvent } from './schema.js';
 
-/** ConfirmPayment 문장 시간 한도 상한 200ms [가정](데드라인 200ms와 같다, docs/architecture.md §5) */
-export const CONFIRM_STATEMENT_TIMEOUT_MS = 200;
+/** ConfirmPayment 문장 시간 한도 상한 400ms [가정](데드라인 500ms 안, BAT-029: 200ms에서 올려 승인 명령 저장이 예산을 넘지 않게) */
+export const CONFIRM_STATEMENT_TIMEOUT_MS = 400;
 /** BatchGetPayments 문장 시간 한도 상한 400ms [가정](데드라인 500ms 안, docs/data.md §5.1) */
 export const BATCH_GET_STATEMENT_TIMEOUT_MS = 400;
 

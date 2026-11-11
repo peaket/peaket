@@ -21,7 +21,7 @@
 // - 작업 행을 바꾸는 메서드는 자기 임대 값(lease_until = 잡은 값)을 받으면 조건으로 건다(리뷰 낮음). 트랜잭션마다 문장 시간 한도 5초 [가정](요청 밖이다).
 // - 판매 예약 트랜잭션에서 작업 행이 없거나 남의 임대면 ORDER_STATE로 되돌린다(작업 없는 RESERVED 주문을 만들지 않는다).
 // - 결제 참조를 지우는 결제 시도는 그 주문의 ACCEPTED 시도다. 시도 상태(status)는 바꾸지 않는다(정본에 없다).
-import type { Clock, Database, DbTransaction } from '@peaket/platform';
+import type { Clock, Database, DatabaseOptions, DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import { ACTOR_PATTERN, type OrderStatus } from '../../domain/order.js';
 import type {
@@ -53,6 +53,17 @@ export interface SagaSeatSales {
     input: { eventId: string; orderId: string; accountId: string; seatIds: readonly string[]; limit: number },
   ): Promise<{ status: 'RESERVED' } | { status: 'QUOTA_EXCEEDED' } | { status: 'SEAT_TAKEN'; seatIds: string[] }>;
   releasePendingIn(tx: DbTransaction, release: SagaSaleRelease): Promise<number>;
+}
+
+/** 주문 Saga 실행기 전용 풀의 연결 수 24개 [가정](BAT-029: 12개에서 올려 잡기·예약·승인 명령이 40/s를 따라가게) */
+const SAGA_DB_MAX = 24;
+
+/**
+ * 주문 Saga 실행기의 purchase DB 풀 설정(BAT-029). 핫패스 풀과 따로 두어, 예약·승인 명령·실패 기록 트랜잭션이
+ * 홀드·주문·결제 상태 HTTP 요청의 연결을 기다리지 않게 한다. 실행기 전용 일반 풀(연결을 기다린다)이다
+ */
+export function sagaDatabaseOptions(url: string): DatabaseOptions {
+  return { url, profile: 'general', max: SAGA_DB_MAX, applicationName: 'purchase-svc-order-saga' };
 }
 
 export interface DrizzleSagaOptions {

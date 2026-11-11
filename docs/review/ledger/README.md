@@ -75,10 +75,11 @@
 
 ## 표 읽기 경고
 
+- docs/devops.md:912: D-T36 시나리오 칸의 ⑦이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/identity.md:732: I-T51 시나리오 칸의 ①⑥이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/identity.md:754: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:707: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다
-- docs/features/seat-hold.md:548: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/seat-hold.md:551: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1615: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1620: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:334: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다

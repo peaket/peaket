@@ -6,7 +6,7 @@
 // L1 승인된 주문의 다시 온 사건은 구매 세션 끝내기만 다시, L5 같은 사건의 보류 로그는 한 번(시간 창 안), L6 금액·결제사 대조 실패는 보안 이벤트 표시.
 // PRF-170: 승인(T9·T13·T16)을 커밋한 뒤 발권 실행기 깨우기(onApproved)를 한 번 부르고, 실패·입금 대기·보류·건너뜀에는 부르지 않는다.
 // 실제 PostgreSQL로 도는 승인·실패 트랜잭션은 test-int(다른 담당)다.
-import { fakeClock, isTransientError } from '@peaket/platform';
+import { fakeClock, type HotPathMetrics, isTransientError } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
   ApplyPaymentResult,
@@ -812,5 +812,30 @@ describe('InventoryPaymentResultSessions(커밋 뒤 구매 세션 일의 invento
     );
     await expect(s2.complete(PSID)).rejects.toBe(bad);
     await expect(s2.unmarkPaying(PSID)).rejects.toBe(bad);
+  });
+});
+
+describe('계측(BAT-029)', () => {
+  test('execute는 읽기·쓰기·커밋 뒤 일·전체 구간과 applied 결과를 남긴다', async () => {
+    const stages: string[] = [];
+    const outcomes: string[] = [];
+    const hotPath = {
+      start: (stage: string) => {
+        stages.push(stage);
+        return () => undefined;
+      },
+      outcome: (outcome: string) => void outcomes.push(outcome),
+    } as unknown as HotPathMetrics;
+    await run(paymentEvent(), { hotPath });
+    expect(stages).toEqual(['payment.result.total', 'payment.result.read', 'payment.result.write', 'payment.result.after_commit']);
+    expect(outcomes).toEqual(['applied']);
+  });
+
+  test('보류로 끝난 execute는 held 결과를 남긴다', async () => {
+    const outcomes: string[] = [];
+    const hotPath = { start: () => () => undefined, outcome: (outcome: string) => void outcomes.push(outcome) } as unknown as HotPathMetrics;
+    fx.outcome = { status: 'SOLD_MISMATCH' };
+    await expect(run(paymentEvent(), { hotPath })).rejects.toBeInstanceOf(PaymentResultHeld);
+    expect(outcomes).toEqual(['held']);
   });
 });

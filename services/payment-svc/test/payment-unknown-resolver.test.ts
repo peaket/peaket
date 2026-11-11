@@ -751,7 +751,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
 
     await resolver.runJob(claimed);
 
-    expect(queries.rescheduled).toEqual([{ job: claimed, nextAtMs: NOW + 10_000 }]);
+    expect(queries.rescheduled).toEqual([{ job: claimed, nextAtMs: NOW + 2_000 }]);
     expect(order).toEqual(['query', 'reschedule']);
     expect(signals.outcomes).toEqual([['SIMULATOR', outcome]]);
   });
@@ -979,7 +979,7 @@ describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
     const { queries, gateway, resolver } = setup();
     gateway.fallback = () => ({ kind: 'UNKNOWN' });
     await resolver.runJob(job());
-    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 5_000 }]);
+    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 1_000 }]);
   });
 
   test('P-T40_조회의 429는 상한을 낮추지 않고 지표만 센다(first false)이고 다시 묻는다 [ASVS v5.0.0-2.3.2]', async () => {

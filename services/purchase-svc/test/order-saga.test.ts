@@ -23,9 +23,11 @@ import {
   OrderSeatStoreUnavailable,
   type ReserveTxInput,
   type ReserveTxOutcome,
+  SAGA_CLAIM_LIMIT,
   SAGA_CONFIRM_PARK_MS,
   SAGA_GEN_RESTART_MAX,
   SAGA_LEASE_MIN_REMAINING_MS,
+  SAGA_LEASE_MS,
   type SagaAttemptView,
   type SagaEventConfig,
   type SagaFailInput,
@@ -82,7 +84,7 @@ function sagaOrder(over: Partial<SagaOrderView> = {}): SagaOrderView {
 
 /** 집은 작업 행 */
 function sagaJob(over: Partial<SagaJob> = {}): SagaJob {
-  return { orderId: ORDER_ID, eventId: EVENT, step: 'RESERVE', attempts: 0, nextAttemptAtMs: NOW, leaseUntilMs: NOW + 30_000, ...over };
+  return { orderId: ORDER_ID, eventId: EVENT, step: 'RESERVE', attempts: 0, nextAttemptAtMs: NOW, leaseUntilMs: NOW + SAGA_LEASE_MS, ...over };
 }
 
 type Call =
@@ -456,7 +458,7 @@ function notCalled(...ports: Call[]): void {
 }
 
 /** T8 실패 기록 입력(release 없음, 자기 임대 조건 = 집은 작업의 임대) */
-const t8 = (reason: string) => ({ orderId: ORDER_ID, transition: 'T8', reason, actor: 'system:order-saga', leaseUntilMs: NOW + 30_000 });
+const t8 = (reason: string) => ({ orderId: ORDER_ID, transition: 'T8', reason, actor: 'system:order-saga', leaseUntilMs: NOW + SAGA_LEASE_MS });
 /** 실패 해제 입력(좌석 차례는 보지 않는다) */
 function expectRelease(input: OrderReleaseInput | undefined): void {
   expect(input).toBeDefined();
@@ -529,7 +531,7 @@ describe('RESERVE ② 좌석 묶기', () => {
       limit: 4,
       orderGen: SEAT_GEN,
       actor: ORDER_SAGA_ACTOR,
-      leaseUntilMs: NOW + 30_000,
+      leaseUntilMs: NOW + SAGA_LEASE_MS,
     });
     expect(ORDER_SAGA_ACTOR).toBe('system:order-saga');
   });
@@ -853,12 +855,12 @@ describe('CONFIRM 승인 명령', () => {
   const reserved = (over: Partial<SagaOrderView> = {}) => sagaOrder({ status: 'RESERVED', ...over });
   const confirmJob = (over: Partial<SagaJob> = {}) => sagaJob({ step: 'CONFIRM', ...over });
 
-  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 200ms. ACCEPTED면 ConfirmSent.done(결제 참조 지우기·작업 행 AWAIT, PRF-171) 뒤 DONE', async () => {
+  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 500ms. ACCEPTED면 ConfirmSent.done(결제 참조 지우기·작업 행 AWAIT, PRF-171) 뒤 DONE', async () => {
     const order = reserved();
     fx.put(order, confirmJob());
     const out = await runner().confirmStep(confirmJob(), order);
     expect(out).toEqual({ kind: 'DONE' });
-    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW - 2 * MIN, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200 }]);
+    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW - 2 * MIN, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 500 }]);
     expectInOrder(fx.calls, ['confirms.confirm', 'confirmSent.done']);
     expect(fx.doneOrders).toEqual([ORDER_ID]);
     expect(fx.jobRows.get(ORDER_ID)?.step).toBe('AWAIT');
@@ -901,8 +903,10 @@ describe('CONFIRM 승인 명령', () => {
     [10 * MIN - 150, 150],
     [10 * MIN - 1, 1],
     [10 * MIN - 200, 200],
-    [10 * MIN - 201, 200],
-  ])('FR011_ADR0107_데드라인은 min(200ms, 승인 기한까지 남은 시간)이다: 인증 %ims 뒤 → %ims', async (elapsed, deadlineMs) => {
+    [10 * MIN - 201, 201],
+    [10 * MIN - 500, 500],
+    [10 * MIN - 501, 500],
+  ])('FR011_ADR0107_데드라인은 min(500ms, 승인 기한까지 남은 시간)이다: 인증 %ims 뒤 → %ims', async (elapsed, deadlineMs) => {
     const order = reserved({ attempt: tossAttempt({ authenticatedAtMs: NOW - elapsed }) });
     fx.put(order, confirmJob());
     await runner().confirmStep(confirmJob(), order);
@@ -921,7 +925,7 @@ describe('CONFIRM 승인 명령', () => {
       transition: 'T11',
       reason: 'EXPIRED',
       actor: 'system:order-saga',
-      leaseUntilMs: NOW + 30_000,
+      leaseUntilMs: NOW + SAGA_LEASE_MS,
       release: { eventId: EVENT, orderId: ORDER_ID, accountId: ACCOUNT, seatIds: SEAT_IDS_SORTED },
     });
     expectInOrder(fx.calls, ['failures.fail', 'pins.releaseFailed']);
@@ -939,7 +943,7 @@ describe('CONFIRM 승인 명령', () => {
 
   // 리뷰 고침 H1(2026-11-05): 승인 명령을 한 번이라도 보냈으면(작업 행 confirm_sent_at) purchase는 혼자 T11을 하지 않는다
   // (결과를 모르는 명령이 payment-svc에 적혔을 수 있다: 결제는 됐는데 주문이 FAILED가 된다). 같은 주문 ID로 계속 다시 보내고 결과는 trade.payments로 온다(PRF-163)
-  test('H1_대역이 매번 200ms를 넘겨 답해도(RETRYABLE deadline) 승인 기한이 지난 뒤의 runJob은 T11을 하지 않고 같은 주문 ID로 다시 보낸다: 주문 RESERVED 그대로·판매 행 지우기·실패 해제 없음', async () => {
+  test('H1_대역이 매번 500ms를 넘겨 답해도(RETRYABLE deadline) 승인 기한이 지난 뒤의 runJob은 T11을 하지 않고 같은 주문 ID로 다시 보낸다: 주문 RESERVED 그대로·판매 행 지우기·실패 해제 없음', async () => {
     const order = reserved({ attempt: tossAttempt({ authenticatedAtMs: NOW - 10 * MIN + 500 }) });
     fx.put(order, confirmJob());
     fx.confirmQueue = [
@@ -951,11 +955,11 @@ describe('CONFIRM 승인 명령', () => {
     // 보내기 바로 전에 보낸 시각을 적었다(커밋한 뒤 보낸다)
     expect(fx.jobRows.get(ORDER_ID)?.confirmSentAtMs).toBe(NOW);
     clock.advance(1000);
-    const job = { ...fx.jobRows.get(ORDER_ID)!, leaseUntilMs: clock.now() + 30_000 };
+    const job = { ...fx.jobRows.get(ORDER_ID)!, leaseUntilMs: clock.now() + SAGA_LEASE_MS };
     expect(await r.runJob(job)).toEqual({ kind: 'RETRY', reason: 'confirm_retryable', nextAtMs: clock.now() + 2000 });
     expect(fx.sentCommands.map((c) => [c.orderId, c.deadlineMs])).toEqual([
-      [ORDER_ID, 200],
-      [ORDER_ID, 200],
+      [ORDER_ID, 500],
+      [ORDER_ID, 500],
     ]);
     notCalled('failures.fail', 'pins.releaseFailed', 'confirmSent.done');
     expect(fx.orderRows.get(ORDER_ID)?.status).toBe('RESERVED');
@@ -969,7 +973,7 @@ describe('CONFIRM 승인 명령', () => {
     expect((await r.runJob(confirmJob())).kind).toBe('RETRY');
     expect(fx.jobRows.get(ORDER_ID)?.confirmSentAtMs).toBeUndefined();
     clock.advance(1000);
-    const job = { ...fx.jobRows.get(ORDER_ID)!, leaseUntilMs: clock.now() + 30_000 };
+    const job = { ...fx.jobRows.get(ORDER_ID)!, leaseUntilMs: clock.now() + SAGA_LEASE_MS };
     expect(await r.runJob(job)).toEqual({ kind: 'FAILED', transition: 'T11', reason: 'EXPIRED' });
     expect(fx.sentCommands).toEqual([]);
     expect(fx.failInputs.map((f) => [f.transition, f.reason])).toEqual([['T11', 'EXPIRED']]);
@@ -1080,7 +1084,7 @@ describe('runOne·pollOnce·kick', () => {
   test('FR011_runOne은 claim(주문, 임대 30초)으로 집어 돈다', async () => {
     fx.put(sagaOrder());
     expect(await runner().runOne(ORDER_ID)).toEqual({ kind: 'DONE' });
-    expect(fx.claimArgs).toEqual([[ORDER_ID, 30_000]]);
+    expect(fx.claimArgs).toEqual([[ORDER_ID, SAGA_LEASE_MS]]);
   });
 
   test('FR011_runOne: 작업 행이 없으면 SKIPPED NO_JOB, 다른 실행이 임대 중이면 SKIPPED LEASED이고 단계를 돌지 않는다', async () => {
@@ -1098,7 +1102,7 @@ describe('runOne·pollOnce·kick', () => {
     fx.readErrors.set(ORDER_B, new Error('db down'));
     fx.due = [sagaJob(), sagaJob({ orderId: ORDER_B }), sagaJob({ orderId: ORDER_C })];
     expect(await runner().pollOnce()).toBe(3);
-    expect(fx.claimDueArgs).toEqual([[50, 30_000]]);
+    expect(fx.claimDueArgs).toEqual([[SAGA_CLAIM_LIMIT, SAGA_LEASE_MS]]);
     expect(fx.confirmCommands.map((c) => c.orderId).sort()).toEqual([ORDER_ID, ORDER_C].sort());
     expect(fx.stepErrors.map((e) => e.orderId)).toEqual([ORDER_B]);
     expect(fx.reschedules.map((r) => r.orderId)).toEqual([ORDER_B]);
@@ -1121,7 +1125,7 @@ describe('runOne·pollOnce·kick', () => {
     const r = runner();
     expect(r.kick(ORDER_ID)).toBeUndefined();
     await flush();
-    expect(fx.claimArgs).toEqual([[ORDER_ID, 30_000]]);
+    expect(fx.claimArgs).toEqual([[ORDER_ID, SAGA_LEASE_MS]]);
     expect(fx.doneOrders).toEqual([ORDER_ID]);
   });
 
@@ -1144,7 +1148,7 @@ describe('승인 명령 접수 뒤 작업 행 AWAIT(PRF-171)', () => {
     expect(fx.orderRows.get(ORDER_ID)?.status).toBe('RESERVED');
     expect(fx.orderRows.get(ORDER_ID)?.attempt?.refs).toBeUndefined();
     // 정리는 집은 작업의 자기 임대 조건으로 한 번(작업 행 지우기가 아니다)
-    expect(fx.leaseArgs.filter((x) => x.call === 'confirmSent.done')).toEqual([{ call: 'confirmSent.done', leaseUntilMs: NOW + 30_000 }]);
+    expect(fx.leaseArgs.filter((x) => x.call === 'confirmSent.done')).toEqual([{ call: 'confirmSent.done', leaseUntilMs: NOW + SAGA_LEASE_MS }]);
     notCalled('jobs.delete', 'jobs.abandon');
   });
 
@@ -1157,7 +1161,7 @@ describe('승인 명령 접수 뒤 작업 행 AWAIT(PRF-171)', () => {
     expect((await r.runOne(ORDER_ID)).kind).toBe('SKIPPED');
     r.kick(ORDER_ID);
     await flush();
-    fx.due = [{ ...awaiting, nextAttemptAtMs: NOW, leaseUntilMs: NOW + 30_000 }];
+    fx.due = [{ ...awaiting, nextAttemptAtMs: NOW, leaseUntilMs: NOW + SAGA_LEASE_MS }];
     expect(await r.pollOnce()).toBe(0);
     expect(fx.sentCommands).toHaveLength(1);
     expect(fx.jobRows.get(ORDER_ID)).toEqual(awaiting);
@@ -1299,7 +1303,7 @@ describe('리뷰 고침 M2·낮음: 요청 맥락 떼기, 자기 임대 조건, 
   });
 
   test('낮음_실패 기록·작업 지우기·다시 하기·승인 뒤 정리·보낸 시각 적기는 집은 작업의 임대 값을 조건으로 넘긴다', async () => {
-    const lease = NOW + 30_000;
+    const lease = NOW + SAGA_LEASE_MS;
     // T8 → 실패 해제 OK → 작업 지우기
     fx.put(sagaOrder());
     fx.pinQueue = [{ status: 'TAKEN' }];

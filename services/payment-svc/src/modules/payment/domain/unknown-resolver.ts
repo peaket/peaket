@@ -17,8 +17,8 @@ export const UNKNOWN_QUERY_POLL_INTERVAL_MS = 1_000;
 export const UNKNOWN_QUERY_CONCURRENCY = 16;
 /** 한 번에 잡는 행 50건 [가정] */
 export const UNKNOWN_QUERY_BATCH = 50;
-/** UNKNOWN을 쓴 뒤 첫 조회까지, 그리고 조회 간격의 시작 5초 [가정] */
-export const UNKNOWN_QUERY_BASE_MS = 5_000;
+/** UNKNOWN을 쓴 뒤 첫 조회까지, 그리고 조회 간격의 시작 1초 [가정](BAT-029: 결제 확정 p99 3초 안에 결과 모름을 풀기 위해 5초에서 줄였다) */
+export const UNKNOWN_QUERY_BASE_MS = 1_000;
 /** 조회 간격을 늘리는 배수 2배 [가정] */
 export const UNKNOWN_QUERY_FACTOR = 2;
 /** 조회 간격 상한 60초 [가정] */
@@ -124,7 +124,7 @@ const AMOUNT_MISMATCH: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'amount_mis
 const ORDER_MISMATCH: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'amount_mismatch', anomaly: 'order' };
 const CANCELLED_AT_PG: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'cancelled_at_pg', anomaly: 'cancelled' };
 /** 거듭제곱의 지수 상한(5초 × 2^5 = 160초가 상한 60초보다 크다) */
-const DELAY_EXPONENT_CAP = 5;
+const DELAY_EXPONENT_CAP = 6;
 
 /**
  * 조회 답 → 할 일(명세 `query`: 결제사가 결과를 정했을 때만 바꾼다). 던지지 않는다.
@@ -267,7 +267,7 @@ function dueAtOf(raw: string | undefined): number | undefined {
  */
 export function unknownQueryDelayMs(attempts: number): number {
   if (!Number.isSafeInteger(attempts) || attempts < 1) throw new RangeError(`조회 횟수는 1 이상의 안전한 정수다: ${String(attempts)}`);
-  // 지수를 잘라 아주 큰 횟수에서도 거듭제곱이 넘치지 않게 한다(2^DELAY_EXPONENT_CAP × 5초는 이미 상한보다 크다)
+  // 지수를 잘라 아주 큰 횟수에서도 거듭제곱이 넘치지 않게 한다(2^DELAY_EXPONENT_CAP × 1초는 상한 60초보다 크다, BAT-029)
   return Math.min(UNKNOWN_QUERY_MAX_MS, UNKNOWN_QUERY_BASE_MS * UNKNOWN_QUERY_FACTOR ** Math.min(attempts - 1, DELAY_EXPONENT_CAP));
 }
 

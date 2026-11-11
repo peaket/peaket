@@ -12,6 +12,7 @@ import {
   HOLD_LEDGER_GROUP,
   kafkaConsumersFromEnv,
   ORDER_SAGA_GROUP,
+  paymentConsumerDatabaseOptions,
   paymentResultApply,
   type PurchaseConsumersOptions,
   startPurchaseConsumers,
@@ -268,5 +269,10 @@ describe('kafkaConsumersFromEnv(API 파드의 소비자 설정)', () => {
     expect(c).toMatchObject({ enabled: true, brokers: ['kafka-0:9092', 'kafka-1.peaket.svc:9094'], env: 'prod' });
     if (!c.enabled) throw new Error('켜져야 한다');
     expect(c.auth).toMatchObject({ mechanism: 'msk-iam', sessionName: 'purchase-svc-prod' });
+  });
+
+  test('BAT-029: 결제 결과 소비자 풀은 홀드 원장 풀과 따로이고 32연결이다', () => {
+    expect(consumerDatabaseOptions('postgres://x')).toMatchObject({ profile: 'general', max: 4, applicationName: 'purchase-svc-consumers' });
+    expect(paymentConsumerDatabaseOptions('postgres://x')).toMatchObject({ profile: 'general', max: 32, applicationName: 'purchase-svc-payment-results' });
   });
 });

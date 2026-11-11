@@ -15,6 +15,7 @@ import {
   type DatabaseOptions,
   drizzleHeldEventStore,
   heldEventCounts,
+  type HotPathMetrics,
   type KafkaAuth,
   kafkaAuthFromEnv,
   PlatformConfigError,
@@ -37,8 +38,15 @@ import { DrizzleSeatSales, SEAT_TOPIC, type SeatHoldLedger, SeatHoldLedgerHandle
 
 const SERVICE = 'purchase-svc';
 
-/** 소비자 전용 DB 풀의 연결 수 4개 [가정](docs/features/seat-hold.md §6 'API 파드 소비자의 DB 풀') */
+/** 홀드 원장 소비자 전용 DB 풀의 연결 수 4개 [가정](docs/features/seat-hold.md §6 'API 파드 소비자의 DB 풀') */
 const CONSUMER_DB_MAX = 4;
+/**
+ * 결제 결과 소비자 전용 DB 풀의 연결 수 32개 [가정](BAT-029).
+ * 회차 키 하나에 결제 사건이 몰려도(파티션 하나) 파드가 읽기·승인 트랜잭션을 32개까지 겹쳐 처리해 100/s의 결과 반영을 따라가게 한다.
+ * 키 단위 동시 처리(파티션마다 32키)와 같은 수로 맞춰 풀 대기가 생기지 않게 했다. PostgreSQL max_connections 600과 파드 3대 안이고,
+ * 핫패스 풀과 따로라 홀드·주문 요청의 풀 대기(429)를 늘리지 않는다
+ */
+const PAYMENT_CONSUMER_DB_MAX = 32;
 
 /**
  * API 파드 두 소비자의 purchase DB(PEAKET_DATABASE_URL) 풀 설정(main.ts가 createDatabase에 넘긴다, PRF-164 리뷰 고침 M4).
@@ -47,6 +55,14 @@ const CONSUMER_DB_MAX = 4;
  */
 export function consumerDatabaseOptions(url: string): DatabaseOptions {
   return { url, profile: 'general', max: CONSUMER_DB_MAX, applicationName: `${SERVICE}-consumers` };
+}
+
+/**
+ * 결제 결과 소비자(trade.payments) 전용 purchase DB 풀 설정(BAT-029). 홀드 원장 소비자와 달리 회차 키 하나에 사건이 몰리므로
+ * 키 단위 동시 처리(파티션마다 32키)를 받치도록 연결을 넉넉히 둔다. 핫패스 풀과 따로다
+ */
+export function paymentConsumerDatabaseOptions(url: string): DatabaseOptions {
+  return { url, profile: 'general', max: PAYMENT_CONSUMER_DB_MAX, applicationName: `${SERVICE}-payment-results` };
 }
 
 export interface PaymentResultApplyOptions {
@@ -73,6 +89,8 @@ export interface PaymentResultApplyOptions {
   onApproved?: (orderId: string) => void;
   /** 입금 오류 되돌림(T21)을 커밋한 뒤 부를 것(티켓 무효 실행기 깨우기, BUILD_ORDER HOT-152) */
   onDepositReversed?: (orderId: string) => void;
+  /** 결제 결과 반영 구간 진단(BAT-029). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 /**
@@ -92,6 +110,7 @@ export function paymentResultApply(o: PaymentResultApplyOptions): ApplyPaymentRe
     onOrderChanged: o.onOrderChanged,
     ...(o.onApproved ? { onApproved: o.onApproved } : {}),
     ...(o.onDepositReversed ? { onDepositReversed: o.onDepositReversed } : {}),
+    ...(o.hotPath ? { hotPath: o.hotPath } : {}),
   });
 }
 
@@ -114,8 +133,10 @@ export interface PurchaseConsumersOptions {
   clientId: string;
   /** 없으면 평문(로컬·CI 브로커). 운영은 MSK IAM(kafkaAuthFromEnv('purchase-svc'), 세션 이름 purchase-svc-<환경>) */
   auth?: KafkaAuth;
-  /** purchase DB(보류 표 held_event 넣기·읽기와 보류 수 재기). 운영은 소비자 전용 풀(consumerDatabaseOptions) */
+  /** purchase DB(보류 표 held_event 넣기·읽기와 보류 수 재기). 운영은 홀드 원장 소비자 전용 풀(consumerDatabaseOptions) */
   database: Database;
+  /** 결제 결과 소비자의 보류 표 전용 DB(없으면 database). 두 소비자가 한 풀을 나눠 쓰지 않게 한다(BAT-029) */
+  paymentDatabase?: Database;
   /** 홀드 원장 쓰기(운영은 inventory DrizzleSeatHoldLedger) */
   ledger: SeatHoldLedger;
   /** 결제 결과 반영 쓰임새(운영은 booking ApplyPaymentResult, onOrderChanged에 기다림 표 notify를 넘겨 만든다) */
@@ -145,20 +166,22 @@ export interface PurchaseConsumers {
  * 기다리지 않는다(연결은 started로 기다린다)
  */
 export function startPurchaseConsumers(o: PurchaseConsumersOptions): PurchaseConsumers {
-  const held = drizzleHeldEventStore(o.database, o.clock ?? systemClock);
-  const common = {
+  const clock = o.clock ?? systemClock;
+  const held = drizzleHeldEventStore(o.database, clock);
+  const base = {
     service: SERVICE,
     brokers: o.brokers,
     clientId: o.clientId,
     auth: o.auth,
-    held,
     registry: o.registry,
     ...(o.registry ? { heldCounts: () => heldEventCounts(o.database) } : {}),
     logger: o.logger,
     startAt: o.startAt,
   };
-  const ledger = runKeyedConsumer({ ...common, groupId: HOLD_LEDGER_GROUP(o.env), topics: [SEAT_TOPIC], handler: new SeatHoldLedgerHandler(o.ledger) });
-  const saga = runKeyedConsumer({ ...common, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult) });
+  const ledger = runKeyedConsumer({ ...base, held, groupId: HOLD_LEDGER_GROUP(o.env), topics: [SEAT_TOPIC], handler: new SeatHoldLedgerHandler(o.ledger) });
+  // 결제 결과 소비자는 전용 풀의 보류 표를 쓴다(없으면 기존 공유 풀). 표는 같은 DB의 held_event라 어느 풀이나 써도 된다
+  const paymentHeld = o.paymentDatabase ? drizzleHeldEventStore(o.paymentDatabase, clock) : held;
+  const saga = runKeyedConsumer({ ...base, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult) });
   const started = Promise.all([ledger.started, saga.started]).then(() => undefined);
   // 부른 쪽이 started를 기다리지 않고 stop만 불러도 처리되지 않은 거부가 남지 않게 한다(거부는 started를 기다리는 쪽이 받는다)
   started.catch(() => undefined);

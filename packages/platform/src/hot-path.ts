@@ -29,7 +29,17 @@ export type HotPathStage =
   | 'payment.status.read'
   | 'payment.status.deposit_read'
   | 'payment.status.wait'
+  | 'payment.status.poll'
+  | 'payment.status.poll.read'
   | 'payment.status.total'
+  | 'payment.result.read'
+  | 'payment.result.write'
+  | 'payment.result.after_commit'
+  | 'payment.result.total'
+  | 'saga.pin'
+  | 'saga.reserve'
+  | 'saga.confirm'
+  | 'saga.total'
   | 'queue.entry.schedule'
   | 'queue.entry.preempt'
   | 'queue.entry.arrival'
@@ -90,7 +100,10 @@ export type HotPathOutcome =
   | 'restart'
   | 'no_adapter'
   | 'circuit_open'
-  | 'rejected';
+  | 'rejected'
+  | 'applied'
+  | 'skipped'
+  | 'held';
 
 /**
  * 한 서비스의 핫패스 구간 지표.

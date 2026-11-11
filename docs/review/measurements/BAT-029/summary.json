@@ -1,0 +1,98 @@
+{
+  "batch": "BAT-029",
+  "condition": "v1 payment: users 11002, rate 100/s, seats-per-order 2, warm 10s, main 100s, fault drop 5%, fault delay 0.5% (16s), kill one bundle pod at main 50s, bundle CPU 4/replica 3 (patched after cluster.mjs v1), new cluster each run",
+  "k7": {
+    "runs": [
+      {
+        "run": "r1",
+        "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r1-bat029",
+        "payment_confirm_p99_ms": 9060.33,
+        "payment_confirm_p95_ms": 3208.35,
+        "payment_confirm_max_ms": 76850,
+        "hold_p99_ms": 217.32,
+        "dropped": 0,
+        "scenario_errors": 2,
+        "valid": false,
+        "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "Q1": "PASS", "Q2": "PASS", "S1": "PASS", "S2": "PASS", "S4": "PASS" }
+      },
+      {
+        "run": "r2",
+        "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r2-bat029",
+        "payment_confirm_p99_ms": 6202.57,
+        "payment_confirm_p95_ms": 3642.95,
+        "payment_confirm_max_ms": 75660,
+        "hold_p99_ms": 249.23,
+        "dropped": 0,
+        "scenario_errors": 0,
+        "valid": true,
+        "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "Q1": "PASS", "Q2": "PASS", "S1": "PASS", "S2": "PASS", "S4": "PASS" }
+      },
+      {
+        "run": "r3",
+        "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r3-bat029",
+        "payment_confirm_p99_ms": 5375.2,
+        "payment_confirm_p95_ms": 3714.0,
+        "payment_confirm_max_ms": 76086,
+        "hold_p99_ms": 226.05,
+        "dropped": 0,
+        "scenario_errors": 0,
+        "valid": true,
+        "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "Q1": "PASS", "Q2": "PASS", "S1": "PASS", "S2": "PASS", "S4": "PASS" }
+      }
+    ],
+    "verdict": "p99 3초 목표 미달. 가장 좋은 유효 실행 r3 5,375.2ms, p95 3,714ms, 홀드 p99 226ms. r1은 시나리오 오류 2로 무효. 장부 판정은 세 회 모두 hold_p99_50ms·hold_p999_150ms·payment_p99_3000ms fail."
+  },
+  "aa": {
+    "condition": "v1 seat-hold, users 1000, rate 2000/s, hot 1, keep, warm 60s, main 60s, generators 4, bundle CPU 4/replica 3",
+    "pair": [
+      { "run": "quiet-r4", "p99_ms": 43.94096656, "dropped": 0, "startSkewS": 0, "valid": true },
+      { "run": "quiet-r5", "p99_ms": 44.26525964, "dropped": 0, "startSkewS": 0, "valid": true }
+    ],
+    "ratio": 1.0074,
+    "verdict": "A/A 성립. 0.7% 차이로 ±9.6% 안. 이전 6배 느림은 v1 합본 배포가 CPU 1/한도 1이어서였다. CPU 4로 올리자 http.auth 4.75ms·hold.lua 2.08ms·event loop p99 17.1ms로 BAT-028 수준으로 돌아왔다.",
+    "environment": {
+      "host_cpu_avg_pct": 2,
+      "host_cores": 32,
+      "valkey_latency_ms": 0.16,
+      "client_get_mean_ms": 0.0878,
+      "client_get_p99_ms": 0.297,
+      "previous_stage_cpu": "1 request / 1 limit",
+      "fixed_stage_cpu": "4 request / 4 limit"
+    }
+  },
+  "k2": {
+    "runs": [
+      { "run": "quiet-r4", "p99_ms": 43.94096656, "dropped": 0, "valid": true, "under_50ms": true },
+      { "run": "quiet-r5", "p99_ms": 44.26525964, "dropped": 0, "valid": true, "under_50ms": true },
+      { "run": "quiet-r7", "p99_ms": 53.19825667, "dropped": 0, "valid": true, "under_50ms": false }
+    ],
+    "verdict": "3회 모두 유효, 2회만 50ms 안. r7 53.20ms는 회차 지터. A/A 쌍 r4/r5는 0.7% 차이로 안정."
+  },
+  "fixes": [
+    "payment result consumer dedicated DB pool 32, split from hold ledger",
+    "wait table dedicated DB pool 2 and readMany join on the ACCEPTED partial unique index",
+    "order saga dedicated DB pool 24, claim limit 50 -> 20, lease 30s -> 15s",
+    "purchase hot pool 10 -> 16, payment hot pool 16 -> 32",
+    "ticket issue DB pool 4 -> 24 and concurrency 8 -> 24",
+    "confirm command gRPC deadline 200ms -> 500ms, payment store statement timeout 200ms -> 400ms",
+    "UNKNOWN first query 5s -> 1s, delay exponent cap 5 -> 6",
+    "instrumentation: payment.result.*, payment.status.poll*, saga.pin/reserve/confirm/total"
+  ],
+  "gates": {
+    "typecheck": "platform, purchase-svc, payment-svc pass",
+    "tests": "platform 509, purchase-svc 3699, payment-svc 2894 pass",
+    "test_int": "purchase-svc payment-results/saga-db/ticket-issue 237 pass; payment-svc payment-grpc/payment-confirm-runner/payment-unknown-resolver 188 pass",
+    "trace_check": "P-T47 8, P-T53 215, P-T3 92, P-T36 274, P-T39 81 pass; P-T44 no unit test, P-T1 measurement",
+    "lint": "pass",
+    "doc_check": "0 errors, 4 existing warnings",
+    "ledger": "pass with P-T1, P-T47",
+    "mutations": [
+      "saga claim 20 -> 50: 1 fail",
+      "consumer pool 32 -> 4: 1 fail",
+      "confirm deadline 500 -> 200: 1 fail",
+      "ticket concurrency 24 -> 8: 1 fail",
+      "saga lease 15 -> 30: 3 fail",
+      "readMany ACCEPTED -> READY: 10 fail (test-int boundary/rollback)"
+    ]
+  }
+}

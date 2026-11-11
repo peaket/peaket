@@ -521,6 +521,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - BAT-027 핫패스 구간 계측(HotPathMetrics)과 K2 2,000/s CPU 4/replica 1회 측정을 더한다. 계측 실행은 p99 47.54ms·놓침 143으로 무효, 안쪽은 hold.session·hold.lua가 88.7%, HTTP와 execute 차이 25.58ms를 다음 표적으로 남긴다(R-472).
 - BAT-028 D·A·B(예열 60초·발생기 동시 시작, HTTP 구간 계측, 인증 세션 재사용)를 넣고 K2 2,000/s CPU 4/replica 유효 3회 중앙값 44.33ms를 얻었다. K7 ② 3회는 결제 경로 처리량 때문에 모두 무효·미달(놓침 435·991·420, 결제 확정 p99 36~40초, P3 등 불변식 PASS)이고 A/A 조용한 쌍은 49.73 vs 66.75ms(1.342)로 불성립, 4관점 리뷰 높음·보안 지적은 0이다(R-473).
 - 새 kind 클러스터에 Strimzi·Kafka·Prometheus·Grafana·Postgres·Valkey·moto·합본 이미지를 미리 실어 v1 무대가 서지 않던 문제를 고친다(R-474).
+- BAT-029 K7 ② 결제 경로 처리량 진단·최적화(R-475): 상위 구간은 결제 결과 반영 소비자(`payment.approved_at → purchase APPROVED` p50 6.45초·p99 21.11초)와 Saga 승인 명령(`RESERVED → payment.created_at` p99 32.41초)이었다. 결제 결과 소비자 풀 32·기다림 표 풀 2·Saga 풀 24/1회 20건/임대 15초·발권 풀 24/동시 24·승인 명령 500ms·UNKNOWN 첫 조회 1초로 고쳤다. A/A는 quiet-r4 43.94·quiet-r5 44.27ms(비율 1.007, 놓침 0·`startSkewS=0`)로 성립했고, 이전 6배 느림은 v1 합본이 CPU 1/한도 1로 떠 있었기 때문이었다(CPU 4로 올리자 `http.auth` 4.75ms·`hold.lua` 2.08ms). K7 ② 3회(새 클러스터·CPU 4)는 r1 무효 9,060.3ms·r2 유효 6,202.6ms·r3 유효 5,375.2ms로 p99 3초를 넘겼고, 홀드 p99 217~249ms도 50ms를 넘겼다. K2 3회는 r4 43.94·r5 44.27·r7 53.20ms로 2회만 50ms 안이다. 보고서 docs/review/measurements/BAT-029-payment-throughput.md.
 
 ## 5. [충돌] 결정 결과
 
