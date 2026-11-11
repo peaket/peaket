@@ -18,8 +18,11 @@ import type { ConfirmCallOptions, ConfirmCommand, ConfirmOutcome, ConfirmResultN
 
 /** 주소 환경 값(host:port) */
 export const PAYMENT_GRPC_ADDR_ENV = 'PEAKET_PAYMENT_GRPC_ADDR';
-/** 승인 명령 데드라인 상한 500ms [가정](architecture 시간 초과 표. domain/saga.ts CONFIRM_CALL_DEADLINE_MS와 같은 값, BAT-029) */
-export const CONFIRM_CAP_MS = 500;
+/**
+ * 승인 명령 데드라인 상한 1,000ms [가정](architecture 시간 초과 표. domain/saga.ts CONFIRM_CALL_DEADLINE_MS와 같은 값).
+ * BAT-029의 500ms는 100/s에서 3.2%가 넘겨 재시도 꼬리를 만들었다(BAT-031)
+ */
+export const CONFIRM_CAP_MS = 1_000;
 
 /** 의존성 이름(span·의존 로그·차단기 지표) */
 const DEPENDENCY = 'payment-svc';

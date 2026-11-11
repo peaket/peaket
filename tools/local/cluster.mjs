@@ -8,7 +8,7 @@
 //   node tools/local/cluster.mjs prometheus  Prometheus를 127.0.0.1:9090으로 연다(collect.py --prom-url)
 //   node tools/local/cluster.mjs v0      v0 배포(이미지 둘·Valkey·metrics-server·Secret·마이그레이션·앱(CPU HPA)·입구, docs/infra.md §3 'v0 배포')
 //   node tools/local/cluster.mjs v0-forward  v0 입구를 127.0.0.1:8443으로 연다(포트 전달)
-//   node tools/local/cluster.mjs v1 [--redis-tls on|off] [--replicas N]  v1 측정 무대(한 프로세스 합본·릴레이·Valkey 둘·전용 PostgreSQL·DB 마이그레이션·Kafka 토픽·nginx 캐시, docs/verification.md §3.8 '합본의 v1 무대')
+//   node tools/local/cluster.mjs v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]  v1 측정 무대(한 프로세스 합본·릴레이·Valkey 둘·전용 PostgreSQL·DB 마이그레이션·Kafka 토픽·nginx 캐시, docs/verification.md §3.8 '합본의 v1 무대')
 //   node tools/local/cluster.mjs v1-down   v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더. 클러스터는 그대로)
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
@@ -638,7 +638,12 @@ export async function v1(argv = []) {
     await waitJob(V1_NAMESPACE, job.metadata.name);
   }
   step('합본·릴레이(공용 차트)');
-  await helm(v1HelmArgs('v1-bundle', REPO, plan.replicas === undefined ? {} : { replicas: plan.replicas }));
+  // K7/K2 측정은 합본 CPU 4가 조건이다(BAT-031). 값 파일 기본은 CPU 1이라 CLI가 준 값을 helm --set으로 덮는다
+  await helm(v1HelmArgs('v1-bundle', REPO, {
+    ...(plan.replicas !== undefined ? { replicas: plan.replicas } : {}),
+    ...(plan.cpus !== undefined ? { cpus: plan.cpus } : {}),
+    ...(plan.memoryMi !== undefined ? { memoryMi: plan.memoryMi } : {}),
+  }));
   for (const r of /** @type {const} */ (['v1-purchase-relay', 'v1-payment-relay'])) await helm(v1HelmArgs(r, REPO));
   // 새 Secret 값(키·주소)과 새 이미지를 읽게 다시 띄운다
   const deploys = ['bundle', 'purchase-svc-outbox-relay', 'payment-svc-outbox-relay'];
@@ -684,7 +689,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const cmd = process.argv[2];
   const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N]|v1-down|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();

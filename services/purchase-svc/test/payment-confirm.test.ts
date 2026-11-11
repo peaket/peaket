@@ -132,7 +132,7 @@ describe('GrpcPaymentConfirms', () => {
     try {
       expect(await c.confirm(tossCommand())).toEqual({ status: 'RETRYABLE', reason: 'circuit_open' });
       expect(runs).toHaveLength(1);
-      expect([CONFIRM_CAP_MS, CONFIRM_CALL_DEADLINE_MS]).toEqual([500, 500]);
+      expect([CONFIRM_CAP_MS, CONFIRM_CALL_DEADLINE_MS]).toEqual([1_000, 1_000]);
     } finally {
       c.close();
     }

@@ -96,6 +96,8 @@ const ALLOWED = {
 // v1: 합본으로 보내 네임스페이스는 v1 하나이고, HPA가 없어 --settle·--hpa-timeline이 없다(§3.8 '합본의 v1 무대')
 const V1_DROPPED = new Set(['--namespace', '--settle', '--hpa-timeline']);
 for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`] = ALLOWED[k].filter((f) => !V1_DROPPED.has(f));
+// v1 측정은 합본 CPU 목표를 실제 배포에서 확인한다(BAT-031). v0에는 없다.
+for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`].push('--target-cpus');
 // 좌석 Redis TLS 짝 실행(K2, docs/verification.md §3.5 7번)은 v1 좌석 홀드만 받는다(K1·K7 ②는 TLS 켬 하나, §3.10 'v1 합본 측정 규칙', 코드 리뷰 M9)
 ALLOWED['v1:seat-hold'].push('--paired-run');
 
@@ -319,6 +321,7 @@ export function parseArgs(argv) {
     settle: o.settle ?? false,
     hpaTimeline: o.hpaTimeline ?? false,
     ...(o.generators !== undefined ? { generators: o.generators } : {}),
+    ...(o.targetCpus !== undefined ? { targetCpus: o.targetCpus } : {}),
     ...(o.runId !== undefined ? { runId: o.runId } : {}),
     ...(record ? { profile: o.profile ?? (users <= 1000 ? 'local-1k' : users <= 10000 ? 'local-10k' : 'local-100k') } : {}),
     ...(o.promUrl !== undefined ? { promUrl: o.promUrl } : {}),

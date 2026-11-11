@@ -486,8 +486,9 @@ export function v1SimulatorObjects() {
 const RELEASES = Object.freeze({ 'v1-bundle': 'bundle', 'v1-purchase-relay': 'purchase-svc-relay', 'v1-payment-relay': 'payment-svc-relay' });
 
 /**
- * 공용 차트로 v1 릴리스 하나를 올리는 helm 인자(값은 deploy/envs/local/<값 파일>.yaml). 합본은 복제 수를 바꿀 수 있다(리허설은 1, 측정은 값 파일의 3)
- * @param {'v1-bundle'|'v1-purchase-relay'|'v1-payment-relay'} values @param {string} repo 저장소 뿌리 @param {{ replicas?: number }} [o]
+ * 공용 차트로 v1 릴리스 하나를 올리는 helm 인자(값은 deploy/envs/local/<값 파일>.yaml). 합본은 복제 수·CPU·메모리를 바꿀 수 있다
+ * (리허설은 1, 측정은 값 파일의 3·CPU 1). `--cpus`·`--memory-mi`는 합본에만 준다.
+ * @param {'v1-bundle'|'v1-purchase-relay'|'v1-payment-relay'} values @param {string} repo 저장소 뿌리 @param {{ replicas?: number, cpus?: number, memoryMi?: number }} [o]
  */
 export function v1HelmArgs(values, repo, o = {}) {
   if (!Object.hasOwn(RELEASES, values)) throw new RangeError(`v1 값 파일은 ${Object.keys(RELEASES).join('·')}다: ${values}`);
@@ -496,18 +497,31 @@ export function v1HelmArgs(values, repo, o = {}) {
     if (values !== 'v1-bundle' || !Number.isInteger(o.replicas) || o.replicas < 1 || o.replicas > 8) throw new RangeError('복제 수는 합본에만 1~8로 준다');
     args.push('--set', `service.replicas=${o.replicas}`);
   }
+  if (o.cpus !== undefined) {
+    if (values !== 'v1-bundle' || !Number.isInteger(o.cpus) || o.cpus < 1 || o.cpus > 16) throw new RangeError('CPU 수는 합본에만 1~16으로 준다');
+    args.push('--set', `service.resources.requests.cpu=${o.cpus}`, '--set', `service.resources.limits.cpu=${o.cpus}`);
+  }
+  if (o.memoryMi !== undefined) {
+    if (values !== 'v1-bundle' || !Number.isInteger(o.memoryMi) || o.memoryMi < 256 || o.memoryMi > 32768) throw new RangeError('메모리는 합본에만 256~32768Mi로 준다');
+    args.push('--set', `service.resources.requests.memory=${o.memoryMi}Mi`, '--set', `service.resources.limits.memory=${o.memoryMi}Mi`);
+  }
   return args;
 }
 
 /**
- * v1 명령의 인자: [--redis-tls on|off](기본 on, 운영과 같다) [--replicas N](기본 값 파일의 3). 모르는 인자는 Error
+ * v1 명령의 인자: [--redis-tls on|off](기본 on, 운영과 같다) [--replicas N](기본 값 파일의 3)
+ * [--cpus N](합본 CPU 요청·한도, 1~16) [--memory-mi N](합본 메모리 요청·한도, 256~32768). 모르는 인자는 Error
  * @param {string[]} argv
- * @returns {{ redisTls: boolean, replicas: number | undefined }}
+ * @returns {{ redisTls: boolean, replicas: number | undefined, cpus: number | undefined, memoryMi: number | undefined }}
  */
 export function v1Plan(argv) {
   let redisTls = true;
   /** @type {number | undefined} */
   let replicas;
+  /** @type {number | undefined} */
+  let cpus;
+  /** @type {number | undefined} */
+  let memoryMi;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--redis-tls') {
@@ -518,7 +532,15 @@ export function v1Plan(argv) {
       const v = argv[++i] ?? '';
       if (!/^[1-8]$/.test(v)) throw new Error('--replicas는 1~8이다');
       replicas = Number(v);
-    } else throw new Error(`v1의 모르는 인자: ${a}(쓰는 법: v1 [--redis-tls on|off] [--replicas N])`);
+    } else if (a === '--cpus') {
+      const v = argv[++i] ?? '';
+      if (!/^(?:[1-9]|1[0-6])$/.test(v)) throw new Error('--cpus는 1~16이다');
+      cpus = Number(v);
+    } else if (a === '--memory-mi') {
+      const v = argv[++i] ?? '';
+      if (!/^\d+$/.test(v) || Number(v) < 256 || Number(v) > 32768) throw new Error('--memory-mi는 256~32768이다');
+      memoryMi = Number(v);
+    } else throw new Error(`v1의 모르는 인자: ${a}(쓰는 법: v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N])`);
   }
-  return { redisTls, replicas };
+  return { redisTls, replicas, cpus, memoryMi };
 }

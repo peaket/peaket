@@ -30,8 +30,12 @@ import type { CallBudget, FinishConfirmResult, MarkConfirmSentResult, PaymentCon
 import { buildResolvedEvent, RESOLVED_EVENT_TYPE, type ResolvedFinish, UNKNOWN_OVERDUE_MS, UNKNOWN_QUERY_BASE_MS, unknownQueryClaimHoldMs, type UnknownQueryJob } from '../../domain/unknown-resolver.js';
 import { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from '../payment-events.js';
 
-/** 승인 실행기 전용 DB 풀의 연결 수 8개 [가정](docs/verification.md §4.1 '승인 실행기') */
-export const CONFIRM_RUNNER_DB_MAX = 8;
+/**
+ * 승인 실행기 전용 DB 풀의 연결 수 24개 [가정](docs/verification.md §4.1 '승인 실행기').
+ * BAT-031 진단: 8개로는 100/s에서 read·mark·finish 세 트랜잭션이 줄을 서 mark p95 428ms·finish p95 451ms가 됐다.
+ * 실행기 전용 일반 풀이라 핫패스와 경쟁하지 않고, PostgreSQL max_connections 600 안에서 다른 풀과 합쳐도 남는다
+ */
+export const CONFIRM_RUNNER_DB_MAX = 24;
 
 /** 모든 쓰기 트랜잭션의 격리 수준(서버·역할 기본값에 기대지 않는다)과 문장 시간 한도(요청 밖이라 요청의 남은 시간이 없다) */
 const TX = { isolationLevel: 'read committed', statementTimeoutMs: CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS } as const;
@@ -318,6 +322,15 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
   async release(job: ConfirmJob): Promise<boolean> {
     const r = await this.#tx((tx) =>
       tx.execute(sql`update payment_confirm_job set lease_owner = null, lease_until = null where payment_id = ${job.paymentId}::uuid and ${ownLease(job)} returning payment_id`),
+    );
+    return r.rows.length > 0;
+  }
+
+  async releaseLease(job: ConfirmJob): Promise<boolean> {
+    const r = await this.#tx((tx) =>
+      tx.execute(
+        sql`update payment_confirm_job set lease_until = ${new Date(this.o.clock.now())}::timestamptz where payment_id = ${job.paymentId}::uuid and ${ownLease(job)} returning payment_id`,
+      ),
     );
     return r.rows.length > 0;
   }

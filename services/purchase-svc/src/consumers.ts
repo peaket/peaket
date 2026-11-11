@@ -46,7 +46,9 @@ const CONSUMER_DB_MAX = 4;
  * 키 단위 동시 처리(파티션마다 32키)와 같은 수로 맞춰 풀 대기가 생기지 않게 했다. PostgreSQL max_connections 600과 파드 3대 안이고,
  * 핫패스 풀과 따로라 홀드·주문 요청의 풀 대기(429)를 늘리지 않는다
  */
-const PAYMENT_CONSUMER_DB_MAX = 32;
+// BAT-031: 32키·32연결이 100/s 결제 결과에서 꽉 차(order APPROVED가 p99 7초까지 밀렸다) 48로 올린다.
+// 연결 수는 PostgreSQL max_connections 600 안에서 핫패스·Saga·발권 풀과 합쳐도 남는다
+const PAYMENT_CONSUMER_DB_MAX = 48;
 
 /**
  * API 파드 두 소비자의 purchase DB(PEAKET_DATABASE_URL) 풀 설정(main.ts가 createDatabase에 넘긴다, PRF-164 리뷰 고침 M4).
@@ -181,7 +183,8 @@ export function startPurchaseConsumers(o: PurchaseConsumersOptions): PurchaseCon
   const ledger = runKeyedConsumer({ ...base, held, groupId: HOLD_LEDGER_GROUP(o.env), topics: [SEAT_TOPIC], handler: new SeatHoldLedgerHandler(o.ledger) });
   // 결제 결과 소비자는 전용 풀의 보류 표를 쓴다(없으면 기존 공유 풀). 표는 같은 DB의 held_event라 어느 풀이나 써도 된다
   const paymentHeld = o.paymentDatabase ? drizzleHeldEventStore(o.paymentDatabase, clock) : held;
-  const saga = runKeyedConsumer({ ...base, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult) });
+  // 결제 결과는 키(주문)마다 한 건씩 48개까지 동시에 처리한다(BAT-031). 파드마다 파티션 하나를 받으므로 DB 연결 48개와 같다
+  const saga = runKeyedConsumer({ ...base, maxKeys: 48, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult) });
   const started = Promise.all([ledger.started, saga.started]).then(() => undefined);
   // 부른 쪽이 started를 기다리지 않고 stop만 불러도 처리되지 않은 거부가 남지 않게 한다(거부는 started를 기다리는 쪽이 받는다)
   started.catch(() => undefined);

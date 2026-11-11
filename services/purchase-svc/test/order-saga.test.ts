@@ -855,12 +855,12 @@ describe('CONFIRM 승인 명령', () => {
   const reserved = (over: Partial<SagaOrderView> = {}) => sagaOrder({ status: 'RESERVED', ...over });
   const confirmJob = (over: Partial<SagaJob> = {}) => sagaJob({ step: 'CONFIRM', ...over });
 
-  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 500ms. ACCEPTED면 ConfirmSent.done(결제 참조 지우기·작업 행 AWAIT, PRF-171) 뒤 DONE', async () => {
+  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 1,000ms. ACCEPTED면 ConfirmSent.done(결제 참조 지우기·작업 행 AWAIT, PRF-171) 뒤 DONE', async () => {
     const order = reserved();
     fx.put(order, confirmJob());
     const out = await runner().confirmStep(confirmJob(), order);
     expect(out).toEqual({ kind: 'DONE' });
-    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW - 2 * MIN, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 500 }]);
+    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW - 2 * MIN, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 1_000 }]);
     expectInOrder(fx.calls, ['confirms.confirm', 'confirmSent.done']);
     expect(fx.doneOrders).toEqual([ORDER_ID]);
     expect(fx.jobRows.get(ORDER_ID)?.step).toBe('AWAIT');
@@ -904,9 +904,11 @@ describe('CONFIRM 승인 명령', () => {
     [10 * MIN - 1, 1],
     [10 * MIN - 200, 200],
     [10 * MIN - 201, 201],
-    [10 * MIN - 500, 500],
-    [10 * MIN - 501, 500],
-  ])('FR011_ADR0107_데드라인은 min(500ms, 승인 기한까지 남은 시간)이다: 인증 %ims 뒤 → %ims', async (elapsed, deadlineMs) => {
+    [10 * MIN - 1_000, 1_000],
+    [10 * MIN - 2_001, 1_000],
+    [10 * MIN - 2_500, 1_000],
+    [10 * MIN - 2_501, 1_000],
+  ])('FR011_ADR0107_데드라인은 min(1,000ms, 승인 기한까지 남은 시간)이다: 인증 %ims 뒤 → %ims', async (elapsed, deadlineMs) => {
     const order = reserved({ attempt: tossAttempt({ authenticatedAtMs: NOW - elapsed }) });
     fx.put(order, confirmJob());
     await runner().confirmStep(confirmJob(), order);
@@ -943,7 +945,7 @@ describe('CONFIRM 승인 명령', () => {
 
   // 리뷰 고침 H1(2026-11-05): 승인 명령을 한 번이라도 보냈으면(작업 행 confirm_sent_at) purchase는 혼자 T11을 하지 않는다
   // (결과를 모르는 명령이 payment-svc에 적혔을 수 있다: 결제는 됐는데 주문이 FAILED가 된다). 같은 주문 ID로 계속 다시 보내고 결과는 trade.payments로 온다(PRF-163)
-  test('H1_대역이 매번 500ms를 넘겨 답해도(RETRYABLE deadline) 승인 기한이 지난 뒤의 runJob은 T11을 하지 않고 같은 주문 ID로 다시 보낸다: 주문 RESERVED 그대로·판매 행 지우기·실패 해제 없음', async () => {
+  test('H1_대역이 매번 1,000ms를 넘겨 답해도(RETRYABLE deadline) 승인 기한이 지난 뒤의 runJob은 T11을 하지 않고 같은 주문 ID로 다시 보낸다: 주문 RESERVED 그대로·판매 행 지우기·실패 해제 없음', async () => {
     const order = reserved({ attempt: tossAttempt({ authenticatedAtMs: NOW - 10 * MIN + 500 }) });
     fx.put(order, confirmJob());
     fx.confirmQueue = [
@@ -959,7 +961,7 @@ describe('CONFIRM 승인 명령', () => {
     expect(await r.runJob(job)).toEqual({ kind: 'RETRY', reason: 'confirm_retryable', nextAtMs: clock.now() + 2000 });
     expect(fx.sentCommands.map((c) => [c.orderId, c.deadlineMs])).toEqual([
       [ORDER_ID, 500],
-      [ORDER_ID, 500],
+      [ORDER_ID, 1_000],
     ]);
     notCalled('failures.fail', 'pins.releaseFailed', 'confirmSent.done');
     expect(fx.orderRows.get(ORDER_ID)?.status).toBe('RESERVED');

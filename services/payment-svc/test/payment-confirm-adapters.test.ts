@@ -268,8 +268,8 @@ describe('StaticPaymentGateways', () => {
 describe('confirmRunnerDatabaseOptions', () => {
   test('PRF181_일반 풀 8개, 이름 payment-svc-confirm이다(결제사가 느려도 접수 풀이 막히지 않게)', () => {
     const url = 'postgres://u:p@h:6432/payment';
-    expect(CONFIRM_RUNNER_DB_MAX).toBe(8);
-    expect(confirmRunnerDatabaseOptions(url)).toEqual({ url, profile: 'general', max: 8, applicationName: 'payment-svc-confirm' });
+    expect(CONFIRM_RUNNER_DB_MAX).toBe(24);
+    expect(confirmRunnerDatabaseOptions(url)).toEqual({ url, profile: 'general', max: 24, applicationName: 'payment-svc-confirm' });
   });
 });
 
@@ -337,6 +337,7 @@ describe('DrizzleConfirmJobs(DB에 가기 전)', () => {
     ['reschedule', (j) => j.reschedule(job, NOW, { countRetry: false })],
     ['dropJob', (j) => j.dropJob(job)],
     ['release', (j) => j.release(job)],
+    ['releaseLease', (j) => j.releaseLease(job)],
   ])('PRF181_%s는 READ COMMITTED 트랜잭션이고 문장 시간 한도 5초를 건다', async (_name, call) => {
     const d = fakeDatabase();
     expect(await rejectedBy(call(new DrizzleConfirmJobs({ database: d.database, clock })))).toBeInstanceOf(Stop);

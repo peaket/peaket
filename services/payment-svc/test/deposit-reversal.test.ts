@@ -48,8 +48,8 @@ describe('입금 오류 확인의 조회 답', () => {
   });
 
   test('P-T36 ④_아직 입금 완료면 원장을 바꾸지 않고 짧은 간격으로 다시 묻는다 [ASVS v5.0.0-16.5.3]', () => {
-    expect(decideReversalAnswer(found({ status: 'APPROVED' }), LEDGER, NOW, NOW)).toEqual({ kind: 'ASK_AGAIN', outcome: 'reversal_waiting', nextAtMs: NOW + 1_000 });
-    expect(decideReversalAnswer(found({ status: 'APPROVED' }), { ...LEDGER, queryAttempts: 3 }, NOW, NOW)).toEqual({ kind: 'ASK_AGAIN', outcome: 'reversal_waiting', nextAtMs: NOW + 4_000 });
+    expect(decideReversalAnswer(found({ status: 'APPROVED' }), LEDGER, NOW, NOW)).toEqual({ kind: 'ASK_AGAIN', outcome: 'reversal_waiting', nextAtMs: NOW + 250 });
+    expect(decideReversalAnswer(found({ status: 'APPROVED' }), { ...LEDGER, queryAttempts: 3 }, NOW, NOW)).toEqual({ kind: 'ASK_AGAIN', outcome: 'reversal_waiting', nextAtMs: NOW + 1_000 });
   });
 
   test('P-T36 ④_통보 뒤 10분이 지나도 입금 완료면 묻기를 끝낸다(원장은 그대로)', () => {

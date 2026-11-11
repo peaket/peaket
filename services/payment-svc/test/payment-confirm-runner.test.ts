@@ -124,6 +124,8 @@ class FakeJobs implements PaymentConfirmJobs {
   readonly dropped: ConfirmJob[] = [];
   releaseResults: Script<boolean>[] = [];
   readonly released: ConfirmJob[] = [];
+  releaseLeaseResults: Script<boolean>[] = [];
+  readonly releasedLeases: ConfirmJob[] = [];
 
   constructor(private readonly order: string[]) {}
 
@@ -184,6 +186,11 @@ class FakeJobs implements PaymentConfirmJobs {
     this.order.push('jobs.release');
     this.released.push(j);
     return play(this.releaseResults.shift() ?? true);
+  }
+  async releaseLease(j: ConfirmJob): Promise<boolean> {
+    this.order.push('jobs.releaseLease');
+    this.releasedLeases.push(j);
+    return play(this.releaseLeaseResults.shift() ?? true);
   }
 }
 
@@ -845,7 +852,7 @@ describe('runJob ⑧: 답 반영 쓰기가 실패할 때', () => {
     expect(f.jobs.finished).toHaveLength(3);
   });
 
-  test('P-T24_세 번 다 실패하면 행을 그대로 둔다(임대가 끝나면 UNKNOWN으로 맞춰진다) [ASVS v5.0.0-2.3.3] [ASVS v5.0.0-16.3.4]', async () => {
+  test('P-T24_BAT031_세 번 다 실패하면 임대 시간을 지금으로 당겨 다음 실행기가 75초를 기다리지 않게 한다(소유자는 남긴다) [ASVS v5.0.0-2.3.3] [ASVS v5.0.0-16.3.4]', async () => {
     const f = setup();
     f.jobs.finishResults = [throws(dbError()), throws(dbError()), throws(dbError())];
     await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'WRITE_FAILED', stage: 'finish' });
@@ -854,6 +861,7 @@ describe('runJob ⑧: 답 반영 쓰기가 실패할 때', () => {
     expect(f.jobs.rescheduled).toEqual([]);
     expect(f.jobs.dropped).toEqual([]);
     expect(f.jobs.released).toEqual([]);
+    expect(f.jobs.releasedLeases).toEqual([job()]);
     expect(f.gateway.calls).toHaveLength(1);
     expect(f.signals.writeFailures).toBe(1);
     expect(f.signals.outcomes).toEqual([]);

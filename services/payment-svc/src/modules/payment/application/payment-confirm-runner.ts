@@ -623,7 +623,16 @@ export class PaymentConfirmRunner {
         return { kind: 'FINISHED', status: finish.status, outcome };
       } catch (err) {
         const delayMs = CONFIRM_FINISH_RETRY_DELAYS_MS[attempt];
-        if (delayMs === undefined) return this.#writeFailed(target, 'finish', err);
+        if (delayMs === undefined) {
+          // 결과를 원장에 못 쓴 채 끝났다. 임대를 75초 그대로 두면 그동안 아무도 이 명령을 잡지 못해 결제 확정이 75초 밀린다(BAT-031).
+          // 소유자는 남겨 다음 실행기가 '앞 소유자의 잔해'로 보고 결제사를 다시 부르지 않게 한다. 이 쓰기가 실패해도 75초 뒤에는 잡힌다
+          try {
+            await timeHotPath(this.deps.hotPath, 'payment.confirm.release', () => this.deps.jobs.releaseLease(job));
+          } catch {
+            // 삼킨다(임대가 끝나면 다시 잡힌다)
+          }
+          return this.#writeFailed(target, 'finish', err);
+        }
         await (this.deps.sleep ?? defaultSleep)(delayMs);
       }
     }

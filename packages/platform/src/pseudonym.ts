@@ -1,6 +1,6 @@
 // 로그 가명과 IP 앞부분(ADR-0053 결정 1, docs/observability.md §2·§7, openspec 변경 add-service-logging 결정 4).
 // 운영 로그·추적의 사람 식별값(pid·세션 ID·계정 ID)은 HMAC-SHA256(로그 가명 키, 값)의 앞 16바이트(base64url)로만 남긴다.
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, createSecretKey, type KeyObject, randomBytes } from 'node:crypto';
 import { isIPv4, isIPv6 } from 'node:net';
 import { DEBUG_ERRORS_ALLOWED, PEAKET_ENVS, type PeaketEnv, PlatformConfigError } from './config.js';
 
@@ -10,10 +10,12 @@ const REF_BYTES = 16;
 
 /** 키를 안에만 두는 가명 함수. 객체를 글로 바꿔도 키가 드러나지 않는다 */
 export class LogPseudonymizer {
-  readonly #key: Buffer;
+  readonly #key: KeyObject;
   constructor(key: Buffer) {
     if (key.length !== KEY_BYTES) throw new PlatformConfigError(`로그 가명 키는 ${KEY_BYTES}바이트여야 한다`);
-    this.#key = Buffer.from(key);
+    // 요청마다 createHmac에 Buffer를 넘기면 Node가 KeyObject를 다시 만든다(프로파일에서 HMAC 한 번에 39µs).
+    // 키 객체를 한 번만 만들어 두면 같은 값으로 13µs다(BAT-031, 동작 불변)
+    this.#key = createSecretKey(Buffer.from(key));
   }
 
   /** HMAC-SHA256(키, 값)의 앞 16바이트(base64url, 22자) */

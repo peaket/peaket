@@ -7,7 +7,7 @@
 //   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [--fault-drop-pct P] [--fault-delay-pct P] [--kill-app-at S] [--db-stats] [공통]
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통]
-//   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
+//   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--target-cpus N] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 // - Before 측정(docs/verification.md §3.10): 최고 도착률이 1,000/s를 넘으면 발생기를 나눈다(k6 실행 구간). 장부는 큰 원본을 보낼 폴더로 옮긴다
 // - 먼저 클러스터와 v0를 올린다: node tools/local/cluster.mjs up && node tools/local/cluster.mjs v0
@@ -1289,6 +1289,15 @@ async function runV1(a, runTag) {
     const bundle = JSON.parse(await kc(['-n', V1_NAMESPACE, 'get', 'deploy/bundle', '-o', 'json']));
     const replicas = bundle.spec.replicas;
     const res = bundle.spec.template.spec.containers[0].resources;
+    // 측정 조건의 합본 CPU(요청=한도)를 실제 배포에서 확인한다(BAT-031). 값 파일 기본은 CPU 1이라 손으로 패치한 무대를 조용히 재지 않게 한다
+    if (a.targetCpus !== undefined) {
+      const want = String(a.targetCpus);
+      const req = res?.requests?.cpu;
+      const lim = res?.limits?.cpu;
+      if (req !== want || lim !== want) {
+        throw new Error(`v1 합본 CPU가 목표 ${want}와 다르다(요청 ${req ?? '-'}·한도 ${lim ?? '-'}). node tools/local/cluster.mjs v1 --cpus ${want}로 무대를 만든 뒤 다시 실행한다`);
+      }
+    }
 
     // 시나리오 시간과 도착률(v0와 같은 셈. 좌석 홀드의 준비는 setup()이라 k6 시간 밖이다)
     let maxRate;
@@ -1481,7 +1490,7 @@ async function runV1(a, runTag) {
     writeFileSync(
       infraFile,
       `${infraText({ cpus: gen.cpus, memoryMi: gen.memoryMi, generators: nGen, args: a })}\n${[
-        `v1 합본(docs/verification.md §3.8 '합본의 v1 무대'): 복제 ${replicas}, CPU 요청 ${res?.requests?.cpu ?? '-'}·한도 ${res?.limits?.cpu ?? '-'}, 메모리 요청 ${res?.requests?.memory ?? '-'}·한도 ${res?.limits?.memory ?? '-'}, HPA 끔`,
+        `v1 합본(docs/verification.md §3.8 '합본의 v1 무대'): 복제 ${replicas}, CPU 요청 ${res?.requests?.cpu ?? '-'}·한도 ${res?.limits?.cpu ?? '-'}(목표 ${a.targetCpus ?? '-'}), 메모리 요청 ${res?.requests?.memory ?? '-'}·한도 ${res?.limits?.memory ?? '-'}, HPA 끔`,
         `대기열·좌석 Redis TLS ${redisTls ? '켬' : '끔'}, 릴레이 purchase·payment 각 2, 대기 상태 파일 앞 nginx 캐시(${V1_NGINX_TAG}, 실은 이미지 ${pub.nginxImageId ?? '-'}, ${pub.nginxPlatform ?? '-'} 매니페스트 ${pub.nginxManifest ?? '-'})`,
         `PostgreSQL(v1 무대 전용, max_connections ${pub.pgMaxConnections ?? '-'}) 클라이언트 연결 최대 ${dbConnections.some((c) => c !== null) ? Math.max(...dbConnections.filter((c) => c !== null)) : '-'}(5초마다 ${dbConnections.length}번 잼, 못 읽음 ${dbConnections.filter((c) => c === null).length})`,
       ].join('\n')}\n`,

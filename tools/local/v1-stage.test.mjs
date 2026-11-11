@@ -17,9 +17,10 @@ const TLS = { ca: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n'
 const envOf = (text) => Object.fromEntries(text.trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 
 test('PRF215_v1Plan은_기본이_TLS켬·복제값파일이고_on·off·1~8만받는다', () => {
-  assert.deepEqual(v1Plan([]), { redisTls: true, replicas: undefined });
-  assert.deepEqual(v1Plan(['--redis-tls', 'off', '--replicas', '2']), { redisTls: false, replicas: 2 });
-  for (const bad of [['--redis-tls'], ['--redis-tls', 'yes'], ['--replicas', '0'], ['--replicas', '9'], ['--replicas', '2.5'], ['--tls']]) assert.throws(() => v1Plan(bad), Error, bad.join(' '));
+  assert.deepEqual(v1Plan([]), { redisTls: true, replicas: undefined, cpus: undefined, memoryMi: undefined });
+  assert.deepEqual(v1Plan(['--redis-tls', 'off', '--replicas', '2']), { redisTls: false, replicas: 2, cpus: undefined, memoryMi: undefined });
+  assert.deepEqual(v1Plan(['--cpus', '4', '--memory-mi', '1024']), { redisTls: true, replicas: undefined, cpus: 4, memoryMi: 1024 });
+  for (const bad of [['--redis-tls'], ['--redis-tls', 'yes'], ['--replicas', '0'], ['--replicas', '9'], ['--replicas', '2.5'], ['--cpus', '0'], ['--cpus', '17'], ['--cpus', '4.5'], ['--memory-mi', '255'], ['--memory-mi', '32769'], ['--memory-mi', '1Gi'], ['--tls']]) assert.throws(() => v1Plan(bad), Error, bad.join(' '));
 });
 
 test('PRF215_주소는_TLS켬이면_대기열·좌석모두rediss이고_끔이면redis다(TLS 끔인데 rediss면 연결이 실패한다)', () => {
@@ -198,8 +199,16 @@ test('PRF215_helm인자는_세릴리스이고_복제수는_합본에만_1~8로�
   assert.ok(b.includes('/r/deploy/envs/local/v1-bundle.yaml'));
   assert.deepEqual(b.slice(-2), ['--set', 'service.replicas=2']);
   assert.ok(!v1HelmArgs('v1-bundle', '/r').includes('--set'));
+  const withResources = v1HelmArgs('v1-bundle', '/r', { cpus: 4, memoryMi: 1024 });
+  assert.ok(withResources.includes('service.resources.requests.cpu=4'));
+  assert.ok(withResources.includes('service.resources.limits.cpu=4'));
+  assert.ok(withResources.includes('service.resources.requests.memory=1024Mi'));
+  assert.ok(withResources.includes('service.resources.limits.memory=1024Mi'));
   assert.equal(v1HelmArgs('v1-purchase-relay', '/r')[2], 'purchase-svc-relay');
   assert.throws(() => v1HelmArgs('v1-purchase-relay', '/r', { replicas: 2 }), RangeError);
+  assert.throws(() => v1HelmArgs('v1-purchase-relay', '/r', { cpus: 4 }), RangeError);
+  assert.throws(() => v1HelmArgs('v1-bundle', '/r', { cpus: 17 }), RangeError);
+  assert.throws(() => v1HelmArgs('v1-bundle', '/r', { memoryMi: 255 }), RangeError);
   assert.throws(() => v1HelmArgs('v1-bundle', '/r', { replicas: 9 }), RangeError);
   assert.throws(() => v1HelmArgs('v1-queue', '/r'), RangeError);
 });

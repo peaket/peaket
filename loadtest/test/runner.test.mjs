@@ -450,6 +450,14 @@ test('[ASVS v5.0.0-2.2.1] parseArgs --mode는 spread·hot·crossed만', () => {
   for (const mode of ['HOT', 'Spread', 'random', 'hot ', '']) expectUsage(sh({ mode }));
 });
 
+test('BAT031_v1_세시나리오모두_target-cpus를_parse결과에싣고_v0는거부한다', () => {
+  const v1pay = parseArgs(argvOf(['v1', 'payment'], { ...PAY, 'target-cpus': 4 }));
+  assert.equal(v1pay.targetCpus, 4);
+  assert.equal(parseArgs(argvOf(['v1', 'queue'], { ...QUEUE, 'target-cpus': 4 })).targetCpus, 4);
+  assert.equal(parseArgs(argvOf(['v1', 'seat-hold'], { ...SEAT, 'target-cpus': 4 })).targetCpus, 4);
+  assert.equal(parseArgs(argvOf(['v1', 'payment'], { ...PAY })).targetCpus, undefined);
+});
+
 test('[ASVS v5.0.0-2.2.1] parseArgs 그 시나리오에 없는 인자는 거부한다(queue의 --rate, payment의 --mode, seat-hold의 --entry-rate 등)', () => {
   const cases = [
     q({ rate: 100 }), q({ mode: 'hot' }), q({ 'seats-per-order': 2 }), q({ 'hold-size': 2 }), q({ 'hot-count': 2 }),

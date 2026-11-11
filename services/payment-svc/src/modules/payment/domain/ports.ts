@@ -312,6 +312,14 @@ export interface PaymentConfirmJobs {
 
   /** 임대만 놓는다(lease_owner·lease_until 비움, 자기 임대 조건). 임대를 잃었으면 false */
   release(job: ConfirmJob): Promise<boolean>;
+
+  /**
+   * 임대 **시간만** 지금으로 당긴다(lease_owner는 남긴다). 결과를 원장에 못 쓴 채 두 번 다시 시도해도 실패했을 때,
+   * 다음 실행기가 75초 임대가 끝나기를 기다리지 않고 바로 잡게 한다(BAT-031). 소유자를 남기므로 다음 실행기는
+   * 앞 소유자가 있던 잔해로 보고 결제사를 다시 부르지 않고 단독 조회로 결과를 맞춘다(confirmGateOf의 UNKNOWN_RESTART).
+   * 자기 임대 조건. 임대를 잃었으면 false
+   */
+  releaseLease(job: ConfirmJob): Promise<boolean>;
 }
 
 /** 승인의 경로(BUILD_ORDER PRF-200): direct 재시도 큐를 거치지 않음, retry_queue 여유 부족으로 미뤄진 적이 있음 */

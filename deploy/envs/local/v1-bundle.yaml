@@ -10,6 +10,9 @@ image:
 
 env:
   PEAKET_ENV: local
+  # BAT-031: 512Mi에서 GC가 21.8초/100초였고, 1Gi(--memory-mi 1024)와 함께 이 값으로 5.2초/100초까지 줄었다.
+  # 이벤트 루프 포화 자체는 남지만, 재현 가능한 측정 무대를 위해 값을 파일에 둔다
+  NODE_OPTIONS: --max-semi-space-size=64
   # 대기열·좌석 Valkey의 TLS 시험 인증 기관(Secret v1-redis-tls, TLS를 끈 무대에도 붙여 둔다. 그때는 쓰지 않는다)
   NODE_EXTRA_CA_CERTS: /etc/peaket/redis-tls/ca.crt
 

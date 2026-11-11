@@ -41,8 +41,12 @@ export const SAGA_RETRY_BASE_MS = 1000;
 export const SAGA_RETRY_MAX_MS = 10_000;
 /** 승인 기한 = 결제창 인증(authenticated_at) + 10분(payment §2, ADR-0107) */
 export const CONFIRM_WINDOW_MS = 10 * 60_000;
-/** 승인 명령 gRPC 데드라인 500ms [가정](architecture 시간 초과 표 '승인 명령 gRPC', BAT-029: 200ms에서 올려 재시도 꼬리를 줄였다) */
-export const CONFIRM_CALL_DEADLINE_MS = 500;
+/**
+ * 승인 명령 gRPC 데드라인 1,000ms [가정](architecture 시간 초과 표 '승인 명령 gRPC').
+ * BAT-029에서 200→500ms로 올렸지만 100/s 혼합 부하에서 500ms를 넘긴 호출이 3.2%였고, 그때마다 Saga가 1·2·4초 뒤로
+ * 미뤄 결제 확정 p99가 6.5초까지 밀렸다(BAT-031 진단: RESERVED→payment.created p99 4.2초). 재시도 대신 기다리게 1,000ms로 올린다
+ */
+export const CONFIRM_CALL_DEADLINE_MS = 1_000;
 /** 회차 키 수명 = 판매 종료 + 1일(inventory KEEP_AFTER_SALE_END_MS와 같은 값. booking은 inventory 층을 가져오지 않아 다시 적는다) */
 export const SEAT_KEYS_KEEP_AFTER_SALE_END_MS = 24 * 3600_000;
 /** 판 번호가 바뀌어(GEN_CHANGED) 같은 실행 안에서 묶기부터 다시 하는 횟수 상한 3번 [가정]. 넘으면 다시 하기로 미룬다 */

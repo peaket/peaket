@@ -186,7 +186,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // purchase DB(PostgreSQL): 판매 확정 저장소 SeatSales의 연결(BUILD_ORDER PRF-140 ①). 핫패스 풀(대기 100ms)이다. 홀드 원장 적재(PRF-141)와 결제 접수 Saga(PRF-160)가 필수로 만들 때까지
   // PEAKET_DATABASE_URL이 없으면 DB 없이 뜬다(좌석 홀드·구매 세션은 좌석 Redis만 쓴다). 풀 크기는 PgBouncer 배치와 함께 정한다(wbs 2.11.2)
   const databaseUrl = env.PEAKET_DATABASE_URL;
-  // 핫패스 풀 16개 [가정](BAT-029: 10개에서 올려 홀드·주문·결제 접수·상태 읽기가 서로의 연결을 덜 기다리게 한다)
+  // 핫패스 풀 16개 [가정](BAT-029: 10개에서 올려 홀드·주문·결제 접수·상태 읽기가 서로의 연결을 덜 기다리게 한다).
+  // BAT-031 진단: 32개는 100/s 혼합 부하에서 이벤트 루프·PostgreSQL 연결 압박만 키우고 429를 줄이지 못해 16으로 되돌린다
   const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE, max: 16 }) : undefined;
   const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
   const sessionStore = new RedisPurchaseSessionStore(redis);
