@@ -1,7 +1,7 @@
 // v1 측정 무대의 kind 객체(node tools/local/cluster.mjs v1, docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215): 주소, Valkey(TLS 켬·끔), 전용 PostgreSQL,
 // Secret, 무대 공개 값 ConfigMap, DB 마이그레이션 잡, Kafka 토픽, 대기 상태 파일 앞 nginx 캐시, 결제 시뮬레이터, 고정 이미지 싣기 점검, helm 인자.
 // 클러스터를 부르지 않는 순수 함수다(시험: v1-stage.test.mjs).
-import { envFileText, V1_CONSENT_VERSION, V1_NAMESPACE, V1_PATHS, V1_PORTS, V1_SERVICES, v1EnvFiles } from './v1-stage.mjs';
+import { envFileText, V1_CONSENT_VERSION, V1_HOLD_PORT, V1_NAMESPACE, V1_PATHS, V1_PORTS, V1_SERVICES, v1EnvFiles } from './v1-stage.mjs';
 
 export const V1_IMAGES = Object.freeze({ bundle: 'peaket/bundle:local', simulator: 'peaket/pg-simulator:local' });
 /** deploy/local/valkey.yaml과 같은 Valkey 8.1 다이제스트(v0와 같은 판) */
@@ -73,6 +73,8 @@ export function v1Layout(o) {
     queueUrl: `http://bundle.${ns}.svc.cluster.local:${V1_PORTS['queue-svc'].app}`,
     stateUrl: `http://queue-state-cache.${ns}.svc.cluster.local:8080`,
     purchaseUrl: `http://bundle.${ns}.svc.cluster.local:${V1_PORTS['purchase-svc'].app}`,
+    /** BAT-032: 홀드 전용 워커(별도 이벤트 루프). 나머지 구매 요청은 purchaseUrl */
+    holdUrl: `http://bundle.${ns}.svc.cluster.local:${V1_HOLD_PORT}`,
   };
 }
 

@@ -359,11 +359,13 @@ export class PaymentConfirmRunner {
 
   async #run(job: ConfirmJob, guard: PgCallGuard | undefined, hold: TokenHold): Promise<ConfirmRunOutcome> {
     if (this.#stopped) return this.#letGo(job);
-    let target: ConfirmTarget | undefined;
+    // BAT-032: claimDue가 같은 트랜잭션에서 원장 값을 함께 읽었으면 read를 한 번 더 묻지 않는다.
+    // 기한 지난 행 잡기·시험의 직접 runJob처럼 target이 없을 때만 예전처럼 읽는다
+    let target: ConfirmTarget | undefined = job.target;
     let gateway: PaymentGatewayPort | undefined;
     let deadlineMs: number | undefined;
     try {
-      target = await timeHotPath(this.deps.hotPath, 'payment.confirm.read', () => this.deps.jobs.read(job.paymentId));
+      if (target === undefined) target = await timeHotPath(this.deps.hotPath, 'payment.confirm.read', () => this.deps.jobs.read(job.paymentId));
       if (target !== undefined) {
         gateway = this.deps.gateways.of(target.pg);
         deadlineMs = gateway?.capabilities().confirmDeadlineMs;

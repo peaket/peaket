@@ -1289,6 +1289,7 @@ async function runV1(a, runTag) {
     const bundle = JSON.parse(await kc(['-n', V1_NAMESPACE, 'get', 'deploy/bundle', '-o', 'json']));
     const replicas = bundle.spec.replicas;
     const res = bundle.spec.template.spec.containers[0].resources;
+    const bundleMode = (bundle.spec.template.spec.containers[0].env ?? []).find((e) => e.name === 'PEAKET_BUNDLE_MODE')?.value ?? 'single';
     // 측정 조건의 합본 CPU(요청=한도)를 실제 배포에서 확인한다(BAT-031). 값 파일 기본은 CPU 1이라 손으로 패치한 무대를 조용히 재지 않게 한다
     if (a.targetCpus !== undefined) {
       const want = String(a.targetCpus);
@@ -1368,6 +1369,7 @@ async function runV1(a, runTag) {
       QUEUE_BASE: L.queueUrl,
       STATE_BASE: L.stateUrl,
       PURCHASE_BASE: L.purchaseUrl,
+      HOLD_BASE: L.holdUrl,
       RUN_TAG: runTag,
       USERS_FILE: '/work/users.json',
       EVENT_ID: eventId,
@@ -1490,7 +1492,7 @@ async function runV1(a, runTag) {
     writeFileSync(
       infraFile,
       `${infraText({ cpus: gen.cpus, memoryMi: gen.memoryMi, generators: nGen, args: a })}\n${[
-        `v1 합본(docs/verification.md §3.8 '합본의 v1 무대'): 복제 ${replicas}, CPU 요청 ${res?.requests?.cpu ?? '-'}·한도 ${res?.limits?.cpu ?? '-'}(목표 ${a.targetCpus ?? '-'}), 메모리 요청 ${res?.requests?.memory ?? '-'}·한도 ${res?.limits?.memory ?? '-'}, HPA 끔`,
+        `v1 합본(docs/verification.md §3.8 '합본의 v1 무대'): 복제 ${replicas}, CPU 요청 ${res?.requests?.cpu ?? '-'}·한도 ${res?.limits?.cpu ?? '-'}(목표 ${a.targetCpus ?? '-'}), 메모리 요청 ${res?.requests?.memory ?? '-'}·한도 ${res?.limits?.memory ?? '-'}, 모드 ${bundleMode}, HPA 끔`,
         `대기열·좌석 Redis TLS ${redisTls ? '켬' : '끔'}, 릴레이 purchase·payment 각 2, 대기 상태 파일 앞 nginx 캐시(${V1_NGINX_TAG}, 실은 이미지 ${pub.nginxImageId ?? '-'}, ${pub.nginxPlatform ?? '-'} 매니페스트 ${pub.nginxManifest ?? '-'})`,
         `PostgreSQL(v1 무대 전용, max_connections ${pub.pgMaxConnections ?? '-'}) 클라이언트 연결 최대 ${dbConnections.some((c) => c !== null) ? Math.max(...dbConnections.filter((c) => c !== null)) : '-'}(5초마다 ${dbConnections.length}번 잼, 못 읽음 ${dbConnections.filter((c) => c === null).length})`,
       ].join('\n')}\n`,

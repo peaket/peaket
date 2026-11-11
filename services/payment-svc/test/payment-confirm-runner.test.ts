@@ -1127,6 +1127,16 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰)', () => {
     });
   });
 
+  test('BAT032_claimDue가_원장을_함께_읽었으면_read를_다시_묻지_않는다', async () => {
+    const f = setup();
+    const t = target();
+    f.jobs.put(t);
+    f.gateway.answers = [answer({ outcome: 'APPROVED' })];
+    await expect(f.runner.runJob(job({ target: t }))).resolves.toMatchObject({ kind: 'FINISHED' });
+    expect(f.jobs.reads).toEqual([]);
+    expect(f.gateway.calls).toHaveLength(1);
+  });
+
   describe('L8: 원장 읽기 실패', () => {
     test('PRF181_리뷰 고침 L8: 앞 소유자가 없던 행은 임대를 놓는다(남기면 다음 잡기가 잔해로 본다) [ASVS v5.0.0-16.5.3]', async () => {
       const f = setup();

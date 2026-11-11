@@ -18,7 +18,7 @@ import { faultFor } from '../lib/targets.mjs';
 import { userSeats } from '../lib/seats.mjs';
 import { PAYMENT_TERMINAL, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
-import { admitAndOpen, CONSENT_VERSION, countOverTarget, envInt, envStr, jsonOf, markScenarios, PURCHASE_BASE, scenarioErrors, V1Session, vcall, writeSummary } from './v1-common.js';
+import { admitAndOpen, CONSENT_VERSION, countOverTarget, envInt, envStr, HOLD_BASE, jsonOf, markScenarios, PURCHASE_BASE, scenarioErrors, V1Session, vcall, writeSummary } from './v1-common.js';
 
 export { markEnd, markStart } from './v1-common.js';
 
@@ -74,7 +74,7 @@ export function pay() {
   if (!opened) return;
   const s = new V1Session(i, opened.admissionToken);
 
-  const held = s.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: v1SeatIds(GRID, userSeats(GRID, i, SEATS_PER_ORDER)) }, { route: 'hold', expected: [201] });
+  const held = s.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: v1SeatIds(GRID, userSeats(GRID, i, SEATS_PER_ORDER)) }, { route: 'hold', expected: [201], base: HOLD_BASE });
   const holdId = held.status === 201 ? jsonOf(held)?.holdId : undefined;
   if (!check(held, { '홀드 201': () => typeof holdId === 'string' })) return;
 

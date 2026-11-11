@@ -14,7 +14,7 @@ import { openPhases } from '../lib/model.mjs';
 import { pickHoldSeats } from '../lib/seats.mjs';
 import { ownedUser, segmentUsers, v1Headers, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
-import { envInt, envStr, jsonOf, markScenarios, PURCHASE_BASE, QUEUE_BASE, RUN_TAG, scenarioErrors, STATE_BASE, V1Session, writeSummary } from './v1-common.js';
+import { envInt, envStr, HOLD_BASE, jsonOf, markScenarios, PURCHASE_BASE, QUEUE_BASE, RUN_TAG, scenarioErrors, STATE_BASE, V1Session, writeSummary } from './v1-common.js';
 
 export { markEnd, markStart } from './v1-common.js';
 
@@ -111,14 +111,14 @@ export function hold(data) {
   let s = sessions.get(u);
   if (!s) sessions.set(u, (s = new V1Session(u, data.tokens[u])));
   const seatIds = v1SeatIds(GRID, pickHoldSeats(GRID, { mode: MODE, size: HOLD_SIZE, hotCount: HOT_COUNT, pairs: PAIRS, u1: Math.random(), u2: Math.random() }));
-  const r = s.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds }, { route: 'hold', expected: [201, 409, 422] });
+  const r = s.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds }, { route: 'hold', expected: [201, 409, 422], base: HOLD_BASE });
   if (r.status === 422 && String(r.body).includes('invalid-seat')) scenarioErrors.add(1);
   if (r.status === 401) scenarioErrors.add(1);
   if (r.status !== 201) return;
   const holdId = jsonOf(r)?.holdId;
   if (typeof holdId !== 'string' || KEEP) return;
   if (RELEASE_MS > 0) sleep(RELEASE_MS / 1000);
-  const d = s.call('DELETE', `/v1/holds/${holdId}`, undefined, { route: 'release', expected: [204] });
+  const d = s.call('DELETE', `/v1/holds/${holdId}`, undefined, { route: 'release', expected: [204], base: HOLD_BASE });
   check(d, { '해제 204': (x) => x.status === 204 });
 }
 

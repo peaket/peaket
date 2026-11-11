@@ -59,7 +59,29 @@ export interface DrizzleConfirmJobsOptions {
   readonly codec?: PaymentEventCodec;
 }
 
-type ClaimRow = { payment_id: string; attempts: number | string; next_attempt_at: Date | string; previous_owner: string | null; queued_at: Date | string | null };
+type ClaimRow = {
+  payment_id: string;
+  attempts: number | string;
+  next_attempt_at: Date | string;
+  previous_owner: string | null;
+  queued_at: Date | string | null;
+  /** BAT-032: claimDue가 같은 트랜잭션에서 함께 읽은 원장 값. 기한 지난 행 잡기는 없다(그때는 read로 읽는다) */
+  id?: string;
+  order_id?: string;
+  event_id?: string;
+  attempt_no?: number | string;
+  pg?: string;
+  pg_payment_ref?: string;
+  pg_confirm_token?: string | null;
+  pg_tx_id?: string | null;
+  amount?: number | string;
+  status?: string;
+  authenticated_at?: Date | string;
+  confirm_sent?: boolean;
+  entry_opens_at?: Date | string | null;
+  virtual_account_allowed?: boolean | null;
+  status_changed_at?: Date | string;
+};
 
 type TargetRow = {
   id: string;
@@ -100,6 +122,27 @@ type QueryRow = {
 };
 
 const msOf = (v: Date | string): number => new Date(v).getTime();
+
+/** TargetRow → ConfirmTarget. read와 claimDue가 같은 규칙을 쓴다(BAT-032) */
+function targetOf(row: TargetRow): ConfirmTarget {
+  return {
+    paymentId: row.id,
+    orderId: row.order_id,
+    eventId: row.event_id,
+    attemptNo: Number(row.attempt_no),
+    pg: row.pg as PgName,
+    paymentRef: row.pg_payment_ref,
+    ...(row.pg_confirm_token ? { confirmToken: row.pg_confirm_token } : {}),
+    ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
+    amount: Number(row.amount),
+    status: row.status as PaymentLedgerStatus,
+    authenticatedAtMs: msOf(row.authenticated_at),
+    confirmSent: row.confirm_sent,
+    ...(row.entry_opens_at === null || row.entry_opens_at === undefined ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
+    ...(row.virtual_account_allowed === null || row.virtual_account_allowed === undefined ? {} : { virtualAccountAllowed: row.virtual_account_allowed }),
+    acceptedAtMs: msOf(row.status_changed_at),
+  };
+}
 
 /** 잡은 행의 원장 상태(잡을 때 본 상태. 답 반영과 간격 쓰기의 조건이다) */
 const sourceOf = (job: UnknownQueryJob): 'UNKNOWN' | 'AWAITING_DEPOSIT' | 'FAILED' | 'APPROVED' => (job.lateDepositCheck ? 'FAILED' : job.reversalCheck !== undefined ? 'APPROVED' : job.deposit === undefined ? 'UNKNOWN' : 'AWAITING_DEPOSIT');
@@ -148,8 +191,12 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
         update payment_confirm_job j
         set lease_owner = ${owner}, lease_until = ${new Date(leaseUntilMs)}::timestamptz, queued_at = coalesce(j.queued_at, case when j.next_attempt_at < ${new Date(now - CONFIRM_QUEUED_AFTER_MS)}::timestamptz then ${at}::timestamptz end)
         from picked p
+        join payment pay on pay.id = p.payment_id
         where j.payment_id = p.payment_id
-        returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner, j.queued_at`),
+        returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner, j.queued_at,
+          pay.id::text as id, pay.order_id::text as order_id, pay.event_id::text as event_id, pay.attempt_no, pay.pg, pay.pg_payment_ref, pay.pg_confirm_token, pay.pg_tx_id, pay.amount,
+          pay.status, pay.authenticated_at, pay.status_changed_at, pay.entry_opens_at, pay.virtual_account_allowed,
+          exists (select 1 from payment_event e where e.payment_id = pay.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent`),
     );
     return this.#jobsOf(r.rows as ClaimRow[], pg, owner, leaseUntilMs);
   }
@@ -199,7 +246,19 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
   #jobsOf(rows: ClaimRow[], pg: PgName, owner: string, leaseUntilMs: number): ConfirmJob[] {
     return rows
       .sort((a, b) => msOf(a.next_attempt_at) - msOf(b.next_attempt_at) || (a.payment_id < b.payment_id ? -1 : a.payment_id > b.payment_id ? 1 : 0))
-      .map((row) => ({ paymentId: row.payment_id, pg, attempts: Number(row.attempts), owner, leaseUntilMs, hadPreviousOwner: row.previous_owner !== null, ...(row.queued_at === null ? {} : { queued: true as const }) }));
+      .map((row) => {
+        const target = row.id === undefined || row.id === null ? undefined : targetOf(row as unknown as TargetRow);
+        return {
+          paymentId: row.payment_id,
+          pg,
+          attempts: Number(row.attempts),
+          owner,
+          leaseUntilMs,
+          hadPreviousOwner: row.previous_owner !== null,
+          ...(row.queued_at === null ? {} : { queued: true as const }),
+          ...(target === undefined ? {} : { target }),
+        };
+      });
   }
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
@@ -209,24 +268,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       from payment p where p.id = ${paymentId}::uuid`);
     const row = r.rows[0] as TargetRow | undefined;
     if (!row) return undefined;
-    return {
-      paymentId: row.id,
-      orderId: row.order_id,
-      eventId: row.event_id,
-      attemptNo: Number(row.attempt_no),
-      pg: row.pg as PgName,
-      paymentRef: row.pg_payment_ref,
-      ...(row.pg_confirm_token ? { confirmToken: row.pg_confirm_token } : {}),
-      ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
-      amount: Number(row.amount),
-      status: row.status as PaymentLedgerStatus,
-      authenticatedAtMs: msOf(row.authenticated_at),
-      confirmSent: row.confirm_sent,
-      ...(row.entry_opens_at === null ? {} : { entryOpensAtMs: msOf(row.entry_opens_at) }),
-      ...(row.virtual_account_allowed === null ? {} : { virtualAccountAllowed: row.virtual_account_allowed }),
-      // ACCEPTED로 쓴 시각(이 행을 읽는 동안 다른 전이가 없다, 결제 확정 소요의 시작점)
-      acceptedAtMs: msOf(row.status_changed_at),
-    };
+    return targetOf(row);
   }
 
   async markSent(job: ConfirmJob): Promise<MarkConfirmSentResult> {

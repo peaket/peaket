@@ -71,6 +71,11 @@ export interface ConfirmJob {
   readonly hadPreviousOwner: boolean;
   /** 이 명령이 여유 부족이나 서킷으로 미뤄진 적이 있다(경로 지표 retry_queue, BUILD_ORDER PRF-200) */
   readonly queued?: true;
+  /**
+   * 잡을 때 같은 트랜잭션에서 읽은 원장 값(BAT-032). 있으면 실행기가 read를 한 번 더 묻지 않는다.
+   * 없으면(기한 지난 행 잡기·시험의 직접 runJob) 예전처럼 read로 읽는다
+   */
+  readonly target?: ConfirmTarget;
 }
 
 /** 승인 호출에 필요한 원장 값(read의 결과) */

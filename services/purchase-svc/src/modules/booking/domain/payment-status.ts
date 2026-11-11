@@ -22,6 +22,7 @@ export const PAYMENT_STATUS_MAX_DEADLINE_MS = 27_000;
  */
 export const ISSUE_DELAYED_AFTER_MS = 60_000;
 /** 파드 안 기다림 표의 묶음 조회 간격 200ms [가정](payment §2 '알림 길') */
+/** 기다리는 주문의 묶음 조회 간격 200ms [가정]. BAT-032에서 100ms를 시험했지만 100초 K7이 놓침 294로 무효·악화되어 되돌렸다 */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 200;
 /** 묶음 조회 한 번에 읽는 주문 수 상한 500건 [가정](payment §2 '알림 길', verification §4.1 long polling 행) */
 export const PAYMENT_STATUS_BATCH_MAX = 500;

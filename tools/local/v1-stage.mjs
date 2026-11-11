@@ -12,6 +12,12 @@ export const V1_SERVICES = Object.freeze(['payment-svc', 'purchase-svc', 'admiss
  * payment-svc의 업무 gRPC는 같은 파드 안 purchase-svc가 127.0.0.1로 부른다(서비스 사이 호출은 v1과 같은 gRPC, docs/verification.md §3.8 '같게 두는 것'). queue-svc의 업무 gRPC(VerificationAppealService)는 다른 포트로 127.0.0.1에만 연다
  */
 /** @type {Readonly<V1Ports>} */
+/**
+ * BAT-032: 홀드 전용 purchase-svc 워커의 앱 포트. 합본 파드 안에서 별도 스레드가 듣고,
+ * 차트 Service의 extraPorts로 k6가 직접 부른다(다른 구매 요청은 기존 purchase-svc 8081).
+ */
+export const V1_HOLD_PORT = 8083;
+/** @type {Readonly<V1Ports>} */
 export const V1_PORTS = Object.freeze({
   bundleManagement: 9464,
   'queue-svc': Object.freeze({ app: 8080, management: 9471, grpc: 50052 }),

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments } from 'yaml';
 import { ensureTool } from './tools.mjs';
 import { kafkaTopicArgs, redisTlsCertArgs, redisTlsNames, V1_DATABASES, V1_HOST_DIRS, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_NGINX_TAG, V1_POSTGRES_TAG, V1_PRELOAD_IMAGES, V1_VALKEY_TAG, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1Secrets, v1SimulatorObjects, v1StateCacheConf, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
-import { envFileText, V1_ADMISSION_ISSUER, V1_PATHS, V1_PORTS, V1_SERVICES, v1ClientKey, v1EnvFiles, v1Keys, v1SharedSecret } from './v1-stage.mjs';
+import { envFileText, V1_ADMISSION_ISSUER, V1_HOLD_PORT, V1_PATHS, V1_PORTS, V1_SERVICES, v1ClientKey, v1EnvFiles, v1Keys, v1SharedSecret } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TLS = { ca: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n', cert: '-----BEGIN CERTIFICATE-----\nSRV\n-----END CERTIFICATE-----\n', key: '-----BEGIN PRIVATE KEY-----\nK\n-----END PRIVATE KEY-----\n' };
@@ -33,6 +33,7 @@ test('PRF215_주소는_TLS켬이면_대기열·좌석모두rediss이고_끔이�
   assert.notEqual(V1_DATABASES.purchase, V1_DATABASES.payment);
   assert.equal(on.queueUrl, `http://bundle.v1.svc.cluster.local:${V1_PORTS['queue-svc'].app}`);
   assert.equal(on.purchaseUrl, `http://bundle.v1.svc.cluster.local:${V1_PORTS['purchase-svc'].app}`);
+  assert.equal(on.holdUrl, `http://bundle.v1.svc.cluster.local:${V1_HOLD_PORT}`);
   assert.throws(() => v1Layout({ redisTls: 'on' }), TypeError);
 });
 
@@ -230,7 +231,7 @@ test('PRF215_합본값파일은_복제3·Lease둘·서비스포트(V1_PORTS와�
   assert.equal(spec.automountServiceAccountToken, true);
   assert.deepEqual(objs.filter((o) => o.kind === 'Lease').map((l) => l.metadata.name).sort(), ['admission-ctrl', 'payment-entry-pause']);
   const port = (name) => c.ports.find((p) => p.name === name)?.containerPort;
-  assert.deepEqual(c.ports.map((p) => [p.name, p.containerPort]), [['http', V1_PORTS['queue-svc'].app], ['management', V1_PORTS.bundleManagement], ['purchase', V1_PORTS['purchase-svc'].app]]);
+  assert.deepEqual(c.ports.map((p) => [p.name, p.containerPort]), [['http', V1_PORTS['queue-svc'].app], ['management', V1_PORTS.bundleManagement], ['purchase', V1_PORTS['purchase-svc'].app], ['hold', V1_HOLD_PORT]]);
   const env = Object.fromEntries(c.env.map((e) => [e.name, e.value ?? e.valueFrom]));
   assert.equal(env.PEAKET_ENV, 'local');
   assert.equal(env.PEAKET_BUNDLE_ENV_DIR, V1_PATHS.envDir);
@@ -336,7 +337,7 @@ test('PRF215_코드리뷰_결제gRPC는_파드안127.0.0.1에만열고_합본Ser
   const f = v1EnvFiles({ keys: v1Keys(), queueRedisUrl: 'redis://q', seatRedisUrl: 'redis://s', purchaseDatabaseUrl: 'postgres://p/pu', paymentDatabaseUrl: 'postgres://p/pa', seatmapDir: '/sm', batchResultDir: '/br' });
   assert.equal(f['payment-svc'].PEAKET_GRPC_HOST, '127.0.0.1');
   const svc = find(renderValues('v1-bundle.yaml'), 'Service', 'bundle');
-  assert.deepEqual(svc.spec.ports.map((p) => [p.name, p.port]), [['http', V1_PORTS['queue-svc'].app], ['purchase', V1_PORTS['purchase-svc'].app]]);
+  assert.deepEqual(svc.spec.ports.map((p) => [p.name, p.port]), [['http', V1_PORTS['queue-svc'].app], ['purchase', V1_PORTS['purchase-svc'].app], ['hold', V1_HOLD_PORT]]);
 });
 
 test('PRF215_코드리뷰_합본메모리는_리허설최대(약226Mi)의_두배를_올린512Mi다', () => {

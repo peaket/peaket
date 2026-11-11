@@ -18,6 +18,8 @@ export { emit, envInt, envStr, jsonOf, markEnd, markScenarios, markStart, scenar
 export const QUEUE_BASE = envStr('QUEUE_BASE', 'http://bundle.v1.svc.cluster.local:8080');
 export const STATE_BASE = envStr('STATE_BASE', 'http://queue-state-cache.v1.svc.cluster.local:8080');
 export const PURCHASE_BASE = envStr('PURCHASE_BASE', 'http://bundle.v1.svc.cluster.local:8081');
+/** BAT-032: 홀드 전용 워커(별도 이벤트 루프). 값이 없으면 예전처럼 구매 포트로 보낸다 */
+export const HOLD_BASE = envStr('HOLD_BASE', PURCHASE_BASE);
 export const RUN_TAG = envStr('RUN_TAG', 'local');
 const CLIENT_KEY = envStr('CLIENT_KEY', '');
 const SHARED_SECRET = __ENV.SHARED_SECRET_HEX ? hexToBytes(__ENV.SHARED_SECRET_HEX) : new Uint8Array(0);
@@ -181,7 +183,7 @@ export class V1Session {
     const body = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
     this.signer.seq = nextPurchaseSeq(this.signer.seq, Date.now()) - 1;
     const sig = this.signer.sign(method, path, body);
-    return vcall(PURCHASE_BASE, method, path, {
+    return vcall(o.base ?? PURCHASE_BASE, method, path, {
       i: this.i,
       route: o.route,
       expected: o.expected,
