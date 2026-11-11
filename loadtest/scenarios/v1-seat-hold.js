@@ -23,6 +23,8 @@ const USERS = envInt('USERS');
 const RATE = envInt('RATE');
 const WARM_S = envInt('WARM_S');
 const MAIN_S = envInt('MAIN_S');
+/** 모든 발생기가 준비를 마친 뒤 같은 시각에 예열을 시작하는 절대 시각(ms, 0이면 기다리지 않는다, BAT-028 D) */
+const WARM_START_AT_MS = envInt('WARM_START_AT_MS', 0);
 const MODE = envStr('MODE', 'spread');
 const HOLD_SIZE = envInt('HOLD_SIZE', 2);
 const HOT_COUNT = envInt('HOT_COUNT', 1);
@@ -90,6 +92,11 @@ export function setup() {
   }
   const ready = tokens.filter(Boolean).length;
   if (ready < MINE) throw new Error(`준비 구간에 구매 세션을 연 가상 사용자가 ${ready}/${MINE}명이다(이 발생기 몫 ${MINE_FROM}~${MINE_TO})`);
+  // 모든 발생기가 준비를 마치고 같은 시각에 예열을 시작한다(BAT-028 D). 실행 도구가 이 시각을 부하 시작으로 센다
+  if (WARM_START_AT_MS > 0) {
+    const waitMs = WARM_START_AT_MS - Date.now();
+    if (waitMs > 0) sleep(waitMs / 1000);
+  }
   return { tokens };
 }
 

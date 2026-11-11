@@ -1,0 +1,10 @@
+{
+  "name": "bundle-9545768cf-d2pgx",
+  "atMs": 1794379722012,
+  "leaseHolders": {
+    "admission-ctrl": "bundle-9545768cf-pxlw2",
+    "payment-entry-pause": "bundle-9545768cf-jzptw"
+  },
+  "heldLeases": [],
+  "leaseErrors": []
+}

@@ -25,6 +25,7 @@ import {
   MemorySeatStore,
   MemorySweepLeases,
   RecordingHoldAttempts,
+  type ResolvedPurchaseSessionInfo,
   SEAT_CALL_CAP_MS,
   SEAT_CALL_MIN_REMAINING_MS,
   SEAT_STORE_RETRY_AFTER_SEC,
@@ -1131,6 +1132,54 @@ describe('시험 대역의 계약', () => {
       ['CONFLICT', 1],
     ]);
     expect(r.records[0]).not.toBe(a);
+  });
+});
+
+describe('HoldSeats.execute: 인증 세션 재사용(BAT-028, HOT-463)', () => {
+  const resolved = (w: Awaited<ReturnType<typeof world>>, over: Partial<ResolvedPurchaseSessionInfo> = {}): ResolvedPurchaseSessionInfo => ({
+    sessionId: 'ps-a',
+    accountId: ACCOUNT_A,
+    eventId: w.eventId,
+    journeyId: JNY_A,
+    ...over,
+  });
+
+  test('BAT028_인증이_읽은_세션을_넘기면_sessions.get을_부르지_않고_같은_홀드를_한다', async () => {
+    const w = await world();
+    const innerGet = w.sessions.get.bind(w.sessions);
+    let gets = 0;
+    w.sessions.get = async (id: string) => {
+      gets += 1;
+      return innerGet(id);
+    };
+    const r = await w.run([SEAT_DEFS[0]!.seatId], { session: resolved(w) });
+    expect(r.seatIds).toEqual([SEAT_DEFS[0]!.seatId]);
+    expect(gets).toBe(0);
+  });
+
+  test('BAT028_넘긴_세션도_계정과_회차를_다시_대조한다', async () => {
+    const w = await world();
+    await rejects(w.run([SEAT_DEFS[0]!.seatId], { accountId: ACCOUNT_B, purchaseSessionId: 'ps-b', session: resolved(w) }), 'SESSION_NOT_FOUND');
+    await rejects(w.run([SEAT_DEFS[0]!.seatId], { session: resolved(w, { eventId: w.otherEvent }) }), 'EVENT_MISMATCH');
+  });
+
+  test('BAT028_최대체류경계는_넘긴_세션에서도_다시_본다', async () => {
+    const w = await world();
+    await rejects(w.run([SEAT_DEFS[0]!.seatId], { session: resolved(w, { maxStayUntilMs: NOW }) }), 'SESSION_NOT_FOUND');
+    const r = await w.run([SEAT_DEFS[0]!.seatId], { session: resolved(w, { maxStayUntilMs: NOW + 1 }) });
+    expect(r.seatIds).toEqual([SEAT_DEFS[0]!.seatId]);
+  });
+
+  test('BAT028_세션을_넘기지_않으면_기존처럼_sessions.get을_한_번_부른다', async () => {
+    const w = await world();
+    const innerGet = w.sessions.get.bind(w.sessions);
+    let gets = 0;
+    w.sessions.get = async (id: string) => {
+      gets += 1;
+      return innerGet(id);
+    };
+    await w.run([SEAT_DEFS[0]!.seatId]);
+    expect(gets).toBe(1);
   });
 });
 

@@ -24,6 +24,8 @@ export const SCENARIOS = Object.freeze({ queue: 'v0-queue.js', 'seat-hold': 'v0-
 export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js' });
 /** v1 입장 토큰의 최대 체류 45분 [가정](queue-svc MAX_STAY_MS). 준비부터 본구간 끝까지가 이 안이어야 구매 세션이 끝나지 않는다 */
 export const V1_ADMISSION_STAY_S = 45 * 60;
+/** v1 K2 좌석 홀드의 기본 예열(초, BAT-028 D). 발생기 준비가 끝난 뒤 모두 같은 시각에 시작하도록 60초를 둔다 */
+export const V1_SEAT_HOLD_WARM_S = 60;
 
 /** 기본값 [가정](docs/verification.md §3.9) */
 export const DEFAULTS = Object.freeze({
@@ -281,7 +283,8 @@ export function parseArgs(argv) {
   if (o.runId !== undefined && !RUN_ID.test(o.runId)) fail(`--run-id 꼴이 틀렸다(YYYY-MM-DD-영소문자·숫자·-): ${o.runId}`);
   if (o.profile !== undefined && !PROFILE.test(o.profile)) fail(`--profile 꼴이 틀렸다(local-…): ${o.profile}`);
 
-  const warmS = o.warmS ?? DEFAULTS.warmS;
+  // K2 좌석 홀드만 예열 기본을 60초로 둔다(BAT-028 D). K1·K7과 v0는 기존 30초 기본을 그대로 쓴다
+  const warmS = o.warmS ?? (v1 && kind === 'seat-hold' ? V1_SEAT_HOLD_WARM_S : DEFAULTS.warmS);
   const mainS = o.mainS ?? (kind === 'gate' ? DEFAULTS.gateMainS : DEFAULTS.mainS);
   // 준비 구간에서 진입·입장시키는 가상 사용자 수(seat-deltas는 연결 쪽까지, gate는 스캐너 계정)
   const prepUsers = kind === 'seat-deltas' ? o.users + o.connections : kind === 'gate' ? o.scanners : o.users;

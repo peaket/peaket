@@ -20,6 +20,7 @@ import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Clock } from './clock.js';
 import { requestContext } from './context.js';
+import type { HotPathMetrics } from './hot-path.js';
 import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
@@ -210,6 +211,8 @@ export class AuthState {
     readonly requireAdminAuthz = true,
     /** 구매 요청 인증 훅(@PurchaseSigned)의 구매 세션 포트와 거절을 세는 곳 */
     readonly purchase: { sessions?: PurchaseSessionPort; onRejected?: (reason: PurchaseRejection) => void } = {},
+    /** 핫패스 구간 진단(BAT-028). 없으면 계측하지 않는다 */
+    readonly hotPath?: HotPathMetrics,
   ) {
     this.terminated = new TerminatedSessions(clock);
     this.#cache = new AdminAuthzCache(clock);
@@ -288,6 +291,8 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     if (ctx.getType() !== 'http') return true;
+    const done = this.state.hotPath?.start('http.auth');
+    try {
     const policy = this.reflector.getAllAndOverride<RolesPolicy | undefined>(ROLES_METADATA, [ctx.getHandler(), ctx.getClass()]);
     // 시작 때 모든 처리기를 확인하므로 여기 오지 않는다. 와도 닫는다
     if (!policy) throw new ForbiddenException();
@@ -348,6 +353,9 @@ export class AuthGuard implements CanActivate {
     }
     throwAttachedValidationError(request);
     return true;
+    } finally {
+      done?.();
+    }
   }
 }
 

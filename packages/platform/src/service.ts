@@ -12,6 +12,7 @@ import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js
 import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, loadPlatformConfig } from './config.js';
 import { activeTrace } from './context.js';
+import type { HotPathMetrics } from './hot-path.js';
 import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
 import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLogger } from './log.js';
 import { PlatformMetrics, statusClass } from './metrics.js';
@@ -64,6 +65,8 @@ export interface CreateServiceOptions {
   purchaseSessions?: PurchaseSessionPort;
   /** 앱 포트가 요청 하나(머리·본문)를 다 받는 시한(ms). 기본은 Fastify 기본(시한 없음)이다. 서버 전체에 걸리므로 그 포트의 경로를 모두 보고 정한다 */
   requestTimeoutMs?: number;
+  /** 핫패스 구간 진단(BAT-028). 서비스가 만든 것을 넘기면 인증·처리기·문제 변환·로그·응답 구간을 잰다 */
+  hotPath?: HotPathMetrics;
 }
 
 export interface PlatformService {
@@ -109,10 +112,16 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   const clock = o.clock ?? systemClock;
   const metrics = new PlatformMetrics(o.name);
   const rejections = purchaseRejections(metrics.registry);
-  const auth = new AuthState(clock, o.adminAuthz, true, {
-    sessions: o.purchaseSessions,
-    onRejected: (reason) => rejections.inc({ service: o.name, reason }),
-  });
+  const auth = new AuthState(
+    clock,
+    o.adminAuthz,
+    true,
+    {
+      sessions: o.purchaseSessions,
+      onRejected: (reason) => rejections.inc({ service: o.name, reason }),
+    },
+    o.hotPath,
+  );
   const logger = createPlatformLogger({
     service: o.name,
     env: config.env,
@@ -167,10 +176,10 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     logger: nestLevels === false ? false : new NestPinoLogger(logger, nestLevels),
   });
   const http = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
-  installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs, canonical });
+  installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs, canonical, ...(o.hotPath ? { hotPath: o.hotPath } : {}) });
   // 경로 스키마 검사기와 본문 해석기는 경로를 붙이기(app.init) 전에 건다(결정 4·6)
   installRequestChecks(http);
-  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors }));
+  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors, ...(o.hotPath ? { hotPath: o.hotPath } : {}) }));
   await app.init();
 
   const readiness = new Readiness();

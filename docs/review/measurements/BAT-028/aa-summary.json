@@ -1,0 +1,23 @@
+{
+  "condition": "v1 seat-hold, users 1000, rate 2000/s, hot 1, keep, warm 60s, main 60s, generators 4, bundle CPU 4/replica 3",
+  "quiet": {
+    "pair": ["quiet-r2", "quiet-r3"],
+    "p99_ms": [49.732953, 66.75038739],
+    "ratio": 1.3424,
+    "valid": [true, true],
+    "note": "quiet-r1은 dropped 87로 무효. quiet-r2(16:43:13~16:50:57 KST)·quiet-r3(16:53:17~17:01:02 KST)는 purchase-svc 잡음 시작(17:01:20 KST) 전에 끝나 조용한 조건이었다."
+  },
+  "noisy": {
+    "intended_noise": "args090.test.mjs 반복",
+    "valid_runs": ["noisy-r5"],
+    "p99_ms": { "noisy-r4": 99.23645886, "noisy-r5": 69.16901533999993 },
+    "valid": { "noisy-r4": false, "noisy-r5": true },
+    "ratio_note": "noisy-r4는 dropped 14로 무효, noisy-r5만 유효라 쌍을 이루지 못했다.",
+    "discarded": {
+      "noisy-r1": "purchase-svc 시험 반복이 너무 무거워 대상이 무너짐(놓침 58,692·오류 69.0%)",
+      "noisy-r2": "noise2가 pnpm 실행 실패로 잡음이 없었음",
+      "noisy-r3": "noise2가 pnpm 실행 실패로 잡음이 없었음"
+    }
+  },
+  "verdict": "A/A 성립하지 않음. 조용한 쌍 34.24% 차이로 ±9.6% 기준을 넘고, 잡음 쌍은 유효 실행이 하나뿐이다."
+}

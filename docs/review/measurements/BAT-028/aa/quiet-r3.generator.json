@@ -1,0 +1,117 @@
+{
+  "generators": 4,
+  "loadStartMs": 1794383802358,
+  "startSkewS": 0,
+  "cpuMeanPctMax": 29.3,
+  "cpuMaxPctMax": 38.1,
+  "memMaxPctMax": 28.7,
+  "dropped": 0,
+  "scenarioErrors": 0,
+  "vusMax": 801,
+  "judge": {
+    "valid": true,
+    "reasons": []
+  },
+  "each": [
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 29.3,
+        "cpuMaxPct": 38.1,
+        "memMaxPct": 28.7,
+        "memMaxBytes": 308461568,
+        "samples": 58
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 201,
+      "perVuBytes": 1534635,
+      "marks": {
+        "main_start": 1794383862345,
+        "main_end": 1794383922337
+      },
+      "startedS": 1794383627
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 28.8,
+        "cpuMaxPct": 35.7,
+        "memMaxPct": 28.6,
+        "memMaxBytes": 307011584,
+        "samples": 58
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 200,
+      "perVuBytes": 1535058,
+      "marks": {
+        "main_start": 1794383862345,
+        "main_end": 1794383922337
+      },
+      "startedS": 1794383627
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 29.2,
+        "cpuMaxPct": 36.1,
+        "memMaxPct": 28.7,
+        "memMaxBytes": 308404224,
+        "samples": 57
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 200,
+      "perVuBytes": 1542022,
+      "marks": {
+        "main_start": 1794383862345,
+        "main_end": 1794383922337
+      },
+      "startedS": 1794383627
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 29.1,
+        "cpuMaxPct": 37.6,
+        "memMaxPct": 28.5,
+        "memMaxBytes": 306331648,
+        "samples": 58
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 200,
+      "perVuBytes": 1531659,
+      "marks": {
+        "main_start": 1794383862345,
+        "main_end": 1794383922337
+      },
+      "startedS": 1794383627
+    }
+  ]
+}

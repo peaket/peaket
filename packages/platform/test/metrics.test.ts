@@ -20,7 +20,7 @@ describe('지연 히스토그램 칸', () => {
     expect(m, 'observability §8의 표준 칸 목록 문장').not.toBeNull();
     const listed = m![1].split(',').map((x) => Number(x.trim()));
     expect([...LATENCY_BUCKETS_SECONDS]).toEqual(listed);
-    expect(LATENCY_BUCKETS_SECONDS).toHaveLength(20);
+    expect(LATENCY_BUCKETS_SECONDS).toHaveLength(22);
   });
 
   test('ADR0077_SLO와경보기준값이_모두칸경계에있다', () => {

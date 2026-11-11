@@ -39,7 +39,14 @@ export type HotPathStage =
   | 'queue.entry.batch_result'
   | 'queue.entry.mirror'
   | 'queue.entry.release'
-  | 'queue.entry.total';
+  | 'queue.entry.total'
+  | 'http.entry'
+  | 'http.auth'
+  | 'http.handler'
+  | 'http.problem'
+  | 'http.log'
+  | 'http.serialize'
+  | 'http.total';
 
 /** 결과 이름(고정 목록). 화면·경보가 쓰는 이름이므로 함부로 바꾸지 않는다 */
 export type HotPathOutcome =

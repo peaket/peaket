@@ -455,26 +455,25 @@ describe('업무 거절', () => {
     untouched(ev());
   });
 
-  test('PRF192_FR010_ 인증 훅을 지난 뒤 구매 세션이 끝났으면 쓰임새의 401 purchase-session-ended이고 WWW-Authenticate(Cookie realm="peaket")가 있으며 시도 기록이 없다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('BAT028_인증 훅이 읽은 세션을 홀드가 재사용하므로 두 번째 get을 부르지 않는다', async () => {
     const { eventId, fan, ev } = await world();
     const f = fan(1);
-    // 인증 훅(resolve·advance)은 지나고 쓰임새의 세션 읽기(get)만 비게 한다
     const get = sessions.get.bind(sessions);
-    sessions.get = async () => undefined;
-    const calls = holdCalls.length;
-    const recs = attempts.records.length;
+    let gets = 0;
+    sessions.get = async () => {
+      gets += 1;
+      return undefined;
+    };
     try {
       const r = await post(eventId, seats('A01'), f);
-      expect(r.statusCode).toBe(401);
-      expect(r.headers['www-authenticate']).toBe('Cookie realm="peaket"');
+      expect(r.statusCode).toBe(201);
       expect(r.headers['cache-control']).toBe('no-store');
-      expect(json(r)).toMatchObject({ type: problem('purchase-session-ended'), status: 401, title: '예매 시간이 끝났습니다' });
     } finally {
       sessions.get = get;
     }
-    expect(holdCalls.length).toBe(calls);
-    expect(attempts.records.length).toBe(recs);
-    untouched(ev());
+    // 인증(resolve)이 읽은 세션 스냅샷을 쓴다. 예전에는 쓰임새가 한 번 더 읽었다
+    expect(gets).toBe(0);
+    expect(ev().stream).toHaveLength(1);
   });
 });
 

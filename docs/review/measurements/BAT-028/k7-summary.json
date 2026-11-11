@@ -1,0 +1,45 @@
+{
+  "condition": "v1 payment, users 11002, rate 100/s, seats-per-order 2, warm 10s, main 100s, fault drop 5%, fault delay 0.5% (16s), kill one bundle pod at main 50s, bundle CPU 4/replica 3, new cluster each run",
+  "runs": [
+    {
+      "run": "r1",
+      "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r1-bat028",
+      "k6_p99_ms": 13226.068280880001,
+      "error_rate": 0.09446051644701596,
+      "requests": 46665,
+      "dropped": 435,
+      "scenario_errors": 1,
+      "hold_p99_ms": 236.3,
+      "payment_p99_ms": 36264.0,
+      "valid": false,
+      "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "skipped": ["S3", "P5", "M1", "M2", "M3", "M4", "M5"] }
+    },
+    {
+      "run": "r2",
+      "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r2-bat028",
+      "k6_p99_ms": 14208.011017,
+      "error_rate": 0.11794262518254499,
+      "requests": 40401,
+      "dropped": 991,
+      "scenario_errors": 102,
+      "hold_p99_ms": 419.4,
+      "payment_p99_ms": 38462.2,
+      "valid": false,
+      "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "skipped": ["S3", "P5", "M1", "M2", "M3", "M4", "M5"] }
+    },
+    {
+      "run": "r3",
+      "ledger": "docs/perf-ledger/runs/2026-11-11-k7-v1-fault-r3-bat028",
+      "k6_p99_ms": 14461.618180560008,
+      "error_rate": 0.1090454374432862,
+      "requests": 45183,
+      "dropped": 420,
+      "scenario_errors": 16,
+      "hold_p99_ms": 189.0,
+      "payment_p99_ms": 39720.7,
+      "valid": false,
+      "invariants": { "P1": "PASS", "P2": "PASS", "P3": "PASS", "P4": "PASS", "P6": "PASS", "skipped": ["S3", "P5", "M1", "M2", "M3", "M4", "M5"] }
+    }
+  ],
+  "verdict": "3회 모두 발생기 놓침·시나리오 오류로 무효이고 hold_p99_50ms·payment_p99_3000ms도 fail. 불변식 P1~P4·P6은 PASS. K7 ② 통과는 결제 경로 처리량 최적화 뒤 별도 배치."
+}

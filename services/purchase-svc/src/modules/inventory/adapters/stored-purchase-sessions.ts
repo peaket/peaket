@@ -8,7 +8,7 @@ import type { FastifyRequest } from 'fastify';
 import { ADMISSION_TOKEN_MAX_CHARS } from '../domain/admission-token.js';
 import { parseClientEphemeralKey } from '../domain/client-key.js';
 import { KEY_PART, SEAT_STORE_RETRY_AFTER_SEC, SEAT_STORE_UNAVAILABLE_PROBLEM, SeatStoreUnavailable } from '../domain/hold.js';
-import type { PurchaseSessionInfo, PurchaseSessionStore } from '../domain/ports.js';
+import { PURCHASE_SESSION_INFO, type PurchaseSessionInfo, type PurchaseSessionStore, type ResolvedPurchaseSessionInfo } from '../domain/ports.js';
 import { sessionStoreErrorOf } from '../domain/purchase-session.js';
 import type { PurchaseSessionAccess } from './memory-purchase-sessions.js';
 import type { ServerEcdhKey } from './server-ecdh.js';
@@ -75,6 +75,9 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
     if (this.deps.clock.now() >= s.maxStayUntilMs) return undefined;
     const client = parseClientEphemeralKey(s.clientKey);
     if (!client) return undefined;
+    // 같은 요청의 홀드가 세션을 다시 읽지 않게 인증 때 읽은 값을 요청에 붙인다(BAT-028). 최대 체류 경계도 함께 넘겨 홀드가 다시 본다
+    const info: ResolvedPurchaseSessionInfo = { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId, maxStayUntilMs: s.maxStayUntilMs };
+    (request as unknown as Record<symbol, ResolvedPurchaseSessionInfo | undefined>)[PURCHASE_SESSION_INFO] = info;
     return { ref: jti, key: purchaseRequestKey(this.deps.ecdh.sharedSecret(client.key), jti) };
   }
 

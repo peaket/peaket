@@ -24,6 +24,8 @@ import { HoldError, throwHoldProblem } from '../application/hold-error.js';
 import { type LogGate, OOM_WARN_GATE } from '../application/log-gate.js';
 import { type HoldResponse, HoldSeats } from '../application/hold-seats.js';
 import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN } from '../domain/hold.js';
+import type { ResolvedPurchaseSessionInfo } from '../domain/ports.js';
+import { CurrentPurchaseSessionInfo } from './current-purchase-session-info.js';
 import { type SeatKeyKind, type SeatLuaErrorCode, seatLuaErrorOf } from '../domain/lua-errors.js';
 
 /** 멱등 작업 이름(범위 = 계정 × 이 작업, guidelines §4). 홀드의 멱등 기록은 PostgreSQL이 아니라 좌석 Redis의 홀드 Lua 안이다 */
@@ -146,13 +148,14 @@ export class HoldsController {
     @CurrentPrincipal() me: Principal,
     @IdempotencyRequest() idem: IdempotencyRequest,
     @CurrentPurchaseSession() purchaseSessionId: string,
+    @CurrentPurchaseSessionInfo() resolvedSession: ResolvedPurchaseSessionInfo | undefined,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<HoldResponse> {
     requestLog().set({ queuePhase: 'purchase' });
     void reply.header('cache-control', 'no-store');
     try {
       const deadline = requestContext()?.deadline;
-      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, ...(me.pid !== undefined ? { pid: me.pid } : {}), idempotencyKey: idem.key, body, ...(deadline ? { deadline } : {}) });
+      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, ...(resolvedSession ? { session: resolvedSession } : {}), ...(me.pid !== undefined ? { pid: me.pid } : {}), idempotencyKey: idem.key, body, ...(deadline ? { deadline } : {}) });
     } catch (e) {
       if (e instanceof HoldError) {
         if (e.code === 'STORE_UNAVAILABLE' && e.details.storeReason === 'oom' && (this.oomGate?.allow() ?? true)) {

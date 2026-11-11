@@ -2,7 +2,7 @@
 // 플랫폼 구매 요청 인증 훅의 포트(resolve·advance)와 inventory의 세션 읽기(get)를 함께 맡는 PurchaseSessionAccess 면은 둘이 같다.
 import type { Principal, PurchaseSession, PurchaseSessionPort } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
-import type { PurchaseSessionInfo, PurchaseSessions } from '../domain/ports.js';
+import { PURCHASE_SESSION_INFO, type PurchaseSessionInfo, type PurchaseSessions } from '../domain/ports.js';
 
 /** 구매 세션 구현이 함께 맡는 두 면: 플랫폼 구매 요청 인증 훅의 포트(resolve·advance)와 inventory의 세션 읽기(get) */
 export type PurchaseSessionAccess = PurchaseSessions & PurchaseSessionPort;
@@ -42,9 +42,16 @@ export class MemoryPurchaseSessions implements PurchaseSessionAccess {
   }
 
   /** 플랫폼 포트: principal의 계정·로그인 세션에 열린 구매 세션이 있으면 { ref: sessionId, key }, 없으면 undefined(가드가 401) */
-  async resolve(_request: FastifyRequest, principal: Principal): Promise<PurchaseSession | undefined> {
+  async resolve(request: FastifyRequest, principal: Principal): Promise<PurchaseSession | undefined> {
     for (const s of this.#sessions.values()) {
-      if (s.accountId === principal.accountId && s.loginSessionId === principal.sessionId) return { ref: s.sessionId, key: s.key };
+      if (s.accountId !== principal.accountId || s.loginSessionId !== principal.sessionId) continue;
+      (request as unknown as Record<symbol, PurchaseSessionInfo | undefined>)[PURCHASE_SESSION_INFO] = {
+        sessionId: s.sessionId,
+        accountId: s.accountId,
+        eventId: s.eventId,
+        journeyId: s.journeyId,
+      };
+      return { ref: s.sessionId, key: s.key };
     }
     return undefined;
   }

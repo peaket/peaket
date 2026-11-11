@@ -1204,6 +1204,8 @@ const V1_BATCH_WINDOW_MS = 1_500;
 const V1_DISPERSAL_WAIT_MS = 12_000;
 /** 시드한 때부터 오픈까지 [가정](리더가 200ms마다 회차 목록을 보고, 오픈 전 60초부터 그 회차를 본다) */
 const V1_OPEN_LEAD_MS = 5_000;
+/** K2 좌석 홀드: 발생기가 준비를 마치고 모두 같은 시각에 예열을 시작할 때까지의 여유(초, BAT-028 D) */
+const V1_WARM_LEAD_S = 180;
 /** v1 좌석 가격·한 사람 상한(시드 좌석맵 판) */
 const V1_PRICE = 150_000;
 const V1_PER_ACCOUNT = 4;
@@ -1304,7 +1306,8 @@ async function runV1(a, runTag) {
       maxRate = a.rate;
       prepS = 0;
     }
-    const busyS = prepS + a.warmS + a.mainS + 60;
+    const warmLeadS = a.scenario === 'seat-hold' ? V1_WARM_LEAD_S : 0;
+    const busyS = prepS + a.warmS + a.mainS + 60 + warmLeadS;
     const nGen = a.generators ?? generatorCount(maxRate);
     const split = nGen > 1;
     const gen = split && a.cpus === DEFAULTS.cpus && a.memoryMi === DEFAULTS.memoryMi ? { ...a, cpus: SPLIT_CPUS, memoryMi: SPLIT_MEMORY_MI } : a;
@@ -1349,6 +1352,8 @@ async function runV1(a, runTag) {
     // v1은 계정 토큰이 없다(신원 머리). 공통 시나리오 부분이 읽는 사용자 파일 자리만 채운다
     stageInputs(hostDir, { caPem: '', tokens: JSON.stringify(['v1']) });
     const L = v1Layout({ redisTls });
+    // K2 좌석 홀드는 모든 발생기가 준비를 마친 뒤 같은 시각에 예열을 시작한다(BAT-028 D). 준비가 이 시각을 넘기면 그 발생기만 늦게 시작한다
+    const warmStartAtMs = a.scenario === 'seat-hold' ? Date.now() + V1_WARM_LEAD_S * 1000 : undefined;
     const env = {
       SCENARIO: V1_SCENARIOS[a.scenario],
       QUEUE_BASE: L.queueUrl,
@@ -1359,6 +1364,7 @@ async function runV1(a, runTag) {
       EVENT_ID: eventId,
       WARM_S: a.warmS,
       MAIN_S: a.mainS,
+      ...(warmStartAtMs !== undefined ? { WARM_START_AT_MS: String(warmStartAtMs) } : {}),
       PRE_VUS: vus.pre * nGen,
       MAX_VUS: vus.max * nGen,
       USERS: a.users,
@@ -1391,6 +1397,11 @@ async function runV1(a, runTag) {
     if (split) {
       await sleep(1000);
       onNode(['sh', '-c', `touch ${hostDir}/go && chown ${K6_UID}:${K6_UID} ${hostDir}/go`]);
+    }
+    // 발생기가 준비를 마치고 예열을 시작할 시각까지 기다린다(그 시각을 부하 시작으로 센다, BAT-028 D)
+    if (warmStartAtMs !== undefined) {
+      const waitMs = warmStartAtMs - Date.now();
+      if (waitMs > 0) await sleep(waitMs);
     }
     const loadStartMs = Date.now();
     const side = sideTasks(loadStartMs);

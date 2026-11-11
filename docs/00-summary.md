@@ -519,6 +519,8 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - BAT-026 진단 결과(합본 CPU가 K2·K7 첫 병목, K1은 진입 경로/측정, A/A 미성립, S-T35 ⑥는 코드 차이)와 다음 배치 OPEN[35]를 기록한다(R-470).
 - K2 2,000/s CPU 4/replica 확인(p99 53.6ms·놓침 12로 미달, CPU/event loop 여유)과 다음 코드 계측 방향을 기록한다(R-471).
 - BAT-027 핫패스 구간 계측(HotPathMetrics)과 K2 2,000/s CPU 4/replica 1회 측정을 더한다. 계측 실행은 p99 47.54ms·놓침 143으로 무효, 안쪽은 hold.session·hold.lua가 88.7%, HTTP와 execute 차이 25.58ms를 다음 표적으로 남긴다(R-472).
+- BAT-028 D·A·B(예열 60초·발생기 동시 시작, HTTP 구간 계측, 인증 세션 재사용)를 넣고 K2 2,000/s CPU 4/replica 유효 3회 중앙값 44.33ms를 얻었다. K7 ② 3회는 결제 경로 처리량 때문에 모두 무효·미달(놓침 435·991·420, 결제 확정 p99 36~40초, P3 등 불변식 PASS)이고 A/A 조용한 쌍은 49.73 vs 66.75ms(1.342)로 불성립, 4관점 리뷰 높음·보안 지적은 0이다(R-473).
+- 새 kind 클러스터에 Strimzi·Kafka·Prometheus·Grafana·Postgres·Valkey·moto·합본 이미지를 미리 실어 v1 무대가 서지 않던 문제를 고친다(R-474).
 
 ## 5. [충돌] 결정 결과
 

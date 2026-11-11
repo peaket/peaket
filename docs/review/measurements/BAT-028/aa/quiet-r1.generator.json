@@ -1,0 +1,139 @@
+{
+  "generators": 4,
+  "loadStartMs": 1794382594814,
+  "startSkewS": 0,
+  "cpuMeanPctMax": 30.7,
+  "cpuMaxPctMax": 37.6,
+  "memMaxPctMax": 30.3,
+  "dropped": 87,
+  "scenarioErrors": 0,
+  "vusMax": 832,
+  "judge": {
+    "valid": false,
+    "reasons": [
+      "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 13)",
+      "발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 15)",
+      "발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 26)",
+      "발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 33)"
+    ]
+  },
+  "each": [
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 30.6,
+        "cpuMaxPct": 37.2,
+        "memMaxPct": 29.4,
+        "memMaxBytes": 315846656,
+        "samples": 58
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 13)"
+        ]
+      },
+      "scenarioErrors": 0,
+      "dropped": 13,
+      "droppedByScenario": {
+        "warm": 13
+      },
+      "vusMax": 206,
+      "perVuBytes": 1533237,
+      "marks": {
+        "main_start": 1794382654799,
+        "main_end": 1794382714794
+      },
+      "startedS": 1794382429
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 30.4,
+        "cpuMaxPct": 36.9,
+        "memMaxPct": 29.5,
+        "memMaxBytes": 316633088,
+        "samples": 58
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 15)"
+        ]
+      },
+      "scenarioErrors": 0,
+      "dropped": 15,
+      "droppedByScenario": {
+        "main": 5,
+        "warm": 10
+      },
+      "vusMax": 208,
+      "perVuBytes": 1522275,
+      "marks": {
+        "main_start": 1794382654799,
+        "main_end": 1794382714794
+      },
+      "startedS": 1794382429
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 30.7,
+        "cpuMaxPct": 37.6,
+        "memMaxPct": 29.1,
+        "memMaxBytes": 312107008,
+        "samples": 58
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 26)"
+        ]
+      },
+      "scenarioErrors": 0,
+      "dropped": 26,
+      "droppedByScenario": {
+        "warm": 26
+      },
+      "vusMax": 205,
+      "perVuBytes": 1522474,
+      "marks": {
+        "main_start": 1794382654799,
+        "main_end": 1794382714794
+      },
+      "startedS": 1794382429
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 30.6,
+        "cpuMaxPct": 36.7,
+        "memMaxPct": 30.3,
+        "memMaxBytes": 325586944,
+        "samples": 58
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 33)"
+        ]
+      },
+      "scenarioErrors": 0,
+      "dropped": 33,
+      "droppedByScenario": {
+        "warm": 33
+      },
+      "vusMax": 213,
+      "perVuBytes": 1528578,
+      "marks": {
+        "main_start": 1794382654799,
+        "main_end": 1794382714794
+      },
+      "startedS": 1794382429
+    }
+  ]
+}

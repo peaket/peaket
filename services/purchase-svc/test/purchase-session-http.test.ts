@@ -244,23 +244,15 @@ describe('좌석 Redis 장애면 구매 세션 확인이 500이 아니라 503이
     expect((await post(w.eventId, f, { seq: 31 })).statusCode).toBe(201);
   });
 
-  test('NFR015_ST28_훅은 지났는데 홀드 유스케이스의 구매 세션 읽기(get)가 일시 장애여도 503이고 좌석에 변화가 없다 [ASVS v5.0.0-16.3.4]', async () => {
+  test('BAT028_인증_훅이_읽은_구매_세션을_홀드가_재사용해_두_번째_get을_부르지_않는다', async () => {
     const w = await world();
     const f = await w.fan(9);
-    // 훅의 resolve가 첫 읽기, 유스케이스의 get이 둘째 읽기다
-    flaky.read = new SeatStoreUnavailable(new Error('down'));
-    flaky.readAt = 2;
     flaky.readCalls = 0;
-    try {
-      const r = await post(w.eventId, f);
-      expect(r.statusCode).toBe(503);
-      expect(r.headers['retry-after']).toBe('2');
-      expect(json(r)).toMatchObject({ type: problem('seat-store-unavailable'), status: 503 });
-      expect(w.ev().bits.size).toBe(0);
-      expect(w.ev().stream).toHaveLength(0);
-    } finally {
-      reset();
-    }
+    const r = await post(w.eventId, f);
+    expect(r.statusCode).toBe(201);
+    // resolve 한 번만 읽는다. 예전에는 HoldSeats가 get으로 한 번 더 읽었다
+    expect(flaky.readCalls).toBe(1);
+    expect(w.ev().bits.size).toBe(1);
   });
 
   test('저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY)는 키 이름(구매 세션 ID가 든다)을 싣지 않은 채 500으로 나간다 [ASVS v5.0.0-16.2.5]', async () => {

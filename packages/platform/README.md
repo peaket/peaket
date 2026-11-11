@@ -97,7 +97,7 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | `currentDeadline()` | 지금 요청의 남은 시간. `budgetFor(상한)`은 다음 호출에 줄 시간, `ensure(필요한 시간)`은 모자라면 504 `deadline-exceeded`를 던진다 | docs/api/guidelines.md §5 |
 | `CLOCK`·`fakeClock` | 주입하는 시계(벽시계·단조 시계)와 시험용 시계 | 시간 의존 로직은 Clock 주입 |
 | `emitOpenApi`·`contractSchema` | CI 안에서만 서비스 OpenAPI 문서를 파일로 뽑는다(미리 보기 모드라 제공자를 만들지 않는다). `contractSchema`는 계약 Zod를 swagger 데코레이터용 스키마로 바꾼다. 기본은 입력 기준이라 계약과 같은 모양이 된다(`{ io: 'output' }`은 기본값이 채워진 뒤의 모양). 실행 중인 서비스는 문서 경로를 내지 않는다 | D-T38, docs/devops.md §3.1 |
-| `LATENCY_BUCKETS_SECONDS` | 지연 히스토그램 표준 칸 20개. 개별 서비스가 바꾸지 않는다 | docs/observability.md §8 |
+| `LATENCY_BUCKETS_SECONDS` | 지연 히스토그램 표준 칸 22개. 개별 서비스가 바꾸지 않는다 | docs/observability.md §8 |
 | `@ContractBody`·`@ContractQuery`·`@ContractParams`·`@ContractHeaders` | 계약 생성 Zod로 요청을 검사하는 매개변수 장식자(Zod 파이프). 쿼리·경로·머리는 검사 전에 계약 형식대로 문자열을 바꾸고, 겹친 쿼리는 400이다. 실패는 `about:blank` 400 | docs/api/guidelines.md §1·§2, ASVS 15.3.7 |
 | `@ContractRouteSchema`·`contractRouteSchema` | 핫패스의 Fastify 경로 스키마(`@RouteSchema()` 대신 처리기에 단다. 함수는 스키마만 만든다). 플랫폼 검사기는 형 바꾸기·정의 밖 칸 지우기를 하지 않아 Zod 파이프와 같게 거르고, 실패는 인증 가드가 신원을 판정한 뒤 400으로 낸다. 닫지 않은 객체의 정의 밖 칸은 처리기까지 오므로 쓸 칸을 골라 쓴다. 같은 처리기에 Zod 파이프를 함께 달지 않는다. NestJS의 `@RouteConfig()`도 함께 달지 않는다(경로 설정을 통째로 덮어 플랫폼 표시가 빠진다. 그래도 검사는 하고 익명 요청이 401 대신 400을 받는다, 마지막 확인 2026-11-01) | ADR-0023, V-T41 표본 묶음 |
 | `@AcceptTextPlain()` | 그 경로만 `text/plain` 본문을 JSON으로 읽는다. 그 밖의 경로와 `application/json` 밖 형식은 415 | asvs/delivery.md 3.5.2, ADR-0065 |

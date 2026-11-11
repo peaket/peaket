@@ -24,6 +24,7 @@ import {
   noSeatSignals,
   PURCHASE_SESSIONS,
   type PurchaseSessions,
+  type ResolvedPurchaseSessionInfo,
   SEAT_MAP,
   SEAT_SIGNALS,
   SESSION_HOLDS,
@@ -54,6 +55,11 @@ export interface HoldCommand {
   accountId: string;
   /** 플랫폼 구매 요청 인증 훅이 확인한 구매 세션 참조(@CurrentPurchaseSession()) */
   purchaseSessionId: string;
+  /**
+   * 인증 훅이 이미 읽은 구매 세션(BAT-028). 있으면 sessions.get을 부르지 않고 이 값을 쓴다.
+   * 계정·회차 대조와 최대 체류 경계는 #execute가 그대로 다시 본다. 없으면 기존처럼 sessions.get을 부른다.
+   */
+  session?: ResolvedPurchaseSessionInfo;
   /** 사람 식별값(Principal.pid). 없으면 행동 요약을 내지 않는다 */
   pid?: string;
   /** 플랫폼 멱등 모듈이 형식을 확인한 키(@IdempotencyRequest().key, 소문자 UUID v4). 플랫폼의 requestHash는 쓰지 않는다 */
@@ -205,15 +211,19 @@ export class HoldSeats {
 
     // 1 구매 세션(계정 ID는 Redis 키에 들어가므로 모양부터 본다)
     if (!KEY_PART.test(c.accountId)) throw new HoldError('SESSION_NOT_FOUND', '계정 ID 모양이 키 조각이 아니다');
-    let session;
-    try {
-      session = await timeHotPath(this.hotPath, 'hold.session', () => this.sessions.get(c.purchaseSessionId));
-    } catch (err) {
-      // 구매 세션 저장소(좌석 Redis)의 일시 장애·메모리 부족도 503이다. 아직 시도 기록을 남기기 전이다(PRF-136 리뷰)
-      if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
-      throw err;
+    let session = c.session;
+    if (session === undefined) {
+      try {
+        session = await timeHotPath(this.hotPath, 'hold.session', () => this.sessions.get(c.purchaseSessionId));
+      } catch (err) {
+        // 구매 세션 저장소(좌석 Redis)의 일시 장애·메모리 부족도 503이다. 아직 시도 기록을 남기기 전이다(PRF-136 리뷰)
+        if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
+        throw err;
+      }
     }
-    if (!session || session.accountId !== c.accountId) throw new HoldError('SESSION_NOT_FOUND', '구매 세션이 없거나 이 계정의 것이 아니다');
+    if (!session || session.accountId !== c.accountId || (session.maxStayUntilMs !== undefined && this.clock.now() >= session.maxStayUntilMs)) {
+      throw new HoldError('SESSION_NOT_FOUND', '구매 세션이 없거나 이 계정의 것이 아니다');
+    }
 
     // 여기부터 결과마다 시도 하나를 남긴다(멱등 재생과 2의 400은 빼고)
     const requested = [...(c.body.seatIds ?? [])];

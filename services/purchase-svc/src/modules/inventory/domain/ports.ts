@@ -505,6 +505,18 @@ export interface PurchaseSessionInfo {
   journeyId: string;
 }
 
+/**
+ * 인증 훅이 이미 읽은 구매 세션. `HoldSeats`가 같은 요청에서 세션을 다시 읽지 않게 넘긴다(BAT-028, HOT-463).
+ * maxStayUntilMs는 운영 어댑터가 채우고, HoldSeats가 홀드 직전에 같은 경계를 다시 본다.
+ */
+export interface ResolvedPurchaseSessionInfo extends PurchaseSessionInfo {
+  /** 인증 훅이 확인한 최대 체류 시각(epoch ms). 없으면 이 검사를 하지 않는다(시험 대역) */
+  maxStayUntilMs?: number;
+}
+
+/** 인증 훅이 요청에 붙이는 구매 세션 정보의 열쇠(받는 층이 읽는다) */
+export const PURCHASE_SESSION_INFO = Symbol('purchase.PurchaseSessionInfo');
+
 export const PURCHASE_SESSIONS = Symbol('purchase.PurchaseSessions');
 /**
  * 구매 세션 읽기 포트. 구현은 플랫폼 구매 요청 인증 훅의 포트(PurchaseSessionPort: resolve·advance, createService의 purchaseSessions)도

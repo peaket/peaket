@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 import {
   KEY_PART,
   MemoryPurchaseSessionStore,
+  PURCHASE_SESSION_INFO,
   type PurchaseSessionStore,
   RedisPurchaseSessionStore,
   SEAT_STORE_RETRY_AFTER_SEC,
@@ -168,6 +169,22 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     const r = await w.sessions.resolve(tokenReq(s.jti), principal());
     expect(r?.ref).toBe(s.jti);
     expect(Buffer.from(r!.key as Uint8Array).equals(s.key)).toBe(true);
+  });
+
+  test('BAT028_resolve는_인증에_쓴_구매_세션_정보와_최대체류경계를_요청에_붙인다(홀드가 다시 읽지 않게)', async () => {
+    const w = world();
+    const s = await opened(w);
+    const request = tokenReq(s.jti);
+    await w.sessions.resolve(request, principal());
+    expect((request as unknown as Record<symbol, unknown>)[PURCHASE_SESSION_INFO]).toMatchObject({
+      sessionId: s.jti,
+      accountId: ACCOUNT,
+      eventId: EVENT,
+      journeyId: JOURNEY,
+    });
+    const info = (request as unknown as Record<symbol, { maxStayUntilMs?: number }>)[PURCHASE_SESSION_INFO]!;
+    expect(info.maxStayUntilMs).toBeGreaterThan(w.clock.now());
+    expect(w.reads).toEqual([s.jti]);
   });
 
   test('resolve는 구매 세션 상태를 한 번 읽을 뿐 일련번호를 올리지 않는다 [ASVS v5.0.0-8.2.1]', async () => {

@@ -3,6 +3,7 @@
 import { Registry } from '@prometheus-io/client';
 import { describe, expect, test } from 'vitest';
 import { HotPathMetrics, timeHotPath, timeHotPathSync } from '../src/index.js';
+import { sample as sampleMetric, start } from './fixture.js';
 
 const registry = () => new Registry();
 
@@ -60,5 +61,20 @@ describe('HotPathMetrics(핫패스 구간 진단)', () => {
   test('BAT027_ 계측을 넘기지 않으면 원래 함수만 부르고 지표를 만들지 않는다', async () => {
     await expect(timeHotPath(undefined, 'hold.total', async () => 1)).resolves.toBe(1);
     expect(timeHotPathSync(undefined, 'hold.attempts', () => 2)).toBe(2);
+  });
+
+  test('BAT028_ HTTP 입구·인증·처리기·문제 변환·로그·응답 구간을 남긴다', async () => {
+    const hotPath = new HotPathMetrics('demo-svc');
+    const s = await start(undefined, { hotPath });
+    try {
+      const r = await s.inject({ method: 'POST', url: '/v1/demo/holds' });
+      expect(r.statusCode).toBe(409);
+      const text = await s.metrics();
+      for (const stage of ['http.entry', 'http.auth', 'http.handler', 'http.problem', 'http.log', 'http.serialize', 'http.total']) {
+        expect(sampleMetric(text, 'hot_path_stage_seconds_count', { service: 'demo-svc', stage }), stage).toBeGreaterThanOrEqual(1);
+      }
+    } finally {
+      await s.svc.close();
+    }
   });
 });

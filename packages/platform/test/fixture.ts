@@ -20,6 +20,7 @@ import {
   purchaseMac,
   purchaseMacInput,
   type FakeClock,
+  type HotPathMetrics,
   type PlatformLogger,
   type PurchaseSessionPort,
 } from '../src/index.js';
@@ -242,10 +243,11 @@ export function collector() {
   return { raw, lines, stream };
 }
 
-export async function start(env: Record<string, string> = { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' }, o: { now?: number } = {}): Promise<Started> {
+export async function start(env: Record<string, string> = { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' }, o: { now?: number; hotPath?: HotPathMetrics } = {}): Promise<Started> {
   const clock = fakeClock({ now: o.now });
   const { raw, lines, stream } = collector();
-  const svc = await createService({ name: 'demo-svc', module: DemoModule, env, clock, logDestination: stream });
+  const svc = await createService({ name: 'demo-svc', module: DemoModule, env, clock, logDestination: stream, ...(o.hotPath ? { hotPath: o.hotPath } : {}) });
+  o.hotPath?.register(svc.metrics.registry);
   return {
     svc,
     clock,

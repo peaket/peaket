@@ -343,6 +343,7 @@ export {
 export {
   HOLD_ATTEMPTS,
   ORDER_HOLDS,
+  PURCHASE_SESSION_INFO,
   PURCHASE_SESSION_STORE,
   PURCHASE_SESSIONS,
   SEAT_EXPIRIES,
@@ -382,6 +383,7 @@ export {
   type PurchaseSessionInfo,
   type PurchaseSessionStore,
   type PurchaseSessions,
+  type ResolvedPurchaseSessionInfo,
   type SeatCallOptions,
   type SeatExpiries,
   type SeatMap,

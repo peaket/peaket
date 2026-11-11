@@ -6,6 +6,7 @@ import { clientFamily } from './client-family.js';
 import type { Clock } from './clock.js';
 import { type RequestContext, activeTrace, runInRequestContext } from './context.js';
 import { DEADLINE_HEADER, Deadline, routeDeadlineMaxOf } from './deadline.js';
+import type { HotPathMetrics } from './hot-path.js';
 import { type PlatformMetrics, routeLabel, statusClass } from './metrics.js';
 import { type CanonicalLog, type ErrorInfo, type LineInput, type RouteLogPolicy, routePolicyOf } from './request-log.js';
 import { sampleKeep } from './sampling.js';
@@ -27,6 +28,10 @@ export interface RequestState {
   aborted: boolean;
   /** 처리기 앞 훅(preHandler)을 지났다 */
   handlerStarted: boolean;
+  /** preHandler에 닿은 단조 시각(계측, BAT-028) */
+  preHandlerMs?: number;
+  /** onSend에 닿은 단조 시각(계측, BAT-028) */
+  onSendMs?: number;
   /** 연결이 끊겼을 때 부른다(close·onRequestAbort) */
   abort: () => void;
   /** 끊긴 뒤 처리기가 응답을 보내지 않을 때의 대비 타이머 */
@@ -74,9 +79,9 @@ export function requestSideFields(request: FastifyRequest): { app?: string; clie
 
 export function installHttpHooks(
   fastify: FastifyInstance,
-  o: { metrics: PlatformMetrics; clock: Clock; maxDeadlineMs: number; canonical: CanonicalLog },
+  o: { metrics: PlatformMetrics; clock: Clock; maxDeadlineMs: number; canonical: CanonicalLog; hotPath?: HotPathMetrics },
 ): void {
-  const { metrics, clock, canonical } = o;
+  const { metrics, clock, canonical, hotPath } = o;
   const service = metrics.service;
   const release = (s: RequestState) => {
     if (s.activeDone) return;
@@ -90,23 +95,28 @@ export function installHttpHooks(
     // 끊긴 요청의 대비 타이머가 요청·응답 객체를 남은 시간 + 1초 동안 붙잡지 않게 지운다(세 번째 리뷰, 2026-11-01)
     if (s.abortTimer) clearTimeout(s.abortTimer);
     s.abortTimer = undefined;
-    canonical.write({
-      traceId: s.ctx.traceId,
-      spanId: s.ctx.spanId,
-      route: s.ctx.route,
-      method: s.ctx.method,
-      status: reply?.statusCode,
-      aborted,
-      durationMs: Math.max(0, clock.monotonicMs() - s.startedMs),
-      app: s.app,
-      client: s.client,
-      eventIdParam: s.eventIdParam,
-      normalBranch: s.normalBranch,
-      error: s.error,
-      state: s.ctx.log,
-      policy: s.policy,
-      sample: s.sample,
-    });
+    const doneLog = hotPath?.start('http.log');
+    try {
+      canonical.write({
+        traceId: s.ctx.traceId,
+        spanId: s.ctx.spanId,
+        route: s.ctx.route,
+        method: s.ctx.method,
+        status: reply?.statusCode,
+        aborted,
+        durationMs: Math.max(0, clock.monotonicMs() - s.startedMs),
+        app: s.app,
+        client: s.client,
+        eventIdParam: s.eventIdParam,
+        normalBranch: s.normalBranch,
+        error: s.error,
+        state: s.ctx.log,
+        policy: s.policy,
+        sample: s.sample,
+      });
+    } finally {
+      doneLog?.();
+    }
   };
 
   fastify.addHook('onRequest', (request, reply, done) => {
@@ -176,7 +186,12 @@ export function installHttpHooks(
 
   fastify.addHook('preHandler', (request, _reply, done) => {
     const state = requestState(request);
-    if (state) state.handlerStarted = true;
+    if (state) {
+      state.handlerStarted = true;
+      const now = clock.monotonicMs();
+      state.preHandlerMs = now;
+      hotPath?.observe('http.entry', Math.max(0, now - state.startedMs) / 1000);
+    }
     done();
   });
 
@@ -191,10 +206,13 @@ export function installHttpHooks(
   fastify.addHook('onResponse', (request, reply, done) => {
     const state = requestState(request);
     if (state) {
+      const now = clock.monotonicMs();
       const labels = { service, route: state.ctx.route, method: state.ctx.method, status_class: statusClass(reply.statusCode) };
-      metrics.requestDuration.observe(labels, Math.max(0, clock.monotonicMs() - state.startedMs) / 1000);
+      metrics.requestDuration.observe(labels, Math.max(0, now - state.startedMs) / 1000);
       if (reply.statusCode >= 500) metrics.errors.inc(labels);
       else if (state.normalBranch) metrics.businessRejections.inc(labels);
+      if (state.onSendMs !== undefined) hotPath?.observe('http.serialize', Math.max(0, now - state.onSendMs) / 1000);
+      hotPath?.observe('http.total', Math.max(0, now - state.startedMs) / 1000);
       release(state);
       writeLine(state, reply, false);
     }
@@ -205,6 +223,11 @@ export function installHttpHooks(
   fastify.addHook('onSend', (request, reply, payload, done) => {
     const state = requestState(request);
     if (state) {
+      if (state.onSendMs === undefined) {
+        const now = clock.monotonicMs();
+        state.onSendMs = now;
+        if (state.preHandlerMs !== undefined) hotPath?.observe('http.handler', Math.max(0, now - state.preHandlerMs) / 1000);
+      }
       state.sent = true;
       if (state.aborted) writeLine(state, reply, true);
     }

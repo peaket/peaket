@@ -142,6 +142,13 @@ describe('runner/args.mjs v1', () => {
     bad(['v1', 'payment', '--users', '3000', '--rate', '20', '--fault-drop-pct', '99.9', '--fault-delay-pct', '0.2'], /합은 100 이하/);
   });
 
+  test('BAT028_K2_seat-hold_기본예열은60초이고_K1_K7_기본예열은30초그대로다', () => {
+    assert.equal(ok(['v1', 'seat-hold', '--users', '100', '--rate', '20']).warmS, 60);
+    assert.equal(ok(['v1', 'queue', '--users', '100', '--entry-rate', '10', '--admit-per-second', '5']).warmS, 30);
+    assert.equal(ok(['v1', 'payment', '--users', '3000', '--rate', '20']).warmS, 30);
+    assert.equal(ok(['v1', 'seat-hold', '--users', '100', '--rate', '20', '--warm', '45']).warmS, 45);
+  });
+
   test('PRF215_v1_seat-hold는_입구IP한도규칙이없고_입장토큰체류45분안이어야한다', () => {
     // v0이면 IP 몫 규칙에 걸리는 값(10명에 초당 2,000건)도 v1은 받는다(게이트웨이 없음)
     bad(['v0', 'seat-hold', '--users', '10', '--rate', '2000'], /IP당 한도/);

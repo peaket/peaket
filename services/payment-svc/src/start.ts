@@ -180,6 +180,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const service = await createService({
     name: SERVICE,
     env,
+    hotPath,
     ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     module: AppModule.register({
       store,

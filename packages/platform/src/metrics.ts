@@ -7,7 +7,7 @@ import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from '@pro
  * SLO·경보 기준값을 모두 칸 경계로 담는다. 바꿀 때는 observability §8의 목록을 먼저 고친다(시험이 둘을 견준다).
  */
 export const LATENCY_BUCKETS_SECONDS: readonly number[] = Object.freeze([
-  0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1, 1.5, 1.8, 2, 2.5, 3, 5, 10, 30, 60,
+  0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 0.6, 0.8, 1, 1.5, 1.8, 2, 2.5, 3, 5, 10, 30, 60,
 ]);
 
 const DONE_LABELS = ['service', 'route', 'method', 'status_class'] as const;

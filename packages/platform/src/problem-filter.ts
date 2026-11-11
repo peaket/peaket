@@ -8,12 +8,15 @@ import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException } from '
 import { DrizzleQueryError } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { newTraceId } from './context.js';
+import type { HotPathMetrics } from './hot-path.js';
 import { requestState } from './http-hooks.js';
 import { PROBLEM_CONTENT_TYPE, ProblemError } from './problem.js';
 import { errorInfoOf, queryErrorInfo } from './request-log.js';
 
 export interface ProblemFilterOptions {
   debugErrors: boolean;
+  /** 핫패스 구간 진단(BAT-028). 없으면 계측하지 않는다 */
+  hotPath?: HotPathMetrics;
 }
 
 const isErrorStatus = (code: unknown): code is number => typeof code === 'number' && Number.isInteger(code) && code >= 400 && code <= 599;
@@ -59,6 +62,8 @@ export class ProblemFilter implements ExceptionFilter {
   constructor(private readonly options: ProblemFilterOptions) {}
 
   catch(thrown: unknown, host: ArgumentsHost): void {
+    const done = this.options.hotPath?.start('http.problem');
+    try {
     // Drizzle은 드라이버 오류를 쿼리 오류로 감싼다. 풀 대기 초과(429 server-busy)처럼 안에 든 Problem은 그것으로 답한다
     const exception = thrown instanceof DrizzleQueryError && thrown.cause instanceof ProblemError ? thrown.cause : thrown;
     const http = host.switchToHttp();
@@ -90,5 +95,8 @@ export class ProblemFilter implements ExceptionFilter {
     if (state) state.error = errorInfoOf(exception, status);
     if (this.options.debugErrors) body.debug = debugOf(exception);
     void reply.status(status).header('content-type', PROBLEM_CONTENT_TYPE).send(JSON.stringify(body));
+    } finally {
+      done?.();
+    }
   }
 }
