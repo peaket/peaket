@@ -1,0 +1,50 @@
+{
+  "run": "2026-11-11-k2-v1-hot-2k-cpu4-diag",
+  "condition": "v1 bundle 3 replicas, CPU request/limit 4, memory 512Mi, Redis TLS on, K2 hot seat 1, users 1000, rate 2000/s, keep, warm 30s/main 60s, generators 4",
+  "startedAt": "2026-11-11T10:09:58.760+09:00",
+  "endedAt": "2026-11-11T10:14:18.563+09:00",
+  "k6": {
+    "hold_requests": 120004,
+    "p99_ms": 53.649714719999984,
+    "p99_9_ms": 88.02159653400739,
+    "median_ms": 10.660677,
+    "max_ms": 120.286961,
+    "failures": 0,
+    "dropped_iterations": 12,
+    "dropped_by_scenario": { "warm": 12, "main": 0 }
+  },
+  "generator": {
+    "count": 4,
+    "cpu_mean_pct_max": 28.1,
+    "memory_max_pct_max": 28.3,
+    "vus_max": 804,
+    "valid": false,
+    "reasons": [
+      "발생기 0: dropped_iterations 5(웜 구간)",
+      "발생기 1: dropped_iterations 7(웜 구간)"
+    ]
+  },
+  "bundle": {
+    "app_cpu_cores_prom": { "min": 0.12, "max": 3.13, "mean": 1.15, "limit": 12 },
+    "app_cpu_pct_crictl": { "min": 9.34, "max": 364.48, "mean": 114.57, "note": "crictl stats의 app 컨테이너 합(코어 %)" },
+    "event_loop_lag_p99_ms": { "min": 10.9, "max": 24.7, "mean": 13.1 },
+    "postgres_connections": { "max": 45, "limit": 600 }
+  },
+  "other": {
+    "valkey_cpu_pct_crictl": { "max": 28.46, "mean": 9.38, "note": "대기열·좌석 valkey 두 컨테이너 합" },
+    "postgres_cpu_pct_crictl": { "max": 18.48, "mean": 11.68 },
+    "kafka_cpu_pct_crictl": { "max": 3.94, "mean": 1.63 },
+    "nginx_cpu_pct_crictl": { "max": 0.12, "mean": 0.01 },
+    "relay_cpu_pct_crictl": { "max": 4.24, "mean": 3.0 }
+  },
+  "seat_hold_rows": 1,
+  "verdict": {
+    "pass": false,
+    "reasons": [
+      "p99 53.6ms > 목표 50ms",
+      "dropped_iterations 12(웜 구간)로 무효",
+      "201은 1건, 오류 0, p99.9 88.0ms(목표 150ms)는 목표 안"
+    ],
+    "conclusion": "CPU 4/replica는 정본 통과가 아니다. 합본 CPU는 12코어 중 최대 3.13코어(26%)·event loop p99 24.7ms로 포화가 아니므로, 남은 p99 3.6ms 초과분과 웜 구간 놓침은 자원 증설이 아니라 코드/측정 꼬리 문제로 본다."
+  }
+}
