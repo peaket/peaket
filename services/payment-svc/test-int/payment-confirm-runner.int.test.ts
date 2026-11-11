@@ -1239,18 +1239,19 @@ async function planOnBigTable(s: { text: string; values: unknown[] }): Promise<R
 }
 
 describe('문장과 트랜잭션', () => {
-  test('P-T40_리뷰 고침 H1: 잡기 문장은 결제 표를 읽지 않고 (pg, next_attempt_at, payment_id) 색인으로 그 채널의 행만 고른다 [ASVS v5.0.0-15.1.3]', async () => {
+  test('P-T40_리뷰 고침 H1: 잡기 문장은 명령 표 색인으로 그 채널의 행만 고르고 결제 행은 기본 키로만 본다 [ASVS v5.0.0-15.1.3]', async () => {
     const h = await harness();
     await accepted();
     const statements = await statementsDuring(() => h.jobs.claimDue('SIMULATOR', 1, 'pod-plan', CONFIRM_LEASE_MS));
     const claim = statements.find((s) => /skip locked/i.test(s.text));
     expect(claim, JSON.stringify(statements.map((s) => s.text))).toBeDefined();
-    expect(claim!.text).not.toMatch(/\bjoin payment\b/i);
+    // BAT-032: 잡을 때 같은 트랜잭션에서 원장(target)을 함께 읽어 read를 없앤다. 결제 행은 기본 키로만 본다
+    expect(claim!.text).toMatch(/\bjoin payment\b/i);
 
     const nodes = await planOnBigTable(claim!);
 
     expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_confirm_job_claim_idx');
-    expect(nodes.filter((n) => n['Relation Name'] === 'payment')).toEqual([]);
+    for (const n of nodes.filter((n) => n['Relation Name'] === 'payment')) expect(n['Index Name']).toBe('payment_pkey');
     expect(nodes.filter((n) => n['Node Type'] === 'Seq Scan')).toEqual([]);
   }, 60_000);
 

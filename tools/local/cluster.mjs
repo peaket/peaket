@@ -13,7 +13,8 @@
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 도구(kind·kubectl·helm)는 tools.mjs가 고정 판으로 받는다. 사용자의 ~/.kube/config는 건드리지 않고 전용 kubeconfig를 쓴다
-// - 운영·CI 공급망은 다이제스트로 고정하지만, 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드도 태그로 찾는다(BAT-028)
+// - 운영·CI 공급망은 다이제스트로 고정한다. 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드는 태그로 찾는다(BAT-028).
+//   관측(Prometheus·Grafana) 매니페스트는 한 플랫폼(amd64) 매니페스트 다이제스트까지 고정하고, 같은 태그 이미지를 미리 실어 IfNotPresent로 찾게 한다
 //   (여러 플랫폼 목록 다이제스트는 한 플랫폼만 실은 노드와 맞지 않아 Pulling에 머문다). 계정·인증 토큰이 필요한 것은 없다
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -23,7 +24,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { loadOrCreateV0TokenKey } from './v0-token.mjs';
-import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
+import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -131,6 +132,7 @@ async function image() {
  * 로컬 Docker 이미지를 새 kind 노드에 미리 넣는다(BAT-028 로컬 수정).
  * `kind load docker-image`는 여러 플랫폼 이미지에서 목록 다이제스트의 내용을 찾지 못해 실패할 수 있다.
  * 그래서 이 PC의 플랫폼 이미지만 `docker save --platform`으로 저장하고 `kind load image-archive`로 넣는다.
+ * 로컬에 없으면 받아 온다(CI 러너처럼 처음부터 비어 있는 환경에서도 observability·v1이 서게).
  * 파드는 태그로 찾고(imagePullPolicy IfNotPresent/Never), 고정 다이제스트는 문서·공급망 확인용으로만 남긴다.
  * @param {readonly string[]} tags
  */
@@ -142,7 +144,8 @@ async function preloadLocalImages(tags) {
     try {
       run('docker', ['image', 'inspect', '--format', '{{.Id}}', tag], { quiet: true });
     } catch {
-      throw new Error(`로컬 Docker에 ${tag}가 없다. docker pull ${tag} 뒤 다시 실행한다(또는 v1 무대를 올리기 전에 받아 둔다)`);
+      step(`로컬에 ${tag}가 없어 받는다`);
+      execFileSync('docker', ['pull', '--platform', platform, tag], { stdio: 'inherit' });
     }
     const dir = mkdtempSync(join(tmpdir(), 'peaket-image-'));
     const archive = join(dir, 'image.tar');
@@ -187,7 +190,7 @@ function dashboardsConfigMap() {
 
 async function observability() {
   step('로컬 관측 최소(Prometheus·Grafana, deploy/local/observability.yaml)');
-  await preloadLocalImages(['prom/prometheus:latest', 'grafana/grafana:latest']);
+  await preloadLocalImages(OBSERVABILITY_IMAGES);
   await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', 'observability.yaml')]);
   // 관리자 Secret은 없을 때만 만든다(다시 올려도 비밀번호를 바꾸지 않는다)
   const has = await kubectl(['-n', 'observability', 'get', 'secret', 'grafana-admin', '--ignore-not-found', '-o', 'name'], { quiet: true });

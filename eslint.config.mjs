@@ -29,7 +29,14 @@ const SHARED_SERVER_SOURCES = ['packages/platform/src', 'packages/shuffle/src', 
  * 앱·화면 패키지는 peaket-web/, 서비스·공용 패키지는 peaket-service/ 이름이다(줄 안 주석 끄기 검사가 두 이름을 본다)
  */
 const PROTOTYPE_EVERYWHERE = [
-  { files: [...WEB_FILES, 'apps/**/*.{js,mjs,cjs}'], plugins: { 'peaket-web': webSecurityPlugin }, rules: { 'peaket-web/no-prototype-mutation': 'error' } },
+  {
+    // apps 뿌리의 TS(proxy.ts·next.config.ts·instrumentation.ts 등)까지 덮는다(ADR-0264 리뷰 S1). 그 파일들은 화면 린트(WEB_FILES) 밖이라
+    // 여기서 빠지면 규칙이 꺼진 채 lint 대상에 남는다(packages/config/eslint/js-security.test.mjs).
+    files: [...WEB_FILES, 'apps/**/*.{ts,tsx,js,mjs,cjs}'],
+    languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' } },
+    plugins: { 'peaket-web': webSecurityPlugin },
+    rules: { 'peaket-web/no-prototype-mutation': 'error' },
+  },
   {
     files: ['services/**/*.{js,mjs,cjs}', 'packages/**/*.{js,mjs,cjs}', ...SERVICE_SOURCES.map((r) => `${r}/**/*.ts`), ...SHARED_SERVER_SOURCES.map((r) => `${r}/**/*.ts`)],
     ignores: ['apps/**'],

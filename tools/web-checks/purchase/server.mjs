@@ -70,18 +70,20 @@ createServer(async (req, res) => {
         }
         if (sink.length >= MAX_SINK) sink.shift();
         sink.push(String(req.headers['x-purchase-seq'] ?? ''));
-        const d = Math.min(200, Math.max(0, Math.trunc(Number(u.searchParams.get('d'))) || 0));
+        // d는 검사 API의 호환용 이름이다. 타이머 길이는 사용자 입력을 쓰지 않고 고정 상한(20ms)으로 둔다(CodeQL js/resource-exhaustion).
         req.resume();
         maxInflight = Math.max(maxInflight, ++inflight);
         return setTimeout(() => {
           inflight--;
           send(res, 204, 'text/plain', '');
-        }, d);
+        }, 20);
       }
     }
     send(res, 404, 'text/plain', 'not found');
   } catch (e) {
-    send(res, 500, 'text/plain', String(e));
+    // 스택·내부 오류 글은 응답에 싣지 않는다(CodeQL js/stack-trace-exposure). 검사 로그에만 남긴다.
+    console.error(e);
+    send(res, 500, 'text/plain', 'internal error');
   }
 })
   .on('upgrade', (req, socket) => {

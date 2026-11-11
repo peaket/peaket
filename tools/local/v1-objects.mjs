@@ -30,6 +30,12 @@ export const V1_POSTGRES_IMAGE = 'postgres@sha256:10a5c69a83035ab5239f5620d70852
 export const V1_POSTGRES_TAG = 'postgres:18-alpine';
 
 /**
+ * 로컬 관측 최소(deploy/local/observability.yaml)의 파드 이미지 태그. 매니페스트는 같은 판을 다이제스트로 고정하고,
+ * kind 노드에는 이 태그로 미리 실어 파드가 IfNotPresent로 찾게 한다(BAT-028 로컬 수정, tools/local/observability.test.mjs).
+ */
+export const OBSERVABILITY_IMAGES = Object.freeze(['prom/prometheus:v3.14.0', 'grafana/grafana:13.2.5']);
+
+/**
  * 새 kind 클러스터에 미리 넣을 로컬 이미지 태그(BAT-028 로컬 수정). deploy/local/*.yaml의 태그와 같아야 한다.
  * `cluster.mjs`가 `docker save --platform linux/amd64`→`kind load image-archive`로 싣고, 파드는 태그로 찾는다.
  * 고정 다이제스트는 문서·공급망 확인용으로 남기고, 로컬 kind 무대의 파드 참조에는 쓰지 않는다.
@@ -37,8 +43,7 @@ export const V1_POSTGRES_TAG = 'postgres:18-alpine';
 export const V1_PRELOAD_IMAGES = Object.freeze([
   'quay.io/strimzi/operator:0.47.0',
   'quay.io/strimzi/kafka:0.47.0-kafka-3.9.1',
-  'prom/prometheus:latest',
-  'grafana/grafana:latest',
+  ...OBSERVABILITY_IMAGES,
   'postgres:18-alpine',
   'valkey/valkey:8.1-alpine',
   'motoserver/moto:5.2.5',

@@ -112,6 +112,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "status": {
                       "type": "TicketStatus",
                       "id": 3
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "id": 4
                     }
                   }
                 },

@@ -51,7 +51,8 @@ beforeAll(async () => {
   await migratePayment(pgc.url);
   admin = createDatabase({ url: pgc.url, profile: 'general', max: 2, applicationName: 'recon-it-admin' });
   database = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'recon-it' });
-  await ensureOutboxPartitions(admin, systemClock);
+  // 이 파일은 대사·조회 시각을 가짜 시계(NOW)로 돌린다. Outbox 파티션도 그 시계 기준으로 만들어야 UUIDv7 id가 들어간다(실제 오늘 기준이면 날짜가 어긋나 23514)
+  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }), { daysAhead: 40 });
   sim = buildSimulatorApp({ secretKey: KEY, clock: { now: () => NOW }, seed: 11, confirmLatency: { kind: 'none' } });
   simUrl = await sim.listen({ port: 0, host: '127.0.0.1' });
 }, 180_000);

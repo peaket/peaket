@@ -3,12 +3,13 @@
 // - 좌석맵 파일(/v1/events/{id}/seatmap-layouts/*) → 정적 원본(검사에서는 가짜 API, 운영은 www 출처의 S3)
 // - 그 밖 → 소비자 웹 앱 서버(운영 빌드 4101, 없으면 502)
 // 쓰는 법: node lib/same-origin.mjs [--port 4130] [--queue-room <폴더>] [--web http://127.0.0.1:4101] [--static http://127.0.0.1:4011]
-import { createServer, request } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { readFile } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { DEFAULT_HOST, PRESETS, fileFor } from './serve.mjs';
+import { DEFAULT_HOST, PRESETS, fileIndex, keyOfFile, keyOfUrl } from './serve.mjs';
 import { staticAppHeaders } from '../../../packages/config/headers/security-headers.mjs';
 import { CHECK_MOCK_ORIGIN } from '../queue-room/origins.mjs';
 
@@ -29,45 +30,23 @@ export function routeFor(path) {
   return 'web';
 }
 
-/** 폴더 안의 경로만 돌려준다(CodeQL js/path-injection) */
-function within(root, p) {
-  const rootAbs = resolve(root);
-  const abs = resolve(rootAbs, p);
-  const rel = relative(rootAbs, abs);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? abs : null;
-}
-
-async function isFile(root, p) {
-  const abs = within(root, p);
-  if (!abs) return false;
-  try {
-    return (await stat(abs)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/** root 안의 파일만 읽는다(검사와 읽기를 같은 함수에서 한다) */
-async function readWithin(root, p) {
-  const abs = within(root, p);
-  if (!abs) throw new Error('폴더 밖의 파일은 읽지 않는다');
-  return readFile(abs);
-}
-
-/** 넘길 곳의 출처를 바꾸지 않고 경로만 바꾼다(CodeQL js/request-forgery) */
-function targetOf(target, url) {
+/**
+ * 넘길 곳의 출처는 설정값 그대로 두고 경로만 바꾼다. 요청 URL은 path에만 쓰고,
+ * http.request에는 설정에서 온 hostname·port를 넘긴다(CodeQL js/request-forgery).
+ */
+function proxy(req, res, target) {
   const base = new URL(target);
   if ((base.protocol !== 'http:' && base.protocol !== 'https:') || base.username || base.password) throw new Error('넘길 곳이 http·https 주소가 아니다');
-  const dest = new URL(url ?? '/', base.origin);
+  const dest = new URL(req.url ?? '/', base.origin);
   if (dest.origin !== base.origin) throw new Error('넘길 곳의 출처가 바뀌었다');
-  return dest;
-}
-
-function proxy(req, res, target) {
-  const up = request(targetOf(target, req.url), { method: req.method, headers: { ...req.headers, host: new URL(target).host } }, (r) => {
-    res.writeHead(r.statusCode ?? 502, r.headers);
-    r.pipe(res);
-  });
+  const send = base.protocol === 'https:' ? httpsRequest : httpRequest;
+  const up = send(
+    { hostname: base.hostname, port: base.port, path: `${dest.pathname}${dest.search}`, method: req.method, headers: { ...req.headers, host: base.host } },
+    (r) => {
+      res.writeHead(r.statusCode ?? 502, r.headers);
+      r.pipe(res);
+    },
+  );
   // 손님이 끊으면 원본 쪽 요청도 끊는다(걸린 채 남지 않게)
   res.on('close', () => {
     if (!res.writableEnded) up.destroy();
@@ -83,26 +62,38 @@ function proxy(req, res, target) {
  * @param {{ port?: number, host?: string, queueRoomRoot?: string, web?: string, staticOrigin?: string, origins?: Record<string, string> }} o
  *   origins: A′ CSP의 출처(검사 빌드가 부르는 가짜 API와, 아직 값이 없는 본인확인기관 자리)
  */
-export function startSameOrigin({ port = SAME_ORIGIN_PORT, host = DEFAULT_HOST, queueRoomRoot = QUEUE_ROOM_CHECK_DIR, web = 'http://127.0.0.1:4101', staticOrigin = MOCK_ORIGIN, origins } = {}) {
+export async function startSameOrigin({ port = SAME_ORIGIN_PORT, host = DEFAULT_HOST, queueRoomRoot = QUEUE_ROOM_CHECK_DIR, web = 'http://127.0.0.1:4101', staticOrigin = MOCK_ORIGIN, origins } = {}) {
   const o = origins ?? { queue: MOCK_ORIGIN, queueFiles: MOCK_ORIGIN, api: MOCK_ORIGIN, identity: 'http://127.0.0.1:4020' };
   const shellHeaders = staticAppHeaders('queue-room', { origins: o });
+  const files = await fileIndex(queueRoomRoot);
+  // 좌석 화면 자산 목록은 웹 빌드가 만든다(운영에서는 배포가 /_q/로 올린다, HOT-352). 웹을 빌드하지 않은 검사에서는 없다
+  const seatPreload = await readFile(SEAT_PRELOAD_FILE).catch(() => undefined);
   const server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     const route = routeFor(path);
     if (route === 'web') return proxy(req, res, web);
     if (route === 'static') return proxy(req, res, staticOrigin);
+    if (path === SEAT_PRELOAD_PATH) {
+      if (seatPreload === undefined) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        res.end('없음');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(seatPreload);
+      return;
+    }
     const rewrite = QR.rewrites.find(([re]) => re.test(path));
-    // 좌석 화면 자산 목록은 웹 빌드가 만든다(운영에서는 배포가 /_q/로 올린다, HOT-352). 웹을 빌드하지 않은 검사에서는 없고 대기실은 건너뛴다
-    const root = path === SEAT_PRELOAD_PATH ? dirname(SEAT_PRELOAD_FILE) : queueRoomRoot;
-    const file = path === SEAT_PRELOAD_PATH ? within(root, SEAT_PRELOAD_FILE) : rewrite ? within(root, resolve(root, rewrite[1])) : fileFor(root, path, QR.base);
-    if (!file || !(await isFile(root, file))) {
+    const key = rewrite ? keyOfFile(rewrite[1]) : keyOfUrl(path, QR.base);
+    const file = key ? files.get(key) : undefined;
+    if (!file) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       res.end('없음');
       return;
     }
     const type = TYPES[extname(file)] ?? 'application/octet-stream';
     res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', ...(type.startsWith('text/html') ? shellHeaders : {}) });
-    res.end(await readWithin(root, file));
+    res.end(await readFile(file));
   });
   return new Promise((ok) => server.listen(port, host, () => ok(server)));
 }

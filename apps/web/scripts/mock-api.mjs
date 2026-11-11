@@ -445,11 +445,7 @@ export function seatmapLayout() {
   };
 }
 
-/** 자리 그림: 이름마다 다른 색과 이름 글자 */
-const XML_TEXT = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
-/** SVG 글자에 넣을 값을 XML 글자 참조로 바꾼다(주소의 이름이 꼬리표로 해석되지 않게) */
-const xmlText = (s) => String(s).replace(/[&<>"']/g, (c) => XML_TEXT[c]);
-
+/** 자리 그림: 이름마다 다른 색. 주소의 이름은 색조(hash)에만 쓰고 SVG 글자로 되비추지 않는다(CodeQL js/reflected-xss) */
 export function placeholderSvg(name, width) {
   const n = String(name);
   const w = Math.max(1, Math.min(1280, Math.round(Number(width) || 0)));
@@ -458,7 +454,7 @@ export function placeholderSvg(name, width) {
   let hash = 0;
   for (const ch of n) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   const hue = hash % 360;
-  const label = xmlText(n.replace(/^(banner|poster)-/, '').toUpperCase());
+  const label = 'PEAKET';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 60% 38%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 65% 22%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="${banner ? '50%' : '42%'}" fill="#fff" font-family="sans-serif" font-size="${Math.round(w / (banner ? 14 : 7))}" font-weight="700" text-anchor="middle">${label}</text></svg>`;
 }
 

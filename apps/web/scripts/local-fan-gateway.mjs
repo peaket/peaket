@@ -13,8 +13,10 @@
 // 실행: PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=http://localhost:3000 \
 //       PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=… node scripts/local-fan-gateway.mjs [포트]
 //       (대기열까지: PEAKET_QUEUE_HTTP=http://127.0.0.1:<queue-svc 앱 포트>)
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose';
 
 const ACCESS_COOKIE = '__Secure-peaket_at';
@@ -57,6 +59,47 @@ const problem = (status, title, headers = {}) => ({
   headers: { 'content-type': 'application/problem+json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers },
   body: Buffer.from(JSON.stringify({ type: 'about:blank', title, status })),
 });
+
+/** 원본이 그래도 압축해 보냈으면 풀어서 준다(응답 머리에서 압축 머리는 뺀다) */
+function decodeBody(body, encoding) {
+  switch (String(encoding ?? '').trim().toLowerCase()) {
+    case 'gzip':
+    case 'x-gzip':
+      return gunzipSync(body);
+    case 'br':
+      return brotliDecompressSync(body);
+    case 'deflate':
+      return inflateSync(body);
+    default:
+      return body;
+  }
+}
+
+/**
+ * 설정한 원본(upstream)으로 요청을 넘긴다. hostname·port·protocol은 upstream에서만 오고, path만 요청 URL에서 온다.
+ * @param {URL} upstream @param {string} path @param {string} method @param {Record<string, string>} headers @param {Buffer | undefined} body
+ */
+function forward(upstream, path, method, headers, body) {
+  return new Promise((resolve, reject) => {
+    const send = upstream.protocol === 'https:' ? httpsRequest : httpRequest;
+    // 대역은 받은 본문을 그대로 브라우저에 넘기므로 압축을 풀어 둔다. 압축 머리는 응답에서 뺀다(DECODED).
+    const req = send({ hostname: upstream.hostname, port: upstream.port, path, method, headers: { ...headers, host: upstream.host, 'accept-encoding': 'identity' } }, (r) => {
+      const chunks = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => {
+        try {
+          resolve({ status: r.statusCode ?? 502, headers: r.headers, body: decodeBody(Buffer.concat(chunks), r.headers['content-encoding']) });
+        } catch {
+          // 풀지 못한 본문은 넘기지 않는다(압축 머리를 뺀 채 깨진 바이트를 보내면 브라우저가 잘못 읽는다)
+          resolve({ status: 502, headers: { 'content-type': 'application/problem+json' }, body: Buffer.from(JSON.stringify({ type: 'about:blank', title: 'Bad Gateway', status: 502 })) });
+        }
+      });
+    });
+    req.on('error', reject);
+    if (body === undefined) req.end();
+    else req.end(body);
+  });
+}
 
 /**
  * 게이트웨이 대역을 띄운다
@@ -151,19 +194,19 @@ export async function startLocalFanGateway(o) {
     Object.assign(headers, (await identityOf(cookieOf(req.headers.cookie, ACCESS_COOKIE))) ?? o.devIdentity ?? {});
     let res;
     try {
-      res = await fetch(target, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : Buffer.concat(chunks), redirect: 'manual' });
+      // 넘길 곳의 hostname·port는 설정(upstream)에서만 온다. 요청 URL은 path에만 쓴다(CodeQL js/request-forgery)
+      res = await forward(upstream, `${target.pathname}${target.search}`, method, headers, ['GET', 'HEAD'].includes(method) ? undefined : Buffer.concat(chunks));
     } catch {
       return problem(502, 'Bad Gateway', cors);
     }
     /** @type {Record<string, string | string[]>} */
     const out = { ...cors, 'x-content-type-options': 'nosniff' };
-    res.headers.forEach((v, k) => {
-      if (k !== 'set-cookie' && !HOP.has(k) && !DECODED.has(k) && !k.startsWith('access-control-')) out[k] = v;
-    });
-    const setCookies = res.headers.getSetCookie();
-    if (setCookies.length) out['set-cookie'] = setCookies;
-    if (!res.headers.has('cache-control')) out['cache-control'] = 'no-store';
-    return { status: res.status, headers: out, body: Buffer.from(await res.arrayBuffer()) };
+    for (const [k, v] of Object.entries(res.headers)) {
+      if (v === undefined || HOP.has(k) || DECODED.has(k) || k.startsWith('access-control-')) continue;
+      out[k] = v;
+    }
+    if (!res.headers['cache-control']) out['cache-control'] = 'no-store';
+    return { status: res.status, headers: out, body: res.body };
   }
 
   /** @type {number} */
