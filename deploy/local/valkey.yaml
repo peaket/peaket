@@ -28,7 +28,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: valkey
-          image: valkey/valkey@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+          image: valkey/valkey:8.1-alpine
           args: ["valkey-server", "--save", "", "--appendonly", "no"]
           ports:
             - { containerPort: 6379 }

@@ -29,7 +29,7 @@ spec:
   kafka:
     version: 3.9.1
     metadataVersion: 3.9-IV0
-    image: quay.io/strimzi/kafka@sha256:8a793cdf5084cdb72c6663419530985158b16330a518720e9e9d1d96babbaf7e
+    image: quay.io/strimzi/kafka:0.47.0-kafka-3.9.1
     listeners:
       - name: plain
         port: 9092

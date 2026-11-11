@@ -6,6 +6,11 @@ import { envFileText, V1_CONSENT_VERSION, V1_NAMESPACE, V1_PATHS, V1_PORTS, V1_S
 export const V1_IMAGES = Object.freeze({ bundle: 'peaket/bundle:local', simulator: 'peaket/pg-simulator:local' });
 /** deploy/local/valkey.yaml과 같은 Valkey 8.1 다이제스트(v0와 같은 판) */
 export const V1_VALKEY_IMAGE = 'valkey/valkey@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a';
+/**
+ * 파드가 쓰는 Valkey 태그. kind는 `docker save --platform`으로 한 플랫폼만 싣기 때문에 목록 다이제스트와 노드의 매니페스트 다이제스트가 다르다.
+ * 그래서 로컬 무대는 태그와 imagePullPolicy Never/IfNotPresent로 싣고, `cluster.mjs`가 시작 전에 이미지를 미리 넣는다(BAT-028 로컬 수정).
+ */
+export const V1_VALKEY_TAG = 'valkey/valkey:8.1-alpine';
 /** 대기 상태 파일 앞 로컬 캐시(루트가 아닌 nginx, loadtest/runner/manifests.mjs의 NULL_TARGET_IMAGE와 같은 판). 실을 때 이 다이제스트와 견준다 */
 export const V1_NGINX_IMAGE = 'nginxinc/nginx-unprivileged:1.29.3-alpine@sha256:5aea7cc516b419e3526f47dd1531be31a56a046cfe44754d94f9383e13e2ee99';
 /**
@@ -21,6 +26,23 @@ export const V1_KAFKA_TOPICS = Object.freeze(['trade.seats', 'trade.payments', '
 export const V1_DATABASES = Object.freeze({ purchase: 'v1_purchase', payment: 'v1_payment' });
 /** deploy/local/postgres.yaml과 같은 PostgreSQL 18 다이제스트(통합 시험과 같은 판) */
 export const V1_POSTGRES_IMAGE = 'postgres@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5';
+/** 파드가 쓰는 PostgreSQL 태그(위와 같은 이유로 로컬 무대는 태그를 쓴다) */
+export const V1_POSTGRES_TAG = 'postgres:18-alpine';
+
+/**
+ * 새 kind 클러스터에 미리 넣을 로컬 이미지 태그(BAT-028 로컬 수정). deploy/local/*.yaml의 태그와 같아야 한다.
+ * `cluster.mjs`가 `docker save --platform linux/amd64`→`kind load image-archive`로 싣고, 파드는 태그로 찾는다.
+ * 고정 다이제스트는 문서·공급망 확인용으로 남기고, 로컬 kind 무대의 파드 참조에는 쓰지 않는다.
+ */
+export const V1_PRELOAD_IMAGES = Object.freeze([
+  'quay.io/strimzi/operator:0.47.0',
+  'quay.io/strimzi/kafka:0.47.0-kafka-3.9.1',
+  'prom/prometheus:latest',
+  'grafana/grafana:latest',
+  'postgres:18-alpine',
+  'valkey/valkey:8.1-alpine',
+  'motoserver/moto:5.2.5',
+]);
 /**
  * 전용 PostgreSQL의 연결 한도(코드 리뷰 M2). 합본 파드 하나의 풀 최대 58 × 복제 최대 8(v1Plan) + 릴레이 넷 약 28 = 492에 검사·psql·마이그레이션 여유를 더한다.
  * 로컬 PostgreSQL(peaket-local)의 기본 100은 복제 3에서도 넘는다
@@ -112,7 +134,7 @@ export function v1ValkeyObjects(name, o) {
             containers: [
               {
                 name: 'valkey',
-                image: V1_VALKEY_IMAGE,
+                image: V1_VALKEY_TAG,
                 args: ['valkey-server', '--save', '', '--appendonly', 'no', '--protected-mode', 'no', ...portArgs],
                 ports: [{ name: 'redis', containerPort: 6379 }],
                 readinessProbe: { tcpSocket: { port: 6379 }, periodSeconds: 2 },
@@ -155,7 +177,7 @@ export function v1PostgresObjects() {
             containers: [
               {
                 name: 'postgres',
-                image: V1_POSTGRES_IMAGE,
+                image: V1_POSTGRES_TAG,
                 args: ['-c', `max_connections=${V1_PG_MAX_CONNECTIONS}`],
                 envFrom: [{ secretRef: { name: 'v1-postgres' } }],
                 ports: [{ name: 'pg', containerPort: 5432 }],

@@ -9,7 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments } from 'yaml';
 import { ensureTool } from './tools.mjs';
-import { kafkaTopicArgs, redisTlsCertArgs, redisTlsNames, V1_DATABASES, V1_HOST_DIRS, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_NGINX_TAG, V1_VALKEY_IMAGE, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1Secrets, v1SimulatorObjects, v1StateCacheConf, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
+import { kafkaTopicArgs, redisTlsCertArgs, redisTlsNames, V1_DATABASES, V1_HOST_DIRS, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_NGINX_TAG, V1_POSTGRES_TAG, V1_PRELOAD_IMAGES, V1_VALKEY_TAG, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1Secrets, v1SimulatorObjects, v1StateCacheConf, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { envFileText, V1_ADMISSION_ISSUER, V1_PATHS, V1_PORTS, V1_SERVICES, v1ClientKey, v1EnvFiles, v1Keys, v1SharedSecret } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -35,13 +35,19 @@ test('PRF215_주소는_TLS켬이면_대기열·좌석모두rediss이고_끔이�
   assert.throws(() => v1Layout({ redisTls: 'on' }), TypeError);
 });
 
+test('BAT028_로컬무대는_고정다이제스트대신_태그를쓰고_미리실을목록에넣는다', () => {
+  assert.ok(V1_PRELOAD_IMAGES.includes(V1_VALKEY_TAG));
+  assert.ok(V1_PRELOAD_IMAGES.includes(V1_POSTGRES_TAG));
+  for (const tag of V1_PRELOAD_IMAGES) assert.match(tag, /^[a-z0-9./_-]+:[A-Za-z0-9._-]+$/);
+});
+
 test('PRF215_Valkey는_TLS켬이면_TLS포트만열고_인증서를붙이며_끔이면_평문포트만이고_인증서를붙이지않는다', () => {
   const [svcOn, depOn] = v1ValkeyObjects('valkey-seat', { tls: true });
   const [, depOff] = v1ValkeyObjects('valkey-seat', { tls: false });
   assert.equal(svcOn.spec.ports[0].port, 6379);
   const on = depOn.spec.template.spec;
   const off = depOff.spec.template.spec;
-  assert.equal(on.containers[0].image, V1_VALKEY_IMAGE);
+  assert.equal(on.containers[0].image, V1_VALKEY_TAG);
   const argsOn = on.containers[0].args.join(' ');
   assert.match(argsOn, /--port 0 --tls-port 6379/);
   assert.match(argsOn, /--tls-auth-clients no/);

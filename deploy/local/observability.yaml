@@ -96,7 +96,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: prometheus
-          image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+          image: prom/prometheus:latest
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
@@ -179,7 +179,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 472, runAsGroup: 472, fsGroup: 472, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: grafana
-          image: grafana/grafana:13.2.5@sha256:9f7aa1e1e3246aade5792d35a738049f7f32f89cd51d1956cf426a4e86268a84
+          image: grafana/grafana:latest
           env:
             # 익명 보기만 연다. 로그인 화면을 끄고, 관리자 비밀번호는 cluster.mjs가 만든 Secret에서만 받는다
             - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }

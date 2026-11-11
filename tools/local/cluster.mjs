@@ -13,7 +13,8 @@
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 도구(kind·kubectl·helm)는 tools.mjs가 고정 판으로 받는다. 사용자의 ~/.kube/config는 건드리지 않고 전용 kubeconfig를 쓴다
-// - 이미지는 모두 다이제스트로 고정한다(deploy/local/*.yaml, 아래 PINNED). 계정·인증 토큰이 필요한 것은 없다
+// - 운영·CI 공급망은 다이제스트로 고정하지만, 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드도 태그로 찾는다(BAT-028)
+//   (여러 플랫폼 목록 다이제스트는 한 플랫폼만 실은 노드와 맞지 않아 Pulling에 머문다). 계정·인증 토큰이 필요한 것은 없다
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +23,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { loadOrCreateV0TokenKey } from './v0-token.mjs';
-import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
+import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -40,18 +41,17 @@ export const PINNED = {
 };
 
 /**
- * Strimzi 설치 파일을 이 클러스터에 맞춘다: 네임스페이스, 운영자 메모리(384Mi에서 메모리 초과로 죽었다), 운영자 이미지 다이제스트.
+ * Strimzi 설치 파일을 이 클러스터에 맞춘다: 네임스페이스, 운영자 메모리(384Mi에서 메모리 초과로 죽었다).
+ * 운영자 이미지는 로컬 태그로 두고 `preloadLocalImages`가 kind 노드에 미리 싣는다(BAT-028 로컬 수정).
  * 고칠 자리가 없으면(판이 바뀜) 던진다
  */
 export function strimziInstall(text, namespace) {
   const image = 'image: quay.io/strimzi/operator:0.47.0';
   if (!text.includes(image)) throw new Error('Strimzi 설치 파일에서 운영자 이미지 자리를 찾지 못했다(판이 바뀌었나?)');
   if (!/memory: 384Mi/.test(text)) throw new Error('Strimzi 설치 파일에서 운영자 메모리 자리를 찾지 못했다(판이 바뀌었나?)');
-  // 운영자 이미지는 운영자 자신(image:)과 그가 띄우는 엔티티 운영자·초기화 컨테이너(환경 변수 값)에 모두 있다. 모두 다이제스트로 바꾼다
-  return text
-    .replaceAll('namespace: myproject', `namespace: ${namespace}`)
-    .replaceAll('quay.io/strimzi/operator:0.47.0', `quay.io/strimzi/operator@${PINNED.strimziOperatorDigest}`)
-    .replaceAll('memory: 384Mi', 'memory: 512Mi');
+  // 운영자 이미지는 로컬 태그로 둔다. 새 kind 노드에는 `preloadLocalImages`가 `docker save --platform`으로 미리 넣는다.
+  // 고정 다이제스트는 PINNED에 남겨 두지만, 로컬 무대의 파드 참조에는 쓰지 않는다(목록 다이제스트와 한 플랫폼 매니페스트가 달라 Pulling에 머문다).
+  return text.replaceAll('namespace: myproject', `namespace: ${namespace}`).replaceAll('memory: 384Mi', 'memory: 512Mi');
 }
 
 const run = (cmd, args, o = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: o.input !== undefined ? ['pipe', 'pipe', 'inherit'] : o.quiet ? 'pipe' : ['ignore', 'pipe', 'inherit'], ...o });
@@ -104,6 +104,7 @@ async function up(argv = []) {
     await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
   }
   await kubectl(['apply', '-f', '-'], { input: `${plan.v0Only ? '' : 'apiVersion: v1\nkind: Namespace\nmetadata: { name: kafka }\n---\n'}apiVersion: v1\nkind: Namespace\nmetadata: { name: peaket-local }\n` });
+  await preloadLocalImages(plan.v0Only ? ['postgres:18-alpine'] : ['quay.io/strimzi/operator:0.47.0', 'quay.io/strimzi/kafka:0.47.0-kafka-3.9.1', 'postgres:18-alpine', 'motoserver/moto:5.2.5']);
   if (!plan.v0Only) {
     step(`Strimzi ${PINNED.strimziVersion} 운영자`);
     await kubectl(['apply', '--server-side', '--force-conflicts', '-n', 'kafka', '-f', '-'], { input: strimziInstall(await strimziFile(), 'kafka') });
@@ -123,7 +124,35 @@ async function up(argv = []) {
 async function image() {
   step(`이미지 ${IMAGE}`);
   execFileSync('docker', ['build', '-f', join(REPO, 'packages', 'platform', 'template', 'Dockerfile'), '-t', IMAGE, REPO], { stdio: 'inherit' });
-  await kind(['load', 'docker-image', IMAGE, '--name', CLUSTER]);
+  await preloadLocalImages([IMAGE]);
+}
+
+/**
+ * 로컬 Docker 이미지를 새 kind 노드에 미리 넣는다(BAT-028 로컬 수정).
+ * `kind load docker-image`는 여러 플랫폼 이미지에서 목록 다이제스트의 내용을 찾지 못해 실패할 수 있다.
+ * 그래서 이 PC의 플랫폼 이미지만 `docker save --platform`으로 저장하고 `kind load image-archive`로 넣는다.
+ * 파드는 태그로 찾고(imagePullPolicy IfNotPresent/Never), 고정 다이제스트는 문서·공급망 확인용으로만 남긴다.
+ * @param {readonly string[]} tags
+ */
+async function preloadLocalImages(tags) {
+  const unique = [...new Set(tags)];
+  step(`로컬 이미지 ${unique.length}개를 kind에 미리 싣기`);
+  const platform = dockerPlatform(run('docker', ['info', '--format', '{{.Architecture}}'], { quiet: true }));
+  for (const tag of unique) {
+    try {
+      run('docker', ['image', 'inspect', '--format', '{{.Id}}', tag], { quiet: true });
+    } catch {
+      throw new Error(`로컬 Docker에 ${tag}가 없다. docker pull ${tag} 뒤 다시 실행한다(또는 v1 무대를 올리기 전에 받아 둔다)`);
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'peaket-image-'));
+    const archive = join(dir, 'image.tar');
+    try {
+      execFileSync('docker', ['save', '--platform', platform, tag, '-o', archive], { stdio: ['ignore', 'ignore', 'pipe'] });
+      await kind(['load', 'image-archive', archive, '--name', CLUSTER]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 }
 
 // --- 로컬 관측 최소(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드', wbs 1.3.1) ---
@@ -158,6 +187,7 @@ function dashboardsConfigMap() {
 
 async function observability() {
   step('로컬 관측 최소(Prometheus·Grafana, deploy/local/observability.yaml)');
+  await preloadLocalImages(['prom/prometheus:latest', 'grafana/grafana:latest']);
   await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', 'observability.yaml')]);
   // 관리자 Secret은 없을 때만 만든다(다시 올려도 비밀번호를 바꾸지 않는다)
   const has = await kubectl(['-n', 'observability', 'get', 'secret', 'grafana-admin', '--ignore-not-found', '-o', 'name'], { quiet: true });
@@ -559,7 +589,7 @@ export async function v1(argv = []) {
   step(`이미지 ${V1_IMAGES.bundle}·${V1_IMAGES.simulator}`);
   execFileSync('docker', ['build', '-f', join(REPO, 'services', 'bundle', 'Dockerfile'), '-t', V1_IMAGES.bundle, REPO], { stdio: 'inherit' });
   execFileSync('docker', ['build', '-f', join(REPO, 'services', 'pg-simulator', 'Dockerfile'), '-t', V1_IMAGES.simulator, REPO], { stdio: 'inherit' });
-  for (const img of Object.values(V1_IMAGES)) await kind(['load', 'docker-image', img, '--name', CLUSTER]);
+  await preloadLocalImages([...V1_PRELOAD_IMAGES, ...Object.values(V1_IMAGES)]);
   const nginx = await loadPinnedImage(V1_NGINX_IMAGE);
   step(`네임스페이스 ${V1_NAMESPACE}와 노드 폴더`);
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: V1_NAMESPACE } }) });
