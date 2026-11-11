@@ -1,0 +1,67 @@
+{
+  "generators": 2,
+  "loadStartMs": 1794355918461,
+  "startSkewS": 0,
+  "cpuMeanPctMax": 25.6,
+  "cpuMaxPctMax": 29.6,
+  "memMaxPctMax": 34.9,
+  "dropped": 0,
+  "scenarioErrors": 0,
+  "vusMax": 401,
+  "judge": {
+    "valid": true,
+    "reasons": []
+  },
+  "each": [
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 25.3,
+        "cpuMaxPct": 29,
+        "memMaxPct": 34.9,
+        "memMaxBytes": 375119872,
+        "samples": 58
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 201,
+      "perVuBytes": 1866269,
+      "marks": {
+        "main_start": 1794355958427,
+        "main_end": 1794356018426
+      },
+      "startedS": 1794355918
+    },
+    {
+      "cpus": 2,
+      "memoryMi": 1024,
+      "stats": {
+        "cpuMeanPct": 25.6,
+        "cpuMaxPct": 29.6,
+        "memMaxPct": 34.6,
+        "memMaxBytes": 371752960,
+        "samples": 58
+      },
+      "judge": {
+        "valid": true,
+        "reasons": []
+      },
+      "scenarioErrors": 0,
+      "dropped": 0,
+      "droppedByScenario": {},
+      "vusMax": 200,
+      "perVuBytes": 1858765,
+      "marks": {
+        "main_start": 1794355958427,
+        "main_end": 1794356018426
+      },
+      "startedS": 1794355918
+    }
+  ]
+}

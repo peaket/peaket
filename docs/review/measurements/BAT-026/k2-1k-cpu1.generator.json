@@ -1,0 +1,66 @@
+{
+  "cpus": 4,
+  "memoryMi": 4096,
+  "stats": {
+    "cpuMeanPct": 22.3,
+    "cpuMaxPct": 25.3,
+    "memMaxPct": 12.2,
+    "memMaxBytes": 524947456,
+    "samples": 58
+  },
+  "judge": {
+    "valid": false,
+    "reasons": [
+      "발생기가 반복을 시작하지 못함(dropped_iterations 13)"
+    ]
+  },
+  "scenarioErrors": 0,
+  "dropped": 13,
+  "droppedByScenario": {
+    "main": 13
+  },
+  "vusMax": 202,
+  "perVuBytes": 2598750,
+  "marks": {
+    "main_start": 1794355367686,
+    "main_end": 1794355427680
+  },
+  "startedS": 1794355316,
+  "generators": 1,
+  "loadStartMs": 1794355316770,
+  "startSkewS": 0,
+  "cpuMeanPctMax": 22.3,
+  "cpuMaxPctMax": 25.3,
+  "memMaxPctMax": 12.2,
+  "each": [
+    {
+      "cpus": 4,
+      "memoryMi": 4096,
+      "stats": {
+        "cpuMeanPct": 22.3,
+        "cpuMaxPct": 25.3,
+        "memMaxPct": 12.2,
+        "memMaxBytes": 524947456,
+        "samples": 58
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 13)"
+        ]
+      },
+      "scenarioErrors": 0,
+      "dropped": 13,
+      "droppedByScenario": {
+        "main": 13
+      },
+      "vusMax": 202,
+      "perVuBytes": 2598750,
+      "marks": {
+        "main_start": 1794355367686,
+        "main_end": 1794355427680
+      },
+      "startedS": 1794355316
+    }
+  ]
+}
