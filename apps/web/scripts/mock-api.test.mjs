@@ -92,7 +92,7 @@ test('가짜 API의 회차 목록은 판매 종료가 지난 회차를 빼되 �
 test('가짜 API의 이미지 주소는 파생본 이름 규칙의 기준 주소다(ADR-0199 결정 4)', () => {
   const feed = homeFeed(ORIGIN, 'normal', NOW);
   assert.match(feed.upcoming[0].posterUrl, /^http:\/\/127\.0\.0\.1:4010\/img\/poster-[a-z]+$/);
-  assert.ok(placeholderSvg('poster-lumen', 640).startsWith('<svg'));
+  assert.ok(placeholderSvg(640).startsWith('<svg'));
 });
 
 test('가짜 API는 127.0.0.1 이름에만 답하고, 비로그인 상태면 찜 목록이 401이다', async () => {

@@ -15,7 +15,7 @@
 //
 // 정본 모호:
 // - runOne의 결과는 마지막 단계의 결과다(RESERVE가 ADVANCED면 같은 실행에서 CONFIRM을 이어 돌아 DONE, order-saga.ts runJob 설명).
-// - 승인 명령 데드라인은 min(200ms, 기한까지 남은 시간)이라 1 이상 200 이하로만 본다.
+// - 승인 명령 데드라인은 min(1,000ms, 기한까지 남은 시간)이라 1 이상 1,000 이하로만 본다.
 // - 다시 하기 첫 간격은 1초(sagaRetryDelayMs(1), payment §2 '1초에서 두 배씩')로 본다.
 // - 승인 기한의 경계(인증 + 10분 정각)는 넘긴 것으로 본다(saga.ts isPastConfirmDeadline).
 import 'reflect-metadata';
@@ -28,6 +28,7 @@ import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mj
 import {
   type ConfirmCommand,
   type ConfirmOutcome,
+  CONFIRM_CALL_DEADLINE_MS,
   DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleRebuildOrders,
@@ -340,7 +341,7 @@ describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 →
     const c = a.confirms.calls[0]!;
     expect(c).toMatchObject({ orderId: p.o.id, attemptId: p.attemptId, pg: 'TOSS', refs: p.refs, amount: p.o.amount });
     expect(c.deadlineMs).toBeGreaterThanOrEqual(1);
-    expect(c.deadlineMs).toBeLessThanOrEqual(200);
+    expect(c.deadlineMs).toBeLessThanOrEqual(CONFIRM_CALL_DEADLINE_MS);
     expect(await attemptRefs(p.attemptId)).toEqual(NO_REFS);
     expect(await jobOf(p.o.id)).toMatchObject({ step: 'AWAIT' });
     expect(a.log.lines).toEqual([]);
@@ -476,7 +477,7 @@ describe('승인 기한 넘김(가짜 시계)', () => {
 
   // 리뷰 고침 H1(2026-11-05): 승인 명령을 한 번이라도 보냈으면 purchase는 혼자 T11을 하지 않는다(결과를 모르는 명령이 payment-svc에 적혔을 수 있다).
   // 같은 주문 ID로 계속 다시 보내고 결과는 payment-svc가 정해 trade.payments로 온다(PRF-163)
-  test('H1_CONFIRM: 대역이 매번 200ms를 넘겨 답하면(RETRYABLE deadline) 승인 기한을 넘긴 뒤에도 T11을 하지 않고 다시 보낸다: 주문 RESERVED·판매 행 PENDING·한도·좌석 묶음 그대로, 실패 표시 없음 [ASVS v5.0.0-2.3.4] [ASVS v5.0.0-15.4.1]', async () => {
+  test('H1_CONFIRM: 대역이 매번 1,000ms를 넘겨 답하면(RETRYABLE deadline) 승인 기한을 넘긴 뒤에도 T11을 하지 않고 다시 보낸다: 주문 RESERVED·판매 행 PENDING·한도·좌석 묶음 그대로, 실패 표시 없음 [ASVS v5.0.0-2.3.4] [ASVS v5.0.0-15.4.1]', async () => {
     const a = assemble(recordingConfirms(Array.from({ length: 3 }, () => ({ status: 'RETRYABLE', reason: 'deadline' }) as const)));
     const w = await world();
     const p = await placeAndAccept(a, w);

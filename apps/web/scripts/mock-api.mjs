@@ -445,15 +445,12 @@ export function seatmapLayout() {
   };
 }
 
-/** 자리 그림: 이름마다 다른 색. 주소의 이름은 색조(hash)에만 쓰고 SVG 글자로 되비추지 않는다(CodeQL js/reflected-xss) */
-export function placeholderSvg(name, width) {
-  const n = String(name);
+/** 자리 그림: 너비에 따라 비율과 색을 정한다. 주소의 이름은 받지 않는다(CodeQL js/reflected-xss) */
+export function placeholderSvg(width) {
   const w = Math.max(1, Math.min(1280, Math.round(Number(width) || 0)));
-  const banner = n.startsWith('banner-');
+  const banner = w >= 1000;
   const h = banner ? Math.round((w * 400) / 1240) : Math.round((w * 4) / 3);
-  let hash = 0;
-  for (const ch of n) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  const hue = hash % 360;
+  const hue = (w * 7) % 360;
   const label = 'PEAKET';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 60% 38%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 65% 22%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="${banner ? '50%' : '42%'}" fill="#fff" font-family="sans-serif" font-size="${Math.round(w / (banner ? 14 : 7))}" font-weight="700" text-anchor="middle">${label}</text></svg>`;
 }
@@ -660,7 +657,8 @@ export function startMockApi({
     const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After, ETag', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
-      res.end(body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body));
+      // 문자열을 그대로 res.end에 넘기지 않는다(반사 XSS). JSON은 객체에서 만들고, 그림은 Buffer로 받는다(CodeQL js/reflected-xss)
+      res.end(body === undefined ? undefined : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)));
     };
     if (req.method === 'OPTIONS') {
       send(204, undefined, undefined, {
@@ -917,7 +915,7 @@ export function startMockApi({
       return send(204);
     }
     const img = /^\/img\/([a-z0-9-]{1,40})\/(\d{3,4})\.(avif|webp)$/.exec(p);
-    if (img && req.method === 'GET') return send(200, placeholderSvg(img[1], Math.min(Number(img[2]), 1280)), 'image/svg+xml', { 'cache-control': 'public, max-age=60' });
+    if (img && req.method === 'GET') return send(200, Buffer.from(placeholderSvg(Math.min(Number(img[2]), 1280))), 'image/svg+xml', { 'cache-control': 'public, max-age=60' });
     send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
