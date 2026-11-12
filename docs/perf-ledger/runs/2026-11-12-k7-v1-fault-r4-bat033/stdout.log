@@ -1,0 +1,7 @@
+2026-11-12T07:05:00Z 측정 폴더: D:\ticketpass-lane1\docs\perf-ledger\runs\2026-11-12-k7-v1-fault-r4-bat033
+2026-11-12T07:05:00Z 첨부: .cache/peaket-bat033/k7-r4/summary.json → k6-summary.json
+2026-11-12T07:05:00Z k6: p99=1591.45158525 ms, 오류율=0.020089361270013203, 요청=59086, 못 보낸 반복=0
+2026-11-12T07:05:00Z 첨부: .cache/peaket-bat033/k7-r4/infra.txt → infra.txt
+2026-11-12T07:05:00Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-12T07:05:00Z 점검: hold_p99_50ms n=10001 k=2091 상한=0.21588 → fail, hold_p999_150ms n=10001 k=615 상한=0.065591 → fail, payment_p99_3000ms n=9253 k=827 상한=0.094405 → fail
+2026-11-12T07:05:00Z manifest.json 작성

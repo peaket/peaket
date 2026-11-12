@@ -1,0 +1,89 @@
+{
+  "run_id": "2026-11-12-k7-v1-fault-r4-bat033",
+  "kpi": "K7",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": 11002,
+    "arrival_rps": 100.0,
+    "duration_s": 100,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-payment.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "c4f4aa0e869d37b5734ecb0cf7f64d08610643e0",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": null,
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-12T03:22:08Z",
+  "ended_at": "2026-11-12T03:25:06Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 159.48928899999999,
+    "p95_ms": 1047.05876575,
+    "p99_ms": 1591.45158525,
+    "error_rate": 0.020089361270013203,
+    "requests": 59086,
+    "rps": 590.86,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 10001,
+      "violations": 2091,
+      "cp_upper": 0.21588,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 10001,
+      "violations": 615,
+      "cp_upper": 0.065591,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "payment_p99_3000ms",
+      "allowed": 0.01,
+      "trials": 9253,
+      "violations": 827,
+      "cp_upper": 0.094405,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "payment p99 ≤ 3000ms"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "BAT-033 K7 r4: 새 클러스터, split, 2Gi, relay 정상, CPU 4. 결제 확정 p99 2846.6ms. 홀드 k6 p99 214.0ms.",
+  "collected_at": "2026-11-12T07:05:00Z",
+  "tool": "tools/perf-ledger/collect.py"
+}
