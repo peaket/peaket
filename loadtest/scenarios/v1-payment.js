@@ -11,10 +11,10 @@
 import http from 'k6/http';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 import { openPhases } from '../lib/model.mjs';
-import { faultFor, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
+import { faultFor, paymentDrainFinished, paymentDrainNewStart, paymentDrainUnfinished, paymentOverTarget, paymentPendingBefore3s, paymentStatusPollNext, PAYMENT_STATUS_POLL_MAX_MS } from '../lib/targets.mjs';
 import { userSeats } from '../lib/seats.mjs';
 import { PAYMENT_TERMINAL, paymentUserOf, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
@@ -49,29 +49,50 @@ const TERMINAL = PAYMENT_TERMINAL;
 const outcomes = new Counter('payment_outcomes');
 /** 결제 접수 응답 상태 코드(202·4xx·5xx·0). 실패의 코드 분포를 다음 측정에 남긴다(BAT-033) */
 const acceptStatus = new Counter('payment_accept_status');
-/** 본구간 마지막 3초 안에 시작해 초과 집계에서 뺀 반복 수(BAT-033). 끝 상태와 비끝 상태를 나눠 old PENDING과 비교한다 */
-const endTruncated = new Counter('payment_end_truncated');
-const endTruncatedTerminal = new Counter('payment_end_truncated_terminal');
-const endTruncatedPending = new Counter('payment_end_truncated_pending');
+/** 드레인 중 끝난 결제 수와 그중 끝 상태/비끝 상태(BAT-511) */
+const drainFinished = new Counter('payment_drain_finished');
+const drainFinishedTerminal = new Counter('payment_drain_finished_terminal');
+const drainFinishedPending = new Counter('payment_drain_finished_pending');
+/** 드레인 20초가 지나도 끝나지 않은 결제 수(시작 - 끝) */
+const drainUnfinished = new Counter('payment_drain_unfinished');
+/** 드레인 중 새 결제가 시작되지 않았는지 세는 시작·끝 수(끝나지 않은 수 = 시작 - 끝) */
+const paymentStarted = new Counter('payment_started');
+const paymentFinished = new Counter('payment_finished');
 /** 결제 확정 시간(결제 접수 시작 → 끝 상태, ms) */
 const confirmMs = new Trend('payment_confirm_ms', true);
+/** 결제 하나의 상태 조회 수와 호출 하나의 시간(조기 종료·느린 호출 진단, BAT-511) */
+const statusCalls = new Trend('payment_status_calls', true);
+const statusCallMs = new Trend('payment_status_call_ms', true);
+/** PENDING으로 끝난 결제의 마지막 상태·호출 시간·3초 전 포기 여부(BAT-511) */
+const pendingLastStatus = new Counter('payment_pending_last_status');
+const pendingBefore3s = new Counter('payment_pending_before_3s');
+const pendingAfter3s = new Counter('payment_pending_after_3s');
+const pendingMs = new Trend('payment_pending_ms', true);
+const pendingLastCallMs = new Trend('payment_pending_last_call_ms', true);
 
 const pays = openPhases({ exec: 'pay', rate: RATE, warmS: WARM_S, mainS: MAIN_S, startS: 0, preVUs: PRE_VUS, maxVUs: MAX_VUS });
+// 본구간 뒤 20초 드레인: 새 반복을 시작하지 않고 진행 중인 결제를 끝까지 기다린다(BAT-511)
+const main = { ...pays.main, gracefulStop: '20s' };
 
 export const options = baseOptions(
-  { warm: pays.warm, main: pays.main, ...markScenarios(WARM_S, WARM_S + MAIN_S) },
+  { warm: pays.warm, main, ...markScenarios(WARM_S, WARM_S + MAIN_S) },
   ['hold', 'order', 'pay_start', 'sim_auth', 'sim_fault', 'payment', 'payment_status'],
 );
 options.thresholds['payment_confirm_ms{phase:main}'] = ['max>=0'];
-options.thresholds['payment_end_truncated{phase:main}'] = ['count>=0'];
-options.thresholds['payment_end_truncated_terminal{phase:main}'] = ['count>=0'];
-options.thresholds['payment_end_truncated_pending{phase:main}'] = ['count>=0'];
+for (const name of ['payment_drain_finished', 'payment_drain_finished_terminal', 'payment_drain_finished_pending', 'payment_drain_unfinished', 'payment_started', 'payment_finished', 'payment_pending_before_3s', 'payment_pending_after_3s']) {
+  options.thresholds[`${name}{phase:main}`] = ['count>=0'];
+}
+for (const name of ['payment_status_calls', 'payment_status_call_ms', 'payment_pending_ms', 'payment_pending_last_call_ms']) options.thresholds[`${name}{phase:main}`] = ['max>=0'];
+// PENDING의 마지막 상태 분포(빠른 비끝 답의 정체를 남긴다)
+for (const s of ['ACCEPTED', 'RESERVED', 'APPROVED', 'UNKNOWN', 'undefined']) options.thresholds[`payment_pending_last_status{phase:main,status:${s}}`] = ['count>=0'];
 // 접수 응답 코드 분포를 요약에 남긴다(태그가 붙은 계열은 임계값이 있어야 summary.json에 나온다). 429도 접수 경로 응답이 될 수 있어 함께 둔다
 for (const code of ['0', '202', '400', '401', '404', '409', '422', '423', '429', '500', '503', '504']) options.thresholds[`payment_accept_status{phase:main,status:${code}}`] = ['count>=0'];
 for (const s of [...TERMINAL, 'PENDING']) options.thresholds[`payment_outcomes{phase:main,status:${s}}`] = ['count>=0'];
 
 export function setup() {
   if (RATE * (WARM_S + MAIN_S) + 2 > USERS) throw new Error('결제 시작 수의 상한(도착률 × 시간 + 2)이 가상 사용자 수보다 많다');
+  // 드레인·조기 종료 카운터는 0건이어도 요약에 남긴다(시작·끝 수는 payment_started/payment_finished에서 계산)
+  for (const c of [drainFinished, drainFinishedTerminal, drainFinishedPending, drainUnfinished, paymentStarted, paymentFinished, pendingBefore3s, pendingAfter3s]) c.add(0, { phase: 'main' });
 }
 
 const sim = (path, body, route, expected) => http.post(`${SIM_URL}${path}`, JSON.stringify(body), { headers: { authorization: SIM_AUTH, 'content-type': 'application/json' }, tags: { route }, responseCallback: http.expectedStatuses(expected) });
@@ -82,6 +103,9 @@ export function pay() {
   const it = exec.scenario.iterationInTest;
   const i = paymentUserOf(exec.scenario.name, it, USERS, RATE, WARM_S, MAIN_S);
   if (i < 0 || i >= USERS) return;
+  // 본구간 끝 뒤에는 새 결제를 시작하지 않는다. k6 gracefulStop이 새 반복을 막고, 이 가드가 경계의 반복을 막는다(BAT-511)
+  const mainEndMs = exec.scenario.name === 'main' ? exec.scenario.startTime + MAIN_S * 1000 : 0;
+  if (paymentDrainNewStart({ startedMs: Date.now(), mainEndMs })) return;
   const opened = admitAndOpen(EVENT_ID, i, { phase: 'prep', waitS: ADMIT_WAIT_S, record: false });
   if (!opened) return;
   const s = new V1Session(i, opened.admissionToken);
@@ -110,39 +134,77 @@ export function pay() {
   }
 
   const phase = exec.scenario.name === 'main' ? 'main' : 'warm';
+  // 접수도 본구간 끝 뒤에는 시작하지 않는다(앞 단계가 드레인 경계를 넘긴 반복)
   const startedMs = Date.now();
-  // 본구간 종료 시각(k6가 주는 절대 시각). 마지막 3초 안에 시작한 반복은 끝에서 잘렸을 수 있어 초과 집계에서 뺀다(BAT-033)
-  const mainEndMs = exec.scenario.name === 'main' ? exec.scenario.startTime + MAIN_S * 1000 : 0;
+  if (paymentDrainNewStart({ startedMs, mainEndMs })) return;
   const accepted = s.call('POST', `/v1/orders/${order.orderId}/payment-acceptance`, { pg: attempt.pg, paymentKey, amount: order.amount, attemptId: attempt.attemptId }, { route: 'payment', expected: [202], noTarget: true });
   acceptStatus.add(1, { phase, status: String(accepted.status) });
   if (!check(accepted, { '결제 접수 202': (x) => x.status === 202 })) {
     countOverTarget('payment', 0, { phase }, true);
     return;
   }
+  paymentStarted.add(1, { phase });
 
-  // 결제 결과: 롱 폴링(최대 25초 [가정] 기다림)을 끝 상태까지, 네 번까지
+  // 결제 결과: 끝 상태까지 롱 폴링. 빠른 비끝 답이면 짧게 쉬었다 다시 묻고, 접수 시작 후 최소 3초까지 묻는다.
+  // 3초가 지나도 비끝이면 그때 위반으로 세고 멈춘다. 전체 상한은 20초 드레인과 맞춘다(BAT-511).
   let status;
-  for (let k = 0; k < 4; k++) {
+  let calls = 0;
+  let lastCallMs = 0;
+  for (;;) {
+    const before = paymentStatusPollNext({ startedMs, nowMs: Date.now(), calls, terminal: TERMINAL.includes(status) });
+    if (!before.poll) break;
+    const remainingMs = Math.max(1_000, PAYMENT_STATUS_POLL_MAX_MS - (Date.now() - startedMs));
+    const callStartedMs = Date.now();
     // 결과 조회는 서명하지 않는 경로다(신원 머리만)
-    const r = vcall(PURCHASE_BASE, 'GET', `/v1/orders/${order.orderId}/payment-status`, { i, route: 'payment_status', expected: [200], timeout: '40s' });
+    const r = vcall(PURCHASE_BASE, 'GET', `/v1/orders/${order.orderId}/payment-status`, { i, route: 'payment_status', expected: [200], timeout: `${remainingMs}ms` });
+    calls += 1;
+    lastCallMs = Date.now() - callStartedMs;
+    statusCallMs.add(lastCallMs, { phase });
     status = r.status === 200 ? jsonOf(r)?.status : undefined;
     if (TERMINAL.includes(status)) break;
+    const after = paymentStatusPollNext({ startedMs, nowMs: Date.now(), calls, terminal: false });
+    if (!after.poll) break;
+    if (after.sleepMs > 0) sleep(after.sleepMs / 1000);
   }
-  const tookMs = Date.now() - startedMs;
+  statusCalls.add(calls, { phase });
+  const finishedMs = Date.now();
+  const tookMs = finishedMs - startedMs;
   const terminal = TERMINAL.includes(status);
   confirmMs.add(tookMs, { phase });
-  if (paymentEndTruncated({ startedMs, mainEndMs })) {
-    endTruncated.add(1, { phase });
-    if (terminal) endTruncatedTerminal.add(1, { phase });
-    else endTruncatedPending.add(1, { phase });
+  paymentFinished.add(1, { phase });
+  if (!terminal) {
+    // PENDING의 정체를 남긴다: 마지막 상태·전체 시간·마지막 호출 시간·3초 전 포기 여부
+    pendingLastStatus.add(1, { phase, status: String(status ?? 'undefined') });
+    pendingMs.add(tookMs, { phase });
+    pendingLastCallMs.add(lastCallMs, { phase });
+    if (paymentPendingBefore3s({ tookMs, terminal })) pendingBefore3s.add(1, { phase });
+    else pendingAfter3s.add(1, { phase });
   }
-  // 끝 상태가 아닌 답은 시작 시각과 무관하게 초과로 센다(M6). 끝 상태라도 본구간 마지막 3초 안에 시작한 반복은
-  // 본구간 종료와 함께 끝나지 못한 것이므로 초과에서 뺀다. 그 밖은 결제 확정 시간이 3초를 넘었는지로 센다.
-  countOverTarget('payment', tookMs, { phase }, paymentOverTarget({ tookMs, terminal, startedMs, mainEndMs }));
+  if (paymentDrainFinished({ startedMs, finishedMs, mainEndMs })) {
+    drainFinished.add(1, { phase });
+    if (terminal) drainFinishedTerminal.add(1, { phase });
+    else drainFinishedPending.add(1, { phase });
+  }
+  // 드레인 중 끝난 결제도 실제 시간으로 판정한다. 끝 상태가 아니면 위반이고, 끝 상태면 3초 초과가 위반이다(BAT-511).
+  countOverTarget('payment', tookMs, { phase }, paymentOverTarget({ tookMs, terminal }));
   outcomes.add(1, { status: terminal ? status : 'PENDING' });
   check(null, { '결제 확정 CONFIRMED': () => status === 'CONFIRMED' });
 }
 
 export function handleSummary(data) {
+  // 드레인 20초가 지나도 끝나지 않은 결제는 위반으로 센다(시작 - 끝). k6 gracefulStop이 강제로 멈춘 반복은
+  // payment_finished를 부르지 못하므로 이 차이가 곧 미완 수다(BAT-511).
+  const started = data.metrics['payment_started{phase:main}']?.values?.count ?? 0;
+  const finished = data.metrics['payment_finished{phase:main}']?.values?.count ?? 0;
+  const unfinished = paymentDrainUnfinished({ started, finished });
+  const drain = data.metrics['payment_drain_unfinished{phase:main}'];
+  if (drain) {
+    drain.values.count = unfinished;
+    drain.values.rate = 0;
+  }
+  const over = data.metrics['over_target{phase:main,route:payment,le:3000}'];
+  if (over) over.values.count += unfinished;
+  const pending = data.metrics['payment_outcomes{phase:main,status:PENDING}'];
+  if (pending) pending.values.count += unfinished;
   return writeSummary(data, MAIN_S);
 }

@@ -557,6 +557,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - R-509: BAT-038 결제 접수 전용 HTTP 칸막이(2026-11-13): 접수 429 158 = 칸막이 즉시 106 + 핫풀 52였고, 공유 `purchase-write`를 주문·결제 시작이 먹었다. 접수만 `purchase-accept`(기본 64, `Retry-After` 1, `PEAKET_PURCHASE_ACCEPT_BULKHEAD_LIMIT` 1~1,024)로 분리했다. 30초 프로파일에서 번들 CPU 1.09코어·이벤트 루프 p99 14.6ms, `payment.status.wait` p99 2.80s → p99는 롱 폴링 대기이지 CPU/event loop가 아니다. K7 r1에서 접수 429 70/9,301(0.75%) <1% 통과, confirm p99 3,609.8ms로 p99는 별도.
 - R-510: BAT-039 UNKNOWN 조회 꼬리 단축(2026-11-13): `pg_charge` 10,153건의 주문→승인 지연 p99 3.976s·p99.5 10.8s, 10~20초 53건(0.52%)이 16초 지연군이고 p99 경계는 3~5초의 정상/드롭 꼬리다. 드롭 5%의 UNKNOWN 조회 간격 250ms×2배 누적 3.75초를 줄이려고 `UNKNOWN_QUERY_BASE_MS`·`UNKNOWN_QUERY_POLL_INTERVAL_MS`를 100ms로, `DELAY_EXPONENT_CAP`을 10으로 바꿨다. 0.5% 지연은 p99.5에 남고 p99를 구조적으로 넘기지 않는다. K7은 measurement go 뒤.
 - R-502: BAT-210(BAS-070·BAS-110·BAS-230, 2026-11-12): 운영 확인 표 4편, NFR-007 셈 근거, RFC 3건 초안을 더했다.
+R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣어 끝에서 잘린 PENDING과 3초 전 조기 종료를 실제 시간으로 판정한다.
 
 ## 5. [충돌] 결정 결과
 

@@ -18,29 +18,87 @@ export const ROUTE_TARGETS = Object.freeze({
 export const ERROR_TARGETS = Object.freeze({ entry: 0.001, status: 0.001, admission: 0.001 });
 
 /**
- * K7 결제 확정의 본구간 끝 경계(ms). 본구간 마지막 3초 안에 시작한 반복은 k6가 본구간 종료와 함께
- * 끝내지 못해 PENDING으로 남을 수 있다. 그 반복은 결제가 3초를 넘겼다는 증거가 아니므로 초과 집계에서 뺀다.
- * 본구간 밖에서 시작한 비끝 상태는 M6 규칙대로 그대로 초과로 센다(실제 미확정을 숨기지 않는다).
+ * K7 결제 확정의 드레인(ms). 본구간이 끝나면 새 결제를 시작하지 않고, 진행 중인 결제가 끝날 때까지
+ * 최대 이 시간만큼 기다린다. 드레인 중 끝난 결제는 실제 시간으로 판정하고, 이 시간이 지나도 끝나지 않은
+ * 결제는 위반으로 센다(실제 미확정을 숨기지 않는다).
  */
-export const PAYMENT_END_GUARD_MS = 3_000;
+export const PAYMENT_DRAIN_MS = 20_000;
 
 /**
- * 본구간 마지막 `PAYMENT_END_GUARD_MS` 안에 시작해 끝에서 잘렸을 수 있는 반복인가.
+ * K7 결제 상태 조회의 최소 폴링 시간(ms). 이 시간 전에 비끝 답으로 끝내면 3초 목표를 재기 전에
+ * 포기한 것이다. 빠른 비끝 답(기다림 표가 참·멈춤 등)은 짧게 쉬었다 다시 묻는다.
+ */
+export const PAYMENT_STATUS_POLL_MIN_MS = 3_000;
+/** 빠른 비끝 답 사이의 짧은 쉼(ms). 3초 동안 최대 30번 묻는다 */
+export const PAYMENT_STATUS_POLL_INTERVAL_MS = 100;
+/** 상태 조회 최대 호출 수(안전 상한. 3초 최소 폴링과 20초 전체 상한이 먼저 선다) */
+export const PAYMENT_STATUS_POLL_MAX_CALLS = 100;
+/** 상태 조회 전체 상한(ms). 20초 드레인과 맞춘다 */
+export const PAYMENT_STATUS_POLL_MAX_MS = PAYMENT_DRAIN_MS;
+
+/**
+ * K7 결제 상태 조회를 한 번 더 할지 정한다.
+ * - 끝 상태면 멈춘다.
+ * - 접수 시작 후 `PAYMENT_STATUS_POLL_MIN_MS` 전이면 빠른 비끝 답이라도 `PAYMENT_STATUS_POLL_INTERVAL_MS`만큼
+ *   쉬었다 다시 묻는다(3초 전에 포기하지 않는다).
+ * - `PAYMENT_STATUS_POLL_MIN_MS`가 지났거나 전체 상한(`PAYMENT_STATUS_POLL_MAX_MS`)·호출 상한에 닿으면 멈춘다.
+ *  3초가 지나도 비끝이면 그때 위반으로 센다.
+ * @param {{ startedMs: number, nowMs: number, calls: number, terminal: boolean }} o
+ * @returns {{ poll: boolean, sleepMs: number, reason: 'terminal'|'min'|'max'|'calls'|'until-min' }}
+ */
+export function paymentStatusPollNext({ startedMs, nowMs, calls, terminal }) {
+  if (terminal) return { poll: false, sleepMs: 0, reason: 'terminal' };
+  const elapsed = nowMs - startedMs;
+  if (elapsed >= PAYMENT_STATUS_POLL_MAX_MS) return { poll: false, sleepMs: 0, reason: 'max' };
+  if (calls >= PAYMENT_STATUS_POLL_MAX_CALLS) return { poll: false, sleepMs: 0, reason: 'calls' };
+  if (elapsed >= PAYMENT_STATUS_POLL_MIN_MS) return { poll: false, sleepMs: 0, reason: 'min' };
+  return { poll: true, sleepMs: Math.min(PAYMENT_STATUS_POLL_INTERVAL_MS, PAYMENT_STATUS_POLL_MIN_MS - elapsed), reason: 'until-min' };
+}
+
+/**
+ * 끝 상태가 아닌데 3초 전에 끝낸 결제인가(시나리오 조기 종료). 이 값이 참이면 3초 목표를 재기 전에
+ * 포기한 것이므로 측정 방법 문제다.
+ * @param {{ tookMs: number, terminal: boolean }} o
+ */
+export function paymentPendingBefore3s({ tookMs, terminal }) {
+  return !terminal && tookMs < PAYMENT_STATUS_POLL_MIN_MS;
+}
+
+/**
+ * 본구간이 끝난 뒤 진행 중이던 결제가 드레인 중에 끝났는가.
+ * 본구간 전에 시작했고(`startedMs < mainEndMs`) 본구간 뒤에 끝났으면(`finishedMs > mainEndMs`) 참이다.
+ * @param {{ startedMs: number, finishedMs: number, mainEndMs: number }} o
+ */
+export function paymentDrainFinished({ startedMs, finishedMs, mainEndMs }) {
+  return mainEndMs > 0 && startedMs < mainEndMs && finishedMs > mainEndMs;
+}
+
+/**
+ * 드레인 중 새 결제를 시작하려는가(그러면 안 된다). 본구간 끝과 같거나 뒤에 시작하면 참이다.
  * @param {{ startedMs: number, mainEndMs: number }} o
  */
-export function paymentEndTruncated({ startedMs, mainEndMs }) {
-  return mainEndMs > 0 && startedMs >= mainEndMs - PAYMENT_END_GUARD_MS;
+export function paymentDrainNewStart({ startedMs, mainEndMs }) {
+  return mainEndMs > 0 && startedMs >= mainEndMs;
+}
+
+/**
+ * 드레인 20초가 지나도 끝나지 않은 결제 수 = 시작한 수 - 끝난 수(음수는 0).
+ * 시작·끝은 0 이상의 안전한 정수다(아니면 RangeError).
+ * @param {{ started: number, finished: number }} o
+ */
+export function paymentDrainUnfinished({ started, finished }) {
+  if (!Number.isSafeInteger(started) || started < 0) throw new RangeError(`시작한 결제 수는 0 이상의 안전한 정수다: ${started}`);
+  if (!Number.isSafeInteger(finished) || finished < 0) throw new RangeError(`끝난 결제 수는 0 이상의 안전한 정수다: ${finished}`);
+  return Math.max(0, started - finished);
 }
 
 /**
  * K7 결제 한 반복이 `payment_p99_3000ms` 초과인가.
- * - 끝 상태 여부와 무관하게 본구간 마지막 `PAYMENT_END_GUARD_MS` 안에 시작했으면 초과가 아니다(끝에서 잘린 반복).
- * - 그 밖에서 끝 상태가 아니면(UNKNOWN·PENDING 등) 시작 시각과 무관하게 초과다(M6, 실제 미확정을 숨기지 않는다).
- * - 그 밖은 결제 확정 시간이 3,000ms를 넘었는지로 정한다.
- * @param {{ tookMs: number, terminal: boolean, startedMs: number, mainEndMs: number }} o
+ * 드레인 중 끝난 결제도 실제 시간으로 판정한다. 끝 상태가 아니면(UNKNOWN·PENDING 등) 위반이고,
+ * 끝 상태면 접수 시작→끝 상태가 3,000ms를 넘었는지로 정한다.
+ * @param {{ tookMs: number, terminal: boolean }} o
  */
-export function paymentOverTarget({ tookMs, terminal, startedMs, mainEndMs }) {
-  if (paymentEndTruncated({ startedMs, mainEndMs })) return false;
+export function paymentOverTarget({ tookMs, terminal }) {
   if (!terminal) return true;
   return tookMs > 3_000;
 }

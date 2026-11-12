@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { faultFor, PAYMENT_END_GUARD_MS, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
+import { faultFor, PAYMENT_DRAIN_MS, paymentDrainFinished, paymentDrainNewStart, paymentDrainUnfinished, paymentOverTarget, paymentPendingBefore3s, paymentStatusPollNext, PAYMENT_STATUS_POLL_INTERVAL_MS, PAYMENT_STATUS_POLL_MAX_CALLS, PAYMENT_STATUS_POLL_MAX_MS, PAYMENT_STATUS_POLL_MIN_MS } from '../lib/targets.mjs';
 import { nextPurchaseSeq, ownedUser, paymentUserOf, runTagHex, seatIndexOf, v1AccountId, v1Headers, v1Pid, v1SeatIds, v1SeatMap, v1SeatUuid, v1SessionId } from '../lib/v1.mjs';
 import { seatCount, seatIdAt } from '../lib/seats.mjs';
 import { parseArgs, UsageError, V1_ADMISSION_STAY_S, V1_SCENARIOS } from '../runner/args.mjs';
@@ -142,21 +142,37 @@ describe('BAT-035 v1 payment 사용자 번호', () => {
   });
 });
 
-describe('BAT-033 K7 결제 확정 끝 경계', () => {
-  test('끝 3초 안에 시작한 반복은 끝 상태 여부와 무관하게 초과가 아니고, 그 밖의 비끝 상태는 초과다(M6 유지)', () => {
+describe('BAT-511 K7 결제 확정 드레인', () => {
+  test('드레인 중 끝난 결제는 실제 시간으로 판정하고, 20초가 지나도 안 끝난 결제는 위반이다', () => {
     const mainEndMs = 1_000_000;
-    assert.equal(PAYMENT_END_GUARD_MS, 3_000);
-    assert.equal(paymentEndTruncated({ startedMs: mainEndMs - 3_000, mainEndMs }), true);
-    assert.equal(paymentEndTruncated({ startedMs: mainEndMs - 3_001, mainEndMs }), false);
-    assert.equal(paymentEndTruncated({ startedMs: mainEndMs, mainEndMs: 0 }), false);
-    assert.equal(paymentOverTarget({ tookMs: 4_000, terminal: true, startedMs: mainEndMs - 3_000, mainEndMs }), false);
-    assert.equal(paymentOverTarget({ tookMs: 4_000, terminal: true, startedMs: mainEndMs - 3_001, mainEndMs }), true);
-    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 3_000, mainEndMs }), false);
-    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 3_001, mainEndMs }), true);
-    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 10_000, mainEndMs }), true);
-    assert.equal(paymentOverTarget({ tookMs: 3_000, terminal: true, startedMs: mainEndMs - 10_000, mainEndMs }), false);
-    assert.equal(paymentOverTarget({ tookMs: 3_001, terminal: true, startedMs: mainEndMs - 10_000, mainEndMs }), true);
-    assert.equal(paymentOverTarget({ tookMs: 3_001, terminal: true, startedMs: mainEndMs, mainEndMs: 0 }), true);
+    assert.equal(PAYMENT_DRAIN_MS, 20_000);
+    assert.equal(paymentDrainFinished({ startedMs: mainEndMs - 5_000, finishedMs: mainEndMs + 1_000, mainEndMs }), true);
+    assert.equal(paymentDrainFinished({ startedMs: mainEndMs + 1, finishedMs: mainEndMs + 1_000, mainEndMs }), false);
+    assert.equal(paymentDrainFinished({ startedMs: mainEndMs - 5_000, finishedMs: mainEndMs - 1, mainEndMs }), false);
+    assert.equal(paymentDrainNewStart({ startedMs: mainEndMs, mainEndMs }), true);
+    assert.equal(paymentDrainNewStart({ startedMs: mainEndMs - 1, mainEndMs }), false);
+    assert.equal(paymentDrainUnfinished({ started: 10, finished: 8 }), 2);
+    assert.equal(paymentDrainUnfinished({ started: 8, finished: 10 }), 0);
+    assert.equal(paymentOverTarget({ tookMs: 3_000, terminal: true }), false);
+    assert.equal(paymentOverTarget({ tookMs: 3_001, terminal: true }), true);
+    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false }), true);
+    assert.equal(paymentOverTarget({ tookMs: 10_000, terminal: true }), true);
+  });
+
+  test('빠른 비끝 답은 3초까지 다시 묻고, 3초가 지나면 그때 멈춘다', () => {
+    assert.equal(PAYMENT_STATUS_POLL_MIN_MS, 3_000);
+    assert.equal(PAYMENT_STATUS_POLL_INTERVAL_MS, 100);
+    assert.equal(PAYMENT_STATUS_POLL_MAX_CALLS, 100);
+    assert.equal(PAYMENT_STATUS_POLL_MAX_MS, PAYMENT_DRAIN_MS);
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 0, calls: 0, terminal: false }), { poll: true, sleepMs: 100, reason: 'until-min' });
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 2_999, calls: 1, terminal: false }), { poll: true, sleepMs: 1, reason: 'until-min' });
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 3_000, calls: 2, terminal: false }), { poll: false, sleepMs: 0, reason: 'min' });
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 20_000, calls: 2, terminal: false }), { poll: false, sleepMs: 0, reason: 'max' });
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 1_000, calls: 100, terminal: false }), { poll: false, sleepMs: 0, reason: 'calls' });
+    assert.deepEqual(paymentStatusPollNext({ startedMs: 0, nowMs: 1_000, calls: 1, terminal: true }), { poll: false, sleepMs: 0, reason: 'terminal' });
+    assert.equal(paymentPendingBefore3s({ tookMs: 2_999, terminal: false }), true);
+    assert.equal(paymentPendingBefore3s({ tookMs: 3_000, terminal: false }), false);
+    assert.equal(paymentPendingBefore3s({ tookMs: 1_000, terminal: true }), false);
   });
 });
 
@@ -277,6 +293,7 @@ describe('v1 시나리오 형식(k6 inspect)', { skip: SKIP }, () => {
   test('PRF215_v1-payment는_예열·본구간(도착률)과_결제경로기준·결과상태셈이있다', () => {
     const o = inspect('v1-payment.js');
     assert.equal(o.scenarios.main.exec, 'pay');
+    assert.equal(o.scenarios.main.gracefulStop, '20s', '본구간 뒤 20초 드레인');
     for (const k of ['http_req_duration{phase:main,route:payment}', 'over_target{phase:main,route:payment,le:3000}', 'payment_outcomes{phase:main,status:CONFIRMED}', 'payment_outcomes{phase:main,status:PENDING}', 'payment_confirm_ms{phase:main}']) assert.ok(o.thresholds[k], k);
   });
 });
@@ -490,12 +507,22 @@ describe('v1-payment.js 결제 확정 시간(코드 리뷰 M6, k6를 가짜 서�
       const m = JSON.parse(read(join(out, 'summary.json'), 'utf8')).metrics;
       const trials = m['http_reqs{phase:main,route:payment}']?.values?.count ?? 0;
       assert.ok(trials >= 8, `본구간 결제 접수 ${trials}건`);
-      assert.ok(statusCalls >= trials * 4, '끝 상태가 아니면 네 번까지 묻는다');
-      // 모든 결제가 끝 상태 없이 끝났다. 본구간 마지막 3초 안에 시작해 끝에서 잘린 반복만 초과에서 빠진다.
-      const truncated = m['payment_end_truncated{phase:main}']?.values?.count ?? m['payment_end_truncated']?.values?.count ?? 0;
-      assert.equal(m['over_target{phase:main,route:payment,le:3000}']?.values?.count + truncated, trials);
-      assert.equal(m['payment_end_truncated_pending{phase:main}']?.values?.count, truncated);
-      assert.equal(m['payment_end_truncated_terminal{phase:main}']?.values?.count ?? 0, 0);
+      assert.ok(statusCalls >= trials * 4, '끝 상태가 아니면 3초까지 다시 묻는다');
+      // 모든 결제가 끝 상태 없이 끝났다. 드레인 규칙에서는 끝 상태가 아닌 결제가 모두 위반이고,
+      // 가짜 서버가 빨라 드레인까지 간 결제는 없다(BAT-511).
+      assert.equal(m['payment_pending_before_3s{phase:main}']?.values?.count ?? 0, 0, '3초 전에 포기한 결제 없음');
+      assert.equal(m['payment_pending_after_3s{phase:main}']?.values?.count, trials, '3초가 지나도 비끝인 결제');
+      assert.equal(m['payment_pending_last_status{phase:main,status:ACCEPTED}']?.values?.count, trials);
+      assert.ok((m['payment_status_calls{phase:main}']?.values?.med ?? 0) >= 4, '결제마다 여러 번 묻는다');
+      assert.equal(m['over_target{phase:main,route:payment,le:3000}']?.values?.count, trials);
+      // 본구간 끝 무렵에 시작한 결제는 3초 폴링 때문에 드레인으로 넘어간다. 모두 비끝 상태라 위반으로 센다.
+      const drainFinished = m['payment_drain_finished{phase:main}']?.values?.count ?? 0;
+      assert.ok(drainFinished >= 0);
+      assert.equal(m['payment_drain_finished_terminal{phase:main}']?.values?.count ?? 0, 0);
+      assert.equal(m['payment_drain_finished_pending{phase:main}']?.values?.count ?? 0, drainFinished);
+      assert.equal(m['payment_drain_unfinished{phase:main}']?.values?.count ?? 0, 0);
+      assert.equal(m['payment_started{phase:main}']?.values?.count, trials);
+      assert.equal(m['payment_finished{phase:main}']?.values?.count, trials);
       assert.equal(m['payment_accept_status{phase:main,status:202}']?.values?.count, trials);
       assert.equal(m['payment_outcomes{phase:main,status:PENDING}']?.values?.count, trials);
       assert.ok(Number.isFinite(m['payment_confirm_ms{phase:main}']?.values?.['p(99)']), '결제 확정 시간 지표');
