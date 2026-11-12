@@ -78,9 +78,9 @@ const sim = (path, body, route, expected) => http.post(`${SIM_URL}${path}`, JSON
 
 export function pay() {
   // 반복 번호는 발생기를 나눠도(k6 실행 구간) 겹치지 않는다(줄무늬로 나뉜다). 사람마다 결제는 한 번이다.
-  // k6의 iterationInTest는 시험 전체 번호라, 예열은 뒤에서 본구간은 그 다음에서 세어 사용자 범위가 겹치지 않게 한다(BAT-035)
+  // k6의 iterationInTest는 시나리오별 번호다. 예열은 뒤에서, 본구간은 앞에서 세고, 계획한 반복 수를 넘는 꼬리는 버린다(BAT-035)
   const it = exec.scenario.iterationInTest;
-  const i = paymentUserOf(exec.scenario.name, it, USERS, RATE, WARM_S);
+  const i = paymentUserOf(exec.scenario.name, it, USERS, RATE, WARM_S, MAIN_S);
   if (i < 0 || i >= USERS) return;
   const opened = admitAndOpen(EVENT_ID, i, { phase: 'prep', waitS: ADMIT_WAIT_S, record: false });
   if (!opened) return;

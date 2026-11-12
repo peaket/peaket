@@ -48,15 +48,15 @@ export const v1SessionId = (runTag, i) => idOf(runTag, i, '000000000002');
 export const v1Pid = (runTag, i) => `pid-lt-${assertRunTag(runTag)}-${userIndex(i)}`;
 
 /**
- * v1 payment의 가상 사용자 번호(BAT-035). k6 `exec.scenario.iterationInTest`는 시험 전체 번호라
- * 예열과 본구간이 같은 번호를 다시 쓰지 않도록, 예열은 뒤에서, 본구간은 예열이 쓴 번호 다음에서 센다.
- * 본구간 앞의 여유는 큰 시험(users≥1,000)에서 mark_start·mark_end 두 반복과 예열 초과(최대 4)를 덮는 6이다.
- * 작은 통합 시험(users<1,000)은 본구간 번호가 예열의 높은 범위에 닿지 않아 여유를 두지 않는다.
- * @param {string} scenarioName @param {number} iterationInTest @param {number} users @param {number} rate @param {number} warmS
+ * v1 payment의 가상 사용자 번호(BAT-035). k6 `exec.scenario.iterationInTest`는 **시나리오별** 0부터 세는 번호다.
+ * 예열은 뒤에서(users-1-it), 본구간은 앞에서(it) 고른다. 두 구간이 계획한 반복 수(rate × 초)보다 조금 더 돌면
+ * 꼬리 번호가 서로 겹치므로(예열 it=1,000 → user 10,000, 본구간 it=10,000 → user 10,000), 계획한 수를 넘는 반복은
+ * -1로 돌려보내 사용자 번호를 쓰지 않는다. 제품 요청을 줄이는 것이 아니라 계획 밖 꼬리 반복을 버리는 것이다.
+ * @param {string} scenarioName @param {number} iterationInTest @param {number} users @param {number} rate @param {number} warmS @param {number} mainS
  */
-export function paymentUserOf(scenarioName, iterationInTest, users, rate, warmS) {
-  const margin = users >= 1_000 ? 6 : 0;
-  return scenarioName === 'main' ? iterationInTest - (rate * warmS + margin) : users - 1 - iterationInTest;
+export function paymentUserOf(scenarioName, iterationInTest, users, rate, warmS, mainS) {
+  if (scenarioName === 'main') return iterationInTest < rate * mainS ? iterationInTest : -1;
+  return iterationInTest < rate * warmS ? users - 1 - iterationInTest : -1;
 }
 
 /**

@@ -119,17 +119,26 @@ describe('faultFor 소수 한 자리(§3.9 비율 소수 한 자리)', () => {
 });
 
 describe('BAT-035 v1 payment 사용자 번호', () => {
-  test('예열과 본구간이 k6 시험 전체 반복 번호에서 같은 사용자를 두 번 쓰지 않는다', () => {
+  test('시나리오별 반복 번호에서 예열과 본구간 사용자 범위가 겹치지 않고, 계획 밖 꼬리는 버린다', () => {
     const users = 11002;
     const rate = 100;
     const warmS = 10;
-    for (const warmCount of [999, 1000, 1001, 1002]) {
-      const markOffset = 2;
-      const warm = Array.from({ length: warmCount }, (_, it) => paymentUserOf('warm', markOffset + it, users, rate, warmS));
-      const main = Array.from({ length: rate * 100 }, (_, k) => paymentUserOf('main', markOffset + warmCount + k, users, rate, warmS));
-      const all = [...warm, ...main].filter((i) => i >= 0 && i < users);
-      assert.equal(new Set(all).size, all.length, `겹침 없음(warm ${warmCount})`);
-    }
+    const mainS = 100;
+    const warmCount = rate * warmS;
+    const mainCount = rate * mainS;
+    const warm = Array.from({ length: warmCount + 8 }, (_, it) => paymentUserOf('warm', it, users, rate, warmS, mainS));
+    const main = Array.from({ length: mainCount + 8 }, (_, it) => paymentUserOf('main', it, users, rate, warmS, mainS));
+    const validWarm = warm.filter((i) => i >= 0 && i < users);
+    const validMain = main.filter((i) => i >= 0 && i < users);
+    assert.equal(validWarm.length, warmCount, '예열은 계획한 반복 수만 사용자 번호를 쓴다');
+    assert.equal(validMain.length, mainCount, '본구간은 계획한 반복 수만 사용자 번호를 쓴다');
+    assert.equal(new Set([...validWarm, ...validMain]).size, validWarm.length + validMain.length, '겹침 없음');
+    assert.deepEqual(warm.slice(warmCount), Array(8).fill(-1), '예열 꼬리는 버린다');
+    assert.deepEqual(main.slice(mainCount), Array(8).fill(-1), '본구간 꼬리는 버린다');
+    assert.equal(validWarm[0], users - 1);
+    assert.equal(validWarm.at(-1), users - warmCount);
+    assert.equal(validMain[0], 0);
+    assert.equal(validMain.at(-1), mainCount - 1);
   });
 });
 
