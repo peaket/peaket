@@ -58,6 +58,11 @@
         "script",
         "image"
       ]
+    },
+    {
+      "code": "W1",
+      "seatCount": 0,
+      "seatIds": []
     }
   ]
 }

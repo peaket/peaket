@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 79 | 13 | 13 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
-| B | 73 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 34 | 156 |
-| 합계 | 152 | 43 | 13 | 2 | 0 | 27 | 1 | 15 | 34 | 287 |
+| B | 81 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 26 | 156 |
+| 합계 | 160 | 43 | 13 | 2 | 0 | 27 | 1 | 15 | 26 | 287 |
 
 ## docs/features/seat-hold.md
 
@@ -143,14 +143,14 @@
 | S-T39 | ④ | 판매 정책 평가와 1인 한도 합치기(추천 적용 2026-11-10… | ④ 창 안 명단 없음만 `PRESALE_ONLY`로 들이지 않고, 등급·매수 조건만으로 거부하는 규칙은 진입을 막지 않는다 | 자동 시험 | A | 시험: packages/validation/test/sale-policy.test.ts |
 | S-T39 | ⑤ | 판매 정책 평가와 1인 한도 합치기(추천 적용 2026-11-10… | ⑤ 20:00 회차는 `PRESALE`(20:00~22:00, 2) 뒤 `GENERAL`(22:00~판매 종료, 회차 한도)이고, 19:00 회차는 그 앞에… | 자동 시험 | A | 시험: packages/validation/test/sale-policy.test.ts |
 | S-T39 | ⑥ | 판매 정책 평가와 1인 한도 합치기(추천 적용 2026-11-10… | ⑥ 넷 다 거절되고 코드가 `LIMIT_ABOVE_EVENT`·`REFUND_RATE_ABOVE_CAP`·`REFUND_BAND_OVERLAP`·UNKNOWN_… | 자동 시험 | A | 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/sale-policy.int.test.ts 외 1곳 |
-| S-T40 | ① | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ① 목록은 공개된 템플릿(코드·이름·변형·개략도 주소)이고, 하나는 도형·구역별 `fillRule`·등급 기본값을 주며 좌석 좌표가 없다. 공개되지 않은… | 빈칸 | B | — |
-| S-T40 | ② | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ② 201이고 구역별 `fillRule` 목표 수의 합이 목표 좌석 수이며 좌석이 0개다. 좌석이 있으면 409… | 빈칸 | B | — |
-| S-T40 | ③ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ③ 2,400석의 12석은 W1(기준 20석, 8석 부족)이고 0석도 W1이다. 1,234석은 기준 13석이라 13석은 경고가 없고 12석은 W1이다 | 빈칸 | B | — |
-| S-T40 | ④ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ④ 양옆 2석인 묶음만 W2이고 1석인 묶음·열 끝·번갈아 있는 열은 경고가 없다 | 빈칸 | B | — |
-| S-T40 | ⑤ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑤ W3이다 | 빈칸 | B | — |
-| S-T40 | ⑥ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑥ 24cm 짝과 이웃 구역 짝은 두 좌석이 모두 `SEAT_OVERLAP`에 들고 25cm 짝은 들지 않는다 | 빈칸 | B | — |
-| S-T40 | ⑦ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑦ 밖 좌석만 `SEAT_OUTSIDE_SHAPE`이고 변 위·안 좌석은 아니다 | 빈칸 | B | — |
-| S-T40 | ⑧ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑧가져오기 결과와 저장 응답의 `warnings`가 같은 코드·좌석이고 저장은 200으로 판이 오른다. 좌석 ID는 경고마다 100개까지이고… | 빈칸 | B | — |
+| S-T40 | ① | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ① 목록은 공개된 템플릿(코드·이름·변형·개략도 주소)이고, 하나는 도형·구역별 `fillRule`·등급 기본값을 주며 좌석 좌표가 없다. 공개되지 않은… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-templates.int.test.ts, services/core-svc/test/seatmap-templates.http.test.ts 외 1곳 |
+| S-T40 | ② | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ② 201이고 구역별 `fillRule` 목표 수의 합이 목표 좌석 수이며 좌석이 0개다. 좌석이 있으면 409… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-templates.int.test.ts, services/core-svc/test/seatmap-templates.http.test.ts 외 1곳 |
+| S-T40 | ③ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ③ 2,400석의 12석은 W1(기준 20석, 8석 부족)이고 0석도 W1이다. 1,234석은 기준 13석이라 13석은 경고가 없고 12석은 W1이다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
+| S-T40 | ④ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ④ 양옆 2석인 묶음만 W2이고 1석인 묶음·열 끝·번갈아 있는 열은 경고가 없다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
+| S-T40 | ⑤ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑤ W3이다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
+| S-T40 | ⑥ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑥ 24cm 짝과 이웃 구역 짝은 두 좌석이 모두 `SEAT_OVERLAP`에 들고 25cm 짝은 들지 않는다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
+| S-T40 | ⑦ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑦ 밖 좌석만 `SEAT_OUTSIDE_SHAPE`이고 변 위·안 좌석은 아니다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
+| S-T40 | ⑧ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑧가져오기 결과와 저장 응답의 `warnings`가 같은 코드·좌석이고 저장은 200으로 판이 오른다. 좌석 ID는 경고마다 100개까지이고… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-templates.int.test.ts, services/core-svc/test/seatmap-warnings.http.test.ts |
 
 ## docs/security/asvs/seat-hold.md
 
@@ -187,7 +187,7 @@
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 36곳 |
-| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 |
+| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 다른 단계 | B | HOT-252 · 이 행의 판매 정책 한도 몫(Q-T36 ③, HOT-250이 더함)은 갈래 1 새 단계가 시험한다. 이름을 단 기존 시험(1인 한도 Lua 등)은 규칙 한도를 보지 않는다(BAT-157 계획… |
@@ -208,7 +208,7 @@
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 (영역:… |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/partner |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |

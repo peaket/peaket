@@ -117,6 +117,18 @@ describe('대기열 Redis 사본', () => {
     expect(r.sets.has('q:e1:elig:fanclub')).toBe(false);
   });
 
+  test('같은 판은 덮지 않고, 지우기는 판 키도 지운다', async () => {
+    const r = new FakeRedis();
+    const c = new QueueSaleEligibilityCopy(r);
+    await c.put(put(5, ['a']));
+    await c.put(put(5, ['b']));
+    expect([...(r.sets.get('q:e1:elig:fanclub') ?? [])]).toEqual(['a']);
+    expect(r.versions.get('q:e1:elig:fanclub:v')).toBe(5);
+    await c.drop({ eventIds: ['E1'], listKey: 'fanclub', version: 5 });
+    expect(r.sets.has('q:e1:elig:fanclub')).toBe(false);
+    expect(r.versions.has('q:e1:elig:fanclub:v')).toBe(false);
+  });
+
   test('닫기는 Redis 연결을 닫는다', async () => {
     const r = new FakeRedis();
     await new QueueSaleEligibilityCopy(r).close();

@@ -17,5 +17,11 @@
       "code": "NUMBER_INVALID"
     }
   ],
-  "warnings": []
+  "warnings": [
+    {
+      "code": "W1",
+      "seatCount": 0,
+      "seatIds": []
+    }
+  ]
 }

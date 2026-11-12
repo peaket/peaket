@@ -6,17 +6,19 @@ import type { EligibilityCopyDrop, EligibilityCopyPut, SaleEligibilityCopy } fro
 
 /** HotRedis의 command만 쓰는 최소 포트(시험은 가짜를 넣는다) */
 export interface QueueRedis {
-  command(args: string[], o?: { key?: string }): Promise<unknown>;
+  command(args: string[], o?: { key?: string; deadlineMs?: number }): Promise<unknown>;
   close?(): Promise<void>;
 }
 
 const KEY = (eventId: string, listKey: string) => `q:${eventId.toLowerCase()}:elig:${listKey}`;
 const VKEY = (eventId: string, listKey: string) => `${KEY(eventId, listKey)}:v`;
 const BATCH = 10_000;
+/** 사본 쓰기는 핫패스가 아니라 정비 경로다. 1만 개 SADD·Lua가 100ms를 넘을 수 있어 5초를 준다 [가정] */
+const DEADLINE_MS = 5_000;
 
 /** 판이 지금보다 클 때만 임시 키를 본 키로 바꾼다. 아니면 임시 키를 지운다 */
 const RENAME_IF_NEWER = `
-local cur = tonumber(redis.call('GET', KEYS[2]) or '-1')
+local cur = tonumber(redis.call('GET', KEYS[3]) or '-1')
 local v = tonumber(ARGV[1])
 if cur >= v then
   redis.call('DEL', KEYS[1])
@@ -63,16 +65,16 @@ export class QueueSaleEligibilityCopy implements SaleEligibilityCopy {
       const temp = `${final}:tmp:${randomBytes(8).toString('hex')}`;
       try {
         if (c.accountIds.length === 0) {
-          await this.redis.command(['EVAL', EMPTY_IF_NEWER, '2', final, version, String(c.version), expire], { key: final });
+          await this.redis.command(['EVAL', EMPTY_IF_NEWER, '2', final, version, String(c.version), expire], { key: final, deadlineMs: DEADLINE_MS });
           continue;
         }
         for (let i = 0; i < c.accountIds.length; i += BATCH) {
           const ids = c.accountIds.slice(i, i + BATCH);
-          await this.redis.command(['SADD', temp, ...ids], { key: temp });
+          await this.redis.command(['SADD', temp, ...ids], { key: temp, deadlineMs: DEADLINE_MS });
         }
-        await this.redis.command(['EVAL', RENAME_IF_NEWER, '3', temp, final, version, String(c.version), expire], { key: final });
+        await this.redis.command(['EVAL', RENAME_IF_NEWER, '3', temp, final, version, String(c.version), expire], { key: final, deadlineMs: DEADLINE_MS });
       } catch (e) {
-        await this.redis.command(['DEL', temp], { key: temp }).catch(() => undefined);
+        await this.redis.command(['DEL', temp], { key: temp, deadlineMs: DEADLINE_MS }).catch(() => undefined);
         throw e;
       }
     }
@@ -80,7 +82,7 @@ export class QueueSaleEligibilityCopy implements SaleEligibilityCopy {
 
   async drop(c: EligibilityCopyDrop): Promise<void> {
     for (const eventId of c.eventIds) {
-      await this.redis.command(['EVAL', DROP_IF_NOT_NEWER, '2', KEY(eventId, c.listKey), VKEY(eventId, c.listKey), String(c.version)], { key: KEY(eventId, c.listKey) });
+      await this.redis.command(['EVAL', DROP_IF_NOT_NEWER, '2', KEY(eventId, c.listKey), VKEY(eventId, c.listKey), String(c.version)], { key: KEY(eventId, c.listKey), deadlineMs: DEADLINE_MS });
     }
   }
 

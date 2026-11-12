@@ -205,7 +205,10 @@ describe('S-T32 좌석맵 가져오기 공격 파일', () => {
         sections: [{ sectionId: '1', name: 'A', shape: { kind: 'POLYGON', points: [[0, 200], [500, 200], [500, 600], [0, 600]] }, seats: [{ seatId: '1-1-1', row: '1', number: 1, x: 10, y: 210 }] }],
       },
       errors: [],
-      warnings: [{ code: 'SVG_IGNORED', ignored: ['style', 'script', 'foreignObject', 'image', 'use', 'onclick', 'href'] }],
+      warnings: [
+        { code: 'SVG_IGNORED', ignored: ['style', 'script', 'foreignObject', 'image', 'use', 'onclick', 'href'] },
+        { code: 'W1', seatCount: 0, seatIds: [] },
+      ],
     });
     expect(r.payload).not.toContain(outside.url);
     await new Promise((res) => setTimeout(res, 200));
@@ -288,7 +291,7 @@ describe('S-T32 좌석맵 가져오기 공격 파일', () => {
       ok: true,
       layout: { canvas: { width: 100, height: 100 }, stage: [], sections: [{ sectionId: '1', name: 'VIP석', shape: { kind: 'POLYGON', points: [[0, 0], [100, 0], [100, 100], [0, 100]] }, seats: [{ seatId: '1-1-1', row: '1', number: 1, x: 10, y: 10, tierId: 'R', wheelchair: true, gateZone: '동문' }, { seatId: '1-1-2', row: '1', number: 2, x: 20, y: 10, tierId: 'R', gateZone: '동문' }] }] },
       errors: [],
-      warnings: [],
+      warnings: [{ code: 'SEAT_OVERLAP', seatCount: 2, seatIds: ['1-1-1', '1-1-2'] }],
     });
   });
 
@@ -516,7 +519,10 @@ describe('가져오기 받는 쪽의 차례와 기록', () => {
         { line: 0, field: 'sections[0].seats[1]', code: 'DUPLICATE_SEAT' },
         { line: 0, field: 'sections[0].seats[1].seatId', code: 'DUPLICATE_SEAT_ID' },
       ],
-      warnings: [],
+      warnings: [
+        { code: 'W1', seatCount: 0, seatIds: [] },
+        { code: 'SEAT_OVERLAP', seatCount: 1, seatIds: ['1-1-1'] },
+      ],
     });
     fake.mode = 'invalid';
     const bad = await importFile(altered, { format: 'JSON', file: enc('{}') });

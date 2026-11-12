@@ -340,7 +340,9 @@ describe('S-T38 배치본 저장과 팬 좌석맵 파일', () => {
     expect(g.headers.etag).toBe('"1"');
     expect(g.headers['cache-control']).toBe('no-store');
     const out = json(g);
-    expect(out).toEqual({ ...json(r), fanFilePublished: undefined });
+    const saved = { ...json(r) };
+    delete saved.warnings;
+    expect(out).toEqual({ ...saved, fanFilePublished: undefined });
     // 다시 보낸 서버 좌석 ID는 다음 저장에도 그대로이고(행을 바꿔 넣어도) 새 좌석만 새 ID를 받으며 앞 판 파일은 지운다
     const before = idsOf(r);
     const r2 = await put(m.id, memberOf(A), withIds(layoutBody({ sections: [secA(4), secB()] }), before), '"1"');
