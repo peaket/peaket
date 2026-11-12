@@ -553,7 +553,8 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - R-504: Avro BACKWARD_TRANSITIVE 검사가 유니온 안 named enum의 호환 변화를 통과시키고, 새 배열 필드 기본값을 요구한다.
 - R-506: gitleaks 이력 지문 예외·SRI 쿼리 시험 수정.
 - R-507: BAT-035 후속 측정 보정(2026-11-12): `paymentUserOf`를 시나리오별 반복 번호와 계획 밖 꼬리 버리기로 고치고, payment-model 웹훅 시험을 같은 `fakeClock`으로 맞췄다. K7 r2는 429 159/9,354(1.70%)·confirm p99 4,320.36ms로 미달해 BAT-037 후보를 남겼다.
-- R-508: BAT-037 purchase-svc 쓰기 경로 HTTP 백프레셔(2026-11-12): `payment-status` 롱 폴링은 대기 중 DB 연결을 쥐지 않는다(기다림 표 메모리, 묶음 조회 전용 풀 2). 쓰기 429 951건이 핫패스 풀을 포화시키므로 세 쓰기 경로에 `@Bulkhead`(공유 이름 `purchase-write`, 기본 64=핫패스 16×4, `Retry-After` 1, `PEAKET_PURCHASE_WRITE_BULKHEAD_LIMIT` 1~1,024)를 달았다. K7은 measurement go 뒤.
+- R-508: BAT-037 purchase-svc 쓰기 경로 HTTP 백프레셔(2026-11-12): `payment-status` 롱 폴링은 대기 중 DB 연결을 쥐지 않는다(기다림 표 메모리, 묶음 조회 전용 풀 2). 쓰기 429 951건이 핫패스 풀을 포화시키므로 세 쓰기 경로에 `@Bulkhead`(공유 이름 `purchase-write`, 기본 64=핫패스 16×4, `Retry-After` 1, `PEAKET_PURCHASE_WRITE_BULKHEAD_LIMIT` 1~1,024)를 달았다. K7 r1(64) 429 1.69%·p99 3,737ms, r2(128) 2.67%·3,831ms, r3(192) 3.47%·3,977ms로 미달해 기본 64를 유지했다.
+- R-509: BAT-038 결제 접수 전용 HTTP 칸막이(2026-11-13): 접수 429 158 = 칸막이 즉시 106 + 핫풀 52였고, 공유 `purchase-write`를 주문·결제 시작이 먹었다. 접수만 `purchase-accept`(기본 64, `Retry-After` 1, `PEAKET_PURCHASE_ACCEPT_BULKHEAD_LIMIT` 1~1,024)로 분리했다. 30초 프로파일에서 번들 CPU 1.09코어·이벤트 루프 p99 14.6ms, `payment.status.wait` p99 2.80s → p99는 롱 폴링 대기이지 CPU/event loop가 아니다. K7은 measurement go 뒤.
 - R-502: BAT-210(BAS-070·BAS-110·BAS-230, 2026-11-12): 운영 확인 표 4편, NFR-007 셈 근거, RFC 3건 초안을 더했다.
 
 ## 5. [충돌] 결정 결과

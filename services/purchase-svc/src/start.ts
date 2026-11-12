@@ -35,7 +35,7 @@ import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
-import { setWriteBulkheadLimit, writeBulkheadLimitFromEnv } from './write-bulkhead.js';
+import { acceptBulkheadLimitFromEnv, setAcceptBulkheadLimit, setWriteBulkheadLimit, writeBulkheadLimitFromEnv } from './write-bulkhead.js';
 import {
   type BehaviorSignalPublisher,
   type BookingModuleDeps,
@@ -161,8 +161,9 @@ export interface StartedService {
 
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
-  // BAT-037: 세 쓰기 경로(주문 생성·결제 시도 시작·결제 접수)의 동시 처리 칸막이. 기본 64, 환경 값으로 조정한다
+  // BAT-037: 주문 생성·결제 시도 시작의 동시 처리 칸막이. BAT-038: 결제 접수는 별도 이름(purchase-accept)으로 보호한다
   setWriteBulkheadLimit(writeBulkheadLimitFromEnv(env));
+  setAcceptBulkheadLimit(acceptBulkheadLimitFromEnv(env));
   // 좌석 Redis: 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표)
   const clusterUrls = (env.PEAKET_SEAT_REDIS_CLUSTER_URLS ?? '')
     .split(',')

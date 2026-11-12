@@ -12,7 +12,8 @@ import { AppModule } from '../src/app.module.js';
 import { ACCEPT_PROBLEMS, type AcceptPaymentRejection, PaymentAcceptRequest, throwAcceptProblem } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
 import { AcceptFakes, ATTEMPT_ID, okAttempt, okOrder, ORDER_ID, PAYMENT_KEY, PAYMENT_TOKEN, PORTONE_PAYMENT_ID, TX_ID } from './accept-cases.js';
-import { ACCOUNT, AMOUNT, CONSENT_VERSION, EVENT, IDEM_KEY, JOURNEY, LOGIN, NOW, OrderFakes, PID, PSID } from './order-cases.js';
+import { ACCOUNT, AMOUNT, CONSENT_VERSION, EVENT, IDEM_KEY, JOURNEY, LOGIN, NOW, okBody, OrderFakes, PID, PSID } from './order-cases.js';
+import { setWriteBulkheadLimit, WRITE_BULKHEAD_DEFAULT_LIMIT } from '../src/write-bulkhead.js';
 
 const KEY = Buffer.alloc(32, 9);
 const logLines: string[] = [];
@@ -49,6 +50,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   fx.reset();
+  orders.reset();
   logLines.length = 0;
 });
 
@@ -86,6 +88,24 @@ function post(body: unknown, o: PostOptions = {}) {
 }
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const problem = (slug: string) => `${PROBLEM_TYPE_BASE}${slug}`;
+const ORDER_PATH = '/v1/orders';
+/** BAT-038: 주문 생성 폭주를 만들기 위한 서명한 주문 요청(주문 HTTP 시험과 같은 모양). 접수와 같은 구매 세션 서명 번호를 이어 쓴다 */
+function postOrder(body: unknown) {
+  const payload = JSON.stringify(body);
+  const n = ++seq;
+  const headers: Record<string, string> = {
+    'x-user-id': ACCOUNT,
+    'x-session-id': LOGIN,
+    'x-user-aud': 'fan',
+    'x-user-scope': 'ticket:buy',
+    'x-user-pid': PID,
+    'content-type': 'application/json',
+    'x-purchase-seq': String(n),
+    'x-purchase-mac': purchaseMac(KEY, purchaseMacInput('POST', ORDER_PATH, n, Buffer.from(payload, 'utf8'))),
+    'idempotency-key': IDEM_KEY,
+  };
+  return svc.http.inject({ method: 'POST', url: ORDER_PATH, headers, payload });
+}
 const toss = (over: Record<string, unknown> = {}) => ({ pg: 'TOSS', paymentKey: PAYMENT_KEY, amount: AMOUNT, ...over });
 const portone = (over: Record<string, unknown> = {}) => ({ pg: 'PORTONE', paymentId: PORTONE_PAYMENT_ID, paymentToken: PAYMENT_TOKEN, txId: TX_ID, ...over });
 
@@ -488,5 +508,28 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     expect(PaymentAcceptRequest.safeParse(toss({ orderId: ORDER_ID })).success).toBe(false);
     expect(PaymentAcceptRequest.safeParse(portone({ amount: AMOUNT })).success).toBe(false);
     expect(PaymentAcceptRequest.safeParse(toss({ pg: 'KAKAO' })).success).toBe(false);
+  });
+});
+
+describe('BAT-038 결제 접수 보호', () => {
+  test('주문 생성이 purchase-write 자리를 다 써도 접수는 purchase-accept라 429가 아니다', async () => {
+    setWriteBulkheadLimit(1);
+    let open: (() => void) | undefined;
+    orders.createGate = new Promise<void>((r) => {
+      open = r;
+    });
+    try {
+      const first = postOrder(okBody());
+      for (let i = 0; i < 200 && !orders.calls.includes('writes.create'); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(orders.calls).toContain('writes.create');
+      const accepted = await post(toss());
+      expect(accepted.statusCode).toBe(202);
+      open!();
+      expect((await first).statusCode).toBe(201);
+    } finally {
+      open?.();
+      orders.createGate = undefined;
+      setWriteBulkheadLimit(WRITE_BULKHEAD_DEFAULT_LIMIT);
+    }
   });
 });

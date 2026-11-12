@@ -1,6 +1,11 @@
 // BAT-037 쓰기 경로 HTTP 백프레셔 설정 시험. 기본값·환경 값 검증·같은 객체를 장식자가 참조하는지 본다.
 import { afterEach, describe, expect, test } from 'vitest';
 import {
+  ACCEPT_BULKHEAD,
+  ACCEPT_BULKHEAD_DEFAULT_LIMIT,
+  ACCEPT_BULKHEAD_LIMIT_ENV,
+  acceptBulkheadLimitFromEnv,
+  setAcceptBulkheadLimit,
   setWriteBulkheadLimit,
   WRITE_BULKHEAD,
   WRITE_BULKHEAD_DEFAULT_LIMIT,
@@ -10,6 +15,7 @@ import {
 
 afterEach(() => {
   setWriteBulkheadLimit(WRITE_BULKHEAD_DEFAULT_LIMIT);
+  setAcceptBulkheadLimit(ACCEPT_BULKHEAD_DEFAULT_LIMIT);
 });
 
 describe('BAT-037 쓰기 칸막이 설정', () => {
@@ -32,5 +38,24 @@ describe('BAT-037 쓰기 칸막이 설정', () => {
     for (const bad of [0, 1.5, 1_025]) expect(() => setWriteBulkheadLimit(bad)).toThrow(Error);
     expect(WRITE_BULKHEAD.limit).toBe(128);
   });
+});
 
+describe('BAT-038 결제 접수 전용 칸막이 설정', () => {
+  test('주문·결제 시작과 다른 이름이고 기본 64다', () => {
+    expect(ACCEPT_BULKHEAD).toMatchObject({ name: 'purchase-accept', limit: 64, retryAfterSeconds: 1 });
+    expect(ACCEPT_BULKHEAD.name).not.toBe(WRITE_BULKHEAD.name);
+    expect(acceptBulkheadLimitFromEnv({})).toBe(64);
+    expect(acceptBulkheadLimitFromEnv({ [ACCEPT_BULKHEAD_LIMIT_ENV]: '' })).toBe(64);
+  });
+
+  test('1~1,024의 10진 정수만 받고 시작 때 바꾼 한도가 같은 객체에 적용된다', () => {
+    for (const raw of ['1', '64', '1024']) expect(acceptBulkheadLimitFromEnv({ [ACCEPT_BULKHEAD_LIMIT_ENV]: raw })).toBe(Number(raw));
+    for (const raw of ['0', '1025', '1.5', '0x10', ' 10', '10 ', 'abc']) {
+      expect(() => acceptBulkheadLimitFromEnv({ [ACCEPT_BULKHEAD_LIMIT_ENV]: raw }), raw).toThrow(Error);
+    }
+    setAcceptBulkheadLimit(128);
+    expect(ACCEPT_BULKHEAD.limit).toBe(128);
+    for (const bad of [0, 1.5, 1_025]) expect(() => setAcceptBulkheadLimit(bad)).toThrow(Error);
+    expect(ACCEPT_BULKHEAD.limit).toBe(128);
+  });
 });
