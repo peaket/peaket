@@ -15,6 +15,9 @@ const DEFAULT_ROOT = join(HERE, '..', '..', 'docs', 'api', 'avro');
 const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const typeName = (t) => (typeof t === 'string' ? t : Array.isArray(t) ? t.map(typeName).join('|') : isObject(t) ? t.name ?? typeName(t.type) : String(t));
 const sameType = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const isNamed = (t) => isObject(t) && (t.type === 'record' || t.type === 'enum' || t.type === 'fixed');
+/** 같은 이름·같은 종류의 named type은 이름으로 같다고 본다(안쪽 호환은 compareSchema가 본다) */
+const sameNamed = (a, b) => isNamed(a) && isNamed(b) && a.type === b.type && a.name === b.name;
 
 /** 스키마 안의 이름 붙은 타입(레코드·열거)을 차례로 모은다 */
 export function namedTypesOf(schema, out = []) {
@@ -118,6 +121,43 @@ export function listAvsc(root) {
   return out.sort();
 }
 
+/** 필드 형 하나를 BACKWARD 뜻으로 견준다. 유니온 배열은 옛 갈래가 새 유니온에 있는지 재귀로 본다 */
+function compareType(oldType, newType, where = '') {
+  const at = where ? `${where}: ` : '';
+  if (sameType(oldType, newType)) return [];
+  if (Array.isArray(oldType) && Array.isArray(newType)) {
+    const errors = [];
+    for (const ob of oldType) {
+      const nb = newType.find((n) => sameType(ob, n) || sameNamed(ob, n));
+      if (!nb) {
+        errors.push(`${at}유니온에 옛 갈래 ${typeName(ob)}가 없다`);
+        continue;
+      }
+      errors.push(...compareType(ob, nb, where));
+    }
+    return errors;
+  }
+  if (Array.isArray(newType)) {
+    // 넓히기: 옛 T → 새 [null, T]는 옛 데이터를 읽을 수 있다. 좁히기는 안 된다
+    const nb = newType.find((n) => sameType(oldType, n) || sameNamed(oldType, n));
+    if (nb) return compareType(oldType, nb, where);
+    return [`${at}형이 바뀌었다: ${typeName(oldType)} → ${typeName(newType)}`];
+  }
+  if (Array.isArray(oldType)) return [`${at}형이 좁아졌다: ${typeName(oldType)} → ${typeName(newType)}`];
+  if (isNamed(oldType) || isNamed(newType)) {
+    if (!sameNamed(oldType, newType)) return [`${at}이름 붙은 형이 바뀌었다: ${typeName(oldType)} → ${typeName(newType)}`];
+    return compareSchema(oldType, newType, where);
+  }
+  if (isObject(oldType) && isObject(newType)) {
+    if (oldType.type === 'array' && newType.type === 'array') return compareType(oldType.items, newType.items, where);
+    if (oldType.type === 'map' && newType.type === 'map') return compareType(oldType.values, newType.values, where);
+    if (oldType.type !== newType.type) return [`${at}형이 바뀌었다: ${typeName(oldType)} → ${typeName(newType)}`];
+    if ((oldType.logicalType ?? null) !== (newType.logicalType ?? null)) return [`${at}논리 형이 바뀌었다: ${String(oldType.logicalType)} → ${String(newType.logicalType)}`];
+    return [];
+  }
+  return [`${at}형이 바뀌었다: ${typeName(oldType)} → ${typeName(newType)}`];
+}
+
 /** 오래된 스키마(reader가 아님, writer)와 새 스키마를 BACKWARD_TRANSITIVE 뜻으로 견준다 */
 export function compareSchema(oldSchema, newSchema, where = '') {
   const errors = [];
@@ -149,19 +189,7 @@ export function compareSchema(oldSchema, newSchema, where = '') {
         if (nf.default === undefined && !(Array.isArray(nf.type) && nf.type[0] === 'null')) errors.push(`${at}필드 ${name}가 기본값 없이 새로 더해졌다`);
         continue;
       }
-      if (!sameType(of.type, nf.type)) {
-        // 같은 이름의 레코드·열거는 안쪽을 따로 견준다(열거 기호 더하기는 허용)
-        const named = isObject(of.type) && isObject(nf.type) && of.type.type === nf.type.type && of.type.name === nf.type.name;
-        // 넓히기: 옛 T → 새 [null, T]는 옛 데이터를 읽을 수 있다. 좁히기는 안 된다
-        const widened = Array.isArray(nf.type) && nf.type.some((t) => sameType(t, of.type));
-        if (!named && !widened) errors.push(`${at}필드 ${name}의 형이 바뀌었다: ${typeName(of.type)} → ${typeName(nf.type)}`);
-      }
-    }
-    // 레코드·열거 안쪽도 같은 규칙으로 본다
-    for (const [name, of] of oldFields) {
-      const nf = newFields.get(name);
-      if (!nf || !isObject(of.type) || !isObject(nf.type)) continue;
-      errors.push(...compareSchema(of.type, nf.type, `${where}${where ? '.' : ''}${name}`));
+      errors.push(...compareType(of.type, nf.type, `${where}${where ? '.' : ''}${name}`));
     }
   }
   return errors;

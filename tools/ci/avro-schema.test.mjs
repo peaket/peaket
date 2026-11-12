@@ -71,6 +71,32 @@ test('D-T39 ①: 기본값 없는 새 필드와 좁아진 형은 깨지고, null
   assert.deepEqual(compareSchema(old, record('Thing', [field('n', ['null', 'long'], { default: null })])), []);
 });
 
+test('D-T39 ①: 새 배열 필드는 기본값 []가 있어야 하고, 없으면 잡는다', () => {
+  const old = record('EventSaleChanged', [field('status', 'string')]);
+  const noDefault = record('EventSaleChanged', [field('status', 'string'), field('soldOutTiers', { type: 'array', items: 'string' })]);
+  assert.ok(compareSchema(old, noDefault).some((e) => e.includes('soldOutTiers') && e.includes('기본값 없이')));
+  const withDefault = record('EventSaleChanged', [
+    field('status', 'string'),
+    field('soldOutTiers', { type: 'array', items: 'string' }, { default: [] }),
+  ]);
+  assert.deepEqual(compareSchema(old, withDefault), []);
+});
+
+test('D-T39 ①: null 유니온 안 named enum의 기호 추가는 통과하고, 삭제·끼워 넣기는 잡는다', () => {
+  const base = ['UNRECOGNIZED', 'CARD_DECLINED', 'PG_ERROR'];
+  const schema = (symbols) => record('PaymentEvent', [
+    field('failureCategory', ['null', enumType('PaymentEventFailureCategory', symbols)], { default: null }),
+  ]);
+  const old = schema(base);
+  assert.deepEqual(compareSchema(old, schema([...base, 'DEPOSIT_CANCELED'])), []);
+  assert.ok(compareSchema(old, schema(base.filter((s) => s !== 'PG_ERROR'))).some((e) => e.includes('PG_ERROR')));
+  assert.ok(compareSchema(old, schema(['UNRECOGNIZED', 'CARD_DECLINED', 'DEPOSIT_CANCELED', 'PG_ERROR'])).some((e) => e.includes('끝에 있지 않다')));
+  // 유니온에서 옛 갈래가 통째로 빠지는 것도 잡는다
+  const oldUnion = record('Thing', [field('v', ['null', 'string'], { default: null })]);
+  const narrowed = record('Thing', [field('v', ['null'], { default: null })]);
+  assert.ok(compareSchema(oldUnion, narrowed).some((e) => e.includes('옛 갈래 string')));
+});
+
 test('D-T39 ④: 같은 판을 다시 등록해도 같은 스키마 ID가 돌아온다', async () => {
   const dir = temp();
   let id = 7;

@@ -33,7 +33,7 @@
 - **바꿈(2026-11-04, BUILD_ORDER BOT-041)**: 로그인 수단 연결·해제 `identity/LoginMethodChanged.avsc`(토픽 `identity.login-methods-changed`, 레코드 하나, 열거 둘 `LoginMethodChange`·`LoginMethodProvider`, 칸 다섯 모두 필수)를 더했다. 파일 21개(identity 3), 이름 붙은 타입 72개(레코드 30개, 열거 42개)다. 열거마다 맨 앞 `UNRECOGNIZED`와 기본값을 두었다(§2).
 - **바꿈(2026-11-05, BUILD_ORDER BOT-044, ADR-0209)**: `SessionTerminatedReason` 끝에 `LOGIN_METHOD_CHANGED`(팬 계정의 로그인 수단이 바뀌어 다른 세션을 끝냄, ASVS 7.4.3)를 더했다. 2026-10-30과 같이 열거 끝에 더해 기존 기호의 순서는 그대로이고, 새 기호를 모르는 옛 읽는 쪽은 기본값 `UNRECOGNIZED`로 읽는다. 파일·타입 수는 그대로다.
 - **바꿈(2026-11-06, BUILD_ORDER HOT-011, ADR-0219 결정 5·6)**: `trade/EventSaleChanged.avsc`의 끝에 셈 시각 `countedAt`(null 허용 timestamp-millis)과 평균 구매 매수 `avgTicketsPerOrder`(null 허용 double)를 기본값 null로 더했다. 내는 쪽이 같은 판을 다시 낼 때 그때의 셈을 싣는다. 이름 붙은 타입 수는 그대로다.
-- **바꿈(2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)**: `trade/EventSaleChanged.avsc`의 `paying` 뒤에 매진 등급 `soldOutTiers`(문자열 배열, 필수, 없으면 빈 배열)를 더했다. 첫 등록 전이고 내는 쪽(회차 판매 상태 판정 작업)이 아직 없어 §6의 규칙대로 필수로 넣었다. 이름 붙은 타입 수는 그대로다.
+- **바꿈(2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)**: `trade/EventSaleChanged.avsc`의 `paying` 뒤에 매진 등급 `soldOutTiers`(문자열 배열, 기본값 `[]`, 없으면 빈 배열)를 더했다. 2026-11-12 R-504: BACKWARD_TRANSITIVE를 위해 `"default": []`를 넣었다. 옛 데이터는 이 칸이 없으므로 빈 배열로 읽는다. 이름 붙은 타입 수는 그대로다.
 
 ## 2. 옮긴 규칙(추천 적용 2026-10-22)
 
