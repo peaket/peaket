@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 79 | 13 | 13 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
-| B | 81 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 26 | 156 |
-| 합계 | 160 | 43 | 13 | 2 | 0 | 27 | 1 | 15 | 26 | 287 |
+| B | 81 | 31 | 0 | 0 | 0 | 4 | 0 | 15 | 25 | 156 |
+| 합계 | 160 | 44 | 13 | 2 | 0 | 27 | 1 | 15 | 25 | 287 |
 
 ## docs/features/seat-hold.md
 
@@ -169,7 +169,7 @@
 | v5.0.0-1.2.9 | — | L2 | 정규식의 특수 문자를 이스케이프해 메타 문자로 해석되지 않게 한다. | 해당 없음 | B | 해당 없음(사용자 값을 정규식에 넣지 않는다. CSV의 꼭짓점 열('x y;x y;…')은 고정 구분자로 나눈다) |
 | v5.0.0-1.3.1 | — | L1 | WYSIWYG 편집기 등에서 오는 신뢰하지 않는 HTML 입력은 모두 잘 알려진 안전한 HTML 정화 라이브러리나 프레임워크 기능으로 정화한다. | 해당 없음 | B | 해당 없음(HTML 입력을 받지 않는다. 좌석맵 SVG는 HTML로 다루지 않고 도형 데이터만 뽑는다, 1.3.4) |
 | v5.0.0-1.3.2 | — | L1 | `eval()` 같은 동적 코드 실행을 피하고, 불가피하면 사용자 입력을 실행 전에 정화한다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs |
-| v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts 외 2곳 |
+| v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 3곳 |
 | v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 |
 | v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
 | v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts |
@@ -185,7 +185,7 @@
 | v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/sale-policy.http.test.ts 외 3곳 |
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/end-purchase-session.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 3곳 |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
-| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
+| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 36곳 |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |

@@ -532,11 +532,14 @@ erDiagram
         timestamptz removed_at
     }
     search_document {
-        uuid production_id PK "검색 읽기 모델의 공연 한 줄(ADR-0094). 카탈로그와 같은 트랜잭션에서 고친다. 지우면 같은 트랜잭션에서 search_removal에 적는다"
+        uuid production_id PK "검색 읽기 모델의 공연 한 줄(ADR-0094). 카탈로그와 같은 트랜잭션에서 고친다. 지우면 같은 트랜잭션에서 search_removal에 적는다. 2026-11-12 1차 구현은 production·event·place·artist·search_alias·production_image·wish를 모은 뷰로 두어 항상 지금 값을 보여 준다(ADR-0268)"
         text title
         text genre
         uuid place_id
+        text place_name "검색 카드에 보이는 공연장 이름(place에서 채운다)"
         jsonb artist_ids "아티스트 ID 목록"
+        jsonb artists "검색 카드에 보이는 아티스트 {artistId, name} 목록"
+        jsonb aliases "다른 이름 목록(search_alias의 살아 있는 행)"
         uuid representative_event_id "대표 회차(ADR-0093 결정 8)"
         timestamptz next_open_at
         uuid next_open_event_id "공연 카드의 오픈 알림 대상"
@@ -545,8 +548,10 @@ erDiagram
         date period_end "마지막 회차 종료(KST 날짜)"
         timestamptz sale_ends_at "마지막 회차의 판매 종료"
         int min_price
-        bigint interest "관심도: 오픈 전은 다음 오픈 회차의 오픈 알림 신청 수, 그 밖은 최근 7일 확정 판매 매수"
+        bigint interest "관심도: 오픈 전은 다음 오픈 회차의 오픈 알림 신청 수, 그 밖은 최근 7일 확정 판매 매수(1차 구현은 찜 수)"
         bigint updated_version
+        uuid poster_image_id "포스터 이미지 ID(production_image POSTER)"
+        text poster_alt "포스터 대체 텍스트"
     }
     search_term {
         uuid id PK
@@ -567,7 +572,9 @@ erDiagram
         timestamptz removed_at "하루 [가정] 지나면 1분 정리 작업이 지운다"
     }
     search_version {
+        integer id PK "1만 둔다(한 줄 보장)"
         bigint version "검색 읽기 모델(search_document·search_term·search_removal)을 바꾸는 트랜잭션마다 UPDATE … RETURNING으로 1 올린다. 시퀀스 금지(ADR-0086). 자동완성 사전이 10초 [가정]마다 판·바뀐 줄·지운 표시를 한 읽기 전용 트랜잭션에서 읽는다(ADR-0094, search §2.3)"
+        timestamptz updated_at
     }
     venue {
         uuid id PK "LAYOUT은 공연 ID에서 정한 UUIDv5(첫 저장이 회차에 잇기 전에 실패해도 다음 저장이 같은 행의 판 차례를 잇는다, ADR-0260 결정 15)"

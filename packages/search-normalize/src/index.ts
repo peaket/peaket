@@ -2,6 +2,9 @@
 // 낱자·초성은 es-hangul을 쓴다. NFD로 풀면 받침 ㅁ과 첫소리 ㅁ이 다른 문자라 조합 중인 글자가 맞지 않는다(§3.1).
 import { canBeChoseong, convertQwertyToHangul, disassemble, getChoseong } from 'es-hangul';
 
+/** 한/영 변환 값(검색 화면의 '바꿔 찾기' 안내와 서버의 변환 감지에 쓴다) */
+export { convertQwertyToHangul };
+
 /** 호환 자모 94자(U+3131~U+318E)를 NFKC로 바꾼 값 → 호환 자모(§3.1 1단계) */
 const JAMO_BACK = new Map<string, string>();
 for (let cp = 0x3131; cp <= 0x318e; cp++) {

@@ -23,7 +23,7 @@ describe('SR-T2 조합 중 글자', () => {
   });
 });
 
-describe('SR-T3 초성', () => {
+describe('SR-T3 ① 초성만인지 판정', () => {
   test.each(['ㄹㅁ', 'ㄱㅅ', 'ㄳ'])('%s는 초성만이다', (q) => {
     expect(queryKeys(q).chosung).not.toBeNull();
   });
@@ -31,7 +31,9 @@ describe('SR-T3 초성', () => {
   test.each(['ㄹㅏ', 'ㅏ', '루ㅁ', 'lumen'])('%s는 초성만이 아니다', (q) => {
     expect(queryKeys(q).chosung).toBeNull();
   });
+});
 
+describe('SR-T3 ② 초성 맞힘', () => {
   test('초성이 겹받침·겹모음이 든 이름과 맞고, 낱자 하나가 이름 앞부분과 맞는다', () => {
     expect(grade('ㄱ', '값')).toBe(GRADE.PREFIX);
     expect(grade('ㄱ', '과')).toBe(GRADE.PREFIX);

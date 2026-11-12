@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 5 | 101 | 0 | 0 | 0 | 1 | 0 | 19 | 106 | 232 |
-| 합계 | 5 | 101 | 0 | 0 | 0 | 1 | 0 | 19 | 106 | 232 |
+| B | 5 | 102 | 0 | 0 | 0 | 1 | 0 | 19 | 105 | 232 |
+| 합계 | 5 | 102 | 0 | 0 | 0 | 1 | 0 | 19 | 105 | 232 |
 
 ## docs/features/offline-gate.md
 
@@ -73,9 +73,9 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 6곳 (영역:… |
+| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 7곳 (영역:… |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 5곳… |
-| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/scanner |
+| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts (영역: apps/scanner) |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, loadtest/test/args090.test.mjs 외 77곳 (영역: apps/scanner… |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/save-answer.test.mjs… |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/catalog.int.test.ts 외 34곳 (영역:… |
@@ -136,7 +136,7 @@
 | v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 3곳… |
 | v5.0.0-7.6.1 | — | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 2곳… |
+| v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 3곳… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, packages/platform/test/auth-guard.test.ts 외 28곳… |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 39곳 (영역:… |
@@ -241,7 +241,7 @@
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/problem.test.ts (영역: apps/scanner) |
-| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/kafka.int.test.ts, packages/platform/test-int/outbox.int.test.ts 외 86곳 (영역:… |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/kafka.int.test.ts, packages/platform/test-int/outbox.int.test.ts 외 87곳 (영역:… |
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-8.3.2 | — | L3 | 인가 판정의 근거 값이 바뀌면 바로 반영하고, 자체 완결형 토큰처럼 바로 반영할 수 없으면 완화 통제를 둔다. | 빈칸 | B | 영역: apps/scanner |

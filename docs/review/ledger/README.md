@@ -5,62 +5,66 @@
 ## 완성 판정
 
 - 항목 3649개: 시험 시나리오(세부 단위) 1609, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
-- 빈칸 1153, ID만 1118: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다)
+- 빈칸 1124, ID만 1125: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 3(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 2: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 6: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 244 | 91 | 21 | 2 | 2 | 39 | 1 | 0 | 182 | 582 |
-| B | 780 | 1027 | 13 | 2 | 1 | 28 | 0 | 245 | 969 | 3065 |
+| B | 788 | 1034 | 14 | 4 | 1 | 38 | 0 | 246 | 940 | 3065 |
 | C | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 2 |
-| 합계 | 1024 | 1118 | 34 | 4 | 3 | 67 | 1 | 245 | 1153 | 3649 |
+| 합계 | 1032 | 1125 | 35 | 6 | 3 | 77 | 1 | 246 | 1124 | 3649 |
 
 ## 분야별 상태
 
 | 분야 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| analytics | B | 0 | 102 | 0 | 0 | 0 | 0 | 0 | 29 | 57 | 188 |
-| bot-defense | B | 111 | 19 | 0 | 0 | 0 | 6 | 0 | 0 | 16 | 152 |
-| catalog-review | B | 52 | 25 | 0 | 0 | 0 | 0 | 0 | 16 | 23 | 116 |
-| control-tower | B | 1 | 102 | 0 | 0 | 0 | 3 | 0 | 24 | 162 | 292 |
+| analytics | B | 0 | 103 | 0 | 0 | 0 | 0 | 0 | 29 | 56 | 188 |
+| bot-defense | B | 111 | 20 | 0 | 0 | 0 | 6 | 0 | 0 | 15 | 152 |
+| catalog-review | B | 54 | 21 | 0 | 0 | 0 | 5 | 0 | 17 | 19 | 116 |
+| control-tower | B | 1 | 103 | 0 | 0 | 0 | 3 | 0 | 24 | 161 | 292 |
 | delivery | B | 25 | 35 | 0 | 0 | 0 | 0 | 0 | 3 | 14 | 77 |
 | devops | B | 24 | 7 | 0 | 0 | 1 | 0 | 0 | 0 | 74 | 106 |
-| forensic-replay | B | 2 | 107 | 0 | 0 | 0 | 3 | 0 | 19 | 60 | 191 |
-| frontend | B | 77 | 42 | 8 | 2 | 0 | 1 | 0 | 22 | 51 | 203 |
+| forensic-replay | B | 2 | 109 | 0 | 0 | 0 | 3 | 0 | 19 | 58 | 191 |
+| frontend | B | 77 | 43 | 8 | 2 | 0 | 1 | 0 | 22 | 50 | 203 |
 | identity | B | 217 | 56 | 0 | 0 | 0 | 5 | 0 | 7 | 95 | 380 |
-| notify | B | 0 | 102 | 0 | 0 | 0 | 0 | 0 | 21 | 56 | 179 |
-| offline-gate | B | 5 | 101 | 0 | 0 | 0 | 1 | 0 | 19 | 106 | 232 |
+| notify | B | 0 | 103 | 0 | 0 | 0 | 0 | 0 | 21 | 55 | 179 |
+| offline-gate | B | 5 | 102 | 0 | 0 | 0 | 1 | 0 | 19 | 105 | 232 |
 | payment | A | 70 | 26 | 6 | 0 | 2 | 12 | 0 | 0 | 0 | 116 |
-| payment | B | 56 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 89 |
+| payment | B | 56 | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 89 |
 | queue-admission | A | 94 | 49 | 2 | 0 | 0 | 4 | 0 | 0 | 42 | 191 |
 | queue-admission | B | 33 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 9 | 59 |
 | requirements | A | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
 | requirements | B | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 12 |
 | requirements | C | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 2 |
-| search | B | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 12 | 17 |
+| search | B | 9 | 0 | 1 | 2 | 0 | 5 | 0 | 0 | 0 | 17 |
 | seat-hold | A | 79 | 13 | 13 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
-| seat-hold | B | 81 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 26 | 156 |
+| seat-hold | B | 81 | 31 | 0 | 0 | 0 | 4 | 0 | 15 | 25 | 156 |
 | security | B | 17 | 6 | 0 | 0 | 0 | 0 | 0 | 0 | 34 | 57 |
 | settlement | A | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 38 | 41 |
-| settlement | B | 0 | 98 | 0 | 0 | 0 | 0 | 0 | 23 | 32 | 153 |
+| settlement | B | 0 | 99 | 0 | 0 | 0 | 0 | 0 | 23 | 31 | 153 |
 | streaming | B | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 23 | 27 |
-| support | B | 0 | 63 | 0 | 0 | 0 | 0 | 0 | 22 | 16 | 101 |
+| support | B | 0 | 64 | 0 | 0 | 0 | 0 | 0 | 22 | 15 | 101 |
 | transfer-refund | A | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 102 | 102 |
-| transfer-refund | B | 0 | 86 | 0 | 0 | 0 | 0 | 0 | 20 | 20 | 126 |
+| transfer-refund | B | 0 | 87 | 0 | 0 | 0 | 0 | 0 | 20 | 19 | 126 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | B | 34 | 3 | 5 | 0 | 0 | 2 | 0 | 0 | 59 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1024 | 1118 | 34 | 4 | 3 | 67 | 1 | 245 | 1153 | 3649 |
+| 합계 |  | 1032 | 1125 | 35 | 6 | 3 | 77 | 1 | 246 | 1124 | 3649 |
 
 ## 다시 볼 notes
 
 | 항목 | notes 상태 | 이름을 단 시험 |
 | --- | --- | --- |
 | O-T23 | 다른 단계 | services/v0-monolith/test-int/gate.int.test.ts |
+| catalog-review:v5.0.0-2.4.1 | 다른 단계 | services/core-svc/test/wish.http.test.ts |
+| catalog-review:v5.0.0-16.1.1 | 다른 단계 | services/core-svc/test-int/seatmap-import.int.test.ts |
+| catalog-review:v5.0.0-16.2.5 | 다른 단계 | services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
+| catalog-review:v5.0.0-16.3.3 | 다른 단계 | services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.ts… |
 | seat-hold:v5.0.0-2.3.2 | 다른 단계 | packages/validation/test/sale-policy.test.ts, services/purchase-svc/test-int/order-store.int.test.ts… |
 
 ## 정본에 없는 ID·세부 번호를 단 시험 이름

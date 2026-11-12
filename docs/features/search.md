@@ -35,6 +35,8 @@
 
 카탈로그 표(`production`·`event`·`artist`·`place`·`search_alias`, docs/data.md §2)를 검색에 맞게 미리 모아 둔 사본 표(읽기 모델) 둘, 지운 줄을 적는 작은 표 하나, 판 번호 하나다. 모두 core 논리 DB 안이고, 카탈로그를 바꾸는 같은 트랜잭션에서 고친다.
 
+2026-11-12 1차 구현(BAT-165, ADR-0268)은 `search_document`를 사본 표가 아니라 뷰로 둔다. `production`·`event`·`place`·`artist`·`production_artist`·`search_alias`·`production_image`·`wish`를 모아 항상 지금 값을 보여 주므로, 카탈로그를 바꾸는 트랜잭션이 읽기 모델을 따로 고치지 않아도 된다. `search_term`·`search_removal`·`search_version`은 위 표 모양으로 자리만 잡고, 사전 확장·증분 읽기는 후속 배치가 쓴다. 공연 수가 늘어 뷰 스캔이 느려지면 materialized view·증분 동기화로 바꾼다.
+
 | 표 | 한 줄 | 칸 |
 | --- | --- | --- |
 | `search_document` | 공연 하나 | 공연 ID, 공연명, 장르, 공연장 ID·이름, 아티스트 ID 목록, 포스터 키, 공연 기간(첫 회차 시작·마지막 회차 종료), 대표 회차 ID, 다음 오픈 시각과 그 회차 ID, 판매 상태, 판매 종료(마지막 회차), 최저가, 배지(대표 회차의 판매 방식), 관심도와 그 근거(오픈 알림 신청 수 또는 최근 7일 확정 판매 매수), 바꾼 판 |

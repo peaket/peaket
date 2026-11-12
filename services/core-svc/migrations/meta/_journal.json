@@ -64,6 +64,13 @@
       "when": 1794302864853,
       "tag": "0008_sale_policy_eligibility",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794480000000,
+      "tag": "0009_search",
+      "breakpoints": true
     }
   ]
 }

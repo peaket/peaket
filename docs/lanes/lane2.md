@@ -6,6 +6,8 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
+- **2026-11-12 웨이브 2 BAT-165(HOT-270·HOT-280) 1차 구현·싼 게이트 끝**: 검색 포트 `SearchIndex`, 메모리·PostgreSQL 어댑터, `search_document` 뷰(0009), 순위·필터·쪽 상한·0건 제안·관련 공연·자동완성 몫을 core-svc에 넣었다(ADR-0268, 계획 docs/review/plans/BAT-165.md). 단위 시험 250(core-svc)·38(search-normalize), typecheck·lint·doc-check·trace-check·ledger 통과. 커밋 R-497. 무거운 게이트(test-int·측정·브라우저 확인·4관점 리뷰·변이·CI)는 `heavy gate go` 뒤 웨이브 단위로 돈다.
+- **2026-11-12 BAT-160(HOT-260·HOT-200) 보류**: HOT-200이 새 `image-worker` 배포·S3 어댑터·악성 코드 검사기·코덱 의존을 요구하는데 `develop`에 없고, HOT-260만 하면 묶음이 반쪽이라 BAT-165를 먼저 했다. 감독이 HOT-200 인프라를 먼저 넣을지 HOT-260을 따로 뺄지 정해야 한다.
 - **2026-11-12 웨이브 1(BAT-151·BAT-158) 끝**: 구현·단위 시험·싼 게이트와 웨이브 끝 검사(test-int 전체, 변이 36, 4관점 리뷰, 브라우저 확인, 로컬 CI 동등 게이트)를 마쳤다. 감독 보고 뒤 합치기·푸시는 감독이 한다. 다음 웨이브는 BUILD_ORDER의 갈래 2 남은 묶음에서 고른다.
 - **2026-11-11 BAT-150(HOT-220) 끝**: 좌석맵 에디터 편집 캔버스를 실제 저장 경로에 잇고, 리뷰 25건을 재현 시험 뒤 고쳤다. BAT-151 계획을 만들고 `@peaket/validation` 하위 경로(`./seatmap-checks`)를 이었다(ADR-0264 결정 15, docs/review/plans/BAT-150.md §4).
 - **2026-11-10 기능 묶음으로 재개(ADR-0256)**: BAT-145(HOT-190·HOT-210)·BAT-155(HOT-240)·BAT-157(HOT-250)은 끝났다. 다음 묶음은 BAT-150(HOT-220·HOT-230, Konva 10.9 설치 허락됨. 설치 방법은 32a6a966의 잠금 파일 손질을 본다), 그다음 BAT-158(HOT-251 판매 정책 화면). 묶음마다 지시서(`node tools/ci/brief.mjs`)와 계획 담당의 작업 목록을 먼저 만든다(ADR-0256 결정 9·10). BAT-040(HOT-305·HOT-346·HOT-357)은 비고의 선행(HOT-090 등)이 `develop`에 들어올 때까지 건너뛴다.

@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 70 | 26 | 6 | 0 | 2 | 12 | 0 | 0 | 0 | 116 |
-| B | 56 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 89 |
-| 합계 | 126 | 45 | 6 | 0 | 2 | 12 | 0 | 0 | 14 | 205 |
+| B | 56 | 20 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 89 |
+| 합계 | 126 | 46 | 6 | 0 | 2 | 12 | 0 | 0 | 13 | 205 |
 
 ## docs/features/payment.md
 
@@ -135,7 +135,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/end-purchase-session.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 3곳 |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
-| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 빈칸 | B | 영역: apps/web, services/payment-svc, services/pg-simulator, services/purchase-svc |
+| v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts (영역: apps/web, services/payment-svc, services/pg-simulator… |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-deposit.int.test.t… |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.int… |

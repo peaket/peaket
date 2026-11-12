@@ -1,16 +1,18 @@
 // 모듈 조립 파일: 포트에 어댑터를 묶는다(층 규칙의 밖. 모든 층을 가져온다).
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, type Provider, RequestMethod } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { type Database, LogPseudonymizer } from '@peaket/platform';
+import { type Clock, type Database, LogPseudonymizer, CLOCK } from '@peaket/platform';
 import { LogCdnInvalidation, MemoryCdnInvalidation, unavailableImageProcessing, unavailableSeatmapParser } from './adapters/cdn-invalidation.js';
 import { DrizzleCatalogRepository, PARTNER_DATABASE } from './adapters/db/drizzle-catalog-repository.js';
 import { DrizzleProductionMedia } from './adapters/db/drizzle-production-media.js';
 import { DrizzleSaleStore } from './adapters/db/drizzle-sale-store.js';
 import { DrizzleSeatmapLayoutStore } from './adapters/db/drizzle-seatmap-layout.js';
+import { DrizzleSearchIndex } from './adapters/db/drizzle-search-index.js';
 import { MemoryImageObjectStore } from './adapters/image-store.js';
 import { MemoryCatalogRepository, MemoryProductionMedia } from './adapters/memory-catalog-repository.js';
 import { MemorySaleStore } from './adapters/memory-sale-store.js';
 import { MemorySeatmapLayoutStore } from './adapters/memory-seatmap-layout.js';
+import { MemorySearchIndex } from './adapters/memory-search-index.js';
 import { EmptyTemplateCatalog } from './adapters/static-template-catalog.js';
 import { MemoryPublicFileStore } from './adapters/public-file-store.js';
 import { MemorySaleEligibilityCopy, unavailableMemberCodes } from './adapters/sale-eligibility-copy.js';
@@ -24,6 +26,7 @@ import { PartnerDirectory } from './application/partner-directory.js';
 import { ProductionImages } from './application/production-images.js';
 import { SaleEligibilityLists } from './application/sale-eligibility-lists.js';
 import { SalePolicies } from './application/sale-policy.js';
+import { SearchCatalog } from './application/search.js';
 import { SeatmapLayouts } from './application/seatmap-layouts.js';
 import { SEATMAP_TEMPLATES, SeatmapTemplates } from './application/seatmap-templates.js';
 import { UpdateProductionEvent } from './application/update-production-event.js';
@@ -43,6 +46,7 @@ import {
 import { LOG_PSEUDONYM, type LogPseudonym, MEMBER_CODE_DIRECTORY, type MemberCodeDirectory, SALE_ELIGIBILITY_COPY, SALE_ELIGIBILITY_METRICS, type SaleEligibilityCopy } from './domain/eligibility-ports.js';
 import { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
 import { CATALOG_REPOSITORY } from './domain/ports.js';
+import { SEARCH_INDEX } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
@@ -55,6 +59,7 @@ import { PartnerSaleEligibilityController } from './inbound/partner-sale-eligibi
 import { PartnerSalePolicyController } from './inbound/partner-sale-policy.controller.js';
 import { PartnerSeatmapController } from './inbound/partner-seatmap.controller.js';
 import { PartnerSeatmapTemplatesController } from './inbound/partner-seatmap-templates.controller.js';
+import { SearchController } from './inbound/search.controller.js';
 import { WishController } from './inbound/wish.controller.js';
 
 /** 이미지·좌석맵 가져오기의 바깥 잇기(ADR-0257). 운영은 모두 정한다(없으면 시작하지 않는다, main.ts) */
@@ -141,8 +146,8 @@ export class CatalogModule implements NestModule {
    * media는 database면 꼭 넘기고, memory면 시험이 필요한 것만 넘긴다
    */
   static register(o: { storage: 'database'; partnerDatabase: Database; media: MediaWiring } | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring> }): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -154,6 +159,7 @@ export class CatalogModule implements NestModule {
           { provide: PARTNER_PRODUCTION_MEDIA, useClass: DrizzleProductionMedia },
           { provide: SEATMAP_LAYOUT_STORE, useClass: DrizzleSeatmapLayoutStore },
           { provide: SALE_STORE, useClass: DrizzleSaleStore },
+          { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
           ...mediaProviders(o.media, false),
         ],
       };
@@ -168,6 +174,7 @@ export class CatalogModule implements NestModule {
         { provide: PARTNER_PRODUCTION_MEDIA, useValue: new MemoryProductionMedia(repo) },
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
         { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },
+        { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         ...mediaProviders(o.media ?? {}, true),
       ],
     };

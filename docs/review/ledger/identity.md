@@ -338,7 +338,7 @@
 | v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 3곳 |
 | v5.0.0-7.6.1 | — | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 빈칸 | B | 영역: apps/web |
 | v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 빈칸 | B | 영역: apps/web |
-| v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 2곳… |
+| v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 3곳… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/queue-svc/test/leave-cases.ts |

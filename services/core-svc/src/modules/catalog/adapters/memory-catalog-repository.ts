@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce, SaleEligibilityEvent } from '../domain/ports.js';
-import { type CatalogEvent, isPublic, type Production } from '../domain/production.js';
+import { type CatalogEvent, type EventSaleState, isPublic, type Production } from '../domain/production.js';
 import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
 import type { ProductionImageRow } from '../domain/production-image.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
@@ -43,6 +43,8 @@ export interface MemorySaleList extends StoredList {
 export class MemoryCatalogRepository implements CatalogRepository {
   readonly productions = new Map<string, Production>();
   readonly events = new Map<string, CatalogEvent>();
+  /** 회차 ID → 판매 상태(시험이 넣는다. 없으면 시각으로 UPCOMING·ON_SALE·ENDED를 계산한다) */
+  readonly saleStates = new Map<string, EventSaleState>();
   /** 판매자(promoter) ID → 상호. 판매자 행이 있다는 뜻이기도 하다 */
   readonly sellerNames = new Map<string, string>();
   /** 회차 ID → 공연 상세의 나머지 칸(시험이 넣는다. 없으면 기본값) */
