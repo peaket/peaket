@@ -7,9 +7,11 @@ class FakeRedis implements QueueRedis {
   versions = new Map<string, number>();
   ttl = new Map<string, number>();
   batches: number[] = [];
+  deadlines: number[] = [];
   closed = false;
 
-  async command(args: string[]): Promise<unknown> {
+  async command(args: string[], o?: { key?: string; deadlineMs?: number }): Promise<unknown> {
+    if (o?.deadlineMs !== undefined) this.deadlines.push(o.deadlineMs);
     const [op, key, ...rest] = args;
     if (op === 'SADD') {
       this.batches.push(rest.length);
@@ -86,6 +88,8 @@ describe('대기열 Redis 사본', () => {
     const ids = Array.from({ length: 25_000 }, (_, i) => `a${i}`);
     await c.put(put(5, ids));
     expect(r.batches).toEqual([10_000, 10_000, 5_000]);
+    expect(r.deadlines.length).toBeGreaterThan(0);
+    expect(r.deadlines.every((x) => x >= 5_000)).toBe(true);
     expect(r.sets.get('q:e1:elig:fanclub')?.size).toBe(25_000);
     expect(r.versions.get('q:e1:elig:fanclub')).toBe(5);
     expect(r.ttl.get('q:e1:elig:fanclub')).toBe(new Date('2027-01-01T00:00:00Z').getTime());

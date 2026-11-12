@@ -42,6 +42,15 @@ describe('S-T40 ② 목표 좌석 수 배분·변형', () => {
     expect(splitCapacity(t.sections, t.sections.length - 1)).toBeUndefined();
   });
 
+  test('나머지는 소수부가 큰 구역부터 준다', () => {
+    const sections = [
+      { sectionId: 'a', name: 'A', shape: { kind: 'POLYGON', points: [[0, 0], [1, 0], [1, 1]] }, fillRule: {}, defaultCapacity: 600 },
+      { sectionId: 'b', name: 'B', shape: { kind: 'POLYGON', points: [[0, 0], [1, 0], [1, 1]] }, fillRule: {}, defaultCapacity: 400 },
+    ] as const;
+    const split = splitCapacity(sections as never, 1001)!;
+    expect([...split.values()]).toEqual([600, 401]);
+  });
+
   test('변형은 목록에 있는 키·형·범위만 받는다', () => {
     const t = catalog.list().find((x) => x.code === 'ARENA-END')!;
     const def = catalog.get(t.templateId)!;

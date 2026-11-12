@@ -80,6 +80,7 @@ describe('좌석맵 템플릿(메모리)', () => {
     row.rows = { version: 1, doc: { ...row.rows!.doc, sections: row.rows!.doc.sections.map((s, i) => (i === 0 ? { ...s, seats: [{ seatId: randomUUID(), index: 0, row: '1', number: 1, x: 10, y: 10 }] } : s)) } };
     const blocked = await create(withSeats, { templateId: first.templateId, targetCapacity: 800 });
     expect([blocked.statusCode, json(blocked).type]).toEqual([409, `${P}seatmap-replace-required`]);
+    expect(json(blocked).existingSeatCount).toBe(1);
     expect((await create(withSeats, { templateId: first.templateId, targetCapacity: 800, replace: true })).statusCode).toBe(201);
   });
 

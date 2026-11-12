@@ -47,6 +47,9 @@ describe('대기열 Redis 사본(실제 Valkey)', () => {
     const ttl = (await cmd(['PTTL', KEY])) as number;
     expect(Math.abs(ttl - expected)).toBeLessThan(10_000);
 
+    // 같은 판은 덮지 않는다
+    await copy.put(put(5, ['same']));
+    expect(await members()).not.toContain('same');
     // 옛 판은 덮지 않는다
     await copy.put(put(4, ['old']));
     expect(await members()).not.toContain('old');
