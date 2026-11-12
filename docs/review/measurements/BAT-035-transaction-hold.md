@@ -56,6 +56,7 @@ K7 진단 1회(`.cache/peaket-bat033/k7-diag-bat034/`):
 
 - 구매-svc 단위 7파일: **459건 통과**(주문 생성·결제 시작·접수·HTTP·주문 상태 SQL).
 - 실제 PostgreSQL 통합: `order-writes`·`start-payment`·`order-accepts` 102건 + BAT-035 문장 수·순서 1건 + BAT-034 풀 2건 = **105건 통과**. `accept-e2e` **25건**, `orders-e2e` **34건**도 통과했다.
+- purchase-svc test-int **전체: 46파일 1,795건 통과**(2026-11-12, 실제 PostgreSQL·Redis, Docker). 첫 전체 실행에서 `payment-model`의 V-T40 웹훅 집중 시험 1건이 실패했다. 결제 시스템은 `fakeClock`을 쓰는데 웹훅 수신기만 `systemClock`을 써서, `UNKNOWN`의 `next_query_at`(250ms 뒤)이 실제 시각보다 먼저 지나면 첫 웹훅이 `query_signal`이 아니라 `query_signal_skipped`가 됐다. 웹훅 수신기도 같은 `fakeClock`을 쓰도록 고쳐 결정적으로 만들었고(제품 동작 변화 없음), 다시 46파일 1,795건이 통과했다.
 - BAT-035 문장 시험: create 6, start 8, accept 11, 접수 `itemsOf`/`reachedBeforeOf` 각 1, Outbox가 Saga INSERT 뒤·멱등 결과 UPDATE 앞.
 - 시나리오: `paymentUserOf` 단위 시험 통과, loadtest v1 시험 **48건 통과**.
 - typecheck: 영향 패키지(`@peaket/platform`, `@peaket/purchase-svc`) 통과.
@@ -79,7 +80,7 @@ K7 진단 1회(`.cache/peaket-bat033/k7-diag-bat034/`):
 - BAT-035: `event_seq +2→+1`, `seat_gen` 제거, T3 seq `seq-1→seq`, T3/T4 status 뒤바꿈, T3 이력 from/to 뒤바꿈, Outbox를 Saga 앞으로, 시도 상한 `<→<=`, SUPERSEDED 제거, create `order_item` CTE 비우기, create event seq `1→2`.
 - BAT-034: 기본 250→100, 범위 검증 5,000→100,000.
 - BAT-033: 끝 경계를 `!terminal` 뒤로, `_terminal`/`_pending` 맞바꾸기, 끝 경계 3,000→2,999.
-- 사용 시험: `order-accepts`·`start-payment`·`order-writes`·`bat035-transaction-statements` test-int, `db-pool-config` 단위, BAT-033 단위·M6 k6 시험. 전체 test-int는 돌리지 않았다.
+- 사용 시험: `order-accepts`·`start-payment`·`order-writes`·`bat035-transaction-statements` test-int, `db-pool-config` 단위, BAT-033 단위·M6 k6 시험. 전체 test-int는 46파일 1,795건 통과로 다시 확인했다.
 
 ### 4관점 리뷰
 

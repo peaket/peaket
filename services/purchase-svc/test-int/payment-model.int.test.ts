@@ -29,7 +29,7 @@ import 'reflect-metadata';
 import { join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createDatabase, type Database, fakeClock, systemClock } from '@peaket/platform';
+import { createDatabase, type Database, fakeClock } from '@peaket/platform';
 import fc from 'fast-check';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
@@ -445,8 +445,8 @@ test('V-T40 집중(발권 불가): ticket-svc가 그 주문을 끝내 발권하�
 
 test('V-T40 집중(웹훅): 서명 없는 \'승인됨\' 웹훅의 처리 길이 조회 신호 → 중복 → 조회 신호 건너뜀 차례이고 결제 원장을 바꾸지 않으며, 포트원 경로의 서명 없음·틀림은 거절, 토스 경로로 온 포트원 고정 주문은 결제사 불일치다(명세 ③, 코드 리뷰 M5)', async () => {
   const receiverOf = (s: PaymentSystem, outcomes: string[]) =>
-    new ReceivePaymentWebhook({ store: new DrizzleWebhookStore({ database: s.paymentDb() }), gateways: s.gateways(), log: new Proxy({}, { get: () => () => undefined }) as never, signals: { outcome: (_pg, o) => outcomes.push(o) }, clock: systemClock, allowSimulator: true });
-  const tossBody = (s: PaymentSystem, paymentKey: string) => Buffer.from(JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', createdAt: new Date().toISOString(), data: { paymentKey, orderId: s.orderIdOf(1), status: 'DONE' } }));
+    new ReceivePaymentWebhook({ store: new DrizzleWebhookStore({ database: s.paymentDb() }), gateways: s.gateways(), log: new Proxy({}, { get: () => () => undefined }) as never, signals: { outcome: (_pg, o) => outcomes.push(o) }, clock: s.clock, allowSimulator: true });
+  const tossBody = (s: PaymentSystem, paymentKey: string) => Buffer.from(JSON.stringify({ eventType: 'PAYMENT_STATUS_CHANGED', createdAt: new Date(s.clock.now()).toISOString(), data: { paymentKey, orderId: s.orderIdOf(1), status: 'DONE' } }));
 
   const s = await make(ONE);
   await using(s, async () => {
@@ -466,7 +466,7 @@ test('V-T40 집중(웹훅): 서명 없는 \'승인됨\' 웹훅의 처리 길이 
     const portone = (headers: Record<string, string>) => receiver.receive('portone', headers, Buffer.from(JSON.stringify({ type: 'Transaction.Paid', timestamp: new Date().toISOString(), data: { paymentId: `pay-${s.orderIdOf(1)}` } })));
     const before = outcomes.length;
     await s.noChange('포트원 서명 없음', async () => answers.push(await portone({})));
-    await s.noChange('포트원 서명 틀림', async () => answers.push(await portone({ 'webhook-id': 'wh-p1', 'webhook-timestamp': String(Math.floor(Date.now() / 1000)), 'webhook-signature': 'v1,AAAA' })));
+    await s.noChange('포트원 서명 틀림', async () => answers.push(await portone({ 'webhook-id': 'wh-p1', 'webhook-timestamp': String(Math.floor(s.clock.now() / 1000)), 'webhook-signature': 'v1,AAAA' })));
     expect(answers.slice(-2)).toEqual(['REJECTED', 'REJECTED']);
     expect(outcomes.slice(before)).toEqual(['invalid', 'invalid']);
     expect(s.obs.pay['1,1']).toBe('UNKNOWN');

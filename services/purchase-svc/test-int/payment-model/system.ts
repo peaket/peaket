@@ -363,7 +363,8 @@ export class PaymentSystem {
   constructor(
     private readonly purchase: Database,
     private readonly payment: Database,
-    private readonly clock: FakeClock,
+    /** 결제 시스템과 같은 가짜 시계(집중 시험이 웹훅 수신기처럼 같은 시간축을 써야 하는 곳에 넘긴다) */
+    readonly clock: FakeClock,
     readonly scope: Scope,
     private readonly o: SystemOptions = {},
   ) {
