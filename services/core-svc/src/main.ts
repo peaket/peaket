@@ -1,9 +1,9 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 import { fileURLToPath } from 'node:url';
-import { createDatabase, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
+import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -22,8 +22,9 @@ const lbProfile = loadPlatformConfig(process.env).grpcLbProfile;
 const adminAuthz = new GrpcAdminAuthz(identityGrpc, lbProfile);
 // 판매 자격 명단의 회원 코드 변환(identity MemberCodeService)도 같은 주소다(ADR-0261 결정 6). 서버(GAT-050) 전에는 UNIMPLEMENTED라 올리기가 503이다
 const memberCodes = new GrpcMemberCodeDirectory(identityGrpc, lbProfile);
-// 명단 사본을 대기열 Redis에 쓰는 쪽은 소유자 결정 대기다. 그때까지 늘 실패하고 sale_eligibility_copy_unwired_total을 올린다(ADR-0261 결정 9)
-const eligibilityCopy = new UnwiredSaleEligibilityCopy();
+// 명단 사본을 대기열 Redis에 쓰는 어댑터(ADR-0261 결정 9, OPEN[33] (가)). 주소가 없으면 늘 실패하는 어댑터로 시작한다
+const queueRedis = process.env.PEAKET_QUEUE_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_QUEUE_REDIS_URL }) : undefined;
+const eligibilityCopy = queueRedis ? new QueueSaleEligibilityCopy(queueRedis) : new UnwiredSaleEligibilityCopy();
 // 명단 감사 줄의 올린 계정은 로그 가명이다. 서비스 뼈대와 같은 키(PEAKET_LOG_PSEUDONYM_KEY)로 만들어 정규 로그 줄의 accountRef와 같은 값이 된다(ADR-0053 결정 1)
 const { pseudonymizer: pseudonym } = loadLogPseudonymizer(process.env);
 // 명단 운영 지표(올리기 결과·사본 넘기기 결과, docs/features/queue-admission.md §3 운영 확인 표)
@@ -68,7 +69,7 @@ const service = await createService({
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
   }),
 });
-eligibilityCopy.register(service.metrics.registry);
+if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 await service.listen();
 
@@ -82,6 +83,7 @@ process.once('SIGTERM', () => {
       memberCodes.close();
       imageProcessing.close();
       seatmapParser.close();
+      void queueRedis?.close();
       return Promise.all([database.close(), partnerDatabase.close()]);
     });
 });

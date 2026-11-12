@@ -12,6 +12,7 @@ import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { Modal } from '@/shared/ui/Modal';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
+import { LiveSalePolicy } from './LiveSalePolicy';
 import {
   CASE_RESULT,
   FANCLUB_LIST,
@@ -35,6 +36,7 @@ type PolicyState = (typeof POLICY_STATES)[number];
 const TAB_LG = 'max-lg:min-h-[52px] max-lg:rounded-[var(--r-lg)] max-lg:px-5 max-lg:text-base';
 const TAB_MD = 'max-lg:min-h-10 max-lg:px-4 max-lg:text-sm';
 const JSON_DIALOG = 'policy-json';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function withState(path: string, keep: Record<string, string | undefined>, state?: PolicyState): string {
   const p = new URLSearchParams();
@@ -46,7 +48,24 @@ function withState(path: string, keep: Record<string, string | undefined>, state
 
 export default async function SalePolicyPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
-  const pv = readPreview(await searchParams, POLICY_STATES, '기본');
+  const sp = await searchParams;
+  // 라이브 경로: 소문자 UUID 공연이고 ?state=가 없으면 실제 서버에 잇는다(ADR-0245 결정 7과 같은 규칙)
+  if (UUID.test(id) && sp.state === undefined) {
+    return (
+      <>
+        <div className="col" style={{ gap: 4 }}>
+          <h1 className="t-xl">판매 정책</h1>
+          <p className="t-sm muted">{`공연 ${id.slice(0, 8)}`}</p>
+        </div>
+        <div className="banner banner-warning">
+          <i className="ic ic-alert" aria-hidden="true" />
+          <div className="banner-body">승인 뒤 판매 정책을 바꾸면 다시 판매 승인을 받고, 오픈 전이면 오픈 예약이 멈춥니다</div>
+        </div>
+        <LiveSalePolicy productionId={id} />
+      </>
+    );
+  }
+  const pv = readPreview(sp, POLICY_STATES, '기본');
   const production = requireProduction(id);
   const st = pv.state;
   /** 취소 공제율 초안을 고른 상태(입력 오류·상한 위반) */
