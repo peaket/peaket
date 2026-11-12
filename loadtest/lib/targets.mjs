@@ -17,6 +17,34 @@ export const ROUTE_TARGETS = Object.freeze({
 /** 오류율 목표(§3.10): 경로 → 허용 비율(대기열 경로 0.1% 미만, Q-T2) */
 export const ERROR_TARGETS = Object.freeze({ entry: 0.001, status: 0.001, admission: 0.001 });
 
+/**
+ * K7 결제 확정의 본구간 끝 경계(ms). 본구간 마지막 3초 안에 시작한 반복은 k6가 본구간 종료와 함께
+ * 끝내지 못해 PENDING으로 남을 수 있다. 그 반복은 결제가 3초를 넘겼다는 증거가 아니므로 초과 집계에서 뺀다.
+ * 본구간 밖에서 시작한 비끝 상태는 M6 규칙대로 그대로 초과로 센다(실제 미확정을 숨기지 않는다).
+ */
+export const PAYMENT_END_GUARD_MS = 3_000;
+
+/**
+ * 본구간 마지막 `PAYMENT_END_GUARD_MS` 안에 시작해 끝에서 잘렸을 수 있는 반복인가.
+ * @param {{ startedMs: number, mainEndMs: number }} o
+ */
+export function paymentEndTruncated({ startedMs, mainEndMs }) {
+  return mainEndMs > 0 && startedMs >= mainEndMs - PAYMENT_END_GUARD_MS;
+}
+
+/**
+ * K7 결제 한 반복이 `payment_p99_3000ms` 초과인가.
+ * - 끝 상태 여부와 무관하게 본구간 마지막 `PAYMENT_END_GUARD_MS` 안에 시작했으면 초과가 아니다(끝에서 잘린 반복).
+ * - 그 밖에서 끝 상태가 아니면(UNKNOWN·PENDING 등) 시작 시각과 무관하게 초과다(M6, 실제 미확정을 숨기지 않는다).
+ * - 그 밖은 결제 확정 시간이 3,000ms를 넘었는지로 정한다.
+ * @param {{ tookMs: number, terminal: boolean, startedMs: number, mainEndMs: number }} o
+ */
+export function paymentOverTarget({ tookMs, terminal, startedMs, mainEndMs }) {
+  if (paymentEndTruncated({ startedMs, mainEndMs })) return false;
+  if (!terminal) return true;
+  return tookMs > 3_000;
+}
+
 
 /**
  * 요청 하나가 넘은 목표 시간(ms) 목록. 목표 시간보다 '큰' 것만 넘은 것이다(같으면 넘지 않음).

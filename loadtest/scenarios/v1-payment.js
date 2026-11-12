@@ -14,7 +14,7 @@ import encoding from 'k6/encoding';
 import { check } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 import { openPhases } from '../lib/model.mjs';
-import { faultFor } from '../lib/targets.mjs';
+import { faultFor, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
 import { userSeats } from '../lib/seats.mjs';
 import { PAYMENT_TERMINAL, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
@@ -47,6 +47,12 @@ const ADMIT_WAIT_S = envInt('ADMIT_WAIT_S', 120);
 const TERMINAL = PAYMENT_TERMINAL;
 /** 결제 하나의 마지막 상태(꼬리표 status) */
 const outcomes = new Counter('payment_outcomes');
+/** 결제 접수 응답 상태 코드(202·4xx·5xx·0). 실패의 코드 분포를 다음 측정에 남긴다(BAT-033) */
+const acceptStatus = new Counter('payment_accept_status');
+/** 본구간 마지막 3초 안에 시작해 초과 집계에서 뺀 반복 수(BAT-033). 끝 상태와 비끝 상태를 나눠 old PENDING과 비교한다 */
+const endTruncated = new Counter('payment_end_truncated');
+const endTruncatedTerminal = new Counter('payment_end_truncated_terminal');
+const endTruncatedPending = new Counter('payment_end_truncated_pending');
 /** 결제 확정 시간(결제 접수 시작 → 끝 상태, ms) */
 const confirmMs = new Trend('payment_confirm_ms', true);
 
@@ -57,6 +63,11 @@ export const options = baseOptions(
   ['hold', 'order', 'pay_start', 'sim_auth', 'sim_fault', 'payment', 'payment_status'],
 );
 options.thresholds['payment_confirm_ms{phase:main}'] = ['max>=0'];
+options.thresholds['payment_end_truncated{phase:main}'] = ['count>=0'];
+options.thresholds['payment_end_truncated_terminal{phase:main}'] = ['count>=0'];
+options.thresholds['payment_end_truncated_pending{phase:main}'] = ['count>=0'];
+// 접수 응답 코드 분포를 요약에 남긴다(태그가 붙은 계열은 임계값이 있어야 summary.json에 나온다). 429도 접수 경로 응답이 될 수 있어 함께 둔다
+for (const code of ['0', '202', '400', '401', '404', '409', '422', '423', '429', '500', '503', '504']) options.thresholds[`payment_accept_status{phase:main,status:${code}}`] = ['count>=0'];
 for (const s of [...TERMINAL, 'PENDING']) options.thresholds[`payment_outcomes{phase:main,status:${s}}`] = ['count>=0'];
 
 export function setup() {
@@ -99,7 +110,10 @@ export function pay() {
 
   const phase = exec.scenario.name === 'main' ? 'main' : 'warm';
   const startedMs = Date.now();
+  // 본구간 종료 시각(k6가 주는 절대 시각). 마지막 3초 안에 시작한 반복은 끝에서 잘렸을 수 있어 초과 집계에서 뺀다(BAT-033)
+  const mainEndMs = exec.scenario.name === 'main' ? exec.scenario.startTime + MAIN_S * 1000 : 0;
   const accepted = s.call('POST', `/v1/orders/${order.orderId}/payment-acceptance`, { pg: attempt.pg, paymentKey, amount: order.amount, attemptId: attempt.attemptId }, { route: 'payment', expected: [202], noTarget: true });
+  acceptStatus.add(1, { phase, status: String(accepted.status) });
   if (!check(accepted, { '결제 접수 202': (x) => x.status === 202 })) {
     countOverTarget('payment', 0, { phase }, true);
     return;
@@ -114,10 +128,17 @@ export function pay() {
     if (TERMINAL.includes(status)) break;
   }
   const tookMs = Date.now() - startedMs;
+  const terminal = TERMINAL.includes(status);
   confirmMs.add(tookMs, { phase });
-  // 끝 상태가 아닌 답으로 끝났으면(기다림 표 참·멈춤 등 빠른 답 포함) 목표를 넘은 것이다
-  countOverTarget('payment', tookMs, { phase }, !TERMINAL.includes(status));
-  outcomes.add(1, { status: TERMINAL.includes(status) ? status : 'PENDING' });
+  if (paymentEndTruncated({ startedMs, mainEndMs })) {
+    endTruncated.add(1, { phase });
+    if (terminal) endTruncatedTerminal.add(1, { phase });
+    else endTruncatedPending.add(1, { phase });
+  }
+  // 끝 상태가 아닌 답은 시작 시각과 무관하게 초과로 센다(M6). 끝 상태라도 본구간 마지막 3초 안에 시작한 반복은
+  // 본구간 종료와 함께 끝나지 못한 것이므로 초과에서 뺀다. 그 밖은 결제 확정 시간이 3초를 넘었는지로 센다.
+  countOverTarget('payment', tookMs, { phase }, paymentOverTarget({ tookMs, terminal, startedMs, mainEndMs }));
+  outcomes.add(1, { status: terminal ? status : 'PENDING' });
   check(null, { '결제 확정 CONFIRMED': () => status === 'CONFIRMED' });
 }
 

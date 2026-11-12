@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { faultFor } from '../lib/targets.mjs';
+import { faultFor, PAYMENT_END_GUARD_MS, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
 import { nextPurchaseSeq, ownedUser, runTagHex, seatIndexOf, v1AccountId, v1Headers, v1Pid, v1SeatIds, v1SeatMap, v1SeatUuid, v1SessionId } from '../lib/v1.mjs';
 import { seatCount, seatIdAt } from '../lib/seats.mjs';
 import { parseArgs, UsageError, V1_ADMISSION_STAY_S, V1_SCENARIOS } from '../runner/args.mjs';
@@ -115,6 +115,24 @@ describe('faultFor 소수 한 자리(§3.9 비율 소수 한 자리)', () => {
     assert.doesNotThrow(() => faultFor(0, 0.1, 0));
     assert.doesNotThrow(() => faultFor(0, 99.9, 0.1));
     for (const [d, l] of [[0.05, 0], [100.1, 0], [99.9, 0.2], [50.5, 49.6]]) assert.throws(() => faultFor(0, d, l), RangeError, `${d}+${l}`);
+  });
+});
+
+describe('BAT-033 K7 결제 확정 끝 경계', () => {
+  test('끝 3초 안에 시작한 반복은 끝 상태 여부와 무관하게 초과가 아니고, 그 밖의 비끝 상태는 초과다(M6 유지)', () => {
+    const mainEndMs = 1_000_000;
+    assert.equal(PAYMENT_END_GUARD_MS, 3_000);
+    assert.equal(paymentEndTruncated({ startedMs: mainEndMs - 3_000, mainEndMs }), true);
+    assert.equal(paymentEndTruncated({ startedMs: mainEndMs - 3_001, mainEndMs }), false);
+    assert.equal(paymentEndTruncated({ startedMs: mainEndMs, mainEndMs: 0 }), false);
+    assert.equal(paymentOverTarget({ tookMs: 4_000, terminal: true, startedMs: mainEndMs - 3_000, mainEndMs }), false);
+    assert.equal(paymentOverTarget({ tookMs: 4_000, terminal: true, startedMs: mainEndMs - 3_001, mainEndMs }), true);
+    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 3_000, mainEndMs }), false);
+    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 3_001, mainEndMs }), true);
+    assert.equal(paymentOverTarget({ tookMs: 100, terminal: false, startedMs: mainEndMs - 10_000, mainEndMs }), true);
+    assert.equal(paymentOverTarget({ tookMs: 3_000, terminal: true, startedMs: mainEndMs - 10_000, mainEndMs }), false);
+    assert.equal(paymentOverTarget({ tookMs: 3_001, terminal: true, startedMs: mainEndMs - 10_000, mainEndMs }), true);
+    assert.equal(paymentOverTarget({ tookMs: 3_001, terminal: true, startedMs: mainEndMs, mainEndMs: 0 }), true);
   });
 });
 
@@ -449,8 +467,12 @@ describe('v1-payment.js 결제 확정 시간(코드 리뷰 M6, k6를 가짜 서�
       const trials = m['http_reqs{phase:main,route:payment}']?.values?.count ?? 0;
       assert.ok(trials >= 8, `본구간 결제 접수 ${trials}건`);
       assert.ok(statusCalls >= trials * 4, '끝 상태가 아니면 네 번까지 묻는다');
-      // 모든 결제가 끝 상태 없이 끝났으므로 3초 목표를 모두 넘었다
-      assert.equal(m['over_target{phase:main,route:payment,le:3000}']?.values?.count, trials);
+      // 모든 결제가 끝 상태 없이 끝났다. 본구간 마지막 3초 안에 시작해 끝에서 잘린 반복만 초과에서 빠진다.
+      const truncated = m['payment_end_truncated{phase:main}']?.values?.count ?? m['payment_end_truncated']?.values?.count ?? 0;
+      assert.equal(m['over_target{phase:main,route:payment,le:3000}']?.values?.count + truncated, trials);
+      assert.equal(m['payment_end_truncated_pending{phase:main}']?.values?.count, truncated);
+      assert.equal(m['payment_end_truncated_terminal{phase:main}']?.values?.count ?? 0, 0);
+      assert.equal(m['payment_accept_status{phase:main,status:202}']?.values?.count, trials);
       assert.equal(m['payment_outcomes{phase:main,status:PENDING}']?.values?.count, trials);
       assert.ok(Number.isFinite(m['payment_confirm_ms{phase:main}']?.values?.['p(99)']), '결제 확정 시간 지표');
     } finally {

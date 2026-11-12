@@ -607,6 +607,7 @@
 | R-494 | `docs/data.md`의 Mermaid ER 그림에 `//` 주석을 넣어 CI docs-check가 실패했다 | docs/data.md | `//`를 Mermaid 주석 `%%`로 바꿨다 | 적용 |
 | R-495 | BAT-151의 템플릿 카드 뒤 FE-T46 ① 시험이 옛 기대(0개)를 그대로 써 CI rich-text가 3브라우저에서 실패했다 | tools/web-checks/rich-text/seatmap-editor.spec.mjs | 404 시작 화면의 템플릿 카드를 1개로 기대하고 주석을 고쳤다 | 적용 |
 | R-484 | BAS-020·BAS-030이 만드는 공급망 게시·SBOM 찾기·Avro 계약 검사·등록 Job이 비어 있었다 | .github/workflows/build-image.yml·contract-check.yml·ci.yml, tools/ci, packages/platform, deploy/charts | 워크플로·도구·차트·단위 시험을 더하고 장부 범위를 이 배치 몫으로 좁힘 | 적용 |
+| R-496 | BAT-033 K7 공식 payment_p99_3000ms가 8.94·9.43·9.06%로 fail인데, 실제 3초 초과인지 끝에서 잘린 반복인지 갈리지 않았다 | loadtest/lib/targets.mjs, loadtest/scenarios/v1-payment.js, loadtest/test/v1.test.mjs, docs/review/measurements/BAT-033-k7-finish.md, docs/review/plans/BAT-033.md, docs/BUILD_ORDER.md, docs/PROGRESS.md | over_target을 PENDING·접수 실패·실제 3초 초과로 분해해 실제 초과가 70~78건임을 밝히고, 본구간 마지막 3초 안에 시작한 반복은 끝 상태 여부와 무관하게 초과에서 빼는 paymentOverTarget을 넣었다. 그 밖의 비끝 상태는 M6대로 센다. 접수 실패의 상태 코드 분포는 r4~r6 원자료에 없어 다음 K7부터 payment_end_truncated_terminal·payment_end_truncated_pending·payment_accept_status로 남긴다 | 완료(측정 방법 수정·시험; K7 재측정은 measurement go 뒤) |
 | R-498 | `sigstore/cosign-installer`가 저장소 실제 허용 액션 정책에 없어 develop CI가 startup_failure로 시작하지 못했다 | .github/workflows/build-image.yml, infra/stacks/global/github/variables.tf | cosign을 체크섬 고정 바이너리로 받아 쓰고, 쓰지 않는 허용 패턴을 되돌렸다 | 적용 |
 | R-500 | BAT-205의 스키마 등록 Job이 CI 차트 값에 없어 tools-check 두 시험이 실패했다 | tools/ci/trivy-chart-values.yaml | CI 값에 schemaRegistry required 값을 채웠다 | 적용 |
 
