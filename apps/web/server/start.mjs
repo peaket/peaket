@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createCspHashServer, reactRuntimeScripts } from './csp-hash-server.mjs';
+import { prepareStandalone, standaloneServerPath } from './standalone.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values } = parseArgs({ options: { port: { type: 'string', default: process.env.PORT ?? '3000' }, 'inner-port': { type: 'string' }, host: { type: 'string', default: '127.0.0.1' } } });
@@ -21,7 +22,9 @@ const inner = Number(values['inner-port'] ?? port + 1);
 if (!Number.isInteger(port) || !Number.isInteger(inner) || port === inner) throw new Error(`--port·--inner-port가 틀렸다: ${values.port}, ${values['inner-port']}`);
 
 const dist = process.env.PEAKET_NEXT_DIST ?? '.next';
-const standalone = join(appDir, dist, 'standalone', 'apps', 'web', 'server.js');
+// standalone server.js가 있으면 .next/static과 public을 그 안으로 복사한다(없으면 next start 길).
+prepareStandalone(appDir, dist);
+const standalone = standaloneServerPath(appDir, dist);
 
 /** 안쪽 서버가 응답할 때까지 기다린다 */
 async function waitUp(url, ms = 60_000) {

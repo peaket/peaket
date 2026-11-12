@@ -22,6 +22,7 @@ import { queueRoomHref } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 import { cx } from '@/shared/lib/cx';
 import { deviceId } from '@/shared/lib/device-id';
+import { entryHref } from '@/shared/lib/in-app-browser';
 import { lobbyUnlockDelayMs } from '@/shared/lib/lobby-unlock';
 import { renderNextLink } from '@/shared/lib/next-link';
 import { VERIFY_PURPOSE } from '../model/content';
@@ -46,6 +47,8 @@ interface BookingState {
   phase?: BookingPhase;
   now?: number;
   unlockAt?: number;
+  /** 클라이언트가 붙은 뒤의 User-Agent. 인앱 브라우저면 대기실 대신 SCR-058을 먼저 연다 */
+  ua?: string;
 }
 
 const BookingContext = createContext<BookingState>({});
@@ -56,9 +59,15 @@ const RECHECK_MS = 15_000;
 export function BookingProvider({ data, children }: { data: BookingData; children: ReactNode }) {
   const [state, setState] = useState<BookingState>({});
   const [unlockAt, setUnlockAt] = useState<number | undefined>(undefined);
+  const [ua, setUa] = useState<string | undefined>(undefined);
   const [announce, setAnnounce] = useState('');
   const prev = useRef<BookingPhase | undefined>(undefined);
   const { eventId, status, openAtMs, lobbyOpensAtMs, saleEndsAtMs } = data;
+
+  // 인앱 브라우저 감지는 클라이언트가 붙은 뒤에만 한다(서버 첫 그리기와 하이드레이션을 맞춘다, SCR-058)
+  useEffect(() => {
+    setUa(navigator.userAgent);
+  }, []);
 
   // 이 기기의 버튼이 열리면 "로비에 들어갈 수 있습니다"를 한 번 읽는다(d5 §5.2 '로비 열림, 이 기기의 버튼은 아직')
   useEffect(() => {
@@ -100,7 +109,7 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
   }, [status, openAtMs, lobbyOpensAtMs, saleEndsAtMs, unlockAt]);
 
   return (
-    <BookingContext.Provider value={state}>
+    <BookingContext.Provider value={{ ...state, ua }}>
       {children}
       <p className="sr-only" aria-live="polite">
         {announce}
@@ -228,8 +237,8 @@ function useRestrictedCta(phase: BookingPhase | undefined, session: FanSession, 
   return restrictionCta(r, now, appealHref);
 }
 
-function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>, restricted: RestrictedCta): CtaModel {
-  const queue = queueRoomHref(data.eventId);
+function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>, restricted: RestrictedCta, ua: string | undefined): CtaModel {
+  const queue = entryHref(queueRoomHref(data.eventId), ua);
   const lobbyMeta = `${data.roundLabel}${data.lobbyText && phase !== 'queue' ? ` · 로비 ${data.lobbyText}부터` : ''}`;
   // 개인 상태가 먼저다(d5 §5.2 '비로그인'·'본인확인 필요'). 오픈 알림 토글은 오픈 전에만 둔다(오픈 뒤 진입 버튼에는 없다)
   const openAlert = phase === 'queue' ? undefined : {};
@@ -344,9 +353,9 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
 
 /** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
 export function BookingBar({ data }: { data: BookingData }) {
-  const { phase, now, unlockAt } = useBooking();
+  const { phase, now, unlockAt, ua } = useBooking();
   const session = useFanSession();
-  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now));
+  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now), ua);
   const descId = m.desc ? `bar-${phase ?? 'load'}-why` : undefined;
   let body: ReactNode;
   if (m.special === 'load') {
@@ -411,9 +420,9 @@ export function BookingBar({ data }: { data: BookingData }) {
 
 /** 데스크톱 오른쪽 고정 예매 패널의 버튼 묶음(보드 SCR-002-d aside) */
 export function BookingPanelCta({ data }: { data: BookingData }) {
-  const { phase, now, unlockAt } = useBooking();
+  const { phase, now, unlockAt, ua } = useBooking();
   const session = useFanSession();
-  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now));
+  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now), ua);
   const descId = m.desc ? `pnl-${phase ?? 'load'}-why` : undefined;
   if (m.special === 'load') {
     return (

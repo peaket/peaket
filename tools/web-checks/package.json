@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@12.16.0",
   "scripts": {
-    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\"",
+    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\" \"reflow/*.test.mjs\"",
     "seed-css:build": "node seed-css/build.mjs",
     "seed-css": "playwright test -c playwright.layers.config.mjs",
     "visual": "playwright test -c playwright.visual.config.mjs",
@@ -16,6 +16,7 @@
     "seatmap-pkg": "playwright test -c playwright.seatmap-pkg.config.mjs",
     "ds": "playwright test -c playwright.ds.config.mjs",
     "csp": "playwright test -c playwright.csp.config.mjs",
+    "reflow": "playwright test -c playwright.reflow.config.mjs",
     "rich-text:build": "node rich-text/build.mjs",
     "rich-text": "playwright test -c playwright.rich-text.config.mjs",
     "queue-room:build": "node queue-room/build.mjs",

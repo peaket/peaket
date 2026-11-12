@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
 import { seedLayeredAlias } from '@peaket/ds/seed-layered-alias';
+import { deploymentIdOf } from './server/deployment-id.mjs';
 import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
 import { writeSeatPreload } from './scripts/seat-preload.mjs';
 
@@ -19,6 +20,11 @@ const config: NextConfig = {
   poweredByHeader: false,
   // 퍼블리싱 중 여러 사람이 같은 앱을 동시에 빌드할 때만 산출 폴더를 나눈다(기본은 .next)
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
+  // 운영 이미지는 standalone 산출물만 담는다(docs/frontend.md §5.18, ASVS 13.4.1, HOT-390).
+  // server/start.mjs는 `<distDir>/standalone/apps/web/server.js`가 있으면 그것을 안쪽 포트에 띄운다.
+  output: 'standalone',
+  // 출시 후보 커밋 SHA를 배포 식별자로 쓴다(화면·서버 배포 식별자가 다르면 새로고침, HOT-390).
+  deploymentId: deploymentIdOf(),
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: { ...seedLayeredAlias(import.meta.dirname), 'peaket-pg-simulator-window': simulatorWindowModule } },

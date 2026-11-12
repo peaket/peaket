@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 /** 정본 §5.18의 허용 확장자(static/assets.test.mjs가 정본과 같은지 본다) */
 export const ALLOWED_EXTENSIONS = ['js', 'mjs', 'css', 'woff2', 'avif', 'webp', 'png', 'svg', 'ico', 'json', 'webmanifest', 'wasm', 'html'];
+/** 앱마다 정적 배포에 함께 싣는 제3자 고지 파일(ADR-0040 결정 7, BUILD_ORDER HOT-390). `.txt` 예외는 이 이름 하나뿐이다 */
+export const NOTICE_FILE = 'THIRD-PARTY-NOTICES.txt';
 /** 글자로 읽어 소스 맵 링크를 찾는 확장자 */
 const TEXT_EXTENSIONS = new Set(['js', 'mjs', 'css', 'html', 'json', 'webmanifest', 'svg']);
 // 소스 맵 링크: JS의 `//# sourceMappingURL=`와 CSS의 블록 주석 꼴(예전 꼴 `//@`도 본다)
@@ -55,7 +57,8 @@ export function planUpload(dir, { allowSimulator = false } = {}) {
       excluded.push({ path: rel, reason: '숨은 파일·폴더(.git·.env 등)' });
       continue;
     }
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    const notice = rel.split('/').pop() === NOTICE_FILE;
+    if (!notice && !ALLOWED_EXTENSIONS.includes(ext)) {
       excluded.push({ path: rel, reason: ext === 'map' ? '소스 맵(오류 도구에만 올린다)' : `허용 확장자 밖(.${ext || '없음'})` });
       continue;
     }

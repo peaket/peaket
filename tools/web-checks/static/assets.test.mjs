@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ALLOWED_EXTENSIONS, bundledPackages, cycloneDx, planUpload, workspaceDeps } from './assets.mjs';
+import { ALLOWED_EXTENSIONS, NOTICE_FILE, bundledPackages, cycloneDx, planUpload, workspaceDeps } from './assets.mjs';
 import { repoRoot } from '../lib/canon.mjs';
 
 const md = readFileSync(join(repoRoot, 'docs/frontend.md'), 'utf8');
@@ -22,6 +22,23 @@ test('[ASVS v5.0.0-13.4.7] 허용 확장자 목록이 정본 §5.18과 같다', 
   const line = md.split(/\r?\n/).find((l) => l.startsWith('- **정적 업로드 허용 확장자**'));
   const canon = [...line.split('.')[0].matchAll(/`([a-z0-9]+)`/g)].map((m) => m[1]);
   assert.deepEqual(ALLOWED_EXTENSIONS, canon);
+});
+
+test('[ASVS v5.0.0-13.4.1] 앱마다 제3자 고지 파일은 .txt여도 올리고, 같은 이름이 아닌 .txt는 계속 뺀다(ADR-0040 결정 7, HOT-390)', () => {
+  const dir = fixture({
+    'index.html': '<p>ok</p>',
+    [NOTICE_FILE]: 'THIRD-PARTY NOTICES',
+    'assets/notes.txt': 'not a notice',
+  });
+  try {
+    const plan = planUpload(dir);
+    assert.deepEqual(plan.upload.map((f) => f.path), [NOTICE_FILE, 'index.html']);
+    assert.deepEqual(plan.excluded.map((f) => f.path), ['assets/notes.txt']);
+    assert.match(plan.excluded[0].reason, /허용 확장자 밖/);
+    assert.deepEqual(plan.errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('[ASVS v5.0.0-13.4.7] [ASVS v5.0.0-13.4.1] 허용 확장자만 올리고 .map·.env·.git·그 밖 확장자는 까닭과 함께 뺀다', () => {

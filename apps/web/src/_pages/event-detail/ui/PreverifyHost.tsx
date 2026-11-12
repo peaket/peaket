@@ -9,6 +9,7 @@ import { createPreverifyFlow, type FlowState } from '@/features/preverify/flow';
 import { queueRoomHref } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 import { deviceId } from '@/shared/lib/device-id';
+import { entryHref } from '@/shared/lib/in-app-browser';
 import { preverifyStorage, type PreverifyActions, type PreverifyView } from './Preverify';
 
 async function loadQueueApi() {
@@ -56,6 +57,12 @@ export default function PreverifyHost({
   const silentSlot = useRef(slotWaiter());
   const flowRef = useRef<ReturnType<typeof createPreverifyFlow> | null>(null);
   const [left, setLeft] = useState(0);
+  // 인앱 브라우저면 사람 확인을 마친 뒤에도 SCR-058을 먼저 거친다(클라이언트가 붙은 뒤에만 읽는다).
+  // 흐름을 다시 만들지 않도록 state 대신 ref에 둔다(사람 확인 도중 흐름이 초기화되지 않는다).
+  const uaRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    uaRef.current = navigator.userAgent;
+  }, []);
 
   useEffect(() => {
     const flow = createPreverifyFlow({
@@ -93,7 +100,7 @@ export default function PreverifyHost({
       },
       navigate: (u) => location.assign(u),
       refreshPersonal: () => void refreshFanSession(),
-      queueHref: queueRoomHref(eventId),
+      queueHref: entryHref(queueRoomHref(eventId), uaRef.current),
       loginHref,
       onChange: (s) => {
         setView(s);

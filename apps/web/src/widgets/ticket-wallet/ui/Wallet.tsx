@@ -12,6 +12,7 @@ import { QrPattern, RotatingQR } from '@peaket/ds/RotatingQR';
 import { Stepper } from '@peaket/ds/Stepper';
 import { ProductionPoster } from '@/entities/production';
 import { cx } from '@/shared/lib/cx';
+import { InAppBrowserNotice } from '@/shared/ui/InAppBrowserNotice';
 import { PAST, T1, T2, T3, WALLET, walletView, type WalletState, type WalletView } from '../model/wallet';
 import { BoothReissue, CopyNoButton, GoButton, ReturnToPayerButton, ToastButton } from './WalletClient';
 
@@ -396,6 +397,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
                     </DetailLink>
                   </>
                 ) : null}
+                <InAppBrowserNotice next={`/my/tickets/${T1.id}`} />
                 {v.keyBtn ? (
                   <>
                     <p className="t-sm muted">등록한 휴대폰에서만 입장 QR이 만들어집니다. 공연장에 가져갈 휴대폰에서 등록하세요.</p>
@@ -417,6 +419,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
               </span>
               <h4 className="t-lg">입장 QR은 휴대폰에서 등록하세요</h4>
               {v.keyRevoked ? <p className="t-sm">계정을 합치거나 티켓을 다시 받아 전에 등록한 입장 키가 폐기되었습니다. 다시 등록해 주세요</p> : null}
+              <InAppBrowserNotice next={`/my/tickets/${T1.id}`} />
               <p className="t-sm">
                 입장할 때 쓸 휴대폰을 등록해야 QR이 나옵니다. 공연장에 가져갈 휴대폰에서 피켓에 로그인하고 마이 티켓을 연 뒤 &apos;이 휴대폰을 입장용으로
                 등록&apos;을 누르세요.
