@@ -1,12 +1,13 @@
 // FE-T31 재배치·확대·글자 간격 시험 설정(docs/frontend.md §5.11·§5.17, BUILD_ORDER BAT-170).
 // 운영 빌드(seed-css/apps.mjs의 prod)를 띄우고 소비자 웹·파트너·관제의 대표 흐름을 ko·en, 320·640 폭에서 돈다.
 // 브라우저 확인은 웨이브 끝 heavy gate에서 한다(갈래 1이 kind/Docker를 쓰는 동안은 돌리지 않는다).
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
 import { firefoxUse } from './lib/firefox.mjs';
 import { APPS, EXTERNAL_SERVERS, mockApiServer, portOf, readyPath, serverCommand } from './seed-css/apps.mjs';
 
-/** 빌드와 시작이 같은 서버 액션 키를 써야 한다(운영은 Secrets Manager, 여기서는 고정 시험 값) */
-const SERVER_ACTIONS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+/** 빌드와 시작이 같은 서버 액션 키를 써야 한다(운영은 Secrets Manager). 값이 없으면 매 실행 새로 만든다 */
+const SERVER_ACTIONS_KEY = process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY || randomBytes(32).toString('base64');
 
 const SERVERS = ['web', 'partner', 'console'].map((name) => {
   const app = APPS.find((a) => a.name === name);

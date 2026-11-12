@@ -156,10 +156,10 @@ test.describe('FE-T30 style 속성과 nonce 없는 요소(ADR-0111)', () => {
 test.describe('SRI PoC: 캐시 화면(A)의 인라인 스크립트', () => {
   test('SRI PoC 외부 스크립트에는 integrity가 붙고, 인라인 스크립트는 남는다(해시 방식이 덮지 못한다)', async ({ request, browserName }) => {
     test.skip(browserName !== 'chromium', 'HTML 검사는 엔진과 상관없다');
-    const html = await (await request.get(`${WEB_BASE}/system-notice`)).text();
+    const html = await (await request.get(`${WEB_BASE}/help`)).text();
     const external = [...html.matchAll(/<script\b([^>]*\ssrc=[^>]*)>/g)].map((m) => m[1]);
     const withIntegrity = external.filter((a) => /integrity="sha256-/.test(a));
-    console.log(`SRI PoC /system-notice: 외부 스크립트 ${external.length}개 중 integrity ${withIntegrity.length}개, 인라인 ${inlineScripts(html).length}개`);
+    console.log(`SRI PoC /help: 외부 스크립트 ${external.length}개 중 integrity ${withIntegrity.length}개, 인라인 ${inlineScripts(html).length}개`);
     expect(withIntegrity.length).toBeGreaterThan(0);
     expect(inlineScripts(html).length).toBeGreaterThan(0);
   });
@@ -168,7 +168,7 @@ test.describe('SRI PoC: 캐시 화면(A)의 인라인 스크립트', () => {
     // Playwright WebKit의 응답 가로채기(route.fulfill)는 바이트로 넘겨도 한글 본문의 글자를 바꿔(스크립트 2262→2288자) 해시 비교에 쓸 수 없다.
     // WebKit에서 실제 응답의 해시가 맞는지는 아래 '캐시 화면(A) 응답 때 해시' 시험이 가로채지 않고 본다
     test.skip(browserName === 'webkit', 'Playwright WebKit 응답 가로채기가 본문 글자를 바꾼다(2026-11-04 확인)');
-    const path = '/system-notice';
+    const path = '/help';
     await page.route(`${WEB_BASE}${path}`, async (route) => {
       const res = await route.fetch();
       const body = await res.text();
@@ -184,7 +184,7 @@ test.describe('SRI PoC: 캐시 화면(A)의 인라인 스크립트', () => {
 });
 
 test.describe('캐시 화면(A) 응답 때 해시(ADR-0193)', () => {
-  const CACHED_PAGES = ['/', `/events/${DETAIL_EVENT}`, '/search', '/system-notice', '/my/tickets', '/policy/terms'];
+  const CACHED_PAGES = ['/', `/events/${DETAIL_EVENT}`, '/search', '/help', '/my/tickets', '/policy/terms'];
   for (const path of CACHED_PAGES) {
     test(`[ASVS v5.0.0-3.4.3] ${path}: 앞 서버가 HTML의 인라인 스크립트 해시로 막는 CSP를 달고, 세 엔진에서 위반 0`, async ({ page, request, browserName }) => {
       if (browserName === 'chromium') {
@@ -294,7 +294,7 @@ test.describe('공연 상세의 404·410 상태 코드(ADR-0201, HOT-311)', () =
 });
 
 test.describe('SRI 값과 소스 맵 링크(HOT-291 숨김 소스 맵)', () => {
-  for (const path of ['/', '/my/settings', '/system-notice']) {
+  for (const path of ['/', '/my/settings', '/help']) {
     test(`[ASVS v5.0.0-13.4.7] ${path}: 모든 integrity가 내려받은 파일의 SHA-256과 같고, 받은 JS에 소스 맵 링크가 없다`, async ({ request, browserName }) => {
       test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
       const html = await (await request.get(`${WEB_BASE}${path}`)).text();

@@ -30,6 +30,20 @@ test('[ASVS v5.0.0-13.4.1] standalone 폴더에 .next/static과 public을 복사
   }
 });
 
+test('distDir가 .next-poc이면 standalone 안의 .next-poc/static으로 복사한다(빌드 이름을 따른다)', () => {
+  const appDir = mkdtempSync(join(tmpdir(), 'peaket-standalone-'));
+  try {
+    mkdirSync(join(appDir, '.next-poc', 'static', 'chunks'), { recursive: true });
+    mkdirSync(join(appDir, '.next-poc', 'standalone', 'apps', 'web'), { recursive: true });
+    writeFileSync(join(appDir, '.next-poc', 'static', 'chunks', 'poc.css'), 'a{}');
+    writeFileSync(join(appDir, '.next-poc', 'standalone', 'apps', 'web', 'server.js'), '// server');
+    assert.equal(prepareStandalone(appDir, '.next-poc'), true);
+    assert.equal(readFileSync(join(appDir, '.next-poc', 'standalone', 'apps', 'web', '.next-poc', 'static', 'chunks', 'poc.css'), 'utf8'), 'a{}');
+  } finally {
+    rmSync(appDir, { recursive: true, force: true });
+  }
+});
+
 test('standalone server.js가 없으면 false이고 아무것도 만들지 않는다(개발 next start 길)', () => {
   const appDir = mkdtempSync(join(tmpdir(), 'peaket-standalone-'));
   try {
