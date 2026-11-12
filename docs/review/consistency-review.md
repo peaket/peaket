@@ -603,6 +603,7 @@
 | R-491 | 리뷰에서 명단 키가 폼에 반영되지 않고, 오류 낭독 역할·템플릿 목록 역할·템플릿 자료 정본 설명이 맞지 않았다 | apps/partner/src/_pages/sale-policy/ui/LiveSalePolicy.tsx, apps/partner/src/_pages/seatmap-editor/ui/live/TemplatePicker.tsx, docs/data.md, services/core-svc/src/modules/catalog/adapters/db/schema.ts | 명단 키 반영·오류 role·group 역할·정적 JSON 정본 설명을 고쳤다 | 완료 |
 | R-492 | SCR-024 라이브 모드가 parseSalePolicy에 규칙 배열이 아니라 { rules }를 넘겨 폼 적용·시뮬레이션이 늘 실패했다 | apps/partner/src/_pages/sale-policy/ui/LiveSalePolicy.tsx, apps/partner/src/_pages/sale-policy/model/form.test.mjs | 규칙 배열을 그대로 넘기고 폼 규칙이 parseSalePolicy를 지나는 시험을 더했다 | 완료 |
 | R-493 | 웨이브 게이트·브라우저 확인 기록이 없고 `seatmap-replace-required` 코드 제목이 계약 목록과 달랐다 | docs/review/browser-check/HOT-230.md, docs/review/browser-check/HOT-251.md, docs/review/measurements/BAT-151-158-wave.md, docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/lanes/lane2.md, services/core-svc/src/modules/catalog/application/problems.ts, docs/review/consistency-review.md, docs/00-summary.md | 확인 기록·웨이브 보고서를 더하고 오류 제목을 계약에 맞추며 records·장부를 맞췄다 | 완료 |
+| R-494 | `docs/data.md`의 Mermaid ER 그림에 `//` 주석을 넣어 CI docs-check가 실패했다 | docs/data.md | `//`를 Mermaid 주석 `%%`로 바꿨다 | 적용 |
 
 ## 4. 숫자 일치표
 

@@ -583,7 +583,7 @@ erDiagram
         int published_version "행 판의 팬 좌석맵 파일을 공개 위치에 게시했으면 그 판(= layout_version), 아니면 NULL. 판매 승인(LCH-080)·회차 더하기가 게시 여부를 다시 계산하지 않고 읽는다(ADR-0260 결정 6, 추천 적용 2026-11-10 리뷰)"
         jsonb pending_layout "승인 이력이 있는 공연의 재승인 대기 배치 문서(SeatMapLayout과 가격 등급, 판, 준비 위치에 팬 파일을 썼는지 staged). 판매 승인(LCH-080)이 행으로 옮기고 준비 위치 파일을 공개 위치로 옮긴 뒤 비운다(ADR-0260 결정 6·9, 추천 적용 2026-11-10 리뷰). 오픈 뒤 잠금은 칸 없이 계산한다(승인 이력 + 이 배치본을 쓰는 취소되지 않은 회차의 open_at ≤ 지금, 결정 7)"
         bool published "TEMPLATE만. 파트너 템플릿 목록에 보이는지"
-        // TEMPLATE의 코드·이름·계열·변형·기본 좌석 수·개략도 주소·판은 DB 칸이 아니라 배포 때 넣는 정적 JSON(services/core-svc/seed/seatmap-templates/*.json)이 정본이다. DB venue·section 행은 templateOk·templateDraft가 읽는 사본이다(ADR-0264 결정 43).
+        %% TEMPLATE의 코드·이름·계열·변형·기본 좌석 수·개략도 주소·판은 DB 칸이 아니라 배포 때 넣는 정적 JSON(services/core-svc/seed/seatmap-templates/*.json)이 정본이다. DB venue·section 행은 templateOk·templateDraft가 읽는 사본이다(ADR-0264 결정 43).
     }
     section {
         uuid venue_id PK "배치본(또는 TEMPLATE) 행"
