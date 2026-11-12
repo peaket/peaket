@@ -110,7 +110,7 @@ export function TemplatePicker({ productionId, onClose, onCreated }: { productio
             지금 쓸 수 있는 템플릿이 없습니다
           </p>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2" role="list" aria-label="좌석맵 템플릿">
+          <div className="grid gap-3 md:grid-cols-2" role="group" aria-label="좌석맵 템플릿">
             {items.map((s) => (
               <button key={s.templateId} className="card pad col" type="button" style={{ gap: 6, textAlign: 'left' }} aria-pressed={detail?.templateId === s.templateId} onClick={() => void pick(s)}>
                 <img src={new URL(s.schematicUrl).pathname} alt={`${s.name} 개략도`} style={{ width: '100%', height: 110, objectFit: 'contain', background: '#f7f9fc', borderRadius: 6 }} />

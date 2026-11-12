@@ -582,13 +582,8 @@ erDiagram
         int version_seq "마지막으로 잡은 판 번호. 저장마다 1 올려 잡고 다시 쓰지 않는다(실패하거나 진 저장의 번호는 빈 번호로 남는다, ADR-0260 결정 5)"
         int published_version "행 판의 팬 좌석맵 파일을 공개 위치에 게시했으면 그 판(= layout_version), 아니면 NULL. 판매 승인(LCH-080)·회차 더하기가 게시 여부를 다시 계산하지 않고 읽는다(ADR-0260 결정 6, 추천 적용 2026-11-10 리뷰)"
         jsonb pending_layout "승인 이력이 있는 공연의 재승인 대기 배치 문서(SeatMapLayout과 가격 등급, 판, 준비 위치에 팬 파일을 썼는지 staged). 판매 승인(LCH-080)이 행으로 옮기고 준비 위치 파일을 공개 위치로 옮긴 뒤 비운다(ADR-0260 결정 6·9, 추천 적용 2026-11-10 리뷰). 오픈 뒤 잠금은 칸 없이 계산한다(승인 이력 + 이 배치본을 쓰는 취소되지 않은 회차의 open_at ≤ 지금, 결정 7)"
-        text template_code "TEMPLATE만. ARENA-END|ARENA-THRUST|ARENA-CENTER|DOME|STADIUM|THEATER-L|THEATER-M|THEATER-S|HALL|FLAT(좌석맵 템플릿 10종, ADR-0066). TEMPLATE의 name은 템플릿 이름이고 특정 공연장 이름을 쓰지 않는다"
-        text template_family "TEMPLATE만. ARENA|DOME|STADIUM|THEATER|HALL|FLAT"
-        jsonb variants "TEMPLATE만. 고를 수 있는 것(돌출 길이, 그라운드 구역 수, 오케스트라 피트 있음·없음, 합창석 판매 여부, 블록 수)의 키·값 범위·기본값"
-        int default_capacity "TEMPLATE만. 기본 좌석 수 [가정]. 파트너가 목표 좌석 수로 바꾼다"
-        int template_version "TEMPLATE만. 템플릿 판. 배포 때 올리고 이미 복제한 배치본은 바뀌지 않는다"
         bool published "TEMPLATE만. 파트너 템플릿 목록에 보이는지"
-        text schematic_key "TEMPLATE만. 개략도(SVG) 파일 키. 템플릿과 함께 배포 때 넣는다"
+        // TEMPLATE의 코드·이름·계열·변형·기본 좌석 수·개략도 주소·판은 DB 칸이 아니라 배포 때 넣는 정적 JSON(services/core-svc/seed/seatmap-templates/*.json)이 정본이다. DB venue·section 행은 templateOk·templateDraft가 읽는 사본이다(ADR-0264 결정 43).
     }
     section {
         uuid venue_id PK "배치본(또는 TEMPLATE) 행"

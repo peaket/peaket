@@ -144,7 +144,9 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
     try {
       const key = listKey || `list-${Date.now()}`;
       const r = await uploadEligibility(productionId, key, name || key, file);
-      setMessage(`반영 ${r.applied}명 · 형식 오류 ${r.invalidLineCount}줄 · 없는 코드 ${r.unknownLineCount}줄`);
+      setListKey(r.listKey);
+      setSimList(r.listKey);
+      setMessage(`반영 ${r.applied}명 · 형식 오류 ${r.invalidLineCount}줄 · 없는 코드 ${r.unknownLineCount}줄 · 명단 키 ${r.listKey}`);
       setLists(await listEligibility(productionId));
     } catch (e) {
       const err = e as { status?: number };
@@ -267,7 +269,7 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
             <button className="btn btn-text btn-sm" type="button" onClick={() => setJsonOpen((v) => !v)}>JSON 보기</button>
           </div>
           {jsonOpen ? <pre className="code" tabIndex={0} aria-label="판매 정책 JSON, 읽기 전용" style={{ whiteSpace: 'pre', overflowX: 'auto', padding: 12, margin: 0 }}>{json}</pre> : null}
-          {message ? <p className={message.startsWith('저장') || message.startsWith('반영') ? 't-sm' : 'error-msg'} role="status">{message}</p> : null}
+          {message ? <p className={message.startsWith('저장') || message.startsWith('반영') ? 't-sm' : 'error-msg'} role={message.startsWith('저장') || message.startsWith('반영') ? 'status' : 'alert'}>{message}</p> : null}
           {pending ? <p className="t-sm muted">승인된 공연이라 이 규칙은 재승인 대기 판에 저장됩니다.</p> : null}
         </section>
 

@@ -130,7 +130,8 @@ export const searchAlias = pgTable(
 
 /**
  * 공연장 틀(TEMPLATE)과 틀을 복제한 공연용 배치본(LAYOUT, docs/data.md venue, ADR-0063·ADR-0260 결정 2). 이 단계는 배치본 저장에 쓰는 칸과
- * 틀의 공개 표시(published)만 둔다. 템플릿 자료 칸(template_code·template_family·variants·default_capacity·template_version·schematic_key)은 HOT-230이 더한다.
+ * 틀의 공개 표시(published)만 둔다. 템플릿 코드·이름·계열·변형·기본 좌석 수·개략도·판은 DB 칸이 아니라 정적 JSON(seed/seatmap-templates)이 정본이고,
+ * DB venue·section 행은 templateOk·templateDraft가 읽는 사본이다(ADR-0264 결정 43).
  * 배치본 ID는 공연 ID에서 정해진 값(domain/seatmap-layout.ts layoutVenueId)이라, 첫 저장이 판을 잡은 뒤 실패해도 다음 저장이 같은 행의 판 차례를 잇는다
  */
 export const venue = pgTable(
