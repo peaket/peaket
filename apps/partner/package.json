@@ -20,6 +20,7 @@
     "@peaket/api-client": "workspace:*",
     "@peaket/ds": "workspace:*",
     "@peaket/seatmap": "workspace:*",
+    "@peaket/validation": "workspace:*",
     "konva": "10.9.1",
     "lexical": "0.53.0",
     "next": "^16.4.3",

@@ -18,7 +18,7 @@ export interface SendLike {
 
 export interface ApiDeps {
   client: SendLike;
-  ops: { getPartnerProductionSeatmap: unknown; putPartnerProductionSeatmap: unknown; createPartnerProductionSeatmapImport: unknown };
+  ops: { getPartnerProductionSeatmap: unknown; putPartnerProductionSeatmap: unknown; createPartnerProductionSeatmapImport: unknown; createPartnerProductionSeatmap: unknown; getPartnerSeatmapTemplates: unknown; getPartnerSeatmapTemplate: unknown };
   parseRetryAfter?: (h: string | null, nowMs: number, date?: string | null) => number | undefined;
 }
 
@@ -53,6 +53,27 @@ export async function loadSeatmap(productionId: string, signal?: AbortSignal, d?
     if ((e as { status?: unknown })?.status === 404) return { kind: 'none' };
     throw e;
   }
+}
+
+/** 템플릿 목록(공개된 10종) */
+export async function listSeatmapTemplates(d?: ApiDeps): Promise<unknown> {
+  const { client, ops } = d ?? (await liveDeps());
+  const r = await client.send<unknown>(ops.getPartnerSeatmapTemplates, {});
+  return r.data;
+}
+
+/** 템플릿 하나(도형·구역별 fillRule·등급 기본값) */
+export async function getSeatmapTemplate(templateId: string, d?: ApiDeps): Promise<unknown> {
+  const { client, ops } = d ?? (await liveDeps());
+  const r = await client.send<unknown>(ops.getPartnerSeatmapTemplate, { params: { templateId } });
+  return r.data;
+}
+
+/** 템플릿에서 만들기. 409 replace-required면 화면이 지우고 다시 만들지 묻는다 */
+export async function createSeatmapFromTemplate(productionId: string, body: { templateId: string; targetCapacity: number; variant?: Record<string, unknown>; replace?: boolean }, d?: ApiDeps): Promise<{ layout: unknown; etag: string | null }> {
+  const { client, ops } = d ?? (await liveDeps());
+  const r = await client.send<unknown>(ops.createPartnerProductionSeatmap, { params: { productionId }, body });
+  return { layout: r.data, etag: r.headers.get('etag') };
 }
 
 export class BodyTooLarge extends Error {

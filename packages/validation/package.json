@@ -11,6 +11,11 @@
       "types": "./src/sale-policy/index.ts",
       "development": "./src/sale-policy/index.ts",
       "default": "./dist/sale-policy/index.js"
+    },
+    "./seatmap-checks": {
+      "types": "./src/seatmap-checks/index.ts",
+      "development": "./src/seatmap-checks/index.ts",
+      "default": "./dist/seatmap-checks/index.js"
     }
   },
   "scripts": {

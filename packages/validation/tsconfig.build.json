@@ -11,5 +11,5 @@
     "outDir": "dist",
     "declaration": false
   },
-  "include": ["src/sale-policy", "src/safe-json.ts"]
+  "include": ["src/sale-policy", "src/seatmap-checks", "src/safe-json.ts"]
 }

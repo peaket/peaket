@@ -15,6 +15,7 @@ export { LocalFolderImageStore, MemoryImageObjectStore } from './adapters/image-
 export { LocalFolderPublicFileStore, MemoryPublicFileStore } from './adapters/public-file-store.js';
 export type { PublicFileStore, PublishLimits } from './domain/seatmap-ports.js';
 export { MemoryCdnInvalidation } from './adapters/cdn-invalidation.js';
+export { StaticTemplateCatalog } from './adapters/static-template-catalog.js';
 export { cardSaleStatus, isPublic, opensAsScheduled, representativeEvent, sameVenue } from './domain/production.js';
 export type { CardSaleStatus, CatalogEvent, EventSaleState, Production, SaleReview } from './domain/production.js';
 export { assertDatabaseRole } from './adapters/db/database-role.js';

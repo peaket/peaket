@@ -318,6 +318,9 @@ importers:
       '@peaket/seatmap':
         specifier: workspace:*
         version: link:../../packages/seatmap
+      '@peaket/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       konva:
         specifier: 10.9.1
         version: 10.9.1

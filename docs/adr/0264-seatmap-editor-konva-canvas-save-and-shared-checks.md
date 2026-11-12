@@ -79,6 +79,12 @@
 41. **가져오기 왕복**: seatmap-worker의 JSON 읽개는 도형의 `arc`를 결과에 넘긴다(다시 가져와도 손잡이 값이 남는다, 결정 10·12). CSV 읽개는 내보내기가 붙인 수식 방지 작은따옴표 하나를 벗긴다(작은따옴표 다음 글자가 `=`·`+`·`-`·`@`·탭·CR일 때만). 그래서 등급 `+R`은 CSV로 내보냈다 가져와도 `+R`이다.
 42. **팬 좌석맵 패키지 하위 경로**: 에디터는 `@peaket/seatmap`의 뿌리 대신 하위 경로(`./grid`·`./engine`)로 가져온다. 뿌리는 Zod를 쓰는 Worker 메시지 정의를 함께 실어, 강제 CSP에서 Zod 4의 평가 가능 시험이 `script-src eval` 위반 보고를 남겼다.
 
+### BAT-151 구현 중 더한 결정(추천 적용, 2026-11-12, 웨이브)
+
+43. **템플릿은 정적 JSON이 정본**: `services/core-svc/seed/seatmap-templates/*.json` 10종이 목록·하나·만들기의 정본이고, DB의 TEMPLATE 행은 `templateOk`·`templateDraft`가 읽는 사본이다(배포 때 `seed:seatmap-templates`로 덮는다). `templateId`는 파일에 고정한 UUID이고, 개략도는 `apps/partner/public/seatmap-templates/*.svg` 정적 파일로 `<img>`에만 쓴다. 목록·하나는 `GET /v1/partner/seatmap-templates`·`/{templateId}`, 만들기는 `POST /v1/partner/productions/{productionId}/seatmap`이다.
+44. **목표 좌석 수 배분**: 만들기의 `targetCapacity`는 구역의 `defaultCapacity` 비율로 나누고 내림 뒤 나머지는 소수부가 큰 구역부터 1석씩 준다(같으면 기본 좌석 수가 큰 구역). 구역마다 최소 1석이라 목표가 구역 수보다 작으면 422 `TARGET_TOO_SMALL`이다. 변형은 템플릿 `variants`의 키·형·범위만 받고 아니면 422다. 만들기는 저장과 같은 공연 행 잠금·판 예약·잠금·권한 검사를 쓰고, 이미 좌석이 있으면 `replace: true` 없이는 409 `seatmap-replace-required`(`existingSeatCount`)다.
+45. **경고를 화면에도 같은 검사기로**: 에디터 요약 줄은 `@peaket/validation/seatmap-checks`를 직접 불러 `확인 필요 n`·`위치 확인 n석`을 보이고, 저장·가져오기 응답의 `warnings`와 같은 코드·좌석을 쓴다. 경고는 저장을 막지 않는다. 화면의 좌석 테두리 강조는 다음 성능 측정(FE-T33)에서 Worker `check`로 옮긴다.
+
 ### HOT-230 몫
 
 15. **경고 검사기 하나**: 휠체어석 W1~W3·좌석 겹침·도형 밖 좌석 검사는 `@peaket/validation`의 하위 경로 `./seatmap-checks`(순수 함수, 서비스는 빌드한 `dist`)에 두고 에디터 Worker, core-svc 가져오기 다시 보기, 저장이 같은 함수를 부른다(판매 정책 평가기와 같은 꼴, ADR-0261 결정 11).

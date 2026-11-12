@@ -6,6 +6,7 @@
 // 행 또는 대기 판 쓰기, 첫 배치본이면 회차 잇기, 커밋 바로 앞에 잠금 다시 보기) → 커밋 뒤 앞 판 파일 지우기(승인된 판은 남긴다, 실패는 기록만).
 // ②가 거절하거나 커밋 전에 실패하면 V 파일을 지운다. 커밋 결과를 모르면 지우지 않고 기록한다. V는 다시 쓰지 않는다(버린 번호). 파일은 트랜잭션을 연 채 쓰지 않는다.
 // 기록에는 판·좌석·구역 수·결과 코드·게시 여부·회차 수만 싣고 구역 이름 같은 파트너 글자는 넣지 않는다(결정 13).
+import { checkSeatmap } from '@peaket/validation/seatmap-checks';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, deadlineExceeded, PLATFORM_LOGGER, type PlatformLogger, requestContext, uuidv7 } from '@peaket/platform';
 import { countRaw, recheckLayout, type SeatmapIssue } from '../domain/seatmap-import.js';
@@ -229,7 +230,7 @@ export class SeatmapLayouts {
     }
     const seats = doc.sections.reduce((n, s) => n + s.seats.length, 0);
     this.#info({ event: 'seatmap_saved', ...at, version, seats, sections: doc.sections.length, published: bytes !== undefined, where, rounds: second.rounds.length }, '좌석맵을 저장했다');
-    return layoutView(doc, version, { fanFilePublished: bytes !== undefined, geometryLocked: second.locked });
+    return layoutView(doc, version, { fanFilePublished: bytes !== undefined, geometryLocked: second.locked, warnings: checkSeatmap(doc) });
   }
 
   /** 판매 중지·승인 이력의 관리자 판정(트랜잭션 ①·② 모두, 결정 5). logged면 실패한 인가 시도를 다시 남기지 않는다 */

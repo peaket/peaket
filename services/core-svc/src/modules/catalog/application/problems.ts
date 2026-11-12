@@ -37,6 +37,8 @@ export const seatmapWorkerUnavailable = () => new ProblemError({ type: 'seatmap-
 export const seatmapInvalid = (errors: { line: number; field: string; code: string }[]) =>
   new ProblemError({ type: 'seatmap-invalid', status: 422, title: '좌석맵에 고칠 곳이 있습니다', extensions: { result: { ok: false, errors, warnings: [] } } });
 export const seatmapGeometryLocked = () => new ProblemError({ type: 'seatmap-geometry-locked', status: 409, title: '판매가 시작되어 좌석 배치는 바꿀 수 없습니다' });
+export const seatmapReplaceRequired = (existingSeatCount: number) =>
+  new ProblemError({ type: 'seatmap-replace-required', status: 409, title: '이미 좌석이 있는 배치본입니다. 지우고 다시 만들지 확인해 주세요', extensions: { existingSeatCount } });
 export const saleSettingLocked = () => new ProblemError({ type: 'sale-setting-locked', status: 409, title: '지금은 바꿀 수 없는 항목입니다' });
 export const seatmapPublishUnavailable = (retryAfterSeconds: number) => new ProblemError({ type: 'seatmap-publish-unavailable', status: 503, title: '좌석맵 파일을 잠시 게시할 수 없습니다', retryAfterSeconds });
 

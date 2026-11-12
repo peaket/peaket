@@ -1,0 +1,273 @@
+{
+  "templateId": "a0000000-0000-4000-8000-0000000000a3",
+  "code": "ARENA-THRUST",
+  "name": "실내 아레나 · 돌출 스테이지",
+  "family": "ARENA",
+  "defaultCapacity": 14000,
+  "levelCount": 2,
+  "summary": "2층 · 5구역 · 약 14,000석",
+  "variants": [
+    {
+      "key": "thrustCm",
+      "label": "돌출 길이(cm)",
+      "kind": "NUMBER",
+      "min": 600,
+      "max": 1800,
+      "defaultValue": 1200
+    }
+  ],
+  "schematicUrl": "https://partner.peaket.example/seatmap-templates/arena-thrust.svg",
+  "version": 1,
+  "canvas": {
+    "width": 8000,
+    "height": 6000
+  },
+  "stage": [
+    {
+      "kind": "RECT",
+      "name": "무대",
+      "points": [
+        [
+          3000,
+          200
+        ],
+        [
+          5000,
+          200
+        ],
+        [
+          5000,
+          800
+        ],
+        [
+          3000,
+          800
+        ]
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "sectionId": "s1",
+      "name": "A구역",
+      "level": "1",
+      "tierId": "R",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            500,
+            1200
+          ],
+          [
+            2700,
+            1200
+          ],
+          [
+            2700,
+            3100
+          ],
+          [
+            500,
+            3100
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 37,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 2800
+    },
+    {
+      "sectionId": "s2",
+      "name": "B구역",
+      "level": "1",
+      "tierId": "S",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            2900,
+            1200
+          ],
+          [
+            5100,
+            1200
+          ],
+          [
+            5100,
+            3100
+          ],
+          [
+            2900,
+            3100
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 37,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 2800
+    },
+    {
+      "sectionId": "s3",
+      "name": "C구역",
+      "level": "1",
+      "tierId": "A",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            5300,
+            1200
+          ],
+          [
+            7500,
+            1200
+          ],
+          [
+            7500,
+            3100
+          ],
+          [
+            5300,
+            3100
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 37,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 2800
+    },
+    {
+      "sectionId": "s4",
+      "name": "D구역",
+      "level": "2",
+      "tierId": "R",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            500,
+            3300
+          ],
+          [
+            2700,
+            3300
+          ],
+          [
+            2700,
+            5200
+          ],
+          [
+            500,
+            5200
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 37,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 2800
+    },
+    {
+      "sectionId": "s5",
+      "name": "E구역",
+      "level": "2",
+      "tierId": "S",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            2900,
+            3300
+          ],
+          [
+            5100,
+            3300
+          ],
+          [
+            5100,
+            5200
+          ],
+          [
+            2900,
+            5200
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 37,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 2800
+    }
+  ],
+  "priceTiers": [
+    {
+      "tierId": "R",
+      "name": "R석",
+      "price": 150000
+    },
+    {
+      "tierId": "S",
+      "name": "S석",
+      "price": 100000
+    },
+    {
+      "tierId": "A",
+      "name": "A석",
+      "price": 70000
+    }
+  ]
+}

@@ -24,6 +24,8 @@ import { AppModule } from '../src/app.module.js';
 import { event, place, production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
 import { GrpcSeatmapParser, LocalFolderPublicFileStore } from '../src/modules/catalog/index.js';
 import { FakeIdentity, testMedia } from '../test/support.js';
+import { StaticTemplateCatalog } from '../src/modules/catalog/index.js';
+import { seedSeatmapTemplates } from '../src/seed/seatmap-templates.js';
 import { gatewayHandler } from './local-gateway.js';
 import { SERVICE_DIR, startWorker } from './media-support.js';
 import { startPostgres } from './postgres.js';
@@ -69,6 +71,8 @@ describe.runIf(process.env.PEAKET_LOCAL_STACK === '1')('로컬 파트너 스택'
       await migrateCore(pg.url);
       admin = createDatabase({ url: pg.url, applicationName: 'local-stack', max: 4 });
       await ensureOutboxPartitions(admin, systemClock);
+      const templates = StaticTemplateCatalog.load(join(SERVICE_DIR, 'seed', 'seatmap-templates'));
+      await seedSeatmapTemplates(admin, templates);
       appDb = await loginFor(admin, pg, 'core_app_login', 'core_app', 4);
       partnerDb = await loginFor(admin, pg, 'core_partner_login', 'core_partner', 6);
       worker = await startWorker();
@@ -78,7 +82,7 @@ describe.runIf(process.env.PEAKET_LOCAL_STACK === '1')('로컬 파트너 스택'
       const identity = new FakeIdentity();
       svc = await createService({
         name: 'core-svc',
-        module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(files) }) }),
+        module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(files), templates }) }),
         env: { PEAKET_ENV: 'local', PEAKET_LOG_LEVEL: 'info' },
         clock: systemClock,
         adminAuthz: identity,

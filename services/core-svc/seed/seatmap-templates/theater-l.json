@@ -1,0 +1,230 @@
+{
+  "templateId": "a0000000-0000-4000-8000-0000000000a8",
+  "code": "THEATER-L",
+  "name": "대극장 · 프로시니엄",
+  "family": "THEATER",
+  "defaultCapacity": 1800,
+  "levelCount": 2,
+  "summary": "2층 · 4구역 · 약 1,800석",
+  "variants": [
+    {
+      "key": "orchestraPit",
+      "label": "오케스트라 피트",
+      "kind": "BOOLEAN",
+      "defaultValue": true
+    }
+  ],
+  "schematicUrl": "https://partner.peaket.example/seatmap-templates/theater-l.svg",
+  "version": 1,
+  "canvas": {
+    "width": 8000,
+    "height": 6000
+  },
+  "stage": [
+    {
+      "kind": "RECT",
+      "name": "무대",
+      "points": [
+        [
+          3000,
+          200
+        ],
+        [
+          5000,
+          200
+        ],
+        [
+          5000,
+          800
+        ],
+        [
+          3000,
+          800
+        ]
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "sectionId": "s1",
+      "name": "A구역",
+      "level": "1",
+      "tierId": "R",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            500,
+            1200
+          ],
+          [
+            3900,
+            1200
+          ],
+          [
+            3900,
+            3100
+          ],
+          [
+            500,
+            3100
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 57,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 450
+    },
+    {
+      "sectionId": "s2",
+      "name": "B구역",
+      "level": "1",
+      "tierId": "S",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            4100,
+            1200
+          ],
+          [
+            7500,
+            1200
+          ],
+          [
+            7500,
+            3100
+          ],
+          [
+            4100,
+            3100
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 57,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 450
+    },
+    {
+      "sectionId": "s3",
+      "name": "C구역",
+      "level": "2",
+      "tierId": "A",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            500,
+            3300
+          ],
+          [
+            3900,
+            3300
+          ],
+          [
+            3900,
+            5200
+          ],
+          [
+            500,
+            5200
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 57,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 450
+    },
+    {
+      "sectionId": "s4",
+      "name": "D구역",
+      "level": "2",
+      "tierId": "R",
+      "shape": {
+        "kind": "POLYGON",
+        "points": [
+          [
+            4100,
+            3300
+          ],
+          [
+            7500,
+            3300
+          ],
+          [
+            7500,
+            5200
+          ],
+          [
+            4100,
+            5200
+          ]
+        ]
+      },
+      "fillRule": {
+        "method": "COUNT",
+        "rows": 24,
+        "seatsPerRow": 57,
+        "rowShape": "STRAIGHT",
+        "seatSpacingCm": 50,
+        "rowSpacingCm": 80,
+        "aisles": 1,
+        "aisleWidthCm": 120,
+        "rowLabel": "NUMBER",
+        "firstNumber": 1,
+        "numberFrom": "LEFT"
+      },
+      "defaultCapacity": 450
+    }
+  ],
+  "priceTiers": [
+    {
+      "tierId": "R",
+      "name": "R석",
+      "price": 150000
+    },
+    {
+      "tierId": "S",
+      "name": "S석",
+      "price": 100000
+    },
+    {
+      "tierId": "A",
+      "name": "A석",
+      "price": 70000
+    }
+  ]
+}

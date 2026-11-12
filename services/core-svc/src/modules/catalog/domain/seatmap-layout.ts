@@ -1,6 +1,7 @@
 // 도메인 층: 공연용 배치본 저장의 규칙(docs/features/seat-hold.md §2·§10 '배치본 저장과 팬 좌석맵 파일', ADR-0260 결정 2~7·10, BUILD_ORDER HOT-240).
 // 색인 매기기(구역 차례대로 0부터 빈틈 없이), 등급·가격 등급 검사, 오픈 뒤 잠금 판정과 바뀐 갈래, 팬 좌석맵 파일(SeatMapColumns) 만들기, 라벨 기본값.
 // 순수 함수만 둔다. 계약 스키마 검사(SeatMapLayoutInput Zod)는 받는 층이 먼저 하고, 가져오기와 같은 검사(recheckLayout·countRaw)는 seatmap-import.ts를 쓴다.
+import type { SeatMapWarning } from '@peaket/validation/seatmap-checks';
 import { createHash } from 'node:crypto';
 import { type CheckedLayout, type LayoutShape, SECTION_ID_KEY, SEATMAP_MAX_ISSUES, SEATMAP_TAG_MAX, type SeatmapIssue } from './seatmap-import.js';
 
@@ -371,6 +372,8 @@ export interface SeatMapLayoutView {
   templateVenueId?: string;
   priceTiers: PriceTier[];
   fanFilePublished?: boolean;
+  /** 저장 응답에서만: 업무 경고(W1~W3·겹침·도형 밖, ADR-0264 결정 15) */
+  warnings?: SeatMapWarning[];
   /** 오픈 뒤 도형 잠금(불러오기·저장 응답, geometryLocked 판정 함수, ADR-0264 결정 13) */
   geometryLocked: boolean;
   canvas: { width: number; height: number };
@@ -378,12 +381,13 @@ export interface SeatMapLayoutView {
   sections: (Omit<DocSection, 'seats'> & { seats: DocSeat[] })[];
 }
 
-export function layoutView(doc: LayoutDoc, version: number, extra: { fanFilePublished?: boolean; geometryLocked: boolean }): SeatMapLayoutView {
+export function layoutView(doc: LayoutDoc, version: number, extra: { fanFilePublished?: boolean; geometryLocked: boolean; warnings?: SeatMapWarning[] }): SeatMapLayoutView {
   return {
     layoutVersion: version,
     ...(doc.templateVenueId !== undefined ? { templateVenueId: doc.templateVenueId } : {}),
     priceTiers: doc.priceTiers.map((t) => ({ tierId: t.tierId, name: t.name, price: t.price })),
     ...(extra.fanFilePublished !== undefined ? { fanFilePublished: extra.fanFilePublished } : {}),
+    ...(extra.warnings !== undefined ? { warnings: extra.warnings } : {}),
     geometryLocked: extra.geometryLocked,
     canvas: { width: doc.canvas.width, height: doc.canvas.height },
     stage: doc.stage,

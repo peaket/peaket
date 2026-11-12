@@ -1,8 +1,9 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
+import { fileURLToPath } from 'node:url';
 import { createDatabase, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, SaleEligibilityMetrics, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
+import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -46,6 +47,9 @@ const imageStoreDir = need('PEAKET_IMAGE_STORE_DIR', '개발용 이미지 폴더
 const publicFileDir = need('PEAKET_PUBLIC_FILE_DIR', '개발용 팬 좌석맵 파일 폴더. S3 어댑터는 HOT-200');
 const imageProcessing = new GrpcImageProcessing(imageGrpc, lbProfile);
 const seatmapParser = new GrpcSeatmapParser(seatmapGrpc, lbProfile);
+// 좌석맵 템플릿 10종은 배포 때 넣는 정적 JSON 파일이다(ADR-0066). 폴더가 없거나 파일이 틀리면 시작하지 않는다
+const templateDir = process.env.PEAKET_SEATMAP_TEMPLATE_DIR ?? fileURLToPath(new URL('../seed/seatmap-templates/', import.meta.url));
+const templates = StaticTemplateCatalog.load(templateDir);
 
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
@@ -61,7 +65,7 @@ const service = await createService({
   module: AppModule.register({
     database,
     partnerDatabase,
-    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics },
+    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
   }),
 });
 eligibilityCopy.register(service.metrics.registry);

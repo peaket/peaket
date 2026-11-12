@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { mountSeatmapCanvas, type CanvasHandle } from '@/widgets/seatmap-canvas';
-import { emptyDoc, sectionsInOrder } from '../../model/doc';
+import { docFromLayout, emptyDoc, sectionsInOrder } from '../../model/doc';
 import type { ExportFormat } from '../../model/export';
 import { removeShapeCmd, seatsCmd, type EditorStore } from '../../model/store';
 import { canSave, fieldLabel, TEXT, type SaveAnswer } from '../../model/save-answer';
@@ -15,8 +15,9 @@ import { moveShape, NUDGE_BIG_CM, NUDGE_CM } from '../../model/shapes';
 import { updateSectionCmd, updateStageCmd } from '../../model/store';
 import { sectionOf } from '../../model/types';
 import { canvasHost } from './canvas-host';
-import { deleteSelectedSeats, exportDoc, jobError, loadInto, refine, reload, save } from './controller';
+import { deleteSelectedSeats, exportDoc, jobError, loadInto, refine, reload, save, versionOfEtag } from './controller';
 import { ImportDialog } from './ImportDialog';
+import { TemplatePicker } from './TemplatePicker';
 import { LiveDialog } from './LiveDialog';
 import { PropsArea } from './Panels';
 import { Preview } from './Preview';
@@ -47,6 +48,7 @@ const inField = (t: EventTarget | null) => t instanceof HTMLInputElement || t in
 export default function EditorApp({ productionId }: { productionId: string }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [importOpen, setImportOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const load = useCallback(async () => {
     setPhase({ kind: 'loading' });
     const r = await loadInto(productionId);
@@ -75,10 +77,14 @@ export default function EditorApp({ productionId }: { productionId: string }) {
           <h2 className="t-lg" id="h-start">
             어떻게 시작할까요?
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <button className="card pad col" type="button" style={{ gap: 6, textAlign: 'left' }} onClick={() => { st.getState().reset(emptyDoc(), 0, st.getState().locked); setPhase({ kind: 'edit', store: st }); }}>
               <span className="t-md fw-b">빈 캔버스에서 그리기</span>
               <span className="t-sm muted">무대와 구역을 처음부터 그립니다</span>
+            </button>
+            <button className="card pad col" type="button" style={{ gap: 6, textAlign: 'left' }} onClick={() => setTemplateOpen(true)}>
+              <span className="t-md fw-b">템플릿으로 시작</span>
+              <span className="t-sm muted">공연장 모양 10종에서 구역과 채우기 규칙을 가져옵니다</span>
             </button>
             <button className="card pad col" type="button" style={{ gap: 6, textAlign: 'left' }} onClick={() => setImportOpen(true)}>
               <span className="t-md fw-b">파일 가져오기</span>
@@ -86,6 +92,17 @@ export default function EditorApp({ productionId }: { productionId: string }) {
             </button>
           </div>
         </section>
+        {templateOpen ? (
+          <TemplatePicker
+            productionId={productionId}
+            onClose={() => setTemplateOpen(false)}
+            onCreated={(layout, etag) => {
+              const v = typeof (layout as { layoutVersion?: unknown })?.layoutVersion === 'number' ? (layout as { layoutVersion: number }).layoutVersion : 1;
+              st.getState().reset(docFromLayout(layout), versionOfEtag(etag, v), false);
+              setPhase({ kind: 'edit', store: st });
+            }}
+          />
+        ) : null}
         {importOpen ? <ImportDialog store={st} productionId={productionId} onClose={() => setImportOpen(false)} onApplied={() => setPhase({ kind: 'edit', store: st })} onNotFound={() => setPhase({ kind: 'notFound' })} /> : null}
       </>
     );

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "seed:seatmap-templates": "node dist/seed/seatmap-templates.cli.js",
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",
     "start:seatmap-worker": "node dist/seatmap-worker/main.js",
     "migrate": "node scripts/migrate.mjs",

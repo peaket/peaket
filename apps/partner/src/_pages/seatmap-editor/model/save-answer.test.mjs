@@ -24,7 +24,7 @@ function fakeClient(answer) {
 }
 const headers = (etag) => ({ get: (k) => (k === 'etag' ? etag : null) });
 
-test('FE-T46 ⑦ 저장 본문은 If-Match "0"·색인과 응답 전용 칸 없음이고 412·409·403·422·429·503·12MiB·떠나기 확인이 정한 대로다 [ASVS v5.0.0-3.5.2]', async () => {
+test('FE-T46 ⑦ 저장 본문은 If-Match "0"·색인과 응답 전용 칸 없음이고 412·409·403·422·429·503·12MiB·떠나기 확인이 정한 대로다 [ASVS v5.0.0-3.5.2] [ASVS v5.0.0-2.2.2]', async () => {
   const doc = {
     ...emptyDoc(),
     order: ['s1'],
