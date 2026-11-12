@@ -1,0 +1,94 @@
+{
+  "run_id": "2026-11-13-k7-v1-fault-r7-bat033",
+  "kpi": "K7",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": 11002,
+    "arrival_rps": 100.0,
+    "duration_s": 100,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-payment.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "05161fc456f99884390f9835a6a058a215c08c75",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-13-k7-v1-fault-r7-bat033/",
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 4·메모리 3072Mi씩, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-12T18:28:49Z",
+  "ended_at": "2026-11-12T18:30:39Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 159.788115,
+    "p95_ms": 1313.4712523,
+    "p99_ms": 1816.3106164200024,
+    "error_rate": 0.007347104227540663,
+    "requests": 59207,
+    "rps": 592.07,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "invariants": "invariants.csv",
+    "extra": [
+      "pause-transitions.json",
+      "invariants-detail.ndjson"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 10000,
+      "violations": 1592,
+      "cp_upper": 0.165341,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 10000,
+      "violations": 336,
+      "cp_upper": 0.036717,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "payment_p99_3000ms",
+      "allowed": 0.01,
+      "trials": 9431,
+      "violations": 129,
+      "cp_upper": 0.015814,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "payment p99 ≤ 3000ms"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 54.8%·메모리 최대 74.3%, VU 최대 합 1201, 시나리오 오류 0건, 계획 최고 도착률 100/s(docs/verification.md §3.9·§3.10); hold: 10000건, p99 228.6ms, 실패 0건; order: 10000건, p99 651.6ms, 실패 343건; pay_start: 9657건, p99 628.3ms, 실패 81건; sim_auth: 9576건, p99 131.2ms, 실패 0건; sim_fault: 521건, p99 132.0ms, 실패 0건; payment: 9431건, p99 616.6ms, 실패 9건; payment_status: 10022건, p99 2843.2ms, 실패 2건; 결제사 장애: 응답 버림 5%·16000ms 지연 0.5%; 결제 확정(접수 시작 → 끝 상태) p99 3168.9ms·최대 18718.0ms; v1 한 프로세스 합본(queue-svc·admission-ctrl·purchase-svc·payment-svc, OTel 서비스 이름 bundle 하나), Redis TLS 켬; 넣지 않은 서비스의 대역: trust-svc 위험 판정 늘 축소 운영, identity-svc 재확인 토큰 판정, ticket-svc 늘 발권, core-svc 대신 시드(회차 일정·좌석 판매·좌석맵 판); 게이트웨이 없음: k6가 합본 Service와 대기 상태 파일 앞 nginx 캐시로 바로 보내고 신원 머리를 넣는다(입구 IP 한도 없음); 불변식 SKIPPED: M1·M2·M3·M4·M5·P5·S3(기대 S3·P5·M1~M5, 티켓 원본·정산 표 없음, 결제 취소는 빈 검사 뷰); K7: 가상 사용자마다 반복 안에서 진입·입장 뒤 결제(phase:prep 요청은 본구간 판정에서 뺌, 동시 입장 목표 5,000명), 결제 확정 시간은 결제 접수 시작부터 끝 상태까지; 정지 판정 입력(kube_pod_status_ready) 없음: 로컬 무대에서는 K7 ②의 정지 전이를 판정하지 못한다(측정 조건), 새 결제 정지 503 0건(끝낸 파드 포함)",
+  "collected_at": "2026-11-12T18:35:50Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

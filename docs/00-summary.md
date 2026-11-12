@@ -558,6 +558,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - R-510: BAT-039 UNKNOWN 조회 꼬리 단축(2026-11-13): `pg_charge` 10,153건의 주문→승인 지연 p99 3.976s·p99.5 10.8s, 10~20초 53건(0.52%)이 16초 지연군이고 p99 경계는 3~5초의 정상/드롭 꼬리다. 드롭 5%의 UNKNOWN 조회 간격 250ms×2배 누적 3.75초를 줄이려고 `UNKNOWN_QUERY_BASE_MS`·`UNKNOWN_QUERY_POLL_INTERVAL_MS`를 100ms로, `DELAY_EXPONENT_CAP`을 10으로 바꿨다. 0.5% 지연은 p99.5에 남고 p99를 구조적으로 넘기지 않는다. K7은 measurement go 뒤.
 - R-502: BAT-210(BAS-070·BAS-110·BAS-230, 2026-11-12): 운영 확인 표 4편, NFR-007 셈 근거, RFC 3건 초안을 더했다.
 R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣어 끝에서 잘린 PENDING과 3초 전 조기 종료를 실제 시간으로 판정한다.
+- R-512: BAT-033 공식 K7 3회·K2/A/A 결과를 기록한다 — K7 3/3 fail, A/A 미성립, K2 p99는 50ms 안이나 dropped로 무효.
 
 ## 5. [충돌] 결정 결과
 
