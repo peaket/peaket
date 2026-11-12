@@ -594,6 +594,7 @@
 | R-480 | 마지막 CI 두 갈래: payment-process가 빈 포트 재사용 경합으로 EADDRINUSE, mock-api CORS가 요청 origin 헤더를 그대로 반사해 CodeQL js/reflected-xss | services/payment-svc/src/start.ts·main.ts·config.ts, services/payment-svc/test-int/payment-process.int.test.ts, apps/web/scripts/mock-api.mjs | payment-svc를 포트 0으로 띄우고 실제 포트를 IPC로 읽게 했으며 local·ci에서 gRPC 0을 허용했다. mock-api는 허용 목록에서 고른 상수 출처만 CORS 응답에 쓴다 | 완료(로컬 게이트; CodeQL은 CI 확인) |
 | R-481 | CodeQL js/reflected-xss 한 건이 남아 CI가 빨간색: 개발용 mock API의 상태 JSON 입력 흐름을 CodeQL이 반사 XSS로 봄 | tools/ci/scan-exceptions.json, tools/ci/scan-gate.test.mjs | 이슈 #11 근거로 2026-12-12까지 30일 예외를 두고, 예외 파일의 codeql 줄이 모의 SARIF를 차단 0으로 지나가는지와 명령줄 시험의 빈 예외 격리를 맞췄다 | 완료(로컬 scan-gate·scan-tools 43건; 실제 CodeQL은 CI 확인) |
 | R-482 | PROGRESS에 OPEN[38]·BAT-032 다음 할 일·CI 수정 로그가 빠져 기록과 실제가 어긋났다 | docs/PROGRESS.md | OPEN[38]·BAT-032 줄·CI 수정 로그를 더하고 BAT-029를 완료로 고쳤다 | 적용 |
+| R-483 | 배치마다 비싼 검사·CI·측정을 반복해 개발이 길어졌다 | docs/adr/0267-wave-delivery-group-batches-expensive-gates-at-end.md, docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/architecture.md | 웨이브 단위로 비싼 검사를 모으고 웨이브 끝에 한 번 푸시하는 규칙을 세 갈래에 적용했다 | 적용 |
 
 ## 4. 숫자 일치표
 
