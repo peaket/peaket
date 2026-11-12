@@ -124,14 +124,14 @@ test('FE-T46 ① 배치본이 있는 공연은 서버 판의 구역·좌석 수�
   // CSP 강제 위반은 0이다(팬 좌석맵 패키지를 하위 경로로 가져와 Zod의 평가 가능 시험이 실리지 않는다, ADR-0264 결정 42). 보고 모드의 Trusted Types 위반은 기록만 한다
   expect(violations.filter((v) => v.disposition === 'enforce')).toEqual([]);
 
-  // 배치본이 없는 공연(404): 시작 화면. 템플릿 카드는 HOT-230 전이라 숨긴다
+  // 배치본이 없는 공연(404): 시작 화면. HOT-230(BAT-151)부터 템플릿 카드도 보인다
   const page2 = await page.context().newPage();
   await fakeApi(page2, new URL(test.info().project.use.baseURL).origin);
   await page2.goto(`/events/${P2}/seatmap`);
   await expect(page2.getByRole('heading', { name: '어떻게 시작할까요?' })).toBeVisible();
   await expect(page2.getByRole('button', { name: /빈 캔버스에서 그리기/ })).toBeVisible();
   await expect(page2.getByRole('button', { name: /파일 가져오기/ })).toBeVisible();
-  await expect(page2.getByText('템플릿으로 시작')).toHaveCount(0);
+  await expect(page2.getByText('템플릿으로 시작')).toHaveCount(1);
 });
 
 test('FE-T46 ⑪ 구역 이름 <img src=x onerror=alert(1)>는 캔버스 글자로만 그려지고 문서에 요소가 생기지 않는다 [ASVS v5.0.0-1.1.2] [ASVS v5.0.0-1.3.5] [ASVS v5.0.0-3.2.2]', async ({ page }) => {
