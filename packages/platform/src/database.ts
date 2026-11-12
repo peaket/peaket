@@ -50,6 +50,8 @@ export interface DatabaseOptions {
   profile?: DatabaseProfile;
   /** 풀 크기(PgBouncer 연결 수와 함께 정한다). 기본 10 */
   max?: number;
+  /** 연결 대기 한도(ms). 없으면 profile 기본값(핫패스 100ms·일반 1초). BAT-034: purchase-svc 핫패스는 250ms를 넘긴다 */
+  connectionTimeoutMillis?: number;
   /** pg_stat_activity의 application_name(서비스 이름) */
   applicationName?: string;
 }
@@ -79,10 +81,13 @@ export const DATABASE = Symbol.for('peaket.platform.database');
 
 export function createDatabase(o: DatabaseOptions): Database {
   const profile = o.profile ?? 'general';
+  if (o.connectionTimeoutMillis !== undefined && (!Number.isInteger(o.connectionTimeoutMillis) || o.connectionTimeoutMillis < 1)) {
+    throw new RangeError(`connectionTimeoutMillis는 양의 정수(ms)여야 한다: ${String(o.connectionTimeoutMillis)}`);
+  }
   const pool = new PlatformPool({
     connectionString: o.url,
     max: o.max ?? 10,
-    connectionTimeoutMillis: POOL_DEFAULTS.connectionTimeoutMillis[profile],
+    connectionTimeoutMillis: o.connectionTimeoutMillis ?? POOL_DEFAULTS.connectionTimeoutMillis[profile],
     idleTimeoutMillis: POOL_DEFAULTS.idleTimeoutMillis,
     maxLifetimeSeconds: POOL_DEFAULTS.maxLifetimeSeconds,
     application_name: o.applicationName,

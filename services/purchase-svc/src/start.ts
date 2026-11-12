@@ -34,6 +34,7 @@ import { CircuitBreaker, createDatabase, createHotRedis, createService, type Dat
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
+import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
 import {
   type BehaviorSignalPublisher,
   type BookingModuleDeps,
@@ -183,12 +184,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 서버 고정 ECDH 개인키: Secrets Manager에서 시작 때 메모리로만 읽는다(없거나 틀리면 시작하지 않는다, docs/security/secrets-and-keys.md)
   const ecdh = ServerEcdhKey.fromEnv(env);
 
-  // purchase DB(PostgreSQL): 판매 확정 저장소 SeatSales의 연결(BUILD_ORDER PRF-140 ①). 핫패스 풀(대기 100ms)이다. 홀드 원장 적재(PRF-141)와 결제 접수 Saga(PRF-160)가 필수로 만들 때까지
+  // purchase DB(PostgreSQL): 판매 확정 저장소 SeatSales의 연결(BUILD_ORDER PRF-140 ①). 핫패스 풀(기본 대기 250ms, BAT-034)이다. 홀드 원장 적재(PRF-141)와 결제 접수 Saga(PRF-160)가 필수로 만들 때까지
   // PEAKET_DATABASE_URL이 없으면 DB 없이 뜬다(좌석 홀드·구매 세션은 좌석 Redis만 쓴다). 풀 크기는 PgBouncer 배치와 함께 정한다(wbs 2.11.2)
   const databaseUrl = env.PEAKET_DATABASE_URL;
   // 핫패스 풀 16개 [가정](BAT-029: 10개에서 올려 홀드·주문·결제 접수·상태 읽기가 서로의 연결을 덜 기다리게 한다).
-  // BAT-031 진단: 32개는 100/s 혼합 부하에서 이벤트 루프·PostgreSQL 연결 압박만 키우고 429를 줄이지 못해 16으로 되돌린다
-  const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE, max: 16 }) : undefined;
+  // BAT-031 진단: 32개는 100/s 혼합 부하에서 이벤트 루프·PostgreSQL 연결 압박만 키우고 429를 줄이지 못해 16으로 되돌린다.
+  // BAT-034: 연결 대기 100ms는 짧은 포화를 429로 거절했다. PEAKET_DB_HOT_CONNECT_TIMEOUT_MS 기본 250ms로 늘려 흡수한다(풀 크기는 16 유지).
+  const database = databaseUrl
+    ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE, max: 16, connectionTimeoutMillis: hotConnectTimeoutMsFromEnv(env) })
+    : undefined;
   const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
   const sessionStore = new RedisPurchaseSessionStore(redis);
   const sessions = new StoredPurchaseSessions({ store: sessionStore, ecdh, clock: systemClock });

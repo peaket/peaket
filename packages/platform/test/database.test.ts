@@ -33,6 +33,38 @@ describe('DB 설정', () => {
     }
   });
 
+  test('BAT034_핫패스_연결_대기_한도를_설정으로_늘리면_429까지_기다린다', async () => {
+    // BAT-034: purchase-svc가 100ms 대신 250ms를 넘길 수 있어야 한다. 받기만 하고 답하지 않는 PostgreSQL 자리에서
+    // 연결 시도가 250ms까지 기다린 뒤 429 server-busy로 끝나는지 본다(기본 100ms와 구분되는 시간).
+    const held: net.Socket[] = [];
+    const server = net.createServer((sock) => void held.push(sock));
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', () => ok()));
+    const { port } = server.address() as net.AddressInfo;
+    const d = createDatabase({ url: `postgres://nobody:x@127.0.0.1:${port}/none`, profile: 'hot', connectionTimeoutMillis: 250 });
+    try {
+      const t0 = performance.now();
+      const err = await d.transaction(async () => 1).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      const elapsed = performance.now() - t0;
+      expect(err).toBeInstanceOf(ProblemError);
+      expect((err as ProblemError).status).toBe(429);
+      expect(elapsed).toBeGreaterThanOrEqual(200);
+      expect(elapsed).toBeLessThan(2_000);
+    } finally {
+      await d.close();
+      for (const sock of held) sock.destroy();
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  });
+
+  test('BAT034_연결_대기_한도가_양의_정수가_아니면_시작하지_않는다', () => {
+    for (const v of [0, -1, 1.5, Number.NaN]) {
+      expect(() => createDatabase({ url: 'postgres://nobody:x@127.0.0.1:1/none', profile: 'hot', connectionTimeoutMillis: v })).toThrow(RangeError);
+    }
+  });
+
   test('FND070_트랜잭션선택지가틀리면_던지지않고_거절된Promise를돌려준다', async () => {
     // 코드 리뷰 2026-11-01: 바로 던져 .catch()로 이은 호출이 오류를 못 잡았다
     const d = createDatabase({ url: 'postgres://nobody:x@127.0.0.1:1/none' });
