@@ -552,6 +552,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - R-503: standalone 정적 자산 경로·gitleaks 리터럴·CSP 시험 페이지 수정.
 - R-504: Avro BACKWARD_TRANSITIVE 검사가 유니온 안 named enum의 호환 변화를 통과시키고, 새 배열 필드 기본값을 요구한다.
 - R-506: gitleaks 이력 지문 예외·SRI 쿼리 시험 수정.
+- R-507: BAT-035 후속 측정 보정(2026-11-12): `paymentUserOf`를 시나리오별 반복 번호와 계획 밖 꼬리 버리기로 고치고, payment-model 웹훅 시험을 같은 `fakeClock`으로 맞췄다. K7 r2는 429 159/9,354(1.70%)·confirm p99 4,320.36ms로 미달해 BAT-037 후보를 남겼다.
 
 ## 5. [충돌] 결정 결과
 

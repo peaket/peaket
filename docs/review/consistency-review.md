@@ -617,6 +617,7 @@
 | R-503 | standalone이 정적 자산을 `.next`에만 복사해 PoC CSS가 404였고, CSP 시험이 운영 404인 preview 화면을 봤다 | apps/web/server/standalone.mjs, apps/web/server/standalone.test.mjs, tools/web-checks/playwright.reflow.config.mjs, tools/web-checks/csp/web.spec.mjs | distDir별 static 복사·키 리터럴 제거·공개 페이지로 시험 교체 | 완료 |
 | R-504 | `EventSaleChanged.soldOutTiers`가 기본값 없이 더해지고, `PaymentEvent.failureCategory`의 유니온 안 enum 기호 추가를 검사기가 형 변경으로 오판해 develop contract-check가 실패했다 | docs/api/avro, tools/ci/avro-schema.mjs·test | 기본값 [] 추가, 유니온·named type 재귀 비교, 재현 시험 | 적용 |
 | R-506 | gitleaks가 옛 커밋 지문을 계속 잡았고, SRI 시험이 `?dpl=` 쿼리 때문에 0건을 봤다 | tools/ci/gitleaks-ignore, tools/web-checks/csp/web.spec.mjs | 이슈 #12 예외와 쿼리 허용 정규식 | 완료 |
+| R-507 | BAT-035 후속: `paymentUserOf`가 k6 시나리오별 반복 번호를 전체 번호로 잘못 보고 본구간 앞 1,006번을 버렸고, payment-model 웹훅 시험이 결제 시스템 `fakeClock`과 `systemClock`을 섞어 250ms 뒤 첫 웹훅이 `query_signal_skipped`가 됐다. K7 r2는 429 1.70%·p99 4,320ms로 미달 | loadtest/lib/v1.mjs, loadtest/scenarios/v1-payment.js, loadtest/test/v1.test.mjs, services/purchase-svc/test-int/payment-model.int.test.ts, services/purchase-svc/test-int/payment-model/system.ts, docs/review/plans/BAT-035.md, docs/review/measurements/BAT-035-transaction-hold.md, docs/BUILD_ORDER.md, docs/PROGRESS.md | `paymentUserOf`가 계획한 반복 수를 넘는 꼬리만 -1로 버리고, 웹훅 수신기가 같은 `fakeClock`을 쓰게 했으며, K7 r2 결과와 다음 후보를 기록했다. 전체 test-int 46파일 1,795건·loadtest v1 48건 통과 | 완료(K7 r2 미달, BAT-037 후보) |
 
 ## 4. 숫자 일치표
 
