@@ -607,6 +607,7 @@
 | R-495 | BAT-151의 템플릿 카드 뒤 FE-T46 ① 시험이 옛 기대(0개)를 그대로 써 CI rich-text가 3브라우저에서 실패했다 | tools/web-checks/rich-text/seatmap-editor.spec.mjs | 404 시작 화면의 템플릿 카드를 1개로 기대하고 주석을 고쳤다 | 적용 |
 | R-484 | BAS-020·BAS-030이 만드는 공급망 게시·SBOM 찾기·Avro 계약 검사·등록 Job이 비어 있었다 | .github/workflows/build-image.yml·contract-check.yml·ci.yml, tools/ci, packages/platform, deploy/charts | 워크플로·도구·차트·단위 시험을 더하고 장부 범위를 이 배치 몫으로 좁힘 | 적용 |
 | R-498 | `sigstore/cosign-installer`가 저장소 실제 허용 액션 정책에 없어 develop CI가 startup_failure로 시작하지 못했다 | .github/workflows/build-image.yml, infra/stacks/global/github/variables.tf | cosign을 체크섬 고정 바이너리로 받아 쓰고, 쓰지 않는 허용 패턴을 되돌렸다 | 적용 |
+| R-500 | BAT-205의 스키마 등록 Job이 CI 차트 값에 없어 tools-check 두 시험이 실패했다 | tools/ci/trivy-chart-values.yaml | CI 값에 schemaRegistry required 값을 채웠다 | 적용 |
 
 ## 4. 숫자 일치표
 

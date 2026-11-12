@@ -52,3 +52,12 @@ outboxRelay:
     - name: trivy-ci-relay-config
       mountPath: /etc/trivy-ci-relay
       readOnly: true
+
+# Avro 스키마 등록 Job(BAS-030, schema-registry-job.yaml)도 CI에서 켜서 그린다.
+# required(schemaRegistry.image·registryUrl·serviceAccountName)를 채우고, 주제는 빈 사전으로 둔다.
+schemaRegistry:
+  enabled: true
+  image: ghcr.io/peaket/schema-register:ci
+  registryUrl: http://schema-registry.ci:8081
+  topics: {}
+  serviceAccountName: trivy-ci-schema-register
