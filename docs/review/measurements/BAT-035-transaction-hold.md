@@ -65,11 +65,27 @@ K7 진단 1회(`.cache/peaket-bat033/k7-diag-bat034/`):
 - `ledger --batch BAT-035 --require`: 통과.
 - trace-check `P-T23`: 통과.
 
-## 6. 다음
+## 6. K7 진단 결과(2026-11-12)
 
-- K7 진단은 아직 돌리지 않았다. 갈래 2·3 CI 회귀 수정이 develop에 합쳐져 CI가 초록이 되고 `measurement go`를 받은 뒤 BAT-035 후 K7 진단 1회를 돈다.
-- 확인: 접수 429 <1%, `payment_confirm_ms` p99 <3초, dropped 0·시나리오 오류 0·`startSkewS=0`.
-- 유효하고 목표를 맞추면 공식 K7 3회·A/A·K2 3회를 소유자가 승인한다. 미달이면 (라) HTTP 백프레셔를 다음 배치 후보로 검토한다.
+- 산출물: `.cache/peaket-bat033/k7-diag-bat035-r2/` (커밋하지 않음). 새 클러스터(split·2Gi·relay 정상·CPU 4), `v1 payment` 100/s, 예열 10초·본구간 100초, 좌석 2, 응답 버림 5%·16초 지연 0.5%, 발생기 1대 CPU 4·3GB.
+- 유효: dropped 0, 시나리오 오류 0, `startSkewS=0`, VU 최대 1,201, 발생기 CPU 평균 최고 57.4%·메모리 최대 75.1%.
+- 첫 실행은 `paymentUserOf`가 시나리오별 반복 번호를 전체 번호로 잘못 본 탓에 본구간 앞 1,006번이 사용자 번호를 잃어(홀드 8,994) 비교에 쓰지 않았다. `f8ed4cfa`에서 고친 뒤 r2를 쟀다.
+
+| 항목 | r2 | 목표 | 판정 |
+| --- | ---: | ---: | --- |
+| 접수 호출 | 9,354 | - | - |
+| 202 | 9,195 | - | - |
+| 429 `server-busy` | **159 (1.70%)** | <1% | **미달** |
+| 503 | 0 | - | - |
+| `payment_confirm_ms{phase:main}` p99 | **4,320.36ms** | <3,000ms | **미달** |
+| `payment_end_truncated_terminal` / `_pending` | 476 / 21 | - | - |
+| `payment_outcomes` PENDING | 393 | - | - |
+| 공식 `payment_p99_3000ms` 위반 | 907/9,354 (9.70%) | ≤1% | **미달** |
+
+- 429 `durationMs`(번들 로그, 예열 포함): 주문 p50 515ms·p90 616ms·p99 689ms, 결제 시작 p50 523ms·p90 926ms·p99 1,114ms, 접수 p50 433ms·p90 717ms·p99 923ms. 429도 250ms 대기 뒤에 끝나며 빠른 거절이 아니다.
+- 세 경로 429 `server-busy` 로그 수(예열·본구간 합, 번들 3파드): `/v1/orders` **385**, `/v1/orders/{orderId}/payments` **368**, `/v1/orders/{orderId}/payment-acceptance` **198**. 그 밖에 `/v1/orders/{orderId}/payment-status` 203. 모두 `type=server-busy`이고 503은 0이다.
+- 판정: BAT-035의 문장 수 축소(8/9/14→6/8/11)와 BAT-034의 250ms 대기로는 429 <1%·confirm p99 <3초를 맞추지 못했다. **공식 K7 3회는 시작하지 않는다.**
+- 다음 후보: **(라) HTTP 백프레셔**를 BAT-036 후보로 제안한다. 입구에서 처리 한도·대기열을 두어 429를 늦게까지 기다리게 하지 않고, 성공 요청의 p99를 지키는 쪽이다. 다만 BAT-036 번호는 현재 SEG-010(구간 마무리, C)에 쓰이고 있어, 실제 배치 번호는 다음 빈 번호로 확정해야 한다.
 
 ## 7. 변이·4관점 리뷰(2026-11-12)
 
