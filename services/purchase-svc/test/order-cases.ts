@@ -169,6 +169,8 @@ export class OrderFakes {
   fallbackSignals: FallbackReason[] = [];
   fallbackLogs: Parameters<OrderLog['identityFallback']>[0][] = [];
   configErrors: Parameters<OrderLog['configError']>[0][] = [];
+  /** 있으면 writes.create가 이 약속을 기다린다(BAT-037 칸막이 시험이 처리기를 붙잡는 문) */
+  createGate: Promise<void> | undefined = undefined;
   /** Paying 표시 실패 지표(purchase_order_paying_mark_failed_total)를 올린 수 */
   payingFailedSignals = 0;
   payingFailedLogs: Parameters<OrderLog['payingMarkFailed']>[0][] = [];
@@ -196,6 +198,7 @@ export class OrderFakes {
     this.fallbackSignals = [];
     this.fallbackLogs = [];
     this.configErrors = [];
+    this.createGate = undefined;
     this.payingFailedSignals = 0;
     this.payingFailedLogs = [];
   }
@@ -228,6 +231,7 @@ export class OrderFakes {
       this.calls.push('writes.create');
       this.created.push({ once, order });
       this.createOptions.push(o);
+      if (this.createGate) await this.createGate;
       if (this.outcome instanceof Error) throw this.outcome;
       return this.outcome ?? { status: 'CREATED', order: viewOf(order) };
     },

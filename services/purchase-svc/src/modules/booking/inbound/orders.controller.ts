@@ -5,6 +5,7 @@
 // 좌석 홀드(inventory holds.controller.ts)와 같은 장식자 묶음이다. 경로 스키마(@ContractRouteSchema, 미리 만든 Ajv 검사기)로 보고 Zod 파이프를 함께 달지 않는다(ADR-0176 결정 4).
 import { Body, Controller, Get, HttpCode, Inject, Optional, Param, Post, Res } from '@nestjs/common';
 import {
+  Bulkhead,
   ContractRouteSchema,
   COOKIE_CHALLENGE,
   CurrentPrincipal,
@@ -30,6 +31,7 @@ import { ORDER_STATUSES } from '../domain/order.js';
 import { START_PAY_METHODS } from '../domain/payment-attempt.js';
 import { PAYMENT_STATUS_MAX_DEADLINE_MS, PAYMENT_STATUS_VALUES, type PaymentStatusProblem } from '../domain/payment-status.js';
 import type { CheckoutValues, OrderView } from '../domain/ports.js';
+import { WRITE_BULKHEAD } from '../../../write-bulkhead.js';
 
 // openapi 모양을 여기 둔다(좌석 홀드·queue-svc와 같은 방식). 요청 본문은 계약처럼 모든 층을 닫는다(.strict(), docs/api/guidelines.md §1 '요청은 닫고 응답은 연다').
 
@@ -424,6 +426,7 @@ export class OrdersController {
    */
   @Post(':orderId/payments')
   @HttpCode(201)
+  @Bulkhead(WRITE_BULKHEAD)
   @Roles(['fan'], { scopes: ['ticket:buy'] })
   @Idempotent({ operation: START_PAYMENT_OPERATION })
   @PurchaseSigned()
@@ -459,6 +462,7 @@ export class OrdersController {
    */
   @Post()
   @HttpCode(201)
+  @Bulkhead(WRITE_BULKHEAD)
   @Roles(['fan'], { scopes: ['ticket:buy'] })
   @Idempotent({ operation: CREATE_ORDER_OPERATION })
   @PurchaseSigned()
@@ -492,6 +496,7 @@ export class OrdersController {
    */
   @Post(':orderId/payment-acceptance')
   @HttpCode(202)
+  @Bulkhead(WRITE_BULKHEAD)
   @Roles(['fan'], { scopes: ['ticket:buy'] })
   @Idempotent({ operation: ACCEPT_PAYMENT_OPERATION })
   @PurchaseSigned()

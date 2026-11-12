@@ -2,12 +2,13 @@
 import 'reflect-metadata';
 import { Body, Controller, HttpCode, Module, Post } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { AcceptMultipart, BodyLimit, DEFAULT_BODY_LIMIT_BYTES, ProblemError, Roles, createService, fakeClock } from '../src/index.js';
+import { AcceptMultipart, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, ProblemError, Roles, createService, fakeClock } from '../src/index.js';
 import { collector } from './fixture.js';
 
 /** 칸막이 시험: 처리기 안에서 기다리게 하는 문 */
 const gate = { current: { promise: Promise.resolve(), open: () => {} }, hits: 0 };
 const SHARED = { name: 'big-body', limit: 1, retryAfterSeconds: 9 };
+const PLAIN = { name: 'plain-bulkhead', limit: 1, retryAfterSeconds: 5 };
 
 @Controller('v1/limit')
 class LimitController {
@@ -41,6 +42,16 @@ class LimitController {
   @Roles(['public'])
   @AcceptMultipart({ maxBytes: 64, tooLarge: () => new ProblemError({ type: 'image-too-large', status: 413, title: '크다' }), bulkhead: SHARED })
   upload() {
+    return { ok: true };
+  }
+
+  @HttpCode(200)
+  @Post('plain')
+  @Roles(['public'])
+  @Bulkhead(PLAIN)
+  async plainBulkhead() {
+    gate.hits++;
+    await gate.current.promise;
     return { ok: true };
   }
 }
@@ -97,6 +108,29 @@ describe('@BodyLimit의 칸막이(ADR-0260 결정 11)', () => {
     // 응답이 끝나면 자리를 놓는다
     gate.current = { promise: Promise.resolve(), open: () => {} };
     expect((await post('/v1/limit/big', JSON.stringify({ a: 3 }))).statusCode).toBe(200);
+  });
+});
+
+describe('@Bulkhead(HTTP 백프레셔)', () => {
+  test('BAT037_본문 상한이 없어도 같은 이름의 칸막이가 차면 429 server-busy와 Retry-After다', async () => {
+    let open!: () => void;
+    gate.current = { promise: new Promise<void>((r) => (open = r)), open: () => open() };
+    const first = post('/v1/limit/plain', '{}');
+    await new Promise((r) => setTimeout(r, 50));
+    const busy = await post('/v1/limit/plain', '{}');
+    expect([busy.statusCode, busy.headers['retry-after'], JSON.parse(busy.payload).type]).toEqual([429, '5', 'https://peaket.example/problems/server-busy']);
+    open();
+    expect((await first).statusCode).toBe(200);
+    gate.current = { promise: Promise.resolve(), open: () => {} };
+    expect((await post('/v1/limit/plain', '{}')).statusCode).toBe(200);
+  });
+
+  test('BAT037_칸막이 이름·한도·Retry-After가 틀리면 만들 때 RangeError다', () => {
+    expect(() => Bulkhead({ name: '', limit: 1, retryAfterSeconds: 1 })).toThrow(RangeError);
+    expect(() => Bulkhead({ name: 'x', limit: 0, retryAfterSeconds: 1 })).toThrow(RangeError);
+    expect(() => Bulkhead({ name: 'x', limit: 1.5, retryAfterSeconds: 1 })).toThrow(RangeError);
+    expect(() => Bulkhead({ name: 'x', limit: 1, retryAfterSeconds: -1 })).toThrow(RangeError);
+    expect(() => Bulkhead({ name: 'x', limit: 1, retryAfterSeconds: 0 })).not.toThrow();
   });
 });
 

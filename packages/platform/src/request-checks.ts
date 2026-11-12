@@ -351,6 +351,23 @@ export function BodyLimit(bytes: number, o: { bulkhead?: RouteBulkhead } = {}): 
   };
 }
 
+/**
+ * 경로의 동시 처리 칸막이(HTTP 백프레셔). 본문 상한과 별개로 쓸 수 있고, 같은 이름의 경로가 자리를 함께 쓴다.
+ * 자리가 차면 본문을 읽기 전에 429 `server-busy`와 Retry-After로 답한다(ADR-0257 결정 2와 같은 자리 셈).
+ * @throws RangeError 이름이 비었거나 limit이 양의 정수가 아니거나 retryAfterSeconds가 0 이상 정수가 아님
+ */
+export function Bulkhead(o: RouteBulkhead): MethodDecorator {
+  if (typeof o.name !== 'string' || o.name.length === 0) throw new RangeError('칸막이 이름은 비지 않은 문자열이다');
+  if (!Number.isInteger(o.limit) || o.limit <= 0) throw new RangeError('칸막이 한도는 양의 정수다');
+  if (!Number.isInteger(o.retryAfterSeconds) || o.retryAfterSeconds < 0) throw new RangeError('칸막이 Retry-After는 0 이상 정수다');
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [BULKHEAD_KEY]: o }, fn);
+    return descriptor;
+  };
+}
+
 function unsupportedMediaType(): Error {
   return Object.assign(new Error('Unsupported Media Type'), { statusCode: 415, code: 'FST_ERR_CTP_INVALID_MEDIA_TYPE' });
 }

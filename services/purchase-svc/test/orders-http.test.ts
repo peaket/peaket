@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { AppModule } from '../src/app.module.js';
 import { type CreateOrderRejection, ORDER_PROBLEMS, orderResponseOf } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
+import { setWriteBulkheadLimit, WRITE_BULKHEAD_DEFAULT_LIMIT } from '../src/write-bulkhead.js';
 import { AcceptFakes } from './accept-cases.js';
 import {
   ACCOUNT,
@@ -382,5 +383,28 @@ describe('플랫폼 가드(쓰임새에 닿기 전)', () => {
     const r = await post(okBody({ consents: { provisionToSeller: true, salesTerms: true, consentVersion: 'v'.repeat(32) } }));
     expect(r.statusCode).toBe(422);
     expect(json(r)).toMatchObject({ type: problem('consent-version-outdated') });
+  });
+});
+
+describe('BAT-037 쓰기 칸막이(HTTP 백프레셔)', () => {
+  test('주문 생성이 자리를 쥐고 있으면 둘째 주문 생성은 DB에 가기 전에 429 server-busy + Retry-After다', async () => {
+    setWriteBulkheadLimit(1);
+    let open: (() => void) | undefined;
+    fx.createGate = new Promise<void>((r) => {
+      open = r;
+    });
+    try {
+      const first = post(okBody());
+      for (let i = 0; i < 200 && !fx.calls.includes('writes.create'); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(fx.calls).toContain('writes.create');
+      const second = await post(okBody());
+      expect([second.statusCode, second.headers['retry-after'], json(second).type]).toEqual([429, '1', problem('server-busy')]);
+      open!();
+      expect((await first).statusCode).toBe(201);
+    } finally {
+      open?.();
+      fx.createGate = undefined;
+      setWriteBulkheadLimit(WRITE_BULKHEAD_DEFAULT_LIMIT);
+    }
   });
 });
