@@ -298,7 +298,8 @@ test.describe('SRI 값과 소스 맵 링크(HOT-291 숨김 소스 맵)', () => {
     test(`[ASVS v5.0.0-13.4.7] ${path}: 모든 integrity가 내려받은 파일의 SHA-256과 같고, 받은 JS에 소스 맵 링크가 없다`, async ({ request, browserName }) => {
       test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
       const html = await (await request.get(`${WEB_BASE}${path}`)).text();
-      const tags = [...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)="([^"]+\.js)"[^>]*\sintegrity="(sha256-[^"]+)"/g)];
+      // deploymentId가 있으면 Next.js가 `?dpl=<SHA>`를 붙인다. 파일 이름 뒤 쿼리는 SRI 계산과 무관하므로 받아들인다.
+      const tags = [...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"[^>]*\sintegrity="(sha256-[^"]+)"/g)];
       expect(tags.length).toBeGreaterThan(0);
       for (const [, url, integrity] of tags) {
         const body = await (await request.get(`${WEB_BASE}${url}`)).body();
