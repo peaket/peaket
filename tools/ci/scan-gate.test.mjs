@@ -339,13 +339,38 @@ test('CodeQL 결과 경로는 저장소 기준 상대 경로로 읽고 결과가
 
 test('명령줄은 판정 결과를 종료 코드로 내고 GitHub 주석에 규칙·파일·줄만 적는다', () => {
   const dir = tempDir('scan-gate-cli-');
+  // 저장소 예외 파일에는 이제 codeql 예외가 있어 빈 SARIF에서 '쓰이지 않는 예외'로 막힌다. 이 시험은 명령줄 판정만 보므로 빈 예외 파일을 준다
+  const none = join(dir, 'no-exceptions.json');
+  writeFileSync(none, JSON.stringify({ exceptions: [] }));
   writeFileSync(join(dir, 'c.sarif'), codeql([result('js/xss', 'apps/web/src/a.ts', 7)]));
-  const r = spawnSync(process.execPath, [SCRIPT, '--tool', 'codeql', '--sarif', join(dir, 'c.sarif')], { encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: '' } });
+  const r = spawnSync(process.execPath, [SCRIPT, '--tool', 'codeql', '--sarif', join(dir, 'c.sarif'), '--exceptions', none], { encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: '' } });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /::error file=apps\/web\/src\/a\.ts,line=7::/);
   assert.equal(r.stdout.includes('표시-메시지-원문'), false);
   writeFileSync(join(dir, 'ok.sarif'), codeql([]));
-  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tool', 'codeql', '--sarif', join(dir, 'ok.sarif')], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tool', 'codeql', '--sarif', join(dir, 'ok.sarif'), '--exceptions', none], { encoding: 'utf8' }).status, 0);
+});
+
+test('R-481 저장소 예외 파일의 codeql js/reflected-xss 줄이 모의 결과를 지나가게 한다', () => {
+  const now = new Date('2026-11-12T03:00:00Z');
+  const exceptions = parseScanExceptions(readFileSync(join(HERE, 'scan-exceptions.json'), 'utf8'), { now });
+  const finding = { tool: 'codeql', rule: 'js/reflected-xss', path: 'apps/web/scripts/mock-api.mjs', line: 661, severity: 7.8 };
+  const r = judge({ tool: 'codeql', findings: [finding], exceptions, now });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.blocking, []);
+  assert.equal(r.excepted.length, 1);
+  assert.equal(r.excepted[0].exception.issue, 11);
+  assert.equal(r.excepted[0].exception.expiresOn, '2026-12-12');
+  assert.deepEqual(r.unusedExceptions, []);
+});
+
+test('R-481 모의 SARIF의 js/reflected-xss 한 건은 예외로 지나가고 차단 0이다', () => {
+  const dir = tempDir('scan-gate-r481-');
+  const file = join(dir, 'mock-api.sarif');
+  writeFileSync(file, codeql([result('js/reflected-xss', 'apps/web/scripts/mock-api.mjs', 661)], codeqlRules([rule('js/reflected-xss', 7.8)])));
+  const r = spawnSync(process.execPath, [SCRIPT, '--tool', 'codeql', '--sarif', file, '--now', '2026-11-12T03:00:00Z'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /예외로 지나감: codeql js\/reflected-xss/);
 });
 
 // ---------- 받아들인 결과(설계로 받아들인 결과, devops §4.4 '예외 파일' 끝 문장, ADR-0263 결정 12) ----------

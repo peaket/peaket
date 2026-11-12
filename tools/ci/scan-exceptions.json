@@ -10,6 +10,16 @@
       "count": 1,
       "createdOn": "2026-11-10",
       "reviewOn": "2027-11-10"
+    },
+    {
+      "tool": "codeql",
+      "rule": "js/reflected-xss",
+      "path": "apps/web/scripts/mock-api.mjs",
+      "reason": "개발용 mock API(운영 미배포)다. /__mock/state가 시험 상태를 JSON으로 돌려주는 것이 목적이고, 응답은 JSON·SVG이며 nosniff를 붙인다. 코드로 문자열 응답 경로와 CORS origin 반사는 제거했으나, 상태 JSON 입력 흐름을 CodeQL이 반사 XSS로 본다. 30일 안에 상태 반사를 시험 전용으로 좁히거나 sanitizer로 근본 수정한다(이슈 #11)",
+      "issue": 11,
+      "count": 1,
+      "createdOn": "2026-11-12",
+      "expiresOn": "2026-12-12"
     }
   ]
 }
