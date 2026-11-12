@@ -42,9 +42,20 @@ const [MINE_FROM, MINE_TO] = segmentUsers(USERS, __ENV.K6_EXECUTION_SEGMENT);
 const MINE = MINE_TO - MINE_FROM;
 
 const holds = openPhases({ exec: 'hold', rate: RATE, warmS: WARM_S, mainS: MAIN_S, startS: 0, preVUs: PRE_VUS, maxVUs: MAX_VUS });
+/**
+ * 예열 종료 뒤 진행 중인 홀드를 마무리할 여유(초, BAT-040). 예열은 60초에 새 반복을 멈추고
+ * 이 시간 동안 진행 중인 반복을 끝낸다. 본구간은 그 뒤에 시작해 예열 꼬리와 겹치지 않는다.
+ * k6의 dropped_iterations{scenario:warm}가 예열 끝 경계에서 나던 것을 없애는 측정 하네스 수정이다.
+ */
+const WARM_GRACE_S = 5;
+// 예열은 본구간의 절반 도착률로 돌린다. 예열은 캐시를 데우는 구간이고, 본구간 2,000/s를 그대로 걸면
+// 발생기 warm 시나리오가 끝 경계에서 반복을 놓치는 dropped_iterations가 남는다(BAT-040).
+const warm = { ...holds.warm, rate: Math.max(1, Math.floor(RATE / 2)), gracefulStop: `${WARM_GRACE_S}s` };
+const mainStartS = WARM_S + WARM_GRACE_S;
+const main = { ...holds.main, startTime: `${mainStartS}s` };
 
 export const options = {
-  ...baseOptions({ warm: holds.warm, main: holds.main, ...markScenarios(WARM_S, WARM_S + MAIN_S) }, ['hold', 'release']),
+  ...baseOptions({ warm, main, ...markScenarios(mainStartS, mainStartS + MAIN_S) }, ['hold', 'release']),
   setupTimeout: `${PREP_TIMEOUT_S}s`,
 };
 // 준비 진입의 시행·실패(발생기를 나눠도 사람마다 한 번인지 실행 도구·리허설이 요약에서 본다)

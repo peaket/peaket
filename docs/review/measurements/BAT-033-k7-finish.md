@@ -214,3 +214,54 @@ K7은 회마다 `cluster.mjs down/up/observability/v1 --cpus 4 --memory-mi 2048`
 - **(나)는 2순위**다. 4→6은 p99를 조금 낮췄지만 429를 악화시켜 공식 ≤1%에는 도움이 안 됐다.
 - **(가)는 제외**한다. 시뮬레이터 CPU가 0.13코어라 상향할 여지가 없고, 레플리카 2는 파드 안 메모리 상태·멱등 기록이 갈라져 공유 상태 없이는 안 된다.
 - **(라)는 별도 측정 하네스 배치**로 처리한다. K7 공식과 무관하고, K2/A/A 성립에만 필요하다.
+
+## 8. BAT-041(HOT-474) PostgreSQL 귀속·K2 예열 수정(2026-11-13, R-514)
+
+### 8.1 PostgreSQL CPU 한도와 실제 사용
+
+- v1 전용 PostgreSQL 컨테이너: **CPU request 500m, CPU limit 없음**, 메모리 request 1Gi·limit 2Gi(`tools/local/v1-objects.mjs v1PostgresObjects`).
+- 실제 사용(30초 K7 실험, `crictl stats`): **평균 4.5~4.8코어, 최고 5.4코어**. CPU limit이 없어 컨테이너 한도에 막힌 것이 아니다. 노드 논리 CPU 32개, 번들 파드별 1.7~2.2/4코어.
+- 따라서 이번 3~5초 꼬리는 **Postgres 컨테이너 CPU 한도 병목이 아니라 실제 쿼리·커밋 작업량**이다. 용량 제안은 8.4에 둔다.
+
+### 8.2 상위 질의·인덱스
+
+`pg_stat_statements`(30초 K7, v1_purchase·v1_payment, 총 734,748문, SQL 실행 38.0초):
+
+| 질의 | 호출 | 총 실행 | 평균 | 비고 |
+| --- | ---: | ---: | ---: | --- |
+| `insert into order_event` | 13,851 | 2,894ms | 0.21ms | 주문 전이 이력 |
+| `createOrder` CTE(주문·항목·이력 1) | 3,797 | 1,849ms | 0.49ms | 주문 생성 |
+| `insert into seat_hold` | 8,000 | 1,601ms | 0.20ms | 좌석 홀드 |
+| `update purchase_order ...` | 10,337 | 1,421ms | 0.14ms | 상태 전이 |
+| `insert into outbox` | 17,176 | 1,398ms | 0.08ms | 사건 발행 |
+| `order_idempotency` insert/update | 10,794+10,794 | 1,370+892ms | 0.13/0.08ms | 멱등 기록 |
+| `payment_confirm_job` claim | 10,121 | 823ms | 0.08ms | 승인 작업 |
+| `order_status_has_event` trigger | 20,988 | 917ms | 0.04ms | 상태·이력 제약 |
+| `payment_status` readMany(500건 묶음) | 605 | 369ms | 2.5ms/묶음 | 500건씩 조회 |
+
+- `pg_stat_user_tables` 순차 스캔: `payment_attempt` 451회·904,193행, `order_item` 63회·246,722행, `ticket_issue_job` 4,824회·70,209행, `order_saga_job` 1,795회·20,321행. `payment_attempt`가 가장 크다.
+- `pg_stat_io`: 30초에 WAL 쓰기 27,253회·fsync 27,168회, WAL 74.9MB. `pg_stat_database`: 트랜잭션 커밋 101,355회.
+- **한 질의가 지배하지 않는다.** 상위 질의 평균은 0.04~0.49ms이고, 24k문/초의 작은 쓰기·커밋이 CPU를 만든다. `payment_status` 읽기 한 질의를 인덱스로 바꾸는 정도로는 3~5초 꼬리가 줄지 않는다.
+
+### 8.3 시도한 read-path 수정과 K7 진단
+
+- `drizzle-payment-status.ts`의 `readMany`를 `left join lateral`로 바꿔 `payment_attempt`·`ticket_issue_job`를 주문마다 인덱스로 풀게 하는 수정을 **실험**했다. 30초 EXPLAIN에서는 인덱스 스캔이 됐지만, 100초 K7 진단(2026-11-13, `k7-bat040-diag2`)은 공식 **431/9,000(4.79%) fail**, p99 **4,577.6ms**, 3~5초 꼬리 **3.63%**, 접수 429 62(0.69%)로 개선이 없었다. 한 질의가 병목이 아니라는 8.2와 맞는다. **이 수정은 되돌렸다**(R-514에 넣지 않는다).
+- K7 3~5초 꼬리 목표 **<0.2%**는 이번 read-path 수정으로 달성하지 못했다. 남은 후보는 8.4의 무대·커밋 경로다.
+
+### 8.4 K2 예열 수정(채택)
+
+- K2 4발생기 1Gi·preVUs 100에서 예열 도착률을 본구간의 **절반(1,000/s)**으로 낮추고, 예열 `gracefulStop: '5s'`와 예열→본구간 5초 틈을 두었다(`v1-seat-hold.js`). 본구간은 그대로 2,000/s다.
+- 짧은 K2(30초 예열·30초 본구간) 결과: **dropped 0**, 시나리오 오류 0, hold p99 **36.0~38.4ms**(50ms 안), VU 최대 402. **유효**.
+- full 2,000/s 예열은 예열 구간 dropped 145~275로 무효였고, preVUs 200·예열 여유 240초·3발생기는 모두 무효였다. **예열 도착률 절반이 dropped를 0으로 만든 수정**이다. A/A는 이 무대로 다시 세운다.
+
+### 8.5 무대 용량 제안
+
+- Postgres CPU limit은 없으므로 지금의 4.5~4.8코어는 한도가 아니라 실제 사용이다. **CPU request 500m→4**로 올려 스케줄러가 실제 사용을 보장하게 하고, 필요하면 6~8까지 비교한다. limit은 두지 않거나 8로 둔다.
+- 커밋·WAL 경로: 30초 fsync 27,168회, WAL 74.9MB. `commit_delay`(예: 100µs)·`commit_siblings` 조정과 `shared_buffers` 상향을 **무대 후보**로 제안한다. `synchronous_commit=off`는 결제 내구성 때문에 제안하지 않는다.
+- 코드 쪽 다음 후보: `payment_confirm_job`·`order_event`·`outbox`·`order_idempotency`의 작은 쓰기·커밋 수를 줄이는 묶음(예: 같은 트랜잭션 안에서 이력·Outbox를 더 묶기)이다. 이번에는 한 질의 최적화로 목표를 못 맞춰 넣지 않았다.
+
+### 8.6 판정
+
+- **BAT-041(HOT-474) K7 목표 미달**: 3~5초 꼬리 3.63%, 공식 4.79%, p99 4,577.6ms. read-path 수정은 되돌렸다.
+- **K2 예열 dropped 수정 성공**: 짧은 K2 dropped 0, p99 36.0~38.4ms.
+- 다음은 8.5의 Postgres CPU request/커밋 경로를 소유자 승인 뒤 무대로 비교하고, 코드 쪽은 쓰기·커밋 묶음으로 간다.

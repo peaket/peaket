@@ -286,6 +286,9 @@ describe('v1 시나리오 형식(k6 inspect)', { skip: SKIP }, () => {
     const o = inspect('v1-seat-hold.js');
     for (const n of ['warm', 'main', 'mark_start', 'mark_end']) assert.ok(o.scenarios[n], n);
     assert.equal(o.scenarios.main.exec, 'hold');
+    assert.equal(o.scenarios.warm.rate, Math.max(1, Math.floor(ENV.RATE / 2)), '예열은 본구간 절반 도착률');
+    assert.equal(o.scenarios.warm.gracefulStop, '5s', '예열 끝 진행 중인 홀드를 마무리한다');
+    assert.equal(o.scenarios.main.startTime, `${ENV.WARM_S + 5}s`, '예열 유예 뒤 본구간을 시작한다');
     assert.equal(o.setupTimeout, '15m0s');
     for (const k of ['http_req_duration{phase:main,route:hold}', 'over_target{phase:main,route:hold,le:150}', 'http_reqs{phase:main,route:release}']) assert.ok(o.thresholds[k], k);
   });
