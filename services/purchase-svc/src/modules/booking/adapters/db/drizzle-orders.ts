@@ -4,7 +4,7 @@
 // - 조건이 맞지 않는 전이는 0행이라 아무것도 쓰지 않고 STALE을 돌려준다. 같은 주문의 두 전이가 겹치면 행 쓰기 잠금에서 줄을 서고,
 //   뒤 쪽은 앞 쪽이 커밋한 뒤 조건을 다시 평가해 0행이 된다(READ COMMITTED, data.md §5 '주문 상태 전이').
 // - 좌석·주문 ID 묶음은 `array[$1::uuid, …]`로 넘긴다(drizzle의 sql 템플릿은 배열 값을 나열로 펼친다, inventory drizzle-seat-sales.ts와 같다).
-import { type Clock, type Database, type DbTransaction, writeOutbox } from '@peaket/platform';
+import { type Clock, type Database, type DbTransaction, type OutboxMessage, writeOutbox } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import {
   ACTOR_PATTERN,
@@ -50,6 +50,8 @@ const ITEM_TEXT_MAX = 64;
 const SEAT_ASSIGNMENTS: ReadonlySet<string> = new Set<SeatAssignment>(['PICK', 'AUTO']);
 
 const T1 = transitionById('T1')!;
+const T3 = transitionById('T3')!;
+const T4 = transitionById('T4')!;
 /**
  * 결제 결과 반영 전이 가운데 결제 사건 순번 없이도 받는 것: T11(RESERVED → FAILED). Saga가 승인 기한을 넘겨 끝낼 때는 결제 사건이 없어
  * 상태 조건만으로 바꾼다(payment §3 '주문 저장소의 첫 구현', 추천 적용 2026-11-05, BUILD_ORDER PRF-165)
@@ -202,18 +204,25 @@ export class DrizzleOrderStore {
     // 사건을 먼저 만든다(순수 계산). 시각이 날짜 범위 밖이면 DB에 가기 전에 던진다. CREATED는 단계 목록 밖이라 firstInStage는 거짓이다
     const message = buildOrderEvent({ order: row, items: order.items, transition: T1, seq: 1, occurredAtMs: now, reachedBefore: false, created: order.created });
     if (!message) throw new Error('T1은 CREATED 사건을 낸다');
+    // 주문·항목·이력 1을 한 문장(CTE)으로 묶는다(BAT-035). 항목·이력은 같은 주문 ID를 쓰므로 왕복 세 번을 한 번으로 줄인다
+    const lines = order.items.map((item, i) => sql`(${i + 1}::int, ${item.seatId}::uuid, ${item.tierId}, ${item.sectionId}, ${item.unitPrice}::int)`);
     await tx.execute(sql`
-      insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
-                                  hold_id, purchase_session_id)
-      values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0,
-              ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz,
-              ${order.holdId}::uuid, ${order.purchaseSessionId})`);
-    // 항목은 준 차례로 줄 번호 1부터, 한 문장으로 넣는다
-    const lines = order.items.map((item, i) => sql`(${order.id}::uuid, ${i + 1}::int, ${item.seatId}::uuid, ${item.tierId}, ${item.sectionId}, ${item.unitPrice}::int)`);
-    await tx.execute(sql`insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) values ${sql.join(lines, sql`, `)}`);
-    await tx.execute(sql`
-      insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at)
-      values (${order.id}::uuid, 1, null, ${T1.to}, ${T1.id}, ${order.actor}, ${at}::timestamptz)`);
+      with o as (
+        insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
+                                    hold_id, purchase_session_id)
+        values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0,
+                ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz,
+                ${order.holdId}::uuid, ${order.purchaseSessionId})
+        returning id
+      ), items as (
+        insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price)
+        select o.id, v.line_no, v.seat_id, v.tier, v.section_id, v.unit_price
+        from o cross join (values ${sql.join(lines, sql`, `)}) as v(line_no, seat_id, tier, section_id, unit_price)
+      ), ev as (
+        insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at)
+        select o.id, 1, null, ${T1.to}, ${T1.id}, ${order.actor}, ${at}::timestamptz from o
+      )
+      select id from o`);
     // 마지막 문장(ADR-0116 결정 3). Kafka 키는 회차 ID다
     const [outboxId] = await writeOutbox(tx, this.o.clock, [{ topic: TRADE_ORDERS_TOPIC, key: order.eventId, payload: this.codec.encode(message) }]);
     return { seq: 1, outboxId: outboxId! };
@@ -255,6 +264,43 @@ export class DrizzleOrderStore {
     return { status: 'APPLIED', seq, order, outboxId: outboxId! };
   }
 
+  /**
+   * 결제 접수의 T3(CREATED→AUTHENTICATED)·T4(AUTHENTICATED→ACCEPTED)를 한 UPDATE와 한 order_event 묶음으로 쓴다(BAT-035).
+   * T3는 사건이 없고, T4만 ACCEPTED 사건을 만든다. Outbox 행은 호출자가 업무 문장의 마지막에 쓴다(ADR-0116 결정 3).
+   * 두 전이를 따로 부르면 주문 행 UPDATE와 order_event INSERT가 두 번씩 나가 연결 보유 시간이 길어지므로, 한 트랜잭션 안에서 한 번에 쓴다.
+   * 반환 모양은 transition과 같다(0행이면 STALE). 호출자는 APPLIED가 아니면 트랜잭션째 되돌린다.
+   * @throws RangeError orderId·actor·seatGen 모양이 틀림
+   */
+  async acceptTransitions(
+    tx: DbTransaction,
+    input: { orderId: string; actor: string; seatGen: number; at: Date },
+  ): Promise<{ status: 'APPLIED'; seq: number; order: OrderRow; outbox: OutboxMessage } | Extract<TransitionResult, { status: 'STALE' }>> {
+    assertUuid(input.orderId, 'orderId');
+    assertActor(input.actor);
+    assertInt4(input.seatGen, 'seatGen');
+    // ① T3·T4를 한 조건부 UPDATE로: 출발 상태 CREATED일 때만 ACCEPTED로 두 칸 올리고 seat_gen도 같은 문장에서 쓴다
+    const updated = await tx.execute(sql`
+      update purchase_order
+         set status = ${T4.to}, event_seq = event_seq + 2, seat_gen = ${input.seatGen}::int
+       where id = ${input.orderId}::uuid and status = ${T3.from}
+       returning ${ORDER_COLUMNS}`);
+    const changed = updated.rows[0] as OrderDbRow | undefined;
+    if (!changed) return staleOf(tx, input.orderId, T3, undefined);
+    const order = orderRowOf(changed);
+    const seq = order.eventSeq;
+    // ② T3·T4 이력을 한 문장으로(순번은 새 event_seq의 앞 두 칸)
+    await tx.execute(sql`
+      insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at)
+      values (${order.id}::uuid, ${seq - 1}::int, ${T3.from}, ${T3.to}, ${T3.id}, ${input.actor}, ${input.at}::timestamptz),
+             (${order.id}::uuid, ${seq}::int, ${T4.from}, ${T4.to}, ${T4.id}, ${input.actor}, ${input.at}::timestamptz)`);
+    // ③ T4 사건: ACCEPTED가 이 주문 이력에 처음인지 보고(첫 단계 퍼널), 항목은 한 번만 읽는다
+    const reachedBefore = await reachedBeforeOf(tx, order.id, T4.to, seq);
+    const items = await itemsOf(tx, order.id);
+    const message = buildOrderEvent({ order, items, transition: T4, seq, occurredAtMs: input.at.getTime(), reachedBefore });
+    if (!message) throw new Error('T4는 ACCEPTED 사건을 낸다');
+    return { status: 'APPLIED', seq, order, outbox: { topic: TRADE_ORDERS_TOPIC, key: order.eventId, payload: this.codec.encode(message) } };
+  }
+
   /** 주문 행 하나(없으면 undefined) */
   async getOrder(db: Database | DbTransaction, orderId: string): Promise<OrderRow | undefined> {
     assertUuid(orderId, 'orderId');
@@ -269,7 +315,7 @@ export class DrizzleOrderStore {
  * 전이하지 않은 까닭을 가른다: 주문 없음, 지금 상태가 출발이 아님, 상태는 출발이지만 그 순번 이상을 이미 반영함.
  * UPDATE와 이 조회 사이에 다른 트랜잭션이 상태를 바꿨을 수 있어, 순번 조건이 지금도 막는 때만 PAYMENT_SEQ로 본다
  */
-async function staleOf(tx: Executor, orderId: string, t: OrderTransition, paymentSeq: number | undefined): Promise<TransitionResult> {
+async function staleOf(tx: Executor, orderId: string, t: OrderTransition, paymentSeq: number | undefined): Promise<Extract<TransitionResult, { status: 'STALE' }>> {
   const r = await tx.execute(sql`select status, payment_event_seq from purchase_order where id = ${orderId}::uuid`);
   const row = r.rows[0] as { status: string; payment_event_seq: string | number } | undefined;
   if (!row) return { status: 'STALE', reason: 'NOT_FOUND' };

@@ -143,15 +143,24 @@ export class DrizzleOrderStarts implements StartPaymentReads, StartPaymentWrites
               // ② T2: 주문 행을 먼저 잠근다(같은 주문의 시작·접수·만료가 여기서 줄을 선다)
               const t = await this.o.store.transition(tx, { orderId: input.orderId, transition: 'T2', actor: input.actor });
               if (t.status !== 'APPLIED') throw new RejectedStart({ status: 'STALE', reason: 'ORDER_STATE', ...(t.current !== undefined ? { current: t.current } : {}) });
-              // ③ 주문 행을 잡은 뒤에 세므로 겹쳐도 상한을 넘지 못한다
-              const count = await countAttempts(tx, input.orderId);
-              if (count >= PAYMENT_ATTEMPTS_MAX) throw new RejectedStart({ status: 'ATTEMPTS_EXCEEDED' });
-              // ④ 접수 전의 이전 시도를 대체한다(ACCEPTED는 주문이 CREATED가 아니라서 여기 없다)
+              // ③ 이전 READY 시도를 대체한다(주문 행을 잡은 뒤라 같은 주문의 시작이 줄을 선다)
               await tx.execute(sql`update payment_attempt set status = 'SUPERSEDED' where order_id = ${input.orderId}::uuid and status = 'READY'`);
-              // ⑤ 새 시도. 활성 시도 부분 유일 인덱스가 마지막 안전망이다
-              await tx.execute(sql`
-                insert into payment_attempt (id, order_id, pg, pg_order_ref, status, created_at)
-                values (${input.attemptId}::uuid, ${input.orderId}::uuid, ${input.pg}, ${input.pgOrderRef}, 'READY', ${new Date(this.o.clock.now())}::timestamptz)`);
+              // ④⑤ 시도 수를 세고 새 시도를 한 문장(CTE)으로 쓴다(BAT-035). count는 대체 뒤에도 전체 시도 수라 old와 같고,
+              //    상한을 넘으면 INSERT가 0행이다. 활성 시도 유일 인덱스가 마지막 안전망이다
+              const at = new Date(this.o.clock.now());
+              const r = await tx.execute(sql`
+                with counted as (
+                  select count(*)::int as n from payment_attempt where order_id = ${input.orderId}::uuid
+                ), inserted as (
+                  insert into payment_attempt (id, order_id, pg, pg_order_ref, status, created_at)
+                  select ${input.attemptId}::uuid, ${input.orderId}::uuid, ${input.pg}, ${input.pgOrderRef}, 'READY', ${at}::timestamptz
+                   where (select n from counted) < ${PAYMENT_ATTEMPTS_MAX}
+                  returning id
+                )
+                select (select n from counted) as n, (select id from inserted) as id`);
+              const row = r.rows[0] as { n: number | string; id: string | null } | undefined;
+              const count = Number(row?.n);
+              if (!row || row.id === null) throw new RejectedStart({ status: 'ATTEMPTS_EXCEEDED' });
               return { resultRef: input.attemptId, value: { status: 'STARTED', attemptNo: count + 1 } };
             },
             replay: async (ref) => ({ status: 'REPLAYED', attemptId: ref }),

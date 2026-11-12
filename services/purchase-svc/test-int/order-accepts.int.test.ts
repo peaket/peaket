@@ -703,7 +703,7 @@ describe('DrizzleOrderAccepts.accept 문장 차례(리뷰 고침 M2, ADR-0116 �
     return { db, statements };
   }
 
-  test('주문 행 잠금(T3) → 결제 시도 → seat_gen → Saga 작업 → T4(Outbox)이고, Outbox INSERT 뒤에는 멱등 기록 result_ref UPDATE뿐이다 [ASVS v5.0.0-15.4.1]', async () => {
+  test('주문 행 잠금(T3·T4 한 UPDATE) → order_event(T3·T4) → 결제 시도 → Saga 작업 → Outbox(T4)이고, Outbox INSERT 뒤에는 멱등 기록 result_ref UPDATE뿐이다 [ASVS v5.0.0-15.4.1]', async () => {
     const s = fresh();
     const o = await placed(s);
     const attemptId = await putAttempt(s, o);
@@ -715,19 +715,15 @@ describe('DrizzleOrderAccepts.accept 문장 차례(리뷰 고침 M2, ADR-0116 �
     const writes = rec.statements.filter((x) => x.startsWith('insert') || x.startsWith('update'));
     expect(writes).toEqual([
       'insert into order_idempotency',
-      // T3(이력만, 사건 없음)
+      // T3·T4(주문 행 한 번, T3 이력 + T4 이력·사건)
       'update purchase_order',
       'insert into order_event',
       'update payment_attempt',
-      'update purchase_order',
       'insert into order_saga_job',
-      // T4(이력 → Outbox)
-      'update purchase_order',
-      'insert into order_event',
       'insert into outbox',
       'update order_idempotency',
     ]);
-    // 주문 행을 처음 바꾸는 문장(T3)이 결제 시도 UPDATE보다 앞이다
+    // 주문 행을 처음 바꾸는 문장(T3·T4)이 결제 시도 UPDATE보다 앞이다
     expect(writes.indexOf('update purchase_order')).toBeLessThan(writes.indexOf('update payment_attempt'));
     const afterOutbox = rec.statements.slice(rec.statements.lastIndexOf('insert into outbox') + 1);
     expect(afterOutbox).toEqual(['update order_idempotency']);

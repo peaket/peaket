@@ -13,9 +13,9 @@
 //   남은 시간을 받으면 트랜잭션의 문장 시간 초과로 건다(리뷰 고침 L4).
 // 주문 상태를 바꾸는 SQL은 쓰지 않는다(상태 SQL은 drizzle-orders.ts의 전이 함수에만, test/order-status-sql.test.ts). 결제 참조·토큰은 로그·오류 글에 싣지 않는다.
 import { timingSafeEqual } from 'node:crypto';
-import { type Clock, type Database, type DbTransaction, IDEMPOTENCY_RETENTION_MS, IdempotencyStore, type TransactionOptions } from '@peaket/platform';
+import { type Clock, type Database, type DbTransaction, IDEMPOTENCY_RETENTION_MS, IdempotencyStore, type TransactionOptions, writeOutbox } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import { ACTOR_PATTERN, type OrderStatus, type TransitionId } from '../../domain/order.js';
+import { ACTOR_PATTERN, type OrderStatus } from '../../domain/order.js';
 import type {
   AcceptInput,
   AcceptOrderView,
@@ -188,8 +188,12 @@ export class DrizzleOrderAccepts implements OrderAcceptReads, OrderAcceptWrites 
           this.#idempotency.run<AcceptOutcome>(tx, once, {
             execute: async () => {
               const at = new Date(this.o.clock.now());
-              // ② T3: 주문 행을 먼저 잠근다(잠금 차례 주문 행 → 결제 시도 행). 다른 탭이 먼저 접수했거나 만료와 겹치면 0행이다
-              await this.#transition(tx, input, 'T3');
+              // ② T3·T4: 주문 행을 한 번만 잠그고 두 전이와 seat_gen을 한 UPDATE로 쓴다(BAT-035).
+              //    다른 탭이 먼저 접수했거나 만료와 겹치면 0행이라 STALE ORDER_STATE다
+              const applied = await this.o.store.acceptTransitions(tx, { orderId: input.orderId, actor: input.actor, seatGen: input.seatGen, at });
+              if (applied.status !== 'APPLIED') {
+                throw new StaleAccept({ status: 'STALE', reason: 'ORDER_STATE', ...(applied.current !== undefined ? { current: applied.current } : {}) });
+              }
               // ③ 결제 시도 READY → ACCEPTED(그 주문의 시도일 때만). 주문 행을 잡은 뒤라 0행은 시도가 대체·만료된 것이다
               const taken = await tx.execute(sql`
                 update payment_attempt
@@ -198,14 +202,12 @@ export class DrizzleOrderAccepts implements OrderAcceptReads, OrderAcceptWrites 
                  where id = ${input.attemptId}::uuid and order_id = ${input.orderId}::uuid and status = 'READY'
                 returning id`);
               if (taken.rows.length !== 1) throw new StaleAccept(await attemptGoneOf(tx, input.attemptId));
-              // ④ 주문의 판 번호(판매 예약이 seat_rebuild의 지금 번호와 견준다, PRF-165)
-              await tx.execute(sql`update purchase_order set seat_gen = ${input.seatGen}::int where id = ${input.orderId}::uuid`);
-              // ⑤ Saga 작업 행(주문 ID 기본 키라 한 주문에 하나). 바로 돌 수 있게 다음 시각 = 지금, 임대는 비운다
+              // ④ Saga 작업 행(주문 ID 기본 키라 한 주문에 하나). 바로 돌 수 있게 다음 시각 = 지금, 임대는 비운다
               await tx.execute(sql`
                 insert into order_saga_job (order_id, event_id, step, attempts, next_attempt_at, lease_until, created_at)
                 values (${input.orderId}::uuid, ${input.eventId}::uuid, ${SAGA_FIRST_STEP}, 0, ${at}::timestamptz, null, ${at}::timestamptz)`);
-              // ⑥ T4: ACCEPTED 사건의 Outbox 행이 업무 문장의 마지막이다(ADR-0116 결정 3. 뒤에는 플랫폼의 멱등 결과 참조 UPDATE뿐)
-              await this.#transition(tx, input, 'T4');
+              // ⑤ Outbox 행이 업무 문장의 마지막이다(ADR-0116 결정 3)
+              await writeOutbox(tx, this.o.clock, [applied.outbox]);
               return { resultRef: input.orderId, value: { status: 'ACCEPTED' } };
             },
             // 같은 키·같은 지문이 먼저 커밋했다: 처음 202 그대로(입력이 달라도 지문만 본다)
@@ -218,12 +220,6 @@ export class DrizzleOrderAccepts implements OrderAcceptReads, OrderAcceptWrites 
       if (e instanceof StaleAccept) return e.outcome;
       throw e;
     }
-  }
-
-  /** 주문 전이 하나(주문 전이 함수만 상태를 바꾼다). 0행이면 STALE ORDER_STATE(current = 지금 상태)로 트랜잭션째 되돌린다 */
-  async #transition(tx: DbTransaction, input: AcceptInput, transition: TransitionId): Promise<void> {
-    const t = await this.o.store.transition(tx, { orderId: input.orderId, transition, actor: input.actor });
-    if (t.status !== 'APPLIED') throw new StaleAccept({ status: 'STALE', reason: 'ORDER_STATE', ...(t.current !== undefined ? { current: t.current } : {}) });
   }
 }
 

@@ -16,7 +16,7 @@ import { Counter, Trend } from 'k6/metrics';
 import { openPhases } from '../lib/model.mjs';
 import { faultFor, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
 import { userSeats } from '../lib/seats.mjs';
-import { PAYMENT_TERMINAL, v1SeatIds } from '../lib/v1.mjs';
+import { PAYMENT_TERMINAL, paymentUserOf, v1SeatIds } from '../lib/v1.mjs';
 import { baseOptions } from './common.js';
 import { admitAndOpen, CONSENT_VERSION, countOverTarget, envInt, envStr, HOLD_BASE, jsonOf, markScenarios, PURCHASE_BASE, scenarioErrors, V1Session, vcall, writeSummary } from './v1-common.js';
 
@@ -77,9 +77,10 @@ export function setup() {
 const sim = (path, body, route, expected) => http.post(`${SIM_URL}${path}`, JSON.stringify(body), { headers: { authorization: SIM_AUTH, 'content-type': 'application/json' }, tags: { route }, responseCallback: http.expectedStatuses(expected) });
 
 export function pay() {
-  // 반복 번호는 발생기를 나눠도(k6 실행 구간) 겹치지 않는다(줄무늬로 나뉜다). 사람마다 결제는 한 번이다
+  // 반복 번호는 발생기를 나눠도(k6 실행 구간) 겹치지 않는다(줄무늬로 나뉜다). 사람마다 결제는 한 번이다.
+  // k6의 iterationInTest는 시험 전체 번호라, 예열은 뒤에서 본구간은 그 다음에서 세어 사용자 범위가 겹치지 않게 한다(BAT-035)
   const it = exec.scenario.iterationInTest;
-  const i = exec.scenario.name === 'main' ? it : USERS - 1 - it;
+  const i = paymentUserOf(exec.scenario.name, it, USERS, RATE, WARM_S);
   if (i < 0 || i >= USERS) return;
   const opened = admitAndOpen(EVENT_ID, i, { phase: 'prep', waitS: ADMIT_WAIT_S, record: false });
   if (!opened) return;

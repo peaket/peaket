@@ -10,7 +10,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { faultFor, PAYMENT_END_GUARD_MS, paymentEndTruncated, paymentOverTarget } from '../lib/targets.mjs';
-import { nextPurchaseSeq, ownedUser, runTagHex, seatIndexOf, v1AccountId, v1Headers, v1Pid, v1SeatIds, v1SeatMap, v1SeatUuid, v1SessionId } from '../lib/v1.mjs';
+import { nextPurchaseSeq, ownedUser, paymentUserOf, runTagHex, seatIndexOf, v1AccountId, v1Headers, v1Pid, v1SeatIds, v1SeatMap, v1SeatUuid, v1SessionId } from '../lib/v1.mjs';
 import { seatCount, seatIdAt } from '../lib/seats.mjs';
 import { parseArgs, UsageError, V1_ADMISSION_STAY_S, V1_SCENARIOS } from '../runner/args.mjs';
 import { K6_IMAGE } from '../runner/manifests.mjs';
@@ -115,6 +115,21 @@ describe('faultFor 소수 한 자리(§3.9 비율 소수 한 자리)', () => {
     assert.doesNotThrow(() => faultFor(0, 0.1, 0));
     assert.doesNotThrow(() => faultFor(0, 99.9, 0.1));
     for (const [d, l] of [[0.05, 0], [100.1, 0], [99.9, 0.2], [50.5, 49.6]]) assert.throws(() => faultFor(0, d, l), RangeError, `${d}+${l}`);
+  });
+});
+
+describe('BAT-035 v1 payment 사용자 번호', () => {
+  test('예열과 본구간이 k6 시험 전체 반복 번호에서 같은 사용자를 두 번 쓰지 않는다', () => {
+    const users = 11002;
+    const rate = 100;
+    const warmS = 10;
+    for (const warmCount of [999, 1000, 1001, 1002]) {
+      const markOffset = 2;
+      const warm = Array.from({ length: warmCount }, (_, it) => paymentUserOf('warm', markOffset + it, users, rate, warmS));
+      const main = Array.from({ length: rate * 100 }, (_, k) => paymentUserOf('main', markOffset + warmCount + k, users, rate, warmS));
+      const all = [...warm, ...main].filter((i) => i >= 0 && i < users);
+      assert.equal(new Set(all).size, all.length, `겹침 없음(warm ${warmCount})`);
+    }
   });
 });
 

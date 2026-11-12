@@ -48,6 +48,18 @@ export const v1SessionId = (runTag, i) => idOf(runTag, i, '000000000002');
 export const v1Pid = (runTag, i) => `pid-lt-${assertRunTag(runTag)}-${userIndex(i)}`;
 
 /**
+ * v1 payment의 가상 사용자 번호(BAT-035). k6 `exec.scenario.iterationInTest`는 시험 전체 번호라
+ * 예열과 본구간이 같은 번호를 다시 쓰지 않도록, 예열은 뒤에서, 본구간은 예열이 쓴 번호 다음에서 센다.
+ * 본구간 앞의 여유는 큰 시험(users≥1,000)에서 mark_start·mark_end 두 반복과 예열 초과(최대 4)를 덮는 6이다.
+ * 작은 통합 시험(users<1,000)은 본구간 번호가 예열의 높은 범위에 닿지 않아 여유를 두지 않는다.
+ * @param {string} scenarioName @param {number} iterationInTest @param {number} users @param {number} rate @param {number} warmS
+ */
+export function paymentUserOf(scenarioName, iterationInTest, users, rate, warmS) {
+  const margin = users >= 1_000 ? 6 : 0;
+  return scenarioName === 'main' ? iterationInTest - (rate * warmS + margin) : users - 1 - iterationInTest;
+}
+
+/**
  * 게이트웨이가 넣는 신원 머리(packages/platform/src/auth.ts identityOf): 계정·로그인 세션·대상(fan)·권한(ticket:buy)·사람 식별값.
  * json이면 content-type도 단다
  * @param {string} runTag @param {number} i @param {{ json?: boolean }} [o]

@@ -1,0 +1,94 @@
+# BAT-035 결과 — purchase-svc 세 경로 트랜잭션 DB 연결 보유 시간
+
+- 날짜: 2026-11-12
+- 묶음: BAT-035(HOT-469, 갈래 1, A등급, 0.5~1일 [가정])
+- 장부 범위: `P-T1`, `P-T23`
+- 선행: BAT-034(HOT-468, R-501) 핫패스 연결 대기 250ms
+
+## 1. 진단 수치
+
+K7 진단 1회(`.cache/peaket-bat033/k7-diag-bat034/`):
+
+| 항목 | 값 |
+| --- | ---: |
+| 접수 호출 | 9,402 |
+| 202 | 9,136 |
+| **429 `server-busy`** | **265 (2.82%)** |
+| 503 | 1 |
+| `payment_confirm_ms` p99 | 4,065.35ms |
+| `payment_end_truncated_terminal` / `_pending` | 452 / 19 |
+| dropped / 시나리오 오류 / startSkewS | 0 / **16** / 0 |
+
+- 429 `durationMs`: 접수 p50 385ms·p90 673ms·p99 811ms, 주문 p50 476ms·p90 589ms, 결제 시작 p50 502ms·p90 790ms.
+- 성공 202 p50 533ms·p90 838ms·p99 1,049ms. 250ms를 기다리고도 실패하는 요청이 남았다.
+
+## 2. 문장 수·시간
+
+실제 PostgreSQL 18에서 각 경로를 한 번씩 실행하고 `tx.execute`를 감싸 셌다.
+
+| 경로 | 고치기 전 | 고친 뒤 |
+| --- | ---: | ---: |
+| 주문 생성 | 8문장 / 18.2ms | **6문장 / 18.0ms** |
+| 결제 시도 시작 | 9문장 / 8.8ms | **8문장 / 9.3ms** |
+| 결제 접수 | 14문장 / 13.3ms | **11문장 / 10.9ms** |
+
+- 공통 멱등 기록 4문장(락 한도 설정·키 INSERT·기본값 복원·결과 참조 UPDATE)은 원자성 때문에 유지했다.
+- `itemsOf`·`reachedBeforeOf`는 **중복이 아니었다**. T3(AUTHENTICATED)는 사건이 없어 읽지 않고, T4(ACCEPTED)만 `itemsOf` 1회·`reachedBeforeOf` 1회를 읽는다. 실제 계측도 `itemReads=1`, `reachedBeforeReads=1`이다.
+- 접수의 실제 중복은 **T3 UPDATE + T4 UPDATE**, **T3 이력 INSERT + T4 이력 INSERT**, 별도 `seat_gen` UPDATE였다.
+- 주문 생성은 주문·항목·이력 INSERT 세 번, 결제 시작은 시도 수 SELECT·대체 UPDATE·새 시도 INSERT 세 번이었다.
+
+## 3. 고른 수정
+
+1. 주문 생성: 주문 행·항목·이력 1을 한 CTE 문장으로 묶었다. Outbox는 기존처럼 마지막 업무 문장이다. 8→6.
+2. 결제 시도 시작: 이전 READY 대체는 순서를 지켜 별도 문장으로 두고, 시도 수 SELECT와 새 시도 INSERT를 한 CTE로 묶었다. 9→8.
+3. 결제 접수: T3·T4를 한 조건부 UPDATE(`event_seq + 2`, `seat_gen` 병합)와 한 `order_event` 다중 행 INSERT로 썼다. T4 사건은 `acceptTransitions`가 만들고, Outbox는 결제 시도 UPDATE·Saga INSERT 뒤 업무 문장의 마지막에 쓴다. 14→11.
+4. BAT-034의 250ms 연결 대기는 유지했다.
+
+## 4. 시나리오 오류 16건 — 측정 방법 문제
+
+- 16건은 모두 `409 already-admitted`였고, 계정 16개가 모두 서로 달랐다. 같은 계정의 중복 진입이 아니다.
+- 16건 모두 본구간 끝(21:13:21.879~.947)에 몰렸다.
+- 원인: k6 `exec.scenario.iterationInTest`는 **시험 전체 번호**다. 예열은 `USERS - 1 - it`, 본구간은 `it`으로 사용자 번호를 골라 두 범위가 끝에서 겹쳤다. 예열에서 이미 입장한 사용자가 본구간 진입에서 409를 받았다.
+- 수정: `loadtest/lib/v1.mjs`의 `paymentUserOf`가 큰 시험(users≥1,000)의 본구간 번호에서 `RATE * WARM_S + 6`을 빼고(mark_start·mark_end 두 반복과 예열 초과 최대 4), 작은 통합 시험은 여유 0으로 둔다. 예열 999·1,000·1,001·1,002 모두 사용자 범위가 겹치지 않는 단위 시험을 더했다.
+- 판정: **제품 문제가 아니라 측정 방법 문제**다.
+
+## 5. 시험
+
+- 구매-svc 단위 7파일: **459건 통과**(주문 생성·결제 시작·접수·HTTP·주문 상태 SQL).
+- 실제 PostgreSQL 통합: `order-writes`·`start-payment`·`order-accepts` 102건 + BAT-035 문장 수·순서 1건 + BAT-034 풀 2건 = **105건 통과**. `accept-e2e` **25건**, `orders-e2e` **34건**도 통과했다.
+- BAT-035 문장 시험: create 6, start 8, accept 11, 접수 `itemsOf`/`reachedBeforeOf` 각 1, Outbox가 Saga INSERT 뒤·멱등 결과 UPDATE 앞.
+- 시나리오: `paymentUserOf` 단위 시험 통과, loadtest v1 시험 **48건 통과**.
+- typecheck: 영향 패키지(`@peaket/platform`, `@peaket/purchase-svc`) 통과.
+- lint: 오류 0.
+- doc-check: 오류 0(기존 경고 4).
+- `ledger --batch BAT-035 --require`: 통과.
+- trace-check `P-T23`: 통과.
+
+## 6. 다음
+
+- K7 진단은 아직 돌리지 않았다. 갈래 2·3 CI 회귀 수정이 develop에 합쳐져 CI가 초록이 되고 `measurement go`를 받은 뒤 BAT-035 후 K7 진단 1회를 돈다.
+- 확인: 접수 429 <1%, `payment_confirm_ms` p99 <3초, dropped 0·시나리오 오류 0·`startSkewS=0`.
+- 유효하고 목표를 맞추면 공식 K7 3회·A/A·K2 3회를 소유자가 승인한다. 미달이면 (라) HTTP 백프레셔를 다음 배치 후보로 검토한다.
+
+## 7. 변이·4관점 리뷰(2026-11-12)
+
+### 변이
+
+15개 변이를 넣고 해당 시험을 돌렸다. **15개 모두 잡혔다(놓침 0).**
+
+- BAT-035: `event_seq +2→+1`, `seat_gen` 제거, T3 seq `seq-1→seq`, T3/T4 status 뒤바꿈, T3 이력 from/to 뒤바꿈, Outbox를 Saga 앞으로, 시도 상한 `<→<=`, SUPERSEDED 제거, create `order_item` CTE 비우기, create event seq `1→2`.
+- BAT-034: 기본 250→100, 범위 검증 5,000→100,000.
+- BAT-033: 끝 경계를 `!terminal` 뒤로, `_terminal`/`_pending` 맞바꾸기, 끝 경계 3,000→2,999.
+- 사용 시험: `order-accepts`·`start-payment`·`order-writes`·`bat035-transaction-statements` test-int, `db-pool-config` 단위, BAT-033 단위·M6 k6 시험. 전체 test-int는 돌리지 않았다.
+
+### 4관점 리뷰
+
+- **정확성**: T3/T4 한 UPDATE의 `event_seq +2`·두 이력 행·T4 사건·`seat_gen` 병합이 기존 전이 표와 같다. create CTE는 주문·항목·이력을 한 문장으로 쓰고 Outbox를 마지막에 둔다. start CTE는 대체 뒤 시도 수와 INSERT를 묶고 활성 유일 인덱스를 유지한다. **높음·중간 없음.**
+- **동시성/장애**: 주문 행 잠금(T3/T4) → 결제 시도 UPDATE → Saga INSERT → Outbox 순서다. 시도 UPDATE·Saga INSERT·Outbox가 실패하면 트랜잭션째 되돌린다. start는 주문 행 잠금 뒤 대체→카운트+INSERT라 동시 시작이 직렬화되고, 유일 인덱스가 마지막 안전망이다. **높음·중간 없음.**
+- **보안**: 새 SQL은 모두 매개변수화되어 있고, 결제 참조·토큰을 로그·오류에 싣지 않는다. 새 환경 값은 비밀이 아니며 범위를 검증한다. **높음·중간 없음.**
+- **데이터 불변식**: P-T23(한 주문 한 접수), 주문 이력 seq/상태, `seat_gen`, Saga 작업 한 행, Outbox 마지막 문장을 기존 test-int와 변이가 확인했다. **높음·중간 없음.**
+- **중간 지적 1건(고침)**: `paymentUserOf`의 큰 시험 여유가 4면 예열이 계획보다 2회 더 돌 때 1~2명이 다시 겹칠 수 있었다. 여유를 6으로 늘리고 예열 1,002까지 단위 시험에 넣었다.
+- **낮음**: `hotConnectTimeoutMsFromEnv`가 `Number(raw)`라 `0x10`·`1e3` 같은 표기도 받는다. 범위(1~5,000)는 지키므로 보안·동작 영향은 없고, 다음 정비 때 10진수 정규식으로 좁힌다.
+- **낮음**: `acceptTransitions`는 `at`이 Date인지 직접 보지 않는다. 호출자(`DrizzleOrderAccepts`)가 `new Date(clock.now())`를 넘긴다.
+- **낮음**: create CTE의 `items`는 최종 SELECT가 참조하지 않는 data-modifying CTE다. PostgreSQL이 실행하지만, 변이(`where false`)가 항목 누락을 잡는지 확인했다.
+- **낮음**: 큰 시험은 본구간 앞 6회를 사용자 번호 여유로 비워 둔다(10,000회 중 6회, 0.06%). 공식 점검의 분모는 실제 접수 호출 수라 429 비율 계산에는 영향이 없다.
