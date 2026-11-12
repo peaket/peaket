@@ -62,7 +62,7 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
   const json = useMemo(() => JSON.stringify(selected ?? rules, null, 2), [selected, rules]);
   const decision = useMemo(() => {
     try {
-      const parsed = parseSalePolicy({ rules }, CTX);
+      const parsed = parseSalePolicy(rules, CTX);
       if (!parsed.ok) return null;
       return evaluateSalePolicy(parsed.rules, { at: new Date(), round: 'ALL', grade, quantity: simQty, lists: simList ? [simList] : [] }, 4);
     } catch {
@@ -105,7 +105,7 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
   const apply = () => {
     const next = makeRule();
     try {
-      const parsed = parseSalePolicy({ rules: [...rules.filter((_, i) => i !== editAt), next] }, CTX);
+      const parsed = parseSalePolicy([...rules.filter((_, i) => i !== editAt), next], CTX);
       if (!parsed.ok) {
         setMessage(`입력 오류: ${parsed.errors[0]?.path ?? ''} ${parsed.errors[0]?.code ?? ''}`.trim());
         return;
