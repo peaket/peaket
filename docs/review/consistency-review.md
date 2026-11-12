@@ -605,6 +605,8 @@
 | R-493 | 웨이브 게이트·브라우저 확인 기록이 없고 `seatmap-replace-required` 코드 제목이 계약 목록과 달랐다 | docs/review/browser-check/HOT-230.md, docs/review/browser-check/HOT-251.md, docs/review/measurements/BAT-151-158-wave.md, docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/lanes/lane2.md, services/core-svc/src/modules/catalog/application/problems.ts, docs/review/consistency-review.md, docs/00-summary.md | 확인 기록·웨이브 보고서를 더하고 오류 제목을 계약에 맞추며 records·장부를 맞췄다 | 완료 |
 | R-494 | `docs/data.md`의 Mermaid ER 그림에 `//` 주석을 넣어 CI docs-check가 실패했다 | docs/data.md | `//`를 Mermaid 주석 `%%`로 바꿨다 | 적용 |
 | R-495 | BAT-151의 템플릿 카드 뒤 FE-T46 ① 시험이 옛 기대(0개)를 그대로 써 CI rich-text가 3브라우저에서 실패했다 | tools/web-checks/rich-text/seatmap-editor.spec.mjs | 404 시작 화면의 템플릿 카드를 1개로 기대하고 주석을 고쳤다 | 적용 |
+| R-484 | BAS-020·BAS-030이 만드는 공급망 게시·SBOM 찾기·Avro 계약 검사·등록 Job이 비어 있었다 | .github/workflows/build-image.yml·contract-check.yml·ci.yml, tools/ci, packages/platform, deploy/charts | 워크플로·도구·차트·단위 시험을 더하고 장부 범위를 이 배치 몫으로 좁힘 | 적용 |
+| R-498 | `sigstore/cosign-installer`가 저장소 실제 허용 액션 정책에 없어 develop CI가 startup_failure로 시작하지 못했다 | .github/workflows/build-image.yml, infra/stacks/global/github/variables.tf | cosign을 체크섬 고정 바이너리로 받아 쓰고, 쓰지 않는 허용 패턴을 되돌렸다 | 적용 |
 
 ## 4. 숫자 일치표
 

@@ -47,5 +47,5 @@ variable "require_code_owner_review" {
 variable "actions_patterns_allowed" {
   description = "허용할 제3자 액션 패턴. 워크플로가 쓰는 것만 더한다(docs/devops.md §4.5). 판은 조직 정책의 SHA 고정 요구가 따로 막는다. tools/ci/check-workflows.mjs가 이 기본값으로 워크플로를 본다(D-T12 ①)"
   type        = list(string)
-  default     = ["hashicorp/setup-terraform@*", "ossf/scorecard-action@*", "sigstore/cosign-installer@*"]
+  default     = ["hashicorp/setup-terraform@*", "ossf/scorecard-action@*"]
 }

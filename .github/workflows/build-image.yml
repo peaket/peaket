@@ -141,8 +141,21 @@ jobs:
               anchore/syft@sha256:825cad3a952c87676a6d07e9a3bb05ac9c401d598360070e970aa46d54c1727e \
               "oci-archive:/in/$IMAGE-$arch.oci.tar" -o "cyclonedx-json=/out/$IMAGE-$arch.cdx.json"
           done
-      # cosign 키 없는 서명(인덱스와 플랫폼 이미지 모두, --recursive)과 SLSA 출처 증명, SBOM 증명
-      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      # cosign 키 없는 서명(인덱스와 플랫폼 이미지 모두, --recursive)과 SLSA 출처 증명, SBOM 증명.
+      # sigstore/cosign-installer는 저장소의 허용 액션 정책(제3자 액션)에 걸려 CI가 시작하지 못하므로,
+      # 다이제스트 대신 판·체크섬을 고정한 cosign 바이너리를 받아 쓴다(제3자 액션을 늘리지 않는다).
+      - name: cosign 받기
+        env:
+          COSIGN_VERSION: v2.4.1
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION"
+          curl -fsSL -o "$RUNNER_TEMP/cosign-linux-amd64" "$base/cosign-linux-amd64"
+          curl -fsSL -o "$RUNNER_TEMP/cosign_checksums.txt" "$base/cosign_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep " cosign-linux-amd64$" cosign_checksums.txt | sha256sum -c -)
+          mv "$RUNNER_TEMP/cosign-linux-amd64" "$RUNNER_TEMP/cosign"
+          chmod +x "$RUNNER_TEMP/cosign"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: cosign 서명
         env:
           IMAGE: ${{ inputs.image }}
