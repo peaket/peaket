@@ -554,6 +554,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - R-506: gitleaks 이력 지문 예외·SRI 쿼리 시험 수정.
 - R-507: BAT-035 후속 측정 보정(2026-11-12): `paymentUserOf`를 시나리오별 반복 번호와 계획 밖 꼬리 버리기로 고치고, payment-model 웹훅 시험을 같은 `fakeClock`으로 맞췄다. K7 r2는 429 159/9,354(1.70%)·confirm p99 4,320.36ms로 미달해 BAT-037 후보를 남겼다.
 - R-508: BAT-037 purchase-svc 쓰기 경로 HTTP 백프레셔(2026-11-12): `payment-status` 롱 폴링은 대기 중 DB 연결을 쥐지 않는다(기다림 표 메모리, 묶음 조회 전용 풀 2). 쓰기 429 951건이 핫패스 풀을 포화시키므로 세 쓰기 경로에 `@Bulkhead`(공유 이름 `purchase-write`, 기본 64=핫패스 16×4, `Retry-After` 1, `PEAKET_PURCHASE_WRITE_BULKHEAD_LIMIT` 1~1,024)를 달았다. K7은 measurement go 뒤.
+- R-502: BAT-210(BAS-070·BAS-110·BAS-230, 2026-11-12): 운영 확인 표 4편, NFR-007 셈 근거, RFC 3건 초안을 더했다.
 
 ## 5. [충돌] 결정 결과
 
