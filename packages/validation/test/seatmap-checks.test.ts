@@ -76,10 +76,25 @@ describe('S-T40 ⑥ 좌석 겹침', () => {
 
   test('S-T40 ⑥ 좌석 간격이 없으면 50cm를 쓰고, 경고 ID는 100개까지이며 seatCount는 전체 수다', () => {
     expect(seatSpacingOf(section([]))).toBe(50);
+    expect(seatSpacingOf(section([], { fillRule: { seatSpacingCm: 100_000 } }))).toBe(1_000);
     const seats = Array.from({ length: 101 }, (_, i) => seat({ seatId: `p${i}`, x: 100, y: 100 }));
     const w = overlapWarnings([section(seats)])[0]!;
     expect(w.seatIds).toHaveLength(WARNING_SEAT_IDS_MAX);
     expect(w.seatCount).toBe(101);
+  });
+
+  test('S-T40 ⑥ 같은 좌표 1,001석은 모두 겹침으로 세고 ID는 100개까지다', () => {
+    const seats = Array.from({ length: 1_001 }, (_, i) => seat({ seatId: `same${i}`, x: 100, y: 100 }));
+    const w = overlapWarnings([section(seats)])[0]!;
+    expect(w.seatCount).toBe(1_001);
+    expect(w.seatIds).toHaveLength(WARNING_SEAT_IDS_MAX);
+  });
+
+  test('S-T40 ⑥ 촘촘한 2,001석도 비교 상한 안에서 겹침으로 센다', () => {
+    const seats = Array.from({ length: 2_001 }, (_, i) => seat({ seatId: `dense${i}`, x: 100 + i * 0.001, y: 100 }));
+    const w = overlapWarnings([section(seats)])[0]!;
+    expect(w.seatCount).toBe(2_001);
+    expect(w.seatIds).toHaveLength(WARNING_SEAT_IDS_MAX);
   });
 });
 

@@ -36,6 +36,10 @@ export interface CheckLayout {
 export const WARNING_SEAT_IDS_MAX = 100;
 /** 좌석 간격이 없을 때 쓰는 기본값(cm) [가정] */
 export const DEFAULT_SEAT_SPACING_CM = 50;
+/** 좌석 간격 상한(cm) [가정]. 비정상적으로 큰 값이 겹침 격자를 한 칸으로 만들어 5만 석에서 O(n²)이 되는 것을 막는다 */
+export const SEAT_SPACING_MAX_CM = 1_000;
+/** 겹침 비교 상한 [가정]. 한 칸에 아주 촘촘히 몰린 비정상 배치에서도 한 번 훑게 한다(넘으면 경고를 넓게 잡는다) */
+export const MAX_OVERLAP_COMPARISONS = 1_000_000;
 /** W1의 휠체어석 기준: N/100을 올림하고 20석에서 멈춘다 [가정] */
 export const WHEELCHAIR_PER_100 = 100;
 export const WHEELCHAIR_MAX_REQUIRED = 20;
@@ -92,31 +96,48 @@ function adjacentWheelchairRuns(sections: readonly CheckSection[]): string[] {
   return out;
 }
 
-/** 구역의 좌석 간격(cm). fillRule 값이 1 이상 정수면 그것, 아니면 50 [가정] */
+/** 구역의 좌석 간격(cm). fillRule 값이 1 이상 정수면 그것(상한 1,000cm [가정]), 아니면 50 [가정] */
 export function seatSpacingOf(section: CheckSection): number {
   const v = section.fillRule?.seatSpacingCm;
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : DEFAULT_SEAT_SPACING_CM;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(v, SEAT_SPACING_MAX_CM) : DEFAULT_SEAT_SPACING_CM;
 }
 
 /**
  * 좌석 겹침: 두 좌석 중심 사이 거리가 두 좌석 구역의 좌석 간격 가운데 작은 쪽의 절반보다 가까우면 두 좌석 모두.
- * 같으면 경고가 아니다. 격자로 이웃만 견주어 5만 석에서도 한 번 훑는다
+ * 같으면 경고가 아니다. 같은 좌표는 묶어 한 번에 세고, 격자로 이웃만 견주어 5만 석에서도 한 번 훑는다.
+ * 비교 상한을 넘는 비정상 배치는 경고를 넓게 잡는다(경고는 저장을 막지 않는다)
  */
 export function overlapWarnings(sections: readonly CheckSection[]): SeatMapWarning[] {
   const items = sections.flatMap((s) => seatsOf(s).map((seat) => ({ seat, spacing: seatSpacingOf(s) })));
   if (items.length < 2) return [];
+  const hit = new Set<string>();
+  // 같은 좌표의 좌석은 서로 반드시 겹친다. 대표 하나만 격자에 넣고, 대표가 겹치면 묶음 전체를 넣는다
+  const groups = new Map<string, number[]>();
+  items.forEach((x, i) => {
+    const k = `${x.seat.x},${x.seat.y}`;
+    const list = groups.get(k);
+    if (list) list.push(i);
+    else groups.set(k, [i]);
+  });
+  const members = new Map<number, number[]>();
+  for (const g of groups.values()) {
+    members.set(g[0]!, g);
+    if (g.length > 1) for (const i of g) hit.add(items[i]!.seat.seatId);
+  }
   const cell = Math.max(...items.map((x) => x.spacing), DEFAULT_SEAT_SPACING_CM);
   const grid = new Map<string, number[]>();
   const key = (x: number, y: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
-  const add = (i: number) => {
+  for (const i of members.keys()) {
     const k = key(items[i]!.seat.x, items[i]!.seat.y);
     const list = grid.get(k);
     if (list) list.push(i);
     else grid.set(k, [i]);
+  }
+  const addGroup = (i: number) => {
+    for (const k of members.get(i) ?? []) hit.add(items[k]!.seat.seatId);
   };
-  items.forEach((_, i) => add(i));
-  const hit = new Set<string>();
-  for (let i = 0; i < items.length; i++) {
+  let comparisons = 0;
+  outer: for (const i of members.keys()) {
     const a = items[i]!;
     const cx = Math.floor(a.seat.x / cell);
     const cy = Math.floor(a.seat.y / cell);
@@ -124,11 +145,16 @@ export function overlapWarnings(sections: readonly CheckSection[]): SeatMapWarni
       for (let dy = -1; dy <= 1; dy++) {
         for (const j of grid.get(`${cx + dx},${cy + dy}`) ?? []) {
           if (j <= i) continue;
+          if (++comparisons > MAX_OVERLAP_COMPARISONS) {
+            // 촘촘한 비정상 배치: 남은 좌석을 모두 겹침으로 넓게 잡고 멈춘다
+            for (const x of items) hit.add(x.seat.seatId);
+            break outer;
+          }
           const b = items[j]!;
           const limit = Math.min(a.spacing, b.spacing) / 2;
           if (Math.hypot(a.seat.x - b.seat.x, a.seat.y - b.seat.y) < limit) {
-            hit.add(a.seat.seatId);
-            hit.add(b.seat.seatId);
+            addGroup(i);
+            addGroup(j);
           }
         }
       }
