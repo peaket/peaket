@@ -31,6 +31,11 @@ jobs:
       # 생성물이 계약과 같은지, 생성 스키마가 계약대로 거르는지(packages/contracts/README.md)
       - run: pnpm --filter @peaket/contracts gen:check
       - run: pnpm --filter @peaket/contracts test
+      # Avro 사건 스키마(docs/api/avro, BUILD_ORDER BAS-030): 파일·열거 기본 기호를 보고, 마지막 출시 태그의 스키마와 BACKWARD_TRANSITIVE로 견준다.
+      # 운영 레지스트리에는 닿지 않는다(등록 Job은 GitOps가 하고, CI는 로컬 검사만 한다, docs/devops.md §3.1·§4.2)
+      - run: |
+          base=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$base" ]; then node tools/ci/avro-schema.mjs --base "$base"; else node tools/ci/avro-schema.mjs; fi
       # 화면 생성물(api-client의 작업 서술 표·오류 표·orval 훅·MSW 처리기)이 계약과 같은지(packages/api-client, BUILD_ORDER BAS-041)
       - run: pnpm --filter @peaket/api-client test
       # 깨짐 검사: 도구는 다이제스트를 고정한 이미지로 네트워크를 끊고 돈다(tools/ci/README.md).

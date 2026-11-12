@@ -74,6 +74,7 @@ export {
   type OutboxRelayProcessOptions,
 } from './relay-process.js';
 export { KAFKA_AUTH_LOCKED, KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
+export { assertStartupSchema, assertTopicsConfigured, checkStartupSchema, CONFLUENT_MAGIC_BYTE, decodeConfluent, encodeConfluent, MAX_SCHEMA_ID, parseSchemaIds, type StartupSchemaStatus } from './avro.js';
 export { kafkaAuthFromEnv, mskIamTokenProvider, mskSessionName, type KafkaAuth, type KafkaMskIamAuth, type MskIamOptions, type OAuthBearerProvider, type OAuthBearerToken } from './msk-iam.js';
 export {
   KEYED_CONSUMER_DEFAULTS,

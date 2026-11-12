@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- **2026-11-11 BAT-203(HOT-253)까지 끝냈다**: 다음 묶음은 BAT-205(BAS-020·BAS-030, 4.25일)다. BAT-203의 실제 Valkey 통합 시험(`test-int/entry-store.int.test.ts`의 `eligibilityCases`)은 감독 허가 뒤 돌린다(갈래 2가 먼저 통합 시험을 쓴다). BAT-195(BOT-065), BAT-200(BOT-090·BAS-010 ①), BAT-202(BAS-011)는 끝났다. BOT-080은 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다.
+- **2026-11-12 BAT-205 웨이브 진행 중(ADR-0267)**: 가지 `wave/lane3-BAT-205`. 장부 범위를 `D-T32 ①, D-T39 ①~④, ST-T15, delivery:v5.0.0-15.1.2`로 좁혔다(나머지 docs/devops·streaming·delivery 항목은 다른 단계). 싼 게이트(구현·단위 시험·typecheck·lint·doc-check·ledger/trace-check)까지 하고, test-int 전체·변이·4관점 리뷰·CI는 heavy gate go 뒤에 한 번 한다. 그 뒤 다음 묶음 BAT-210(BAS-070·BAS-110·BAS-230, 4.5일)이다. BAT-203의 실제 Valkey 통합 시험은 BAT-205 heavy gate에서 함께 돈다. BAT-195(BOT-065), BAT-200(BOT-090·BAS-010 ①), BAT-202(BAS-011)는 끝났다. BOT-080은 선행 OPS-260(갈래 2)·HOT-400(갈래 1) 뒤 묶음 BAT-197로 옮겼다. BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)는 다른 갈래 대기, BAT-185(HOT-012)는 AWS 계정까지, BAT-190(BAS-250)은 OPEN[23]으로, BAT-197은 선행 대기로 건너뛴다.
 - 구간 2: 소유자 결정(2026-11-09)으로 BOT-060에서 멈췄다. 재개는 소유자 지시 뒤 BOT-065부터 BUILD_ORDER 차례이고, 구간 끝에 정리 목록. HOT-012 엣지 KeyValueStore·S3 실제 어댑터와 권한은 AWS 계정이 생겨 배포하는 단계까지 건너뛴다(ADR-0234) → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 미룸이라 건너뛴다). 구간 1의 정리 목록과 BOT-122(패스키), 구간 2의 BOT-044(2026-11-05)·HOT-010·HOT-011(2026-11-06)·HOT-020·HOT-030·HOT-040 ①·HOT-050·HOT-060·BOT-047·HOT-041·HOT-061·HOT-042·BAS-260·BOT-050·BOT-055·BOT-060(2026-11-09)은 끝냈다. 건너뛴 구간 1 단계: BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 미룬다(OPEN[23] (다), 소유자 결정 2026-11-05). 이 세션은 만들지 않는다(2026-11-03 안전 분류기에 막힘). K6 측정(BOT-170) 전에 소유자가 만들 길을 정한다.
 
@@ -41,6 +41,10 @@
 - BAT-203: 바꾼 Lua(진입 번호 묶음·로비 창·입장)의 옛·새 성능 비교(ADR-0265 결정 10)는 갈래 1 몫이다. `loadtest/micro/lua-compare.mjs`의 `queue` 묶음에 `entry-lua.ts` 원문을 더하는 일을 감독이 갈래 1과 맞춘다
 - BAT-203: 화면이 403 `sale-eligibility-required`를 공연 상세의 예매 제한 안내로 돌리는 Q-T36 ⑧은 HOT-346이다. 이 묶음은 정본(docs/frontend.md §3.4)만 맞췄다
 - BAT-203: queue-svc 전체 시험을 두 번 돌리는 가운데 `GrpcTrustRisk.verify(VERIFICATION)`의 B-T11 시험이 한 번 UNAVAILABLE/ALLOW로 흔들렸다(바로 다시 돌려 665개 통과, 이번 변경과 닿지 않는 trust gRPC 시험)
+- BAT-205: 실제 Schema Registry 컨테이너로 등록·BACKWARD_TRANSITIVE를 확인하는 통합 시험과 ArgoCD PreSync 실행은 배포 단계다. 지금은 `tools/ci/avro-schema.mjs`의 정적·태그 대비 검사와 가짜 HTTP 등록 시험까지다
+- BAT-205: `build-image.yml` 게시 잡의 실제 GHCR 푸시·cosign·SLSA·SBOM 증명은 출시·핫픽스 가지 첫 CI에서 확인한다. `ci.yml` image 잡은 게시 잡 권한을 덮지만 게시 잡 조건이 PR·develop을 막는다
+- BAT-205: D-T32 ② `cache-mode` 규칙은 출시 가지 후보 빌드가 생기는 단계 몫이다. D-T11(서명 없는 이미지 기동 거부)·D-T33(오버레이 레지스트리)·D-T34(비밀 교체)는 Kyverno·배포 단계다
+- BAT-205: `sbom-find`의 조치 기한 표(취약점 공개일 기준)는 BAS-140 승격 차단과 함께 잰다. 지금은 배포 다이제스트→SBOM→패키지 판 찾기까지다
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -98,4 +102,5 @@
 - 2026-11-10 BAT-195 BOT-065 차단 기기 목록·라벨 반영·그림자 판·기기 키 회전 이음(R-441, B-T4·B-T9·B-T20·B-T21·B-T26·B-T27·Q-T48, ADR-0258): trust-svc `TrustLabelService.ApplyLabel`(멱등 기록과 판 가드), 규칙 파일 `shadow`·`stage: "LAUNCH"`, 이음 기간 옮기기와 이어 달기. 장부 범위 빈칸 33 → 0, 독립 틀린 구현 70개 중 12개 놓침 → 시험 더함. BOT-080은 BAT-197로 옮김
 - 2026-11-10 BAT-200 BOT-090 추가 검증 제출·이의 접수·SCR-009와 BAS-010 ① 보안 린트(R-454, Q-T34·B-T10·B-T11·B-T15·I-T56·V-T31, ADR-0259): queue-svc 제출·이의·상태 읽기와 첫 gRPC 서버, identity `CheckReverification`, trust `GetVerdictEvidence`, 입장 확정 통과자 예외, ESLint 보안 규칙·끄기 거절·응답 스키마 기준선, 조치 기한 판정. 리뷰 높음 1·보안 5 고침, 틀린 구현 40개 중 4개 놓침 → 시험 더함, 브라우저 확인 통과
 - 2026-11-10 BAT-202 BAS-011 외부 보안 검사 게이트(R-460, delivery 13.3.1·13.4.1·15.3.6·D-T12, ADR-0263): gitleaks(CI만, 미끼·허용 블록 검사)·CodeQL(프로토타입 오염 셋은 등급과 상관없이 막음)·Trivy 설정·이미지 비밀(미끼, 내장 허용 끔)·Scorecard(따로 된 워크플로, 게시 끔), 판정 도구 scan-gate(결과 수·받아들인 결과), ESLint sql.raw·원형 규칙. 리뷰 높음 2 고침
+- 2026-11-12 BAT-205 BAS-020·BAS-030 웨이브 첫 배치(R-484, D-T32 ①·D-T39 ①~④·ST-T15·delivery:v5.0.0-15.1.2, ADR-0267): build-image 게시 잡(체크아웃·비밀 없이 인덱스·Syft SBOM·cosign·SLSA·SBOM 증명), `sbom-find`, Avro 정적·태그 대비 검사·등록 도구·PreSync Job·ConfigMap, 공용 Confluent 껍데기·시작 확인. 싼 게이트 통과, heavy gate는 웨이브 끝
 - 2026-11-11 BAT-203 HOT-253 queue-svc 판매 자격 대조·입장 토큰 `lst`(R-466, Q-T36 ①②, queue-admission:v5.0.0-2.3.2, ADR-0265): 로비는 오픈 시각, 진입은 지금으로 `eligGates` 창을 고르고, 표지 `eligv`가 있는 사본만 계정 ID로 대조한다. 사본 없음·설정 틀림은 닫힌 쪽 403 `sale-eligibility-required`와 SEV2 지표·경고, 입장 확정은 후보 명단에서 그 계정이 든 키만 `lst`에 싣는다. 메모리 시험 665·통합 시험 328 통과

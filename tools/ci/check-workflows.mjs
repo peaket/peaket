@@ -8,6 +8,7 @@
 //   5. actions/checkout 단계마다 persist-credentials: false를 둔다
 //   6. 잡마다 timeout-minutes를 둔다(재사용 워크플로를 부르는 잡은 그 워크플로가 정한다)
 //   7. build-image.yml의 잡 build는 잡 권한이 contents: read 하나뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없다(D-T32 ①)
+//      잡 publish가 있으면 저장소 코드를 체크아웃하지 않고(secrets 없음) 서명 신원·레지스트리 쓰기·출처 증명 권한과 cosign·attest 단계를 갖춘다(D-T32 ①, BAS-020)
 //   8. `branch-watch.mjs count`를 부르는 단계는 continue-on-error: true와 timeout-minutes를 둔다. 경고만 하는 점검이 필수 검사(branch-policy)를 막지 않게 한다(D-T49)
 //   9. GitHub 소유(소유자가 actions·github)가 아닌 액션·재사용 워크플로는 조직 허용 목록(infra/stacks/global/github/variables.tf의
 //      actions_patterns_allowed 기본값, 조직에 적용하는 것은 소유자)의 꼴(소유자/저장소@*, 소유자/*)에 맞아야 한다. 그 목록을 읽지 못하면 실패한다
@@ -236,7 +237,10 @@ function check(file, text, allowlist = []) {
     }
     close();
   }
-  if (/(^|[\\/])build-image\.ya?ml$/.test(file)) errors.push(...checkBuildJob(file, code, start));
+  if (/(^|[\\/])build-image\.ya?ml$/.test(file)) {
+  errors.push(...checkBuildJob(file, code, start));
+  errors.push(...checkPublishJob(file, code, start));
+}
   errors.push(...checkWatchSteps(file, code, indent));
   errors.push(...checkCalledPermissions(file, code));
   return errors;
@@ -336,6 +340,70 @@ function checkBuildJob(file, code, jobsStart) {
   block.forEach((l, k) => {
     for (const [re, what] of BUILD_JOB_FORBIDDEN) if (re.test(l)) errors.push(`${where(from + 1 + k)}: 잡 build에 ${what}이 있다(D-T32 ①: 빌드 잡은 레지스트리·서명·출처 증명 권한이 없다)`);
   });
+  return errors;
+}
+
+// 11. build-image.yml의 게시 잡(BAS-020, D-T32 ①): 저장소 코드를 체크아웃·실행하지 않고 비밀 값도 받지 않는다.
+//     서명 신원(id-token)·레지스트리 쓰기(packages)·출처 증명(attestations) 권한과 cosign·attest 단계를 갖춘다. 게시 잡이 없으면 이 규칙은 건너뛴다.
+const PUBLISH_ALLOWED = { contents: 'read', 'id-token': 'write', packages: 'write', attestations: 'write' };
+const PUBLISH_FORBIDDEN = [
+  [/\buses:\s*['"]?actions\/checkout@/, '저장소 체크아웃(actions/checkout)'],
+  [/\$\{\{\s*secrets\./, '비밀 값(secrets.)'],
+  [/^\s*secrets:\s*inherit\b/, 'secrets: inherit'],
+];
+
+function jobRange(code, jobsStart, name) {
+  if (jobsStart < 0) return null;
+  let from = -1;
+  let to = code.length;
+  for (let i = jobsStart + 1; i < code.length; i++) {
+    const l = code[i];
+    if (/^\S/.test(l)) {
+      to = Math.min(to, i);
+      break;
+    }
+    const key = /^ {2}([A-Za-z_][\w-]*):\s*(#.*)?$/.exec(l);
+    if (!key) continue;
+    if (from >= 0) {
+      to = i;
+      break;
+    }
+    if (key[1] === name) from = i;
+  }
+  return from < 0 ? null : { from, to };
+}
+
+function checkPublishJob(file, code, jobsStart) {
+  const range = jobRange(code, jobsStart, 'publish');
+  if (!range) return [];
+  const errors = [];
+  const where = (i) => `${file}:${i + 1}`;
+  const block = code.slice(range.from + 1, range.to);
+  if (!block.some((l) => /^\s{4}needs:\s*(?:\[[^\]]*\bbuild\b[^\]]*\]|build)\s*(#.*)?$/.test(l))) errors.push(`${where(range.from)}: 잡 publish에 needs: build가 없다(BAS-020)`);
+  const p = block.findIndex((l) => /^ {4}permissions:/.test(l));
+  if (p < 0) {
+    errors.push(`${where(range.from)}: 잡 publish에 잡 권한이 없다(BAS-020)`);
+  } else {
+    const inline = /^ {4}permissions:\s*(.*?)\s*(#.*)?$/.exec(block[p])[1];
+    const entries = [];
+    if (inline) {
+      const m = /^\{\s*(.*?)\s*\}$/.exec(inline);
+      if (m) for (const s of m[1].split(',')) if (s.trim()) entries.push(s.trim());
+    } else {
+      for (let j = p + 1; j < block.length && (block[j].trim() === '' || /^ {6,}/.test(block[j])); j++) if (block[j].trim()) entries.push(block[j].trim());
+    }
+    const got = Object.fromEntries(entries.map((e) => {
+      const [k, v] = e.split(/\s*:\s*/);
+      return [k, v];
+    }));
+    if (JSON.stringify(Object.keys(got).sort()) !== JSON.stringify(Object.keys(PUBLISH_ALLOWED).sort())) errors.push(`${where(range.from + 1 + p)}: 잡 publish의 권한은 ${Object.keys(PUBLISH_ALLOWED).join('·')}뿐이어야 한다(BAS-020): ${entries.join(', ')}`);
+    for (const [k, v] of Object.entries(PUBLISH_ALLOWED)) if (got[k] !== v) errors.push(`${where(range.from + 1 + p)}: 잡 publish의 ${k}는 ${v}여야 한다(BAS-020)`);
+  }
+  block.forEach((l, k) => {
+    for (const [re, what] of PUBLISH_FORBIDDEN) if (re.test(l)) errors.push(`${where(range.from + 1 + k)}: 잡 publish에 ${what}가 있다(BAS-020)`);
+  });
+  if (!block.some((l) => /\bcosign\s+sign\b/.test(l))) errors.push(`${where(range.from)}: 잡 publish에 cosign 단계가 없다(BAS-020)`);
+  if (!block.some((l) => /\buses:\s*['"]?actions\/attest/.test(l))) errors.push(`${where(range.from)}: 잡 publish에 actions/attest 단계가 없다(BAS-020)`);
   return errors;
 }
 

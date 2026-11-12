@@ -83,3 +83,19 @@ outboxRelay:
     requests: { cpu: 50m, memory: 192Mi }
     limits: { memory: 384Mi }
   terminationGracePeriodSeconds: 30
+
+# Avro 사건 스키마 등록 Job(BUILD_ORDER BAS-030, docs/devops.md §4.2, D-T39).
+# ArgoCD PreSync 훅으로 그 서비스가 내는 주제만 등록하고, 주제별 스키마 ID를 ConfigMap schema-ids에 쓴다.
+# image는 kubectl과 tools/ci/register-avro.mjs를 담은 도구 이미지다(운영 조립은 그 이미지를 만드는 단계에서 정한다).
+schemaRegistry:
+  enabled: false
+  image: ""
+  registryUrl: ""
+  topics: {}
+  serviceAccountName: ""
+  command: ["/bin/sh", "-c"]
+  args:
+    - |
+      set -euo pipefail
+      node /app/register-avro.mjs --registry "$PEAKET_SCHEMA_REGISTRY_URL" --topic-map /app/topics.json > /tmp/schema-ids.json
+      kubectl create configmap schema-ids --from-file=schema-ids.json=/tmp/schema-ids.json --dry-run=client -o yaml | kubectl apply -f -

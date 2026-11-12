@@ -4,7 +4,7 @@
 # 스모크는 이미지 안 소스 관리 폴더(.git·.svn·.hg)도 막고(ASVS 13.4.1), 이어서 OCI 묶음을 다이제스트 고정 Trivy로 네트워크 없이 비밀 검사만 해
 # 하나라도 찾으면 묶음을 올리지 않고 실패한다(ASVS 13.3.1, ADR-0263 결정 7·9, tools/ci/scan-tools.mjs·scan-gate.mjs).
 # 빌드 잡은 레지스트리·서명·출처 증명 권한이 없다(잡 권한은 contents: read뿐, D-T32 ①, tools/ci/check-workflows.mjs가 지킨다).
-# ② 게시 잡(이미지 인덱스, SBOM·취약점 검사, 푸시, cosign 서명, SLSA 출처 증명)은 wbs 0.1.5에서 더한다.
+# ② 게시 잡은 저장소 코드를 체크아웃·실행하지 않고, 빌드 잡이 넘긴 OCI 묶음만 받아 다이제스트를 확인한 뒤 이미지 인덱스·SBOM·푸시·cosign 서명·SLSA 출처 증명을 한다(BUILD_ORDER BAS-020).
 name: build-image
 
 on:
@@ -75,5 +75,106 @@ jobs:
         with:
           name: image-${{ inputs.image }}-${{ matrix.arch }}
           path: image-out/
+          if-no-files-found: error
+          retention-days: 7
+
+  # 게시 잡(BAS-020, D-T32 ①): 저장소 코드를 체크아웃하지 않고 빌드 산출물만 쓴다. 서명 신원·레지스트리 쓰기·출처 증명 권한은 이 잡만 받는다.
+  publish:
+    needs: build
+    # 출시·핫픽스 가지의 후보 빌드만 게시·서명한다(develop·PR 빌드는 푸시 없이 빌드만, docs/devops.md §3.2·§4.2).
+    # release 환경의 보호 규칙(필수 검토자)이 한 번 더 막는다: ci.yml이 부르는 쪽 권한을 덮어도 PR에서는 이 잡이 승인 없이 돌지 않는다
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/')) }}
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: image-${{ inputs.image }}-*
+          merge-multiple: true
+          path: image-in
+      # 빌드 잡이 남긴 플랫폼 이미지 두 개와 다이제스트 파일이 모두 있는지 먼저 본다
+      - name: 빌드 산출물 확인
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          test "$(ls image-in/$IMAGE-amd64.oci.tar image-in/$IMAGE-arm64.oci.tar | wc -l)" -eq 2
+          test "$(ls image-in/$IMAGE-amd64.digest image-in/$IMAGE-arm64.digest | wc -l)" -eq 2
+          for arch in amd64 arm64; do
+            test "$(wc -l < "image-in/$IMAGE-$arch.digest")" -eq 1
+            grep -Eq '^sha256:[0-9a-f]{64}$' "image-in/$IMAGE-$arch.digest"
+          done
+      # 플랫폼 이미지를 레지스트리에 올리고 인덱스를 만든다. 태그는 커밋 SHA다(승격은 인덱스 다이제스트로 한다)
+      - name: 이미지 인덱스 게시
+        id: index
+        env:
+          IMAGE: ${{ inputs.image }}
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for arch in amd64 arm64; do
+            docker run --rm -v "$PWD/image-in:/in:ro" quay.io/skopeo/stable@sha256:c4c8a9d6fc95e331fa92fc31de3f6c9b5fe4761c82f0acb99669eef067fb7c33 \
+              copy --all "oci-archive:/in/$IMAGE-$arch.oci.tar" "docker://ghcr.io/$OWNER/$IMAGE:$TAG-$arch"
+          done
+          docker buildx imagetools create -t "ghcr.io/$OWNER/$IMAGE:$TAG" "ghcr.io/$OWNER/$IMAGE:$TAG-amd64" "ghcr.io/$OWNER/$IMAGE:$TAG-arm64"
+          digest=$(docker buildx imagetools inspect "ghcr.io/$OWNER/$IMAGE:$TAG" --format '{{.Manifest.Digest}}')
+          echo "$digest" > "image-in/$IMAGE.index.digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # 플랫폼 이미지마다 CycloneDX SBOM을 만든다(다이제스트 고정 Syft 이미지, OCI 묶음을 직접 읽고 네트워크를 쓰지 않는다)
+      - name: SBOM 만들기
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          for arch in amd64 arm64; do
+            docker run --rm --network none --tmpfs /tmp -v "$PWD/image-in:/in:ro" -v "$PWD/sbom:/out" \
+              anchore/syft@sha256:825cad3a952c87676a6d07e9a3bb05ac9c401d598360070e970aa46d54c1727e \
+              "oci-archive:/in/$IMAGE-$arch.oci.tar" -o "cyclonedx-json=/out/$IMAGE-$arch.cdx.json"
+          done
+      # cosign 키 없는 서명(인덱스와 플랫폼 이미지 모두, --recursive)과 SLSA 출처 증명, SBOM 증명
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - name: cosign 서명
+        env:
+          IMAGE: ${{ inputs.image }}
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --recursive "ghcr.io/$OWNER/$IMAGE:$TAG"
+      - uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true
+      - uses: actions/attest@4cd38b497a0123730d9f9f4349bf29fd520207c5 # v2.0.0
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          predicate-type: https://cyclonedx.org/bom
+          predicate-path: sbom/${{ inputs.image }}-amd64.cdx.json
+          push-to-registry: true
+      - uses: actions/attest@4cd38b497a0123730d9f9f4349bf29fd520207c5 # v2.0.0
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          predicate-type: https://cyclonedx.org/bom
+          predicate-path: sbom/${{ inputs.image }}-arm64.cdx.json
+          push-to-registry: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-sbom-${{ inputs.image }}
+          path: |
+            sbom/
+            image-in/*.digest
           if-no-files-found: error
           retention-days: 7

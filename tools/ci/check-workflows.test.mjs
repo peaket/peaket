@@ -383,7 +383,7 @@ jobs:
           name: image-\${{ strategy.job-index }}
           path: out/
 `;
-// 미래의 게시 잡: 서명 신원·레지스트리 쓰기·출처 증명 권한을 받고 그 단계를 둔다(이 잡은 규칙 밖이다)
+// 게시 잡: 서명 신원·레지스트리 쓰기·출처 증명 권한을 받고 그 단계를 둔다(규칙 11이 본다)
 const PUBLISH_JOB = `  publish:
     needs: build
     runs-on: ubuntu-24.04
@@ -463,11 +463,26 @@ test('DT32_build-image.yml에_빌드잡build가없으면실패한다', () => {
   assert.match(r.out, /D-T32/);
 });
 
+test('D-T32 ① BAS-020 게시잡은 체크아웃·비밀 없이 서명신원·레지스트리쓰기·출처증명 권한과 cosign·attest를 갖춘다', () => {
+  const ok = run(`${BUILD_GOOD}${PUBLISH_JOB}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
+  assert.equal(ok.code, 0, ok.out);
+  for (const [what, job] of [
+    ['id-token 권한 없음', PUBLISH_JOB.replace('      id-token: write\n', '')],
+    ['checkout', PUBLISH_JOB.replace('    steps:\n', `    steps:\n      - uses: actions/checkout@${SHA}\n`)],
+    ['비밀 값', PUBLISH_JOB.replace('    steps:\n', '    steps:\n      - run: echo ${{ secrets.X }}\n')],
+    ['cosign 없음', PUBLISH_JOB.replace(/      - run: cosign[^\n]*\n/, '')],
+  ]) {
+    const r = run(`${BUILD_GOOD}${job}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
+    assert.notEqual(r.code, 0, what);
+    assert.match(r.out, /BAS-020/, what);
+  }
+});
+
 test('DT32_같은파일의_다른잡(게시잡)은_서명신원·푸시·서명·출처증명을둘수있다', () => {
   // 게시 잡이 빌드 잡 뒤에 있든 앞에 있든 빌드 잡만 본다
   const after = run(`${BUILD_GOOD}${PUBLISH_JOB}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(after.code, 0, after.out);
-  const before = run(BUILD_GOOD.replace('jobs:\n', `jobs:\n${PUBLISH_JOB.replace('    needs: build\n', '')}`), 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
+  const before = run(BUILD_GOOD.replace('jobs:\n', `jobs:\n${PUBLISH_JOB}`), 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(before.code, 0, before.out);
   // 게시 잡이 있어도 빌드 잡의 위반은 잡는다
   const bad = run(`${withStep('      - run: docker push ghcr.io/peaket/v0-monolith:x')}${PUBLISH_JOB}`, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
@@ -545,7 +560,7 @@ test('DT32_실제build-image.yml은_재사용워크플로이고_빌드잡은플�
 
 test('DT32_빌드잡이_다른잡뒤에있어도_그위반을잡는다', () => {
   // 게시 잡을 앞에, 위반이 있는 빌드 잡을 뒤에 둔다(첫 잡만 보는 검사를 잡는다)
-  const publishFirst = (text) => text.replace('jobs:\n', `jobs:\n${PUBLISH_JOB.replace('    needs: build\n', '')}`);
+  const publishFirst = (text) => text.replace('jobs:\n', `jobs:\n${PUBLISH_JOB}`);
   const good = run(publishFirst(BUILD_GOOD), 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
   assert.equal(good.code, 0, good.out);
   for (const text of [publishFirst(withStep('      - run: docker push ghcr.io/peaket/v0-monolith:x')), publishFirst(withPerms(`${JOB_PERMS}      id-token: write\n`))]) {
@@ -596,8 +611,8 @@ test('BSL050_실제ci.yml_잡image는_범위image일때_이미지넷을build-ima
   assert.match(cond, /needs\.changes\.outputs\.image\s*==\s*'true'/, cond);
   assert.match(cond, /needs\.changes\.result\s*!=\s*'success'/, cond);
   assert.equal(job.uses, './.github/workflows/build-image.yml');
-  // 부르는 잡이 권한을 넓히지 않는다(맨 위 contents: read를 물려준다)
-  assert.ok(job.permissions === undefined || JSON.stringify(job.permissions) === JSON.stringify({ contents: 'read' }), JSON.stringify(job.permissions));
+  // 부르는 잡은 게시 잡이 요구하는 권한을 그대로 덮는다. 게시 잡은 출시·핫픽스 ref에서만 돌고, 빌드 잡은 자기 권한(contents: read)만 쓴다(BAS-020)
+  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write', packages: 'write', attestations: 'write' });
   assert.equal(JSON.stringify(job.secrets ?? null).includes('inherit'), false, '비밀을 물려주지 않는다');
   // 이미지 넷(한 프로세스 합본은 BUILD_ORDER PRF-215, docs/devops.md §3.1): 행렬 조합마다 build-image.yml의 Dockerfile 입력을 채워 본다
   const combos = job.strategy?.matrix ? matrixCombos(job.strategy.matrix) : [{}];

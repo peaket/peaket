@@ -649,7 +649,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
   1. 단위: 소비 모듈의 커밋 순서(쓰기 성공 전에는 커밋하지 않는다), 다시 시도와 멈춤, 거절, 재조정 중 처리를 본다. 재평가 Lua 스크립트(문턱, 넘음 표시, 다시 읽을 때 다시 내기)는 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄운 실제 Redis로 본다.
   2. 뷰: 고정 사건으로 매개변수 뷰의 결과를 정답과 맞춘다(ST-T9·T10, ClickHouse 컨테이너).
   3. 통합: 컨테이너로 띄운 Kafka, Schema Registry, ClickHouse, Redis로 ST-T1~T4·T7·T11~T13을 돌린다.
-  4. 계약: Avro 호환은 `contract-check`(BACKWARD_TRANSITIVE)가 지난 출시 태그의 스키마를 모두 올린 로컬 레지스트리 컨테이너로 본다(ADR-0165). 열거 규칙(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지)도 같은 검사가 본다(추천 적용 2026-10-28, 기술 검토 중간-087·088). `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
+  4. 계약: Avro 호환은 `contract-check`(BACKWARD_TRANSITIVE)가 지난 출시 태그의 스키마를 모두 올린 로컬 레지스트리 컨테이너로 본다(ADR-0165). 열거 규칙(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지)도 같은 검사가 본다(추천 적용 2026-10-28, 기술 검토 중간-087·088). 2026-11-12 BAS-030: `tools/ci/avro-schema.mjs`가 파일·열거 기본 기호를 먼저 보고 마지막 출시 태그와 BACKWARD_TRANSITIVE 정적 검사를 하며, `tools/ci/register-avro.mjs`와 차트의 PreSync 등록 Job이 주제별 스키마 ID를 ConfigMap `schema-ids`에 쓴다(시험 `tools/ci/avro-schema.test.mjs`·`packages/platform/test/avro.test.ts`). 실제 레지스트리 컨테이너 통합 시험은 배포 단계다. `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
   5. 성능: docs/verification.md §3.7(V-T12~V-T15, V-T19).
 
 ## 14. 대시보드·경보·런북

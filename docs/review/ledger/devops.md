@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 24 | 7 | 0 | 0 | 1 | 0 | 0 | 0 | 74 | 106 |
-| 합계 | 24 | 7 | 0 | 0 | 1 | 0 | 0 | 0 | 74 | 106 |
+| B | 29 | 6 | 0 | 0 | 1 | 0 | 0 | 0 | 70 | 106 |
+| 합계 | 29 | 6 | 0 | 0 | 1 | 0 | 0 | 0 | 70 | 106 |
 
 ## docs/devops.md
 
@@ -45,8 +45,8 @@
 | D-T29 | ③ | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ③ 동안은 준비 상태가 아니다. | ID만 | B | 시험: packages/platform/test/control.test.ts |
 | D-T29 | ④ | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ④는 30초 [가정] 뒤 준비 상태가 되며 SEV2 `control_sync_lagging{kind}`가 뜬다. 준비 프로브는 시작 작업이 켠 표시만 본다… | ID만 | B | 시험: packages/platform/test/control.test.ts |
 | D-T30 | — | IAM 코드에서 워크로드의 Pod Identity 역할에… | 셋 모두 정적 검사가 PR을 막는다. 워크로드마다 MSK 전용 역할 하나와, 그 역할만 맡을 수 있는 Pod Identity 역할의 짝이면 통과한다 | 빈칸 | B | — |
-| D-T32 | ① | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ①는 워크플로 검사(`tools/ci/check-workflows.mjs`. 빌드 잡의 권한 규칙(그 잡의 `permissions`가 contents:… | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
-| D-T32 | ② | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ②는 워크플로 검사(`tools/ci/check-workflows.mjs`. 빌드 잡의 권한 규칙(그 잡의 `permissions`가 contents:… | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
+| D-T32 | ① | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ①은 워크플로 검사(`tools/ci/check-workflows.mjs`)가 PR을 막는다. 빌드 잡의 권한 규칙(그 잡의 `permissions`가… | 자동 시험 | B | 시험: tools/ci/check-workflows.test.mjs |
+| D-T32 | ② | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ② `cache-mode` 규칙은 출시 가지 후보 빌드가 생기는 단계에서 더한다. 빌드 잡에는 `id-token` 권한이 없어 토큰 요청도 실패한다. | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
 | D-T32 | ③ | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ③은 `gitops-check`가 인증서의 소스 ref·실행기 종류로 거부하고, 스테이징·운영 입장 정책도 기동을 거부한다. 출시·핫픽스 가지를 GitHub… | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
 | D-T33 | ① | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ①은 통과한다. | 빈칸 | B | — |
 | D-T33 | ② | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ②는 `gitops-check`가 허용 레지스트리 밖이라 PR을 막는다. | 빈칸 | B | — |
@@ -87,10 +87,10 @@
 | D-T43 | ③ | 게이트웨이가 만든 오류와 추적 헤더(추천 적용 2026-10-28… | ③의 응답에는 `X-Trace-Id`가 없다. | 빈칸 | B | — |
 | D-T43 | ④ | 게이트웨이가 만든 오류와 추적 헤더(추천 적용 2026-10-28… | ④는 본문에 그 요청의 trace-id가 실리는지와 판 올림에서 깨지는지를 기록하고, 되면 guidelines §2의 기본을 바꾼다 | 빈칸 | B | — |
 | D-T38 | — | 서비스를 바꾼 PR에서 계약에 없는 응답 필드를 가진 컨트롤러와… | 두 PR 모두 `contract-check`의 OpenAPI 차이 검사가 실패해 병합되지 않는다. 계약과 같은 판은 통과한다. 운영 이미지에는 문서 경로가 없어… | 자동 시험 | B | 시험: packages/platform/test/contract-sweep.test.ts, packages/platform/test/metrics.test.ts 외 4곳 |
-| D-T39 | ① | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ① : PreSync Job이 실패해 동기화가 멈추고 생산자는 배포되지 않는다. | 빈칸 | B | — |
-| D-T39 | ② | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ② : 주제별 ID가 ConfigMap에 쓰이고, 생산자는 실행 중 레지스트리 호출 0건으로 Outbox 바이트를 만든다. | 빈칸 | B | — |
-| D-T39 | ③ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ③ : 생산자가 시작하지 않아 카나리가 멈춘다. | 빈칸 | B | — |
-| D-T39 | ④ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ④ : 같은 ID가 돌아와 ConfigMap이 그대로다 | 빈칸 | B | — |
+| D-T39 | ① | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ① : PreSync Job이 실패해 동기화가 멈추고 생산자는 배포되지 않는다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
+| D-T39 | ② | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ② : 주제별 ID가 ConfigMap에 쓰이고, 생산자는 실행 중 레지스트리 호출 0건으로 Outbox 바이트를 만든다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
+| D-T39 | ③ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ③ : 생산자가 시작하지 않아 카나리가 멈춘다. | 자동 시험 | B | 시험: packages/platform/test/avro.test.ts |
+| D-T39 | ④ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ④ : 같은 ID가 돌아와 ConfigMap이 그대로다. 정적·단위 시험은 `tools/ci/avro-schema.test.mjs`의 D-T39… | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
 | D-T37 | ① | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토… | ① 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 | 빈칸 | B | — |
 | D-T37 | ② | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토… | ② 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 | 빈칸 | B | — |
 | D-T37 | ③ | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토… | ③ 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 | 빈칸 | B | — |
