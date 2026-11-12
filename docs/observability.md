@@ -176,7 +176,7 @@ flowchart LR
 - 결과 이름: `ok`·`conflict`·`quota_exceeded`·`rehold_wait`·`paused`·`not_ready`·`idem_reused`·`invalid_seat`·`sale_ended`·`session_not_found`·`event_mismatch`·`deadline_exceeded`·`store_unavailable`·`invalid_request`·`error`, `ticket`·`batching`·`already_admitted`·`already_waiting`·`entry_cancelled`·`preverify_invalid`·`not_open`·`not_found`·`sold_out`·`queue_recovering`·`lobby_closed`·`lobby_participant_not_found`·`eligibility_required`·`degraded_limited`·`identity_verification_required`, `approved`·`already`·`declined`·`waiting`·`in_progress`·`unknown`·`expired`·`restart`·`no_adapter`·`circuit_open`·`rejected`, `applied`·`skipped`·`held`.
 - 합본은 서비스마다 논리 이름(`purchase-svc`·`payment-svc`·`queue-svc`)을 `service` 라벨로 두어 관리 포트에서 합쳐도 구분된다. 구간·결과 목록을 늘리면 이 표와 `packages/platform/src/hot-path.ts`의 형을 함께 고친다.
 
-**서비스 템플릿의 운영 확인(docs/architecture.md §8.4, 추천 적용 2026-11-01)**: 기능 설계서 9편의 표는 wbs 0.3.5에서 채운다. 아래는 템플릿 자체의 표다.
+**서비스 템플릿의 운영 확인(docs/architecture.md §8.4, 추천 적용 2026-11-01)**: 기능 설계서 13편의 표는 2026-11-12 BAT-210까지 모두 채웠다(남은 4편은 analytics·control-tower·settlement·transfer-refund). 아래는 템플릿 자체의 표다.
 
 | 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보 | 배포 뒤 확인 방법 |
 | --- | --- | --- | --- | --- | --- |

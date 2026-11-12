@@ -447,3 +447,15 @@ sequenceDiagram
   - 확인 필요(시험 환경 wbs 7.2.4와 계약 때, docs/review/open-items.md 40): 이미 나간 출금을 되돌릴 수 있는지, 이체 원장 `balance`의 뜻, 콘솔에서 아무 계좌로 보낸 출금의 출금 유형(`withdrawalType`), 지급대행 일괄 지급 실행의 서명 단계, 콘솔의 계정별 활동 기록, 포트원 API 호출 한도.
   - 토스페이먼츠 상점관리자에서 셀러 계좌를 바꿀 수 있는지도 확인 필요다. 바꿀 수 있으면 셀러 조회(`GET /v2/sellers/{id}`)가 계좌를 돌려주는지 함께 확인하고, 같은 계좌 대조를 더한다.
   - PEAKET 몫을 포트원 가상계좌 출금으로 받기로 하면(위 '계약 때 확인할 것'), 그 출금을 미리 승인 업무로 등록하고 받는 계좌를 PEAKET 법인 계좌로 한정해 같은 대사에 넣는다. 그 전에는 지급과 이어지지 않는 출금이 모두 경보다.
+
+## 15. 운영 확인(architecture §8.4)
+
+| 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보 | 배포 뒤 확인 방법 |
+| --- | --- | --- | --- | --- | --- |
+| 정산서가 계산·통지·확정 순서로 끝난다 | `statement`·`statement_line`·`statement_source`, `settlement_batch_unapproved{pg}`, 감사 로그 | 지급일 전 영업일 15시까지 승인, 이의 2영업일 | 정산서 패널(상태·판·이의) | 미승인 묶음 1건 이상이면 commander 알림 | J-T1~J-T8과 첫 정산 주기에 상태 전이·판 번호·이의 처리를 확인한다 |
+| 지급 묶음이 기한 안에 실행된다 | `settlement_payout_overdue_total{pg}`, `settlement_payout_failed_total{pg,reason}`, `settlement_portone_execution_pending` | 지급일 다음 영업일 12시까지 완료, 실패 0 | 지급 실행 패널(결제사·묶음·건수) | 지연·실패 1건 이상이면 SEV3, 포트원 15시 미실행은 operator 알림 | J-T13·J-T20과 지급 리허설에서 묶음 생성·승인·실행·실패 재시도를 확인한다 |
+| 결제사 웹훅 서명을 검증한다 | `settlement_webhook_signature_invalid_total`, 웹훅 수신 기록 | 잘못된 서명 거절 100% | 웹훅 패널 | 10분에 5건 이상이면 SEV2(보안) | J-T6으로 잘못된 서명·필수 머리 누락·5분 초과를 주입해 거절과 경보를 확인한다 |
+| 포트원 출금이 지급 건과 맞는다 | `settlement_portone_withdrawal_unmatched_total`, `settlement_portone_ledger_sync_age_seconds` | 불일치 0건, 대사 3,600초 [가정] 이내 | 포트원 대사 패널 | 불일치 1건 이상 SEV2(보안), 3,600초 [가정] 초과 SEV2 | J-T20·J-T22로 금액·계좌가 다른 출금과 이체 원장 지연을 주입해 CS 건과 SEV2를 확인한다 |
+| 포트원 파트너 계좌가 명의와 맞는다 | `settlement_portone_partner_account_mismatch`, 08시 계좌 대조 결과 | 불일치 0건 | 포트원 계좌 패널 | 1건 이상 SEV2(보안), 그 파트너 포트원 결제분 보류 | J-T21로 파트너 계좌를 바꿔 다음 날 대조에서 보류와 CS 건이 생기는지 본다 |
+| 결제사 잔액과 장부가 맞는다 | `settlement_pg_balance_diff_krw{pg,store}`, `settlement_portone_balance_diff_krw`, `settlement_receivable_open_krw` | 차이 0원, 30일 넘은 미수금 주간 보고 | 잔액·미수금 패널 | 1만 원 [가정] 초과 SEV3, 미수금은 주간 보고 | J-T25로 승인·취소·수수료·지급이 맞는 상점과 3만 원 차이 상점을 만들어 대조한다 |
+| 지급 뒤 환불·이의·회수가 장부에 남는다 | `partner_receivable`(원인 `REFUND_AFTER_PAYOUT`·`CHARGEBACK`·`COMPENSATION_ADVANCE`·`NEGATIVE_STATEMENT`)·`receivable_movement`(종류 `OFFSET`·`GUARANTEE`·`COLLECTED`·`WRITE_OFF`·`REVERSAL`), 감사 로그 | 환불 3영업일, 회수 순서 상계→보증→청구 | 미수금 패널 | 30일 넘은 미수금 주간 보고, 회수 실패는 CS 처리함 | J-T11·J-T12·J-T24로 지급 뒤 환불·카드 이의·회수 순서를 확인한다 |
