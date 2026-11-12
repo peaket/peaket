@@ -751,7 +751,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
 
     await resolver.runJob(claimed);
 
-    expect(queries.rescheduled).toEqual([{ job: claimed, nextAtMs: NOW + 500 }]);
+    expect(queries.rescheduled).toEqual([{ job: claimed, nextAtMs: NOW + 200 }]);
     expect(order).toEqual(['query', 'reschedule']);
     expect(signals.outcomes).toEqual([['SIMULATOR', outcome]]);
   });
@@ -785,7 +785,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
     await flush();
 
     resolver.start();
-    expect(timer.set.map((t) => t.ms)).toEqual([250, 60_000]);
+    expect(timer.set.map((t) => t.ms)).toEqual([100, 60_000]);
     queries.sweeps = [[uuidAt(1), uuidAt(2)]];
     timer.set[1]!.fn();
     await flush();
@@ -846,7 +846,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-182, 코드 리뷰)', () => {
 });
 
 describe('start·stop', () => {
-  test('PRF182_start는 250ms 주기로 켜고 앞 틱의 잡기가 끝나지 않았으면 건너뛴다', async () => {
+  test('PRF182_start는 100ms 주기로 켜고 앞 틱의 잡기가 끝나지 않았으면 건너뛴다', async () => {
     const { queries, timer, resolver } = setup();
     const held = deferred<UnknownQueryJob[]>();
     queries.claimDueQueries = async (pg: PgName, limit: number) => {
@@ -858,7 +858,7 @@ describe('start·stop', () => {
     resolver.start();
     resolver.start();
     expect(timer.set).toHaveLength(2);
-    expect(timer.set[0]!.ms).toBe(250);
+    expect(timer.set[0]!.ms).toBe(100);
 
     timer.fire();
     timer.fire();
@@ -979,7 +979,7 @@ describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
     const { queries, gateway, resolver } = setup();
     gateway.fallback = () => ({ kind: 'UNKNOWN' });
     await resolver.runJob(job());
-    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 250 }]);
+    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 100 }]);
   });
 
   test('P-T40_조회의 429는 상한을 낮추지 않고 지표만 센다(first false)이고 다시 묻는다 [ASVS v5.0.0-2.3.2]', async () => {

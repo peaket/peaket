@@ -11,15 +11,15 @@ import type { PayMethodCategory, QueryResult } from './payment-gateway.js';
 import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
 import { depositExpired, depositNextQueryAtMs, depositNotifiedRecently } from './virtual-account.js';
 
-/** 잡기 주기 250ms [가정](BAT-031: 5% 응답 버림의 첫 조회를 빨리 잡기 위해 1초에서 내렸다) */
-export const UNKNOWN_QUERY_POLL_INTERVAL_MS = 250;
+/** 잡기 주기 100ms [가정](BAT-031: 1초→250ms, BAT-039: 5% 드롭의 꼬리를 줄이려고 250ms→100ms) */
+export const UNKNOWN_QUERY_POLL_INTERVAL_MS = 100;
 /** 파드당 동시 조회 16건 [가정] */
 export const UNKNOWN_QUERY_CONCURRENCY = 16;
 /** 한 번에 잡는 행 50건 [가정] */
 export const UNKNOWN_QUERY_BATCH = 50;
-/** UNKNOWN을 쓴 뒤 첫 조회까지, 그리고 조회 간격의 시작 250ms [가정](BAT-031: 5% 응답 버림의 첫 조회를 빨리 잡기 위해 1초에서 내렸다) */
-export const UNKNOWN_QUERY_BASE_MS = 250;
-/** 입금 완료·되돌림 통보 뒤 다시 묻는 첫 간격 5초 [가정]. UNKNOWN의 250ms와 별개다(코드 리뷰 M3, docs/features/payment.md §6) */
+/** UNKNOWN을 쓴 뒤 첫 조회까지, 그리고 조회 간격의 시작 100ms [가정](BAT-031: 1초→250ms, BAT-039: 5% 드롭의 꼬리를 줄이려고 250ms→100ms) */
+export const UNKNOWN_QUERY_BASE_MS = 100;
+/** 입금 완료·되돌림 통보 뒤 다시 묻는 첫 간격 5초 [가정]. UNKNOWN의 100ms와 별개다(코드 리뷰 M3, docs/features/payment.md §6) */
 export const DEPOSIT_NOTIFIED_RETRY_BASE_MS = 5_000;
 /** 조회 간격을 늘리는 배수 2배 [가정] */
 export const UNKNOWN_QUERY_FACTOR = 2;
@@ -125,8 +125,8 @@ const QUERY_FAILED: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'query_failed'
 const AMOUNT_MISMATCH: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'amount_mismatch', anomaly: 'amount' };
 const ORDER_MISMATCH: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'amount_mismatch', anomaly: 'order' };
 const CANCELLED_AT_PG: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'cancelled_at_pg', anomaly: 'cancelled' };
-/** 거듭제곱의 지수 상한(5초 × 2^5 = 160초가 상한 60초보다 크다) */
-const DELAY_EXPONENT_CAP = 8;
+/** 거듭제곱의 지수 상한(UNKNOWN 100ms·입금 5초 모두 상한 60초에 닿게 한다) */
+const DELAY_EXPONENT_CAP = 10;
 
 /**
  * 조회 답 → 할 일(명세 `query`: 결제사가 결과를 정했을 때만 바꾼다). 던지지 않는다.
@@ -263,8 +263,8 @@ function dueAtOf(raw: string | undefined): number | undefined {
 }
 
 /**
- * 다음 조회까지의 간격(ms) = min(5초 × 2^(attempts − 1), 60초).
- * @param attempts 이번 잡기를 더한 조회 횟수(1 → 5초, 2 → 10초, 3 → 20초, 4 → 40초, 5 이상 → 60초). 아주 큰 수에서도 거듭제곱하지 않는다
+ * 다음 조회까지의 간격(ms) = min(100ms × 2^(attempts − 1), 60초).
+ * @param attempts 이번 잡기를 더한 조회 횟수(1 → 100ms, 2 → 200ms, 3 → 400ms, 4 → 800ms, 5 → 1.6초, … 11 이상 → 60초). 아주 큰 수에서도 거듭제곱하지 않는다
  * @throws RangeError attempts가 1 이상의 안전한 정수가 아님
  */
 export function unknownQueryDelayMs(attempts: number): number {
@@ -273,7 +273,7 @@ export function unknownQueryDelayMs(attempts: number): number {
 
 /**
  * 입금 완료·되돌림 통보를 받은 뒤 다시 묻는 간격(ms) = min(5초 × 2^(attempts − 1), 60초).
- * UNKNOWN 첫 조회를 빨리 잡으려고 250ms로 내린 뒤에도 이 경로는 5초 간격을 지킨다(코드 리뷰 M3).
+ * UNKNOWN 첫 조회를 빨리 잡으려고 100ms로 내린 뒤에도 이 경로는 5초 간격을 지킨다(코드 리뷰 M3, BAT-039).
  * @throws RangeError attempts가 1 이상의 안전한 정수가 아님
  */
 export function depositNotifiedDelayMs(attempts: number): number {
@@ -283,7 +283,7 @@ export function depositNotifiedDelayMs(attempts: number): number {
 /** 지수 간격. 아주 큰 횟수에서도 거듭제곱이 넘치지 않게 지수를 자른다 */
 function backoffMs(baseMs: number, attempts: number): number {
   if (!Number.isSafeInteger(attempts) || attempts < 1) throw new RangeError(`조회 횟수는 1 이상의 안전한 정수다: ${String(attempts)}`);
-  // 지수를 잘라 아주 큰 횟수에서도 거듭제곱이 넘치지 않게 한다(2^DELAY_EXPONENT_CAP × 5초는 상한 60초보다 크다, BAT-031)
+  // 지수를 잘라 아주 큰 횟수에서도 거듭제곱이 넘치지 않게 한다(2^DELAY_EXPONENT_CAP × 기준은 상한 60초보다 크다, BAT-031·BAT-039)
   return Math.min(UNKNOWN_QUERY_MAX_MS, baseMs * UNKNOWN_QUERY_FACTOR ** Math.min(attempts - 1, DELAY_EXPONENT_CAP));
 }
 
