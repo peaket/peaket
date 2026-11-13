@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PEAKET 마스커블 아이콘">
+  <rect width="512" height="512" fill="#4338CA"/>
+  <g transform="translate(128 128) scale(8)">
+    <path fill="#fff" d="M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z"/>
+    <path d="M7.5 21h3M14.5 21h3M21.5 21h3" stroke="#4338CA" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>

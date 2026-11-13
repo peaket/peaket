@@ -12,6 +12,9 @@ import '../styles/globals.css';
 export const rootMetadata: Metadata = {
   title: { default: 'PEAKET', template: '%s · PEAKET' },
   description: '공정한 대기열로 여는 공연 예매, PEAKET(피켓)',
+  // 홈 화면 바로가기(PWA) 아이콘과 설치 이름(BAS-200). 아이콘 파일은 app/icon.svg·app/apple-icon.png가 만든다
+  manifest: '/manifest.webmanifest',
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'PEAKET' },
   // 퍼블리싱 단계: 검색 엔진에 올리지 않는다(경로별 robots는 화면을 잇는 단계에서 정한다)
   robots: { index: false, follow: false },
 };
@@ -20,6 +23,7 @@ export const rootViewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   colorScheme: 'light dark',
+  themeColor: '#4338CA',
 };
 
 export function RootDocument({ children, nonce }: { children: ReactNode; nonce?: string }) {
