@@ -547,12 +547,14 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `keys` | `keyId` | 공개키(검증용 `CryptoKey` 캐시는 Worker 메모리에 둔다), `ticketId` | 위와 같다 |
 | `revoked` | `keyId` | 폐기 사유(옛 QR·위조 구분) | 위와 같다 |
 | `entryState` | `ticketId` | 마지막 방향·시각·구역·출처(이 기기·변경분) | 위와 같다 |
-| `scanQueue` | `id`(UUIDv7), 색인 `uploaded` | `ScanEvent` 전체. 아래 따로 둔 DB `peaket-scanner-queue`에 있다 | 업로드 확인(`acceptedIds`) 뒤 7일 [가정] |
+| `scanQueue` | `id`(UUIDv7), 색인 `nextAttemptAtMs` | `ScanEvent` 전체. 아래 따로 둔 DB `peaket-scanner-queue`에 있다 | 업로드 확인(`acceptedIds`) 뒤 7일 [가정] |
 | `cursor` | `eventId` | 마지막 변경분 `seq` | 회차 끝 |
 | `telemetry` | 자동 키 | 판정 지연 표본, 오류 사건 | 보낸 뒤 바로 |
 | `session` | 고정 키 | 현장 스태프 토큰, 역할, 유효 기간 끝 | 로그아웃(업로드를 비운 뒤)·유효 기간 끝 |
 
 **Dexie DB `peaket-scanner-queue`**(판 1, 추천 적용 2026-10-28, 기술 검토 중간-059). `scanQueue` 표 하나만 두고, DB 옵션 `chromeTransactionDurability: 'strict'`로 연다. 크롬은 121부터 IndexedDB 쓰기의 기본 내구성을 strict에서 relaxed로 바꿨다. relaxed는 변경이 운영체제 버퍼에 닿으면 바로 '완료'를 알리고, 디스크에는 보통 몇 초 뒤에 쓴다(크롬 블로그, IndexedDB 3.0 `durability`). 그래서 배터리가 갑자기 꺼지면 통과시킨 마지막 기록을 잃을 수 있다. strict는 디스크에 쓴 뒤 완료를 알린다. Dexie의 이 옵션은 DB 단위라 스캔 큐만 따로 DB로 나누고, 나머지 표(목록·텔레메트리 등)는 `peaket-scanner`에서 기본(relaxed)으로 둔다. 통과 화면은 이 쓰기가 끝난 뒤에 띄운다(§5.5). 저장 장치 고장이나 기기 분실로 잃는 기록은 그대로 남는 위험이다(offline-gate §9).
+
+- **2026-11-13 BAT-445 구현 상태**: 이 작업 트리에는 Dexie 4가 설치되어 있지 않아 `apps/scanner/src/storage/scan-queue.ts`가 브라우저 IndexedDB로 같은 계약(DB `peaket-scanner-queue`, 표 `scanQueue`, 색인 `nextAttemptAtMs`, 쓰기 트랜잭션 `durability: 'strict'`, complete 뒤 완료)을 구현했다. Dexie를 쓰게 되면 `ScanQueue` 포트의 어댑터만 바꾼다. `apps/scanner/src/storage/decoder.ts`는 BarcodeDetector가 있으면 QR 원문을 읽고, 없거나 QR 형식을 지원하지 않으면 디코더를 만들지 않는다(zxing-wasm 대체는 남음). 브라우저에서 스캔 큐 DB를 열지 못하면 메모리 큐로 숨기지 않고 오류를 내 통과 화면을 막는다(내구성 약속을 지키기 위해서다). 전원 차단 실기는 아직 확인하지 않았다.
 
 ### 3.9 파트너 좌석맵 에디터 문서 모델
 

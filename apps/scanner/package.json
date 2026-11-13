@@ -8,6 +8,7 @@
     "dev": "vite --port 3003",
     "build": "vite build",
     "preview": "vite preview --port 3003",
+    "test": "node --test test/scan-queue.test.ts test/decoder.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
