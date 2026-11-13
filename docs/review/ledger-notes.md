@@ -104,6 +104,7 @@
 | S-T18 | 사람 확인 |  | BAT-175 | 화면 낭독기로 사람이 예매를 완주한다(axe 자동 검사는 CI). 확인 목록은 docs/review/manual-a11y/S-T18.md다. VoiceOver(iOS Safari)는 기기를 구할 때까지 미실행이다(ADR-0237) |
 | FE-T8 | 사람 확인 |  | 브라우저 확인 | docs/review/browser-check/HOT-356-358.md에서 시뮬레이터 성공과 새로고침을 봤다. 포트원 복귀와 쿠키 없는 첫 요청은 아직 못 봤다 |
 | FE-T18 | 사람 확인 |  | BAT-580 | 화면 낭독기·키보드 완주는 사람이 본다. 이름을 단 자동 시험(axe·목록 구조)은 그 일부다. 3조합·3시나리오 확인 목록은 docs/review/manual-a11y/LCH-190.md(2026-11-13) |
+| POL-027 | 사람 확인 | C | BAT-590 | 법률 항목 표기 규칙과 검토 목록은 docs/review/legal/BAT-590-legal-review.md에 정리했다. 변호사 검토 제출과 결론 반영은 소유자 몫이다(2026-11-13) |
 | SR-T10 | 사람 확인 |  | BAT-165 browser check | 한글 조합 중 Enter·Esc를 처리하지 않는 것은 실제 브라우저 입력기로 확인한다. 코드는 `isComposing`·`keyCode 229`를 본다(packages/ds SearchField·WebSearchBox) |
 | SR-T14 | 사람 확인 |  | BAT-165 browser check | `/search`의 noindex·sitemap 제외는 브라우저 확인과 화면 머리 검사로 본다. 화면 주석과 metadata는 `SearchPage`에 있다 |
 
@@ -124,6 +125,5 @@
 | 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
 | --- | --- | --- | --- | --- |
 | POL-007 |  | A |  | 대기열 인원의 기준(대기 순번) |
-| POL-027 |  | C |  | 문서의 법률 항목 표기와 검토 규칙 |
 | POL-043 |  | C |  | 홈 섹션 구성(배치) |
 | S-T40 |  | B |  | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고는 좌석 판매·홀드의 핵심 로직이 아니다(경고는 저장을 막지 않고, 템플릿은 출발점일 뿐이다. 잠금 409는 A로 증명한 S-T38 ⑤의 판정 함수를 부른다, ADR-0264) |

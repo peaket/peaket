@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 79 | 13 | 13 | 2 | 0 | 23 | 1 | 0 | 0 | 131 |
+| A | 79 | 13 | 15 | 2 | 0 | 21 | 1 | 0 | 0 | 131 |
 | B | 85 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 22 | 156 |
-| 합계 | 164 | 43 | 13 | 2 | 0 | 27 | 1 | 15 | 22 | 287 |
+| 합계 | 164 | 43 | 15 | 2 | 0 | 25 | 1 | 15 | 22 | 287 |
 
 ## docs/features/seat-hold.md
 
@@ -28,11 +28,11 @@
 | S-T14 | — | 실시간 전파 Degraded Mode 검증 | 1초 배치 주기로 자동 완화 전환되어 완화 SLO p99 1.5초를 지키고, 초과 판매 0건을 유지한다. | 측정 | A | 구간 측정 · 실시간 전파 Degraded Mode |
 | S-T15 | — | 대규모 좌석맵 그리기 성능 검증 | 5만 석 화면 표시 1초 미만, 4배 스로틀 환경에서 INP ≤ 200ms, 조작 경로 Long Task 0건, 화면 이동 뒤 메모리 누수 0건. v0 대비 힙… | 측정 | A | 구간 측정 · 대규모 좌석맵 그리기 성능 (이름을 단 시험도 있다) |
 | S-T16 | ① | 구매 세션 탈취 재현과 소지 증명 검증(ADR-0124) | ①은 공격마다 결과를 '방해'(좌석·한도·시간을 묶음)와 '이득'(돈이나 티켓이 공격자 쪽으로 감)으로 나눠 기록하고, ADR-0124 결정 2대로 소지 증명을… | 사람 확인 | A | BOT-100 · 공격마다 결과를 '방해'와 '이득'으로 나눠 기록하고 소지 증명을 남길지 정하는 것은 사람의 판단이다(ADR-0124 결정 2) |
-| S-T16 | ② | 구매 세션 탈취 재현과 소지 증명 검증(ADR-0124) | ②는 서버 계층에서 바로 401로 거부되고, 정상 요청의 확인 p99가 1ms 예산 안에서 끝난다 | 측정 | A | 구간 측정 · 거부(서명 변조·재전송·범위·역할의 401)는 이름을 단 자동 시험이 있다. 정상 요청 확인 p99 1ms 예산은 측정 몫이다 (이름을 단 시험도 있다) |
+| S-T16 | ② | 구매 세션 탈취 재현과 소지 증명 검증(ADR-0124) | ②는 서버 계층에서 바로 401로 거부되고, 정상 요청의 확인 p99가 1ms 예산 안에서 끝난다 | 측정 | A | BAT-090 heavy gate · 탈취 거부(서명 변조·재전송·다른 세션 키)는 `services/purchase-svc/test/purchase-session-theft.test.ts`가 본다. 정상 요청… |
 | S-T17 | — | (없앰 2026-10-28) 스냅샷 헤지(Hedged) 요청 검증 | — | 없앰 | A | — |
 | S-T18 | — | 화면 낭독기 웹 접근성 검증 | 모든 회차가 완주해 예매 완주율 100%를 달성하고(개발자 수동 시험으로 표시), axe Core 자동 검사 위반 건수 0건을 충족한다… | 사람 확인 | A | BAT-175 · 화면 낭독기로 사람이 예매를 완주한다(axe 자동 검사는 CI). 확인 목록은 docs/review/manual-a11y/S-T18.md다. VoiceOver(iOS Safari)는 기기를 구할… |
-| S-T19 | — | 자동 좌석 배정 모드 검증 | 배정 좌석이 희망 조건 규칙(1순위 연석, 분리 허용 시 1순위 분리, 2순위 순)대로 정확히 할당되고, 중복 홀드는 0건이다. 모든 후보가 실패하면 아무… | 다른 단계 | A | 구간 측정 · 자동 좌석 배정 모드의 1,000건 동시 요청·연석 부족·1순위 매진 판정은 purchase-svc 부하 측정 몫이다. BAT-175는 자동 배정 화면과 실패 갈래(409 no-match… |
-| S-T20 | — | 자동 배정 순서 공정성 | 순번과 배정 순서의 스피어만 상관계수 0.99 이상, 봇의 평균 순위 이득(순번 순위 − 배정 순위)이 입장 제어 루프 1주기분(약 6명) 이하 [가정… | 다른 단계 | A | 미정 · 자동 배정 순서 공정성 |
+| S-T19 | — | 자동 좌석 배정 모드 검증 | 배정 좌석이 희망 조건 규칙(1순위 연석, 분리 허용 시 1순위 분리, 2순위 순)대로 정확히 할당되고, 중복 홀드는 0건이다. 모든 후보가 실패하면 아무… | 측정 | A | BAT-090 heavy gate · 자동 배정 1,000건 동시·1순위 매진·분리 조합. 단위 시험은 후보·분리·수동 전환을 본다. 2026-11-13 측정: 100 동시×10묶음 1,000/1,000·중복… |
+| S-T20 | — | 자동 배정 순서 공정성 | 순번과 배정 순서의 스피어만 상관계수 0.99 이상, 봇의 평균 순위 이득(순번 순위 − 배정 순위)이 입장 제어 루프 1주기분(약 6명) 이하 [가정… | 측정 | A | BAT-090 heavy gate · 자동 배정 순서 공정성. 2026-11-13 측정: 같은 조건 순차 10건×2회 R0001~R0020 동일·굶주림 0(보고서 §6) (이름을 단 시험도 있다) |
 | S-T21 | — | 확대 표시와 구역 구독 | 좌석이 보이는 구역만 구독되고(전체 보기에서 0개) 축소하면 해제된다. 보이는 좌석의 다른 분 선택은 p99 300ms 안에 바뀌고, 전체 보기의 구역 상태는… | 다른 단계 | A | 미정 · 확대 표시와 구역 구독 |
 | S-T22 | ① | 판매 종료 뒤 홀드 | ① 앞은 201, 뒤는 410 `sale-ended`이고 좌석을 잡지 않는다 | 다른 단계 | A | 미정 · 판매 종료 뒤 홀드 |
 | S-T22 | ② | 판매 종료 뒤 홀드 | ② 홀드 TTL·연장·결제창 유지 규칙 안에서 성공한다 | 다른 단계 | A | 미정 · 판매 종료 뒤 홀드 |
@@ -183,12 +183,12 @@
 | v5.0.0-1.4.3 | — | L2 | 할당한 메모리와 자원을 해제하고 해제된 참조를 지워 use-after-free를 막는다. | 해당 없음 | B | 해당 없음(메모리 관리 언어만 쓴다) |
 | v5.0.0-1.5.1 | — | L1 | XML 파서를 제한적으로 설정하고 외부 엔터티 해석 같은 위험 기능을 꺼 XXE를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
 | v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/sale-policy.http.test.ts 외 3곳 |
-| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/end-purchase-session.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 3곳 |
+| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/end-purchase-session.test.ts 외 4곳 |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
-| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 36곳 |
-| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 |
-| v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 6곳 |
+| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 38곳 |
+| v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 6곳 |
+| v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 8곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 다른 단계 | B | HOT-252 · 이 행의 판매 정책 한도 몫(Q-T36 ③, HOT-250이 더함)은 갈래 1 새 단계가 시험한다. 이름을 단 기존 시험(1인 한도 Lua 등)은 규칙 한도를 보지 않는다(BAT-157 계획… |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외… |
