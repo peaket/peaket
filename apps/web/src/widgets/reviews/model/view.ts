@@ -3,7 +3,6 @@
 // 2) 아니면 실제 주소 값: ?reviews=all(전체 모달, &review=<id>&photo=<n>이면 사진 보기) · ?review=new(쓰기 모달) ·
 //    ?report=<id>(신고 모달, ?reviews=all과 함께면 전체 모달 자리, 아니면 상세 위).
 // 3) 둘 다 없으면 null(아무것도 그리지 않는다).
-import { getReview } from '@/entities/review';
 import { SCR016_STATES, type Scr016State } from '@/shared/config/screens.discovery';
 
 export type ReviewModalKind = 'list' | 'photo' | 'report' | 'confirm' | 'write' | 'noRight' | 'login' | 'reportLogin' | 'off';
@@ -75,10 +74,8 @@ export function resolveReviewModal(sp: Params, guest: boolean): ReviewModalInit 
     return { ...base, kind: guest ? 'reportLogin' : 'report', reviewId: report, from: all ? 'list' : 'detail' };
   }
   if (all) {
-    const target = review ? getReview(review) : undefined;
-    if (target && Number.isInteger(photo) && photo >= 1 && photo <= target.photos.length) {
-      return { ...base, kind: 'photo', reviewId: target.id, photo };
-    }
+    // 사진 수는 목록을 받은 뒤 안다. 주소가 사진을 가리키면 화면이 목록에서 찾아 그리고, 없으면 안내한다.
+    if (review && Number.isInteger(photo) && photo >= 1) return { ...base, kind: 'photo', reviewId: review, photo };
     return { ...base, kind: 'list' };
   }
   if (review === 'new') return { ...base, kind: guest ? 'login' : 'write', from: 'detail' };

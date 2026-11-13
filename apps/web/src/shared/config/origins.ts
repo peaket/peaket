@@ -24,6 +24,8 @@ export const ORIGINS = {
   /** 대기열 API·파일 출처(docs/frontend.md §2.1 `queue`·`queue-files`). api-client 클라이언트가 함께 담는다(ADR-0199) */
   queue: process.env.NEXT_PUBLIC_QUEUE_ORIGIN || (DEV ? '' : 'https://queue.peaket.example'),
   queueFiles: process.env.NEXT_PUBLIC_QUEUE_FILES_ORIGIN || (DEV ? '' : 'https://queue-files.peaket.example'),
+  /** 관제 API 출처(운영자 후기 조치처럼 ops 역할이 필요한 화면에서만 쓴다). 없으면 그 버튼을 숨긴다 */
+  opsApi: process.env.NEXT_PUBLIC_OPS_API_ORIGIN || (DEV ? '' : 'https://ops-api.peaket.example'),
 } as const;
 
 /**

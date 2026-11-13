@@ -6,6 +6,7 @@
 // - 주소: 창을 바꾸면 history.pushState로 ?reviews=all·?report=·?review=new 등을 남기고(뒤로 가기로 돌아간다), 닫으면 router.replace로 지운다.
 // - 초점: 처음 연 버튼을 기억했다가 모두 닫으면 돌려주고, 신고·사진 보기에서 목록으로 돌아오면 누른 버튼으로 돌린다.
 // - 입력(신고 내용·후기 글)은 화면에만 두고 브라우저 저장소에 남기지 않는다.
+// - 목록·요약·쓰기·고치기·지우기·신고는 core-svc 후기 API에 연결한다. 사진 올리기는 DS가 파일을 넘기지 않아 다음 배치다(본문만 보낸다).
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ImageUploader, type ImageUploaderItem } from '@peaket/ds/ImageUploader';
@@ -26,21 +27,26 @@ import {
 import { Select } from '@peaket/ds/Select';
 import { TextArea } from '@peaket/ds/TextArea';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
+import { ApiError } from '@peaket/api-client';
 import {
   BANNED_PHRASES,
   MY_MASKED_EMAIL,
-  REVIEW_ITEMS,
   REVIEW_SORT_LABEL,
-  REVIEW_SUMMARY,
-  getReview,
+  mapReview,
+  mapReviewPage,
+  mapReviewSummary,
+  reviewSortParam,
+  reviewTargetOf,
   sortReviewItems,
   type Review,
   type ReviewItem,
   type ReviewSort,
 } from '@/entities/review';
+import { ensureBrowserApi, withFanRefresh } from '@/shared/api';
 import type { Scr016State } from '@/shared/config/screens.discovery';
 import { cx } from '@/shared/lib/cx';
 import { useToast } from '@/shared/ui/toast';
+import { ReviewModerationActions } from './ReviewModerationActions';
 import { closedSearch, resolveReviewModal, reviewModalSearch, type ReviewModalInit, type ReviewModalKind } from '../model/view';
 
 export interface ReviewModalsClientProps {
@@ -53,8 +59,11 @@ export interface ReviewModalsClientProps {
   title: string;
   /** 이 공연에서 후기를 쓸 수 있는 회차(둘 이상이면 고르기) */
   rounds: readonly { value: string; label: string }[];
+  /** 지금 회차 ID(후기 API의 경로 값) */
   currentRound: string;
   loginHref: string;
+  /** 관제 운영자 조치를 함께 보일지(운영자 화면에서만 참) */
+  moderator?: boolean;
 }
 
 interface View {
@@ -103,10 +112,9 @@ function writePresetFor(preview: Scr016State | null, editing?: Review): WritePre
       return { mode: 'new', rating: 0, text: '좋았어요', photos: [], validate: true, already: false };
     case '금칙어 오류':
       return { mode: 'new', rating: 4, text: '매크로 대행으로 좋은 자리 구해 드립니다', photos: [], validate: true, already: false };
-    case '이미 씀': {
-      const mine = getReview('1238');
-      return { mode: 'edit', rating: mine?.stars ?? 5, text: mine?.body ?? '', photos: [], validate: false, already: true };
-    }
+    case '이미 씀':
+      // 실제 '이미 씀'은 자격 확인이 myReviewId를 받아 고치기로 연다. 미리보기에서는 빈 고치기 모양만 보인다.
+      return { mode: 'edit', rating: 5, text: '', photos: [], validate: false, already: true };
     default:
       return { mode: 'new', rating: 0, text: '', photos: [], validate: false, already: false };
   }
@@ -144,35 +152,66 @@ interface LocalToast {
   mono?: string;
 }
 
+type ListState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; items: ReviewItem[]; nextCursor: string | null }
+  | { kind: 'error'; message: string }
+  | { kind: 'off' }
+  | { kind: 'login' };
+
+interface SummaryState {
+  average: number | null;
+  count: number;
+  loading: boolean;
+}
+
+interface WriteResult {
+  ok: boolean;
+  errors?: WriteErrors;
+}
+
+/** API 오류를 화면 문구로. 서버 title은 보이지 않는다(docs/frontend.md §4.1) */
+function listProblem(e: unknown): ListState {
+  if (e instanceof ApiError) {
+    if (e.status === 503) return { kind: 'off' };
+    if (e.status === 401) return { kind: 'login' };
+    if (e.status === 404) return { kind: 'error', message: '후기를 볼 수 있는 공연을 찾지 못했습니다.' };
+    return { kind: 'error', message: '후기 목록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+  }
+  return { kind: 'error', message: '후기 목록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+}
+
 /** 휴대폰 목록 카드의 [신고]·[수정] 줄은 왼쪽 여백을 버튼 안 여백만큼 당긴다(보드 margin-left:-12px). 데스크톱은 오른쪽 열 */
 const ACTION_ROW = '-ml-3 lg:ml-0';
 
-export function ReviewModalsClient({ init, path, theme, guest, title, rounds, currentRound, loginHref }: ReviewModalsClientProps) {
+export function ReviewModalsClient({ init, path, theme, guest, title, rounds, currentRound, loginHref, moderator = false }: ReviewModalsClientProps) {
   const router = useRouter();
   const shellToast = useToast();
   const preview = init.preview;
+  const eventId = currentRound;
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<View>({ kind: init.kind, reviewId: init.reviewId, photo: init.photo, from: init.from });
 
   const reportPreset = useMemo(() => reportPresetFor(preview), [preview]);
-  const knownTarget = getReview(init.reviewId);
   const [draft, setDraft] = useState<ReportDraft>(reportPreset.draft);
   const [reportErrors, setReportErrors] = useState<ReportFieldError[]>(reportPreset.errors);
   const [errorKey, setErrorKey] = useState(0);
-  const [alert, setAlert] = useState<ReportAlert | null>(
-    reportPreset.alert ?? (init.kind === 'report' && !knownTarget ? 'gone' : null),
-  );
-  const [busy, setBusy] = useState(preview === '신고 보내는 중');
-  const [reported, setReported] = useState<ReadonlySet<string>>(() => new Set(preview === '신고 접수 완료' ? ['1234'] : []));
+  const [alert, setAlert] = useState<ReportAlert | null>(reportPreset.alert);
+  const [busy, setBusy] = useState(false);
+  const [list, setList] = useState<ListState>({ kind: 'loading' });
+  const [summary, setSummary] = useState<SummaryState>({ average: null, count: 0, loading: true });
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reported, setReported] = useState<ReadonlySet<string>>(() => new Set(preview === '신고 접수 완료' ? [init.reviewId] : []));
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
   const [askDelete, setAskDelete] = useState<string | null>(null);
   const [sort, setSort] = useState<ReviewSort>('latest');
   const [editing, setEditing] = useState<Review | undefined>(undefined);
   const [writeFrom, setWriteFrom] = useState<'list' | 'detail'>('detail');
   const [writeKey, setWriteKey] = useState(0);
+  const [writeCheck, setWriteCheck] = useState<'checking' | 'ready' | 'noRight' | 'login'>(init.kind === 'write' ? 'checking' : 'ready');
   const [toast, setToast] = useState<LocalToast | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const busyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const opener = useRef<HTMLElement | null>(null);
   const focusNext = useRef<string | null>(null);
 
@@ -187,6 +226,52 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     if (!persistent) toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
 
+  const items = useMemo(() => (list.kind === 'ready' ? list.items.filter((r) => !removed.has(r.id)) : []), [list, removed]);
+  const targetItem = items.find((r): r is Review => r.kind === 'review' && r.id === view.reviewId);
+  const target: ReportTarget = targetItem ? reviewTargetOf(targetItem) : { author: '', watched: '', postId: view.reviewId, excerpt: '' };
+
+  // 목록·요약은 실제 core-svc API에서 받는다. 게스트도 읽을 수 있고, 401이면 로그인 안내로 바꾼다.
+  useEffect(() => {
+    let live = true;
+    setList({ kind: 'loading' });
+    setSummary((s) => ({ ...s, loading: true }));
+    void (async () => {
+      try {
+        const [{ listEventReviews, getEventReviewSummary }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+        if (!ensureBrowserApi()) {
+          if (live) setList({ kind: 'error', message: '후기 API 주소가 설정되지 않았습니다.' });
+          return;
+        }
+        const [page, sum] = await Promise.all([
+          withFanRefresh(() => listEventReviews(eventId, { sort: reviewSortParam(sort), limit: 10 })),
+          withFanRefresh(() => getEventReviewSummary(eventId)),
+        ]);
+        if (!live) return;
+        setList({ kind: 'ready', ...mapReviewPage(page.data) });
+        setSummary({ ...mapReviewSummary(sum.data), loading: false });
+      } catch (e) {
+        if (!live) return;
+        setList(listProblem(e));
+        setSummary((s) => ({ ...s, loading: false }));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [eventId, sort, reloadKey]);
+
+  // 서버가 이미 신고한 후기라고 하면 [신고함]으로 그린다
+  useEffect(() => {
+    if (list.kind !== 'ready') return;
+    const ids = list.items.filter((r): r is Review => r.kind === 'review' && r.reportedByMe === true).map((r) => r.id);
+    if (ids.length) setReported((prev) => new Set([...prev, ...ids]));
+  }, [list]);
+
+  // 주소로 연 신고 대상이 목록에 없으면 '지워졌거나 가려진 후기' 안내를 보인다
+  useEffect(() => {
+    if (view.kind === 'report' && list.kind === 'ready' && !targetItem) setAlert('gone');
+  }, [view.kind, list, targetItem]);
+
   // 처음 연 버튼을 기억한다(모두 닫으면 돌려준다). 미리보기 상태의 토스트는 보드처럼 떠 있게 둔다
   useEffect(() => {
     const active = document.activeElement;
@@ -196,10 +281,52 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     if (preview === '복사 실패') showLocalToast({ icon: 'ic-alert', text: '신고서에 이 주소를 적어 주세요: ', mono: postUrl(init.reviewId) }, true);
     return () => {
       clearTimeout(toastTimer.current);
-      clearTimeout(busyTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 쓰기 모달은 열기 전에 자격을 확인한다. 이미 쓴 회차면 그 후기를 받아 고치기로 바꾼다.
+  useEffect(() => {
+    if (view.kind !== 'write') return;
+    if (guest) {
+      setView((v) => ({ ...v, kind: 'login' }));
+      return;
+    }
+    let live = true;
+    setWriteCheck('checking');
+    void (async () => {
+      try {
+        const [{ getEventReviewEligibility, getReview }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+        if (!ensureBrowserApi()) {
+          if (live) setWriteCheck('noRight');
+          return;
+        }
+        const r = await withFanRefresh(() => getEventReviewEligibility(eventId));
+        if (!live) return;
+        if (r.data.eligible) {
+          setWriteCheck('ready');
+          return;
+        }
+        if (r.data.reason === 'ALREADY_WRITTEN' && r.data.myReviewId) {
+          const mine = await withFanRefresh(() => getReview(r.data.myReviewId!));
+          const mapped = mapReview(mine.data);
+          if (live && mapped?.kind === 'review' && !mapped.restricted) {
+            setEditing(mapped);
+            setWriteKey((k) => k + 1);
+            setWriteCheck('ready');
+            return;
+          }
+        }
+        if (live) setWriteCheck('noRight');
+      } catch (e) {
+        if (!live) return;
+        setWriteCheck(e instanceof ApiError && e.status === 401 ? 'login' : 'noRight');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [view.kind, eventId, guest]);
 
   // 뒤로·앞으로 가기: 주소에서 다시 정한다
   useEffect(() => {
@@ -243,6 +370,72 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
 
   const backToList = (focusId?: string) => go({ ...view, kind: 'list', from: 'list' }, focusId);
 
+  const loadMore = async () => {
+    if (list.kind !== 'ready' || !list.nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const [{ listEventReviews }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+      const page = mapReviewPage((await withFanRefresh(() => listEventReviews(eventId, { sort: reviewSortParam(sort), cursor: list.nextCursor!, limit: 10 }))).data);
+      setList({ kind: 'ready', items: [...list.items, ...page.items], nextCursor: page.nextCursor });
+    } catch {
+      showLocalToast({ icon: 'ic-alert', text: '후기를 더 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const deleteReview = async (id: string) => {
+    try {
+      const [{ deleteReview }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+      await withFanRefresh(() => deleteReview(id));
+      setRemoved((prev) => new Set(prev).add(id));
+      setAskDelete(null);
+      showLocalToast({ icon: 'ic-check', text: '후기를 지웠습니다' });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setAskDelete(null);
+      showLocalToast({ icon: 'ic-alert', text: e instanceof ApiError && e.status === 403 ? '내 후기만 지울 수 있습니다' : '후기를 지우지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    }
+  };
+
+  const submitWrite = async (rating: number, body: string): Promise<WriteResult> => {
+    try {
+      const [{ createEventReview, updateReview }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+      if (editing) {
+        await withFanRefresh(() => updateReview(editing.id, { rating, body }));
+      } else {
+        await withFanRefresh(() =>
+          createEventReview(eventId, { rating, body }, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+        );
+      }
+      setReloadKey((k) => k + 1);
+      const text = editing ? '후기를 고쳤습니다' : '후기를 등록했습니다';
+      if (writeFrom === 'list') {
+        setEditing(undefined);
+        backToList();
+        showLocalToast({ icon: 'ic-check', text });
+      } else {
+        closeAll({ text, icon: 'ic-check' });
+      }
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.status === 401) {
+          setView((v) => ({ ...v, kind: 'login' }));
+          return { ok: false };
+        }
+        if (e.status === 403) {
+          setView((v) => ({ ...v, kind: 'noRight' }));
+          return { ok: false };
+        }
+        if (e.status === 409) return { ok: false, errors: { server: '이 회차의 후기를 이미 썼습니다. 목록에서 고쳐 주세요.' } };
+        if (e.status === 422) return { ok: false, errors: { server: '입력 내용을 확인해 주세요.' } };
+        if (e.status === 503) return { ok: false, errors: { server: '지금은 후기를 쓸 수 없습니다.' } };
+      }
+      return { ok: false, errors: { server: '후기를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } };
+    }
+  };
+
   const openReport = (id: string) => {
     if (guest) {
       go({ ...view, kind: 'reportLogin', reviewId: id, from: 'list' });
@@ -250,7 +443,7 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     }
     setDraft(EMPTY_REPORT_DRAFT);
     setReportErrors([]);
-    setAlert(getReview(id) ? null : 'gone');
+    setAlert(list.kind === 'ready' && !items.some((r) => r.id === id) ? 'gone' : null);
     go({ ...view, kind: 'report', reviewId: id, from: 'list' });
   };
 
@@ -271,11 +464,19 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     setView({ ...view, kind: 'confirm' });
   };
 
-  const confirmReport = () => {
-    if (busy) return;
+  const confirmReport = async () => {
+    if (busy || !draft.reason) return;
     setBusy(true);
-    busyTimer.current = setTimeout(() => {
-      setBusy(false);
+    try {
+      const [{ createReviewReport }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+      await withFanRefresh(() =>
+        createReviewReport(view.reviewId, {
+          category: draft.reason!,
+          ...(draft.detail.trim() ? { detail: draft.detail.trim() } : {}),
+          ...(draft.reason === 'RIGHTS' ? { rightsHolder: draft.rightsHolder === 'yes' } : {}),
+          ...(draft.reason === 'RIGHTS' && draft.rightsHolder === 'yes' && draft.notify ? { notifyChannel: draft.notify } : {}),
+        }),
+      );
       setReported((prev) => new Set(prev).add(view.reviewId));
       setDraft(EMPTY_REPORT_DRAFT);
       const done = '신고를 접수했습니다. 검토 결과는 알림으로 알려 드립니다.';
@@ -285,7 +486,30 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
       } else {
         closeAll({ text: done, icon: 'ic-check' });
       }
-    }, 900);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.status === 429) {
+          setAlert('limited');
+          setView((v) => ({ ...v, kind: 'report' }));
+        } else if (e.status === 404) {
+          setAlert('gone');
+          setView((v) => ({ ...v, kind: 'report' }));
+        } else if (e.status === 409) {
+          setReported((prev) => new Set(prev).add(view.reviewId));
+          setAlert(null);
+          showLocalToast({ icon: 'ic-check', text: '이미 신고한 후기입니다' });
+          backToList(`rv-rp-${view.reviewId}`);
+        } else {
+          setAlert('failed');
+          setView((v) => ({ ...v, kind: 'report' }));
+        }
+      } else {
+        setAlert('failed');
+        setView((v) => ({ ...v, kind: 'report' }));
+      }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const onOutbound = () => {
@@ -301,13 +525,12 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     );
   };
 
-  const target: ReportTarget = knownOrGeneric(view.reviewId);
-  const emptyList = preview === '빈 화면';
-  const loadingList = preview === '목록 불러오는 중';
-  const items = useMemo(
-    () => (emptyList ? [] : sortReviewItems(REVIEW_ITEMS.filter((r) => !removed.has(r.id)), sort)),
-    [emptyList, removed, sort],
-  );
+  const emptyList = preview === '빈 화면' || (list.kind === 'ready' && items.length === 0);
+  const loadingList = preview === '목록 불러오는 중' || list.kind === 'loading';
+  const errorList = list.kind === 'error' ? list.message : null;
+  const offList = list.kind === 'off';
+  const loginList = list.kind === 'login';
+  const shownItems = sort === 'latest' ? items : sortReviewItems(items, sort);
 
   if (!open) return null;
 
@@ -325,11 +548,11 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
           height={820}
           heightLg={640}
           restoreFocus={false}
-          header={view.kind === 'list' && !loadingList && items.length > 0 ? <ListHeader sort={sort} onSort={setSort} /> : undefined}
+          header={view.kind === 'list' && !loadingList && items.length > 0 ? <ListHeader sort={sort} onSort={setSort} average={summary.average} count={summary.count} loading={summary.loading} /> : undefined}
         >
           {view.kind === 'photo' ? (
             <PhotoView
-              review={getReview(view.reviewId)}
+              review={targetItem}
               index={view.photo}
               onIndex={(n) => {
                 setView({ ...view, photo: n });
@@ -337,6 +560,21 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
               }}
               onBack={() => backToList(`rv-ph-${view.reviewId}-${view.photo}`)}
             />
+          ) : offList ? (
+            <div className="state py-16 md:py-24" role="status">
+              <span className="state-icon"><i className="ic ic-eye-off" aria-hidden="true" /></span>
+              <p className="t-lg">지금은 후기를 볼 수 없습니다</p>
+            </div>
+          ) : loginList ? (
+            <div className="state py-16 md:py-24" role="status">
+              <p className="t-lg">로그인하면 후기를 볼 수 있습니다</p>
+              <a className="btn btn-primary btn-lg" href={loginHref}>로그인</a>
+            </div>
+          ) : errorList ? (
+            <div className="state py-16 md:py-24" role="alert">
+              <p className="t-lg">{errorList}</p>
+              <button className="btn btn-secondary btn-lg" type="button" onClick={() => setReloadKey((k) => k + 1)}>다시 불러오기</button>
+            </div>
           ) : loadingList ? (
             <ul className="col" style={{ gap: 12 }} aria-busy="true" aria-label="후기 목록">
               <li className="sr-only">후기를 불러오는 중</li>
@@ -348,7 +586,7 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
                 </li>
               ))}
             </ul>
-          ) : items.length === 0 ? (
+          ) : shownItems.length === 0 ? (
             <div className="state py-16 md:py-24">
               <span className="state-icon">
                 <i className="ic ic-star" aria-hidden="true" />
@@ -358,11 +596,11 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
           ) : (
             <>
               <ul className="col" style={{ gap: 12 }} aria-label="후기 목록">
-                {items.map((it) => (
+                {shownItems.map((it) => (
                   <li key={it.id}>
                     <ReviewCard
                       item={it}
-                      reported={reported.has(it.id)}
+                      reported={reported.has(it.id) || (it.kind === 'review' && it.reportedByMe === true)}
                       askDelete={askDelete === it.id}
                       onPhoto={(n) => go({ ...view, kind: 'photo', reviewId: it.id, photo: n }, 'rv-photo-view')}
                       onReport={() => openReport(it.id)}
@@ -375,18 +613,21 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
                         setView({ ...view, kind: 'write' });
                       }}
                       onAskDelete={(ask) => setAskDelete(ask ? it.id : null)}
-                      onDelete={() => {
-                        setRemoved((prev) => new Set(prev).add(it.id));
-                        setAskDelete(null);
-                        showLocalToast({ icon: 'ic-check', text: '후기를 지웠습니다' });
+                      onDelete={() => void deleteReview(it.id)}
+                      moderator={moderator}
+                      onModerated={(text) => {
+                        showLocalToast({ icon: 'ic-check', text });
+                        setReloadKey((k) => k + 1);
                       }}
                     />
                   </li>
                 ))}
               </ul>
-              <button className="btn btn-secondary btn-lg btn-block md:w-auto md:min-w-[240px] md:self-center" type="button">
-                더 보기
-              </button>
+              {list.kind === 'ready' && list.nextCursor ? (
+                <button className="btn btn-secondary btn-lg btn-block md:w-auto md:min-w-[240px] md:self-center" type="button" onClick={() => void loadMore()} disabled={loadingMore} aria-busy={loadingMore}>
+                  {loadingMore ? '불러오는 중…' : '더 보기'}
+                </button>
+              ) : null}
             </>
           )}
         </ModalFrame>
@@ -420,7 +661,11 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
         restoreFocus={false}
       />
 
-      {view.kind === 'write' ? (
+      {view.kind === 'write' && writeCheck === 'checking' ? (
+        <ModalFrame open onClose={() => closeAll()} title="후기 쓰기" closeLabel="후기 쓰기 닫기" layout="form" maxWidth={560} maxWidthLg={600} restoreFocus={false}>
+          <p className="t-sm muted" role="status" aria-busy="true">후기를 쓸 수 있는지 확인하는 중입니다…</p>
+        </ModalFrame>
+      ) : view.kind === 'write' && writeCheck === 'ready' ? (
         <WriteModal
           key={writeKey}
           preset={writePresetFor(editing ? null : preview, editing)}
@@ -433,19 +678,12 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
               backToList(editing ? `rv-ed-${editing.id}` : undefined);
             } else closeAll();
           }}
-          onSubmitted={(mode) => {
-            const text = mode === 'edit' ? '후기를 고쳤습니다' : '후기를 등록했습니다';
-            if (writeFrom === 'list') {
-              setEditing(undefined);
-              backToList();
-              showLocalToast({ icon: 'ic-check', text });
-            } else closeAll({ text, icon: 'ic-check' });
-          }}
+          onSubmit={submitWrite}
         />
       ) : null}
 
       <WebShellModal
-        open={view.kind === 'noRight'}
+        open={view.kind === 'noRight' || (view.kind === 'write' && writeCheck === 'noRight')}
         onClose={() => closeAll()}
         title="공연이 끝난 뒤 이 회차를 예매하신 분만 후기를 쓸 수 있습니다"
         icon={<i className="ic ic-edit" aria-hidden="true" />}
@@ -456,9 +694,9 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
         }
       />
       <WebShellModal
-        open={view.kind === 'login' || view.kind === 'reportLogin'}
+        open={view.kind === 'login' || view.kind === 'reportLogin' || (view.kind === 'write' && writeCheck === 'login')}
         onClose={() => closeAll()}
-        title={view.kind === 'login' ? '로그인하면 후기를 쓸 수 있습니다' : '로그인하면 신고할 수 있습니다'}
+        title={view.kind === 'login' || (view.kind === 'write' && writeCheck === 'login') ? '로그인하면 후기를 쓸 수 있습니다' : '로그인하면 신고할 수 있습니다'}
         icon={<i className="ic ic-user" aria-hidden="true" />}
         iconTone="primary"
         actions={
@@ -500,32 +738,28 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
   );
 }
 
-/** 신고 대상 상자: 알면 작성자·관람 회차·본문, 모르면(404) 게시물 번호만 */
-function knownOrGeneric(id: string): ReportTarget {
-  const r = getReview(id);
-  return r ? { author: r.author, watched: r.watched, postId: r.id, excerpt: r.body } : { author: '', watched: '', postId: id, excerpt: '' };
-}
-
 /** 전체 모달 머리: 평균 별점·후기 수·정렬, 신고 안내(POL-024 나목, 정부 신고기관 바로가기) */
-function ListHeader({ sort, onSort }: { sort: ReviewSort; onSort: (s: ReviewSort) => void }) {
+function ListHeader({ sort, onSort, average, count, loading }: { sort: ReviewSort; onSort: (s: ReviewSort) => void; average: number | null; count: number; loading: boolean }) {
   return (
     <>
       <div className="row between" style={{ gap: 8 }}>
         <div className="row" style={{ gap: 8 }}>
-          <span className="row" style={{ gap: 1, color: 'var(--primary)' }} aria-hidden="true">
-            {[1, 2, 3, 4, 5].map((k) => (
-              <i key={k} className="ic ic-star-fill ic-16" />
-            ))}
-          </span>
-          <strong className="t-lg num" aria-hidden="true">
-            {REVIEW_SUMMARY.average}
-          </strong>
-          <span className="t-sm muted" aria-hidden="true">
-            {REVIEW_SUMMARY.count}개
-          </span>
-          <span className="sr-only">
-            평균 별점 5점 만점에 {REVIEW_SUMMARY.average}점, 후기 {REVIEW_SUMMARY.count}개
-          </span>
+          {loading ? (
+            <span className="skel" style={{ width: 150, height: 20 }} aria-hidden="true" />
+          ) : average !== null ? (
+            <>
+              <span className="row" style={{ gap: 1, color: 'var(--primary)' }} aria-hidden="true">
+                {[1, 2, 3, 4, 5].map((k) => (
+                  <i key={k} className="ic ic-star-fill ic-16" />
+                ))}
+              </span>
+              <strong className="t-lg num" aria-hidden="true">{average.toFixed(1)}</strong>
+              <span className="t-sm muted" aria-hidden="true">{count.toLocaleString('ko-KR')}개</span>
+              <span className="sr-only">평균 별점 5점 만점에 {average.toFixed(1)}점, 후기 {count.toLocaleString('ko-KR')}개</span>
+            </>
+          ) : (
+            <span className="t-sm muted">아직 후기가 없습니다</span>
+          )}
         </div>
         <div className="input-group input-group-sm" style={{ width: 'auto', padding: '0 8px 0 10px' }}>
           <select aria-label="정렬" value={sort} onChange={(e) => onSort(e.target.value as ReviewSort)}>
@@ -573,6 +807,8 @@ function ReviewCard({
   onEdit,
   onAskDelete,
   onDelete,
+  moderator,
+  onModerated,
 }: {
   item: ReviewItem;
   reported: boolean;
@@ -582,6 +818,8 @@ function ReviewCard({
   onEdit: () => void;
   onAskDelete: (ask: boolean) => void;
   onDelete: () => void;
+  moderator?: boolean;
+  onModerated?: (text: string) => void;
 }) {
   if (item.kind === 'notice') {
     return (
@@ -675,7 +913,7 @@ function ReviewCard({
         )}
         {r.photos.length > 0 ? (
           <ul className="row lg:mt-0.5" style={{ gap: 8 }} aria-label={`${r.author}의 후기 사진 ${r.photos.length}장`}>
-            {r.photos.map((_, k) => (
+            {r.photos.map((photo, k) => (
               <li key={k}>
                 <button
                   className="center"
@@ -692,16 +930,24 @@ function ReviewCard({
                     background: 'var(--fill-weak)',
                     color: 'var(--text-muted)',
                     cursor: 'pointer',
+                    overflow: 'hidden',
                   }}
                 >
-                  <i className="ic ic-image ic-24" aria-hidden="true" />
+                  {photo.thumbnailUrl ? (
+                    <img src={photo.thumbnailUrl} alt="" width={72} height={72} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <i className="ic ic-image ic-24" aria-hidden="true" />
+                  )}
                 </button>
               </li>
             ))}
           </ul>
         ) : null}
       </div>
-      <div className="col flex-none lg:items-end">{actions}</div>
+      <div className="col flex-none lg:items-end">
+        {actions}
+        {moderator ? <ReviewModerationActions reviewId={r.id} onDone={(text) => onModerated?.(text)} /> : null}
+      </div>
     </article>
   );
 }
@@ -720,8 +966,10 @@ function PhotoView({ review, index, onIndex, onBack }: { review: Review | undefi
   }
   const total = review.photos.length;
   const n = Math.min(Math.max(index, 1), total);
-  const caption = review.photos[n - 1]?.caption ?? '';
+  const photo = review.photos[n - 1];
+  const caption = photo?.caption ?? '';
   const name = caption || `후기 사진 ${n}/${total}`;
+  const src = photo?.url ?? photo?.thumbnailUrl;
   const atStart = n <= 1;
   const atEnd = n >= total;
   const disabled = { color: 'var(--text-disabled)', cursor: 'not-allowed' } as const;
@@ -739,8 +987,12 @@ function PhotoView({ review, index, onIndex, onBack }: { review: Review | undefi
           aria-label={name}
           style={{ borderRadius: 'var(--r-lg)', background: 'var(--fill-weak)', color: 'var(--text-muted)' }}
         >
-          <i className="ic ic-image ic-48 md:hidden" aria-hidden="true" />
-          <i className="ic ic-image ic-64 hidden md:inline-block" aria-hidden="true" />
+          {src ? <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : (
+            <>
+              <i className="ic ic-image ic-48 md:hidden" aria-hidden="true" />
+              <i className="ic ic-image ic-64 hidden md:inline-block" aria-hidden="true" />
+            </>
+          )}
         </div>
         <div className="row between" style={{ gap: 8 }}>
           <button
@@ -789,6 +1041,7 @@ interface WriteErrors {
   rating?: string;
   text?: string;
   banned?: string;
+  server?: string;
 }
 
 function checkWrite(rating: number, text: string): WriteErrors {
@@ -808,30 +1061,38 @@ function WriteModal({
   rounds,
   currentRound,
   onClose,
-  onSubmitted,
+  onSubmit,
 }: {
   preset: WritePreset;
   title: string;
   rounds: readonly { value: string; label: string }[];
   currentRound: string;
   onClose: () => void;
-  onSubmitted: (mode: WriteMode) => void;
+  onSubmit: (rating: number, body: string) => Promise<WriteResult>;
 }) {
   const [rating, setRating] = useState(preset.rating);
   const [text, setText] = useState(preset.text);
   const [errors, setErrors] = useState<WriteErrors>(() => (preset.validate ? checkWrite(preset.rating, preset.text) : {}));
   const [submitCount, setSubmitCount] = useState(preset.validate ? 1 : 0);
+  const [submitting, setSubmitting] = useState(false);
   const edit = preset.mode === 'edit';
   const summary = [
     errors.rating ? { fieldId: 'rw-rating', message: errors.rating } : null,
     errors.text ? { fieldId: 'rw-text', message: errors.text } : null,
   ].filter((x): x is { fieldId: string; message: string } => x !== null);
 
-  const submit = () => {
+  const submit = async () => {
     const e = checkWrite(rating, text);
     setErrors(e);
     setSubmitCount((c) => c + 1);
-    if (!e.rating && !e.text && !e.banned) onSubmitted(preset.mode);
+    if (e.rating || e.text || e.banned) return;
+    setSubmitting(true);
+    try {
+      const result = await onSubmit(rating, text);
+      if (!result.ok) setErrors(result.errors ?? { server: '후기를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -862,6 +1123,12 @@ function WriteModal({
         ) : null}
         {summary.length > 0 ? (
           <FormErrorSummary key={submitCount} title={`등록하기 전에 ${summary.length}곳을 고쳐 주세요`} errors={summary} focusFirst={submitCount > 0} />
+        ) : null}
+        {errors.server ? (
+          <div className="banner banner-danger" role="alert">
+            <i className="ic ic-alert" aria-hidden="true" />
+            <div className="banner-body">{errors.server}</div>
+          </div>
         ) : null}
         <div className="banner banner-legal">
           <i className="ic ic-scale" aria-hidden="true" />
@@ -901,8 +1168,8 @@ function WriteModal({
           <button className="btn btn-ghost hidden md:inline-flex" type="button" onClick={onClose}>
             닫기
           </button>
-          <button className="btn btn-primary btn-lg btn-block md:w-auto md:min-w-[160px]" type="submit">
-            {edit ? '고치기' : '등록'}
+          <button className="btn btn-primary btn-lg btn-block md:w-auto md:min-w-[160px]" type="submit" disabled={submitting} aria-busy={submitting}>
+            {submitting ? '보내는 중…' : edit ? '고치기' : '등록'}
           </button>
         </div>
       </form>

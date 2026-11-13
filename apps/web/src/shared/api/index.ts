@@ -44,7 +44,7 @@ export function ensureServerApi(): boolean {
 export function ensureBrowserApi(): boolean {
   if (typeof window === 'undefined') return false;
   if (!browserClient) {
-    const hosts = { api: ORIGINS.api, queue: ORIGINS.queue, 'queue-files': ORIGINS.queueFiles, www: window.location.origin };
+    const hosts = { api: ORIGINS.api, queue: ORIGINS.queue, 'queue-files': ORIGINS.queueFiles, 'ops-api': ORIGINS.opsApi, www: window.location.origin };
     browserClient = createApiClient({ baseUrls: Object.fromEntries(Object.entries(hosts).filter(([, v]) => v)) });
     setOrvalClient(browserClient);
   }
@@ -58,6 +58,9 @@ export function browserApiClient(): ApiClient | null {
 
 /** 팬 API를 부를 수 있는가(개발 서버에서 주소를 넣지 않았으면 개인 값은 비로그인처럼 둔다) */
 export const fanApiAvailable = (): boolean => ORIGINS.api !== '';
+
+/** 관제 API를 부를 수 있는가(운영자 후기 조치 버튼을 보일지 정한다) */
+export const opsApiAvailable = (): boolean => ORIGINS.opsApi !== '';
 
 /** 토큰 갱신은 창끼리 하나씩(Web Locks, 다른 기능과 같은 잠금 shared/lib/refresh-lock). 같은 리프레시 토큰으로 두 창이 갱신하면 재사용 탐지에 걸린다 */
 let refreshing: Promise<RefreshResult> | null = null;

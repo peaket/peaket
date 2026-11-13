@@ -73,7 +73,7 @@ const NO_MOCKS_IN_APPS = {
   },
 };
 /** setOrvalClient를 꽂는 한 곳(ADR-0199 결정 3) */
-const API_CLIENT_HOME = { files: ['apps/web/src/shared/api/index.ts'], rules: { 'no-restricted-imports': 'off' } };
+const API_CLIENT_HOME = { files: ['apps/web/src/shared/api/index.ts', 'apps/console-host/src/shared/api/index.ts'], rules: { 'no-restricted-imports': 'off' } };
 
 /** 앱 코드의 동적 코드 실행 금지: eval·new Function·문자열 타이머(setTimeout('…'))(asvs/seat-hold.md 1.3.2, ADR-0264, BUILD_ORDER HOT-220) */
 // no-implied-eval은 전역으로 선언된 타이머만 본다. 그래서 타이머 이름을 전역으로 둔다(값은 바꾸지 않는다)

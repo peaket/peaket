@@ -52,7 +52,11 @@ export default (_env, argv) => {
         ? new HtmlWebpackPlugin({ filename: 'poc-seed-css.html', template: path.join(dirname, 'src/poc-seed-css.html') })
         : new HtmlWebpackPlugin({ template: path.join(dirname, 'src/index.html') }),
       // 화면 목록(/preview)은 개발 서버에서만 연다(design.md 결정 7)
-      new webpack.DefinePlugin({ __PREVIEW__: JSON.stringify(dev) }),
+      new webpack.DefinePlugin({
+        __PREVIEW__: JSON.stringify(dev),
+        __OPS_API_ORIGIN__: JSON.stringify(process.env.PEAKET_OPS_API_ORIGIN || (dev ? 'http://localhost:8080' : 'https://ops-api.peaket.example')),
+        __SCANNER_ORIGIN__: JSON.stringify(process.env.PEAKET_SCANNER_ORIGIN || (dev ? 'http://localhost:3003' : 'https://scanner.peaket.example')),
+      }),
       ...(dev ? [] : [new MiniCssExtractPlugin({ filename: 'assets/[name].[contenthash:8].css', chunkFilename: 'assets/[name].[contenthash:8].chunk.css' })]),
     ],
     devServer: {

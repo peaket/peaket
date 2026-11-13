@@ -2,6 +2,9 @@
 // 개발 서버에서는 따로 띄운 포렌식 데모 앱(포트 3005)으로 잇는다. __PREVIEW__는 빌드 때 글자로 바뀌어 운영 묶음에 개발 주소가 남지 않는다.
 export const FORENSICS_BASE: string = __PREVIEW__ ? 'http://localhost:3005/' : '/forensics';
 
+/** 스캐너 PWA 주소(등록 코드 QR의 주소 조각에 쓴다). 빌드 때 PEAKET_SCANNER_ORIGIN으로 바꾼다 */
+export const SCANNER_ORIGIN: string = __SCANNER_ORIGIN__.replace(/\/+$/, '');
+
 /**
  * 사건 작업대에서 여는 조사 원천 리플레이 주소(새 탭, rel="noopener"). 정본은 '연 길이 원천을 정한다'이고(§4.2·§6.8),
  * 퍼블리싱에서는 연 길 대신 ?source=조사로 원천을 고른다(add-fraud-investigation-screens design.md 결정 7).
