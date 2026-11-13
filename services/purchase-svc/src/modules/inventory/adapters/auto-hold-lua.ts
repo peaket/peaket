@@ -46,7 +46,7 @@
 //
 // 쓰기(6)
 //   - exp = heldAt + TTL. 토큰 = max((GET fence 또는 0) + 1, µs). SET fence 토큰 글.
-//   - 고른 좌석을 색인 오름차순으로 정렬해 비트 켜기(BITFIELD 한 번), hold Hash DEL 뒤 HSET(holdId·owner·psid·fence·heldAt·exp·kind 'FAN'·ext '0'),
+//   - 고른 좌석을 색인 오름차순으로 정렬해 비트 켜기(BITFIELD 한 번), hold Hash DEL 뒤 HSET(holdId·owner·psid·fence·heldAt·exp·kind 'FAN'·ext '0'·lim),
 //     만료 인덱스 ZADD, 보유 수 INCRBY(고른 수), idem HSET(fp·resp·seats·assign), 바뀐 구역마다 HINCRBY secver 1,
 //     좌석마다 Stream HELD 한 건, 구역마다 SPUBLISH 델타 한 건(좌석 색인 오름차순).
 //   - auto_cur HSET(칸 = 다음 커서), PEXPIREAT keepUntil. 비트맵·expiry·quota·stream·epoch·secver·fence·auto_cur의 수명도 keepUntil까지 늘린다.
@@ -222,7 +222,7 @@ redis.call('DEL', unpack(holdKeys))
 for i = 1, #chosen do
   local s = chosen[i]
   local hk = KEYS[s.keyPos]
-  redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0')
+  redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0', 'lim', ARGV[5])
   redis.call('PEXPIREAT', hk, keepText)
 end
 redis.call('ZADD', KEYS[2], unpack(expiryPairs))

@@ -1233,6 +1233,9 @@ importers:
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@peaket/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)

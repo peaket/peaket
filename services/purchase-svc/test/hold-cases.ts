@@ -226,7 +226,7 @@ export function holdCases(name: string, setup: () => Promise<SeatHarness>): void
     const tok = String(r.fencingToken);
     for (const id of ['A01', 'A02', 'B01']) {
       expect(await h.bit(e, idx(id))).toBe(1);
-      expect(await h.holdHash(e, idx(id))).toEqual({ holdId: i.holdId, owner: ACCOUNT_A, psid: 'ps-a', fence: tok, heldAt: String(r.heldAtMs), exp: String(r.expiresAtMs), kind: 'FAN', ext: '0' });
+      expect(await h.holdHash(e, idx(id))).toEqual({ holdId: i.holdId, owner: ACCOUNT_A, psid: 'ps-a', fence: tok, heldAt: String(r.heldAtMs), exp: String(r.expiresAtMs), kind: 'FAN', ext: '0', lim: String(i.limit) });
       expect(await h.expiryScore(e, idx(id))).toBe(r.expiresAtMs);
     }
     // 이웃 좌석은 그대로
@@ -290,6 +290,7 @@ export function holdCases(name: string, setup: () => Promise<SeatHarness>): void
       exp: String(r.expiresAtMs),
       kind: 'FAN',
       ext: '0',
+      lim: String(i.limit),
     });
   });
 

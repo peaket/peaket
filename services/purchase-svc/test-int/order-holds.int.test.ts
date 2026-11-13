@@ -130,13 +130,13 @@ describe('RedisOrderHolds.check: 맞는 홀드', () => {
 
     const r = await holds.check(query(w));
 
-    expect(r).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf) });
+    expect(r).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4 });
   });
 
   test('ST28_좌석 하나짜리 홀드도 OK이고, 마감(deadlineMs)을 넘겨도 결과가 같다', async () => {
     const w = await heldWorld({ seatIds: ['B07'] });
     const holds = new RedisOrderHolds(redis, seatMapWith(w.eventId));
-    expect(await holds.check(query(w), { deadlineMs: 500 })).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: [seatOf('B07')] });
+    expect(await holds.check(query(w), { deadlineMs: 500 })).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: [seatOf('B07')], limit: 4 });
   });
 
   test('Lua 계약: 첫 줄이 #!lua flags=no-writes이고, 스크립트 한 번에 KEYS = [세대 키, hold:{색인} …(목록 차례)], ARGV = [holdId, 계정, 구매 세션]이며 KEYS가 모두 회차 슬롯 하나다', async () => {
@@ -370,7 +370,7 @@ describe('ORDER_HOLD_LUA: 만료 경계(TIME을 고정한 사본)', () => {
     await cmd(key, ['HSET', key, 'exp', String(nowMs)]);
     expect(await run()).toEqual(['NOT_FOUND']);
     await cmd(key, ['HSET', key, 'exp', String(nowMs + 1)]);
-    expect(await run()).toEqual(['OK', String(w.heldAtMs)]);
+    expect(await run()).toEqual(['OK', String(w.heldAtMs), '4']);
     await cmd(key, ['HSET', key, 'exp', String(nowMs - 1)]);
     expect(await run()).toEqual(['NOT_FOUND']);
   });

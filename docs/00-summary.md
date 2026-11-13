@@ -578,6 +578,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-532: BAT-090 OpenAPI 변경 API 클라이언트 생성물 반영(2026-11-13): `contract-check` 실패를 고쳤다.
 - R-533: BAT-050 ticket-svc 최소 발권과 payment-svc 발권 포트를 넣는다.
 - R-534: BAT-615 OpenAPI 문제 유형 API 클라이언트 생성물 반영(2026-11-13): `contract-check` 실패를 고쳤다.
+- R-535: BAT-051(HOT-252) purchase-svc 홀드의 판매 정책 평가를 넣었다(2026-11-13): core-svc 내부 읽기 경로, `LayoutSeatMap` 덮기, `lst` 모양·`entryGate`·`evaluateSalePolicy`, 규칙 한도→홀드 Lua·`purchase_quota`.
 - R-536: BAT-050 ticket proto 기본값 시험 반영(2026-11-13): CI `node` 실패를 고쳤다.
 
 ## 5. [충돌] 결정 결과

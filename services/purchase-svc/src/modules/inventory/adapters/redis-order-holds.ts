@@ -3,8 +3,8 @@
 // 키에 넣는 값(jti·회차 ID·holdId)은 KEY_PART 모양을 다시 확인한다(해시 태그를 깨는 값이 키로 가지 않게. 모양이 틀리면 저장소를 부르지 않고 NOT_FOUND).
 // 주문 만료의 '홀드 남음' 읽기(holdLeft, BUILD_ORDER PRF-172)도 여기 둔다. 회차 ID가 좌석맵 판을 지나야 키가 되므로 모양을 따로 보지 않는다.
 import { type HotRedis, redisScript } from '@peaket/platform';
-import { heldSeatIdsOf, KEY_PART, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
-import type { OrderHoldCheck, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
+import { heldSeatIdsOf, KEY_PART, MAX_SEATS, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
+import type { OrderHoldCheck, OrderHoldLimitQuery, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
 import { ORDER_HOLD_EXPIRY_LUA, ORDER_HOLD_LEFT_LUA, ORDER_HOLD_LUA } from './order-hold-lua.js';
 import { sessionKeys } from './redis-purchase-sessions.js';
 import { guard, seatKeys } from './redis-seat-store.js';
@@ -65,11 +65,13 @@ export class RedisOrderHolds implements OrderHoldReader {
       const kind = str(r[0]);
       if (kind === 'NOT_READY') return STORE_UNAVAILABLE;
       if (kind === 'NOT_FOUND') return NOT_FOUND;
-      if (kind === 'OK' && r.length === 2) {
+      if (kind === 'OK' && (r.length === 2 || r.length === 3)) {
         const text = str(r[1]);
         const heldAtMs = Number(text);
         if (!/^(0|[1-9][0-9]*)$/.test(text) || !Number.isSafeInteger(heldAtMs)) throw new Error('홀드 확인 Lua가 돌려준 heldAt이 0 이상 정수 글이 아니다');
-        return { status: 'OK', heldAtMs, seats: seats.map(heldSeatOf) };
+        const limit = r.length === 3 ? Number(str(r[2])) : undefined;
+        if (limit !== undefined && (!/^[1-9][0-9]*$/.test(str(r[2])) || !Number.isSafeInteger(limit) || limit < 1)) throw new Error('홀드 확인 Lua가 돌려준 1인 한도가 양의 정수 글이 아니다');
+        return { status: 'OK', heldAtMs, seats: seats.map(heldSeatOf), ...(limit !== undefined ? { limit } : {}) };
       }
       throw new Error(`홀드 확인 Lua가 모르는 결과를 돌려줬다: ${kind}`);
     } catch (e) {
@@ -77,6 +79,26 @@ export class RedisOrderHolds implements OrderHoldReader {
       if (e instanceof SeatStoreUnavailable) return STORE_UNAVAILABLE;
       throw e;
     }
+  }
+
+  /** 홀드 Hash의 lim(1인 한도). 구매 세션 목록 없이 주문 좌석의 Hash만 읽는다(BAT-051) */
+  async limit(q: OrderHoldLimitQuery, o?: SeatCallOptions): Promise<number | undefined> {
+    if (!orderHoldQueryShaped({ eventId: q.eventId, accountId: q.accountId, purchaseSessionId: q.purchaseSessionId, holdId: q.holdId })) return undefined;
+    if (!Array.isArray(q.seatIds) || q.seatIds.length < 1 || q.seatIds.length > MAX_SEATS) return undefined;
+    const refs = await this.seatMap.resolve(q.eventId, q.seatIds);
+    if (refs.some((r) => r === undefined)) return undefined;
+    const seats = refs as SeatRef[];
+    const keys = [seatKeys.epoch(q.eventId), ...seats.map((s) => seatKeys.hold(q.eventId, s.index))];
+    const r = await guard(this.redis.evalScript(ORDER_HOLD, keys, [q.holdId, q.accountId, q.purchaseSessionId], deadlineOf(o)));
+    if (!Array.isArray(r) || r.length < 1) throw new Error(`홀드 한도 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY' || kind === 'NOT_FOUND') return undefined;
+    if (kind !== 'OK') throw new Error(`홀드 한도 Lua가 모르는 결과를 돌려줬다: ${kind}`);
+    if (r.length !== 3) return undefined;
+    const text = str(r[2]);
+    const limit = Number(text);
+    if (!/^[1-9][0-9]*$/.test(text) || !Number.isSafeInteger(limit) || limit < 1) throw new Error('홀드 한도 Lua가 돌려준 lim이 양의 정수 글이 아니다');
+    return limit;
   }
 
   /**

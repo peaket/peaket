@@ -2,7 +2,8 @@
 // 차례: 회차 설정 → 구역 검사 → 구매 세션 열기(입장 토큰의 첫 사용) → 스냅샷 읽기 Lua → 이진 본문.
 import type { Clock, Deadline } from '@peaket/platform';
 import { KEY_PART, SEAT_CALL_CAP_MS } from '../domain/hold.js';
-import type { SeatMap, SeatMapSections, SeatSnapshots } from '../domain/ports.js';
+import type { EventSeatConfig, SeatMap, SeatMapSections, SeatSnapshots } from '../domain/ports.js';
+import { SaleConfigUnavailable } from '../domain/sale-config.js';
 import type { SectionRange } from '../domain/seat-layout.js';
 import { encodeSnapshot, lsbFirstBits, U32_MAX } from '../domain/snapshot.js';
 import type { OpenPurchaseSession } from './open-purchase-session.js';
@@ -55,7 +56,14 @@ export class ReadSeatSnapshot {
    */
   async execute(c: SnapshotCommand): Promise<Buffer> {
     if (typeof c.eventId !== 'string' || !KEY_PART.test(c.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
-    const config = await this.deps.seatMap.config(c.eventId);
+    let config: EventSeatConfig | undefined;
+    try {
+      config = await this.deps.seatMap.config(c.eventId);
+    } catch (err) {
+      // core-svc 판매 설정 사본을 읽지 못하면 좌석 판이 없는 것과 같은 503으로 닫는다(BAT-051)
+      if (err instanceof SaleConfigUnavailable) throw new SnapshotError('NOT_READY');
+      throw err;
+    }
     const sections = config ? await this.deps.seatMap.sections(c.eventId) : undefined;
     if (!config || !sections) throw new SnapshotError('NOT_READY');
     let range: SectionRange | undefined;

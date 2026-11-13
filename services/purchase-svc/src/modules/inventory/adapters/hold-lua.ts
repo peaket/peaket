@@ -57,7 +57,7 @@
 //
 // 쓰기(7)
 //   - exp = heldAt + TTL. 토큰 = max((GET fence 또는 0) + 1, µs). SET fence 토큰 글.
-//   - 비트 켜기는 BITFIELD bitmap SET u1 색인 1 … 한 번, hold 키는 DEL 한 번에 지운 뒤 좌석마다 HSET hold = holdId·owner·psid·fence(토큰 글)·heldAt·exp·
+//   - 비트 켜기는 BITFIELD bitmap SET u1 색인 1 … 한 번, hold 키는 DEL 한 번에 지운 뒤 좌석마다 HSET hold = holdId·owner·psid·fence(토큰 글)·heldAt·exp·lim(1인 한도, BAT-051)·
 //     kind 'FAN'·ext '0', 만료 인덱스는 ZADD expiry exp 색인 exp 색인 … 한 번.
 //   - INCRBY quota n. HSET idem fp 지문 resp '{holdId}:{heldAt}:{exp}:{토큰 글}', PEXPIRE idem TTL.
 //   - 바뀐 구역마다(좌석 차례로 처음 나온 차례) HINCRBY secver 구역 색인 1.
@@ -318,7 +318,7 @@ redis.call('BITFIELD', KEYS[1], unpack(setBits))
 redis.call('DEL', unpack(holdKeys))
 for i = 1, n do
   local hk = KEYS[10 + i]
-  redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0')
+  redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0', 'lim', ARGV[5])
   -- 방금 지우고 새로 쓴 키라 수명이 없다(PEXPIRETIME을 보지 않고 건다)
   redis.call('PEXPIREAT', hk, keepText)
 end

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fakeClock } from '@peaket/platform';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  type EventSaleConfigOverlay,
   type EventSeatConfig,
   FileSeatMapSource,
   LayoutSeatMap,
@@ -338,14 +339,49 @@ interface Warn {
   msg: string;
 }
 
-function setup(o: { missingTtlMs?: number } = {}) {
+function setup(o: { missingTtlMs?: number; overlay?: { get(eventId: string): Promise<EventSaleConfigOverlay | undefined> } } = {}) {
   const clock = fakeClock({ now: NOW });
   const source = new FakeSource();
   const warns: Warn[] = [];
   source.files.set(EVENT, validFile());
-  const map = new LayoutSeatMap({ source, clock, logger: { warn: (obj, msg) => warns.push({ obj: obj as Record<string, unknown>, msg }) }, ...(o.missingTtlMs !== undefined ? { missingTtlMs: o.missingTtlMs } : {}) });
+  const map = new LayoutSeatMap({
+    source,
+    clock,
+    logger: { warn: (obj, msg) => warns.push({ obj: obj as Record<string, unknown>, msg }) },
+    ...(o.missingTtlMs !== undefined ? { missingTtlMs: o.missingTtlMs } : {}),
+    ...(o.overlay ? { overlay: o.overlay } : {}),
+  });
   return { clock, source, warns, map };
 }
+
+describe('LayoutSeatMap: core-svc 판매 설정 사본을 파일 설정 위에 덮는다(BAT-051, HOT-252)', () => {
+  const policy = [{ version: 1, name: '팬클럽', rounds: 'ALL', rule: { then: { limitPerPerson: 2 } } }] as const;
+
+  test('overlay가 있으면 perAccountLimit·saleEndsAtMs·salePolicy·eligLists를 덮고 좌석·가격은 파일 판 그대로다', async () => {
+    const { map } = setup({
+      overlay: {
+        get: async () => ({ rev: 9, perPersonLimit: 3, saleEndsAtMs: SALE_END_MS + 60_000, salePolicy: policy, eligLists: ['lumen-fanclub-2026'], layoutVersion: 7 }),
+      },
+    });
+    const c = await map.config(EVENT);
+    expect(c).toMatchObject({ perAccountLimit: 3, saleEndsAtMs: SALE_END_MS + 60_000, salePolicy: policy, eligLists: ['lumen-fanclub-2026'], saleConfigRev: 9, layoutVersion: '7', seatCount: CONFIG_V7.seatCount });
+    expect(c?.tierPrices).toBeUndefined();
+    expect((await map.resolve(EVENT, ['A01']))[0]?.seatId).toBe('A01');
+  });
+
+  test('overlay가 없으면(404) 파일 설정 그대로다. 읽기 실패는 던져 홀드가 닫힌다', async () => {
+    const none = setup({ overlay: { get: async () => undefined } });
+    expect(await none.map.config(EVENT)).toEqual(CONFIG_V7);
+    const broken = setup({
+      overlay: {
+        get: async () => {
+          throw new Error('core-svc down');
+        },
+      },
+    });
+    await expect(broken.map.config(EVENT)).rejects.toThrow('core-svc down');
+  });
+});
 
 describe('LayoutSeatMap: 처음 부를 때만 읽는다', () => {
   test('NFR003_처음 부를 때 한 번 읽고, 이후 config·resolve·byIndex·sections는 파일을 읽지 않는다', async () => {

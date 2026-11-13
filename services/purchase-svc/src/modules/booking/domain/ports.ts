@@ -199,8 +199,11 @@ export interface OrderHoldQuery {
 
 /** 홀드 확인 결과 */
 export type OrderHoldCheck =
-  /** heldAtMs: 홀드를 잡은 시각(홀드 Hash heldAt, 좌석마다 같다). seats: 구매 세션에 기록한 좌석 차례(좌석 ID 오름차순) */
-  | { readonly status: 'OK'; readonly heldAtMs: number; readonly seats: readonly HeldSeat[] }
+  /**
+   * heldAtMs: 홀드를 잡은 시각(홀드 Hash heldAt, 좌석마다 같다). seats: 구매 세션에 기록한 좌석 차례(좌석 ID 오름차순).
+   * limit: 홀드 때 쓴 1인 한도(판매 정책 규칙 결과, BAT-051). 옛 홀드처럼 칸이 없으면 undefined다
+   */
+  | { readonly status: 'OK'; readonly heldAtMs: number; readonly seats: readonly HeldSeat[]; readonly limit?: number }
   /** 목록에 없음·남의 것·다른 회차·끝난 것을 가리지 않는다(404 not-found, 판매 종료 뒤면 410 sale-ended) */
   | { readonly status: 'NOT_FOUND' }
   /** 좌석 Redis 일시 장애·메모리 부족, 그 회차 좌석 저장소가 준비되지 않음(세대 키 없음), 좌석맵 판 없음(503 seat-store-unavailable) */
@@ -214,6 +217,21 @@ export type OrderHoldCheck =
 export interface OrderHolds {
   /** @param o.deadlineMs 좌석 Redis 호출 하나의 마감(ms, 1 이상 정수). 없으면 플랫폼 기본 */
   check(q: OrderHoldQuery, o?: { deadlineMs?: number }): Promise<OrderHoldCheck>;
+  /**
+   * 홀드 Hash의 `lim`(홀드 때 쓴 1인 한도, BAT-051). 구매 세션의 홀드 목록을 보지 않고 좌석 Hash만 읽는다
+   * (세션이 끝난 뒤 예약해도 규칙 한도를 잃지 않게). 홀드가 없거나 `lim` 칸이 없으면 undefined. 읽기만 한다
+   */
+  limit(q: OrderHoldLimitQuery, o?: { deadlineMs?: number }): Promise<number | undefined>;
+}
+
+/** 홀드 Hash의 lim을 읽는 질의(주문 항목의 좌석 ID가 필요하다) */
+export interface OrderHoldLimitQuery {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly purchaseSessionId: string;
+  readonly holdId: string;
+  /** 주문 항목의 좌석 ID(차례는 다리가 맞춘다) */
+  readonly seatIds: readonly string[];
 }
 
 /** 회차의 판매 설정(좌석맵 판 파일의 saleEndsAt·tierPrices) */

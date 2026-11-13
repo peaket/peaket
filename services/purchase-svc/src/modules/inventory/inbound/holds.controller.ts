@@ -2,7 +2,7 @@
 // 구매 권한(ticket:buy)을 쓰고, 계정은 플랫폼 인증 가드의 신원으로만 정한다. 응답은 캐시하지 않는다.
 // 검사 차례(플랫폼 인증 가드): 신원 → 역할·스코프 → 멱등 키 형식(400 idempotency-key-invalid) → 구매 요청 서명(401) → 경로 스키마(400) → 처리기.
 // 핫패스라 Zod 파이프가 아니라 경로 스키마(@ContractRouteSchema, 미리 만든 Ajv 검사기)로 본다(ADR-0176 결정 4). 같은 처리기에 Zod 파이프를 함께 달지 않는다.
-import { Body, Controller, HttpCode, Inject, Optional, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Inject, Optional, Param, Post, Res } from '@nestjs/common';
 import {
   ContractRouteSchema,
   CurrentPrincipal,
@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { HoldError, throwHoldProblem } from '../application/hold-error.js';
 import { type LogGate, OOM_WARN_GATE } from '../application/log-gate.js';
 import { type HoldResponse, HoldSeats } from '../application/hold-seats.js';
+import { admissionListsOf } from '../domain/admission-token.js';
 import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN } from '../domain/hold.js';
 import type { ResolvedPurchaseSessionInfo } from '../domain/ports.js';
 import { CurrentPurchaseSessionInfo } from './current-purchase-session-info.js';
@@ -149,13 +150,18 @@ export class HoldsController {
     @IdempotencyRequest() idem: IdempotencyRequest,
     @CurrentPurchaseSession() purchaseSessionId: string,
     @CurrentPurchaseSessionInfo() resolvedSession: ResolvedPurchaseSessionInfo | undefined,
+    @Headers('x-admission-token') token: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<HoldResponse> {
     requestLog().set({ queuePhase: 'purchase' });
     void reply.header('cache-control', 'no-store');
     try {
+      // 입장 토큰 lst 모양은 게이트웨이의 서명 확인 뒤 purchase-svc가 한 번 더 본다(ADR-0265 결정 7, seat-hold §2).
+      // 틀리면 서명이 맞아도 401 admission-token-invalid다(없으면 빈 배열: 명단 없는 사람으로 평가한다)
+      const lists = token === undefined ? [] : admissionListsOf(token);
+      if (lists === undefined) throw new HoldError('ADMISSION_INVALID', '입장 토큰의 lst 모양이 틀렸다');
       const deadline = requestContext()?.deadline;
-      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, ...(resolvedSession ? { session: resolvedSession } : {}), ...(me.pid !== undefined ? { pid: me.pid } : {}), idempotencyKey: idem.key, body, ...(deadline ? { deadline } : {}) });
+      return await this.holdSeats.execute({ eventId, accountId: me.accountId, purchaseSessionId, ...(resolvedSession ? { session: resolvedSession } : {}), ...(me.pid !== undefined ? { pid: me.pid } : {}), idempotencyKey: idem.key, body, lists, ...(deadline ? { deadline } : {}) });
     } catch (e) {
       if (e instanceof HoldError) {
         if (e.code === 'STORE_UNAVAILABLE' && e.details.storeReason === 'oom' && (this.oomGate?.allow() ?? true)) {

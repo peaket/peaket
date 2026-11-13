@@ -2,6 +2,7 @@
 // 받는 층(HoldsController)이 신원·멱등 키 형식·구매 요청 서명·본문 모양을 확인한 뒤 부른다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, type Deadline, HOT_PATH_METRICS, type HotPathMetrics, type HotPathOutcome, PLATFORM_LOGGER, type PlatformLogger, timeHotPath, timeHotPathSync, uuidv7 } from '@peaket/platform';
+import { type DenyReason, entryGate, evaluateSalePolicy } from '@peaket/validation/sale-policy';
 import {
   type HeldHold,
   type HoldResult,
@@ -39,6 +40,7 @@ import {
   type SeatSignals,
   type SeatStore,
 } from '../domain/ports.js';
+import { SaleConfigUnavailable } from '../domain/sale-config.js';
 import { HoldError, type HoldErrorCode, type HoldErrorDetails, storeUnavailableError } from './hold-error.js';
 import { SEAT_BEHAVIOR, type SeatBehaviorReporter } from './seat-behavior.js';
 
@@ -66,6 +68,8 @@ export interface HoldCommand {
   session?: ResolvedPurchaseSessionInfo;
   /** 사람 식별값(Principal.pid). 없으면 행동 요약을 내지 않는다 */
   pid?: string;
+  /** 입장 토큰 lst(판매 자격 명단 키). 받는 층이 모양을 확인해 넘긴다. 없으면 빈 배열 */
+  lists?: readonly string[];
   /** 플랫폼 멱등 모듈이 형식을 확인한 키(@IdempotencyRequest().key, 소문자 UUID v4). 플랫폼의 requestHash는 쓰지 않는다 */
   idempotencyKey: string;
   body: HoldBody;
@@ -302,7 +306,13 @@ export class HoldSeats {
     };
 
     // 3 회차 설정, 4 판매 종료(주입 시계)
-    const config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
+    let config: EventSeatConfig | undefined;
+    try {
+      config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
+    } catch (err) {
+      if (err instanceof SaleConfigUnavailable) throw refuse('NOT_READY', '회차 판매 설정을 읽지 못했다');
+      throw err;
+    }
     if (!config) {
       const replayed = await replayOrRefuse();
       if (replayed) return replayed;
@@ -314,6 +324,15 @@ export class HoldSeats {
       throw refuse('SALE_ENDED', '판매 종료 뒤의 새 홀드다');
     }
 
+    // 4′ 판매 정책 진입 판정(BAT-051, HOT-252): 등급·매수를 모르는 거친 거름. 정확한 판정은 좌석 확인 뒤 evaluateSalePolicy가 한다
+    const lists = c.lists ?? [];
+    const gate = entryGate(config.salePolicy ?? [], { at: new Date(this.clock.now()), round: c.eventId, lists });
+    if (!gate.allowed) {
+      const replayed = await replayOrRefuse();
+      if (replayed) return replayed;
+      throw refuse('SALE_POLICY_DENIED', '판매 정책이 이 입장을 거부한다', { reason: gate.reason });
+    }
+
     // 5 좌석 확인(Lua 전에. 없는 좌석·다른 회차·판매 제외석·겹침)
     const refs = await timeHotPath(this.hotPath, 'hold.seat_resolve', () => this.seatMap.resolve(c.eventId, requested));
     first = refs[0];
@@ -322,6 +341,14 @@ export class HoldSeats {
       const replayed = await replayOrRefuse();
       if (replayed) return replayed;
       throw refuse('INVALID_SEAT', '고를 수 없는 좌석이 있다');
+    }
+
+    // 5′ 판매 정책 평가(BAT-051, HOT-252): 등급별 규칙을 합쳐 거부와 1인 한도를 정한다. 거부면 아무 좌석도 잡지 않는다
+    const policy = evaluateHoldPolicy(config, seats, lists, this.clock.now(), c.eventId);
+    if (!policy.allowed) {
+      const replayed = await replayOrRefuse();
+      if (replayed) return replayed;
+      throw refuse('SALE_POLICY_DENIED', '판매 정책이 이 좌석 선택을 거부한다', { reason: policy.reason });
     }
 
     // 6 저장소(한 번만)
@@ -340,7 +367,7 @@ export class HoldSeats {
             idempotencyKey: c.idempotencyKey,
             fingerprint: holdFingerprint(seatIds),
             seats,
-            limit: config.perAccountLimit,
+            limit: policy.limit,
             keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
           },
           opt,
@@ -447,7 +474,13 @@ export class HoldSeats {
     };
 
     // 3 회차 설정, 4 판매 종료(주입 시계)
-    const config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
+    let config: EventSeatConfig | undefined;
+    try {
+      config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
+    } catch (err) {
+      if (err instanceof SaleConfigUnavailable) throw refuse('NOT_READY', '회차 판매 설정을 읽지 못했다');
+      throw err;
+    }
     if (!config) {
       const replayed = await replay(undefined);
       if (replayed) return replayed;
@@ -459,6 +492,15 @@ export class HoldSeats {
       throw refuse('SALE_ENDED', '판매 종료 뒤의 새 홀드다');
     }
 
+    // 4′ 판매 정책 진입 판정(BAT-051, HOT-252). 정확한 판정은 희망 등급별 evaluateSalePolicy가 한다
+    const lists = c.lists ?? [];
+    const gate = entryGate(config.salePolicy ?? [], { at: new Date(this.clock.now()), round: c.eventId, lists });
+    if (!gate.allowed) {
+      const replayed = await replay(config);
+      if (replayed) return replayed;
+      throw refuse('SALE_POLICY_DENIED', '판매 정책이 이 입장을 거부한다', { reason: gate.reason });
+    }
+
     // 5 희망 조건과 후보
     if (!this.autoMap) throw refuse('AUTO_NOT_SUPPORTED', '자동 배정을 조립하지 않았다');
     const list = await timeHotPath(this.hotPath, 'hold.auto_candidates', () => this.autoMap!.autoCandidates(c.eventId, auto));
@@ -467,7 +509,13 @@ export class HoldSeats {
       if (replayed) return replayed;
       throw refuse('NOT_READY', '그 회차의 좌석맵 판이 없다');
     }
-    const problem = autoConditionProblem(auto, new Set(list.tiers), list.wheelchairSeats, config.perAccountLimit);
+    const policy = evaluateAutoPolicy(config, auto, lists, this.clock.now(), c.eventId);
+    if (!policy.allowed) {
+      const replayed = await replay(config);
+      if (replayed) return replayed;
+      throw refuse('SALE_POLICY_DENIED', '판매 정책이 이 희망 조건을 거부한다', { reason: policy.reason });
+    }
+    const problem = autoConditionProblem(auto, new Set(list.tiers), list.wheelchairSeats, policy.limit);
     if (problem === 'UNKNOWN_TIER') throw new HoldError('AUTO_TIER_UNKNOWN', '희망 조건에 그 공연에 없는 등급이 있다');
     if (problem === 'SAME_TIER' || problem === 'NO_WHEELCHAIR_SEATS') throw refuse('AUTO_CONDITION_INVALID', '희망 조건 조합이 규칙에 맞지 않는다');
     if (problem === 'COUNT_OVER_LIMIT') {
@@ -510,7 +558,7 @@ export class HoldSeats {
               groups,
               cursor,
               cursorField: field,
-              limit: config.perAccountLimit,
+              limit: policy.limit,
               keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
             },
             opt,
@@ -577,6 +625,44 @@ export class HoldSeats {
     }
     return out;
   }
+}
+
+/** 판매 정책 평가 결과(허용이면 홀드 Lua·purchase_quota에 쓸 1인 한도) */
+type PolicyDecision = { readonly allowed: true; readonly limit: number } | { readonly allowed: false; readonly reason: DenyReason };
+
+/**
+ * 직접 선택 홀드의 판매 정책 평가(BAT-051, HOT-252, seat-hold §4). 등급이 섞인 요청은 등급마다 같은 매수로 평가하고
+ * 거부가 하나라도 있으면 그 사유로 거부한다. 한도는 등급별 결과 가운데 가장 작은 값이다(회차 한도를 넘지 않는다)
+ */
+function evaluateHoldPolicy(config: EventSeatConfig, seats: readonly SeatRef[], lists: readonly string[], atMs: number, round: string): PolicyDecision {
+  const rules = config.salePolicy ?? [];
+  if (rules.length === 0) return { allowed: true, limit: config.perAccountLimit };
+  const grades = [...new Set(seats.map((s) => s.tierId))].sort(byCodeUnit);
+  let limit = config.perAccountLimit;
+  for (const grade of grades) {
+    const d = evaluateSalePolicy(rules, { at: new Date(atMs), round, grade, quantity: seats.length, lists }, config.perAccountLimit);
+    if (!d.allowed) return { allowed: false, reason: d.reason };
+    limit = Math.min(limit, d.limit);
+  }
+  return { allowed: true, limit };
+}
+
+/**
+ * 자동 배정 홀드의 판매 정책 평가(BAT-051, HOT-252). 희망 등급(1·2순위)마다 같은 매수로 평가하고,
+ * 하나라도 거부면 그 사유로 거부한다(2순위가 허용이어도 1순위 거부를 숨기지 않는다: 화면이 등급을 바꿔 다시 고른다).
+ * 한도는 허용된 희망 등급 가운데 가장 작은 값이다
+ */
+function evaluateAutoPolicy(config: EventSeatConfig, auto: AutoCondition, lists: readonly string[], atMs: number, round: string): PolicyDecision {
+  const rules = config.salePolicy ?? [];
+  if (rules.length === 0) return { allowed: true, limit: config.perAccountLimit };
+  const grades = [...new Set([auto.firstTierId, ...(auto.secondTierId !== undefined ? [auto.secondTierId] : [])])].sort(byCodeUnit);
+  let limit = config.perAccountLimit;
+  for (const grade of grades) {
+    const d = evaluateSalePolicy(rules, { at: new Date(atMs), round, grade, quantity: auto.count, lists }, config.perAccountLimit);
+    if (!d.allowed) return { allowed: false, reason: d.reason };
+    limit = Math.min(limit, d.limit);
+  }
+  return { allowed: true, limit };
 }
 
 /** 좌석 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */

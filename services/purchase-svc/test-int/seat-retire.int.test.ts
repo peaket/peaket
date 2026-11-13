@@ -287,6 +287,7 @@ describe('판 번호 gen(세대 키 s:{event:E}:epoch의 칸, 판매 열기가 �
       kind: 'FAN',
       ext: '0',
       pin: '1',
+      lim: '4',
     });
     expect(Number(st.hold!.exp) - Number(st.hold!.heldAt)).toBe(HOLD_TTL_MS);
     expect(await quotaOf(a.eventId, me)).toBe(1);

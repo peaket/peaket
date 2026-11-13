@@ -46,6 +46,8 @@ export type HoldErrorCode =
   | 'REHOLD_WAIT'
   /** 보유 수 + 좌석 수 > 1인 한도 */
   | 'QUOTA_EXCEEDED'
+  /** 판매 정책 규칙이 이 요청(명단 키·등급·매수·지금 시각)을 거부한다(403 sale-policy-denied, BAT-051) */
+  | 'SALE_POLICY_DENIED'
   /** GET 홀드의 입장 토큰이 맞지 않음(BUILD_ORDER HOT-070) */
   | 'ADMISSION_INVALID'
   /** 그 구매 세션의 홀드가 아니거나 끝났다(BOLA 방지로 남의 것·없는 것과 같은 답) */
@@ -66,6 +68,8 @@ export interface HoldErrorDetails {
    * 받는 층의 서비스 로그 한 줄({ seatStoreReason: 'oom' })에만 남는다
    */
   storeReason?: SeatStoreUnavailableReason;
+  /** SALE_POLICY_DENIED: 규칙이 돌려준 사유(PRESALE_ONLY·GRADE_NOT_ON_SALE). 응답 확장 칸 reason에 싣는다 */
+  reason?: string;
   cause?: unknown;
 }
 
@@ -125,6 +129,7 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   CONFLICT: { status: 409, type: 'seat-already-held', title: '좌석이 이미 선택되었습니다', normalBranch: true },
   REHOLD_WAIT: { status: 409, type: 'seat-recently-released', title: '방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다', normalBranch: true },
   QUOTA_EXCEEDED: { status: 422, type: 'purchase-limit-exceeded', title: '1인 구매 한도를 넘었습니다' },
+  SALE_POLICY_DENIED: { status: 403, type: 'sale-policy-denied', title: '판매 정책에 따라 지금은 예매할 수 없습니다' },
   ADMISSION_INVALID: { status: 401, type: 'admission-token-invalid', title: '입장 확인이 끝났습니다' },
   HOLD_NOT_FOUND: { status: 404, type: 'hold-not-found', title: '홀드를 찾을 수 없습니다', normalBranch: true },
   HOLD_ALREADY_EXTENDED: { status: 409, type: 'hold-already-extended', title: '이미 연장한 홀드입니다', normalBranch: true },
@@ -170,6 +175,7 @@ export function throwHoldProblem(e: HoldError, reply: ReplyHeaders): never {
     extensions.recentlyReleasedSeats = [...(e.details.recentlyReleasedSeats ?? [])];
     if (e.details.reholdAvailableAtMs !== undefined) extensions.reholdAvailableAt = new Date(e.details.reholdAvailableAtMs).toISOString();
   }
+  if (e.code === 'SALE_POLICY_DENIED' && e.details.reason !== undefined) extensions.reason = e.details.reason;
   throw new ProblemError({
     type: spec.type,
     status: spec.status,

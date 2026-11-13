@@ -31,8 +31,8 @@ import { ApproveSaleReview } from './application/approve-sale-review.js';
 import { PublishSaleConfigs } from './application/publish-sale-configs.js';
 import { RejectSaleReview } from './application/reject-sale-review.js';
 import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
-import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_STORE } from './domain/sale-config-ports.js';
-import { DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
+import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_READER, SALE_CONFIG_STORE, type SaleConfigStore } from './domain/sale-config-ports.js';
+import { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
 import { MemorySaleConfigStore } from './adapters/memory-sale-config-store.js';
 import { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 import { SeatmapLayouts } from './application/seatmap-layouts.js';
@@ -59,6 +59,7 @@ import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
+import { InternalSaleConfigController } from './inbound/internal-sale-config.controller.js';
 import { PartnerDirectoryController } from './inbound/partner-directory.controller.js';
 import { PartnerEventController } from './inbound/partner-event.controller.js';
 import { PartnerMediaController } from './inbound/partner-media.controller.js';
@@ -146,6 +147,7 @@ export class CatalogModule implements NestModule {
         { path: lists + '/:listKey', method: RequestMethod.DELETE },
         { path: 'v1/partner/events/:eventId', method: RequestMethod.PATCH },
         { path: 'v1/events/:eventId/sale-eligibility', method: RequestMethod.GET },
+        { path: 'internal/v1/events/:eventId/sale-config', method: RequestMethod.GET },
       );
   }
 
@@ -153,9 +155,13 @@ export class CatalogModule implements NestModule {
    * 저장소를 고른다. database면 DATABASE(databaseModule)가 함께 있어야 하고, 파트너 경로는 partnerDatabase로 접속한다(ADR-0241). memory는 시험이 채울 저장소를 넘길 수 있다.
    * media는 database면 꼭 넘기고, memory면 시험이 필요한 것만 넘긴다
    */
-  static register(o: { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring } | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring> }): DynamicModule {
+  static register(
+    o:
+      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring }
+      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore },
+  ): DynamicModule {
     const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -170,6 +176,7 @@ export class CatalogModule implements NestModule {
           { provide: OPS_DATABASE, useFactory: (db: Database) => o.opsDatabase ?? db, inject: [DATABASE] },
           { provide: OPS_SALE_STORE, useFactory: (db: Database) => new DrizzleSaleStore(db), inject: [OPS_DATABASE] },
           { provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore },
+          { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
           ...mediaProviders(o.media, false),
@@ -187,7 +194,8 @@ export class CatalogModule implements NestModule {
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
         { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },
         { provide: OPS_SALE_STORE, useExisting: SALE_STORE },
-        { provide: SALE_CONFIG_STORE, useValue: new MemorySaleConfigStore() },
+        { provide: SALE_CONFIG_STORE, useValue: o.saleConfigs ?? new MemorySaleConfigStore() },
+        { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         ...mediaProviders(o.media ?? {}, true),

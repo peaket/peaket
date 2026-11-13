@@ -2,6 +2,7 @@
 // 운영 어댑터: 좌석 저장소·만료 저장소는 RedisSeatStore, 만료 임대는 RedisSweepLeases, 구매 세션 저장소는 RedisPurchaseSessionStore(PRF-136),
 // 구매 세션 읽기·플랫폼 요청 인증 포트는 StoredPurchaseSessions(PRF-136). 좌석맵 판은 PRF-130 ①에서 메모리 대역뿐이고(운영 구현은 PRF-137),
 // 홀드 시도 기록의 Kafka·Avro 보내기는 BAS-030이다. 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다.
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { SessionHoldEntry } from './purchase-session.js';
 import type { HoldReleaseReason } from './hold-lifecycle.js';
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
@@ -302,6 +303,15 @@ export interface EventSeatConfig {
   entryOpensAtMs?: number;
   /** 가상계좌를 내도 되는가(판 파일의 선택 칸 virtualAccountAllowed, BUILD_ORDER PRF-191). 없으면 칸도 없다(참으로 본다) */
   virtualAccountAllowed?: boolean;
+  /**
+   * 승인한 판매 정책 규칙(공개본, core-svc event_sale_config의 salePolicy). BAT-051(HOT-252)이 core-svc 내부 읽기 경로에서 덮는다.
+   * 없으면 규칙이 없는 회차다(좌석맵 판 파일만 있는 로컬·CI·승인 전)
+   */
+  salePolicy?: readonly SalePolicyRule[];
+  /** 그 회차에 걸리는 규칙이 쓰는 명단 키 모두(입장 토큰 lst의 후보, core-svc event_sale_config의 eligLists) */
+  eligLists?: readonly string[];
+  /** 판매 설정 사본의 판(로그·진단용, core-svc event_sale_config.rev) */
+  saleConfigRev?: number;
 }
 
 export const SEAT_MAP = Symbol('purchase.SeatMap');
@@ -867,8 +877,8 @@ export interface OrderHoldQuery {
 
 /** 주문 생성의 홀드 확인 결과(booking OrderHoldCheck와 같은 모양) */
 export type OrderHoldCheck =
-  /** heldAtMs: 홀드 Hash heldAt(좌석마다 같다). seats: 구매 세션의 h:{holdId}에 적힌 좌석 차례, 등급·구역은 좌석맵 판(SeatMap.resolve)에서 */
-  | { status: 'OK'; heldAtMs: number; seats: { seatId: string; tierId: string; sectionId: string }[] }
+  /** heldAtMs: 홀드 Hash heldAt(좌석마다 같다). seats: 구매 세션의 h:{holdId}에 적힌 좌석 차례, 등급·구역은 좌석맵 판(SeatMap.resolve)에서. limit: 홀드 Hash lim(BAT-051) */
+  | { status: 'OK'; heldAtMs: number; seats: { seatId: string; tierId: string; sectionId: string }[]; limit?: number }
   /** 목록에 없음·남의 것·다른 회차·끝난 것·좌석맵 판에 없는 좌석을 가리지 않는다 */
   | { status: 'NOT_FOUND' }
   /** 좌석 Redis 일시 장애·메모리 부족, 세대 키 없음(NOT_READY), 그 회차 좌석맵 판 없음 */
@@ -885,6 +895,17 @@ export const ORDER_HOLDS = Symbol('purchase.OrderHolds');
  */
 export interface OrderHoldReader {
   check(q: OrderHoldQuery, o?: SeatCallOptions): Promise<OrderHoldCheck>;
+  /** 홀드 Hash의 lim(1인 한도, BAT-051). 구매 세션 목록 없이 주문 좌석 Hash만 읽는다. 없으면 undefined */
+  limit(q: OrderHoldLimitQuery, o?: SeatCallOptions): Promise<number | undefined>;
+}
+
+/** 홀드 Hash의 lim을 읽는 질의(주문 항목의 좌석 ID가 필요하다) */
+export interface OrderHoldLimitQuery {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly purchaseSessionId: string;
+  readonly holdId: string;
+  readonly seatIds: readonly string[];
 }
 
 /**

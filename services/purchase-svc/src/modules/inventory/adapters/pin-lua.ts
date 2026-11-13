@@ -19,7 +19,7 @@
 //   4 보유 수 + 빈 좌석 수 > 한도                              → {'QUOTA_EXCEEDED'}
 //   5 쓰기                                                    → {'OK', gen, 다시 잡은 수, 토큰 글(다시 잡았으면, 아니면 '')}
 // 쓰기: 모든 좌석의 홀드 Hash에 pin '1', ZREM expiry 모든 좌석 색인. 빈 좌석이 있으면 토큰 = max(fence + 1, µs), SET fence, BITFIELD SET u1 1,
-//       빈 좌석마다 DEL 뒤 HSET hold(holdId·owner·psid·fence·heldAt=now·exp=now+TTL·kind 'FAN'·ext '0'·pin '1')와 키 수명(hold-lua.ts와 같은 규칙),
+//       빈 좌석마다 DEL 뒤 HSET hold(holdId·owner·psid·fence·heldAt=now·exp=now+TTL·kind 'FAN'·ext '0'·pin '1'·lim)와 키 수명(hold-lua.ts와 같은 규칙),
 //       INCRBY quota 빈 좌석 수, 바뀐 구역마다 HINCRBY secver, 빈 좌석마다 XADD stream HELD(hold-lua.ts와 같은 칸), 바뀐 구역마다 SPUBLISH(상태 1).
 //
 // 구현에서 정한 세부(PRF-142)
@@ -200,7 +200,7 @@ if k > 0 then
   redis.call('DEL', unpack(holdKeys))
   for _, i in ipairs(empty) do
     local hk = KEYS[7 + i]
-    redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0', 'pin', '1')
+    redis.call('HSET', hk, 'holdId', ARGV[3], 'owner', ARGV[1], 'psid', ARGV[2], 'fence', tokText, 'heldAt', nowText, 'exp', expText, 'kind', 'FAN', 'ext', '0', 'pin', '1', 'lim', ARGV[4])
     redis.call('PEXPIREAT', hk, keepText)
   end
 end

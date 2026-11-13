@@ -30,7 +30,7 @@
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
@@ -103,6 +103,7 @@ import {
   unavailableIdentityRecheck,
 } from './modules/booking/index.js';
 import {
+  CoreSaleConfigs,
   DrizzleEventSale,
   DrizzleSeatHoldLedger,
   DrizzleSeatSales,
@@ -183,6 +184,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const admissionKeys = parseAdmissionJwks(need('PEAKET_ADMISSION_JWKS', '입장 토큰 공개키 묶음 JWKS JSON'));
   const admissionIssuer = need('PEAKET_ADMISSION_ISSUER', '입장 토큰 발급자 iss');
   const seatMapDir = need('PEAKET_SEATMAP_DIR', '회차별 좌석맵 판 파일 {eventId}.json이 있는 폴더');
+  // 판매 설정 사본(event_sale_config)을 core-svc 내부 HTTP 경로에서 읽는다(BAT-051). 주소가 없으면 파일 설정만 쓴다(로컬·CI).
+  // 운영은 반드시 넣는다: 없으면 승인한 판매 정책 규칙을 평가하지 못한다(services/README.md).
+  const coreHttpUrl = env.PEAKET_CORE_HTTP_URL;
+  const envName = env.PEAKET_ENV ?? 'local';
+  if (!coreHttpUrl && envName !== 'local' && envName !== 'ci' && envName !== 'demo') throw new Error('PEAKET_CORE_HTTP_URL이 없다(core-svc 판매 설정 사본 읽기, 운영 필수)');
 
   // 만료 임대 값: {HOSTNAME 앞 57자}-{무작위 16진 6자리}. HOSTNAME이 없거나 키 조각 모양이 아니면 무작위 UUID(이 프로세스 안에서만 같다, L5)
   const podId = podIdFrom(env, (n) => randomBytes(n));
@@ -234,7 +240,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const signals = new PromSeatSignals();
   // 서비스 로거는 서비스를 만든 뒤에야 생기므로, 좌석맵 판은 늦게 묶는 로거로 경고를 남긴다(판 파일은 처음 요청 때 읽는다)
   let log: { warn(obj: object, msg: string): void } | undefined;
-  const seatMap = new LayoutSeatMap({ source: new FileSeatMapSource(seatMapDir), clock: systemClock, logger: { warn: (o, m) => log?.warn(o, m) } });
+  const coreSaleConfigs = coreHttpUrl
+    ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock })
+    : undefined;
+  const seatMap = new LayoutSeatMap({
+    source: new FileSeatMapSource(seatMapDir),
+    clock: systemClock,
+    logger: { warn: (o, m) => log?.warn(o, m) },
+    ...(coreSaleConfigs ? { overlay: coreSaleConfigs } : {}),
+  });
 
   // 주문 생성(booking, POST /v1/orders, BUILD_ORDER PRF-161). purchase DB가 있을 때만 연다(DB 없이 뜬 파드는 주문 경로를 열지 않는다, 뜨는 동작은 그대로다).
   // - 동의 문안 판: PEAKET_ORDER_CONSENT_VERSION(없거나 ^[0-9A-Za-z._-]{1,32}$가 아니면 시작하지 않는다. 모양은 BookingModule.register가 본다)
@@ -273,19 +287,21 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const manageHolds = new ManageHolds({ lifecycle: holdLifecycle, seatMap, sessions: sessionStore, keys: admissionKeys, issuer: admissionIssuer, clock: systemClock, signals, onReleased: (e) => orderExpiry?.onHoldsExpired(e), logger: { warn: (o: object, m: string) => log?.warn(o, m) } as never });
   const pauseLate: { source?: PaymentPauseSource } = {};
   const holdPauseView = new HoldPauseView({ read: (ids, o) => (pauseLate.source ? pauseLate.source.read(ids, o) : Promise.resolve({ status: 'OK' as const, pauses: [] })) }, systemClock, (r) => signals.pauseRead(r));
+  // 주문 생성의 홀드 확인과 Saga 예약의 1인 한도 읽기가 같은 어댑터를 쓴다(BAT-051)
+  const orderHolds = new RedisOrderHolds(redis, seatMap);
   const booking: BookingModuleDeps | undefined = database
     ? {
         startPayment: {
           starts: new DrizzleOrderStarts({ database, store: orderStore, clock: systemClock }),
           checkouts: { prepare: (q) => (startLate.checkouts ?? simulatorPaymentCheckouts).prepare(q) },
-          holdExpiries: new InventoryOrderHoldExpiries(new RedisOrderHolds(redis, seatMap)),
+          holdExpiries: new InventoryOrderHoldExpiries(orderHolds),
           behavior: { publish: (m) => (startLate.behavior ?? discardBehaviorSignals).publish(m) },
           signals: orderSignals,
         },
         writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
         accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
         slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
-        holds: new RedisOrderHolds(redis, seatMap),
+        holds: orderHolds,
         holdMarks: manageHolds,
         saleConfigs: new SeatMapSaleConfigs(seatMap),
         sessions: new InventoryOrderSessions({ sessions, store: sessionStore }),
@@ -410,6 +426,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       failures: saga,
       confirmSent: saga,
       pins: new InventoryOrderSeatPins({ pins: new RedisSeatStore(redis, service.logger), seatMap }),
+      holds: orderHolds,
       confirms: payment.confirms,
       configs: new SeatMapSagaConfigs(seatMap),
       log: new LoggerSagaLog(service.logger),

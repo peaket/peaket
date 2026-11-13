@@ -5,6 +5,7 @@ import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
 import { type AutoCandidateList, type AutoCondition, autoCandidatesOf, autoFingerprint } from '../domain/auto.js';
 import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
+import type { EventSaleConfigOverlay } from '../domain/sale-config.js';
 import type { SaleLayout } from '../domain/sale-state.js';
 import { type ParsedSeatMap, parseEventSeatMapFile, SeatMapFileError, type SectionRange } from '../domain/seat-layout.js';
 
@@ -85,6 +86,11 @@ export interface LayoutSeatMapOptions {
   logger?: { warn(obj: object, msg: string): void };
   /** 파일이 없거나 틀린 회차를 '없음'으로 기억하는 시간(ms, 기본 1000) */
   missingTtlMs?: number;
+  /**
+   * core-svc의 회차 판매 설정 사본(BAT-051, HOT-252). 있으면 파일 설정 위에 salePolicy·eligLists·perPersonLimit·saleEndsAtMs를 덮는다.
+   * 사본이 없으면(404) 파일 설정을 그대로 쓴다. 읽지 못하면 던져 홀드가 503으로 닫힌다(정책을 건너뛰지 않는다)
+   */
+  overlay?: { get(eventId: string): Promise<EventSaleConfigOverlay | undefined> };
 }
 
 interface Entry {
@@ -148,7 +154,19 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
 
   async config(eventId: string): Promise<EventSeatConfig | undefined> {
     const e = await this.#get(eventId);
-    return e ? { ...e.parsed.config } : undefined;
+    if (!e) return undefined;
+    const base = { ...e.parsed.config };
+    if (!this.o.overlay) return base;
+    const overlay = await this.o.overlay.get(eventId);
+    if (!overlay) return base;
+    return {
+      ...base,
+      perAccountLimit: overlay.perPersonLimit,
+      saleEndsAtMs: overlay.saleEndsAtMs,
+      salePolicy: overlay.salePolicy,
+      eligLists: overlay.eligLists,
+      saleConfigRev: overlay.rev,
+    };
   }
 
   async resolve(eventId: string, seatIds: readonly string[]): Promise<(SeatRef | undefined)[]> {

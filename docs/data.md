@@ -720,7 +720,7 @@ erDiagram
         uuid production_id "공연. 판매 승인 단위(ADR-0093)"
         uuid promoter_id "테넌트(행 보안)"
         int rev "판매 정책 판과 회차 판 가운데 큰 값. queue-svc는 이 값이 지금보다 클 때만 바꾼다"
-        jsonb payload "EventSaleConfig JSON(salePolicy·eligGates·eligLists·opensAtMs·startsAtMs·lobbyMinutes·lobbyShuffle·openBatch·perPersonLimit·saleEndsAtMs, 선택 layoutVersion·pgKey·pgTps). 판매 승인 LCH-080이 쓰고 purchase-svc BAT-051이 읽는다"
+        jsonb payload "EventSaleConfig JSON(salePolicy·eligGates·eligLists·opensAtMs·startsAtMs·lobbyMinutes·lobbyShuffle·openBatch·perPersonLimit·saleEndsAtMs, 선택 layoutVersion·pgKey·pgTps). 판매 승인 LCH-080이 쓰고 purchase-svc BAT-051이 core-svc 내부 HTTP GET /internal/v1/events/{eventId}/sale-config로 읽는다(직접 DB 접속 없음)"
         timestamptz updated_at
     }
     sale_eligibility_member {

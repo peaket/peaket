@@ -9,6 +9,7 @@
 // 구현에서 정한 것: 좌석맵 판의 경고(판 파일을 읽지 못함)는 이 파일이 만든 로거(service·pod가 붙은 같은 모양)로 남긴다(프로세스 로거는 startPurchaseRelay 안에 있다).
 import {
   createDatabase,
+  createExternalHttpClient,
   createHotRedis,
   createPlatformLogger,
   inClusterLeaseApi,
@@ -18,7 +19,7 @@ import {
   systemClock,
 } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
-import { FileSeatMapSource, KafkaTradeEventPublisher, LayoutSeatMap, SeatMapEventCatalog } from './modules/inventory/index.js';
+import { CoreSaleConfigs, FileSeatMapSource, KafkaTradeEventPublisher, LayoutSeatMap, SeatMapEventCatalog } from './modules/inventory/index.js';
 import { relayServiceDatabaseOptions, startPurchaseRelay } from './relay-app.js';
 
 const SERVICE = 'purchase-svc';
@@ -59,7 +60,13 @@ const maintenanceDatabase = createDatabase({ url: config.maintenanceDatabaseUrl,
 const serviceDatabase = createDatabase(relayServiceDatabaseOptions(serviceDatabaseUrl));
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url: seatRedisUrl });
 const source = new FileSeatMapSource(seatMapDir);
-const seatMap = new LayoutSeatMap({ source, clock: systemClock, logger: log });
+// 판매 설정 사본도 API와 같은 core-svc 내부 HTTP 경로에서 읽는다(BAT-051). 주소가 없으면 파일 설정만 쓴다(로컬·CI)
+const coreHttpUrl = process.env.PEAKET_CORE_HTTP_URL;
+if (!coreHttpUrl && env !== 'local' && env !== 'ci' && env !== 'demo') throw new Error('PEAKET_CORE_HTTP_URL이 없다(core-svc 판매 설정 사본 읽기, 운영 필수)');
+const coreSaleConfigs = coreHttpUrl
+  ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock })
+  : undefined;
+const seatMap = new LayoutSeatMap({ source, clock: systemClock, logger: log, ...(coreSaleConfigs ? { overlay: coreSaleConfigs } : {}) });
 // 운영은 MSK IAM: 작업자 전용 역할을 세션 이름 `<서비스>-outbox-relay-<환경>`으로 맡는다(PEAKET_KAFKA_AUTH=msk-iam, docs/streaming.md §2.6)
 const producer = createKafkaProducer({ kind: 'outbox-relay', brokers: config.kafkaBrokers, clientId: `${SERVICE}-${env}-${config.pod}`, auth: kafkaAuthFromEnv(`${SERVICE}-outbox-relay`) });
 await producer.connect();

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ForbiddenException, HttpException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, Deadline, type FakeClock, fakeClock, HotPathMetrics, PlatformMetrics, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import { describe, expect, test } from 'vitest';
 import {
   HOLD_PROBLEMS,
@@ -195,6 +196,10 @@ interface WorldOptions {
   autoCursor?: (eventId: string, field: string) => Promise<number>;
   /** 핫패스 구간 진단(BAT-027) */
   hotPath?: HotPathMetrics;
+  /** 승인한 판매 정책 규칙(BAT-051, core-svc event_sale_config.salePolicy 대역) */
+  salePolicy?: readonly SalePolicyRule[];
+  /** 그 회차에 걸리는 규칙이 쓰는 명단 키(eligLists 대역) */
+  eligLists?: readonly string[];
 }
 
 async function world(o: WorldOptions = {}) {
@@ -230,7 +235,19 @@ async function world(o: WorldOptions = {}) {
   const saleEndsAtMs = o.saleEndsAtMs ?? NOW + DAY;
   const limit = o.limit ?? 4;
   if (!o.noConfig) {
-    seatMap.put({ eventId, layoutVersion: 'v1', seatCount: SEAT_COUNT, perAccountLimit: limit, saleEndsAtMs }, SEAT_DEFS);
+    seatMap.put(
+      {
+        eventId,
+        layoutVersion: 'v1',
+        seatCount: SEAT_COUNT,
+        perAccountLimit: limit,
+        saleEndsAtMs,
+        ...(o.salePolicy ? { salePolicy: o.salePolicy } : {}),
+        ...(o.eligLists ? { eligLists: o.eligLists } : {}),
+        ...(o.salePolicy ? { saleConfigRev: 1 } : {}),
+      },
+      SEAT_DEFS,
+    );
     await inner.openSale({ eventId, seatCount: SEAT_COUNT, keepUntilMs: saleEndsAtMs + KEEP_AFTER_SALE_END_MS });
   }
   seatMap.put({ eventId: otherEvent, layoutVersion: 'v1', seatCount: 10, perAccountLimit: 4, saleEndsAtMs: NOW + DAY }, [OTHER_SEAT]);
@@ -268,6 +285,62 @@ function expectRangeError(f: () => unknown, what?: unknown): void {
   }
   expect(err, `${JSON.stringify(what) ?? ''} 던진 것: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`).toBeInstanceOf(RangeError);
 }
+
+describe('HoldSeats.execute: 판매 정책 평가(BAT-051, HOT-252, Q-T36 ③, seat-hold §4) [ASVS v5.0.0-2.3.2]', () => {
+  const presale = (): SalePolicyRule[] => [
+    {
+      version: 1,
+      name: '팬클럽 선예매',
+      rounds: 'ALL',
+      during: { from: '2026-11-04T02:00:00.000Z', to: '2026-11-04T04:00:00.000Z' },
+      rule: { if: { fact: 'buyer.lists', has: 'lumen-fanclub-2026' }, then: { limitPerPerson: 2 }, else: { deny: 'PRESALE_ONLY' } },
+    },
+  ];
+
+  test('Q-T36 ③ 진입 판정이 좌석 확인보다 먼저라, 거부된 요청은 판에 없는 좌석도 INVALID_SEAT가 아니라 PRESALE_ONLY다', async () => {
+    const w = await world({ salePolicy: presale(), eligLists: ['lumen-fanclub-2026'] });
+    const e = await rejects(w.run(['Z99']), 'SALE_POLICY_DENIED');
+    expect(e.details.reason).toBe('PRESALE_ONLY');
+    expect(w.calls).toHaveLength(0);
+  });
+
+  test('Q-T36 ③ lst가 없으면 진입 판정이 PRESALE_ONLY로 거부하고 아무 좌석도 잡지 않는다', async () => {
+    const w = await world({ salePolicy: presale(), eligLists: ['lumen-fanclub-2026'] });
+    const e = await rejects(w.run(['A01']), 'SALE_POLICY_DENIED');
+    expect(e.details.reason).toBe('PRESALE_ONLY');
+    expect(w.calls).toHaveLength(0);
+    expect(await w.inner.db.event(w.eventId).bits.size).toBe(0);
+  });
+
+  test('Q-T36 ③ lst가 명단에 들면 규칙의 1인 2매가 홀드 Lua 한도가 되고 3매는 QUOTA_EXCEEDED다', async () => {
+    const w = await world({ salePolicy: presale(), eligLists: ['lumen-fanclub-2026'] });
+    const ok = await w.run(['A01', 'A02'], { lists: ['lumen-fanclub-2026'] });
+    expect(ok.seatIds).toEqual(['A01', 'A02']);
+    expect(w.calls[0]!.limit).toBe(2);
+    const e = await rejects(w.run(['A03', 'A04', 'A05'], { lists: ['lumen-fanclub-2026'] }), 'QUOTA_EXCEEDED');
+    expect(e.code).toBe('QUOTA_EXCEEDED');
+  });
+
+  test('Q-T36 ③ 걸리는 두 규칙의 한도가 2·3이면 작은 2가 홀드 Lua 한도다', async () => {
+    const rules: SalePolicyRule[] = [
+      { version: 1, name: '한도 2', rounds: 'ALL', rule: { then: { limitPerPerson: 2 } } },
+      { version: 1, name: '한도 3', rounds: 'ALL', rule: { then: { limitPerPerson: 3 } } },
+    ];
+    const w = await world({ salePolicy: rules });
+    expect((await w.run(['A01', 'A02'])).seatIds).toEqual(['A01', 'A02']);
+    expect(w.calls[0]!.limit).toBe(2);
+    await rejects(w.run(['A03']), 'QUOTA_EXCEEDED');
+  });
+
+  test('Q-T36 ③ 등급 규칙이 거부하는 좌석이 섞이면 GRADE_NOT_ON_SALE로 거부하고 한 좌석도 잡지 않는다', async () => {
+    const rules: SalePolicyRule[] = [{ version: 1, name: 'S등급 판매 중지', rounds: 'ALL', rule: { if: { fact: 'grade', eq: 'S' }, then: { deny: 'GRADE_NOT_ON_SALE' } } }];
+    const w = await world({ salePolicy: rules });
+    const e = await rejects(w.run(['A01', 'B01']), 'SALE_POLICY_DENIED');
+    expect(e.details.reason).toBe('GRADE_NOT_ON_SALE');
+    expect(w.calls).toHaveLength(0);
+    expect((await w.run(['A01'])).seatIds).toEqual(['A01']);
+  });
+});
 
 describe('HoldSeats.execute: 차례', () => {
   test('FR010_ 계정 모양이 키 조각(KEY_PART)이 아니거나, 구매 세션이 없거나 끝났거나, 다른 계정의 것이면 401(SESSION_NOT_FOUND)이고 저장소를 부르지 않으며 시도 기록을 남기지 않는다', async () => {

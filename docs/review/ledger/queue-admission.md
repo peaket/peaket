@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 94 | 49 | 2 | 0 | 0 | 4 | 0 | 0 | 42 | 191 |
+| A | 95 | 49 | 2 | 0 | 0 | 3 | 0 | 0 | 42 | 191 |
 | B | 35 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 7 | 59 |
-| 합계 | 129 | 61 | 2 | 0 | 0 | 7 | 0 | 2 | 49 | 250 |
+| 합계 | 130 | 61 | 2 | 0 | 0 | 6 | 0 | 2 | 49 | 250 |
 
 ## docs/features/queue-admission.md
 
@@ -60,7 +60,7 @@
 | Q-T35 | ④ | 만료 뒤 다시 줄 서기 | ④ 410(rejoinAllowed=true) 뒤 맨 뒤 새 번호(ADR-0064) | ID만 | A | 시험: services/queue-svc/test-int/admission-store.int.test.ts, services/queue-svc/test/leave-cases.ts 외 1곳 |
 | Q-T36 | ① | 판매 자격 명단 | ① 없는 사람은 로비 참가(오픈 전 참가도 오픈 시각으로 판정)와 진입 모두 대기열에 들지 않고(번호 발급 0) 403… | 자동 시험 | A | 시험: services/queue-svc/test/eligibility-cases.ts, services/queue-svc/test/eligibility-schedule.test.ts |
 | Q-T36 | ② | 판매 자격 명단 | ② 있는 사람은 입장 토큰 클레임 `lst`에 그 사람이 든 명단 키만 실린다(든 명단이 없으면 `lst`가 없다) | 자동 시험 | A | 시험: services/queue-svc/test/eligibility-cases.ts |
-| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 다른 단계 | A | HOT-252 · 홀드 때의 판매 정책 평가(`lst`·등급·매수, 403 `sale-policy-denied`, 규칙 한도를 홀드 Lua 한도로)는 purchase-svc 몫이다. 감독이 갈래 1 새 단계를… |
+| Q-T36 | ③ | 판매 자격 명단 | ③ 3매 홀드는 거부된다(1인 2매) | 자동 시험 | A | 시험: services/purchase-svc/test-int/sale-policy.int.test.ts, services/purchase-svc/test/hold-seats.test.ts |
 | Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
@@ -260,7 +260,7 @@
 | v5.0.0-13.2.2 | — | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | ID만 | B | 다른 곳 시험: loadtest/test/manifests090.test.mjs, loadtest/test/review060.test.mjs 외 9곳 (영역: services/admission-ctrl) |
 | v5.0.0-13.3.1 | — | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은… | 자동 시험 | B | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 11곳 |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 12곳 |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |

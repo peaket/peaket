@@ -63,8 +63,15 @@ const holdHash = (w: World, seatId: string) => seats.db.peek(w.eventId)!.holds.g
 describe('MemoryOrderHolds.check: 맞는 홀드', () => {
   test('ST28_목록에 있고 홀드 Hash의 holdId·owner·psid가 같고 만료 전이면 OK: heldAtMs는 잡은 시각, 좌석은 목록 차례(좌석 ID 오름차순)에 등급·구역을 붙인다', async () => {
     const w = await heldWorld({ seatIds: ['B01', 'A01', 'A02'] });
-    expect(await holds.check(query(w))).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf) });
+    expect(await holds.check(query(w))).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4 });
     expect(w.heldAtMs).toBe(NOW);
+  });
+
+  test('BAT051_ limit은 구매 세션 목록 없이 홀드 Hash lim을 읽고, lim이 없으면 undefined다 [ASVS v5.0.0-2.3.2]', async () => {
+    const w = await heldWorld({ seatIds: ['A01'] });
+    expect(await holds.limit({ ...query(w), seatIds: ['A01'] })).toBe(4);
+    delete holdHash(w, 'A01').lim;
+    expect(await holds.limit({ ...query(w), seatIds: ['A01'] })).toBeUndefined();
   });
 
   test('읽기만 한다: 확인 전후로 홀드 Hash·구매 세션의 홀드 목록이 같다 [ASVS v5.0.0-2.3.3]', async () => {

@@ -2,7 +2,7 @@
 // 서명은 queue-svc가 쓰는 것과 같은 방식(Node 표준 암호 모듈, ES256, r‖s 64바이트)으로 시험에서 만든다.
 import { type KeyObject, randomUUID, sign } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { type AdmissionKeys, AdmissionTokenRejected, FIRST_USE_MS, IAT_SKEW_MS, parseAdmissionJwks, verifyAdmissionToken } from '../src/modules/inventory/index.js';
+import { type AdmissionKeys, AdmissionTokenRejected, admissionListsOf, FIRST_USE_MS, IAT_SKEW_MS, parseAdmissionJwks, verifyAdmissionToken } from '../src/modules/inventory/index.js';
 import { b64, claimsOf as claimsFor, ISS, JNY, newKey, signAdmission } from './admission-fixtures.js';
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
@@ -47,6 +47,18 @@ describe('입장 토큰 확인', () => {
 
   test('ADR0183_8_우선구매 prio 클레임이 있으면 priorityGrantId로 돌려준다', () => {
     expect(verify(token({ claims: claimsOf({ prio: 'grant-1' }) })).priorityGrantId).toBe('grant-1');
+  });
+
+  test('ADR0265_7 lst는 1~10개의 중복 없는 명단 키 배열만 받고, 없으면 칸을 빼며, 틀리면 claims로 거절한다 [ASVS v5.0.0-2.3.2]', () => {
+    expect(verify(token({ claims: claimsOf({ lst: ['lumen-fanclub-2026'] }) })).lists).toEqual(['lumen-fanclub-2026']);
+    expect(verify(token()).lists).toBeUndefined();
+    for (const lst of [[], 'lumen-fanclub-2026', ['BAD'], ['lumen-fanclub-2026', 'lumen-fanclub-2026'], Array.from({ length: 11 }, (_, i) => `list-${i + 1}`)]) {
+      expect(reasonOf(token({ claims: claimsOf({ lst }) })), JSON.stringify(lst)).toBe('claims');
+    }
+    expect(admissionListsOf(token({ claims: claimsOf({ lst: ['lumen-fanclub-2026'] }) }))).toEqual(['lumen-fanclub-2026']);
+    expect(admissionListsOf(token())).toEqual([]);
+    expect(admissionListsOf(token({ claims: claimsOf({ lst: ['BAD'] }) }))).toBeUndefined();
+    expect(admissionListsOf(undefined)).toBeUndefined();
   });
 
   test('kid로 고른 공개키로만 확인한다: 다른 kid의 키로 서명하거나 모르는 kid·kid 없음은 거절한다 [ASVS v5.0.0-9.1.3]', () => {

@@ -251,6 +251,7 @@ export class OrderFakes {
       this.holdQueries.push(q);
       return this.hold;
     },
+    limit: async () => undefined,
   };
 
   readonly identity: IdentityRecheck = {

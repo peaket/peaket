@@ -1,8 +1,8 @@
 // 주문 생성의 홀드 확인 시험 대역(OrderHoldReader, BUILD_ORDER PRF-161). RedisOrderHolds·ORDER_HOLD_LUA(order-hold-lua.ts)와 같은 계약을 따른다:
 // 같은 사례에서 같은 결과를 낸다. 시각은 주입 Clock(Redis TIME 대신)이다.
 import type { Clock } from '@peaket/platform';
-import type { SeatRef } from '../domain/hold.js';
-import type { OrderHoldCheck, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
+import { MAX_SEATS, type SeatRef } from '../domain/hold.js';
+import type { OrderHoldCheck, OrderHoldLimitQuery, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
 import type { MemoryPurchaseSessionStore } from './memory-purchase-session-store.js';
 import type { MemorySeatStore } from './memory-seat-store.js';
 import { heldSeatIdsOf, heldSeatOf, orderHoldQueryShaped } from './redis-order-holds.js';
@@ -33,6 +33,29 @@ const isMs = (v: unknown): v is number => typeof v === 'number' && Number.isSafe
 export class MemoryOrderHolds implements OrderHoldReader {
   constructor(private readonly deps: MemoryOrderHoldsDeps) {}
 
+  /** 홀드 Hash의 lim(1인 한도). 구매 세션 목록 없이 주문 좌석의 Hash만 읽는다(BAT-051) */
+  async limit(q: OrderHoldLimitQuery, _o?: SeatCallOptions): Promise<number | undefined> {
+    if (!orderHoldQueryShaped({ eventId: q.eventId, accountId: q.accountId, purchaseSessionId: q.purchaseSessionId, holdId: q.holdId })) return undefined;
+    if (!Array.isArray(q.seatIds) || q.seatIds.length < 1 || q.seatIds.length > MAX_SEATS) return undefined;
+    const refs = await this.deps.seatMap.resolve(q.eventId, q.seatIds);
+    if (refs.some((r) => r === undefined)) return undefined;
+    const ev = this.deps.seats.db.peek(q.eventId);
+    if (!ev?.epoch) return undefined;
+    const now = this.deps.clock.now();
+    let limit: number | undefined;
+    for (const r of refs as SeatRef[]) {
+      const h = ev.holds.get(r.index);
+      if (!h || h.holdId !== q.holdId || h.owner !== q.accountId || h.psid !== q.purchaseSessionId || h.kind !== 'FAN') return undefined;
+      if (!isMs(h.exp) || h.exp <= now) return undefined;
+      if (h.lim !== undefined && (!Number.isSafeInteger(h.lim) || h.lim < 1)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.hold(q.eventId, r.index)}`);
+      if (h.lim !== undefined) {
+        if (limit === undefined) limit = h.lim;
+        else if (limit !== h.lim) return undefined;
+      }
+    }
+    return limit;
+  }
+
   async check(q: OrderHoldQuery, _o?: SeatCallOptions): Promise<OrderHoldCheck> {
     if (!orderHoldQueryShaped(q)) return NOT_FOUND;
     if (this.deps.unavailable?.()) return STORE_UNAVAILABLE;
@@ -48,6 +71,7 @@ export class MemoryOrderHolds implements OrderHoldReader {
     if (!ev?.epoch) return STORE_UNAVAILABLE;
     const now = this.deps.clock.now();
     let heldAt: number | undefined;
+    let limit: number | undefined;
     for (const s of seats) {
       const h = ev.holds.get(s.index);
       if (!h) return NOT_FOUND;
@@ -55,9 +79,14 @@ export class MemoryOrderHolds implements OrderHoldReader {
       if (h.holdId !== q.holdId || h.owner !== q.accountId || h.psid !== q.purchaseSessionId || h.kind !== 'FAN') return NOT_FOUND;
       if (!isMs(h.heldAt) || !isMs(h.exp)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.hold(q.eventId, s.index)}`);
       if (h.exp <= now) return NOT_FOUND;
+      if (h.lim !== undefined && (!Number.isSafeInteger(h.lim) || h.lim < 1)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.hold(q.eventId, s.index)}`);
       if (heldAt === undefined) heldAt = h.heldAt;
       else if (heldAt !== h.heldAt) return NOT_FOUND;
+      if (h.lim !== undefined) {
+        if (limit === undefined) limit = h.lim;
+        else if (limit !== h.lim) return NOT_FOUND;
+      }
     }
-    return { status: 'OK', heldAtMs: heldAt!, seats: seats.map(heldSeatOf) };
+    return { status: 'OK', heldAtMs: heldAt!, seats: seats.map(heldSeatOf), ...(limit !== undefined ? { limit } : {}) };
   }
 }

@@ -14,6 +14,13 @@ export interface SaleConfigStore {
 
 export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
 
+/** 읽기 전용 사본 읽기(core_app). 내부 HTTP 경로가 쓰는 최소 권한 포트다 */
+export interface SaleConfigReader {
+  get(eventId: string): Promise<EventSaleConfig | undefined>;
+}
+
+export const SALE_CONFIG_READER = Symbol('SALE_CONFIG_READER');
+
 /** 회차의 좌석맵 판·결제사 상한을 읽는 포트. 없으면 그 선택 칸을 빼고 쓴다 */
 export interface SaleConfigFactsSource {
   of(eventIds: readonly string[]): Promise<Map<string, EventSaleConfigFacts>>;

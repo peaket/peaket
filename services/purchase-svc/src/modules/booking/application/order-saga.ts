@@ -34,6 +34,7 @@ import {
   type ConfirmRefs,
   type ConfirmSent,
   OrderSeatStoreUnavailable,
+  type OrderHolds,
   type OrderSeatPins,
   type PaymentConfirms,
   type ReserveTx,
@@ -84,6 +85,8 @@ export interface OrderSagaDeps {
   failures: SagaFailures;
   confirmSent: ConfirmSent;
   pins: OrderSeatPins;
+  /** 홀드 때 쓴 1인 한도(판매 정책 규칙 결과)를 예약의 purchase_quota 한도로 쓴다(BAT-051). 없으면 회차 설정 한도만 쓴다 */
+  holds?: OrderHolds;
   confirms: PaymentConfirms;
   configs: SagaEventConfigs;
   log: SagaLog;
@@ -239,6 +242,16 @@ export class OrderSagaRunner {
   async reserveStep(job: SagaJob, order: SagaOrderView): Promise<SagaStepOutcome> {
     if (order.status !== 'ACCEPTED') return this.#skipOrderState(job);
     const config = await this.#configOf(order);
+    // 홀드 때 판매 정책 규칙이 정한 1인 한도를 예약의 purchase_quota 한도로 쓴다(BAT-051, HOT-252).
+    // 홀드 Hash의 lim 칸이 없으면(옛 홀드·다시 만든 홀드) 회차 설정 한도로 본다. 홀드 확인의 일시 장애는 다시 한다
+    let limit = config.perAccountLimit;
+    try {
+      const held = await this.deps.holds?.limit({ eventId: order.eventId, purchaseSessionId: order.purchaseSessionId, accountId: order.accountId, holdId: order.holdId, seatIds: order.seats.map((s) => s.seatId) });
+      if (held !== undefined) limit = held;
+    } catch (err) {
+      if (err instanceof OrderSeatStoreUnavailable) return this.#retry(job, 'seat_store_unavailable');
+      throw err;
+    }
     // ① 승인 기한(인증 + 10분)을 넘겼으면 묶지 않는다(승인을 보내지 않으므로 과금이 없다)
     if (isPastConfirmDeadline(order.attempt?.authenticatedAtMs, this.deps.clock.now())) return this.#fail(job, order, config, 'T8', 'EXPIRED');
     if (order.seatGen === undefined) throw new Error('접수된 주문에 판 번호(seat_gen)가 없다');
@@ -257,7 +270,7 @@ export class OrderSagaRunner {
             holdId: order.holdId,
             purchaseSessionId: order.purchaseSessionId,
             seatIds,
-            limit: config.perAccountLimit,
+            limit,
             orderGen,
             keepUntilMs,
           }),
@@ -296,7 +309,7 @@ export class OrderSagaRunner {
           eventId: order.eventId,
           accountId: order.accountId,
           seatIds,
-          limit: config.perAccountLimit,
+          limit,
           orderGen,
           actor: ORDER_SAGA_ACTOR,
           ...leaseOf(job),

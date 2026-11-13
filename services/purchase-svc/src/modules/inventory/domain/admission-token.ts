@@ -15,6 +15,10 @@ export const ADMISSION_TOKEN_MAX_CHARS = 2048;
 
 const KID = /^[A-Za-z0-9_.-]{1,64}$/;
 const B64URL = /^[A-Za-z0-9_-]+$/;
+/** 판매 자격 명단 키 모양(docs/data.md q:{event:E}:elig:{listKey}, ADR-0261 결정 3) */
+export const LIST_KEY = /^[a-z0-9-]{3,32}$/;
+/** 입장 토큰 lst의 최대 키 수(ADR-0265 결정 7) */
+export const MAX_ADMISSION_LISTS = 10;
 
 export type AdmissionRejectReason = 'format' | 'alg' | 'kid' | 'signature' | 'typ' | 'iss' | 'aud' | 'expired' | 'not_yet' | 'claims';
 
@@ -40,6 +44,8 @@ export interface AdmissionClaims {
   expiresAtMs: number;
   /** prio (우선 구매 입장일 때만) */
   priorityGrantId?: string;
+  /** lst: 구매자가 든 판매 자격 명단 키(없으면 칸을 뺀다). 판매 정책의 buyer.lists 사실이다 */
+  lists?: string[];
 }
 
 /** kid → 공개키 */
@@ -62,6 +68,35 @@ function jsonObject(b: Buffer): Record<string, unknown> | undefined {
 }
 
 const isKeyPart = (v: unknown): v is string => typeof v === 'string' && KEY_PART.test(v);
+
+/**
+ * lst 클레임의 모양을 본다(없으면 빈 배열, 있으면 1~10개의 중복 없는 명단 키). 틀리면 undefined.
+ * queue-svc가 싣는 값과 purchase-svc가 읽는 값이 같은 규칙이다(ADR-0265 결정 7, seat-hold §2)
+ */
+export function admissionListsOfClaim(v: unknown): string[] | undefined {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length < 1 || v.length > MAX_ADMISSION_LISTS) return undefined;
+  if (!v.every((k) => typeof k === 'string' && LIST_KEY.test(k))) return undefined;
+  if (new Set(v).size !== v.length) return undefined;
+  return [...v];
+}
+
+/**
+ * 홀드 요청의 입장 토큰 머리에서 lst만 꺼낸다(서명은 게이트웨이가 확인해 넘겼다. stored-purchase-sessions의 admissionJtiOf와 같은 전제).
+ * 토큰 모양이 깨졌거나 lst 모양이 틀리면 undefined(받는 층이 401 admission-token-invalid로 답한다). lst가 없으면 빈 배열이다
+ */
+export function admissionListsOf(token: unknown): string[] | undefined {
+  if (typeof token !== 'string' || token.length > ADMISSION_TOKEN_MAX_CHARS) return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 3 || !parts.every((p) => B64URL.test(p))) return undefined;
+  try {
+    const body: unknown = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined;
+    return admissionListsOfClaim((body as { lst?: unknown }).lst);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 입장 토큰을 확인하고 클레임을 돌려준다. 하나라도 어긋나면 AdmissionTokenRejected(reason)다. 머리의 jku·x5u·jwk·x5c 같은 키 출처는 읽지 않는다.
@@ -103,6 +138,8 @@ export function verifyAdmissionToken(token: unknown, o: { keys: AdmissionKeys; i
   if (!isKeyPart(c.jti) || !isKeyPart(c.sub) || !isKeyPart(c.sid) || !isKeyPart(c.event)) throw new AdmissionTokenRejected('claims');
   if (typeof c.jny !== 'string' || !UUID_PATTERN.test(c.jny)) throw new AdmissionTokenRejected('claims');
   if (c.prio !== undefined && !isKeyPart(c.prio)) throw new AdmissionTokenRejected('claims');
+  const lists = admissionListsOfClaim(c.lst);
+  if (!lists) throw new AdmissionTokenRejected('claims');
   if (o.nowMs >= exp * 1000) throw new AdmissionTokenRejected('expired');
   if (iat * 1000 > o.nowMs + IAT_SKEW_MS) throw new AdmissionTokenRejected('not_yet');
   return {
@@ -114,6 +151,7 @@ export function verifyAdmissionToken(token: unknown, o: { keys: AdmissionKeys; i
     issuedAtMs: iat * 1000,
     expiresAtMs: exp * 1000,
     ...(c.prio !== undefined ? { priorityGrantId: c.prio } : {}),
+    ...(lists.length > 0 ? { lists } : {}),
   };
 }
 

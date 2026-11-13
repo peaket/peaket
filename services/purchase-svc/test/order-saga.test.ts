@@ -536,6 +536,15 @@ describe('RESERVE ② 좌석 묶기', () => {
     expect(ORDER_SAGA_ACTOR).toBe('system:order-saga');
   });
 
+  test('BAT051_HOT252_ 홀드 Hash의 lim(판매 정책 규칙 결과)이 묶기·purchase_quota 예약의 한도가 된다 [ASVS v5.0.0-2.3.2]', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    const holds = { check: async () => ({ status: 'NOT_FOUND' as const }), limit: async () => 2 };
+    expect(await runner({ holds }).reserveStep(sagaJob(), order)).toEqual({ kind: 'ADVANCED', next: 'CONFIRM' });
+    expect(fx.pinInputs[0]!.limit).toBe(2);
+    expect(fx.reserveInputs[0]!.limit).toBe(2);
+  });
+
   test('FR011_reserveStep만으로는 승인 명령을 보내지 않는다(ADVANCED까지. CONFIRM은 runJob이 잇는다)', async () => {
     const order = sagaOrder();
     fx.put(order);

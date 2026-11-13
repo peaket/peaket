@@ -53,6 +53,8 @@ export interface MemoryHoldHash {
   ext: string;
   /** 묶음 표시(묶기 Lua가 '1'로 둔다, BUILD_ORDER PRF-142). 없으면 묶이지 않았다 */
   pin?: '1';
+  /** 홀드 때 쓴 1인 한도(판매 정책 규칙 결과, BAT-051). 없으면 회차 설정 한도로 본다 */
+  lim?: number;
 }
 
 /** 멱등 기록 s:{event:E}:idem:{account}:{key} */
@@ -326,7 +328,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       ev.bits.add(s.index);
       // DEL 뒤 HSET: 있던 칸과 수명을 지운다
       ev.expireAt.delete(hk);
-      ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0' });
+      ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0', lim: i.limit });
       ev.expiry.set(s.index, exp);
       extend(hk);
     }
@@ -469,7 +471,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       const hk = seatKeys.hold(e, s.index);
       ev.bits.add(s.index);
       ev.expireAt.delete(hk);
-      ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0' });
+      ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0', lim: i.limit });
       ev.expiry.set(s.index, exp);
       extend(hk);
     }
@@ -649,7 +651,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         ev.bits.add(s.index);
         // DEL 뒤 HSET: 있던 칸과 수명을 지우고 새로 쓴 뒤 keepUntil을 건다
         ev.expireAt.delete(hk);
-        ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0', pin: '1' });
+        ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0', pin: '1', lim: i.limit });
         ev.expireAt.set(hk, i.keepUntilMs);
       }
     }

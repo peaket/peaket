@@ -1,4 +1,4 @@
-# 갈래 1 — 마지막 상태(2026-11-13, R-533)
+# 갈래 1 — 마지막 상태(2026-11-13, R-535)
 
 - 갈래 1의 정본 진행 기록은 `docs/PROGRESS.md`다(ADR-0190 결정 3). 이 파일은 마지막 상태만 짧게 남긴다.
 - **BAT-050(HOT-160): 완료(R-533).** `services/ticket-svc` 최소 발권을 열었다. `IssueTickets`는 주문·발권 세대 단위 멱등(같은 주문 두 번 → 티켓 0장 더), `CancelTickets`는 결제자=보유자·양도 요청 없음·입장 전/후를 행 잠금 안에서 보고 키를 폐기하며 취소표를 남긴다. `ListTickets`는 월렛 목록이다. 티켓 키는 DB에 SHA-256만, QR은 공개 포인터다. payment-svc `TicketIssuer` 포트·gRPC 어댑터·재시도 분류 시험까지 했고 실제 Saga 연결은 후속. ticket-svc 19건·test-int 9건·payment-svc 2,907건·변이 17/17·4관점 리뷰 높음 2·중간 4 고침·typecheck·lint·doc-check·ledger·trace-check 통과. Docker test-int·변이·4관점 리뷰·CI는 heavy gate에서 마쳤고, 측정 대상은 아니다. 계획 `docs/review/plans/BAT-050.md`.
@@ -6,6 +6,6 @@
 - **남은 문제**: S-T16 ② 1ms는 3회 반복 중앙값 전체 p99 9.7101ms·Redis 제외 3.8070ms·MAC만 1.1281ms로 미달. S-T19 문자 그대로 1,000건 동시는 로컬 단일 Valkey 100ms 마감에서 503(100 동시×10묶음은 1,000/1,000·중복 0·수동 0), S-T20은 순서 동일·굶주림 0으로 통과. 보고서 `docs/review/measurements/BAT-090-wave.md` §9.
 - **S-T16 재개 조건**: 운영과 같은 다중 샤드·연결 풀·실기에서 다시 재고, Redis 근접 측정(같은 AZ·노드, 파이프라인, 로컬 세션 캐시)으로 왕복을 줄인 뒤 같은 3경로를 다시 잰다. 그래도 1ms가 어려우면 1ms 예산을 '검증 연산(ECDH/HKDF+MAC)'으로 조정할지 소유자가 정한다. 정본 `docs/verification.md` §3.11.
 - **BAT-050 분할(감독 결정 2026-11-13)**: BAT-050은 **HOT-160 발권(ticket-svc 최소, 1일)** 만, BAT-052는 **HOT-090 실시간 전파(realtime-gw, 3일)** 로 나눴다. BAT-052는 새 서비스 선행이 필요해 **보류**. BAT-050 HOT-160은 R-533에서 완료했다.
-- **BAT-051 보류(2026-11-13)**: HOT-252의 `salePolicy` 읽기 경로가 core-svc/purchase-svc에 없고 LCH-080(BAT-615) 전이라 보류. 평가 함수 `@peaket/validation/sale-policy`는 준비되어 있고, 규칙 원천만 없다.
+- **BAT-051(HOT-252): 구현·heavy gate 통과(R-535).** core-svc `GET /internal/v1/events/{eventId}/sale-config`(읽기 전용, 클러스터 안, `core_app` 읽기)로 `event_sale_config` 사본을 purchase-svc가 읽고(직접 DB 접속 없음), `LayoutSeatMap`이 파일 설정 위에 `salePolicy`·`eligLists`·`perPersonLimit`·`saleEndsAtMs`를 덮는다. 홀드는 `lst` 모양 검사·`entryGate`·`evaluateSalePolicy`(등급별)로 403 `sale-policy-denied`·규칙 한도를 정하고, 그 한도를 홀드 Lua와 홀드 Hash `lim`→`purchase_quota.limit_count`로 쓴다. heavy gate: test-int 214·1,809건, 단위 260·3,758건, 변이 12/12, 4관점 리뷰 높음 0·중간 5(1 고침), Q-T36 ③ 100 동시 표본(성공 2·422 98·p50 4.6ms·p99 5.3ms), typecheck·lint·doc-check·ledger/trace-check·records·generated contracts·api-client 통과. 브라우저 확인은 화면 변경이 없어 생략. 보고서 `docs/review/measurements/BAT-051-wave.md`.
 - **BAT-033/HOT-467**: 부분 완료(known gap). K2/A/A는 r23~r25 21.74/22.36/22.81ms·A/A 0.9723/0.9800으로 통과·닫음. K7 공식 3회 1.37/5.51/2.01%·p99 3,168.9/4,344.9/3,413.9ms, 진단 최선 1.77%·3,773.6ms로 ≤1%·p99 <3초 미달. 재개 조건은 시뮬레이터 지연 모델·동시 처리, wait 경로 추가 최적화, 실제 PG·운영 무대 재측정.
 - 정본 기록: `docs/BUILD_ORDER.md` BAT-050/BAT-051/BAT-052/BAT-090, `docs/features/seat-hold.md` §3, `docs/data.md` §3, `docs/PROGRESS.md`, `docs/verification.md` §3.10.

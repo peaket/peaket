@@ -60,7 +60,9 @@ export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessio
 export { DrizzleSeatHoldLedger } from './adapters/db/drizzle-seat-hold-ledger.js';
 export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
 export { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from './adapters/db/schema.js';
+export { CoreSaleConfigs, overlayOf, type CoreSaleConfigsOptions } from './adapters/core-sale-configs.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
+export { SaleConfigUnavailable, type EventSaleConfigOverlay } from './domain/sale-config.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export {
   MemorySeatDb,
@@ -193,6 +195,10 @@ export {
   AdmissionTokenRejected,
   FIRST_USE_MS,
   IAT_SKEW_MS,
+  LIST_KEY,
+  MAX_ADMISSION_LISTS,
+  admissionListsOf,
+  admissionListsOfClaim,
   parseAdmissionJwks,
   verifyAdmissionToken,
   type AdmissionClaims,

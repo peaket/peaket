@@ -19,7 +19,8 @@
 //     칸이 하나라도 없음(Hash 없음 포함), holdId·owner·psid가 ARGV와 다름, kind가 FAN이 아님(우선 구매 PRIORITY 홀드의 주문은 GAT-135, 리뷰 고침 L4), exp ≤ now → {'NOT_FOUND'}
 //     heldAt·exp가 앞 0 없는 0 이상 10진 정수 글이 아님                 → 'ERR PEAKET_CORRUPT_KEY {그 hold 키}'(오류, 망가진 키)
 //     좌석마다 heldAt이 같지 않음(한 홀드는 한 번에 잡혀 같아야 한다)        → {'NOT_FOUND'}
-//   3                                                              → {'OK', heldAt 글}
+//   3                                                              → {'OK', heldAt 글} 또는 {'OK', heldAt 글, lim 글}
+// lim은 홀드 때 쓴 1인 한도(BAT-051, 판매 정책 규칙 결과)다. 칸이 없으면 두 칸으로 답한다(옛 홀드·다시 만든 홀드).
 // 아무것도 쓰지 않는다. 키의 형이 틀리면 WRONGTYPE이 그대로 나간다(앱은 일시 장애가 아닌 Error로 던진다).
 
 // 정한 것(정본에 없음): 검사 2의 좌석 하나 안의 차례는 칸 없음 → holdId·owner·psid·kind 다름 → heldAt·exp 형식 → exp ≤ now → heldAt 다름이다.
@@ -89,8 +90,9 @@ local function ms(v)
   return #v == 1 or string.sub(v, 1, 1) ~= '0'
 end
 local heldAt = nil
+local limit = nil
 for i = 2, #KEYS do
-  local h = redis.call('HMGET', KEYS[i], 'holdId', 'owner', 'psid', 'heldAt', 'exp', 'kind', 'rem')
+  local h = redis.call('HMGET', KEYS[i], 'holdId', 'owner', 'psid', 'heldAt', 'exp', 'kind', 'rem', 'lim')
   if not h[1] or not h[2] or not h[3] or not h[4] or not h[5] or not h[6] then return {'NOT_FOUND'} end
   if h[1] ~= ARGV[1] or h[2] ~= ARGV[2] or h[3] ~= ARGV[3] or h[6] ~= 'FAN' then return {'NOT_FOUND'} end
   if not ms(h[4]) or not ms(h[5]) then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
@@ -101,6 +103,12 @@ for i = 2, #KEYS do
   elseif heldAt ~= h[4] then
     return {'NOT_FOUND'}
   end
+  -- 홀드 때 쓴 1인 한도(판매 정책 규칙 결과, BAT-051). 없으면 회차 설정 한도로 본다
+  if h[8] ~= nil then
+    if not ms(h[8]) or tonumber(h[8]) < 1 then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
+    if limit == nil then limit = h[8] elseif limit ~= h[8] then return {'NOT_FOUND'} end
+  end
 end
+if limit then return {'OK', heldAt, limit} end
 return {'OK', heldAt}
 `;

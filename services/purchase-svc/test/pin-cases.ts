@@ -291,7 +291,7 @@ export function pinCases(make: () => Promise<PinHarness>): void {
       expect({ id, bit: await h.bit(e, idx(id)), score: await h.expiryScore(e, idx(id)) }).toEqual({ id, bit: 1, score: null });
       expect({ id, hold: await h.holdHash(e, idx(id)) }).toEqual({
         id,
-        hold: { holdId: o.holdId, owner: ACCOUNT_A, psid: o.purchaseSessionId, fence: String(token), heldAt: String(now), exp: String(now + HOLD_TTL_MS), kind: 'FAN', ext: '0', pin: '1' },
+        hold: { holdId: o.holdId, owner: ACCOUNT_A, psid: o.purchaseSessionId, fence: String(token), heldAt: String(now), exp: String(now + HOLD_TTL_MS), kind: 'FAN', ext: '0', pin: '1', lim: '4' },
       });
       // DEL 뒤 다시 쓴 홀드 Hash에 수명이 없으면 영원히 남는다(hold-lua.ts와 같은 키 수명 규칙)
       expect({ id, at: await h.expireAt(e, seatKeys.hold(e, idx(id))) }).toEqual({ id, at: keepUntilMs });
@@ -353,7 +353,7 @@ export function pinCases(make: () => Promise<PinHarness>): void {
     const r = okPin(await pin(o));
     expect(r.regrabbed).toBe(1);
     const hash = await h.holdHash(e, idx('A04'));
-    expect(Object.keys(hash ?? {}).sort()).toEqual(['exp', 'ext', 'fence', 'heldAt', 'holdId', 'kind', 'owner', 'pin', 'psid']);
+    expect(Object.keys(hash ?? {}).sort()).toEqual(['exp', 'ext', 'fence', 'heldAt', 'holdId', 'kind', 'lim', 'owner', 'pin', 'psid']);
     expect(hash).toMatchObject({ psid: o.purchaseSessionId, fence: String(r.fencingToken), ext: '0', pin: '1' });
     expect(await h.bit(e, idx('A04'))).toBe(1);
   });
