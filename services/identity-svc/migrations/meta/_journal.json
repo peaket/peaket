@@ -218,6 +218,13 @@
       "when": 1794286730426,
       "tag": "0030_verification_attempt_person_mismatch",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794550800000,
+      "tag": "0031_staff_assignment_and_scanner_session",
+      "breakpoints": true
     }
   ]
 }

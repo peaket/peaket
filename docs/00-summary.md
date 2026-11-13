@@ -586,6 +586,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-541: bundle 이미지에 sale-policy 검증 패키지 반영(2026-11-13): CI `image` 실패를 고쳤다.
 - R-537: BAT-435(GAT-170) ticket-svc 스캐너 기기 원장·등록 코드·DPoP `jkt` 등록과 관제 기기 경로를 넣고, platform `ScannerGuard`·identity 세션 확인·Redis `jti`를 이었다. heavy gate에서 test-int 15건·변이 30/30·4관점 리뷰(높음 0·중간 5)를 통과했다(2026-11-13).
 - R-544: BAT-440(GAT-180·GAT-190) ticket-svc 스캐너 package·changes·scans·flags 서버 경로와 변경 일련번호·스캔 판정·이상 표시를 넣고 heavy gate를 통과했다(2026-11-13): 실제 PostgreSQL test-int 26건, 변이 26/26, 4관점 리뷰 높음 1(동시 IN 직렬화, 고침)·중간 4.
+- R-548: BAT-450 GAT-210 identity-svc 현장 스태프 초대 조회·수락·거절·내 배정 목록을 넣고 heavy gate를 통과했다(2026-11-13): 실제 PostgreSQL test-int 4건, 변이 25/25, 4관점 리뷰 높음 1(마이그레이션 장부, 고침)·중간 3. GAT-220은 기기 조회 gRPC·staff 토큰 `cnf.jkt`·기기 인증 전용 DPoP 가드·기기 승인/세션 종료·GAT-140 배치가 없어 보류다.
 - R-543: DPoP Authorization 정규식 ReDoS 제거(2026-11-13): CI `codeql` 실패를 고쳤다.
 - R-546: BAT-585 후기 오류 유형·제목 계약 정렬(2026-11-13): CI `node` 실패를 고쳤다.
 - R-545: BAT-620(LCH-090) 관제 수요 예측·규모 올리기를 core-svc에 부분 적용했다(2026-11-13): 0.5~2배 이력·기본 비율·10만/50만 경계, T-30분·올리기만·LARGE 30분 간격·commander 예외, 판매 승인 전 예측, 취소 회차 제외, 판매 승인과 같은 전역 잠금 직렬화. heavy gate: test-int 226 통과·1 건너뜀, 변이 30/30, 4관점 리뷰 높음 0·중간 2(재인증·감사). 관제 명령·판매 중지/재개·잔여석·화면은 ops-svc·purchase-svc 몫이다.

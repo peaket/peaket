@@ -216,7 +216,9 @@ export type ProblemType =
   | 'session-not-found'
   | 'signup-already-completed'
   | 'sold-out'
+  | 'staff-assignment-exists'
   | 'staff-assignment-missing'
+  | 'staff-invitation-email-mismatch'
   | 'subscription-limit'
   | 'transfer-locked'
   | 'trigger-deferred'
@@ -449,7 +451,9 @@ export const PROBLEM_TYPES = {
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
   'signup-already-completed': { status: 409, title: "이미 가입을 마친 계정입니다" },
   'sold-out': { status: 410, title: "매진되었습니다" },
+  'staff-assignment-exists': { status: 409, title: "이미 이 회차에 배정된 계정입니다" },
   'staff-assignment-missing': { status: 403, title: "이 회차의 스태프 배정이 없습니다" },
+  'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },
   'trigger-deferred': { status: 409, title: "판정 보류 중인 지표입니다" },

@@ -24,6 +24,7 @@ export { ListSessions } from './application/list-sessions.js';
 export { IssueReauthToken } from './application/issue-reauth-token.js';
 export { identityPackage, identityServiceHandlers, sessionServiceHandlers } from './inbound/session.grpc.js';
 export { CheckScannerSession } from './application/check-scanner-session.js';
+export { StaffInvitations, STAFF_CONSENT_VERSION, type StaffAssignmentView, type StaffInvitationView } from './application/staff-invitations.js';
 export { scannerSessionCheckHandlers } from './inbound/scanner-session-check.grpc.js';
 export { STAFF_ASSIGNMENT_STORE, type ScannerSessionRecord, type StaffAssignmentStore } from './domain/staff.js';
 export { GetVerificationStatus } from './application/get-verification-status.js';

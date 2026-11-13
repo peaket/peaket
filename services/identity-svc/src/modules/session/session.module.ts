@@ -43,6 +43,8 @@ import { MemoryNicknameCheckLimits } from './adapters/memory-nickname-check-limi
 import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
 import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from './domain/staff.js';
 import { CheckScannerSession } from './application/check-scanner-session.js';
+import { StaffInvitations } from './application/staff-invitations.js';
+import { StaffInvitationController } from './inbound/staff-invitation.controller.js';
 import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
 import { MemoryStaffAssignmentStore } from './adapters/memory-staff-assignment-store.js';
 
@@ -81,7 +83,7 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController],
+      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController, StaffInvitationController],
       providers: [
         GetAccountSummary,
         CompleteSignup,
@@ -91,6 +93,7 @@ export class SessionModule {
         o.storage === 'database' ? { provide: STAFF_ASSIGNMENT_STORE, useClass: DrizzleStaffAssignmentStore } : { provide: STAFF_ASSIGNMENT_STORE, useValue: new MemoryStaffAssignmentStore() },
         { provide: STAFF_ASSIGNMENTS, useFactory: (store: StaffAssignmentStore) => o.staffAssignments ?? store, inject: [STAFF_ASSIGNMENT_STORE] },
         CheckScannerSession,
+        StaffInvitations,
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,
