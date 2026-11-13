@@ -409,7 +409,9 @@ export class ScannerGuard implements CanActivate {
     const proof = singleHeader(request.headers.dpop);
     if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
     const authorization = singleHeader(request.headers.authorization);
-    const token = /^DPoP\s+(.+)$/i.exec(authorization ?? '')?.[1];
+    // \s+와 (.+)가 공백에서 겹치면 긴 공백 머리에서 되짚기가 늘어난다(CodeQL js/polynomial-redos).
+    // DPoP 접근 토큰은 공백 없는 한 토큰이므로 \S+로 못 박는다.
+    const token = /^DPoP[ \t]+(\S+)$/i.exec(authorization ?? '')?.[1];
     if (!token) throw scannerUnauthorized(reply, 'invalid_token');
     const expectedJkt = singleHeader(request.headers['x-user-jkt']);
     if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
