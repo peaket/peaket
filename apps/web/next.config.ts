@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
+import { withSerwist } from '@serwist/turbopack';
 import { seedLayeredAlias } from '@peaket/ds/seed-layered-alias';
 import { deploymentIdOf } from './server/deployment-id.mjs';
 import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
@@ -67,4 +68,5 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+// 월렛 서비스 워커(offline-gate §2·§4, BAT-350). Turbopack 빌드에서 app/serwist/[path]/route.ts가 sw를 만든다.
+export default withSerwist(config);

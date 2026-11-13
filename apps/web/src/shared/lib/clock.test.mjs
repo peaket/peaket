@@ -26,6 +26,23 @@ test('offset = 서버 시각 + 왕복/2 − 받은 시각이고, 받은 뒤의 �
   assert.equal(c.now(), 1_011_100);
 });
 
+test('화면이 다시 보이면 기기 시계 + 마지막 오차로 기준을 다시 잡는다(잠든 동안 단조 시계가 멈춘 모바일)', () => {
+  let wall = 1_000_000;
+  let mono = 500;
+  const c = createClock({ wall: () => wall, mono: () => mono, storage: memoryStorage() });
+  mono = 700;
+  c.addSample({ serverMs: 1_010_000, sentMono: 500, receivedMono: 700 });
+  assert.equal(c.now(), 1_010_100);
+  wall = 1_120_000; // 기기가 2분 잠들어 기기 시계만 흘렀다
+  mono = 700; // performance.now()는 그대로
+  assert.equal(c.now(), 1_010_100);
+  assert.equal(c.wallNow(), 1_130_100);
+  c.reset();
+  assert.equal(c.now(), 1_130_100);
+  mono = 1_700;
+  assert.equal(c.now(), 1_131_100);
+});
+
 test('최근 8개 가운데 왕복이 가장 짧은 표본을 쓴다', () => {
   let mono = 0;
   const c = createClock({ wall: () => 0, mono: () => mono, storage: memoryStorage() });

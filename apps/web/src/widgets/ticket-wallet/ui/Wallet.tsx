@@ -11,6 +11,8 @@ import { previewHref } from '@peaket/ds/Preview';
 import { QrPattern, RotatingQR } from '@peaket/ds/RotatingQR';
 import { Stepper } from '@peaket/ds/Stepper';
 import { ProductionPoster } from '@/entities/production';
+import { DeviceQr, type DeviceQrSnapshot } from '@/features/wallet-device-key/ui/DeviceQr';
+import { OfflineBanner } from '@/features/wallet-device-key/ui/OfflineBanner';
 import { cx } from '@/shared/lib/cx';
 import { InAppBrowserNotice } from '@/shared/ui/InAppBrowserNotice';
 import { PAST, T1, T2, T3, WALLET, walletView, type WalletState, type WalletView } from '../model/wallet';
@@ -34,12 +36,7 @@ export function Wallet({ state, path, dark }: WalletProps) {
 
   return (
     <>
-      {v.offline ? (
-        <div className="banner banner-offline banner-strip md:px-6 lg:px-8" role="status" id="off-msg">
-          <i className="ic ic-wifi-off" aria-hidden="true" />
-          <div className="banner-body">오프라인입니다. 마지막 동기화 {WALLET.lastSyncOffline} · QR은 그대로 표시됩니다</div>
-        </div>
-      ) : null}
+      <OfflineBanner forceOffline={v.offline} fallbackLastSyncText={v.offline ? WALLET.lastSyncOffline : undefined} />
       <main className="page-main" id="main" tabIndex={-1}>
         <div className="col mx-auto w-full max-w-[1040px] gap-6 px-4 pt-5 pb-10 md:gap-7 md:px-6 md:pb-12 lg:gap-8 lg:px-8 lg:pt-8 lg:pb-16">
           <h1 className="t-xl lg:text-[32px] lg:leading-[42px]">마이 티켓</h1>
@@ -148,6 +145,10 @@ export function Wallet({ state, path, dark }: WalletProps) {
 }
 
 const T1Title = T1.title;
+
+/** 오프라인 진입 때 IndexedDB에 남길 티켓 스냅샷(화면 목업 값, 서버 연결 단계에서 티켓 API 응답으로 바뀐다) */
+const T1_SNAPSHOT: DeviceQrSnapshot = { title: T1.title, whenText: T1.whenText, venueName: T1.venueName, seat: T1.seat, gate: T1.gate };
+const T3_SNAPSHOT: DeviceQrSnapshot = { title: T1.title, whenText: T3.whenText, venueName: T1.venueName, seat: T3.seat, gate: T3.gate };
 
 /** 카드 머리의 포스터(보드 .poster-sm, 휴대폰 48 · 태블릿 이상 56) */
 function Poster() {
@@ -370,13 +371,23 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
         <div className="lg:col-span-5">
           {v.showQr ? (
             <div className={cx('col items-center gap-3 px-px pb-[18px] md:p-0', mobileOnly)}>
-              <RotatingQR
-                label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
-                seed={17}
-                startTime={v.qrStale ? WALLET.nowStaleText : WALLET.nowText}
-                running={!v.qrStale}
-                stale={v.qrStale}
-              />
+              {v.qrStale ? (
+                // 'QR 15초 지남'은 디자인 미리보기다. 실제 기기 키가 없어도 보드와 같은 지난 QR을 그린다.
+                <RotatingQR
+                  label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
+                  seed={17}
+                  startTime={WALLET.nowStaleText}
+                  running={false}
+                  stale
+                />
+              ) : (
+                <DeviceQr
+                  ticketId={T1.qrUuid}
+                  label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
+                  offline={v.offline}
+                  snapshot={T1_SNAPSHOT}
+                />
+              )}
               <QrHints />
             </div>
           ) : null}
@@ -743,7 +754,11 @@ function ReceivedOpen() {
       </div>
       <div className="md:grid md:grid-cols-[320px_minmax(0,1fr)] md:items-start md:gap-7 md:p-5 lg:grid-cols-12 lg:gap-x-6 lg:px-7 lg:pt-6 lg:pb-7">
         <div className="col items-center gap-3 px-px pb-[18px] md:p-0 lg:col-span-5">
-          <RotatingQR label={`입장 QR, 티켓 ${T3.qrTicketId}, 받은 티켓 ${T3.seat}, 15초마다 바뀝니다`} seed={29} startTime={WALLET.nowText} />
+          <DeviceQr
+            ticketId={T3.qrUuid}
+            label={`입장 QR, 티켓 ${T3.qrTicketId}, 받은 티켓 ${T3.seat}, 15초마다 바뀝니다`}
+            snapshot={T3_SNAPSHOT}
+          />
           <p className="t-sm muted px-[15px] text-center md:px-0">인터넷이 없어도 QR이 표시됩니다 · 화면 밝기를 올려 주세요</p>
         </div>
         <div className="col gap-3 border-t border-(--border) p-4 md:gap-[18px] md:border-t-0 md:p-0 lg:col-span-7">

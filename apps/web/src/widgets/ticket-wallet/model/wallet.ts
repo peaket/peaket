@@ -17,8 +17,10 @@ export const T1 = {
   gate: '동문',
   gateOpenText: '16:30',
   bookingNo: '2026101400123',
-  /** QR 대체 텍스트의 티켓 식별자 */
+  /** QR 대체 텍스트의 티켓 식별자(화면 표시용) */
   qrTicketId: 'T-48213-01',
+  /** QR v1에 싣는 UUIDv7(목업 티켓의 실제 서버 ID 자리) */
+  qrUuid: '0190f3a1-7c2e-7a00-8000-000000000101',
   addon: '주차권 1매',
   transferDeadlineText: '10/25(일) 16:00',
   /** 일정 변경 뒤 새 일정 */
@@ -46,6 +48,8 @@ export const T3 = {
   from: '하늘',
   // 추천안: 보드의 '[티켓 ID]' 자리 표시를 목업 식별자로 채웠다
   qrTicketId: 'T-48317-04',
+  /** QR v1에 싣는 UUIDv7(목업 티켓의 실제 서버 ID 자리) */
+  qrUuid: '0190f3a1-7c2e-7a00-8000-000000000102',
 } as const;
 
 /** 지난 공연(보드 t9) */

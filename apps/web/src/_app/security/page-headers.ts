@@ -37,6 +37,8 @@ const handler = (pattern: string): RouteRule => ({ pattern, group: 'request', ki
 export const ROUTES: readonly RouteRule[] = [
   // (cached) 묶음 A: 홈·공연 상세·검색 셸·굿즈·정적 문서·복귀 화면·스태프 화면·셔플 검증·월렛 셸(§5.14.1)
   cached('/'),
+  // 서비스 워커가 캐시 못 한 문서를 대체하는 정적 오프라인 화면(BAT-350)
+  cached('/~offline'),
   cached('/booking/[eventId]/checkout/return', 'return'),
   // 공연 상세는 사람 확인 위젯을 싣고 본인확인기관 창을 연다(§5.14.1 A의 '+' 줄 둘, '변형은 실제 화면에 걸려야 한다')
   cached('/events/[id]', 'web', ['humanCheck', 'identityForm']),

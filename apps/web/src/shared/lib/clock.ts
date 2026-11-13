@@ -19,11 +19,17 @@ interface Sample {
   serverAtReceive: number;
   receivedMono: number;
   rttMs: number;
+  /** 표본을 받은 순간의 기기 벽시계(화면이 다시 보일 때 기준을 다시 잡는다) */
+  wallAtReceive: number;
 }
 
 export interface Clock {
-  /** 보정한 지금(유닉스 밀리초) */
+  /** 보정한 지금(유닉스 밀리초). 화면이 켜진 동안은 단조 시계로 이어 센다 */
   now(): number;
+  /** 기기 벽시계 + 마지막 보정값. 기기가 잠들어 단조 시계가 멈춘 뒤 화면이 다시 보일 때 쓴다 */
+  wallNow(): number;
+  /** 화면이 다시 보일 때 단조 기준을 기기 벽시계 + 마지막 오차로 다시 잡는다 */
+  reset(): void;
   addSample(s: { serverMs: number; sentMono: number; receivedMono: number }): void;
   /** 캐시하지 않는 응답의 Date 머리로 표본을 더한다. 받았으면 true */
   addDateHeader(date: string | null | undefined, sentMono: number, receivedMono: number): boolean;
@@ -51,9 +57,22 @@ export function createClock({ wall = () => Date.now(), mono = () => performance.
       if (b) return b.serverAtReceive + (mono() - b.receivedMono);
       return wall() + (stored ?? 0);
     },
+    wallNow() {
+      const b = best();
+      if (b) return wall() + (b.serverAtReceive - b.wallAtReceive);
+      return wall() + (stored ?? 0);
+    },
+    reset() {
+      const b = best();
+      if (!b) return;
+      const corrected = wall() + (b.serverAtReceive - b.wallAtReceive);
+      b.serverAtReceive = corrected;
+      b.receivedMono = mono();
+      b.wallAtReceive = wall();
+    },
     addSample({ serverMs, sentMono, receivedMono }) {
       const rttMs = Math.max(0, receivedMono - sentMono);
-      const s: Sample = { serverAtReceive: serverMs + rttMs / 2, receivedMono, rttMs };
+      const s: Sample = { serverAtReceive: serverMs + rttMs / 2, receivedMono, rttMs, wallAtReceive: wall() };
       samples.push(s);
       if (samples.length > MAX_SAMPLES) samples.shift();
       const b = best()!;
