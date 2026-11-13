@@ -186,7 +186,7 @@ export const CreateEventHoldBody = zod.object({
   "count": zod.int().min(1).describe('1인 매수 한도 이하'),
   "wheelchair": zod.boolean().default(createEventHoldBodyAutoWheelchairDefault),
   "allowSplit": zod.boolean().default(createEventHoldBodyAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
-}).strict().optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
+}).strict().optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정은 BUILD_ORDER HOT-080에서 열었다. seatIds와 함께 보내면 400 auto-condition-invalid다.'),
   "clientEphemeralPublicKey": zod.string().optional().describe('좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
