@@ -197,13 +197,18 @@ x-peaket-problem-types:
     reauth-step-invalid: { status: 410, title: "처음부터 다시 인증해 주세요" }
     refresh-token-invalid: { status: 401, title: "다시 로그인해 주세요" }
     refund-account-required: { status: 422, title: "환불받을 계좌를 입력해 주세요" }
+    report-limited: { status: 429, title: "오늘은 더 신고할 수 없습니다" }
     research-export-not-ready: { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" }
     restriction-too-long: { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" }
     retention-ended: { status: 410, title: "보관 기간이 끝났습니다" }
     review-already-written: { status: 409, title: "이 회차의 후기를 이미 썼습니다" }
+    review-eligibility-unavailable: { status: 503, title: "후기 자격을 잠시 확인할 수 없습니다" }
     review-event-cancelled: { status: 403, title: "취소된 회차에는 후기를 쓸 수 없습니다" }
+    review-hidden-by-notice: { status: 409, title: "통보로 가린 후기는 고칠 수 없습니다" }
+    review-not-author: { status: 403, title: "내 후기만 고칠 수 있습니다" }
     review-not-ended: { status: 403, title: "공연이 끝난 뒤에 후기를 쓸 수 있습니다" }
     review-not-purchaser: { status: 403, title: "이 회차를 예매한 분만 후기를 쓸 수 있습니다" }
+    review-self-report: { status: 403, title: "내 후기는 신고할 수 없습니다" }
     role-group-mismatch: { status: 422, title: "파트너 역할과 관제 역할 사이는 바꿀 수 없습니다" }
     rotation-too-soon: { status: 409, title: "비밀을 방금 바꿨습니다. 잠시 뒤 다시 시도해 주세요" }
     sale-eligibility-list-limit: { status: 409, title: "판매 자격 명단은 공연마다 10개까지 둘 수 있습니다" }

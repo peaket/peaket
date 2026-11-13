@@ -56,14 +56,14 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   }
 };
 
-const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '후기를 찾을 수 없습니다' });
+const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
 const notAuthor = () => new ProblemError({ type: 'review-not-author', status: 403, title: '내 후기만 고칠 수 있습니다' });
 const selfReport = () => new ProblemError({ type: 'review-self-report', status: 403, title: '내 후기는 신고할 수 없습니다' });
 const alreadyReported = () => new ProblemError({ type: 'already-reported', status: 409, title: '이미 신고한 후기입니다' });
 const reportLimited = (retryAfterSeconds: number) => new ProblemError({ type: 'report-limited', status: 429, title: '오늘은 더 신고할 수 없습니다', retryAfterSeconds });
 const eligibilityUnavailable = () => new ProblemError({ type: 'review-eligibility-unavailable', status: 503, title: '후기 자격을 잠시 확인할 수 없습니다', retryAfterSeconds: 5 });
 const hiddenByNotice = () => new ProblemError({ type: 'review-hidden-by-notice', status: 409, title: '통보로 가린 후기는 고칠 수 없습니다' });
-const eventNotFound = () => new ProblemError({ type: 'not-found', status: 404, title: '공연을 찾을 수 없습니다' });
+const eventNotFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
 
 type EventInfo = Omit<ReviewEvent, 'rounds'> & { readonly rounds: ReadonlyMap<string, number> };
 
@@ -128,11 +128,11 @@ export class Reviews {
     return guard(async () => {
       const e = await this.#event(eventId);
       const existing = await this.d.store.findReviewByEventAccount(e.eventId, accountId);
-      if (existing) throw new ProblemError({ type: 'review-already-written', status: 409, title: '이미 후기를 썼습니다', extensions: { myReviewId: existing.reviewId } });
+      if (existing) throw new ProblemError({ type: 'review-already-written', status: 409, title: '이 회차의 후기를 이미 썼습니다', extensions: { myReviewId: existing.reviewId } });
       if (e.cancelled) throw new ProblemError({ type: 'review-event-cancelled', status: 403, title: '취소된 회차에는 후기를 쓸 수 없습니다' });
       const eligible = await this.#checkEligibility(accountId, e);
       if (!eligible.eligible) {
-        if (eligible.reason === 'NOT_ENDED') throw new ProblemError({ type: 'review-not-ended', status: 403, title: '공연이 끝난 뒤 후기를 쓸 수 있습니다' });
+        if (eligible.reason === 'NOT_ENDED') throw new ProblemError({ type: 'review-not-ended', status: 403, title: '공연이 끝난 뒤에 후기를 쓸 수 있습니다' });
         throw new ProblemError({ type: 'review-not-purchaser', status: 403, title: '이 회차를 예매한 분만 후기를 쓸 수 있습니다' });
       }
       // 자격 답에 근거 주문이 없으면 저장하지 않는다(빈 UUID로 DB 오류를 내지 않는다)
@@ -161,7 +161,7 @@ export class Reviews {
       try {
         await this.d.store.insertReview(review);
       } catch (e) {
-        if (isUniqueViolation(e)) throw new ProblemError({ type: 'review-already-written', status: 409, title: '이미 후기를 썼습니다' });
+        if (isUniqueViolation(e)) throw new ProblemError({ type: 'review-already-written', status: 409, title: '이 회차의 후기를 이미 썼습니다' });
         throw e;
       }
       if (hidden) await this.d.store.insertTakedown(this.#takedown(id, 'SAME_CONTENT', fingerprint, now));
