@@ -279,9 +279,14 @@ test('PRF215_코드리뷰M2_v1무대는_전용PostgreSQL을쓰고_max_connection
   const c = dep.spec.template.spec.containers[0];
   const localPg = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'local', 'postgres.yaml'), 'utf8')).map((d) => d.toJS()).find((o) => o.kind === 'Deployment');
   assert.equal(c.image, localPg.spec.template.spec.containers[0].image, '로컬 PostgreSQL과 같은 판');
-  assert.deepEqual(c.args, ['-c', `max_connections=${m.V1_PG_MAX_CONNECTIONS}`]);
+  assert.deepEqual(c.args, ['-c', `max_connections=${m.V1_PG_MAX_CONNECTIONS}`, '-c', 'shared_buffers=128MB', '-c', 'commit_delay=0', '-c', 'commit_siblings=5']);
   assert.deepEqual(c.envFrom, [{ secretRef: { name: 'v1-postgres' } }]);
+  assert.equal(c.resources.requests.cpu, '500m');
+  assert.equal(c.resources.limits.cpu, undefined);
   assert.ok(/^\d+Gi$/.test(c.resources.limits.memory) && Number.parseInt(c.resources.limits.memory, 10) >= 1, c.resources.limits.memory);
+  const tuned = m.v1PostgresObjects({ PEAKET_PG_CPU_REQUEST: '4', PEAKET_PG_CPU_LIMIT: '8', PEAKET_PG_SHARED_BUFFERS: '1GB', PEAKET_PG_COMMIT_DELAY: '100', PEAKET_PG_COMMIT_SIBLINGS: '5' })[1].spec.template.spec.containers[0];
+  assert.deepEqual(tuned.args, ['-c', `max_connections=${m.V1_PG_MAX_CONNECTIONS}`, '-c', 'shared_buffers=1GB', '-c', 'commit_delay=100', '-c', 'commit_siblings=5']);
+  assert.deepEqual(tuned.resources, { requests: { cpu: '4', memory: '1Gi' }, limits: { cpu: '8', memory: '2Gi' } });
   assert.equal(dep.spec.template.spec.automountServiceAccountToken, false);
   const keys = v1Keys();
   assert.match(keys.dbPassword, /^[A-Za-z0-9_-]{24}$/);

@@ -162,8 +162,24 @@ export function v1ValkeyObjects(name, o) {
  * v1 무대 전용 PostgreSQL(네임스페이스 v1, 코드 리뷰 M2): Service postgres와 Deployment. 연결 한도는 V1_PG_MAX_CONNECTIONS, 저장소는 임시(emptyDir, 다시 띄우면 비고
  * Secret v1-postgres의 새 비밀번호로 처음부터 만든다). 비밀번호는 Secret으로만 잇는다
  */
-export function v1PostgresObjects() {
+/**
+ * v1 전용 PostgreSQL 무대 튜닝(BAT-042, HOT-475, R-515). 같은 30초 K7에서 하나씩 바꿔 비교한다.
+ * 기본값은 튜닝 전 무대이고, 환경 값으로만 바꾼다(정본 기본값은 비교 뒤 고른 조합으로 갱신한다).
+ * synchronous_commit=off는 결제 내구성 때문에 쓰지 않는다.
+ * @param {Record<string, string | undefined>} [env]
+ */
+export function v1PostgresTuning(env = process.env) {
+  const cpuRequest = env.PEAKET_PG_CPU_REQUEST ?? '500m';
+  const cpuLimit = env.PEAKET_PG_CPU_LIMIT ?? '';
+  const sharedBuffers = env.PEAKET_PG_SHARED_BUFFERS ?? '128MB';
+  const commitDelay = env.PEAKET_PG_COMMIT_DELAY ?? '0';
+  const commitSiblings = env.PEAKET_PG_COMMIT_SIBLINGS ?? '5';
+  return { cpuRequest, cpuLimit, sharedBuffers, commitDelay, commitSiblings };
+}
+
+export function v1PostgresObjects(env = process.env) {
   const name = 'postgres';
+  const tune = v1PostgresTuning(env);
   const labels = { 'app.kubernetes.io/name': name, 'app.kubernetes.io/part-of': 'peaket' };
   return [
     { apiVersion: 'v1', kind: 'Service', metadata: { name, namespace: V1_NAMESPACE, labels }, spec: { selector: labels, ports: [{ name: 'pg', port: 5432, targetPort: 5432 }] } },
@@ -185,11 +201,14 @@ export function v1PostgresObjects() {
               {
                 name: 'postgres',
                 image: V1_POSTGRES_TAG,
-                args: ['-c', `max_connections=${V1_PG_MAX_CONNECTIONS}`],
+                args: ['-c', `max_connections=${V1_PG_MAX_CONNECTIONS}`, '-c', `shared_buffers=${tune.sharedBuffers}`, '-c', `commit_delay=${tune.commitDelay}`, '-c', `commit_siblings=${tune.commitSiblings}`],
                 envFrom: [{ secretRef: { name: 'v1-postgres' } }],
                 ports: [{ name: 'pg', containerPort: 5432 }],
                 readinessProbe: { exec: { command: ['pg_isready', '-U', 'postgres'] }, periodSeconds: 2 },
-                resources: { requests: { cpu: '500m', memory: '1Gi' }, limits: { memory: '2Gi' } },
+                resources: {
+                  requests: { cpu: tune.cpuRequest, memory: '1Gi' },
+                  limits: { ...(tune.cpuLimit ? { cpu: tune.cpuLimit } : {}), memory: '2Gi' },
+                },
                 securityContext: RESTRICTED,
                 volumeMounts: [
                   { name: 'data', mountPath: '/var/lib/postgresql' },

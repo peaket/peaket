@@ -265,3 +265,41 @@ K7은 회마다 `cluster.mjs down/up/observability/v1 --cpus 4 --memory-mi 2048`
 - **BAT-041(HOT-474) K7 목표 미달**: 3~5초 꼬리 3.63%, 공식 4.79%, p99 4,577.6ms. read-path 수정은 되돌렸다.
 - **K2 예열 dropped 수정 성공**: 짧은 K2 dropped 0, p99 36.0~38.4ms.
 - 다음은 8.5의 Postgres CPU request/커밋 경로를 소유자 승인 뒤 무대로 비교하고, 코드 쪽은 쓰기·커밋 묶음으로 간다.
+
+## 9. BAT-042(HOT-475) Postgres 무대 튜닝 비교(2026-11-13, R-515)
+
+### 9.1 30초 K7 비교(같은 조건)
+
+조건: 새 클러스터, v1 split·2Gi·CPU 4, K7 100/s·좌석 2·예열 10초·본구간 30초·응답 버림 5%·16초 지연 0.5%. 각 실행은 유효(dropped 0·오류 0·`startSkewS=0`). 한 번에 한 값만 바꿨다.
+
+| 실행 | 변경 | p99(confirm) | 공식 위반 | 3~5초 | 접수 429 | Postgres CPU 평균 | 번들 CPU(파드별) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 없음(500m, 128MB, commit_delay 0) | **3,854.4ms** | **70/2,695 (2.60%)** | **1.52%** | 2 (0.07%) | 4.99코어 | 1.5~2.1 |
+| commit_delay | `commit_delay=100`, `commit_siblings=5` | 5,136.8ms | 221/2,545 (8.68%) | 3.55% | 49 (1.93%) | 4.75코어 | 1.8~2.0 |
+| CPU4 | CPU request 4, limit 없음 | 4,486.0ms | 275/2,530 (10.87%) | 7.49% | 104 (4.11%) | 4.58코어 | 1.8~2.1 |
+| shared_buffers | `shared_buffers=1GB` | 3,984.8ms | 73/2,661 (2.74%) | 2.08% | 4 (0.15%) | 4.57코어 | 1.8~2.1 |
+
+- **baseline이 가장 좋았다.** commit_delay는 커밋을 늦춰 꼬리와 429를 악화시켰고, CPU request 4도 개선이 없었다(요청은 limit이 아니라 CFS 보장일 뿐). shared_buffers 1GB는 거의 같거나 조금 나빴다.
+- 가장 작은 유효 조합은 **무대 변경 없음(baseline)** 이다. `synchronous_commit=off`는 쓰지 않았다.
+- `v1-objects.mjs`에 `PEAKET_PG_CPU_REQUEST`·`PEAKET_PG_CPU_LIMIT`·`PEAKET_PG_SHARED_BUFFERS`·`PEAKET_PG_COMMIT_DELAY`·`PEAKET_PG_COMMIT_SIBLINGS` 환경 값을 더해 비교할 수 있게 했고, **기본값은 baseline**으로 두었다. 정본 기록은 `docs/verification.md` §3.10과 이 절이다.
+
+### 9.2 최종 K7 진단 1회
+
+baseline 무대에서 100초 K7 1회(드레인 20초·최소 3초 폴링):
+
+| 항목 | 값 |
+| --- | ---: |
+| 공식 `payment_p99_3000ms` | **505/8,990 (5.62%) fail** |
+| `payment_confirm_ms` p99 | **4,297.1ms fail** |
+| 3~5초 charge 꼬리(본구간) | **306/8,956 (3.42%)** |
+| 16초 지연군 | 47/8,956 (0.52%) |
+| 접수 429 | **179/8,990 (1.99%) fail** |
+| PENDING(3초 전 포기) | 16 (0) |
+| 드레인 끝/미완 | 139 / 0 |
+| dropped / 오류 / `startSkewS` | 0 / 0 / 0 · 유효 |
+| 번들 CPU 평균/최고 | 58.0% / 100.1% |
+
+- **3~5초 꼬리 <0.2%·p99 <3초·공식 ≤1% 목표는 달성하지 못했다.** 무대 튜닝 네 가지 모두 baseline보다 나쁘거나 같았다.
+- 쓰기·커밋 묶음 코드는 이번에 넣지 않았다. 8.2의 상위 질의가 모두 작고, `xact_commit` 101,355회/30초·WAL fsync 27,168회/30초라 **한두 질의를 묶는 것으로 목표가 바뀌지 않는다.** A등급 제품 코드로 트랜잭션 경계를 바꾸는 일은 별도 배치에서 단위·test-int·변이·4관점 리뷰를 갖춰야 한다.
+- 다음 후보: (가) `payment_confirm_job`·`order_saga_job`·`ticket_issue_job`의 **백그라운드 집기/결과 반영 커밋 수**를 줄이는 배치(예: 집기 batch 확대·결과 반영 트랜잭션 병합), (나) Postgres를 별도 노드/볼륨으로 옮겨 WAL fsync를 분리하는 무대, (다) 3~5초 꼬리를 만드는 charge 구간을 payment-svc·시뮬레이터 쪽에서 더 계측하는 것.
+- K2는 R-514의 예열 절반 수정으로 짧은 30초 dropped 0·p99 36.0~38.4ms를 확인했다. A/A는 그 무대로 다음에 세운다.
