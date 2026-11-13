@@ -1,8 +1,9 @@
 // 서비스별 Outbox 릴레이 프로세스 시작(ADR-0116 결정 1·2, BUILD_ORDER FND-110).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
+import { assertDatabaseRole, CompositeSaleConfigStore, DrizzleSaleConfigStore, QueueSaleConfigStore } from './modules/catalog/index.js';
 import { coreMaintenanceTasks } from './maintenance-tasks.js';
 
 const SERVICE = 'core-svc';
@@ -16,8 +17,21 @@ const maintenanceDatabase = createDatabase({ url: config.maintenanceDatabaseUrl,
 const producer = createKafkaProducer({ kind: 'outbox-relay', brokers: config.kafkaBrokers, clientId: `${SERVICE}-${env}-${config.pod}`, auth: kafkaAuthFromEnv(`${SERVICE}-outbox-relay`) });
 await producer.connect();
 
-// 공용 정비 일과 core-svc의 일(판매 자격 명단 파기·사본 다시 넘기기, ADR-0261 결정 7·9)
-const core = coreMaintenanceTasks(maintenanceDatabase, systemClock);
+// 관제 판매 승인·설정 사본 쓰기의 DB 역할(core_ops). 주소가 없으면 회차 판매 설정 다시 쓰기만 띄우지 않는다
+const opsUrl = process.env.PEAKET_OPS_DATABASE_URL;
+const opsDatabase = opsUrl ? createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: 2 }) : undefined;
+// 소유자·슈퍼유저로 붙으면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
+if (opsDatabase) await assertDatabaseRole(opsDatabase, 'core_ops');
+// 대기열 Redis의 회차 판매 설정 사본(판매 승인 LCH-080). 주소가 없으면 core DB 사본만 쓴다
+const queueRedisUrl = process.env.PEAKET_QUEUE_REDIS_URL;
+const queueRedis = queueRedisUrl ? await createHotRedis({ url: queueRedisUrl }) : undefined;
+const saleConfigStore = opsDatabase
+  ? queueRedis
+    ? new CompositeSaleConfigStore(new DrizzleSaleConfigStore(opsDatabase), new QueueSaleConfigStore(queueRedis))
+    : new DrizzleSaleConfigStore(opsDatabase)
+  : undefined;
+// 공용 정비 일과 core-svc의 일(판매 자격 명단 파기·사본 다시 넘기기·회차 판매 설정 다시 쓰기, ADR-0261 결정 7·9, LCH-080)
+const core = coreMaintenanceTasks(maintenanceDatabase, systemClock, process.env, { ...(saleConfigStore ? { saleConfigStore } : {}), ...(opsDatabase ? { opsDatabase } : {}) });
 const relay = await startOutboxRelayProcess({
   service: SERVICE,
   database,
@@ -39,7 +53,7 @@ const shutdown = async (why: string, code: number) => {
     await relay.stop();
     await producer.disconnect();
     // 풀 닫기는 쓰이는 연결이 돌아오기를 기다린다. 정비 한도를 넘겨 아직 도는 문장이 있어도 3초 [가정] 뒤에는 끝낸다(코드 리뷰 2026-11-01)
-    await Promise.race([Promise.all([database.close(), maintenanceDatabase.close()]), new Promise((r) => setTimeout(r, 3_000).unref())]);
+    await Promise.race([Promise.all([database.close(), maintenanceDatabase.close(), opsDatabase?.close(), queueRedis?.close()]), new Promise((r) => setTimeout(r, 3_000).unref())]);
   } catch (err) {
     console.error(JSON.stringify({ kind: 'outbox-relay', msg: `${why} 뒤 끝내기 실패`, err: String(err) }));
     code = 1;

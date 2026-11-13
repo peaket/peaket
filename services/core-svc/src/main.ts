@@ -13,6 +13,9 @@ if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣
 // 파트너 경로의 DB 사용자(core_partner, 행 보안의 대상, ADR-0241). 없으면 시작하지 않는다
 const partnerUrl = process.env.PEAKET_PARTNER_DATABASE_URL;
 if (!partnerUrl) throw new Error('PEAKET_PARTNER_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
+// 관제 판매 승인 경로의 DB 사용자(core_ops, 판매 승인 LCH-080). 없으면 승인·설정 사본을 쓸 수 없어 시작하지 않는다
+const opsUrl = process.env.PEAKET_OPS_DATABASE_URL;
+if (!opsUrl) throw new Error('PEAKET_OPS_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
 
 // 파트너 경로의 역할·테넌트는 요청마다 identity에 묻는다(ADR-0172). 주소가 없으면 시작하지 않는다(대역으로 통과시키지 않는다, ADR-0198 결정 6)
 const identityGrpc = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -54,9 +57,11 @@ const templates = StaticTemplateCatalog.load(templateDir);
 
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
+const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
+await assertDatabaseRole(opsDatabase, 'core_ops');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
@@ -66,6 +71,7 @@ const service = await createService({
   module: AppModule.register({
     database,
     partnerDatabase,
+    opsDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
   }),
 });
@@ -84,6 +90,6 @@ process.once('SIGTERM', () => {
       imageProcessing.close();
       seatmapParser.close();
       void queueRedis?.close();
-      return Promise.all([database.close(), partnerDatabase.close()]);
+      return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close()]);
     });
 });

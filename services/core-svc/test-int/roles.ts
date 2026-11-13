@@ -3,7 +3,7 @@ import { createDatabase, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { PostgresContainer } from './postgres.js';
 
-export async function loginFor(admin: Database, pg: PostgresContainer, user: string, role: 'core_app' | 'core_partner', max: number): Promise<Database> {
+export async function loginFor(admin: Database, pg: PostgresContainer, user: string, role: 'core_app' | 'core_partner' | 'core_ops' | 'core_maintenance', max: number): Promise<Database> {
   const password = 'peaket-test';
   await admin.db.execute(sql.raw(`CREATE USER ${user} PASSWORD '${password}' NOBYPASSRLS NOSUPERUSER; GRANT ${role} TO ${user}`));
   return createDatabase({ url: pg.urlFor(user, password), applicationName: `core-svc-${role}`, max });

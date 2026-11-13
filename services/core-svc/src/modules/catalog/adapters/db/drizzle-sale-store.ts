@@ -13,6 +13,7 @@ import type { EventStatus, SaleReview } from '../../domain/production.js';
 import type { PendingEvent } from '../../domain/registration.js';
 import { destroyTime, listEventIds, MEMBER_CHUNK } from '../../domain/sale-eligibility.js';
 import type { EventEditable, ListWrite, MaintenanceList, PendingDrop, SaleEventRow, SaleMaintenanceStore, SaleOwnerView, SaleState, SaleStore, SaleTx, StoredList } from '../../domain/sale-ports.js';
+import { applyApproval, type SaleApprovalInput } from '../../domain/sale-approval.js';
 import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
@@ -64,6 +65,7 @@ const eventRow = (e: typeof event.$inferSelect): SaleEventRow => ({
   eventId: e.id,
   status: e.status as EventStatus,
   version: e.version,
+  venueId: e.venueId,
   openAt: e.openAt,
   lobbyMinutes: e.lobbyMinutes,
   entryOpensAt: e.entryOpensAt,
@@ -73,6 +75,7 @@ const eventRow = (e: typeof event.$inferSelect): SaleEventRow => ({
   openBatch: e.openBatch,
   seatAssignment: e.seatAssignment as 'PICK' | 'AUTO',
   perPersonLimit: e.perPersonLimit,
+  ...(e.scale !== null ? { scale: e.scale as 'LARGE' | 'MEDIUM' | 'SMALL' } : {}),
 });
 
 /**
@@ -137,6 +140,12 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
 @Injectable()
 export class DrizzleSaleStore implements SaleStore {
   constructor(@Inject(PARTNER_DATABASE) private readonly db: Database) {}
+
+  async promoterOf(productionId: string): Promise<string | undefined> {
+    if (!UUID.test(productionId)) return undefined;
+    const [p] = await this.db.db.select({ promoterId: production.promoterId }).from(production).where(eq(production.id, productionId));
+    return p?.promoterId;
+  }
 
   async owner(productionId: string, tenantId: string): Promise<SaleOwnerView | undefined> {
     if (!UUID.test(productionId)) return undefined;
@@ -277,6 +286,66 @@ export class DrizzleSaleStore implements SaleStore {
         await tx.delete(saleEligibilityList).where(mineList(listId));
         const [d] = await tx.insert(saleEligibilityDrop).values({ productionId: p.id, promoterId: tenantId, listKey, copySeq: nextSeq, createdAt: now }).returning({ seq: saleEligibilityDrop.copySeq });
         return Number(d!.seq);
+      },
+      approve: async (input: SaleApprovalInput) => {
+        const before = await readState(tx, p, tenantId);
+        const after = applyApproval(before, input);
+        const existing = new Set(before.events.map((e) => e.eventId));
+        // applyApproval이 만든 공개본을 그대로 쓴다(변경분을 저장소에서 다시 적용하지 않는다). 그래야 pending 규칙·회차 고침·규모가 한 곳에서만 정해진다
+        for (const e of after.events) {
+          if (existing.has(e.eventId)) {
+            await tx
+              .update(event)
+              .set({
+                openAt: e.openAt,
+                entryOpensAt: e.entryOpensAt,
+                startsAt: e.startsAt,
+                endsAt: e.endsAt,
+                lobbyMinutes: e.lobbyMinutes,
+                lobbyShuffle: e.lobbyShuffle,
+                openBatch: e.openBatch,
+                seatAssignment: e.seatAssignment,
+                perPersonLimit: e.perPersonLimit,
+                version: e.version,
+                ...(e.scale !== undefined ? { scale: e.scale } : {}),
+              })
+              .where(and(eq(event.id, e.eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
+          } else {
+            await tx.insert(event).values({
+              id: e.eventId,
+              productionId: p.id,
+              promoterId: tenantId,
+              venueId: e.venueId ?? null,
+              openAt: e.openAt,
+              entryOpensAt: e.entryOpensAt ?? null,
+              startsAt: e.startsAt,
+              endsAt: e.endsAt,
+              status: 'SCHEDULED',
+              lobbyMinutes: e.lobbyMinutes,
+              lobbyShuffle: e.lobbyShuffle,
+              openBatch: e.openBatch,
+              seatAssignment: e.seatAssignment,
+              perPersonLimit: e.perPersonLimit,
+              version: e.version,
+              ...(e.scale !== undefined ? { scale: e.scale } : {}),
+            });
+          }
+        }
+        await tx
+          .update(production)
+          .set({
+            saleReview: 'APPROVED',
+            saleApprovedAt: input.now,
+            salePolicy: after.production.rules,
+            pendingRevision: null,
+            ...(input.placeId !== undefined ? { placeId: input.placeId, requestedPlace: null } : {}),
+            ...(input.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: input.accessibleSeatingCheck } : {}),
+          })
+          .where(mineProduction);
+        return after;
+      },
+      reject: async (_reason, _now) => {
+        await tx.update(production).set({ saleReview: 'REJECTED' }).where(mineProduction);
       },
     };
   }

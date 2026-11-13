@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 79 | 13 | 15 | 2 | 0 | 21 | 1 | 0 | 0 | 131 |
+| A | 80 | 13 | 15 | 2 | 0 | 21 | 1 | 0 | 0 | 132 |
 | B | 85 | 30 | 0 | 0 | 0 | 4 | 0 | 15 | 22 | 156 |
-| 합계 | 164 | 43 | 15 | 2 | 0 | 25 | 1 | 15 | 22 | 287 |
+| 합계 | 165 | 43 | 15 | 2 | 0 | 25 | 1 | 15 | 22 | 288 |
 
 ## docs/features/seat-hold.md
 
@@ -151,6 +151,7 @@
 | S-T40 | ⑥ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑥ 24cm 짝과 이웃 구역 짝은 두 좌석이 모두 `SEAT_OVERLAP`에 들고 25cm 짝은 들지 않는다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
 | S-T40 | ⑦ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑦ 밖 좌석만 `SEAT_OUTSIDE_SHAPE`이고 변 위·안 좌석은 아니다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
 | S-T40 | ⑧ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑧가져오기 결과와 저장 응답의 `warnings`가 같은 코드·좌석이고 저장은 200으로 판이 오른다. 좌석 ID는 경고마다 100개까지이고… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-templates.int.test.ts, services/core-svc/test/seatmap-warnings.http.test.ts |
+| S-T41 | — | 판매 설정 사본과 승인 실행(판매 승인 LCH-080, §4 '판매… | 승인된 공연의 회차마다 `salePolicy`·`eligGates`(PRESALE 창)·`eligLists`가 실리고, 취소 회차는 빠지며, 승인 전 공연은… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-approval.int.test.ts, services/core-svc/test/event-sale-config.test.ts 외 1곳 |
 
 ## docs/security/asvs/seat-hold.md
 

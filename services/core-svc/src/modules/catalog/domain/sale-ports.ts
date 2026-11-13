@@ -3,6 +3,7 @@
 // 쓰기는 공연 행을 FOR NO KEY UPDATE로 잡은 트랜잭션(등록·이미지·좌석맵과 같은 잠금) 안에서 한다.
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { EventStatus, SaleReview } from './production.js';
+import type { SaleApprovalInput } from './sale-approval.js';
 import type { PendingEvent } from './registration.js';
 
 /** 회차 고치기로 바꿀 수 있는 칸(openapi PartnerEventUpdate) */
@@ -23,6 +24,10 @@ export interface SaleEventRow extends EventEditable {
   eventId: string;
   status: EventStatus;
   version: number;
+  /** 공연의 배치본(승인 전에는 없을 수 있다) */
+  venueId?: string | null;
+  /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 없다 */
+  scale?: 'LARGE' | 'MEDIUM' | 'SMALL';
 }
 
 /** 저장한 명단 정보(구성원은 싣지 않는다) */
@@ -99,6 +104,10 @@ export interface SaleTx {
   putList(row: ListWrite, accountIds: readonly string[]): Promise<number>;
   /** 구성원(5,000행씩)과 명단 행을 지우고 지운 기록(새 사본 판)을 남긴다. 그 판을 돌려준다(리뷰 S1) */
   deleteList(listId: string, listKey: string, now: Date): Promise<number>;
+  /** 판매 승인: pending_revision을 공개본으로 옮기고 규모·결제사 칸을 정한다(판매 승인 LCH-080) */
+  approve(input: SaleApprovalInput): Promise<SaleState>;
+  /** 판매 승인 반려: 사유를 남기고 상태만 바꾼다. pending_revision은 다음 수정·재요청에 남긴다 */
+  reject(reason: string, now: Date): Promise<void>;
 }
 
 /** 잠금 밖에서 먼저 보는 공연(소속·승인 이력·판매 중지). 잠금 안에서 다시 본다 */
@@ -108,6 +117,8 @@ export interface SaleOwnerView {
 }
 
 export interface SaleStore {
+  /** 공연의 판매자(테넌트). 관제 판매 승인은 요청에 테넌트가 없어 이 값으로 잠금 범위를 정한다. 없으면 undefined */
+  promoterOf(productionId: string): Promise<string | undefined>;
   /** 그 테넌트의 공연이면 보기, 아니면 undefined(없는 공연과 남의 공연은 같다) */
   owner(productionId: string, tenantId: string): Promise<SaleOwnerView | undefined>;
   /** 잠금 없이 읽는 판매 상태(읽기 전용 REPEATABLE READ 한 번). 없거나 남의 것이면 undefined */
@@ -169,3 +180,5 @@ export interface SaleMaintenanceStore {
 }
 
 export const SALE_STORE = Symbol('SALE_STORE');
+/** 관제 판매 승인용 저장소(모든 테넌트, core DB). 파트너 경로의 SALE_STORE와 나눈다 */
+export const OPS_SALE_STORE = Symbol('OPS_SALE_STORE');

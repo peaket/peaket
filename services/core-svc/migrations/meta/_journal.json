@@ -71,6 +71,27 @@
       "when": 1794480000000,
       "tag": "0009_search",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0010_event_sale_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794600001000,
+      "tag": "0011_sale_approval_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794600002000,
+      "tag": "0012_ops_role",
+      "breakpoints": true
     }
   ]
 }

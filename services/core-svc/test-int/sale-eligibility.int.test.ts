@@ -38,6 +38,7 @@ let pg: PostgresContainer;
 let admin: Database;
 let appDb: Database;
 let partnerDb: Database;
+let opsDb: Database;
 let svc: Svc;
 let directory: GrpcMemberCodeDirectory;
 const logs = logSink();
@@ -88,6 +89,7 @@ beforeAll(async () => {
   await ensureOutboxPartitions(admin, systemClock);
   appDb = await loginFor(admin, pg, 'core_app_login', 'core_app', 4);
   partnerDb = await loginFor(admin, pg, 'core_partner_login', 'core_partner', 6);
+  opsDb = await loginFor(admin, pg, 'core_ops_login', 'core_ops', 4);
   await admin.db.insert(promoter).values([
     { id: A, legalName: '(주)에이' },
     { id: B, legalName: '(주)비' },
@@ -110,6 +112,7 @@ afterAll(async () => {
   identityServer?.forceShutdown();
   await appDb?.close();
   await partnerDb?.close();
+  await opsDb?.close();
   await admin?.close();
   pg?.stop();
 });
@@ -669,6 +672,7 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
       PEAKET_MANAGEMENT_PORT: String(mgmt),
       PEAKET_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test'),
       PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
+      PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
       PEAKET_IDENTITY_GRPC_URL: identityAddress,
       PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',
       PEAKET_SEATMAP_GRPC_URL: '127.0.0.1:1',

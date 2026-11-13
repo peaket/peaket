@@ -1,7 +1,7 @@
 // 모듈 조립 파일: 포트에 어댑터를 묶는다(층 규칙의 밖. 모든 층을 가져온다).
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, type Provider, RequestMethod } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { type Clock, type Database, LogPseudonymizer, CLOCK } from '@peaket/platform';
+import { type Clock, type Database, DATABASE, LogPseudonymizer, CLOCK } from '@peaket/platform';
 import { LogCdnInvalidation, MemoryCdnInvalidation, unavailableImageProcessing, unavailableSeatmapParser } from './adapters/cdn-invalidation.js';
 import { DrizzleCatalogRepository, PARTNER_DATABASE } from './adapters/db/drizzle-catalog-repository.js';
 import { DrizzleProductionMedia } from './adapters/db/drizzle-production-media.js';
@@ -27,6 +27,14 @@ import { ProductionImages } from './application/production-images.js';
 import { SaleEligibilityLists } from './application/sale-eligibility-lists.js';
 import { SalePolicies } from './application/sale-policy.js';
 import { SearchCatalog } from './application/search.js';
+import { ApproveSaleReview } from './application/approve-sale-review.js';
+import { PublishSaleConfigs } from './application/publish-sale-configs.js';
+import { RejectSaleReview } from './application/reject-sale-review.js';
+import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
+import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_STORE } from './domain/sale-config-ports.js';
+import { DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
+import { MemorySaleConfigStore } from './adapters/memory-sale-config-store.js';
+import { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 import { SeatmapLayouts } from './application/seatmap-layouts.js';
 import { SEATMAP_TEMPLATES, SeatmapTemplates } from './application/seatmap-templates.js';
 import { UpdateProductionEvent } from './application/update-production-event.js';
@@ -48,7 +56,7 @@ import { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.j
 import { CATALOG_REPOSITORY } from './domain/ports.js';
 import { SEARCH_INDEX } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
-import { SALE_STORE } from './domain/sale-ports.js';
+import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
 import { PartnerDirectoryController } from './inbound/partner-directory.controller.js';
@@ -145,9 +153,9 @@ export class CatalogModule implements NestModule {
    * 저장소를 고른다. database면 DATABASE(databaseModule)가 함께 있어야 하고, 파트너 경로는 partnerDatabase로 접속한다(ADR-0241). memory는 시험이 채울 저장소를 넘길 수 있다.
    * media는 database면 꼭 넘기고, memory면 시험이 필요한 것만 넘긴다
    */
-  static register(o: { storage: 'database'; partnerDatabase: Database; media: MediaWiring } | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring> }): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController];
+  static register(o: { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring } | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring> }): DynamicModule {
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -159,6 +167,10 @@ export class CatalogModule implements NestModule {
           { provide: PARTNER_PRODUCTION_MEDIA, useClass: DrizzleProductionMedia },
           { provide: SEATMAP_LAYOUT_STORE, useClass: DrizzleSeatmapLayoutStore },
           { provide: SALE_STORE, useClass: DrizzleSaleStore },
+          { provide: OPS_DATABASE, useFactory: (db: Database) => o.opsDatabase ?? db, inject: [DATABASE] },
+          { provide: OPS_SALE_STORE, useFactory: (db: Database) => new DrizzleSaleStore(db), inject: [OPS_DATABASE] },
+          { provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore },
+          { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
           ...mediaProviders(o.media, false),
         ],
@@ -174,6 +186,9 @@ export class CatalogModule implements NestModule {
         { provide: PARTNER_PRODUCTION_MEDIA, useValue: new MemoryProductionMedia(repo) },
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
         { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },
+        { provide: OPS_SALE_STORE, useExisting: SALE_STORE },
+        { provide: SALE_CONFIG_STORE, useValue: new MemorySaleConfigStore() },
+        { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         ...mediaProviders(o.media ?? {}, true),
       ],

@@ -18,6 +18,14 @@ export class FakeIdentity implements AdminAuthzPort {
     this.answers.set(`${accountId}/${sessionId}`, { valid: true, role, tenantId });
     return { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': 'partner', 'x-user-scope': '' };
   }
+
+  /** 관제 계정 하나를 만들고 그 신원 머리를 돌려준다(판매 승인 LCH-080) */
+  ops(role: 'operator' | 'commander' | 'viewer' = 'operator'): Record<string, string> {
+    const accountId = randomUUID();
+    const sessionId = randomUUID();
+    this.answers.set(`${accountId}/${sessionId}`, { valid: true, role });
+    return { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': 'ops', 'x-user-scope': '' };
+  }
 }
 
 export const fan = (accountId: string = randomUUID()): Record<string, string> => ({ 'x-user-id': accountId, 'x-session-id': randomUUID(), 'x-user-aud': 'fan', 'x-user-scope': 'openid' });

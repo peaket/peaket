@@ -1,12 +1,17 @@
 // 메모리 판매 정책·회차 고치기·판매 자격 명단 저장소(시험·로컬). 메모리 카탈로그의 지도를 함께 쓴다.
 // 공연마다 한 줄로 세워 잠금을 흉내 내고, 쓰기는 fn이 끝난 뒤에만 반영한다(던지면 버린다, DB 트랜잭션과 같게 답한다). 운영은 Drizzle 저장소다.
 import type { EventEditable, ListWrite, SaleEventRow, SaleOwnerView, SaleState, SaleStore, SaleTx } from '../domain/sale-ports.js';
+import { applyApproval, type SaleApprovalInput } from '../domain/sale-approval.js';
 import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
 
 export class MemorySaleStore implements SaleStore {
   readonly #locks = new Map<string, Promise<unknown>>();
 
   constructor(private readonly repo: MemoryCatalogRepository) {}
+
+  async promoterOf(productionId: string): Promise<string | undefined> {
+    return this.repo.productions.get(productionId)?.promoterId;
+  }
 
   async owner(productionId: string, tenantId: string): Promise<SaleOwnerView | undefined> {
     const p = this.repo.productions.get(productionId);
@@ -89,6 +94,47 @@ export class MemorySaleStore implements SaleStore {
             this.repo.saleDrops.push({ productionId, promoterId: tenantId, listKey, copySeq, createdAt: now });
           });
           return copySeq;
+        },
+        approve: async (input: SaleApprovalInput) => {
+          const before = this.#state(productionId);
+          const after = applyApproval(before, input);
+          writes.push(() => {
+            const p = this.repo.productions.get(productionId)!;
+            this.repo.productions.set(productionId, {
+              ...p,
+              saleReview: 'APPROVED',
+              saleApprovedAt: input.now,
+              ...(input.placeId !== undefined ? { placeId: input.placeId } : {}),
+            });
+            const policy = this.repo.salePolicies.get(productionId);
+            if (policy) this.repo.salePolicies.set(productionId, { rules: policy.pending ?? policy.rules, version: policy.version });
+            for (const e of after.events) {
+              if (!this.repo.events.has(e.eventId)) {
+                this.repo.events.set(e.eventId, { id: e.eventId, productionId, venueId: null, openAt: e.openAt, startsAt: e.startsAt, status: 'SCHEDULED' });
+              }
+              this.#apply(e.eventId, {
+                openAt: e.openAt,
+                startsAt: e.startsAt,
+                endsAt: e.endsAt,
+                entryOpensAt: e.entryOpensAt,
+                lobbyMinutes: e.lobbyMinutes,
+                lobbyShuffle: e.lobbyShuffle,
+                openBatch: e.openBatch,
+                seatAssignment: e.seatAssignment,
+                perPersonLimit: e.perPersonLimit,
+              });
+              this.repo.eventVersions.set(e.eventId, e.version);
+            }
+            this.repo.eventChanges.delete(productionId);
+            this.repo.pending.delete(productionId);
+          });
+          return after;
+        },
+        reject: async (_reason, _now) => {
+          writes.push(() => {
+            const p = this.repo.productions.get(productionId)!;
+            this.repo.productions.set(productionId, { ...p, saleReview: 'REJECTED' });
+          });
         },
       };
       const value = await fn(tx);

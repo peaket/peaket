@@ -65,6 +65,8 @@ export const production = pgTable(
     salePolicy: jsonb('sale_policy'),
     /** 규칙 고치기 If-Match의 판(1부터, 저장마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 2) */
     salePolicyVersion: integer('sale_policy_version').notNull().default(1),
+    /** 판매 승인 때 운영자가 확인한 휠체어석 수·위치(FR-023, LCH-090). 승인 전에는 false */
+    accessibleSeatingCheck: boolean('accessible_seating_check').notNull().default(false),
     /** 새 공연장 요청 { name, address } */
     requestedPlace: jsonb('requested_place'),
     /** 새 아티스트 이름 요청 [{ name, sortOrder }] */
@@ -279,6 +281,8 @@ export const event = pgTable(
     openBatch: boolean('open_batch').notNull().default(true),
     seatAssignment: text('seat_assignment').notNull().default('PICK'),
     perPersonLimit: integer('per_person_limit').notNull().default(4),
+    /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 비어 있다 */
+    scale: text('scale'),
     /** 회차 고치기 If-Match의 판(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 4) */
     version: integer('version').notNull().default(1),
   },
@@ -291,6 +295,7 @@ export const event = pgTable(
     // 정렬 설정 두 값을 둘 다 끈 조합은 받지 않는다(POL-003, ADR-0118)
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),
     check('event_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
+    check('event_scale_check', sql`${t.scale} is null or ${t.scale} in ('LARGE', 'MEDIUM', 'SMALL')`),
     check('event_per_person_limit_check', sql`${t.perPersonLimit} between 1 and 10`),
     check('event_version_check', sql`${t.version} >= 1`),
     index('event_production_idx').on(t.productionId),
@@ -452,3 +457,23 @@ export const heldEvent = heldEventTable();
 
 /** 정비 잡의 통계 스냅샷(ADR-0086 결정 7) */
 export const statSnapshot = statSnapshotTable();
+
+// 회차 판매 설정 사본(판매 승인 LCH-080, docs/data.md `q:{event:E}:cfg`). queue-svc는 대기열 Redis를,
+// purchase-svc(BAT-051)는 이 표를 읽어 홀드 때 판매 정책을 평가한다. payload는 EventSaleConfig JSON이다.
+export const eventSaleConfig = pgTable(
+  'event_sale_config',
+  {
+    eventId: uuid('event_id')
+      .primaryKey()
+      .references(() => event.id, { onDelete: 'cascade' }),
+    productionId: uuid('production_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    rev: integer('rev').notNull(),
+    payload: jsonb('payload').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    check('event_sale_config_rev_check', sql`${t.rev} >= 1`),
+    index('event_sale_config_production_idx').on(t.productionId),
+  ],
+);
