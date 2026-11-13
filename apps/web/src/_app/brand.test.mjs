@@ -6,15 +6,17 @@ import { test } from 'node:test';
 const root = new URL('../../../../', import.meta.url);
 const at = (p) => new URL(p, root);
 const text = (p) => readFileSync(at(p), 'utf8');
+const SYMBOL_SHAPE = 'M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z';
 
-test('BAS-200 심벌 도형은 워드마크 CSS와 같은 티켓 절취선·봉우리다', () => {
+test('BAS-200 심벌 도형은 워드마크 CSS·파비콘·스캐너 아이콘과 같다', () => {
   const symbol = text('packages/ds/src/assets/brand/peaket-symbol.svg');
   const kit = text('packages/ds/src/styles/kit.css');
-  const shape = 'M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z';
-  assert.ok(symbol.includes(shape));
-  assert.ok(kit.includes(encodeURIComponent(shape).replaceAll('%20', ' ')) || kit.includes(shape));
+  assert.ok(symbol.includes(SYMBOL_SHAPE));
+  assert.ok(kit.includes(encodeURIComponent(SYMBOL_SHAPE).replaceAll('%20', ' ')) || kit.includes(SYMBOL_SHAPE));
   assert.ok(symbol.includes('#4338CA'), '기본 심벌은 인디고');
   assert.ok(text('packages/ds/src/assets/brand/peaket-symbol-neg.svg').includes('fill="#fff"'), '반전 심벌이 있다');
+  // 앱마다 복사한 파비콘이 원본과 갈라지지 않게 같은 도형인지 본다
+  for (const p of ['apps/web/app/icon.svg', 'apps/scanner/public/icon.svg']) assert.ok(text(p).includes(SYMBOL_SHAPE), p);
 });
 
 test('BAS-200 파비콘·애플 터치 아이콘·PWA 아이콘이 있다', () => {
@@ -48,12 +50,12 @@ test('BAS-200 소비자 웹 설치 파일은 이름·시작 주소·192/512·마
 });
 
 test('BAS-200 스캐너 PWA도 같은 심벌의 아이콘과 설치 파일을 싣는다', () => {
-  for (const p of ['apps/scanner/public/icon.svg', 'apps/scanner/public/icon-192.png', 'apps/scanner/public/icon-512.png', 'apps/scanner/public/manifest.webmanifest']) {
+  for (const p of ['apps/scanner/public/icon.svg', 'apps/scanner/public/icon-192.png', 'apps/scanner/public/icon-512.png', 'apps/scanner/public/maskable-512.png', 'apps/scanner/public/manifest.webmanifest']) {
     assert.ok(existsSync(at(p)), p);
   }
   const m = JSON.parse(text('apps/scanner/public/manifest.webmanifest'));
   assert.equal(m.short_name, 'PEAKET 스캐너');
-  assert.deepEqual(m.icons.map((i) => i.sizes), ['192x192', '512x512']);
+  assert.deepEqual(m.icons.map((i) => [i.sizes, i.purpose]), [['192x192', 'any'], ['512x512', 'any'], ['512x512', 'maskable']]);
   const html = text('apps/scanner/index.html');
   for (const needle of ['rel="manifest" href="/manifest.webmanifest"', 'href="/icon.svg"', 'href="/icon-192.png"', 'name="theme-color" content="#4338CA"']) assert.ok(html.includes(needle), needle);
 });

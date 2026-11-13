@@ -2,6 +2,7 @@
 // 찾아 읽으면 웹 앱에만 있는 @tailwindcss/postcss를 찾지 못해 빌드가 실패한다(CI 실행 42089422611). 대기실 CSS는 Tailwind를 쓰지 않으므로 PostCSS 설정을 비워 찾지 않게 한다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import config, { shellForPath } from '../vite.config.ts';
 
 const built = () => {
@@ -15,6 +16,14 @@ test('대기실 빌드는 폴더 위쪽의 PostCSS 설정을 찾아 읽지 않�
 
 test('HOT-370 로케일 셸 넷을 모두 빌드 입력에 넣는다', () => {
   assert.deepEqual(Object.keys(built().build?.rolldownOptions?.input ?? {}).sort(), ['shell.en', 'shell.ja', 'shell.ko', 'shell.zh']);
+});
+
+test('HOT-370 로케일 셸 파일의 lang·제목이 로케일과 맞는다', () => {
+  for (const [locale, title] of [['ko', '대기실'], ['en', 'Waiting room'], ['ja', '待機室'], ['zh', '等候室']]) {
+    const html = readFileSync(new URL(`../shell.${locale}.html`, import.meta.url), 'utf8');
+    assert.match(html, new RegExp(`<html lang="${locale}">`), locale);
+    assert.ok(html.includes(`<title>${title} · PEAKET</title>`), locale);
+  }
 });
 
 test('HOT-370 대기실 경로를 로케일 셸로 바꾼다', () => {

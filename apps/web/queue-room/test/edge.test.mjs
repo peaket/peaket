@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { SHELLS } from '../vite.config.ts';
 
 const code = readFileSync(new URL('../edge/queue-room-viewer-request.js', import.meta.url), 'utf8');
 const { handler } = new Function(`${code}; return { handler };`)();
@@ -17,6 +18,13 @@ test('HOT-370 대기실 경로를 로케일 셸로 바꾼다', () => {
   assert.equal(call('/zh/queue/evt-1'), '/_q/shell.zh.html');
   assert.equal(call('/shop/md-lumen/queue'), '/_q/shell.ko.html');
   assert.equal(call('/shop/md-lumen/queue/'), '/_q/shell.ko.html');
+});
+
+test('HOT-370 edge 함수의 로케일 셸 이름이 빌드 설정과 같다', () => {
+  for (const locale of ['ko', 'en', 'ja', 'zh']) {
+    const path = locale === 'ko' ? '/queue/e1' : `/${locale}/queue/e1`;
+    assert.equal(call(path), `/_q/${SHELLS[locale]}`, locale);
+  }
 });
 
 test('HOT-370 대기실 경로가 아니면 URI를 건드리지 않는다', () => {
