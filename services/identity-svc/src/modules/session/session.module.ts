@@ -40,7 +40,11 @@ import { CompleteSignup } from './application/complete-signup.js';
 import { CheckNickname } from './application/check-nickname.js';
 import { CancelSignup } from './application/cancel-signup.js';
 import { MemoryNicknameCheckLimits } from './adapters/memory-nickname-check-limits.js';
-import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, noStaffAssignments, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
+import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
+import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from './domain/staff.js';
+import { CheckScannerSession } from './application/check-scanner-session.js';
+import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
+import { MemoryStaffAssignmentStore } from './adapters/memory-staff-assignment-store.js';
 
 export interface SessionModuleOptions {
   /** 닉네임 확인의 요청 수 저장소(세션·캐시 Redis id:nick, ADR-0235). 없으면 메모리(로컬·시험) */
@@ -84,7 +88,9 @@ export class SessionModule {
         CheckNickname,
         CancelSignup,
         o.nicknameCheckLimits ? { provide: NICKNAME_CHECK_LIMITS, useValue: o.nicknameCheckLimits } : { provide: NICKNAME_CHECK_LIMITS, useFactory: (clock: Clock) => new MemoryNicknameCheckLimits(clock), inject: [CLOCK] },
-        { provide: STAFF_ASSIGNMENTS, useValue: o.staffAssignments ?? noStaffAssignments },
+        o.storage === 'database' ? { provide: STAFF_ASSIGNMENT_STORE, useClass: DrizzleStaffAssignmentStore } : { provide: STAFF_ASSIGNMENT_STORE, useValue: new MemoryStaffAssignmentStore() },
+        { provide: STAFF_ASSIGNMENTS, useFactory: (store: StaffAssignmentStore) => o.staffAssignments ?? store, inject: [STAFF_ASSIGNMENT_STORE] },
+        CheckScannerSession,
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,
@@ -123,7 +129,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, CheckScannerSession, ACCOUNT_CLOSURE],
     };
   }
 }

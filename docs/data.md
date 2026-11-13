@@ -1362,6 +1362,7 @@ erDiagram
         timestamptz cert_expires_at "MTLS_CERT일 때만"
         uuid enrolled_by "operator"
         timestamptz enrolled_at
+        timestamptz last_seen_at "마지막 스캐너 요청 시각(목록 표시용, 선택)"
         timestamptz revoked_at
         text revoke_reason
     }

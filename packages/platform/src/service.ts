@@ -7,7 +7,8 @@ import { type DynamicModule, Global, type LogLevel, Module, type Type } from '@n
 import { APP_GUARD, DiscoveryModule, NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { AUTH_STATE, AuthGuard, AuthState, RolesCheck, type AdminAuthzPort } from './auth.js';
+import { AUTH_STATE, AuthGuard, AuthState, RolesCheck, ScannerGuard, type AdminAuthzPort } from './auth.js';
+import { ScannerAuthState, type ScannerAuthWiring } from './scanner-auth.js';
 import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js';
 import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, loadPlatformConfig } from './config.js';
@@ -37,7 +38,7 @@ export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock
   @Global()
   @Module({
     imports: [DiscoveryModule],
-    providers: [...values, { provide: APP_GUARD, useClass: AuthGuard }, RolesCheck],
+    providers: [...values, { provide: APP_GUARD, useClass: AuthGuard }, { provide: APP_GUARD, useClass: ScannerGuard }, RolesCheck],
     exports: values.map((p) => p.provide),
   })
   class PlatformCoreModule {}
@@ -63,6 +64,8 @@ export interface CreateServiceOptions {
   adminAuthz?: AdminAuthzPort;
   /** 구매 세션 포트(purchase-svc). @PurchaseSigned()를 단 처리기가 있으면 꼭 있어야 한다(ADR-0050 결정 8) */
   purchaseSessions?: PurchaseSessionPort;
+  /** 스캐너 기기 증명·세션 판정 포트(GAT-170). @ScannerAuth()를 단 처리기가 있으면 꼭 있어야 한다 */
+  scanner?: ScannerAuthWiring;
   /** 앱 포트가 요청 하나(머리·본문)를 다 받는 시한(ms). 기본은 Fastify 기본(시한 없음)이다. 서버 전체에 걸리므로 그 포트의 경로를 모두 보고 정한다 */
   requestTimeoutMs?: number;
   /** 핫패스 구간 진단(BAT-028). 서비스가 만든 것을 넘기면 인증·처리기·문제 변환·로그·응답 구간을 잰다 */
@@ -112,6 +115,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   const clock = o.clock ?? systemClock;
   const metrics = new PlatformMetrics(o.name);
   const rejections = purchaseRejections(metrics.registry);
+  const scanner = o.scanner ? new ScannerAuthState(o.scanner, clock) : undefined;
   const auth = new AuthState(
     clock,
     o.adminAuthz,
@@ -121,6 +125,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
       onRejected: (reason) => rejections.inc({ service: o.name, reason }),
     },
     o.hotPath,
+    scanner,
   );
   const logger = createPlatformLogger({
     service: o.name,

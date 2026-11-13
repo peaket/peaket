@@ -10,6 +10,7 @@ import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers,
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
+  CheckScannerSession,
   CreateSession,
   EndSession,
   GetLinkProposal,
@@ -18,6 +19,7 @@ import {
   GetInvestigationRefs,
   GetVerificationStatus,
   investigationRefHandlers,
+  scannerSessionCheckHandlers,
   InvRefKeyRing,
   phoneContactRefs,
   deviceRefsOf,
@@ -261,6 +263,11 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().ReverificationCheckService.service,
       handlers: reverificationCheckHandlers({ check: service.app.get(CheckReverification) }, (method, err) => service.logger.error({ err, method }, 'ReverificationCheckService 처리 실패')),
+    },
+    // 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, ADR-0051 결정 4, GAT-170)
+    {
+      definition: identityPackage().ScannerSessionCheckService.service,
+      handlers: scannerSessionCheckHandlers({ check: service.app.get(CheckScannerSession) }, (method, err) => service.logger.error({ err, method }, 'ScannerSessionCheckService 처리 실패')),
     },
   ],
 });

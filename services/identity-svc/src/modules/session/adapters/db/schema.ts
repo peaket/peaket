@@ -236,3 +236,62 @@ export const accountContactRef = pgTable(
   },
   (t) => [primaryKey({ columns: [t.accountId, t.kind] }), check('account_contact_ref_kind_check', sql`${t.kind} in ('PHONE', 'EMAIL')`)],
 );
+
+// 현장 스태프 배정(docs/data.md staff_assignment, offline-gate §6.1, BUILD_ORDER GAT-210·GAT-170).
+// 초대 메일 주소와 토큰 해시는 수락·만료·거절 때 지운다(data-classification '현장 스태프 초대 이메일').
+export const staffAssignment = pgTable(
+  'staff_assignment',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').references(() => account.id),
+    eventId: uuid('event_id').notNull(),
+    role: text('role').notNull(),
+    inviteEmail: text('invite_email'),
+    inviteTokenHash: bytea('invite_token_hash'),
+    inviteExpiresAt: at('invite_expires_at').notNull(),
+    // 초대한 파트너 관리 계정(admin_account). 관리 계정 표는 admin 모듈에 있어 외래키를 두지 않는다
+    invitedBy: uuid('invited_by').notNull(),
+    validFrom: at('valid_from').notNull(),
+    validUntil: at('valid_until').notNull(),
+    status: text('status').notNull(),
+    acceptedAt: at('accepted_at'),
+    consentVersion: text('consent_version'),
+  },
+  (t) => [
+    unique('staff_assignment_event_account_key').on(t.eventId, t.accountId),
+    index('staff_assignment_account_status_idx').on(t.accountId, t.status),
+    index('staff_assignment_event_status_idx').on(t.eventId, t.status),
+    index('staff_assignment_invite_token_idx').on(t.inviteTokenHash).where(sql`${t.inviteTokenHash} is not null`),
+    check('staff_assignment_role_check', sql`${t.role} in ('gate_staff', 'gate_lead')`),
+    check('staff_assignment_status_check', sql`${t.status} in ('INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED')`),
+    check('staff_assignment_window_check', sql`${t.validFrom} <= ${t.validUntil}`),
+    check('staff_assignment_consent_version_check', sql`${t.consentVersion} is null or char_length(${t.consentVersion}) between 1 and 32`),
+  ],
+);
+
+// 스캐너 세션(docs/data.md scanner_session, identity §6.1 '스캐너 세션 확인', BUILD_ORDER GAT-170·GAT-220).
+// 기기 원장(scanner_device)은 ticket 데이터라 외래키 없이 기기 ID만 둔다.
+export const scannerSession = pgTable(
+  'scanner_session',
+  {
+    id: uuid('id').primaryKey(),
+    staffAssignmentId: uuid('staff_assignment_id')
+      .notNull()
+      .references(() => staffAssignment.id),
+    scannerDeviceId: uuid('scanner_device_id').notNull(),
+    // 승인한 휴대폰 세션(identity session). 세션이 지워져도 스캐너 세션의 감사 값은 남긴다
+    approvedBySession: uuid('approved_by_session'),
+    role: text('role').notNull(),
+    proxy: boolean('proxy').notNull().default(false),
+    approvedAt: at('approved_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+    lastSeenAt: at('last_seen_at'),
+    terminatedAt: at('terminated_at'),
+  },
+  (t) => [
+    index('scanner_session_assignment_idx').on(t.staffAssignmentId),
+    index('scanner_session_device_active_idx').on(t.scannerDeviceId).where(sql`${t.terminatedAt} is null`),
+    check('scanner_session_role_check', sql`${t.role} in ('gate_staff', 'gate_lead')`),
+    check('scanner_session_proxy_role_check', sql`not ${t.proxy} or ${t.role} = 'gate_staff'`),
+  ],
+);

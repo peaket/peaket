@@ -38,8 +38,11 @@ export type ProblemType =
   | 'designation-exists'
   | 'designation-target-not-commander'
   | 'designation-target-not-eligible'
+  | 'device-revoked'
+  | 'device-unregistered'
   | 'duplicate-account'
   | 'duplicate-admission'
+  | 'enrollment-code-expired'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
   | 'event-schedule-invalid'
@@ -71,6 +74,8 @@ export type ProblemType =
   | 'image-type-unsupported'
   | 'inquiry-closed'
   | 'invalid-auto-condition'
+  | 'invalid-dpop-proof'
+  | 'invalid-enrollment-code'
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
@@ -185,6 +190,9 @@ export type ProblemType =
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
   | 'scale-change-closed'
+  | 'scanner-auth-unavailable'
+  | 'scanner-device-key-in-use'
+  | 'scanner-device-not-found'
   | 'seat-already-held'
   | 'seat-recently-released'
   | 'seat-store-unavailable'
@@ -255,8 +263,11 @@ export const PROBLEM_TYPES = {
   'designation-exists': { status: 409, title: "이미 같은 지정이 있습니다" },
   'designation-target-not-commander': { status: 422, title: "commander 계정에만 줄 수 있는 지정입니다" },
   'designation-target-not-eligible': { status: 422, title: "이 계정에는 줄 수 없는 지정입니다" },
+  'device-revoked': { status: 403, title: "폐기된 스캐너 기기입니다" },
+  'device-unregistered': { status: 403, title: "등록되지 않은 스캐너 기기입니다" },
   'duplicate-account': { status: 409, title: "이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요" },
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
+  'enrollment-code-expired': { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
@@ -288,6 +299,8 @@ export const PROBLEM_TYPES = {
   'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
   'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
+  'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
+  'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
@@ -402,6 +415,9 @@ export const PROBLEM_TYPES = {
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
+  'scanner-auth-unavailable': { status: 503, title: "스캐너 기기·세션을 확인하지 못했습니다" },
+  'scanner-device-key-in-use': { status: 409, title: "이미 다른 기기에 묶인 기기 키입니다" },
+  'scanner-device-not-found': { status: 404, title: "스캐너 기기를 찾을 수 없습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },
   'seat-store-unavailable': { status: 503, title: "좌석 정보를 잠시 쓸 수 없습니다" },

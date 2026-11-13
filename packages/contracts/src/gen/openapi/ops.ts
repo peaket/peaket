@@ -4037,6 +4037,9 @@ export const CreateOpsScannerDeviceBody = zod.object({
   "promoterId": zod.string()
 }).strict()
 
+export const createOpsScannerDeviceResponseEnrollmentCodeRegExp = new RegExp('^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$');
+
+
 export const CreateOpsScannerDeviceResponse = zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -4045,7 +4048,9 @@ export const CreateOpsScannerDeviceResponse = zod.object({
   "credentialType": zod.enum(['MTLS_CERT', 'DEVICE_KEY']).optional(),
   "certExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "lastSeenAt": zod.iso.datetime({"offset":true}).optional(),
-  "activeSessionNickname": zod.string().optional()
+  "activeSessionNickname": zod.string().optional(),
+  "enrollmentCode": zod.string().regex(createOpsScannerDeviceResponseEnrollmentCodeRegExp),
+  "enrollmentCodeExpiresAt": zod.iso.datetime({"offset":true})
 })
 
 /**

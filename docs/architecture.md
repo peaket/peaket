@@ -676,7 +676,7 @@ flowchart LR
 - 공연 당일 ticket-svc가 멈춰도 스캐너는 내려받은 목록으로 오프라인 판정을 이어 가고, 기록은 복구 뒤 올린다. 도쿄 보조 클러스터는 티켓 원장의 보존과 복구 기준점이고 당일 조회에는 쓰지 않는다(docs/features/offline-gate.md §9).
 - 그림을 처음 그릴 때 호출 계약이 정본에 없던 선이 둘 있었다. ticket-svc → identity-svc 스캐너 세션 확인(docs/features/offline-gate.md §6 흐름도)과 ops-svc → ticket-svc 승인된 양도 회수(docs/features/transfer-refund.md §4)다. 2026-10-30에 호출 계약 초안(`ScannerSessionCheckService/CheckScannerSession`, `TicketReclaimService/ReclaimTicket`)이 docs/api/proto/README.md §3에 생겼고, §3.2 통신 표에도 더했다(추천 적용 2026-10-30).
 - 2026-10-30에 identity-svc가 기기 승인 로그인 때 기기 키 지문으로 등록 기기와 상태를 찾는 선(`ScannerDeviceLookupService/GetScannerDeviceByCredential`, docs/features/identity.md §6.1)을 더했다. 기기 원장의 주인이 ticket-svc라 identity-svc가 직접 읽지 않는다(추천 적용 2026-10-30).
-- ticket-svc의 Redis 사용(등록 코드, DPoP `jti`)은 세션·캐시 클러스터의 `scanner:enroll:*`·`scanner:dpop:*` 키다(docs/data.md §3). §3.1 서비스 맵의 저장소 칸에도 적었다(추천 적용 2026-10-30).
+- ticket-svc의 Redis 사용(등록 코드, DPoP `jti`)은 세션·캐시 클러스터의 `scanner:enroll:*`·`scanner:dpop:*` 키다(docs/data.md §3). §3.1 서비스 맵의 저장소 칸에도 적었다(추천 적용 2026-10-30). ticket-svc는 `PEAKET_TICKET_REDIS_URL`로 그 Redis를, `PEAKET_IDENTITY_GRPC_URL`로 identity gRPC를 받는다. staging·prod에서 둘 가운데 하나라도 없으면 시작하지 않는다(2026-11-13 GAT-170 heavy gate).
 
 ## 4. API 게이트웨이: 클라이언트 유형별 분리 및 씬 게이트웨이 (ADR-0008)
 

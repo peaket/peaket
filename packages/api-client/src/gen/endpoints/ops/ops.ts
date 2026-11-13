@@ -203,6 +203,7 @@ import type {
   ResearchExportCreate,
   ReviewModeration,
   ScannerDevice,
+  ScannerDeviceCreated,
   SecurityIncident,
   SecurityIncidentCreate,
   SecurityIncidentPage,
@@ -12230,7 +12231,7 @@ export function useListOpsScannerDevices<TData = Awaited<ReturnType<typeof listO
 
 
 export type createOpsScannerDeviceResponse201 = {
-  data: ScannerDevice
+  data: ScannerDeviceCreated
   status: 201
 }
 

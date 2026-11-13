@@ -26,6 +26,7 @@ import type {
 import type {
   CreateScannerBoothAuthorizationBody,
   CreateScannerDeviceAuthorizationBody,
+  CreateScannerDeviceEnrollment201,
   CreateScannerDeviceEnrollmentBody,
   CreateScannerFlagResolutionBody,
   CreateScannerScan200,
@@ -41,6 +42,8 @@ import type {
   ScannerShift
 } from '../../model';
 
+
+export const getCreateScannerDeviceEnrollmentResponseMock = (overrideResponse: Partial<Extract<CreateScannerDeviceEnrollment201, object>> = {}): CreateScannerDeviceEnrollment201 => ({deviceId: faker.string.alpha({length: {min: 10, max: 20}}), ...overrideResponse})
 
 export const getCreateScannerDeviceAuthorizationResponseMock = (overrideResponse: Partial<Extract<DeviceAuthorization, object>> = {}): DeviceAuthorization => ({deviceCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), userCode: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$"), undefined]), verificationUriComplete: faker.helpers.arrayElement([faker.internet.url(), undefined]), expiresIn: faker.helpers.arrayElement([faker.number.int(), undefined]), interval: faker.helpers.arrayElement([faker.number.int(), undefined]), ...overrideResponse})
 
@@ -61,11 +64,13 @@ export const getGetScannerEventDevicesResponseMock = (overrideResponse: Partial<
 export const getListScannerEventFlagsResponseMock = (overrideResponse: Partial<Extract<GateFlagPage, object>> = {}): GateFlagPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({flagId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DUPLICATE','NO_EXIT','AFTER_CANCEL','OUT_OF_SESSION','AFTER_CLOSE','OVERRIDE_REVIEW'] as const), undefined]), awareness: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONCURRENT','KNOWN'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OPEN','OK','SUSPECT','UNDETERMINED'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
 
-export const getCreateScannerDeviceEnrollmentMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, CreateScannerDeviceEnrollmentBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreateScannerDeviceEnrollmentMockHandler = (overrideResponse?: CreateScannerDeviceEnrollment201 | ((info: Parameters<HttpResponseResolver<PathParams, CreateScannerDeviceEnrollmentBody>>[0]) => Promise<CreateScannerDeviceEnrollment201> | CreateScannerDeviceEnrollment201), options?: RequestHandlerOptions) => {
   return http.post<PathParams, CreateScannerDeviceEnrollmentBody>('*/v1/scanner/device-enrollments', async (info: Parameters<HttpResponseResolver<PathParams, CreateScannerDeviceEnrollmentBody>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateScannerDeviceEnrollmentResponseMock(),
       { status: 201
       })
   }, options)

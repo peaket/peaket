@@ -20,6 +20,8 @@ export interface RequestContext {
   readonly log: RequestLogState;
   /** 인증 가드가 판정한 요청자(공개 경로는 없다, auth.ts) */
   principal?: Principal;
+  /** 스캐너 기기 증명을 통과한 기기(스캐너 경로만, scanner-auth.ts) */
+  scannerDevice?: { deviceId: string; jkt: string };
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -31,6 +33,11 @@ export function runInRequestContext<T>(ctx: RequestContext, fn: () => T): T {
 /** 지금 요청의 맥락. 요청 밖이면 undefined */
 export function requestContext(): RequestContext | undefined {
   return storage.getStore();
+}
+
+/** 스캐너 경로에서 기기 증명을 통과한 기기. 그 밖의 요청에서는 undefined */
+export function currentScannerDevice(): { deviceId: string; jkt: string } | undefined {
+  return storage.getStore()?.scannerDevice;
 }
 
 /** 지금 요청의 남은 시간. 요청 밖에서 부르면 던진다 */

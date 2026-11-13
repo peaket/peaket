@@ -25,6 +25,7 @@ import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
+import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, verifyDpopProof } from './scanner-auth.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
 export const ROLE_VALUES = [
@@ -81,10 +82,12 @@ export interface Principal {
   pid?: string;
   /** pid 키 전환 기간의 옛 pid */
   pidPrev?: string;
-  /** 관리 계정의 지금 역할(팬은 없다) */
+  /** 관리 계정의 지금 역할(팬은 없다). 스캐너는 기기 증명 뒤 CheckScannerSession의 역할이다 */
   role?: string;
   /** 파트너 테넌트(promoter_id). 경로·쿼리·본문의 promoterId가 아니라 이 값만 쓴다(authz-matrix §3.3) */
   tenantId?: string;
+  /** 스캐너 기기 증명을 통과한 등록 기기 ID(GAT-170, scanner-auth.ts) */
+  deviceId?: string;
 }
 
 /** 지금 요청의 요청자(공개 경로나 요청 밖이면 undefined) */
@@ -205,7 +208,7 @@ export class AuthState {
   readonly #cache: AdminAuthzCache;
 
   constructor(
-    clock: Clock,
+    readonly clock: Clock,
     readonly adminAuthz?: AdminAuthzPort,
     /** 관리 역할 처리기가 있는데 adminAuthz가 없으면 시작을 막는다(문서 뽑기에서는 끈다). 구매 세션 포트도 같다 */
     readonly requireAdminAuthz = true,
@@ -213,6 +216,8 @@ export class AuthState {
     readonly purchase: { sessions?: PurchaseSessionPort; onRejected?: (reason: PurchaseRejection) => void } = {},
     /** 핫패스 구간 진단(BAT-028). 없으면 계측하지 않는다 */
     readonly hotPath?: HotPathMetrics,
+    /** 스캐너 기기 증명·세션 판정 포트(GAT-170). 없으면 스캐너 역할 처리기가 시작하지 않는다 */
+    readonly scanner?: ScannerAuthState,
   ) {
     this.terminated = new TerminatedSessions(clock);
     this.#cache = new AdminAuthzCache(clock);
@@ -359,6 +364,94 @@ export class AuthGuard implements CanActivate {
   }
 }
 
+const singleHeader = (v: string | string[] | undefined): string | undefined => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined);
+
+const scannerUnauthorized = (reply: FastifyReply, error: 'invalid_token' | 'invalid_dpop_proof'): UnauthorizedException => {
+  void reply.header('www-authenticate', `DPoP error="${error}"`);
+  return new UnauthorizedException();
+};
+
+/** DPoP 증명의 htu와 견줄 절대 주소. 게이트웨이가 넘긴 출처 머리를 먼저 쓴다(offline-gate §6.1) */
+function requestUrlOf(request: FastifyRequest): string {
+  const proto = singleHeader(request.headers['x-forwarded-proto']) ?? request.protocol;
+  const host = singleHeader(request.headers['x-forwarded-host']) ?? singleHeader(request.headers.host);
+  if (!host) throw new Error('요청 Host가 없다(DPoP htu를 만들 수 없다)');
+  const path = request.url.split(/[?#]/)[0];
+  return `${proto}://${host}${path}`;
+}
+
+/**
+ * 스캐너 경로의 기기 증명·세션 판정(GAT-170, offline-gate §6.1). AuthGuard가 스태프 토큰의 신원을 판정한 뒤에 돈다.
+ * - `@ScannerAuth()`가 없는 처리기는 그대로 통과한다.
+ * - 증명·기기·세션이 하나라도 틀리면 401/403이고, 판정에 닿지 못하면 503이다.
+ * - 통과하면 principal의 role·deviceId·tenantId와 요청 맥락의 scannerDevice를 채운다.
+ */
+@Injectable()
+export class ScannerGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    @Inject(AUTH_STATE) private readonly state: AuthState,
+  ) {}
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    if (ctx.getType() !== 'http') return true;
+    const options = this.reflector.getAllAndOverride<ScannerAuthOptions | undefined>(SCANNER_AUTH_METADATA, [ctx.getHandler(), ctx.getClass()]);
+    if (!options) return true;
+    const scanner = this.state.scanner;
+    // 시작 확인이 막으므로 오지 않는다. 와도 닫는다
+    if (!scanner) throw new Error('스캐너 인증 포트가 없다(createService의 scanner)');
+    const http = ctx.switchToHttp();
+    const request = http.getRequest<FastifyRequest>();
+    const reply = http.getResponse<FastifyReply>();
+    const principal = requestContext()?.principal;
+    if (!principal || principal.aud !== 'scanner') throw scannerUnauthorized(reply, 'invalid_token');
+
+    const proof = singleHeader(request.headers.dpop);
+    if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+    const authorization = singleHeader(request.headers.authorization);
+    const token = /^DPoP\s+(.+)$/i.exec(authorization ?? '')?.[1];
+    if (!token) throw scannerUnauthorized(reply, 'invalid_token');
+    const expectedJkt = singleHeader(request.headers['x-user-jkt']);
+    if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
+    const forwardedAth = singleHeader(request.headers['x-user-ath']);
+    const computedAth = athOf(token);
+    if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
+
+    let verified: { jkt: string; jti: string };
+    try {
+      verified = await verifyDpopProof({
+        proof,
+        method: request.method,
+        url: requestUrlOf(request),
+        accessToken: token,
+        expectedAth: forwardedAth ?? computedAth,
+        expectedJkt,
+        clock: this.state.clock,
+        replay: scanner.wiring.replay,
+      });
+    } catch (e) {
+      if (e instanceof DpopRejected) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+      throw e;
+    }
+
+    const device = await scanner.deviceByThumbprint(verified.jkt);
+    if (!device) throw new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' });
+    if (device.status !== 'ACTIVE') throw new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' });
+
+    const session = await scanner.sessionOf(principal.sessionId, device.deviceId);
+    if (!session.valid || !session.role) throw scannerUnauthorized(reply, 'invalid_token');
+    const policy = this.reflector.getAllAndOverride<RolesPolicy | undefined>(ROLES_METADATA, [ctx.getHandler(), ctx.getClass()]);
+    if (policy && !policy.roles.includes(session.role)) throw new ForbiddenException();
+
+    principal.role = session.role;
+    principal.deviceId = device.deviceId;
+    principal.tenantId = device.promoterId;
+    const rc = requestContext();
+    if (rc) rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt };
+    return true;
+  }
+}
+
 /** 시작 때 모든 처리기의 허용 역할을 확인한다(AZ-T1). 하나라도 틀리면 앱 초기화가 실패한다 */
 @Injectable()
 export class RolesCheck implements OnApplicationBootstrap {
@@ -383,11 +476,18 @@ export class RolesCheck implements OnApplicationBootstrap {
           problems.push(`${where}: 허용 역할(@Roles)이 없다`);
           continue;
         }
+        const scannerAuth = (Reflect.getMetadata(SCANNER_AUTH_METADATA, fn) as ScannerAuthOptions | undefined) ?? (Reflect.getMetadata(SCANNER_AUTH_METADATA, metatype) as ScannerAuthOptions | undefined);
         for (const r of policy.roles) {
           if (!(ROLE_VALUES as readonly string[]).includes(r)) problems.push(`${where}: 표에 없는 역할 값 ${r}`);
-          else if (AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'scanner') {
-            problems.push(`${where}: 현장 스태프·기기 역할 ${r}은 기기 증명과 함께 판정한다(BUILD_ORDER GAT-170 전에는 쓸 수 없다)`);
+          else if (AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'scanner' && !this.state.scanner) {
+            problems.push(`${where}: 현장 스태프·기기 역할 ${r}은 기기 증명과 함께 판정한다(createService의 scanner 포트가 없다)`);
           }
+        }
+        if (policy.roles.some((r) => AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'scanner') && !scannerAuth) {
+          problems.push(`${where}: 현장 스태프 역할을 단 처리기에는 @ScannerAuth()가 있어야 한다`);
+        }
+        if (scannerAuth && !this.state.scanner) {
+          problems.push(`${where}: @ScannerAuth()의 기기·세션 포트가 없다(createService의 scanner)`);
         }
         if (Reflect.getMetadata(IDEMPOTENCY_KEY_BY_MODULE, fn) === true && Reflect.getMetadata(IDEMPOTENT_METADATA, fn) === undefined) {
           problems.push(`${where}: 계약이 Idempotency-Key를 요구하는데 @Idempotent가 없다(머리 스키마는 이 키를 보지 않는다, guidelines §4)`);

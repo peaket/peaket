@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 7 | 104 | 0 | 0 | 0 | 1 | 0 | 19 | 101 | 232 |
-| 합계 | 7 | 104 | 0 | 0 | 0 | 1 | 0 | 19 | 101 | 232 |
+| B | 16 | 102 | 0 | 0 | 0 | 3 | 0 | 19 | 92 | 232 |
+| 합계 | 16 | 102 | 0 | 0 | 0 | 3 | 0 | 19 | 92 | 232 |
 
 ## docs/features/offline-gate.md
 
@@ -51,14 +51,14 @@
 | O-T35 | ④ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ④는 정상 처리된다 | 빈칸 | B | — |
 | O-T35 | ⑤ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ⑤는 정상 처리된다 | 빈칸 | B | — |
 | O-T36 | — | mTLS 선택지의 교차 출처 인증서(선택 PoC 5.4.3):… | 사전 요청은 인증서 없이 통과하고, 본 요청에는 기기 인증서가 실려 통과하며 PWA가 응답을 읽는다. 인증서 없는 본 요청은 403이다. 하나라도 안 되면… | 빈칸 | B | — |
-| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | 빈칸 | B | — |
-| O-T37 | ② | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ②은 401이고 기록이 저장되지 않는다. | 빈칸 | B | — |
-| O-T37 | ③ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ③은 401이고 기록이 저장되지 않는다. | 빈칸 | B | — |
-| O-T37 | ④ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ④은 401이고 기록이 저장되지 않는다. | 빈칸 | B | — |
-| O-T37 | ⑤ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑤은 401이고 기록이 저장되지 않는다. | 빈칸 | B | — |
-| O-T37 | ⑥ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑥은 401이고 기록이 저장되지 않는다. | 빈칸 | B | — |
-| O-T37 | ⑦ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑦은 403(기기 폐기)이다. | 빈칸 | B | — |
-| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다 | 빈칸 | B | — |
+| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | 다른 단계 | B | GAT-140 · 등록 코드로 기기 키를 묶는 경로와 브라우저 사전 요청(`credentials: 'omit'`)은 ticket-svc 기기 원장·스캐너 PWA 단계(GAT-140) 몫이다. 플랫폼 가드는 이미… |
+| O-T37 | ② | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ②은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ③ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ③은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ④ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ④은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ⑤ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑤은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ⑥ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑥은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ⑦ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑦은 403(기기 폐기)이다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다 | 다른 단계 | B | GAT-140 · 서비스 워커 업로드와 비행기 모드 해제 직후 올리기는 ticket-svc 스캔 업로드·스캐너 PWA 단계(GAT-140) 몫이다. 플랫폼 가드는 같은 키로 만든 증명을 받는 부분만… |
 | O-T38 | — | 목록 생성 중 커밋된 폐기(추천 적용 2026-10-28, 기술 검토… | 한 스냅샷 구현에서는 스캐너가 그 keyId를 폐기로 안다(빠짐 0건). 비교 대상에서는 빠짐이 재현된다. 같은 변경을 두 번 받아도 스캐너 상태가 같다 | 빈칸 | B | — |
 | O-T39 | — | 스캔 큐 쓰기의 내구성(추천 적용 2026-10-28, 기술 검토… | 다시 켜면 통과 화면을 본 기록이 모두 스캔 큐에 있다(유실 0건). strict의 판정 지연 p95가 150ms 안이다. 넘으면 wbs 5.4.7에서 예산을… | 빈칸 | B | — |
 | O-T40 | — | 온라인 → 오프라인 전환 중 판정(추천 적용 2026-10-28, 기술… | 결과가 나오지 않거나 오류인 판정이 0건이고, 전환 앞뒤 1분 판정 지연의 최댓값이 평소 p95(150ms) 안 [가정]이다(판정이 멈춘 시간 0초). 끊긴… | 빈칸 | B | — |
@@ -121,13 +121,13 @@
 | v5.0.0-7.1.1 | — | L2 | 세션 유휴 만료와 절대 만료를 다른 통제와 함께 봐도 적절하게 정해 문서화하고, NIST SP 800-63B 재인증 기준과 다른 점의 근거를 적는다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.1.2 | — | L2 | 계정당 동시 세션 수와 한도 도달 때의 동작을 문서화한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/device-sessions.test.ts (영역: apps/scanner) |
 | v5.0.0-7.1.3 | — | L2 | SSO 같은 연합 인증 환경에서 사용자 세션을 만들고 관리하는 모든 시스템과, 세션 수명·종료·재인증 조건을 서로 맞추는 통제를 문서화한다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | 빈칸 | B | 영역: services/identity-svc, services/ticket-svc |
+| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | 빈칸 | B | 영역: packages/platform, services/identity-svc |
 | v5.0.0-7.2.2 | — | L1 | 세션은 동적으로 만든 토큰으로 관리하고 고정 API 키를 쓰지 않는다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.2.3 | — | L1 | 사용자 세션에 참조 토큰을 쓰면 CSPRNG로 만든 엔트로피 128비트 이상의 고유한 값으로 한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.2.4 | — | L1 | 인증·재인증 때 새 세션 토큰을 만들고 이전 토큰을 끝낸다. | ID만 | B | 다른 곳 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-… |
 | v5.0.0-7.3.1 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 유휴 만료를 두어 재인증을 요구한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-token-refresh-http.test.ts (영역: apps/scanner) |
 | v5.0.0-7.3.2 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 절대 만료를 두어 재인증을 요구한다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, packages/platform/test/auth-guard.test.ts 외… |
+| v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/device-sessions.int.test.ts, services/identity-svc/test-int/fan-account.int.test.ts… |
 | v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-token-refresh-http.test.ts, services/identity-svc/test/http.test.ts (영역:… |
 | v5.0.0-7.4.3 | — | L2 | 인증 요소를 바꾸거나 지운 뒤 다른 세션을 모두 끝낼 수 있게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/entities/provider/model.test.mjs, apps/web/src/features/login-methods/flow.test.mjs 외 4곳 (영역:… |
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/scanner |
@@ -138,7 +138,7 @@
 | v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 3곳… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, packages/platform/test/auth-guard.test.ts 외 28곳… |
+| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: packages/platform/test/auth-guard.test.ts |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 39곳 (영역:… |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: apps/scanner) |
@@ -245,6 +245,6 @@
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-8.3.2 | — | L3 | 인가 판정의 근거 값이 바뀌면 바로 반영하고, 자체 완결형 토큰처럼 바로 반영할 수 없으면 완화 통제를 둔다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-10.3.5 | — | L3 | 자원 서버는 mTLS나 DPoP로 보낸 사람에 묶인 토큰만 받아 도난 토큰 사용을 막는다. | 빈칸 | B | 영역: apps/scanner |
+| v5.0.0-10.3.5 | — | L3 | 자원 서버는 mTLS나 DPoP로 보낸 사람에 묶인 토큰만 받아 도난 토큰 사용을 막는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | v5.0.0-10.4.14 | — | L3 | 인가 서버는 보낸 사람에 묶인 액세스 토큰만 발급한다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | ID만 | B | 다른 곳 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test-int/leader-store.int.tes… |

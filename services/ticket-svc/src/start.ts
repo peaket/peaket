@@ -2,13 +2,21 @@
 // gRPC 포트는 서비스 안에서 따로 열고, health/management HTTP는 플랫폼 createService가 연다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { createDatabase, createService, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, createDatabase, createHotRedis, createService, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
+import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-store.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
+import {
+  DrizzleScannerDeviceStore,
+  GrpcScannerSessionCheck,
+  MemoryEnrollmentCodeStore,
+  RedisDpopReplayStore,
+  RedisEnrollmentCodeStore,
+} from './modules/scanner/index.js';
 
 const SERVICE = 'ticket-svc';
 
@@ -26,15 +34,34 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
   const config = loadTicketServiceConfig(env);
   const database = createDatabase({ url: config.databaseUrl, profile: 'hot', max: TICKET_DB_POOL_MAX, applicationName: SERVICE });
+  const lbProfile = loadPlatformConfig(env).grpcLbProfile;
+  let redis: Awaited<ReturnType<typeof createHotRedis>> | undefined;
+  let adminAuthz: (AdminAuthzPort & { close?(): void }) | undefined;
+  let scannerSessions: (ScannerSessionCheck & { close?(): void }) | undefined;
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   try {
     const store = new DrizzleTicketStore({ database });
     const ticket = new TicketService({ store, clock: systemClock });
+    const scannerStore = new DrizzleScannerDeviceStore(database);
+    redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
+    const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
+    const replay = redis ? new RedisDpopReplayStore(redis) : new MemoryDpopReplayStore(systemClock);
+    // identity 주소가 없으면 스캐너 세션 확인은 503, 관제 역할 판정은 401로 닫는다(대역으로 통과시키지 않는다)
+    adminAuthz = config.identityGrpcUrl ? new GrpcAdminAuthz(config.identityGrpcUrl, lbProfile) : { getAdminAuthz: async () => ({ valid: false, role: '' }) };
+    scannerSessions = config.identityGrpcUrl
+      ? new GrpcScannerSessionCheck(config.identityGrpcUrl, lbProfile)
+      : {
+          check: async () => {
+            throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 스캐너 세션을 확인하지 못한다');
+          },
+        };
     service = await createService({
       name: SERVICE,
       env,
-      module: AppModule,
+      module: AppModule.register({ scanner: { store: scannerStore, codes, replay } }),
+      adminAuthz,
+      scanner: { devices: scannerStore, sessions: scannerSessions, replay },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
     service.readiness.register('grpc');
@@ -65,6 +92,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
           await startedGrpc.close();
           await started.close();
         } finally {
+          adminAuthz?.close?.();
+          scannerSessions?.close?.();
+          await redis?.close().catch(() => {});
           await database.close();
         }
       })());
@@ -73,6 +103,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   } catch (err) {
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
+    adminAuthz?.close?.();
+    scannerSessions?.close?.();
+    await redis?.close().catch(() => {});
     await database.close().catch(() => {});
     throw err;
   }

@@ -31,6 +31,7 @@ import type {
 import type {
   CreateScannerBoothAuthorizationBody,
   CreateScannerDeviceAuthorizationBody,
+  CreateScannerDeviceEnrollment201,
   CreateScannerDeviceEnrollmentBody,
   CreateScannerFlagResolutionBody,
   CreateScannerScan200,
@@ -77,7 +78,7 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 export type createScannerDeviceEnrollmentResponse201 = {
-  data: void
+  data: CreateScannerDeviceEnrollment201
   status: 201
 }
 

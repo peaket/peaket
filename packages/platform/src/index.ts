@@ -1,8 +1,32 @@
 // @peaket/platform: 서비스(NestJS·Fastify) 공용 시작 코드(docs/architecture.md §10, openspec 변경 add-service-template).
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
 export { DEBUG_ERRORS_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
-export { currentDeadline, requestContext, runInRequestContext, type RequestContext } from './context.js';
-export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
+export { currentDeadline, currentScannerDevice, requestContext, runInRequestContext, type RequestContext } from './context.js';
+export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, Roles, ScannerGuard, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
+export {
+  DpopRejected,
+  MemoryDpopReplayStore,
+  SCANNER_AUTH_METADATA,
+  SCANNER_DPOP_IAT_WINDOW_MS,
+  SCANNER_DPOP_JTI_TTL_MS,
+  SCANNER_SESSION_CACHE_MS,
+  ScannerAuth,
+  ScannerAuthState,
+  athOf,
+  scannerAuthUnavailable,
+  verifyDpopProof,
+  type DpopRejectReason,
+  type DpopReplayStore,
+  type ScannerAuthOptions,
+  type ScannerAuthWiring,
+  type ScannerDeviceLookup,
+  type ScannerDeviceRecord,
+  type ScannerDeviceStatus,
+  type ScannerSessionAnswer,
+  type ScannerSessionCheck,
+  type ScannerStaffRole,
+  type VerifiedDpopProof,
+} from './scanner-auth.js';
 export { AcceptMultipart, AcceptTextPlain, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, type RouteBulkhead, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type AcceptMultipartOptions, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { HOT_PATH_METRICS, HotPathMetrics, timeHotPath, timeHotPathSync, type HotPathOutcome, type HotPathStage } from './hot-path.js';

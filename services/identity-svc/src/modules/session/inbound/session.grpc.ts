@@ -34,6 +34,8 @@ export interface IdentityPackage {
   AdminDesignationService: grpc.ServiceClientConstructor;
   /** 추가 검증 제출의 본인확인 재통과 확인(queue-svc만, bot-defense §5.2 3단계, BOT-090) */
   ReverificationCheckService: grpc.ServiceClientConstructor;
+  /** 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, GAT-170) */
+  ScannerSessionCheckService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;

@@ -25,7 +25,9 @@ export const CreateScannerDeviceEnrollmentBody = zod.object({
   "code": zod.string()
 }).strict()
 
-export const CreateScannerDeviceEnrollmentResponse = zod.void()
+export const CreateScannerDeviceEnrollmentResponse = zod.object({
+  "deviceId": zod.string()
+})
 
 /**
  * FR-046, POL-031, SCR-036, ADR-0051. 등록되고 ACTIVE인 기기만. 확인 코드 8자, 5분, 기기당 시간당 10회 [가정]. 기기 인증만 요구하는 쓰기라 쿠키 경로처럼 위조 요청을 막는다(기본안의 DPoP 증명은 저절로 실리지 않지만 심층 방어로 두고, mTLS 선택지의 인증서는 브라우저가 알아서 싣는다): Content-Type: application/json만 받고(그 밖 415) 빈 객체도 JSON 본문으로 보내며, Origin이 스캐너 PWA 출처(https://scanner.peaket.example)가 아니거나 없으면 거절한다(추천 적용 2026-10-15, ADR-0065 결정 10)

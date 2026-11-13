@@ -581,6 +581,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-535: BAT-051(HOT-252) purchase-svc 홀드의 판매 정책 평가를 넣었다(2026-11-13): core-svc 내부 읽기 경로, `LayoutSeatMap` 덮기, `lst` 모양·`entryGate`·`evaluateSalePolicy`, 규칙 한도→홀드 Lua·`purchase_quota`.
 - R-536: BAT-050 ticket proto 기본값 시험 반영(2026-11-13): CI `node` 실패를 고쳤다.
 - R-541: bundle 이미지에 sale-policy 검증 패키지 반영(2026-11-13): CI `image` 실패를 고쳤다.
+- R-537: BAT-435(GAT-170) ticket-svc 스캐너 기기 원장·등록 코드·DPoP `jkt` 등록과 관제 기기 경로를 넣고, platform `ScannerGuard`·identity 세션 확인·Redis `jti`를 이었다. heavy gate에서 test-int 15건·변이 30/30·4관점 리뷰(높음 0·중간 5)를 통과했다(2026-11-13).
 
 ## 5. [충돌] 결정 결과
 
