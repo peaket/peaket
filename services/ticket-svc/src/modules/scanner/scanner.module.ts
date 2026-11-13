@@ -2,14 +2,17 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { ScannerDevices } from './application/scanner-devices.js';
-import { DPOP_REPLAY_STORE, ENROLLMENT_CODE_STORE, SCANNER_DEVICE_STORE, type DpopReplayStore, type EnrollmentCodeStore, type ScannerDeviceStore } from './domain/ports.js';
+import { ScannerGate } from './application/scanner-gate.js';
+import { DPOP_REPLAY_STORE, ENROLLMENT_CODE_STORE, SCANNER_DEVICE_STORE, SCANNER_GATE_STORE, type DpopReplayStore, type EnrollmentCodeStore, type ScannerDeviceStore, type ScannerGateStore } from './domain/ports.js';
 import { OpsScannerDevicesController } from './inbound/ops-scanner-devices.controller.js';
 import { ScannerEnrollmentController } from './inbound/scanner-enrollment.controller.js';
+import { ScannerGateController } from './inbound/scanner-gate.controller.js';
 
 export interface ScannerWiring {
   store: ScannerDeviceStore;
   codes: EnrollmentCodeStore;
   replay: DpopReplayStore;
+  gate: ScannerGateStore;
 }
 
 @Module({})
@@ -19,12 +22,18 @@ export class ScannerModule {
       { provide: SCANNER_DEVICE_STORE, useValue: o.store },
       { provide: ENROLLMENT_CODE_STORE, useValue: o.codes },
       { provide: DPOP_REPLAY_STORE, useValue: o.replay },
+      { provide: SCANNER_GATE_STORE, useValue: o.gate },
       {
         provide: ScannerDevices,
         useFactory: (store: ScannerDeviceStore, codes: EnrollmentCodeStore, clock: Clock) => new ScannerDevices({ store, codes, clock }),
         inject: [SCANNER_DEVICE_STORE, ENROLLMENT_CODE_STORE, CLOCK],
       },
+      {
+        provide: ScannerGate,
+        useFactory: (store: ScannerGateStore, clock: Clock) => new ScannerGate({ store, clock }),
+        inject: [SCANNER_GATE_STORE, CLOCK],
+      },
     ];
-    return { module: ScannerModule, controllers: [OpsScannerDevicesController, ScannerEnrollmentController], providers };
+    return { module: ScannerModule, controllers: [OpsScannerDevicesController, ScannerEnrollmentController, ScannerGateController], providers };
   }
 }

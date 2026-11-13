@@ -292,7 +292,16 @@ export const CreateScannerFlagResolutionBody = zod.object({
   "note": zod.string().max(createScannerFlagResolutionBodyNoteMax).optional().describe('개인정보 금지')
 }).strict()
 
-export const CreateScannerFlagResolutionResponse = zod.unknown()
+export const CreateScannerFlagResolutionResponse = zod.object({
+  "flagId": zod.string().optional(),
+  "ticketId": zod.string().optional(),
+  "seatLabel": zod.string().optional(),
+  "gateZone": zod.string().optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW']).optional(),
+  "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
+  "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+})
 
 /**
  * FR-066, ADR-0050 결정 2, ADR-0051 결정 11. 코드는 8자·10분·한 번. 책임자당 10분 5회 실패 제한 [가정]

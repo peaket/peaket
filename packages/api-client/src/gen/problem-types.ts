@@ -199,6 +199,8 @@ export type ProblemType =
   | 'scanner-auth-unavailable'
   | 'scanner-device-key-in-use'
   | 'scanner-device-not-found'
+  | 'scanner-event-mismatch'
+  | 'scanner-flag-not-found'
   | 'seat-already-held'
   | 'seat-recently-released'
   | 'seat-store-unavailable'
@@ -430,6 +432,8 @@ export const PROBLEM_TYPES = {
   'scanner-auth-unavailable': { status: 503, title: "스캐너 기기·세션을 확인하지 못했습니다" },
   'scanner-device-key-in-use': { status: 409, title: "이미 다른 기기에 묶인 기기 키입니다" },
   'scanner-device-not-found': { status: 404, title: "스캐너 기기를 찾을 수 없습니다" },
+  'scanner-event-mismatch': { status: 403, title: "스캐너 세션의 회차와 요청 회차가 다릅니다" },
+  'scanner-flag-not-found': { status: 404, title: "이상 표시를 찾을 수 없습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },
   'seat-store-unavailable': { status: 503, title: "좌석 정보를 잠시 쓸 수 없습니다" },

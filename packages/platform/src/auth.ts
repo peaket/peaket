@@ -88,6 +88,8 @@ export interface Principal {
   tenantId?: string;
   /** 스캐너 기기 증명을 통과한 등록 기기 ID(GAT-170, scanner-auth.ts) */
   deviceId?: string;
+  /** 스캐너 세션이 가리키는 회차(GAT-180). 경로 회차와 대조한다 */
+  eventId?: string;
 }
 
 /** 지금 요청의 요청자(공개 경로나 요청 밖이면 undefined) */
@@ -448,8 +450,9 @@ export class ScannerGuard implements CanActivate {
     principal.role = session.role;
     principal.deviceId = device.deviceId;
     principal.tenantId = device.promoterId;
+    if (session.eventId) principal.eventId = session.eventId;
     const rc = requestContext();
-    if (rc) rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt };
+    if (rc) rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(session.eventId ? { eventId: session.eventId } : {}) };
     return true;
   }
 }

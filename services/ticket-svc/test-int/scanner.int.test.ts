@@ -28,6 +28,7 @@ import { DrizzleStaffAssignmentStore } from '../../identity-svc/src/modules/sess
 import { migrateTicket } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleScannerDeviceStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-device-store.js';
+import { DrizzleScannerGateStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-gate-store.js';
 import { RedisDpopReplayStore } from '../src/modules/scanner/adapters/redis-dpop-replay-store.js';
 import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { ScannerDevices } from '../src/modules/scanner/application/scanner-devices.js';
@@ -137,7 +138,7 @@ beforeAll(async () => {
   const adminAuthz: AdminAuthzPort = { getAdminAuthz: async () => ({ valid: true, role: 'operator' }) };
   ticketSvc = await createService({
     name: 'ticket-svc-scanner-int',
-    module: AppModule.register({ scanner: { store, codes, replay } }),
+    module: AppModule.register({ scanner: { store, codes, replay, gate: new DrizzleScannerGateStore(database) } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

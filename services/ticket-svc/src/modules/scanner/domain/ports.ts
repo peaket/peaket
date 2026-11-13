@@ -1,4 +1,13 @@
-// 스캐너 기기 원장·등록 코드·DPoP jti 저장소의 포트(BUILD_ORDER GAT-170).
+// 스캐너 기기 원장·등록 코드·DPoP jti·목록/스캔/이상 표시 저장소의 포트(BUILD_ORDER GAT-170·GAT-180).
+import type {
+  GateFlagPage,
+  GateFlagStatus,
+  GateFlagView,
+  ScanBatchResult,
+  ScanEventInput,
+  ScannerChangesView,
+  ScannerPackageView,
+} from './scanner-gate.js';
 import type { ScannerDeviceRecord } from './scanner-device.js';
 
 export interface ScannerDeviceListInput {
@@ -40,3 +49,23 @@ export interface DpopReplayStore {
 }
 
 export const DPOP_REPLAY_STORE = Symbol('ticket.DpopReplayStore');
+
+/** 스캐너 목록·변경분·스캔·이상 표시 저장소. 판정과 일련번호 매기기는 저장소 트랜잭션 안에서 끝낸다. */
+export interface ScannerGateStore {
+  package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView>;
+  changes(i: { eventId: string; after: number; limit: number }): Promise<ScannerChangesView>;
+  acceptScans(i: {
+    eventId: string;
+    deviceId: string;
+    staffAccountId: string;
+    sessionId: string;
+    scans: readonly ScanEventInput[];
+    nowMs: number;
+  }): Promise<ScanBatchResult>;
+  listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage>;
+  /** 이상 표시의 회차. 없으면 undefined. 다른 회차면 403으로 닫는 데 쓴다 */
+  flagEventId(flagId: string): Promise<string | undefined>;
+  resolveFlag(i: { eventId: string; flagId: string; status: GateFlagStatus; note?: string; resolvedBy: string; nowMs: number }): Promise<GateFlagView | undefined>;
+}
+
+export const SCANNER_GATE_STORE = Symbol('ticket.ScannerGateStore');

@@ -12,6 +12,7 @@ import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
 import {
   DrizzleScannerDeviceStore,
+  DrizzleScannerGateStore,
   GrpcScannerSessionCheck,
   MemoryEnrollmentCodeStore,
   RedisDpopReplayStore,
@@ -41,7 +42,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   try {
-    const store = new DrizzleTicketStore({ database });
+    const gateStore = new DrizzleScannerGateStore(database);
+    const store = new DrizzleTicketStore({ database, changes: gateStore });
     const ticket = new TicketService({ store, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
@@ -59,7 +61,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     service = await createService({
       name: SERVICE,
       env,
-      module: AppModule.register({ scanner: { store: scannerStore, codes, replay } }),
+      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore } }),
       adminAuthz,
       scanner: { devices: scannerStore, sessions: scannerSessions, replay },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),

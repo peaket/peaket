@@ -585,6 +585,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-538: 관람 후기·신고·운영자 조치·같은 내용 자동 가림과 ticket-svc 후기 자격.
 - R-541: bundle 이미지에 sale-policy 검증 패키지 반영(2026-11-13): CI `image` 실패를 고쳤다.
 - R-537: BAT-435(GAT-170) ticket-svc 스캐너 기기 원장·등록 코드·DPoP `jkt` 등록과 관제 기기 경로를 넣고, platform `ScannerGuard`·identity 세션 확인·Redis `jti`를 이었다. heavy gate에서 test-int 15건·변이 30/30·4관점 리뷰(높음 0·중간 5)를 통과했다(2026-11-13).
+- R-544: BAT-440(GAT-180·GAT-190) ticket-svc 스캐너 package·changes·scans·flags 서버 경로와 변경 일련번호·스캔 판정·이상 표시를 넣고 heavy gate를 통과했다(2026-11-13): 실제 PostgreSQL test-int 26건, 변이 26/26, 4관점 리뷰 높음 1(동시 IN 직렬화, 고침)·중간 4.
 - R-543: DPoP Authorization 정규식 ReDoS 제거(2026-11-13): CI `codeql` 실패를 고쳤다.
 - R-546: BAT-585 후기 오류 유형·제목 계약 정렬(2026-11-13): CI `node` 실패를 고쳤다.
 

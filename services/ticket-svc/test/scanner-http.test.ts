@@ -2,12 +2,13 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
-import { fakeClock, MemoryDpopReplayStore, type AdminAuthz, type AdminAuthzPort, createService } from '@peaket/platform';
+import { fakeClock, MemoryDpopReplayStore, type AdminAuthz, type AdminAuthzPort, createService, type ScannerSessionCheck } from '@peaket/platform';
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
+import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
 
 const NOW = Date.parse('2026-11-13T00:00:00Z');
 const PROMOTER = '0190f3a1-7c2e-7a00-8000-000000000001';
@@ -18,6 +19,12 @@ class FakeIdentity implements AdminAuthzPort {
   readonly answers = new Map<string, AdminAuthz>();
   async getAdminAuthz(q: { adminAccountId: string; sessionId: string }): Promise<AdminAuthz> {
     return this.answers.get(`${q.adminAccountId}/${q.sessionId}`) ?? { valid: false, role: '' };
+  }
+}
+
+class FakeSessions implements ScannerSessionCheck {
+  async check(): Promise<{ valid: boolean }> {
+    return { valid: false };
   }
 }
 
@@ -34,12 +41,13 @@ beforeAll(async () => {
   svc = await createService({
     name: 'ticket-svc',
     module: AppModule.register({
-      scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay: new MemoryDpopReplayStore(clock) },
+      scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay: new MemoryDpopReplayStore(clock), gate: new MemoryScannerGateStore() },
     }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
     adminAuthz: identity,
+    scanner: { devices: store, sessions: new FakeSessions(), replay: new MemoryDpopReplayStore(clock) },
   });
 });
 

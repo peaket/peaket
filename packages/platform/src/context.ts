@@ -21,7 +21,7 @@ export interface RequestContext {
   /** 인증 가드가 판정한 요청자(공개 경로는 없다, auth.ts) */
   principal?: Principal;
   /** 스캐너 기기 증명을 통과한 기기(스캐너 경로만, scanner-auth.ts) */
-  scannerDevice?: { deviceId: string; jkt: string };
+  scannerDevice?: { deviceId: string; jkt: string; eventId?: string };
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -36,7 +36,7 @@ export function requestContext(): RequestContext | undefined {
 }
 
 /** 스캐너 경로에서 기기 증명을 통과한 기기. 그 밖의 요청에서는 undefined */
-export function currentScannerDevice(): { deviceId: string; jkt: string } | undefined {
+export function currentScannerDevice(): { deviceId: string; jkt: string; eventId?: string } | undefined {
   return storage.getStore()?.scannerDevice;
 }
 

@@ -37,6 +37,7 @@ import type {
   CreateScannerScan200,
   CreateScannerTokenBody,
   DeviceAuthorization,
+  GateFlag,
   GateFlagPage,
   GateStatus,
   GetScannerEventChangesParams,
@@ -1397,7 +1398,7 @@ export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listS
 
 
 export type createScannerFlagResolutionResponse200 = {
-  data: void
+  data: GateFlag
   status: 200
 }
 

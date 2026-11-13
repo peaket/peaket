@@ -18,8 +18,15 @@ import {
 } from '../../domain/ticket.js';
 import { ticket, ticketCancellation, ticketIssue } from './schema.js';
 
+/** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
+export interface ScannerChangeWriter {
+  append(tx: DbTransaction, eventId: string, kind: string, payload: Record<string, unknown>): Promise<number>;
+}
+
 export interface DrizzleTicketStoreOptions {
   readonly database: Database;
+  /** 없으면 변경 기록을 남기지 않는다(단위 시험·구성 전) */
+  readonly changes?: ScannerChangeWriter;
 }
 
 const statusOf = (v: string): TicketStatus => {
@@ -98,6 +105,11 @@ export class DrizzleTicketStore implements TicketStore {
         return { tickets: rows.map(recordOf), replayed: true };
       }
       await tx.insert(ticket).values(candidates.map(valuesOf));
+      if (this.o.changes) {
+        for (const t of candidates) {
+          await this.o.changes.append(tx, input.eventId, 'TICKET_STATUS', { v: 1, ticketId: t.ticketId, status: t.status, version: t.version });
+        }
+      }
       return { tickets: candidates, replayed: false };
     });
   }
@@ -152,6 +164,10 @@ export class DrizzleTicketStore implements TicketStore {
       result,
       cancelledAt: new Date(input.nowMs),
     });
+    if (this.o.changes) {
+      await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId, status, version: row.version + 1 });
+      await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId, keyId: null });
+    }
     return result;
   }
 
