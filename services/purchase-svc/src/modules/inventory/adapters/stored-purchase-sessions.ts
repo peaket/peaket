@@ -34,9 +34,15 @@ function sanitizedOnly(err: unknown): never {
 
 export interface StoredPurchaseSessionsDeps {
   store: PurchaseSessionStore;
-  /** 서버 고정 ECDH 키(공유 비밀만 쓴다) */
-  ecdh: Pick<ServerEcdhKey, 'sharedSecret'>;
+  /** 서버 고정 ECDH 키(현재 키와 옛 키의 공유 비밀을 쓴다, BOT-100) */
+  ecdh: Pick<ServerEcdhKey, 'sharedSecrets'>;
   clock: Clock;
+  /**
+   * 세션이 아직 없고 첫 홀드 요청이 구매 세션을 열어야 할 때(자동 배정 공연, BUILD_ORDER HOT-080) 한 번 부른다.
+   * 요청의 입장 토큰·회차·본문의 clientEphemeralPublicKey로 OpenPurchaseSession을 부르고, 열렸으면 true를 준다.
+   * 없으면 기존처럼 세션이 없을 때 undefined(401)다.
+   */
+  openFirstUse?: (i: { jti: string; token: unknown; accountId: string; loginSessionId: string; eventId: string; clientKey: unknown }) => Promise<boolean>;
 }
 
 /** 헤더 값에서 입장 토큰의 jti를 꺼낸다(서명은 보지 않는다). 모양이 틀리면 undefined */
@@ -56,6 +62,23 @@ export function admissionJtiOf(header: unknown): string | undefined {
 }
 
 /**
+ * 홀드 경로의 회차 ID. Fastify가 경로 매개변수를 채웠으면 그것을, 아니면 주소 `/v1/events/{eventId}/holds`에서 꺼낸다.
+ * 다른 구매 서명 경로(주문·결제)에서는 undefined다(첫 사용 열기는 홀드만).
+ */
+function eventIdOfHold(request: FastifyRequest): string | undefined {
+  const p = (request.params as { eventId?: unknown } | undefined)?.eventId;
+  if (typeof p === 'string' && KEY_PART.test(p)) return p;
+  const m = /^\/v1\/events\/([^/?#]+)\/holds(?:[?#]|$)/.exec(request.url);
+  return m && KEY_PART.test(m[1]!) ? m[1] : undefined;
+}
+
+/** 홀드 본문의 clientEphemeralPublicKey(자동 배정 공연의 첫 요청). 없거나 본문이 객체가 아니면 undefined */
+function clientKeyOfHold(request: FastifyRequest): unknown {
+  const body = request.body as { clientEphemeralPublicKey?: unknown } | undefined;
+  return body !== null && typeof body === 'object' ? body.clientEphemeralPublicKey : undefined;
+}
+
+/**
  * - resolve: 입장 토큰 헤더(하나, 2048자 이하)의 jti → 구매 세션 상태 읽기(한 번) → 계정·로그인 세션이 principal과 같고 최대 체류 앞이면
  *   { ref: jti, key: HKDF(ECDH(서버 개인키, 저장된 임시 공개키), salt = jti) }. 하나라도 어긋나거나 저장된 임시 공개키가 곡선 위의 점이 아니면 undefined(가드가 401)다.
  *   일련번호는 올리지 않는다. 저장소 장애(SeatStoreUnavailable)는 503 seat-store-unavailable ProblemError로 바꿔 던진다(PRF-136 리뷰. 훅이 그대로 낸다)
@@ -70,7 +93,19 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
   async resolve(request: FastifyRequest, principal: Principal): Promise<PurchaseSession | undefined> {
     const jti = admissionJtiOf(request.headers[ADMISSION_TOKEN_HEADER]);
     if (jti === undefined) return undefined;
-    const s = await this.deps.store.read(jti).catch(rethrown);
+    let s = await this.deps.store.read(jti).catch(rethrown);
+    // 자동 배정 공연은 스냅샷을 받지 않아 첫 홀드 요청이 입장 토큰의 첫 사용이다(HOT-080).
+    // 세션이 없고 본문에 clientEphemeralPublicKey가 있으면 그 요청에서 한 번 연다(열기 유스케이스가 토큰·회차·키를 다시 본다).
+    if (!s && this.deps.openFirstUse) {
+      const eventId = eventIdOfHold(request);
+      const clientKey = clientKeyOfHold(request);
+      if (eventId !== undefined && clientKey !== undefined) {
+        const opened = await this.deps
+          .openFirstUse({ jti, token: request.headers[ADMISSION_TOKEN_HEADER], accountId: principal.accountId, loginSessionId: principal.sessionId, eventId, clientKey })
+          .catch(() => false);
+        if (opened) s = await this.deps.store.read(jti).catch(rethrown);
+      }
+    }
     if (!s || s.accountId !== principal.accountId || s.loginSessionId !== principal.sessionId) return undefined;
     if (this.deps.clock.now() >= s.maxStayUntilMs) return undefined;
     const client = parseClientEphemeralKey(s.clientKey);
@@ -78,7 +113,8 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
     // 같은 요청의 홀드가 세션을 다시 읽지 않게 인증 때 읽은 값을 요청에 붙인다(BAT-028). 최대 체류 경계도 함께 넘겨 홀드가 다시 본다
     const info: ResolvedPurchaseSessionInfo = { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId, maxStayUntilMs: s.maxStayUntilMs };
     (request as unknown as Record<symbol, ResolvedPurchaseSessionInfo | undefined>)[PURCHASE_SESSION_INFO] = info;
-    return { ref: jti, key: purchaseRequestKey(this.deps.ecdh.sharedSecret(client.key), jti) };
+    const secrets = this.deps.ecdh.sharedSecrets(client.key).map((s) => purchaseRequestKey(s, jti));
+    return { ref: jti, key: secrets[0]!, ...(secrets.length > 1 ? { keys: secrets } : {}) };
   }
 
   async advance(ref: string, seq: number): Promise<boolean> {

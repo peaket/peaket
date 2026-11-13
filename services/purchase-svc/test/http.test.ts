@@ -62,6 +62,8 @@ const store: SeatStore & ReplayPort = {
     if (failWith !== undefined) throw failWith;
     return inner.hold(i);
   },
+  holdAuto: (i, o) => inner.holdAuto(i, o),
+  autoCursor: (eventId, field) => inner.autoCursor(eventId, field),
   openSale: (i) => inner.openSale(i),
   replay: async (i: ReplayInput) => {
     replays.push(i);
@@ -232,18 +234,19 @@ describe('400 모양 검사(저장소에 닿기 전)', () => {
     expect(json(ten).type).toBe(problem('purchase-limit-exceeded'));
   });
 
-  test('FR010_ auto를 보내면 seatIds가 함께 있어도 400 auto-assign-not-supported와 detail(지금은 좌석 지정만 받는다)이다', async () => {
-    const { eventId, fan, ev } = await world();
+  test('FR010_ auto만 보내면 자동 배정 201(assignResult FIRST)이고, seatIds와 함께 보내면 400 auto-condition-invalid다', async () => {
+    const { eventId, fan } = await world();
     const f = fan(1);
-    const calls = holdCalls.length;
-    const auto = { firstTierId: 'R', count: 2 };
-    for (const payload of [JSON.stringify({ auto }), JSON.stringify({ seatIds: ['A01'], auto })]) {
-      const r = await post(eventId, payload, f);
-      expect(r.statusCode).toBe(400);
-      expect(json(r)).toMatchObject({ type: problem('auto-assign-not-supported'), status: 400, title: HOLD_PROBLEMS.AUTO_NOT_SUPPORTED.title, detail: '지금은 좌석 지정(seatIds)만 받습니다' });
-    }
-    expect(holdCalls.length).toBe(calls);
-    untouched(ev());
+    const auto = { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false };
+    const ok = await post(eventId, JSON.stringify({ auto }), f);
+    expect(ok.statusCode).toBe(201);
+    expect(json(ok)).toMatchObject({ assignResult: 'FIRST', seatIds: ['A01', 'A02'] });
+    const both = await post(eventId, JSON.stringify({ seatIds: ['A01'], auto }), f);
+    expect(both.statusCode).toBe(400);
+    expect(json(both)).toMatchObject({ type: problem('auto-condition-invalid'), status: 400, detail: 'seatIds와 auto 가운데 하나만 보냅니다' });
+    const unknown = await post(eventId, JSON.stringify({ auto: { ...auto, firstTierId: 'NOPE' } }), f);
+    expect(unknown.statusCode).toBe(400);
+    expect(json(unknown).type).toBe(problem('auto-condition-invalid'));
   });
 
   test('FR010_ seatIds도 auto도 없으면 400(about:blank, detail 없음)이다', async () => {

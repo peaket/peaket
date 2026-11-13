@@ -1,8 +1,9 @@
-# 갈래 1 — 마지막 상태(2026-11-13, R-517)
+# 갈래 1 — 마지막 상태(2026-11-13, R-518)
 
 - 갈래 1의 정본 진행 기록은 `docs/PROGRESS.md`다(ADR-0190 결정 3). 이 파일은 마지막 상태만 짧게 남긴다.
-- **BAT-033/HOT-467: 부분 완료(known gap).** K2/A/A는 r23 21.74ms·r24 22.36ms·r25 22.81ms, dropped 0, A/A 0.9723/0.9800으로 통과·닫음. K7 공식 3회는 1.37/5.51/2.01%·p99 3,168.9/4,344.9/3,413.9ms, 진단 최선은 1.77%(167/9,422)·p99 3,773.6ms로 **공식 ≤1%·p99 <3초 미달**이다.
-- 원인: `payment.confirm.gateway` p99 1,783ms(시뮬레이터 승인 지연·큐), `payment.status.wait` p99 3,455ms, 16초 지연군 0.5% 고정. 집기 19.7ms·결과 반영 52.2ms는 작다. 개선 이력 9%대→5.62%→1.77%.
-- 재개 조건: 시뮬레이터 승인 지연 모델·동시 처리, `payment.status.wait` 경로 추가 최적화, 실제 PG·운영 무대 재측정 가운데 하나.
-- 다음 갈래 1 묶음: **BAT-050**(HOT-160·HOT-090), **BAT-051**(HOT-252). BAT-036(SEG-010)은 구간 1의 다른 단계가 모두 끝난 뒤.
-- 정본 기록: `docs/verification.md` §3.10, `docs/review/measurements/BAT-033-k7-finish.md` §12, `docs/BUILD_ORDER.md` BAT-033/HOT-467.
+- **BAT-090(HOT-080·BOT-100): 구현·단위 시험·싼 게이트 끝(R-518).** HOT-080은 자동 배정 Lua·후보 목록(연석→1순위 분리→2순위→2순위 분리, 휠체어 필터)·`auto_cur` 커서·409 `manual-selection-required`를 넣었다. BOT-100은 서버 ECDH 옛 키(`PEAKET_PURCHASE_ECDH_KEY_PREV`)·`sharedSecrets`·다중 키 MAC 확인·탈취 재현 단위 시험을 넣었다. purchase-svc 단위 3,740·플랫폼 517 통과, typecheck 통과.
+- **heavy gate 대기**: S-T16 1ms 측정, S-T19·S-T20 자동 배정 부하·공정성, test-int, 변이, 4관점 리뷰, CI는 `heavy gate go` 뒤.
+- **BAT-050 분할(감독 결정 2026-11-13)**: BAT-050은 **HOT-160 발권(ticket-svc 최소, 1일)** 만, BAT-052는 **HOT-090 실시간 전파(realtime-gw, 3일)** 로 나눴다. BAT-052는 새 서비스 선행이 필요해 **보류**. BAT-050 HOT-160은 다음 기회에 별도 배치.
+- **BAT-051 보류(2026-11-13)**: HOT-252의 `salePolicy` 읽기 경로가 core-svc/purchase-svc에 없고 LCH-080(BAT-615) 전이라 보류. 평가 함수 `@peaket/validation/sale-policy`는 준비되어 있고, 규칙 원천만 없다.
+- **BAT-033/HOT-467**: 부분 완료(known gap). K2/A/A는 r23~r25 21.74/22.36/22.81ms·A/A 0.9723/0.9800으로 통과·닫음. K7 공식 3회 1.37/5.51/2.01%·p99 3,168.9/4,344.9/3,413.9ms, 진단 최선 1.77%·3,773.6ms로 ≤1%·p99 <3초 미달. 재개 조건은 시뮬레이터 지연 모델·동시 처리, wait 경로 추가 최적화, 실제 PG·운영 무대 재측정.
+- 정본 기록: `docs/BUILD_ORDER.md` BAT-050/BAT-051/BAT-052/BAT-090, `docs/features/seat-hold.md` §3, `docs/data.md` §3, `docs/PROGRESS.md`, `docs/verification.md` §3.10.

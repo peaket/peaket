@@ -60,7 +60,7 @@ const BehaviorSummary = z
 
 /**
  * 본문 HoldRequest. seatIds는 1~10개, 좌석 ID 모양 SEAT_ID_PATTERN(어기면 400). 같은 좌석 두 번은 여기서 막지 않고 쓰임새가 422 invalid-seat로 답한다
- * (seat-hold.md §3 '좌석 ID 확인', S-T30 ④). auto는 모양만 받고 쓰임새가 400 auto-assign-not-supported로 거절한다(자동 배정은 wbs 2.5.4).
+ * (seat-hold.md §3 '좌석 ID 확인', S-T30 ④). auto는 희망 조건이며 쓰임새가 자동 배정한다(BUILD_ORDER HOT-080).
  * seatIds와 auto 가운데 하나만 보내는 규칙도 쓰임새가 본다
  */
 export const HoldRequest = z.object({

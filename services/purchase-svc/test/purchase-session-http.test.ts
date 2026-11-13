@@ -66,8 +66,17 @@ const flakyStore: PurchaseSessionStore = {
   sweep: (jti) => mem.sweep(jti),
   setPaying: (jti, paying) => mem.setPaying(jti, paying),
 };
-const sessions = new StoredPurchaseSessions({ store: flakyStore, ecdh: serverPriv, clock });
 const opener = new OpenPurchaseSession({ store: mem, log: startedLog, keys: new Map([['k1', admissionKey.pub]]), issuer: ISS, clock });
+const sessions = new StoredPurchaseSessions({
+  store: flakyStore,
+  ecdh: serverPriv,
+  clock,
+  openFirstUse: (i) =>
+    opener
+      .execute({ token: i.token, accountId: i.accountId, loginSessionId: i.loginSessionId, eventId: i.eventId, clientKey: i.clientKey })
+      .then((r) => r.sessionId === i.jti)
+      .catch(() => false),
+});
 
 let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
@@ -90,6 +99,7 @@ interface Fan {
   jti: string;
   token: string;
   macKey: Buffer;
+  clientKey: string;
 }
 
 /** 회차 하나(좌석맵 판·판매 열기)와, 그 회차에서 입장 토큰으로 구매 세션을 연 팬 */
@@ -106,9 +116,19 @@ async function world() {
     // 열기는 토큰의 회차로 연다(주소의 회차 = 토큰의 회차)
     await opener.execute({ token, accountId, loginSessionId: login, eventId: tokenEvent, clientKey: client.text });
     const macKey = Buffer.from(purchaseRequestKey(diffieHellman({ privateKey: client.privateKey, publicKey: serverPub }), jti));
-    return { accountId, login, jti, token, macKey };
+    return { accountId, login, jti, token, macKey, clientKey: client.text };
   };
-  return { eventId, fan, ev: () => inner.db.event(eventId) };
+  /** 구매 세션을 미리 열지 않은 팬(자동 배정 첫 홀드 요청이 여는지 본다, HOT-080) */
+  const fanNoOpen = (k: number, tokenEvent = eventId): Fan => {
+    const jti = randomUUID();
+    const accountId = account(k);
+    const login = `ls-${eventId}-${k}-noopen`;
+    const token = signAdmission(admissionKey, claimsOf({ nowMs: clock.now(), jti, accountId, loginSessionId: login, eventId: tokenEvent }));
+    const client = clientKeyOf();
+    const macKey = Buffer.from(purchaseRequestKey(diffieHellman({ privateKey: client.privateKey, publicKey: serverPub }), jti));
+    return { accountId, login, jti, token, macKey, clientKey: client.text };
+  };
+  return { eventId, fan, fanNoOpen, ev: () => inner.db.event(eventId) };
 }
 
 let seq = 0;
@@ -131,6 +151,25 @@ function post(eventId: string, f: Fan, o: { macKey?: Buffer; token?: string | nu
 }
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
+/** 자동 배정 첫 홀드 요청(구매 세션을 미리 열지 않는다). 본문의 clientEphemeralPublicKey가 세션을 연다 */
+function postAuto(eventId: string, f: Fan, o: { seq?: number } = {}) {
+  const url = `/v1/events/${eventId}/holds`;
+  const payload = JSON.stringify({ auto: { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false }, clientEphemeralPublicKey: f.clientKey });
+  const n = o.seq ?? ++seq;
+  const headers: Record<string, string> = {
+    'x-user-id': f.accountId,
+    'x-session-id': f.login,
+    'x-user-aud': 'fan',
+    'x-user-scope': 'ticket:buy',
+    'content-type': 'application/json',
+    'idempotency-key': randomUUID(),
+    'x-purchase-seq': String(n),
+    'x-purchase-mac': purchaseMac(f.macKey, purchaseMacInput('POST', url, n, Buffer.from(payload, 'utf8'))),
+    'x-admission-token': f.token,
+  };
+  return svc.http.inject({ method: 'POST', url, headers, payload });
+}
+
 describe('실제 구매 세션으로 홀드', () => {
   test('ST28_ST35_입장 토큰으로 연 구매 세션의 요청 인증 키로 서명한 홀드는 201이고, 홀드 시도 기록의 여정 ID는 입장 토큰의 jny이며 Stream의 구매 세션 ID는 jti다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-9.1.1]', async () => {
     const w = await world();
@@ -141,6 +180,16 @@ describe('실제 구매 세션으로 홀드', () => {
     expect(w.ev().stream[0]).toMatchObject({ type: 'HELD', purchaseSessionId: f.jti, accountId: f.accountId });
     // 서명이 맞아 일련번호가 올랐다
     expect((await mem.read(f.jti))?.lastSeq).toBe(7);
+  });
+
+  test('HOT080_ 자동 배정 첫 홀드 요청은 본문 clientEphemeralPublicKey로 구매 세션을 열고 201이다', async () => {
+    const w = await world();
+    const f = w.fanNoOpen(6);
+    const r = await postAuto(w.eventId, f);
+    expect(r.statusCode).toBe(201);
+    expect(json(r)).toMatchObject({ assignResult: 'FIRST', seatIds: ['A01', 'A02'] });
+    expect(await mem.read(f.jti)).toBeDefined();
+    expect(w.ev().bits.size).toBe(2);
   });
 
   test('ST28_③_게이트웨이를 거치지 않고 다른 회차 주소를 바로 넣으면 구매 세션 상태의 회차와 달라 403이다. 그 회차 좌석에 변화가 없다 [ASVS v5.0.0-8.2.2]', async () => {

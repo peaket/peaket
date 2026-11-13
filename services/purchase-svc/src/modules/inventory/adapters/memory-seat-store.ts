@@ -15,6 +15,7 @@ import {
   SEAT_STATE_HELD,
   type SeatRef,
 } from '../domain/hold.js';
+import type { AutoAssignResult, AutoHoldInput, AutoHoldResult } from '../domain/auto.js';
 import type { LogGate } from '../domain/log-gate.js';
 import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatRebuildTarget, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
 import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, type RebuildFinishInput, type RebuildSeat, type RebuildStep } from '../domain/rebuild.js';
@@ -60,6 +61,10 @@ export interface MemoryIdemRecord {
   fp: string;
   /** 처음 응답 '{holdId}:{heldAt}:{exp}:{토큰}' */
   resp: string;
+  /** 자동 배정이면 잡은 좌석 색인(직접 선택이면 없다) */
+  seats?: number[];
+  /** 자동 배정이면 배정 결과 유형(직접 선택이면 없다) */
+  assign?: AutoAssignResult;
   /** 이 시각(epoch ms) 이후에는 없는 것으로 본다(= 쓴 시각 + IDEM_TTL_MS) */
   expiresAtMs: number;
 }
@@ -106,6 +111,8 @@ export class MemorySeatEvent {
   readonly secver = new Map<number, number>();
   /** 마지막 펜싱 토큰(10진 글). 없으면 0으로 본다 */
   fence: string | undefined;
+  /** 자동 배정 커서 s:{event:E}:auto_cur(칸 = 조건 글, 값 = 다음 후보 묶음 차례). BUILD_ORDER HOT-080 */
+  readonly autoCur = new Map<string, number>();
   /** 다시 만들기 시도의 판 번호 s:{event:E}:rebuild(시작이 쓴다, 코드 리뷰 PRF-143). 없으면 undefined */
   rebuildGen: number | undefined;
   /**
@@ -365,6 +372,155 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     return { kind: 'OK', holdId: i.holdId, fencingToken: token, heldAtMs: now, expiresAtMs: exp };
   }
 
+  /**
+   * 자동 배정 홀드(BUILD_ORDER HOT-080, auto-hold-lua.ts의 쌍둥이): 페이지의 후보 묶음을 차례로 보고 처음 맞는 묶음을 잡는다.
+   * 메모리도 같은 차례(세대 키 → 멱등 → 정지 → 보유 수 → 후보 → 쓰기)를 따르고, 시각은 주입 Clock이다.
+   */
+  async holdAuto(i: AutoHoldInput, _o?: SeatCallOptions): Promise<AutoHoldResult> {
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    const now = this.clock.now();
+    const sec = Math.floor(now / 1000);
+
+    // 1 세대 키(읽기만. 망가진 세대 칸은 오류)
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    const decided = (r: AutoHoldResult): AutoHoldResult => {
+      this.#ensureEpoch(ep, sec);
+      return r;
+    };
+
+    // 2 멱등 기록
+    const idemKey = `${i.accountId}:${i.idempotencyKey}`;
+    const replayed = this.#replay(ev, idemKey, i.fingerprint, now);
+    if (replayed) {
+      if (replayed.kind === 'IDEM_REPLAY' && replayed.seatIndexes !== undefined && replayed.assignResult !== undefined) {
+        return decided({ kind: 'IDEM_REPLAY', holdId: replayed.holdId, heldAtMs: replayed.heldAtMs, expiresAtMs: replayed.expiresAtMs, fencingToken: replayed.fencingToken, seatIndexes: replayed.seatIndexes, assignResult: replayed.assignResult });
+      }
+      // 자동 배정 지문은 직접 선택 지문과 같을 수 없다(입력이 다르다). 좌석이 없는 옛 기록은 망가진 기록으로 본다
+      throw new Error('자동 배정 멱등 기록에 좌석·배정 결과가 없다');
+    }
+
+    // 3 판매 정지 사본
+    if (STOP_FIELDS.some((f) => ev.ctl.get(f) === '1')) return decided({ kind: 'PAUSED' });
+
+    // 쓰기 전 지킴(hold와 같다): 지난 keepUntil, 표준 10진 정수가 아닌 보유 수·fence
+    if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+    const quotaKey = seatKeys.quota(e, i.accountId);
+    const quota = ev.quota.get(i.accountId);
+    if (quota !== undefined && !isStandardInt(String(quota))) throw new Error(`PEAKET_CORRUPT_KEY ${quotaKey}`);
+    if (ev.fence !== undefined && !DIGITS.test(ev.fence)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.fence(e)}`);
+
+    // 4 보유 수 + 희망 매수
+    const held = quota === undefined ? 0 : Number(quota);
+    if (held + i.count > i.limit) return decided({ kind: 'QUOTA_EXCEEDED' });
+
+    // 5 후보 묶음(비트·방금 놓은 좌석)
+    const rel = ev.rel.get(i.accountId);
+    const free = (s: SeatRef): boolean => !ev.bits.has(s.index) && !(rel !== undefined && (rel.get(s.index) ?? -Infinity) > now);
+    let chosen: SeatRef[] | undefined;
+    let assign: AutoAssignResult | undefined;
+    let chosenGroup = 0;
+    for (let g = 0; g < i.groups.length; g++) {
+      const grp = i.groups[g]!;
+      if (grp.split) {
+        const picked = grp.seats.filter(free).slice(0, i.count);
+        if (picked.length === i.count) {
+          chosen = picked;
+          assign = grp.assignResult;
+          chosenGroup = g + 1;
+          break;
+        }
+      } else if (grp.seats.every(free)) {
+        chosen = [...grp.seats];
+        assign = grp.assignResult;
+        chosenGroup = g + 1;
+        break;
+      }
+    }
+    if (!chosen) {
+      const nextCursor = i.cursor + i.groups.length;
+      this.#ensureEpoch(ep, sec);
+      ev.autoCur.set(i.cursorField, nextCursor);
+      return { kind: 'NEXT', nextCursor };
+    }
+
+    // 쓰기 전 지킴: 고른 좌석의 구역 일련번호(바뀔 구역만 본다)
+    for (const s of chosen) {
+      const v = ev.secver.get(s.sectionIndex);
+      if (v !== undefined && !isStandardInt(String(v))) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.secver(e)}`);
+    }
+
+    // 6 쓰기(여기까지 아무것도 쓰지 않았다)
+    const token = Math.max(Number(ev.fence ?? '0') + 1, now * 1000);
+    if (!Number.isSafeInteger(token)) throw new Error(`PEAKET_FENCE_OVERFLOW 펜싱 토큰이 안전한 정수를 넘는다(fence ${ev.fence})`);
+    const cur = this.#ensureEpoch(ep, sec);
+    const tok = String(token);
+    const exp = now + HOLD_TTL_MS;
+    const extend = (key: string): void => {
+      const at = ev.expireAt.get(key);
+      if (at === undefined || at < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+    };
+    chosen.sort((a, b) => a.index - b.index);
+    ev.fence = tok;
+    for (const s of chosen) {
+      const hk = seatKeys.hold(e, s.index);
+      ev.bits.add(s.index);
+      ev.expireAt.delete(hk);
+      ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0' });
+      ev.expiry.set(s.index, exp);
+      extend(hk);
+    }
+    const seatIndexes = chosen.map((s) => s.index);
+    ev.quota.set(i.accountId, held + chosen.length);
+    ev.idem.set(idemKey, { fp: i.fingerprint, resp: `${i.holdId}:${now}:${exp}:${tok}`, seats: [...seatIndexes], assign: assign!, expiresAtMs: now + IDEM_TTL_MS });
+
+    const version = new Map<number, number>();
+    const deltas = new Map<number, string[]>();
+    for (const s of chosen) {
+      if (!version.has(s.sectionIndex)) {
+        const v = Number(ev.secver.get(s.sectionIndex) ?? 0) + 1;
+        ev.secver.set(s.sectionIndex, v);
+        version.set(s.sectionIndex, v);
+        deltas.set(s.sectionIndex, []);
+      }
+      deltas.get(s.sectionIndex)!.push(`${s.seatOffset}:${SEAT_STATE_HELD}`);
+    }
+    const seatEpoch = String(cur.epoch);
+    for (const s of chosen) {
+      ev.stream.push({
+        type: 'HELD',
+        seatIdx: String(s.index),
+        seatId: s.seatId,
+        tierId: s.tierId,
+        sectionId: s.sectionId,
+        holdId: i.holdId,
+        holdKind: 'FAN',
+        purchaseSessionId: i.purchaseSessionId,
+        accountId: i.accountId,
+        fencingToken: tok,
+        sectionVersion: String(version.get(s.sectionIndex)),
+        seatEpoch,
+        occurredAtMs: String(now),
+        expiresAtMs: String(exp),
+      });
+    }
+    for (const [secIndex, list] of deltas) {
+      ev.published.push({ channel: seatKeys.section(e, String(secIndex)), message: `1 ${seatEpoch} ${secIndex} ${version.get(secIndex)} ${now} ${list.join(' ')}` });
+    }
+    const nextCursor = i.cursor + chosenGroup;
+    ev.autoCur.set(i.cursorField, nextCursor);
+    for (const key of [seatKeys.bitmap(e), seatKeys.expiry(e), quotaKey, seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.fence(e), seatKeys.autoCur(e)]) extend(key);
+    return { kind: 'OK', holdId: i.holdId, fencingToken: token, heldAtMs: now, expiresAtMs: exp, seatIndexes, assignResult: assign!, nextCursor };
+  }
+
+  /** 자동 배정 커서(SeatStore.autoCursor): 메모리 맵에서 읽고, 없거나 안전한 정수가 아니면 0이다 */
+  async autoCursor(eventId: string, field: string): Promise<number> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    const v = this.db.event(eventId).autoCur.get(field);
+    return v !== undefined && Number.isSafeInteger(v) && v >= 0 ? v : 0;
+  }
+
   /** SeatStore.replay: 멱등 기록 하나만 읽는다(지난 것은 없앤다, Redis 키 만료와 같다) */
   async replay(i: ReplayInput, _o?: SeatCallOptions): Promise<ReplayResult> {
     return this.#replay(this.db.event(i.eventId), `${i.accountId}:${i.idempotencyKey}`, i.fingerprint, this.clock.now());
@@ -378,7 +534,12 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       return null;
     }
     if (rec.fp !== fingerprint) return { kind: 'IDEM_REUSED' };
-    return { kind: 'IDEM_REPLAY', ...firstResponseOf(rec.resp) };
+    return {
+      kind: 'IDEM_REPLAY',
+      ...firstResponseOf(rec.resp),
+      ...(rec.seats !== undefined ? { seatIndexes: [...rec.seats] } : {}),
+      ...(rec.assign !== undefined ? { assignResult: rec.assign } : {}),
+    };
   }
 
   async read(i: SnapshotReadInput, _o?: SeatCallOptions): Promise<SnapshotReadResult> {

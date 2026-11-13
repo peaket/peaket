@@ -3,7 +3,8 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
-import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
+import { type AutoCandidateList, type AutoCondition, autoCandidatesOf } from '../domain/auto.js';
+import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
 import type { SaleLayout } from '../domain/sale-state.js';
 import { type ParsedSeatMap, parseEventSeatMapFile, SeatMapFileError, type SectionRange } from '../domain/seat-layout.js';
 
@@ -94,6 +95,8 @@ interface Entry {
   signature: string;
   /** 판매 상태 판정의 좌석표(처음 부를 때 만들어 판마다 한 번만, BUILD_ORDER PRF-144) */
   saleLayout?: SaleLayout;
+  /** 자동 배정 후보(희망 조건별로 한 번 만들어 둔다, BUILD_ORDER HOT-080) */
+  auto?: Map<string, AutoCandidateList>;
 }
 
 const MISSING_TTL_MS = 1000;
@@ -133,7 +136,7 @@ function saleLayoutOf(parsed: ParsedSeatMap): SaleLayout {
  * SeatMap·SeatMapIndex·SeatMapSections·SeatMapTiers의 운영 구현. 처음 부를 때만 파일을 읽고(같은 회차의 동시 요청은 한 번만 읽는다), 없음/틀림은 missingTtlMs 동안 기억한다.
  * refresh()가 읽은 회차를 다시 읽어 바꾼다(실패하면 이전 판을 그대로 둔다. 판 번호와 설정이 같으면 좌석 표를 다시 만들지 않는다).
  */
-export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers {
+export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers, SeatMapAuto {
   readonly #entries = new Map<string, Entry>();
   /** 없음/틀림을 기억하는 회차 → 기억이 끝나는 시각(주입 Clock) */
   readonly #missing = new Map<string, number>();
@@ -165,6 +168,23 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
     if (!e) return undefined;
     e.saleLayout ??= saleLayoutOf(e.parsed);
     return e.saleLayout;
+  }
+
+  /**
+   * 자동 배정 후보(SeatMapAuto). 판매 대상 좌석과 등급으로 domain/auto.ts의 순수 함수가 만든다.
+   * 같은 희망 조건은 판마다 한 번만 만들어 둔다(판이 바뀌면 새 Entry라 저절로 버려진다).
+   */
+  async autoCandidates(eventId: string, condition: AutoCondition): Promise<AutoCandidateList | undefined> {
+    const e = await this.#get(eventId);
+    if (!e) return undefined;
+    const key = `${condition.firstTierId}|${condition.secondTierId ?? ''}|${condition.count}|${condition.wheelchair ? 1 : 0}|${condition.allowSplit ? 1 : 0}`;
+    const cached = e.auto?.get(key);
+    if (cached) return cached;
+    const layout = (e.saleLayout ??= saleLayoutOf(e.parsed));
+    const tiers = new Set(layout.tiers.map((t) => t.tierId));
+    const list = autoCandidatesOf([...e.parsed.byId.values()], condition, tiers);
+    (e.auto ??= new Map()).set(key, list);
+    return list;
   }
 
   /** 읽은 회차를 모두 다시 읽어 바꾼다. 던지지 않는다(실패는 로그 한 줄이고 이전 판을 그대로 둔다) */

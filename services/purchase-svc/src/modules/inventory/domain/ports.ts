@@ -5,6 +5,7 @@
 import type { SessionHoldEntry } from './purchase-session.js';
 import type { HoldReleaseReason } from './hold-lifecycle.js';
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
+import type { AutoCandidateGroup, AutoCandidateList, AutoCondition, AutoHoldInput, AutoHoldResult } from './auto.js';
 import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
 import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEntry, SessionEndReason, SessionStartedEntry, StoredSession, SweepSessionResult } from './purchase-session.js';
@@ -81,6 +82,24 @@ export interface SeatStore {
    * @throws Error 기록의 처음 응답 모양이 틀렸거나 토큰이 안전한 정수가 아님
    */
   replay(i: ReplayInput, o?: SeatCallOptions): Promise<ReplayResult>;
+
+  /**
+   * 자동 배정 홀드(한 원자 연산, BUILD_ORDER HOT-080, 계약은 adapters/auto-hold-lua.ts).
+   * 후보 묶음 페이지(최대 AUTO_CANDIDATE_PAGE개)를 받아 비트맵·방금 놓은 좌석·1인 한도를 한 Lua에서 보고, 처음 맞는 묶음을 잡는다.
+   * 연석 묶음(split=false)은 모든 좌석이 비어야 하고, 분리 묶음(split=true)은 앞에서부터 빈 좌석을 count개 고른다.
+   * 페이지의 후보가 모두 차면 아무것도 쓰지 않고 NEXT와 다음 커서를 돌려준다(부르는 쪽이 다음 페이지를 부른다).
+   * OK·IDEM_REPLAY의 seatIndexes는 잡은 좌석 색인이고, assignResult는 그 묶음의 배정 결과 유형이다.
+   * 멱등 기록은 fp·resp에 더해 seats(색인 쉼표 글)·assign(결과 유형)을 남겨 재생 때 같은 좌석을 돌려준다.
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   * @throws Error 스크립트 오류 같은 버그
+   */
+  holdAuto(i: AutoHoldInput, o?: SeatCallOptions): Promise<AutoHoldResult>;
+
+  /**
+   * 자동 배정 커서 s:{event:E}:auto_cur의 칸(등급·매수·휠체어·분리 조건)을 읽는다. 없거나 0 이상의 안전한 정수가 아니면 0이다.
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애
+   */
+  autoCursor(eventId: string, field: string): Promise<number>;
 
   /**
    * 판매 열기(시험·시드 데이터용, HTTP로 열지 않는다. 운영의 판매 승인 경로는 LCH-080).
@@ -321,6 +340,20 @@ export interface SeatMapTiers {
    */
   saleLayout(eventId: string): Promise<SaleLayout | undefined>;
 }
+
+/**
+ * 좌석맵 판의 자동 배정 후보(BUILD_ORDER HOT-080, docs/features/seat-hold.md §3 '자동 좌석 배정 모드').
+ * SeatMap과 같은 객체가 맡는다(LayoutSeatMap·MemorySeatMap). 판이 없으면 undefined.
+ */
+export interface SeatMapAuto {
+  /**
+   * 희망 조건에 맞는 후보 묶음 전체와 판매 대상 등급 ID. 후보 만들기는 domain/auto.ts의 순수 함수가 한다.
+   * @returns 그 회차의 판이 없으면 undefined. 판은 있으나 등급이 없으면 tiers에 없고 groups는 빈 목록일 수 있다
+   */
+  autoCandidates(eventId: string, condition: AutoCondition): Promise<AutoCandidateList | undefined>;
+}
+
+export const SEAT_MAP_AUTO = Symbol('purchase.SeatMapAuto');
 
 /** 좌석 Redis 셈 읽기의 결과(SaleCountsReader.read) */
 export type SaleCountsRead =
@@ -670,8 +703,8 @@ export interface HoldAttemptRecord {
   purchaseSessionId: string;
   /** 구매 세션의 여정 ID */
   journeyId: string;
-  /** 직접 선택만 있다(자동 배정 AUTO는 wbs 2.5.4) */
-  mode: 'PICK';
+  /** 직접 선택(PICK) 또는 자동 배정(AUTO, BUILD_ORDER HOT-080) */
+  mode: 'PICK' | 'AUTO';
   /** 시도한 좌석 ID(결과와 관계없이 요청 본문의 seatIds를 보낸 차례 그대로, 겹친 것도 그대로) */
   seatIds: string[];
   /** 요청 seatIds 첫 좌석의 등급(여러 등급이 섞여도 첫 좌석의 것). 첫 좌석을 좌석맵 판에서 찾기 전에 거절했거나 판에 없으면 없다 */

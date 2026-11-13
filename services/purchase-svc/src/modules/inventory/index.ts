@@ -1,6 +1,7 @@
 // inventory 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { ENSURE_EPOCH, HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
+export { AUTO_HOLD_LUA } from './adapters/auto-hold-lua.js';
 export { ORDER_HOLD_LUA } from './adapters/order-hold-lua.js';
 export { RedisHoldLifecycle, holdLifecycleKeys } from './adapters/redis-hold-lifecycle.js';
 export * from './domain/hold-lifecycle.js';
@@ -136,7 +137,7 @@ export {
   type SaleTierIndexes,
 } from './domain/sale-state.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
-export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
+export { PURCHASE_ECDH_KEY_ENV, PURCHASE_ECDH_KEY_PREV_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
 export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
 export {
   ExpirySweeper,
@@ -291,6 +292,21 @@ export {
   type SeatStoreUnavailableReason,
 } from './domain/hold.js';
 export {
+  AUTO_CANDIDATE_MAX,
+  AUTO_CANDIDATE_PAGE,
+  AUTO_SPLIT_GROUP_MAX,
+  autoCandidatesOf,
+  autoConditionProblem,
+  autoFingerprint,
+  type AutoAssignResult,
+  type AutoCandidateGroup,
+  type AutoCandidateList,
+  type AutoCondition,
+  type AutoConditionProblem,
+  type AutoHoldInput,
+  type AutoHoldResult,
+} from './domain/auto.js';
+export {
   CLIENT_KEY_PATTERN,
   SESSION_IDLE_MS,
   SESSION_KEY_GRACE_MS,
@@ -359,6 +375,7 @@ export {
   SEAT_STORE,
   SESSION_STARTED_LOG,
   SWEEP_LEASES,
+  SEAT_MAP_AUTO,
   noSaleStateSignals,
   noSeatSignals,
   type EventSaleChange,
@@ -387,6 +404,7 @@ export {
   type SeatCallOptions,
   type SeatExpiries,
   type SeatMap,
+  type SeatMapAuto,
   type SeatMapIndex,
   type SeatMapSections,
   type SeatEventRetire,

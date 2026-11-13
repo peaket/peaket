@@ -24,6 +24,7 @@ import {
   PURCHASE_SESSIONS,
   type PurchaseSessionStore,
   SEAT_MAP,
+  SEAT_MAP_AUTO,
   SEAT_MAP_SECTIONS,
   SEAT_SALES,
   SEAT_SNAPSHOTS,
@@ -37,6 +38,7 @@ import {
   SEAT_SIGNALS,
   SEAT_STORE,
   type SeatMap,
+  type SeatMapAuto,
   type SeatMapIndex,
   type SeatSignals,
   type SeatStore,
@@ -77,12 +79,12 @@ export type InventoryModuleOptions = (
    * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop).
    * onHoldsExpired는 만료로 푼 홀드를 알리는 고리다(BUILD_ORDER PRF-172. 운영은 purchase DB가 있을 때 booking OrderExpiry.onHoldsExpired를 잇는다)
    */
-  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
+  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
   /**
    * 시험: 넘기지 않은 것은 새로 만든다(저장소 MemorySeatStore(주입 Clock), 좌석맵 MemorySeatMap, 시도 기록 RecordingHoldAttempts, 지표 버림).
    * 만료 반복은 만들지 않는다(시험은 ExpirySweeper를 직접 만들어 손으로 tick한다)
    */
-  | { storage: 'memory'; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
+  | { storage: 'memory'; store?: SeatStore; seatMap?: SeatMap & SeatMapSections & SeatMapAuto; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
 ) & {
   /** 스냅샷 API·홀드 기록. 없으면 스냅샷 경로를 열지 않는다(기존 시험·조립) */
   admission?: AdmissionOptions;
@@ -114,6 +116,7 @@ export class InventoryModule {
             },
             { provide: SWEEP_LEASES, useClass: RedisSweepLeases },
             { provide: SEAT_MAP, useValue: o.seatMap },
+            { provide: SEAT_MAP_AUTO, useExisting: SEAT_MAP },
             { provide: HOLD_ATTEMPTS, useValue: o.attempts },
             {
               provide: ExpirySweeper,
@@ -127,6 +130,7 @@ export class InventoryModule {
               ? { provide: SEAT_STORE, useValue: o.store }
               : { provide: SEAT_STORE, useFactory: (clock: Clock, logger?: PlatformLogger) => new MemorySeatStore(clock, logger), inject: [CLOCK, optionalLogger] },
             { provide: SEAT_MAP, useValue: o.seatMap ?? new MemorySeatMap() },
+            { provide: SEAT_MAP_AUTO, useExisting: SEAT_MAP },
             { provide: HOLD_ATTEMPTS, useValue: o.attempts ?? new RecordingHoldAttempts() },
           ];
     const optionalLoggerToken = { token: PLATFORM_LOGGER, optional: true };

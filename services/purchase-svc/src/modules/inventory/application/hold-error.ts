@@ -14,8 +14,16 @@ export type HoldErrorCode =
   | 'SESSION_NOT_FOUND'
   /** 구매 세션에 적힌 회차가 주소의 회차와 다르다(S-T28 ③) */
   | 'EVENT_MISMATCH'
-  /** 본문에 auto(자동 배정 희망 조건)가 있다. 자동 배정은 wbs 2.5.4에서 연다 */
+  /** 본문에 auto(자동 배정 희망 조건)가 있다. 자동 배정을 조립하지 않은 경우 */
   | 'AUTO_NOT_SUPPORTED'
+  /** 본문에 seatIds와 auto가 함께 있다 */
+  | 'AUTO_AND_SEATS'
+  /** auto의 등급이 그 공연 판에 없다 */
+  | 'AUTO_TIER_UNKNOWN'
+  /** auto의 조합 규칙 위반(같은 등급 중복·휠체어석 없는 등급) */
+  | 'AUTO_CONDITION_INVALID'
+  /** auto 후보를 모두 찾지 못했다(아무 좌석도 잡지 않았다) */
+  | 'MANUAL_SELECTION_REQUIRED'
   /** 본문에 seatIds도 auto도 없다 */
   | 'SEATS_REQUIRED'
   /** 좌석맵 판에 없는 좌석·다른 회차의 좌석·판매 제외석·같은 좌석 두 번(S-T30, seat-hold.md §3 '좌석 ID 확인') */
@@ -99,6 +107,10 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
     title: '좌석 자동 배정은 아직 받지 않습니다',
     detail: '지금은 좌석 지정(seatIds)만 받습니다',
   },
+  AUTO_AND_SEATS: { status: 400, type: 'auto-condition-invalid', title: '희망 조건이 올바르지 않습니다', detail: 'seatIds와 auto 가운데 하나만 보냅니다' },
+  AUTO_TIER_UNKNOWN: { status: 400, type: 'auto-condition-invalid', title: '희망 조건이 올바르지 않습니다', detail: '그 공연에 없는 등급입니다' },
+  AUTO_CONDITION_INVALID: { status: 422, type: 'invalid-auto-condition', title: '희망 조건을 다시 확인해 주세요' },
+  MANUAL_SELECTION_REQUIRED: { status: 409, type: 'manual-selection-required', title: '좌석을 직접 골라 주세요', normalBranch: true },
   SEATS_REQUIRED: { status: 400, type: 'about:blank', title: 'Bad Request' },
   INVALID_SEAT: { status: 422, type: 'invalid-seat', title: '고를 수 없는 좌석이 있습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },

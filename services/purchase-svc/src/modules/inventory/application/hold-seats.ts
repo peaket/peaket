@@ -16,6 +16,7 @@ import {
   SeatStoreUnavailable,
 } from '../domain/hold.js';
 import { holdSeatsView } from '../domain/hold-lifecycle.js';
+import { type AutoAssignResult, type AutoCondition, AUTO_CANDIDATE_PAGE, autoConditionProblem, autoFingerprint, type AutoHoldResult } from '../domain/auto.js';
 import { seatLuaErrorOf } from '../domain/lua-errors.js';
 import {
   HOLD_ATTEMPTS,
@@ -26,12 +27,15 @@ import {
   type PurchaseSessions,
   type ResolvedPurchaseSessionInfo,
   SEAT_MAP,
+  SEAT_MAP_AUTO,
   SEAT_SIGNALS,
   SESSION_HOLDS,
   type SessionHolds,
   SEAT_STORE,
+  type EventSeatConfig,
   type SeatCallOptions,
   type SeatMap,
+  type SeatMapAuto,
   type SeatSignals,
   type SeatStore,
 } from '../domain/ports.js';
@@ -42,8 +46,8 @@ import { SEAT_BEHAVIOR, type SeatBehaviorReporter } from './seat-behavior.js';
 export interface HoldBody {
   /** 직접 선택 좌석 ID(1~10개, 겹침 없음, 좌석 ID 모양은 경로 스키마가 확인했다) */
   seatIds?: readonly string[];
-  /** 자동 배정 희망 조건(모양만 확인했다). PRF-130 ①은 받지 않는다 */
-  auto?: object;
+  /** 자동 배정 희망 조건(모양은 경로 스키마가 확인했다, BUILD_ORDER HOT-080) */
+  auto?: AutoCondition;
   /** 좌석 화면 행동 요약(모양은 경로 스키마가 확인했다. 홀드 판정에 쓰지 않는다, BUILD_ORDER BOT-055) */
   behavior?: Record<string, unknown>;
 }
@@ -86,6 +90,8 @@ export interface HoldResponse {
   /** 좌석 표시 값과 정가 합(가격이 없는 등급이 있으면 뺀다, BUILD_ORDER HOT-070) */
   seats?: { seatId: string; label: string; tierId: string; tierName?: string; price: number }[];
   totalAmount?: number;
+  /** 자동 배정 결과 유형(직접 선택이면 없다, BUILD_ORDER HOT-080) */
+  assignResult?: AutoAssignResult;
 }
 
 @Injectable()
@@ -106,6 +112,8 @@ export class HoldSeats {
     @Optional() @Inject(SEAT_BEHAVIOR) private readonly seatBehavior?: SeatBehaviorReporter,
     /** 핫패스 구간 진단(BAT-027). 주입하지 않으면 계측하지 않는다 */
     @Optional() @Inject(HOT_PATH_METRICS) private readonly hotPath?: HotPathMetrics,
+    /** 자동 배정 후보(BUILD_ORDER HOT-080). 주입하지 않으면 auto 요청을 400으로 거절한다 */
+    @Optional() @Inject(SEAT_MAP_AUTO) private readonly autoMap?: SeatMapAuto,
   ) {}
 
   /** 좌석 Redis 일시 장애(SeatStoreUnavailable)로 503을 낼 때: 미룸 지표 seat_hold_deferred_total{reason="store_unavailable"}을 올리고 503 오류를 돌려준다(PRF-143) */
@@ -255,7 +263,10 @@ export class HoldSeats {
     if (session.eventId !== c.eventId) throw refuse('EVENT_MISMATCH', '구매 세션의 회차와 주소의 회차가 다르다');
 
     // 2 본문(기록 없음)
-    if (c.body.auto !== undefined) throw new HoldError('AUTO_NOT_SUPPORTED', '자동 배정은 아직 받지 않는다(wbs 2.5.4)');
+    if (c.body.auto !== undefined) {
+      if (c.body.seatIds !== undefined) throw new HoldError('AUTO_AND_SEATS', 'seatIds와 auto 가운데 하나만 보낸다');
+      return this.#executeAuto(c, session, started);
+    }
     if (requested.length === 0) throw new HoldError('SEATS_REQUIRED', '본문에 seatIds가 없다');
 
     // 좌석 화면 행동 요약: 홀드 결과와 상관없이 세션마다 처음 것 하나만 낸다(기다리지 않는다, 판정에 쓰지 않는다)
@@ -371,6 +382,194 @@ export class HoldSeats {
         throw new HoldError('QUOTA_EXCEEDED', '1인 한도를 넘는다');
     }
   }
+
+  /**
+   * 자동 배정 홀드(BUILD_ORDER HOT-080, docs/features/seat-hold.md §3 '자동 좌석 배정 모드').
+   * 차례: 세션·본문 → 회차 설정·판매 종료 → 희망 조건 검사 → 후보 목록 → 커서부터 4페이지까지 holdAuto → 없으면 409 manual-selection-required.
+   * 앱 쪽 거절(설정 없음·판매 종료·후보 없음) 전에 멱등 재생을 먼저 본다(직접 선택과 같다).
+   */
+  async #executeAuto(c: HoldCommand, session: ResolvedPurchaseSessionInfo, started: number): Promise<HoldResponse> {
+    const auto = c.body.auto;
+    if (!auto) throw new HoldError('SEATS_REQUIRED', '본문에 auto가 없다');
+    let chosen: SeatRef[] = [];
+    let assignResult: AutoAssignResult | undefined;
+    /** 자동 배정 시도 하나를 남긴다(mode AUTO, seatIds는 잡은 좌석 또는 실패 시 빈 목록) */
+    const record = (result: HoldAttemptResult, heldAtMs?: number, firstHeldInSession?: boolean): void => {
+      timeHotPathSync(this.hotPath, 'hold.attempts', () =>
+        this.attempts.record({
+          eventId: c.eventId,
+          accountId: c.accountId,
+          purchaseSessionId: c.purchaseSessionId,
+          journeyId: session.journeyId,
+          mode: 'AUTO',
+          seatIds: chosen.map((s) => s.seatId),
+          ...(chosen[0] ? { tierId: chosen[0].tierId, sectionId: chosen[0].sectionId } : {}),
+          result,
+          ...(heldAtMs !== undefined ? { heldAtMs } : {}),
+          ...(firstHeldInSession !== undefined ? { firstHeldInSession } : {}),
+          occurredAtMs: this.clock.now(),
+          latencyMs: Math.max(0, this.clock.monotonicMs() - started),
+        }),
+      );
+    };
+    const refuse = (code: HoldErrorCode, message: string, details?: HoldErrorDetails): HoldError => {
+      record('ERROR');
+      return new HoldError(code, message, details);
+    };
+    const callOptions = (): SeatCallOptions | undefined => {
+      const d = c.deadline;
+      if (!d) return undefined;
+      if (d.remainingMs() < SEAT_CALL_MIN_REMAINING_MS) throw refuse('DEADLINE_EXCEEDED', '남은 시간이 모자라 좌석 Redis를 부르지 않았다');
+      return { deadlineMs: Math.max(1, Math.floor(d.budgetFor(SEAT_CALL_CAP_MS))) };
+    };
+    /** 자동 배정 멱등 재생: 같은 조건의 처음 201을 그대로 돌려준다. 좌석 색인은 지금 후보 목록에서 찾는다 */
+    const replay = async (config: EventSeatConfig | undefined): Promise<HoldResponse | undefined> => {
+      const opt = callOptions();
+      let r: ReplayResult;
+      try {
+        r = await timeHotPath(this.hotPath, 'hold.replay', () =>
+          this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: autoFingerprint(auto) }, opt),
+        );
+      } catch (err) {
+        record('ERROR');
+        if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
+        throw err;
+      }
+      if (r === null) return undefined;
+      if (r.kind === 'IDEM_REUSED') throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 희망 조건이다');
+      if (r.seatIndexes === undefined || r.assignResult === undefined) throw refuse('NOT_READY', '자동 배정 재생 기록에 좌석이 없다');
+      const refs = await this.#autoSeatsOf(c.eventId, auto, r.seatIndexes);
+      if (!refs) throw refuse('NOT_READY', '자동 배정 재생 좌석을 지금 판에서 찾지 못했다');
+      chosen = refs;
+      assignResult = r.assignResult;
+      const viewRefs = [...refs].sort((a, b) => byCodeUnit(a.seatId, b.seatId));
+      return responseOf(r, sortedIds(viewRefs.map((s) => s.seatId)), config ? holdSeatsView(viewRefs, config) : undefined, r.assignResult);
+    };
+
+    // 3 회차 설정, 4 판매 종료(주입 시계)
+    const config = await timeHotPath(this.hotPath, 'hold.seat_config', () => this.seatMap.config(c.eventId));
+    if (!config) {
+      const replayed = await replay(undefined);
+      if (replayed) return replayed;
+      throw refuse('NOT_READY', '그 회차의 좌석맵 판이 없다');
+    }
+    if (this.clock.now() >= config.saleEndsAtMs) {
+      const replayed = await replay(config);
+      if (replayed) return replayed;
+      throw refuse('SALE_ENDED', '판매 종료 뒤의 새 홀드다');
+    }
+
+    // 5 희망 조건과 후보
+    if (!this.autoMap) throw refuse('AUTO_NOT_SUPPORTED', '자동 배정을 조립하지 않았다');
+    const list = await timeHotPath(this.hotPath, 'hold.auto_candidates', () => this.autoMap!.autoCandidates(c.eventId, auto));
+    if (!list) {
+      const replayed = await replay(config);
+      if (replayed) return replayed;
+      throw refuse('NOT_READY', '그 회차의 좌석맵 판이 없다');
+    }
+    const problem = autoConditionProblem(auto, new Set(list.tiers), list.wheelchairSeats, config.perAccountLimit);
+    if (problem === 'UNKNOWN_TIER') throw new HoldError('AUTO_TIER_UNKNOWN', '희망 조건에 그 공연에 없는 등급이 있다');
+    if (problem === 'SAME_TIER' || problem === 'NO_WHEELCHAIR_SEATS') throw refuse('AUTO_CONDITION_INVALID', '희망 조건 조합이 규칙에 맞지 않는다');
+    if (problem === 'COUNT_OVER_LIMIT') {
+      record('LIMIT');
+      throw new HoldError('QUOTA_EXCEEDED', '1인 한도를 넘는다');
+    }
+    if (list.groups.length === 0) {
+      const replayed = await replay(config);
+      if (replayed) return replayed;
+      throw refuse('MANUAL_SELECTION_REQUIRED', '희망 조건에 맞는 좌석이 없다');
+    }
+
+    // 6 커서부터 4페이지까지 찾는다(각 페이지는 최대 AUTO_CANDIDATE_PAGE 묶음)
+    const field = autoCursorField(auto);
+    let cursor = await timeHotPath(this.hotPath, 'hold.auto_cursor', () => this.store.autoCursor(c.eventId, field));
+    if (cursor >= list.groups.length) cursor = 0;
+    for (let page = 0; page < 4; page++) {
+      const groups = list.groups.slice(cursor, cursor + AUTO_CANDIDATE_PAGE);
+      if (groups.length === 0) break;
+      const opt = callOptions();
+      let r: AutoHoldResult;
+      try {
+        r = await timeHotPath(this.hotPath, 'hold.auto', () =>
+          this.store.holdAuto(
+            {
+              eventId: c.eventId,
+              accountId: c.accountId,
+              purchaseSessionId: c.purchaseSessionId,
+              holdId: uuidv7(this.clock),
+              idempotencyKey: c.idempotencyKey,
+              fingerprint: autoFingerprint(auto),
+              count: auto.count,
+              groups,
+              cursor,
+              cursorField: field,
+              limit: config.perAccountLimit,
+              keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
+            },
+            opt,
+          ),
+        );
+      } catch (err) {
+        record('ERROR');
+        if (err instanceof SeatStoreUnavailable) {
+          if (err.reason === 'oom') this.signals.luaError('hold', 'OOM');
+          throw this.#deferred(err);
+        }
+        this.signals.luaError('hold', seatLuaErrorOf(err)?.code ?? 'OTHER');
+        throw err;
+      }
+      switch (r.kind) {
+        case 'OK':
+        case 'IDEM_REPLAY': {
+          const refs = await this.#autoSeatsOf(c.eventId, auto, r.seatIndexes);
+          if (!refs) throw refuse('NOT_READY', '자동 배정 좌석을 지금 판에서 찾지 못했다');
+          chosen = refs;
+          assignResult = r.assignResult;
+          if (r.kind === 'OK') record('HELD', r.heldAtMs, await this.#recordHold(c.purchaseSessionId, r.holdId, refs.map((s) => s.seatId), c.deadline));
+          const viewRefs = [...refs].sort((a, b) => byCodeUnit(a.seatId, b.seatId));
+          return responseOf(r, sortedIds(viewRefs.map((s) => s.seatId)), holdSeatsView(viewRefs, config), r.assignResult);
+        }
+        case 'NEXT': {
+          const next = list.groups.length > 0 ? r.nextCursor % list.groups.length : 0;
+          if (next === cursor) break;
+          cursor = next;
+          continue;
+        }
+        case 'NOT_READY':
+          this.signals.luaError('hold', 'NOT_READY');
+          this.signals.holdDeferred?.('not_ready');
+          throw refuse('NOT_READY', '세대 키가 없다(좌석 저장소가 준비되지 않음)');
+        case 'IDEM_REUSED':
+          throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 희망 조건이다');
+        case 'PAUSED':
+          throw refuse('PAUSED', '판매 정지 중이다');
+        case 'QUOTA_EXCEEDED':
+          record('LIMIT');
+          throw new HoldError('QUOTA_EXCEEDED', '1인 한도를 넘는다');
+      }
+    }
+
+    // 7 모두 실패: 아무 좌석도 잡지 않았고, 수동 선택으로 넘긴다
+    const replayed = await replay(config);
+    if (replayed) return replayed;
+    throw refuse('MANUAL_SELECTION_REQUIRED', '희망 조건에 맞는 좌석이 없다');
+  }
+
+  /** 자동 배정 재생·결과의 좌석 색인을 지금 후보 목록에서 찾는다(없으면 undefined) */
+  async #autoSeatsOf(eventId: string, auto: AutoCondition, indexes: readonly number[]): Promise<SeatRef[] | undefined> {
+    if (!this.autoMap) return undefined;
+    const list = await this.autoMap.autoCandidates(eventId, auto);
+    if (!list) return undefined;
+    const byIndex = new Map<number, SeatRef>();
+    for (const g of list.groups) for (const s of g.seats) byIndex.set(s.index, s);
+    const out: SeatRef[] = [];
+    for (const i of indexes) {
+      const s = byIndex.get(i);
+      if (!s) return undefined;
+      out.push(s);
+    }
+    return out;
+  }
 }
 
 /** 좌석 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */
@@ -378,8 +577,21 @@ const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0
 const sortedIds = (ids: readonly string[]): string[] => [...ids].sort(byCodeUnit);
 
 /** 201 본문(처음 응답이든 재생이든 저장소가 준 holdId·토큰·만료 시각) */
-function responseOf(h: HeldHold, seatIds: string[], view?: ReturnType<typeof holdSeatsView>): HoldResponse {
-  return { holdId: h.holdId, seatIds, expiresAt: new Date(h.expiresAtMs).toISOString(), extendable: true, fencingToken: h.fencingToken, ...(view ?? {}) };
+function responseOf(h: HeldHold, seatIds: string[], view?: ReturnType<typeof holdSeatsView>, assignResult?: AutoAssignResult): HoldResponse {
+  return {
+    holdId: h.holdId,
+    seatIds,
+    expiresAt: new Date(h.expiresAtMs).toISOString(),
+    extendable: true,
+    fencingToken: h.fencingToken,
+    ...(view ?? {}),
+    ...(assignResult !== undefined ? { assignResult } : {}),
+  };
+}
+
+/** 자동 배정 커서 s:{event:E}:auto_cur의 칸 이름(등급·매수·휠체어·분리·2순위) */
+function autoCursorField(c: AutoCondition): string {
+  return `${c.firstTierId}:${c.count}:${c.wheelchair ? 1 : 0}:${c.allowSplit ? 1 : 0}:${c.secondTierId ?? ''}`;
 }
 
 /** HoldError를 핫패스 결과 이름으로 바꾼다(고정 목록, 카디널리티 낮춤). 모르는 오류는 error다 */
@@ -411,7 +623,12 @@ function holdOutcomeOf(err: unknown): HotPathOutcome {
     case 'STORE_UNAVAILABLE':
       return 'store_unavailable';
     case 'AUTO_NOT_SUPPORTED':
+    case 'AUTO_AND_SEATS':
+    case 'AUTO_TIER_UNKNOWN':
     case 'SEATS_REQUIRED':
+      return 'invalid_request';
+    case 'AUTO_CONDITION_INVALID':
+    case 'MANUAL_SELECTION_REQUIRED':
       return 'invalid_request';
     default:
       return 'error';

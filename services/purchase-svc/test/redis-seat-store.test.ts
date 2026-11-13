@@ -3,9 +3,14 @@
 import { type HotRedis, RedisDeadlineError, type RedisScript } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import {
+  AUTO_HOLD_LUA,
+  autoFingerprint,
+  type AutoCondition,
+  type AutoHoldInput,
   EXPIRE_LUA,
   type ExpireInput,
   type ExpireSeat,
+  HOLD_TTL_MS,
   RedisSeatStore,
   RedisSweepLeases,
   REHOLD_WAIT_MS,
@@ -365,5 +370,75 @@ describe('RedisSweepLeases(만료 임대 s:{event:E}:sweep, 한 번에 끝나는
     expect(!down.ok && down.x instanceof SeatStoreUnavailable && down.x.reason).toBe('unavailable');
     const bug = new Error('WRONGTYPE Operation against a key holding the wrong kind of value');
     await expect(new RedisSweepLeases(failing(bug).redis).acquire(E, 'pod-a', 3000)).rejects.toBe(bug);
+  });
+});
+
+describe('RedisSeatStore.holdAuto(자동 배정 Lua 한 번)', () => {
+  const cond: AutoCondition = { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false };
+  const groups = [{ assignResult: 'FIRST' as const, split: false, seats: [ref('A01'), ref('A02')] }];
+  const input: AutoHoldInput = {
+    eventId: E,
+    accountId: ACCOUNT_A,
+    purchaseSessionId: 'ps-a',
+    holdId: 'h-auto',
+    idempotencyKey: 'idem-auto',
+    fingerprint: autoFingerprint(cond),
+    count: 2,
+    groups,
+    cursor: 0,
+    cursorField: 'R:2:0:0:',
+    limit: 4,
+    keepUntilMs: KEEP,
+  };
+
+  test('HOT080_ 자동 배정 Lua의 KEYS·ARGV와 OK 결과(좌석 색인·배정 결과·다음 커서)를 옮긴다', async () => {
+    const f = fake(() => ['OK', '1700000000000001', '1700000000000000', '1700000000042000', '0,1', 'FIRST', '1']);
+    const r = await new RedisSeatStore(f.redis).holdAuto(input);
+    expect(r).toEqual({ kind: 'OK', holdId: 'h-auto', fencingToken: 1700000000000001, heldAtMs: 1700000000000000, expiresAtMs: 1700000000042000, seatIndexes: [0, 1], assignResult: 'FIRST', nextCursor: 1 });
+    const c = f.calls[0]!;
+    expect(c.kind).toBe('eval');
+    expect(c.script!.source).toBe(AUTO_HOLD_LUA);
+    expect(c.keys).toEqual([
+      seatKeys.bitmap(E),
+      seatKeys.expiry(E),
+      seatKeys.quota(E, ACCOUNT_A),
+      seatKeys.stream(E),
+      seatKeys.idem(E, ACCOUNT_A, 'idem-auto'),
+      seatKeys.epoch(E),
+      seatKeys.ctl(E),
+      seatKeys.rel(E, ACCOUNT_A),
+      seatKeys.secver(E),
+      seatKeys.fence(E),
+      seatKeys.autoCur(E),
+      seatKeys.hold(E, 0),
+      seatKeys.hold(E, 1),
+    ]);
+    expect(c.args.slice(0, 16)).toEqual([ACCOUNT_A, 'ps-a', 'h-auto', autoFingerprint(cond), '4', String(HOLD_TTL_MS), String(KEEP), seatKeys.section(E, ''), 'R:2:0:0:', '0', '1', '2', 'FIRST', '0', '2', '0']);
+  });
+
+  test('HOT080_ NEXT·IDEM_REPLAY·autoCursor·replay의 값을 옮긴다', async () => {
+    const next = fake(() => ['NEXT', '4']);
+    expect(await new RedisSeatStore(next.redis).holdAuto(input)).toEqual({ kind: 'NEXT', nextCursor: 4 });
+
+    const replay = fake(() => ['IDEM_REPLAY', 'h', '1', '2', '3', '0,1', 'FIRST']);
+    expect(await new RedisSeatStore(replay.redis).holdAuto(input)).toEqual({ kind: 'IDEM_REPLAY', holdId: 'h', heldAtMs: 1, expiresAtMs: 2, fencingToken: 3, seatIndexes: [0, 1], assignResult: 'FIRST' });
+
+    const cursor = fake((c) => (c.kind === 'command' ? ['1'] : null));
+    expect(await new RedisSeatStore(cursor.redis).autoCursor(E, 'R:2:0:0:')).toBe(1);
+    const missing = fake(() => [null]);
+    expect(await new RedisSeatStore(missing.redis).autoCursor(E, 'R:2:0:0:')).toBe(0);
+    const bad = fake(() => ['01']);
+    expect(await new RedisSeatStore(bad.redis).autoCursor(E, 'R:2:0:0:')).toBe(0);
+
+    const replayed = fake((c) => (c.kind === 'command' ? ['fp', 'h:1:2:3', '0,1', 'FIRST'] : null));
+    expect(await new RedisSeatStore(replayed.redis).replay({ eventId: E, accountId: ACCOUNT_A, idempotencyKey: 'idem-auto', fingerprint: 'fp' })).toEqual({
+      kind: 'IDEM_REPLAY',
+      holdId: 'h',
+      heldAtMs: 1,
+      expiresAtMs: 2,
+      fencingToken: 3,
+      seatIndexes: [0, 1],
+      assignResult: 'FIRST',
+    });
   });
 });

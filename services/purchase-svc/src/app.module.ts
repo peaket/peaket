@@ -10,6 +10,7 @@ import {
   InventoryModule,
   type PurchaseSessionAccess,
   type SeatMap,
+  type SeatMapAuto,
   type SeatMapIndex,
   type SeatMapSections,
   type SeatSales,
@@ -39,8 +40,8 @@ export class AppModule implements NestModule {
    */
   static register(
     o: (
-      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
-      | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
+      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
+      | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections & SeatMapAuto; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
     ) & {
       sessions: PurchaseSessionAccess;
       /** 스냅샷 API·홀드 기록(BUILD_ORDER PRF-137). 없으면 스냅샷 경로를 열지 않는다 */

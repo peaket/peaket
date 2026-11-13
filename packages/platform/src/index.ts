@@ -160,6 +160,7 @@ export {
   purchaseMac,
   purchaseMacInput,
   purchaseRequestKey,
+  verifyPurchaseRequest,
   type PurchaseRejection,
   type PurchaseSession,
   type PurchaseSessionPort,

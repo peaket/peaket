@@ -254,6 +254,8 @@ async function deferWorld(o: DeferWorld = {}) {
   const inner = new MemorySeatStore(clock);
   const store: SeatStore & ReplayPort = {
     hold: async (i) => (o.hold ? o.hold(i) : inner.hold(i)),
+    holdAuto: (i, opt) => inner.holdAuto(i, opt),
+    autoCursor: (eventId, field) => inner.autoCursor(eventId, field),
     openSale: (i) => inner.openSale(i),
     replay: async (i) => (o.replay ? o.replay(i) : replayOf(inner)(i)),
   };

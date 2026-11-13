@@ -4,6 +4,8 @@
 import { createECDH, createPrivateKey, diffieHellman, type KeyObject } from 'node:crypto';
 
 export const PURCHASE_ECDH_KEY_ENV = 'PEAKET_PURCHASE_ECDH_KEY';
+/** 키 교체 중에 함께 받는 옛 개인 JWK(선택, BOT-100). 있으면 옛 키로 서명한 요청도 받는다 */
+export const PURCHASE_ECDH_KEY_PREV_ENV = 'PEAKET_PURCHASE_ECDH_KEY_PREV';
 
 const KID = /^[A-Za-z0-9_.-]{1,64}$/;
 /** P-256 좌표·개인 스칼라는 32바이트 = base64url 43자 */
@@ -23,9 +25,11 @@ export class ServerEcdhKey {
   readonly #priv: KeyObject;
   readonly #x: string;
   readonly #y: string;
+  /** 키 교체 중 함께 받는 옛 키(없으면 undefined). 이 키로 합의한 요청도 통과시킨다(BOT-100) */
+  readonly previous?: ServerEcdhKey;
 
   /** 오류 문구에는 키 값을 싣지 않는다 */
-  constructor(jwk: ServerEcdhJwk) {
+  constructor(jwk: ServerEcdhJwk, previous?: ServerEcdhKey) {
     const j = jwk as unknown as Record<string, unknown>;
     if (j.kty !== 'EC' || j.crv !== 'P-256') throw new Error(`${PURCHASE_ECDH_KEY_ENV}는 P-256 JWK여야 한다(ECDH)`);
     if (typeof j.d !== 'string' || !COORD.test(j.d)) throw new Error(`${PURCHASE_ECDH_KEY_ENV}는 개인 JWK여야 한다(d가 없거나 모양이 틀렸다)`);
@@ -46,19 +50,29 @@ export class ServerEcdhKey {
     this.kid = j.kid;
     this.#x = j.x;
     this.#y = j.y;
+    this.previous = previous;
   }
 
   static fromEnv(env: Readonly<Record<string, string | undefined>>): ServerEcdhKey {
-    const raw = env[PURCHASE_ECDH_KEY_ENV];
-    if (!raw) throw new Error(`${PURCHASE_ECDH_KEY_ENV}가 없다(구매 세션 서버 ECDH 개인 JWK, 비밀 관리에서 넣는다)`);
+    const current = ServerEcdhKey.#parseJwk(env, PURCHASE_ECDH_KEY_ENV);
+    const raw = env[PURCHASE_ECDH_KEY_PREV_ENV];
+    const previous = raw === undefined || raw === '' ? undefined : new ServerEcdhKey(ServerEcdhKey.#parseJwk(env, PURCHASE_ECDH_KEY_PREV_ENV));
+    const key = new ServerEcdhKey(current, previous);
+    if (previous && previous.kid === key.kid) throw new Error(`${PURCHASE_ECDH_KEY_PREV_ENV}의 kid가 현재 키와 같다(키 교체는 다른 kid로 한다)`);
+    return key;
+  }
+
+  static #parseJwk(env: Readonly<Record<string, string | undefined>>, name: string): ServerEcdhJwk {
+    const raw = env[name];
+    if (!raw) throw new Error(`${name}가 없다(구매 세션 서버 ECDH 개인 JWK, 비밀 관리에서 넣는다)`);
     let j: unknown;
     try {
       j = JSON.parse(raw);
     } catch {
-      throw new Error(`${PURCHASE_ECDH_KEY_ENV}는 JWK JSON이어야 한다`);
+      throw new Error(`${name}는 JWK JSON이어야 한다`);
     }
-    if (j === null || typeof j !== 'object' || Array.isArray(j)) throw new Error(`${PURCHASE_ECDH_KEY_ENV}는 JWK 객체여야 한다`);
-    return new ServerEcdhKey(j as ServerEcdhJwk);
+    if (j === null || typeof j !== 'object' || Array.isArray(j)) throw new Error(`${name}는 JWK 객체여야 한다`);
+    return j as ServerEcdhJwk;
   }
 
   /** 짝이 되는 공개 JWK(개인 성분 없음). queue-svc가 입장 확정 응답에 싣는 PEAKET_PURCHASE_ECDH_PUBLIC_JWK와 같아야 한다 */
@@ -69,5 +83,11 @@ export class ServerEcdhKey {
   /** ECDH 공유 비밀(x 좌표 32바이트). 클라이언트 공개키는 parseClientEphemeralKey가 곡선 위의 점으로 확인한 것이어야 한다 */
   sharedSecret(clientPublic: KeyObject): Buffer {
     return diffieHellman({ privateKey: this.#priv, publicKey: clientPublic });
+  }
+
+  /** 현재 키와 옛 키(있으면)의 공유 비밀. 현재 키가 먼저다(키 교체 중 요청 인증은 모두 본다, BOT-100) */
+  sharedSecrets(clientPublic: KeyObject): Buffer[] {
+    const current = this.sharedSecret(clientPublic);
+    return this.previous ? [current, this.previous.sharedSecret(clientPublic)] : [current];
   }
 }

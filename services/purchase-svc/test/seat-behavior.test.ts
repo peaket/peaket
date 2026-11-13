@@ -97,7 +97,7 @@ describe('좌석 화면 행동 요약(B-T19)', () => {
 
   test('[B-T19] [S-T36] 자동배정요청에는_SEAT신호가없다', async () => {
     const w = await world();
-    await w.run({ auto: { firstTierId: 'T', count: 1 }, behavior: { ...SUMMARY } }).catch(() => undefined);
+    await w.run({ auto: { firstTierId: 'T', count: 1, wheelchair: false, allowSplit: false }, behavior: { ...SUMMARY } }).catch(() => undefined);
     await w.flush();
     expect(w.signals).toEqual([]);
   });

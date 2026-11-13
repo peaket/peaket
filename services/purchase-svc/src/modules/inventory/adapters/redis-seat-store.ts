@@ -25,6 +25,7 @@ import {
   SeatStoreUnavailable,
   type SeatRef,
 } from '../domain/hold.js';
+import type { AutoAssignResult, AutoHoldInput, AutoHoldResult } from '../domain/auto.js';
 import type { LogGate } from '../domain/log-gate.js';
 import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatRebuildTarget, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
 import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, REBUILD_BATCH, type RebuildFinishInput, type RebuildSeat, type RebuildStep } from '../domain/rebuild.js';
@@ -44,11 +45,13 @@ import { SNAPSHOT_LUA } from './snapshot-lua.js';
 import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
+import { AUTO_HOLD_LUA } from './auto-hold-lua.js';
 import { PIN_LUA, RELEASE_FAILED_LUA } from './pin-lua.js';
 import { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './rebuild-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
+const AUTO_HOLD = redisScript(AUTO_HOLD_LUA);
 const SNAPSHOT = redisScript(SNAPSHOT_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
@@ -134,6 +137,27 @@ function fencingTokenOf(v: unknown): number {
   return n;
 }
 
+/** 자동 배정 멱등 기록의 seats 글(색인 쉼표 글) → 색인 배열. 빈 글은 빈 배열, 모양이 틀리면 Error */
+function seatIndexesOf(v: unknown): number[] {
+  const s = str(v);
+  if (s === '') return [];
+  const out: number[] = [];
+  for (const part of s.split(',')) {
+    if (!/^(0|[1-9][0-9]*)$/.test(part)) throw new Error(`자동 배정 멱등 기록의 좌석 색인 글이 틀렸다: ${s}`);
+    const n = Number(part);
+    if (!Number.isSafeInteger(n)) throw new Error(`자동 배정 멱등 기록의 좌석 색인 글이 안전한 정수가 아니다: ${s}`);
+    out.push(n);
+  }
+  return out;
+}
+
+/** 자동 배정 결과 유형(openapi Hold.assignResult) */
+function assignResultOf(v: unknown): AutoAssignResult {
+  const s = str(v);
+  if (s === 'FIRST' || s === 'FIRST_SPLIT' || s === 'SECOND' || s === 'SECOND_SPLIT') return s;
+  throw new Error(`자동 배정 결과 유형이 틀렸다: ${s}`);
+}
+
 /** 멱등 기록의 처음 응답 '{holdId}:{heldAt}:{exp}:{토큰}'(docs/data.md §3) */
 export function firstResponseOf(resp: string): HeldHold {
   const m = /^(.+):(\d+):(\d+):(\d+)$/.exec(resp);
@@ -167,6 +191,8 @@ export const seatKeys = {
   paused: (e: string) => `s:{event:${e}}:paused`,
   /** 회차의 마지막 펜싱 토큰(OPEN[16] 추천 적용) */
   fence: (e: string) => `s:{event:${e}}:fence`,
+  /** 자동 배정 커서(칸 = 등급·매수·휠체어·분리 조건, BUILD_ORDER HOT-080) */
+  autoCur: (e: string) => `s:{event:${e}}:auto_cur`,
   /** 구역 델타 샤드 Pub/Sub 채널(키가 아니라 채널) */
   section: (e: string, sectionId: string) => `s:{event:${e}}:sec:${sectionId}`,
   /** 좌석 비트맵이 있는 회차 목록(회차 태그 없음, 다른 슬롯) */
@@ -281,13 +307,105 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     }
   }
 
+  /**
+   * 자동 배정 홀드(BUILD_ORDER HOT-080, 계약은 adapters/auto-hold-lua.ts): 페이지의 후보 묶음을 Lua 한 번에 넘긴다.
+   * 좌석 메타데이터와 hold 키 차례는 같은 페이지 좌석 차례다. 결과의 seats 글은 색인 쉼표 글이다.
+   */
+  async holdAuto(i: AutoHoldInput, o?: SeatCallOptions): Promise<AutoHoldResult> {
+    const e = i.eventId;
+    const seats = i.groups.flatMap((g) => g.seats);
+    const keys = [
+      seatKeys.bitmap(e),
+      seatKeys.expiry(e),
+      seatKeys.quota(e, i.accountId),
+      seatKeys.stream(e),
+      seatKeys.idem(e, i.accountId, i.idempotencyKey),
+      seatKeys.epoch(e),
+      seatKeys.ctl(e),
+      seatKeys.rel(e, i.accountId),
+      seatKeys.secver(e),
+      seatKeys.fence(e),
+      seatKeys.autoCur(e),
+      ...seats.map((s) => seatKeys.hold(e, s.index)),
+    ];
+    const args = [
+      i.accountId,
+      i.purchaseSessionId,
+      i.holdId,
+      i.fingerprint,
+      String(i.limit),
+      String(HOLD_TTL_MS),
+      String(i.keepUntilMs),
+      seatKeys.section(e, ''),
+      i.cursorField,
+      String(i.cursor),
+      String(i.groups.length),
+      String(i.count),
+      ...i.groups.flatMap((g) => [
+        g.assignResult,
+        g.split ? '1' : '0',
+        String(g.seats.length),
+        ...g.seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset), s.seatId, s.tierId, s.sectionId]),
+      ]),
+    ];
+    const r = (await guard(this.redis.evalScript(AUTO_HOLD, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`자동 배정 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    switch (kind) {
+      case 'NOT_READY':
+      case 'IDEM_REUSED':
+      case 'PAUSED':
+      case 'QUOTA_EXCEEDED':
+        return { kind };
+      case 'NEXT':
+        return { kind, nextCursor: int(r[1], '다음 커서') };
+      case 'IDEM_REPLAY':
+        return {
+          kind,
+          holdId: str(r[1]),
+          heldAtMs: int(r[2], '잡은 시각'),
+          expiresAtMs: int(r[3], '만료 시각'),
+          fencingToken: fencingTokenOf(r[4]),
+          seatIndexes: seatIndexesOf(r[5]),
+          assignResult: assignResultOf(r[6]),
+        };
+      case 'OK':
+        return {
+          kind,
+          holdId: i.holdId,
+          heldAtMs: int(r[2], '잡은 시각'),
+          expiresAtMs: int(r[3], '만료 시각'),
+          fencingToken: fencingTokenOf(r[1]),
+          seatIndexes: seatIndexesOf(r[4]),
+          assignResult: assignResultOf(r[5]),
+          nextCursor: int(r[6], '다음 커서'),
+        };
+      default:
+        throw new Error(`자동 배정 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    }
+  }
+
+  /** 자동 배정 커서(SeatStore.autoCursor): HGET 한 번. 없거나 0 이상의 안전한 정수가 아니면 0이다 */
+  async autoCursor(eventId: string, field: string): Promise<number> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    const key = seatKeys.autoCur(eventId);
+    const v = await guard(this.redis.command(['HGET', key, field], { key }));
+    if (v === null || v === undefined) return 0;
+    const s = str(v);
+    const n = Number(s);
+    return /^(0|[1-9][0-9]*)$/.test(s) && Number.isSafeInteger(n) ? n : 0;
+  }
+
   /** 멱등 기록 하나를 HMGET으로 읽는다(같은 슬롯, 쓰지 않음). 만료는 Redis가 지운다 */
   async replay(i: ReplayInput, o?: SeatCallOptions): Promise<ReplayResult> {
     const key = seatKeys.idem(i.eventId, i.accountId, i.idempotencyKey);
-    const r = (await guard(this.redis.command(['HMGET', key, 'fp', 'resp'], { key, ...deadlineOf(o) }))) as unknown[];
+    const r = (await guard(this.redis.command(['HMGET', key, 'fp', 'resp', 'seats', 'assign'], { key, ...deadlineOf(o) }))) as unknown[];
     if (!Array.isArray(r) || r[0] === null || r[0] === undefined) return null;
     if (str(r[0]) !== i.fingerprint) return { kind: 'IDEM_REUSED' };
-    return { kind: 'IDEM_REPLAY', ...firstResponseOf(r[1] === null || r[1] === undefined ? '' : str(r[1])) };
+    const base = firstResponseOf(r[1] === null || r[1] === undefined ? '' : str(r[1]));
+    // 자동 배정 기록이면 seats·assign이 함께 있다. 직접 선택 기록에는 없으므로 그대로 돌려준다
+    if (r[2] === null || r[2] === undefined) return { kind: 'IDEM_REPLAY', ...base };
+    return { kind: 'IDEM_REPLAY', ...base, seatIndexes: seatIndexesOf(r[2]), assignResult: assignResultOf(r[3]) };
   }
 
   async read(i: SnapshotReadInput, o?: SeatCallOptions): Promise<SnapshotReadResult> {

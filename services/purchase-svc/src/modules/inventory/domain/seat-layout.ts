@@ -161,13 +161,13 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
     const seats = sec.seats ?? [];
     if (!Array.isArray(seats)) throw new SeatMapFileError('BAD_SEAT');
     for (const seat of seats as unknown[]) {
-      if (!isObject(seat) || !isId(seat.seatId) || !isNonNegInt(seat.index) || (seat.unavailable !== undefined && typeof seat.unavailable !== 'boolean')) throw new SeatMapFileError('BAD_SEAT');
+      if (!isObject(seat) || !isId(seat.seatId) || !isNonNegInt(seat.index) || (seat.unavailable !== undefined && typeof seat.unavailable !== 'boolean') || (seat.wheelchair !== undefined && typeof seat.wheelchair !== 'boolean')) throw new SeatMapFileError('BAD_SEAT');
       if (seat.index < from || seat.index > to) throw new SeatMapFileError('SEAT_OUT_OF_RANGE');
       const tier = seat.tierId ?? sectionTier;
       if (typeof tier !== 'string' || tier.length === 0) throw new SeatMapFileError('NO_TIER');
       if (byIndex.has(seat.index)) throw new SeatMapFileError('SEAT_INDEX_DUPLICATE');
       const label = typeof seat.label === 'string' && seat.label.length > 0 && seat.label.length <= 64 ? seat.label : undefined;
-      const ref: SeatRef = { seatId: seat.seatId, index: seat.index, sectionId: sec.sectionId, sectionIndex, seatOffset: seat.index - from, tierId: tier, ...(label !== undefined ? { label } : {}) };
+      const ref: SeatRef = { seatId: seat.seatId, index: seat.index, sectionId: sec.sectionId, sectionIndex, seatOffset: seat.index - from, tierId: tier, ...(label !== undefined ? { label } : {}), ...(seat.wheelchair === true ? { wheelchair: true } : {}) };
       if (seenIds.has(ref.seatId)) throw new SeatMapFileError('SEAT_ID_DUPLICATE');
       seenIds.add(ref.seatId);
       byIndex.set(seat.index, ref);

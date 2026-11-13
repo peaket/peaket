@@ -136,7 +136,7 @@ describe('InventoryOrderSessions(구매 세션 다리)', () => {
   test('POL009_실제 구매 세션 저장소에 이으면 markPaying 뒤 유휴 시한이 지나도 정리 점검이 세션을 끝내지 않는다(Paying), 표시하지 않은 세션은 끝난다', async () => {
     const clock = fakeClock({ now: NOW });
     const store = new MemoryPurchaseSessionStore(clock);
-    const sessions = new StoredPurchaseSessions({ store, ecdh: { sharedSecret: () => Buffer.alloc(32) }, clock });
+    const sessions = new StoredPurchaseSessions({ store, ecdh: { sharedSecrets: () => [Buffer.alloc(32)] }, clock });
     const bridge = new InventoryOrderSessions({ sessions, store });
     const paying = newJti();
     const idle = newJti();

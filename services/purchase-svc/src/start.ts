@@ -129,6 +129,7 @@ import {
   saleStateDatabaseOptions,
   SessionSweeper,
   ServerEcdhKey,
+  OpenPurchaseSession,
   StoredPurchaseSessions,
   discardBehaviorSignals as discardSeatBehaviorSignals,
   discardHoldAttempts,
@@ -199,7 +200,19 @@ export async function start(o: StartOptions): Promise<StartedService> {
     : undefined;
   const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
   const sessionStore = new RedisPurchaseSessionStore(redis);
-  const sessions = new StoredPurchaseSessions({ store: sessionStore, ecdh, clock: systemClock });
+  // 자동 배정 공연은 스냅샷을 받지 않아 첫 홀드 요청이 입장 토큰의 첫 사용이다(HOT-080).
+  // 본문의 clientEphemeralPublicKey로 그 요청에서 구매 세션을 열고, 그 뒤 요청 인증 키를 같은 세션에서 꺼낸다.
+  const firstUseOpener = new OpenPurchaseSession({ store: sessionStore, log: new RedisSessionStartedLog(redis), keys: admissionKeys, issuer: admissionIssuer, clock: systemClock });
+  const sessions = new StoredPurchaseSessions({
+    store: sessionStore,
+    ecdh,
+    clock: systemClock,
+    openFirstUse: (i) =>
+      firstUseOpener
+        .execute({ token: i.token, accountId: i.accountId, loginSessionId: i.loginSessionId, eventId: i.eventId, clientKey: i.clientKey })
+        .then((r) => r.sessionId === i.jti)
+        .catch(() => false),
+  });
   // 좌석 화면 행동 요약(BUILD_ORDER BOT-055, ADR-0249): 텔레메트리 클러스터로 낸다. 주소가 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
   const telemetryKafka = telemetryKafkaFromEnv(SERVICE, env);
   let behaviorSignals: BehaviorSignals = discardSeatBehaviorSignals;

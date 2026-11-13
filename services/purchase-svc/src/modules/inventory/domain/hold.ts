@@ -1,6 +1,7 @@
 // 좌석 홀드의 규칙 값과 타입(docs/features/seat-hold.md §3~§5, docs/data.md §3 좌석 키, BUILD_ORDER PRF-130 ①).
 // 값의 출처: 홀드 TTL 7분(POL-012), 다시 잡기 30초 [가정](ADR-0161 결정 2), 좌석 수 1~10(openapi HoldRequest), 멱등 키 수명 = 홀드 TTL(guidelines §4, R-224).
 import { createHash } from 'node:crypto';
+import type { AutoAssignResult } from './auto.js';
 
 /** 홀드 TTL 7분(POL-012). 홀드 Hash의 exp = heldAt + 이 값 */
 export const HOLD_TTL_MS = 7 * 60_000;
@@ -54,6 +55,8 @@ export interface SeatRef {
   tierId: string;
   /** 화면에 보이는 좌석 이름(판 파일의 선택 칸 label, 예 'A구역 3열 12'). 없으면 칸이 없다(BUILD_ORDER HOT-070) */
   label?: string;
+  /** 휠체어석인가(판 파일의 선택 칸 wheelchair, BUILD_ORDER HOT-080). 없으면 보통 좌석이다 */
+  wheelchair?: boolean;
 }
 
 /**
@@ -143,7 +146,7 @@ export interface ReplayInput {
  * SeatStore.replay의 결과. 같은 계정·같은 키의 살아 있는 기록이 같은 지문이면 처음 응답(IDEM_REPLAY), 다른 지문이면 IDEM_REUSED,
  * 기록이 없거나 수명(7분)이 지났으면 null이다
  */
-export type ReplayResult = ({ kind: 'IDEM_REPLAY' } & HeldHold) | { kind: 'IDEM_REUSED' } | null;
+export type ReplayResult = ({ kind: 'IDEM_REPLAY' } & HeldHold & { seatIndexes?: number[]; assignResult?: AutoAssignResult }) | { kind: 'IDEM_REUSED' } | null;
 
 /**
  * SeatStoreUnavailable의 까닭. 응답(503 본문·머리)은 같고 지표(seat_lua_errors_total code OOM)·정규 로그 줄(seatStoreReason)에만 쓴다.

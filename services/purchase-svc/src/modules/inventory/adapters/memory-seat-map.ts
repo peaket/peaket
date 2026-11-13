@@ -1,7 +1,8 @@
 // 시험용 좌석맵 판. 운영 좌석맵 판(좌석맵 파일·event_seat_price에서 읽는 회차 캐시)은 PRF-130 ①에 없다.
 import { SEAT_ID_PATTERN, type SeatRef } from '../domain/hold.js';
+import { type AutoCandidateList, type AutoCondition, autoCandidatesOf } from '../domain/auto.js';
 import type { SectionRange } from '../domain/seat-layout.js';
-import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
+import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
 
 /** 좌석맵 판의 좌석 하나. saleExcluded면 그 판에 있어도 고를 수 없다(resolve가 undefined) */
 export interface MemorySeatDef extends SeatRef {
@@ -16,15 +17,17 @@ interface EventEntry {
   byIndex: Map<number, SeatRef>;
   /** 구역 비트맵 범위(구역 색인 오름차순) */
   sections: SectionRange[];
+  /** 자동 배정 후보(희망 조건별로 한 번 만들어 둔다, BUILD_ORDER HOT-080) */
+  auto?: Map<string, AutoCandidateList>;
 }
 
 const isNonNegativeInt = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 
 /** 판매 제외 표시를 뺀 좌석 사본 */
-const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId, ...(s.label !== undefined ? { label: s.label } : {}) });
+const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId, ...(s.label !== undefined ? { label: s.label } : {}), ...(s.wheelchair === true ? { wheelchair: true } : {}) });
 
 /** SeatMap·SeatMapIndex의 메모리 구현. 시험이 put으로 회차를 넣는다 */
-export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
+export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapAuto {
   readonly #events = new Map<string, EventEntry>();
 
   /**
@@ -96,5 +99,18 @@ export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
    */
   async sections(eventId: string): Promise<readonly SectionRange[] | undefined> {
     return this.#events.get(eventId)?.sections.map((r) => ({ ...r }));
+  }
+
+  /** SeatMapAuto: 판매 대상 좌석과 등급으로 후보를 만든다(같은 희망 조건은 판마다 한 번만) */
+  async autoCandidates(eventId: string, condition: AutoCondition): Promise<AutoCandidateList | undefined> {
+    const e = this.#events.get(eventId);
+    if (!e) return undefined;
+    const key = `${condition.firstTierId}|${condition.secondTierId ?? ''}|${condition.count}|${condition.wheelchair ? 1 : 0}|${condition.allowSplit ? 1 : 0}`;
+    const cached = e.auto?.get(key);
+    if (cached) return cached;
+    const tiers = new Set([...e.seats.values()].map((s) => s.tierId));
+    const list = autoCandidatesOf([...e.seats.values()], condition, tiers);
+    (e.auto ??= new Map()).set(key, list);
+    return list;
   }
 }

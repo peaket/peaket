@@ -210,6 +210,8 @@ async function world(o: WorldOptions = {}) {
       holdOpts.push(opt);
       return o.hold ? o.hold(i, { inner, clock }) : inner.hold(i);
     },
+    holdAuto: async (i, opt) => inner.holdAuto(i, opt),
+    autoCursor: async (eventId, field) => inner.autoCursor(eventId, field),
     openSale: (i) => inner.openSale(i),
     replay: async (i: ReplayInput, opt?: SeatCallOptions) => {
       replays.push(i);
@@ -233,7 +235,7 @@ async function world(o: WorldOptions = {}) {
   await inner.openSale({ eventId: otherEvent, seatCount: 10, keepUntilMs: NOW + 2 * DAY });
   sessions.open({ sessionId: 'ps-a', accountId: ACCOUNT_A, eventId, journeyId: JNY_A, loginSessionId: 'ls-a', key: KEY });
   sessions.open({ sessionId: 'ps-b', accountId: ACCOUNT_B, eventId, journeyId: JNY_B, loginSessionId: 'ls-b', key: KEY });
-  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock, signals, undefined, undefined, undefined, o.hotPath);
+  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock, signals, undefined, undefined, undefined, o.hotPath, seatMap);
   /** A의 요청(c로 바꾼다). seatIds가 undefined면 본문은 c.body 또는 {} */
   const run = (seatIds: readonly string[] | undefined, c: Partial<HoldCommand> = {}) =>
     uc.execute({ eventId, accountId: ACCOUNT_A, purchaseSessionId: 'ps-a', idempotencyKey: randomUUID(), body: seatIds === undefined ? {} : { seatIds }, ...c });
@@ -291,7 +293,7 @@ describe('HoldSeats.execute: 차례', () => {
     const w = await world();
     await rejects(w.run(['C01'], { eventId: w.otherEvent }), 'EVENT_MISMATCH');
     // 403이 본문 검사(400)보다 먼저다
-    await rejects(w.run(undefined, { eventId: w.otherEvent, body: { auto: { firstTierId: 'R', count: 1 } } }), 'EVENT_MISMATCH');
+    await rejects(w.run(undefined, { eventId: w.otherEvent, body: { auto: { firstTierId: 'R', count: 1, wheelchair: false, allowSplit: false } } }), 'EVENT_MISMATCH');
     expect(w.calls).toHaveLength(0);
     const other = w.inner.db.event(w.otherEvent);
     expect(other.bits.size).toBe(0);
@@ -303,15 +305,21 @@ describe('HoldSeats.execute: 차례', () => {
     expect(w.attempts.records[0]!.heldAtMs).toBeUndefined();
   });
 
-  test('FR010_ auto가 있으면 seatIds가 함께 있어도 400(AUTO_NOT_SUPPORTED), seatIds가 없거나 비면 400(SEATS_REQUIRED)이고, 둘 다 회차 설정 확인보다 먼저이며 시도 기록을 남기지 않는다', async () => {
+  test('FR010_ seatIds와 auto가 함께 있으면 400(AUTO_AND_SEATS), seatIds가 없거나 비면 400(SEATS_REQUIRED)이고, 둘 다 회차 설정 확인보다 먼저이며 시도 기록을 남기지 않는다', async () => {
     const w = await world({ noConfig: true });
-    const auto = { firstTierId: 'R', count: 2 };
-    await rejects(w.run(undefined, { body: { auto } }), 'AUTO_NOT_SUPPORTED');
-    await rejects(w.run(undefined, { body: { seatIds: ['A01'], auto } }), 'AUTO_NOT_SUPPORTED');
+    const auto = { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false };
+    await rejects(w.run(undefined, { body: { seatIds: ['A01'], auto } }), 'AUTO_AND_SEATS');
     await rejects(w.run(undefined), 'SEATS_REQUIRED');
     await rejects(w.run([]), 'SEATS_REQUIRED');
     expect(w.calls).toHaveLength(0);
     expect(w.attempts.records).toHaveLength(0);
+  });
+
+  test('FR010_ auto만 있고 회차 좌석맵 판이 없으면 503(NOT_READY)이고 저장소를 부르지 않으며 시도 기록 ERROR 하나다', async () => {
+    const w = await world({ noConfig: true });
+    await rejects(w.run(undefined, { body: { auto: { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false } } }), 'NOT_READY');
+    expect(w.calls).toHaveLength(0);
+    expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
   });
 
   test('FR010_ 회차 좌석맵 판이 없으면 503(NOT_READY)이고 저장소를 부르지 않는다', async () => {
@@ -657,7 +665,7 @@ describe('HoldSeats.execute: 앱 쪽 거절 전 멱등 재생(ST24, guidelines �
     await rejects(w.run(['A01'], { idempotencyKey: key, purchaseSessionId: 'ps-none' }), 'SESSION_NOT_FOUND');
     await rejects(w.run(['A01'], { idempotencyKey: key, accountId: 'a{b}' }), 'SESSION_NOT_FOUND');
     await rejects(w.run(['A01'], { idempotencyKey: key, eventId: w.otherEvent }), 'EVENT_MISMATCH');
-    await rejects(w.run(undefined, { idempotencyKey: key, body: { seatIds: ['A01'], auto: { firstTierId: 'R', count: 1 } } }), 'AUTO_NOT_SUPPORTED');
+    await rejects(w.run(undefined, { idempotencyKey: key, body: { seatIds: ['A01'], auto: { firstTierId: 'R', count: 1, wheelchair: false, allowSplit: false } } }), 'AUTO_AND_SEATS');
     await rejects(w.run([], { idempotencyKey: key }), 'SEATS_REQUIRED');
     expect(w.replays).toHaveLength(0);
     expect(w.calls).toHaveLength(1);
@@ -736,12 +744,12 @@ describe('HoldSeats.execute: 좌석 Redis 호출 마감(guidelines §5, seat-hol
     }
   });
 
-  test('NFR003_ 세션 401·회차 403·auto 400·좌석 없음 400은 좌석 Redis를 부르지 않는 단계라 마감보다 먼저다', async () => {
+  test('NFR003_ 세션 401·회차 403·auto 504·좌석 없음 400은 좌석 Redis를 부르지 않는 단계라 마감보다 먼저다', async () => {
     const w = await world();
     const deadline = Deadline.after(1, w.clock);
     await rejects(w.run(['A01'], { deadline, purchaseSessionId: 'ps-none' }), 'SESSION_NOT_FOUND');
     await rejects(w.run(['A01'], { deadline, eventId: w.otherEvent }), 'EVENT_MISMATCH');
-    await rejects(w.run(undefined, { deadline, body: { auto: { firstTierId: 'R', count: 1 } } }), 'AUTO_NOT_SUPPORTED');
+    await rejects(w.run(undefined, { deadline, body: { auto: { firstTierId: 'R', count: 1, wheelchair: false, allowSplit: false } } }), 'DEADLINE_EXCEEDED');
     await rejects(w.run([], { deadline }), 'SEATS_REQUIRED');
     expect(w.calls).toHaveLength(0);
     expect(w.replays).toHaveLength(0);
@@ -1180,6 +1188,65 @@ describe('HoldSeats.execute: 인증 세션 재사용(BAT-028, HOT-463)', () => {
     };
     await w.run([SEAT_DEFS[0]!.seatId]);
     expect(gets).toBe(1);
+  });
+});
+
+describe('HoldSeats.execute: 자동 배정(BUILD_ORDER HOT-080) [S-T19] [S-T20] [ASVS v5.0.0-2.2.1] [ASVS v5.0.0-2.2.2] [ASVS v5.0.0-2.2.3]', () => {
+  const auto = (over: Record<string, unknown> = {}) => ({ firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false, ...over });
+
+  test('연석 후보를 잡고 assignResult FIRST·mode AUTO로 시도 기록을 남긴다', async () => {
+    const w = await world();
+    const r = await w.run(undefined, { body: { auto: auto() } });
+    expect(r.assignResult).toBe('FIRST');
+    expect(r.seatIds).toEqual(['A01', 'A02']);
+    expect(w.attempts.records[0]).toMatchObject({ mode: 'AUTO', result: 'HELD', seatIds: ['A01', 'A02'], tierId: 'R', sectionId: 'SEC-A' });
+    // 직접 선택 홀드 경로는 부르지 않는다
+    expect(w.calls).toHaveLength(0);
+    expect([...w.ev().bits].sort((a, b) => a - b)).toEqual([0, 1]);
+  });
+
+  test('1순위가 모두 차면 2순위 등급으로 내려간다', async () => {
+    const w = await world();
+    for (let i = 0; i < 20; i++) w.ev().bits.add(i);
+    const r = await w.run(undefined, { body: { auto: auto({ secondTierId: 'S' }) } });
+    expect(r.assignResult).toBe('SECOND');
+    expect(r.seatIds).toEqual(['B01', 'B02']);
+  });
+
+  test('연석이 없고 분리 허용이면 분리 후보로 잡는다', async () => {
+    const w = await world();
+    for (const i of [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]) w.ev().bits.add(i);
+    const r = await w.run(undefined, { body: { auto: auto({ allowSplit: true }) } });
+    expect(r.assignResult).toBe('FIRST_SPLIT');
+    expect(r.seatIds).toEqual(['A02', 'A04']);
+  });
+
+  test('후보가 모두 차면 409 manual-selection-required이고 아무 좌석도 잡지 않는다', async () => {
+    const w = await world();
+    for (let i = 0; i < 30; i++) w.ev().bits.add(i);
+    await rejects(w.run(undefined, { body: { auto: auto({ secondTierId: 'S' }) } }), 'MANUAL_SELECTION_REQUIRED');
+    expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    expect(w.ev().bits.size).toBe(30);
+    expect(w.calls).toHaveLength(0);
+  });
+
+  test('같은 멱등 키·같은 조건이면 처음 응답을 재생하고 새 홀드를 만들지 않는다', async () => {
+    const w = await world();
+    const key = randomUUID();
+    const first = await w.run(undefined, { idempotencyKey: key, body: { auto: auto() } });
+    const second = await w.run(undefined, { idempotencyKey: key, body: { auto: auto() } });
+    expect(second).toEqual(first);
+    expect(w.ev().bits.size).toBe(2);
+    expect(w.attempts.records.filter((a) => a.result === 'HELD')).toHaveLength(1);
+  });
+
+  test('매수 초과·같은 등급·없는 등급·휠체어석 없는 등급을 가른다', async () => {
+    const w = await world();
+    await rejects(w.run(undefined, { body: { auto: auto({ count: 5 }) } }), 'QUOTA_EXCEEDED');
+    await rejects(w.run(undefined, { body: { auto: auto({ secondTierId: 'R' }) } }), 'AUTO_CONDITION_INVALID');
+    await rejects(w.run(undefined, { body: { auto: auto({ firstTierId: 'NOPE' }) } }), 'AUTO_TIER_UNKNOWN');
+    await rejects(w.run(undefined, { body: { auto: auto({ wheelchair: true }) } }), 'AUTO_CONDITION_INVALID');
+    expect(w.ev().bits.size).toBe(0);
   });
 });
 

@@ -54,7 +54,13 @@ export function parsePurchaseMac(value: string | string[] | undefined): Buffer |
 export interface PurchaseSession {
   /** 일련번호를 올릴 때 다시 넘기는 참조(예: 구매 세션 ID). 처리기는 @CurrentPurchaseSession()으로 받는다 */
   ref: string;
+  /** 이 요청의 구매 세션과 요청 인증 키(현재 키) */
   key: Uint8Array | KeyObject;
+  /**
+   * 키 교체 중에 함께 받는 옛 키들(BOT-100, BUILD_ORDER HOT-080). 있으면 key와 함께 모두 맞춰 보고 하나라도 맞으면 통과한다.
+   * 없으면 key 하나만 본다(기존 조립·시험)
+   */
+  keys?: readonly (Uint8Array | KeyObject)[];
 }
 
 /** 서비스(purchase-svc)가 주는 포트(createService의 purchaseSessions) */
@@ -125,8 +131,15 @@ export async function verifyPurchaseRequest(request: FastifyRequest, principal: 
   const session = await port.resolve(request, principal);
   if (!session) return 'no_session';
   const target = request.raw.url ?? request.url;
-  const expected = Buffer.from(purchaseMac(session.key, purchaseMacInput(request.method, target, seq, rawBodyOf(request))), 'base64url');
-  if (expected.length !== mac.length || !timingSafeEqual(expected, mac)) return 'mismatch';
+  const input = purchaseMacInput(request.method, target, seq, rawBodyOf(request));
+  // 키 교체 중에는 현재 키와 옛 키를 모두 본다(하나라도 맞으면 통과). 어느 키가 맞았는지는 응답에 싣지 않는다
+  const keys = session.keys && session.keys.length > 0 ? session.keys : [session.key];
+  let matched = false;
+  for (const key of keys) {
+    const expected = Buffer.from(purchaseMac(key, input), 'base64url');
+    if (expected.length === mac.length && timingSafeEqual(expected, mac)) matched = true;
+  }
+  if (!matched) return 'mismatch';
   if (!(await port.advance(session.ref, seq))) return 'replay';
   (request as unknown as Record<symbol, string>)[SESSION_REF] = session.ref;
   return undefined;

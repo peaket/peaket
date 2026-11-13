@@ -54,6 +54,8 @@ x-peaket-problem-types:
     artist-exists: { status: 409, title: "같은 이름의 아티스트가 있습니다" }
     authz-unavailable: { status: 503, title: "권한을 확인하지 못했습니다" }
     auto-assign-not-supported: { status: 400, title: "좌석 자동 배정은 아직 받지 않습니다" }
+    auto-condition-invalid: { status: 400, title: "희망 조건이 올바르지 않습니다" }
+    invalid-auto-condition: { status: 422, title: "희망 조건을 다시 확인해 주세요" }
     batching: { status: 503, title: "순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요" }
     booking-restricted: { status: 403, title: "예매가 제한된 계정입니다" }
     booth-mismatch: { status: 409, title: "티켓 보유자와 다른 분입니다" }
@@ -382,7 +384,7 @@ components:
         auto:
           additionalProperties: false
           type: object
-          description: "희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)"
+          description: "희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정은 BUILD_ORDER HOT-080에서 열었다. seatIds와 함께 보내면 400 auto-condition-invalid다."
           required: [firstTierId, count]
           properties:
             firstTierId: { type: string }
@@ -4040,8 +4042,8 @@ paths:
       responses:
         '201': { description: 홀드, content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }
         '409': { $ref: '#/components/responses/Problem', description: "경합 패배 seat-already-held(suggestedSeats, 정상 분기로 집계), 자동 배정 실패 manual-selection-required, 우선 구매 좌석 밖 priority-seat-only(입장 토큰에 prio가 있는데 그 권리의 좌석 밖을 잡으려 함, 판매 종료 전, 추천 적용 2026-10-31, ADR-0171), 방금 놓은 좌석 seat-recently-released: 같은 계정이 그 회차에서 방금 놓은(해제·만료·자동 배정 반납) 좌석을 30초 [가정] 안에 다시 잡으려 했다. 아무 좌석도 잡지 않고 recentlyReleasedSeats·reholdAvailableAt을 싣는다. 다른 사람은 그 좌석을 바로 잡을 수 있다. 다른 사람이 잡은 좌석이 섞이면 seat-already-held가 먼저다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5)" }
-        '422': { $ref: '#/components/responses/Problem', description: "1인당 매수 한도 초과(purchase-limit-exceeded), 희망 조건 조합 규칙 위반(같은 등급 중복·휠체어석 없는 등급), 같은 멱등 키에 다른 좌석 선택(idempotency-key-reused, 지문은 정렬한 seatIds만으로 만든다, guidelines §4). 직접 선택 공연의 seatIds는 purchase-svc가 Lua를 부르기 전에 그 회차의 지금 좌석맵 판에서 좌석 색인으로 바꾸고, 없는 좌석·다른 회차의 좌석·판매 제외석·같은 좌석의 중복이 하나라도 있으면 아무 좌석도 잡지 않고 422 invalid-seat로 거절한다(화면이 고르지 못하게 하는 것만으로는 API를 직접 부르는 요청을 막지 못한다, 추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 2)" }
-        '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(seatIds 0개·11개 이상·좌석 ID 모양, about:blank), 희망 조건 형식 오류(그 공연에 없는 등급). 자동 배정을 여는 wbs 2.5.4 전에는 auto를 보내면 auto-assign-not-supported다(추천 적용 2026-11-04)" }
+        '422': { $ref: '#/components/responses/Problem', description: "1인당 매수 한도 초과(purchase-limit-exceeded), 희망 조건 조합 규칙 위반(같은 등급 중복·휠체어석 없는 등급, invalid-auto-condition), 같은 멱등 키에 다른 좌석 선택(idempotency-key-reused, 지문은 정렬한 seatIds만으로 만든다, guidelines §4). 직접 선택 공연의 seatIds는 purchase-svc가 Lua를 부르기 전에 그 회차의 지금 좌석맵 판에서 좌석 색인으로 바꾸고, 없는 좌석·다른 회차의 좌석·판매 제외석·같은 좌석의 중복이 하나라도 있으면 아무 좌석도 잡지 않고 422 invalid-seat로 거절한다(화면이 고르지 못하게 하는 것만으로는 API를 직접 부르는 요청을 막지 못한다, 추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 2)" }
+        '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(seatIds 0개·11개 이상·좌석 ID 모양, about:blank), 희망 조건 형식 오류(그 공연에 없는 등급, auto-condition-invalid), seatIds와 auto를 함께 보냄(auto-condition-invalid)." }
         '403': { $ref: '#/components/responses/Problem', description: "주소의 회차 ID가 입장 토큰의 event와 다르거나, 구매 세션에 적힌 회차와 다르다. 한가한 회차에서 받은 입장 토큰으로 다른 회차의 좌석을 잡지 못하게 한다(추천 적용 2026-10-30, docs/features/seat-hold.md §2, ADR-0159 결정 1). sale-policy-denied: 판매 정책 규칙이 이 요청(입장 토큰의 명단 키 lst·좌석 등급·매수·지금 시각)을 거부한다. 확장 칸 reason(PRESALE_ONLY·GRADE_NOT_ON_SALE)을 싣고 아무 좌석도 잡지 않는다. 규칙 한도를 넘는 매수는 1인 한도 초과와 같은 거절이다(Q-T36 ③, 추천 적용 2026-11-10, ADR-0261 결정 10)" }
         '410': { description: "그 회차의 판매 종료(공연 시작 24시간 전) 뒤의 새 홀드(Problem type sale-ended). 판매 종료 전에 만든 홀드는 그대로 두고 지금 홀드 시간·1회 연장 안에서 결제를 마칠 수 있다(소유자 결정 2026-10-14, 진행 중 세션 허용은 추천 적용 2026-10-14, ADR-0064). 예외: 입장 토큰에 클레임 prio(우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦))가 있으면 판매 종료 뒤에도 그 권리의 우선 구매 보류 좌석 하나만 일반 홀드로 바꿔 잡는다. prio 토큰은 판매 종료 전후와 상관없이 언제나 그 좌석 하나만 잡고, 다른 좌석이면 판매 종료 전에는 409 priority-seat-only, 뒤에는 410이다(docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '423': { $ref: '#/components/responses/Problem', description: "판매 일시정지(킬스위치, 명령 3)나 판매 중지(ADR-0123). Problem type sale-paused(추천 적용 2026-11-04)" }
