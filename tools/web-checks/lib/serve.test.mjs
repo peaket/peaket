@@ -20,7 +20,12 @@ test('도구 명령줄: --host가 없으면 PEAKET_SERVE_HOST, 그것도 없으�
   assert.deepEqual(o.rewrites.map(([re, f]) => [re.test('/q/evt-1'), re.test('/q/a/b'), f]), [[true, false, 'shell.html']]);
   const q = parseServeArgs(['--root', 'd', '--port', '1', '--preset', 'queue-room'], {});
   assert.equal(q.base, '/_q/');
-  assert.equal(q.rewrites.length, 2);
+  assert.equal(q.rewrites.length, 5);
+  assert.deepEqual(q.rewrites.map(([re, f]) => [re.test('/en/queue/e1') ? f : null, re.test('/ja/queue/e1') ? f : null, re.test('/zh/queue/e1') ? f : null]).filter((x) => x.some(Boolean)), [
+    ['shell.en.html', null, null],
+    [null, 'shell.ja.html', null],
+    [null, null, 'shell.zh.html'],
+  ]);
   assert.throws(() => parseServeArgs(['--port', '1'], {}), /쓰는 법/);
   assert.throws(() => parseServeArgs(['--root', 'd', '--port', '1', '--preset', 'nope'], {}), /preset/);
   assert.throws(() => parseServeArgs(['--root', 'd', '--port', 'x'], {}), /port/);

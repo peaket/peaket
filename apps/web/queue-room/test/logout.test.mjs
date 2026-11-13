@@ -37,7 +37,7 @@ function deps() {
   };
 }
 
-test('SCR-008 로그아웃 정리: 로그아웃 때 지우는 저장물만 지우고(기기 ID·최근 검색어·흡수 표시는 남김), 다른 탭에 logout을 알린다. 월렛은 고를 때만', async () => {
+test('[ASVS v5.0.0-14.3.1] SCR-008 로그아웃 정리: 로그아웃 때 지우는 저장물만 지우고(기기 ID·최근 검색어·흡수 표시는 남김), 다른 탭에 logout을 알린다. 월렛은 고를 때만', async () => {
   const x = deps();
   await clearForLogout(x.d, { wallet: false });
   assert.deepEqual(x.local.keys().sort(), ['peaket.device', 'peaket.recentSearches']);

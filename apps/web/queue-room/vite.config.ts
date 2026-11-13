@@ -1,12 +1,24 @@
 // 대기실 경량 페이지 빌드(docs/frontend.md §2.3·§5.1). 프레임워크 없이 Vite 8(rolldown)로 셸 HTML과 JS·CSS 한 벌을 만든다.
-// 로케일 셸 넷(shell.{ko,en,ja,zh}.html)은 다국어 단계에서 더한다. 지금은 한국어 셸 하나다.
+// 로케일 셸 넷(shell.{ko,en,ja,zh}.html)을 모두 빌드 입력에 넣는다. 화면 문구 자체의 다국어는 다국어 단계에서 잇는다.
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
-/** 운영에서 CloudFront Function이 셸로 바꿔 읽는 경로(§2.5·§5.1). 회차·상품 ID는 페이지 스크립트가 주소에서 읽는다 */
-const SHELL_PATHS = [/^\/(?:(?:en|ja|zh)\/)?queue\/[^/]+\/?$/, /^\/shop\/[^/]+\/queue\/?$/];
+/** 빌드에 넣는 로케일 셸(docs/frontend.md §2.5·§5.1, ADR-0079 결정 2) */
+export const SHELLS = { ko: 'shell.ko.html', en: 'shell.en.html', ja: 'shell.ja.html', zh: 'shell.zh.html' } as const;
+export type ShellLocale = keyof typeof SHELLS;
 
-/** 개발 서버에서 CloudFront Function을 흉내 낸다: 대기실 경로 → 셸 HTML, `/preview` → 화면 목록(개발에서만), `/logout` → 웹 앱 서버 흉내 */
+const EVENT_PATH = /^\/(?:(en|ja|zh)\/)?queue\/[^/]+\/?$/;
+const GOODS_PATH = /^\/shop\/[^/]+\/queue\/?$/;
+
+/** 운영에서 CloudFront Function이 셸로 바꿔 읽는 경로(§2.5·§5.1). 회차·상품 ID는 페이지 스크립트가 주소에서 읽는다 */
+export function shellForPath(path: string): string | null {
+  const event = EVENT_PATH.exec(path);
+  if (event) return `/_q/${SHELLS[(event[1] as ShellLocale | undefined) ?? 'ko']}`;
+  if (GOODS_PATH.test(path)) return `/_q/${SHELLS.ko}`;
+  return null;
+}
+
+/** 개발 서버에서 CloudFront Function을 흉내 낸다: 대기실 경로 → 로케일 셸 HTML, `/preview` → 화면 목록(개발에서만), `/logout` → 웹 앱 서버 흉내 */
 function cloudFrontShellRewrite(): Plugin {
   return {
     name: 'peaket-queue-room-shell-rewrite',
@@ -31,7 +43,8 @@ function cloudFrontShellRewrite(): Plugin {
           res.end();
           return;
         }
-        if (SHELL_PATHS.some((re) => re.test(path))) req.url = `/_q/shell.ko.html${search}`;
+        const shell = shellForPath(path);
+        if (shell) req.url = `${shell}${search}`;
         else if (path === '/preview' || path === '/preview/') req.url = `/_q/preview.html${search}`;
         next();
       });
@@ -61,7 +74,7 @@ export default defineConfig(() => ({
     sourcemap: 'hidden',
     // `/preview`(preview.html)는 빌드 입력에 넣지 않는다: 운영 빌드에는 화면 목록이 없다(design.md 결정 7)
     rolldownOptions: {
-      input: { 'shell.ko': fileURLToPath(new URL('./shell.ko.html', import.meta.url)) },
+      input: Object.fromEntries(Object.entries(SHELLS).map(([locale, file]) => [`shell.${locale}`, fileURLToPath(new URL(`./${file}`, import.meta.url))])),
       output: {
         entryFileNames: 'assets/queue-room.[hash].js',
         chunkFileNames: 'assets/queue-room-[name].[hash].js',

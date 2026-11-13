@@ -11,7 +11,7 @@ const TIERS = [
   { id: 'tier-a', name: 'A석' },
 ];
 
-test('SCR-008 희망 조건: 기본값은 첫 등급 1매, 저장 꼴을 검사하고 그 회차에 없는 등급·상한을 넘는 매수·2순위 = 1순위는 버린다', () => {
+test('[ASVS v5.0.0-14.3.3] SCR-008 희망 조건: 기본값은 첫 등급 1매, 저장 꼴을 검사하고 그 회차에 없는 등급·상한을 넘는 매수·2순위 = 1순위는 버린다', () => {
   const kv = memory();
   assert.deepEqual(defaultPreference(TIERS), { firstTierId: 'tier-r', count: 1, wheelchair: false, allowSplit: false });
   assert.equal(readPreference(kv, 'e1', TIERS, 4), null, '저장된 값이 없으면 null(저장됨 표시 없음)');

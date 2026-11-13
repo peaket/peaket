@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 94 | 49 | 2 | 0 | 0 | 4 | 0 | 0 | 42 | 191 |
-| B | 33 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 9 | 59 |
-| 합계 | 127 | 61 | 2 | 0 | 0 | 7 | 0 | 2 | 51 | 250 |
+| B | 35 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 7 | 59 |
+| 합계 | 129 | 61 | 2 | 0 | 0 | 7 | 0 | 2 | 49 | 250 |
 
 ## docs/features/queue-admission.md
 
@@ -262,8 +262,8 @@
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 자동 시험 | B | 시험: services/admission-ctrl/test/kms-seed-opener.test.ts, services/admission-ctrl/test/seed-reveal.test.ts 외 5곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 11곳 |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외… |
-| v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 2곳 |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
 | v5.0.0-11.2.4 | — | L3 | 모든 암호 연산을 상수 시간으로 하고 비교·계산·반환에서 조기 종료하지 않아 정보가 새지 않게 한다. | 자동 시험 | B | 시험: services/queue-svc/test/arrival-cookie.test.ts |
 | v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test-int/leader-store.int.test.ts… |

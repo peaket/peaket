@@ -1021,8 +1021,8 @@ React 런타임만으로도 JS 예산을 넘고, SEED CSS 전체는 CSS 예산�
 
 - CSP는 CloudFront 응답 헤더 정책에 넣은 고정 문자열이다(빌드마다 바뀌는 해시를 넣지 않으려고). 그래서 인라인 스크립트·스타일을 쓰지 않고, 묶음 A′의 `script-src`는 `'self'`와 사람 확인 출처뿐이다(§5.14).
 - 글꼴은 싣지 않고 시스템 글꼴을 쓴다(토큰 글꼴 스택의 앞쪽). 핵심 숫자(앞 인원)는 display 48px다(docs/design/d2).
-- CloudFront Function(시청자 요청 단계)이 `/queue/{eventId}`·`/{en,ja,zh}/queue/{eventId}`·`/shop/{productId}/queue` 요청을 `/_q/shell.{locale}.html`로 바꿔 읽는다. 회차 ID는 페이지 스크립트가 `location.pathname`에서 읽는다 [가정, PoC wbs 2.10.6].
-- 배포 때 `/_q/shell.*`만 무효화한다. 해시 이름이 붙은 자산은 30일 또는 최근 5빌드를 보존하는 규칙이 있어, 옛 탭에서도 404가 나지 않는다(devops §6.6).
+- CloudFront Function(시청자 요청 단계)이 `/queue/{eventId}`·`/{en,ja,zh}/queue/{eventId}`·`/shop/{productId}/queue` 요청을 `/_q/shell.{locale}.html`로 바꿔 읽는다. 회차 ID는 페이지 스크립트가 `location.pathname`에서 읽는다. **BAT-175(2026-11-13)**: 빌드가 로케일 셸 넷(`shell.{ko,en,ja,zh}.html`)을 모두 내고, 함수 코드는 `apps/web/queue-room/edge/queue-room-viewer-request.js`, S3 `/_q/` 업로드 목록은 `apps/web/queue-room/scripts/upload-manifest.mjs`가 만든다. 화면 문구의 다국어는 다국어 단계에서 잇는다. 실제 함수 게시는 HOT-012·BAT-185 몫이다.
+- 배포 때 `/_q/shell.*`만 무효화한다. 해시 이름이 붙은 자산은 30일 또는 최근 5빌드를 보존하는 규칙이 있어, 옛 탭에서도 404가 나지 않는다(devops §6.6). 업로드 목록은 셸을 `max-age=0, must-revalidate`, `assets/*`를 1년 immutable로 표시하고 `preview.html`·소스 맵은 뺀다.
 
 **폴링 알고리즘**(ADR-0003, ADR-0079 결정 3)
 

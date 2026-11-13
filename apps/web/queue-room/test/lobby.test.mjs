@@ -82,7 +82,7 @@ test('SCR-007 다시 열면 저장한 참가 토큰으로 로비부터 이어 �
   assert.equal(h.calls.length, 0);
 });
 
-test('SCR-007 참가 응답: REQUIRED는 저장 뒤 추가 검증, 401은 갱신 뒤 같은 토큰, 403 본인확인 전은 공연 상세, 그 밖 403·428은 사람 확인 실패와 다시 시도', async () => {
+test('[ASVS v5.0.0-16.5.2] SCR-007 참가 응답: REQUIRED는 저장 뒤 추가 검증, 401은 갱신 뒤 같은 토큰, 403 본인확인 전은 공연 상세, 그 밖 403·428은 사람 확인 실패와 다시 시도', async () => {
   const sched = { openAtMs: START + 10 * 60_000, lobbyOpensAtMs: START - 60_000 };
   // REQUIRED
   let h = harness({ schedule: sched, handler: ({ m, now }) => (m === 'POSTJSON' ? reply(201, lobbyBody(now, { extra: { verification: 'REQUIRED', verificationReason: 'NETWORK' } })) : reply(500)) });

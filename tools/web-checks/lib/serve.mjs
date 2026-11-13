@@ -37,7 +37,17 @@ export const DEFAULT_HOST = '127.0.0.1';
 
 /** 미리 정한 배포 흉내 */
 export const PRESETS = {
-  'queue-room': { base: '/_q/', rewrites: [[/^\/(?:(?:en|ja|zh)\/)?queue\/[^/]+\/?$/, 'shell.ko.html'], [/^\/shop\/[^/]+\/queue\/?$/, 'shell.ko.html']] },
+  // 로케일별 셸을 먼저 고른다(뒤의 한국어 규칙이 `/en/queue/...`까지 삼키지 않게)
+  'queue-room': {
+    base: '/_q/',
+    rewrites: [
+      [/^\/en\/queue\/[^/]+\/?$/, 'shell.en.html'],
+      [/^\/ja\/queue\/[^/]+\/?$/, 'shell.ja.html'],
+      [/^\/zh\/queue\/[^/]+\/?$/, 'shell.zh.html'],
+      [/^\/queue\/[^/]+\/?$/, 'shell.ko.html'],
+      [/^\/shop\/[^/]+\/queue\/?$/, 'shell.ko.html'],
+    ],
+  },
 };
 
 /** 폴더 안의 경로만 돌려준다(상대 경로가 ..로 시작하거나 절대 경로면 null). CodeQL js/path-injection */

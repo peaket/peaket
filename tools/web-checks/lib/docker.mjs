@@ -51,8 +51,8 @@ function main() {
   const mounts = ['-v', `${pkg}:/src:ro`, '-v', `${join(repo, 'docs')}:/repo/docs:ro`, '-v', `${out}:/out`];
   if (mode === 'visual') {
     const dist = join(repo, 'apps/web/queue-room/dist');
-    if (!existsSync(join(dist, 'shell.ko.html'))) {
-      console.error('대기실 셸 빌드가 없다: pnpm --filter @peaket/queue-room build');
+    if (['shell.ko.html', 'shell.en.html', 'shell.ja.html', 'shell.zh.html'].some((f) => !existsSync(join(dist, f)))) {
+      console.error('대기실 로케일 셸 넷 빌드가 없다: pnpm --filter @peaket/queue-room build');
       process.exit(2);
     }
     mounts.push('-v', `${dist}:/repo/apps/web/queue-room/dist:ro`);

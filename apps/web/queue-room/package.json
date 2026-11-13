@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite --port 3004",
     "build": "vite build",
+    "manifest": "node scripts/upload-manifest.mjs dist",
     "typecheck": "tsc --noEmit",
     "size": "size-limit",
     "test": "node --test \"test/*.test.mjs\""
