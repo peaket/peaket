@@ -281,6 +281,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "event_id": {
                       "type": "string",
                       "id": 2
+                    },
+                    "event_ends_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 3
                     }
                   }
                 },

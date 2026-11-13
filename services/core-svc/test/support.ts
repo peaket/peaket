@@ -19,8 +19,8 @@ export class FakeIdentity implements AdminAuthzPort {
     return { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': 'partner', 'x-user-scope': '' };
   }
 
-  /** 관제 계정 하나를 만들고 그 신원 머리를 돌려준다(판매 승인 LCH-080) */
-  ops(role: 'operator' | 'commander' | 'viewer' = 'operator'): Record<string, string> {
+  /** 관제 계정 하나를 만들고 그 신원 머리를 돌려준다(판매 승인 LCH-080, 후기 조치 BAT-585) */
+  ops(role: 'operator' | 'commander' | 'viewer' | 'cs_agent' | 'cs_lead' = 'operator'): Record<string, string> {
     const accountId = randomUUID();
     const sessionId = randomUUID();
     this.answers.set(`${accountId}/${sessionId}`, { valid: true, role });

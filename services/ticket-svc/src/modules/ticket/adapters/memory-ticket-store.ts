@@ -7,6 +7,7 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
   walletCursorOf,
@@ -79,6 +80,12 @@ export class MemoryTicketStore implements TicketStore {
       this.issues.set(issueKey(t.orderId, t.issueGeneration), { ...issue, tickets: issue.tickets.map((x) => (x.ticketId === t.ticketId ? next : x)) });
     }
     return started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
+  }
+
+  async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {
+    return [...this.tickets.values()]
+      .filter((t) => t.eventId === eventId)
+      .map((t) => ({ accountId: t.accountId, payerAccountId: t.payerAccountId, orderId: t.orderId, status: t.status, issuedAtMs: t.issuedAtMs }));
   }
 
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {

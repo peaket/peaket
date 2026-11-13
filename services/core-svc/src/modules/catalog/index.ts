@@ -10,7 +10,7 @@ export { saleEligibilityMaintenanceTasks } from './application/eligibility-maint
 export type { EligibilityCopyPut, MemberCodeDirectory, SaleEligibilityCopy } from './domain/eligibility-ports.js';
 export { MemberCodeLookupFailed } from './domain/eligibility-ports.js';
 export { GrpcImageProcessing } from './adapters/image-processing-client.js';
-export { GrpcSeatmapParser } from './adapters/seatmap-worker-client.js';
+export { GrpcSeatmapParser, hostPort } from './adapters/seatmap-worker-client.js';
 export { LocalFolderImageStore, MemoryImageObjectStore } from './adapters/image-store.js';
 export { LocalFolderPublicFileStore, MemoryPublicFileStore } from './adapters/public-file-store.js';
 export type { PublicFileStore, PublishLimits } from './domain/seatmap-ports.js';
@@ -33,4 +33,5 @@ export { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 export { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
 export { DrizzleSaleConfigMaintenanceStore } from './adapters/db/drizzle-sale-config-maintenance-store.js';
 export type { CardSaleStatus, CatalogEvent, EventSaleState, Production, SaleReview } from './domain/production.js';
+export { CATALOG_REPOSITORY, type CatalogRepository } from './domain/ports.js';
 export { assertDatabaseRole } from './adapters/db/database-role.js';

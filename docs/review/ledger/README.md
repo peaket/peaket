@@ -5,7 +5,7 @@
 ## 완성 판정
 
 - 항목 3650개: 시험 시나리오(세부 단위) 1610, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
-- 빈칸 1052, ID만 1118: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다)
+- 빈칸 1051, ID만 1117: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 3(모두 사유가 있다): 완료로 세지 않고 따로 센다
 - 다시 볼 notes 8: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
@@ -15,9 +15,9 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 243 | 89 | 23 | 2 | 2 | 41 | 1 | 0 | 182 | 583 |
-| B | 825 | 1029 | 15 | 4 | 1 | 76 | 0 | 246 | 869 | 3065 |
+| B | 827 | 1028 | 15 | 4 | 1 | 76 | 0 | 246 | 868 | 3065 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1068 | 1118 | 38 | 7 | 3 | 117 | 1 | 246 | 1052 | 3650 |
+| 합계 | 1070 | 1117 | 38 | 7 | 3 | 117 | 1 | 246 | 1051 | 3650 |
 
 ## 분야별 상태
 
@@ -25,8 +25,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | analytics | B | 0 | 106 | 0 | 0 | 0 | 0 | 0 | 29 | 53 | 188 |
 | bot-defense | B | 111 | 20 | 0 | 0 | 0 | 6 | 0 | 0 | 15 | 152 |
-| catalog-review | B | 57 | 21 | 0 | 0 | 0 | 5 | 0 | 17 | 16 | 116 |
-| control-tower | B | 1 | 106 | 0 | 0 | 0 | 3 | 0 | 24 | 158 | 292 |
+| catalog-review | B | 58 | 20 | 0 | 0 | 0 | 5 | 0 | 17 | 16 | 116 |
+| control-tower | B | 2 | 106 | 0 | 0 | 0 | 3 | 0 | 24 | 157 | 292 |
 | delivery | B | 26 | 34 | 0 | 0 | 0 | 0 | 0 | 3 | 14 | 77 |
 | devops | B | 29 | 6 | 0 | 0 | 1 | 0 | 0 | 0 | 70 | 106 |
 | forensic-replay | B | 2 | 112 | 0 | 0 | 0 | 3 | 0 | 19 | 55 | 191 |
@@ -54,7 +54,7 @@
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | B | 34 | 3 | 5 | 0 | 0 | 2 | 0 | 0 | 59 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1068 | 1118 | 38 | 7 | 3 | 117 | 1 | 246 | 1052 | 3650 |
+| 합계 |  | 1070 | 1117 | 38 | 7 | 3 | 117 | 1 | 246 | 1051 | 3650 |
 
 ## 다시 볼 notes
 
@@ -64,7 +64,7 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
-| catalog-review:v5.0.0-2.4.1 | 다른 단계 | services/core-svc/test/wish.http.test.ts |
+| catalog-review:v5.0.0-2.4.1 | 다른 단계 | services/core-svc/test/review.http.test.ts, services/core-svc/test/wish.http.test.ts |
 | catalog-review:v5.0.0-16.1.1 | 다른 단계 | services/core-svc/test-int/seatmap-import.int.test.ts |
 | catalog-review:v5.0.0-16.2.5 | 다른 단계 | services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | catalog-review:v5.0.0-16.3.3 | 다른 단계 | services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.ts… |

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
+import { GrpcReviewEligibility, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -54,6 +55,10 @@ const seatmapParser = new GrpcSeatmapParser(seatmapGrpc, lbProfile);
 // 좌석맵 템플릿 10종은 배포 때 넣는 정적 JSON 파일이다(ADR-0066). 폴더가 없거나 파일이 틀리면 시작하지 않는다
 const templateDir = process.env.PEAKET_SEATMAP_TEMPLATE_DIR ?? fileURLToPath(new URL('../seed/seatmap-templates/', import.meta.url));
 const templates = StaticTemplateCatalog.load(templateDir);
+// 후기 자격은 ticket-svc CheckReviewEligibility에 묻는다(BAT-585). 주소가 없으면 후기 기능만 503이고 나머지는 뜬다
+const ticketGrpc = process.env.PEAKET_TICKET_GRPC_URL;
+const reviewEligibility = ticketGrpc ? new GrpcReviewEligibility(ticketGrpc, lbProfile) : new UnavailableReviewEligibility();
+if (!ticketGrpc) console.warn(JSON.stringify({ level: 'warn', kind: 'review-eligibility', msg: 'PEAKET_TICKET_GRPC_URL이 없어 후기 자격 확인이 503이다' }));
 
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
@@ -73,6 +78,7 @@ const service = await createService({
     partnerDatabase,
     opsDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
+    review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
   }),
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
@@ -89,6 +95,7 @@ process.once('SIGTERM', () => {
       memberCodes.close();
       imageProcessing.close();
       seatmapParser.close();
+      if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
       void queueRedis?.close();
       return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close()]);
     });

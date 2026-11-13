@@ -16,8 +16,9 @@ import {
   UnwiredSaleEligibilityCopy,
   type SaleConfigStore,
 } from './modules/catalog/index.js';
+import { DrizzleReviewStore, reviewMaintenanceTasks } from './modules/review/index.js';
 
-export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish'] as const;
+export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire'] as const;
 
 export function coreMaintenanceTasks(
   database: Database,
@@ -36,5 +37,6 @@ export function coreMaintenanceTasks(
     const publish = new PublishSaleConfigs(new DrizzleSaleStore(o.opsDatabase), store, new NoopSaleConfigFacts(), clock);
     tasks.push(...saleConfigMaintenanceTasks(new DrizzleSaleConfigMaintenanceStore(o.opsDatabase), publish, logger));
   }
+  tasks.push(...reviewMaintenanceTasks(new DrizzleReviewStore(database), clock));
   return { tasks, copy, metrics };
 }

@@ -14,7 +14,11 @@ import {
   normalizeCancelInput,
   normalizeIssueInput,
   normalizeListInput,
+  normalizeReviewEligibilityInput,
   qrPayloadOf,
+  type ReviewEligibilityInput,
+  type ReviewEligibilityResult,
+  reviewEligibilityOf,
   type TicketRecord,
   ticketKeyHash,
 } from '../domain/ticket.js';
@@ -66,5 +70,12 @@ export class TicketService {
   /** 계정의 월렛 목록(최신 발권순). */
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {
     return this.deps.store.list(normalizeListInput(input));
+  }
+
+  /** 후기 작성 자격(FR-016, BAT-585). 종료 시각·결제자·유효 티켓을 ticket 데이터로 본다. */
+  async reviewEligibility(input: ReviewEligibilityInput): Promise<ReviewEligibilityResult> {
+    const n = normalizeReviewEligibilityInput(input);
+    const tickets = await this.deps.store.listReviewEligibility(n.eventId);
+    return reviewEligibilityOf(tickets, n);
   }
 }

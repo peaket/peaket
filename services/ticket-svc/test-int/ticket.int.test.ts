@@ -144,6 +144,28 @@ describe('ticket-svc PostgreSQL [HOT-160] [P-T15]', () => {
     expect(page2.nextCursor).toBeUndefined();
   });
 
+  test('CheckReviewEligibility는 실제 DB의 결제자·유효 티켓·종료 시각으로 자격과 근거 주문을 준다 [ASVS v5.0.0-2.2.3]', async () => {
+    const eventId = '0190f3a1-7c2e-7a00-8000-000000000031';
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000032';
+    await service.issue(issue({ eventId, orderId, payerAccountId: ACCOUNT, seatIds: [SEAT_A] }));
+    const notEnded = await service.reviewEligibility({ accountId: ACCOUNT, eventId, nowMs: NOW, eventEndsAtMs: NOW + 3_600_000 });
+    expect(notEnded).toMatchObject({ eligible: false, reason: 'NOT_ENDED' });
+    const eligible = await service.reviewEligibility({ accountId: ACCOUNT, eventId, nowMs: NOW, eventEndsAtMs: NOW - 3_600_000 });
+    expect(eligible).toMatchObject({ eligible: true, basisOrderId: orderId });
+    const notPayer = await service.reviewEligibility({ accountId: OTHER, eventId, nowMs: NOW, eventEndsAtMs: NOW - 3_600_000 });
+    expect(notPayer).toMatchObject({ eligible: false, reason: 'NOT_PAYER' });
+
+    const ticketId = (await database.pool.query('select id from ticket where order_id = $1', [orderId])).rows[0].id as string;
+    await database.pool.query('update ticket set account_id = $1 where id = $2', [OTHER, ticketId]);
+    const holder = await service.reviewEligibility({ accountId: OTHER, eventId, nowMs: NOW, eventEndsAtMs: NOW - 3_600_000 });
+    expect(holder).toMatchObject({ eligible: false, reason: 'NOT_PAYER' });
+    await database.pool.query('update ticket set account_id = $1 where id = $2', [ACCOUNT, ticketId]);
+
+    await service.cancel(cancel({ orderId, ticketIds: [ticketId], cancellationId: CANCEL }));
+    const noValid = await service.reviewEligibility({ accountId: ACCOUNT, eventId, nowMs: NOW, eventEndsAtMs: NOW - 3_600_000 });
+    expect(noValid).toMatchObject({ eligible: false, reason: 'NO_VALID_TICKET' });
+  });
+
   test('payment-svc TicketGrpcIssuer가 실제 gRPC로 ticket-svc를 불러 발권하고 재요청은 같은 티켓이다', async () => {
     const server = await startGrpcServer({
       host: '127.0.0.1',

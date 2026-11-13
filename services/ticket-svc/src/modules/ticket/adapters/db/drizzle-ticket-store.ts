@@ -9,6 +9,7 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
   type TicketStatus,
@@ -152,6 +153,14 @@ export class DrizzleTicketStore implements TicketStore {
       cancelledAt: new Date(input.nowMs),
     });
     return result;
+  }
+
+  async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {
+    const rows = await this.o.database.db
+      .select({ accountId: ticket.accountId, payerAccountId: ticket.payerAccountId, orderId: ticket.orderId, status: ticket.status, createdAt: ticket.createdAt })
+      .from(ticket)
+      .where(eq(ticket.eventId, eventId));
+    return rows.map((r) => ({ accountId: r.accountId, payerAccountId: r.payerAccountId, orderId: r.orderId, status: statusOf(r.status), issuedAtMs: r.createdAt.getTime() }));
   }
 
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {

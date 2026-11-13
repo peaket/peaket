@@ -177,6 +177,9 @@ message OperatorCancelTicketsResponse {
 message CheckReviewEligibilityRequest {
   string account_id = 1;
   string event_id = 2;
+  // 회차의 공연 종료 예정 시각(event.ends_at). core-svc review가 카탈로그에서 읽어 넘긴다(2026-11-13, BAT-585).
+  // ticket-svc는 이 시각이 지났는지와 결제자·유효 티켓을 함께 본다. 없으면 INVALID_ARGUMENT다.
+  google.protobuf.Timestamp event_ends_at = 3;
 }
 
 enum ReviewIneligibleReason {

@@ -92,6 +92,30 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('CancelTickets', err, orderId, cb, onError));
     },
 
+    CheckReviewEligibility: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      const req = call.request;
+      const endsAtMs = msOf(req.event_ends_at);
+      if (endsAtMs === undefined) {
+        cb({ code: grpc.status.INVALID_ARGUMENT, message: 'event_ends_at이 없다' });
+        return;
+      }
+      useCases.ticket
+        .reviewEligibility({
+          accountId: text(req.account_id),
+          eventId: text(req.event_id),
+          nowMs: useCases.nowMs?.() ?? Date.now(),
+          eventEndsAtMs: endsAtMs,
+        })
+        .then((r) => {
+          cb(null, {
+            eligible: r.eligible,
+            ...(r.basisOrderId ? { basis_order_id: r.basisOrderId } : {}),
+            reason: r.reason ? `REVIEW_INELIGIBLE_REASON_${r.reason}` : 'REVIEW_INELIGIBLE_REASON_UNSPECIFIED',
+          });
+        })
+        .catch((err: unknown) => fail('CheckReviewEligibility', err, text(req.event_id), cb, onError));
+    },
+
     ListTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;
       useCases.ticket

@@ -1462,6 +1462,9 @@ erDiagram
         smallint rating "별점 1~5, 필수"
         text body "NFC 정규화 뒤 grapheme 10~1,000자 [가정]"
         text status "VISIBLE|HIDDEN|DELETED. DELETED면 본문·별점·사진 키·계정 ID를 바로 비운다(ADR-0086). HIDDEN 사유는 takedown_action(통보·같은 내용·권리 침해 임시조치·신고 처리 노출 차단·불법 촬영물 신고 가림, ADR-0066)"
+        text content_fingerprint "NFKC 뒤 공백·문장부호·제어 문자를 지운 본문의 SHA-256. 통보로 차단한 같은 내용을 새 후기 저장 때 바로 가리는 데 쓴다(POL-024 2호 마목, BAT-585)"
+        text author_display "닉네임 첫 grapheme + '**'. identity 팬 프로필 조회가 생기기 전에는 '***'다(BAT-585)"
+        bool edited "팬이 고친 적이 있으면 true. 운영자 조치와 구분한다(BAT-585)"
         timestamptz created_at
         timestamptz updated_at
         timestamptz deleted_at
@@ -1481,6 +1484,11 @@ erDiagram
         timestamptz created_at
         timestamptz attached_at
         timestamptz deleted_at "붙이지 않은 사진은 올린 뒤 24시간 [가정]에 지운다"
+    }
+    review_hidden_fingerprint {
+        text fingerprint PK "통보로 차단한 본문 지문(review.content_fingerprint와 같은 값)"
+        uuid notice_id "takedown_notice ID(ops 논리 DB라 외래키 없음)"
+        timestamptz created_at
     }
     content_report {
         uuid id PK

@@ -7,6 +7,8 @@ import {
   normalizeIssueInput,
   parseWalletCursor,
   qrPayloadOf,
+  type ReviewEligibilityTicket,
+  reviewEligibilityOf,
   TicketInputError,
   ticketKeyHash,
   walletCursorOf,
@@ -15,6 +17,7 @@ import {
 const ORDER = '0190f3a1-7c2e-7a00-8000-000000000001';
 const EVENT = '0190f3a1-7c2e-7a00-8000-000000000002';
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000003';
+const OTHER = '0190f3a1-7c2e-7a00-8000-000000000006';
 const SEAT_A = '0190f3a1-7c2e-7a00-8000-000000000004';
 const SEAT_B = '0190f3a1-7c2e-7a00-8000-000000000005';
 const input = (over: Partial<Parameters<typeof normalizeIssueInput>[0]> = {}) => ({ orderId: ORDER, eventId: EVENT, payerAccountId: ACCOUNT, seatIds: [SEAT_A, SEAT_B], issueGeneration: 0, ...over });
@@ -51,6 +54,18 @@ describe('ticket domain [HOT-160]', () => {
     expect(parseWalletCursor(walletCursorOf(c))).toEqual(c);
     expect(parseWalletCursor('not-base64')).toBeUndefined();
     expect(parseWalletCursor(Buffer.from('["x","y"]').toString('base64url'))).toBeUndefined();
+  });
+
+  test('후기 자격은 종료 시각·결제자·유효 티켓을 보고 근거 주문을 준다 [ASVS v5.0.0-2.2.3]', () => {
+    const now = Date.parse('2026-11-13T00:00:00.000Z');
+    const ticket = (o: Partial<ReviewEligibilityTicket> = {}): ReviewEligibilityTicket => ({ accountId: ACCOUNT, payerAccountId: ACCOUNT, orderId: ORDER, status: 'ISSUED', issuedAtMs: now, ...o });
+    const input = { accountId: ACCOUNT, eventId: EVENT, nowMs: now, eventEndsAtMs: now - 1 };
+    expect(reviewEligibilityOf([ticket()], input)).toEqual({ eligible: true, basisOrderId: ORDER });
+    expect(reviewEligibilityOf([ticket({ status: 'REFUNDED' })], input)).toEqual({ eligible: false, reason: 'NO_VALID_TICKET' });
+    expect(reviewEligibilityOf([ticket({ accountId: OTHER })], { ...input, accountId: OTHER })).toEqual({ eligible: false, reason: 'NOT_PAYER' });
+    expect(reviewEligibilityOf([ticket()], { ...input, nowMs: now - 2 })).toEqual({ eligible: false, reason: 'NOT_ENDED' });
+    expect(reviewEligibilityOf([], input)).toEqual({ eligible: false, reason: 'NO_VALID_TICKET' });
+    expect(reviewEligibilityOf([ticket()], { ...input, eventCancelled: true })).toEqual({ eligible: false, reason: 'EVENT_CANCELLED' });
   });
 
   test('UUID 검사는 대소문자를 받아들이고 다른 모양은 거절한다', () => {

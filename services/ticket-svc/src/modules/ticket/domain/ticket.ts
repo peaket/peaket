@@ -75,6 +75,66 @@ export interface ListTicketsInput {
   readonly limit: number;
 }
 
+/** 후기 작성 자격 판정에 쓰는 티켓 한 줄(BAT-585, FR-016·POL-042) */
+export interface ReviewEligibilityTicket {
+  readonly accountId: string;
+  readonly payerAccountId: string;
+  readonly orderId: string;
+  readonly status: TicketStatus;
+  readonly issuedAtMs: number;
+}
+
+export type ReviewIneligibleReason = 'NOT_ENDED' | 'NOT_PAYER' | 'NO_VALID_TICKET' | 'EVENT_CANCELLED';
+
+export interface ReviewEligibilityInput {
+  readonly accountId: string;
+  readonly eventId: string;
+  readonly nowMs: number;
+  /** 회차의 공연 종료 예정 시각(event.ends_at). core-svc가 넘긴다 */
+  readonly eventEndsAtMs: number;
+  /** 취소된 회차면 core-svc가 먼저 거른다. ticket-svc는 이 값을 받지 않는다 */
+  readonly eventCancelled?: boolean;
+}
+
+export interface ReviewEligibilityResult {
+  readonly eligible: boolean;
+  /** 자격의 근거가 된 결제자 주문(review.basis_order_id) */
+  readonly basisOrderId?: string;
+  readonly reason?: ReviewIneligibleReason;
+}
+
+/** 후기를 쓸 수 있는 티켓 상태. 취소·환불·무효·신고 보류는 뺀다(양도 진행 중은 결제자가 아직 주인이다) */
+const REVIEW_VALID_STATUS: ReadonlySet<TicketStatus> = new Set(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING']);
+
+/**
+ * 후기 작성 자격(FR-016, POL-042 ①): 공연 종료 예정 시각이 지났고, 그 회차 티켓의 결제자이며,
+ * 취소·환불·무효가 아닌 티켓이 남아 있어야 한다. 양도받은 보유자는 결제자가 아니므로 쓸 수 없다.
+ * 티켓 상태와 결제자만 본다. 회차 취소는 core-svc가 catalog에서 먼저 본다.
+ */
+export function reviewEligibilityOf(tickets: readonly ReviewEligibilityTicket[], input: ReviewEligibilityInput): ReviewEligibilityResult {
+  if (input.eventCancelled) return { eligible: false, reason: 'EVENT_CANCELLED' };
+  if (!Number.isFinite(input.eventEndsAtMs) || input.eventEndsAtMs <= 0) return { eligible: false, reason: 'NOT_ENDED' };
+  if (input.nowMs < input.eventEndsAtMs) return { eligible: false, reason: 'NOT_ENDED' };
+  const valid = tickets.filter((t) => REVIEW_VALID_STATUS.has(t.status));
+  if (valid.length === 0) return { eligible: false, reason: 'NO_VALID_TICKET' };
+  const payer = valid
+    .filter((t) => t.payerAccountId === input.accountId)
+    .sort((a, b) => a.issuedAtMs - b.issuedAtMs || a.orderId.localeCompare(b.orderId));
+  if (payer.length === 0) return { eligible: false, reason: 'NOT_PAYER' };
+  return { eligible: true, basisOrderId: payer[0]!.orderId };
+}
+
+/** 후기 자격 입력을 검사한다. event_ends_at은 core-svc가 카탈로그에서 읽어 넘긴다 */
+export function normalizeReviewEligibilityInput(i: ReviewEligibilityInput): ReviewEligibilityInput {
+  return {
+    accountId: requireUuid('accountId', i.accountId),
+    eventId: requireUuid('eventId', i.eventId),
+    nowMs: i.nowMs,
+    eventEndsAtMs: i.eventEndsAtMs,
+    ...(i.eventCancelled === undefined ? {} : { eventCancelled: i.eventCancelled }),
+  };
+}
+
 export interface WalletTicket {
   readonly ticketId: string;
   readonly orderId: string;

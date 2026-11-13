@@ -733,6 +733,6 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
       { cwd: SERVICE_DIR, env: { ...base, URL: pg.url }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const line = out.split('\n').find((l) => l.startsWith('{"tasks"'))!;
-    expect(JSON.parse(line)).toMatchObject({ tasks: [['sale-eligibility-purge', 'daily'], ['sale-eligibility-copy', 'daily']], purge: { purged: 0, dropFailed: 0 } });
+    expect(JSON.parse(line)).toMatchObject({ tasks: [['sale-eligibility-purge', 'daily'], ['sale-eligibility-copy', 'daily'], ['review-temp-block-expire', 'daily']], purge: { purged: 0, dropFailed: 0 } });
   }, 180_000);
 });

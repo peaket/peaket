@@ -15,11 +15,13 @@ const ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000003';
 const SEAT_A = '0190f3a1-7c2e-7a00-8000-000000000005';
 const SEAT_B = '0190f3a1-7c2e-7a00-8000-000000000006';
 const CANCEL = '0190f3a1-7c2e-7a00-8000-000000000007';
+const OTHER_ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000008';
 
 interface Client {
   IssueTickets(req: Record<string, unknown>, cb: (err: grpc.ServiceError | null, res: any) => void): void;
   CancelTickets(req: Record<string, unknown>, cb: (err: grpc.ServiceError | null, res: any) => void): void;
   ListTickets(req: Record<string, unknown>, cb: (err: grpc.ServiceError | null, res: any) => void): void;
+  CheckReviewEligibility(req: Record<string, unknown>, cb: (err: grpc.ServiceError | null, res: any) => void): void;
 }
 
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
@@ -62,6 +64,22 @@ describe('TicketService gRPC [HOT-160] [P-T15]', () => {
     const ticketId = String(list.tickets[0]!.ticket_id);
     const out = await call<{ outcomes: Array<Record<string, unknown>> }>((cb) => client.CancelTickets({ order_id: ORDER, ticket_ids: [ticketId], requested_by_account_id: ACCOUNT, cancellation_id: CANCEL }, cb));
     expect(out.outcomes).toEqual([{ ticket_id: ticketId, result: 'CANCEL_TICKET_RESULT_REFUND_NOW' }]);
+  });
+
+  test('CheckReviewEligibility는 종료 시각·결제자·유효 티켓을 보고 자격과 근거 주문을 준다 [ASVS v5.0.0-2.2.3]', async () => {
+    const notEnded = await call<Record<string, unknown>>((cb) => client.CheckReviewEligibility({ account_id: ACCOUNT, event_id: EVENT, event_ends_at: { seconds: Math.floor((NOW + 3_600_000) / 1000), nanos: 0 } }, cb));
+    expect(notEnded).toMatchObject({ eligible: false, reason: 'REVIEW_INELIGIBLE_REASON_NOT_ENDED' });
+
+    const eligible = await call<Record<string, unknown>>((cb) => client.CheckReviewEligibility({ account_id: ACCOUNT, event_id: EVENT, event_ends_at: { seconds: Math.floor((NOW - 3_600_000) / 1000), nanos: 0 } }, cb));
+    expect(eligible).toMatchObject({ eligible: true, basis_order_id: ORDER });
+    expect(eligible.reason).toBe('REVIEW_INELIGIBLE_REASON_UNSPECIFIED');
+
+    const notPayer = await call<Record<string, unknown>>((cb) => client.CheckReviewEligibility({ account_id: OTHER_ACCOUNT, event_id: EVENT, event_ends_at: { seconds: Math.floor((NOW - 3_600_000) / 1000), nanos: 0 } }, cb));
+    expect(notPayer).toMatchObject({ eligible: false, reason: 'REVIEW_INELIGIBLE_REASON_NOT_PAYER' });
+  });
+
+  test('CheckReviewEligibility는 종료 시각이 없으면 INVALID_ARGUMENT다', async () => {
+    await expect(call((cb) => client.CheckReviewEligibility({ account_id: ACCOUNT, event_id: EVENT }, cb))).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
   });
 
   test('잘못된 UUID는 INVALID_ARGUMENT로 답하고, 처리기 오류 로그를 남긴다', async () => {
