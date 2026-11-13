@@ -179,6 +179,10 @@ export type ProblemType =
   | 'sale-paused'
   | 'sale-policy-denied'
   | 'sale-policy-invalid'
+  | 'sale-review-list-missing'
+  | 'sale-review-not-approved'
+  | 'sale-review-not-submitted'
+  | 'sale-review-scales-missing'
   | 'sale-setting-locked'
   | 'scale-change-closed'
   | 'seat-already-held'
@@ -392,6 +396,10 @@ export const PROBLEM_TYPES = {
   'sale-paused': { status: 423, title: "판매가 잠시 멈췄습니다" },
   'sale-policy-denied': { status: 403, title: "판매 정책에 따라 지금은 예매할 수 없습니다" },
   'sale-policy-invalid': { status: 422, title: "판매 정책 규칙에 고칠 곳이 있습니다" },
+  'sale-review-list-missing': { status: 422, title: "판매 정책이 쓰는 명단이 없습니다" },
+  'sale-review-not-approved': { status: 409, title: "판매 승인된 공연만 회차 설정을 쓸 수 있습니다" },
+  'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
+  'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
