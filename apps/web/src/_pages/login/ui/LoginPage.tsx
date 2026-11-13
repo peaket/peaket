@@ -8,6 +8,9 @@ import { LogoWordmark } from '@peaket/ds/LogoWordmark';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewTheme } from '@peaket/ds/Preview';
 import { SESSION_END_TEXT } from '@/entities/provider';
+import { DomesticPhoneNotice } from '@/shared/i18n/DomesticPhoneNotice';
+import { localePath, type Locale } from '@/shared/i18n/catalog';
+import { domesticPhoneNotice } from '@/shared/i18n/notice';
 import type { PageProps } from '@/shared/lib/page-props';
 import { AppShell } from '@/widgets/app-shell';
 import { loginView } from '../model/state';
@@ -20,10 +23,12 @@ const LOCALES = [
   { lang: 'zh', label: '中文' },
 ] as const;
 
-export async function LoginPage({ searchParams }: PageProps) {
+export async function LoginPage({ searchParams, locale }: PageProps & { locale?: Locale }) {
   const sp = await searchParams;
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = loginView(sp);
+  const notice = await domesticPhoneNotice(locale);
+  const current = locale ?? 'ko';
 
   return (
     <AppShell dark={dark} guest>
@@ -49,6 +54,7 @@ export async function LoginPage({ searchParams }: PageProps) {
             </NoticeBanner>
           ) : null}
 
+          <DomesticPhoneNotice text={notice} lang={locale} className="text-center" />
           <LoginProviders next={v.next} down={v.down} />
 
           <div className="col items-center" style={{ gap: 14 }}>
@@ -64,11 +70,19 @@ export async function LoginPage({ searchParams }: PageProps) {
             </nav>
             <nav className="row wrap center t-sm" aria-label="언어 선택" style={{ gap: '4px 14px' }}>
               <i className="ic ic-globe ic-16 muted" aria-hidden="true" />
-              <a className="fw-b" href="/login" aria-current="true" style={{ color: 'inherit' }}>
+              <a className={current === 'ko' ? 'fw-b' : undefined} href="/login" aria-current={current === 'ko' ? 'true' : undefined} style={{ color: 'inherit' }}>
                 한국어
               </a>
               {LOCALES.map((l) => (
-                <a key={l.lang} href={`/${l.lang}/login`} lang={l.lang} hrefLang={l.lang}>
+                <a
+                  key={l.lang}
+                  className={current === l.lang ? 'fw-b' : undefined}
+                  href={localePath(l.lang, '/login')}
+                  lang={l.lang}
+                  hrefLang={l.lang}
+                  aria-current={current === l.lang ? 'true' : undefined}
+                  style={{ color: 'inherit' }}
+                >
                   {l.label}
                 </a>
               ))}

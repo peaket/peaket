@@ -161,7 +161,7 @@
 | BAT-565 | 1 | 4 | C | SEG-040 | 0.5 | - | 혼자: 구간 마무리 |
 | BAT-570 | 2 | 4 | B | LCH-220 | 3 | docs/features/forensic-replay.md, FX-T4, FX-T8 | 혼자: 이웃 LCH-230과 합치면 5.25일. 선행 LCH-210·LCH-215(갈래 1) |
 | BAT-575 | 2 | 4 | B | LCH-230 | 2.25 | docs/features/forensic-replay.md, FX-T5, FX-T9 | 혼자: 이웃과 합치면 5일을 넘음(LCH-220·LCH-190과 5.25일) |
-| BAT-580 | 2 | 4 | B | LCH-190 | 3 | docs/frontend.md, docs/security/asvs/frontend.md | 혼자: 이웃과 합치면 5일을 넘음(LCH-230과 5.25일, LCH-150과 5.5일) |
+| BAT-580 | 2 | 4 | B | LCH-190 | 3 | FE-T18, frontend:v5.0.0-1.3.10 | 혼자: 이웃과 합치면 5일을 넘음(LCH-230과 5.25일, LCH-150과 5.5일). 2026-11-13 웨이브 4: 구매 조건 알림 4언어·번역 검토 표시·키 검사, 로케일 로그인·공연 상세 경로, 접근성 3조합 확인 목록. 장부 범위는 두 문서 전체에서 이 묶음이 닿는 2개로 좁혔다(계획 docs/review/plans/BAT-580.md). FE-T18은 사람 확인 |
 | BAT-585 | 2 | 4 | B | LCH-150·LCH-160 | 5 | docs/security/asvs/catalog-review.md, docs/features/control-tower.md |  |
 | BAT-590 | 2 | 4 | B | LCH-180·LCH-185 | 3.5 | POL-027, docs/security/data-classification.md, docs/security/internal-management-plan.md |  |
 | BAT-595 | 2 | 4 | B | LCH-040·LCH-130 | 3.5 | docs/features/transfer-refund.md, docs/features/settlement.md, docs/frontend.md | 선행 LCH-010·LCH-020·LCH-030·LCH-120(갈래 3) |
@@ -578,7 +578,7 @@
 - [ ] LCH-350 wbs 7.6.1: 리드 산출물 — 관제 데모 영상, 처음 일을 익히는 안내, RFC 정리, ADR 점검, 블로그 10편 목차 정리 (1.5일) 측정 창 4
 - [ ] LCH-220 wbs 7.7.2: 리플레이 화면(SCR-069) — 좌석맵 `replay` 변형, 타임라인 `scrub`, 비트마스크 교차 필터, 세 크기, 표로 보기·키보드 조작(FX-T4·T8) (3일) 갈래 2(루프는 건너뛴다)
 - [ ] LCH-230 wbs 7.7.3: 봇 후보 패널(CMP-079 WebGL2 산점도와 2D 대체, 기기 묶음, 합성 정답 기준 정밀도·재현율), 원천별 패널(조사 원천은 정상 기준선, 연구 원천은 한 축 막대)과 고정 문구, 성능(FX-T5·T9, ADR-0171) (2.25일) 갈래 2(루프는 건너뛴다)
-- [ ] LCH-190 wbs 7.5.1: i18n 4개 언어(구매 조건 알림 문구·번역 검토 표시), 접근성 수동 시나리오 3종(낭독기 확인은 소유자 몫이라 확인 목록만 만든다) (3일) 갈래 2(루프는 건너뛴다)
+- [x] LCH-190 wbs 7.5.1: i18n 4개 언어(구매 조건 알림 문구·번역 검토 표시), 접근성 수동 시나리오 3종(낭독기 확인은 소유자 몫이라 확인 목록만 만든다) (3일) 갈래 2(루프는 건너뛴다) 2026-11-13 BAT-580: 구매 조건 알림을 ko·en·ja·zh 카탈로그로 만들고 en·ja·zh 로그인·공연 상세에 붙였다. 문구마다 `review: machine | native`, 번역 키 검사기(`tools/ci/i18n-check.mjs`), 로케일 접두 로그인·공연 상세 경로, 접근성 3조합 확인 목록(`docs/review/manual-a11y/LCH-190.md`). 사람 확인은 소유자 몫
 - [ ] LCH-150 wbs 7.3.1 ①: review — 관람 후기(자격·회차당 하나), 후기 사진·일반 신고·운영자 조치(ADR-0066) HOT-170이 넘긴 것: 후기 목록·요약은 그 회차가 속한 공연의 모든 회차 후기를 모으고 후기마다 관람 회차 일시를 싣는다(ADR-0093 결정 표, core-svc catalog의 `event.production_id`로 묶는다) HOT-311이 넘긴 것: 후기 모달(SCR-016: 후기 전체·쓰기·신고)이 아직 퍼블리싱 목업 목록을 보인다. 공연 상세가 주소 값(`?reviews=all`·`?review=new`·`?report=`)을 화면 스크립트로 읽어 모달을 띄우고 회차 목록은 상세 응답의 `rounds`를 넘긴다. 모달 안 목록·쓰기 자격·쓰기·신고를 `GET /v1/events/{eventId}/reviews`·`review-eligibility`·`POST …/reviews`·신고 경로에 잇는다. 상세의 후기 요약(`review-summary`)은 HOT-311이 이었다 (2.5일) 갈래 2(루프는 건너뛴다)
 - [ ] LCH-160 wbs 7.3.1 ②: 신고 누리집 연결(부정판매 포함), 통보 차단·복구(24시간·고시 사항 10시간), 같은 내용 게시물 자동 차단, 과징금 고지 (2.5일) 갈래 2(루프는 건너뛴다)
 - [ ] LCH-180 wbs 7.4.1 ①: 처리방침(수탁자 목록·국외 이전 절, ADR-0139)과 부정 예매 조사 목적 문구·가명정보 절·자동화된 결정 절(ADR-0171 결정 8), 국외 처리위탁 서면 고지, 내부 관리계획 사람 칸(부정 거래 조사관 지정·해제 포함) (1.75일) 갈래 2(루프는 건너뛴다)

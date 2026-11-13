@@ -103,7 +103,7 @@
 | S-T16 ① | 사람 확인 |  | BOT-100 | 공격마다 결과를 '방해'와 '이득'으로 나눠 기록하고 소지 증명을 남길지 정하는 것은 사람의 판단이다(ADR-0124 결정 2) |
 | S-T18 | 사람 확인 |  | BAT-175 | 화면 낭독기로 사람이 예매를 완주한다(axe 자동 검사는 CI). 확인 목록은 docs/review/manual-a11y/S-T18.md다. VoiceOver(iOS Safari)는 기기를 구할 때까지 미실행이다(ADR-0237) |
 | FE-T8 | 사람 확인 |  | 브라우저 확인 | docs/review/browser-check/HOT-356-358.md에서 시뮬레이터 성공과 새로고침을 봤다. 포트원 복귀와 쿠키 없는 첫 요청은 아직 못 봤다 |
-| FE-T18 | 사람 확인 |  | HOT-346 | 화면 낭독기·키보드 완주는 사람이 본다. 이름을 단 자동 시험(axe·목록 구조)은 그 일부다 |
+| FE-T18 | 사람 확인 |  | BAT-580 | 화면 낭독기·키보드 완주는 사람이 본다. 이름을 단 자동 시험(axe·목록 구조)은 그 일부다. 3조합·3시나리오 확인 목록은 docs/review/manual-a11y/LCH-190.md(2026-11-13) |
 | SR-T10 | 사람 확인 |  | BAT-165 browser check | 한글 조합 중 Enter·Esc를 처리하지 않는 것은 실제 브라우저 입력기로 확인한다. 코드는 `isComposing`·`keyCode 229`를 본다(packages/ds SearchField·WebSearchBox) |
 | SR-T14 | 사람 확인 |  | BAT-165 browser check | `/search`의 noindex·sitemap 제외는 브라우저 확인과 화면 머리 검사로 본다. 화면 주석과 metadata는 `SearchPage`에 있다 |
 

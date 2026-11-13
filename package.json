@@ -9,6 +9,7 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "asvs:report": "node tools/ci/asvs-report.mjs --scan services --scan packages --scan apps --scan tools --scan loadtest",
+    "i18n:check": "node tools/ci/i18n-check.mjs",
     "typecheck": "turbo run typecheck",
     "lint": "eslint --no-error-on-unmatched-pattern services packages/platform/template packages/platform/src packages/shuffle/src packages/search-normalize/src apps packages/ds/src packages/api-client/src packages/telemetry/src packages/validation/src packages/console-contract/src packages/seatmap/src"
   },

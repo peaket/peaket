@@ -40,6 +40,8 @@ export const ROUTES: readonly RouteRule[] = [
   cached('/booking/[eventId]/checkout/return', 'return'),
   // 공연 상세는 사람 확인 위젯을 싣고 본인확인기관 창을 연다(§5.14.1 A의 '+' 줄 둘, '변형은 실제 화면에 걸려야 한다')
   cached('/events/[id]', 'web', ['humanCheck', 'identityForm']),
+  // 로케일 접두 공연 상세(NFR-024): 같은 ISR 화면·같은 CSP 변형
+  cached('/[locale]/events/[id]', 'web', ['humanCheck', 'identityForm']),
   cached('/events/[id]/shuffle-proof'),
   cached('/help'),
   // 월렛은 부스 재발급의 대조 본인확인(목적 booth)을 연다(§5.14.1 A의 '+' 줄)
@@ -66,6 +68,8 @@ export const ROUTES: readonly RouteRule[] = [
   req('/help/inquiries/new'),
   // 로그인 시작(POST /login/{p})·로그인 수단 잇기 확인은 303으로 제공자로 간다: form-action에 제공자 인가 출처(ADR-0215)
   req('/login', 'B', 'web', ['socialLogin']),
+  // 로케일 접두 로그인(NFR-024): 같은 제공자 버튼·같은 CSP 변형
+  req('/[locale]/login', 'B', 'web', ['socialLogin']),
   req('/login/link', 'B', 'web', ['socialLogin']),
   req('/my/appeals/[id]'),
   req('/my/compensations/[id]'),

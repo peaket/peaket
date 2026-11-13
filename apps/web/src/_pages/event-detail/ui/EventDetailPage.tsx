@@ -13,6 +13,8 @@ import { CopyTextButton, ShareButton } from '@/features/copy-share';
 import { GENRES, searchHref } from '@/shared/config/genres';
 import { hiddenLinkHref } from '@/shared/config/hidden-link';
 import { SITE_ORIGIN } from '@/shared/config/origins';
+import { languageAlternates, localePath, type Locale } from '@/shared/i18n/catalog';
+import { domesticPhoneNotice } from '@/shared/i18n/notice';
 import { cx } from '@/shared/lib/cx';
 import { hiddenLink } from '@/shared/ui/hidden-link';
 import { derivativeUrl } from '@/shared/lib/image-loader';
@@ -44,22 +46,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (r.kind === 'missing') return { title: '페이지를 찾을 수 없습니다', robots: { index: false, follow: false } };
   const d = r.detail;
   // 회차마다 자기 주소가 정규 주소다(ADR-0153). 제목에 회차 일시를 넣어 같은 공연의 회차끼리 비슷한 페이지로 묶이지 않게 한다
-  return { title: `${d.title} ${d.roundLabel}`, alternates: { canonical: `${SITE_ORIGIN}/events/${d.eventId}` } };
+  return { title: `${d.title} ${d.roundLabel}`, alternates: { canonical: `${SITE_ORIGIN}/events/${d.eventId}`, languages: languageAlternates(`/events/${d.eventId}`) } };
 }
 
 /** 섹션 사이: 휴대폰·태블릿은 8px 바탕 띠, 데스크톱은 1px 선 */
 const GAP = <div className="section-gap lg:h-px lg:bg-(--border)" />;
 const SEC = 'col scroll-mt-14 px-4 py-7 md:px-6 lg:px-0 lg:py-9';
 
-export async function EventDetailPage({ params }: Props) {
+export async function EventDetailPage({ params, locale }: Props & { locale?: Locale }) {
   const { id } = await params;
   const r = await loadEvent(id);
   if (r.kind === 'missing') notFound();
   if (r.kind === 'suspended') return <SuspendedNotice />;
   const d = r.detail;
-  const path = `/events/${d.eventId}`;
+  const path = locale ? localePath(locale, `/events/${d.eventId}`) : `/events/${d.eventId}`;
   const extraHref = hiddenLinkHref(d.eventId);
-  const loginHref = `/login?next=${encodeURIComponent(path)}`;
+  const loginHref = `${locale ? `/${locale}` : ''}/login?next=${encodeURIComponent(path)}`;
+  const notice = await domesticPhoneNotice(locale);
   const sort = SORT_NOTICE[d.sortMode];
   // 계약의 장르는 정본 이름(한글)이고 검색 주소는 영문 키다(docs/features/search.md §5.4)
   const genreKey = GENRES.find((g) => g.label === d.genre)?.key;
@@ -79,6 +82,8 @@ export async function EventDetailPage({ params }: Props) {
     otherRoundFallbackHref: genreKey ? searchHref.genre(genreKey) : '/search',
     loginHref,
     signupHref: `/signup/consent?next=${encodeURIComponent(path)}`,
+    ...(notice ? { domesticPhoneNotice: notice } : {}),
+    ...(locale ? { locale } : {}),
   };
   const tabs = [
     { id: 'sec-info', label: '공연 정보' },

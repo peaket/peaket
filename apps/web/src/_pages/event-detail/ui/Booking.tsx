@@ -18,6 +18,8 @@ import { personalCta, restrictionCta, restrictionGate, useFanSession, type FanSe
 import { appealHref, useBookingRestriction } from '@/entities/me/restriction';
 import { formatWon } from '@/entities/production';
 import { OpenAlertToggle } from '@/features/open-alert';
+import { DomesticPhoneNotice } from '@/shared/i18n/DomesticPhoneNotice';
+import type { Locale } from '@/shared/i18n/catalog';
 import { queueRoomHref } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 import { cx } from '@/shared/lib/cx';
@@ -41,6 +43,10 @@ export type BookingData = Pick<
   loginHref: string;
   /** 가입 완료 화면(SCR-005, 돌아갈 주소는 이 회차) */
   signupHref: string;
+  /** en·ja·zh 화면의 구매 조건 알림(POL-001, docs/frontend.md §5.12) */
+  domesticPhoneNotice?: string;
+  /** 현재 화면 로케일. 한국어는 없다 */
+  locale?: Locale;
 };
 
 interface BookingState {
@@ -413,7 +419,10 @@ export function BookingBar({ data }: { data: BookingData }) {
   }
   return (
     <div className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden" data-verify-scope>
-      <div className="w-full">{body}</div>
+      <div className="w-full">
+        <DomesticPhoneNotice text={data.domesticPhoneNotice} lang={data.locale} className="px-1 pb-1 text-center md:text-left" />
+        {body}
+      </div>
     </div>
   );
 }
@@ -443,6 +452,7 @@ export function BookingPanelCta({ data }: { data: BookingData }) {
   }
   return (
     <div className="col" style={{ gap: 8 }} data-verify-scope>
+      <DomesticPhoneNotice text={data.domesticPhoneNotice} lang={data.locale} />
       {m.desc ? (
         <p className="t-sm muted" id={descId}>
           {m.desc}
