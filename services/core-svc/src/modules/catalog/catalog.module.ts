@@ -2,6 +2,11 @@
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, type Provider, RequestMethod } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { type Clock, type Database, DATABASE, LogPseudonymizer, CLOCK } from '@peaket/platform';
+import { EmptyDemandForecastSource } from './adapters/empty-demand-forecast-source.js';
+import { ChangeEventScale } from './application/change-event-scale.js';
+import { GetDemandForecast } from './application/demand-forecast.js';
+import { DEMAND_FORECAST_SOURCE, type DemandForecastSource } from './domain/demand-ports.js';
+import { OpsEventController } from './inbound/ops-event.controller.js';
 import { LogCdnInvalidation, MemoryCdnInvalidation, unavailableImageProcessing, unavailableSeatmapParser } from './adapters/cdn-invalidation.js';
 import { DrizzleCatalogRepository, PARTNER_DATABASE } from './adapters/db/drizzle-catalog-repository.js';
 import { DrizzleProductionMedia } from './adapters/db/drizzle-production-media.js';
@@ -94,6 +99,8 @@ export interface MediaWiring {
   pseudonym?: LogPseudonym;
   /** 판매 자격 명단 운영 지표(서비스 등록부에 다는 것은 main.ts). 없으면 등록하지 않은 묶음 */
   eligibilityMetrics?: SaleEligibilityMetrics;
+  /** 수요 예측 원천(구독 수·지난 회차). 없으면 0·빈 이력이라 기본 비율을 쓴다 */
+  demandSource?: DemandForecastSource;
 }
 
 /** 시험 기본값: 처리·해석 작업을 잇지 않았으면 늘 503(조용히 통과시키지 않는다) */
@@ -160,8 +167,8 @@ export class CatalogModule implements NestModule {
       | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring }
       | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -179,6 +186,7 @@ export class CatalogModule implements NestModule {
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
+          { provide: DEMAND_FORECAST_SOURCE, useValue: o.media.demandSource ?? new EmptyDemandForecastSource() },
           ...mediaProviders(o.media, false),
         ],
       };
@@ -198,6 +206,7 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
+        { provide: DEMAND_FORECAST_SOURCE, useValue: o.media?.demandSource ?? new EmptyDemandForecastSource() },
         ...mediaProviders(o.media ?? {}, true),
       ],
     };

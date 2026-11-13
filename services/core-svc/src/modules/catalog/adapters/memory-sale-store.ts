@@ -6,6 +6,8 @@ import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
 
 export class MemorySaleStore implements SaleStore {
   readonly #locks = new Map<string, Promise<unknown>>();
+  /** 규모 올리기·판매 승인의 오픈 간격 검사를 한 줄로 세운다(프로세스 밖 잠금의 대역) */
+  #scaleLock: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly repo: MemoryCatalogRepository) {}
 
@@ -25,6 +27,12 @@ export class MemorySaleStore implements SaleStore {
   async eventProduction(eventId: string, tenantId: string): Promise<string | undefined> {
     const e = this.repo.events.get(eventId);
     return e && this.repo.productions.get(e.productionId)?.promoterId === tenantId ? e.productionId : undefined;
+  }
+
+  async eventOwner(eventId: string): Promise<{ productionId: string; tenantId: string } | undefined> {
+    const e = this.repo.events.get(eventId);
+    const p = e && this.repo.productions.get(e.productionId);
+    return p ? { productionId: p.id, tenantId: p.promoterId } : undefined;
   }
 
   withLockedProduction<T>(productionId: string, tenantId: string, fn: (tx: SaleTx) => Promise<T>): Promise<T | 'not-found'> {
@@ -99,6 +107,7 @@ export class MemorySaleStore implements SaleStore {
           const before = this.#state(productionId);
           const after = applyApproval(before, input);
           writes.push(() => {
+            for (const e of after.events) if (e.scale !== undefined) this.repo.eventScales.set(e.eventId, e.scale);
             const p = this.repo.productions.get(productionId)!;
             this.repo.productions.set(productionId, {
               ...p,
@@ -136,6 +145,17 @@ export class MemorySaleStore implements SaleStore {
             this.repo.productions.set(productionId, { ...p, saleReview: 'REJECTED' });
           });
         },
+        setEventScale: async (eventId, scale, version) => {
+          writes.push(() => {
+            this.repo.eventScales.set(eventId, scale);
+            this.repo.eventVersions.set(eventId, version);
+          });
+        },
+        largeOpenTimes: async (from, to, exclude) =>
+          [...this.repo.events.values()]
+            .filter((e) => e.productionId !== exclude && e.status !== 'CANCELLED' && this.repo.eventScales.get(e.id) === 'LARGE' && this.repo.productions.get(e.productionId)?.saleReview === 'APPROVED')
+            .map((e) => e.openAt)
+            .filter((t) => t.getTime() >= from.getTime() && t.getTime() <= to.getTime()),
       };
       const value = await fn(tx);
       for (const w of writes) w();
@@ -143,6 +163,18 @@ export class MemorySaleStore implements SaleStore {
     });
     this.#locks.set(productionId, run.catch(() => undefined));
     return run;
+  }
+
+  async withScaleChangeLock<T>(_tenantId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.#scaleLock;
+    let release!: () => void;
+    this.#scaleLock = new Promise<void>((resolve) => (release = resolve));
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 
   async markCopied(listId: string, tenantId: string, copySeq: number): Promise<void> {
@@ -186,6 +218,7 @@ export class MemorySaleStore implements SaleStore {
       openBatch: d?.openBatch ?? draft?.openBatch ?? true,
       seatAssignment: d?.seatAssignment ?? draft?.seatAssignment ?? 'PICK',
       perPersonLimit: d?.perPersonLimit ?? draft?.perPersonLimit ?? 4,
+      ...(this.repo.eventScales.get(eventId) !== undefined ? { scale: this.repo.eventScales.get(eventId) } : {}),
     };
   }
 

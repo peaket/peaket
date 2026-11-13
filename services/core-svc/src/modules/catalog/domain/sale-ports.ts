@@ -4,6 +4,7 @@
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { EventStatus, SaleReview } from './production.js';
 import type { SaleApprovalInput } from './sale-approval.js';
+import type { ShowScale } from './demand-forecast.js';
 import type { PendingEvent } from './registration.js';
 
 /** 회차 고치기로 바꿀 수 있는 칸(openapi PartnerEventUpdate) */
@@ -106,6 +107,10 @@ export interface SaleTx {
   deleteList(listId: string, listKey: string, now: Date): Promise<number>;
   /** 판매 승인: pending_revision을 공개본으로 옮기고 규모·결제사 칸을 정한다(판매 승인 LCH-080) */
   approve(input: SaleApprovalInput): Promise<SaleState>;
+  /** 판매 승인 뒤 회차 규모 올리기(ADR-0078). 판을 올리고 규모를 쓴다 */
+  setEventScale(eventId: string, scale: ShowScale, version: number): Promise<void>;
+  /** from~to에 오픈하는 다른 공연의 대형(LARGE) 회차 오픈 시각. 규모 올리기 간격 검사에 쓴다(ADR-0078) */
+  largeOpenTimes(from: Date, to: Date, excludeProductionId: string): Promise<Date[]>;
   /** 판매 승인 반려: 사유를 남기고 상태만 바꾼다. pending_revision은 다음 수정·재요청에 남긴다 */
   reject(reason: string, now: Date): Promise<void>;
 }
@@ -125,8 +130,15 @@ export interface SaleStore {
   read(productionId: string, tenantId: string): Promise<SaleState | undefined>;
   /** 그 테넌트의 회차가 속한 공연 ID(없는 회차와 남의 회차는 undefined) */
   eventProduction(eventId: string, tenantId: string): Promise<string | undefined>;
+  /** 관제: 회차가 속한 공연과 판매자. 공개 전(승인 대기) 회차도 본다(수요 예측 LCH-090) */
+  eventOwner(eventId: string): Promise<{ productionId: string; tenantId: string } | undefined>;
   /** 공연 행을 잠근 트랜잭션에서 fn을 부른다. 없거나 남의 것이면 'not-found'이고 fn을 부르지 않는다. fn이 던지면 되돌린다 */
   withLockedProduction<T>(productionId: string, tenantId: string, fn: (tx: SaleTx) => Promise<T>): Promise<T | 'not-found'>;
+  /**
+   * 규모 올리기·판매 승인의 오픈 간격 검사를 프로세스 밖에서도 직렬화한다(ADR-0078).
+   * fn 안에서 공연 행 잠금(withLockedProduction)을 잡는다. 잠금 순서는 이 잠금 → 공연 행이다
+   */
+  withScaleChangeLock<T>(tenantId: string, fn: () => Promise<T>): Promise<T>;
   /** 사본으로 넘긴 판을 적는다(지금 판 이하이고 앞 값보다 클 때만) */
   markCopied(listId: string, tenantId: string, copySeq: number): Promise<void>;
   /**

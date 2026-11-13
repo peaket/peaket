@@ -8,18 +8,21 @@ import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import { and, asc, count, eq, gt, gte, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, gte, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { EventStatus, SaleReview } from '../../domain/production.js';
 import type { PendingEvent } from '../../domain/registration.js';
 import { destroyTime, listEventIds, MEMBER_CHUNK } from '../../domain/sale-eligibility.js';
 import type { EventEditable, ListWrite, MaintenanceList, PendingDrop, SaleEventRow, SaleMaintenanceStore, SaleOwnerView, SaleState, SaleStore, SaleTx, StoredList } from '../../domain/sale-ports.js';
 import { applyApproval, type SaleApprovalInput } from '../../domain/sale-approval.js';
+import type { ShowScale } from '../../domain/demand-forecast.js';
 import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
 import { event, priceTier, production, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** 규모 올리기·판매 승인의 오픈 간격 검사를 직렬화하는 잠금 종류(하나의 문) */
+const SCALE_CHANGE_LOCK_CLASS = 7_301_172;
 type Tx = DbTransaction | Database['db'];
 type ProductionRow = typeof production.$inferSelect;
 const nextSeq = sql<number>`nextval('sale_eligibility_copy_seq')`;
@@ -155,6 +158,17 @@ export class DrizzleSaleStore implements SaleStore {
     }, { tenantId });
   }
 
+  async eventOwner(eventId: string): Promise<{ productionId: string; tenantId: string } | undefined> {
+    if (!UUID.test(eventId)) return undefined;
+    const [r] = await this.db.db
+      .select({ productionId: event.productionId, tenantId: production.promoterId })
+      .from(event)
+      .innerJoin(production, eq(event.productionId, production.id))
+      .where(eq(event.id, eventId))
+      .limit(1);
+    return r;
+  }
+
   async read(productionId: string, tenantId: string): Promise<SaleState | undefined> {
     if (!UUID.test(productionId)) return undefined;
     return this.db.transaction(
@@ -177,6 +191,13 @@ export class DrizzleSaleStore implements SaleStore {
       const [p] = await tx.select().from(production).where(and(eq(production.id, productionId), eq(production.promoterId, tenantId))).for('no key update');
       if (!p) return 'not-found' as const;
       return fn(this.#tx(tx, p, tenantId));
+    }, { tenantId });
+  }
+
+  async withScaleChangeLock<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${SCALE_CHANGE_LOCK_CLASS})`);
+      return fn();
     }, { tenantId });
   }
 
@@ -346,6 +367,17 @@ export class DrizzleSaleStore implements SaleStore {
       },
       reject: async (_reason, _now) => {
         await tx.update(production).set({ saleReview: 'REJECTED' }).where(mineProduction);
+      },
+      setEventScale: async (eventId, scale, version) => {
+        await tx.update(event).set({ scale, version }).where(and(eq(event.id, eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
+      },
+      largeOpenTimes: async (from, to, exclude) => {
+        const rows = await tx
+          .select({ openAt: event.openAt })
+          .from(event)
+          .innerJoin(production, eq(event.productionId, production.id))
+          .where(and(ne(event.productionId, exclude), ne(event.status, 'CANCELLED'), eq(event.scale, 'LARGE'), eq(production.saleReview, 'APPROVED'), gte(event.openAt, from), lte(event.openAt, to)));
+        return rows.map((r) => r.openAt);
       },
     };
   }

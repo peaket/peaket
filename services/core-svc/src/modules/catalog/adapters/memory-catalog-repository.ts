@@ -71,6 +71,8 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly salePolicies = new Map<string, MemorySalePolicy>();
   /** 회차 ID → 회차 고치기 판(없으면 1) */
   readonly eventVersions = new Map<string, number>();
+  /** 회차 ID → 판매 승인 때 정한 규모(ADR-0078 규모 올리기) */
+  readonly eventScales = new Map<string, 'LARGE' | 'MEDIUM' | 'SMALL'>();
   /** 공연 ID → pending_revision.eventChanges */
   readonly eventChanges = new Map<string, Record<string, Partial<EventEditable>>>();
   /** 명단 ID → 판매 자격 명단 */

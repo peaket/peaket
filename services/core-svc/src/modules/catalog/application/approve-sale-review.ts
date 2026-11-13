@@ -29,26 +29,28 @@ export class ApproveSaleReview {
     const tenantId = await this.store.promoterOf(q.productionId);
     if (!tenantId) throw notFound();
     const input: SaleApprovalInput = { now: new Date(this.clock.now()), scales: q.scales, ...(q.placeId !== undefined ? { placeId: q.placeId } : {}), ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}) };
-    const out = await this.store.withLockedProduction(q.productionId, tenantId, async (tx) => {
-      const st = await tx.state();
-      if (st.production.saleReview === 'SUSPENDED') throw productionSuspended();
-      if (st.production.saleReview !== 'SUBMITTED' && st.production.saleReview !== 'REJECTED') {
-        throw new ProblemError({ type: 'sale-review-not-submitted', status: 409, title: '판매 승인 대기 중인 공연이 아닙니다' });
-      }
-      const targets = new Set([...st.events.map((e) => e.eventId), ...st.addedEvents.map((e) => e.eventId)]);
-      const given = new Set(q.scales.map((s) => s.eventId));
-      if (given.size !== targets.size || [...targets].some((id) => !given.has(id))) {
-        throw new ProblemError({ type: 'sale-review-scales-missing', status: 422, title: '모든 회차의 공연 규모를 정해 주세요' });
-      }
-      const rules = st.production.pendingRules ?? st.production.rules;
-      const available = new Set(st.lists.map((l) => l.key));
-      for (const e of targets) {
-        for (const key of eligibleListKeys(rules, e)) {
-          if (!available.has(key)) throw new ProblemError({ type: 'sale-review-list-missing', status: 422, title: '판매 정책이 쓰는 명단이 없습니다' });
+    const out = await this.store.withScaleChangeLock(tenantId, () =>
+      this.store.withLockedProduction(q.productionId, tenantId, async (tx) => {
+        const st = await tx.state();
+        if (st.production.saleReview === 'SUSPENDED') throw productionSuspended();
+        if (st.production.saleReview !== 'SUBMITTED' && st.production.saleReview !== 'REJECTED') {
+          throw new ProblemError({ type: 'sale-review-not-submitted', status: 409, title: '판매 승인 대기 중인 공연이 아닙니다' });
         }
-      }
-      return tx.approve(input);
-    });
+        const targets = new Set([...st.events.map((e) => e.eventId), ...st.addedEvents.map((e) => e.eventId)]);
+        const given = new Set(q.scales.map((s) => s.eventId));
+        if (given.size !== targets.size || [...targets].some((id) => !given.has(id))) {
+          throw new ProblemError({ type: 'sale-review-scales-missing', status: 422, title: '모든 회차의 공연 규모를 정해 주세요' });
+        }
+        const rules = st.production.pendingRules ?? st.production.rules;
+        const available = new Set(st.lists.map((l) => l.key));
+        for (const e of targets) {
+          for (const key of eligibleListKeys(rules, e)) {
+            if (!available.has(key)) throw new ProblemError({ type: 'sale-review-list-missing', status: 422, title: '판매 정책이 쓰는 명단이 없습니다' });
+          }
+        }
+        return tx.approve(input);
+      }),
+    );
     if (out === 'not-found') throw notFound();
     try {
       await this.publish.publishState(out, tenantId);
