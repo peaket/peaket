@@ -15,7 +15,9 @@ export async function MyTicketsPage({ searchParams }: PageProps) {
   return (
     <AppShell dark={dark}>
       <Wallet state={state} path={path} dark={dark} />
-      <PreviewSwitcher path={path} states={SCR013_LIST_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+      {process.env.NODE_ENV !== 'production' ? (
+        <PreviewSwitcher path={path} states={SCR013_LIST_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+      ) : null}
     </AppShell>
   );
 }

@@ -199,7 +199,7 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
 
   if (phase === 'loading') {
     return (
-      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" aria-busy="true">
+      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} aria-busy="true">
         <p className="t-sm muted">입장 QR을 준비하고 있습니다…</p>
       </div>
     );
@@ -208,7 +208,7 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
   if (phase === 'no-key' || phase === 'registering') {
     const disabled = !online || offline || phase === 'registering';
     return (
-      <div className="card-flat col items-center gap-3 px-4 py-7 text-center">
+      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }}>
         <span className="state-icon is-primary">
           <i className="ic ic-phone" aria-hidden="true" />
         </span>
@@ -238,7 +238,7 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
 
   if (phase === 'error' || (stale && !frame)) {
     return (
-      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" role="alert">
+      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} role="alert">
         <span className="state-icon is-danger">
           <i className="ic ic-warning" aria-hidden="true" />
         </span>
@@ -256,14 +256,14 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
 
   if (!key || !frame || !matrix) {
     return (
-      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" aria-busy="true">
+      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} aria-busy="true">
         <p className="t-sm muted">입장 QR을 준비하고 있습니다…</p>
       </div>
     );
   }
 
   return (
-    <div className="col items-center gap-3" style={{ alignSelf: 'stretch' }}>
+    <div className="col items-center gap-3" style={{ alignSelf: 'stretch', minHeight: 400 }}>
       <QrPattern label={label} matrix={matrix} live={!displayStale} maxWidth={maxWidth} />
       <QrStatus stale={displayStale} now={now} />
       <p className="t-xs muted">

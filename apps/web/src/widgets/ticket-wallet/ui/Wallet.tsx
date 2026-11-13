@@ -11,12 +11,10 @@ import { previewHref } from '@peaket/ds/Preview';
 import { QrPattern, RotatingQR } from '@peaket/ds/RotatingQR';
 import { Stepper } from '@peaket/ds/Stepper';
 import { ProductionPoster } from '@/entities/production';
-import { DeviceQr, type DeviceQrSnapshot } from '@/features/wallet-device-key/ui/DeviceQr';
-import { OfflineBanner } from '@/features/wallet-device-key/ui/OfflineBanner';
 import { cx } from '@/shared/lib/cx';
 import { InAppBrowserNotice } from '@/shared/ui/InAppBrowserNotice';
 import { PAST, T1, T2, T3, WALLET, walletView, type WalletState, type WalletView } from '../model/wallet';
-import { BoothReissue, CopyNoButton, GoButton, ReturnToPayerButton, ToastButton } from './WalletClient';
+import { BoothReissue, CopyNoButton, DeviceQrLazy, GoButton, OfflineBannerLazy, ReturnToPayerButton, ToastButton, type DeviceQrSnapshot } from './WalletClient';
 
 export interface WalletProps {
   state: WalletState;
@@ -36,7 +34,7 @@ export function Wallet({ state, path, dark }: WalletProps) {
 
   return (
     <>
-      <OfflineBanner forceOffline={v.offline} fallbackLastSyncText={v.offline ? WALLET.lastSyncOffline : undefined} />
+      <OfflineBannerLazy forceOffline={v.offline} fallbackLastSyncText={v.offline ? WALLET.lastSyncOffline : undefined} />
       <main className="page-main" id="main" tabIndex={-1}>
         <div className="col mx-auto w-full max-w-[1040px] gap-6 px-4 pt-5 pb-10 md:gap-7 md:px-6 md:pb-12 lg:gap-8 lg:px-8 lg:pt-8 lg:pb-16">
           <h1 className="t-xl lg:text-[32px] lg:leading-[42px]">마이 티켓</h1>
@@ -370,7 +368,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
       <div className="md:grid md:grid-cols-[320px_minmax(0,1fr)] md:items-start md:gap-7 md:p-5 lg:grid-cols-12 lg:gap-x-6 lg:gap-y-6 lg:px-7 lg:pt-6 lg:pb-7">
         <div className="lg:col-span-5">
           {v.showQr ? (
-            <div className={cx('col items-center gap-3 px-px pb-[18px] md:p-0', mobileOnly)}>
+            <div className={cx('col items-center gap-3 px-px pb-[18px] md:p-0', mobileOnly)} style={{ minHeight: 400 }}>
               {v.qrStale ? (
                 // 'QR 15초 지남'은 디자인 미리보기다. 실제 기기 키가 없어도 보드와 같은 지난 QR을 그린다.
                 <RotatingQR
@@ -381,7 +379,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
                   stale
                 />
               ) : (
-                <DeviceQr
+                <DeviceQrLazy
                   ticketId={T1.qrUuid}
                   label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
                   offline={v.offline}
@@ -753,8 +751,8 @@ function ReceivedOpen() {
         {facts(false)}
       </div>
       <div className="md:grid md:grid-cols-[320px_minmax(0,1fr)] md:items-start md:gap-7 md:p-5 lg:grid-cols-12 lg:gap-x-6 lg:px-7 lg:pt-6 lg:pb-7">
-        <div className="col items-center gap-3 px-px pb-[18px] md:p-0 lg:col-span-5">
-          <DeviceQr
+        <div className="col items-center gap-3 px-px pb-[18px] md:p-0 lg:col-span-5" style={{ minHeight: 400 }}>
+          <DeviceQrLazy
             ticketId={T3.qrUuid}
             label={`입장 QR, 티켓 ${T3.qrTicketId}, 받은 티켓 ${T3.seat}, 15초마다 바뀝니다`}
             snapshot={T3_SNAPSHOT}

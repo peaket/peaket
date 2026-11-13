@@ -7,7 +7,6 @@
 // - 글꼴: Pretendard 가변 글꼴 동적 서브셋(styles/globals.css, 화면에 쓰인 글자의 조각만 받는다, docs/frontend.md §5.8).
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { SerwistProvider } from '../pwa/SerwistProvider';
 import '../styles/globals.css';
 
 export const rootMetadata: Metadata = {
@@ -34,15 +33,8 @@ export function RootDocument({ children, nonce }: { children: ReactNode; nonce?:
         <script src="/seed-color-mode.js" nonce={nonce} />
       </head>
       <body className="pk">
-        {/* 월렛 서비스 워커(offline-gate §2·§4). 범위는 /my/tickets로 좁히고, 개발 서버에서는 캐시가 HMR을 방해하지 않게 끈다 */}
-        <SerwistProvider
-          swUrl="/serwist/sw.js"
-          cacheOnNavigation={false}
-          disable={process.env.NODE_ENV === 'development'}
-          options={{ scope: '/my/tickets' }}
-        >
-          {children}
-        </SerwistProvider>
+        {/* 서비스 워커는 월렛 화면(WalletPwa)에서만 동적으로 등록한다. 루트 문서에 두면 모든 경로 첫 JS에 Serwist가 들어간다 */}
+        {children}
       </body>
     </html>
   );

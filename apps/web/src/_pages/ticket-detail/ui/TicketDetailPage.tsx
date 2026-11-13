@@ -22,7 +22,9 @@ export async function TicketDetailPage({ params, searchParams }: PageProps<{ tic
   return (
     <AppShell dark={dark}>
       <Wallet state={state} path={path} dark={dark} />
-      <PreviewSwitcher path={path} states={SCR013_DETAIL_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+      {process.env.NODE_ENV !== 'production' ? (
+        <PreviewSwitcher path={path} states={SCR013_DETAIL_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+      ) : null}
     </AppShell>
   );
 }

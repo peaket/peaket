@@ -32,11 +32,15 @@ test('Serwist 경로는 /~offline과 /my/tickets을 미리 저장하고 Service-
   assert.match(route, /useNativeEsbuild: true/);
 });
 
-test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/tickets이다', () => {
+test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/tickets이며 루트 문서에는 없다', () => {
   assert.ok(existsSync(join(appRoot, 'app/(cached)/~offline/page.tsx')));
   assert.match(read('app/(cached)/~offline/page.tsx'), /인터넷에 연결되어 있지 않습니다/);
-  const layout = read('src/_app/layouts/RootDocument.tsx');
-  assert.match(layout, /swUrl="\/serwist\/sw\.js"/);
-  assert.match(layout, /options=\{\{ scope: '\/my\/tickets' \}\}/);
-  assert.match(layout, /disable=\{process\.env\.NODE_ENV === 'development'\}/);
+  const root = read('src/_app/layouts/RootDocument.tsx');
+  assert.doesNotMatch(root, /SerwistProvider|swUrl=/);
+  const pwa = read('src/features/wallet-device-key/ui/OfflineBanner.tsx');
+  assert.match(pwa, /import\('@serwist\/turbopack\/react'\)/);
+  assert.match(pwa, /swUrl="\/serwist\/sw\.js"/);
+  assert.match(pwa, /options=\{\{ scope: '\/my\/tickets' \}\}/);
+  assert.match(pwa, /process\.env\.NODE_ENV === 'development'/);
+  assert.match(read('src/widgets/ticket-wallet/ui/Wallet.tsx'), /<OfflineBannerLazy /);
 });

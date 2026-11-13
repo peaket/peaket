@@ -2,9 +2,59 @@
 // SCR-013 마이 티켓의 작은 상호작용 부품(복사·상태로 이동하는 버튼·토스트 버튼·부스 재발급 대조 동의·결제자에게 돌려주기).
 // 퍼블리싱 단계라 서버 호출 없이, 흐름의 다음 상태(?state=)로 옮기거나 토스트로 결과를 보인다(ADR-0170).
 import { useRouter } from 'next/navigation';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ComponentType, type ReactNode } from 'react';
 import { WebShellModal } from '@peaket/ds/WebShell';
+import type { DeviceQrProps, DeviceQrSnapshot } from '@/features/wallet-device-key/ui/DeviceQr';
+import type { OfflineBannerProps } from '@/features/wallet-device-key/ui/OfflineBanner';
 import { useToast } from '@/shared/ui/toast';
+
+// 월렛의 무거운 클라이언트 조각(QR·오프라인 배너)을 첫 화면 번들에서 뺀다(R-562).
+// next/dynamic의 런타임을 첫 묶음에 넣지 않으려고 import()와 상태만 쓰고, 마운트 뒤 별도 덩어리를 받는다.
+// 첫 HTML에는 QR 자리(400px)와 같은 모양의 등록 안내를 그려 LCP를 앞당기고 layout shift를 막는다.
+function useLazyComponent<P>(load: () => Promise<ComponentType<P>>): ComponentType<P> | null {
+  const [Component, setComponent] = useState<ComponentType<P> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void load()
+      .then((loaded) => {
+        if (!cancelled) setComponent(() => loaded);
+      })
+      .catch(() => {
+        // 청크를 받지 못하면 화면을 막지 않는다. 다음 방문에서 다시 시도한다.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+  return Component;
+}
+
+const loadDeviceQr = () => import('@/features/wallet-device-key/ui/DeviceQr').then((m) => m.DeviceQr);
+const loadOfflineBanner = () => import('@/features/wallet-device-key/ui/OfflineBanner').then((m) => m.OfflineBanner);
+
+export function DeviceQrLazy(props: DeviceQrProps) {
+  const Component = useLazyComponent(loadDeviceQr);
+  if (!Component) {
+    return (
+      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} aria-busy="true">
+        <span className="state-icon is-primary">
+          <i className="ic ic-phone" aria-hidden="true" />
+        </span>
+        <p className="t-md fw-b">입장할 때 쓸 휴대폰을 등록해야 QR이 나옵니다</p>
+        <p className="t-sm muted">등록 버튼을 눌러야만 입장 QR을 만들겠습니다. 공연장에 가기 전에 미리 등록하세요</p>
+      </div>
+    );
+  }
+  return <Component {...props} />;
+}
+
+export function OfflineBannerLazy(props: OfflineBannerProps) {
+  const Component = useLazyComponent(loadOfflineBanner);
+  if (!Component) return <div style={{ height: 40 }} aria-hidden="true" />;
+  return <Component {...props} />;
+}
+
+export type { DeviceQrProps, DeviceQrSnapshot, OfflineBannerProps };
 
 async function copyText(text: string): Promise<boolean> {
   try {
