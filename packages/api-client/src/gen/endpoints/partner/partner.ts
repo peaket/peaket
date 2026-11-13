@@ -108,7 +108,10 @@ import type {
   PartnerMerchReturnRejection,
   PartnerMerchShipmentImportResult,
   PartnerMerchShipmentInput,
+  PartnerProductCreate,
+  PartnerProductDetail,
   PartnerProductPage,
+  PartnerProductUpdate,
   PartnerProductionCreate,
   PartnerProductionCreated,
   PartnerProductionDetail,
@@ -6107,14 +6110,31 @@ export const useDeletePartnerProductionImage = <TError = ErrorType<ProblemRespon
       return useMutation(getDeletePartnerProductionImageMutationOptions(options), queryClient);
     }
     export type createPartnerProductResponse201 = {
-  data: void
+  data: PartnerProductDetail
   status: 201
+}
+
+export type createPartnerProductResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerProductResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerProductResponse422 = {
+  data: ProblemResponse
+  status: 422
 }
 
 export type createPartnerProductResponseSuccess = (createPartnerProductResponse201) & {
   headers: Headers;
 };
-;
+export type createPartnerProductResponseError = (createPartnerProductResponse400 | createPartnerProductResponse401 | createPartnerProductResponse422) & {
+  headers: Headers;
+};
 
 export const getCreatePartnerProductUrl = () => {
 
@@ -6125,17 +6145,31 @@ export const getCreatePartnerProductUrl = () => {
 }
 
 /**
- * FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다
+ * FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다. status PUBLISHED면 게시하고, DRAFT면 목록에 초안으로 남는다. 중개수수료율은 게시할 때 그 파트너의 계약값으로 고정한다(ADR-0062). Cache-Control: no-store
  * @summary 상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)
  */
-export const createPartnerProduct = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductResponseSuccess> => {
+export const createPartnerProduct = async (partnerProductCreate: PartnerProductCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductResponseSuccess> => {
 
-  return orvalFetch<createPartnerProductResponseSuccess>(getCreatePartnerProductUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerProductResponseSuccess>(getCreatePartnerProductUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerProductCreate)
   }
 );}
 
@@ -6145,9 +6179,9 @@ export const createPartnerProduct = async ( options?: Parameters<typeof orvalFet
 
 export const getCreatePartnerProductMutationKey = () => ['createPartnerProduct'] as const;
 
-export const getCreatePartnerProductMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,void, TContext> => {
+export const getCreatePartnerProductMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,CreatePartnerProductMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,CreatePartnerProductMutationVariables, TContext> => {
 
 const mutationKey = getCreatePartnerProductMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -6159,10 +6193,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerProduct>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerProduct>>, CreatePartnerProductMutationVariables> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  createPartnerProduct(requestOptions)
+          return  createPartnerProduct(data,requestOptions)
         }
 
 
@@ -6173,19 +6207,19 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreatePartnerProductMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProduct>>>
-
-    export type CreatePartnerProductMutationError = ErrorType<unknown>
-
+    export type CreatePartnerProductMutationBody = BodyType<PartnerProductCreate>
+    export type CreatePartnerProductMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreatePartnerProductMutationVariables = {data: BodyType<PartnerProductCreate>}
 
     /**
  * @summary 상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)
  */
-export const useCreatePartnerProduct = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+export const useCreatePartnerProduct = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduct>>, TError,CreatePartnerProductMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerProduct>>,
         TError,
-        void,
+        CreatePartnerProductMutationVariables,
         TContext
       > => {
       return useMutation(getCreatePartnerProductMutationOptions(options), queryClient);
@@ -6315,7 +6349,251 @@ export function useListPartnerProducts<TData = Awaited<ReturnType<typeof listPar
 
 
 
-export type createPartnerWebhookResponse201 = {
+export type getPartnerProductResponse200 = {
+  data: PartnerProductDetail
+  status: 200
+}
+
+export type getPartnerProductResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerProductResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerProductResponseSuccess = (getPartnerProductResponse200) & {
+  headers: Headers;
+};
+export type getPartnerProductResponseError = (getPartnerProductResponse401 | getPartnerProductResponse404) & {
+  headers: Headers;
+};
+
+export const getGetPartnerProductUrl = (productId: string,) => {
+
+
+
+
+  return `/v1/partner/products/${encodeURIComponent(String(productId))}`
+}
+
+/**
+ * FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 준다. 다른 파트너 상품은 404다. Cache-Control: no-store
+ * @summary 상품 하나(고치기 화면, 유형별 속성 포함)
+ */
+export const getPartnerProduct = async (productId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerProductResponseSuccess> => {
+
+  return orvalFetch<getPartnerProductResponseSuccess>(getGetPartnerProductUrl(productId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerProductQueryKey = (productId: string,) => {
+    return [
+    `/v1/partner/products/${productId}`
+    ] as const;
+    }
+
+
+export const getGetPartnerProductQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerProduct>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerProductQueryKey(productId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerProduct>>> = ({ signal }) => getPartnerProduct(productId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productId !== null && productId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerProductQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerProduct>>>
+export type GetPartnerProductQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerProduct<TData = Awaited<ReturnType<typeof getPartnerProduct>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProduct>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProduct>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProduct<TData = Awaited<ReturnType<typeof getPartnerProduct>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProduct>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProduct>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProduct<TData = Awaited<ReturnType<typeof getPartnerProduct>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 상품 하나(고치기 화면, 유형별 속성 포함)
+ */
+
+export function useGetPartnerProduct<TData = Awaited<ReturnType<typeof getPartnerProduct>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduct>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerProductQueryOptions(productId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type updatePartnerProductResponse200 = {
+  data: PartnerProductDetail
+  status: 200
+}
+
+export type updatePartnerProductResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type updatePartnerProductResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type updatePartnerProductResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type updatePartnerProductResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type updatePartnerProductResponseSuccess = (updatePartnerProductResponse200) & {
+  headers: Headers;
+};
+export type updatePartnerProductResponseError = (updatePartnerProductResponse401 | updatePartnerProductResponse404 | updatePartnerProductResponse412 | updatePartnerProductResponse428) & {
+  headers: Headers;
+};
+
+export const getUpdatePartnerProductUrl = (productId: string,) => {
+
+
+
+
+  return `/v1/partner/products/${encodeURIComponent(String(productId))}`
+}
+
+/**
+ * FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 받는다. 보낸 칸만 바꾸고, 유형별 속성은 유형 스키마로 다시 검사한다. 판이 다르면 412, If-Match가 없으면 428이다(guidelines §12)
+ * @summary 상품 고치기(보낸 칸만, If-Match)
+ */
+export const updatePartnerProduct = async (productId: string,
+    partnerProductUpdate: PartnerProductUpdate, options?: Parameters<typeof orvalFetch>[1]): Promise<updatePartnerProductResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<updatePartnerProductResponseSuccess>(getUpdatePartnerProductUrl(productId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerProductUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdatePartnerProductMutationKey = () => ['updatePartnerProduct'] as const;
+
+export const getUpdatePartnerProductMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduct>>, TError,UpdatePartnerProductMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduct>>, TError,UpdatePartnerProductMutationVariables, TContext> => {
+
+const mutationKey = getUpdatePartnerProductMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePartnerProduct>>, UpdatePartnerProductMutationVariables> = (props) => {
+          const {productId,data} = props ?? {};
+
+          return  updatePartnerProduct(productId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePartnerProductMutationResult = NonNullable<Awaited<ReturnType<typeof updatePartnerProduct>>>
+    export type UpdatePartnerProductMutationBody = BodyType<PartnerProductUpdate>
+    export type UpdatePartnerProductMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type UpdatePartnerProductMutationVariables = {productId: string;data: BodyType<PartnerProductUpdate>}
+
+    /**
+ * @summary 상품 고치기(보낸 칸만, If-Match)
+ */
+export const useUpdatePartnerProduct = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduct>>, TError,UpdatePartnerProductMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePartnerProduct>>,
+        TError,
+        UpdatePartnerProductMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdatePartnerProductMutationOptions(options), queryClient);
+    }
+    export type createPartnerWebhookResponse201 = {
   data: CreatePartnerWebhook201
   status: 201
 }

@@ -5,7 +5,7 @@
 import { requireProduction } from '@/entities/production';
 import { routes } from '@/shared/config/routes';
 import { SETTLEMENT_MEMBER_STATES, SETTLEMENT_STATES, type SettlementState } from '@/shared/config/states/scr027';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
 import { FALLBACK_ROUNDS } from '../model/settlement';
@@ -14,6 +14,7 @@ import { FraudTab, type FraudVariant } from './FraudTab';
 import { LogTab, RosterTab, type LogVariant, type RosterVariant } from './RosterTab';
 import { SettleTab, type SettleVariant } from './SettleTab';
 import { SummaryTab } from './SummaryTab';
+import { LiveExportLogPanel, LiveRosterPanel } from './live/RosterLive';
 
 const SETTLE: readonly SettlementState[] = ['정산', 'KYC 예고', '이의 제기 대화상자', '이의 기간 끝', '재통지(조정)', '재통지(기각)'];
 const SUMMARY: readonly SettlementState[] = ['판매 요약', '판매 요약 확정 전'];
@@ -30,12 +31,15 @@ function tabOf(s: SettlementState): SubTab {
 
 export default async function SettlementPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
-  const pv = readPreview(await searchParams, SETTLEMENT_STATES, '정산');
+  const sp = await searchParams;
+  const pv = readPreview(sp, SETTLEMENT_STATES, '정산');
+  const live = readParam(sp, 'state') === undefined;
   const production = requireProduction(id);
   const s = pv.state;
   const tab = tabOf(s);
   const isMember = pv.isMember || SETTLEMENT_MEMBER_STATES.includes(s);
   const rounds = production.rounds.length > 0 ? production.rounds.map((r) => r.startsAt) : FALLBACK_ROUNDS;
+  const liveRounds = production.rounds.map((r) => ({ eventId: r.id, label: r.startsAt }));
 
   const settleV: SettleVariant = tab === 'settle' ? (s as SettleVariant) : '정산';
   const rosterV: RosterVariant = isMember ? '실무자' : tab === 'roster' ? (s as RosterVariant) : '예매자 명단';
@@ -55,8 +59,8 @@ export default async function SettlementPage({ params, searchParams }: RouteProp
           panels={{
             settle: <SettleTab v={settleV} isMember={isMember} rounds={rounds} />,
             summary: <SummaryTab pending={s === '판매 요약 확정 전'} rounds={rounds} eventId={id} />,
-            roster: <RosterTab v={rosterV} rounds={rounds} />,
-            log: <LogTab v={logV} productionName={production.name} />,
+            roster: live ? <LiveRosterPanel eventName={production.name} rounds={liveRounds} isMember={isMember} /> : <RosterTab v={rosterV} rounds={rounds} />,
+            log: live ? <LiveExportLogPanel eventName={production.name} rounds={liveRounds} isMember={isMember} /> : <LogTab v={logV} productionName={production.name} />,
             fraud: <FraudTab v={fraudV} rounds={rounds} />,
           }}
         />

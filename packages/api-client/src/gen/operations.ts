@@ -269,6 +269,7 @@ export type OperationId =
   | 'getPartnerEventReport'
   | 'getPartnerEventSettlements'
   | 'getPartnerMerchOrderDelivery'
+  | 'getPartnerProduct'
   | 'getPartnerProduction'
   | 'getPartnerProductionSeatmap'
   | 'getPartnerSalePolicy'
@@ -381,6 +382,7 @@ export type OperationId =
   | 'updateOpsNoticeTemplate'
   | 'updateOpsPlace'
   | 'updatePartnerEvent'
+  | 'updatePartnerProduct'
   | 'updatePartnerProduction'
   | 'updatePartnerProductionImage'
   | 'updatePartnerWebhook'
@@ -653,6 +655,7 @@ export const OPERATIONS = {
   getPartnerEventReport: {operationId: "getPartnerEventReport",method: "GET",path: "/v1/partner/events/{eventId}/report",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventSettlements: {operationId: "getPartnerEventSettlements",method: "GET",path: "/v1/partner/events/{eventId}/settlements",host: "partner-api",kind: "read",cookie: true},
   getPartnerMerchOrderDelivery: {operationId: "getPartnerMerchOrderDelivery",method: "GET",path: "/v1/partner/merch-orders/{orderId}/delivery",host: "partner-api",kind: "read",cookie: true},
+  getPartnerProduct: {operationId: "getPartnerProduct",method: "GET",path: "/v1/partner/products/{productId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduction: {operationId: "getPartnerProduction",method: "GET",path: "/v1/partner/productions/{productionId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProductionSeatmap: {operationId: "getPartnerProductionSeatmap",method: "GET",path: "/v1/partner/productions/{productionId}/seatmap",host: "partner-api",kind: "read",cookie: true,query: ["fromTemplate"]},
   getPartnerSalePolicy: {operationId: "getPartnerSalePolicy",method: "GET",path: "/v1/partner/productions/{productionId}/sale-policy",host: "partner-api",kind: "read",cookie: true},
@@ -765,6 +768,7 @@ export const OPERATIONS = {
   updateOpsNoticeTemplate: {operationId: "updateOpsNoticeTemplate",method: "PATCH",path: "/v1/ops/notice-templates/{templateId}",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
   updateOpsPlace: {operationId: "updateOpsPlace",method: "PATCH",path: "/v1/ops/places/{placeId}",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
   updatePartnerEvent: {operationId: "updatePartnerEvent",method: "PATCH",path: "/v1/partner/events/{eventId}",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
+  updatePartnerProduct: {operationId: "updatePartnerProduct",method: "PATCH",path: "/v1/partner/products/{productId}",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   updatePartnerProduction: {operationId: "updatePartnerProduction",method: "PATCH",path: "/v1/partner/productions/{productionId}",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   updatePartnerProductionImage: {operationId: "updatePartnerProductionImage",method: "PATCH",path: "/v1/partner/productions/{productionId}/images/{imageId}",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   updatePartnerWebhook: {operationId: "updatePartnerWebhook",method: "PATCH",path: "/v1/partner/webhooks/{endpointId}",host: "partner-api",kind: "write",cookie: true,ifMatch: true},

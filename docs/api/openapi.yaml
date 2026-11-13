@@ -3059,6 +3059,56 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/PartnerProductSummary' } }
         nextCursor: { type: [string, 'null'] }
+    PartnerProductCreate:
+      type: object
+      additionalProperties: false
+      description: "상품 빌더 저장 본문(SCR-023, FR-024, docs/data.md product). 유형마다 다른 속성은 attributes에 둔다. 서버는 유형별 Zod 스키마로 다시 검사한다"
+      required: [type, name, price, ticketLinked, fulfillments, status]
+      properties:
+        type: { type: string, description: "product_type.code(MERCH·PARKING·VIP·FAST_LANE 등)" }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        price: { type: integer, minimum: 0, description: "상품가(원)" }
+        shippingFee: { type: [integer, 'null'], minimum: 0, description: "편도 배송비(원). 택배를 켜지 않았으면 null" }
+        returnShippingFee: { type: [integer, 'null'], minimum: 0, description: "단순 변심 반품 배송비(편도, 원)" }
+        returnAddress: { type: [string, 'null'], maxLength: 500, description: "반품 받을 주소" }
+        ticketLinked: { type: boolean, description: "티켓 연동 부가 상품인지" }
+        linkedEventId: { type: [string, 'null'], format: uuid, description: "티켓 연동 부가 상품의 연결 회차" }
+        limitedQty: { type: [integer, 'null'], minimum: 0, description: "한정 수량. null이면 한정하지 않음" }
+        fulfillments: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [DELIVERY, PICKUP, WALLET] }, description: "받을 수 있는 수령 방식" }
+        transferable: { type: boolean, default: false, description: "티켓과 함께 양도 허용" }
+        status: { type: string, enum: [DRAFT, PUBLISHED], default: DRAFT, description: "저장 상태. PUBLISHED면 게시한다" }
+        attributes: { type: object, additionalProperties: true, 'x-peaket-open-object': true, description: "유형별 속성(옵션 규격·특전 등). 유형 스키마가 검사한다" }
+    PartnerProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/PartnerProductSummary'
+        - type: object
+          required: [version, linkedEventId, returnShippingFee, returnAddress, limitedQty, transferable, attributes]
+          properties:
+            version: { type: integer, description: "고치기 If-Match에 쓰는 판" }
+            linkedEventId: { type: [string, 'null'], format: uuid, description: "티켓 연동 부가 상품의 연결 회차" }
+            returnShippingFee: { type: [integer, 'null'], minimum: 0 }
+            returnAddress: { type: [string, 'null'], maxLength: 500 }
+            limitedQty: { type: [integer, 'null'], minimum: 0 }
+            transferable: { type: boolean }
+            attributes: { type: object, additionalProperties: true }
+    PartnerProductUpdate:
+      type: object
+      additionalProperties: false
+      description: "상품 고치기 본문. 보낸 칸만 바꾼다"
+      properties:
+        type: { type: string, description: "product_type.code" }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        price: { type: integer, minimum: 0 }
+        shippingFee: { type: [integer, 'null'], minimum: 0 }
+        returnShippingFee: { type: [integer, 'null'], minimum: 0 }
+        returnAddress: { type: [string, 'null'], maxLength: 500 }
+        ticketLinked: { type: boolean }
+        linkedEventId: { type: [string, 'null'], format: uuid }
+        limitedQty: { type: [integer, 'null'], minimum: 0 }
+        fulfillments: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [DELIVERY, PICKUP, WALLET] } }
+        transferable: { type: boolean }
+        status: { type: string, enum: [DRAFT, PUBLISHED, HIDDEN] }
+        attributes: { type: object, additionalProperties: true, 'x-peaket-open-object': true }
     PartnerMerchOrderStatsRow:
       type: object
       description: "상품별 표의 한 줄. 개수만"
@@ -4837,7 +4887,30 @@ paths:
     patch: { operationId: updatePartnerProductionImage, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "공연 이미지 대체 텍스트·순서 고치기", description: "FR-022(추천 적용 2026-10-14, ADR-0063). 판매 승인 뒤 바꿔도 재승인 대상이 아니다(docs/planning/03 §2.14). If-Match는 올리기·고치기 응답의 ETag(version)다. 상세 이미지의 order를 바꾸면 같은 공연의 다른 상세 이미지를 밀어 0부터 빈틈 없이 다시 매긴다. 포스터의 order는 0 그대로다(ADR-0257 결정 3)", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/IfMatch' }, { $ref: '#/components/parameters/ProductionId' }, { name: imageId, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, properties: { alt: { type: string, minLength: 1, maxLength: 300 }, order: { type: integer, minimum: 0, maximum: 9 } } } } } }, responses: { '412': { $ref: '#/components/responses/Problem', description: "판 불일치(precondition-failed, 다른 사람이 먼저 고침)" }, '428': { $ref: '#/components/responses/Problem', description: "If-Match 없음(precondition-required)" }, '200': { description: 고침, content: { application/json: { schema: { $ref: '#/components/schemas/ProductionImage' } } } }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자·실무자가 아닌 계정(역할 가드, x-peaket-roles). 다른 파트너 공연은 403이 아니라 없는 것과 같은 404다(ADR-0257 결정 2)" }, '404': { $ref: '#/components/responses/Problem', description: "없는 이미지·공연이거나 다른 파트너 공연(not-found, ADR-0257 결정 2)" } } }
     delete: { operationId: deletePartnerProductionImage, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "공연 이미지 지우기(파생본 삭제와 CDN 무효화)", description: "FR-022(추천 적용 2026-10-14, ADR-0063). 포스터는 지울 수 없고 바꾸기만 한다(판매 승인 요청에 포스터 필수). 판매 승인 뒤 지워도 재승인 대상이 아니다(docs/planning/03 §2.14)", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }, { name: imageId, in: path, required: true, schema: { type: string } }], responses: { '204': { description: 지움 }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자·실무자가 아닌 계정(역할 가드, x-peaket-roles). 다른 파트너 공연은 403이 아니라 없는 것과 같은 404다(ADR-0257 결정 2)" }, '404': { $ref: '#/components/responses/Problem', description: "없는 이미지·공연이거나 다른 파트너 공연(not-found, ADR-0257 결정 2)" }, '409': { $ref: '#/components/responses/Problem', description: "포스터는 지우지 않고 바꾼다(poster-not-deletable)" } } }
   /v1/partner/products:
-    post: { operationId: createPartnerProduct, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)", description: "FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다", security: [{ partnerCookie: [] }], responses: { '201': { description: 상품 } } }
+    post:
+      operationId: createPartnerProduct
+      tags: [partner]
+      x-peaket-roles: [partner_admin, partner_member]
+      summary: "상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)"
+      description: "FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다. status PUBLISHED면 게시하고, DRAFT면 목록에 초안으로 남는다. 중개수수료율은 게시할 때 그 파트너의 계약값으로 고정한다(ADR-0062). Cache-Control: no-store"
+      security:
+        - partnerCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PartnerProductCreate' }
+      responses:
+        '201':
+          description: 상품
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerProductDetail' }
+        '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Problem', description: "유형별 속성·판매 기간·수령 방식이 규칙과 맞지 않음" }
     get:
       operationId: listPartnerProducts
       tags: [partner]
@@ -4860,6 +4933,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PartnerProductPage' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/partner/products/{productId}:
+    get:
+      operationId: getPartnerProduct
+      tags: [partner]
+      x-peaket-roles: [partner_admin, partner_member]
+      summary: "상품 하나(고치기 화면, 유형별 속성 포함)"
+      description: "FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 준다. 다른 파트너 상품은 404다. Cache-Control: no-store"
+      security:
+        - partnerCookie: []
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 상품
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerProductDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem', description: "없는 상품·다른 파트너 상품(같은 응답)" }
+    patch:
+      operationId: updatePartnerProduct
+      tags: [partner]
+      x-peaket-roles: [partner_admin, partner_member]
+      summary: "상품 고치기(보낸 칸만, If-Match)"
+      description: "FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 받는다. 보낸 칸만 바꾸고, 유형별 속성은 유형 스키마로 다시 검사한다. 판이 다르면 412, If-Match가 없으면 428이다(guidelines §12)"
+      security:
+        - partnerCookie: []
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PartnerProductUpdate' }
+      responses:
+        '200':
+          description: 고침
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerProductDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem', description: "없는 상품·다른 파트너 상품(같은 응답)" }
+        '412': { $ref: '#/components/responses/Problem', description: "precondition-failed: 다른 사람이 먼저 고침" }
+        '428': { $ref: '#/components/responses/Problem', description: "precondition-required: If-Match 없음" }
   /v1/partner/webhooks:
     post: { operationId: createPartnerWebhook, tags: [partner], x-peaket-roles: [partner_admin], summary: "웹훅 등록(https만, 엔드포인트마다 서명 비밀 발급)", description: "FR-025, ADR-0053. 목적: 판매·취소·매진·회차 취소·연기·정산 같은 일이 생기면 PEAKET이 파트너 회사 서버 주소로 바로 알려 파트너 시스템(매출·회계, 사내 메신저, 자사 공지, 정산 입금 확인)이 콘솔을 계속 확인하지 않게 한다. 본문에 개인정보·좌석 번호가 없어 팬 관리(CRM)에는 쓸 수 없고, 쓰지 않아도 판매·정산은 그대로다(추천 적용 2026-10-19, ADR-0066). Standard Webhooks 형식으로 보낸다. 헤더는 webhook-id(사건 키, 재전송에도 같음), webhook-timestamp(시도 시각, 유닉스 초), webhook-signature(v1, 뒤에 base64 HMAC-SHA256(비밀, id.timestamp.본문))다. 비밀(whsec_, 32바이트)은 등록 응답에 한 번만 보여 준다. 비밀을 바꾸면 24시간 동안 옛 비밀과 새 비밀의 서명을 공백으로 이어 함께 보낸다. 받는 쪽은 시각 차이 5분 초과를 거부하고 webhook-id로 중복을 거른다. 보내는 이벤트 8종과 본문은 webhooks의 partnerEvent이고, 엔드포인트마다 고른 type만 보낸다. 등록·비밀 재발급·다시 보내기는 파트너 관리자(partner_admin)만 하고 partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)", security: [{ partnerCookie: [] }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [url], properties: { url: { type: string, format: uri, description: https만 }, eventTypes: { type: array, minItems: 0, description: "구독할 이벤트. 기본값은 아무것도 고르지 않음이고 이때는 보내지 않는다", items: { type: string, enum: [order.confirmed, order.cancelled, event.sold_out, event.cancelled, event.postponed, statement.notified, payout.completed, payout.failed] } } } } } } }, responses: { '201': { description: "등록. 서명 비밀(whsec_로 시작)은 이 응답에만 한 번 싣는다(추천 적용 2026-10-30, docs/features/notify.md §9)", content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/WebhookEndpoint' }, { type: object, properties: { secret: { type: string, description: "whsec_로 시작" } } }] } } } }, '400': { $ref: '#/components/responses/Problem', description: "webhook-url-not-allowed. 사유(reason): scheme(https가 아님), port(443이 아님), credentials(주소 안의 사용자 정보), ip-literal(IP를 그대로 쓴 주소), private-address(해석한 IP 가운데 사설·루프백·링크 로컬·CGNAT·메타데이터·IPv6 ULA·IPv4 사상 주소가 있음), unresolvable(이름을 해석하지 못함). 발송 때도 연결할 때마다 같은 IP 검사를 하고 리디렉션은 따르지 않는다(docs/api/guidelines.md §8, 추천 적용 2026-10-28, 기술 검토 중간-061)" }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자가 아님(partner_member)" } } }
     get: { operationId: listPartnerWebhooks, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "웹훅 엔드포인트 목록(SCR-025, 비밀 원문 없음)", description: "FR-025(추천 적용 2026-10-30, docs/features/notify.md §9, docs/design/d5 §1.6 16번). 이 파트너사의 엔드포인트만 준다. 서명 비밀은 발급 시각과 옛 비밀이 함께 유효한 끝 시각만 싣는다. 파트너 사용자(partner_admin·partner_member)가 부른다. Cache-Control: no-store", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 목록, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/WebhookEndpoint' } }, nextCursor: { type: [string, 'null'] } } } } } } } }

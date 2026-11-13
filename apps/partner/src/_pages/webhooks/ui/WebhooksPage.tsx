@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { routes } from '@/shared/config/routes';
 import { WEBHOOK_STATES } from '@/shared/config/states/scr025';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { Modal } from '@/shared/ui/Modal';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
@@ -22,6 +22,7 @@ import {
 import { CopySecretButton } from './CopySecretButton';
 import { DeliveryLog } from './DeliveryLog';
 import { UseCases } from './UseCases';
+import { LiveWebhooksPage } from './live/WebhooksLive';
 
 type WebhookState = (typeof WEBHOOK_STATES)[number];
 
@@ -41,7 +42,9 @@ function withState(path: string, keep: Record<string, string | undefined>, state
 }
 
 export default async function WebhooksPage({ searchParams }: RouteProps) {
-  const pv = readPreview(await searchParams, WEBHOOK_STATES, '기본');
+  const sp = await searchParams;
+  const pv = readPreview(sp, WEBHOOK_STATES, '기본');
+  if (readParam(sp, 'state') === undefined) return <LiveWebhooksPage isMember={pv.isMember} />;
   const st = pv.state;
   const off = st === '계속 실패해 꺼짐';
   const noSub = st === '구독 없음';

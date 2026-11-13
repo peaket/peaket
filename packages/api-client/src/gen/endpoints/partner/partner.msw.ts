@@ -94,7 +94,10 @@ import type {
   PartnerMerchReturnRejection,
   PartnerMerchShipmentImportResult,
   PartnerMerchShipmentInput,
+  PartnerProductCreate,
+  PartnerProductDetail,
   PartnerProductPage,
+  PartnerProductUpdate,
   PartnerProductionCreate,
   PartnerProductionCreated,
   PartnerProductionDetail,
@@ -222,7 +225,13 @@ export const getUpdatePartnerProductionImageResponseMock = (overrideResponse: Pa
         [faker.string.alphanumeric(5)]: faker.internet.url()
       }, undefined]), ...overrideResponse})
 
+export const getCreatePartnerProductResponseMock = (): PartnerProductDetail => ({...{productId: faker.string.uuid(), name: faker.string.alpha({length: {min: 10, max: 20}}), type: faker.string.alpha({length: {min: 10, max: 20}}), ticketLinked: faker.datatype.boolean(), status: faker.helpers.arrayElement(['DRAFT','NOT_STARTED','ON_SALE','SOLD_OUT','ENDED','HIDDEN'] as const), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), stockRemaining: faker.helpers.arrayElement([faker.number.int(), null]), stockTotal: faker.helpers.arrayElement([faker.number.int(), null]), saleStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), linkedProductionId: faker.helpers.arrayElement([faker.string.uuid(), null]), linkedProductionTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},...{version: faker.number.int(), linkedEventId: faker.helpers.arrayElement([faker.string.uuid(), null]), returnShippingFee: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), returnAddress: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 500}}), null]), limitedQty: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), transferable: faker.datatype.boolean(), attributes: {}},})
+
 export const getListPartnerProductsResponseMock = (overrideResponse: Partial<Extract<PartnerProductPage, object>> = {}): PartnerProductPage => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({productId: faker.string.uuid(), name: faker.string.alpha({length: {min: 10, max: 20}}), type: faker.string.alpha({length: {min: 10, max: 20}}), ticketLinked: faker.datatype.boolean(), status: faker.helpers.arrayElement(['DRAFT','NOT_STARTED','ON_SALE','SOLD_OUT','ENDED','HIDDEN'] as const), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), stockRemaining: faker.helpers.arrayElement([faker.number.int(), null]), stockTotal: faker.helpers.arrayElement([faker.number.int(), null]), saleStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), linkedProductionId: faker.helpers.arrayElement([faker.string.uuid(), null]), linkedProductionTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])})), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getGetPartnerProductResponseMock = (): PartnerProductDetail => ({...{productId: faker.string.uuid(), name: faker.string.alpha({length: {min: 10, max: 20}}), type: faker.string.alpha({length: {min: 10, max: 20}}), ticketLinked: faker.datatype.boolean(), status: faker.helpers.arrayElement(['DRAFT','NOT_STARTED','ON_SALE','SOLD_OUT','ENDED','HIDDEN'] as const), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), stockRemaining: faker.helpers.arrayElement([faker.number.int(), null]), stockTotal: faker.helpers.arrayElement([faker.number.int(), null]), saleStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), linkedProductionId: faker.helpers.arrayElement([faker.string.uuid(), null]), linkedProductionTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},...{version: faker.number.int(), linkedEventId: faker.helpers.arrayElement([faker.string.uuid(), null]), returnShippingFee: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), returnAddress: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 500}}), null]), limitedQty: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), transferable: faker.datatype.boolean(), attributes: {}},})
+
+export const getUpdatePartnerProductResponseMock = (): PartnerProductDetail => ({...{productId: faker.string.uuid(), name: faker.string.alpha({length: {min: 10, max: 20}}), type: faker.string.alpha({length: {min: 10, max: 20}}), ticketLinked: faker.datatype.boolean(), status: faker.helpers.arrayElement(['DRAFT','NOT_STARTED','ON_SALE','SOLD_OUT','ENDED','HIDDEN'] as const), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), stockRemaining: faker.helpers.arrayElement([faker.number.int(), null]), stockTotal: faker.helpers.arrayElement([faker.number.int(), null]), saleStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), linkedProductionId: faker.helpers.arrayElement([faker.string.uuid(), null]), linkedProductionTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},...{version: faker.number.int(), linkedEventId: faker.helpers.arrayElement([faker.string.uuid(), null]), returnShippingFee: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), returnAddress: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 500}}), null]), limitedQty: faker.helpers.arrayElement([faker.number.int({min: 0}), null]), transferable: faker.datatype.boolean(), attributes: {}},})
 
 export const getCreatePartnerWebhookResponseMock = (): CreatePartnerWebhook201 => ({...{endpointId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), url: faker.helpers.arrayElement([faker.internet.url(), undefined]), eventTypes: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACTIVE','DISABLED'] as const), undefined]), disabledReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['PARTNER','FAILING'] as const), null]), secretIssuedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), previousSecretValidUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), version: faker.helpers.arrayElement([faker.number.int(), undefined])},...{secret: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},})
 
@@ -855,11 +864,13 @@ export const getDeletePartnerProductionImageMockHandler = (overrideResponse?: vo
   }, options)
 }
 
-export const getCreatePartnerProductMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
-  return http.post('*/v1/partner/products', async (info: Parameters<HttpResponseResolver>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+export const getCreatePartnerProductMockHandler = (overrideResponse?: PartnerProductDetail | ((info: Parameters<HttpResponseResolver<PathParams, PartnerProductCreate>>[0]) => Promise<PartnerProductDetail> | PartnerProductDetail), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, PartnerProductCreate>('*/v1/partner/products', async (info: Parameters<HttpResponseResolver<PathParams, PartnerProductCreate>>[0]) => {
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerProductResponseMock(),
       { status: 201
       })
   }, options)
@@ -872,6 +883,30 @@ export const getListPartnerProductsMockHandler = (overrideResponse?: PartnerProd
     return HttpResponse.json(overrideResponse !== undefined
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getListPartnerProductsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetPartnerProductMockHandler = (overrideResponse?: PartnerProductDetail | ((info: Parameters<HttpResponseResolver<{ productId: string }>>[0]) => Promise<PartnerProductDetail> | PartnerProductDetail), options?: RequestHandlerOptions) => {
+  return http.get<{ productId: string }>('*/v1/partner/products/:productId', async (info: Parameters<HttpResponseResolver<{ productId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerProductResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getUpdatePartnerProductMockHandler = (overrideResponse?: PartnerProductDetail | ((info: Parameters<HttpResponseResolver<{ productId: string }, PartnerProductUpdate>>[0]) => Promise<PartnerProductDetail> | PartnerProductDetail), options?: RequestHandlerOptions) => {
+  return http.patch<{ productId: string }, PartnerProductUpdate>('*/v1/partner/products/:productId', async (info: Parameters<HttpResponseResolver<{ productId: string }, PartnerProductUpdate>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getUpdatePartnerProductResponseMock(),
       { status: 200
       })
   }, options)
@@ -1305,6 +1340,8 @@ export const getPartnerMock = () => [
   getDeletePartnerProductionImageMockHandler(),
   getCreatePartnerProductMockHandler(),
   getListPartnerProductsMockHandler(),
+  getGetPartnerProductMockHandler(),
+  getUpdatePartnerProductMockHandler(),
   getCreatePartnerWebhookMockHandler(),
   getListPartnerWebhooksMockHandler(),
   getUpdatePartnerWebhookMockHandler(),

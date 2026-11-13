@@ -2595,10 +2595,75 @@ export const DeletePartnerProductionImageParams = zod.object({
 export const DeletePartnerProductionImageResponse = zod.void()
 
 /**
- * FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다
+ * FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다. status PUBLISHED면 게시하고, DRAFT면 목록에 초안으로 남는다. 중개수수료율은 게시할 때 그 파트너의 계약값으로 고정한다(ADR-0062). Cache-Control: no-store
  * @summary 상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)
  */
-export const CreatePartnerProductResponse = zod.void()
+export const createPartnerProductBodyNameMax = 100;
+
+export const createPartnerProductBodyPriceMin = 0;
+
+export const createPartnerProductBodyShippingFeeMin = 0;
+
+export const createPartnerProductBodyReturnShippingFeeMin = 0;
+
+export const createPartnerProductBodyReturnAddressMax = 500;
+
+export const createPartnerProductBodyLimitedQtyMin = 0;
+
+
+export const createPartnerProductBodyTransferableDefault = false;
+export const createPartnerProductBodyStatusDefault = `DRAFT`;
+
+export const CreatePartnerProductBody = zod.object({
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등)'),
+  "name": zod.string().min(1).max(createPartnerProductBodyNameMax),
+  "price": zod.int().min(createPartnerProductBodyPriceMin).describe('상품가(원)'),
+  "shippingFee": zod.int().min(createPartnerProductBodyShippingFeeMin).nullish().describe('편도 배송비(원). 택배를 켜지 않았으면 null'),
+  "returnShippingFee": zod.int().min(createPartnerProductBodyReturnShippingFeeMin).nullish().describe('단순 변심 반품 배송비(편도, 원)'),
+  "returnAddress": zod.string().max(createPartnerProductBodyReturnAddressMax).nullish().describe('반품 받을 주소'),
+  "ticketLinked": zod.boolean().describe('티켓 연동 부가 상품인지'),
+  "linkedEventId": zod.uuid().nullish().describe('티켓 연동 부가 상품의 연결 회차'),
+  "limitedQty": zod.int().min(createPartnerProductBodyLimitedQtyMin).nullish().describe('한정 수량. null이면 한정하지 않음'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('받을 수 있는 수령 방식'),
+  "transferable": zod.boolean().default(createPartnerProductBodyTransferableDefault).describe('티켓과 함께 양도 허용'),
+  "status": zod.enum(['DRAFT', 'PUBLISHED']).default(createPartnerProductBodyStatusDefault).describe('저장 상태. PUBLISHED면 게시한다'),
+  "attributes": zod.record(zod.string(), zod.unknown()).optional().describe('유형별 속성(옵션 규격·특전 등). 유형 스키마가 검사한다')
+}).strict().describe('상품 빌더 저장 본문(SCR-023, FR-024, docs/data.md product). 유형마다 다른 속성은 attributes에 둔다. 서버는 유형별 Zod 스키마로 다시 검사한다')
+
+export const createPartnerProductResponseTwoReturnShippingFeeMin = 0;
+
+export const createPartnerProductResponseTwoReturnAddressMax = 500;
+
+export const createPartnerProductResponseTwoLimitedQtyMin = 0;
+
+
+
+export const CreatePartnerProductResponse = zod.object({
+  "productId": zod.uuid(),
+  "name": zod.string(),
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등)'),
+  "ticketLinked": zod.boolean(),
+  "status": zod.enum(['DRAFT', 'NOT_STARTED', 'ON_SALE', 'SOLD_OUT', 'ENDED', 'HIDDEN']).describe('저장 값과 판매 기간·재고로 계산한 값'),
+  "price": zod.int().describe('상품가(원)'),
+  "shippingFee": zod.int().nullish().describe('편도 배송비(원). 택배를 켜지 않았으면 null'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).describe('받을 수 있는 수령 방식(총금액 표시 규칙의 재료)'),
+  "stockRemaining": zod.int().nullish().describe('남은 재고. 한정 수량이 아니면 null'),
+  "stockTotal": zod.int().nullish().describe('전체 한정 수량. 한정 수량이 아니면 null'),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "linkedProductionId": zod.uuid().nullish(),
+  "linkedProductionTitle": zod.string().nullish()
+}).describe('상품 목록의 한 줄(SCR-023)').and(zod.object({
+  "version": zod.int().describe('고치기 If-Match에 쓰는 판'),
+  "linkedEventId": zod.uuid().nullable().describe('티켓 연동 부가 상품의 연결 회차'),
+  "returnShippingFee": zod.int().min(createPartnerProductResponseTwoReturnShippingFeeMin).nullable(),
+  "returnAddress": zod.string().max(createPartnerProductResponseTwoReturnAddressMax).nullable(),
+  "limitedQty": zod.int().min(createPartnerProductResponseTwoLimitedQtyMin).nullable(),
+  "transferable": zod.boolean(),
+  "attributes": zod.record(zod.string(), zod.unknown())
+}))
 
 /**
  * FR-024, POL-016, SCR-023, docs/design/d5 §1.6 16번. 소속 파트너의 상품만 준다(product.promoter_id, authz-matrix §3.3). status는 저장 값(DRAFT·PUBLISHED·HIDDEN)과 판매 기간·재고로 계산한 값이다(docs/data.md product). 표시 가격(총금액 규칙, docs/design/d5 §5.15 ⑬)은 화면이 price·shippingFee·fulfillments로 그린다. [가정] 화면의 네 상태(판매 전·판매 중·품절·숨김) 밖에 초안 DRAFT와 판매 기간이 끝난 ENDED를 둔다. [가정] 연결 공연은 부가 상품이면 linked_event_id의 공연, 굿즈면 수령 시간대(pickup_slot)의 공연이고, 없으면 null이다. 정렬은 최근 고친 순 [가정]. 상품 고치기(SCR-023 [ 고치기 ])의 경로는 §1.6 16번에 없어 이 초안에 넣지 않았다. 커서 페이징. Cache-Control: no-store
@@ -2638,6 +2703,125 @@ export const ListPartnerProductsResponse = zod.object({
 }).describe('상품 목록의 한 줄(SCR-023)')),
   "nextCursor": zod.string().nullable()
 })
+
+/**
+ * FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 준다. 다른 파트너 상품은 404다. Cache-Control: no-store
+ * @summary 상품 하나(고치기 화면, 유형별 속성 포함)
+ */
+export const GetPartnerProductParams = zod.object({
+  "productId": zod.uuid()
+})
+
+export const getPartnerProductResponseTwoReturnShippingFeeMin = 0;
+
+export const getPartnerProductResponseTwoReturnAddressMax = 500;
+
+export const getPartnerProductResponseTwoLimitedQtyMin = 0;
+
+
+
+export const GetPartnerProductResponse = zod.object({
+  "productId": zod.uuid(),
+  "name": zod.string(),
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등)'),
+  "ticketLinked": zod.boolean(),
+  "status": zod.enum(['DRAFT', 'NOT_STARTED', 'ON_SALE', 'SOLD_OUT', 'ENDED', 'HIDDEN']).describe('저장 값과 판매 기간·재고로 계산한 값'),
+  "price": zod.int().describe('상품가(원)'),
+  "shippingFee": zod.int().nullish().describe('편도 배송비(원). 택배를 켜지 않았으면 null'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).describe('받을 수 있는 수령 방식(총금액 표시 규칙의 재료)'),
+  "stockRemaining": zod.int().nullish().describe('남은 재고. 한정 수량이 아니면 null'),
+  "stockTotal": zod.int().nullish().describe('전체 한정 수량. 한정 수량이 아니면 null'),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "linkedProductionId": zod.uuid().nullish(),
+  "linkedProductionTitle": zod.string().nullish()
+}).describe('상품 목록의 한 줄(SCR-023)').and(zod.object({
+  "version": zod.int().describe('고치기 If-Match에 쓰는 판'),
+  "linkedEventId": zod.uuid().nullable().describe('티켓 연동 부가 상품의 연결 회차'),
+  "returnShippingFee": zod.int().min(getPartnerProductResponseTwoReturnShippingFeeMin).nullable(),
+  "returnAddress": zod.string().max(getPartnerProductResponseTwoReturnAddressMax).nullable(),
+  "limitedQty": zod.int().min(getPartnerProductResponseTwoLimitedQtyMin).nullable(),
+  "transferable": zod.boolean(),
+  "attributes": zod.record(zod.string(), zod.unknown())
+}))
+
+/**
+ * FR-024, SCR-023 [고치기]. 소속 파트너의 상품만 받는다. 보낸 칸만 바꾸고, 유형별 속성은 유형 스키마로 다시 검사한다. 판이 다르면 412, If-Match가 없으면 428이다(guidelines §12)
+ * @summary 상품 고치기(보낸 칸만, If-Match)
+ */
+export const UpdatePartnerProductParams = zod.object({
+  "productId": zod.uuid()
+})
+
+export const UpdatePartnerProductHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
+})
+
+export const updatePartnerProductBodyNameMax = 100;
+
+export const updatePartnerProductBodyPriceMin = 0;
+
+export const updatePartnerProductBodyShippingFeeMin = 0;
+
+export const updatePartnerProductBodyReturnShippingFeeMin = 0;
+
+export const updatePartnerProductBodyReturnAddressMax = 500;
+
+export const updatePartnerProductBodyLimitedQtyMin = 0;
+
+
+
+
+export const UpdatePartnerProductBody = zod.object({
+  "type": zod.string().optional().describe('product_type.code'),
+  "name": zod.string().min(1).max(updatePartnerProductBodyNameMax).optional(),
+  "price": zod.int().min(updatePartnerProductBodyPriceMin).optional(),
+  "shippingFee": zod.int().min(updatePartnerProductBodyShippingFeeMin).nullish(),
+  "returnShippingFee": zod.int().min(updatePartnerProductBodyReturnShippingFeeMin).nullish(),
+  "returnAddress": zod.string().max(updatePartnerProductBodyReturnAddressMax).nullish(),
+  "ticketLinked": zod.boolean().optional(),
+  "linkedEventId": zod.uuid().nullish(),
+  "limitedQty": zod.int().min(updatePartnerProductBodyLimitedQtyMin).nullish(),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional(),
+  "transferable": zod.boolean().optional(),
+  "status": zod.enum(['DRAFT', 'PUBLISHED', 'HIDDEN']).optional(),
+  "attributes": zod.record(zod.string(), zod.unknown()).optional()
+}).strict().describe('상품 고치기 본문. 보낸 칸만 바꾼다')
+
+export const updatePartnerProductResponseTwoReturnShippingFeeMin = 0;
+
+export const updatePartnerProductResponseTwoReturnAddressMax = 500;
+
+export const updatePartnerProductResponseTwoLimitedQtyMin = 0;
+
+
+
+export const UpdatePartnerProductResponse = zod.object({
+  "productId": zod.uuid(),
+  "name": zod.string(),
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등)'),
+  "ticketLinked": zod.boolean(),
+  "status": zod.enum(['DRAFT', 'NOT_STARTED', 'ON_SALE', 'SOLD_OUT', 'ENDED', 'HIDDEN']).describe('저장 값과 판매 기간·재고로 계산한 값'),
+  "price": zod.int().describe('상품가(원)'),
+  "shippingFee": zod.int().nullish().describe('편도 배송비(원). 택배를 켜지 않았으면 null'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).describe('받을 수 있는 수령 방식(총금액 표시 규칙의 재료)'),
+  "stockRemaining": zod.int().nullish().describe('남은 재고. 한정 수량이 아니면 null'),
+  "stockTotal": zod.int().nullish().describe('전체 한정 수량. 한정 수량이 아니면 null'),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "linkedProductionId": zod.uuid().nullish(),
+  "linkedProductionTitle": zod.string().nullish()
+}).describe('상품 목록의 한 줄(SCR-023)').and(zod.object({
+  "version": zod.int().describe('고치기 If-Match에 쓰는 판'),
+  "linkedEventId": zod.uuid().nullable().describe('티켓 연동 부가 상품의 연결 회차'),
+  "returnShippingFee": zod.int().min(updatePartnerProductResponseTwoReturnShippingFeeMin).nullable(),
+  "returnAddress": zod.string().max(updatePartnerProductResponseTwoReturnAddressMax).nullable(),
+  "limitedQty": zod.int().min(updatePartnerProductResponseTwoLimitedQtyMin).nullable(),
+  "transferable": zod.boolean(),
+  "attributes": zod.record(zod.string(), zod.unknown())
+}))
 
 /**
  * FR-025, ADR-0053. 목적: 판매·취소·매진·회차 취소·연기·정산 같은 일이 생기면 PEAKET이 파트너 회사 서버 주소로 바로 알려 파트너 시스템(매출·회계, 사내 메신저, 자사 공지, 정산 입금 확인)이 콘솔을 계속 확인하지 않게 한다. 본문에 개인정보·좌석 번호가 없어 팬 관리(CRM)에는 쓸 수 없고, 쓰지 않아도 판매·정산은 그대로다(추천 적용 2026-10-19, ADR-0066). Standard Webhooks 형식으로 보낸다. 헤더는 webhook-id(사건 키, 재전송에도 같음), webhook-timestamp(시도 시각, 유닉스 초), webhook-signature(v1, 뒤에 base64 HMAC-SHA256(비밀, id.timestamp.본문))다. 비밀(whsec_, 32바이트)은 등록 응답에 한 번만 보여 준다. 비밀을 바꾸면 24시간 동안 옛 비밀과 새 비밀의 서명을 공백으로 이어 함께 보낸다. 받는 쪽은 시각 차이 5분 초과를 거부하고 webhook-id로 중복을 거른다. 보내는 이벤트 8종과 본문은 webhooks의 partnerEvent이고, 엔드포인트마다 고른 type만 보낸다. 등록·비밀 재발급·다시 보내기는 파트너 관리자(partner_admin)만 하고 partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)

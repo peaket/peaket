@@ -5,7 +5,7 @@
 import { previewHref } from '@peaket/ds/Preview';
 import { routes } from '@/shared/config/routes';
 import { PRODUCT_STATES } from '@/shared/config/states/scr023';
-import { readPreview, type SearchParams } from '@/shared/lib/preview';
+import { readParam, readPreview, type SearchParams } from '@/shared/lib/preview';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { partnerProducts } from '../model/products';
 import { OrdersSection } from './OrdersSection';
@@ -14,6 +14,11 @@ import { ProductListSection } from './ProductListSection';
 import { ProductTabs, type ProductTab } from './ProductTabs';
 import { SettlementSection } from './SettlementSection';
 import { ShippingSection } from './ShippingSection';
+import { LiveOrdersSection } from './live/OrdersLive';
+import { LiveProductForm } from './live/ProductFormLive';
+import { LiveProductListSection } from './live/ProductListLive';
+import { LiveSettlementSection } from './live/SettlementLive';
+import { LiveShippingSection } from './live/ShippingLive';
 
 export type ProductState = (typeof PRODUCT_STATES)[number];
 
@@ -49,18 +54,25 @@ function tabOf(st: ProductState): Tab {
 
 export function ProductBuilderPage({ path, fallback, editingName, searchParams }: ProductBuilderPageProps) {
   const pv = readPreview(searchParams, PRODUCT_STATES, fallback);
+  const live = readParam(searchParams, 'state') === undefined;
   const st = pv.state;
-  const tab = tabOf(st);
+  const view = readParam(searchParams, 'tab');
+  const tab: Tab = view === 'ship' ? 'ship' : view === 'settle' ? 'settle' : tabOf(st);
   const keep = pv.keep;
   const listHref = previewHref(routes.products(), undefined, keep);
   const newHref = previewHref(routes.productNew(), undefined, keep);
+  const liveTabHref = (next: 'ship' | 'settle') => {
+    const p = new URLSearchParams({ tab: next });
+    for (const [k, v] of Object.entries(keep)) if (v !== undefined) p.set(k, v);
+    return `${routes.products()}?${p.toString()}`;
+  };
 
   const tabs: ProductTab[] = [
-    { key: 'list', label: '상품 목록', href: listHref, active: tab === 'list', badge: String(partnerProducts.length) },
+    { key: 'list', label: '상품 목록', href: listHref, active: tab === 'list', badge: live ? undefined : String(partnerProducts.length) },
     { key: 'new', label: '상품 만들기', href: newHref, active: tab === 'new' },
     { key: 'orders', label: '굿즈 주문 현황', href: previewHref(routes.productOrders(), undefined, keep), active: tab === 'orders' },
-    { key: 'ship', label: '배송·반품 처리', href: previewHref(routes.products(), '배송·반품 처리', keep), active: tab === 'ship' },
-    { key: 'settle', label: '상품 정산', href: previewHref(routes.products(), '상품 정산', keep), active: tab === 'settle' },
+    { key: 'ship', label: '배송·반품 처리', href: live ? liveTabHref('ship') : previewHref(routes.products(), '배송·반품 처리', keep), active: tab === 'ship' },
+    { key: 'settle', label: '상품 정산', href: live ? liveTabHref('settle') : previewHref(routes.products(), '상품 정산', keep), active: tab === 'settle' },
   ];
 
   return (
@@ -74,13 +86,23 @@ export function ProductBuilderPage({ path, fallback, editingName, searchParams }
       <ProductTabs tabs={tabs} />
 
       {tab === 'new' ? (
-        <ProductForm kind={st === '티켓 연동 부가 상품' ? '티켓 연동 부가 상품' : '굿즈'} saving={st === '저장 중'} editingName={editingName} listHref={listHref} />
+        live ? (
+          <LiveProductForm listHref={listHref} />
+        ) : (
+          <ProductForm kind={st === '티켓 연동 부가 상품' ? '티켓 연동 부가 상품' : '굿즈'} saving={st === '저장 중'} editingName={editingName} listHref={listHref} />
+        )
       ) : tab === 'orders' ? (
-        <OrdersSection />
+        live ? <LiveOrdersSection /> : <OrdersSection />
       ) : tab === 'ship' ? (
-        <ShippingSection isMember={pv.isMember} openDownload={st === '배송 명단 내려받기'} openReject={st === '반품 거절'} />
+        live ? (
+          <LiveShippingSection isMember={pv.isMember} />
+        ) : (
+          <ShippingSection isMember={pv.isMember} openDownload={st === '배송 명단 내려받기'} openReject={st === '반품 거절'} />
+        )
       ) : tab === 'settle' ? (
-        <SettlementSection isMember={pv.isMember} />
+        live ? <LiveSettlementSection isMember={pv.isMember} /> : <SettlementSection isMember={pv.isMember} />
+      ) : live ? (
+        <LiveProductListSection newHref={newHref} />
       ) : (
         <ProductListSection newHref={newHref} />
       )}

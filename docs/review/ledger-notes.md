@@ -169,3 +169,12 @@
 | payment:v5.0.0-14.1.1 | 다른 단계 | B | core-svc 판매 자격 후속 | core-svc 판매 자격 시험이 맡는다. BAT-050은 ticket-svc 발권만 본다. |
 | payment:v5.0.0-14.1.2 | 다른 단계 | B | core-svc 판매 자격 후속 | core-svc 판매 자격 시험이 맡는다. BAT-050은 ticket-svc 발권만 본다. |
 | payment:v5.0.0-14.2.2 | 다른 단계 | B | core-svc 좌석맵 후속 | core-svc 좌석맵 저장 시험이 맡는다. BAT-050은 ticket-svc 발권만 본다. |
+
+## BAT-610 화면 몫(2026-11-14)
+
+| ID | 상태 | 등급 | 담당 | 근거·이유 |
+| --- | --- | --- | --- | --- |
+| I-T53 | 다른 계약 | B | apps/partner 재인증 화면 | 화면은 `act BOOKER_EXPORT`·패스키 단계·403 `reauth-required`를 부르고 시험은 `apps/partner/src/shared/api/reauth.test.mjs`·`problem.test.mjs`·`_pages/settlement/model/roster-live.test.mjs`가 본다. 서버의 jti 한 번 쓰기·factors 검사는 identity-svc 기존 시험 몫이다. |
+| J-T18 | 다른 계약 | A | payment-svc 정산 모듈 | 상품 정산서 계산·지급대행·KYC·상계가 없다. 화면은 목록·이의 제기 계약과 준비 중 상태만 시험한다(`settlement-live.test.mjs`). |
+| J-T26 | 다른 계약 | A | core-svc export·purchase-svc 명단 원천 | 내려받기 사유·보유 기간·이력 문구는 화면 시험이 본다(`roster-live.test.mjs`). 실제 명단 원천·접속기록·스트리밍 저장은 서버 모듈이 없다. |
+| N-T15 | 다른 계약 | B | core-svc notify 모듈 | 웹훅 endpoint·delivery 표·발송기·재시도가 없다. 화면은 주소 검사·상태·재발급·다시 보내기 계약을 시험한다(`webhooks/model/live.test.mjs`). |
