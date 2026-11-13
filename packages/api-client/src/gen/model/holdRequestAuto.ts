@@ -11,7 +11,7 @@
  */
 
 /**
- * 희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)
+ * 희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정은 BUILD_ORDER HOT-080에서 열었다. seatIds와 함께 보내면 400 auto-condition-invalid다.
  */
 export type HoldRequestAuto = {
   firstTierId: string;

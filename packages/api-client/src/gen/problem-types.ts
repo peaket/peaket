@@ -21,6 +21,7 @@ export type ProblemType =
   | 'artist-exists'
   | 'authz-unavailable'
   | 'auto-assign-not-supported'
+  | 'auto-condition-invalid'
   | 'batching'
   | 'booking-restricted'
   | 'booth-mismatch'
@@ -69,6 +70,7 @@ export type ProblemType =
   | 'image-too-large'
   | 'image-type-unsupported'
   | 'inquiry-closed'
+  | 'invalid-auto-condition'
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
@@ -232,6 +234,7 @@ export const PROBLEM_TYPES = {
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
   'authz-unavailable': { status: 503, title: "권한을 확인하지 못했습니다" },
   'auto-assign-not-supported': { status: 400, title: "좌석 자동 배정은 아직 받지 않습니다" },
+  'auto-condition-invalid': { status: 400, title: "희망 조건이 올바르지 않습니다" },
   'batching': { status: 503, title: "순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요" },
   'booking-restricted': { status: 403, title: "예매가 제한된 계정입니다" },
   'booth-mismatch': { status: 409, title: "티켓 보유자와 다른 분입니다" },
@@ -280,6 +283,7 @@ export const PROBLEM_TYPES = {
   'image-too-large': { status: 413, title: "한 장에 10MB까지 올릴 수 있습니다" },
   'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
+  'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
