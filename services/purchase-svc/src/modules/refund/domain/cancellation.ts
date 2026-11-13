@@ -23,6 +23,16 @@ export interface RefundAccount {
   readonly holderName: string;
 }
 
+/** 같은 취소 ID의 재요청을 견적·티켓 취소 전에 알아보기 위한 기록 */
+export interface CancellationRecord {
+  readonly cancellationId: string;
+  readonly orderId: string;
+  readonly ticketId: string;
+  readonly refundAmount: number;
+  readonly state: CancellationStatus;
+  readonly refundAttempts: number;
+}
+
 /** 취소가 보는 주문·티켓 한 장. ticket-svc가 소유한 보유자·양도 상태는 여기 없다(티켓 취소 포트가 본다) */
 export interface CancellationOrderView {
   readonly orderId: string;
@@ -50,6 +60,28 @@ export type TicketCancelOutcome = 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' | 'NOT_PAY
 /** 결제사 취소 포트 결과(payment.proto CancelResult와 같은 뜻) */
 export type PaymentCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED' | 'UNKNOWN';
 
+/** 환급 재시도 횟수 상한 [가정]. 넘으면 CS 처리함 '환급 실패' 대상이다(transfer-refund §7.1) */
+export const REFUND_RETRY_MAX_ATTEMPTS = 5;
+/** 재시도 간격(ms): 1분 → 5분 → 15분 → 1시간 → 6시간 [가정]. 시도 횟수 1부터 */
+const REFUND_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000] as const;
+
+/** 다음 재시도까지 기다릴 시간(ms). 시도 횟수가 상한을 넘어도 마지막 간격을 쓴다 */
+export function refundRetryDelayMs(attempts: number): number {
+  if (!Number.isSafeInteger(attempts) || attempts < 1) throw new RangeError(`재시도 횟수는 1 이상의 정수다: ${String(attempts)}`);
+  return REFUND_RETRY_DELAYS_MS[Math.min(attempts, REFUND_RETRY_DELAYS_MS.length) - 1]!;
+}
+
+/** 환급 실행기가 집은 취소 한 건(REQUESTED는 입장 기록 마감 뒤, REFUND_PENDING은 재시도) */
+export interface DueRefund {
+  readonly cancellationId: string;
+  readonly orderId: string;
+  readonly amount: number;
+  readonly reason: CancellationReason;
+  readonly status: 'REQUESTED' | 'REFUND_PENDING';
+  /** 지금까지 실패한 횟수(REQUESTED는 0) */
+  readonly attempts: number;
+}
+
 /** order_cancellation 한 행을 만든 결과 */
 export type CancellationWriteOutcome =
   | { readonly status: 'CREATED' }
@@ -59,6 +91,7 @@ export type CancellationWriteOutcome =
       readonly refundAmount: number;
       readonly state: CancellationStatus;
       readonly refundAfterEntryClose: boolean;
+      readonly refundAttempts: number;
     }
   | { readonly status: 'CONFLICT' };
 

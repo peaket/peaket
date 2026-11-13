@@ -9,7 +9,7 @@
 // - Redis 비트맵·secver·구역 Pub/Sub은 실제 Valkey에서 읽고, 취소표 Lua가 낸 글을 구독해 확인한다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { createDatabase, createHotRedis, fakeClock, type Database, type HotRedis } from '@peaket/platform';
+import { createDatabase, createHotRedis, ensureOutboxPartitions, fakeClock, type Database, type HotRedis } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import {
@@ -29,6 +29,7 @@ import { DrizzleTicketStore } from '../../ticket-svc/src/modules/ticket/adapters
 import { TicketService } from '../../ticket-svc/src/modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from '../../ticket-svc/src/modules/ticket/inbound/ticket.grpc.js';
 import { migrateTicket } from '../../ticket-svc/scripts/migrate.mjs';
+import { DrizzleOrderStore } from '../src/modules/booking/index.js';
 import { DrizzleSeatSales, MemorySeatMap, RedisSeatStore, seatKeys } from '../src/modules/inventory/index.js';
 import {
   CancelTicket,
@@ -96,6 +97,7 @@ beforeAll(async () => {
   ticketDb = createDatabase({ url: ticketUrl, profile: 'general', max: 6, applicationName: 'cancellation-it-ticket' });
   paymentDb = createDatabase({ url: paymentUrl, profile: 'general', max: 6, applicationName: 'cancellation-it-payment' });
   admin = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'cancellation-it-admin' });
+  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }));
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
   seatMap = new MemorySeatMap();
@@ -154,7 +156,7 @@ beforeAll(async () => {
   });
 
   const orders = new DrizzleCancellationOrders(purchaseDb, seatMap);
-  writes = new DrizzleCancellationWrites(purchaseDb);
+  writes = new DrizzleCancellationWrites(purchaseDb, new DrizzleOrderStore({ clock }));
   ticketCancels = new GrpcTicketCancellations({ address: `127.0.0.1:${ticketServer.port}` });
   paymentCancels = new GrpcPaymentCancellations({ address: `127.0.0.1:${paymentServer.port}` });
   quote = new QuoteCancellation({ orders, calendar });
@@ -260,7 +262,18 @@ const cancelOf = (w: World, cancellationId: string, reason: 'USER' | 'FRAUD' = '
 
 const cancellationRow = async (cancellationId: string) =>
   (await admin.pool.query('select * from order_cancellation where id = $1', [cancellationId])).rows[0] as
-    | { status: string; reason: string; deduction_bp: number; deduction_amount: number; refund_amount: number; refund_due_at: Date | null }
+    | {
+        status: string;
+        reason: string;
+        deduction_bp: number;
+        deduction_amount: number;
+        refund_amount: number;
+        refund_due_at: Date | null;
+        refund_attempts: number;
+        next_refund_at: Date | null;
+        refund_failed_at: Date | null;
+        refund_last_error: string | null;
+      }
     | undefined;
 const paymentRow = async (paymentId: string) =>
   (await paymentDb.pool.query('select status, cancelled_amount from payment where id = $1', [paymentId])).rows[0] as
@@ -334,6 +347,7 @@ describe('견적·취소 Saga', () => {
       expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'PARTIAL_CANCELED', cancelled_amount: 90_000 });
       expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
       expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('RETURNED');
+      expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe('REFUNDED');
       expect((await admin.pool.query('select used from purchase_quota where account_id = $1 and event_id = $2', [w.accountId, w.eventId])).rows[0].used).toBe(0);
       expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '3'], { key: seatKeys.bitmap(w.eventId) }))).toBe(0);
       expect(String(await redis.command(['HGET', seatKeys.secver(w.eventId), '0'], { key: seatKeys.secver(w.eventId) }))).toBe('1');
@@ -344,6 +358,44 @@ describe('견적·취소 Saga', () => {
     } finally {
       sub.close();
     }
+  });
+
+  test('GAT090_주문에_남은_티켓이_있으면_PARTIALLY_REFUNDED다', async () => {
+    const w = await world();
+    await admin.pool.query(`insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) values ($1, 2, $2, 'R', 'A', $3)`, [w.orderId, randomUUID(), PRICE]);
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'ACCEPTED' });
+    expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe('PARTIALLY_REFUNDED');
+  });
+
+  test('GAT090_두_항목_주문에서_두번째_취소는_T25를_거쳐_T23으로_끝난다', async () => {
+    const w = await world();
+    const seat2 = randomUUID();
+    seatMap.put(
+      { eventId: w.eventId, layoutVersion: 'v1', seatCount: 10, perAccountLimit: 4, saleEndsAtMs: w.saleEndsAtMs, tierPrices: { R: PRICE } },
+      [
+        { seatId: w.seatId, index: 3, sectionId: 'A', sectionIndex: 0, seatOffset: 3, tierId: 'R' },
+        { seatId: seat2, index: 4, sectionId: 'A', sectionIndex: 0, seatOffset: 4, tierId: 'R' },
+      ],
+    );
+    const issued = await ticketService.issue({ orderId: w.orderId, eventId: w.eventId, payerAccountId: w.accountId, seatIds: [seat2], issueGeneration: 1 });
+    const ticket2 = issued.tickets[0]!.ticketId;
+    await admin.pool.query(`insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, 2, $2, 'R', 'A', $3, $4)`, [w.orderId, seat2, PRICE, ticket2]);
+    await admin.pool.query('update purchase_order set amount = $2 where id = $1', [w.orderId, PRICE * 2]);
+    await paymentDb.pool.query('update payment set amount = $2 where id = $1', [w.paymentId, PRICE * 2]);
+    expect(await sales.reserve({ eventId: w.eventId, accountId: w.accountId, orderId: w.orderId, seatIds: [seat2], limit: 4 })).toEqual({ status: 'RESERVED' });
+    expect(await sales.markSold({ eventId: w.eventId, orderId: w.orderId, seatIds: [seat2] })).toBe(1);
+    await redis.command(['SETBIT', seatKeys.bitmap(w.eventId), '4', '1'], { key: seatKeys.bitmap(w.eventId) });
+
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    await expect(cancelOf(w, randomUUID())).resolves.toMatchObject({ status: 'ACCEPTED' });
+    await expect(saga.execute({ accountId: w.accountId, ticketId: ticket2, cancellationId: randomUUID(), reason: 'USER', nowMs: NOW, deadlineMs: 5_000 })).resolves.toMatchObject({ status: 'ACCEPTED' });
+    expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe('REFUNDED');
+    const causes = (await admin.pool.query<{ cause: string }>('select cause from order_event where order_id = $1 order by seq', [w.orderId])).rows.map((r) => r.cause);
+    expect(causes).toEqual(expect.arrayContaining(['T22', 'T25', 'T23']));
   });
 
   test('GAT080_부정예매_FRAUD는_공제0원으로_전액환급한다', async () => {
@@ -378,7 +430,7 @@ describe('견적·취소 Saga', () => {
     expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
 
     const later = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => w.eventStartsAtMs + 50 * HOUR + 1 });
-    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0 });
+    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 10_000 });
     expect(gatewayCalls).toHaveLength(1);
     expect(gatewayCalls[0]).toMatchObject({ amount: 10_000, idemKey: `cancel-${cancellationId}` });
@@ -391,22 +443,68 @@ describe('견적·취소 Saga', () => {
     gatewayCalls = [];
     const cancellationId = randomUUID();
     await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'REFUND_PENDING', cancellationId, refundAmount: 90_000, payment: 'UNKNOWN' });
-    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING' });
+    expect(await cancellationRow(cancellationId)).toMatchObject({
+      status: 'REFUND_PENDING',
+      refund_attempts: 1,
+      next_refund_at: new Date(NOW + 60_000),
+      refund_failed_at: null,
+      refund_last_error: 'UNKNOWN',
+    });
     expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'APPROVED', cancelled_amount: 0 });
     expect(gatewayCalls).toHaveLength(1);
+    // 환급이 끝나지 않았어도 취소가 접수됐으므로 주문은 부분 환불이고, 이력·Outbox에 T22가 남는다
+    expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe('PARTIALLY_REFUNDED');
+    const events = await admin.pool.query<{ cause: string; to_status: string }>('select cause, to_status from order_event where order_id = $1 order by seq', [w.orderId]);
+    expect(events.rows.at(-1)).toEqual({ cause: 'T22', to_status: 'PARTIALLY_REFUNDED' });
+    const outbox = await admin.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [w.eventId]);
+    expect(outbox.rows.map((r) => (JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string }).type)).toContain('PARTIALLY_REFUNDED');
 
     // 같은 티켓의 다른 취소 ID는 진행 중 취소와 겹쳐 CONFLICT다(결제사를 부르지 않는다)
     await expect(cancelOf(w, randomUUID())).resolves.toEqual({ status: 'CONFLICT' });
     expect(gatewayCalls).toHaveLength(1);
 
+    // 다음 재시도 시각이 지나면 실행기가 같은 멱등키로 다시 부른다
     gatewayOutcome = 'CANCELLED';
-    await expect(cancelOf(w, cancellationId)).resolves.toEqual({ status: 'ACCEPTED', cancellationId, refundAmount: 90_000, refundAfterEntryClose: false });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
     expect(gatewayCalls).toHaveLength(2);
     expect(gatewayCalls[1]).toMatchObject({ amount: 90_000, idemKey: `cancel-${cancellationId}` });
-    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED' });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 1, next_refund_at: null, refund_failed_at: null });
     expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'PARTIAL_CANCELED', cancelled_amount: 90_000 });
     const sent = await paymentDb.pool.query("select count(*)::int as n from payment_event where payment_id = $1 and type = 'CONFIRMED_CANCEL_SENT'", [w.paymentId]);
     expect(sent.rows[0].n).toBe(1);
+    await expect(cancelOf(w, cancellationId)).resolves.toEqual({ status: 'REPLAYED', cancellationId, refundAmount: 90_000, refundAfterEntryClose: false });
+    expect(gatewayCalls).toHaveLength(2);
+  });
+
+  test('GAT090_업무거절은_refund_failed_at을_남기고_실행기가_건너뛴다', async () => {
+    const w = await world();
+    gatewayOutcome = 'REJECTED';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'REFUND_PENDING', payment: 'REJECTED' });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 1, next_refund_at: null, refund_last_error: 'REJECTED' });
+    expect((await cancellationRow(cancellationId))!.refund_failed_at).not.toBeNull();
+    expect(gatewayCalls).toHaveLength(1);
+
+    gatewayOutcome = 'CANCELLED';
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 24 * HOUR });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0 });
+    expect(gatewayCalls).toHaveLength(1);
+  });
+
+  test('GAT090_재시도_상한을_넘으면_refund_failed_at을_남긴다', async () => {
+    const w = await world();
+    gatewayOutcome = 'UNKNOWN';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await cancelOf(w, cancellationId);
+    await admin.pool.query('update order_cancellation set refund_attempts = 4, next_refund_at = $2 where id = $1', [cancellationId, new Date(NOW + 60_000)]);
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1 });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 5, next_refund_at: null, refund_last_error: 'UNKNOWN' });
+    expect((await cancellationRow(cancellationId))!.refund_failed_at).not.toBeNull();
+    expect(gatewayCalls).toHaveLength(2);
   });
 
   test('GAT080_같은취소ID_재요청은_끝난뒤_결제사를_다시부르지_않는다', async () => {

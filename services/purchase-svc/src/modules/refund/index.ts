@@ -16,16 +16,20 @@ export {
 export {
   CANCELLATION_REASONS,
   CANCELLATION_STATUSES,
+  REFUND_RETRY_MAX_ATTEMPTS,
+  refundRetryDelayMs,
   type CancellationOrderView,
   type CancellationReason,
+  type CancellationRecord,
   type CancellationStatus,
   type CancellationWriteOutcome,
   type CancelTicketResult,
+  type DueRefund,
   type PaymentCancelOutcome,
   type RefundAccount,
   type TicketCancelOutcome,
 } from './domain/cancellation.js';
-export type { CancellationConfigs, CancellationOrders, CancellationWrites, PaymentCancellations, ReauthGate, RefundDeps, SeatReturnNotices, SeatReturns, TicketCancellations } from './domain/ports.js';
+export type { CancellationConfigs, CancellationOrders, CancellationWrites, PaymentCancellations, ReauthGate, RefundDeps, RefundFailureNotice, SeatReturnNotices, SeatReturns, TicketCancellations } from './domain/ports.js';
 export { DrizzleCancellationOrders, DrizzleCancellationWrites, DrizzleSeatReturns } from './adapters/db/drizzle-cancellation.js';
 export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './adapters/grpc-ticket-cancellations.js';
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';
@@ -35,3 +39,4 @@ export { RefundModule, type RefundModuleDeps } from './refund.module.js';
 export { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
 export { eventStartsAtOf, QuoteCancellation, type CancellationQuoteView, type QuoteCancellationInput, type QuoteCancellationResult } from './application/quote-cancellation.js';
 export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } from './application/refund-after-entry.js';
+export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';

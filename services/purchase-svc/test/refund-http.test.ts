@@ -39,6 +39,8 @@ const payments: PaymentCancellations = { cancel: async () => 'CANCELLED' };
 const writes: CancellationWrites = {
   create: async () => ({ status: 'CREATED' }),
   updateStatus: async () => undefined,
+  scheduleRefundRetry: async () => undefined,
+  markRefundFailed: async () => undefined,
   dueRefunds: async () => [],
 };
 
@@ -50,7 +52,7 @@ beforeAll(async () => {
       memory: true,
       sessions,
       refund: {
-        orders: { findByTicket: async (id) => (id === TICKET ? view : undefined) },
+        orders: { findByTicket: async (id) => (id === TICKET ? view : undefined), findCancellation: async () => undefined },
         tickets,
         payments,
         writes,

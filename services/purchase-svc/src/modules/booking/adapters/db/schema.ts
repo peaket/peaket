@@ -100,6 +100,14 @@ export const orderCancellation = pgTable(
     status: text('status').notNull(),
     /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다 */
     refundDueAt: at('refund_due_at'),
+    /** 결제사 취소를 다시 시도한 횟수(REFUND_PENDING) */
+    refundAttempts: integer('refund_attempts').notNull().default(0),
+    /** 다음 재시도 시각(REFUND_PENDING). 없으면 곧 시도한다 */
+    nextRefundAt: at('next_refund_at'),
+    /** 재시도를 다 썼거나 업무 거절로 CS 처리함에 넘길 시각. 있으면 실행기가 건너뛴다 */
+    refundFailedAt: at('refund_failed_at'),
+    /** 마지막 실패 결과 코드(CANCELLED·PENDING·UNKNOWN·REJECTED). 비밀·계좌는 싣지 않는다 */
+    refundLastError: text('refund_last_error'),
     createdAt: at('created_at').notNull(),
     statusChangedAt: at('status_changed_at').notNull(),
   },
@@ -108,9 +116,13 @@ export const orderCancellation = pgTable(
       .on(t.orderId, t.ticketId)
       .where(sql`${t.status} <> 'VOIDED'`),
     index('order_cancellation_status_idx').on(t.status, t.createdAt),
+    index('order_cancellation_refund_due_idx')
+      .on(t.nextRefundAt)
+      .where(sql`${t.status} = 'REFUND_PENDING' and ${t.refundFailedAt} is null`),
     check('order_cancellation_reason_check', sql`${t.reason} in ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD')`),
     check('order_cancellation_status_check', sql`${t.status} in ('REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED')`),
     check('order_cancellation_amounts_check', sql`${t.daysBefore} >= 0 and ${t.deductionBp} between 0 and 10000 and ${t.deductionAmount} >= 0 and ${t.refundAmount} >= 0`),
+    check('order_cancellation_refund_attempts_check', sql`${t.refundAttempts} >= 0`),
   ],
 );
 

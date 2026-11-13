@@ -37,7 +37,7 @@ import {
   DrizzleCancellationWrites,
   GrpcPaymentCancellations,
   RefundAfterEntry,
-  refundAfterEntryTask,
+  RefundRetryLoop,
 } from './modules/refund/index.js';
 import {
   DrizzleSeatRebuildSource,
@@ -108,6 +108,8 @@ export interface PurchaseRelayOptions {
   rebuildTickMs?: number;
   /** 세대 올리기 감시 틱(기본 EPOCH_WATCH_TICK_MS 1초, 시험이 줄인다. BUILD_ORDER PRF-168) */
   epochWatchTickMs?: number;
+  /** 환급 재시도 반복 틱(기본 REFUND_RETRY_TICK_MS 1분, 시험이 줄인다. GAT-090) */
+  refundRetryTickMs?: number;
   /** 주문 만료 안전망 틱(기본 ORDER_EXPIRY_SWEEP_INTERVAL_MS 10분 [가정], 시험이 줄인다. BUILD_ORDER PRF-172) */
   orderExpirySweepTickMs?: number;
   /** 좌석 Stream 릴레이의 쉬기(시험이 줄인다. 기본 setTimeout) */
@@ -155,7 +157,15 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   const paymentCancelAddress = o.env?.PEAKET_PAYMENT_GRPC_ADDR;
   const paymentCancels = paymentCancelAddress ? new GrpcPaymentCancellations({ address: paymentCancelAddress }) : undefined;
   const refundAfterEntry = paymentCancels
-    ? new RefundAfterEntry({ writes: new DrizzleCancellationWrites(o.serviceDatabase), payments: paymentCancels, nowMs: () => clock.now() })
+    ? new RefundAfterEntry({
+        writes: new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock })),
+        payments: paymentCancels,
+        nowMs: () => clock.now(),
+        // ops-svc CS 처리함 계약이 아직 없다. 재시도 소진·업무 거절은 refund_failed_at으로 남기고 경보 로그만 낸다(known gap)
+        failureNotice: {
+          open: async (q) => taskLogger.warn({ event: 'cancellation_refund_failed', cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError }, '환급 재시도 소진·업무 거절(CS 처리함 연결 대기)'),
+        },
+      })
     : undefined;
   const relay = await startOutboxRelayProcess({
     service: SERVICE,
@@ -184,7 +194,6 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         signals: orderExpirySignals,
         logger: taskLogger,
       }),
-      ...(refundAfterEntry ? [refundAfterEntryTask(refundAfterEntry, taskLogger)] : []),
     ],
     leaderLoops: (ctx) => {
       seatSignals.register(ctx.registry);
@@ -232,6 +241,16 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           ...(o.rebuildTickMs !== undefined ? { tickMs: o.rebuildTickMs } : {}),
         }),
         // 세대 올리기 감시(PRF-168): 회차 목록의 회차마다 세대 올리기 Lua를 불러, 그 슬롯의 주 노드가 바뀌었으면(장애 조치) 세대를 올린다
+        ...(refundAfterEntry
+          ? [
+              new RefundRetryLoop({
+                refund: refundAfterEntry,
+                leader: ctx.leader,
+                logger: ctx.logger,
+                ...(o.refundRetryTickMs !== undefined ? { tickMs: o.refundRetryTickMs } : {}),
+              }),
+            ]
+          : []),
         new SeatEpochWatch({
           store,
           leader: ctx.leader,

@@ -116,6 +116,8 @@ PEAKET은 판매를 위탁받아 하는 자(시행령 §3의3 1호, 해석)이�
 
 **첫 구현(2026-11-13, GAT-080)**: purchase-svc의 취소 Saga가 결제자 확인·견적(공제) 뒤 ticket-svc `CancelTickets`로 키를 폐기하고, `order_cancellation`(진행 중 취소 1건 유일)을 쓴 뒤 payment-svc 일반 취소로 환급한다. 사유 `FRAUD`는 공제율 0으로 계산한다. R-540에서 HTTP 견적과 `@PurchaseSigned` 취소(재인증 계약이 없어 403 `reauth-required`), Redis 비트맵 취소표 즉시 방출, 입장 기록 마감 뒤 환급 정비 일을 더했다. 마감 시각은 core `event.entry_closed_at` 연결 전까지 공연 시작 + 50시간의 보수적 상한을 쓴다(known gap). 부정 예매 운영자 취소는 ticket-svc `OperatorCancelTickets`가 없어 보류다.
 
+**GAT-090 환급 상태·부분 환불·재시도(2026-11-13, R-547)**: 취소가 주문 항목을 모두 덮으면 주문을 `REFUNDED`(T24·T23), 일부만 덮으면 `PARTIALLY_REFUNDED`(T22·T25)로 전이하고 이력·Outbox에 남긴다. 결제사 결과가 `PENDING`·`UNKNOWN`이면 `order_cancellation`을 `REFUND_PENDING`으로 두고 `refund_attempts`·`next_refund_at`(1분→5분→15분→1시간→6시간 [가정])·`refund_last_error`를 적는다. 환급 실행기 `cancellation-refund-retry`가 릴레이 리더에서 1분 [가정]마다 입장 기록 마감 뒤 `REQUESTED`와 재시도할 `REFUND_PENDING`을 함께 집어 같은 `cancel-{cancellationId}` 멱등키로 다시 부른다. 업무 거절(`REJECTED`)이나 5회 [가정] 소진은 `refund_failed_at`을 남겨 CS 처리함 '환급 실패' 대상으로 보낸다. ops-svc가 없어 실제 CS 건 생성 계약은 아직 연결하지 못했고, 실행기는 경보 로그와 `refund_failed_at`까지만 남긴다(known gap).
+
 모든 판정은 티켓 행 잠금(`SELECT … FOR UPDATE`) 안에서 상태·기한을 다시 확인해 한다. 양도, 취소, 회수, 스캔 수신이 한 티켓에서 겹쳐도 하나만 성공한다. 버전 칸은 CS 처리함처럼 사람이 화면에서 읽고 나중에 저장하는 흐름이 본 판과 비교하는 데만 쓴다(docs/features/payment.md §4.1, 추천 적용 2026-10-28, 기술 검토 낮음-071). 오프라인 스캐너의 입장 기록은 늦게 올라오므로, 입장 시간대에는 서버가 누가 들어갔는지 모른다. 그래서 입장 시작부터 입장 기록 마감까지는 소유권과 키를 바꾸는 수락·돌려주기·회수를 막는다(ADR-0051, docs/features/offline-gate.md §5).
 
 ### 3.2 승인 업무 종류(POL-038)

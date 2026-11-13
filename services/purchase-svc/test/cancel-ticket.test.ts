@@ -5,6 +5,7 @@ import {
   QuoteCancellation,
   WeekendBusinessCalendar,
   type CancellationOrderView,
+  type CancellationRecord,
   type CancellationWriteOutcome,
   type CancellationWrites,
   type PaymentCancelOutcome,
@@ -38,9 +39,15 @@ const order = (over: Partial<CancellationOrderView> = {}): CancellationOrderView
 });
 
 class Orders {
-  constructor(private readonly value: CancellationOrderView | undefined) {}
+  constructor(
+    private readonly value: CancellationOrderView | undefined,
+    private readonly existing?: CancellationRecord,
+  ) {}
   async findByTicket(): Promise<CancellationOrderView | undefined> {
     return this.value;
+  }
+  async findCancellation(): Promise<CancellationRecord | undefined> {
+    return this.existing;
   }
 }
 
@@ -73,6 +80,8 @@ class Seats implements SeatReturns {
 class Writes implements CancellationWrites {
   created: Parameters<CancellationWrites['create']>[0][] = [];
   updates: Parameters<CancellationWrites['updateStatus']>[0][] = [];
+  retries: Parameters<CancellationWrites['scheduleRefundRetry']>[0][] = [];
+  failures: Parameters<CancellationWrites['markRefundFailed']>[0][] = [];
   constructor(private readonly replay?: CancellationWriteOutcome) {}
   async create(q: Parameters<CancellationWrites['create']>[0]): Promise<CancellationWriteOutcome> {
     this.created.push(q);
@@ -80,6 +89,12 @@ class Writes implements CancellationWrites {
   }
   async updateStatus(q: Parameters<CancellationWrites['updateStatus']>[0]): Promise<void> {
     this.updates.push(q);
+  }
+  async scheduleRefundRetry(q: Parameters<CancellationWrites['scheduleRefundRetry']>[0]): Promise<void> {
+    this.retries.push(q);
+  }
+  async markRefundFailed(q: Parameters<CancellationWrites['markRefundFailed']>[0]): Promise<void> {
+    this.failures.push(q);
   }
   async dueRefunds(): Promise<[]> {
     return [];
@@ -129,6 +144,14 @@ describe('취소 Saga', () => {
     expect(writes.created[0]).toMatchObject({ deductionBp: 0, deductionAmount: 0, refundAmount: 33_333 });
   });
 
+  test('GAT090_다른 계정이 남의 취소 ID로 재요청하면 NOT_PAYER다', async () => {
+    const existing: CancellationRecord = { cancellationId: CANCEL, orderId: ORDER, ticketId: TICKET, refundAmount: 30_000, state: 'REFUNDED', refundAttempts: 0 };
+    const payments = new Payments('CANCELLED');
+    const svc = new CancelTicket({ orders: new Orders(order(), existing), calendar, tickets: new Tickets('REFUND_NOW'), payments, writes: new Writes(), seats: new Seats() });
+    expect(await svc.execute({ accountId: '01900000-0000-7000-8000-000000000099', ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 })).toEqual({ status: 'NOT_PAYER' });
+    expect(payments.calls).toHaveLength(0);
+  });
+
   test('R-T3 남이 보유하거나 양도 요청 중이거나 공연이 시작됐으면 쓰지 않고 거절한다', async () => {
     for (const [ticket, expected] of [
       ['NOT_PAYER_HOLDER', { status: 'TICKET_NOT_HELD' }],
@@ -164,7 +187,7 @@ describe('취소 Saga', () => {
 
   test('REFUND_PENDING 재요청은 같은 취소 ID로 결제사를 다시 부르고 CANCELLED면 REFUNDED다', async () => {
     const { svc, payments, writes } = saga({
-      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'REFUND_PENDING', refundAfterEntryClose: false },
+      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'REFUND_PENDING', refundAfterEntryClose: false, refundAttempts: 1 },
     });
     const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
     expect(r).toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
@@ -172,18 +195,23 @@ describe('취소 Saga', () => {
     expect(writes.updates.at(-1)).toEqual({ cancellationId: CANCEL, status: 'REFUNDED', nowMs: kst('2026-11-13T10:00:00') });
   });
 
-  test('결제사가 거절하거나 결과를 모르면 환급 대기로 두고 CS가 이어 받는다', async () => {
-    for (const payment of ['REJECTED', 'UNKNOWN', 'PENDING'] as const) {
+  test('결제사가 거절하면 바로, 결과를 모르면 재시도 예약으로 환급 대기한다', async () => {
+    for (const payment of ['UNKNOWN', 'PENDING'] as const) {
       const { svc, writes } = saga({ payment });
       const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
       expect(r).toMatchObject({ status: 'REFUND_PENDING', refundAmount: 30_000, payment });
-      expect(writes.updates[0]).toMatchObject({ status: 'REFUND_PENDING' });
+      expect(writes.retries[0]).toMatchObject({ cancellationId: CANCEL, attempts: 1, nextRetryAtMs: kst('2026-11-13T10:01:00'), lastError: payment });
+      expect(writes.updates).toHaveLength(0);
     }
+    const rejected = saga({ payment: 'REJECTED' });
+    expect(await rejected.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 })).toMatchObject({ status: 'REFUND_PENDING', payment: 'REJECTED' });
+    expect(rejected.writes.failures[0]).toMatchObject({ cancellationId: CANCEL, attempts: 1, lastError: 'REJECTED' });
+    expect(rejected.writes.retries).toHaveLength(0);
   });
 
   test('같은 취소 ID의 재요청은 처음 결과를 그대로 돌려준다', async () => {
     const { svc, payments } = saga({
-      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'REFUNDED', refundAfterEntryClose: false },
+      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'REFUNDED', refundAfterEntryClose: false, refundAttempts: 0 },
     });
     const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
     expect(r).toEqual({ status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
@@ -192,7 +220,7 @@ describe('취소 Saga', () => {
 
   test('CS가 무효로 끝낸 취소를 다시 요청하면 CONFLICT다', async () => {
     const { svc, payments } = saga({
-      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'VOIDED', refundAfterEntryClose: false },
+      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'VOIDED', refundAfterEntryClose: false, refundAttempts: 0 },
     });
     expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 })).toEqual({ status: 'CONFLICT' });
     expect(payments.calls).toHaveLength(0);

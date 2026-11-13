@@ -66,6 +66,7 @@ const EVENT_SALE_TAG = '0012_event_sale';
 /** 티켓 무효 큐 ticket_void_job과 발권 세대 ticket_issue_job.issue_generation(BUILD_ORDER HOT-152) */
 const VOID_TAG = '0013_ticket_void_job';
 const CANCEL_TAG = '0014_order_cancellation';
+const RETRY_TAG = '0015_order_cancellation_refund_retry';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -410,6 +411,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [12, EVENT_SALE_TAG],
       [13, VOID_TAG],
       [14, CANCEL_TAG],
+      [15, RETRY_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -437,6 +439,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${EVENT_SALE_TAG}.sql`,
       `${VOID_TAG}.sql`,
       `${CANCEL_TAG}.sql`,
+      `${RETRY_TAG}.sql`,
     ]);
   });
 
@@ -473,8 +476,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob, ticketVoidJob, orderCancellation];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0014_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0014_snapshot.json');
+  test('마지막 스냅샷(0015_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0015_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES]) {

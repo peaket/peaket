@@ -2,8 +2,10 @@
 import type {
   CancellationOrderView,
   CancellationReason,
+  CancellationRecord,
   CancellationStatus,
   CancellationWriteOutcome,
+  DueRefund,
   PaymentCancelOutcome,
   RefundAccount,
   TicketCancelOutcome,
@@ -14,6 +16,8 @@ import type { BusinessCalendar } from './refund-policy.js';
 export interface CancellationOrders {
   /** 티켓 ID로 주문 한 장. 없거나 소문자 UUID가 아니면 undefined */
   findByTicket(ticketId: string): Promise<CancellationOrderView | undefined>;
+  /** 같은 취소 ID의 기존 기록. 견적·티켓 취소 전에 재요청을 알아본다 */
+  findCancellation(cancellationId: string): Promise<CancellationRecord | undefined>;
 }
 
 /** ticket-svc TicketService.CancelTickets(티켓 행 잠금 안에서 결제자·보유자·양도·공연 시작을 본다) */
@@ -60,11 +64,22 @@ export interface CancellationWrites {
     readonly nowMs: number;
     /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만) */
     readonly refundDueAtMs?: number;
+    /** 주문 상태 전이(T22~T25)의 행위자. `account:<UUID>` */
+    readonly actor: string;
   }): Promise<CancellationWriteOutcome>;
-  /** 입장 기록 마감 뒤 환급할 REQUESTED 취소(환급 시각이 지난 것) */
-  dueRefunds(nowMs: number, limit: number): Promise<readonly { readonly cancellationId: string; readonly orderId: string; readonly amount: number; readonly reason: CancellationReason }[]>;
-  /** 환급 상태 바꾸기(REFUND_PENDING·REFUNDED·VOIDED). 없으면 조용히 넘어간다 */
+  /** 입장 기록 마감 뒤 환급할 REQUESTED와 재시도할 REFUND_PENDING(환급 시각이 지난 것) */
+  dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]>;
+  /** 환급 상태 바꾸기(REFUNDED·VOIDED). 없으면 조용히 넘어간다 */
   updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<void>;
+  /** 결제사 결과 모름·일시 실패: REFUND_PENDING으로 두고 다음 재시도 시각을 적는다 */
+  scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
+  /** 재시도 소진·업무 거절: REFUND_PENDING을 유지하고 CS 처리함 대상 표시(refund_failed_at)를 남긴다 */
+  markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
+}
+
+/** 환급 재시도 소진·업무 거절을 CS 처리함에 잇는 포트(ops-svc 계약이 생기기 전에는 기록 대역) */
+export interface RefundFailureNotice {
+  open(q: { readonly cancellationId: string; readonly orderId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
 }
 
 /** 취소 견적·Saga가 읽는 회차 판매 설정(좌석맵 판의 saleEndsAt·entryOpensAt) */

@@ -943,6 +943,10 @@ erDiagram
         int refund_amount "티켓 금액 − deduction_amount. 공용 함수 한 곳에서만 계산"
         text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED"
         timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. core event.entry_closed_at 연결 전에는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540)"
+        int refund_attempts "결제사 취소를 다시 시도한 횟수(REFUND_PENDING). 기본 0. 5회 [가정]를 넘으면 refund_failed_at을 남긴다(추천 적용 2026-11-13, R-547)"
+        timestamptz next_refund_at "다음 재시도 시각(REFUND_PENDING). 없으면 곧 시도한다. 1분→5분→15분→1시간→6시간 [가정](R-547)"
+        timestamptz refund_failed_at "재시도를 다 썼거나 결제사 업무 거절로 CS 처리함 '환급 실패'에 넘길 시각. 있으면 실행기가 건너뛴다(R-547)"
+        text refund_last_error "마지막 실패 결과 코드(CANCELLED·PENDING·UNKNOWN·REJECTED). 계좌·결제 참조는 싣지 않는다(R-547)"
     }
     event_cancellation_request {
         uuid id PK

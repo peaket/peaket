@@ -275,7 +275,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
-      writes: new DrizzleCancellationWrites(database),
+      writes: new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock })),
       seats: new DrizzleSeatReturns(new DrizzleSeatSales(database), seatMap, new RedisSeatReturnNotices(redis)),
       tickets: refundTickets,
       payments: refundPayments,

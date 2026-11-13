@@ -1,7 +1,7 @@
 // 예매 취소 Saga(POST /v1/tickets/{ticketId}/cancellation, docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1, POL-032·POL-038, BUILD_ORDER GAT-080).
 // 차례: 주문·결제자 확인 → 견적(공제) → ticket-svc 키 폐기·취소표·양도 확인 → order_cancellation → payment-svc 부분 취소 → 상태.
 // ticket-svc가 멈추면 아무것도 쓰지 않는다. 결제사가 결과 모름이면 REFUND_PENDING으로 두고 재시도 큐가 이어 간다.
-import type { CancellationReason, CancelTicketResult, RefundAccount } from '../domain/cancellation.js';
+import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type CancellationReason, type CancellationStatus, type CancelTicketResult, type RefundAccount } from '../domain/cancellation.js';
 import type { CancellationOrders, CancellationWrites, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
 import type { BusinessCalendar } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
@@ -46,6 +46,12 @@ export class CancelTicket {
     const order = await this.o.orders.findByTicket(i.ticketId);
     if (!order) return { status: 'NOT_FOUND' };
     if (order.payerAccountId !== i.accountId) return { status: 'NOT_PAYER' };
+    // 같은 취소 ID의 재요청은 견적·티켓 취소·좌석 되돌리기를 다시 하지 않는다. 주문이 이미 REFUNDED여도 처음 결과를 준다
+    const existing = await this.o.orders.findCancellation(i.cancellationId);
+    if (existing) {
+      if (existing.orderId !== order.orderId || existing.ticketId !== i.ticketId) return { status: 'CONFLICT' };
+      return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, order.orderId, i);
+    }
     if (order.orderStatus !== 'CONFIRMED' && order.orderStatus !== 'PARTIALLY_REFUNDED') return { status: 'ALREADY_ENDED' };
     const q = quoteRefund({
       ticketPrice: order.ticketPrice,
@@ -91,40 +97,10 @@ export class CancelTicket {
       status: afterClose ? 'REQUESTED' : 'REFUND_PENDING',
       nowMs: i.nowMs,
       ...(afterClose ? { refundDueAtMs: eventStartsAtOf(order.saleEndsAtMs) + ENTRY_CLOSE_SAFE_MS } : {}),
+      actor: `account:${i.accountId}`,
     });
     if (write.status === 'CONFLICT') return { status: 'CONFLICT' };
-    if (write.status === 'REPLAYED') {
-      // CS가 무효로 끝낸 취소는 되살리지 않는다
-      if (write.state === 'VOIDED') return { status: 'CONFLICT' };
-      // 앞 시도가 결제사 결과를 모른 채 끝났으면(REFUND_PENDING) 같은 취소 ID로 결제사 취소를 다시 부른다.
-      // 결제사 멱등키가 cancel-{cancellationId}라 두 번 보내도 한 번만 취소된다. 끝났으면 처음 결과를 그대로 준다
-      if (write.state === 'REFUND_PENDING') {
-        const payment = await this.o.payments.cancel({
-          cancellationId: i.cancellationId,
-          orderId: order.orderId,
-          amount: write.refundAmount,
-          reason: i.reason,
-          ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
-          deadlineMs: i.deadlineMs,
-        });
-        if (payment === 'CANCELLED') {
-          await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
-          return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: write.refundAmount, refundAfterEntryClose: false };
-        }
-        return {
-          status: 'REFUND_PENDING',
-          cancellationId: i.cancellationId,
-          refundAmount: write.refundAmount,
-          payment: payment === 'REJECTED' ? 'REJECTED' : payment,
-        };
-      }
-      return {
-        status: 'REPLAYED',
-        cancellationId: write.cancellationId,
-        refundAmount: write.refundAmount,
-        refundAfterEntryClose: write.refundAfterEntryClose,
-      };
-    }
+    if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, order.orderId, i);
 
     // 입장 시작 뒤 취소는 키만 폐기하고 환급은 입장 기록 마감 뒤에 한다(ADR-0051 결정 13).
     if (afterClose) return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: q.quote.refundAmount, refundAfterEntryClose: true };
@@ -141,13 +117,57 @@ export class CancelTicket {
       await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
       return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: q.quote.refundAmount, refundAfterEntryClose: false };
     }
-    // 결과 모름·재시도 대기·업무 거절은 모두 환급 대기다. 거절은 CS 처리함이 이어 받는다.
-    await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUND_PENDING', nowMs: i.nowMs });
+    // 결과 모름·재시도 대기·업무 거절은 모두 환급 대기다. 업무 거절은 바로, 결과 모름은 재시도 뒤
+    // 다 쓰면 CS 처리함 '환급 실패'로 넘긴다(refund_failed_at, transfer-refund §7.1)
+    const attempts = 1;
+    if (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
+      await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
+    } else {
+      await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
+    }
     return {
       status: 'REFUND_PENDING',
       cancellationId: i.cancellationId,
       refundAmount: q.quote.refundAmount,
       payment: payment === 'REJECTED' ? 'REJECTED' : payment,
+    };
+  }
+
+  /** 같은 취소 ID의 재요청. REFUND_PENDING이면 같은 멱등키로 결제사를 다시 부르고, 끝난 취소는 처음 결과를 준다 */
+  async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, orderId: string, i: CancelTicketInput): Promise<CancelTicketResult> {
+    // CS가 무효로 끝낸 취소는 되살리지 않는다
+    if (state === 'VOIDED') return { status: 'CONFLICT' };
+    if (state === 'REFUND_PENDING') {
+      const payment = await this.o.payments.cancel({
+        cancellationId: i.cancellationId,
+        orderId,
+        amount: refundAmount,
+        reason: i.reason,
+        ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
+        deadlineMs: i.deadlineMs,
+      });
+      if (payment === 'CANCELLED') {
+        await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
+        return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount, refundAfterEntryClose: false };
+      }
+      const attempts = refundAttempts + 1;
+      if (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
+        await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
+      } else {
+        await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
+      }
+      return {
+        status: 'REFUND_PENDING',
+        cancellationId: i.cancellationId,
+        refundAmount,
+        payment: payment === 'REJECTED' ? 'REJECTED' : payment,
+      };
+    }
+    return {
+      status: 'REPLAYED',
+      cancellationId: i.cancellationId,
+      refundAmount,
+      refundAfterEntryClose: state === 'REQUESTED',
     };
   }
 }
