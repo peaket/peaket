@@ -16,6 +16,7 @@ COPY packages/config/package.json packages/config/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/platform/package.json packages/platform/
 COPY packages/shuffle/package.json packages/shuffle/
+COPY packages/validation/package.json packages/validation/
 COPY services/pg-simulator/package.json services/pg-simulator/
 COPY services/queue-svc/package.json services/queue-svc/
 COPY services/admission-ctrl/package.json services/admission-ctrl/
@@ -27,6 +28,7 @@ COPY packages/config packages/config
 COPY packages/contracts packages/contracts
 COPY packages/platform packages/platform
 COPY packages/shuffle packages/shuffle
+COPY packages/validation packages/validation
 COPY services/pg-simulator services/pg-simulator
 COPY services/queue-svc services/queue-svc
 COPY services/admission-ctrl services/admission-ctrl
@@ -36,6 +38,7 @@ COPY services/bundle services/bundle
 COPY tools/ci/verify-native-binding.mjs tools/ci/
 RUN pnpm --filter @peaket/platform build \
  && pnpm --filter @peaket/contracts build \
+ && pnpm --filter @peaket/validation build \
  && pnpm --filter @peaket/shuffle build \
  && pnpm --filter @peaket/queue-svc build \
  && pnpm --filter @peaket/admission-ctrl build \
