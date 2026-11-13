@@ -29,6 +29,7 @@ export type ProblemType =
   | 'cancellation-conflict'
   | 'case-not-actioned'
   | 'commander-removal-needs-role-change'
+  | 'commander-required'
   | 'consent-required'
   | 'consent-version-outdated'
   | 'current-password-invalid'
@@ -196,6 +197,8 @@ export type ProblemType =
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
   | 'scale-change-closed'
+  | 'scale-change-not-approved'
+  | 'scale-change-not-up'
   | 'scanner-auth-unavailable'
   | 'scanner-device-key-in-use'
   | 'scanner-device-not-found'
@@ -264,6 +267,7 @@ export const PROBLEM_TYPES = {
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
+  'commander-required': { status: 403, title: "간격 예외는 commander만 쓸 수 있습니다" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
   'consent-version-outdated': { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" },
   'current-password-invalid': { status: 422, title: "지금 비밀번호가 맞지 않습니다" },
@@ -431,6 +435,8 @@ export const PROBLEM_TYPES = {
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
+  'scale-change-not-approved': { status: 422, title: "판매 승인된 공연만 규모를 올릴 수 있습니다" },
+  'scale-change-not-up': { status: 422, title: "지금보다 큰 규모로만 올릴 수 있습니다" },
   'scanner-auth-unavailable': { status: 503, title: "스캐너 기기·세션을 확인하지 못했습니다" },
   'scanner-device-key-in-use': { status: 409, title: "이미 다른 기기에 묶인 기기 키입니다" },
   'scanner-device-not-found': { status: 404, title: "스캐너 기기를 찾을 수 없습니다" },

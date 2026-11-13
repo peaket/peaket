@@ -102,7 +102,7 @@ describe('규모 올리기(ADR-0078 결정 1)', () => {
   });
 
   test('C-T43 판매 승인 전이면 422다', () => {
-    expect(checkScaleChange({ ...base, saleReview: 'SUBMITTED' })).toMatchObject({ ok: false, problem: { type: 'sale-review-not-approved', status: 422 } });
+    expect(checkScaleChange({ ...base, saleReview: 'SUBMITTED' })).toMatchObject({ ok: false, problem: { type: 'scale-change-not-approved', status: 422 } });
   });
 
   test('C-T43 T-30분 점검이 시작되면 409다', () => {

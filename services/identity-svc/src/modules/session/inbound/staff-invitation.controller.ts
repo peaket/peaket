@@ -17,7 +17,7 @@ import { StaffInvitationError, StaffInvitations, type StaffAssignmentView, type 
 
 function reject(e: unknown): never {
   if (e instanceof StaffInvitationError) {
-    if (e.code === 'INVITATION_INVALID') throw new ProblemError({ type: 'invitation-invalid', status: 410, title: '초대가 만료되었거나 이미 사용되었습니다' });
+    if (e.code === 'INVITATION_INVALID') throw new ProblemError({ type: 'invitation-invalid', status: 410, title: '초대가 만료되었습니다' });
     if (e.code === 'EMAIL_MISMATCH') throw new ProblemError({ type: 'staff-invitation-email-mismatch', status: 403, title: '초대 이메일과 검증된 계정 이메일이 다릅니다' });
     if (e.code === 'ASSIGNMENT_EXISTS') throw new ProblemError({ type: 'staff-assignment-exists', status: 409, title: '이미 이 회차에 배정된 계정입니다' });
     if (e.code === 'CONSENT_REQUIRED') throw new ProblemError({ type: 'consent-required', status: 422, title: '동의가 필요합니다' });
