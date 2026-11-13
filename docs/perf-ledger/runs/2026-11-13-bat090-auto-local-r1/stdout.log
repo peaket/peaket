@@ -1,0 +1,23 @@
+2026-11-13T04:23:17Z S19_S20 자동 배정 측정
+
+S-T19 문자 그대로 1,000건 동시(5,000석, 1인 2매)
+requests 1000, fulfilled 0, rejected 1000, STORE_UNAVAILABLE 1000, manual 0
+held 0, unique 0, duplicate 0, bits 0
+p50 242.7410 p95 335.2162 p99 345.7102 max 348.4971
+
+S-T19 100 동시×10묶음(같은 조건, 새 5,000석)
+requests 1000, fulfilled 1000, rejected 0, manual 0
+held 2000, unique 2000, duplicate 0, bits 2000, autoCur 1999
+p50 124.9451 p95 194.7385 p99 240.7881 max 250.5323
+
+S-T19 1순위 매진
+requests 50, fulfilled 50, SECOND 50, held 100, unique 100, duplicate 0
+
+S-T19 연석 부족(10석, 한 칸씩 띄움)
+no split: 409 manual-selection-required
+split allowed: FIRST_SPLIT R0002,R0004
+
+S-T20 순서 공정성
+sequential 10건×2회 identical true, sequence R0001..R0020, starvation 0
+
+판정: 기능 기준 통과(100 동시×10묶음), 문자 그대로 1,000건 동시는 로컬 단일 Valkey 100ms 마감에서 실패.

@@ -294,6 +294,7 @@ export {
 export {
   AUTO_CANDIDATE_MAX,
   AUTO_CANDIDATE_PAGE,
+  AUTO_CURSOR_PAGES,
   AUTO_SPLIT_GROUP_MAX,
   autoCandidatesOf,
   autoConditionProblem,

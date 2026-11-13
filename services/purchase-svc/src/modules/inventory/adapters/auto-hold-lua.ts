@@ -86,7 +86,7 @@ for g = 1, groupCount do
       seatId = ARGV[p + 3],
       tierId = ARGV[p + 4],
       sectionId = ARGV[p + 5],
-      keyPos = 12 + #flat + k,
+      keyPos = 11 + #flat + 1,
     }
     seats[k] = s
     flat[#flat + 1] = s
@@ -160,7 +160,7 @@ for g = 1, groupCount do
   if grp.split then
     local picked = {}
     for k = 1, #grp.seats do
-      if #picked < want and free(grp.seats[k].keyPos - 12) then picked[#picked + 1] = grp.seats[k] end
+      if #picked < want and free(grp.seats[k].keyPos - 11) then picked[#picked + 1] = grp.seats[k] end
     end
     if #picked == want then
       chosen = picked
@@ -171,7 +171,7 @@ for g = 1, groupCount do
   else
     local ok = true
     for k = 1, #grp.seats do
-      if not free(grp.seats[k].keyPos - 12) then ok = false; break end
+      if not free(grp.seats[k].keyPos - 11) then ok = false; break end
     end
     if ok then
       chosen = grp.seats
@@ -182,12 +182,14 @@ for g = 1, groupCount do
   end
 end
 
--- 맞는 묶음이 없으면 커서만 다음 페이지로 옮기고 끝낸다(아무 좌석도 쓰지 않는다)
+-- 맞는 묶음이 없으면 이번 요청 안에서만 다음 페이지로 이어 간다. 공유 커서가 이미 더 앞서 있으면
+-- 그 커서로 따라가, 늦게 시작한 요청이 낡은 페이지에서 빈 블록을 놓치지 않게 한다(공유 커서는 성공한 묶음 다음으로만 옮긴다).
 if not chosen then
-  local nextCursor = int(tonumber(ARGV[10]) + groupCount)
+  local pageEnd = int(tonumber(ARGV[10]) + groupCount)
+  local curCursor = tonumber(redis.call('HGET', KEYS[11], ARGV[9]) or '0')
+  local nextCursor = pageEnd
+  if curCursor and curCursor > tonumber(pageEnd) then nextCursor = int(curCursor) end
   ensureEpoch(ep, nowSec)
-  redis.call('HSET', KEYS[11], ARGV[9], nextCursor)
-  extend(KEYS[11], tonumber(ARGV[7]))
   return {'NEXT', nextCursor}
 end
 
@@ -264,7 +266,9 @@ end
 
 -- 다음 커서: 고른 묶음 다음부터(페이지 끝을 넘으면 부르는 쪽이 0으로 되돌린다)
 local nextCursor = int(tonumber(ARGV[10]) + chosenGroup)
-redis.call('HSET', KEYS[11], ARGV[9], nextCursor)
+-- 공유 커서는 앞으로만 간다(늦게 끝난 요청이 낮은 커서를 덮어써 다음 요청이 빈 블록을 건너뛰지 않게)
+local curCursor = tonumber(redis.call('HGET', KEYS[11], ARGV[9]) or '0')
+if tonumber(nextCursor) > curCursor then redis.call('HSET', KEYS[11], ARGV[9], nextCursor) end
 for _, k in ipairs({KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[6], KEYS[9], KEYS[10], KEYS[11]}) do extend(k, keep) end
 return {'OK', tokText, nowText, expText, table.concat(seatList, ','), chosenResult, nextCursor}
 `;

@@ -1,0 +1,8 @@
+측정 환경(2026-11-13T04:29Z)
+PC: Intel(R) Core(TM) i9-14900HX, 32 GiB, Windows
+Docker: Docker Desktop 29.8.1 (Docker 29.8.1, build 4a63305)
+WSL2: Docker Desktop 기본 커널
+런타임: Node 24.18.0, Vitest 5.0.5, node-redis 6.3.0
+Valkey: valkey/valkey:8.1-alpine, 로컬 단일 노드, TLS 없음
+명령: PEAKET_MEASURE=1 services/purchase-svc/node_modules/.bin/vitest run --config vitest.integration.config.mjs test-int/measure-purchase-verify.int.test.ts
+반복: 3회, 각 full 5,000표본(예열 500)·mem 5,000표본(예열 500)·cpu 20,000표본(예열 2,000)

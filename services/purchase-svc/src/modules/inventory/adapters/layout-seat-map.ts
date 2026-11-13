@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
-import { type AutoCandidateList, type AutoCondition, autoCandidatesOf } from '../domain/auto.js';
+import { type AutoCandidateList, type AutoCondition, autoCandidatesOf, autoFingerprint } from '../domain/auto.js';
 import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
 import type { SaleLayout } from '../domain/sale-state.js';
 import { type ParsedSeatMap, parseEventSeatMapFile, SeatMapFileError, type SectionRange } from '../domain/seat-layout.js';
@@ -100,6 +100,8 @@ interface Entry {
 }
 
 const MISSING_TTL_MS = 1000;
+/** 자동 배정 후보 캐시의 최대 조건 수(큰 판에서 조건을 바꿔 메모리를 채우지 않게 가장 오래된 것부터 잊는다) */
+const AUTO_CACHE_MAX = 8;
 /** 없음 기억의 개수 상한(서로 다른 회차 ID로 계속 물어도 메모리가 늘지 않게 가장 오래된 것부터 잊는다) */
 const MISSING_MAX = 1024;
 
@@ -177,13 +179,18 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
   async autoCandidates(eventId: string, condition: AutoCondition): Promise<AutoCandidateList | undefined> {
     const e = await this.#get(eventId);
     if (!e) return undefined;
-    const key = `${condition.firstTierId}|${condition.secondTierId ?? ''}|${condition.count}|${condition.wheelchair ? 1 : 0}|${condition.allowSplit ? 1 : 0}`;
-    const cached = e.auto?.get(key);
+    const key = autoFingerprint(condition);
+    const cache = (e.auto ??= new Map());
+    const cached = cache.get(key);
     if (cached) return cached;
     const layout = (e.saleLayout ??= saleLayoutOf(e.parsed));
     const tiers = new Set(layout.tiers.map((t) => t.tierId));
     const list = autoCandidatesOf([...e.parsed.byId.values()], condition, tiers);
-    (e.auto ??= new Map()).set(key, list);
+    if (cache.size >= AUTO_CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, list);
     return list;
   }
 

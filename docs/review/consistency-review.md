@@ -635,6 +635,7 @@
 | R-523 | 스캐너 스캔 큐의 별도 DB·strict 저장과 SCR-053 휴대폰 배치 확인이 없었고, BAT-415 부분 적용·BAT-420/425 보류가 기록되지 않았다 | apps/scanner, apps/console-host, docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/lanes/lane3.md, docs/frontend.md, docs/review/plans/BAT-445-tablet-check.md, docs/review/measurements/BAT-445-wave.md | 스캔 큐·디코더 경계·확인 목록·휴대폰 배치 시험과 기록을 더하고, heavy gate에서 찾은 조용한 메모리 폴백·DB 연결 수명·시험 범위를 고침 | 적용(Dexie 대신 IndexedDB, 실기·zxing-wasm 남음) |
 | R-524 | heavy gate에서 찾은 Q-T57 대역 도구·스캐너 마스커블 아이콘·시험 보강 | tools/poc/turnstile-latency, apps/scanner/public, apps/web/queue-room/test, apps/web/src/_app, docs/review | 동시 측정 함수·마스커블 아이콘·매핑/도형 대조 시험과 게이트 기록을 더함 | 완료 |
 | R-530 | 합쳐진 R-520·R-521·R-523·R-524가 정합 점검 표·요약·WBS에 빠져 `records --check`가 실패했다 | docs/review/consistency-review.md, docs/00-summary.md, docs/wbs | `records.mjs`로 행·줄·WBS 상태를 반영하고 R-523 줄에 번호를 붙였다 | 적용 |
+| R-525 | BAT-090 heavy gate에서 Lua keyPos·첫 홀드 구매 세션·공유 auto_cur 굶주림·503 전파·후보 캐시를 고치고 test-int·측정 보고서를 넣는다 | docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/lanes/lane1.md, docs/features/seat-hold.md, docs/data.md, docs/review/plans/BAT-090.md, docs/review/ledger-notes.md, docs/review/measurements/BAT-090-wave.md, docs/perf-ledger.md, docs/perf-ledger/runs, services/purchase-svc | 실제 Valkey Lua 5건·test-int 46파일 1,800건·변이 23/23·4관점 리뷰. S-T16 1ms 미달, S-T19 1,000 동시는 무대 한계, S-T20 통과 | 완료(known gap) |
 
 ## 4. 숫자 일치표
 

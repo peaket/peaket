@@ -381,7 +381,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
           nextCursor: int(r[6], '다음 커서'),
         };
       default:
-        throw new Error(`자동 배정 Lua가 모르는 값을 돌려줬다: ${kind}`);
+        throw new Error(`자동 배정 Lua가 모르는 값을 돌려줬다: ${kind} ${str(r[1] ?? '')}`);
     }
   }
 

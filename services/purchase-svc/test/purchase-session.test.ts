@@ -14,6 +14,7 @@ import {
   SESSION_KEY_GRACE_MS,
   SESSION_STARTED_GRACE_MS,
   ServerEcdhKey,
+  SeatStoreUnavailable,
   StoredPurchaseSessions,
   parseClientEphemeralKey,
   seatKeys,
@@ -163,6 +164,26 @@ async function opened(w: World, over: { accountId?: string; loginSessionId?: str
 }
 
 describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
+  test('HOT080_ 세션이 없고 openFirstUse가 좌석 Redis 일시 장애를 던지면 503이고 401로 숨기지 않는다', async () => {
+    const w = world();
+    const jti = newJti();
+    const sessions = new StoredPurchaseSessions({
+      store: w.mem,
+      ecdh: w.server,
+      clock: w.clock,
+      openFirstUse: async () => {
+        throw new SeatStoreUnavailable(new Error('down'));
+      },
+    });
+    const request = {
+      headers: { 'x-admission-token': admissionHeader(jti) },
+      params: { eventId: 'ev-1' },
+      body: { clientEphemeralPublicKey: 'key' },
+      url: '/v1/events/ev-1/holds',
+    } as unknown as FastifyRequest;
+    await expect(sessions.resolve(request, principal())).rejects.toMatchObject({ status: 503 });
+  });
+
   test('ST16_세션이 있고 계정·로그인 세션이 맞으면 { ref: jti, key }를 주고 key는 클라이언트가 따로 계산한 요청 인증 키와 같다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = world();
     const s = await opened(w);

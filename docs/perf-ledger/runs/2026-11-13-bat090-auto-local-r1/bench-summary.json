@@ -1,0 +1,65 @@
+{
+  "measuredAt": "2026-11-13T04:23:17.702Z",
+  "condition": "Valkey 8.1 로컬, HoldSeats.execute + RedisSeatStore.holdAuto, 1,000 동시(5,000석), 2순위 100석, 분리 10석, 순차 10건×2",
+  "s19": {
+    "requests": 1000,
+    "fulfilled": 0,
+    "rejected": 1000,
+    "manualSelectionRequired": 0,
+    "rejectCodes": {
+      "STORE_UNAVAILABLE": 1000
+    },
+    "heldSeats": 0,
+    "uniqueHeldSeats": 0,
+    "duplicateHeldSeats": 0,
+    "bits": 0,
+    "latencyMs": {
+      "n": 1000,
+      "p50": 242.741,
+      "p95": 335.2162,
+      "p99": 345.7102,
+      "max": 348.4971
+    },
+    "concurrent100": {
+      "requests": 1000,
+      "fulfilled": 1000,
+      "rejected": 0,
+      "rejectCodes": {},
+      "manualSelectionRequired": 0,
+      "heldSeats": 2000,
+      "uniqueHeldSeats": 2000,
+      "duplicateHeldSeats": 0,
+      "bits": 2000,
+      "autoCur": 1999,
+      "latencyMs": {
+        "n": 1000,
+        "p50": 124.9451,
+        "p95": 194.7385,
+        "p99": 240.7881,
+        "max": 250.5323
+      }
+    },
+    "soldOutSecondTier": {
+      "requests": 50,
+      "fulfilled": 50,
+      "second": 50,
+      "heldSeats": 100,
+      "uniqueHeldSeats": 100,
+      "duplicateHeldSeats": 0
+    },
+    "insufficientAdjacent": {
+      "noSplit": "HoldError: 희망 조건에 맞는 좌석이 없다",
+      "splitAssignResult": "FIRST_SPLIT",
+      "splitSeats": ["R0002", "R0004"]
+    }
+  },
+  "s20": {
+    "sequentialRequests": 10,
+    "identical": true,
+    "sequence": [
+      "R0001", "R0002", "R0003", "R0004", "R0005", "R0006", "R0007", "R0008", "R0009", "R0010",
+      "R0011", "R0012", "R0013", "R0014", "R0015", "R0016", "R0017", "R0018", "R0019", "R0020"
+    ],
+    "starvation": 0
+  }
+}

@@ -16,7 +16,7 @@ import {
   SeatStoreUnavailable,
 } from '../domain/hold.js';
 import { holdSeatsView } from '../domain/hold-lifecycle.js';
-import { type AutoAssignResult, type AutoCondition, AUTO_CANDIDATE_PAGE, autoConditionProblem, autoFingerprint, type AutoHoldResult } from '../domain/auto.js';
+import { type AutoAssignResult, type AutoCondition, AUTO_CANDIDATE_PAGE, AUTO_CURSOR_PAGES, autoConditionProblem, autoFingerprint, type AutoHoldResult } from '../domain/auto.js';
 import { seatLuaErrorOf } from '../domain/lua-errors.js';
 import {
   HOLD_ATTEMPTS,
@@ -385,7 +385,7 @@ export class HoldSeats {
 
   /**
    * 자동 배정 홀드(BUILD_ORDER HOT-080, docs/features/seat-hold.md §3 '자동 좌석 배정 모드').
-   * 차례: 세션·본문 → 회차 설정·판매 종료 → 희망 조건 검사 → 후보 목록 → 커서부터 4페이지까지 holdAuto → 없으면 409 manual-selection-required.
+   * 차례: 세션·본문 → 회차 설정·판매 종료 → 희망 조건 검사 → 후보 목록 → 커서부터 32페이지까지 holdAuto → 없으면 409 manual-selection-required.
    * 앱 쪽 거절(설정 없음·판매 종료·후보 없음) 전에 멱등 재생을 먼저 본다(직접 선택과 같다).
    */
   async #executeAuto(c: HoldCommand, session: ResolvedPurchaseSessionInfo, started: number): Promise<HoldResponse> {
@@ -480,11 +480,18 @@ export class HoldSeats {
       throw refuse('MANUAL_SELECTION_REQUIRED', '희망 조건에 맞는 좌석이 없다');
     }
 
-    // 6 커서부터 4페이지까지 찾는다(각 페이지는 최대 AUTO_CANDIDATE_PAGE 묶음)
+    // 6 커서부터 32페이지까지 찾는다(각 페이지는 최대 AUTO_CANDIDATE_PAGE 묶음)
     const field = autoCursorField(auto);
-    let cursor = await timeHotPath(this.hotPath, 'hold.auto_cursor', () => this.store.autoCursor(c.eventId, field));
+    let cursor: number;
+    try {
+      cursor = await timeHotPath(this.hotPath, 'hold.auto_cursor', () => this.store.autoCursor(c.eventId, field));
+    } catch (err) {
+      record('ERROR');
+      if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
+      throw err;
+    }
     if (cursor >= list.groups.length) cursor = 0;
-    for (let page = 0; page < 4; page++) {
+    for (let page = 0; page < AUTO_CURSOR_PAGES; page++) {
       const groups = list.groups.slice(cursor, cursor + AUTO_CANDIDATE_PAGE);
       if (groups.length === 0) break;
       const opt = callOptions();
@@ -589,9 +596,9 @@ function responseOf(h: HeldHold, seatIds: string[], view?: ReturnType<typeof hol
   };
 }
 
-/** 자동 배정 커서 s:{event:E}:auto_cur의 칸 이름(등급·매수·휠체어·분리·2순위) */
+/** 자동 배정 커서 s:{event:E}:auto_cur의 칸 이름(희망 조건의 멱등 지문). 등급 ID를 그대로 넣지 않아 칸 이름 충돌·특수 문자를 피한다 */
 function autoCursorField(c: AutoCondition): string {
-  return `${c.firstTierId}:${c.count}:${c.wheelchair ? 1 : 0}:${c.allowSplit ? 1 : 0}:${c.secondTierId ?? ''}`;
+  return autoFingerprint(c);
 }
 
 /** HoldError를 핫패스 결과 이름으로 바꾼다(고정 목록, 카디널리티 낮춤). 모르는 오류는 error다 */

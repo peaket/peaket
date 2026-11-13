@@ -191,6 +191,8 @@ interface WorldOptions {
   hold?: (i: HoldInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<HoldResult>;
   /** 저장소 replay 대역(기본은 메모리 저장소) */
   replay?: (i: ReplayInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<ReplayResult>;
+  /** 저장소 autoCursor 대역(기본은 메모리 저장소) */
+  autoCursor?: (eventId: string, field: string) => Promise<number>;
   /** 핫패스 구간 진단(BAT-027) */
   hotPath?: HotPathMetrics;
 }
@@ -211,7 +213,7 @@ async function world(o: WorldOptions = {}) {
       return o.hold ? o.hold(i, { inner, clock }) : inner.hold(i);
     },
     holdAuto: async (i, opt) => inner.holdAuto(i, opt),
-    autoCursor: async (eventId, field) => inner.autoCursor(eventId, field),
+    autoCursor: async (eventId, field) => (o.autoCursor ? o.autoCursor(eventId, field) : inner.autoCursor(eventId, field)),
     openSale: (i) => inner.openSale(i),
     replay: async (i: ReplayInput, opt?: SeatCallOptions) => {
       replays.push(i);
@@ -1246,6 +1248,14 @@ describe('HoldSeats.execute: 자동 배정(BUILD_ORDER HOT-080) [S-T19] [S-T20] 
     await rejects(w.run(undefined, { body: { auto: auto({ secondTierId: 'R' }) } }), 'AUTO_CONDITION_INVALID');
     await rejects(w.run(undefined, { body: { auto: auto({ firstTierId: 'NOPE' }) } }), 'AUTO_TIER_UNKNOWN');
     await rejects(w.run(undefined, { body: { auto: auto({ wheelchair: true }) } }), 'AUTO_CONDITION_INVALID');
+    expect(w.ev().bits.size).toBe(0);
+  });
+
+  test('자동 배정 커서 읽기가 좌석 Redis 일시 장애면 503(STORE_UNAVAILABLE)이고 좌석을 잡지 않는다', async () => {
+    const down = new SeatStoreUnavailable(new Error('down'));
+    const w = await world({ autoCursor: async () => Promise.reject(down) });
+    const e = await rejects(w.run(undefined, { body: { auto: auto() } }), 'STORE_UNAVAILABLE');
+    expect(e.details.cause ?? e.cause).toBe(down);
     expect(w.ev().bits.size).toBe(0);
   });
 });

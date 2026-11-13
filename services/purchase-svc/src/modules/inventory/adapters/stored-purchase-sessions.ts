@@ -100,9 +100,14 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
       const eventId = eventIdOfHold(request);
       const clientKey = clientKeyOfHold(request);
       if (eventId !== undefined && clientKey !== undefined) {
-        const opened = await this.deps
-          .openFirstUse({ jti, token: request.headers[ADMISSION_TOKEN_HEADER], accountId: principal.accountId, loginSessionId: principal.sessionId, eventId, clientKey })
-          .catch(() => false);
+        let opened = false;
+        try {
+          opened = await this.deps.openFirstUse({ jti, token: request.headers[ADMISSION_TOKEN_HEADER], accountId: principal.accountId, loginSessionId: principal.sessionId, eventId, clientKey });
+        } catch (e) {
+          // 좌석 Redis 장애는 401로 숨기지 않고 503으로 올린다(열기가 쓰였는지 모른다. 같은 요청을 다시 보낸다)
+          if (e instanceof SeatStoreUnavailable) rethrown(e);
+          opened = false;
+        }
         if (opened) s = await this.deps.store.read(jti).catch(rethrown);
       }
     }

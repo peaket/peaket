@@ -391,6 +391,18 @@ describe('RedisSeatStore.holdAuto(자동 배정 Lua 한 번)', () => {
     keepUntilMs: KEEP,
   };
 
+  test('HOT080_ 자동 배정 Lua는 비트 읽기·rel·보유 수·NEXT·auto_cur를 갖는다', () => {
+    for (const needle of [
+      "redis.call('BITFIELD_RO', KEYS[1], unpack(probe))",
+      "redis.call('ZMSCORE', KEYS[8], unpack(idx))",
+      "return decided({'QUOTA_EXCEEDED'})",
+      "return {'NEXT', nextCursor}",
+      "redis.call('HSET', KEYS[11], ARGV[9], nextCursor)",
+      'PEAKET_AUTO_ARGS',
+    ])
+      expect(AUTO_HOLD_LUA).toContain(needle);
+  });
+
   test('HOT080_ 자동 배정 Lua의 KEYS·ARGV와 OK 결과(좌석 색인·배정 결과·다음 커서)를 옮긴다', async () => {
     const f = fake(() => ['OK', '1700000000000001', '1700000000000000', '1700000000042000', '0,1', 'FIRST', '1']);
     const r = await new RedisSeatStore(f.redis).holdAuto(input);

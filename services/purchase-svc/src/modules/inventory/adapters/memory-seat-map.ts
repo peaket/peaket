@@ -1,6 +1,6 @@
 // 시험용 좌석맵 판. 운영 좌석맵 판(좌석맵 파일·event_seat_price에서 읽는 회차 캐시)은 PRF-130 ①에 없다.
 import { SEAT_ID_PATTERN, type SeatRef } from '../domain/hold.js';
-import { type AutoCandidateList, type AutoCondition, autoCandidatesOf } from '../domain/auto.js';
+import { type AutoCandidateList, type AutoCondition, autoCandidatesOf, autoFingerprint } from '../domain/auto.js';
 import type { SectionRange } from '../domain/seat-layout.js';
 import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
 
@@ -105,12 +105,17 @@ export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
   async autoCandidates(eventId: string, condition: AutoCondition): Promise<AutoCandidateList | undefined> {
     const e = this.#events.get(eventId);
     if (!e) return undefined;
-    const key = `${condition.firstTierId}|${condition.secondTierId ?? ''}|${condition.count}|${condition.wheelchair ? 1 : 0}|${condition.allowSplit ? 1 : 0}`;
-    const cached = e.auto?.get(key);
+    const key = autoFingerprint(condition);
+    const cache = (e.auto ??= new Map());
+    const cached = cache.get(key);
     if (cached) return cached;
     const tiers = new Set([...e.seats.values()].map((s) => s.tierId));
     const list = autoCandidatesOf([...e.seats.values()], condition, tiers);
-    (e.auto ??= new Map()).set(key, list);
+    if (cache.size >= 8) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, list);
     return list;
   }
 }

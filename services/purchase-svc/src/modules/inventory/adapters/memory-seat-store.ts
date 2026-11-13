@@ -439,9 +439,11 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       }
     }
     if (!chosen) {
-      const nextCursor = i.cursor + i.groups.length;
+      const pageEnd = i.cursor + i.groups.length;
+      const curCursor = ev.autoCur.get(i.cursorField) ?? 0;
+      const nextCursor = Math.max(pageEnd, curCursor);
       this.#ensureEpoch(ep, sec);
-      ev.autoCur.set(i.cursorField, nextCursor);
+      // 공유 커서는 성공한 묶음 다음으로만 옮긴다. NEXT는 이번 요청 안에서만 다음 페이지로 이어 간다
       return { kind: 'NEXT', nextCursor };
     }
 
@@ -509,7 +511,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       ev.published.push({ channel: seatKeys.section(e, String(secIndex)), message: `1 ${seatEpoch} ${secIndex} ${version.get(secIndex)} ${now} ${list.join(' ')}` });
     }
     const nextCursor = i.cursor + chosenGroup;
-    ev.autoCur.set(i.cursorField, nextCursor);
+    const curCursor = ev.autoCur.get(i.cursorField) ?? 0;
+    if (nextCursor > curCursor) ev.autoCur.set(i.cursorField, nextCursor);
     for (const key of [seatKeys.bitmap(e), seatKeys.expiry(e), quotaKey, seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.fence(e), seatKeys.autoCur(e)]) extend(key);
     return { kind: 'OK', holdId: i.holdId, fencingToken: token, heldAtMs: now, expiresAtMs: exp, seatIndexes, assignResult: assign!, nextCursor };
   }

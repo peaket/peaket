@@ -78,8 +78,10 @@ export type AutoHoldResult =
 
 /** 한 번에 Lua에 넘기는 후보 묶음 수(문서 §3 '한 번에 보는 후보는 32개 [가정]까지') */
 export const AUTO_CANDIDATE_PAGE = 32;
+/** 요청 하나가 이어 찾는 페이지 수. S-T19 측정에서 4페이지(128묶음)는 동시 요청의 공유 커서가 앞서면 빈 블록을 놓쳐 32페이지(1,024묶음)로 늘렸다 */
+export const AUTO_CURSOR_PAGES = 32;
 /** 한 회차의 후보 묶음 상한. 넘으면 커서가 앞쪽만 돌고, 뒤쪽 좌석은 수동 선택으로 넘어간다(5만 석에서도 1MB 안팎) */
-export const AUTO_CANDIDATE_MAX = 65_536;
+export const AUTO_CANDIDATE_MAX = 16_384;
 /** 분리 좌석 후보 묶음 하나에 담는 낱개 좌석 수(한 Lua 호출의 비트 확인 상한과 같다) */
 export const AUTO_SPLIT_GROUP_MAX = 32;
 

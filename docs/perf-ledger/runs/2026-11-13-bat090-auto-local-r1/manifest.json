@@ -1,0 +1,100 @@
+{
+  "run_id": "2026-11-13-bat090-auto-local-r1",
+  "kpi": "S-T19·S-T20",
+  "version": "v1",
+  "profile": "local-functional",
+  "scale": {
+    "users": 1000,
+    "arrival_rps": null,
+    "duration_s": null,
+    "warmup_s": null
+  },
+  "scenario": {
+    "path": "services/purchase-svc/test-int/measure-auto-s19-s20.int.test.ts",
+    "args": "PEAKET_MEASURE=1 (1,000건 동시 1회, 100 동시×10묶음 1회, 1순위 매진 50건, 분리 10석, 순차 10건×2회)",
+    "open_model": false
+  },
+  "commit": {
+    "code": "48c5cbf3f8e850799352a88c70431bc42c55a3d7",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": false,
+  "paired_run": null,
+  "generator": {
+    "description": "Vitest 5.0.5, Node 24.18.0, 실제 Valkey 8.1 컨테이너, HoldSeats.execute + RedisSeatStore.holdAuto. 5,000석 회차, 1인 2매",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-13T04:23:12Z",
+  "ended_at": "2026-11-13T04:23:18Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 240.7881,
+    "error_rate": 0,
+    "requests": 1000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "stdout.log"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "s19_1000_100concurrent_fulfilled",
+      "allowed": 0,
+      "trials": 1000,
+      "violations": 0,
+      "cp_upper": 0.003,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "100 동시×10묶음 1,000건 모두 자동 배정"
+    },
+    {
+      "name": "s19_duplicate_hold_0",
+      "allowed": 0,
+      "trials": 2000,
+      "violations": 0,
+      "cp_upper": 0.0015,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "중복 홀드 0"
+    },
+    {
+      "name": "s19_manual_selection_0",
+      "allowed": 0,
+      "trials": 1000,
+      "violations": 0,
+      "cp_upper": 0.003,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "좌석이 남았는데 수동 선택 0"
+    },
+    {
+      "name": "s19_literal_1000_simultaneous",
+      "allowed": 0,
+      "trials": 1000,
+      "violations": 1000,
+      "cp_upper": 1.0,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "문자 그대로 1,000건 동시(로컬 단일 Valkey, 100ms 마감)"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정값",
+  "verdict": "fail",
+  "notes": "S-T19 기능 기준은 100 동시×10묶음에서 1,000/1,000 성공·중복 0·수동 전환 0으로 통과. 문자 그대로 1,000건 동시는 로컬 단일 Valkey의 100ms 호출 마감에서 1,000/1,000 STORE_UNAVAILABLE로 실패(무대 한계). 1순위 매진 50/50 SECOND, 분리 미허용 409·허용 FIRST_SPLIT. S-T20 순차 10건×2회 동일(R0001~R0020), 굶주림 0.",
+  "collected_at": "2026-11-13T04:31:10Z",
+  "tool": "manual"
+}

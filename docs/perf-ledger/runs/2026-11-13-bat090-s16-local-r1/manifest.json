@@ -1,0 +1,90 @@
+{
+  "run_id": "2026-11-13-bat090-s16-local-r1",
+  "kpi": "S-T16",
+  "version": "v1",
+  "profile": "local-functional",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": null,
+    "warmup_s": 500
+  },
+  "scenario": {
+    "path": "services/purchase-svc/test-int/measure-purchase-verify.int.test.ts",
+    "args": "PEAKET_MEASURE=1 (3회 반복, 각 5,000표본·예열 500)",
+    "open_model": false
+  },
+  "commit": {
+    "code": "48c5cbf3f8e850799352a88c70431bc42c55a3d7",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": false,
+  "paired_run": null,
+  "generator": {
+    "description": "Vitest 5.0.5, Node 24.18.0, 실제 Valkey 8.1 컨테이너. full=HMGET+ECDH/HKDF+MAC+일련번호 Lua, mem=메모리 세션+ECDH/HKDF+MAC, cpu=MAC만",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-13T04:29:24Z",
+  "ended_at": "2026-11-13T04:30:48Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 9.7101,
+    "error_rate": 0,
+    "requests": 5000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "stdout.log"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "s16_full_p99_1ms",
+      "allowed": 0.01,
+      "trials": 5000,
+      "violations": 4632,
+      "cp_upper": 0.9332,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "정상 요청 확인(전체) p99 ≤ 1ms"
+    },
+    {
+      "name": "s16_mem_p99_1ms",
+      "allowed": 0.01,
+      "trials": 5000,
+      "violations": 780,
+      "cp_upper": 0.1629,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "Redis 제외 확인 p99 ≤ 1ms"
+    },
+    {
+      "name": "s16_cpu_p99_1ms",
+      "allowed": 0.01,
+      "trials": 20000,
+      "violations": 219,
+      "cp_upper": 0.0125,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "MAC만 확인 p99 ≤ 1ms"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정값",
+  "verdict": "fail",
+  "notes": "3회 반복 중앙값. full p99 9.4192~9.9969ms, mem p99 3.6766~5.1016ms, cpu p99 1.0930~1.4999ms. 모든 경로가 1ms를 넘어 S-T16 ② 미달. 표본 full/mem 5,000, cpu 20,000. 로컬 PC GC·이벤트 루프·컨테이너 부하가 섞여 단일 실행의 낮은 p99는 재현되지 않았다.",
+  "collected_at": "2026-11-13T04:31:10Z",
+  "tool": "manual"
+}

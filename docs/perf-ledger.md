@@ -430,6 +430,8 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-12 | 2026-11-12-k7-v1-fault-r4-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 1,591 | 2.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-12-k7-v1-fault-r4-bat033/ |
 | 2026-11-12 | 2026-11-12-k7-v1-fault-r5-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 1,611 | 2.3% | fail | 측정함 | - | perf-ledger/runs/2026-11-12-k7-v1-fault-r5-bat033/ |
 | 2026-11-12 | 2026-11-12-k7-v1-fault-r6-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 1,559 | 1.9% | fail | 측정함 | - | perf-ledger/runs/2026-11-12-k7-v1-fault-r6-bat033/ |
+| 2026-11-13 | 2026-11-13-bat090-auto-local-r1 | S-T19·S-T20 | v1 | local-functional | 1,000명 | 241 | 0.0% | fail | 측정값 | 0 | perf-ledger/runs/2026-11-13-bat090-auto-local-r1/ |
+| 2026-11-13 | 2026-11-13-bat090-s16-local-r1 | S-T16 | v1 | local-functional | - | 9.71 | 0.0% | fail | 측정값 | 0 | perf-ledger/runs/2026-11-13-bat090-s16-local-r1/ |
 | 2026-11-13 | 2026-11-13-k2-v1-hot-tls-r17-bat033 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 46 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-13-k2-v1-hot-tls-r17-bat033/ |
 | 2026-11-13 | 2026-11-13-k2-v1-hot-tls-r18-bat033 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 44 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-13-k2-v1-hot-tls-r18-bat033/ |
 | 2026-11-13 | 2026-11-13-k2-v1-hot-tls-r19-bat033 | K2 | v1 | local-1k | 1,000명, 2,000 RPS | 46 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-13-k2-v1-hot-tls-r19-bat033/ |

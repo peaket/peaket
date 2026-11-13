@@ -1,0 +1,8 @@
+측정 환경(2026-11-13T04:23Z)
+PC: Intel(R) Core(TM) i9-14900HX, 32 GiB, Windows
+Docker: Docker Desktop 29.8.1 (Docker 29.8.1, build 4a63305)
+WSL2: Docker Desktop 기본 커널
+런타임: Node 24.18.0, Vitest 5.0.5, node-redis 6.3.0
+Valkey: valkey/valkey:8.1-alpine, 로컬 단일 노드, TLS 없음
+명령: PEAKET_MEASURE=1 services/purchase-svc/node_modules/.bin/vitest run --config vitest.integration.config.mjs test-int/measure-auto-s19-s20.int.test.ts
+회차: 1,000 동시(5,000석) 1회, 100 동시×10묶음 1회, 1순위 매진 50건, 분리 10석, 순차 10건×2회

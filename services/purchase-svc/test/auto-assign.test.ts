@@ -98,6 +98,8 @@ describe('autoCandidatesOf [S-T19] [ASVS v5.0.0-2.2.1]', () => {
     ]);
     const secondSplit = list.groups.find((g) => g.assignResult === 'SECOND_SPLIT');
     expect(ids(secondSplit!)).toEqual(['B01', 'B02', 'B03', 'B04']);
+    // 전체 차례: 1순위 연석 → 1순위 분리 → 2순위 연석 → 2순위 분리
+    expect(list.groups.map((g) => g.assignResult)).toEqual(['FIRST', 'FIRST', 'FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND', 'SECOND', 'SECOND_SPLIT']);
   });
 
   test('휠체어 조건이 참이면 휠체어석만, 거짓이면 휠체어석을 뺀다', () => {
@@ -195,11 +197,28 @@ describe('MemorySeatStore.holdAuto [S-T19] [S-T20] [ASVS v5.0.0-2.2.2] [ASVS v5.
     const first = await store.holdAuto(await inputFor(store, map, c));
     expect(first.kind).toBe('OK');
     const before = store.db.event(EVENT).quota.get(ACCOUNT);
-    const next = await store.holdAuto(await inputFor(store, map, c, { idempotencyKey: 'idem-auto-2', groups: [list.groups[0]!], cursor: 0 }));
+    const next = await store.holdAuto(await inputFor(store, map, c, { idempotencyKey: 'idem-auto-2', groups: [list.groups[0]!], cursor: 2 }));
     expect(next.kind).toBe('NEXT');
     if (next.kind !== 'NEXT') return;
-    expect(next.nextCursor).toBe(1);
+    expect(next.nextCursor).toBe(3);
     expect(store.db.event(EVENT).quota.get(ACCOUNT)).toBe(before);
+    expect(store.db.event(EVENT).bits.size).toBe(2);
+    // NEXT는 요청 안에서만 다음 페이지로 가고, 공유 커서는 성공한 묶음 다음(1)에 머문다
+    expect(store.db.event(EVENT).autoCur.get('R:2:0:0:')).toBe(1);
+  });
+
+  test('공유 커서가 페이지 끝보다 앞서 있으면 NEXT가 그 커서로 따라간다', async () => {
+    const { store, map } = await world();
+    const c = cond();
+    const list = (await map.autoCandidates(EVENT, c))!;
+    // 다른 요청이 이미 10번째 묶음까지 성공해 공유 커서가 앞서 있고, 이 페이지의 후보는 모두 찼다
+    store.db.event(EVENT).autoCur.set('R:2:0:0:', 10);
+    for (const s of list.groups[0]!.seats) store.db.event(EVENT).bits.add(s.index);
+    const next = await store.holdAuto(await inputFor(store, map, c, { idempotencyKey: 'idem-auto-catch', groups: [list.groups[0]!], cursor: 2 }));
+    expect(next.kind).toBe('NEXT');
+    if (next.kind !== 'NEXT') return;
+    expect(next.nextCursor).toBe(10);
+    expect(store.db.event(EVENT).autoCur.get('R:2:0:0:')).toBe(10);
     expect(store.db.event(EVENT).bits.size).toBe(2);
   });
 

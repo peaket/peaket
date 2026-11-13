@@ -131,6 +131,7 @@ import {
   ServerEcdhKey,
   OpenPurchaseSession,
   StoredPurchaseSessions,
+  SeatStoreUnavailable,
   discardBehaviorSignals as discardSeatBehaviorSignals,
   discardHoldAttempts,
   JsonBehaviorSignals,
@@ -211,7 +212,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       firstUseOpener
         .execute({ token: i.token, accountId: i.accountId, loginSessionId: i.loginSessionId, eventId: i.eventId, clientKey: i.clientKey })
         .then((r) => r.sessionId === i.jti)
-        .catch(() => false),
+        .catch((e: unknown) => {
+          if (e instanceof SeatStoreUnavailable) throw e;
+          return false;
+        }),
   });
   // 좌석 화면 행동 요약(BUILD_ORDER BOT-055, ADR-0249): 텔레메트리 클러스터로 낸다. 주소가 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
   const telemetryKafka = telemetryKafkaFromEnv(SERVICE, env);

@@ -15,6 +15,11 @@ import {
 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import {
+  AUTO_CANDIDATE_PAGE,
+  type AutoCondition,
+  type AutoHoldInput,
+  autoCandidatesOf,
+  autoFingerprint,
   EXPIRE_LUA,
   ExpirySweeper,
   HOLD_LUA,
@@ -984,5 +989,124 @@ describe('최종 검토 결함의 재현(추천 적용 2026-11-04, PRF-135 A2·B
     expect(t.events.find((x) => x.eventId === e)).toMatchObject({ outcome: 'ERROR' });
     // 두 멤버 모두 그대로다(건드리지 않았다)
     expect(Number(await redis.command(['ZCARD', expiry], { key: expiry }))).toBe(2);
+  });
+});
+
+describe('자동 배정 Lua(실제 Valkey, BUILD_ORDER HOT-080)', () => {
+  const cond: AutoCondition = { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false };
+  const tiers = new Set(['R', 'S']);
+  const candidates = (c: AutoCondition = cond) => autoCandidatesOf(SEAT_DEFS.filter((d) => !d.saleExcluded), c, tiers);
+  const field = (c: AutoCondition = cond) => autoFingerprint(c);
+
+  async function autoWorld(c: AutoCondition = cond) {
+    const h = harness();
+    const e = newEvent();
+    const saleEnd = Date.now() + DAY;
+    const keep = saleEnd + 2 * DAY;
+    await h.store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs: keep });
+    const list = candidates(c);
+    const input = (over: Partial<AutoHoldInput> = {}): AutoHoldInput => ({
+      eventId: e,
+      accountId: ACCOUNT_A,
+      purchaseSessionId: 'ps-auto',
+      holdId: uuidv7(systemClock),
+      idempotencyKey: randomUUID(),
+      fingerprint: autoFingerprint(c),
+      count: c.count,
+      groups: list.groups.slice(0, AUTO_CANDIDATE_PAGE),
+      cursor: 0,
+      cursorField: field(c),
+      limit: 4,
+      keepUntilMs: keep,
+      ...over,
+    });
+    return { h, e, list, input, keep };
+  }
+
+  test('S-T19_ 연석 후보를 실제 Lua로 잡고 비트·홀드·보유 수·만료·Stream·멱등·auto_cur를 남긴다', async () => {
+    const { h, e, input } = await autoWorld();
+    const r = await h.store.holdAuto(input({ holdId: 'h-auto', idempotencyKey: 'idem-auto' }));
+    expect(r.kind).toBe('OK');
+    if (r.kind !== 'OK') return;
+    expect(r.seatIndexes).toEqual([0, 1]);
+    expect(r.assignResult).toBe('FIRST');
+    expect(r.nextCursor).toBe(1);
+    expect(await h.bit(e, 0)).toBe(1);
+    expect(await h.bit(e, 1)).toBe(1);
+    expect(await h.quota(e, ACCOUNT_A)).toBe(2);
+    expect(await h.holdHash(e, 0)).toMatchObject({ holdId: 'h-auto', owner: ACCOUNT_A, psid: 'ps-auto', kind: 'FAN' });
+    expect(await h.expiryScore(e, 0)).toBeGreaterThan(Date.now());
+    const stream = await h.stream(e);
+    expect(stream.filter((x) => x.type === 'HELD').map((x) => x.seatIdx)).toEqual(['0', '1']);
+    const idem = hash(await redis.command(['HGETALL', seatKeys.idem(e, ACCOUNT_A, 'idem-auto')]));
+    expect(idem).toMatchObject({ fp: autoFingerprint(cond), seats: '0,1', assign: 'FIRST' });
+    expect(String(await redis.command(['HGET', seatKeys.autoCur(e), field()], { key: seatKeys.autoCur(e) }))).toBe('1');
+    expect(await h.store.autoCursor(e, field())).toBe(1);
+  });
+
+  test('S-T19_ 같은 멱등 키·지문이면 실제 Lua가 처음 좌석·결과를 재생한다', async () => {
+    const { h, e, input } = await autoWorld();
+    const first = await h.store.holdAuto(input({ holdId: 'h-auto', idempotencyKey: 'idem-auto' }));
+    expect(first.kind).toBe('OK');
+    const second = await h.store.holdAuto(input({ holdId: 'h-auto-2', idempotencyKey: 'idem-auto' }));
+    expect(second.kind).toBe('IDEM_REPLAY');
+    if (second.kind !== 'IDEM_REPLAY' || first.kind !== 'OK') return;
+    expect(second.seatIndexes).toEqual(first.seatIndexes);
+    expect(second.assignResult).toBe('FIRST');
+    expect(second.holdId).toBe('h-auto');
+    expect(await h.quota(e, ACCOUNT_A)).toBe(2);
+    expect(await h.bit(e, 0)).toBe(1);
+  });
+
+  test('S-T19_ 앞 연석이 차면 실제 Lua가 다음 연석을 잡고, rel 좌석이 든 후보는 건너뛴다', async () => {
+    const { h, e, list, input } = await autoWorld();
+    const first = await h.store.holdAuto(input({ holdId: 'h-1', idempotencyKey: 'idem-1' }));
+    expect(first.kind).toBe('OK');
+    const second = await h.store.holdAuto(input({ holdId: 'h-2', idempotencyKey: 'idem-2' }));
+    expect(second.kind).toBe('OK');
+    if (second.kind !== 'OK') return;
+    expect(second.seatIndexes).toEqual([2, 3]);
+    // rel이 첫 후보를 막으면 다음 후보로 간다(새 회차)
+    const w = await autoWorld();
+    await w.h.store.holdAuto(w.input({ holdId: 'h-rel-0', idempotencyKey: 'idem-rel-0' }));
+    await redis.command(['ZADD', seatKeys.rel(w.e, ACCOUNT_A), String(Date.now() + 30_000), '0'], { key: seatKeys.rel(w.e, ACCOUNT_A) });
+    const r = await w.h.store.holdAuto(w.input({ holdId: 'h-rel', idempotencyKey: 'idem-rel' }));
+    expect(r.kind).toBe('OK');
+    if (r.kind !== 'OK') return;
+    expect(r.seatIndexes).toEqual([2, 3]);
+    expect(list.groups.length).toBeGreaterThan(1);
+  });
+
+  test('S-T19_ 분리 후보를 실제 Lua가 앞에서부터 빈 좌석으로 고른다', async () => {
+    const c = { ...cond, allowSplit: true };
+    const { h, e, list, input } = await autoWorld(c);
+    // A01·A03·A05를 먼저 잡아 연석 블록을 막는다(비트만 켠다)
+    for (const i of [0, 2, 4]) await redis.command(['SETBIT', seatKeys.bitmap(e), String(i), '1'], { key: seatKeys.bitmap(e) });
+    const split = list.groups.find((g) => g.assignResult === 'FIRST_SPLIT');
+    expect(split?.split).toBe(true);
+    console.log('split seats', split!.seats.map((s) => s.index).slice(0, 10), 'bits', [0, 2, 4]);
+    console.log('bits before', await h.bit(e, 0), await h.bit(e, 1), await h.bit(e, 2), await h.bit(e, 3), await h.bit(e, 4));
+    const r = await h.store.holdAuto(input({ holdId: 'h-split', idempotencyKey: 'idem-split', groups: [split!] }));
+    expect(r.kind).toBe('OK');
+    if (r.kind !== 'OK') return;
+    expect(r.assignResult).toBe('FIRST_SPLIT');
+    expect(r.seatIndexes).toEqual([1, 3]);
+  });
+
+  test('S-T19_ 실제 Lua가 auto_cur를 NEXT에서 다음 커서로 쓰고, 보유 수·정지에서 거절한다', async () => {
+    const { h, e, list, input } = await autoWorld();
+    const first = await h.store.holdAuto(input({ holdId: 'h-1', idempotencyKey: 'idem-1' }));
+    expect(first.kind).toBe('OK');
+    const next = await h.store.holdAuto(input({ holdId: 'h-next', idempotencyKey: 'idem-next', groups: [list.groups[0]!], cursor: 2 }));
+    expect(next.kind).toBe('NEXT');
+    if (next.kind !== 'NEXT') return;
+    expect(next.nextCursor).toBe(3);
+    // NEXT는 이번 요청 안에서만 다음 페이지로 가고 공유 커서는 성공한 묶음 다음(1)에 머문다
+    expect(await h.store.autoCursor(e, field())).toBe(1);
+    await redis.command(['SET', seatKeys.quota(e, ACCOUNT_A), '3'], { key: seatKeys.quota(e, ACCOUNT_A) });
+    expect((await h.store.holdAuto(input({ holdId: 'h-q', idempotencyKey: 'idem-q' }))).kind).toBe('QUOTA_EXCEEDED');
+    await redis.command(['DEL', seatKeys.quota(e, ACCOUNT_A)], { key: seatKeys.quota(e, ACCOUNT_A) });
+    await redis.command(['HSET', seatKeys.ctl(e), 'paused', '1'], { key: seatKeys.ctl(e) });
+    expect((await h.store.holdAuto(input({ holdId: 'h-p', idempotencyKey: 'idem-p' }))).kind).toBe('PAUSED');
   });
 });
