@@ -1,0 +1,17 @@
+# ops-svc 배포 단위 기본 값(platform 템플릿 기반, GAT-110 첫 몫). 환경 값은 deploy/envs/<환경>/ops-svc.yaml에 둔다.
+# 관제 전용 노드 풀·ops 전용 Aurora·gw-ops 경로는 ADR-0102다. 이 골격은 HTTP 명령 접수·2인 승인·감사 체인만 열고,
+# 제어 gRPC 전달·ack·SSE·CS 처리함 Kafka 소비자는 후속이다.
+name: ops-svc
+
+managementPort: 9464
+
+service:
+  replicas: 2
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  env:
+    # 관제 역할(operator·commander·viewer)은 요청마다 identity AdminAuthzService.GetAdminAuthz로 본다(ADR-0172)
+    PEAKET_IDENTITY_GRPC_URL: identity-svc:50051
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

@@ -28,6 +28,8 @@ export type ProblemType =
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'case-not-actioned'
+  | 'command-not-pending'
+  | 'command-requester-cannot-approve'
   | 'commander-removal-needs-role-change'
   | 'commander-required'
   | 'consent-required'
@@ -76,8 +78,10 @@ export type ProblemType =
   | 'image-type-unsupported'
   | 'inquiry-closed'
   | 'invalid-auto-condition'
+  | 'invalid-command'
   | 'invalid-dpop-proof'
   | 'invalid-enrollment-code'
+  | 'invalid-query'
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
@@ -266,6 +270,8 @@ export const PROBLEM_TYPES = {
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
+  'command-not-pending': { status: 409, title: "승인 대기 중인 명령이 아닙니다" },
+  'command-requester-cannot-approve': { status: 403, title: "요청한 분은 승인할 수 없습니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
   'commander-required': { status: 403, title: "간격 예외는 commander만 쓸 수 있습니다" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
@@ -314,8 +320,10 @@ export const PROBLEM_TYPES = {
   'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
   'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
+  'invalid-command': { status: 422, title: "명령 값이 올바르지 않습니다" },
   'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
   'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
+  'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },

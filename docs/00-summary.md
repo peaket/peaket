@@ -591,6 +591,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-546: BAT-585 후기 오류 유형·제목 계약 정렬(2026-11-13): CI `node` 실패를 고쳤다.
 - R-545: BAT-620(LCH-090) 관제 수요 예측·규모 올리기를 core-svc에 부분 적용했다(2026-11-13): 0.5~2배 이력·기본 비율·10만/50만 경계, T-30분·올리기만·LARGE 30분 간격·commander 예외, 판매 승인 전 예측, 취소 회차 제외, 판매 승인과 같은 전역 잠금 직렬화. heavy gate: test-int 226 통과·1 건너뜀, 변이 30/30, 4관점 리뷰 높음 0·중간 2(재인증·감사). 관제 명령·판매 중지/재개·잔여석·화면은 ops-svc·purchase-svc 몫이다.
 - R-547: BAT-420 GAT-090 환급 재시도·부분 환불(2026-11-13): `order_cancellation` 재시도 칸(0015), 주문 상태 T22~T25, `REFUND_PENDING` 1분→6시간 재시도·`refund_failed_at` CS 대상 표시를 넣고 heavy gate를 통과했다(test-int 1823, 단위 3792, 변이 13/13, 리뷰 높음 0·중간 6 고침). GAT-110은 ops-svc·GAT-120 선행이 없어 보류다.
+- R-552: ops-svc 최소 골격(2026-11-14): platform 템플릿 기반 서비스, 운영 명령 접수·목록·상세·2인 승인·거부, `ops_command`·`command_event`·`command_approval`, SHA-256 감사 해시 체인, `support.cases-requested`의 `REFUND_FAILED` CS 건 계약. test-int 13건(실제 PostgreSQL 18)·변이 30/30·4관점 리뷰 높음 0·중간 6 고침·Docker 이미지 빌드·CI 로컬 등가 통과. 행위자 가명화·재인증·멱등 키, GAT-110 나머지·BAT-425/465/470·제어 gRPC는 후속이다.
 - R-553: BAT-620 규모 올리기 오류 유형 계약 정렬(2026-11-14): CI `node` 실패를 고쳤다.
 - R-555: identity 세션 통합 시험 TRUNCATE 목록 보강(2026-11-14): CI `node` 실패를 고쳤다.
 - R-557: R-550이 낸 공연 상세 첫 JS 예산 회귀를 고쳤다(2026-11-14): 후기 모달 본체(`ReviewModalsClient`)가 `ReviewModalsFromUrl`의 정적 가져오기로 첫 화면 번들에 들어와 225.6kB(한도 203.3kB)였다. `next/dynamic(ssr:false)`로 주소가 모달을 가리킬 때만 받게 바꿔 **189.6kB**로 줄였다. budgets 24/24, 웹 823 시험·typecheck·lint 통과.

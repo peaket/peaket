@@ -207,6 +207,8 @@ test('BSL050_이미지에드는곳·작업공간파일·이미지워크플로와
     'services/pg-simulator/Dockerfile',
     // v0 모놀리스 이미지가 담는 결제 모듈
     'services/payment-svc/src/payment.ts',
+    'services/ops-svc/Dockerfile',
+    'services/ops-svc/src/main.ts',
     // 서비스 뼈대 이미지(packages/platform/template/Dockerfile)와 이미지가 담는 공용 패키지
     'packages/platform/template/Dockerfile',
     'packages/platform/src/service.ts',

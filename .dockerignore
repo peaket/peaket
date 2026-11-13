@@ -21,6 +21,7 @@ services
 !services/queue-svc
 !services/admission-ctrl
 !services/purchase-svc
+!services/ops-svc
 # v0 모놀리스의 개발 의존성(작업 공간 연결에 package.json만 있으면 된다)
 !services/invariant-checker/package.json
 **/.cache

@@ -106,6 +106,8 @@ jobs:
             image: v0-monolith
           - dockerfile: services/pg-simulator/Dockerfile
             image: pg-simulator
+          - dockerfile: services/ops-svc/Dockerfile
+            image: ops-svc
           - dockerfile: packages/platform/template/Dockerfile
             image: example-svc
           # 한 프로세스 합본(증명 핵심 측정의 무대, BUILD_ORDER PRF-215). 서비스 넷과 릴레이가 같은 이미지다

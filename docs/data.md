@@ -1837,6 +1837,19 @@ erDiagram
         jsonb dry_run
         timestamptz acked_at
     }
+    ops_command {
+        uuid id PK "GAT-110 첫 골격(2026-11-14, R-552)의 현재 상태 투영. command_event가 사건의 정본이고 이 표는 목록·승인 판정을 빠르게 한다"
+        text type "openapi Command.type"
+        text state "DRAFTED|DRY_RUN|PENDING_APPROVAL|APPROVED|REJECTED|DISPATCHED|ACKED|FAILED|REVERT_PENDING|REVERTED|AUTO_EXPIRED"
+        text reason
+        jsonb params
+        text requested_by "관리 계정 가명 참조"
+        text requested_role "operator|commander"
+        uuid event_id "회차 하나에 건 명령이면 그 회차"
+        timestamptz approval_expires_at "2인 승인 기한(10분 [가정])"
+        timestamptz created_at
+        timestamptz updated_at
+    }
     audit_chain {
         bigint seq PK "빈틈 없는 번호"
         text record_type
