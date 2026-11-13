@@ -1,7 +1,7 @@
 // 운영 명령의 두 번째 승인·거부(GAT-110 첫 몫). 요청자와 같은 계정은 승인하지 못한다.
 import { ProblemError } from '@peaket/platform';
 import type { Command } from '../domain/command.js';
-import type { CommandDecision, CommandStore } from '../domain/ports.js';
+import type { CommandDecision, CommandDispatcher, CommandStore } from '../domain/ports.js';
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -12,11 +12,22 @@ const fail = (d: Exclude<CommandDecision, { status: 'APPLIED' }>): never => {
 };
 
 export class DecideCommand {
-  constructor(private readonly store: CommandStore) {}
+  constructor(
+    private readonly store: CommandStore,
+    private readonly dispatcher?: CommandDispatcher,
+  ) {}
 
   async approve(q: { commandId: string; approverRef: string; approverRole: string; nowMs: number }): Promise<Command> {
     const d = await this.store.approve(q.commandId, q.approverRef, q.approverRole, q.nowMs);
-    return d.status === 'APPLIED' ? d.command : fail(d);
+    if (d.status !== 'APPLIED') return fail(d);
+    if (d.command.type !== 'EVENT_CANCEL' || !this.dispatcher) return d.command;
+    try {
+      await this.dispatcher.dispatch(d.command);
+    } catch (err) {
+      await this.store.markDispatchFailed(d.command.commandId, err instanceof Error ? err.message : 'dispatch-failed', q.nowMs);
+      throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다' });
+    }
+    return this.store.markDispatched(d.command.commandId, q.nowMs);
   }
 
   async reject(q: { commandId: string; approverRef: string; approverRole: string; reason: string; nowMs: number }): Promise<Command> {

@@ -778,6 +778,7 @@ erDiagram
     event_cancellation_request ||--o{ order_cancellation : "일괄 환불 취소(ADR-0086)"
     event_cancellation_request ||--o{ event_cancellation_approval : "판정자 외 승인(ADR-0086)"
     event_cancellation_request ||--o{ event_refund_pg_part : "일괄 환불의 결제사 몫(기술 검토 중간-045)"
+    event_cancellation_request ||--o{ event_refund_item : "BAT-425 첫 몫의 티켓별 취소 ID·상태(2026-11-14, R-558)"
     purchase_order {
         uuid id PK "UUIDv7(시간순). 표는 나누지 않고 보존 기한이 지난 행을 ID 범위로 나눠 지운다(ADR-0114)"
         uuid account_id
@@ -970,6 +971,17 @@ erDiagram
         timestamptz paused_at "다시 알림(1시간 [가정]마다)의 기준"
         uuid resumed_by
         text reason "정지·재개 사유(감사 로그와 같은 값)"
+    }
+    event_refund_item {
+        uuid request_id PK "BAT-425 첫 몫(2026-11-14, R-558). event_refund_pg_part의 결제사 몫 진행률은 아직 event_cancellation_request.progress JSONB로 센다"
+        uuid ticket_id PK
+        uuid order_id
+        uuid cancellation_id "같은 요청·티켓이면 같은 결정적 UUID. 결제사 멱등키 cancel-{cancellation_id}"
+        text pg "TOSS|PORTONE|SIMULATOR"
+        text status "PENDING|REFUNDED|FAILED|UNKNOWN"
+        int attempts "환급 재시도 횟수"
+        text last_error "마지막 실패 결과 코드. 계좌·결제 참조는 싣지 않는다"
+        timestamptz updated_at
     }
     compensation {
         uuid id PK

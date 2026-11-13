@@ -29,4 +29,13 @@ export interface CommandStore {
   approve(commandId: string, approverRef: string, approverRole: string, nowMs: number): Promise<CommandDecision>;
   /** PENDING_APPROVAL만 거부한다. 요청자와 같은 계정은 SAME_ACTOR다 */
   reject(commandId: string, approverRef: string, approverRole: string, reason: string, nowMs: number): Promise<CommandDecision>;
+  /** 승인 뒤 전달까지 끝난 명령을 DISPATCHED로 바꾸고 사건·감사를 남긴다 */
+  markDispatched(commandId: string, nowMs: number): Promise<Command>;
+  /** 승인 뒤 전달이 실패한 명령을 FAILED로 바꾸고 사건·감사를 남긴다 */
+  markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command>;
+}
+
+/** 승인된 명령을 받는 쪽에 전달하는 포트. 첫 몫은 EVENT_CANCEL만 purchase-svc 내부 HTTP로 보낸다 */
+export interface CommandDispatcher {
+  dispatch(command: Command): Promise<void>;
 }

@@ -35,11 +35,17 @@ import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedi
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import {
+  CancelTicket,
+  CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventRefundStore,
+  DrizzleEventRefundTargets,
   DrizzleSeatReturns,
+  EventRefundService,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpRefundFailureNotice,
   parseHolidayCalendar,
   RedisSeatReturnNotices,
   type RefundModuleDeps,
@@ -284,6 +290,29 @@ export async function start(o: StartOptions): Promise<StartedService> {
   }
   if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
     throw new Error('PEAKET_TICKET_GRPC_ADDR·PEAKET_PAYMENT_GRPC_ADDR가 없다(예매 취소, 운영 필수)');
+  }
+  // 회차 취소 일괄 환불(BAT-425 첫 몫). 기존 예매 취소 Saga를 티켓마다 부르고, 진행률·부분 실패·수동 일시정지·재개를 남긴다.
+  // CS 처리함 연결은 아직 로그 대역이다(ops-svc 내부 HTTP는 후속). 자동 정지·백그라운드 실행기·연기(POSTPONE)도 후속이다.
+  if (database && refund) {
+    const opsUrl = env.PEAKET_OPS_HTTP_URL;
+    refund.eventRefund = new EventRefundService({
+      store: new DrizzleEventRefundStore(database),
+      targets: new DrizzleEventRefundTargets(database, new SeatMapSaleConfigs(seatMap)),
+      canceller: new CancelTicketEventRefund(new CancelTicket(refund)),
+      notice: opsUrl
+        ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }))
+        : {
+            open: async (q) => {
+              log?.warn(
+                { event: 'event_refund_failed', requestId: q.requestId, orderId: q.orderId, ticketId: q.ticketId, cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError },
+                '회차 취소 환불 실패(CS 처리함 주소 없음)',
+              );
+            },
+          },
+      nowMs: () => systemClock.now(),
+      deadlineMs: () => systemClock.now() + 30_000,
+      concurrency: 8,
+    });
   }
 
   // 주문 생성(booking, POST /v1/orders, BUILD_ORDER PRF-161). purchase DB가 있을 때만 연다(DB 없이 뜬 파드는 주문 경로를 열지 않는다, 뜨는 동작은 그대로다).

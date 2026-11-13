@@ -66,6 +66,8 @@ export interface CancellationWrites {
     readonly refundDueAtMs?: number;
     /** 주문 상태 전이(T22~T25)의 행위자. `account:<UUID>` */
     readonly actor: string;
+    /** 회차 취소 일괄 환불 요청 ID(BAT-425). 있으면 order_cancellation에 함께 남긴다 */
+    readonly eventCancellationRequestId?: string;
   }): Promise<CancellationWriteOutcome>;
   /** 입장 기록 마감 뒤 환급할 REQUESTED와 재시도할 REFUND_PENDING(환급 시각이 지난 것) */
   dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]>;

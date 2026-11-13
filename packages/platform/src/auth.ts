@@ -65,6 +65,24 @@ export const PASSWORD_CHANGE_SCOPE = 'password:change';
 
 export const ROLES_METADATA = 'peaket:roles';
 
+/** 서비스 사이 내부 HTTP의 공유 토큰 주입 이름(환경 값 PEAKET_INTERNAL_TOKEN). 비어 있으면 local·ci처럼 검사를 끈다 */
+export const INTERNAL_TOKEN = Symbol.for('peaket.platform.internal-token');
+
+/**
+ * 서비스 사이 내부 HTTP 처리기의 공유 토큰 검사(BAT-425). 공개 게이트웨이에 노출하지 않는 경로에만 쓴다.
+ * 토큰이 비어 있으면(로컬·CI) 통과시키고, 운영은 PEAKET_INTERNAL_TOKEN을 Secret에서 넣는다.
+ */
+@Injectable()
+export class InternalTokenGuard implements CanActivate {
+  constructor(@Inject(INTERNAL_TOKEN) private readonly expected?: string) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    if (!this.expected) return true;
+    const request = context.switchToHttp().getRequest<FastifyRequest>();
+    return request.headers['x-peaket-internal-token'] === this.expected;
+  }
+}
+
 /** 처리기(또는 컨트롤러 전체)의 허용 역할. 모든 처리기에 있어야 하고 없으면 서비스가 시작하지 않는다(AZ-T1) */
 export function Roles(roles: readonly RoleValue[], options: RolesOptions = {}): MethodDecorator & ClassDecorator {
   if (roles.length === 0) throw new Error('허용 역할 목록이 비었다(공개 작업은 [public])');

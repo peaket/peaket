@@ -1,9 +1,10 @@
 // ops-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // 앱 포트(관제 HTTP /v1/ops/commands)와 관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 업무 gRPC는 이 골격에 없다(제어 gRPC는 후속).
 import 'reflect-metadata';
-import { createDatabase, createService } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, createService } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
+import { HttpEventRefundDispatcher } from './adapters/http-event-refund-dispatcher.js';
 
 const SERVICE = 'ops-svc';
 const url = process.env.PEAKET_DATABASE_URL;
@@ -13,7 +14,10 @@ if (!identityUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity A
 
 const database = createDatabase({ url, applicationName: SERVICE });
 const adminAuthz = new GrpcAdminAuthz(identityUrl);
-const service = await createService({ name: SERVICE, adminAuthz, module: AppModule.register({ database }) });
+const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
+const dispatcher = purchaseUrl ? new HttpEventRefundDispatcher(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl, timeoutCapMs: 30_000 })) : undefined;
+const service = await createService({ name: SERVICE, adminAuthz, module: AppModule.register({ database, ...(dispatcher ? { dispatcher } : {}) }) });
+if (!dispatcher) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL이 없어 EVENT_CANCEL 전달을 하지 않는다');
 await service.listen();
 
 process.once('SIGTERM', () => {

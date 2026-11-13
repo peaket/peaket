@@ -66,6 +66,24 @@ export class MemoryCommandStore implements CommandStore {
     return this.#decide(commandId, approverRef, approverRole, 'REJECTED', reason, nowMs);
   }
 
+  async markDispatched(commandId: string, nowMs: number): Promise<Command> {
+    const current = this.#byId.get(commandId);
+    if (!current) throw new Error(`명령이 없다: ${commandId}`);
+    const command: Command = { ...current, state: 'DISPATCHED', updatedAtMs: nowMs };
+    this.#byId.set(commandId, command);
+    await this.audit.append({ recordType: 'COMMAND_DISPATCHED', recordId: commandId, payload: { state: 'DISPATCHED' }, nowMs });
+    return command;
+  }
+
+  async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
+    const current = this.#byId.get(commandId);
+    if (!current) throw new Error(`명령이 없다: ${commandId}`);
+    const command: Command = { ...current, state: 'FAILED', updatedAtMs: nowMs };
+    this.#byId.set(commandId, command);
+    await this.audit.append({ recordType: 'COMMAND_DISPATCH_FAILED', recordId: commandId, payload: { state: 'FAILED', reason }, nowMs });
+    return command;
+  }
+
   async #decide(commandId: string, approverRef: string, approverRole: string, decision: 'APPROVED' | 'REJECTED', reason: string | undefined, nowMs: number): Promise<CommandDecision> {
     const current = this.#byId.get(commandId);
     if (!current) return { status: 'NOT_FOUND' };

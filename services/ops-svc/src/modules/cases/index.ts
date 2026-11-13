@@ -3,3 +3,5 @@ export { CS_CASE_KINDS, type CaseRequested, type CsCase, type CsCaseKind, type C
 export { ReceiveCaseRequested } from './application/receive-case-requested.js';
 export { MemoryCsCaseStore } from './adapters/memory-cs-case-store.js';
 export { DrizzleCsCaseStore } from './adapters/db/drizzle-cs-case-store.js';
+export { CasesModule } from './cases.module.js';
+export { CasesController } from './inbound/cases.controller.js';

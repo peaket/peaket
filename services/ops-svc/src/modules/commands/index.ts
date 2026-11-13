@@ -5,7 +5,7 @@ export { DecideCommand } from './application/decide-command.js';
 export { GetCommand } from './application/get-command.js';
 export { ListCommands } from './application/list-commands.js';
 export { COMMAND_STATES, COMMAND_TYPES, APPROVAL_TTL_MS, approvalModeOf, stateAfterCreate, type ApprovalMode, type Command, type CommandState, type CommandType, type NewCommand } from './domain/command.js';
-export type { CommandDecision, CommandListQuery, CommandPage, CommandStore } from './domain/ports.js';
+export type { CommandDecision, CommandDispatcher, CommandListQuery, CommandPage, CommandStore } from './domain/ports.js';
 export { MemoryCommandStore } from './adapters/memory-command-store.js';
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';
 export { CommandsController } from './inbound/commands.controller.js';

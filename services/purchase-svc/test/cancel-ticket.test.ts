@@ -176,6 +176,13 @@ describe('취소 Saga', () => {
     expect(writes.updates).toHaveLength(0);
   });
 
+  test('회차 취소(EVENT_CANCELLED)는 입장 시작 뒤에도 바로 환급한다', async () => {
+    const { svc, payments } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'EVENT_CANCELLED', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: kst('2026-11-20T18:30:05') });
+    expect(r).toMatchObject({ status: 'ACCEPTED', refundAfterEntryClose: false, refundAmount: 33_333 });
+    expect(payments.calls).toHaveLength(1);
+  });
+
   test('견적이 입장 시작 뒤라고 하면 티켓이 REFUND_NOW여도 환급을 입장 기록 마감 뒤로 미룬다', async () => {
     const { svc, payments, writes } = saga({ ticket: 'REFUND_NOW' });
     const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: 2000 });

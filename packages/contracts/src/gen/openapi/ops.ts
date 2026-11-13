@@ -731,7 +731,7 @@ export const createOpsCommandBodyReasonMax = 2000;
 
 
 export const CreateOpsCommandBody = zod.object({
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드'),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드'),
   "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
@@ -781,7 +781,7 @@ export const listOpsCommandsQueryLimitMax = 100;
 
 export const ListOpsCommandsQueryParams = zod.object({
   "eventId": zod.string().optional(),
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN']).optional(),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL']).optional(),
   "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional().describe('쉼표로 여럿(guidelines §11)'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
   "limit": zod.int().min(1).max(listOpsCommandsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')

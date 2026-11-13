@@ -14,6 +14,7 @@ export const COMMAND_TYPES = [
   'TAKEDOWN',
   'AUTOMATION_STOP',
   'PG_ASSIGN',
+  'EVENT_CANCEL',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 
@@ -41,7 +42,7 @@ export type ApprovalMode = 'NONE' | 'ONE' | 'TWO';
  */
 export function approvalModeOf(type: CommandType): ApprovalMode {
   if (type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP') return 'NONE';
-  if (type === 'BOT_LEVEL' || type === 'DEGRADED_MODE' || type === 'BLOCK_ASN_IP') return 'TWO';
+  if (type === 'BOT_LEVEL' || type === 'DEGRADED_MODE' || type === 'BLOCK_ASN_IP' || type === 'EVENT_CANCEL') return 'TWO';
   return 'ONE';
 }
 

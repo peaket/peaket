@@ -12,6 +12,9 @@ service:
   env:
     # 관제 역할(operator·commander·viewer)은 요청마다 identity AdminAuthzService.GetAdminAuthz로 본다(ADR-0172)
     PEAKET_IDENTITY_GRPC_URL: identity-svc:50051
+    # purchase-svc 내부 HTTP 주소(BAT-425). EVENT_CANCEL 전달에 쓴다
+    PEAKET_PURCHASE_HTTP_URL: http://purchase-svc:8080
+    # 내부 HTTP 공유 토큰 PEAKET_INTERNAL_TOKEN은 Secret에서 넣는다(비우면 로컬·CI처럼 검사를 끈다)
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }

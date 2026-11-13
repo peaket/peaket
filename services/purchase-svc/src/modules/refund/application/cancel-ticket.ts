@@ -23,6 +23,8 @@ export interface CancelTicketInput {
   readonly nowMs: number;
   readonly deadlineMs: number;
   readonly refundAccount?: RefundAccount;
+  /** 회차 취소 일괄 환불 요청 ID(BAT-425) */
+  readonly eventCancellationRequestId?: string;
 }
 
 /** 회차 취소·부정 예매·미성년자 계약 취소·탈퇴는 공제하지 않는다(POL-032·POL-038·POL-046) */
@@ -83,7 +85,8 @@ export class CancelTicket {
 
     // ticket-svc는 공연 시작으로 REFUND_AFTER_CLOSE를 가르고, 견적은 입장 시작(entryOpensAt)으로 가른다.
     // 입장이 시작됐지만 공연 시작 전인 취소도 키만 폐기하고 환급은 입장 기록 마감 뒤로 미룬다(ADR-0051 결정 13)
-    const afterClose = ticket === 'REFUND_AFTER_CLOSE' || q.quote.refundAfterEntryClose;
+    // 회차 취소·연기는 입장 여부와 관계없이 바로 환급한다(transfer-refund §5). 팬 취소만 입장 기록 마감을 기다린다.
+    const afterClose = i.reason !== 'EVENT_CANCELLED' && i.reason !== 'EVENT_POSTPONED' && (ticket === 'REFUND_AFTER_CLOSE' || q.quote.refundAfterEntryClose);
     const write = await this.o.writes.create({
       cancellationId: i.cancellationId,
       orderId: order.orderId,
@@ -98,6 +101,7 @@ export class CancelTicket {
       nowMs: i.nowMs,
       ...(afterClose ? { refundDueAtMs: eventStartsAtOf(order.saleEndsAtMs) + ENTRY_CLOSE_SAFE_MS } : {}),
       actor: `account:${i.accountId}`,
+      ...(i.eventCancellationRequestId !== undefined ? { eventCancellationRequestId: i.eventCancellationRequestId } : {}),
     });
     if (write.status === 'CONFLICT') return { status: 'CONFLICT' };
     if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, order.orderId, i);

@@ -29,4 +29,5 @@ export const CommandType = {
   TAKEDOWN: 'TAKEDOWN',
   AUTOMATION_STOP: 'AUTOMATION_STOP',
   PG_ASSIGN: 'PG_ASSIGN',
+  EVENT_CANCEL: 'EVENT_CANCEL',
 } as const;

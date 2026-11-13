@@ -108,6 +108,7 @@ export class DrizzleCancellationWrites implements CancellationWrites {
         deductionAmount: q.deductionAmount,
         refundAmount: q.refundAmount,
         status: q.status,
+        ...(q.eventCancellationRequestId !== undefined ? { eventCancellationRequestId: q.eventCancellationRequestId } : {}),
         ...(q.refundDueAtMs !== undefined ? { refundDueAt: new Date(q.refundDueAtMs) } : {}),
         createdAt: now,
         statusChangedAt: now,

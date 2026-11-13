@@ -18,6 +18,7 @@ import {
   type OutboxRelayProcessOptions,
   type PlatformLogger,
   platformMaintenanceTasks,
+  createExternalHttpClient,
   startOutboxRelayProcess,
   systemClock,
 } from '@peaket/platform';
@@ -36,6 +37,7 @@ import {
 import {
   DrizzleCancellationWrites,
   GrpcPaymentCancellations,
+  HttpRefundFailureNotice,
   RefundAfterEntry,
   RefundRetryLoop,
 } from './modules/refund/index.js';
@@ -156,15 +158,19 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // 입장 기록 마감 뒤 환급(GAT-080). 결제사 주소가 없으면(로컬·CI) 이 일을 띄우지 않는다
   const paymentCancelAddress = o.env?.PEAKET_PAYMENT_GRPC_ADDR;
   const paymentCancels = paymentCancelAddress ? new GrpcPaymentCancellations({ address: paymentCancelAddress }) : undefined;
+  const opsUrl = o.env?.PEAKET_OPS_HTTP_URL;
+  const refundFailureNotice = opsUrl
+    ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }))
+    : {
+        open: async (q: { cancellationId: string; attempts: number; lastError: string }) =>
+          taskLogger.warn({ event: 'cancellation_refund_failed', cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError }, '환급 재시도 소진·업무 거절(CS 처리함 주소 없음)'),
+      };
   const refundAfterEntry = paymentCancels
     ? new RefundAfterEntry({
         writes: new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock })),
         payments: paymentCancels,
         nowMs: () => clock.now(),
-        // ops-svc CS 처리함 계약이 아직 없다. 재시도 소진·업무 거절은 refund_failed_at으로 남기고 경보 로그만 낸다(known gap)
-        failureNotice: {
-          open: async (q) => taskLogger.warn({ event: 'cancellation_refund_failed', cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError }, '환급 재시도 소진·업무 거절(CS 처리함 연결 대기)'),
-        },
+        failureNotice: refundFailureNotice,
       })
     : undefined;
   const relay = await startOutboxRelayProcess({

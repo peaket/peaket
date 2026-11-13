@@ -31,6 +31,7 @@ import { describe, expect, test } from 'vitest';
 import { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { eventCancellationRequest, eventRefundItem } from '../src/modules/refund/adapters/db/schema.js';
 import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
 
@@ -67,6 +68,7 @@ const EVENT_SALE_TAG = '0012_event_sale';
 const VOID_TAG = '0013_ticket_void_job';
 const CANCEL_TAG = '0014_order_cancellation';
 const RETRY_TAG = '0015_order_cancellation_refund_retry';
+const EVENT_REFUND_TAG = '0016_event_refund';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -412,6 +414,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [13, VOID_TAG],
       [14, CANCEL_TAG],
       [15, RETRY_TAG],
+      [16, EVENT_REFUND_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -440,6 +443,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${VOID_TAG}.sql`,
       `${CANCEL_TAG}.sql`,
       `${RETRY_TAG}.sql`,
+      `${EVENT_REFUND_TAG}.sql`,
     ]);
   });
 
@@ -475,12 +479,13 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   /** booking schema.ts의 주문 표 일곱(PRF-160 다섯 + PRF-162 order_saga_job + PRF-163 ticket_issue_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
   const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob, ticketVoidJob, orderCancellation];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
+  const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem].map(shapeOf);
 
-  test('마지막 스냅샷(0015_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0015_snapshot.json');
+  test('마지막 스냅샷(0016_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소 표 둘)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0016_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
-    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES]) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));

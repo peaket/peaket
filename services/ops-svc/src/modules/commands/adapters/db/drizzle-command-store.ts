@@ -105,6 +105,32 @@ export class DrizzleCommandStore implements CommandStore {
     return this.#decide(commandId, approverRef, approverRole, 'REJECTED', reason, nowMs);
   }
 
+  async markDispatched(commandId: string, nowMs: number): Promise<Command> {
+    return this.#finishDispatch(commandId, 'DISPATCHED', undefined, nowMs);
+  }
+
+  async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
+    return this.#finishDispatch(commandId, 'FAILED', reason, nowMs);
+  }
+
+  async #finishDispatch(commandId: string, state: 'DISPATCHED' | 'FAILED', reason: string | undefined, nowMs: number): Promise<Command> {
+    return this.database.transaction(async (tx) => {
+      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
+      if (!row) throw new Error(`명령이 없다: ${commandId}`);
+      await tx.execute(sql`update ops_command set state = ${state}, updated_at = ${new Date(nowMs)}::timestamptz where id = ${commandId}::uuid`);
+      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
+      await this.#event(tx, commandId, Number(seq!.seq), state, 'system', 'system', reason ?? row.reason, nowMs);
+      await appendAuditIn(tx, {
+        recordType: state === 'DISPATCHED' ? 'COMMAND_DISPATCHED' : 'COMMAND_DISPATCH_FAILED',
+        recordId: commandId,
+        payload: { state, ...(reason !== undefined ? { reason } : {}) },
+        nowMs,
+      });
+      const approvals = await this.#approvalsIn(tx, commandId);
+      return toCommand({ ...row, state, updated_at: new Date(nowMs) }, approvals);
+    });
+  }
+
   async #decide(commandId: string, approverRef: string, approverRole: string, decision: 'APPROVED' | 'REJECTED', reason: string | undefined, nowMs: number): Promise<CommandDecision> {
     return this.database.transaction(async (tx) => {
       const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];

@@ -40,3 +40,46 @@ export { TicketCancellationController, unavailableReauth } from './inbound/ticke
 export { eventStartsAtOf, QuoteCancellation, type CancellationQuoteView, type QuoteCancellationInput, type QuoteCancellationResult } from './application/quote-cancellation.js';
 export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } from './application/refund-after-entry.js';
 export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';
+export {
+  compensationAmount,
+  eventRefundCancellationId,
+  progressOf,
+  EVENT_REFUND_FAULTS,
+  EVENT_REFUND_ITEM_STATUSES,
+  EVENT_REFUND_KINDS,
+  EVENT_REFUND_STATUSES,
+  REFUND_JOB_STATES,
+  REFUND_PAUSE_REASONS,
+  REFUND_PG_PROVIDERS,
+  type EventCancellationRequest,
+  type EventRefundFault,
+  type EventRefundItem,
+  type EventRefundItemStatus,
+  type EventRefundKind,
+  type EventRefundPgProgress,
+  type EventRefundPreview,
+  type EventRefundProgress,
+  type EventRefundStatus,
+  type EventRefundTarget,
+  type RefundJobState,
+  type RefundPauseReason,
+  type RefundPgProvider,
+} from './domain/event-refund.js';
+export type {
+  EventRefundCanceller,
+  EventRefundFailureNotice,
+  EventRefundPauseInput,
+  EventRefundPreviewInput,
+  EventRefundResumeInput,
+  EventRefundServiceDeps,
+  EventRefundStartInput,
+  EventRefundStore,
+  EventRefundTargets,
+} from './domain/event-refund-ports.js';
+export { EventRefundError, EventRefundService, type EventRefundErrorCode } from './application/event-refund-service.js';
+export { MemoryEventRefundStore } from './adapters/memory-event-refund-store.js';
+export { DrizzleEventRefundStore } from './adapters/db/drizzle-event-refund-store.js';
+export { DrizzleEventRefundTargets } from './adapters/db/drizzle-event-refund-targets.js';
+export { CancelTicketEventRefund } from './application/cancel-ticket-event-refund.js';
+export { HttpRefundFailureNotice } from './adapters/http-refund-failure-notice.js';
+export { EventRefundController } from './inbound/event-refund.controller.js';
