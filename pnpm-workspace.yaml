@@ -20,3 +20,4 @@ allowBuilds:                # 설치 스크립트를 허용할 패키지. 빈 �
   msw: false                # 거부(돌리지 않음): @peaket/api-client의 MSW 2 처리기(시험·개발용). 설치 스크립트는 서비스 워커 파일을 앱 public에 복사하는 것이라 시험(Node 처리기)에 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-05, BAS-041)
 overrides:                  # 막힌 판을 요구 범위 안의 출처 증명 있는 앞 판으로 고정한다(docs/devops.md §4.4)
   '@seed-design/react-dismissible-layer': 1.0.1  # 1.0.2는 출처 증명 없음(2026-08-07). react-dialog 2.0.2가 ^1.0.1을 요구
+  zod: 4.6.7                # @serwist/build·@serwist/turbopack이 4.6.5를 고정하지만 GHSA-mrhx-c7xc-m3w5(high) 수정 판이 4.6.6이라 올린다(BAT-350, R-560)

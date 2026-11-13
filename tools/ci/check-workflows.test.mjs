@@ -619,7 +619,7 @@ test('BSL050_실제ci.yml_잡image는_범위image일때_이미지넷을build-ima
   const dockerKey = Object.keys(job.with ?? {}).find((k) => /dockerfile/i.test(k));
   assert.ok(dockerKey, `with에 Dockerfile 입력이 없다: ${Object.keys(job.with ?? {})}`);
   const dockerfiles = combos.map((c) => fillMatrix(job.with[dockerKey], c)).sort();
-  assert.deepEqual(dockerfiles, ['packages/platform/template/Dockerfile', 'services/bundle/Dockerfile', 'services/pg-simulator/Dockerfile', 'services/v0-monolith/Dockerfile']);
+  assert.deepEqual(dockerfiles, ['packages/platform/template/Dockerfile', 'services/bundle/Dockerfile', 'services/ops-svc/Dockerfile', 'services/pg-simulator/Dockerfile', 'services/v0-monolith/Dockerfile']);
   // 올리기를 켜는 입력이 없다
   assert.equal(Object.entries(job.with).some(([k, v]) => /push|publish|registry/i.test(k) && String(v) !== 'false'), false, JSON.stringify(job.with));
   // 필수 검사(ci-summary)가 이 잡을 기다린다

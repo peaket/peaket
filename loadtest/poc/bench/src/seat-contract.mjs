@@ -27,6 +27,7 @@ export const seatKeys = {
   sessions: (e) => `s:{event:${e}}:sessions`,
   sessionSweep: (e) => `s:{event:${e}}:sesweep`,
   saleSweep: (e) => `s:{event:${e}}:salesweep`,
+  autoCur: (e) => `s:{event:${e}}:auto_cur`,
 };
 
 /** 만료 1단계에서 한 번에 읽는 수이자 만료 Lua 한 번의 좌석 상한(domain/expiry.ts EXPIRY_BATCH_SIZE, ADR-0176 결정 3) */
@@ -86,7 +87,8 @@ export function holdCall(i) {
 /** 틀린 좌석 요청의 재생 읽기(RedisSeatStore.replay: 멱등 기록 하나를 HMGET, 쓰지 않음, seat-hold §3) */
 export function replayCommand(eventId, accountId, idempotencyKey) {
   const key = seatKeys.idem(eventId, accountId, idempotencyKey);
-  return { key, args: ['HMGET', key, 'fp', 'resp'] };
+  // 자동 배정 기록이면 seats·assign이 함께 있다(redis-seat-store.ts replay). 직접 선택 기록에는 없어 null로 온다.
+  return { key, args: ['HMGET', key, 'fp', 'resp', 'seats', 'assign'] };
 }
 
 /**
