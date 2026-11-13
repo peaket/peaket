@@ -312,7 +312,9 @@ describe('GrpcTicketIssuer와 가짜 ticket-svc', () => {
         { seatId: SEAT_2, ticketId: TICKET_2, status: 'ISSUED' },
       ]);
       expect(srv.requests).toHaveLength(1);
-      expect(srv.requests[0]).toEqual({ order_id: ORDER_ID, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_2, SEAT_1], issue_generation: 0 });
+      // event_starts_at은 BAT-050에서 더한 google.protobuf.Timestamp 칸이다. 이 경로는 아직 회차 시작 시각을 싣지 않으므로
+      // protoLoader defaults가 null로 채운다(payment-svc TicketGrpcIssuer는 eventStartsAtMs가 있으면 싣는다).
+      expect(srv.requests[0]).toEqual({ order_id: ORDER_ID, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_2, SEAT_1], issue_generation: 0, event_starts_at: null });
     } finally {
       srv.close();
       c.close();

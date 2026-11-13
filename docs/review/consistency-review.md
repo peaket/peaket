@@ -643,6 +643,7 @@
 | R-532 | BAT-090의 OpenAPI 문제 유형·설명 변경 뒤 api-client 생성물을 다시 만들지 않아 CI `contract-check`가 실패했다 | packages/api-client/src/gen | 생성기를 다시 돌려 설명·문제 유형을 맞췄다 | 적용 |
 | R-533 | BAT-050(HOT-160) ticket-svc 최소 발권·취소·월렛과 payment-svc 발권 포트를 넣고, 기존 ASVS payment 항목 가운데 이 묶음 밖은 다른 단계로 표시했다 | docs/BUILD_ORDER.md, docs/PROGRESS.md, docs/lanes/lane1.md, docs/features/payment.md, docs/data.md, docs/api/proto/README.md, docs/api/proto/peaket/ticket/v1/ticket.proto, docs/review/plans/BAT-050.md, docs/review/measurements/BAT-050-wave.md, docs/review/ledger-notes.md, packages/contracts/src/gen, pnpm-lock.yaml, tools/ci/ledger.mjs, services/ticket-svc, services/payment-svc | ticket-svc 19건·test-int 9건·payment-svc 2,907건·변이 17/17·4관점 리뷰 높음 2·중간 4 고침, typecheck·lint·doc-check·ledger·trace-check·records·generated contracts 통과. 측정 대상 아님 | 완료(heavy gate) |
 | R-534 | BAT-615의 OpenAPI 문제 유형 추가 뒤 api-client 생성물을 다시 만들지 않아 CI `contract-check`가 실패했다 | packages/api-client/src/gen/problem-types.ts | 생성기를 다시 돌려 문제 유형 네 개를 맞췄다 | 적용 |
+| R-536 | BAT-050이 ticket proto에 `event_starts_at`을 더한 뒤 purchase-svc 가짜 서버 시험의 정확 일치 기대가 낡아 CI `node`가 실패했다 | services/purchase-svc/test/ticket-issue-adapters.test.ts | 기대에 `event_starts_at: null`을 더하고 이유를 주석으로 남겼다 | 적용 |
 
 ## 4. 숫자 일치표
 

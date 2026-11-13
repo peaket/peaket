@@ -578,6 +578,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-532: BAT-090 OpenAPI 변경 API 클라이언트 생성물 반영(2026-11-13): `contract-check` 실패를 고쳤다.
 - R-533: BAT-050 ticket-svc 최소 발권과 payment-svc 발권 포트를 넣는다.
 - R-534: BAT-615 OpenAPI 문제 유형 API 클라이언트 생성물 반영(2026-11-13): `contract-check` 실패를 고쳤다.
+- R-536: BAT-050 ticket proto 기본값 시험 반영(2026-11-13): CI `node` 실패를 고쳤다.
 
 ## 5. [충돌] 결정 결과
 
