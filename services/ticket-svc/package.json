@@ -1,0 +1,45 @@
+{
+  "name": "@peaket/ticket-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "ticket-svc. 발권 최소(IssueTickets 주문 단위 멱등), 예매 취소(CancelTickets 키 폐기·취소표), 월렛 목록(ListTickets), 티켓 키·QR 페이로드, DB 마이그레이션(BUILD_ORDER HOT-160, BAT-050).",
+  "type": "module",
+  "exports": {
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
+    "./ticket": {
+      "types": "./dist/modules/ticket/index.d.ts",
+      "default": "./dist/modules/ticket/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "migrate": "node scripts/migrate.mjs",
+    "db:generate": "node scripts/db-generate.mjs",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "pg": "^8.23.1",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

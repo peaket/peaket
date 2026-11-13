@@ -274,7 +274,7 @@ export const ASVS_DEFAULT_AREA = {
   frontend: ['apps/console-host', 'apps/forensics', 'apps/partner', 'apps/scanner', 'apps/web', 'apps/widgets', 'packages/api-client', 'packages/ds', 'tools/web-checks'],
   notify: [],
   'offline-gate': ['apps/scanner'],
-  payment: ['apps/web', 'services/payment-svc', 'services/pg-simulator', 'services/purchase-svc'],
+  payment: ['apps/web', 'services/payment-svc', 'services/pg-simulator', 'services/purchase-svc', 'services/ticket-svc'],
   'queue-admission': ['apps/web', 'packages/shuffle', 'services/admission-ctrl', 'services/queue-svc', 'tools/edge'],
   'seat-hold': ['apps/partner', 'apps/web', 'packages/seatmap', 'services/purchase-svc'],
   settlement: [],

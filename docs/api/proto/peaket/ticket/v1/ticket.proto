@@ -41,6 +41,10 @@ service TicketService {
 
   // 계정이 그 회차의 유효한 티켓을 가지고 있는지. core-svc shop이 티켓 연동 부가 상품에 쓴다.
   rpc ListHeldTickets(ListHeldTicketsRequest) returns (ListHeldTicketsResponse);
+
+  // 팬 월렛의 내 티켓 목록(FR-012, openapi GET /v1/tickets). 계정의 티켓을 최근 발권 순으로 커서 페이지로 준다.
+  // 티켓 키는 발권 응답에만 싣고 목록에는 싣지 않는다. QR 페이로드는 공개 포인터(PEAKET1:<ticket_id>)라 목록에도 싣는다.
+  rpc ListTickets(ListTicketsRequest) returns (ListTicketsResponse);
 }
 
 message IssueTicketsRequest {
@@ -52,6 +56,8 @@ message IssueTicketsRequest {
   repeated string seat_ids = 4;
   // 이 발권을 낳은 승인 사건의 순번. 입금 오류로 무효가 된 뒤의 재발권이 앞 세대의 멱등 기록과 부딪치지 않게 한다(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
   int64 issue_generation = 5;
+  // 회차 시작 시각. 취소가 입장 시작 전인지 판정한다. 없으면 취소는 입장 전으로 본다(첫 구현).
+  google.protobuf.Timestamp event_starts_at = 6;
 }
 
 message VoidTicketsRequest {
@@ -86,6 +92,12 @@ message IssuedTicket {
   // 이 티켓을 발권한 주문(purchase 논리 DB라 외래키 없음). ticket-svc가 티켓 행에 같은 값을 두고,
   // CheckReviewEligibility가 이 칸으로 근거 주문을 찾는다(소유자 결정 2026-11-11, open-items 92번).
   string order_id = 4;
+  // 이 티켓의 회차
+  string event_id = 5;
+  // 스캐너가 읽는 공개 QR 포인터. PEAKET1:<ticket_id>. 서명·회전은 기기 키 등록(ADR-0025) 뒤에 붙인다.
+  string qr_payload = 6;
+  // 발권 응답에만 싣는 소지 증명 키(base64url 32바이트). DB에는 SHA-256만 둔다. 월렛은 기기 키 등록 때 이 키로 소유를 증명한다.
+  string ticket_key = 7;
 }
 
 message IssueTicketsResponse {
@@ -111,6 +123,8 @@ enum CancelTicketResult {
   CANCEL_TICKET_RESULT_TRANSFER_PENDING = 4;
   // 거부: 공연이 시작됐다.
   CANCEL_TICKET_RESULT_EVENT_STARTED = 5;
+  // 이미 환급·무효다(같은 cancellation_id면 처음 결과를 그대로 돌려준다).
+  CANCEL_TICKET_RESULT_ALREADY_CANCELLED = 6;
 }
 
 message CancelTicketOutcome {
@@ -196,6 +210,32 @@ message HeldTicket {
 
 message ListHeldTicketsResponse {
   repeated HeldTicket tickets = 1;
+}
+
+message ListTicketsRequest {
+  // 티켓 보유자 계정(팬). 게이트웨이가 인증한 값만 싣는다.
+  string account_id = 1;
+  // 이전 응답의 next_cursor(불투명 값). 첫 쪽이면 비운다.
+  string cursor = 2;
+  // 한 번에 받을 건수. 최대 100(docs/api/guidelines.md §3).
+  int32 limit = 3;
+}
+
+message WalletTicket {
+  string ticket_id = 1;
+  string order_id = 2;
+  string event_id = 3;
+  string seat_id = 4;
+  TicketStatus status = 5;
+  google.protobuf.Timestamp issued_at = 6;
+  // 공개 QR 포인터(PEAKET1:<ticket_id>). 티켓 키는 목록에 싣지 않는다.
+  string qr_payload = 7;
+}
+
+message ListTicketsResponse {
+  repeated WalletTicket tickets = 1;
+  // 다음 쪽 커서. 마지막 쪽이면 비운다.
+  string next_cursor = 2;
 }
 
 // 부르는 쪽: ops-svc만(관제 콘솔 '스캐너 기기 관리' SCR-053, ADR-0148 결정 1·2). 기기 원장의 주인은 ticket-svc다.

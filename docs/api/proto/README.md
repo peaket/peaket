@@ -77,6 +77,7 @@ docs/api/proto/
 | purchase-svc → ticket-svc | `OperatorCancelTickets` | 부정 예매 운영자 취소의 티켓 단계(보유자와 무관, 양도 요청 FRAUD_LOCK 철회, 기대 보유자와 다르면 건너뜀, 2026-11-05 ADR-0197) | (`approval_id`, `ticket_id`) | docs/features/transfer-refund.md §7.4 | 있음 |
 | core-svc review → ticket-svc | `CheckReviewEligibility` | 관람 후기 작성 자격 | — | docs/data.md(관람 후기), docs/architecture.md §3.1 | 있음(서비스 맵) |
 | core-svc shop → ticket-svc | `ListHeldTickets` | 티켓 연동 부가 상품의 보유 확인 | — | docs/architecture.md §3.2 | 있음 |
+| 팬 웹 앱 서버 → ticket-svc | `ListTickets` | 월렛 목록(openapi GET /v1/tickets). 계정의 티켓을 최신 발권순으로 커서 페이지로 준다. 티켓 키는 목록에 싣지 않고 QR 공개 포인터만 싣는다(2026-11-13, BUILD_ORDER HOT-160) | 읽기라 없음 | docs/features/payment.md §2, openapi `/v1/tickets` | 있음 |
 | purchase-svc → identity-svc | `GetVerificationStatus` | 결제 직전 본인확인 재확인 | — | docs/features/identity.md, docs/features/payment.md §2 | 있음 |
 | 소비자 웹 앱 서버(OIDC 클라이언트) → identity-svc | `CreateSession`, `EndSession`, `IssueReauthToken` | 소셜 로그인 뒤 세션 생성(제공자 토큰은 보내지 않는다), 로그아웃, 팬 민감 작업 전 제공자 재인증 뒤 재인증 토큰 받기(강도를 싣는다, 추천 적용 2026-11-03, docs/features/identity.md §7.1). 받는 쪽 웨이포인트의 L7 허용 목록이 웹 앱 서버 서비스 계정만 `SessionService`로 들인다(추천 적용 2026-10-28, 기술 검토 중간-083) | `idempotency_key`(로그인 시도마다, 로그인 진행 쿠키 state의 HMAC. 다시 오면 같은 세션에 토큰만 다시 발급) | docs/features/identity.md §2 | 있음(gRPC 행에 합침, 2026-10-28) |
 | queue-svc·identity-svc → trust-svc | `ScoreRisk` | 위험 판정(로비 입장·사전 검증·추가 검증 제출·로그인). 결과는 `ALLOW`·`CHALLENGE`와 사유 분류 코드 하나, `degraded`(축소 운영 ① 층)다. 추가 검증 제출(`SCORE_CONTEXT_VERIFICATION`)은 사람 확인만 보고, trust-svc가 멈췄으면 queue-svc는 통과로 보지 않는다. 로비 입장·사전 검증에는 회차 정렬 설정(`lobby_shuffle`)을 싣는다(추천 적용 2026-10-30, ADR-0156 결정 1·5·8). queue-svc는 여정 ID(`journey_id`)도 싣고, trust-svc는 판정에 쓰지 않고 `TrustVerdict`·`BehaviorSignal`에만 옮긴다. 기기 식별값은 기기 가명으로 바꾼다(추천 적용 2026-10-31, ADR-0171 결정 4) | — | docs/features/bot-defense.md §3~§5·§11, docs/features/queue-admission.md §2·§7 | 있음 |
@@ -116,6 +117,8 @@ docs/api/proto/
 | core-svc catalog → seatmap-worker | `ParseSeatmapImport` | 좌석맵 가져오기 해석(`SeatmapImportService`): 파일 바이트와 형식을 보내고 상태(`PARSED`·`REJECTED`)·배치 JSON·오류·무시한 요소를 받는다. 저장소를 쓰지 않고, 요청 12MiB·응답 8MiB·데드라인 10초 [가정]이다. core-svc는 받은 배치를 스키마·개수 상한·업무 경고로 다시 본다(소유자 결정 2026-10-30, open-items 70번 ②, 계약 모양은 추천 적용 2026-10-30) | 상태를 바꾸지 않아 없음 | docs/features/seat-hold.md §10, docs/security/asvs/seat-hold.md 15.2.5 | 있음(2026-10-30) |
 | core-svc 작업 워커 → image-worker | `ProcessImage` | 이미지 처리 맡기기(`ImageService`): 원본 객체 키와 종류(공연 이미지·홈 배너·후기 사진)를 보내고 상태(`ACCEPTED`·`REJECTED`)·파생본 키·폭·높이·거절 사유를 받는다. 악성 코드 검사 결과가 아직 없으면 `SCAN_PENDING`이고 작업 워커가 1분 [가정] 뒤 다시 맡긴다. 30초 [가정]을 넘으면 작업 워커가 작업 원장에서 다시 맡긴다(추천 적용 2026-10-29, ADR-0148 결정 8) | `source_key`(원본 객체 키. 같은 원본은 같은 결과) | docs/security/asvs/catalog-review.md 5.4.3, ADR-0130(기술 검토 중간-068) | 있음 |
 | core-svc catalog → identity-svc | `ResolveMemberCodes` | 판매 자격 명단 올리기의 회원 코드 → 계정 ID 변환(`MemberCodeService`): 대문자 회원 코드를 한 번에 10,000개 [가정]까지 보내 가입을 마친 ACTIVE 계정의 것만 받는다. 데드라인 2초 [가정], 실패하면 core-svc는 명단을 반영하지 않고 503이다. 서버는 BUILD_ORDER GAT-050이 만든다(추천 적용 2026-11-10, ADR-0261 결정 6) | — | docs/design/d5-screen-blueprint.md §6.7, ADR-0261 | 있음 |
+
+- 2026-11-13 HOT-160(BAT-050): ticket.proto에 `ListTickets`(월렛)와 `IssueTicketsRequest.event_starts_at`, `IssuedTicket.event_id`·`qr_payload`·`ticket_key`, `CANCEL_TICKET_RESULT_ALREADY_CANCELLED`를 더했다. 서비스 42·메서드 83개다.
 
 ## 4. 이 초안에 넣지 않은 것
 

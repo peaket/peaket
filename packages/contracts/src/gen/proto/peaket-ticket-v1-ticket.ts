@@ -32,6 +32,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "ListHeldTickets": {
                       "requestType": "ListHeldTicketsRequest",
                       "responseType": "ListHeldTicketsResponse"
+                    },
+                    "ListTickets": {
+                      "requestType": "ListTicketsRequest",
+                      "responseType": "ListTicketsResponse"
                     }
                   }
                 },
@@ -57,6 +61,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "issue_generation": {
                       "type": "int64",
                       "id": 5
+                    },
+                    "event_starts_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 6
                     }
                   }
                 },
@@ -116,6 +124,18 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "order_id": {
                       "type": "string",
                       "id": 4
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 5
+                    },
+                    "qr_payload": {
+                      "type": "string",
+                      "id": 6
+                    },
+                    "ticket_key": {
+                      "type": "string",
+                      "id": 7
                     }
                   }
                 },
@@ -156,7 +176,8 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "CANCEL_TICKET_RESULT_REFUND_AFTER_CLOSE": 2,
                     "CANCEL_TICKET_RESULT_NOT_PAYER_HOLDER": 3,
                     "CANCEL_TICKET_RESULT_TRANSFER_PENDING": 4,
-                    "CANCEL_TICKET_RESULT_EVENT_STARTED": 5
+                    "CANCEL_TICKET_RESULT_EVENT_STARTED": 5,
+                    "CANCEL_TICKET_RESULT_ALREADY_CANCELLED": 6
                   }
                 },
                 "CancelTicketOutcome": {
@@ -318,6 +339,67 @@ export const ticketV1Ticket: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "HeldTicket",
                       "id": 1
+                    }
+                  }
+                },
+                "ListTicketsRequest": {
+                  "fields": {
+                    "account_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "cursor": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "limit": {
+                      "type": "int32",
+                      "id": 3
+                    }
+                  }
+                },
+                "WalletTicket": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "seat_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "status": {
+                      "type": "TicketStatus",
+                      "id": 5
+                    },
+                    "issued_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 6
+                    },
+                    "qr_payload": {
+                      "type": "string",
+                      "id": 7
+                    }
+                  }
+                },
+                "ListTicketsResponse": {
+                  "fields": {
+                    "tickets": {
+                      "rule": "repeated",
+                      "type": "WalletTicket",
+                      "id": 1
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "id": 2
                     }
                   }
                 },

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@peaket/config/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@peaket/platform": ["../../packages/platform/src/index.ts"]
+    },
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["src", "test", "test-int", "scripts", "drizzle.config.ts"]
+}

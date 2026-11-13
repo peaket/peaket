@@ -11,6 +11,8 @@ export * from './domain/deposit-cancel.js';
 export * from './domain/reconciliation.js';
 export * from './domain/pg-selection.js';
 export * from './domain/entry-pause.js';
+export * from './domain/ticket-issuer.js';
+export { TicketGrpcIssuer, type TicketGrpcIssuerOptions } from './adapters/ticket-grpc-issuer.js';
 export { CachedPgSelectionReader, type CachedPgSelectionReaderOptions, PG_SELECTION_CACHE_MAX_EVENTS, PG_SELECTION_CACHE_READ_BUDGET_MS, PG_SELECTION_CACHE_TTL_MS } from './application/pg-selection-cache.js';
 export { CachedEntryPauseReader, type CachedEntryPauseReaderOptions, ENTRY_PAUSE_CACHE_READ_BUDGET_MS, ENTRY_PAUSE_CACHE_TTL_MS, ENTRY_PAUSE_MAX_STALE_MS, EntryPauseReleaseWatcher, type EntryPauseReleaseWatcherDeps } from './application/entry-pause-cache.js';
 export { type EventPaymentPause, GetNewPaymentPause, type GetNewPaymentPauseDeps } from './application/get-new-payment-pause.js';

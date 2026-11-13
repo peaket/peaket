@@ -1,0 +1,8 @@
+// drizzle-kit generate용 tsconfig: @peaket/platform의 paths를 비워 빌드된 패키지(dist)를 쓰게 한다.
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {}
+  }
+}
