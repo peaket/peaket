@@ -303,3 +303,30 @@ baseline 무대에서 100초 K7 1회(드레인 20초·최소 3초 폴링):
 - 쓰기·커밋 묶음 코드는 이번에 넣지 않았다. 8.2의 상위 질의가 모두 작고, `xact_commit` 101,355회/30초·WAL fsync 27,168회/30초라 **한두 질의를 묶는 것으로 목표가 바뀌지 않는다.** A등급 제품 코드로 트랜잭션 경계를 바꾸는 일은 별도 배치에서 단위·test-int·변이·4관점 리뷰를 갖춰야 한다.
 - 다음 후보: (가) `payment_confirm_job`·`order_saga_job`·`ticket_issue_job`의 **백그라운드 집기/결과 반영 커밋 수**를 줄이는 배치(예: 집기 batch 확대·결과 반영 트랜잭션 병합), (나) Postgres를 별도 노드/볼륨으로 옮겨 WAL fsync를 분리하는 무대, (다) 3~5초 꼬리를 만드는 charge 구간을 payment-svc·시뮬레이터 쪽에서 더 계측하는 것.
 - K2는 R-514의 예열 절반 수정으로 짧은 30초 dropped 0·p99 36.0~38.4ms를 확인했다. A/A는 그 무대로 다음에 세운다.
+
+## 10. K2 2,000/s 유효 3회·A/A (2026-11-13, R-516)
+
+- 무대: v1 1.5Gi, 4발생기 CPU 2·1Gi, `--mode hot`, 예열 60초·본구간 60초. R-514의 예열 도착률 절반(1,000/s)+`gracefulStop` 5초+5초 틈.
+- 세 실행 모두 **dropped 0·시나리오 오류 0**, hold p99 **21.5~22.8ms**, `hold_p99_50ms` pass, `hold_p999_150ms` pass, 유효.
+
+| 실행 | hold p99 | dropped | 판정 |
+| --- | ---: | ---: | --- |
+| r23 | 21.74ms | 0 | 유효 |
+| r24 | 22.36ms | 0 | 유효 |
+| r25 | 22.81ms | 0 | 유효 |
+
+- **A/A 조용한 쌍**: r23/r24 p99 비율 **0.9723(2.77% 차이)**, ±9.6% 안. r24/r25도 0.9800(2.0%)로 안정. **A/A 성립.**
+- 성능 장부: `2026-11-13-k2-v1-hot-tls-r23-bat042`·`r24`·`r25`를 기록하고 `index.py` 표를 갱신했다.
+
+## 11. BAT-043(HOT-476) 백그라운드 집기 batch·charge 계측(2026-11-13, R-516)
+
+- 백그라운드 집기 batch를 늘렸다: `SAGA_CLAIM_LIMIT` 20→50, `TICKET_ISSUE_CLAIM_LIMIT` 50→100, `CONFIRM_EXPIRED_BATCH` 50→100. 단위 시험 purchase 287·payment 317 통과.
+- 결과 반영 트랜잭션 병합은 하지 않았다. 각 주문·결제의 결과 반영은 한 트랜잭션 안에서 이미 묶여 있고, 여러 주문을 한 트랜잭션으로 합치면 잠금 차례·STALE 처리·재시도가 복잡해져 A등급 리뷰 범위를 넘는다.
+- K7 진단 1회(100초, 드레인 20초, 3초 폴링): 공식 **167/9,422(1.77%) fail**, p99 **3,773.6ms fail**, 3~5초 **99/9,589(1.03%)**, 429 12/9,422(0.13%), PENDING 4(3초 전 포기 0), 드레인 145/0, dropped/오류/`startSkewS` 0으로 유효. 이전 BAT-042 진단(5.62%·4,297.1ms·3.42%)보다 좋아졌지만 목표 <0.2%·p99 <3초·공식 ≤1%에는 미달.
+- charge 구간 계측(같은 100초, `hot_path_stage_seconds` p99):
+  - `payment.confirm.claim` **19.7ms**, `payment.confirm.mark` 49.6ms, `payment.confirm.finish` **52.2ms** — 백그라운드 집기·결과 반영은 작다.
+  - `payment.confirm.gateway` **1,783ms** — 결제사(시뮬레이터) 승인 호출이 3~5초 꼬리의 큰 몫.
+  - `payment.status.wait` **3,455ms**, `payment.status.read` 186ms, `payment.status.poll` 48ms — purchase long polling이 gateway 결과를 기다린다.
+  - `saga.total` 630ms, `payment.result.total` 471ms, resolution `direct` p99 1.88s·`retry_queue` p99 1.67s.
+- **귀속: 3~5초 꼬리는 백그라운드 집기/결과 반영 커밋이 아니라 `payment.confirm.gateway`(시뮬레이터 승인 지연·큐)와 `payment.status.wait`(그 결과를 기다리는 long polling)다.** 집기 batch 확대는 커밋 수를 줄였지만 이 꼬리를 직접 줄이지 않는다.
+- 다음 결정 후보(소유자): (가) 시뮬레이터 승인 지연 분포·동시 처리(기본 lognormal p99 1.5초)를 무대에서 조정할지, (나) `payment.status.wait`의 long polling·결과 반영 경로를 더 줄일지, (다) 목표 3~5초 <0.2%·공식 ≤1%를 known gap으로 둘지. 코드만으로 0.2%를 맞추려면 시뮬레이터 charge 모델 자체를 바꿔야 한다.

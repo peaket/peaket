@@ -41,7 +41,8 @@ export const CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS = 5_000;
 /** 실행기가 승인 호출을 감싸는 한도 72초 [가정](어댑터의 시간 합 상한 70초 + 여유. 임대 75초보다 짧아 호출 중인 행을 다음 실행기가 잔해로 잡지 않는다) */
 export const CONFIRM_CALL_GUARD_MS = 72_000;
 /** 기한 지난 행을 틱마다 채널당 잡는 수(동시에도 이만큼까지) 50건 [가정](BUILD_ORDER PRF-183 코드 리뷰) */
-export const CONFIRM_EXPIRED_BATCH = 50;
+/** BAT-043: 기한 지난 행을 한 번에 끝내는 수를 50→100으로 늘려 집기 커밋 수를 줄인다 */
+export const CONFIRM_EXPIRED_BATCH = 100;
 /** 기한 지난 행을 찾으려고 표 앞쪽에서 살펴보는 행 수 500건 [가정](밀린 표에서 틱마다 표 전체를 조인하지 않게) */
 export const CONFIRM_EXPIRED_SCAN = 500;
 /** 잡을 때 때가 된 지 이만큼 넘게 지난 명령은 여유 부족으로 재시도 큐에서 기다린 것으로 본다 1초 [가정](잡기 주기 100ms보다 충분히 길다, 경로 지표 retry_queue, BUILD_ORDER PRF-200) */

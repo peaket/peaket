@@ -95,7 +95,7 @@ const STOP_EXPECTED: readonly TicketIssueFailureCode[] = [
 const ALL_CODES: readonly TicketIssueFailureCode[] = [...GRPC_STATUS_NAMES.filter((n) => n !== 'OK'), 'CIRCUIT_OPEN', 'BAD_ANSWER'] as TicketIssueFailureCode[];
 
 describe('상수(설계 1~3·7·9의 [가정]·[정함] 값)', () => {
-  test('반복 1초·한 번에 50건·임대 30초·파드 동시 24개·데드라인 2초·부르기 전 남은 임대 5초 (ADR0106, BAT-029)', () => {
+  test('반복 1초·한 번에 100건·임대 30초·파드 동시 24개·데드라인 2초·부르기 전 남은 임대 5초 (ADR0106, BAT-029)', () => {
     expect({
       poll: TICKET_ISSUE_POLL_INTERVAL_MS,
       claim: TICKET_ISSUE_CLAIM_LIMIT,
@@ -103,7 +103,7 @@ describe('상수(설계 1~3·7·9의 [가정]·[정함] 값)', () => {
       concurrency: TICKET_ISSUE_CONCURRENCY,
       deadline: TICKET_ISSUE_CALL_DEADLINE_MS,
       minRemaining: TICKET_ISSUE_LEASE_MIN_REMAINING_MS,
-    }).toEqual({ poll: 1000, claim: 50, lease: 30_000, concurrency: 24, deadline: 2000, minRemaining: 5000 });
+    }).toEqual({ poll: 1000, claim: 100, lease: 30_000, concurrency: 24, deadline: 2000, minRemaining: 5000 });
     // 데드라인 2초 + 성공 반영이 임대 안에 끝나게 남은 임대가 데드라인보다 길다
     expect(TICKET_ISSUE_LEASE_MIN_REMAINING_MS).toBeGreaterThan(TICKET_ISSUE_CALL_DEADLINE_MS);
   });

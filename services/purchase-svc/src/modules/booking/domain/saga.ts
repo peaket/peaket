@@ -32,7 +32,8 @@ export type SagaFailTransition = 'T8' | 'T11';
 /** 폴링 간격 1초 [가정](모든 API 파드가 기한이 된 작업을 줍는다) */
 export const SAGA_POLL_INTERVAL_MS = 1000;
 /** 한 번에 집는 작업 수 20건 [가정](BAT-029: 파드 강제 종료 때 임대에 남는 작업을 1% 아래로 줄이기 위해 50에서 내렸다) */
-export const SAGA_CLAIM_LIMIT = 20;
+/** BAT-043: 한 번에 집는 수를 20→50으로 늘려 백그라운드 집기 커밋 수를 줄인다 */
+export const SAGA_CLAIM_LIMIT = 50;
 /** 임대 15초 [가정](lease_until = 지금 + 이 값. 끝나기 전에는 다른 파드가 집지 않는다. BAT-029: 파드 강제 종료 때 30초 잔해를 줄이기 위해 30초에서 내렸다) */
 export const SAGA_LEASE_MS = 15_000;
 /** 다시 하기 첫 간격 1초 [가정] */

@@ -986,7 +986,7 @@ describe('리뷰 고침(2026-11-05 코드 리뷰)', () => {
     expect(pool).toHaveLength(50 - out.claimed);
   });
 
-  test('리뷰 고침 H1_빈자리가 없으면 틱은 큐 행을 잡지 않는다(claimDue를 부르지 않는다). 빈자리가 3이면 claimDue(3)이고, 상한이 50보다 크면 50이다 (ADR0106)', async () => {
+  test('리뷰 고침 H1_빈자리가 없으면 틱은 큐 행을 잡지 않는다(claimDue를 부르지 않는다). 빈자리가 3이면 claimDue(3)이고, 상한이 100보다 크면 100이다 (ADR0106)', async () => {
     fx.holdIssue = true;
     const r = runner({ concurrency: 1 });
     const busy = later(r.runJob(issueJob()));
@@ -1006,7 +1006,7 @@ describe('리뷰 고침(2026-11-05 코드 리뷰)', () => {
 
     fx.holdIssue = false;
     await runner({ concurrency: 100 }).tick();
-    expect(fx.claimDueArgs.at(-1)).toEqual([50, 30_000]);
+    expect(fx.claimDueArgs.at(-1)).toEqual([100, 30_000]);
   });
 
   test('리뷰 고침 H1_자리는 발권 호출과 그 뒤 쓰기가 끝날 때까지 쥔다: 상한 1에서 첫 행의 성공 반영(complete)이 끝나기 전에는 둘째 행의 발권을 부르지 않는다 (ADR0106)', async () => {

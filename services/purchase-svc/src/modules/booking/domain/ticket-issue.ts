@@ -21,7 +21,8 @@ export const TICKET_ISSUE_ACTOR = 'system:ticket-issue';
 /** 반복 간격 1초 [가정](모든 API 파드가 기한이 된 큐 행을 잡는다) */
 export const TICKET_ISSUE_POLL_INTERVAL_MS = 1000;
 /** 한 번에 잡는 큐 행 수 50건 [가정] */
-export const TICKET_ISSUE_CLAIM_LIMIT = 50;
+/** BAT-043: 한 번에 집는 수를 50→100으로 늘려 백그라운드 집기 커밋 수를 줄인다 */
+export const TICKET_ISSUE_CLAIM_LIMIT = 100;
 /** 임대 30초 [가정](lease_until = 지금 + 이 값. 끝나기 전에는 다른 파드가 잡지 않는다) */
 export const TICKET_ISSUE_LEASE_MS = 30_000;
 /** 파드마다 동시에 부르는 발권 호출 수 24개 [가정](BAT-029: 승인 100/s를 따라가도록 8에서 올렸다) */

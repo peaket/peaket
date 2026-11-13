@@ -1676,7 +1676,7 @@ describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
         await expect(f.runner.tick()).resolves.toEqual({ claimed: 1 });
         await flush();
 
-        expect(f.jobs.expiredArgs.at(-1)).toEqual(['SIMULATOR', 50, POD, 75_000, DEADLINE_MS]);
+        expect(f.jobs.expiredArgs.at(-1)).toEqual(['SIMULATOR', 100, POD, 75_000, DEADLINE_MS]);
         expect(f.jobs.finished.map((x) => [x.target.paymentId, x.finish])).toEqual([[OTHER_PAYMENT, { status: 'FAILED', failureCategory: 'EXPIRED' }]]);
         expect(f.gateway.calls).toHaveLength(1);
         expect(tokensLeft(f)).toBe(tokens);
@@ -1684,7 +1684,7 @@ describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
         await f.runner.whenIdle();
       });
 
-      test('P-T40_리뷰 고침 M5: 채널마다 동시 50건까지 잡고 끝난 만큼 다시 잡는다', async () => {
+      test('P-T40_리뷰 고침 M5: 채널마다 동시 100건까지 잡고 끝난 만큼 다시 잡는다', async () => {
         const f = setup();
         const finish = deferred<FinishConfirmResult>();
         f.jobs.finishResults = Array.from({ length: 20 }, () => finish.promise);
@@ -1693,18 +1693,18 @@ describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
         await f.runner.tick();
         await flush();
         await f.runner.tick();
-        expect(f.jobs.expiredArgs.map((a) => a[1])).toEqual([50, 30]);
+        expect(f.jobs.expiredArgs.map((a) => a[1])).toEqual([100, 80]);
         finish.resolve('APPLIED');
         await f.runner.whenIdle();
         await f.runner.tick();
-        expect(f.jobs.expiredArgs.at(-1)![1]).toBe(50);
+        expect(f.jobs.expiredArgs.at(-1)![1]).toBe(100);
       });
 
       test('P-T40_리뷰 고침 M5: 기한은 그 어댑터의 capabilities에서 받고, 어댑터가 없는 채널은 묻지 않는다', async () => {
         const f = setup();
         f.gateway.deadlineMs = 60_000;
         await f.runner.tick();
-        expect(f.jobs.expiredArgs).toEqual([['SIMULATOR', 50, POD, 75_000, 60_000]]);
+        expect(f.jobs.expiredArgs).toEqual([['SIMULATOR', 100, POD, 75_000, 60_000]]);
       });
 
       test('P-T40_리뷰 고침 M5: 기한 지난 행의 잡기가 던져도 그 채널의 승인 잡기는 돈다 [ASVS v5.0.0-16.3.4]', async () => {
