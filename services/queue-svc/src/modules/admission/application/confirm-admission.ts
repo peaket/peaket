@@ -10,7 +10,8 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { candidateEligibilityLists, type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS, TURN_GRACE_MS } from '../domain/admission.js';
-import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
+import { priorityGrantUsable } from '../domain/priority-grant.js';
+import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type PriorityGrantStore } from '../domain/ports.js';
 import { AdmissionError } from './admission-error.js';
 
 export const ADMISSION_SCHEDULES = Symbol('queue.AdmissionSchedules');
@@ -48,6 +49,8 @@ export class ConfirmAdmission {
     @Inject(ADMISSION_SIGNALS) private readonly signals: AdmissionSignals,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(ADMISSION_POLICY) policy?: AdmissionPolicy,
+    /** 우선 구매 권리 사본(GAT-135). 없으면 priorityGrantId 요청은 404로 닫는다 */
+    @Optional() @Inject(PRIORITY_GRANTS) private readonly priorityGrants?: PriorityGrantStore,
   ) {
     const g = policy?.turnGraceMs ?? TURN_GRACE_MS;
     if (!Number.isInteger(g) || g <= 0) throw new Error(`입장 확정 유예는 양의 정수(ms)여야 한다: ${g}`);
@@ -57,8 +60,8 @@ export class ConfirmAdmission {
   async run(i: ConfirmInput): Promise<ConfirmResult> {
     const now = this.clock.now();
     const b = i.body;
-    // 우선 구매 권리(GAT-135)는 아직 받지 않는다. 사본이 없으니 정본의 '없음'과 같은 응답이다
-    if (b.priorityGrantId) throw new AdmissionError('PRIORITY_GRANT_NOT_FOUND', '우선 구매 권리 사본이 없다(GAT-135 전)');
+    // 우선 구매 입장(GAT-135, ADR-0171): 대기 번호·셔플·15분 만료 없이 사본만 보고 새 여정으로 입장한다(판매 종료·매진 뒤에도)
+    if (b.priorityGrantId) return this.#priority(i, b.priorityGrantId, now);
     const presented = b.queueTicket ?? b.lobbyToken;
     if (!presented) throw new AdmissionError('TICKET_INVALID', '대기표도 참가 토큰도 없다');
     const hash = this.tickets.hash(presented);
@@ -178,6 +181,36 @@ export class ConfirmAdmission {
       }
       throw e;
     }
+  }
+
+  /**
+   * 우선 구매 입장(GAT-135, ADR-0171): 그 계정·회차의 사본이 같은 권리 ID의 OFFERED이고 만료 전일 때만 입장 토큰을 준다.
+   * 대기 번호·셔플·15분 만료·판매 종료·매진을 보지 않고, 입장 자리 수에도 세지 않는다. 새 여정 ID(jny)를 만들고 클레임 prio에 권리 ID를 싣는다.
+   * 결제가 실패하면 같은 권리로 다시 입장할 수 있다(한 번만 사게 하는 것은 purchase-svc가 지킨다).
+   */
+  async #priority(i: ConfirmInput, grantId: string, now: number): Promise<ConfirmResult> {
+    const copy = this.priorityGrants ? await this.priorityGrants.get({ accountId: i.accountId, eventId: i.eventId, grantId }) : undefined;
+    if (!priorityGrantUsable(copy, grantId, now)) throw new AdmissionError('PRIORITY_GRANT_NOT_FOUND', '쓸 수 있는 우선 구매 권리 사본이 없다');
+    const jny = randomUUID();
+    const { token, expiresAtMs } = this.signer.sign({
+      jti: randomUUID(),
+      accountId: i.accountId,
+      sessionId: i.sessionId,
+      eventId: i.eventId,
+      jny,
+      nowMs: now,
+      priorityGrantId: grantId,
+    });
+    const schedule = await this.schedules.get(i.eventId);
+    const seatmapLayoutPath = schedule ? seatmapLayoutPathOf(i.eventId, schedule) : undefined;
+    return {
+      status: 'ADMITTED',
+      admissionToken: token,
+      purchaseSessionExpiresAt: new Date(expiresAtMs).toISOString(),
+      serverTimeMs: now,
+      verificationReason: null,
+      ...(seatmapLayoutPath ? { seatmapLayoutPath } : {}),
+    };
   }
 
   /** 이 요청이 새로 채운 q:adm만 지운다(값이 이 요청이 채운 그대로일 때만) */

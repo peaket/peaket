@@ -23,10 +23,17 @@ export interface ScannerChangeWriter {
   append(tx: DbTransaction, eventId: string, kind: string, payload: Record<string, unknown>): Promise<number>;
 }
 
+/** 취소 트랜잭션 안에서 그 티켓의 유효 기기 키를 폐기하는 포트(GAT-140) */
+export interface DeviceKeyRevoker {
+  revokeActiveInTx(tx: DbTransaction, ticketId: string, nowMs: number): Promise<Uint8Array | undefined>;
+}
+
 export interface DrizzleTicketStoreOptions {
   readonly database: Database;
   /** 없으면 변경 기록을 남기지 않는다(단위 시험·구성 전) */
   readonly changes?: ScannerChangeWriter;
+  /** 없으면 기기 키를 폐기하지 않는다(단위 시험·구성 전) */
+  readonly deviceKeys?: DeviceKeyRevoker;
 }
 
 const statusOf = (v: string): TicketStatus => {
@@ -153,6 +160,7 @@ export class DrizzleTicketStore implements TicketStore {
     const started = row.eventStartsAt !== null && input.nowMs >= row.eventStartsAt.getTime();
     const status: TicketStatus = started ? 'VOIDED' : 'REFUNDED';
     const result: CancelTicketOutcome['result'] = started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
+    const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, ticketId, input.nowMs);
     await tx
       .update(ticket)
       .set({ status, keyRevokedAt: new Date(input.nowMs), version: row.version + 1 })
@@ -166,7 +174,7 @@ export class DrizzleTicketStore implements TicketStore {
     });
     if (this.o.changes) {
       await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId, status, version: row.version + 1 });
-      await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId, keyId: null });
+      await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
     }
     return result;
   }

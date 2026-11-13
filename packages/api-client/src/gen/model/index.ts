@@ -267,6 +267,7 @@ export * from './createTicketAddonBody';
 export * from './createTicketAddonBodyOptions';
 export * from './createTicketBoothRequestBody';
 export * from './createTicketCancellationBody';
+export * from './createTicketDeviceKey201';
 export * from './createTicketDeviceKeyBody';
 export * from './createTicketDeviceKeyBodyPublicKeyJwk';
 export * from './createTicketDeviceKeyBodyPublicKeyJwkAlg';

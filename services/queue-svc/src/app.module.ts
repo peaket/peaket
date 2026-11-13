@@ -1,7 +1,7 @@
 // 뿌리 모듈: 컨텍스트 모듈을 모은다. 진입(사전 검증·진입), 대기 상태 파일, 입장 확정, 추가 검증(제출·이의, BOT-090)이 있다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotPathMetrics, HotRedis } from '@peaket/platform';
-import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from './modules/admission/index.js';
+import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type PriorityGrantStore } from './modules/admission/index.js';
 import { type ArrivalCookies, type ArrivalSignals, type DegradedLimits, EntryModule, type EligibilitySignals, type EventSchedules, type FirstVisitCookies, type FirstVisitSignals, type LeaveSignals, type LobbySignals, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
 import { type ShuffleProofSource, StateModule, type StateSnapshots } from './modules/state/index.js';
 import { VerificationModule, type VerificationModuleOptions, type VerificationStore } from './modules/verification/index.js';
@@ -32,7 +32,7 @@ export class AppModule {
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
       /** 입장 확정: 운영은 입장 토큰 서명기를 꼭 넘긴다(시험은 저장소·서명기를 넘기지 않으면 새로 만든다) */
-      admission?: { signer?: AdmissionTokens; signals?: AdmissionSignals; store?: AdmissionStore };
+      admission?: { signer?: AdmissionTokens; signals?: AdmissionSignals; store?: AdmissionStore; priorityGrants?: PriorityGrantStore };
       /** 추가 검증 제출·이의(BOT-090): identity·trust 클라이언트, 건 요청 생산자. 넘기지 않은 것은 늘 503이다(시험은 메모리 저장소를 넘길 수 있다) */
       verification?: Omit<VerificationModuleOptions, 'storage' | 'redis' | 'store' | 'schedules'> & { store?: VerificationStore };
     },
@@ -45,7 +45,7 @@ export class AppModule {
     const admission =
       'redis' in o
         ? AdmissionModule.register({ storage: 'redis', redis: o.redis, tokens: o.tokens, signer: requireSigner(a.signer), ...(a.signals ? { signals: a.signals } : {}) })
-        : AdmissionModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, ...(a.store ? { store: a.store } : {}), ...(a.signer ? { signer: a.signer } : {}), ...(a.signals ? { signals: a.signals } : {}) });
+        : AdmissionModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, ...(a.store ? { store: a.store } : {}), ...(a.signer ? { signer: a.signer } : {}), ...(a.signals ? { signals: a.signals } : {}), ...(a.priorityGrants ? { priorityGrants: a.priorityGrants } : {}) });
     const { store: verificationStore, ...v } = o.verification ?? {};
     const verification = 'redis' in o ? VerificationModule.register({ storage: 'redis', redis: o.redis, ...v }) : VerificationModule.register({ storage: 'memory', schedules: o.schedules, ...(verificationStore ? { store: verificationStore } : {}), ...v });
     return { module: AppModule, imports: [entry, state, admission, verification] };

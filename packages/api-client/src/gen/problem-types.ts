@@ -25,6 +25,7 @@ export type ProblemType =
   | 'batching'
   | 'booking-restricted'
   | 'booth-mismatch'
+  | 'booth-not-authorized'
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'case-not-actioned'
@@ -79,6 +80,7 @@ export type ProblemType =
   | 'inquiry-closed'
   | 'invalid-auto-condition'
   | 'invalid-command'
+  | 'invalid-device-key'
   | 'invalid-dpop-proof'
   | 'invalid-enrollment-code'
   | 'invalid-query'
@@ -228,6 +230,7 @@ export type ProblemType =
   | 'staff-invitation-email-mismatch'
   | 'subscription-limit'
   | 'transfer-locked'
+  | 'transfer-not-allowed'
   | 'trigger-deferred'
   | 'under-14'
   | 'unknown-promoter'
@@ -267,6 +270,7 @@ export const PROBLEM_TYPES = {
   'batching': { status: 503, title: "순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요" },
   'booking-restricted': { status: 403, title: "예매가 제한된 계정입니다" },
   'booth-mismatch': { status: 409, title: "티켓 보유자와 다른 분입니다" },
+  'booth-not-authorized': { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" },
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
@@ -321,6 +325,7 @@ export const PROBLEM_TYPES = {
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
   'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
   'invalid-command': { status: 422, title: "명령 값이 올바르지 않습니다" },
+  'invalid-device-key': { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" },
   'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
   'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
@@ -470,6 +475,7 @@ export const PROBLEM_TYPES = {
   'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },
+  'transfer-not-allowed': { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" },
   'trigger-deferred': { status: 409, title: "판정 보류 중인 지표입니다" },
   'under-14': { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" },
   'unknown-promoter': { status: 422, title: "등록되지 않은 파트너사입니다" },

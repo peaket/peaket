@@ -19,7 +19,7 @@ const AdmissionBody = z
     firstEtaAtMs: z.unknown().optional(),
   })
   .strict()
-  .refine((b) => b.queueTicket !== undefined || b.lobbyToken !== undefined || b.priorityGrantId !== undefined, { message: '대기표·참가 토큰·우선 구매 권리 ID 가운데 하나가 있어야 한다' });
+  .refine((b) => [b.queueTicket, b.lobbyToken, b.priorityGrantId].filter((v) => v !== undefined).length === 1, { message: '대기표·참가 토큰·우선 구매 권리 ID 가운데 하나만 있어야 한다' });
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */
 const KEY_PART = /^[A-Za-z0-9_-]{1,64}$/;

@@ -4,26 +4,13 @@
 // 대기열 Redis에 닿지 못하면 UNAVAILABLE(ops-svc 작업 워커가 같은 건·판으로 다시 보낸다), 예상하지 못한 오류는 INTERNAL이다.
 // 오류 문구는 고정 글이고 받은 값을 싣지 않는다(docs/api/proto/README.md §2).
 import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import { queueV1Queue } from '@peaket/contracts/proto';
+import { queuePackage } from '../../../grpc-package.js';
 import { QueueStoreUnavailable } from '../../entry/index.js';
 import type { AppealEntryState, GetVerificationAppeal, ResolveVerificationAppeal } from '../application/appeals.js';
 import { VerificationError } from '../application/verification-error.js';
 import type { AppealOutcome, ResolveResult } from '../domain/verification.js';
 
-const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
-
-export interface QueuePackage {
-  VerificationAppealService: grpc.ServiceClientConstructor;
-}
-let pkg: QueuePackage | undefined;
-export function queuePackage(): QueuePackage {
-  if (!pkg) {
-    const def = protoLoader.fromJSON(queueV1Queue as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
-    pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { queue: { v1: QueuePackage } } }).peaket.queue.v1;
-  }
-  return pkg;
-}
+export { queuePackage };
 
 type Req = Record<string, unknown>;
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');

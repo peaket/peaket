@@ -1,9 +1,10 @@
 // ticket DB 스키마(BUILD_ORDER HOT-160, docs/data.md §2 `ticket`·`ticket_cancellation`, docs/features/payment.md §2·§4.1).
 // 마이그레이션은 migrations/0000_ticket.sql이다. 다른 논리 DB의 주문·좌석 ID에는 외래키를 걸지 않는다.
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 
 /** 발권 세대 단위 멱등 기록. 같은 (order_id, issue_generation)은 한 번만 발권한다. */
 export const ticketIssue = pgTable(
@@ -54,6 +55,29 @@ export const ticket = pgTable(
     index('ticket_wallet_idx').on(t.accountId, t.createdAt, t.id),
     index('ticket_order_idx').on(t.orderId, t.issueGeneration),
     check('ticket_status_check', sql`${t.status} IN ('ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED')`),
+  ],
+);
+
+/** 입장용 기기 공개키(offline-gate §2·§3, ADR-0025·0051). 티켓당 유효 키 하나, 폐기 키는 목록에 남긴다. */
+export const deviceKey = pgTable(
+  'device_key',
+  {
+    id: uuid('id').primaryKey(),
+    ticketId: uuid('ticket_id').notNull(),
+    /** QR v1 keyId 8바이트 */
+    keyId: bytea('key_id').notNull(),
+    /** 압축 P-256 공개키 33바이트 */
+    publicKey: bytea('public_key').notNull(),
+    reason: text('reason').notNull(),
+    registeredAt: at('registered_at').notNull(),
+    revokedAt: at('revoked_at'),
+  },
+  (t) => [
+    uniqueIndex('device_key_active_key').on(t.ticketId).where(sql`${t.revokedAt} IS NULL`),
+    index('device_key_ticket_key_idx').on(t.ticketId, t.keyId),
+    check('device_key_reason_check', sql`${t.reason} IN ('ISSUE', 'REISSUE', 'TRANSFER', 'BOOTH')`),
+    check('device_key_key_id_len', sql`octet_length(${t.keyId}) = 8`),
+    check('device_key_public_key_len', sql`octet_length(${t.publicKey}) = 33`),
   ],
 );
 

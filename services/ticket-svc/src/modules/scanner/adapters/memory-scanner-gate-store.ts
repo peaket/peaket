@@ -1,5 +1,6 @@
 // 시험·로컬용 스캐너 목록·스캔·이상 표시 저장소. 운영은 DrizzleScannerGateStore다.
 import { randomUUID } from 'node:crypto';
+import type { DeviceKeyStore } from '../../ticket/index.js';
 import type { ScannerGateStore } from '../domain/ports.js';
 import type {
   GateFlagAwareness,
@@ -67,6 +68,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   readonly changeLog = new Map<string, StoredChange[]>();
   readonly seq = new Map<string, number>();
 
+  constructor(private readonly deviceKeys?: DeviceKeyStore) {}
+
   seedTicket(t: ScannerGateTicketSeed): void {
     this.tickets.set(t.ticketId, { ...t });
   }
@@ -83,6 +86,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
     const tickets = [...this.tickets.values()].filter((t) => t.eventId === i.eventId).sort((a, b) => a.ticketId.localeCompare(b.ticketId));
     const zones = [...new Set(tickets.map((t) => t.gateZone).filter((z) => z !== ''))].sort();
+    const keysByTicket = this.deviceKeys ? await this.deviceKeys.activeKeysByEvent(i.eventId) : new Map<string, { keyId: string; publicKey: string }[]>();
+    const revokedKeyIds = this.deviceKeys ? await this.deviceKeys.revokedKeyIdsByEvent(i.eventId) : [];
     const views = tickets.map((t) => {
       const last = this.#latestScan(t.ticketId);
       return {
@@ -90,7 +95,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         gateZone: t.gateZone,
         seatLabel: t.seatId,
         status: t.status,
-        keys: [],
+        keys: keysByTicket.get(t.ticketId) ?? [],
         ...(last && last.method !== 'VERIFY'
           ? {
               scanState: {
@@ -108,7 +113,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       gateZones: zones,
       serverTime: new Date(i.nowMs).toISOString(),
       tickets: views,
-      revokedKeyIds: [],
+      revokedKeyIds,
       lastSeq: this.seq.get(i.eventId) ?? 0,
     };
   }
@@ -139,6 +144,16 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       let result: ScanResult = scan.result;
       let reason: string | undefined = scan.reason;
       const kinds: GateFlagKind[] = [];
+      let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
+      if (scan.keyId !== undefined) {
+        const keyId = /^[A-Za-z0-9_-]{11}$/.test(scan.keyId) ? Buffer.from(scan.keyId, 'base64url') : undefined;
+        if (!keyId || keyId.length !== 8) keyBad = 'INVALID_QR';
+        else {
+          const state = this.deviceKeys ? await this.deviceKeys.keyState(scan.ticketId, new Uint8Array(keyId)) : 'UNKNOWN';
+          if (state === 'REVOKED') keyBad = 'KEY_REVOKED';
+          else if (state === 'UNKNOWN') keyBad = 'KEY_UNKNOWN';
+        }
+      }
       if (!ticket || ticket.eventId !== i.eventId) {
         result = 'REJECT';
         reason = 'UNKNOWN_TICKET';
@@ -149,6 +164,9 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       } else if (scan.method === 'VERIFY') {
         result = 'CHECK';
         reason = 'VERIFY_ONLY';
+      } else if (keyBad) {
+        result = 'REJECT';
+        reason = keyBad;
       } else if (scan.direction === 'IN' && latest?.direction === 'IN') {
         result = 'REJECT';
         reason = 'ALREADY_IN';

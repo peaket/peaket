@@ -37,6 +37,7 @@ import type {
   CreateTicketAddonBody,
   CreateTicketBoothRequestBody,
   CreateTicketCancellationBody,
+  CreateTicketDeviceKey201,
   CreateTicketDeviceKeyBody,
   CreateTicketTransferBody,
   CreateTransferRecipientLookupBody,
@@ -198,13 +199,23 @@ export function useListTickets<TData = Awaited<ReturnType<typeof listTickets>>, 
 
 
 export type createTicketDeviceKeyResponse201 = {
-  data: void
+  data: CreateTicketDeviceKey201
   status: 201
 }
 
 export type createTicketDeviceKeyResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type createTicketDeviceKeyResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createTicketDeviceKeyResponse422 = {
+  data: ProblemResponse
+  status: 422
 }
 
 export type createTicketDeviceKeyResponse429 = {
@@ -215,7 +226,7 @@ export type createTicketDeviceKeyResponse429 = {
 export type createTicketDeviceKeyResponseSuccess = (createTicketDeviceKeyResponse201) & {
   headers: Headers;
 };
-export type createTicketDeviceKeyResponseError = (createTicketDeviceKeyResponse403 | createTicketDeviceKeyResponse429) & {
+export type createTicketDeviceKeyResponseError = (createTicketDeviceKeyResponse403 | createTicketDeviceKeyResponse404 | createTicketDeviceKeyResponse422 | createTicketDeviceKeyResponse429) & {
   headers: Headers;
 };
 
@@ -228,7 +239,7 @@ export const getCreateTicketDeviceKeyUrl = (ticketId: string,) => {
 }
 
 /**
- * FR-012, POL-018, ADR-0025, ADR-0050 결정 2, ADR-0051 결정 10·11. ISSUE는 월렛의 '이 휴대폰을 입장용으로 등록'에서만 부르고, 입장 시작 뒤 ISSUE는 재인증 토큰이 있어야 하며 계정 이메일로 알린다. REISSUE는 입장 시작 전에만, 소셜 제공자 재인증 토큰이 있어야 하고 티켓당 24시간에 1회까지다. 재발급하면 계정 이메일과 이전 기기에 알린다. 입장 시작 뒤 REISSUE는 403이고 BOOTH만 된다. BOOTH는 그 티켓의 부스 허용(POST /v1/scanner/booth-authorizations)이 있고 허용 뒤 10분 안일 때만 된다. TRANSFER는 양도 수락·돌려주기·양도 회수로 보유자가 바뀐 뒤 새 보유자가 같은 버튼으로 처음 등록할 때이고 ISSUE와 같은 규칙을 따른다(키는 등록 버튼으로만 만든다). 등록·폐기는 scanner_change에 남는다. 응답에 keyId(SPKI SHA-256 앞 8바이트)를 준다
+ * FR-012, POL-018, ADR-0025, ADR-0050 결정 2, ADR-0051 결정 10·11. ISSUE는 월렛의 '이 휴대폰을 입장용으로 등록'에서만 부르고, 입장 시작 뒤 ISSUE는 재인증 토큰이 있어야 하며 계정 이메일로 알린다. 이미 유효 키가 있으면 ISSUE도 첫 등록이 아니므로 재인증이 필요하고 REISSUE와 같은 24시간 1회 한도를 따른다. REISSUE는 입장 시작 전에만, 소셜 제공자 재인증 토큰이 있어야 하고 티켓당 24시간에 1회까지다. 재발급하면 계정 이메일과 이전 기기에 알린다. 입장 시작 뒤 REISSUE는 403이고 BOOTH만 된다. BOOTH는 그 티켓의 부스 허용(POST /v1/scanner/booth-authorizations)이 있고 허용 뒤 10분 안일 때만 된다. TRANSFER는 양도 수락·돌려주기·양도 회수로 보유자가 바뀐 뒤 새 보유자가 같은 버튼으로 처음 등록할 때이고 ISSUE와 같은 규칙을 따른다(키는 등록 버튼으로만 만든다). 등록·폐기는 scanner_change에 남는다. 응답에 keyId(SPKI SHA-256 앞 8바이트)를 준다
  * @summary 기기 공개키 등록(입장용 휴대폰 등록·재발급·부스). 이전 키 폐기
  */
 export const createTicketDeviceKey = async (ticketId: string,

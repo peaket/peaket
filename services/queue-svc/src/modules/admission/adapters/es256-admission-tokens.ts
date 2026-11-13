@@ -68,13 +68,35 @@ export class Es256AdmissionTokens implements AdmissionTokens {
     return new Es256AdmissionTokens({ jwk: parseJwk(ADMISSION_TOKEN_KEY_ENV, raw), issuer, ...(ecdhPublicJwk ? { ecdhPublicJwk } : {}) });
   }
 
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number; lists?: string[] }): { token: string; expiresAtMs: number } {
+  sign(c: {
+    jti: string;
+    accountId: string;
+    sessionId: string;
+    eventId: string;
+    jny: string;
+    nowMs: number;
+    firstIssuedAtMs?: number;
+    lists?: string[];
+    priorityGrantId?: string;
+  }): { token: string; expiresAtMs: number } {
     const iat = seconds(c.nowMs);
     // 같은 jti를 다시 줄 때도 만료는 첫 발급 + 최대 체류다(purchase-svc는 첫 토큰의 만료로 구매 세션을 연다, HOT-010 리뷰)
     const exp = seconds(Math.min(c.firstIssuedAtMs ?? c.nowMs, c.nowMs)) + seconds(MAX_STAY_MS);
     const head = b64({ alg: 'ES256', typ: 'admission+jwt', kid: this.#kid });
-    // lst는 그 계정이 든 판매 자격 명단 키다(글자 차례, 1~10개). 든 것이 없으면 클레임을 넣지 않는다(ADR-0265 결정 7)
-    const body = b64({ iss: this.#issuer, sub: c.accountId, aud: 'purchase', jti: c.jti, sid: c.sessionId, event: c.eventId, jny: c.jny, ...(c.lists && c.lists.length > 0 ? { lst: c.lists } : {}), iat, exp });
+    // lst는 그 계정이 든 판매 자격 명단 키다(글자 차례, 1~10개). prio는 우선 구매 권리 ID다. 없으면 클레임을 넣지 않는다(ADR-0265 결정 7, ADR-0171)
+    const body = b64({
+      iss: this.#issuer,
+      sub: c.accountId,
+      aud: 'purchase',
+      jti: c.jti,
+      sid: c.sessionId,
+      event: c.eventId,
+      jny: c.jny,
+      ...(c.lists && c.lists.length > 0 ? { lst: c.lists } : {}),
+      ...(c.priorityGrantId !== undefined ? { prio: c.priorityGrantId } : {}),
+      iat,
+      exp,
+    });
     const signed = `${head}.${body}`;
     const sig = sign('sha256', Buffer.from(signed), { key: this.#key, dsaEncoding: 'ieee-p1363' });
     return { token: `${signed}.${sig.toString('base64url')}`, expiresAtMs: exp * 1000 };

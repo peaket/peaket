@@ -321,6 +321,7 @@ export * from './createTicketAddonHeaders.zod.js';
 export * from './createTicketBoothRequestBody.zod.js';
 export * from './createTicketCancellationBody.zod.js';
 export * from './createTicketCancellationHeaders.zod.js';
+export * from './createTicketDeviceKey201.zod.js';
 export * from './createTicketDeviceKeyBody.zod.js';
 export * from './createTicketDeviceKeyHeaders.zod.js';
 export * from './createTicketReturnHeaders.zod.js';

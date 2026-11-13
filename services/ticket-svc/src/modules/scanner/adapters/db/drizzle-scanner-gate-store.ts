@@ -104,6 +104,27 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           `)
         ).rows as unknown as LatestScanRow[];
         const scanByTicket = new Map(scans.map((s) => [s.ticket_id, s]));
+        const keyRows = (
+          await tx.execute(sql`
+            select dk.ticket_id, dk.key_id, dk.public_key
+            from device_key dk join ticket t on t.id = dk.ticket_id
+            where t.event_id = ${i.eventId} and dk.revoked_at is null
+            order by dk.ticket_id, dk.registered_at
+          `)
+        ).rows as { ticket_id: string; key_id: Buffer; public_key: Buffer }[];
+        const revokedRows = (
+          await tx.execute(sql`
+            select distinct dk.key_id
+            from device_key dk join ticket t on t.id = dk.ticket_id
+            where t.event_id = ${i.eventId} and dk.revoked_at is not null
+          `)
+        ).rows as { key_id: Buffer }[];
+        const keysByTicket = new Map<string, { keyId: string; publicKey: string }[]>();
+        for (const r of keyRows) {
+          const list = keysByTicket.get(r.ticket_id) ?? [];
+          list.push({ keyId: Buffer.from(r.key_id).toString('base64url'), publicKey: Buffer.from(r.public_key).toString('base64url') });
+          keysByTicket.set(r.ticket_id, list);
+        }
         const zones = [...new Set(tickets.map((t) => t.gate_zone).filter((z) => z !== ''))].sort();
         return {
           eventId: i.eventId,
@@ -117,7 +138,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
               gateZone: t.gate_zone,
               seatLabel: t.seat_id,
               status: t.status,
-              keys: [],
+              keys: keysByTicket.get(t.id) ?? [],
               ...(scan
                 ? {
                     scanState: {
@@ -130,7 +151,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
                 : {}),
             };
           }),
-          revokedKeyIds: [],
+          revokedKeyIds: revokedRows.map((r) => Buffer.from(r.key_id).toString('base64url')),
           lastSeq: Number(seqRows[0]?.last_seq ?? 0),
         };
       },
@@ -186,6 +207,16 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         const kinds: GateFlagKind[] = [];
         let result: ScanResult = scan.result;
         let reason: string | undefined = scan.reason;
+        let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
+        if (scan.keyId !== undefined) {
+          const keyId = /^[A-Za-z0-9_-]{11}$/.test(scan.keyId) ? Buffer.from(scan.keyId, 'base64url') : undefined;
+          if (!keyId || keyId.length !== 8) keyBad = 'INVALID_QR';
+          else {
+            const state = await this.#keyState(tx, scan.ticketId, keyId);
+            if (state === 'REVOKED') keyBad = 'KEY_REVOKED';
+            else if (state === 'UNKNOWN') keyBad = 'KEY_UNKNOWN';
+          }
+        }
         if (!ticket) {
           result = 'REJECT';
           reason = 'UNKNOWN_TICKET';
@@ -196,6 +227,9 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         } else if (scan.method === 'VERIFY') {
           result = 'CHECK';
           reason = 'VERIFY_ONLY';
+        } else if (keyBad) {
+          result = 'REJECT';
+          reason = keyBad;
         } else if (scan.direction === 'IN' && latest[0]?.direction === 'IN') {
           result = 'REJECT';
           reason = 'ALREADY_IN';
@@ -319,5 +353,20 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
   async #lastSeq(tx: DbTransaction, eventId: string): Promise<number> {
     const [row] = await tx.select({ lastSeq: scannerSeq.lastSeq }).from(scannerSeq).where(eq(scannerSeq.eventId, eventId)).limit(1);
     return Number(row?.lastSeq ?? 0);
+  }
+
+  /** 스캔 기록의 keyId가 그 티켓의 유효 키인지 폐기됐는지 모르는지(같은 트랜잭션 스냅샷) */
+  async #keyState(tx: DbTransaction, ticketId: string, keyId: Buffer): Promise<'ACTIVE' | 'REVOKED' | 'UNKNOWN'> {
+    const rows = (
+      await tx.execute(sql`
+        select count(*) filter (where revoked_at is null)::int as active,
+               count(*) filter (where revoked_at is not null)::int as revoked
+        from device_key where ticket_id = ${ticketId} and key_id = ${keyId}
+      `)
+    ).rows as { active: number; revoked: number }[];
+    const r = rows[0];
+    if (Number(r?.active ?? 0) > 0) return 'ACTIVE';
+    if (Number(r?.revoked ?? 0) > 0) return 'REVOKED';
+    return 'UNKNOWN';
   }
 }

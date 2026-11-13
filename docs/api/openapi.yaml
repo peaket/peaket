@@ -58,6 +58,7 @@ x-peaket-problem-types:
     invalid-auto-condition: { status: 422, title: "희망 조건을 다시 확인해 주세요" }
     batching: { status: 503, title: "순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요" }
     booking-restricted: { status: 403, title: "예매가 제한된 계정입니다" }
+    booth-not-authorized: { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" }
     booth-mismatch: { status: 409, title: "티켓 보유자와 다른 분입니다" }
     cancel-deadline-passed: { status: 409, title: "취소할 수 있는 시각이 지났습니다" }
     case-not-actioned: { status: 409, title: "조치하지 않은 사건입니다" }
@@ -114,6 +115,7 @@ x-peaket-problem-types:
     image-type-unsupported: { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" }
     inquiry-closed: { status: 409, title: "닫힌 문의입니다" }
     invalid-command: { status: 422, title: "명령 값이 올바르지 않습니다" }
+    invalid-device-key: { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" }
     invalid-query: { status: 400, title: "목록 조건이 올바르지 않습니다" }
     invalid-seat: { status: 422, title: "고를 수 없는 좌석이 있습니다" }
     investigation-source-expired: { status: 410, title: "조사 원천 보존 기간이 끝났습니다" }
@@ -261,6 +263,7 @@ x-peaket-problem-types:
     staff-invitation-email-mismatch: { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" }
     subscription-limit: { status: 422, title: "알림 신청 수를 넘었습니다" }
     transfer-locked: { status: 409, title: "지금은 양도할 수 없는 티켓입니다" }
+    transfer-not-allowed: { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" }
     trigger-deferred: { status: 409, title: "판정 보류 중인 지표입니다" }
     under-14: { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" }
     unknown-promoter: { status: 422, title: "등록되지 않은 파트너사입니다" }
@@ -4247,11 +4250,11 @@ paths:
       tags: [tickets]
       x-peaket-roles: [fan]
       summary: 기기 공개키 등록(입장용 휴대폰 등록·재발급·부스). 이전 키 폐기
-      description: "FR-012, POL-018, ADR-0025, ADR-0050 결정 2, ADR-0051 결정 10·11. ISSUE는 월렛의 '이 휴대폰을 입장용으로 등록'에서만 부르고, 입장 시작 뒤 ISSUE는 재인증 토큰이 있어야 하며 계정 이메일로 알린다. REISSUE는 입장 시작 전에만, 소셜 제공자 재인증 토큰이 있어야 하고 티켓당 24시간에 1회까지다. 재발급하면 계정 이메일과 이전 기기에 알린다. 입장 시작 뒤 REISSUE는 403이고 BOOTH만 된다. BOOTH는 그 티켓의 부스 허용(POST /v1/scanner/booth-authorizations)이 있고 허용 뒤 10분 안일 때만 된다. TRANSFER는 양도 수락·돌려주기·양도 회수로 보유자가 바뀐 뒤 새 보유자가 같은 버튼으로 처음 등록할 때이고 ISSUE와 같은 규칙을 따른다(키는 등록 버튼으로만 만든다). 등록·폐기는 scanner_change에 남는다. 응답에 keyId(SPKI SHA-256 앞 8바이트)를 준다"
+      description: "FR-012, POL-018, ADR-0025, ADR-0050 결정 2, ADR-0051 결정 10·11. ISSUE는 월렛의 '이 휴대폰을 입장용으로 등록'에서만 부르고, 입장 시작 뒤 ISSUE는 재인증 토큰이 있어야 하며 계정 이메일로 알린다. 이미 유효 키가 있으면 ISSUE도 첫 등록이 아니므로 재인증이 필요하고 REISSUE와 같은 24시간 1회 한도를 따른다. REISSUE는 입장 시작 전에만, 소셜 제공자 재인증 토큰이 있어야 하고 티켓당 24시간에 1회까지다. 재발급하면 계정 이메일과 이전 기기에 알린다. 입장 시작 뒤 REISSUE는 403이고 BOOTH만 된다. BOOTH는 그 티켓의 부스 허용(POST /v1/scanner/booth-authorizations)이 있고 허용 뒤 10분 안일 때만 된다. TRANSFER는 양도 수락·돌려주기·양도 회수로 보유자가 바뀐 뒤 새 보유자가 같은 버튼으로 처음 등록할 때이고 ISSUE와 같은 규칙을 따른다(키는 등록 버튼으로만 만든다). 등록·폐기는 scanner_change에 남는다. 응답에 keyId(SPKI SHA-256 앞 8바이트)를 준다"
       security: [{ fanCookie: [] }]
       parameters: [{ name: ticketId, in: path, required: true, schema: { type: string } }, { name: X-Reauth-Token, in: header, required: false, description: "REISSUE와 입장 시작 뒤 ISSUE일 때 필수(guidelines §7)", schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [publicKeyJwk, reason], properties: { publicKeyJwk: { type: object, additionalProperties: false, required: [kty, crv, x, y], description: "기기 공개키(P-256, RFC 7517 JWK). 브라우저 crypto.subtle.exportKey('jwk')가 내는 칸(ext·key_ops)까지만 받고, 개인키 칸(d)이 섞이면 정의 밖 칸이라 400이다(BAS-040)", properties: { kty: { type: string, enum: [EC] }, crv: { type: string, enum: [P-256] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, y: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, ext: { type: boolean }, key_ops: { type: array, maxItems: 2, items: { type: string, enum: [verify] } }, alg: { type: string, enum: [ES256] } } }, reason: { type: string, enum: [ISSUE, REISSUE, TRANSFER, BOOTH] }, boothRequestId: { type: string, description: "BOOTH일 때 필수" } } } } } }
-      responses: { '201': { description: "등록됨(keyId)" }, '403': { $ref: '#/components/responses/Problem', description: "입장 시작 뒤 온라인 재발급(현장 부스 안내)·재인증 없음·부스 허용 없음 또는 10분 지남" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "24시간 재발급 한도 초과(고객센터 안내)" } }
+      responses: { '201': { description: "등록됨(keyId)", content: { application/json: { schema: { type: object, required: [keyId], properties: { keyId: { type: string, description: "QR v1 keyId(base64url 8바이트)" } } } } } }, '403': { $ref: '#/components/responses/Problem', description: "입장 시작 뒤 온라인 재발급(현장 부스 안내)·재인증 없음·부스 허용 없음 또는 10분 지남·결제자 그대로인데 TRANSFER(reauth-required·booth-not-authorized·transfer-not-allowed)" }, '404': { $ref: '#/components/responses/Problem', description: "티켓이 없거나 보유자가 아님(not-found)" }, '422': { $ref: '#/components/responses/Problem', description: "공개키가 P-256 곡선 위의 점이 아님(invalid-device-key)" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "24시간 재발급 한도 초과(고객센터 안내)" } }
   /v1/tickets/{ticketId}/booth-requests:
     post: { operationId: createTicketBoothRequest, tags: [tickets], x-peaket-roles: [fan], summary: "부스 재발급 요청(입장 시작 뒤, 보유자). 부스 본인확인 대조 결과로 부스 코드(8자, 10분)를 받는다", description: "FR-066, ADR-0051 결정 11. reverificationToken은 POST /v1/identity/booth-reverifications 결과(ci_hmac 일치)다. 티켓당 하루 3회 [가정]", security: [{ fanCookie: [] }], parameters: [{ name: ticketId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [reverificationToken], properties: { reverificationToken: { type: string } } } } } }, responses: { '201': { description: "부스 요청(boothRequestId, 부스 코드 QR 문자열, 만료 시각)" }, '409': { $ref: '#/components/responses/Problem', description: "입장 시작 전(온라인 재발급 안내)·대조 불일치" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "하루 요청 한도 초과" } } }
   /v1/identity/booth-reverifications:

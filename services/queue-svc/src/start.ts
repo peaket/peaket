@@ -10,7 +10,7 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { startGrpcServer } from './grpc-server.js';
-import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
+import { Es256AdmissionTokens, priorityGrantHandlers, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots, SetPriorityGrant } from './modules/admission/index.js';
 import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromEligibilitySignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
@@ -178,6 +178,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
           definition: queuePackage().VerificationAppealService.service,
           handlers: verificationAppealHandlers({ get: service.app.get(GetVerificationAppeal), resolve: service.app.get(ResolveVerificationAppeal) }, (method, err) =>
             service.logger.error({ err: errorSummary(err), method }, 'VerificationAppealService 처리 실패'),
+          ),
+        },
+        {
+          definition: queuePackage().PriorityGrantService.service,
+          handlers: priorityGrantHandlers({ run: (i) => service.app.get(SetPriorityGrant).run(i) }, (method, err) =>
+            service.logger.error({ err: errorSummary(err), method }, 'PriorityGrantService 처리 실패'),
           ),
         },
       ],

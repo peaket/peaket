@@ -1,5 +1,6 @@
-// 입장 확정 컨텍스트의 포트: 입장 저장소(대기열 Redis), 입장 토큰 서명, 지표.
+// 입장 확정 컨텍스트의 포트: 입장 저장소(대기열 Redis), 우선 구매 권리 사본, 입장 토큰 서명, 지표.
 import type { AdmitResult, Claim, LobbySeat, Precheck } from './admission.js';
+import type { PriorityGrantCopy, PriorityGrantSetInput } from './priority-grant.js';
 
 export const ADMISSION_STORE = Symbol('queue.AdmissionStore');
 /**
@@ -50,6 +51,14 @@ export interface AdmissionStore {
   sessionEnded(i: { eventId: string; jti: string }): Promise<boolean>;
 }
 
+export const PRIORITY_GRANTS = Symbol('queue.PriorityGrantStore');
+/** 우선 구매 권리 사본(`q:prio:{account}:E`, docs/data.md). 판 번호가 클 때만 바꾼다 */
+export interface PriorityGrantStore {
+  set(i: PriorityGrantSetInput): Promise<{ changed: boolean }>;
+  /** 그 계정·회차의 사본. 권리 ID가 다르거나 망가졌으면 undefined */
+  get(i: { accountId: string; eventId: string; grantId: string }): Promise<PriorityGrantCopy | undefined>;
+}
+
 /** 입장 확정 규칙 값(조립에서 바꿀 수 있다. 시험은 기본값과 다른 값으로도 돈다) */
 export const ADMISSION_POLICY = Symbol('queue.AdmissionPolicy');
 export interface AdmissionPolicy {
@@ -61,8 +70,19 @@ export const ADMISSION_TOKENS = Symbol('queue.AdmissionTokens');
 /** 입장 토큰 서명(ES256, typ admission+jwt, aud purchase). exp = iat + 최대 체류 */
 export interface AdmissionTokens {
   /** firstIssuedAtMs: 같은 jti를 다시 줄 때 첫 발급 시각. exp를 그 시각 + 최대 체류로 둔다(없으면 nowMs 기준). iat는 늘 nowMs다.
-   * lists: 판매 자격 명단 키(그 계정이 든 것만). 있으면 클레임 `lst`에 싣는다(ADR-0265 결정 7) */
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number; lists?: string[] }): { token: string; expiresAtMs: number };
+   * lists: 판매 자격 명단 키(그 계정이 든 것만). 있으면 클레임 `lst`에 싣는다(ADR-0265 결정 7)
+   * priorityGrantId: 우선 구매 입장이면 클레임 `prio`에 싣는다(GAT-135, ADR-0171) */
+  sign(c: {
+    jti: string;
+    accountId: string;
+    sessionId: string;
+    eventId: string;
+    jny: string;
+    nowMs: number;
+    firstIssuedAtMs?: number;
+    lists?: string[];
+    priorityGrantId?: string;
+  }): { token: string; expiresAtMs: number };
   /** 입장 확정 응답의 서버 ECDH 공개키(설정이 없으면 undefined, BOT-100) */
   serverEcdhPublicKey(): Record<string, string> | undefined;
 }

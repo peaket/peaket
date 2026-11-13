@@ -7,7 +7,9 @@ import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
+import { DrizzleDeviceKeyStore } from './modules/ticket/adapters/db/drizzle-device-key-store.js';
 import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-store.js';
+import { DeviceKeys } from './modules/ticket/application/device-keys.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
 import {
@@ -43,8 +45,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
-    const store = new DrizzleTicketStore({ database, changes: gateStore });
+    const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
+    const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
     const ticket = new TicketService({ store, clock: systemClock });
+    const deviceKeys = new DeviceKeys({ store: deviceKeyStore, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
@@ -61,7 +65,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     service = await createService({
       name: SERVICE,
       env,
-      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore } }),
+      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore }, ticket: { deviceKeys } }),
       adminAuthz,
       scanner: { devices: scannerStore, sessions: scannerSessions, replay },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
