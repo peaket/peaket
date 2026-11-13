@@ -110,6 +110,8 @@ export interface PaymentDetailRow {
   readonly pg: PgName;
   readonly status: PaymentLedgerStatus;
   readonly amount: number;
+  /** 결제 후 일반 취소로 돌려준 누적액(부분 취소 합) */
+  readonly cancelledAmount: number;
   readonly approvedAtMs?: number;
   /** 입금 대기일 때만 */
   readonly virtualAccountBank?: string;

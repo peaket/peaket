@@ -28,7 +28,10 @@ const TAG_0010 = '0010_payment_entry_pause';
 const TAG_0011 = '0011_payment_entry_pause_reopened';
 const TAG_0012 = '0012_payment_virtual_account_allowed';
 const TAG_0013 = '0013_payment_channel_limit';
+const TAG_0014 = '0014_payment_cancelled_amount';
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
+const ADDED_COLUMN_0014 = 'cancelled_amount';
+const ADDED_CHECK_0014 = 'payment_cancelled_amount_check';
 const ADDED_JOB_COLUMN_0010 = 'queued_at';
 const ADDED_COLUMN_0009 = 'entry_opens_at';
 const ADDED_COLUMN_0004 = 'pg_tx_id';
@@ -89,8 +92,8 @@ const RECON_INDEX_0008 = 'payment_recon_approved_idx';
 const HASH_INDEX_0008 = 'payment_deposit_hash_idx';
 const SHAPES_0000 = SHAPES.map((s) => ({
   ...s,
-  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
-  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK),
+  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_COLUMN_0014 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
+  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK && k.name !== ADDED_CHECK_0014),
   // 0003이 잡기 색인을 바꾼다(0000은 next_attempt_at 하나짜리다)
   indexes: s.name === 'payment_confirm_job' ? [{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }] : s.indexes.filter((i) => i.name !== QUERY_DUE_INDEX && i.name !== ADDED_OVERDUE_INDEX_0002 && i.name !== ADDED_INDEX_0005 && i.name !== RECON_INDEX_0008 && i.name !== HASH_INDEX_0008),
 }));
@@ -113,6 +116,7 @@ describe('표 정의(schema.ts)', () => {
       ['pg_confirm_token', 'text', false],
       ['deposit_secret_hash', 'bytea', false],
       ['amount', 'integer', true],
+      ['cancelled_amount', 'integer', true],
       ['status', 'text', true],
       ['deposit_due_at', TZ, false],
       ['deposit_notified_at', TZ, false],
@@ -168,7 +172,7 @@ describe('표 정의(schema.ts)', () => {
 
   test('PRF180_기본값은 payment.created_at·payment.query_attempts·job.attempts·job.created_at뿐이다', () => {
     const withDefault = SHAPES.flatMap((s) => s.columns.filter((c) => c.hasDefault).map((c) => `${s.name}.${c.name}`));
-    expect(withDefault).toEqual(['payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
+    expect(withDefault).toEqual(['payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
   });
 
   test('PRF180_기본 키는 payment.id·payment_event(payment_id, seq)·payment_confirm_job.payment_id다', () => {
@@ -264,6 +268,7 @@ describe('표 정의(schema.ts)', () => {
       'payment_status_check',
       'payment_pg_check',
       'payment_amount_check',
+      ADDED_CHECK_0014,
       'payment_attempt_no_check',
       'payment_method_ref_card_bin_check',
       'payment_failure_category_check',
@@ -540,7 +545,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const eleventh = snapshotOf('0010_snapshot.json');
   const twelfth = snapshotOf('0011_snapshot.json');
   const thirteenth = snapshotOf('0012_snapshot.json');
-  const latest = snapshotOf('0013_snapshot.json');
+  const latest13 = snapshotOf('0013_snapshot.json');
+  const latest = snapshotOf('0014_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -553,7 +559,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('P-T34 0013 스냅샷의 앞은 0012 스냅샷이고, SQL은 낮춘 채널 상한 표와 관측 하위 결제사 표 둘만 만든다', () => {
-    expect(latest.prevId).toBe(thirteenth.id);
+    expect(latest13.prevId).toBe(thirteenth.id);
+    expect(latest.prevId).toBe(latest13.id);
     for (const name of ['payment_channel_limit', 'payment_pg_channel_observed']) expect(Object.keys(thirteenth.tables)).not.toContain(`public.${name}`);
     const statements = readFileSync(join(MIGRATIONS, `${TAG_0013}.sql`), 'utf8').replace(/\r\n/g, '\n').replace(/^-- .*$/gm, '').split(BREAKPOINT).map((x) => canon(x));
     expect(statements).toHaveLength(2);
@@ -589,7 +596,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  test('PRF182_PRF183_기록은 0000~0013 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0014 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -606,6 +613,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [11, TAG_0011],
       [12, TAG_0012],
       [13, TAG_0013],
+      [14, TAG_0014],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -624,11 +632,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[10]!.when).toBeGreaterThan(journal.entries[9]!.when);
     expect(journal.entries[11]!.when).toBeGreaterThan(journal.entries[10]!.when);
     expect(journal.entries[13]!.when).toBeGreaterThan(journal.entries[12]!.when);
+    expect(journal.entries[14]!.when).toBeGreaterThan(journal.entries[13]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {

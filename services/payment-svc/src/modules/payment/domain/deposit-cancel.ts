@@ -55,8 +55,8 @@ export interface DepositCancelAnswer {
 /** 입금 대기가 아닌 결제의 CancelPayment(gRPC FAILED_PRECONDITION. 일반 취소는 GAT-080). 글에는 내부 값을 싣지 않는다 */
 export class PaymentCancelStateError extends Error {
   readonly code = 'FAILED_PRECONDITION' as const;
-  constructor() {
-    super('입금 대기 결제만 입금 전 취소할 수 있다');
+  constructor(message = '입금 대기 결제만 입금 전 취소할 수 있다') {
+    super(message);
     this.name = 'PaymentCancelStateError';
   }
 }

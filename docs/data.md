@@ -1026,6 +1026,7 @@ erDiagram
         text pg_tx_id "포트원 결제 시도 ID(txId). 승인 본문의 검증값이자 조회 답 대조값, 토스·시뮬레이터는 비움(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰)"
         bytea deposit_secret_hash "토스 가상계좌 입금 콜백 secret의 SHA-256. 입금 오류 통보를 대조하려고 입금 확정(T16)에는 지우지 않고 회차가 끝날 때까지 둔다. 기한 경과·실패(T17)면 지운다(ADR-0050, 추천 적용 2026-11-09, BUILD_ORDER HOT-152. 회차 종료 뒤 지우는 작업은 HOT-153)"
         int amount
+        int cancelled_amount "결제 후 일반 취소로 돌려준 누적액(부분 취소 합). 남은 취소 가능액 = amount - cancelled_amount. 입금 전 취소는 쓰지 않는다(마이그레이션 0014, GAT-080)"
         text status "ACCEPTED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|FAILED|PARTIAL_CANCELED|CANCELED"
         timestamptz deposit_due_at "가상계좌 입금 기한(결제사에 보낸 값, ADR-0062)"
         timestamptz entry_opens_at "회차의 입장 시작 시각(승인 명령이 싣는다, 선택). 입금 오류 되돌림의 새 기한을 입장 24시간 전으로 자른다(추천 적용 2026-11-09, BUILD_ORDER PRF-190, 마이그레이션 0009)"

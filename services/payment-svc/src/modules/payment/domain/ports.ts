@@ -9,6 +9,7 @@ import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-se
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PgChannelLimitRow, PgLimitLowering } from './pg-channel-limit.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
+import type { ConfirmedCancelBegin, ConfirmedCancelTarget } from './confirmed-cancel.js';
 import type { QueryStatus } from './payment-gateway.js';
 import type { ReconDiffKind, ReconDiffState, ReconLedger, ReconRunRef, ReconRunStatus, ReconSeen, ReconStage } from './reconciliation.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
@@ -644,6 +645,19 @@ export interface PaymentDepositCancels {
   beginDepositCancel(target: DepositCancelTarget, cancellationId: string, budget?: CallBudget): Promise<DepositCancelBegin>;
   /** 답 반영 한 트랜잭션: payment 행 FOR UPDATE → AWAITING_DEPOSIT이 아니면 STALE → 수출 사건 FAILED(DEPOSIT_CANCELED) → 원장 FAILED → Outbox(마지막 문장) */
   finishDepositCancel(target: DepositCancelTarget, budget?: CallBudget): Promise<ResolveUnknownResult>;
+}
+
+/**
+ * 결제 후 일반 취소(부분·전액)의 원장 저장소(GAT-080, docs/features/payment.md §4.1).
+ * payment 행을 FOR UPDATE로 잠그고 cancelled_amount를 더한다. 결제사 호출은 잠금 밖에서 한다.
+ */
+export interface PaymentConfirmedCancels {
+  /** 원장 행을 읽는다. 없으면 undefined */
+  readConfirmedCancelTarget(paymentId: string, budget?: CallBudget): Promise<ConfirmedCancelTarget | undefined>;
+  /** 취소 ID의 내부 표시를 남긴다. DONE이면 그 취소 ID로 이미 끝났다, NOT_CONFIRMED면 일반 취소 대상 상태가 아니다 */
+  beginConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<ConfirmedCancelBegin>;
+  /** 결제사 취소 성공 반영: cancelled_amount를 더하고 CANCELED·PARTIAL_CANCELED로 바꾼다. STALE이면 그사이 상태가 바뀌었다 */
+  finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, amount: number, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
 }
 
 // ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----

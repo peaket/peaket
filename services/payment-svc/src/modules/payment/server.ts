@@ -8,6 +8,7 @@ export * from './domain/pg-call-guard.js';
 export * from './domain/pg-circuit.js';
 export * from './domain/webhook-receipt.js';
 export * from './domain/deposit-cancel.js';
+export * from './domain/confirmed-cancel.js';
 export * from './domain/reconciliation.js';
 export * from './domain/pg-selection.js';
 export * from './domain/entry-pause.js';
@@ -32,6 +33,8 @@ export { deleteExpiredDepositHashes, deleteFinishedReconSeen, type DepositHashDe
 export { paymentReconciliationLog } from './adapters/payment-reconciliation-log.js';
 export { PromPaymentReconciliationSignals } from './adapters/prom-payment-reconciliation-signals.js';
 export { CancelDepositPayment, type CancelDepositPaymentDeps } from './application/cancel-deposit-payment.js';
+export { CancelConfirmedPayment, type CancelConfirmedPaymentDeps } from './application/cancel-confirmed-payment.js';
+export { CancelPayment, type CancelAnswer, type CancelPaymentStatusReader } from './application/cancel-payment.js';
 export { ReceivePaymentWebhook, type ReceivePaymentWebhookDeps, type WebhookAnswer } from './application/receive-payment-webhook.js';
 export { deleteExpiredWebhookReceipts, DrizzleWebhookStore, type DrizzleWebhookStoreOptions, WEBHOOK_DB_MAX, webhookDatabaseOptions, webhookReceiptsDeleteTask } from './adapters/db/drizzle-webhook-store.js';
 export { paymentWebhookLog } from './adapters/payment-webhook-log.js';

@@ -34,6 +34,8 @@ export const payment = pgTable(
     pgConfirmToken: text('pg_confirm_token'),
     depositSecretHash: bytea('deposit_secret_hash'),
     amount: integer('amount').notNull(),
+    /** 결제 후 일반 취소로 돌려준 누적액(부분 취소 합). 입금 전 취소는 쓰지 않는다(마이그레이션 0014) */
+    cancelledAmount: integer('cancelled_amount').notNull().default(0),
     status: text('status').notNull(),
     depositDueAt: at('deposit_due_at'),
     // 입금 완료·되돌림 통보를 처음 받은 시각(입금 대기·되돌림 확인 행은 짧은 간격 조회의 기준, FAILED 행은 늦은 입금 확인을 걸었다는 표시. BUILD_ORDER HOT-151·HOT-152, 마이그레이션 0006)
@@ -84,6 +86,7 @@ export const payment = pgTable(
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
     check('payment_pg_check', sql`${t.pg} IN (${PG_LIST})`),
     check('payment_amount_check', sql`${t.amount} > 0`),
+    check('payment_cancelled_amount_check', sql`${t.cancelledAmount} >= 0 and ${t.cancelledAmount} <= ${t.amount}`),
     check('payment_attempt_no_check', sql`${t.attemptNo} >= 1`),
     check('payment_method_ref_card_bin_check', sql`(${t.paymentMethodRef} IS NULL) = (${t.cardBin} IS NULL)`),
     check('payment_failure_category_check', sql`${t.failureCategory} IN (${FAILURE_CATEGORY_LIST})`),

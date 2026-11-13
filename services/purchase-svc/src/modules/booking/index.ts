@@ -31,7 +31,7 @@ export {
   type OrderExpiryView,
 } from './domain/order-expiry.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
-export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
+export { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
 export {
   DrizzlePaymentResults,
   PaymentResultRollback,

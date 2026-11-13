@@ -9,9 +9,9 @@ import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
 import type { AcceptPaymentCommand } from '../application/accept-payment-command.js';
 import type { BatchGetPaymentStates } from '../application/batch-get-payment-states.js';
-import type { CancelDepositPayment } from '../application/cancel-deposit-payment.js';
 import type { GetPaymentDetail } from '../application/get-payment-detail.js';
-import { type DepositCancelAnswer, type DepositCancelInput, PaymentCancelStateError } from '../domain/deposit-cancel.js';
+import { type DepositCancelInput, PaymentCancelStateError } from '../domain/deposit-cancel.js';
+import type { CancelPayment } from '../application/cancel-payment.js';
 import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, type PaymentDetail, PaymentInputError, PaymentNotFoundError, type PaymentState } from '../domain/confirm-command.js';
 import type { CallBudget } from '../domain/ports.js';
 import type { CheckoutValues, TossCheckoutValues } from '../domain/payment-gateway.js';
@@ -132,8 +132,8 @@ export function cancelInputOf(request: Record<string, unknown>): DepositCancelIn
 }
 
 /** 답 → CancelPaymentResponse(proto 칸 이름, result는 CANCEL_RESULT_ 앞머리를 붙인다) */
-export function cancelResponseOf(answer: DepositCancelAnswer): Record<string, unknown> {
-  return { result: `CANCEL_RESULT_${answer.result}`, cancelled_amount: { krw: 0 } };
+export function cancelResponseOf(answer: { readonly result: string; readonly cancelledAmount?: number }): Record<string, unknown> {
+  return { result: `CANCEL_RESULT_${answer.result}`, cancelled_amount: { krw: answer.cancelledAmount ?? 0 } };
 }
 
 const tossCheckoutOf = (v: TossCheckoutValues): Record<string, unknown> => ({ client_key: v.clientKey, customer_key: v.customerKey, order_id: v.orderId, order_name: v.orderName, amount: { krw: v.amount }, success_url: v.successUrl, fail_url: v.failUrl });
@@ -191,7 +191,7 @@ export interface PaymentGrpcUseCases {
   /** 없으면 GetPayment는 UNIMPLEMENTED다 */
   getPayment?: Pick<GetPaymentDetail, 'execute'>;
   /** 없으면 CancelPayment는 UNIMPLEMENTED다 */
-  cancelPayment?: Pick<CancelDepositPayment, 'execute'>;
+  cancelPayment?: Pick<CancelPayment, 'execute'>;
   /** 없으면 PrepareCheckout은 UNIMPLEMENTED다 */
   prepareCheckout?: Pick<PrepareCheckout, 'execute'>;
   /** 없으면 GetNewPaymentPause는 UNIMPLEMENTED다 */

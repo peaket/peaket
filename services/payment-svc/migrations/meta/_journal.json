@@ -99,6 +99,13 @@
       "when": 1794270849027,
       "tag": "0013_payment_channel_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0014_payment_cancelled_amount",
+      "breakpoints": true
     }
   ]
 }

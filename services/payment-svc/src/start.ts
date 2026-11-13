@@ -21,7 +21,9 @@ import {
   CachedEntryPauseReader,
   CachedPgChannelObservations,
   CachedPgSelectionReader,
+  CancelConfirmedPayment,
   CancelDepositPayment,
+  CancelPayment,
   channelTableOf,
   confirmRunnerDatabaseOptions,
   createPgHttp,
@@ -223,6 +225,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger), circuits, share: { lowered: (e) => limitSync?.lowered(e) } });
   limitSync = new PgChannelLimitSync({ store: new DrizzlePgChannelLimit({ database: batchDatabase }), guards, clock: systemClock, signals: channelSignals, log: channelLogs });
   const depositCancel = new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock });
+  // 결제 후 일반 취소(GAT-080). 입금 전 취소와 같은 차단기·호출 보호기를 쓰고, 원장 상태로 갈래를 고른다
+  const confirmedCancel = new CancelConfirmedPayment({ store: confirmJobs, gateways, guards, clock: systemClock });
+  const cancelPayment = new CancelPayment(depositCancel, confirmedCancel, confirmJobs);
   const VIRTUAL_ACCOUNT_DISALLOWED_REASON = '가상계좌를 받지 않는 공연의 입금 대기';
   entryPauseReleaseWatcher = new EntryPauseReleaseWatcher({ closeCircuit: (pg) => guards.of(pg)?.closeCircuit() });
   const resolutionSignals = new PromPaymentResolutionSignals().register(service.metrics.registry);
@@ -236,7 +241,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     services: [
       {
         definition: paymentPackage().PaymentService.service,
-        handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment: depositCancel, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }) }, (method, err, orderId) =>
+        handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }) }, (method, err, orderId) =>
           // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
           service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
         ),

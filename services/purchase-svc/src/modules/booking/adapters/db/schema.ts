@@ -17,7 +17,7 @@
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -73,6 +73,42 @@ export const purchaseOrder = pgTable(
     check('purchase_order_event_seq_check', sql`${t.eventSeq} >= 1`),
     check('purchase_order_payment_event_seq_check', sql`${t.paymentEventSeq} >= 0`),
     check('purchase_order_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
+  ],
+);
+
+/**
+ * 예매 취소 한 건(docs/data.md order_cancellation, POL-032·POL-038, GAT-080).
+ * (order_id, ticket_id) 진행 중 취소 1건 유일(VOIDED 제외). 같은 취소 ID의 재요청은 처음 결과를 그대로 돌려준다.
+ */
+export const orderCancellation = pgTable(
+  'order_cancellation',
+  {
+    id: uuid('id').primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => purchaseOrder.id),
+    ticketId: uuid('ticket_id').notNull(),
+    eventCancellationRequestId: uuid('event_cancellation_request_id'),
+    fraudCaseId: uuid('fraud_case_id'),
+    reason: text('reason').notNull(),
+    approvalId: uuid('approval_id'),
+    daysBefore: integer('days_before').notNull(),
+    within24h: boolean('within_24h').notNull(),
+    deductionBp: integer('deduction_bp').notNull(),
+    deductionAmount: integer('deduction_amount').notNull(),
+    refundAmount: integer('refund_amount').notNull(),
+    status: text('status').notNull(),
+    createdAt: at('created_at').notNull(),
+    statusChangedAt: at('status_changed_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('order_cancellation_active_key')
+      .on(t.orderId, t.ticketId)
+      .where(sql`${t.status} <> 'VOIDED'`),
+    index('order_cancellation_status_idx').on(t.status, t.createdAt),
+    check('order_cancellation_reason_check', sql`${t.reason} in ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD')`),
+    check('order_cancellation_status_check', sql`${t.status} in ('REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED')`),
+    check('order_cancellation_amounts_check', sql`${t.daysBefore} >= 0 and ${t.deductionBp} between 0 and 10000 and ${t.deductionAmount} >= 0 and ${t.refundAmount} >= 0`),
   ],
 );
 

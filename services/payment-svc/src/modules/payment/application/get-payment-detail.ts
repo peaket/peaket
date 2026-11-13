@@ -50,8 +50,7 @@ export class GetPaymentDetail {
       pg: row.pg,
       status: row.status,
       amount: row.amount,
-      // 취소를 만드는 단계 전에는 취소한 금액이 없다(payment §6 '`GetPayment` 서버')
-      cancelledAmount: 0,
+      cancelledAmount: row.cancelledAmount ?? 0,
       ...(row.approvedAtMs === undefined ? {} : { approvedAtMs: row.approvedAtMs }),
       ...(virtualAccount === undefined ? {} : { virtualAccount }),
     };
