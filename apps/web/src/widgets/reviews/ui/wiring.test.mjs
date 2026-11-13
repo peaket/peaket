@@ -23,6 +23,13 @@ test('SCR016_ 후기 모달은 목록·요약·자격·쓰기/고치기/지우�
   assert.match(src, /e\.status === 422/);
 });
 
+test('SCR016_ 후기 모달 본체는 첫 화면 JS에서 빼고 주소가 열 때만 동적으로 받는다', () => {
+  const src = read('./ReviewModalsFromUrl.tsx');
+  assert.match(src, /dynamic\(\(\) => import\('\.\/ReviewModalsClient'\)/);
+  assert.doesNotMatch(src, /import \{ ReviewModalsClient \} from '\.\/ReviewModalsClient'/);
+  assert.match(src, /if \(!init\) return null/);
+});
+
 test('SCR016_ 운영자 조치 컴포넌트는 core-svc 조치 API를 부른다', () => {
   const src = read('./ReviewModerationActions.tsx');
   assert.match(src, /await createOpsReviewModeration\(reviewId, payload\.body\)/);
