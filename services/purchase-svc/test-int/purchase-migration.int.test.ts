@@ -62,17 +62,38 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 14(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스, 0012 회차 판매 상태 표·결제 중 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 15(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스, 0012 회차 판매 상태 표·결제 중 부분 인덱스, 0013 발권 무효 작업 큐, 0014 예매 취소 표·환급 시각)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
     expect(before).toEqual(
-      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job', 'event_sale']),
+      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job', 'event_sale', 'order_cancellation']),
     );
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(14);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(15);
+  });
+
+  test('GAT080_0014(예매 취소): order_cancellation은 refund_due_at·진행 중 취소 1건 유일 색인·상태/사유/금액 CHECK를 만든다', async () => {
+    const cols = await q<{ column_name: string; data_type: string; is_nullable: string }>(
+      "select column_name, data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'order_cancellation' order by ordinal_position",
+    );
+    expect(cols.rows).toEqual(
+      expect.arrayContaining([
+        { column_name: 'order_id', data_type: 'uuid', is_nullable: 'NO' },
+        { column_name: 'ticket_id', data_type: 'uuid', is_nullable: 'NO' },
+        { column_name: 'reason', data_type: 'text', is_nullable: 'NO' },
+        { column_name: 'deduction_bp', data_type: 'integer', is_nullable: 'NO' },
+        { column_name: 'refund_amount', data_type: 'integer', is_nullable: 'NO' },
+        { column_name: 'status', data_type: 'text', is_nullable: 'NO' },
+        { column_name: 'refund_due_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      ]),
+    );
+    const idx = await q<{ indexname: string; indexdef: string }>("select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_cancellation'");
+    expect(idx.rows.find((r) => r.indexname === 'order_cancellation_active_key')?.indexdef).toContain("status <> 'VOIDED'");
+    const checks = await q<{ conname: string }>("select conname from pg_constraint where conrelid = 'public.order_cancellation'::regclass and contype = 'c' order by conname");
+    expect(checks.rows.map((r) => r.conname)).toEqual(['order_cancellation_amounts_check', 'order_cancellation_reason_check', 'order_cancellation_status_check']);
   });
 
   test('ST25_ADR0122_0012(PRF-144, data.md §4 열세 번째 마이그레이션·§5.1): seat_sale_pending_idx는 seat_sale (event_id, reserved_at)의 PENDING 부분 인덱스이고(리뷰 고침 L11), event_sale은 다섯 상태·판 번호 1 이상·음수 아닌 셈을 CHECK로 거절하며 매진 등급 기본값은 빈 배열이다 [ASVS v5.0.0-2.3.4]', async () => {

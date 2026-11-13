@@ -87,6 +87,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     virtual_account_allowed: ['boolean', 'YES'],
     deposit_secret_hash: ['bytea', 'YES'],
     amount: ['integer', 'NO'],
+    cancelled_amount: ['integer', 'NO'],
     status: ['text', 'NO'],
     deposit_due_at: ['timestamp with time zone', 'YES'],
     deposit_notified_at: ['timestamp with time zone', 'YES'],
@@ -162,14 +163,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0013)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 14개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0014)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 15개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['event_pg_config', 'outbox', 'payment', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'pg_switch', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('14');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('15');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -185,6 +186,7 @@ describe('마이그레이션과 표 모양', () => {
       `select table_name, column_name, column_default from information_schema.columns where table_schema = 'public' and column_default is not null and table_name in ('payment', 'payment_confirm_job') order by table_name, column_name`,
     );
     expect(rows).toEqual([
+      { table_name: 'payment', column_name: 'cancelled_amount', column_default: '0' },
       { table_name: 'payment', column_name: 'created_at', column_default: 'now()' },
       { table_name: 'payment', column_name: 'query_attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'attempts', column_default: '0' },

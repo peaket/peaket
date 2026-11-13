@@ -114,7 +114,7 @@ PEAKET은 판매를 위탁받아 하는 자(시행령 §3의3 1호, 해석)이�
 | 양도 회수 | 승인 업무(2인) 승인이 있고, 입장 시작 전이며, 입장 기록이 없다(ADR-0051) |
 | 탈퇴 | 보유자 탈퇴 → 받은 티켓은 돌려주기(입장 시간대에는 키를 폐기한 뒤 마감 때 돌려준다), 보낸 요청은 철회, 받은 요청은 거절(docs/planning/03 §1.5, 추천 적용 2026-10-14, ADR-0062) |
 
-**첫 구현(2026-11-13, GAT-080)**: purchase-svc의 취소 Saga가 결제자 확인·견적(공제) 뒤 ticket-svc `CancelTickets`로 키를 폐기하고, `order_cancellation`(진행 중 취소 1건 유일)을 쓴 뒤 payment-svc 일반 취소로 환급한다. 사유 `FRAUD`는 공제율 0으로 계산한다. HTTP 견적·취소 경로(재인증·구매 서명)와 Redis 비트맵 취소표 즉시 방출은 다음 배치다.
+**첫 구현(2026-11-13, GAT-080)**: purchase-svc의 취소 Saga가 결제자 확인·견적(공제) 뒤 ticket-svc `CancelTickets`로 키를 폐기하고, `order_cancellation`(진행 중 취소 1건 유일)을 쓴 뒤 payment-svc 일반 취소로 환급한다. 사유 `FRAUD`는 공제율 0으로 계산한다. R-540에서 HTTP 견적과 `@PurchaseSigned` 취소(재인증 계약이 없어 403 `reauth-required`), Redis 비트맵 취소표 즉시 방출, 입장 기록 마감 뒤 환급 정비 일을 더했다. 마감 시각은 core `event.entry_closed_at` 연결 전까지 공연 시작 + 50시간의 보수적 상한을 쓴다(known gap). 부정 예매 운영자 취소는 ticket-svc `OperatorCancelTickets`가 없어 보류다.
 
 모든 판정은 티켓 행 잠금(`SELECT … FOR UPDATE`) 안에서 상태·기한을 다시 확인해 한다. 양도, 취소, 회수, 스캔 수신이 한 티켓에서 겹쳐도 하나만 성공한다. 버전 칸은 CS 처리함처럼 사람이 화면에서 읽고 나중에 저장하는 흐름이 본 판과 비교하는 데만 쓴다(docs/features/payment.md §4.1, 추천 적용 2026-10-28, 기술 검토 낮음-071). 오프라인 스캐너의 입장 기록은 늦게 올라오므로, 입장 시간대에는 서버가 누가 들어갔는지 모른다. 그래서 입장 시작부터 입장 기록 마감까지는 소유권과 키를 바꾸는 수락·돌려주기·회수를 막는다(ADR-0051, docs/features/offline-gate.md §5).
 

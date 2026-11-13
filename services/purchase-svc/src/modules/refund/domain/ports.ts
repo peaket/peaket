@@ -58,7 +58,11 @@ export interface CancellationWrites {
     readonly refundAmount: number;
     readonly status: CancellationStatus;
     readonly nowMs: number;
+    /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만) */
+    readonly refundDueAtMs?: number;
   }): Promise<CancellationWriteOutcome>;
+  /** 입장 기록 마감 뒤 환급할 REQUESTED 취소(환급 시각이 지난 것) */
+  dueRefunds(nowMs: number, limit: number): Promise<readonly { readonly cancellationId: string; readonly orderId: string; readonly amount: number; readonly reason: CancellationReason }[]>;
   /** 환급 상태 바꾸기(REFUND_PENDING·REFUNDED·VOIDED). 없으면 조용히 넘어간다 */
   updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<void>;
 }
@@ -75,7 +79,24 @@ export interface SeatReturns {
     readonly orderId: string;
     readonly seatId: string;
     readonly accountId: string;
+    readonly saleEndsAtMs: number;
   }): Promise<number>;
+}
+
+/** 좌석 Redis 비트맵을 끄고 구역 델타를 내는 포트(취소표 즉시 재판매) */
+export interface SeatReturnNotices {
+  returnSold(q: {
+    readonly eventId: string;
+    readonly seats: readonly { readonly index: number; readonly sectionIndex: number; readonly seatOffset: number }[];
+    readonly keepUntilMs: number;
+  }): Promise<'OK' | 'NOT_READY'>;
+}
+
+export const REAUTH_GATE = Symbol('purchase.REAUTH_GATE');
+
+/** 재인증 토큰 확인(identity 계약이 생기기 전에는 늘 false인 대역) */
+export interface ReauthGate {
+  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string }): Promise<boolean>;
 }
 
 /** 견적·취소가 함께 쓰는 의존성 */
@@ -87,4 +108,6 @@ export interface RefundDeps {
   readonly writes: CancellationWrites;
   /** 없으면 좌석 DB 되돌리기를 하지 않는다(계산·계약 시험) */
   readonly seats?: SeatReturns;
+  /** 없으면 재인증 토큰을 확인하지 못해 취소를 403으로 닫는다 */
+  readonly reauth?: ReauthGate;
 }

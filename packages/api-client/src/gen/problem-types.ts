@@ -26,6 +26,7 @@ export type ProblemType =
   | 'booking-restricted'
   | 'booth-mismatch'
   | 'cancel-deadline-passed'
+  | 'cancellation-conflict'
   | 'case-not-actioned'
   | 'commander-removal-needs-role-change'
   | 'consent-required'
@@ -256,6 +257,7 @@ export const PROBLEM_TYPES = {
   'booking-restricted': { status: 403, title: "예매가 제한된 계정입니다" },
   'booth-mismatch': { status: 409, title: "티켓 보유자와 다른 분입니다" },
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
+  'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },

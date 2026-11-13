@@ -34,6 +34,11 @@ export interface SaleConfigSource {
 export class SeatMapSaleConfigs implements SaleConfigs {
   constructor(private readonly source: SaleConfigSource) {}
 
+  /** 취소 견적·Saga가 쓰는 이름(같은 값을 get으로도 준다) */
+  config(eventId: string): Promise<SaleConfig | undefined> {
+    return this.get(eventId);
+  }
+
   async get(eventId: string): Promise<SaleConfig | undefined> {
     let c: Awaited<ReturnType<SaleConfigSource['config']>>;
     try {

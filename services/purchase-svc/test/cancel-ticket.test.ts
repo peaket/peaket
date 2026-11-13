@@ -81,6 +81,9 @@ class Writes implements CancellationWrites {
   async updateStatus(q: Parameters<CancellationWrites['updateStatus']>[0]): Promise<void> {
     this.updates.push(q);
   }
+  async dueRefunds(): Promise<[]> {
+    return [];
+  }
 }
 
 const saga = (o: { order?: CancellationOrderView | undefined; ticket?: TicketCancelOutcome; payment?: PaymentCancelOutcome; replay?: CancellationWriteOutcome } = {}) => {
@@ -112,7 +115,7 @@ describe('취소 Saga', () => {
     const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
     expect(r).toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
     expect(tickets.calls[0]).toMatchObject({ orderId: ORDER, ticketIds: [TICKET], requestedByAccountId: ACCOUNT, cancellationId: CANCEL });
-    expect(seats.calls[0]).toEqual({ eventId: order().eventId, orderId: ORDER, seatId: order().seatId, accountId: ACCOUNT });
+    expect(seats.calls[0]).toEqual({ eventId: order().eventId, orderId: ORDER, seatId: order().seatId, accountId: ACCOUNT, saleEndsAtMs: SALE_ENDS });
     expect(payments.calls[0]).toMatchObject({ cancellationId: CANCEL, orderId: ORDER, amount: 30_000 });
     expect(writes.created[0]).toMatchObject({ deductionBp: 1000, deductionAmount: 3_333, refundAmount: 30_000, status: 'REFUND_PENDING' });
     expect(writes.updates).toEqual([{ cancellationId: CANCEL, status: 'REFUNDED', nowMs: kst('2026-11-13T10:00:00') }]);
@@ -150,6 +153,25 @@ describe('취소 Saga', () => {
     expect(writes.updates).toHaveLength(0);
   });
 
+  test('견적이 입장 시작 뒤라고 하면 티켓이 REFUND_NOW여도 환급을 입장 기록 마감 뒤로 미룬다', async () => {
+    const { svc, payments, writes } = saga({ ticket: 'REFUND_NOW' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 3_334, refundAfterEntryClose: true });
+    expect(payments.calls).toHaveLength(0);
+    // 입장 기록 마감의 보수적 상한 = 공연 시작 + 50시간
+    expect(writes.created[0]).toMatchObject({ status: 'REQUESTED', refundAmount: 3_334, refundDueAtMs: kst('2026-11-22T21:00:00') });
+  });
+
+  test('REFUND_PENDING 재요청은 같은 취소 ID로 결제사를 다시 부르고 CANCELLED면 REFUNDED다', async () => {
+    const { svc, payments, writes } = saga({
+      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'REFUND_PENDING', refundAfterEntryClose: false },
+    });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
+    expect(payments.calls[0]).toMatchObject({ cancellationId: CANCEL, amount: 30_000 });
+    expect(writes.updates.at(-1)).toEqual({ cancellationId: CANCEL, status: 'REFUNDED', nowMs: kst('2026-11-13T10:00:00') });
+  });
+
   test('결제사가 거절하거나 결과를 모르면 환급 대기로 두고 CS가 이어 받는다', async () => {
     for (const payment of ['REJECTED', 'UNKNOWN', 'PENDING'] as const) {
       const { svc, writes } = saga({ payment });
@@ -165,6 +187,14 @@ describe('취소 Saga', () => {
     });
     const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
     expect(r).toEqual({ status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
+    expect(payments.calls).toHaveLength(0);
+  });
+
+  test('CS가 무효로 끝낸 취소를 다시 요청하면 CONFLICT다', async () => {
+    const { svc, payments } = saga({
+      replay: { status: 'REPLAYED', cancellationId: CANCEL, refundAmount: 30_000, state: 'VOIDED', refundAfterEntryClose: false },
+    });
+    expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 })).toEqual({ status: 'CONFLICT' });
     expect(payments.calls).toHaveLength(0);
   });
 

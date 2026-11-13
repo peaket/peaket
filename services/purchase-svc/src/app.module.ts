@@ -2,6 +2,7 @@
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import type { HotPathMetrics, HotRedis } from '@peaket/platform';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
+import { RefundModule, type RefundModuleDeps } from './modules/refund/index.js';
 import {
   type AdmissionOptions,
   type ExpirySweeperDeps,
@@ -53,6 +54,8 @@ export class AppModule implements NestModule {
        * 운영은 purchase DB가 있을 때만 넘긴다(main.ts)
        */
       booking?: BookingModuleDeps;
+      /** 예매 취소 견적·취소(GAT-070·GAT-080). 넘기면 취소 경로를 연다 */
+      refund?: RefundModuleDeps;
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
     },
@@ -86,6 +89,6 @@ export class AppModule implements NestModule {
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.hotPath ? { hotPath: o.hotPath } : {}),
           });
-    return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : [])] };
+    return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : [])] };
   }
 }

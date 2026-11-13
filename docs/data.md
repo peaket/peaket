@@ -942,6 +942,7 @@ erDiagram
         int deduction_amount "⌊티켓 금액 × deduction_bp ÷ 10000⌋. 원 미만 버림(POL-032)"
         int refund_amount "티켓 금액 − deduction_amount. 공용 함수 한 곳에서만 계산"
         text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED"
+        timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. core event.entry_closed_at 연결 전에는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540)"
     }
     event_cancellation_request {
         uuid id PK

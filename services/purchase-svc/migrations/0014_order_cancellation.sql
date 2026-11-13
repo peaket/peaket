@@ -14,6 +14,7 @@ CREATE TABLE "order_cancellation" (
   "deduction_amount" integer NOT NULL,
   "refund_amount" integer NOT NULL,
   "status" text NOT NULL,
+  "refund_due_at" timestamp with time zone,
   "created_at" timestamp with time zone NOT NULL,
   "status_changed_at" timestamp with time zone NOT NULL,
   CONSTRAINT "order_cancellation_order_id_purchase_order_id_fk" FOREIGN KEY ("order_id") REFERENCES "purchase_order"("id") ON DELETE no action ON UPDATE no action,

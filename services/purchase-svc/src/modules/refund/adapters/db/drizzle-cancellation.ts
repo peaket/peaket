@@ -2,10 +2,10 @@
 // 주문·티켓·좌석은 purchase DB에서 읽고, 취소 행은 한 트랜잭션에 쓴다. 좌석 되돌리기는 inventory의 SeatSales를 쓴다.
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
-import { and, eq, ne } from 'drizzle-orm';
-import type { SeatSales } from '../../../inventory/index.js';
-import type { CancellationOrderView, CancellationWriteOutcome } from '../../domain/cancellation.js';
-import type { CancellationConfigs, CancellationOrders, CancellationWrites, SeatReturns } from '../../domain/ports.js';
+import { and, eq, lte, ne } from 'drizzle-orm';
+import type { SeatMap, SeatSales } from '../../../inventory/index.js';
+import type { CancellationOrderView, CancellationReason, CancellationWriteOutcome } from '../../domain/cancellation.js';
+import type { CancellationConfigs, CancellationOrders, CancellationWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
 import { orderCancellation, orderItem, purchaseOrder } from '../../../booking/index.js';
 
 /** 주문·항목·회차 설정을 읽는 어댑터. 티켓 ID로 주문 한 장을 찾는다 */
@@ -88,6 +88,7 @@ export class DrizzleCancellationWrites implements CancellationWrites {
         deductionAmount: q.deductionAmount,
         refundAmount: q.refundAmount,
         status: q.status,
+        ...(q.refundDueAtMs !== undefined ? { refundDueAt: new Date(q.refundDueAtMs) } : {}),
         createdAt: now,
         statusChangedAt: now,
       });
@@ -101,14 +102,32 @@ export class DrizzleCancellationWrites implements CancellationWrites {
       .set({ status: q.status, statusChangedAt: new Date(q.nowMs) })
       .where(eq(orderCancellation.id, q.cancellationId));
   }
+
+  async dueRefunds(nowMs: number, limit: number): Promise<readonly { cancellationId: string; orderId: string; amount: number; reason: CancellationReason }[]> {
+    const rows = await this.database.db
+      .select({ cancellationId: orderCancellation.id, orderId: orderCancellation.orderId, amount: orderCancellation.refundAmount, reason: orderCancellation.reason })
+      .from(orderCancellation)
+      .where(and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, new Date(nowMs))))
+      .limit(limit);
+    return rows.map((r) => ({ ...r, reason: r.reason as CancellationReason }));
+  }
 }
 
 /** 좌석 DB 되돌리기. inventory SeatSales.returnSold가 seat_sale RETURNED·purchase_quota 감소를 한 트랜잭션에 한다 */
 @Injectable()
 export class DrizzleSeatReturns implements SeatReturns {
-  constructor(@Inject('REFUND_SEAT_SALES') private readonly sales: SeatSales) {}
+  constructor(
+    @Inject('REFUND_SEAT_SALES') private readonly sales: SeatSales,
+    @Inject('REFUND_SEAT_MAP') private readonly seatMap: SeatMap,
+    @Inject('REFUND_SEAT_NOTICES') private readonly notices?: SeatReturnNotices,
+  ) {}
 
-  returnSold(q: { readonly eventId: string; readonly orderId: string; readonly seatId: string; readonly accountId: string }): Promise<number> {
-    return this.sales.returnSold({ eventId: q.eventId, orderId: q.orderId, seatIds: [q.seatId], accountId: q.accountId });
+  async returnSold(q: { readonly eventId: string; readonly orderId: string; readonly seatId: string; readonly accountId: string; readonly saleEndsAtMs: number }): Promise<number> {
+    const [seat] = await this.seatMap.resolve(q.eventId, [q.seatId]);
+    if (!seat) throw new Error('좌석맵에서 취소 좌석을 찾지 못했다');
+    const changed = await this.sales.returnSold({ eventId: q.eventId, orderId: q.orderId, seatIds: [q.seatId], accountId: q.accountId });
+    // 비트맵·델타는 DB가 RETURNED로 바뀐 뒤에만 한다. Redis가 실패하면 취소 행을 만들지 않아 같은 취소 ID의 재시도가 둘을 다시 한다
+    if (this.notices) await this.notices.returnSold({ eventId: q.eventId, seats: [seat], keepUntilMs: q.saleEndsAtMs + 24 * 60 * 60_000 });
+    return changed;
   }
 }

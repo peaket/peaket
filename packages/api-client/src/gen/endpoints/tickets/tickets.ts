@@ -1125,6 +1125,16 @@ export const useCreateTicketReturn = <TError = ErrorType<ProblemResponse>,
   status: 200
 }
 
+export type getTicketCancellationQuoteResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getTicketCancellationQuoteResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type getTicketCancellationQuoteResponse409 = {
   data: ProblemResponse
   status: 409
@@ -1133,7 +1143,7 @@ export type getTicketCancellationQuoteResponse409 = {
 export type getTicketCancellationQuoteResponseSuccess = (getTicketCancellationQuoteResponse200) & {
   headers: Headers;
 };
-export type getTicketCancellationQuoteResponseError = (getTicketCancellationQuoteResponse409) & {
+export type getTicketCancellationQuoteResponseError = (getTicketCancellationQuoteResponse403 | getTicketCancellationQuoteResponse404 | getTicketCancellationQuoteResponse409) & {
   headers: Headers;
 };
 
@@ -1248,6 +1258,11 @@ export type createTicketCancellationResponse403 = {
   status: 403
 }
 
+export type createTicketCancellationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createTicketCancellationResponse409 = {
   data: ProblemResponse
   status: 409
@@ -1256,7 +1271,7 @@ export type createTicketCancellationResponse409 = {
 export type createTicketCancellationResponseSuccess = (createTicketCancellationResponse202) & {
   headers: Headers;
 };
-export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse409) & {
+export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse404 | createTicketCancellationResponse409) & {
   headers: Headers;
 };
 

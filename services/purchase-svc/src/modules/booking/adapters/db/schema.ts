@@ -98,6 +98,8 @@ export const orderCancellation = pgTable(
     deductionAmount: integer('deduction_amount').notNull(),
     refundAmount: integer('refund_amount').notNull(),
     status: text('status').notNull(),
+    /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다 */
+    refundDueAt: at('refund_due_at'),
     createdAt: at('created_at').notNull(),
     statusChangedAt: at('status_changed_at').notNull(),
   },

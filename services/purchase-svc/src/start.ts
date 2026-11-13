@@ -28,11 +28,23 @@
 // 좌석 Stream 릴레이·다시 만들기 반복·정비 일은 이 파일이 아니라 릴레이 프로세스(src/relay.ts, purchase-svc-outbox-relay 배포)가 돈다.
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
+import {
+  DrizzleCancellationOrders,
+  DrizzleCancellationWrites,
+  DrizzleSeatReturns,
+  GrpcPaymentCancellations,
+  GrpcTicketCancellations,
+  parseHolidayCalendar,
+  RedisSeatReturnNotices,
+  type RefundModuleDeps,
+  WeekendBusinessCalendar,
+} from './modules/refund/index.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
 import { acceptBulkheadLimitFromEnv, setAcceptBulkheadLimit, setWriteBulkheadLimit, writeBulkheadLimitFromEnv } from './write-bulkhead.js';
@@ -249,6 +261,30 @@ export async function start(o: StartOptions): Promise<StartedService> {
     logger: { warn: (o, m) => log?.warn(o, m) },
     ...(coreSaleConfigs ? { overlay: coreSaleConfigs } : {}),
   });
+  // 예매 취소 견적·취소(GAT-070·GAT-080). purchase DB가 있을 때만 연다.
+  // 재인증 토큰 확인 계약이 아직 없어 ReauthGate 기본값(늘 false)이 취소를 403으로 닫는다(known gap).
+  let refund: RefundModuleDeps | undefined;
+  let refundTickets: GrpcTicketCancellations | undefined;
+  let refundPayments: GrpcPaymentCancellations | undefined;
+  const ticketGrpcAddr = env.PEAKET_TICKET_GRPC_ADDR;
+  const paymentGrpcAddr = env.PEAKET_PAYMENT_GRPC_ADDR;
+  if (database && ticketGrpcAddr && paymentGrpcAddr) {
+    const holidayFile = env.PEAKET_HOLIDAY_CALENDAR_FILE;
+    const calendar = holidayFile ? parseHolidayCalendar(readFileSync(holidayFile, 'utf8')) : new WeekendBusinessCalendar();
+    refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr });
+    refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
+    refund = {
+      orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
+      writes: new DrizzleCancellationWrites(database),
+      seats: new DrizzleSeatReturns(new DrizzleSeatSales(database), seatMap, new RedisSeatReturnNotices(redis)),
+      tickets: refundTickets,
+      payments: refundPayments,
+      calendar,
+    };
+  }
+  if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
+    throw new Error('PEAKET_TICKET_GRPC_ADDR·PEAKET_PAYMENT_GRPC_ADDR가 없다(예매 취소, 운영 필수)');
+  }
 
   // 주문 생성(booking, POST /v1/orders, BUILD_ORDER PRF-161). purchase DB가 있을 때만 연다(DB 없이 뜬 파드는 주문 경로를 열지 않는다, 뜨는 동작은 그대로다).
   // - 동의 문안 판: PEAKET_ORDER_CONSENT_VERSION(없거나 ^[0-9A-Za-z._-]{1,32}$가 아니면 시작하지 않는다. 모양은 BookingModule.register가 본다)
@@ -336,6 +372,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       holdFreeze: { pauseView: holdPauseView, lifecycle: holdLifecycle },
       ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
       ...(booking ? { booking } : {}),
+      ...(refund ? { refund } : {}),
       hotPath,
       admission: {
         store: sessionStore,
@@ -675,6 +712,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
           paymentPullBreaker?.shutdown();
         } catch (err) {
           service.logger.error({ err: errorSummary(err) }, 'payment-svc 결과 당기기 클라이언트 닫기 실패');
+        }
+        try {
+          refundTickets?.close();
+          refundPayments?.close();
+        } catch (err) {
+          service.logger.error({ err: errorSummary(err) }, '취소 gRPC 클라이언트 닫기 실패');
         }
         // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
         return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), paymentConsumerDatabase?.close(), paymentStatusWaitDatabase?.close(), sagaDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);

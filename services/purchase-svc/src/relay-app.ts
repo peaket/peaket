@@ -34,6 +34,12 @@ import {
   PromOrderSignals,
 } from './modules/booking/index.js';
 import {
+  DrizzleCancellationWrites,
+  GrpcPaymentCancellations,
+  RefundAfterEntry,
+  refundAfterEntryTask,
+} from './modules/refund/index.js';
+import {
   DrizzleSeatRebuildSource,
   jsonTradeEventCodec,
   PromSeatSignals,
@@ -145,6 +151,12 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
     info: (obj: object, msg?: string) => bound().logger.info(obj, msg),
   };
 
+  // 입장 기록 마감 뒤 환급(GAT-080). 결제사 주소가 없으면(로컬·CI) 이 일을 띄우지 않는다
+  const paymentCancelAddress = o.env?.PEAKET_PAYMENT_GRPC_ADDR;
+  const paymentCancels = paymentCancelAddress ? new GrpcPaymentCancellations({ address: paymentCancelAddress }) : undefined;
+  const refundAfterEntry = paymentCancels
+    ? new RefundAfterEntry({ writes: new DrizzleCancellationWrites(o.serviceDatabase), payments: paymentCancels, nowMs: () => clock.now() })
+    : undefined;
   const relay = await startOutboxRelayProcess({
     service: SERVICE,
     env: o.env,
@@ -172,6 +184,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         signals: orderExpirySignals,
         logger: taskLogger,
       }),
+      ...(refundAfterEntry ? [refundAfterEntryTask(refundAfterEntry, taskLogger)] : []),
     ],
     leaderLoops: (ctx) => {
       seatSignals.register(ctx.registry);
@@ -250,6 +263,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
     listen: (host) => relay.listen(host),
     stop: () => {
       clearInterval(refresh);
+      paymentCancels?.close();
       return relay.stop();
     },
   };

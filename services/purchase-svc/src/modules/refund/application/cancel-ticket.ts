@@ -7,6 +7,13 @@ import type { BusinessCalendar } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
 import { eventStartsAtOf } from './quote-cancellation.js';
 
+/**
+ * 입장 기록 마감의 보수적 상한(ms). core-svc의 `event.entry_closed_at`이 purchase-svc에 오기 전까지 쓴다:
+ * 공연 24시간 [가정] + 역할 유효 끝 2시간 + 미보고 기기 24시간 [가정] = 50시간. 이보다 일찍 환급하지 않는다.
+ * 정확한 마감 시각을 연결하면 이 상수를 그 값으로 바꾼다(known gap).
+ */
+const ENTRY_CLOSE_SAFE_MS = 50 * 60 * 60_000;
+
 export interface CancelTicketInput {
   readonly accountId: string;
   readonly ticketId: string;
@@ -66,9 +73,11 @@ export class CancelTicket {
 
     // 취소표: 티켓 키를 폐기한 뒤 좌석을 RETURNED로 되돌린다. 이 단계가 실패하면 취소 행을 만들지 않아
     // 같은 취소 ID의 재시도가 티켓 취소(멱등)와 좌석 되돌리기를 다시 한다
-    if (this.o.seats) await this.o.seats.returnSold({ eventId: order.eventId, orderId: order.orderId, seatId: order.seatId, accountId: i.accountId });
+    if (this.o.seats) await this.o.seats.returnSold({ eventId: order.eventId, orderId: order.orderId, seatId: order.seatId, accountId: i.accountId, saleEndsAtMs: order.saleEndsAtMs });
 
-    const afterClose = ticket === 'REFUND_AFTER_CLOSE';
+    // ticket-svc는 공연 시작으로 REFUND_AFTER_CLOSE를 가르고, 견적은 입장 시작(entryOpensAt)으로 가른다.
+    // 입장이 시작됐지만 공연 시작 전인 취소도 키만 폐기하고 환급은 입장 기록 마감 뒤로 미룬다(ADR-0051 결정 13)
+    const afterClose = ticket === 'REFUND_AFTER_CLOSE' || q.quote.refundAfterEntryClose;
     const write = await this.o.writes.create({
       cancellationId: i.cancellationId,
       orderId: order.orderId,
@@ -81,9 +90,34 @@ export class CancelTicket {
       refundAmount: q.quote.refundAmount,
       status: afterClose ? 'REQUESTED' : 'REFUND_PENDING',
       nowMs: i.nowMs,
+      ...(afterClose ? { refundDueAtMs: eventStartsAtOf(order.saleEndsAtMs) + ENTRY_CLOSE_SAFE_MS } : {}),
     });
     if (write.status === 'CONFLICT') return { status: 'CONFLICT' };
     if (write.status === 'REPLAYED') {
+      // CS가 무효로 끝낸 취소는 되살리지 않는다
+      if (write.state === 'VOIDED') return { status: 'CONFLICT' };
+      // 앞 시도가 결제사 결과를 모른 채 끝났으면(REFUND_PENDING) 같은 취소 ID로 결제사 취소를 다시 부른다.
+      // 결제사 멱등키가 cancel-{cancellationId}라 두 번 보내도 한 번만 취소된다. 끝났으면 처음 결과를 그대로 준다
+      if (write.state === 'REFUND_PENDING') {
+        const payment = await this.o.payments.cancel({
+          cancellationId: i.cancellationId,
+          orderId: order.orderId,
+          amount: write.refundAmount,
+          reason: i.reason,
+          ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
+          deadlineMs: i.deadlineMs,
+        });
+        if (payment === 'CANCELLED') {
+          await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
+          return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: write.refundAmount, refundAfterEntryClose: false };
+        }
+        return {
+          status: 'REFUND_PENDING',
+          cancellationId: i.cancellationId,
+          refundAmount: write.refundAmount,
+          payment: payment === 'REJECTED' ? 'REJECTED' : payment,
+        };
+      }
       return {
         status: 'REPLAYED',
         cancellationId: write.cancellationId,

@@ -580,6 +580,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-534: BAT-615 OpenAPI 문제 유형 API 클라이언트 생성물 반영(2026-11-13): `contract-check` 실패를 고쳤다.
 - R-535: BAT-051(HOT-252) purchase-svc 홀드의 판매 정책 평가를 넣었다(2026-11-13): core-svc 내부 읽기 경로, `LayoutSeatMap` 덮기, `lst` 모양·`entryGate`·`evaluateSalePolicy`, 규칙 한도→홀드 Lua·`purchase_quota`.
 - R-539: BAT-415 GAT-070·GAT-080를 재개해 payment-svc 일반 취소와 purchase-svc 취소 Saga·어댑터를 넣었다. HTTP 재인증·구매 서명과 Redis 비트맵은 다음 배치다.
+- R-540: BAT-415의 start/Nest 조립, 견적 HTTP·@PurchaseSigned 취소, Redis 비트맵 취소표 방출, 입장 기록 마감 뒤 환급 정비 일을 넣고 heavy gate를 통과했다(purchase test-int 1818·payment 467, 변이 14/14, 리뷰 높음 0·중간 7 고침). 재인증 계약과 ticket-svc OperatorCancelTickets는 남았다.
 - R-536: BAT-050 ticket proto 기본값 시험 반영(2026-11-13): CI `node` 실패를 고쳤다.
 - R-538: 관람 후기·신고·운영자 조치·같은 내용 자동 가림과 ticket-svc 후기 자격.
 - R-541: bundle 이미지에 sale-policy 검증 패키지 반영(2026-11-13): CI `image` 실패를 고쳤다.
