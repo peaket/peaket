@@ -36,14 +36,20 @@ function WalletPwa() {
   return <Provider swUrl="/serwist/sw.js" cacheOnNavigation={false} options={{ scope: '/my/tickets' }} />;
 }
 
-const KST = new Intl.DateTimeFormat('ko-KR', {
-  timeZone: 'Asia/Seoul',
-  month: 'numeric',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
+let kst: Intl.DateTimeFormat | undefined;
+
+/** 오프라인 배너가 실제로 보일 때만 만든다(온라인 첫 화면의 메인 스레드 비용을 줄인다, R-589). */
+function formatKst(ms: number): string {
+  kst ??= new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return kst.format(new Date(ms));
+}
 
 export interface OfflineBannerProps {
   /** 미리보기 상태를 오프라인으로 강제한다 */
@@ -78,7 +84,7 @@ export function OfflineBanner({ forceOffline = false, fallbackLastSyncText }: Of
     );
   }
 
-  const lastSync = lastSyncedAt ? KST.format(new Date(lastSyncedAt)) : fallbackLastSyncText;
+  const lastSync = lastSyncedAt ? formatKst(lastSyncedAt) : fallbackLastSyncText;
   return (
     <>
       <WalletPwa />

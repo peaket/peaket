@@ -693,6 +693,7 @@
 | R-586 | GAT-220 잔여가 ops-svc 이관·SCR-036 실제 로그인·O-T20·SESSION_TERMINATED·mTLS 계약 없이 남아 있었다 | ticket-svc ScannerDeviceService gRPC·ops-svc /v1/ops/scanner-devices*·scanner 기기 승인 로그인·last_changes_at 신선도 경보·SESSION_TERMINATED 변경분·packages/platform mtls.ts | 각 경계의 단위 시험과 계약 생성물·문서·ASVS를 넣고 cheap gate를 돌렸다 | 완료(heavy gate 통과) |
 | R-587 | GAT-135 잔여가 PRIORITY 보류를 회수·만료·결제 실패 때 풀지 않아 좌석이 남고, 팔린 좌석을 덮으며, gRPC 정본·ops 자동 호출이 없었다 | purchase-svc priority/inventory·booking, ops-svc priority, proto/contracts, purchase 0020 | PRIORITY_RELEASE_LUA·PRIORITY_EXPIRE_LUA·RESTORE_PRIORITY_LUA, seat_sale 대조, 부분 유일 인덱스, 만료 반복 연결, core entryOpensAtMs, USED 전이, priority-seat-only, gRPC Grant/Withdraw·ops 자동 호출, S-T37 ⑤~⑦ 시험 | 통과 |
 | R-588 | BAT-610 잔여(예매자 명단 BOOKER_EXPORT·다운로드 이력, 웹훅 발송기·재시도·DLQ·FAILING, 상품 정산서 원천·미수금 상계, ops 2인 지급 승인, 토스/포트원 지급대행 경계)가 정본과 어긋나지 않는다 | services/core-svc, services/payment-svc, services/ops-svc, apps/partner, tools/web-checks, docs | 정본(docs/features/settlement.md §4.5·§5·§7, docs/features/notify.md §9, docs/features/payment.md §8, docs/security/asvs/settlement.md, I-T53·J-T18·J-T26·N-T15)과 대조했고, 실제 키·계정이 없어 토스 실행 503·KYC 셀러 조회·Secrets Manager·Kafka outbox 소비자는 남은 막힘으로 적었다 | 적용(잔여 일부) |
+| R-589 | 웨이브 4 최종 CI의 월렛 TBT가 219.5/203.5ms로 한도 200을 넘었다(코드 무변경, 실행기 편차) | apps/web/src/widgets/ticket-wallet/ui/WalletClient.tsx, apps/web/src/features/wallet-device-key/ui/OfflineBanner.tsx, docs/PROGRESS.md | 동적 조각을 300ms/1.5s로 나눠 받고 Intl은 오프라인일 때만 만든다. web 833·typecheck 통과, budgets는 새 CI에서 확인 | 진행 |
 
 ## 4. 숫자 일치표
 
