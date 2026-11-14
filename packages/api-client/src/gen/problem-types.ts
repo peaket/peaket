@@ -88,6 +88,7 @@ export type ProblemType =
   | 'invalid-device-key'
   | 'invalid-dpop-proof'
   | 'invalid-enrollment-code'
+  | 'invalid-priority-grant'
   | 'invalid-query'
   | 'invalid-seat'
   | 'investigation-source-expired'
@@ -156,6 +157,7 @@ export type ProblemType =
   | 'precondition-failed'
   | 'precondition-required'
   | 'preverify-invalid'
+  | 'priority-grant-already-used'
   | 'priority-grant-in-use'
   | 'priority-grant-not-found'
   | 'priority-seat-only'
@@ -361,6 +363,7 @@ export const PROBLEM_TYPES = {
   'invalid-device-key': { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" },
   'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
   'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
+  'invalid-priority-grant': { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
@@ -429,6 +432,7 @@ export const PROBLEM_TYPES = {
   'precondition-failed': { status: 412, title: "다른 사람이 먼저 고쳤습니다" },
   'precondition-required': { status: 428, title: "고칠 판(If-Match)을 보내 주세요" },
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
+  'priority-grant-already-used': { status: 409, title: "이미 사용한 우선 구매 권리입니다" },
   'priority-grant-in-use': { status: 409, title: "지금 쓸 수 없는 우선 구매 권리입니다" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
   'priority-seat-only': { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" },

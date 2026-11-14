@@ -618,6 +618,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-558: BAT-425 GAT-120·GAT-130 첫 몫(2026-11-14): ops-svc `EVENT_CANCEL` 2인 승인, purchase-svc `event_cancellation_request`·`event_refund_item`(0016), 기존 `CancelTicket`/`CancelPayment`로 대상 티켓 환불, 진행률·부분 실패·수동 일시정지·재개, CS `REFUND_FAILED` 내부 HTTP, 내부 토큰 가드. heavy gate Docker test-int purchase 85·ops 15, 변이 29/29, 4관점 리뷰 높음 1·중간 5(3 고침). 단위 ops-svc 27·purchase-svc 3804·platform 528·contracts 41·api-client 113, typecheck·lint·doc-check·ledger·records·contracts gen:check 통과. trace GAT-120 6·GAT-130 9, R-T9·R-T22는 후속이다.
 - R-577: BAT-610 payment-svc 정산 문제 유형 두 제목을 정본에 맞춘다.
 - R-578: BAT-465 internal command eventKey 멱등 비교를 키 순서와 무관하게 만든다.
+- R-579: BAT-430 우선 구매 문제 유형 두 개를 계약에 더하고 seat-store 제목을 정본에 맞춘다.
 
 ## 5. [충돌] 결정 결과
 

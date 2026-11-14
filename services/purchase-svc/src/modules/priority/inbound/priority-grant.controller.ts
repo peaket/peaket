@@ -42,7 +42,7 @@ const viewOf = (g: { grantId: string; seatId: string; price: number; expiresAtMs
 
 const fail = (err: unknown): never => {
   if (err instanceof PriorityGrantNotFound) throw new ProblemError({ type: 'priority-grant-not-found', status: 404, title: '쓸 수 있는 우선 구매 권리가 없습니다' });
-  if (err instanceof PriorityStoreUnavailable) throw new ProblemError({ type: 'seat-store-unavailable', status: 503, title: '좌석 저장소를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 });
+  if (err instanceof PriorityStoreUnavailable) throw new ProblemError({ type: 'seat-store-unavailable', status: 503, title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 });
   throw err;
 };
 
