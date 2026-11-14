@@ -2,8 +2,8 @@
 import { and, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
-import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, StatementRecord, StatementSource } from '../../domain/settlement.js';
-import { payout, payoutAccount, payoutBatch, sellerKyc, settlementStatement, statementDispute, statementSource } from './schema.js';
+import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, ReceivableMoveRecord, ReceivableRecord, StatementRecord, StatementSource } from '../../domain/settlement.js';
+import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, statementDispute, statementSource } from './schema.js';
 
 const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementRecord => ({
   statementId: r.id,
@@ -189,6 +189,7 @@ export class DrizzleSettlementStore implements SettlementStore {
         status: record.status,
         holdReason: record.holdReason,
         disputeDueAt: record.disputeDueAt,
+        offsetAmount: record.offsetAmount,
         payoutAmount: record.payoutAmount,
         payoutDate: record.payoutDate,
         payoutBankCode: record.payoutBankCode,
@@ -410,5 +411,88 @@ export class DrizzleSettlementStore implements SettlementStore {
           holderVerified: record.holderVerified,
         },
       });
+  }
+
+  async listStatements(filter: { kind?: 'EVENT' | 'PRODUCT' | undefined; status?: string | undefined; pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; limit: number }): Promise<StatementRecord[]> {
+    const conditions = [];
+    if (filter.kind) conditions.push(eq(settlementStatement.kind, filter.kind));
+    if (filter.status) conditions.push(eq(settlementStatement.status, filter.status));
+    if (filter.pg) conditions.push(eq(settlementStatement.pg, filter.pg));
+    if (filter.pgStore) conditions.push(eq(settlementStatement.pgStore, filter.pgStore));
+    if (filter.payoutDate) conditions.push(eq(settlementStatement.payoutDate, filter.payoutDate));
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(settlementStatement.createdAt), desc(settlementStatement.id))
+      .limit(filter.limit);
+    return rows.map(statementRecord);
+  }
+
+  async findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string): Promise<StatementRecord | undefined> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(and(eq(settlementStatement.promoterId, promoterId), eq(settlementStatement.kind, 'PRODUCT'), eq(settlementStatement.pg, pg), eq(settlementStatement.pgStore, pgStore), eq(settlementStatement.periodStart, periodStart), eq(settlementStatement.periodEnd, periodEnd)))
+      .limit(1);
+    return rows[0] && rows[0].status !== 'SUPERSEDED' ? statementRecord(rows[0]) : undefined;
+  }
+
+  async insertReceivable(record: ReceivableRecord): Promise<void> {
+    await this.db.db.insert(partnerReceivable).values({
+      id: record.receivableId,
+      promoterId: record.promoterId,
+      pg: record.pg,
+      cause: record.cause,
+      amount: record.amount,
+      remaining: record.remaining,
+      status: record.status,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    });
+  }
+
+  async saveReceivable(record: ReceivableRecord): Promise<void> {
+    await this.db.db
+      .update(partnerReceivable)
+      .set({ remaining: record.remaining, status: record.status, updatedAt: record.updatedAt })
+      .where(eq(partnerReceivable.id, record.receivableId));
+  }
+
+  async listReceivables(filter: { promoterId?: string | undefined; pg?: Pg | undefined; status?: readonly ReceivableRecord['status'][] | undefined; limit: number }): Promise<ReceivableRecord[]> {
+    const conditions = [];
+    if (filter.promoterId) conditions.push(eq(partnerReceivable.promoterId, filter.promoterId));
+    if (filter.pg) conditions.push(eq(partnerReceivable.pg, filter.pg));
+    if (filter.status && filter.status.length > 0) conditions.push(inArray(partnerReceivable.status, [...filter.status]));
+    const rows = await this.db.db
+      .select()
+      .from(partnerReceivable)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(partnerReceivable.createdAt)
+      .limit(filter.limit);
+    return rows.map((r) => ({
+      receivableId: r.id,
+      promoterId: r.promoterId,
+      pg: r.pg as Pg,
+      cause: r.cause as ReceivableRecord['cause'],
+      amount: r.amount,
+      remaining: r.remaining,
+      status: r.status as ReceivableRecord['status'],
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
+  async listOpenReceivables(promoterId: string, pg: Pg): Promise<ReceivableRecord[]> {
+    return this.listReceivables({ promoterId, pg, status: ['OPEN'], limit: 1000 });
+  }
+
+  async insertReceivableMove(record: ReceivableMoveRecord): Promise<void> {
+    await this.db.db.insert(receivableMove).values({ receivableId: record.receivableId, statementId: record.statementId, amount: record.amount, movedAt: record.movedAt });
+  }
+
+  async listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]> {
+    const rows = await this.db.db.select().from(receivableMove).where(eq(receivableMove.statementId, statementId));
+    return rows.map((r) => ({ receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, movedAt: r.movedAt }));
   }
 }

@@ -1,5 +1,5 @@
 // 파트너 웹훅 도메인(BUILD_ORDER BAT-610 서버 잔여, FR-025, ADR-0053·0109, docs/features/notify.md §9).
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 
 export class WebhookProblem extends Error {
@@ -56,6 +56,8 @@ export interface WebhookDeliveryRecord {
   nextAttemptAt: Date | null;
   createdAt: Date;
   finishedAt: Date | null;
+  /** thin 본문({type, timestamp, data}). 다시 보내도 같은 값을 쓴다 */
+  payload: Record<string, unknown>;
 }
 
 export interface WebhookDeliveryView {
@@ -97,6 +99,33 @@ export function checkWebhookUrl(value: string): void {
 }
 
 export const newWebhookSecret = (): string => `whsec_${randomBytes(32).toString('base64')}`;
+
+/** Standard Webhooks 서명: v1, + base64(HMAC-SHA256(비밀, `${id}.${timestamp}.${본문}`)). 비밀 교체 중이면 공백으로 잇는다. */
+export function webhookSignature(secrets: readonly string[], id: string, timestamp: number, body: string): string {
+  const content = `${id}.${timestamp}.${body}`;
+  return secrets.map((secret) => `v1,${createHmac('sha256', secret).update(content).digest('base64')}`).join(' ');
+}
+
+/** 처음 보낸 뒤 1분·5분·30분·2시간·6시간·12시간 [가정](docs/features/notify.md §9). 다 보내면 DEAD다. */
+export const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000, 6 * 60 * 60_000, 12 * 60 * 60_000] as const;
+
+/** 다음 재시도까지 남은 시간. null이면 더 보내지 않고 DEAD다. */
+export function retryDelayMs(attemptCount: number): number | null {
+  return RETRY_DELAYS_MS[attemptCount - 1] ?? null;
+}
+
+/** 계속 실패하는 엔드포인트 판정: 5일 [가정] 동안 성공 없이 DEAD 50건 [가정]을 넘으면 DISABLED(FAILING). */
+export const FAILING_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
+export const FAILING_DEAD_THRESHOLD = 50;
+
+export function shouldDisableEndpoint(now: Date, lastSuccessAt: Date | null, deadCount: number): boolean {
+  if (deadCount < FAILING_DEAD_THRESHOLD) return false;
+  return lastSuccessAt === null || now.getTime() - lastSuccessAt.getTime() > FAILING_WINDOW_MS;
+}
+
+export const activeSecrets = (e: WebhookEndpointRecord, now: Date): string[] =>
+  e.previousSecret && e.previousSecretValidUntil && e.previousSecretValidUntil.getTime() > now.getTime() ? [e.secret, e.previousSecret] : [e.secret];
+
 
 export function endpointView(e: WebhookEndpointRecord): WebhookEndpointView {
   return {

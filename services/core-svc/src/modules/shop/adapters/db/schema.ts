@@ -53,3 +53,64 @@ export const productStock = pgTable(
   },
   (t) => [check('product_stock_stock_check', sql`${t.stock} >= 0`)],
 );
+
+// 굿즈·부가 상품 주문(docs/data.md merch_order·merch_order_item, settlement §4.5).
+// 주문을 만드는 경로는 아직 없고, 명단·상품 정산서 원천으로 읽는다.
+export const merchOrder = pgTable(
+  'merch_order',
+  {
+    id: uuid('id').primaryKey(),
+    promoterId: uuid('promoter_id').notNull(),
+    eventId: uuid('event_id'),
+    buyerName: text('buyer_name').notNull(),
+    buyerPhone: text('buyer_phone').notNull(),
+    status: text('status').notNull().default('PAID'),
+    pg: text('pg').notNull(),
+    pgStore: text('pg_store').notNull(),
+    shippingFee: integer('shipping_fee').notNull().default(0),
+    purchaseConfirmedAt: at('purchase_confirmed_at'),
+    orderedAt: at('ordered_at').notNull(),
+  },
+  (t) => [
+    check('merch_order_status_check', sql`${t.status} in ('PENDING', 'PAID', 'CANCELLED', 'REFUNDED')`),
+    check('merch_order_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE')`),
+    check('merch_order_pg_store_check', sql`${t.pgStore} in ('STANDARD', 'ESCROW')`),
+    check('merch_order_shipping_fee_check', sql`${t.shippingFee} >= 0`),
+    index('merch_order_promoter_event_idx').on(t.promoterId, t.eventId, t.orderedAt),
+  ],
+);
+
+export const merchOrderItem = pgTable(
+  'merch_order_item',
+  {
+    id: uuid('id').primaryKey(),
+    orderId: uuid('order_id').notNull().references(() => merchOrder.id, { onDelete: 'cascade' }),
+    promoterId: uuid('promoter_id').notNull(),
+    eventId: uuid('event_id'),
+    productId: uuid('product_id').notNull(),
+    productName: text('product_name').notNull(),
+    quantity: integer('quantity').notNull(),
+    unitAmount: integer('unit_amount').notNull(),
+    commissionRateBp: integer('commission_rate_bp').notNull(),
+    status: text('status').notNull().default('READY'),
+    fulfillment: text('fulfillment').notNull(),
+    seatLabel: text('seat_label'),
+    ticketLinked: boolean('ticket_linked').notNull().default(false),
+    shippedAt: at('shipped_at'),
+    deliveredAt: at('delivered_at'),
+    pickedUpAt: at('picked_up_at'),
+    returnRequestedAt: at('return_requested_at'),
+    returnResolvedAt: at('return_resolved_at'),
+    refundedAmount: integer('refunded_amount').notNull().default(0),
+    eventEndsAt: at('event_ends_at'),
+  },
+  (t) => [
+    check('merch_order_item_status_check', sql`${t.status} in ('READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED')`),
+    check('merch_order_item_fulfillment_check', sql`${t.fulfillment} in ('DELIVERY', 'PICKUP', 'WALLET')`),
+    check('merch_order_item_quantity_check', sql`${t.quantity} > 0`),
+    check('merch_order_item_amount_check', sql`${t.unitAmount} >= 0 and ${t.refundedAmount} >= 0`),
+    check('merch_order_item_commission_check', sql`${t.commissionRateBp} >= 0 and ${t.commissionRateBp} <= 10000`),
+    index('merch_order_item_promoter_event_idx').on(t.promoterId, t.eventId),
+    index('merch_order_item_order_idx').on(t.orderId),
+  ],
+);

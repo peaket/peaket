@@ -766,6 +766,8 @@ sequenceDiagram
 - 공연예술통합전산망 전송(FR-054)도 같은 대사 완료 원장을 쓴다(transfer-refund §2.4).
 - 파트너 정산 지급(정산서, 지급 묶음, 결제사 지급대행, 파트너에게서 돌려받을 돈인 미수금)은 docs/features/settlement.md에 있다(FR-062, ADR-0047). 정산서도 같은 대사 완료 원장을 쓴다.
 
+- **지급대행 어댑터의 첫 구현(2026-11-15, R-588)**: 토스 지급 웹훅 서명(`payout.changed`·`seller.changed`)은 보안 키 HMAC-SHA256을 상수 시간으로 비교하고, 키 교체 중 4개 서명 가운데 하나만 맞아도 받으며 5분 [가정] 창을 넘으면 본문을 쓰지 않고 단건 조회로만 확정하는 규칙을 `payment-svc` settlement 도메인에 넣었다. 토스 지급대행 JWE·API 키는 설정 경계(`PEAKET_PG_TOSS_PAYOUT_*`)만 있고 실제 키가 없어 실행은 503 `payout-gateway-unavailable`이다. 포트원은 공개 지급 생성 API가 없어 콘솔 실행 기록을 쓰고, `GET /platform/payouts`·`account-transfers` 응답을 받는 포트와 출금 대사(금액·계좌·예금주, MISSING/UNLINKED)·잔액 원장 순수 함수를 시험까지 넣었다. 실제 계정·콘솔 권한·계약 조건은 배포 단계다.
+
 ## 9. 장애 시 동작(Degraded, NFR-006)
 
 | 장애 상황 | 감지 임계 조건 | Degraded Mode 동작 | 완화 SLO | 절대적 보장 원칙 |

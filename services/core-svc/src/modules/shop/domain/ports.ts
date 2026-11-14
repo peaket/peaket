@@ -18,6 +18,11 @@ export interface ProductEventDirectory {
   productionOf(eventId: string): Promise<{ productionId: string; title: string } | undefined>;
 }
 
+/** 파트너 회차 찾기(명단 내려받기·권한 확인). 소속 파트너의 회차만 준다. */
+export interface PartnerEventDirectory {
+  find(promoterId: string, eventId: string): Promise<{ eventId: string; title: string; endsAt: Date } | undefined>;
+}
+
 /** 상품을 처음 게시할 때 고정하는 중개수수료율(만분율, ADR-0062) */
 export interface CommissionRateSource {
   rateBp(promoterId: string): Promise<number>;

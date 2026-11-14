@@ -14,6 +14,7 @@ import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
+import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 
 const SERVICE = 'ops-svc';
 const url = process.env.PEAKET_DATABASE_URL;
@@ -27,6 +28,7 @@ const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
 const purchaseGrpcAddr = process.env.PEAKET_PURCHASE_GRPC_ADDR;
 const coreUrl = process.env.PEAKET_CORE_HTTP_URL;
 const queueUrl = process.env.PEAKET_QUEUE_HTTP_URL;
+const paymentUrl = process.env.PEAKET_PAYMENT_HTTP_URL;
 const internalToken = process.env.PEAKET_INTERNAL_TOKEN;
 // 회차 취소 일괄 환불 gRPC(BAT-425 GAT-130). 주소가 없으면 EVENT_CANCEL은 내부 HTTP 호환 경로로 물러난다.
 const refunds = purchaseGrpcAddr ? new GrpcEventRefunds({ address: purchaseGrpcAddr }) : undefined;
@@ -59,6 +61,15 @@ const priority =
         copies: new HttpQueuePriorityGrantCopies(queueClient, internalToken),
       }
     : undefined;
+// 지급 승인 업무(BAT-610 잔여). payment-svc 내부 경로가 없으면 503이고, 재인증 JWKS가 없으면 승인은 403이다.
+const payouts = paymentUrl
+  ? {
+      payments: new HttpPayoutPaymentClient(paymentUrl, internalToken),
+      ...(process.env.PEAKET_IDENTITY_JWKS_URL
+        ? { reauth: new JwksApprovalVerifier({ jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' }) }
+        : {}),
+    }
+  : undefined;
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;
 // 관제 스캐너 기기 경계(BAT-450): ops-svc가 권한·감사를 맡고 ticket-svc ScannerDeviceService gRPC가 원장을 쓴다.
@@ -75,6 +86,7 @@ const service = await createService({
     signer: anchor.signer,
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
+    ...(payouts ? { payouts } : {}),
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });

@@ -190,18 +190,20 @@ export interface ProductSettlementPage {
 }
 
 export interface AttendeeRow {
-  bookingNo: string;
-  name: string;
-  phone: string;
-  round: string;
-  seat: string;
-  quantity: number;
+  orderId: string;
+  buyerNameMasked: string;
+  buyerPhoneMasked: string;
+  eventId: string;
+  seats: { seatLabel: string; tier: string }[];
+  ticketCount: number;
 }
 
 export interface AttendeePage {
   items: AttendeeRow[];
   nextCursor: string | null;
-  totals?: { bookings: number; tickets: number };
+  bookingCount: number;
+  ticketCount: number;
+  asOf: string;
 }
 
 export interface AttendeeExport {

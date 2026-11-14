@@ -91,8 +91,10 @@ import {
   GrpcAdminAuthz,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
+  UnavailableProductSettlementSource,
   UnavailableReauthVerifier,
   UnavailableTossPayoutGateway,
+  HttpProductSettlementSource,
 } from './modules/settlement/index.js';
 import { safeErrorCode } from './safe-error-code.js';
 import { shutdownInOrder } from './shutdown.js';
@@ -212,6 +214,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       settlement: {
         store: new DrizzleSettlementStore(batchDatabase),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
+        products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({

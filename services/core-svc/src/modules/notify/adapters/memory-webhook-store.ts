@@ -45,4 +45,35 @@ export class MemoryWebhookStore implements WebhookStore {
     this.deliveries.set(deliveryId, next);
     return next;
   }
+
+  async listActiveEndpoints(promoterId: string) {
+    return (await this.listEndpoints(promoterId)).filter((e) => e.status === 'ACTIVE');
+  }
+  async findEndpointById(endpointId: string) {
+    return this.endpoints.get(endpointId);
+  }
+  async insertDeliveries(records: readonly WebhookDeliveryRecord[]) {
+    for (const r of records) this.deliveries.set(r.deliveryId, { ...r });
+  }
+  async listDueDeliveries(now: Date, limit: number) {
+    return [...this.deliveries.values()]
+      .filter((d) => (d.status === 'PENDING' || d.status === 'RETRYING') && d.nextAttemptAt !== null && d.nextAttemptAt.getTime() <= now.getTime())
+      .sort((a, b) => a.nextAttemptAt!.getTime() - b.nextAttemptAt!.getTime())
+      .slice(0, limit);
+  }
+  async saveDelivery(record: WebhookDeliveryRecord) {
+    this.deliveries.set(record.deliveryId, { ...record });
+  }
+  async countDeadSince(endpointId: string, since: Date) {
+    return [...this.deliveries.values()].filter((d) => d.endpointId === endpointId && d.status === 'DEAD' && (d.finishedAt?.getTime() ?? d.createdAt.getTime()) >= since.getTime()).length;
+  }
+  async lastSuccessAt(endpointId: string) {
+    const rows = [...this.deliveries.values()].filter((d) => d.endpointId === endpointId && d.status === 'SUCCEEDED' && d.finishedAt !== null);
+    return rows.length === 0 ? null : new Date(Math.max(...rows.map((d) => d.finishedAt!.getTime())));
+  }
+  async disableEndpoint(endpointId: string, _now: Date) {
+    const e = this.endpoints.get(endpointId);
+    if (!e) return;
+    this.endpoints.set(endpointId, { ...e, status: 'DISABLED', disabledReason: 'FAILING', version: e.version + 1 });
+  }
 }

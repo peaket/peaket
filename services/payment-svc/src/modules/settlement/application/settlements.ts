@@ -1,11 +1,12 @@
 // 정산서·지급 묶음·KYC 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, ADR-0047·0062).
 // 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 아직 없다(상품 정산서는 빈 목록).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { PayoutGateway, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter } from '../domain/ports.js';
+import type { PayoutGateway, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter } from '../domain/ports.js';
 import {
   accountLast4,
   addBusinessDays,
   calculateEventStatement,
+  calculateProductStatement,
   dateOnly,
   payoutBatchView,
   SettlementProblem,
@@ -19,6 +20,8 @@ import {
   type PayoutRecord,
   type Pg,
   type PgStore,
+  type ReceivableRecord,
+  type StatementKind,
   type StatementRecord,
   type StatementView,
 } from '../domain/settlement.js';
@@ -26,6 +29,7 @@ import {
 export interface SettlementDeps {
   readonly store: SettlementStore;
   readonly payments: SettlementPaymentSource;
+  readonly products?: ProductSettlementSource;
   readonly gateways: readonly PayoutGateway[];
   readonly reauth: ReauthVerifier;
   readonly clock: Clock;
@@ -108,6 +112,87 @@ export class Settlements {
     });
   }
 
+  async calculateProduct(input: { periodStart: string; periodEnd: string; commissionRateBp?: number }): Promise<{ created: number; items: StatementView[] }> {
+    return guard(async () => {
+      if (!this.d.products) throw new SettlementProblem('product-settlement-source-unavailable', 503, '상품 정산 원천을 읽을 수 없습니다');
+      if (input.periodEnd < input.periodStart) throw new SettlementProblem('invalid-query', 422, '정산 기간이 맞지 않습니다');
+      const items = await this.d.products.listProductItems(input.periodStart, input.periodEnd);
+      const groups = new Map<string, typeof items>();
+      for (const item of items) {
+        const key = `${item.promoterId}/${item.pg}/${item.pgStore}`;
+        const list = groups.get(key) ?? [];
+        list.push(item);
+        groups.set(key, list);
+      }
+      const now = new Date(this.d.clock.now());
+      const out: StatementView[] = [];
+      for (const [key, list] of groups) {
+        const first = list[0]!;
+        const existing = await this.d.store.findProductStatement(first.promoterId, first.pg, first.pgStore, input.periodStart, input.periodEnd);
+        if (existing) continue;
+        const [kyc, account] = await Promise.all([this.d.store.findKyc(first.promoterId), this.d.store.findPayoutAccount(first.promoterId)]);
+        const { record, sources } = calculateProductStatement({
+          periodStart: input.periodStart,
+          periodEnd: input.periodEnd,
+          items: list,
+          kyc,
+          account,
+          now,
+          statementId: uuidv7(this.d.clock),
+        });
+        void key;
+        await this.d.store.insertStatement(record, sources);
+        out.push(statementView(record));
+      }
+      return { created: out.length, items: out };
+    });
+  }
+
+  async listAll(filter: { kind?: StatementKind | undefined; status?: string | undefined; pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; limit: number }): Promise<StatementView[]> {
+    return (await this.d.store.listStatements(filter)).map(statementView);
+  }
+
+  async listBatches(filter: { pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; status?: readonly string[] | undefined; limit: number }) {
+    return (await this.d.store.listPayoutBatches(filter)).map(payoutBatchView);
+  }
+
+  async listReceivables(filter: { promoterId?: string | undefined; pg?: Pg | undefined; status?: readonly ReceivableRecord['status'][] | undefined; limit: number }): Promise<ReceivableRecord[]> {
+    return this.d.store.listReceivables(filter);
+  }
+
+  async recordReceivable(input: { promoterId: string; pg: Pg; cause: ReceivableRecord['cause']; amount: number }): Promise<ReceivableRecord> {
+    return guard(async () => {
+      if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new SettlementProblem('invalid-query', 422, '미수금 금액이 맞지 않습니다');
+      const now = new Date(this.d.clock.now());
+      const record: ReceivableRecord = {
+        receivableId: uuidv7(this.d.clock),
+        promoterId: input.promoterId,
+        pg: input.pg,
+        cause: input.cause,
+        amount: input.amount,
+        remaining: input.amount,
+        status: 'OPEN',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.d.store.insertReceivable(record);
+      return record;
+    });
+  }
+
+  async recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<ReturnType<typeof payoutBatchView>> {
+    return guard(async () => {
+      const b = await this.d.store.findPayoutBatch(batchId);
+      if (!b) throw notFound();
+      if (b.pg !== 'PORTONE') throw new SettlementProblem('payout-batch-not-portone', 409, '포트원 지급 묶음이 아닙니다');
+      if (b.status !== 'APPROVED' && b.status !== 'SUBMITTED') throw new SettlementProblem('payout-batch-not-approved', 409, '승인된 지급 묶음이 아닙니다');
+      if (bulkPayoutId.trim() === '') throw new SettlementProblem('invalid-query', 422, '일괄 지급 ID가 필요합니다');
+      const next = { ...b, portoneBulkPayoutId: bulkPayoutId.trim(), status: 'SUBMITTED' as const, updatedAt: new Date(this.d.clock.now()) };
+      await this.d.store.savePayoutBatch(next);
+      return payoutBatchView(next);
+    });
+  }
+
   async confirmDue(statementId: string): Promise<StatementView> {
     return guard(async () => {
       const s = await this.d.store.findStatementById(statementId);
@@ -166,7 +251,31 @@ export class Settlements {
         if (heldAccount > 0) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 지급할 수 없습니다');
         throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
       }
-      const totalAmount = included.reduce((sum, s) => sum + s.payoutAmount, 0);
+      // 미수금 상계(settlement §7): 같은 파트너·같은 결제사의 열린 미수금을 지급액에서 먼저 뺀다.
+      const includedAfterOffset: StatementRecord[] = [];
+      for (const s of included) {
+        let remaining = s.payoutAmount;
+        let offset = 0;
+        for (const r of await this.d.store.listOpenReceivables(s.promoterId, input.pg)) {
+          if (remaining <= 0) break;
+          const take = Math.min(r.remaining, remaining);
+          if (take <= 0) continue;
+          const nextRemaining = r.remaining - take;
+          await this.d.store.saveReceivable({ ...r, remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN', updatedAt: now });
+          await this.d.store.insertReceivableMove({ receivableId: r.receivableId, statementId: s.statementId, amount: take, movedAt: now });
+          offset += take;
+          remaining -= take;
+        }
+        if (offset > 0) {
+          const next: StatementRecord = { ...s, offsetAmount: s.offsetAmount + offset, payoutAmount: remaining, status: remaining > 0 ? s.status : 'CARRIED_OVER', updatedAt: now };
+          await this.d.store.saveStatement(next);
+          if (remaining > 0) includedAfterOffset.push(next);
+        } else {
+          includedAfterOffset.push(s);
+        }
+      }
+      if (includedAfterOffset.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '상계 뒤 지급할 정산서가 없습니다');
+      const totalAmount = includedAfterOffset.reduce((sum, s) => sum + s.payoutAmount, 0);
       if (input.pg === 'PORTONE' && !input.portoneBalance) throw new SettlementProblem('invalid-query', 422, '포트원 지급대행 계좌 잔액이 필요합니다');
       if (input.pg === 'PORTONE' && input.portoneBalance && input.portoneBalance.amount < totalAmount) throw new SettlementProblem('payout-balance-insufficient', 409, '결제사 잔액이 모자라 지급일을 미룹니다');
       const batch: PayoutBatchRecord = {
@@ -175,7 +284,7 @@ export class Settlements {
         pgStore: input.pgStore,
         payoutDate: input.payoutDate,
         totalAmount,
-        statementCount: included.length,
+        statementCount: includedAfterOffset.length,
         approvalId: null,
         portoneBulkPayoutId: null,
         pgBalanceKrw: input.portoneBalance?.amount ?? null,
@@ -196,6 +305,8 @@ export class Settlements {
     return guard(async () => {
       const b = await this.d.store.findPayoutBatch(batchId);
       if (!b) throw notFound();
+      // 실행 실패 뒤 같은 승인 업무로 다시 승인하면 승인은 한 번만 반영하고 실행만 다시 한다.
+      if (b.approvalId === approvalId && (b.status === 'APPROVED' || b.status === 'SUBMITTED' || b.status === 'COMPLETED')) return payoutBatchView(b);
       if (b.status !== 'PENDING_APPROVAL') throw new SettlementProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
       const next = { ...b, status: 'APPROVED' as const, approvalId, updatedAt: new Date(this.d.clock.now()) };
       await this.d.store.savePayoutBatch(next);

@@ -1,10 +1,11 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 import { fileURLToPath } from 'node:url';
-import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 import { GrpcReviewEligibility, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
+import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 
 const SERVICE = 'core-svc';
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
@@ -79,13 +80,23 @@ const service = await createService({
     opsDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
     review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
+    ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
+    identityGrpc,
   }),
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 await service.listen();
 
+// 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다.
+const webhookWorker =
+  process.env.PEAKET_WEBHOOK_WORKER === 'off'
+    ? undefined
+    : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(database), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
+webhookWorker?.start();
+
 process.once('SIGTERM', () => {
+  webhookWorker?.stop();
   // 받는 요청을 먼저 마치고 identity 채널과 DB 연결을 닫는다
   void service
     .close()

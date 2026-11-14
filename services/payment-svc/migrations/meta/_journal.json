@@ -113,6 +113,13 @@
       "when": 1794656846104,
       "tag": "0015_settlement",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794687699856,
+      "tag": "0016_receivables",
+      "breakpoints": true
     }
   ]
 }

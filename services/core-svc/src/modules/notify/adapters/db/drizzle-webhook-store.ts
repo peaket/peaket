@@ -1,6 +1,6 @@
 // notify Drizzle 저장소(docs/data.md webhook_endpoint·webhook_delivery). 파트너 경로는 core_partner 역할(RLS)로 읽고 쓴다.
 // RLS는 트랜잭션의 app.tenant_id로 거르므로 모든 질의를 테넌트 트랜잭션 안에서 한다(ADR-0241, authz-matrix §5.3).
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { WebhookStore } from '../../domain/ports.js';
 import type { DeliveryStatus, WebhookDeliveryRecord, WebhookEndpointRecord } from '../../domain/webhook.js';
@@ -31,6 +31,7 @@ const deliveryRecord = (r: typeof webhookDelivery.$inferSelect): WebhookDelivery
   nextAttemptAt: r.nextAttemptAt,
   createdAt: r.createdAt,
   finishedAt: r.finishedAt,
+  payload: r.payload ?? {},
 });
 
 export class DrizzleWebhookStore implements WebhookStore {
@@ -150,5 +151,92 @@ export class DrizzleWebhookStore implements WebhookStore {
       },
       { tenantId: promoterId },
     );
+  }
+
+  async listActiveEndpoints(promoterId: string) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.select().from(webhookEndpoint).where(and(eq(webhookEndpoint.promoterId, promoterId), eq(webhookEndpoint.status, 'ACTIVE')));
+      return rows.map(endpointRecord);
+    });
+  }
+
+  async findEndpointById(endpointId: string) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.select().from(webhookEndpoint).where(eq(webhookEndpoint.id, endpointId)).limit(1);
+      return rows[0] ? endpointRecord(rows[0]) : undefined;
+    });
+  }
+
+  async insertDeliveries(records: readonly WebhookDeliveryRecord[]) {
+    if (records.length === 0) return;
+    await this.db.transaction(async (tx) => {
+      await tx.insert(webhookDelivery).values(
+        records.map((r) => ({
+          id: r.deliveryId,
+          endpointId: r.endpointId,
+          webhookId: r.webhookId,
+          eventType: r.eventType,
+          status: r.status,
+          attemptCount: r.attemptCount,
+          lastHttpStatus: r.lastHttpStatus,
+          lastError: r.lastError,
+          nextAttemptAt: r.nextAttemptAt,
+          createdAt: r.createdAt,
+          finishedAt: r.finishedAt,
+          payload: r.payload,
+        })),
+      );
+    });
+  }
+
+  async listDueDeliveries(now: Date, limit: number) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(webhookDelivery)
+        .where(and(inArray(webhookDelivery.status, ['PENDING', 'RETRYING']), lte(webhookDelivery.nextAttemptAt, now)))
+        .orderBy(webhookDelivery.nextAttemptAt)
+        .limit(limit);
+      return rows.map(deliveryRecord);
+    });
+  }
+
+  async saveDelivery(record: WebhookDeliveryRecord) {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(webhookDelivery)
+        .set({ status: record.status, attemptCount: record.attemptCount, lastHttpStatus: record.lastHttpStatus, lastError: record.lastError, nextAttemptAt: record.nextAttemptAt, finishedAt: record.finishedAt })
+        .where(eq(webhookDelivery.id, record.deliveryId));
+    });
+  }
+
+  async countDeadSince(endpointId: string, since: Date) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(webhookDelivery)
+        .where(and(eq(webhookDelivery.endpointId, endpointId), eq(webhookDelivery.status, 'DEAD'), sql`coalesce(${webhookDelivery.finishedAt}, ${webhookDelivery.createdAt}) >= ${since}`));
+      return rows[0]?.n ?? 0;
+    });
+  }
+
+  async lastSuccessAt(endpointId: string) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ at: sql<Date | null>`max(${webhookDelivery.finishedAt})` })
+        .from(webhookDelivery)
+        .where(and(eq(webhookDelivery.endpointId, endpointId), eq(webhookDelivery.status, 'SUCCEEDED')));
+      const at = rows[0]?.at;
+      return at ? new Date(at) : null;
+    });
+  }
+
+  async disableEndpoint(endpointId: string, _now: Date) {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(webhookEndpoint)
+        .set({ status: 'DISABLED', disabledReason: 'FAILING', version: sql`${webhookEndpoint.version} + 1` })
+        .where(eq(webhookEndpoint.id, endpointId));
+    });
   }
 }

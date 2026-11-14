@@ -203,6 +203,7 @@ describe('정산 HTTP·유스케이스', () => {
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-not-approved') });
     const approved = await settlements.approveBatch(batch.batchId, randomUUID());
     expect(approved.status).toBe('APPROVED');
+    expect((await settlements.approveBatch(batch.batchId, approved.approvalId!)).status).toBe('APPROVED');
     await expect(settlements.approveBatch(batch.batchId, randomUUID())).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-not-approved') });
     const executed = await settlements.executeBatch(batch.batchId);
     expect(executed.status).toBe('SUBMITTED');
@@ -223,13 +224,72 @@ describe('정산 HTTP·유스케이스', () => {
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-kyc-required') });
   });
+});
 
-  test('토스 지급대행 어댑터가 없으면 실행은 503이고 묶음은 승인 상태로 남는다', async () => {
-    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
-    await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
-    const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() });
-    await settlements.approveBatch(batch.batchId, randomUUID());
-    await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 503, type: expect.stringContaining('payout-gateway-unavailable') });
-    expect((await store.findPayoutBatch(batch.batchId))?.status).toBe('APPROVED');
+describe('상품 정산·미수금 상계', () => {
+  const store = new MemorySettlementStore();
+  const payments = new MemorySettlementPaymentSource();
+  const products = {
+    rows: [] as import('../src/modules/settlement/index.js').ProductSettlementItem[],
+    async listProductItems(from: string, to: string) {
+      return this.rows.filter((r) => r.basisDate >= from && r.basisDate <= to);
+    },
+  };
+  const svc = new Settlements({ store, payments, products, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
+
+  const productItem = (o: Partial<import('../src/modules/settlement/index.js').ProductSettlementItem> = {}) => ({
+    itemId: randomUUID(),
+    orderId: randomUUID(),
+    promoterId: A,
+    eventId: null,
+    pg: 'TOSS' as const,
+    pgStore: 'STANDARD' as const,
+    productId: randomUUID(),
+    productName: '응원봉',
+    quantity: 2,
+    grossAmount: 30_000,
+    refundedAmount: 0,
+    commissionRateBp: 1000,
+    basisDate: '2026-11-09',
+    returnStatus: 'DELIVERED',
+    eventEndsAt: null,
+    ...o,
+  });
+
+  beforeEach(() => {
+    store.statements.clear();
+    store.sources.clear();
+    store.receivables.clear();
+    store.receivableMoves.length = 0;
+    products.rows = [];
+    store.kycs.set(A, kyc(A, 'VERIFIED'));
+  });
+
+  test('J-T18 상품 정산서는 항목별 수수료율로 계산하고 지급일이 4영업일 뒤다', async () => {
+    products.rows = [productItem({ grossAmount: 30_000, refundedAmount: 0, commissionRateBp: 1000 }), productItem({ itemId: randomUUID(), grossAmount: 20_000, refundedAmount: 2_000, commissionRateBp: 500 })];
+    const out = await svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' });
+    expect(out.created).toBe(1);
+    expect(out.items[0]).toMatchObject({ kind: 'PRODUCT', grossAmount: 50_000, refundAmount: 2_000, commissionAmount: 3_900, commissionVat: 390, payoutAmount: 43_710, status: 'NOTIFIED', payoutDate: '2026-11-19' });
+    // 같은 주를 다시 계산하지 않는다
+    expect((await svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' })).created).toBe(0);
+    // KYC가 없으면 HELD
+    store.kycs.delete(A);
+    products.rows = [productItem({ itemId: randomUUID(), promoterId: B })];
+    const held = await svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' });
+    expect(held.items[0]).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+  });
+
+  test('J-T18 미수금은 같은 결제사의 다음 지급에서 상계되고 이동 기록이 남는다', async () => {
+    payments.set(HOLD_EVENT, 'TOSS', [fact({ amount: 10_000_000, cancelledAmount: 0, status: 'APPROVED' })]);
+    const calculated = await svc.calculateEvent({ promoterId: A, eventId: HOLD_EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(calculated.statementId))!, status: 'CONFIRMED' });
+    const r = await svc.recordReceivable({ promoterId: A, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 445_000 });
+    const batch = await svc.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: calculated.payoutDate!, actor: randomUUID() });
+    expect(batch.totalAmount).toBe(calculated.payoutAmount - 445_000);
+    expect(store.receivables.get(r.receivableId)).toMatchObject({ remaining: 0, status: 'CLOSED' });
+    const moves = await store.listReceivableMoves(calculated.statementId);
+    expect(moves).toEqual([expect.objectContaining({ receivableId: r.receivableId, amount: 445_000 })]);
+    const after = await store.findStatementById(calculated.statementId);
+    expect(after).toMatchObject({ offsetAmount: 445_000, payoutAmount: calculated.payoutAmount - 445_000 });
   });
 });

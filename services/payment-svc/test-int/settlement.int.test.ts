@@ -1,5 +1,5 @@
-// 정산·지급·KYC 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-610 잔여, R-574).
-// 0015 적용·재적용, 실제 payment 원장 계산, 정산서·이의·KYC·지급 묶음·재시도·정산 계좌를 본다.
+// 정산·지급·KYC 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-610 잔여, R-574·R-588).
+// 0015·0016 적용·재적용, 실제 payment 원장 계산, 정산서·이의·KYC·지급 묶음·재시도·정산 계좌·상품 정산·미수금 상계를 본다.
 import 'reflect-metadata';
 import { createDatabase, fakeClock, type Database } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +12,7 @@ import {
   MemoryReauthVerifier,
   Settlements,
   UnavailableTossPayoutGateway,
+  type ProductSettlementItem,
 } from '../src/modules/settlement/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -26,6 +27,7 @@ let db: Database;
 let clock: ReturnType<typeof fakeClock>;
 let store: DrizzleSettlementStore;
 let settlements: Settlements;
+const productRows: ProductSettlementItem[] = [];
 
 const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE' }) => {
   await db.pool.query(
@@ -45,6 +47,7 @@ beforeAll(async () => {
   settlements = new Settlements({
     store,
     payments: new DrizzleSettlementPaymentSource(db),
+    products: { listProductItems: async (from: string, to: string) => productRows.filter((r) => r.basisDate >= from && r.basisDate <= to) },
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock,
@@ -134,5 +137,38 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const all = await db.pool.query('select * from payout_account where promoter_id = $1', [A]);
     expect(JSON.stringify(all.rows[0])).not.toContain('98765432101234');
     await expect(settlements.putPayoutAccount(A, 'sid', body, '"0"', 'test-reauth')).rejects.toMatchObject({ status: 412 });
+  });
+
+  test('0016이 partner_receivable·receivable_move를 만들고 재적용해도 같다', async () => {
+    const tables = await db.pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_name in ('partner_receivable','receivable_move') order by table_name");
+    expect(tables.rows.map((r) => r.table_name)).toEqual(['partner_receivable', 'receivable_move']);
+    await expect(migratePayment(pgc.url)).resolves.toBeUndefined();
+  });
+
+  test('상품 정산서는 주문 항목 원천으로 계산되고 상품 목록에 나온다', async () => {
+    productRows.push(
+      { itemId: randomUUID(), orderId: randomUUID(), promoterId: A, eventId: null, pg: 'TOSS', pgStore: 'STANDARD', productId: randomUUID(), productName: '응원봉', quantity: 2, grossAmount: 30_000, refundedAmount: 0, commissionRateBp: 1000, basisDate: '2026-11-09', returnStatus: 'DELIVERED', eventEndsAt: null },
+      { itemId: randomUUID(), orderId: randomUUID(), promoterId: A, eventId: null, pg: 'TOSS', pgStore: 'STANDARD', productId: randomUUID(), productName: '포스터', quantity: 1, grossAmount: 20_000, refundedAmount: 2_000, commissionRateBp: 500, basisDate: '2026-11-10', returnStatus: 'DELIVERED', eventEndsAt: null },
+    );
+    const out = await settlements.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' });
+    expect(out.created).toBe(1);
+    expect(out.items[0]).toMatchObject({ kind: 'PRODUCT', grossAmount: 50_000, refundAmount: 2_000, commissionAmount: 3_900, commissionVat: 390, payoutAmount: 43_710, status: 'NOTIFIED', periodStart: '2026-11-09', periodEnd: '2026-11-15' });
+    expect((await settlements.listProduct(A, { limit: 10 })).items.some((s) => s.kind === 'PRODUCT')).toBe(true);
+    expect((await settlements.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' })).created).toBe(0);
+  });
+
+  test('미수금은 같은 결제사의 지급 묶음에서 상계되고 이동 기록이 남는다', async () => {
+    await db.pool.query("update payout_account set hold_until = '2026-11-01T00:00:00Z' where promoter_id = $1", [A]);
+    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED', payoutDate: '2026-11-20' });
+    const r = await settlements.recordReceivable({ promoterId: A, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 445_000 });
+    const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-20', actor: ACCOUNT });
+    const after = await store.findStatementById(s.statementId);
+    expect(after).toMatchObject({ offsetAmount: 445_000, payoutAmount: s.payoutAmount - 445_000 });
+    expect(batch.totalAmount).toBe(s.payoutAmount - 445_000);
+    const moves = await db.pool.query('select receivable_id, statement_id, amount from receivable_move where statement_id = $1', [s.statementId]);
+    expect(moves.rows).toEqual([{ receivable_id: r.receivableId, statement_id: s.statementId, amount: '445000' }]);
+    const left = await db.pool.query('select remaining, status from partner_receivable where id = $1', [r.receivableId]);
+    expect(left.rows[0]).toEqual({ remaining: '0', status: 'CLOSED' });
   });
 });

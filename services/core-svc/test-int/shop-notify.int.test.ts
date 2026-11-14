@@ -1,6 +1,5 @@
-// shop·notify 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-610 서버 잔여, R-567).
-// 0014_shop·0015_notify 적용·재적용, 테넌트 RLS, Drizzle 저장소, 상품·웹훅 HTTP 관리 API를 실제 DB로 본다.
-// 웹훅 발송기·재시도·DLQ는 아직 없으므로 관리·검증·저장까지만 본다.
+// shop·notify 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-610 서버 잔여, R-567·R-588).
+// 0014_shop·0015_notify·0016_merch_export 적용·재적용, 테넌트 RLS, Drizzle 저장소, 상품·웹훅·export·상품 정산 원천 HTTP를 실제 DB로 본다.
 import 'reflect-metadata';
 import { createDatabase, createService, ensureOutboxPartitions, systemClock, type Database } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +8,7 @@ import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { event, place, production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
 import { webhookEndpoint as webhookEndpointTable } from '../src/modules/notify/adapters/db/schema.js';
-import { product as productTable } from '../src/modules/shop/adapters/db/schema.js';
+import { merchOrder as merchOrderTable, product as productTable } from '../src/modules/shop/adapters/db/schema.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 import { loginFor } from './roles.js';
@@ -41,6 +40,7 @@ beforeAll(async () => {
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: A });
   await admin.db.insert(production).values({ id: PROD_A, promoterId: A, placeId: PLACE, title: 'LUMEN 콘서트', genre: '콘서트', saleReview: 'DRAFT' });
   await admin.db.insert(event).values({ id: EVENT_A, productionId: PROD_A, promoterId: A, venueId: null, openAt: new Date('2027-01-01T00:00:00Z'), startsAt: new Date('2027-02-01T10:00:00Z'), endsAt: new Date('2027-02-01T12:00:00Z') });
+  process.env.PEAKET_INTERNAL_TOKEN = 'int-test-token';
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia() }),
@@ -251,5 +251,86 @@ describe('shop·notify PostgreSQL [BAT-610 R-567]', () => {
     expect(none).toEqual([]);
     const other = await partnerDb.transaction(async (tx) => tx.select({ id: webhookEndpointTable.id }).from(webhookEndpointTable), { tenantId: B });
     expect(other).toEqual([]);
+  });
+
+  test('0016이 merch_order·merch_order_item·attendee_export와 webhook payload를 만들고 RLS·권한을 건다', async () => {
+    const tables = await admin.pool.query(
+      "select tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('merch_order','merch_order_item','attendee_export') order by tablename",
+    );
+    expect(tables.rows).toEqual([
+      { tablename: 'attendee_export', rowsecurity: true },
+      { tablename: 'merch_order', rowsecurity: true },
+      { tablename: 'merch_order_item', rowsecurity: true },
+    ]);
+    const grants = await admin.pool.query(
+      "select table_name, string_agg(privilege_type, ',' order by privilege_type) as privileges from information_schema.role_table_grants where grantee = 'core_partner' and table_name in ('merch_order','merch_order_item','attendee_export') group by table_name order by table_name",
+    );
+    expect(grants.rows).toEqual([
+      { table_name: 'attendee_export', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'merch_order', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'merch_order_item', privileges: 'INSERT,SELECT,UPDATE' },
+    ]);
+    const appGrants = await admin.pool.query(
+      "select table_name, string_agg(privilege_type, ',' order by privilege_type) as privileges from information_schema.role_table_grants where grantee = 'core_app' and table_name in ('webhook_delivery','webhook_endpoint') group by table_name order by table_name",
+    );
+    expect(appGrants.rows).toEqual([
+      { table_name: 'webhook_delivery', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'webhook_endpoint', privileges: 'SELECT,UPDATE' },
+    ]);
+    const payload = await admin.pool.query("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'webhook_delivery' and column_name = 'payload'");
+    expect(payload.rows).toHaveLength(1);
+    await expect(migrateCore(pg.url)).resolves.toBeUndefined();
+  });
+
+  test('상품 정산 원천 HTTP가 기준일이 든 항목만 주고 core_app으로 읽는다', async () => {
+    const orderId = randomUUID();
+    const itemId = randomUUID();
+    await admin.pool.query(
+      "insert into merch_order (id, promoter_id, event_id, buyer_name, buyer_phone, status, pg, pg_store, shipping_fee, ordered_at) values ($1,$2,$3,'김민수','010-1234-5678','PAID','TOSS','STANDARD',3000,now())",
+      [orderId, A, EVENT_A],
+    );
+    await admin.pool.query(
+      "insert into merch_order_item (id, order_id, promoter_id, event_id, product_id, product_name, quantity, unit_amount, commission_rate_bp, status, fulfillment, seat_label, ticket_linked, delivered_at) values ($1,$2,$3,$4,$5,'응원봉',2,15000,1000,'DELIVERED','DELIVERY','A-12',false,'2026-10-22T00:00:00Z')",
+      [itemId, orderId, A, EVENT_A, randomUUID()],
+    );
+    const r = await svc.http.inject({ method: 'GET', url: '/internal/v1/shop/product-settlement-items?from=2026-10-30&to=2026-10-30', headers: { 'x-peaket-internal-token': 'int-test-token' } });
+    expect(r.statusCode).toBe(200);
+    const body = JSON.parse(r.payload);
+    expect(body.items).toEqual([expect.objectContaining({ itemId, orderId, promoterId: A, grossAmount: 33_000, commissionRateBp: 1000, basisDate: '2026-10-30' })]);
+    expect((await svc.http.inject({ method: 'GET', url: '/internal/v1/shop/product-settlement-items?from=2026-10-30&to=2026-10-30' })).statusCode).toBe(403);
+  });
+
+  test('merch 주문·내보내기 이력도 파트너 테넌트 RLS로 갈린다 [ASVS v5.0.0-8.4.1]', async () => {
+    const orderId = randomUUID();
+    await admin.pool.query(
+      "insert into merch_order (id, promoter_id, event_id, buyer_name, buyer_phone, status, pg, pg_store, shipping_fee, ordered_at) values ($1,$2,$3,'이서','010-9876-5432','PAID','TOSS','STANDARD',0,now())",
+      [orderId, A, EVENT_A],
+    );
+    const own = await partnerDb.transaction(async (tx) => tx.select({ id: merchOrderTable.id }).from(merchOrderTable), { tenantId: A });
+    expect(own.length).toBeGreaterThan(0);
+    const other = await partnerDb.transaction(async (tx) => tx.select({ id: merchOrderTable.id }).from(merchOrderTable), { tenantId: B });
+    expect(other).toEqual([]);
+  });
+
+  test('웹훅 사건 내부 입구는 발송 행을 만들고, 예매자 명단 내려받기는 재인증 없이 403이다', async () => {
+    const created = JSON.parse((await createWebhook(A, { eventTypes: ['order.confirmed'] })).payload);
+    const enq = await svc.http.inject({
+      method: 'POST',
+      url: '/internal/v1/notify/webhook-events',
+      headers: { 'content-type': 'application/json', 'x-peaket-internal-token': 'int-test-token' },
+      payload: JSON.stringify({ promoterId: A, eventType: 'order.confirmed', data: { orderId: randomUUID() } }),
+    });
+    expect(enq.statusCode).toBe(202);
+    expect(JSON.parse(enq.payload).accepted).toBeGreaterThanOrEqual(1);
+    const rows = await admin.pool.query("select payload, status from webhook_delivery where endpoint_id = $1", [created.endpointId]);
+    expect(rows.rows[0]).toMatchObject({ status: 'PENDING', payload: { type: 'order.confirmed' } });
+    const exportTry = await svc.http.inject({
+      method: 'POST',
+      url: `/v1/partner/events/${EVENT_A}/attendee-exports`,
+      headers: { ...headers(), 'x-reauth-token': 'anything' },
+      payload: JSON.stringify({ reason: '현장 대조', format: 'CSV' }),
+    });
+    expect(exportTry.statusCode).toBe(403);
+    expect(JSON.parse(exportTry.payload).type).toContain('reauth-required');
   });
 });

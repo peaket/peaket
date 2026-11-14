@@ -9,6 +9,7 @@ import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modul
 import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
+import { PayoutsModule, type PayoutsModuleDeps } from './modules/payouts/index.js';
 
 interface CommonWiring {
   readonly executor?: CommandExecutor;
@@ -24,6 +25,8 @@ interface CommonWiring {
   readonly scannerDevices?: TicketScannerDevices;
   /** 시험에서 감사 체인을 넘겨 기록을 확인한다. 없으면 DB/메모리 체인을 만든다 */
   readonly auditChain?: AuditChain & AuditChainReader;
+  /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
+  readonly payouts?: PayoutsModuleDeps;
 }
 
 @Module({})
@@ -45,6 +48,7 @@ export class AppModule {
           AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
+          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts } : { storage: 'memory' }),
         ],
       };
     }
@@ -61,6 +65,7 @@ export class AppModule {
         AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
+        PayoutsModule.register({ storage: 'memory', ...(o.payouts ? { deps: o.payouts } : {}) }),
       ],
     };
   }

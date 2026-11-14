@@ -96,6 +96,7 @@ describe('파트너 웹훅 관리', () => {
       nextAttemptAt: null,
       createdAt: new Date(NOW_MS),
       finishedAt: new Date(NOW_MS),
+      payload: { type: 'order.confirmed', timestamp: new Date(NOW_MS).toISOString(), data: {} },
     });
     const page = JSON.parse((await svc.http.inject({ method: 'GET', url: `/v1/partner/webhooks/${created.endpointId}/deliveries`, headers: headers() })).payload);
     expect(page.items).toHaveLength(1);

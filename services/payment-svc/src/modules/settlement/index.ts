@@ -4,12 +4,14 @@ export { MemorySettlementStore } from './adapters/memory-settlement-store.js';
 export { DrizzleSettlementPaymentSource } from './adapters/db/drizzle-payment-source.js';
 export { DrizzleSettlementStore } from './adapters/db/drizzle-settlement-store.js';
 export { JwksReauthVerifier, UnavailableReauthVerifier } from './adapters/jwks-reauth-verifier.js';
+export { HttpProductSettlementSource, UnavailableProductSettlementSource } from './adapters/http-product-source.js';
 export { DenyAllAdminAuthz, GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { SettlementModule, type SettlementModuleDeps } from './settlement.module.js';
 export {
   accountLast4,
   addBusinessDays,
   calculateEventStatement,
+  calculateProductStatement,
   dateOnly,
   payoutBatchView,
   SettlementProblem,
@@ -30,10 +32,14 @@ export {
   type PayoutStatus,
   type Pg,
   type PgStore,
+  type ProductSettlementItem,
+  type ReceivableCause,
+  type ReceivableRecord,
+  type ReceivableStatus,
   type StatementKind,
   type StatementRecord,
   type StatementSource,
   type StatementStatus,
   type StatementView,
 } from './domain/settlement.js';
-export type { PayoutGateway, PayoutSubmitInput, PayoutSubmitResult, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter, StatementPage, VerifiedReauth } from './domain/ports.js';
+export type { PayoutGateway, PayoutSubmitInput, PayoutSubmitResult, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter, StatementPage, VerifiedReauth } from './domain/ports.js';

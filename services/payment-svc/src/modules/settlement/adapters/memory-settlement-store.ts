@@ -1,6 +1,6 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
 import type { StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
-import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, StatementRecord, StatementSource } from '../domain/settlement.js';
+import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, ReceivableMoveRecord, ReceivableRecord, StatementRecord, StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -21,6 +21,8 @@ export class MemorySettlementStore implements SettlementStore {
   readonly payouts = new Map<string, PayoutRecord>();
   readonly kycs = new Map<string, KycRecord>();
   readonly accounts = new Map<string, PayoutAccountRecord>();
+  readonly receivables = new Map<string, ReceivableRecord>();
+  readonly receivableMoves: ReceivableMoveRecord[] = [];
 
   async insertStatement(record: StatementRecord, sources: readonly StatementSource[]) {
     this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
@@ -105,5 +107,41 @@ export class MemorySettlementStore implements SettlementStore {
   }
   async savePayoutAccount(record: PayoutAccountRecord) {
     this.accounts.set(record.promoterId, record);
+  }
+  async listStatements(filter: { kind?: 'EVENT' | 'PRODUCT' | undefined; status?: string | undefined; pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; limit: number }) {
+    return [...this.statements.values()]
+      .filter((s) => !filter.kind || s.kind === filter.kind)
+      .filter((s) => !filter.status || s.status === filter.status)
+      .filter((s) => !filter.pg || s.pg === filter.pg)
+      .filter((s) => !filter.pgStore || s.pgStore === filter.pgStore)
+      .filter((s) => !filter.payoutDate || s.payoutDate === filter.payoutDate)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.statementId.localeCompare(a.statementId))
+      .slice(0, filter.limit);
+  }
+  async findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string) {
+    return [...this.statements.values()].find((s) => s.promoterId === promoterId && s.kind === 'PRODUCT' && s.pg === pg && s.pgStore === pgStore && s.periodStart === periodStart && s.periodEnd === periodEnd && s.status !== 'SUPERSEDED');
+  }
+  async insertReceivable(record: ReceivableRecord) {
+    this.receivables.set(record.receivableId, record);
+  }
+  async saveReceivable(record: ReceivableRecord) {
+    this.receivables.set(record.receivableId, record);
+  }
+  async listReceivables(filter: { promoterId?: string | undefined; pg?: Pg | undefined; status?: readonly ReceivableRecord['status'][] | undefined; limit: number }) {
+    return [...this.receivables.values()]
+      .filter((r) => !filter.promoterId || r.promoterId === filter.promoterId)
+      .filter((r) => !filter.pg || r.pg === filter.pg)
+      .filter((r) => !filter.status || filter.status.includes(r.status))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, filter.limit);
+  }
+  async listOpenReceivables(promoterId: string, pg: Pg) {
+    return [...this.receivables.values()].filter((r) => r.promoterId === promoterId && r.pg === pg && r.status === 'OPEN' && r.remaining > 0).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+  async insertReceivableMove(record: ReceivableMoveRecord) {
+    this.receivableMoves.push(record);
+  }
+  async listReceivableMoves(statementId: string) {
+    return this.receivableMoves.filter((m) => m.statementId === statementId);
   }
 }

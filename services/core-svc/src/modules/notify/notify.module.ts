@@ -1,39 +1,70 @@
-// notify 모듈 조립. 지금은 웹훅 관리·발송 원장만이고, 발송기·재시도 워커는 후속이다.
+// notify 모듈 조립. 웹훅 관리·발송 원장·발송기(내부 입구)를 싣는다. 주기 실행은 main의 WebhookWorker가 맡는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN } from '@peaket/platform';
 import { Webhooks } from './application/webhooks.js';
-import { WEBHOOK_STORE, type WebhookStore } from './domain/ports.js';
+import { WebhookDispatcher } from './application/dispatcher.js';
+import { WEBHOOK_STORE, WEBHOOK_TRANSPORT, type WebhookStore, type WebhookTransport } from './domain/ports.js';
 import { DrizzleWebhookStore } from './adapters/db/drizzle-webhook-store.js';
 import { MemoryWebhookStore } from './adapters/memory-webhook-store.js';
 import { PartnerWebhookController } from './inbound/partner-webhook.controller.js';
+import { InternalWebhookEventController } from './inbound/internal-webhook-event.controller.js';
+import { HttpsWebhookTransport } from './adapters/https-transport.js';
 
 export const NOTIFY_PARTNER_DATABASE = Symbol.for('peaket.notify.partner-database');
+export const NOTIFY_APP_STORE = Symbol.for('peaket.notify.app-store');
 
 @Module({})
 export class NotifyModule {
-  static register(o: { storage: 'memory'; store?: WebhookStore } | { storage: 'database'; database: Database; partnerDatabase: Database }): DynamicModule {
+  static register(
+    o:
+      | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport }
+      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport },
+  ): DynamicModule {
     const providers: Provider[] = [
       {
         provide: Webhooks,
         useFactory: (store: WebhookStore, clock: Clock) => new Webhooks({ store, clock }),
         inject: [WEBHOOK_STORE, CLOCK],
       },
+      { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+      {
+        provide: WebhookDispatcher,
+        useFactory: (store: WebhookStore, transport: WebhookTransport, clock: Clock) => new WebhookDispatcher({ store, transport, clock }),
+        inject: [NOTIFY_APP_STORE, WEBHOOK_TRANSPORT, CLOCK],
+      },
     ];
     if (o.storage === 'database') {
       return {
         module: NotifyModule,
-        controllers: [PartnerWebhookController],
+        controllers: [PartnerWebhookController, InternalWebhookEventController],
         providers: [
           ...providers,
           { provide: NOTIFY_PARTNER_DATABASE, useValue: o.partnerDatabase },
+          { provide: NOTIFY_APP_STORE, useFactory: (db: Database) => new DrizzleWebhookStore(db), inject: [DATABASE] },
           { provide: WEBHOOK_STORE, useFactory: (db: Database) => new DrizzleWebhookStore(db), inject: [NOTIFY_PARTNER_DATABASE] },
+          { provide: WEBHOOK_TRANSPORT, useValue: o.transport ?? new HttpsWebhookTransport() },
         ],
       };
     }
+    const store = o.store ?? new MemoryWebhookStore();
     return {
       module: NotifyModule,
-      controllers: [PartnerWebhookController],
-      providers: [...providers, { provide: WEBHOOK_STORE, useValue: o.store ?? new MemoryWebhookStore() }],
+      controllers: [PartnerWebhookController, InternalWebhookEventController],
+      providers: [
+        ...providers,
+        { provide: WEBHOOK_STORE, useValue: store },
+        { provide: NOTIFY_APP_STORE, useValue: store },
+        {
+          provide: WEBHOOK_TRANSPORT,
+          useValue:
+            o.transport ??
+            ({
+              send: async () => {
+                throw new Error('웹훅 발송기가 조립되지 않았습니다');
+              },
+            } satisfies WebhookTransport),
+        },
+      ],
     };
   }
 }

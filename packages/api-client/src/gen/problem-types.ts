@@ -17,7 +17,9 @@ export type ProblemType =
   | 'already-verified'
   | 'already-waiting'
   | 'approval-reason-required'
+  | 'approval-role-required'
   | 'approval-scope-invalid'
+  | 'approval-self-not-allowed'
   | 'artist-exists'
   | 'assignment-required'
   | 'audit-chain-broken'
@@ -58,6 +60,7 @@ export type ProblemType =
   | 'escrow-partial-not-allowed'
   | 'event-schedule-invalid'
   | 'event-suspended'
+  | 'export-format-unavailable'
   | 'first-partner-account-must-be-admin'
   | 'fraud-approver-ineligible'
   | 'fraud-case-exists'
@@ -148,6 +151,8 @@ export type ProblemType =
   | 'payout-batch-empty'
   | 'payout-batch-exists'
   | 'payout-batch-not-approved'
+  | 'payout-batch-not-portone'
+  | 'payout-dependency-unavailable'
   | 'payout-gateway-unavailable'
   | 'payout-kyc-required'
   | 'payout-not-retryable'
@@ -167,6 +172,7 @@ export type ProblemType =
   | 'product-limited-qty-invalid'
   | 'product-return-address-required'
   | 'product-return-shipping-fee-required'
+  | 'product-settlement-source-unavailable'
   | 'product-shipping-fee-required'
   | 'product-ticket-link-invalid'
   | 'production-suspended'
@@ -296,7 +302,9 @@ export const PROBLEM_TYPES = {
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
+  'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
+  'approval-self-not-allowed': { status: 403, title: "요청자는 승인할 수 없습니다" },
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
   'assignment-required': { status: 422, title: "승인할 배정을 하나 골라 주세요" },
   'audit-chain-broken': { status: 409, title: "감사 체인 구간이 비었습니다" },
@@ -337,6 +345,7 @@ export const PROBLEM_TYPES = {
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
+  'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },
@@ -427,6 +436,8 @@ export const PROBLEM_TYPES = {
   'payout-batch-empty': { status: 409, title: "지급할 확정 정산서가 없습니다" },
   'payout-batch-exists': { status: 409, title: "이미 지급 묶음이 있습니다" },
   'payout-batch-not-approved': { status: 409, title: "승인된 지급 묶음이 아닙니다" },
+  'payout-batch-not-portone': { status: 409, title: "포트원 지급 묶음이 아닙니다" },
+  'payout-dependency-unavailable': { status: 503, title: "지급 서비스에 연결하지 못했습니다" },
   'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
   'payout-kyc-required': { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" },
   'payout-not-retryable': { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" },
@@ -446,6 +457,7 @@ export const PROBLEM_TYPES = {
   'product-limited-qty-invalid': { status: 422, title: "한정 수량이 맞지 않습니다" },
   'product-return-address-required': { status: 422, title: "택배 상품은 반품 받을 주소가 필요합니다" },
   'product-return-shipping-fee-required': { status: 422, title: "택배 상품은 반품 배송비가 필요합니다" },
+  'product-settlement-source-unavailable': { status: 503, title: "상품 정산 원천을 읽을 수 없습니다" },
   'product-shipping-fee-required': { status: 422, title: "택배 상품은 배송비가 필요합니다" },
   'product-ticket-link-invalid': { status: 422, title: "티켓 연동 여부와 연결 회차가 맞지 않습니다" },
   'production-suspended': { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" },

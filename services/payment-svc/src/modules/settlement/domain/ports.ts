@@ -8,6 +8,11 @@ import type {
   PayoutRecord,
   Pg,
   PgStore,
+  ProductSettlementItem,
+  ReceivableMoveRecord,
+  ReceivableRecord,
+  ReceivableStatus,
+  StatementKind,
   StatementRecord,
   StatementSource,
 } from './settlement.js';
@@ -48,6 +53,21 @@ export interface SettlementStore {
   saveKyc(record: KycRecord): Promise<void>;
   findPayoutAccount(promoterId: string): Promise<PayoutAccountRecord | undefined>;
   savePayoutAccount(record: PayoutAccountRecord): Promise<void>;
+  /** 관제 목록(테넌트를 가리지 않는다) */
+  listStatements(filter: { kind?: StatementKind | undefined; status?: string | undefined; pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; limit: number }): Promise<StatementRecord[]>;
+  findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string): Promise<StatementRecord | undefined>;
+  // ---- 미수금 상계(settlement §7) ----
+  insertReceivable(record: ReceivableRecord): Promise<void>;
+  saveReceivable(record: ReceivableRecord): Promise<void>;
+  listReceivables(filter: { promoterId?: string | undefined; pg?: Pg | undefined; status?: readonly ReceivableStatus[] | undefined; limit: number }): Promise<ReceivableRecord[]>;
+  listOpenReceivables(promoterId: string, pg: Pg): Promise<ReceivableRecord[]>;
+  insertReceivableMove(record: ReceivableMoveRecord): Promise<void>;
+  listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]>;
+}
+
+export interface ProductSettlementSource {
+  /** core-svc shop의 상품 정산 원천(정산 기준일이 [from, to]에 든 항목). */
+  listProductItems(from: string, to: string): Promise<ProductSettlementItem[]>;
 }
 
 export interface SettlementPaymentSource {
@@ -86,5 +106,6 @@ export interface ReauthVerifier {
 
 export const SETTLEMENT_STORE = Symbol.for('peaket.settlement.store');
 export const SETTLEMENT_PAYMENT_SOURCE = Symbol.for('peaket.settlement.payment-source');
+export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-source');
 export const PAYOUT_GATEWAY = Symbol.for('peaket.settlement.payout-gateway');
 export const REAUTH_VERIFIER = Symbol.for('peaket.settlement.reauth-verifier');

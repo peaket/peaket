@@ -186,3 +186,43 @@ export const payoutAccount = pgTable(
   },
   (t) => [check('payout_account_version_check', sql`${t.version} >= 1`)],
 );
+
+export const partnerReceivable = pgTable(
+  'partner_receivable',
+  {
+    id: uuid('id').primaryKey(),
+    promoterId: uuid('promoter_id').notNull(),
+    pg: text('pg').notNull(),
+    cause: text('cause').notNull(),
+    amount: amount('amount').notNull(),
+    remaining: amount('remaining').notNull(),
+    status: text('status').notNull().default('OPEN'),
+    createdAt: at('created_at').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    check('partner_receivable_pg_check', sql`${t.pg} in (${PG})`),
+    check('partner_receivable_cause_check', sql`${t.cause} in ('REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT')`),
+    check('partner_receivable_status_check', sql`${t.status} in ('OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF')`),
+    check('partner_receivable_amount_check', sql`${t.amount} >= 0 and ${t.remaining} >= 0 and ${t.remaining} <= ${t.amount}`),
+    index('partner_receivable_open_idx').on(t.promoterId, t.pg, t.status, t.createdAt),
+  ],
+);
+
+export const receivableMove = pgTable(
+  'receivable_move',
+  {
+    receivableId: uuid('receivable_id')
+      .notNull()
+      .references(() => partnerReceivable.id),
+    statementId: uuid('statement_id')
+      .notNull()
+      .references(() => settlementStatement.id),
+    amount: amount('amount').notNull(),
+    movedAt: at('moved_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.receivableId, t.statementId] }),
+    check('receivable_move_amount_check', sql`${t.amount} > 0`),
+  ],
+);

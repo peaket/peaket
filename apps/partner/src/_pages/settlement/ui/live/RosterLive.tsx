@@ -43,7 +43,7 @@ export function LiveRosterPanel({ eventName, rounds, isMember }: { eventName: st
     if (!rounds.some((r) => r.eventId === selected)) setSelected(rounds[0]?.eventId ?? '');
   }, [rounds, selected]);
   const page = useAsync(`attendees:${selected}:${isMember}`, (signal) =>
-    isMember || !selected ? Promise.resolve({ items: [], nextCursor: null }) : listAttendees(selected, { limit: 100 }, signal),
+    isMember || !selected ? Promise.resolve({ items: [], nextCursor: null, bookingCount: 0, ticketCount: 0, asOf: new Date().toISOString() }) : listAttendees(selected, { limit: 100 }, signal),
   );
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('현장 명단 대조(동문 입장 확인용)');
@@ -130,7 +130,7 @@ export function LiveRosterPanel({ eventName, rounds, isMember }: { eventName: st
         <>
           <div className="row between wrap" style={{ gap: 8, alignItems: 'flex-end' }}>
             <span className="t-sm muted num">
-              {page.data.totals ? `예매 ${page.data.totals.bookings.toLocaleString('ko-KR')}건 · ${page.data.totals.tickets.toLocaleString('ko-KR')}매` : `예매자 ${page.data.items.length}명`}
+              {`예매 ${page.data.bookingCount.toLocaleString('ko-KR')}건 · ${page.data.ticketCount.toLocaleString('ko-KR')}매`}
             </span>
             <div className="col" style={{ gap: 4, alignItems: 'flex-end' }}>
               <button className="btn btn-outline" type="button" onClick={() => setOpen(true)} aria-describedby="rs-dl-h">
@@ -162,13 +162,13 @@ export function LiveRosterPanel({ eventName, rounds, isMember }: { eventName: st
                 </thead>
                 <tbody>
                   {page.data.items.map((r) => (
-                    <tr key={r.bookingNo}>
-                      <td>{r.name}</td>
-                      <td className="mono">{r.phone}</td>
-                      <td className="mono">{r.bookingNo}</td>
-                      <td className="num">{r.round}</td>
-                      <td>{r.seat}</td>
-                      <td className="r">{r.quantity}</td>
+                    <tr key={r.orderId}>
+                      <td>{r.buyerNameMasked}</td>
+                      <td className="mono">{r.buyerPhoneMasked}</td>
+                      <td className="mono">{r.orderId}</td>
+                      <td className="num">{r.eventId}</td>
+                      <td>{r.seats.map((s) => s.seatLabel).filter(Boolean).join(', ') || '—'}</td>
+                      <td className="r">{r.ticketCount}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -9,12 +9,14 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
 const sql14 = read('migrations/0014_shop.sql');
 const sql15 = read('migrations/0015_notify.sql');
+const sql16 = read('migrations/0016_merch_export.sql');
 const journal = JSON.parse(read('migrations/meta/_journal.json')) as { entries: { idx: number; tag: string }[] };
 
 describe('shop·notify 마이그레이션', () => {
-  test('journal이 0014_shop·0015_notify를 순서대로 갖는다', () => {
+  test('journal이 0014_shop·0015_notify·0016_merch_export를 순서대로 갖는다', () => {
     expect(journal.entries.find((e) => e.idx === 14)?.tag).toBe('0014_shop');
     expect(journal.entries.find((e) => e.idx === 15)?.tag).toBe('0015_notify');
+    expect(journal.entries.find((e) => e.idx === 16)?.tag).toBe('0016_merch_export');
   });
 
   test('0014는 product·product_stock을 만들고 테넌트 RLS·권한을 건다', () => {
@@ -47,8 +49,20 @@ describe('shop·notify 마이그레이션', () => {
     expect(Object.keys(snap15.tables)).toEqual(expect.arrayContaining(['public.webhook_endpoint', 'public.webhook_delivery']));
   });
 
+  test('0016은 merch_order·merch_order_item·attendee_export와 webhook payload를 더하고 RLS를 건다', () => {
+    expect(sql16).toContain('CREATE TABLE "merch_order"');
+    expect(sql16).toContain('CREATE TABLE "merch_order_item"');
+    expect(sql16).toContain('CREATE TABLE "attendee_export"');
+    expect(sql16).toContain('ALTER TABLE "webhook_delivery" ADD COLUMN "payload"');
+    expect(sql16).toContain('CREATE POLICY merch_order_partner_tenant');
+    expect(sql16).toContain('CREATE POLICY attendee_export_partner_tenant');
+    expect(sql16).toContain('GRANT SELECT, INSERT, UPDATE ON merch_order, merch_order_item TO core_partner');
+    expect(sql16).toContain('CREATE POLICY webhook_delivery_app_all');
+    expect(JSON.parse(read('migrations/meta/0016_snapshot.json')) as { tables: Record<string, unknown> }).toMatchObject({ tables: expect.objectContaining({ 'public.merch_order': expect.anything(), 'public.attendee_export': expect.anything() }) });
+  });
+
   test('마이그레이션은 기존 표를 지우지 않는다', () => {
-    for (const sql of [sql14, sql15]) {
+    for (const sql of [sql14, sql15, sql16]) {
       expect(sql).not.toMatch(/DROP TABLE/i);
       expect(sql).not.toMatch(/TRUNCATE/i);
     }

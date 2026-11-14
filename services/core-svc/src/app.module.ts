@@ -1,4 +1,4 @@
-// 뿌리 모듈: 컨텍스트 모듈과 공용 설정(DB)을 모은다. catalog·review를 싣는다(notify·shop·support는 뒤 단계, docs/architecture.md §3.1).
+// 뿌리 모듈: 컨텍스트 모듈과 공용 설정(DB)을 모은다. catalog·review·shop·notify·export를 싣는다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
 import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type SaleConfigStore } from './modules/catalog/index.js';
@@ -6,14 +6,33 @@ import { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from
 import { ShopModule, type DatabaseShopWiring, type MemoryShopWiring } from './modules/shop/index.js';
 import { NotifyModule } from './modules/notify/index.js';
 import type { WebhookStore } from './modules/notify/domain/ports.js';
+import { ExportModule, type MemoryExportWiring } from './modules/export/index.js';
 
 @Module({})
 export class AppModule {
   /** 운영은 database, 시험은 memory를 고른다(저장소가 없을 때 조용히 메모리로 가지 않게 둘 중 하나를 꼭 적는다) */
   static register(
     o:
-      | { database: Database; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring; review?: Omit<DatabaseReviewWiring, 'database'>; shop?: Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'> }
-      | { memory: true; catalog?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; review?: MemoryReviewWiring; shop?: MemoryShopWiring; notify?: { store?: WebhookStore } },
+      | {
+          database: Database;
+          partnerDatabase: Database;
+          opsDatabase?: Database;
+          media: MediaWiring;
+          review?: Omit<DatabaseReviewWiring, 'database'>;
+          shop?: Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>;
+          exportJwks?: { url: string; issuer: string };
+          identityGrpc?: string;
+        }
+      | {
+          memory: true;
+          catalog?: MemoryCatalogRepository;
+          media?: Partial<MediaWiring>;
+          saleConfigs?: SaleConfigStore;
+          review?: MemoryReviewWiring;
+          shop?: MemoryShopWiring;
+          notify?: { store?: WebhookStore };
+          export?: MemoryExportWiring;
+        },
   ): DynamicModule {
     if ('database' in o)
       return {
@@ -24,6 +43,13 @@ export class AppModule {
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
           ShopModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.shop?.commission ? { commission: o.shop.commission } : {}) }),
           NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase }),
+          ExportModule.register({
+            storage: 'database',
+            database: o.database,
+            partnerDatabase: o.partnerDatabase,
+            ...(o.exportJwks ? { jwks: o.exportJwks } : {}),
+            ...(o.identityGrpc ? { identityGrpc: o.identityGrpc } : {}),
+          }),
         ],
       };
     return {
@@ -33,6 +59,7 @@ export class AppModule {
         ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
         NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}) }),
+        ExportModule.register({ storage: 'memory', ...(o.export ? { wiring: o.export } : {}) }),
       ],
     };
   }

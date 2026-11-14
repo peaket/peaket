@@ -9,6 +9,27 @@ export type DisputeReasonCode = 'GROSS_AMOUNT' | 'REFUND_AMOUNT' | 'COMMISSION' 
 export type KycStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED';
 export type PayoutStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
+export type ReceivableCause = 'REFUND_AFTER_PAYOUT' | 'CHARGEBACK' | 'COMPENSATION_ADVANCE' | 'NEGATIVE_STATEMENT';
+export type ReceivableStatus = 'OPEN' | 'OFFSET' | 'GUARANTEE' | 'BILLED' | 'CLOSED' | 'WRITTEN_OFF';
+
+export interface ReceivableRecord {
+  receivableId: string;
+  promoterId: string;
+  pg: Pg;
+  cause: ReceivableCause;
+  amount: number;
+  remaining: number;
+  status: ReceivableStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ReceivableMoveRecord {
+  receivableId: string;
+  statementId: string;
+  amount: number;
+  movedAt: Date;
+}
 
 export class SettlementProblem extends Error {
   constructor(
@@ -288,3 +309,79 @@ export function validatePayoutAccount(body: { bankCode: string; accountNumber: s
 }
 
 export const accountLast4 = (accountNumber: string): string => accountNumber.slice(-4);
+
+/** core-svc shop이 넘기는 상품 정산 원천 한 줄(settlement §4.5). */
+export interface ProductSettlementItem {
+  itemId: string;
+  orderId: string;
+  promoterId: string;
+  eventId: string | null;
+  pg: Pg;
+  pgStore: PgStore;
+  productId: string;
+  productName: string;
+  quantity: number;
+  grossAmount: number;
+  refundedAmount: number;
+  commissionRateBp: number;
+  basisDate: string;
+  returnStatus: string;
+  eventEndsAt: string | null;
+}
+
+export interface ProductCalculationInput {
+  periodStart: string;
+  periodEnd: string;
+  items: readonly ProductSettlementItem[];
+  kyc: KycRecord | undefined;
+  account: PayoutAccountRecord | undefined;
+  now: Date;
+  statementId: string;
+}
+
+/**
+ * 상품 정산서 한 판(settlement §4.5). 주문 항목마다 복사한 수수료율로 수수료를 계산하고,
+ * 지급일은 계산일로부터 4영업일 뒤다(J-T18).
+ */
+export function calculateProductStatement(input: ProductCalculationInput): { record: StatementRecord; sources: StatementSource[] } {
+  const grossAmount = input.items.reduce((s, i) => s + i.grossAmount, 0);
+  const refundAmount = input.items.reduce((s, i) => s + i.refundedAmount, 0);
+  const commissionAmount = input.items.reduce((s, i) => s + Math.floor((Math.max(0, i.grossAmount - i.refundedAmount) * i.commissionRateBp) / 10_000), 0);
+  const commissionVat = Math.floor(commissionAmount / 10);
+  const offsetAmount = 0;
+  const payoutAmount = grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount;
+  const kycVerified = input.kyc?.status === 'VERIFIED' && input.kyc.businessVerified && input.kyc.representativeVerified;
+  const status: StatementStatus = payoutAmount <= 0 ? 'CARRIED_OVER' : kycVerified ? 'NOTIFIED' : 'HELD';
+  const first = input.items[0]!;
+  const sources: StatementSource[] = input.items.map((i) => ({ statementId: input.statementId, sourceId: i.itemId, kind: 'GROSS' as const, paymentId: i.itemId, amount: i.grossAmount }));
+  return {
+    record: {
+      statementId: input.statementId,
+      promoterId: first.promoterId,
+      kind: 'PRODUCT',
+      eventId: null,
+      pg: first.pg,
+      pgStore: first.pgStore,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      grossAmount,
+      refundAmount,
+      commissionAmount,
+      commissionVat,
+      offsetAmount,
+      payoutAmount,
+      revision: 1,
+      supersedesId: null,
+      excludedPayments: [],
+      status,
+      holdReason: status === 'HELD' ? 'KYC' : null,
+      disputeDueAt: addBusinessDays(input.now, 2),
+      payoutDate: dateOnly(addBusinessDays(input.now, 4)),
+      payoutBankCode: input.account?.bankCode ?? null,
+      payoutAccountLast4: input.account?.accountLast4 ?? null,
+      createdAt: input.now,
+      updatedAt: input.now,
+    },
+    sources,
+  };
+}

@@ -1,6 +1,6 @@
 // notify Drizzle 스키마(docs/data.md webhook_endpoint·webhook_delivery, BUILD_ORDER BAT-610 서버 잔여).
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { check, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -41,6 +41,8 @@ export const webhookDelivery = pgTable(
     nextAttemptAt: at('next_attempt_at'),
     createdAt: at('created_at').notNull(),
     finishedAt: at('finished_at'),
+    /** thin 본문. 응답 본문은 저장하지 않는다 */
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
   },
   (t) => [
     check('webhook_delivery_status_check', sql`${t.status} in ('PENDING', 'RETRYING', 'SUCCEEDED', 'DEAD')`),

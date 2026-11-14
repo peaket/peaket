@@ -4,15 +4,15 @@ import type { AttendeeExport, AttendeeRow } from '../../../shared/api/partner-li
 import { isProblem, isReauthRequired, isRetentionEnded } from '../../../shared/api/problem.ts';
 
 export function attendeeName(row: AttendeeRow): string {
-  return row.name || '—';
+  return row.buyerNameMasked || '—';
 }
 
 export function attendeePhone(row: AttendeeRow): string {
-  return row.phone || '—';
+  return row.buyerPhoneMasked || '—';
 }
 
 export function attendeeSeat(row: AttendeeRow): string {
-  return row.seat || '—';
+  return row.seats.map((s) => s.seatLabel).filter(Boolean).join(', ') || '—';
 }
 
 export function exportFormatLabel(format: 'CSV' | 'XLSX' | 'PDF'): string {

@@ -410,7 +410,7 @@ T는 오픈 시각(`open_at`), L은 로비 개방 리드(기본 10분, 회차 �
 | 다시 보내기 | `POST /v1/partner/webhook-deliveries/{deliveryId}/redeliveries` | 파트너 관리자. DEAD·SUCCEEDED 행을 PENDING으로 되돌려 같은 `webhook-id`로 다시 보낸다. 엔드포인트마다 분당 10건 [가정] |
 
 - 다른 파트너의 엔드포인트·발송 행은 404다(있는지 알리지 않는다). 엔지니어의 다시 보내기는 RB-11이다.
-- **구현 상태(2026-11-14, R-567)**: core-svc notify 모듈이 위 관리 API 가운데 등록·조회·고치기·비밀 재발급·발송 이력·다시 보내기를 구현했다. `webhook_endpoint`·`webhook_delivery` 표(0015), 테넌트 RLS, If-Match·권한·주소 검사·1분 재발급 제한·DEAD/SUCCEEDED만 다시 보내기를 단위·HTTP 시험으로 본다. 발송기·재시도 워커·DLQ·FAILING 자동 전환·Secrets Manager 저장·응답 본문 저장·분당 다시 보내기 상한은 후속이다.
+- **구현 상태(2026-11-15, R-588)**: core-svc notify 모듈이 위 관리 API 가운데 등록·조회·고치기·비밀 재발급·발송 이력·다시 보내기를 구현했다. `webhook_endpoint`·`webhook_delivery` 표(0015), 테넌트 RLS, If-Match·권한·주소 검사·1분 재발급 제한·DEAD/SUCCEEDED만 다시 보내기를 단위·HTTP 시험으로 본다. **발송기**: `webhook_delivery`의 thin 본문(`payload`)을 읽어 Standard Webhooks 서명(현재·옛 비밀 공백 연결)으로 보내고, 2xx만 성공, 3xx·시간 초과는 실패로 본다. 재시도는 1분·5분·30분·2시간·6시간·12시간 [가정]이고 다 실패하면 DEAD다. 5일 [가정] 동안 성공 없이 DEAD 50건 [가정]이면 DISABLED(FAILING)로 바꾼다. 연결마다 DNS를 다시 해석해 공인 IP만 연결하고 리디렉션을 따르지 않는다. 시험은 가짜 수신기로 서명·재시도·DLQ·비활성화를 본다. **남은 것**: Secrets Manager/KMS 비밀 저장, 파트너 콘솔 알림함·이메일, 분당 다시 보내기 상한, Kafka `outbox` 소비자(지금은 `POST /internal/v1/notify/webhook-events` 내부 입구), 발송 파드의 나가는 443 제한(V-T34).
 
 ## 10. 실패와 재시도
 

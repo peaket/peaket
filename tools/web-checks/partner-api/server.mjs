@@ -284,10 +284,10 @@ const merchItems = [
 ];
 
 const attendees = [
-  { bookingNo: '2026101400123', name: '김*민', phone: '010-****-1234', round: '10/25(일) 18:00', seat: 'R1구역 12열 7·8번', quantity: 2 },
-  { bookingNo: '2026101400219', name: '이*영', phone: '010-****-7730', round: '10/25(일) 18:00', seat: 'S1구역 3열 11~14번', quantity: 4 },
-  { bookingNo: '2026101400226', name: '박*준', phone: '010-****-0412', round: '10/25(일) 18:00', seat: 'A2구역 16열 3번', quantity: 1 },
-  { bookingNo: '2026101400230', name: '최*아', phone: '010-****-5568', round: '10/25(일) 18:00', seat: 'R2구역 5열 10·11번', quantity: 2 },
+  { orderId: '01900000-0000-7000-8000-000000000101', buyerNameMasked: '김*수', buyerPhoneMasked: '010-****-1234', eventId: '01900000-0000-7000-8000-000000000001', seats: [{ seatLabel: 'R1층 12열 7번', tier: 'R' }, { seatLabel: 'R1층 12열 8번', tier: 'R' }], ticketCount: 2 },
+  { orderId: '01900000-0000-7000-8000-000000000102', buyerNameMasked: '이*민', buyerPhoneMasked: '010-****-7730', eventId: '01900000-0000-7000-8000-000000000001', seats: [{ seatLabel: 'S1층 3열 11번', tier: 'S' }, { seatLabel: 'S1층 3열 12번', tier: 'S' }, { seatLabel: 'S1층 3열 13번', tier: 'S' }, { seatLabel: 'S1층 3열 14번', tier: 'S' }], ticketCount: 4 },
+  { orderId: '01900000-0000-7000-8000-000000000103', buyerNameMasked: '박*', buyerPhoneMasked: '010-****-0412', eventId: '01900000-0000-7000-8000-000000000001', seats: [{ seatLabel: 'A2층 16열 3번', tier: 'A' }], ticketCount: 1 },
+  { orderId: '01900000-0000-7000-8000-000000000104', buyerNameMasked: '최*호', buyerPhoneMasked: '010-****-5568', eventId: '01900000-0000-7000-8000-000000000001', seats: [{ seatLabel: 'R2층 5열 10번', tier: 'R' }, { seatLabel: 'R2층 5열 11번', tier: 'R' }], ticketCount: 2 },
 ];
 const exportLog = [
   { exportId: '88888888-8888-4888-8888-888888888881', exportedAt: '2026-10-24T06:02:00.000Z', actorDisplayName: '스텔라 관리자', actorRole: 'partner_admin', reason: '현장 명단 대조(동문 입장 확인용)', count: 4, format: 'XLSX', result: 'COMPLETED' },
@@ -541,7 +541,7 @@ const server = createServer(async (req, res) => {
 
     const attendeeMatch = /^\/v1\/partner\/events\/([^/]+)\/attendees$/.exec(path);
     if (method === 'GET' && attendeeMatch) {
-      return json(res, 200, { items: attendees, nextCursor: null, totals: { bookings: attendees.length, tickets: attendees.reduce((s, a) => s + a.quantity, 0) } });
+      return json(res, 200, { items: attendees, nextCursor: null, bookingCount: attendees.length, ticketCount: attendees.reduce((s, a) => s + a.ticketCount, 0), asOf: now() });
     }
     const exportMatch = /^\/v1\/partner\/events\/([^/]+)\/attendee-exports$/.exec(path);
     if (exportMatch) {
@@ -550,7 +550,9 @@ const server = createServer(async (req, res) => {
         if (req.headers['x-reauth-token'] !== REAUTH_TOKEN) return problem(res, 403, 'reauth-required', '다시 인증해 주세요');
         exportLog.unshift({ exportId: uuid(), exportedAt: now(), actorDisplayName: '스텔라 관리자', actorRole: 'partner_admin', reason: body?.reason ?? '', count: attendees.length, format: body?.format ?? 'CSV', result: 'COMPLETED' });
         const rows = ['예매자,휴대폰,예매번호,회차,좌석,매수'];
-        for (const a of attendees) rows.push(`${a.name},${a.phone},${a.bookingNo},${a.round},${a.seat},${a.quantity}`);
+        for (const a of attendees) rows.push(`${a.buyerNameMasked},${a.buyerPhoneMasked},${a.orderId},${a.eventId},${a.seats.map((x) => x.seatLabel).join(" / ")},${a.ticketCount}`);
+        if (body?.format === 'XLSX') return text(res, 200, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00]), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '예매자명단.xlsx');
+        if (body?.format === 'PDF') return problem(res, 503, 'export-format-unavailable', 'PDF 형식은 아직 만들 수 없습니다');
         return text(res, 200, `\uFEFF${rows.join('\n')}`, 'text/csv; charset=utf-8', '예매자명단.csv');
       }
     }
