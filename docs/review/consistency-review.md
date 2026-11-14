@@ -688,6 +688,7 @@
 | R-582 | BAT-435 GAT-170 잔여(근무 준비·기기 배치·기기 폐기 세션 종료·등록 IP 제한·SCR-033/035 실제 연결) | services/ticket-svc, services/identity-svc, packages/platform, packages/contracts, packages/api-client, apps/scanner, apps/console-host, docs | 구현·단위 시험·cheap gate·기록 | 통과 |
 | R-583 | BAT-425 GAT-130 잔여(gRPC 정본·자동 정지·연기 신청 창·백그라운드 실행기·팬 알림) 구현 | services/purchase-svc/src/modules/refund, services/ops-svc/src/adapters/grpc-event-refunds.ts, services/ops-svc/src/modules/alerts, docs/api/proto/peaket/purchase/v1/refund.proto, docs/features/transfer-refund.md, docs/features/settlement.md, docs/features/notify.md, docs/security/asvs/transfer-refund.md | gRPC 정본·내부 HTTP 호환, 자동 정지·재시도·신청 창·Outbox·ops 경보, purchase 0018·ops 0003 | 적용 |
 | R-584 | BAT-465 잔여(판매 중지·재개 집행, Kafka 소비자, SSE /v1/ops/live, 제어 gRPC ack, 공개 앵커·서명)가 정본과 어긋남 | services/ops-svc, services/purchase-svc, services/queue-svc, apps/console-host, packages/contracts, packages/api-client, docs | 정본(ADR-0075·0102·0103·0123, transfer-refund §2.1, control-tower §5·§7)대로 구현하고 시험·계약 생성물·문서를 맞췄다. 갈래 2 merge 뒤 purchase 0019·ops 0004~0006으로 재번호 | 적용 |
+| R-585 | 2026-11-15 웨이브 3 마감 기록과 docs-check Mermaid 문법 오류 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/data.md, docs/00-summary.md, docs/review/consistency-review.md | 기능 CI 43631752646의 node·kind·budgets·contracts 등 초록, docs-check는 ops_alert의 unique 줄 문법 오류 → event_key 주석으로 옮김. 세 갈래 R-582/583/584와 다음 후보 기록 | 적용 |
 
 ## 4. 숫자 일치표
 

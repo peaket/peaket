@@ -1895,14 +1895,13 @@ erDiagram
     }
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"
-        text event_key "멱등 키"
+        text event_key "멱등 키. kind와 함께 유니크(같은 경보는 한 건으로 모은다)"
         text kind "AUTO_FAILURE_RATE|AUTO_FAILED_AMOUNT|AUTO_CONSECUTIVE_FAILURES|AUTO_CIRCUIT_OPEN|AUTO_REJECT_RATE|REFUND_WINDOW_CLOSED"
         text severity "SEV1|SEV2|SEV3"
         text source "purchase-svc"
         text reason
         jsonb detail "회차·결제사·1분 창 값"
         timestamptz created_at
-        unique (event_key, kind) "같은 경보는 한 건으로 모은다"
     }
     audit_chain {
         bigint seq PK "빈틈 없는 번호"
