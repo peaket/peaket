@@ -182,3 +182,75 @@
 - **payment-svc 정산·지급·KYC**: 정산서 표·주문 항목 원천·지급대행 어댑터가 없다.
 - **웹훅 발송기**: 서명·재시도·DLQ·FAILING 자동 전환·Secrets Manager/KMS 저장이 없다.
 - **게이트웨이**: 파트너 API 라우팅·세션 스택은 이 가지 밖이다. 브라우저는 가짜 API로 계약 모양만 확인했다.
+
+## 10. payment-svc 정산·지급·KYC cheap gate(2026-11-14, R-574)
+
+`origin/develop` `b710e1d1`(R-572)에서 `wave/lane2-BAT-610-payment` 가지로 payment-svc settlement 모듈을 넣은 뒤의 싼 검사다. Docker test-int·브라우저·변이·4관점 리뷰는 아직 돌리지 않았다.
+
+- **payment-svc 단위·HTTP**: **2929개 통과**(새 정산 8·마이그레이션 5 포함).
+- **payment-svc typecheck**: **0**.
+- **payment-svc lint**: **0**.
+- **계약**: `contracts gen:check` 통과, api-client 113.
+- **마이그레이션**: `0015_settlement.sql`이 정산서·원본·이의·지급 묶음·지급·KYC·계좌 표를 만들고, 기존 `payment` 표는 건드리지 않는다.
+- **정산 계산**: 판매 대금 3,000만·환급 200만·수수료 10% -> 수수료 280만·부가세 28만·지급액 2,492만.
+- **KYC**: 미확인 판매자의 정산서는 HELD/KYC, 지급 묶음은 409 `payout-kyc-required`.
+- **지급**: 포트원 수기 실행은 SUBMITTED, 토스 지급대행 어댑터가 없으면 503 `payout-gateway-unavailable`.
+- **정산 계좌**: If-Match·재인증(passkey) 필요, 계좌 원문은 저장하지 않고 은행·끝 4자리만 저장.
+- **문제 유형**: payout 8·settlement 3을 `x-peaket-problem-types`에 더하고 생성물을 다시 만들었다.
+
+**heavy gate에서 돌릴 것**:
+- Docker test-int: payment-svc 0015 마이그레이션 사슬·재적용, 정산서·지급·KYC 표, 실제 payment 원장과의 계산.
+- 상품 정산서 원천(core-svc `merch_order`)이 생기면 상품 정산서 계산·목록.
+- 토스 지급대행 JWE·서명 웹훅 어댑터, 포트원 지급 내역·출금 대사.
+- KYC 원천(사업자·대표자 확인)과 ops-svc 승인 업무 연결.
+- 파트너 화면 브라우저 확인(상품 정산 탭·정산 계좌·KYC 표시).
+- 변이·4관점 리뷰.
+
+## 11. payment 잔여 heavy gate(2026-11-14, R-574)
+
+`wave/lane2-BAT-610-payment`(`72591a1b`, 기준 `origin/develop` `b710e1d1`)에서 웨이브 끝 비싼 검사를 돌렸다.
+
+### 11.1 Docker test-int(실제 PostgreSQL 18)
+
+- **payment-svc 전체**: `--maxWorkers=2`로 **473 통과·2 건너뜀**(21 파일). 기본 병렬 실행은 Docker Desktop 엔진이 내려가 중단됐고, watchdog 재기동 뒤 `--maxWorkers=2`로 다시 돌려 통과했다.
+- **새 `test-int/settlement.int.test.ts`**: **6/6 통과**. 0015 적용·재적용, 실제 `payment` 원장 계산(판매 4,500만·환급 700만·수수료 380만·부가세 38만·지급액 3,382만), `statement_source` GROSS 3·REFUND 2, 같은 회차 중복 계산 방지, 이의 `OTHER` 설명·기간, KYC `HELD/KYC`·409, 지급 묶음 승인→수기 포트원 SUBMITTED, 실패 재시도 `-2`, 계좌 끝 4자리·3영업일 보류·If-Match·재인증을 확인했다.
+- **core-svc 회귀**: **235 통과·1 건너뜀**(19 파일).
+- 고친 결함: payment-svc 프로세스가 새 파트너 정산 `@Roles` 처리기를 위해 `adminAuthz` 없이 시작해 `RolesCheck`에서 죽었다. `PEAKET_IDENTITY_GRPC_URL`이 있으면 identity `GetAdminAuthz`, local·ci는 deny-all, 운영은 없으면 시작 실패로 바꿨다.
+- `0015_settlement.sql`의 BOM을 제거했고, 기존 `payment` 표 CHECK를 DROP/ADD하던 생성 SQL은 덜어냈다.
+
+### 11.2 변이(등급 B, 28개)
+
+**29/29 잡았다.** 정산 계산(수수료·부가세·환급·지급액·주말 영업일), 상태 전이(중복 계산·이의 상태/기간·OTHER 설명), KYC(상태·사업자/대표자 플래그), 지급(승인·잔액·게이트웨이 선택·재시도 순번·실행 멱등), 계좌(마스킹·3영업일·If-Match·재인증·변경 보류), Drizzle 저장소(회차 필터·상태 저장)를 덮었다.
+
+### 11.3 4관점 리뷰
+
+| 관점 | 높음 | 중간 | 낮음 | 내용 |
+| --- | --- | --- | --- | --- |
+| 보안 | 1(고침) | 1 | 1 | 높음: 새 `@Roles` 처리기 때문에 payment-svc 프로세스가 시작하지 못했다(identity adminAuthz 배선으로 고침). 중간: 예금주 이름 대조가 없다(원천 없음, 후속). 낮음: 정산 계좌 GET 계약이 없어 첫 If-Match가 `"0"`이다 |
+| 정합 | 0 | 2(고침) | 2 | 중간: 계좌 변경 보류를 지급 묶음이 보지 않았다(고침), KYC `businessVerified`·`representativeVerified`를 보지 않았다(고침). 낮음: 상품 정산서 원천 없음, 자동 확정 작업 없음 |
+| 시험 | 0 | 0 | 1 | 변이 29/29, payment test-int 473·2 건너뜀, core test-int 235·1 건너뜀. 낮음: 기본 병렬 test-int는 Docker 엔진이 내려가 `--maxWorkers=2`로 재실행했다 |
+| 운영 | 0 | 0 | 1 | 낮음: 토스 JWE·포트원 대사·KYC 원천·ops 승인·export·웹훅 발송기·게이트웨이가 없다 |
+
+- 높음 1(프로세스 시작)은 이번에 고쳤다. 중간 2(계좌 보류·KYC 플래그)는 고쳤고, 중간 1(예금주 대조)과 상품 원천은 문서화·후속으로 남겼다.
+
+### 11.4 브라우저 확인
+
+- 파트너 dev 3001 + `tools/web-checks/partner-api` 가짜 API 4012로 상품 정산 탭을 열었다.
+- `GET /v1/partner/product-settlements?limit=100` 200을 관찰했고, 가짜 응답의 이의 기한을 미래로 바꾼 뒤 `POST /v1/partner/settlements/{statementId}/disputes`를 눌러 1회 보냈다. 화면은 "이의 접수했습니다"를 보였다.
+- 실제 payment-svc HTTP는 이 브라우저 확인이 아니라 §11.1 test-int가 본다. 정산 계좌/KYC 화면은 GET 계약이 없어 이번 확인 범위 밖이다.
+
+### 11.5 CI 로컬 등가와 정리
+
+- payment-svc 단위 **2929**, payment test-int **473 통과·2 건너뜀**, core-svc 단위 **329**, core test-int **235 통과·1 건너뜀**, partner **181**, api-client **113**.
+- payment/core/partner typecheck **0**, lint **0**, doc-check **오류 0·경고 4**, `ledger --batch BAT-610 --require` **자동 10·ID만 0·빈칸 0**, `trace-check` **4 ID / 3439 보고**, `records --check` **통과**, `contracts gen:check` **같음**.
+- test-int 컨테이너는 각 시험이 `docker rm -f -v`로 지웠고, 가짜 API·파트너 dev도 확인 뒤 멈췄다. `docker ps`는 비어 있다.
+
+### 11.6 남은 막힘
+
+- **상품 정산서 원천**: core-svc `merch_order`·`merch_order_item`이 없다.
+- **토스 지급대행**: JWE·API 키·지급 웹훅 서명 어댑터가 없다.
+- **포트원**: 지급 내역 조회·출금 대사·잔액 원장이 없다.
+- **KYC 원천**: 사업자·대표자 확인 업체/웹훅이 없다.
+- **ops-svc**: 지급 묶음 2인 승인·지급 실행 화면·미수금 상계가 없다.
+- **export**: `BOOKER_EXPORT` JWKS verifier·명단 원천이 없다.
+- **웹훅 발송기·게이트웨이**: 이번 범위 밖이다.

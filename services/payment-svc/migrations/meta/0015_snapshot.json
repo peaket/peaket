@@ -1,0 +1,2403 @@
+{
+  "id": "8521f336-5d03-4bd4-9ba9-b3208a6e9124",
+  "prevId": "5fe578b9-6fca-422b-af9b-a136c501d56b",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.event_pg_config": {
+      "name": "event_pg_config",
+      "schema": "",
+      "columns": {
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg_primary": {
+          "name": "pg_primary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_fallback": {
+          "name": "pg_fallback",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "event_pg_config_primary_check": {
+          "name": "event_pg_config_primary_check",
+          "value": "\"event_pg_config\".\"pg_primary\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "event_pg_config_fallback_check": {
+          "name": "event_pg_config_fallback_check",
+          "value": "\"event_pg_config\".\"pg_fallback\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "event_pg_config_distinct_check": {
+          "name": "event_pg_config_distinct_check",
+          "value": "\"event_pg_config\".\"pg_fallback\" IS NULL OR \"event_pg_config\".\"pg_fallback\" <> \"event_pg_config\".\"pg_primary\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment": {
+      "name": "payment",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_payment_ref": {
+          "name": "pg_payment_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_confirm_token": {
+          "name": "pg_confirm_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deposit_secret_hash": {
+          "name": "deposit_secret_hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cancelled_amount": {
+          "name": "cancelled_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deposit_due_at": {
+          "name": "deposit_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deposit_notified_at": {
+          "name": "deposit_notified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "virtual_account_no": {
+          "name": "virtual_account_no",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "virtual_account_bank": {
+          "name": "virtual_account_bank",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_method_ref": {
+          "name": "payment_method_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "card_bin": {
+          "name": "card_bin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "authenticated_at": {
+          "name": "authenticated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status_changed_at": {
+          "name": "status_changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "failure_category": {
+          "name": "failure_category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_query_at": {
+          "name": "next_query_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "query_attempts": {
+          "name": "query_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "overdue_at": {
+          "name": "overdue_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "anomaly_logged_at": {
+          "name": "anomaly_logged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_tx_id": {
+          "name": "pg_tx_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "query_touched_at": {
+          "name": "query_touched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_opens_at": {
+          "name": "entry_opens_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "virtual_account_allowed": {
+          "name": "virtual_account_allowed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "payment_order_id_key": {
+          "name": "payment_order_id_key",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_query_due_idx": {
+          "name": "payment_query_due_idx",
+          "columns": [
+            {
+              "expression": "next_query_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"payment\".\"status\" IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR (\"payment\".\"status\" IN ('FAILED', 'APPROVED') AND \"payment\".\"next_query_at\" IS NOT NULL)",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_unknown_status_changed_idx": {
+          "name": "payment_unknown_status_changed_idx",
+          "columns": [
+            {
+              "expression": "status_changed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"payment\".\"status\" = 'UNKNOWN'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_pg_ref_idx": {
+          "name": "payment_pg_ref_idx",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pg_payment_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_recon_approved_idx": {
+          "name": "payment_recon_approved_idx",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "approved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"payment\".\"status\" = 'APPROVED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_deposit_hash_idx": {
+          "name": "payment_deposit_hash_idx",
+          "columns": [
+            {
+              "expression": "approved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"payment\".\"deposit_secret_hash\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_next_query_check": {
+          "name": "payment_next_query_check",
+          "value": "\"payment\".\"status\" NOT IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR \"payment\".\"next_query_at\" IS NOT NULL"
+        },
+        "payment_status_check": {
+          "name": "payment_status_check",
+          "value": "\"payment\".\"status\" IN ('ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED')"
+        },
+        "payment_pg_check": {
+          "name": "payment_pg_check",
+          "value": "\"payment\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "payment_amount_check": {
+          "name": "payment_amount_check",
+          "value": "\"payment\".\"amount\" > 0"
+        },
+        "payment_cancelled_amount_check": {
+          "name": "payment_cancelled_amount_check",
+          "value": "\"payment\".\"cancelled_amount\" >= 0 and \"payment\".\"cancelled_amount\" <= \"payment\".\"amount\""
+        },
+        "payment_attempt_no_check": {
+          "name": "payment_attempt_no_check",
+          "value": "\"payment\".\"attempt_no\" >= 1"
+        },
+        "payment_method_ref_card_bin_check": {
+          "name": "payment_method_ref_card_bin_check",
+          "value": "(\"payment\".\"payment_method_ref\" IS NULL) = (\"payment\".\"card_bin\" IS NULL)"
+        },
+        "payment_failure_category_check": {
+          "name": "payment_failure_category_check",
+          "value": "\"payment\".\"failure_category\" IN ('CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED', 'DEPOSIT_CANCELED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_channel_limit": {
+      "name": "payment_channel_limit",
+      "schema": "",
+      "columns": {
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ratio_percent": {
+          "name": "ratio_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lowered_at": {
+          "name": "lowered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "payment_channel_limit_pg_channel_pk": {
+          "name": "payment_channel_limit_pg_channel_pk",
+          "columns": [
+            "pg",
+            "channel"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_channel_limit_pg_check": {
+          "name": "payment_channel_limit_pg_check",
+          "value": "\"payment_channel_limit\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "payment_channel_limit_channel_check": {
+          "name": "payment_channel_limit_channel_check",
+          "value": "\"payment_channel_limit\".\"channel\" = 'ALL'"
+        },
+        "payment_channel_limit_ratio_check": {
+          "name": "payment_channel_limit_ratio_check",
+          "value": "\"payment_channel_limit\".\"ratio_percent\" BETWEEN 25 AND 99"
+        },
+        "payment_channel_limit_expires_check": {
+          "name": "payment_channel_limit_expires_check",
+          "value": "\"payment_channel_limit\".\"expires_at\" > \"payment_channel_limit\".\"lowered_at\""
+        },
+        "payment_channel_limit_version_check": {
+          "name": "payment_channel_limit_version_check",
+          "value": "\"payment_channel_limit\".\"version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_confirm_job": {
+      "name": "payment_confirm_job",
+      "schema": "",
+      "columns": {
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "queued_at": {
+          "name": "queued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payment_confirm_job_claim_idx": {
+          "name": "payment_confirm_job_claim_idx",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_confirm_job_payment_id_payment_id_fk": {
+          "name": "payment_confirm_job_payment_id_payment_id_fk",
+          "tableFrom": "payment_confirm_job",
+          "tableTo": "payment",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_confirm_job_attempts_check": {
+          "name": "payment_confirm_job_attempts_check",
+          "value": "\"payment_confirm_job\".\"attempts\" >= 0"
+        },
+        "payment_confirm_job_pg_check": {
+          "name": "payment_confirm_job_pg_check",
+          "value": "\"payment_confirm_job\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_entry_pause": {
+      "name": "payment_entry_pause",
+      "schema": "",
+      "columns": {
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "since": {
+          "name": "since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trial_started_at": {
+          "name": "trial_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reopened_at": {
+          "name": "reopened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "payment_entry_pause_pg_channel_pk": {
+          "name": "payment_entry_pause_pg_channel_pk",
+          "columns": [
+            "pg",
+            "channel"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_entry_pause_pg_check": {
+          "name": "payment_entry_pause_pg_check",
+          "value": "\"payment_entry_pause\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "payment_entry_pause_channel_check": {
+          "name": "payment_entry_pause_channel_check",
+          "value": "\"payment_entry_pause\".\"channel\" = 'ALL'"
+        },
+        "payment_entry_pause_stage_check": {
+          "name": "payment_entry_pause_stage_check",
+          "value": "\"payment_entry_pause\".\"stage\" IN ('OPEN', 'PROBING', 'TRIAL')"
+        },
+        "payment_entry_pause_reason_check": {
+          "name": "payment_entry_pause_reason_check",
+          "value": "\"payment_entry_pause\".\"reason\" IN ('PG_FAILURE', 'CHANNEL_WAIT')"
+        },
+        "payment_entry_pause_version_check": {
+          "name": "payment_entry_pause_version_check",
+          "value": "\"payment_entry_pause\".\"version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_entry_trial": {
+      "name": "payment_entry_trial",
+      "schema": "",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admitted_at": {
+          "name": "admitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_result": {
+          "name": "first_result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_result_at": {
+          "name": "first_result_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_call_ms": {
+          "name": "first_call_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_call_at": {
+          "name": "first_call_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "payment_entry_trial_pg_admitted_idx": {
+          "name": "payment_entry_trial_pg_admitted_idx",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "admitted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_entry_trial_pg_check": {
+          "name": "payment_entry_trial_pg_check",
+          "value": "\"payment_entry_trial\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "payment_entry_trial_first_result_check": {
+          "name": "payment_entry_trial_first_result_check",
+          "value": "\"payment_entry_trial\".\"first_result\" IN ('APPROVED', 'DECLINED', 'FAILED', 'UNKNOWN')"
+        },
+        "payment_entry_trial_first_call_ms_check": {
+          "name": "payment_entry_trial_first_call_ms_check",
+          "value": "\"payment_entry_trial\".\"first_call_ms\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_event": {
+      "name": "payment_event",
+      "schema": "",
+      "columns": {
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_key": {
+          "name": "event_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exported": {
+          "name": "exported",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "payment_event_payment_id_payment_id_fk": {
+          "name": "payment_event_payment_id_payment_id_fk",
+          "tableFrom": "payment_event",
+          "tableTo": "payment",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "payment_event_payment_id_seq_pk": {
+          "name": "payment_event_payment_id_seq_pk",
+          "columns": [
+            "payment_id",
+            "seq"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payment_event_seq_check": {
+          "name": "payment_event_seq_check",
+          "value": "\"payment_event\".\"seq\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_pg_channel_observed": {
+      "name": "payment_pg_channel_observed",
+      "schema": "",
+      "columns": {
+        "channel_key": {
+          "name": "channel_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg_provider": {
+          "name": "pg_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pg_switch": {
+      "name": "pg_switch",
+      "schema": "",
+      "columns": {
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_pg": {
+          "name": "from_pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_pg": {
+          "name": "to_pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "pg_switch_scope_check": {
+          "name": "pg_switch_scope_check",
+          "value": "\"pg_switch\".\"scope\" = 'PLATFORM' OR \"pg_switch\".\"scope\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"
+        },
+        "pg_switch_from_pg_check": {
+          "name": "pg_switch_from_pg_check",
+          "value": "\"pg_switch\".\"from_pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "pg_switch_to_pg_check": {
+          "name": "pg_switch_to_pg_check",
+          "value": "\"pg_switch\".\"to_pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "pg_switch_version_check": {
+          "name": "pg_switch_version_check",
+          "value": "\"pg_switch\".\"version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reconciliation_diff": {
+      "name": "reconciliation_diff",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_ref": {
+          "name": "order_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_ref": {
+          "name": "payment_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ledger_status": {
+          "name": "ledger_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_status": {
+          "name": "pg_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ledger_amount": {
+          "name": "ledger_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_amount": {
+          "name": "pg_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "reconciliation_diff_pg_ref_kind_key": {
+          "name": "reconciliation_diff_pg_ref_kind_key",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "reconciliation_diff_run_idx": {
+          "name": "reconciliation_diff_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "reconciliation_diff_run_id_reconciliation_run_id_fk": {
+          "name": "reconciliation_diff_run_id_reconciliation_run_id_fk",
+          "tableFrom": "reconciliation_diff",
+          "tableTo": "reconciliation_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "reconciliation_diff_pg_check": {
+          "name": "reconciliation_diff_pg_check",
+          "value": "\"reconciliation_diff\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "reconciliation_diff_kind_check": {
+          "name": "reconciliation_diff_kind_check",
+          "value": "\"reconciliation_diff\".\"kind\" IN ('PG_APPROVED_NO_LEDGER', 'PG_MISMATCH', 'AMOUNT_MISMATCH', 'ORDER_MISMATCH', 'LEDGER_APPROVED_PG_NOT_PAID', 'LEDGER_APPROVED_NO_PG_RECORD', 'LEDGER_FAILED_PG_APPROVED', 'PARTIAL_CANCELED_AT_PG', 'LEDGER_CANCELED_PG_APPROVED', 'UNKNOWN_HANDED_OFF', 'UNKNOWN_CANCELED_CLOSED', 'UNREADABLE')"
+        },
+        "reconciliation_diff_state_check": {
+          "name": "reconciliation_diff_state_check",
+          "value": "\"reconciliation_diff\".\"state\" IN ('OPEN', 'HANDED_OFF', 'CLOSED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reconciliation_run": {
+      "name": "reconciliation_run",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recon_date": {
+          "name": "recon_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_cursor": {
+          "name": "pg_cursor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "compare_after": {
+          "name": "compare_after",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ledger_after_at": {
+          "name": "ledger_after_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ledger_after_id": {
+          "name": "ledger_after_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "listed_count": {
+          "name": "listed_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "matched_count": {
+          "name": "matched_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "mismatch_count": {
+          "name": "mismatch_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "owner": {
+          "name": "owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "reconciliation_run_pg_date_key": {
+          "name": "reconciliation_run_pg_date_key",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recon_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "reconciliation_run_pg_check": {
+          "name": "reconciliation_run_pg_check",
+          "value": "\"reconciliation_run\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        },
+        "reconciliation_run_status_check": {
+          "name": "reconciliation_run_status_check",
+          "value": "\"reconciliation_run\".\"status\" IN ('RUNNING', 'DONE', 'FAILED')"
+        },
+        "reconciliation_run_stage_check": {
+          "name": "reconciliation_run_stage_check",
+          "value": "\"reconciliation_run\".\"stage\" IN ('LISTING', 'COMPARING', 'LEDGER', 'PULLING')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reconciliation_seen": {
+      "name": "reconciliation_seen",
+      "schema": "",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_ref": {
+          "name": "payment_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_ref": {
+          "name": "order_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_status": {
+          "name": "pg_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "reconciliation_seen_run_id_payment_ref_pk": {
+          "name": "reconciliation_seen_run_id_payment_ref_pk",
+          "columns": [
+            "run_id",
+            "payment_ref"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.webhook_receipt": {
+      "name": "webhook_receipt",
+      "schema": "",
+      "columns": {
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dedup_key": {
+          "name": "dedup_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "webhook_receipt_received_at_idx": {
+          "name": "webhook_receipt_received_at_idx",
+          "columns": [
+            {
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "webhook_receipt_pg_dedup_key_pk": {
+          "name": "webhook_receipt_pg_dedup_key_pk",
+          "columns": [
+            "pg",
+            "dedup_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "webhook_receipt_pg_check": {
+          "name": "webhook_receipt_pg_check",
+          "value": "\"webhook_receipt\".\"pg\" IN ('TOSS', 'PORTONE', 'SIMULATOR')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payout": {
+      "name": "payout",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "batch_id": {
+          "name": "batch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statement_id": {
+          "name": "statement_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ref_payout_id": {
+          "name": "ref_payout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_payout_id": {
+          "name": "pg_payout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_transfer_id": {
+          "name": "pg_transfer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transfer_check": {
+          "name": "transfer_check",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transfer_checked_at": {
+          "name": "transfer_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "payout_ref_key": {
+          "name": "payout_ref_key",
+          "columns": [
+            {
+              "expression": "ref_payout_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_batch_statement_seq_key": {
+          "name": "payout_batch_statement_seq_key",
+          "columns": [
+            {
+              "expression": "batch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "statement_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_batch_idx": {
+          "name": "payout_batch_idx",
+          "columns": [
+            {
+              "expression": "batch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payout_batch_id_payout_batch_id_fk": {
+          "name": "payout_batch_id_payout_batch_id_fk",
+          "tableFrom": "payout",
+          "tableTo": "payout_batch",
+          "columnsFrom": [
+            "batch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "payout_statement_id_settlement_statement_id_fk": {
+          "name": "payout_statement_id_settlement_statement_id_fk",
+          "tableFrom": "payout",
+          "tableTo": "settlement_statement",
+          "columnsFrom": [
+            "statement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payout_status_check": {
+          "name": "payout_status_check",
+          "value": "\"payout\".\"status\" in ('REQUESTED', 'IN_PROGRESS', 'COMPLETED', 'FAILED', 'CANCELED')"
+        },
+        "payout_amount_check": {
+          "name": "payout_amount_check",
+          "value": "\"payout\".\"amount\" > 0"
+        },
+        "payout_seq_check": {
+          "name": "payout_seq_check",
+          "value": "\"payout\".\"seq\" >= 1"
+        },
+        "payout_transfer_check_check": {
+          "name": "payout_transfer_check_check",
+          "value": "\"payout\".\"transfer_check\" is null or \"payout\".\"transfer_check\" in ('MATCHED', 'MISMATCH', 'MISSING')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payout_account": {
+      "name": "payout_account",
+      "schema": "",
+      "columns": {
+        "promoter_id": {
+          "name": "promoter_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "bank_code": {
+          "name": "bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_last4": {
+          "name": "account_last4",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hold_until": {
+          "name": "hold_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "holder_verified": {
+          "name": "holder_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payout_account_version_check": {
+          "name": "payout_account_version_check",
+          "value": "\"payout_account\".\"version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payout_batch": {
+      "name": "payout_batch",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_store": {
+          "name": "pg_store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payout_date": {
+          "name": "payout_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statement_count": {
+          "name": "statement_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approval_id": {
+          "name": "approval_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portone_bulk_payout_id": {
+          "name": "portone_bulk_payout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_balance_krw": {
+          "name": "pg_balance_krw",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_balance_source": {
+          "name": "pg_balance_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_balance_observed_at": {
+          "name": "pg_balance_observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_balance_observed_by": {
+          "name": "pg_balance_observed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg_balance_ledger_krw": {
+          "name": "pg_balance_ledger_krw",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "payout_batch_key": {
+          "name": "payout_batch_key",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pg_store",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payout_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"payout_batch\".\"status\" not in ('COMPLETED', 'PARTIAL_FAILED')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_batch_list_idx": {
+          "name": "payout_batch_list_idx",
+          "columns": [
+            {
+              "expression": "payout_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pg_store",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "payout_batch_pg_check": {
+          "name": "payout_batch_pg_check",
+          "value": "\"payout_batch\".\"pg\" in ('TOSS', 'PORTONE')"
+        },
+        "payout_batch_pg_store_check": {
+          "name": "payout_batch_pg_store_check",
+          "value": "\"payout_batch\".\"pg_store\" in ('STANDARD', 'ESCROW')"
+        },
+        "payout_batch_status_check": {
+          "name": "payout_batch_status_check",
+          "value": "\"payout_batch\".\"status\" in ('PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED')"
+        },
+        "payout_batch_balance_source_check": {
+          "name": "payout_batch_balance_source_check",
+          "value": "\"payout_batch\".\"pg_balance_source\" is null or \"payout_batch\".\"pg_balance_source\" in ('PG_API', 'OPERATOR_CONSOLE')"
+        },
+        "payout_batch_total_check": {
+          "name": "payout_batch_total_check",
+          "value": "\"payout_batch\".\"total_amount\" >= 0 and \"payout_batch\".\"statement_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.seller_kyc": {
+      "name": "seller_kyc",
+      "schema": "",
+      "columns": {
+        "promoter_id": {
+          "name": "promoter_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "business_verified": {
+          "name": "business_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "representative_verified": {
+          "name": "representative_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MANUAL'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "seller_kyc_status_check": {
+          "name": "seller_kyc_status_check",
+          "value": "\"seller_kyc\".\"status\" in ('PENDING', 'VERIFIED', 'REJECTED')"
+        },
+        "seller_kyc_source_check": {
+          "name": "seller_kyc_source_check",
+          "value": "\"seller_kyc\".\"source\" in ('MANUAL', 'TOSS', 'PORTONE')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.settlement_statement": {
+      "name": "settlement_statement",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "promoter_id": {
+          "name": "promoter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pg": {
+          "name": "pg",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pg_store": {
+          "name": "pg_store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_start": {
+          "name": "period_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "period_end": {
+          "name": "period_end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gross_amount": {
+          "name": "gross_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refund_amount": {
+          "name": "refund_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commission_amount": {
+          "name": "commission_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commission_vat": {
+          "name": "commission_vat",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offset_amount": {
+          "name": "offset_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "payout_amount": {
+          "name": "payout_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "supersedes_id": {
+          "name": "supersedes_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "excluded_payments": {
+          "name": "excluded_payments",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hold_reason": {
+          "name": "hold_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dispute_due_at": {
+          "name": "dispute_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_date": {
+          "name": "payout_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_bank_code": {
+          "name": "payout_bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payout_account_last4": {
+          "name": "payout_account_last4",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "settlement_statement_partner_idx": {
+          "name": "settlement_statement_partner_idx",
+          "columns": [
+            {
+              "expression": "promoter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "settlement_statement_event_idx": {
+          "name": "settlement_statement_event_idx",
+          "columns": [
+            {
+              "expression": "promoter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "settlement_statement_payout_idx": {
+          "name": "settlement_statement_payout_idx",
+          "columns": [
+            {
+              "expression": "pg",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pg_store",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payout_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "settlement_statement_kind_check": {
+          "name": "settlement_statement_kind_check",
+          "value": "\"settlement_statement\".\"kind\" in ('EVENT', 'PRODUCT')"
+        },
+        "settlement_statement_pg_check": {
+          "name": "settlement_statement_pg_check",
+          "value": "\"settlement_statement\".\"pg\" in ('TOSS', 'PORTONE')"
+        },
+        "settlement_statement_pg_store_check": {
+          "name": "settlement_statement_pg_store_check",
+          "value": "\"settlement_statement\".\"pg_store\" in ('STANDARD', 'ESCROW')"
+        },
+        "settlement_statement_status_check": {
+          "name": "settlement_statement_status_check",
+          "value": "\"settlement_statement\".\"status\" in ('CALCULATED', 'NOTIFIED', 'DISPUTED', 'CONFIRMED', 'HELD', 'SCHEDULED', 'FAILED', 'PAID', 'CARRIED_OVER', 'SUPERSEDED')"
+        },
+        "settlement_statement_hold_reason_check": {
+          "name": "settlement_statement_hold_reason_check",
+          "value": "\"settlement_statement\".\"hold_reason\" is null or \"settlement_statement\".\"hold_reason\" in ('KYC', 'ACCOUNT_CHANGE', 'BALANCE', 'ACCOUNT_MISMATCH', 'SALE_SUSPENDED')"
+        },
+        "settlement_statement_amounts_check": {
+          "name": "settlement_statement_amounts_check",
+          "value": "\"settlement_statement\".\"gross_amount\" >= 0 and \"settlement_statement\".\"refund_amount\" >= 0 and \"settlement_statement\".\"commission_amount\" >= 0 and \"settlement_statement\".\"commission_vat\" >= 0 and \"settlement_statement\".\"offset_amount\" >= 0"
+        },
+        "settlement_statement_revision_check": {
+          "name": "settlement_statement_revision_check",
+          "value": "\"settlement_statement\".\"revision\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.statement_dispute": {
+      "name": "statement_dispute",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "statement_id": {
+          "name": "statement_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detail": {
+          "name": "detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "submitted_by": {
+          "name": "submitted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "statement_dispute_statement_idx": {
+          "name": "statement_dispute_statement_idx",
+          "columns": [
+            {
+              "expression": "statement_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "statement_dispute_statement_id_settlement_statement_id_fk": {
+          "name": "statement_dispute_statement_id_settlement_statement_id_fk",
+          "tableFrom": "statement_dispute",
+          "tableTo": "settlement_statement",
+          "columnsFrom": [
+            "statement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "statement_dispute_reason_check": {
+          "name": "statement_dispute_reason_check",
+          "value": "\"statement_dispute\".\"reason_code\" in ('GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER')"
+        },
+        "statement_dispute_result_check": {
+          "name": "statement_dispute_result_check",
+          "value": "\"statement_dispute\".\"result\" is null or \"statement_dispute\".\"result\" in ('ADJUSTED', 'DISMISSED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.statement_source": {
+      "name": "statement_source",
+      "schema": "",
+      "columns": {
+        "statement_id": {
+          "name": "statement_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "statement_source_statement_id_settlement_statement_id_fk": {
+          "name": "statement_source_statement_id_settlement_statement_id_fk",
+          "tableFrom": "statement_source",
+          "tableTo": "settlement_statement",
+          "columnsFrom": [
+            "statement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "statement_source_statement_id_source_id_kind_pk": {
+          "name": "statement_source_statement_id_source_id_kind_pk",
+          "columns": [
+            "statement_id",
+            "source_id",
+            "kind"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "statement_source_kind_check": {
+          "name": "statement_source_kind_check",
+          "value": "\"statement_source\".\"kind\" in ('GROSS', 'REFUND')"
+        },
+        "statement_source_amount_check": {
+          "name": "statement_source_amount_check",
+          "value": "\"statement_source\".\"amount\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -140,6 +140,14 @@ export type ProblemType =
   | 'payment-attempt-mismatch'
   | 'payment-attempts-exceeded'
   | 'payment-not-accepted'
+  | 'payout-account-change-hold'
+  | 'payout-balance-insufficient'
+  | 'payout-batch-empty'
+  | 'payout-batch-exists'
+  | 'payout-batch-not-approved'
+  | 'payout-gateway-unavailable'
+  | 'payout-kyc-required'
+  | 'payout-not-retryable'
   | 'pg-fallback-same-provider'
   | 'pg-unavailable'
   | 'pickup-slot-unavailable'
@@ -237,6 +245,9 @@ export type ProblemType =
   | 'self-target-forbidden'
   | 'server-busy'
   | 'session-not-found'
+  | 'settlement-commission-rate-invalid'
+  | 'settlement-dispute-window-closed'
+  | 'settlement-not-disputable'
   | 'signup-already-completed'
   | 'sold-out'
   | 'staff-assignment-exists'
@@ -401,6 +412,14 @@ export const PROBLEM_TYPES = {
   'payment-attempt-mismatch': { status: 409, title: "결제 시도와 맞지 않습니다. 결제를 다시 시작해 주세요" },
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'payment-not-accepted': { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" },
+  'payout-account-change-hold': { status: 409, title: "정산 계좌 변경 보류 중이라 지급할 수 없습니다" },
+  'payout-balance-insufficient': { status: 409, title: "결제사 잔액이 모자라 지급일을 미룹니다" },
+  'payout-batch-empty': { status: 409, title: "지급할 확정 정산서가 없습니다" },
+  'payout-batch-exists': { status: 409, title: "이미 지급 묶음이 있습니다" },
+  'payout-batch-not-approved': { status: 409, title: "승인된 지급 묶음이 아닙니다" },
+  'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
+  'payout-kyc-required': { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" },
+  'payout-not-retryable': { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" },
   'pg-fallback-same-provider': { status: 422, title: "대체 결제사가 기본 결제사와 같은 하위 결제사를 거칩니다" },
   'pg-unavailable': { status: 503, title: "결제를 잠시 시작할 수 없습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
@@ -498,6 +517,9 @@ export const PROBLEM_TYPES = {
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
+  'settlement-commission-rate-invalid': { status: 422, title: "수수료율이 맞지 않습니다" },
+  'settlement-dispute-window-closed': { status: 409, title: "이의 기간이 끝났습니다" },
+  'settlement-not-disputable': { status: 409, title: "지금은 이의를 낼 수 없는 정산서입니다" },
   'signup-already-completed': { status: 409, title: "이미 가입을 마친 계정입니다" },
   'sold-out': { status: 410, title: "매진되었습니다" },
   'staff-assignment-exists': { status: 409, title: "이미 이 회차에 배정된 계정입니다" },

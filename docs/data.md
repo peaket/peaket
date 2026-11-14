@@ -1213,6 +1213,24 @@ erDiagram
         text transfer_check "MATCHED|MISMATCH|MISSING(포트원 출금 대사 결과, ADR-0108)"
         timestamptz transfer_checked_at
     }
+    seller_kyc {
+        uuid promoter_id PK "payment-svc가 두는 판매자 KYC 상태(원천은 사업자·대표자 확인)"
+        text status "PENDING|VERIFIED|REJECTED"
+        bool business_verified "사업자등록번호 확인"
+        bool representative_verified "대표자 확인"
+        timestamptz verified_at
+        text source "MANUAL|TOSS|PORTONE"
+        timestamptz updated_at
+    }
+    payout_account {
+        uuid promoter_id PK "정산 계좌의 은행·끝 4자리만. 계좌번호 원문은 저장하지 않는다"
+        text bank_code
+        text account_last4
+        int version "If-Match 판"
+        timestamptz changed_at
+        timestamptz hold_until "변경 뒤 3영업일 지급 보류"
+        bool holder_verified "예금주 확인"
+    }
     partner_receivable {
         uuid id PK
         uuid promoter_id

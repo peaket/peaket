@@ -6,6 +6,8 @@
 - **아키텍처 설계 근거**: [docs/features/settlement.md](../../features/settlement.md), [ADR-0047](../../adr/0047-settlement-payout-via-pg-agency.md), [ADR-0044](../../adr/0044-dual-pg-selection-and-switchover.md), [ADR-0045](../../adr/0045-intermediary-legal-status.md), [ADR-0046](../../adr/0046-cancel-transfer-refund-approvals.md), [docs/features/payment.md](../../features/payment.md)
 - **문서 상태 및 일정**: 항목 선정을 마쳤고 구현 직전 단계다(2026-10-13 수립, ADR-0047 반영). 요구사항 원문은 OWASP ASVS `v5.0.0_release` 원문과 대조했다(2026-10-13). V3 절은 OWASP ASVS 저장소 `v5.0.0` 태그의 V3 원문과 대조해 더했다(2026-10-15). 결제사 규격은 토스페이먼츠 지급대행 가이드·API 참조·웹훅 이벤트 문서와 포트원 API 명세 v1.16.0을 따른다(2026-10-13 확인). 정산 지급 작업 착수(wbs 7.2.3) 전에 다시 판정한다.
 
+**구현 상태(2026-11-14, R-574)**: payment-svc settlement 모듈이 회차 정산서 계산·이의·정산 계좌(은행·끝 4자리)·KYC 게이트·지급 묶음·수기 포트원 실행 기록을 넣었다. 정산서·지급 표는 0015 마이그레이션에 있고, 결제 원장은 payment-svc의 payment 표만 읽는다. 토스페이먼츠 지급대행 JWE·API 어댑터, 포트원 지급 내역 조회·출금 대사, KYC 원천(사업자·대표자 확인), ops-svc 승인 업무, 상품 정산서 주문 항목 원천은 아직 없어 해당 ASVS 행은 미실행이다.
+
 **작성 및 판독 가이드**
 
 - **적용 여부**: 적용, 부분 적용, 미적용 중 하나로 적는다.

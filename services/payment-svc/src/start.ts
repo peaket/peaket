@@ -84,6 +84,16 @@ import {
   WEBHOOK_REQUEST_TIMEOUT_MS,
   webhookDatabaseOptions,
 } from './modules/payment/server.js';
+import {
+  DenyAllAdminAuthz,
+  DrizzleSettlementPaymentSource,
+  DrizzleSettlementStore,
+  GrpcAdminAuthz,
+  JwksReauthVerifier,
+  ManualPortonePayoutGateway,
+  UnavailableReauthVerifier,
+  UnavailableTossPayoutGateway,
+} from './modules/settlement/index.js';
 import { safeErrorCode } from './safe-error-code.js';
 import { shutdownInOrder } from './shutdown.js';
 
@@ -185,6 +195,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
     name: SERVICE,
     env,
     hotPath,
+    adminAuthz: env.PEAKET_IDENTITY_GRPC_URL
+      ? new GrpcAdminAuthz(env.PEAKET_IDENTITY_GRPC_URL)
+      : env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci'
+        ? new DenyAllAdminAuthz()
+        : (() => {
+            throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(파트너 정산 경로의 관리자 인증)');
+          })(),
     ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     module: AppModule.register({
       store,
@@ -192,6 +209,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
       log: lateLog,
       signals,
       webhook: { store: new DrizzleWebhookStore({ database: webhookDatabase }), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator(env) },
+      settlement: {
+        store: new DrizzleSettlementStore(batchDatabase),
+        payments: new DrizzleSettlementPaymentSource(batchDatabase),
+        gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
+        reauth: env.PEAKET_IDENTITY_JWKS_URL
+          ? new JwksReauthVerifier({
+              jwksUrl: env.PEAKET_IDENTITY_JWKS_URL,
+              issuer: env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
+              clock: systemClock,
+            })
+          : new UnavailableReauthVerifier(),
+      },
     }),
     // 이 앱 포트의 HTTP 경로는 웹훅뿐이라 웹훅에 맞춘 시한을 서버 전체에 건다
     requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS,
