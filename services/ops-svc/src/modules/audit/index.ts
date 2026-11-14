@@ -30,3 +30,14 @@ export {
   type NewAuditCheckpoint,
 } from './checkpoint.js';
 export { checkpointViewOf } from './inbound/checkpoints.controller.js';
+export {
+  MemoryImmutableAnchorStore,
+  MemoryOpenTimestampsAnchor,
+  OpenTimestampsAnchorAdapter,
+  S3ObjectLockAnchorStore,
+  anchorCheckpoint,
+  type AnchorInput,
+  type AnchorResult,
+  type ImmutableAnchorStore,
+  type OpenTimestampsAnchor,
+} from './immutable-anchor.js';

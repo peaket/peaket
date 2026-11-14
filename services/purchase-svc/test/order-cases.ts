@@ -281,6 +281,7 @@ export class OrderFakes {
       if (this.restriction instanceof Error) throw this.restriction;
       return this.restriction;
     },
+    apply: async () => ({ changed: false }),
   };
 
   readonly contactRefs: ContactRefs = {

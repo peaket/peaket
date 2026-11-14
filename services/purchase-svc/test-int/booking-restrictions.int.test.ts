@@ -3,21 +3,46 @@
 // booking domain/ports.ts BookingRestrictions와 adapters/redis-booking-restrictions.ts의 설명.
 // 사본을 쓰는 쪽(SetBookingRestriction 받기)은 GAT-310이라, 여기서는 Hash를 직접 HSET해 준비한다. 계정마다 새 UUID를 쓰고 Valkey를 비우지 않는다.
 import 'reflect-metadata';
+import * as grpc from '@grpc/grpc-js';
 import { randomUUID } from 'node:crypto';
 import { createHotRedis, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { bookingRestrictionKey, OrderSeatStoreUnavailable, RedisBookingRestrictions } from '../src/modules/booking/index.js';
+import { startPurchaseGrpcServer } from '../src/grpc-server.js';
+import {
+  bookingRestrictionHandlers,
+  bookingRestrictionKey,
+  bookingRestrictionPackage,
+  OrderSeatStoreUnavailable,
+  RedisBookingRestrictions,
+} from '../src/modules/booking/index.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 let valkey: ValkeyContainer | undefined;
 let redis: HotRedis;
+let restrictions: RedisBookingRestrictions;
+
+type Unary = (req: object, md: grpc.Metadata, o: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
+type Client = grpc.Client & Record<'SetBookingRestriction', Unary>;
+let server: Awaited<ReturnType<typeof startPurchaseGrpcServer>>;
+let client: Client;
+const call = (req: object): Promise<Record<string, unknown>> =>
+  new Promise((resolve, reject) => client.SetBookingRestriction(req, new grpc.Metadata(), {}, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
 
 beforeAll(async () => {
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
+  restrictions = new RedisBookingRestrictions(redis);
+  server = await startPurchaseGrpcServer({
+    host: '127.0.0.1',
+    port: 0,
+    services: [{ definition: bookingRestrictionPackage().BookingRestrictionService.service, handlers: bookingRestrictionHandlers({ apply: (i) => restrictions.apply(i) }, () => undefined) }],
+  });
+  client = new (bookingRestrictionPackage().BookingRestrictionService as unknown as new (address: string, credentials: grpc.ChannelCredentials) => Client)(`127.0.0.1:${server.port}`, grpc.credentials.createInsecure());
 });
 
 afterAll(async () => {
+  client?.close();
+  await server?.close();
   await redis?.close();
   valkey?.stop();
 });
@@ -194,3 +219,46 @@ describe('RedisBookingRestrictions.read', () => {
     expect(await new RedisBookingRestrictions(redis).read(a)).toEqual({ st: 'ACTIVE' });
   });
 });
+
+describe('Q-T59 RedisBookingRestrictions.apply · SetBookingRestriction', () => {
+  const fields = (accountId: string): Promise<unknown[]> =>
+    redis.command(['HMGET', bookingRestrictionKey(accountId), 'st', 'until', 'rid', 'ver'], { key: bookingRestrictionKey(accountId) }) as Promise<unknown[]>;
+
+  test('판 번호가 클 때만 s:rst를 바꾸고 같은 판·옛 판은 changed false다', async () => {
+    const a = randomUUID();
+    expect(await restrictions.apply({ accountId: a, restrictionId: 'r1', state: 'ACTIVE', untilMs: UNTIL, version: 1 })).toEqual({ changed: true });
+    expect(await fields(a)).toEqual(['ACTIVE', String(UNTIL), 'r1', '1']);
+    expect(await restrictions.read(a)).toEqual({ st: 'ACTIVE', untilMs: UNTIL });
+
+    expect(await restrictions.apply({ accountId: a, restrictionId: 'r1', state: 'LIFTED', version: 1 })).toEqual({ changed: false });
+    expect(await restrictions.read(a)).toEqual({ st: 'ACTIVE', untilMs: UNTIL });
+
+    expect(await restrictions.apply({ accountId: a, restrictionId: 'r1', state: 'LIFTED', version: 2 })).toEqual({ changed: true });
+    expect(await fields(a)).toEqual(['LIFTED', null, 'r1', '2']);
+    expect(await restrictions.read(a)).toEqual({ st: 'LIFTED' });
+
+    expect(await restrictions.apply({ accountId: a, restrictionId: 'r1', state: 'ACTIVE', untilMs: UNTIL, version: 1 })).toEqual({ changed: false });
+    expect(await restrictions.read(a)).toEqual({ st: 'LIFTED' });
+  });
+
+  test('gRPC SetBookingRestriction이 proto 칸을 읽어 실제 s:rst에 쓴다', async () => {
+    const b = randomUUID();
+    const ends = { seconds: 1_793_761_199, nanos: 200_000_000 };
+    expect(await call({ account_id: b, restriction_id: 'r2', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', ends_at: ends, version: 10 })).toEqual({ changed: true });
+    expect(await restrictions.read(b)).toEqual({ st: 'ACTIVE', untilMs: UNTIL });
+    expect(await call({ account_id: b, restriction_id: 'r2', state: 'BOOKING_RESTRICTION_STATE_LIFTED', version: 10 })).toEqual({ changed: false });
+    expect(await call({ account_id: b, restriction_id: 'r2', state: 'BOOKING_RESTRICTION_STATE_LIFTED', version: 11 })).toEqual({ changed: true });
+    expect(await restrictions.read(b)).toEqual({ st: 'LIFTED' });
+    expect(await fields(b)).toEqual(['LIFTED', null, 'r2', '11']);
+  });
+
+  test('모양이 틀린 gRPC 요청은 INVALID_ARGUMENT이고 저장소를 바꾸지 않는다', async () => {
+    const c = randomUUID();
+    await expect(call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', version: 0 })).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    await expect(call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_UNSPECIFIED', version: 1 })).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    await expect(call({ account_id: 'not-a-uuid', restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', version: 1 })).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    await expect(call({ account_id: c, restriction_id: '', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', version: 1 })).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    expect(await restrictions.read(c)).toBeUndefined();
+  });
+});
+

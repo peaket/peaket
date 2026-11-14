@@ -9,6 +9,7 @@ const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number,
 export interface QueuePackage {
   VerificationAppealService: grpc.ServiceClientConstructor;
   PriorityGrantService: grpc.ServiceClientConstructor;
+  BookingRestrictionService: grpc.ServiceClientConstructor;
 }
 
 let pkg: QueuePackage | undefined;

@@ -126,6 +126,8 @@ import {
   PromPaymentPullSignals,
   PromTicketIssueSignals,
   RedisBookingRestrictions,
+  bookingRestrictionHandlers,
+  bookingRestrictionPackage,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
   simulatorPaymentCheckouts,
@@ -244,6 +246,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     : undefined;
   const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
   const sessionStore = new RedisPurchaseSessionStore(redis);
+  const bookingRestrictions = new RedisBookingRestrictions(redis);
   // 자동 배정 공연은 스냅샷을 받지 않아 첫 홀드 요청이 입장 토큰의 첫 사용이다(HOT-080).
   // 본문의 clientEphemeralPublicKey로 그 요청에서 구매 세션을 열고, 그 뒤 요청 인증 키를 같은 세션에서 꺼낸다.
   const firstUseOpener = new OpenPurchaseSession({ store: sessionStore, log: new RedisSessionStartedLog(redis), keys: admissionKeys, issuer: admissionIssuer, clock: systemClock });
@@ -439,7 +442,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         sessions: new InventoryOrderSessions({ sessions, store: sessionStore }),
         identity: { check: (q) => (identityLate.recheck ?? unavailableIdentityRecheck).check(q) },
         contactRefs: { compute: (phone, ms) => (identityLate.contactRefs ?? missingContactRefs).compute(phone, ms) },
-        restrictions: new RedisBookingRestrictions(redis),
+        restrictions: bookingRestrictions,
         priorityGrants: priority!.grants,
         ...(priority?.sales ? { prioritySeatSales: priority.sales } : {}),
         ...(priorityWithdraw ? { priorityWithdraw: (grantId: string) => priorityWithdraw.run(grantId) } : {}),
@@ -757,6 +760,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       handlers: priorityPurchaseHandlers({ grant: service.app.get(GrantPriorityPurchase), withdraw: service.app.get(WithdrawPriorityGrant) }),
     });
   }
+  grpcServices.push({
+    definition: bookingRestrictionPackage().BookingRestrictionService.service,
+    handlers: bookingRestrictionHandlers({ apply: (i) => bookingRestrictions.apply(i) }, (method, err) => service.logger.error({ err: errorSummary(err), method }, 'BookingRestrictionService 처리 실패')),
+  });
   if (grpcServices.length > 0 && env.PEAKET_GRPC_PORT) {
     const raw = env.PEAKET_GRPC_PORT;
     const port = Number(raw);

@@ -338,6 +338,7 @@ export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events
 export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog, LoggerTicketVoidLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
+export { bookingRestrictionHandlers, bookingRestrictionPackage, type BookingRestrictionPackage } from './inbound/booking-restriction.grpc.js';
 export {
   ACCEPT_PAYMENT_OPERATION,
   AcceptPayment,

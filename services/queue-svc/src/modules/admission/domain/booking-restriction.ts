@@ -7,6 +7,19 @@ export interface BookingRestrictionCopy {
   readonly st: BookingRestrictionState;
   /** 끝 시각(없으면 끝 없음) */
   readonly untilMs?: number;
+  /** 제한 ID(ops DB booking_restriction.id) */
+  readonly rid?: string;
+  /** 판 번호(계정마다 늘어나기만 한다) */
+  readonly ver?: number;
+}
+
+/** ops-svc가 SetBookingRestriction으로 보내는 사본 한 판. 판 번호가 저장한 판보다 클 때만 반영한다. */
+export interface BookingRestrictionApply {
+  readonly accountId: string;
+  readonly restrictionId: string;
+  readonly state: BookingRestrictionState;
+  readonly untilMs?: number;
+  readonly version: number;
 }
 
 /** 계정마다 하나라 회차 해시 태그를 붙이지 않는다 */

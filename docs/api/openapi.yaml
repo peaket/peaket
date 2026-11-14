@@ -48,6 +48,7 @@ x-peaket-problem-types:
     already-admitted: { status: 409, title: "이 회차에 이미 입장했습니다" }
     already-reported: { status: 409, title: "이미 신고한 후기입니다" }
     already-verified: { status: 409, title: "이미 본인확인을 마친 계정입니다" }
+    anchor-unavailable: { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" }
     already-waiting: { status: 409, title: "이미 다른 곳에서 대기 중입니다" }
     approval-reason-required: { status: 422, title: "승인 사유를 적어 주세요" }
     approval-scope-invalid: { status: 422, title: "요청 범위 밖의 대상입니다" }

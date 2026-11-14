@@ -16,6 +16,7 @@ export type ProblemType =
   | 'already-reported'
   | 'already-verified'
   | 'already-waiting'
+  | 'anchor-unavailable'
   | 'approval-reason-required'
   | 'approval-role-required'
   | 'approval-scope-invalid'
@@ -301,6 +302,7 @@ export const PROBLEM_TYPES = {
   'already-reported': { status: 409, title: "이미 신고한 후기입니다" },
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
+  'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
   'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },

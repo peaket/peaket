@@ -1,8 +1,11 @@
 // 예매 제한 사본 읽기(좌석 Redis s:rst:{account} Hash, docs/data.md §3 s:rst 행, docs/features/payment.md §2 '예매 제한 확인'·'주문 생성의 첫 구현' 예매 제한 사본, BUILD_ORDER PRF-161).
 // 칸: st(ACTIVE·LIFTED), until(끝 시각 유닉스 밀리초, 비면 끝 없음), rid(제한 ID), ver(판 번호). 주문 생성은 네 칸을 함께 읽고(HMGET 한 번, 일반 명령) 판정은 st·until로 한다.
 // 계정 단위라 회차 해시 태그 없이 흩는다. 사본을 쓰는 쪽(SetBookingRestriction 받기, 판 번호가 클 때만)은 GAT-310이다.
-import { type HotRedis, isRedisOutOfMemory, isRedisUnavailable } from '@peaket/platform';
-import { type BookingRestriction, type BookingRestrictions, OrderSeatStoreUnavailable } from '../domain/ports.js';
+import { type HotRedis, isRedisOutOfMemory, isRedisUnavailable, redisScript } from '@peaket/platform';
+import { type BookingRestriction, type BookingRestrictionApply, type BookingRestrictions, OrderSeatStoreUnavailable } from '../domain/ports.js';
+import { SET_BOOKING_RESTRICTION_LUA } from './booking-restriction-lua.js';
+
+const SET = redisScript(SET_BOOKING_RESTRICTION_LUA);
 
 /** 키 이름(계정 ID는 소문자 UUID라 해시 태그를 깨지 않는다. 그래도 어댑터가 모양을 다시 본다) */
 export const bookingRestrictionKey = (accountId: string): string => `s:rst:${accountId}`;
@@ -23,6 +26,22 @@ const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : S
  */
 export class RedisBookingRestrictions implements BookingRestrictions {
   constructor(private readonly redis: HotRedis) {}
+
+  async apply(i: BookingRestrictionApply): Promise<{ changed: boolean }> {
+    if (typeof i.accountId !== 'string' || !ACCOUNT_UUID.test(i.accountId)) throw new RangeError('예매 제한 사본의 계정 ID가 소문자 UUID가 아니다');
+    if (typeof i.restrictionId !== 'string' || i.restrictionId === '') throw new RangeError('예매 제한 사본의 제한 ID가 비었다');
+    if (i.state !== 'ACTIVE' && i.state !== 'LIFTED') throw new RangeError('예매 제한 사본의 상태가 ACTIVE·LIFTED가 아니다');
+    if (!Number.isSafeInteger(i.version) || i.version < 1) throw new RangeError('예매 제한 사본의 판 번호가 1 이상 정수가 아니다');
+    if (i.untilMs !== undefined && (!Number.isSafeInteger(i.untilMs) || i.untilMs < 0)) throw new RangeError('예매 제한 사본의 끝 시각이 0 이상 정수가 아니다');
+    const key = bookingRestrictionKey(i.accountId);
+    try {
+      const r = await this.redis.evalScript(SET, [key], [i.state, i.restrictionId, i.untilMs === undefined ? '' : String(i.untilMs), String(i.version)]);
+      return { changed: Number(str(r)) === 1 };
+    } catch (e) {
+      if (isRedisUnavailable(e) || isRedisOutOfMemory(e)) throw new OrderSeatStoreUnavailable(e);
+      throw e;
+    }
+  }
 
   async read(accountId: string): Promise<BookingRestriction | undefined> {
     if (typeof accountId !== 'string' || !ACCOUNT_UUID.test(accountId)) throw new RangeError('예매 제한 사본의 계정 ID가 소문자 UUID가 아니다');
@@ -55,9 +74,18 @@ export class MemoryBookingRestrictions implements BookingRestrictions {
   readonly rows = new Map<string, BookingRestriction>();
   failWith: unknown;
 
+  async apply(i: BookingRestrictionApply): Promise<{ changed: boolean }> {
+    if (this.failWith !== undefined) throw this.failWith;
+    const current = this.rows.get(i.accountId);
+    if (current?.ver !== undefined && current.ver >= i.version) return { changed: false };
+    this.rows.set(i.accountId, { st: i.state, ...(i.untilMs !== undefined ? { untilMs: i.untilMs } : {}), rid: i.restrictionId, ver: i.version });
+    return { changed: true };
+  }
+
   async read(accountId: string): Promise<BookingRestriction | undefined> {
     if (this.failWith !== undefined) throw this.failWith;
     const row = this.rows.get(accountId);
-    return row ? { ...row } : undefined;
+    // Redis 구현과 같은 모양만 돌려준다(rid·ver는 쓰기·판 번호 가드가 쓰는 내부 칸)
+    return row ? { st: row.st, ...(row.untilMs !== undefined ? { untilMs: row.untilMs } : {}) } : undefined;
   }
 }

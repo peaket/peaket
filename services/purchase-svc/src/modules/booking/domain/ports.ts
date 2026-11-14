@@ -308,20 +308,35 @@ export interface ContactRefs {
   compute(phoneE164: string, deadlineMs: number): Promise<string | undefined>;
 }
 
-/** 예매 제한 사본 하나(s:rst:{account} Hash의 st·until) */
+/** 예매 제한 사본 하나(s:rst:{account} Hash의 st·until·rid·ver) */
 export interface BookingRestriction {
   readonly st: 'ACTIVE' | 'LIFTED';
   /** 끝 시각(유닉스 밀리초). 없으면 끝 없음 */
   readonly untilMs?: number;
+  /** 제한 ID(ops DB booking_restriction.id) */
+  readonly rid?: string;
+  /** 판 번호(계정마다 늘어나기만 한다) */
+  readonly ver?: number;
 }
 
-/** 예매 제한 사본 읽기(좌석 Redis s:rst:{account}, adapters/redis-booking-restrictions.ts). 쓰는 쪽(SetBookingRestriction)은 GAT-310이다 */
+/** ops-svc가 SetBookingRestriction으로 보내는 사본 한 판. 판 번호가 저장한 판보다 클 때만 반영한다. */
+export interface BookingRestrictionApply {
+  readonly accountId: string;
+  readonly restrictionId: string;
+  readonly state: 'ACTIVE' | 'LIFTED';
+  readonly untilMs?: number;
+  readonly version: number;
+}
+
+/** 예매 제한 사본 읽기·쓰기(좌석 Redis s:rst:{account}, adapters/redis-booking-restrictions.ts). */
 export interface BookingRestrictions {
   /**
    * 사본(st·until·rid·ver 네 칸)이 모두 없으면 undefined(제한 없음). 다른 칸이 있는데 st가 없거나, st가 ACTIVE·LIFTED가 아니거나, until이 0 이상 정수 글이 아니면 망가진 사본이라 Error.
    * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애
    */
   read(accountId: string): Promise<BookingRestriction | undefined>;
+  /** 판 번호가 저장한 판보다 클 때만 반영한다. 반영했으면 changed true, 옛 판이면 false */
+  apply(input: BookingRestrictionApply): Promise<{ changed: boolean }>;
 }
 
 /** 커밋된 멱등 기록 읽기 결과(트랜잭션 밖, 검사 차례의 셋째) */
