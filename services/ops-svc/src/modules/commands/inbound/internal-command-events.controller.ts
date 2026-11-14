@@ -1,6 +1,7 @@
 // 내부 명령 사건 수신(BAT-465 GAT-300). Kafka 소비자 조립 전의 첫 연결로, 명령 요청·결과 사건을 받는다.
 // eventKey로 명령 ID를 결정해 같은 사건이 다시 와도 한 번만 만든다. CS 사건은 기존 /internal/v1/cs-cases가 받는다.
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { Body, Controller, HttpCode, Inject, Post, UseGuards } from '@nestjs/common';
 import { CLOCK, type Clock, ContractRouteSchema, InternalTokenGuard, Roles } from '@peaket/platform';
 import { z } from 'zod';
@@ -68,7 +69,7 @@ export class InternalCommandEventsController {
       const existing = await this.store.find(commandId);
       if (existing) {
         // 같은 eventKey에 다른 내용을 실으면 조용히 처음 것을 돌려주지 않는다(멱등 키 재사용 탐지).
-        const same = existing.type === e.type && existing.reason === e.reason && JSON.stringify(existing.params) === JSON.stringify(e.params ?? {});
+        const same = existing.type === e.type && existing.reason === e.reason && isDeepStrictEqual(existing.params, e.params ?? {});
         return same ? { accepted: true, commandId: existing.commandId } : { accepted: false };
       }
       try {
