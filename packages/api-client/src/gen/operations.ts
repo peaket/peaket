@@ -331,6 +331,7 @@ export type OperationId =
   | 'listOpsNoticeTemplates'
   | 'listOpsPartnerNotices'
   | 'listOpsPayoutBatches'
+  | 'listOpsPgCircuits'
   | 'listOpsPlaces'
   | 'listOpsPromoterContractTerms'
   | 'listOpsPromoters'
@@ -724,6 +725,7 @@ export const OPERATIONS = {
   listOpsNoticeTemplates: {operationId: "listOpsNoticeTemplates",method: "GET",path: "/v1/ops/notice-templates",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","status"]},
   listOpsPartnerNotices: {operationId: "listOpsPartnerNotices",method: "GET",path: "/v1/ops/partner-notices",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit"]},
   listOpsPayoutBatches: {operationId: "listOpsPayoutBatches",method: "GET",path: "/v1/ops/payout-batches",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","payoutDate","pg","pgStore","status"]},
+  listOpsPgCircuits: {operationId: "listOpsPgCircuits",method: "GET",path: "/v1/ops/pg-circuits",host: "ops-api",kind: "read",cookie: true},
   listOpsPlaces: {operationId: "listOpsPlaces",method: "GET",path: "/v1/ops/places",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","q"]},
   listOpsPromoterContractTerms: {operationId: "listOpsPromoterContractTerms",method: "GET",path: "/v1/ops/promoters/{promoterId}/contract-terms",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listOpsPromoters: {operationId: "listOpsPromoters",method: "GET",path: "/v1/ops/promoters",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","q"]},

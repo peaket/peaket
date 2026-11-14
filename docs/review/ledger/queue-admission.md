@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 99 | 52 | 2 | 0 | 0 | 0 | 0 | 0 | 38 | 191 |
+| A | 99 | 59 | 2 | 0 | 0 | 0 | 0 | 0 | 31 | 191 |
 | B | 35 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 7 | 59 |
-| 합계 | 134 | 64 | 2 | 0 | 0 | 3 | 0 | 2 | 45 | 250 |
+| 합계 | 134 | 71 | 2 | 0 | 0 | 3 | 0 | 2 | 38 | 250 |
 
 ## docs/features/queue-admission.md
 
@@ -144,13 +144,13 @@
 | Q-T58 | ③ | 봇 판정 서비스 장애 때의 축소 운영(추천 적용 2026-10-29… | ③ 한도는 기기·계정 단위로 걸리고, 통신사 대역에는 IP 제한이 걸리지 않는다 | 빈칸 | A | — |
 | Q-T58 | ④ | 봇 판정 서비스 장애 때의 축소 운영(추천 적용 2026-10-29… | ④ 축소 운영 동안 통과한 봇 수와 막힌 정상 사용자 수를 따로 세어 성능 장부에 남긴다(목표는 두지 않는다. 품질 목표 순서에서 가용성이 봇 방어보다 앞이라… | 빈칸 | A | — |
 | Q-T58 | ⑤ | 봇 판정 서비스 장애 때의 축소 운영(추천 적용 2026-10-29… | ⑤ trust-svc를 되살리면 정상 판정으로 돌아온다 | 빈칸 | A | — |
-| Q-T59 | ① | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ① 403 `booking-restricted`이고 입장 자리·곧 입장 대기열·전진 기록에 변화가 0이다. 로비 참가·진입은 막지 않는다 | 빈칸 | A | — |
-| Q-T59 | ② | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ② 사본이 바뀌지 않는다(`changed` false) | 빈칸 | A | — |
-| Q-T59 | ③ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ③ ADMITTED | 빈칸 | A | — |
-| Q-T59 | ④ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ④ ADMITTED(끝 시각 뒤는 제한이 아니다) | 빈칸 | A | — |
-| Q-T59 | ⑤ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑤ 10분 [가정] 안에 사본이 다시 서고, 그 뒤 입장 확정이 403이다 | 빈칸 | A | — |
-| Q-T59 | ⑥ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑥ `PERMISSION_DENIED` | 빈칸 | A | — |
-| Q-T59 | ⑦ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑦ 입장 확정 p99가 사본 읽기 전보다 나빠진 값을 적고, 제한된 계정의 번호가 입장 자리를 쓰지 않는다 | 빈칸 | A | — |
+| Q-T59 | ① | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ① 403 `booking-restricted`이고 입장 자리·곧 입장 대기열·전진 기록에 변화가 0이다. 로비 참가·진입은 막지 않는다 | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ② | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ② 사본이 바뀌지 않는다(`changed` false) | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ③ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ③ ADMITTED | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ④ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ④ ADMITTED(끝 시각 뒤는 제한이 아니다) | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ⑤ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑤ 10분 [가정] 안에 사본이 다시 서고, 그 뒤 입장 확정이 403이다 | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ⑥ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑥ `PERMISSION_DENIED` | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
+| Q-T59 | ⑦ | 예매 제한의 입장 확정 집행(소유자 결정 2026-10-30… | ⑦ 입장 확정 p99가 사본 읽기 전보다 나빠진 값을 적고, 제한된 계정의 번호가 입장 자리를 쓰지 않는다 | ID만 | A | 시험: services/ops-svc/test-int/immutable-anchor.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test… |
 | Q-T60 | ① | 여정 ID 발급과 옮기기(추천 적용 2026-10-31… | ①는 서로 다른 UUIDv7이고 … 의 `ScoreRisk` `journey_id`와 `TrustVerdict.journeyId`가 토큰 값과 같고, 추가 검증… | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts, services/queue-svc/test/entry-cases.ts 외 3곳 |
 | Q-T60 | ② | 여정 ID 발급과 옮기기(추천 적용 2026-10-31… | ②는 서로 다른 UUIDv7이고 … 와 같다. … 의 `ScoreRisk` `journey_id`와 `TrustVerdict.journeyId`가 토큰 값과… | 자동 시험 | A | 시험: services/queue-svc/test/preverify.test.ts |
 | Q-T60 | ③ | 여정 ID 발급과 옮기기(추천 적용 2026-10-31… | ③은 | 자동 시험 | A | 시험: services/queue-svc/test/preverify.test.ts |

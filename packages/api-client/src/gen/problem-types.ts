@@ -13,6 +13,7 @@ export type ProblemType =
   | 'admin-role-not-allowed'
   | 'admission-token-invalid'
   | 'already-admitted'
+  | 'already-approved'
   | 'already-reported'
   | 'already-verified'
   | 'already-waiting'
@@ -21,6 +22,7 @@ export type ProblemType =
   | 'approval-role-required'
   | 'approval-scope-invalid'
   | 'approval-self-not-allowed'
+  | 'approver-ineligible'
   | 'artist-exists'
   | 'assignment-required'
   | 'audit-chain-broken'
@@ -59,6 +61,7 @@ export type ProblemType =
   | 'enrollment-rate-limited'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
+  | 'event-refund-unavailable'
   | 'event-schedule-invalid'
   | 'event-suspended'
   | 'export-format-unavailable'
@@ -89,10 +92,12 @@ export type ProblemType =
   | 'image-type-unsupported'
   | 'inquiry-closed'
   | 'invalid-auto-condition'
+  | 'invalid-body'
   | 'invalid-command'
   | 'invalid-device-key'
   | 'invalid-dpop-proof'
   | 'invalid-enrollment-code'
+  | 'invalid-notify-event'
   | 'invalid-placement'
   | 'invalid-priority-grant'
   | 'invalid-query'
@@ -102,6 +107,8 @@ export type ProblemType =
   | 'invitation-invalid'
   | 'invitation-step-invalid'
   | 'invitation-step-out-of-order'
+  | 'judgement-not-allowed'
+  | 'judgement-required'
   | 'jwks-not-found'
   | 'last-login-method'
   | 'last-partner-admin'
@@ -126,7 +133,9 @@ export type ProblemType =
   | 'no-placement'
   | 'not-found'
   | 'not-payer'
+  | 'not-running'
   | 'not-verifying'
+  | 'notify-sender-unavailable'
   | 'open-interval-conflict'
   | 'open-maintenance-window'
   | 'open-passed'
@@ -299,6 +308,7 @@ export const PROBLEM_TYPES = {
   'admin-role-not-allowed': { status: 403, title: "이 역할로는 초대할 수 없습니다" },
   'admission-token-invalid': { status: 401, title: "입장 확인이 끝났습니다" },
   'already-admitted': { status: 409, title: "이 회차에 이미 입장했습니다" },
+  'already-approved': { status: 409, title: "이미 확정된 요청입니다" },
   'already-reported': { status: 409, title: "이미 신고한 후기입니다" },
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
@@ -307,6 +317,7 @@ export const PROBLEM_TYPES = {
   'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
   'approval-self-not-allowed': { status: 403, title: "요청자는 승인할 수 없습니다" },
+  'approver-ineligible': { status: 403, title: "판정자는 확정할 수 없습니다" },
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
   'assignment-required': { status: 422, title: "승인할 배정을 하나 골라 주세요" },
   'audit-chain-broken': { status: 409, title: "감사 체인 구간이 비었습니다" },
@@ -345,6 +356,7 @@ export const PROBLEM_TYPES = {
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
+  'event-refund-unavailable': { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
@@ -375,10 +387,12 @@ export const PROBLEM_TYPES = {
   'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
   'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
+  'invalid-body': { status: 400, title: "요청 본문이 올바르지 않습니다" },
   'invalid-command': { status: 422, title: "명령 값이 올바르지 않습니다" },
   'invalid-device-key': { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" },
   'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
   'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
+  'invalid-notify-event': { status: 422, title: "알림 사건이 올바르지 않습니다" },
   'invalid-placement': { status: 400, title: "기기 배치 입력이 올바르지 않습니다" },
   'invalid-priority-grant': { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
@@ -388,6 +402,8 @@ export const PROBLEM_TYPES = {
   'invitation-invalid': { status: 410, title: "초대가 만료되었습니다" },
   'invitation-step-invalid': { status: 410, title: "처음부터 다시 진행해 주세요" },
   'invitation-step-out-of-order': { status: 409, title: "앞 단계를 먼저 마쳐 주세요" },
+  'judgement-not-allowed': { status: 409, title: "지금은 판정할 수 없습니다" },
+  'judgement-required': { status: 409, title: "판정 전에는 확정할 수 없습니다" },
   'jwks-not-found': { status: 404, title: "없는 공개키 묶음입니다" },
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
@@ -412,7 +428,9 @@ export const PROBLEM_TYPES = {
   'no-placement': { status: 409, title: "배치되지 않은 기기입니다" },
   'not-found': { status: 404, title: "찾을 수 없습니다" },
   'not-payer': { status: 403, title: "결제한 분만 할 수 있습니다" },
+  'not-running': { status: 409, title: "진행 중인 요청이 아닙니다" },
   'not-verifying': { status: 409, title: "추가 검증 중인 대기표가 아닙니다" },
+  'notify-sender-unavailable': { status: 503, title: "알림 발송기를 쓸 수 없습니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },
   'open-maintenance-window': { status: 409, title: "정비 시간에는 오픈할 수 없습니다" },
   'open-passed': { status: 410, title: "오픈 시각이 지났습니다" },

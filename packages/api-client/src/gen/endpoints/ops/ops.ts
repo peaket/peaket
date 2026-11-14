@@ -161,6 +161,7 @@ import type {
   ListOpsNoticeTemplatesParams,
   ListOpsPartnerNoticesParams,
   ListOpsPayoutBatchesParams,
+  ListOpsPgCircuits200,
   ListOpsPlaces200,
   ListOpsPlacesParams,
   ListOpsPromoterContractTermsParams,
@@ -11622,6 +11623,134 @@ export function useListOpsReceivables<TData = Awaited<ReturnType<typeof listOpsR
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListOpsReceivablesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsPgCircuitsResponse200 = {
+  data: ListOpsPgCircuits200
+  status: 200
+}
+
+export type listOpsPgCircuitsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsPgCircuitsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsPgCircuitsResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type listOpsPgCircuitsResponseSuccess = (listOpsPgCircuitsResponse200) & {
+  headers: Headers;
+};
+export type listOpsPgCircuitsResponseError = (listOpsPgCircuitsResponse401 | listOpsPgCircuitsResponse403 | listOpsPgCircuitsResponse503) & {
+  headers: Headers;
+};
+
+export const getListOpsPgCircuitsUrl = () => {
+
+
+
+
+  return `/v1/ops/pg-circuits`
+}
+
+/**
+ * BAT-425 GAT-130 잔여, transfer-refund §5. payment-svc 내부 /internal/v1/circuits의 상태를 관제에 노출한다. 회차 취소 재개 화면이 결제사 몫마다 서킷 상태와 최근 실패율로 '재개 조건 충족'을 보인다. 계정·구독 주소는 싣지 않는다. Cache-Control: no-store
+ * @summary 결제사 서킷 상태(회차 취소 재개 조건)
+ */
+export const listOpsPgCircuits = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsPgCircuitsResponseSuccess> => {
+
+  return orvalFetch<listOpsPgCircuitsResponseSuccess>(getListOpsPgCircuitsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsPgCircuitsQueryKey = () => {
+    return [
+    `/v1/ops/pg-circuits`
+    ] as const;
+    }
+
+
+export const getListOpsPgCircuitsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsPgCircuits>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsPgCircuitsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsPgCircuits>>> = ({ signal }) => listOpsPgCircuits({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsPgCircuitsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsPgCircuits>>>
+export type ListOpsPgCircuitsQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useListOpsPgCircuits<TData = Awaited<ReturnType<typeof listOpsPgCircuits>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPgCircuits>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPgCircuits>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPgCircuits<TData = Awaited<ReturnType<typeof listOpsPgCircuits>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPgCircuits>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPgCircuits>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPgCircuits<TData = Awaited<ReturnType<typeof listOpsPgCircuits>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 결제사 서킷 상태(회차 취소 재개 조건)
+ */
+
+export function useListOpsPgCircuits<TData = Awaited<ReturnType<typeof listOpsPgCircuits>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPgCircuits>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsPgCircuitsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

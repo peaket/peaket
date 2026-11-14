@@ -13,6 +13,7 @@ import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
+import { CompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
 import {
   AcceptPaymentCommand,
   assertPlatformSubProviders,
@@ -62,6 +63,7 @@ import {
   pgChannelLog,
   PgChannelLimitSync,
   PgChannelObserver,
+  type PgCircuits,
   PortoneFallbackExclusions,
   PortoneGateway,
   PrepareCheckout,
@@ -184,6 +186,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
   // 로거는 서비스가 선 뒤에 생긴다. 쓰임새에는 늦게 잇는 로그를 넣는다(gRPC·앱 포트는 그 뒤에 열려 그 전에 불리지 않는다)
   let log: PaymentCommandLog | undefined;
+/** 서킷 등록부는 createService 뒤에 만들어 늦게 묶는다(내부 /internal/v1/circuits). */
+let circuitsRef: PgCircuits | undefined;
   const lateLog: PaymentCommandLog = { mismatch: (e) => log?.mismatch(e) };
   let webhookLog: PaymentWebhookLog | undefined;
   const lateWebhookLog: PaymentWebhookLog = {
@@ -211,6 +215,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       log: lateLog,
       signals,
       webhook: { store: new DrizzleWebhookStore({ database: webhookDatabase }), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator(env) },
+      circuits: () => circuitsRef,
       settlement: {
         store: new DrizzleSettlementStore(batchDatabase),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
@@ -252,6 +257,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const confirmJobs = new DrizzleConfirmJobs({ database: confirmDatabase, clock: systemClock });
   // 결제사 서킷은 채널마다 하나이고 승인·조회·취소가 함께 쓴다. 값은 플랫폼 기본값 [가정](docs/features/payment.md §2 '결제사 서킷의 첫 구현', BUILD_ORDER PRF-200)
   const circuits = new BreakerPgCircuits({ service: SERVICE, registry: service.metrics.registry, logger: service.logger, clock: systemClock }).register(service.metrics.registry);
+  circuitsRef = circuits;
   // 첫 승인 호출 429로 낮춘 상한은 표에 판 번호 조건으로 써서 모든 파드가 1초 [가정] 안에 따른다(일반 풀, BUILD_ORDER PRF-203)
   let limitSync: PgChannelLimitSync | undefined;
   const guards = new PgCallGuards({ gateways, podCount: guardConfig.podCount, clock: systemClock, signals: guardSignals, log: pgCallGuardLog(service.logger), circuits, share: { lowered: (e) => limitSync?.lowered(e) } });
@@ -266,6 +272,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   service.readiness.register('grpc');
   if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
+  const compensationTransfers = new CompensationTransfers(new FakeCompensationTransfer(env));
   const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,
@@ -277,6 +284,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
           // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
           service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
         ),
+      },
+      {
+        definition: compensationTransferPackage().CompensationTransferService.service,
+        handlers: compensationTransferHandlers(compensationTransfers),
       },
     ],
   });

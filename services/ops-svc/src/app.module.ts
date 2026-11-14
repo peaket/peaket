@@ -10,6 +10,7 @@ import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, type PayoutsModuleDeps } from './modules/payouts/index.js';
+import { DrizzleEventCancellationStore, EventCancellationsModule, MemoryEventCancellationStore, type EventRefundStarter } from './modules/event-cancellations/index.js';
 
 interface CommonWiring {
   readonly executor?: CommandExecutor;
@@ -27,6 +28,8 @@ interface CommonWiring {
   readonly auditChain?: AuditChain & AuditChainReader;
   /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
   readonly payouts?: PayoutsModuleDeps;
+  /** 회차 취소 요청(BAT-425 GAT-130 잔여). refunds가 없으면 확정·정지·재개가 503이다 */
+  readonly eventCancellations?: { readonly refunds?: EventRefundStarter };
 }
 
 @Module({})
@@ -49,6 +52,7 @@ export class AppModule {
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
           PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts } : { storage: 'memory' }),
+          EventCancellationsModule.register({ store: new DrizzleEventCancellationStore(o.database), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
         ],
       };
     }
@@ -66,6 +70,7 @@ export class AppModule {
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
         PayoutsModule.register({ storage: 'memory', ...(o.payouts ? { deps: o.payouts } : {}) }),
+        EventCancellationsModule.register({ store: new MemoryEventCancellationStore(), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
       ],
     };
   }

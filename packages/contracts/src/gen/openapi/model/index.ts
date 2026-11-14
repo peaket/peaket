@@ -475,6 +475,7 @@ export * from './listOpsFraudClustersParams.zod.js';
 export * from './listOpsNoticeTemplatesParams.zod.js';
 export * from './listOpsPartnerNoticesParams.zod.js';
 export * from './listOpsPayoutBatchesParams.zod.js';
+export * from './listOpsPgCircuits200.zod.js';
 export * from './listOpsPlaces200.zod.js';
 export * from './listOpsPlacesParams.zod.js';
 export * from './listOpsPromoterContractTermsParams.zod.js';

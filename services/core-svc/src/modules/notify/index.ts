@@ -1,6 +1,7 @@
 export { Webhooks } from './application/webhooks.js';
 export { WebhookDispatcher, WEBHOOK_EVENT_TYPES, type EnqueueInput } from './application/dispatcher.js';
 export { WebhookWorker } from './application/webhook-worker.js';
+export { FakeNotificationTransport, NotificationSender, NotificationSenderProblem, type FanNoticeDelivery, type FanNoticeEvent, type FanNoticeType, type NotificationTransport } from './application/notification-sender.js';
 export { MemoryWebhookStore } from './adapters/memory-webhook-store.js';
 export { DrizzleWebhookStore } from './adapters/db/drizzle-webhook-store.js';
 export { HttpsWebhookTransport } from './adapters/https-transport.js';

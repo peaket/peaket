@@ -398,3 +398,56 @@ message EventPaymentPause {
   // 이번 일시 정지가 시작된 시각. 채널이 없거나 비활성이라 멈춘 회차는 0이다(시작 시각이 정해지지 않았다, 추천 적용 2026-11-09, BUILD_ORDER PRF-201)
   google.protobuf.Timestamp paused_since = 2;
 }
+
+// 배상 송금(BAT-425 GAT-130 잔여, FR-056, POL-014·019, ADR-0046 결정 5).
+// 지급대행·은행 계정이 없으면 어댑터가 UNAVAILABLE을 돌려주고, 받는 쪽은 503과 Retry-After로 답한다.
+// 계좌 원문은 저장하지 않고 이 요청으로만 넘긴다(POL-014). compensation_id가 멱등 키다.
+service CompensationTransferService {
+  rpc RequestCompensationTransfer(RequestCompensationTransferRequest) returns (RequestCompensationTransferResponse);
+  rpc GetCompensationTransfer(GetCompensationTransferRequest) returns (GetCompensationTransferResponse);
+}
+
+enum CompensationTransferStatus {
+  COMPENSATION_TRANSFER_STATUS_UNSPECIFIED = 0;
+  // 송금 요청을 받았다(지급대행이 처리 중)
+  COMPENSATION_TRANSFER_STATUS_REQUESTED = 1;
+  // 송금 완료
+  COMPENSATION_TRANSFER_STATUS_PAID = 2;
+  // 송금 실패(사유는 failure_reason)
+  COMPENSATION_TRANSFER_STATUS_FAILED = 3;
+  // 지급대행·계정이 없어 지금은 보낼 수 없다(503)
+  COMPENSATION_TRANSFER_STATUS_UNAVAILABLE = 4;
+}
+
+message RequestCompensationTransferRequest {
+  // compensation.id. 멱등 키다.
+  string compensation_id = 1;
+  string order_id = 2;
+  // 결제자 계정
+  string account_id = 3;
+  int64 amount = 4;
+  // 계좌 원문은 저장하지 않는다(POL-014)
+  string bank_code = 5;
+  string account_number = 6;
+  string holder_name = 7;
+  // 요청한 관리 계정(감사 기록용)
+  string requested_by = 8;
+}
+
+message RequestCompensationTransferResponse {
+  string transfer_id = 1;
+  CompensationTransferStatus status = 2;
+  string failure_reason = 3;
+}
+
+message GetCompensationTransferRequest {
+  string transfer_id = 1;
+}
+
+message GetCompensationTransferResponse {
+  string transfer_id = 1;
+  string compensation_id = 2;
+  int64 amount = 3;
+  CompensationTransferStatus status = 4;
+  string failure_reason = 5;
+}

@@ -128,6 +128,15 @@ x-peaket-problem-types:
     invalid-command: { status: 422, title: "명령 값이 올바르지 않습니다" }
     invalid-device-key: { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" }
     invalid-query: { status: 400, title: "목록 조건이 올바르지 않습니다" }
+    invalid-body: { status: 400, title: "요청 본문이 올바르지 않습니다" }
+    invalid-notify-event: { status: 422, title: "알림 사건이 올바르지 않습니다" }
+    judgement-not-allowed: { status: 409, title: "지금은 판정할 수 없습니다" }
+    judgement-required: { status: 409, title: "판정 전에는 확정할 수 없습니다" }
+    approver-ineligible: { status: 403, title: "판정자는 확정할 수 없습니다" }
+    already-approved: { status: 409, title: "이미 확정된 요청입니다" }
+    not-running: { status: 409, title: "진행 중인 요청이 아닙니다" }
+    event-refund-unavailable: { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" }
+    notify-sender-unavailable: { status: 503, title: "알림 발송기를 쓸 수 없습니다" }
     invalid-seat: { status: 422, title: "고를 수 없는 좌석이 있습니다" }
     invalid-priority-grant: { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" }
     investigation-source-expired: { status: 410, title: "조사 원천 보존 기간이 끝났습니다" }
@@ -5525,6 +5534,34 @@ paths:
     post: { operationId: createOpsPayoutBatchPortoneExecution, tags: [ops], x-peaket-roles: [operator], x-peaket-trace-rare: true, summary: "포트원 콘솔 일괄 지급 실행 기록(operator)", description: "FR-062, ADR-0047. 공개 API에 지급 생성이 없어 콘솔에서 실행하고 일괄 지급 ID를 적음. 결과는 지급 내역 조회로 맞춤", security: [{ opsCookie: [] }], parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [bulkPayoutId], properties: { bulkPayoutId: { type: string } } } } } }, responses: { '200': { description: 기록됨 }, '409': { $ref: '#/components/responses/Problem', description: 승인 전이거나 포트원 묶음이 아님 } } }
   /v1/ops/receivables:
     get: { operationId: listOpsReceivables, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "미수금 목록(원인·상태)", description: "POL-039. 상계 → 보증 → 청구. 목록은 커서로 나눈다(추천 적용 2026-10-21, ADR-0081). 관제 역할(viewer·operator·commander)만이고 CS 담당자는 403이다(open-items 72번, 2026-10-30)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 미수금 한 페이지, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Receivable' } }, nextCursor: { type: [string, 'null'] } } } } } } } }
+  /v1/ops/pg-circuits:
+    get:
+      operationId: listOpsPgCircuits
+      tags: [ops]
+      x-peaket-roles: [viewer, operator, commander]
+      summary: "결제사 서킷 상태(회차 취소 재개 조건)"
+      description: "BAT-425 GAT-130 잔여, transfer-refund §5. payment-svc 내부 /internal/v1/circuits의 상태를 관제에 노출한다. 회차 취소 재개 화면이 결제사 몫마다 서킷 상태와 최근 실패율로 '재개 조건 충족'을 보인다. 계정·구독 주소는 싣지 않는다. Cache-Control: no-store"
+      security:
+        - opsCookie: []
+      responses:
+        '200':
+          description: "결제사별 서킷 상태"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [pg, state]
+                      properties:
+                        pg: { type: string, enum: [TOSS, PORTONE, SIMULATOR] }
+                        state: { type: string, enum: [closed, half_open, open] }
+        '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
+        '403': { $ref: '#/components/responses/Problem', description: "관제 역할이 아님" }
+        '503': { $ref: '#/components/responses/Problem', description: "payment-svc에 연결하지 못함" }
   /v1/ops/events/{eventId}/reports:
     get: { operationId: getOpsEventReports, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "공연 리포트 판 목록과 마감 상태(SCR-029 ④)", description: "FR-068, POL-040, ADR-0052. viewer 이상", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/EventId' }], responses: { '200': { description: 마감 단계별 판, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EventReportSummary' } } } } } } }
   /v1/ops/events/{eventId}/reports/{stage}:

@@ -139,6 +139,7 @@ import type {
   IncidentFilingCreate,
   InquiryMessage,
   ListOpsArtists200,
+  ListOpsPgCircuits200,
   ListOpsPlaces200,
   ListOpsReceivables200,
   ListOpsScannerDevices200,
@@ -362,6 +363,8 @@ export const getCreateOpsPayoutBatchResponseMock = (overrideResponse: Partial<Ex
 export const getListOpsPayoutBatchesResponseMock = (overrideResponse: Partial<Extract<PayoutBatchPage, object>> = {}): PayoutBatchPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({batchId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE'] as const), undefined]), pgStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), payoutDate: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), totalAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), statementCount: faker.helpers.arrayElement([faker.number.int(), undefined]), approvalId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), portoneBulkPayoutId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pgBalance: faker.helpers.arrayElement([{amount: faker.helpers.arrayElement([faker.number.int(), undefined]), pendingAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), ledgerAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), source: faker.helpers.arrayElement([faker.helpers.arrayElement(['PG_API','OPERATOR_CONSOLE'] as const), undefined]), observedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), observedBy: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PREPARED','PENDING_APPROVAL','APPROVED','SUBMITTED','COMPLETED','PARTIAL_FAILED'] as const), undefined]), approvalDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
 export const getListOpsReceivablesResponseMock = (overrideResponse: Partial<Extract<ListOpsReceivables200, object>> = {}): ListOpsReceivables200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({receivableId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), cause: faker.helpers.arrayElement([faker.helpers.arrayElement(['REFUND_AFTER_PAYOUT','CHARGEBACK','COMPENSATION_ADVANCE','NEGATIVE_STATEMENT'] as const), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), remaining: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OPEN','OFFSET','GUARANTEE','BILLED','CLOSED','WRITTEN_OFF'] as const), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getListOpsPgCircuitsResponseMock = (overrideResponse: Partial<Extract<ListOpsPgCircuits200, object>> = {}): ListOpsPgCircuits200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({pg: faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), state: faker.helpers.arrayElement(['closed','half_open','open'] as const)})), undefined]), ...overrideResponse})
 
 export const getGetOpsEventReportsResponseMock = (): EventReportSummary[] => (Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), stage: faker.helpers.arrayElement([faker.helpers.arrayElement(Object.values(ReportStage)), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['DONE','DELAYED','PENDING'] as const), undefined]), closedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), qualityPassed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), rulesTriggered: faker.helpers.arrayElement([faker.number.int(), undefined]), rulesDeferred: faker.helpers.arrayElement([faker.number.int(), undefined])})))
 
@@ -1580,6 +1583,18 @@ export const getListOpsReceivablesMockHandler = (overrideResponse?: ListOpsRecei
   }, options)
 }
 
+export const getListOpsPgCircuitsMockHandler = (overrideResponse?: ListOpsPgCircuits200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ListOpsPgCircuits200> | ListOpsPgCircuits200), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/ops/pg-circuits', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListOpsPgCircuitsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getGetOpsEventReportsMockHandler = (overrideResponse?: EventReportSummary[] | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<EventReportSummary[]> | EventReportSummary[]), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string }>('*/v1/ops/events/:eventId/reports', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
 
@@ -2272,6 +2287,7 @@ export const getOpsMock = () => [
   getListOpsPayoutBatchesMockHandler(),
   getCreateOpsPayoutBatchPortoneExecutionMockHandler(),
   getListOpsReceivablesMockHandler(),
+  getListOpsPgCircuitsMockHandler(),
   getGetOpsEventReportsMockHandler(),
   getGetOpsEventReportMockHandler(),
   getListOpsDecisionsMockHandler(),

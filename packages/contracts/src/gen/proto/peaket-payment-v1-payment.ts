@@ -705,6 +705,111 @@ export const paymentV1Payment: Record<string, unknown> = {
                       "id": 2
                     }
                   }
+                },
+                "CompensationTransferService": {
+                  "methods": {
+                    "RequestCompensationTransfer": {
+                      "requestType": "RequestCompensationTransferRequest",
+                      "responseType": "RequestCompensationTransferResponse"
+                    },
+                    "GetCompensationTransfer": {
+                      "requestType": "GetCompensationTransferRequest",
+                      "responseType": "GetCompensationTransferResponse"
+                    }
+                  }
+                },
+                "CompensationTransferStatus": {
+                  "values": {
+                    "COMPENSATION_TRANSFER_STATUS_UNSPECIFIED": 0,
+                    "COMPENSATION_TRANSFER_STATUS_REQUESTED": 1,
+                    "COMPENSATION_TRANSFER_STATUS_PAID": 2,
+                    "COMPENSATION_TRANSFER_STATUS_FAILED": 3,
+                    "COMPENSATION_TRANSFER_STATUS_UNAVAILABLE": 4
+                  }
+                },
+                "RequestCompensationTransferRequest": {
+                  "fields": {
+                    "compensation_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "amount": {
+                      "type": "int64",
+                      "id": 4
+                    },
+                    "bank_code": {
+                      "type": "string",
+                      "id": 5
+                    },
+                    "account_number": {
+                      "type": "string",
+                      "id": 6
+                    },
+                    "holder_name": {
+                      "type": "string",
+                      "id": 7
+                    },
+                    "requested_by": {
+                      "type": "string",
+                      "id": 8
+                    }
+                  }
+                },
+                "RequestCompensationTransferResponse": {
+                  "fields": {
+                    "transfer_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "status": {
+                      "type": "CompensationTransferStatus",
+                      "id": 2
+                    },
+                    "failure_reason": {
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "GetCompensationTransferRequest": {
+                  "fields": {
+                    "transfer_id": {
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "GetCompensationTransferResponse": {
+                  "fields": {
+                    "transfer_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "compensation_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "amount": {
+                      "type": "int64",
+                      "id": 3
+                    },
+                    "status": {
+                      "type": "CompensationTransferStatus",
+                      "id": 4
+                    },
+                    "failure_reason": {
+                      "type": "string",
+                      "id": 5
+                    }
+                  }
                 }
               }
             }

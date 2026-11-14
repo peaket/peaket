@@ -3852,6 +3852,17 @@ export const ListOpsReceivablesResponse = zod.object({
 })
 
 /**
+ * BAT-425 GAT-130 잔여, transfer-refund §5. payment-svc 내부 /internal/v1/circuits의 상태를 관제에 노출한다. 회차 취소 재개 화면이 결제사 몫마다 서킷 상태와 최근 실패율로 '재개 조건 충족'을 보인다. 계정·구독 주소는 싣지 않는다. Cache-Control: no-store
+ * @summary 결제사 서킷 상태(회차 취소 재개 조건)
+ */
+export const ListOpsPgCircuitsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']),
+  "state": zod.enum(['closed', 'half_open', 'open'])
+})).optional()
+})
+
+/**
  * FR-068, POL-040, ADR-0052. viewer 이상
  * @summary 공연 리포트 판 목록과 마감 상태(SCR-029 ④)
  */

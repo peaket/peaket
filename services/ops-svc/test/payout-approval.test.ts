@@ -25,6 +25,9 @@ class FakePayments implements PayoutPaymentClient {
   async listBatches() {
     return this.batches;
   }
+  async listCircuits() {
+    return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };
+  }
   async approveBatch(batchId: string) {
     this.calls.push('approve');
     return { ...this.batches.find((b) => b.batchId === batchId)!, status: 'APPROVED' };

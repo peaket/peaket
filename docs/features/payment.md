@@ -924,3 +924,5 @@ K7의 비교 기준인 v0 결제다. v0는 '유능한 팀이 처음 만들 법�
 | --- | --- | --- | --- | --- | --- |
 | 동기 결제 체인의 지연과 실패 | 정규 로그 줄(`route`, `status`, `dep` postgres·pg-simulator), `http_server_request_duration_seconds{route}`, 422·502·409 수 | 결제 확정 p99(NFR-006과 같은 식, 비교용) | 템플릿 대시보드(wbs 1.3.1) | 없음(비교 기준선) | 확인 불가: 운영에 배포하지 않는다. 성능 장부 실행(K7)으로 본다 |
 | 결제-발권 불일치·이중 결제 | 불변식 검사기 결과(`invariants.csv`의 S1·S4·P1~P6) | 위반 0건 | — | 없음 | 확인 불가: 같은 까닭. v0 시험·부하 시험 뒤 `peaket-invariants`로 본다 |
+
+- **결제사 서킷 상태 노출(2026-11-15, R-592)**: payment-svc 내부 `GET /internal/v1/circuits`가 `{items:[{pg,state}]}`(`closed`·`half_open`·`open`)를 답한다. ops-svc 관제 `GET /v1/ops/pg-circuits`가 이를 그대로 옮겨 회차 취소 재개 화면이 결제사 몫마다 재개 조건을 보인다(transfer-refund §5). 계정·구독 주소는 싣지 않고 `Cache-Control: no-store`다.

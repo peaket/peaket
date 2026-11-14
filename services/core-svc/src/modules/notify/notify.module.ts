@@ -9,6 +9,8 @@ import { MemoryWebhookStore } from './adapters/memory-webhook-store.js';
 import { PartnerWebhookController } from './inbound/partner-webhook.controller.js';
 import { InternalWebhookEventController } from './inbound/internal-webhook-event.controller.js';
 import { HttpsWebhookTransport } from './adapters/https-transport.js';
+import { FakeNotificationTransport, NotificationSender, type NotificationTransport } from './application/notification-sender.js';
+import { InternalNotifyController } from './inbound/internal-notify.controller.js';
 
 export const NOTIFY_PARTNER_DATABASE = Symbol.for('peaket.notify.partner-database');
 export const NOTIFY_APP_STORE = Symbol.for('peaket.notify.app-store');
@@ -17,8 +19,8 @@ export const NOTIFY_APP_STORE = Symbol.for('peaket.notify.app-store');
 export class NotifyModule {
   static register(
     o:
-      | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport }
-      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport },
+      | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport }
+      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport },
   ): DynamicModule {
     const providers: Provider[] = [
       {
@@ -27,6 +29,7 @@ export class NotifyModule {
         inject: [WEBHOOK_STORE, CLOCK],
       },
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+      { provide: NotificationSender, useFactory: () => new NotificationSender(o.notificationTransport ?? new FakeNotificationTransport(), process.env) },
       {
         provide: WebhookDispatcher,
         useFactory: (store: WebhookStore, transport: WebhookTransport, clock: Clock) => new WebhookDispatcher({ store, transport, clock }),
@@ -36,7 +39,7 @@ export class NotifyModule {
     if (o.storage === 'database') {
       return {
         module: NotifyModule,
-        controllers: [PartnerWebhookController, InternalWebhookEventController],
+        controllers: [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController],
         providers: [
           ...providers,
           { provide: NOTIFY_PARTNER_DATABASE, useValue: o.partnerDatabase },
@@ -49,7 +52,7 @@ export class NotifyModule {
     const store = o.store ?? new MemoryWebhookStore();
     return {
       module: NotifyModule,
-      controllers: [PartnerWebhookController, InternalWebhookEventController],
+      controllers: [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController],
       providers: [
         ...providers,
         { provide: WEBHOOK_STORE, useValue: store },

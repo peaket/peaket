@@ -17,6 +17,8 @@ export interface PayoutPaymentClient {
   recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView>;
   listStatements(filter: { kind?: string | undefined; status?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; payoutDate?: string | undefined; limit: number }): Promise<unknown[]>;
   listReceivables(filter: { limit: number }): Promise<unknown[]>;
+  /** 결제사 서킷 상태(재개 조건 표시). payment-svc 내부 /internal/v1/circuits */
+  listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>;
 }
 
 export interface ApprovalReauthVerifier {

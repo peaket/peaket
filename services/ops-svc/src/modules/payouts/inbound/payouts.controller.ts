@@ -1,9 +1,10 @@
 // 받는 층: 지급 묶음 승인 업무·정산서·미수금(openapi ops payout-batches·approval-requests·settlements·receivables).
-import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PayoutApprovals, type OpsActor } from '../application/payout-approvals.js';
+import { PAYOUT_PAYMENT_CLIENT, type PayoutPaymentClient } from '../domain/ports.js';
 
 const BatchBody = z
   .object({
@@ -61,7 +62,10 @@ const num = (v: string | undefined, fallback: number): number => {
 
 @Controller('v1/ops')
 export class PayoutsController {
-  constructor(private readonly approvals: PayoutApprovals) {}
+  constructor(
+    private readonly approvals: PayoutApprovals,
+    @Inject(PAYOUT_PAYMENT_CLIENT) private readonly payments: PayoutPaymentClient,
+  ) {}
 
   @Post('payout-batches')
   @HttpCode(202)
@@ -145,5 +149,13 @@ export class PayoutsController {
   @ContractRouteSchema({ responses: { 200: UnknownPage } })
   async listReceivables(@Query() q: Record<string, string | undefined>) {
     return { items: await this.approvals.listReceivables({ limit: num(q.limit, 50) }), nextCursor: null };
+  }
+
+  @Get('pg-circuits')
+  @Header('Cache-Control', 'no-store')
+  @Roles(['viewer', 'operator', 'commander'])
+  @ContractRouteSchema({ responses: { 200: z.object({ items: z.array(z.object({ pg: z.enum(['TOSS', 'PORTONE', 'SIMULATOR']), state: z.enum(['closed', 'half_open', 'open']) })) }) } })
+  async listPgCircuits() {
+    return this.payments.listCircuits();
   }
 }

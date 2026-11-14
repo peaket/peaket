@@ -68,6 +68,11 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient {
     const res = await this.#client.request({ method: 'GET', path: '/internal/v1/settlements/receivables', params: { limit: String(filter.limit) }, headers: headers(this.token), timeoutCapMs: 10_000 });
     return (await this.#json<{ items: unknown[] }>(res, '미수금 목록을 읽지 못했습니다')).items;
   }
+
+  async listCircuits() {
+    const res = await this.#client.request({ method: 'GET', path: '/internal/v1/circuits', headers: headers(this.token), timeoutCapMs: 5_000 });
+    return this.#json<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>(res, '결제사 서킷 상태를 읽지 못했습니다');
+  }
 }
 
 export class UnavailablePayoutPaymentClient implements PayoutPaymentClient {
@@ -90,6 +95,9 @@ export class UnavailablePayoutPaymentClient implements PayoutPaymentClient {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async listReceivables(): Promise<unknown[]> {
+    throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+  }
+  async listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }> {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
 }

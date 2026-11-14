@@ -99,7 +99,7 @@
 | I-T52 | ③ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ③에 Auth.js 쿠키(`authjs.*`)가 없다. | 빈칸 | B | — |
 | I-T52 | ④ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ④는 앱 서버가 받은 액세스 토큰으로 gw-partner를 불러 그린다 | 빈칸 | B | — |
 | I-T53 | ① | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ①은 활성화되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
-| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/identity-svc/test/passkey-cases.ts |
+| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/export.test.ts, services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ④ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ④는 RP ID가 맞지 않아 거부된다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
