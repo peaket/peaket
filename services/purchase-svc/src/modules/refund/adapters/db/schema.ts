@@ -14,6 +14,8 @@ export const eventCancellationRequest = pgTable(
     status: text('status').notNull(),
     fault: text('fault'),
     fanNoticeReason: text('fan_notice_reason'),
+    postponedTo: at('postponed_to'),
+    refundWindowClosesAt: at('refund_window_closes_at'),
     ruledBy: text('ruled_by'),
     confirmedBy: text('confirmed_by'),
     targetOrders: integer('target_orders').notNull().default(0),
@@ -36,6 +38,7 @@ export const eventCancellationRequest = pgTable(
     check('event_cancellation_fault_check', sql`${t.fault} is null or ${t.fault} in ('ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE')`),
     check('event_cancellation_amounts_check', sql`${t.targetOrders} >= 0 and ${t.refundTotal} >= 0 and ${t.compensationTargets} >= 0 and ${t.compensationTotal} >= 0`),
     check('event_cancellation_people_check', sql`${t.ruledBy} is null or ${t.confirmedBy} is null or ${t.ruledBy} <> ${t.confirmedBy}`),
+    check('event_cancellation_window_check', sql`${t.refundWindowClosesAt} is null or ${t.postponedTo} is null or ${t.refundWindowClosesAt} <= ${t.postponedTo}`),
   ],
 );
 
@@ -52,14 +55,36 @@ export const eventRefundItem = pgTable(
     status: text('status').notNull(),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
+    appliedAt: at('applied_at'),
+    nextAttemptAt: at('next_attempt_at'),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
     primaryKey({ name: 'event_refund_item_pkey', columns: [t.requestId, t.ticketId] }),
     uniqueIndex('event_refund_item_cancellation_key').on(t.cancellationId),
     index('event_refund_item_status_idx').on(t.requestId, t.status),
+    index('event_refund_item_due_idx').on(t.status, t.nextAttemptAt),
     check('event_refund_item_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE', 'SIMULATOR')`),
-    check('event_refund_item_status_check', sql`${t.status} in ('PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN')`),
+    check('event_refund_item_status_check', sql`${t.status} in ('PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED')`),
     check('event_refund_item_attempts_check', sql`${t.attempts} >= 0`),
+  ],
+);
+
+export const eventRefundAttempt = pgTable(
+  'event_refund_attempt',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    pg: text('pg').notNull(),
+    amount: integer('amount').notNull(),
+    outcome: text('outcome').notNull(),
+    attemptedAt: at('attempted_at').notNull(),
+  },
+  (t) => [
+    index('event_refund_attempt_pg_time_idx').on(t.pg, t.attemptedAt),
+    check('event_refund_attempt_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE', 'SIMULATOR')`),
+    check('event_refund_attempt_outcome_check', sql`${t.outcome} in ('SUCCESS', 'FAILURE', 'REJECT', 'UNKNOWN')`),
+    check('event_refund_attempt_amount_check', sql`${t.amount} >= 0`),
   ],
 );

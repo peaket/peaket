@@ -33,16 +33,32 @@ import {
   orderHistoryCheckTask,
   PromOrderExpirySignals,
   PromOrderSignals,
+  SeatMapSaleConfigs,
 } from './modules/booking/index.js';
 import {
+  CancelTicket,
+  CancelTicketEventRefund,
+  DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventRefundAttempts,
+  DrizzleEventRefundStore,
+  DrizzleEventRefundTargets,
+  DrizzleSeatReturns,
+  EventRefundLoop,
+  EventRefundService,
   GrpcPaymentCancellations,
+  GrpcTicketCancellations,
+  HttpEventRefundAlert,
   HttpRefundFailureNotice,
+  OutboxEventRefundFanNotifier,
+  RedisSeatReturnNotices,
   RefundAfterEntry,
   RefundRetryLoop,
+  WeekendBusinessCalendar,
 } from './modules/refund/index.js';
 import {
   DrizzleSeatRebuildSource,
+  DrizzleSeatSales,
   jsonTradeEventCodec,
   PromSeatSignals,
   RedisOrderHolds,
@@ -112,6 +128,8 @@ export interface PurchaseRelayOptions {
   epochWatchTickMs?: number;
   /** 환급 재시도 반복 틱(기본 REFUND_RETRY_TICK_MS 1분, 시험이 줄인다. GAT-090) */
   refundRetryTickMs?: number;
+  /** 회차 취소 일괄 환불 실행기 틱(기본 EVENT_REFUND_TICK_MS 10초, 시험이 줄인다. GAT-130) */
+  eventRefundTickMs?: number;
   /** 주문 만료 안전망 틱(기본 ORDER_EXPIRY_SWEEP_INTERVAL_MS 10분 [가정], 시험이 줄인다. BUILD_ORDER PRF-172) */
   orderExpirySweepTickMs?: number;
   /** 좌석 Stream 릴레이의 쉬기(시험이 줄인다. 기본 setTimeout) */
@@ -173,6 +191,35 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         failureNotice: refundFailureNotice,
       })
     : undefined;
+  // 회차 취소 일괄 환불 실행기(BAT-425 GAT-130). ticket-svc·payment-svc 주소가 있을 때만 만든다.
+  // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기를 이 릴레이 리더가 이어 간다.
+  const ticketGrpcAddr = o.env?.PEAKET_TICKET_GRPC_ADDR;
+  const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr }) : undefined;
+  const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
+  const eventRefund =
+    refundTicketCancels && paymentCancels
+      ? new EventRefundService({
+          store: new DrizzleEventRefundStore(o.serviceDatabase, clock),
+          targets: new DrizzleEventRefundTargets(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
+          canceller: new CancelTicketEventRefund(
+            new CancelTicket({
+              orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
+              writes: new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock })),
+              tickets: refundTicketCancels,
+              payments: paymentCancels,
+              seats: new DrizzleSeatReturns(new DrizzleSeatSales(o.serviceDatabase), o.seatMap, new RedisSeatReturnNotices(o.redis)),
+              calendar: new WeekendBusinessCalendar(),
+            }),
+          ),
+          attempts: new DrizzleEventRefundAttempts(o.serviceDatabase),
+          fanNotifier: new OutboxEventRefundFanNotifier(),
+          ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient), alert: new HttpEventRefundAlert(opsClient) } : {}),
+          nowMs: () => clock.now(),
+          deadlineMs: () => clock.now() + 30_000,
+          concurrency: 8,
+          batchSize: 200,
+        })
+      : undefined;
   const relay = await startOutboxRelayProcess({
     service: SERVICE,
     env: o.env,
@@ -257,6 +304,16 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
               }),
             ]
           : []),
+        ...(eventRefund
+          ? [
+              new EventRefundLoop({
+                refund: eventRefund,
+                leader: ctx.leader,
+                logger: ctx.logger,
+                ...(o.eventRefundTickMs !== undefined ? { tickMs: o.eventRefundTickMs } : {}),
+              }),
+            ]
+          : []),
         new SeatEpochWatch({
           store,
           leader: ctx.leader,
@@ -289,6 +346,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
     stop: () => {
       clearInterval(refresh);
       paymentCancels?.close();
+      refundTicketCancels?.close();
       return relay.stop();
     },
   };

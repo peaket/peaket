@@ -5,6 +5,7 @@ import { AuditCheckpointService, AuditModule, DrizzleAuditChain, DrizzleAuditChe
 import { CommandsModule, type CommandExecutor } from './modules/commands/index.js';
 import { DrizzleCommandStore, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, MemoryCsCaseStore } from './modules/cases/index.js';
+import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modules/alerts/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 
 interface CommonWiring {
@@ -28,6 +29,7 @@ export class AppModule {
           CommandsModule.register(new DrizzleCommandStore(o.database), o.executor, checkpoints),
           AuditModule.register(checkpoints),
           CasesModule.register(new DrizzleCsCaseStore(o.database)),
+          AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
         ],
       };
@@ -40,6 +42,7 @@ export class AppModule {
         CommandsModule.register(new MemoryCommandStore(chain), o.executor, checkpoints),
         AuditModule.register(checkpoints),
         CasesModule.register(new MemoryCsCaseStore()),
+        AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
       ],
     };

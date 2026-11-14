@@ -6,9 +6,9 @@ import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService } from '../src/modules/refund/index.js';
+import { DrizzleEventRefundAttempts, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService } from '../src/modules/refund/index.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
-import type { EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
+import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = Date.parse('2026-11-14T08:00:00.000Z');
@@ -72,7 +72,10 @@ async function seedOrder(o: { eventId: string; accountId: string; amount: number
 }
 
 const configs = { config: async () => ({ saleEndsAtMs: NOW + 7 * DAY, entryOpensAtMs: NOW + 6 * DAY }) };
-const fixture = (outcomeFor: (target: EventRefundTarget, index: number) => 'REFUNDED' | 'REFUND_PENDING' | 'FAILED' = () => 'REFUNDED') => {
+const fixture = (
+  outcomeFor: (target: EventRefundTarget, index: number) => 'REFUNDED' | 'REFUND_PENDING' | 'FAILED' = () => 'REFUNDED',
+  opts: { attempts?: EventRefundAttemptStore; alert?: EventRefundAlert } = {},
+) => {
   const calls: Parameters<EventRefundCanceller['cancel']>[] = [];
   const notices: Parameters<EventRefundFailureNotice['open']>[0][] = [];
   let index = 0;
@@ -88,6 +91,8 @@ const fixture = (outcomeFor: (target: EventRefundTarget, index: number) => 'REFU
     targets: new DrizzleEventRefundTargets(db, configs),
     canceller,
     notice: { open: async (q) => void notices.push(q) },
+    ...(opts.attempts ? { attempts: opts.attempts } : {}),
+    ...(opts.alert ? { alert: opts.alert } : {}),
     nowMs: () => NOW,
     deadlineMs: () => NOW + 30_000,
     concurrency: 2,
@@ -104,7 +109,7 @@ describe('0016 회차 취소 일괄 환불', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(18);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(19);
     const idx = await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'event_refund_item' and indexname = 'event_refund_item_cancellation_key'");
     expect(idx.rows[0]?.indexdef).toContain('UNIQUE INDEX');
   });
@@ -124,7 +129,7 @@ describe('0016 회차 취소 일괄 환불', () => {
       refundTotal: 10_000,
       compensationTargets: 1,
       compensationTotal: 1_000,
-      progress: { total: 1, done: 0, failed: 0, perPg: [] },
+      progress: { total: 1, done: 0, failed: 0, notApplied: 0, perPg: [] },
       ruledBy: 'commander-1',
       confirmedBy: 'operator-2',
       createdAtMs: NOW,
@@ -143,6 +148,11 @@ describe('0016 회차 취소 일괄 환불', () => {
     expect((await store.create(request, [item])).requestId).toBe(requestId);
     expect(await count('select count(*) as n from event_cancellation_request where id = $1', [requestId])).toBe(1);
     expect(await count('select count(*) as n from event_refund_item where request_id = $1', [requestId])).toBe(1);
+    // 신청과 창 닫기가 겹치면 먼저 온 쪽만 남는다(조건부 UPDATE).
+    expect(await store.markApplied(requestId, ticketId, NOW + 10)).toBe(true);
+    expect(await store.markApplied(requestId, ticketId, NOW + 20)).toBe(false);
+    expect(await store.markNotApplied(requestId, ticketId)).toBe(false);
+    expect((await store.items(requestId))[0]?.appliedAtMs).toBe(NOW + 10);
     // 환급 재시도 실행기가 order_cancellation을 REFUNDED로 바꾸면 event_refund_item 진행률도 따라간다.
     await q(
       `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
@@ -192,6 +202,54 @@ describe('0016 회차 취소 일괄 환불', () => {
     expect(second.requestId).toBe(first.requestId);
     expect(second.progress).toEqual(first.progress);
     expect(f.calls).toHaveLength(calls);
+  });
+
+  test('BAT425_0018은_환불_시도_표와_신청·재시도_칸을_더하고_재적용해도_같다', async () => {
+    const cols = async (table: string) =>
+      (await q<{ column_name: string }>('select column_name from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position', ['public', table])).rows.map((r) => r.column_name);
+    expect(await cols('event_cancellation_request')).toEqual(expect.arrayContaining(['postponed_to', 'refund_window_closes_at']));
+    expect(await cols('event_refund_item')).toEqual(expect.arrayContaining(['applied_at', 'next_attempt_at']));
+    expect(await cols('event_refund_attempt')).toEqual(expect.arrayContaining(['request_id', 'ticket_id', 'pg', 'amount', 'outcome', 'attempted_at']));
+    await migratePurchase(url);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(19);
+  });
+
+  test('BAT425_자동_정지는_1분_창_실패율로_멈추고_경보를_남긴다', async () => {
+    const eventId = randomUUID();
+    await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
+    const requestId = randomUUID();
+    const attempts = new DrizzleEventRefundAttempts(db);
+    for (let i = 0; i < 20; i++) {
+      await attempts.record({ requestId, ticketId: randomUUID(), pg: 'TOSS', amount: 10_000, outcome: i === 19 ? 'FAILURE' : 'SUCCESS', atMs: NOW - 1_000 });
+    }
+    expect(await attempts.window('TOSS', NOW - 60_000)).toMatchObject({ calls: 20, failures: 1, failedAmount: 10_000 });
+    expect(await attempts.consecutiveFailures('TOSS')).toBe(1);
+    const raises: Parameters<EventRefundAlert['raise']>[0][] = [];
+    const f = fixture(() => 'REFUNDED', { attempts, alert: { raise: async (q) => void raises.push(q) } });
+    const r = await f.service.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(f.calls).toHaveLength(0);
+    expect(r.status).toBe('PAUSED');
+    expect(r.progress.perPg[0]).toMatchObject({ pg: 'TOSS', state: 'PAUSED', pauseReason: 'AUTO_FAILURE_RATE' });
+    expect(raises[0]).toMatchObject({ severity: 'SEV2', reason: 'AUTO_FAILURE_RATE' });
+  });
+
+  test('BAT425_연기_신청_창은_신청한_티켓만_환급하고_닫히면_미신청을_NOT_APPLIED로_끝낸다', async () => {
+    const eventId = randomUUID();
+    const a = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
+    const b = await seedOrder({ eventId, accountId: randomUUID(), amount: 20_000, pg: 'PORTONE' });
+    const requestId = randomUUID();
+    const f = fixture();
+    const started = await f.service.start({ eventId, requestId, fault: 'CONTENT_CHANGE', ruledBy: 'commander-1', confirmedBy: 'operator-2', kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    expect(started.status).toBe('REFUND_WINDOW');
+    const applied = await f.service.apply({ requestId, ticketId: a.ticketId });
+    expect(applied.progress).toMatchObject({ total: 2, done: 1, notApplied: 0 });
+    const closed = await f.service.closeWindow({ requestId, closedBy: 'commander-1', reason: '신청 기한 종료' });
+    expect(closed.status).toBe('COMPLETED');
+    expect(closed.progress).toMatchObject({ total: 2, done: 1, notApplied: 1 });
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]![1].reason).toBe('EVENT_POSTPONED');
+    const rows = await q<{ ticket_id: string; status: string }>('select ticket_id, status from event_refund_item where request_id = $1 order by ticket_id', [requestId]);
+    expect(rows.rows.find((x) => x.ticket_id === b.ticketId)?.status).toBe('NOT_APPLIED');
   });
 
   test('BAT425_결과_모름은_일시정지_뒤_재개에서_같은_취소_ID로_다시_시도한다', async () => {

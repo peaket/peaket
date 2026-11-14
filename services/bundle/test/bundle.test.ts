@@ -97,13 +97,15 @@ describe('serviceEnv·포트: 서비스마다 다른 환경 값', () => {
     expect(() => serviceEnv('admission-ctrl', common, file)).toThrow(new RegExp(`admission-ctrl\\.env에 ${key}가 없다`));
   });
 
-  test('PRF215_포트가 서비스끼리·합본 관리 포트와 겹치면 시작하지 않고, payment-svc·queue-svc는 gRPC 포트(없으면 기본 50051)도 센다', () => {
+  test('PRF215_포트가 서비스끼리·합본 관리 포트와 겹치면 시작하지 않고, payment-svc·queue-svc·purchase-svc는 gRPC 포트(없으면 기본 50051)도 센다', () => {
     const p = (svc: BundleService, env: Record<string, string>) => portsOf(svc, env);
     expect(p('payment-svc', { PORT: '18084', PEAKET_MANAGEMENT_PORT: '19474', PEAKET_GRPC_PORT: '15051' }).map((x) => x.port)).toEqual([18_084, 19_474, 15_051]);
     // queue-svc도 업무 gRPC(VerificationAppealService, BOT-090)를 연다. 파일에 없으면 두 서비스 모두 기본 50051이라 겹침으로 잡는다(rebase로 BAT-200을 실을 때)
     expect(p('queue-svc', { PORT: '18080', PEAKET_MANAGEMENT_PORT: '19471', PEAKET_GRPC_PORT: '15052' }).map((x) => x.port)).toEqual([18_080, 19_471, 15_052]);
     expect(p('queue-svc', { PORT: '18080', PEAKET_MANAGEMENT_PORT: '19471' }).map((x) => x.port)).toEqual([18_080, 19_471, 50_051]);
-    expect(p('purchase-svc', { PORT: '18081', PEAKET_MANAGEMENT_PORT: '19473', PEAKET_GRPC_PORT: '15053' }).map((x) => x.port)).toEqual([18_081, 19_473]);
+    // purchase-svc도 회차 취소 환불 gRPC(EventRefundService, BAT-425 GAT-130)를 연다
+    expect(p('purchase-svc', { PORT: '18081', PEAKET_MANAGEMENT_PORT: '19473', PEAKET_GRPC_PORT: '15053' }).map((x) => x.port)).toEqual([18_081, 19_473, 15_053]);
+    expect(p('purchase-svc', { PORT: '18081', PEAKET_MANAGEMENT_PORT: '19473' }).map((x) => x.port)).toEqual([18_081, 19_473, 50_051]);
     expect(() => assertDistinctPorts(19_464, [...p('payment-svc', { PORT: '18084', PEAKET_MANAGEMENT_PORT: '19474' }), ...p('queue-svc', { PORT: '18080', PEAKET_MANAGEMENT_PORT: '19471' })])).toThrow(/50051가 겹친다: payment-svc PEAKET_GRPC_PORT와 queue-svc PEAKET_GRPC_PORT/);
     expect(() => assertDistinctPorts(19_464, [{ name: 'queue-svc PORT', port: 18_080 }, { name: 'purchase-svc PORT', port: 18_080 }])).toThrow(/18080가 겹친다: queue-svc PORT와 purchase-svc PORT/);
     expect(() => assertDistinctPorts(19_464, [{ name: 'queue-svc PEAKET_MANAGEMENT_PORT', port: 19_464 }])).toThrow(/합본 PEAKET_MANAGEMENT_PORT와 queue-svc/);
@@ -140,7 +142,7 @@ function fakes(o: { failStart?: BundleService; failClose?: BundleService; fatalA
 
 const FILES: Record<BundleService, string> = {
   'payment-svc': 'PORT=18084\nPEAKET_MANAGEMENT_PORT=19474\nPEAKET_GRPC_PORT=15051\nPEAKET_DATABASE_URL=postgres://payment\n',
-  'purchase-svc': 'PORT=18081\nPEAKET_MANAGEMENT_PORT=19473\nPEAKET_SEAT_REDIS_URL=redis://seat:6379\nPEAKET_PAYMENT_GRPC_ADDR=127.0.0.1:15051\n',
+  'purchase-svc': 'PORT=18081\nPEAKET_MANAGEMENT_PORT=19473\nPEAKET_GRPC_PORT=15053\nPEAKET_SEAT_REDIS_URL=redis://seat:6379\nPEAKET_PAYMENT_GRPC_ADDR=127.0.0.1:15051\n',
   'admission-ctrl': 'PORT=18082\nPEAKET_MANAGEMENT_PORT=19472\nPEAKET_QUEUE_REDIS_URL=redis://queue:6379\n',
   'queue-svc': 'PORT=18080\nPEAKET_MANAGEMENT_PORT=19471\nPEAKET_QUEUE_REDIS_URL=redis://queue:6379\n',
 };

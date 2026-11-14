@@ -72,7 +72,7 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(18);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(19);
   });
 
   test('GAT080_0014(예매 취소): order_cancellation은 refund_due_at·진행 중 취소 1건 유일 색인·상태/사유/금액 CHECK를 만든다', async () => {

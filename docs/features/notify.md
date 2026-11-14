@@ -146,6 +146,7 @@ ADR-0109의 규칙 그대로다. 사건을 받은 트랜잭션에서 `notificati
 - 중복 키: `{알림 종류}:{대상 ID}:{사건 ID 또는 상태 버전}:{받는 계정 ID}:{채널}`(docs/design/d5 §9.1.1).
 - 시각을 잡는 안내(공연 전날 18:00 등)와 60초 모아 보내기는 `next_attempt_at`으로 미룬다.
 - 낱건은 초당 수백 건 아래에서 쓴다(ADR-0109 [추정]). 한 사건에서 받는 사람이 1,000명 [가정]을 넘는 알림(오픈 알림, 취소표 알림)은 낱건으로 만들지 않고 §4.2의 대량 발송으로 보낸다. 거래·안전 알림 가운데 받는 사람이 많은 회차 취소·연기 안내(5만 석 회차면 수만 명)는 지금처럼 낱건이다. 2인 확정 뒤 한 번 나가는 알림이고, 수만 행을 몇 분에 나눠 적으면 초당 수백 건 안이다.
+- **회차 취소·연기·환급 알림의 사건(2026-11-15, R-583)**: purchase-svc가 `trade.orders` Outbox에 대상 주문마다 `EVENT_CANCELLATION_CONFIRMED`(회차 취소 확정, `fanNoticeReason`), `EVENT_POSTPONED`(연기 확정, `postponedTo`·`refundWindowClosesAt`), `REFUNDED`(환급 완료, `refundAmount`), `REFUND_FAILED`(환급 실패, `fanNoticeReason`에 실패 사유 코드)를 남긴다. core-svc notify가 이 사건을 받아 결제자용·보유자용 문안으로 보내는 계약까지다. 실제 발송기(`core-notify-sender`)가 아직 없어 Outbox와 asyncapi 계약만 있다.
 
 ### 4.2 대량 발송(추천 적용 2026-10-30)
 

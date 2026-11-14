@@ -114,13 +114,23 @@ describe('BAT-465 실제 PostgreSQL·대상 HTTP', () => {
     await migrateOps(container!.url);
     await migrateOps(container!.url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from ops_migration')).toBe(3);
+    expect(await count('select count(*) as n from ops_migration')).toBe(4);
     const cols = (await q<{ column_name: string }>("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'ops_command'")).rows.map((r) => r.column_name);
     expect(cols).toEqual(expect.arrayContaining(['attempts', 'last_error', 'executed_at', 'result']));
     const state = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_state_check'");
     expect(state.rows[0]?.def).toContain("'SUCCEEDED'");
     const type = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
     expect(type.rows[0]?.def).toContain("'SCALE_CHANGE'");
+  });
+
+  test('BAT425_0003은_운영_경보_표와_회차_취소_환불_수동_명령_유형을_더한다', async () => {
+    const tables = (await q<{ relname: string }>("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by relname")).rows.map((r) => r.relname);
+    expect(tables).toEqual(expect.arrayContaining(['ops_alert']));
+    const cols = (await q<{ column_name: string }>("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'ops_alert' order by ordinal_position")).rows.map((r) => r.column_name);
+    expect(cols).toEqual(['id', 'event_key', 'kind', 'severity', 'source', 'reason', 'detail', 'created_at']);
+    const type = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
+    expect(type.rows[0]?.def).toContain("'EVENT_REFUND_PAUSE'");
+    expect(type.rows[0]?.def).toContain("'EVENT_REFUND_RESUME'");
   });
 
   test('BAT465_저장소는_실패_뒤_성공에서_lastError를_지운다', async () => {

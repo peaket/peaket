@@ -28,7 +28,22 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "ResumeEventRefundJob": {
                       "requestType": "ResumeEventRefundJobRequest",
                       "responseType": "ResumeEventRefundJobResponse"
+                    },
+                    "ApplyEventRefund": {
+                      "requestType": "ApplyEventRefundRequest",
+                      "responseType": "ApplyEventRefundResponse"
+                    },
+                    "CloseEventRefundWindow": {
+                      "requestType": "CloseEventRefundWindowRequest",
+                      "responseType": "CloseEventRefundWindowResponse"
                     }
+                  }
+                },
+                "EventRefundKind": {
+                  "values": {
+                    "EVENT_REFUND_KIND_UNSPECIFIED": 0,
+                    "EVENT_REFUND_KIND_CANCEL": 1,
+                    "EVENT_REFUND_KIND_POSTPONE": 2
                   }
                 },
                 "CancellationRuling": {
@@ -121,6 +136,22 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "confirmed_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 6
+                    },
+                    "kind": {
+                      "type": "EventRefundKind",
+                      "id": 7
+                    },
+                    "postponed_to": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 8
+                    },
+                    "refund_window_closes_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 9
+                    },
+                    "fan_notice_reason": {
+                      "type": "string",
+                      "id": 10
                     }
                   }
                 },
@@ -129,6 +160,14 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "job_id": {
                       "type": "string",
                       "id": 1
+                    },
+                    "state": {
+                      "type": "RefundJobState",
+                      "id": 2
+                    },
+                    "refund_window_closes_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 3
                     }
                   }
                 },
@@ -145,7 +184,8 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "REFUND_JOB_STATE_UNSPECIFIED": 0,
                     "REFUND_JOB_STATE_RUNNING": 1,
                     "REFUND_JOB_STATE_PAUSED": 2,
-                    "REFUND_JOB_STATE_COMPLETED": 3
+                    "REFUND_JOB_STATE_COMPLETED": 3,
+                    "REFUND_JOB_STATE_REFUND_WINDOW": 4
                   }
                 },
                 "RefundPauseReason": {
@@ -155,7 +195,8 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "REFUND_PAUSE_REASON_AUTO_CONSECUTIVE_FAILURES": 2,
                     "REFUND_PAUSE_REASON_AUTO_CIRCUIT_OPEN": 3,
                     "REFUND_PAUSE_REASON_AUTO_REJECT_RATE": 4,
-                    "REFUND_PAUSE_REASON_MANUAL": 5
+                    "REFUND_PAUSE_REASON_MANUAL": 5,
+                    "REFUND_PAUSE_REASON_AUTO_FAILED_AMOUNT": 6
                   }
                 },
                 "PgRefundPart": {
@@ -183,6 +224,10 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "unknown_orders": {
                       "type": "int32",
                       "id": 6
+                    },
+                    "not_applied_orders": {
+                      "type": "int32",
+                      "id": 7
                     }
                   }
                 },
@@ -208,6 +253,22 @@ export const purchaseV1Refund: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "PgRefundPart",
                       "id": 5
+                    },
+                    "kind": {
+                      "type": "EventRefundKind",
+                      "id": 6
+                    },
+                    "refund_window_closes_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 7
+                    },
+                    "not_applied_orders": {
+                      "type": "int32",
+                      "id": 8
+                    },
+                    "applied_orders": {
+                      "type": "int32",
+                      "id": 9
                     }
                   }
                 },
@@ -264,6 +325,82 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "state": {
                       "type": "RefundJobState",
                       "id": 1
+                    }
+                  }
+                },
+                "ApplyEventRefundRequest": {
+                  "fields": {
+                    "request_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "application_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "applied_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 4
+                    }
+                  }
+                },
+                "ApplyEventRefundResponse": {
+                  "fields": {
+                    "accepted": {
+                      "type": "bool",
+                      "id": 1
+                    },
+                    "state": {
+                      "type": "RefundJobState",
+                      "id": 2
+                    },
+                    "total_orders": {
+                      "type": "int32",
+                      "id": 3
+                    },
+                    "done_orders": {
+                      "type": "int32",
+                      "id": 4
+                    },
+                    "failed_orders": {
+                      "type": "int32",
+                      "id": 5
+                    },
+                    "not_applied_orders": {
+                      "type": "int32",
+                      "id": 6
+                    }
+                  }
+                },
+                "CloseEventRefundWindowRequest": {
+                  "fields": {
+                    "request_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "closed_by": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "CloseEventRefundWindowResponse": {
+                  "fields": {
+                    "state": {
+                      "type": "RefundJobState",
+                      "id": 1
+                    },
+                    "not_applied_orders": {
+                      "type": "int32",
+                      "id": 2
                     }
                   }
                 }

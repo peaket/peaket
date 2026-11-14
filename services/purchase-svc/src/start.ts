@@ -40,18 +40,24 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventRefundAttempts,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
   DrizzleSeatReturns,
+  EventRefundGrpcController,
   EventRefundService,
+  eventRefundPackage,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpEventRefundAlert,
   HttpRefundFailureNotice,
+  OutboxEventRefundFanNotifier,
   parseHolidayCalendar,
   RedisSeatReturnNotices,
   type RefundModuleDeps,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
+import { startPurchaseGrpcServer } from './grpc-server.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
 import { acceptBulkheadLimitFromEnv, setAcceptBulkheadLimit, setWriteBulkheadLimit, writeBulkheadLimitFromEnv } from './write-bulkhead.js';
@@ -292,16 +298,21 @@ export async function start(o: StartOptions): Promise<StartedService> {
   if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
     throw new Error('PEAKET_TICKET_GRPC_ADDR·PEAKET_PAYMENT_GRPC_ADDR가 없다(예매 취소, 운영 필수)');
   }
-  // 회차 취소 일괄 환불(BAT-425 첫 몫). 기존 예매 취소 Saga를 티켓마다 부르고, 진행률·부분 실패·수동 일시정지·재개를 남긴다.
-  // CS 처리함 연결은 아직 로그 대역이다(ops-svc 내부 HTTP는 후속). 자동 정지·백그라운드 실행기·연기(POSTPONE)도 후속이다.
+  // 회차 취소 일괄 환불(BAT-425 GAT-120·GAT-130). 기존 예매 취소 Saga를 티켓마다 부르고, 진행률·부분 실패·수동 일시정지·재개,
+  // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
+  // CS 처리함·경보 연결은 ops-svc 내부 HTTP다. 주소가 없으면 로그 대역이다.
+  let eventRefundService: EventRefundService | undefined;
   if (database && refund) {
     const opsUrl = env.PEAKET_OPS_HTTP_URL;
-    refund.eventRefund = new EventRefundService({
+    const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
+    eventRefundService = new EventRefundService({
       store: new DrizzleEventRefundStore(database),
       targets: new DrizzleEventRefundTargets(database, new SeatMapSaleConfigs(seatMap)),
       canceller: new CancelTicketEventRefund(new CancelTicket(refund)),
-      notice: opsUrl
-        ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }))
+      attempts: new DrizzleEventRefundAttempts(database),
+      fanNotifier: new OutboxEventRefundFanNotifier(),
+      notice: opsClient
+        ? new HttpRefundFailureNotice(opsClient)
         : {
             open: async (q) => {
               log?.warn(
@@ -310,10 +321,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
               );
             },
           },
+      alert: opsClient
+        ? new HttpEventRefundAlert(opsClient)
+        : {
+            raise: async (q) => {
+              log?.warn({ event: 'event_refund_alert', ...q }, '회차 취소 환불 경보(ops-svc 주소 없음)');
+            },
+          },
       nowMs: () => systemClock.now(),
       deadlineMs: () => systemClock.now() + 30_000,
       concurrency: 8,
     });
+    refund.eventRefund = eventRefundService;
   }
 
   // 우선 구매 권리 발급·회수(GAT-135, POL-046 ⑦, ADR-0171). purchase DB가 있을 때만 연다.
@@ -679,6 +698,22 @@ export async function start(o: StartOptions): Promise<StartedService> {
     await telemetrySender?.disconnect(TELEMETRY_CLOSE_MS);
   };
   await service.listen();
+  // 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130). PEAKET_GRPC_PORT가 있을 때만 연다.
+  // 없으면 ops-svc는 내부 HTTP 호환 경로를 쓴다(같은 쓰임새·같은 멱등 키).
+  let refundGrpc: Awaited<ReturnType<typeof startPurchaseGrpcServer>> | undefined;
+  if (eventRefundService && env.PEAKET_GRPC_PORT) {
+    const raw = env.PEAKET_GRPC_PORT;
+    const port = Number(raw);
+    if (!Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
+    refundGrpc = await startPurchaseGrpcServer({
+      host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+      port,
+      services: [{ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(eventRefundService).handlers() }],
+    });
+    service.logger.info({ port: refundGrpc.port }, '회차 취소 환불 gRPC 포트를 열었다');
+  } else if (eventRefundService) {
+    service.logger.warn({ dep: 'grpc' }, 'PEAKET_GRPC_PORT가 없어 회차 취소 환불 gRPC를 열지 않는다(내부 HTTP 호환 경로만)');
+  }
   const sweeper = service.app.get(ExpirySweeper);
   sweeper.start();
   saleStateJudge?.start();
@@ -717,7 +752,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       (consumers?.stop() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)')),
       paymentPuller?.stop(),
     ])
-      .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop()]))
+      .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
       .then(() => service.close())
       .finally(closeTelemetry)
       .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))

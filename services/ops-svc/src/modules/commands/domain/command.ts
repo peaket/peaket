@@ -15,6 +15,8 @@ export const COMMAND_TYPES = [
   'AUTOMATION_STOP',
   'PG_ASSIGN',
   'EVENT_CANCEL',
+  'EVENT_REFUND_PAUSE',
+  'EVENT_REFUND_RESUME',
   'SCALE_CHANGE',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];

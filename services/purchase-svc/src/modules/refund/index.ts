@@ -1,5 +1,4 @@
-// 예매 취소·환급 모듈(BUILD_ORDER GAT-070·GAT-080). 도메인·유스케이스만 내보낸다.
-// HTTP·gRPC·DB 어댑터는 ticket-svc·purchase-svc 조립 단계에서 잇는다(이 묶음은 계산·Saga 계약과 시험까지다).
+// 예매 취소·환급 모듈(BUILD_ORDER GAT-070·GAT-080·GAT-120·GAT-130). 도메인·유스케이스·어댑터를 내보낸다.
 export {
   businessHoursBetween,
   calendarDaysBefore,
@@ -43,7 +42,11 @@ export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type R
 export {
   compensationAmount,
   eventRefundCancellationId,
+  eventRefundRetryDelayMs,
   progressOf,
+  rateBp,
+  EVENT_REFUND_ATTEMPT_OUTCOMES,
+  EVENT_REFUND_AUTO_STOP,
   EVENT_REFUND_FAULTS,
   EVENT_REFUND_ITEM_STATUSES,
   EVENT_REFUND_KINDS,
@@ -52,6 +55,8 @@ export {
   REFUND_PAUSE_REASONS,
   REFUND_PG_PROVIDERS,
   type EventCancellationRequest,
+  type EventRefundAttempt,
+  type EventRefundAttemptOutcome,
   type EventRefundFault,
   type EventRefundItem,
   type EventRefundItemStatus,
@@ -61,13 +66,20 @@ export {
   type EventRefundProgress,
   type EventRefundStatus,
   type EventRefundTarget,
+  type EventRefundWindowStats,
   type RefundJobState,
   type RefundPauseReason,
   type RefundPgProvider,
 } from './domain/event-refund.js';
 export type {
+  EventRefundAlert,
+  EventRefundApplyInput,
+  EventRefundAttemptStore,
   EventRefundCanceller,
+  EventRefundCloseWindowInput,
   EventRefundFailureNotice,
+  EventRefundFanNotifier,
+  EventRefundOutboxMessage,
   EventRefundPauseInput,
   EventRefundPreviewInput,
   EventRefundResumeInput,
@@ -77,9 +89,14 @@ export type {
   EventRefundTargets,
 } from './domain/event-refund-ports.js';
 export { EventRefundError, EventRefundService, type EventRefundErrorCode } from './application/event-refund-service.js';
-export { MemoryEventRefundStore } from './adapters/memory-event-refund-store.js';
+export { MemoryEventRefundAttemptStore, MemoryEventRefundStore } from './adapters/memory-event-refund-store.js';
 export { DrizzleEventRefundStore } from './adapters/db/drizzle-event-refund-store.js';
+export { DrizzleEventRefundAttempts } from './adapters/db/drizzle-event-refund-attempts.js';
 export { DrizzleEventRefundTargets } from './adapters/db/drizzle-event-refund-targets.js';
 export { CancelTicketEventRefund } from './application/cancel-ticket-event-refund.js';
 export { HttpRefundFailureNotice } from './adapters/http-refund-failure-notice.js';
+export { HttpEventRefundAlert } from './adapters/http-event-refund-alert.js';
+export { OutboxEventRefundFanNotifier, TRADE_ORDERS_TOPIC, eventRefundNoticeKey } from './adapters/outbox-event-refund-fan-notifier.js';
+export { EVENT_REFUND_TICK_MS, EventRefundLoop, type EventRefundLoopDeps, type EventRefundTick } from './application/event-refund-loop.js';
 export { EventRefundController } from './inbound/event-refund.controller.js';
+export { EventRefundGrpcController, eventRefundPackage, eventRefundServiceHandlers, type EventRefundGrpcUseCases } from './inbound/event-refund.grpc.js';

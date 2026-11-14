@@ -103,8 +103,8 @@ export function serviceEnv(service: BundleService, common: Record<string, string
   return { ...common, ...file };
 }
 
-/** 업무 gRPC 포트를 여는 서비스와 그 기본값(파일에 없을 때 서비스가 여는 포트. payment-svc·queue-svc 모두 50051이라 둘 다 빠지면 겹침으로 잡는다) */
-const GRPC_DEFAULT_PORTS: Partial<Record<BundleService, number>> = { 'payment-svc': 50_051, 'queue-svc': 50_051 };
+/** 업무 gRPC 포트를 여는 서비스와 그 기본값(파일에 없을 때 서비스가 여는 포트. payment-svc·queue-svc·purchase-svc 모두 50051이라 둘 다 빠지면 겹침으로 잡는다) */
+const GRPC_DEFAULT_PORTS: Partial<Record<BundleService, number>> = { 'payment-svc': 50_051, 'queue-svc': 50_051, 'purchase-svc': 50_051 };
 
 /** 서비스마다 쓰는 포트 이름(앱·관리, payment-svc·queue-svc는 업무 gRPC도) */
 export function portsOf(service: BundleService, env: Record<string, string | undefined>): { name: string; port: number }[] {

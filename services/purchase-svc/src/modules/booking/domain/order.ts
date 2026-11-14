@@ -94,6 +94,8 @@ export type OrderEventType =
   | 'PARTIALLY_REFUNDED'
   | 'REFUNDED'
   | 'EVENT_CANCELLATION_CONFIRMED'
+  | 'EVENT_POSTPONED'
+  | 'REFUND_FAILED'
   | 'COMPENSATION_PAID'
   | 'EXPIRED'
   | 'ISSUE_DELAYED';
@@ -142,6 +144,14 @@ export interface OrderEventMessage {
   accountId: string;
   type: OrderEventType;
   amount: number;
+  /** 회차 취소·연기로 돌려준 금액(REFUNDED에만) */
+  refundAmount?: number;
+  /** 팬 통지 사유 요약(EVENT_CANCELLATION_CONFIRMED·EVENT_POSTPONED·REFUND_FAILED에만) */
+  fanNoticeReason?: string;
+  /** 연기된 회차의 새 시작 시각(EVENT_POSTPONED에만) */
+  postponedTo?: string;
+  /** 연기 회차의 환급 신청 창 닫힘(EVENT_POSTPONED에만) */
+  refundWindowClosesAt?: string;
   seatIds: string[];
   purchaseSessionId?: string;
   journeyId?: string;

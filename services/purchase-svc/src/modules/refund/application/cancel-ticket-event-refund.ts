@@ -10,7 +10,7 @@ export class CancelTicketEventRefund implements EventRefundCanceller {
       accountId: target.payerAccountId,
       ticketId: target.ticketId,
       cancellationId: q.cancellationId,
-      reason: 'EVENT_CANCELLED',
+      reason: q.reason,
       nowMs: q.nowMs,
       deadlineMs: q.deadlineMs,
       eventCancellationRequestId: q.requestId,
