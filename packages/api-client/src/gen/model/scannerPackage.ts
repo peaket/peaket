@@ -10,6 +10,7 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ScannerPackageTicket } from './scannerPackageTicket';
+import type { ScannerVersionVector } from './scannerVersionVector';
 
 /**
  * 회차 목록 전체(offline-gate §6.3)
@@ -22,6 +23,7 @@ export interface ScannerPackage {
   tickets?: ScannerPackageTicket[];
   revokedKeyIds?: string[];
   lastSeq?: number;
+  versionVector?: ScannerVersionVector;
   /** 서버가 지원하는 가장 낮은 스캐너 앱 판(SemVer, 예 1.4.0). 스캐너 API는 최근 앱 판 2개와 호환한다. 새 판은 근무 준비 때만 적용하고, 입장 시간 중에는 서버가 판이 낮다고 거부하지 않는다(guidelines §1, docs/devops.md §6.6, 추천 적용 2026-10-29, ADR-0145 결정 4) */
   minAppVersion?: string;
 }

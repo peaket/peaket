@@ -10,11 +10,13 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ScannerChange } from './scannerChange';
+import type { ScannerVersionVector } from './scannerVersionVector';
 
 export interface ScannerChanges {
   changes?: ScannerChange[];
   lastSeq?: number;
   hasMore?: boolean;
+  versionVector?: ScannerVersionVector;
   /** ScannerPackage.minAppVersion과 같다(추천 적용 2026-10-29, ADR-0145 결정 4) */
   minAppVersion?: string;
 }

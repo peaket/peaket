@@ -18,11 +18,13 @@ export const CreateScannerScan200 = zod.object({
   "ticketId": zod.string().optional(),
   "seatLabel": zod.string().optional(),
   "gateZone": zod.string().optional(),
-  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW']).optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
   "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
   "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-})).optional()
+})).optional(),
+  "resyncRequired": zod.boolean().optional().describe('낡은 버전 벡터로 판정한 기록이 있어 클라이언트가 목록·변경분을 다시 받아야 한다(GAT-160)'),
+  "staleIds": zod.array(zod.string()).optional().describe('낡은 버전 벡터로 판정한 기록 ID')
 })
 
 export type CreateScannerScan200 = zod.input<typeof CreateScannerScan200>;

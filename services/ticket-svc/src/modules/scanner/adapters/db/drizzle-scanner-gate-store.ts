@@ -94,6 +94,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
       async (tx) => {
         const tickets = (await tx.execute(sql`select id, seat_id, gate_zone, status from ticket where event_id = ${i.eventId} order by id`)).rows as unknown as TicketRow[];
         const seqRows = (await tx.execute(sql`select last_seq from scanner_seq where event_id = ${i.eventId}`)).rows as { last_seq: string | number }[];
+        const kindRows = (await tx.execute(sql`select kind, max(seq) as seq from scanner_change where event_id = ${i.eventId} group by kind`)).rows as { kind: string; seq: string | number }[];
+        const lastOf = (...kinds: string[]) => Math.max(0, ...kindRows.filter((r) => kinds.includes(r.kind)).map((r) => Number(r.seq)));
         const scans = (
           await tx.execute(sql`
             select distinct on (se.ticket_id) se.ticket_id, se.direction, se.scanned_at_device, se.gate_zone, sd.name as device_name
@@ -153,26 +155,55 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           }),
           revokedKeyIds: revokedRows.map((r) => Buffer.from(r.key_id).toString('base64url')),
           lastSeq: Number(seqRows[0]?.last_seq ?? 0),
+          versionVector: {
+            eventId: i.eventId,
+            seq: Number(seqRows[0]?.last_seq ?? 0),
+            ticketSeq: lastOf('TICKET_STATUS'),
+            keySeq: lastOf('KEY_REGISTERED', 'KEY_REVOKED'),
+            policySeq: lastOf('POLICY'),
+            placementSeq: lastOf('PLACEMENT'),
+            flagSeq: lastOf('FLAG'),
+            issuedAt: new Date(i.nowMs).toISOString(),
+            maxOfflineMs: 0,
+          },
         };
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
   }
 
-  async changes(i: { eventId: string; after: number; limit: number }): Promise<ScannerChangesView> {
-    const rows = await this.database.db
-      .select()
-      .from(scannerChange)
-      .where(sql`${scannerChange.eventId} = ${i.eventId} and ${scannerChange.seq} > ${i.after}`)
-      .orderBy(asc(scannerChange.seq))
-      .limit(i.limit + 1);
-    const [seqRow] = await this.database.db.select({ lastSeq: scannerSeq.lastSeq }).from(scannerSeq).where(eq(scannerSeq.eventId, i.eventId)).limit(1);
-    const page = rows.slice(0, i.limit);
-    return {
-      changes: page.map((r) => ({ seq: Number(r.seq), kind: r.kind, payload: r.payload })),
-      lastSeq: Number(seqRow?.lastSeq ?? 0),
-      hasMore: rows.length > i.limit,
-    };
+  async changes(i: { eventId: string; after: number; limit: number; nowMs?: number }): Promise<ScannerChangesView> {
+    return this.database.transaction(
+      async (tx) => {
+        const rows = await tx
+          .select()
+          .from(scannerChange)
+          .where(sql`${scannerChange.eventId} = ${i.eventId} and ${scannerChange.seq} > ${i.after}`)
+          .orderBy(asc(scannerChange.seq))
+          .limit(i.limit + 1);
+        const [seqRow] = await tx.select({ lastSeq: scannerSeq.lastSeq }).from(scannerSeq).where(eq(scannerSeq.eventId, i.eventId)).limit(1);
+        const kindRows = (await tx.execute(sql`select kind, max(seq) as seq from scanner_change where event_id = ${i.eventId} group by kind`)).rows as { kind: string; seq: string | number }[];
+        const lastOf = (...kinds: string[]) => Math.max(0, ...kindRows.filter((r) => kinds.includes(r.kind)).map((r) => Number(r.seq)));
+        const page = rows.slice(0, i.limit);
+        return {
+          changes: page.map((r) => ({ seq: Number(r.seq), kind: r.kind, payload: r.payload })),
+          lastSeq: Number(seqRow?.lastSeq ?? 0),
+          hasMore: rows.length > i.limit,
+          versionVector: {
+            eventId: i.eventId,
+            seq: Number(seqRow?.lastSeq ?? 0),
+            ticketSeq: lastOf('TICKET_STATUS'),
+            keySeq: lastOf('KEY_REGISTERED', 'KEY_REVOKED'),
+            policySeq: lastOf('POLICY'),
+            placementSeq: lastOf('PLACEMENT'),
+            flagSeq: lastOf('FLAG'),
+            issuedAt: new Date(i.nowMs ?? Date.now()).toISOString(),
+            maxOfflineMs: 0,
+          },
+        };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
   }
 
   async acceptScans(i: {
@@ -182,10 +213,12 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     sessionId: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
+    staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult> {
     return this.database.transaction(async (tx) => {
       const acceptedIds: string[] = [];
       const flags: GateFlagView[] = [];
+      const stale = new Set(i.staleVersionIds ?? []);
       for (const scan of i.scans) {
         const existing = (await tx.execute(sql`select id from scan_event where event_id = ${i.eventId} and id = ${scan.id} limit 1`)).rows as { id: string }[];
         if (existing[0]) {
@@ -239,6 +272,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           reason = 'NO_ENTRY_RECORD';
         }
         if (scan.scannerSessionId !== i.sessionId) kinds.push('OUT_OF_SESSION');
+        if (stale.has(scan.id)) kinds.push('STALE_VERSION');
         const inserted = await tx
           .insert(scanEvent)
           .values({
@@ -300,7 +334,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           });
         }
       }
-      return { acceptedIds, flags };
+      return { acceptedIds, flags, resyncRequired: stale.size > 0, staleIds: [...stale] };
     });
   }
 

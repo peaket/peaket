@@ -13,6 +13,7 @@ import type { ScanEventDirection } from './scanEventDirection';
 import type { ScanEventMethod } from './scanEventMethod';
 import type { ScanEventReason } from './scanEventReason';
 import type { ScanEventResult } from './scanEventResult';
+import type { ScannerVersionVectorInput } from './scannerVersionVectorInput';
 
 /**
  * 스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)
@@ -43,4 +44,6 @@ export interface ScanEvent {
   knownSeq: number;
   /** 기기 일련번호(두 번째 칸) */
   deviceSeq: number;
+  /** 판정 때 클라이언트가 들고 있던 스냅샷 버전 벡터(GAT-160). 없으면 옛 클라이언트로 본다 */
+  versionVector?: ScannerVersionVectorInput;
 }

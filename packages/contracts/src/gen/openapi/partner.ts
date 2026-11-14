@@ -1182,7 +1182,7 @@ export const ListPartnerEventFlagsResponse = zod.object({
   "ticketId": zod.string().optional(),
   "seatLabel": zod.string().optional(),
   "gateZone": zod.string().optional(),
-  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW']).optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
   "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
   "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()

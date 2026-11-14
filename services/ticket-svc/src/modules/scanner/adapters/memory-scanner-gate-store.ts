@@ -83,6 +83,22 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return seq;
   }
 
+  #versionVector(eventId: string, nowMs: number) {
+    const list = this.changeLog.get(eventId) ?? [];
+    const lastOf = (...kinds: string[]) => list.filter((c) => kinds.includes(c.kind)).at(-1)?.seq ?? 0;
+    return {
+      eventId,
+      seq: this.seq.get(eventId) ?? 0,
+      ticketSeq: lastOf('TICKET_STATUS'),
+      keySeq: lastOf('KEY_REGISTERED', 'KEY_REVOKED'),
+      policySeq: lastOf('POLICY'),
+      placementSeq: lastOf('PLACEMENT'),
+      flagSeq: lastOf('FLAG'),
+      issuedAt: new Date(nowMs).toISOString(),
+      maxOfflineMs: 0,
+    };
+  }
+
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
     const tickets = [...this.tickets.values()].filter((t) => t.eventId === i.eventId).sort((a, b) => a.ticketId.localeCompare(b.ticketId));
     const zones = [...new Set(tickets.map((t) => t.gateZone).filter((z) => z !== ''))].sort();
@@ -115,13 +131,19 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       tickets: views,
       revokedKeyIds,
       lastSeq: this.seq.get(i.eventId) ?? 0,
+      versionVector: this.#versionVector(i.eventId, i.nowMs),
     };
   }
 
-  async changes(i: { eventId: string; after: number; limit: number }): Promise<ScannerChangesView> {
+  async changes(i: { eventId: string; after: number; limit: number; nowMs?: number }): Promise<ScannerChangesView> {
     const all = (this.changeLog.get(i.eventId) ?? []).filter((c) => c.seq > i.after).sort((a, b) => a.seq - b.seq);
     const page = all.slice(0, i.limit);
-    return { changes: page.map((c) => ({ seq: c.seq, kind: c.kind, payload: c.payload })), lastSeq: this.seq.get(i.eventId) ?? 0, hasMore: all.length > i.limit };
+    return {
+      changes: page.map((c) => ({ seq: c.seq, kind: c.kind, payload: c.payload })),
+      lastSeq: this.seq.get(i.eventId) ?? 0,
+      hasMore: all.length > i.limit,
+      versionVector: this.#versionVector(i.eventId, i.nowMs ?? Date.now()),
+    };
   }
 
   async acceptScans(i: {
@@ -131,9 +153,11 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     sessionId: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
+    staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult> {
     const acceptedIds: string[] = [];
     const createdFlags: GateFlagView[] = [];
+    const stale = new Set(i.staleVersionIds ?? []);
     for (const scan of i.scans) {
       if (this.scans.has(scan.id)) {
         acceptedIds.push(scan.id);
@@ -176,6 +200,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         reason = 'NO_ENTRY_RECORD';
       }
       if (scan.scannerSessionId !== i.sessionId) kinds.push('OUT_OF_SESSION');
+      if (stale.has(scan.id)) kinds.push('STALE_VERSION');
       const stored: StoredScan = {
         ...scan,
         result,
@@ -201,7 +226,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         });
       }
     }
-    return { acceptedIds, flags: createdFlags };
+    return { acceptedIds, flags: createdFlags, resyncRequired: stale.size > 0, staleIds: [...stale] };
   }
 
   async listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage> {

@@ -51,6 +51,7 @@ export const scannerChange = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.eventId, t.seq] }),
+    index('scanner_change_event_kind_seq_idx').on(t.eventId, t.kind, sql`${t.seq} DESC`),
     check(
       'scanner_change_kind_check',
       sql`${t.kind} IN ('KEY_REGISTERED', 'KEY_REVOKED', 'TICKET_STATUS', 'SCAN_STATE', 'POLICY', 'PLACEMENT', 'FLAG', 'SESSION_TERMINATED')`,
@@ -89,7 +90,7 @@ export const scanEvent = pgTable(
     check('scan_event_direction_check', sql`${t.direction} IN ('IN', 'OUT')`),
     check('scan_event_method_check', sql`${t.method} IN ('QR', 'OVERRIDE', 'VERIFY')`),
     check('scan_event_result_check', sql`${t.result} IN ('PASS', 'REJECT', 'CHECK')`),
-    check('scan_event_flag_check', sql`${t.flag} IN ('NONE', 'DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN')`),
+    check('scan_event_flag_check', sql`${t.flag} IN ('NONE', 'DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'STALE_VERSION')`),
   ],
 );
 
@@ -110,7 +111,7 @@ export const gateFlag = pgTable(
   },
   (t) => [
     index('gate_flag_event_created_idx').on(t.eventId, t.createdAt, t.id),
-    check('gate_flag_kind_check', sql`${t.kind} IN ('DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW')`),
+    check('gate_flag_kind_check', sql`${t.kind} IN ('DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION')`),
     check('gate_flag_awareness_check', sql`${t.awareness} IN ('CONCURRENT', 'KNOWN')`),
     check('gate_flag_status_check', sql`${t.status} IN ('OPEN', 'OK', 'SUSPECT', 'UNDETERMINED')`),
   ],

@@ -153,9 +153,9 @@ describe('스캔·이상 표시 HTTP [GAT-180·GAT-190]', () => {
     const s = scan({ ticketId: TICKET_2 });
     const first = await post('/v1/scanner/scans', [s]);
     expect(first.statusCode).toBe(200);
-    expect(JSON.parse(first.payload)).toEqual({ acceptedIds: [s.id], flags: [] });
+    expect(JSON.parse(first.payload)).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [] });
     const again = await post('/v1/scanner/scans', [s]);
-    expect(JSON.parse(again.payload)).toEqual({ acceptedIds: [s.id], flags: [] });
+    expect(JSON.parse(again.payload)).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [] });
     const dup = await post('/v1/scanner/scans', [scan({ ticketId: TICKET_2, knownSeq: 1 })]);
     expect(JSON.parse(dup.payload).flags).toEqual([expect.objectContaining({ kind: 'DUPLICATE', status: 'OPEN' })]);
   });

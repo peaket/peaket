@@ -55,7 +55,7 @@ export const DPOP_REPLAY_STORE = Symbol('ticket.DpopReplayStore');
 /** 스캐너 목록·변경분·스캔·이상 표시 저장소. 판정과 일련번호 매기기는 저장소 트랜잭션 안에서 끝낸다. */
 export interface ScannerGateStore {
   package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView>;
-  changes(i: { eventId: string; after: number; limit: number }): Promise<ScannerChangesView>;
+  changes(i: { eventId: string; after: number; limit: number; nowMs?: number }): Promise<ScannerChangesView>;
   acceptScans(i: {
     eventId: string;
     deviceId: string;
@@ -63,6 +63,8 @@ export interface ScannerGateStore {
     sessionId: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
+    /** 낡은 버전 벡터로 판정한 기록 ID(GAT-160). STALE_VERSION 이상 표시를 만든다 */
+    staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult>;
   listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage>;
   /** 이상 표시의 회차. 없으면 undefined. 다른 회차면 403으로 닫는 데 쓴다 */

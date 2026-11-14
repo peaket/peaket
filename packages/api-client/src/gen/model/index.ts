@@ -1028,6 +1028,8 @@ export * from './scannerSessionSelf';
 export * from './scannerSessionSelfRole';
 export * from './scannerShift';
 export * from './scannerShiftRole';
+export * from './scannerVersionVector';
+export * from './scannerVersionVectorInput';
 export * from './searchResultPage';
 export * from './searchResultPageFilterNames';
 export * from './searchResultPageLimit';

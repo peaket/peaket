@@ -66,7 +66,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     service = await createService({
       name: SERVICE,
       env,
-      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore }, ticket: { deviceKeys } }),
+      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore, maxOfflineMs: config.scannerMaxOfflineMs }, ticket: { deviceKeys } }),
       adminAuthz,
       scanner: { devices: scannerStore, sessions: scannerSessions, replay },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),

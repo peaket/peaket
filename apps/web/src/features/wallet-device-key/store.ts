@@ -36,6 +36,20 @@ export interface WalletTicketSnapshot {
 interface WalletMeta {
   id: 'wallet';
   lastSyncedAt: number;
+  /** 오프라인 스냅샷 버전 벡터(GAT-160). 서버 스캐너 목록의 벡터와 같은 모양이다 */
+  versionVector?: WalletVersionVector;
+}
+
+export interface WalletVersionVector {
+  eventId: string;
+  seq: number;
+  ticketSeq: number;
+  keySeq: number;
+  policySeq: number;
+  placementSeq: number;
+  flagSeq: number;
+  issuedAt: string;
+  maxOfflineMs: number;
 }
 
 class WalletDatabase extends Dexie {
@@ -88,6 +102,23 @@ export async function saveLastSyncedAt(at = Date.now()): Promise<void> {
 
 export async function loadLastSyncedAt(): Promise<number | undefined> {
   return (await walletDatabase()?.meta.get('wallet'))?.lastSyncedAt;
+}
+
+export async function saveWalletVersionVector(vector: WalletVersionVector): Promise<void> {
+  const db = walletDatabase();
+  if (!db) return;
+  const meta = (await db.meta.get('wallet')) ?? { id: 'wallet' as const, lastSyncedAt: Date.now() };
+  await db.meta.put({ ...meta, versionVector: vector });
+}
+
+export async function loadWalletVersionVector(): Promise<WalletVersionVector | undefined> {
+  return (await walletDatabase()?.meta.get('wallet'))?.versionVector;
+}
+
+/** 월렛 스냅샷이 서버가 정한 오프라인 허용 시간을 넘겼는가. 경계값(같음)은 아직 신선하다 */
+export function isWalletSnapshotStale(vector: Pick<WalletVersionVector, 'issuedAt' | 'maxOfflineMs'>, syncedAtMs: number, nowMs: number): boolean {
+  if (nowMs - syncedAtMs > vector.maxOfflineMs) return true;
+  return nowMs - Date.parse(vector.issuedAt) > vector.maxOfflineMs;
 }
 
 /** iOS 7일 삭제·저장 공간 정리에 대비해 영구 저장소를 요청한다(offline-gate §4). 결과를 돌려준다 */

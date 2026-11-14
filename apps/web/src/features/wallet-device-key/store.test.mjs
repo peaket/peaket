@@ -5,12 +5,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   deleteDeviceKey,
+  isWalletSnapshotStale,
   loadDeviceKey,
   loadLastSyncedAt,
   loadTicketSnapshot,
+  loadWalletVersionVector,
   saveDeviceKey,
   saveLastSyncedAt,
   saveTicketSnapshot,
+  saveWalletVersionVector,
   WALLET_DB_NAME,
   walletDatabase,
 } from './store.ts';
@@ -51,6 +54,23 @@ test('Dexie peaket-wallet은 기기 키·티켓 스냅샷·마지막 동기화 �
 
   await saveLastSyncedAt(1_700_000_003_000);
   assert.equal(await loadLastSyncedAt(), 1_700_000_003_000);
+
+  await saveWalletVersionVector({
+    eventId: 'ev-1',
+    seq: 10,
+    ticketSeq: 4,
+    keySeq: 5,
+    policySeq: 1,
+    placementSeq: 2,
+    flagSeq: 3,
+    issuedAt: new Date(1_700_000_003_000).toISOString(),
+    maxOfflineMs: 24 * 3_600_000,
+  });
+  const vector = await loadWalletVersionVector();
+  assert.equal(vector?.seq, 10);
+  assert.equal(vector?.maxOfflineMs, 24 * 3_600_000);
+  assert.equal(isWalletSnapshotStale(vector, 1_700_000_003_000, 1_700_000_003_000 + 24 * 3_600_000), false);
+  assert.equal(isWalletSnapshotStale(vector, 1_700_000_003_000, 1_700_000_003_000 + 24 * 3_600_000 + 1), true);
 
   await deleteDeviceKey(TICKET);
   assert.equal(await loadDeviceKey(TICKET), undefined);

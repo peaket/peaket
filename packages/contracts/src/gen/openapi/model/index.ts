@@ -713,6 +713,8 @@ export * from './scannerPlacement.zod.js';
 export * from './scannerPlacementInput.zod.js';
 export * from './scannerSessionSelf.zod.js';
 export * from './scannerShift.zod.js';
+export * from './scannerVersionVector.zod.js';
+export * from './scannerVersionVectorInput.zod.js';
 export * from './searchResultPage.zod.js';
 export * from './seatFillRule.zod.js';
 export * from './seatFillRuleInput.zod.js';

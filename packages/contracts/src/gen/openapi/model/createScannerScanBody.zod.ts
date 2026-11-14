@@ -32,7 +32,18 @@ export const CreateScannerScanBody = zod.array(zod.object({
   "scannedAtDevice": zod.iso.datetime({"offset":true}).describe('보정 시각'),
   "clockOffsetMs": zod.int().optional(),
   "knownSeq": zod.int().describe('판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸)'),
-  "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)')
+  "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)'),
+  "versionVector": zod.object({
+  "eventId": zod.string(),
+  "seq": zod.int(),
+  "ticketSeq": zod.int(),
+  "keySeq": zod.int(),
+  "policySeq": zod.int(),
+  "placementSeq": zod.int(),
+  "flagSeq": zod.int(),
+  "issuedAt": zod.iso.datetime({"offset":true}),
+  "maxOfflineMs": zod.int()
+}).strict().optional().describe('판정 때 클라이언트가 들고 있던 스냅샷 버전 벡터(GAT-160). 없으면 옛 클라이언트로 본다')
 }).strict().describe('스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)')).max(CreateScannerScanBodyMax)
 
 export type CreateScannerScanBody = zod.input<typeof CreateScannerScanBody>;

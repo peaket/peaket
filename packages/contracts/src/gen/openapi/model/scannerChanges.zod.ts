@@ -21,6 +21,17 @@ export const ScannerChanges = zod.object({
 })).optional(),
   "lastSeq": zod.int().optional(),
   "hasMore": zod.boolean().optional(),
+  "versionVector": zod.object({
+  "eventId": zod.string(),
+  "seq": zod.int(),
+  "ticketSeq": zod.int().describe('TICKET_STATUS의 마지막 일련번호'),
+  "keySeq": zod.int().describe('KEY_REGISTERED·KEY_REVOKED의 마지막 일련번호'),
+  "policySeq": zod.int().describe('POLICY의 마지막 일련번호'),
+  "placementSeq": zod.int().describe('PLACEMENT의 마지막 일련번호'),
+  "flagSeq": zod.int().describe('FLAG의 마지막 일련번호'),
+  "issuedAt": zod.iso.datetime({"offset":true}).describe('이 벡터를 만든 서버 시각'),
+  "maxOfflineMs": zod.int().describe('오프라인 허용 최대 시간(ms). 이보다 오래된 스냅샷은 재동기화가 필요하다(24시간 [가정])')
+}).optional().describe('오프라인 스냅샷 버전 벡터(offline-gate §6.3, GAT-160). 각 값은 그 종류 변경의 마지막 일련번호다'),
   "minAppVersion": zod.string().optional().describe('ScannerPackage.minAppVersion과 같다(추천 적용 2026-10-29, ADR-0145 결정 4)')
 })
 

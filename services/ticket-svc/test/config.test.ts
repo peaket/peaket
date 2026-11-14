@@ -14,4 +14,11 @@ describe('ticket-svc 설정 [GAT-170]', () => {
       redisUrl: 'redis://127.0.0.1:6379',
     });
   });
+
+  test('스캐너 오프라인 허용 시간은 기본 24시간이고 양의 밀리초만 받는다 [GAT-160]', () => {
+    expect(loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'ci' }).scannerMaxOfflineMs).toBe(24 * 60 * 60_000);
+    expect(loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'ci', PEAKET_SCANNER_MAX_OFFLINE_MS: '60000' }).scannerMaxOfflineMs).toBe(60_000);
+    expect(() => loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'ci', PEAKET_SCANNER_MAX_OFFLINE_MS: '0' })).toThrow(/PEAKET_SCANNER_MAX_OFFLINE_MS/);
+    expect(() => loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'ci', PEAKET_SCANNER_MAX_OFFLINE_MS: 'abc' })).toThrow(/PEAKET_SCANNER_MAX_OFFLINE_MS/);
+  });
 });

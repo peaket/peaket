@@ -11,6 +11,8 @@ import {
   assertFlagStatus,
   assertNote,
   assertUuid,
+  DEFAULT_SCANNER_MAX_OFFLINE_MS,
+  isVersionVectorStale,
   normalizeScanBatch,
   type GateFlagPage,
   type GateFlagStatus,
@@ -37,21 +39,29 @@ export class ScannerFlagNotFound extends Error {
 export interface ScannerGateDeps {
   store: ScannerGateStore;
   clock: Clock;
+  /** 오프라인 허용 최대 시간(ms). 없으면 24시간 [가정] */
+  maxOfflineMs?: number;
 }
 
 export class ScannerGate {
-  constructor(private readonly d: ScannerGateDeps) {}
+  readonly #maxOfflineMs: number;
+
+  constructor(private readonly d: ScannerGateDeps) {
+    this.#maxOfflineMs = d.maxOfflineMs ?? DEFAULT_SCANNER_MAX_OFFLINE_MS;
+  }
 
   async package(eventIdRaw: unknown, sessionEventId: string | undefined): Promise<ScannerPackageView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
-    return this.d.store.package({ eventId, nowMs: this.d.clock.now() });
+    const p = await this.d.store.package({ eventId, nowMs: this.d.clock.now() });
+    return { ...p, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
   async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined): Promise<ScannerChangesView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
-    return this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw) });
+    const c = await this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw), nowMs: this.d.clock.now() });
+    return { ...c, versionVector: { ...c.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
   /** 업로드는 현재 스태프 세션의 회차만 받는다. 다른 회차 기록은 403으로 닫고 저장하지 않는다(WRONG_EVENT) */
@@ -67,13 +77,18 @@ export class ScannerGate {
     this.#sameEvent(eventId, i.sessionEventId);
     const scans = normalizeScanBatch(i.body);
     if (scans.some((s) => s.eventId !== eventId)) throw new ScannerGateForbidden();
+    const now = this.d.clock.now();
+    const staleIds = scans
+      .filter((s) => s.versionVector !== undefined && isVersionVectorStale(s.versionVector, now, this.#maxOfflineMs))
+      .map((s) => s.id);
     return this.d.store.acceptScans({
       eventId,
       deviceId: i.deviceId,
       staffAccountId: i.staffAccountId,
       sessionId: i.sessionId,
       scans,
-      nowMs: this.d.clock.now(),
+      nowMs: now,
+      staleVersionIds: staleIds,
     });
   }
 

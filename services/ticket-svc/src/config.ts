@@ -10,6 +10,8 @@ export interface TicketServiceConfig {
   readonly identityGrpcUrl?: string;
   /** 등록 코드·DPoP jti 저장소(운영 필수). 없으면 프로세스 메모리(파드 하나에서만 유효) */
   readonly redisUrl?: string;
+  /** 오프라인 스냅샷 허용 최대 시간(ms). 기본 24시간 [가정] */
+  readonly scannerMaxOfflineMs: number;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -27,7 +29,15 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     grpcPort: grpcPortOf(env.PEAKET_GRPC_PORT, test),
     ...(identityGrpcUrl ? { identityGrpcUrl } : {}),
     ...(redisUrl ? { redisUrl } : {}),
+    scannerMaxOfflineMs: scannerMaxOfflineMsOf(env.PEAKET_SCANNER_MAX_OFFLINE_MS),
   };
+}
+
+function scannerMaxOfflineMsOf(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 24 * 60 * 60_000;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 1) throw new Error('PEAKET_SCANNER_MAX_OFFLINE_MS가 올바르지 않다(1 이상 밀리초)');
+  return n;
 }
 
 function isTestEnv(env: Record<string, string | undefined>): boolean {

@@ -14,4 +14,8 @@ import type { GateFlag } from './gateFlag';
 export type CreateScannerScan200 = {
   acceptedIds?: string[];
   flags?: GateFlag[];
+  /** 낡은 버전 벡터로 판정한 기록이 있어 클라이언트가 목록·변경분을 다시 받아야 한다(GAT-160) */
+  resyncRequired?: boolean;
+  /** 낡은 버전 벡터로 판정한 기록 ID */
+  staleIds?: string[];
 };

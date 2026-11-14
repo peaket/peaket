@@ -13,6 +13,8 @@ export interface ScannerWiring {
   codes: EnrollmentCodeStore;
   replay: DpopReplayStore;
   gate: ScannerGateStore;
+  /** 오프라인 스냅샷 허용 최대 시간(ms). 없으면 24시간 [가정] */
+  maxOfflineMs?: number;
 }
 
 @Module({})
@@ -30,7 +32,7 @@ export class ScannerModule {
       },
       {
         provide: ScannerGate,
-        useFactory: (store: ScannerGateStore, clock: Clock) => new ScannerGate({ store, clock }),
+        useFactory: (store: ScannerGateStore, clock: Clock) => new ScannerGate({ store, clock, ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}) }),
         inject: [SCANNER_GATE_STORE, CLOCK],
       },
     ];

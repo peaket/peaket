@@ -23,7 +23,7 @@ export type ScanReason =
   | 'OVERRIDE_KEY_UNKNOWN'
   | 'OVERRIDE_BOOTH_OFFLINE'
   | 'OVERRIDE_OTHER';
-export type GateFlagKind = 'DUPLICATE' | 'NO_EXIT' | 'AFTER_CANCEL' | 'OUT_OF_SESSION' | 'AFTER_CLOSE' | 'OVERRIDE_REVIEW';
+export type GateFlagKind = 'DUPLICATE' | 'NO_EXIT' | 'AFTER_CANCEL' | 'OUT_OF_SESSION' | 'AFTER_CLOSE' | 'OVERRIDE_REVIEW' | 'STALE_VERSION';
 export type GateFlagAwareness = 'CONCURRENT' | 'KNOWN';
 export type GateFlagStatus = 'OPEN' | 'OK' | 'SUSPECT' | 'UNDETERMINED';
 
@@ -54,6 +54,29 @@ export interface ScannerPackageView {
   revokedKeyIds: string[];
   lastSeq: number;
   minAppVersion?: string;
+  /** 오프라인 스냅샷의 버전 벡터(offline-gate §6.3, GAT-160) */
+  versionVector: ScannerVersionVector;
+}
+
+/** 오프라인 스냅샷의 버전 벡터. 각 값은 그 종류 변경의 마지막 일련번호다(0이면 없음) */
+export interface ScannerVersionVector {
+  eventId: string;
+  /** 전체 마지막 변경 일련번호 */
+  seq: number;
+  /** 티켓 상태 변경(TICKET_STATUS)의 마지막 일련번호 */
+  ticketSeq: number;
+  /** 기기 키 등록·폐기(KEY_REGISTERED·KEY_REVOKED)의 마지막 일련번호 */
+  keySeq: number;
+  /** 입장 정책(POLICY)의 마지막 일련번호 */
+  policySeq: number;
+  /** 기기 배치(PLACEMENT)의 마지막 일련번호 */
+  placementSeq: number;
+  /** 이상 표시(FLAG)의 마지막 일련번호 */
+  flagSeq: number;
+  /** 이 벡터를 만든 서버 시각 */
+  issuedAt: string;
+  /** 오프라인 허용 최대 시간(ms). 이보다 오래된 스냅샷은 재동기화가 필요하다 */
+  maxOfflineMs: number;
 }
 
 export interface ScannerChangeView {
@@ -67,6 +90,7 @@ export interface ScannerChangesView {
   lastSeq: number;
   hasMore: boolean;
   minAppVersion?: string;
+  versionVector: ScannerVersionVector;
 }
 
 export interface ScanEventInput {
@@ -86,6 +110,8 @@ export interface ScanEventInput {
   clockOffsetMs?: number;
   knownSeq: number;
   deviceSeq: number;
+  /** 스캔 판정 때 클라이언트가 들고 있던 스냅샷 버전 벡터(GAT-160). 없으면 옛 클라이언트로 본다 */
+  versionVector?: ScannerVersionVector;
 }
 
 export interface GateFlagView {
@@ -107,6 +133,10 @@ export interface GateFlagPage {
 export interface ScanBatchResult {
   acceptedIds: string[];
   flags: GateFlagView[];
+  /** 낡은 버전 벡터로 판정한 기록이 있어 클라이언트가 재동기화해야 한다 */
+  resyncRequired: boolean;
+  /** 낡은 버전 벡터로 판정한 기록 ID */
+  staleIds: string[];
 }
 
 export class ScannerGateInputError extends Error {
@@ -193,6 +223,40 @@ function requireDate(name: string, v: unknown): string {
   return new Date(Date.parse(v)).toISOString();
 }
 
+/** 오프라인 허용 최대 시간 [가정](offline-gate §6.3, GAT-160). 넘은 스냅샷은 재동기화가 필요하다 */
+export const DEFAULT_SCANNER_MAX_OFFLINE_MS = 24 * 60 * 60_000;
+
+const VECTOR_INT = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+/** 클라이언트가 보낸 버전 벡터의 모양을 본다. 회차가 다르면 거절한다 */
+export function normalizeVersionVector(v: unknown, eventId: string): ScannerVersionVector | undefined {
+  if (v === undefined) return undefined;
+  if (!v || typeof v !== 'object') throw new ScannerGateInputError('SCAN');
+  const x = v as Record<string, unknown>;
+  if (typeof x.eventId !== 'string' || x.eventId !== eventId) throw new ScannerGateInputError('SCAN');
+  for (const k of ['seq', 'ticketSeq', 'keySeq', 'policySeq', 'placementSeq', 'flagSeq'] as const) {
+    if (!VECTOR_INT(x[k])) throw new ScannerGateInputError('SCAN');
+  }
+  if (typeof x.issuedAt !== 'string' || !Number.isFinite(Date.parse(x.issuedAt))) throw new ScannerGateInputError('SCAN');
+  if (!VECTOR_INT(x.maxOfflineMs)) throw new ScannerGateInputError('SCAN');
+  return {
+    eventId: x.eventId,
+    seq: x.seq as number,
+    ticketSeq: x.ticketSeq as number,
+    keySeq: x.keySeq as number,
+    policySeq: x.policySeq as number,
+    placementSeq: x.placementSeq as number,
+    flagSeq: x.flagSeq as number,
+    issuedAt: new Date(Date.parse(x.issuedAt)).toISOString(),
+    maxOfflineMs: x.maxOfflineMs as number,
+  };
+}
+
+/** 스냅샷이 서버가 정한 오프라인 허용 시간을 넘겼는가 */
+export function isVersionVectorStale(vector: Pick<ScannerVersionVector, 'issuedAt'>, nowMs: number, maxOfflineMs: number): boolean {
+  return nowMs - Date.parse(vector.issuedAt) > maxOfflineMs;
+}
+
 /** 업로드 한 건을 검사한다. 티켓·기기·세션 값은 서버가 정하는 값과 대조하므로 여기서는 모양만 본다. */
 export function normalizeScan(v: unknown): ScanEventInput {
   if (!v || typeof v !== 'object') throw new ScannerGateInputError('SCAN');
@@ -224,6 +288,7 @@ export function normalizeScan(v: unknown): ScanEventInput {
     ...(s.clockOffsetMs !== undefined ? { clockOffsetMs: s.clockOffsetMs as number } : {}),
     knownSeq: s.knownSeq as number,
     deviceSeq: s.deviceSeq as number,
+    ...(s.versionVector !== undefined ? { versionVector: normalizeVersionVector(s.versionVector, assertEventId(s.eventId))! } : {}),
   };
 }
 

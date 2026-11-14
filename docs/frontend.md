@@ -543,7 +543,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 표 | 키·색인 | 값 | 지우는 때 |
 | --- | --- | --- | --- |
-| `meta` | 고정 키 | 기기 이름, 배정, 앱 판, `clockOffsetMs`, `packageSeq`, 스키마(데이터의 구조 정의) 판 | 기기 등록을 풀 때 |
+| `meta` | 고정 키 | 기기 이름, 배정, 앱 판, `clockOffsetMs`, `packageSeq`, `versionVector`(GAT-160 버전 벡터), 스키마(데이터의 구조 정의) 판 | 기기 등록을 풀 때 |
 | `deviceKey` | 고정 키 | 기기 키(WebCrypto ECDSA P-256 `CryptoKey`, `extractable=false`. 화면과 서비스 워커가 함께 꺼내 DPoP 증명에 서명한다), 공개키 지문 `jkt`, 등록한 기기 ID(추천 적용 2026-10-28, 기술 검토 중간-057) | 기기 폐기·다시 등록 때. 로그아웃해도 남긴다 |
 | `tickets` | `ticketId`, 색인 `gateZone` | 좌석 표시, 구역, 상태, 유효 `keyId` 목록 | 회차 끝 + 24시간 [가정] |
 | `keys` | `keyId` | 공개키(검증용 `CryptoKey` 캐시는 Worker 메모리에 둔다), `ticketId` | 위와 같다 |

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test } from 'vitest';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
 import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden } from '../src/modules/scanner/application/scanner-gate.js';
 import type { ScanEventInput } from '../src/modules/scanner/domain/scanner-gate.js';
+import { normalizeVersionVector } from '../src/modules/scanner/domain/scanner-gate.js';
 
 const NOW = Date.parse('2026-11-13T03:00:00.000Z');
 const EVENT = '0190f3a1-7c2e-7a00-8000-000000000001';
@@ -41,6 +42,67 @@ beforeEach(() => {
   store.seedTicket({ ticketId: TICKET_B, eventId: EVENT, seatId: 'B-2', gateZone: '서문', status: 'ACTIVE' });
   store.seedTicket({ ticketId: TICKET_CANCELLED, eventId: EVENT, seatId: 'C-3', gateZone: '동문', status: 'REFUNDED' });
   gate = new ScannerGate({ store, clock: fakeClock({ now: NOW }) });
+});
+
+describe('버전 벡터·동기화 신선도 [GAT-160]', () => {
+  const vector = (over: Partial<import('../src/modules/scanner/domain/scanner-gate.js').ScannerVersionVector> = {}) => ({
+    eventId: EVENT,
+    seq: 0,
+    ticketSeq: 0,
+    keySeq: 0,
+    policySeq: 0,
+    placementSeq: 0,
+    flagSeq: 0,
+    issuedAt: new Date(NOW).toISOString(),
+    maxOfflineMs: 24 * 60 * 60_000,
+    ...over,
+  });
+
+  test('패키지·변경분은 종류별 마지막 일련번호와 오프라인 허용 시간을 준다 [O-T38]', async () => {
+    const p = await gate.package(EVENT, EVENT);
+    expect(p.versionVector).toEqual({
+      eventId: EVENT,
+      seq: 0,
+      ticketSeq: 0,
+      keySeq: 0,
+      policySeq: 0,
+      placementSeq: 0,
+      flagSeq: 0,
+      issuedAt: new Date(NOW).toISOString(),
+      maxOfflineMs: 24 * 60 * 60_000,
+    });
+    const s = scan();
+    await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [s] });
+    const c = await gate.changes(EVENT, 0, 10, EVENT);
+    expect(c.versionVector).toMatchObject({ eventId: EVENT, seq: 1, ticketSeq: 0, keySeq: 0, policySeq: 0, placementSeq: 0, flagSeq: 0, maxOfflineMs: 24 * 60 * 60_000 });
+  });
+
+  test('오프라인 허용 시간을 넘긴 버전 벡터로 판정하면 STALE_VERSION 표시와 재동기화를 요구한다', async () => {
+    const stale = scan({ versionVector: vector({ issuedAt: new Date(NOW - 25 * 60 * 60_000).toISOString() }) });
+    const r = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [stale] });
+    expect(r).toMatchObject({ resyncRequired: true, staleIds: [stale.id] });
+    expect(r.flags).toEqual([expect.objectContaining({ kind: 'STALE_VERSION', ticketId: TICKET_A })]);
+    expect((await store.changes({ eventId: EVENT, after: 0, limit: 10 })).changes.some((c) => c.kind === 'FLAG')).toBe(true);
+  });
+
+  test('허용 시간 안의 버전 벡터는 재동기화를 요구하지 않고, 회차가 다른 벡터는 거절한다', async () => {    const fresh = scan({ versionVector: vector() });
+    const r = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [fresh] });
+    expect(r).toMatchObject({ resyncRequired: false, staleIds: [] });
+    expect(r.flags).toEqual([]);
+
+    const exact = scan({ versionVector: vector({ issuedAt: new Date(NOW - 24 * 60 * 60_000).toISOString() }) });
+    const r2 = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [exact] });
+    expect(r2).toMatchObject({ resyncRequired: false, staleIds: [] });
+
+    const wrong = scan({ versionVector: vector({ eventId: OTHER }) });
+    await expect(gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [wrong] })).rejects.toThrow();
+  });
+
+  test('음수 seq·다른 회차 벡터는 모양 검사에서 거절한다', () => {
+    expect(() => normalizeVersionVector(vector({ seq: -1 }), EVENT)).toThrow();
+    expect(() => normalizeVersionVector(vector({ eventId: OTHER }), EVENT)).toThrow();
+    expect(() => normalizeVersionVector({ ...vector(), maxOfflineMs: -1 }, EVENT)).toThrow();
+  });
 });
 
 describe('ScannerGate 목록·변경분 [GAT-180]', () => {
@@ -91,7 +153,7 @@ describe('ScannerGate 스캔 판정 [GAT-180]', () => {
     const first = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [s] });
     const second = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [s] });
     expect(first.acceptedIds).toEqual([s.id]);
-    expect(second).toEqual({ acceptedIds: [s.id], flags: [] });
+    expect(second).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [] });
     expect((await gate.changes(EVENT, 0, 5000, EVENT)).changes).toHaveLength(1);
   });
 

@@ -1395,7 +1395,7 @@ erDiagram
     }
     scanner_change {
         uuid event_id
-        bigint seq "회차별 서버 일련번호"
+        bigint seq "회차별 서버 일련번호. GAT-160 버전 벡터가 (event_id, kind, seq desc) 인덱스로 종류별 마지막 값을 읽는다"
         text kind "KEY_REGISTERED|KEY_REVOKED|TICKET_STATUS|SCAN_STATE|POLICY|PLACEMENT|FLAG|SESSION_TERMINATED"
         jsonb payload "개인정보 없음, 판 번호 v(ADR-0086)"
         timestamptz created_at
