@@ -731,7 +731,7 @@ export const createOpsCommandBodyReasonMax = 2000;
 
 
 export const CreateOpsCommandBody = zod.object({
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드'),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'SCALE_CHANGE']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes)'),
   "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
@@ -740,7 +740,7 @@ export const CreateOpsCommandBody = zod.object({
 
 export const CreateOpsCommandResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -760,6 +760,12 @@ export const CreateOpsCommandResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({
@@ -781,8 +787,9 @@ export const listOpsCommandsQueryLimitMax = 100;
 
 export const ListOpsCommandsQueryParams = zod.object({
   "eventId": zod.string().optional(),
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL']).optional(),
-  "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional().describe('쉼표로 여럿(guidelines §11)'),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'SCALE_CHANGE']).optional(),
+  "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional().describe('쉼표로 여럿(guidelines §11)'),
+  "updatedAfter": zod.iso.datetime({"offset":true}).optional().describe('이 시각(ISO 8601) 뒤에 바뀐 명령만. 관제 콘솔 폴링 갱신에 쓴다(BAT-465)'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
   "limit": zod.int().min(1).max(listOpsCommandsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
@@ -790,7 +797,7 @@ export const ListOpsCommandsQueryParams = zod.object({
 export const ListOpsCommandsResponse = zod.object({
   "items": zod.array(zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -810,6 +817,12 @@ export const ListOpsCommandsResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({
@@ -837,7 +850,7 @@ export const CreateOpsCommandApprovalHeader = zod.object({
 
 export const CreateOpsCommandApprovalResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -857,6 +870,12 @@ export const CreateOpsCommandApprovalResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({
@@ -883,6 +902,53 @@ export const CreateOpsCommandRejectionBody = zod.object({
 export const CreateOpsCommandRejectionResponse = zod.unknown()
 
 /**
+ * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed.
+ * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
+ */
+export const CreateOpsCommandRetryParams = zod.object({
+  "commandId": zod.string()
+})
+
+export const CreateOpsCommandRetryResponse = zod.object({
+  "commandId": zod.string().optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.looseObject({
+
+}).optional(),
+  "approvals": zod.array(zod.string()).optional(),
+  "ackedAt": zod.iso.datetime({"offset":true}).optional(),
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
+  "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
+  "eventId": zod.string().nullish().describe('회차 하나에 건 명령이면 그 회차. 범위가 여럿이거나 전체면 null이고 params로 본다'),
+  "reason": zod.string().optional().describe('실행 사유. 승인자에게 그대로 보인다'),
+  "params": zod.looseObject({
+
+}).optional().describe('유형별 값. 상세에만 싣는다'),
+  "requestedBy": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
+  "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
+  "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
+  "delivery": zod.object({
+  "kind": zod.enum(['ACK', 'APPLY_CHECK']).optional(),
+  "ackedCount": zod.int().optional(),
+  "targetCount": zod.int().optional(),
+  "unackedTargets": zod.array(zod.string()).optional(),
+  "applyStatus": zod.union([zod.literal('OUTBOX_WAITING'),zod.literal('CHECKING'),zod.literal('CONFIRMED'),zod.literal('UNCONFIRMED'),zod.literal('UNKNOWN'),zod.literal(null)]).nullish().describe('APPLY_CHECK일 때만')
+}).nullish().describe('전파 상태. 제어 gRPC 명령은 ack 수, 설정형 명령은 적용 확인(ADR-0143). 상세에만 싣는다')
+})
+
+/**
  * FR-030, POL-021 B. ACKED인 명령만 되돌린다. 명령 3(판매 재개)·11(자동 제어 재개)의 되돌리기는 2인이다. commander가 사유와 재인증(X-Reauth-Token)으로 요청하면 202와 REVERT_PENDING이고, 요청자 아닌 operator 이상 1인이 POST /v1/ops/commands/{commandId}/approvals(재인증)로 승인하면 REVERTED, 10분 안에 승인이 없거나 거부(POST …/rejections)하면 ACKED로 돌아간다(명령은 그대로). 그 밖의 명령은 1인 되돌리기라 200과 REVERTED다(docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073). 허용 역할 [가정]: 1인 되돌리기를 누가 하는지 정본에 없어, 그 명령을 낼 수 있는 역할(POL-021 B의 권한 칸, operator·commander)로 두고 서버가 명령마다 그 권한을 본다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5)
  * @summary 되돌리기(직전 값 복원, 재개, 해제. 사유 필수). 명령 3·11은 2인
  */
@@ -903,7 +969,7 @@ export const CreateOpsCommandReversionBody = zod.object({
 
 export const CreateOpsCommandReversionResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -923,6 +989,12 @@ export const CreateOpsCommandReversionResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({
@@ -951,7 +1023,7 @@ export const CreateOpsCommandExtensionBody = zod.object({
 
 export const CreateOpsCommandExtensionResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -971,6 +1043,12 @@ export const CreateOpsCommandExtensionResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({
@@ -4093,6 +4171,92 @@ export const CreateOpsScannerDeviceEnrollmentCodeResponse = zod.object({
 })
 
 /**
+ * BAT-465 GAT-310. viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 목록(최신순)
+ */
+export const listOpsAuditCheckpointsQueryLimitMax = 100;
+
+
+
+export const ListOpsAuditCheckpointsQueryParams = zod.object({
+  "limit": zod.int().min(1).max(listOpsAuditCheckpointsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListOpsAuditCheckpointsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "rootHash": zod.string().optional().describe('구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진'),
+  "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
+  "reason": zod.string().optional(),
+  "actorRef": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * BAT-465 GAT-310. commander가 사유와 함께 만든다. 구간 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 만든 사실도 감사 체인에 남는다. 공개 앵커·서명·OpenTimestamps는 후속이다.
+ * @summary 감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)
+ */
+export const createOpsAuditCheckpointBodyReasonMax = 500;
+
+
+
+export const CreateOpsAuditCheckpointBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsAuditCheckpointBodyReasonMax)
+}).strict()
+
+export const CreateOpsAuditCheckpointResponse = zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "rootHash": zod.string().optional().describe('구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진'),
+  "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
+  "reason": zod.string().optional(),
+  "actorRef": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')
+
+/**
+ * BAT-465 GAT-310. viewer 이상. 없는 ID는 404. Cache-Control: no-store
+ * @summary 감사 체크포인트 상세
+ */
+export const GetOpsAuditCheckpointParams = zod.object({
+  "checkpointId": zod.uuid()
+})
+
+export const GetOpsAuditCheckpointResponse = zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "rootHash": zod.string().optional().describe('구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진'),
+  "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
+  "reason": zod.string().optional(),
+  "actorRef": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')
+
+/**
+ * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ */
+export const GetOpsAuditCheckpointVerificationParams = zod.object({
+  "checkpointId": zod.uuid()
+})
+
+export const GetOpsAuditCheckpointVerificationResponse = zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "valid": zod.boolean().optional().describe('루트와 직전 사슬이 모두 맞는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
+  "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "checkedAt": zod.iso.datetime({"offset":true}).optional()
+})
+
+/**
  * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
  * @summary 관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)
  */
@@ -4148,7 +4312,7 @@ export const GetOpsCommandParams = zod.object({
 
 export const GetOpsCommandResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -4168,6 +4332,12 @@ export const GetOpsCommandResponse = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({

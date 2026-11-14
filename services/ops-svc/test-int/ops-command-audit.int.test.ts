@@ -73,14 +73,17 @@ describe('0000 마이그레이션과 표 모양', () => {
     const tables = async () =>
       (await q<{ relname: string }>("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by relname")).rows.map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(expect.arrayContaining(['ops_command', 'command_event', 'command_approval', 'audit_chain', 'audit_chain_head', 'cs_case']));
+    expect(before).toEqual(expect.arrayContaining(['ops_command', 'command_event', 'command_approval', 'audit_chain', 'audit_chain_head', 'audit_checkpoint', 'cs_case']));
 
     await migrateOps(url);
     await migrateOps(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from ops_migration')).toBe(2);
+    expect(await count('select count(*) as n from ops_migration')).toBe(3);
     const typeCheck = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
     expect(typeCheck.rows[0]?.def).toContain("'EVENT_CANCEL'");
+    expect(typeCheck.rows[0]?.def).toContain("'SCALE_CHANGE'");
+    const stateCheck = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_state_check'");
+    expect(stateCheck.rows[0]?.def).toContain("'SUCCEEDED'");
   });
 
   test('GAT110_0000_제약과_CS_열린_건_부분_유일_색인을_실제_DB에_건다', async () => {

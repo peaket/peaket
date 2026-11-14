@@ -2,8 +2,9 @@
 import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import { z } from 'zod';
-import { COMMAND_TYPES, type Command, type CommandType } from '../domain/command.js';
+import { COMMAND_TYPES, type Command, type CommandExecutionActor, type CommandType } from '../domain/command.js';
 import type { CommandStore } from '../domain/ports.js';
+import type { ExecuteCommand } from './execute-command.js';
 
 export interface CreateCommandInput {
   readonly type: CommandType;
@@ -12,6 +13,10 @@ export interface CreateCommandInput {
   readonly requestedBy: string;
   readonly requestedRole: string;
   readonly nowMs: number;
+  /** 1인 명령을 접수 뒤 바로 실행할 때 넘길 관리 계정 신원 */
+  readonly actor?: CommandExecutionActor;
+  /** Kafka 사건의 eventKey처럼 외부에서 정한 멱등 키로 명령 ID를 고정할 때 */
+  readonly commandId?: string;
 }
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -24,7 +29,10 @@ export function eventIdOf(params: Record<string, unknown>): string | undefined {
 }
 
 export class CreateCommand {
-  constructor(private readonly store: CommandStore) {}
+  constructor(
+    private readonly store: CommandStore,
+    private readonly execution?: ExecuteCommand,
+  ) {}
 
   async execute(input: CreateCommandInput): Promise<Command> {
     if (!COMMAND_TYPES.includes(input.type)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
@@ -33,8 +41,8 @@ export class CreateCommand {
     if (typeof input.params !== 'object' || input.params === null || Array.isArray(input.params)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
     const eventId = eventIdOf(input.params);
     if (eventId !== undefined && !z.uuid().safeParse(eventId).success) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
-    const commandId = randomUUID();
-    return this.store.create({
+    const commandId = input.commandId ?? randomUUID();
+    const command = await this.store.create({
       commandId,
       type: input.type,
       reason,
@@ -44,5 +52,11 @@ export class CreateCommand {
       ...(eventId !== undefined ? { eventId } : {}),
       nowMs: input.nowMs,
     });
+    // 1인·즉시 실행 명령은 접수 응답 전에 실행한다. 2인 명령은 승인 뒤 DecideCommand가 실행한다.
+    if (this.execution && command.state === 'APPROVED') {
+      const actor: CommandExecutionActor = input.actor ?? { accountId: input.requestedBy, sessionId: '', role: input.requestedRole };
+      return this.execution.run(command, actor, input.nowMs);
+    }
+    return command;
   }
 }

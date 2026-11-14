@@ -8,6 +8,7 @@ import { CreateCommand } from '../application/create-command.js';
 import { DecideCommand } from '../application/decide-command.js';
 import { GetCommand } from '../application/get-command.js';
 import { ListCommands } from '../application/list-commands.js';
+import { RetryCommand } from '../application/retry-command.js';
 import { COMMAND_STATES, COMMAND_TYPES, type Command } from '../domain/command.js';
 
 const CommandIdParams = z.object({ commandId: z.uuid() }).strict();
@@ -32,12 +33,17 @@ const CommandView = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   approvals: z.array(z.string()),
+  attempts: z.number(),
+  lastError: z.string().nullable().optional(),
+  executedAt: z.string().nullable().optional(),
+  result: z.record(z.string(), z.unknown()).nullable().optional(),
+  canApprove: z.boolean(),
 });
 const CommandBaseView = CommandView.omit({ params: true });
 const CommandPageView = z.object({ items: z.array(CommandBaseView), nextCursor: z.string().nullable() });
 
 // 표시 이름은 identity admin_account 조회가 붙기 전까지 null이다(후속). 목록에는 params를 싣지 않는다(openapi).
-const baseViewOf = (c: Command): z.output<typeof CommandBaseView> => ({
+const baseViewOf = (c: Command, me?: Principal): z.output<typeof CommandBaseView> => ({
   commandId: c.commandId,
   type: c.type,
   state: c.state,
@@ -48,8 +54,13 @@ const baseViewOf = (c: Command): z.output<typeof CommandBaseView> => ({
   createdAt: new Date(c.createdAtMs).toISOString(),
   updatedAt: new Date(c.updatedAtMs).toISOString(),
   approvals: [...c.approvals],
+  attempts: c.attempts,
+  ...(c.lastError !== undefined ? { lastError: c.lastError } : {}),
+  ...(c.executedAtMs !== undefined ? { executedAt: new Date(c.executedAtMs).toISOString() } : {}),
+  ...(c.result !== undefined ? { result: c.result } : {}),
+  canApprove: c.state === 'PENDING_APPROVAL' && me !== undefined && c.requestedBy !== me.accountId,
 });
-const viewOf = (c: Command): z.output<typeof CommandView> => ({ ...baseViewOf(c), params: c.params });
+const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView> => ({ ...baseViewOf(c, me), params: c.params });
 
 const badQuery = (): never => {
   throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
@@ -62,6 +73,7 @@ export class CommandsController {
     private readonly listCommands: ListCommands,
     private readonly getCommand: GetCommand,
     private readonly decideCommand: DecideCommand,
+    private readonly retryCommand: RetryCommand,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -77,15 +89,16 @@ export class CommandsController {
       requestedBy: me.accountId,
       requestedRole: me.role ?? 'operator',
       nowMs: this.clock.now(),
+      actor: { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' },
     });
-    return viewOf(command);
+    return viewOf(command, me);
   }
 
   @Get()
   @Header('Cache-Control', 'no-store')
   @Roles(['viewer', 'operator', 'commander'])
   @ContractRouteSchema({ responses: { 200: CommandPageView } })
-  async list(@Req() request: FastifyRequest): Promise<z.output<typeof CommandPageView>> {
+  async list(@Req() request: FastifyRequest, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandPageView>> {
     const q = request.query as Record<string, unknown>;
     const limit = typeof q.limit === 'string' ? Number(q.limit) : 50;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) badQuery();
@@ -95,22 +108,25 @@ export class CommandsController {
     if (states !== undefined && states.some((s) => !COMMAND_STATES.includes(s as never))) badQuery();
     const eventId = typeof q.eventId === 'string' ? q.eventId : undefined;
     if (eventId !== undefined && !z.uuid().safeParse(eventId).success) badQuery();
+    const updatedAfter = typeof q.updatedAfter === 'string' ? Date.parse(q.updatedAfter) : undefined;
+    if (updatedAfter !== undefined && !Number.isFinite(updatedAfter)) badQuery();
     const page = await this.listCommands.execute({
       ...(eventId !== undefined ? { eventId } : {}),
       ...(type !== undefined ? { type: type as never } : {}),
       ...(states !== undefined ? { states: states as never } : {}),
       ...(typeof q.cursor === 'string' ? { cursor: q.cursor } : {}),
+      ...(updatedAfter !== undefined ? { updatedAfterMs: updatedAfter } : {}),
       limit,
     });
-    return { items: page.items.map(baseViewOf), nextCursor: page.nextCursor ?? null };
+    return { items: page.items.map((c) => baseViewOf(c, me)), nextCursor: page.nextCursor ?? null };
   }
 
   @Get(':commandId')
   @Header('Cache-Control', 'no-store')
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: CommandIdParams, responses: { 200: CommandView } })
-  async detail(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>): Promise<z.output<typeof CommandView>> {
-    return viewOf(await this.getCommand.execute(params.commandId));
+  async detail(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
+    return viewOf(await this.getCommand.execute(params.commandId), me);
   }
 
   @Post(':commandId/approvals')
@@ -118,7 +134,16 @@ export class CommandsController {
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: CommandIdParams, responses: { 200: CommandView } })
   async approve(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
-    return viewOf(await this.decideCommand.approve({ commandId: params.commandId, approverRef: me.accountId, approverRole: me.role ?? 'operator', nowMs: this.clock.now() }));
+    return viewOf(
+      await this.decideCommand.approve({
+        commandId: params.commandId,
+        approverRef: me.accountId,
+        approverRole: me.role ?? 'operator',
+        nowMs: this.clock.now(),
+        actor: { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' },
+      }),
+      me,
+    );
   }
 
   @Post(':commandId/rejections')
@@ -126,6 +151,21 @@ export class CommandsController {
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: CommandIdParams, body: RejectBody, responses: { 200: CommandView } })
   async reject(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @ContractBody(RejectBody) body: z.output<typeof RejectBody>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
-    return viewOf(await this.decideCommand.reject({ commandId: params.commandId, approverRef: me.accountId, approverRole: me.role ?? 'operator', reason: body.reason, nowMs: this.clock.now() }));
+    return viewOf(await this.decideCommand.reject({ commandId: params.commandId, approverRef: me.accountId, approverRole: me.role ?? 'operator', reason: body.reason, nowMs: this.clock.now() }), me);
+  }
+
+  @Post(':commandId/retries')
+  @HttpCode(200)
+  @Roles(['operator', 'commander'])
+  @ContractRouteSchema({ params: CommandIdParams, responses: { 200: CommandView } })
+  async retry(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
+    return viewOf(
+      await this.retryCommand.execute({
+        commandId: params.commandId,
+        actor: { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' },
+        nowMs: this.clock.now(),
+      }),
+      me,
+    );
   }
 }

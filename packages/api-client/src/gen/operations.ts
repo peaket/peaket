@@ -34,6 +34,7 @@ export type OperationId =
   | 'createOpsApprovalRequestRejection'
   | 'createOpsApprovalRequestWithdrawal'
   | 'createOpsArtist'
+  | 'createOpsAuditCheckpoint'
   | 'createOpsAuthAccessToken'
   | 'createOpsAuthInvitationAcceptance'
   | 'createOpsAuthInvitationCompletion'
@@ -57,6 +58,7 @@ export type OperationId =
   | 'createOpsCommandPostReview'
   | 'createOpsCommandPostReviewConfirmation'
   | 'createOpsCommandRejection'
+  | 'createOpsCommandRetry'
   | 'createOpsCommandReversion'
   | 'createOpsComplianceAccessFindingResolution'
   | 'createOpsComplianceAccessReviewCompletion'
@@ -234,6 +236,8 @@ export type OperationId =
   | 'getMyOpsAuthSession'
   | 'getOpsAdminAccount'
   | 'getOpsApprovalRequest'
+  | 'getOpsAuditCheckpoint'
+  | 'getOpsAuditCheckpointVerification'
   | 'getOpsAuthPasskeys'
   | 'getOpsCase'
   | 'getOpsCommand'
@@ -303,6 +307,7 @@ export type OperationId =
   | 'listOpsAdminAccounts'
   | 'listOpsApprovalRequests'
   | 'listOpsArtists'
+  | 'listOpsAuditCheckpoints'
   | 'listOpsCases'
   | 'listOpsCommands'
   | 'listOpsComplianceAccessReviews'
@@ -420,6 +425,7 @@ export const OPERATIONS = {
   createOpsApprovalRequestRejection: {operationId: "createOpsApprovalRequestRejection",method: "POST",path: "/v1/ops/approval-requests/{approvalId}/rejections",host: "ops-api",kind: "write",cookie: true},
   createOpsApprovalRequestWithdrawal: {operationId: "createOpsApprovalRequestWithdrawal",method: "POST",path: "/v1/ops/approval-requests/{approvalId}/withdrawals",host: "ops-api",kind: "write",cookie: true},
   createOpsArtist: {operationId: "createOpsArtist",method: "POST",path: "/v1/ops/artists",host: "ops-api",kind: "write",cookie: true},
+  createOpsAuditCheckpoint: {operationId: "createOpsAuditCheckpoint",method: "POST",path: "/v1/ops/audit-checkpoints",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthAccessToken: {operationId: "createOpsAuthAccessToken",method: "POST",path: "/v1/ops/auth/access-tokens",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthInvitationAcceptance: {operationId: "createOpsAuthInvitationAcceptance",method: "POST",path: "/v1/ops/auth/invitation-acceptances",host: "ops-api",kind: "write",cookie: false},
   createOpsAuthInvitationCompletion: {operationId: "createOpsAuthInvitationCompletion",method: "POST",path: "/v1/ops/auth/invitation-completions",host: "ops-api",kind: "write",cookie: false},
@@ -443,6 +449,7 @@ export const OPERATIONS = {
   createOpsCommandPostReview: {operationId: "createOpsCommandPostReview",method: "POST",path: "/v1/ops/commands/{commandId}/post-review",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandPostReviewConfirmation: {operationId: "createOpsCommandPostReviewConfirmation",method: "POST",path: "/v1/ops/commands/{commandId}/post-review-confirmation",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandRejection: {operationId: "createOpsCommandRejection",method: "POST",path: "/v1/ops/commands/{commandId}/rejections",host: "ops-api",kind: "write",cookie: true},
+  createOpsCommandRetry: {operationId: "createOpsCommandRetry",method: "POST",path: "/v1/ops/commands/{commandId}/retries",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandReversion: {operationId: "createOpsCommandReversion",method: "POST",path: "/v1/ops/commands/{commandId}/reversions",host: "ops-api",kind: "write",cookie: true},
   createOpsComplianceAccessFindingResolution: {operationId: "createOpsComplianceAccessFindingResolution",method: "POST",path: "/v1/ops/compliance/access-findings/{findingId}/resolution",host: "ops-api",kind: "write",cookie: true},
   createOpsComplianceAccessReviewCompletion: {operationId: "createOpsComplianceAccessReviewCompletion",method: "POST",path: "/v1/ops/compliance/access-reviews/{reviewId}/completion",host: "ops-api",kind: "write",cookie: true},
@@ -620,6 +627,8 @@ export const OPERATIONS = {
   getMyOpsAuthSession: {operationId: "getMyOpsAuthSession",method: "GET",path: "/v1/ops/auth/sessions/me",host: "ops-api",kind: "read",cookie: true},
   getOpsAdminAccount: {operationId: "getOpsAdminAccount",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}",host: "ops-api",kind: "read",cookie: true},
   getOpsApprovalRequest: {operationId: "getOpsApprovalRequest",method: "GET",path: "/v1/ops/approval-requests/{approvalId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsAuditCheckpoint: {operationId: "getOpsAuditCheckpoint",method: "GET",path: "/v1/ops/audit-checkpoints/{checkpointId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsAuditCheckpointVerification: {operationId: "getOpsAuditCheckpointVerification",method: "GET",path: "/v1/ops/audit-checkpoints/{checkpointId}/verification",host: "ops-api",kind: "read",cookie: true},
   getOpsAuthPasskeys: {operationId: "getOpsAuthPasskeys",method: "GET",path: "/v1/ops/auth/passkeys",host: "ops-api",kind: "read",cookie: true},
   getOpsCase: {operationId: "getOpsCase",method: "GET",path: "/v1/ops/cases/{caseId}",host: "ops-api",kind: "read",cookie: true},
   getOpsCommand: {operationId: "getOpsCommand",method: "GET",path: "/v1/ops/commands/{commandId}",host: "ops-api",kind: "read",cookie: true},
@@ -689,8 +698,9 @@ export const OPERATIONS = {
   listOpsAdminAccounts: {operationId: "listOpsAdminAccounts",method: "GET",path: "/v1/ops/admin-accounts",host: "ops-api",kind: "read",cookie: true,query: ["cursor","group","limit","promoterId","status"]},
   listOpsApprovalRequests: {operationId: "listOpsApprovalRequests",method: "GET",path: "/v1/ops/approval-requests",host: "ops-api",kind: "read",cookie: true,query: ["awaitingMyApproval","cursor","kind","limit","requestedByMe","status"]},
   listOpsArtists: {operationId: "listOpsArtists",method: "GET",path: "/v1/ops/artists",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","q"]},
+  listOpsAuditCheckpoints: {operationId: "listOpsAuditCheckpoints",method: "GET",path: "/v1/ops/audit-checkpoints",host: "ops-api",kind: "read",cookie: true,query: ["limit"]},
   listOpsCases: {operationId: "listOpsCases",method: "GET",path: "/v1/ops/cases",host: "ops-api",kind: "read",cookie: true,query: ["cursor","dueWithinDays","kind","limit"]},
-  listOpsCommands: {operationId: "listOpsCommands",method: "GET",path: "/v1/ops/commands",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit","state","type"]},
+  listOpsCommands: {operationId: "listOpsCommands",method: "GET",path: "/v1/ops/commands",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit","state","type","updatedAfter"]},
   listOpsComplianceAccessReviews: {operationId: "listOpsComplianceAccessReviews",method: "GET",path: "/v1/ops/compliance/access-reviews",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","period"]},
   listOpsComplianceDataRequests: {operationId: "listOpsComplianceDataRequests",method: "GET",path: "/v1/ops/compliance/data-requests",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","sort","status"]},
   listOpsComplianceIncidents: {operationId: "listOpsComplianceIncidents",method: "GET",path: "/v1/ops/compliance/incidents",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","sort","status"]},

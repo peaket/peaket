@@ -14,7 +14,7 @@ import * as zod from 'zod';
 export const CommandStatePage = zod.object({
   "items": zod.array(zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
 
 }).optional(),
@@ -34,6 +34,12 @@ export const CommandStatePage = zod.object({
 }).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
   "delivery": zod.object({

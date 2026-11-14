@@ -35,6 +35,7 @@ export class MemoryCommandStore implements CommandStore {
       createdAtMs: input.nowMs,
       updatedAtMs: input.nowMs,
       approvals: [],
+      attempts: 0,
     };
     this.#byId.set(command.commandId, command);
     await this.audit.append({ recordType: 'COMMAND_CREATED', recordId: command.commandId, payload: { type: command.type, state: command.state, requestedBy: command.requestedBy, reason: command.reason }, nowMs: input.nowMs });
@@ -51,6 +52,7 @@ export class MemoryCommandStore implements CommandStore {
       .filter((c) => (query.eventId === undefined || c.eventId === query.eventId))
       .filter((c) => (query.type === undefined || c.type === query.type))
       .filter((c) => (query.states === undefined || query.states.includes(c.state)))
+      .filter((c) => (query.updatedAfterMs === undefined || c.updatedAtMs > query.updatedAfterMs))
       .sort((a, b) => b.createdAtMs - a.createdAtMs || (a.commandId < b.commandId ? 1 : -1));
     if (cursor) items = items.filter((c) => c.createdAtMs < cursor.createdAtMs || (c.createdAtMs === cursor.createdAtMs && c.commandId < cursor.commandId));
     const page = items.slice(0, query.limit);
@@ -69,18 +71,34 @@ export class MemoryCommandStore implements CommandStore {
   async markDispatched(commandId: string, nowMs: number): Promise<Command> {
     const current = this.#byId.get(commandId);
     if (!current) throw new Error(`명령이 없다: ${commandId}`);
-    const command: Command = { ...current, state: 'DISPATCHED', updatedAtMs: nowMs };
+    const command: Command = { ...current, state: 'DISPATCHED', attempts: current.attempts + 1, lastError: undefined, executedAtMs: undefined, updatedAtMs: nowMs };
     this.#byId.set(commandId, command);
-    await this.audit.append({ recordType: 'COMMAND_DISPATCHED', recordId: commandId, payload: { state: 'DISPATCHED' }, nowMs });
+    await this.audit.append({ recordType: 'COMMAND_EXECUTION_STARTED', recordId: commandId, payload: { state: 'DISPATCHED', attempt: command.attempts }, nowMs });
+    return command;
+  }
+
+  async markSucceeded(commandId: string, result: Record<string, unknown> | undefined, nowMs: number): Promise<Command> {
+    const current = this.#byId.get(commandId);
+    if (!current) throw new Error(`명령이 없다: ${commandId}`);
+    const command: Command = {
+      ...current,
+      state: 'SUCCEEDED',
+      updatedAtMs: nowMs,
+      executedAtMs: nowMs,
+      ...(result !== undefined ? { result } : {}),
+      lastError: undefined,
+    };
+    this.#byId.set(commandId, command);
+    await this.audit.append({ recordType: 'COMMAND_SUCCEEDED', recordId: commandId, payload: { state: 'SUCCEEDED', ...(result !== undefined ? { result } : {}) }, nowMs });
     return command;
   }
 
   async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
     const current = this.#byId.get(commandId);
     if (!current) throw new Error(`명령이 없다: ${commandId}`);
-    const command: Command = { ...current, state: 'FAILED', updatedAtMs: nowMs };
+    const command: Command = { ...current, state: 'FAILED', lastError: reason, executedAtMs: nowMs, updatedAtMs: nowMs };
     this.#byId.set(commandId, command);
-    await this.audit.append({ recordType: 'COMMAND_DISPATCH_FAILED', recordId: commandId, payload: { state: 'FAILED', reason }, nowMs });
+    await this.audit.append({ recordType: 'COMMAND_EXECUTION_FAILED', recordId: commandId, payload: { state: 'FAILED', reason }, nowMs });
     return command;
   }
 

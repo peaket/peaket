@@ -18,6 +18,10 @@ interface Row {
   approval_expires_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  attempts: number | string | null;
+  last_error: string | null;
+  executed_at: Date | string | null;
+  result: Record<string, unknown> | string | null;
 }
 
 const toCommand = (r: Row, approvals: readonly string[] = []): Command => ({
@@ -33,6 +37,10 @@ const toCommand = (r: Row, approvals: readonly string[] = []): Command => ({
   createdAtMs: new Date(r.created_at).getTime(),
   updatedAtMs: new Date(r.updated_at).getTime(),
   approvals,
+  attempts: Number(r.attempts ?? 0),
+  ...(r.last_error !== null ? { lastError: r.last_error } : {}),
+  ...(r.executed_at !== null ? { executedAtMs: new Date(r.executed_at).getTime() } : {}),
+  ...(r.result !== null ? { result: typeof r.result === 'string' ? (JSON.parse(r.result) as Record<string, unknown>) : r.result } : {}),
 });
 
 const encodeCursor = (c: Command): string => Buffer.from(JSON.stringify([c.createdAtMs, c.commandId]), 'utf8').toString('base64url');
@@ -84,6 +92,7 @@ export class DrizzleCommandStore implements CommandStore {
     if (query.eventId !== undefined) where = sql`${where} and event_id = ${query.eventId}::uuid`;
     if (query.type !== undefined) where = sql`${where} and type = ${query.type}`;
     if (query.states !== undefined && query.states.length > 0) where = sql`${where} and state in (${sql.join(query.states.map((s: string) => sql`${s}`), sql`, `)})`;
+    if (query.updatedAfterMs !== undefined) where = sql`${where} and updated_at > ${new Date(query.updatedAfterMs)}::timestamptz`;
     const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
     if (cursor) {
       const at = new Date(cursor.createdAtMs);
@@ -106,28 +115,47 @@ export class DrizzleCommandStore implements CommandStore {
   }
 
   async markDispatched(commandId: string, nowMs: number): Promise<Command> {
-    return this.#finishDispatch(commandId, 'DISPATCHED', undefined, nowMs);
-  }
-
-  async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
-    return this.#finishDispatch(commandId, 'FAILED', reason, nowMs);
-  }
-
-  async #finishDispatch(commandId: string, state: 'DISPATCHED' | 'FAILED', reason: string | undefined, nowMs: number): Promise<Command> {
     return this.database.transaction(async (tx) => {
       const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
       if (!row) throw new Error(`명령이 없다: ${commandId}`);
-      await tx.execute(sql`update ops_command set state = ${state}, updated_at = ${new Date(nowMs)}::timestamptz where id = ${commandId}::uuid`);
+      const attempts = Number(row.attempts ?? 0) + 1;
+      await tx.execute(sql`update ops_command set state = 'DISPATCHED', attempts = ${attempts}, last_error = null, executed_at = null, updated_at = ${new Date(nowMs)}::timestamptz where id = ${commandId}::uuid`);
       const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
-      await this.#event(tx, commandId, Number(seq!.seq), state, 'system', 'system', reason ?? row.reason, nowMs);
-      await appendAuditIn(tx, {
-        recordType: state === 'DISPATCHED' ? 'COMMAND_DISPATCHED' : 'COMMAND_DISPATCH_FAILED',
-        recordId: commandId,
-        payload: { state, ...(reason !== undefined ? { reason } : {}) },
-        nowMs,
-      });
+      await this.#event(tx, commandId, Number(seq!.seq), 'DISPATCHED', 'system', 'system', row.reason, nowMs);
+      await appendAuditIn(tx, { recordType: 'COMMAND_EXECUTION_STARTED', recordId: commandId, payload: { state: 'DISPATCHED', attempt: attempts }, nowMs });
       const approvals = await this.#approvalsIn(tx, commandId);
-      return toCommand({ ...row, state, updated_at: new Date(nowMs) }, approvals);
+      return toCommand({ ...row, state: 'DISPATCHED', attempts, last_error: null, executed_at: null, updated_at: new Date(nowMs) }, approvals);
+    });
+  }
+
+  async markSucceeded(commandId: string, result: Record<string, unknown> | undefined, nowMs: number): Promise<Command> {
+    return this.database.transaction(async (tx) => {
+      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
+      if (!row) throw new Error(`명령이 없다: ${commandId}`);
+      await tx.execute(sql`
+        update ops_command set state = 'SUCCEEDED', last_error = null, executed_at = ${new Date(nowMs)}::timestamptz,
+          result = ${result !== undefined ? JSON.stringify(result) : null}::jsonb, updated_at = ${new Date(nowMs)}::timestamptz
+        where id = ${commandId}::uuid`);
+      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
+      await this.#event(tx, commandId, Number(seq!.seq), 'SUCCEEDED', 'system', 'system', row.reason, nowMs);
+      await appendAuditIn(tx, { recordType: 'COMMAND_SUCCEEDED', recordId: commandId, payload: { state: 'SUCCEEDED', ...(result !== undefined ? { result } : {}) }, nowMs });
+      const approvals = await this.#approvalsIn(tx, commandId);
+      return toCommand({ ...row, state: 'SUCCEEDED', last_error: null, executed_at: new Date(nowMs), result: result ?? null, updated_at: new Date(nowMs) }, approvals);
+    });
+  }
+
+  async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
+    return this.database.transaction(async (tx) => {
+      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
+      if (!row) throw new Error(`명령이 없다: ${commandId}`);
+      await tx.execute(sql`
+        update ops_command set state = 'FAILED', last_error = ${reason}, executed_at = ${new Date(nowMs)}::timestamptz, updated_at = ${new Date(nowMs)}::timestamptz
+        where id = ${commandId}::uuid`);
+      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
+      await this.#event(tx, commandId, Number(seq!.seq), 'FAILED', 'system', 'system', reason, nowMs);
+      await appendAuditIn(tx, { recordType: 'COMMAND_EXECUTION_FAILED', recordId: commandId, payload: { state: 'FAILED', reason }, nowMs });
+      const approvals = await this.#approvalsIn(tx, commandId);
+      return toCommand({ ...row, state: 'FAILED', last_error: reason, executed_at: new Date(nowMs), updated_at: new Date(nowMs) }, approvals);
     });
   }
 

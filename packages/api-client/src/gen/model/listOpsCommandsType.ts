@@ -27,4 +27,5 @@ export const ListOpsCommandsType = {
   AUTOMATION_STOP: 'AUTOMATION_STOP',
   PG_ASSIGN: 'PG_ASSIGN',
   EVENT_CANCEL: 'EVENT_CANCEL',
+  SCALE_CHANGE: 'SCALE_CHANGE',
 } as const;

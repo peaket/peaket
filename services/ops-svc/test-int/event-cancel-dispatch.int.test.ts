@@ -8,7 +8,7 @@ import { createDatabase, createExternalHttpClient, createService, fakeClock, typ
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
-import { HttpEventRefundDispatcher } from '../src/adapters/http-event-refund-dispatcher.js';
+import { HttpCommandExecutor } from '../src/adapters/http-command-executor.js';
 import { AppModule } from '../src/app.module.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -41,10 +41,10 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port;
-  const dispatcher = new HttpEventRefundDispatcher(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: `http://127.0.0.1:${port}`, timeoutCapMs: 5_000 }));
+  const executor = new HttpCommandExecutor({ purchase: createExternalHttpClient({ provider: 'purchase-svc', baseUrl: `http://127.0.0.1:${port}`, timeoutCapMs: 5_000 }) });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, dispatcher }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -70,7 +70,7 @@ const createEventCancel = async (operator: Record<string, string>, eventId: stri
 };
 
 describe('EVENT_CANCEL 실제 DB·내부 HTTP', () => {
-  test('BAT425_2인_승인_뒤_purchase로_전달하고_DISPATCHED_사건·감사를_남긴다', async () => {
+  test('BAT425_2인_승인_뒤_purchase로_전달하고_SUCCEEDED_사건·감사를_남긴다', async () => {
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
     const eventId = randomUUID();
@@ -80,7 +80,7 @@ describe('EVENT_CANCEL 실제 DB·내부 HTTP', () => {
     expect((await post(`/v1/ops/commands/${created.commandId}/approvals`, operator, {})).statusCode).toBe(403);
     const approved = await post(`/v1/ops/commands/${created.commandId}/approvals`, commander, {});
     expect(approved.statusCode).toBe(200);
-    expect(JSON.parse(approved.payload)).toMatchObject({ commandId: created.commandId, state: 'DISPATCHED' });
+    expect(JSON.parse(approved.payload)).toMatchObject({ commandId: created.commandId, state: 'SUCCEEDED' });
 
     expect(received).toHaveLength(1);
     expect(received[0]!.url).toBe('/internal/v1/event-refunds');
@@ -94,26 +94,27 @@ describe('EVENT_CANCEL 실제 DB·내부 HTTP', () => {
     });
 
     const row = await admin.query("select state from ops_command where id = $1::uuid", [created.commandId]);
-    expect(row.rows[0]).toEqual({ state: 'DISPATCHED' });
+    expect(row.rows[0]).toEqual({ state: 'SUCCEEDED' });
     const events = await admin.query('select type from command_event where command_id = $1::uuid order by seq', [created.commandId]);
-    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED']);
+    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
     const audit = await admin.query('select record_type from audit_chain where record_id = $1::uuid order by seq', [created.commandId]);
-    expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_DISPATCHED']);
+    expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_SUCCEEDED']);
   });
 
-  test('BAT425_전달이_실패하면_503과_FAILED_사건·감사를_남긴다', async () => {
+  test('BAT425_전달이_실패하면_FAILED_사건·감사를_남긴다', async () => {
     failDispatch = true;
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
     const created = await createEventCancel(operator, randomUUID());
     const rejected = await post(`/v1/ops/commands/${created.commandId}/approvals`, commander, {});
-    expect(rejected.statusCode).toBe(503);
+    expect(rejected.statusCode).toBe(200);
+    expect(JSON.parse(rejected.payload)).toMatchObject({ commandId: created.commandId, state: 'FAILED' });
     const row = await admin.query("select state from ops_command where id = $1::uuid", [created.commandId]);
     expect(row.rows[0]).toEqual({ state: 'FAILED' });
     const events = await admin.query('select type from command_event where command_id = $1::uuid order by seq', [created.commandId]);
-    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'FAILED']);
+    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'FAILED']);
     const audit = await admin.query('select record_type from audit_chain where record_id = $1::uuid order by seq', [created.commandId]);
-    expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_DISPATCH_FAILED']);
+    expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_EXECUTION_FAILED']);
     failDispatch = false;
   });
 });

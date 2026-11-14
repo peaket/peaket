@@ -2,16 +2,26 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { auditHash, MemoryAuditChain } from '../src/modules/audit/index.js';
-import { CreateCommand, DecideCommand, ListCommands, MemoryCommandStore, approvalModeOf, stateAfterCreate, type CommandDispatcher } from '../src/modules/commands/index.js';
+import {
+  CreateCommand,
+  DecideCommand,
+  ExecuteCommand,
+  ListCommands,
+  MemoryCommandStore,
+  approvalModeOf,
+  stateAfterCreate,
+  type CommandExecutor,
+} from '../src/modules/commands/index.js';
 
 const NOW = Date.parse('2026-11-14T01:00:00.000Z');
 const REQUESTER = '0193a000-0000-7000-8000-000000000001';
 const APPROVER = '0193a000-0000-7000-8000-000000000002';
 
-const fixture = (dispatcher?: CommandDispatcher) => {
+const fixture = (executor?: CommandExecutor) => {
   const audit = new MemoryAuditChain();
   const store = new MemoryCommandStore(audit);
-  return { audit, store, create: new CreateCommand(store), list: new ListCommands(store), decide: new DecideCommand(store, dispatcher) };
+  const execution = executor ? new ExecuteCommand(store, executor) : undefined;
+  return { audit, store, create: new CreateCommand(store, execution), list: new ListCommands(store), decide: new DecideCommand(store, execution) };
 };
 
 const input = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'KILL_SWITCH' | 'AUTOMATION_STOP' | 'EVENT_CANCEL', over: Record<string, unknown> = {}) => ({
@@ -74,25 +84,27 @@ describe('운영 명령 접수·승인', () => {
     await expect(f.decide.reject({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'operator', reason: '근거\u0000부족', nowMs: NOW + 1 })).rejects.toMatchObject({ status: 422 });
   });
 
-  test('GAT120_EVENT_CANCEL은_2인_승인_뒤_purchase로_전달하고_DISPATCHED가_된다', async () => {
+  test('GAT120_EVENT_CANCEL은_2인_승인_뒤_purchase로_전달하고_SUCCEEDED가_된다', async () => {
     const dispatched: string[] = [];
-    const f = fixture({ dispatch: async (c) => void dispatched.push(c.commandId) });
+    const f = fixture({ execute: async (c) => (dispatched.push(c.commandId), { status: 'SUCCEEDED' as const }) });
     const eventId = randomUUID();
     const c = await f.create.execute(input('EVENT_CANCEL', { params: { eventId, fault: 'ORGANIZER' } }));
     expect(c.state).toBe('PENDING_APPROVAL');
     expect(approvalModeOf('EVENT_CANCEL')).toBe('TWO');
     const approved = await f.decide.approve({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 });
-    expect(approved.state).toBe('DISPATCHED');
+    expect(approved.state).toBe('SUCCEEDED');
     expect(dispatched).toEqual([c.commandId]);
-    expect(f.audit.entries.map((e) => e.recordType)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_DISPATCHED']);
+    expect(f.audit.entries.map((e) => e.recordType)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_SUCCEEDED']);
   });
 
-  test('GAT120_EVENT_CANCEL_전달이_실패하면_FAILED와_503을_남긴다', async () => {
-    const f = fixture({ dispatch: async () => { throw new Error('purchase down'); } });
+  test('GAT120_EVENT_CANCEL_전달이_실패하면_FAILED를_남긴다', async () => {
+    const f = fixture({ execute: async () => { throw new Error('purchase down'); } });
     const c = await f.create.execute(input('EVENT_CANCEL', { params: { eventId: randomUUID(), fault: 'ORGANIZER' } }));
-    await expect(f.decide.approve({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 })).rejects.toMatchObject({ status: 503 });
+    const failed = await f.decide.approve({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 });
+    expect(failed.state).toBe('FAILED');
+    expect(failed.lastError).toBe('purchase down');
     expect((await f.store.find(c.commandId))?.state).toBe('FAILED');
-    expect(f.audit.entries.at(-1)).toMatchObject({ recordType: 'COMMAND_DISPATCH_FAILED' });
+    expect(f.audit.entries.at(-1)).toMatchObject({ recordType: 'COMMAND_EXECUTION_FAILED' });
   });
 
   test('GAT110_요청자_본인은_승인할_수_없고_다른_계정은_승인한다', async () => {

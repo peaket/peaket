@@ -12,12 +12,13 @@
 import type { CommandStateDelivery } from './commandStateDelivery';
 import type { CommandStateDryRun } from './commandStateDryRun';
 import type { CommandStateParams } from './commandStateParams';
+import type { CommandStateResult } from './commandStateResult';
 import type { CommandStateState } from './commandStateState';
 import type { OpsActor } from './opsActor';
 
 export interface CommandState {
   commandId?: string;
-  /** REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073) */
+  /** DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073) */
   state?: CommandStateState;
   dryRun?: CommandStateDryRun;
   approvals?: string[];
@@ -42,6 +43,23 @@ export interface CommandState {
      * @nullable
      */
   approvalExpiresAt?: string | null;
+  /** 실행 시도 횟수(재시도 포함). 첫 실행 전에는 0 */
+  attempts?: number;
+  /**
+     * 마지막 실행 실패 사유. 성공하면 null
+     * @nullable
+     */
+  lastError?: string | null;
+  /**
+     * 마지막 실행이 끝난 시각
+     * @nullable
+     */
+  executedAt?: string | null;
+  /**
+     * 대상이 돌려준 결과(성공했을 때만)
+     * @nullable
+     */
+  result?: CommandStateResult;
   /** 부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다 */
   canApprove?: boolean;
   /**

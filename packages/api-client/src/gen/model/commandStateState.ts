@@ -11,7 +11,7 @@
  */
 
 /**
- * REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)
+ * DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)
  */
 export type CommandStateState = typeof CommandStateState[keyof typeof CommandStateState];
 
@@ -24,6 +24,7 @@ export const CommandStateState = {
   REJECTED: 'REJECTED',
   DISPATCHED: 'DISPATCHED',
   ACKED: 'ACKED',
+  SUCCEEDED: 'SUCCEEDED',
   FAILED: 'FAILED',
   REVERT_PENDING: 'REVERT_PENDING',
   REVERTED: 'REVERTED',

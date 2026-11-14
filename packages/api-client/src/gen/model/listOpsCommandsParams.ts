@@ -22,6 +22,10 @@ type?: ListOpsCommandsType;
  */
 state?: ListOpsCommandsStateItem[];
 /**
+ * 이 시각(ISO 8601) 뒤에 바뀐 명령만. 관제 콘솔 폴링 갱신에 쓴다(BAT-465)
+ */
+updatedAfter?: string;
+/**
  * 불투명 커서(이전 응답의 nextCursor, guidelines §3)
  */
 cursor?: CursorParameter;

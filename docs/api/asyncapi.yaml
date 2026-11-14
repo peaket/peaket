@@ -102,6 +102,13 @@ channels:
     description: CS 처리함 건 요청(core-svc support·review 모듈 Outbox와 queue-svc의 봇 판정 이의 제기, 키 = sourceId). 팬의 문의 접수·추가 문의와 게시물 신고, 추가 검증 화면(SCR-009)의 이의 제기를 ops-svc가 받아 CS 처리함 건을 만들거나 기존 건에 더한다. 본문·신고 상세·이의 글 같은 개인정보는 싣지 않고 ops-svc가 내부 API로 읽는다(이의 글은 queue-svc VerificationAppealService.GetVerificationAppeal, docs/api/proto/README.md §3). ops-svc는 팬 트래픽을 받지 않는다(추천 적용 2026-10-19, ADR-0066. 이의 제기는 추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)
     messages:
       CaseRequested: { $ref: '#/components/messages/CaseRequested' }
+  ops.command-events:
+    address: ops.command-events
+    servers: [{ $ref: '#/servers/kafka-trade' }]
+    description: "운영 명령 사건(명령 요청·결과). ops-svc가 소비한다. 첫 몫(BAT-465 R-568)은 Kafka 어댑터를 아직 붙이지 않았고, 같은 모양을 내부 HTTP POST /internal/v1/ops/command-events로 받는다. eventKey가 중복 제거 키이고, COMMAND_REQUESTED는 eventKey로 명령 ID를 결정하며, COMMAND_RESULT는 명령을 SUCCEEDED/FAILED로 끝낸다. CS 사건은 support.cases-requested를 쓴다."
+    messages:
+      OpsCommandRequested: { $ref: '#/components/messages/OpsCommandRequested' }
+      OpsCommandResult: { $ref: '#/components/messages/OpsCommandResult' }
   telemetry.queue:
     address: telemetry.queue
     servers: [{ $ref: '#/servers/kafka-telemetry' }]
@@ -443,6 +450,31 @@ components:
           followUp: { type: boolean, default: false, description: "추가 문의면 true(기존 건을 다시 처리 중으로)" }
           hold: { type: boolean, default: false, description: "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)" }
           createdAt: { type: string, format: date-time }
+    OpsCommandRequested:
+      payload:
+        type: object
+        required: [eventKey, kind, type, reason, requestedBy, requestedRole]
+        properties:
+          eventKey: { type: string, description: "중복 제거 키. 같은 사건을 다시 보내면 같은 값" }
+          kind: { type: string, enum: [COMMAND_REQUESTED] }
+          type: { type: string, description: "Command.type(예 EVENT_CANCEL·SCALE_CHANGE)" }
+          reason: { type: string, maxLength: 2000 }
+          params: { type: object, description: "명령 유형별 값" }
+          requestedBy: { type: string, description: "요청한 관리 계정 ID" }
+          requestedRole: { type: string, description: "요청 당시 역할" }
+          occurredAt: { type: string, format: date-time }
+    OpsCommandResult:
+      payload:
+        type: object
+        required: [eventKey, kind, commandId, status]
+        properties:
+          eventKey: { type: string, description: "중복 제거 키. 같은 사건을 다시 보내면 같은 값" }
+          kind: { type: string, enum: [COMMAND_RESULT] }
+          commandId: { type: string, format: uuid }
+          status: { type: string, enum: [SUCCEEDED, FAILED] }
+          detail: { type: object, description: "대상이 돌려준 결과(성공했을 때)" }
+          error: { type: string, maxLength: 2000, description: "실패 사유" }
+          occurredAt: { type: string, format: date-time }
     QueueAggregate:
       payload:
         type: object

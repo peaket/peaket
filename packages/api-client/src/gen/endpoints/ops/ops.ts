@@ -68,6 +68,9 @@ import type {
   ApprovalRequest,
   ApprovalRequestInput,
   ApprovalRequestPage,
+  AuditCheckpoint,
+  AuditCheckpointPage,
+  AuditCheckpointVerification,
   CaseReply,
   Command,
   CommandState,
@@ -80,6 +83,7 @@ import type {
   CreateOpsApprovalRequestRejectionBody,
   CreateOpsApprovalRequestWithdrawalBody,
   CreateOpsArtistBody,
+  CreateOpsAuditCheckpointBody,
   CreateOpsCommandExtensionBody,
   CreateOpsCommandPostReviewBody,
   CreateOpsCommandPostReviewConfirmationBody,
@@ -138,6 +142,7 @@ import type {
   ListOpsApprovalRequestsParams,
   ListOpsArtists200,
   ListOpsArtistsParams,
+  ListOpsAuditCheckpointsParams,
   ListOpsCasesParams,
   ListOpsCommandsParams,
   ListOpsComplianceAccessReviewsParams,
@@ -3422,6 +3427,107 @@ export const useCreateOpsCommandRejection = <TError = ErrorType<ProblemResponse>
         TContext
       > => {
       return useMutation(getCreateOpsCommandRejectionMutationOptions(options), queryClient);
+    }
+    export type createOpsCommandRetryResponse200 = {
+  data: CommandState
+  status: 200
+}
+
+export type createOpsCommandRetryResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCommandRetryResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsCommandRetryResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCommandRetryResponseSuccess = (createOpsCommandRetryResponse200) & {
+  headers: Headers;
+};
+export type createOpsCommandRetryResponseError = (createOpsCommandRetryResponse403 | createOpsCommandRetryResponse404 | createOpsCommandRetryResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCommandRetryUrl = (commandId: string,) => {
+
+
+
+
+  return `/v1/ops/commands/${encodeURIComponent(String(commandId))}/retries`
+}
+
+/**
+ * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed.
+ * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
+ */
+export const createOpsCommandRetry = async (commandId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCommandRetryResponseSuccess> => {
+
+  return orvalFetch<createOpsCommandRetryResponseSuccess>(getCreateOpsCommandRetryUrl(commandId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCommandRetryMutationKey = () => ['createOpsCommandRetry'] as const;
+
+export const getCreateOpsCommandRetryMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandRetry>>, TError,CreateOpsCommandRetryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandRetry>>, TError,CreateOpsCommandRetryMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCommandRetryMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCommandRetry>>, CreateOpsCommandRetryMutationVariables> = (props) => {
+          const {commandId} = props ?? {};
+
+          return  createOpsCommandRetry(commandId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCommandRetryMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCommandRetry>>>
+
+    export type CreateOpsCommandRetryMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsCommandRetryMutationVariables = {commandId: string}
+
+    /**
+ * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
+ */
+export const useCreateOpsCommandRetry = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandRetry>>, TError,CreateOpsCommandRetryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCommandRetry>>,
+        TError,
+        CreateOpsCommandRetryMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCommandRetryMutationOptions(options), queryClient);
     }
     export type createOpsCommandReversionResponse200 = {
   data: CommandState
@@ -12511,7 +12617,493 @@ export const useCreateOpsScannerDeviceEnrollmentCode = <TError = ErrorType<unkno
       > => {
       return useMutation(getCreateOpsScannerDeviceEnrollmentCodeMutationOptions(options), queryClient);
     }
-    export type getOpsLiveResponse401 = {
+    export type listOpsAuditCheckpointsResponse200 = {
+  data: AuditCheckpointPage
+  status: 200
+}
+
+export type listOpsAuditCheckpointsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsAuditCheckpointsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsAuditCheckpointsResponseSuccess = (listOpsAuditCheckpointsResponse200) & {
+  headers: Headers;
+};
+export type listOpsAuditCheckpointsResponseError = (listOpsAuditCheckpointsResponse400 | listOpsAuditCheckpointsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsAuditCheckpointsUrl = (params?: ListOpsAuditCheckpointsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/audit-checkpoints?${stringifiedParams}` : `/v1/ops/audit-checkpoints`
+}
+
+/**
+ * BAT-465 GAT-310. viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 목록(최신순)
+ */
+export const listOpsAuditCheckpoints = async (params?: ListOpsAuditCheckpointsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsAuditCheckpointsResponseSuccess> => {
+
+  return orvalFetch<listOpsAuditCheckpointsResponseSuccess>(getListOpsAuditCheckpointsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsAuditCheckpointsQueryKey = (params?: ListOpsAuditCheckpointsParams,) => {
+    return [
+    `/v1/ops/audit-checkpoints`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsAuditCheckpointsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError = ErrorType<ProblemResponse>>(params?: ListOpsAuditCheckpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsAuditCheckpointsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>> = ({ signal }) => listOpsAuditCheckpoints(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsAuditCheckpointsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>>
+export type ListOpsAuditCheckpointsQueryError = ErrorType<ProblemResponse>
+
+
+export function useListOpsAuditCheckpoints<TData = Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError = ErrorType<ProblemResponse>>(
+ params: undefined |  ListOpsAuditCheckpointsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsAuditCheckpoints>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsAuditCheckpoints>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsAuditCheckpoints<TData = Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAuditCheckpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsAuditCheckpoints>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsAuditCheckpoints>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsAuditCheckpoints<TData = Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAuditCheckpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 감사 체크포인트 목록(최신순)
+ */
+
+export function useListOpsAuditCheckpoints<TData = Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAuditCheckpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAuditCheckpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsAuditCheckpointsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsAuditCheckpointResponse201 = {
+  data: AuditCheckpoint
+  status: 201
+}
+
+export type createOpsAuditCheckpointResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsAuditCheckpointResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuditCheckpointResponseSuccess = (createOpsAuditCheckpointResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuditCheckpointResponseError = (createOpsAuditCheckpointResponse403 | createOpsAuditCheckpointResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuditCheckpointUrl = () => {
+
+
+
+
+  return `/v1/ops/audit-checkpoints`
+}
+
+/**
+ * BAT-465 GAT-310. commander가 사유와 함께 만든다. 구간 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 만든 사실도 감사 체인에 남는다. 공개 앵커·서명·OpenTimestamps는 후속이다.
+ * @summary 감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)
+ */
+export const createOpsAuditCheckpoint = async (createOpsAuditCheckpointBody: CreateOpsAuditCheckpointBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuditCheckpointResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuditCheckpointResponseSuccess>(getCreateOpsAuditCheckpointUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsAuditCheckpointBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuditCheckpointMutationKey = () => ['createOpsAuditCheckpoint'] as const;
+
+export const getCreateOpsAuditCheckpointMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>, TError,CreateOpsAuditCheckpointMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>, TError,CreateOpsAuditCheckpointMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuditCheckpointMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>, CreateOpsAuditCheckpointMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuditCheckpoint(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuditCheckpointMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>>
+    export type CreateOpsAuditCheckpointMutationBody = BodyType<CreateOpsAuditCheckpointBody>
+    export type CreateOpsAuditCheckpointMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsAuditCheckpointMutationVariables = {data: BodyType<CreateOpsAuditCheckpointBody>}
+
+    /**
+ * @summary 감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)
+ */
+export const useCreateOpsAuditCheckpoint = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>, TError,CreateOpsAuditCheckpointMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuditCheckpoint>>,
+        TError,
+        CreateOpsAuditCheckpointMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuditCheckpointMutationOptions(options), queryClient);
+    }
+    export type getOpsAuditCheckpointResponse200 = {
+  data: AuditCheckpoint
+  status: 200
+}
+
+export type getOpsAuditCheckpointResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsAuditCheckpointResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsAuditCheckpointResponseSuccess = (getOpsAuditCheckpointResponse200) & {
+  headers: Headers;
+};
+export type getOpsAuditCheckpointResponseError = (getOpsAuditCheckpointResponse403 | getOpsAuditCheckpointResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsAuditCheckpointUrl = (checkpointId: string,) => {
+
+
+
+
+  return `/v1/ops/audit-checkpoints/${encodeURIComponent(String(checkpointId))}`
+}
+
+/**
+ * BAT-465 GAT-310. viewer 이상. 없는 ID는 404. Cache-Control: no-store
+ * @summary 감사 체크포인트 상세
+ */
+export const getOpsAuditCheckpoint = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditCheckpointResponseSuccess> => {
+
+  return orvalFetch<getOpsAuditCheckpointResponseSuccess>(getGetOpsAuditCheckpointUrl(checkpointId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsAuditCheckpointQueryKey = (checkpointId: string,) => {
+    return [
+    `/v1/ops/audit-checkpoints/${checkpointId}`
+    ] as const;
+    }
+
+
+export const getGetOpsAuditCheckpointQueryOptions = <TData = Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError = ErrorType<ProblemResponse>>(checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsAuditCheckpointQueryKey(checkpointId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>> = ({ signal }) => getOpsAuditCheckpoint(checkpointId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: checkpointId !== null && checkpointId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsAuditCheckpointQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>>
+export type GetOpsAuditCheckpointQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsAuditCheckpoint<TData = Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditCheckpoint>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditCheckpoint>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditCheckpoint<TData = Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditCheckpoint>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditCheckpoint>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditCheckpoint<TData = Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 감사 체크포인트 상세
+ */
+
+export function useGetOpsAuditCheckpoint<TData = Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsAuditCheckpointQueryOptions(checkpointId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsAuditCheckpointVerificationResponse200 = {
+  data: AuditCheckpointVerification
+  status: 200
+}
+
+export type getOpsAuditCheckpointVerificationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsAuditCheckpointVerificationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsAuditCheckpointVerificationResponseSuccess = (getOpsAuditCheckpointVerificationResponse200) & {
+  headers: Headers;
+};
+export type getOpsAuditCheckpointVerificationResponseError = (getOpsAuditCheckpointVerificationResponse403 | getOpsAuditCheckpointVerificationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsAuditCheckpointVerificationUrl = (checkpointId: string,) => {
+
+
+
+
+  return `/v1/ops/audit-checkpoints/${encodeURIComponent(String(checkpointId))}/verification`
+}
+
+/**
+ * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ */
+export const getOpsAuditCheckpointVerification = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditCheckpointVerificationResponseSuccess> => {
+
+  return orvalFetch<getOpsAuditCheckpointVerificationResponseSuccess>(getGetOpsAuditCheckpointVerificationUrl(checkpointId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsAuditCheckpointVerificationQueryKey = (checkpointId: string,) => {
+    return [
+    `/v1/ops/audit-checkpoints/${checkpointId}/verification`
+    ] as const;
+    }
+
+
+export const getGetOpsAuditCheckpointVerificationQueryOptions = <TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsAuditCheckpointVerificationQueryKey(checkpointId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>> = ({ signal }) => getOpsAuditCheckpointVerification(checkpointId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: checkpointId !== null && checkpointId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsAuditCheckpointVerificationQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>>
+export type GetOpsAuditCheckpointVerificationQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ */
+
+export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsAuditCheckpointVerificationQueryOptions(checkpointId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsLiveResponse401 = {
   data: ProblemResponse
   status: 401
 }

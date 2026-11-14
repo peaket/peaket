@@ -11,7 +11,7 @@
  */
 
 /**
- * PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드
+ * PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes)
  */
 export type CommandType = typeof CommandType[keyof typeof CommandType];
 
@@ -30,4 +30,5 @@ export const CommandType = {
   AUTOMATION_STOP: 'AUTOMATION_STOP',
   PG_ASSIGN: 'PG_ASSIGN',
   EVENT_CANCEL: 'EVENT_CANCEL',
+  SCALE_CHANGE: 'SCALE_CHANGE',
 } as const;

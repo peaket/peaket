@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 0 | 106 | 0 | 0 | 0 | 0 | 0 | 21 | 52 | 179 |
-| 합계 | 0 | 106 | 0 | 0 | 0 | 0 | 0 | 21 | 52 | 179 |
+| B | 1 | 106 | 0 | 0 | 0 | 0 | 0 | 21 | 51 | 179 |
+| 합계 | 1 | 106 | 0 | 0 | 0 | 0 | 0 | 21 | 51 | 179 |
 
 ## docs/features/notify.md
 
@@ -30,7 +30,7 @@
 | N-T12 | — | 한 번 누름 수신 거부: List-Unsubscribe=One-Clic… | 첫 요청에 그 신청만 지워진다. 다시 보낸 요청·위조한 토큰·맞지 않는 HMAC은 모두 같은 200이고, `GET`은 이 경로에 없어 받지… | 빈칸 | B | — |
 | N-T13 | — | 이메일 대행 응답: 흉내 대행사가 429·5xx·시간 초과·결과 모름을… | 신청 알림은 결과 모름에 다시 보내지 않고, 환급 완료(돈) 알림은 상태 확인 뒤 한 번 더 간다. 스팸 신고가 온 신청은 지워진다. 쓸모 기한이 지난 작업은… | 빈칸 | B | — |
 | N-T14 | — | 알림 문구 변수: 이메일·전화번호가 든 값과 허용 목록 밖 키로 작업을… | 작업이 만들어지지 않고 오류로 센다. 표 어디에도 받는 주소·전화번호·본문이 없다. 연결: FR-040 | 빈칸 | B | — |
-| N-T15 | — | 파트너 웹훅 관리: 실무자가 재발급·다시 보내기를 부른다, 다른… | 실무자는 403, 남의 행은 404, 판 불일치는 412다. 다시 보낸 것은 같은 `webhook-id`이고 새 `webhook-timestamp`다. 계속… | 빈칸 | B | — |
+| N-T15 | — | 파트너 웹훅 관리: 실무자가 재발급·다시 보내기를 부른다, 다른… | 실무자는 403, 남의 행은 404, 판 불일치는 412다. 다시 보낸 것은 같은 `webhook-id`이고 새 `webhook-timestamp`다. 계속… | 자동 시험 | B | 시험: apps/partner/src/_pages/webhooks/model/live.test.mjs, services/core-svc/test/notify-webhook.http.test.ts |
 | N-T16 | ① | 부정 예매 알림(추천 적용 2026-10-31… | ①은 알림이 늘지 않는다 | 빈칸 | B | — |
 | N-T16 | ② | 부정 예매 알림(추천 적용 2026-10-31… | ②는 결제자에게 `FRAUD_ACTION_NOTICE`('3영업일 안에 원래 결제 수단으로 전액 환급합니다')와, 잠긴 표 가운데 받은 사람의 표가 남아… | 빈칸 | B | — |
 | N-T16 | ③ | 부정 예매 알림(추천 적용 2026-10-31… | ③은 그 결제자에게 `FRAUD_TRANSFER_LOCK_RELEASED`가 한 통 간다 | 빈칸 | B | — |
@@ -114,7 +114,7 @@
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 39곳 (영역:… |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: 아직 코드가 없다) |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 4곳 (영역:… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 5곳 (영역:… |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: 아직 코드가 없다 |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: 아직 코드가 없다 |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 1곳… |

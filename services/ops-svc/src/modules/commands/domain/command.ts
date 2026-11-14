@@ -15,6 +15,7 @@ export const COMMAND_TYPES = [
   'AUTOMATION_STOP',
   'PG_ASSIGN',
   'EVENT_CANCEL',
+  'SCALE_CHANGE',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 
@@ -26,6 +27,7 @@ export const COMMAND_STATES = [
   'REJECTED',
   'DISPATCHED',
   'ACKED',
+  'SUCCEEDED',
   'FAILED',
   'REVERT_PENDING',
   'REVERTED',
@@ -66,7 +68,25 @@ export interface Command {
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
   readonly approvals: readonly string[];
+  /** 실행 시도 횟수(재시도 포함). 첫 실행 전에는 0 */
+  readonly attempts: number;
+  /** 마지막 실행 실패 사유. 성공하면 비운다 */
+  readonly lastError?: string;
+  /** 마지막 실행이 끝난 시각(성공·실패 모두) */
+  readonly executedAtMs?: number;
+  /** 대상이 돌려준 결과(성공했을 때만) */
+  readonly result?: Record<string, unknown>;
 }
+
+/** 실행을 요청한 관리 계정. 대상 서비스에 넘길 신원 머리를 만드는 데 쓴다 */
+export interface CommandExecutionActor {
+  readonly accountId: string;
+  readonly sessionId: string;
+  readonly role: string;
+}
+
+/** 대상 실행 결과. 실패는 명령을 FAILED로 남기고 재시도할 수 있게 한다 */
+export type CommandExecutionResult = { readonly status: 'SUCCEEDED'; readonly detail?: Record<string, unknown> } | { readonly status: 'FAILED'; readonly error: string };
 
 /** 만들기 결과. TWO면 PENDING_APPROVAL, 그 밖은 APPROVED다 */
 export interface NewCommand {

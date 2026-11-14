@@ -20,6 +20,7 @@ export type ProblemType =
   | 'approval-scope-invalid'
   | 'artist-exists'
   | 'assignment-required'
+  | 'audit-chain-broken'
   | 'authz-unavailable'
   | 'auto-assign-not-supported'
   | 'auto-condition-invalid'
@@ -30,6 +31,9 @@ export type ProblemType =
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'case-not-actioned'
+  | 'checkpoint-empty'
+  | 'command-not-executable'
+  | 'command-not-failed'
   | 'command-not-pending'
   | 'command-requester-cannot-approve'
   | 'commander-removal-needs-role-change'
@@ -277,6 +281,7 @@ export const PROBLEM_TYPES = {
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
   'assignment-required': { status: 422, title: "승인할 배정을 하나 골라 주세요" },
+  'audit-chain-broken': { status: 409, title: "감사 체인 구간이 비었습니다" },
   'authz-unavailable': { status: 503, title: "권한을 확인하지 못했습니다" },
   'auto-assign-not-supported': { status: 400, title: "좌석 자동 배정은 아직 받지 않습니다" },
   'auto-condition-invalid': { status: 400, title: "희망 조건이 올바르지 않습니다" },
@@ -287,6 +292,9 @@ export const PROBLEM_TYPES = {
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
+  'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
+  'command-not-executable': { status: 409, title: "실행할 수 있는 명령이 아닙니다" },
+  'command-not-failed': { status: 409, title: "실패한 명령만 다시 시도할 수 있습니다" },
   'command-not-pending': { status: 409, title: "승인 대기 중인 명령이 아닙니다" },
   'command-requester-cannot-approve': { status: 403, title: "요청한 분은 승인할 수 없습니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },

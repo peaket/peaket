@@ -16,8 +16,9 @@ export const listOpsCommandsParamsLimitMax = 100;
 
 export const ListOpsCommandsParams = zod.object({
   "eventId": zod.string().optional(),
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL']).optional(),
-  "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional(),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'SCALE_CHANGE']).optional(),
+  "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional(),
+  "updatedAfter": zod.iso.datetime({"offset":true}).optional(),
   "cursor": zod.string().optional(),
   "limit": zod.int().min(1).max(listOpsCommandsParamsLimitMax).optional()
 })

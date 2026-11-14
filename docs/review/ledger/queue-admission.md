@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 95 | 49 | 2 | 0 | 0 | 3 | 0 | 0 | 42 | 191 |
+| A | 95 | 53 | 2 | 0 | 0 | 3 | 0 | 0 | 38 | 191 |
 | B | 35 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 7 | 59 |
-| 합계 | 130 | 61 | 2 | 0 | 0 | 6 | 0 | 2 | 49 | 250 |
+| 합계 | 130 | 65 | 2 | 0 | 0 | 6 | 0 | 2 | 45 | 250 |
 
 ## docs/features/queue-admission.md
 
@@ -163,10 +163,10 @@
 | Q-T61 | ③ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ③ 위조 값이 기록에 없다 | 빈칸 | A | — |
 | Q-T61 | ④ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ④ 분석 저장소에 원문 IP·JA4·`journeyId`가 0건이다 | 빈칸 | A | — |
 | Q-T61 | ⑤ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ⑤ 진입 p99가 수집기를 켜기 전과 같은 범위이고, 수집기 버린 줄 수를 적는다 | 빈칸 | A | — |
-| Q-T62 | ① | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ① 200 ADMITTED와 클레임 `prio`·새 `jny`가 든 입장 토큰, 입장 자리 수는 그대로 | 빈칸 | A | — |
-| Q-T62 | ② | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ② 모두 같은 404 `priority-grant-not-found` | 빈칸 | A | — |
-| Q-T62 | ③ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ③ 모두 같은 404 `priority-grant-not-found` | 빈칸 | A | — |
-| Q-T62 | ④ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ④ 모두 같은 404 `priority-grant-not-found` | 빈칸 | A | — |
+| Q-T62 | ① | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ① 200 ADMITTED와 클레임 `prio`·새 `jny`가 든 입장 토큰, 입장 자리 수는 그대로 | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ② | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ② 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ③ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ③ 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ④ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ④ 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
 | Q-T63 | ① | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ① 엣지 켬이 `notice`의 `SOLD_OUT` 쓰기보다 먼저다(Q-T54 ①의 차례) | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts |
 | Q-T63 | ② | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ② 끔이 판 번호와 함께 남는다(판매 종료도 끔) | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts |
 | Q-T63 | ③ | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ③ 저장된 판보다 작은 판은 엣지를 바꾸지 않고, `notice`의 지금 판으로 되돌린다. 같은 판의 다시 내기는 60초 [가정] 안에는 다시 쓰지 않는다… | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts, services/queue-svc/test/sale-state-cases.ts |

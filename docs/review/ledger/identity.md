@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 220 | 56 | 0 | 0 | 0 | 7 | 0 | 7 | 90 | 380 |
-| 합계 | 220 | 56 | 0 | 0 | 0 | 7 | 0 | 7 | 90 | 380 |
+| B | 223 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 89 | 380 |
+| 합계 | 223 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 89 | 380 |
 
 ## docs/features/identity.md
 
@@ -46,7 +46,7 @@
 | I-T19 | — | 액세스 토큰 `aud` 권한 격리 | 일반 팬의 토큰으로 partner나 ops 관리자 API 엔드포인트를 부르면 게이트웨이에서 바로 401로 막힌다(관리 토큰 키로 서명되지 않은 토큰… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | I-T20 | — | JWT 서명 키 무중단 로테이션 | 새 `kid` 키쌍을 배포한 뒤에도 기존 키로 서명된 토큰이 만료 시점까지 정상 검증됨을 확인한다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, packages/platform/test/token-verify.test.ts 외 2곳 |
 | I-T21 | — | 현장 스태프 초대 및 수락 통제 | 현장 스태프 초대 링크는 24시간 동안 쓰는 일회용이다. 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은 계정, 네이버만 연결한 계정의 수락… | 자동 시험 | B | 시험: services/identity-svc/test/staff-invitations.test.ts |
-| I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: services/identity-svc/test/device-approval.test.ts, services/identity-svc/test/scanner-authorization-http.test.ts |
+| I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 빈칸 | B | — |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 빈칸 | B | — |
 | I-T25 | — | 현장 책임자 권한 통제 | `gate_staff` 토큰과 대리 승인 토큰으로 예외 통과·기기 배치·부스 허용·확인 스캔을 시도하면 403이 돌아온다. 이 작업은 `gate_lead`… | 빈칸 | B | — |
@@ -98,11 +98,11 @@
 | I-T52 | ② | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ②는 거절된다. | 빈칸 | B | — |
 | I-T52 | ③ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ③에 Auth.js 쿠키(`authjs.*`)가 없다. | 빈칸 | B | — |
 | I-T52 | ④ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ④는 앱 서버가 받은 액세스 토큰으로 gw-partner를 불러 그린다 | 빈칸 | B | — |
-| I-T53 | ① | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ①은 활성화되지 않는다. | ID만 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
+| I-T53 | ① | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ①은 활성화되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
 | I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ④ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ④는 RP ID가 맞지 않아 거부된다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
-| I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | ID만 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
+| I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
 | I-T54 | ① | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ①은 '확인됨' 재인증 토큰이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
 | I-T54 | ② | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ②는 거부되고 '제공자 계정에서 로그아웃한 뒤 다시 시도'를 안내한다. | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | I-T54 | ③ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ③은 '요청만 함'이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
@@ -344,7 +344,7 @@
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/queue-svc/test/leave-cases.ts |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: apps/console-host… |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 4곳 (영역:… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 5곳 (영역:… |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: packages/platform/test/purchase-auth.test.ts, packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/queue-svc/test/tokens.test.ts |

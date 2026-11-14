@@ -1,6 +1,7 @@
 // SCR-030 운영 명령(/commands, d5 §7.3). 보드 SCR-030-d(데스크톱)·t(태블릿)·m(휴대폰)을 배치마다 옮겼다.
 // 명령 카드(CMP-036)·2인 승인 단계(CMP-037)·드라이런 미리보기(CMP-038)는 보드 마크업 그대로다(ds 부품으로 뽑는 일은 BAS-180).
 // 위 상태 바는 보드 머리 분기대로 바꾼다: 단계 T=0 · 자동 제어(일시정지 13:12 / 긴급 정지 / 정상) · SEV3 수 · 승인자 화면이면 민호(operator).
+import { useSearchParams } from 'react-router';
 import { OPERATORS } from '@/entities/operator';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, type HostPatch } from '@/features/preview-host';
@@ -9,6 +10,7 @@ import { DEFAULT, STATES, type State } from '../states';
 import { MainD, valsD } from './board-d';
 import { MainM, OverlaysM, valsM } from './board-m';
 import { MainT, valsT } from './board-t';
+import { ConnectedPage } from './ConnectedPage';
 
 function shell(f: { autoHold: boolean; isReport: boolean; ctlOk: boolean; asMinho: boolean; sev3: number }): HostPatch {
   return {
@@ -43,7 +45,13 @@ const GAPS: BoardGaps<State> = {
   },
 };
 
+/** 실제 경로: ops-svc 명령 API에 연결한 화면. 미리보기(?state=)는 디자인 보드를 그대로 쓴다 */
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const { state, boardStates, layout, close } = useBoardPage('운영 명령', STATES, DEFAULT, GAPS);
   const vd = valsD(state);
   const vm = valsM(state);

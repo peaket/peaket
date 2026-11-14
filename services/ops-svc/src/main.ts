@@ -4,7 +4,7 @@ import 'reflect-metadata';
 import { createDatabase, createExternalHttpClient, createService } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
-import { HttpEventRefundDispatcher } from './adapters/http-event-refund-dispatcher.js';
+import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 
 const SERVICE = 'ops-svc';
 const url = process.env.PEAKET_DATABASE_URL;
@@ -15,9 +15,15 @@ if (!identityUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity A
 const database = createDatabase({ url, applicationName: SERVICE });
 const adminAuthz = new GrpcAdminAuthz(identityUrl);
 const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
-const dispatcher = purchaseUrl ? new HttpEventRefundDispatcher(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl, timeoutCapMs: 30_000 })) : undefined;
-const service = await createService({ name: SERVICE, adminAuthz, module: AppModule.register({ database, ...(dispatcher ? { dispatcher } : {}) }) });
-if (!dispatcher) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL이 없어 EVENT_CANCEL 전달을 하지 않는다');
+const coreUrl = process.env.PEAKET_CORE_HTTP_URL;
+const executor = new HttpCommandExecutor({
+  ...(purchaseUrl ? { purchase: createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl, timeoutCapMs: 30_000 }) } : {}),
+  ...(coreUrl ? { core: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }) } : {}),
+  internalToken: process.env.PEAKET_INTERNAL_TOKEN,
+});
+const service = await createService({ name: SERVICE, adminAuthz, module: AppModule.register({ database, executor }) });
+if (!purchaseUrl) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL이 없어 EVENT_CANCEL 실행을 하지 않는다');
+if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHANGE 실행을 하지 않는다');
 await service.listen();
 
 process.once('SIGTERM', () => {

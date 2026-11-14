@@ -54,6 +54,21 @@ export class MemoryAuditChain implements AuditChain {
       createdAtMs: record.nowMs,
     });
   }
+
+  /** 체크포인트가 읽는 머리 seq(비어 있으면 0) */
+  async headSeq(): Promise<number> {
+    return this.entries.at(-1)?.seq ?? 0;
+  }
+
+  /** 체크포인트가 읽는 머리 해시(비어 있으면 빈 글자) */
+  async headHash(): Promise<string> {
+    return this.entries.at(-1)?.hash ?? '';
+  }
+
+  /** 구간 기록. 체크포인트 루트를 다시 모을 때 쓴다 */
+  async entriesBetween(fromSeq: number, toSeq: number): Promise<readonly AuditEntry[]> {
+    return this.entries.filter((e) => e.seq >= fromSeq && e.seq <= toSeq);
+  }
 }
 
 /**
