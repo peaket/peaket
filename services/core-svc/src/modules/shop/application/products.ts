@@ -29,7 +29,7 @@ export interface ProductPage {
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
-const preconditionRequired = () => new ProblemError({ type: 'precondition-required', status: 428, title: 'If-Match가 필요합니다' });
+const preconditionRequired = () => new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
 const preconditionFailed = () => new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
 const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {

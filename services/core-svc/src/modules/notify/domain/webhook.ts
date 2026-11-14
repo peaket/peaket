@@ -72,7 +72,7 @@ export interface WebhookDeliveryView {
 }
 
 const bad = (type: string, title: string): WebhookProblem => new WebhookProblem(type, 400, title);
-const preconditionRequired = () => new WebhookProblem('precondition-required', 428, 'If-Match가 필요합니다');
+const preconditionRequired = () => new WebhookProblem('precondition-required', 428, '고칠 판(If-Match)을 보내 주세요');
 const preconditionFailed = () => new WebhookProblem('precondition-failed', 412, '다른 사람이 먼저 고쳤습니다');
 const rotationTooSoon = () => new WebhookProblem('rotation-too-soon', 409, '비밀을 너무 자주 바꿀 수 없습니다');
 const redeliveryConflict = () => new WebhookProblem('webhook-delivery-not-redeliverable', 409, '지금은 다시 보낼 수 없습니다');
