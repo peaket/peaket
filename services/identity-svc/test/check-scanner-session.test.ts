@@ -17,6 +17,7 @@ function world() {
   store.assignments.set('a-1', { id: 'a-1', accountId: 'acc-1', status: 'ASSIGNED' });
   const session: ScannerSessionRecord = {
     scannerSessionId: 'ss-1',
+    assignmentId: 'a-1',
     deviceId: 'dev-1',
     role: 'gate_staff',
     proxy: false,

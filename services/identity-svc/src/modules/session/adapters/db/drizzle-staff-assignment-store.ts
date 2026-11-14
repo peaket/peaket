@@ -1,7 +1,7 @@
 // PostgreSQL 저장소(Drizzle): staff_assignment·scanner_session(identity §6.1, docs/data.md).
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
-import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import type {
   AcceptInvitationResult,
   ScannerSessionRecord,
@@ -20,6 +20,7 @@ const recordOf = (r: StaffAssignmentRow): StaffAssignmentRecord => ({
   accountId: r.accountId,
   eventId: r.eventId,
   role: r.role as StaffRole,
+  ...(r.promoterId !== null ? { promoterId: r.promoterId } : {}),
   ...(r.inviteEmail !== null ? { inviteEmail: r.inviteEmail } : {}),
   ...(r.inviteTokenHash !== null ? { inviteTokenHash: Buffer.from(r.inviteTokenHash).toString('hex') } : {}),
   inviteExpiresAtMs: r.inviteExpiresAt.getTime(),
@@ -125,10 +126,12 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     const [row] = await this.database.db
       .select({
         scannerSessionId: scannerSession.id,
+        assignmentId: scannerSession.staffAssignmentId,
         deviceId: scannerSession.scannerDeviceId,
         role: scannerSession.role,
         proxy: scannerSession.proxy,
         expiresAt: scannerSession.expiresAt,
+        lastSeenAt: scannerSession.lastSeenAt,
         terminatedAt: scannerSession.terminatedAt,
         assignmentStatus: staffAssignment.status,
         validFrom: staffAssignment.validFrom,
@@ -142,15 +145,79 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     if (!row) return null;
     return {
       scannerSessionId: row.scannerSessionId,
+      assignmentId: row.assignmentId,
       deviceId: row.deviceId,
       role: row.role as StaffRole,
       proxy: row.proxy,
       expiresAt: row.expiresAt.getTime(),
+      ...(row.lastSeenAt !== null ? { lastSeenAtMs: row.lastSeenAt.getTime() } : {}),
       terminatedAt: row.terminatedAt === null ? null : row.terminatedAt.getTime(),
       assignmentStatus: row.assignmentStatus as StaffAssignmentStatus,
       validFrom: row.validFrom.getTime(),
       validUntil: row.validUntil.getTime(),
       eventId: row.eventId,
     };
+  }
+
+  async listAssignedByAccount(i: { accountId: string; nowMs: number }): Promise<StaffAssignmentRecord[]> {
+    void i.nowMs;
+    const rows = await this.database.db
+      .select()
+      .from(staffAssignment)
+      .where(and(eq(staffAssignment.accountId, i.accountId), eq(staffAssignment.status, 'ASSIGNED')))
+      .orderBy(desc(staffAssignment.validFrom));
+    return rows.map(recordOf);
+  }
+
+  async createScannerSession(i: {
+    scannerSessionId: string;
+    assignmentId: string;
+    deviceId: string;
+    accountId: string;
+    approvedBySession: string;
+    role: StaffRole;
+    proxy: boolean;
+    approvedAtMs: number;
+    expiresAtMs: number;
+  }): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const [assignment] = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
+      if (!assignment) throw new Error('배정을 찾을 수 없다');
+      const mine = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.accountId, i.accountId));
+      const assignmentIds = mine.map((r) => r.id);
+      await tx
+        .update(scannerSession)
+        .set({ terminatedAt: new Date(i.approvedAtMs) })
+        .where(
+          and(
+            isNull(scannerSession.terminatedAt),
+            or(eq(scannerSession.scannerDeviceId, i.deviceId), assignmentIds.length > 0 ? inArray(scannerSession.staffAssignmentId, assignmentIds) : undefined),
+          ),
+        );
+      await tx.insert(scannerSession).values({
+        id: i.scannerSessionId,
+        staffAssignmentId: i.assignmentId,
+        scannerDeviceId: i.deviceId,
+        approvedBySession: i.approvedBySession,
+        role: i.role,
+        proxy: i.proxy,
+        approvedAt: new Date(i.approvedAtMs),
+        expiresAt: new Date(i.expiresAtMs),
+      });
+    });
+  }
+
+  async touchScannerSession(scannerSessionId: string, atMs: number): Promise<void> {
+    await this.database.db
+      .update(scannerSession)
+      .set({ lastSeenAt: new Date(atMs) })
+      .where(and(eq(scannerSession.id, scannerSessionId), isNull(scannerSession.terminatedAt)));
+  }
+
+  async endScannerSession(scannerSessionId: string, atMs: number): Promise<void> {
+    await this.database.db
+      .update(scannerSession)
+      .set({ terminatedAt: new Date(atMs) })
+      .where(and(eq(scannerSession.id, scannerSessionId), isNull(scannerSession.terminatedAt)));
   }
 }

@@ -97,4 +97,8 @@ export class DrizzleScannerDeviceStore implements ScannerDeviceStore {
     const [row] = await this.database.db.select().from(scannerDevice).where(eq(scannerDevice.credentialThumbprint, Buffer.from(jkt, 'base64url'))).limit(1);
     return row ? recordOf(row) : null;
   }
+
+  async touch(deviceId: string, atMs: number): Promise<void> {
+    await this.database.db.update(scannerDevice).set({ lastSeenAt: new Date(atMs) }).where(eq(scannerDevice.id, deviceId));
+  }
 }

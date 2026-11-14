@@ -1,6 +1,6 @@
 // 모듈 조립 파일: 포트에 어댑터를 묶는다(층 규칙의 밖. 모든 층을 가져온다).
 import { type DynamicModule, Module } from '@nestjs/common';
-import { CLOCK, type Clock } from '@peaket/platform';
+import { CLOCK, type Clock, type DpopReplayStore, MemoryDpopReplayStore } from '@peaket/platform';
 import { BackfillContactRefs } from './application/backfill-contact-refs.js';
 import { ComputeContactRef, CONTACT_REF_RPS, DEFAULT_CONTACT_REF_RPS } from './application/compute-contact-ref.js';
 import { GetInvestigationRefs } from './application/get-investigation-refs.js';
@@ -47,6 +47,13 @@ import { StaffInvitations } from './application/staff-invitations.js';
 import { StaffInvitationController } from './inbound/staff-invitation.controller.js';
 import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
 import { MemoryStaffAssignmentStore } from './adapters/memory-staff-assignment-store.js';
+import { StartDeviceAuthorization, NEW_SCANNER_SESSION_ID, defaultScannerSessionId } from './application/start-device-authorization.js';
+import { DeviceApprovals } from './application/device-approvals.js';
+import { PollScannerToken } from './application/poll-scanner-token.js';
+import { ScannerAuthorizationController } from './inbound/scanner-authorization.controller.js';
+import { DeviceApprovalController } from './inbound/device-approval.controller.js';
+import { MemoryDeviceAuthorizations, MemoryDeviceApprovalLimits } from './adapters/memory-device-authorizations.js';
+import { DEVICE_APPROVAL_LIMITS, DEVICE_AUTHORIZATIONS, SCANNER_DEVICE_REGISTRY, SCANNER_DPOP_REPLAY, type DeviceApprovalLimits, type DeviceAuthorizationStore, type ScannerDeviceRegistry } from './domain/ports.js';
 
 export interface SessionModuleOptions {
   /** 닉네임 확인의 요청 수 저장소(세션·캐시 Redis id:nick, ADR-0235). 없으면 메모리(로컬·시험) */
@@ -73,6 +80,16 @@ export interface SessionModuleOptions {
   loginRisk?: LoginRisk;
   /** ComputeContactRef의 파드마다 초당 상한. 없으면 기본값 */
   contactRefRps?: number;
+  /** 기기 승인 요청 저장소(세션·캐시 Redis id:devauth). 없으면 메모리(로컬·시험) */
+  deviceAuthorizations?: DeviceAuthorizationStore;
+  /** 기기 승인 코드 발급·승인 시도 한도. 없으면 메모리(로컬·시험) */
+  deviceApprovalLimits?: DeviceApprovalLimits;
+  /** ticket-svc 기기 원장(gRPC). 없으면 기기 승인 로그인이 503이다 */
+  scannerDevices?: ScannerDeviceRegistry;
+  /** 기기 DPoP jti 저장소. 없으면 메모리(로컬·시험) */
+  scannerDpopReplay?: DpopReplayStore;
+  /** 시험에서 스캐너 세션 ID를 고정한다 */
+  newScannerSessionId?: () => string;
 }
 
 @Module({})
@@ -83,7 +100,7 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController, StaffInvitationController],
+      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController, StaffInvitationController, ScannerAuthorizationController, DeviceApprovalController],
       providers: [
         GetAccountSummary,
         CompleteSignup,
@@ -94,6 +111,21 @@ export class SessionModule {
         { provide: STAFF_ASSIGNMENTS, useFactory: (store: StaffAssignmentStore) => o.staffAssignments ?? store, inject: [STAFF_ASSIGNMENT_STORE] },
         CheckScannerSession,
         StaffInvitations,
+        StartDeviceAuthorization,
+        DeviceApprovals,
+        PollScannerToken,
+        { provide: NEW_SCANNER_SESSION_ID, useValue: o.newScannerSessionId ?? defaultScannerSessionId },
+        o.deviceAuthorizations ? { provide: DEVICE_AUTHORIZATIONS, useValue: o.deviceAuthorizations } : { provide: DEVICE_AUTHORIZATIONS, useFactory: (clock: Clock) => new MemoryDeviceAuthorizations(() => clock.now()), inject: [CLOCK] },
+        o.deviceApprovalLimits ? { provide: DEVICE_APPROVAL_LIMITS, useValue: o.deviceApprovalLimits } : { provide: DEVICE_APPROVAL_LIMITS, useValue: new MemoryDeviceApprovalLimits() },
+        {
+          provide: SCANNER_DEVICE_REGISTRY,
+          useValue: o.scannerDevices ?? {
+            byThumbprint: async () => {
+              throw new Error('PEAKET_TICKET_GRPC_URL이 없어 스캐너 기기 원장을 확인하지 못한다');
+            },
+          },
+        },
+        o.scannerDpopReplay ? { provide: SCANNER_DPOP_REPLAY, useValue: o.scannerDpopReplay } : { provide: SCANNER_DPOP_REPLAY, useFactory: (clock: Clock) => new MemoryDpopReplayStore(clock), inject: [CLOCK] },
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,

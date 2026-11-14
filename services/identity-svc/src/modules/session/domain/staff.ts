@@ -6,10 +6,12 @@ export type StaffAssignmentStatus = 'INVITED' | 'ASSIGNED' | 'REVOKED' | 'ENDED'
 /** CheckScannerSession이 보는 한 줄. 시각은 밀리초 */
 export interface ScannerSessionRecord {
   scannerSessionId: string;
+  assignmentId: string;
   deviceId: string;
   role: StaffRole;
   proxy: boolean;
   expiresAt: number;
+  lastSeenAtMs?: number;
   terminatedAt: number | null;
   assignmentStatus: StaffAssignmentStatus;
   validFrom: number;
@@ -30,6 +32,8 @@ export interface StaffAssignmentRecord {
   accountId: string | null;
   eventId: string;
   role: StaffRole;
+  /** 배정 파트너(기기 승인 때 기기의 배정 파트너와 대조한다, I-T22). 파트너 초대 생성이 채운다 */
+  promoterId?: string;
   inviteEmail?: string;
   inviteTokenHash?: string;
   inviteExpiresAtMs: number;
@@ -72,6 +76,24 @@ export interface StaffAssignmentStore {
   rejectInvitation(i: { tokenHash: string; nowMs: number }): Promise<void>;
   /** 내 배정 목록(ASSIGNED·ENDED·REVOKED만). 유효 시작이 늦은 순 */
   listSelf(i: { accountId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }>;
+  /** 계정의 ASSIGNED 배정(역할 유효 시간 밖도 포함). 기기 승인 화면·승인 판정이 시간 창을 따로 본다 */
+  listAssignedByAccount(i: { accountId: string; nowMs: number }): Promise<StaffAssignmentRecord[]>;
+  /** 기기 승인으로 스캐너 세션을 만든다. 같은 기기·같은 계정의 이전 활성 세션을 먼저 끝낸다(교대) */
+  createScannerSession(i: {
+    scannerSessionId: string;
+    assignmentId: string;
+    deviceId: string;
+    accountId: string;
+    approvedBySession: string;
+    role: StaffRole;
+    proxy: boolean;
+    approvedAtMs: number;
+    expiresAtMs: number;
+  }): Promise<void>;
+  /** 세션의 마지막 연락 시각. 끝난 세션이면 아무것도 하지 않는다 */
+  touchScannerSession(scannerSessionId: string, atMs: number): Promise<void>;
+  /** 승인 저장소가 승인을 거절했을 때 만든 세션을 되돌린다(끝난 시각을 남긴다) */
+  endScannerSession(scannerSessionId: string, atMs: number): Promise<void>;
 }
 
 export const STAFF_ASSIGNMENT_STORE = Symbol('identity.StaffAssignmentStore');

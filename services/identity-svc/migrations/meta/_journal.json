@@ -225,6 +225,13 @@
       "when": 1794550800000,
       "tag": "0031_staff_assignment_and_scanner_session",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794723600000,
+      "tag": "0032_staff_promoter_and_scanner_session_unique",
+      "breakpoints": true
     }
   ]
 }

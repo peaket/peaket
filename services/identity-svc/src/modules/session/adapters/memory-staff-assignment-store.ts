@@ -15,6 +15,7 @@ export interface MemoryStaffAssignmentRow {
   status: 'INVITED' | 'ASSIGNED' | 'REVOKED' | 'ENDED' | 'EXPIRED';
   eventId?: string;
   role?: StaffRole;
+  promoterId?: string;
   inviteEmail?: string;
   inviteTokenHash?: string;
   inviteExpiresAtMs?: number;
@@ -30,6 +31,7 @@ const recordOf = (a: MemoryStaffAssignmentRow): StaffAssignmentRecord => ({
   accountId: a.accountId,
   eventId: a.eventId ?? '',
   role: a.role ?? 'gate_staff',
+  ...(a.promoterId !== undefined ? { promoterId: a.promoterId } : {}),
   ...(a.inviteEmail !== undefined ? { inviteEmail: a.inviteEmail } : {}),
   ...(a.inviteTokenHash !== undefined ? { inviteTokenHash: a.inviteTokenHash } : {}),
   inviteExpiresAtMs: a.inviteExpiresAtMs ?? 0,
@@ -123,5 +125,55 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       })),
       ...(filtered.length > i.limit && last ? { nextCursor: cursorOf(last.validFromMs ?? 0, last.id) } : {}),
     };
+  }
+
+  async listAssignedByAccount(i: { accountId: string; nowMs: number }): Promise<StaffAssignmentRecord[]> {
+    void i.nowMs;
+    return [...this.assignments.values()]
+      .filter((a) => a.accountId === i.accountId && a.status === 'ASSIGNED')
+      .map(recordOf);
+  }
+
+  async createScannerSession(i: {
+    scannerSessionId: string;
+    assignmentId: string;
+    deviceId: string;
+    accountId: string;
+    approvedBySession: string;
+    role: StaffRole;
+    proxy: boolean;
+    approvedAtMs: number;
+    expiresAtMs: number;
+  }): Promise<void> {
+    for (const [id, s] of this.sessions) {
+      if (s.terminatedAt !== null) continue;
+      const a = this.assignments.get(s.assignmentId);
+      if (s.deviceId === i.deviceId || a?.accountId === i.accountId) this.sessions.set(id, { ...s, terminatedAt: i.approvedAtMs });
+    }
+    const a = this.assignments.get(i.assignmentId);
+    if (!a) throw new Error('배정을 찾을 수 없다');
+    this.sessions.set(i.scannerSessionId, {
+      scannerSessionId: i.scannerSessionId,
+      assignmentId: i.assignmentId,
+      deviceId: i.deviceId,
+      role: i.role,
+      proxy: i.proxy,
+      expiresAt: i.expiresAtMs,
+      terminatedAt: null,
+      assignmentStatus: a.status,
+      validFrom: a.validFromMs ?? 0,
+      validUntil: a.validUntilMs ?? 0,
+      eventId: a.eventId ?? '',
+    });
+  }
+
+  async touchScannerSession(scannerSessionId: string, atMs: number): Promise<void> {
+    const s = this.sessions.get(scannerSessionId);
+    if (s && s.terminatedAt === null) this.sessions.set(scannerSessionId, { ...s, lastSeenAtMs: atMs });
+  }
+
+  async endScannerSession(scannerSessionId: string, atMs: number): Promise<void> {
+    const s = this.sessions.get(scannerSessionId);
+    if (s && s.terminatedAt === null) this.sessions.set(scannerSessionId, { ...s, terminatedAt: atMs });
   }
 }

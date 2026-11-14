@@ -19,6 +19,7 @@ export type ProblemType =
   | 'approval-reason-required'
   | 'approval-scope-invalid'
   | 'artist-exists'
+  | 'assignment-required'
   | 'authz-unavailable'
   | 'auto-assign-not-supported'
   | 'auto-condition-invalid'
@@ -154,6 +155,7 @@ export type ProblemType =
   | 'production-suspended'
   | 'promoter-mismatch'
   | 'provider-down'
+  | 'proxy-approval-forbidden'
   | 'pseudonym-handler-required'
   | 'pseudonymization-review-pending'
   | 'purchase-limit-exceeded'
@@ -216,6 +218,8 @@ export type ProblemType =
   | 'scanner-device-not-found'
   | 'scanner-event-mismatch'
   | 'scanner-flag-not-found'
+  | 'scanner-login-rate-limited'
+  | 'scanner-origin-forbidden'
   | 'seat-already-held'
   | 'seat-recently-released'
   | 'seat-store-unavailable'
@@ -272,6 +276,7 @@ export const PROBLEM_TYPES = {
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
+  'assignment-required': { status: 422, title: "승인할 배정을 하나 골라 주세요" },
   'authz-unavailable': { status: 503, title: "권한을 확인하지 못했습니다" },
   'auto-assign-not-supported': { status: 400, title: "좌석 자동 배정은 아직 받지 않습니다" },
   'auto-condition-invalid': { status: 400, title: "희망 조건이 올바르지 않습니다" },
@@ -407,6 +412,7 @@ export const PROBLEM_TYPES = {
   'production-suspended': { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" },
   'promoter-mismatch': { status: 422, title: "계정의 파트너사와 다릅니다" },
   'provider-down': { status: 503, title: "지금은 본인확인을 할 수 없습니다" },
+  'proxy-approval-forbidden': { status: 403, title: "대리 승인은 현장 책임자만 할 수 있습니다" },
   'pseudonym-handler-required': { status: 403, title: "가명정보 취급자만 할 수 있습니다" },
   'pseudonymization-review-pending': { status: 403, title: "가명 처리 검토 중입니다" },
   'purchase-limit-exceeded': { status: 422, title: "1인 구매 한도를 넘었습니다" },
@@ -469,6 +475,8 @@ export const PROBLEM_TYPES = {
   'scanner-device-not-found': { status: 404, title: "스캐너 기기를 찾을 수 없습니다" },
   'scanner-event-mismatch': { status: 403, title: "스캐너 세션의 회차와 요청 회차가 다릅니다" },
   'scanner-flag-not-found': { status: 404, title: "이상 표시를 찾을 수 없습니다" },
+  'scanner-login-rate-limited': { status: 429, title: "승인 요청이 너무 잦습니다" },
+  'scanner-origin-forbidden': { status: 403, title: "스캐너 앱 출처가 아닙니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },
   'seat-store-unavailable': { status: 503, title: "좌석 정보를 잠시 쓸 수 없습니다" },

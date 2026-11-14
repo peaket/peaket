@@ -245,6 +245,8 @@ export const staffAssignment = pgTable(
     id: uuid('id').primaryKey(),
     accountId: uuid('account_id').references(() => account.id),
     eventId: uuid('event_id').notNull(),
+    // 배정 파트너(promoter). 기기 승인 때 기기의 배정 파트너와 대조한다(I-T22). 파트너 초대 생성이 채운다
+    promoterId: uuid('promoter_id'),
     role: text('role').notNull(),
     inviteEmail: text('invite_email'),
     inviteTokenHash: bytea('invite_token_hash'),
@@ -290,7 +292,7 @@ export const scannerSession = pgTable(
   },
   (t) => [
     index('scanner_session_assignment_idx').on(t.staffAssignmentId),
-    index('scanner_session_device_active_idx').on(t.scannerDeviceId).where(sql`${t.terminatedAt} is null`),
+    uniqueIndex('scanner_session_device_active_key').on(t.scannerDeviceId).where(sql`${t.terminatedAt} is null`),
     check('scanner_session_role_check', sql`${t.role} in ('gate_staff', 'gate_lead')`),
     check('scanner_session_proxy_role_check', sql`not ${t.proxy} or ${t.role} = 'gate_staff'`),
   ],

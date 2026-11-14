@@ -29,6 +29,8 @@ export interface ScannerDeviceStore {
   bindCredential(i: { deviceId: string; jkt: string; atMs: number }): Promise<ScannerDeviceRecord | undefined>;
   /** platform ScannerGuard의 기기 찾기. 없으면 null, 있으면 상태와 파트너를 준다 */
   byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null>;
+  /** 마지막 연락 시각(관측용). 없거나 실패해도 요청을 막지 않는다 */
+  touch(deviceId: string, atMs: number): Promise<void>;
 }
 
 export const SCANNER_DEVICE_STORE = Symbol('ticket.ScannerDeviceStore');

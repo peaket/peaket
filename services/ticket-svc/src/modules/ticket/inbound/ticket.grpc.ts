@@ -9,6 +9,7 @@ import { TicketConflictError, TicketInputError } from '../domain/ticket.js';
 
 export interface TicketPackage {
   TicketService: grpc.ServiceClientConstructor;
+  ScannerDeviceLookupService: grpc.ServiceClientConstructor;
 }
 
 /** 이름은 proto 그대로, enum은 이름, int64는 숫자로 읽는다. */

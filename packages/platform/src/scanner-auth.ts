@@ -32,6 +32,8 @@ export interface ScannerDeviceRecord {
 /** 키 지문(jkt)으로 등록 기기를 찾는다(ticket-svc ScannerDeviceLookupService) */
 export interface ScannerDeviceLookup {
   byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null>;
+  /** 마지막 연락 시각. 실패해도 요청을 막지 않는다(관측용) */
+  touch?(deviceId: string, atMs: number): Promise<void>;
 }
 
 /** identity-svc CheckScannerSession의 답 */
@@ -60,7 +62,12 @@ export interface ScannerAuthWiring {
 
 /** 이번 배치는 스태프 토큰이 붙은 스캐너 경로만 다룬다(기기 등록·업로드의 기기 인증만 경로는 ticket-svc 단계) */
 export interface ScannerAuthOptions {
-  token: 'required';
+  /**
+   * required: 스태프 토큰과 그 세션을 함께 본다(근무 준비·목록·이상 표시).
+   * none: 기기 키 증명만 본다(기기 승인 코드·토큰, device-only).
+   * optional: 토큰이 붙으면 세션까지 보고, 없으면 기기 증명만 본다(스캔 업로드).
+   */
+  token: 'required' | 'none' | 'optional';
   device: 'registered';
 }
 

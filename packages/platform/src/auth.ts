@@ -25,7 +25,7 @@ import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
-import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, verifyDpopProof } from './scanner-auth.js';
+import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, type ScannerStaffRole, verifyDpopProof } from './scanner-auth.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
 export const ROLE_VALUES = [
@@ -329,12 +329,22 @@ export class AuthGuard implements CanActivate {
     };
     const roles = policy.roles.filter((r) => r !== 'public') as Exclude<RoleValue, 'public'>[];
     const identity = identityOf(request.headers);
+    const scannerOptions = this.reflector.getAllAndOverride<ScannerAuthOptions | undefined>(SCANNER_AUTH_METADATA, [ctx.getHandler(), ctx.getClass()]);
+    // 기기 증명만 하는 스캐너 경로(기기 승인 코드·토큰·기기 인증 업로드)는 사람 신원 머리가 없다.
+    // 역할 판정과 기기 상태·세션은 뒤의 ScannerGuard가 한다.
+    const deviceOnly = scannerOptions !== undefined && scannerOptions.token !== 'required' && roles.includes('scanner_device');
     // 공개 작업: 공개만 허용하면 신원 머리를 보지 않고, 세션이 있으면 더 보이는 작업([public, fan])은 신원이 없을 때만 익명으로 통과
     if (policy.roles.includes('public') && (roles.length === 0 || !identity)) {
       throwAttachedValidationError(request);
       return true;
     }
-    if (!identity) throw unauthorized();
+    if (!identity) {
+      if (deviceOnly) {
+        throwAttachedValidationError(request);
+        return true;
+      }
+      throw unauthorized();
+    }
     if (this.state.terminated.has(identity.sessionId)) throw unauthorized();
     if (!roles.some((r) => AUDIENCE_OF[r] === identity.aud)) throw unauthorized();
     for (const s of policy.scopes) if (!identity.scopes.includes(s)) throw new ForbiddenException();
@@ -424,20 +434,32 @@ export class ScannerGuard implements CanActivate {
     const request = http.getRequest<FastifyRequest>();
     const reply = http.getResponse<FastifyReply>();
     const principal = requestContext()?.principal;
-    if (!principal || principal.aud !== 'scanner') throw scannerUnauthorized(reply, 'invalid_token');
-
     const proof = singleHeader(request.headers.dpop);
     if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
     const authorization = singleHeader(request.headers.authorization);
     // \s+와 (.+)가 공백에서 겹치면 긴 공백 머리에서 되짚기가 늘어난다(CodeQL js/polynomial-redos).
     // DPoP 접근 토큰은 공백 없는 한 토큰이므로 \S+로 못 박는다.
     const token = /^DPoP[ \t]+(\S+)$/i.exec(authorization ?? '')?.[1];
-    if (!token) throw scannerUnauthorized(reply, 'invalid_token');
+    const tokenAttached = authorization !== undefined;
+    const deviceOnly = options.token === 'none' || (options.token === 'optional' && !tokenAttached);
+
+    if (!deviceOnly) {
+      if (!principal || principal.aud !== 'scanner') throw scannerUnauthorized(reply, 'invalid_token');
+      if (!token) throw scannerUnauthorized(reply, 'invalid_token');
+    } else if (tokenAttached) {
+      // 기기만 증명하는 경로에 사용자 토큰을 붙이면 대체 경로로 쓰지 못하게 거절한다.
+      throw scannerUnauthorized(reply, 'invalid_token');
+    }
+
     const expectedJkt = singleHeader(request.headers['x-user-jkt']);
-    if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
     const forwardedAth = singleHeader(request.headers['x-user-ath']);
-    const computedAth = athOf(token);
-    if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
+    const computedAth = token === undefined ? undefined : athOf(token);
+    if (!deviceOnly) {
+      if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
+      if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
+    } else if (expectedJkt !== undefined || forwardedAth !== undefined) {
+      throw scannerUnauthorized(reply, 'invalid_token');
+    }
 
     let verified: { jkt: string; jti: string };
     try {
@@ -445,9 +467,9 @@ export class ScannerGuard implements CanActivate {
         proof,
         method: request.method,
         url: requestUrlOf(request),
-        accessToken: token,
-        expectedAth: forwardedAth ?? computedAth,
-        expectedJkt,
+        ...(deviceOnly
+          ? { requireAth: false }
+          : { accessToken: token!, expectedAth: forwardedAth ?? computedAth!, expectedJkt: expectedJkt! }),
         clock: this.state.clock,
         replay: scanner.wiring.replay,
       });
@@ -459,18 +481,41 @@ export class ScannerGuard implements CanActivate {
     const device = await scanner.deviceByThumbprint(verified.jkt);
     if (!device) throw new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' });
     if (device.status !== 'ACTIVE') throw new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' });
+    // 마지막 연락 시각은 관측용이라 실패해도 요청을 막지 않는다.
+    try {
+      await scanner.wiring.devices.touch?.(device.deviceId, this.state.clock.now());
+    } catch {
+      // ignore
+    }
 
-    const session = await scanner.sessionOf(principal.sessionId, device.deviceId);
-    if (!session.valid || !session.role) throw scannerUnauthorized(reply, 'invalid_token');
     const policy = this.reflector.getAllAndOverride<RolesPolicy | undefined>(ROLES_METADATA, [ctx.getHandler(), ctx.getClass()]);
-    if (policy && !policy.roles.includes(session.role)) throw new ForbiddenException();
+    let role: ScannerStaffRole | 'scanner_device';
+    let eventId: string | undefined;
+    if (deviceOnly) {
+      role = 'scanner_device';
+      if (policy && !policy.roles.includes(role)) throw new ForbiddenException();
+    } else {
+      const session = await scanner.sessionOf(principal!.sessionId, device.deviceId);
+      if (!session.valid || !session.role) throw scannerUnauthorized(reply, 'invalid_token');
+      if (policy && !policy.roles.includes(session.role)) throw new ForbiddenException();
+      role = session.role;
+      eventId = session.eventId;
+    }
 
-    principal.role = session.role;
-    principal.deviceId = device.deviceId;
-    principal.tenantId = device.promoterId;
-    if (session.eventId) principal.eventId = session.eventId;
     const rc = requestContext();
-    if (rc) rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(session.eventId ? { eventId: session.eventId } : {}) };
+    if (rc) {
+      rc.principal = {
+        accountId: deviceOnly ? device.deviceId : principal!.accountId,
+        sessionId: deviceOnly ? '' : principal!.sessionId,
+        aud: 'scanner',
+        scopes: deviceOnly ? [] : principal!.scopes,
+        role,
+        deviceId: device.deviceId,
+        tenantId: device.promoterId,
+        ...(eventId ? { eventId } : {}),
+      };
+      rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(eventId ? { eventId } : {}) };
+    }
     return true;
   }
 }

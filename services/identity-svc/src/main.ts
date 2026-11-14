@@ -41,6 +41,10 @@ import {
   sessionServiceHandlers,
   TokenKeyRing,
   tokenIssuerFromEnv,
+  GrpcScannerDeviceRegistry,
+  RedisDeviceAuthorizations,
+  RedisDeviceApprovalLimits,
+  RedisScannerDpopReplayStore,
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
@@ -135,6 +139,13 @@ const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 const env = process.env.PEAKET_ENV || 'prod';
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
+// 기기 승인 로그인(GAT-220): ticket-svc 기기 원장(gRPC)과 기기 승인 요청·한도·DPoP jti 저장소.
+// ticket 주소가 없으면 기기 승인 로그인이 503이고, local·CI만 메모리로 대신한다.
+const ticketGrpc = process.env.PEAKET_TICKET_GRPC_URL;
+const scannerDevices = ticketGrpc ? new GrpcScannerDeviceRegistry(ticketGrpc, loadPlatformConfig(process.env).grpcLbProfile) : undefined;
+const deviceAuthorizations = cache ? new RedisDeviceAuthorizations(cache, () => systemClock.now()) : undefined;
+const deviceApprovalLimits = cache ? new RedisDeviceApprovalLimits(cache) : undefined;
+const scannerDpopReplay = cache ? new RedisScannerDpopReplayStore(cache) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
 // 로그인 판정(identity §7, BOT-050): trust-svc 주소가 없으면 세션의 판정을 UNKNOWN으로 남긴다(양도·계좌 입력에서 안전 쪽, 로그인은 막지 않는다)
@@ -144,7 +155,7 @@ const loginRisk = trustGrpc ? new GrpcTrustLoginRisk(trustGrpc, loadPlatformConf
 const adminAuthzHolder: { port?: AdminAuthzPort } = {};
 const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
 // 관리 경로(페퍼가 있을 때만 싣는다)가 없으면 판정 포트도 넘기지 않는다: 시작 확인이 관리 역할 처리기 없음을 그대로 본다(새 맥락 리뷰 2026-11-05)
-const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
@@ -289,6 +300,7 @@ process.once('SIGTERM', () => {
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {
       stopInvRefs();
+      scannerDevices?.close();
       return Promise.all([database.close(), cache?.close()]);
     });
 });

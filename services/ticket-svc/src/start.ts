@@ -12,6 +12,7 @@ import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-
 import { DeviceKeys } from './modules/ticket/application/device-keys.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
+import { scannerDeviceLookupHandlers } from './modules/scanner/inbound/scanner-device-lookup.grpc.js';
 import {
   DrizzleScannerDeviceStore,
   DrizzleScannerGateStore,
@@ -80,6 +81,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
           definition: ticketPackage().TicketService.service,
           handlers: ticketServiceHandlers({ ticket, nowMs: () => systemClock.now() }, (method, err, orderId) => {
             service!.logger.error({ method, ...(orderId ? { orderId } : {}), err }, 'TicketService 처리 실패');
+          }),
+        },
+        {
+          definition: ticketPackage().ScannerDeviceLookupService.service,
+          handlers: scannerDeviceLookupHandlers({ store: scannerStore }, (method, err) => {
+            service!.logger.error({ method, err }, 'ScannerDeviceLookupService 처리 실패');
           }),
         },
       ],

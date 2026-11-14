@@ -392,6 +392,7 @@ erDiagram
         uuid id PK
         uuid account_id "수락한 PEAKET 계정, UNIQUE(event_id, account_id)"
         uuid event_id "회차"
+        uuid promoter_id "배정 파트너(promoter). 기기 승인 때 기기의 배정 파트너와 대조한다(I-T22, GAT-220). 파트너 초대 생성이 채운다"
         text role "gate_staff|gate_lead"
         text invite_email "수락·만료 시 파기"
         bytea invite_token_hash "32바이트 난수의 SHA-256(ADR-0051)"

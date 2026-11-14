@@ -274,6 +274,8 @@ export interface TokenSigner {
   readonly issuer: string;
   access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken>;
   reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; purpose: ReauthPurpose }, now: number): Promise<SignedToken>;
+  /** 현장 스태프 토큰(ES256, typ at+jwt, aud scanner, cnf.jkt = 기기 키 지문, 만료 = 역할 유효 끝) */
+  staff(c: { accountId: string; scannerSessionId: string; eventId: string; jkt: string; expiresAtMs: number }, now: number): Promise<SignedToken>;
 }
 
 export const DEVICE_REFS = Symbol('identity.DeviceRefs');
@@ -457,3 +459,57 @@ export interface MergeProposals {
   get(id: string): Promise<import('./merge.js').StoredMergeProposal | null>;
   remove(id: string): Promise<void>;
 }
+
+export const SCANNER_DEVICE_REGISTRY = Symbol('identity.ScannerDeviceRegistry');
+/** ticket-svc ScannerDeviceLookupService.GetScannerDeviceByCredential의 답(identity §6.1 '기기 승인 때의 기기 상태 확인') */
+export interface ScannerDeviceLookupAnswer {
+  found: boolean;
+  deviceId?: string;
+  status?: 'ACTIVE' | 'REVOKED' | 'RETIRED';
+  name?: string;
+  promoterId?: string;
+}
+export interface ScannerDeviceRegistry {
+  /** 기기 키 지문(jkt)으로 등록 기기를 찾는다. 답하지 않으면 ScannerRegistryUnavailable */
+  byThumbprint(jkt: string): Promise<ScannerDeviceLookupAnswer>;
+}
+/** 기기 원장(ticket-svc)이 답하지 않았다(503, 기기 상태를 모른 채 로그인을 열지 않는다) */
+export class ScannerRegistryUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('스캐너 기기 원장이 답하지 않았다', { cause });
+    this.name = 'ScannerRegistryUnavailable';
+  }
+}
+
+export const DEVICE_AUTHORIZATIONS = Symbol('identity.DeviceAuthorizations');
+/** 기기 승인 요청 저장소(세션·캐시 Redis id:devauth, 5분). 모든 메서드: @throws DeviceAuthorizationUnavailable */
+export interface DeviceAuthorizationStore {
+  save(r: import('./device-approval.js').DeviceAuthorizationRecord): Promise<void>;
+  /** 사용자 확인 코드로 찾는다. 없거나 만료면 null */
+  findByUserCode(userCode: string): Promise<import('./device-approval.js').DeviceAuthorizationRecord | null>;
+  /** 기기 코드 SHA-256(hex)으로 찾는다. 없거나 만료면 null */
+  get(deviceCodeHash: string): Promise<import('./device-approval.js').DeviceAuthorizationRecord | null>;
+  /** PENDING일 때만 승인으로 바꾼다. 이미 승인·거부·만료면 false */
+  approve(i: { deviceCodeHash: string; approved: import('./device-approval.js').ApprovedScannerSession; nowMs: number }): Promise<boolean>;
+  /** PENDING일 때만 거부로 바꾼다. 이미 끝났으면 false */
+  deny(deviceCodeHash: string, nowMs: number): Promise<boolean>;
+  /** 폴링 간격을 본다. 너무 잦으면 SLOW_DOWN과 남은 시간을 준다 */
+  notePoll(deviceCodeHash: string, nowMs: number): Promise<import('./device-approval.js').DeviceAuthorizationPoll>;
+}
+/** 기기 승인 저장소에 닿지 못했다 */
+export class DeviceAuthorizationUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('기기 승인 저장소에 닿지 못했다', { cause });
+    this.name = 'DeviceAuthorizationUnavailable';
+  }
+}
+
+export const DEVICE_APPROVAL_LIMITS = Symbol('identity.DeviceApprovalLimits');/** 기기 승인 코드 발급·승인 시도 한도(세션·캐시 Redis). 저장소에 닿지 못하면 통과시킨다 */
+export interface DeviceApprovalLimits {
+  /** 기기당 시간당 코드 발급. 넘으면 남은 시간(ms) */
+  allowIssue(deviceId: string, nowMs: number): Promise<{ allowed: true } | { allowed: false; retryAfterMs: number }>;
+  /** 계정당 10분 승인 시도. 넘으면 남은 시간(ms) */
+  allowApproval(accountId: string, nowMs: number): Promise<{ allowed: true } | { allowed: false; retryAfterMs: number }>;
+}
+
+export const SCANNER_DPOP_REPLAY = Symbol('identity.ScannerDpopReplay');

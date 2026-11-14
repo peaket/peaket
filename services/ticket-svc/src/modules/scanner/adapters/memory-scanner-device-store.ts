@@ -56,4 +56,9 @@ export class MemoryScannerDeviceStore implements ScannerDeviceStore {
     for (const d of this.devices.values()) if (d.credentialThumbprint === jkt) return structuredClone(d);
     return null;
   }
+
+  async touch(deviceId: string, atMs: number): Promise<void> {
+    const d = this.devices.get(deviceId);
+    if (d) this.devices.set(deviceId, { ...d, lastSeenAtMs: atMs });
+  }
 }

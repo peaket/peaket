@@ -66,4 +66,21 @@ export class JoseTokenSigner implements TokenSigner {
       .sign(key);
     return { token, expiresAt: exp * 1000 };
   }
+
+  /** 현장 스태프 토큰: 역할은 토큰에 싣지 않고(ADR-0172) 회차·세션·기기 키 지문만 묶는다. 만료는 역할 유효 끝이다 */
+  async staff(c: { accountId: string; scannerSessionId: string; eventId: string; jkt: string; expiresAtMs: number }, now: number): Promise<SignedToken> {
+    const { kid, key } = this.#keys.signingKey('staff');
+    const exp = seconds(c.expiresAtMs);
+    if (exp * 1000 <= now) throw new Error('현장 스태프 토큰 만료(역할 유효 끝)가 이미 지났다');
+    const token = await new SignJWT({ sid: c.scannerSessionId, evt: c.eventId, cnf: { jkt: c.jkt } })
+      .setProtectedHeader({ alg: 'ES256', typ: 'at+jwt', kid })
+      .setIssuer(this.#issuer)
+      .setSubject(c.accountId)
+      .setAudience('scanner')
+      .setIssuedAt(seconds(now))
+      .setExpirationTime(exp)
+      .setJti(randomUUID())
+      .sign(key);
+    return { token, expiresAt: exp * 1000 };
+  }
 }

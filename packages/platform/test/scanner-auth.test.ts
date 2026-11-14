@@ -51,6 +51,26 @@ class LeadOnlyController {
   }
 }
 
+@Controller('v1/scanner-device-test')
+class DeviceOnlyController {
+  @Get('authorize')
+  @Roles(['scanner_device'])
+  @ScannerAuth({ token: 'none', device: 'registered' })
+  authorize(@CurrentPrincipal() p: Principal) {
+    return { role: p.role, deviceId: p.deviceId, sessionId: p.sessionId, tenantId: p.tenantId };
+  }
+}
+
+@Controller('v1/scanner-optional-test')
+class OptionalTokenController {
+  @Get('scans')
+  @Roles(['scanner_device', 'gate_staff', 'gate_lead'])
+  @ScannerAuth({ token: 'optional', device: 'registered' })
+  scans(@CurrentPrincipal() p: Principal) {
+    return { role: p.role, deviceId: p.deviceId, sessionId: p.sessionId };
+  }
+}
+
 @Module({ controllers: [ScannerController] })
 class ScannerModule {}
 
@@ -60,10 +80,20 @@ class ScannerWithoutProofModule {}
 @Module({ controllers: [LeadOnlyController] })
 class LeadOnlyModule {}
 
+@Module({ controllers: [DeviceOnlyController] })
+class DeviceOnlyModule {}
+
+@Module({ controllers: [OptionalTokenController] })
+class OptionalTokenModule {}
+
 class FakeDevices implements ScannerDeviceLookup {
   readonly byJkt = new Map<string, ScannerDeviceRecord>();
+  readonly touched: { deviceId: string; atMs: number }[] = [];
   async byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null> {
     return this.byJkt.get(jkt) ?? null;
+  }
+  async touch(deviceId: string, atMs: number): Promise<void> {
+    this.touched.push({ deviceId, atMs });
   }
 }
 
@@ -285,5 +315,61 @@ describe('스캐너 인증 시작 확인(GAT-170)', () => {
   test('스캐너포트와_ScannerAuth가있으면_시작한다', async () => {
     const b = await boot();
     expect(b.svc.name).toBe('scanner-auth-svc');
+  });
+});
+
+
+describe('기기 증명만 하는 스캐너 경로(GAT-220, I-T22)', () => {
+  const deviceHeaders = (proof: string) => ({
+    dpop: proof,
+    'x-forwarded-proto': 'https',
+    'x-forwarded-host': 'scanner-api.peaket.example',
+  });
+
+  test('기기 키 증명만으로_기기ID와파트너를넘기고_사람토큰은받지않는다', async () => {
+    const b = await boot(DeviceOnlyModule);
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    const r = await b.get(deviceHeaders(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-device-test/authorize' })), '/v1/scanner-device-test/authorize');
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.payload)).toEqual({ role: 'scanner_device', deviceId: 'dev-1', sessionId: '', tenantId: 'prom-1' });
+    expect(b.devices.touched).toEqual([{ deviceId: 'dev-1', atMs: b.clock.now() }]);
+  });
+
+  test('기기 전용 경로에_사용자토큰을붙이면_401이다', async () => {
+    const b = await boot(DeviceOnlyModule);
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    const proof = await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-device-test/authorize' });
+    const r = await b.get({ ...deviceHeaders(proof), authorization: `DPoP ${TOKEN}` }, '/v1/scanner-device-test/authorize');
+    expect(r.statusCode).toBe(401);
+  });
+
+  test('미등록·폐기 기기는_403이다', async () => {
+    const b = await boot(DeviceOnlyModule);
+    const key = await keyOf();
+    const unregistered = await b.get(deviceHeaders(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-device-test/authorize' })), '/v1/scanner-device-test/authorize');
+    expect(unregistered.statusCode).toBe(403);
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'REVOKED', promoterId: 'prom-1' });
+    const revoked = await b.get(deviceHeaders(await proofOf(key, { jti: 'jti-revoked', htu: 'https://scanner-api.peaket.example/v1/scanner-device-test/authorize' })), '/v1/scanner-device-test/authorize');
+    expect(revoked.statusCode).toBe(403);
+    expect(JSON.parse(revoked.payload)).toMatchObject({ type: 'https://peaket.example/problems/device-revoked' });
+  });
+
+  test('토큰이 선택인 경로는_없으면기기로_있으면세션으로판정한다', async () => {
+    const b = await boot(OptionalTokenModule);
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    const deviceOnly = await b.get(deviceHeaders(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-optional-test/scans' })), '/v1/scanner-optional-test/scans');
+    expect(deviceOnly.statusCode).toBe(200);
+    expect(JSON.parse(deviceOnly.payload)).toEqual({ role: 'scanner_device', deviceId: 'dev-1', sessionId: '' });
+
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const withToken = await b.get(
+      headersOf(await proofOf(key, { jti: 'jti-2', htu: 'https://scanner-api.peaket.example/v1/scanner-optional-test/scans' }), key.jkt),
+      '/v1/scanner-optional-test/scans',
+    );
+    expect(withToken.statusCode).toBe(200);
+    expect(JSON.parse(withToken.payload)).toEqual({ role: 'gate_staff', deviceId: 'dev-1', sessionId: 'sess-1' });
   });
 });
