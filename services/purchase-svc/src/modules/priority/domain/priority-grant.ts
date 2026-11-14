@@ -11,6 +11,14 @@ export const PRIORITY_GRANT_STATUSES = ['OFFERED', 'USED', 'EXPIRED', 'WITHDRAWN
 /** 48시간 [가정](ADR-0171). 입장 시작이 더 이르면 그때까지다 */
 export const PRIORITY_GRANT_TTL_MS = 48 * 60 * 60 * 1000;
 
+/** 같은 좌석에 다른 OFFERED 권리가 먼저 만들어졌다(DB 유일 인덱스). 잡은 보류를 풀고 다음 후보로 간다 */
+export class PrioritySeatConflict extends Error {
+  constructor(readonly seatId: string) {
+    super('같은 좌석에 다른 우선 구매 권리가 있다');
+    this.name = 'PrioritySeatConflict';
+  }
+}
+
 export interface PriorityGrant {
   readonly grantId: string;
   readonly eventId: string;

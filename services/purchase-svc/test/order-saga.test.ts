@@ -104,6 +104,7 @@ type Call =
   | 'confirmSent.done'
   | 'pins.pin'
   | 'pins.releaseFailed'
+  | 'pins.restorePriority'
   | 'confirms.confirm'
   | 'configs.get'
   | 'log.releaseFailed'
@@ -184,6 +185,7 @@ class SagaFakes {
   confirmCommands: ConfirmCommand[] = [];
   doneOrders: string[] = [];
   releaseLogs: Parameters<SagaLog['releaseFailed']>[0][] = [];
+  restoreInputs: { eventId: string; accountId: string; grantId: string; seatIds: readonly string[]; keepUntilMs: number }[] = [];
   rejectLogs: Parameters<SagaLog['confirmRejected']>[0][] = [];
   stepErrors: Parameters<SagaLog['stepError']>[0][] = [];
 
@@ -373,6 +375,11 @@ class SagaFakes {
       this.releaseInputs.push(input);
       if (this.releaseResult instanceof Error) throw this.releaseResult;
       return this.releaseResult ?? { status: 'OK', released: input.seatIds.length };
+    },
+    restorePriority: async (input: { eventId: string; accountId: string; grantId: string; seatIds: readonly string[]; keepUntilMs: number }): Promise<{ status: 'OK'; restored: number }> => {
+      this.calls.push('pins.restorePriority');
+      this.restoreInputs.push(input);
+      return { status: 'OK', restored: input.seatIds.length };
     },
   };
 
@@ -567,6 +574,17 @@ describe('RESERVE ② 좌석 묶기', () => {
     expectInOrder(fx.calls, ['pins.pin', 'failures.fail', 'pins.releaseFailed']);
     expect(fx.releaseInputs).toHaveLength(1);
     expectRelease(fx.releaseInputs[0]);
+  });
+
+  test('S-T37_⑤_우선 구매 주문의 결제 실패는 좌석을 풀지 않고 권리의 PRIORITY 보류로 되돌린다', async () => {
+    const order = sagaOrder({ priorityGrantId: '01900000-0000-7000-8000-0000000000c1' });
+    fx.put(order);
+    fx.pinQueue = [{ status: 'TAKEN' }];
+    const out = await runner().reserveStep(sagaJob(), order);
+    expect(out).toEqual({ kind: 'FAILED', transition: 'T8', reason: 'SEAT_TAKEN' });
+    expectInOrder(fx.calls, ['pins.pin', 'failures.fail', 'pins.restorePriority']);
+    expect(fx.releaseInputs).toHaveLength(0);
+    expect(fx.restoreInputs[0]).toMatchObject({ eventId: EVENT, accountId: ACCOUNT, grantId: order.priorityGrantId });
   });
 
   test.each([

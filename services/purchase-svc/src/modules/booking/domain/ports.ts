@@ -70,6 +70,11 @@ export interface PriorityGrants {
   find(grantId: string): Promise<PriorityGrantView | undefined>;
 }
 
+/** 활성 판매 행 대조(seat_sale PENDING·SOLD). 권리 발급·사용 때 팔린 좌석을 거절한다 */
+export interface PrioritySeatSales {
+  active(eventId: string, seatIds: readonly string[]): Promise<ReadonlySet<string>>;
+}
+
 export interface TransitionInput {
   readonly orderId: string;
   readonly transition: TransitionId;
@@ -877,6 +882,8 @@ export interface SagaOrderView {
   readonly purchaseSessionId: string;
   /** 결제 접수 때 적은 판 번호(purchase_order.seat_gen). 접수 전이면 undefined */
   readonly seatGen?: number;
+  /** 우선 구매 보류에서 만든 주문이면 그 권리 ID(0020, GAT-135). 결제 실패·만료 때 보류로 되돌린다 */
+  readonly priorityGrantId?: string;
   /** 줄 번호 차례 */
   readonly seats: readonly SagaSeat[];
   /** ACCEPTED 결제 시도. 없으면 undefined(코드 오류·손질) */
@@ -1066,6 +1073,18 @@ export interface OrderReleaseInput {
 /** 실패 해제 결과. NOT_READY: 세대 키 없음(회차 키 수명이 지났으면 해제가 끝난 것으로 본다) */
 export type OrderReleaseResult = { readonly status: 'OK'; readonly released: number } | { readonly status: 'NOT_READY' };
 
+/** 우선 구매 주문의 결제 실패 복귀 입력 */
+export interface OrderRestorePriorityInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly grantId: string;
+  readonly seatIds: readonly string[];
+  readonly keepUntilMs: number;
+}
+
+/** 결제 실패 복귀 결과. NOT_READY: 세대 키 없음 */
+export type OrderRestorePriorityResult = { readonly status: 'OK'; readonly restored: number } | { readonly status: 'NOT_READY' };
+
 /**
  * 좌석 묶기·실패 해제의 inventory 다리(운영은 adapters/inventory-bridges.ts InventoryOrderSeatPins: 좌석맵 판 resolve로 SeatRef를 만들어 SeatPins를 부른다).
  * 실패 해제는 실패 표시(수명 10분 [가정])를 같은 Lua에서 남기고, 묶기는 그 표시가 있으면 FAILED_HOLD로 거절한다(구현은 inventory pin-lua.ts).
@@ -1078,6 +1097,8 @@ export interface OrderSeatPins {
   pin(input: OrderPinInput, o?: { deadlineMs?: number }): Promise<OrderPinResult>;
   /** @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(다시 부르면 남은 것만 푼다) · Error 좌석맵 판에 없는 좌석·망가진 키 */
   releaseFailed(input: OrderReleaseInput, o?: { deadlineMs?: number }): Promise<OrderReleaseResult>;
+  /** 우선 구매 주문의 결제 실패 복귀(GAT-135). 좌석을 풀지 않고 그 권리의 PRIORITY 보류로 되돌린다(옛 대역은 없을 수 있다) */
+  restorePriority?(input: OrderRestorePriorityInput, o?: { deadlineMs?: number }): Promise<OrderRestorePriorityResult>;
 }
 
 /** Saga가 쓰는 회차 설정(좌석맵 판의 perAccountLimit·saleEndsAt) */

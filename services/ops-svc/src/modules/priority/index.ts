@@ -1,6 +1,8 @@
 // ops 우선 구매 권리 모듈의 공개 면.
 export { GrantPriority } from './application/grant-priority.js';
+export { ResolveFraudObjection } from './application/resolve-fraud-objection.js';
 export { WithdrawPriority } from './application/withdraw-priority.js';
+export { GrpcPurchasePriorityGrants } from './adapters/grpc-purchase-priority-grants.js';
 export { HttpPurchasePriorityGrants } from './adapters/http-purchase-priority-grants.js';
 export { HttpQueuePriorityGrantCopies } from './adapters/http-queue-priority-grant-copies.js';
 export { PriorityDependencyUnavailable, type GrantPriorityInput, type GrantPriorityView, type PurchasePriorityGrants, type QueuePriorityGrantCopies, type WithdrawPriorityView } from './domain/priority.js';

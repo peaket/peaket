@@ -121,6 +121,25 @@ function pauseStub(o: { dues: DueExpiriesInput[]; expires: ExpireInput[]; pause:
   return sweeper;
 }
 
+describe('우선 구매 보류 만료 회수(GAT-135)', () => {
+  test('S-T37_⑦_만료 반복이 prio 보류를 풀고 권리 EXPIRED 고리를 부른다', async () => {
+    const w = world();
+    const { eventId } = await w.openEvent();
+    const grantId = '01900000-0000-7000-8000-0000000000c1';
+    const held = await w.store.holdPriority({ eventId, accountId: account(1), grantId, seat: SEAT_DEFS[0]!, expiresAtMs: NOW + 1_000, keepUntilMs: NOW + DAY });
+    expect(held.kind).toBe('OK');
+    w.clock.advance(2_000);
+    const expired: string[][] = [];
+    const s = w.sweeper('pod-priority', { priorityExpiries: w.store, onPriorityGrantsExpired: ({ grantIds }) => void expired.push([...grantIds]) });
+    const r = await s.tick();
+    expect(r.events.find((e) => e.eventId === eventId)?.priorityReleased).toBe(1);
+    expect(expired).toEqual([[grantId]]);
+    const ev = w.store.db.event(eventId);
+    expect(ev.bits.has(SEAT_DEFS[0]!.index)).toBe(false);
+    expect(ev.prio.has(SEAT_DEFS[0]!.index)).toBe(false);
+  });
+});
+
 describe('결제 정지 판단과 만료 Lua 입력(HOT-070)', () => {
   const ok = () => Promise.resolve({ kind: 'OK' as const, released: 100, skipped: 0, orphans: 0, corrupt: 0, nowUs: NOW * 1000, expired: [] });
   test.each([
@@ -257,6 +276,7 @@ const report = (
   eventId,
   outcome,
   batches: 0,
+  priorityReleased: 0,
   released: 0,
   skipped: 0,
   orphans: 0,

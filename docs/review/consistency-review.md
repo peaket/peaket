@@ -690,6 +690,7 @@
 | R-584 | BAT-465 잔여(판매 중지·재개 집행, Kafka 소비자, SSE /v1/ops/live, 제어 gRPC ack, 공개 앵커·서명)가 정본과 어긋남 | services/ops-svc, services/purchase-svc, services/queue-svc, apps/console-host, packages/contracts, packages/api-client, docs | 정본(ADR-0075·0102·0103·0123, transfer-refund §2.1, control-tower §5·§7)대로 구현하고 시험·계약 생성물·문서를 맞췄다. 갈래 2 merge 뒤 purchase 0019·ops 0004~0006으로 재번호 | 적용 |
 | R-585 | 2026-11-15 웨이브 3 마감 기록과 docs-check Mermaid 문법 오류 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/data.md, docs/00-summary.md, docs/review/consistency-review.md | 기능 CI 43631752646의 node·kind·budgets·contracts 등 초록, docs-check는 ops_alert의 unique 줄 문법 오류 → event_key 주석으로 옮김. 세 갈래 R-582/583/584와 다음 후보 기록 | 적용 |
 | R-586 | GAT-220 잔여가 ops-svc 이관·SCR-036 실제 로그인·O-T20·SESSION_TERMINATED·mTLS 계약 없이 남아 있었다 | ticket-svc ScannerDeviceService gRPC·ops-svc /v1/ops/scanner-devices*·scanner 기기 승인 로그인·last_changes_at 신선도 경보·SESSION_TERMINATED 변경분·packages/platform mtls.ts | 각 경계의 단위 시험과 계약 생성물·문서·ASVS를 넣고 cheap gate를 돌렸다 | 완료(heavy gate 통과) |
+| R-587 | GAT-135 잔여가 PRIORITY 보류를 회수·만료·결제 실패 때 풀지 않아 좌석이 남고, 팔린 좌석을 덮으며, gRPC 정본·ops 자동 호출이 없었다 | purchase-svc priority/inventory·booking, ops-svc priority, proto/contracts, purchase 0020 | PRIORITY_RELEASE_LUA·PRIORITY_EXPIRE_LUA·RESTORE_PRIORITY_LUA, seat_sale 대조, 부분 유일 인덱스, 만료 반복 연결, core entryOpensAtMs, USED 전이, priority-seat-only, gRPC Grant/Withdraw·ops 자동 호출, S-T37 ⑤~⑦ 시험 | 통과 |
 
 ## 4. 숫자 일치표
 

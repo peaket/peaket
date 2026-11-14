@@ -211,10 +211,10 @@ export class DrizzleOrderStore {
     await tx.execute(sql`
       with o as (
         insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
-                                    hold_id, purchase_session_id)
+                                    hold_id, purchase_session_id, priority_grant_id)
         values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0,
                 ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz,
-                ${order.holdId}::uuid, ${order.purchaseSessionId})
+                ${order.holdId}::uuid, ${order.purchaseSessionId}, ${order.priorityGrantId ?? null}::uuid)
         returning id
       ), items as (
         insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price)
@@ -255,6 +255,12 @@ export class DrizzleOrderStore {
     // 이 표시가 남으면 기한 안에서 다시 살 수 없다(docs/features/seat-hold.md §5 '우선 구매 보류')
     if (RELEASES_PRIORITY_GRANT.has(t.to)) {
       await tx.execute(sql`update priority_grant set active_order_id = null, updated_at = ${new Date(now)}::timestamptz where active_order_id = ${order.id}::uuid`);
+    }
+    // 우선 구매 주문의 결제가 끝나면(APPROVED) 같은 트랜잭션에서 권리를 USED로 끝낸다(GAT-135, S-T37 ⑤)
+    if (t.to === 'APPROVED') {
+      await tx.execute(sql`
+        update priority_grant set status = 'USED', used_order_id = ${order.id}::uuid, active_order_id = null, version = version + 1, updated_at = ${new Date(now)}::timestamptz
+        where active_order_id = ${order.id}::uuid and status = 'OFFERED'`);
     }
     // ② 돌려받은 번호로 이력 한 행
     await tx.execute(sql`

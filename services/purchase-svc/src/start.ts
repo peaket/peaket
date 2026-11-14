@@ -34,7 +34,17 @@ import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
-import { DrizzleCancelledTickets, DrizzlePriorityGrantStore, SeatMapPriorityCandidates, type PriorityModuleDeps } from './modules/priority/index.js';
+import {
+  DrizzleCancelledTickets,
+  DrizzlePriorityGrantStore,
+  DrizzlePrioritySeatSales,
+  GrantPriorityPurchase,
+  priorityPurchaseHandlers,
+  priorityPurchasePackage,
+  SeatMapPriorityCandidates,
+  WithdrawPriorityGrant,
+  type PriorityModuleDeps,
+} from './modules/priority/index.js';
 import { DrizzleSaleControlStore, RedisSaleControlCopies, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import { startControlServer } from './control/control-server.js';
 import {
@@ -339,15 +349,20 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
   // 우선 구매 권리 발급·회수(GAT-135, POL-046 ⑦, ADR-0171). purchase DB가 있을 때만 연다.
   // 권리 발급은 좌석 Redis의 우선 구매 보류 Lua를 쓰고, 취소한 표는 purchase DB의 order_cancellation·order_item에서 읽는다.
-  const priority: PriorityModuleDeps | undefined = database
-    ? {
-        grants: new DrizzlePriorityGrantStore(database),
-        cancelled: new DrizzleCancelledTickets(database),
-        seats: new RedisSeatStore(redis, undefined, systemClock),
-        candidates: new SeatMapPriorityCandidates(seatMap),
-        seatMap,
-      }
-    : undefined;
+  const prioritySeats = database ? new RedisSeatStore(redis, undefined, systemClock) : undefined;
+  const priority: PriorityModuleDeps | undefined =
+    database && prioritySeats
+      ? {
+          grants: new DrizzlePriorityGrantStore(database),
+          cancelled: new DrizzleCancelledTickets(database, coreSaleConfigs),
+          seats: prioritySeats,
+          candidates: new SeatMapPriorityCandidates(seatMap),
+          seatMap,
+          sales: new DrizzlePrioritySeatSales(database),
+        }
+      : undefined;
+  // 우선 구매 권리 회수(팔린 좌석 대조·소명 인정 뒤). 주문 생성이 팔린 좌석의 권리를 거절할 때도 같은 길을 쓴다
+  const priorityWithdraw = priority ? new WithdrawPriorityGrant(priority.grants, () => systemClock.now(), { seats: priority.seats, seatMap }) : undefined;
 
   // 판매 중지·재개 사본(BAT-465 R-584, ADR-0123). 원본은 purchase DB sale_control, 사본은 좌석 Redis s:{event:E}:ctl이다.
   // purchase DB가 없으면 내부 HTTP 경로를 열지 않는다(홀드 Lua가 읽을 사본도 쓸 곳이 없다).
@@ -426,6 +441,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
         contactRefs: { compute: (phone, ms) => (identityLate.contactRefs ?? missingContactRefs).compute(phone, ms) },
         restrictions: new RedisBookingRestrictions(redis),
         priorityGrants: priority!.grants,
+        ...(priority?.sales ? { prioritySeatSales: priority.sales } : {}),
+        ...(priorityWithdraw ? { priorityWithdraw: (grantId: string) => priorityWithdraw.run(grantId) } : {}),
         signals: orderSignals,
         consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
         onAccepted: (orderId) => sagaRunner?.kick(orderId),
@@ -456,6 +473,14 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(booking ? { booking } : {}),
       ...(refund ? { refund } : {}),
       ...(priority ? { priority } : {}),
+      ...(priority && prioritySeats
+        ? {
+            priorityExpiries: prioritySeats,
+            onPriorityGrantsExpired: async (e: { eventId: string; grantIds: readonly string[] }) => {
+              for (const grantId of e.grantIds) await priority.grants.expire(grantId, systemClock.now());
+            },
+          }
+        : {}),
       ...(saleControl ? { saleControl } : {}),
       hotPath,
       admission: {
@@ -722,18 +747,24 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130). PEAKET_GRPC_PORT가 있을 때만 연다.
   // 없으면 ops-svc는 내부 HTTP 호환 경로를 쓴다(같은 쓰임새·같은 멱등 키).
   let refundGrpc: Awaited<ReturnType<typeof startPurchaseGrpcServer>> | undefined;
-  if (eventRefundService && env.PEAKET_GRPC_PORT) {
+  const grpcServices: Parameters<typeof startPurchaseGrpcServer>[0]['services'] = [];
+  if (eventRefundService) {
+    grpcServices.push({ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(eventRefundService).handlers() });
+  }
+  if (priority) {
+    grpcServices.push({
+      definition: priorityPurchasePackage().PriorityPurchaseService.service,
+      handlers: priorityPurchaseHandlers({ grant: service.app.get(GrantPriorityPurchase), withdraw: service.app.get(WithdrawPriorityGrant) }),
+    });
+  }
+  if (grpcServices.length > 0 && env.PEAKET_GRPC_PORT) {
     const raw = env.PEAKET_GRPC_PORT;
     const port = Number(raw);
     if (!Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
-    refundGrpc = await startPurchaseGrpcServer({
-      host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
-      port,
-      services: [{ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(eventRefundService).handlers() }],
-    });
-    service.logger.info({ port: refundGrpc.port }, '회차 취소 환불 gRPC 포트를 열었다');
-  } else if (eventRefundService) {
-    service.logger.warn({ dep: 'grpc' }, 'PEAKET_GRPC_PORT가 없어 회차 취소 환불 gRPC를 열지 않는다(내부 HTTP 호환 경로만)');
+    refundGrpc = await startPurchaseGrpcServer({ host: env.PEAKET_GRPC_HOST ?? '0.0.0.0', port, services: grpcServices });
+    service.logger.info({ port: refundGrpc.port }, 'purchase-svc gRPC 포트를 열었다');
+  } else if (grpcServices.length > 0) {
+    service.logger.warn({ dep: 'grpc' }, 'PEAKET_GRPC_PORT가 없어 purchase-svc gRPC를 열지 않는다(내부 HTTP 호환 경로만)');
   }
   const sweeper = service.app.get(ExpirySweeper);
   sweeper.start();

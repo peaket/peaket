@@ -5,11 +5,15 @@ import { type Clock, type HotRedis, isRedisOutOfMemory, isRedisUnavailable, type
 import {
   assertDueExpiriesInput,
   assertExpireInput,
+  assertExpirePriorityInput,
   type DueExpiriesInput,
   type DueExpiry,
   type DueHold,
+  type DuePriorityExpiry,
   type ExpiredHold,
   type ExpireInput,
+  type ExpirePriorityInput,
+  type ExpirePriorityResult,
   type ExpireResult,
   isExpirableFence,
 } from '../domain/expiry.js';
@@ -21,6 +25,8 @@ import {
   KEY_PART,
   type PriorityHoldInput,
   type PriorityHoldResult,
+  type PriorityReleaseInput,
+  type PriorityReleaseResult,
   REHOLD_WAIT_MS,
   type ReplayInput,
   type ReplayResult,
@@ -34,11 +40,14 @@ import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, REBUILD_BA
 import {
   assertPinInput,
   assertReleaseFailedInput,
+  assertRestorePriorityInput,
   assertRetireInput,
   type PinInput,
   type PinResult,
   type ReleaseFailedInput,
   type ReleaseFailedResult,
+  type RestorePriorityInput,
+  type RestorePriorityResult,
   RETIRE_AFTER_SALE_END_MS,
   type RetireResult,
 } from '../domain/pin.js';
@@ -47,20 +56,24 @@ import { SNAPSHOT_LUA } from './snapshot-lua.js';
 import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
-import { PRIORITY_HOLD_LUA } from './priority-hold-lua.js';
+import { PRIORITY_HOLD_LUA, PRIORITY_RELEASE_LUA } from './priority-hold-lua.js';
+import { PRIORITY_EXPIRE_LUA } from './priority-expire-lua.js';
 import { AUTO_HOLD_LUA } from './auto-hold-lua.js';
-import { PIN_LUA, RELEASE_FAILED_LUA } from './pin-lua.js';
+import { PIN_LUA, RELEASE_FAILED_LUA, RESTORE_PRIORITY_LUA } from './pin-lua.js';
 import { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './rebuild-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
 const PRIORITY_HOLD = redisScript(PRIORITY_HOLD_LUA);
+const PRIORITY_RELEASE = redisScript(PRIORITY_RELEASE_LUA);
+const PRIORITY_EXPIRE = redisScript(PRIORITY_EXPIRE_LUA);
 const AUTO_HOLD = redisScript(AUTO_HOLD_LUA);
 const SNAPSHOT = redisScript(SNAPSHOT_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
 const PIN = redisScript(PIN_LUA);
 const RELEASE_FAILED = redisScript(RELEASE_FAILED_LUA);
+const RESTORE_PRIORITY = redisScript(RESTORE_PRIORITY_LUA);
 const BEGIN_REBUILD = redisScript(BEGIN_REBUILD_LUA);
 const REBUILD_SEATS = redisScript(REBUILD_SEATS_LUA);
 const REBUILD_QUOTAS = redisScript(REBUILD_QUOTAS_LUA);
@@ -343,6 +356,31 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     throw new Error(`우선 구매 보류 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
+  /** 우선 구매 보류 해제(GAT-135, 계약은 adapters/priority-hold-lua.ts PRIORITY_RELEASE_LUA). 좌석을 바로 돌려준다 */
+  async releasePriority(i: PriorityReleaseInput, o?: SeatCallOptions): Promise<PriorityReleaseResult> {
+    if (!KEY_PART.test(i.eventId) || i.accountId.length === 0 || !KEY_PART.test(i.grantId)) return { kind: 'NOT_FOUND' };
+    if (i.keepUntilMs <= 0) return { kind: 'NOT_FOUND' };
+    const e = i.eventId;
+    const keys = [seatKeys.bitmap(e), seatKeys.prio(e), seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.hold(e, i.seat.index)];
+    const args = [
+      i.grantId,
+      i.accountId,
+      String(i.keepUntilMs),
+      String(i.seat.index),
+      String(i.seat.sectionIndex),
+      String(i.seat.seatOffset),
+      i.seat.seatId,
+      i.seat.tierId,
+      i.seat.sectionId,
+      seatKeys.section(e, ''),
+    ];
+    const r = (await guard(this.redis.evalScript(PRIORITY_RELEASE, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`우선 구매 보류 해제 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'OK' || kind === 'NOT_FOUND' || kind === 'NOT_READY') return { kind };
+    throw new Error(`우선 구매 보류 해제 Lua가 모르는 값을 돌려줬다: ${kind}`);
+  }
+
   /**
    * 자동 배정 홀드(BUILD_ORDER HOT-080, 계약은 adapters/auto-hold-lua.ts): 페이지의 후보 묶음을 Lua 한 번에 넘긴다.
    * 좌석 메타데이터와 hold 키 차례는 같은 페이지 좌석 차례다. 결과의 seats 글은 색인 쉼표 글이다.
@@ -554,6 +592,20 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     const released = count(r[1], '푼 수');
     if (released > i.seats.length) throw new Error(`실패 해제 Lua의 푼 수(${released})가 넘긴 좌석 수(${i.seats.length})보다 크다`);
     return { kind, released };
+  }
+
+  /** 결제 실패 복귀(GAT-135, 계약은 adapters/pin-lua.ts RESTORE_PRIORITY_LUA). 그 권리의 PRIORITY 보류를 주문 표시만 지워 되돌린다 */
+  async restorePriority(i: RestorePriorityInput, o?: SeatCallOptions): Promise<RestorePriorityResult> {
+    assertRestorePriorityInput(i);
+    const e = i.eventId;
+    const keys = [seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), ...i.seats.map((s) => seatKeys.hold(e, s.index))];
+    const args = [i.accountId, i.grantId, String(i.keepUntilMs), ...i.seats.map((s) => String(s.index))];
+    const r = (await guard(this.redis.evalScript(RESTORE_PRIORITY, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`결제 실패 복귀 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { kind };
+    if (kind !== 'OK') throw new Error(`결제 실패 복귀 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    return { kind, restored: count(r[1], '되돌린 수') };
   }
 
   /**
@@ -790,6 +842,88 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       const index = count(r[k], '좌석 색인');
       if (!inputIndexes.has(index)) throw new Error(`만료 Lua가 입력에 없는 좌석 색인을 돌려줬다: ${index}`);
       expired.push({ index, fencingToken: fencingTokenOf(r[k + 1]) });
+    }
+    return { kind: 'OK', nowUs: count(r[1], '지금(µs)'), released, skipped, orphans, corrupt, expired };
+  }
+
+  /** 우선 구매 보류 만료 1단계: ZRANGE prio … WITHSCORES 뒤 홀드 Hash에서 권리 ID·fence·owner·kind를 읽는다 */
+  async duePriorityExpiries(i: DueExpiriesInput): Promise<DuePriorityExpiry[]> {
+    assertDueExpiriesInput(i);
+    const e = i.eventId;
+    const prio = seatKeys.prio(e);
+    const range = await guard(this.redis.command(['ZRANGE', prio, '-inf', String(i.nowMs), 'BYSCORE', 'LIMIT', String(i.offset ?? 0), String(i.limit), 'WITHSCORES'], { key: prio }));
+    const due = scoredMembers(range).map(([member, score]) => {
+      const m = str(member);
+      const index = Number(m);
+      const expiresAtMs = Number(str(score));
+      if (!/^(0|[1-9][0-9]*)$/.test(m) || !Number.isSafeInteger(index) || !Number.isFinite(expiresAtMs)) throw new Error(`PEAKET_CORRUPT_KEY ${prio}`);
+      return { index, expiresAtMs };
+    });
+    const hashes = await Promise.all(
+      due.map(async (d) => {
+        const key = seatKeys.hold(e, d.index);
+        try {
+          return await this.redis.command(['HMGET', key, 'holdId', 'fence', 'owner', 'kind', 'priorityGrantId'], { key });
+        } catch (err) {
+          if (isWrongType(err)) return WRONG_TYPE;
+          throw seatRedisError(err);
+        }
+      }),
+    );
+    return due.map((d, k): DuePriorityExpiry => {
+      if (hashes[k] === WRONG_TYPE) return { ...d, hold: null, corrupt: true };
+      const h = hashes[k] as unknown[];
+      const grantId = h[0] === null || h[0] === undefined ? undefined : str(h[0]);
+      const fence = h[1] === null || h[1] === undefined ? undefined : str(h[1]);
+      const owner = h[2] === null || h[2] === undefined ? undefined : str(h[2]);
+      const kind = h[3] === null || h[3] === undefined ? undefined : str(h[3]);
+      const priorityGrantId = h[4] === null || h[4] === undefined ? undefined : str(h[4]);
+      if (grantId === undefined && fence === undefined && owner === undefined) return { ...d, hold: null };
+      if (grantId === undefined || fence === undefined || owner === undefined || kind !== 'PRIORITY' || priorityGrantId !== grantId || !KEY_PART.test(owner) || !isExpirableFence(fence)) {
+        return { ...d, hold: null, corrupt: true };
+      }
+      return { ...d, hold: { grantId, fencingToken: fence, owner } };
+    });
+  }
+
+  /** 우선 구매 보류 만료 2단계: priority-expire-lua.ts PRIORITY_EXPIRE_LUA 한 번 */
+  async expirePriority(i: ExpirePriorityInput): Promise<ExpirePriorityResult> {
+    assertExpirePriorityInput(i);
+    const e = i.eventId;
+    const keys = [seatKeys.bitmap(e), seatKeys.prio(e), seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), ...i.seats.map((s) => seatKeys.hold(e, s.index))];
+    const args = [
+      seatKeys.section(e, ''),
+      String(i.keepUntilMs),
+      String(i.seats.length),
+      ...i.seats.flatMap((s) => [
+        String(s.index),
+        s.expected?.grantId ?? '',
+        s.expected?.fencingToken ?? '',
+        s.expected?.owner ?? '',
+        s.seat ? String(s.seat.sectionIndex) : '',
+        s.seat ? String(s.seat.seatOffset) : '',
+        s.seat?.seatId ?? '',
+        s.seat?.tierId ?? '',
+        s.seat?.sectionId ?? '',
+      ]),
+    ];
+    const r = (await guard(this.redis.evalScript(PRIORITY_EXPIRE, keys, args))) as unknown;
+    if (!Array.isArray(r)) throw new Error(`우선 구매 보류 만료 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { kind };
+    if (kind !== 'OK') throw new Error(`우선 구매 보류 만료 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    const released = count(r[2], '푼 수');
+    const skipped = count(r[3], '건너뛴 수');
+    const orphans = count(r[4], '고아 수');
+    if (r.length !== 5 + 2 * released) throw new Error(`우선 구매 보류 만료 Lua 답의 길이가 푼 수와 맞지 않는다: ${r.length}, 푼 수 ${released}`);
+    const corrupt = i.seats.length - (released + skipped + orphans);
+    if (corrupt < 0) throw new Error(`우선 구매 보류 만료 Lua 답의 합이 넘긴 좌석 수(${i.seats.length})보다 크다`);
+    const inputIndexes = new Set(i.seats.map((s) => s.index));
+    const expired: { index: number; grantId: string }[] = [];
+    for (let k = 5; k < r.length; k += 2) {
+      const index = count(r[k], '좌석 색인');
+      if (!inputIndexes.has(index)) throw new Error(`우선 구매 보류 만료 Lua가 입력에 없는 좌석 색인을 돌려줬다: ${index}`);
+      expired.push({ index, grantId: str(r[k + 1]) });
     }
     return { kind: 'OK', nowUs: count(r[1], '지금(µs)'), released, skipped, orphans, corrupt, expired };
   }

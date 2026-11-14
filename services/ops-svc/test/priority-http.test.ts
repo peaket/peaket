@@ -72,6 +72,34 @@ describe('/v1/ops/priority-grants [GAT-135]', () => {
     expect(copies).toEqual([{ accountId: ACCOUNT, eventId: EVENT, grantId: GRANT, state: 'WITHDRAWN', expiresAt: EXPIRES, version: 2 }]);
   });
 
+  test('소명 인정은 취소표마다 발급을, 기각은 그 권리 회수를 자동 호출한다', async () => {
+    copies.length = 0;
+    fail = undefined;
+    const accepted = await post('/internal/v1/fraud-objections/01900000-0000-7000-8000-0000000000a1/decisions', {}, {
+      accountId: ACCOUNT,
+      eventId: EVENT,
+      cancelledTicketIds: [TICKET],
+      decision: 'ACCEPTED',
+      actedBy: 'operator-1',
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(JSON.parse(accepted.payload)).toMatchObject({ decision: 'ACCEPTED', grants: [{ result: 'SAME_SEAT', grantId: GRANT, version: 1 }] });
+    expect(copies).toHaveLength(1);
+
+    copies.length = 0;
+    const rejected = await post('/internal/v1/fraud-objections/01900000-0000-7000-8000-0000000000a1/decisions', {}, {
+      accountId: ACCOUNT,
+      eventId: EVENT,
+      cancelledTicketIds: [],
+      decision: 'REJECTED',
+      grantId: GRANT,
+      actedBy: 'operator-1',
+    });
+    expect(rejected.statusCode).toBe(200);
+    expect(JSON.parse(rejected.payload)).toMatchObject({ decision: 'REJECTED', withdrawnGrantId: GRANT });
+    expect(copies).toEqual([{ accountId: ACCOUNT, eventId: EVENT, grantId: GRANT, state: 'WITHDRAWN', expiresAt: EXPIRES, version: 2 }]);
+  });
+
   test('viewer는 발급·회수하지 못하고, 의존 서비스가 답하지 않으면 503 dependency-unavailable이다', async () => {
     const viewer = identity.ops('viewer');
     expect((await post('/v1/ops/priority-grants', viewer, { fraudCaseId: CASE, eventId: EVENT, accountId: ACCOUNT, cancelledTicketId: TICKET })).statusCode).toBe(403);

@@ -116,7 +116,60 @@ export const purchaseV1Account: Record<string, unknown> = {
                     "GrantPriorityPurchase": {
                       "requestType": "GrantPriorityPurchaseRequest",
                       "responseType": "GrantPriorityPurchaseResponse"
+                    },
+                    "WithdrawPriorityPurchase": {
+                      "requestType": "WithdrawPriorityPurchaseRequest",
+                      "responseType": "WithdrawPriorityPurchaseResponse"
                     }
+                  }
+                },
+                "WithdrawPriorityPurchaseRequest": {
+                  "fields": {
+                    "grant_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "acted_by": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "WithdrawPriorityPurchaseResponse": {
+                  "fields": {
+                    "grant_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "status": {
+                      "type": "PriorityGrantState",
+                      "id": 4
+                    },
+                    "expires_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 5
+                    },
+                    "version": {
+                      "type": "int64",
+                      "id": 6
+                    }
+                  }
+                },
+                "PriorityGrantState": {
+                  "values": {
+                    "PRIORITY_GRANT_STATE_UNSPECIFIED": 0,
+                    "PRIORITY_GRANT_STATE_OFFERED": 1,
+                    "PRIORITY_GRANT_STATE_USED": 2,
+                    "PRIORITY_GRANT_STATE_EXPIRED": 3,
+                    "PRIORITY_GRANT_STATE_WITHDRAWN": 4
                   }
                 },
                 "GrantPriorityPurchaseRequest": {
@@ -173,6 +226,10 @@ export const purchaseV1Account: Record<string, unknown> = {
                     "expires_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 5
+                    },
+                    "version": {
+                      "type": "int64",
+                      "id": 6
                     }
                   }
                 }

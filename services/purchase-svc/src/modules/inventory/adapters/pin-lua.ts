@@ -398,3 +398,43 @@ extend(KEYS[4], keep)
 extend(KEYS[6], keep)
 return {'OK', k}
 `;
+
+// RESTORE_PRIORITY_LUA
+// 우선 구매 주문의 결제 실패 복귀(GAT-135, S-T37 ⑤). 그 권리의 PRIORITY 보류에서 주문 표시(pin·ordAt·maxStay·rem·thawAt)와
+// ordered·paused 멤버만 지운다. 비트·홀드 Hash·prio 인덱스는 그대로 두어 좌석이 PRIORITY 보류로 돌아간다.
+// KEYS: 1 ordered 2 paused 3 epoch 4.. hold:{좌석 색인}
+// ARGV: 1 계정 2 grantId 3 keepUntil ms 4 좌석 색인 …(색인은 KEYS 4..와 같은 차례)
+// 검사: 세대 키 없음 → {'NOT_READY'}, keepUntil ≤ now → PEAKET_KEEP_UNTIL_PAST, 키 형(ordered·paused zset, hold hash) →
+//       PEAKET_CORRUPT_KEY. 그 권리의 보류(holdId·owner·kind PRIORITY)만 되돌린다.
+// 돌려주기: {'OK', 되돌린 수}
+/** 결제 실패 복귀 Lua 원문(위 계약). 첫 줄이 #!lua다 */
+export const RESTORE_PRIORITY_LUA = `#!lua
+${INT_TEXT}${EXTEND}${GUARDS}${ENSURE_EPOCH}
+local n = #KEYS - 3
+if n < 1 or #ARGV ~= 3 + n then return redis.error_reply('ERR PEAKET_RESTORE_PRIORITY_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV) end
+local t = redis.call('TIME')
+local nowSec = tonumber(t[1])
+local now = nowSec * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ep = readEpoch(KEYS[3])
+if not ep then return {'NOT_READY'} end
+local keep = tonumber(ARGV[3])
+if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[3] .. ' now ' .. int(now)) end
+for _, kt in ipairs({{KEYS[1], 'zset'}, {KEYS[2], 'zset'}}) do
+  if not typed(kt[1], kt[2]) then return corrupt(kt[1]) end
+end
+for i = 1, n do
+  if not typed(KEYS[3 + i], 'hash') then return corrupt(KEYS[3 + i]) end
+end
+local restored = 0
+for i = 1, n do
+  local h = redis.call('HMGET', KEYS[3 + i], 'holdId', 'owner', 'kind', 'priorityGrantId')
+  if h[1] == ARGV[2] and h[2] == ARGV[1] and h[3] == 'PRIORITY' and h[4] == ARGV[2] then
+    redis.call('HDEL', KEYS[3 + i], 'pin', 'ordAt', 'maxStay', 'rem', 'thawAt')
+    redis.call('ZREM', KEYS[1], ARGV[3 + i])
+    redis.call('ZREM', KEYS[2], ARGV[3 + i])
+    restored = restored + 1
+  end
+end
+ensureEpoch(ep, nowSec)
+return {'OK', restored}
+`;

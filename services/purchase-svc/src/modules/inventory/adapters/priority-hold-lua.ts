@@ -98,3 +98,48 @@ redis.call('SPUBLISH', ARGV[11] .. ARGV[6], '1 ' .. seatEpoch .. ' ' .. ARGV[6] 
 for _, k in ipairs({KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6]}) do extend(k, keep) end
 return {'OK', tokText, nowText, expText}
 `;
+
+/** 우선 구매 보류 해제 Lua 계약(GAT-135, 회수·만료 회수). 첫 줄이 #!lua다 */
+export const PRIORITY_RELEASE_LUA = `#!lua
+${INT_TEXT}${EXTEND}${ENSURE_EPOCH}
+if #KEYS ~= 6 or #ARGV ~= 10 then return redis.error_reply('ERR PEAKET_PRIORITY_RELEASE_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV) end
+local t = redis.call('TIME')
+local nowSec = tonumber(t[1])
+local now = nowSec * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ep = readEpoch(KEYS[4])
+if not ep then return {'NOT_READY'} end
+local function decided(r)
+  ensureEpoch(ep, nowSec)
+  return r
+end
+local keep = tonumber(ARGV[3])
+if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[3] .. ' now ' .. int(now)) end
+for _, kt in ipairs({{KEYS[1], 'string'}, {KEYS[2], 'zset'}, {KEYS[3], 'stream'}, {KEYS[5], 'hash'}, {KEYS[6], 'hash'}}) do
+  local ty = redis.call('TYPE', kt[1]).ok
+  if ty ~= 'none' and ty ~= kt[2] then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. kt[1]) end
+end
+local idx = ARGV[4]
+local bit = redis.call('BITFIELD_RO', KEYS[1], 'GET', 'u1', idx)
+if bit[1] ~= 1 then return decided({'NOT_FOUND'}) end
+local h = redis.call('HMGET', KEYS[6], 'holdId', 'owner', 'kind', 'priorityGrantId', 'fence', 'exp')
+if h[1] ~= ARGV[1] or h[2] ~= ARGV[2] or h[3] ~= 'PRIORITY' or h[4] ~= ARGV[1] then return decided({'NOT_FOUND'}) end
+local sec = ARGV[5]
+local secNow = redis.call('HGET', KEYS[5], sec)
+if secNow and not (secNow == '0' or (#secNow <= 18 and string.match(secNow, '^[1-9]%d*$') ~= nil)) then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[5]) end
+local seatEpoch = ensureEpoch(ep, nowSec)
+redis.call('BITFIELD', KEYS[1], 'SET', 'u1', idx, '0')
+redis.call('DEL', KEYS[6])
+redis.call('ZREM', KEYS[2], idx)
+local version = redis.call('HINCRBY', KEYS[5], sec, 1)
+local nowText = int(now)
+redis.call('XADD', KEYS[3], '*',
+  'type', 'RELEASED', 'seatIdx', idx, 'seatId', ARGV[7], 'tierId', ARGV[8], 'sectionId', ARGV[9],
+  'holdId', ARGV[1], 'holdKind', 'PRIORITY', 'priorityGrantId', ARGV[1], 'purchaseSessionId', '', 'accountId', ARGV[2],
+  'fencingToken', h[5] or '', 'sectionVersion', int(version), 'seatEpoch', seatEpoch,
+  'occurredAtMs', nowText, 'expiresAtMs', h[6] or '')
+redis.call('SPUBLISH', ARGV[10] .. sec, '1 ' .. seatEpoch .. ' ' .. sec .. ' ' .. int(version) .. ' ' .. nowText .. ' ' .. ARGV[6] .. ':0')
+extend(KEYS[3], keep)
+extend(KEYS[5], keep)
+extend(KEYS[2], keep)
+return {'OK'}
+`;

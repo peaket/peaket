@@ -47,6 +47,8 @@ export interface SweepEventReport {
   outcome: SweepOutcome;
   /** 끝까지 돌아 결과를 받은 만료 Lua(SeatExpiries.expire) 수(0 ~ 20) */
   batches: number;
+  /** 이번 틱에 푼 우선 구매 보류 수(GAT-135) */
+  priorityReleased: number;
   /** 이번 틱에 그 회차에서 푼 좌석·건너뛴 좌석·고아 수(만료 Lua 결과의 합) */
   released: number;
   skipped: number;
@@ -97,6 +99,10 @@ export interface ExpirySweeperDeps {
   pauseView?: Pick<HoldPauseView, 'refresh'>;
   /** 옮기기·되돌리기 저장소(BUILD_ORDER HOT-070) */
   lifecycle?: Pick<HoldLifecycle, 'orderedPage' | 'frozenPage' | 'frozenCount' | 'freeze' | 'thaw'>;
+  /** 우선 구매 보류 만료 회수(GAT-135). 있으면 만료 반복이 s:{event:E}:prio도 돈다 */
+  priorityExpiries?: Pick<SeatExpiries, 'duePriorityExpiries' | 'expirePriority'>;
+  /** 푼 우선 구매 보류의 권리 ID를 EXPIRED로 바꾸는 고리. 던져도 반복은 그대로다 */
+  onPriorityGrantsExpired?: (e: { readonly eventId: string; readonly grantIds: readonly string[] }) => Promise<void> | void;
 }
 
 /** 로그 한 줄의 첫 인자(계정 ID가 든 키 이름·오류 글은 싣지 않는다) */
@@ -117,7 +123,7 @@ export interface SweepLogFields {
   seatStoreReason?: 'oom';
 }
 
-type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'loop' | 'hook' | 'freeze';
+type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'priority' | 'loop' | 'hook' | 'freeze';
 
 /** 회차 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -261,7 +267,7 @@ export class ExpirySweeper {
   async #sweepEvent(eventId: string, stopped: () => boolean, lags: number[], frozen: number[], pause?: EventPauseState): Promise<SweepEventReport> {
     const { expiries, seatMap, leases, clock, podId } = this.deps;
     const signals = this.deps.signals ?? noSeatSignals;
-    const report: SweepEventReport = { eventId, outcome: 'DRAINED', batches: 0, released: 0, skipped: 0, orphans: 0, unknownSeats: 0, corrupt: 0 };
+    const report: SweepEventReport = { eventId, outcome: 'DRAINED', batches: 0, priorityReleased: 0, released: 0, skipped: 0, orphans: 0, unknownSeats: 0, corrupt: 0 };
     const failedAt = this.#failedAt.get(eventId);
     if (failedAt !== undefined && clock.now() < failedAt + EXPIRY_BACKOFF_MS) return { ...report, outcome: 'BACKOFF' };
     const done = (outcome: SweepOutcome): SweepEventReport => {
@@ -277,6 +283,8 @@ export class ExpirySweeper {
       step = 'lease';
       if (!(await leases.acquire(eventId, podId, SWEEP_LEASE_TTL_MS))) return done('NOT_LEASED');
       const keepUntilMs = config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS;
+      // 우선 구매 보류 만료 회수(GAT-135). 일반 만료와 별도 인덱스(prio)라 먼저 돌린다
+      await this.#sweepPriority(eventId, keepUntilMs, config.seatCount, report);
       // 결제 정지 옮기기·되돌리기(BUILD_ORDER HOT-070). 만료보다 먼저 해 이번 틱의 회수에 반영한다
       let pausedSinceMs: number | undefined;
       if (pause && this.deps.lifecycle) {
@@ -382,6 +390,59 @@ export class ExpirySweeper {
       this.#log('error', { eventId, step, ...info }, '만료 반복이 그 회차를 이번 틱에서 멈췄다');
       if (step === 'expire') signals.luaError('expire', info.code);
       return done('ERROR');
+    }
+  }
+
+  /**
+   * 우선 구매 보류 만료 회수(GAT-135, S-T37 ⑦). prio 인덱스에서 지난 보류를 최대 5묶음 풀고,
+   * 푼 권리 ID를 onPriorityGrantsExpired로 넘겨 purchase DB 권리를 EXPIRED로 바꾼다. 실패는 경고 한 줄 뒤 다음 틱에 다시 한다.
+   */
+  async #sweepPriority(eventId: string, keepUntilMs: number, seatCount: number, report: SweepEventReport): Promise<void> {
+    const duePriorityExpiries = this.deps.priorityExpiries?.duePriorityExpiries?.bind(this.deps.priorityExpiries);
+    const expirePriority = this.deps.priorityExpiries?.expirePriority?.bind(this.deps.priorityExpiries);
+    if (!duePriorityExpiries || !expirePriority) return;
+    const { clock, seatMap } = this.deps;
+    const signals = this.deps.signals ?? noSeatSignals;
+    for (let batch = 0; batch < 5; batch++) {
+      let due;
+      try {
+        due = await duePriorityExpiries({ eventId, nowMs: clock.now(), limit: EXPIRY_BATCH_SIZE });
+      } catch (err) {
+        this.#log('warn', { eventId, step: 'priority', ...this.#codeOf(err) }, '우선 구매 보류 만료 읽기가 실패해 이번 틱을 건너뛴다');
+        return;
+      }
+      if (due.length === 0) return;
+      const usable = due.filter((d) => !d.corrupt && d.index < seatCount);
+      const held = usable.filter((d) => d.hold !== null);
+      const refs = held.length > 0 ? await seatMap.byIndex(eventId, held.map((d) => d.index)) : [];
+      const seatOf = new Map(held.map((d, k) => [d.index, refs[k]]));
+      let out;
+      try {
+        out = await expirePriority({
+          eventId,
+          keepUntilMs,
+          seats: usable.map((d) => {
+            const seat = seatOf.get(d.index);
+            return { index: d.index, expected: d.hold, ...(seat ? { seat } : {}) };
+          }),
+        });
+      } catch (err) {
+        this.#log('warn', { eventId, step: 'priority', ...this.#codeOf(err) }, '우선 구매 보류 만료 회수가 실패해 이번 틱을 건너뛴다');
+        return;
+      }
+      if (out.kind === 'NOT_READY') {
+        signals.luaError('expire', 'NOT_READY');
+        return;
+      }
+      report.priorityReleased += out.released;
+      if (out.released === 0) return;
+      const grantIds = [...new Set(out.expired.map((x) => x.grantId))];
+      try {
+        await this.deps.onPriorityGrantsExpired?.({ eventId, grantIds });
+      } catch (err) {
+        this.#log('warn', { eventId, step: 'priority', ...this.#codeOf(err) }, '우선 구매 권리 EXPIRED 반영 실패(다음 틱이 다시 한다)');
+      }
+      if (due.length < EXPIRY_BATCH_SIZE) return;
     }
   }
 

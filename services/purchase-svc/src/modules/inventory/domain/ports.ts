@@ -5,7 +5,7 @@
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { SessionHoldEntry } from './purchase-session.js';
 import type { HoldReleaseReason } from './hold-lifecycle.js';
-import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
+import type { DueExpiriesInput, DueExpiry, DuePriorityExpiry, ExpireInput, ExpirePriorityInput, ExpirePriorityResult, ExpireResult, SweepOutcome } from './expiry.js';
 import type { AutoCandidateGroup, AutoCandidateList, AutoCondition, AutoHoldInput, AutoHoldResult } from './auto.js';
 import type { HoldInput, HoldResult, PriorityHoldInput, PriorityHoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
@@ -13,7 +13,7 @@ import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEnt
 import type { SectionRange } from './seat-layout.js';
 import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
 import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
-import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RetireResult } from './pin.js';
+import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RestorePriorityInput, RestorePriorityResult, RetireResult } from './pin.js';
 import type { RebuildFinishInput, RebuildHold, RebuildLedgerRow, RebuildPinnedOrder, RebuildSale, RebuildSaleOrder, RebuildSeat, RebuildStep } from './rebuild.js';
 import type { EventSaleRow, SaleLayout, SaleSeatCounts, SaleStatus } from './sale-state.js';
 
@@ -212,6 +212,15 @@ export interface SeatExpiries {
    * @throws Error 3a의 묶음 전체 오류(PEAKET_KEEP_UNTIL_PAST·PEAKET_CORRUPT_KEY), 모르는 결과 값, 안전한 정수가 아닌 토큰, 푼·건너뛴·고아 수의 합이 seats 수보다 큼
    */
   expire(i: ExpireInput): Promise<ExpireResult>;
+
+  /**
+   * 우선 구매 보류 만료 1단계: s:{event:E}:prio에서 점수가 nowMs 이하인 좌석을 limit개까지 읽고,
+   * 홀드 Hash의 holdId·fence·owner·kind·priorityGrantId를 읽는다. kind PRIORITY가 아니면 corrupt로 본다.
+   */
+  duePriorityExpiries?(i: DueExpiriesInput): Promise<DuePriorityExpiry[]>;
+
+  /** 우선 구매 보류 만료 2단계: 그 권리의 PRIORITY 보류를 풀고 EXPIRED 사건을 남긴다(권리는 스위퍼가 EXPIRED로 바꾼다) */
+  expirePriority?(i: ExpirePriorityInput): Promise<ExpirePriorityResult>;
 }
 
 export const SWEEP_LEASES = Symbol('purchase.SweepLeases');
@@ -952,6 +961,8 @@ export interface SeatPins {
   pin(input: PinInput, o?: SeatCallOptions): Promise<PinResult>;
   /** @throws RangeError 입력 모양이 틀림 · SeatStoreUnavailable 좌석 Redis 일시 장애(다시 부르면 남은 것만 푼다) */
   releaseFailed(input: ReleaseFailedInput, o?: SeatCallOptions): Promise<ReleaseFailedResult>;
+  /** 우선 구매 주문의 결제 실패 복귀(GAT-135). 그 권리의 PRIORITY 보류에서 주문 표시만 지운다 */
+  restorePriority(input: RestorePriorityInput, o?: SeatCallOptions): Promise<RestorePriorityResult>;
 }
 
 /** 회차 목록 s:ctl:events에서 회차 빼기(판매 종료 정비, BUILD_ORDER PRF-142). 정비 잡이 하루 한 번 부른다(조립은 PRF-160) */

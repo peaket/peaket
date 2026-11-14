@@ -138,6 +138,37 @@ export type ExpireResult =
   | { kind: 'OK'; nowUs: number; released: number; skipped: number; orphans: number; corrupt: number; expired: ExpiredHold[] }
   | { kind: 'NOT_READY' };
 
+/** 1단계에서 읽은 우선 구매 보류 하나(s:{event:E}:prio와 hold Hash) */
+export interface DuePriorityExpiry {
+  /** 좌석 색인(prio 인덱스 멤버) */
+  index: number;
+  /** prio 인덱스 점수(권리 만료 시각, epoch ms) */
+  expiresAtMs: number;
+  /** 그 홀드가 이 권리의 PRIORITY 보류일 때의 기대값. 고아·망가짐이면 null */
+  hold: { readonly grantId: string; readonly fencingToken: string; readonly owner: string } | null;
+  /** 망가진 홀드(일부 칸 없음·모양 틀림). 다음 틱에 다시 본다 */
+  corrupt?: true;
+}
+
+/** 우선 구매 보류 만료 Lua에 넘기는 좌석 하나 */
+export interface ExpirePrioritySeat {
+  readonly index: number;
+  readonly expected: { readonly grantId: string; readonly fencingToken: string; readonly owner: string } | null;
+  readonly seat?: SeatRef;
+}
+
+/** 우선 구매 보류 만료 Lua의 입력 */
+export interface ExpirePriorityInput {
+  readonly eventId: string;
+  readonly keepUntilMs: number;
+  readonly seats: readonly ExpirePrioritySeat[];
+}
+
+/** 우선 구매 보류 만료 결과. expired는 푼 좌석의 (색인, 권리 ID)다 */
+export type ExpirePriorityResult =
+  | { kind: 'OK'; nowUs: number; released: number; skipped: number; orphans: number; corrupt: number; expired: { readonly index: number; readonly grantId: string }[] }
+  | { kind: 'NOT_READY' };
+
 /** 회차 ID 모양 검사(키 이름의 해시 태그에 들어간다) */
 function assertEventId(eventId: unknown): void {
   if (typeof eventId !== 'string' || !KEY_PART.test(eventId)) throw new RangeError(`회차 ID 모양이 키 조각이 아니다: ${String(eventId)}`);
@@ -160,6 +191,20 @@ export function assertDueExpiriesInput(i: DueExpiriesInput): void {
 export function assertExpireInput(i: ExpireInput): void {
   assertEventId(i.eventId);
   if (i.seats.length < 1 || i.seats.length > EXPIRY_BATCH_SIZE) throw new RangeError(`만료 좌석 수는 1 ~ ${EXPIRY_BATCH_SIZE}다: ${i.seats.length}`);
+  const seen = new Set<number>();
+  for (const s of i.seats) {
+    if (!Number.isSafeInteger(s.index) || s.index < 0) throw new RangeError(`좌석 색인은 0 이상의 정수다: ${s.index}`);
+    if (seen.has(s.index)) throw new RangeError(`좌석 색인이 겹친다: ${s.index}`);
+    seen.add(s.index);
+    if (s.expected && (typeof s.expected.owner !== 'string' || !KEY_PART.test(s.expected.owner))) throw new RangeError(`좌석 ${s.index}의 소유 계정 모양이 키 조각이 아니다`);
+  }
+}
+
+/** 우선 구매 보류 만료 입력의 모양 검사 */
+export function assertExpirePriorityInput(i: ExpirePriorityInput): void {
+  assertEventId(i.eventId);
+  if (!Number.isSafeInteger(i.keepUntilMs) || i.keepUntilMs < 1) throw new RangeError(`keepUntilMs는 양의 안전한 정수다: ${i.keepUntilMs}`);
+  if (i.seats.length < 1 || i.seats.length > EXPIRY_BATCH_SIZE) throw new RangeError(`우선 구매 보류 좌석 수는 1 ~ ${EXPIRY_BATCH_SIZE}다: ${i.seats.length}`);
   const seen = new Set<number>();
   for (const s of i.seats) {
     if (!Number.isSafeInteger(s.index) || s.index < 0) throw new RangeError(`좌석 색인은 0 이상의 정수다: ${s.index}`);

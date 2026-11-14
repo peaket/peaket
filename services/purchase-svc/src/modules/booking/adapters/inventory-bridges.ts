@@ -9,6 +9,8 @@ import {
   type OrderPinResult,
   type OrderReleaseInput,
   type OrderReleaseResult,
+  type OrderRestorePriorityInput,
+  type OrderRestorePriorityResult,
   OrderSeatStoreUnavailable,
   type OrderSeatPins,
   type OrderSessions,
@@ -156,6 +158,10 @@ export interface SeatPinSource {
       input: { eventId: string; accountId: string; holdId: string; seats: readonly SeatRefShape[]; keepUntilMs: number },
       o?: { deadlineMs?: number },
     ): Promise<{ kind: 'OK'; released: number } | { kind: 'NOT_READY' }>;
+    restorePriority?(
+      input: { eventId: string; accountId: string; grantId: string; seats: readonly SeatRefShape[]; keepUntilMs: number },
+      o?: { deadlineMs?: number },
+    ): Promise<{ kind: 'OK'; restored: number } | { kind: 'NOT_READY' }>;
   };
   seatMap: { resolve(eventId: string, seatIds: readonly string[]): Promise<(SeatRefShape | undefined)[]> };
 }
@@ -210,6 +216,19 @@ export class InventoryOrderSeatPins implements OrderSeatPins {
       throw seatStoreErrorOf(e);
     }
     return r.kind === 'OK' ? { status: 'OK', released: r.released } : { status: 'NOT_READY' };
+  }
+
+  async restorePriority(input: OrderRestorePriorityInput, o?: { deadlineMs?: number }): Promise<OrderRestorePriorityResult> {
+    const restore = this.source.pins.restorePriority?.bind(this.source.pins);
+    if (!restore) return { status: 'NOT_READY' };
+    const seats = await this.#seatsOf(input.eventId, input.seatIds);
+    let r: Awaited<ReturnType<NonNullable<SeatPinSource['pins']['restorePriority']>>>;
+    try {
+      r = await restore({ eventId: input.eventId, accountId: input.accountId, grantId: input.grantId, seats, keepUntilMs: input.keepUntilMs }, ...callOptions(o));
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+    return r.kind === 'OK' ? { status: 'OK', restored: r.restored } : { status: 'NOT_READY' };
   }
 
   /** 좌석 ID → SeatRef(좌석 ID 오름차순, 겹친 ID는 하나로). 판에 없는 좌석이 하나라도 있으면 Error(설정 오류. 좌석 Redis를 부르지 않는다) */

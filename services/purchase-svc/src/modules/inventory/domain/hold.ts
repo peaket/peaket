@@ -161,6 +161,19 @@ export type PriorityHoldResult =
   | { readonly kind: 'CONFLICT'; readonly seatId: string }
   | { readonly kind: 'EXPIRED' };
 
+/** 우선 구매 보류 해제(GAT-135, 권리 회수·만료 회수). 좌석을 바로 돌려준다(방금 놓은 좌석 대기 없음) */
+export interface PriorityReleaseInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly grantId: string;
+  readonly seat: SeatRef;
+  /** 회차 키의 만료 시각(판매 종료 + 1일) */
+  readonly keepUntilMs: number;
+}
+
+/** SeatStore.releasePriority의 결과. NOT_FOUND는 이미 풀렸거나 이 권리의 보류가 아니다 */
+export type PriorityReleaseResult = { readonly kind: 'OK' } | { readonly kind: 'NOT_FOUND' } | { readonly kind: 'NOT_READY' };
+
 /**
  * SeatStore.replay의 결과. 같은 계정·같은 키의 살아 있는 기록이 같은 지문이면 처음 응답(IDEM_REPLAY), 다른 지문이면 IDEM_REUSED,
  * 기록이 없거나 수명(7분)이 지났으면 null이다

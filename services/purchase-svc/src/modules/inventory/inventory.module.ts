@@ -79,7 +79,19 @@ export type InventoryModuleOptions = (
    * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop).
    * onHoldsExpired는 만료로 푼 홀드를 알리는 고리다(BUILD_ORDER PRF-172. 운영은 purchase DB가 있을 때 booking OrderExpiry.onHoldsExpired를 잇는다)
    */
-  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
+  | {
+      storage: 'redis';
+      redis: HotRedis;
+      seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto;
+      attempts: HoldAttempts;
+      podId: string;
+      signals?: SeatSignals;
+      seatBehavior?: SeatBehaviorReporter;
+      onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'];
+      priorityExpiries?: ExpirySweeperDeps['priorityExpiries'];
+      onPriorityGrantsExpired?: ExpirySweeperDeps['onPriorityGrantsExpired'];
+      holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> };
+    }
   /**
    * 시험: 넘기지 않은 것은 새로 만든다(저장소 MemorySeatStore(주입 Clock), 좌석맵 MemorySeatMap, 시도 기록 RecordingHoldAttempts, 지표 버림).
    * 만료 반복은 만들지 않는다(시험은 ExpirySweeper를 직접 만들어 손으로 tick한다)
@@ -121,7 +133,20 @@ export class InventoryModule {
             {
               provide: ExpirySweeper,
               useFactory: (store: RedisSeatStore, seatMap: SeatMap & SeatMapIndex, leases: SweepLeases, clock: Clock, s: SeatSignals, gate: LogGate, logger?: PlatformLogger) =>
-                new ExpirySweeper({ expiries: store, seatMap, leases, clock, podId: o.podId, signals: s, oomWarnGate: gate, ...(logger ? { logger } : {}), ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}), ...(o.holdFreeze ?? {}) }),
+                new ExpirySweeper({
+                  expiries: store,
+                  seatMap,
+                  leases,
+                  clock,
+                  podId: o.podId,
+                  signals: s,
+                  oomWarnGate: gate,
+                  ...(logger ? { logger } : {}),
+                  ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
+                  ...(o.priorityExpiries ? { priorityExpiries: o.priorityExpiries } : {}),
+                  ...(o.onPriorityGrantsExpired ? { onPriorityGrantsExpired: o.onPriorityGrantsExpired } : {}),
+                  ...(o.holdFreeze ?? {}),
+                }),
               inject: [SEAT_STORE, SEAT_MAP, SWEEP_LEASES, CLOCK, SEAT_SIGNALS, OOM_WARN_GATE, optionalLogger],
             },
           ]

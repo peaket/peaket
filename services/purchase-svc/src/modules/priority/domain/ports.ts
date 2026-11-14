@@ -13,6 +13,10 @@ export interface PriorityGrantStore {
   markUsed(grantId: string, orderId: string, nowMs: number): Promise<PriorityGrant | undefined>;
   /** 회수. OFFERED를 WITHDRAWN으로 바꾸고 판 번호를 올린다 */
   withdraw(grantId: string, nowMs: number): Promise<PriorityGrant | undefined>;
+  /** 기한이 지난 OFFERED를 EXPIRED로 바꾸고 판 번호를 올린다(만료 회수, 보상 건 없음) */
+  expire(grantId: string, nowMs: number): Promise<PriorityGrant | undefined>;
+  /** 결제 실패로 진행 중 주문 표시를 비운다. OFFERED이고 active_order_id가 그 주문일 때만 */
+  releaseOrder(grantId: string, orderId: string, nowMs: number): Promise<boolean>;
 }
 
 /** 취소한 표의 좌석·등급·가격을 읽는 포트(purchase DB order_item·order_cancellation·event 일정) */
@@ -29,6 +33,14 @@ export interface PrioritySeatHolds {
     | { kind: 'NOT_READY' }
     | { kind: 'EXPIRED' }
   >;
+  /** 회수·만료 때 좌석을 바로 돌려준다(권리 만료까지 좌석이 남지 않게) */
+  releasePriority(input: { eventId: string; accountId: string; grantId: string; seat: SeatRef; keepUntilMs: number }): Promise<{ kind: 'OK' } | { kind: 'NOT_FOUND' } | { kind: 'NOT_READY' }>;
+}
+
+/** 활성 판매 행(seat_sale PENDING·SOLD)을 보는 포트. purchase DB가 구현한다 */
+export interface PrioritySeatSales {
+  /** 그 좌석들 가운데 지금 팔렸거나 결제 중인 좌석 ID */
+  active(eventId: string, seatIds: readonly string[]): Promise<ReadonlySet<string>>;
 }
 
 /** 같은 등급의 남은 좌석 후보를 찾는 포트. inventory의 SeatMapTiers·SeatMapIndex가 구현한다 */

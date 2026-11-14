@@ -27,6 +27,7 @@ import type {
   PaymentStatusReads,
   PaymentStatusWaiters,
   PriorityGrants,
+  PrioritySeatSales,
   SaleConfigs,
   SeatSlotReads,
   StartPaymentLog,
@@ -55,6 +56,10 @@ export interface BookingModuleDeps {
   restrictions: BookingRestrictions;
   /** 우선 구매 보류 주문의 권리 확인(GAT-135). 없으면 PRIORITY 홀드 주문을 409로 거절한다 */
   priorityGrants?: PriorityGrants;
+  /** 우선 구매 좌석의 활성 판매 행 대조(GAT-135) */
+  prioritySeatSales?: PrioritySeatSales;
+  /** 팔린 좌석의 권리를 회수하는 고리(운영은 WithdrawPriorityGrant) */
+  priorityWithdraw?: (grantId: string) => Promise<unknown>;
   signals: OrderSignals;
   /** 결제 접수의 purchase DB 읽기·쓰기(운영은 DrizzleOrderAccepts 하나가 둘을 구현한다, PRF-162) */
   accepts: OrderAcceptReads & OrderAcceptWrites;

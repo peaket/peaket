@@ -68,6 +68,36 @@ describe('우선 구매 보류 Lua [GAT-135, S-T37 ①]', () => {
     expect(await holds.check({ ...base, holdId: other, priorityGrantId: other })).toEqual({ status: 'NOT_FOUND' });
   });
 
+  test('S-T37 ⑦_회수_해제는_좌석을_바로_돌려주고_RELEASED를_남긴다', async () => {
+    const eventId = randomUUID();
+    const accountId = randomUUID();
+    const grantId = randomUUID();
+    const seat = { seatId: randomUUID(), index: 5, sectionId: 'SEC-A', sectionIndex: 0, seatOffset: 5, tierId: 'R' };
+    await store.openSale({ eventId, seatCount: 10, keepUntilMs: NOW + 10 * DAY });
+    expect(await store.holdPriority({ eventId, accountId, grantId, seat, expiresAtMs: NOW + DAY, keepUntilMs: NOW + 2 * DAY })).toMatchObject({ kind: 'OK' });
+    expect(await store.releasePriority({ eventId, accountId, grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'OK' });
+    expect(await redis.command(['GETBIT', seatKeys.bitmap(eventId), String(seat.index)], { key: seatKeys.bitmap(eventId) })).toBe(0);
+    expect(await redis.command(['EXISTS', seatKeys.hold(eventId, seat.index)], { key: seatKeys.hold(eventId, seat.index) })).toBe(0);
+    expect(await redis.command(['ZSCORE', seatKeys.prio(eventId), String(seat.index)], { key: seatKeys.prio(eventId) })).toBeNull();
+    expect(await store.releasePriority({ eventId, accountId, grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'NOT_FOUND' });
+  });
+
+  test('S-T37 ⑦_prio_만료_회수는_지난_보류만_풀고_EXPIRED를_남긴다', async () => {
+    const eventId = randomUUID();
+    const accountId = randomUUID();
+    const grantId = randomUUID();
+    const seat = { seatId: randomUUID(), index: 6, sectionId: 'SEC-A', sectionIndex: 0, seatOffset: 6, tierId: 'R' };
+    await store.openSale({ eventId, seatCount: 10, keepUntilMs: NOW + 10 * DAY });
+    const exp = Date.now() + 200;
+    expect(await store.holdPriority({ eventId, accountId, grantId, seat, expiresAtMs: exp, keepUntilMs: NOW + 2 * DAY })).toMatchObject({ kind: 'OK' });
+    await new Promise((r) => setTimeout(r, 250));
+    const due = await store.duePriorityExpiries({ eventId, nowMs: Date.now(), limit: 100 });
+    expect(due).toMatchObject([{ index: seat.index, hold: { grantId, owner: accountId } }]);
+    const out = await store.expirePriority({ eventId, keepUntilMs: NOW + 2 * DAY, seats: [{ index: seat.index, expected: due[0]!.hold, seat }] });
+    expect(out).toMatchObject({ kind: 'OK', released: 1, expired: [{ index: seat.index, grantId }] });
+    expect(await redis.command(['GETBIT', seatKeys.bitmap(eventId), String(seat.index)], { key: seatKeys.bitmap(eventId) })).toBe(0);
+  });
+
   test('GAT135_만료_시각이_지난_보류는_EXPIRED이고_아무것도_잡지_않는다', async () => {
     const eventId = randomUUID();
     const seat = { seatId: randomUUID(), index: 1, sectionId: 'SEC-A', sectionIndex: 0, seatOffset: 1, tierId: 'R' };

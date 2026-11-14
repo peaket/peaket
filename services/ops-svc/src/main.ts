@@ -12,7 +12,7 @@ import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
-import { HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
+import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 
 const SERVICE = 'ops-svc';
@@ -50,10 +50,12 @@ const executor = new HttpCommandExecutor({
   ...(control ? { control } : {}),
   internalToken,
 });
+const purchasePriority = purchaseGrpcAddr ? new GrpcPurchasePriorityGrants(purchaseGrpcAddr) : undefined;
 const priority =
-  purchaseUrl && queueClient
+  (purchasePriority || purchaseUrl) && queueClient
     ? {
-        purchase: new HttpPurchasePriorityGrants(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl, timeoutCapMs: 5_000 }), internalToken),
+        purchase:
+          purchasePriority ?? new HttpPurchasePriorityGrants(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl!, timeoutCapMs: 5_000 }), internalToken),
         copies: new HttpQueuePriorityGrantCopies(queueClient, internalToken),
       }
     : undefined;
@@ -124,8 +126,9 @@ process.once('SIGTERM', () => {
     } finally {
       try {
         refunds?.close();
+        purchasePriority?.close();
       } catch (err) {
-        service.logger.error({ err }, '회차 취소 환불 gRPC 클라이언트 닫기 실패');
+        service.logger.error({ err }, '회차 취소 환불·우선 구매 gRPC 클라이언트 닫기 실패');
       }
       try {
         control?.purchase.close();

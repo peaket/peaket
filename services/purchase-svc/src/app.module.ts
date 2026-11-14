@@ -43,7 +43,18 @@ export class AppModule implements NestModule {
    */
   static register(
     o: (
-      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto; attempts: HoldAttempts; podId: string; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired']; holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> } }
+      | {
+          redis: HotRedis;
+          seatMap: SeatMap & SeatMapIndex & SeatMapSections & SeatMapAuto;
+          attempts: HoldAttempts;
+          podId: string;
+          signals?: SeatSignals;
+          seatBehavior?: SeatBehaviorReporter;
+          onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'];
+          priorityExpiries?: ExpirySweeperDeps['priorityExpiries'];
+          onPriorityGrantsExpired?: ExpirySweeperDeps['onPriorityGrantsExpired'];
+          holdFreeze?: { pauseView: NonNullable<ExpirySweeperDeps['pauseView']>; lifecycle: NonNullable<ExpirySweeperDeps['lifecycle']> };
+        }
       | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections & SeatMapAuto; attempts?: HoldAttempts; signals?: SeatSignals; seatBehavior?: SeatBehaviorReporter }
     ) & {
       sessions: PurchaseSessionAccess;
@@ -80,6 +91,8 @@ export class AppModule implements NestModule {
             ...(o.signals ? { signals: o.signals } : {}),
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
+            ...(o.priorityExpiries ? { priorityExpiries: o.priorityExpiries } : {}),
+            ...(o.onPriorityGrantsExpired ? { onPriorityGrantsExpired: o.onPriorityGrantsExpired } : {}),
             ...(o.holdFreeze ? { holdFreeze: o.holdFreeze } : {}),
             ...(o.hotPath ? { hotPath: o.hotPath } : {}),
           })

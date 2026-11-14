@@ -61,6 +61,8 @@ export const purchaseOrder = pgTable(
     // Saga 묶기가 OK인 뒤 적는 시각(0008, BUILD_ORDER PRF-167). 다시 만들기가 결제를 접수했고(ACCEPTED) 묶인 주문의 좌석을
     // 원장 만료 시각과 상관없이 되살리는 근거다(docs/features/seat-hold.md §6 '주문 기준 되살리기', K1). 묶기 전이면 비어 있다
     pinnedAt: at('pinned_at'),
+    // 우선 구매 보류에서 만든 주문이면 그 권리 ID(0020, GAT-135). 결제 실패·만료 때 권리의 보류로 되돌리는 근거다
+    priorityGrantId: uuid('priority_grant_id'),
   },
   (t) => [
     // 한 홀드에 주문 하나(docs/data.md §5 '주문 생성'). 뒤 쪽 트랜잭션은 유일 확인에서 앞 쪽 커밋을 기다리고 23505로 끝난다

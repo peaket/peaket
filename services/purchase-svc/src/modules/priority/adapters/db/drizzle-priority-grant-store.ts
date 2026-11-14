@@ -1,7 +1,7 @@
 // 우선 구매 권리 표의 Drizzle 저장소(GAT-135, docs/data.md priority_grant). 판 번호와 상태 전이는 조건부 UPDATE로 지킨다.
 import { type Database, type DbTransaction } from '@peaket/platform';
 import { sql, type SQL } from 'drizzle-orm';
-import type { NewPriorityGrant, PriorityGrant, PriorityGrantStatus } from '../../domain/priority-grant.js';
+import { PrioritySeatConflict, type NewPriorityGrant, type PriorityGrant, type PriorityGrantStatus } from '../../domain/priority-grant.js';
 import type { PriorityGrantStore } from '../../domain/ports.js';
 
 type Executor = Pick<DbTransaction, 'execute'>;
@@ -73,14 +73,20 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
             values (${input.grantId}::uuid, ${input.eventId}::uuid, ${input.accountId}::uuid, ${input.fraudCaseId}::uuid, ${input.cancelledTicketId}::uuid,
                     ${input.grantKind}, ${input.seatId}::uuid, ${input.tierId}, ${input.price}::int, 'OFFERED', ${new Date(input.expiresAtMs)}::timestamptz, 1,
                     ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz)
-            on conflict (cancelled_ticket_id) do nothing
+            on conflict do nothing
             returning ${COLUMNS}`,
       );
       if (inserted) return inserted;
       // 같은 표로 먼저 만든 권리를 돌려준다(멱등)
       const existing = await one(tx, sql`select ${COLUMNS} from priority_grant where cancelled_ticket_id = ${input.cancelledTicketId}::uuid`);
-      if (!existing) throw new Error('priority_grant를 넣지 못했고 기존 행도 없다');
-      return existing;
+      if (existing) return existing;
+      // 같은 좌석에 다른 OFFERED 권리가 먼저 만들어졌다(0020 부분 유일 인덱스). 잡은 보류를 풀고 다음 후보로 간다
+      const sameSeat = await one(
+        tx,
+        sql`select ${COLUMNS} from priority_grant where event_id = ${input.eventId}::uuid and seat_id = ${input.seatId}::uuid and status = 'OFFERED' limit 1`,
+      );
+      if (sameSeat) throw new PrioritySeatConflict(input.seatId);
+      throw new Error('priority_grant를 넣지 못했고 기존 행도 없다');
     });
   }
 
@@ -105,5 +111,20 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
       sql`update priority_grant set status = 'WITHDRAWN', version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
           where id = ${grantId}::uuid and status = 'OFFERED' returning ${COLUMNS}`,
     );
+  }
+
+  async expire(grantId: string, nowMs: number): Promise<PriorityGrant | undefined> {
+    return one(
+      this.database.db,
+      sql`update priority_grant set status = 'EXPIRED', active_order_id = null, version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
+          where id = ${grantId}::uuid and status = 'OFFERED' returning ${COLUMNS}`,
+    );
+  }
+
+  async releaseOrder(grantId: string, orderId: string, nowMs: number): Promise<boolean> {
+    const r = await this.database.db.execute(sql`
+      update priority_grant set active_order_id = null, updated_at = ${new Date(nowMs)}::timestamptz
+      where id = ${grantId}::uuid and status = 'OFFERED' and active_order_id = ${orderId}::uuid`);
+    return (r.rowCount ?? 0) === 1;
   }
 }

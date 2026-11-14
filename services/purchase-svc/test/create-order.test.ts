@@ -889,6 +889,14 @@ describe('S-T37 우선 구매 보류 주문(GAT-135, ADR-0171)', () => {
     });
   });
 
+  test('S-T37 ⑥_prio_세션이_권리의_좌석이_아닌_좌석을_주문하면_409_priority-seat-only다', async () => {
+    prioritySession();
+    fx.priorityGrant = GRANT_VIEW;
+    priorityHold({ seats: [{ seatId: 'A02', tierId: 'R', sectionId: 'SEC-A' }] });
+    expect(await run(okCommand({ body: okBody({ holdId: GRANT }) }))).toEqual({ status: 'REJECTED', reason: 'PRIORITY_SEAT_ONLY' });
+    noOrder();
+  });
+
   test('S-T37 ④_판매_종료_뒤에도_유효한_권리의_PRIORITY_홀드는_201이다', async () => {
     prioritySession();
     fx.priorityGrant = GRANT_VIEW;
@@ -898,7 +906,14 @@ describe('S-T37 우선 구매 보류 주문(GAT-135, ADR-0171)', () => {
   });
 
   test('GAT135_권리가_없거나_만료·다른_회차·진행_중_주문이면_409이고_홀드를_보지_않는다', async () => {
-    const cases = [undefined, { ...GRANT_VIEW, expiresAtMs: NOW }, { ...GRANT_VIEW, eventId: '0190f3a1-7c2e-7c00-8000-0000000000c2' }, { ...GRANT_VIEW, activeOrderId: '0190f3a1-7c2e-7f00-8000-0000000000f9' }];
+    const cases = [
+      undefined,
+      { ...GRANT_VIEW, expiresAtMs: NOW },
+      { ...GRANT_VIEW, status: 'WITHDRAWN' as const },
+      { ...GRANT_VIEW, status: 'USED' as const },
+      { ...GRANT_VIEW, eventId: '0190f3a1-7c2e-7c00-8000-0000000000c2' },
+      { ...GRANT_VIEW, activeOrderId: '0190f3a1-7c2e-7f00-8000-0000000000f9' },
+    ];
     for (const g of cases) {
       fx.reset();
       prioritySession();

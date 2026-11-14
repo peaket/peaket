@@ -1,5 +1,5 @@
 // 시험용 우선 구매 권리 저장소. 같은 취소 표에는 한 번만 만든다.
-import type { NewPriorityGrant, PriorityGrant } from '../domain/priority-grant.js';
+import { PrioritySeatConflict, type NewPriorityGrant, type PriorityGrant } from '../domain/priority-grant.js';
 import type { PriorityGrantStore } from '../domain/ports.js';
 
 export class MemoryPriorityGrantStore implements PriorityGrantStore {
@@ -18,6 +18,9 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
   async create(input: NewPriorityGrant): Promise<PriorityGrant> {
     const existing = await this.findByCancelledTicket(input.cancelledTicketId);
     if (existing) return existing;
+    for (const g of this.grants.values()) {
+      if (g.eventId === input.eventId && g.seatId === input.seatId && g.status === 'OFFERED') throw new PrioritySeatConflict(input.seatId);
+    }
     const grant: PriorityGrant = {
       grantId: input.grantId,
       eventId: input.eventId,
@@ -60,5 +63,20 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
     const next: PriorityGrant = { ...g, status: 'WITHDRAWN', version: g.version + 1, updatedAtMs: nowMs };
     this.grants.set(grantId, next);
     return next;
+  }
+
+  async expire(grantId: string, nowMs: number): Promise<PriorityGrant | undefined> {
+    const g = this.grants.get(grantId);
+    if (!g || g.status !== 'OFFERED') return g;
+    const next: PriorityGrant = { ...g, status: 'EXPIRED', activeOrderId: undefined, version: g.version + 1, updatedAtMs: nowMs };
+    this.grants.set(grantId, next);
+    return next;
+  }
+
+  async releaseOrder(grantId: string, orderId: string, nowMs: number): Promise<boolean> {
+    const g = this.grants.get(grantId);
+    if (!g || g.status !== 'OFFERED' || g.activeOrderId !== orderId) return false;
+    this.grants.set(grantId, { ...g, activeOrderId: undefined, updatedAtMs: nowMs });
+    return true;
   }
 }

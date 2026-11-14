@@ -1,7 +1,20 @@
 // 시험용 좌석 저장소. 좌석 Redis의 홀드 Lua(hold-lua.ts의 계약)와 같은 규칙을 메모리로 둔다(같은 사례를 메모리와 실제 Valkey에 똑같이 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME): µs = Clock.now() × 1000. 키 만료는 흉내 내지 않고 걸린 시각만 적는다(멱등 기록 7분만 읽을 때 지난 것을 없는 것으로 본다).
 import type { Clock, PlatformLogger } from '@peaket/platform';
-import { assertDueExpiriesInput, assertExpireInput, type DueExpiriesInput, type DueExpiry, type ExpireInput, type ExpireResult, isExpirableFence, isStandardInt } from '../domain/expiry.js';
+import {
+  assertDueExpiriesInput,
+  assertExpireInput,
+  assertExpirePriorityInput,
+  type DueExpiriesInput,
+  type DueExpiry,
+  type DuePriorityExpiry,
+  type ExpireInput,
+  type ExpirePriorityInput,
+  type ExpirePriorityResult,
+  type ExpireResult,
+  isExpirableFence,
+  isStandardInt,
+} from '../domain/expiry.js';
 import {
   HOLD_TTL_MS,
   type HoldInput,
@@ -9,6 +22,8 @@ import {
   IDEM_TTL_MS,
   type PriorityHoldInput,
   type PriorityHoldResult,
+  type PriorityReleaseInput,
+  type PriorityReleaseResult,
   KEY_PART,
   REHOLD_WAIT_MS,
   type ReplayInput,
@@ -24,6 +39,7 @@ import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, type Rebui
 import {
   assertPinInput,
   assertReleaseFailedInput,
+  assertRestorePriorityInput,
   assertRetireInput,
   FAILED_HOLD_MARK_TTL_MS,
   INITIAL_SEAT_GEN,
@@ -31,6 +47,8 @@ import {
   type PinResult,
   type ReleaseFailedInput,
   type ReleaseFailedResult,
+  type RestorePriorityInput,
+  type RestorePriorityResult,
   RETIRE_AFTER_SALE_END_MS,
   type RetireResult,
 } from '../domain/pin.js';
@@ -435,6 +453,54 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     return { kind: 'OK', seatId: i.seat.seatId, fencingToken: token, heldAtMs: now, expiresAtMs: exp };
   }
 
+  /** 우선 구매 보류 해제(GAT-135, priority-hold-lua.ts PRIORITY_RELEASE_LUA의 쌍둥이). 좌석을 바로 돌려준다 */
+  async releasePriority(i: PriorityReleaseInput, _o?: SeatCallOptions): Promise<PriorityReleaseResult> {
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    const now = this.clock.now();
+    const sec = Math.floor(now / 1000);
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    const decided = (r: PriorityReleaseResult): PriorityReleaseResult => {
+      this.#ensureEpoch(ep, sec);
+      return r;
+    };
+    if (i.keepUntilMs <= now) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+    if (!ev.bits.has(i.seat.index)) return decided({ kind: 'NOT_FOUND' });
+    const h = ev.holds.get(i.seat.index);
+    if (!h || h.holdId !== i.grantId || h.owner !== i.accountId || h.kind !== 'PRIORITY' || h.priorityGrantId !== i.grantId) return decided({ kind: 'NOT_FOUND' });
+    const extend = (key: string) => {
+      const cur = ev.expireAt.get(key);
+      if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+    };
+    const version = (ev.secver.get(i.seat.sectionIndex) ?? 0) + 1;
+    ev.bits.delete(i.seat.index);
+    ev.holds.delete(i.seat.index);
+    ev.prio.delete(i.seat.index);
+    ev.expireAt.delete(seatKeys.hold(e, i.seat.index));
+    ev.secver.set(i.seat.sectionIndex, version);
+    ev.stream.push({
+      type: 'RELEASED',
+      seatIdx: String(i.seat.index),
+      seatId: i.seat.seatId,
+      tierId: i.seat.tierId,
+      sectionId: i.seat.sectionId,
+      holdId: i.grantId,
+      holdKind: 'PRIORITY',
+      priorityGrantId: i.grantId,
+      purchaseSessionId: '',
+      accountId: i.accountId,
+      fencingToken: h.fence,
+      sectionVersion: String(version),
+      seatEpoch: String(ep.epoch),
+      occurredAtMs: String(now),
+      expiresAtMs: String(h.exp),
+    });
+    ev.published.push({ channel: seatKeys.section(e, String(i.seat.sectionIndex)), message: `1 ${ep.epoch} ${i.seat.sectionIndex} ${version} ${now} ${i.seat.seatOffset}:0` });
+    for (const key of [seatKeys.bitmap(e), seatKeys.prio(e), seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e)]) extend(key);
+    return { kind: 'OK' };
+  }
+
   async holdAuto(i: AutoHoldInput, _o?: SeatCallOptions): Promise<AutoHoldResult> {
     const e = i.eventId;
     const ev = this.db.event(e);
@@ -759,6 +825,29 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     return { kind: 'OK', gen, regrabbed: k, fencingToken: token };
   }
 
+  /** 결제 실패 복귀(GAT-135, pin-lua.ts RESTORE_PRIORITY_LUA의 쌍둥이). 그 권리의 PRIORITY 보류에서 주문 표시만 지운다 */
+  async restorePriority(i: RestorePriorityInput, _o?: SeatCallOptions): Promise<RestorePriorityResult> {
+    assertRestorePriorityInput(i);
+    const ev = this.db.event(i.eventId);
+    const now = this.clock.now();
+    const ep = this.#readEpoch(i.eventId, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    if (i.keepUntilMs <= now) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+    let restored = 0;
+    for (const s of i.seats) {
+      const h = ev.holds.get(s.index);
+      if (!h || h.holdId !== i.grantId || h.owner !== i.accountId || h.kind !== 'PRIORITY' || h.priorityGrantId !== i.grantId) continue;
+      delete h.pin;
+      delete (h as { ordAt?: number }).ordAt;
+      delete (h as { maxStay?: number }).maxStay;
+      delete (h as { rem?: number }).rem;
+      delete (h as { thawAt?: number }).thawAt;
+      restored += 1;
+    }
+    this.#ensureEpoch(ep, Math.floor(now / 1000));
+    return { kind: 'OK', restored };
+  }
+
   /**
    * 결제 실패 해제(BUILD_ORDER PRF-142): 실패 해제 Lua(pin-lua.ts RELEASE_FAILED_LUA)와 같은 차례(세대 키 → 시각 한 번 → keepUntil 지킴 →
    * 그 주문의 홀드(비트 1, holdId·owner 같음) 고르기 → 보유 수·secver 지킴 → 쓰기). 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다
@@ -1032,6 +1121,103 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       if (typeof holdId !== 'string' || typeof fence !== 'string' || typeof owner !== 'string' || !KEY_PART.test(owner) || !isExpirableFence(fence)) return { index, expiresAtMs: score, hold: null, corrupt: true };
       return { index, expiresAtMs: score, hold: { holdId, fencingToken: fence, owner } };
     });
+  }
+
+  /** SeatExpiries.duePriorityExpiries: prio에서 exp ≤ nowMs인 것을 (exp, 색인 10진 글) 오름차순으로 limit개, holds에서 권리 ID·fence·owner */
+  async duePriorityExpiries(i: DueExpiriesInput): Promise<DuePriorityExpiry[]> {
+    assertDueExpiriesInput(i);
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    const due = [...ev.prio]
+      .filter(([, score]) => score <= i.nowMs)
+      .map(([index, score]) => ({ index, score, member: String(index) }))
+      .sort((a, b) => a.score - b.score || (a.member < b.member ? -1 : a.member > b.member ? 1 : 0))
+      .slice(i.offset ?? 0, (i.offset ?? 0) + i.limit);
+    return due.map(({ index, score }): DuePriorityExpiry => {
+      const h = ev.holds.get(index);
+      if (!h) return { index, expiresAtMs: score, hold: null };
+      const grantId = h.holdId;
+      const fence = h.fence;
+      const owner = h.owner;
+      if (h.kind !== 'PRIORITY' || h.priorityGrantId !== grantId || !KEY_PART.test(owner) || !isExpirableFence(fence)) return { index, expiresAtMs: score, hold: null, corrupt: true };
+      return { index, expiresAtMs: score, hold: { grantId, fencingToken: fence, owner } };
+    });
+  }
+
+  /** SeatExpiries.expirePriority: priority-expire-lua.ts와 같은 차례. prio에서 지난 보류를 풀고 EXPIRED를 남긴다 */
+  async expirePriority(i: ExpirePriorityInput): Promise<ExpirePriorityResult> {
+    assertExpirePriorityInput(i);
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    const now = this.clock.now();
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    if (i.keepUntilMs <= now) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+    const kinds = i.seats.map((s): 'r' | 'o' | 's' | 'c' => {
+      const h = ev.holds.get(s.index);
+      const inIndex = ev.prio.has(s.index);
+      if (!h) return inIndex ? 'o' : 's';
+      if (h.kind !== 'PRIORITY' || h.priorityGrantId !== h.holdId || h.exp === undefined || !isExpirableFence(h.fence)) return 'c';
+      const x = s.expected;
+      if (!inIndex || !x || h.holdId !== x.grantId || h.fence !== x.fencingToken || h.owner !== x.owner) return 's';
+      return h.exp <= now ? 'r' : 's';
+    });
+    const count = (k: 'r' | 'o' | 's' | 'c') => kinds.filter((x) => x === k).length;
+    const released = count('r');
+    const result: ExpirePriorityResult = { kind: 'OK', nowUs: now * 1000, released, skipped: count('s'), orphans: count('o'), corrupt: count('c'), expired: [] };
+    i.seats.forEach((s, k) => {
+      if (kinds[k] === 'o') ev.prio.delete(s.index);
+    });
+    if (released > 0) {
+      const version = new Map<number, number>();
+      const deltas = new Map<number, string[]>();
+      i.seats.forEach((s, k) => {
+        if (kinds[k] !== 'r') return;
+        const h = ev.holds.get(s.index)!;
+        ev.bits.delete(s.index);
+        ev.holds.delete(s.index);
+        ev.prio.delete(s.index);
+        ev.expireAt.delete(seatKeys.hold(e, s.index));
+        if (s.seat) {
+          const sec = s.seat.sectionIndex;
+          if (!version.has(sec)) {
+            const v = Number(ev.secver.get(sec) ?? 0) + 1;
+            ev.secver.set(sec, v);
+            version.set(sec, v);
+            deltas.set(sec, []);
+          }
+          deltas.get(sec)!.push(`${s.seat.seatOffset}:${SEAT_STATE_AVAILABLE}`);
+        }
+        ev.stream.push({
+          type: 'EXPIRED',
+          seatIdx: String(s.index),
+          seatId: s.seat?.seatId ?? '',
+          tierId: s.seat?.tierId ?? '',
+          sectionId: s.seat?.sectionId ?? '',
+          holdId: h.holdId,
+          holdKind: 'PRIORITY',
+          priorityGrantId: h.priorityGrantId ?? h.holdId,
+          purchaseSessionId: '',
+          accountId: h.owner,
+          fencingToken: h.fence,
+          sectionVersion: s.seat ? String(version.get(s.seat.sectionIndex)) : '',
+          seatEpoch: String(ep.epoch),
+          occurredAtMs: String(now),
+          expiresAtMs: String(h.exp),
+        });
+        result.expired.push({ index: s.index, grantId: h.priorityGrantId ?? h.holdId });
+      });
+      const seatEpoch = String(ep.epoch);
+      for (const [sec, list] of deltas) {
+        ev.published.push({ channel: seatKeys.section(e, String(sec)), message: `1 ${seatEpoch} ${sec} ${version.get(sec)} ${now} ${list.join(' ')}` });
+      }
+      for (const key of [seatKeys.stream(e), seatKeys.secver(e), seatKeys.prio(e)]) {
+        const cur = ev.expireAt.get(key);
+        if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+      }
+    }
+    this.#ensureEpoch(ep, Math.floor(now / 1000));
+    return result;
   }
 
   /**

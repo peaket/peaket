@@ -117,6 +117,27 @@ export function assertReleaseFailedInput(i: ReleaseFailedInput): void {
   assertKeepUntil(i.keepUntilMs);
 }
 
+/** 우선 구매 주문의 결제 실패 복귀(GAT-135, S-T37 ⑤). 그 권리의 PRIORITY 보류를 주문 표시만 지워 되돌린다 */
+export interface RestorePriorityInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly grantId: string;
+  readonly seats: readonly SeatRef[];
+  readonly keepUntilMs: number;
+}
+
+/** 결제 실패 복귀 결과. NOT_FOUND는 보류가 이미 없거나 이 권리의 것이 아니다(그대로 두면 만료가 푼다) */
+export type RestorePriorityResult = { readonly kind: 'OK'; readonly restored: number } | { readonly kind: 'NOT_READY' };
+
+/** 결제 실패 복귀 입력 모양 검사. 틀리면 RangeError */
+export function assertRestorePriorityInput(i: RestorePriorityInput): void {
+  if (!isKeyPart(i.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
+  if (!isKeyPart(i.accountId)) throw new RangeError('accountId가 키 조각 모양이 아니다');
+  if (!isUuid(i.grantId)) throw new RangeError('grantId가 UUID가 아니다');
+  assertSeats(i.seats);
+  assertKeepUntil(i.keepUntilMs);
+}
+
 /** 회차 목록에서 빼기 입력 모양 검사(두 구현이 같이 쓴다). 회차는 키 조각, 판매 종료 시각은 안전한 정수(epoch ms). 틀리면 RangeError */
 export function assertRetireInput(i: { eventId: string; saleEndMs: number }): void {
   if (!isKeyPart(i.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');

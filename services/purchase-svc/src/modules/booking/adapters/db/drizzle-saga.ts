@@ -341,11 +341,11 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     if (!isUuid(orderId)) return undefined;
     const db = this.o.database.db;
     const o = await db.execute(sql`
-      select id, account_id, event_id, status, amount, hold_id, purchase_session_id, seat_gen,
+      select id, account_id, event_id, status, amount, hold_id, purchase_session_id, seat_gen, priority_grant_id,
         exists (select 1 from ticket_void_job v where v.order_id = purchase_order.id) as void_pending
       from purchase_order where id = ${orderId}::uuid`);
     const row = o.rows[0] as
-      | { id: string; account_id: string; event_id: string; status: string; amount: number | string; hold_id: string; purchase_session_id: string; seat_gen: number | null; void_pending: boolean }
+      | { id: string; account_id: string; event_id: string; status: string; amount: number | string; hold_id: string; purchase_session_id: string; seat_gen: number | null; priority_grant_id: string | null; void_pending: boolean }
       | undefined;
     if (!row) return undefined;
     const items = await db.execute(sql`select seat_id, tier, section_id from order_item where order_id = ${orderId}::uuid order by line_no`);
@@ -389,6 +389,7 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
       holdId: row.hold_id,
       purchaseSessionId: row.purchase_session_id,
       ...(row.seat_gen !== null ? { seatGen: Number(row.seat_gen) } : {}),
+      ...(row.priority_grant_id !== null ? { priorityGrantId: row.priority_grant_id } : {}),
       seats: (items.rows as { seat_id: string; tier: string; section_id: string }[]).map((x) => ({ seatId: x.seat_id, tierId: x.tier, sectionId: x.section_id })),
       ...(attempt ? { attempt } : {}),
       ...(row.void_pending ? { ticketVoidPending: true } : {}),

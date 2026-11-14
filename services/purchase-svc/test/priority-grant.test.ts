@@ -19,7 +19,7 @@ const SEATS = [
   { seatId: 'B01', index: 3, sectionId: 'SEC-B', sectionIndex: 1, seatOffset: 0, tierId: 'S' },
 ] as const;
 
-const fixture = (ticketOver: { entryStartsAtMs?: number } = {}) => {
+const fixture = (ticketOver: { entryStartsAtMs?: number } = {}, soldSeats: readonly string[] = []) => {
   const clock = fakeClock({ now: NOW });
   const store = new MemorySeatStore(clock);
   const map = new MemorySeatMap();
@@ -29,9 +29,11 @@ const fixture = (ticketOver: { entryStartsAtMs?: number } = {}) => {
     find: async (id: string, fraudCaseId: string) =>
       id === TICKET && fraudCaseId === CASE ? { eventId: EVENT, accountId: ACCOUNT, orderId: '01900000-0000-7000-8000-000000000005', seatId: 'A01', tierId: TIER, price: 110_000, ...ticketOver } : undefined,
   };
-  const grant = new GrantPriorityPurchase({ grants, cancelled, seats: store, candidates: new SeatMapPriorityCandidates(map), seatMap: map, clock });
-  const withdraw = new WithdrawPriorityGrant(grants, () => NOW + 1);
-  return { clock, store, map, grants, grant, withdraw };
+  const sold = new Set(soldSeats);
+  const sales = { active: async (_eventId: string, seatIds: readonly string[]) => new Set(seatIds.filter((id) => sold.has(id))) };
+  const grant = new GrantPriorityPurchase({ grants, cancelled, seats: store, candidates: new SeatMapPriorityCandidates(map), seatMap: map, sales, clock });
+  const withdraw = new WithdrawPriorityGrant(grants, () => NOW + 1, { seats: store, seatMap: map });
+  return { clock, store, map, grants, grant, withdraw, sold };
 };
 
 const input = (over: Record<string, unknown> = {}) => ({ fraudCaseId: CASE, eventId: EVENT, accountId: ACCOUNT, cancelledTicketId: TICKET, actedBy: 'commander-1', ...over });
@@ -100,13 +102,52 @@ describe('GrantPriorityPurchase', () => {
     expect(f.grants.grants.size).toBe(1);
   });
 
-  test('GAT135_회수는_OFFERED를_WITHDRAWN으로_바꾸고_판을_올린다', async () => {
+  test('GAT135_회수는_OFFERED를_WITHDRAWN으로_바꾸고_판을_올리며_좌석을_바로_돌려준다', async () => {
     const f = fixture();
     await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
     const r = await f.grant.run(input());
     const w = await f.withdraw.run(r.grant!.grantId);
     expect(w).toMatchObject({ status: 'WITHDRAWN', version: 2 });
+    const ev = f.store.db.event(EVENT);
+    expect(ev.bits.has(0)).toBe(false);
+    expect(ev.holds.has(0)).toBe(false);
+    expect(ev.prio.has(0)).toBe(false);
     expect(await f.withdraw.run(r.grant!.grantId)).toMatchObject({ status: 'WITHDRAWN', version: 2 });
+  });
+
+  test('S-T37_⑦_권리_만료_회수는_좌석을_풀고_권리를_EXPIRED로_끝낸다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    f.clock.advance(2 * DAY + 1);
+    const due = await f.store.duePriorityExpiries({ eventId: EVENT, nowMs: f.clock.now(), limit: 100 });
+    expect(due).toHaveLength(1);
+    const out = await f.store.expirePriority({ eventId: EVENT, keepUntilMs: NOW + 10 * DAY, seats: due.map((d) => ({ index: d.index, expected: d.hold, seat: SEATS[0] })) });
+    expect(out).toMatchObject({ kind: 'OK', released: 1, expired: [{ index: 0, grantId: r.grant!.grantId }] });
+    const ev = f.store.db.event(EVENT);
+    expect(ev.bits.has(0)).toBe(false);
+    expect(ev.prio.has(0)).toBe(false);
+    await f.grants.expire(r.grant!.grantId, f.clock.now());
+    expect(await f.grants.find(r.grant!.grantId)).toMatchObject({ status: 'EXPIRED', version: 2 });
+  });
+
+  test('GAT135_팔린_좌석은_다시_잡지_않고_같은_등급의_남은_좌석으로_간다', async () => {
+    const f = fixture({}, ['A01']);
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    expect(r.result).toBe('SAME_TIER');
+    expect(r.grant?.seatId).not.toBe('A01');
+  });
+
+  test('GAT135_같은_취소_표로_동시에_두_번_와도_권리_하나만_남고_여분_보류는_푼다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const [a, b] = await Promise.all([f.grant.run(input()), f.grant.run(input())]);
+    expect(a.grant?.grantId).toBe(b.grant?.grantId);
+    expect(f.grants.grants.size).toBe(1);
+    const ev = f.store.db.event(EVENT);
+    expect(ev.bits.size).toBe(1);
+    expect(ev.prio.size).toBe(1);
   });
 
   test('GAT135_이미_사용한_권리는_회수하지_못한다', async () => {

@@ -110,6 +110,7 @@ export const ORDER_PROBLEMS: Readonly<Record<CreateOrderRejection, OrderProblemS
   BOOKING_RESTRICTED: { status: 403, type: 'booking-restricted', title: '예매가 제한된 계정입니다' },
   // 우선 구매 권리가 없음·남의 것·다른 회차·이미 사용·기한 지남·진행 중 주문 있음(어느 것인지 새지 않는다, GAT-135)
   PRIORITY_GRANT_INVALID: { status: 409, type: 'priority-grant-in-use', title: '지금 쓸 수 없는 우선 구매 권리입니다', normalBranch: true },
+  PRIORITY_SEAT_ONLY: { status: 409, type: 'priority-seat-only', title: '우선 구매 권리의 좌석만 고를 수 있습니다', normalBranch: true },
   PRICE_MISSING: { status: 500, type: 'about:blank', title: 'Internal Server Error' },
   // 여러 탭이 같은 홀드로 주문을 겹쳐 보낸 경합이라 정상 분기로 센다(좌석 경합 seat-already-held와 같은 셈)
   HOLD_ALREADY_ORDERED: { status: 409, type: 'hold-already-ordered', title: '이 좌석으로 만든 주문이 이미 있습니다', normalBranch: true },

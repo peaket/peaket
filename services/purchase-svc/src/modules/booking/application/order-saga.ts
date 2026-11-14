@@ -498,6 +498,13 @@ export class OrderSagaRunner {
   async #releaseHold(order: SagaOrderView, config: SagaEventConfig): Promise<boolean> {
     const seatIds = order.seats.map((s) => s.seatId);
     try {
+      // 우선 구매 주문은 좌석을 풀지 않고 그 권리의 PRIORITY 보류로 되돌린다(S-T37 ⑤). 권리는 OFFERED 그대로다
+      if (order.priorityGrantId !== undefined && this.deps.pins.restorePriority) {
+        const restored = await this.deps.pins.restorePriority({ eventId: order.eventId, accountId: order.accountId, grantId: order.priorityGrantId, seatIds, keepUntilMs: keepUntilOf(config) });
+        if (restored.status === 'OK' || isSeatStoreGone(config.saleEndsAtMs, this.deps.clock.now())) return true;
+        this.#safeLog(() => this.deps.log.releaseFailed({ orderId: order.orderId, eventId: order.eventId, why: 'not_ready' }));
+        return false;
+      }
       const released = await this.deps.pins.releaseFailed({ eventId: order.eventId, accountId: order.accountId, holdId: order.holdId, seatIds, keepUntilMs: keepUntilOf(config) });
       if (released.status === 'OK' || isSeatStoreGone(config.saleEndsAtMs, this.deps.clock.now())) return true;
       this.#safeLog(() => this.deps.log.releaseFailed({ orderId: order.orderId, eventId: order.eventId, why: 'not_ready' }));

@@ -35,8 +35,12 @@ export const priorityGrant = pgTable(
   },
   (t) => [
     uniqueIndex('priority_grant_cancelled_ticket_key').on(t.cancelledTicketId),
+    // 같은 좌석에 살아 있는 권리는 하나(동시 발급 경합에서 여분 보류를 만들지 않게, 0020)
+    uniqueIndex('priority_grant_offered_seat_key').on(t.eventId, t.seatId).where(sql`${t.status} = 'OFFERED'`),
     // 한 계정의 그 회차 권리를 찾는다(입장·주문 확인)
     index('priority_grant_account_event_idx').on(t.accountId, t.eventId),
+    // 만료 회수 스위퍼가 기한 지난 OFFERED를 찾는다(0020)
+    index('priority_grant_expiry_idx').on(t.expiresAt).where(sql`${t.status} = 'OFFERED'`),
     check('priority_grant_kind_check', sql`${t.grantKind} in ('SAME_SEAT', 'SAME_TIER')`),
     check('priority_grant_status_check', sql`${t.status} in ('OFFERED', 'USED', 'EXPIRED', 'WITHDRAWN')`),
     check('priority_grant_price_check', sql`${t.price} >= 0`),

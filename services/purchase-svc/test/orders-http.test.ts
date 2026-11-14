@@ -182,6 +182,15 @@ const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: ()
   IDENTITY_MISCONFIGURED: { arrange: () => (fx.recheck = { status: 'FAILED', reason: 'permission_denied' }) },
   BOOKING_RESTRICTED: { arrange: () => (fx.restriction = { st: 'ACTIVE' }) },
   PRIORITY_GRANT_INVALID: { arrange: () => (fx.session = { ...fx.session!, priorityGrantId: '01900000-0000-7000-8000-000000000099' }) },
+  PRIORITY_SEAT_ONLY: {
+    body: () => okBody({ holdId: '01900000-0000-7000-8000-0000000000aa' }),
+    arrange: () => {
+      const grantId = '01900000-0000-7000-8000-0000000000aa';
+      fx.session = { ...fx.session!, priorityGrantId: grantId };
+      fx.priorityGrant = { grantId, eventId: EVENT, accountId: ACCOUNT, seatId: 'A01', price: 99_000, status: 'OFFERED', expiresAtMs: NOW + DAY };
+      fx.hold = { status: 'OK', heldAtMs: NOW - 1, seats: [{ seatId: 'A02', tierId: 'R', sectionId: 'SEC-A' }], kind: 'PRIORITY', priorityGrantId: grantId };
+    },
+  },
   PRICE_MISSING: {
     arrange: () => {
       fx.sale = { saleEndsAtMs: NOW + DAY, tierPrices: {} };
@@ -225,6 +234,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
       IDENTITY_MISCONFIGURED: [503, 'dependency-unavailable'],
       BOOKING_RESTRICTED: [403, 'booking-restricted'],
       PRIORITY_GRANT_INVALID: [409, 'priority-grant-in-use'],
+      PRIORITY_SEAT_ONLY: [409, 'priority-seat-only'],
       PRICE_MISSING: [500, 'about:blank'],
       HOLD_ALREADY_ORDERED: [409, 'hold-already-ordered'],
       DEADLINE_EXCEEDED: [504, 'deadline-exceeded'],

@@ -20,6 +20,7 @@ import {
   type OrderView,
   type OrderWrites,
   type PriorityGrants,
+  type PrioritySeatSales,
   type SaleConfigs,
 } from '../domain/ports.js';
 import { judgeRecheck, type RecheckFailure, type RecheckToken } from '../domain/recheck.js';
@@ -45,6 +46,10 @@ export interface CreateOrderDeps {
   restrictions: BookingRestrictions;
   /** 우선 구매 보류 주문의 권리 확인(GAT-135). 없으면 PRIORITY 홀드 주문을 거절한다 */
   priorityGrants?: PriorityGrants;
+  /** 우선 구매 좌석의 활성 판매 행 대조(GAT-135). 있으면 팔린 좌석의 권리를 거절하고 회수한다 */
+  prioritySeatSales?: PrioritySeatSales;
+  /** 팔린 좌석의 권리를 회수하는 고리(운영은 WithdrawPriorityGrant) */
+  priorityWithdraw?: (grantId: string) => Promise<unknown>;
   signals: OrderSignals;
   log: OrderLog;
   /** 판매 종료 비교와 주문 ID(UUIDv7)의 시계 */
@@ -108,6 +113,7 @@ export type CreateOrderRejection =
   | 'IDENTITY_MISCONFIGURED'
   | 'BOOKING_RESTRICTED'
   | 'PRIORITY_GRANT_INVALID'
+  | 'PRIORITY_SEAT_ONLY'
   | 'PRICE_MISSING'
   | 'HOLD_ALREADY_ORDERED'
   | 'DEADLINE_EXCEEDED';
@@ -191,6 +197,14 @@ export class CreateOrder {
       ) {
         return rejected('PRIORITY_GRANT_INVALID');
       }
+      // 그 좌석이 이미 팔렸거나 결제 중이면 권리를 쓰지 못한다. 보류를 풀고 회수한다(팔린 좌석을 덮지 않게)
+      if (d.prioritySeatSales) {
+        const sold = await d.prioritySeatSales.active(session.eventId, [priorityGrant!.seatId]);
+        if (sold.has(priorityGrant!.seatId)) {
+          await d.priorityWithdraw?.(priorityGrantId).catch(() => undefined);
+          return rejected('PRIORITY_GRANT_INVALID');
+        }
+      }
     }
     if (seatCallTooLate(c.deadline)) return rejected('DEADLINE_EXCEEDED');
     const hold = await d.holds.check(
@@ -206,6 +220,8 @@ export class CreateOrder {
     if (hold.status === 'STORE_UNAVAILABLE') return rejected('SEAT_STORE_UNAVAILABLE');
     if (priorityGrantId !== undefined) {
       if (hold.status !== 'OK' || hold.kind !== 'PRIORITY' || hold.priorityGrantId !== priorityGrantId) return rejected('PRIORITY_GRANT_INVALID');
+      // prio 토큰은 그 권리의 좌석 하나만 주문한다(S-T37 ⑥). 다른 좌석이면 409 priority-seat-only
+      if (hold.seats.length !== 1 || hold.seats[0]!.seatId !== priorityGrant!.seatId) return rejected('PRIORITY_SEAT_ONLY');
     } else {
       if (d.clock.now() >= sale.saleEndsAtMs && (hold.status !== 'OK' || hold.heldAtMs >= sale.saleEndsAtMs)) return rejected('SALE_ENDED');
       if (hold.status !== 'OK') return rejected('HOLD_NOT_FOUND');

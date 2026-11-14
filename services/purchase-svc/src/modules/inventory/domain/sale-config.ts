@@ -16,6 +16,8 @@ export interface EventSaleConfigOverlay {
   eligLists: readonly string[];
   /** 게시한 좌석맵 판(선택). 지금 파일 판과 다르면 로그만 남기고 파일 판을 쓴다 */
   layoutVersion?: number;
+  /** 입장 시작 시각(epoch ms, core 일정 사본). 없으면 undefined(48시간만 쓴다) */
+  entryOpensAtMs?: number;
 }
 
 /** core-svc의 판매 설정 사본을 읽지 못했다(네트워크·5xx·모양 오류). 닫힌 쪽으로 홀드를 503으로 답한다 */

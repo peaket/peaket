@@ -5,7 +5,9 @@ export { WithdrawPriorityGrant } from './application/withdraw-priority-grant.js'
 export { MemoryPriorityGrantStore } from './adapters/memory-priority-grant-store.js';
 export { DrizzleCancelledTickets } from './adapters/db/drizzle-cancelled-tickets.js';
 export { DrizzlePriorityGrantStore } from './adapters/db/drizzle-priority-grant-store.js';
+export { DrizzlePrioritySeatSales } from './adapters/db/drizzle-priority-seat-sales.js';
 export { SeatMapPriorityCandidates } from './adapters/seat-map-priority-candidates.js';
 export { PRIORITY_GRANT_KINDS, PRIORITY_GRANT_STATUSES, PRIORITY_GRANT_TTL_MS, priorityGrantUsable, type CancelledTicketView, type NewPriorityGrant, type PriorityGrant, type PriorityGrantKind, type PriorityGrantResult, type PriorityGrantStatus } from './domain/priority-grant.js';
 export type { CancelledTickets, PriorityGrantLogger, PriorityGrantStore, PrioritySeatCandidates, PrioritySeatHolds } from './domain/ports.js';
 export { PriorityGrantController } from './inbound/priority-grant.controller.js';
+export { priorityPurchaseHandlers, priorityPurchasePackage, type PriorityPurchasePackage, type PriorityPurchaseUseCases } from './inbound/priority-grant.grpc.js';

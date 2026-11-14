@@ -96,6 +96,34 @@ message SetBookingRestrictionResponse {
 // cancelled_ticket_id로 멱등하다. 같은 표로 다시 오면 처음 결과를 돌려준다. 표를 무상으로 되살리지 않는다. 팬은 원래 가격·취소 수수료 없이 다시 산다.
 service PriorityPurchaseService {
   rpc GrantPriorityPurchase(GrantPriorityPurchaseRequest) returns (GrantPriorityPurchaseResponse);
+  // 회수(소명 인정 뒤 되돌림 취소, POL-046 ⑦). OFFERED만 WITHDRAWN으로 바꾸고 그 권리의 PRIORITY 보류를 풀어 좌석을 바로 돌려준다.
+  rpc WithdrawPriorityPurchase(WithdrawPriorityPurchaseRequest) returns (WithdrawPriorityPurchaseResponse);
+}
+
+message WithdrawPriorityPurchaseRequest {
+  // 회수할 권리(priority_grant.id)
+  string grant_id = 1;
+  // 처리한 관리 계정 ID(감사 기록용)
+  string acted_by = 2;
+}
+
+message WithdrawPriorityPurchaseResponse {
+  string grant_id = 1;
+  string event_id = 2;
+  string account_id = 3;
+  PriorityGrantState status = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  // queue-svc q:prio 사본의 판 번호
+  int64 version = 6;
+}
+
+// 우선 구매 권리 상태(priority_grant.status)
+enum PriorityGrantState {
+  PRIORITY_GRANT_STATE_UNSPECIFIED = 0;
+  PRIORITY_GRANT_STATE_OFFERED = 1;
+  PRIORITY_GRANT_STATE_USED = 2;
+  PRIORITY_GRANT_STATE_EXPIRED = 3;
+  PRIORITY_GRANT_STATE_WITHDRAWN = 4;
 }
 
 message GrantPriorityPurchaseRequest {
@@ -129,4 +157,6 @@ message GrantPriorityPurchaseResponse {
   string seat_id = 3;
   int64 price = 4;
   google.protobuf.Timestamp expires_at = 5;
+  // queue-svc q:prio 사본의 판 번호(HTTP 호환과 같은 값)
+  int64 version = 6;
 }

@@ -1,8 +1,11 @@
 // 우선 구매 권리 모듈(GAT-135). AppModule이 purchase·queue 내부 HTTP 어댑터를 골라 넘긴다.
 import { type DynamicModule, Module } from '@nestjs/common';
+import { INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/platform';
 import { GrantPriority } from './application/grant-priority.js';
+import { ResolveFraudObjection } from './application/resolve-fraud-objection.js';
 import { WithdrawPriority } from './application/withdraw-priority.js';
 import type { PurchasePriorityGrants, QueuePriorityGrantCopies } from './domain/priority.js';
+import { FraudObjectionsController } from './inbound/fraud-objections.controller.js';
 import { PriorityGrantsController } from './inbound/priority-grants.controller.js';
 
 export interface PriorityModuleDeps {
@@ -15,10 +18,17 @@ export class PriorityModule {
   static register(deps: PriorityModuleDeps): DynamicModule {
     return {
       module: PriorityModule,
-      controllers: [PriorityGrantsController],
+      controllers: [PriorityGrantsController, FraudObjectionsController],
       providers: [
         { provide: GrantPriority, useFactory: () => new GrantPriority(deps.purchase, deps.copies) },
         { provide: WithdrawPriority, useFactory: () => new WithdrawPriority(deps.purchase, deps.copies) },
+        {
+          provide: ResolveFraudObjection,
+          useFactory: (grant: GrantPriority, withdraw: WithdrawPriority) => new ResolveFraudObjection(grant, withdraw),
+          inject: [GrantPriority, WithdrawPriority],
+        },
+        { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+        InternalTokenGuard,
       ],
     };
   }

@@ -13,6 +13,7 @@
   },
   "scripts": {
     "gen": "node scripts/generate.mjs",
+    "gen:check": "node scripts/check-generated.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
