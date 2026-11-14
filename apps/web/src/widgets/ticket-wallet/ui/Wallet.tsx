@@ -153,6 +153,31 @@ function Poster() {
   return <ProductionPoster art="lumen" size="sm" title="LUMEN" label={`${T1.title} 포스터`} className="w-[48px] shrink-0 md:w-[56px]" />;
 }
 
+/**
+ * QR 조각을 받기 전에 서버가 먼저 그리는 자리(R-563). QR과 같은 400px 높이를 잡아 layout shift를 막고,
+ * QR 모양 뼈대 그림을 첫 HTML에 넣어 LCP를 폰트 교체 뒤로 미루지 않는다. 그림은 public 정적 파일이라 첫 JS에 들어가지 않는다.
+ */
+function DeviceQrFallback() {
+  return (
+    <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} aria-busy="true">
+      <span className="state-icon is-primary">
+        <i className="ic ic-phone" aria-hidden="true" />
+      </span>
+      <p className="t-md fw-b">입장할 때 쓸 휴대폰을 등록해야 QR이 나옵니다</p>
+      <p className="t-sm muted">등록한 휴대폰에서만 입장 QR이 만들어집니다. 공연장에 가져갈 휴대폰에서 등록하세요.</p>
+      <img
+        src="/wallet-qr-skeleton.png"
+        alt=""
+        width={312}
+        height={156}
+        fetchPriority="high"
+        className="w-full max-w-[312px] rounded-(--r-lg)"
+        style={{ height: 'auto' }}
+      />
+    </div>
+  );
+}
+
 /** 접힌 티켓 카드(CMP-028 wallet). flat이면 회색(환급됨·지난 공연) */
 function MiniCard({
   hid,
@@ -384,6 +409,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
                   label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
                   offline={v.offline}
                   snapshot={T1_SNAPSHOT}
+                  fallback={<DeviceQrFallback />}
                 />
               )}
               <QrHints />
@@ -756,6 +782,7 @@ function ReceivedOpen() {
             ticketId={T3.qrUuid}
             label={`입장 QR, 티켓 ${T3.qrTicketId}, 받은 티켓 ${T3.seat}, 15초마다 바뀝니다`}
             snapshot={T3_SNAPSHOT}
+            fallback={<DeviceQrFallback />}
           />
           <p className="t-sm muted px-[15px] text-center md:px-0">인터넷이 없어도 QR이 표시됩니다 · 화면 밝기를 올려 주세요</p>
         </div>

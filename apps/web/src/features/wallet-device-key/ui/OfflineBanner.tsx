@@ -29,36 +29,9 @@ function WalletPwa() {
       cancelled = true;
     };
   }, []);
-  // 첫 방문에는 QR 동적 조각이 서비스 워커 제어 전에 받아져 런타임 캐시에 없을 수 있다.
-  // 등록이 끝나면 이 화면이 받은 스크립트를 워커에 보내 오프라인 새로고침에서도 QR 조각을 쓴다.
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development' || !('serviceWorker' in navigator)) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void navigator.serviceWorker.ready
-        .then((registration) => {
-          if (cancelled) return;
-          const urls = new Set<string>();
-          for (const entry of performance.getEntriesByType('resource')) {
-            const url = new URL(entry.name);
-            if (url.origin === location.origin && url.pathname.endsWith('.js')) urls.add(url.pathname + url.search);
-          }
-          for (const script of document.querySelectorAll('script[src]')) {
-            const src = script.getAttribute('src');
-            if (src) urls.add(src);
-          }
-          if (urls.size > 0) (registration.active ?? navigator.serviceWorker.controller)?.postMessage({ type: 'CACHE_URLS', payload: { urlsToCache: [...urls] } });
-        })
-        .catch(() => {
-          // 캐시는 다음 방문에서 다시 시도한다.
-        });
-    }, 2000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, []);
-
+  // 스크립트 캐시는 서비스 워커의 precache manifest(빌드의 모든 청크)가 맡는다(R-563).
+  // 화면이 받은 스크립트를 다시 보내는 CACHE_URLS는 매 방문 100여 개를 다시 받아
+  // LCP 이미지와 네트워크를 다퉈 두 번째 방문부터 LCP를 8초대로 밀어 올렸다.
   if (!Provider) return null;
   return <Provider swUrl="/serwist/sw.js" cacheOnNavigation={false} options={{ scope: '/my/tickets' }} />;
 }

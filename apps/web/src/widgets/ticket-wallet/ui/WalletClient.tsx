@@ -32,19 +32,9 @@ function useLazyComponent<P>(load: () => Promise<ComponentType<P>>): ComponentTy
 const loadDeviceQr = () => import('@/features/wallet-device-key/ui/DeviceQr').then((m) => m.DeviceQr);
 const loadOfflineBanner = () => import('@/features/wallet-device-key/ui/OfflineBanner').then((m) => m.OfflineBanner);
 
-export function DeviceQrLazy(props: DeviceQrProps) {
+export function DeviceQrLazy({ fallback, ...props }: DeviceQrProps & { fallback?: ReactNode }) {
   const Component = useLazyComponent(loadDeviceQr);
-  if (!Component) {
-    return (
-      <div className="card-flat col items-center gap-3 px-4 py-7 text-center" style={{ minHeight: 400 }} aria-busy="true">
-        <span className="state-icon is-primary">
-          <i className="ic ic-phone" aria-hidden="true" />
-        </span>
-        <p className="t-md fw-b">입장할 때 쓸 휴대폰을 등록해야 QR이 나옵니다</p>
-        <p className="t-sm muted">등록 버튼을 눌러야만 입장 QR을 만들겠습니다. 공연장에 가기 전에 미리 등록하세요</p>
-      </div>
-    );
-  }
+  if (!Component) return <>{fallback}</>;
   return <Component {...props} />;
 }
 

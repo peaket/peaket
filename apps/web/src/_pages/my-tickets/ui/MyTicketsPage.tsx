@@ -13,11 +13,14 @@ export async function MyTicketsPage({ searchParams }: PageProps) {
   const dark = resolvePreviewTheme(sp) === 'dark';
   const path = '/my/tickets';
   return (
-    <AppShell dark={dark}>
-      <Wallet state={state} path={path} dark={dark} />
-      {process.env.NODE_ENV !== 'production' ? (
-        <PreviewSwitcher path={path} states={SCR013_LIST_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
-      ) : null}
-    </AppShell>
+    <>
+      <link rel="preload" as="image" href="/wallet-qr-skeleton.png" fetchPriority="high" />
+      <AppShell dark={dark}>
+        <Wallet state={state} path={path} dark={dark} />
+        {process.env.NODE_ENV !== 'production' ? (
+          <PreviewSwitcher path={path} states={SCR013_LIST_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+        ) : null}
+      </AppShell>
+    </>
   );
 }
