@@ -619,6 +619,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-577: BAT-610 payment-svc 정산 문제 유형 두 제목을 정본에 맞춘다.
 - R-578: BAT-465 internal command eventKey 멱등 비교를 키 순서와 무관하게 만든다.
 - R-579: BAT-430 우선 구매 문제 유형 두 개를 계약에 더하고 seat-store 제목을 정본에 맞춘다.
+- R-580: BAT-430 PRIORITY 홀드 변경에 purchase test-int 기대값을 맞춘다.
 
 ## 5. [충돌] 결정 결과
 

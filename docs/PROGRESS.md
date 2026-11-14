@@ -30,6 +30,7 @@
 - 구간 끝 정리 목록(ADR-0190 결정 2): 갈래 1은 SEG 단계에서, 갈래 2·3은 그 구간의 자기 단계를 다 끝낸 뒤, 목록을 한 번에 고친다. 같은 게이트와 새 맥락 리뷰를 거치고, 고친 줄은 지운다.
 
 ## 다음 할 일
+- 2026-11-14 R-580: **BAT-430 PRIORITY 홀드 시험 기대값 정리**. `develop`(기준 `7b23727e`, R-579). 갈래 3이 홀드 확인 결과에 `kind`를 더하고 `ORDER_HOLD_LUA` ARGV 4에 종류를 넣고 마이그레이션 0017을 더한 뒤 purchase 전체 test-int의 기대값이 낡아 6건이 실패했다. order-holds의 check 기대값에 `kind: 'FAN'`, ARGV에 종류, 고정 TIME 사본의 시간 자리를 ARGV 5로 옮기고, 마이그레이션 수를 18로 맞췄다. purchase test-int 1832 통과·2 건너뜀.
 - 2026-11-14 R-579: **BAT-430 문제 유형 정본 보충**. `develop`(기준 `adf3ce6c`, R-578). 갈래 3이 코드에만 더한 `priority-grant-already-used`(409)·`invalid-priority-grant`(400)가 정본 `x-peaket-problem-types`에 없고 `seat-store-unavailable` 제목도 정본과 달라 platform `problem-types.test.ts`가 실패했다. 두 유형을 계약에 더하고 contracts/api-client 생성물을 다시 만들며 제목을 정본으로 맞췄다. platform 532·purchase 3819·contracts `gen:check`·api-client 113 통과.
 - 2026-11-14 R-578: **BAT-465 eventKey 멱등 비교 수정**. `develop`(기준 `f7c78cde`, R-577). 갈래 3 heavy gate의 ops-svc test-int에서 `command-execution.int.test.ts`의 eventKey 멱등 시험이 PostgreSQL jsonb 키 정렬과 `JSON.stringify` 비교가 달라 같은 사건을 중복 명령으로 만들었다. `isDeepStrictEqual`로 바꿔 키 순서와 무관하게 비교한다. ops 49·test-int 23·typecheck 통과.
 - 2026-11-14 R-577: **BAT-610 문제 유형 제목 정본 통일**. `develop`(기준 `430d87ba`, R-574). CI 43600655661의 `node / node`가 platform `problem-types.test.ts`에서 payment-svc 정산의 `authz-unavailable` 제목 `'테넌트를 확인할 수 없습니다'`와 `precondition-required` 제목 `'If-Match가 필요합니다'`가 정본 `x-peaket-problem-types`와 다르다고 잡았다. 두 제목을 정본 `'권한을 확인하지 못했습니다'`·`'고칠 판(If-Match)을 보내 주세요'`로 통일했다. platform 532·payment 2929·typecheck 통과.

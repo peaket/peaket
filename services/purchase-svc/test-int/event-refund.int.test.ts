@@ -104,7 +104,7 @@ describe('0016 회차 취소 일괄 환불', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(17);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(18);
     const idx = await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'event_refund_item' and indexname = 'event_refund_item_cancellation_key'");
     expect(idx.rows[0]?.indexdef).toContain('UNIQUE INDEX');
   });

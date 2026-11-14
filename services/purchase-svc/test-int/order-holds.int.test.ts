@@ -130,13 +130,13 @@ describe('RedisOrderHolds.check: 맞는 홀드', () => {
 
     const r = await holds.check(query(w));
 
-    expect(r).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4 });
+    expect(r).toEqual({ status: 'OK', kind: 'FAN', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4 });
   });
 
   test('ST28_좌석 하나짜리 홀드도 OK이고, 마감(deadlineMs)을 넘겨도 결과가 같다', async () => {
     const w = await heldWorld({ seatIds: ['B07'] });
     const holds = new RedisOrderHolds(redis, seatMapWith(w.eventId));
-    expect(await holds.check(query(w), { deadlineMs: 500 })).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: [seatOf('B07')], limit: 4 });
+    expect(await holds.check(query(w), { deadlineMs: 500 })).toEqual({ status: 'OK', kind: 'FAN', heldAtMs: w.heldAtMs, seats: [seatOf('B07')], limit: 4 });
   });
 
   test('Lua 계약: 첫 줄이 #!lua flags=no-writes이고, 스크립트 한 번에 KEYS = [세대 키, hold:{색인} …(목록 차례)], ARGV = [holdId, 계정, 구매 세션]이며 KEYS가 모두 회차 슬롯 하나다', async () => {
@@ -151,7 +151,7 @@ describe('RedisOrderHolds.check: 맞는 홀드', () => {
     const call = rec.scripts[0]!;
     expect(call.script.source).toBe(ORDER_HOLD_LUA);
     expect(call.keys).toEqual([seatKeys.epoch(w.eventId), seatKeys.hold(w.eventId, idx('A03')), seatKeys.hold(w.eventId, idx('B02'))]);
-    expect(call.args).toEqual([w.holdId, w.accountId, w.jti]);
+    expect(call.args).toEqual([w.holdId, w.accountId, w.jti, 'FAN']);
     expect(new Set(call.keys.map(slotOf)).size).toBe(1);
   });
 
@@ -360,13 +360,13 @@ describe('ORDER_HOLD_LUA: 만료 경계(TIME을 고정한 사본)', () => {
 
   test('원문에 TIME 읽기가 정확히 한 번 있고, 그것을 고정한 사본에서 exp = 지금이면 NOT_FOUND, 지금 + 1ms면 OK, 지금 − 1ms면 NOT_FOUND다', async () => {
     expect(ORDER_HOLD_LUA.split(NEEDLE)).toHaveLength(2);
-    const fixed = redisScript(ORDER_HOLD_LUA.replace(NEEDLE, "{ARGV[4], '0'}"));
+    const fixed = redisScript(ORDER_HOLD_LUA.replace(NEEDLE, "{ARGV[5], '0'}"));
     const w = await heldWorld({ seatIds: ['A20'] });
     const key = seatKeys.hold(w.eventId, idx('A20'));
     // 고정한 지금(초 단위로 맞춘 ms): 홀드 Lua가 쓴 exp보다 뒤라 경계는 아래 HSET으로만 정해진다
     const nowSec = Math.floor(Date.now() / 1000) + 3600;
     const nowMs = nowSec * 1000;
-    const run = () => redis.evalScript(fixed, [seatKeys.epoch(w.eventId), key], [w.holdId, w.accountId, w.jti, String(nowSec)]);
+    const run = () => redis.evalScript(fixed, [seatKeys.epoch(w.eventId), key], [w.holdId, w.accountId, w.jti, 'FAN', String(nowSec)]);
     await cmd(key, ['HSET', key, 'exp', String(nowMs)]);
     expect(await run()).toEqual(['NOT_FOUND']);
     await cmd(key, ['HSET', key, 'exp', String(nowMs + 1)]);
