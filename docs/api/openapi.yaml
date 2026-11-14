@@ -176,6 +176,12 @@ x-peaket-problem-types:
     precondition-failed: { status: 412, title: "다른 사람이 먼저 고쳤습니다" }
     precondition-required: { status: 428, title: "고칠 판(If-Match)을 보내 주세요" }
     preverify-invalid: { status: 403, title: "사람 확인을 다시 해 주세요" }
+    product-fulfillment-invalid: { status: 422, title: "수령 방식이 맞지 않습니다" }
+    product-limited-qty-invalid: { status: 422, title: "한정 수량이 맞지 않습니다" }
+    product-return-address-required: { status: 422, title: "택배 상품은 반품 받을 주소가 필요합니다" }
+    product-return-shipping-fee-required: { status: 422, title: "택배 상품은 반품 배송비가 필요합니다" }
+    product-shipping-fee-required: { status: 422, title: "택배 상품은 배송비가 필요합니다" }
+    product-ticket-link-invalid: { status: 422, title: "티켓 연동 여부와 연결 회차가 맞지 않습니다" }
     priority-grant-not-found: { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" }
     priority-seat-only: { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" }
     production-suspended: { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" }
@@ -273,6 +279,7 @@ x-peaket-problem-types:
     unlock-link-resend-limit: { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" }
     verification-not-found: { status: 404, title: "본인확인 건을 찾을 수 없습니다" }
     verification-submit-limited: { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" }
+    webhook-delivery-not-redeliverable: { status: 409, title: "지금은 다시 보낼 수 없습니다" }
     webhook-url-not-allowed: { status: 400, title: "받지 않는 웹훅 주소입니다" }
     wish-limit: { status: 422, title: "찜 수를 넘었습니다" }
     withdrawal-confirmation-required: { status: 409, title: "탈퇴 전에 확인해 주세요" }
@@ -3081,6 +3088,8 @@ components:
         fulfillments: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [DELIVERY, PICKUP, WALLET] }, description: "받을 수 있는 수령 방식" }
         transferable: { type: boolean, default: false, description: "티켓과 함께 양도 허용" }
         status: { type: string, enum: [DRAFT, PUBLISHED], default: DRAFT, description: "저장 상태. PUBLISHED면 게시한다" }
+        saleStartsAt: { type: [string, 'null'], format: date-time, description: "판매 시작 시각. null이면 제한 없음" }
+        saleEndsAt: { type: [string, 'null'], format: date-time, description: "판매 종료 시각. null이면 제한 없음" }
         attributes: { type: object, additionalProperties: true, 'x-peaket-open-object': true, description: "유형별 속성(옵션 규격·특전 등). 유형 스키마가 검사한다" }
     PartnerProductDetail:
       allOf:
@@ -3112,6 +3121,8 @@ components:
         fulfillments: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [DELIVERY, PICKUP, WALLET] } }
         transferable: { type: boolean }
         status: { type: string, enum: [DRAFT, PUBLISHED, HIDDEN] }
+        saleStartsAt: { type: [string, 'null'], format: date-time, description: "판매 시작 시각. null이면 제한 없음" }
+        saleEndsAt: { type: [string, 'null'], format: date-time, description: "판매 종료 시각. null이면 제한 없음" }
         attributes: { type: object, additionalProperties: true, 'x-peaket-open-object': true }
     PartnerMerchOrderStatsRow:
       type: object

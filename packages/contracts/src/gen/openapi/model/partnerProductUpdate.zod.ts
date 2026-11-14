@@ -40,6 +40,8 @@ export const PartnerProductUpdate = zod.object({
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional(),
   "transferable": zod.boolean().optional(),
   "status": zod.enum(['DRAFT', 'PUBLISHED', 'HIDDEN']).optional(),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish().describe('판매 시작 시각. null이면 제한 없음'),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish().describe('판매 종료 시각. null이면 제한 없음'),
   "attributes": zod.record(zod.string(), zod.unknown()).optional()
 }).strict().describe('상품 고치기 본문. 보낸 칸만 바꾼다')
 

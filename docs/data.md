@@ -1598,21 +1598,22 @@ erDiagram
     product {
         uuid id PK "UUIDv7(ADR-0101)"
         uuid promoter_id "판매자(상품을 등록한 파트너, POL-037)"
-        text type FK "product_type.code. CHECK 목록 대신 외래 키(새 유형에 DDL 없음)"
+        text type "product_type.code. product_type 표·외래 키·유형별 Zod 검사는 후속(지금은 문자열)"
         int schema_version "그 유형 속성 스키마(Zod)의 판"
         text name
         text status "DRAFT|PUBLISHED|HIDDEN. 판매 전·판매 중·품절은 판매 기간·재고로 계산"
         int price "원, CHECK (price >= 0)"
         int shipping_fee "편도 배송비, 택배를 켤 때 필수(ADR-0062)"
         int return_shipping_fee "단순 변심 반품 배송비(편도, ADR-0062)"
-        jsonb return_address "반품 받을 주소(판매자가 정함)"
+        text return_address "반품 받을 주소(판매자가 정함). 지금은 text, 구조화는 후속"
         int limited_qty "한정 수량, NULL이면 한정 아님. 재고는 product_stock"
         bool transferable
         bool ticket_linked "CHECK (ticket_linked = (linked_event_id IS NOT NULL))"
         uuid linked_event_id "티켓 연동 부가 상품의 연결 회차"
+        text_array fulfillments "DELIVERY|PICKUP|WALLET, 하나 이상"
         timestamptz sale_starts_at
         timestamptz sale_ends_at
-        int commission_rate_bp "처음 게시할 때 그 파트너의 계약 수수료율로 고정(ADR-0062). CHECK (status = 'DRAFT' OR commission_rate_bp IS NOT NULL)"
+        int commission_rate_bp "처음 게시할 때 그 파트너의 계약 수수료율로 고정(ADR-0062). 계약 표가 없어 지금은 기본 1000bp"
         jsonb attributes "유형마다 다른 속성(옵션 규격·혜택 목록 등). Zod로 검사, GIN jsonb_path_ops"
         int version "낙관적 잠금"
         timestamptz published_at "처음 게시한 시각"
@@ -1640,24 +1641,23 @@ erDiagram
         uuid id PK
         uuid promoter_id
         text url "https만(FR-025)"
-        text secret_ref "Secrets Manager의 엔드포인트별 서명 비밀(whsec_) 위치"
+        text secret "엔드포인트별 서명 비밀(whsec_). 지금은 DB text, Secrets Manager 참조는 후속"
+        text previous_secret "비밀을 바꾼 뒤 24시간 함께 서명하는 옛 비밀(ADR-0053)"
         text_array event_types "구독한 이벤트 type(ADR-0062)"
         text status "ACTIVE|DISABLED"
-        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9)"
-        text secret_prev_ref "비밀을 바꾼 뒤 24시간 함께 서명하는 옛 비밀 위치(ADR-0053, 추천 적용 2026-10-30)"
-        timestamptz secret_prev_until "옛 비밀 서명을 그만 붙이는 시각"
+        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9). 자동 전환은 발송기와 함께 후속"
+        timestamptz secret_issued_at "현재 비밀을 발급한 시각. 1분 안 재발급은 409"
+        timestamptz previous_secret_valid_until "옛 비밀 서명을 그만 붙이는 시각"
         int version "PATCH의 If-Match 판(guidelines §12)"
     }
     webhook_delivery {
-        uuid endpoint_id PK
-        text event_key PK "webhook-id(사건 키, 재전송에도 같음). (endpoint_id, event_key) 유일"
-        uuid id "UNIQUE. 다시 보내기 경로의 deliveryId(추천 적용 2026-10-30)"
+        uuid id PK "다시 보내기 경로의 deliveryId(추천 적용 2026-10-30)"
+        uuid endpoint_id FK "webhook_endpoint.id"
+        text webhook_id "webhook-id(사건 키, 재전송에도 같음). (endpoint_id, webhook_id) 유일"
         text event_type
-        jsonb payload "thin 본문 {type, timestamp, data}. 개인정보 없음"
         text status "PENDING|RETRYING|SUCCEEDED|DEAD(DLQ)"
         int attempt_count
-        timestamptz next_attempt_at "부분 인덱스 WHERE status IN ('PENDING','RETRYING')"
-        timestamptz lease_until "워커가 맡은 동안의 임대 끝(ADR-0109)"
+        timestamptz next_attempt_at "발송기가 쓸 시각. 부분 인덱스는 발송기와 함께 후속"
         int last_http_status
         text last_error "응답이 없을 때의 분류(TIMEOUT·TLS·DNS_BLOCKED·REDIRECT 등). 응답 본문은 두지 않음(추천 적용 2026-10-30)"
         timestamptz created_at

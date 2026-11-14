@@ -69,6 +69,16 @@ export interface PartnerProductCreate {
   transferable?: boolean;
   /** 저장 상태. PUBLISHED면 게시한다 */
   status?: PartnerProductCreateStatus;
+  /**
+     * 판매 시작 시각. null이면 제한 없음
+     * @nullable
+     */
+  saleStartsAt?: string | null;
+  /**
+     * 판매 종료 시각. null이면 제한 없음
+     * @nullable
+     */
+  saleEndsAt?: string | null;
   /** 유형별 속성(옵션 규격·특전 등). 유형 스키마가 검사한다 */
   attributes?: PartnerProductCreateAttributes;
 }

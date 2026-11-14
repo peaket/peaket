@@ -103,3 +103,82 @@
 
 - 파트너 운영 빌드 4201, 가짜 API 4012, Chromium을 끝냈다.
 - Docker 컨테이너는 만들지 않았다.
+
+## 8. 서버 잔여 cheap gate(2026-11-14, R-567)
+
+`origin/develop` `0adc8057`(R-565)에서 `wave/lane2-BAT-610-server` 가지로 core-svc shop·notify를 넣은 뒤의 싼 검사다. Docker·브라우저·변이·4관점 리뷰는 돌리지 않았다.
+
+- `services/core-svc` vitest: **329개 통과**(새 상품·웹훅·마이그레이션 시험 27개 포함).
+- `services/core-svc` `tsc --noEmit`: **0**.
+- 뿌리 eslint(`services/core-svc`): **0**.
+- `contracts gen:check`: **생성물이 계약과 같다**.
+- `api-client` test: **113개 통과**.
+- doc-check: **오류 0, 경고 4**(기존 openapi 3·mermaid 건너뜀 1).
+- `records --check`: **통과**(기존 중복 번호 경고만).
+- `ledger --batch BAT-610 --require`: **자동 10, ID만 0, 빈칸 0**.
+- `trace-check --ids "I-T53,J-T18,J-T26,N-T15"`: **4 ID 통과 / 파트너 181 + core 329 보고 510개**(N-T15 14).
+
+**heavy gate에서 돌릴 것**:
+- Docker test-int: core-svc 0014·0015 마이그레이션 사슬, RLS·core_partner 권한, 상품·웹훅 Drizzle 저장소.
+- 상품·웹훅 HTTP를 실제 PostgreSQL·게이트웨이로 확인.
+- 웹훅 발송기·재시도·DLQ를 넣은 뒤 SSRF·서명·재시도 시험.
+- 파트너 화면 브라우저 확인(서버 경로가 생긴 상품·웹훅).
+- 변이·4관점 리뷰.
+
+## 9. 서버 잔여 heavy gate(2026-11-14, R-567)
+
+`wave/lane2-BAT-610-server`(`35434510`, 기준 `origin/develop` `0adc8057`)에서 웨이브 끝 비싼 검사를 돌렸다.
+
+### 9.1 Docker test-int(실제 PostgreSQL 18)
+
+- `services/core-svc` 전체 test-int: **235 통과, 1 건너뜀**(19 파일). 새 `test-int/shop-notify.int.test.ts`는 **10/10 통과**.
+- `0014_shop`·`0015_notify`를 적용한 뒤 `migrateCore`를 다시 불러 재적용이 안전한 것을 확인했다.
+- `product`·`product_stock`·`webhook_endpoint`·`webhook_delivery`의 RLS 켜짐과 `core_partner` 권한을 실제 `pg_tables`·`information_schema.role_table_grants`로 확인했다. `product_stock`은 한정을 풀 때 행을 지우므로 `DELETE` 권한을 더했다.
+- Drizzle 저장소가 트랜잭션마다 `app.tenant_id`를 걸도록 고쳤다. 고치기 전에는 `core_partner` RLS가 모든 행을 0건으로 보아 실제 DB에서 상품·웹훅이 동작하지 않았다. 상품·웹훅 읽기/쓰기, 테넌트 없이 0건, 다른 테넌트 쓰기 42501을 확인했다.
+- 상품 만들기·목록·상세·고치기(If-Match/ETag), 재고·한정 수량, 품절·판매 전·판매 끝 상태, 티켓 연동 회차→공연 이름, 판매 기간 저장을 확인했다.
+- 웹훅 등록·목록·고치기·비밀 재발급(1분 제한·24시간 옛 비밀)·발송 기록·다시 보내기(DEAD만 202, PENDING 409, 다른 테넌트 404)·주소 검사(https·443·사용자 정보·IP literal·IPv6·10진 IP·사설 호스트)를 확인했다.
+- 웹훅 발송기·재시도·DLQ는 구현하지 않았으므로 시험하지 않았다. 발송 기록은 관리 API가 읽는 저장·상태 전이까지만 본다.
+
+### 9.2 변이(등급 A)
+
+18개를 넣어 **18/18 잡았다**.
+
+| 묶음 | 변이 | 결과 |
+| --- | --- | --- |
+| 상품 상태·재고 | P-01 품절 조건 제거, P-02 재고 0 경계를 `< 0`으로, P-05 생성 때 재고를 null로, P-09 한정 수량 0을 거절 | 4/4 잡음 |
+| If-Match·검증 | P-03 메모리 저장소 판 비교 제거, P-04 고치기 검증 제거, P-06 티켓 연동 검사 제거, P-08 판 증가를 +2로 | 4/4 잡음 |
+| 테넌트/RLS | P-07 Drizzle `find`의 `tenantId` 제거 | 잡음 |
+| 웹훅 비밀 | W-01 1분 재발급 제한 제거, W-02 옛 비밀 24시간을 1시간으로, W-07 저장소 판 비교 제거, W-08 다시 보내기 시도 횟수 증가 제거 | 4/4 잡음 |
+| 다시 보내기 조건 | W-03 PENDING 재전송 허용 | 잡음 |
+| SSRF | W-04 https 검사 제거, W-05 포트 검사 제거, W-09 443 경계를 8443으로 | 3/3 잡음 |
+| 테넌트/RLS | W-06 Drizzle `findEndpoint`의 `tenantId` 제거 | 잡음 |
+
+### 9.3 4관점 리뷰
+
+| 관점 | 높음 | 중간 | 낮음 | 내용 |
+| --- | --- | --- | --- | --- |
+| 보안 | 0 | 2 | 2 | 높음 0. 중간: 웹훅 비밀이 DB text(Secrets Manager/KMS 후속), 발송기·보낼 때 SSRF 검사 부재(발송기와 함께 후속). 낮음: 비밀 응답 `no-store`를 넣었고, 주소 검사는 등록 때만 한다 |
+| 정합 | 0 | 1 | 3 | 중간: `product_type` FK·유형별 Zod 검사가 없다. 낮음: 상태 필터를 DB 페이지 뒤에 적용해 빈 페이지가 날 수 있다, 발송 기록 커서 없음, 한정 수량을 바꾸면 재고를 새 값으로 되돌린다(주문 원천이 생기면 다시 설계) |
+| 시험 | 0 | 0 | 1 | 변이 18/18, test-int 10/10, 단위 329. 낮음: 브라우저 확인은 가짜 API로 했고 실제 게이트웨이·세션 스택은 세우지 않았다 |
+| 운영 | 0 | 0 | 1 | 낮음: 웹훅 발송기·재시도·DLQ·FAILING 자동 전환이 없어 관리 API만 운영할 수 있다 |
+
+- 높음은 0이다. 중간 3은 선행(Secrets Manager/KMS·발송기·product_type 표)이 없어 문서화·후속으로 남겼다. 이번에 고친 것은 RLS 누락, `product_stock` DELETE 권한, 비밀 응답 `no-store`, 판매 기간 입력 계약이다.
+
+### 9.4 브라우저 확인
+
+- 파트너 dev 3001 + `tools/web-checks/partner-api` 가짜 API 4012로 확인했다. **실제 core-svc를 브라우저에 붙이지는 않았다**(게이트웨이·쿠키 세션 스택을 세우지 않음). 실제 서버 경로는 §9.1 test-int가 실제 PostgreSQL과 core-svc HTTP로 본다.
+- 관찰한 호출: `GET /v1/partner/products?limit=100` 200, `POST /v1/partner/products` 201, `GET/PATCH /v1/partner/products/{id}` 200, `GET /v1/partner/webhooks?limit=100` 200, `GET /v1/partner/webhooks/{id}/deliveries?limit=50` 200, `POST /v1/partner/webhooks/{id}/secret-rotations` 201, `POST /v1/partner/webhook-deliveries/{id}/redeliveries` 202.
+- 화면은 상품 목록·만들기·고치기, 웹훅 목록·발송 기록·비밀 재발급·다시 보내기를 실제 API 계약 모양으로 불렀다.
+
+### 9.5 CI 로컬 등가와 정리
+
+- core-svc 단위 **329**, test-int **235 통과·1 건너뜀**, typecheck **0**, lint **0**.
+- doc-check **오류 0·경고 4**, `ledger --batch BAT-610 --require` **자동 10·ID만 0·빈칸 0**, `trace-check` **4 ID / 510 보고**, `records --check` **통과**, `contracts gen:check` **같음**, api-client **113**.
+- test-int 컨테이너는 각 시험이 `docker rm -f -v`로 지웠고, 가짜 API·파트너 dev 서버도 확인 뒤 멈춘다.
+
+### 9.6 남은 막힘
+
+- **export**: 명단 원천·`BOOKER_EXPORT` 서버 검증 배선이 없다.
+- **payment-svc 정산·지급·KYC**: 정산서 표·주문 항목 원천·지급대행 어댑터가 없다.
+- **웹훅 발송기**: 서명·재시도·DLQ·FAILING 자동 전환·Secrets Manager/KMS 저장이 없다.
+- **게이트웨이**: 파트너 API 라우팅·세션 스택은 이 가지 밖이다. 브라우저는 가짜 API로 계약 모양만 확인했다.

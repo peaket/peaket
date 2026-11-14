@@ -177,4 +177,6 @@
 | I-T53 | 다른 계약 | B | apps/partner 재인증 화면 | 화면은 `act BOOKER_EXPORT`·패스키 단계·403 `reauth-required`를 부르고 시험은 `apps/partner/src/shared/api/reauth.test.mjs`·`problem.test.mjs`·`_pages/settlement/model/roster-live.test.mjs`가 본다. 서버의 jti 한 번 쓰기·factors 검사는 identity-svc 기존 시험 몫이다. |
 | J-T18 | 다른 계약 | A | payment-svc 정산 모듈 | 상품 정산서 계산·지급대행·KYC·상계가 없다. 화면은 목록·이의 제기 계약과 준비 중 상태만 시험한다(`settlement-live.test.mjs`). |
 | J-T26 | 다른 계약 | A | core-svc export·purchase-svc 명단 원천 | 내려받기 사유·보유 기간·이력 문구는 화면 시험이 본다(`roster-live.test.mjs`). 실제 명단 원천·접속기록·스트리밍 저장은 서버 모듈이 없다. |
-| N-T15 | 다른 계약 | B | core-svc notify 모듈 | 웹훅 endpoint·delivery 표·발송기·재시도가 없다. 화면은 주소 검사·상태·재발급·다시 보내기 계약을 시험한다(`webhooks/model/live.test.mjs`). |
+| N-T15 | 다른 계약 | B | core-svc notify 모듈 | 웹훅 endpoint·delivery 표와 관리 API(등록·고치기·비밀 재발급·발송 기록·다시 보내기)는 R-567에서 넣었고 `services/core-svc/test/notify-webhook.http.test.ts`가 본다. 발송기·재시도·DLQ·FAILING 자동 전환은 아직 없다. 화면 시험은 `webhooks/model/live.test.mjs`다. |
+
+서버 잔여(R-567)로 core-svc shop·notify 관리 API와 `product`·`product_stock`·`webhook_endpoint`·`webhook_delivery` 표(0014·0015, 테넌트 RLS)를 넣었다. N-T15의 관리 API 부분은 `services/core-svc/test/notify-webhook.http.test.ts`가 본다. J-T18·J-T26과 N-T15의 발송기·재시도·DLQ는 위 사유대로 막혀 있다.

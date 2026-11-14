@@ -145,6 +145,12 @@ export type ProblemType =
   | 'preverify-invalid'
   | 'priority-grant-not-found'
   | 'priority-seat-only'
+  | 'product-fulfillment-invalid'
+  | 'product-limited-qty-invalid'
+  | 'product-return-address-required'
+  | 'product-return-shipping-fee-required'
+  | 'product-shipping-fee-required'
+  | 'product-ticket-link-invalid'
   | 'production-suspended'
   | 'promoter-mismatch'
   | 'provider-down'
@@ -240,6 +246,7 @@ export type ProblemType =
   | 'unlock-link-resend-limit'
   | 'verification-not-found'
   | 'verification-submit-limited'
+  | 'webhook-delivery-not-redeliverable'
   | 'webhook-url-not-allowed'
   | 'wish-limit'
   | 'withdrawal-confirmation-required';
@@ -391,6 +398,12 @@ export const PROBLEM_TYPES = {
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
   'priority-seat-only': { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" },
+  'product-fulfillment-invalid': { status: 422, title: "수령 방식이 맞지 않습니다" },
+  'product-limited-qty-invalid': { status: 422, title: "한정 수량이 맞지 않습니다" },
+  'product-return-address-required': { status: 422, title: "택배 상품은 반품 받을 주소가 필요합니다" },
+  'product-return-shipping-fee-required': { status: 422, title: "택배 상품은 반품 배송비가 필요합니다" },
+  'product-shipping-fee-required': { status: 422, title: "택배 상품은 배송비가 필요합니다" },
+  'product-ticket-link-invalid': { status: 422, title: "티켓 연동 여부와 연결 회차가 맞지 않습니다" },
   'production-suspended': { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" },
   'promoter-mismatch': { status: 422, title: "계정의 파트너사와 다릅니다" },
   'provider-down': { status: 503, title: "지금은 본인확인을 할 수 없습니다" },
@@ -486,6 +499,7 @@ export const PROBLEM_TYPES = {
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },
   'verification-not-found': { status: 404, title: "본인확인 건을 찾을 수 없습니다" },
   'verification-submit-limited': { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" },
+  'webhook-delivery-not-redeliverable': { status: 409, title: "지금은 다시 보낼 수 없습니다" },
   'webhook-url-not-allowed': { status: 400, title: "받지 않는 웹훅 주소입니다" },
   'wish-limit': { status: 422, title: "찜 수를 넘었습니다" },
   'withdrawal-confirmation-required': { status: 409, title: "탈퇴 전에 확인해 주세요" },

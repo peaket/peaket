@@ -409,6 +409,7 @@ T는 오픈 시각(`open_at`), L은 로비 개방 리드(기본 10분, 회차 �
 | 다시 보내기 | `POST /v1/partner/webhook-deliveries/{deliveryId}/redeliveries` | 파트너 관리자. DEAD·SUCCEEDED 행을 PENDING으로 되돌려 같은 `webhook-id`로 다시 보낸다. 엔드포인트마다 분당 10건 [가정] |
 
 - 다른 파트너의 엔드포인트·발송 행은 404다(있는지 알리지 않는다). 엔지니어의 다시 보내기는 RB-11이다.
+- **구현 상태(2026-11-14, R-567)**: core-svc notify 모듈이 위 관리 API 가운데 등록·조회·고치기·비밀 재발급·발송 이력·다시 보내기를 구현했다. `webhook_endpoint`·`webhook_delivery` 표(0015), 테넌트 RLS, If-Match·권한·주소 검사·1분 재발급 제한·DEAD/SUCCEEDED만 다시 보내기를 단위·HTTP 시험으로 본다. 발송기·재시도 워커·DLQ·FAILING 자동 전환·Secrets Manager 저장·응답 본문 저장·분당 다시 보내기 상한은 후속이다.
 
 ## 10. 실패와 재시도
 

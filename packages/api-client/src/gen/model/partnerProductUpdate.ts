@@ -53,5 +53,15 @@ export interface PartnerProductUpdate {
   fulfillments?: PartnerProductUpdateFulfillmentsItem[];
   transferable?: boolean;
   status?: PartnerProductUpdateStatus;
+  /**
+     * 판매 시작 시각. null이면 제한 없음
+     * @nullable
+     */
+  saleStartsAt?: string | null;
+  /**
+     * 판매 종료 시각. null이면 제한 없음
+     * @nullable
+     */
+  saleEndsAt?: string | null;
   attributes?: PartnerProductUpdateAttributes;
 }

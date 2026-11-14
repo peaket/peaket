@@ -41,6 +41,8 @@ export const PartnerProductCreate = zod.object({
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('받을 수 있는 수령 방식'),
   "transferable": zod.boolean().default(partnerProductCreateTransferableDefault).describe('티켓과 함께 양도 허용'),
   "status": zod.enum(['DRAFT', 'PUBLISHED']).default(partnerProductCreateStatusDefault).describe('저장 상태. PUBLISHED면 게시한다'),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish().describe('판매 시작 시각. null이면 제한 없음'),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish().describe('판매 종료 시각. null이면 제한 없음'),
   "attributes": zod.record(zod.string(), zod.unknown()).optional().describe('유형별 속성(옵션 규격·특전 등). 유형 스키마가 검사한다')
 }).strict().describe('상품 빌더 저장 본문(SCR-023, FR-024, docs/data.md product). 유형마다 다른 속성은 attributes에 둔다. 서버는 유형별 Zod 스키마로 다시 검사한다')
 
