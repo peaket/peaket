@@ -30,4 +30,14 @@ export class RecordOpsAlert {
       nowMs: i.createdAt !== undefined ? Date.parse(i.createdAt) : this.nowMs(),
     });
   }
+
+  /** 열린 경보를 푼다(O-T20 신선도 회복). 없는 경보는 undefined다 */
+  async resolve(i: { eventKey: string; kind: string; reason: string; resolvedAt?: string }): Promise<OpsAlert | undefined> {
+    return this.store.resolve({
+      eventKey: i.eventKey,
+      kind: i.kind,
+      reason: i.reason,
+      nowMs: i.resolvedAt !== undefined ? Date.parse(i.resolvedAt) : this.nowMs(),
+    });
+  }
 }

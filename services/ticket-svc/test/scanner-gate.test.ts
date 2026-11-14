@@ -2,6 +2,7 @@
 import { fakeClock } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
+import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
 import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden } from '../src/modules/scanner/application/scanner-gate.js';
 import type { ScanEventInput } from '../src/modules/scanner/domain/scanner-gate.js';
 import { normalizeVersionVector } from '../src/modules/scanner/domain/scanner-gate.js';
@@ -184,5 +185,22 @@ describe('ScannerGate 이상 표시 [GAT-190]', () => {
     await expect(gate.resolveFlag({ eventIdRaw: EVENT, sessionEventId: EVENT, flagIdRaw: flag.flagId, status: 'OK', resolvedBy: ACCOUNT })).resolves.toMatchObject({ status: 'OK' });
     await expect(gate.resolveFlag({ eventIdRaw: OTHER, sessionEventId: OTHER, flagIdRaw: flag.flagId, status: 'OK', resolvedBy: ACCOUNT })).rejects.toBeInstanceOf(ScannerGateForbidden);
     await expect(gate.resolveFlag({ eventIdRaw: EVENT, sessionEventId: EVENT, flagIdRaw: '0190f3a1-7c2e-7a00-8000-000000000099', status: 'OK', resolvedBy: ACCOUNT })).rejects.toBeInstanceOf(ScannerFlagNotFound);
+  });
+
+  test('변경분을 받으면 그 기기의 last_changes_at을 기록한다', async () => {
+    const touched: { deviceId: string; atMs: number }[] = [];
+    const deviceGate = new ScannerGate({ store, clock: fakeClock({ now: NOW }), devices: { touchChanges: async (deviceId, atMs) => void touched.push({ deviceId, atMs }) } });
+    await deviceGate.changes(EVENT, 0, 100, EVENT, DEVICE);
+    expect(touched).toEqual([{ deviceId: DEVICE, atMs: NOW }]);
+  });
+
+  test('스태프 토큰이 없어도 그 회차에 배치된 기기면 업로드를 받고, 배치가 없으면 403이다', async () => {
+    const shifts = new MemoryScannerShiftStore(store);
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
+    const deviceGate = new ScannerGate({ store, clock: fakeClock({ now: NOW }), shifts });
+    const accepted = await deviceGate.scans({ eventIdRaw: EVENT, sessionEventId: undefined, deviceId: DEVICE, body: [scan()] });
+    expect(accepted.acceptedIds).toHaveLength(1);
+    expect(accepted.flags).toEqual([expect.objectContaining({ kind: 'OUT_OF_SESSION', status: 'OPEN' })]);
+    await expect(deviceGate.scans({ eventIdRaw: EVENT, sessionEventId: undefined, deviceId: '0190f3a1-7c2e-7a00-8000-000000000099', body: [scan()] })).rejects.toBeInstanceOf(ScannerGateForbidden);
   });
 });

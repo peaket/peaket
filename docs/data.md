@@ -1402,8 +1402,15 @@ erDiagram
         uuid enrolled_by "operator"
         timestamptz enrolled_at
         timestamptz last_seen_at "마지막 스캐너 요청 시각(목록 표시용, 선택)"
+        timestamptz last_changes_at "마지막 변경분 수신 시각(O-T20 2분 신선도 경보, 2026-11-15 R-586)"
         timestamptz revoked_at
         text revoke_reason
+    }
+    scanner_device_command {
+        uuid request_id PK "ops-svc 기기 명령 멱등 키(ADR-0148, 2026-11-15 R-586)"
+        text action "REGISTER|REVOKE|REISSUE"
+        uuid device_id
+        timestamptz created_at
     }
     scanner_placement {
         uuid event_id PK
@@ -1896,12 +1903,14 @@ erDiagram
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"
         text event_key "멱등 키. kind와 함께 유니크(같은 경보는 한 건으로 모은다)"
-        text kind "AUTO_FAILURE_RATE|AUTO_FAILED_AMOUNT|AUTO_CONSECUTIVE_FAILURES|AUTO_CIRCUIT_OPEN|AUTO_REJECT_RATE|REFUND_WINDOW_CLOSED"
+        text kind "AUTO_FAILURE_RATE|AUTO_FAILED_AMOUNT|AUTO_CONSECUTIVE_FAILURES|AUTO_CIRCUIT_OPEN|AUTO_REJECT_RATE|REFUND_WINDOW_CLOSED|scanner-freshness:{deviceId}"
         text severity "SEV1|SEV2|SEV3"
-        text source "purchase-svc"
+        text source "purchase-svc|ticket-svc"
         text reason
-        jsonb detail "회차·결제사·1분 창 값"
+        jsonb detail "회차·결제사·1분 창 값 또는 스캐너 last_changes_at·ageMs"
         timestamptz created_at
+        timestamptz resolved_at "풀린 시각(O-T20 회복, 2026-11-15 R-586). 열려 있으면 null"
+        text resolved_reason
     }
     audit_chain {
         bigint seq PK "빈틈 없는 번호"

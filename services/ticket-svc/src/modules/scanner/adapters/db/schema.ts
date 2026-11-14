@@ -21,6 +21,8 @@ export const scannerDevice = pgTable(
     enrolledBy: uuid('enrolled_by').notNull(),
     enrolledAt: at('enrolled_at').notNull(),
     lastSeenAt: at('last_seen_at'),
+    /** 스캐너가 마지막으로 변경분을 받은 시각(O-T20 신선도 경보). null이면 아직 받은 적이 없다 */
+    lastChangesAt: at('last_changes_at'),
     revokedAt: at('revoked_at'),
     revokeReason: text('revoke_reason'),
   },
@@ -30,6 +32,21 @@ export const scannerDevice = pgTable(
     check('scanner_device_status_check', sql`${t.status} IN ('ACTIVE', 'REVOKED', 'RETIRED')`),
     check('scanner_device_credential_type_check', sql`${t.credentialType} IN ('DEVICE_KEY', 'MTLS_CERT')`),
     check('scanner_device_name_check', sql`char_length(${t.name}) BETWEEN 1 AND 80`),
+  ],
+);
+
+/** ops-svc 기기 명령 한 번(request_id 멱등, ADR-0148, BAT-450). 같은 요청이 다시 와도 기기를 또 만들지 않는다 */
+export const scannerDeviceCommand = pgTable(
+  'scanner_device_command',
+  {
+    requestId: uuid('request_id').primaryKey(),
+    action: text('action').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    index('scanner_device_command_device_idx').on(t.deviceId, t.createdAt),
+    check('scanner_device_command_action_check', sql`${t.action} IN ('REGISTER', 'REVOKE', 'REISSUE')`),
   ],
 );
 

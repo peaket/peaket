@@ -121,7 +121,8 @@ export const GetScannerShiftResponse = zod.object({
 }).describe('오프라인 스냅샷 버전 벡터(offline-gate §6.3, GAT-160). 각 값은 그 종류 변경의 마지막 일련번호다'),
   "auth": zod.object({
   "deviceProof": zod.enum(['DPOP', 'MTLS']),
-  "staffSession": zod.boolean().describe('이 응답은 스태프 세션 확인을 통과한 요청에만 준다')
+  "staffSession": zod.boolean().describe('이 응답은 스태프 세션 확인을 통과한 요청에만 준다'),
+  "confirmation": zod.enum(['jkt', 'x5t#S256']).describe('스태프 토큰의 cnf 결속 방식. 기기 키+DPoP는 jkt(기본), mTLS 선택지는 인증서 SHA-256 지문 x5t#S256(RFC 8705·RFC 9449). mTLS는 관리형 기기·사설 CA PoC가 있어야 켠다(offline-gate §6.1)')
 })
 }).describe('근무 준비 응답(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호에 기기·배정·근무 창·판매/입장 창·목록 동기화 나이·버전 벡터 신선도·기기 인증 방식을 더한다(GAT-170 잔여, offline-gate §6.2)')
 

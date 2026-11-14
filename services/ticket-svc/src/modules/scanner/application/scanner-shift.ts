@@ -120,7 +120,11 @@ export class ScannerShift {
         stale,
       },
       versionVector: vector,
-      auth: { deviceProof: device.credentialType === 'MTLS_CERT' ? 'MTLS' : 'DPOP', staffSession: true },
+      auth: {
+        deviceProof: device.credentialType === 'MTLS_CERT' ? 'MTLS' : 'DPOP',
+        staffSession: true,
+        confirmation: device.credentialType === 'MTLS_CERT' ? 'x5t#S256' : 'jkt',
+      },
     };
   }
 

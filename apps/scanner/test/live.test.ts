@@ -1,7 +1,7 @@
 // SCR-033·SCR-035 actual-data mapping and freshness (GAT-170).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyChanges, formatAge, formatClockOffset, freshnessOf, loadSyncSnapshot, saveSyncSnapshot, setupStateOf, syncStateOf, type SyncSnapshot } from '../src/api/live.ts';
+import { applyChanges, formatAge, formatClockOffset, freshnessOf, loadSyncSnapshot, saveSyncSnapshot, sessionTerminatedOf, setupStateOf, syncStateOf, type SyncSnapshot } from '../src/api/live.ts';
 import type { ScannerShiftResponse, ScannerVersionVector } from '../src/api/client.ts';
 
 const NOW = Date.parse('2026-11-15T00:00:00Z');
@@ -90,4 +90,13 @@ test('동기화 스냅샷과 변경분 반영은 마지막 번호를 서버 값�
   const next = applyChanges(s, { changes: [], lastSeq: 12, hasMore: false, versionVector: vector({ seq: 12 }) }, NOW + 500);
   assert.equal(next.lastSeq, 12);
   assert.equal(next.syncedAtMs, NOW + 500);
+});
+
+test('SESSION_TERMINATED 변경분은 그 기기의 세션 종료만 골라 읽는다', () => {
+  const base = { lastSeq: 13, hasMore: false, versionVector: vector({ seq: 13 }) };
+  const other = sessionTerminatedOf({ ...base, changes: [{ seq: 12, kind: 'SESSION_TERMINATED', payload: { v: 1, deviceId: 'other', reason: 'DEVICE_REVOKED' } }] }, 'mine');
+  assert.equal(other, undefined);
+  const mine = sessionTerminatedOf({ ...base, changes: [{ seq: 12, kind: 'TICKET_STATUS', payload: {} }, { seq: 13, kind: 'SESSION_TERMINATED', payload: { v: 1, deviceId: 'mine', reason: 'DEVICE_REVOKED' } }] }, 'mine');
+  assert.deepEqual(mine, { reason: 'DEVICE_REVOKED' });
+  assert.deepEqual(sessionTerminatedOf({ ...base, changes: [{ seq: 13, kind: 'SESSION_TERMINATED', payload: { deviceId: 'mine' } }] }, 'mine'), {});
 });

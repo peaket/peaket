@@ -1,7 +1,7 @@
 // 스캐너 기기 원장 쓰임새(BUILD_ORDER GAT-170, offline-gate §6.1). 등록·목록·폐기·등록 코드 소비·재발급.
 import type { Clock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
-import type { EnrollmentAttemptLimiter, EnrollmentCodeStore, ScannerDeviceStore, ScannerSessionTerminator } from '../domain/ports.js';
+import type { EnrollmentAttemptLimiter, EnrollmentCodeStore, ScannerDeviceCommandStore, ScannerDeviceStore, ScannerSessionTerminator, ScannerShiftStore } from '../domain/ports.js';
 import {
   assertAccountId,
   assertCursor,
@@ -10,12 +10,14 @@ import {
   assertJkt,
   assertLimit,
   assertPromoterId,
+  assertRequestId,
   assertRevokeReason,
   deviceView,
   ENROLLMENT_CODE_TTL_MS,
   enrollmentCodeHash,
   newEnrollmentCode,
   normalizeEnrollmentCode,
+  ScannerDeviceInputError,
   ScannerDeviceKeyConflict,
   type ScannerDeviceView,
 } from '../domain/scanner-device.js';
@@ -58,6 +60,10 @@ export interface ScannerDevicesDeps {
   limiter?: EnrollmentAttemptLimiter;
   /** 기기 폐기 때 identity 스캐너 세션을 끝내는 포트. 없으면 부르지 않는다 */
   sessions?: ScannerSessionTerminator;
+  /** 기기 폐기 때 SESSION_TERMINATED 변경분을 남기는 포트(다른 스캐너 화면, O-T27). 없으면 남기지 않는다 */
+  shifts?: Pick<ScannerShiftStore, 'appendSessionTerminated'>;
+  /** ops-svc 기기 명령의 request_id 멱등 기록. 없으면 매번 새로 처리한다 */
+  commands?: ScannerDeviceCommandStore;
   /** SEV3 경보·세션 종료 실패를 남기는 곳. 없으면 버린다 */
   alert?: (message: string, fields: Record<string, unknown>) => void;
   /** 시험에서 고정 ID를 주입한다. 없으면 UUIDv4 */
@@ -74,19 +80,46 @@ export class ScannerDevices {
     return { items: r.devices.map(deviceView), ...(r.nextCursor !== undefined ? { nextCursor: r.nextCursor } : {}) };
   }
 
-  /** 기기를 만들고 1회용 등록 코드를 이 응답에만 싣는다. 코드 원문은 저장하지 않는다 */
-  async register(q: { name: unknown; promoterId: unknown; enrolledBy: unknown }): Promise<{ device: ScannerDeviceView; enrollmentCode: string; enrollmentCodeExpiresAt: string }> {
+  /** 기기를 만들고 1회용 등록 코드를 이 응답에만 싣는다. 코드 원문은 저장하지 않는다. requestId가 같으면 다시 만들지 않는다 */
+  async register(q: {
+    name: unknown;
+    promoterId: unknown;
+    enrolledBy: unknown;
+    requestId?: unknown;
+  }): Promise<{ device: ScannerDeviceView; enrollmentCode: string; enrollmentCodeExpiresAt: string; alreadyDone: boolean }> {
+    const requestId = q.requestId === undefined ? undefined : assertRequestId(q.requestId);
+    if (requestId !== undefined && this.d.commands) {
+      const prior = await this.d.commands.get(requestId);
+      if (prior) {
+        if (prior.action !== 'REGISTER') throw new ScannerDeviceInputError('REQUEST');
+        const device = await this.d.store.findById(prior.deviceId);
+        if (!device) throw new ScannerDeviceNotFound();
+        return { device: deviceView(device), enrollmentCode: '', enrollmentCodeExpiresAt: '', alreadyDone: true };
+      }
+    }
     const name = assertDeviceName(q.name);
     const promoterId = assertPromoterId(q.promoterId);
     const enrolledBy = assertAccountId(q.enrolledBy);
+    const atMs = this.d.clock.now();
     const deviceId = (this.d.newId ?? randomUUID)();
-    const device = await this.d.store.register({ deviceId, name, promoterId, enrolledBy, atMs: this.d.clock.now() });
+    const device = await this.d.store.register({ deviceId, name, promoterId, enrolledBy, atMs });
     const code = newEnrollmentCode();
     await this.d.codes.put({ codeHash: enrollmentCodeHash(code), deviceId, ttlMs: ENROLLMENT_CODE_TTL_MS });
-    return { device: deviceView(device), enrollmentCode: code, enrollmentCodeExpiresAt: new Date(this.d.clock.now() + ENROLLMENT_CODE_TTL_MS).toISOString() };
+    if (requestId !== undefined && this.d.commands) await this.d.commands.put({ requestId, action: 'REGISTER', deviceId, atMs });
+    return { device: deviceView(device), enrollmentCode: code, enrollmentCodeExpiresAt: new Date(atMs + ENROLLMENT_CODE_TTL_MS).toISOString(), alreadyDone: false };
   }
 
-  async revoke(q: { deviceId: unknown; reason: unknown }): Promise<ScannerDeviceView> {
+  async revoke(q: { deviceId: unknown; reason: unknown; requestId?: unknown }): Promise<{ device: ScannerDeviceView; alreadyDone: boolean }> {
+    const requestId = q.requestId === undefined ? undefined : assertRequestId(q.requestId);
+    if (requestId !== undefined && this.d.commands) {
+      const prior = await this.d.commands.get(requestId);
+      if (prior) {
+        if (prior.action !== 'REVOKE') throw new ScannerDeviceInputError('REQUEST');
+        const device = await this.d.store.findById(prior.deviceId);
+        if (!device) throw new ScannerDeviceNotFound();
+        return { device: deviceView(device), alreadyDone: true };
+      }
+    }
     const deviceId = assertDeviceId(q.deviceId);
     const reason = assertRevokeReason(q.reason);
     const atMs = this.d.clock.now();
@@ -101,11 +134,28 @@ export class ScannerDevices {
         this.d.alert?.('스캐너 기기 폐기 뒤 identity 세션 종료에 실패했다', { deviceId, err: e instanceof Error ? e.message : String(e) });
       }
     }
-    return deviceView(device);
+    // 다른 스캐너 화면이 이 기기의 세션 종료를 변경분으로 받는다(O-T27). identity 종료 성공 여부와 무관하게 기기는 이미 REVOKED다.
+    if (this.d.shifts) {
+      try {
+        await this.d.shifts.appendSessionTerminated({ deviceId, reason: 'DEVICE_REVOKED', atMs });
+      } catch (e) {
+        this.d.alert?.('스캐너 기기 폐기 뒤 SESSION_TERMINATED 변경분을 남기지 못했다', { deviceId, err: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (requestId !== undefined && this.d.commands) await this.d.commands.put({ requestId, action: 'REVOKE', deviceId, atMs });
+    return { device: deviceView(device), alreadyDone: false };
   }
 
-  /** 등록 코드를 새로 만든다. 같은 기기의 옛 코드는 덮어써 무효가 된다(SCR-053 '새 코드 만들기') */
-  async issueCode(q: { deviceId: unknown }): Promise<{ enrollmentCode: string; enrollmentCodeExpiresAt: string }> {
+  /** 등록 코드를 새로 만든다. 같은 기기의 옛 코드는 덮어써 무효가 된다(SCR-053 '새 코드 만들기'). requestId가 같으면 코드를 다시 만들지 않는다 */
+  async issueCode(q: { deviceId: unknown; requestId?: unknown }): Promise<{ enrollmentCode: string; enrollmentCodeExpiresAt: string; alreadyDone: boolean }> {
+    const requestId = q.requestId === undefined ? undefined : assertRequestId(q.requestId);
+    if (requestId !== undefined && this.d.commands) {
+      const prior = await this.d.commands.get(requestId);
+      if (prior) {
+        if (prior.action !== 'REISSUE') throw new ScannerDeviceInputError('REQUEST');
+        return { enrollmentCode: '', enrollmentCodeExpiresAt: '', alreadyDone: true };
+      }
+    }
     const deviceId = assertDeviceId(q.deviceId);
     const device = await this.d.store.findById(deviceId);
     if (!device) throw new ScannerDeviceNotFound();
@@ -113,7 +163,8 @@ export class ScannerDevices {
     const code = newEnrollmentCode();
     const atMs = this.d.clock.now();
     await this.d.codes.put({ codeHash: enrollmentCodeHash(code), deviceId, ttlMs: ENROLLMENT_CODE_TTL_MS });
-    return { enrollmentCode: code, enrollmentCodeExpiresAt: new Date(atMs + ENROLLMENT_CODE_TTL_MS).toISOString() };
+    if (requestId !== undefined && this.d.commands) await this.d.commands.put({ requestId, action: 'REISSUE', deviceId, atMs });
+    return { enrollmentCode: code, enrollmentCodeExpiresAt: new Date(atMs + ENROLLMENT_CODE_TTL_MS).toISOString(), alreadyDone: false };
   }
 
   /**

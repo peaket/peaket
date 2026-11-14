@@ -8,6 +8,7 @@ import {
   DPOP_REPLAY_STORE,
   ENROLLMENT_ATTEMPT_LIMITER,
   ENROLLMENT_CODE_STORE,
+  SCANNER_DEVICE_COMMAND_STORE,
   SCANNER_DEVICE_STORE,
   SCANNER_EVENT_POLICY,
   SCANNER_GATE_STORE,
@@ -16,6 +17,7 @@ import {
   type DpopReplayStore,
   type EnrollmentAttemptLimiter,
   type EnrollmentCodeStore,
+  type ScannerDeviceCommandStore,
   type ScannerDeviceStore,
   type ScannerEventPolicyProvider,
   type ScannerGateStore,
@@ -41,6 +43,8 @@ export interface ScannerWiring {
   limiter?: EnrollmentAttemptLimiter;
   /** 기기 폐기 때 identity 스캐너 세션 종료. 없으면 부르지 않는다 */
   sessions?: ScannerSessionTerminator;
+  /** ops-svc 기기 명령 request_id 멱등 기록. 없으면 매번 새로 처리한다 */
+  commands?: ScannerDeviceCommandStore;
   /** SEV3 경보·세션 종료 실패를 남기는 곳 */
   alert?: (message: string, fields: Record<string, unknown>) => void;
   /** 오프라인 스냅샷 허용 최대 시간(ms). 없으면 24시간 [가정] */
@@ -59,15 +63,18 @@ export class ScannerModule {
       ...(o.policy ? [{ provide: SCANNER_EVENT_POLICY, useValue: o.policy } satisfies Provider] : []),
       ...(o.limiter ? [{ provide: ENROLLMENT_ATTEMPT_LIMITER, useValue: o.limiter } satisfies Provider] : []),
       ...(o.sessions ? [{ provide: SCANNER_SESSION_TERMINATOR, useValue: o.sessions } satisfies Provider] : []),
+      ...(o.commands ? [{ provide: SCANNER_DEVICE_COMMAND_STORE, useValue: o.commands } satisfies Provider] : []),
       {
         provide: ScannerDevices,
-        useFactory: (store: ScannerDeviceStore, codes: EnrollmentCodeStore, clock: Clock, limiter?: EnrollmentAttemptLimiter, sessions?: ScannerSessionTerminator) =>
+        useFactory: (store: ScannerDeviceStore, codes: EnrollmentCodeStore, clock: Clock, limiter?: EnrollmentAttemptLimiter, sessions?: ScannerSessionTerminator, commands?: ScannerDeviceCommandStore) =>
           new ScannerDevices({
             store,
             codes,
             clock,
+            shifts: o.shift,
             ...(limiter ? { limiter } : {}),
             ...(sessions ? { sessions } : {}),
+            ...(commands ? { commands } : {}),
             ...(o.alert ? { alert: o.alert } : {}),
           }),
         inject: [
@@ -76,12 +83,14 @@ export class ScannerModule {
           CLOCK,
           ...(o.limiter ? [ENROLLMENT_ATTEMPT_LIMITER] : []),
           ...(o.sessions ? [SCANNER_SESSION_TERMINATOR] : []),
+          ...(o.commands ? [SCANNER_DEVICE_COMMAND_STORE] : []),
         ],
       },
       {
         provide: ScannerGate,
-        useFactory: (store: ScannerGateStore, clock: Clock) => new ScannerGate({ store, clock, shifts: o.shift, ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}) }),
-        inject: [SCANNER_GATE_STORE, CLOCK],
+        useFactory: (store: ScannerGateStore, clock: Clock, devices: ScannerDeviceStore) =>
+          new ScannerGate({ store, clock, shifts: o.shift, devices, ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}) }),
+        inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },
       {
         provide: ScannerShift,

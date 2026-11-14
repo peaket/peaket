@@ -14,6 +14,10 @@ export interface TicketServiceConfig {
   readonly scannerMaxOfflineMs: number;
   /** core-svc 내부 HTTP 주소(회차 판매·입장 창). 없으면 근무 준비가 창을 비우고 OUT 배치는 503이다 */
   readonly coreHttpUrl?: string;
+  /** ops-svc internal 경보 경로(O-T20 신선도 SEV2). 없으면 신선도 경보를 내지 않는다 */
+  readonly opsHttpUrl?: string;
+  /** ops-svc internal 경로의 x-peaket-internal-token */
+  readonly internalToken?: string;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -33,6 +37,8 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(redisUrl ? { redisUrl } : {}),
     scannerMaxOfflineMs: scannerMaxOfflineMsOf(env.PEAKET_SCANNER_MAX_OFFLINE_MS),
     ...(env.PEAKET_CORE_HTTP_URL ? { coreHttpUrl: env.PEAKET_CORE_HTTP_URL } : {}),
+    ...(env.PEAKET_OPS_HTTP_URL ? { opsHttpUrl: env.PEAKET_OPS_HTTP_URL } : {}),
+    ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
   };
 }
 

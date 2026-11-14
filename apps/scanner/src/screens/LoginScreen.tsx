@@ -5,10 +5,14 @@
 import { CameraView } from "@peaket/ds/CameraView";
 import { DeviceApprovalPanel } from "@peaket/ds/DeviceApprovalPanel";
 import { ScannerShell, ScannerStatusStrip } from "@peaket/ds/ScannerShell";
-import type { CSSProperties, ReactNode } from "react";
-import type { ScannerLayout } from "../app/layout";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { liveRequested, SCANNER_API_ORIGIN } from "../api/config";
+import { DeviceLoginError, enrollDevice } from "../api/device-login";
+import { clearStaffToken, ensureDeviceKey } from "../api/key-store";
+import { useScannerLayout, type ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
-import { Link } from "../app/router";
+import { Link, navigate, useLocation } from "../app/router";
+import { useDeviceLogin, type DeviceLoginView } from "../app/useDeviceLogin";
 import { approval, device, lead } from "../fixtures/scanner";
 import { logout, stripStyle } from "../shared/shell";
 
@@ -38,8 +42,15 @@ const ENDED_REASONS = [
 ];
 
 export function LoginScreen({ enroll = false }: { enroll?: boolean }) {
+  const { search } = useLocation();
+  const live = liveRequested(search);
+  const login = useDeviceLogin(live && !enroll);
   const states: readonly LoginState[] = enroll ? ENROLL_STATES : LOGIN_STATES;
-  const { state: st, layout } = usePreviewState(states, enroll ? "기기 등록" : "승인 대기");
+  // 훅 순서를 지키려고 미리보기 상태도 늘 부른다(주소가 live로 바뀌어도 순서가 같다)
+  const preview = usePreviewState(states, enroll ? "기기 등록" : "승인 대기");
+  if (live && enroll) return <LiveEnrollScreen />;
+  if (live) return <LiveLoginScreen view={login} search={search} />;
+  const { state: st, layout } = preview;
 
   const fresh = st === "새 코드로 바뀜" || st === "승인 거부됨";
   const old = st === "승인 대기" || st === "세션 끝";
@@ -599,5 +610,221 @@ function EnrollBlock({ layout }: { layout: ScannerLayout }) {
         </>
       )}
     </section>
+  );
+}
+
+// ---- 실제 연결(?live=1 / VITE_SCANNER_LIVE=1) ----
+// 미리보기와 같은 셸·부품을 쓰되, 확인 코드·QR 주소·승인 결과는 서버 응답을 그대로 보여 준다.
+
+function useCountdown(untilMs: number | undefined): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (untilMs === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [untilMs]);
+  return untilMs === undefined ? undefined : Math.max(0, untilMs - now);
+}
+
+function formatRemaining(ms: number | undefined): string {
+  if (ms === undefined) return "5:00";
+  const sec = Math.ceil(ms / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+function liveSeed(code: string | undefined): number {
+  if (!code) return 41;
+  let n = 0;
+  for (const c of code) n = (n * 31 + c.charCodeAt(0)) % 100_000;
+  return n || 41;
+}
+
+function LiveStrip({ approved, proxy = false }: { approved: boolean; proxy?: boolean }) {
+  return (
+    <ScannerStatusStrip
+      user={approved ? { name: lead.name, initial: lead.initial } : undefined}
+      role={approved ? { label: proxy ? "현장 스태프 권한(대리)" : lead.role, tone: proxy ? "proxy" : "lead" } : undefined}
+      extra={
+        <span className="who">
+          <i className="ic ic-device ic-16" aria-hidden="true" />
+          이 스캐너
+        </span>
+      }
+    />
+  );
+}
+
+function LiveLoginScreen({ view, search }: { view: DeviceLoginView; search: string }) {
+  const layout = useScannerLayout(search);
+  const t = layout === "t";
+  const remaining = useCountdown(view.expiresAtMs);
+  const code = view.code;
+  const approved = view.phase === "approved";
+
+  let body: ReactNode;
+  if (view.phase === "revoked") {
+    body = (
+      <StateCard layout={layout} tone="danger" icon="ban" title="운영자에게 기기 등록을 요청하세요" headingId="h-live-rev" wide>
+        <p className={t ? "t-lg fw-m" : "t-md"}>{view.error ?? "등록되지 않았거나 폐기된 기기에서는 로그인할 수 없습니다."}</p>
+        <Link className="btn btn-primary btn-xl btn-block" href="/enroll?live=1">
+          기기 등록으로 가기
+        </Link>
+      </StateCard>
+    );
+  } else if (view.phase === "limited") {
+    body = (
+      <StateCard layout={layout} tone="warning" icon="clock" title="잠시 뒤 다시 시도하세요" headingId="h-live-lim">
+        <p className={t ? "t-lg fw-m" : "t-md"}>{view.error ?? "확인 코드 발급 한도(기기당 한 시간 10번)를 넘었습니다."}</p>
+      </StateCard>
+    );
+  } else if (view.phase === "error") {
+    body = (
+      <StateCard layout={layout} tone="warning" icon="alert" title="스캐너 로그인에 닿지 못했습니다" headingId="h-live-err">
+        <p className={t ? "t-lg fw-m" : "t-md"}>{view.error ?? "잠시 뒤 다시 시도해 주세요."}</p>
+        <button className="btn btn-primary btn-xl btn-block" type="button" onClick={() => window.location.reload()}>
+          다시 시도
+        </button>
+      </StateCard>
+    );
+  } else if (approved) {
+    body = (
+      <section className="card col" role="alert" aria-labelledby="h-live-ok" style={{ gap: t ? 16 : 14, padding: t ? 28 : 20, border: "2px solid var(--success)" }}>
+        <div className="row" style={{ gap: 12 }}>
+          <span className="state-icon is-success">
+            <i className="ic ic-check-circle" aria-hidden="true" />
+          </span>
+          <h2 className={t ? "t-2xl" : "t-xl"} id="h-live-ok">
+            로그인했습니다
+          </h2>
+        </div>
+        <p className={t ? "t-lg fw-m" : "t-md"}>스태프 토큰을 이 기기에 저장했습니다. 근무 준비로 이어서 진행하세요.</p>
+        <Link className="btn btn-primary btn-xl btn-block" href="/setup?live=1">
+          근무 준비로 가기
+        </Link>
+        <button
+          className="btn btn-outline btn-lg btn-block"
+          type="button"
+          onClick={() => void clearStaffToken().finally(() => navigate("/login?live=1"))}
+        >
+          <i className="ic ic-logout" aria-hidden="true" />
+          안전하게 로그아웃
+        </button>
+      </section>
+    );
+  } else {
+    body = (
+      <>
+        {view.phase === "rejected" ? (
+          <div className="banner banner-warning" role="alert">
+            <i className="ic ic-ban" aria-hidden="true" />
+            <div className="banner-body fw-b">휴대폰에서 승인을 거부했습니다. 새 코드를 받는 중입니다</div>
+          </div>
+        ) : null}
+        <p className={t ? "t-lg fw-m" : "t-md"} style={t ? { textAlign: "center" } : undefined}>
+          이 스캐너는 여러 사람이 함께 쓰는 기기라 아이디와 비밀번호를 넣지 않습니다. 내 휴대폰으로 승인해 로그인합니다.
+        </p>
+        {code ? (
+          <DeviceApprovalPanel
+            size={t ? "lg" : "md"}
+            qrWidth={t ? 320 : 196}
+            qrSeed={liveSeed(code)}
+            qrLabel={`기기 승인 QR, 이 스캐너 로그인용, 확인 코드 ${code}`}
+            code={code}
+            timer={{ text: formatRemaining(remaining), label: `확인 코드 남은 시간 ${formatRemaining(remaining)}` }}
+            timerNote="5분이 지나면 새 코드로 자동으로 바뀝니다"
+          />
+        ) : (
+          <div className="progress progress-lg indet" role="progressbar" aria-label="확인 코드를 받는 중">
+            <span />
+          </div>
+        )}
+        {view.verificationUri ? (
+          <p className={t ? "t-md" : "t-sm"} style={{ textAlign: "center", wordBreak: "break-all" }}>
+            휴대폰에서{" "}
+            <a href={view.verificationUri} target="_blank" rel="noreferrer">
+              이 주소
+            </a>
+            를 열고 코드가 같은지 확인하세요
+          </p>
+        ) : null}
+        <p className={t ? "t-md fw-b" : "t-sm fw-b"} role="status" style={{ textAlign: "center" }}>
+          {view.phase === "starting" ? "기기 키를 준비하는 중" : "승인 기다리는 중 · 휴대폰에서 거부하면 새 코드를 띄웁니다"}
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <ScannerShell strip={<LiveStrip approved={approved} />} stripLabel="스캐너 기기 정보" stripStyle={stripStyle(layout)} mainClassName={layout === "l" ? undefined : "col"} mainStyle={t ? { padding: "32px 40px 40px", justifyContent: "center" } : { padding: "16px 16px 24px", gap: 14 }}>
+      <div className="col" style={{ width: "100%", maxWidth: 600, margin: "0 auto", gap: 16 }}>
+        <h1 className={t ? "t-2xl" : "t-xl"}>현장 스태프 로그인</h1>
+        {body}
+      </div>
+    </ScannerShell>
+  );
+}
+
+function LiveEnrollScreen() {
+  const { search } = useLocation();
+  const layout = useScannerLayout(search);
+  const t = layout === "t";
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const submit = async () => {
+    if (busy || code.trim() === "") return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const key = await ensureDeviceKey();
+      await enrollDevice({ origin: SCANNER_API_ORIGIN, key, code });
+      navigate("/login?live=1");
+    } catch (e) {
+      setError(e instanceof DeviceLoginError ? e.message : e instanceof Error ? e.message : "기기 등록에 닿지 못했습니다");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ScannerShell strip={<LiveStrip approved={false} />} stripLabel="스캐너 기기 정보" stripStyle={stripStyle(layout)} mainClassName="col" mainStyle={{ padding: "16px 16px 24px", gap: 14 }}>
+      <div className="col" style={{ width: "100%", maxWidth: 600, margin: "0 auto", gap: 16 }}>
+        <h1 className={t ? "t-2xl" : "t-xl"}>기기 등록</h1>
+        <section className="card col" style={{ gap: 14, padding: t ? 28 : 20 }} aria-labelledby="h-live-enr">
+          <h2 className="t-xl" id="h-live-enr">
+            기기 등록
+          </h2>
+          <p className={t ? "t-lg fw-m" : "t-md"}>운영자가 준 등록 코드를 넣으세요. 이 기기의 키(DPoP)가 코드에 묶입니다.</p>
+          <div className="field">
+            <label className="label" htmlFor="live-enr-code">
+              등록 코드
+            </label>
+            <input
+              className="input"
+              id="live-enr-code"
+              type="text"
+              placeholder="XXXX-XXXX-XXXX"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              disabled={busy}
+              style={{ height: 56, fontFamily: "var(--mono)", fontSize: 20, letterSpacing: ".04em" }}
+            />
+            <span className="hint">대문자·하이픈·공백은 구분하지 않습니다</span>
+          </div>
+          {error ? (
+            <p className="t-sm fw-b" role="alert" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          ) : null}
+          <button className="btn btn-primary btn-xl btn-block" type="button" onClick={() => void submit()} disabled={busy}>
+            {busy ? "등록하는 중" : "기기 등록"}
+          </button>
+        </section>
+      </div>
+    </ScannerShell>
   );
 }

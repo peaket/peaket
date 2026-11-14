@@ -54,7 +54,8 @@ export class OpsScannerDevicesController {
     void reply.header('cache-control', 'no-store');
     try {
       const r = await this.devices.register({ name: body.name, promoterId: body.promoterId, enrolledBy: me.accountId });
-      return { ...r.device, enrollmentCode: r.enrollmentCode, enrollmentCodeExpiresAt: r.enrollmentCodeExpiresAt };
+      // HTTP 경로는 매 요청이 새 명령이라 코드가 늘 있다(gRPC 재시도만 alreadyDone으로 코드가 없다)
+      return { ...r.device, enrollmentCode: r.enrollmentCode!, enrollmentCodeExpiresAt: r.enrollmentCodeExpiresAt! };
     } catch (e) {
       reject(e);
     }
@@ -70,7 +71,8 @@ export class OpsScannerDevicesController {
   ): Promise<z.output<typeof CreateOpsScannerDeviceEnrollmentCodeResponse>> {
     void reply.header('cache-control', 'no-store');
     try {
-      return await this.devices.issueCode({ deviceId: params.deviceId });
+      const r = await this.devices.issueCode({ deviceId: params.deviceId });
+      return { enrollmentCode: r.enrollmentCode!, enrollmentCodeExpiresAt: r.enrollmentCodeExpiresAt! };
     } catch (e) {
       reject(e);
     }
@@ -87,7 +89,7 @@ export class OpsScannerDevicesController {
   ): Promise<z.output<typeof CreateOpsScannerDeviceRevocationResponse>> {
     void reply.header('cache-control', 'no-store');
     try {
-      return await this.devices.revoke({ deviceId: params.deviceId, reason: body.reason });
+      return (await this.devices.revoke({ deviceId: params.deviceId, reason: body.reason })).device;
     } catch (e) {
       reject(e);
     }

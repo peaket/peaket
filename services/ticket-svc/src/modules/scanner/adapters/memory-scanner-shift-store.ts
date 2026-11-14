@@ -87,4 +87,18 @@ export class MemoryScannerShiftStore implements ScannerShiftStore {
   async lastSeq(eventId: string): Promise<number> {
     return this.changes?.lastSeq(eventId) ?? 0;
   }
+
+  async eventsWithPlacements(): Promise<string[]> {
+    return [...new Set([...this.placements.values()].map((p) => p.eventId))].sort();
+  }
+
+  async eventsOfDevice(deviceId: string): Promise<string[]> {
+    return [...new Set([...this.placements.values()].filter((p) => p.deviceId === deviceId).map((p) => p.eventId))].sort();
+  }
+
+  async appendSessionTerminated(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<string[]> {
+    const events = await this.eventsOfDevice(i.deviceId);
+    for (const eventId of events) this.changes?.appendChange(eventId, 'SESSION_TERMINATED', { v: 1, deviceId: i.deviceId, reason: i.reason });
+    return events;
+  }
 }

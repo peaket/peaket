@@ -23,4 +23,20 @@ describe('GAT-130 운영 경보', () => {
     await record.handle({ eventKey: 'k', kind: 'REFUND_WINDOW_CLOSED', severity: 'SEV3', source: 'purchase-svc', reason: 'r' });
     expect(store.alerts.map((a) => a.kind)).toEqual(['AUTO_FAILURE_RATE', 'REFUND_WINDOW_CLOSED']);
   });
+
+  test('BAT450_푼_경보는_다시_열리고_열린_경보는_첫_값을_지킨다', async () => {
+    const store = new MemoryOpsAlertStore();
+    const record = new RecordOpsAlert(store, () => NOW);
+    const first = await record.handle({ eventKey: 'ev', kind: 'scanner-freshness:d', severity: 'SEV2', source: 'ticket-svc', reason: 'stale', detail: { ageMs: 120_001 } });
+    const stillOpen = await record.handle({ eventKey: 'ev', kind: 'scanner-freshness:d', severity: 'SEV2', source: 'ticket-svc', reason: 'stale', detail: { ageMs: 180_000 } });
+    expect(stillOpen.detail).toEqual({ ageMs: 120_001 });
+
+    const resolved = await record.resolve({ eventKey: 'ev', kind: 'scanner-freshness:d', reason: 'fresh', resolvedAt: new Date(NOW + 1_000).toISOString() });
+    expect(resolved).toMatchObject({ alertId: first.alertId, resolvedAtMs: NOW + 1_000, resolvedReason: 'fresh' });
+    const reopened = await record.handle({ eventKey: 'ev', kind: 'scanner-freshness:d', severity: 'SEV2', source: 'ticket-svc', reason: 'stale again', detail: { ageMs: 130_000 } });
+    expect(reopened.alertId).toBe(first.alertId);
+    expect(reopened.detail).toEqual({ ageMs: 130_000 });
+    expect(reopened.resolvedAtMs).toBeUndefined();
+    expect(await record.resolve({ eventKey: 'nope', kind: 'x', reason: 'r' })).toBeUndefined();
+  });
 });

@@ -1,13 +1,14 @@
 // 뿌리 모듈: 운영 명령·CS 처리함의 저장소를 DB/메모리로 골라 싣는다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
-import { AuditCheckpointService, AuditModule, DrizzleAuditChain, DrizzleAuditCheckpointStore, MemoryAuditChain, MemoryAuditCheckpointStore, ephemeralAuditAnchorSigner, type AuditAnchorSigner } from './modules/audit/index.js';
+import { AuditCheckpointService, AuditModule, DrizzleAuditChain, DrizzleAuditCheckpointStore, MemoryAuditChain, MemoryAuditCheckpointStore, ephemeralAuditAnchorSigner, type AuditAnchorSigner, type AuditChain, type AuditChainReader } from './modules/audit/index.js';
 import { CommandsModule, type CommandExecutor, type HandleCommandEvent } from './modules/commands/index.js';
 import { DrizzleCommandStore, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, MemoryCsCaseStore } from './modules/cases/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modules/alerts/index.js';
 import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
+import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 
 interface CommonWiring {
   readonly executor?: CommandExecutor;
@@ -19,6 +20,10 @@ interface CommonWiring {
   readonly onCommandEvent?: (h: HandleCommandEvent) => void;
   /** 감사 체크포인트 공개 앵커 서명기(BAT-465 R-584). 없으면 임시 Ed25519 키를 쓴다(시험) */
   readonly signer?: AuditAnchorSigner;
+  /** ticket-svc ScannerDeviceService gRPC 클라이언트(BAT-450). 없으면 관제 기기 경로를 열지 않는다 */
+  readonly scannerDevices?: TicketScannerDevices;
+  /** 시험에서 감사 체인을 넘겨 기록을 확인한다. 없으면 DB/메모리 체인을 만든다 */
+  readonly auditChain?: AuditChain & AuditChainReader;
 }
 
 @Module({})
@@ -26,7 +31,7 @@ export class AppModule {
   static register(o: ({ database: Database } & CommonWiring) | ({ memory: true } & CommonWiring)): DynamicModule {
     const signer = o.signer ?? ephemeralAuditAnchorSigner();
     if ('database' in o) {
-      const chain = new DrizzleAuditChain(o.database);
+      const chain = o.auditChain ?? new DrizzleAuditChain(o.database);
       const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now(), signer);
       const store = new DrizzleCommandStore(o.database);
       return {
@@ -39,10 +44,11 @@ export class AppModule {
           CasesModule.register(new DrizzleCsCaseStore(o.database)),
           AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
+          ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
         ],
       };
     }
-    const chain = new MemoryAuditChain();
+    const chain = o.auditChain ?? new MemoryAuditChain();
     const checkpoints = new AuditCheckpointService(new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now(), signer);
     const store = new MemoryCommandStore(chain);
     return {
@@ -54,6 +60,7 @@ export class AppModule {
         CasesModule.register(new MemoryCsCaseStore()),
         AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
+        ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
       ],
     };
   }

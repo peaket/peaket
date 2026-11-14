@@ -17,7 +17,7 @@ export interface ScannerShiftResponse {
   eventWindows?: { salesOpensAt?: string; salesEndsAt?: string; entryOpensAt?: string; entryClosesAt?: string; endsAt?: string };
   package: { seq: number; issuedAt: string; maxOfflineMs: number; reportedAt?: string; ageMs?: number; reportedPackageSeq?: number; clockOffsetMs?: number; pendingUploads?: number; stale: boolean };
   versionVector: ScannerVersionVector;
-  auth: { deviceProof: 'DPOP' | 'MTLS'; staffSession: boolean };
+  auth: { deviceProof: 'DPOP' | 'MTLS'; staffSession: boolean; confirmation: 'jkt' | 'x5t#S256' };
 }
 
 export interface ScannerVersionVector {

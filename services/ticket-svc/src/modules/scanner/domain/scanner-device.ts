@@ -18,6 +18,8 @@ export interface ScannerDeviceRecord {
   enrolledBy: string;
   enrolledAtMs: number;
   lastSeenAtMs?: number;
+  /** 스캐너가 마지막으로 변경분을 받은 시각(O-T20). 없으면 아직 받은 적이 없다 */
+  lastChangesAtMs?: number;
   revokedAtMs?: number;
   revokeReason?: string;
 }
@@ -34,7 +36,7 @@ const REASON_MAX = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class ScannerDeviceInputError extends Error {
-  constructor(readonly code: 'NAME' | 'PROMOTER' | 'DEVICE' | 'ACCOUNT' | 'CODE' | 'REASON' | 'JKT' | 'CURSOR' | 'LIMIT') {
+  constructor(readonly code: 'NAME' | 'PROMOTER' | 'DEVICE' | 'ACCOUNT' | 'CODE' | 'REASON' | 'JKT' | 'CURSOR' | 'LIMIT' | 'REQUEST') {
     super(`스캐너 기기 입력 오류: ${code}`);
     this.name = 'ScannerDeviceInputError';
   }
@@ -91,6 +93,12 @@ export function assertDeviceId(v: unknown): string {
 
 export function assertAccountId(v: unknown): string {
   if (typeof v !== 'string' || !UUID.test(v)) throw new ScannerDeviceInputError('ACCOUNT');
+  return v.toLowerCase();
+}
+
+/** ops-svc 기기 명령의 멱등 키(request_id). UUIDv4 모양만 받는다 */
+export function assertRequestId(v: unknown): string {
+  if (typeof v !== 'string' || !UUID.test(v)) throw new ScannerDeviceInputError('REQUEST');
   return v.toLowerCase();
 }
 

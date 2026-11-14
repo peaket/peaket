@@ -33,9 +33,26 @@ export interface ScannerDeviceStore {
   byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null>;
   /** 마지막 연락 시각(관측용). 없거나 실패해도 요청을 막지 않는다 */
   touch(deviceId: string, atMs: number): Promise<void>;
+  /** 마지막 변경분 수신 시각(O-T20 신선도 경보). 없거나 실패해도 요청을 막지 않는다 */
+  touchChanges(deviceId: string, atMs: number): Promise<void>;
 }
 
 export const SCANNER_DEVICE_STORE = Symbol('ticket.ScannerDeviceStore');
+
+/** ops-svc 기기 명령 한 번(request_id 멱등, ADR-0148). 같은 요청이 다시 오면 기기를 또 만들지 않는다 */
+export interface ScannerDeviceCommand {
+  readonly requestId: string;
+  readonly action: 'REGISTER' | 'REVOKE' | 'REISSUE';
+  readonly deviceId: string;
+  readonly atMs: number;
+}
+
+export interface ScannerDeviceCommandStore {
+  get(requestId: string): Promise<ScannerDeviceCommand | undefined>;
+  put(command: ScannerDeviceCommand): Promise<void>;
+}
+
+export const SCANNER_DEVICE_COMMAND_STORE = Symbol('ticket.ScannerDeviceCommandStore');
 
 /** 등록 코드 저장소. 원문은 넘기지 않고 SHA-256 해시만 다룬다 */
 export interface EnrollmentCodeStore {
@@ -100,6 +117,15 @@ export interface ScannerShiftStore {
   reportReadiness(i: { eventId: string; deviceId: string; packageSeq: number; clockOffsetMs: number; pendingUploads: number; reportedBy: string; atMs: number }): Promise<ScannerReadinessRecord>;
   /** 회차의 지금 마지막 변경 일련번호(scanner_seq). 없으면 0 */
   lastSeq(eventId: string): Promise<number>;
+  /** 배치가 하나라도 있는 회차 목록(O-T20 신선도 감시가 회차를 돈다) */
+  eventsWithPlacements(): Promise<string[]>;
+  /** 기기가 배치된 회차 목록(기기 폐기 때 SESSION_TERMINATED 변경분을 남길 곳, O-T27) */
+  eventsOfDevice(deviceId: string): Promise<string[]>;
+  /**
+   * 기기 폐기로 끝난 세션을 그 기기가 배치된 회차마다 scanner_change(SESSION_TERMINATED)로 남긴다.
+   * 남긴 회차 ID를 돌려준다. 세션이 없어도 기기 상태가 REVOKED면 다른 스캐너 화면은 알아야 한다.
+   */
+  appendSessionTerminated(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<string[]>;
 }
 
 export const SCANNER_SHIFT_STORE = Symbol('ticket.ScannerShiftStore');
@@ -139,3 +165,27 @@ export interface EnrollmentAttemptLimiter {
 }
 
 export const ENROLLMENT_ATTEMPT_LIMITER = Symbol('ticket.EnrollmentAttemptLimiter');
+
+/** O-T20 신선도 경보 한 건. ops-svc internal /internal/v1/ops-alerts의 몸통과 같다 */
+export interface ScannerFreshnessAlert {
+  readonly eventKey: string;
+  readonly kind: string;
+  readonly severity: 'SEV2';
+  readonly source: string;
+  readonly reason: string;
+  readonly detail: Record<string, unknown>;
+  readonly atMs: number;
+}
+
+export interface ScannerFreshnessResolution {
+  readonly eventKey: string;
+  readonly kind: string;
+  readonly reason: string;
+  readonly atMs: number;
+}
+
+/** ops-svc 기존 경보 경로를 부르는 포트(어댑터가 구현한다) */
+export interface ScannerFreshnessAlertSink {
+  open(alert: ScannerFreshnessAlert): Promise<void>;
+  resolve(resolution: ScannerFreshnessResolution): Promise<void>;
+}

@@ -13,7 +13,8 @@ import * as zod from 'zod';
 
 export const ScannerShiftAuth = zod.object({
   "deviceProof": zod.enum(['DPOP', 'MTLS']),
-  "staffSession": zod.boolean().describe('이 응답은 스태프 세션 확인을 통과한 요청에만 준다')
+  "staffSession": zod.boolean().describe('이 응답은 스태프 세션 확인을 통과한 요청에만 준다'),
+  "confirmation": zod.enum(['jkt', 'x5t#S256']).describe('스태프 토큰의 cnf 결속 방식. 기기 키+DPoP는 jkt(기본), mTLS 선택지는 인증서 SHA-256 지문 x5t#S256(RFC 8705·RFC 9449). mTLS는 관리형 기기·사설 CA PoC가 있어야 켠다(offline-gate §6.1)')
 })
 
 export type ScannerShiftAuth = zod.input<typeof ScannerShiftAuth>;

@@ -1,7 +1,7 @@
 // 스캐너 목록·변경분·스캔·이상 표시 쓰임새(BUILD_ORDER GAT-180·GAT-190, offline-gate §6.3~§7.2).
 // 회차는 스태프 세션의 회차와 같아야 한다. 다른 회차를 경로로 부르면 403으로 닫는다.
 import type { Clock } from '@peaket/platform';
-import type { ScannerGateStore, ScannerShiftStore } from '../domain/ports.js';
+import type { ScannerDeviceStore, ScannerGateStore, ScannerShiftStore } from '../domain/ports.js';
 import {
   assertAfter,
   assertChangesLimit,
@@ -41,6 +41,8 @@ export interface ScannerGateDeps {
   clock: Clock;
   /** 기기 인증만으로 올라온 기록의 회차 배치 확인(없으면 확인하지 않는다) */
   shifts?: Pick<ScannerShiftStore, 'placementOf'>;
+  /** 변경분을 받은 기기의 수신 시각(O-T20 신선도 경보). 없으면 세지 않는다 */
+  devices?: Pick<ScannerDeviceStore, 'touchChanges'>;
   /** 오프라인 허용 최대 시간(ms). 없으면 24시간 [가정] */
   maxOfflineMs?: number;
 }
@@ -59,10 +61,13 @@ export class ScannerGate {
     return { ...p, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
-  async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined): Promise<ScannerChangesView> {
+  async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined, deviceId?: string): Promise<ScannerChangesView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
-    const c = await this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw), nowMs: this.d.clock.now() });
+    const now = this.d.clock.now();
+    const c = await this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw), nowMs: now });
+    // 신선도 경보(O-T20)의 기준은 '변경분을 실제로 받은 시각'이다. 실패해도 응답을 막지 않는다.
+    if (deviceId !== undefined && this.d.devices) await this.d.devices.touchChanges(deviceId, now).catch(() => undefined);
     return { ...c, versionVector: { ...c.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 

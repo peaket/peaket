@@ -206,7 +206,7 @@ describe('기기 폐기와 identity 세션 종료 [GAT-170]', () => {
       newId: () => DEVICE,
     });
     await devices.register({ name: '동문-03', promoterId: PROMOTER, enrolledBy: ADMIN });
-    await expect(devices.revoke({ deviceId: DEVICE, reason: '분실' })).resolves.toMatchObject({ status: 'REVOKED' });
+    await expect(devices.revoke({ deviceId: DEVICE, reason: '분실' })).resolves.toMatchObject({ device: { status: 'REVOKED' }, alreadyDone: false });
     expect(calls).toEqual([{ deviceId: DEVICE, reason: 'DEVICE_REVOKED', atMs: NOW }]);
 
     const failing = new ScannerDevices({
@@ -218,7 +218,19 @@ describe('기기 폐기와 identity 세션 종료 [GAT-170]', () => {
       newId: () => OTHER_DEVICE,
     });
     await failing.register({ name: '서문-01', promoterId: PROMOTER, enrolledBy: ADMIN });
-    await expect(failing.revoke({ deviceId: OTHER_DEVICE, reason: '도난' })).resolves.toMatchObject({ status: 'REVOKED' });
+    await expect(failing.revoke({ deviceId: OTHER_DEVICE, reason: '도난' })).resolves.toMatchObject({ device: { status: 'REVOKED' }, alreadyDone: false });
     expect(alerts.some((m) => m.includes('identity 세션 종료에 실패'))).toBe(true);
+  });
+});
+
+describe('기기 인증 방식 [BAT-450]', () => {
+  test('mTLS 인증서 기기는 deviceProof MTLS·confirmation x5t#S256으로 답한다', async () => {
+    const w = await world();
+    const d = w.devices.devices.get(DEVICE)!;
+    w.devices.devices.set(DEVICE, { ...d, credentialType: 'MTLS_CERT', credentialThumbprint: JKT });
+    await w.placements.put({ eventIdRaw: EVENT, deviceIdRaw: DEVICE, tenantId: PROMOTER, actorId: ACCOUNT, ifMatch: '"0"', body: { gateZone: '동문', mode: 'IN' } });
+    const s = await w.shift.shift(ctx);
+    expect(s.device.mtls).toBe(true);
+    expect(s.auth).toEqual({ deviceProof: 'MTLS', staffSession: true, confirmation: 'x5t#S256' });
   });
 });

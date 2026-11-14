@@ -1,9 +1,9 @@
 // ticket DB의 스캐너 기기 원장(Drizzle, BUILD_ORDER GAT-170). 등록 코드는 Redis에만 둔다.
 import type { Database } from '@peaket/platform';
 import { and, asc, eq, gt } from 'drizzle-orm';
-import type { ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../../domain/ports.js';
+import type { ScannerDeviceCommand, ScannerDeviceCommandStore, ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../../domain/ports.js';
 import { type ScannerCredentialType, type ScannerDeviceRecord, type ScannerDeviceStatus, ScannerDeviceInputError, ScannerDeviceKeyConflict } from '../../domain/scanner-device.js';
-import { scannerDevice } from './schema.js';
+import { scannerDevice, scannerDeviceCommand } from './schema.js';
 
 type Row = typeof scannerDevice.$inferSelect;
 
@@ -28,6 +28,7 @@ const recordOf = (r: Row): ScannerDeviceRecord => ({
   enrolledBy: r.enrolledBy,
   enrolledAtMs: r.enrolledAt.getTime(),
   ...(r.lastSeenAt !== null ? { lastSeenAtMs: r.lastSeenAt.getTime() } : {}),
+  ...(r.lastChangesAt !== null ? { lastChangesAtMs: r.lastChangesAt.getTime() } : {}),
   ...(r.revokedAt !== null ? { revokedAtMs: r.revokedAt.getTime() } : {}),
   ...(r.revokeReason !== null ? { revokeReason: r.revokeReason } : {}),
 });
@@ -100,5 +101,26 @@ export class DrizzleScannerDeviceStore implements ScannerDeviceStore {
 
   async touch(deviceId: string, atMs: number): Promise<void> {
     await this.database.db.update(scannerDevice).set({ lastSeenAt: new Date(atMs) }).where(eq(scannerDevice.id, deviceId));
+  }
+
+  async touchChanges(deviceId: string, atMs: number): Promise<void> {
+    await this.database.db.update(scannerDevice).set({ lastChangesAt: new Date(atMs) }).where(eq(scannerDevice.id, deviceId));
+  }
+}
+
+/** ops-svc 기기 명령의 request_id 멱등 기록(ADR-0148, BAT-450) */
+export class DrizzleScannerDeviceCommandStore implements ScannerDeviceCommandStore {
+  constructor(private readonly database: Database) {}
+
+  async get(requestId: string): Promise<ScannerDeviceCommand | undefined> {
+    const [row] = await this.database.db.select().from(scannerDeviceCommand).where(eq(scannerDeviceCommand.requestId, requestId)).limit(1);
+    return row ? { requestId: row.requestId, action: row.action as ScannerDeviceCommand['action'], deviceId: row.deviceId, atMs: row.createdAt.getTime() } : undefined;
+  }
+
+  async put(command: ScannerDeviceCommand): Promise<void> {
+    await this.database.db
+      .insert(scannerDeviceCommand)
+      .values({ requestId: command.requestId, action: command.action, deviceId: command.deviceId, createdAt: new Date(command.atMs) })
+      .onConflictDoNothing();
   }
 }

@@ -2,7 +2,7 @@
 // gRPC 포트는 서비스 안에서 따로 열고, health/management HTTP는 플랫폼 createService가 연다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, createDatabase, createExternalHttpClient, createHotRedis, createService, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -12,18 +12,24 @@ import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-
 import { DeviceKeys } from './modules/ticket/application/device-keys.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
+import { scannerDeviceHandlers } from './modules/scanner/inbound/scanner-device.grpc.js';
 import { scannerDeviceLookupHandlers } from './modules/scanner/inbound/scanner-device-lookup.grpc.js';
 import {
+  DrizzleScannerDeviceCommandStore,
   DrizzleScannerDeviceStore,
   DrizzleScannerGateStore,
   DrizzleScannerShiftStore,
   GrpcScannerSessionCheck,
   HttpCoreEventPolicy,
+  HttpOpsAlertSink,
   MemoryEnrollmentAttemptLimiter,
   MemoryEnrollmentCodeStore,
   RedisDpopReplayStore,
   RedisEnrollmentAttemptLimiter,
   RedisEnrollmentCodeStore,
+  ScannerDevices,
+  ScannerFreshness,
+  SCANNER_FRESHNESS_ALERT_MS,
 } from './modules/scanner/index.js';
 
 const SERVICE = 'ticket-svc';
@@ -49,6 +55,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   let alert: ((message: string, fields: Record<string, unknown>) => void) | undefined;
+  let freshnessTimer: ReturnType<typeof setInterval> | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
     const shiftStore = new DrizzleScannerShiftStore(database);
@@ -57,6 +64,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const ticket = new TicketService({ store, clock: systemClock });
     const deviceKeys = new DeviceKeys({ store: deviceKeyStore, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
+    const scannerCommands = new DrizzleScannerDeviceCommandStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
     const replay = redis ? new RedisDpopReplayStore(redis) : new MemoryDpopReplayStore(systemClock);
@@ -92,6 +100,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           ...(policy ? { policy } : {}),
           limiter,
           sessions: scannerSessions,
+          commands: scannerCommands,
           alert: (message, fields) => alert?.(message, fields),
           maxOfflineMs: config.scannerMaxOfflineMs,
         },
@@ -102,6 +111,43 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
     alert = (message, fields) => service!.logger.warn(fields, message);
+    // O-T20: 입장 시간대에 2분 넘게 변경분을 받지 못한 스캐너를 ops-svc SEV2 경보로 넘긴다(기존 ops_alert 경로).
+    if (config.opsHttpUrl) {
+      const freshnessAlerts = new Counter({
+        name: 'scanner_freshness_alerts_total',
+        help: '스캐너 변경분 신선도 경보 수(O-T20, result=open·resolve·error)',
+        labelNames: ['service', 'result'],
+        registers: [service.metrics.registry],
+      });
+      const freshnessOpen = new Gauge({
+        name: 'scanner_freshness_open_alerts',
+        help: '지금 열려 있는 스캐너 변경분 신선도 경보 수(O-T20)',
+        labelNames: ['service'],
+        registers: [service.metrics.registry],
+      });
+      const freshness = new ScannerFreshness({
+        devices: scannerStore,
+        shifts: shiftStore,
+        ...(policy ? { policy } : {}),
+        sink: new HttpOpsAlertSink(createExternalHttpClient({ provider: 'ops-svc', baseUrl: config.opsHttpUrl, timeoutCapMs: 2_000, clock: systemClock }), config.internalToken),
+        clock: systemClock,
+        log: service.logger,
+        metric: (result) => freshnessAlerts.inc({ service: SERVICE, result }),
+      });
+      const tick = (): void => {
+        void freshness
+          .run()
+          .then(() => freshnessOpen.set({ service: SERVICE }, freshness.openAlerts()))
+          .catch((err: unknown) => service!.logger.warn({ err: err instanceof Error ? err.message : String(err) }, '스캐너 신선도 감시가 실패했다'));
+      };
+      freshnessTimer = setInterval(tick, 30_000);
+      freshnessTimer.unref?.();
+      tick();
+      if (!config.internalToken) service.logger.warn({}, 'PEAKET_INTERNAL_TOKEN이 없어 스캐너 신선도 경보가 ops-svc에서 401로 거절될 수 있다');
+      service.logger.info({ thresholdMs: SCANNER_FRESHNESS_ALERT_MS, everyMs: 30_000 }, '스캐너 변경분 신선도 감시를 켰다(O-T20)');
+    } else {
+      service.logger.warn({}, 'PEAKET_OPS_HTTP_URL이 없어 스캐너 신선도 경보(O-T20)를 내지 않는다');
+    }
     service.readiness.register('grpc');
     const httpPorts = await service.listen();
     grpc = await startGrpcServer({
@@ -120,6 +166,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
             service!.logger.error({ method, err }, 'ScannerDeviceLookupService 처리 실패');
           }),
         },
+        {
+          definition: ticketPackage().ScannerDeviceService.service,
+          handlers: scannerDeviceHandlers(service.app.get(ScannerDevices), (method, err) => {
+            service!.logger.error({ method, err }, 'ScannerDeviceService 처리 실패');
+          }),
+        },
       ],
     });
     service.readiness.complete('grpc');
@@ -131,6 +183,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {
       started.readiness.register('shutting-down');
+      if (freshnessTimer) clearInterval(freshnessTimer);
       return (closing ??= (async () => {
         try {
           await startedGrpc.close();
@@ -145,6 +198,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     };
     return { close, ports };
   } catch (err) {
+    if (freshnessTimer) clearInterval(freshnessTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
     adminAuthz?.close?.();

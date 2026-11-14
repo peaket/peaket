@@ -90,6 +90,8 @@ export interface ScannerShiftPackageView {
 export interface ScannerShiftAuthView {
   deviceProof: 'DPOP' | 'MTLS';
   staffSession: true;
+  /** 스태프 토큰 cnf 결속. 기기 키+DPoP는 jkt(기본), mTLS 선택지는 인증서 지문 x5t#S256 */
+  confirmation: 'jkt' | 'x5t#S256';
 }
 
 /** GET /v1/scanner/shift 응답. 서버 시각을 실으므로 Cache-Control: no-store다 */

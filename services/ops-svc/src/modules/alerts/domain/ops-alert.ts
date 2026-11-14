@@ -12,9 +12,14 @@ export interface OpsAlert {
   readonly reason: string;
   readonly detail: Record<string, unknown>;
   readonly createdAtMs: number;
+  /** 풀린 시각. 없으면 열려 있다 */
+  readonly resolvedAtMs?: number;
+  readonly resolvedReason?: string;
 }
 
 export interface OpsAlertStore {
-  /** 같은 (eventKey, kind)의 경보는 한 건으로 모은다(멱등) */
+  /** 같은 (eventKey, kind)의 경보는 한 건으로 모은다(멱등). 풀렸던 경보가 다시 나빠지면 다시 연다 */
   open(input: { alertId: string; eventKey: string; kind: string; severity: OpsAlertSeverity; source: string; reason: string; detail: Record<string, unknown>; nowMs: number }): Promise<OpsAlert>;
+  /** 열린 경보를 푼다. 없으면 undefined. 이미 풀렸으면 그대로 둔다 */
+  resolve(input: { eventKey: string; kind: string; reason: string; nowMs: number }): Promise<OpsAlert | undefined>;
 }

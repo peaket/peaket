@@ -34,7 +34,7 @@ const readinessOf = (r: typeof scannerReadiness.$inferSelect): ScannerReadinessR
 });
 
 /** 변경 일련번호를 올리고 변경 기록을 적는다. 커밋 순서와 번호 순서를 맞추려고 행 잠금을 쓴다(ADR-0086) */
-async function appendChange(tx: Tx, eventId: string, kind: 'PLACEMENT', payload: Record<string, unknown>, nowMs: number): Promise<number> {
+async function appendChange(tx: Tx, eventId: string, kind: 'PLACEMENT' | 'SESSION_TERMINATED', payload: Record<string, unknown>, nowMs: number): Promise<number> {
   const [row] = await tx
     .insert(scannerSeq)
     .values({ eventId, lastSeq: 1 })
@@ -150,5 +150,23 @@ export class DrizzleScannerShiftStore implements ScannerShiftStore {
   async lastSeq(eventId: string): Promise<number> {
     const [row] = await this.database.db.select({ lastSeq: scannerSeq.lastSeq }).from(scannerSeq).where(eq(scannerSeq.eventId, eventId)).limit(1);
     return row?.lastSeq ?? 0;
+  }
+
+  async eventsWithPlacements(): Promise<string[]> {
+    const rows = await this.database.db.selectDistinct({ eventId: scannerPlacement.eventId }).from(scannerPlacement);
+    return rows.map((r) => r.eventId).sort();
+  }
+
+  async eventsOfDevice(deviceId: string): Promise<string[]> {
+    const rows = await this.database.db.selectDistinct({ eventId: scannerPlacement.eventId }).from(scannerPlacement).where(eq(scannerPlacement.scannerDeviceId, deviceId));
+    return rows.map((r) => r.eventId).sort();
+  }
+
+  async appendSessionTerminated(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<string[]> {
+    const events = await this.eventsOfDevice(i.deviceId);
+    for (const eventId of events) {
+      await this.database.transaction((tx) => appendChange(tx, eventId, 'SESSION_TERMINATED', { v: 1, deviceId: i.deviceId, reason: i.reason }, i.atMs));
+    }
+    return events;
   }
 }

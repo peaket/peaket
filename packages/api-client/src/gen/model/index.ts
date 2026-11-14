@@ -1032,6 +1032,7 @@ export * from './scannerShift';
 export * from './scannerShiftAssignment';
 export * from './scannerShiftAssignmentRole';
 export * from './scannerShiftAuth';
+export * from './scannerShiftAuthConfirmation';
 export * from './scannerShiftAuthDeviceProof';
 export * from './scannerShiftDevice';
 export * from './scannerShiftDeviceCredentialType';

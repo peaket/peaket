@@ -1,5 +1,5 @@
 // 시험·로컬용 스캐너 기기 원장. 운영은 DrizzleScannerDeviceStore다.
-import type { ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../domain/ports.js';
+import type { ScannerDeviceCommand, ScannerDeviceCommandStore, ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../domain/ports.js';
 import { type ScannerDeviceRecord, ScannerDeviceInputError, ScannerDeviceKeyConflict } from '../domain/scanner-device.js';
 
 export class MemoryScannerDeviceStore implements ScannerDeviceStore {
@@ -60,5 +60,24 @@ export class MemoryScannerDeviceStore implements ScannerDeviceStore {
   async touch(deviceId: string, atMs: number): Promise<void> {
     const d = this.devices.get(deviceId);
     if (d) this.devices.set(deviceId, { ...d, lastSeenAtMs: atMs });
+  }
+
+  async touchChanges(deviceId: string, atMs: number): Promise<void> {
+    const d = this.devices.get(deviceId);
+    if (d) this.devices.set(deviceId, { ...d, lastChangesAtMs: atMs });
+  }
+}
+
+/** 시험·로컬용 기기 명령 멱등 저장소. 운영은 DrizzleScannerDeviceCommandStore다 */
+export class MemoryScannerDeviceCommandStore implements ScannerDeviceCommandStore {
+  readonly commands = new Map<string, ScannerDeviceCommand>();
+
+  async get(requestId: string): Promise<ScannerDeviceCommand | undefined> {
+    const c = this.commands.get(requestId);
+    return c ? { ...c } : undefined;
+  }
+
+  async put(command: ScannerDeviceCommand): Promise<void> {
+    this.commands.set(command.requestId, { ...command });
   }
 }

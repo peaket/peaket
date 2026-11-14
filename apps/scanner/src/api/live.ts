@@ -115,3 +115,13 @@ export function syncStateOf(i: { freshness: Freshness; queue: number; uploadFail
 export function applyChanges(snapshot: SyncSnapshot, changes: ScannerChangesResponse, nowMs: number): SyncSnapshot {
   return { ...snapshot, eventId: changes.versionVector.eventId, lastSeq: changes.lastSeq, syncedAtMs: nowMs };
 }
+
+/** 이 기기의 세션이 끝났다는 변경분(SESSION_TERMINATED)이 있으면 그 까닭을 준다(O-T27) */
+export function sessionTerminatedOf(changes: ScannerChangesResponse, deviceId: string): { reason?: string } | undefined {
+  for (const c of changes.changes) {
+    if (c.kind !== 'SESSION_TERMINATED') continue;
+    if (c.payload.deviceId !== deviceId) continue;
+    return typeof c.payload.reason === 'string' ? { reason: c.payload.reason } : {};
+  }
+  return undefined;
+}

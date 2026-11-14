@@ -7,8 +7,8 @@ import { loadVersionVector, saveVersionVector } from '../storage/version-vector'
 import { ScannerApi, ScannerApiError, type GateFlagView, type ScannerShiftResponse, type ScannerVersionVector } from '../api/client';
 import { liveRequested, SCANNER_API_ORIGIN } from '../api/config';
 import { generateDpopKey } from '../api/dpop';
-import { loadDeviceKey, loadStaffToken, saveDeviceKey } from '../api/key-store';
-import { applyChanges, freshnessOf, loadSyncSnapshot, saveSyncSnapshot, syncStateOf, type Freshness, type LiveSetupState, type LiveSyncState, type SyncSnapshot } from '../api/live';
+import { clearStaffToken, loadDeviceKey, loadStaffToken, saveDeviceKey } from '../api/key-store';
+import { applyChanges, freshnessOf, loadSyncSnapshot, saveSyncSnapshot, sessionTerminatedOf, syncStateOf, type Freshness, type LiveSetupState, type LiveSyncState, type SyncSnapshot } from '../api/live';
 
 export interface LiveSyncView {
   queue: number;
@@ -89,6 +89,10 @@ export function useScannerLive(search: string): ScannerLive {
       } catch (e) {
         if (!alive) return;
         clearTimeout(timer);
+        // 토큰 만료·세션 종료·기기 폐기는 저장 토큰을 지워 재로그인으로 돌린다.
+        if (e instanceof ScannerApiError && (e.status === 401 || (e.status === 403 && (e.type === 'device-revoked' || e.type === 'invalid_token')))) {
+          await clearStaffToken().catch(() => undefined);
+        }
         setMode('error');
         setError(e instanceof ScannerApiError ? e.title : e instanceof Error ? e.message : '스캐너 API에 닿지 못했습니다');
       }
@@ -121,6 +125,15 @@ export function useScannerLive(search: string): ScannerLive {
     const before: SyncSnapshot = loadSyncSnapshot(storage) ?? { eventId: s.eventId, lastSeq: 0, syncedAtMs: 0 };
     const pkg = await api.package(s.eventId);
     const changes = await api.changes(s.eventId, pkg.lastSeq);
+    // 기기 폐기로 이 기기의 세션이 끝났으면 토큰을 지우고 로그인 화면으로 돌려보낸다(O-T27).
+    if (sessionTerminatedOf(changes, s.device.deviceId)) {
+      await clearStaffToken();
+      apiRef.current = undefined;
+      shiftRef.current = undefined;
+      setMode('error');
+      setError('이 기기의 스캐너 세션이 끝났습니다. 기기 승인 로그인(SCR-036)을 다시 마쳐 주세요.');
+      return;
+    }
     const now = Date.now();
     const current: ScannerVersionVector = changes.versionVector;
     const freshness = freshnessOf({ ...(stored ? { stored } : {}), current, snapshot: { ...before, syncedAtMs: now }, nowMs: now, queue });

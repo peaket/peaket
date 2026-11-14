@@ -13,6 +13,7 @@ import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './c
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
 import { HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
+import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 
 const SERVICE = 'ops-svc';
 const url = process.env.PEAKET_DATABASE_URL;
@@ -58,12 +59,22 @@ const priority =
     : undefined;
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;
+// 관제 스캐너 기기 경계(BAT-450): ops-svc가 권한·감사를 맡고 ticket-svc ScannerDeviceService gRPC가 원장을 쓴다.
+const ticketGrpcUrl = process.env.PEAKET_TICKET_GRPC_URL;
+const scannerDevices = ticketGrpcUrl ? new GrpcTicketScannerDevices({ address: ticketGrpcUrl }) : undefined;
 // 감사 체크포인트 공개 앵커 서명 키(Ed25519, BAT-465 R-584). 운영은 비밀 관리에서 넣는다.
 const anchor = auditAnchorSignerFromEnv(process.env);
 const service = await createService({
   name: SERVICE,
   adminAuthz,
-  module: AppModule.register({ database, executor, signer: anchor.signer, ...(priority ? { priority } : {}), onCommandEvent: (h) => (commandEvents = h) }),
+  module: AppModule.register({
+    database,
+    executor,
+    signer: anchor.signer,
+    ...(priority ? { priority } : {}),
+    ...(scannerDevices ? { scannerDevices } : {}),
+    onCommandEvent: (h) => (commandEvents = h),
+  }),
 });
 if (anchor.warning) service.logger.warn({}, anchor.warning);
 if (!purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 환불 gRPC를 쓰지 않는다(내부 HTTP 호환 경로)');
@@ -71,6 +82,7 @@ if (!purchaseUrl && !purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_
 if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHANGE 실행을 하지 않는다');
 if (!purchaseUrl || !queueUrl) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 SALE_STOP·SALE_RESUME 실행을 하지 않는다');
 if (!priority) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 우선 구매 권리 발급·회수를 열지 않는다');
+if (!scannerDevices) service.logger.warn({}, 'PEAKET_TICKET_GRPC_URL이 없어 관제 스캐너 기기 경로(/v1/ops/scanner-devices)를 열지 않는다');
 await service.listen();
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.
@@ -121,6 +133,7 @@ process.once('SIGTERM', () => {
       } catch (err) {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
+      scannerDevices?.close();
       adminAuthz.close();
       await database.close();
     }
