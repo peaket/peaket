@@ -262,6 +262,7 @@ x-peaket-problem-types:
     staff-assignment-missing: { status: 403, title: "이 회차의 스태프 배정이 없습니다" }
     staff-invitation-email-mismatch: { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" }
     subscription-limit: { status: 422, title: "알림 신청 수를 넘었습니다" }
+    too-many-requests: { status: 429, title: "24시간 안에 이미 다시 받았습니다" }
     transfer-locked: { status: 409, title: "지금은 양도할 수 없는 티켓입니다" }
     transfer-not-allowed: { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" }
     trigger-deferred: { status: 409, title: "판정 보류 중인 지표입니다" }
