@@ -377,6 +377,9 @@ importers:
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
+      qrcode:
+        specifier: 1.5.4
+        version: 1.5.4
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -393,6 +396,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      '@types/qrcode':
+        specifier: 1.5.6
+        version: 1.5.6
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -840,6 +846,9 @@ importers:
       drizzle-kit:
         specifier: 0.31.11
         version: 0.31.11
+      selfsigned:
+        specifier: 5.5.0
+        version: 5.5.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

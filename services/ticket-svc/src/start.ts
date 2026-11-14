@@ -107,7 +107,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
         ticket: { deviceKeys },
       }),
       adminAuthz,
-      scanner: { devices: scannerStore, sessions: scannerSessions, replay },
+      scanner: {
+        devices: scannerStore,
+        sessions: scannerSessions,
+        replay,
+        ...(config.scannerMtlsSecret ? { mtls: { secret: config.scannerMtlsSecret } } : {}),
+      },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
     alert = (message, fields) => service!.logger.warn(fields, message);

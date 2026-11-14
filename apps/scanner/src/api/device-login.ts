@@ -121,6 +121,16 @@ export async function pollDeviceToken(o: DeviceLoginOptions & { deviceCode: stri
   throw errorOf(res, await problemOf(res));
 }
 
+/** 승인 화면 QR(data URL). qrcode를 동적 import하므로 초기 번들에 들어가지 않는다. 실패하면 undefined(가짜 무늬 유지) */
+export async function qrDataUrlOf(uri: string, load: () => Promise<{ default: { toDataURL(text: string, options?: Record<string, unknown>): Promise<string> } }> = () => import('qrcode')): Promise<string | undefined> {
+  try {
+    const QR = (await load()).default;
+    return await QR.toDataURL(uri, { margin: 1, width: 320, errorCorrectionLevel: 'M' });
+  } catch {
+    return undefined;
+  }
+}
+
 /** 기기 등록(POST /v1/scanner/device-enrollments). 등록 코드를 한 번 쓰고 기기 키 지문(jkt)을 묶는다 */
 export async function enrollDevice(o: DeviceLoginOptions & { code: string }): Promise<{ deviceId: string }> {
   const url = `${base(o.origin)}/v1/scanner/device-enrollments`;

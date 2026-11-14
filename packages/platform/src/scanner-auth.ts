@@ -58,11 +58,30 @@ export interface DpopReplayStore {
   claim(jti: string, ttlMs: number): Promise<boolean>;
 }
 
+/** 게이트웨이가 클라이언트 인증서를 검증한 뒤 넣는 머리 이름(기본값). 클라이언트가 보낸 값은 게이트웨이가 지운다 */
+export const SCANNER_MTLS_AUTH_HEADER = 'x-peaket-mtls-authenticated';
+export const SCANNER_MTLS_CERT_HEADER = 'x-peaket-client-cert-sha256';
+export const SCANNER_MTLS_CNF_HEADER = 'x-user-x5t';
+
+/**
+ * mTLS 선택지의 게이트웨이 신뢰 경계(offline-gate §6.1, RFC 8705).
+ * `secret`은 게이트웨이만 아는 값이고, `x-peaket-mtls-authenticated`에 이 값이 있을 때만 mTLS로 본다.
+ * 게이트웨이는 클라이언트가 보낸 같은 이름의 머리를 지우고, TLS 계층에서 인증서를 검증한 뒤에만 넣어야 한다.
+ */
+export interface ScannerMtlsOptions {
+  secret: string;
+  authenticatedHeader?: string;
+  certThumbprintHeader?: string;
+  tokenConfirmationHeader?: string;
+}
+
 /** createService에 넘기는 스캐너 인증 포트 묶음 */
 export interface ScannerAuthWiring {
   devices: ScannerDeviceLookup;
   sessions: ScannerSessionCheck;
   replay: DpopReplayStore;
+  /** 없으면 mTLS 머리를 믿지 않는다(기본 기기 키+DPoP만) */
+  mtls?: ScannerMtlsOptions;
 }
 
 /** 이번 배치는 스태프 토큰이 붙은 스캐너 경로만 다룬다(기기 등록·업로드의 기기 인증만 경로는 ticket-svc 단계) */
@@ -74,6 +93,8 @@ export interface ScannerAuthOptions {
    */
   token: 'required' | 'none' | 'optional';
   device: 'registered';
+  /** mTLS 머리를 받아들일지. 기본 true지만 wiring.mtls가 없으면 아무 효과가 없다 */
+  mtls?: boolean;
 }
 
 /** 스캐너 경로의 기기 증명·세션 판정을 요구한다 */

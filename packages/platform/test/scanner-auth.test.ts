@@ -2,6 +2,8 @@
 import 'reflect-metadata';
 import { Controller, Get, Module } from '@nestjs/common';
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { X509Certificate } from 'node:crypto';
+import selfsigned from 'selfsigned';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   CurrentPrincipal,
@@ -11,12 +13,14 @@ import {
   athOf,
   createService,
   fakeClock,
+  mtlsConfirmationOf,
   type DpopReplayStore,
   type FakeClock,
   type Principal,
   type ScannerAuthWiring,
   type ScannerDeviceLookup,
   type ScannerDeviceRecord,
+  type ScannerMtlsOptions,
   type ScannerSessionAnswer,
   type ScannerSessionCheck,
 } from '../src/index.js';
@@ -129,12 +133,12 @@ interface Booted {
   get(headers: Record<string, string>, url?: string): Promise<{ statusCode: number; headers: Record<string, unknown>; payload: string }>;
 }
 
-async function boot(module: unknown = ScannerModule, withScanner = true): Promise<Booted> {
+async function boot(module: unknown = ScannerModule, withScanner = true, mtls?: ScannerMtlsOptions): Promise<Booted> {
   const clock = fakeClock();
   const devices = new FakeDevices();
   const sessions = new FakeSessions();
   const replay = new FakeReplay();
-  const scanner: ScannerAuthWiring = { devices, sessions, replay };
+  const scanner: ScannerAuthWiring = { devices, sessions, replay, ...(mtls ? { mtls } : {}) };
   const logs = collector();
   const svc = await createService({
     name: 'scanner-auth-svc',
@@ -300,6 +304,84 @@ describe('스캐너 기기 증명(GAT-170, O-T37)', () => {
     const third = await b.get(headersOf(await proofOf(key, { jti: 'jti-3' }), key.jkt));
     expect(third.statusCode).toBe(200);
     expect(b.sessions.calls).toBe(2);
+  });
+});
+
+describe('스캐너 mTLS 선택지 PoC(GAT-170, BAT-435)', () => {
+  const X5T = 'X'.repeat(43);
+  const MTLS: ScannerMtlsOptions = { secret: 'gw-secret' };
+  const mtlsHeaders = (over: Record<string, string | undefined> = {}): Record<string, string> => {
+    const base: Record<string, string | undefined> = {
+      'x-user-id': 'acc-staff',
+      'x-session-id': 'sess-1',
+      'x-user-aud': 'scanner',
+      authorization: `DPoP ${TOKEN}`,
+      'x-peaket-mtls-authenticated': 'gw-secret',
+      'x-peaket-client-cert-sha256': X5T,
+      'x-user-x5t': X5T,
+      ...over,
+    };
+    return Object.fromEntries(Object.entries(base).filter((e): e is [string, string] => e[1] !== undefined));
+  };
+
+  test('게이트웨이 비밀·인증서 지문·토큰 cnf.x5t#S256이 같으면 DPoP 증명 없이 통과한다', async () => {
+    const b = await boot(ScannerModule, true, MTLS);
+    b.devices.byJkt.set(X5T, { deviceId: 'dev-mtls', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-mtls', { valid: true, role: 'gate_lead', eventId: 'ev-1' });
+    const r = await b.get(mtlsHeaders());
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.payload)).toEqual({ role: 'gate_lead', deviceId: 'dev-mtls', tenantId: 'prom-1' });
+  });
+
+  test('기기 인증만 하는 경로는 mTLS 인증서 지문만으로 통과하고 cnf.x5t를 요구하지 않는다', async () => {
+    const b = await boot(DeviceOnlyModule, true, MTLS);
+    b.devices.byJkt.set(X5T, { deviceId: 'dev-mtls', status: 'ACTIVE', promoterId: 'prom-1' });
+    const r = await b.get({ 'x-peaket-mtls-authenticated': 'gw-secret', 'x-peaket-client-cert-sha256': X5T }, '/v1/scanner-device-test/authorize');
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.payload)).toEqual({ role: 'scanner_device', deviceId: 'dev-mtls', sessionId: '', tenantId: 'prom-1' });
+  });
+
+  test('자체 서명 인증서 DER의 x5t#S256로도 가드가 기기를 찾는다', async () => {
+    const pems = await selfsigned.generate([{ name: 'commonName', value: 'scanner-poc' }], { keySize: 2048 });
+    const x5t = mtlsConfirmationOf(new X509Certificate(pems.cert).raw);
+    const b = await boot(ScannerModule, true, MTLS);
+    b.devices.byJkt.set(x5t, { deviceId: 'dev-cert', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-cert', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const r = await b.get(mtlsHeaders({ 'x-peaket-client-cert-sha256': x5t, 'x-user-x5t': x5t }));
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.payload)).toMatchObject({ deviceId: 'dev-cert' });
+  });
+
+  test('비밀 값이 틀리거나 인증서 지문과 토큰 cnf가 다르거나 인증서 머리가 없으면 401이다', async () => {
+    const b = await boot(ScannerModule, true, MTLS);
+    b.devices.byJkt.set(X5T, { deviceId: 'dev-mtls', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-mtls', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    expect((await b.get(mtlsHeaders({ 'x-peaket-mtls-authenticated': 'wrong' }))).statusCode).toBe(401);
+    expect((await b.get(mtlsHeaders({ 'x-user-x5t': 'Y'.repeat(43) }))).statusCode).toBe(401);
+    expect((await b.get(mtlsHeaders({ 'x-peaket-client-cert-sha256': undefined }))).statusCode).toBe(401);
+  });
+
+  test('폐기된 인증서 기기는 403이고, mTLS 머리가 없으면 기존 DPoP 경로를 그대로 쓴다', async () => {
+    const b = await boot(ScannerModule, true, MTLS);
+    b.devices.byJkt.set(X5T, { deviceId: 'dev-mtls', status: 'REVOKED', promoterId: 'prom-1' });
+    const revoked = await b.get(mtlsHeaders());
+    expect(revoked.statusCode).toBe(403);
+    expect(JSON.parse(revoked.payload)).toMatchObject({ type: 'https://peaket.example/problems/device-revoked' });
+
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const dpop = await b.get(headersOf(await proofOf(key), key.jkt));
+    expect(dpop.statusCode).toBe(200);
+  });
+
+  test('wiring.mtls가 없으면 mTLS 머리를 믿지 않고 DPoP 증명을 요구한다', async () => {
+    const b = await boot();
+    b.devices.byJkt.set(X5T, { deviceId: 'dev-mtls', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-mtls', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const r = await b.get(mtlsHeaders());
+    expect(r.statusCode).toBe(401);
+    expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_token"');
   });
 });
 

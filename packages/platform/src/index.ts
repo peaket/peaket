@@ -32,6 +32,7 @@ export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY,
 export { HOT_PATH_METRICS, HotPathMetrics, timeHotPath, timeHotPathSync, type HotPathOutcome, type HotPathStage } from './hot-path.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
 export { MTLS_CONFIRMATION_CLAIM, MTLS_POC_BLOCKERS, mtlsConfirmationOf, mtlsPocBlockers, verifyMtlsConfirmation, type MtlsConfirmationDecision, type MtlsPocBlocker } from './mtls.js';
+export { SCANNER_MTLS_AUTH_HEADER, SCANNER_MTLS_CERT_HEADER, SCANNER_MTLS_CNF_HEADER, type ScannerMtlsOptions } from './scanner-auth.js';
 // 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
 export { Counter, Gauge, Histogram, type Registry } from '@prometheus-io/client';
 export { contractSchema, emitOpenApi, type EmitOpenApiOptions } from './openapi.js';

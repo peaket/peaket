@@ -25,7 +25,19 @@ import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
-import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, type ScannerSessionAnswer, type ScannerStaffRole, verifyDpopProof } from './scanner-auth.js';
+import {
+  athOf,
+  DpopRejected,
+  SCANNER_AUTH_METADATA,
+  SCANNER_MTLS_AUTH_HEADER,
+  SCANNER_MTLS_CERT_HEADER,
+  SCANNER_MTLS_CNF_HEADER,
+  type ScannerAuthOptions,
+  ScannerAuthState,
+  type ScannerSessionAnswer,
+  type ScannerStaffRole,
+  verifyDpopProof,
+} from './scanner-auth.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
 export const ROLE_VALUES = [
@@ -439,8 +451,6 @@ export class ScannerGuard implements CanActivate {
     const request = http.getRequest<FastifyRequest>();
     const reply = http.getResponse<FastifyReply>();
     const principal = requestContext()?.principal;
-    const proof = singleHeader(request.headers.dpop);
-    if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
     const authorization = singleHeader(request.headers.authorization);
     // \s+와 (.+)가 공백에서 겹치면 긴 공백 머리에서 되짚기가 늘어난다(CodeQL js/polynomial-redos).
     // DPoP 접근 토큰은 공백 없는 한 토큰이므로 \S+로 못 박는다.
@@ -456,31 +466,56 @@ export class ScannerGuard implements CanActivate {
       throw scannerUnauthorized(reply, 'invalid_token');
     }
 
+    // mTLS 선택지(PoC): 게이트웨이가 TLS 계층에서 인증서를 검증하고, 클라이언트가 보낸 같은 이름의
+    // 머리를 지운 뒤 비밀 값과 인증서 지문을 넣었을 때만 DPoP 증명 없이 받는다.
+    // wiring.mtls가 없거나 비밀 값이 다르면 이 경로를 쓰지 않고 DPoP로 내려간다(가짜 머리로 통과하지 않는다).
+    const mtls = options.mtls === false ? undefined : scanner.wiring.mtls;
+    const mtlsHeaderName = mtls?.authenticatedHeader ?? SCANNER_MTLS_AUTH_HEADER;
+    const mtlsHeader = mtls ? singleHeader(request.headers[mtlsHeaderName]) : undefined;
+    let mtlsThumbprint: string | undefined;
+    if (mtls && mtlsHeader !== undefined) {
+      if (mtlsHeader !== mtls.secret) throw scannerUnauthorized(reply, 'invalid_token');
+      const cert = singleHeader(request.headers[mtls.certThumbprintHeader ?? SCANNER_MTLS_CERT_HEADER]);
+      const cnf = singleHeader(request.headers[mtls.tokenConfirmationHeader ?? SCANNER_MTLS_CNF_HEADER]);
+      // 기기 인증만 하는 경로는 스태프 토큰이 없어 cnf가 없다. 토큰이 붙는 경로만 cert와 cnf를 대조한다.
+      if (!cert) throw scannerUnauthorized(reply, 'invalid_token');
+      if (!deviceOnly && (!cnf || cert !== cnf)) throw scannerUnauthorized(reply, 'invalid_token');
+      mtlsThumbprint = cert;
+    }
+
     const expectedJkt = singleHeader(request.headers['x-user-jkt']);
     const forwardedAth = singleHeader(request.headers['x-user-ath']);
     const computedAth = token === undefined ? undefined : athOf(token);
-    if (!deviceOnly) {
-      if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
-      if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
-    } else if (expectedJkt !== undefined || forwardedAth !== undefined) {
-      throw scannerUnauthorized(reply, 'invalid_token');
+    if (mtlsThumbprint === undefined) {
+      if (!deviceOnly) {
+        if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
+        if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
+      } else if (expectedJkt !== undefined || forwardedAth !== undefined) {
+        throw scannerUnauthorized(reply, 'invalid_token');
+      }
     }
 
     let verified: { jkt: string; jti: string };
-    try {
-      verified = await verifyDpopProof({
-        proof,
-        method: request.method,
-        url: requestUrlOf(request),
-        ...(deviceOnly
-          ? { requireAth: false }
-          : { accessToken: token!, expectedAth: forwardedAth ?? computedAth!, expectedJkt: expectedJkt! }),
-        clock: this.state.clock,
-        replay: scanner.wiring.replay,
-      });
-    } catch (e) {
-      if (e instanceof DpopRejected) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
-      throw e;
+    if (mtlsThumbprint !== undefined) {
+      verified = { jkt: mtlsThumbprint, jti: 'mtls' };
+    } else {
+      const proof = singleHeader(request.headers.dpop);
+      if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+      try {
+        verified = await verifyDpopProof({
+          proof,
+          method: request.method,
+          url: requestUrlOf(request),
+          ...(deviceOnly
+            ? { requireAth: false }
+            : { accessToken: token!, expectedAth: forwardedAth ?? computedAth!, expectedJkt: expectedJkt! }),
+          clock: this.state.clock,
+          replay: scanner.wiring.replay,
+        });
+      } catch (e) {
+        if (e instanceof DpopRejected) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+        throw e;
+      }
     }
 
     const device = await scanner.deviceByThumbprint(verified.jkt);
@@ -524,7 +559,7 @@ export class ScannerGuard implements CanActivate {
         ...(session?.validUntilMs !== undefined ? { staffValidUntilMs: session.validUntilMs } : {}),
         ...(session?.proxy !== undefined ? { proxy: session.proxy } : {}),
       };
-      rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(eventId ? { eventId } : {}) };
+      rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(mtlsThumbprint !== undefined ? { mtls: true } : {}), ...(eventId ? { eventId } : {}) };
     }
     return true;
   }

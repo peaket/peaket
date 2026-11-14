@@ -12,6 +12,8 @@ export interface DeviceApprovalPanelProps {
   qrWidth: number;
   /** 무늬를 고르는 씨앗. 코드가 바뀌면 다른 값을 준다 */
   qrSeed: number;
+  /** 실제 QR 그림(data URL). 있으면 가짜 무늬 대신 이것을 그린다 */
+  qrDataUrl?: string;
   /** QR 그림 이름(예: '기기 승인 QR, 스캐너 동문-03 로그인용, 5분마다 바뀝니다') */
   qrLabel: string;
   /** 확인 코드(4자-4자) */
@@ -68,6 +70,7 @@ export function DeviceApprovalPanel({
   size = "md",
   qrWidth,
   qrSeed,
+  qrDataUrl,
   qrLabel,
   code,
   deviceName,
@@ -106,11 +109,15 @@ export function DeviceApprovalPanel({
           기기 승인 QR · 관람객 입장 QR 아님
         </figcaption>
         <div className="qr-wrap" style={{ width: qrWidth, maxWidth: "100%" }} role="img" aria-label={qrLabel}>
-          <div className="qr">
-            {cells.map((on, i) => (
-              <i key={i} className={on ? "on" : undefined} />
-            ))}
-          </div>
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt={qrLabel} style={{ display: "block", width: "100%", height: "auto", imageRendering: "pixelated" }} />
+          ) : (
+            <div className="qr">
+              {cells.map((on, i) => (
+                <i key={i} className={on ? "on" : undefined} />
+              ))}
+            </div>
+          )}
         </div>
       </figure>
       {lg ? (

@@ -1,7 +1,7 @@
 // SCR-036 기기 승인 로그인 API 연결(RFC 8628) 시험.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DeviceLoginError, enrollDevice, pollDeviceToken, startDeviceAuthorization } from '../src/api/device-login.ts';
+import { DeviceLoginError, enrollDevice, pollDeviceToken, qrDataUrlOf, startDeviceAuthorization } from '../src/api/device-login.ts';
 import { generateDpopKey } from '../src/api/dpop.ts';
 
 const ORIGIN = 'https://scanner-api.peaket.example';
@@ -62,6 +62,18 @@ test('승인된 토큰은 access_token·expires_in을 주고, 폐기 기기는 d
 
   const revoked = fakeFetch(403, { type: 'https://peaket.example/problems/device-revoked', title: '폐기된 스캐너 기기입니다' });
   await assert.rejects(() => pollDeviceToken({ origin: ORIGIN, key, deviceCode: 'd', fetch: revoked.fetch }), (e: unknown) => e instanceof DeviceLoginError && e.code === 'device_revoked' && e.status === 403);
+});
+
+test('승인 QR은 실제 data URL을 만들고, qrcode 동적 import가 실패하면 undefined로 가짜 무늬를 남긴다', async () => {
+  const qr = await qrDataUrlOf('https://scanner.peaket.example/approve#code=BCDF-GHJK');
+  assert.match(qr ?? '', /^data:image\/png;base64,/);
+  const png = Buffer.from((qr ?? '').split(',')[1] ?? '', 'base64');
+  assert.equal(png.readUInt32BE(16), 320);
+  assert.equal(png.readUInt32BE(20), 320);
+  const failed = await qrDataUrlOf('https://scanner.peaket.example/approve#code=BCDF-GHJK', async () => {
+    throw new Error('qrcode chunk failed');
+  });
+  assert.equal(failed, undefined);
 });
 
 test('기기 등록은 코드와 DPoP 증명을 보내고, 만료 코드(410)는 expired_token이다', async () => {

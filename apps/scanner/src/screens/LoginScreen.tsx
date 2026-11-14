@@ -728,6 +728,7 @@ function LiveLoginScreen({ view, search }: { view: DeviceLoginView; search: stri
             size={t ? "lg" : "md"}
             qrWidth={t ? 320 : 196}
             qrSeed={liveSeed(code)}
+            {...(view.qrDataUrl ? { qrDataUrl: view.qrDataUrl } : {})}
             qrLabel={`기기 승인 QR, 이 스캐너 로그인용, 확인 코드 ${code}`}
             code={code}
             timer={{ text: formatRemaining(remaining), label: `확인 코드 남은 시간 ${formatRemaining(remaining)}` }}

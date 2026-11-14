@@ -18,6 +18,8 @@ export interface TicketServiceConfig {
   readonly opsHttpUrl?: string;
   /** ops-svc internal 경로의 x-peaket-internal-token */
   readonly internalToken?: string;
+  /** mTLS 선택지 PoC: 게이트웨이만 아는 머리 비밀 값. 없으면 mTLS 머리를 믿지 않는다 */
+  readonly scannerMtlsSecret?: string;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -39,6 +41,7 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(env.PEAKET_CORE_HTTP_URL ? { coreHttpUrl: env.PEAKET_CORE_HTTP_URL } : {}),
     ...(env.PEAKET_OPS_HTTP_URL ? { opsHttpUrl: env.PEAKET_OPS_HTTP_URL } : {}),
     ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
+    ...(env.PEAKET_SCANNER_MTLS_SECRET ? { scannerMtlsSecret: env.PEAKET_SCANNER_MTLS_SECRET } : {}),
   };
 }
 

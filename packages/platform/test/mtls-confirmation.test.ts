@@ -1,4 +1,6 @@
 // 스캐너 mTLS 선택지의 cnf.x5t#S256 결속(offline-gate §6.1, RFC 8705·RFC 9449).
+import { X509Certificate } from 'node:crypto';
+import selfsigned from 'selfsigned';
 import { describe, expect, test } from 'vitest';
 import { MTLS_CONFIRMATION_CLAIM, mtlsConfirmationOf, mtlsPocBlockers, verifyMtlsConfirmation } from '../src/index.js';
 
@@ -22,6 +24,17 @@ describe('mTLS cnf.x5t#S256 [GAT-220]', () => {
     expect(verifyMtlsConfirmation({ mtlsAuthenticated: true, certificateDer: CERT_A, tokenCnf: { [MTLS_CONFIRMATION_CLAIM]: '' } })).toBe('missing-claim');
     expect(verifyMtlsConfirmation({ mtlsAuthenticated: true, certificateDer: CERT_A, tokenCnf: { [MTLS_CONFIRMATION_CLAIM]: mtlsConfirmationOf(CERT_B) } })).toBe('mismatch');
     expect(verifyMtlsConfirmation({ mtlsAuthenticated: true, certificateDer: CERT_A, tokenCnf: { [MTLS_CONFIRMATION_CLAIM]: mtlsConfirmationOf(CERT_A) } })).toBe('ok');
+  });
+
+  test('자체 서명 인증서 DER에서 x5t#S256를 만들고, 다른 인증서는 mismatch로 거절한다', async () => {
+    const a = await selfsigned.generate([{ name: 'commonName', value: 'scanner-poc-a' }], { keySize: 2048 });
+    const b = await selfsigned.generate([{ name: 'commonName', value: 'scanner-poc-b' }], { keySize: 2048 });
+    const certA = new X509Certificate(a.cert);
+    const certB = new X509Certificate(b.cert);
+    const x5tA = mtlsConfirmationOf(certA.raw);
+    expect(x5tA).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(verifyMtlsConfirmation({ mtlsAuthenticated: true, certificateDer: certA.raw, tokenCnf: { [MTLS_CONFIRMATION_CLAIM]: x5tA } })).toBe('ok');
+    expect(verifyMtlsConfirmation({ mtlsAuthenticated: true, certificateDer: certA.raw, tokenCnf: { [MTLS_CONFIRMATION_CLAIM]: mtlsConfirmationOf(certB.raw) } })).toBe('mismatch');
   });
 
   test('관리형 기기·사설 CA·게이트웨이 인증서 검증이 하나라도 없으면 그 막힘을 돌려준다', () => {
