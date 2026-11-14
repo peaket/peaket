@@ -89,3 +89,14 @@ export function priceSeats(seats: readonly HeldSeat[], tierPrices: Readonly<Reco
   if (!(amount <= ORDER_AMOUNT_MAX)) return { status: 'AMOUNT_OUT_OF_RANGE' };
   return { status: 'OK', amount, items };
 }
+
+/**
+ * 우선 구매 보류의 주문 금액(GAT-135, ADR-0171). 좌석마다 권리의 원래 가격(priority_grant.price) 하나를 쓴다.
+ * 등급 가격표를 보지 않으므로 PRICE_MISSING이 없고, 합이 int4를 넘을 때만 AMOUNT_OUT_OF_RANGE다
+ */
+export function priceSeatsAt(seats: readonly HeldSeat[], unitPrice: number): OrderPricing {
+  const items: OrderItem[] = seats.map((s) => ({ seatId: s.seatId, tierId: s.tierId, sectionId: s.sectionId, unitPrice }));
+  const amount = unitPrice * seats.length;
+  if (!(amount <= ORDER_AMOUNT_MAX)) return { status: 'AMOUNT_OUT_OF_RANGE' };
+  return { status: 'OK', amount, items };
+}

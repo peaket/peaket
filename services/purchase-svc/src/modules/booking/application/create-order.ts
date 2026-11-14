@@ -2,7 +2,7 @@
 // 받는 층(inbound/orders.controller.ts)이 플랫폼 가드(신원·역할 ticket:buy·멱등 키 400·구매 세션 서명 401·본문 형식 400)를 지난 요청을 넘긴다.
 // 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1). 결과는 던지지 않고 이름 붙은 값으로 돌려주고, 받는 층이 HTTP로 바꾼다.
 import { type Clock, type Deadline, uuidv7 } from '@peaket/platform';
-import { buyerOf, consentVerdict, type OrderBuyerInput, type OrderConsents, priceSeats } from '../domain/order-request.js';
+import { buyerOf, consentVerdict, type OrderBuyerInput, type OrderConsents, priceSeats, priceSeatsAt } from '../domain/order-request.js';
 import {
   type BookingRestriction,
   type BookingRestrictions,
@@ -19,6 +19,7 @@ import {
   type OrderSignals,
   type OrderView,
   type OrderWrites,
+  type PriorityGrants,
   type SaleConfigs,
 } from '../domain/ports.js';
 import { judgeRecheck, type RecheckFailure, type RecheckToken } from '../domain/recheck.js';
@@ -42,6 +43,8 @@ export interface CreateOrderDeps {
   identity: IdentityRecheck;
   contactRefs: ContactRefs;
   restrictions: BookingRestrictions;
+  /** 우선 구매 보류 주문의 권리 확인(GAT-135). 없으면 PRIORITY 홀드 주문을 거절한다 */
+  priorityGrants?: PriorityGrants;
   signals: OrderSignals;
   log: OrderLog;
   /** 판매 종료 비교와 주문 ID(UUIDv7)의 시계 */
@@ -104,6 +107,7 @@ export type CreateOrderRejection =
   | 'IDENTITY_DENIED'
   | 'IDENTITY_MISCONFIGURED'
   | 'BOOKING_RESTRICTED'
+  | 'PRIORITY_GRANT_INVALID'
   | 'PRICE_MISSING'
   | 'HOLD_ALREADY_ORDERED'
   | 'DEADLINE_EXCEEDED';
@@ -166,17 +170,46 @@ export class CreateOrder {
     }
     if (committed.status === 'MISMATCH') return rejected('IDEM_REUSED');
 
-    // 3. 판매 설정과 홀드 확인. 판매 종료 뒤에는 판매 종료 전에 잡은 홀드만 받고 그 밖은 모두 410(있는지 새지 않게 같은 답)
+    // 3. 판매 설정과 홀드 확인. 판매 종료 뒤에는 판매 종료 전에 잡은 홀드만 받고 그 밖은 모두 410(있는지 새지 않게 같은 답).
+    //    우선 구매 입장(입장 토큰 prio)은 판매 종료 뒤에도 그 권리의 PRIORITY 홀드 하나를 주문한다(GAT-135, ADR-0171).
     const sale = await d.saleConfigs.get(session.eventId);
     if (!sale) return rejected('SEAT_STORE_UNAVAILABLE');
+    const priorityGrantId = session.priorityGrantId;
+    let priorityGrant: Awaited<ReturnType<PriorityGrants['find']>>;
+    if (priorityGrantId !== undefined) {
+      if (!d.priorityGrants) return rejected('PRIORITY_GRANT_INVALID');
+      priorityGrant = await d.priorityGrants.find(priorityGrantId);
+      // 없음·남의 것·다른 회차·이미 쓴 것·기한 지남·진행 중 주문 있음은 모두 같은 409다(어느 것인지 새지 않는다)
+      if (
+        !priorityGrant ||
+        priorityGrant.eventId !== session.eventId ||
+        priorityGrant.accountId !== c.accountId ||
+        priorityGrant.status !== 'OFFERED' ||
+        d.clock.now() >= priorityGrant.expiresAtMs ||
+        priorityGrant.activeOrderId !== undefined ||
+        c.body.holdId !== priorityGrantId
+      ) {
+        return rejected('PRIORITY_GRANT_INVALID');
+      }
+    }
     if (seatCallTooLate(c.deadline)) return rejected('DEADLINE_EXCEEDED');
     const hold = await d.holds.check(
-      { eventId: session.eventId, purchaseSessionId: c.purchaseSessionId, accountId: c.accountId, holdId: c.body.holdId },
+      {
+        eventId: session.eventId,
+        purchaseSessionId: c.purchaseSessionId,
+        accountId: c.accountId,
+        holdId: c.body.holdId,
+        ...(priorityGrantId !== undefined ? { priorityGrantId, prioritySeatId: priorityGrant!.seatId } : {}),
+      },
       seatCallOf(c.deadline),
     );
     if (hold.status === 'STORE_UNAVAILABLE') return rejected('SEAT_STORE_UNAVAILABLE');
-    if (d.clock.now() >= sale.saleEndsAtMs && (hold.status !== 'OK' || hold.heldAtMs >= sale.saleEndsAtMs)) return rejected('SALE_ENDED');
-    if (hold.status !== 'OK') return rejected('HOLD_NOT_FOUND');
+    if (priorityGrantId !== undefined) {
+      if (hold.status !== 'OK' || hold.kind !== 'PRIORITY' || hold.priorityGrantId !== priorityGrantId) return rejected('PRIORITY_GRANT_INVALID');
+    } else {
+      if (d.clock.now() >= sale.saleEndsAtMs && (hold.status !== 'OK' || hold.heldAtMs >= sale.saleEndsAtMs)) return rejected('SALE_ENDED');
+      if (hold.status !== 'OK') return rejected('HOLD_NOT_FOUND');
+    }
 
     // 4. 동의(422), 5. 예매자(400)
     const consent = consentVerdict(c.body.consents, d.consentVersion);
@@ -213,8 +246,8 @@ export class CreateOrder {
       return rejected('BOOKING_RESTRICTED');
     }
 
-    // 8. 금액(홀드 좌석의 등급 가격 합. 클라이언트 값은 쓰지 않는다)
-    const pricing = priceSeats(hold.seats, sale.tierPrices);
+    // 8. 금액(홀드 좌석의 등급 가격 합. 클라이언트 값은 쓰지 않는다). 우선 구매는 권리의 원래 가격이다(GAT-135)
+    const pricing = priorityGrantId !== undefined ? priceSeatsAt(hold.seats, priorityGrant!.price) : priceSeats(hold.seats, sale.tierPrices);
     if (pricing.status === 'PRICE_MISSING') {
       d.log.configError({ what: 'tier_price_missing', eventId: session.eventId, tierId: pricing.tierId });
       return rejected('PRICE_MISSING');
@@ -252,6 +285,7 @@ export class CreateOrder {
       },
       holdId: c.body.holdId,
       purchaseSessionId: c.purchaseSessionId,
+      ...(priorityGrantId !== undefined ? { priorityGrantId } : {}),
     };
     // 남은 시간이 DB 문장 상한보다 짧으면 트랜잭션의 문장 시간 초과로 넘긴다(리뷰 고침 L4)
     const outcome = await d.writes.create(c.idem, order, transactionCallOf(c.deadline));
@@ -268,9 +302,13 @@ export class CreateOrder {
       return { status: 'REJECTED', reason: 'HOLD_ALREADY_ORDERED', ...(orderId ? { orderId } : {}) };
     }
 
-    // 주문 뒤 표시(결제 정지 때 멈출 대상, seat-hold §5 '주문 표시'). 실패해도 201은 그대로다
+    // 주문 뒤 표시(결제 정지 때 멈출 대상, seat-hold §5 '주문 표시'). 실패해도 201은 그대로다.
+    // 우선 구매 보류는 구매 세션이 없어 sessionId ''·권리 만료를 maxStay로 넘긴다(GAT-135)
     if (outcome.status === 'CREATED' && d.holdMarks) {
-      const mark = () => d.holdMarks!.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: c.body.holdId, seatIds: hold.seats.map((s) => s.seatId), ...(c.deadline ? { deadline: c.deadline } : {}) });
+      const mark =
+        priorityGrantId !== undefined
+          ? () => d.holdMarks!.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: '', holdId: priorityGrantId, seatIds: hold.seats.map((s) => s.seatId), maxStayMs: priorityGrant!.expiresAtMs, ...(c.deadline ? { deadline: c.deadline } : {}) })
+          : () => d.holdMarks!.markOrdered({ eventId: session.eventId, accountId: c.accountId, sessionId: c.purchaseSessionId, holdId: c.body.holdId, seatIds: hold.seats.map((s) => s.seatId), ...(c.deadline ? { deadline: c.deadline } : {}) });
       // 일시 실패면 한 번 더 한다. 그래도 실패하면 결제 시도 시작이 다시 표시한다(L4)
       if (!(await mark()) && !(await mark())) d.signals.holdMarkFailed?.();
     }

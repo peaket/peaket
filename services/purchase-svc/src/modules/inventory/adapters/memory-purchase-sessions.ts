@@ -50,6 +50,7 @@ export class MemoryPurchaseSessions implements PurchaseSessionAccess {
         accountId: s.accountId,
         eventId: s.eventId,
         journeyId: s.journeyId,
+        ...(s.priorityGrantId !== undefined ? { priorityGrantId: s.priorityGrantId } : {}),
       };
       return { ref: s.sessionId, key: s.key };
     }
@@ -67,6 +68,8 @@ export class MemoryPurchaseSessions implements PurchaseSessionAccess {
   /** 열린 세션의 상태(PurchaseSessionInfo 칸만, 사본). 없거나 끝났으면 undefined */
   async get(sessionId: string): Promise<PurchaseSessionInfo | undefined> {
     const s = this.#sessions.get(sessionId);
-    return s ? { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId } : undefined;
+    return s
+      ? { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId, ...(s.priorityGrantId !== undefined ? { priorityGrantId: s.priorityGrantId } : {}) }
+      : undefined;
   }
 }

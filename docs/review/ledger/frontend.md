@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 82 | 40 | 8 | 2 | 0 | 5 | 0 | 22 | 44 | 203 |
-| 합계 | 82 | 40 | 8 | 2 | 0 | 5 | 0 | 22 | 44 | 203 |
+| B | 82 | 42 | 8 | 2 | 0 | 0 | 0 | 22 | 47 | 203 |
+| 합계 | 82 | 42 | 8 | 2 | 0 | 0 | 0 | 22 | 47 | 203 |
 
 ## docs/frontend.md
 
@@ -19,7 +19,7 @@
 | FE-T6 | — | 여러 탭 | 폴링 리더 하나, 일련번호 역전 0. 리더를 숨기면 1초 [가정] 안에 보이는 탭이 리더가 되어 자기 간격으로 묻는다. 모든 탭이 숨겨지면 묻기가 숨긴 간격마다… | 자동 시험 | B | 시험: apps/web/queue-room/test/tabs.test.mjs, apps/web/queue-room/test/ticket-identity.test.mjs 외 2곳 |
 | FE-T7 | — | 구매 세션 서명 | 벡터 일치 | 자동 시험 | B | 시험: packages/api-client/test/purchase-crypto.test.ts, packages/platform/test/purchase-auth.test.ts 외 1곳 |
 | FE-T8 | — | 결제 복귀 | 결제 값이 담긴 주소를 바로 지운다, 접수 202 | 사람 확인 | B | 브라우저 확인 · docs/review/browser-check/HOT-356-358.md에서 시뮬레이터 성공과 새로고침을 봤다. 포트원 복귀와 쿠키 없는 첫 요청은 아직 못 봤다 |
-| FE-T9 | — | 이진 해독기 경계 | 예외 없이 버리고, 경계 밖 읽기 0 | 다른 단계 | B | 미정 · 이진 해독기 경계는 좌석맵 패키지 단계 몫이다. 시범에서는 서버와의 맞물림 시험만 더했다 |
+| FE-T9 | — | 이진 해독기 경계 | 예외 없이 버리고, 경계 밖 읽기 0 | 빈칸 | B | — |
 | FE-T10 | — | 좌석맵 성능과 네트워크 | 첫 그림 1초, INP 200ms, 긴 작업 0, 상태 메시지 처리 p95 2ms [가정]. 힙 감축률(v0 대비 70%)은 보조 숫자로… | 측정 | B | LCH-200 · 좌석맵 성능과 네트워크(측정 캠페인) |
 | FE-T11 | — | 좌석 연결 상태 | §3.5 전이, 기계의 모든 전이를 경로가 덮는다, 30초 안에 스스로 회복, 같은 구역 스냅샷 재요청은 동시에 하나 | 자동 시험 | B | 시험: apps/web/src/_pages/seats/model/connection-machine.test.mjs, packages/seatmap/test/connection.test.ts 외 1곳 |
 | FE-T12 | — | 돌아갈 주소와 URL 조각 | 모두 첫 화면으로 보내고 조각은 바로 지운다 | 자동 시험 | B | 시험: apps/web/src/_pages/login/model/state.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs 외 1곳 |
@@ -133,13 +133,13 @@
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: services/queue-svc/test/state-http.test.ts (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/server/csp-hash-server.test.mjs 외 3곳 |
-| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 다른 단계 | B | HOT-450 · 서비스 워커·`remoteEntry.js`의 `nosniff`는 CloudFront 응답 헤더 정책 몫이다. BAT-170은 앱 코드와 정적 업로드 목록까지만 본다 |
+| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save-answ… |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 3곳 (영역:… |
-| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 다른 단계 | B | BAT-170 후속 · 지갑 서비스 워커(범위 `/my/tickets/`)와 원격 위젯 호스트 분리는 월렛 SW PoC(wbs 5.1.4)·관제 MF 호스트(OPS-350) 뒤에 본다. 화면 호스트… |
+| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/scanner |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 4곳 |
@@ -149,7 +149,7 @@
 | v5.0.0-3.4.8 | — | L3 | 문서를 그리는 응답에 COOP `same-origin`이나 `same-origin-allow-popups`를 둔다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
 | v5.0.0-3.5.6 | — | L3 | JSONP 기능을 어디에서도 켜지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.5.7 | — | L3 | 인가가 필요한 데이터를 JavaScript 파일 같은 스크립트 응답에 넣지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
-| v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 다른 단계 | B | OPS-350 · `remotes.json`의 sha384 무결성·계약 주판 검사는 `@peaket/console-contract`가 OPS-350으로 넘겼다. BAT-170은 정적 배포·standalone·정적… |
+| v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 빈칸 | B | 영역: apps/widgets |
 | v5.0.0-3.7.5 | — | L3 | 브라우저가 기대한 보안 기능을 지원하지 않으면 문서대로(경고, 차단) 동작한다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-13.4.7 | — | L3 | 웹 계층은 정한 확장자 파일만 내보내 정보·설정·소스 코드 유출을 막는다. | 자동 시험 | B | 시험: apps/web/scripts/hide-source-maps.test.mjs, tools/web-checks/csp/web.spec.mjs 외 1곳 |
 | v5.0.0-4.1.1 | — | L1 | 본문이 있는 모든 HTTP 응답에 실제 내용과 맞는 `Content-Type`을 두고, 텍스트·XML처럼 IANA 미디어 타입이 정하는 경우 안전한 문자… | ID만 | B | 다른 곳 시험: services/purchase-svc/test/http.test.ts, services/v0-monolith/test-int/queue.int.test.ts (영역:… |
@@ -186,7 +186,7 @@
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/telemetry.test.ts, services/payment-svc/test/portone-gateway.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 15곳 (영역:… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
-| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 다른 단계 | B | BAT-170 후속 · 월렛 서비스 워커가 아직 없다(Serwist PoC wbs 5.1.4). SW가 `no-store` 응답을 Cache Storage에 넣지 않는 시험은 그 뒤에 본다 |
+| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: services/identity-svc/test-int/fan-account.int.test.ts, services/identity-svc/test/fan-account-http.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | ID만 | B | 다른 곳 시험: tools/ci/vuln-deadline.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web… |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | 자동 시험 | B | 시험: tools/web-checks/static/assets.test.mjs |

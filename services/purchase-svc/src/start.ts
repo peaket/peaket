@@ -34,6 +34,7 @@ import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
+import { DrizzleCancelledTickets, DrizzlePriorityGrantStore, SeatMapPriorityCandidates, type PriorityModuleDeps } from './modules/priority/index.js';
 import {
   CancelTicket,
   CancelTicketEventRefund,
@@ -315,6 +316,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
     });
   }
 
+  // 우선 구매 권리 발급·회수(GAT-135, POL-046 ⑦, ADR-0171). purchase DB가 있을 때만 연다.
+  // 권리 발급은 좌석 Redis의 우선 구매 보류 Lua를 쓰고, 취소한 표는 purchase DB의 order_cancellation·order_item에서 읽는다.
+  const priority: PriorityModuleDeps | undefined = database
+    ? {
+        grants: new DrizzlePriorityGrantStore(database),
+        cancelled: new DrizzleCancelledTickets(database),
+        seats: new RedisSeatStore(redis, undefined, systemClock),
+        candidates: new SeatMapPriorityCandidates(seatMap),
+        seatMap,
+      }
+    : undefined;
+
   // 주문 생성(booking, POST /v1/orders, BUILD_ORDER PRF-161). purchase DB가 있을 때만 연다(DB 없이 뜬 파드는 주문 경로를 열지 않는다, 뜨는 동작은 그대로다).
   // - 동의 문안 판: PEAKET_ORDER_CONSENT_VERSION(없거나 ^[0-9A-Za-z._-]{1,32}$가 아니면 시작하지 않는다. 모양은 BookingModule.register가 본다)
   // - identity-svc 클라이언트(재확인·가명)는 차단기가 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 만든다. 그때까지(듣기 전) 부르면 '답 없음'과 같다
@@ -373,6 +386,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         identity: { check: (q) => (identityLate.recheck ?? unavailableIdentityRecheck).check(q) },
         contactRefs: { compute: (phone, ms) => (identityLate.contactRefs ?? missingContactRefs).compute(phone, ms) },
         restrictions: new RedisBookingRestrictions(redis),
+        priorityGrants: priority!.grants,
         signals: orderSignals,
         consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
         onAccepted: (orderId) => sagaRunner?.kick(orderId),
@@ -402,6 +416,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
       ...(booking ? { booking } : {}),
       ...(refund ? { refund } : {}),
+      ...(priority ? { priority } : {}),
       hotPath,
       admission: {
         store: sessionStore,

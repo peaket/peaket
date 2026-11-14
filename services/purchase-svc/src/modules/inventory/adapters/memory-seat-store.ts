@@ -7,6 +7,8 @@ import {
   type HoldInput,
   type HoldResult,
   IDEM_TTL_MS,
+  type PriorityHoldInput,
+  type PriorityHoldResult,
   KEY_PART,
   REHOLD_WAIT_MS,
   type ReplayInput,
@@ -49,6 +51,8 @@ export interface MemoryHoldHash {
   exp: number;
   /** 홀드 종류(data.md: FAN·PRIORITY. 홀드 Lua는 FAN) */
   kind: 'FAN' | 'PRIORITY';
+  /** kind PRIORITY일 때 우선 구매 권리 ID */
+  priorityGrantId?: string;
   /** 연장한 횟수(10진 글, 홀드 Lua는 '0') */
   ext: string;
   /** 묶음 표시(묶기 Lua가 '1'로 둔다, BUILD_ORDER PRF-142). 없으면 묶이지 않았다 */
@@ -101,6 +105,8 @@ export class MemorySeatEvent {
   readonly holds = new Map<number, MemoryHoldHash>();
   /** 만료 인덱스: 색인 → exp */
   readonly expiry = new Map<number, number>();
+  /** 우선 구매 보류 인덱스: 색인 → exp (s:{event:E}:prio, 일반 7분 만료 인덱스와 따로 둔다) */
+  readonly prio = new Map<number, number>();
   /** 보유 수: 계정 → 수 */
   readonly quota = new Map<string, number>();
   /** 멱등 기록: '{account}:{key}' → 기록 */
@@ -378,6 +384,57 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
    * 자동 배정 홀드(BUILD_ORDER HOT-080, auto-hold-lua.ts의 쌍둥이): 페이지의 후보 묶음을 차례로 보고 처음 맞는 묶음을 잡는다.
    * 메모리도 같은 차례(세대 키 → 멱등 → 정지 → 보유 수 → 후보 → 쓰기)를 따르고, 시각은 주입 Clock이다.
    */
+  async holdPriority(i: PriorityHoldInput, _o?: SeatCallOptions): Promise<PriorityHoldResult> {
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    const now = this.clock.now();
+    const sec = Math.floor(now / 1000);
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    const decided = (r: PriorityHoldResult): PriorityHoldResult => {
+      this.#ensureEpoch(ep, sec);
+      return r;
+    };
+    if (i.expiresAtMs <= now || i.keepUntilMs <= now) return decided({ kind: 'EXPIRED' });
+    if (ev.bits.has(i.seat.index)) return decided({ kind: 'CONFLICT', seatId: i.seat.seatId });
+    const exp = Math.min(i.expiresAtMs, i.keepUntilMs);
+    const extend = (key: string) => {
+      const cur = ev.expireAt.get(key);
+      if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+    };
+    const token = Math.max(Number(ev.fence ?? '0') + 1, now * 1000);
+    const tok = String(token);
+    const version = (ev.secver.get(i.seat.sectionIndex) ?? 0) + 1;
+    ev.fence = tok;
+    ev.bits.add(i.seat.index);
+    ev.prio.set(i.seat.index, exp);
+    const hk = seatKeys.hold(e, i.seat.index);
+    ev.expireAt.delete(hk);
+    ev.holds.set(i.seat.index, { holdId: i.grantId, owner: i.accountId, psid: '', fence: tok, heldAt: now, exp, kind: 'PRIORITY', priorityGrantId: i.grantId, ext: '0' });
+    ev.secver.set(i.seat.sectionIndex, version);
+    ev.stream.push({
+      type: 'HELD',
+      seatIdx: String(i.seat.index),
+      seatId: i.seat.seatId,
+      tierId: i.seat.tierId,
+      sectionId: i.seat.sectionId,
+      holdId: i.grantId,
+      holdKind: 'PRIORITY',
+      priorityGrantId: i.grantId,
+      purchaseSessionId: '',
+      accountId: i.accountId,
+      fencingToken: tok,
+      sectionVersion: String(version),
+      seatEpoch: String(ep.epoch),
+      occurredAtMs: String(now),
+      expiresAtMs: String(exp),
+    });
+    ev.published.push({ channel: seatKeys.section(e, String(i.seat.sectionIndex)), message: `1 ${ep.epoch} ${i.seat.sectionIndex} ${version} ${now} ${i.seat.seatOffset}:1` });
+    for (const key of [seatKeys.bitmap(e), seatKeys.prio(e), seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.fence(e)]) extend(key);
+    extend(hk);
+    return { kind: 'OK', seatId: i.seat.seatId, fencingToken: token, heldAtMs: now, expiresAtMs: exp };
+  }
+
   async holdAuto(i: AutoHoldInput, _o?: SeatCallOptions): Promise<AutoHoldResult> {
     const e = i.eventId;
     const ev = this.db.event(e);

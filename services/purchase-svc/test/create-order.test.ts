@@ -33,6 +33,7 @@ import {
   type PortCall,
   PSID,
   SEATS,
+  TIER_PRICES,
   viewOf,
 } from './order-cases.js';
 
@@ -845,5 +846,85 @@ describe('입력을 바꾸지 않는다', () => {
     const before = JSON.stringify({ ...cmd, idem: { ...cmd.idem, requestHash: [...cmd.idem.requestHash] } });
     await run(cmd);
     expect(JSON.stringify({ ...cmd, idem: { ...cmd.idem, requestHash: [...cmd.idem.requestHash] } })).toBe(before);
+  });
+});
+
+describe('S-T37 우선 구매 보류 주문(GAT-135, ADR-0171)', () => {
+  const GRANT = '0190f3a1-7c2e-7a00-8000-0000000000aa';
+  const GRANT_VIEW = {
+    grantId: GRANT,
+    eventId: EVENT,
+    accountId: ACCOUNT,
+    seatId: 'A01',
+    price: 99_000,
+    status: 'OFFERED' as const,
+    expiresAtMs: NOW + DAY,
+  };
+  const prioritySession = () => {
+    fx.session = { ...(fx.session as Exclude<typeof fx.session, Error | undefined>), priorityGrantId: GRANT };
+  };
+  const priorityHold = (over: Record<string, unknown> = {}) => {
+    fx.hold = {
+      status: 'OK',
+      heldAtMs: NOW - 1,
+      seats: [{ seatId: 'A01', tierId: 'R', sectionId: 'SEC-A' }],
+      kind: 'PRIORITY',
+      priorityGrantId: GRANT,
+      ...over,
+    };
+  };
+
+  test('S-T37 ④_prio_세션은_PRIORITY_홀드를_권리의_원래_가격으로_주문하고_NewOrder에_권리_ID를_싣는다', async () => {
+    prioritySession();
+    fx.priorityGrant = GRANT_VIEW;
+    priorityHold();
+    const r = await run(okCommand({ body: okBody({ holdId: GRANT }) }));
+    expect(r.status).toBe(201);
+    expect(fx.holdQueries[0]).toMatchObject({ holdId: GRANT, priorityGrantId: GRANT, prioritySeatId: 'A01' });
+    expect(fx.lastOrder()).toMatchObject({
+      amount: 99_000,
+      holdId: GRANT,
+      priorityGrantId: GRANT,
+      items: [{ seatId: 'A01', tierId: 'R', sectionId: 'SEC-A', unitPrice: 99_000 }],
+    });
+  });
+
+  test('S-T37 ④_판매_종료_뒤에도_유효한_권리의_PRIORITY_홀드는_201이다', async () => {
+    prioritySession();
+    fx.priorityGrant = GRANT_VIEW;
+    fx.sale = { saleEndsAtMs: NOW - 1, tierPrices: TIER_PRICES };
+    priorityHold({ heldAtMs: NOW });
+    expect(await run(okCommand({ body: okBody({ holdId: GRANT }) }))).toMatchObject({ status: 201 });
+  });
+
+  test('GAT135_권리가_없거나_만료·다른_회차·진행_중_주문이면_409이고_홀드를_보지_않는다', async () => {
+    const cases = [undefined, { ...GRANT_VIEW, expiresAtMs: NOW }, { ...GRANT_VIEW, eventId: '0190f3a1-7c2e-7c00-8000-0000000000c2' }, { ...GRANT_VIEW, activeOrderId: '0190f3a1-7c2e-7f00-8000-0000000000f9' }];
+    for (const g of cases) {
+      fx.reset();
+      prioritySession();
+      fx.priorityGrant = g;
+      priorityHold();
+      expect({ g, r: await run(okCommand({ body: okBody({ holdId: GRANT }) })) }).toEqual({ g, r: { status: 'REJECTED', reason: 'PRIORITY_GRANT_INVALID' } });
+      notCalled('holds.check');
+      noOrder();
+    }
+  });
+
+  test('GAT135_본문_holdId가_권리_ID와_다르면_409이고_홀드를_보지_않는다', async () => {
+    prioritySession();
+    fx.priorityGrant = GRANT_VIEW;
+    priorityHold();
+    expect(await run(okCommand({ body: okBody({ holdId: HOLD_ID }) }))).toEqual({ status: 'REJECTED', reason: 'PRIORITY_GRANT_INVALID' });
+    notCalled('holds.check');
+    noOrder();
+  });
+
+  test('GAT135_GAT310_예매_제한_중인_계정은_우선_구매_주문도_403이다', async () => {
+    prioritySession();
+    fx.priorityGrant = GRANT_VIEW;
+    priorityHold();
+    fx.restriction = { st: 'ACTIVE' };
+    expect(await run(okCommand({ body: okBody({ holdId: GRANT }) }))).toEqual({ status: 'REJECTED', reason: 'BOOKING_RESTRICTED' });
+    noOrder();
   });
 });

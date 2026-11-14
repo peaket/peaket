@@ -63,7 +63,7 @@ const holdHash = (w: World, seatId: string) => seats.db.peek(w.eventId)!.holds.g
 describe('MemoryOrderHolds.check: 맞는 홀드', () => {
   test('ST28_목록에 있고 홀드 Hash의 holdId·owner·psid가 같고 만료 전이면 OK: heldAtMs는 잡은 시각, 좌석은 목록 차례(좌석 ID 오름차순)에 등급·구역을 붙인다', async () => {
     const w = await heldWorld({ seatIds: ['B01', 'A01', 'A02'] });
-    expect(await holds.check(query(w))).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4 });
+    expect(await holds.check(query(w))).toEqual({ status: 'OK', heldAtMs: w.heldAtMs, seats: ['A01', 'A02', 'B01'].map(seatOf), limit: 4, kind: 'FAN' });
     expect(w.heldAtMs).toBe(NOW);
   });
 

@@ -5,6 +5,7 @@ import { fakeClock } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { readAdmissionToken, recordingSignals, signer } from './admission-cases.js';
 import { MemoryAdmissionStore } from '../src/modules/admission/adapters/memory-admission-store.js';
+import { MemoryBookingRestrictions } from '../src/modules/admission/adapters/memory-booking-restrictions.js';
 import { MemoryPriorityGrantStore } from '../src/modules/admission/adapters/memory-priority-grants.js';
 import { AdmissionError } from '../src/modules/admission/application/admission-error.js';
 import { ConfirmAdmission } from '../src/modules/admission/application/confirm-admission.js';
@@ -21,6 +22,7 @@ let clock: ReturnType<typeof fakeClock>;
 let store: MemoryAdmissionStore;
 let schedules: MemoryEventSchedules;
 let grants: MemoryPriorityGrantStore;
+let restrictions: MemoryBookingRestrictions;
 let set: SetPriorityGrant;
 let app: ConfirmAdmission;
 let eventId: string;
@@ -30,8 +32,9 @@ beforeEach(async () => {
   store = new MemoryAdmissionStore(clock);
   schedules = new MemoryEventSchedules();
   grants = new MemoryPriorityGrantStore();
+  restrictions = new MemoryBookingRestrictions();
   set = new SetPriorityGrant(grants, clock);
-  app = new ConfirmAdmission(store, schedules, tokens, signer, recordingSignals(), clock, undefined, grants);
+  app = new ConfirmAdmission(store, schedules, tokens, signer, recordingSignals(), clock, undefined, grants, restrictions);
   eventId = newEvent();
   await schedules.set(eventId, openSchedule(NOW));
 });
@@ -78,7 +81,7 @@ describe('우선 구매 권리 사본 [GAT-135]', () => {
 });
 
 describe('우선 구매 입장 [GAT-135, Q-T62]', () => {
-  test('OFFERED·만료 전 사본이면 대기 번호 없이 ADMITTED하고 새 여정 ID와 prio 클레임을 준다', async () => {
+  test('Q-T62 ①_OFFERED·만료 전 사본이면 대기 번호 없이 ADMITTED하고 새 여정 ID와 prio 클레임을 준다', async () => {
     const i = offered();
     await set.run(i);
     const r = await confirm(i.grantId);
@@ -117,7 +120,7 @@ describe('우선 구매 입장 [GAT-135, Q-T62]', () => {
     expect(r.status).toBe('ADMITTED');
   });
 
-  test('없는 권리·남의 계정·WITHDRAWN·만료는 모두 404 PRIORITY_GRANT_NOT_FOUND다', async () => {
+  test('Q-T62 ②③④_없는 권리·남의 계정·WITHDRAWN·만료는 모두 404 PRIORITY_GRANT_NOT_FOUND다', async () => {
     const missing = randomUUID();
     await expect(confirm(missing)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
 
@@ -152,5 +155,16 @@ describe('우선 구매 입장 [GAT-135, Q-T62]', () => {
     await expect(
       guarded.run({ accountId: ACCOUNT, pid: PID, sessionId: 'sess-1', eventId, body: { priorityGrantId: asked } }),
     ).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+  });
+
+  test('GAT310_예매_제한_ACTIVE이고_끝_전이면_우선_구매_입장도_403_BOOKING_RESTRICTED다', async () => {
+    const i = offered();
+    await set.run(i);
+    restrictions.rows.set(ACCOUNT, { st: 'ACTIVE' as const });
+    await expect(confirm(i.grantId)).rejects.toMatchObject({ code: 'BOOKING_RESTRICTED' });
+    restrictions.rows.set(ACCOUNT, { st: 'ACTIVE' as const, untilMs: NOW - 1 });
+    expect(await confirm(i.grantId)).toMatchObject({ status: 'ADMITTED' });
+    restrictions.rows.set(ACCOUNT, { st: 'LIFTED' as const });
+    expect(await confirm(i.grantId)).toMatchObject({ status: 'ADMITTED' });
   });
 });

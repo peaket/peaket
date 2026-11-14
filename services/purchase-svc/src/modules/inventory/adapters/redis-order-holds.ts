@@ -47,12 +47,23 @@ export class RedisOrderHolds implements OrderHoldReader {
 
   async check(q: OrderHoldQuery, o?: SeatCallOptions): Promise<OrderHoldCheck> {
     if (!orderHoldQueryShaped(q)) return NOT_FOUND;
+    const priority = q.priorityGrantId !== undefined;
+    if (priority && (q.holdId !== q.priorityGrantId || q.prioritySeatId === undefined)) return NOT_FOUND;
     try {
-      // ② 구매 세션의 홀드 목록(jti 슬롯, 일반 명령)
-      const sessionKey = sessionKeys.session(q.purchaseSessionId);
-      const listed = await guard(this.redis.command(['HGET', sessionKey, `h:${q.holdId}`], { key: sessionKey, ...deadlineOf(o) }));
-      if (listed === null || listed === undefined) return NOT_FOUND;
-      const seatIds = heldSeatIdsOf(str(listed));
+      // ② 좌석 목록. 우선 구매 보류는 세션 홀드 목록이 없어 권리의 좌석 하나를 쓰고 psid가 빈 홀드를 본다(GAT-135)
+      let seatIds: readonly string[];
+      let psid: string;
+      if (priority) {
+        seatIds = [q.prioritySeatId!];
+        psid = '';
+      } else {
+        // 구매 세션의 홀드 목록(jti 슬롯, 일반 명령)
+        const sessionKey = sessionKeys.session(q.purchaseSessionId);
+        const listed = await guard(this.redis.command(['HGET', sessionKey, `h:${q.holdId}`], { key: sessionKey, ...deadlineOf(o) }));
+        if (listed === null || listed === undefined) return NOT_FOUND;
+        seatIds = heldSeatIdsOf(str(listed));
+        psid = q.purchaseSessionId;
+      }
       // ③ 좌석맵 판
       if (!(await this.seatMap.config(q.eventId))) return STORE_UNAVAILABLE;
       const refs = await this.seatMap.resolve(q.eventId, seatIds);
@@ -60,7 +71,7 @@ export class RedisOrderHolds implements OrderHoldReader {
       const seats = refs as SeatRef[];
       // ④ 회차 슬롯의 읽기 전용 Lua 한 번
       const keys = [seatKeys.epoch(q.eventId), ...seats.map((s) => seatKeys.hold(q.eventId, s.index))];
-      const r = await guard(this.redis.evalScript(ORDER_HOLD, keys, [q.holdId, q.accountId, q.purchaseSessionId], deadlineOf(o)));
+      const r = await guard(this.redis.evalScript(ORDER_HOLD, keys, [q.holdId, q.accountId, psid, priority ? 'PRIORITY' : 'FAN'], deadlineOf(o)));
       if (!Array.isArray(r) || r.length < 1) throw new Error(`홀드 확인 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
       const kind = str(r[0]);
       if (kind === 'NOT_READY') return STORE_UNAVAILABLE;
@@ -71,7 +82,14 @@ export class RedisOrderHolds implements OrderHoldReader {
         if (!/^(0|[1-9][0-9]*)$/.test(text) || !Number.isSafeInteger(heldAtMs)) throw new Error('홀드 확인 Lua가 돌려준 heldAt이 0 이상 정수 글이 아니다');
         const limit = r.length === 3 ? Number(str(r[2])) : undefined;
         if (limit !== undefined && (!/^[1-9][0-9]*$/.test(str(r[2])) || !Number.isSafeInteger(limit) || limit < 1)) throw new Error('홀드 확인 Lua가 돌려준 1인 한도가 양의 정수 글이 아니다');
-        return { status: 'OK', heldAtMs, seats: seats.map(heldSeatOf), ...(limit !== undefined ? { limit } : {}) };
+        return {
+          status: 'OK',
+          heldAtMs,
+          seats: seats.map(heldSeatOf),
+          ...(limit !== undefined ? { limit } : {}),
+          kind: priority ? 'PRIORITY' : 'FAN',
+          ...(priority ? { priorityGrantId: q.priorityGrantId } : {}),
+        };
       }
       throw new Error(`홀드 확인 Lua가 모르는 결과를 돌려줬다: ${kind}`);
     } catch (e) {

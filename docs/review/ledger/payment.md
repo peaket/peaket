@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 67 | 24 | 6 | 0 | 2 | 17 | 0 | 0 | 0 | 116 |
+| A | 67 | 26 | 6 | 0 | 2 | 5 | 0 | 0 | 10 | 116 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 125 | 24 | 6 | 0 | 2 | 48 | 0 | 0 | 0 | 205 |
+| 합계 | 125 | 26 | 6 | 0 | 2 | 36 | 0 | 0 | 10 | 205 |
 
 ## docs/features/payment.md
 
@@ -25,14 +25,14 @@
 | P-T11 | — | Degraded 결제 모드 검증 | 재시도 큐에 쌓아 두기, 새 결제 일시 정지, 홀드 TTL 연장(그 결제의 승인 기한까지), 주문을 만들고 결제 접수 전인 홀드의 남은 시간 멈춤과 다시 열린… | 측정 | A | 구간 측정 · Degraded 결제 모드 |
 | P-T12 | — | 결제 중 세션 수명 유지 | 구매 세션과 입장 자리가 만료되지 않고 유지되며, 결제에 성공하면 바로 안전하게 비워진다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/payment-result-e2e.int.test.ts… |
 | P-T13 | — | 주문 상태 이력 역추적(추천 적용 2026-10-28, ADR-0113) | 다시 구성한 전이가 실제 좌석 전이와 정확히 일치한다. 시험 데이터의 모든 주문에서 마지막 이력의 새 상태가 지금 상태와 같고, 빈 번호가 없으며… | 자동 시험 | A | 시험: services/purchase-svc/test/apply-payment-result.test.ts |
-| P-T14 | — | PG 시뮬레이터 전환 검증 | 실제 외부 PG 호출을 0건으로 유지하면서 대규모 결제 SLO를 정밀하게 잰다. | 다른 단계 | A | 미정 · PG 시뮬레이터 전환 |
+| P-T14 | — | PG 시뮬레이터 전환 검증 | 실제 외부 PG 호출을 0건으로 유지하면서 대규모 결제 SLO를 정밀하게 잰다. | 빈칸 | A | — |
 | P-T15 | — | 멱등 처리 무결성 | 티켓 발권이 정확히 1회만 실행되고(발권은 Saga가 gRPC로 부른다, architecture §3.2), 소비자가 같은 `eventKey`를 한 번만… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 15곳 |
 | P-T16 | — | PG 어댑터 계약 테스트 | 세 어댑터 모두 같은 정규화 계약 결과를 돌려주고, 포트원 멱등키 따옴표 규격을 지킨다. 토스 어댑터의 첫 구현은 시뮬레이터 몫이다: 시뮬레이터 주소와… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts 외… |
 | P-T17 | — | 포트원 웹훅 서명 검증 | 서명이나 헤더에 결함이 있는 요청은 바로 거절된다. 중복 건은 1회 처리되고, 지원하지 않는 이벤트는 안전하게 무시된다. 재전송의 `webhook-id`가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-process.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts… |
-| P-T18 | — | 공제율 산정 정확도 검증 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용… | 다른 단계 | A | 미정 · 공제율 산정 정확도 |
-| P-T19 | — | 입장 개시 후 예매 취소 | 금융 환급이 보류된 뒤, '취소 뒤 입장' 이상 표시와 CS 확인으로 취소가 최종 무효 처리된다. 입장 기록이 없는 경우에만 입장 기록 마감 뒤 정상 환급된다. | 다른 단계 | A | 미정 · 입장 개시 후 예매 취소 |
-| P-T20 | — | 회차 취소 일괄 환불 검증 | 모든 주문에 100% 전액 환급이 실행되고, 배상 대상 수·금액 합계와 상계·보증 충당·청구 내역이 정산 리포트에 들어가며(개인 명단은 넣지 않는다), 이중… | 다른 단계 | A | 미정 · 회차 취소 일괄 환불 |
-| P-T21 | — | 취소 멱등성 및 재시도 검증 | 먼저 조회해 이미 취소됐는지 확인한 뒤 재전송해, 단 1회만 환급된다는 것을 입증한다. | 다른 단계 | A | 미정 · 취소 멱등성과 재시도 |
+| P-T18 | — | 공제율 산정 정확도 검증 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용… | 빈칸 | A | — |
+| P-T19 | — | 입장 개시 후 예매 취소 | 금융 환급이 보류된 뒤, '취소 뒤 입장' 이상 표시와 CS 확인으로 취소가 최종 무효 처리된다. 입장 기록이 없는 경우에만 입장 기록 마감 뒤 정상 환급된다. | 빈칸 | A | — |
+| P-T20 | — | 회차 취소 일괄 환불 검증 | 모든 주문에 100% 전액 환급이 실행되고, 배상 대상 수·금액 합계와 상계·보증 충당·청구 내역이 정산 리포트에 들어가며(개인 명단은 넣지 않는다), 이중… | 빈칸 | A | — |
+| P-T21 | — | 취소 멱등성 및 재시도 검증 | 먼저 조회해 이미 취소됐는지 확인한 뒤 재전송해, 단 1회만 환급된다는 것을 입증한다. | 빈칸 | A | — |
 | P-T22 | — | PG 한도 추정 모델 검증 | 300 TPS 환경에서는 확정 p99 3초를 달성한다. 100 TPS 환경에서는 대기열이 10분 기한 안에 해소되고, 기한을 넘긴 건은 과금 없이 만료된다. 첫… | 측정 | A | 구간 측정 · PG 한도 추정 모델 |
 | P-T23 | — | 주문당 활성 결제 1건 제한 | 두 번째 접수는 409 Conflict로 막힌다. 인증 단계의 이전 시도는 안전하게 대체되고, 승인이 진행 중일 때는 새 시도가 막힌다. 결제 시도… | 자동 시험 | A | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 6곳 |
 | P-T24 | — | 승인 후 프로세스 중단 복구 | 프로세스가 다시 시작되면 단독 조회 API로 상태를 확인해, 1건만 정상 승인으로 반영되고 이중 승인은 0건이다. BUILD_ORDER PRF-181은 임대가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-confirm-runner.int.test.ts, services/payment-svc/test-int/payment-process.int… |
@@ -69,11 +69,11 @@
 | P-T41 | ② | 결제하지 않은 티켓 주문의 만료 | ② 세션 종료와 홀드 해제 뒤 EXPIRED | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ③ | 결제하지 않은 티켓 주문의 만료 | ③ 접수가 먼저면 만료하지 않고 지금 규칙대로 처리, 만료 뒤의 시도·접수는 409 `order-expired` | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ④ | 결제하지 않은 티켓 주문의 만료 | ④ 안전망이 만든 지 90분 [가정] 지난 주문을 끝낸다. 과금 0건 | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
-| P-T42 | ① | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ① 주문 Expired, 재고가 돌아와 다시 살 수 있다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ② | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ② 연장된 시각까지 만료하지 않는다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ③ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ③ 하나만 이긴다(승인이면 재고 확정, 만료면 과금 0건) | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ④ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ④이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
+| P-T42 | ① | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ① 주문 Expired, 재고가 돌아와 다시 살 수 있다 | 빈칸 | A | — |
+| P-T42 | ② | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ② 연장된 시각까지 만료하지 않는다 | 빈칸 | A | — |
+| P-T42 | ③ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ③ 하나만 이긴다(승인이면 재고 확정, 만료면 과금 0건) | 빈칸 | A | — |
+| P-T42 | ④ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ④이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 | 빈칸 | A | — |
+| P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 빈칸 | A | — |
 | P-T43 | ① | 새 결제 진입 정지와 다시 열기 | ① 시험 재개에서 정지로 돌아가고, 시험 결제의 과금은 0원이다 … , PromQL의 `path="direct"`를 본다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T43 | ② | 새 결제 진입 정지와 다시 열기 | ② 바로 모두 열리고, 감사 로그에 사유와 commander가 남는다. 실패가 이어지면 연 뒤의 표본으로 다시 멈춘다 … , PromQL의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T43 | ③ | 새 결제 진입 정지와 다시 열기 | ③ 예상 대기가 10초 아래로 1분 이어지면 열리고, 확인 호출은 나가지 않는다 … , PromQL의 `path="direct"`를 본다. … 의 예상 대기를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-channel-limit.int.test.ts, services/payment-svc/test-int/payment-entry-pause-j… |
@@ -100,8 +100,8 @@
 | P-T49 | ② | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ② 홀드는 201, 주문은 다시 403 | 자동 시험 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts |
 | P-T49 | ③ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ③ 받는다(막지 않는다) | ID만 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int… |
 | P-T49 | ④ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ④ 201 Order | 자동 시험 | A | 시험: services/purchase-svc/test-int/booking-restrictions.int.test.ts, services/purchase-svc/test-int/orders-e2e.int.test… |
-| P-T49 | ⑤ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ⑤ 10분 [가정] 안에 사본이 다시 서고 그 뒤 주문이 403이다 | 다른 단계 | A | GAT-310 · `SetBookingRestriction`을 받는 쪽이 생기는 GAT-310 뒤에 본다(시범 범위 표의 끝 문단) |
-| P-T49 | ⑥ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ⑥ `PERMISSION_DENIED` | 다른 단계 | A | GAT-310 · `SetBookingRestriction`을 받는 쪽이 생기는 GAT-310 뒤에 본다(시범 범위 표의 끝 문단) |
+| P-T49 | ⑤ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ⑤ 10분 [가정] 안에 사본이 다시 서고 그 뒤 주문이 403이다 | ID만 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int… |
+| P-T49 | ⑥ | 예매 제한의 주문 생성 집행(소유자 결정 2026-10-30… | ⑥ `PERMISSION_DENIED` | ID만 | A | 시험: services/payment-svc/test-int/purchase-path-e2e.int.test.ts, services/purchase-svc/test-int/booking-restrictions.int… |
 | P-T50 | ① | 결제 수단 연결값(추천 적용 2026-10-31, ADR-0171… | ① A·B의 승인 사건에 같은 `paymentMethodRef`와 6자리 `cardBin`이 실린다 … 과 원장·로그·사건의 0건)은… | ID만 | A | 시험: packages/contracts/test/generated-schemas.test.ts, services/payment-svc/test-int/payment-method-ref.int.test.ts 외 8곳 |
 | P-T50 | ② | 결제 수단 연결값(추천 적용 2026-10-31, ADR-0171… | ② `paymentMethodRef`가 다르다 … 과 원장·로그·사건의 0건)은 `test-int/payment-method-ref.int.test.ts`가… | ID만 | A | 시험: packages/contracts/test/generated-schemas.test.ts, services/payment-svc/test-int/payment-method-ref.int.test.ts 외 8곳 |
 | P-T50 | ③ | 결제 수단 연결값(추천 적용 2026-10-31, ADR-0171… | ③ 두 칸이 없다 … 과 원장·로그·사건의 0건)은 `test-int/payment-method-ref.int.test.ts`가 돈다. | ID만 | A | 시험: packages/contracts/test/generated-schemas.test.ts, services/payment-svc/test-int/payment-method-ref.int.test.ts 외 8곳 |

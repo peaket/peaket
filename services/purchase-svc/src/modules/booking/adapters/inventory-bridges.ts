@@ -77,7 +77,9 @@ export class InventoryOrderSessions implements OrderSessions {
   async get(sessionId: string): Promise<OrderSessionView | undefined> {
     try {
       const s = await this.source.sessions.get(sessionId);
-      return s ? { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId } : undefined;
+      return s
+        ? { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId, ...(s.priorityGrantId !== undefined ? { priorityGrantId: s.priorityGrantId } : {}) }
+        : undefined;
     } catch (e) {
       throw seatStoreErrorOf(e);
     }

@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 58 | 20 | 0 | 0 | 0 | 5 | 0 | 17 | 16 | 116 |
-| 합계 | 58 | 20 | 0 | 0 | 0 | 5 | 0 | 17 | 16 | 116 |
+| B | 62 | 21 | 0 | 0 | 0 | 0 | 0 | 16 | 17 | 116 |
+| 합계 | 62 | 21 | 0 | 0 | 0 | 0 | 0 | 16 | 17 | 116 |
 
 ## docs/security/asvs/catalog-review.md
 
@@ -30,7 +30,7 @@
 | v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-1.3.7 | — | L2 | 신뢰하지 않는 입력으로 템플릿을 만들지 않아 템플릿 주입을 막고, 불가피하면 템플릿에 넣는 신뢰하지 않는 입력을 정화하거나 엄격히 검증한다. | 빈칸 | B | 영역: apps/web |
 | v5.0.0-1.3.8 | — | L2 | JNDI 조회에 넣기 전에 입력을 정화하고 JNDI를 안전하게 설정한다. | 해당 없음 | B | 해당 없음(JNDI 미사용) |
-| v5.0.0-1.3.9 | — | L2 | memcache로 보내기 전에 내용을 정화한다. | 해당 없음 | B | — · memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
+| v5.0.0-1.3.9 | — | L2 | memcache로 보내기 전에 내용을 정화한다. | 해당 없음 | B | 해당 없음(memcache 미사용. 자동완성은 서버 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다. 입력을 키로 쓰던 `cat:suggest`는 없앴다(ADR-0094, docs/data.md… |
 | v5.0.0-1.3.10 | — | L2 | 예상과 다르거나 악의적으로 해석될 수 있는 형식 문자열은 처리 전에 정화한다. | 자동 시험 | B | 시험: apps/web/src/shared/i18n/catalog.test.mjs |
 | v5.0.0-1.3.11 | — | L2 | 메일 시스템에 넘기기 전에 사용자 입력을 정화해 SMTP·IMAP 주입을 막는다. | 빈칸 | B | 영역: services/core-svc |
 | v5.0.0-1.4.1 | — | L2 | 메모리 안전한 문자열·메모리 복사·포인터 연산으로 스택·버퍼·힙 오버플로를 찾아내거나 막는다. | 해당 없음 | B | 해당 없음(애플리케이션 코드는 메모리 관리 언어(TypeScript)다. 네이티브 의존성인 이미지 처리 라이브러리(libvips를 감싼 Node 네이티브 애드온 sharp)는 DB 자격 증명이 없는 이미지 처리… |
@@ -48,7 +48,7 @@
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/internal-sale-config.int.test.ts, services/core-svc/test-int/production-image.int.test.ts… |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test/review.test.ts |
 | v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 해당 없음 | B | 해당 없음(이 범위에 한정 수량 자원이 없다. 좌석은 seat-hold에서 다루고, 회차당 후기 하나는 2.3.2의 유일 인덱스로 지킨다) |
-| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 다른 단계 | B | BAT-165 heavy gate · 검색·자동완성 IP별 레이트 리밋과 검색 전용 연결 묶음(파드마다 10개 [가정])은 gw-fan·CDN·배포 설정 몫이다. 1차 검색은 공개 읽기와 쪽 상한만 둔다 (이름을… |
+| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test/review.http.test.ts, services/core-svc/test/wish.http.test.ts |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -98,20 +98,20 @@
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts |
-| v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 해당 없음 | B | — · 검색어를 외부 분석·추적 도구로 보내지 않는다. 1차 검색은 응답을 만들 뿐 외부 호출이 없다 |
+| v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/telemetry.test.ts, services/payment-svc/test/portone-gateway.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: services/identity-svc/test-int/fan-account.int.test.ts, services/identity-svc/test/fan-account-http.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
-| v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 다른 단계 | B | BAT-165 후속 · 검색·자동완성 접근 로그와 `search_query` 정규 로그 줄은 로그 목록을 붙이는 후속 배치 몫이다. 1차는 검색어를 로그에 남기지 않는다 (이름을 단 시험도 있다) |
+| v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts |
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 다른 단계 | B | BAT-165 후속 · 검색어를 로그에 남기지 않으므로 가리기 규칙을 아직 쓰지 않는다. 로그를 붙일 때 정규화·50자·계정 비연결 규칙을 함께 넣는다 (이름을 단 시험도 있다) |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.ts 외… |
-| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 다른 단계 | B | BAT-165 heavy gate · 검색·자동완성 레이트 리밋 초과와 검색 전용 연결 묶음 포화(503) 기록은 게이트웨이·검색 연결 묶음 배포 몫이다 (이름을 단 시험도 있다) |
+| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.ts 외… |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/redis.test.ts, packages/platform/test/request-log.test.ts 외 54곳 (영역:… |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-recheck.test.ts |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
@@ -122,7 +122,7 @@
 | v5.0.0-1.3.12 | — | L3 | 정규식에 지수 역추적을 일으키는 요소가 없게 하고 신뢰하지 않는 입력을 정화해 ReDoS를 막는다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts |
 | v5.0.0-3.4.8 | — | L3 | 문서를 그리는 응답에 COOP `same-origin`이나 `same-origin-allow-popups`를 둔다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/web) |
 | v5.0.0-5.2.6 | — | L3 | 최대 화소보다 큰 이미지를 거절해 픽셀 폭주 공격을 막는다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
-| v5.0.0-14.2.5 | — | L3 | 캐시는 기대한 콘텐츠 형식이고 민감·동적 내용이 없는 응답만 저장하며, 없는 파일에 다른 유효 파일을 돌려주지 않는다(웹 캐시 기만 방지). | 다른 단계 | B | BAT-165 heavy gate · CDN 캐시 정책 경로 표와 없는 파일 404는 게이트웨이·CDN 배포 설정 몫이다. 검색 응답은 Cache-Control을 단다 |
+| v5.0.0-14.2.5 | — | L3 | 캐시는 기대한 콘텐츠 형식이고 민감·동적 내용이 없는 응답만 저장하며, 없는 파일에 다른 유효 파일을 돌려주지 않는다(웹 캐시 기만 방지). | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |
 | v5.0.0-14.2.6 | — | L3 | 기능에 필요한 최소한의 민감 데이터만 돌려주고, 전체가 필요하면 사용자가 일부러 볼 때가 아니면 화면에서 가린다. | ID만 | B | 다른 곳 시험: apps/console-host/src/entities/fraud-case/model.test.mjs, services/invariant-checker/test-int/invariants.int.te… |
 | v5.0.0-14.2.7 | — | L3 | 민감 정보에 보존 등급을 매기고, 쓸모없어진 데이터를 정한 일정이나 상황에 따라 자동으로 지운다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | v5.0.0-14.2.8 | — | L3 | 사용자가 올린 파일의 메타데이터에서 민감 정보를 지운다. | 빈칸 | B | 영역: apps/partner, apps/web, services/core-svc |

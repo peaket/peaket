@@ -179,15 +179,19 @@ export class ManageHolds {
   }
 
   /** 주문 커밋 뒤 표시. 표시가 실패해도 주문은 그대로다(그 홀드가 멈추지 않을 뿐이다). 실패면 false */
-  async markOrdered(e: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; deadline?: Deadline }): Promise<boolean> {
+  async markOrdered(e: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; maxStayMs?: number; deadline?: Deadline }): Promise<boolean> {
     try {
-      const session = await this.d.sessions.read(e.sessionId);
+      // 우선 구매 보류는 구매 세션이 없다(sessionId ''). maxStayMs(권리 만료)를 받은 경우에만 세션 읽기를 건너뛴다
+      const session = e.maxStayMs === undefined ? await this.d.sessions.read(e.sessionId) : undefined;
       const config = await this.d.seatMap.config(e.eventId);
-      if (!session || !config) return false;
+      if ((e.maxStayMs === undefined && !session) || !config) return false;
       const refs = await this.d.seatMap.resolve(e.eventId, e.seatIds);
       if (refs.some((r) => r === undefined)) return false;
       const t: HoldTarget = { eventId: e.eventId, holdId: e.holdId, accountId: e.accountId, purchaseSessionId: e.sessionId, seats: refs as SeatRef[] };
-      return (await this.d.lifecycle.markOrdered(t, session.maxStayUntilMs, config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS, this.#call(e.deadline))).kind === 'OK';
+      const maxStayMs = e.maxStayMs ?? session!.maxStayUntilMs;
+      // 우선 구매 보류는 판매 종료 뒤에도 주문하므로, 주문 표시 키 수명이 권리 만료보다 짧아 바로 지워지지 않게 한다
+      const keepUntilMs = Math.max(config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS, maxStayMs);
+      return (await this.d.lifecycle.markOrdered(t, maxStayMs, keepUntilMs, this.#call(e.deadline))).kind === 'OK';
     } catch (err) {
       this.d.logger?.warn({ eventId: e.eventId, errorName: err instanceof Error ? err.name : typeof err }, '주문 표시 실패');
       return false;

@@ -156,6 +156,7 @@ export type ProblemType =
   | 'precondition-failed'
   | 'precondition-required'
   | 'preverify-invalid'
+  | 'priority-grant-in-use'
   | 'priority-grant-not-found'
   | 'priority-seat-only'
   | 'product-fulfillment-invalid'
@@ -428,6 +429,7 @@ export const PROBLEM_TYPES = {
   'precondition-failed': { status: 412, title: "다른 사람이 먼저 고쳤습니다" },
   'precondition-required': { status: 428, title: "고칠 판(If-Match)을 보내 주세요" },
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
+  'priority-grant-in-use': { status: 409, title: "지금 쓸 수 없는 우선 구매 권리입니다" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
   'priority-seat-only': { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" },
   'product-fulfillment-invalid': { status: 422, title: "수령 방식이 맞지 않습니다" },

@@ -50,6 +50,24 @@ export interface NewOrder {
   readonly holdId: string;
   /** 주문을 만든 구매 세션 ID(입장 토큰 jti, purchase_order.purchase_session_id). created.purchaseSessionId와 같은 값을 준다(PRF-161) */
   readonly purchaseSessionId: string;
+  /** 우선 구매 보류에서 만든 주문이면 그 권리 ID. 같은 트랜잭션에서 priority_grant.active_order_id를 적는다(GAT-135) */
+  readonly priorityGrantId?: string;
+}
+
+/** 우선 구매 권리 읽기(주문 생성이 권리 가격·상태를 본다). 우선 모듈의 저장소가 구현한다 */
+export interface PriorityGrantView {
+  readonly grantId: string;
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly seatId: string;
+  readonly price: number;
+  readonly status: 'OFFERED' | 'USED' | 'EXPIRED' | 'WITHDRAWN';
+  readonly expiresAtMs: number;
+  readonly activeOrderId?: string;
+}
+
+export interface PriorityGrants {
+  find(grantId: string): Promise<PriorityGrantView | undefined>;
 }
 
 export interface TransitionInput {
@@ -159,6 +177,8 @@ export interface OrderSessionView {
   readonly eventId: string;
   /** 여정 ID(UUIDv7, 입장 토큰 jny). CREATED 사건의 journeyId */
   readonly journeyId: string;
+  /** 우선 구매 입장의 권리 ID(입장 토큰 prio). 일반 입장이면 없다 */
+  readonly priorityGrantId?: string;
 }
 
 /** 구매 세션 읽기와 Paying 표시(운영은 inventory의 StoredPurchaseSessions.get·RedisPurchaseSessionStore.setPaying을 잇는다) */
@@ -193,6 +213,10 @@ export interface OrderHoldQuery {
   readonly accountId: string;
   /** 본문 holdId(모양은 보지 않은 글 그대로) */
   readonly holdId: string;
+  /** 우선 구매 입장의 권리 ID. 있으면 구매 세션 홀드 목록 대신 그 권리의 보류 좌석을 본다(GAT-135) */
+  readonly priorityGrantId?: string;
+  /** 우선 구매 보류 좌석 ID(priority_grant.seat_id). priorityGrantId가 있을 때만 */
+  readonly prioritySeatId?: string;
   /** 주문 항목의 좌석 ID(만료 판정의 '홀드 남음' 확인 OrderExpiryInventory.holdRemains만 쓴다. 주문 생성의 check는 세션의 홀드 목록에서 읽으므로 쓰지 않는다, BUILD_ORDER PRF-172) */
   readonly seatIds?: readonly string[];
 }
@@ -203,7 +227,7 @@ export type OrderHoldCheck =
    * heldAtMs: 홀드를 잡은 시각(홀드 Hash heldAt, 좌석마다 같다). seats: 구매 세션에 기록한 좌석 차례(좌석 ID 오름차순).
    * limit: 홀드 때 쓴 1인 한도(판매 정책 규칙 결과, BAT-051). 옛 홀드처럼 칸이 없으면 undefined다
    */
-  | { readonly status: 'OK'; readonly heldAtMs: number; readonly seats: readonly HeldSeat[]; readonly limit?: number }
+  | { readonly status: 'OK'; readonly heldAtMs: number; readonly seats: readonly HeldSeat[]; readonly limit?: number; readonly kind?: 'FAN' | 'PRIORITY'; readonly priorityGrantId?: string }
   /** 목록에 없음·남의 것·다른 회차·끝난 것을 가리지 않는다(404 not-found, 판매 종료 뒤면 410 sale-ended) */
   | { readonly status: 'NOT_FOUND' }
   /** 좌석 Redis 일시 장애·메모리 부족, 그 회차 좌석 저장소가 준비되지 않음(세대 키 없음), 좌석맵 판 없음(503 seat-store-unavailable) */
@@ -316,7 +340,11 @@ export type OrderCreateOutcome =
 /** 주문 쓰기(운영은 adapters/db/drizzle-order-writes.ts: purchase DB 트랜잭션 하나에 IdempotencyStore.run과 DrizzleOrderStore.createOrder를 묶는다) */
 /** 주문 뒤 표시와 예매 제한 해제(BUILD_ORDER HOT-070, 운영은 inventory ManageHolds). 던지지 않는다 */
 export interface OrderHoldMarks {
-  markOrdered(q: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; deadline?: HoldMarkDeadline }): Promise<boolean>;
+  /**
+   * 주문 뒤 표시. 우선 구매 보류는 구매 세션이 없으므로 sessionId ''과 maxStayMs(권리 만료)로 부른다(GAT-135).
+   * maxStayMs가 있으면 세션 읽기 없이 그 값을 쓴다.
+   */
+  markOrdered(q: { eventId: string; accountId: string; sessionId: string; holdId: string; seatIds: readonly string[]; maxStayMs?: number; deadline?: HoldMarkDeadline }): Promise<boolean>;
   releaseSession(q: { eventId: string; accountId: string; sessionId: string }): Promise<void>;
 }
 

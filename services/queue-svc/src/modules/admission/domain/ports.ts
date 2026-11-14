@@ -1,5 +1,6 @@
 // 입장 확정 컨텍스트의 포트: 입장 저장소(대기열 Redis), 우선 구매 권리 사본, 입장 토큰 서명, 지표.
 import type { AdmitResult, Claim, LobbySeat, Precheck } from './admission.js';
+import type { BookingRestrictionCopy } from './booking-restriction.js';
 import type { PriorityGrantCopy, PriorityGrantSetInput } from './priority-grant.js';
 
 export const ADMISSION_STORE = Symbol('queue.AdmissionStore');
@@ -57,6 +58,12 @@ export interface PriorityGrantStore {
   set(i: PriorityGrantSetInput): Promise<{ changed: boolean }>;
   /** 그 계정·회차의 사본. 권리 ID가 다르거나 망가졌으면 undefined */
   get(i: { accountId: string; eventId: string; grantId: string }): Promise<PriorityGrantCopy | undefined>;
+}
+
+export const BOOKING_RESTRICTIONS = Symbol('queue.BookingRestrictions');
+/** 예매 제한 사본(`q:rst:{account}`). 입장 확정이 ACTIVE이고 끝 전이면 403 booking-restricted로 막는다 */
+export interface BookingRestrictions {
+  read(accountId: string): Promise<BookingRestrictionCopy | undefined>;
 }
 
 /** 입장 확정 규칙 값(조립에서 바꿀 수 있다. 시험은 기본값과 다른 값으로도 돈다) */

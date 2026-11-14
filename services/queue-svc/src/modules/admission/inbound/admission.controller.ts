@@ -28,6 +28,7 @@ const PROBLEM: Record<AdmissionError['code'], { status: number; type: string; ti
   NOT_FOUND: { status: 404, type: 'queue-not-found', title: '이 회차의 대기열이 열리지 않았습니다' },
   TICKET_INVALID: { status: 403, type: 'queue-ticket-invalid', title: '대기표를 확인할 수 없습니다' },
   PRIORITY_GRANT_NOT_FOUND: { status: 404, type: 'priority-grant-not-found', title: '쓸 수 있는 우선 구매 권리가 없습니다' },
+  BOOKING_RESTRICTED: { status: 403, type: 'booking-restricted', title: '예매가 제한된 계정입니다' },
   IDENTITY_VERIFICATION_REQUIRED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
   DUPLICATE_ADMISSION: { status: 409, type: 'duplicate-admission', title: '이미 다른 기기나 탭에서 입장했습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },

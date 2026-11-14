@@ -508,6 +508,8 @@ export type {
   PaymentResultWriteOutcome,
   PaymentResultWrites,
   PaymentDepositReader,
+  PriorityGrants,
+  PriorityGrantView,
   PaymentStatusReads,
   PaymentStatusSignals,
   PaymentStatusWaiters,

@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 80 | 13 | 15 | 2 | 0 | 21 | 1 | 0 | 0 | 132 |
+| A | 84 | 16 | 15 | 2 | 0 | 14 | 1 | 0 | 0 | 132 |
 | B | 86 | 30 | 0 | 0 | 0 | 3 | 0 | 15 | 22 | 156 |
-| 합계 | 166 | 43 | 15 | 2 | 0 | 24 | 1 | 15 | 22 | 288 |
+| 합계 | 170 | 46 | 15 | 2 | 0 | 17 | 1 | 15 | 22 | 288 |
 
 ## docs/features/seat-hold.md
 
@@ -120,13 +120,13 @@
 | S-T36 | ④ | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ④ 신호가 0건이다 | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |
 | S-T36 | ⑤ | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ⑤ 홀드는 정상 응답이고 버린 신호가 `telemetry_dropped_total`로 세어진다 | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |
 | S-T36 | ⑥ | 좌석 화면 행동 요약(추천 적용 2026-10-31, ADR-0171… | ⑥ 홀드 p99가 50ms 이하다. `trust-reassess`의 원시 적재와 분석 저장소에 screen `SEAT` 신호가 0건이다 | ID만 | A | 시험: services/purchase-svc/test/seat-behavior.test.ts |
-| S-T37 | ① | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ① 같은 좌석이 PRIORITY로 잡히고 비트가 켜지며 7분 만료 인덱스에 없다 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ② | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ② 같은 등급 좌석 하나가 잡힌다 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ③ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ③ `NO_SEAT`이고 아무것도 잡히지 않는다 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ④ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ④ 판매 종료 뒤인데도 홀드·주문이 되고 금액은 원래 가격, 다른 팬은 409 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ⑤ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑤ 실패 뒤 권리는 OFFERED 그대로이고 좌석이 PRIORITY로 돌아가며, 다시 사서 결제를 마치면 USED | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ⑥ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑥ 409 `priority-seat-only` | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
-| S-T37 | ⑦ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑦ 좌석이 풀리고 권리는 EXPIRED, 보상 건은 생기지 않는다 | 다른 단계 | A | GAT-135 · 우선 구매 보류 |
+| S-T37 | ① | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ① 같은 좌석이 PRIORITY로 잡히고 비트가 켜지며 7분 만료 인덱스에 없다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/priority-hold.int.test.ts, services/purchase-svc/test/priority-grant.test.ts |
+| S-T37 | ② | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ② 같은 등급 좌석 하나가 잡힌다 | 자동 시험 | A | 시험: services/purchase-svc/test/priority-grant.test.ts |
+| S-T37 | ③ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ③ `NO_SEAT`이고 아무것도 잡히지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/priority-grant.test.ts |
+| S-T37 | ④ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ④ 판매 종료 뒤인데도 홀드·주문이 되고 금액은 원래 가격, 다른 팬은 409 | 자동 시험 | A | 시험: services/purchase-svc/test-int/priority-hold.int.test.ts, services/purchase-svc/test/create-order.test.ts |
+| S-T37 | ⑤ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑤ 실패 뒤 권리는 OFFERED 그대로이고 좌석이 PRIORITY로 돌아가며, 다시 사서 결제를 마치면 USED | ID만 | A | 시험: services/purchase-svc/test-int/priority-hold.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 1곳 |
+| S-T37 | ⑥ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑥ 409 `priority-seat-only` | ID만 | A | 시험: services/purchase-svc/test-int/priority-hold.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 1곳 |
+| S-T37 | ⑦ | 우선 구매 보류(추천 적용 2026-10-31, ADR-0171, §5… | ⑦ 좌석이 풀리고 권리는 EXPIRED, 보상 건은 생기지 않는다 | ID만 | A | 시험: services/purchase-svc/test-int/priority-hold.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 1곳 |
 | S-T38 | ① | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ① 모두 422 `seatmap-invalid`(`INDEX_MISMATCH`)이고 판이 오르지 않고 파일이 0개다 | 자동 시험 | A | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 |
 | S-T38 | ② | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ② 판 1이 되고 세 회차 모두 같은 `venue_id`를 가지며, 회차마다 `seatmap-layouts/1.json`이 하나씩 생기고(승인 이력이 있는… | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 2곳 |
 | S-T38 | ③ | 배치본 저장과 팬 좌석맵 파일(추천 적용 2026-11-10, §10… | ③ 412·428이고, 동시 둘은 하나만 200이며 진 쪽이 잡은 판 번호는 다음 저장에도 쓰이지 않고 이긴 판의 파일 바이트가 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-save.int.test.ts |

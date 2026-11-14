@@ -19,6 +19,8 @@ import {
   type HoldInput,
   type HoldResult,
   KEY_PART,
+  type PriorityHoldInput,
+  type PriorityHoldResult,
   REHOLD_WAIT_MS,
   type ReplayInput,
   type ReplayResult,
@@ -45,12 +47,14 @@ import { SNAPSHOT_LUA } from './snapshot-lua.js';
 import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
+import { PRIORITY_HOLD_LUA } from './priority-hold-lua.js';
 import { AUTO_HOLD_LUA } from './auto-hold-lua.js';
 import { PIN_LUA, RELEASE_FAILED_LUA } from './pin-lua.js';
 import { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './rebuild-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
+const PRIORITY_HOLD = redisScript(PRIORITY_HOLD_LUA);
 const AUTO_HOLD = redisScript(AUTO_HOLD_LUA);
 const SNAPSHOT = redisScript(SNAPSHOT_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
@@ -174,6 +178,8 @@ export const seatKeys = {
   /** 좌석 색인 하나의 홀드 Hash */
   hold: (e: string, index: number) => `s:{event:${e}}:hold:${index}`,
   expiry: (e: string) => `s:{event:${e}}:expiry`,
+  /** 우선 구매 보류 만료 인덱스(멤버 = 좌석 색인, 점수 = exp ms, GAT-135) */
+  prio: (e: string) => `s:{event:${e}}:prio`,
   quota: (e: string, account: string) => `s:{event:${e}}:quota:${account}`,
   stream: (e: string) => `s:{event:${e}}:stream`,
   /** 홀드 멱등 기록(계정 × 키) */
@@ -305,6 +311,36 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       default:
         throw new Error(`홀드 Lua가 모르는 값을 돌려줬다: ${kind}`);
     }
+  }
+
+  /** 우선 구매 보류 하나(GAT-135, 계약은 adapters/priority-hold-lua.ts). 구매 세션·1인 한도·멱등 기록을 쓰지 않는다 */
+  async holdPriority(i: PriorityHoldInput, o?: SeatCallOptions): Promise<PriorityHoldResult> {
+    if (!KEY_PART.test(i.eventId) || i.accountId.length === 0 || !KEY_PART.test(i.grantId)) return { kind: 'NOT_READY' };
+    if (i.expiresAtMs <= 0 || i.keepUntilMs <= 0) return { kind: 'EXPIRED' };
+    const e = i.eventId;
+    const keys = [seatKeys.bitmap(e), seatKeys.prio(e), seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.fence(e), seatKeys.hold(e, i.seat.index)];
+    const args = [
+      i.accountId,
+      i.grantId,
+      String(i.keepUntilMs),
+      String(i.expiresAtMs),
+      String(i.seat.index),
+      String(i.seat.sectionIndex),
+      String(i.seat.seatOffset),
+      i.seat.seatId,
+      i.seat.tierId,
+      i.seat.sectionId,
+      seatKeys.section(e, ''),
+    ];
+    const r = (await guard(this.redis.evalScript(PRIORITY_HOLD, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`우선 구매 보류 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY' || kind === 'EXPIRED') return { kind };
+    if (kind === 'CONFLICT') return { kind, seatId: i.seat.seatId };
+    if (kind === 'OK') {
+      return { kind, seatId: i.seat.seatId, fencingToken: fencingTokenOf(r[1]), heldAtMs: int(r[2], '잡은 시각'), expiresAtMs: int(r[3], '만료 시각') };
+    }
+    throw new Error(`우선 구매 보류 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
   /**

@@ -2,7 +2,8 @@
 import { SEAT_ID_PATTERN, type SeatRef } from '../domain/hold.js';
 import { type AutoCandidateList, type AutoCondition, autoCandidatesOf, autoFingerprint } from '../domain/auto.js';
 import type { SectionRange } from '../domain/seat-layout.js';
-import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
+import type { EventSeatConfig, SeatMap, SeatMapAuto, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
+import type { SaleLayout } from '../domain/sale-state.js';
 
 /** 좌석맵 판의 좌석 하나. saleExcluded면 그 판에 있어도 고를 수 없다(resolve가 undefined) */
 export interface MemorySeatDef extends SeatRef {
@@ -27,7 +28,7 @@ const isNonNegativeInt = (v: unknown): v is number => Number.isSafeInteger(v) &&
 const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId, ...(s.label !== undefined ? { label: s.label } : {}), ...(s.wheelchair === true ? { wheelchair: true } : {}) });
 
 /** SeatMap·SeatMapIndex의 메모리 구현. 시험이 put으로 회차를 넣는다 */
-export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapAuto {
+export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers, SeatMapAuto {
   readonly #events = new Map<string, EventEntry>();
 
   /**
@@ -64,6 +65,20 @@ export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
     }
     const sections = [...ranges.values()].sort((a, b) => a.sectionIndex - b.sectionIndex);
     this.#events.set(config.eventId, { config: { ...config }, seats: usable, byIndex: all, sections });
+  }
+
+  /** SeatMapTiers.saleLayout: put에 넣은 판매 대상 좌석을 등급별 색인으로 모은다(등급 ID 문자 코드 순, 색인 오름차순) */
+  async saleLayout(eventId: string): Promise<SaleLayout | undefined> {
+    const e = this.#events.get(eventId);
+    if (!e) return undefined;
+    const byTier = new Map<string, number[]>();
+    for (const s of e.seats.values()) {
+      const list = byTier.get(s.tierId) ?? [];
+      list.push(s.index);
+      byTier.set(s.tierId, list);
+    }
+    const tiers = [...byTier.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([tierId, indexes]) => ({ tierId, indexes: indexes.sort((a, b) => a - b) }));
+    return { sellableSeats: tiers.reduce((n, t) => n + t.indexes.length, 0), tiers };
   }
 
   /** 넣은 회차 설정의 사본(없으면 undefined) */

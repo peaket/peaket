@@ -2,6 +2,7 @@
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import type { HotPathMetrics, HotRedis } from '@peaket/platform';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
+import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { RefundModule, type RefundModuleDeps } from './modules/refund/index.js';
 import {
   type AdmissionOptions,
@@ -56,6 +57,8 @@ export class AppModule implements NestModule {
       booking?: BookingModuleDeps;
       /** 예매 취소 견적·취소(GAT-070·GAT-080). 넘기면 취소 경로를 연다 */
       refund?: RefundModuleDeps;
+      /** 우선 구매 권리 발급·회수(GAT-135). 운영은 purchase DB와 좌석 Redis가 있을 때만 넘긴다 */
+      priority?: PriorityModuleDeps;
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
     },
@@ -89,6 +92,9 @@ export class AppModule implements NestModule {
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.hotPath ? { hotPath: o.hotPath } : {}),
           });
-    return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : [])] };
+    return {
+      module: AppModule,
+      imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : []), ...(o.priority ? [PriorityModule.register(o.priority)] : [])],
+    };
   }
 }

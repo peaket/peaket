@@ -11,7 +11,8 @@ import { CLOCK, type Clock } from '@peaket/platform';
 import { candidateEligibilityLists, type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS, TURN_GRACE_MS } from '../domain/admission.js';
 import { priorityGrantUsable } from '../domain/priority-grant.js';
-import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type PriorityGrantStore } from '../domain/ports.js';
+import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from '../domain/ports.js';
+import { bookingRestricted } from '../domain/booking-restriction.js';
 import { AdmissionError } from './admission-error.js';
 
 export const ADMISSION_SCHEDULES = Symbol('queue.AdmissionSchedules');
@@ -51,6 +52,8 @@ export class ConfirmAdmission {
     @Optional() @Inject(ADMISSION_POLICY) policy?: AdmissionPolicy,
     /** 우선 구매 권리 사본(GAT-135). 없으면 priorityGrantId 요청은 404로 닫는다 */
     @Optional() @Inject(PRIORITY_GRANTS) private readonly priorityGrants?: PriorityGrantStore,
+    /** 예매 제한 사본(GAT-310). 없으면 제한 검사를 하지 않는다(시험 대역) */
+    @Optional() @Inject(BOOKING_RESTRICTIONS) private readonly restrictions?: BookingRestrictions,
   ) {
     const g = policy?.turnGraceMs ?? TURN_GRACE_MS;
     if (!Number.isInteger(g) || g <= 0) throw new Error(`입장 확정 유예는 양의 정수(ms)여야 한다: ${g}`);
@@ -60,6 +63,9 @@ export class ConfirmAdmission {
   async run(i: ConfirmInput): Promise<ConfirmResult> {
     const now = this.clock.now();
     const b = i.body;
+    // 예매 제한 사본(GAT-310): ACTIVE이고 끝 시각 전이면 우선 구매 입장도 포함해 입장 자리를 주지 않는다(403 booking-restricted)
+    const restriction = this.restrictions ? await this.restrictions.read(i.accountId) : undefined;
+    if (bookingRestricted(restriction, now)) throw new AdmissionError('BOOKING_RESTRICTED', '예매가 제한된 계정이다');
     // 우선 구매 입장(GAT-135, ADR-0171): 대기 번호·셔플·15분 만료 없이 사본만 보고 새 여정으로 입장한다(판매 종료·매진 뒤에도)
     if (b.priorityGrantId) return this.#priority(i, b.priorityGrantId, now);
     const presented = b.queueTicket ?? b.lobbyToken;

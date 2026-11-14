@@ -5,7 +5,7 @@
 //   같은 홀드의 두 주문은 purchase_order_hold_key 유일 위반(23505)으로 HOLD_ALREADY_ORDERED다(트랜잭션째 되돌려 키 행도 남지 않는다).
 // 주문 상태를 바꾸는 SQL은 쓰지 않는다(상태 SQL은 drizzle-orders.ts에만, test/order-status-sql.test.ts). 여기는 읽기(select)뿐이다.
 import { timingSafeEqual } from 'node:crypto';
-import { type Clock, type Database, type DbTransaction, IDEMPOTENCY_RETENTION_MS, IdempotencyStore } from '@peaket/platform';
+import { type Clock, type Database, type DbTransaction, IDEMPOTENCY_RETENTION_MS, IdempotencyStore, ProblemError } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { OrderItem, OrderStatus } from '../../domain/order.js';
 import type { CommittedOrderLookup, NewOrder, OrderCreateOutcome, OrderRequestOnce, OrderView, OrderWrites, TransactionCallOptions } from '../../domain/ports.js';
@@ -100,6 +100,17 @@ export class DrizzleOrderWrites implements OrderWrites {
           this.#idempotency.run<OrderCreateOutcome>(tx, once, {
             execute: async () => {
               await this.o.store.createOrder(tx, order);
+              // 우선 구매 보류 주문이면 같은 트랜잭션에서 권리에 진행 중 주문을 적는다(한 권리에 하나, GAT-135).
+              // 사전 확인과 이 UPDATE 사이에 다른 주문이 먼저 적었으면 0행이라 주문째 되돌린다(409 priority-grant-in-use)
+              if (order.priorityGrantId !== undefined) {
+                const now = this.o.clock.now();
+                const r = await tx.execute(sql`
+                  update priority_grant set active_order_id = ${order.id}::uuid, updated_at = ${new Date(now)}::timestamptz
+                  where id = ${order.priorityGrantId}::uuid and status = 'OFFERED' and active_order_id is null and expires_at > ${new Date(now)}::timestamptz`);
+                if ((r.rowCount ?? 0) !== 1) {
+                  throw new ProblemError({ type: 'priority-grant-in-use', status: 409, title: '지금 쓸 수 없는 우선 구매 권리입니다', normalBranch: true });
+                }
+              }
               // 방금 넣은 행을 다시 읽지 않고 입력으로 응답 모습을 만든다(줄 번호 = items 차례, 상태 CREATED. 트랜잭션 안 왕복 둘을 줄인다, 리뷰 고침 L7)
               return { resultRef: order.id, value: { status: 'CREATED', order: newOrderViewOf(order) } };
             },

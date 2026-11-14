@@ -142,6 +142,25 @@ export interface ReplayInput {
   fingerprint: string;
 }
 
+/** 우선 구매 보류(GAT-135, docs/features/seat-hold.md §5). 구매 세션 없이 권리 하나가 좌석 하나를 잡는다 */
+export interface PriorityHoldInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly grantId: string;
+  readonly seat: SeatRef;
+  /** 권리 만료 시각(48시간과 입장 시작 가운데 이른 때) */
+  readonly expiresAtMs: number;
+  /** 회차 키의 만료 시각(판매 종료 + 1일). 보류 만료가 더 이르면 그 값을 쓴다 */
+  readonly keepUntilMs: number;
+}
+
+/** SeatStore.holdPriority의 결과. OK가 아니면 아무것도 쓰지 않았다 */
+export type PriorityHoldResult =
+  | { readonly kind: 'OK'; readonly seatId: string; readonly fencingToken: number; readonly heldAtMs: number; readonly expiresAtMs: number }
+  | { readonly kind: 'NOT_READY' }
+  | { readonly kind: 'CONFLICT'; readonly seatId: string }
+  | { readonly kind: 'EXPIRED' };
+
 /**
  * SeatStore.replay의 결과. 같은 계정·같은 키의 살아 있는 기록이 같은 지문이면 처음 응답(IDEM_REPLAY), 다른 지문이면 IDEM_REUSED,
  * 기록이 없거나 수명(7분)이 지났으면 null이다

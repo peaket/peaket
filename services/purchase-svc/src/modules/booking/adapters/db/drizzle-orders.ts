@@ -50,6 +50,8 @@ const ITEM_TEXT_MAX = 64;
 const SEAT_ASSIGNMENTS: ReadonlySet<string> = new Set<SeatAssignment>(['PICK', 'AUTO']);
 
 const T1 = transitionById('T1')!;
+/** 주문이 끝나 우선 구매 권리의 진행 중 주문 표시를 비우는 상태(GAT-135). 결제 실패·만료·환불 뒤 같은 권리로 다시 살 수 있다 */
+const RELEASES_PRIORITY_GRANT: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['EXPIRED', 'FAILED', 'REFUNDED', 'COMPENSATED']);
 const T3 = transitionById('T3')!;
 const T4 = transitionById('T4')!;
 /**
@@ -249,6 +251,11 @@ export class DrizzleOrderStore {
     const order = orderRowOf(changed);
     const seq = order.eventSeq;
     const now = this.o.clock.now();
+    // 우선 구매 주문이 실패·만료·환불로 끝나면 같은 트랜잭션에서 권리의 진행 중 주문 표시를 비운다(GAT-135).
+    // 이 표시가 남으면 기한 안에서 다시 살 수 없다(docs/features/seat-hold.md §5 '우선 구매 보류')
+    if (RELEASES_PRIORITY_GRANT.has(t.to)) {
+      await tx.execute(sql`update priority_grant set active_order_id = null, updated_at = ${new Date(now)}::timestamptz where active_order_id = ${order.id}::uuid`);
+    }
     // ② 돌려받은 번호로 이력 한 행
     await tx.execute(sql`
       insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at)

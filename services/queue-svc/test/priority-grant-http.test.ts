@@ -75,4 +75,17 @@ describe('우선 구매 입장 HTTP [GAT-135, Q-T62]', () => {
     expect((await admit(eventId, { priorityGrantId: grantId, lobbyToken: 'x' })).statusCode).toBe(400);
     expect((await admit(eventId, {})).statusCode).toBe(400);
   });
+
+  test('내부 HTTP POST /internal/v1/priority-grants는 SetPriorityGrant 사본을 판 번호·만료와 함께 쓴다', async () => {
+    const eventId = crypto.randomUUID();
+    await schedules.set(eventId, openSchedule(NOW));
+    const grantId = crypto.randomUUID();
+    const body = { accountId: ACCOUNT, eventId, grantId, state: 'OFFERED', expiresAt: new Date(NOW + 48 * 3600_000).toISOString(), version: 3 };
+    const r = await svc.http.inject({ method: 'POST', url: '/internal/v1/priority-grants', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+    expect(r.statusCode, r.payload).toBe(200);
+    expect(JSON.parse(r.payload)).toEqual({ changed: true });
+    expect(await grants.get({ accountId: ACCOUNT, eventId, grantId })).toMatchObject({ grantId, state: 'OFFERED', version: 3 });
+    const again = await svc.http.inject({ method: 'POST', url: '/internal/v1/priority-grants', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+    expect(JSON.parse(again.payload)).toEqual({ changed: false });
+  });
 });

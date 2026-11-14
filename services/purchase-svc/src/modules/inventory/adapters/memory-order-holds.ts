@@ -59,10 +59,17 @@ export class MemoryOrderHolds implements OrderHoldReader {
   async check(q: OrderHoldQuery, _o?: SeatCallOptions): Promise<OrderHoldCheck> {
     if (!orderHoldQueryShaped(q)) return NOT_FOUND;
     if (this.deps.unavailable?.()) return STORE_UNAVAILABLE;
-    const listed = this.deps.sessions.holdsOf(q.purchaseSessionId)?.get(q.holdId);
-    if (listed === undefined) return NOT_FOUND;
-    // Redis 칸과 같은 글로 이어 같은 규칙으로 나눈다(망가진 목록은 Error)
-    const seatIds = heldSeatIdsOf(listed.join(','));
+    const priority = q.priorityGrantId !== undefined;
+    if (priority && (q.holdId !== q.priorityGrantId || q.prioritySeatId === undefined)) return NOT_FOUND;
+    let seatIds: readonly string[];
+    if (priority) {
+      seatIds = [q.prioritySeatId!];
+    } else {
+      const listed = this.deps.sessions.holdsOf(q.purchaseSessionId)?.get(q.holdId);
+      if (listed === undefined) return NOT_FOUND;
+      // Redis 칸과 같은 글로 이어 같은 규칙으로 나눈다(망가진 목록은 Error)
+      seatIds = heldSeatIdsOf(listed.join(','));
+    }
     if (!(await this.deps.seatMap.config(q.eventId))) return STORE_UNAVAILABLE;
     const refs = await this.deps.seatMap.resolve(q.eventId, seatIds);
     if (refs.some((r) => r === undefined)) return NOT_FOUND;
@@ -75,8 +82,9 @@ export class MemoryOrderHolds implements OrderHoldReader {
     for (const s of seats) {
       const h = ev.holds.get(s.index);
       if (!h) return NOT_FOUND;
-      // 일반 홀드(FAN)만 받는다(우선 구매 PRIORITY 홀드의 주문은 GAT-135). 칸이 없어도 NOT_FOUND
-      if (h.holdId !== q.holdId || h.owner !== q.accountId || h.psid !== q.purchaseSessionId || h.kind !== 'FAN') return NOT_FOUND;
+      // 일반 홀드는 FAN·세션 일치, 우선 구매 보류는 PRIORITY·권리 ID 일치(psid는 빈 글, GAT-135)
+      if (h.holdId !== q.holdId || h.owner !== q.accountId) return NOT_FOUND;
+      if (priority ? h.kind !== 'PRIORITY' || h.priorityGrantId !== q.priorityGrantId : h.psid !== q.purchaseSessionId || h.kind !== 'FAN') return NOT_FOUND;
       if (!isMs(h.heldAt) || !isMs(h.exp)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.hold(q.eventId, s.index)}`);
       if (h.exp <= now) return NOT_FOUND;
       if (h.lim !== undefined && (!Number.isSafeInteger(h.lim) || h.lim < 1)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.hold(q.eventId, s.index)}`);
@@ -87,6 +95,13 @@ export class MemoryOrderHolds implements OrderHoldReader {
         else if (limit !== h.lim) return NOT_FOUND;
       }
     }
-    return { status: 'OK', heldAtMs: heldAt!, seats: seats.map(heldSeatOf), ...(limit !== undefined ? { limit } : {}) };
+    return {
+      status: 'OK',
+      heldAtMs: heldAt!,
+      seats: seats.map(heldSeatOf),
+      ...(limit !== undefined ? { limit } : {}),
+      kind: priority ? 'PRIORITY' : 'FAN',
+      ...(priority ? { priorityGrantId: q.priorityGrantId } : {}),
+    };
   }
 }

@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 95 | 53 | 2 | 0 | 0 | 3 | 0 | 0 | 38 | 191 |
+| A | 99 | 52 | 2 | 0 | 0 | 0 | 0 | 0 | 38 | 191 |
 | B | 35 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 7 | 59 |
-| 합계 | 130 | 65 | 2 | 0 | 0 | 6 | 0 | 2 | 45 | 250 |
+| 합계 | 134 | 64 | 2 | 0 | 0 | 3 | 0 | 2 | 45 | 250 |
 
 ## docs/features/queue-admission.md
 
@@ -64,8 +64,8 @@
 | Q-T36 | ④ | 판매 자격 명단 | ④ 판매 기간 끝 + 1일(파기 시각)이 지난 뒤 첫 정비에 명단(DB 행과 구성원)이 지워지고, 사본에 넘긴 수명이 그 파기 시각이다(1ms 전에는 지우지… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts |
 | Q-T36 | ⑤ | 판매 자격 명단 | ⑤ 잠금 뒤 올리기는 거절되고 명단이 바뀌지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
 | Q-T36 | ⑥ | 판매 자격 명단 | ⑥ 올리기 결과는 반영 수·형식 오류 줄(행 번호)·없는 코드 줄(행 번호)만 싣고, 올린 파일은 어디에도 남지 않으며 감사 기록에는 올린 계정·시각·건수·파일… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts |
-| Q-T36 | ⑦ | 판매 자격 명단 | ⑦ 명단 사본(대기열 Redis `q:{event:E}:elig:{listKey}`)이 그 수명에 지워진다( | 다른 단계 | A | HOT-251 · 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 core-svc 어댑터가 본다(소유자 결정 2026-11-10, OPEN[33] (가), ADR-0261 결정 9). 어댑터는… |
-| Q-T36 | ⑧ | 판매 자격 명단 | ⑧ 화면은 로비 참가·진입의 403 `sale-eligibility-required`를 참가 실패가 아니라 공연 상세의 예매 제한 안내로 돌린다 | 다른 단계 | A | HOT-346 · 로비 참가·진입의 403 `sale-eligibility-required`를 참가 실패가 아니라 공연 상세의 예매 제한 안내로 돌리는 화면 몫이다(apps/web 대기실·공연 상세… |
+| Q-T36 | ⑦ | 판매 자격 명단 | ⑦ 명단 사본(대기열 Redis `q:{event:E}:elig:{listKey}`)이 그 수명에 지워진다( | ID만 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 4곳 |
+| Q-T36 | ⑧ | 판매 자격 명단 | ⑧ 화면은 로비 참가·진입의 403 `sale-eligibility-required`를 참가 실패가 아니라 공연 상세의 예매 제한 안내로 돌린다 | ID만 | A | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 4곳 |
 | Q-T36 | ⑨ | 판매 자격 명단 | ⑨ 창 안인데 그 창 명단의 사본 표지가 없을 때와 자격 설정 칸(`eligGates`·`eligLists`)의 모양이 틀릴 때(창을 모르므로 판매 기간… | 자동 시험 | A | 시험: services/queue-svc/test/eligibility-cases.ts |
 | Q-T37 | — | 대기 화면 진행 막대 | 진행률이 0~100% 안에서 계산식대로 움직이고, 오래된 파일은 버려져 막대가 물러나지 않고 앞 인원도 늘지 않는다. serving이 작은 새 파일은 판매… | 빈칸 | A | — |
 | Q-T38 | ① | 판매 종료와 사전 셔플 공연의 오픈 뒤 진입 | ① 410 없이 모두 1,001번부터 도착 순 번호, 202 BATCHING 없음 | ID만 | A | 시험: services/queue-svc/test/admission-cases.ts |
@@ -103,7 +103,7 @@
 | Q-T46 | — | 도착 지연을 넣은 입장 제어 루프(추천 적용 2026-10-28… | 곧 입장 응답이 입장 확정 요청의 1% [가정] 이하, 곧 입장으로 기다린 시간 p99 5초 [가정] 이하, 바꾸기 전 식보다 입장 수 감소 2% [가정]… | 자동 시험 | A | 시험: services/admission-ctrl/test-sim/admission-loop.sim.test.ts |
 | Q-T47 | — | 입장 임박 구간 반영 지연(추천 적용 2026-10-28… | 차례 반영 지연(serving이 내 번호를 넘은 전진 시각 → 화면에 그린 시각) p99 2.8초 [가정] 이하다(3초에서 CDN 계층 몫 0.2초를 남긴다… | 자동 시험 | A | 시험: services/queue-svc/test-sim/nginx-expiry.sim.test.ts, services/queue-svc/test-sim/reflect.sim.test.ts |
 | Q-T48 | ① | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ① 세 기기 모두 '차단 목록에 있음' 신호가 붙는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
-| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록(기기 가명·이의 건 ID·처리자·시각)이 CS 처리함 건과 판정 기록에 남는다. | 다른 단계 | A | GAT-280 · 지운 기록이 CS 처리함 건에 남는 것은 CS 처리함(SCR-045) 몫이고 ops-svc가 아직 없다. trust-svc 쪽(차단 키 지우기, 보안 로그 줄, 라벨 판정 기록)은 B-T9… |
+| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록(기기 가명·이의 건 ID·처리자·시각)이 CS 처리함 건과 판정 기록에 남는다. | ID만 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ③ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ③ 차단 목록 신호가 붙지 않는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ④ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ④ 남은 두 키가 TTL로 사라진다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ⑤ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ⑤ 차단 목록 신호가 붙은 기기가 0개다(틀린 '있다'가 없다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
@@ -163,10 +163,10 @@
 | Q-T61 | ③ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ③ 위조 값이 기록에 없다 | 빈칸 | A | — |
 | Q-T61 | ④ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ④ 분석 저장소에 원문 IP·JA4·`journeyId`가 0건이다 | 빈칸 | A | — |
 | Q-T61 | ⑤ | 조사용 요청 기록(추천 적용 2026-10-31, ADR-0171… | ⑤ 진입 p99가 수집기를 켜기 전과 같은 범위이고, 수집기 버린 줄 수를 적는다 | 빈칸 | A | — |
-| Q-T62 | ① | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ① 200 ADMITTED와 클레임 `prio`·새 `jny`가 든 입장 토큰, 입장 자리 수는 그대로 | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
-| Q-T62 | ② | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ② 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
-| Q-T62 | ③ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ③ 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
-| Q-T62 | ④ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ④ 모두 같은 404 `priority-grant-not-found` | ID만 | A | 시험: services/queue-svc/test/priority-grant-http.test.ts, services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ① | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ① 200 ADMITTED와 클레임 `prio`·새 `jny`가 든 입장 토큰, 입장 자리 수는 그대로 | 자동 시험 | A | 시험: services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ② | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ② 모두 같은 404 `priority-grant-not-found` | 자동 시험 | A | 시험: services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ③ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ③ 모두 같은 404 `priority-grant-not-found` | 자동 시험 | A | 시험: services/queue-svc/test/priority-grant.test.ts |
+| Q-T62 | ④ | 우선 구매 입장(추천 적용 2026-10-31, ADR-0171… | ④ 모두 같은 404 `priority-grant-not-found` | 자동 시험 | A | 시험: services/queue-svc/test/priority-grant.test.ts |
 | Q-T63 | ① | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ① 엣지 켬이 `notice`의 `SOLD_OUT` 쓰기보다 먼저다(Q-T54 ①의 차례) | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts |
 | Q-T63 | ② | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ② 끔이 판 번호와 함께 남는다(판매 종료도 끔) | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts |
 | Q-T63 | ③ | 엣지 매진 표시 켜고 끄기(추천 적용 2026-11-06… | ③ 저장된 판보다 작은 판은 엣지를 바꾸지 않고, `notice`의 지금 판으로 되돌린다. 같은 판의 다시 내기는 60초 [가정] 안에는 다시 쓰지 않는다… | 자동 시험 | A | 시험: services/queue-svc/test/edge-sale-flags.test.ts, services/queue-svc/test/sale-state-cases.ts |

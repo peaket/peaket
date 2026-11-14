@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 223 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 89 | 380 |
-| 합계 | 223 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 89 | 380 |
+| B | 223 | 55 | 0 | 0 | 0 | 6 | 0 | 7 | 89 | 380 |
+| 합계 | 223 | 55 | 0 | 0 | 0 | 6 | 0 | 7 | 89 | 380 |
 
 ## docs/features/identity.md
 
@@ -116,7 +116,7 @@
 | I-T56 | ② | 본인확인 재통과 확인(`CheckReverification`, 추천… | ②은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
 | I-T56 | ③ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ③은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
 | I-T56 | ④ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ④는 queue-svc가 추가 검증 제출에 503을 돌려주고 통과로 보지 않는다. … 에서 떼어 냄은 추천 적용 2026-11-10, BUILD_ORDER… | 자동 시험 | B | 시험: services/queue-svc/test/verification-cases.ts, services/queue-svc/test/verification-clients.test.ts |
-| I-T56 | ⑤ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ⑤는 거부된다(메시 L7 허용 목록 몫, | 다른 단계 | B | HOT-400 · `CheckReverification`을 queue-svc 신원으로만 받는 것은 메시 L7 허용 목록이다(BAT-200에서 정함, 2026-11-10) |
+| I-T56 | ⑤ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ⑤는 거부된다(메시 L7 허용 목록 몫, | ID만 | B | 시험: services/identity-svc/test-int/main-reverification.int.test.ts, services/identity-svc/test-int/reverification-check… |
 | I-T57 | ① | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ①은 승인 화면에 기기 이름이 보이고 토큰이 나온다. | 빈칸 | B | — |
 | I-T57 | ② | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ②는 토큰 발급이 거부된다(캐시하지 않는다). | 빈칸 | B | — |
 | I-T57 | ③ | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ③은 503이고 기기를 승인하지 않는다 | 빈칸 | B | — |

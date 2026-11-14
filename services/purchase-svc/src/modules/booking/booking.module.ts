@@ -26,6 +26,7 @@ import type {
   PaymentDepositReader,
   PaymentStatusReads,
   PaymentStatusWaiters,
+  PriorityGrants,
   SaleConfigs,
   SeatSlotReads,
   StartPaymentLog,
@@ -52,6 +53,8 @@ export interface BookingModuleDeps {
   identity: IdentityRecheck;
   contactRefs: ContactRefs;
   restrictions: BookingRestrictions;
+  /** 우선 구매 보류 주문의 권리 확인(GAT-135). 없으면 PRIORITY 홀드 주문을 409로 거절한다 */
+  priorityGrants?: PriorityGrants;
   signals: OrderSignals;
   /** 결제 접수의 purchase DB 읽기·쓰기(운영은 DrizzleOrderAccepts 하나가 둘을 구현한다, PRF-162) */
   accepts: OrderAcceptReads & OrderAcceptWrites;

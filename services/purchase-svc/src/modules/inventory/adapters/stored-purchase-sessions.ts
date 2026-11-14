@@ -131,6 +131,6 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
     if (typeof sessionId !== 'string' || !KEY_PART.test(sessionId)) return undefined;
     const s = await this.deps.store.read(sessionId).catch(sanitizedOnly);
     if (!s || this.deps.clock.now() >= s.maxStayUntilMs) return undefined;
-    return { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId };
+    return { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId, ...(s.priorityGrantId !== undefined ? { priorityGrantId: s.priorityGrantId } : {}) };
   }
 }

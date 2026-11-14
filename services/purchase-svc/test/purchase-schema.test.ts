@@ -31,6 +31,7 @@ import { describe, expect, test } from 'vitest';
 import { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { priorityGrant } from '../src/modules/priority/adapters/db/schema.js';
 import { eventCancellationRequest, eventRefundItem } from '../src/modules/refund/adapters/db/schema.js';
 import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
@@ -69,6 +70,8 @@ const VOID_TAG = '0013_ticket_void_job';
 const CANCEL_TAG = '0014_order_cancellation';
 const RETRY_TAG = '0015_order_cancellation_refund_retry';
 const EVENT_REFUND_TAG = '0016_event_refund';
+/** 우선 구매 권리 표 priority_grant(GAT-135, ADR-0171) */
+const PRIORITY_TAG = '0017_priority_grant';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -125,6 +128,8 @@ const rebuild = shapeOf(seatRebuild);
 /** 0000·0002가 만든 좌석 표 넷. 0012의 event_sale은 따로 본다(아래 eventSaleShape) */
 const SHAPES = [sale, quota, hold, rebuild];
 const eventSaleShape = shapeOf(eventSale);
+/** 0017의 우선 구매 권리 표(GAT-135) */
+const priorityShape = shapeOf(priorityGrant);
 
 const TZ = 'timestamp with time zone';
 /** [열 이름, 종류, 널 불허] */
@@ -415,6 +420,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [14, CANCEL_TAG],
       [15, RETRY_TAG],
       [16, EVENT_REFUND_TAG],
+      [17, PRIORITY_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -444,7 +450,23 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${CANCEL_TAG}.sql`,
       `${RETRY_TAG}.sql`,
       `${EVENT_REFUND_TAG}.sql`,
+      `${PRIORITY_TAG}.sql`,
     ]);
+  });
+
+  test('0017 SQL은 priority_grant 표 하나와 취소표 유일 인덱스·계정/회차 인덱스만 만들고, 칸·check가 schema.ts와 같다(GAT-135, ADR-0171) [ASVS v5.0.0-2.3.4]', () => {
+    const sqlText = canon(readFileSync(join(MIGRATIONS, `${PRIORITY_TAG}.sql`), 'utf8'));
+    expect(sqlText.match(/create table/gi)).toHaveLength(1);
+    expect(sqlText).toContain('create table priority_grant');
+    for (const c of priorityShape.columns) {
+      const def = c.name === 'version' ? ' default 1' : '';
+      expect(sqlText, c.name).toContain(`${c.name} ${c.type}${def}${c.notNull ? ' not null' : ''}`);
+    }
+    expect(sqlText).toContain('create unique index priority_grant_cancelled_ticket_key on priority_grant using btree(cancelled_ticket_id)');
+    expect(sqlText).toContain('create index priority_grant_account_event_idx on priority_grant using btree(account_id,event_id)');
+    for (const k of priorityShape.checks) expect(sqlText).toContain(`constraint ${k.name} check(${k.expr})`);
+    // 다른 표를 바꾸지 않는다
+    expect(sqlText).not.toMatch(/alter table|drop table|create table (?!priority_grant)/);
   });
 
   type Snapshot = {
@@ -481,11 +503,11 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem].map(shapeOf);
 
-  test('마지막 스냅샷(0016_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소 표 둘)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0016_snapshot.json');
+  test('마지막 스냅샷(0017_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소 표 둘, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0017_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES].map((s) => `public.${s.name}`).sort());
-    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES]) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));

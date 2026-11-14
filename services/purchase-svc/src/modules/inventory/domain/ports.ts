@@ -7,7 +7,7 @@ import type { SessionHoldEntry } from './purchase-session.js';
 import type { HoldReleaseReason } from './hold-lifecycle.js';
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
 import type { AutoCandidateGroup, AutoCandidateList, AutoCondition, AutoHoldInput, AutoHoldResult } from './auto.js';
-import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
+import type { HoldInput, HoldResult, PriorityHoldInput, PriorityHoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
 import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEntry, SessionEndReason, SessionStartedEntry, StoredSession, SweepSessionResult } from './purchase-session.js';
 import type { SectionRange } from './seat-layout.js';
@@ -72,6 +72,13 @@ export interface SeatStore {
    * @throws Error 스크립트 오류 같은 버그(모르는 결과 값, 안전한 정수가 아닌 토큰, 위 쓰기 전 지킴 포함)
    */
   hold(i: HoldInput, o?: SeatCallOptions): Promise<HoldResult>;
+
+  /**
+   * 우선 구매 보류 하나를 잡는다(GAT-135, docs/features/seat-hold.md §5). 일반 홀드와 달리 구매 세션·1인 한도·멱등 기록이 없고,
+   * 7분 만료 인덱스가 아니라 `s:{event:E}:prio`(점수 = 만료 시각)에 넣는다. 홀드 Hash는 kind 'PRIORITY'·priorityGrantId·owner를 적는다.
+   * 비트가 이미 켜져 있으면 CONFLICT, 세대 키가 없으면 NOT_READY, 만료 시각이 지났으면 EXPIRED다.
+   */
+  holdPriority?(i: PriorityHoldInput, o?: SeatCallOptions): Promise<PriorityHoldResult>;
 
   /**
    * 멱등 재생 읽기(추천 적용 2026-11-04). HoldSeats가 앱 쪽 거절(판매 종료 410, 좌석맵에 없는 좌석 422, 회차 설정 없음 503) 전에 부른다.
@@ -546,6 +553,8 @@ export interface PurchaseSessionInfo {
   eventId: string;
   /** 여정 ID(입장 토큰의 jny, UUIDv7). 판정에는 쓰지 않고 HoldAttempt에 싣는다 */
   journeyId: string;
+  /** 우선 구매 입장의 권리 ID(입장 토큰 prio). 일반 입장이면 없다(GAT-135) */
+  priorityGrantId?: string;
 }
 
 /**
@@ -873,12 +882,16 @@ export interface OrderHoldQuery {
   accountId: string;
   /** 본문 holdId(받은 글 그대로. KEY_PART 모양이 아니면 저장소를 부르지 않고 NOT_FOUND) */
   holdId: string;
+  /** 우선 구매 입장의 권리 ID. 있으면 세션 홀드 목록 대신 그 권리의 PRIORITY 보류 하나를 본다(GAT-135) */
+  priorityGrantId?: string;
+  /** 우선 구매 보류 좌석 ID(priority_grant.seat_id). priorityGrantId가 있을 때만 */
+  prioritySeatId?: string;
 }
 
 /** 주문 생성의 홀드 확인 결과(booking OrderHoldCheck와 같은 모양) */
 export type OrderHoldCheck =
   /** heldAtMs: 홀드 Hash heldAt(좌석마다 같다). seats: 구매 세션의 h:{holdId}에 적힌 좌석 차례, 등급·구역은 좌석맵 판(SeatMap.resolve)에서. limit: 홀드 Hash lim(BAT-051) */
-  | { status: 'OK'; heldAtMs: number; seats: { seatId: string; tierId: string; sectionId: string }[]; limit?: number }
+  | { status: 'OK'; heldAtMs: number; seats: { seatId: string; tierId: string; sectionId: string }[]; limit?: number; kind?: 'FAN' | 'PRIORITY'; priorityGrantId?: string }
   /** 목록에 없음·남의 것·다른 회차·끝난 것·좌석맵 판에 없는 좌석을 가리지 않는다 */
   | { status: 'NOT_FOUND' }
   /** 좌석 Redis 일시 장애·메모리 부족, 세대 키 없음(NOT_READY), 그 회차 좌석맵 판 없음 */

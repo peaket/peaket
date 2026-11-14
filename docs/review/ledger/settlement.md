@@ -31,7 +31,7 @@
 | J-T15 | ③ | 지급 실패 | ③ `KYC_REQUIRED` 실패를 만든다. … 은 그 셀러의 토스페이먼츠 지급이 HELD가 된다. 금액이 같은 재요청은 새 2인 승인 없이 나가고 감사… | 빈칸 | A | — |
 | J-T16 | — | 늦은 지급 웹훅 | 서명은 맞고 `transmission-time`이 10분 전인 `payout.changed`를 보낸다. 이때 본문으로 상태를 바꾸지 않고, '늦은 웹훅' 보안… | 빈칸 | A | — |
 | J-T17 | — | 예금주 조회 URL 가림 | 예금주 조회를 부른 뒤 트레이스·로그·OTel Collector 출력 어디에도 계좌번호가 없고 경로 템플릿만 남는다 | 빈칸 | A | — |
-| J-T18 | — | 상품 정산서 | 에스크로 구매 확정 전 주문, 받은 지 7일이 안 된 택배·현장 수령, 반품 요청 중인 항목은 빠진다. 부가 상품은 연결 회차가 끝난 다음 날 들어간다… | 자동 시험 | A | 시험: apps/partner/src/_pages/product-builder/model/settlement-live.test.mjs |
+| J-T18 | — | 상품 정산서 | 에스크로 구매 확정 전 주문, 받은 지 7일이 안 된 택배·현장 수령, 반품 요청 중인 항목은 빠진다. 부가 상품은 연결 회차가 끝난 다음 날 들어간다… | 자동 시험 | A | 시험: apps/partner/src/_pages/product-builder/model/settlement-live.test.mjs, services/payment-svc/test/settlement.test.ts |
 | J-T19 | — | KYC 예고 | PARTIALLY_APPROVED 셀러의 지급일 앞뒤 6일 합계가 1,000만 원이면 통지와 SCR-027에 예고가 나오고, 999만 원이면 나오지 않는다… | 빈칸 | A | — |
 | J-T20 | ① | 포트원 출금 대사(추천 적용 2026-10-28, ADR-0108) | ① 정상 일괄 지급 … 은 `MATCHED`이고 경보가 없다. | 빈칸 | A | — |
 | J-T20 | ② | 포트원 출금 대사(추천 적용 2026-10-28, ADR-0108) | ② 지급 건과 금액이 다른 출금 … 는 다음 30분 동기화에서 SEV2(보안)와 CS 처리함 건이 하나씩 생기고, 그다음 동기화에서 같은 건이 다시 생기지… | 빈칸 | A | — |

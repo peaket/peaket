@@ -181,6 +181,7 @@ const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: ()
   IDENTITY_DENIED: { arrange: () => (fx.recheck = { status: 'DENIED' }) },
   IDENTITY_MISCONFIGURED: { arrange: () => (fx.recheck = { status: 'FAILED', reason: 'permission_denied' }) },
   BOOKING_RESTRICTED: { arrange: () => (fx.restriction = { st: 'ACTIVE' }) },
+  PRIORITY_GRANT_INVALID: { arrange: () => (fx.session = { ...fx.session!, priorityGrantId: '01900000-0000-7000-8000-000000000099' }) },
   PRICE_MISSING: {
     arrange: () => {
       fx.sale = { saleEndsAtMs: NOW + DAY, tierPrices: {} };
@@ -223,6 +224,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
       IDENTITY_DENIED: [403, 'identity-verification-required'],
       IDENTITY_MISCONFIGURED: [503, 'dependency-unavailable'],
       BOOKING_RESTRICTED: [403, 'booking-restricted'],
+      PRIORITY_GRANT_INVALID: [409, 'priority-grant-in-use'],
       PRICE_MISSING: [500, 'about:blank'],
       HOLD_ALREADY_ORDERED: [409, 'hold-already-ordered'],
       DEADLINE_EXCEEDED: [504, 'deadline-exceeded'],

@@ -25,6 +25,8 @@ import type {
   OrderSignals,
   OrderView,
   OrderWrites,
+  PriorityGrants,
+  PriorityGrantView,
   RecheckAnswer,
   SaleConfig,
   SaleConfigs,
@@ -104,6 +106,7 @@ export type PortCall =
   | 'writes.findCommitted'
   | 'saleConfigs.get'
   | 'holds.check'
+  | 'priorityGrants.find'
   | 'identity.check'
   | 'restrictions.read'
   | 'contactRefs.compute'
@@ -126,6 +129,7 @@ const defaults = () => ({
   committed: { status: 'NONE' } as CommittedOrderLookup | Error,
   sale: { saleEndsAtMs: NOW + DAY, tierPrices: TIER_PRICES } as SaleConfig | undefined,
   hold: { status: 'OK', heldAtMs: NOW - 60_000, seats: SEATS } as OrderHoldCheck,
+  priorityGrant: undefined as PriorityGrantView | undefined,
   recheck: { status: 'VERIFIED', pid: PID } as RecheckAnswer,
   restriction: undefined as BookingRestriction | undefined | Error,
   contactRef: CONTACT_REF as string | undefined,
@@ -146,6 +150,7 @@ export class OrderFakes {
   committed = defaults().committed;
   sale = defaults().sale;
   hold = defaults().hold;
+  priorityGrant = defaults().priorityGrant;
   recheck = defaults().recheck;
   restriction = defaults().restriction;
   contactRef = defaults().contactRef;
@@ -254,6 +259,13 @@ export class OrderFakes {
     limit: async () => undefined,
   };
 
+  readonly priorityGrants: PriorityGrants = {
+    find: async (grantId) => {
+      this.calls.push('priorityGrants.find');
+      return this.priorityGrant?.grantId === grantId ? this.priorityGrant : undefined;
+    },
+  };
+
   readonly identity: IdentityRecheck = {
     check: async (q) => {
       this.calls.push('identity.check');
@@ -311,6 +323,7 @@ export class OrderFakes {
       identity: this.identity,
       contactRefs: this.contactRefs,
       restrictions: this.restrictions,
+      priorityGrants: this.priorityGrants,
       signals: this.signals,
       log: this.log,
     };
