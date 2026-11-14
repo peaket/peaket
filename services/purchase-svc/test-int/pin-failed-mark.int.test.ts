@@ -63,7 +63,15 @@ async function snapshot(e: string): Promise<Record<string, unknown>> {
     const ttl = Number(await cmd(k, ['PEXPIRETIME', k]));
     let v: unknown;
     if (type === 'string') v = String(await cmd(k, ['GET', k]));
-    else if (type === 'hash') v = await cmd(k, ['HGETALL', k]);
+    else if (type === 'hash') {
+      // epoch의 chk는 '마지막으로 epoch를 확인한 초'다(hold-lua ENSURE_EPOCH). 핀처럼 epoch를 다시 확인하는 요청은
+      // 초가 바뀌면 chk만 새로 쓴다. 이 시험이 보는 '아무것도 쓰지 않았다'는 좌석·홀드·쿼터·표시가 그대로라는 뜻이므로
+      // chk는 비교에서 뺀다(PRF-142, 2026-11-14 CI 타이밍 플레이크).
+      const hash = (await cmd(k, ['HGETALL', k])) as string[];
+      const kept: string[] = [];
+      for (let i = 0; i < hash.length; i += 2) if (hash[i] !== 'chk') kept.push(hash[i]!, hash[i + 1]!);
+      v = kept;
+    }
     else if (type === 'zset') v = await cmd(k, ['ZRANGE', k, '0', '-1', 'WITHSCORES']);
     else if (type === 'stream') v = Number(await cmd(k, ['XLEN', k]));
     else v = type;

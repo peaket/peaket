@@ -97,8 +97,11 @@ test('PostgreSQL·Valkey에서_한계정에동시에온시도10개는Redis임대
   const processed = out.filter((o) => o.kind !== 'BUSY').length;
   expect(processed).toBeGreaterThanOrEqual(1);
   expect(out.filter((o) => o.kind === 'BUSY').length).toBeGreaterThanOrEqual(1);
+  // 사람 확인 문턱(3번)을 넘긴 뒤의 시도는 토큰이 없어 HUMAN_CHECK_REQUIRED로 끝나고 세지 않는다.
+  // 그러므로 셈에 든 시도(FAILED, 또는 이번에 잠금을 만든 LOCKED)만 센다. 잠금(5번) 뒤의 LOCKED는 min이 막는다.
+  const counted = out.filter((o) => o.kind === 'FAILED' || o.kind === 'LOCKED').length;
   const [row] = await q<{ password_failure_total: number }>('select password_failure_total from admin_account where id = $1', [id]);
-  expect(row).toEqual({ password_failure_total: Math.min(processed, 5) });
+  expect(row).toEqual({ password_failure_total: Math.min(counted, 5) });
   for (let i = 0; i < 4; i++) await step.run({ aud: 'ops', email: 'race@peaket.example', password: `seq-${i}`, ip: '198.51.100.80', deviceId: '', humanCheckToken: 'ok' });
   expect((await q<{ lock_kind: string }>('select lock_kind from admin_account where id = $1', [id]))[0]).toEqual({ lock_kind: 'TIMED' });
   expect(await q('select kind from admin_security_notice where admin_account_id = $1 and kind = $2', [id, 'TIMED_LOCK'])).toHaveLength(1);
