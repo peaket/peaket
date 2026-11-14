@@ -43,7 +43,7 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
 };
 
 const parseIfMatch = (value: string | undefined): number => {
-  if (value === undefined) throw new ProblemError({ type: 'precondition-required', status: 428, title: 'If-Match가 필요합니다' });
+  if (value === undefined) throw new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
   const m = /^"(\d+)"$/.exec(value.trim());
   if (!m) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
   return Number(m[1]);

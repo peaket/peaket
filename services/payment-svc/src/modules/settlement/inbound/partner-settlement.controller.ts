@@ -25,7 +25,7 @@ type DisputeBody = { reasonCode: 'GROSS_AMOUNT' | 'REFUND_AMOUNT' | 'COMMISSION'
 type PayoutAccountBody = { bankCode: string; accountNumber: string; holderName: string };
 
 export function tenantOf(me: Principal): string {
-  if (!me.tenantId) throw new ProblemError({ type: 'authz-unavailable', status: 503, title: '테넌트를 확인할 수 없습니다' });
+  if (!me.tenantId) throw new ProblemError({ type: 'authz-unavailable', status: 503, title: '권한을 확인하지 못했습니다' });
   return me.tenantId;
 }
 
