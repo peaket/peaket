@@ -6,6 +6,7 @@ import { CreateCommand } from './application/create-command.js';
 import { DecideCommand } from './application/decide-command.js';
 import { ExecuteCommand } from './application/execute-command.js';
 import { GetCommand } from './application/get-command.js';
+import { HandleCommandEvent } from './application/handle-command-event.js';
 import { ListCommands } from './application/list-commands.js';
 import { RetryCommand } from './application/retry-command.js';
 import type { CommandExecutor, CommandStore } from './domain/ports.js';
@@ -17,14 +18,17 @@ export { COMMAND_STORE, COMMAND_EXECUTOR } from './tokens.js';
 
 @Module({})
 export class CommandsModule {
-  static register(store: CommandStore, executor?: CommandExecutor, checkpoints?: AuditCheckpointService): DynamicModule {
+  static register(store: CommandStore, executor?: CommandExecutor, checkpoints?: AuditCheckpointService, onCommandEvent?: (h: HandleCommandEvent) => void): DynamicModule {
     const execution = new ExecuteCommand(store, executor, checkpoints);
     const wired = executor ? execution : undefined;
+    const createCommand = new CreateCommand(store, wired);
+    // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
+    onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));
     const providers: Provider[] = [
       { provide: COMMAND_STORE, useValue: store },
       { provide: COMMAND_EXECUTOR, useValue: executor },
       { provide: ExecuteCommand, useValue: execution },
-      { provide: CreateCommand, useFactory: () => new CreateCommand(store, wired) },
+      { provide: CreateCommand, useValue: createCommand },
       { provide: ListCommands, useFactory: () => new ListCommands(store) },
       { provide: GetCommand, useFactory: () => new GetCommand(store) },
       { provide: DecideCommand, useFactory: () => new DecideCommand(store, wired) },

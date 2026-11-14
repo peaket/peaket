@@ -33,6 +33,7 @@ import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { priorityGrant } from '../src/modules/priority/adapters/db/schema.js';
 import { eventCancellationRequest, eventRefundAttempt, eventRefundItem } from '../src/modules/refund/adapters/db/schema.js';
+import { saleControl } from '../src/modules/sale-control/adapters/db/schema.js';
 import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
 
@@ -74,6 +75,8 @@ const EVENT_REFUND_TAG = '0016_event_refund';
 const PRIORITY_TAG = '0017_priority_grant';
 /** 회차 연기 신청 창·재시도·자동 정지 기록(BAT-425 GAT-130) */
 const WINDOW_TAG = '0018_event_refund_window_runner';
+/** 판매 정지 사본 sale_control(BAT-465 R-584, ADR-0123) */
+const SALE_CONTROL_TAG = '0019_sale_control';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -132,6 +135,7 @@ const SHAPES = [sale, quota, hold, rebuild];
 const eventSaleShape = shapeOf(eventSale);
 /** 0017의 우선 구매 권리 표(GAT-135) */
 const priorityShape = shapeOf(priorityGrant);
+const saleControlShape = shapeOf(saleControl);
 
 const TZ = 'timestamp with time zone';
 /** [열 이름, 종류, 널 불허] */
@@ -424,6 +428,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [16, EVENT_REFUND_TAG],
       [17, PRIORITY_TAG],
       [18, WINDOW_TAG],
+      [19, SALE_CONTROL_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -455,6 +460,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${EVENT_REFUND_TAG}.sql`,
       `${PRIORITY_TAG}.sql`,
       `${WINDOW_TAG}.sql`,
+      `${SALE_CONTROL_TAG}.sql`,
     ]);
   });
 
@@ -507,11 +513,11 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  test('마지막 스냅샷(0018_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0018_snapshot.json');
+  test('마지막 스냅샷(0019_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0019_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape].map((s) => `public.${s.name}`).sort());
-    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape]) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));

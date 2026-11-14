@@ -68,6 +68,7 @@ import type {
   ApprovalRequest,
   ApprovalRequestInput,
   ApprovalRequestPage,
+  AuditAnchor,
   AuditCheckpoint,
   AuditCheckpointPage,
   AuditCheckpointVerification,
@@ -13104,6 +13105,242 @@ export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetOpsAuditCheckpointVerificationQueryOptions(checkpointId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsAuditAnchorResponse200 = {
+  data: AuditAnchor
+  status: 200
+}
+
+export type getOpsAuditAnchorResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsAuditAnchorResponseSuccess = (getOpsAuditAnchorResponse200) & {
+  headers: Headers;
+};
+export type getOpsAuditAnchorResponseError = (getOpsAuditAnchorResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsAuditAnchorUrl = (checkpointId: string,) => {
+
+
+
+
+  return `/v1/ops/audit-anchors/${encodeURIComponent(String(checkpointId))}`
+}
+
+/**
+ * BAT-465 R-584, ADR-0075. 세션 없이 읽는다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트이고, publicKey(SPKI PEM)로 확인한다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 외부 불변 저장소 앵커(S3 Object Lock)·OpenTimestamps는 후속이다. Cache-Control: no-store
+ * @summary 감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)
+ */
+export const getOpsAuditAnchor = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditAnchorResponseSuccess> => {
+
+  return orvalFetch<getOpsAuditAnchorResponseSuccess>(getGetOpsAuditAnchorUrl(checkpointId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsAuditAnchorQueryKey = (checkpointId: string,) => {
+    return [
+    `/v1/ops/audit-anchors/${checkpointId}`
+    ] as const;
+    }
+
+
+export const getGetOpsAuditAnchorQueryOptions = <TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsAuditAnchorQueryKey(checkpointId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsAuditAnchor>>> = ({ signal }) => getOpsAuditAnchor(checkpointId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: checkpointId !== null && checkpointId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsAuditAnchorQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsAuditAnchor>>>
+export type GetOpsAuditAnchorQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditAnchor>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditAnchor>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditAnchor>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditAnchor>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)
+ */
+
+export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsAuditAnchorQueryOptions(checkpointId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsAuditAnchorVerificationResponse200 = {
+  data: AuditCheckpointVerification
+  status: 200
+}
+
+export type getOpsAuditAnchorVerificationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsAuditAnchorVerificationResponseSuccess = (getOpsAuditAnchorVerificationResponse200) & {
+  headers: Headers;
+};
+export type getOpsAuditAnchorVerificationResponseError = (getOpsAuditAnchorVerificationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsAuditAnchorVerificationUrl = (checkpointId: string,) => {
+
+
+
+
+  return `/v1/ops/audit-anchors/${encodeURIComponent(String(checkpointId))}/verification`
+}
+
+/**
+ * BAT-465 R-584. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다. Cache-Control: no-store
+ * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ */
+export const getOpsAuditAnchorVerification = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditAnchorVerificationResponseSuccess> => {
+
+  return orvalFetch<getOpsAuditAnchorVerificationResponseSuccess>(getGetOpsAuditAnchorVerificationUrl(checkpointId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsAuditAnchorVerificationQueryKey = (checkpointId: string,) => {
+    return [
+    `/v1/ops/audit-anchors/${checkpointId}/verification`
+    ] as const;
+    }
+
+
+export const getGetOpsAuditAnchorVerificationQueryOptions = <TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsAuditAnchorVerificationQueryKey(checkpointId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>> = ({ signal }) => getOpsAuditAnchorVerification(checkpointId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: checkpointId !== null && checkpointId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsAuditAnchorVerificationQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>>
+export type GetOpsAuditAnchorVerificationQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ */
+
+export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(
+ checkpointId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsAuditAnchorVerificationQueryOptions(checkpointId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

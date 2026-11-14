@@ -37,3 +37,9 @@ export {
   type SeatCounts,
 } from './domain/sale.js';
 export { EventSaleChangedHandler, jsonSaleChangedCodec, type SaleChangedCodec, type SaleRecord, SEATS_TOPIC } from './inbound/event-sale-changed.handler.js';
+export { SetSaleSuspensionCopy, type SaleSuspensionCopyResult, type SetSaleSuspensionCopyInput } from './application/set-sale-suspension-copy.js';
+export { MemorySaleSuspensionCopies } from './adapters/memory-sale-suspension-copies.js';
+export { RedisSaleSuspensionCopies, SALE_SUSPENSION_COPY_TTL_MS } from './adapters/redis-sale-suspension-copies.js';
+export { SALE_SUSPENSION_ACTIONS, SALE_SUSPENSION_COPIES, type SaleSuspensionAction, type SaleSuspensionCopies, type SaleSuspensionCopyWrite } from './domain/sale-suspension.js';
+export { SaleSuspensionCopyController } from './inbound/sale-suspension-copy.controller.js';
+export { SaleSuspensionModule } from './sale-suspension.module.js';

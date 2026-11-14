@@ -57,6 +57,7 @@ export * from './approvalRequestInput.zod.js';
 export * from './approvalRequestPage.zod.js';
 export * from './attendeeExport.zod.js';
 export * from './attendeeExportPage.zod.js';
+export * from './auditAnchor.zod.js';
 export * from './auditCheckpoint.zod.js';
 export * from './auditCheckpointPage.zod.js';
 export * from './auditCheckpointVerification.zod.js';

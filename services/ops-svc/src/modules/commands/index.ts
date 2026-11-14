@@ -1,6 +1,14 @@
 // 운영 명령 모듈의 공개 면.
 export { CommandsModule, COMMAND_STORE, COMMAND_EXECUTOR } from './commands.module.js';
 export { CreateCommand, eventIdOf, type CreateCommandInput } from './application/create-command.js';
+export {
+  CommandEventBody,
+  CommandEventResponse,
+  HandleCommandEvent,
+  commandIdOfEventKey,
+  type CommandEvent,
+  type HandleCommandEventDeps,
+} from './application/handle-command-event.js';
 export { DecideCommand } from './application/decide-command.js';
 export { ExecuteCommand } from './application/execute-command.js';
 export { GetCommand } from './application/get-command.js';
@@ -24,3 +32,4 @@ export type { CommandDecision, CommandExecutor, CommandListQuery, CommandPage, C
 export { MemoryCommandStore } from './adapters/memory-command-store.js';
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';
 export { CommandsController } from './inbound/commands.controller.js';
+export { CommandBody, CommandIdParams, CommandPageView, CommandView, RejectBody, baseViewOf, viewOf } from './inbound/command-view.js';

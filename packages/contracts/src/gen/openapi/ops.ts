@@ -731,7 +731,7 @@ export const createOpsCommandBodyReasonMax = 2000;
 
 
 export const CreateOpsCommandBody = zod.object({
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes). EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME은 회차 취소 일괄 환불 작업을 멈추고 다시 시작한다(2026-11-15 R-583, params.requestId·params.pg)'),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes). EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME은 회차 취소 일괄 환불 작업을 멈추고 다시 시작한다(2026-11-15 R-583, params.requestId·params.pg). SALE_STOP·SALE_RESUME은 판매 승인 업무의 판매 중지·재개를 회차에 집행한다(요청자가 아닌 두 번째 사람이 승인, ADR-0123, BAT-465 R-584). params는 {eventId, reasonCode(SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER), suspensionRef}이다'),
   "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
@@ -787,7 +787,7 @@ export const listOpsCommandsQueryLimitMax = 100;
 
 export const ListOpsCommandsQueryParams = zod.object({
   "eventId": zod.string().optional(),
-  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE']).optional(),
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME']).optional(),
   "state": zod.array(zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED'])).optional().describe('쉼표로 여럿(guidelines §11)'),
   "updatedAfter": zod.iso.datetime({"offset":true}).optional().describe('이 시각(ISO 8601) 뒤에 바뀐 명령만. 관제 콘솔 폴링 갱신에 쓴다(BAT-465)'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
@@ -4191,8 +4191,12 @@ export const ListOpsAuditCheckpointsResponse = zod.object({
   "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
   "reason": zod.string().optional(),
   "actorRef": zod.string().optional(),
-  "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')).optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "signature": zod.string().nullish().describe('체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null'),
+  "keyId": zod.string().nullish().describe('서명 키 ID'),
+  "anchorRef": zod.string().nullish().describe('공개 앵커의 위치. 이번 몫은 local:<checkpointId>'),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')).optional(),
   "nextCursor": zod.string().nullish()
 })
 
@@ -4216,8 +4220,12 @@ export const CreateOpsAuditCheckpointResponse = zod.object({
   "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
   "reason": zod.string().optional(),
   "actorRef": zod.string().optional(),
-  "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "signature": zod.string().nullish().describe('체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null'),
+  "keyId": zod.string().nullish().describe('서명 키 ID'),
+  "anchorRef": zod.string().nullish().describe('공개 앵커의 위치. 이번 몫은 local:<checkpointId>'),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')
 
 /**
  * BAT-465 GAT-310. viewer 이상. 없는 ID는 404. Cache-Control: no-store
@@ -4235,8 +4243,12 @@ export const GetOpsAuditCheckpointResponse = zod.object({
   "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
   "reason": zod.string().optional(),
   "actorRef": zod.string().optional(),
-  "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "signature": zod.string().nullish().describe('체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null'),
+  "keyId": zod.string().nullish().describe('서명 키 ID'),
+  "anchorRef": zod.string().nullish().describe('공개 앵커의 위치. 이번 몫은 local:<checkpointId>'),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')
 
 /**
  * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store
@@ -4248,9 +4260,54 @@ export const GetOpsAuditCheckpointVerificationParams = zod.object({
 
 export const GetOpsAuditCheckpointVerificationResponse = zod.object({
   "checkpointId": zod.uuid().optional(),
-  "valid": zod.boolean().optional().describe('루트와 직전 사슬이 모두 맞는가'),
+  "valid": zod.boolean().optional().describe('루트·직전 사슬·서명·앵커가 모두 맞는가'),
   "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
   "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
+  "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
+  "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "checkedAt": zod.iso.datetime({"offset":true}).optional()
+})
+
+/**
+ * BAT-465 R-584, ADR-0075. 세션 없이 읽는다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트이고, publicKey(SPKI PEM)로 확인한다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 외부 불변 저장소 앵커(S3 Object Lock)·OpenTimestamps는 후속이다. Cache-Control: no-store
+ * @summary 감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)
+ */
+export const GetOpsAuditAnchorParams = zod.object({
+  "checkpointId": zod.uuid()
+})
+
+export const GetOpsAuditAnchorResponse = zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "fromSeq": zod.int().optional(),
+  "toSeq": zod.int().optional(),
+  "rootHash": zod.string().optional(),
+  "prevCheckpointHash": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "signature": zod.string().nullish(),
+  "keyId": zod.string().nullish(),
+  "anchorRef": zod.string().nullish(),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish(),
+  "algorithm": zod.enum(['Ed25519']).optional(),
+  "publicKey": zod.string().optional().describe('SPKI PEM 공개키')
+}).describe('공개 앵커(BAT-465 R-584, ADR-0075). 세션 없이 읽어 Ed25519 공개키로 검증한다. 서명 대상은 \'audit-checkpoint-v1\' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트다.')
+
+/**
+ * BAT-465 R-584. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다. Cache-Control: no-store
+ * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ */
+export const GetOpsAuditAnchorVerificationParams = zod.object({
+  "checkpointId": zod.uuid()
+})
+
+export const GetOpsAuditAnchorVerificationResponse = zod.object({
+  "checkpointId": zod.uuid().optional(),
+  "valid": zod.boolean().optional().describe('루트·직전 사슬·서명·앵커가 모두 맞는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
+  "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
+  "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
+  "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),
   "fromSeq": zod.int().optional(),
   "toSeq": zod.int().optional(),
   "checkedAt": zod.iso.datetime({"offset":true}).optional()

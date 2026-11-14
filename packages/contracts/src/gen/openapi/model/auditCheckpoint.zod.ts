@@ -19,8 +19,12 @@ export const AuditCheckpoint = zod.object({
   "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
   "reason": zod.string().optional(),
   "actorRef": zod.string().optional(),
-  "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('감사 체크포인트(BAT-465 GAT-310, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 공개 앵커·서명·OpenTimestamps는 후속이다.')
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "signature": zod.string().nullish().describe('체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null'),
+  "keyId": zod.string().nullish().describe('서명 키 ID'),
+  "anchorRef": zod.string().nullish().describe('공개 앵커의 위치. 이번 몫은 local:<checkpointId>'),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')
 
 export type AuditCheckpoint = zod.input<typeof AuditCheckpoint>;
 export type AuditCheckpointOutput = zod.output<typeof AuditCheckpoint>;

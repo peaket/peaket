@@ -95,6 +95,8 @@ export * from './attendeeExport';
 export * from './attendeeExportFormat';
 export * from './attendeeExportPage';
 export * from './attendeeExportResult';
+export * from './auditAnchor';
+export * from './auditAnchorAlgorithm';
 export * from './auditCheckpoint';
 export * from './auditCheckpointPage';
 export * from './auditCheckpointVerification';

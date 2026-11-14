@@ -134,6 +134,13 @@
       "when": 1794744000000,
       "tag": "0018_event_refund_window_runner",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794745000000,
+      "tag": "0019_sale_control",
+      "breakpoints": true
     }
   ]
 }

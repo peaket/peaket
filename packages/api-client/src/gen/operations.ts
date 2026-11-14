@@ -236,6 +236,8 @@ export type OperationId =
   | 'getMyOpsAuthSession'
   | 'getOpsAdminAccount'
   | 'getOpsApprovalRequest'
+  | 'getOpsAuditAnchor'
+  | 'getOpsAuditAnchorVerification'
   | 'getOpsAuditCheckpoint'
   | 'getOpsAuditCheckpointVerification'
   | 'getOpsAuthPasskeys'
@@ -627,6 +629,8 @@ export const OPERATIONS = {
   getMyOpsAuthSession: {operationId: "getMyOpsAuthSession",method: "GET",path: "/v1/ops/auth/sessions/me",host: "ops-api",kind: "read",cookie: true},
   getOpsAdminAccount: {operationId: "getOpsAdminAccount",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}",host: "ops-api",kind: "read",cookie: true},
   getOpsApprovalRequest: {operationId: "getOpsApprovalRequest",method: "GET",path: "/v1/ops/approval-requests/{approvalId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsAuditAnchor: {operationId: "getOpsAuditAnchor",method: "GET",path: "/v1/ops/audit-anchors/{checkpointId}",host: "ops-api",kind: "read",cookie: false},
+  getOpsAuditAnchorVerification: {operationId: "getOpsAuditAnchorVerification",method: "GET",path: "/v1/ops/audit-anchors/{checkpointId}/verification",host: "ops-api",kind: "read",cookie: false},
   getOpsAuditCheckpoint: {operationId: "getOpsAuditCheckpoint",method: "GET",path: "/v1/ops/audit-checkpoints/{checkpointId}",host: "ops-api",kind: "read",cookie: true},
   getOpsAuditCheckpointVerification: {operationId: "getOpsAuditCheckpointVerification",method: "GET",path: "/v1/ops/audit-checkpoints/{checkpointId}/verification",host: "ops-api",kind: "read",cookie: true},
   getOpsAuthPasskeys: {operationId: "getOpsAuthPasskeys",method: "GET",path: "/v1/ops/auth/passkeys",host: "ops-api",kind: "read",cookie: true},

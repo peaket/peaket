@@ -1,4 +1,5 @@
 // SCR-030 연결 화면: ops-svc 운영 명령 API로 목록·상세·2인 승인/거부·재시도와 감사 체크포인트를 본다(BAT-465 GAT-300·GAT-310).
+// 갱신은 5초 폴링 대신 관제 SSE(/v1/ops/live)를 받는다(BAT-465 R-584). 끊기면 EventSource가 다시 붙고, 그때 목록을 다시 읽어 빠진 것을 채운다.
 // 디자인 보드(ui/Page.tsx의 BoardPage)는 ?state= 미리보기에 남기고, 실제 경로는 이 화면을 쓴다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChosenRole, usePreviewHost } from '@/features/preview-host';
@@ -16,13 +17,14 @@ import {
   type CommandStateValue,
   type RawCommand,
 } from '../model/commands';
+import { liveUrl, mergeCommand, parseLiveFrame } from '../model/live';
 
 type Load = { kind: 'loading' } | { kind: 'ready'; items: CommandRow[]; nextCursor: string | null } | { kind: 'error'; message: string } | { kind: 'config' };
 type CheckpointRow = { checkpointId: string; fromSeq: number; toSeq: number; rootHash: string; prevCheckpointHash: string; reason: string; actorRef: string; createdAt: string };
 type Verification = { valid: boolean; rootValid: boolean; prevValid: boolean };
 
 const STATES: readonly CommandStateValue[] = ['PENDING_APPROVAL', 'DISPATCHED', 'SUCCEEDED', 'FAILED', 'APPROVED', 'REJECTED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED', 'DRAFTED', 'DRY_RUN', 'ACKED'];
-const TYPES = ['EVENT_CANCEL', 'SCALE_CHANGE', 'KILL_SWITCH', 'ADMISSION_PAUSE', 'ADMISSION_TARGET', 'BOT_LEVEL', 'DEGRADED_MODE', 'BLOCK_ASN_IP', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN'] as const;
+const TYPES = ['EVENT_CANCEL', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME', 'KILL_SWITCH', 'ADMISSION_PAUSE', 'ADMISSION_TARGET', 'BOT_LEVEL', 'DEGRADED_MODE', 'BLOCK_ASN_IP', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN'] as const;
 
 export function ConnectedPage() {
   const role = useChosenRole() ?? 'operator';
@@ -43,7 +45,12 @@ export function ConnectedPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [live, setLive] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
 
   const notify = useCallback((text: string) => {
     clearTimeout(toastTimer.current);
@@ -86,12 +93,47 @@ export function ConnectedPage() {
 
   useEffect(() => {
     void refresh();
-    const tick = setInterval(() => void refresh(), 5_000);
+    if (!opsApiAvailable()) {
+      setLive('closed');
+      return () => clearTimeout(toastTimer.current);
+    }
+    // 5초 폴링 대신 관제 SSE(BAT-465 R-584). EventSource가 끊기면 스스로 다시 붙고, 그때 목록을 다시 읽어 빠진 것을 채운다.
+    const es = new EventSource(liveUrl(__OPS_API_ORIGIN__), { withCredentials: true });
+    setLive('connecting');
+    const onOpen = (): void => {
+      setLive('open');
+      void refresh();
+      if (tabRef.current === 'audit') void loadCheckpoints();
+    };
+    const onCommand = (ev: Event): void => {
+      const m = ev as MessageEvent;
+      const frame = parseLiveFrame({ ...(m.lastEventId ? { lastEventId: m.lastEventId } : {}), type: m.type, data: m.data });
+      if (!frame) return;
+      const row = mapCommandList({ items: [frame.data as RawCommand] }).items[0];
+      if (!row) return;
+      setLoad((prev) => (prev.kind === 'ready' ? { ...prev, items: mergeCommand(prev.items, row) } : prev));
+      setSelectedId((prev) => prev ?? row.commandId);
+      if (selectedRef.current === row.commandId) void loadDetail(row.commandId).catch(() => undefined);
+    };
+    const onAudit = (): void => {
+      if (tabRef.current === 'audit') void loadCheckpoints();
+    };
+    const onReset = (): void => {
+      // 서버가 1시간 밖의 Last-Event-ID를 받았다: REST로 다시 읽는다(openapi 설명)
+      void refresh();
+      if (tabRef.current === 'audit') void loadCheckpoints();
+    };
+    const onError = (): void => setLive('closed');
+    es.addEventListener('open', onOpen);
+    es.addEventListener('command', onCommand);
+    es.addEventListener('audit', onAudit);
+    es.addEventListener('reset', onReset);
+    es.addEventListener('error', onError);
     return () => {
-      clearInterval(tick);
+      es.close();
       clearTimeout(toastTimer.current);
     };
-  }, [refresh]);
+  }, [refresh, loadCheckpoints, loadDetail]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -181,9 +223,14 @@ export function ConnectedPage() {
           <h1 className="t-xl">운영 명령</h1>
           <p className="t-sm muted">승인된 명령의 실행 결과와 감사 체크포인트를 확인합니다. 요청자와 다른 운영자만 승인할 수 있습니다.</p>
         </div>
-        <button className="btn btn-outline" type="button" onClick={() => void refresh()} disabled={busy}>
-          <i className="ic ic-refresh" aria-hidden="true" /> 새로 고침
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <span className={`badge badge-${live === 'open' ? 'success' : live === 'connecting' ? 'warning' : 'outline'}`} title="관제 SSE(/v1/ops/live) 연결 상태">
+            {live === 'open' ? '실시간' : live === 'connecting' ? '연결 중' : '다시 연결 중'}
+          </span>
+          <button className="btn btn-outline" type="button" onClick={() => void refresh()} disabled={busy}>
+            <i className="ic ic-refresh" aria-hidden="true" /> 새로 고침
+          </button>
+        </div>
       </div>
 
       <div className="tabs" style={{ marginTop: 16 }} role="tablist" aria-label="운영 명령 탭">

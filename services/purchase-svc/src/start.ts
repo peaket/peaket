@@ -35,6 +35,8 @@ import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedi
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { DrizzleCancelledTickets, DrizzlePriorityGrantStore, SeatMapPriorityCandidates, type PriorityModuleDeps } from './modules/priority/index.js';
+import { DrizzleSaleControlStore, RedisSaleControlCopies, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
+import { startControlServer } from './control/control-server.js';
 import {
   CancelTicket,
   CancelTicketEventRefund,
@@ -347,6 +349,24 @@ export async function start(o: StartOptions): Promise<StartedService> {
       }
     : undefined;
 
+  // 판매 중지·재개 사본(BAT-465 R-584, ADR-0123). 원본은 purchase DB sale_control, 사본은 좌석 Redis s:{event:E}:ctl이다.
+  // purchase DB가 없으면 내부 HTTP 경로를 열지 않는다(홀드 Lua가 읽을 사본도 쓸 곳이 없다).
+  const saleControl: SaleControlModuleDeps | undefined = database ? { store: new DrizzleSaleControlStore(database), copies: new RedisSaleControlCopies(redis) } : undefined;
+  // 제어 gRPC 받는 쪽(peaket.control.v1.ControlReceiver, ADR-0102·0103). 주소가 있을 때만 제어 전용 포트를 연다.
+  const controlPort = Number(env.PEAKET_PURCHASE_CONTROL_GRPC_PORT ?? '');
+  const controlServer =
+    saleControl && Number.isInteger(controlPort) && controlPort > 0
+      ? await startControlServer({
+          host: env.PEAKET_CONTROL_GRPC_HOST ?? '0.0.0.0',
+          port: controlPort,
+          deps: {
+            setSuspension: new SetSaleSuspension(saleControl.store, saleControl.copies),
+            podName: podId,
+            nowMs: () => systemClock.now(),
+          },
+        })
+      : undefined;
+
   // 주문 생성(booking, POST /v1/orders, BUILD_ORDER PRF-161). purchase DB가 있을 때만 연다(DB 없이 뜬 파드는 주문 경로를 열지 않는다, 뜨는 동작은 그대로다).
   // - 동의 문안 판: PEAKET_ORDER_CONSENT_VERSION(없거나 ^[0-9A-Za-z._-]{1,32}$가 아니면 시작하지 않는다. 모양은 BookingModule.register가 본다)
   // - identity-svc 클라이언트(재확인·가명)는 차단기가 서비스 지표·로거를 쓰므로 서비스를 만든 뒤 만든다. 그때까지(듣기 전) 부르면 '답 없음'과 같다
@@ -436,6 +456,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(booking ? { booking } : {}),
       ...(refund ? { refund } : {}),
       ...(priority ? { priority } : {}),
+      ...(saleControl ? { saleControl } : {}),
       hotPath,
       admission: {
         store: sessionStore,
@@ -751,6 +772,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     closing = Promise.all([
       (consumers?.stop() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)')),
       paymentPuller?.stop(),
+      // 제어 gRPC 서버는 새 제어를 받지 않고 돌던 호출을 기다린다(ADR-0102의 우아한 종료)
+      (controlServer?.close() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '제어 gRPC 서버 닫기 실패')),
     ])
       .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
       .then(() => service.close())

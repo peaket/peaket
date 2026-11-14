@@ -4,6 +4,7 @@ import type { HotPathMetrics, HotRedis } from '@peaket/platform';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { RefundModule, type RefundModuleDeps } from './modules/refund/index.js';
+import { SaleControlModule, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import {
   type AdmissionOptions,
   type ExpirySweeperDeps,
@@ -59,6 +60,8 @@ export class AppModule implements NestModule {
       refund?: RefundModuleDeps;
       /** 우선 구매 권리 발급·회수(GAT-135). 운영은 purchase DB와 좌석 Redis가 있을 때만 넘긴다 */
       priority?: PriorityModuleDeps;
+      /** 판매 중지·재개 사본(BAT-465 R-584). 운영은 purchase DB와 좌석 Redis가 있을 때만 넘긴다 */
+      saleControl?: SaleControlModuleDeps;
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
     },
@@ -94,7 +97,7 @@ export class AppModule implements NestModule {
           });
     return {
       module: AppModule,
-      imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : []), ...(o.priority ? [PriorityModule.register(o.priority)] : [])],
+      imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : []), ...(o.priority ? [PriorityModule.register(o.priority)] : []), ...(o.saleControl ? [SaleControlModule.register(o.saleControl)] : [])],
     };
   }
 }

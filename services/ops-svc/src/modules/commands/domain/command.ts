@@ -18,6 +18,8 @@ export const COMMAND_TYPES = [
   'EVENT_REFUND_PAUSE',
   'EVENT_REFUND_RESUME',
   'SCALE_CHANGE',
+  'SALE_STOP',
+  'SALE_RESUME',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 
@@ -46,6 +48,8 @@ export type ApprovalMode = 'NONE' | 'ONE' | 'TWO';
  */
 export function approvalModeOf(type: CommandType): ApprovalMode {
   if (type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP') return 'NONE';
+  // 판매 중지·재개는 판 팬·파트너 매출·정산을 바로 묶으므로 요청자가 아닌 두 번째 사람이 승인한다(ADR-0123 결정 2).
+  if (type === 'SALE_STOP' || type === 'SALE_RESUME') return 'TWO';
   if (type === 'BOT_LEVEL' || type === 'DEGRADED_MODE' || type === 'BLOCK_ASN_IP' || type === 'EVENT_CANCEL') return 'TWO';
   return 'ONE';
 }

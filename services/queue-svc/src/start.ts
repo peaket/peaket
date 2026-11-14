@@ -10,9 +10,10 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { startGrpcServer } from './grpc-server.js';
+import { startQueueControlServer } from './control/control-server.js';
 import { Es256AdmissionTokens, priorityGrantHandlers, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots, SetPriorityGrant } from './modules/admission/index.js';
 import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromEligibilitySignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
-import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
+import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates, SetSaleSuspensionCopy } from './modules/sale/index.js';
 import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
 
 const SERVICE = 'queue-svc';
@@ -200,6 +201,23 @@ export async function start(o: StartOptions): Promise<StartedService> {
   }
   service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 
+  // 제어 전용 gRPC 포트(ControlReceiver.ApplyControl, ADR-0102). 주소가 있을 때만 연다(업무 포트와 다른 포트다).
+  const controlPort = Number(env.PEAKET_QUEUE_CONTROL_GRPC_PORT ?? '');
+  const control =
+    Number.isInteger(controlPort) && controlPort > 0
+      ? await startQueueControlServer({
+          host: env.PEAKET_CONTROL_GRPC_HOST ?? '0.0.0.0',
+          port: controlPort,
+          deps: {
+            setSuspension: service.app.get(SetSaleSuspensionCopy),
+            podName: (env.PEAKET_POD ?? env.HOSTNAME ?? 'local').slice(0, 64),
+            nowMs: () => systemClock.now(),
+            onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'ControlReceiver 처리 실패'),
+          },
+        })
+      : undefined;
+  if (control) service.logger.info({ port: control.port }, '제어 gRPC 포트를 열었다');
+
   // 셔플 커밋 공시 일꾼(ADR-0231 결정 6): 봉인이 있으면 파드마다 돈다. 먼저 쓴 값 하나로 남는다
   const commitWorker = sealer ? new ShuffleCommitWorker(service.app.get(ShuffleCommits), new RedisEventSchedules(redis, systemClock), (now) => new RedisWithdrawnKeys(redis).activeEvents(now), systemClock, service.logger) : undefined;
   commitWorker?.start();
@@ -270,9 +288,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     closing ??= (() => {
       commitWorker?.stop();
       asnTable.stop();
-      // 받는 gRPC 호출을 먼저 닫고(처리 중인 결과 반영은 마친다), Kafka 소비자를 멈춘다
-      return grpc
-        .close()
+      // 받는 gRPC 호출을 먼저 닫고(처리 중인 결과 반영은 마친다), Kafka 소비자를 멈춘다. 제어 포트도 함께 닫는다
+      return Promise.all([grpc.close(), control?.close() ?? Promise.resolve()])
         .then(() => consumers?.stop())
         .then(() => dueWorker?.stop())
         .then(() => edgeSync?.stop())

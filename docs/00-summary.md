@@ -623,6 +623,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-581: 2026-11-14 웨이브 2 마감. develop f6476dc2, CI 43605816693 초록. PROGRESS·BUILD_ORDER 갱신.
 - R-582 BAT-435 GAT-170 잔여 — scanner_placement·scanner_readiness(0005), GET /v1/scanner/shift·readiness, 파트너·현장 책임자 배치(If-Match·ETag), 등록 코드 재발급, IP 실패 제한(10분 10회 → 429, 전체 100회 → SEV3), last_seen_at 표시, identity TerminateScannerSessions·control.sessions-terminated(DEVICE_REVOKED), 기기 인증만 스캔 업로드, SCR-033·SCR-035 실제 API 연결(DPoP·IndexedDB·version-vector 신선도).
 - R-583: BAT-425 GAT-130 잔여 구현. refund.proto gRPC 정본과 ops-svc 클라이언트, 자동 정지·백그라운드 실행기·연기 신청 창·팬 알림 Outbox·ops_alert. 막힌 몫은 배상 송금·정산 지급 연결·core-svc notify 발송기·회차 취소 요청 REST·결제사 서킷 상태.
+- R-584 — SALE_STOP/SALE_RESUME 2인 승인 집행(purchase-svc sale_control 0019·좌석 Redis 사본, queue-svc notice·ctl 사본), ops.command-events Kafka 소비자(HTTP 호환·eventKey 멱등·held_event 0005), SSE /v1/ops/live(command·audit·reset·Last-Event-ID·1시간 reset, console-host SCR-030 폴링 제거), 제어 gRPC ControlReceiver.ApplyControl(purchase/queue 서버·ops 클라이언트·판 번호 ack), 감사 체크포인트 Ed25519 공개 앵커·공개 검증 경로(/v1/ops/audit-anchors, 0006). 갈래 2 merge 뒤 마이그레이션을 0019·0004~0006으로 재번호했다. cheap gate: ops 67·purchase 전체·queue 685·console-host 57·platform 532·contracts 41·api-client 113, typecheck·lint·doc-check·trace-check(GAT-300 11·GAT-310 8)·records·contracts gen:check·console-host build 통과.
 
 ## 5. [충돌] 결정 결과
 

@@ -3,6 +3,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotPathMetrics, HotRedis } from '@peaket/platform';
 import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from './modules/admission/index.js';
 import { type ArrivalCookies, type ArrivalSignals, type DegradedLimits, EntryModule, type EligibilitySignals, type EventSchedules, type FirstVisitCookies, type FirstVisitSignals, type LeaveSignals, type LobbySignals, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
+import { MemorySaleSuspensionCopies, RedisSaleSuspensionCopies, SaleSuspensionModule, type SaleSuspensionCopies } from './modules/sale/index.js';
 import { type ShuffleProofSource, StateModule, type StateSnapshots } from './modules/state/index.js';
 import { VerificationModule, type VerificationModuleOptions, type VerificationStore } from './modules/verification/index.js';
 
@@ -35,6 +36,8 @@ export class AppModule {
       admission?: { signer?: AdmissionTokens; signals?: AdmissionSignals; store?: AdmissionStore; priorityGrants?: PriorityGrantStore; bookingRestrictions?: BookingRestrictions };
       /** 추가 검증 제출·이의(BOT-090): identity·trust 클라이언트, 건 요청 생산자. 넘기지 않은 것은 늘 503이다(시험은 메모리 저장소를 넘길 수 있다) */
       verification?: Omit<VerificationModuleOptions, 'storage' | 'redis' | 'store' | 'schedules'> & { store?: VerificationStore };
+      /** 판매 중지·재개 사본(BAT-465 R-584). 없으면 저장소에 맞는 것을 만든다(시험은 메모리 사본을 넘길 수 있다) */
+      saleSuspension?: SaleSuspensionCopies;
     },
   ): DynamicModule {
     const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}) });
@@ -57,7 +60,8 @@ export class AppModule {
           });
     const { store: verificationStore, ...v } = o.verification ?? {};
     const verification = 'redis' in o ? VerificationModule.register({ storage: 'redis', redis: o.redis, ...v }) : VerificationModule.register({ storage: 'memory', schedules: o.schedules, ...(verificationStore ? { store: verificationStore } : {}), ...v });
-    return { module: AppModule, imports: [entry, state, admission, verification] };
+    const saleSuspension = SaleSuspensionModule.register(o.saleSuspension ?? ('redis' in o ? new RedisSaleSuspensionCopies(o.redis) : new MemorySaleSuspensionCopies()));
+    return { module: AppModule, imports: [entry, state, admission, verification, saleSuspension] };
   }
 }
 

@@ -9,58 +9,8 @@ import { DecideCommand } from '../application/decide-command.js';
 import { GetCommand } from '../application/get-command.js';
 import { ListCommands } from '../application/list-commands.js';
 import { RetryCommand } from '../application/retry-command.js';
-import { COMMAND_STATES, COMMAND_TYPES, type Command } from '../domain/command.js';
-
-const CommandIdParams = z.object({ commandId: z.uuid() }).strict();
-const CommandBody = z
-  .object({
-    type: z.enum(COMMAND_TYPES),
-    reason: z.string().min(1).max(2000),
-    params: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
-const RejectBody = z.object({ reason: z.string().min(1).max(2000) }).strict();
-const OpsActorView = z.object({ adminAccountId: z.string(), displayName: z.string().nullable(), role: z.string() });
-const CommandView = z.object({
-  commandId: z.string(),
-  type: z.enum(COMMAND_TYPES),
-  state: z.enum(COMMAND_STATES),
-  reason: z.string(),
-  params: z.record(z.string(), z.unknown()),
-  requestedBy: OpsActorView,
-  eventId: z.string().nullable().optional(),
-  approvalExpiresAt: z.string().nullable().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  approvals: z.array(z.string()),
-  attempts: z.number(),
-  lastError: z.string().nullable().optional(),
-  executedAt: z.string().nullable().optional(),
-  result: z.record(z.string(), z.unknown()).nullable().optional(),
-  canApprove: z.boolean(),
-});
-const CommandBaseView = CommandView.omit({ params: true });
-const CommandPageView = z.object({ items: z.array(CommandBaseView), nextCursor: z.string().nullable() });
-
-// 표시 이름은 identity admin_account 조회가 붙기 전까지 null이다(후속). 목록에는 params를 싣지 않는다(openapi).
-const baseViewOf = (c: Command, me?: Principal): z.output<typeof CommandBaseView> => ({
-  commandId: c.commandId,
-  type: c.type,
-  state: c.state,
-  reason: c.reason,
-  requestedBy: { adminAccountId: c.requestedBy, displayName: null, role: c.requestedRole },
-  ...(c.eventId !== undefined ? { eventId: c.eventId } : {}),
-  ...(c.approvalExpiresAtMs !== undefined ? { approvalExpiresAt: new Date(c.approvalExpiresAtMs).toISOString() } : {}),
-  createdAt: new Date(c.createdAtMs).toISOString(),
-  updatedAt: new Date(c.updatedAtMs).toISOString(),
-  approvals: [...c.approvals],
-  attempts: c.attempts,
-  ...(c.lastError !== undefined ? { lastError: c.lastError } : {}),
-  ...(c.executedAtMs !== undefined ? { executedAt: new Date(c.executedAtMs).toISOString() } : {}),
-  ...(c.result !== undefined ? { result: c.result } : {}),
-  canApprove: c.state === 'PENDING_APPROVAL' && me !== undefined && c.requestedBy !== me.accountId,
-});
-const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView> => ({ ...baseViewOf(c, me), params: c.params });
+import { COMMAND_STATES, COMMAND_TYPES } from '../domain/command.js';
+import { CommandBody, CommandIdParams, CommandPageView, CommandView, RejectBody, baseViewOf, viewOf } from './command-view.js';
 
 const badQuery = (): never => {
   throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });

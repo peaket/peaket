@@ -151,6 +151,10 @@ export function typeLabel(type: string): string {
       return '자동화 정지';
     case 'PG_ASSIGN':
       return '결제사 지정';
+    case 'SALE_STOP':
+      return '판매 중지';
+    case 'SALE_RESUME':
+      return '판매 재개';
     default:
       return type;
   }
