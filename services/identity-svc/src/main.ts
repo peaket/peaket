@@ -11,6 +11,7 @@ import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
   CheckScannerSession,
+  TerminateScannerSessions,
   CreateSession,
   EndSession,
   GetLinkProposal,
@@ -278,7 +279,10 @@ const grpc = await startGrpcServer({
     // 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, ADR-0051 결정 4, GAT-170)
     {
       definition: identityPackage().ScannerSessionCheckService.service,
-      handlers: scannerSessionCheckHandlers({ check: service.app.get(CheckScannerSession) }, (method, err) => service.logger.error({ err, method }, 'ScannerSessionCheckService 처리 실패')),
+      handlers: scannerSessionCheckHandlers(
+        { check: service.app.get(CheckScannerSession), terminate: service.app.get(TerminateScannerSessions) },
+        (method, err) => service.logger.error({ err, method }, 'ScannerSessionCheckService 처리 실패'),
+      ),
     },
   ],
 });

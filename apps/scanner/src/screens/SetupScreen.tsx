@@ -3,8 +3,10 @@
 // 가로 보드는 '준비 완료'·'앱 판이 낮음'만 그렸다. 나머지 상태의 가로 배치는 같은 두 칸 격자에 세로 보드의 내용을 옮겼다(추천안).
 import { ScannerShell } from "@peaket/ds/ScannerShell";
 import type { CSSProperties, ReactNode } from "react";
+import { formatClockOffset } from "../api/live";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
-import { Link } from "../app/router";
+import { Link, navigate } from "../app/router";
+import { useScannerLive } from "../app/useScannerLive";
 import { device, placement, prep } from "../fixtures/scanner";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 
@@ -19,9 +21,20 @@ export const SETUP_STATES = [
 ] as const;
 
 export function SetupScreen() {
-  const { state: st, layout } = usePreviewState(SETUP_STATES, "준비 중");
+  const { state: previewState, layout, search } = usePreviewState(SETUP_STATES, "준비 중");
+  const live = useScannerLive(search);
+  const liveShift = live.mode === "live" ? live.shift : undefined;
+  const st = liveShift ? live.setupState : previewState;
   const t = layout === "t";
   const l = layout === "l";
+  const liveError = live.mode === "error" ? live.error : undefined;
+  const deviceName = liveShift?.device.name ?? device.name;
+  const placementZone = liveShift?.placement.gateZone ?? placement.zone;
+  const placementMode = liveShift?.placement.mode ?? "IN";
+  const listSeq = liveShift ? String(liveShift.packageSeq) : prep.listSeq;
+  const clockOffset = liveShift ? formatClockOffset(liveShift.package.clockOffsetMs) : prep.clockOffset;
+  const pendingUploads = liveShift?.package.pendingUploads ?? 0;
+  const progress = liveShift ? (live.setupState === "준비 완료" ? 100 : 82) : prep.progress;
 
   const revoked = st === "미등록·폐기 기기";
   const noPl = st === "배치 없음";
@@ -54,7 +67,7 @@ export function SetupScreen() {
     <div className="col" style={{ gap: t ? 8 : l ? 4 : 6 }}>
       <h1 className={t ? "t-2xl" : "t-xl"}>근무 준비</h1>
       <p className={t ? "row wrap t-lg" : "row wrap t-md"} style={{ gap: t ? "8px 10px" : "6px 8px" }}>
-        <span className={t ? undefined : "fw-b"}>기기 {device.name}</span>
+        <span className={t ? undefined : "fw-b"}>기기 {deviceName}</span>
         {revoked ? (
           <span className={t ? "badge badge-lg badge-danger" : "badge badge-danger"}>
             <i className="ic ic-ban" aria-hidden="true" />
@@ -91,12 +104,12 @@ export function SetupScreen() {
       </div>
       {hasPlacement ? (
         <div className="col" style={{ gap: t ? 10 : l ? 6 : 8 }}>
-          <p className="t-md fw-b">{placement.event}</p>
+          <p className="t-md fw-b">{liveShift ? `회차 ${liveShift.eventId.slice(0, 8)}` : placement.event}</p>
           <div className="row wrap" style={{ gap: 8 }}>
-            <span className="badge badge-lg badge-outline">{placement.zone}</span>
-            <span className="badge badge-lg mode-in">
-              <i className="ic ic-arrow-right" aria-hidden="true" />
-              입장 모드
+            <span className="badge badge-lg badge-outline">{placementZone}</span>
+            <span className={placementMode === "OUT" ? "badge badge-lg mode-out" : "badge badge-lg mode-in"}>
+              <i className={placementMode === "OUT" ? "ic ic-arrow-left" : "ic ic-arrow-right"} aria-hidden="true" />
+              {placementMode === "OUT" ? "퇴장 모드" : "입장 모드"}
             </span>
           </div>
           {l ? null : <p className="t-sm">현장 책임자·파트너가 정합니다.</p>}
@@ -111,7 +124,7 @@ export function SetupScreen() {
               배치(게이트 구역·입장 또는 퇴장)를 받기 전에는 스캔을 시작할 수 없습니다.
             </div>
           </div>
-          <button className="btn btn-outline btn-lg btn-block" type="button">
+          <button className="btn btn-outline btn-lg btn-block" type="button" onClick={live.reload}>
             <i className="ic ic-refresh" aria-hidden="true" />
             배치 다시 확인하기
           </button>
@@ -141,10 +154,10 @@ export function SetupScreen() {
       {!listBlocked && !(l && listDone) ? <p className="t-sm">입장 시작 전에 목록을 내려받으세요.</p> : null}
       {preparing ? (
         <div className="row" style={{ gap: 10 }}>
-          <div className="progress progress-lg grow" role="progressbar" aria-label="목록 받기" aria-valuenow={prep.progress} aria-valuemin={0} aria-valuemax={100}>
-            <span style={{ width: `${prep.progress}%` }} />
+          <div className="progress progress-lg grow" role="progressbar" aria-label="목록 받기" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${progress}%` }} />
           </div>
-          <span className={pctClass}>{prep.progress}%</span>
+          <span className={pctClass}>{progress}%</span>
         </div>
       ) : null}
       {listDone ? (
@@ -208,9 +221,9 @@ export function SetupScreen() {
   );
   const stats = (
     <section aria-label="준비 상태 수치" style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: t ? 16 : 8 }}>
-      {listDone ? stat("목록 일련번호", prep.listSeq, "받음") : stat("목록 일련번호", "—", "받기 전", true)}
-      {hasPlacement ? stat("시계 오차", prep.clockOffset, "보정됨") : stat("시계 오차", "—", "재기 전", true)}
-      {stat("업로드 대기", "0건", "비어 있음")}
+      {listDone ? stat("목록 일련번호", listSeq, "받음") : stat("목록 일련번호", "—", "받기 전", true)}
+      {hasPlacement ? stat("시계 오차", clockOffset, "보정됨") : stat("시계 오차", "—", "재기 전", true)}
+      {stat("업로드 대기", `${pendingUploads}건`, pendingUploads === 0 ? "비어 있음" : "연결되면 올립니다")}
     </section>
   );
 
@@ -269,18 +282,28 @@ export function SetupScreen() {
     { id: "start-why-4", text: "새 버전을 적용한 뒤에 스캔을 시작할 수 있습니다", on: old },
   ];
   const shown = reasons.filter((r) => r.on);
+  const startScan = () => {
+    if (!liveShift) {
+      navigate("/scan");
+      return;
+    }
+    void live
+      .reportReadiness()
+      .then(() => navigate("/scan"))
+      .catch(() => navigate("/scan"));
+  };
   const startArea: ReactNode = ready ? (
     <div className="col" style={{ gap: t ? 12 : 10, marginTop: "auto" }}>
       <div className="banner banner-success" role="status">
         <i className="ic ic-check-circle" aria-hidden="true" />
         <div className="banner-body fw-b">
-          준비 완료: 목록 {prep.listSeq}, 시계 오차 {prep.clockOffset}, 업로드 대기 0건
+          준비 완료: 목록 {listSeq}, 시계 오차 {clockOffset}, 업로드 대기 {pendingUploads}건
         </div>
       </div>
-      <Link className="btn btn-primary btn-xl btn-block" href="/scan">
+      <button className="btn btn-primary btn-xl btn-block" type="button" onClick={startScan}>
         <i className="ic ic-scan" aria-hidden="true" />
         스캔 시작
-      </Link>
+      </button>
     </div>
   ) : notReady ? (
     <div className="col" style={{ gap: t ? 12 : 10, marginTop: "auto" }}>
@@ -331,6 +354,15 @@ export function SetupScreen() {
       <>
         <div className="col" style={{ gap: 10 }}>
           {head}
+        {liveError ? (
+          <div className="banner banner-danger" role="alert">
+            <i className="ic ic-ban" aria-hidden="true" />
+            <div className="banner-body">
+              <span className="banner-title">실제 스캐너 API에 연결하지 못했습니다</span>
+              {liveError}
+            </div>
+          </div>
+        ) : null}
           {revoked ? null : placementCard}
           {revoked ? null : listCard}
         </div>
@@ -347,6 +379,15 @@ export function SetupScreen() {
     main = (
       <>
         {head}
+        {liveError ? (
+          <div className="banner banner-danger" role="alert">
+            <i className="ic ic-ban" aria-hidden="true" />
+            <div className="banner-body">
+              <span className="banner-title">실제 스캐너 API에 연결하지 못했습니다</span>
+              {liveError}
+            </div>
+          </div>
+        ) : null}
         {revoked ? null : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 }}>
             {placementCard}
@@ -364,6 +405,15 @@ export function SetupScreen() {
     main = (
       <>
         {head}
+        {liveError ? (
+          <div className="banner banner-danger" role="alert">
+            <i className="ic ic-ban" aria-hidden="true" />
+            <div className="banner-body">
+              <span className="banner-title">실제 스캐너 API에 연결하지 못했습니다</span>
+              {liveError}
+            </div>
+          </div>
+        ) : null}
         {revoked ? null : placementCard}
         {revoked ? null : listCard}
         {revoked ? null : stats}

@@ -24,6 +24,7 @@ export { ListSessions } from './application/list-sessions.js';
 export { IssueReauthToken } from './application/issue-reauth-token.js';
 export { identityPackage, identityServiceHandlers, sessionServiceHandlers } from './inbound/session.grpc.js';
 export { CheckScannerSession } from './application/check-scanner-session.js';
+export { TerminateScannerSessions, ScannerSessionTerminationInputError } from './application/terminate-scanner-sessions.js';
 export { StaffInvitations, STAFF_CONSENT_VERSION, type StaffAssignmentView, type StaffInvitationView } from './application/staff-invitations.js';
 export { StartDeviceAuthorization, DeviceAuthorizationError, type DeviceAuthorizationStart, SCANNER_APPROVAL_URL_ENV } from './application/start-device-authorization.js';
 export { DeviceApprovals, DeviceApprovalError, type DeviceApprovalView } from './application/device-approvals.js';

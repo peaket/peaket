@@ -12,6 +12,8 @@ export interface TicketServiceConfig {
   readonly redisUrl?: string;
   /** 오프라인 스냅샷 허용 최대 시간(ms). 기본 24시간 [가정] */
   readonly scannerMaxOfflineMs: number;
+  /** core-svc 내부 HTTP 주소(회차 판매·입장 창). 없으면 근무 준비가 창을 비우고 OUT 배치는 503이다 */
+  readonly coreHttpUrl?: string;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -30,6 +32,7 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(identityGrpcUrl ? { identityGrpcUrl } : {}),
     ...(redisUrl ? { redisUrl } : {}),
     scannerMaxOfflineMs: scannerMaxOfflineMsOf(env.PEAKET_SCANNER_MAX_OFFLINE_MS),
+    ...(env.PEAKET_CORE_HTTP_URL ? { coreHttpUrl: env.PEAKET_CORE_HTTP_URL } : {}),
   };
 }
 

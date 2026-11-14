@@ -25,6 +25,10 @@ export interface SaleEventRow extends EventEditable {
   eventId: string;
   status: EventStatus;
   version: number;
+  /** 재입장 허용 여부(POL-018). 없으면 불허로 본다 */
+  reentryAllowed?: boolean;
+  /** 입장 기록 마감 시각(아직이면 null) */
+  entryClosedAt?: Date | null;
   /** 공연의 배치본(승인 전에는 없을 수 있다) */
   venueId?: string | null;
   /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 없다 */

@@ -64,17 +64,66 @@ export const CreateScannerTokenResponse = zod.unknown()
  * @summary 근무 준비 정보(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호
  */
 export const GetScannerShiftResponse = zod.object({
-  "serverTime": zod.iso.datetime({"offset":true}).optional(),
-  "eventId": zod.string().optional(),
-  "reentryAllowed": zod.boolean().optional(),
+  "serverTime": zod.iso.datetime({"offset":true}),
+  "eventId": zod.string(),
+  "reentryAllowed": zod.boolean(),
   "placement": zod.object({
   "gateZone": zod.string(),
   "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
-}).optional(),
-  "packageSeq": zod.int().optional(),
-  "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
-  "proxy": zod.boolean().optional()
-}).describe('근무 준비 응답(SCR-033)')
+}),
+  "packageSeq": zod.int(),
+  "role": zod.enum(['gate_staff', 'gate_lead']),
+  "proxy": zod.boolean(),
+  "device": zod.object({
+  "deviceId": zod.string(),
+  "name": zod.string(),
+  "status": zod.enum(['ACTIVE', 'REVOKED', 'RETIRED']),
+  "credentialType": zod.enum(['MTLS_CERT', 'DEVICE_KEY']),
+  "enrolled": zod.boolean().describe('기기 키 지문(jkt)이나 인증서 지문이 묶였는가'),
+  "lastSeenAt": zod.iso.datetime({"offset":true}).optional(),
+  "mtls": zod.boolean().describe('mTLS 선택지를 쓰는 기기인가. 기본안은 DPoP라 false')
+}),
+  "assignment": zod.object({
+  "assignmentId": zod.string(),
+  "role": zod.enum(['gate_staff', 'gate_lead']),
+  "validFrom": zod.iso.datetime({"offset":true}),
+  "validUntil": zod.iso.datetime({"offset":true}),
+  "proxy": zod.boolean().describe('대리 승인 세션이면 true')
+}),
+  "eventWindows": zod.object({
+  "salesOpensAt": zod.iso.datetime({"offset":true}).optional(),
+  "salesEndsAt": zod.iso.datetime({"offset":true}).optional(),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).optional(),
+  "entryClosesAt": zod.iso.datetime({"offset":true}).optional(),
+  "endsAt": zod.iso.datetime({"offset":true}).optional()
+}).optional().describe('core-svc 회차에서 읽은 판매·입장 창. 값이 없는 칸은 싣지 않는다'),
+  "package": zod.object({
+  "seq": zod.int().describe('지금 서버의 마지막 변경 일련번호'),
+  "issuedAt": zod.iso.datetime({"offset":true}).describe('이 버전 벡터를 만든 서버 시각'),
+  "maxOfflineMs": zod.int().describe('오프라인 허용 최대 시간(ms). 24시간 [가정]'),
+  "reportedAt": zod.iso.datetime({"offset":true}).optional().describe('기기가 마지막으로 준비 보고를 보낸 시각'),
+  "ageMs": zod.int().optional().describe('마지막 준비 보고 뒤 지난 시간(ms)'),
+  "reportedPackageSeq": zod.int().optional().describe('기기가 마지막으로 받았다고 보고한 목록 일련번호'),
+  "clockOffsetMs": zod.int().optional().describe('마지막 준비 보고의 시계 오차(ms). 양수면 기기가 서버보다 느리다'),
+  "pendingUploads": zod.int().optional().describe('마지막 준비 보고 때 올리지 못한 기록 수'),
+  "stale": zod.boolean().describe('준비 보고가 오프라인 허용 시간을 넘겼거나 기기가 서버보다 새 번호를 들고 있어 재동기화가 필요하다')
+}),
+  "versionVector": zod.object({
+  "eventId": zod.string(),
+  "seq": zod.int(),
+  "ticketSeq": zod.int().describe('TICKET_STATUS의 마지막 일련번호'),
+  "keySeq": zod.int().describe('KEY_REGISTERED·KEY_REVOKED의 마지막 일련번호'),
+  "policySeq": zod.int().describe('POLICY의 마지막 일련번호'),
+  "placementSeq": zod.int().describe('PLACEMENT의 마지막 일련번호'),
+  "flagSeq": zod.int().describe('FLAG의 마지막 일련번호'),
+  "issuedAt": zod.iso.datetime({"offset":true}).describe('이 벡터를 만든 서버 시각'),
+  "maxOfflineMs": zod.int().describe('오프라인 허용 최대 시간(ms). 이보다 오래된 스냅샷은 재동기화가 필요하다(24시간 [가정])')
+}).describe('오프라인 스냅샷 버전 벡터(offline-gate §6.3, GAT-160). 각 값은 그 종류 변경의 마지막 일련번호다'),
+  "auth": zod.object({
+  "deviceProof": zod.enum(['DPOP', 'MTLS']),
+  "staffSession": zod.boolean().describe('이 응답은 스태프 세션 확인을 통과한 요청에만 준다')
+})
+}).describe('근무 준비 응답(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호에 기기·배정·근무 창·판매/입장 창·목록 동기화 나이·버전 벡터 신선도·기기 인증 방식을 더한다(GAT-170 잔여, offline-gate §6.2)')
 
 /**
  * FR-035, FR-046, ADR-0051. 마지막 보고로 바꾼다(같은 보고를 다시 보내도 결과가 같다). 파트너 현장 운영 현황(gate-status)의 기기 준비 표시가 이 보고를 쓴다(추천 적용 2026-10-21, ADR-0081)

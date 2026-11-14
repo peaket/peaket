@@ -7,8 +7,10 @@ import type {
   ScanEventInput,
   ScannerChangesView,
   ScannerPackageView,
+  ScannerVersionVector,
 } from './scanner-gate.js';
 import type { ScannerDeviceRecord } from './scanner-device.js';
+import type { ScannerPlacementMode, ScannerPlacementRecord, ScannerReadinessRecord } from './scanner-shift.js';
 
 export interface ScannerDeviceListInput {
   readonly cursor?: string;
@@ -55,12 +57,15 @@ export const DPOP_REPLAY_STORE = Symbol('ticket.DpopReplayStore');
 /** 스캐너 목록·변경분·스캔·이상 표시 저장소. 판정과 일련번호 매기기는 저장소 트랜잭션 안에서 끝낸다. */
 export interface ScannerGateStore {
   package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView>;
+  /** 회차의 지금 버전 벡터(근무 준비 응답용, GAT-160). 변경 종류별 마지막 일련번호 */
+  versionVector(eventId: string, nowMs: number): Promise<ScannerVersionVector>;
   changes(i: { eventId: string; after: number; limit: number; nowMs?: number }): Promise<ScannerChangesView>;
   acceptScans(i: {
     eventId: string;
     deviceId: string;
-    staffAccountId: string;
-    sessionId: string;
+    /** 기기 인증만으로 올라온 기록은 없다(세션 밖 기록으로 표시한다) */
+    staffAccountId?: string;
+    sessionId?: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
     /** 낡은 버전 벡터로 판정한 기록 ID(GAT-160). STALE_VERSION 이상 표시를 만든다 */
@@ -73,3 +78,64 @@ export interface ScannerGateStore {
 }
 
 export const SCANNER_GATE_STORE = Symbol('ticket.ScannerGateStore');
+
+/** 기기 배치·근무 준비 보고 저장소(GAT-170 잔여, offline-gate §6.2). 배치를 바꾸면 PLACEMENT 변경을 같은 트랜잭션에 적는다 */
+export interface ScannerShiftStore {
+  placementOf(eventId: string, deviceId: string): Promise<ScannerPlacementRecord | undefined>;
+  placementsOf(eventId: string): Promise<ScannerPlacementRecord[]>;
+  /**
+   * 배치를 넣거나 고친다. expectedVersion은 If-Match의 판(새 배치는 0)이고, 다르면 ScannerPlacementConflict를 던진다.
+   * 바꾼 배치를 scanner_change(PLACEMENT)에 같은 트랜잭션으로 적는다.
+   */
+  putPlacement(i: {
+    eventId: string;
+    deviceId: string;
+    gateZone: string;
+    mode: ScannerPlacementMode;
+    setBy: string;
+    atMs: number;
+    expectedVersion: number;
+  }): Promise<ScannerPlacementRecord>;
+  readinessOf(eventId: string, deviceId: string): Promise<ScannerReadinessRecord | undefined>;
+  reportReadiness(i: { eventId: string; deviceId: string; packageSeq: number; clockOffsetMs: number; pendingUploads: number; reportedBy: string; atMs: number }): Promise<ScannerReadinessRecord>;
+  /** 회차의 지금 마지막 변경 일련번호(scanner_seq). 없으면 0 */
+  lastSeq(eventId: string): Promise<number>;
+}
+
+export const SCANNER_SHIFT_STORE = Symbol('ticket.ScannerShiftStore');
+
+/** 기기 폐기 때 identity 스캐너 세션을 끝내고 control.sessions-terminated를 남기는 포트 */
+export interface ScannerSessionTerminator {
+  terminateByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<number>;
+}
+
+export const SCANNER_SESSION_TERMINATOR = Symbol('ticket.ScannerSessionTerminator');
+
+/** core-svc 회차의 판매·입장 창(offline-gate §6.2). ticket-svc는 core DB에 직접 붙지 않는다 */
+export interface ScannerEventPolicy {
+  /** 회차 판매자(테넌트). 파트너 배치의 회차 소유 확인에 쓴다 */
+  promoterId: string;
+  reentryAllowed: boolean;
+  salesOpensAtMs?: number;
+  salesEndsAtMs?: number;
+  entryOpensAtMs?: number;
+  entryClosesAtMs?: number;
+  endsAtMs?: number;
+}
+
+export interface ScannerEventPolicyProvider {
+  /** 회차가 없거나 core-svc가 답하지 못하면 undefined. 배치 검사는 undefined를 '모른다'로 닫는다 */
+  get(eventId: string): Promise<ScannerEventPolicy | undefined>;
+}
+
+export const SCANNER_EVENT_POLICY = Symbol('ticket.ScannerEventPolicy');
+
+/** 등록 시도 IP 실패 제한(offline-gate §6.1, O-T42). 성공은 세지 않는다 */
+export interface EnrollmentAttemptLimiter {
+  /** 지금 이 IP가 막히지 않았는가. false면 코드를 꺼내기 전에 429로 닫는다 */
+  allowed(ip: string): Promise<boolean>;
+  /** 실패 한 번을 세고, 전체 실패가 SEV3 경보 경계를 넘었는지 알린다 */
+  failed(ip: string): Promise<{ globalAlert: boolean; globalFailures: number }>;
+}
+
+export const ENROLLMENT_ATTEMPT_LIMITER = Symbol('ticket.EnrollmentAttemptLimiter');

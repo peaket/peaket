@@ -7,6 +7,7 @@ import {
   filterDevices,
   formatKstDate,
   formatKstDateTime,
+  lastSeenSummary,
   mapDeviceList,
   promoterLabel,
   relativeLastSeen,
@@ -49,6 +50,8 @@ test('SCR053_ KST 날짜·시각과 마지막 연락', () => {
   assert.equal(relativeLastSeen('2026-11-14T02:59:51Z', now), '9초 전');
   assert.equal(relativeLastSeen('2026-11-14T02:54:00Z', now), '6분 전');
   assert.equal(relativeLastSeen(undefined, now), '—');
+  assert.deepEqual(lastSeenSummary('2026-11-14T02:59:51Z', now), { relative: '9초 전', absolute: '11/14(토) 11:59 KST', never: false });
+  assert.deepEqual(lastSeenSummary(undefined, now), { relative: '아직 없음', absolute: '—', never: true });
 });
 
 test('SCR053_ 등록 코드 QR 주소와 만료 안내', () => {

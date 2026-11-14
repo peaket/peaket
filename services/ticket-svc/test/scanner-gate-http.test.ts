@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
+import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
 
 const NOW = Date.parse('2026-11-13T03:00:00.000Z');
 const IAT = Math.floor(NOW / 1000);
@@ -107,9 +108,10 @@ beforeAll(async () => {
   sessions = new FakeSessions();
   sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
   const replay = new MemoryDpopReplayStore(clock);
+  const shift = new MemoryScannerShiftStore(gate);
   svc = await createService({
     name: 'ticket-svc-gate-int',
-    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate } }),
+    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

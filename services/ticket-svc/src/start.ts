@@ -2,7 +2,7 @@
 // gRPC 포트는 서비스 안에서 따로 열고, health/management HTTP는 플랫폼 createService가 연다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, createDatabase, createHotRedis, createService, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, createDatabase, createExternalHttpClient, createHotRedis, createService, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -16,9 +16,13 @@ import { scannerDeviceLookupHandlers } from './modules/scanner/inbound/scanner-d
 import {
   DrizzleScannerDeviceStore,
   DrizzleScannerGateStore,
+  DrizzleScannerShiftStore,
   GrpcScannerSessionCheck,
+  HttpCoreEventPolicy,
+  MemoryEnrollmentAttemptLimiter,
   MemoryEnrollmentCodeStore,
   RedisDpopReplayStore,
+  RedisEnrollmentAttemptLimiter,
   RedisEnrollmentCodeStore,
 } from './modules/scanner/index.js';
 
@@ -41,11 +45,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const lbProfile = loadPlatformConfig(env).grpcLbProfile;
   let redis: Awaited<ReturnType<typeof createHotRedis>> | undefined;
   let adminAuthz: (AdminAuthzPort & { close?(): void }) | undefined;
-  let scannerSessions: (ScannerSessionCheck & { close?(): void }) | undefined;
+  let scannerSessions: (ScannerSessionCheck & { terminateByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<number>; close?(): void }) | undefined;
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
+  let alert: ((message: string, fields: Record<string, unknown>) => void) | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
+    const shiftStore = new DrizzleScannerShiftStore(database);
     const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
     const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
     const ticket = new TicketService({ store, clock: systemClock });
@@ -54,6 +60,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
     const replay = redis ? new RedisDpopReplayStore(redis) : new MemoryDpopReplayStore(systemClock);
+    const limiter = redis ? new RedisEnrollmentAttemptLimiter(redis) : new MemoryEnrollmentAttemptLimiter(() => systemClock.now());
+    const policy = config.coreHttpUrl
+      ? new HttpCoreEventPolicy({
+          client: createExternalHttpClient({ provider: 'core-svc', baseUrl: config.coreHttpUrl, timeoutCapMs: 300, clock: systemClock }),
+          clock: systemClock,
+        })
+      : undefined;
     // identity 주소가 없으면 스캐너 세션 확인은 503, 관제 역할 판정은 401로 닫는다(대역으로 통과시키지 않는다)
     adminAuthz = config.identityGrpcUrl ? new GrpcAdminAuthz(config.identityGrpcUrl, lbProfile) : { getAdminAuthz: async () => ({ valid: false, role: '' }) };
     scannerSessions = config.identityGrpcUrl
@@ -62,15 +75,33 @@ export async function start(o: StartOptions): Promise<StartedService> {
           check: async () => {
             throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 스캐너 세션을 확인하지 못한다');
           },
+          terminateByDevice: async () => {
+            throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 스캐너 세션을 끝내지 못한다');
+          },
         };
     service = await createService({
       name: SERVICE,
       env,
-      module: AppModule.register({ scanner: { store: scannerStore, codes, replay, gate: gateStore, maxOfflineMs: config.scannerMaxOfflineMs }, ticket: { deviceKeys } }),
+      module: AppModule.register({
+        scanner: {
+          store: scannerStore,
+          codes,
+          replay,
+          gate: gateStore,
+          shift: shiftStore,
+          ...(policy ? { policy } : {}),
+          limiter,
+          sessions: scannerSessions,
+          alert: (message, fields) => alert?.(message, fields),
+          maxOfflineMs: config.scannerMaxOfflineMs,
+        },
+        ticket: { deviceKeys },
+      }),
       adminAuthz,
       scanner: { devices: scannerStore, sessions: scannerSessions, replay },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
+    alert = (message, fields) => service!.logger.warn(fields, message);
     service.readiness.register('grpc');
     const httpPorts = await service.listen();
     grpc = await startGrpcServer({

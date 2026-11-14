@@ -11,6 +11,7 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { DrizzleScannerDeviceStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-device-store.js';
 import { DrizzleScannerGateStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-gate-store.js';
+import { DrizzleScannerShiftStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-shift-store.js';
 import { DrizzleTicketStore } from '../src/modules/ticket/adapters/db/drizzle-ticket-store.js';
 import { TicketService } from '../src/modules/ticket/application/ticket-service.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
@@ -137,9 +138,10 @@ beforeAll(async () => {
   sessions = new FakeSessions();
   sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
   const replay = new MemoryDpopReplayStore(clock);
+  const shift = new DrizzleScannerShiftStore(database);
   svc = await createService({
     name: 'ticket-svc-gate-int',
-    module: AppModule.register({ scanner: { store: deviceStore, codes: new MemoryEnrollmentCodeStore(clock), replay, gate } }),
+    module: AppModule.register({ scanner: { store: deviceStore, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

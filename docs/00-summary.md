@@ -621,6 +621,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-579: BAT-430 우선 구매 문제 유형 두 개를 계약에 더하고 seat-store 제목을 정본에 맞춘다.
 - R-580: BAT-430 PRIORITY 홀드 변경에 purchase test-int 기대값을 맞춘다.
 - R-581: 2026-11-14 웨이브 2 마감. develop f6476dc2, CI 43605816693 초록. PROGRESS·BUILD_ORDER 갱신.
+- R-582 BAT-435 GAT-170 잔여 — scanner_placement·scanner_readiness(0005), GET /v1/scanner/shift·readiness, 파트너·현장 책임자 배치(If-Match·ETag), 등록 코드 재발급, IP 실패 제한(10분 10회 → 429, 전체 100회 → SEV3), last_seen_at 표시, identity TerminateScannerSessions·control.sessions-terminated(DEVICE_REVOKED), 기기 인증만 스캔 업로드, SCR-033·SCR-035 실제 API 연결(DPoP·IndexedDB·version-vector 신선도).
 - R-583: BAT-425 GAT-130 잔여 구현. refund.proto gRPC 정본과 ops-svc 클라이언트, 자동 정지·백그라운드 실행기·연기 신청 창·팬 알림 Outbox·ops_alert. 막힌 몫은 배상 송금·정산 지급 연결·core-svc notify 발송기·회차 취소 요청 REST·결제사 서킷 상태.
 
 ## 5. [충돌] 결정 결과

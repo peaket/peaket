@@ -41,6 +41,11 @@ export interface ScannerSessionAnswer {
   valid: boolean;
   role?: ScannerStaffRole;
   eventId?: string;
+  /** 배정 ID·역할 유효 창·대리 승인 여부(근무 준비 응답, GAT-170 잔여) */
+  assignmentId?: string;
+  validFromMs?: number;
+  validUntilMs?: number;
+  proxy?: boolean;
 }
 
 /** 스캐너 세션의 지금 유효성(identity-svc ScannerSessionCheckService) */

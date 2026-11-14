@@ -29,6 +29,7 @@ import { migrateTicket } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleScannerDeviceStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-device-store.js';
 import { DrizzleScannerGateStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-gate-store.js';
+import { DrizzleScannerShiftStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-shift-store.js';
 import { RedisDpopReplayStore } from '../src/modules/scanner/adapters/redis-dpop-replay-store.js';
 import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { ScannerDevices } from '../src/modules/scanner/application/scanner-devices.js';
@@ -133,12 +134,12 @@ beforeAll(async () => {
   replay = new RedisDpopReplayStore(redis);
   clock = fakeClock({ now: NOW });
   devices = new ScannerDevices({ store, codes, clock });
-  checkSession = new CheckScannerSession(new DrizzleStaffAssignmentStore(database), clock);
+  checkSession = new CheckScannerSession(new DrizzleStaffAssignmentStore(database, clock), clock);
   const sessions: ScannerSessionCheck = { check: (q) => checkSession.run(q) };
   const adminAuthz: AdminAuthzPort = { getAdminAuthz: async () => ({ valid: true, role: 'operator' }) };
   ticketSvc = await createService({
     name: 'ticket-svc-scanner-int',
-    module: AppModule.register({ scanner: { store, codes, replay, gate: new DrizzleScannerGateStore(database) } }),
+    module: AppModule.register({ scanner: { store, codes, replay, gate: new DrizzleScannerGateStore(database), shift: new DrizzleScannerShiftStore(database) } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

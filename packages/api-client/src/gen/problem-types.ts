@@ -53,6 +53,7 @@ export type ProblemType =
   | 'duplicate-account'
   | 'duplicate-admission'
   | 'enrollment-code-expired'
+  | 'enrollment-rate-limited'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
   | 'event-schedule-invalid'
@@ -88,6 +89,7 @@ export type ProblemType =
   | 'invalid-device-key'
   | 'invalid-dpop-proof'
   | 'invalid-enrollment-code'
+  | 'invalid-placement'
   | 'invalid-priority-grant'
   | 'invalid-query'
   | 'invalid-seat'
@@ -229,12 +231,14 @@ export type ProblemType =
   | 'scale-change-not-approved'
   | 'scale-change-not-up'
   | 'scanner-auth-unavailable'
+  | 'scanner-device-inactive'
   | 'scanner-device-key-in-use'
   | 'scanner-device-not-found'
   | 'scanner-event-mismatch'
   | 'scanner-flag-not-found'
   | 'scanner-login-rate-limited'
   | 'scanner-origin-forbidden'
+  | 'scanner-placement-reentry-not-allowed'
   | 'seat-already-held'
   | 'seat-recently-released'
   | 'seat-store-unavailable'
@@ -328,6 +332,7 @@ export const PROBLEM_TYPES = {
   'duplicate-account': { status: 409, title: "이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요" },
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'enrollment-code-expired': { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" },
+  'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
@@ -363,6 +368,7 @@ export const PROBLEM_TYPES = {
   'invalid-device-key': { status: 422, title: "기기 공개키가 P-256 곡선 위의 점이 아닙니다" },
   'invalid-dpop-proof': { status: 400, title: "DPoP 증명이 올바르지 않습니다" },
   'invalid-enrollment-code': { status: 400, title: "등록 코드 형식이 올바르지 않습니다" },
+  'invalid-placement': { status: 400, title: "기기 배치 입력이 올바르지 않습니다" },
   'invalid-priority-grant': { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
@@ -504,12 +510,14 @@ export const PROBLEM_TYPES = {
   'scale-change-not-approved': { status: 422, title: "판매 승인된 공연만 규모를 올릴 수 있습니다" },
   'scale-change-not-up': { status: 422, title: "지금보다 큰 규모로만 올릴 수 있습니다" },
   'scanner-auth-unavailable': { status: 503, title: "스캐너 기기·세션을 확인하지 못했습니다" },
+  'scanner-device-inactive': { status: 409, title: "폐기·퇴역한 스캐너 기기입니다" },
   'scanner-device-key-in-use': { status: 409, title: "이미 다른 기기에 묶인 기기 키입니다" },
   'scanner-device-not-found': { status: 404, title: "스캐너 기기를 찾을 수 없습니다" },
   'scanner-event-mismatch': { status: 403, title: "스캐너 세션의 회차와 요청 회차가 다릅니다" },
   'scanner-flag-not-found': { status: 404, title: "이상 표시를 찾을 수 없습니다" },
   'scanner-login-rate-limited': { status: 429, title: "승인 요청이 너무 잦습니다" },
   'scanner-origin-forbidden': { status: 403, title: "스캐너 앱 출처가 아닙니다" },
+  'scanner-placement-reentry-not-allowed': { status: 422, title: "재입장을 허용하지 않는 회차에는 퇴장 모드를 배치할 수 없습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },
   'seat-store-unavailable': { status: 503, title: "좌석 정보를 잠시 쓸 수 없습니다" },

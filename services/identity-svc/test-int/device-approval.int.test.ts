@@ -1,6 +1,6 @@
 // identity-svc 기기 승인 로그인 실제 PostgreSQL 18·Valkey 8.1 통합 시험(BUILD_ORDER GAT-220, R-566).
 // 0032 적용·재적용, 기기 코드 TTL·1회용, 승인·교대·만료·폐기, 세션 last_seen_at, 계정/기기 rate limit을 본다.
-import { createDatabase, createHotRedis, fakeClock, type Database, type HotRedis } from '@peaket/platform';
+import { createDatabase, createHotRedis, ensureOutboxPartitions, fakeClock, type Database, type HotRedis } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { migrateIdentity } from '../scripts/migrate.mjs';
@@ -8,6 +8,7 @@ import { DrizzleStaffAssignmentStore } from '../src/modules/session/adapters/db/
 import { RedisDeviceAuthorizations, RedisDeviceApprovalLimits } from '../src/modules/session/adapters/redis-device-authorizations.js';
 import { RedisScannerDpopReplayStore } from '../src/modules/session/adapters/redis-scanner-dpop-replay.js';
 import { CheckScannerSession } from '../src/modules/session/application/check-scanner-session.js';
+import { TerminateScannerSessions } from '../src/modules/session/application/terminate-scanner-sessions.js';
 import { DeviceApprovals } from '../src/modules/session/application/device-approvals.js';
 import { PollScannerToken } from '../src/modules/session/application/poll-scanner-token.js';
 import { StartDeviceAuthorization } from '../src/modules/session/application/start-device-authorization.js';
@@ -72,7 +73,8 @@ beforeAll(async () => {
   redis = await createHotRedis({ url: valkey.url });
   database = createDatabase({ url: pg.url, applicationName: 'identity-device-approval-test', max: 8 });
   clock = fakeClock({ now: NOW });
-  store = new DrizzleStaffAssignmentStore(database);
+  await ensureOutboxPartitions(database, clock);
+  store = new DrizzleStaffAssignmentStore(database, clock);
   registry = new FakeRegistry();
   auths = new RedisDeviceAuthorizations(redis, () => clock.now());
   const limits = new RedisDeviceApprovalLimits(redis);
@@ -207,5 +209,23 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
 
     clock.advance(5 * 60_000 + 1);
     await expect(poll.run({ deviceCode: expired.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
+  });
+
+  test('기기 폐기 세션 종료는 scanner_session을 끝내고 DEVICE_REVOKED Outbox를 남긴다', async () => {
+    const device = randomUUID();
+    const session = randomUUID();
+    await database.pool.query(
+      `insert into scanner_session (id, staff_assignment_id, scanner_device_id, role, proxy, approved_at, expires_at)
+       values ($1, $2, $3, 'gate_staff', false, $4, $5)`,
+      [session, ASSIGN, device, new Date(clock.now()), new Date(clock.now() + HOUR)],
+    );
+    const terminate = new TerminateScannerSessions(store, clock);
+    await expect(terminate.run({ deviceId: device, reason: 'DEVICE_REVOKED' })).resolves.toEqual({ terminated: 1 });
+    const ended = await database.pool.query('select terminated_at from scanner_session where id = $1', [session]);
+    expect(ended.rows[0].terminated_at).not.toBeNull();
+    const outbox = await database.pool.query("select topic, payload from outbox where topic = 'control.sessions-terminated' order by id desc limit 1");
+    expect(outbox.rows[0].topic).toBe('control.sessions-terminated');
+    expect(JSON.parse(Buffer.from(outbox.rows[0].payload).toString('utf8'))).toMatchObject({ accountId: ACCOUNT, sessionId: session, reason: 'DEVICE_REVOKED' });
+    await expect(terminate.run({ deviceId: device, reason: 'DEVICE_REVOKED' })).resolves.toEqual({ terminated: 0 });
   });
 });

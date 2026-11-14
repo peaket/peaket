@@ -4,6 +4,8 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
 import {
   CreateOpsScannerDeviceBody,
+  CreateOpsScannerDeviceEnrollmentCodeParams,
+  CreateOpsScannerDeviceEnrollmentCodeResponse,
   CreateOpsScannerDeviceResponse,
   CreateOpsScannerDeviceRevocationBody,
   CreateOpsScannerDeviceRevocationParams,
@@ -14,12 +16,13 @@ import {
 import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, ProblemError, RequestValidationError, Roles, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { ScannerDeviceNotFound, ScannerDevices } from '../application/scanner-devices.js';
+import { ScannerDeviceInactive, ScannerDeviceNotFound, ScannerDevices } from '../application/scanner-devices.js';
 import { ScannerDeviceInputError } from '../domain/scanner-device.js';
 
 function reject(e: unknown): never {
   if (e instanceof ScannerDeviceInputError) throw new RequestValidationError(`스캐너 기기 입력이 올바르지 않습니다: ${e.code}`);
   if (e instanceof ScannerDeviceNotFound) throw new ProblemError({ type: 'scanner-device-not-found', status: 404, title: '스캐너 기기를 찾을 수 없습니다' });
+  if (e instanceof ScannerDeviceInactive) throw new ProblemError({ type: 'scanner-device-inactive', status: 409, title: '폐기·퇴역한 스캐너 기기입니다' });
   throw e;
 }
 
@@ -52,6 +55,22 @@ export class OpsScannerDevicesController {
     try {
       const r = await this.devices.register({ name: body.name, promoterId: body.promoterId, enrolledBy: me.accountId });
       return { ...r.device, enrollmentCode: r.enrollmentCode, enrollmentCodeExpiresAt: r.enrollmentCodeExpiresAt };
+    } catch (e) {
+      reject(e);
+    }
+  }
+
+  @Post(':deviceId/enrollment-code')
+  @HttpCode(201)
+  @ContractRouteSchema({ params: CreateOpsScannerDeviceEnrollmentCodeParams, responses: { 201: CreateOpsScannerDeviceEnrollmentCodeResponse } })
+  @Roles(['operator', 'commander'])
+  async issueCode(
+    @ContractParams(CreateOpsScannerDeviceEnrollmentCodeParams) params: z.output<typeof CreateOpsScannerDeviceEnrollmentCodeParams>,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<z.output<typeof CreateOpsScannerDeviceEnrollmentCodeResponse>> {
+    void reply.header('cache-control', 'no-store');
+    try {
+      return await this.devices.issueCode({ deviceId: params.deviceId });
     } catch (e) {
       reject(e);
     }

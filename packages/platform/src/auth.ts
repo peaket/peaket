@@ -25,7 +25,7 @@ import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
-import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, type ScannerStaffRole, verifyDpopProof } from './scanner-auth.js';
+import { athOf, DpopRejected, SCANNER_AUTH_METADATA, type ScannerAuthOptions, ScannerAuthState, type ScannerSessionAnswer, type ScannerStaffRole, verifyDpopProof } from './scanner-auth.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
 export const ROLE_VALUES = [
@@ -108,6 +108,11 @@ export interface Principal {
   deviceId?: string;
   /** 스캐너 세션이 가리키는 회차(GAT-180). 경로 회차와 대조한다 */
   eventId?: string;
+  /** 스캐너 세션의 배정과 역할 유효 창(GAT-170 잔여, 근무 준비 응답) */
+  assignmentId?: string;
+  staffValidFromMs?: number;
+  staffValidUntilMs?: number;
+  proxy?: boolean;
 }
 
 /** 지금 요청의 요청자(공개 경로나 요청 밖이면 undefined) */
@@ -491,11 +496,12 @@ export class ScannerGuard implements CanActivate {
     const policy = this.reflector.getAllAndOverride<RolesPolicy | undefined>(ROLES_METADATA, [ctx.getHandler(), ctx.getClass()]);
     let role: ScannerStaffRole | 'scanner_device';
     let eventId: string | undefined;
+    let session: ScannerSessionAnswer | undefined;
     if (deviceOnly) {
       role = 'scanner_device';
       if (policy && !policy.roles.includes(role)) throw new ForbiddenException();
     } else {
-      const session = await scanner.sessionOf(principal!.sessionId, device.deviceId);
+      session = await scanner.sessionOf(principal!.sessionId, device.deviceId);
       if (!session.valid || !session.role) throw scannerUnauthorized(reply, 'invalid_token');
       if (policy && !policy.roles.includes(session.role)) throw new ForbiddenException();
       role = session.role;
@@ -513,6 +519,10 @@ export class ScannerGuard implements CanActivate {
         deviceId: device.deviceId,
         tenantId: device.promoterId,
         ...(eventId ? { eventId } : {}),
+        ...(session?.assignmentId ? { assignmentId: session.assignmentId } : {}),
+        ...(session?.validFromMs !== undefined ? { staffValidFromMs: session.validFromMs } : {}),
+        ...(session?.validUntilMs !== undefined ? { staffValidUntilMs: session.validUntilMs } : {}),
+        ...(session?.proxy !== undefined ? { proxy: session.proxy } : {}),
       };
       rc.scannerDevice = { deviceId: device.deviceId, jkt: verified.jkt, ...(eventId ? { eventId } : {}) };
     }

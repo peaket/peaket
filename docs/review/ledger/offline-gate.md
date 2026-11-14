@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 19 | 104 | 0 | 0 | 0 | 0 | 0 | 19 | 90 | 232 |
-| 합계 | 19 | 104 | 0 | 0 | 0 | 0 | 0 | 19 | 90 | 232 |
+| B | 26 | 101 | 0 | 0 | 0 | 0 | 0 | 19 | 86 | 232 |
+| 합계 | 26 | 101 | 0 | 0 | 0 | 0 | 0 | 19 | 86 | 232 |
 
 ## docs/features/offline-gate.md
 
@@ -51,22 +51,22 @@
 | O-T35 | ④ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ④는 정상 처리된다 | 빈칸 | B | — |
 | O-T35 | ⑤ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ⑤는 정상 처리된다 | 빈칸 | B | — |
 | O-T36 | — | mTLS 선택지의 교차 출처 인증서(선택 PoC 5.4.3):… | 사전 요청은 인증서 없이 통과하고, 본 요청에는 기기 인증서가 실려 통과하며 PWA가 응답을 읽는다. 인증서 없는 본 요청은 403이다. 하나라도 안 되면… | 빈칸 | B | — |
-| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | ID만 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-http.test.ts |
 | O-T37 | ② | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ②은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | O-T37 | ③ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ③은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | O-T37 | ④ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ④은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | O-T37 | ⑤ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑤은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | O-T37 | ⑥ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑥은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
 | O-T37 | ⑦ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑦은 403(기기 폐기)이다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다 | ID만 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift-http.test.ts |
 | O-T38 | — | 목록 생성 중 커밋된 폐기(추천 적용 2026-10-28, 기술 검토… | 한 스냅샷 구현에서는 스캐너가 그 keyId를 폐기로 안다(빠짐 0건). 비교 대상에서는 빠짐이 재현된다. 같은 변경을 두 번 받아도 스캐너 상태가 같다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-gate.int.test.ts, services/ticket-svc/test/scanner-gate.test.ts |
 | O-T39 | — | 스캔 큐 쓰기의 내구성(추천 적용 2026-10-28, 기술 검토… | 다시 켜면 통과 화면을 본 기록이 모두 스캔 큐에 있다(유실 0건). strict의 판정 지연 p95가 150ms 안이다. 넘으면 wbs 5.4.7에서 예산을… | 빈칸 | B | — |
 | O-T40 | — | 온라인 → 오프라인 전환 중 판정(추천 적용 2026-10-28, 기술… | 결과가 나오지 않거나 오류인 판정이 0건이고, 전환 앞뒤 1분 판정 지연의 최댓값이 평소 p95(150ms) 안 [가정]이다(판정이 멈춘 시간 0초). 끊긴… | 빈칸 | B | — |
 | O-T41 | — | 레인 처리량(추천 적용 2026-10-28, 기술 검토 낮음-058):… | 오프라인의 분당 통과 인원 중앙값이 온라인의 90% [가정] 이상이다. 차이가 나면 판정 지연·화면 갱신·큐 쓰기 가운데 어디서 늘었는지 기록한다 | 빈칸 | B | — |
-| O-T42 | ① | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ① 15대 모두 201(성공은 세지 않는다) | 빈칸 | B | — |
-| O-T42 | ② | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ② 11번째부터 10분 동안 429 | 빈칸 | B | — |
-| O-T42 | ③ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ③ 등록 201과 SEV3 경보 하나, 등록 경로는 닫히지 않는다 | 빈칸 | B | — |
-| O-T42 | ④ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ④ 410 | 빈칸 | B | — |
+| O-T42 | ① | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ① 15대 모두 201(성공은 세지 않는다) | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
+| O-T42 | ② | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ② 11번째부터 10분 동안 429 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift-http.test.ts, services/ticket-svc/test/scanner-shift.test.ts |
+| O-T42 | ③ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ③ 등록 201과 SEV3 경보 하나, 등록 경로는 닫히지 않는다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
+| O-T42 | ④ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ④ 410 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
 | O-T43 | — | 잠금 걸린 티켓의 정상 입장(추천 적용 2026-10-31… | 세 티켓 모두 통과하고, 판정 사유와 지연이 잠금 없는 티켓과 같다. 회차 목록·변경분·스캐너 저장소에 잠금 칸·사건 ID가 0건이다. 입장 시작 뒤… | 빈칸 | B | — |
 
 ## docs/security/asvs/offline-gate.md
@@ -139,7 +139,7 @@
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/event-summary.http.test.ts, services/core-svc/test/partner-production.http.test.ts 외 3곳… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: packages/platform/test/auth-guard.test.ts |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 39곳 (영역:… |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 5곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: apps/scanner) |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 5곳 (영역:… |

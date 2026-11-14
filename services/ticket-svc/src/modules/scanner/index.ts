@@ -1,17 +1,27 @@
 // scanner 모듈 공개 파일(단위·계약 시험과 서비스 조립이 쓴다).
 export * from './domain/scanner-device.js';
+export * from './domain/scanner-shift.js';
 export * from './domain/ports.js';
-export { ScannerDevices, ScannerDeviceNotFound, EnrollmentCodeRejected, type ScannerDevicesDeps } from './application/scanner-devices.js';
+export { ScannerDevices, ScannerDeviceNotFound, ScannerDeviceInactive, EnrollmentCodeRejected, EnrollmentRateLimited, type ScannerDevicesDeps } from './application/scanner-devices.js';
 export { ScannerGate, ScannerGateForbidden, ScannerFlagNotFound, type ScannerGateDeps } from './application/scanner-gate.js';
+export { ScannerShift, ScannerPlacements, ScannerPlacementForbidden, ScannerPlacementPolicyUnavailable, type ScannerSessionContext, type ScannerShiftDeps, type ScannerPlacementsDeps } from './application/scanner-shift.js';
 export { MemoryScannerDeviceStore } from './adapters/memory-scanner-device-store.js';
 export { MemoryScannerGateStore } from './adapters/memory-scanner-gate-store.js';
+export { MemoryScannerShiftStore } from './adapters/memory-scanner-shift-store.js';
+export { MemoryEnrollmentAttemptLimiter } from './adapters/memory-enrollment-attempt-limiter.js';
 export { DrizzleScannerDeviceStore } from './adapters/db/drizzle-scanner-device-store.js';
 export { DrizzleScannerGateStore } from './adapters/db/drizzle-scanner-gate-store.js';
+export { DrizzleScannerShiftStore } from './adapters/db/drizzle-scanner-shift-store.js';
 export { MemoryEnrollmentCodeStore } from './adapters/memory-enrollment-code-store.js';
 export { RedisEnrollmentCodeStore } from './adapters/redis-enrollment-code-store.js';
+export { RedisEnrollmentAttemptLimiter } from './adapters/redis-enrollment-attempt-limiter.js';
 export { RedisDpopReplayStore } from './adapters/redis-dpop-replay-store.js';
 export { GrpcScannerSessionCheck } from './adapters/grpc-scanner-session-check.js';
+export { HttpCoreEventPolicy } from './adapters/http-core-event-policy.js';
 export { ScannerModule, type ScannerWiring } from './scanner.module.js';
 export { OpsScannerDevicesController } from './inbound/ops-scanner-devices.controller.js';
 export { ScannerEnrollmentController } from './inbound/scanner-enrollment.controller.js';
 export { ScannerGateController } from './inbound/scanner-gate.controller.js';
+export { ScannerShiftController } from './inbound/scanner-shift.controller.js';
+export { ScannerPlacementController } from './inbound/scanner-placement.controller.js';
+export { PartnerScannerPlacementController } from './inbound/partner-scanner-placement.controller.js';

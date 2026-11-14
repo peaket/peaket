@@ -504,6 +504,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "CheckScannerSession": {
                       "requestType": "CheckScannerSessionRequest",
                       "responseType": "CheckScannerSessionResponse"
+                    },
+                    "TerminateScannerSessions": {
+                      "requestType": "TerminateScannerSessionsRequest",
+                      "responseType": "TerminateScannerSessionsResponse"
                     }
                   }
                 },
@@ -539,6 +543,46 @@ export const identityV1Identity: Record<string, unknown> = {
                     "event_id": {
                       "type": "string",
                       "id": 3
+                    },
+                    "assignment_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "valid_from_ms": {
+                      "type": "int64",
+                      "id": 5
+                    },
+                    "valid_until_ms": {
+                      "type": "int64",
+                      "id": 6
+                    },
+                    "proxy": {
+                      "type": "bool",
+                      "id": 7
+                    }
+                  }
+                },
+                "TerminateScannerSessionsRequest": {
+                  "fields": {
+                    "device_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "terminated_at_ms": {
+                      "type": "int64",
+                      "id": 3
+                    }
+                  }
+                },
+                "TerminateScannerSessionsResponse": {
+                  "fields": {
+                    "terminated": {
+                      "type": "int32",
+                      "id": 1
                     }
                   }
                 },

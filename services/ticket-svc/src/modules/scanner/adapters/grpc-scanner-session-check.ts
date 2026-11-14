@@ -5,6 +5,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { ScannerSessionAnswer, ScannerSessionCheck, ScannerStaffRole } from '@peaket/platform';
+import type { ScannerSessionTerminator } from '../domain/ports.js';
 
 const DEADLINE_CAP_MS = 1_000;
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -17,8 +18,8 @@ const roleOf = (v: unknown): ScannerStaffRole | undefined => {
   return undefined;
 };
 
-export class GrpcScannerSessionCheck implements ScannerSessionCheck {
-  readonly #client: grpc.Client & { CheckScannerSession: Unary };
+export class GrpcScannerSessionCheck implements ScannerSessionCheck, ScannerSessionTerminator {
+  readonly #client: grpc.Client & { CheckScannerSession: Unary; TerminateScannerSessions: Unary };
 
   constructor(address: string, profile: GrpcLbProfile = 'service') {
     const def = protoLoader.fromJSON(identityV1Identity as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
@@ -32,7 +33,7 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck {
       profile,
       dependency: 'identity-svc',
       timeoutCapMs: DEADLINE_CAP_MS,
-    }) as unknown as grpc.Client & { CheckScannerSession: Unary };
+    }) as unknown as grpc.Client & { CheckScannerSession: Unary; TerminateScannerSessions: Unary };
   }
 
   check(q: { scannerSessionId: string; deviceId: string }): Promise<ScannerSessionAnswer> {
@@ -45,7 +46,33 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck {
           if (e) return rej(e);
           const role = roleOf(v?.role);
           const eventId = typeof v?.event_id === 'string' && v.event_id !== '' ? v.event_id : undefined;
-          res({ valid: v?.valid === true, ...(role ? { role } : {}), ...(eventId ? { eventId } : {}) });
+          const assignmentId = typeof v?.assignment_id === 'string' && v.assignment_id !== '' ? v.assignment_id : undefined;
+          const validFromMs = typeof v?.valid_from_ms === 'number' && Number.isSafeInteger(v.valid_from_ms) && v.valid_from_ms > 0 ? v.valid_from_ms : undefined;
+          const validUntilMs = typeof v?.valid_until_ms === 'number' && Number.isSafeInteger(v.valid_until_ms) && v.valid_until_ms > 0 ? v.valid_until_ms : undefined;
+          const proxy = typeof v?.proxy === 'boolean' ? v.proxy : undefined;
+          res({
+            valid: v?.valid === true,
+            ...(role ? { role } : {}),
+            ...(eventId ? { eventId } : {}),
+            ...(assignmentId ? { assignmentId } : {}),
+            ...(validFromMs !== undefined ? { validFromMs } : {}),
+            ...(validUntilMs !== undefined ? { validUntilMs } : {}),
+            ...(proxy !== undefined ? { proxy } : {}),
+          });
+        },
+      );
+    });
+  }
+
+  terminateByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; atMs: number }): Promise<number> {
+    return new Promise((res, rej) => {
+      this.#client.TerminateScannerSessions(
+        { device_id: i.deviceId, reason: i.reason, terminated_at_ms: i.atMs },
+        new grpc.Metadata(),
+        { deadline: Date.now() + DEADLINE_CAP_MS },
+        (e, v) => {
+          if (e) return rej(e);
+          res(typeof v?.terminated === 'number' ? v.terminated : 0);
         },
       );
     });

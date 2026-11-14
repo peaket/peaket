@@ -24,6 +24,14 @@ export class CheckScannerSession {
     if (row.assignmentStatus !== 'ASSIGNED') return { valid: false };
     if (row.validFrom > now || row.validUntil < now) return { valid: false };
     await this.store.touchScannerSession(row.scannerSessionId, now);
-    return { valid: true, role: row.role, eventId: row.eventId };
+    return {
+      valid: true,
+      role: row.role,
+      eventId: row.eventId,
+      assignmentId: row.assignmentId,
+      validFromMs: row.validFrom,
+      validUntilMs: row.validUntil,
+      proxy: row.proxy,
+    };
   }
 }

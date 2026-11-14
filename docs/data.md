@@ -1412,6 +1412,16 @@ erDiagram
         text mode "IN|OUT, OUT은 재입장 허용 회차만"
         uuid set_by "파트너 또는 gate_lead"
         timestamptz set_at
+        int version "If-Match 판(1부터, 고칠 때마다 +1, GAT-170 잔여)"
+    }
+    scanner_readiness {
+        uuid event_id PK
+        uuid scanner_device_id PK
+        bigint package_seq "마지막으로 받았다고 보고한 목록 일련번호"
+        int clock_offset_ms "준비 때 잰 서버 시각 차이"
+        int pending_uploads "올리지 못한 기록 수"
+        uuid reported_by
+        timestamptz reported_at
     }
     scanner_change {
         uuid event_id

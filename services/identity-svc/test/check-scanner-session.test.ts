@@ -36,7 +36,7 @@ function world() {
 describe('CheckScannerSession(GAT-170)', () => {
   test('유효한 세션은 역할과 회차를 돌려준다', async () => {
     const { check } = world();
-    await expect(check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).resolves.toEqual({ valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    await expect(check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).resolves.toMatchObject({ valid: true, role: 'gate_staff', eventId: 'ev-1', assignmentId: 'a-1', proxy: false });
   });
 
   test('다른 기기·끝난 세션·만료된 세션은 유효하지 않다', async () => {
@@ -62,7 +62,7 @@ describe('CheckScannerSession(GAT-170)', () => {
   test('대리 승인 세션은 gate_staff 역할로 돌려준다', async () => {
     const { check, store } = world();
     store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, proxy: true, role: 'gate_staff' });
-    await expect(check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).resolves.toEqual({ valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    await expect(check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).resolves.toMatchObject({ valid: true, role: 'gate_staff', eventId: 'ev-1', proxy: true });
   });
 
   test('BOT047_hasStaffAssignment는 지금 ASSIGNED인 배정만 true다', async () => {
@@ -75,11 +75,11 @@ describe('CheckScannerSession(GAT-170)', () => {
 
   test('gRPC 처리기는 역할을 계약의 열거 이름으로 바꾼다', async () => {
     const { check } = world();
-    const handlers = scannerSessionCheckHandlers({ check }, () => {});
+    const handlers = scannerSessionCheckHandlers({ check, terminate: { run: async () => ({ terminated: 0 }) } }, () => {});
     const call = { request: { scanner_session_id: 'ss-1', device_id: 'dev-1' } } as unknown as grpc.ServerUnaryCall<Record<string, unknown>, object>;
     const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
       (handlers.CheckScannerSession as (c: typeof call, cb: (err: unknown, value: Record<string, unknown>) => void) => void)(call, (err, value) => (err ? reject(err) : resolve(value)));
     });
-    expect(answer).toEqual({ valid: true, role: 'STAFF_ROLE_GATE_STAFF', event_id: 'ev-1' });
+    expect(answer).toMatchObject({ valid: true, role: 'STAFF_ROLE_GATE_STAFF', event_id: 'ev-1', assignment_id: 'a-1', proxy: false });
   });
 });

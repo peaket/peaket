@@ -27,6 +27,14 @@ export interface EventSaleConfig {
   openBatch: boolean;
   perPersonLimit: number;
   saleEndsAtMs: number;
+  /** 재입장 허용 여부(POL-018). 스캐너 근무 준비·배치 판정이 읽는다(GAT-170 잔여) */
+  reentryAllowed?: boolean;
+  /** 입장 시작 시각(없으면 비운다). 스캐너 근무 준비 응답에 싣는다 */
+  entryOpensAtMs?: number | null;
+  /** 공연 종료 예정 시각(event.ends_at) */
+  endsAtMs?: number;
+  /** 입장 기록 마감 시각. 아직 마감 전이면 null */
+  entryClosedAtMs?: number | null;
   /** 게시한 좌석맵 판. 자동 배정 회차는 없다 */
   layoutVersion?: number;
   /** 결제사 묶음 이름과 승인 상한(초당 건수). 없으면 결제사 상한을 걸지 않는다 */
@@ -99,6 +107,10 @@ function configOf(productionId: string, promoterId: string, e: SaleEventRow, rul
     openBatch: e.openBatch,
     perPersonLimit: e.perPersonLimit,
     saleEndsAtMs: end.getTime(),
+    reentryAllowed: e.reentryAllowed,
+    entryOpensAtMs: e.entryOpensAt?.getTime() ?? null,
+    endsAtMs: e.endsAt.getTime(),
+    entryClosedAtMs: e.entryClosedAt?.getTime() ?? null,
     ...(facts.layoutVersion !== undefined ? { layoutVersion: facts.layoutVersion } : {}),
     ...(facts.pgKey !== undefined ? { pgKey: facts.pgKey } : {}),
     ...(facts.pgTps !== undefined ? { pgTps: facts.pgTps } : {}),

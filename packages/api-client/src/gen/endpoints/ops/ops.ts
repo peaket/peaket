@@ -12538,10 +12538,22 @@ export const useCreateOpsScannerDeviceRevocation = <TError = ErrorType<unknown>,
   status: 201
 }
 
+export type createOpsScannerDeviceEnrollmentCodeResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsScannerDeviceEnrollmentCodeResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createOpsScannerDeviceEnrollmentCodeResponseSuccess = (createOpsScannerDeviceEnrollmentCodeResponse201) & {
   headers: Headers;
 };
-;
+export type createOpsScannerDeviceEnrollmentCodeResponseError = (createOpsScannerDeviceEnrollmentCodeResponse404 | createOpsScannerDeviceEnrollmentCodeResponse409) & {
+  headers: Headers;
+};
 
 export const getCreateOpsScannerDeviceEnrollmentCodeUrl = (deviceId: string,) => {
 
@@ -12552,7 +12564,7 @@ export const getCreateOpsScannerDeviceEnrollmentCodeUrl = (deviceId: string,) =>
 }
 
 /**
- * FR-065, ADR-0051, 추천 적용 2026-10-14, ADR-0062. operator 이상. 코드는 RFC 8628 §6.1 문자 집합(BCDFGHJKLMNPQRSTVWXZ) 12자를 4자씩 하이픈으로 나눈 XXXX-XXXX-XXXX, 만든 뒤 10분 [가정] 한 번만 쓴다. 서버는 코드의 SHA-256만 Redis에 10분 TTL로 두고 등록되면 바로 지운다. SCR-053은 코드와 QR(https://<스캐너 주소>/enroll#code=…, 코드는 URL 조각에만)을 보인다
+ * FR-065, ADR-0051, 추천 적용 2026-10-14, ADR-0062. operator 이상. 코드는 RFC 8628 §6.1 문자 집합(BCDFGHJKLMNPQRSTVWXZ) 12자를 4자씩 하이픈으로 나눈 XXXX-XXXX-XXXX, 만든 뒤 10분 [가정] 한 번만 쓴다. 서버는 코드의 SHA-256만 Redis에 10분 TTL로 두고 등록되면 바로 지운다. 폐기·퇴역 기기는 409다. SCR-053은 코드와 QR(https://<스캐너 주소>/enroll#code=…, 코드는 URL 조각에만)을 보인다
  * @summary 스캐너 기기 등록 코드 새로 만들기. 이전 코드는 무효
  */
 export const createOpsScannerDeviceEnrollmentCode = async (deviceId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsScannerDeviceEnrollmentCodeResponseSuccess> => {
@@ -12572,7 +12584,7 @@ export const createOpsScannerDeviceEnrollmentCode = async (deviceId: string, opt
 
 export const getCreateOpsScannerDeviceEnrollmentCodeMutationKey = () => ['createOpsScannerDeviceEnrollmentCode'] as const;
 
-export const getCreateOpsScannerDeviceEnrollmentCodeMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateOpsScannerDeviceEnrollmentCodeMutationOptions = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsScannerDeviceEnrollmentCode>>, TError,CreateOpsScannerDeviceEnrollmentCodeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createOpsScannerDeviceEnrollmentCode>>, TError,CreateOpsScannerDeviceEnrollmentCodeMutationVariables, TContext> => {
 
@@ -12601,13 +12613,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateOpsScannerDeviceEnrollmentCodeMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsScannerDeviceEnrollmentCode>>>
 
-    export type CreateOpsScannerDeviceEnrollmentCodeMutationError = ErrorType<unknown>
+    export type CreateOpsScannerDeviceEnrollmentCodeMutationError = ErrorType<ProblemResponse>
     export type CreateOpsScannerDeviceEnrollmentCodeMutationVariables = {deviceId: string}
 
     /**
  * @summary 스캐너 기기 등록 코드 새로 만들기. 이전 코드는 무효
  */
-export const useCreateOpsScannerDeviceEnrollmentCode = <TError = ErrorType<unknown>,
+export const useCreateOpsScannerDeviceEnrollmentCode = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsScannerDeviceEnrollmentCode>>, TError,CreateOpsScannerDeviceEnrollmentCodeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createOpsScannerDeviceEnrollmentCode>>,

@@ -14,9 +14,9 @@ import {
   filterDevices,
   formatKstDate,
   formatKstDateTime,
+  lastSeenSummary,
   mapDeviceList,
   promoterLabel,
-  relativeLastSeen,
   statusLabel,
   statusTone,
 } from '../model/devices';
@@ -271,7 +271,7 @@ export function ConnectedPage() {
                       <td>{partnerName(d.promoterId)}</td>
                       <td><span className={`badge badge-${statusTone(d.status)}`}>{statusLabel(d.status)}</span></td>
                       <td title={d.credentialType === 'DEVICE_KEY' ? '기기 키는 만료가 없고 API에 등록일이 없습니다' : undefined}>{d.credentialType === 'MTLS_CERT' ? formatKstDate(d.certExpiresAt) : '—'}</td>
-                      <td>{relativeLastSeen(d.lastSeenAt, NOW())}</td>
+                      <td title={formatKstDateTime(d.lastSeenAt)}>{lastSeenSummary(d.lastSeenAt, NOW()).relative}</td>
                       <td>{d.activeSessionNickname ?? '—'}</td>
                     </tr>
                   ))}
@@ -295,7 +295,7 @@ export function ConnectedPage() {
                 <dl className="col" style={{ gap: 6 }}>
                   <div className="row between"><dt className="t-sm muted">배정 파트너</dt><dd className="t-sm">{partnerName(selected.promoterId)}</dd></div>
                   <div className="row between"><dt className="t-sm muted">기기 자격</dt><dd className="t-sm">{selected.credentialType === 'DEVICE_KEY' ? '기기 키 + DPoP' : 'mTLS 인증서'}</dd></div>
-                  <div className="row between"><dt className="t-sm muted">마지막 연락</dt><dd className="t-sm">{formatKstDateTime(selected.lastSeenAt)}</dd></div>
+                  <div className="row between"><dt className="t-sm muted">마지막 연락</dt><dd className="t-sm">{(() => { const s = lastSeenSummary(selected.lastSeenAt, NOW()); return s.never ? s.relative : `${s.relative} (${s.absolute})`; })()}</dd></div>
                   <div className="row between"><dt className="t-sm muted">로그인 세션</dt><dd className="t-sm">{selected.activeSessionNickname ?? '없음'}</dd></div>
                 </dl>
                 {code && code.deviceId === selected.deviceId ? (

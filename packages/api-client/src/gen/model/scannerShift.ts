@@ -10,17 +10,29 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ScannerPlacement } from './scannerPlacement';
+import type { ScannerShiftAssignment } from './scannerShiftAssignment';
+import type { ScannerShiftAuth } from './scannerShiftAuth';
+import type { ScannerShiftDevice } from './scannerShiftDevice';
+import type { ScannerShiftEventWindows } from './scannerShiftEventWindows';
+import type { ScannerShiftPackage } from './scannerShiftPackage';
 import type { ScannerShiftRole } from './scannerShiftRole';
+import type { ScannerVersionVector } from './scannerVersionVector';
 
 /**
- * 근무 준비 응답(SCR-033)
+ * 근무 준비 응답(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호에 기기·배정·근무 창·판매/입장 창·목록 동기화 나이·버전 벡터 신선도·기기 인증 방식을 더한다(GAT-170 잔여, offline-gate §6.2)
  */
 export interface ScannerShift {
-  serverTime?: string;
-  eventId?: string;
-  reentryAllowed?: boolean;
-  placement?: ScannerPlacement;
-  packageSeq?: number;
-  role?: ScannerShiftRole;
-  proxy?: boolean;
+  serverTime: string;
+  eventId: string;
+  reentryAllowed: boolean;
+  placement: ScannerPlacement;
+  packageSeq: number;
+  role: ScannerShiftRole;
+  proxy: boolean;
+  device: ScannerShiftDevice;
+  assignment: ScannerShiftAssignment;
+  eventWindows?: ScannerShiftEventWindows;
+  package: ScannerShiftPackage;
+  versionVector: ScannerVersionVector;
+  auth: ScannerShiftAuth;
 }

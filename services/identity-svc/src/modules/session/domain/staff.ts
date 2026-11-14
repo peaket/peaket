@@ -24,6 +24,10 @@ export interface ScannerSessionAnswer {
   valid: boolean;
   role?: StaffRole;
   eventId?: string;
+  assignmentId?: string;
+  validFromMs?: number;
+  validUntilMs?: number;
+  proxy?: boolean;
 }
 
 /** staff_assignment 한 행(초대·배정). 초대 이메일과 토큰 해시는 수락·거절 때 지운다. */
@@ -94,6 +98,12 @@ export interface StaffAssignmentStore {
   touchScannerSession(scannerSessionId: string, atMs: number): Promise<void>;
   /** 승인 저장소가 승인을 거절했을 때 만든 세션을 되돌린다(끝난 시각을 남긴다) */
   endScannerSession(scannerSessionId: string, atMs: number): Promise<void>;
+  /**
+   * 기기 폐기 때 그 기기의 살아 있는 스캐너 세션을 모두 끝내고, 같은 트랜잭션에
+   * control.sessions-terminated(reason DEVICE_REVOKED)를 세션마다 적는다(GAT-170 잔여, O-T27).
+   * 이미 끝난 세션은 세지 않는다(멱등). 끝낸 수를 돌려준다.
+   */
+  terminateScannerSessionsByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; nowMs: number }): Promise<number>;
 }
 
 export const STAFF_ASSIGNMENT_STORE = Symbol('identity.StaffAssignmentStore');

@@ -17,6 +17,7 @@ import type {
   ScannerChangesView,
   ScannerPackageView,
   ScannerTicketStatus,
+  ScannerVersionVector,
 } from '../../domain/scanner-gate.js';
 import { gateFlag, gateFlagScan, scanEvent, scannerChange, scannerSeq } from './schema.js';
 
@@ -87,6 +88,28 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     if (!row) throw new Error('스캐너 변경 일련번호를 올리지 못했다');
     await tx.insert(scannerChange).values({ eventId, seq: row.lastSeq, kind, payload, createdAt: new Date() });
     return row.lastSeq;
+  }
+
+  async versionVector(eventId: string, nowMs: number): Promise<ScannerVersionVector> {
+    return this.database.transaction(
+      async (tx) => {
+        const seqRows = (await tx.execute(sql`select last_seq from scanner_seq where event_id = ${eventId}`)).rows as { last_seq: string | number }[];
+        const kindRows = (await tx.execute(sql`select kind, max(seq) as seq from scanner_change where event_id = ${eventId} group by kind`)).rows as { kind: string; seq: string | number }[];
+        const lastOf = (...kinds: string[]) => Math.max(0, ...kindRows.filter((r) => kinds.includes(r.kind)).map((r) => Number(r.seq)));
+        return {
+          eventId,
+          seq: Number(seqRows[0]?.last_seq ?? 0),
+          ticketSeq: lastOf('TICKET_STATUS'),
+          keySeq: lastOf('KEY_REGISTERED', 'KEY_REVOKED'),
+          policySeq: lastOf('POLICY'),
+          placementSeq: lastOf('PLACEMENT'),
+          flagSeq: lastOf('FLAG'),
+          issuedAt: new Date(nowMs).toISOString(),
+          maxOfflineMs: 0,
+        };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
   }
 
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
@@ -209,8 +232,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
   async acceptScans(i: {
     eventId: string;
     deviceId: string;
-    staffAccountId: string;
-    sessionId: string;
+    staffAccountId?: string;
+    sessionId?: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
     staleVersionIds?: readonly string[];
@@ -281,7 +304,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             ticketId: scan.ticketId,
             scannerDeviceId: i.deviceId,
             scannerSessionId: scan.scannerSessionId,
-            staffAccountId: i.staffAccountId,
+            staffAccountId: i.staffAccountId ?? null,
             direction: scan.direction,
             method: scan.method,
             result,

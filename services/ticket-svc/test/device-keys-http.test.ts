@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
+import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
 import { MemoryDeviceKeyStore } from '../src/modules/ticket/adapters/memory-device-key-store.js';
 import { DeviceKeys } from '../src/modules/ticket/application/device-keys.js';
 import type { PublicKeyJwk } from '../src/modules/ticket/domain/device-key.js';
@@ -54,11 +55,12 @@ beforeAll(async () => {
   deviceKeysStore = new MemoryDeviceKeyStore();
   deviceKeysStore.seedTicket({ ticketId: TICKET, eventId: EVENT, accountId: ACCOUNT });
   const gate = new MemoryScannerGateStore(deviceKeysStore);
+  const shift = new MemoryScannerShiftStore(gate);
   const devices = new MemoryScannerDeviceStore();
   svc = await createService({
     name: 'ticket-svc-device-keys-http',
     module: AppModule.register({
-      scanner: { store: devices, codes: new MemoryEnrollmentCodeStore(clock), replay, gate },
+      scanner: { store: devices, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift },
       ticket: { deviceKeys: new DeviceKeys({ store: deviceKeysStore, clock }) },
     }),
     env: { PEAKET_ENV: 'ci' },

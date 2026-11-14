@@ -43,6 +43,7 @@ import { MemoryNicknameCheckLimits } from './adapters/memory-nickname-check-limi
 import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
 import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from './domain/staff.js';
 import { CheckScannerSession } from './application/check-scanner-session.js';
+import { TerminateScannerSessions } from './application/terminate-scanner-sessions.js';
 import { StaffInvitations } from './application/staff-invitations.js';
 import { StaffInvitationController } from './inbound/staff-invitation.controller.js';
 import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
@@ -110,6 +111,7 @@ export class SessionModule {
         o.storage === 'database' ? { provide: STAFF_ASSIGNMENT_STORE, useClass: DrizzleStaffAssignmentStore } : { provide: STAFF_ASSIGNMENT_STORE, useValue: new MemoryStaffAssignmentStore() },
         { provide: STAFF_ASSIGNMENTS, useFactory: (store: StaffAssignmentStore) => o.staffAssignments ?? store, inject: [STAFF_ASSIGNMENT_STORE] },
         CheckScannerSession,
+        TerminateScannerSessions,
         StaffInvitations,
         StartDeviceAuthorization,
         DeviceApprovals,
@@ -164,7 +166,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, CheckScannerSession, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, CheckScannerSession, TerminateScannerSessions, ACCOUNT_CLOSURE],
     };
   }
 }

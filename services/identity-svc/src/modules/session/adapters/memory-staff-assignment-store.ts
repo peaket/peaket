@@ -58,6 +58,8 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   readonly assignments = new Map<string, MemoryStaffAssignmentRow>();
   readonly sessions = new Map<string, ScannerSessionRecord>();
   readonly accounts = new Map<string, { email?: string; verified: boolean }>();
+  /** 기기 폐기로 끝낸 세션의 control.sessions-terminated 값(시험 확인용) */
+  readonly terminatedEvents: { accountId: string; sessionId: string; reason: string; terminatedAt: string }[] = [];
 
   async hasAssigned(accountId: string): Promise<boolean> {
     for (const a of this.assignments.values()) if (a.accountId === accountId && a.status === 'ASSIGNED') return true;
@@ -175,5 +177,17 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   async endScannerSession(scannerSessionId: string, atMs: number): Promise<void> {
     const s = this.sessions.get(scannerSessionId);
     if (s && s.terminatedAt === null) this.sessions.set(scannerSessionId, { ...s, terminatedAt: atMs });
+  }
+
+  async terminateScannerSessionsByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; nowMs: number }): Promise<number> {
+    let terminated = 0;
+    for (const [id, s] of this.sessions) {
+      if (s.deviceId !== i.deviceId || s.terminatedAt !== null) continue;
+      this.sessions.set(id, { ...s, terminatedAt: i.nowMs });
+      const accountId = this.assignments.get(s.assignmentId)?.accountId;
+      if (accountId) this.terminatedEvents.push({ accountId, sessionId: id, reason: i.reason, terminatedAt: new Date(i.nowMs).toISOString() });
+      terminated++;
+    }
+    return terminated;
   }
 }

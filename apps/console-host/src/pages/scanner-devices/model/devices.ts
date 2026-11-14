@@ -101,6 +101,12 @@ export function relativeLastSeen(iso: string | undefined, nowMs: number): string
   return `${Math.floor(hour / 24)}일 전`;
 }
 
+/** SCR-053 마지막 연락 표시. 상대 시각과 KST 절대 시각을 함께 준다. 없으면 '아직 없음' */
+export function lastSeenSummary(iso: string | undefined, nowMs: number): { relative: string; absolute: string; never: boolean } {
+  if (!iso || !Number.isFinite(Date.parse(iso))) return { relative: '아직 없음', absolute: '—', never: true };
+  return { relative: relativeLastSeen(iso, nowMs), absolute: formatKstDateTime(iso), never: false };
+}
+
 /** 등록 코드 QR의 내용(d5 §7.11). 코드는 주소 조각에만 넣는다 */
 export function enrollmentUrl(code: string, scannerOrigin: string): string {
   return `${scannerOrigin.replace(/\/+$/, '')}/enroll#code=${encodeURIComponent(code)}`;

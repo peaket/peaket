@@ -78,6 +78,8 @@ const eventRow = (e: typeof event.$inferSelect): SaleEventRow => ({
   openBatch: e.openBatch,
   seatAssignment: e.seatAssignment as 'PICK' | 'AUTO',
   perPersonLimit: e.perPersonLimit,
+  reentryAllowed: e.reentryAllowed,
+  entryClosedAt: e.entryClosedAt,
   ...(e.scale !== null ? { scale: e.scale as 'LARGE' | 'MEDIUM' | 'SMALL' } : {}),
 });
 

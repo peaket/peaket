@@ -1,6 +1,6 @@
 // PostgreSQL 저장소(Drizzle): staff_assignment·scanner_session(identity §6.1, docs/data.md).
 import { Inject, Injectable } from '@nestjs/common';
-import { DATABASE, type Database } from '@peaket/platform';
+import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import type {
   AcceptInvitationResult,
@@ -45,7 +45,10 @@ const parseCursor = (raw: string): { validFromMs: number; assignmentId: string }
 
 @Injectable()
 export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
-  constructor(@Inject(DATABASE) private readonly database: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly database: Database,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   async hasAssigned(accountId: string): Promise<boolean> {
     const [row] = await this.database.db
@@ -219,5 +222,44 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       .update(scannerSession)
       .set({ terminatedAt: new Date(atMs) })
       .where(and(eq(scannerSession.id, scannerSessionId), isNull(scannerSession.terminatedAt)));
+  }
+
+  async terminateScannerSessionsByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; nowMs: number }): Promise<number> {
+    return this.database.transaction(async (tx) => {
+      const sessions = await tx
+        .select({ id: scannerSession.id, assignmentId: scannerSession.staffAssignmentId })
+        .from(scannerSession)
+        .where(and(eq(scannerSession.scannerDeviceId, i.deviceId), isNull(scannerSession.terminatedAt)))
+        .for('update');
+      if (sessions.length === 0) return 0;
+      const at = new Date(i.nowMs);
+      await tx
+        .update(scannerSession)
+        .set({ terminatedAt: at })
+        .where(and(eq(scannerSession.scannerDeviceId, i.deviceId), isNull(scannerSession.terminatedAt)));
+      const assignmentIds = [...new Set(sessions.map((s) => s.assignmentId))];
+      const owners = await tx
+        .select({ id: staffAssignment.id, accountId: staffAssignment.accountId })
+        .from(staffAssignment)
+        .where(inArray(staffAssignment.id, assignmentIds));
+      const accountOf = new Map(owners.map((o) => [o.id, o.accountId]));
+      const terminatedAt = at.toISOString();
+      const messages = sessions
+        .flatMap((s) => {
+          const accountId = accountOf.get(s.assignmentId);
+          return accountId === null || accountId === undefined
+            ? []
+            : [
+                {
+                  topic: CONTROL_TOPICS.sessionsTerminated,
+                  key: accountId,
+                  payload: Buffer.from(JSON.stringify({ accountId, sessionId: s.id, reason: i.reason, terminatedAt })),
+                },
+              ];
+        })
+        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      if (messages.length > 0) await writeOutbox(tx, this.clock, messages);
+      return sessions.length;
+    });
   }
 }

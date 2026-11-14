@@ -33,6 +33,46 @@ export const scannerDevice = pgTable(
   ],
 );
 
+/** 회차 하나에서 기기 하나의 게이트 구역·모드(docs/data.md scanner_placement, offline-gate §6.2). */
+export const scannerPlacement = pgTable(
+  'scanner_placement',
+  {
+    eventId: uuid('event_id').notNull(),
+    scannerDeviceId: uuid('scanner_device_id').notNull(),
+    gateZone: text('gate_zone').notNull(),
+    mode: text('mode').notNull(),
+    setBy: uuid('set_by').notNull(),
+    setAt: at('set_at').notNull(),
+    version: integer('version').notNull().default(1),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.scannerDeviceId] }),
+    index('scanner_placement_device_idx').on(t.scannerDeviceId, t.eventId),
+    check('scanner_placement_mode_check', sql`${t.mode} IN ('IN', 'OUT')`),
+    check('scanner_placement_gate_zone_check', sql`char_length(${t.gateZone}) BETWEEN 1 AND 80`),
+    check('scanner_placement_version_check', sql`${t.version} >= 1`),
+  ],
+);
+
+/** 근무 준비 보고(SCR-033·SCR-037). 기기·회차마다 마지막 보고 하나를 덮어쓴다. */
+export const scannerReadiness = pgTable(
+  'scanner_readiness',
+  {
+    eventId: uuid('event_id').notNull(),
+    scannerDeviceId: uuid('scanner_device_id').notNull(),
+    packageSeq: bigint('package_seq', { mode: 'number' }).notNull(),
+    clockOffsetMs: integer('clock_offset_ms').notNull(),
+    pendingUploads: integer('pending_uploads').notNull(),
+    reportedBy: uuid('reported_by').notNull(),
+    reportedAt: at('reported_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.scannerDeviceId] }),
+    check('scanner_readiness_package_seq_check', sql`${t.packageSeq} >= 0`),
+    check('scanner_readiness_pending_uploads_check', sql`${t.pendingUploads} >= 0`),
+  ],
+);
+
 /** 회차별 변경 일련번호 카운터(offline-gate §6.3, ADR-0086). 변경 트랜잭션 안에서 UPDATE … RETURNING으로 올린다. */
 export const scannerSeq = pgTable('scanner_seq', {
   eventId: uuid('event_id').primaryKey(),

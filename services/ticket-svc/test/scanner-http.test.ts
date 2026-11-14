@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
+import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
 
 const NOW = Date.parse('2026-11-13T00:00:00Z');
 const PROMOTER = '0190f3a1-7c2e-7a00-8000-000000000001';
@@ -38,10 +39,12 @@ const headers = { 'x-user-id': ADMIN, 'x-session-id': SESSION, 'x-user-aud': 'op
 beforeAll(async () => {
   identity.answers.set(`${ADMIN}/${SESSION}`, { valid: true, role: 'operator' });
   store = new MemoryScannerDeviceStore();
+  const gate = new MemoryScannerGateStore();
+  const shift = new MemoryScannerShiftStore(gate);
   svc = await createService({
     name: 'ticket-svc',
     module: AppModule.register({
-      scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay: new MemoryDpopReplayStore(clock), gate: new MemoryScannerGateStore() },
+      scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay: new MemoryDpopReplayStore(clock), gate, shift },
     }),
     env: { PEAKET_ENV: 'ci' },
     clock,
@@ -72,7 +75,7 @@ describe('관제 스캐너 기기 경로 [GAT-170]', () => {
     expect(JSON.parse(list.payload)).toMatchObject({ items: [expect.objectContaining({ deviceId: body.deviceId, name: '동문-03' })] });
   });
 
-  test('공개 기기 등록은 DPoP 증명과 등록 코드로 jkt를 묶고, 같은 코드는 다시 쓰지 못한다', async () => {
+  test('O-T37 ① 공개 기기 등록은 DPoP 증명과 등록 코드로 jkt를 묶고, 같은 코드는 다시 쓰지 못한다', async () => {
     const created = await post('/v1/ops/scanner-devices', { name: '동문-04', promoterId: PROMOTER });
     const { enrollmentCode, deviceId } = JSON.parse(created.payload) as { enrollmentCode: string; deviceId: string };
 

@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memory-enrollment-code-store.js';
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
 import { RedisDpopReplayStore } from '../src/modules/scanner/adapters/redis-dpop-replay-store.js';
+import { RedisEnrollmentAttemptLimiter } from '../src/modules/scanner/adapters/redis-enrollment-attempt-limiter.js';
 import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { EnrollmentCodeRejected, ScannerDeviceNotFound, ScannerDevices } from '../src/modules/scanner/application/scanner-devices.js';
 import {
@@ -58,9 +59,44 @@ describe('Redis 저장소 어댑터 [GAT-170]', () => {
 
     const codes = new RedisEnrollmentCodeStore(redis);
     await codes.put({ codeHash: 'abc', deviceId: 'dev-1', ttlMs: 600_000 });
-    expect(calls.at(-1)).toEqual(['SET', 'scanner:enroll:abc', 'dev-1', 'PX', '600000']);
+    expect(calls).toContainEqual(['SET', 'scanner:enroll:abc', 'dev-1', 'PX', '600000']);
+    expect(calls).toContainEqual(['SET', 'scanner:enroll-device:dev-1', 'abc', 'PX', '600000']);
     expect(await codes.take('abc')).toBe('0190f3a1-7c2e-7a00-8000-000000000001');
-    expect(calls.at(-1)).toEqual(['GETDEL', 'scanner:enroll:abc']);
+    expect(calls).toContainEqual(['GETDEL', 'scanner:enroll:abc']);
+  });
+
+  test('등록 실패 제한은 IP 카운터 TTL을 쓰고 10회 뒤 막으며, 전체 101회에 경보를 낸다', async () => {
+    const counts = new Map<string, number>();
+    const ttls = new Map<string, number>();
+    const redis = {
+      command: async (args: string[]) => {
+        if (args[0] === 'GET') return counts.has(args[1]!) ? String(counts.get(args[1])) : null;
+        if (args[0] === 'INCR') {
+          const n = (counts.get(args[1]!) ?? 0) + 1;
+          counts.set(args[1]!, n);
+          return n;
+        }
+        if (args[0] === 'PEXPIRE') {
+          ttls.set(args[1]!, Number(args[2]));
+          return 1;
+        }
+        return null;
+      },
+    } as unknown as HotRedis;
+    const limiter = new RedisEnrollmentAttemptLimiter(redis);
+    for (let i = 0; i < 10; i++) {
+      expect(await limiter.allowed('10.0.0.1')).toBe(true);
+      await limiter.failed('10.0.0.1');
+    }
+    expect(ttls.get('scanner:enroll:fail:10.0.0.1')).toBe(600_000);
+    expect(await limiter.allowed('10.0.0.1')).toBe(false);
+
+    let alert = false;
+    for (let i = 0; i < 100; i++) {
+      const r = await limiter.failed(`10.1.0.${i}`);
+      if (r.globalAlert) alert = true;
+    }
+    expect(alert).toBe(true);
   });
 });
 

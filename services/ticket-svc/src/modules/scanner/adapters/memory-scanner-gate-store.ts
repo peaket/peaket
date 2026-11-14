@@ -14,6 +14,7 @@ import type {
   ScannerChangesView,
   ScannerPackageView,
   ScannerTicketStatus,
+  ScannerVersionVector,
 } from '../domain/scanner-gate.js';
 
 export interface ScannerGateTicketSeed {
@@ -83,6 +84,15 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return seq;
   }
 
+  /** 배치 저장소가 같은 변경 기록·일련번호를 쓰게 연다(시험·로컬). 운영은 DrizzleScannerShiftStore가 같은 트랜잭션에서 적는다 */
+  appendChange(eventId: string, kind: string, payload: Record<string, unknown>): number {
+    return this.#appendChange(eventId, kind, payload);
+  }
+
+  lastSeq(eventId: string): number {
+    return this.seq.get(eventId) ?? 0;
+  }
+
   #versionVector(eventId: string, nowMs: number) {
     const list = this.changeLog.get(eventId) ?? [];
     const lastOf = (...kinds: string[]) => list.filter((c) => kinds.includes(c.kind)).at(-1)?.seq ?? 0;
@@ -97,6 +107,10 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       issuedAt: new Date(nowMs).toISOString(),
       maxOfflineMs: 0,
     };
+  }
+
+  async versionVector(eventId: string, nowMs: number): Promise<ScannerVersionVector> {
+    return this.#versionVector(eventId, nowMs);
   }
 
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
@@ -149,8 +163,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   async acceptScans(i: {
     eventId: string;
     deviceId: string;
-    staffAccountId: string;
-    sessionId: string;
+    staffAccountId?: string;
+    sessionId?: string;
     scans: readonly ScanEventInput[];
     nowMs: number;
     staleVersionIds?: readonly string[];

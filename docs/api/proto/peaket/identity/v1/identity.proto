@@ -331,6 +331,9 @@ message ListActiveScannerSessionsResponse {
 // 읽기라 멱등 키가 없다(초안, 추천 적용 2026-10-30, docs/features/identity.md §6.1, docs/features/offline-gate.md §6).
 service ScannerSessionCheckService {
   rpc CheckScannerSession(CheckScannerSessionRequest) returns (CheckScannerSessionResponse);
+  // 기기 폐기 때 그 기기의 살아 있는 스캐너 세션을 끝내고 control.sessions-terminated(reason DEVICE_REVOKED)를 남긴다(GAT-170 잔여, O-T27).
+  // 이미 끝난 세션은 세지 않는다(멱등). ticket-svc 기기 폐기가 부른다.
+  rpc TerminateScannerSessions(TerminateScannerSessionsRequest) returns (TerminateScannerSessionsResponse);
 }
 
 message CheckScannerSessionRequest {
@@ -354,6 +357,24 @@ message CheckScannerSessionResponse {
   // valid일 때만 채운다. 그때의 역할과 회차
   StaffRole role = 2;
   string event_id = 3;
+  // 근무 준비(SCR-033)가 배정·근무 창·대리 승인을 보일 때 쓴다(GAT-170 잔여)
+  string assignment_id = 4;
+  int64 valid_from_ms = 5;
+  int64 valid_until_ms = 6;
+  bool proxy = 7;
+}
+
+message TerminateScannerSessionsRequest {
+  string device_id = 1;
+  // asyncapi SessionTerminated.reason. 지금은 DEVICE_REVOKED만 받는다
+  string reason = 2;
+  // 0이면 identity-svc 시계를 쓴다
+  int64 terminated_at_ms = 3;
+}
+
+message TerminateScannerSessionsResponse {
+  // 이번에 끝낸 세션 수. 이미 끝난 세션은 세지 않는다
+  int32 terminated = 1;
 }
 
 // 부르는 쪽: core-svc의 팬 알림 발송 워커(core-notify-sender 배포의 서비스 계정)만. 대량 발송 조각 하나의 받는 사람을 한 번에 묻는다.

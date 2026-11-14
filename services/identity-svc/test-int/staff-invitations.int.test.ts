@@ -69,7 +69,7 @@ beforeAll(async () => {
   await migrateIdentity(pg.url);
   database = createDatabase({ url: pg.url, applicationName: 'identity-staff-invitations-test', max: 8 });
   clock = fakeClock({ now: NOW });
-  store = new DrizzleStaffAssignmentStore(database);
+  store = new DrizzleStaffAssignmentStore(database, clock);
   invitations = new StaffInvitations(store, clock);
   await seedAccount(ACCOUNT, 'staff@example.com');
   await seedAccount(OTHER, 'other@example.com');
