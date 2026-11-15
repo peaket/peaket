@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 223 | 55 | 0 | 0 | 0 | 6 | 0 | 7 | 89 | 380 |
-| 합계 | 223 | 55 | 0 | 0 | 0 | 6 | 0 | 7 | 89 | 380 |
+| B | 223 | 55 | 0 | 0 | 0 | 7 | 0 | 7 | 88 | 380 |
+| 합계 | 223 | 55 | 0 | 0 | 0 | 7 | 0 | 7 | 88 | 380 |
 
 ## docs/features/identity.md
 
@@ -116,7 +116,7 @@
 | I-T56 | ② | 본인확인 재통과 확인(`CheckReverification`, 추천… | ②은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
 | I-T56 | ③ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ③은 재통과 아님이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/reverification-check.int.test.ts, services/identity-svc/test/reverification-check.tes… |
 | I-T56 | ④ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ④는 queue-svc가 추가 검증 제출에 503을 돌려주고 통과로 보지 않는다. … 에서 떼어 냄은 추천 적용 2026-11-10, BUILD_ORDER… | 자동 시험 | B | 시험: services/queue-svc/test/verification-cases.ts, services/queue-svc/test/verification-clients.test.ts |
-| I-T56 | ⑤ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ⑤는 거부된다(메시 L7 허용 목록 몫, | ID만 | B | 시험: services/identity-svc/test-int/main-reverification.int.test.ts, services/identity-svc/test-int/reverification-check… |
+| I-T56 | ⑤ | 본인확인 재통과 확인(`CheckReverification`, 추천… | ⑤는 거부된다(메시 L7 허용 목록 몫, | 다른 단계 | B | HOT-400 · `CheckReverification`을 queue-svc 신원으로만 받는 것은 메시 L7 허용 목록이다(BAT-200에서 정함, 2026-11-10) |
 | I-T57 | ① | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ①은 승인 화면에 기기 이름이 보이고 토큰이 나온다. | 빈칸 | B | — |
 | I-T57 | ② | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ②는 토큰 발급이 거부된다(캐시하지 않는다). | 빈칸 | B | — |
 | I-T57 | ③ | 기기 승인 때 기기 상태 확인(GetScannerDeviceByCred… | ③은 503이고 기기를 승인하지 않는다 | 빈칸 | B | — |
@@ -301,7 +301,7 @@
 | v5.0.0-6.3.1 | — | L1 | 명세서에 정의된 크리덴셜 스터핑 및 무차별 대입 방어 통제를 시스템에 구현한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-login.int.test.ts, services/identity-svc/test/admin-login-http.test.ts 외 3곳 |
 | v5.0.0-6.3.2 | — | L1 | 기본 계정(root, admin 등)이 없거나 비활성화되어 있다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-6.3.3 | — | L2 | 애플리케이션 접근에는 다중 요소 인증이나 단일 요소 인증의 조합을 요구하고(L3는 피싱에 강하고 사용자 동작을 요구하는 하드웨어 요소 포함), 이를 완화하려면… | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/admin-totp.test.ts 외 1곳 |
-| v5.0.0-6.3.4 | — | L2 | 인증 경로가 여럿이면 문서에 없는 경로가 없게 하고, 모든 경로에 같은 보안 통제와 인증 강도를 일관되게 적용한다. | 빈칸 | B | 영역: apps/web, services/identity-svc |
+| v5.0.0-6.3.4 | — | L2 | 인증 경로가 여럿이면 문서에 없는 경로가 없게 하고, 모든 경로에 같은 보안 통제와 인증 강도를 일관되게 적용한다. | ID만 | B | 다른 곳 시험: services/ticket-svc/test/scanner-gate-http.test.ts (영역: apps/web, services/identity-svc) |
 | v5.0.0-6.4.1 | — | L1 | 시스템이 자동 발급하는 초기 비밀번호 및 활성화 코드는 CSPRNG 난수와 짧은 만료 기한을 적용한다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-6.4.2 | — | L1 | 비밀번호 힌트 기능이나 비밀 질문 복구 방식을 일절 사용하지 않는다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-6.4.3 | — | L2 | 비밀번호 재설정 절차가 기존 다중 요소 인증(MFA) 검증 단계를 우회하지 않도록 보장한다. | 빈칸 | B | 영역: services/identity-svc |
