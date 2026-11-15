@@ -57,7 +57,7 @@ const parseCursor = (raw: string): { validFromMs: number; assignmentId: string }
 export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   readonly assignments = new Map<string, MemoryStaffAssignmentRow>();
   readonly sessions = new Map<string, ScannerSessionRecord>();
-  readonly accounts = new Map<string, { email?: string; verified: boolean }>();
+  readonly accounts = new Map<string, { email?: string; verified: boolean; status?: 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' }>();
   /** 기기 폐기로 끝낸 세션의 control.sessions-terminated 값(시험 확인용) */
   readonly terminatedEvents: { accountId: string; sessionId: string; reason: string; terminatedAt: string }[] = [];
 
@@ -77,6 +77,10 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
 
   async accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }> {
     return this.accounts.get(accountId) ?? { verified: false };
+  }
+
+  async accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null> {
+    return this.accounts.get(accountId)?.status ?? 'ACTIVE';
   }
 
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
@@ -157,6 +161,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     this.sessions.set(i.scannerSessionId, {
       scannerSessionId: i.scannerSessionId,
       assignmentId: i.assignmentId,
+      accountId: i.accountId,
       deviceId: i.deviceId,
       role: i.role,
       proxy: i.proxy,
@@ -189,5 +194,23 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       terminated++;
     }
     return terminated;
+  }
+
+  async terminateByAccount(i: { accountId: string; reason: 'STAFF_REVOKED'; nowMs: number }): Promise<{ assignments: number; sessions: number }> {
+    let assignments = 0;
+    for (const [id, a] of this.assignments) {
+      if (a.accountId !== i.accountId || (a.status !== 'ASSIGNED' && a.status !== 'INVITED')) continue;
+      this.assignments.set(id, { ...a, status: 'REVOKED' });
+      assignments++;
+    }
+    let sessions = 0;
+    for (const [id, s] of this.sessions) {
+      if (s.terminatedAt !== null) continue;
+      if (s.accountId !== i.accountId) continue;
+      this.sessions.set(id, { ...s, terminatedAt: i.nowMs });
+      this.terminatedEvents.push({ accountId: i.accountId, sessionId: id, reason: i.reason, terminatedAt: new Date(i.nowMs).toISOString() });
+      sessions++;
+    }
+    return { assignments, sessions };
   }
 }

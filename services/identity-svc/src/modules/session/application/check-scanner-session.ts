@@ -17,6 +17,8 @@ export class CheckScannerSession {
     if (!i.scannerSessionId || !i.deviceId) return { valid: false };
     const row = await this.store.findScannerSession(i.scannerSessionId);
     if (!row) return { valid: false };
+    // 탈퇴·병합된 계정의 스태프 토큰은 배정 유효 시간이 남아도 통하지 않는다(C2-01).
+    if ((await this.store.accountStatusOf(row.accountId)) !== 'ACTIVE') return { valid: false };
     const now = this.clock.now();
     if (row.deviceId !== i.deviceId) return { valid: false };
     if (row.terminatedAt !== null) return { valid: false };

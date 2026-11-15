@@ -4,6 +4,7 @@ import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-verifier.js';
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
+import { MemoryStaffAssignmentStore } from '../src/modules/session/adapters/memory-staff-assignment-store.js';
 import { AccountError } from '../src/modules/session/application/account-error.js';
 import { CloseAccount } from '../src/modules/session/application/close-account.js';
 import { FinishWithdrawals } from '../src/modules/session/application/finish-withdrawals.js';
@@ -47,7 +48,8 @@ async function setup(o: { failErase?: number; failEraseFor?: (accountId: string)
     pidsOf: (accountId) => real.pidsOf(accountId),
   };
   const reauth = new JoseReauthVerifier(k.keys, ISSUER, clock);
-  const withdraw = new WithdrawAccount(sessions, reauth, eraser, clock);
+  const staff = new MemoryStaffAssignmentStore();
+  const withdraw = new WithdrawAccount(sessions, reauth, eraser, clock, undefined, staff);
   const finish = new FinishWithdrawals(sessions, eraser, clock);
   const login = (id: string) => k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: id, email: `${id}@kakao.test`, deviceId: 'dev-1' });
   const verify = async (accountId: string, person: string, birth = '2000-01-01') => {
@@ -56,7 +58,7 @@ async function setup(o: { failErase?: number; failEraseFor?: (accountId: string)
   };
   const reauthToken = async (s: { accountId: string; sessionId: string }, purpose: 'sensitive' | 'high-risk' = 'sensitive', o2: { now?: number } = {}) =>
     (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose }, o2.now ?? clock.now())).token;
-  return { clock, sessions, verifications, k, withdraw, finish, login, verify, reauthToken, closure, claims, provider, hashers, status: new GetVerificationStatus(sessions, claims, clock) };
+  return { clock, sessions, verifications, staff, k, withdraw, finish, login, verify, reauthToken, closure, claims, provider, hashers, status: new GetVerificationStatus(sessions, claims, clock) };
 }
 
 const code = async (p: Promise<unknown>) => {
@@ -90,6 +92,19 @@ describe('탈퇴(I-T16·I-T27)', () => {
     expect(t.verifications.retentionOf(a.accountId)).toMatchObject({ verifiedAt: t.clock.now(), deleteAt: t.clock.now() + 365 * DAY });
     expect(JSON.stringify(t.verifications.retentionOf(a.accountId))).not.toMatch(/ci|pid/i);
     expect(t.verifications.attemptsOf(a.accountId)).toEqual([]);
+  });
+
+  test('탈퇴하면 그 계정의 스태프 배정을 끝내고 스태너 세션 종료 사건을 남긴다', async () => {
+    const t = await setup();
+    const a = await t.login('w-staff');
+    await t.verify(a.accountId, 'staff-person');
+    const HOUR = 60 * 60_000;
+    t.staff.assignments.set('a-staff', { id: 'a-staff', accountId: a.accountId, status: 'ASSIGNED', eventId: 'ev-1', validFromMs: t.clock.now() - HOUR, validUntilMs: t.clock.now() + HOUR, inviteExpiresAtMs: t.clock.now() + HOUR, invitedBy: 'admin' });
+    t.staff.sessions.set('ss-staff', { scannerSessionId: 'ss-staff', assignmentId: 'a-staff', accountId: a.accountId, deviceId: 'dev-1', role: 'gate_staff', proxy: false, expiresAt: t.clock.now() + HOUR, terminatedAt: null, assignmentStatus: 'ASSIGNED', validFrom: t.clock.now() - HOUR, validUntil: t.clock.now() + HOUR, eventId: 'ev-1' });
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(t.staff.assignments.get('a-staff')?.status).toBe('REVOKED');
+    expect(t.staff.sessions.get('ss-staff')?.terminatedAt).toBe(t.clock.now());
+    expect(t.staff.terminatedEvents).toEqual([{ accountId: a.accountId, sessionId: 'ss-staff', reason: 'STAFF_REVOKED', terminatedAt: new Date(t.clock.now()).toISOString() }]);
   });
 
   test('I-T16_재인증토큰이없거나·다른세션·다른작업묶음·다른계정·만료면403이고_한번쓴토큰은다시못쓴다', async () => {

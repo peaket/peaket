@@ -5,6 +5,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { ACCOUNT_ERASER, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore, type SessionTx } from '../domain/ports.js';
+import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from '../domain/staff.js';
 import { WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
 import { AccountError } from './account-error.js';
 import { checkIds } from './end-session.js';
@@ -40,6 +41,8 @@ export class WithdrawAccount {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 대조값 보관 안내(없으면 보지 않는다: 시험) */
     @Optional() @Inject(FRAUD_HOLDS) private readonly holds?: FraudHolds,
+    /** 탈퇴 계정의 스태프 배정·스캐너 세션 정리(없으면 계정 상태 확인이 안전을 지킨다) */
+    @Optional() @Inject(STAFF_ASSIGNMENT_STORE) private readonly staff?: StaffAssignmentStore,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {}
 
@@ -78,6 +81,15 @@ export class WithdrawAccount {
       }
       await completeWithdrawal(tx, accountId, now, pids);
     });
+    // 계정은 이미 DELETED라 스캐너 세션 확인은 바로 false가 된다. 배정·세션 정리와 종료 사건은
+    // 별도 트랜잭션으로 이어서 남기고, 실패해도 계정 상태 확인이 안전을 지킨다.
+    if (this.staff) {
+      try {
+        await this.staff.terminateByAccount({ accountId, reason: 'STAFF_REVOKED', nowMs: now });
+      } catch (err) {
+        this.logger?.warn({ err, accountId }, '탈퇴 뒤 스태프 배정·스캐너 세션 정리에 실패했다');
+      }
+    }
     try {
       await this.eraser.erase(accountId, now);
     } catch (err) {

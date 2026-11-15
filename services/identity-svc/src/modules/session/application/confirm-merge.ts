@@ -4,8 +4,9 @@
 // 탈퇴 유예·같은 종류의 로그인 수단(SAME_PROVIDER_KIND, OPEN[21]) → 로그인 수단·기기 행 이전(OPEN[22])·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) →
 // 대표 계정의 다른 세션 끝내기(LOGIN_METHOD_CHANGED: 흡수 계정의 수단이 옮겨 와 인증 요소가 바뀌었다. 제안한 세션이 대표 계정의 것이면 그 세션만 남긴다, ASVS 7.4.3, BOT-044, ADR-0209 결정 5) → 병합 사건.
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
+import { CLOCK, type Clock, PLATFORM_LOGGER, uuidv7 } from '@peaket/platform';
 import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, type SignupState } from '../domain/ports.js';
+import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from '../domain/staff.js';
 import { signupCompleted } from '../domain/signup.js';
 import { choosePrimary, sharedProviderKinds } from '../domain/merge.js';
 import { sessionAlive, WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
@@ -24,6 +25,9 @@ export class ConfirmMerge {
     @Inject(MERGE_PROPOSALS) private readonly proposals: MergeProposals,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(SESSION_SIGNALS) private readonly signals?: Pick<SessionSignals, 'othersEnded'>,
+    /** 흡수 계정의 스태프 배정·스캐너 세션 정리(없으면 계정 상태 확인이 안전을 지킨다) */
+    @Optional() @Inject(STAFF_ASSIGNMENT_STORE) private readonly staff?: StaffAssignmentStore,
+    @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: { warn(o: object, msg?: string): void },
   ) {}
 
   /** @throws MergeError NOT_FOUND·REAUTH_REQUIRED·BLOCKED·INVARIANT·UNAVAILABLE */
@@ -109,6 +113,14 @@ export class ConfirmMerge {
       throw e;
     }
     if (ended) this.signals?.othersEnded('login_method_changed', ended);
+    // 흡수 계정은 이미 MERGED라 스캐너 세션 확인이 false가 된다. 배정·세션 정리와 종료 사건을 이어서 남긴다.
+    if (this.staff) {
+      try {
+        await this.staff.terminateByAccount({ accountId: p.absorbedAccountId, reason: 'STAFF_REVOKED', nowMs: now });
+      } catch (err) {
+        this.logger?.warn({ err, accountId: p.absorbedAccountId }, '병합 뒤 흡수 계정의 스태프 배정·스캐너 세션 정리에 실패했다');
+      }
+    }
     // 한 번만 쓴다. 지우지 못해도 다시 오면 흡수 계정이 MERGED라 NOT_FOUND다
     await this.proposals.remove(p.id).catch(() => undefined);
     return { mergeId };

@@ -32,6 +32,11 @@ const ASSIGN2 = '0190f3a1-7c2e-7a00-8000-000000000012';
 const JKT = 'A'.repeat(43);
 const FAN_SESSION = '0190f3a1-7c2e-7a00-8000-000000000021';
 const FAN_SESSION2 = '0190f3a1-7c2e-7a00-8000-000000000022';
+const OTHER_DEVICE = '0190f3a1-7c2e-7a00-8000-000000000009';
+const OTHER_ASSIGN = '0190f3a1-7c2e-7a00-8000-00000000000d';
+const MERGED_ACCOUNT = '0190f3a1-7c2e-7a00-8000-00000000000a';
+const MERGED_ASSIGN = '0190f3a1-7c2e-7a00-8000-00000000000b';
+const MERGED_DEVICE = '0190f3a1-7c2e-7a00-8000-00000000000c';
 
 class FakeRegistry implements ScannerDeviceRegistry {
   answer: ScannerDeviceLookupAnswer = { found: true, deviceId: DEVICE, status: 'ACTIVE', name: '동문-03', promoterId: P1 };
@@ -84,6 +89,7 @@ beforeAll(async () => {
   check = new CheckScannerSession(store, clock);
   await database.pool.query("insert into account (id, status, email, email_verified, created_at) values ($1, 'ACTIVE', 'staff@example.com', true, now()) on conflict (id) do nothing", [ACCOUNT]);
   await database.pool.query("insert into account (id, status, email, email_verified, created_at) values ($1, 'ACTIVE', 'other@example.com', true, now()) on conflict (id) do nothing", [OTHER]);
+  await database.pool.query("insert into account (id, status, email, email_verified, created_at) values ($1, 'ACTIVE', 'merged@example.com', true, now()) on conflict (id) do nothing", [MERGED_ACCOUNT]);
   await database.pool.query(
     `insert into staff_assignment (id, account_id, event_id, promoter_id, role, invite_expires_at, invited_by, valid_from, valid_until, status)
      values ($1, $2, $3, $4, 'gate_staff', $5, $6, $7, $8, 'ASSIGNED')`,
@@ -93,6 +99,16 @@ beforeAll(async () => {
     `insert into staff_assignment (id, account_id, event_id, promoter_id, role, invite_expires_at, invited_by, valid_from, valid_until, status)
      values ($1, $2, $3, $4, 'gate_lead', $5, $6, $7, $8, 'ASSIGNED')`,
     [ASSIGN2, ACCOUNT, EVENT2, P1, new Date(NOW + HOUR), ADMIN, new Date(NOW - HOUR), new Date(NOW + 24 * HOUR)],
+  );
+  await database.pool.query(
+    `insert into staff_assignment (id, account_id, event_id, promoter_id, role, invite_expires_at, invited_by, valid_from, valid_until, status)
+     values ($1, $2, $3, $4, 'gate_staff', $5, $6, $7, $8, 'ASSIGNED')`,
+    [MERGED_ASSIGN, MERGED_ACCOUNT, EVENT, P1, new Date(NOW + HOUR), ADMIN, new Date(NOW - HOUR), new Date(NOW + 24 * HOUR)],
+  );
+  await database.pool.query(
+    `insert into staff_assignment (id, account_id, event_id, promoter_id, role, invite_expires_at, invited_by, valid_from, valid_until, status)
+     values ($1, $2, $3, $4, 'gate_staff', $5, $6, $7, $8, 'ASSIGNED')`,
+    [OTHER_ASSIGN, OTHER, EVENT, P1, new Date(NOW + HOUR), ADMIN, new Date(NOW - HOUR), new Date(NOW + 24 * HOUR)],
   );
 });
 
@@ -104,6 +120,10 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // 시험마다 스캐너 세션·배정 상태를 처음으로 되돌린다(앞 시험이 남긴 세션 수에 기대지 않는다).
+  await database.pool.query('delete from scanner_session');
+  await database.pool.query(`update staff_assignment set status = 'ASSIGNED' where id = any($1)`, [[ASSIGN, ASSIGN2, MERGED_ASSIGN, OTHER_ASSIGN]]);
+  await database.pool.query("update account set status = 'ACTIVE', merged_into_account_id = null where id = any($1)", [[OTHER, MERGED_ACCOUNT]]);
   await redis.command(['DEL', `id:devrate:issue:${DEVICE}`], { key: `id:devrate:issue:${DEVICE}` });
   await redis.command(['DEL', `id:devrate:approve:${ACCOUNT}`], { key: `id:devrate:approve:${ACCOUNT}` });
 });
@@ -122,6 +142,36 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     expect(col.rows).toEqual([{ column_name: 'promoter_id' }]);
     const idx = await database.pool.query("select indexname from pg_indexes where schemaname='public' and tablename='scanner_session' order by indexname");
     expect(idx.rows.map((r) => r.indexname)).toContain('scanner_session_device_active_key');
+    expect(idx.rows.map((r) => r.indexname)).toContain('scanner_session_account_active_key');
+  });
+
+  test('같은 계정의 동시 승인은 한 세션만 남긴다', async () => {
+    await Promise.all([
+      store.createScannerSession({ scannerSessionId: randomUUID(), assignmentId: ASSIGN, deviceId: DEVICE, accountId: ACCOUNT, approvedBySession: FAN_SESSION, role: 'gate_staff', proxy: false, approvedAtMs: NOW, expiresAtMs: NOW + HOUR }),
+      store.createScannerSession({ scannerSessionId: randomUUID(), assignmentId: ASSIGN2, deviceId: OTHER_DEVICE, accountId: ACCOUNT, approvedBySession: FAN_SESSION2, role: 'gate_lead', proxy: false, approvedAtMs: NOW + 1, expiresAtMs: NOW + HOUR }),
+    ]);
+    const rows = await database.pool.query('select count(*)::int as n from scanner_session where staff_account_id = $1 and terminated_at is null', [ACCOUNT]);
+    expect(rows.rows[0].n).toBe(1);
+  });
+
+  test('탈퇴·병합된 계정의 배정을 끝내고 세션 종료 사유를 남긴다', async () => {
+    for (const [accountId, deviceId, assignmentId, status] of [
+      [OTHER, OTHER_DEVICE, OTHER_ASSIGN, 'DELETED'],
+      [MERGED_ACCOUNT, MERGED_DEVICE, MERGED_ASSIGN, 'MERGED'],
+    ] as const) {
+      const scannerSessionId = randomUUID();
+      await store.createScannerSession({ scannerSessionId, assignmentId, deviceId, accountId, approvedBySession: FAN_SESSION, role: 'gate_staff', proxy: false, approvedAtMs: NOW, expiresAtMs: NOW + HOUR });
+      await database.pool.query('update account set status = $2, merged_into_account_id = $3 where id = $1', [accountId, status, status === 'MERGED' ? OTHER : null]);
+      const r = await store.terminateByAccount({ accountId, reason: 'STAFF_REVOKED', nowMs: NOW + 1_000 });
+      expect(r).toMatchObject({ assignments: 1, sessions: 1 });
+      const assignment = await database.pool.query('select status from staff_assignment where id = $1', [assignmentId]);
+      expect(assignment.rows[0].status).toBe('REVOKED');
+      const session = await database.pool.query('select terminated_at from scanner_session where id = $1', [scannerSessionId]);
+      expect(session.rows[0].terminated_at).not.toBeNull();
+      const outbox = await database.pool.query("select payload from outbox where topic = 'control.sessions-terminated' and msg_key = $1 order by id desc limit 1", [accountId]);
+      expect(JSON.parse(Buffer.from(outbox.rows[0].payload).toString('utf8'))).toMatchObject({ accountId, sessionId: scannerSessionId, reason: 'STAFF_REVOKED' });
+      expect((await check.run({ scannerSessionId, deviceId })).valid).toBe(false);
+    }
   });
 
   test('기기 코드는 5분·1회용이고 기기당 시간당 10회로 제한한다', async () => {
@@ -215,9 +265,9 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     const device = randomUUID();
     const session = randomUUID();
     await database.pool.query(
-      `insert into scanner_session (id, staff_assignment_id, scanner_device_id, role, proxy, approved_at, expires_at)
-       values ($1, $2, $3, 'gate_staff', false, $4, $5)`,
-      [session, ASSIGN, device, new Date(clock.now()), new Date(clock.now() + HOUR)],
+      `insert into scanner_session (id, staff_assignment_id, staff_account_id, scanner_device_id, role, proxy, approved_at, expires_at)
+       values ($1, $2, $3, $4, 'gate_staff', false, $5, $6)`,
+      [session, ASSIGN, ACCOUNT, device, new Date(clock.now()), new Date(clock.now() + HOUR)],
     );
     const terminate = new TerminateScannerSessions(store, clock);
     await expect(terminate.run({ deviceId: device, reason: 'DEVICE_REVOKED' })).resolves.toEqual({ terminated: 1 });

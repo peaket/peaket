@@ -7,6 +7,8 @@ export type StaffAssignmentStatus = 'INVITED' | 'ASSIGNED' | 'REVOKED' | 'ENDED'
 export interface ScannerSessionRecord {
   scannerSessionId: string;
   assignmentId: string;
+  /** 배정된 스태프 계정. 계정 상태(ACTIVE)를 함께 보기 위해 둔다 */
+  accountId: string;
   deviceId: string;
   role: StaffRole;
   proxy: boolean;
@@ -74,6 +76,8 @@ export interface StaffAssignmentStore {
   findInvitationByTokenHash(tokenHash: string): Promise<StaffAssignmentRecord | null>;
   /** 계정의 이메일과 검증 여부. 초대 수락의 이메일 일치 확인에 쓴다 */
   accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }>;
+  /** 계정 상태. 없으면 null. 스캐너 세션 확인이 ACTIVE가 아닌 계정을 거절한다 */
+  accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null>;
   /** 초대를 수락해 ASSIGNED로 바꾼다. 만료·사용됨·이메일 불일치·중복 배정을 구분한다 */
   acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult>;
   /** 초대를 거절해 EXPIRED로 끝낸다. 같은 토큰을 다시 보내도 결과가 같다 */
@@ -104,6 +108,11 @@ export interface StaffAssignmentStore {
    * 이미 끝난 세션은 세지 않는다(멱등). 끝낸 수를 돌려준다.
    */
   terminateScannerSessionsByDevice(i: { deviceId: string; reason: 'DEVICE_REVOKED'; nowMs: number }): Promise<number>;
+  /**
+   * 탈퇴·병합된 계정의 배정을 REVOKED로 끝내고, 그 계정의 살아 있는 스캐너 세션을 모두 끝낸 뒤
+   * control.sessions-terminated(reason STAFF_REVOKED)를 세션마다 적는다. 끝낸 배정·세션 수를 돌려준다.
+   */
+  terminateByAccount(i: { accountId: string; reason: 'STAFF_REVOKED'; nowMs: number }): Promise<{ assignments: number; sessions: number }>;
 }
 
 export const STAFF_ASSIGNMENT_STORE = Symbol('identity.StaffAssignmentStore');

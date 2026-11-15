@@ -18,6 +18,7 @@ function session(id: string, deviceId: string, assignmentId: string): ScannerSes
   return {
     scannerSessionId: id,
     assignmentId,
+    accountId: ACCOUNT,
     deviceId,
     role: 'gate_staff',
     proxy: false,
