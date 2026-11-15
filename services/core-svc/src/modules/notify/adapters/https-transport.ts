@@ -1,5 +1,5 @@
 // 실제 웹훅 발송기: HTTPS 443만, 연결마다 해석한 IP가 공인인지 확인하고, 공용 외부 HTTP 클라이언트로 보낸다.
-// 리디렉션을 따르지 않고(공용 클라이언트), 응답은 64KiB까지만 읽고 전체 10초 [가정]에 끊는다(docs/features/notify.md §9).
+// 리디렉션을 따르지 않고(공용 클라이언트), 응답은 Content-Length와 스트림 읽기 모두 64KiB에서 끊고 전체 10초 [가정]에 끊는다(docs/features/notify.md §9).
 // 남는 한계: fetch는 해석한 IP로 고정 연결하지 못해 DNS 재해석 창이 있다. 발송 파드의 나가는 443 제한(V-T34)이 그 창을 줄인다.
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -10,6 +10,9 @@ const RESPONSE_CAP_BYTES = 64 * 1024;
 const TOTAL_TIMEOUT_MS = 10_000;
 
 export class WebhookTransportError extends Error {}
+
+type LookupAddress = { address: string; family: number };
+type Lookup = (hostname: string, options: { all: true; verbatim: true }) => Promise<readonly LookupAddress[]>;
 
 function isPublicIp(ip: string): boolean {
   if (isIP(ip) === 4) {
@@ -43,17 +46,58 @@ function checkUrl(raw: string): URL {
   return url;
 }
 
+/** 응답 본문을 64KiB까지만 읽는다. 넘으면 스트림을 끊고 실패로 기록한다. 본문은 쓰지 않는다 */
+async function drainCapped(res: Response): Promise<void> {
+  const declared = res.headers.get('content-length');
+  if (declared !== null) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && n > RESPONSE_CAP_BYTES) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new WebhookTransportError('응답이 64KiB를 넘었습니다');
+    }
+  }
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      total += value.byteLength;
+      if (total > RESPONSE_CAP_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new WebhookTransportError('응답이 64KiB를 넘었습니다');
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // 이미 끊겼다
+    }
+  }
+}
+
+export interface HttpsWebhookTransportOptions {
+  /** 시험용 바꿔 끼우기(실제 배포는 전역 fetch) */
+  fetch?: typeof fetch;
+  /** 시험용 바꿔 끼우기(실제 배포는 node:dns/promises.lookup) */
+  lookup?: Lookup;
+}
+
 export class HttpsWebhookTransport implements WebhookTransport {
+  constructor(private readonly opts: HttpsWebhookTransportOptions = {}) {}
+
   async send(input: { url: string; headers: Record<string, string>; body: string }): Promise<{ status: number }> {
     const url = checkUrl(input.url);
-    const addresses = await lookup(url.hostname, { all: true, verbatim: true });
+    const resolve: Lookup = this.opts.lookup ?? ((hostname, options) => lookup(hostname, options));
+    const addresses = await resolve(url.hostname, { all: true, verbatim: true });
     if (addresses.length === 0) throw new WebhookTransportError('주소를 해석하지 못했습니다');
     if (!addresses.every((a) => isPublicIp(a.address))) throw new WebhookTransportError('사설·루프백 주소로는 보낼 수 없습니다');
     const query = Object.fromEntries(url.searchParams.entries());
-    const client = createExternalHttpClient({ provider: 'partner-webhook', baseUrl: url.origin, timeoutCapMs: TOTAL_TIMEOUT_MS });
+    const client = createExternalHttpClient({ provider: 'partner-webhook', baseUrl: url.origin, timeoutCapMs: TOTAL_TIMEOUT_MS, ...(this.opts.fetch ? { fetch: this.opts.fetch } : {}) });
     const res = await client.request({ method: 'POST', path: url.pathname, query, headers: input.headers, body: input.body });
-    const text = await res.text();
-    if (Buffer.byteLength(text) > RESPONSE_CAP_BYTES) throw new WebhookTransportError('응답이 64KiB를 넘었습니다');
+    await drainCapped(res);
     return { status: res.status };
   }
 }

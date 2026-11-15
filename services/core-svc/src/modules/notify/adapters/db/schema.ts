@@ -39,6 +39,8 @@ export const webhookDelivery = pgTable(
     lastHttpStatus: integer('last_http_status'),
     lastError: text('last_error'),
     nextAttemptAt: at('next_attempt_at'),
+    /** 발송 워커 임대 만료(다른 복제가 이 시각 전에는 집지 않는다). docs/data.md §5 webhook_delivery */
+    leaseUntil: at('lease_until'),
     createdAt: at('created_at').notNull(),
     finishedAt: at('finished_at'),
     /** thin 본문. 응답 본문은 저장하지 않는다 */
@@ -48,5 +50,6 @@ export const webhookDelivery = pgTable(
     check('webhook_delivery_status_check', sql`${t.status} in ('PENDING', 'RETRYING', 'SUCCEEDED', 'DEAD')`),
     unique('webhook_delivery_endpoint_event_uq').on(t.endpointId, t.webhookId),
     index('webhook_delivery_endpoint_created_idx').on(t.endpointId, t.createdAt),
+    index('webhook_delivery_due_idx').on(t.nextAttemptAt).where(sql`${t.status} in ('PENDING', 'RETRYING')`),
   ],
 );

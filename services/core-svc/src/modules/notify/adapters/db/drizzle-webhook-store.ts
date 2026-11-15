@@ -1,6 +1,6 @@
 // notify Drizzle 저장소(docs/data.md webhook_endpoint·webhook_delivery). 파트너 경로는 core_partner 역할(RLS)로 읽고 쓴다.
 // RLS는 트랜잭션의 app.tenant_id로 거르므로 모든 질의를 테넌트 트랜잭션 안에서 한다(ADR-0241, authz-matrix §5.3).
-import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { WebhookStore } from '../../domain/ports.js';
 import type { DeliveryStatus, WebhookDeliveryRecord, WebhookEndpointRecord } from '../../domain/webhook.js';
@@ -144,7 +144,7 @@ export class DrizzleWebhookStore implements WebhookStore {
         if (current[0].delivery.status === 'PENDING' || current[0].delivery.status === 'RETRYING') return 'conflict';
         const rows = await tx
           .update(webhookDelivery)
-          .set({ status: 'PENDING', attemptCount: sql`${webhookDelivery.attemptCount} + 1`, nextAttemptAt: now, finishedAt: null })
+          .set({ status: 'PENDING', attemptCount: sql`${webhookDelivery.attemptCount} + 1`, nextAttemptAt: now, finishedAt: null, leaseUntil: null })
           .where(and(eq(webhookDelivery.id, deliveryId), inArray(webhookDelivery.status, ['SUCCEEDED', 'DEAD'])))
           .returning();
         return rows[0] ? deliveryRecord(rows[0]) : 'conflict';
@@ -190,23 +190,40 @@ export class DrizzleWebhookStore implements WebhookStore {
   }
 
   async listDueDeliveries(now: Date, limit: number) {
+    // docs/data.md §5: 보낼 때가 된 행을 짧은 트랜잭션에서 FOR UPDATE SKIP LOCKED로 집고 lease_until을 건다.
+    // 여러 복제가 같은 행을 집지 않으며, 임대가 끝난 행은 다른 복제가 다시 집는다.
+    const leaseUntil = new Date(now.getTime() + 2 * 60_000);
     return this.db.transaction(async (tx) => {
-      const rows = await tx
-        .select()
+      const picked = await tx
+        .select({ id: webhookDelivery.id })
         .from(webhookDelivery)
-        .where(and(inArray(webhookDelivery.status, ['PENDING', 'RETRYING']), lte(webhookDelivery.nextAttemptAt, now)))
+        .where(
+          and(
+            inArray(webhookDelivery.status, ['PENDING', 'RETRYING']),
+            lte(webhookDelivery.nextAttemptAt, now),
+            or(isNull(webhookDelivery.leaseUntil), lt(webhookDelivery.leaseUntil, now)),
+          ),
+        )
         .orderBy(webhookDelivery.nextAttemptAt)
-        .limit(limit);
+        .limit(limit)
+        .for('update', { skipLocked: true });
+      if (picked.length === 0) return [];
+      const rows = await tx
+        .update(webhookDelivery)
+        .set({ leaseUntil })
+        .where(inArray(webhookDelivery.id, picked.map((r) => r.id)))
+        .returning();
       return rows.map(deliveryRecord);
     });
   }
 
   async saveDelivery(record: WebhookDeliveryRecord) {
     await this.db.transaction(async (tx) => {
+      // 임대가 끝난 뒤 늦게 돌아온 워커가 SUCCEEDED/DEAD를 RETRYING으로 되돌리지 않게 한다(터미널 상태는 다시 쓰지 않는다).
       await tx
         .update(webhookDelivery)
-        .set({ status: record.status, attemptCount: record.attemptCount, lastHttpStatus: record.lastHttpStatus, lastError: record.lastError, nextAttemptAt: record.nextAttemptAt, finishedAt: record.finishedAt })
-        .where(eq(webhookDelivery.id, record.deliveryId));
+        .set({ status: record.status, attemptCount: record.attemptCount, lastHttpStatus: record.lastHttpStatus, lastError: record.lastError, nextAttemptAt: record.nextAttemptAt, finishedAt: record.finishedAt, leaseUntil: null })
+        .where(and(eq(webhookDelivery.id, record.deliveryId), inArray(webhookDelivery.status, ['PENDING', 'RETRYING'])));
     });
   }
 
