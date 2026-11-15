@@ -26,9 +26,8 @@ export async function bootMain(extraEnv: Record<string, string>): Promise<{ valk
   const managementPort = await freePort();
   const grpcPort = await freePort();
   delete process.env.PEAKET_TELEMETRY_KAFKA_BROKERS;
-  Object.assign(process.env, {
+  const env: Record<string, string> = {
     PEAKET_ENV: 'prod',
-    PEAKET_INTERNAL_GRPC_TOKEN: 'test-internal-grpc-token',
     PEAKET_TRUST_REDIS_URL: valkey.url,
     PEAKET_TRUST_RULES_FILE: rulesFile,
     PEAKET_GRPC_PORT: String(grpcPort),
@@ -39,7 +38,10 @@ export async function bootMain(extraEnv: Record<string, string>): Promise<{ valk
     PEAKET_LOG_PSEUDONYM_KEY: Buffer.alloc(32, 7).toString('base64'),
     PEAKET_LOG_LEVEL: 'fatal',
     ...extraEnv,
-  });
+  };
+  // R-608: prod/staging 기동은 내부 gRPC 토큰을 요구한다. ci/local 시험은 토큰 없이 부른다.
+  if ((env.PEAKET_ENV === 'prod' || env.PEAKET_ENV === 'staging') && !env.PEAKET_INTERNAL_GRPC_TOKEN) env.PEAKET_INTERNAL_GRPC_TOKEN = 'test-internal-grpc-token';
+  Object.assign(process.env, env);
   try {
     await import('../src/main.js');
   } catch (err) {

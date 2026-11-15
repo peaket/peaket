@@ -675,6 +675,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-632: CI 43680392600의 contract-check·node·kind 실패를 고친다. (1) 차트 RBAC 시험이 OPS-08의 create 규칙과 get/update/patch를 함께 기대한다. (2) C1-13 TIME_UNCERTAIN enum 추가를 깨짐 예외로 기록한다. (3) payment 마이그레이션 0020의 settlement_statement_audit 표·pg_store 칸·적용 21건을 시험 기대값에 반영한다. (4) PEAKET_CORE_HTTP_URL이 없을 때 settlementDueElector를 시작하지 않고, 종료 때는 worker 유무와 무관하게 항상 stop해 SIGTERM 뒤 프로세스가 남지 않게 한다.
 - R-633: `bootMain`이 `PEAKET_ENV=prod`로 trust-svc main을 띄우면서 R-608의 내부 gRPC 토큰 요구를 채우지 않아 main-start·main-evidence·main-no-key-metric 시험이 실패했다. 시험 전용 토큰 `test-internal-grpc-token`을 넣어 prod 기동 경로를 그대로 시험한다. production 코드는 바꾸지 않는다.
 - R-634: 웨이브 6 마감 뒤 도착한 독립 검증 보고서를 보존한다. L1V2는 R-608/618/619 잔여 네 건의 통과를 확인했고, R628V는 R-628의 prod 무토큰 시작 차단·401·상수시간 비교 동작을 확인하되 onModuleInit·timingSafeEqual 회귀 시험 공백을 남겼다. A2-17/A2-19 재현 시험은 `test/audit-core-gaps` 가지에, BOT_LEVEL·DEGRADED_MODE 문서-코드 차이는 Wave 7 소유자 결정 목록에 남긴다.
+- R-635: R-608이 trust-svc prod 기동에 내부 gRPC 토큰을 요구한다. R-633은 이를 모든 main-boot에 넣었지만 main-label은 `PEAKET_ENV=ci`로 서버를 띄우고 토큰 없이 ApplyLabel을 부른다. main-boot가 최종 env의 PEAKET_ENV를 보고 prod/staging일 때만 시험 토큰을 넣게 해 prod 기동 시험과 ci 무토큰 시험을 모두 만족한다.
 
 ## 5. [충돌] 결정 결과
 
