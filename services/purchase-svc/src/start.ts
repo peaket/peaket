@@ -282,7 +282,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 서비스 로거는 서비스를 만든 뒤에야 생기므로, 좌석맵 판은 늦게 묶는 로거로 경고를 남긴다(판 파일은 처음 요청 때 읽는다)
   let log: { warn(obj: object, msg: string): void } | undefined;
   const coreSaleConfigs = coreHttpUrl
-    ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock, ...(process.env.PEAKET_INTERNAL_TOKEN ? { internalToken: process.env.PEAKET_INTERNAL_TOKEN } : {}) })
+    ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock, ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}) })
     : undefined;
   const seatMap = new LayoutSeatMap({
     source: new FileSeatMapSource(seatMapDir),
