@@ -292,3 +292,81 @@ describe('GAT-130 백그라운드 실행기·팬 알림', () => {
     expect(seen?.reason).toBe('EVENT_POSTPONED');
   });
 });
+
+describe('GAT-130 신청 창 경계', () => {
+  test('창이 닫히기 1ms 전에는 신청을 받고 그 티켓만 환급한다', async () => {
+    const f = fixture({ targets: [target(T1), target(T2)] });
+    await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    f.setNow(NOW + 3 * DAY - 1);
+    const applied = await f.service.apply({ requestId: REQUEST, ticketId: T1 });
+    expect(applied.status).toBe('REFUND_WINDOW');
+    expect(applied.progress).toMatchObject({ total: 2, done: 1, notApplied: 0 });
+    expect(applied.progress.perPg[0]).toMatchObject({ state: 'REFUND_WINDOW', done: 1 });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  test('실행기는 창이 닫히기 1ms 전에는 닫지 않고, 닫히는 밀리초에 닫는다', async () => {
+    const f = fixture({ targets: [target(T1), target(T2)] });
+    await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    f.setNow(NOW + 3 * DAY - 1);
+    expect(await f.service.runDue()).toMatchObject({ closedWindows: 0 });
+    expect((await f.service.get(REQUEST)).status).toBe('REFUND_WINDOW');
+    f.setNow(NOW + 3 * DAY);
+    expect(await f.service.runDue()).toMatchObject({ closedWindows: 1 });
+    expect((await f.service.get(REQUEST)).status).toBe('COMPLETED');
+  });
+
+  test('사람이 창을 일찍 닫으면 미신청은 NOT_APPLIED로 끝나고 경보를 남긴다', async () => {
+    const f = fixture({ targets: [target(T1), target(T2)] });
+    await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    await f.service.apply({ requestId: REQUEST, ticketId: T1 });
+    f.setNow(NOW + DAY);
+    const closed = await f.service.closeWindow({ requestId: REQUEST, closedBy: 'commander-1', reason: '신청 기한 조기 종료' });
+    expect(closed.status).toBe('COMPLETED');
+    expect(closed.progress).toMatchObject({ total: 2, done: 1, notApplied: 1 });
+    expect(closed.progress.perPg[0]).toMatchObject({ state: 'COMPLETED', notApplied: 1 });
+    expect(f.raises.at(-1)).toMatchObject({ severity: 'SEV3', reason: 'REFUND_WINDOW_CLOSED', detail: { closedBy: 'commander-1', notApplied: 1, total: 2 } });
+    // 두 번째 닫기는 같은 결과를 돌려주고 아무것도 다시 하지 않는다
+    expect(await f.service.closeWindow({ requestId: REQUEST, closedBy: 'commander-1', reason: '다시' })).toMatchObject({ status: 'COMPLETED' });
+    expect(f.raises.filter((r) => r.reason === 'REFUND_WINDOW_CLOSED')).toHaveLength(1);
+  });
+
+  test('신청한 환급이 아직 결과를 모르면 창이 닫힌 뒤에도 RUNNING이고, 실행기가 이어서 끝낸다', async () => {
+    const f = fixture({ targets: [target(T1), target(T2)], outcomes: ['REFUND_PENDING', 'REFUND_PENDING', 'REFUNDED'] });
+    await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    const applied = await f.service.apply({ requestId: REQUEST, ticketId: T1 });
+    expect(applied.progress).toMatchObject({ total: 2, done: 0, notApplied: 0 });
+    f.setNow(NOW + 3 * DAY);
+    // 창을 닫는 같은 실행에서 이미 기한이 지난 T1 재시도도 한 번 한다(attempt 2)
+    expect(await f.service.runDue()).toMatchObject({ closedWindows: 1, processed: 1 });
+    // 미신청 T2는 끝났지만 T1이 아직 결과 모름이라 작업 전체는 끝나지 않았다
+    const closed = await f.service.get(REQUEST);
+    expect(closed.status).toBe('RUNNING');
+    expect(closed.progress).toMatchObject({ total: 2, done: 0, failed: 0, notApplied: 1 });
+    f.setNow(NOW + 3 * DAY + 5 * 60_000 + 1);
+    expect(await f.service.runDue()).toMatchObject({ processed: 1 });
+    expect((await f.service.get(REQUEST)).status).toBe('COMPLETED');
+    expect((await f.service.get(REQUEST)).progress).toMatchObject({ total: 2, done: 1, notApplied: 1 });
+  });
+
+  test('신청 창의 기본 닫힘은 바뀐 공연 시작이고, 지금·바뀐 시작을 넘는 값은 INVALID다', async () => {
+    const f = fixture();
+    const r = await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY });
+    expect(r.refundWindowClosesAtMs).toBe(NOW + 7 * DAY);
+    const other = fixture();
+    await expect(start(other.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 8 * DAY })).rejects.toMatchObject({ code: 'INVALID' });
+    const atNow = fixture();
+    await expect(start(atNow.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW })).rejects.toMatchObject({ code: 'INVALID' });
+    const pastStart = fixture();
+    await expect(start(pastStart.service, { kind: 'POSTPONE', postponedToMs: NOW })).rejects.toMatchObject({ code: 'INVALID' });
+    const noStart = fixture();
+    await expect(start(noStart.service, { kind: 'POSTPONE' })).rejects.toMatchObject({ code: 'INVALID' });
+  });
+
+  test('취소(CANCEL) 요청에는 신청·창 닫기가 없고 CONFLICT다', async () => {
+    const f = fixture();
+    await start(f.service);
+    await expect(f.service.apply({ requestId: REQUEST, ticketId: T1 })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(f.service.closeWindow({ requestId: REQUEST, closedBy: 'commander-1', reason: 'x' })).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+});

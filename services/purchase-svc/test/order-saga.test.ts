@@ -587,6 +587,24 @@ describe('RESERVE ② 좌석 묶기', () => {
     expect(fx.restoreInputs[0]).toMatchObject({ eventId: EVENT, accountId: ACCOUNT, grantId: order.priorityGrantId });
   });
 
+  test('S-T37_⑤_승인_기한을_넘긴_우선_구매_주문(T11)도_판매_행을_지우고_PRIORITY_보류로_되돌린다', async () => {
+    const grantId = '01900000-0000-7000-8000-0000000000c1';
+    const order = sagaOrder({ status: 'RESERVED', priorityGrantId: grantId, attempt: tossAttempt({ authenticatedAtMs: NOW - 10 * MIN }) });
+    fx.put(order, sagaJob({ step: 'CONFIRM' }));
+    expect(await runner().confirmStep(sagaJob({ step: 'CONFIRM' }), order)).toEqual({ kind: 'FAILED', transition: 'T11', reason: 'EXPIRED' });
+    notCalled('confirms.confirm', 'confirmSent.done', 'pins.releaseFailed');
+    // 판매 행 PENDING 지우기·한도 되돌리기는 실패 기록 트랜잭션이 한다(T11)
+    expect(fx.failInputs).toHaveLength(1);
+    expect(fx.failInputs[0]).toMatchObject({ transition: 'T11', reason: 'EXPIRED', release: { eventId: EVENT, orderId: ORDER_ID, accountId: ACCOUNT, seatIds: [SEAT_2, SEAT_1] } });
+    // 좌석은 풀지 않고 그 권리의 PRIORITY 보류로 돌아간다(회차 키 수명까지)
+    expect(fx.releaseInputs).toHaveLength(0);
+    expect(fx.restoreInputs).toEqual([{ eventId: EVENT, accountId: ACCOUNT, grantId, seatIds: [SEAT_2, SEAT_1], keepUntilMs: KEEP_UNTIL }]);
+    expectInOrder(fx.calls, ['failures.fail', 'pins.restorePriority']);
+    expect(fx.orderRows.get(ORDER_ID)?.status).toBe('FAILED');
+    // 복귀가 끝났으므로 RELEASE 작업 행을 지운다
+    expect(fx.jobRows.get(ORDER_ID)).toBeUndefined();
+  });
+
   test.each([
     [0, NOW + 1000],
     [1, NOW + 2000],
