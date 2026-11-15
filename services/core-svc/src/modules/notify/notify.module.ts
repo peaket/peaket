@@ -19,8 +19,8 @@ export const NOTIFY_APP_STORE = Symbol.for('peaket.notify.app-store');
 export class NotifyModule {
   static register(
     o:
-      | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport }
-      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport },
+      | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> }
+      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
   ): DynamicModule {
     const providers: Provider[] = [
       {
@@ -29,7 +29,7 @@ export class NotifyModule {
         inject: [WEBHOOK_STORE, CLOCK],
       },
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
-      { provide: NotificationSender, useFactory: () => new NotificationSender(o.notificationTransport ?? new FakeNotificationTransport(), process.env) },
+      { provide: NotificationSender, useFactory: () => new NotificationSender(o.notificationTransport ?? new FakeNotificationTransport(), o.env ?? process.env) },
       {
         provide: WebhookDispatcher,
         useFactory: (store: WebhookStore, transport: WebhookTransport, clock: Clock) => new WebhookDispatcher({ store, transport, clock }),
