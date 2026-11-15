@@ -3,7 +3,7 @@
 // 다른 계정 시도 기록 1년(BOT-020), 보존 전용 표의 연계정보 처리 기록 1년(docs/features/identity.md §5·§8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
 import type { Clock, Database, MaintenanceTask } from '@peaket/platform';
 import { AdminAccountStoreForMaintenance, DEFAULT_ADMIN_AUTH_CONFIG } from './modules/admin/index.js';
-import { ACCOUNT_HOLD_CLOSED_KEEP_MS, BackfillContactRefs, CloseInvRefBridge, DrizzleSessionStore, FinishWithdrawals, InvRefKeyRing, PurgeIncompleteSignups, RotateContactRefs } from './modules/session/index.js';
+import { ACCOUNT_HOLD_CLOSED_KEEP_MS, BackfillContactRefs, CloseInvRefBridge, DrizzleSessionStore, DrizzleStaffAssignmentStore, FinishWithdrawals, InvRefKeyRing, PurgeIncompleteSignups, RotateContactRefs } from './modules/session/index.js';
 import { DrizzleVerificationStore, VerificationEraser } from './modules/verification/index.js';
 
 /** 관리 재인증 기록을 남기는 기간 [가정](docs/data.md admin_reauth, BOT-122) */
@@ -19,9 +19,32 @@ const CONTACT_REF_BACKFILL_BATCH = 1_000;
 export function identityMaintenanceTasks(database: Database, clock: Clock, invRefs?: InvRefKeyRing, bridges?: ReturnType<typeof InvRefKeyRing.bridgesFromEnv>, knownSourceWindowMs = DEFAULT_ADMIN_AUTH_CONFIG.knownSourceWindowMs): MaintenanceTask[] {
   const sessions = new DrizzleSessionStore(database, clock);
   const verifications = new DrizzleVerificationStore(database);
+  const staff = new DrizzleStaffAssignmentStore(database, clock);
   const finish = new FinishWithdrawals(sessions, new VerificationEraser(verifications), clock);
   return [
-    { name: 'withdrawal-finish', when: 'daily', run: (signal) => finish.run(signal) },
+    {
+      name: 'withdrawal-finish',
+      when: 'daily',
+      run: async (signal) => {
+        try {
+          return await finish.run(signal);
+        } finally {
+          // 탈퇴·병합 정리가 실패하거나 크래시로 빠졌어도 같은 정비 일에서 다시 훑는다(C2V-04).
+          // 한 계정이 실패해도 나머지를 계속하고, 남은 행은 다음 정비 일에 다시 잡힌다.
+          try {
+            for (const accountId of await staff.inactiveAccountIdsWithStaff(100)) {
+              try {
+                await staff.terminateByAccount({ accountId, reason: 'STAFF_REVOKED', nowMs: clock.now() });
+              } catch {
+                // 다음 정비 일에 다시 시도한다
+              }
+            }
+          } catch {
+            // 목록 조회가 실패해도 finish의 원래 오류를 가리지 않는다
+          }
+        }
+      },
+    },
     // 가입을 마치지 않고 30일 [가정] 지난 계정을 지운다(identity §8 '팬 계정 요약·세션 종료 사유·가입 마무리의 첫 구현', ADR-0235 결정 7, BOT-047)
     { name: 'signup-incomplete-purge', when: 'daily', run: (signal) => new PurgeIncompleteSignups(sessions, clock).run(signal) },
     { name: 'refresh-hash-expired', when: 'daily', run: (signal) => sessions.purgeExpiredRefreshHashes(clock.now(), signal) },

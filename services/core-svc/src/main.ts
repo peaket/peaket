@@ -1,13 +1,14 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 import { fileURLToPath } from 'node:url';
-import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 import { GrpcReviewEligibility, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
 import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 
 const SERVICE = 'core-svc';
+assertInternalGrpcToken(process.env);
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
 const PARTNER_POOL_MAX = 4;
 const url = process.env.PEAKET_DATABASE_URL;
@@ -85,6 +86,7 @@ const service = await createService({
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }
       : {}),
     identityGrpc,
+    reauthJti: reauthJtiStoreFromEnv(process.env, queueRedis),
   }),
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);

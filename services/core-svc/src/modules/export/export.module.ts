@@ -1,6 +1,6 @@
 // export 모듈 조립. 명단 원천은 shop의 merch_order·merch_order_item이다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, DATABASE } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, DATABASE, type ReauthJtiStore } from '@peaket/platform';
 import { AttendeeExports } from './application/attendee-exports.js';
 import { ExportProblem } from './domain/export.js';
 import type { ActorNameResolver, AttendeeExportStore, AttendeeSource, BookersReauth, PartnerEventLookup } from './domain/ports.js';
@@ -32,6 +32,8 @@ export interface DatabaseExportWiring {
   identityGrpc?: string;
   /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다(개발·시험) */
   purchaseHttp?: { url: string; token?: string };
+  /** 재인증 jti 1회용 저장소(Redis). 없으면 local·ci용 메모리 */
+  reauthJti?: ReauthJtiStore;
 }
 
 class MerchAttendeeSource implements AttendeeSource {
@@ -68,7 +70,7 @@ export class ExportModule {
           inject: [EXPORT_PARTNER_DATABASE, DATABASE],
         },
         { provide: PARTNER_EVENT_LOOKUP, useFactory: (db: Database) => new DrizzlePartnerEventDirectory(db), inject: [DATABASE] },
-        { provide: BOOKERS_REAUTH, useValue: o.jwks ? new JwksBookersReauth({ jwksUrl: o.jwks.url, issuer: o.jwks.issuer }) : new UnavailableBookersReauth() },
+        { provide: BOOKERS_REAUTH, useValue: o.jwks ? new JwksBookersReauth({ jwksUrl: o.jwks.url, issuer: o.jwks.issuer, ...(o.reauthJti ? { jti: o.reauthJti } : {}) }) : new UnavailableBookersReauth() },
         { provide: EXPORT_ACTOR_NAMES, useValue: o.identityGrpc ? new GrpcAdminAccountNames(o.identityGrpc) : undefined },
         {
           provide: AttendeeExports,

@@ -125,7 +125,7 @@ beforeAll(async () => {
   [pg, valkey] = await Promise.all([startPostgres(), startValkey()]);
   database = createDatabase({ url: pg.url, applicationName: 'ticket-svc-scanner-int', max: 8 });
   await migrateTicket(pg.url);
-  await database.pool.query('CREATE TABLE IF NOT EXISTS account (id uuid PRIMARY KEY)');
+  await database.pool.query("CREATE TABLE IF NOT EXISTS account (id uuid PRIMARY KEY, status text NOT NULL DEFAULT 'ACTIVE')");
   const identityMigration = readFileSync(new URL('../../identity-svc/migrations/0031_staff_assignment_and_scanner_session.sql', import.meta.url), 'utf8');
   await database.pool.query(identityMigration);
   redis = await createHotRedis({ url: valkey.url });

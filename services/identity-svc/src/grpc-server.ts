@@ -11,8 +11,8 @@ export interface GrpcServiceBinding {
   handlers: grpc.UntypedServiceImplementation;
 }
 
-export async function startGrpcServer(o: { host: string; port: number; services: GrpcServiceBinding[] }): Promise<{ port: number; close(): Promise<void> }> {
-  const server = new grpc.Server(grpcServerOptions('service'));
+export async function startGrpcServer(o: { host: string; port: number; services: GrpcServiceBinding[]; internal?: { token?: string; services?: readonly string[] } }): Promise<{ port: number; close(): Promise<void> }> {
+  const server = new grpc.Server(grpcServerOptions('service', {}, o.internal));
   for (const s of o.services) server.addService(s.definition, s.handlers);
   const port = await new Promise<number>((res, rej) => server.bindAsync(`${o.host}:${o.port}`, grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
   return {

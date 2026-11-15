@@ -1,15 +1,16 @@
 // PostgreSQL 저장소(Drizzle): staff_assignment·scanner_session(identity §6.1, docs/data.md).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
-import type {
-  AcceptInvitationResult,
-  ScannerSessionRecord,
-  StaffAssignmentRecord,
-  StaffAssignmentSelfView,
-  StaffAssignmentStatus,
-  StaffAssignmentStore,
-  StaffRole,
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import {
+  type AcceptInvitationResult,
+  type ScannerSessionRecord,
+  StaffAccountInactive,
+  type StaffAssignmentRecord,
+  type StaffAssignmentSelfView,
+  type StaffAssignmentStatus,
+  type StaffAssignmentStore,
+  type StaffRole,
 } from '../../domain/staff.js';
 import { account, scannerSession, staffAssignment } from './schema.js';
 
@@ -70,8 +71,10 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
   }
 
   async accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null> {
-    const [row] = await this.database.db.select({ status: account.status }).from(account).where(eq(account.id, accountId)).limit(1);
-    return (row?.status as 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined) ?? null;
+    // status 칸이 없거나 NULL이면 ACTIVE로 보지 않는다(없음·NULL은 비ACTIVE로 닫는다).
+    const r = await this.database.db.execute(sql`select to_jsonb(a)->>'status' as status from account a where a.id = ${accountId} limit 1`);
+    const status = (r.rows as { status?: string | null }[])[0]?.status;
+    return status === 'ACTIVE' || status === 'WITHDRAWAL_PENDING' || status === 'MERGED' || status === 'DELETED' ? status : null;
   }
 
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
@@ -193,8 +196,10 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
   }): Promise<void> {
     await this.database.transaction(async (tx) => {
       // 계정 행을 잠가 같은 계정의 동시 승인을 한 번에 하나만 처리한다(부분 유일 인덱스의 백스톱, C2-05).
-      const [acc] = await tx.select({ id: account.id }).from(account).where(eq(account.id, i.accountId)).limit(1).for('update');
-      if (!acc) throw new Error('계정을 찾을 수 없다');
+      // 탈퇴·병합 트랜잭션이 먼저 계정을 바꿨다면 여기서 기다렸다가 ACTIVE가 아닌 것을 보고 세션을 만들지 않는다(C2V-06).
+      const [acc] = await tx.select({ id: account.id, status: account.status }).from(account).where(eq(account.id, i.accountId)).limit(1).for('update');
+      if (!acc) throw new StaffAccountInactive();
+      if (acc.status !== 'ACTIVE') throw new StaffAccountInactive();
       const [assignment] = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
       if (!assignment) throw new Error('배정을 찾을 수 없다');
       const mine = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.accountId, i.accountId));
@@ -281,6 +286,12 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
 
   async terminateByAccount(i: { accountId: string; reason: 'STAFF_REVOKED'; nowMs: number }): Promise<{ assignments: number; sessions: number }> {
     return this.database.transaction(async (tx) => {
+      // 잠금 순서를 createScannerSession(계정 → 배정 → 세션)과 맞춘다: 배정을 먼저 잠그고 세션을 잠근다.
+      const lockedAssignments = await tx
+        .select({ id: staffAssignment.id })
+        .from(staffAssignment)
+        .where(eq(staffAssignment.accountId, i.accountId))
+        .for('update');
       const sessions = await tx
         .select({ id: scannerSession.id })
         .from(scannerSession)
@@ -293,11 +304,13 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
           .set({ terminatedAt: at })
           .where(inArray(scannerSession.id, sessions.map((s) => s.id)));
       }
-      const endedAssignments = await tx
-        .update(staffAssignment)
-        .set({ status: 'REVOKED' })
-        .where(and(eq(staffAssignment.accountId, i.accountId), inArray(staffAssignment.status, ['ASSIGNED', 'INVITED'])))
-        .returning({ id: staffAssignment.id });
+      const endedAssignments = lockedAssignments.length === 0
+        ? []
+        : await tx
+            .update(staffAssignment)
+            .set({ status: 'REVOKED' })
+            .where(and(inArray(staffAssignment.id, lockedAssignments.map((a) => a.id)), inArray(staffAssignment.status, ['ASSIGNED', 'INVITED'])))
+            .returning({ id: staffAssignment.id });
       const terminatedAt = at.toISOString();
       const messages = sessions.map((s) => ({
         topic: CONTROL_TOPICS.sessionsTerminated,
@@ -307,5 +320,21 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       if (messages.length > 0) await writeOutbox(tx, this.clock, messages);
       return { assignments: endedAssignments.length, sessions: sessions.length };
     });
+  }
+
+  async inactiveAccountIdsWithStaff(limit: number): Promise<string[]> {
+    const r = await this.database.db.execute(sql`
+      select distinct account_id from (
+        select sa.account_id as account_id
+        from staff_assignment sa join account a on a.id = sa.account_id
+        where a.status in ('DELETED', 'MERGED') and sa.status in ('ASSIGNED', 'INVITED')
+        union
+        select ss.staff_account_id as account_id
+        from scanner_session ss join account a on a.id = ss.staff_account_id
+        where a.status in ('DELETED', 'MERGED') and ss.terminated_at is null
+      ) pending
+      limit ${limit}
+    `);
+    return (r.rows as { account_id: string }[]).map((x) => x.account_id);
   }
 }

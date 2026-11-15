@@ -19,9 +19,16 @@ type Props = PageProps<{ slug: string }>;
 const STATE_SLUG: Record<Exclude<Scr057State, '없는 문서'>, string> = { '개인정보 처리방침': 'privacy', 이용약관: 'terms' };
 const DOC_OPTIONS = POLICY_DOCS.map((d) => ({ slug: d.slug, title: d.title }));
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
-  return { title: getPolicyDoc(slug)?.title ?? '약관·정책 문서' };
+  const sp = await searchParams;
+  const picked = firstParam(sp, 'state') !== undefined ? resolvePreviewState(sp, SCR057_STATES, '개인정보 처리방침') : null;
+  const doc = picked === '없는 문서' ? undefined : getPolicyDoc(picked ? STATE_SLUG[picked] : slug);
+  return {
+    title: doc?.title ?? '약관·정책 문서',
+    // 법무 검토 전 초안은 전역 noindex가 풀려도 검색에 실리지 않게 경로 자체에 robots를 건다.
+    ...(doc?.draft === true ? { robots: { index: false, follow: false } } : {}),
+  };
 }
 
 export async function PolicyPage({ params, searchParams }: Props) {
@@ -78,6 +85,7 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
   const h = `doc-h-${doc.slug}`;
   const toc = `toc-h-${doc.slug}`;
   const posted = !doc.postedOnly;
+  const draft = doc.draft === true;
   return (
     <div className="col mx-auto w-full max-w-[976px] gap-5 md:gap-6 lg:grid lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:gap-y-8">
       <DocSelect docs={DOC_OPTIONS} current={doc.slug} className="md:max-w-[400px] lg:col-span-3 lg:max-w-none" />
@@ -87,17 +95,21 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
           {doc.title}
         </h1>
         <p className="row wrap t-sm muted" style={{ gap: '4px 14px' }}>
-          <span>
-            시행일 <span className="num">{old ? doc.previous : doc.effective}</span>
-            {old ? ' · 이전 버전' : null}
-          </span>
-          {doc.previous && !old ? (
+          {draft ? (
+            <span>초안 · 법무 검토 전</span>
+          ) : (
+            <span>
+              시행일 <span className="num">{old ? doc.previous : doc.effective}</span>
+              {old ? ' · 이전 버전' : null}
+            </span>
+          )}
+          {!draft && doc.previous && !old ? (
             <Link className="link-more" href={`/policy/${doc.slug}?version=${doc.previous}`}>
               이전 버전
               <i className="ic ic-chevron-right" aria-hidden="true" />
             </Link>
           ) : null}
-          {old ? (
+          {!draft && old ? (
             <Link className="link-more" href={`/policy/${doc.slug}`}>
               지금 버전 보기
               <i className="ic ic-chevron-right" aria-hidden="true" />
@@ -150,7 +162,7 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
 function Block({ block }: { block: PolicyBlock }) {
   switch (block.kind) {
     case 'placeholder':
-      return <p className="muted">[조항 본문은 법무 검토 뒤 확정]</p>;
+      return <p className="muted">준비 중</p>;
     case 'p':
       return <p>{block.text}</p>;
     case 'h3':

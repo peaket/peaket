@@ -12,8 +12,8 @@ export interface GrpcServiceBinding {
 }
 
 /** port 0이면 빈 포트를 잡고 돌려준다(시험). close는 처리 중인 호출을 10초 [가정]까지 기다리고 넘으면 끊는다 */
-export async function startPurchaseGrpcServer(o: { host: string; port: number; services: GrpcServiceBinding[] }): Promise<{ port: number; close(): Promise<void> }> {
-  const server = new grpc.Server(grpcServerOptions('service'));
+export async function startPurchaseGrpcServer(o: { host: string; port: number; services: GrpcServiceBinding[]; internal?: { token?: string; services?: readonly string[] } }): Promise<{ port: number; close(): Promise<void> }> {
+  const server = new grpc.Server(grpcServerOptions('service', {}, o.internal));
   for (const s of o.services) server.addService(s.definition, s.handlers);
   const port = await new Promise<number>((res, rej) => server.bindAsync(`${o.host}:${o.port}`, grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
   return {

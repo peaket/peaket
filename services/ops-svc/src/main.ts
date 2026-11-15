@@ -3,7 +3,7 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 import 'reflect-metadata';
-import { createDatabase, createExternalHttpClient, createService } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, reauthJtiStoreFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -17,6 +17,7 @@ import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 
 const SERVICE = 'ops-svc';
+assertInternalGrpcToken(process.env);
 const url = process.env.PEAKET_DATABASE_URL;
 if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
 const identityUrl = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -62,8 +63,14 @@ const priority =
       }
     : undefined;
 // 재인증 검증기는 결제사 HTTP URL과 분리한다(OPSV-05). identity JWKS만 있으면 회차 취소 확정의 패스키 재인증이 결제 URL 없이도 돈다.
+// 재인증 jti 1회용(SEC-03). 주소가 없으면 local·ci용 메모리 기록을 쓰고, 운영은 닫힌 저장소를 쓴다.
+const reauthRedis = process.env.PEAKET_REAUTH_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_REAUTH_REDIS_URL }) : undefined;
 const reauth = process.env.PEAKET_IDENTITY_JWKS_URL
-  ? new JwksApprovalVerifier({ jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' })
+  ? new JwksApprovalVerifier({
+      jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL,
+      issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
+      jti: reauthJtiStoreFromEnv(process.env, reauthRedis),
+    })
   : undefined;
 // 지급 승인 업무(BAT-610 잔여). payment-svc 내부 경로가 없으면 지급 실행은 503이고, 재인증 JWKS가 없으면 승인은 403이다.
 const payouts = paymentUrl
@@ -153,6 +160,7 @@ process.once('SIGTERM', () => {
       }
       scannerDevices?.close();
       adminAuthz.close();
+      await reauthRedis?.close();
       await database.close();
     }
   })();

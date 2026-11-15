@@ -26,6 +26,8 @@ export class AppModule {
           identityGrpc?: string;
           /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다 */
           purchaseHttp?: { url: string; token?: string };
+          /** 재인증 jti 1회용 저장소(Redis). 없으면 local·ci는 메모리 */
+          reauthJti?: import('@peaket/platform').ReauthJtiStore;
         }
       | {
           memory: true;
@@ -54,6 +56,7 @@ export class AppModule {
             ...(o.exportJwks ? { jwks: o.exportJwks } : {}),
             ...(o.identityGrpc ? { identityGrpc: o.identityGrpc } : {}),
             ...(o.purchaseHttp ? { purchaseHttp: o.purchaseHttp } : {}),
+            ...(o.reauthJti ? { reauthJti: o.reauthJti } : {}),
           }),
         ],
       };

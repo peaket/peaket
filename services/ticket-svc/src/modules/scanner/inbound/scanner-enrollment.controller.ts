@@ -1,14 +1,14 @@
 // 받는 층: 스캐너 기기 등록(openapi POST /v1/scanner/device-enrollments, BUILD_ORDER GAT-170).
 // 인증 전 공개 경로이고, 등록 코드와 DPoP 증명(토큰 없음, ath 없음)으로 기기 키 지문(jkt)을 묶는다.
 // 코드 원문은 로그·응답 밖에 남기지 않고, 코드는 1회용·10분 [가정]이다(offline-gate §6.1).
-import { Body, Controller, Headers, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Inject, Optional, Post, Req, Res } from '@nestjs/common';
 import { CreateScannerDeviceEnrollmentBody, CreateScannerDeviceEnrollmentResponse } from '@peaket/contracts/openapi/scanner';
-import { CLOCK, type Clock, ContractBody, ContractRouteSchema, DpopRejected, ProblemError, RequestValidationError, Roles, verifyDpopProof } from '@peaket/platform';
+import { CLOCK, type Clock, ContractBody, ContractRouteSchema, DpopRejected, ProblemError, RequestValidationError, Roles, SCANNER_MTLS_AUTH_HEADER, SCANNER_MTLS_CERT_HEADER, verifyDpopProof } from '@peaket/platform';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { EnrollmentCodeRejected, EnrollmentRateLimited, ScannerDevices } from '../application/scanner-devices.js';
 import { ScannerDeviceInputError } from '../domain/scanner-device.js';
-import { DPOP_REPLAY_STORE, type DpopReplayStore } from '../domain/ports.js';
+import { DPOP_REPLAY_STORE, type DpopReplayStore, SCANNER_MTLS_SECRET } from '../domain/ports.js';
 import { requestUrlOf } from './http-url.js';
 
 /** 게이트웨이가 넘긴 출발지 IP(x-forwarded-for 첫 값)나 직접 연결 IP. 등록 실패 제한의 키다 */
@@ -24,6 +24,7 @@ export class ScannerEnrollmentController {
     private readonly devices: ScannerDevices,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(DPOP_REPLAY_STORE) private readonly replay: DpopReplayStore,
+    @Optional() @Inject(SCANNER_MTLS_SECRET) private readonly mtlsSecret?: string,
   ) {}
 
   @Post('device-enrollments')
@@ -37,22 +38,42 @@ export class ScannerEnrollmentController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<z.output<typeof CreateScannerDeviceEnrollmentResponse>> {
     void reply.header('cache-control', 'no-store');
+    // 게이트웨이가 클라이언트 인증서를 검증하고 넣은 머리가 있으면 그 지문(x5t#S256)을 MTLS_CERT로 묶는다.
+    // 비밀 값이 없거나 다르면 mTLS를 믿지 않고 DPoP 경로로 내려간다(가짜 머리로 통과하지 않는다).
+    const mtlsHeader = request.headers[SCANNER_MTLS_AUTH_HEADER];
+    const cert = request.headers[SCANNER_MTLS_CERT_HEADER];
+    let mtlsThumbprint: string | undefined;
+    if (this.mtlsSecret && mtlsHeader !== undefined) {
+      if (mtlsHeader !== this.mtlsSecret || typeof cert !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(cert)) {
+        throw new ProblemError({ type: 'invalid-dpop-proof', status: 400, title: 'DPoP 증명이 올바르지 않습니다' });
+      }
+      mtlsThumbprint = cert;
+    }
     let verified: { jkt: string };
-    try {
-      verified = await verifyDpopProof({
-        proof: typeof proof === 'string' ? proof : '',
-        method: request.method,
-        url: requestUrlOf(request),
-        requireAth: false,
-        clock: this.clock,
-        replay: this.replay,
-      });
-    } catch (e) {
-      if (e instanceof DpopRejected) throw new ProblemError({ type: 'invalid-dpop-proof', status: 400, title: 'DPoP 증명이 올바르지 않습니다' });
-      throw e;
+    if (mtlsThumbprint !== undefined) {
+      verified = { jkt: mtlsThumbprint };
+    } else {
+      try {
+        verified = await verifyDpopProof({
+          proof: typeof proof === 'string' ? proof : '',
+          method: request.method,
+          url: requestUrlOf(request),
+          requireAth: false,
+          clock: this.clock,
+          replay: this.replay,
+        });
+      } catch (e) {
+        if (e instanceof DpopRejected) throw new ProblemError({ type: 'invalid-dpop-proof', status: 400, title: 'DPoP 증명이 올바르지 않습니다' });
+        throw e;
+      }
     }
     try {
-      return await this.devices.enroll({ code: body.code, jkt: verified.jkt, ip: clientIpOf(request) });
+      return await this.devices.enroll({
+        code: body.code,
+        jkt: verified.jkt,
+        ip: clientIpOf(request),
+        ...(mtlsThumbprint !== undefined ? { credentialType: 'MTLS_CERT' as const, thumbprint: mtlsThumbprint } : {}),
+      });
     } catch (e) {
       if (e instanceof EnrollmentRateLimited) throw new ProblemError({ type: 'enrollment-rate-limited', status: 429, title: '등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요', retryAfterSeconds: 600 });
       if (e instanceof EnrollmentCodeRejected) {

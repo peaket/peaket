@@ -14,6 +14,7 @@ const HOUR = 60 * 60_000;
 function world() {
   const clock = fakeClock({ now: NOW });
   const store = new MemoryStaffAssignmentStore();
+  store.accounts.set('acc-1', { verified: true, status: 'ACTIVE' });
   store.assignments.set('a-1', { id: 'a-1', accountId: 'acc-1', status: 'ASSIGNED' });
   const session: ScannerSessionRecord = {
     scannerSessionId: 'ss-1',

@@ -42,6 +42,14 @@ export interface StaffPhoneVerification {
   statusOf(accountId: string): Promise<'VERIFIED' | 'UNVERIFIED' | 'UNAVAILABLE'>;
 }
 
+/** 승인 시점에 계정이 ACTIVE가 아니다(탈퇴·병합과 경합). 유령 스캐너 세션을 만들지 않는다 */
+export class StaffAccountInactive extends Error {
+  constructor() {
+    super('활성 계정이 아니다');
+    this.name = 'StaffAccountInactive';
+  }
+}
+
 /** staff_assignment 한 행(초대·배정). 초대 이메일과 토큰 해시는 수락·거절 때 지운다. */
 export interface StaffAssignmentRecord {
   assignmentId: string;
@@ -123,6 +131,8 @@ export interface StaffAssignmentStore {
    * control.sessions-terminated(reason STAFF_REVOKED)를 세션마다 적는다. 끝낸 배정·세션 수를 돌려준다.
    */
   terminateByAccount(i: { accountId: string; reason: 'STAFF_REVOKED'; nowMs: number }): Promise<{ assignments: number; sessions: number }>;
+  /** 탈퇴·병합됐지만 아직 배정·세션이 남은 계정(정비 재시도용). 최대 limit개 */
+  inactiveAccountIdsWithStaff(limit: number): Promise<string[]>;
 }
 
 export const STAFF_ASSIGNMENT_STORE = Symbol('identity.StaffAssignmentStore');

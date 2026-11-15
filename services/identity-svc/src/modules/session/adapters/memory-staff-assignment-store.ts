@@ -1,12 +1,13 @@
 // 시험·로컬용 배정·스캐너 세션 저장소. 운영은 DrizzleStaffAssignmentStore를 쓴다.
-import type {
-  AcceptInvitationResult,
-  ScannerSessionRecord,
-  StaffAssignmentRecord,
-  StaffAssignmentSelfView,
-  StaffAssignmentStatus,
-  StaffAssignmentStore,
-  StaffRole,
+import {
+  type AcceptInvitationResult,
+  type ScannerSessionRecord,
+  StaffAccountInactive,
+  type StaffAssignmentRecord,
+  type StaffAssignmentSelfView,
+  type StaffAssignmentStatus,
+  type StaffAssignmentStore,
+  type StaffRole,
 } from '../domain/staff.js';
 
 export interface MemoryStaffAssignmentRow {
@@ -61,6 +62,13 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   /** 기기 폐기로 끝낸 세션의 control.sessions-terminated 값(시험 확인용) */
   readonly terminatedEvents: { accountId: string; sessionId: string; reason: string; terminatedAt: string }[] = [];
 
+  /** local·memory 조립에서 세션 저장소의 계정 상태를 읽는다. 없으면 null(비ACTIVE)로 닫는다 */
+  constructor(private readonly accountStatus?: (accountId: string) => 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined) {}
+
+  #statusOf(accountId: string): 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null {
+    return this.accounts.get(accountId)?.status ?? this.accountStatus?.(accountId) ?? null;
+  }
+
   async hasAssigned(accountId: string): Promise<boolean> {
     for (const a of this.assignments.values()) if (a.accountId === accountId && a.status === 'ASSIGNED') return true;
     return false;
@@ -80,7 +88,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   }
 
   async accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null> {
-    return this.accounts.get(accountId)?.status ?? 'ACTIVE';
+    return this.#statusOf(accountId);
   }
 
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
@@ -151,6 +159,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     approvedAtMs: number;
     expiresAtMs: number;
   }): Promise<void> {
+    if (this.#statusOf(i.accountId) !== 'ACTIVE') throw new StaffAccountInactive();
     for (const [id, s] of this.sessions) {
       if (s.terminatedAt !== null) continue;
       const a = this.assignments.get(s.assignmentId);
@@ -212,5 +221,16 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       sessions++;
     }
     return { assignments, sessions };
+  }
+
+  async inactiveAccountIdsWithStaff(limit: number): Promise<string[]> {
+    const ids = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.accountId && (a.status === 'ASSIGNED' || a.status === 'INVITED') && this.#statusOf(a.accountId) !== 'ACTIVE') ids.add(a.accountId);
+    }
+    for (const s of this.sessions.values()) {
+      if (s.terminatedAt === null && this.#statusOf(s.accountId) !== 'ACTIVE') ids.add(s.accountId);
+    }
+    return [...ids].slice(0, limit);
   }
 }

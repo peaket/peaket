@@ -53,6 +53,8 @@ export interface VerifiedReauth {
   accountId: string;
   sessionId: string;
   act: string;
+  /** 토큰 만료(밀리초). jti 1회용 기록의 TTL을 토큰 수명 안으로 줄인다 */
+  expiresAt: number;
   provider?: string;
   strength?: string;
   factors?: string[];
@@ -166,8 +168,8 @@ export class TokenVerifier {
   /** 재인증 토큰(typ reauth+jwt): 요청의 세션·작업 묶음과 같아야 한다(identity §3 '재인증 토큰의 묶음'). 한 번 쓰기(jti)는 부르는 쪽이 본다 */
   async verifyReauth(token: string, o: { keySet: TokenKeySet; audience: string; sessionId: string; act: string }): Promise<VerifiedReauth> {
     const p = await this.#verify(token, o.keySet, o.audience, 'reauth+jwt');
-    if (typeof p.sub !== 'string' || typeof p.jti !== 'string' || p.sid !== o.sessionId || p.act !== o.act) throw new TokenRejected('claims');
-    const v: VerifiedReauth = { jti: p.jti, accountId: p.sub, sessionId: o.sessionId, act: o.act };
+    if (typeof p.sub !== 'string' || typeof p.jti !== 'string' || typeof p.exp !== 'number' || p.sid !== o.sessionId || p.act !== o.act) throw new TokenRejected('claims');
+    const v: VerifiedReauth = { jti: p.jti, accountId: p.sub, sessionId: o.sessionId, act: o.act, expiresAt: p.exp * 1000 };
     if (typeof p.provider === 'string') v.provider = p.provider;
     if (typeof p.strength === 'string') v.strength = p.strength;
     if (Array.isArray(p.factors)) v.factors = p.factors.filter((f): f is string => typeof f === 'string');

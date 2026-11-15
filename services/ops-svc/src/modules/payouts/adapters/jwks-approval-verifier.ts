@@ -1,12 +1,16 @@
 // 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, act APPROVAL, passkey 필수).
-import { createExternalHttpClient, ProblemError, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
+import { createExternalHttpClient, ProblemError, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
 import type { ApprovalReauthVerifier } from '../domain/ports.js';
 
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
 
 export class JwksApprovalVerifier implements ApprovalReauthVerifier {
   readonly #verifier: TokenVerifier;
-  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch }) {
+  readonly #jti?: ReauthJtiStore;
+  readonly #clock: Clock;
+  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch; jti?: ReauthJtiStore }) {
+    this.#jti = o.jti;
+    this.#clock = o.clock ?? systemClock;
     const u = new URL(o.jwksUrl);
     const client = createExternalHttpClient({ provider: 'identity-jwks', baseUrl: u.origin, timeoutCapMs: 5_000, ...(o.clock ? { clock: o.clock } : {}), ...(o.fetch ? { fetch: o.fetch } : {}) });
     this.#verifier = new TokenVerifier({
@@ -21,6 +25,14 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'ops', sessionId: o.sessionId, act: o.act });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw reauthRequired();
+      if (this.#jti) {
+        try {
+          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+        } catch (e) {
+          if (e instanceof ProblemError) throw e;
+          throw reauthRequired();
+        }
+      }
       return { accountId: v.accountId, factors };
     } catch (e) {
       if (e instanceof ProblemError) throw e;

@@ -12,6 +12,7 @@ import {
   SCANNER_DEVICE_STORE,
   SCANNER_EVENT_POLICY,
   SCANNER_GATE_STORE,
+  SCANNER_MTLS_SECRET,
   SCANNER_SESSION_TERMINATOR,
   SCANNER_SHIFT_STORE,
   type DpopReplayStore,
@@ -54,6 +55,8 @@ export interface ScannerWiring {
   opsAlert?: ScannerOpsAlertSink;
   /** 오프라인 스냅샷 허용 최대 시간(ms). 없으면 24시간 [가정] */
   maxOfflineMs?: number;
+  /** 게이트웨이 mTLS 신뢰 머리 비밀 값. 없으면 인증서 지문 등록을 받지 않는다 */
+  mtlsSecret?: string;
 }
 
 @Module({})
@@ -65,6 +68,7 @@ export class ScannerModule {
       { provide: DPOP_REPLAY_STORE, useValue: o.replay },
       { provide: SCANNER_GATE_STORE, useValue: o.gate },
       { provide: SCANNER_SHIFT_STORE, useValue: o.shift },
+      ...(o.mtlsSecret ? [{ provide: SCANNER_MTLS_SECRET, useValue: o.mtlsSecret } satisfies Provider] : []),
       ...(o.policy ? [{ provide: SCANNER_EVENT_POLICY, useValue: o.policy } satisfies Provider] : []),
       ...(o.limiter ? [{ provide: ENROLLMENT_ATTEMPT_LIMITER, useValue: o.limiter } satisfies Provider] : []),
       ...(o.sessions ? [{ provide: SCANNER_SESSION_TERMINATOR, useValue: o.sessions } satisfies Provider] : []),

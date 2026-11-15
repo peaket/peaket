@@ -3,7 +3,7 @@
 // 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel, TrustEvidenceService.GetVerdictEvidence)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
-import { CircuitBreaker, createHotRedis, createService, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
@@ -37,6 +37,7 @@ const RULES_READY_TASK = 'trust-rules';
 const TELEMETRY_CLOSE_MS = 2_000;
 
 const env = process.env;
+const internalGrpcToken = internalGrpcTokenFromEnv(env);
 const grpcPort = Number(env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
 if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${env.PEAKET_GRPC_PORT}`);
 
@@ -160,9 +161,10 @@ const grpc = await startGrpcServer({
   port: grpcPort,
   services: [
     { definition: trustPackage().TrustService.service, handlers: trustServiceHandlers(score, (method, err) => service.logger.error({ err, method }, 'TrustService 처리 실패')) },
-    { definition: trustPackage().TrustLabelService.service, handlers: trustLabelServiceHandlers(applyLabel, (method, err) => service.logger.error({ err, method }, 'TrustLabelService 처리 실패')) },
+    { definition: trustPackage().TrustLabelService.service, handlers: trustLabelServiceHandlers(applyLabel, (method, err) => service.logger.error({ err, method }, 'TrustLabelService 처리 실패'), internalGrpcToken) },
     { definition: trustPackage().TrustEvidenceService.service, handlers: trustEvidenceServiceHandlers(verdictEvidence, (method, err) => service.logger.error({ err, method }, 'TrustEvidenceService 처리 실패')) },
   ],
+  internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.trust.v1.TrustLabelService'] },
 });
 service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 

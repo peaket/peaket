@@ -3,7 +3,7 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
 import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
@@ -138,6 +138,7 @@ const database = createDatabase({ url, applicationName: SERVICE });
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 // 없거나 비면 운영으로 본다(위 RP 검사·플랫폼 설정과 같다). 로컬에서 Redis 없이 띄우려면 PEAKET_ENV=local을 준다
 const env = process.env.PEAKET_ENV || 'prod';
+const internalGrpcToken = internalGrpcTokenFromEnv(process.env);
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 기기 승인 로그인(GAT-220): ticket-svc 기기 원장(gRPC)과 기기 승인 요청·한도·DPoP jti 저장소.
@@ -285,6 +286,7 @@ const grpc = await startGrpcServer({
       ),
     },
   ],
+  internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.identity.v1.AdminAuthzService'] },
 });
 service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 

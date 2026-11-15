@@ -2,15 +2,19 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
-import { createExternalHttpClient, createGrpcClient, TokenRejected, TokenVerifier, type Clock, type GrpcLbProfile, type TokenVerifierOptions } from '@peaket/platform';
+import { createExternalHttpClient, createGrpcClient, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type GrpcLbProfile, type TokenVerifierOptions } from '@peaket/platform';
 import { ExportProblem } from '../domain/export.js';
 import type { ActorNameResolver, BookersReauth } from '../domain/ports.js';
 
 /** identity GET /internal/jwks/admin.json의 관리 키로 재인증 토큰을 확인한다(act BOOKER_EXPORT, passkey 필수). */
 export class JwksBookersReauth implements BookersReauth {
   readonly #verifier: TokenVerifier;
+  readonly #jti?: ReauthJtiStore;
+  readonly #clock: Clock;
 
-  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch }) {
+  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch; jti?: ReauthJtiStore }) {
+    this.#jti = o.jti;
+    this.#clock = o.clock ?? systemClock;
     const u = new URL(o.jwksUrl);
     const client = createExternalHttpClient({
       provider: 'identity-jwks',
@@ -32,6 +36,15 @@ export class JwksBookersReauth implements BookersReauth {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'partner', sessionId: o.sessionId, act: 'BOOKER_EXPORT' });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+      // 같은 재인증 토큰의 jti를 두 번 쓰지 못한다(SEC-03). 저장소를 쓸 수 없으면 닫는다.
+      if (this.#jti) {
+        try {
+          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+        } catch (e) {
+          if (e instanceof ExportProblem) throw e;
+          throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+        }
+      }
       return { accountId: v.accountId, factors };
     } catch (e) {
       if (e instanceof ExportProblem) throw e;

@@ -13,6 +13,7 @@ function reject(e: unknown): never {
     if (e.code === 'STAFF_ASSIGNMENT_MISSING') throw new ProblemError({ type: 'staff-assignment-missing', status: 403, title: '이 회차의 스태프 배정이 없습니다' });
     if (e.code === 'OTHER_PARTNER_DEVICE') throw new ProblemError({ type: 'other-partner-device', status: 403, title: '다른 파트너사의 기기입니다' });
     if (e.code === 'OUTSIDE_STAFF_HOURS') throw new ProblemError({ type: 'outside-staff-hours', status: 403, title: '근무 시간이 아닙니다' });
+    if (e.code === 'ACCOUNT_INACTIVE') throw new ProblemError({ type: 'staff-account-inactive', status: 403, title: '배정할 수 없는 계정 상태입니다' });
     if (e.code === 'ASSIGNMENT_REQUIRED') throw new ProblemError({ type: 'assignment-required', status: 422, title: '승인할 배정을 하나 골라 주세요' });
     if (e.code === 'ASSIGNMENT_NOT_ALLOWED') throw new ProblemError({ type: 'staff-assignment-missing', status: 403, title: '이 회차의 스태프 배정이 없습니다' });
     if (e.code === 'PROXY_NOT_ALLOWED') throw new ProblemError({ type: 'proxy-approval-forbidden', status: 403, title: '대리 승인은 현장 책임자만 할 수 있습니다' });

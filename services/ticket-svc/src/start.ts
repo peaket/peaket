@@ -2,7 +2,7 @@
 // gRPC 포트는 서비스 안에서 따로 열고, health/management HTTP는 플랫폼 createService가 연다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -47,6 +47,7 @@ export interface StartedService {
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
   const config = loadTicketServiceConfig(env);
+  const internalGrpcToken = internalGrpcTokenFromEnv(env);
   const database = createDatabase({ url: config.databaseUrl, profile: 'hot', max: TICKET_DB_POOL_MAX, applicationName: SERVICE });
   const lbProfile = loadPlatformConfig(env).grpcLbProfile;
   let redis: Awaited<ReturnType<typeof createHotRedis>> | undefined;
@@ -106,6 +107,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           sessions: scannerSessions,
           sessionLookup: scannerSessions,
           commands: scannerCommands,
+          ...(config.scannerMtlsSecret ? { mtlsSecret: config.scannerMtlsSecret } : {}),
           alert: (message, fields) => alert?.(message, fields),
           ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
@@ -184,6 +186,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           }),
         },
       ],
+      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.ticket.v1.ScannerDeviceService'] },
     });
     service.readiness.complete('grpc');
     service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');

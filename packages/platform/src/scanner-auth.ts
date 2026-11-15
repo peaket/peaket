@@ -27,6 +27,8 @@ export interface ScannerDeviceRecord {
   status: ScannerDeviceStatus;
   /** 기기가 묶인 파트너. 스태프 배정의 파트너와 대조하는 것은 identity-svc 몫이다 */
   promoterId: string;
+  /** 기기 키(DPoP)인지 인증서(mTLS)인지. 없으면 예전 어댑터처럼 종류를 보지 않는다 */
+  credentialType?: 'DEVICE_KEY' | 'MTLS_CERT';
 }
 
 /** 키 지문(jkt)으로 등록 기기를 찾는다(ticket-svc ScannerDeviceLookupService) */

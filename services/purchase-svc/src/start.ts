@@ -31,7 +31,7 @@ import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import {
@@ -227,6 +227,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 운영은 반드시 넣는다: 없으면 승인한 판매 정책 규칙을 평가하지 못한다(services/README.md).
   const coreHttpUrl = env.PEAKET_CORE_HTTP_URL;
   const envName = env.PEAKET_ENV ?? 'local';
+  const internalGrpcToken = internalGrpcTokenFromEnv(env);
   if (!coreHttpUrl && envName !== 'local' && envName !== 'ci' && envName !== 'demo') throw new Error('PEAKET_CORE_HTTP_URL이 없다(core-svc 판매 설정 사본 읽기, 운영 필수)');
 
   // 만료 임대 값: {HOSTNAME 앞 57자}-{무작위 16진 6자리}. HOSTNAME이 없거나 키 조각 모양이 아니면 무작위 UUID(이 프로세스 안에서만 같다, L5)
@@ -770,7 +771,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const raw = env.PEAKET_GRPC_PORT;
     const port = Number(raw);
     if (!Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
-    refundGrpc = await startPurchaseGrpcServer({ host: env.PEAKET_GRPC_HOST ?? '0.0.0.0', port, services: grpcServices });
+    refundGrpc = await startPurchaseGrpcServer({
+      host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+      port,
+      services: grpcServices,
+      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService'] },
+    });
     service.logger.info({ port: refundGrpc.port }, 'purchase-svc gRPC 포트를 열었다');
   } else if (grpcServices.length > 0) {
     service.logger.warn({ dep: 'grpc' }, 'PEAKET_GRPC_PORT가 없어 purchase-svc gRPC를 열지 않는다(내부 HTTP 호환 경로만)');

@@ -5,6 +5,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { trustV1Trust } from '@peaket/contracts/proto';
+import { verifyInternalGrpcActor } from '@peaket/platform';
 import { TrustError } from '../application/trust-error.js';
 import { type AppliedVerdict, type Label, type LabelRequest, type LabelResult, type LabelSource, type ReviewBatch, UNKNOWN } from '../domain/labels.js';
 import type { BehaviorSummary, ScoreContext, ScoreRequest, ScoreResult, ShuffleMode } from '../domain/types.js';
@@ -180,7 +181,11 @@ function toLabelRequest(r: Req): LabelRequest {
 const labelResponseOf = (r: LabelResult): object => ({ changed: r.changed, block_list: `BLOCK_LIST_CHANGE_${r.blockList}` });
 
 /** TrustLabelService. 업무 오류는 상태 코드로, 예상 못 한 오류는 고정 문구 INTERNAL로 답한다(오류 문구에 받은 값을 싣지 않는다) */
-export function trustLabelServiceHandlers(uc: { run(i: LabelRequest): Promise<LabelResult> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+export function trustLabelServiceHandlers(
+  uc: { run(i: LabelRequest): Promise<LabelResult> },
+  onError: (method: string, err: unknown) => void,
+  internalToken?: string,
+): grpc.UntypedServiceImplementation {
   const ApplyLabel: grpc.handleUnaryCall<Req, object> = (call, cb) => {
     let input: LabelRequest;
     try {
@@ -189,6 +194,15 @@ export function trustLabelServiceHandlers(uc: { run(i: LabelRequest): Promise<La
       onError('ApplyLabel', err);
       cb({ code: grpc.status.INTERNAL, details: '처리하지 못했다' });
       return;
+    }
+    // 내부 토큰이 설정된 환경에서는 호출자 신원(ops-svc)과 본문의 acted_by를 토큰 증명으로 묶는다(COV2-01).
+    // local·ci처럼 토큰이 없으면 기존 시험·로컬 호출을 그대로 받는다.
+    if (internalToken) {
+      const verified = verifyInternalGrpcActor(call.metadata, internalToken, { caller: 'ops-svc', actor: input.actedBy });
+      if (!verified.ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: 'internal caller required' });
+        return;
+      }
     }
     uc.run(input).then(
       (v) => cb(null, labelResponseOf(v)),
