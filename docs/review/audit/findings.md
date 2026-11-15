@@ -195,7 +195,7 @@
 
 ## 검증 단계 추가 발견
 
-수정 커밋을 만든 에이전트와 다른 독립 검증자가 diff·시험·변이를 다시 봤다. 아래는 그 단계에서 새로 나온 발견이다. 전체 보고서는 `reports/verification/`의 `A1V.md`·`A1V2.md`·`A1V3.md`·`B2V.md`·`OPSV.md`·`CONSV.md`·`C2V.md`·`M5V.md`·`COV2.md`·`B2TA.md`·`R622V.md`·`R623V.md`·`R625V.md`·`R626V.md`·`R627V.md`·`L1V.md`·`L1V2.md`에 있다.
+수정 커밋을 만든 에이전트와 다른 독립 검증자가 diff·시험·변이를 다시 봤다. 아래는 그 단계에서 새로 나온 발견이다. 전체 보고서는 `reports/verification/`의 `A1V.md`·`A1V2.md`·`A1V3.md`·`B2V.md`·`OPSV.md`·`CONSV.md`·`C2V.md`·`M5V.md`·`COV2.md`·`B2TA.md`·`R622V.md`·`R623V.md`·`R625V.md`·`R626V.md`·`R627V.md`·`R628V.md`·`L1V.md`·`L1V2.md`에 있다.
 
 | ID | 심각도 | 영역 | 제목 | 상태 |
 | --- | --- | --- | --- | --- |

@@ -65,6 +65,8 @@
 | R-627 | payment A1V 회귀 시험 | `97fbfd56`·`0f42082b`·`87798c80` | 병합 |
 | R-628 | core SEC-06 fail-closed | `89ce5357` | 병합(검증 중) |
 | R-629 | core·payment SEC-07 fake 가드 정본 env | `c94dac55` | 병합(검증 중) |
+| R-632 | CI 계약·마이그레이션·SIGTERM 시험 정합 | `e925bd78` | 병합 |
+| R-633 | trust-svc prod 기동 시험 내부 gRPC 토큰 | `aa35da01` | 병합 |
 
 ## 5. 독립 검증
 
@@ -88,6 +90,7 @@
 | R625V | R-625 core | 조건부 불합격 → 보강 — SEC-07 거짓 통과는 R-629가, A2-03/OPS-08 시험은 `869336c3`이 보강. A2-17/A2-19는 재현 시험을 `test/audit-core-gaps`에 보존 |
 | R626V | R-626 identity | 조건부 통과 — 변이 6개 사망, `refreshUsed` M4b 변이 1개 생존(prevHash 삭제로 history 판정) |
 | R627V | R-627 payment | 조건부 불합격 → 해소 — core 토큰 403 기대가 R-628 401 계약과 어긋남, `87798c80`이 401로 수정·병합 |
+| R628V | R-628 core SEC-06 | 조건부 합격 — prod/staging 무토큰 시작 차단·401·timingSafeEqual 동작 확인, `onModuleInit`·상수시간 비교 회귀 시험은 공백 |
 | A1V2·A1V3 | R-620 payment | 부분 통과 — A1V-01/03/04/08/12 통과, A1V-02 잔여 위험(공휴일·UTC/KST), A1V-07 force tick 대사 전 계산 위험, A1V-09 env 배선 수정 |
 | L1V·L1V2 | R-608/618/619 | L1V 부분 통과 → `684e3ed3`로 jti fail-closed·core/ops 시작 차단·noindex·정비 재시도·계정 상태 fail-closed 수정, **L1V2 통과**(변이 5개 모두 사망, 실제 prod 시작·Postgres 확인) |
 
@@ -105,6 +108,7 @@
 10. **SEC-07 process.env**: R-629가 `prod`·`staging`·`NODE_ENV=production` fake 가드를 정본화했고 `NotifyModule`에 env 주입구를 열었다. 다만 `NotifyModule`의 `PEAKET_INTERNAL_TOKEN` 직접 읽기와 `main.ts`의 env 주입은 후속이다.
 11. **C2-06..C2-11·COV2-07..11·CONS-03..06**: 낮음·중간 잔여는 `findings.md`에 후속으로 남겼다.
 12. **BOT_LEVEL·DEGRADED_MODE 승인 요건 문서 차이**: `docs/features/control-tower.md` §3 표는 "commander 요청 + 요청자 아닌 operator 이상 1인 승인"인데, R-614 코드는 요청·승인 모두 commander로 강제한다(감사 B3-H01의 보안 판단). 코드가 더 엄격해 급한 보안 위험은 없지만 운영자가 승인할 수 없어 정본 결정이 필요하다. Wave 7에서 소유자 결정을 받아 문서·코드 중 하나로 맞춘다.
+13. **R-628 회귀 시험 공백**: `InternalToken401Guard`의 `onModuleInit` 시작 차단과 `timingSafeEqual` 비교를 고정하는 시험이 없다. R628V는 임시 탐침으로 동작을 확인했고, Wave 7에서 최소 모듈 부트·상수시간 비교 시험을 더한다.
 
 ## 7. 웨이브 6 종료 조건
 
