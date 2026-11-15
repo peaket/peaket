@@ -9,7 +9,7 @@ import { DrizzleAttendeeExportStore } from './adapters/db/drizzle-export-store.j
 import { MemoryAttendeeExportStore } from './adapters/memory-export-store.js';
 import { HttpAttendeeSource } from './adapters/http-attendee-source.js';
 import { GrpcAdminAccountNames, JwksBookersReauth, MemoryActorNames, UnavailableBookersReauth } from './adapters/sources.js';
-import { DrizzlePartnerEventDirectory, MemoryMerchOrderStore, MemoryPartnerEventDirectory, type MerchOrderStore } from '../shop/index.js';
+import { DrizzlePartnerEventDirectory, MemoryMerchOrderStore, MemoryPartnerEventDirectory } from '../shop/index.js';
 import { PartnerAttendeeExportController } from './inbound/partner-attendee-export.controller.js';
 
 export const EXPORT_PARTNER_DATABASE = Symbol.for('peaket.export.partner-database');
@@ -36,8 +36,9 @@ export interface DatabaseExportWiring {
   reauthJti?: ReauthJtiStore;
 }
 
+/** 메모리 조립(개발·시험)의 명단 원천. 운영 조립은 HttpAttendeeSource·UnavailableAttendeeSource만 쓴다(W7-audit A2-17) */
 class MerchAttendeeSource implements AttendeeSource {
-  constructor(private readonly store: MerchOrderStore) {}
+  constructor(private readonly store: MemoryMerchOrderStore) {}
   list(promoterId: string, eventId: string, limit: number, cursor?: string) {
     return this.store.listAttendees(promoterId, eventId, limit, cursor);
   }

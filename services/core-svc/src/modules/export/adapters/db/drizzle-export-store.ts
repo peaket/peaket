@@ -1,7 +1,7 @@
 // export Drizzle 저장소. 파트너 경로는 core_partner(RLS)로 읽고 쓴다.
 import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
-import type { AttendeeExportStore } from '../../domain/ports.js';
+import type { AttendeeExportStore, AttendeeViewRecord } from '../../domain/ports.js';
 import type { AttendeeExportRecord, ExportFormat, ExportResult } from '../../domain/export.js';
 import { attendeeExport, attendeeExportAudit } from './schema.js';
 
@@ -65,6 +65,16 @@ export class DrizzleAttendeeExportStore implements AttendeeExportStore {
       },
       { tenantId: record.promoterId, accessMode: 'read write' },
     );
+  }
+
+  /** 뼈대(W7-audit 시험 단계). 이력과 DOWNLOAD 접속기록을 한 트랜잭션에 넣는 일은 구현 담당이 채운다(A2-19) */
+  async recordExport(_record: AttendeeExportRecord): Promise<void> {
+    throw new Error('아직 없음');
+  }
+
+  /** 뼈대(W7-audit 시험 단계). LIST 접속기록 넣기는 구현 담당이 채운다(A2-19) */
+  async recordView(_view: AttendeeViewRecord): Promise<void> {
+    throw new Error('아직 없음');
   }
 
   async list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]> {

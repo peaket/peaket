@@ -28,7 +28,9 @@ const source = (): AttendeeSource & { calls: (string | undefined)[] } => {
     async list(_p, _e, limit, cursor) {
       calls.push(cursor);
       const start = cursor ? Number(Buffer.from(cursor, 'base64url').toString().replace('order-', '')) + 1 : 0;
-      return rows.slice(start, start + limit);
+      const items = rows.slice(start, start + limit);
+      // purchase 원천처럼 뒤에 행이 더 있을 때만 nextCursor(마지막 주문 ID)를 준다(W7-audit A2-17 페이지 모양)
+      return { items, nextCursor: start + limit < rows.length ? Buffer.from(items[items.length - 1]!.orderId).toString('base64url') : null };
     },
     async count() {
       return { bookings: rows.length, tickets: rows.length };

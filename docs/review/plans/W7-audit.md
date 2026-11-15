@@ -308,3 +308,85 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 - 막힌 것은 없다. 위 OPEN 후보 1은 COV2-06 배선을 막지 않는다.
 - 장부: `node tools/ci/ledger.mjs --batch BAT-610`은 이 커밋 뒤 J-T26 ④⑤⑥을 'ID만'으로 보인다(기존 파트너 화면 시험 이름이 세부 번호 없이 `J-T26`을 단다). 이 묶음의 시험이 들어오면 채워진다. 기록 담당이 장부를 다시 쓸 때 확인한다.
 - 정본 점검: `python -I -X utf8 tools/doc-check/check_all.py` 오류 0, `pnpm --dir packages/contracts gen:check`(asyncapi는 설명만 바꿔 생성물이 같다).
+
+## 실패 확인
+
+- **누가·언제**: 시험 담당(세션 `l3w7-audit-test`), 2026-11-16. 가지 `wave/lane3-w7`, 계획 커밋 `f6c3568e` 위. Docker 없이 돌렸다.
+- **가져온 시험**: `039d6c0d`(R-625 독립 시험 작성자)의 두 파일을 `cherry-pick -n`으로 가져와 계획 §0대로 고쳤다. `test/export-paging-limit.test.ts`의 짧은 페이지 시험은 배열 대신 `{ items, nextCursor }`를 돌려주고 둘째 페이지 1,001건을 1,000건 + 1건으로 나눴다. `test/export-audit.test.ts`의 두 시험은 `as unknown as` 형 변환·`auditList` 이름 대신 `recordView`·넷째 인자 `actor`로 부르고, 비원자 동작을 굳히던 `expect(store.inserted).toBeDefined()`를 지웠다.
+
+### 뼈대와 모양만 바꾼 제품 코드(동작은 그대로)
+
+시험이 컴파일되게 공개 인터페이스만 더했다. 새 메서드·함수는 `throw new Error('아직 없음')`이고, 모양이 바뀐 곳은 지금 동작을 그대로 두고 타입만 맞췄다(각 자리에 '뼈대(W7-audit 시험 단계)' 주석). 구현 담당이 채우거나 뺄 것:
+
+| 파일 | 한 것 | 구현 담당이 할 것 |
+| --- | --- | --- |
+| `export/domain/ports.ts` | `AttendeeSourcePage`·`AttendeeViewRecord` 더함, `AttendeeSource.list`가 페이지를 돌려줌, `AttendeeExportStore`에 `recordExport`·`recordView` 더함 | 지금 내려받기 동작을 살리려고 남긴 `insert`·`audit`을 포트에서 뺀다(계획 §2) |
+| `export/adapters/memory-export-store.ts` | `views` 배열, `recordExport`·`recordView` 뼈대 | 채우고 `insert`·`audit`을 뺀다 |
+| `export/adapters/db/drizzle-export-store.ts` | `recordExport`·`recordView` 뼈대 | 채우고 `insert`·`audit`을 뺀다 |
+| `export/domain/export.ts`, `export/index.ts` | `accessLogRetainUntil` 뼈대와 내보내기 | 채운다 |
+| `export/application/attendee-exports.ts` | 원천 결과에서 `.items`만 꺼냄(끝 판단·커서 만들기는 옛 그대로), `listAttendees` 넷째 인자 `_actor?`(쓰지 않음) | 계획 §1·§2대로 고친다. 넷째 인자는 필수로 해도 된다(시험은 늘 넘기고, 빠진 경우는 형 변환으로 넘긴다) |
+| `export/adapters/http-attendee-source.ts` | `{ items, nextCursor: null }`(옛 동작처럼 원천 커서를 버림) | 원천 `nextCursor`를 넘기고 응답 모양을 검사한다 |
+| `export/export.module.ts` | `MerchAttendeeSource`가 `MemoryMerchOrderStore`를 받음 | 그대로 |
+| `shop/domain/merch-ports.ts` | `listAttendees`·`countAttendees`를 포트에서 뺌 | `DrizzleMerchOrderStore`의 두 메서드(죽은 코드, `limit * 10`)를 지운다 |
+| `shop/adapters/memory-merch-store.ts` | `listAttendees`가 `{ items, nextCursor: null }` | 다음 주문이 있을 때만 커서를 준다 |
+| 새 `review/inbound/account-withdrawn.handler.ts`, `review/index.ts` | 처리기·코덱 뼈대(`ACCOUNTS_WITHDRAWN_TOPIC`만 실제 이름) | 채운다 |
+| 새 `src/consumers/index.ts`·`start.ts` | `CORE_GROUP`·`kafkaConsumersFromEnv`·`pidFreeHeldEventStore`·`startCoreConsumers` 뼈대, `CORE_TOPICS`는 빈 배열을 형 변환 | 채운다. `main.ts`는 손대지 않았다 |
+
+### 단위 시험(Docker 없음)
+
+명령은 각 패키지 폴더에서 `npx vitest run <파일>`(`pnpm test`의 `vitest run`과 같다)이다. 전체: `pnpm --dir D:/ticketpass-lane3/services/core-svc test` 시험 427개 가운데 **29개 실패, 398개 통과**. 실패 29개는 모두 이 묶음의 새 시험이고, 그 밖의 기존 시험은 모두 통과했다. `pnpm --dir … typecheck`는 core-svc·purchase-svc·platform 모두 오류 0, 닿은 경로 `npx eslint` 오류 0.
+
+| 파일 | 시험 | 결과 | 실패 까닭 |
+| --- | --- | --- | --- |
+| core `test/export-paging-limit.test.ts` | A2-17 J-T26 ④ 정확히 1,000건이고 nextCursor가 null이면 더 부르지 않는다 | 실패 | 단언: 한 번 더 부른다(`[1000, 1000]`) |
+| 〃 | A2-17 J-T26 ④ 999건 짧은 페이지 뒤에도 nextCursor로 이어 읽어 2,000건을 모두 내보낸다 | 실패 | 단언: 999건에서 멈춘다(가져온 재현 시험) |
+| 〃 | A2-17 J-T26 ④ 0건 페이지와 다음 커서가 와도 멈추지 않는다 | 실패 | 단언: 0건에서 멈춘다 |
+| 〃 | A2-17 J-T26 ④ 원천이 같은 커서를 되풀이하면 503이고 이력·접속기록이 없다 | 실패 | 단언: 조용히 끝나 성공한다 |
+| 〃 | A2-17 J-T26 ④ 명단 보기 응답의 nextCursor는 원천 값 그대로다 | 실패 | 단언: null을 준다 |
+| 〃 | 2,500행도 1,000행 이하 페이지로만 읽고 건수를 잃지 않는다(기존) | 통과 | — |
+| core `test/http-attendee-source.test.ts` | A2-17 HttpAttendeeSource는 원천의 nextCursor를 넘기고 다음 요청에 그 커서를 싣는다 | 실패 | 단언: `nextCursor`가 null |
+| 〃 | A2-17 HttpAttendeeSource는 응답 모양이 틀리면 실패한다 | 실패 | 단언: 거절하지 않는다 |
+| 〃 | A2-03 기존 시험(`page.items`로 고침) | 통과 | — |
+| core `test/export-attendee-source.test.ts` | A2-17 메모리 명단 원천은 다음 주문이 있을 때만 nextCursor를 준다 | 실패 | 단언: 커서가 null |
+| 〃 | A2-03 기존 다섯(페이지 모양·넷째 인자로 고침) | 통과 | — |
+| core `test/export-audit.test.ts` | A2-19 J-T26 ⑤ 명단 보기는 행위자·보인 건수·조건을 LIST 접속기록에 남긴다 | 실패 | 단언: 접속기록 0건(가져온 재현 시험) |
+| 〃 | A2-19 J-T26 ⑤ 접속기록을 남기지 못하면 명단을 돌려주지 않는다 | 실패 | 단언: 명단을 돌려준다 |
+| 〃 | A2-19 J-T26 ⑤ 행위자 없이 부르면 원천을 읽지 않고 실패한다 | 실패 | 단언: 거절하지 않는다 |
+| 〃 | A2-19 J-T26 ⑤ 명단을 보이지 않은 요청은 접속기록에 남지 않는다 | **처음부터 통과(이미 있는 동작)** | 404·410은 지금도 기록 전에 끝난다 |
+| 〃 | A2-19 J-T26 ⑥ 내려받기는 이력과 DOWNLOAD 접속기록을 recordExport 한 번으로 쓴다 | 실패 | 단언: `['insert', 'audit']`를 따로 부른다 |
+| 〃 | A2-19 J-T26 ⑥ 접속기록 저장이 실패하면 내려받기 성공으로 답하지 않는다 | 실패 | 단언: 성공한다(가져온 재현 시험) |
+| 〃 | A2-19 J-T26 ⑥ Drizzle recordExport는 두 행을 한 트랜잭션에 넣는다 | 실패 | 뼈대 '아직 없음' |
+| 〃 | A2-19 J-T26 ⑤ Drizzle recordView는 LIST 행을 export_id·reason·format 없이 넣는다 | 실패 | 뼈대 '아직 없음' |
+| 〃 | A2-19 J-T26 ⑤ 접속기록 보존 끝은 만든 때 + 2년(달력)이다 | 실패 | 뼈대 '아직 없음' |
+| 〃 | A2-19 0021은 action·filter를 더하고 LIST·DOWNLOAD 모양을 CHECK로 강제하며 UPDATE·DELETE를 주지 않는다 | 실패 | 마이그레이션 파일이 아직 없다(ENOENT) |
+| 〃 | 0019는 접속기록 표를 만들고 core_partner에 SELECT·INSERT만 준다(기존) | 통과 | — |
+| core `test/export.test.ts` | A2-17 J-T26 ④ 명단 보기 응답의 nextCursor는 원천 값 그대로다 — GET …/attendees | 실패 | 단언: null을 준다 |
+| 〃 | A2-19 J-T26 ⑤ GET …/attendees는 로그인 주체를 접속기록 행위자로 쓴다 | 실패 | 단언: 접속기록 0건 |
+| 〃 | A2-19 J-T26 ⑥ 접속기록 저장이 실패하면 내려받기 성공으로 답하지 않는다 — POST …/attendee-exports | 실패 | 단언: 200과 파일을 준다 |
+| 〃 | 기존 열 개(원천 람다·저장소를 바꿀 수 있게 고침) | 통과 | — |
+| core `test/export-paging.test.ts`, `test/export-reauth.test.ts`, `test/export-reauth-cases.test.ts` | 기존 일곱(원천을 페이지 모양으로만 고침) | 통과 | — |
+| core `test/review-withdrawn.test.ts` | COV2-06 ①②③④⑤ | 실패 5 | 뼈대 '아직 없음'(④는 맞는 값 대조군이 먼저 실패한다) |
+| 〃 | COV2-06 ⑨ 내부 익명화 경로는 토큰이 없거나 틀리면 403이고 맞으면 바꾼 건수를 준다 | **처음부터 통과(이미 있는 동작)** | R-617 경로가 이미 있다 |
+| core `test/core-consumers.test.ts` | COV2-06 ⑥⑦⑧ | 실패 3 | 뼈대 '아직 없음' |
+| 〃 | COV2-06 ⑩ main.ts는 시작 전에 Kafka 설정을 읽고 듣기 뒤에 후기 탈퇴 소비자를 켠다 | 실패 | 단언: `main.ts`에 `kafkaConsumersFromEnv(`가 없다 |
+| core `test/internal-sale-config-token-boot.test.ts` | SEC-06R ①②③④ | **처음부터 통과(이미 있는 동작)** 4 | 계획대로 시험만 더했다. 검증 담당이 틀린 구현(M1 빈 `onModuleInit`, M3 `===`, `super` 안 부름, `required` 주입 뺌)으로 실패를 본다 |
+| platform `test/internal-token-constant-time.test.ts` | SEC-06R ⑤ InternalTokenGuard는 길이가 같은 토큰을 timingSafeEqual로 비교한다 | **처음부터 통과(이미 있는 동작)** | 〃 |
+
+- 요약: 새로 쓰거나 고쳐 쓴 시험 36개 가운데 실패 29개(뼈대 '아직 없음' 11, 마이그레이션 파일 없음 1, 단언 17), 처음부터 통과 7개(A2-19 ⑤ 404·410, COV2-06 ⑨, SEC-06R ①~⑤).
+- `node tools/ci/trace-check.mjs --ids "J-T26,SEC-06R,COV2-06,A2-17,A2-19" --report <core 단위 JSON 보고서>`는 통과(0)였다. 세부 번호가 아니라 ID만 세므로 이 단계에서는 뜻이 없다. 구현 뒤 게이트에서 다시 본다.
+
+### 통합 시험: 아직 안 돌림(도커 잠금 대기)
+
+| 시험 | 돌릴 명령 | 필요한 것 | 예상 |
+| --- | --- | --- | --- |
+| A2-17 J-T26 ④ purchase 명단 원천은 SOLD 좌석이 없는 주문을 걸러도 다음 커서를 준다 | `pnpm --dir D:/ticketpass-lane3/services/purchase-svc test:integration -- test-int/attendee-reader.int.test.ts` | Docker(PostgreSQL) | 처음부터 통과(코드를 읽어 본 예상) |
+| A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다 · A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD 행이 들어가고 모양이 틀리면 CHECK가 거절한다 · A2-19 core_partner는 접속기록을 고치거나 지우지 못하고 다른 테넌트 행을 읽지 못한다 [ASVS v5.0.0-8.4.1] | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/export-audit.int.test.ts` | Docker(PostgreSQL) | 앞의 둘은 실패(뼈대·0021 없음), 셋째는 `recordView` 뼈대 때문에 실패 |
+| COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다 | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/review-withdrawn.int.test.ts` | Docker(PostgreSQL) | 아래 '확인할 것 1' 때문에 실패할 것으로 보인다 |
+| COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다 | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/review-withdrawn-consumer.int.test.ts` | Docker(PostgreSQL + Kafka 컨테이너), 네이티브 Kafka 모듈(이 PC에서 막히면 CI만) | 실패(`startCoreConsumers` 뼈대) |
+
+- 시험 도우미: 새 `services/core-svc/test-int/kafka.ts`(queue-svc의 것에서 `startKafka`·`until`만 옮김).
+
+### 확인할 것(계획 담당·감독에게)
+
+1. **core_app에는 review·held_event 쓰기 권한이 없다.** 0004가 `GRANT SELECT ON ALL TABLES … TO core_app`만 주고, 0013(review)·0000(held_event)과 그 뒤 마이그레이션에 core_app 쓰기 권한이 없다(`grep -n GRANT services/core-svc/migrations/*.sql`). 계획 §4의 `CoreConsumersOptions.database`는 core_app이고 `main.ts`도 core_app으로 붙으므로, ⑪(계획은 '처음부터 통과 예상')과 ⑫는 운영과 같은 core_app 로그인으로 써 두었다. 그대로면 `UPDATE review`와 `INSERT held_event`가 42501로 실패할 것이다. 계획 §4는 '마이그레이션 없음'이라 구현 담당이 막힌다. 권한 마이그레이션(예: core_app에 review의 익명화 칸 UPDATE, held_event 넣기·다시 처리 권한)을 계획에 더할지 정해야 한다. 같은 까닭으로 지금의 후기 쓰기 경로(`POST /v1/events/{id}/reviews`)도 운영 역할에서는 실패할 수 있다(기존 `test-int/review.int.test.ts`는 슈퍼유저로 붙어 드러나지 않았다). 이 묶음 범위 밖이면 따로 적어 둔다.
+2. 0021 시험은 CHECK 글을 표 이름 접두·따옴표·공백을 지운 뒤 계획의 글(`action in ('LIST','DOWNLOAD')`, `(action = 'DOWNLOAD' and export_id is not null and reason is not null and format is not null) or (action = 'LIST' and export_id is null and reason is null and format is null)`)로 견준다. 뜻이 같은 다른 글로 쓰면 '시험 이의'로 알려 달라.

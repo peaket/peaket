@@ -2,15 +2,42 @@
 import type { AttendeeRecord } from '../../shop/index.js';
 import type { AttendeeExportRecord, ExportFormat } from './export.js';
 
+/** 명단 보기 한 페이지의 LIST 접속기록(W7-audit A2-19, docs/features/settlement.md §9) */
+export interface AttendeeViewRecord {
+  /** uuidv7(clock) */
+  auditId: string;
+  promoterId: string;
+  eventId: string;
+  actorAccountId: string;
+  actorDisplayName: string;
+  actorRole: string;
+  /** 이 페이지에 보인 행 수(items.length) */
+  count: number;
+  /** 받은 cursor가 없으면 키를 두지 않는다 */
+  filter: { limit: number; cursor?: string };
+  createdAt: Date;
+}
+
 export interface AttendeeExportStore {
+  // 뼈대(W7-audit 시험 단계): insert·audit은 지금 내려받기 동작을 그대로 두려고 남겼다. 구현 담당이 recordExport로 바꾸며 포트에서 뺀다(A2-19)
   insert(record: AttendeeExportRecord): Promise<void>;
   /** 다운로드 접속기록(2년 보존, A2-19). 행위자·사유·건수·형식을 남긴다 */
   audit(record: AttendeeExportRecord): Promise<void>;
+  /** 내려받기 이력(attendee_export)과 DOWNLOAD 접속기록을 한 트랜잭션에 쓴다. 하나라도 실패하면 둘 다 남지 않고 오류를 던진다 */
+  recordExport(record: AttendeeExportRecord): Promise<void>;
+  /** 명단 보기 LIST 접속기록. 실패하면 오류를 던진다 */
+  recordView(view: AttendeeViewRecord): Promise<void>;
   list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]>;
 }
 
+/** 명단 원천 한 페이지. nextCursor가 null일 때만 끝이다. items가 limit보다 적거나 0건이어도 nextCursor가 있으면 다음이 있다(W7-audit A2-17) */
+export interface AttendeeSourcePage {
+  items: AttendeeRecord[];
+  nextCursor: string | null;
+}
+
 export interface AttendeeSource {
-  list(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeRecord[]>;
+  list(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeSourcePage>;
   count(promoterId: string, eventId: string): Promise<{ bookings: number; tickets: number }>;
 }
 

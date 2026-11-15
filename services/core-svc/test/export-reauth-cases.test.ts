@@ -90,7 +90,7 @@ describe('TEST-06 BOOKER_EXPORT 재인증 부정 경로', () => {
   test('유스케이스도 패스키 없는 재인증을 403으로 거절한다', async () => {
     const events = new MemoryPartnerEventLookup();
     events.add(TENANT, EVENT, 'LUMEN', new Date('2026-12-01T00:00:00Z'));
-    const attendees: AttendeeSource = { list: async () => [], count: async () => ({ bookings: 0, tickets: 0 }) };
+    const attendees: AttendeeSource = { list: async () => ({ items: [], nextCursor: null }), count: async () => ({ bookings: 0, tickets: 0 }) };
     const app = new AttendeeExports({ store: new MemoryAttendeeExportStore(), attendees, events, reauth, actors: new MemoryActorNames(), clock });
     await expect(
       app.create(TENANT, EVENT, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' }, await sign(admin, { factors: ['password'] }), { reason: '확인', format: 'CSV' }),

@@ -30,11 +30,13 @@ export class MemoryMerchOrderStore implements MerchOrderStore {
     return [...byOrder.values()].sort((a, b) => a.orderId.localeCompare(b.orderId));
   }
 
-  async listAttendees(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeRecord[]> {
+  async listAttendees(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<{ items: AttendeeRecord[]; nextCursor: string | null }> {
     const after = cursor ? Buffer.from(cursor, 'base64url').toString('utf8') : '';
-    return this.#attendeeRows(promoterId, eventId)
+    const items = this.#attendeeRows(promoterId, eventId)
       .filter((r) => after === '' || r.orderId > after)
       .slice(0, limit);
+    // 뼈대(W7-audit 시험 단계): 페이지 모양만 맞췄다. 다음 주문이 있을 때만 nextCursor를 주는 일은 구현 담당 몫(A2-17)
+    return { items, nextCursor: null };
   }
 
   async countAttendees(promoterId: string, eventId: string): Promise<{ bookings: number; tickets: number }> {

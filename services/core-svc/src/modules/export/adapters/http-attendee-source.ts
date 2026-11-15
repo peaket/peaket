@@ -1,7 +1,7 @@
 // 예매자 명단 원천: purchase-svc 내부 HTTP(A2-03). 굿즈 주문이 아니라 결제 완료 주문·SOLD 좌석을 읽는다.
 import { createExternalHttpClient } from '@peaket/platform';
 import type { AttendeeRecord } from '../../shop/index.js';
-import type { AttendeeSource } from '../domain/ports.js';
+import type { AttendeeSource, AttendeeSourcePage } from '../domain/ports.js';
 
 interface Page {
   items: { orderId: string; eventId: string; buyerName: string; buyerPhone: string; seats: { seatLabel: string; tier: string }[]; ticketCount: number }[];
@@ -31,9 +31,9 @@ export class HttpAttendeeSource implements AttendeeSource {
     return (await res.json()) as Page;
   }
 
-  async list(_promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeRecord[]> {
+  async list(_promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeSourcePage> {
     const page = await this.#get(eventId, Math.min(limit, 1_000), cursor);
-    return page.items.map((r) => ({
+    const items: AttendeeRecord[] = page.items.map((r) => ({
       orderId: r.orderId,
       eventId: r.eventId,
       buyerName: r.buyerName,
@@ -42,6 +42,8 @@ export class HttpAttendeeSource implements AttendeeSource {
       quantity: r.ticketCount,
       seats: r.seats,
     }));
+    // 뼈대(W7-audit 시험 단계): 페이지 모양만 맞췄고 지금처럼 원천 nextCursor를 버린다. 넘기기와 응답 모양 검사는 구현 담당 몫(A2-17)
+    return { items, nextCursor: null };
   }
 
   async count(_promoterId: string, eventId: string): Promise<{ bookings: number; tickets: number }> {

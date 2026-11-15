@@ -6,6 +6,13 @@ export { DrizzleReviewStore } from './adapters/db/drizzle-review-store.js';
 export { MemoryReviewEligibility } from './adapters/memory-review-eligibility.js';
 export { UnavailableReviewEligibility } from './adapters/unavailable-review-eligibility.js';
 export { GrpcReviewEligibility } from './adapters/grpc-review-eligibility.js';
+export {
+  ACCOUNTS_WITHDRAWN_TOPIC,
+  type AccountWithdrawnCodec,
+  jsonAccountWithdrawnCodec,
+  ReviewAccountWithdrawnHandler,
+  type ReviewWithdrawnEvent,
+} from './inbound/account-withdrawn.handler.js';
 export { MemoryFanProfile, UnavailableFanProfile } from './adapters/fan-profile.js';
 export { LogReviewCaseSink, LogReviewNotifier, MemoryReviewCaseSink, MemoryReviewNotifier } from './adapters/review-notifier.js';
 export * from './domain/review.js';

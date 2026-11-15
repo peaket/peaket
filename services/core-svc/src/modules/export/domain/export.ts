@@ -69,6 +69,14 @@ export function retentionEnded(eventEndsAt: Date, now: Date): boolean {
   return now.getTime() > eventEndsAt.getTime() + RETENTION_MS;
 }
 
+/**
+ * 접속기록 보존 끝: UTC 달력으로 2년 뒤 같은 월·일(2월 29일 → 3월 1일). 730일이 아니다(W7-audit A2-19, docs/data.md §2).
+ * 뼈대(W7-audit 시험 단계): 구현 담당이 채운다
+ */
+export function accessLogRetainUntil(_createdAt: Date): Date {
+  throw new Error('아직 없음');
+}
+
 /** 내려받는 동안 서버가 들고 있는 행 수를 제한한다(J-T26 ② 스트리밍, 50만 행 [가정] 상한). */
 export const MAX_EXPORT_ROWS = 500_000;
 

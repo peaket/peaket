@@ -1,4 +1,6 @@
 // 예매자 명단 내려받기 시험(BUILD_ORDER BAT-610 잔여, I-T53·J-T26, FR-027·064).
+// W7-audit A2-17·A2-19: 명단 보기 응답의 nextCursor는 원천 값 그대로이고, 보기마다 로그인 주체가 LIST 접속기록에 남으며,
+// 내려받기 접속기록을 남기지 못하면 파일을 주지 않는다(docs/features/settlement.md §9, J-T26 ④⑤⑥).
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +9,8 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryActorNames, MemoryAttendeeExportStore, MemoryPartnerEventLookup } from '../src/modules/export/index.js';
 import { ExportProblem } from '../src/modules/export/domain/export.js';
 import { MemoryMerchOrderStore, maskName, maskPhone, settlementBasisDate, type MerchOrderItemRecord, type MerchOrderRecord } from '../src/modules/shop/index.js';
-import type { BookersReauth } from '../src/modules/export/domain/ports.js';
+import type { AttendeeExportRecord } from '../src/modules/export/domain/export.js';
+import type { AttendeeSource, BookersReauth } from '../src/modules/export/domain/ports.js';
 import { FakeIdentity, NOW_MS, quiet } from './support.js';
 
 const TENANT = randomUUID();
@@ -15,7 +18,20 @@ const OTHER = randomUUID();
 const EVENT = randomUUID();
 const IDENTITY = new FakeIdentity();
 const merch = new MemoryMerchOrderStore();
-const exportsStore = new MemoryAttendeeExportStore();
+/** failExport를 켜면 내려받기 기록(recordExport)이 던진다 */
+class FailableExportStore extends MemoryAttendeeExportStore {
+  failExport = false;
+  override async recordExport(record: AttendeeExportRecord): Promise<void> {
+    if (this.failExport) throw new Error('audit-down');
+    return super.recordExport(record);
+  }
+}
+const exportsStore = new FailableExportStore();
+/** 명단 원천: 기본은 굿즈 주문 메모리 저장소, 시험이 override로 잠시 바꾼다 */
+const source: AttendeeSource & { override?: AttendeeSource } = {
+  list: (p, e, l, c) => (source.override ? source.override.list(p, e, l, c) : merch.listAttendees(p, e, l, c)),
+  count: (p, e) => (source.override ? source.override.count(p, e) : merch.countAttendees(p, e)),
+};
 const events = new MemoryPartnerEventLookup();
 const actors = new MemoryActorNames();
 
@@ -78,7 +94,7 @@ beforeAll(async () => {
     module: AppModule.register({
       memory: true,
       shop: { merch },
-      export: { store: exportsStore, source: { list: (p, e, l, c) => merch.listAttendees(p, e, l, c), count: (p, e) => merch.countAttendees(p, e) }, events, reauth, actors },
+      export: { store: exportsStore, source, events, reauth, actors },
     }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW_MS }),
@@ -150,6 +166,71 @@ describe('I-T53·J-T26 예매자 명단', () => {
   test('J-T26 실무자는 내려받기·이력을 부를 수 없다', async () => {
     const r = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: headers(TENANT, undefined, 'partner_member') });
     expect(r.statusCode).toBe(403);
+  });
+
+  test('A2-17 J-T26 ④ 명단 보기 응답의 nextCursor는 원천 값 그대로다 — GET …/attendees', async () => {
+    const rows = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ orderId: randomUUID(), eventId: EVENT, buyerName: '김민수', buyerPhone: '010-1234-5678', seatLabel: `C-${i}`, quantity: 1 }));
+    const pages = [
+      { items: rows(49), nextCursor: 'opaque-c' as string | null },
+      { items: rows(50), nextCursor: null },
+    ];
+    const cursors: (string | undefined)[] = [];
+    source.override = {
+      list: async (_p, _e, _l, c) => {
+        cursors.push(c);
+        return pages[cursors.length - 1]!;
+      },
+      count: async () => ({ bookings: 99, tickets: 99 }),
+    };
+    try {
+      const short = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50`, headers: headers() });
+      expect(short.statusCode).toBe(200);
+      expect(JSON.parse(short.payload)).toMatchObject({ nextCursor: 'opaque-c' });
+      expect(JSON.parse(short.payload).items).toHaveLength(49);
+      // 경계 반대쪽: 정확히 limit건인 마지막 페이지에서 원천이 null을 주면 null이다
+      const last = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50&cursor=opaque-c`, headers: headers() });
+      expect(last.statusCode).toBe(200);
+      expect(JSON.parse(last.payload).nextCursor).toBeNull();
+      expect(JSON.parse(last.payload).items).toHaveLength(50);
+      expect(cursors).toEqual([undefined, 'opaque-c']);
+    } finally {
+      delete source.override;
+    }
+  });
+
+  test('A2-19 J-T26 ⑤ GET …/attendees는 로그인 주체를 접속기록 행위자로 쓴다', async () => {
+    const before = exportsStore.views.length;
+    const first: Record<string, string> = headers();
+    const second: Record<string, string> = headers();
+    expect(first['x-user-id']).not.toBe(second['x-user-id']);
+    for (const h of [first, second]) {
+      const r = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50`, headers: h });
+      expect(r.statusCode).toBe(200);
+    }
+    const added = exportsStore.views.slice(before);
+    expect(added.map((v) => v.actorAccountId)).toEqual([first['x-user-id'], second['x-user-id']]);
+    for (const v of added) {
+      expect(v).toMatchObject({ promoterId: TENANT, eventId: EVENT, actorRole: 'partner_admin', actorDisplayName: '스텔라 관리자', count: 2 });
+      expect(v.actorAccountId).not.toBe(TENANT);
+      expect(v.filter).toStrictEqual({ limit: 50 });
+    }
+    // 실무자는 403이고 접속기록이 늘지 않는다
+    const member = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50`, headers: headers(TENANT, undefined, 'partner_member') });
+    expect(member.statusCode).toBe(403);
+    expect(exportsStore.views.length).toBe(before + 2);
+  });
+
+  test('A2-19 J-T26 ⑥ 접속기록 저장이 실패하면 내려받기 성공으로 답하지 않는다 — POST …/attendee-exports', async () => {
+    exportsStore.failExport = true;
+    try {
+      const r = await svc.http.inject({ method: 'POST', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: headers(), payload: JSON.stringify({ reason: '감사 실패', format: 'CSV' }) });
+      expect(r.statusCode).toBeGreaterThanOrEqual(500);
+      expect(r.headers['content-disposition']).toBeUndefined();
+      expect(r.rawPayload.toString('utf8')).not.toContain('010-1234-5678');
+    } finally {
+      exportsStore.failExport = false;
+    }
   });
 });
 

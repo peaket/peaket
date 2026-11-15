@@ -64,13 +64,15 @@ export interface AttendeePageView {
 export class AttendeeExports {
   constructor(private readonly d: ExportDeps) {}
 
-  async listAttendees(promoterId: string, eventId: string, q: { limit: number; cursor?: string }): Promise<AttendeePageView> {
+  // 뼈대(W7-audit 시험 단계): 넷째 인자 actor는 모양만 받는다. 행위자 확인과 LIST 접속기록은 구현 담당이 채운다(A2-19)
+  async listAttendees(promoterId: string, eventId: string, q: { limit: number; cursor?: string }, _actor?: ExportActor): Promise<AttendeePageView> {
     return guard(async () => {
       const found = await this.d.events.find(promoterId, eventId);
       if (!found) throw notFound();
       const now = new Date(this.d.clock.now());
       if (retentionEnded(found.endsAt, now)) throw retention();
-      const rows = await this.d.attendees.list(promoterId, eventId, q.limit, q.cursor);
+      // 뼈대(W7-audit 시험 단계): 원천이 페이지 모양이 되어 items만 꺼낸다. 원천 nextCursor를 쓰는 일은 구현 담당 몫(A2-17)
+      const rows = (await this.d.attendees.list(promoterId, eventId, q.limit, q.cursor)).items;
       const totals = await this.d.attendees.count(promoterId, eventId);
       return {
         items: rows.map((r) => ({
@@ -100,10 +102,11 @@ export class AttendeeExports {
       const { reason, format } = validateExportBody(body);
       if (format === 'PDF') throw new ExportProblem('export-format-unavailable', 503, 'PDF 형식은 아직 만들 수 없습니다');
       // A2-17: 한 번에 500만 행을 올리지 않고 1,000행 페이지를 커서로 이어 읽는다(상한은 MAX_EXPORT_ROWS).
-      const rows: Awaited<ReturnType<AttendeeSource['list']>> = [];
+      const rows: Awaited<ReturnType<AttendeeSource['list']>>['items'] = [];
       let cursor: string | undefined;
       for (;;) {
-        const page = await this.d.attendees.list(promoterId, eventId, 1_000, cursor);
+        // 뼈대(W7-audit 시험 단계): 원천이 페이지 모양이 되어 items만 꺼낸다. nextCursor로 끝을 보는 일은 구현 담당 몫(A2-17)
+        const page = (await this.d.attendees.list(promoterId, eventId, 1_000, cursor)).items;
         rows.push(...page);
         if (rows.length > MAX_EXPORT_ROWS) throw new ExportProblem('invalid-query', 422, '한 번에 내려받을 수 있는 행 수를 넘었습니다');
         if (page.length < 1_000) break;
