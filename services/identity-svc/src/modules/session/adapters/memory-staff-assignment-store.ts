@@ -163,6 +163,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       assignmentId: i.assignmentId,
       accountId: i.accountId,
       deviceId: i.deviceId,
+      accountId: i.accountId,
       role: i.role,
       proxy: i.proxy,
       expiresAt: i.expiresAtMs,

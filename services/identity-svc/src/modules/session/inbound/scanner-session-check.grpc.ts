@@ -30,6 +30,7 @@ export function scannerSessionCheckHandlers(
               valid_from_ms: v.validFromMs ?? 0,
               valid_until_ms: v.validUntilMs ?? 0,
               proxy: v.proxy ?? false,
+              account_id: v.accountId ?? '',
             }),
           (err: unknown) => {
             onError('CheckScannerSession', err);

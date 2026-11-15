@@ -64,6 +64,7 @@ export type ProblemType =
   | 'event-cancellation-conflict'
   | 'event-refund-unavailable'
   | 'event-schedule-invalid'
+  | 'event-settlement-source-unavailable'
   | 'event-suspended'
   | 'export-format-unavailable'
   | 'first-partner-account-must-be-admin'
@@ -256,6 +257,7 @@ export type ProblemType =
   | 'scanner-flag-not-found'
   | 'scanner-login-rate-limited'
   | 'scanner-origin-forbidden'
+  | 'scanner-override-forbidden'
   | 'scanner-placement-reentry-not-allowed'
   | 'seat-already-held'
   | 'seat-recently-released'
@@ -361,6 +363,7 @@ export const PROBLEM_TYPES = {
   'event-cancellation-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'event-refund-unavailable': { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
+  'event-settlement-source-unavailable': { status: 503, title: "회차 정산 원천을 읽을 수 없습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
@@ -553,6 +556,7 @@ export const PROBLEM_TYPES = {
   'scanner-flag-not-found': { status: 404, title: "이상 표시를 찾을 수 없습니다" },
   'scanner-login-rate-limited': { status: 429, title: "승인 요청이 너무 잦습니다" },
   'scanner-origin-forbidden': { status: 403, title: "스캐너 앱 출처가 아닙니다" },
+  'scanner-override-forbidden': { status: 403, title: "예외 통과는 현장 책임자 본인 세션에서만 할 수 있습니다" },
   'scanner-placement-reentry-not-allowed': { status: 422, title: "재입장을 허용하지 않는 회차에는 퇴장 모드를 배치할 수 없습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },

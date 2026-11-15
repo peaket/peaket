@@ -20,12 +20,13 @@ import {
 import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, ProblemError, RequestValidationError, Roles, ScannerAuth, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden } from '../application/scanner-gate.js';
+import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden, ScannerGateOverrideForbidden } from '../application/scanner-gate.js';
 import { ScannerGateInputError, type GateFlagPage, type GateFlagView, type ScanBatchResult, type ScannerChangesView, type ScannerPackageView } from '../domain/scanner-gate.js';
 
 function reject(e: unknown): never {
   if (e instanceof ScannerGateInputError) throw new RequestValidationError(`스캐너 게이트 입력이 올바르지 않습니다: ${e.code}`);
   if (e instanceof ScannerGateForbidden) throw new ProblemError({ type: 'scanner-event-mismatch', status: 403, title: '스캐너 세션의 회차와 요청 회차가 다릅니다' });
+  if (e instanceof ScannerGateOverrideForbidden) throw new ProblemError({ type: 'scanner-override-forbidden', status: 403, title: '예외 통과는 현장 책임자 본인 세션에서만 할 수 있습니다' });
   if (e instanceof ScannerFlagNotFound) throw new ProblemError({ type: 'scanner-flag-not-found', status: 404, title: '이상 표시를 찾을 수 없습니다' });
   throw e;
 }
@@ -88,7 +89,11 @@ export class ScannerGateController {
         eventIdRaw: me.eventId ?? bodyEventId,
         sessionEventId: me.eventId,
         deviceId: me.deviceId ?? '',
+        ...(me.role !== undefined ? { role: me.role } : {}),
+        ...(me.proxy !== undefined ? { proxy: me.proxy } : {}),
         ...(me.sessionId ? { staffAccountId: me.accountId, sessionId: me.sessionId } : {}),
+        ...(me.staffValidFromMs !== undefined ? { sessionValidFromMs: me.staffValidFromMs } : {}),
+        ...(me.staffValidUntilMs !== undefined ? { sessionValidUntilMs: me.staffValidUntilMs } : {}),
         body,
       });
     } catch (e) {

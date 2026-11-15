@@ -3,7 +3,7 @@ import { fakeClock } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
 import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
-import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden } from '../src/modules/scanner/application/scanner-gate.js';
+import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden, ScannerGateOverrideForbidden } from '../src/modules/scanner/application/scanner-gate.js';
 import type { ScanEventInput } from '../src/modules/scanner/domain/scanner-gate.js';
 import { normalizeVersionVector } from '../src/modules/scanner/domain/scanner-gate.js';
 
@@ -13,6 +13,9 @@ const OTHER = '0190f3a1-7c2e-7a00-8000-000000000002';
 const TICKET_A = '0190f3a1-7c2e-7a00-8000-000000000011';
 const TICKET_B = '0190f3a1-7c2e-7a00-8000-000000000012';
 const TICKET_CANCELLED = '0190f3a1-7c2e-7a00-8000-000000000013';
+const TICKET_CANCELLED_AFTER = '0190f3a1-7c2e-7a00-8000-000000000014';
+const TICKET_ZONE = '0190f3a1-7c2e-7a00-8000-000000000015';
+const TICKET_REENTRY = '0190f3a1-7c2e-7a00-8000-000000000016';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-000000000021';
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-000000000022';
 const SESSION = '0190f3a1-7c2e-7a00-8000-000000000023';
@@ -42,6 +45,9 @@ beforeEach(() => {
   store.seedTicket({ ticketId: TICKET_A, eventId: EVENT, seatId: 'A-1', gateZone: '동문', status: 'ACTIVE' });
   store.seedTicket({ ticketId: TICKET_B, eventId: EVENT, seatId: 'B-2', gateZone: '서문', status: 'ACTIVE' });
   store.seedTicket({ ticketId: TICKET_CANCELLED, eventId: EVENT, seatId: 'C-3', gateZone: '동문', status: 'REFUNDED' });
+  store.seedTicket({ ticketId: TICKET_CANCELLED_AFTER, eventId: EVENT, seatId: 'C-4', gateZone: '동문', status: 'REFUNDED', cancelledAtMs: NOW + 60_000 });
+  store.seedTicket({ ticketId: TICKET_ZONE, eventId: EVENT, seatId: 'D-4', gateZone: '서문', status: 'ACTIVE' });
+  store.seedTicket({ ticketId: TICKET_REENTRY, eventId: EVENT, seatId: 'E-5', gateZone: '동문', status: 'ACTIVE' });
   gate = new ScannerGate({ store, clock: fakeClock({ now: NOW }) });
 });
 
@@ -110,11 +116,12 @@ describe('ScannerGate 목록·변경분 [GAT-180]', () => {
   test('패키지는 회차 티켓·구역·좌석 표시·상태·lastSeq를 주고, 다른 회차는 403이다', async () => {
     const p = await gate.package(EVENT, EVENT);
     expect(p).toMatchObject({ eventId: EVENT, reentryAllowed: false, gateZones: ['동문', '서문'], lastSeq: 0 });
-    expect(p.tickets).toEqual([
+    expect(p.tickets).toEqual(expect.arrayContaining([
       expect.objectContaining({ ticketId: TICKET_A, seatLabel: 'A-1', gateZone: '동문', status: 'ACTIVE', keys: [] }),
       expect.objectContaining({ ticketId: TICKET_B, seatLabel: 'B-2', gateZone: '서문' }),
       expect.objectContaining({ ticketId: TICKET_CANCELLED, status: 'REFUNDED' }),
-    ]);
+    ]));
+    expect(p.tickets).toHaveLength(6);
     await expect(gate.package(EVENT, OTHER)).rejects.toBeInstanceOf(ScannerGateForbidden);
   });
 
@@ -127,6 +134,18 @@ describe('ScannerGate 목록·변경분 [GAT-180]', () => {
     const next = await gate.changes(EVENT, p.lastSeq, 5000, EVENT);
     expect(next.lastSeq).toBe(2);
     expect(next.changes).toEqual([expect.objectContaining({ seq: 2, kind: 'SCAN_STATE', payload: expect.objectContaining({ direction: 'OUT' }) })]);
+  });
+
+  test('changes.lastSeq는 페이지 끝 번호이고, 그 번호를 다음 커서로 이어 받는다(C1-05)', async () => {
+    await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_A }), scan({ ticketId: TICKET_B })] });
+    await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_A, direction: 'OUT' })] });
+    const p1 = await gate.changes(EVENT, 0, 1, EVENT);
+    expect(p1).toMatchObject({ lastSeq: 1, hasMore: true });
+    const p2 = await gate.changes(EVENT, p1.lastSeq, 1, EVENT);
+    expect(p2).toMatchObject({ lastSeq: 2, hasMore: true });
+    const p3 = await gate.changes(EVENT, p2.lastSeq, 5, EVENT);
+    expect(p3).toMatchObject({ lastSeq: 3, hasMore: false });
+    expect(p3.changes).toEqual([expect.objectContaining({ seq: 3, kind: 'SCAN_STATE' })]);
   });
 
   test('변경분은 after 다음 일련번호부터 주고, 스캔 통과 뒤 SCAN_STATE가 쌓인다', async () => {
@@ -202,5 +221,116 @@ describe('ScannerGate 이상 표시 [GAT-190]', () => {
     expect(accepted.acceptedIds).toHaveLength(1);
     expect(accepted.flags).toEqual([expect.objectContaining({ kind: 'OUT_OF_SESSION', status: 'OPEN' })]);
     await expect(deviceGate.scans({ eventIdRaw: EVENT, sessionEventId: undefined, deviceId: '0190f3a1-7c2e-7a00-8000-000000000099', body: [scan()] })).rejects.toBeInstanceOf(ScannerGateForbidden);
+  });
+});
+
+describe('R-609 C1-01 예외 통과 권한·사후 검토', () => {
+  test('gate_lead 본인만 OVERRIDE를 받고 flag·note를 남긴다. 일반 스태프·대리·기기 단독은 403', async () => {
+    const s = scan({ method: 'OVERRIDE', overrideNote: '휴대폰 액정 파손', knownSeq: 0 });
+    await expect(
+      gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_staff', body: [s] }),
+    ).rejects.toBeInstanceOf(ScannerGateOverrideForbidden);
+    await expect(
+      gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', proxy: true, body: [s] }),
+    ).rejects.toBeInstanceOf(ScannerGateOverrideForbidden);
+    await expect(gate.scans({ eventIdRaw: EVENT, sessionEventId: undefined, deviceId: DEVICE, role: 'scanner_device', body: [s] })).rejects.toBeInstanceOf(ScannerGateOverrideForbidden);
+
+    const ok = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [s] });
+    expect(ok.flags).toEqual([expect.objectContaining({ kind: 'OVERRIDE_REVIEW', ticketId: TICKET_A })]);
+    expect(store.scans.get(s.id)).toMatchObject({ result: 'PASS', method: 'OVERRIDE', overrideNote: '휴대폰 액정 파손', flag: 'OVERRIDE_REVIEW' });
+  });
+});
+
+describe('R-610 C1-03·C1-04 중복 입장·취소 시각', () => {
+  test('늦게 올라온 더 이른 보정 시각 기록이 정상이 되고, 먼저 통과한 뒤 기록은 DUPLICATE로 내린다', async () => {
+    const late = scan({ scannedAtDevice: new Date(NOW + 20_000).toISOString(), deviceSeq: 20 });
+    const first = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [late] });
+    expect(first.flags).toEqual([]);
+    const early = scan({ scannedAtDevice: new Date(NOW + 10_000).toISOString(), deviceSeq: 10 });
+    const second = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [early] });
+    expect(second.flags).toEqual([expect.objectContaining({ kind: 'DUPLICATE' })]);
+    expect(store.scans.get(early.id)).toMatchObject({ result: 'PASS' });
+    expect(store.scans.get(late.id)).toMatchObject({ result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' });
+  });
+
+  test('취소 접수 시각보다 이른 입장은 PASS이고, 그 뒤 입장만 TICKET_CANCELLED·AFTER_CANCEL이다', async () => {
+    const before = scan({ ticketId: TICKET_CANCELLED_AFTER, scannedAtDevice: new Date(NOW + 30_000).toISOString() });
+    const ok = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [before] });
+    expect(ok.flags).toEqual([]);
+    expect(store.scans.get(before.id)).toMatchObject({ result: 'PASS' });
+
+    const after = scan({ ticketId: TICKET_CANCELLED_AFTER, scannedAtDevice: new Date(NOW + 90_000).toISOString() });
+    const rejected = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [after] });
+    expect(rejected.flags).toEqual([expect.objectContaining({ kind: 'AFTER_CANCEL' })]);
+    expect(store.scans.get(after.id)).toMatchObject({ result: 'REJECT', reason: 'TICKET_CANCELLED' });
+  });
+});
+
+describe('R-609 C1-02·C1-11 서버 재판정', () => {
+  const policy = (over: Record<string, unknown> = {}) => ({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false, ...over }) });
+
+  test('배치 구역·모드가 다르면 WRONG_ZONE으로 거부한다', async () => {
+    const shifts = new MemoryScannerShiftStore(store);
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '서문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
+    const placed = new ScannerGate({ store, clock: fakeClock({ now: NOW }), shifts, policy: policy() });
+    const wrongZone = await placed.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_ZONE })] });
+    expect(wrongZone.flags).toEqual([]);
+    expect(store.scans.get(wrongZone.acceptedIds[0]!)).toMatchObject({ result: 'REJECT', reason: 'WRONG_ZONE' });
+
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'OUT', setBy: ACCOUNT, atMs: NOW, expectedVersion: 1 });
+    const wrongMode = await placed.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_A })] });
+    expect(store.scans.get(wrongMode.acceptedIds[0]!)).toMatchObject({ result: 'REJECT', reason: 'WRONG_ZONE' });
+  });
+
+  test('세션 유효 창 밖·입장 마감 뒤·시계 불확실을 표시하고, 재입장 허용의 IN 다음 IN은 NO_EXIT다', async () => {
+    const shifts = new MemoryScannerShiftStore(store);
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
+    const placed = new ScannerGate({
+      store,
+      clock: fakeClock({ now: NOW }),
+      shifts,
+      policy: policy({ reentryAllowed: true, entryClosesAtMs: NOW - 1_000 }),
+      sessions: { check: async () => ({ valid: false, eventId: EVENT, accountId: ACCOUNT, validFromMs: NOW - 1_000, validUntilMs: NOW + 1_000 }) },
+    });
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 1 });
+    const outside = await placed.scans({
+      eventIdRaw: EVENT,
+      sessionEventId: EVENT,
+      deviceId: DEVICE,
+      staffAccountId: ACCOUNT,
+      sessionId: SESSION,
+      role: 'gate_lead',
+      sessionValidFromMs: NOW + 3_600_000,
+      sessionValidUntilMs: NOW + 7_200_000,
+      body: [scan({ clockOffsetMs: 3 * 60_000 })],
+    });
+    expect(outside.flags.map((f) => f.kind).sort()).toEqual(['AFTER_CLOSE', 'OUT_OF_SESSION', 'TIME_UNCERTAIN']);
+
+    const reentryGate = new ScannerGate({ store, clock: fakeClock({ now: NOW }), shifts, policy: policy({ reentryAllowed: true }) });
+    const first = await reentryGate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_REENTRY, scannedAtDevice: new Date(NOW + 10_000).toISOString() })] });
+    expect(first.flags).toEqual([]);
+    const second = await reentryGate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_REENTRY, scannedAtDevice: new Date(NOW + 20_000).toISOString() })] });
+    expect(second.flags).toEqual([expect.objectContaining({ kind: 'NO_EXIT' })]);
+    expect(store.scans.get(second.acceptedIds[0]!)).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD' });
+  });
+
+  test('기기 단독 업로드는 scannerSessionId의 계정을 채우고, 기록 시각이 세션 창 안이면 정상이다', async () => {
+    const shifts = new MemoryScannerShiftStore(store);
+    await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
+    const deviceGate = new ScannerGate({
+      store,
+      clock: fakeClock({ now: NOW }),
+      shifts,
+      sessions: { check: async () => ({ valid: false, eventId: EVENT, accountId: ACCOUNT, validFromMs: NOW - 1_000, validUntilMs: NOW + 1_000 }) },
+    });
+    const s = scan({ scannedAtDevice: new Date(NOW).toISOString() });
+    const accepted = await deviceGate.scans({ eventIdRaw: EVENT, sessionEventId: undefined, deviceId: DEVICE, body: [s] });
+    expect(accepted.flags).toEqual([]);
+    expect(store.scans.get(s.id)).toMatchObject({ result: 'PASS', staffAccountId: ACCOUNT });
+  });
+
+  test('목록의 reentryAllowed는 core 정책에서 채운다', async () => {
+    const policyGate = new ScannerGate({ store, clock: fakeClock({ now: NOW }), policy: policy({ reentryAllowed: true }) });
+    expect((await policyGate.package(EVENT, EVENT)).reentryAllowed).toBe(true);
   });
 });

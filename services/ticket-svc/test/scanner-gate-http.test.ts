@@ -21,6 +21,7 @@ const EVENT = '0190f3a1-7c2e-7a00-8000-000000000004';
 const OTHER = '0190f3a1-7c2e-7a00-8000-000000000005';
 const TICKET = '0190f3a1-7c2e-7a00-8000-000000000006';
 const TICKET_2 = '0190f3a1-7c2e-7a00-8000-000000000009';
+const TICKET_3 = '0190f3a1-7c2e-7a00-8000-00000000000a';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-000000000007';
 const SESSION = '0190f3a1-7c2e-7a00-8000-000000000008';
 const TOKEN = 'staff-access-token';
@@ -105,10 +106,12 @@ beforeAll(async () => {
   gate = new MemoryScannerGateStore();
   gate.seedTicket({ ticketId: TICKET, eventId: EVENT, seatId: 'A-1', gateZone: '동문', status: 'ACTIVE' });
   gate.seedTicket({ ticketId: TICKET_2, eventId: EVENT, seatId: 'A-2', gateZone: '동문', status: 'ACTIVE' });
+  gate.seedTicket({ ticketId: TICKET_3, eventId: EVENT, seatId: 'A-3', gateZone: '동문', status: 'ACTIVE' });
   sessions = new FakeSessions();
   sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
   const replay = new MemoryDpopReplayStore(clock);
   const shift = new MemoryScannerShiftStore(gate);
+  await shift.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
   svc = await createService({
     name: 'ticket-svc-gate-int',
     module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift } }),
@@ -129,21 +132,30 @@ const post = async (path: string, body: unknown, session = SESSION) => {
   const h = await headers('POST', path, session);
   return svc.http.inject({ method: 'POST', url: path, headers: { ...h, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 };
+const postDeviceOnly = async (path: string, body: unknown) => {
+  const h = {
+    dpop: await proofOf('POST', path),
+    'x-forwarded-proto': 'https',
+    'x-forwarded-host': HOST,
+    'content-type': 'application/json',
+  };
+  return svc.http.inject({ method: 'POST', url: path, headers: h, payload: JSON.stringify(body) });
+};
 
 describe('스캐너 목록·변경분 HTTP [GAT-180]', () => {
   test('패키지는 티켓·구역·lastSeq를 주고 Cache-Control no-store이며, 다른 회차는 403이다', async () => {
     const r = await get(`/v1/scanner/events/${EVENT}/package`);
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(r.payload)).toMatchObject({ eventId: EVENT, gateZones: ['동문'], lastSeq: 0, tickets: expect.arrayContaining([expect.objectContaining({ ticketId: TICKET, seatLabel: 'A-1' })]) });
+    expect(JSON.parse(r.payload)).toMatchObject({ eventId: EVENT, gateZones: ['동문'], lastSeq: 1, tickets: expect.arrayContaining([expect.objectContaining({ ticketId: TICKET, seatLabel: 'A-1' })]) });
     expect((await get(`/v1/scanner/events/${OTHER}/package`)).statusCode).toBe(403);
   });
 
   test('변경분은 after 뒤를 주고, 스캔을 받으면 SCAN_STATE가 쌓인다', async () => {
     const r = await get(`/v1/scanner/events/${EVENT}/changes?after=0`);
     expect(r.statusCode).toBe(200);
-    expect(JSON.parse(r.payload)).toMatchObject({ lastSeq: 0, changes: [] });
-    const s = scan();
+    expect(JSON.parse(r.payload)).toMatchObject({ lastSeq: 1, changes: [expect.objectContaining({ seq: 1, kind: 'PLACEMENT' })] });
+    const s = scan({ ticketId: TICKET_3 });
     expect((await post('/v1/scanner/scans', [s])).statusCode).toBe(200);
     const after = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { changes: { kind: string }[] };
     expect(after.changes.map((c) => c.kind)).toContain('SCAN_STATE');
@@ -160,6 +172,25 @@ describe('스캔·이상 표시 HTTP [GAT-180·GAT-190]', () => {
     expect(JSON.parse(again.payload)).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [] });
     const dup = await post('/v1/scanner/scans', [scan({ ticketId: TICKET_2, knownSeq: 1 })]);
     expect(JSON.parse(dup.payload).flags).toEqual([expect.objectContaining({ kind: 'DUPLICATE', status: 'OPEN' })]);
+  });
+
+  test('예외 통과는 gate_lead 본인만 200이고, gate_staff·대리 승인·기기 단독은 403이다 [O-T34, ASVS 6.3.4]', async () => {
+    const s = scan({ ticketId: TICKET, method: 'OVERRIDE', overrideNote: '액정 파손', knownSeq: 0 });
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_staff', eventId: EVENT });
+    clock.advance(6_000);
+    expect((await post('/v1/scanner/scans', [s])).statusCode).toBe(403);
+
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT, proxy: true });
+    clock.advance(6_000);
+    expect((await post('/v1/scanner/scans', [s])).statusCode).toBe(403);
+
+    expect((await postDeviceOnly('/v1/scanner/scans', [s])).statusCode).toBe(403);
+
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT, proxy: false });
+    clock.advance(6_000);
+    const ok = await post('/v1/scanner/scans', [s]);
+    expect(ok.statusCode).toBe(200);
+    expect(JSON.parse(ok.payload).flags).toEqual([expect.objectContaining({ kind: 'OVERRIDE_REVIEW', ticketId: TICKET })]);
   });
 
   test('책임자는 이상 표시 목록을 보고 확인 결과를 남기며, gate_staff는 목록을 볼 수 없다', async () => {

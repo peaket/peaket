@@ -1,6 +1,6 @@
 // 스캐너 기기 모듈 조립(BUILD_ORDER GAT-170). 저장소·등록 코드·DPoP jti·배치·준비 보고 포트를 고른다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock } from '@peaket/platform';
+import { CLOCK, type Clock, type ScannerSessionCheck } from '@peaket/platform';
 import { ScannerDevices } from './application/scanner-devices.js';
 import { ScannerGate } from './application/scanner-gate.js';
 import { ScannerPlacements, ScannerShift } from './application/scanner-shift.js';
@@ -21,6 +21,7 @@ import {
   type ScannerDeviceStore,
   type ScannerEventPolicyProvider,
   type ScannerGateStore,
+  type ScannerOpsAlertSink,
   type ScannerSessionTerminator,
   type ScannerShiftStore,
 } from './domain/ports.js';
@@ -43,10 +44,14 @@ export interface ScannerWiring {
   limiter?: EnrollmentAttemptLimiter;
   /** 기기 폐기 때 identity 스캐너 세션 종료. 없으면 부르지 않는다 */
   sessions?: ScannerSessionTerminator;
+  /** 기기 단독 업로드의 scannerSessionId로 계정·유효 창을 찾는 포트(C1-11). start는 sessions와 같은 객체를 넘긴다 */
+  sessionLookup?: Pick<ScannerSessionCheck, 'check'>;
   /** ops-svc 기기 명령 request_id 멱등 기록. 없으면 매번 새로 처리한다 */
   commands?: ScannerDeviceCommandStore;
   /** SEV3 경보·세션 종료 실패를 남기는 곳 */
   alert?: (message: string, fields: Record<string, unknown>) => void;
+  /** ops-svc ops_alert SEV3 경로(등록 전체 실패, C1-13). 없으면 alert 한 줄로만 남긴다 */
+  opsAlert?: ScannerOpsAlertSink;
   /** 오프라인 스냅샷 허용 최대 시간(ms). 없으면 24시간 [가정] */
   maxOfflineMs?: number;
 }
@@ -76,6 +81,7 @@ export class ScannerModule {
             ...(sessions ? { sessions } : {}),
             ...(commands ? { commands } : {}),
             ...(o.alert ? { alert: o.alert } : {}),
+            ...(o.opsAlert ? { opsAlert: o.opsAlert } : {}),
           }),
         inject: [
           SCANNER_DEVICE_STORE,
@@ -89,7 +95,15 @@ export class ScannerModule {
       {
         provide: ScannerGate,
         useFactory: (store: ScannerGateStore, clock: Clock, devices: ScannerDeviceStore) =>
-          new ScannerGate({ store, clock, shifts: o.shift, devices, ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}) }),
+          new ScannerGate({
+            store,
+            clock,
+            shifts: o.shift,
+            devices,
+            ...(o.policy ? { policy: o.policy } : {}),
+            ...(o.sessionLookup ? { sessions: o.sessionLookup } : {}),
+            ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}),
+          }),
         inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },
       {

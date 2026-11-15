@@ -130,6 +130,8 @@ export const scanEvent = pgTable(
     method: text('method').notNull(),
     result: text('result').notNull(),
     reason: text('reason'),
+    /** 예외 통과 메모(100자 이하). OVERRIDE_REVIEW 표시와 함께 남긴다(C1-01) */
+    overrideNote: text('override_note'),
     gateZone: text('gate_zone').notNull().default(''),
     keyId: bytea('key_id'),
     qrTs: at('qr_ts'),
@@ -147,7 +149,7 @@ export const scanEvent = pgTable(
     check('scan_event_direction_check', sql`${t.direction} IN ('IN', 'OUT')`),
     check('scan_event_method_check', sql`${t.method} IN ('QR', 'OVERRIDE', 'VERIFY')`),
     check('scan_event_result_check', sql`${t.result} IN ('PASS', 'REJECT', 'CHECK')`),
-    check('scan_event_flag_check', sql`${t.flag} IN ('NONE', 'DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'STALE_VERSION')`),
+    check('scan_event_flag_check', sql`${t.flag} IN ('NONE', 'DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'OVERRIDE_REVIEW', 'STALE_VERSION')`),
   ],
 );
 
@@ -168,7 +170,7 @@ export const gateFlag = pgTable(
   },
   (t) => [
     index('gate_flag_event_created_idx').on(t.eventId, t.createdAt, t.id),
-    check('gate_flag_kind_check', sql`${t.kind} IN ('DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION')`),
+    check('gate_flag_kind_check', sql`${t.kind} IN ('DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'OVERRIDE_REVIEW', 'STALE_VERSION')`),
     check('gate_flag_awareness_check', sql`${t.awareness} IN ('CONCURRENT', 'KNOWN')`),
     check('gate_flag_status_check', sql`${t.status} IN ('OPEN', 'OK', 'SUSPECT', 'UNDETERMINED')`),
   ],

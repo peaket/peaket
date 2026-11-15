@@ -708,6 +708,7 @@
 | R-605 | A2-01·05·06(상품 원천 쿼리 누락·HELD/DISPUTED 복구 없음·회차 정산 미배선) | payment settlement http source·settlements·controller·worker·시험 | 쿼리 전달·재확정 경로·내부 계산 경로/스케줄러 | 적용 |
 | R-598 | purchase 감사 M2 중간(변이 생존: 입장 시작 만료 상한·REFUND_AFTER_CLOSE·연기 공제·결제 실패 복귀·재시도 5회·창 경계·보류 소유자·만료 경계) | services/purchase-svc 시험·inventory index | 경계·권한·재시도·복귀 시험 추가 | 적용 |
 | R-607 | M1-F1·F2·F3(상계·배치 결속 비원자성, COMPENSATION_ADVANCE 결제사 가로막힘, confirmDue 미배선) | payment settlement store·settlements·worker·시험 | 원자적 배치 경계·결제사 무관 배상금 상계·자동 확정 워커/내부 경로 | 적용 |
+| R-609 | C1-01·02·11·13(OVERRIDE·재판정·기기 계정·SEV3) | ticket scanner gate/store/schema·migration 0007·시험 | OVERRIDE 권한/flag/note·재판정·기기 계정·SEV3 | 적용 |
 
 ## 4. 숫자 일치표
 

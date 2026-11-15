@@ -270,7 +270,7 @@ export const CreateScannerScanResponse = zod.object({
   "ticketId": zod.string().optional(),
   "seatLabel": zod.string().optional(),
   "gateZone": zod.string().optional(),
-  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
   "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
   "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
@@ -352,7 +352,7 @@ export const ListScannerEventFlagsResponse = zod.object({
   "ticketId": zod.string().optional(),
   "seatLabel": zod.string().optional(),
   "gateZone": zod.string().optional(),
-  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
   "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
   "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
@@ -382,7 +382,7 @@ export const CreateScannerFlagResolutionResponse = zod.object({
   "ticketId": zod.string().optional(),
   "seatLabel": zod.string().optional(),
   "gateZone": zod.string().optional(),
-  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
+  "kind": zod.enum(['DUPLICATE', 'NO_EXIT', 'AFTER_CANCEL', 'OUT_OF_SESSION', 'AFTER_CLOSE', 'TIME_UNCERTAIN', 'OVERRIDE_REVIEW', 'STALE_VERSION']).optional(),
   "awareness": zod.enum(['CONCURRENT', 'KNOWN']).optional(),
   "status": zod.enum(['OPEN', 'OK', 'SUSPECT', 'UNDETERMINED']).optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()

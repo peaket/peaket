@@ -100,6 +100,33 @@ describe('Redis 저장소 어댑터 [GAT-170]', () => {
   });
 });
 
+describe('R-609 C1-13 등록 전체 실패 SEV3', () => {
+  test('전체 실패 경계를 넘으면 ops-svc ops_alert(SEV3)로 보낸다', async () => {
+    const clock = fakeClock({ now: NOW });
+    const store = new MemoryScannerDeviceStore();
+    const codes = new MemoryEnrollmentCodeStore(clock);
+    const alerts: import('../src/modules/scanner/domain/ports.js').ScannerOpsAlert[] = [];
+    const devices = new ScannerDevices({
+      store,
+      codes,
+      clock,
+      limiter: { allowed: async () => true, failed: async () => ({ globalAlert: true, globalFailures: 101 }) },
+      opsAlert: { open: async (alert) => void alerts.push(alert) },
+    });
+    await expect(devices.enroll({ code: 'WRONG-CODE', jkt: JKT })).rejects.toBeInstanceOf(EnrollmentCodeRejected);
+    expect(alerts).toEqual([
+      expect.objectContaining({
+        eventKey: 'scanner-enrollment',
+        kind: 'ENROLLMENT_GLOBAL_FAILURES',
+        severity: 'SEV3',
+        source: 'ticket-svc',
+        detail: { failures: 101 },
+        atMs: NOW,
+      }),
+    ]);
+  });
+});
+
 describe('ScannerDevices [GAT-170]', () => {
   test('등록은 ACTIVE 기기와 1회용 코드를 만들고, 등록 코드로 jkt를 묶으면 기기 키 지문으로 찾힌다', async () => {
     const w = world();

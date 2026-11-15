@@ -27,10 +27,14 @@ const TICKET_A = '0190f3a1-7c2e-7a00-8000-000000000011';
 const TICKET_B = '0190f3a1-7c2e-7a00-8000-000000000012';
 const TICKET_CANCELLED = '0190f3a1-7c2e-7a00-8000-000000000013';
 const TICKET_D = '0190f3a1-7c2e-7a00-8000-000000000014';
+const TICKET_OVERRIDE = '0190f3a1-7c2e-7a00-8000-000000000015';
+const TICKET_CANCELLED_AFTER = '0190f3a1-7c2e-7a00-8000-000000000016';
 const SEAT_A = '0190f3a1-7c2e-7a00-8000-000000000021';
 const SEAT_B = '0190f3a1-7c2e-7a00-8000-000000000022';
 const SEAT_C = '0190f3a1-7c2e-7a00-8000-000000000023';
 const SEAT_D = '0190f3a1-7c2e-7a00-8000-000000000024';
+const SEAT_E = '0190f3a1-7c2e-7a00-8000-000000000025';
+const SEAT_F = '0190f3a1-7c2e-7a00-8000-000000000026';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-000000000031';
 const SESSION = '0190f3a1-7c2e-7a00-8000-000000000032';
 const ORDER = '0190f3a1-7c2e-7a00-8000-000000000041';
@@ -121,6 +125,8 @@ beforeAll(async () => {
     [TICKET_B, SEAT_B, '서문', 'ACTIVE'],
     [TICKET_CANCELLED, SEAT_C, '동문', 'REFUNDED'],
     [TICKET_D, SEAT_D, '동문', 'ACTIVE'],
+    [TICKET_OVERRIDE, SEAT_E, '동문', 'ACTIVE'],
+    [TICKET_CANCELLED_AFTER, SEAT_F, '동문', 'REFUNDED'],
   ] as const) {
     await database.pool.query(
       `insert into ticket (id, account_id, payer_account_id, order_id, event_id, seat_id, gate_zone, status, issue_generation, qr_payload, key_hash, created_at)
@@ -128,6 +134,10 @@ beforeAll(async () => {
       [id, ACCOUNT, ORDER, EVENT, seat, zone, status, `PEAKET1:${id}`, 'hash'],
     );
   }
+  await database.pool.query(
+    `insert into ticket_cancellation (cancellation_id, ticket_id, order_id, result, cancelled_at) values ($1, $2, $3, 'REFUND_NOW', $4)`,
+    [CANCEL, TICKET_CANCELLED_AFTER, ORDER, new Date(NOW + 60_000)],
+  );
   clock = fakeClock({ now: NOW });
   key = await keyOf();
   deviceStore = new DrizzleScannerDeviceStore(database);
@@ -139,6 +149,7 @@ beforeAll(async () => {
   sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
   const replay = new MemoryDpopReplayStore(clock);
   const shift = new DrizzleScannerShiftStore(database);
+  await shift.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
   svc = await createService({
     name: 'ticket-svc-gate-int',
     module: AppModule.register({ scanner: { store: deviceStore, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift } }),
@@ -169,6 +180,13 @@ describe('스캐너 게이트 PostgreSQL [GAT-180]', () => {
     const r = await database.pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_name in ('scanner_seq','scanner_change','scan_event','gate_flag','gate_flag_scan') order by table_name");
     expect(r.rows.map((x) => x.table_name)).toEqual(['gate_flag', 'gate_flag_scan', 'scan_event', 'scanner_change', 'scanner_seq']);
     await expect(database.pool.query("insert into gate_flag (id, event_id, ticket_id, kind, awareness, status, created_at) values ($1,$2,$3,'NOPE','CONCURRENT','OPEN',now())", [randomUUID(), EVENT, TICKET_A])).rejects.toThrow(/gate_flag_kind_check/);
+  });
+
+  test('0007은 scan_event.override_note와 OVERRIDE_REVIEW·TIME_UNCERTAIN 표시를 허용한다(C1-01·C1-02)', async () => {
+    const column = await database.pool.query("select data_type, character_maximum_length from information_schema.columns where table_name = 'scan_event' and column_name = 'override_note'");
+    expect(column.rows[0]).toMatchObject({ data_type: 'text', character_maximum_length: null });
+    await expect(database.pool.query("insert into gate_flag (id, event_id, ticket_id, kind, awareness, status, created_at) values ($1,$2,$3,'TIME_UNCERTAIN','CONCURRENT','OPEN',now())", [randomUUID(), EVENT, TICKET_A])).resolves.toBeTruthy();
+    await expect(database.pool.query("insert into gate_flag (id, event_id, ticket_id, kind, awareness, status, created_at) values ($1,$2,$3,'OVERRIDE_REVIEW','CONCURRENT','OPEN',now())", [randomUUID(), EVENT, TICKET_A])).resolves.toBeTruthy();
   });
 
   test('O-T38 패키지 스냅샷은 REPEATABLE READ로 고정되고, 스냅샷 뒤 변경은 changes after로 온다', async () => {
@@ -271,6 +289,21 @@ describe('스캐너 게이트 HTTP·판정 [GAT-180·GAT-190]', () => {
     expect(JSON.parse(cancelled.payload).flags).toEqual([expect.objectContaining({ kind: 'AFTER_CANCEL' })]);
     const rows = (await database.pool.query('select result, reason from scan_event where event_id = $1 and ticket_id = $2', [EVENT, TICKET_CANCELLED])).rows;
     expect(rows[0]).toMatchObject({ result: 'REJECT', reason: 'TICKET_CANCELLED' });
+  });
+
+  test('예외 통과는 메모와 OVERRIDE_REVIEW를 남기고, 취소 시각보다 이른 입장은 PASS다(C1-01·C1-04)', async () => {
+    const override = scan({ ticketId: TICKET_OVERRIDE, method: 'OVERRIDE', overrideNote: '액정 파손' });
+    const ok = await post('/v1/scanner/scans', [override]);
+    expect(ok.statusCode).toBe(200);
+    expect(JSON.parse(ok.payload).flags).toEqual([expect.objectContaining({ kind: 'OVERRIDE_REVIEW' })]);
+    expect((await database.pool.query('select result, override_note, flag from scan_event where id = $1', [override.id])).rows[0]).toMatchObject({ result: 'PASS', override_note: '액정 파손', flag: 'OVERRIDE_REVIEW' });
+
+    const before = scan({ ticketId: TICKET_CANCELLED_AFTER, scannedAtDevice: new Date(NOW + 30_000).toISOString() });
+    expect(JSON.parse((await post('/v1/scanner/scans', [before])).payload).flags).toEqual([]);
+    const after = scan({ ticketId: TICKET_CANCELLED_AFTER, scannedAtDevice: new Date(NOW + 90_000).toISOString() });
+    expect(JSON.parse((await post('/v1/scanner/scans', [after])).payload).flags).toEqual([expect.objectContaining({ kind: 'AFTER_CANCEL' })]);
+    const rows = (await database.pool.query('select result, reason from scan_event where ticket_id = $1 order by scanned_at_device', [TICKET_CANCELLED_AFTER])).rows;
+    expect(rows).toEqual([{ result: 'PASS', reason: null }, { result: 'REJECT', reason: 'TICKET_CANCELLED' }]);
   });
 
   test('이상 표시 목록·확인은 gate_lead만 되고 gate_staff는 403이다', async () => {

@@ -649,6 +649,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - 상품 정산 원천 HTTP가 from·to를 query로 보내고 가짜 core HTTP 200으로 상품 정산서 계산을 시험한다. HELD(KYC·계좌)·DISPUTED를 CONFIRMED로 되돌리는 내부 재확정 경로, POST /internal/v1/settlements/event-calculations, Lease 리더 회차 정산 스케줄러와 core settlement-due 원천을 더했다. ops 지급 승인은 25억 금액·감사 체인·결제사 요청 합계·같은 날짜 두 번째 배치 409를 시험한다.
 - 회차·상품 정산서에 SUPERSEDED 제외 부분 유일 인덱스를 두고 insertStatement가 삽입 여부를 돌려주게 했다. 충돌하면 calculateEvent는 기존 정산서를 다시 읽고 calculateProduct는 그 그룹을 건너뛴다. settlement_statement.payout_batch_id를 더해 지급 묶음 승인 시점에 정산서를 한 트랜잭션으로 결속하고, listConfirmed는 미결속 확정만, executeBatch는 그 묶음의 정산서만 지급하며 합계가 다르면 409 payout-batch-amount-mismatch로 멈춘다.
 - 상품 정산 원천 HTTP가 from·to를 query로 보내고 가짜 core HTTP 200으로 상품 정산서 계산을 시험한다. HELD(KYC·계좌)·DISPUTED를 CONFIRMED로 되돌리는 내부 재확정 경로, POST /internal/v1/settlements/event-calculations, Lease 리더 회차 정산 스케줄러와 core settlement-due 원천을 더했다. ops 지급 승인은 25억 금액·감사 체인·결제사 요청 합계·같은 날짜 두 번째 배치 409를 시험한다.
+- R-609: 스캐너 예외 통과 권한·OVERRIDE_REVIEW·override_note, §7.1 서버 재판정(구역·모드·세션 창·마감·시계 불확실·NO_EXIT), 기기 단독 세션 계정, 등록 전체 실패 SEV3 ops_alert.
 
 ## 5. [충돌] 결정 결과
 

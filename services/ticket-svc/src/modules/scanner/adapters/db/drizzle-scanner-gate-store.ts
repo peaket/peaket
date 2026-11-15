@@ -26,6 +26,7 @@ interface TicketRow {
   seat_id: string;
   gate_zone: string;
   status: ScannerTicketStatus;
+  cancelled_at?: Date | string | null;
 }
 
 interface LatestScanRow {
@@ -35,6 +36,21 @@ interface LatestScanRow {
   gate_zone: string;
   device_name?: string;
 }
+
+interface PassScanRow {
+  id: string;
+  direction: 'IN' | 'OUT';
+  scanned_at_device: Date | string;
+  clock_offset_ms: number | null;
+  device_seq: string | number;
+  known_seq: string | number;
+}
+
+/** 보정 시각(기기 시각 + 시계 오차). 순서·취소·마감 판정의 기준이다(offline-gate §7.1) */
+const correctedOf = (r: { scanned_at_device: Date | string; clock_offset_ms: number | null }): number =>
+  (r.scanned_at_device instanceof Date ? r.scanned_at_device.getTime() : Date.parse(r.scanned_at_device)) + (r.clock_offset_ms ?? 0);
+/** 마지막 보정 뒤 ±2분 [가정] 넘게 어긋나면 시각 불확실(offline-gate §7.1) */
+const CLOCK_UNCERTAIN_MS = 2 * 60_000;
 
 interface FlagRow {
   id: string;
@@ -125,7 +141,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             from scan_event se
             left join scanner_device sd on sd.id = se.scanner_device_id
             where se.event_id = ${i.eventId} and se.result = 'PASS' and se.method <> 'VERIFY'
-            order by se.ticket_id, se.scanned_at_device desc, se.device_seq desc
+            order by se.ticket_id, se.scanned_at_device + (coalesce(se.clock_offset_ms, 0) * interval '1 millisecond') desc, se.device_seq desc
           `)
         ).rows as unknown as LatestScanRow[];
         const scanByTicket = new Map(scans.map((s) => [s.ticket_id, s]));
@@ -210,7 +226,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         const page = rows.slice(0, i.limit);
         return {
           changes: page.map((r) => ({ seq: Number(r.seq), kind: r.kind, payload: r.payload })),
-          lastSeq: Number(seqRow?.lastSeq ?? 0),
+          // 페이지 끝 번호를 커서로 준다. 앱은 저장한 마지막 번호로 다음 쪽을 받는다(C1-05).
+          lastSeq: page.length > 0 ? Number(page.at(-1)!.seq) : i.after,
           hasMore: rows.length > i.limit,
           versionVector: {
             eventId: i.eventId,
@@ -234,6 +251,10 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     deviceId: string;
     staffAccountId?: string;
     sessionId?: string;
+    placement?: { gateZone: string; mode: 'IN' | 'OUT' };
+    reentryAllowed?: boolean;
+    entryClosesAtMs?: number;
+    sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
     nowMs: number;
     staleVersionIds?: readonly string[];
@@ -242,6 +263,26 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
       const acceptedIds: string[] = [];
       const flags: GateFlagView[] = [];
       const stale = new Set(i.staleVersionIds ?? []);
+      const makeFlag = async (ticket: TicketRow | undefined, ticketId: string, kind: GateFlagKind, knownSeq: number, scanId: string): Promise<void> => {
+        const flagId = randomUUID();
+        const [flagRow] = await tx
+          .insert(gateFlag)
+          .values({ id: flagId, eventId: i.eventId, ticketId, kind, awareness: knownSeq < (await this.#lastSeq(tx, i.eventId)) ? 'CONCURRENT' : 'KNOWN', status: 'OPEN', createdAt: new Date(i.nowMs) })
+          .returning();
+        if (!flagRow) return;
+        await tx.insert(gateFlagScan).values({ flagId, scanEventId: scanId });
+        await this.appendChange(tx, i.eventId, 'FLAG', { v: 1, flagId, ticketId, kind, status: 'OPEN' });
+        flags.push({
+          flagId,
+          ticketId,
+          seatLabel: ticket?.seat_id ?? '',
+          gateZone: ticket?.gate_zone ?? '',
+          kind,
+          awareness: flagRow.awareness as GateFlagAwareness,
+          status: 'OPEN',
+          createdAt: new Date(i.nowMs).toISOString(),
+        });
+      };
       for (const scan of i.scans) {
         const existing = (await tx.execute(sql`select id from scan_event where event_id = ${i.eventId} and id = ${scan.id} limit 1`)).rows as { id: string }[];
         if (existing[0]) {
@@ -250,17 +291,26 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         }
         // 같은 티켓의 두 IN이 동시에 들어와도 한 트랜잭션씩 최신 PASS를 보게 한다.
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${i.eventId} || ':' || ${scan.ticketId}, 0))`);
-        const ticket = ((await tx.execute(sql`select id, seat_id, gate_zone, status from ticket where event_id = ${i.eventId} and id = ${scan.ticketId} limit 1`)).rows as unknown as TicketRow[])[0];
-        const latest = (
+        const ticket = (
+          (await tx.execute(sql`
+            select t.id, t.seat_id, t.gate_zone, t.status,
+                   (select min(c.cancelled_at) from ticket_cancellation c where c.ticket_id = t.id) as cancelled_at
+            from ticket t where t.event_id = ${i.eventId} and t.id = ${scan.ticketId} limit 1
+          `)).rows as unknown as TicketRow[]
+        )[0];
+        const passRows = (
           await tx.execute(sql`
-            select direction, scanned_at_device, device_seq
+            select id, direction, scanned_at_device, clock_offset_ms, device_seq, known_seq
             from scan_event
             where event_id = ${i.eventId} and ticket_id = ${scan.ticketId} and result = 'PASS' and method <> 'VERIFY'
-            order by scanned_at_device desc, device_seq desc
-            limit 1
+            order by scanned_at_device + (coalesce(clock_offset_ms, 0) * interval '1 millisecond') asc, device_seq asc
           `)
-        ).rows as { direction: 'IN' | 'OUT' }[];
+        ).rows as unknown as PassScanRow[];
+        const latest = passRows.at(-1);
+        const corrected = Date.parse(scan.scannedAtDevice) + (scan.clockOffsetMs ?? 0);
+        const session = i.sessions?.[scan.scannerSessionId];
         const kinds: GateFlagKind[] = [];
+        const demoted: PassScanRow[] = [];
         let result: ScanResult = scan.result;
         let reason: string | undefined = scan.reason;
         let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
@@ -273,10 +323,13 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             else if (state === 'UNKNOWN') keyBad = 'KEY_UNKNOWN';
           }
         }
+        // 취소 접수 뒤의 입장만 취소다. 취소 시각보다 이른 기록은 정상 판정으로 넘긴다(C1-04).
+        const cancelledAt = ticket?.cancelled_at ? (ticket.cancelled_at instanceof Date ? ticket.cancelled_at.getTime() : Date.parse(ticket.cancelled_at)) : undefined;
+        const cancelledAfter = cancelledAt !== undefined && corrected < cancelledAt;
         if (!ticket) {
           result = 'REJECT';
           reason = 'UNKNOWN_TICKET';
-        } else if (ticket.status === 'CANCEL_REQUESTED' || ticket.status === 'REFUNDED' || ticket.status === 'VOIDED') {
+        } else if ((ticket.status === 'CANCEL_REQUESTED' || ticket.status === 'REFUNDED' || ticket.status === 'VOIDED') && !cancelledAfter) {
           result = 'REJECT';
           reason = 'TICKET_CANCELLED';
           if (scan.direction === 'IN') kinds.push('AFTER_CANCEL');
@@ -286,16 +339,40 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         } else if (keyBad) {
           result = 'REJECT';
           reason = keyBad;
-        } else if (scan.direction === 'IN' && latest[0]?.direction === 'IN') {
+        } else if (i.placement && (ticket.gate_zone !== i.placement.gateZone || (scan.gateZone !== undefined && scan.gateZone !== i.placement.gateZone) || i.placement.mode !== scan.direction)) {
+          // 티켓 구역·기기 배치 구역·배치 모드가 다르면 거부한다(offline-gate §6.4 8, §7.1).
           result = 'REJECT';
-          reason = 'ALREADY_IN';
-          kinds.push('DUPLICATE');
-        } else if (scan.direction === 'OUT' && latest[0]?.direction !== 'IN') {
+          reason = 'WRONG_ZONE';
+        } else if (scan.direction === 'IN' && i.reentryAllowed === true) {
+          if (latest?.direction === 'IN') {
+            result = 'CHECK';
+            reason = 'NO_EXIT_RECORD';
+            kinds.push('NO_EXIT');
+          }
+        } else if (scan.direction === 'IN') {
+          const firstIn = passRows.find((s) => s.direction === 'IN');
+          if (firstIn && (corrected > correctedOf(firstIn) || (corrected === correctedOf(firstIn) && scan.deviceSeq > Number(firstIn.device_seq)))) {
+            result = 'REJECT';
+            reason = 'ALREADY_IN';
+            kinds.push('DUPLICATE');
+          } else if (firstIn) {
+            // 늦게 올라온 더 이른 기록이 정상이 된다. 먼저 통과했던 뒤 기록은 중복으로 내린다(C1-03).
+            for (const old of passRows) if (old.direction === 'IN') demoted.push(old);
+          }
+        } else if (scan.direction === 'OUT' && latest?.direction !== 'IN') {
           result = 'CHECK';
           reason = 'NO_ENTRY_RECORD';
         }
-        if (scan.scannerSessionId !== i.sessionId) kinds.push('OUT_OF_SESSION');
+        if (session) {
+          if (session.validFromMs !== undefined && session.validUntilMs !== undefined && (corrected < session.validFromMs || corrected > session.validUntilMs)) kinds.push('OUT_OF_SESSION');
+        } else if (i.sessionId === undefined || scan.scannerSessionId !== i.sessionId) {
+          kinds.push('OUT_OF_SESSION');
+        }
+        if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
+        if (scan.clockOffsetMs !== undefined && Math.abs(scan.clockOffsetMs) > CLOCK_UNCERTAIN_MS) kinds.push('TIME_UNCERTAIN');
         if (stale.has(scan.id)) kinds.push('STALE_VERSION');
+        if (scan.method === 'OVERRIDE') kinds.push('OVERRIDE_REVIEW');
+        const staffAccountId = session?.accountId ?? i.staffAccountId;
         const inserted = await tx
           .insert(scanEvent)
           .values({
@@ -304,11 +381,12 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             ticketId: scan.ticketId,
             scannerDeviceId: i.deviceId,
             scannerSessionId: scan.scannerSessionId,
-            staffAccountId: i.staffAccountId ?? null,
+            staffAccountId: staffAccountId ?? null,
             direction: scan.direction,
             method: scan.method,
             result,
             reason: reason ?? null,
+            overrideNote: scan.overrideNote ?? null,
             gateZone: scan.gateZone ?? ticket?.gate_zone ?? '',
             keyId: scan.keyId === undefined ? null : Buffer.from(scan.keyId, 'base64url'),
             qrTs: scan.qrTimestamp === undefined ? null : new Date(scan.qrTimestamp),
@@ -326,25 +404,10 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           continue;
         }
         acceptedIds.push(scan.id);
-        for (const kind of kinds) {
-          const flagId = randomUUID();
-          const [flagRow] = await tx
-            .insert(gateFlag)
-            .values({ id: flagId, eventId: i.eventId, ticketId: scan.ticketId, kind, awareness: scan.knownSeq < (await this.#lastSeq(tx, i.eventId)) ? 'CONCURRENT' : 'KNOWN', status: 'OPEN', createdAt: new Date(i.nowMs) })
-            .returning();
-          if (!flagRow) continue;
-          await tx.insert(gateFlagScan).values({ flagId, scanEventId: scan.id });
-          await this.appendChange(tx, i.eventId, 'FLAG', { v: 1, flagId, ticketId: scan.ticketId, kind, status: 'OPEN' });
-          flags.push({
-            flagId,
-            ticketId: scan.ticketId,
-            seatLabel: ticket?.seat_id ?? '',
-            gateZone: ticket?.gate_zone ?? '',
-            kind,
-            awareness: flagRow.awareness as GateFlagAwareness,
-            status: 'OPEN',
-            createdAt: new Date(i.nowMs).toISOString(),
-          });
+        for (const kind of kinds) await makeFlag(ticket, scan.ticketId, kind, scan.knownSeq, scan.id);
+        for (const old of demoted) {
+          await tx.execute(sql`update scan_event set result = 'REJECT', reason = 'ALREADY_IN', flag = 'DUPLICATE' where event_id = ${i.eventId} and id = ${old.id}`);
+          await makeFlag(ticket, scan.ticketId, 'DUPLICATE', Number(old.known_seq), old.id);
         }
         if (result === 'PASS' && scan.method !== 'VERIFY') {
           await this.appendChange(tx, i.eventId, 'SCAN_STATE', {

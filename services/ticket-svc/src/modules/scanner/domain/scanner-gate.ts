@@ -23,7 +23,7 @@ export type ScanReason =
   | 'OVERRIDE_KEY_UNKNOWN'
   | 'OVERRIDE_BOOTH_OFFLINE'
   | 'OVERRIDE_OTHER';
-export type GateFlagKind = 'DUPLICATE' | 'NO_EXIT' | 'AFTER_CANCEL' | 'OUT_OF_SESSION' | 'AFTER_CLOSE' | 'OVERRIDE_REVIEW' | 'STALE_VERSION';
+export type GateFlagKind = 'DUPLICATE' | 'NO_EXIT' | 'AFTER_CANCEL' | 'OUT_OF_SESSION' | 'AFTER_CLOSE' | 'TIME_UNCERTAIN' | 'OVERRIDE_REVIEW' | 'STALE_VERSION';
 export type GateFlagAwareness = 'CONCURRENT' | 'KNOWN';
 export type GateFlagStatus = 'OPEN' | 'OK' | 'SUSPECT' | 'UNDETERMINED';
 

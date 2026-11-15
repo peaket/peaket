@@ -80,9 +80,17 @@ export interface ScannerGateStore {
   acceptScans(i: {
     eventId: string;
     deviceId: string;
-    /** 기기 인증만으로 올라온 기록은 없다(세션 밖 기록으로 표시한다) */
+    /** 스태프 토큰의 지금 계정. 기기 단독 업로드는 세션 조회로 기록마다 정한다(C1-11) */
     staffAccountId?: string;
     sessionId?: string;
+    /** 기기 배치(offline-gate §7.1). 없으면 구역·모드 재판정을 하지 않는다(시험 기본값) */
+    placement?: { gateZone: string; mode: 'IN' | 'OUT' };
+    /** 회차 입장 정책. 재입장 허용이면 IN 다음 IN을 NO_EXIT로 표시한다 */
+    reentryAllowed?: boolean;
+    /** 입장 기록 마감 시각(event.entry_closed_at). 이 뒤 기록은 받고 AFTER_CLOSE 표시 */
+    entryClosesAtMs?: number;
+    /** 스캔의 scannerSessionId로 찾은 세션 계정·유효 창(C1-11). 없으면 세션 ID만 대조한다 */
+    sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
     nowMs: number;
     /** 낡은 버전 벡터로 판정한 기록 ID(GAT-160). STALE_VERSION 이상 표시를 만든다 */
@@ -166,15 +174,24 @@ export interface EnrollmentAttemptLimiter {
 
 export const ENROLLMENT_ATTEMPT_LIMITER = Symbol('ticket.EnrollmentAttemptLimiter');
 
-/** O-T20 신선도 경보 한 건. ops-svc internal /internal/v1/ops-alerts의 몸통과 같다 */
-export interface ScannerFreshnessAlert {
+/** ops-svc internal /internal/v1/ops-alerts의 몸통과 같은 경보 한 건(SEV1~SEV3) */
+export interface ScannerOpsAlert {
   readonly eventKey: string;
   readonly kind: string;
-  readonly severity: 'SEV2';
+  readonly severity: 'SEV1' | 'SEV2' | 'SEV3';
   readonly source: string;
   readonly reason: string;
   readonly detail: Record<string, unknown>;
   readonly atMs: number;
+}
+
+/** O-T20 신선도 경보 한 건. 같은 경로를 쓰지만 등급은 SEV2다 */
+export interface ScannerFreshnessAlert extends ScannerOpsAlert {
+  readonly severity: 'SEV2';
+}
+
+export interface ScannerOpsAlertSink {
+  open(alert: ScannerOpsAlert): Promise<void>;
 }
 
 export interface ScannerFreshnessResolution {
@@ -185,7 +202,7 @@ export interface ScannerFreshnessResolution {
 }
 
 /** ops-svc 기존 경보 경로를 부르는 포트(어댑터가 구현한다) */
-export interface ScannerFreshnessAlertSink {
+export interface ScannerFreshnessAlertSink extends ScannerOpsAlertSink {
   open(alert: ScannerFreshnessAlert): Promise<void>;
   resolve(resolution: ScannerFreshnessResolution): Promise<void>;
 }
