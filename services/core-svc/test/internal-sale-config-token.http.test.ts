@@ -48,18 +48,18 @@ afterAll(async () => {
 });
 
 describe('A1V-09 GET /internal/v1/events/settlement-due 공유 토큰', () => {
-  test('토큰이 없거나 틀리면 403이고, 맞는 토큰이면 종료 회차를 돌려준다', async () => {
+  test('토큰이 없거나 틀리면 401이고, 맞는 토큰이면 종료 회차를 돌려준다', async () => {
     const missing = await svc.http.inject({ method: 'GET', url: '/internal/v1/events/settlement-due?through=2026-11-14' });
-    expect(missing.statusCode).toBe(403);
+    expect(missing.statusCode).toBe(401);
 
     const wrong = await svc.http.inject({ method: 'GET', url: '/internal/v1/events/settlement-due?through=2026-11-14', headers: { 'x-peaket-internal-token': 'wrong-token' } });
-    expect(wrong.statusCode).toBe(403);
+    expect(wrong.statusCode).toBe(401);
 
     const ok = await svc.http.inject({ method: 'GET', url: '/internal/v1/events/settlement-due?through=2026-11-14', headers: { 'x-peaket-internal-token': TOKEN } });
     expect(ok.statusCode).toBe(200);
     expect(JSON.parse(ok.payload)).toEqual({ items: [{ eventId: EVENT, promoterId: PROMOTER, endsAt: '2026-11-08T00:00:00.000Z' }] });
 
     const saleConfig = await svc.http.inject({ method: 'GET', url: `/internal/v1/events/${EVENT}/sale-config` });
-    expect(saleConfig.statusCode).toBe(403);
+    expect(saleConfig.statusCode).toBe(401);
   });
 });
