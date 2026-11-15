@@ -671,6 +671,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-619: terminateByAccount가 배정을 먼저 잠그고 세션을 잠가 createScannerSession(계정→배정→세션)과 잠금 순서를 맞췄다. 승인 트랜잭션은 계정 행을 잠근 뒤 상태가 ACTIVE가 아니면 StaffAccountInactive로 닫아 탈퇴·병합과 경합한 유령 세션을 만들지 않는다. 정리가 실패·크래시로 빠진 계정은 기존 withdrawal-finish 정비 일이 매일 다시 훑어 배정 REVOKED·세션 종료·Outbox를 남긴다. ScannerDeviceLookupService는 요청한 자격 종류와 기기의 credential_type이 다르면 found=false다. C2V-01(병합 정리 호출 단언)·C2V-02(0033 유일 인덱스 직접 위반) 시험은 별도 시험 작성 에이전트 몫으로 남겼다. 코드 전담 전환, 새 테스트 중단. identity 556·test-int 172, ticket test-int 44, platform problem-types·web 833, typecheck·lint·doc-check·ledger BAT-450·trace I-T21/I-T22·contracts gen:check 통과.
 - R-629(2026-11-15, 커밋 0b7575bc): SEC-07 fake 가드가 정본 prod·staging을 보지 않아 운영에서 가짜 알림·배상 송금이 시작될 수 있음 → isProductionLikeEnv(prod·staging·production)와 NotifyModule env 주입
 - R-630(2026-11-15, 커밋 0b7575bc): 웨이브 6 감사 기록(coverage·findings·wave6·영역/변이/검증 보고서) → 배치 67·구현 55 매핑, 고유 발견 높음 23·중간 61·낮음 20여, 수정 R-595..R-629, 독립 검증 보고서 보존
+- R-631: 웨이브 6 독립 감사(영역 7·관점 4·변이 5·커버리지 2, 17개 에이전트)를 마감한다. BUILD_ORDER 배치 67개 중 구현 55개를 모두 감사에 매핑했고, 높은 결함 23건을 포함해 R-595..R-629에서 수정·독립 검증했다. 회귀 시험은 수정자와 분리된 시험 작성자가 썼고, 남은 중간·낮은 위험은 findings.md·wave6.md에 남겼다. Wave 7은 계획·시험·구현·리뷰를 각각 다른 에이전트가 맡는 파이프라인으로 시작한다.
 
 ## 5. [충돌] 결정 결과
 
