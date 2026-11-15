@@ -85,6 +85,26 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
     expect(await store.read(c)).toBeUndefined();
   });
 
+  test('끝 시각이 없는 ACTIVE는 30일 TTL이고, 같은 판 재전송이 그 30일을 다시 세운다', async () => {
+    const e = randomUUID();
+    const key = bookingRestrictionKeyOf(e);
+    expect(await store.apply({ accountId: e, restrictionId: 'r9', state: 'ACTIVE', version: 1 })).toEqual({ changed: true });
+    expect(await fields(e)).toEqual(['ACTIVE', null, 'r9', '1']);
+    const first = await pttl(e);
+    expect(first).toBeGreaterThan(29 * DAY);
+    expect(first).toBeLessThan(31 * DAY);
+
+    await redis.command(['PEXPIRE', key, '1000'], { key });
+    expect(await pttl(e)).toBeLessThanOrEqual(1000);
+
+    // 같은 판 재전송은 칸을 바꾸지 않고 저장한 상태·끝 시각으로 수명만 다시 세운다(docs/data.md `q:rst`, 10분마다 다시 보내는 작업)
+    expect(await store.apply({ accountId: e, restrictionId: 'r9', state: 'LIFTED', version: 1 })).toEqual({ changed: false });
+    expect(await store.read(e)).toEqual({ st: 'ACTIVE', rid: 'r9', ver: 1 });
+    const rearmed = await pttl(e);
+    expect(rearmed).toBeGreaterThan(29 * DAY);
+    expect(rearmed).toBeLessThan(31 * DAY);
+  });
+
   test('같은 판 재전송은 칸을 바꾸지 않고 TTL만 다시 세우며, 옛 판은 TTL도 못 늘린다', async () => {
     const d = randomUUID();
     const key = bookingRestrictionKeyOf(d);
