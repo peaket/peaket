@@ -1160,6 +1160,15 @@ erDiagram
         date payout_date "회차 정산서는 회차 종료 뒤 5영업일, 상품 정산서는 계산일 뒤 4영업일"
         uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017)"
     }
+    settlement_statement_audit {
+        uuid id PK
+        uuid statement_id FK "정산서(settlement_statement.id)"
+        text from_status "바뀌기 전 상태"
+        text to_status "바뀐 뒤 상태"
+        text reason "재확정·이의 해소·자동 확정 사유"
+        text actor "행위자(자동이면 system)"
+        timestamptz created_at
+    }
     statement_source {
         uuid statement_id PK "정산서 판(settlement_statement.id). 판마다 따로 두고, 옛 판(SUPERSEDED)의 목록도 그대로 남는다"
         uuid source_id PK "GROSS는 payment.id, REFUND는 payment_cancel.id"

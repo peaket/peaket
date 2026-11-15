@@ -93,7 +93,7 @@ export class Settlements {
   }
 
   /** 회차 정산서 한 판을 계산한다. 결제 원장·KYC·계좌를 한 트랜잭션 밖에서 읽고 저장한다. */
-  async calculateEvent(input: { promoterId: string; eventId: string; pg: Pg; pgStore: PgStore; commissionRateBp?: number }): Promise<StatementView> {
+  async calculateEvent(input: { promoterId: string; eventId: string; pg: Pg; pgStore: PgStore; commissionRateBp?: number; eventEndsAt?: string }): Promise<StatementView> {
     return guard(async () => {
       const existing = await this.d.store.findEventStatement(input.promoterId, input.eventId, input.pg, input.pgStore);
       if (existing) return statementView(existing);
@@ -112,6 +112,7 @@ export class Settlements {
         kyc,
         account,
         now,
+        ...(input.eventEndsAt ? { eventEndsAt: input.eventEndsAt } : {}),
         statementId: uuidv7(this.d.clock),
       });
       const inserted = await this.d.store.insertStatement(record, sources);
@@ -172,7 +173,7 @@ export class Settlements {
           for (const pgStore of ['STANDARD', 'ESCROW'] as const) {
             const payments = await this.d.payments.listEventPayments(e.eventId, pg, pgStore);
             if (payments.length === 0) continue;
-            items.push(await this.calculateEvent({ promoterId: e.promoterId, eventId: e.eventId, pg, pgStore }));
+            items.push(await this.calculateEvent({ promoterId: e.promoterId, eventId: e.eventId, pg, pgStore, eventEndsAt: e.endsAt }));
           }
         }
       }
@@ -233,6 +234,7 @@ export class Settlements {
       if (s.status === 'NOTIFIED' && (!s.disputeDueAt || now.getTime() >= s.disputeDueAt.getTime())) {
         const next = { ...s, status: 'CONFIRMED' as const, updatedAt: now };
         await this.d.store.saveStatement(next);
+        await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: 'dispute-window-ended', actor: 'system', createdAt: now });
         return statementView(next);
       }
       return statementView(s);
@@ -240,26 +242,66 @@ export class Settlements {
   }
 
   /**
-   * HELD(KYC·계좌 보류)나 DISPUTED를 다시 CONFIRMED로 푼다(A2-05).
+   * HELD를 정본이 허용한 사유·증빙으로 다시 CONFIRMED로 푼다(A2-05, A1V-03·04).
+   * DISPUTED는 이의 결과가 모두 입력된 뒤에만 NOTIFIED로 돌리고, 새 1영업일 이의 기간을 준다.
    * PAID·SCHEDULED·SUPERSEDED는 이미 지급 흐름에 들어갔거나 끝났으므로 건드리지 않는다.
    */
-  async reconfirmStatement(statementId: string): Promise<StatementView> {
+  async reconfirmStatement(
+    statementId: string,
+    o: { actor?: string; reason?: string; evidence?: { balanceConfirmed?: boolean; saleResumed?: boolean; accountReconciled?: boolean } } = {},
+  ): Promise<StatementView> {
     return guard(async () => {
       const s = await this.d.store.findStatementById(statementId);
       if (!s) throw notFound();
       if (s.status === 'CONFIRMED') return statementView(s);
       if (s.status !== 'HELD' && s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류·이의 상태의 정산서만 다시 확정할 수 있습니다');
       const now = new Date(this.d.clock.now());
-      if (s.status === 'HELD' && s.holdReason === 'KYC') {
+      if (s.status === 'DISPUTED') {
+        const disputes = await this.d.store.listDisputes(statementId);
+        if (disputes.length === 0 || disputes.some((d) => d.result === null)) throw new SettlementProblem('settlement-dispute-open', 409, '이의 결과가 입력되지 않아 다시 확정할 수 없습니다');
+        const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt: addBusinessDays(now, 1), updatedAt: now };
+        await this.d.store.saveStatement(next);
+        await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: o.reason ?? 'dispute-resolved', actor: o.actor ?? 'system', createdAt: now });
+        return statementView(next);
+      }
+      if (s.holdReason === 'KYC') {
         const kyc = await this.d.store.findKyc(s.promoterId);
         if (!(kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified)) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 다시 확정할 수 없습니다');
-      }
-      if (s.status === 'HELD' && s.holdReason === 'ACCOUNT_CHANGE') {
+      } else if (s.holdReason === 'ACCOUNT_CHANGE') {
         const account = await this.d.store.findPayoutAccount(s.promoterId);
         if (account && account.holdUntil.getTime() > now.getTime()) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 다시 확정할 수 없습니다');
+      } else if (s.holdReason === 'ACCOUNT_MISMATCH') {
+        const account = await this.d.store.findPayoutAccount(s.promoterId);
+        const reconciled = o.evidence?.accountReconciled === true || Boolean(account && account.holderVerified && account.holdUntil.getTime() <= now.getTime());
+        if (!reconciled) throw new SettlementProblem('payout-account-mismatch', 409, '계좌 대조가 확인되지 않아 다시 확정할 수 없습니다');
+      } else if (s.holdReason === 'BALANCE') {
+        if (o.evidence?.balanceConfirmed !== true) throw new SettlementProblem('payout-balance-unconfirmed', 409, '잔액 확인 증빙이 없어 다시 확정할 수 없습니다');
+      } else if (s.holdReason === 'SALE_SUSPENDED') {
+        if (o.evidence?.saleResumed !== true) throw new SettlementProblem('settlement-sale-not-resumed', 409, '판매 재개 확인이 없어 다시 확정할 수 없습니다');
+      } else {
+        throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류 사유를 확인할 수 없어 다시 확정할 수 없습니다');
       }
       const next: StatementRecord = { ...s, status: 'CONFIRMED', holdReason: null, updatedAt: now };
       await this.d.store.saveStatement(next);
+      await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: o.reason ?? s.holdReason ?? 'reconfirm', actor: o.actor ?? 'system', createdAt: now });
+      return statementView(next);
+    });
+  }
+
+  /** 이의 결과를 입력하고 DISPUTED를 NOTIFIED로 돌린다(정본 §4.2, A1V-03). */
+  async resolveDispute(statementId: string, disputeId: string, result: 'ADJUSTED' | 'DISMISSED', actor: string): Promise<StatementView> {
+    return guard(async () => {
+      const s = await this.d.store.findStatementById(statementId);
+      if (!s) throw notFound();
+      if (s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-disputed', 409, '이의 중인 정산서가 아닙니다');
+      const dispute = (await this.d.store.listDisputes(statementId)).find((d) => d.disputeId === disputeId);
+      if (!dispute) throw notFound();
+      if (dispute.result !== null) throw new SettlementProblem('settlement-dispute-already-resolved', 409, '이미 결과가 입력된 이의입니다');
+      const now = new Date(this.d.clock.now());
+      await this.d.store.saveDispute({ ...dispute, result, resolvedAt: now });
+      const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt: addBusinessDays(now, 1), updatedAt: now };
+      await this.d.store.saveStatement(next);
+      await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: `dispute-${result.toLowerCase()}`, actor, createdAt: now });
       return statementView(next);
     });
   }
@@ -332,16 +374,21 @@ export class Settlements {
       }
       // 미수금 상계(settlement §7): 같은 파트너의 열린 미수금을 지급액에서 먼저 뺀다.
       // 지급 뒤 환불·이의·감액은 그 결제사 정산서에서, 배상금 미리 지급(COMPENSATION_ADVANCE)은 결제사와 무관하게 상계한다(M1-F2).
+      // 한 배치 안에서는 미수금 잔액을 로컬 맵으로 차감해 같은 미수금이 두 정산서에서 두 번 소진되지 않게 한다(A1V-01).
       const includedAfterOffset: StatementRecord[] = [];
+      const receivableRemaining = new Map<string, { remaining: number; status: ReceivableRecord['status'] }>();
       for (const s of included) {
         let remaining = s.payoutAmount;
         let offset = 0;
         for (const r of await this.d.store.listOpenReceivables(s.promoterId, input.pg)) {
           if (remaining <= 0) break;
-          const take = Math.min(r.remaining, remaining);
+          const tracked = receivableRemaining.get(r.receivableId);
+          const available = tracked?.remaining ?? r.remaining;
+          if (available <= 0) continue;
+          const take = Math.min(available, remaining);
           if (take <= 0) continue;
-          const nextRemaining = r.remaining - take;
-          receivableUpdates.push({ receivableId: r.receivableId, remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN', updatedAt: now });
+          const nextRemaining = available - take;
+          receivableRemaining.set(r.receivableId, { remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN' });
           receivableMoves.push({ receivableId: r.receivableId, statementId: s.statementId, amount: take, movedAt: now });
           offset += take;
           remaining -= take;
@@ -354,6 +401,7 @@ export class Settlements {
           includedAfterOffset.push(s);
         }
       }
+      for (const [receivableId, u] of receivableRemaining) receivableUpdates.push({ receivableId, remaining: u.remaining, status: u.status, updatedAt: now });
       if (includedAfterOffset.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '상계 뒤 지급할 정산서가 없습니다');
       const totalAmount = includedAfterOffset.reduce((sum, s) => sum + s.payoutAmount, 0);
       if (input.pg === 'PORTONE' && !input.portoneBalance) throw new SettlementProblem('invalid-query', 422, '포트원 지급대행 계좌 잔액이 필요합니다');

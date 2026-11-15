@@ -2,8 +2,8 @@
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
-import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, statementDispute, statementSource } from './schema.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
+import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, statementDispute, statementSource } from './schema.js';
 
 const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementRecord => ({
   statementId: r.id,
@@ -213,6 +213,18 @@ export class DrizzleSettlementStore implements SettlementStore {
       .where(eq(settlementStatement.id, record.statementId));
   }
 
+  async insertStatementAudit(record: StatementAuditRecord): Promise<void> {
+    await this.db.db.insert(settlementStatementAudit).values({
+      id: record.auditId,
+      statementId: record.statementId,
+      fromStatus: record.fromStatus,
+      toStatus: record.toStatus,
+      reason: record.reason,
+      actor: record.actor,
+      createdAt: record.createdAt,
+    });
+  }
+
   async insertDispute(record: DisputeRecord): Promise<void> {
     await this.db.db.insert(statementDispute).values({
       id: record.disputeId,
@@ -224,6 +236,13 @@ export class DrizzleSettlementStore implements SettlementStore {
       result: record.result,
       resolvedAt: record.resolvedAt,
     });
+  }
+
+  async saveDispute(record: DisputeRecord): Promise<void> {
+    await this.db.db
+      .update(statementDispute)
+      .set({ result: record.result, resolvedAt: record.resolvedAt })
+      .where(eq(statementDispute.id, record.disputeId));
   }
 
   async listDisputes(statementId: string): Promise<DisputeRecord[]> {
@@ -300,6 +319,10 @@ export class DrizzleSettlementStore implements SettlementStore {
             .where(eq(settlementStatement.id, u.statementId));
         }
         for (const u of input.receivableUpdates) {
+          const moved = input.receivableMoves.filter((m) => m.receivableId === u.receivableId).reduce((sum, m) => sum + m.amount, 0);
+          const locked = await tx.execute(sql`select remaining from partner_receivable where id = ${u.receivableId}::uuid for update`);
+          const current = Number((locked.rows[0] as { remaining: number | string } | undefined)?.remaining);
+          if (!Number.isSafeInteger(current) || current !== u.remaining + moved) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금 잔액이 다른 지급 묶음과 겹쳤습니다');
           await tx.update(partnerReceivable).set({ remaining: u.remaining, status: u.status, updatedAt: u.updatedAt }).where(eq(partnerReceivable.id, u.receivableId));
         }
         if (input.receivableMoves.length > 0) {

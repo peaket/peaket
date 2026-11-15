@@ -12,6 +12,7 @@ import type {
   ReceivableMoveRecord,
   ReceivableRecord,
   ReceivableStatus,
+  StatementAuditRecord,
   StatementKind,
   StatementRecord,
   StatementSource,
@@ -63,7 +64,9 @@ export interface SettlementStore {
   listEvent(promoterId: string, eventId: string): Promise<StatementRecord[]>;
   listProduct(promoterId: string, filter: StatementFilter): Promise<StatementPage>;
   saveStatement(record: StatementRecord): Promise<void>;
+  insertStatementAudit(record: StatementAuditRecord): Promise<void>;
   insertDispute(record: DisputeRecord): Promise<void>;
+  saveDispute(record: DisputeRecord): Promise<void>;
   listDisputes(statementId: string): Promise<DisputeRecord[]>;
   insertPayoutBatch(record: PayoutBatchRecord): Promise<void>;
   /** 배치와 정산서 결속을 한 트랜잭션으로 쓴다. 결속할 수 없는 정산서가 섞이면 롤백하고 409다. */

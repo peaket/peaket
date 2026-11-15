@@ -17,6 +17,15 @@ const BatchBody = z.object({
 });
 const ProductBody = z.object({ periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
 const EventBody = z.object({ promoterId: z.string().uuid(), eventId: z.string().uuid(), pg: PgBody, pgStore: StoreBody, commissionRateBp: z.number().int().min(0).max(10_000).optional() });
+const ReconfirmBody = z
+  .object({
+    actor: z.string().min(1).optional(),
+    reason: z.string().min(1).optional(),
+    evidence: z.object({ balanceConfirmed: z.boolean().optional(), saleResumed: z.boolean().optional(), accountReconciled: z.boolean().optional() }).strict().optional(),
+  })
+  .strict()
+  .optional();
+const DisputeResolutionBody = z.object({ result: z.enum(['ADJUSTED', 'DISMISSED']), actor: z.string().min(1) }).strict();
 const ReceivableBody = z.object({ promoterId: z.string().uuid(), pg: PgBody, cause: z.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']), amount: z.number().int().positive() });
 
 const StatementView = z
@@ -66,8 +75,18 @@ export class InternalSettlementController {
   @Post('statements/:statementId/reconfirm')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: StatementView } })
-  async reconfirm(@Param('statementId') statementId: string) {
-    return this.settlements.reconfirmStatement(statementId);
+  async reconfirm(@Param('statementId') statementId: string, @Body() body: unknown) {
+    const b = ReconfirmBody.safeParse(body);
+    if (!b.success) bad('재확정 본문이 맞지 않습니다');
+    return this.settlements.reconfirmStatement(statementId, b.data ?? {});
+  }
+
+  @Post('statements/:statementId/disputes/:disputeId/resolution')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: StatementView } })
+  async resolveDispute(@Param('statementId') statementId: string, @Param('disputeId') disputeId: string, @Body() body: unknown) {
+    const b = one(DisputeResolutionBody, body, '이의 결과 본문이 맞지 않습니다');
+    return this.settlements.resolveDispute(statementId, disputeId, b.result, b.actor);
   }
 
   @Post('confirm-due')

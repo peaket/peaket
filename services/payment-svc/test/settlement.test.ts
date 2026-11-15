@@ -327,8 +327,8 @@ describe('정산 HTTP·유스케이스', () => {
     const disputed = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(disputed.statementId))!, status: 'DISPUTED' });
     const viaHttp = await svc.http.inject({ method: 'POST', url: `/internal/v1/settlements/statements/${disputed.statementId}/reconfirm` });
-    expect(viaHttp.statusCode).toBe(200);
-    expect(JSON.parse(viaHttp.payload)).toMatchObject({ status: 'CONFIRMED' });
+    expect(viaHttp.statusCode).toBe(409);
+    expect(JSON.parse(viaHttp.payload)).toMatchObject({ type: expect.stringContaining('settlement-dispute-open') });
 
     await store.saveStatement({ ...(await store.findStatementById(disputed.statementId))!, status: 'SCHEDULED' });
     await expect(settlements.reconfirmStatement(disputed.statementId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('settlement-not-reconfirmable') });
@@ -396,7 +396,7 @@ describe('정산 HTTP·유스케이스', () => {
     expect(store2.statements.size).toBe(0);
     leader = true;
     await worker.tick();
-    expect(through).toBe('2026-11-09');
+    expect(through).toBe('2026-11-13');
     expect(store2.statements.size).toBe(1);
   });
 

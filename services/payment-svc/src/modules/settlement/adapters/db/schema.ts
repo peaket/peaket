@@ -79,6 +79,22 @@ export const statementSource = pgTable(
   ],
 );
 
+export const settlementStatementAudit = pgTable(
+  'settlement_statement_audit',
+  {
+    id: uuid('id').primaryKey(),
+    statementId: uuid('statement_id')
+      .notNull()
+      .references(() => settlementStatement.id, { onDelete: 'cascade' }),
+    fromStatus: text('from_status').notNull(),
+    toStatus: text('to_status').notNull(),
+    reason: text('reason').notNull(),
+    actor: text('actor').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('settlement_statement_audit_statement_idx').on(t.statementId, t.createdAt)],
+);
+
 export const statementDispute = pgTable(
   'statement_dispute',
   {

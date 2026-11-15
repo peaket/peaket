@@ -124,6 +124,17 @@ export interface DisputeRecord {
   resolvedAt: Date | null;
 }
 
+/** 정산서 상태 전이 감사(A1V-12). 돈이 나가는 전이의 사유·행위자·이전 상태를 남긴다. */
+export interface StatementAuditRecord {
+  auditId: string;
+  statementId: string;
+  fromStatus: StatementStatus;
+  toStatus: StatementStatus;
+  reason: string;
+  actor: string;
+  createdAt: Date;
+}
+
 export interface PayoutBatchRecord {
   batchId: string;
   pg: Pg;
@@ -263,6 +274,8 @@ export interface EventCalculationInput {
   kyc: KycRecord | undefined;
   account: PayoutAccountRecord | undefined;
   now: Date;
+  /** 회차 종료 시각. 있으면 지급일은 종료일 +5영업일이다(정본 §4.1·§5.1, A1V-02). */
+  eventEndsAt?: string;
   statementId: string;
 }
 
@@ -313,7 +326,7 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
       status,
       holdReason,
       disputeDueAt: addBusinessDays(input.now, 2),
-      payoutDate: dateOnly(addBusinessDays(input.now, 5)),
+      payoutDate: dateOnly(addBusinessDays(input.eventEndsAt ? new Date(input.eventEndsAt) : input.now, 5)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
       payoutBatchId: null,

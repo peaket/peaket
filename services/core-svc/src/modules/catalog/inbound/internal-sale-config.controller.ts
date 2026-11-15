@@ -1,8 +1,8 @@
 // 받는 층: purchase-svc가 회차 판매 설정 사본(event_sale_config)을 읽는 내부 HTTP 경로(BAT-051, HOT-252).
 // purchase-svc가 core DB에 직접 접속하지 않게 core-svc가 대신 읽는다. 클러스터 안에서만 닿는 경로이고(게이트웨이 HTTPRoute에 없다),
 // identity의 /internal/jwks와 같은 public 역할이다. 설정이 없으면 404 not-found, 응답은 항상 no-store다.
-import { Controller, Get, Inject, Param, Query, Res } from '@nestjs/common';
-import { ContractRouteSchema, Roles } from '@peaket/platform';
+import { Controller, Get, Inject, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { ContractRouteSchema, InternalTokenGuard, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { notFound } from '../application/problems.js';
@@ -41,6 +41,7 @@ const DueEventsResponse = z
   .strict();
 
 @Controller('internal/v1/events')
+@UseGuards(InternalTokenGuard)
 export class InternalSaleConfigController {
   constructor(@Inject(SALE_CONFIG_READER) private readonly configs: SaleConfigReader) {}
 

@@ -34,6 +34,7 @@ const TAG_0016 = '0016_receivables';
 const TAG_0017 = '0017_settlement_guards';
 const TAG_0018 = '0018_payment_pg_store';
 const TAG_0019 = '0019_settlement_kyc_holder_names';
+const TAG_0020 = '0020_settlement_statement_audit';
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
 const ADDED_COLUMN_0014 = 'cancelled_amount';
 const ADDED_CHECK_0014 = 'payment_cancelled_amount_check';
@@ -556,7 +557,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const thirteenth = snapshotOf('0012_snapshot.json');
   const latest13 = snapshotOf('0013_snapshot.json');
   const latest = snapshotOf('0014_snapshot.json');
-  const latestAll = snapshotOf('0019_snapshot.json');
+  const latestAll = snapshotOf('0020_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -606,7 +607,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  test('PRF182_PRF183_기록은 0000~0019 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0020 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -629,6 +630,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [17, TAG_0017],
       [18, TAG_0018],
       [19, TAG_0019],
+      [20, TAG_0020],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -653,11 +655,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[17]!.when).toBeGreaterThan(journal.entries[16]!.when);
     expect(journal.entries[18]!.when).toBeGreaterThan(journal.entries[17]!.when);
     expect(journal.entries[19]!.when).toBeGreaterThan(journal.entries[18]!.when);
+    expect(journal.entries[20]!.when).toBeGreaterThan(journal.entries[19]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {

@@ -127,6 +127,7 @@ import type {
   ProductionImage,
   PromoterFraudReport,
   PutPartnerEventEntryPolicyBody,
+  PutPartnerPayoutAccount200,
   PutPartnerProductionSeatmap422,
   PutPartnerSalePolicy422,
   SaleEligibilityListPage,
@@ -3252,7 +3253,7 @@ export const useCreatePartnerSettlementDispute = <TError = ErrorType<ProblemResp
       return useMutation(getCreatePartnerSettlementDisputeMutationOptions(options), queryClient);
     }
     export type putPartnerPayoutAccountResponse200 = {
-  data: void
+  data: PutPartnerPayoutAccount200
   status: 200
 }
 
