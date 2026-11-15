@@ -11,7 +11,6 @@ import { fileURLToPath } from 'node:url';
 import { repo, commit, git, tempDir } from './git-fixture.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'roles-check.mjs');
-const ANY = Symbol('아무 값');
 
 // 좋은 묶음의 역할별 세션(계획 §4)
 const S = { plan: 's-plan', test: 's-test', impl: 's-impl', review: 's-review', verify: 's-verify', record: 's-sup', doc: 's-doc' };
@@ -239,7 +238,8 @@ function run(head, { base: b = base, args, env = {}, cwd = dir } = {}) {
   Object.assign(e, env);
   const r = spawnSync(process.execPath, [script, ...(args ?? ['--base', b, '--head', head])], { cwd, encoding: 'utf8', env: e });
   const out = r.stdout ?? '';
-  return { code: r.status, out, all: `끝 코드 ${r.status}\n[표준 출력]\n${out}\n[표준 오류]\n${r.stderr ?? ''}` };
+  const err = r.stderr ?? '';
+  return { code: r.status, out, err, all: `끝 코드 ${r.status}\n[표준 출력]\n${out}\n[표준 오류]\n${err}` };
 }
 
 function check(seq, o = {}) {
@@ -259,13 +259,13 @@ function failures(out, prefix = '실패: ') {
     });
 }
 
-const hashOk = (hash, sha) => (sha === ANY ? true : sha === null ? hash === '-' : hash !== '-' && sha.startsWith(hash));
-const show = (batch, sha) => `${batch === ANY ? '*' : batch} ${sha === ANY ? '*' : sha === null ? '-' : sha.slice(0, 7)}`;
+const hashOk = (hash, sha) => (sha === null ? hash === '-' : hash !== '-' && sha.startsWith(hash));
+const show = (batch, sha) => `${batch} ${sha === null ? '-' : sha.slice(0, 7)}`;
 
 // 끝 코드 1과, 검사 이름·묶음·해시가 맞고 까닭에 reason 글이 모두 든 실패 줄을 본다
 function expectFail(r, label, name, batch, sha, reason = [], prefix = '실패: ') {
   assert.equal(r.code, 1, `${label}: 끝 코드가 1이 아니다\n${r.all}`);
-  const hit = failures(r.out, prefix).find((f) => !f.bad && f.check === name && (batch === ANY || f.batch === batch) && hashOk(f.hash, sha) && reason.every((x) => f.reason.includes(x)));
+  const hit = failures(r.out, prefix).find((f) => !f.bad && f.check === name && f.batch === batch && hashOk(f.hash, sha) && reason.every((x) => f.reason.includes(x)));
   assert.ok(hit, `${label}: '${prefix}[${name}] ${show(batch, sha)}' 실패 줄이 없다(까닭에 ${JSON.stringify(reason)})\n${r.all}`);
   assert.doesNotMatch(r.out, /^통과:/m, `${label}: 실패했는데 통과 줄이 있다\n${r.all}`);
 }
@@ -276,11 +276,13 @@ function expectPass(r, label, batches, commits) {
   assert.equal(lines(r.out).at(-1), `통과: 묶음 ${batches}개, 커밋 ${commits}개`, `${label}: 마지막 줄\n${r.all}`);
 }
 
+// 끝 코드 2: 표준 출력에 '<앞머리><까닭>' 한 줄만(묶음 줄·통과 줄 없음), 표준 오류는 비어 있다(계획 §1 출력 세부 셋의 셋째)
 function expectError(r, label, prefix = '오류: ') {
   assert.equal(r.code, 2, `${label}: 끝 코드가 2가 아니다\n${r.all}`);
   const ls = lines(r.out);
   assert.equal(ls.length, 1, `${label}: 표준 출력이 오류 한 줄이 아니다\n${r.all}`);
   assert.ok(ls[0].startsWith(prefix) && ls[0].length > prefix.length, `${label}: '${prefix}<까닭>' 꼴이 아니다\n${r.all}`);
+  assert.equal(r.err, '', `${label}: 표준 오류에 썼다\n${r.all}`);
 }
 
 const batchLine = (r, id) => lines(r.out).find((l) => l.startsWith(`묶음 ${id}: `));
@@ -368,10 +370,19 @@ test('RC-07 ① 같은 꼬리말이 둘이면 실패한다', () => {
     ['Role 둘(다른 값)', 'Role: test', 'BAT-901'],
     ['Agent-Session 둘(같은 값)', 'Agent-Session: s-impl', 'BAT-901'],
     ['Agent-Session 둘(다른 값)', 'Agent-Session: s-impl2', 'BAT-901'],
-    ['Batch 둘', 'Batch: BAT-901', ANY],
   ]) {
     const { r, sha } = check(retrail(codeBatch(), 'impl', (t) => [...t, extra]));
     expectFail(r, `RC-07 ${name}`, '꼬리말', batch, sha.impl);
+  }
+  // Batch가 둘이면 묶음 자리는 -이고, 그 커밋은 어느 묶음에도 들지 않는다(계획 §1 출력 세부 셋의 둘째)
+  for (const [name, extra] of [
+    ['Batch 둘(같은 값)', 'Batch: BAT-901'],
+    ['Batch 둘(다른 값)', 'Batch: BAT-903'],
+  ]) {
+    const { r, sha } = check(retrail(codeBatch(), 'impl', (t) => [...t, extra]));
+    expectFail(r, `RC-07 ${name}`, '꼬리말', '-', sha.impl);
+    assert.equal(batchLine(r, 'BAT-901'), summary('BAT-901', '코드', 7, [1, 1, 0, 1, 2, 1, 1, 0]), `RC-07 ${name}: 그 커밋을 BAT-901에 넣었다\n${r.all}`);
+    assert.equal(batchLine(r, 'BAT-903'), undefined, `RC-07 ${name}: 그 커밋으로 BAT-903 묶음을 만들었다\n${r.all}`);
   }
 });
 
@@ -406,8 +417,18 @@ test('RC-09 ① 리뷰 반영의 Fix-By', () => {
 test('RC-10 ① Batch 값 꼴', () => {
   for (const value of ['../x', 'BAT 901', '.hidden', '', 'BAT..901', '-x', '_x', 'BAT/901']) {
     const { r, sha } = check(retrail(codeBatch(), 'record', (t) => t.map((x) => (x === 'Batch: BAT-901' ? `Batch: ${value}` : x))));
-    expectFail(r, `RC-10 Batch: '${value}'`, '꼬리말', ANY, sha.record);
+    expectFail(r, `RC-10 Batch: '${value}'`, '꼬리말', '-', sha.record);
+    assert.equal(batchLine(r, 'BAT-901'), summary('BAT-901', '코드', 7, [1, 1, 1, 1, 2, 1, 0, 0]), `RC-10 Batch: '${value}': 그 커밋을 BAT-901에 넣었다\n${r.all}`);
   }
+  // 꼴이 틀린 Batch의 커밋도 커밋 하나로 보는 검사(⑤⑥⑦)는 그대로 받고, 그 실패의 묶음 자리도 -다
+  const bad = (seq, label, value) => retrail(seq, label, (t) => t.map((x) => (x === 'Batch: BAT-901' ? `Batch: ${value}` : x)));
+  const tf = 'services/a/test/z.test.ts';
+  const five = check(bad(addFiles(codeBatch(), 'impl', { [tf]: '구현이 더함\n' }), 'impl', '../x'));
+  expectFail(five.r, 'RC-10 꼴 틀린 impl 커밋의 시험 파일', '시험 파일', '-', five.sha.impl, [tf]);
+  const six = check(bad(addFiles(codeBatch(), 'record', { 'tools/x.mjs': '\n' }), 'record', '.hidden'));
+  expectFail(six.r, 'RC-10 꼴 틀린 record 커밋의 코드 경로', '코드 경로', '-', six.sha.record, ['tools/x.mjs']);
+  const seven = check(bad(set(codeBatch(), 'record', { session: S.impl }), 'record', 'BAT..901'));
+  expectFail(seven.r, 'RC-10 꼴 틀린 record 커밋의 세션', '세션', '-', seven.sha.record, [S.impl, 'impl', 'record']);
   // 경계의 맞는 값: 한 글자, 가운데의 . _ -(기록만 묶음이라 계획 파일이 없어도 된다)
   const { r } = check([spec('rec1', 'record', 'B', S.record, { 'notes/b.md': '1\n' }), spec('rec2', 'record', 'a.b_C-9', S.record, { 'notes/c.md': '2\n' })]);
   expectPass(r, 'RC-10 맞는 값 B·a.b_C-9', 2, 2);
@@ -615,16 +636,41 @@ test('RC-26 ⑥ 코드를 쓰지 않는 역할이 코드 경로를 바꾸면 실
   expectPass(r, 'RC-26 코드 경로가 아닌 곳', 1, 8);
 });
 
-test('RC-27 ⑦ 다른 역할끼리 같은 세션은 실패한다', () => {
-  for (const [name, seq, session, roles] of [
-    ['impl 세션 = test 세션(같은 묶음)', set(codeBatch(), 'impl', { session: S.test }), S.test, ['test', 'impl']],
-    ['BAT-901 impl 세션 = BAT-903 test 세션', [...set(codeBatch(), 'impl', { session: 's-t3' }), ...bat903({ sessions: { test: 's-t3' } })], 's-t3', ['test', 'impl']],
-    ['record 세션 = impl 세션', set(codeBatch(), 'record', { session: S.impl }), S.impl, ['impl', 'record']],
-    ['Fix-By: test 커밋이 impl 세션', set(codeBatch(), 'rfTest', { session: S.impl }), S.impl, ['impl', 'test']],
-  ]) {
-    const { r } = check(seq);
-    expectFail(r, `RC-27 ${name}`, '세션', ANY, ANY, [session, ...roles]);
+// 세션 실패 줄(계획 §1 출력 세부 셋의 첫째): 세션의 역할은 범위에서 처음 나온 커밋의 역할이고, 다른 역할로 처음 나온 커밋마다
+// (세션·새 역할 쌍마다) 한 줄을 그 커밋의 묶음·해시로 찍는다. 까닭에는 세션 ID, 먼저 맡은 역할, 새 역할이 이 차례로 든다
+function ordered(reason, session, first, next) {
+  if (!reason.includes(session)) return false;
+  const rest = reason.split(session).join(' ');
+  const a = rest.indexOf(first);
+  return a >= 0 && rest.indexOf(next, a + first.length) > a;
+}
+
+function expectSession(r, label, want) {
+  assert.equal(r.code, 1, `${label}: 끝 코드가 1이 아니다\n${r.all}`);
+  const got = failures(r.out).filter((f) => f.check === '세션');
+  assert.equal(got.length, want.length, `${label}: [세션] 줄이 ${want.length}개가 아니다\n${r.all}`);
+  for (const [batch, sha, session, first, next] of want) {
+    const hit = got.find((f) => f.batch === batch && hashOk(f.hash, sha) && ordered(f.reason, session, first, next));
+    assert.ok(hit, `${label}: '실패: [세션] ${show(batch, sha)}' 줄(까닭에 ${session}, ${first} 다음 ${next})이 없다\n${r.all}`);
   }
+}
+
+test('RC-27 ⑦ 다른 역할끼리 같은 세션은 실패한다', () => {
+  const one = check(set(codeBatch(), 'impl', { session: S.test }));
+  expectSession(one.r, 'RC-27 impl 세션 = test 세션(같은 묶음)', [['BAT-901', one.sha.impl, S.test, 'test', 'impl']]);
+  const two = check([...set(codeBatch(), 'impl', { session: 's-t3' }), ...bat903({ sessions: { test: 's-t3' } })]);
+  expectSession(two.r, 'RC-27 BAT-901 impl 세션 = BAT-903 test 세션', [['BAT-903', two.sha['b3.test'], 's-t3', 'impl', 'test']]);
+  const three = check(set(codeBatch(), 'record', { session: S.impl }));
+  expectSession(three.r, 'RC-27 record 세션 = impl 세션', [['BAT-901', three.sha.record, S.impl, 'impl', 'record']]);
+  const four = check(set(codeBatch(), 'rfTest', { session: S.impl }));
+  expectSession(four.r, 'RC-27 Fix-By: test 커밋이 impl 세션', [['BAT-901', four.sha.rfTest, S.impl, 'impl', 'test']]);
+  // 세션 하나가 역할 셋: 새 역할마다 처음 나온 커밋에 한 줄씩. 같은 새 역할의 두 번째 커밋(Fix-By: impl)은 줄을 더하지 않는다
+  const seq = ['impl', 'review', 'rfImpl'].reduce((q, l) => set(q, l, { session: S.test }), codeBatch());
+  const five = check(seq);
+  expectSession(five.r, 'RC-27 세션 하나가 역할 셋', [
+    ['BAT-901', five.sha.impl, S.test, 'test', 'impl'],
+    ['BAT-901', five.sha.review, S.test, 'test', 'review'],
+  ]);
 });
 
 test('RC-28 ⑧ 계획 파일이 머리 커밋에 없으면 실패한다', () => {
