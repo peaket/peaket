@@ -6,6 +6,7 @@ export { DrizzleSettlementStore } from './adapters/db/drizzle-settlement-store.j
 export { JwksReauthVerifier, UnavailableReauthVerifier } from './adapters/jwks-reauth-verifier.js';
 export { HttpProductSettlementSource, UnavailableProductSettlementSource } from './adapters/http-product-source.js';
 export { HttpDueEventSettlementSource, UnavailableDueEventSettlementSource } from './adapters/http-due-event-source.js';
+export { HttpEventCommissionRateSource } from './adapters/http-commission-rate-source.js';
 export { SettlementDueWorker, type SettlementDueLeadership, type SettlementDueLog, type SettlementDueTimer, type SettlementDueWorkerDeps } from './application/settlement-due-worker.js';
 export { DenyAllAdminAuthz, GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { SettlementModule, type SettlementModuleDeps } from './settlement.module.js';

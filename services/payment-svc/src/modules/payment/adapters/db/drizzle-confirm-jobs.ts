@@ -338,6 +338,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
           virtual_account_no = ${deposit?.accountNoSealed ?? null},
           virtual_account_bank = ${deposit?.bank ?? null},
           deposit_secret_hash = case when ${keepHash}::boolean then coalesce(${deposit?.secretHash ?? null}::bytea, deposit_secret_hash) else ${deposit?.secretHash ?? null}::bytea end,
+          cancelled_amount = case when ${finish.status} = 'CANCELED' then amount else cancelled_amount end,
           query_attempts = case when ${awaiting}::boolean then 0 else query_attempts end
       where id = ${target.paymentId}::uuid`);
     return message;

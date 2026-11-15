@@ -73,6 +73,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ? new HttpCoreEventPolicy({
           client: createExternalHttpClient({ provider: 'core-svc', baseUrl: config.coreHttpUrl, timeoutCapMs: 300, clock: systemClock }),
           clock: systemClock,
+          ...(config.internalToken ? { internalToken: config.internalToken } : {}),
         })
       : undefined;
     const opsAlertSink = config.opsHttpUrl

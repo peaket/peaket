@@ -161,6 +161,8 @@ export class PayoutApprovals {
       if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
       const nowMs = this.d.clock.now();
       const now = new Date(nowMs);
+      // 반려하면 payment-svc의 배치·정산서 결속을 풀어 같은 지급일의 새 배치를 만들 수 있게 한다(CONS-V02).
+      await this.d.payments.releaseBatch(r.batchId);
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
       if (!(await this.d.store.save(next, auditRecord('PAYOUT_APPROVAL_REJECTED', next.approvalId, { ...payoutBase(next), status: next.status, reason: next.reasonText }, nowMs))))
         throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');

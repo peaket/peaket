@@ -46,6 +46,8 @@ export function overlayOf(raw: unknown): EventSaleConfigOverlay {
 export interface CoreSaleConfigsOptions {
   client: Pick<ExternalHttpClient, 'request'>;
   clock: Clock;
+  /** core-svc 내부 공유 토큰. 없으면 local·ci처럼 헤더 없이 보낸다(InternalTokenGuard와 같은 규칙). */
+  internalToken?: string;
   /** 새 사본을 다시 읽기까지(ms, 기본 5초 [가정]) */
   ttlMs?: number;
 }
@@ -79,7 +81,13 @@ export class CoreSaleConfigs {
   async #fetch(eventId: string, now: number): Promise<EventSaleConfigOverlay | undefined> {
     let res: Response;
     try {
-      res = await this.o.client.request({ method: 'GET', path: '/internal/v1/events/{eventId}/sale-config', params: { eventId }, timeoutCapMs: 200 });
+      res = await this.o.client.request({
+        method: 'GET',
+        path: '/internal/v1/events/{eventId}/sale-config',
+        params: { eventId },
+        ...(this.o.internalToken ? { headers: { 'x-peaket-internal-token': this.o.internalToken } } : {}),
+        timeoutCapMs: 200,
+      });
     } catch (err) {
       throw new SaleConfigUnavailable('request', { cause: err });
     }

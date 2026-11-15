@@ -32,9 +32,14 @@ const TAG_0014 = '0014_payment_cancelled_amount';
 const TAG_0015 = '0015_settlement';
 const TAG_0016 = '0016_receivables';
 const TAG_0017 = '0017_settlement_guards';
+const TAG_0018 = '0018_payment_pg_store';
+const TAG_0019 = '0019_settlement_kyc_holder_names';
+const TAG_0020 = '0020_settlement_statement_audit';
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
 const ADDED_COLUMN_0014 = 'cancelled_amount';
 const ADDED_CHECK_0014 = 'payment_cancelled_amount_check';
+const ADDED_COLUMN_0018 = 'pg_store';
+const ADDED_CHECK_0018 = 'payment_pg_store_check';
 const ADDED_JOB_COLUMN_0010 = 'queued_at';
 const ADDED_COLUMN_0009 = 'entry_opens_at';
 const ADDED_COLUMN_0004 = 'pg_tx_id';
@@ -95,8 +100,8 @@ const RECON_INDEX_0008 = 'payment_recon_approved_idx';
 const HASH_INDEX_0008 = 'payment_deposit_hash_idx';
 const SHAPES_0000 = SHAPES.map((s) => ({
   ...s,
-  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_COLUMN_0014 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
-  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK && k.name !== ADDED_CHECK_0014),
+  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_COLUMN_0014 && c.name !== ADDED_COLUMN_0018 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
+  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK && k.name !== ADDED_CHECK_0014 && k.name !== ADDED_CHECK_0018),
   // 0003이 잡기 색인을 바꾼다(0000은 next_attempt_at 하나짜리다)
   indexes: s.name === 'payment_confirm_job' ? [{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }] : s.indexes.filter((i) => i.name !== QUERY_DUE_INDEX && i.name !== ADDED_OVERDUE_INDEX_0002 && i.name !== ADDED_INDEX_0005 && i.name !== RECON_INDEX_0008 && i.name !== HASH_INDEX_0008),
 }));
@@ -115,6 +120,7 @@ describe('표 정의(schema.ts)', () => {
       ['attempt_id', 'uuid', true],
       ['attempt_no', 'integer', true],
       ['pg', 'text', true],
+      ['pg_store', 'text', true],
       ['pg_payment_ref', 'text', true],
       ['pg_confirm_token', 'text', false],
       ['deposit_secret_hash', 'bytea', false],
@@ -173,9 +179,9 @@ describe('표 정의(schema.ts)', () => {
     ]);
   });
 
-  test('PRF180_기본값은 payment.created_at·payment.query_attempts·job.attempts·job.created_at뿐이다', () => {
+  test('PRF180_기본값은 payment.pg_store·cancelled_amount·created_at·query_attempts·job.attempts·job.created_at뿐이다', () => {
     const withDefault = SHAPES.flatMap((s) => s.columns.filter((c) => c.hasDefault).map((c) => `${s.name}.${c.name}`));
-    expect(withDefault).toEqual(['payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
+    expect(withDefault).toEqual(['payment.pg_store', 'payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
   });
 
   test('PRF180_기본 키는 payment.id·payment_event(payment_id, seq)·payment_confirm_job.payment_id다', () => {
@@ -270,6 +276,7 @@ describe('표 정의(schema.ts)', () => {
       NEXT_QUERY_CHECK,
       'payment_status_check',
       'payment_pg_check',
+      ADDED_CHECK_0018,
       'payment_amount_check',
       ADDED_CHECK_0014,
       'payment_attempt_no_check',
@@ -550,6 +557,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const thirteenth = snapshotOf('0012_snapshot.json');
   const latest13 = snapshotOf('0013_snapshot.json');
   const latest = snapshotOf('0014_snapshot.json');
+  const latestAll = snapshotOf('0020_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -599,7 +607,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  test('PRF182_PRF183_기록은 0000~0017 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0020 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -620,6 +628,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [15, TAG_0015],
       [16, TAG_0016],
       [17, TAG_0017],
+      [18, TAG_0018],
+      [19, TAG_0019],
+      [20, TAG_0020],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -642,11 +653,14 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[15]!.when).toBeGreaterThan(journal.entries[14]!.when);
     expect(journal.entries[16]!.when).toBeGreaterThan(journal.entries[15]!.when);
     expect(journal.entries[17]!.when).toBeGreaterThan(journal.entries[16]!.when);
+    expect(journal.entries[18]!.when).toBeGreaterThan(journal.entries[17]!.when);
+    expect(journal.entries[19]!.when).toBeGreaterThan(journal.entries[18]!.when);
+    expect(journal.entries[20]!.when).toBeGreaterThan(journal.entries[19]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -736,9 +750,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
 
   test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
     const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes];
-    expect(Object.keys(latest.tables).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
+    expect(Object.keys(latestAll.tables).filter((t) => shapes.some((s) => `public.${s.name}` === t)).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
-      const t = latest.tables[`public.${s.name}`]!;
+      const t = latestAll.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), s.name).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints), s.name).toEqual(s.checks.map((k) => k.name));
@@ -749,7 +763,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
 
   test('PRF181_마지막 스냅샷의 외래 키 이름이 schema.ts와 같다', () => {
     TABLES.forEach((table, i) => {
-      const t = latest.tables[`public.${SHAPES[i]!.name}`]!;
+      const t = latestAll.tables[`public.${SHAPES[i]!.name}`]!;
       expect(Object.keys(t.foreignKeys), SHAPES[i]!.name).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
     });
   });

@@ -51,6 +51,13 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient {
     );
   }
 
+  async releaseBatch(batchId: string): Promise<void> {
+    await this.#json<{ released: true }>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/release`, headers: headers(this.token), body: JSON.stringify({}), timeoutCapMs: 10_000 }),
+      '지급 묶음을 풀지 못했습니다',
+    );
+  }
+
   async recordPortoneExecution(batchId: string, bulkPayoutId: string) {
     return this.#json<PayoutBatchView>(
       await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/portone-execution`, headers: headers(this.token), body: JSON.stringify({ bulkPayoutId }), timeoutCapMs: 10_000 }),
@@ -86,6 +93,9 @@ export class UnavailablePayoutPaymentClient implements PayoutPaymentClient {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async executeBatch(): Promise<PayoutBatchView> {
+    throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+  }
+  async releaseBatch(): Promise<void> {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async recordPortoneExecution(): Promise<PayoutBatchView> {

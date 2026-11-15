@@ -956,7 +956,13 @@ export const PutPartnerPayoutAccountBody = zod.object({
   "holderName": zod.string()
 }).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
 
-export const PutPartnerPayoutAccountResponse = zod.unknown()
+export const PutPartnerPayoutAccountResponse = zod.object({
+  "bankCode": zod.string(),
+  "payoutAccountLast4": zod.string(),
+  "holdUntil": zod.iso.datetime({"offset":true}),
+  "version": zod.int(),
+  "holderVerified": zod.boolean().describe('예금주가 KYC 사업자 상호·대표자와 같으면 true. false면 지급 묶음이 HELD/ACCOUNT_MISMATCH로 막는다(A1-H7)')
+})
 
 /**
  * FR-052, FR-053, POL-037, 추천 적용 2026-10-19, ADR-0066. 공연 상세·결제 직전·예매 확인서에 판매자 정보로 보이는 값이고 PEAKET 판매 승인에 쓰인 값이다(전자상거래법 §20②). 소속 파트너만, 파트너 관리자·실무자 모두 읽는다

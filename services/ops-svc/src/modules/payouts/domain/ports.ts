@@ -18,6 +18,8 @@ export interface PayoutPaymentClient {
   listBatches(filter: { payoutDate?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchView[]>;
   approveBatch(batchId: string, approvalId: string): Promise<PayoutBatchView>;
   executeBatch(batchId: string): Promise<PayoutBatchView>;
+  /** 반려한 배치를 풀어 정산서를 CONFIRMED로 되돌린다(CONS-V02). */
+  releaseBatch(batchId: string): Promise<void>;
   recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView>;
   listStatements(filter: { kind?: string | undefined; status?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; payoutDate?: string | undefined; limit: number }): Promise<unknown[]>;
   listReceivables(filter: { limit: number }): Promise<unknown[]>;

@@ -48,6 +48,8 @@ export interface PaymentFact {
   cancelledAmount: number;
   status: string;
   failureCategory: string | null;
+  /** 대사가 끝나지 않았으면 그 이유. 있으면 정산서 계산에서 빼고 excludedPayments에 남긴다(A1-H8). */
+  excludedReason?: string | null;
 }
 
 export interface KycRecord {
@@ -55,6 +57,9 @@ export interface KycRecord {
   status: KycStatus;
   businessVerified: boolean;
   representativeVerified: boolean;
+  /** 사업자 상호·대표자 이름. 예금주 대조에만 쓰고 계좌번호와 함께 저장하지 않는다(A1-H7). */
+  legalName?: string | null;
+  representative?: string | null;
   verifiedAt: Date | null;
   source: string;
   updatedAt: Date;
@@ -117,6 +122,17 @@ export interface DisputeRecord {
   submittedAt: Date;
   result: 'ADJUSTED' | 'DISMISSED' | null;
   resolvedAt: Date | null;
+}
+
+/** 정산서 상태 전이 감사(A1V-12). 돈이 나가는 전이의 사유·행위자·이전 상태를 남긴다. */
+export interface StatementAuditRecord {
+  auditId: string;
+  statementId: string;
+  fromStatus: StatementStatus;
+  toStatus: StatementStatus;
+  reason: string;
+  actor: string;
+  createdAt: Date;
 }
 
 export interface PayoutBatchRecord {
@@ -258,6 +274,8 @@ export interface EventCalculationInput {
   kyc: KycRecord | undefined;
   account: PayoutAccountRecord | undefined;
   now: Date;
+  /** 회차 종료 시각. 있으면 지급일은 종료일 +5영업일이다(정본 §4.1·§5.1, A1V-02). */
+  eventEndsAt?: string;
   statementId: string;
 }
 
@@ -266,20 +284,25 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
   if (!Number.isInteger(input.commissionRateBp) || input.commissionRateBp < 0 || input.commissionRateBp > 10000) {
     throw new SettlementProblem('settlement-commission-rate-invalid', 422, '수수료율이 맞지 않습니다');
   }
-  const included = input.payments.filter((p) => p.status === 'APPROVED' || p.status === 'PARTIAL_CANCELED' || p.status === 'CANCELED');
-  const grossAmount = included.reduce((s, p) => s + p.amount, 0);
-  const refundAmount = included.reduce((s, p) => s + p.cancelledAmount, 0);
+  const candidates = input.payments.filter((p) => p.status === 'APPROVED' || p.status === 'PARTIAL_CANCELED' || p.status === 'CANCELED');
+  const excludedPayments = candidates.filter((p) => p.excludedReason).map((p) => `${p.paymentId}:${p.excludedReason}`);
+  const included = candidates.filter((p) => !p.excludedReason);
+  // CANCELED는 전액 취소라 매출 0이고 환급은 원금 전액이다. cancelled_amount가 비어 있어도 원금을 환급으로 센다(A1-H3).
+  const grossOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? 0 : p.amount);
+  const refundOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? Math.max(p.cancelledAmount, p.amount) : p.cancelledAmount);
+  const grossAmount = included.reduce((s, p) => s + grossOf(p), 0);
+  const refundAmount = included.reduce((s, p) => s + refundOf(p), 0);
   const commissionAmount = Math.floor((Math.max(0, grossAmount - refundAmount) * input.commissionRateBp) / 10_000);
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
-  const payoutAmount = grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount;
+  const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
   const kycVerified = input.kyc?.status === 'VERIFIED' && input.kyc.businessVerified && input.kyc.representativeVerified;
   const status: StatementStatus = payoutAmount <= 0 ? 'CARRIED_OVER' : kycVerified ? 'NOTIFIED' : 'HELD';
   const holdReason: HoldReason | null = status === 'HELD' ? 'KYC' : null;
   const sources: StatementSource[] = [];
   for (const p of included) {
-    sources.push({ statementId: input.statementId, sourceId: p.paymentId, kind: 'GROSS', paymentId: p.paymentId, amount: p.amount });
-    if (p.cancelledAmount > 0) sources.push({ statementId: input.statementId, sourceId: p.paymentId, kind: 'REFUND', paymentId: p.paymentId, amount: p.cancelledAmount });
+    if (grossOf(p) > 0) sources.push({ statementId: input.statementId, sourceId: p.paymentId, kind: 'GROSS', paymentId: p.paymentId, amount: grossOf(p) });
+    if (refundOf(p) > 0) sources.push({ statementId: input.statementId, sourceId: p.paymentId, kind: 'REFUND', paymentId: p.paymentId, amount: refundOf(p) });
   }
   return {
     record: {
@@ -299,11 +322,11 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
       payoutAmount,
       revision: 1,
       supersedesId: null,
-      excludedPayments: [],
+      excludedPayments,
       status,
       holdReason,
       disputeDueAt: addBusinessDays(input.now, 2),
-      payoutDate: dateOnly(addBusinessDays(input.now, 5)),
+      payoutDate: dateOnly(addBusinessDays(input.eventEndsAt ? new Date(input.eventEndsAt) : input.now, 5)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
       payoutBatchId: null,
@@ -368,7 +391,7 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
   const commissionAmount = input.items.reduce((s, i) => s + Math.floor((Math.max(0, i.grossAmount - i.refundedAmount) * i.commissionRateBp) / 10_000), 0);
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
-  const payoutAmount = grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount;
+  const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
   const kycVerified = input.kyc?.status === 'VERIFIED' && input.kyc.businessVerified && input.kyc.representativeVerified;
   const status: StatementStatus = payoutAmount <= 0 ? 'CARRIED_OVER' : kycVerified ? 'NOTIFIED' : 'HELD';
   const first = input.items[0]!;

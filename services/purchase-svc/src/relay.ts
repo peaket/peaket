@@ -64,7 +64,7 @@ const source = new FileSeatMapSource(seatMapDir);
 const coreHttpUrl = process.env.PEAKET_CORE_HTTP_URL;
 if (!coreHttpUrl && env !== 'local' && env !== 'ci' && env !== 'demo') throw new Error('PEAKET_CORE_HTTP_URL이 없다(core-svc 판매 설정 사본 읽기, 운영 필수)');
 const coreSaleConfigs = coreHttpUrl
-  ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock })
+  ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock, ...(process.env.PEAKET_INTERNAL_TOKEN ? { internalToken: process.env.PEAKET_INTERNAL_TOKEN } : {}) })
   : undefined;
 const seatMap = new LayoutSeatMap({ source, clock: systemClock, logger: log, ...(coreSaleConfigs ? { overlay: coreSaleConfigs } : {}) });
 // 운영은 MSK IAM: 작업자 전용 역할을 세션 이름 `<서비스>-outbox-relay-<환경>`으로 맡는다(PEAKET_KAFKA_AUTH=msk-iam, docs/streaming.md §2.6)

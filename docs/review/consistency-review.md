@@ -719,6 +719,8 @@
 | R-617 | COV2-03·04·06·OPSV-03·05(통보 멱등·후기 상세 계약 누락·탈퇴 후 후기 PII·포트원 수기 실행 감사 누락·회차 취소 재인증 결제 URL 결합) | trust/core takedown·review·openapi/contracts·ops payout/reauth·시험 | 멱등 트랜잭션·계약 추가·익명화·감사·검증기 분리 | 적용 |
 | R-623 | M4-01·04·08, OPS-01·03·04·07, B3-H01·H03, SEC-02, OPSV-01·02·03·04 시험 공백(수정 에이전트와 다른 세션이 계약 고정) | services/ops-svc/test 4파일 | 명령 역할·감사 체인 재계산·체크포인트 원자 포트·영업일 기한·version CAS·RUNNING 선저장·재인증·포트원 감사 | 적용 |
 | R-626 | C2-01·C2-02·CONS-07·OPS-05(탈퇴 스태프 정리, 초대 휴대폰 본인확인, 리프레시 재시도 1회, 내부 토큰 fail-closed) | identity withdrawal·check-scanner-session·staff-invitations·verification-staff-phone, platform internal-token-boot | 새 회귀 시험만 추가(생산 코드 무수정) | 적용 |
+| R-613 | A1-H2·H3·H7·H8·H10(상점 이중 계상·취소 매출·예금주 미대조·대사 미완 포함·회차 수수료율 기본값)와 CONS-V01·02(충돌 경로 미시험·배치 해제 없음) | payment settlement·payment 원장·core 공연 설정·ops 반려·시험 | pg_store 저장/필터·취소 매출 0·예금주 대조/보류·대사 제외·수수료율 503·반려 해제 | 적용 |
+| R-620 | A1V-01·02·03·04·07·08·09·12(미수금 이중 상계·스케줄러 계산일·DISPUTED/HELD 무근거 재확정·리더 첫 tick/confirmDue 결합·core due 토큰·재확정 감사) | payment settlement·core internal·시험 기대값 | 미수금 잔액 추적·FOR UPDATE·종료+5영업일 지급일·이의 결과/사유별 증빙·InternalTokenGuard·감사 0020 | 적용 |
 
 ## 4. 숫자 일치표
 

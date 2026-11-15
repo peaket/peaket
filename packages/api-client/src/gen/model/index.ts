@@ -933,6 +933,7 @@ export * from './putOpsArtistAliasesBody';
 export * from './putOpsPlaceAliasesBody';
 export * from './putOpsProductionAliasesBody';
 export * from './putPartnerEventEntryPolicyBody';
+export * from './putPartnerPayoutAccount200';
 export * from './putPartnerProductionSeatmap422';
 export * from './putPartnerSalePolicy422';
 export * from './putPartnerSalePolicy422ErrorsItem';

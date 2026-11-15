@@ -33,6 +33,8 @@ export interface EventSaleConfig {
   entryOpensAtMs?: number | null;
   /** 공연 종료 예정 시각(event.ends_at) */
   endsAtMs?: number;
+  /** 회차 중개수수료율(bp). 없으면 payment-svc가 회차 정산을 503으로 닫는다(A1-H10) */
+  commissionRateBp?: number;
   /** 입장 기록 마감 시각. 아직 마감 전이면 null */
   entryClosedAtMs?: number | null;
   /** 게시한 좌석맵 판. 자동 배정 회차는 없다 */

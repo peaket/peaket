@@ -1041,6 +1041,7 @@ erDiagram
         uuid attempt_id
         int attempt_no "같은 주문의 결제 시도 순번(1부터). 승인 명령이 싣고 온 값이고 결제 사건 attemptNo가 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
         text pg "TOSS|PORTONE|SIMULATOR(결제 시도에서 고정)"
+        text pg_store "STANDARD|ESCROW. 회차 정산서가 상점별로 결제를 나눠 센다(마이그레이션 0018, A1-H2)"
         text pg_payment_ref "토스 paymentKey 또는 포트원 paymentId"
         text pg_confirm_token "포트원 paymentToken, 결과 확정 시 삭제"
         text pg_tx_id "포트원 결제 시도 ID(txId). 승인 본문의 검증값이자 조회 답 대조값, 토스·시뮬레이터는 비움(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰)"
@@ -1159,6 +1160,15 @@ erDiagram
         date payout_date "회차 정산서는 회차 종료 뒤 5영업일, 상품 정산서는 계산일 뒤 4영업일"
         uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017)"
     }
+    settlement_statement_audit {
+        uuid id PK
+        uuid statement_id FK "정산서(settlement_statement.id)"
+        text from_status "바뀌기 전 상태"
+        text to_status "바뀐 뒤 상태"
+        text reason "재확정·이의 해소·자동 확정 사유"
+        text actor "행위자(자동이면 system)"
+        timestamptz created_at
+    }
     statement_source {
         uuid statement_id PK "정산서 판(settlement_statement.id). 판마다 따로 두고, 옛 판(SUPERSEDED)의 목록도 그대로 남는다"
         uuid source_id PK "GROSS는 payment.id, REFUND는 payment_cancel.id"
@@ -1221,6 +1231,8 @@ erDiagram
         text status "PENDING|VERIFIED|REJECTED"
         bool business_verified "사업자등록번호 확인"
         bool representative_verified "대표자 확인"
+        text legal_name "사업자 상호. 정산 계좌 예금주 대조에만 쓴다(마이그레이션 0019, A1-H7)"
+        text representative "대표자 이름. 정산 계좌 예금주 대조에만 쓴다(마이그레이션 0019, A1-H7)"
         timestamptz verified_at
         text source "MANUAL|TOSS|PORTONE"
         timestamptz updated_at

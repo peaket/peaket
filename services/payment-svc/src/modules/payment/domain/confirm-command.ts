@@ -33,6 +33,8 @@ export interface ConfirmPaymentInput {
   readonly eventId: string;
   /** PgProvider에서 PG_PROVIDER_를 뗀 이름. 지정이 없으면 'UNSPECIFIED' */
   readonly pg: string;
+  /** 결제 상점(STANDARD·ESCROW). 비면 STANDARD(A1-H2) */
+  readonly pgStore?: string;
   readonly paymentRef?: ConfirmPaymentRef;
   /** 서버 금액(원, Money.krw). 칸이 없으면 NaN */
   readonly amount: number;
@@ -51,6 +53,7 @@ export interface ConfirmPaymentCommand {
   readonly attemptNo: number;
   readonly eventId: string;
   readonly pg: PgName;
+  readonly pgStore?: 'STANDARD' | 'ESCROW';
   readonly paymentRef: ConfirmPaymentRef;
   readonly amount: number;
   readonly authenticatedAtMs: number;
@@ -227,9 +230,10 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
   const authenticatedAtMs = input.authenticatedAtMs;
   if (authenticatedAtMs === undefined || !(Number.isInteger(authenticatedAtMs) && authenticatedAtMs > 0 && authenticatedAtMs <= nowMs + AUTHENTICATED_AT_MAX_FUTURE_MS)) throw new PaymentInputError('authenticated_at');
   if (!isPgName(input.pg)) throw new PaymentInputError('pg');
+  if (input.pgStore !== undefined && input.pgStore !== 'STANDARD' && input.pgStore !== 'ESCROW') throw new PaymentInputError('pg_store');
   const { entryOpensAtMs } = input;
   checkEntryOpensAt(entryOpensAtMs);
-  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
+  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, pgStore: input.pgStore ?? 'STANDARD', paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
 }
 
 /**

@@ -53,4 +53,9 @@ export class QueueSaleConfigStore implements SaleConfigStore {
   async listEndedBefore(): Promise<DueEventConfig[]> {
     return [];
   }
+
+  async commissionRateBp(eventId: string): Promise<number | undefined> {
+    const config = await this.get(eventId);
+    return config?.commissionRateBp;
+  }
 }

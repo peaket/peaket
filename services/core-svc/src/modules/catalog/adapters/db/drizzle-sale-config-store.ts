@@ -32,6 +32,12 @@ export class DrizzleSaleConfigReader implements SaleConfigReader {
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]> {
     return dueEvents(this.database, through, limit);
   }
+
+  async commissionRateBp(eventId: string): Promise<number | undefined> {
+    const [row] = await this.database.db.select({ payload: eventSaleConfig.payload }).from(eventSaleConfig).where(eq(eventSaleConfig.eventId, eventId)).limit(1);
+    const rate = (row?.payload as EventSaleConfig | undefined)?.commissionRateBp;
+    return typeof rate === 'number' ? rate : undefined;
+  }
 }
 
 @Injectable()
@@ -58,5 +64,11 @@ export class DrizzleSaleConfigStore implements SaleConfigStore {
 
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]> {
     return dueEvents(this.database, through, limit);
+  }
+
+  async commissionRateBp(eventId: string): Promise<number | undefined> {
+    const [row] = await this.database.db.select({ payload: eventSaleConfig.payload }).from(eventSaleConfig).where(eq(eventSaleConfig.eventId, eventId)).limit(1);
+    const rate = (row?.payload as EventSaleConfig | undefined)?.commissionRateBp;
+    return typeof rate === 'number' ? rate : undefined;
   }
 }

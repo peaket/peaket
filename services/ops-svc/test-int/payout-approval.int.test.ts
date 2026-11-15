@@ -29,6 +29,7 @@ class FakePayments implements PayoutPaymentClient {
     this.batches.push(batch);
     return batch;
   }
+  async releaseBatch() { this.calls.push('release'); }
   async listBatches() {
     return this.batches;
   }

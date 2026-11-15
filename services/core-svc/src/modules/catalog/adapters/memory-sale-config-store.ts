@@ -23,4 +23,8 @@ export class MemorySaleConfigStore implements SaleConfigStore {
       .slice(0, limit)
       .map((c) => ({ eventId: c.eventId, promoterId: c.promoterId, endsAt: new Date(c.endsAtMs) }));
   }
+
+  async commissionRateBp(eventId: string): Promise<number | undefined> {
+    return this.configs.get(eventId)?.commissionRateBp;
+  }
 }

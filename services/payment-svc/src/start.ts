@@ -92,6 +92,7 @@ import {
   DrizzleSettlementStore,
   GrpcAdminAuthz,
   HttpDueEventSettlementSource,
+  HttpEventCommissionRateSource,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
   SETTLEMENT_DUE_LEASE_NAME,
@@ -224,7 +225,7 @@ let circuitsRef: PgCircuits | undefined;
         store: new DrizzleSettlementStore(batchDatabase),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
-        ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
+        ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({
@@ -332,10 +333,19 @@ let circuitsRef: PgCircuits | undefined;
   entryPauseElector.start();
   entryPauseJudge.start();
 
-  // 회차 정산 스케줄러(A2-06): Lease로 뽑힌 파드 하나가 하루 한 번, 회차 종료 5영업일이 지난 회차를 계산한다.
+  // 회차 정산 스케줄러(A2-06): Lease로 뽑힌 파드 하나가 회차 종료 다음 영업일 06시(KST)에 끝난 회차를 계산한다.
+  // 첫 실행은 리더가 된 직후 onChange가 force로 부른다(A1V-07).
   const settlementDueLeaseApi: LeaseApi = env.KUBERNETES_SERVICE_HOST ? inClusterLeaseApi(SETTLEMENT_DUE_LEASE_NAME, env) : memoryLeaseApi();
-  const settlementDueElector = new LeaseElector({ api: settlementDueLeaseApi, identity: podId, clock: systemClock });
-  const settlementDueWorker = env.PEAKET_CORE_HTTP_URL
+  let settlementDueWorker: SettlementDueWorker | undefined;
+  const settlementDueElector = new LeaseElector({
+    api: settlementDueLeaseApi,
+    identity: podId,
+    clock: systemClock,
+    onChange: (leader) => {
+      if (leader) void settlementDueWorker?.tick(true);
+    },
+  });
+  settlementDueWorker = env.PEAKET_CORE_HTTP_URL
     ? new SettlementDueWorker({
         settlements: service.app.get(Settlements),
         leader: settlementDueElector,

@@ -175,6 +175,7 @@ export class CatalogModule implements NestModule {
         controllers,
         providers: [
           ...shared,
+          { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           { provide: PARTNER_DATABASE, useValue: o.partnerDatabase },
           { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository },
           { provide: PARTNER_PRODUCTION_MEDIA, useClass: DrizzleProductionMedia },
@@ -198,6 +199,7 @@ export class CatalogModule implements NestModule {
       controllers,
       providers: [
         ...shared,
+        { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         { provide: CATALOG_REPOSITORY, useValue: repo },
         { provide: PARTNER_PRODUCTION_MEDIA, useValue: new MemoryProductionMedia(repo) },
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },

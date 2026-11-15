@@ -1,6 +1,6 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
 import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -17,6 +17,7 @@ export class MemorySettlementStore implements SettlementStore {
   readonly statements = new Map<string, StatementRecord>();
   readonly sources = new Map<string, StatementSource[]>();
   readonly disputes = new Map<string, DisputeRecord>();
+  readonly statementAudits: StatementAuditRecord[] = [];
   readonly batches = new Map<string, PayoutBatchRecord>();
   readonly payouts = new Map<string, PayoutRecord>();
   readonly kycs = new Map<string, KycRecord>();
@@ -66,7 +67,13 @@ export class MemorySettlementStore implements SettlementStore {
   async saveStatement(record: StatementRecord) {
     this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
   }
+  async insertStatementAudit(record: StatementAuditRecord) {
+    this.statementAudits.push(record);
+  }
   async insertDispute(record: DisputeRecord) {
+    this.disputes.set(record.disputeId, record);
+  }
+  async saveDispute(record: DisputeRecord) {
     this.disputes.set(record.disputeId, record);
   }
   async listDisputes(statementId: string) {
@@ -105,11 +112,21 @@ export class MemorySettlementStore implements SettlementStore {
     }
     for (const u of input.receivableUpdates) {
       const r = this.receivables.get(u.receivableId)!;
+      const moved = input.receivableMoves.filter((m) => m.receivableId === u.receivableId).reduce((sum, m) => sum + m.amount, 0);
+      if (r.remaining !== u.remaining + moved) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금 잔액이 다른 지급 묶음과 겹쳤습니다');
       this.receivables.set(u.receivableId, { ...r, remaining: u.remaining, status: u.status, updatedAt: u.updatedAt });
     }
     this.receivableMoves.push(...input.receivableMoves);
     this.batches.set(record.batchId, record);
     for (const s of bound) this.statements.set(s.statementId, { ...this.statements.get(s.statementId)!, status: 'SCHEDULED', payoutBatchId: record.batchId, updatedAt: record.updatedAt });
+  }
+  async releasePayoutBatch(batchId: string): Promise<boolean> {
+    const batch = this.batches.get(batchId);
+    if (!batch || (batch.status !== 'PENDING_APPROVAL' && batch.status !== 'APPROVED')) return false;
+    if ([...this.payouts.values()].some((p) => p.batchId === batchId)) return false;
+    for (const s of this.statements.values()) if (s.payoutBatchId === batchId) this.statements.set(s.statementId, { ...s, payoutBatchId: null, status: 'CONFIRMED' });
+    this.batches.delete(batchId);
+    return true;
   }
   async findPayoutBatch(batchId: string) {
     return this.batches.get(batchId);

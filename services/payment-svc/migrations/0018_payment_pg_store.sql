@@ -1,0 +1,2 @@
+ALTER TABLE "payment" ADD COLUMN "pg_store" text DEFAULT 'STANDARD' NOT NULL;--> statement-breakpoint
+ALTER TABLE "payment" ADD CONSTRAINT "payment_pg_store_check" CHECK ("payment"."pg_store" IN ('STANDARD', 'ESCROW'));
