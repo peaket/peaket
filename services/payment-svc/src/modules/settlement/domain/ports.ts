@@ -75,6 +75,17 @@ export interface ProductSettlementSource {
   listProductItems(from: string, to: string): Promise<ProductSettlementItem[]>;
 }
 
+export interface DueEvent {
+  promoterId: string;
+  eventId: string;
+  endsAt: string;
+}
+
+/** 회차 종료 뒤 정산할 회차 목록(core-svc event_sale_config). 스케줄러가 하루 한 번 읽는다. */
+export interface DueEventSettlementSource {
+  listDue(through: string, limit: number): Promise<DueEvent[]>;
+}
+
 export interface SettlementPaymentSource {
   /** 회차·결제사 결제 원장. 입금 오류 되돌림(FAILED·DEPOSIT_CANCELED)은 뺀다. */
   listEventPayments(eventId: string, pg: Pg): Promise<PaymentFact[]>;
@@ -112,5 +123,6 @@ export interface ReauthVerifier {
 export const SETTLEMENT_STORE = Symbol.for('peaket.settlement.store');
 export const SETTLEMENT_PAYMENT_SOURCE = Symbol.for('peaket.settlement.payment-source');
 export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-source');
+export const SETTLEMENT_EVENT_SOURCE = Symbol.for('peaket.settlement.event-source');
 export const PAYOUT_GATEWAY = Symbol.for('peaket.settlement.payout-gateway');
 export const REAUTH_VERIFIER = Symbol.for('peaket.settlement.reauth-verifier');

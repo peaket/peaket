@@ -51,7 +51,7 @@ export class AppModule {
           AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts } : { storage: 'memory' }),
+          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, audit: chain, ...o.payouts } : { storage: 'memory', deps: { audit: chain } }),
           EventCancellationsModule.register({ store: new DrizzleEventCancellationStore(o.database), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
         ],
       };
@@ -69,7 +69,7 @@ export class AppModule {
         AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-        PayoutsModule.register({ storage: 'memory', ...(o.payouts ? { deps: o.payouts } : {}) }),
+        PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),
         EventCancellationsModule.register({ store: new MemoryEventCancellationStore(), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
       ],
     };

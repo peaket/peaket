@@ -700,6 +700,7 @@
 | R-593 | BAT-465 잔여 2차(선택 배치 Q-T59 예매 제한 집행 쓰기 경로, 외부 불변 저장소·OpenTimestamps 앵커 포트/가짜 어댑터)가 정본과 어긋나지 않는다 | services/queue-svc, services/purchase-svc, services/ops-svc, docs/api/openapi.yaml, packages/contracts, packages/api-client, docs | 정본(docs/features/queue-admission.md §6·Q-T59, docs/features/payment.md §2, docs/features/transfer-refund.md §7.2 T14, docs/security/asvs/transfer-refund.md)과 대조했고, 외부 버킷·달력이 없어 S3 Object Lock·OpenTimestamps는 503 `anchor-unavailable`과 로컬 앵커 유지로 남겼다. rebase 뒤 cheap gate·Docker test-int(queue 4·purchase 35·ops 3)·변이 6/6·4관점 리뷰(높음 0·중간 1 고침·중간 4 문서화)·브라우저 SCR-030/SCR-048 보드를 통과했다 | 적용(잔여 일부, heavy gate 통과) |
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
 | R-599 | CONS 높음 2건(정산서 중복·승인 금액≠지급 금액) | payment settlement 0017·settlements.ts·drizzle store·ports·시험 | 부분 유일 인덱스와 배치-정산서 결속·합계 검증으로 고침 | 적용 |
+| R-605 | A2-01·05·06(상품 원천 쿼리 누락·HELD/DISPUTED 복구 없음·회차 정산 미배선) | payment settlement http source·settlements·controller·worker·시험 | 쿼리 전달·재확정 경로·내부 계산 경로/스케줄러 | 적용 |
 
 ## 4. 숫자 일치표
 

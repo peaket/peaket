@@ -91,8 +91,12 @@ import {
   DrizzleSettlementPaymentSource,
   DrizzleSettlementStore,
   GrpcAdminAuthz,
+  HttpDueEventSettlementSource,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
+  SETTLEMENT_DUE_LEASE_NAME,
+  SettlementDueWorker,
+  Settlements,
   UnavailableProductSettlementSource,
   UnavailableReauthVerifier,
   UnavailableTossPayoutGateway,
@@ -220,6 +224,7 @@ let circuitsRef: PgCircuits | undefined;
         store: new DrizzleSettlementStore(batchDatabase),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
+        ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({
@@ -327,13 +332,30 @@ let circuitsRef: PgCircuits | undefined;
   entryPauseElector.start();
   entryPauseJudge.start();
 
+  // 회차 정산 스케줄러(A2-06): Lease로 뽑힌 파드 하나가 하루 한 번, 회차 종료 5영업일이 지난 회차를 계산한다.
+  const settlementDueLeaseApi: LeaseApi = env.KUBERNETES_SERVICE_HOST ? inClusterLeaseApi(SETTLEMENT_DUE_LEASE_NAME, env) : memoryLeaseApi();
+  const settlementDueElector = new LeaseElector({ api: settlementDueLeaseApi, identity: podId, clock: systemClock });
+  const settlementDueWorker = env.PEAKET_CORE_HTTP_URL
+    ? new SettlementDueWorker({
+        settlements: service.app.get(Settlements),
+        leader: settlementDueElector,
+        clock: systemClock,
+        log: {
+          ticked: ({ through, calculated }) => service.logger.info({ kind: 'settlement-due-ticked', through, calculated }, '회차 정산 스케줄러가 돌았다'),
+          failed: (err) => service.logger.error({ kind: 'settlement-due-failed', code: safeErrorCode(err) }, '회차 정산 스케줄러 실패'),
+        },
+      })
+    : undefined;
+  settlementDueElector.start();
+  settlementDueWorker?.start();
+
   let closing: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
     service.readiness.register('shutting-down');
     // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 그 뒤에 표 맞추기와 관측기를 멈추고(마무리 중의 낮춤도 표에 쓴다, BUILD_ORDER PRF-203 코드 리뷰 F5),
     // 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
     return shutdownInOrder({
-      stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop())],
+      stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), settlementDueWorker?.stop().then(() => settlementDueElector.stop()) ?? Promise.resolve()],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
       closeService: () => service.close(),
       closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()],

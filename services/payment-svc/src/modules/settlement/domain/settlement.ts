@@ -232,7 +232,21 @@ export function addBusinessDays(from: Date, days: number): Date {
   return d;
 }
 
+export function subtractBusinessDays(from: Date, days: number): Date {
+  const d = new Date(from.getTime());
+  let left = days;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() - 1);
+    const wd = d.getUTCDay();
+    if (wd !== 0 && wd !== 6) left -= 1;
+  }
+  return d;
+}
+
 export const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** 회차 정산 스케줄러의 Lease 이름. 리더 파드 하나만 하루 한 번 돈다. */
+export const SETTLEMENT_DUE_LEASE_NAME = 'payment-settlement-due';
 
 export interface EventCalculationInput {
   promoterId: string;

@@ -1,4 +1,5 @@
 // 지급 승인 업무 저장·payment-svc 호출·재인증 포트.
+import type { AuditChain } from '../../audit/index.js';
 import type { PayoutApprovalRecord, PayoutBatchView } from './payout-approval.js';
 
 export interface PayoutApprovalStore {
@@ -28,3 +29,6 @@ export interface ApprovalReauthVerifier {
 export const PAYOUT_APPROVAL_STORE = Symbol.for('peaket.ops.payout-approval-store');
 export const PAYOUT_PAYMENT_CLIENT = Symbol.for('peaket.ops.payout-payment-client');
 export const APPROVAL_REAUTH_VERIFIER = Symbol.for('peaket.ops.approval-reauth-verifier');
+export const PAYOUT_AUDIT_CHAIN = Symbol.for('peaket.ops.payout-audit-chain');
+
+export type PayoutAuditChain = Pick<AuditChain, 'append'>;

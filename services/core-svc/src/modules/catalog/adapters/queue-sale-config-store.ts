@@ -2,7 +2,7 @@
 // queue-svc는 이 사본이 없으면 그 회차의 대기열을 404로 답한다. 판매 승인·정비 일이 같은 값을 다시 써도 결과가 같다.
 import type { HotRedis } from '@peaket/platform';
 import type { EventSaleConfig } from '../domain/event-sale-config.js';
-import type { SaleConfigStore } from '../domain/sale-config-ports.js';
+import type { DueEventConfig, SaleConfigStore } from '../domain/sale-config-ports.js';
 
 /** 판매 종료 + 1일(진입·입장 확정이 판매 종료 뒤에도 410을 줄 수 있게 남긴다, docs/data.md) */
 const CONFIG_KEEP_AFTER_SALE_END_MS = 24 * 60 * 60_000;
@@ -47,5 +47,10 @@ export class QueueSaleConfigStore implements SaleConfigStore {
     for (let i = 0; i + 1 < raw.length; i += 2) h.set(raw[i]!, raw[i + 1]!);
     const config = h.get('config');
     return config === undefined ? undefined : (JSON.parse(config) as EventSaleConfig);
+  }
+
+  /** 대기열 사본은 회차 정산 원천이 아니다. 정산 스케줄러는 core DB 사본을 읽는다. */
+  async listEndedBefore(): Promise<DueEventConfig[]> {
+    return [];
   }
 }

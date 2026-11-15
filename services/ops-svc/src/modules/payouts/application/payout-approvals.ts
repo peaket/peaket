@@ -1,12 +1,13 @@
 // 지급 묶음 2인 승인·실행 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
+import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutAuditChain, PayoutPaymentClient } from '../domain/ports.js';
 import { approvalDueAt, payoutApprovalView, PayoutApprovalProblem, type PayoutApprovalRecord, type PayoutApprovalView, type PayoutBatchView } from '../domain/payout-approval.js';
 
 export interface PayoutApprovalDeps {
   readonly store: PayoutApprovalStore;
   readonly payments: PayoutPaymentClient;
   readonly reauth: ApprovalReauthVerifier;
+  readonly audit?: PayoutAuditChain;
   readonly clock: Clock;
 }
 
@@ -64,6 +65,12 @@ export class PayoutApprovals {
         version: 1,
       };
       await this.d.store.insert(record);
+      await this.d.audit?.append({
+        recordType: 'PAYOUT_BATCH_REQUESTED',
+        recordId: record.approvalId,
+        payload: { batchId: batch.batchId, pg: batch.pg, pgStore: batch.pgStore, payoutDate: batch.payoutDate, amount: batch.totalAmount, statementCount: batch.statementCount, requesterId: actor.accountId },
+        nowMs: now.getTime(),
+      });
       return { batch: { ...batch, approvalId: record.approvalId }, approval: payoutApprovalView(record, actor) };
     });
   }
@@ -99,13 +106,31 @@ export class PayoutApprovals {
       await this.d.store.save(executing);
       try {
         await this.d.payments.approveBatch(r.batchId, r.approvalId);
+        await this.d.audit?.append({
+          recordType: 'PAYOUT_BATCH_APPROVED',
+          recordId: r.approvalId,
+          payload: { batchId: r.batchId, amount: r.amount, statementCount: r.statementCount, approverId: actor.accountId },
+          nowMs: now.getTime(),
+        });
         await this.d.payments.executeBatch(r.batchId);
         const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(this.d.clock.now()), updatedAt: new Date(this.d.clock.now()) };
         await this.d.store.save(done);
+        await this.d.audit?.append({
+          recordType: 'PAYOUT_BATCH_EXECUTED',
+          recordId: r.approvalId,
+          payload: { batchId: r.batchId, amount: r.amount, statementCount: r.statementCount, approverId: actor.accountId },
+          nowMs: done.executedAt!.getTime(),
+        });
         return payoutApprovalView(done, actor);
       } catch (e) {
         const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(this.d.clock.now()) };
         await this.d.store.save(failed);
+        await this.d.audit?.append({
+          recordType: 'PAYOUT_BATCH_EXECUTION_FAILED',
+          recordId: r.approvalId,
+          payload: { batchId: r.batchId, amount: r.amount, approverId: actor.accountId, failure: failed.failure },
+          nowMs: failed.updatedAt.getTime(),
+        });
         throw e;
       }
     });
@@ -122,6 +147,12 @@ export class PayoutApprovals {
       const now = new Date(this.d.clock.now());
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
       await this.d.store.save(next);
+      await this.d.audit?.append({
+        recordType: 'PAYOUT_BATCH_REJECTED',
+        recordId: r.approvalId,
+        payload: { batchId: r.batchId, amount: r.amount, approverId: actor.accountId, reason: reason.trim() },
+        nowMs: now.getTime(),
+      });
       return payoutApprovalView(next, actor);
     });
   }

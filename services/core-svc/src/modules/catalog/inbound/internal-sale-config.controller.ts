@@ -1,7 +1,7 @@
 // 받는 층: purchase-svc가 회차 판매 설정 사본(event_sale_config)을 읽는 내부 HTTP 경로(BAT-051, HOT-252).
 // purchase-svc가 core DB에 직접 접속하지 않게 core-svc가 대신 읽는다. 클러스터 안에서만 닿는 경로이고(게이트웨이 HTTPRoute에 없다),
 // identity의 /internal/jwks와 같은 public 역할이다. 설정이 없으면 404 not-found, 응답은 항상 no-store다.
-import { Controller, Get, Inject, Param, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, Res } from '@nestjs/common';
 import { ContractRouteSchema, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -36,9 +36,25 @@ const SaleConfigResponse = z
   })
   .strict();
 
+const DueEventsResponse = z
+  .object({ items: z.array(z.object({ eventId: z.string(), promoterId: z.string(), endsAt: z.string() })) })
+  .strict();
+
 @Controller('internal/v1/events')
 export class InternalSaleConfigController {
   constructor(@Inject(SALE_CONFIG_READER) private readonly configs: SaleConfigReader) {}
+
+  @Get('settlement-due')
+  @ContractRouteSchema({ responses: { 200: DueEventsResponse } })
+  @Roles(['public'])
+  async due(@Query() q: Record<string, string | undefined>, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ items: { eventId: string; promoterId: string; endsAt: string }[] }> {
+    void reply.header('cache-control', 'no-store');
+    const through = q.through && /^\d{4}-\d{2}-\d{2}$/.test(q.through) ? new Date(`${q.through}T23:59:59.999Z`) : undefined;
+    if (!through || Number.isNaN(through.getTime())) throw notFound();
+    const limit = Math.min(Math.max(Number(q.limit ?? 100), 1), 500);
+    const rows = await this.configs.listEndedBefore(through, limit);
+    return { items: rows.map((r) => ({ eventId: r.eventId, promoterId: r.promoterId, endsAt: r.endsAt.toISOString() })) };
+  }
 
   @Get(':eventId/sale-config')
   @ContractRouteSchema({ responses: { 200: SaleConfigResponse } })

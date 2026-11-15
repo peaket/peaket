@@ -5,11 +5,19 @@ import type { EventSaleConfig, EventSaleConfigFacts } from './event-sale-config.
 /** 관제 판매 승인·설정 사본 쓰기의 DB 연결(core_ops). 팬 경로 DATABASE(core_app)와 나눈다 */
 export const OPS_DATABASE = Symbol('OPS_DATABASE');
 
+export interface DueEventConfig {
+  eventId: string;
+  promoterId: string;
+  endsAt: Date;
+}
+
 export interface SaleConfigStore {
   /** 회차 설정과 진행 중 회차 목록을 함께 쓴다. 같은 값을 다시 써도 결과가 같다 */
   put(configs: readonly EventSaleConfig[], admission: readonly { eventId: string; startsAtMs: number }[]): Promise<void>;
   /** 시험·읽기용. 없으면 undefined */
   get(eventId: string): Promise<EventSaleConfig | undefined>;
+  /** endsAt이 through 이하인 회차(회차 정산 스케줄러 원천). */
+  listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
 }
 
 export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
@@ -17,6 +25,8 @@ export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
 /** 읽기 전용 사본 읽기(core_app). 내부 HTTP 경로가 쓰는 최소 권한 포트다 */
 export interface SaleConfigReader {
   get(eventId: string): Promise<EventSaleConfig | undefined>;
+  /** endsAt이 through 이하인 회차(회차 정산 스케줄러 원천). */
+  listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
 }
 
 export const SALE_CONFIG_READER = Symbol('SALE_CONFIG_READER');
