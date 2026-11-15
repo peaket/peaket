@@ -14,6 +14,7 @@ import {
   RedisSeatStore,
   RedisSweepLeases,
   RELEASE_FAILED_LUA,
+  RESTORE_PRIORITY_LUA,
   seatKeys,
   slotOf,
 } from '../src/modules/inventory/index.js';
@@ -196,6 +197,32 @@ describe('묶기·실패 해제 Lua의 모양(pin-lua.ts 계약, ADR-0086)', () 
     ]);
     expect(r.args).toEqual([ACCOUNT_A, i.holdId, String(keepUntilMs), seatKeys.section(e, ''), ...seatArgs]);
     expect(new Set([...p.keys, ...r.keys].map(slotOf)).size).toBe(1);
+  });
+
+  test('pin_restorePriority_ 결제 실패 복귀는 PRIORITY 보류의 주문 표시만 지우고 좌석은 남긴다', async () => {
+    const rec = recording(redis);
+    const store = new RedisSeatStore(rec.redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    const seat = ref('A01');
+    const grantId = randomUUID();
+    const accountId = ACCOUNT_A;
+    const expiresAtMs = Date.now() + DAY;
+    expect(await store.holdPriority({ eventId: e, accountId, grantId, seat, expiresAtMs, keepUntilMs })).toMatchObject({ kind: 'OK' });
+    expect(await store.pin({ eventId: e, accountId, purchaseSessionId: 'ps-restore-1', holdId: grantId, seats: [seat], limit: 4, orderGen: 1, keepUntilMs })).toMatchObject({ kind: 'OK' });
+    rec.calls.splice(0);
+    expect(await store.restorePriority({ eventId: e, accountId, grantId, seats: [seat], keepUntilMs })).toEqual({ kind: 'OK', restored: 1 });
+    expect(rec.calls).toHaveLength(1);
+    const c = rec.calls[0]!;
+    expect(c.script.source).toBe(RESTORE_PRIORITY_LUA);
+    expect(c.keys).toEqual([seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), seatKeys.hold(e, seat.index)]);
+    expect(c.args).toEqual([accountId, grantId, String(keepUntilMs), String(seat.index)]);
+    const h = hash(await redis.command(['HGETALL', seatKeys.hold(e, seat.index)], { key: seatKeys.hold(e, seat.index) }));
+    expect(h).toMatchObject({ holdId: grantId, owner: accountId, kind: 'PRIORITY', priorityGrantId: grantId });
+    expect(h.pin).toBeUndefined();
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(e), String(seat.index)], { key: seatKeys.bitmap(e) }))).toBe(1);
+    expect(Number(await redis.command(['ZSCORE', seatKeys.prio(e), String(seat.index)], { key: seatKeys.prio(e) }))).toBe(expiresAtMs);
   });
 });
 

@@ -82,6 +82,20 @@ describe('우선 구매 보류 Lua [GAT-135, S-T37 ①]', () => {
     expect(await store.releasePriority({ eventId, accountId, grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'NOT_FOUND' });
   });
 
+  test('S-T37 ⑦_다른_계정이나_다른_권리_ID로는_PRIORITY_보류를_풀지_못한다', async () => {
+    const eventId = randomUUID();
+    const accountId = randomUUID();
+    const grantId = randomUUID();
+    const seat = { seatId: randomUUID(), index: 8, sectionId: 'SEC-A', sectionIndex: 0, seatOffset: 8, tierId: 'R' };
+    await store.openSale({ eventId, seatCount: 10, keepUntilMs: NOW + 10 * DAY });
+    expect(await store.holdPriority({ eventId, accountId, grantId, seat, expiresAtMs: NOW + DAY, keepUntilMs: NOW + 2 * DAY })).toMatchObject({ kind: 'OK' });
+    expect(await store.releasePriority({ eventId, accountId: randomUUID(), grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'NOT_FOUND' });
+    expect(await store.releasePriority({ eventId, accountId, grantId: randomUUID(), seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'NOT_FOUND' });
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(eventId), String(seat.index)], { key: seatKeys.bitmap(eventId) }))).toBe(1);
+    expect(hash(await redis.command(['HGETALL', seatKeys.hold(eventId, seat.index)], { key: seatKeys.hold(eventId, seat.index) }))).toMatchObject({ holdId: grantId, owner: accountId, kind: 'PRIORITY', priorityGrantId: grantId });
+    expect(await store.releasePriority({ eventId, accountId, grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'OK' });
+  });
+
   test('S-T37 ⑦_prio_만료_회수는_지난_보류만_풀고_EXPIRED를_남긴다', async () => {
     const eventId = randomUUID();
     const accountId = randomUUID();

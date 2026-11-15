@@ -257,7 +257,7 @@ async function world(o: { eventStartsAtMs?: number; entryOpensAtMs?: number; tic
   return { eventId, orderId, accountId, seatId, ticketId, paymentId, eventStartsAtMs, saleEndsAtMs, ...(o.entryOpensAtMs !== undefined ? { entryOpensAtMs: o.entryOpensAtMs } : {}) };
 }
 
-const cancelOf = (w: World, cancellationId: string, reason: 'USER' | 'FRAUD' = 'USER', nowMs = NOW) =>
+const cancelOf = (w: World, cancellationId: string, reason: 'USER' | 'FRAUD' | 'EVENT_POSTPONED' = 'USER', nowMs = NOW) =>
   saga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason, nowMs, deadlineMs: 5_000 });
 
 const cancellationRow = async (cancellationId: string) =>
@@ -407,6 +407,18 @@ describe('견적·취소 Saga', () => {
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', reason: 'FRAUD', deduction_bp: 0, deduction_amount: 0, refund_amount: PRICE });
     // 남은 금액 전액이면 결제사 어댑터가 'ALL'로 보낸다
     expect(gatewayCalls[0]).toMatchObject({ amount: 'ALL', reason: 'FRAUD' });
+    expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'CANCELED', cancelled_amount: PRICE });
+  });
+
+  test('GAT080_연기_EVENT_POSTPONED는_입장_시작_뒤에도_공제0원으로_전액환급한다', async () => {
+    const w = await world({ eventStartsAtMs: NOW + 2 * HOUR, entryOpensAtMs: NOW - HOUR });
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId, 'EVENT_POSTPONED')).resolves.toEqual({ status: 'ACCEPTED', cancellationId, refundAmount: PRICE, refundAfterEntryClose: false });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', reason: 'EVENT_POSTPONED', deduction_bp: 0, deduction_amount: 0, refund_amount: PRICE });
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).toMatchObject({ amount: 'ALL', reason: 'EVENT_POSTPONED' });
     expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'CANCELED', cancelled_amount: PRICE });
   });
 

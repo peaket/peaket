@@ -157,4 +157,62 @@ describe('GrantPriorityPurchase', () => {
     await f.grants.markUsed(r.grant!.grantId, '01900000-0000-7000-8000-0000000000aa', NOW + 1);
     await expect(f.withdraw.run(r.grant!.grantId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('priority-grant-already-used') });
   });
+
+  test('S-T37_입장_시작이_권리_TTL보다_이르면_만료를_입장_시작으로_당긴다', async () => {
+    const entryStartsAtMs = NOW + DAY;
+    const f = fixture({ entryStartsAtMs });
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    expect(r.result).toBe('SAME_SEAT');
+    expect(r.grant).toMatchObject({ status: 'OFFERED', expiresAtMs: entryStartsAtMs });
+    const ev = f.store.db.event(EVENT);
+    expect(ev.prio.get(0)).toBe(entryStartsAtMs);
+    // 보류 Hash의 만료도 입장 시작으로 당긴다
+    expect(ev.holds.get(0)?.exp).toBe(entryStartsAtMs);
+  });
+
+  test('S-T37_만료_시각과_지금이_같으면_만료_반복이_권리를_풀고_EXPIRED로_끝낸다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const grantId = '01900000-0000-7000-8000-000000000077';
+    expect(await f.store.holdPriority({ eventId: EVENT, accountId: ACCOUNT, grantId, seat: SEATS[0], expiresAtMs: NOW + 1, keepUntilMs: NOW + 10 * DAY })).toMatchObject({ kind: 'OK' });
+    f.clock.advance(1);
+    const due = await f.store.duePriorityExpiries({ eventId: EVENT, nowMs: f.clock.now(), limit: 100 });
+    expect(due).toMatchObject([{ index: 0, expiresAtMs: NOW + 1, hold: { grantId, owner: ACCOUNT } }]);
+    const out = await f.store.expirePriority({ eventId: EVENT, keepUntilMs: NOW + 10 * DAY, seats: due.map((d) => ({ index: d.index, expected: d.hold, seat: SEATS[0] })) });
+    expect(out).toMatchObject({ kind: 'OK', released: 1, expired: [{ index: 0, grantId }] });
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(false);
+  });
+
+  test('GAT135_다른_계정이나_다른_권리로는_PRIORITY_보류를_풀지_못한다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    const otherAccount = '01900000-0000-7000-8000-000000000088';
+    expect(await f.store.releasePriority({ eventId: EVENT, accountId: otherAccount, grantId, seat: SEATS[0], keepUntilMs: NOW + 10 * DAY })).toEqual({ kind: 'NOT_FOUND' });
+    expect(await f.store.releasePriority({ eventId: EVENT, accountId: ACCOUNT, grantId: '01900000-0000-7000-8000-000000000099', seat: SEATS[0], keepUntilMs: NOW + 10 * DAY })).toEqual({ kind: 'NOT_FOUND' });
+    const ev = f.store.db.event(EVENT);
+    expect(ev.bits.has(0)).toBe(true);
+    expect(ev.holds.get(0)?.holdId).toBe(grantId);
+    expect(await f.store.releasePriority({ eventId: EVENT, accountId: ACCOUNT, grantId, seat: SEATS[0], keepUntilMs: NOW + 10 * DAY })).toEqual({ kind: 'OK' });
+    expect(ev.bits.has(0)).toBe(false);
+  });
+
+  test('GAT135_결제_실패_복귀는_PRIORITY_보류의_주문_표시만_지우고_좌석은_남긴다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    const keepUntilMs = NOW + 10 * DAY;
+    expect(await f.store.pin({ eventId: EVENT, accountId: ACCOUNT, purchaseSessionId: 'ps-priority-1', holdId: grantId, seats: [SEATS[0]], limit: 4, orderGen: 1, keepUntilMs })).toMatchObject({ kind: 'OK' });
+    const pinned = f.store.db.event(EVENT).holds.get(0)!;
+    expect(pinned.pin).toBe('1');
+    expect(await f.store.restorePriority({ eventId: EVENT, accountId: ACCOUNT, grantId, seats: [SEATS[0]], keepUntilMs })).toEqual({ kind: 'OK', restored: 1 });
+    const restored = f.store.db.event(EVENT).holds.get(0)!;
+    expect(restored).toMatchObject({ holdId: grantId, owner: ACCOUNT, kind: 'PRIORITY', priorityGrantId: grantId });
+    expect(restored.pin).toBeUndefined();
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(true);
+    expect(f.store.db.event(EVENT).prio.has(0)).toBe(true);
+  });
 });

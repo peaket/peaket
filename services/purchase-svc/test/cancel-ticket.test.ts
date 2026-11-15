@@ -237,4 +237,22 @@ describe('취소 Saga', () => {
     const { svc } = saga({ replay: { status: 'CONFLICT' } });
     expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 })).toEqual({ status: 'CONFLICT' });
   });
+
+  test('GAT090_티켓이_REFUND_AFTER_CLOSE여도_견적이_입장_전이면_장_마감까지_미룬다', async () => {
+    const { svc, payments, writes } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: true });
+    expect(payments.calls).toHaveLength(0);
+    expect(writes.created[0]).toMatchObject({ status: 'REQUESTED', deductionBp: 1000, refundAmount: 30_000, refundDueAtMs: EVENT + 50 * 60 * 60_000 });
+    expect(writes.updates).toHaveLength(0);
+  });
+
+  test('POL-032_연기(EVENT_POSTPONED)는_입장_시작_뒤에도_공제_없이_바로_환급한다', async () => {
+    const { svc, payments, writes } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'EVENT_POSTPONED', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: 2000 });
+    expect(r).toMatchObject({ status: 'ACCEPTED', refundAmount: 33_333, refundAfterEntryClose: false });
+    expect(payments.calls[0]).toMatchObject({ amount: 33_333, reason: 'EVENT_POSTPONED' });
+    expect(writes.created[0]).toMatchObject({ status: 'REFUND_PENDING', deductionBp: 0, deductionAmount: 0, refundAmount: 33_333 });
+    expect(writes.updates).toEqual([{ cancellationId: CANCEL, status: 'REFUNDED', nowMs: kst('2026-11-20T18:30:00') }]);
+  });
 });
