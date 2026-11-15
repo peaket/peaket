@@ -25,7 +25,7 @@ import {
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
 import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/support';
 import { CreateEventHoldResponse, GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
-import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
+import { GetFanSaleEligibilityResponse, GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { CreatePartnerProductionImageResponse, UpdatePartnerProductionImageResponse } from '@peaket/contracts/openapi/partner';
 import { productionImage } from './mock-api/partner.mjs';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
@@ -834,6 +834,75 @@ test('HOT-190 가짜 API PATCH는 바뀐 것이 없으면 판을 올리지 않�
     const missing = '0190f3a1-7c2e-7a00-8000-000000000777';
     assert.equal((await patch(missing, { alt: 'x' })).status, 428);
     assert.equal((await patch(missing, { alt: 'x' }, '"1"')).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('가짜 API의 판매 단계(detailSale)·팬별 판매 자격(eligibility)이 계약 Zod를 지나고, 비로그인은 401, down은 503이다', async () => {
+  // HOT-346 화면 확인용 상태(ADR-0272 결정 3, docs/review/plans/BAT-040.md §4·§8). 회차 시각은 고정 자료 값으로 본다
+  const { eventId } = homeFeed(ORIGIN, 'normal', NOW).upcoming[0];
+  const fixed = eventDetail(ORIGIN, eventId, NOW);
+  const openAt = Date.parse(fixed.openAt);
+  const saleEndsAt = Date.parse(fixed.saleEndsAt);
+  const HOUR = 60 * 60_000;
+  let clock = openAt - HOUR;
+  const server = await startMockApi({ port: 0, now: () => clock });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const state = (q) => fetch(`${base}/__mock/state?${q}`);
+    const detail = async () => {
+      const r = await fetch(`${base}/v1/events/${eventId}`);
+      assert.equal(r.status, 200);
+      const body = await r.json();
+      assert.deepEqual(GetEventResponse.parse(body), body, '공연 상세에 계약 밖 칸이 없다');
+      return body;
+    };
+    const eligibility = async (id = eventId) => {
+      const r = await fetch(`${base}/v1/events/${id}/sale-eligibility`);
+      return { status: r.status, cache: r.headers.get('cache-control'), body: r.status === 200 ? await r.json() : null };
+    };
+    const ms = (p) => [p.kind, Date.parse(p.startsAt), Date.parse(p.endsAt)];
+    // 없음: PRESALE 조각이 없다
+    await state('detailSale=none');
+    assert.ok(!((await detail()).salePhases ?? []).some((p) => p.kind === 'PRESALE'));
+    // 오픈부터 1시간 PRESALE 뒤 GENERAL(판매 종료까지)
+    await state('detailSale=presale-before&eligibility=eligible');
+    const before = await detail();
+    assert.ok(Array.isArray(before.salePhases), '공연 상세에 salePhases가 있다');
+    assert.deepEqual(before.salePhases.map(ms), [
+      ['PRESALE', openAt, openAt + HOUR],
+      ['GENERAL', openAt + HOUR, saleEndsAt],
+    ]);
+    let e = await eligibility();
+    assert.equal(e.status, 200);
+    assert.ok(e.cache?.includes('no-store'), 'Cache-Control: no-store');
+    assert.deepEqual(GetFanSaleEligibilityResponse.parse(e.body), e.body, '판매 자격에 계약 밖 칸이 없다');
+    assert.equal(e.body.eventId, eventId);
+    assert.deepEqual(e.body.phases.map(ms), before.salePhases.map(ms), '공개 요약과 같은 차례·시각');
+    assert.deepEqual(e.body.phases.map((p) => p.eligible), [true, true]);
+    assert.ok(e.body.lists.length >= 1, '대상이면 든 명단이 있다');
+    // 대상 아님: PRESALE만 eligible false
+    await state('eligibility=ineligible');
+    e = await eligibility();
+    assert.deepEqual(GetFanSaleEligibilityResponse.parse(e.body), e.body);
+    assert.deepEqual(e.body.phases.map((p) => [p.kind, p.eligible]), [['PRESALE', false], ['GENERAL', true]]);
+    // 지금이 든 PRESALE 뒤 GENERAL
+    clock = openAt + 10 * 60_000;
+    await state('detailSale=presale-now');
+    const now = await detail();
+    assert.ok(Array.isArray(now.salePhases), '공연 상세에 salePhases가 있다');
+    const [p0, p1] = now.salePhases.map(ms);
+    assert.equal(p0[0], 'PRESALE');
+    assert.ok(p0[1] <= clock && clock < p0[2], '지금이 PRESALE 조각 안');
+    assert.deepEqual(p1, ['GENERAL', p0[2], saleEndsAt]);
+    // 장애·비로그인·없는 회차
+    assert.equal((await eligibility('0b8f1f2e-4a1d-4c1e-9b5a-000000000000')).status, 404, '없는 회차');
+    await state('eligibility=down');
+    assert.equal((await eligibility()).status, 503);
+    await state('eligibility=eligible&fan=guest');
+    assert.equal((await eligibility()).status, 401);
   } finally {
     server.close();
   }

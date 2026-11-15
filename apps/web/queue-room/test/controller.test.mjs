@@ -366,3 +366,19 @@ test('SCR-008 진입 403 preverify-invalid면 사전 검증 토큰을 지우고 
   assert.equal(rec?.preverifyToken, undefined);
   assert.equal(rec?.preverifyExpiresAt, undefined);
 });
+
+test('[Q-T36 ⑧] SCR-008 진입 403 sale-eligibility-required는 진입 저장 값을 지우고 공연 상세 주소 + #sale-eligibility-required로 간다(preverify-invalid·identity-verification-required 403은 조각 없이)', async () => {
+  const h = harness({ rec: { preverifyToken: 'pv' }, handler: ({ m }) => (m === 'POST' ? reply(403, {}, { problem: 'sale-eligibility-required' }) : reply(500)) });
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required']);
+  assert.equal(h.store.read()?.entry, undefined, '진입 저장 값을 지운다(번호를 받지 않았다)');
+  assert.equal(h.store.read()?.ticket, undefined);
+  assert.equal(h.calls.filter((c) => c.m === 'POST').length, 1, '다시 보내지 않는다');
+  // 조각 없이 공연 상세: 사전 검증 토큰 틀림·본인확인 전, 목록 밖 403(대소문자·뒤 글자)
+  for (const problem of ['preverify-invalid', 'identity-verification-required', 'Sale-Eligibility-Required', 'sale-eligibility-required-x']) {
+    const x = harness({ rec: { preverifyToken: 'pv' }, handler: ({ m }) => (m === 'POST' ? reply(403, {}, { problem }) : reply(500)) });
+    await x.start();
+    assert.deepEqual(x.navs, ['/events/e1'], problem);
+    assert.equal(x.store.read()?.entry, undefined, `${problem} 진입 저장 값`);
+  }
+});

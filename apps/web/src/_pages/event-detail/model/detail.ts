@@ -4,6 +4,8 @@
 import type { EventPublicSummary } from '@peaket/api-client/model';
 import { dateTimeText, parseTime, timeText } from '../../../shared/lib/kst.ts';
 import { toDescriptionBlocks, type DescriptionBlock } from './description.ts';
+import type { LiveSale } from './live-sale.ts';
+import type { DetailSalePhase } from './sale.ts';
 
 export type SortMode = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SeatMode = 'PICK' | 'AUTO';
@@ -61,6 +63,8 @@ export interface EventDetail {
   reentryAllowed: boolean;
   /** 판매 정보 배지에 선예매가 있는가 */
   presale: boolean;
+  /** 판매 단계 조각(ADR-0272 결정 3). 시험 담당의 뼈대라 아직 선택 칸이고 toEventDetail이 채우지 않는다(구현 담당이 채운다) */
+  salePhases?: DetailSalePhase[];
   rounds: DetailRound[];
   tiers: { id: string; name: string; price: number }[];
   /** 판매자 상호(판매자 줄과 중개자 고지) */
@@ -214,7 +218,10 @@ export function bookingPhase(
  * 등급 배지. 판매 중의 등급별 매진은 실시간 출처(HOT-010)가 정해지기 전이라 고정 글 '판매 중'(POL-029 원본 장애 때와 같은 모양)이다.
  * 상태를 아직 모르면(첫 그리기) 없음: 화면이 뼈대를 둔다.
  */
-export function tierBadge(phase: BookingPhase | undefined): { text: string; kind: 'badge'; tone: 'primary' | 'neutral' } | { text: string; kind: 'muted' } | undefined {
+// 시험 담당의 뼈대(ADR-0270 결정 1): live·tierId(ADR-0272 결정 1)는 받기만 하고 아직 쓰지 않는다. 구현 담당이 채운다
+export function tierBadge(phase: BookingPhase | undefined, live?: LiveSale, tierId?: string): { text: string; kind: 'badge'; tone: 'primary' | 'neutral' } | { text: string; kind: 'muted' } | undefined {
+  void live;
+  void tierId;
   if (!phase) return undefined;
   if (phase === 'queue') return { text: '판매 중', kind: 'muted' };
   if (phase === 'ended' || phase === 'cancelled') return { text: '판매 종료', kind: 'badge', tone: 'neutral' };

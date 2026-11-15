@@ -1,0 +1,220 @@
+// 공연 상세의 판매 단계·팬별 판매 자격·선예매 안내·명단 밖 알림(SCR-002, ADR-0272 결정 3·4, d5 §5.2 '판매 정책 자격 없음'·'선예매 대상', BUILD_ORDER HOT-346)
+// 단언 값은 정본(ADR-0272·d5·openapi)의 글과 시각을 그대로 적는다. 코드의 상수를 가져오지 않는다.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { toEventDetail } from './detail.ts';
+import {
+  deniedUntilMs,
+  eligibilityGate,
+  eligibilityJudgeAt,
+  isDeniedHash,
+  needsEligibility,
+  presaleNotice,
+  saleBoundaryAfter,
+  toFanEligibility,
+  toSalePhases,
+} from './sale.ts';
+
+const T = (iso) => Date.parse(iso);
+const EV = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
+// 오픈 11/20(금) 20:00 KST. 일반 예매는 KST 날짜가 바뀌는 UTC 15:00 뒤(11/21(토) 00:30 KST)에 시작한다
+const OPEN = T('2026-11-20T11:00:00Z');
+const GEN = T('2026-11-20T15:30:00Z');
+const SALE_END = T('2026-12-23T10:00:00Z');
+const P = { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: GEN, limit: 2 };
+const G = { kind: 'GENERAL', startsAtMs: GEN, endsAtMs: SALE_END, limit: 3 };
+const PHASES = [P, G];
+const MEMBER = { status: 'member', me: { signupCompleted: true, verified: true } };
+const fan = (eligible, phases = PHASES, lists = [{ name: '팬클럽 선예매', destroyAtMs: T('2026-12-24T10:00:00Z') }]) => ({
+  status: 'known',
+  phases: phases.map((p, i) => ({ ...p, eligible: Array.isArray(eligible) ? eligible[i] : p.kind === 'PRESALE' ? eligible : true })),
+  lists,
+});
+const gate = (o = {}) => eligibilityGate({ phase: 'lobby', session: MEMBER, phases: PHASES, fan: fan(false), denied: false, openAtMs: OPEN, nowMs: OPEN - 5 * 60_000, ...o });
+const NOT_TARGET = '이 회차의 선예매 대상이 아닙니다';
+const REASON = '이 회차의 선예매 대상이 아닙니다. 일반 예매는 11/21(토) 00:30에 시작합니다';
+
+// ── T1 ──
+const iso = (ms) => new Date(ms).toISOString();
+const apiPhase = (kind, s, e, limitPerPerson) => ({ kind, startsAt: s === undefined ? undefined : typeof s === 'number' ? iso(s) : s, endsAt: e === undefined ? undefined : typeof e === 'number' ? iso(e) : e, limitPerPerson });
+
+test('SCR-002 판매 단계: salePhases를 시각 순 조각으로 바꾸고 틀린 조각(시각 없음·끝 ≤ 시작·모르는 종류·한도 0·11)은 버린다(한도 1·10은 남긴다)', () => {
+  const early = T('2026-11-19T11:00:00Z');
+  const last = SALE_END;
+  const list = [
+    apiPhase('GENERAL', GEN, SALE_END, 3),
+    apiPhase('PRESALE', OPEN, GEN, 2),
+    apiPhase('PRESALE', undefined, GEN, 2), // 시작 없음
+    apiPhase('PRESALE', OPEN, undefined, 2), // 끝 없음
+    apiPhase('PRESALE', 'not-a-date', GEN, 2), // 시작이 시각이 아님
+    apiPhase('PRESALE', OPEN, OPEN, 2), // 끝 = 시작
+    apiPhase('PRESALE', GEN, OPEN, 2), // 끝 < 시작
+    apiPhase('VIP', OPEN, GEN, 2), // 모르는 종류
+    apiPhase('presale', OPEN, GEN, 2), // 대소문자가 다른 종류
+    apiPhase('PRESALE', OPEN, GEN, 0), // 한도 0
+    apiPhase('PRESALE', OPEN, GEN, 11), // 한도 11
+    apiPhase('GENERAL', last, last + 1, 10), // 한도 10, 끝 = 시작 + 1ms는 남긴다
+    apiPhase('PRESALE', early, early + 60 * 60_000, 1), // 한도 1
+  ];
+  assert.deepEqual(toSalePhases(list), [
+    { kind: 'PRESALE', startsAtMs: early, endsAtMs: early + 60 * 60_000, limit: 1 },
+    { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: GEN, limit: 2 },
+    { kind: 'GENERAL', startsAtMs: GEN, endsAtMs: SALE_END, limit: 3 },
+    { kind: 'GENERAL', startsAtMs: last, endsAtMs: last + 1, limit: 10 },
+  ]);
+  assert.deepEqual(toSalePhases(undefined), []);
+  assert.deepEqual(toSalePhases([]), []);
+  // 계약의 maxItems 10: 시각 순으로 10개까지(거꾸로 넣어도 이른 10개)
+  const hour = 60 * 60_000;
+  const many = Array.from({ length: 12 }, (_, i) => apiPhase('GENERAL', OPEN + i * hour, OPEN + (i + 1) * hour, 4)).reverse();
+  const got = toSalePhases(many);
+  assert.equal(got.length, 10);
+  assert.deepEqual(got.map((p) => p.startsAtMs), Array.from({ length: 10 }, (_, i) => OPEN + i * hour));
+});
+
+test('SCR-002 판매 단계: 공연 상세 값(toEventDetail)이 공개 요약의 salePhases를 조각으로 싣는다(없으면 빈 목록)', () => {
+  const summary = (o = {}) => ({ eventId: EV, productionId: 'p1', title: 'LUMEN', startsAt: '2026-12-24T10:00:00Z', openAt: iso(OPEN), saleEndsAt: iso(SALE_END), ...o });
+  assert.deepEqual(toEventDetail(summary({ salePhases: [apiPhase('GENERAL', GEN, SALE_END, 3), apiPhase('PRESALE', OPEN, GEN, 2)] })).salePhases, [P, G]);
+  assert.deepEqual(toEventDetail(summary()).salePhases, []);
+});
+
+// ── T2 ──
+test('SCR-002 팬별 판매 자격은 회원이고 끝나지 않은 PRESALE 조각이 있을 때만 부른다(endsAt = 지금은 끝남, 지금 + 1ms는 부른다, 비회원·받는 중·모름·GENERAL만은 부르지 않는다)', () => {
+  assert.equal(needsEligibility(PHASES, MEMBER, OPEN - 60_000), true, '오픈 전');
+  assert.equal(needsEligibility(PHASES, MEMBER, GEN - 1), true, 'PRESALE 끝 = 지금 + 1ms');
+  assert.equal(needsEligibility(PHASES, MEMBER, GEN), false, 'PRESALE 끝 = 지금은 끝난 조각');
+  for (const status of ['guest', 'loading', 'unknown']) assert.equal(needsEligibility(PHASES, { status }, OPEN - 60_000), false, status);
+  assert.equal(needsEligibility([G], MEMBER, OPEN - 60_000), false, 'GENERAL만');
+  assert.equal(needsEligibility([], MEMBER, OPEN - 60_000), false, '조각 없음');
+});
+
+// ── T3 ──
+test('SCR-002 판정 시각: closed·pending·notYet·lobby·fifo는 오픈 시각, queue는 지금, ended·cancelled는 없음', () => {
+  const now = OPEN - 7 * 60_000 - 123;
+  for (const phase of ['closed', 'pending', 'notYet', 'lobby', 'fifo']) assert.equal(eligibilityJudgeAt(phase, OPEN, now), OPEN, phase);
+  const after = OPEN + 42_000;
+  assert.equal(eligibilityJudgeAt('queue', OPEN, after), after);
+  for (const phase of ['ended', 'cancelled', undefined]) assert.equal(eligibilityJudgeAt(phase, OPEN, now), undefined, String(phase));
+});
+
+// ── T4 ──
+test('[FE-T18] SCR-002 판매 정책 자격 없음: 판정 시각의 PRESALE 조각에서 eligible false면 "이 회차의 선예매 대상이 아닙니다. 일반 예매는 M/D(요일) HH:MM에 시작합니다"', () => {
+  // 오픈 전(로비): 판정 시각 = 오픈 = PRESALE 시작 → 그 조각. 일반 조각 시작은 UTC 15:30 = KST 다음 날 00:30
+  assert.deepEqual(gate(), { reason: REASON });
+  for (const phase of ['closed', 'notYet', 'fifo']) assert.deepEqual(gate({ phase }), { reason: REASON }, phase);
+  // 오픈 뒤: 판정 시각 = 지금
+  assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 60_000 }), { reason: REASON });
+  // 판정 시각 = 조각 끝은 다음 조각(GENERAL)이라 덮지 않는다
+  assert.equal(gate({ phase: 'queue', nowMs: GEN }), null);
+  // 일반 조각이 없으면 첫 문장만
+  assert.deepEqual(gate({ phases: [P], fan: fan(false, [P]) }), { reason: NOT_TARGET });
+  // 판정 시각 '뒤'의 첫 GENERAL: 앞선 GENERAL이 아니라 지금 PRESALE 뒤의 것
+  const h = 60 * 60_000;
+  const P1 = { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: OPEN + h, limit: 2 };
+  const G1 = { kind: 'GENERAL', startsAtMs: OPEN + h, endsAtMs: OPEN + 2 * h, limit: 4 };
+  const P2 = { kind: 'PRESALE', startsAtMs: OPEN + 2 * h, endsAtMs: GEN, limit: 2 };
+  const four = [P1, G1, P2, G];
+  assert.deepEqual(gate({ phase: 'queue', phases: four, fan: fan([true, true, false, true], four), nowMs: OPEN + 2 * h + 60_000 }), { reason: REASON });
+});
+
+// ── T5 ──
+test('SCR-002 자격 모름은 덮지 않는다: idle·none·조각 차례나 시각이 공개 요약과 다름·비회원은 null, 받는 중은 notYet·lobby·queue만 loading이고 closed·fifo는 null', () => {
+  assert.equal(gate({ fan: { status: 'idle' } }), null, 'idle');
+  assert.equal(gate({ fan: { status: 'none' } }), null, 'none(확인 못 함)');
+  for (const phase of ['notYet', 'lobby']) assert.equal(gate({ phase, fan: { status: 'loading' } }), 'loading', phase);
+  assert.equal(gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: { status: 'loading' } }), 'loading', 'queue');
+  for (const phase of ['closed', 'fifo']) assert.equal(gate({ phase, fan: { status: 'loading' } }), null, phase);
+  // 팬 자격의 조각이 공개 요약과 다르면 모름
+  const shifted = { ...P, startsAtMs: P.startsAtMs + 60_000 };
+  assert.equal(gate({ fan: fan(false, [shifted, G]) }), null, '시작 시각이 다름');
+  assert.equal(gate({ fan: fan(false, [{ ...P, endsAtMs: GEN + 1 }, G]) }), null, '끝 시각이 다름');
+  assert.equal(gate({ fan: fan([false, false], [{ ...P, kind: 'GENERAL' }, G]) }), null, '종류가 다름');
+  assert.equal(gate({ fan: fan([true, false], [G, P]) }), null, '차례가 다름');
+  assert.equal(gate({ fan: fan(false, [G]) }), null, '조각 수가 다름');
+  for (const status of ['guest', 'loading', 'unknown']) assert.equal(gate({ session: { status } }), null, `비회원 ${status}`);
+  for (const phase of ['ended', 'cancelled', undefined]) assert.equal(gate({ phase }), null, `판정 시각 없음 ${phase}`);
+});
+
+test('SCR-002 eligible true인 조각과 GENERAL 조각은 덮지 않는다', () => {
+  assert.equal(gate({ fan: fan(true) }), null, '선예매 대상');
+  // GENERAL 조각은 eligible false여도 덮지 않는다(선예매만 명단으로 막는다)
+  assert.equal(gate({ phase: 'queue', nowMs: GEN + 60_000, fan: fan([false, false]) }), null);
+});
+
+// ── T6 ──
+test('SCR-002 조각 경계에 다시 고른다: 일반 예매 시작 1ms 전은 자격 없음, 시작 시각에는 덮지 않는다(saleBoundaryAfter는 지금 뒤 가장 이른 startsAt·endsAt, 같은 시각은 지난 것)', () => {
+  assert.deepEqual(gate({ phase: 'queue', nowMs: GEN - 1 }), { reason: REASON });
+  assert.equal(gate({ phase: 'queue', nowMs: GEN }), null);
+  assert.equal(saleBoundaryAfter(PHASES, OPEN - 1), OPEN);
+  assert.equal(saleBoundaryAfter(PHASES, OPEN), GEN, '같은 시각은 지난 것');
+  assert.equal(saleBoundaryAfter(PHASES, GEN - 1), GEN);
+  assert.equal(saleBoundaryAfter(PHASES, GEN), SALE_END);
+  assert.equal(saleBoundaryAfter(PHASES, SALE_END), undefined);
+  assert.equal(saleBoundaryAfter([], OPEN), undefined);
+  // 조각 사이가 비면 다음 조각의 시작
+  const gapStart = GEN + 10 * 60_000;
+  assert.equal(saleBoundaryAfter([P, { ...G, startsAtMs: gapStart }], GEN + 1), gapStart);
+});
+
+// ── T7 ──
+test('SCR-002 선예매 대상 안내: 명단 이름(\' · \'로 이음)·가장 이른 대상 조각의 시작과 한도·판매자 상호·가장 늦은 파기 날짜 글', () => {
+  const h = 60 * 60_000;
+  const P1 = { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: OPEN + h, limit: 2 };
+  const G1 = { kind: 'GENERAL', startsAtMs: OPEN + h, endsAtMs: OPEN + 2 * h, limit: 4 };
+  const P2 = { kind: 'PRESALE', startsAtMs: OPEN + 2 * h, endsAtMs: GEN, limit: 3 }; // 11/20(금) 22:00 KST
+  const phases = [P1, G1, P2, G];
+  // 파기 예정: 12/24 19:00 KST와 12/25 00:30 KST(UTC 15:30) 가운데 늦은 것
+  const lists = [
+    { name: '팬클럽 선예매', destroyAtMs: T('2026-12-24T15:30:00Z') },
+    { name: '멤버십', destroyAtMs: T('2026-12-24T10:00:00Z') },
+  ];
+  const f = fan([true, true, true, true], phases, lists);
+  assert.deepEqual(presaleNotice({ fan: f, sellerName: '(주)피켓공연', nowMs: OPEN - h }), {
+    lead: '팬클럽 선예매 · 멤버십 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다',
+    notice: '판매자((주)피켓공연)가 보낸 팬클럽 선예매 · 멤버십 명단에 회원님이 있습니다. 이 명단은 선예매 자격 확인에만 쓰고, 이 공연의 판매 기간이 끝나고 1일 뒤(12/25) 지웁니다',
+  });
+  // 첫 대상 조각이 끝났으면(끝 = 지금) 다음 대상 조각의 시작과 한도
+  assert.equal(presaleNotice({ fan: f, sellerName: '(주)피켓공연', nowMs: OPEN + h }).lead, '팬클럽 선예매 · 멤버십 선예매 대상입니다. 11/20(금) 22:00부터 1인 3매까지 예매할 수 있습니다');
+  // 판매자 상호가 없으면 "판매자가 보낸"
+  assert.equal(
+    presaleNotice({ fan: f, sellerName: '', nowMs: OPEN - h }).notice,
+    '판매자가 보낸 팬클럽 선예매 · 멤버십 명단에 회원님이 있습니다. 이 명단은 선예매 자격 확인에만 쓰고, 이 공연의 판매 기간이 끝나고 1일 뒤(12/25) 지웁니다',
+  );
+  // 명단이 없으면 이름은 '판매 자격'
+  const noList = presaleNotice({ fan: fan([true, true, true, true], phases, []), sellerName: '(주)피켓공연', nowMs: OPEN - h });
+  assert.equal(noList.lead, '판매 자격 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다');
+  assert.ok(noList.notice.startsWith('판매자((주)피켓공연)가 보낸 판매 자격 명단에 회원님이 있습니다'), noList.notice);
+  assert.doesNotMatch(noList.notice, /undefined|NaN|Invalid/, '파기 날짜를 모를 때 빈 값이 글에 새지 않는다');
+  // 안내가 없는 때: 대상 조각이 모두 끝남 · eligible false만 · GENERAL만 대상 · 모름·받는 중·받기 전
+  assert.equal(presaleNotice({ fan: f, sellerName: '(주)피켓공연', nowMs: GEN }), null, '대상 조각이 모두 끝남');
+  assert.equal(presaleNotice({ fan: fan(false), sellerName: '(주)피켓공연', nowMs: OPEN - h }), null, 'eligible false만');
+  assert.equal(presaleNotice({ fan: fan([false, true]), sellerName: '(주)피켓공연', nowMs: OPEN - h }), null, 'GENERAL만 대상');
+  for (const status of ['none', 'loading', 'idle']) assert.equal(presaleNotice({ fan: { status }, sellerName: '(주)피켓공연', nowMs: OPEN - h }), null, status);
+});
+
+// ── T8 ──
+test('[Q-T36 ⑧] 공연 상세: 주소 조각은 정확히 #sale-eligibility-required만 명단 밖 알림을 켠다(#Sale-…·뒤 글자·빈 조각은 끈다)', () => {
+  assert.equal(isDeniedHash('#sale-eligibility-required'), true);
+  for (const h of ['#Sale-eligibility-required', '#SALE-ELIGIBILITY-REQUIRED', '#sale-eligibility-required-x', '#sale-eligibility-required ', '#sale-eligibility-required&x=1', 'sale-eligibility-required', '#sale-eligibility', '#', '']) {
+    assert.equal(isDeniedHash(h), false, JSON.stringify(h));
+  }
+});
+
+test('[Q-T36 ⑧] 명단 밖 알림은 팬 자격이 eligible이어도 자격 없음으로 그리고, 지금이 든 조각의 끝 1ms 전까지 켜지고 끝 시각에 꺼진다(조각을 모르면 문서 동안)', () => {
+  // 팬 자격과 상관없이(대상·모름) 자격 없음. 판정 시각은 지금
+  assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: fan(true), denied: true }), { reason: REASON });
+  assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: { status: 'none' }, denied: true }), { reason: REASON });
+  assert.deepEqual(gate({ phase: 'lobby', fan: fan(true), denied: true }), { reason: REASON }, '로비(오픈 전)에서 막혀 돌아온 때');
+  // 꺼지는 시각 = 지금이 든 조각의 끝(그 1ms 전까지 켜져 있다)
+  assert.equal(deniedUntilMs(PHASES, OPEN), GEN);
+  assert.equal(deniedUntilMs(PHASES, GEN - 1), GEN);
+  assert.equal(deniedUntilMs(PHASES, GEN), SALE_END, '끝 시각에는 그 조각이 아니다');
+  // 조각을 모르면 문서 동안(undefined)
+  assert.equal(deniedUntilMs([], OPEN), undefined);
+  assert.equal(deniedUntilMs(PHASES, OPEN - 1), undefined, '지금이 든 조각이 없음');
+});
+
+// toFanEligibility는 T16(가게)에서 바깥 경계로 본다. 여기서는 모양 틀림이 none인지만
+test('SCR-002 팬별 판매 자격 본문의 모양이 틀리면 자격 모름(none)', () => {
+  for (const body of [null, undefined, 'x', {}, { phases: 'x', lists: [] }, { phases: [], lists: 'x' }]) assert.deepEqual(toFanEligibility(body), { status: 'none' }, JSON.stringify(body));
+});

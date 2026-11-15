@@ -299,3 +299,24 @@ test('SCR-007 다른 탭의 로비 끝 상태 방송은 로비 문구(via)로 �
   assert.deepEqual([a.last().state, a.last().via], ['cancelled-elsewhere', 'lobby']);
   assert.deepEqual([b.last().state, b.last().via], ['cancelled-elsewhere', 'lobby']);
 });
+
+test('[Q-T36 ⑧] SCR-007 로비 참가 403 sale-eligibility-required는 사람 확인 실패가 아니라 공연 상세 주소 + #sale-eligibility-required로 간다(human-check-failed 403은 그대로 사람 확인 실패, identity-verification-required는 조각 없는 공연 상세)', async () => {
+  const sched = { openAtMs: START + 10 * 60_000, lobbyOpensAtMs: START - 60_000 };
+  // 명단 밖: 공연 상세의 예매 제한 안내로(주소 조각, ADR-0272 결정 4). 사람 확인 실패 화면을 보이지 않고 다시 보내지 않는다
+  let h = harness({ schedule: sched, handler: ({ m }) => (m === 'POSTJSON' ? reply(403, {}, { problem: 'sale-eligibility-required' }) : reply(500)) });
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required']);
+  assert.ok(!h.views.some((v) => v.state === 'lobby-join' && v.phase === 'failed'), '사람 확인 실패를 보이지 않는다');
+  assert.equal(h.calls.filter(isLobbyPost).length, 1, '참가를 다시 보내지 않는다');
+  assert.equal(h.store.read()?.lobby, undefined, '참가 토큰을 저장하지 않는다');
+  // 본인확인 전: 조각 없는 공연 상세(그대로)
+  h = harness({ schedule: sched, handler: ({ m }) => (m === 'POSTJSON' ? reply(403, {}, { problem: 'identity-verification-required' }) : reply(500)) });
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1']);
+  // 목록 밖 403 문제 유형(대소문자·뒤 글자 포함)은 그대로 사람 확인 실패
+  for (const problem of ['human-check-failed', 'Sale-Eligibility-Required', 'sale-eligibility-required-x', 'sale-policy-denied']) {
+    h = harness({ schedule: sched, handler: ({ m }) => (m === 'POSTJSON' ? reply(403, {}, { problem }) : reply(500)) });
+    await h.start();
+    assert.deepEqual([h.last().state, h.last().phase, h.navs], ['lobby-join', 'failed', []], problem);
+  }
+});

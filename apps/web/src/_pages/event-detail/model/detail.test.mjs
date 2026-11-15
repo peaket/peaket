@@ -116,14 +116,20 @@ test('선착순(로비 없음)은 오픈 전 비활성 대기열 버튼, 취소�
   assert.deepEqual(bookingPhase(c, T('2026-11-20T10:00:00Z'), undefined), { phase: 'cancelled' });
 });
 
-test('등급 배지: 오픈 전 <오픈 예정>, 판매 중은 실시간 출처가 없어 고정 글 \'판매 중\'(POL-029), 판매 종료 뒤 <판매 종료>', () => {
-  assert.deepEqual(tierBadge('closed'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
-  assert.deepEqual(tierBadge('lobby'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
-  assert.deepEqual(tierBadge('pending'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
-  assert.deepEqual(tierBadge('queue'), { text: '판매 중', kind: 'muted' });
-  assert.deepEqual(tierBadge('ended'), { text: '판매 종료', kind: 'badge', tone: 'neutral' });
-  assert.deepEqual(tierBadge('cancelled'), { text: '판매 종료', kind: 'badge', tone: 'neutral' });
-  assert.equal(tierBadge(undefined), undefined);
+test("SCR-002 등급 배지: 오픈 전 <오픈 예정>, 판매 중은 대기 상태 파일 값(받기 전 뼈대, 모름은 고정 글 '판매 중'(POL-029), soldOutTiers에 든 등급은 <매진>), 판매 종료 뒤 <판매 종료>(ADR-0272 결정 1)", () => {
+  const loading = { status: 'loading' };
+  const unknown = { status: 'unknown' };
+  const onSale = { status: 'known', saleStatus: 'ON_SALE', soldOutTiers: ['r'] };
+  assert.deepEqual(tierBadge('closed', loading, 'r'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
+  assert.deepEqual(tierBadge('lobby', loading, 'r'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
+  assert.deepEqual(tierBadge('pending', loading, 'r'), { text: '오픈 예정', kind: 'badge', tone: 'primary' });
+  assert.equal(tierBadge('queue', loading, 'r'), undefined, '상태 파일을 받기 전은 뼈대');
+  assert.deepEqual(tierBadge('queue', unknown, 'r'), { text: '판매 중', kind: 'muted' });
+  assert.deepEqual(tierBadge('queue', onSale, 's'), { text: '판매 중', kind: 'muted' });
+  assert.deepEqual(tierBadge('queue', onSale, 'r'), { text: '매진', kind: 'badge', tone: 'neutral' });
+  assert.deepEqual(tierBadge('ended', onSale, 's'), { text: '판매 종료', kind: 'badge', tone: 'neutral' });
+  assert.deepEqual(tierBadge('cancelled', loading, 's'), { text: '판매 종료', kind: 'badge', tone: 'neutral' });
+  assert.equal(tierBadge(undefined, loading, 'r'), undefined);
 });
 
 test('회차 칩 배지는 회차마다 그 회차의 오픈·판매 종료로 고른다', () => {
