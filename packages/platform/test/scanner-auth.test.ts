@@ -487,3 +487,81 @@ describe('기기 증명만 하는 스캐너 경로(GAT-220, I-T22)', () => {
     expect(JSON.parse(withToken.payload)).toEqual({ role: 'gate_staff', deviceId: 'dev-1', sessionId: 'sess-1' });
   });
 });
+
+describe('R-622 M5-02·M5-04·M5-05·M5-06 DPoP·가드 정본 계약', () => {
+  const setup = async (): Promise<{ b: Booted; key: Key }> => {
+    const b = await boot();
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    return { b, key };
+  };
+
+  test('htu는 호스트·스킴·포트·사용자정보까지 같아야 하고, 같은 주소의 질의·조각은 무시한다', async () => {
+    const { b, key } = await setup();
+    const wrong = [
+      { htu: 'https://evil.example/v1/scanner-test/shift', jti: 'htu-host' },
+      { htu: 'http://scanner-api.peaket.example/v1/scanner-test/shift', jti: 'htu-scheme' },
+      { htu: 'https://scanner-api.peaket.example:8443/v1/scanner-test/shift', jti: 'htu-port' },
+      { htu: 'https://scanner-api.peaket.example@evil.example/v1/scanner-test/shift', jti: 'htu-userinfo' },
+      { htu: 'https://scanner-api.peaket.example/v1/scanner-test/shift/', jti: 'htu-slash' },
+    ];
+    for (const c of wrong) {
+      const r = await b.get(headersOf(await proofOf(key, c), key.jkt));
+      expect(r.statusCode, c.jti).toBe(401);
+      expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_dpop_proof"');
+    }
+    const query = await b.get(
+      headersOf(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-test/shift?after=1#top', jti: 'htu-query' }), key.jkt),
+    );
+    expect(query.statusCode).toBe(200);
+  });
+
+  test('typ가 dpop+jwt가 아닌 증명은 JWT·소문자·빈 값 모두 401이다', async () => {
+    const { b, key } = await setup();
+    for (const [i, typ] of ['JWT', 'dpop', ''].entries()) {
+      const r = await b.get(headersOf(await proofOf(key, { typ, jti: `typ-${i}` }), key.jkt));
+      expect(r.statusCode, typ).toBe(401);
+      expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_dpop_proof"');
+    }
+  });
+
+  test('헤더 jwk에 개인키 d·비EC 키·좌표 누락이 있으면 401이다', async () => {
+    const { b, key } = await setup();
+    const privateJwk = await b.get(headersOf(await proofOf(key, { jwk: { ...key.jwk, d: 'private' }, jti: 'jwk-d' }), key.jkt));
+    expect(privateJwk.statusCode).toBe(401);
+
+    const missingY = await b.get(headersOf(await proofOf(key, { jwk: { kty: 'EC', crv: 'P-256', x: key.jwk.x }, jti: 'jwk-no-y' }), key.jkt));
+    expect(missingY.statusCode).toBe(401);
+
+    // 서명은 EC P-256으로 맞지만 헤더 jwk의 종류·곡선이 다르면 jwk 검사에서 401이다.
+    const nonEc = await b.get(headersOf(await proofOf(key, { jwk: { ...key.jwk, kty: 'RSA' }, jti: 'jwk-rsa' }), key.jkt));
+    expect(nonEc.statusCode).toBe(401);
+    const wrongCurve = await b.get(headersOf(await proofOf(key, { jwk: { ...key.jwk, crv: 'P-384' }, jti: 'jwk-p384' }), key.jkt));
+    expect(wrongCurve.statusCode).toBe(401);
+  });
+
+  test('세션 판정이 valid:false면 역할·회차·유효 창이 함께 와도 401이고, valid:true라도 역할이 없으면 401이다', async () => {
+    const invalid = await boot();
+    const key = await keyOf();
+    invalid.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    invalid.sessions.answers.set('sess-1/dev-1', {
+      valid: false,
+      role: 'gate_lead',
+      eventId: 'ev-1',
+      assignmentId: 'a-1',
+      validFromMs: Date.parse('2026-10-31T00:00:00.000Z'),
+      validUntilMs: Date.parse('2026-11-02T00:00:00.000Z'),
+      proxy: false,
+    });
+    const r = await invalid.get(headersOf(await proofOf(key), key.jkt));
+    expect(r.statusCode).toBe(401);
+    expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_token"');
+
+    const roleless = await boot();
+    const key2 = await keyOf();
+    roleless.devices.byJkt.set(key2.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    roleless.sessions.answers.set('sess-1/dev-1', { valid: true, eventId: 'ev-1' });
+    expect((await roleless.get(headersOf(await proofOf(key2), key2.jkt))).statusCode).toBe(401);
+  });
+});

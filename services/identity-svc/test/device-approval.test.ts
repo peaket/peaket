@@ -240,4 +240,21 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validUntilMs: NOW });
     await expect(w.approvals.lookup({ userCode: s2.userCode, accountId: ACCOUNT })).resolves.toBeDefined();
   });
+
+  test('R-622 M5-08 근무 시작 전 배정은 승인(lookup·decide)에서 OUTSIDE_STAFF_HOURS이고 세션을 만들지 않는다', async () => {
+    const w = world();
+    const s = await started(w);
+    w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validFromMs: NOW + 1 });
+    await expect(w.approvals.lookup({ userCode: s.userCode, accountId: ACCOUNT })).rejects.toMatchObject({ code: 'OUTSIDE_STAFF_HOURS' });
+    await expect(w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' })).rejects.toMatchObject({
+      code: 'OUTSIDE_STAFF_HOURS',
+    });
+    expect(w.assignments.sessions.size).toBe(0);
+    expect(w.store.byHash.get(s.hash)!.status).toBe('PENDING');
+
+    // 경계: validFrom과 정확히 같은 시각이면 승인할 수 있다.
+    w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validFromMs: NOW });
+    await expect(w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' })).resolves.toBeUndefined();
+    expect(w.assignments.sessions.get('ss-1')).toMatchObject({ assignmentId: 'a-1', terminatedAt: null });
+  });
 });
