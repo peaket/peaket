@@ -363,10 +363,10 @@ describe('정산 HTTP·유스케이스', () => {
       method: 'POST',
       url: '/internal/v1/settlements/event-calculations',
       headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' }),
+      payload: JSON.stringify({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD', eventEndsAt: '2026-11-08T00:00:00.000Z' }),
     });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toMatchObject({ kind: 'EVENT', status: 'NOTIFIED', payoutAmount: 24_920_000 });
+    expect(JSON.parse(res.payload)).toMatchObject({ kind: 'EVENT', status: 'NOTIFIED', payoutAmount: 24_920_000, payoutDate: '2026-11-13' });
     expect(store.statements.size).toBe(1);
   });
 

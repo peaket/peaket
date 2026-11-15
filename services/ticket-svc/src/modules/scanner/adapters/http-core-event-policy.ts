@@ -42,6 +42,8 @@ export function eventPolicyOf(raw: unknown): ScannerEventPolicy | undefined {
 export interface HttpCoreEventPolicyOptions {
   client: Pick<ExternalHttpClient, 'request'>;
   clock: Clock;
+  /** core-svc 내부 공유 토큰. 없으면 local·ci처럼 헤더 없이 보낸다(InternalTokenGuard와 같은 규칙). */
+  internalToken?: string;
   ttlMs?: number;
 }
 
@@ -70,7 +72,13 @@ export class HttpCoreEventPolicy implements ScannerEventPolicyProvider {
   async #fetch(eventId: string, now: number): Promise<ScannerEventPolicy | undefined> {
     let res: Response;
     try {
-      res = await this.o.client.request({ method: 'GET', path: '/internal/v1/events/{eventId}/sale-config', params: { eventId }, timeoutCapMs: 300 });
+      res = await this.o.client.request({
+        method: 'GET',
+        path: '/internal/v1/events/{eventId}/sale-config',
+        params: { eventId },
+        ...(this.o.internalToken ? { headers: { 'x-peaket-internal-token': this.o.internalToken } } : {}),
+        timeoutCapMs: 300,
+      });
     } catch {
       return undefined;
     }

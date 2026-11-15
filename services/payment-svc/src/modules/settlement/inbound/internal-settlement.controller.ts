@@ -16,7 +16,15 @@ const BatchBody = z.object({
   actor: z.string().min(1),
 });
 const ProductBody = z.object({ periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
-const EventBody = z.object({ promoterId: z.string().uuid(), eventId: z.string().uuid(), pg: PgBody, pgStore: StoreBody, commissionRateBp: z.number().int().min(0).max(10_000).optional() });
+const EventBody = z.object({
+  promoterId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  pg: PgBody,
+  pgStore: StoreBody,
+  /** 회차 종료 시각(ISO 날짜/시각). 지급일은 이 값 +5영업일이다(A1V-02). */
+  eventEndsAt: z.string().refine((s) => !Number.isNaN(Date.parse(s)), '회차 종료 시각이 맞지 않습니다'),
+  commissionRateBp: z.number().int().min(0).max(10_000).optional(),
+});
 const ReconfirmBody = z
   .object({
     actor: z.string().min(1).optional(),

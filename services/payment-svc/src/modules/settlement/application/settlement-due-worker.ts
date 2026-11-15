@@ -46,7 +46,7 @@ export class SettlementDueWorker {
   #handle: unknown;
   #running = false;
   #tickPromise: Promise<void> | undefined;
-  #lastRunDay: string | undefined;
+  #lastRegularRunDay: string | undefined;
 
   constructor(private readonly deps: SettlementDueWorkerDeps) {}
 
@@ -63,14 +63,16 @@ export class SettlementDueWorker {
     await this.#tickPromise;
   }
 
-  /** 수동·리더 전환 시에는 force로 바로 돌고, 정기 타이머는 06시(KST)에만 돈다. */
+  /** 수동·리더 전환 시에는 force로 바로 돌고, 정기 타이머는 평일 06시(KST)에만 돈다. */
   async tick(force = true): Promise<void> {
     if (this.#running || !this.deps.leader.isLeader()) return;
     const now = new Date(this.deps.clock.now());
     const kst = new Date(now.getTime() + KST_OFFSET_MS);
     const today = dateOnly(kst);
-    if (!force && (kst.getUTCHours() !== 6 || this.#lastRunDay === today)) return;
+    const weekday = kst.getUTCDay() >= 1 && kst.getUTCDay() <= 5;
+    if (!force && (kst.getUTCHours() !== 6 || !weekday || this.#lastRegularRunDay === today)) return;
     this.#running = true;
+    let ok = true;
     try {
       // 회차 종료 다음 영업일 06시에 계산하므로, 오늘 이전(KST)에 끝난 회차까지가 대상이다.
       const through = dateOnly(new Date(kst.getTime() - DAY_MS));
@@ -79,6 +81,7 @@ export class SettlementDueWorker {
         const out = await this.deps.settlements.calculateDueEvents(through, this.deps.limit ?? 100);
         calculated += out.calculated;
       } catch (e) {
+        ok = false;
         this.deps.log?.failed?.(e);
       }
       // 자동 확정은 core-svc 원천 장애와 독립적으로 돈다(A1V-08).
@@ -86,9 +89,11 @@ export class SettlementDueWorker {
         const confirmed = await this.deps.settlements.confirmDueStatements(this.deps.limit ?? 100);
         calculated += confirmed.confirmed;
       } catch (e) {
+        ok = false;
         this.deps.log?.failed?.(e);
       }
-      this.#lastRunDay = today;
+      // 정기 06시 tick이 둘 다 성공했을 때만 그날 실행을 소비한다. force tick은 정기 실행을 막지 않는다(A1V-07).
+      if (!force && ok) this.#lastRegularRunDay = today;
       this.deps.log?.ticked?.({ through, calculated });
     } finally {
       this.#running = false;

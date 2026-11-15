@@ -73,6 +73,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ? new HttpCoreEventPolicy({
           client: createExternalHttpClient({ provider: 'core-svc', baseUrl: config.coreHttpUrl, timeoutCapMs: 300, clock: systemClock }),
           clock: systemClock,
+          ...(config.internalToken ? { internalToken: config.internalToken } : {}),
         })
       : undefined;
     // identity 주소가 없으면 스캐너 세션 확인은 503, 관제 역할 판정은 401로 닫는다(대역으로 통과시키지 않는다)
