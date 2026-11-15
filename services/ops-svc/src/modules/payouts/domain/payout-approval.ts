@@ -80,8 +80,18 @@ export const payoutApprovalView = (r: PayoutApprovalRecord, actor: { accountId: 
   closeReason: r.status === 'REJECTED' ? r.reasonText : r.failure,
 });
 
-/** 지급일 전 영업일 15시까지 승인하지 않으면 다음 영업일로 미룬다(settlement §5.1). 그 시각을 KST로 계산한다. */
+/**
+ * 지급일 전 영업일 15시까지 승인하지 않으면 다음 영업일로 미룬다(settlement §5.1). 그 시각을 KST로 계산한다.
+ * 토·일은 건너뛰고, 토·일이 지급일이면 직전 금요일 15시다.
+ */
 export function approvalDueAt(payoutDate: string): Date {
-  const d = new Date(`${payoutDate}T00:00:00+09:00`);
-  return new Date(d.getTime() - 24 * 60 * 60 * 1000 + 15 * 60 * 60 * 1000);
+  const [y, m, d] = payoutDate.split('-').map(Number);
+  const base = new Date(Date.UTC(y!, m! - 1, d!));
+  do {
+    base.setUTCDate(base.getUTCDate() - 1);
+  } while (base.getUTCDay() === 0 || base.getUTCDay() === 6);
+  const yyyy = base.getUTCFullYear();
+  const mm = String(base.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(base.getUTCDate()).padStart(2, '0');
+  return new Date(`${yyyy}-${mm}-${dd}T15:00:00+09:00`);
 }

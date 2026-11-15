@@ -67,7 +67,7 @@ export class DrizzlePayoutApprovalStore implements PayoutApprovalStore {
   }
 
   async save(r: PayoutApprovalRecord) {
-    await this.db.db
+    const changed = await this.db.db
       .update(payoutApproval)
       .set({
         status: r.status,
@@ -78,7 +78,9 @@ export class DrizzlePayoutApprovalStore implements PayoutApprovalStore {
         executedAt: r.executedAt,
         version: r.version,
       })
-      .where(eq(payoutApproval.id, r.approvalId));
+      .where(and(eq(payoutApproval.id, r.approvalId), eq(payoutApproval.version, r.version - 1)))
+      .returning({ id: payoutApproval.id });
+    return changed.length === 1;
   }
 
   async list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }) {

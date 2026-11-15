@@ -4,6 +4,8 @@ import { createService, fakeClock, ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { MemoryAuditChain } from '../src/modules/audit/index.js';
+import { approvalDueAt } from '../src/modules/payouts/domain/payout-approval.js';
 import { MemoryPayoutApprovalStore, PayoutApprovals, type PayoutBatchView, type PayoutPaymentClient } from '../src/modules/payouts/index.js';
 import type { ApprovalReauthVerifier } from '../src/modules/payouts/domain/ports.js';
 import { FakeIdentity, quiet } from './support.js';
@@ -59,12 +61,13 @@ class TestReauth implements ApprovalReauthVerifier {
 }
 const tokenAccount = new Map<string, string>();
 const payments = new FakePayments();
+const audit = new MemoryAuditChain();
 let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, payouts: { store, payments, reauth: new TestReauth() } }),
+    module: AppModule.register({ memory: true, payouts: { store, payments, reauth: new TestReauth() }, auditChain: audit }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -80,6 +83,7 @@ beforeEach(() => {
   payments.calls.length = 0;
   payments.failExecute = false;
   tokenAccount.clear();
+  audit.entries.length = 0;
 });
 
 const headers = (role: 'viewer' | 'operator' | 'commander' = 'operator', token?: string) => {
@@ -87,13 +91,22 @@ const headers = (role: 'viewer' | 'operator' | 'commander' = 'operator', token?:
   tokenAccount.set(h['x-session-id']!, h['x-user-id']!);
   return { ...h, 'content-type': 'application/json', ...(token ? { 'x-reauth-token': token } : {}) };
 };
-const noBody = (role: 'viewer' | 'operator' | 'commander' = 'operator', token?: string) => {
-  const h = headers(role, token);
-  delete (h as Record<string, string>)['content-type'];
+const noBody = (role: 'viewer' | 'operator' | 'commander' = 'operator', token?: string): Record<string, string> => {
+  const h: Record<string, string> = { ...headers(role, token) };
+  delete h['content-type'];
   return h;
 };
 const create = (h = headers()) =>
   svc.http.inject({ method: 'POST', url: '/v1/ops/payout-batches', headers: h, payload: JSON.stringify({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-20' }) });
+
+describe('M4-01 지급일 전 영업일 15시', () => {
+  test('월요일은 금요일, 화~금은 전날, 토·일은 직전 금요일 15시(KST)다', () => {
+    expect(approvalDueAt('2026-11-16').toISOString()).toBe('2026-11-13T06:00:00.000Z');
+    expect(approvalDueAt('2026-11-17').toISOString()).toBe('2026-11-16T06:00:00.000Z');
+    expect(approvalDueAt('2026-11-21').toISOString()).toBe('2026-11-20T06:00:00.000Z');
+    expect(approvalDueAt('2026-11-22').toISOString()).toBe('2026-11-20T06:00:00.000Z');
+  });
+});
 
 describe('J-T3 지급 묶음 2인 승인', () => {
   test('J-T3 operator가 요청하고 요청자가 아닌 commander가 재인증 뒤 승인·실행한다', async () => {
@@ -111,6 +124,36 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     expect(ok.statusCode).toBe(200);
     expect(JSON.parse(ok.payload)).toMatchObject({ status: 'DONE' });
     expect(payments.calls).toEqual(['create', 'approve', 'execute']);
+  });
+
+  test('M4-04 다른 계정의 재인증 토큰은 승인을 거절한다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const commander = noBody('commander', 'approval-token');
+    tokenAccount.set(commander['x-session-id']!, '01900000-0000-7000-8000-000000000099');
+    const r = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: commander });
+    expect(r.statusCode).toBe(403);
+    expect(JSON.parse(r.payload)).toMatchObject({ type: expect.stringContaining('reauth-required') });
+  });
+
+  test('OPS-03 동시 승인은 하나만 성공하고 DONE을 FAILED로 뒤집지 않는다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const h1 = noBody('commander', 'approval-token');
+    const h2 = noBody('commander', 'approval-token');
+    tokenAccount.set(h1['x-session-id']!, h1['x-user-id']!);
+    tokenAccount.set(h2['x-session-id']!, h2['x-user-id']!);
+    const results = await Promise.all([
+      svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: h1 }),
+      svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: h2 }),
+    ]);
+    expect(results.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+    expect(store.rows.get(created.approvalId)).toMatchObject({ status: 'DONE' });
+  });
+
+  test('OPS-01 지급 승인 요청·승인·실행이 감사 체인에 남는다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const ok = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: noBody('commander', 'approval-token') });
+    expect(ok.statusCode).toBe(200);
+    expect(audit.entries.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_APPROVAL_APPROVED', 'PAYOUT_APPROVAL_EXECUTED']);
   });
 
   test('J-T3 요청자와 같은 사람은 승인할 수 없고, 반려는 사유가 필요하다', async () => {

@@ -28,8 +28,8 @@ interface CommonWiring {
   readonly auditChain?: AuditChain & AuditChainReader;
   /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
   readonly payouts?: PayoutsModuleDeps;
-  /** 회차 취소 요청(BAT-425 GAT-130 잔여). refunds가 없으면 확정·정지·재개가 503이다 */
-  readonly eventCancellations?: { readonly refunds?: EventRefundStarter };
+  /** 회차 취소 요청(BAT-425 GAT-130 잔여). refunds·reauth가 없으면 확정이 503이다 */
+  readonly eventCancellations?: { readonly refunds?: EventRefundStarter; readonly reauth?: import('./modules/event-cancellations/index.js').EventCancellationReauth };
 }
 
 @Module({})
@@ -51,8 +51,8 @@ export class AppModule {
           AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register(o.priority)] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts } : { storage: 'memory' }),
-          EventCancellationsModule.register({ store: new DrizzleEventCancellationStore(o.database), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
+          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
+          EventCancellationsModule.register({ store: new DrizzleEventCancellationStore(o.database), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}), ...(o.eventCancellations?.reauth ? { reauth: o.eventCancellations.reauth } : {}), audit: chain }),
         ],
       };
     }
@@ -69,8 +69,8 @@ export class AppModule {
         AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register(o.priority)] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-        PayoutsModule.register({ storage: 'memory', ...(o.payouts ? { deps: o.payouts } : {}) }),
-        EventCancellationsModule.register({ store: new MemoryEventCancellationStore(), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}) }),
+        PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),
+        EventCancellationsModule.register({ store: new MemoryEventCancellationStore(), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}), ...(o.eventCancellations?.reauth ? { reauth: o.eventCancellations.reauth } : {}), audit: chain }),
       ],
     };
   }

@@ -1,12 +1,21 @@
 // 회차 취소 요청·판정·2인 확정(BAT-425 GAT-130 잔여, FR-055, POL-038, ADR-0046).
 // 요청(commander) → 판정(commander) → 판정자가 아닌 operator·commander의 확정 → purchase-svc 일괄 환불 시작.
+// 확정은 외부 호출 전에 RUNNING으로 조건부 저장하고, 외부가 실패하면 JUDGED로 되돌려 다시 시도할 수 있게 한다.
+// 모든 상태 변화는 ops 감사 체인에도 남긴다(transfer-refund §8, settlement §5.1).
 import { randomUUID } from 'node:crypto';
+import type { AuditChain } from '../../audit/audit.js';
 import { EventCancellationProblem, eventCancellationView, type EventCancellationFault, type EventCancellationKind, type EventCancellationPg, type EventCancellationRecord, type EventCancellationStatus, type EventCancellationView } from '../domain/event-cancellation.js';
 import type { EventCancellationStore, EventRefundStarter } from '../domain/ports.js';
 
 export interface OpsActor {
   readonly accountId: string;
+  readonly sessionId?: string;
   readonly role: string;
+}
+
+/** 재인증 토큰 검증기(payouts의 ApprovalReauthVerifier와 같은 모양). 없으면 확정을 503으로 닫는다 */
+export interface EventCancellationReauth {
+  verify(token: string | undefined, o: { sessionId: string; act: 'APPROVAL' }): Promise<{ accountId: string; factors: string[] }>;
 }
 
 export interface EventCancellationRequestInput {
@@ -15,13 +24,15 @@ export interface EventCancellationRequestInput {
   readonly reason: string;
 }
 
-const activeStatus = (s: EventCancellationStatus): boolean => ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(s);
+const conflict = () => new EventCancellationProblem('event-cancellation-conflict', 409, '다른 사람이 먼저 처리했습니다');
 
 export class EventCancellations {
   constructor(
     private readonly store: EventCancellationStore,
     private readonly refunds?: EventRefundStarter,
     private readonly now: () => number = Date.now,
+    private readonly audit?: AuditChain,
+    private readonly reauth?: EventCancellationReauth,
   ) {}
 
   async request(input: EventCancellationRequestInput, actor: OpsActor): Promise<EventCancellationView> {
@@ -50,6 +61,7 @@ export class EventCancellations {
       updatedAt: now,
     };
     await this.store.insert(record);
+    await this.#audit('EVENT_CANCELLATION_REQUESTED', record.requestId, actor.accountId, { eventId: record.eventId, reason: record.reason, status: record.status }, this.now());
     return eventCancellationView(record);
   }
 
@@ -65,22 +77,43 @@ export class EventCancellations {
     const r = await this.#find(requestId);
     if (r.status !== 'REQUESTED' && r.status !== 'JUDGED') throw new EventCancellationProblem('judgement-not-allowed', 409, '지금은 판정할 수 없습니다');
     if (input.fanNoticeReason.length > 200) throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
-    const next: EventCancellationRecord = { ...r, status: 'JUDGED', fault: input.fault, judgementReason: input.reason, fanNoticeReason: input.fanNoticeReason, judgedBy: actor.accountId, judgedAt: new Date(this.now()), version: r.version + 1, updatedAt: new Date(this.now()) };
-    await this.store.save(next);
+    const now = new Date(this.now());
+    const next: EventCancellationRecord = { ...r, status: 'JUDGED', fault: input.fault, judgementReason: input.reason, fanNoticeReason: input.fanNoticeReason, judgedBy: actor.accountId, judgedAt: now, version: r.version + 1, updatedAt: now };
+    if (!(await this.store.save(next))) throw conflict();
+    await this.#audit('EVENT_CANCELLATION_JUDGED', next.requestId, actor.accountId, { eventId: next.eventId, fault: next.fault, reason: input.reason, fanNoticeReason: input.fanNoticeReason }, this.now());
     return eventCancellationView(next);
   }
 
-  async approve(requestId: string, actor: OpsActor): Promise<EventCancellationView> {
+  async approve(requestId: string, actor: OpsActor, reauthToken?: string): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
     if (r.status !== 'JUDGED' && r.status !== 'PENDING_APPROVAL') throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
     if (r.judgedBy === actor.accountId) throw new EventCancellationProblem('approver-ineligible', 403, '판정자는 확정할 수 없습니다');
+    // 계약(openapi /v1/ops/event-cancellations/{requestId}/approvals)은 재인증 토큰을 요구한다(SEC-02).
+    if (!this.reauth) throw new EventCancellationProblem('dependency-unavailable', 503, '재인증 검증기를 쓸 수 없습니다');
+    const verified = await this.reauth.verify(reauthToken, { sessionId: actor.sessionId ?? '', act: 'APPROVAL' });
+    if (verified.accountId !== actor.accountId) throw new EventCancellationProblem('reauth-required', 403, '다시 인증해 주세요');
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
-    if (r.fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
-    const job = await this.refunds.start({ eventId: r.eventId, requestId: r.requestId, fault: r.fault, ruledBy: r.judgedBy ?? '', confirmedBy: actor.accountId, kind: r.kind, ...(r.fanNoticeReason !== null ? { fanNoticeReason: r.fanNoticeReason } : {}) });
-    const status = job.state === 'COMPLETED' ? 'COMPLETED' : job.state === 'REFUND_WINDOW' ? 'REFUND_WINDOW' : 'RUNNING';
-    const next: EventCancellationRecord = { ...r, status, approvedBy: actor.accountId, approvedAt: new Date(this.now()), refundJobState: job.state, version: r.version + 1, updatedAt: new Date(this.now()) };
-    await this.store.save(next);
-    return eventCancellationView(next);
+    const fault = r.fault;
+    if (fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
+    const now = new Date(this.now());
+    // 외부 호출 전에 RUNNING으로 조건부 저장한다. 두 승인자가 동시에 와도 하나만 통과한다(OPS-07).
+    const running: EventCancellationRecord = { ...r, status: 'RUNNING', approvedBy: actor.accountId, approvedAt: now, version: r.version + 1, updatedAt: now };
+    if (!(await this.store.save(running))) throw conflict();
+    await this.#audit('EVENT_CANCELLATION_APPROVED', running.requestId, actor.accountId, { eventId: running.eventId, judgedBy: running.judgedBy, fault: running.fault }, this.now());
+    try {
+      const job = await this.refunds.start({ eventId: running.eventId, requestId: running.requestId, fault, ruledBy: running.judgedBy ?? '', confirmedBy: actor.accountId, kind: running.kind, ...(running.fanNoticeReason !== null ? { fanNoticeReason: running.fanNoticeReason } : {}) });
+      const status = job.state === 'COMPLETED' ? 'COMPLETED' : job.state === 'REFUND_WINDOW' ? 'REFUND_WINDOW' : 'RUNNING';
+      const next: EventCancellationRecord = { ...running, status, refundJobState: job.state, version: running.version + 1, updatedAt: new Date(this.now()) };
+      if (!(await this.store.save(next))) throw conflict();
+      await this.#audit('EVENT_CANCELLATION_STARTED', next.requestId, actor.accountId, { eventId: next.eventId, status: next.status, jobState: job.state }, this.now());
+      return eventCancellationView(next);
+    } catch (err) {
+      // 외부 호출이 실패하면 다시 시도할 수 있게 JUDGED로 되돌린다(이미 시작됐을 수 있으므로 purchase-svc 멱등 키가 받친다).
+      const back: EventCancellationRecord = { ...running, status: 'JUDGED', approvedBy: null, approvedAt: null, version: running.version + 1, updatedAt: new Date(this.now()) };
+      await this.store.save(back).catch(() => false);
+      await this.#audit('EVENT_CANCELLATION_APPROVAL_FAILED', running.requestId, actor.accountId, { eventId: running.eventId, error: err instanceof Error ? err.name : 'unknown' }, this.now());
+      throw err;
+    }
   }
 
   async reject(requestId: string, actor: OpsActor, reason: string): Promise<EventCancellationView> {
@@ -91,7 +124,8 @@ export class EventCancellations {
     const next: EventCancellationRecord = r.status === 'JUDGED'
       ? { ...r, status: 'REQUESTED', fault: null, judgementReason: null, fanNoticeReason: null, judgedBy: null, judgedAt: null, version: r.version + 1, updatedAt: now }
       : { ...r, status: 'REJECTED', reason: r.reason, version: r.version + 1, updatedAt: now };
-    await this.store.save(next);
+    if (!(await this.store.save(next))) throw conflict();
+    await this.#audit('EVENT_CANCELLATION_REJECTED', next.requestId, actor.accountId, { eventId: next.eventId, reason, status: next.status }, this.now());
     return eventCancellationView(next);
   }
 
@@ -101,7 +135,8 @@ export class EventCancellations {
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
     const job = await this.refunds.pause({ requestId, ...(input.pg ? { pg: input.pg } : {}), reason: input.reason });
     const next: EventCancellationRecord = { ...r, status: 'PAUSED', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(this.now()) };
-    await this.store.save(next);
+    if (!(await this.store.save(next))) throw conflict();
+    await this.#audit('EVENT_CANCELLATION_PAUSED', next.requestId, actor.accountId, { eventId: next.eventId, pg: input.pg ?? null, reason: input.reason }, this.now());
     return eventCancellationView(next);
   }
 
@@ -111,7 +146,8 @@ export class EventCancellations {
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
     const job = await this.refunds.resume({ requestId, ...(input.pg ? { pg: input.pg } : {}), reason: input.reason });
     const next: EventCancellationRecord = { ...r, status: 'RUNNING', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(this.now()) };
-    await this.store.save(next);
+    if (!(await this.store.save(next))) throw conflict();
+    await this.#audit('EVENT_CANCELLATION_RESUMED', next.requestId, actor.accountId, { eventId: next.eventId, pg: input.pg ?? null, reason: input.reason }, this.now());
     return eventCancellationView(next);
   }
 
@@ -120,6 +156,8 @@ export class EventCancellations {
     if (!r) throw new EventCancellationProblem('not-found', 404, '회차 취소 요청을 찾을 수 없습니다');
     return r;
   }
-}
 
-export { activeStatus };
+  async #audit(recordType: string, recordId: string, actorRef: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
+    await this.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
+  }
+}

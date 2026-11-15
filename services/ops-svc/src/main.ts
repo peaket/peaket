@@ -87,7 +87,7 @@ const service = await createService({
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
-    ...(refunds ? { eventCancellations: { refunds } } : {}),
+    ...(refunds ? { eventCancellations: { refunds, ...(payouts?.reauth ? { reauth: payouts.reauth } : {}) } } : {}),
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });

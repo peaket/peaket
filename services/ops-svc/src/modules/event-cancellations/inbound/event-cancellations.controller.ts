@@ -1,6 +1,7 @@
 // 받는 층: 회차 취소 요청·판정·2인 확정(openapi /v1/ops/event-cancellations, BAT-425 GAT-130 잔여).
-import { Body, Controller, Get, Header, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { EventCancellationProblem } from '../domain/event-cancellation.js';
 import { EventCancellations, type OpsActor } from '../application/event-cancellations.js';
@@ -26,7 +27,7 @@ const View = z
   .passthrough();
 const Page = z.object({ items: z.array(View), nextCursor: z.string().nullable() });
 
-const actorOf = (me: Principal): OpsActor => ({ accountId: me.accountId, role: me.role ?? 'operator' });
+const actorOf = (me: Principal): OpsActor => ({ accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' });
 const fail = (err: unknown): never => {
   if (err instanceof EventCancellationProblem) throw new ProblemError({ type: err.type, status: err.status, title: err.title });
   throw err;
@@ -89,9 +90,10 @@ export class EventCancellationsController {
   @HttpCode(200)
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: Params, responses: { 200: View } })
-  async approve(@ContractParams(Params) params: z.output<typeof Params>, @CurrentPrincipal() me: Principal) {
+  async approve(@ContractParams(Params) params: z.output<typeof Params>, @CurrentPrincipal() me: Principal, @Req() request: FastifyRequest) {
     try {
-      return await this.cancellations.approve(params.requestId, actorOf(me));
+      const token = request.headers['x-reauth-token'];
+      return await this.cancellations.approve(params.requestId, actorOf(me), typeof token === 'string' ? token : undefined);
     } catch (err) {
       return fail(err);
     }

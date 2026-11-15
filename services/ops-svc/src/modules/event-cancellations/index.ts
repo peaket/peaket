@@ -1,5 +1,5 @@
 // 회차 취소 요청 모듈의 공개 면.
-export { EventCancellations } from './application/event-cancellations.js';
+export { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
 export { DrizzleEventCancellationStore } from './adapters/db/drizzle-store.js';
 export { MemoryEventCancellationStore } from './adapters/memory-store.js';
 export { EventCancellationProblem, eventCancellationView, type EventCancellationFault, type EventCancellationKind, type EventCancellationPg, type EventCancellationRecord, type EventCancellationStatus, type EventCancellationView } from './domain/event-cancellation.js';

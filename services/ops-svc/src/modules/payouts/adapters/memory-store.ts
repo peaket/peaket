@@ -15,7 +15,10 @@ export class MemoryPayoutApprovalStore implements PayoutApprovalStore {
     return [...this.rows.values()].find((r) => r.batchId === batchId && (r.status === 'PENDING_APPROVAL' || r.status === 'APPROVED' || r.status === 'EXECUTING'));
   }
   async save(record: PayoutApprovalRecord) {
+    const current = this.rows.get(record.approvalId);
+    if (!current || current.version !== record.version - 1) return false;
     this.rows.set(record.approvalId, { ...record });
+    return true;
   }
   async list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }) {
     return [...this.rows.values()]

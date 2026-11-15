@@ -5,7 +5,8 @@ export interface PayoutApprovalStore {
   insert(record: PayoutApprovalRecord): Promise<void>;
   find(approvalId: string): Promise<PayoutApprovalRecord | undefined>;
   findActiveByBatch(batchId: string): Promise<PayoutApprovalRecord | undefined>;
-  save(record: PayoutApprovalRecord): Promise<void>;
+  /** 낙관적 판 번호(version) 조건으로 저장한다. 다른 실행이 먼저 바꿨으면 false */
+  save(record: PayoutApprovalRecord): Promise<boolean>;
   list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }): Promise<PayoutApprovalRecord[]>;
 }
 

@@ -54,6 +54,11 @@ export interface NewAuditCheckpoint {
 
 export interface AuditCheckpointStore {
   create(input: NewAuditCheckpoint): Promise<AuditCheckpoint>;
+  /**
+   * 체크포인트 행과 AUDIT_CHECKPOINT_CREATED 체인 기록을 한 트랜잭션에 쓴다(OPS-04).
+   * 같은 from_seq가 이미 있으면 그 체크포인트를 돌려준다(중복 생성 금지).
+   */
+  createWithAudit?(input: NewAuditCheckpoint, record: AuditRecord): Promise<AuditCheckpoint>;
   list(limit: number): Promise<readonly AuditCheckpoint[]>;
   find(checkpointId: string): Promise<AuditCheckpoint | undefined>;
   head(): Promise<AuditCheckpoint | undefined>;
@@ -146,7 +151,7 @@ export class AuditCheckpointService {
     const prevCheckpointHash = last?.rootHash ?? '';
     const sig = this.signer?.sign({ checkpointId, fromSeq, toSeq, rootHash, prevCheckpointHash, createdAtMs: nowMs });
     const anchorRef = `local:${checkpointId}`;
-    const checkpoint = await this.store.create({
+    const input: NewAuditCheckpoint = {
       checkpointId,
       fromSeq,
       toSeq,
@@ -158,20 +163,16 @@ export class AuditCheckpointService {
       ...(sig ? { signature: sig.signature, keyId: sig.keyId } : {}),
       anchorRef,
       anchoredAtMs: nowMs,
-    });
-    await this.chain.append({
+    };
+    const record: AuditRecord = {
       recordType: 'AUDIT_CHECKPOINT_CREATED',
       recordId: checkpointId,
-      payload: {
-        fromSeq,
-        toSeq,
-        rootHash: checkpoint.rootHash,
-        prevCheckpointHash: checkpoint.prevCheckpointHash,
-        anchorRef,
-        ...(sig ? { signature: sig.signature, keyId: sig.keyId } : {}),
-      },
+      payload: { fromSeq, toSeq, rootHash, prevCheckpointHash, anchorRef, ...(sig ? { signature: sig.signature, keyId: sig.keyId } : {}) },
       nowMs,
-    });
+    };
+    if (this.store.createWithAudit) return this.store.createWithAudit(input, record);
+    const checkpoint = await this.store.create(input);
+    await this.chain.append(record);
     return checkpoint;
   }
 
@@ -283,6 +284,29 @@ export class DrizzleAuditChain implements AuditChain, AuditChainReader {
 @Injectable()
 export class DrizzleAuditCheckpointStore implements AuditCheckpointStore {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
+
+  /** 체크포인트 행과 AUDIT_CHECKPOINT_CREATED를 한 트랜잭션에 쓴다. audit_chain_head 행 잠금으로 같은 구간 중복을 막는다 */
+  async createWithAudit(input: NewAuditCheckpoint, record: AuditRecord): Promise<AuditCheckpoint> {
+    return this.database.transaction(async (tx) => {
+      await tx.execute(sql`select 1 from audit_chain_head where id = 1 for update`);
+      const existing = (await tx.execute(sql`
+        select id, from_seq, to_seq, encode(root_hash, 'hex') as root_hash, encode(prev_hash, 'hex') as prev_hash, reason, actor_ref, created_at,
+               signature, key_id, anchor_ref, anchored_at
+        from audit_checkpoint where from_seq = ${input.fromSeq}::bigint limit 1`)).rows as unknown as CheckpointRow[];
+      if (existing[0]) return toCheckpoint(existing[0]);
+      const [row] = (await tx.execute(sql`
+        insert into audit_checkpoint (id, from_seq, to_seq, root_hash, prev_hash, reason, actor_ref, created_at, signature, key_id, anchor_ref, anchored_at)
+        values (${input.checkpointId}::uuid, ${input.fromSeq}::bigint, ${input.toSeq}::bigint, decode(${input.rootHash}, 'hex'), decode(${input.prevCheckpointHash || ''}, 'hex'),
+                ${input.reason}, ${input.actorRef}, ${new Date(input.nowMs)}::timestamptz,
+                ${input.signature ?? null}, ${input.keyId ?? null}, ${input.anchorRef ?? null},
+                ${input.anchoredAtMs !== undefined ? sql`${new Date(input.anchoredAtMs)}::timestamptz` : sql`null`})
+        returning id, from_seq, to_seq, encode(root_hash, 'hex') as root_hash, encode(prev_hash, 'hex') as prev_hash, reason, actor_ref, created_at,
+                  signature, key_id, anchor_ref, anchored_at`)).rows as unknown as CheckpointRow[];
+      if (!row) throw new Error('감사 체크포인트를 쓰지 못했다');
+      await appendAuditIn(tx, record);
+      return toCheckpoint(row);
+    });
+  }
 
   async create(input: NewAuditCheckpoint): Promise<AuditCheckpoint> {
     const [row] = (await this.database.db.execute(sql`
