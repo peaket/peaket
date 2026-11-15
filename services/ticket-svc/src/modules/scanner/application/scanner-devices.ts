@@ -1,7 +1,15 @@
 // 스캐너 기기 원장 쓰임새(BUILD_ORDER GAT-170, offline-gate §6.1). 등록·목록·폐기·등록 코드 소비·재발급.
 import type { Clock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
-import type { EnrollmentAttemptLimiter, EnrollmentCodeStore, ScannerDeviceCommandStore, ScannerDeviceStore, ScannerSessionTerminator, ScannerShiftStore } from '../domain/ports.js';
+import type {
+  EnrollmentAttemptLimiter,
+  EnrollmentCodeStore,
+  ScannerDeviceCommandStore,
+  ScannerDeviceStore,
+  ScannerOpsAlertSink,
+  ScannerSessionTerminator,
+  ScannerShiftStore,
+} from '../domain/ports.js';
 import {
   assertAccountId,
   assertCursor,
@@ -66,6 +74,8 @@ export interface ScannerDevicesDeps {
   commands?: ScannerDeviceCommandStore;
   /** SEV3 경보·세션 종료 실패를 남기는 곳. 없으면 버린다 */
   alert?: (message: string, fields: Record<string, unknown>) => void;
+  /** ops-svc ops_alert 경로(SEV3). 없으면 alert 한 줄로만 남긴다 */
+  opsAlert?: ScannerOpsAlertSink;
   /** 시험에서 고정 ID를 주입한다. 없으면 UUIDv4 */
   newId?: () => string;
 }
@@ -178,7 +188,26 @@ export class ScannerDevices {
     const fail = async (reason: EnrollmentCodeRejected['reason']): Promise<never> => {
       if (this.d.limiter) {
         const r = await this.d.limiter.failed(ip);
-        if (r.globalAlert) this.d.alert?.('스캐너 등록 전체 실패가 10분 100회를 넘었다(SEV3, 등록 경로는 닫지 않는다)', { failures: r.globalFailures });
+        if (r.globalAlert) {
+          const message = '스캐너 등록 전체 실패가 10분 100회를 넘었다(SEV3, 등록 경로는 닫지 않는다)';
+          if (this.d.opsAlert) {
+            try {
+              await this.d.opsAlert.open({
+                eventKey: 'scanner-enrollment',
+                kind: 'ENROLLMENT_GLOBAL_FAILURES',
+                severity: 'SEV3',
+                source: 'ticket-svc',
+                reason: message,
+                detail: { failures: r.globalFailures },
+                atMs: this.d.clock.now(),
+              });
+            } catch (e) {
+              this.d.alert?.(message, { failures: r.globalFailures, err: e instanceof Error ? e.message : String(e) });
+            }
+          } else {
+            this.d.alert?.(message, { failures: r.globalFailures });
+          }
+        }
       }
       throw new EnrollmentCodeRejected(reason);
     };

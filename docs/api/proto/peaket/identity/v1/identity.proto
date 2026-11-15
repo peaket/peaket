@@ -354,7 +354,8 @@ message CheckScannerSessionResponse {
   // 세션이 끝나지 않았고(terminated_at 없음, 만료 시각 전) 그 기기의 지금 활성 세션이며,
   // 이어진 staff_assignment가 ASSIGNED이고 역할 유효 시간 안이면 true다.
   bool valid = 1;
-  // valid일 때만 채운다. 그때의 역할과 회차
+  // 세션 행이 있고 기기가 맞으면 valid가 false여도 역할·회차·유효 창을 채운다. 가드는 valid만 보고,
+  // ticket-svc는 기기 단독 업로드의 기록 시각이 그 창 안인지 다시 판정한다(C1-11).
   StaffRole role = 2;
   string event_id = 3;
   // 근무 준비(SCR-033)가 배정·근무 창·대리 승인을 보일 때 쓴다(GAT-170 잔여)
@@ -362,6 +363,8 @@ message CheckScannerSessionResponse {
   int64 valid_from_ms = 5;
   int64 valid_until_ms = 6;
   bool proxy = 7;
+  // 배정된 스태프 계정. 기기 단독 업로드의 scan_event.staff_account_id를 정할 때 쓴다(C1-11)
+  string account_id = 8;
 }
 
 message TerminateScannerSessionsRequest {

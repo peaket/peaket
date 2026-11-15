@@ -75,6 +75,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
           clock: systemClock,
         })
       : undefined;
+    const opsAlertSink = config.opsHttpUrl
+      ? new HttpOpsAlertSink(createExternalHttpClient({ provider: 'ops-svc', baseUrl: config.opsHttpUrl, timeoutCapMs: 2_000, clock: systemClock }), config.internalToken)
+      : undefined;
     // identity 주소가 없으면 스캐너 세션 확인은 503, 관제 역할 판정은 401로 닫는다(대역으로 통과시키지 않는다)
     adminAuthz = config.identityGrpcUrl ? new GrpcAdminAuthz(config.identityGrpcUrl, lbProfile) : { getAdminAuthz: async () => ({ valid: false, role: '' }) };
     scannerSessions = config.identityGrpcUrl
@@ -100,8 +103,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
           ...(policy ? { policy } : {}),
           limiter,
           sessions: scannerSessions,
+          sessionLookup: scannerSessions,
           commands: scannerCommands,
           alert: (message, fields) => alert?.(message, fields),
+          ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
         },
         ticket: { deviceKeys },
@@ -134,7 +139,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         devices: scannerStore,
         shifts: shiftStore,
         ...(policy ? { policy } : {}),
-        sink: new HttpOpsAlertSink(createExternalHttpClient({ provider: 'ops-svc', baseUrl: config.opsHttpUrl, timeoutCapMs: 2_000, clock: systemClock }), config.internalToken),
+        sink: opsAlertSink!,
         clock: systemClock,
         log: service.logger,
         metric: (result) => freshnessAlerts.inc({ service: SERVICE, result }),

@@ -8,6 +8,8 @@ export interface ScannerSessionRecord {
   scannerSessionId: string;
   assignmentId: string;
   deviceId: string;
+  /** 배정된 스태프 계정. 기기 단독 업로드가 기록의 계정을 정할 때 쓴다(C1-11) */
+  accountId?: string;
   role: StaffRole;
   proxy: boolean;
   expiresAt: number;
@@ -28,6 +30,7 @@ export interface ScannerSessionAnswer {
   validFromMs?: number;
   validUntilMs?: number;
   proxy?: boolean;
+  accountId?: string;
 }
 
 /** staff_assignment 한 행(초대·배정). 초대 이메일과 토큰 해시는 수락·거절 때 지운다. */

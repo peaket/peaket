@@ -46,6 +46,8 @@ export interface ScannerSessionAnswer {
   validFromMs?: number;
   validUntilMs?: number;
   proxy?: boolean;
+  /** 배정된 스태프 계정. 기기 단독 업로드의 scan_event.staff_account_id를 세션으로 정할 때 쓴다(C1-11) */
+  accountId?: string;
 }
 
 /** 스캐너 세션의 지금 유효성(identity-svc ScannerSessionCheckService) */

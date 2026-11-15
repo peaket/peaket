@@ -23,6 +23,8 @@ export interface ScannerGateTicketSeed {
   seatId: string;
   gateZone: string;
   status: ScannerTicketStatus;
+  /** 취소 접수 시각. 있으면 이보다 이른 입장은 취소 뒤 입장으로 보지 않는다(C1-04) */
+  cancelledAtMs?: number;
 }
 
 interface StoredScan extends Omit<ScanEventInput, 'result' | 'reason'> {
@@ -30,7 +32,16 @@ interface StoredScan extends Omit<ScanEventInput, 'result' | 'reason'> {
   reason?: string;
   receivedAt: string;
   flag: GateFlagKind | 'NONE';
+  /** 서버가 scannerSessionId로 정한 스태프 계정(C1-11) */
+  staffAccountId?: string;
 }
+
+/** 보정 시각(기기 시각 + 시계 오차). 순서·취소·마감 판정의 기준이다(offline-gate §7.1) */
+const correctedMs = (s: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs'>): number => Date.parse(s.scannedAtDevice) + (s.clockOffsetMs ?? 0);
+const orderOf = (a: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs' | 'deviceSeq'>, b: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs' | 'deviceSeq'>): number =>
+  correctedMs(a) - correctedMs(b) || a.deviceSeq - b.deviceSeq;
+/** 마지막 보정 뒤 ±2분 [가정] 넘게 어긋나면 시각 불확실(offline-gate §7.1) */
+const CLOCK_UNCERTAIN_MS = 2 * 60_000;
 
 interface StoredFlag {
   flagId: string;
@@ -154,7 +165,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     const page = all.slice(0, i.limit);
     return {
       changes: page.map((c) => ({ seq: c.seq, kind: c.kind, payload: c.payload })),
-      lastSeq: this.seq.get(i.eventId) ?? 0,
+      // 페이지 끝 번호를 커서로 준다(C1-05).
+      lastSeq: page.length > 0 ? page.at(-1)!.seq : i.after,
       hasMore: all.length > i.limit,
       versionVector: this.#versionVector(i.eventId, i.nowMs ?? Date.now()),
     };
@@ -165,6 +177,10 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     deviceId: string;
     staffAccountId?: string;
     sessionId?: string;
+    placement?: { gateZone: string; mode: 'IN' | 'OUT' };
+    reentryAllowed?: boolean;
+    entryClosesAtMs?: number;
+    sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
     nowMs: number;
     staleVersionIds?: readonly string[];
@@ -178,10 +194,14 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         continue;
       }
       const ticket = this.tickets.get(scan.ticketId);
-      const latest = this.#latestScan(scan.ticketId);
+      const session = i.sessions?.[scan.scannerSessionId];
+      const corrected = correctedMs(scan);
+      const existing = this.#passScans(scan.ticketId);
+      const latest = existing.at(-1);
       let result: ScanResult = scan.result;
       let reason: string | undefined = scan.reason;
       const kinds: GateFlagKind[] = [];
+      const demoted: StoredScan[] = [];
       let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
       if (scan.keyId !== undefined) {
         const keyId = /^[A-Za-z0-9_-]{11}$/.test(scan.keyId) ? Buffer.from(scan.keyId, 'base64url') : undefined;
@@ -192,10 +212,12 @@ export class MemoryScannerGateStore implements ScannerGateStore {
           else if (state === 'UNKNOWN') keyBad = 'KEY_UNKNOWN';
         }
       }
+      // 취소 접수 뒤의 입장만 취소다. 취소 시각보다 이른 기록은 정상 판정으로 넘긴다(C1-04).
+      const cancelledAfter = ticket?.cancelledAtMs !== undefined && corrected < ticket.cancelledAtMs;
       if (!ticket || ticket.eventId !== i.eventId) {
         result = 'REJECT';
         reason = 'UNKNOWN_TICKET';
-      } else if (ticket.status === 'CANCEL_REQUESTED' || ticket.status === 'REFUNDED' || ticket.status === 'VOIDED') {
+      } else if ((ticket.status === 'CANCEL_REQUESTED' || ticket.status === 'REFUNDED' || ticket.status === 'VOIDED') && !cancelledAfter) {
         result = 'REJECT';
         reason = 'TICKET_CANCELLED';
         if (scan.direction === 'IN') kinds.push('AFTER_CANCEL');
@@ -205,20 +227,44 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       } else if (keyBad) {
         result = 'REJECT';
         reason = keyBad;
-      } else if (scan.direction === 'IN' && latest?.direction === 'IN') {
+      } else if (i.placement && (ticket.gateZone !== i.placement.gateZone || (scan.gateZone !== undefined && scan.gateZone !== i.placement.gateZone) || i.placement.mode !== scan.direction)) {
+        // 티켓 구역·기기 배치 구역·배치 모드가 다르면 거부한다(offline-gate §6.4 8, §7.1).
         result = 'REJECT';
-        reason = 'ALREADY_IN';
-        kinds.push('DUPLICATE');
+        reason = 'WRONG_ZONE';
+      } else if (scan.direction === 'IN' && i.reentryAllowed === true) {
+        if (latest?.direction === 'IN') {
+          result = 'CHECK';
+          reason = 'NO_EXIT_RECORD';
+          kinds.push('NO_EXIT');
+        }
+      } else if (scan.direction === 'IN') {
+        const firstIn = existing.find((s) => s.direction === 'IN');
+        if (firstIn && orderOf(scan, firstIn) > 0) {
+          result = 'REJECT';
+          reason = 'ALREADY_IN';
+          kinds.push('DUPLICATE');
+        } else if (firstIn && orderOf(scan, firstIn) < 0) {
+          // 늦게 올라온 더 이른 기록이 정상이 된다. 먼저 통과했던 뒤 기록은 중복으로 내린다(C1-03).
+          for (const old of existing) if (old.direction === 'IN') demoted.push(old);
+        }
       } else if (scan.direction === 'OUT' && latest?.direction !== 'IN') {
         result = 'CHECK';
         reason = 'NO_ENTRY_RECORD';
       }
-      if (scan.scannerSessionId !== i.sessionId) kinds.push('OUT_OF_SESSION');
+      if (session) {
+        if (session.validFromMs !== undefined && session.validUntilMs !== undefined && (corrected < session.validFromMs || corrected > session.validUntilMs)) kinds.push('OUT_OF_SESSION');
+      } else if (i.sessionId === undefined || scan.scannerSessionId !== i.sessionId) {
+        kinds.push('OUT_OF_SESSION');
+      }
+      if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
+      if (scan.clockOffsetMs !== undefined && Math.abs(scan.clockOffsetMs) > CLOCK_UNCERTAIN_MS) kinds.push('TIME_UNCERTAIN');
       if (stale.has(scan.id)) kinds.push('STALE_VERSION');
+      if (scan.method === 'OVERRIDE') kinds.push('OVERRIDE_REVIEW');
       const stored: StoredScan = {
         ...scan,
         result,
         ...(reason !== undefined ? { reason } : {}),
+        ...(session?.accountId !== undefined ? { staffAccountId: session.accountId } : i.staffAccountId !== undefined ? { staffAccountId: i.staffAccountId } : {}),
         receivedAt: new Date(i.nowMs).toISOString(),
         flag: kinds[0] ?? 'NONE',
       };
@@ -226,6 +272,13 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       acceptedIds.push(scan.id);
       for (const kind of kinds) {
         const flag = this.#createFlag(i.eventId, scan.ticketId, kind, scan.knownSeq, i.nowMs);
+        createdFlags.push(this.#flagView(flag));
+        this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
+      }
+      for (const old of demoted) {
+        const next: StoredScan = { ...old, result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' };
+        this.scans.set(old.id, next);
+        const flag = this.#createFlag(i.eventId, old.ticketId, 'DUPLICATE', old.knownSeq, i.nowMs);
         createdFlags.push(this.#flagView(flag));
         this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
       }
@@ -267,10 +320,15 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return this.#flagView(next);
   }
 
-  #latestScan(ticketId: string): StoredScan | undefined {
+  /** 그 티켓의 통과 기록을 보정 시각·기기 일련번호 순으로. 마지막이 지금 입장 상태다 */
+  #passScans(ticketId: string): StoredScan[] {
     return [...this.scans.values()]
       .filter((s) => s.ticketId === ticketId && s.method !== 'VERIFY' && s.result === 'PASS')
-      .sort((a, b) => Date.parse(b.scannedAtDevice) - Date.parse(a.scannedAtDevice) || b.deviceSeq - a.deviceSeq)[0];
+      .sort(orderOf);
+  }
+
+  #latestScan(ticketId: string): StoredScan | undefined {
+    return this.#passScans(ticketId).at(-1);
   }
 
   #createFlag(eventId: string, ticketId: string, kind: GateFlagKind, knownSeq: number, nowMs: number): StoredFlag {

@@ -1,15 +1,15 @@
 // ops-svc internal /internal/v1/ops-alerts로 신선도 경보를 넘기는 어댑터(O-T20).
 // purchase-svc가 쓰는 기존 경보 경로를 그대로 재사용한다. 내부 토큰이 없으면 401이므로 부르는 쪽이 경고를 남긴다.
 import type { ExternalHttpClient } from '@peaket/platform';
-import type { ScannerFreshnessAlert, ScannerFreshnessAlertSink, ScannerFreshnessResolution } from '../domain/ports.js';
+import type { ScannerFreshnessAlertSink, ScannerFreshnessResolution, ScannerOpsAlert, ScannerOpsAlertSink } from '../domain/ports.js';
 
-export class HttpOpsAlertSink implements ScannerFreshnessAlertSink {
+export class HttpOpsAlertSink implements ScannerFreshnessAlertSink, ScannerOpsAlertSink {
   constructor(
     private readonly client: ExternalHttpClient,
     private readonly internalToken: string | undefined,
   ) {}
 
-  async open(alert: ScannerFreshnessAlert): Promise<void> {
+  async open(alert: ScannerOpsAlert): Promise<void> {
     await this.#post('/internal/v1/ops-alerts', {
       eventKey: alert.eventKey,
       kind: alert.kind,

@@ -50,6 +50,7 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck, ScannerSess
           const validFromMs = typeof v?.valid_from_ms === 'number' && Number.isSafeInteger(v.valid_from_ms) && v.valid_from_ms > 0 ? v.valid_from_ms : undefined;
           const validUntilMs = typeof v?.valid_until_ms === 'number' && Number.isSafeInteger(v.valid_until_ms) && v.valid_until_ms > 0 ? v.valid_until_ms : undefined;
           const proxy = typeof v?.proxy === 'boolean' ? v.proxy : undefined;
+          const accountId = typeof v?.account_id === 'string' && v.account_id !== '' ? v.account_id : undefined;
           res({
             valid: v?.valid === true,
             ...(role ? { role } : {}),
@@ -58,6 +59,7 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck, ScannerSess
             ...(validFromMs !== undefined ? { validFromMs } : {}),
             ...(validUntilMs !== undefined ? { validUntilMs } : {}),
             ...(proxy !== undefined ? { proxy } : {}),
+            ...(accountId ? { accountId } : {}),
           });
         },
       );

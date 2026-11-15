@@ -19,6 +19,7 @@ function world() {
     scannerSessionId: 'ss-1',
     assignmentId: 'a-1',
     deviceId: 'dev-1',
+    accountId: 'acc-1',
     role: 'gate_staff',
     proxy: false,
     expiresAt: NOW + HOUR,
@@ -57,6 +58,18 @@ describe('CheckScannerSession(GAT-170)', () => {
     store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, assignmentStatus: 'ASSIGNED' });
     clock.advance(3 * HOUR);
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+  });
+
+  test('끝난 세션도 계정·역할 유효 창을 돌려주어 기기 단독 업로드가 기록 시각을 판정한다(C1-11)', async () => {
+    const { check, store } = world();
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, terminatedAt: NOW });
+    await expect(check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).resolves.toMatchObject({
+      valid: false,
+      accountId: 'acc-1',
+      eventId: 'ev-1',
+      validFromMs: NOW - HOUR,
+      validUntilMs: NOW + 2 * HOUR,
+    });
   });
 
   test('대리 승인 세션은 gate_staff 역할로 돌려준다', async () => {

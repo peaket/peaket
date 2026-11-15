@@ -158,6 +158,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       scannerSessionId: i.scannerSessionId,
       assignmentId: i.assignmentId,
       deviceId: i.deviceId,
+      accountId: i.accountId,
       role: i.role,
       proxy: i.proxy,
       expiresAt: i.expiresAtMs,

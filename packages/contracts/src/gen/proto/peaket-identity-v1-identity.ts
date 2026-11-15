@@ -559,6 +559,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "proxy": {
                       "type": "bool",
                       "id": 7
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 8
                     }
                   }
                 },

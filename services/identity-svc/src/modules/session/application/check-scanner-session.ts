@@ -19,19 +19,24 @@ export class CheckScannerSession {
     if (!row) return { valid: false };
     const now = this.clock.now();
     if (row.deviceId !== i.deviceId) return { valid: false };
-    if (row.terminatedAt !== null) return { valid: false };
-    if (row.expiresAt <= now) return { valid: false };
-    if (row.assignmentStatus !== 'ASSIGNED') return { valid: false };
-    if (row.validFrom > now || row.validUntil < now) return { valid: false };
-    await this.store.touchScannerSession(row.scannerSessionId, now);
+    const valid =
+      row.terminatedAt === null &&
+      row.expiresAt > now &&
+      row.assignmentStatus === 'ASSIGNED' &&
+      row.validFrom <= now &&
+      row.validUntil >= now;
+    if (valid) await this.store.touchScannerSession(row.scannerSessionId, now);
+    // 끝났거나 시간 밖인 세션도 역할·유효 창·계정을 돌려준다. 가드는 valid만 보고 401로 닫고,
+    // ticket-svc는 기기 단독 업로드의 기록 시각이 그 창 안인지 다시 판정한다(C1-11).
     return {
-      valid: true,
+      valid,
       role: row.role,
       eventId: row.eventId,
       assignmentId: row.assignmentId,
       validFromMs: row.validFrom,
       validUntilMs: row.validUntil,
       proxy: row.proxy,
+      ...(row.accountId !== undefined ? { accountId: row.accountId } : {}),
     };
   }
 }
