@@ -63,7 +63,8 @@ export class SettlementDueWorker {
     try {
       const through = dateOnly(subtractBusinessDays(new Date(this.deps.clock.now()), 5));
       const out = await this.deps.settlements.calculateDueEvents(through, this.deps.limit ?? 100);
-      this.deps.log?.ticked?.({ through, calculated: out.calculated });
+      const confirmed = await this.deps.settlements.confirmDueStatements(this.deps.limit ?? 100);
+      this.deps.log?.ticked?.({ through, calculated: out.calculated + confirmed.confirmed });
     } catch (e) {
       this.deps.log?.failed?.(e);
     } finally {

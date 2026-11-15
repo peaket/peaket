@@ -1,5 +1,5 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
-import type { StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
+import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
 import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
@@ -87,6 +87,30 @@ export class MemorySettlementStore implements SettlementStore {
     this.batches.set(record.batchId, record);
     for (const s of bound) this.statements.set(s.statementId, { ...s, status: 'SCHEDULED', payoutBatchId: record.batchId, updatedAt: record.updatedAt });
   }
+  async createPayoutBatchAtomically(input: PayoutBatchAtomicInput) {
+    const { batch: record } = input;
+    const duplicate = [...this.batches.values()].some((b) => b.pg === record.pg && b.pgStore === record.pgStore && b.payoutDate === record.payoutDate && b.status !== 'COMPLETED' && b.status !== 'PARTIAL_FAILED');
+    if (duplicate) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
+    for (const u of input.statementUpdates) if (!this.statements.has(u.statementId)) throw new SettlementProblem('payout-batch-statement-conflict', 409, '정산서를 찾지 못했습니다');
+    for (const u of input.receivableUpdates) if (!this.receivables.has(u.receivableId)) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금을 찾지 못했습니다');
+    const bound: StatementRecord[] = [];
+    for (const id of input.statementIds) {
+      const s = this.statements.get(id);
+      if (!s || s.status !== 'CONFIRMED' || s.payoutBatchId !== null) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
+      bound.push(s);
+    }
+    for (const u of input.statementUpdates) {
+      const s = this.statements.get(u.statementId)!;
+      this.statements.set(u.statementId, { ...s, status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt });
+    }
+    for (const u of input.receivableUpdates) {
+      const r = this.receivables.get(u.receivableId)!;
+      this.receivables.set(u.receivableId, { ...r, remaining: u.remaining, status: u.status, updatedAt: u.updatedAt });
+    }
+    this.receivableMoves.push(...input.receivableMoves);
+    this.batches.set(record.batchId, record);
+    for (const s of bound) this.statements.set(s.statementId, { ...this.statements.get(s.statementId)!, status: 'SCHEDULED', payoutBatchId: record.batchId, updatedAt: record.updatedAt });
+  }
   async findPayoutBatch(batchId: string) {
     return this.batches.get(batchId);
   }
@@ -107,6 +131,12 @@ export class MemorySettlementStore implements SettlementStore {
   }
   async listStatementsByBatch(batchId: string) {
     return [...this.statements.values()].filter((s) => s.payoutBatchId === batchId).sort((a, b) => a.promoterId.localeCompare(b.promoterId) || a.statementId.localeCompare(b.statementId));
+  }
+  async listDueConfirmation(now: Date, limit: number) {
+    return [...this.statements.values()]
+      .filter((s) => s.status === 'NOTIFIED' && s.disputeDueAt !== null && s.disputeDueAt.getTime() <= now.getTime())
+      .sort((a, b) => a.disputeDueAt!.getTime() - b.disputeDueAt!.getTime() || a.statementId.localeCompare(b.statementId))
+      .slice(0, limit);
   }
   async insertPayouts(records: readonly PayoutRecord[]) {
     for (const r of records) this.payouts.set(r.payoutId, r);
@@ -160,7 +190,9 @@ export class MemorySettlementStore implements SettlementStore {
       .slice(0, filter.limit);
   }
   async listOpenReceivables(promoterId: string, pg: Pg) {
-    return [...this.receivables.values()].filter((r) => r.promoterId === promoterId && r.pg === pg && r.status === 'OPEN' && r.remaining > 0).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return [...this.receivables.values()]
+      .filter((r) => r.promoterId === promoterId && (r.pg === pg || r.cause === 'COMPENSATION_ADVANCE') && r.status === 'OPEN' && r.remaining > 0)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
   async insertReceivableMove(record: ReceivableMoveRecord) {
     this.receivableMoves.push(record);

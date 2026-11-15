@@ -1,7 +1,7 @@
 // 정산서·지급 묶음·KYC 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, ADR-0047·0062).
 // 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 아직 없다(상품 정산서는 빈 목록).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { DueEventSettlementSource, PayoutGateway, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter } from '../domain/ports.js';
+import type { DueEventSettlementSource, PayoutGateway, ProductSettlementSource, ReauthVerifier, ReceivableUpdate, SettlementPaymentSource, SettlementStore, StatementFilter, StatementUpdate } from '../domain/ports.js';
 import {
   accountLast4,
   addBusinessDays,
@@ -20,6 +20,7 @@ import {
   type PayoutRecord,
   type Pg,
   type PgStore,
+  type ReceivableMoveRecord,
   type ReceivableRecord,
   type StatementKind,
   type StatementRecord,
@@ -256,6 +257,16 @@ export class Settlements {
     });
   }
 
+  /** 이의 기간이 끝난 NOTIFIED 정산서를 자동 확정한다(M1-F3). 이의가 걸린 DISPUTED는 대상이 아니다. */
+  async confirmDueStatements(limit = 100): Promise<{ confirmed: number; items: StatementView[] }> {
+    return guard(async () => {
+      const due = await this.d.store.listDueConfirmation(new Date(this.d.clock.now()), limit);
+      const items: StatementView[] = [];
+      for (const s of due) items.push(await this.confirmDue(s.statementId));
+      return { confirmed: items.filter((s) => s.status === 'CONFIRMED').length, items };
+    });
+  }
+
   async recordKyc(promoterId: string, status: KycStatus, o: { businessVerified?: boolean; representativeVerified?: boolean; source?: string } = {}): Promise<KycRecord> {
     const now = new Date(this.d.clock.now());
     const record: KycRecord = {
@@ -278,6 +289,9 @@ export class Settlements {
       if (existing.length > 0) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
       const confirmed = await this.d.store.listConfirmed(input.pg, input.pgStore, input.payoutDate);
       const included: StatementRecord[] = [];
+      const statementUpdates: StatementUpdate[] = [];
+      const receivableUpdates: ReceivableUpdate[] = [];
+      const receivableMoves: ReceivableMoveRecord[] = [];
       let heldKyc = 0;
       let heldAccount = 0;
       for (const s of confirmed) {
@@ -286,13 +300,13 @@ export class Settlements {
           const account = await this.d.store.findPayoutAccount(s.promoterId);
           if (account && account.holdUntil.getTime() > now.getTime()) {
             heldAccount += 1;
-            await this.d.store.saveStatement({ ...s, status: 'HELD', holdReason: 'ACCOUNT_CHANGE', updatedAt: now });
+            statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'ACCOUNT_CHANGE', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
             continue;
           }
           included.push(s);
         } else {
           heldKyc += 1;
-          await this.d.store.saveStatement({ ...s, status: 'HELD', holdReason: 'KYC', updatedAt: now });
+          statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'KYC', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
         }
       }
       if (included.length === 0) {
@@ -300,7 +314,8 @@ export class Settlements {
         if (heldAccount > 0) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 지급할 수 없습니다');
         throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
       }
-      // 미수금 상계(settlement §7): 같은 파트너·같은 결제사의 열린 미수금을 지급액에서 먼저 뺀다.
+      // 미수금 상계(settlement §7): 같은 파트너의 열린 미수금을 지급액에서 먼저 뺀다.
+      // 지급 뒤 환불·이의·감액은 그 결제사 정산서에서, 배상금 미리 지급(COMPENSATION_ADVANCE)은 결제사와 무관하게 상계한다(M1-F2).
       const includedAfterOffset: StatementRecord[] = [];
       for (const s of included) {
         let remaining = s.payoutAmount;
@@ -310,14 +325,14 @@ export class Settlements {
           const take = Math.min(r.remaining, remaining);
           if (take <= 0) continue;
           const nextRemaining = r.remaining - take;
-          await this.d.store.saveReceivable({ ...r, remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN', updatedAt: now });
-          await this.d.store.insertReceivableMove({ receivableId: r.receivableId, statementId: s.statementId, amount: take, movedAt: now });
+          receivableUpdates.push({ receivableId: r.receivableId, remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN', updatedAt: now });
+          receivableMoves.push({ receivableId: r.receivableId, statementId: s.statementId, amount: take, movedAt: now });
           offset += take;
           remaining -= take;
         }
         if (offset > 0) {
           const next: StatementRecord = { ...s, offsetAmount: s.offsetAmount + offset, payoutAmount: remaining, status: remaining > 0 ? s.status : 'CARRIED_OVER', updatedAt: now };
-          await this.d.store.saveStatement(next);
+          statementUpdates.push({ statementId: s.statementId, status: next.status, holdReason: next.holdReason, offsetAmount: next.offsetAmount, payoutAmount: next.payoutAmount, updatedAt: now });
           if (remaining > 0) includedAfterOffset.push(next);
         } else {
           includedAfterOffset.push(s);
@@ -345,7 +360,13 @@ export class Settlements {
         createdAt: now,
         updatedAt: now,
       };
-      await this.d.store.createPayoutBatchWithStatements(batch, includedAfterOffset.map((s) => s.statementId));
+      await this.d.store.createPayoutBatchAtomically({
+        batch,
+        statementIds: includedAfterOffset.map((s) => s.statementId),
+        statementUpdates,
+        receivableUpdates,
+        receivableMoves,
+      });
       return payoutBatchView(batch);
     });
   }

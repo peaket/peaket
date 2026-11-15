@@ -414,6 +414,30 @@ describe('상품 정산·미수금 상계', () => {
     expect(held.items[0]).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
   });
 
+  test('M1-F2 배상금 미리 지급 미수금은 다른 결제사 정산서에서도 상계된다', async () => {
+    payments.set(HOLD_EVENT, 'PORTONE', [fact({ amount: 10_000_000 })]);
+    const calculated = await svc.calculateEvent({ promoterId: A, eventId: HOLD_EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(calculated.statementId))!, status: 'CONFIRMED' });
+    const r = await svc.recordReceivable({ promoterId: A, pg: 'TOSS', cause: 'COMPENSATION_ADVANCE', amount: 445_000 });
+    const batch = await svc.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: calculated.payoutDate!, portoneBalance: { amount: calculated.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() });
+    expect(batch.totalAmount).toBe(calculated.payoutAmount - 445_000);
+    expect(store.receivables.get(r.receivableId)).toMatchObject({ remaining: 0, status: 'CLOSED' });
+  });
+
+  test('M1-F3 이의 기간이 끝난 NOTIFIED만 자동 확정하고 DISPUTED는 두지 않는다', async () => {
+    payments.set(EVENT, 'TOSS', [fact({ amount: 10_000_000 })]);
+    const s = await svc.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    expect((await svc.confirmDueStatements()).confirmed).toBe(0);
+    await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, disputeDueAt: new Date(NOW.getTime() - 1) });
+    expect((await svc.confirmDueStatements()).confirmed).toBe(1);
+    expect((await store.findStatementById(s.statementId))?.status).toBe('CONFIRMED');
+
+    const disputed = await svc.calculateEvent({ promoterId: A, eventId: randomUUID(), pg: 'TOSS', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(disputed.statementId))!, status: 'DISPUTED', disputeDueAt: new Date(NOW.getTime() - 1) });
+    expect((await svc.confirmDueStatements()).confirmed).toBe(0);
+    expect((await store.findStatementById(disputed.statementId))?.status).toBe('DISPUTED');
+  });
+
   test('J-T18 미수금은 같은 결제사의 다음 지급에서 상계되고 이동 기록이 남는다', async () => {
     payments.set(HOLD_EVENT, 'TOSS', [fact({ amount: 10_000_000, cancelledAmount: 0, status: 'APPROVED' })]);
     const calculated = await svc.calculateEvent({ promoterId: A, eventId: HOLD_EVENT, pg: 'TOSS', pgStore: 'STANDARD' });

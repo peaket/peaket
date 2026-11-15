@@ -70,6 +70,13 @@ export class InternalSettlementController {
     return this.settlements.reconfirmStatement(statementId);
   }
 
+  @Post('confirm-due')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.object({ confirmed: z.number(), items: z.array(StatementView) }) } })
+  async confirmDue() {
+    return this.settlements.confirmDueStatements();
+  }
+
   @Get('statements')
   @ContractRouteSchema({ responses: { 200: StatementPage } })
   async listStatements(@Query() q: Record<string, string | undefined>) {
