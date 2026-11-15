@@ -128,6 +128,13 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     await expect(w.approvals.lookup({ userCode: s.userCode, accountId: ACCOUNT })).rejects.toMatchObject({ code: 'OUTSIDE_STAFF_HOURS' });
   });
 
+  test('근무 창 밖 승인은 OUTSIDE_STAFF_HOURS다', async () => {
+    const w = world();
+    const s = await started(w);
+    w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validUntilMs: NOW - 1 });
+    await expect(w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' })).rejects.toMatchObject({ code: 'OUTSIDE_STAFF_HOURS' });
+  });
+
   test('승인하면 세션을 만들고 이전 세션을 끝낸 뒤 토큰을 준다', async () => {
     const w = world();
     const s = await started(w);

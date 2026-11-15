@@ -59,6 +59,14 @@ describe('CheckScannerSession(GAT-170)', () => {
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
   });
 
+  test('validFrom이 미래인 세션은 무효이고, 정확히 같은 시각은 유효하다', async () => {
+    const { check, store } = world();
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, validFrom: NOW + 1 });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, validFrom: NOW });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(true);
+  });
+
   test('대리 승인 세션은 gate_staff 역할로 돌려준다', async () => {
     const { check, store } = world();
     store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, proxy: true, role: 'gate_staff' });

@@ -135,6 +135,13 @@ describe('ScannerDevices [GAT-170]', () => {
     await expect(w.devices.enroll({ code: r2.enrollmentCode, jkt: JKT })).rejects.toMatchObject({ reason: 'DEVICE' });
   });
 
+  test('등록 jkt가 43자 base64url이 아니면 ScannerDeviceInputError(JKT)다', async () => {
+    const w = world();
+    await expect(w.store.byThumbprint('short')).rejects.toMatchObject({ name: 'ScannerDeviceInputError', code: 'JKT' });
+    await expect(w.store.byThumbprint('!'.repeat(43))).rejects.toMatchObject({ name: 'ScannerDeviceInputError', code: 'JKT' });
+    await expect(w.store.byThumbprint('A'.repeat(44))).rejects.toMatchObject({ name: 'ScannerDeviceInputError', code: 'JKT' });
+  });
+
   test('목록은 UUID 커서로 나뉘고, 없는 기기 폐기는 404, 입력 오류는 ScannerDeviceInputError다', async () => {
     const w = world();
     const ids = ['0190f3a1-7c2e-7a00-8000-000000000011', '0190f3a1-7c2e-7a00-8000-000000000012'];

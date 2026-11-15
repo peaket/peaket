@@ -700,6 +700,7 @@
 | R-593 | BAT-465 잔여 2차(선택 배치 Q-T59 예매 제한 집행 쓰기 경로, 외부 불변 저장소·OpenTimestamps 앵커 포트/가짜 어댑터)가 정본과 어긋나지 않는다 | services/queue-svc, services/purchase-svc, services/ops-svc, docs/api/openapi.yaml, packages/contracts, packages/api-client, docs | 정본(docs/features/queue-admission.md §6·Q-T59, docs/features/payment.md §2, docs/features/transfer-refund.md §7.2 T14, docs/security/asvs/transfer-refund.md)과 대조했고, 외부 버킷·달력이 없어 S3 Object Lock·OpenTimestamps는 503 `anchor-unavailable`과 로컬 앵커 유지로 남겼다. rebase 뒤 cheap gate·Docker test-int(queue 4·purchase 35·ops 3)·변이 6/6·4관점 리뷰(높음 0·중간 1 고침·중간 4 문서화)·브라우저 SCR-030/SCR-048 보드를 통과했다 | 적용(잔여 일부, heavy gate 통과) |
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
 | R-595 | B2 감사 중간 2건(q:rst TTL 누락·우선 입장 lst 누락) | queue-svc booking-restriction-lua·redis-booking-restrictions·confirm-admission·ports·memory/redis store·시험 | PEXPIREAT와 eligibilityLists를 넣고 단위·test-int로 확인 | 적용 |
+| R-596 | M5 변이 시험 공백 9건(jkt 자기 참조·htu 호스트·validFrom·valid:false+role 등) | scanner dpop.test, platform scanner-auth.test, identity check-scanner-session.test, ticket scanner-device.test, scanner version-vector.test | 회귀를 잡는 시험을 더하고 표적 시험으로 확인 | 적용 |
 
 ## 4. 숫자 일치표
 

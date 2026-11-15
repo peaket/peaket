@@ -1,6 +1,7 @@
 // DPoP proof shape and device-key thumbprint (GAT-170).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { calculateJwkThumbprint } from 'jose';
 import { base64urlOfText, dpopProof, generateDpopKey, jktOf } from '../src/api/dpop.ts';
 
 const decode = (part: string): Record<string, unknown> => {
@@ -15,6 +16,18 @@ test('기기 키 jkt는 RFC 7638 EC P-256 지문 43자다', async () => {
   assert.equal(key.publicJwk.kty, 'EC');
   assert.equal(key.publicJwk.crv, 'P-256');
   assert.equal(key.publicJwk.d, undefined);
+});
+
+test('jkt는 RFC 7638 키 순서(crv,kty,x,y)의 고정 EC 공개키 지문과 같다', async () => {
+  // RFC 7515 A.3.1의 P-256 공개키. 키 순서가 틀리면 이 고정 지문과 달라진다.
+  const jwk = {
+    kty: 'EC',
+    crv: 'P-256',
+    x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
+    y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
+  };
+  assert.equal(await jktOf(jwk), 'oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U');
+  assert.equal(await jktOf(jwk), await calculateJwkThumbprint(jwk as never, 'sha256'));
 });
 
 test('DPoP 증명은 typ·jwk·jti·htm·htu·iat를 담고, 토큰이 있으면 ath를 담는다', async () => {

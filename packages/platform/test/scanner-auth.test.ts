@@ -175,7 +175,7 @@ async function keyOf(): Promise<Key> {
 
 async function proofOf(
   key: Key,
-  o: { jti?: string; htm?: string; htu?: string; iat?: number; ath?: string } = {},
+  o: { jti?: string; htm?: string; htu?: string; iat?: number; ath?: string; typ?: string; jwk?: Record<string, unknown> } = {},
 ): Promise<string> {
   return new SignJWT({
     jti: o.jti ?? 'jti-1',
@@ -184,7 +184,7 @@ async function proofOf(
     iat: o.iat ?? IAT,
     ath: o.ath ?? ATH,
   })
-    .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk as never })
+    .setProtectedHeader({ typ: o.typ ?? 'dpop+jwt', alg: 'ES256', jwk: (o.jwk ?? key.jwk) as never })
     .sign(key.privateKey);
 }
 
@@ -242,6 +242,38 @@ describe('스캐너 기기 증명(GAT-170, O-T37)', () => {
     expect(wrongMethod.statusCode).toBe(401);
     const wrongUrl = await b.get(headersOf(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/other' }), key.jkt));
     expect(wrongUrl.statusCode).toBe(401);
+  });
+
+  test('DPoP htu의 호스트가 다르면 401이고, 같은 호스트의 질의 문자열은 통과한다', async () => {
+    const b = await boot();
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const evil = await b.get(headersOf(await proofOf(key, { htu: 'https://evil.example/v1/scanner-test/shift' }), key.jkt));
+    expect(evil.statusCode).toBe(401);
+    expect(evil.headers['www-authenticate']).toBe('DPoP error="invalid_dpop_proof"');
+    const query = await b.get(headersOf(await proofOf(key, { htu: 'https://scanner-api.peaket.example/v1/scanner-test/shift?after=1', jti: 'jti-query' }), key.jkt));
+    expect(query.statusCode).toBe(200);
+  });
+
+  test('DPoP typ가 dpop+jwt가 아니거나 헤더 jwk에 개인키 d가 있으면 401이다', async () => {
+    const b = await boot();
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const wrongTyp = await b.get(headersOf(await proofOf(key, { typ: 'jwt' }), key.jkt));
+    expect(wrongTyp.statusCode).toBe(401);
+    const privateJwk = await b.get(headersOf(await proofOf(key, { jwk: { ...key.jwk, d: 'private' }, jti: 'jti-private' }), key.jkt));
+    expect(privateJwk.statusCode).toBe(401);
+  });
+
+  test('세션 판정이 valid:false인데 역할·회차가 붙어 있어도 401이다', async () => {
+    const b = await boot();
+    const key = await keyOf();
+    const headers = await ready(b, key, { valid: false, role: 'gate_staff', eventId: 'ev-1' });
+    const r = await b.get(headers);
+    expect(r.statusCode).toBe(401);
+    expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_token"');
   });
 
   test('O-T37 ④ iat가 6분 어긋나면 401이다', async () => {
