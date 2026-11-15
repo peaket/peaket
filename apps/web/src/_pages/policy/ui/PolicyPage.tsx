@@ -78,6 +78,7 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
   const h = `doc-h-${doc.slug}`;
   const toc = `toc-h-${doc.slug}`;
   const posted = !doc.postedOnly;
+  const draft = doc.draft === true;
   return (
     <div className="col mx-auto w-full max-w-[976px] gap-5 md:gap-6 lg:grid lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:gap-y-8">
       <DocSelect docs={DOC_OPTIONS} current={doc.slug} className="md:max-w-[400px] lg:col-span-3 lg:max-w-none" />
@@ -87,17 +88,21 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
           {doc.title}
         </h1>
         <p className="row wrap t-sm muted" style={{ gap: '4px 14px' }}>
-          <span>
-            시행일 <span className="num">{old ? doc.previous : doc.effective}</span>
-            {old ? ' · 이전 버전' : null}
-          </span>
-          {doc.previous && !old ? (
+          {draft ? (
+            <span>초안 · 법무 검토 전</span>
+          ) : (
+            <span>
+              시행일 <span className="num">{old ? doc.previous : doc.effective}</span>
+              {old ? ' · 이전 버전' : null}
+            </span>
+          )}
+          {!draft && doc.previous && !old ? (
             <Link className="link-more" href={`/policy/${doc.slug}?version=${doc.previous}`}>
               이전 버전
               <i className="ic ic-chevron-right" aria-hidden="true" />
             </Link>
           ) : null}
-          {old ? (
+          {!draft && old ? (
             <Link className="link-more" href={`/policy/${doc.slug}`}>
               지금 버전 보기
               <i className="ic ic-chevron-right" aria-hidden="true" />
@@ -150,7 +155,7 @@ function DocBody({ doc, old }: { doc: PolicyDoc; old: boolean }) {
 function Block({ block }: { block: PolicyBlock }) {
   switch (block.kind) {
     case 'placeholder':
-      return <p className="muted">[조항 본문은 법무 검토 뒤 확정]</p>;
+      return <p className="muted">준비 중</p>;
     case 'p':
       return <p>{block.text}</p>;
     case 'h3':
