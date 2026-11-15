@@ -557,7 +557,8 @@ export class DrizzleSessionStore implements SessionStore {
         return r ? rowOf(r) : null;
       },
       setRefreshHash: async (sessionId, hash) => {
-        await tx.update(session).set({ refreshHash: Buffer.from(hash) }).where(eq(session.id, sessionId));
+        // 재시도로 앞 토큰을 폐기한다: 앞 토큰을 prev에 남기지 않고 다시 재시도할 수 없게 표시한다(C2-04·CONS-07).
+        await tx.update(session).set({ refreshHash: Buffer.from(hash), prevRefreshHash: null, refreshUsed: true }).where(eq(session.id, sessionId));
       },
       rotateRefresh: async (sessionId, hash, now, idleExpiresAt) => {
         await tx

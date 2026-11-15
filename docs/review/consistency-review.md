@@ -713,6 +713,7 @@
 | R-602 | OPS-02·06·08(웹훅 임대 없음·응답 무제한·Lease create 권한 없음) | core webhook worker/transport, deploy chart RBAC | SKIP LOCKED·lease_until·응답 상한·Lease 권한을 넣고 시험 | 적용 |
 | R-615 | B2V-01·02·03(TTL 단언 약함·Redis eligibility 시험 없음·같은 판 TTL 미갱신) | queue test-int·booking-restriction-lua | 정확한 TTL 단언·Redis 시험·같은 판 TTL 갱신 | 적용 |
 | R-606 | A1-H4/A2-10·A2-03·A2-17·A2-19·SEC-06·SEC-07·TEST-06·COV2-02(배송비 중복·명단 원천/페이지/감사·내부 토큰/가짜 모드·재인증 시험·검색 판매 상태) | core export·shop store·migration/contracts·purchase attendee HTTP·payment compensation·시험 | 티켓 주문 원천·커서 페이지·감사 기록·401 가드·운영 fake 차단·실제 JWKS 시험·뷰 규칙 | 적용 |
+| R-601 | C2-02·C2-03·C2-04·CONS-07·OPS-05(스태프 초대 휴대폰 본인확인 없음·내부 토큰 fail-open·리프레시 재시도 반복) | platform auth·service, identity staff-invitations·refresh·admin, openapi | 휴대폰 본인확인 포트·503, 내부 토큰 닫힘 실패·상수 시간 비교, 재시도 1회·prev NULL | 적용 |
 
 ## 4. 숫자 일치표
 

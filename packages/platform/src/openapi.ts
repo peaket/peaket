@@ -23,7 +23,7 @@ export interface EmitOpenApiOptions {
 
 export async function emitOpenApi(o: EmitOpenApiOptions): Promise<void> {
   // 미리 보기 모드: 제공자·처리기를 만들지 않아 DB 연결 같은 시작 작업이 돌지 않는다
-  const app = await NestFactory.create(platformRoot(o.module, systemClock, pino({ enabled: false }), new AuthState(systemClock, undefined, false)), new FastifyAdapter(), {
+  const app = await NestFactory.create(platformRoot(o.module, systemClock, pino({ enabled: false }), new AuthState(systemClock, undefined, false), false), new FastifyAdapter(), {
     logger: false,
     abortOnError: false,
     preview: true,

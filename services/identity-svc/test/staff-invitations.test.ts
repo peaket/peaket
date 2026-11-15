@@ -19,10 +19,14 @@ const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 let store: MemoryStaffAssignmentStore;
 let invitations: StaffInvitations;
 let clock: ReturnType<typeof fakeClock>;
+let phoneStatus: 'VERIFIED' | 'UNVERIFIED' | 'UNAVAILABLE';
+let phoneThrows: boolean;
 
 beforeEach(() => {
   clock = fakeClock({ now: NOW });
   store = new MemoryStaffAssignmentStore();
+  phoneStatus = 'VERIFIED';
+  phoneThrows = false;
   store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: true });
   store.accounts.set(OTHER, { email: 'other@example.com', verified: true });
   store.assignments.set('a-1', {
@@ -38,7 +42,12 @@ beforeEach(() => {
     validFromMs: NOW - HOUR,
     validUntilMs: NOW + 2 * HOUR,
   });
-  invitations = new StaffInvitations(store, clock);
+  invitations = new StaffInvitations(store, clock, {
+    statusOf: async () => {
+      if (phoneThrows) throw new Error('본인확인 저장소를 쓸 수 없다');
+      return phoneStatus;
+    },
+  });
 });
 
 const accept = (over: Partial<Parameters<StaffInvitations['accept']>[0]> = {}) => ({
@@ -76,6 +85,20 @@ describe('StaffInvitations [GAT-210]', () => {
     expect(store.assignments.get('a-1')?.inviteEmail).toBeUndefined();
     expect(store.assignments.get('a-1')?.inviteTokenHash).toBeUndefined();
     await expect(store.hasAssigned(ACCOUNT)).resolves.toBe(true);
+  });
+
+  test('휴대폰 본인확인 전이거나 확인 저장소를 쓸 수 없으면 수락하지 않는다(C2-02)', async () => {
+    phoneStatus = 'UNVERIFIED';
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'PHONE_UNVERIFIED' });
+    phoneStatus = 'UNAVAILABLE';
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'PHONE_UNAVAILABLE' });
+    phoneThrows = true;
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'PHONE_UNAVAILABLE' });
+    const noPort = new StaffInvitations(store, clock);
+    await expect(noPort.accept(accept())).rejects.toMatchObject({ code: 'PHONE_UNAVAILABLE' });
+    phoneThrows = false;
+    phoneStatus = 'VERIFIED';
+    await expect(invitations.accept(accept())).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
   });
 
   test('같은 회차에 이미 배정된 계정은 409이고, 같은 토큰 재수락은 410이다', async () => {
