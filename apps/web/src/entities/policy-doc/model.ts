@@ -184,7 +184,7 @@ export const POLICY_DOCS: readonly PolicyDoc[] = [
   {
     slug: 'privacy',
     title: '개인정보 처리방침',
-    effective: '2026-11-15',
+    effective: '2026-11-01',
     draft: true,
     previous: '2026-05-01',
     sections: [

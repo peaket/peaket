@@ -34,7 +34,8 @@ export { RedisDeviceAuthorizations, RedisDeviceApprovalLimits } from './adapters
 export { GrpcScannerDeviceRegistry } from './adapters/grpc-scanner-device-registry.js';
 export { RedisScannerDpopReplayStore } from './adapters/redis-scanner-dpop-replay.js';
 export { scannerSessionCheckHandlers } from './inbound/scanner-session-check.grpc.js';
-export { STAFF_ASSIGNMENT_STORE, STAFF_PHONE_VERIFICATION, type ScannerSessionRecord, type StaffAssignmentStore, type StaffPhoneVerification } from './domain/staff.js';
+export { STAFF_ASSIGNMENT_STORE, STAFF_PHONE_VERIFICATION, StaffAccountInactive, type ScannerSessionRecord, type StaffAssignmentStore, type StaffPhoneVerification } from './domain/staff.js';
+export { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
 export { GetVerificationStatus } from './application/get-verification-status.js';
 export { JoseTokenSigner, tokenIssuerFromEnv } from './adapters/jose-token-signer.js';
 export { TokenKeyRing } from './adapters/token-keys.js';

@@ -32,10 +32,11 @@ export function scannerDeviceLookupHandlers(
         cb(null, { found: false });
         return;
       }
+      const expectedType = credentialType === 'SCANNER_CREDENTIAL_TYPE_MTLS_CERT' ? 'MTLS_CERT' : 'DEVICE_KEY';
       uc.store
         .byThumbprint(jkt)
         .then((d) => {
-          if (!d) {
+          if (!d || d.credentialType !== expectedType) {
             cb(null, { found: false });
             return;
           }

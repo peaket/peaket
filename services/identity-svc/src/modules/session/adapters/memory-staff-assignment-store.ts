@@ -1,12 +1,13 @@
 // 시험·로컬용 배정·스캐너 세션 저장소. 운영은 DrizzleStaffAssignmentStore를 쓴다.
-import type {
-  AcceptInvitationResult,
-  ScannerSessionRecord,
-  StaffAssignmentRecord,
-  StaffAssignmentSelfView,
-  StaffAssignmentStatus,
-  StaffAssignmentStore,
-  StaffRole,
+import {
+  type AcceptInvitationResult,
+  type ScannerSessionRecord,
+  StaffAccountInactive,
+  type StaffAssignmentRecord,
+  type StaffAssignmentSelfView,
+  type StaffAssignmentStatus,
+  type StaffAssignmentStore,
+  type StaffRole,
 } from '../domain/staff.js';
 
 export interface MemoryStaffAssignmentRow {
@@ -151,6 +152,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     approvedAtMs: number;
     expiresAtMs: number;
   }): Promise<void> {
+    if ((this.accounts.get(i.accountId)?.status ?? 'ACTIVE') !== 'ACTIVE') throw new StaffAccountInactive();
     for (const [id, s] of this.sessions) {
       if (s.terminatedAt !== null) continue;
       const a = this.assignments.get(s.assignmentId);
@@ -212,5 +214,16 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       sessions++;
     }
     return { assignments, sessions };
+  }
+
+  async inactiveAccountIdsWithStaff(limit: number): Promise<string[]> {
+    const ids = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.accountId && (a.status === 'ASSIGNED' || a.status === 'INVITED') && (this.accounts.get(a.accountId)?.status ?? 'ACTIVE') !== 'ACTIVE') ids.add(a.accountId);
+    }
+    for (const s of this.sessions.values()) {
+      if (s.terminatedAt === null && (this.accounts.get(s.accountId)?.status ?? 'ACTIVE') !== 'ACTIVE') ids.add(s.accountId);
+    }
+    return [...ids].slice(0, limit);
   }
 }
