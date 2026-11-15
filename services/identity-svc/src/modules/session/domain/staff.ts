@@ -7,11 +7,9 @@ export type StaffAssignmentStatus = 'INVITED' | 'ASSIGNED' | 'REVOKED' | 'ENDED'
 export interface ScannerSessionRecord {
   scannerSessionId: string;
   assignmentId: string;
-  /** 배정된 스태프 계정. 계정 상태(ACTIVE)를 함께 보기 위해 둔다 */
+  /** 배정된 스태프 계정. 계정 상태(ACTIVE)를 함께 보고, 기기 단독 업로드가 기록의 계정을 정할 때도 쓴다(C1-11) */
   accountId: string;
   deviceId: string;
-  /** 배정된 스태프 계정. 기기 단독 업로드가 기록의 계정을 정할 때 쓴다(C1-11) */
-  accountId?: string;
   role: StaffRole;
   proxy: boolean;
   expiresAt: number;

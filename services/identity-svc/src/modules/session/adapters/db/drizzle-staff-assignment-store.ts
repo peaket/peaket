@@ -137,7 +137,6 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         assignmentId: scannerSession.staffAssignmentId,
         accountId: staffAssignment.accountId,
         deviceId: scannerSession.scannerDeviceId,
-        accountId: staffAssignment.accountId,
         role: scannerSession.role,
         proxy: scannerSession.proxy,
         expiresAt: scannerSession.expiresAt,

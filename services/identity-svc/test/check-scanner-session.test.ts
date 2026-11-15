@@ -20,7 +20,6 @@ function world() {
     assignmentId: 'a-1',
     accountId: 'acc-1',
     deviceId: 'dev-1',
-    accountId: 'acc-1',
     role: 'gate_staff',
     proxy: false,
     expiresAt: NOW + HOUR,
