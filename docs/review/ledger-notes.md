@@ -15,8 +15,8 @@
 | --- | --- | --- | --- | --- |
 | Q-T2 | 측정 |  | HOT-460 | PRF-220 v1 합본 K1 1천·1만 측정(2026-11-11-k1-v1-local-1k-r1~r3·10k-r1~r3). 1천은 entry p99가 한 번 39/1000 위반, 1만은 진입 p99 132~250/10000·실패 43~141건으로 목표 미달. 10만·외삽·비례 효율은 HOT-460 |
 | Q-T5 | 측정 |  | PRF-220 | `numberbatch` TLS 켬 3·끔 1(2026-11-11-numberbatch-tls-r1~r3·notls-r1). 켬 p99 4.308·4.308·4.265ms, 끔 4.181ms, valid. 판정 기준 200ms 통과 |
-| SR-T13 | 측정 |  | BAT-165 heavy gate | 오픈 직전 몰림·무작위 입력에서 검색 p95, 검색 전용 연결 묶음 포화, 요청 한도는 k6 시나리오 몫이다. 1차 단위 시험은 순위·쪽만 본다 |
-| SR-T13 ② | 측정 |  | HOT-400 | gw-fan의 IP별 요청 한도는 게이트웨이(HOT-400, 묶음 BAT-055)가 생긴 뒤 같은 k6 시나리오로 잰다(2026-11-16) |
+| SR-T13 ① | 측정 |  | BAT-165 heavy gate | 오픈 직전 몰림·무작위 입력에서 검색·자동완성 원본 p95와 검색 전용 연결 묶음 대기·503을 로컬 k6로 잰다(ADR-0271 결정 5, 계획 docs/review/plans/BAT-165.md 웨이브 7). 결과는 docs/review/measurements/에 남긴다 |
+| SR-T13 ② | 측정 |  | HOT-400 | gw-fan의 IP별 요청 한도는 게이트웨이(HOT-400, 묶음 BAT-055)가 생긴 뒤 같은 k6 시나리오로 잰다. BAT-165 범위에서 뺐다(2026-11-16) |
 | S-T1 | 측정 |  | PRF-220 | 1개 좌석 1,000명 동시 경합. v1 K2 TLS 켬 3·끔 1(2026-11-11-k2-v1-hot-tls-r1~r3·notls-r1)은 발생기 놓침 920~1,504로 모두 무효, p99 271~318ms·서버 p99 250~270ms로 목표(50ms) 미달. 서비스 분리 뒤 HOT-460에서 다시 잰다 |
 | S-T8 | 측정 |  | PRF-140 | Hard Sale 최종 경합. 판정이 부하 수치다 |
 | S-T9 | 측정 |  | 구간 측정 | Redis 주 노드 장애 복구 |
@@ -79,20 +79,9 @@
 | V-T31 ② | 다른 단계 |  | HOT-400 | 앱 서버 모드 단위 시험(`packages/platform/test/telemetry-untrusted.test.ts`)은 있다. 실제 앱 서버 경로는 게이트웨이 단계다. 그 시험 이름에 ②를 달면 자동 시험이 되어 이 줄과 부딪히므로 달지 않는다(BAT-200에서 정함, 2026-11-10) |
 | Q-T36 ⑦ | 다른 단계 |  | HOT-251 | 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 core-svc 어댑터가 본다(소유자 결정 2026-11-10, OPEN[33] (가), ADR-0261 결정 9). 어댑터는 HOT-251(묶음 BAT-158)이 만든다. 사본에 넘기는 수명은 BAT-157의 Q-T36 ④가 본다(2026-11-10) |
 | Q-T36 ⑧ | 다른 단계 |  | HOT-346 | 로비 참가·진입의 403 `sale-eligibility-required`를 참가 실패가 아니라 공연 상세의 예매 제한 안내로 돌리는 화면 몫이다(apps/web 대기실·공연 상세, docs/frontend.md §3.4). 서버 몫과 BAT-203 계획에서 나눴다(2026-11-10, ADR-0265) |
-| SR-T7 | 다른 단계 |  | BAT-165 heavy gate | DB 문자 분류가 C·POSIX가 아니고 조각 비교가 되는 것은 실제 PostgreSQL 마이그레이션·통합 시험 몫이다(ADR-0268) |
-| SR-T8 | 다른 단계 |  | HOT-280 후속 | 판매 승인·반려·판매 중지·회차 삭제·취소 공연의 반영은 purchase-svc `event_sale` 사본이 생긴 뒤 본다. 1차 검색 문서는 시각으로 UPCOMING·ON_SALE·ENDED만 만든다(ADR-0268) |
-| SR-T8 ③ | 다른 단계 |  | LCH-090·GAT-110 | 판매 중지·재개(LCH-090, 묶음 BAT-620)와 회차 전부 취소(GAT-110, 묶음 BAT-420)를 처리하는 유스케이스가 아직 없다. 그 단계가 같은 트랜잭션에서 검색 읽기 모델을 고치고 커밋 뒤 CDN `/v1/search*` 무효화와 `search_removed` 줄을 남기는지 본다(docs/features/search.md §2.3, 2026-11-16) |
-| SR-T11 ② | 다른 단계 |  | HOT-450 | CloudFront 캐시 정책이 쿠키를 키에서 빼는지는 배포 구성 검사다. 입구 CDN 배포(HOT-450, 묶음 BAT-070) 몫이다(2026-11-16) |
-| SR-T12 | 다른 단계 |  | BAT-165 heavy gate | 골든 세트 100검색 CI는 웨이브 끝 비싼 게이트에서 만든다. 1차 단위 시험은 순위·필터·0건 제안·자동완성 몫을 덮는다 |
-| SR-T15 | 다른 단계 |  | BAT-165 heavy gate | search_document 뷰는 항상 지금 값을 보여 주므로 10초 전파를 기다리지 않는다. 실제 읽기 복제본·사전 판 읽기는 DB 통합 시험 몫이다 |
-| SR-T17 | 다른 단계 |  | BAT-165 후속 | 검색어 가리기와 0건 목록 최소 빈도는 검색 로그·품질 사건을 붙이는 후속 배치 몫이다. 1차는 검색어를 로그에 남기지 않는다 |
+| SR-T8 ③ | 다른 단계 |  | LCH-090·GAT-110 | 판매 중지·재개(LCH-090, 묶음 BAT-620)와 회차 전부 취소(GAT-110, 묶음 BAT-420)를 처리하는 유스케이스가 아직 없다. 그 단계가 같은 트랜잭션에서 `syncSearchReadModel`을 부르고 커밋 뒤 CDN `/v1/search*` 무효화와 `search_removed` 줄을 남기는지 본다. 동기화 함수와 경로 무효화 포트는 BAT-165 웨이브 7이 만든다(ADR-0271 결정 2·8, 2026-11-16) |
+| SR-T11 ② | 다른 단계 |  | HOT-450 | CloudFront 캐시 정책이 쿠키를 키에서 빼는지는 배포 구성 검사다. 입구 CDN 배포(HOT-450, 묶음 BAT-070) 몫이고 BAT-165 범위에서 뺐다(2026-11-16) |
 | catalog-review:v5.0.0-1.3.9 | 해당 없음 |  | — | memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
-| catalog-review:v5.0.0-14.2.3 | 해당 없음 |  | — | 검색어를 외부 분석·추적 도구로 보내지 않는다. 1차 검색은 응답을 만들 뿐 외부 호출이 없다 |
-| catalog-review:v5.0.0-14.2.5 | 다른 단계 |  | BAT-165 heavy gate | CDN 캐시 정책 경로 표와 없는 파일 404는 게이트웨이·CDN 배포 설정 몫이다. 검색 응답은 Cache-Control을 단다 |
-| catalog-review:v5.0.0-16.1.1 | 다른 단계 |  | BAT-165 후속 | 검색·자동완성 접근 로그와 `search_query` 정규 로그 줄은 로그 목록을 붙이는 후속 배치 몫이다. 1차는 검색어를 로그에 남기지 않는다 |
-| catalog-review:v5.0.0-16.2.5 | 다른 단계 |  | BAT-165 후속 | 검색어를 로그에 남기지 않으므로 가리기 규칙을 아직 쓰지 않는다. 로그를 붙일 때 정규화·50자·계정 비연결 규칙을 함께 넣는다 |
-| catalog-review:v5.0.0-16.3.3 | 다른 단계 |  | BAT-165 heavy gate | 검색·자동완성 레이트 리밋 초과와 검색 전용 연결 묶음 포화(503) 기록은 게이트웨이·검색 연결 묶음 배포 몫이다 |
-| catalog-review:v5.0.0-2.4.1 | 다른 단계 |  | BAT-165 heavy gate | 검색·자동완성 IP별 레이트 리밋과 검색 전용 연결 묶음(파드마다 10개 [가정])은 gw-fan·CDN·배포 설정 몫이다. 1차 검색은 공개 읽기와 쪽 상한만 둔다 |
 | frontend:v5.0.0-3.5.4 | 다른 단계 |  | GAT-040 | 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다(ADR-0065 결정 1). 남은 몫은 같은 `www`에 둔 월렛 서비스 워커 범위다: 정본은 `/my/tickets/sw.js`·범위 `/my/tickets/`(docs/frontend.md §5.4)인데 BAT-350(R-554)은 `/serwist/sw.js`·`Service-Worker-Allowed: /my/tickets`(끝 `/` 없음)로 냈다. 범위·위치 PoC는 GAT-040(wbs 5.1.4) 몫이고, 관제 원격 위젯 출처는 OPS-350이다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 
@@ -105,8 +94,6 @@
 | FE-T8 | 사람 확인 |  | 브라우저 확인 | docs/review/browser-check/HOT-356-358.md에서 시뮬레이터 성공과 새로고침을 봤다. 포트원 복귀와 쿠키 없는 첫 요청은 아직 못 봤다 |
 | FE-T18 | 사람 확인 |  | BAT-580 | 화면 낭독기·키보드 완주는 사람이 본다. 이름을 단 자동 시험(axe·목록 구조)은 그 일부다. 3조합·3시나리오 확인 목록은 docs/review/manual-a11y/LCH-190.md(2026-11-13) |
 | POL-027 | 사람 확인 | C | BAT-590 | 법률 항목 표기 규칙과 검토 목록은 docs/review/legal/BAT-590-legal-review.md에 정리했다. 변호사 검토 제출과 결론 반영은 소유자 몫이다(2026-11-13) |
-| SR-T10 | 사람 확인 |  | BAT-165 browser check | 한글 조합 중 Enter·Esc를 처리하지 않는 것은 실제 브라우저 입력기로 확인한다. 코드는 `isComposing`·`keyCode 229`를 본다(packages/ds SearchField·WebSearchBox) |
-| SR-T14 | 사람 확인 |  | BAT-165 browser check | `/search`의 noindex·sitemap 제외는 브라우저 확인과 화면 머리 검사로 본다. 화면 주석과 metadata는 `SearchPage`에 있다 |
 
 ## 미검증
 
@@ -118,6 +105,7 @@
 | P-T38 | 미검증 |  | 실제 결제창 | 실제 결제창(토스 이동 방식, 포트원 리디렉션 방식)에서 돌아온 첫 요청은 결제사 계정이 있어야 본다. 브라우저 확인은 시뮬레이터로만 했다 |
 | C-T43 | 미검증 | B | BAT-620 | 수요 예측식·기본 비율·규모 올리기·T-30분·LARGE 간격·commander 예외는 core-svc 시험으로 확인했다. 화면의 '규모 올리기 검토'·SEV3 알림(24시간 뒤 SEV2)·감사 로그·변경 동결 달력 재계산은 ops-svc·감사·배포 단계가 없어 아직 볼 수 없다 |
 | D-T12 ② | 미검증 | B | BAT-202 | 조직 Actions 정책은 GitHub 조직 설정이라 저장소 시험으로 보지 못한다. 2026-11-10 조직 API에서 `sha_pinning_required: true`·허용 목록을 읽었지만 동작은 보지 않았다. 소유자가 `infra/stacks/global/github`의 `actions_patterns_allowed`(Scorecard 액션 더함)를 적용한 뒤 태그로 참조한 시험 워크플로가 실패하는지 한 번 보면 '사람 확인'으로 바꾼다(BAT-202 계획 7장 1·2) |
+| SR-T15 ③ | 미검증 |  | AWS 계정 뒤(OPEN 후보) | Aurora 읽기 전용 복제본에서 `REPEATABLE READ` 읽기 전용 트랜잭션이 되는지는 AWS 계정과 클러스터 비용이 있어야 본다(소유자 자원 한도). 대역은 SR-T15 ②의 로컬 PostgreSQL 18 핫 스탠바이 통합 시험이다. BAT-165 범위에서 뺐다(2026-11-16) |
 
 ## 등급
 

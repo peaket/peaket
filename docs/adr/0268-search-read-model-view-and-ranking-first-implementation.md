@@ -1,6 +1,6 @@
 # ADR-0268: 검색 읽기 모델 1차는 뷰로 두고, 순위·필터·0건 제안을 core-svc에서 한다
 
-- **상태**: 채택(2026-11-12, 추천 적용, BUILD_ORDER HOT-270·HOT-280 / BAT-165).
+- **상태**: 채택(2026-11-12, 추천 적용, BUILD_ORDER HOT-270·HOT-280 / BAT-165). 결정 1(뷰)과 결정 4의 사전 통째로 들고 있기는 [ADR-0271](0271-search-read-model-tables-incremental-dictionary.md)이 바꿨다(2026-11-16).
 - **관련**: [docs/features/search.md](../features/search.md) §2.2·§4~§6, [docs/data.md](../data.md) `search_document`, ADR-0094, ADR-0242.
 - **관련 ID**: SR-T1~SR-T17, HOT-270, HOT-280.
 

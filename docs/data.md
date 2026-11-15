@@ -533,7 +533,7 @@ erDiagram
         timestamptz removed_at
     }
     search_document {
-        uuid production_id PK "검색 읽기 모델의 공연 한 줄(ADR-0094). 카탈로그와 같은 트랜잭션에서 고친다. 지우면 같은 트랜잭션에서 search_removal에 적는다. 2026-11-12 1차 구현은 production·event·place·artist·search_alias·production_image·wish를 모은 뷰로 두어 항상 지금 값을 보여 준다(ADR-0268)"
+        uuid production_id PK "검색 읽기 모델의 공연 한 줄(ADR-0094). 카탈로그와 같은 트랜잭션에서 고친다. 지우면 같은 트랜잭션에서 search_removal에 적는다. 2026-11-12 1차 구현은 production·event·place·artist·search_alias·production_image·wish를 모은 뷰였다(ADR-0268). 2026-11-16부터 그 계산은 원천 뷰 search_document_source로 두고 이 표를 같은 트랜잭션의 동기화 함수가 고친다(추천 적용, 2026-11-16, ADR-0271)"
         text title
         text genre
         uuid place_id
