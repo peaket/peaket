@@ -545,6 +545,10 @@ export class ScannerGuard implements CanActivate {
 
     const device = await scanner.deviceByThumbprint(verified.jkt);
     if (!device) throw new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' });
+    // 인증서 지문으로 찾은 기기는 MTLS_CERT, DPoP 키 지문으로 찾은 기기는 DEVICE_KEY여야 한다(다른 지문·다른 종류 거절).
+    if (device.credentialType !== undefined && device.credentialType !== (mtlsThumbprint !== undefined ? 'MTLS_CERT' : 'DEVICE_KEY')) {
+      throw scannerUnauthorized(reply, 'invalid_token');
+    }
     if (device.status !== 'ACTIVE') throw new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' });
     // 마지막 연락 시각은 관측용이라 실패해도 요청을 막지 않는다.
     try {

@@ -8,7 +8,7 @@
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
-import { createDatabase, createService, HotPathMetrics, inClusterLeaseApi, type LeaseApi, LeaseElector, memoryLeaseApi, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, RedisReauthJtiStore, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
@@ -119,6 +119,8 @@ export interface StartedService {
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
   const config = loadPaymentServiceConfig(env);
+  const internalGrpcToken = internalGrpcTokenFromEnv(env);
+  const reauthRedis = env.PEAKET_REAUTH_REDIS_URL ? await createHotRedis({ url: env.PEAKET_REAUTH_REDIS_URL }) : undefined;
   // 잘못된 주소·빠진 키·환경과 어긋난 키 접두사는 여기서, 듣기 전에 시작 실패다. 어댑터 없이 켜지는 것은 local·ci뿐이다(아래 경고 한 줄과 no_adapter 지표, BUILD_ORDER PRF-184)
   const simulator = loadSimulatorGatewayConfig(env);
   const toss = loadTossGatewayConfig(env);
@@ -226,6 +228,7 @@ let circuitsRef: PgCircuits | undefined;
               jwksUrl: env.PEAKET_IDENTITY_JWKS_URL,
               issuer: env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
               clock: systemClock,
+              ...(reauthRedis ? { jti: new RedisReauthJtiStore(reauthRedis) } : {}),
             })
           : new UnavailableReauthVerifier(),
       },
@@ -290,6 +293,7 @@ let circuitsRef: PgCircuits | undefined;
         handlers: compensationTransferHandlers(compensationTransfers),
       },
     ],
+    internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.payment.v1.CompensationTransferService'] },
   });
   service.readiness.complete('grpc');
   service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
@@ -336,7 +340,7 @@ let circuitsRef: PgCircuits | undefined;
       stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop())],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
       closeService: () => service.close(),
-      closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close()],
+      closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), reauthRedis?.close()],
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
     });
   };

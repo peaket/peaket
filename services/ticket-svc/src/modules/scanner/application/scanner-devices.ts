@@ -172,7 +172,7 @@ export class ScannerDevices {
    * 출발지 IP 실패 한도는 코드를 꺼내기 전에 본다(막힌 IP가 코드를 소모하지 않게).
    * 실패는 IP·전체 카운터에 세고, 성공은 세지 않는다(O-T42).
    */
-  async enroll(q: { code: unknown; jkt: unknown; ip?: string }): Promise<{ deviceId: string }> {
+  async enroll(q: { code: unknown; jkt: unknown; ip?: string; credentialType?: 'DEVICE_KEY' | 'MTLS_CERT'; thumbprint?: string }): Promise<{ deviceId: string }> {
     const ip = q.ip && q.ip.length <= 128 ? q.ip : 'unknown';
     if (this.d.limiter && !(await this.d.limiter.allowed(ip))) throw new EnrollmentRateLimited();
     const fail = async (reason: EnrollmentCodeRejected['reason']): Promise<never> => {
@@ -188,7 +188,13 @@ export class ScannerDevices {
     const deviceId = await this.d.codes.take(enrollmentCodeHash(code));
     if (!deviceId) return fail('USED');
     try {
-      const device = await this.d.store.bindCredential({ deviceId, jkt, atMs: this.d.clock.now() });
+      const device = await this.d.store.bindCredential({
+        deviceId,
+        jkt,
+        atMs: this.d.clock.now(),
+        ...(q.credentialType ? { credentialType: q.credentialType } : {}),
+        ...(q.thumbprint ? { thumbprint: q.thumbprint } : {}),
+      });
       if (!device) return fail('DEVICE');
       return { deviceId: device.deviceId };
     } catch (e) {

@@ -79,11 +79,12 @@ export class DrizzleScannerDeviceStore implements ScannerDeviceStore {
     return row ? recordOf(row) : undefined;
   }
 
-  async bindCredential(i: { deviceId: string; jkt: string; atMs: number }): Promise<ScannerDeviceRecord | undefined> {
+  async bindCredential(i: { deviceId: string; jkt: string; atMs: number; credentialType?: 'DEVICE_KEY' | 'MTLS_CERT'; thumbprint?: string }): Promise<ScannerDeviceRecord | undefined> {
     try {
+      const thumbprint = i.thumbprint ?? i.jkt;
       const [row] = await this.database.db
         .update(scannerDevice)
-        .set({ credentialType: 'DEVICE_KEY', credentialThumbprint: Buffer.from(i.jkt, 'base64url') })
+        .set({ credentialType: i.credentialType ?? 'DEVICE_KEY', credentialThumbprint: Buffer.from(thumbprint, 'base64url') })
         .where(and(eq(scannerDevice.id, i.deviceId), eq(scannerDevice.status, 'ACTIVE')))
         .returning();
       return row ? recordOf(row) : undefined;

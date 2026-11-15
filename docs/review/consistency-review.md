@@ -702,6 +702,7 @@
 | R-596 | M5 변이 시험 공백 9건(jkt 자기 참조·htu 호스트·validFrom·valid:false+role 등) | scanner dpop.test, platform scanner-auth.test, identity check-scanner-session.test, ticket scanner-device.test, scanner version-vector.test | 회귀를 잡는 시험을 더하고 표적 시험으로 확인 | 적용 |
 | R-600 | C2-01·C2-05(탈퇴·병합 계정의 스태프 배정·스캐너 세션 잔존, 계정당 스캐너 세션 하나 미보장) | identity staff·withdraw·merge·check-scanner-session, migrations 0033 | 탈퇴·병합 시 배정·세션 종료와 STAFF_REVOKED 사건, 계정 ACTIVE 확인, staff_account_id 부분 유일 인덱스·계정 잠금 | 적용 |
 | R-601 | C2-02·C2-03·C2-04·CONS-07·OPS-05(스태프 초대 휴대폰 본인확인 없음·내부 토큰 fail-open·리프레시 재시도 반복) | platform auth·service, identity staff-invitations·refresh·admin, openapi | 휴대폰 본인확인 포트·503, 내부 토큰 닫힘 실패·상수 시간 비교, 재시도 1회·prev NULL | 적용 |
+| R-608 | SEC-01·03·08·COV2-01(gRPC 무인증·재인증 jti 재사용·mTLS 기기 결속 없음·ApplyLabel acted_by 임의 지정) | platform grpc/token/verify, ticket/identity/ops/payment/purchase/trust/core 클라이언트·서버, scanner enrollment | 내부 gRPC 토큰·jti 1회용·MTLS_CERT 지문 결속·acted_by 증명 | 적용 |
 
 ## 4. 숫자 일치표
 

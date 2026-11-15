@@ -6,6 +6,7 @@ import { SpanKind, SpanStatusCode, context, propagation, trace } from '@opentele
 import { type Clock, systemClock } from './clock.js';
 import { GRPC_LB_PROFILES, type GrpcLbProfile } from './config.js';
 import { requestContext } from './context.js';
+import { INTERNAL_GRPC_ACTOR_HEADER, INTERNAL_GRPC_ACTOR_PROOF_HEADER, INTERNAL_GRPC_CALLER_HEADER, INTERNAL_GRPC_TOKEN_HEADER, internalGrpcActorProof, internalGrpcServerInterceptor } from './internal-grpc.js';
 
 export { GRPC_LB_PROFILES, type GrpcLbProfile } from './config.js';
 
@@ -53,10 +54,15 @@ export function grpcChannelOptions(profile: GrpcLbProfile, extra: grpc.ChannelOp
 }
 
 /** 서버 설정. headless-round-robin이면 연결 수명을 둔다(측정 전용 프로필, guidelines §5) */
-export function grpcServerOptions(profile: GrpcLbProfile, extra: grpc.ChannelOptions = {}): grpc.ChannelOptions {
+export function grpcServerOptions(
+  profile: GrpcLbProfile,
+  extra: grpc.ChannelOptions = {},
+  internal?: { token?: string; services?: readonly string[] },
+): grpc.ServerOptions {
   const p = profileOf(profile);
   refuseLocked(extra, SERVER_LOCKED, '서버 설정');
-  return p === 'headless-round-robin' ? { ...extra, 'grpc.max_connection_age_ms': GRPC_HEADLESS_MAX_CONNECTION_AGE_MS } : { ...extra };
+  const base: grpc.ServerOptions = p === 'headless-round-robin' ? { ...extra, 'grpc.max_connection_age_ms': GRPC_HEADLESS_MAX_CONNECTION_AGE_MS } : { ...extra };
+  return internal?.token ? { ...base, interceptors: [internalGrpcServerInterceptor(internal.token, internal.services)] } : base;
 }
 
 /** dns:///<호스트>:<포트>. service는 Service 이름, headless-round-robin은 헤드리스 Service 이름을 준다 */
@@ -72,6 +78,12 @@ export interface GrpcInterceptorOptions {
   /** 한 번 부를 때의 데드라인 상한(ms). 요청 안이면 남은 시간과 짧은 쪽 */
   timeoutCapMs: number;
   clock?: Clock;
+  /** 내부 gRPC 공유 토큰. 없으면 local·ci처럼 머리를 싣지 않는다 */
+  internalToken?: string;
+  /** 호출자 서비스 이름(예 ops-svc). 내부 토큰과 함께 보내 서버가 호출자를 가른다 */
+  caller?: string;
+  /** 처리자(관리 계정 ID). 있으면 토큰으로 만든 증명을 함께 보낸다(ApplyLabel의 acted_by 결속) */
+  actor?: string;
 }
 
 const tracer = trace.getTracer('@peaket/platform');
@@ -110,6 +122,12 @@ export function peaketGrpcInterceptor(o: GrpcInterceptorOptions): grpc.Intercept
     return new grpc.InterceptingCall(nextCall(options), {
       start(metadata, listener, next) {
         propagation.inject(trace.setSpan(context.active(), span), metadata, { set: (m, k, v) => (m as grpc.Metadata).set(k, v) });
+        if (o.internalToken) metadata.set(INTERNAL_GRPC_TOKEN_HEADER, o.internalToken);
+        if (o.caller) metadata.set(INTERNAL_GRPC_CALLER_HEADER, o.caller);
+        if (o.internalToken && o.actor) {
+          metadata.set(INTERNAL_GRPC_ACTOR_HEADER, o.actor);
+          metadata.set(INTERNAL_GRPC_ACTOR_PROOF_HEADER, internalGrpcActorProof(o.internalToken, o.actor));
+        }
         next(metadata, {
           onReceiveStatus(status, nextStatus) {
             end(status.code);
@@ -138,7 +156,8 @@ type ClientConstructor<T extends grpc.Client> = new (address: string, credential
  * 의존성 호출은 차단기(createCircuitBreaker)로 감싼다
  */
 export function createGrpcClient<T extends grpc.Client>(Ctor: ClientConstructor<T>, o: GrpcClientOptions): T {
-  const interceptor = peaketGrpcInterceptor(o);
+  const internalToken = o.internalToken ?? process.env.PEAKET_INTERNAL_GRPC_TOKEN;
+  const interceptor = peaketGrpcInterceptor({ ...o, ...(internalToken ? { internalToken } : {}) });
   refuseLocked(o.extra ?? {}, CLIENT_LOCKED, '클라이언트 설정');
   return new Ctor(grpcTarget(o.host, o.port), grpc.credentials.createInsecure(), { ...grpcChannelOptions(o.profile, o.extra), interceptors: [interceptor] });
 }

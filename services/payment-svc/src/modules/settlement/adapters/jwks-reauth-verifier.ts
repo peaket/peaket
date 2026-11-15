@@ -1,6 +1,6 @@
 // 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, typ reauth+jwt, act PAYOUT_ACCOUNT/BOOKER_EXPORT).
 // JWT 확인은 platform TokenVerifier가 하고, 이 서비스는 작업 묶음·패스키 요소만 더 본다.
-import { createExternalHttpClient, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
+import { createExternalHttpClient, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
 import type { ReauthVerifier, VerifiedReauth } from '../domain/ports.js';
 import { SettlementProblem } from '../domain/settlement.js';
 
@@ -8,8 +8,12 @@ const reauthRequired = () => new SettlementProblem('reauth-required', 403, '다�
 
 export class JwksReauthVerifier implements ReauthVerifier {
   readonly #verifier: TokenVerifier;
+  readonly #jti?: ReauthJtiStore;
+  readonly #clock: Clock;
 
-  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch }) {
+  constructor(o: { jwksUrl: string; issuer: string; clock?: Clock; fetch?: typeof fetch; jti?: ReauthJtiStore }) {
+    this.#jti = o.jti;
+    this.#clock = o.clock ?? systemClock;
     const u = new URL(o.jwksUrl);
     const client = createExternalHttpClient({
       provider: 'identity-jwks',
@@ -31,6 +35,7 @@ export class JwksReauthVerifier implements ReauthVerifier {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'partner', sessionId: o.sessionId, act: o.act });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw reauthRequired();
+      if (this.#jti && !(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
       return { jti: v.jti, accountId: v.accountId, sessionId: v.sessionId, act: v.act, factors };
     } catch (e) {
       if (e instanceof TokenRejected) throw reauthRequired();

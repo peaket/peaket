@@ -40,13 +40,14 @@ export class MemoryScannerDeviceStore implements ScannerDeviceStore {
     return structuredClone(next);
   }
 
-  async bindCredential(i: { deviceId: string; jkt: string; atMs: number }): Promise<ScannerDeviceRecord | undefined> {
+  async bindCredential(i: { deviceId: string; jkt: string; atMs: number; credentialType?: 'DEVICE_KEY' | 'MTLS_CERT'; thumbprint?: string }): Promise<ScannerDeviceRecord | undefined> {
     const d = this.devices.get(i.deviceId);
     if (!d || d.status !== 'ACTIVE') return undefined;
+    const thumbprint = i.thumbprint ?? i.jkt;
     for (const other of this.devices.values()) {
-      if (other.deviceId !== i.deviceId && other.credentialThumbprint === i.jkt) throw new ScannerDeviceKeyConflict();
+      if (other.deviceId !== i.deviceId && other.credentialThumbprint === thumbprint) throw new ScannerDeviceKeyConflict();
     }
-    const next: ScannerDeviceRecord = { ...d, credentialType: 'DEVICE_KEY', credentialThumbprint: i.jkt };
+    const next: ScannerDeviceRecord = { ...d, credentialType: i.credentialType ?? 'DEVICE_KEY', credentialThumbprint: thumbprint };
     this.devices.set(i.deviceId, next);
     return structuredClone(next);
   }

@@ -1,7 +1,7 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 import { fileURLToPath } from 'node:url';
-import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, RedisReauthJtiStore, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
 import { GrpcReviewEligibility, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
@@ -82,6 +82,7 @@ const service = await createService({
     review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
     identityGrpc,
+    ...(queueRedis ? { reauthJti: new RedisReauthJtiStore(queueRedis) } : {}),
   }),
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);

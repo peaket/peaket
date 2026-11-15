@@ -28,7 +28,7 @@ export function scannerDeviceLookupHandlers(
       const r = call.request;
       const credentialType = typeof r.credential_type === 'string' ? r.credential_type : '';
       const jkt = thumbprintOf(r.credential_thumbprint);
-      if (credentialType !== 'SCANNER_CREDENTIAL_TYPE_DEVICE_KEY' || jkt === undefined) {
+      if ((credentialType !== 'SCANNER_CREDENTIAL_TYPE_DEVICE_KEY' && credentialType !== 'SCANNER_CREDENTIAL_TYPE_MTLS_CERT') || jkt === undefined) {
         cb(null, { found: false });
         return;
       }

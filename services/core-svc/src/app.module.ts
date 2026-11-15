@@ -24,6 +24,7 @@ export class AppModule {
           notify?: { notificationTransport?: NotificationTransport };
           exportJwks?: { url: string; issuer: string };
           identityGrpc?: string;
+          reauthJti?: import('@peaket/platform').ReauthJtiStore;
         }
       | {
           memory: true;
@@ -51,6 +52,7 @@ export class AppModule {
             partnerDatabase: o.partnerDatabase,
             ...(o.exportJwks ? { jwks: o.exportJwks } : {}),
             ...(o.identityGrpc ? { identityGrpc: o.identityGrpc } : {}),
+            ...(o.reauthJti ? { reauthJti: o.reauthJti } : {}),
           }),
         ],
       };

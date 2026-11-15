@@ -3,7 +3,7 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 import 'reflect-metadata';
-import { createDatabase, createExternalHttpClient, createService } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, createHotRedis, createService, RedisReauthJtiStore } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -61,12 +61,20 @@ const priority =
         copies: new HttpQueuePriorityGrantCopies(queueClient, internalToken),
       }
     : undefined;
+// 재인증 jti 1회용(SEC-03). 주소가 없으면 local·ci용 메모리 기록을 쓴다.
+const reauthRedis = process.env.PEAKET_REAUTH_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_REAUTH_REDIS_URL }) : undefined;
 // 지급 승인 업무(BAT-610 잔여). payment-svc 내부 경로가 없으면 503이고, 재인증 JWKS가 없으면 승인은 403이다.
 const payouts = paymentUrl
   ? {
       payments: new HttpPayoutPaymentClient(paymentUrl, internalToken),
       ...(process.env.PEAKET_IDENTITY_JWKS_URL
-        ? { reauth: new JwksApprovalVerifier({ jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' }) }
+        ? {
+            reauth: new JwksApprovalVerifier({
+              jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL,
+              issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
+              ...(reauthRedis ? { jti: new RedisReauthJtiStore(reauthRedis) } : {}),
+            }),
+          }
         : {}),
     }
   : undefined;
@@ -151,6 +159,7 @@ process.once('SIGTERM', () => {
       }
       scannerDevices?.close();
       adminAuthz.close();
+      await reauthRedis?.close();
       await database.close();
     }
   })();
