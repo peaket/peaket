@@ -717,6 +717,8 @@
 | R-614 | B3-H01·H03·OPSV-01·02·04(명령 역할 미강제·감사 체인 원본 변조 미탐지·상태/감사 트랜잭션 분리·version 동시성 시험 공백·감사 payload 누락) | ops commands·audit chain·event cancellations·payout approvals·migration·시험 | 유형별 역할 메타데이터·record_json/prev_hash 재계산·상태+감사 한 트랜잭션·version 조건·감사 payload | 적용 |
 | R-604 | B1 중간 7건·TEST-03/04(결제 중 만료·회수, acted_by, 회차 취소 충돌, 일시정지 경합, 고아 보류, 재구성 HELD, 자동 정지 경계, USED 전이) | purchase priority/refund/rebuild·ops acted_by | active order/pin 가드·조건부 update·보상·재구성 필터·판정 주기·USED | 적용 |
 | R-617 | COV2-03·04·06·OPSV-03·05(통보 멱등·후기 상세 계약 누락·탈퇴 후 후기 PII·포트원 수기 실행 감사 누락·회차 취소 재인증 결제 URL 결합) | trust/core takedown·review·openapi/contracts·ops payout/reauth·시험 | 멱등 트랜잭션·계약 추가·익명화·감사·검증기 분리 | 적용 |
+| R-623 | M4-01·04·08, OPS-01·03·04·07, B3-H01·H03, SEC-02, OPSV-01·02·03·04 시험 공백(수정 에이전트와 다른 세션이 계약 고정) | services/ops-svc/test 4파일 | 명령 역할·감사 체인 재계산·체크포인트 원자 포트·영업일 기한·version CAS·RUNNING 선저장·재인증·포트원 감사 | 적용 |
+| R-626 | C2-01·C2-02·CONS-07·OPS-05(탈퇴 스태프 정리, 초대 휴대폰 본인확인, 리프레시 재시도 1회, 내부 토큰 fail-closed) | identity withdrawal·check-scanner-session·staff-invitations·verification-staff-phone, platform internal-token-boot | 새 회귀 시험만 추가(생산 코드 무수정) | 적용 |
 
 ## 4. 숫자 일치표
 
