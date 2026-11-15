@@ -94,6 +94,8 @@ export interface StatementRecord {
   payoutDate: string | null;
   payoutBankCode: string | null;
   payoutAccountLast4: string | null;
+  /** 이 정산서를 지급하는 묶음. 승인 시점에 묶여 실행은 이 목록만 지급한다(CONS-02). */
+  payoutBatchId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -176,6 +178,7 @@ export interface StatementView {
   payoutDate: string | null;
   payoutBankCode: string | null;
   payoutAccountLast4: string | null;
+  payoutBatchId: string | null;
 }
 
 export const statementView = (s: StatementRecord): StatementView => ({
@@ -201,6 +204,7 @@ export const statementView = (s: StatementRecord): StatementView => ({
   payoutDate: s.payoutDate,
   payoutBankCode: s.payoutBankCode,
   payoutAccountLast4: s.payoutAccountLast4,
+  payoutBatchId: s.payoutBatchId,
 });
 
 export const payoutBatchView = (b: PayoutBatchRecord) => ({
@@ -228,7 +232,21 @@ export function addBusinessDays(from: Date, days: number): Date {
   return d;
 }
 
+export function subtractBusinessDays(from: Date, days: number): Date {
+  const d = new Date(from.getTime());
+  let left = days;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() - 1);
+    const wd = d.getUTCDay();
+    if (wd !== 0 && wd !== 6) left -= 1;
+  }
+  return d;
+}
+
 export const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** 회차 정산 스케줄러의 Lease 이름. 리더 파드 하나만 하루 한 번 돈다. */
+export const SETTLEMENT_DUE_LEASE_NAME = 'payment-settlement-due';
 
 export interface EventCalculationInput {
   promoterId: string;
@@ -288,6 +306,7 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
       payoutDate: dateOnly(addBusinessDays(input.now, 5)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
+      payoutBatchId: null,
       createdAt: input.now,
       updatedAt: input.now,
     },
@@ -379,6 +398,7 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
       payoutDate: dateOnly(addBusinessDays(input.now, 4)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
+      payoutBatchId: null,
       createdAt: input.now,
       updatedAt: input.now,
     },

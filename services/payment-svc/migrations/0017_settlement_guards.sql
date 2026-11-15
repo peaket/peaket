@@ -1,0 +1,5 @@
+ALTER TABLE "settlement_statement" ADD COLUMN "payout_batch_id" uuid;--> statement-breakpoint
+ALTER TABLE "settlement_statement" ADD CONSTRAINT "settlement_statement_payout_batch_id_payout_batch_id_fk" FOREIGN KEY ("payout_batch_id") REFERENCES "public"."payout_batch"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "settlement_statement_event_key" ON "settlement_statement" USING btree ("promoter_id","event_id","pg","pg_store") WHERE "settlement_statement"."kind" = 'EVENT' and "settlement_statement"."status" <> 'SUPERSEDED';--> statement-breakpoint
+CREATE UNIQUE INDEX "settlement_statement_product_key" ON "settlement_statement" USING btree ("promoter_id","pg","pg_store","period_start","period_end") WHERE "settlement_statement"."kind" = 'PRODUCT' and "settlement_statement"."status" <> 'SUPERSEDED';--> statement-breakpoint
+CREATE INDEX "settlement_statement_batch_idx" ON "settlement_statement" USING btree ("payout_batch_id");

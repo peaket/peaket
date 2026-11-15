@@ -29,6 +29,26 @@ let store: DrizzleSettlementStore;
 let settlements: Settlements;
 const productRows: ProductSettlementItem[] = [];
 
+const statementRow = async (o: { promoterId: string; eventId: string; pg?: 'TOSS' | 'PORTONE'; pgStore?: 'STANDARD' | 'ESCROW'; payoutDate: string; payoutAmount: number; status?: string }) => {
+  const id = randomUUID();
+  await db.pool.query(
+    `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, payout_date, created_at, updated_at)
+     values ($1, $2, 'EVENT', $3, $4, $5, $6, 0, 0, 0, $6, $7, $8, $9, $9)`,
+    [id, o.promoterId, o.eventId, o.pg ?? 'TOSS', o.pgStore ?? 'STANDARD', o.payoutAmount, o.status ?? 'CONFIRMED', o.payoutDate, NOW],
+  );
+  return id;
+};
+
+const productStatementRow = async (promoterId: string, status = 'NOTIFIED') => {
+  const id = randomUUID();
+  await db.pool.query(
+    `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, period_start, period_end, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, created_at, updated_at)
+     values ($1, $2, 'PRODUCT', null, 'TOSS', 'STANDARD', '2026-11-09', '2026-11-15', 10000, 0, 1000, 100, 8900, $3, $4, $4)`,
+    [id, promoterId, status, NOW],
+  );
+  return id;
+};
+
 const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE' }) => {
   await db.pool.query(
     `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at)
@@ -155,6 +175,76 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(out.items[0]).toMatchObject({ kind: 'PRODUCT', grossAmount: 50_000, refundAmount: 2_000, commissionAmount: 3_900, commissionVat: 390, payoutAmount: 43_710, status: 'NOTIFIED', periodStart: '2026-11-09', periodEnd: '2026-11-15' });
     expect((await settlements.listProduct(A, { limit: 10 })).items.some((s) => s.kind === 'PRODUCT')).toBe(true);
     expect((await settlements.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' })).created).toBe(0);
+  });
+
+  test('0017 부분 유일 인덱스가 같은 회차·상품 정산서 중복을 23505로 막고 SUPERSEDED는 허용한다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await statementRow({ promoterId, eventId, payoutDate: '2026-11-24', payoutAmount: 1_000 });
+    await expect(statementRow({ promoterId, eventId, payoutDate: '2026-11-24', payoutAmount: 1_000 })).rejects.toMatchObject({ code: '23505' });
+    await statementRow({ promoterId, eventId, payoutDate: '2026-11-24', payoutAmount: 1_000, status: 'SUPERSEDED' });
+    const active = await db.pool.query("select count(*)::int as n from settlement_statement where promoter_id = $1 and event_id = $2 and status <> 'SUPERSEDED'", [promoterId, eventId]);
+    expect(active.rows[0].n).toBe(1);
+
+    const productPromoter = randomUUID();
+    await productStatementRow(productPromoter);
+    await expect(productStatementRow(productPromoter)).rejects.toMatchObject({ code: '23505' });
+    await productStatementRow(productPromoter, 'SUPERSEDED');
+    const products = await db.pool.query("select count(*)::int as n from settlement_statement where promoter_id = $1 and kind = 'PRODUCT' and status <> 'SUPERSEDED'", [productPromoter]);
+    expect(products.rows[0].n).toBe(1);
+
+    const indexes = await db.pool.query("select indexname from pg_indexes where tablename = 'settlement_statement' and indexname in ('settlement_statement_event_key','settlement_statement_product_key','settlement_statement_batch_idx') order by indexname");
+    expect(indexes.rows.map((r) => r.indexname)).toEqual(['settlement_statement_batch_idx', 'settlement_statement_event_key', 'settlement_statement_product_key']);
+    const column = await db.pool.query("select column_name from information_schema.columns where table_name = 'settlement_statement' and column_name = 'payout_batch_id'");
+    expect(column.rows).toHaveLength(1);
+  });
+
+  test('CONS-02 지급 묶음은 승인 시점 정산서를 붙이고 실행은 그 정산서만 지급한다', async () => {
+    const p1 = randomUUID();
+    const p2 = randomUUID();
+    await settlements.recordKyc(p1, 'VERIFIED');
+    await settlements.recordKyc(p2, 'VERIFIED');
+    const s1 = await statementRow({ promoterId: p1, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-24', payoutAmount: 100_000 });
+    const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-24', portoneBalance: { amount: 100_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
+    expect(batch).toMatchObject({ totalAmount: 100_000, statementCount: 1 });
+    const bound = await db.pool.query('select status, payout_batch_id from settlement_statement where id = $1', [s1]);
+    expect(bound.rows[0]).toEqual({ status: 'SCHEDULED', payout_batch_id: batch.batchId });
+    expect(await store.listConfirmed('PORTONE', 'STANDARD', '2026-11-24')).toHaveLength(0);
+
+    const s2 = await statementRow({ promoterId: p2, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-24', payoutAmount: 200_000 });
+    await settlements.approveBatch(batch.batchId, randomUUID());
+    expect((await settlements.executeBatch(batch.batchId)).status).toBe('SUBMITTED');
+    expect((await store.listPayouts(batch.batchId)).map((p) => p.statementId)).toEqual([s1]);
+    const after = await db.pool.query('select status, payout_batch_id from settlement_statement where id = $1', [s2]);
+    expect(after.rows[0]).toEqual({ status: 'CONFIRMED', payout_batch_id: null });
+  });
+
+  test('CONS-02 묶인 정산서 합계가 승인 금액과 다르면 실행을 409 payout-batch-amount-mismatch로 멈춘다', async () => {
+    const promoterId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    const statementId = await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-25', payoutAmount: 200_000 });
+    const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-25', portoneBalance: { amount: 200_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
+    await settlements.approveBatch(batch.batchId, randomUUID());
+    await db.pool.query('update settlement_statement set payout_amount = 199000 where id = $1', [statementId]);
+    await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-amount-mismatch') });
+    expect(await store.listPayouts(batch.batchId)).toHaveLength(0);
+  });
+
+  test('CONS-02 두 요청이 동시에 배치를 만들면 한쪽만 성공한다', async () => {
+    const p1 = randomUUID();
+    const p2 = randomUUID();
+    await settlements.recordKyc(p1, 'VERIFIED');
+    await settlements.recordKyc(p2, 'VERIFIED');
+    await statementRow({ promoterId: p1, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-26', payoutAmount: 100_000 });
+    await statementRow({ promoterId: p2, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-26', payoutAmount: 200_000 });
+    const input = { pg: 'PORTONE' as const, pgStore: 'STANDARD' as const, payoutDate: '2026-11-26', portoneBalance: { amount: 300_000, observedAt: NOW.toISOString() }, actor: ACCOUNT };
+    const results = await Promise.allSettled([settlements.createPayoutBatch(input), settlements.createPayoutBatch(input)]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find((r) => r.status === 'rejected')).toMatchObject({ status: 'rejected', reason: { status: 409 } });
+    const batches = await db.pool.query("select id from payout_batch where pg = 'PORTONE' and pg_store = 'STANDARD' and payout_date = '2026-11-26'");
+    expect(batches.rows).toHaveLength(1);
+    const bound = await db.pool.query('select count(*)::int as n from settlement_statement where payout_batch_id = $1', [batches.rows[0].id]);
+    expect(bound.rows[0].n).toBe(2);
   });
 
   test('미수금은 같은 결제사의 지급 묶음에서 상계되고 이동 기록이 남는다', async () => {

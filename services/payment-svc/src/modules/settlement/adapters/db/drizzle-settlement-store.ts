@@ -1,8 +1,8 @@
 // 정산·지급·KYC Drizzle 저장소(docs/data.md settlement_statement…payout).
-import { and, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
-import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, ReceivableMoveRecord, ReceivableRecord, StatementRecord, StatementSource } from '../../domain/settlement.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
 import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, statementDispute, statementSource } from './schema.js';
 
 const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementRecord => ({
@@ -29,6 +29,7 @@ const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementR
   payoutDate: r.payoutDate,
   payoutBankCode: r.payoutBankCode,
   payoutAccountLast4: r.payoutAccountLast4,
+  payoutBatchId: r.payoutBatchId,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
 });
@@ -80,6 +81,11 @@ const payoutRecord = (r: typeof payout.$inferSelect): PayoutRecord => ({
   updatedAt: r.updatedAt,
 });
 
+const uniqueViolation = (e: unknown): boolean => {
+  const code = (e as { code?: unknown; cause?: { code?: unknown } }).code ?? (e as { cause?: { code?: unknown } }).cause?.code;
+  return code === '23505';
+};
+
 const encodeCursor = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
   try {
@@ -94,37 +100,44 @@ const decodeCursor = (cursor: string): { at: number; id: string } | undefined =>
 export class DrizzleSettlementStore implements SettlementStore {
   constructor(private readonly db: Database) {}
 
-  async insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx.insert(settlementStatement).values({
-        id: record.statementId,
-        promoterId: record.promoterId,
-        kind: record.kind,
-        eventId: record.eventId,
-        pg: record.pg,
-        pgStore: record.pgStore,
-        periodStart: record.periodStart,
-        periodEnd: record.periodEnd,
-        grossAmount: record.grossAmount,
-        refundAmount: record.refundAmount,
-        commissionAmount: record.commissionAmount,
-        commissionVat: record.commissionVat,
-        offsetAmount: record.offsetAmount,
-        payoutAmount: record.payoutAmount,
-        revision: record.revision,
-        supersedesId: record.supersedesId,
-        excludedPayments: record.excludedPayments,
-        status: record.status,
-        holdReason: record.holdReason,
-        disputeDueAt: record.disputeDueAt,
-        payoutDate: record.payoutDate,
-        payoutBankCode: record.payoutBankCode,
-        payoutAccountLast4: record.payoutAccountLast4,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      });
+  async insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(settlementStatement)
+        .values({
+          id: record.statementId,
+          promoterId: record.promoterId,
+          kind: record.kind,
+          eventId: record.eventId,
+          pg: record.pg,
+          pgStore: record.pgStore,
+          periodStart: record.periodStart,
+          periodEnd: record.periodEnd,
+          grossAmount: record.grossAmount,
+          refundAmount: record.refundAmount,
+          commissionAmount: record.commissionAmount,
+          commissionVat: record.commissionVat,
+          offsetAmount: record.offsetAmount,
+          payoutAmount: record.payoutAmount,
+          revision: record.revision,
+          supersedesId: record.supersedesId,
+          excludedPayments: record.excludedPayments,
+          status: record.status,
+          holdReason: record.holdReason,
+          disputeDueAt: record.disputeDueAt,
+          payoutDate: record.payoutDate,
+          payoutBankCode: record.payoutBankCode,
+          payoutAccountLast4: record.payoutAccountLast4,
+          payoutBatchId: record.payoutBatchId,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        })
+        .onConflictDoNothing()
+        .returning({ id: settlementStatement.id });
+      if (inserted.length === 0) return false;
       if (sources.length > 0)
         await tx.insert(statementSource).values(sources.map((s) => ({ statementId: s.statementId, sourceId: s.sourceId, kind: s.kind, paymentId: s.paymentId, amount: s.amount })));
+      return true;
     });
   }
 
@@ -194,6 +207,7 @@ export class DrizzleSettlementStore implements SettlementStore {
         payoutDate: record.payoutDate,
         payoutBankCode: record.payoutBankCode,
         payoutAccountLast4: record.payoutAccountLast4,
+        payoutBatchId: record.payoutBatchId,
         updatedAt: record.updatedAt,
       })
       .where(eq(settlementStatement.id, record.statementId));
@@ -238,6 +252,43 @@ export class DrizzleSettlementStore implements SettlementStore {
     });
   }
 
+  async createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void> {
+    try {
+      await this.db.transaction(async (tx) => {
+        await tx.insert(payoutBatch).values({
+          id: record.batchId,
+          pg: record.pg,
+          pgStore: record.pgStore,
+          payoutDate: record.payoutDate,
+          totalAmount: record.totalAmount,
+          statementCount: record.statementCount,
+          approvalId: record.approvalId,
+          portoneBulkPayoutId: record.portoneBulkPayoutId,
+          pgBalanceKrw: record.pgBalanceKrw,
+          pgBalanceSource: record.pgBalanceSource,
+          pgBalanceObservedAt: record.pgBalanceObservedAt,
+          pgBalanceObservedBy: record.pgBalanceObservedBy,
+          pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
+          status: record.status,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        });
+        if (statementIds.length > 0) {
+          const updated = await tx
+            .update(settlementStatement)
+            .set({ payoutBatchId: record.batchId, status: 'SCHEDULED', updatedAt: record.updatedAt })
+            .where(and(inArray(settlementStatement.id, [...statementIds]), eq(settlementStatement.status, 'CONFIRMED'), isNull(settlementStatement.payoutBatchId)))
+            .returning({ id: settlementStatement.id });
+          if (updated.length !== statementIds.length) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
+        }
+      });
+    } catch (e) {
+      if (e instanceof SettlementProblem) throw e;
+      if (uniqueViolation(e)) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
+      throw e;
+    }
+  }
+
   async findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined> {
     const rows = await this.db.db.select().from(payoutBatch).where(eq(payoutBatch.id, batchId)).limit(1);
     return rows[0] ? batchRecord(rows[0]) : undefined;
@@ -279,7 +330,24 @@ export class DrizzleSettlementStore implements SettlementStore {
     const rows = await this.db.db
       .select()
       .from(settlementStatement)
-      .where(and(eq(settlementStatement.status, 'CONFIRMED'), eq(settlementStatement.pg, pg), eq(settlementStatement.pgStore, pgStore), eq(settlementStatement.payoutDate, payoutDate)))
+      .where(
+        and(
+          eq(settlementStatement.status, 'CONFIRMED'),
+          eq(settlementStatement.pg, pg),
+          eq(settlementStatement.pgStore, pgStore),
+          eq(settlementStatement.payoutDate, payoutDate),
+          isNull(settlementStatement.payoutBatchId),
+        ),
+      )
+      .orderBy(settlementStatement.promoterId, settlementStatement.id);
+    return rows.map(statementRecord);
+  }
+
+  async listStatementsByBatch(batchId: string): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(eq(settlementStatement.payoutBatchId, batchId))
       .orderBy(settlementStatement.promoterId, settlementStatement.id);
     return rows.map(statementRecord);
   }

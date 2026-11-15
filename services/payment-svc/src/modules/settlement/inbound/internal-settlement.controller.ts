@@ -16,6 +16,7 @@ const BatchBody = z.object({
   actor: z.string().min(1),
 });
 const ProductBody = z.object({ periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+const EventBody = z.object({ promoterId: z.string().uuid(), eventId: z.string().uuid(), pg: PgBody, pgStore: StoreBody, commissionRateBp: z.number().int().min(0).max(10_000).optional() });
 const ReceivableBody = z.object({ promoterId: z.string().uuid(), pg: PgBody, cause: z.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']), amount: z.number().int().positive() });
 
 const StatementView = z
@@ -52,6 +53,21 @@ export class InternalSettlementController {
   async calculateProduct(@Body() body: unknown) {
     const b = one(ProductBody, body, '상품 정산 기간이 맞지 않습니다');
     return this.settlements.calculateProduct(b);
+  }
+
+  @Post('event-calculations')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: StatementView } })
+  async calculateEvent(@Body() body: unknown) {
+    const b = one(EventBody, body, '회차 정산 본문이 맞지 않습니다');
+    return this.settlements.calculateEvent(b);
+  }
+
+  @Post('statements/:statementId/reconfirm')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: StatementView } })
+  async reconfirm(@Param('statementId') statementId: string) {
+    return this.settlements.reconfirmStatement(statementId);
   }
 
   @Get('statements')

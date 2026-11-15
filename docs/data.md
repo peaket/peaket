@@ -1157,6 +1157,7 @@ erDiagram
         text hold_reason "KYC|ACCOUNT_CHANGE|BALANCE|ACCOUNT_MISMATCH|SALE_SUSPENDED. ACCOUNT_MISMATCH는 포트원 파트너 정산 계좌가 PEAKET 기록과 다름(ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지됨(ADR-0123)"
         timestamptz dispute_due_at "통지 뒤 2영업일"
         date payout_date "회차 정산서는 회차 종료 뒤 5영업일, 상품 정산서는 계산일 뒤 4영업일"
+        uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017)"
     }
     statement_source {
         uuid statement_id PK "정산서 판(settlement_statement.id). 판마다 따로 두고, 옛 판(SUPERSEDED)의 목록도 그대로 남는다"

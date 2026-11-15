@@ -16,7 +16,7 @@ export class HttpProductSettlementSource implements ProductSettlementSource {
     const res = await this.#client.request({
       method: 'GET',
       path: '/internal/v1/shop/product-settlement-items',
-      params: { from, to },
+      query: { from, to },
       headers: this.internalToken ? { 'x-peaket-internal-token': this.internalToken } : {},
       timeoutCapMs: 5_000,
     });

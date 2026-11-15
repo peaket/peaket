@@ -5,6 +5,8 @@ export { DrizzleSettlementPaymentSource } from './adapters/db/drizzle-payment-so
 export { DrizzleSettlementStore } from './adapters/db/drizzle-settlement-store.js';
 export { JwksReauthVerifier, UnavailableReauthVerifier } from './adapters/jwks-reauth-verifier.js';
 export { HttpProductSettlementSource, UnavailableProductSettlementSource } from './adapters/http-product-source.js';
+export { HttpDueEventSettlementSource, UnavailableDueEventSettlementSource } from './adapters/http-due-event-source.js';
+export { SettlementDueWorker, type SettlementDueLeadership, type SettlementDueLog, type SettlementDueTimer, type SettlementDueWorkerDeps } from './application/settlement-due-worker.js';
 export { DenyAllAdminAuthz, GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { SettlementModule, type SettlementModuleDeps } from './settlement.module.js';
 export {
@@ -14,7 +16,9 @@ export {
   calculateProductStatement,
   dateOnly,
   payoutBatchView,
+  SETTLEMENT_DUE_LEASE_NAME,
   SettlementProblem,
+  subtractBusinessDays,
   statementView,
   validateDispute,
   validatePayoutAccount,
@@ -42,4 +46,4 @@ export {
   type StatementStatus,
   type StatementView,
 } from './domain/settlement.js';
-export type { PayoutGateway, PayoutSubmitInput, PayoutSubmitResult, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter, StatementPage, VerifiedReauth } from './domain/ports.js';
+export type { DueEvent, DueEventSettlementSource, PayoutGateway, PayoutSubmitInput, PayoutSubmitResult, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter, StatementPage, VerifiedReauth } from './domain/ports.js';

@@ -1,7 +1,7 @@
 // 정산서·지급 묶음·KYC 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, ADR-0047·0062).
 // 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 아직 없다(상품 정산서는 빈 목록).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { PayoutGateway, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter } from '../domain/ports.js';
+import type { DueEventSettlementSource, PayoutGateway, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter } from '../domain/ports.js';
 import {
   accountLast4,
   addBusinessDays,
@@ -30,6 +30,7 @@ export interface SettlementDeps {
   readonly store: SettlementStore;
   readonly payments: SettlementPaymentSource;
   readonly products?: ProductSettlementSource;
+  readonly events?: DueEventSettlementSource;
   readonly gateways: readonly PayoutGateway[];
   readonly reauth: ReauthVerifier;
   readonly clock: Clock;
@@ -107,7 +108,12 @@ export class Settlements {
         now,
         statementId: uuidv7(this.d.clock),
       });
-      await this.d.store.insertStatement(record, sources);
+      const inserted = await this.d.store.insertStatement(record, sources);
+      if (!inserted) {
+        const raced = await this.d.store.findEventStatement(input.promoterId, input.eventId, input.pg, input.pgStore);
+        if (!raced) throw new SettlementProblem('settlement-statement-conflict', 409, '같은 회차 정산서가 이미 있습니다');
+        return statementView(raced);
+      }
       return statementView(record);
     });
   }
@@ -141,10 +147,28 @@ export class Settlements {
           statementId: uuidv7(this.d.clock),
         });
         void key;
-        await this.d.store.insertStatement(record, sources);
+        const inserted = await this.d.store.insertStatement(record, sources);
+        if (!inserted) continue;
         out.push(statementView(record));
       }
       return { created: out.length, items: out };
+    });
+  }
+
+  /** 회차 종료 5영업일 뒤 스케줄러가 부른다. 결제가 있는 결제사만 계산하고, 이미 있으면 기존 정산서를 돌려준다. */
+  async calculateDueEvents(through: string, limit = 100): Promise<{ calculated: number; items: StatementView[] }> {
+    return guard(async () => {
+      if (!this.d.events) throw new SettlementProblem('event-settlement-source-unavailable', 503, '회차 정산 원천을 읽을 수 없습니다');
+      const due = await this.d.events.listDue(through, limit);
+      const items: StatementView[] = [];
+      for (const e of due) {
+        for (const pg of ['TOSS', 'PORTONE'] as const) {
+          const payments = await this.d.payments.listEventPayments(e.eventId, pg);
+          if (payments.length === 0) continue;
+          items.push(await this.calculateEvent({ promoterId: e.promoterId, eventId: e.eventId, pg, pgStore: 'STANDARD' }));
+        }
+      }
+      return { calculated: items.length, items };
     });
   }
 
@@ -204,6 +228,31 @@ export class Settlements {
         return statementView(next);
       }
       return statementView(s);
+    });
+  }
+
+  /**
+   * HELD(KYC·계좌 보류)나 DISPUTED를 다시 CONFIRMED로 푼다(A2-05).
+   * PAID·SCHEDULED·SUPERSEDED는 이미 지급 흐름에 들어갔거나 끝났으므로 건드리지 않는다.
+   */
+  async reconfirmStatement(statementId: string): Promise<StatementView> {
+    return guard(async () => {
+      const s = await this.d.store.findStatementById(statementId);
+      if (!s) throw notFound();
+      if (s.status === 'CONFIRMED') return statementView(s);
+      if (s.status !== 'HELD' && s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류·이의 상태의 정산서만 다시 확정할 수 있습니다');
+      const now = new Date(this.d.clock.now());
+      if (s.status === 'HELD' && s.holdReason === 'KYC') {
+        const kyc = await this.d.store.findKyc(s.promoterId);
+        if (!(kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified)) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 다시 확정할 수 없습니다');
+      }
+      if (s.status === 'HELD' && s.holdReason === 'ACCOUNT_CHANGE') {
+        const account = await this.d.store.findPayoutAccount(s.promoterId);
+        if (account && account.holdUntil.getTime() > now.getTime()) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 다시 확정할 수 없습니다');
+      }
+      const next: StatementRecord = { ...s, status: 'CONFIRMED', holdReason: null, updatedAt: now };
+      await this.d.store.saveStatement(next);
+      return statementView(next);
     });
   }
 
@@ -296,7 +345,7 @@ export class Settlements {
         createdAt: now,
         updatedAt: now,
       };
-      await this.d.store.insertPayoutBatch(batch);
+      await this.d.store.createPayoutBatchWithStatements(batch, includedAfterOffset.map((s) => s.statementId));
       return payoutBatchView(batch);
     });
   }
@@ -322,10 +371,13 @@ export class Settlements {
       const gateway = this.d.gateways.find((g) => g.pg === b.pg);
       if (!gateway) throw new SettlementProblem('payout-gateway-unavailable', 503, '지급대행을 아직 시작할 수 없습니다');
       const now = new Date(this.d.clock.now());
+      const boundStatements = await this.d.store.listStatementsByBatch(batchId);
+      if (boundStatements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
+      const boundTotal = boundStatements.reduce((sum, s) => sum + s.payoutAmount, 0);
+      if (boundTotal !== b.totalAmount) throw new SettlementProblem('payout-batch-amount-mismatch', 409, '승인한 지급 금액과 정산서 합계가 다릅니다');
       let payouts = await this.d.store.listPayouts(batchId);
       if (payouts.length === 0) {
-        const statements = await this.d.store.listConfirmed(b.pg, b.pgStore, b.payoutDate);
-        if (statements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
+        const statements = boundStatements;
         payouts = statements.map((s, i) => ({
           payoutId: uuidv7(this.d.clock),
           batchId,

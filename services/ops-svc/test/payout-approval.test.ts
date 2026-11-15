@@ -17,10 +17,15 @@ const store = new MemoryPayoutApprovalStore();
 class FakePayments implements PayoutPaymentClient {
   batches: PayoutBatchView[] = [];
   readonly calls: string[] = [];
+  readonly executedTotals: number[] = [];
+  totalAmount = 24_920_000;
   failExecute = false;
   async createBatch(input: { pg: 'TOSS' | 'PORTONE'; pgStore: 'STANDARD' | 'ESCROW'; payoutDate: string }) {
     this.calls.push('create');
-    const batch: PayoutBatchView = { batchId: randomUUID(), pg: input.pg, pgStore: input.pgStore, payoutDate: input.payoutDate, totalAmount: 24_920_000, statementCount: 3, status: 'PENDING_APPROVAL' };
+    if (this.batches.some((b) => b.pg === input.pg && b.pgStore === input.pgStore && b.payoutDate === input.payoutDate && b.status !== 'COMPLETED' && b.status !== 'PARTIAL_FAILED')) {
+      throw new ProblemError({ type: 'payout-batch-exists', status: 409, title: '이미 지급 묶음이 있습니다' });
+    }
+    const batch: PayoutBatchView = { batchId: randomUUID(), pg: input.pg, pgStore: input.pgStore, payoutDate: input.payoutDate, totalAmount: this.totalAmount, statementCount: 3, status: 'PENDING_APPROVAL' };
     this.batches.push(batch);
     return batch;
   }
@@ -37,7 +42,9 @@ class FakePayments implements PayoutPaymentClient {
   async executeBatch(batchId: string) {
     this.calls.push('execute');
     if (this.failExecute) throw new ProblemError({ type: 'payout-gateway-unavailable', status: 503, title: '지급대행을 시작할 수 없습니다' });
-    return { ...this.batches.find((b) => b.batchId === batchId)!, status: 'SUBMITTED' };
+    const batch = this.batches.find((b) => b.batchId === batchId)!;
+    this.executedTotals.push(batch.totalAmount);
+    return { ...batch, status: 'SUBMITTED' };
   }
   async recordPortoneExecution(batchId: string) {
     this.calls.push('portone');
@@ -81,9 +88,11 @@ beforeEach(() => {
   store.rows.clear();
   payments.batches = [];
   payments.calls.length = 0;
+  payments.executedTotals.length = 0;
+  payments.totalAmount = 24_920_000;
   payments.failExecute = false;
-  tokenAccount.clear();
   audit.entries.length = 0;
+  tokenAccount.clear();
 });
 
 const headers = (role: 'viewer' | 'operator' | 'commander' = 'operator', token?: string) => {
@@ -197,5 +206,25 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     const blocked = await svc.http.inject({ method: 'POST', url: `/v1/ops/payout-batches/${created.batchId}/portone-execution`, headers: headers('operator'), payload: JSON.stringify({ bulkPayoutId: 'bulk-1' }) });
     expect(blocked.statusCode).toBe(409);
     expect(payments.calls).toEqual(['create', 'portone']);
+  });
+
+  test('TEST-05 25억 승인 금액·감사 로그·결제사 요청 합계가 같다', async () => {
+    payments.totalAmount = 2_500_000_000;
+    const created = JSON.parse((await create()).payload);
+    expect(created).toMatchObject({ totalAmount: 2_500_000_000, statementCount: 3 });
+    const approval = JSON.parse((await svc.http.inject({ method: 'GET', url: `/v1/ops/approval-requests/${created.approvalId}`, headers: noBody('commander') })).payload);
+    expect(approval).toMatchObject({ amount: 2_500_000_000 });
+    const ok = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: noBody('commander', 'approval-token') });
+    expect(ok.statusCode).toBe(200);
+    expect(payments.executedTotals).toEqual([2_500_000_000]);
+    const records = audit.entries.filter((e) => e.recordId === created.approvalId);
+    expect(records.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_APPROVAL_APPROVED', 'PAYOUT_APPROVAL_EXECUTED']);
+  });
+
+  test('TEST-05 같은 pg·pgStore·payoutDate 두 번째 배치는 409 payout-batch-exists다', async () => {
+    expect((await create()).statusCode).toBe(202);
+    const second = await create();
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.payload)).toMatchObject({ type: expect.stringContaining('payout-batch-exists') });
   });
 });
