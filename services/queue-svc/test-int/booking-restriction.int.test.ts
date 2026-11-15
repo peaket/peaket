@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { queuePackage } from '../src/grpc-package.js';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { bookingRestrictionHandlers, RedisBookingRestrictions } from '../src/modules/admission/index.js';
+import { admissionKeys, RedisAdmissionStore } from '../src/modules/admission/adapters/redis-admission-store.js';
 import { bookingRestrictionKeyOf } from '../src/modules/admission/domain/booking-restriction.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -20,7 +21,7 @@ let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
 
 const A = randomUUID();
-const UNTIL = 2_000_000_000_000;
+const UNTIL = Math.floor((Date.now() + 3_600_000) / 1000) * 1000;
 const DAY = 86_400_000;
 
 const call = (req: object): Promise<Record<string, unknown>> =>
@@ -68,7 +69,9 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
   test('ACTIVE+미래 until이면 TTL이 until+1일이고, LIFTED면 30일, until이 2일 전이면 키가 바로 사라진다', async () => {
     const a = randomUUID();
     expect(await store.apply({ accountId: a, restrictionId: 'r5', state: 'ACTIVE', untilMs: UNTIL, version: 1 })).toEqual({ changed: true });
-    expect(await pttl(a)).toBeGreaterThan(0);
+    const activePttl = await pttl(a);
+    expect(activePttl).toBeGreaterThan(DAY);
+    expect(activePttl).toBeLessThanOrEqual(DAY + 3_600_000 + 5_000);
 
     const b = randomUUID();
     expect(await store.apply({ accountId: b, restrictionId: 'r6', state: 'LIFTED', version: 1 })).toEqual({ changed: true });
@@ -80,6 +83,36 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
     expect(await store.apply({ accountId: c, restrictionId: 'r7', state: 'ACTIVE', untilMs: Date.now() - 2 * DAY, version: 1 })).toEqual({ changed: true });
     expect(await exists(c)).toBe(0);
     expect(await store.read(c)).toBeUndefined();
+  });
+
+  test('같은 판 재전송은 칸을 바꾸지 않고 TTL만 다시 세우며, 옛 판은 TTL도 못 늘린다', async () => {
+    const d = randomUUID();
+    const key = bookingRestrictionKeyOf(d);
+    expect(await store.apply({ accountId: d, restrictionId: 'r8', state: 'ACTIVE', untilMs: UNTIL, version: 2 })).toEqual({ changed: true });
+    await redis.command(['PEXPIRE', key, '1000'], { key });
+    expect(await pttl(d)).toBeLessThanOrEqual(1000);
+
+    expect(await store.apply({ accountId: d, restrictionId: 'r8', state: 'LIFTED', version: 2 })).toEqual({ changed: false });
+    expect(await store.read(d)).toMatchObject({ st: 'ACTIVE', untilMs: UNTIL, rid: 'r8', ver: 2 });
+    expect(await pttl(d)).toBeGreaterThan(DAY);
+
+    await redis.command(['PEXPIRE', key, '1000'], { key });
+    expect(await store.apply({ accountId: d, restrictionId: 'r8', state: 'ACTIVE', untilMs: UNTIL + DAY, version: 1 })).toEqual({ changed: false });
+    expect(await pttl(d)).toBeLessThanOrEqual(1000);
+    expect(await store.read(d)).toMatchObject({ st: 'ACTIVE', untilMs: UNTIL, ver: 2 });
+  });
+
+  test('ELIGIBILITY_LISTS_LUA는 계정이 든 명단 키만 글자 차례·중복 없이 돌려준다', async () => {
+    const admission = new RedisAdmissionStore(redis);
+    const e = randomUUID();
+    const account = randomUUID();
+    const alpha = admissionKeys.elig(e, 'alpha-list');
+    const beta = admissionKeys.elig(e, 'beta-list');
+    const gamma = admissionKeys.elig(e, 'gamma-list');
+    await redis.command(['SADD', alpha, account], { key: alpha });
+    await redis.command(['SADD', gamma, account], { key: gamma });
+    await redis.command(['SADD', beta, randomUUID()], { key: beta });
+    expect(await admission.eligibilityLists({ eventId: e, accountId: account, listKeys: ['gamma-list', 'alpha-list', 'alpha-list'] })).toEqual(['alpha-list', 'gamma-list']);
   });
 
   test('끝 시각이 없는 ACTIVE로 올리면 until 칸을 지우고, 옛 판은 되돌리지 못한다', async () => {
@@ -96,7 +129,7 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
 
   test('gRPC SetBookingRestriction이 proto 칸을 읽어 실제 q:rst에 쓴다', async () => {
     const c = randomUUID();
-    const ends = { seconds: 2_000_000_000, nanos: 0 };
+    const ends = { seconds: UNTIL / 1000, nanos: 0 };
     expect(await call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', ends_at: ends, version: 10 })).toEqual({ changed: true });
     expect(await store.read(c)).toEqual({ st: 'ACTIVE', untilMs: UNTIL, rid: 'r3', ver: 10 });
     expect(await call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_LIFTED', version: 10 })).toEqual({ changed: false });

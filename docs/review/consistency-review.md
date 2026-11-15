@@ -700,6 +700,8 @@
 | R-593 | BAT-465 잔여 2차(선택 배치 Q-T59 예매 제한 집행 쓰기 경로, 외부 불변 저장소·OpenTimestamps 앵커 포트/가짜 어댑터)가 정본과 어긋나지 않는다 | services/queue-svc, services/purchase-svc, services/ops-svc, docs/api/openapi.yaml, packages/contracts, packages/api-client, docs | 정본(docs/features/queue-admission.md §6·Q-T59, docs/features/payment.md §2, docs/features/transfer-refund.md §7.2 T14, docs/security/asvs/transfer-refund.md)과 대조했고, 외부 버킷·달력이 없어 S3 Object Lock·OpenTimestamps는 503 `anchor-unavailable`과 로컬 앵커 유지로 남겼다. rebase 뒤 cheap gate·Docker test-int(queue 4·purchase 35·ops 3)·변이 6/6·4관점 리뷰(높음 0·중간 1 고침·중간 4 문서화)·브라우저 SCR-030/SCR-048 보드를 통과했다 | 적용(잔여 일부, heavy gate 통과) |
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
 | R-595 | B2 감사 중간 2건(q:rst TTL 누락·우선 입장 lst 누락) | queue-svc booking-restriction-lua·redis-booking-restrictions·confirm-admission·ports·memory/redis store·시험 | PEXPIREAT와 eligibilityLists를 넣고 단위·test-int로 확인 | 적용 |
+| R-602 | OPS-02·06·08(웹훅 임대 없음·응답 무제한·Lease create 권한 없음) | core webhook worker/transport, deploy chart RBAC | SKIP LOCKED·lease_until·응답 상한·Lease 권한을 넣고 시험 | 적용 |
+| R-615 | B2V-01·02·03(TTL 단언 약함·Redis eligibility 시험 없음·같은 판 TTL 미갱신) | queue test-int·booking-restriction-lua | 정확한 TTL 단언·Redis 시험·같은 판 TTL 갱신 | 적용 |
 
 ## 4. 숫자 일치표
 
