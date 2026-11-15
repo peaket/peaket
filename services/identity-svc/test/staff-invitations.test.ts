@@ -101,6 +101,22 @@ describe('StaffInvitations [GAT-210]', () => {
     await expect(invitations.accept(accept())).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
   });
 
+  test('휴대폰 본인확인은 초대받은 계정의 기록으로만 판정하고, 실패하면 초대를 소비하지 않는다(C2-02)', async () => {
+    const seen: string[] = [];
+    const bound = new StaffInvitations(store, clock, {
+      statusOf: async (accountId) => {
+        seen.push(accountId);
+        return accountId === ACCOUNT ? 'VERIFIED' : 'UNVERIFIED';
+      },
+    });
+    // 이메일이 같아도 다른 계정의 본인확인 기록으로 수락할 수 없다.
+    store.accounts.set(OTHER, { email: 'staff@example.com', verified: true });
+    await expect(bound.accept(accept({ accountId: OTHER }))).rejects.toMatchObject({ code: 'PHONE_UNVERIFIED' });
+    expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null });
+    await expect(bound.accept(accept())).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
+    expect(seen).toEqual([OTHER, ACCOUNT]);
+  });
+
   test('같은 회차에 이미 배정된 계정은 409이고, 같은 토큰 재수락은 410이다', async () => {
     await invitations.accept(accept());
     store.assignments.set('a-2', {
