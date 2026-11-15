@@ -33,13 +33,14 @@ const pinned = async () => {
 };
 
 describe('restorePriority: 그 권리의 PRIORITY 보류만 되돌린다', () => {
-  test('다른 권리 ID로는 되돌리지 않고 주문 표시·비트·prio를 그대로 둔다', async () => {
+  test('다른 권리 ID로는 되돌리지 않고 주문 표시·비트를 그대로 두며 prio에 다시 넣지 않는다', async () => {
     const f = await pinned();
     const out = await f.store.restorePriority({ eventId: EVENT, accountId: ACCOUNT, grantId: '01900000-0000-7000-8000-0000000000c2', seats: [SEAT], keepUntilMs: KEEP });
     expect(out).toEqual({ kind: 'OK', restored: 0 });
     expect(f.ev().holds.get(0)).toMatchObject({ holdId: GRANT, owner: ACCOUNT, kind: 'PRIORITY', priorityGrantId: GRANT, pin: '1' });
     expect(f.ev().bits.has(0)).toBe(true);
-    expect(f.ev().prio.get(0)).toBe(NOW + DAY);
+    // 결제 중(pin)에는 prio에서 빠져 있고(B1-01), 남의 권리로 부른 복귀는 다시 넣지 않는다
+    expect(f.ev().prio.has(0)).toBe(false);
   });
 
   test('다른 계정으로는 되돌리지 않는다', async () => {

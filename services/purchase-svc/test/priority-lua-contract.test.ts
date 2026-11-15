@@ -154,15 +154,19 @@ describe('RESTORE_PRIORITY_LUA · RedisSeatStore.restorePriority(결제 실패 �
     expect(isEval(c)).toBe(true);
     if (!isEval(c)) return;
     expect(c.script.source).toBe(RESTORE_PRIORITY_LUA);
-    expect(c.keys).toEqual([seatKeys.ordered(E), seatKeys.paused(E), seatKeys.epoch(E), seatKeys.hold(E, 3)]);
+    expect(c.keys).toEqual([seatKeys.ordered(E), seatKeys.paused(E), seatKeys.epoch(E), seatKeys.prio(E), seatKeys.hold(E, 3)]);
     expect(c.args).toEqual([ACCOUNT, GRANT, String(KEEP), '3']);
   });
 
   test('그 권리의 PRIORITY 보류만 되돌린다: holdId·owner·kind·priorityGrantId가 모두 같아야 한다', () => {
     // M2-04는 priorityGrantId 일치(h[4] == ARGV[2])를 빼 다른 권리의 보류까지 주문 표시를 지웠다.
     expect(RESTORE_PRIORITY_LUA).toMatch(/h\[1\] == ARGV\[2\] and h\[2\] == ARGV\[1\] and h\[3\] == 'PRIORITY' and h\[4\] == ARGV\[2\]/);
-    // 지우는 것은 주문 표시뿐이고 비트·hold Hash·prio는 남긴다
-    expect(RESTORE_PRIORITY_LUA).toMatch(/HDEL', KEYS\[3 \+ i\], 'pin', 'ordAt', 'maxStay', 'rem', 'thawAt'/);
+    // 결제 중(pin)에는 prio에서 뺐으므로(B1-01) 복귀가 그 보류를 만료 인덱스에 다시 넣는다(h[5] = exp).
+    // 지우는 것은 주문 표시뿐이고 비트·hold Hash는 남긴다.
+    expect(RESTORE_PRIORITY_LUA).toMatch(/HDEL', KEYS\[4 \+ i\], 'pin', 'ordAt', 'maxStay', 'rem', 'thawAt'/);
+    expect(RESTORE_PRIORITY_LUA).toMatch(/ZADD', KEYS\[4\], h\[5\], ARGV\[3 \+ i\]/);
+    expect(RESTORE_PRIORITY_LUA).toMatch(/local n = #KEYS - 4/);
+    expect(RESTORE_PRIORITY_LUA).toMatch(/\{KEYS\[4\], 'zset'\}/);
     expect(RESTORE_PRIORITY_LUA).not.toContain("redis.call('DEL'");
     expect(RESTORE_PRIORITY_LUA).not.toMatch(/BITFIELD/);
   });
