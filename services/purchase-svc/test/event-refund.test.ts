@@ -153,4 +153,12 @@ describe('회차 취소 일괄 환불', () => {
     ]);
     expect(p).toMatchObject({ total: 2, done: 1, failed: 1, perPg: [{ pg: 'TOSS', state: 'COMPLETED', done: 1, failed: 1, unknown: 0 }] });
   });
+
+  test('B1-04_같은_회차에_진행_중_요청이_있으면_새_요청은_CONFLICT다', async () => {
+    const f = fixture();
+    const first = await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * 86_400_000, refundWindowClosesAtMs: NOW + 3 * 86_400_000 });
+    expect(first.status).toBe('REFUND_WINDOW');
+    await expect(start(f.service, { requestId: randomUUID() })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.store.requests.size).toBe(1);
+  });
 });

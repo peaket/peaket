@@ -33,6 +33,7 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
       price: input.price,
       status: 'OFFERED',
       expiresAtMs: input.expiresAtMs,
+      ...(input.actedBy !== undefined ? { actedBy: input.actedBy } : {}),
       version: 1,
       createdAtMs: input.nowMs,
       updatedAtMs: input.nowMs,
@@ -57,17 +58,18 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
     return next;
   }
 
-  async withdraw(grantId: string, nowMs: number): Promise<PriorityGrant | undefined> {
+  async withdraw(grantId: string, actedBy: string, nowMs: number): Promise<PriorityGrant | undefined> {
     const g = this.grants.get(grantId);
-    if (!g || g.status !== 'OFFERED') return g;
-    const next: PriorityGrant = { ...g, status: 'WITHDRAWN', version: g.version + 1, updatedAtMs: nowMs };
+    if (!g || g.status !== 'OFFERED' || g.activeOrderId !== undefined) return g;
+    const next: PriorityGrant = { ...g, status: 'WITHDRAWN', withdrawnBy: actedBy, version: g.version + 1, updatedAtMs: nowMs };
     this.grants.set(grantId, next);
     return next;
   }
 
   async expire(grantId: string, nowMs: number): Promise<PriorityGrant | undefined> {
     const g = this.grants.get(grantId);
-    if (!g || g.status !== 'OFFERED') return g;
+    // 진행 중 주문(active_order_id)이 있으면 만료하지 않는다. 결제가 끝나면 markUsed가 USED로 끝낸다
+    if (!g || g.status !== 'OFFERED' || g.activeOrderId !== undefined) return g;
     const next: PriorityGrant = { ...g, status: 'EXPIRED', activeOrderId: undefined, version: g.version + 1, updatedAtMs: nowMs };
     this.grants.set(grantId, next);
     return next;

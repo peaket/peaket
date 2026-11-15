@@ -6,7 +6,7 @@
 import { uuidv7, type Clock } from '@peaket/platform';
 import { KEEP_AFTER_SALE_END_MS, type SeatMap } from '../../inventory/index.js';
 import { PRIORITY_GRANT_TTL_MS, PrioritySeatConflict, type PriorityGrant, type PriorityGrantResult } from '../domain/priority-grant.js';
-import type { CancelledTickets, PriorityGrantStore, PrioritySeatCandidates, PrioritySeatHolds, PrioritySeatSales } from '../domain/ports.js';
+import type { CancelledTickets, PriorityGrantLogger, PriorityGrantStore, PrioritySeatCandidates, PrioritySeatHolds, PrioritySeatSales } from '../domain/ports.js';
 
 export class PriorityStoreUnavailable extends Error {
   constructor(cause?: unknown) {
@@ -48,6 +48,8 @@ export class GrantPriorityPurchase {
       candidates: PrioritySeatCandidates;
       seatMap: Pick<SeatMap, 'resolve' | 'config'>;
       sales?: PrioritySeatSales;
+      /** DB 쓰기가 실패해 보류를 풀지 못했을 때 재시도 표시를 남긴다 */
+      logger?: PriorityGrantLogger;
       clock: Clock;
     },
   ) {}
@@ -130,6 +132,7 @@ export class GrantPriorityPurchase {
         price,
         expiresAtMs,
         nowMs,
+        ...(i.actedBy !== '' ? { actedBy: i.actedBy } : {}),
       });
       if (grant.grantId !== grantId) await this.#release(i, grantId, seat, keepUntilMs);
       return { result: resultOf(grant), grant };
@@ -137,6 +140,13 @@ export class GrantPriorityPurchase {
       if (e instanceof PrioritySeatConflict) {
         await this.#release(i, grantId, seat, keepUntilMs);
         return undefined;
+      }
+      // DB 쓰기가 실패하면 방금 잡은 PRIORITY 보류가 고아로 남지 않게 푼다.
+      // 풀지 못하면 만료 반복이 처리할 수 있도록 재시도 표시를 남긴다.
+      try {
+        await this.deps.seats.releasePriority({ eventId: i.eventId, accountId: i.accountId, grantId, seat, keepUntilMs });
+      } catch (releaseError) {
+        this.deps.logger?.grantFailed({ eventId: i.eventId, cancelledTicketId: i.cancelledTicketId, reason: `release-failed:${releaseError instanceof Error ? releaseError.name : 'unknown'}` });
       }
       throw e;
     }

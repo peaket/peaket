@@ -78,6 +78,7 @@ const WINDOW_TAG = '0018_event_refund_window_runner';
 /** 판매 정지 사본 sale_control(BAT-465 R-584, ADR-0123) */
 const SALE_CONTROL_TAG = '0019_sale_control';
 const PRIORITY_GUARD_TAG = '0020_priority_grant_guard';
+const PRIORITY_ACTED_TAG = '0021_priority_grant_acted_by';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -431,6 +432,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [18, WINDOW_TAG],
       [19, SALE_CONTROL_TAG],
       [20, PRIORITY_GUARD_TAG],
+      [21, PRIORITY_ACTED_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -464,6 +466,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${WINDOW_TAG}.sql`,
       `${SALE_CONTROL_TAG}.sql`,
       `${PRIORITY_GUARD_TAG}.sql`,
+      `${PRIORITY_ACTED_TAG}.sql`,
     ]);
   });
 
@@ -471,7 +474,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const sqlText = canon(readFileSync(join(MIGRATIONS, `${PRIORITY_TAG}.sql`), 'utf8'));
     expect(sqlText.match(/create table/gi)).toHaveLength(1);
     expect(sqlText).toContain('create table priority_grant');
-    for (const c of priorityShape.columns) {
+    for (const c of priorityShape.columns.filter((c) => c.name !== 'acted_by' && c.name !== 'withdrawn_by')) {
       const def = c.name === 'version' ? ' default 1' : '';
       expect(sqlText, c.name).toContain(`${c.name} ${c.type}${def}${c.notNull ? ' not null' : ''}`);
     }
@@ -480,6 +483,13 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     for (const k of priorityShape.checks) expect(sqlText).toContain(`constraint ${k.name} check(${k.expr})`);
     // 다른 표를 바꾸지 않는다
     expect(sqlText).not.toMatch(/alter table|drop table|create table (?!priority_grant)/);
+  });
+
+  test('0021 SQL은 priority_grant에 발급·회수 행위자 칸만 더한다(B1-03)', () => {
+    const sqlText = canon(readFileSync(join(MIGRATIONS, `${PRIORITY_ACTED_TAG}.sql`), 'utf8'));
+    expect(sqlText).toContain('alter table priority_grant add column acted_by text');
+    expect(sqlText).toContain('alter table priority_grant add column withdrawn_by text');
+    expect(sqlText.match(/alter table/gi)).toHaveLength(2);
   });
 
   type Snapshot = {
@@ -516,8 +526,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  test('마지막 스냅샷(0020_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0020_snapshot.json');
+  test('마지막 스냅샷(0021_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0021_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape]) {

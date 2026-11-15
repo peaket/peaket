@@ -174,6 +174,7 @@ describe('묶기·실패 해제 Lua의 모양(pin-lua.ts 계약, ADR-0086)', () 
       `s:{event:${e}}:failed:${i.holdId}`,
       seatKeys.ordered(e),
       seatKeys.paused(e),
+      seatKeys.prio(e),
     ]);
     // 정본 모호: 표시 수명을 ARGV로 넘기는지 정본에 없다. 기존 ARGV 차례는 그대로라고 본다
     expect(p.args).toEqual([ACCOUNT_A, i.purchaseSessionId, i.holdId, '4', '1', String(HOLD_TTL_MS), String(keepUntilMs), seatKeys.section(e, ''), ...seatArgs]);
@@ -216,7 +217,7 @@ describe('묶기·실패 해제 Lua의 모양(pin-lua.ts 계약, ADR-0086)', () 
     expect(rec.calls).toHaveLength(1);
     const c = rec.calls[0]!;
     expect(c.script.source).toBe(RESTORE_PRIORITY_LUA);
-    expect(c.keys).toEqual([seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), seatKeys.hold(e, seat.index)]);
+    expect(c.keys).toEqual([seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), seatKeys.prio(e), seatKeys.hold(e, seat.index)]);
     expect(c.args).toEqual([accountId, grantId, String(keepUntilMs), String(seat.index)]);
     const h = hash(await redis.command(['HGETALL', seatKeys.hold(e, seat.index)], { key: seatKeys.hold(e, seat.index) }));
     expect(h).toMatchObject({ holdId: grantId, owner: accountId, kind: 'PRIORITY', priorityGrantId: grantId });

@@ -20,6 +20,8 @@ interface Row {
   expires_at: Date | string;
   active_order_id: string | null;
   used_order_id: string | null;
+  acted_by: string | null;
+  withdrawn_by: string | null;
   version: number | string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -41,12 +43,14 @@ const grantOf = (r: Row): PriorityGrant => ({
   expiresAtMs: ms(r.expires_at),
   ...(r.active_order_id !== null ? { activeOrderId: r.active_order_id } : {}),
   ...(r.used_order_id !== null ? { usedOrderId: r.used_order_id } : {}),
+  ...(r.acted_by !== null ? { actedBy: r.acted_by } : {}),
+  ...(r.withdrawn_by !== null ? { withdrawnBy: r.withdrawn_by } : {}),
   version: Number(r.version),
   createdAtMs: ms(r.created_at),
   updatedAtMs: ms(r.updated_at),
 });
 
-const COLUMNS = sql`id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, active_order_id, used_order_id, version, created_at, updated_at`;
+const COLUMNS = sql`id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, active_order_id, used_order_id, acted_by, withdrawn_by, version, created_at, updated_at`;
 
 async function one(exec: Executor, q: SQL): Promise<PriorityGrant | undefined> {
   const r = await exec.execute(q);
@@ -69,10 +73,10 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
     return this.database.transaction(async (tx: DbTransaction) => {
       const inserted = await one(
         tx,
-        sql`insert into priority_grant (id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, version, created_at, updated_at)
+        sql`insert into priority_grant (id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, acted_by, version, created_at, updated_at)
             values (${input.grantId}::uuid, ${input.eventId}::uuid, ${input.accountId}::uuid, ${input.fraudCaseId}::uuid, ${input.cancelledTicketId}::uuid,
-                    ${input.grantKind}, ${input.seatId}::uuid, ${input.tierId}, ${input.price}::int, 'OFFERED', ${new Date(input.expiresAtMs)}::timestamptz, 1,
-                    ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz)
+                    ${input.grantKind}, ${input.seatId}::uuid, ${input.tierId}, ${input.price}::int, 'OFFERED', ${new Date(input.expiresAtMs)}::timestamptz,
+                    ${input.actedBy ?? null}, 1, ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz)
             on conflict do nothing
             returning ${COLUMNS}`,
       );
@@ -105,11 +109,11 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
     );
   }
 
-  async withdraw(grantId: string, nowMs: number): Promise<PriorityGrant | undefined> {
+  async withdraw(grantId: string, actedBy: string, nowMs: number): Promise<PriorityGrant | undefined> {
     return one(
       this.database.db,
-      sql`update priority_grant set status = 'WITHDRAWN', version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
-          where id = ${grantId}::uuid and status = 'OFFERED' returning ${COLUMNS}`,
+      sql`update priority_grant set status = 'WITHDRAWN', withdrawn_by = ${actedBy}, version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
+          where id = ${grantId}::uuid and status = 'OFFERED' and active_order_id is null returning ${COLUMNS}`,
     );
   }
 
@@ -117,7 +121,7 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
     return one(
       this.database.db,
       sql`update priority_grant set status = 'EXPIRED', active_order_id = null, version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
-          where id = ${grantId}::uuid and status = 'OFFERED' returning ${COLUMNS}`,
+          where id = ${grantId}::uuid and status = 'OFFERED' and active_order_id is null returning ${COLUMNS}`,
     );
   }
 

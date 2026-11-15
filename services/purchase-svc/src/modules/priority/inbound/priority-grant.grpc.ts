@@ -93,6 +93,6 @@ export function priorityPurchaseHandlers(useCases: PriorityPurchaseUseCases): gr
           : {}),
       };
     }),
-    WithdrawPriorityPurchase: unary(async (r) => viewOf(await useCases.withdraw.run(text(r.grant_id)))),
+    WithdrawPriorityPurchase: unary(async (r) => viewOf(await useCases.withdraw.run(text(r.grant_id), text(r.acted_by)))),
   };
 }

@@ -4,7 +4,7 @@ import { CLOCK, type Clock, INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/p
 import type { SeatMap } from '../inventory/index.js';
 import { GrantPriorityPurchase } from './application/grant-priority-purchase.js';
 import { WithdrawPriorityGrant } from './application/withdraw-priority-grant.js';
-import type { CancelledTickets, PriorityGrantStore, PrioritySeatCandidates, PrioritySeatHolds, PrioritySeatSales } from './domain/ports.js';
+import type { CancelledTickets, PriorityGrantLogger, PriorityGrantStore, PrioritySeatCandidates, PrioritySeatHolds, PrioritySeatSales } from './domain/ports.js';
 import { PriorityGrantController } from './inbound/priority-grant.controller.js';
 
 export const PRIORITY_GRANTS = Symbol('purchase.PRIORITY_GRANTS');
@@ -21,6 +21,8 @@ export interface PriorityModuleDeps {
   readonly seatMap: Pick<SeatMap, 'resolve' | 'config'>;
   /** 활성 판매 행 대조(없으면 대조하지 않는다. 시험 대역) */
   readonly sales?: PrioritySeatSales;
+  /** DB 실패 보상(보류 해제) 실패를 재시도 표시로 남긴다 */
+  readonly logger?: PriorityGrantLogger;
 }
 
 @Module({})

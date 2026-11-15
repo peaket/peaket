@@ -172,7 +172,7 @@ export interface PriorityReleaseInput {
 }
 
 /** SeatStore.releasePriority의 결과. NOT_FOUND는 이미 풀렸거나 이 권리의 보류가 아니다 */
-export type PriorityReleaseResult = { readonly kind: 'OK' } | { readonly kind: 'NOT_FOUND' } | { readonly kind: 'NOT_READY' };
+export type PriorityReleaseResult = { readonly kind: 'OK' } | { readonly kind: 'NOT_FOUND' } | { readonly kind: 'NOT_READY' } | { readonly kind: 'IN_USE' };
 
 /**
  * SeatStore.replay의 결과. 같은 계정·같은 키의 살아 있는 기록이 같은 지문이면 처음 응답(IDEM_REPLAY), 다른 지문이면 IDEM_REUSED,

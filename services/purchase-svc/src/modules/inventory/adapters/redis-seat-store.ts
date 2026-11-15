@@ -377,7 +377,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     const r = (await guard(this.redis.evalScript(PRIORITY_RELEASE, keys, args, deadlineOf(o)))) as unknown[];
     if (!Array.isArray(r)) throw new Error(`우선 구매 보류 해제 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
     const kind = str(r[0]);
-    if (kind === 'OK' || kind === 'NOT_FOUND' || kind === 'NOT_READY') return { kind };
+    if (kind === 'OK' || kind === 'NOT_FOUND' || kind === 'NOT_READY' || kind === 'IN_USE') return { kind };
     throw new Error(`우선 구매 보류 해제 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
@@ -518,10 +518,11 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       seatKeys.secver(e),
       seatKeys.fence(e),
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
-      // 실패 표시(PRF-165)와 주문 뒤·정지 집합(BUILD_ORDER HOT-070)
+      // 실패 표시(PRF-165)와 주문 뒤·정지 집합(BUILD_ORDER HOT-070), 우선 구매 만료 인덱스(B1-01)
       seatKeys.failed(e, i.holdId),
       seatKeys.ordered(e),
       seatKeys.paused(e),
+      seatKeys.prio(e),
     ];
     const args = [
       a,
@@ -598,7 +599,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
   async restorePriority(i: RestorePriorityInput, o?: SeatCallOptions): Promise<RestorePriorityResult> {
     assertRestorePriorityInput(i);
     const e = i.eventId;
-    const keys = [seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), ...i.seats.map((s) => seatKeys.hold(e, s.index))];
+    const keys = [seatKeys.ordered(e), seatKeys.paused(e), seatKeys.epoch(e), seatKeys.prio(e), ...i.seats.map((s) => seatKeys.hold(e, s.index))];
     const args = [i.accountId, i.grantId, String(i.keepUntilMs), ...i.seats.map((s) => String(s.index))];
     const r = (await guard(this.redis.evalScript(RESTORE_PRIORITY, keys, args, deadlineOf(o)))) as unknown[];
     if (!Array.isArray(r)) throw new Error(`결제 실패 복귀 Lua가 모르는 값을 돌려줬다: ${String(r)}`);

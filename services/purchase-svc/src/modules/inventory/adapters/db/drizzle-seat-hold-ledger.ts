@@ -47,6 +47,12 @@ export class DrizzleSeatHoldLedger implements SeatHoldLedger {
           const nextHeldAt = (newer.rows[0] as { held_at: Date | null }).held_at;
           status = nextHeldAt !== null && expiresAt.getTime() <= new Date(nextHeldAt).getTime() ? 'EXPIRED' : 'RELEASED';
         }
+        // 판매·환불·회수로 끝난 PRIORITY 권리의 늦은 HELD 사건은 HELD로 남기지 않는다(B1-07)
+        if (status === 'HELD' && e.holdKind === 'PRIORITY' && grant !== null) {
+          const g = await tx.execute(sql`select status from priority_grant where id = ${grant}::uuid`);
+          const gs = (g.rows[0] as { status?: string } | undefined)?.status;
+          if (gs !== undefined && gs !== 'OFFERED') status = 'RELEASED';
+        }
         await tx.execute(sql`
           insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, priority_grant_id, held_at, expires_at, hold_id, purchase_session_id)
           values (${e.eventId}::uuid, ${e.seatId}::uuid, ${e.accountId}::uuid, ${e.fencingToken}::bigint, ${status}, ${e.holdKind}, ${grant}::uuid, ${at}::timestamptz, ${expiresAt}::timestamptz,

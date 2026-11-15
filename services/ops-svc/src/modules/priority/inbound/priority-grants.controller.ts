@@ -63,9 +63,9 @@ export class PriorityGrantsController {
   @HttpCode(200)
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: GrantIdParams, responses: { 200: WithdrawView } })
-  async withdraw(@Param('grantId') grantId: string): Promise<z.output<typeof WithdrawView>> {
+  async withdraw(@Param('grantId') grantId: string, @CurrentPrincipal() me: Principal): Promise<z.output<typeof WithdrawView>> {
     try {
-      return await this.withdrawPriority.run(grantId);
+      return await this.withdrawPriority.run(grantId, me.accountId);
     } catch (e) {
       return fail(e);
     }

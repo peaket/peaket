@@ -27,7 +27,7 @@ const target = (ticketId: string, over: Partial<EventRefundTarget> = {}): EventR
   ...over,
 });
 
-const fixture = (o: { targets?: EventRefundTarget[]; outcomes?: Array<'REFUNDED' | 'REFUND_PENDING' | 'FAILED'>; attempts?: MemoryEventRefundAttemptStore; alert?: EventRefundAlert; fan?: boolean } = {}) => {
+const fixture = (o: { targets?: EventRefundTarget[]; outcomes?: Array<'REFUNDED' | 'REFUND_PENDING' | 'FAILED'>; attempts?: MemoryEventRefundAttemptStore; alert?: EventRefundAlert; fan?: boolean; concurrency?: number } = {}) => {
   let now = NOW;
   const store = new MemoryEventRefundStore();
   const attempts = o.attempts ?? new MemoryEventRefundAttemptStore();
@@ -54,7 +54,7 @@ const fixture = (o: { targets?: EventRefundTarget[]; outcomes?: Array<'REFUNDED'
     alert: o.alert ?? { raise: async (q) => void raises.push(q) },
     nowMs: () => now,
     deadlineMs: () => now + 5_000,
-    concurrency: 2,
+    concurrency: o.concurrency ?? 2,
   });
   return { store, attempts, service, calls, notices, raises, setNow: (ms: number) => (now = ms) };
 };
@@ -132,6 +132,33 @@ describe('GAT-130 자동 정지', () => {
     expect(paused.progress.perPg[0]).toMatchObject({ state: 'PAUSED', pauseReason: 'MANUAL' });
     expect(await f.service.runDue()).toMatchObject({ processed: 0 });
     expect(f.calls).toHaveLength(calls);
+  });
+
+  test('TEST03_4.9%_경계인_100건_중_4실패는_멈추지_않는다', async () => {
+    const attempts = new MemoryEventRefundAttemptStore();
+    seed(attempts, [...Array.from({ length: 96 }, () => ({ outcome: 'SUCCESS' as const })), ...Array.from({ length: 4 }, () => ({ outcome: 'FAILURE' as const }))]);
+    const f = fixture({ attempts });
+    const r = await start(f.service);
+    expect(f.calls).toHaveLength(1);
+    expect(r.status).toBe('COMPLETED');
+  });
+
+  test('TEST03_19연속실패는_멈추지_않고_20번째에서_멈춘다', async () => {
+    const attempts = new MemoryEventRefundAttemptStore();
+    seed(attempts, Array.from({ length: 19 }, () => ({ outcome: 'FAILURE' as const })));
+    const f = fixture({ attempts });
+    const r = await start(f.service);
+    expect(f.calls).toHaveLength(1);
+    expect(r.status).toBe('COMPLETED');
+
+    const attempts2 = new MemoryEventRefundAttemptStore();
+    seed(attempts2, Array.from({ length: 19 }, () => ({ outcome: 'FAILURE' as const })));
+    const targets = Array.from({ length: 5 }, (_, i) => target(`0193a000-0000-7000-8000-00000000003${i}`));
+    const g = fixture({ attempts: attempts2, targets, outcomes: ['FAILED'], concurrency: 1 });
+    const paused = await start(g.service);
+    expect(g.calls).toHaveLength(1);
+    expect(paused.status).toBe('PAUSED');
+    expect(paused.progress.perPg[0]).toMatchObject({ state: 'PAUSED', pauseReason: 'AUTO_CONSECUTIVE_FAILURES' });
   });
 
   test('R-T22 ⑤_재개_뒤에도_자동_정지_기준이_남아_있으면_바로_다시_멈춘다', async () => {
@@ -290,5 +317,41 @@ describe('GAT-130 백그라운드 실행기·팬 알림', () => {
     const r = await adapter.cancel(target(T1), { requestId: REQUEST, cancellationId: '0193a000-0000-7000-8000-000000000099', reason: 'EVENT_POSTPONED', nowMs: NOW, deadlineMs: NOW + 1 });
     expect(r.status).toBe('REFUNDED');
     expect(seen?.reason).toBe('EVENT_POSTPONED');
+  });
+
+  test('B1-05_실행_중_수동_일시정지는_남은_호출을_멈추고_PAUSED를_덮지_않는다', async () => {
+    const store = new MemoryEventRefundStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const firstStarted = new Promise<void>((r) => (started = r));
+    const calls: string[] = [];
+    const canceller: EventRefundCanceller = {
+      cancel: async (t) => {
+        calls.push(t.ticketId);
+        if (calls.length === 1) {
+          started();
+          await gate;
+        }
+        return { status: 'REFUNDED' };
+      },
+    };
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target(T1), target(T2)] },
+      canceller,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+      concurrency: 1,
+    });
+    const running = start(service);
+    await firstStarted;
+    expect((await service.pause({ requestId: REQUEST, reason: '수동 정지' })).status).toBe('PAUSED');
+    release();
+    const r = await running;
+    expect(calls).toEqual([T1]);
+    expect(r.status).toBe('PAUSED');
+    expect(r.progress).toMatchObject({ total: 2, done: 1 });
+    expect((await store.items(REQUEST)).map((i) => i.status)).toEqual(['REFUNDED', 'PENDING']);
   });
 });

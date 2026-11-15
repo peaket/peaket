@@ -33,12 +33,12 @@ export class HttpPurchasePriorityGrants implements PurchasePriorityGrants {
     return (await res.json()) as GrantPriorityView;
   }
 
-  async withdraw(grantId: string): Promise<WithdrawPriorityView> {
+  async withdraw(grantId: string, actedBy: string): Promise<WithdrawPriorityView> {
     const res = await this.client.request({
       method: 'POST',
       path: `/internal/v1/priority-grants/${grantId}/withdrawals`,
       headers: this.#headers(),
-      body: JSON.stringify({}),
+      body: JSON.stringify({ actedBy }),
       timeoutCapMs: 5_000,
     });
     if (!res.ok) {

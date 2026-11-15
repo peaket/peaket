@@ -942,4 +942,36 @@ describe('코드 리뷰 재현(PRF-143)', () => {
       expect(await store.writeSeats(eventId, [seat], keepUntilMs, g)).toEqual({ result: 'READY', gen: 3 });
     }
   });
+
+  test('B1-07_끝난_PRIORITY_권리의_옛_HELD_행은_다시_만들기에서_빠지고_OFFERED만_되살아난다', async () => {
+    const eventId = uuidv7(systemClock);
+    const [A, B] = [randomUUID(), randomUUID()];
+    const [gUsed, gOffered] = [randomUUID(), randomUUID()];
+    const usedSeat = S(10);
+    const offeredSeat = S(11);
+    await putSale(eventId, usedSeat.seatId, A, randomUUID(), 'RETURNED');
+    const putGrant = (grantId: string, accountId: string, seatId: string, status: 'USED' | 'OFFERED') =>
+      q(
+        `insert into priority_grant (id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, acted_by, version, created_at, updated_at)
+         values ($1, $2, $3, $4, $5, 'SAME_SEAT', $6, 'R', 10000, $7, now() + interval '2 days', 'commander-1', 1, now(), now())`,
+        [grantId, eventId, accountId, randomUUID(), randomUUID(), seatId, status],
+      );
+    await putGrant(gUsed, A, usedSeat.seatId, 'USED');
+    await putGrant(gOffered, B, offeredSeat.seatId, 'OFFERED');
+    const putPriorityHold = (seatId: string, accountId: string, token: number, grantId: string) =>
+      q(
+        `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, priority_grant_id, held_at, expires_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, $4, 'HELD', 'PRIORITY', $5, now() - interval '1 minute', now() + interval '1 day', $5, $6)`,
+        [eventId, seatId, accountId, token, grantId, randomUUID()],
+      );
+    await putPriorityHold(usedSeat.seatId, A, T0 + 10, gUsed);
+    await putPriorityHold(offeredSeat.seatId, B, T0 + 11, gOffered);
+
+    const r = await rebuilderOf({ seatMap: seatMapOf(eventId) }).rebuild(eventId, { keepUntilMs: Date.now() + 2 * DAY });
+    expect(r.result).toBe('REBUILT');
+    expect(await bit(eventId, 10)).toBe(0);
+    expect(await holdHash(eventId, 10)).toBeNull();
+    expect(await bit(eventId, 11)).toBe(1);
+    expect(await holdHash(eventId, 11)).toMatchObject({ holdId: gOffered, owner: B, kind: 'PRIORITY' });
+  });
 });

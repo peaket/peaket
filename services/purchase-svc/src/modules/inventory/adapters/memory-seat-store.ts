@@ -469,6 +469,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     if (!ev.bits.has(i.seat.index)) return decided({ kind: 'NOT_FOUND' });
     const h = ev.holds.get(i.seat.index);
     if (!h || h.holdId !== i.grantId || h.owner !== i.accountId || h.kind !== 'PRIORITY' || h.priorityGrantId !== i.grantId) return decided({ kind: 'NOT_FOUND' });
+    if (h.pin === '1') return decided({ kind: 'IN_USE' });
     const extend = (key: string) => {
       const cur = ev.expireAt.get(key);
       if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
@@ -778,8 +779,9 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         ev.expireAt.set(hk, i.keepUntilMs);
       }
     }
-    // 내 홀드는 pin 칸만 더한다(exp·토큰은 그대로)
+    // 내 홀드는 pin 칸만 더한다(exp·토큰은 그대로). 결제 중에는 만료 반복이 풀지 않게 prio에서도 뺀다
     for (const h of mine) h.pin = '1';
+    for (const s of i.seats) ev.prio.delete(s.index);
     // 모든 좌석을 만료 인덱스에서 뺀다(Valkey는 빈 정렬 집합을 지운다. 그 키의 수명도 함께 사라진다)
     for (const s of i.seats) ev.expiry.delete(s.index);
     if (ev.expiry.size === 0) ev.expireAt.delete(seatKeys.expiry(e));
@@ -842,6 +844,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       delete (h as { maxStay?: number }).maxStay;
       delete (h as { rem?: number }).rem;
       delete (h as { thawAt?: number }).thawAt;
+      // 결제 중 prio에서 뺐던 보류를 다시 만료 인덱스에 넣는다(결제 실패 복귀)
+      ev.prio.set(s.index, h.exp);
       restored += 1;
     }
     this.#ensureEpoch(ep, Math.floor(now / 1000));

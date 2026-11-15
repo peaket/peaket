@@ -121,8 +121,10 @@ end
 local idx = ARGV[4]
 local bit = redis.call('BITFIELD_RO', KEYS[1], 'GET', 'u1', idx)
 if bit[1] ~= 1 then return decided({'NOT_FOUND'}) end
-local h = redis.call('HMGET', KEYS[6], 'holdId', 'owner', 'kind', 'priorityGrantId', 'fence', 'exp')
+local h = redis.call('HMGET', KEYS[6], 'holdId', 'owner', 'kind', 'priorityGrantId', 'fence', 'exp', 'pin')
 if h[1] ~= ARGV[1] or h[2] ~= ARGV[2] or h[3] ~= 'PRIORITY' or h[4] ~= ARGV[1] then return decided({'NOT_FOUND'}) end
+-- 결제 중(pin)에는 회수가 좌석을 풀지 않는다(B1-02)
+if h[7] == '1' then return decided({'IN_USE'}) end
 local sec = ARGV[5]
 local secNow = redis.call('HGET', KEYS[5], sec)
 if secNow and not (secNow == '0' or (#secNow <= 18 and string.match(secNow, '^[1-9]%d*$') ~= nil)) then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[5]) end

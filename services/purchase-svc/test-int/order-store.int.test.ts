@@ -43,6 +43,7 @@ import {
   type TransitionInput,
   type TransitionResult,
 } from '../src/modules/booking/index.js';
+import { DrizzlePriorityGrantStore } from '../src/modules/priority/index.js';
 import {
   accountActor,
   adminActor,
@@ -1657,5 +1658,41 @@ describe('order_idempotency(platform IdempotencyStore)', () => {
     expect(await orderRowOf(again.id)).toBeUndefined();
     expect(await outboxOf(again.eventId)).toEqual([]);
     expect((await idemRows(o.accountId)).map((r) => [r.operation, r.idempotency_key, r.result_ref])).toEqual([['CREATE_ORDER', o.idempotencyKey, o.id]]);
+  });
+
+  test('TEST04_우선_구매_주문이_APPROVED가_되면_같은_트랜잭션에서_권리가_USED가_된다', async () => {
+    const s = fresh();
+    const base = newOrderInput(s.clock);
+    const grantId = randomUUID();
+    await rawNoHistory(
+      `insert into priority_grant (id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, acted_by, version, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, 'SAME_SEAT', $6, 'R', $7, 'OFFERED', now() + interval '2 days', 'commander-1', 1, now(), now())`,
+      [grantId, base.eventId, base.accountId, randomUUID(), randomUUID(), base.items[0]!.seatId, base.amount],
+    );
+    const o = { ...base, priorityGrantId: grantId };
+    await create(s, o);
+    // 실제 create-order 경로가 하는 진행 중 주문 표시(DrizzleOrderWrites)를 여기서는 직접 넣는다
+    await q('update priority_grant set active_order_id = $2 where id = $1', [grantId, o.id]);
+    s.clock.advance(1000);
+    await drive(s, o, ['T3', 'T4', 'T7']);
+    expect(await q('select active_order_id::text as active_order_id, acted_by from priority_grant where id = $1', [grantId])).toEqual([{ active_order_id: o.id, acted_by: 'commander-1' }]);
+    applied(await transit(s, step(o.id, 'T9', SAGA, 1)));
+    expect(await q('select status, used_order_id::text as used_order_id, active_order_id, acted_by from priority_grant where id = $1', [grantId])).toEqual([
+      { status: 'USED', used_order_id: o.id, active_order_id: null, acted_by: 'commander-1' },
+    ]);
+  });
+
+  test('B1-03_회수_행위자를_priority_grant에_남긴다', async () => {
+    const s = fresh();
+    const base = newOrderInput(s.clock);
+    const grantId = randomUUID();
+    await rawNoHistory(
+      `insert into priority_grant (id, event_id, account_id, fraud_case_id, cancelled_ticket_id, grant_kind, seat_id, tier_id, price, status, expires_at, acted_by, version, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, 'SAME_SEAT', $6, 'R', $7, 'OFFERED', now() + interval '2 days', 'commander-1', 1, now(), now())`,
+      [grantId, base.eventId, base.accountId, randomUUID(), randomUUID(), base.items[0]!.seatId, base.amount],
+    );
+    const w = await new DrizzlePriorityGrantStore(database).withdraw(grantId, 'operator-9', s.clock.now());
+    expect(w).toMatchObject({ status: 'WITHDRAWN', actedBy: 'commander-1', withdrawnBy: 'operator-9' });
+    expect(await q('select acted_by, withdrawn_by from priority_grant where id = $1', [grantId])).toEqual([{ acted_by: 'commander-1', withdrawn_by: 'operator-9' }]);
   });
 });
