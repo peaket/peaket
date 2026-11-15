@@ -72,6 +72,7 @@ beforeAll(async () => {
     version: 3,
   });
   await new DrizzleSaleConfigStore(opsDb).put([config], []);
+  process.env.PEAKET_INTERNAL_TOKEN = 'int-test-token';
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia() }),
@@ -91,7 +92,8 @@ afterAll(async () => {
   pg?.stop();
 });
 
-const get = (eventId: string) => svc.http.inject({ method: 'GET', url: `/internal/v1/events/${eventId}/sale-config` });
+const get = (eventId: string, token: string | null = 'int-test-token') =>
+  svc.http.inject({ method: 'GET', url: `/internal/v1/events/${eventId}/sale-config`, ...(token ? { headers: { 'x-peaket-internal-token': token } } : {}) });
 
 describe('GET /internal/v1/events/{eventId}/sale-config (실제 PostgreSQL)', () => {
   test('BAT051_ core_ops가 쓴 event_sale_config.payload를 salePolicy·eligLists까지 그대로 답하고 no-store다 [ASVS v5.0.0-2.3.2]', async () => {
@@ -99,6 +101,12 @@ describe('GET /internal/v1/events/{eventId}/sale-config (실제 PostgreSQL)', ()
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
     expect(JSON.parse(r.payload)).toEqual(config);
+  });
+
+  test('SEC-06_ 내부 토큰이 없거나 틀리면 401이고 맞으면 200이다', async () => {
+    expect((await get(EVENT, null)).statusCode).toBe(401);
+    expect((await get(EVENT, 'wrong-token')).statusCode).toBe(401);
+    expect((await get(EVENT)).statusCode).toBe(200);
   });
 
   test('BAT051_ 사본이 없는 회차는 404 not-found이고 no-store다(빈 설정을 만들지 않는다)', async () => {

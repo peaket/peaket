@@ -52,6 +52,12 @@ const messageOf = (e: FanNoticeEvent): { title: string; body: string } => {
   }
 };
 
+/** 운영(NODE_ENV·PEAKET_ENV=production)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
+export function assertNotifyFakeAllowed(env: Record<string, string | undefined>): void {
+  if (env.PEAKET_NOTIFY_SENDER_MODE?.trim() !== 'fake') return;
+  if (env.NODE_ENV === 'production' || env.PEAKET_ENV === 'production') throw new Error('PEAKET_NOTIFY_SENDER_MODE=fake는 운영에서 쓸 수 없다');
+}
+
 export class NotificationSender {
   readonly #sent = new Map<string, FanNoticeDelivery>();
   readonly #enabled: boolean;
@@ -61,6 +67,7 @@ export class NotificationSender {
     env: Record<string, string | undefined> = process.env,
     private readonly now: () => number = Date.now,
   ) {
+    assertNotifyFakeAllowed(env);
     this.#enabled = env.PEAKET_NOTIFY_SENDER_MODE?.trim() === 'fake';
   }
 

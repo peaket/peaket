@@ -3,7 +3,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { AttendeeExportStore } from '../../domain/ports.js';
 import type { AttendeeExportRecord, ExportFormat, ExportResult } from '../../domain/export.js';
-import { attendeeExport } from './schema.js';
+import { attendeeExport, attendeeExportAudit } from './schema.js';
 
 const toRecord = (row: typeof attendeeExport.$inferSelect): AttendeeExportRecord => ({
   exportId: row.id,
@@ -39,6 +39,28 @@ export class DrizzleAttendeeExportStore implements AttendeeExportStore {
           result: record.result,
           createdAt: record.createdAt,
           expiresAt: record.expiresAt,
+        });
+      },
+      { tenantId: record.promoterId, accessMode: 'read write' },
+    );
+  }
+
+  async audit(record: AttendeeExportRecord): Promise<void> {
+    await this.db.transaction(
+      async (tx) => {
+        await tx.insert(attendeeExportAudit).values({
+          id: record.exportId,
+          exportId: record.exportId,
+          promoterId: record.promoterId,
+          eventId: record.eventId,
+          actorAccountId: record.actorAccountId,
+          actorDisplayName: record.actorDisplayName,
+          actorRole: record.actorRole,
+          reason: record.reason,
+          format: record.format,
+          count: record.count,
+          createdAt: record.createdAt,
+          retainUntil: new Date(record.createdAt.getTime() + 2 * 365 * 24 * 60 * 60 * 1000),
         });
       },
       { tenantId: record.promoterId, accessMode: 'read write' },

@@ -84,6 +84,8 @@ export interface AttendeeRecord {
   buyerPhone: string;
   seatLabel: string | null;
   quantity: number;
+  /** 티켓 원천이면 좌석 등급까지. 굿즈 원천은 없을 수 있다 */
+  seats?: { seatLabel: string; tier: string }[];
 }
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -125,7 +127,7 @@ export function settlementBasisDate(item: MerchOrderItemRecord, order: MerchOrde
   return null;
 }
 
-export function productSettlementItem(item: MerchOrderItemRecord, order: MerchOrderRecord): ProductSettlementItem | null {
+export function productSettlementItem(item: MerchOrderItemRecord, order: MerchOrderRecord, includeShipping = false): ProductSettlementItem | null {
   const basisDate = settlementBasisDate(item, order);
   if (!basisDate) return null;
   return {
@@ -138,13 +140,26 @@ export function productSettlementItem(item: MerchOrderItemRecord, order: MerchOr
     productId: item.productId,
     productName: item.productName,
     quantity: item.quantity,
-    grossAmount: item.unitAmount * item.quantity + (order.shippingFee > 0 ? order.shippingFee : 0),
+    grossAmount: item.unitAmount * item.quantity + (includeShipping && order.shippingFee > 0 ? order.shippingFee : 0),
     refundedAmount: item.refundedAmount,
     commissionRateBp: item.commissionRateBp,
     basisDate,
     returnStatus: item.status,
     eventEndsAt: item.eventEndsAt?.toISOString() ?? null,
   };
+}
+
+/** 한 주문의 정산 항목. 배송비는 주문에 한 번만 더한다(정산 대상이 된 첫 품목에 붙인다). */
+export function productSettlementItems(items: readonly MerchOrderItemRecord[], order: MerchOrderRecord): ProductSettlementItem[] {
+  let shipping = order.shippingFee > 0;
+  const out: ProductSettlementItem[] = [];
+  for (const item of items) {
+    const row = productSettlementItem(item, order, shipping);
+    if (!row) continue;
+    out.push(row);
+    shipping = false;
+  }
+  return out;
 }
 
 /** 이름 가운데 글자, 휴대폰 가운데 네 자리를 가린다(SCR-027, 두 글자 이름은 끝 글자). */

@@ -32,6 +32,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   const saleConfigs = new MemorySaleConfigStore();
   await saleConfigs.put([config], []);
+  process.env.PEAKET_INTERNAL_TOKEN = 'int-test-token';
   svc = await createService({ name: 'core-svc', module: AppModule.register({ memory: true, saleConfigs }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet(), adminAuthz: new FakeIdentity() });
 });
 
@@ -39,7 +40,8 @@ afterAll(async () => {
   await svc.close();
 });
 
-const get = (eventId: string) => svc.http.inject({ method: 'GET', url: `/internal/v1/events/${eventId}/sale-config` });
+const get = (eventId: string, token: string | null = 'int-test-token') =>
+  svc.http.inject({ method: 'GET', url: `/internal/v1/events/${eventId}/sale-config`, ...(token ? { headers: { 'x-peaket-internal-token': token } } : {}) });
 
 describe('GET /internal/v1/events/{eventId}/sale-config', () => {
   test('BAT051_ 판매 승인 사본을 salePolicy·eligLists까지 그대로 답하고 no-store다', async () => {
@@ -47,6 +49,12 @@ describe('GET /internal/v1/events/{eventId}/sale-config', () => {
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
     expect(JSON.parse(r.payload)).toEqual(config);
+  });
+
+  test('SEC-06_ 내부 토큰이 없거나 틀리면 401, 맞으면 200이다', async () => {
+    expect((await get(EVENT, null)).statusCode).toBe(401);
+    expect((await get(EVENT, 'wrong-token')).statusCode).toBe(401);
+    expect((await get(EVENT)).statusCode).toBe(200);
   });
 
   test('BAT051_ 사본이 없는 회차는 404 not-found다(빈 설정을 만들지 않는다)', async () => {

@@ -127,6 +127,20 @@
       "when": 1794700000000,
       "tag": "0017_webhook_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794700100000,
+      "tag": "0018_search_sale_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794700200000,
+      "tag": "0019_attendee_export_audit",
+      "breakpoints": true
     }
   ]
 }

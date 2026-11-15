@@ -24,6 +24,8 @@ export class AppModule {
           notify?: { notificationTransport?: NotificationTransport };
           exportJwks?: { url: string; issuer: string };
           identityGrpc?: string;
+          /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다 */
+          purchaseHttp?: { url: string; token?: string };
         }
       | {
           memory: true;
@@ -51,6 +53,7 @@ export class AppModule {
             partnerDatabase: o.partnerDatabase,
             ...(o.exportJwks ? { jwks: o.exportJwks } : {}),
             ...(o.identityGrpc ? { identityGrpc: o.identityGrpc } : {}),
+            ...(o.purchaseHttp ? { purchaseHttp: o.purchaseHttp } : {}),
           }),
         ],
       };

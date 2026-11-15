@@ -1,7 +1,7 @@
 // 모듈 조립 파일: 포트에 어댑터를 묶는다(층 규칙의 밖. 모든 층을 가져온다).
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, type Provider, RequestMethod } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { type Clock, type Database, DATABASE, LogPseudonymizer, CLOCK } from '@peaket/platform';
+import { type Clock, type Database, DATABASE, INTERNAL_TOKEN, LogPseudonymizer, CLOCK } from '@peaket/platform';
 import { EmptyDemandForecastSource } from './adapters/empty-demand-forecast-source.js';
 import { ChangeEventScale } from './application/change-event-scale.js';
 import { GetDemandForecast } from './application/demand-forecast.js';
@@ -187,6 +187,7 @@ export class CatalogModule implements NestModule {
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
           { provide: DEMAND_FORECAST_SOURCE, useValue: o.media.demandSource ?? new EmptyDemandForecastSource() },
+          { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           ...mediaProviders(o.media, false),
         ],
       };
@@ -207,6 +208,7 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         { provide: DEMAND_FORECAST_SOURCE, useValue: o.media?.demandSource ?? new EmptyDemandForecastSource() },
+        { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         ...mediaProviders(o.media ?? {}, true),
       ],
     };

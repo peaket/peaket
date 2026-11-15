@@ -4,6 +4,8 @@ import type { AttendeeExportRecord, ExportFormat } from './export.js';
 
 export interface AttendeeExportStore {
   insert(record: AttendeeExportRecord): Promise<void>;
+  /** 다운로드 접속기록(2년 보존, A2-19). 행위자·사유·건수·형식을 남긴다 */
+  audit(record: AttendeeExportRecord): Promise<void>;
   list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]>;
 }
 
