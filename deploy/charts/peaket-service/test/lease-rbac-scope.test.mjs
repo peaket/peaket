@@ -7,15 +7,16 @@ import assert from 'node:assert/strict';
 const templates = new URL('../templates/', import.meta.url);
 const read = (name) => readFileSync(new URL(name, templates), 'utf8');
 
-const CREATE = /- apiGroups: \["coordination\.k8s\.io"\]\s*\n\s*resources: \["leases"\]\s*\n\s*verbs: \["create"\]/;
+const LEASE_RULE = /- apiGroups: \["coordination\.k8s\.io"\]\s*\n\s*resources: \["leases"\]\s*\n([\s\S]*?)(?=\n\s*- apiGroups:|\n---|\napiVersion:|$)/g;
 const SCOPED = /- apiGroups: \["coordination\.k8s\.io"\]\s*\n\s*resources: \["leases"\]\s*\n\s*resourceNames: ([^\n]+)\n\s*verbs: \["get", "update", "patch"\]/;
 
 for (const name of ['outbox-relay.yaml', 'leader-lease.yaml']) {
   test(`${name}는 create를 이름 없는 별도 규칙으로, get/update/patch를 이름 한정 규칙으로 준다`, () => {
     const s = read(name);
-    const create = s.match(CREATE);
+    const rules = [...s.matchAll(LEASE_RULE)].map((m) => m[1]);
+    const create = rules.find((r) => /verbs: \["create"\]/.test(r));
     assert.ok(create, 'leases create 규칙이 없다');
-    assert.ok(!/resourceNames/.test(create[0]), 'create 규칙에 resourceNames를 붙였다(create는 이름으로 좁힐 수 없다)');
+    assert.ok(!/resourceNames/.test(create), 'create 규칙의 verbs 뒤에 resourceNames를 붙였다(create는 이름으로 좁힐 수 없다)');
 
     const scoped = s.match(SCOPED);
     assert.ok(scoped, 'leases get/update/patch를 이름으로 좁힌 규칙이 없다');
