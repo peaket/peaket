@@ -665,6 +665,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-607: createPayoutBatchAtomically가 KYC·계좌 보류, 미수금 상계·이동 기록, 배치 삽입, 정산서 결속을 한 트랜잭션으로 처리하고 실패 시 전부 롤백한다. COMPENSATION_ADVANCE 미수금은 결제사와 무관하게 상계하되 같은 결제사 환불·이의 미수금은 남긴다. 이의 기간이 끝난 NOTIFIED 자동 확정을 스케줄러와 내부 confirm-due 경로에 붙였다.
 - R-613: payment.pg_store(0018)와 seller_kyc 상호·대표자(0019)를 더했다. 회차 정산 원천이 상점으로 걸러 STANDARD/ESCROW 이중 계상을 막고, CANCELED는 매출 0·환급 원금 전액으로 세며 대사 종료 시 cancelled_amount를 채운다. 대사 미완료 결제는 excludedPayments에 이유와 함께 뺀다. 예금주는 KYC 상호·대표자와 대조해 holderVerified를 정하고 미확인 계좌는 ACCOUNT_MISMATCH로 보류한다. 회차 수수료율은 core 설정에서 읽고 없으면 503 event-commission-rate-unavailable로 닫는다. 반려된 배치는 payout_batch_id를 풀어 정산서를 CONFIRMED로 되돌린다.
 - R-620 한 배치 안 미수금 잔액을 로컬로 추적·분배하고 저장소가 FOR UPDATE로 잔액을 확인해 이중 상계를 막았다. 스케줄러는 회차 종료 다음 영업일 06시(KST)에 계산하고 지급일은 종료일 +5영업일로 잡으며, 리더 선출 직후 첫 tick과 confirmDue 분리를 넣었다. DISPUTED는 이의 결과 입력 전 409, HELD는 사유별 증빙이 있을 때만 CONFIRMED로 풀고 재확정·자동 확정·이의 해소를 settlement_statement_audit(0020)에 남긴다. core settlement-due에 InternalTokenGuard를 붙였다.
+- R-628: `InternalToken401Guard`가 플랫폼 `InternalTokenGuard`를 상속해 local·ci 밖에서는 토큰이 없을 때 시작을 막고, 토큰이 없거나 틀리면 401을 던진다(맞으면 200). `INTERNAL_TOKEN_REQUIRED`는 createService가 전역으로 주는 값을 `@Optional()`로 받는다.
 
 ## 5. [충돌] 결정 결과
 
