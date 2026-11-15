@@ -725,6 +725,8 @@
 | R-608 | SEC-01·03·08·COV2-01(gRPC 무인증·재인증 jti 재사용·mTLS 기기 결속 없음·ApplyLabel acted_by 임의 지정) | platform grpc/token/verify, ticket/identity/ops/payment/purchase/trust/core 클라이언트·서버, scanner enrollment | 내부 gRPC 토큰·jti 1회용·MTLS_CERT 지문 결속·acted_by 증명 | 적용 |
 | R-618 | COV2-05(공개 개인정보 처리방침 자리표시자·유효일) | apps/web privacy·legal 정본·시험 | 자리표시자 숨김/초안 표시·유효일 정정 | 적용 |
 | R-619 | C2V-01·02·05·06(병합 정리 시험 없음·유일 인덱스 시험 없음·잠금 순서·유령 세션) | identity merge/withdrawal/scanner session·시험 | 호출 단언·유일 위반·잠금 순서·계정 상태 확인 | 적용 |
+| R-629 | SEC-07 fake 가드가 정본 prod·staging을 보지 않아 운영에서 가짜 알림·배상 송금이 시작될 수 있음 | core notify·payment compensation·platform config | isProductionLikeEnv(prod·staging·production)와 NotifyModule env 주입 | 적용 |
+| R-630 | 웨이브 6 감사 기록(coverage·findings·wave6·영역/변이/검증 보고서) | docs/review/audit | 배치 67·구현 55 매핑, 고유 발견 높음 23·중간 61·낮음 20여, 수정 R-595..R-629, 독립 검증 보고서 보존 | 적용 |
 
 ## 4. 숫자 일치표
 
