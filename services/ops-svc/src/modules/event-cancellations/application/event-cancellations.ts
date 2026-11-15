@@ -89,7 +89,7 @@ export class EventCancellations {
     if (r.status !== 'JUDGED' && r.status !== 'PENDING_APPROVAL') throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
     if (r.judgedBy === actor.accountId) throw new EventCancellationProblem('approver-ineligible', 403, '판정자는 확정할 수 없습니다');
     // 계약(openapi /v1/ops/event-cancellations/{requestId}/approvals)은 재인증 토큰을 요구한다(SEC-02).
-    if (!this.reauth) throw new EventCancellationProblem('dependency-unavailable', 503, '재인증 검증기를 쓸 수 없습니다');
+    if (!this.reauth) throw new EventCancellationProblem('reauth-unavailable', 503, '재인증 검증기를 조립하지 못했습니다(identity JWKS URL 없음)');
     const verified = await this.reauth.verify(reauthToken, { sessionId: actor.sessionId ?? '', act: 'APPROVAL' });
     if (verified.accountId !== actor.accountId) throw new EventCancellationProblem('reauth-required', 403, '다시 인증해 주세요');
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');

@@ -139,8 +139,17 @@ export class PayoutApprovals {
     await this.d.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
   }
 
-  async recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView> {
-    return this.d.payments.recordPortoneExecution(batchId, bulkPayoutId);
+  async recordPortoneExecution(batchId: string, bulkPayoutId: string, actor: string): Promise<PayoutBatchView> {
+    const batch = await this.d.payments.recordPortoneExecution(batchId, bulkPayoutId);
+    // 수기 포트원 일괄 지급 실행은 돈이 나간 기록이다. 실행 배치·금액·행위자·근거를 감사에 남긴다(settlement §5.4)
+    await this.#audit('PAYOUT_PORTONE_EXECUTED', batchId, actor, {
+      batchId,
+      bulkPayoutId,
+      totalAmount: batch.totalAmount,
+      statementCount: batch.statementCount,
+      basis: 'PORTONE_CONSOLE',
+    }, this.d.clock.now());
+    return batch;
   }
 
   listBatches(filter: { payoutDate?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchView[]> {

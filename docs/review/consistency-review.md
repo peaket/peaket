@@ -702,6 +702,7 @@
 | R-597 | ops 감사 M4 중간 8건·OPS 4건·SEC-02 | ops-svc payouts·event-cancellations·audit | 영업일 기한·서명/ID 검증·낙관 버전·조건부 RUNNING·감사 체인·재인증 | 적용 |
 | R-598 | purchase 감사 M2 중간(변이 생존: 입장 시작 만료 상한·REFUND_AFTER_CLOSE·연기 공제·결제 실패 복귀·재시도 5회·창 경계·보류 소유자·만료 경계) | services/purchase-svc 시험·inventory index | 경계·권한·재시도·복귀 시험 추가 | 적용 |
 | R-604 | B1 중간 7건·TEST-03/04(결제 중 만료·회수, acted_by, 회차 취소 충돌, 일시정지 경합, 고아 보류, 재구성 HELD, 자동 정지 경계, USED 전이) | purchase priority/refund/rebuild·ops acted_by | active order/pin 가드·조건부 update·보상·재구성 필터·판정 주기·USED | 적용 |
+| R-617 | COV2-03·04·06·OPSV-03·05(통보 멱등·후기 상세 계약 누락·탈퇴 후 후기 PII·포트원 수기 실행 감사 누락·회차 취소 재인증 결제 URL 결합) | trust/core takedown·review·openapi/contracts·ops payout/reauth·시험 | 멱등 트랜잭션·계약 추가·익명화·감사·검증기 분리 | 적용 |
 
 ## 4. 숫자 일치표
 

@@ -1,4 +1,5 @@
 // 메모리 후기 저장소(단위 시험). 운영은 adapters/db/drizzle-review-store.ts를 쓴다.
+import { randomUUID } from 'node:crypto';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../domain/review.js';
 import type { ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
 
@@ -124,6 +125,32 @@ export class MemoryReviewStore implements ReviewStore {
 
   async resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void> {
     for (const [id, r] of this.reports) if (r.targetId === targetId) this.reports.set(id, { ...r, status: 'RESOLVED', ...(outcome ? { outcome } : {}), resolvedAtMs: nowMs });
+  }
+
+  async applyNoticeTakedown(i: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }> {
+    let applied = 0;
+    for (const reviewId of i.reviewIds) {
+      const r = this.reviews.get(reviewId);
+      if (!r || r.status === 'DELETED') continue;
+      const already = [...this.takedowns.values()].some((t) => t.noticeId === i.noticeId && t.reviewId === reviewId && t.restoredAtMs === undefined);
+      if (already) continue;
+      const takedownId = randomUUID();
+      this.reviews.set(reviewId, { ...r, status: 'HIDDEN', notice: undefined, noticeUntilMs: undefined, updatedAtMs: i.nowMs });
+      this.takedowns.set(takedownId, { takedownId, noticeId: i.noticeId, reviewId, reason: 'NOTICE', contentFingerprint: r.contentFingerprint, hiddenAtMs: i.nowMs });
+      this.hiddenFingerprints.add(r.contentFingerprint);
+      applied += 1;
+    }
+    return { applied };
+  }
+
+  async anonymizeByAccount(accountId: string, nowMs: number): Promise<number> {
+    let anonymized = 0;
+    for (const [id, r] of this.reviews) {
+      if (r.accountId !== accountId) continue;
+      this.reviews.set(id, { ...r, accountId: r.reviewId, basisOrderId: r.reviewId, authorDisplay: '탈퇴한 사용자', updatedAtMs: nowMs });
+      anonymized += 1;
+    }
+    return anonymized;
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

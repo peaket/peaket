@@ -248,6 +248,7 @@ x-peaket-problem-types:
     queue-ticket-removed: { status: 410, title: "이 대기표는 더 쓸 수 없습니다" }
     reauth-code-invalid: { status: 422, title: "인증 앱 코드가 맞지 않습니다" }
     reauth-required: { status: 403, title: "다시 인증해 주세요" }
+    reauth-unavailable: { status: 503, title: "재인증 검증기를 쓸 수 없습니다" }
     reauth-step-invalid: { status: 410, title: "처음부터 다시 인증해 주세요" }
     refresh-token-invalid: { status: 401, title: "다시 로그인해 주세요" }
     refund-account-required: { status: 422, title: "환불받을 계좌를 입력해 주세요" }
@@ -363,7 +364,7 @@ components:
     ProductionId: { name: productionId, in: path, required: true, description: "공연(회차 묶음, ADR-0093)", schema: { type: string } }
     FirstVisitCookie: { name: __Host-peaket_fv, in: cookie, required: false, description: "최초 방문 쿠키(봇 방어의 쿠키 나이 신호). 대기열 API 엣지 함수가 쿠키가 없거나 서명이 틀린 브라우저의 사전 검증 응답에 싣고 HMAC-SHA256(최초 방문 쿠키 서명 키)으로 서명한다. Secure·HttpOnly·SameSite=Strict, Domain 없음·Path=/(queue 호스트만 읽음). 공연 페이지는 CDN 캐시라 사람마다 다른 쿠키를 싣지 않는다. queue-svc는 서명(상수 시간 비교)을 확인하고 발급 시각으로 쿠키 나이를 계산해 위험 점수에 넘긴다. 서명이 맞지 않으면 쿠키가 없는 것으로 본다(추천 적용 2026-10-15, ADR-0065 결정 9, docs/features/queue-admission.md §7)", schema: { type: string } }
     IfMatch: { name: If-Match, in: header, required: true, description: "고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 \"7\")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 '동시 수정', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)", schema: { type: string } }
-    ReauthToken: { name: X-Reauth-Token, in: header, required: true, description: "재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)", schema: { type: string } }
+    ReauthToken: { name: X-Reauth-Token, in: header, required: true, description: "재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다", schema: { type: string } }
     Cursor: { name: cursor, in: query, required: false, description: "불투명 커서(이전 응답의 nextCursor, guidelines §3)", schema: { type: string } }
     Limit: { name: limit, in: query, required: false, description: "한 번에 받을 건수(최대 100, guidelines §3)", schema: { type: integer, minimum: 1, maximum: 100 } }
     ClientEphemeralKey: { name: X-Client-Ephemeral-Key, in: header, required: false, description: "구매 세션 요청 인증 키 합의용 클라이언트 임시 공개키(P-256, 비압축 점의 base64url). 직접 선택 공연은 입장 토큰의 첫 사용인 스냅샷 요청에 필수이고 그 뒤에는 보내지 않아도 된다(보내면 구매 세션에 적힌 키와 같아야 하고 다르면 401, 추천 적용 2026-11-04, docs/features/seat-hold.md §2)", schema: { type: string } }
@@ -1948,6 +1949,38 @@ components:
         reason: { type: string, minLength: 1, maxLength: 2000, description: "사유(필수, 감사 로그). 팬 개인정보를 적지 않는다" }
         violation: { type: string, enum: [SCALPING, MACRO, ABUSE, RIGHTS, ILLEGAL_FILMING, SPAM, OFF_TOPIC, OTHER], description: "TEMP_BLOCK·BLOCK일 때 필수. 글쓴이에게 알리는 사유 종류(신고 사유와 같은 코드)" }
         endsAt: { type: string, format: date-time, description: "TEMP_BLOCK일 때 필수. 지금부터 30일 이내(정보통신망법 §44의2④)" }
+    OpsReviewDetail:
+      type: object
+      description: "CS 처리함의 신고된 후기 상세(GET /v1/ops/reviews/{reviewId}, FR-057·FR-070, POL-044, ADR-0066). 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다"
+      properties:
+        review:
+          type: object
+          properties:
+            reviewId: { type: string }
+            eventId: { type: string }
+            rating: { type: integer, minimum: 1, maximum: 5 }
+            body: { type: string }
+            status: { type: string, enum: [VISIBLE, HIDDEN, DELETED] }
+            notice: { type: string, enum: [RIGHTS_TEMP, POLICY] }
+            noticeUntil: { type: string, format: date-time }
+            authorDisplay: { type: string }
+            createdAt: { type: string, format: date-time }
+            edited: { type: boolean }
+        summary:
+          type: object
+          properties:
+            total: { type: integer }
+            byCategory: { type: object, additionalProperties: { type: integer } }
+            reports:
+              type: array
+              items:
+                type: object
+                properties:
+                  category: { type: string, enum: [SCALPING, MACRO, ABUSE, RIGHTS, ILLEGAL_FILMING, SPAM, OFF_TOPIC, OTHER] }
+                  detail: { type: string }
+                  rightsHolder: { type: boolean }
+                  notifyChannel: { type: string, enum: [APP, EMAIL] }
+                  createdAt: { type: string, format: date-time }
     InquiryCategory: { type: string, enum: [BOOKING_PAYMENT, CANCEL_REFUND, TRANSFER, ENTRY, ACCOUNT, AUTOMATED_DECISION, SELLER_DISPUTE, MINOR_CONTRACT_CANCEL, MERCH, MODERATION_APPEAL, RESALE_POST_REPORT, OTHER], description: "문의 유형 12개(추천 적용 2026-10-19, ADR-0066): 예매·결제, 취소·환불(사정이 있어 공제 면제를 요청), 양도, 입장·현장, 계정, 자동화된 결정(추가 검증) 설명·재검토, 공연(판매자) 관련 분쟁, 미성년자 계약 취소, 굿즈·상품, 게시물 조치 이의, 외부 되팔이 게시물 신고, 기타. 외부 되팔이 게시물 신고(RESALE_POST_REPORT)는 PEAKET 밖 사이트의 되팔이 글을 알리는 창구다. 문의에는 첨부가 없어 신고는 공개 게시물의 주소와 설명만 담는다. 신고자가 받은 비공개 메시지나 로그인해야 보이는 비공개 모임의 글은 모으지 않는다고 화면이 안내한다. CS 처리함 건(INQUIRY)이 되고, 답변은 접수 확인까지만 하며 조사 결과를 신고자에게 알리지 않는다. 담당자가 그 건을 조사관에게 넘기면 조사관이 외부 게시물 등록(POST /v1/ops/external-posts, source REPORT)의 출처로 쓴다. 신고자 정보는 수집본에 넣지 않는다(법률 확인 37번(추천 적용 2026-10-31, ADR-0173))" }
     InquiryCreate:
       type: object
@@ -5305,6 +5338,8 @@ paths:
     patch: { operationId: updateOpsCase, tags: [ops], x-peaket-roles: [operator, commander, cs_agent, cs_lead], summary: "CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)", description: "FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/IfMatch' }, { name: caseId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, properties: { assignee: { type: string }, status: { type: string, enum: [OPEN, IN_PROGRESS, RESOLVED] }, resultNote: { type: string, maxLength: 2000 } } } } } }, responses: { '412': { $ref: '#/components/responses/Problem', description: "판 불일치(precondition-failed, 다른 담당자가 먼저 고침)" }, '428': { $ref: '#/components/responses/Problem', description: "If-Match 없음(precondition-required)" }, '200': { description: 갱신, content: { application/json: { schema: { $ref: '#/components/schemas/CsCase' } } } }, '403': { $ref: '#/components/responses/Problem', description: "그 건 종류를 갱신할 역할이 아님" }, '409': { $ref: '#/components/responses/Problem', description: 이미 종결 } } }
   /v1/ops/cases/{caseId}/replies:
     post: { operationId: createOpsCaseReply, tags: [ops], x-peaket-roles: [cs_agent], summary: "문의 답변·진행 경과 남기기(CS 담당자, 문의가 이어진 건만)", description: "FR-057, FR-069, POL-038, 추천 적용 2026-10-19, ADR-0066. kind ANSWER는 답변, PROGRESS는 진행 경과다. 문의가 이어진 건(INQUIRY와 문의로 접수한 DISPUTE·MINOR_CONTRACT_CANCEL)만 받고 그 밖은 409. CS 담당자(cs_agent)만(docs/planning/03 §3). ops-svc가 권한과 감사 로그(담당자 관리 계정 ID)를 처리한 뒤 core-svc support 모듈 내부 API로 기록을 넣고 팬에게 알린다(앱 알림·이메일). 팬에게는 '피켓 고객센터'로만 보이고 담당자 이름은 싣지 않는다. ANSWER면 문의가 답변 완료가 되고 답변 뒤 14일 [가정] 동안 추가 문의가 없으면 닫힌다. 담당자가 문의를 닫을 때는 PATCH /v1/ops/cases/{caseId}의 status RESOLVED다. 분쟁 건은 진행 경과 3영업일·결과 10영업일 기한을 지킨다(전자상거래법 §20③, 시행령 §25의2). 휴대폰 화면은 보기만 한다(docs/design/d5 §3.9)", security: [{ opsCookie: [] }], parameters: [{ name: caseId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/IdempotencyKey' }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CaseReply' } } } }, responses: { '201': { description: 기록됨, content: { application/json: { schema: { $ref: '#/components/schemas/InquiryMessage' } } } }, '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }, '404': { $ref: '#/components/responses/Problem', description: 없는 건 }, '409': { $ref: '#/components/responses/Problem', description: "문의가 이어진 건이 아님·닫힌 문의" }, '422': { $ref: '#/components/responses/Problem', description: "본문 1~2,000자 밖" } } }
+  /v1/ops/reviews/{reviewId}:
+    get: { operationId: getOpsReview, tags: [ops], x-peaket-roles: [cs_agent, cs_lead], summary: "신고된 후기 상세(사유별 신고 수·내용, 작성자 계정·주문 참조는 싣지 않는다)", description: "FR-057, FR-070, POL-044, ADR-0066. CS 처리함 상세 패널(SCR-045)이 부른다. 후기 본문·평점·상태·공시 표시와 사유별 신고 수·신고 내용을 준다. 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다. cs_agent·cs_lead만.", security: [{ opsCookie: [] }], parameters: [{ name: reviewId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: 상세, content: { application/json: { schema: { $ref: '#/components/schemas/OpsReviewDetail' } } } }, '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }, '404': { $ref: '#/components/responses/Problem', description: "없는 후기" } } }
   /v1/ops/reviews/{reviewId}/moderation:
     post: { operationId: createOpsReviewModeration, tags: [ops], x-peaket-roles: [cs_agent], summary: "신고된 후기 처리(조치 없음·임시조치·노출 차단·해제, 사유 필수)", description: "FR-070, POL-044, POL-042, 추천 적용 2026-10-19, ADR-0066. CS 담당자(cs_agent)가 태블릿·데스크톱 관제 콘솔에서 부른다(휴대폰은 보기만, docs/design/d5 §3.9, docs/planning/03 §3). NO_ACTION은 조치 없음, TEMP_BLOCK은 임시조치(endsAt 필수, 지금부터 30일 이내, 정보통신망법 §44의2④·§44의3), BLOCK은 운영정책 위반 노출 차단, RELEASE는 가린 후기를 다시 보이게 한다(불법 촬영물 신고로 가린 후기를 확인한 뒤 되돌릴 때 포함). ops-svc가 권한·사유·감사 로그를 처리한 뒤 core-svc review 모듈 내부 API로 반영하고 그 후기의 신고를 처리 완료로 바꾼다. 결과는 신고자에게 알리고(처리함·해당 없음), 임시조치·노출 차단은 글쓴이에게 조치 사실과 사유 종류(violation)만 알리며 신고자를 밝히지 않는다. 후기 자리에는 '권리 침해 신고로 임시조치된 후기입니다(끝 날짜까지)'·'운영정책에 따라 가려진 후기입니다'를 보인다(§44의2② 후단 공시). 불법 촬영물인지 판단하기 어려우면 방송미디어통신심의위원회에 심의를 요청할 수 있다(전기통신사업법 시행령 §30의5③). 법정 통보에 따른 노출 차단은 이 경로가 아니라 POST /v1/ops/compliance/notices/{noticeId}/takedown이다. 같은 조치를 다시 보내면 지금 상태를 그대로 돌려준다", security: [{ opsCookie: [] }], parameters: [{ name: reviewId, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewModeration' } } } }, responses: { '200': { description: "반영(후기 상태, 공시 표시, 끝 시각)" }, '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }, '404': { $ref: '#/components/responses/Problem', description: "없는 후기" }, '409': { $ref: '#/components/responses/Problem', description: "신고가 없는 후기, 통보·같은 내용으로 숨긴 후기(법정 통보 경로로만 바꾼다), 가리지 않은 후기의 해제" }, '422': { $ref: '#/components/responses/Problem', description: "사유 없음, TEMP_BLOCK·BLOCK의 violation 없음, TEMP_BLOCK의 endsAt 없음·30일 초과" } } }
   /v1/ops/approval-requests:
@@ -5452,7 +5487,7 @@ paths:
   /v1/ops/event-cancellations/{requestId}/judgement:
     post: { operationId: createOpsEventCancellationJudgement, tags: [ops], x-peaket-roles: [commander], summary: "귀책 판정(commander)과 미리보기 계산", description: "FR-055, POL-038. 요청 접수 뒤 1영업일 안", security: [{ opsCookie: [] }], parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [fault, reason, fanNoticeReason], properties: { fault: { type: string, enum: [ORGANIZER, FORCE_MAJEURE, CONTENT_CHANGE] }, reason: { type: string }, fanNoticeReason: { type: string, maxLength: 200, description: "팬 통지의 사유 요약(200자 [가정], docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(추천 적용 2026-10-14, ADR-0062)" } } } } } }, responses: { '200': { description: "판정과 미리보기", content: { application/json: { schema: { $ref: '#/components/schemas/EventCancellationRequest' } } } } } }
   /v1/ops/event-cancellations/{requestId}/approvals:
-    post: { operationId: createOpsEventCancellationApproval, tags: [ops], x-peaket-roles: [operator, commander], x-peaket-trace-rare: true, summary: "회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작", description: "FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음", security: [{ opsCookie: [] }], parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/ReauthToken' }], responses: { '200': { description: "확정" }, '403': { $ref: '#/components/responses/Problem', description: "판정자 본인" }, '409': { $ref: '#/components/responses/Problem', description: "판정 전" } } }
+    post: { operationId: createOpsEventCancellationApproval, tags: [ops], x-peaket-roles: [operator, commander], x-peaket-trace-rare: true, summary: "회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작", description: "FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음. X-Reauth-Token은 identity-svc 재인증(패스키 포함) 토큰이며 결제사 HTTP URL과 무관하다. 검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required다", security: [{ opsCookie: [] }], parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/ReauthToken' }], responses: { '200': { description: "확정" }, '403': { $ref: '#/components/responses/Problem', description: "판정자 본인 또는 재인증 토큰 불일치(reauth-required)" }, '409': { $ref: '#/components/responses/Problem', description: "판정 전" }, '503': { $ref: '#/components/responses/Problem', description: "재인증 검증기를 조립하지 못함(reauth-unavailable)" } } }
   /v1/ops/event-cancellations/{requestId}/rejections:
     post: { operationId: createOpsEventCancellationRejection, tags: [ops], x-peaket-roles: [operator, commander], summary: "회차 취소 반려(사유 필수). 판정 전이면 요청 반려(REJECTED), 판정 뒤 승인자가 반려하면 재판정 대기", description: "FR-055, POL-038. 판정 뒤 반려는 판정자 외 operator 이상. 허용 역할 [가정]: 판정 전 반려(docs/planning/03 §2.11 T4)를 누가 하는지 정본에 없다. 역할 칸은 판정 뒤 반려에 맞춰 operator·commander로 두고, 판정 전 반려는 귀책을 판정하는 commander만 한다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5)", security: [{ opsCookie: [] }], parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { reason: { type: string } } } } } }, responses: { '200': { description: 반려됨 }, '403': { $ref: '#/components/responses/Problem', description: 판정자 본인(판정 뒤 반려) }, '409': { $ref: '#/components/responses/Problem', description: 이미 확정 } } }
   /v1/ops/event-cancellations/{requestId}/pauses:

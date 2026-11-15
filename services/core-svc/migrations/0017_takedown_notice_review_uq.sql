@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "takedown_action_notice_review_uq" ON "takedown_action" USING btree ("notice_id","review_id") WHERE "takedown_action"."notice_id" is not null;
