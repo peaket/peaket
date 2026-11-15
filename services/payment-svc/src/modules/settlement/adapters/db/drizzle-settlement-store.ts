@@ -1,7 +1,7 @@
 // 정산·지급·KYC Drizzle 저장소(docs/data.md settlement_statement…payout).
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
-import type { StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
+import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
 import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
 import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, statementDispute, statementSource } from './schema.js';
 
@@ -289,6 +289,56 @@ export class DrizzleSettlementStore implements SettlementStore {
     }
   }
 
+  async createPayoutBatchAtomically(input: PayoutBatchAtomicInput): Promise<void> {
+    const { batch: record } = input;
+    try {
+      await this.db.transaction(async (tx) => {
+        for (const u of input.statementUpdates) {
+          await tx
+            .update(settlementStatement)
+            .set({ status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt })
+            .where(eq(settlementStatement.id, u.statementId));
+        }
+        for (const u of input.receivableUpdates) {
+          await tx.update(partnerReceivable).set({ remaining: u.remaining, status: u.status, updatedAt: u.updatedAt }).where(eq(partnerReceivable.id, u.receivableId));
+        }
+        if (input.receivableMoves.length > 0) {
+          await tx.insert(receivableMove).values(input.receivableMoves.map((m) => ({ receivableId: m.receivableId, statementId: m.statementId, amount: m.amount, movedAt: m.movedAt })));
+        }
+        await tx.insert(payoutBatch).values({
+          id: record.batchId,
+          pg: record.pg,
+          pgStore: record.pgStore,
+          payoutDate: record.payoutDate,
+          totalAmount: record.totalAmount,
+          statementCount: record.statementCount,
+          approvalId: record.approvalId,
+          portoneBulkPayoutId: record.portoneBulkPayoutId,
+          pgBalanceKrw: record.pgBalanceKrw,
+          pgBalanceSource: record.pgBalanceSource,
+          pgBalanceObservedAt: record.pgBalanceObservedAt,
+          pgBalanceObservedBy: record.pgBalanceObservedBy,
+          pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
+          status: record.status,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        });
+        if (input.statementIds.length > 0) {
+          const updated = await tx
+            .update(settlementStatement)
+            .set({ payoutBatchId: record.batchId, status: 'SCHEDULED', updatedAt: record.updatedAt })
+            .where(and(inArray(settlementStatement.id, [...input.statementIds]), eq(settlementStatement.status, 'CONFIRMED'), isNull(settlementStatement.payoutBatchId)))
+            .returning({ id: settlementStatement.id });
+          if (updated.length !== input.statementIds.length) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
+        }
+      });
+    } catch (e) {
+      if (e instanceof SettlementProblem) throw e;
+      if (uniqueViolation(e)) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
+      throw e;
+    }
+  }
+
   async findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined> {
     const rows = await this.db.db.select().from(payoutBatch).where(eq(payoutBatch.id, batchId)).limit(1);
     return rows[0] ? batchRecord(rows[0]) : undefined;
@@ -349,6 +399,16 @@ export class DrizzleSettlementStore implements SettlementStore {
       .from(settlementStatement)
       .where(eq(settlementStatement.payoutBatchId, batchId))
       .orderBy(settlementStatement.promoterId, settlementStatement.id);
+    return rows.map(statementRecord);
+  }
+
+  async listDueConfirmation(now: Date, limit: number): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(and(eq(settlementStatement.status, 'NOTIFIED'), lte(settlementStatement.disputeDueAt, now)))
+      .orderBy(settlementStatement.disputeDueAt, settlementStatement.id)
+      .limit(limit);
     return rows.map(statementRecord);
   }
 
@@ -552,7 +612,30 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async listOpenReceivables(promoterId: string, pg: Pg): Promise<ReceivableRecord[]> {
-    return this.listReceivables({ promoterId, pg, status: ['OPEN'], limit: 1000 });
+    const rows = await this.db.db
+      .select()
+      .from(partnerReceivable)
+      .where(
+        and(
+          eq(partnerReceivable.promoterId, promoterId),
+          eq(partnerReceivable.status, 'OPEN'),
+          sql`${partnerReceivable.remaining} > 0`,
+          or(eq(partnerReceivable.pg, pg), eq(partnerReceivable.cause, 'COMPENSATION_ADVANCE')),
+        ),
+      )
+      .orderBy(partnerReceivable.createdAt)
+      .limit(1000);
+    return rows.map((r) => ({
+      receivableId: r.id,
+      promoterId: r.promoterId,
+      pg: r.pg as Pg,
+      cause: r.cause as ReceivableRecord['cause'],
+      amount: r.amount,
+      remaining: r.remaining,
+      status: r.status as ReceivableRecord['status'],
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   async insertReceivableMove(record: ReceivableMoveRecord): Promise<void> {

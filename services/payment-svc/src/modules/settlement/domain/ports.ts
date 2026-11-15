@@ -30,6 +30,30 @@ export interface StatementPage {
   nextCursor: string | null;
 }
 
+export interface StatementUpdate {
+  statementId: string;
+  status: StatementRecord['status'];
+  holdReason: StatementRecord['holdReason'];
+  offsetAmount: number;
+  payoutAmount: number;
+  updatedAt: Date;
+}
+
+export interface ReceivableUpdate {
+  receivableId: string;
+  remaining: number;
+  status: ReceivableRecord['status'];
+  updatedAt: Date;
+}
+
+export interface PayoutBatchAtomicInput {
+  batch: PayoutBatchRecord;
+  statementIds: readonly string[];
+  statementUpdates: readonly StatementUpdate[];
+  receivableUpdates: readonly ReceivableUpdate[];
+  receivableMoves: readonly ReceivableMoveRecord[];
+}
+
 export interface SettlementStore {
   /** 부분 유일 인덱스에 걸려 넣지 못하면 false(원본 목록도 쓰지 않는다). */
   insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean>;
@@ -44,12 +68,16 @@ export interface SettlementStore {
   insertPayoutBatch(record: PayoutBatchRecord): Promise<void>;
   /** 배치와 정산서 결속을 한 트랜잭션으로 쓴다. 결속할 수 없는 정산서가 섞이면 롤백하고 409다. */
   createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void>;
+  /** 상계·보류·배치·정산서 결속을 한 트랜잭션으로 쓴다(M1-F1). 하나라도 실패하면 전부 롤백한다. */
+  createPayoutBatchAtomically(input: PayoutBatchAtomicInput): Promise<void>;
   findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined>;
   listPayoutBatches(filter: { pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchRecord[]>;
   savePayoutBatch(record: PayoutBatchRecord): Promise<void>;
   /** 아직 어느 지급 묶음에도 붙지 않은 확정 정산서만. */
   listConfirmed(pg: Pg, pgStore: PgStore, payoutDate: string): Promise<StatementRecord[]>;
   listStatementsByBatch(batchId: string): Promise<StatementRecord[]>;
+  /** 이의 기간이 끝난 NOTIFIED 정산서(자동 확정 대상, M1-F3). */
+  listDueConfirmation(now: Date, limit: number): Promise<StatementRecord[]>;
   insertPayouts(records: readonly PayoutRecord[]): Promise<void>;
   listPayouts(batchId: string): Promise<PayoutRecord[]>;
   findPayout(payoutId: string): Promise<PayoutRecord | undefined>;

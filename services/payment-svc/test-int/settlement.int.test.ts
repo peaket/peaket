@@ -247,6 +247,61 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(bound.rows[0].n).toBe(2);
   });
 
+  test('M1-F1 배치 저장이 실패하면 상계·보류·정산서 갱신이 모두 롤백된다', async () => {
+    const promoterId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    const statementId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-27', payoutAmount: 100_000 });
+    const receivable = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 50_000 });
+    const batchId = randomUUID();
+    await db.pool.query(
+      `insert into payout_batch (id, pg, pg_store, payout_date, total_amount, statement_count, status, created_at, updated_at)
+       values ($1, 'TOSS', 'STANDARD', '2026-11-27', 0, 0, 'COMPLETED', $2, $2)`,
+      [batchId, NOW],
+    );
+    await expect(
+      store.createPayoutBatchAtomically({
+        batch: { batchId, pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-27', totalAmount: 50_000, statementCount: 1, approvalId: null, portoneBulkPayoutId: null, pgBalanceKrw: null, pgBalanceSource: null, pgBalanceObservedAt: null, pgBalanceObservedBy: null, pgBalanceLedgerKrw: null, status: 'PENDING_APPROVAL', createdAt: NOW, updatedAt: NOW },
+        statementIds: [statementId],
+        statementUpdates: [{ statementId, status: 'CONFIRMED', holdReason: null, offsetAmount: 50_000, payoutAmount: 50_000, updatedAt: NOW }],
+        receivableUpdates: [{ receivableId: receivable.receivableId, remaining: 0, status: 'CLOSED', updatedAt: NOW }],
+        receivableMoves: [{ receivableId: receivable.receivableId, statementId, amount: 50_000, movedAt: NOW }],
+      }),
+    ).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-exists') });
+    const afterStatement = await db.pool.query('select offset_amount, payout_amount, payout_batch_id, status from settlement_statement where id = $1', [statementId]);
+    expect(afterStatement.rows[0]).toEqual({ offset_amount: '0', payout_amount: '100000', payout_batch_id: null, status: 'CONFIRMED' });
+    const afterReceivable = await db.pool.query('select remaining, status from partner_receivable where id = $1', [receivable.receivableId]);
+    expect(afterReceivable.rows[0]).toEqual({ remaining: '50000', status: 'OPEN' });
+    const moves = await db.pool.query('select count(*)::int as n from receivable_move where statement_id = $1', [statementId]);
+    expect(moves.rows[0].n).toBe(0);
+  });
+
+  test('M1-F2 TOSS 배상금 미리 지급 미수금은 PORTONE 묶음에서도 상계되고 다른 결제사 환불 미수금은 남는다', async () => {
+    const promoterId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-28', payoutAmount: 100_000 });
+    const compensation = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'COMPENSATION_ADVANCE', amount: 40_000 });
+    const refund = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 30_000 });
+    const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-28', portoneBalance: { amount: 100_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
+    expect(batch.totalAmount).toBe(60_000);
+    const comp = await db.pool.query('select remaining, status from partner_receivable where id = $1', [compensation.receivableId]);
+    expect(comp.rows[0]).toEqual({ remaining: '0', status: 'CLOSED' });
+    const other = await db.pool.query('select remaining, status from partner_receivable where id = $1', [refund.receivableId]);
+    expect(other.rows[0]).toEqual({ remaining: '30000', status: 'OPEN' });
+  });
+
+  test('M1-F3 이의 기간이 끝난 NOTIFIED는 자동 확정하고 DISPUTED는 그대로 둔다', async () => {
+    const promoterId = randomUUID();
+    const dueId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-29', payoutAmount: 100_000 });
+    const disputedId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-29', payoutAmount: 100_000 });
+    await db.pool.query("update settlement_statement set status = 'NOTIFIED', dispute_due_at = '2026-11-13T00:00:00Z' where id = $1", [dueId]);
+    await db.pool.query("update settlement_statement set status = 'DISPUTED', dispute_due_at = '2026-11-13T00:00:00Z' where id = $1", [disputedId]);
+    await settlements.confirmDueStatements();
+    const due = await db.pool.query('select status from settlement_statement where id = $1', [dueId]);
+    expect(due.rows[0].status).toBe('CONFIRMED');
+    const disputed = await db.pool.query('select status from settlement_statement where id = $1', [disputedId]);
+    expect(disputed.rows[0].status).toBe('DISPUTED');
+  });
+
   test('미수금은 같은 결제사의 지급 묶음에서 상계되고 이동 기록이 남는다', async () => {
     await db.pool.query("update payout_account set hold_until = '2026-11-01T00:00:00Z' where promoter_id = $1", [A]);
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
