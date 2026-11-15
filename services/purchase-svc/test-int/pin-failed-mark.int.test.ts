@@ -253,7 +253,8 @@ describe('두 Lua의 모양(pin-lua.ts 실패 표시 계약: KEYS 끝에 표시 
     expect(await store.releaseFailed(releaseIn)).toEqual({ kind: 'OK', released: 2 });
     expect(rec.calls.map((c) => c.script.source)).toEqual([PIN_LUA, RELEASE_FAILED_LUA]);
     for (const c of rec.calls) {
-      expect(c.keys.at(-3)).toBe(failedKey(e, h.holdId));
+      // B1-01이 pin KEYS 끝에 prio를 더해 실패 표시 키 위치가 -3/-4로 갈린다. 끝 묶음에 있는지만 본다.
+      expect(c.keys.slice(-4)).toContain(failedKey(e, h.holdId));
       expect(new Set(c.keys.map(slotOf)).size).toBe(1);
     }
     // 앞 KEYS는 기존 차례(bitmap·expiry·quota·stream·epoch·secver(·fence)·hold…) 그대로다
