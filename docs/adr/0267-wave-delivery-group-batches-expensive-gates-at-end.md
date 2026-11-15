@@ -1,6 +1,6 @@
 # ADR-0267: 기능 묶음을 웨이브로 묶어 비싼 검사를 웨이브 끝에 한 번 한다
 
-- **상태**: 채택(2026-11-12, 소유자 결정 "파일럿 하지 말고 3갈래 병렬 전체에 적용해서 끝까지", "웨이브 단위 푸시 승인, 비싼 검사만 웨이브 끝에 모으는 것 승인").
+- **상태**: 채택(2026-11-12, 소유자 결정 "파일럿 하지 말고 3갈래 병렬 전체에 적용해서 끝까지", "웨이브 단위 푸시 승인, 비싼 검사만 웨이브 끝에 모으는 것 승인"). 보탬(2026-11-16): [ADR-0270](0270-independent-agents-per-role-test-first.md)이 배치마다 짧은 대조 리뷰와 역할별 커밋·역할 확인을 더한다. 웨이브 끝 비싼 검사와 푸시는 그대로다.
 - **관련**: [docs/architecture.md](../architecture.md) §8.6, [docs/PROGRESS.md](../PROGRESS.md) 턴 규칙, [ADR-0256](0256-feature-batches-completion-ledger-risk-grades.md)(기능 묶음·완성 장부·등급), [ADR-0222](0222-push-develop-each-step-no-ci-wait.md)(배치마다 develop 푸시)
 - **관련 ID**: BAT-*, §8.6, ADR-0222
 
