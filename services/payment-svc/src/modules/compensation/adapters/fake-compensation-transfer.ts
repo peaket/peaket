@@ -4,12 +4,19 @@
 import { randomUUID } from 'node:crypto';
 import type { CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest } from '../domain/ports.js';
 
+/** 운영(NODE_ENV·PEAKET_ENV=production)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
+export function assertCompensationFakeAllowed(env: Record<string, string | undefined>): void {
+  if (env.PEAKET_COMPENSATION_TRANSFER_MODE?.trim() !== 'fake') return;
+  if (env.NODE_ENV === 'production' || env.PEAKET_ENV === 'production') throw new Error('PEAKET_COMPENSATION_TRANSFER_MODE=fake는 운영에서 쓸 수 없다');
+}
+
 export class FakeCompensationTransfer implements CompensationTransferPort {
   readonly #rows = new Map<string, CompensationTransferRecord>();
   readonly #byCompensation = new Map<string, string>();
   readonly #enabled: boolean;
 
   constructor(env: Record<string, string | undefined> = process.env) {
+    assertCompensationFakeAllowed(env);
     this.#enabled = env.PEAKET_COMPENSATION_TRANSFER_MODE?.trim() === 'fake';
   }
 

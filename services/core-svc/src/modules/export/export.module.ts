@@ -2,12 +2,14 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, DATABASE } from '@peaket/platform';
 import { AttendeeExports } from './application/attendee-exports.js';
+import { ExportProblem } from './domain/export.js';
 import type { ActorNameResolver, AttendeeExportStore, AttendeeSource, BookersReauth, PartnerEventLookup } from './domain/ports.js';
 import { ATTENDEE_EXPORT_STORE, ATTENDEE_SOURCE, BOOKERS_REAUTH, PARTNER_EVENT_LOOKUP } from './domain/ports.js';
 import { DrizzleAttendeeExportStore } from './adapters/db/drizzle-export-store.js';
 import { MemoryAttendeeExportStore } from './adapters/memory-export-store.js';
+import { HttpAttendeeSource } from './adapters/http-attendee-source.js';
 import { GrpcAdminAccountNames, JwksBookersReauth, MemoryActorNames, UnavailableBookersReauth } from './adapters/sources.js';
-import { DrizzleMerchOrderStore, DrizzlePartnerEventDirectory, MemoryMerchOrderStore, MemoryPartnerEventDirectory, type MerchOrderStore } from '../shop/index.js';
+import { DrizzlePartnerEventDirectory, MemoryMerchOrderStore, MemoryPartnerEventDirectory, type MerchOrderStore } from '../shop/index.js';
 import { PartnerAttendeeExportController } from './inbound/partner-attendee-export.controller.js';
 
 export const EXPORT_PARTNER_DATABASE = Symbol.for('peaket.export.partner-database');
@@ -28,6 +30,8 @@ export interface DatabaseExportWiring {
   jwks?: { url: string; issuer: string };
   /** identity gRPC 주소. 없으면 표시 이름은 역할 이름으로 남는다 */
   identityGrpc?: string;
+  /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다(개발·시험) */
+  purchaseHttp?: { url: string; token?: string };
 }
 
 class MerchAttendeeSource implements AttendeeSource {
@@ -40,6 +44,16 @@ class MerchAttendeeSource implements AttendeeSource {
   }
 }
 
+/** 운영에서 purchase-svc 내부 HTTP 주소가 없을 때. 굿즈 주문으로 잘못 읽지 않고 503으로 닫는다(A2-03) */
+class UnavailableAttendeeSource implements AttendeeSource {
+  list(): Promise<never> {
+    throw new ExportProblem('dependency-unavailable', 503, '예매자 명단 원천을 쓸 수 없습니다');
+  }
+  count(): Promise<never> {
+    throw new ExportProblem('dependency-unavailable', 503, '예매자 명단 원천을 쓸 수 없습니다');
+  }
+}
+
 @Module({})
 export class ExportModule {
   static register(o: { storage: 'memory'; wiring?: MemoryExportWiring } | ({ storage: 'database' } & DatabaseExportWiring)): DynamicModule {
@@ -49,7 +63,8 @@ export class ExportModule {
         { provide: ATTENDEE_EXPORT_STORE, useFactory: (db: Database) => new DrizzleAttendeeExportStore(db), inject: [EXPORT_PARTNER_DATABASE] },
         {
           provide: ATTENDEE_SOURCE,
-          useFactory: (partner: Database, app: Database) => new MerchAttendeeSource(new DrizzleMerchOrderStore(partner, app)),
+          useFactory: (partner: Database, app: Database) =>
+            o.purchaseHttp ? new HttpAttendeeSource(o.purchaseHttp) : new UnavailableAttendeeSource(),
           inject: [EXPORT_PARTNER_DATABASE, DATABASE],
         },
         { provide: PARTNER_EVENT_LOOKUP, useFactory: (db: Database) => new DrizzlePartnerEventDirectory(db), inject: [DATABASE] },

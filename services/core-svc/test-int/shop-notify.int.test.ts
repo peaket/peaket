@@ -300,6 +300,28 @@ describe('shop·notify PostgreSQL [BAT-610 R-567]', () => {
     expect((await svc.http.inject({ method: 'GET', url: '/internal/v1/shop/product-settlement-items?from=2026-10-30&to=2026-10-30' })).statusCode).toBe(403);
   });
 
+  test('상품 정산 원천은 다품목 주문의 배송비를 한 번만 더해 23,000원이다', async () => {
+    const orderId = randomUUID();
+    const item1 = randomUUID();
+    const item2 = randomUUID();
+    await admin.pool.query(
+      "insert into merch_order (id, promoter_id, event_id, buyer_name, buyer_phone, status, pg, pg_store, shipping_fee, ordered_at) values ($1,$2,$3,'김민수','010-1234-5678','PAID','TOSS','STANDARD',3000,now())",
+      [orderId, A, EVENT_A],
+    );
+    for (const id of [item1, item2]) {
+      await admin.pool.query(
+        "insert into merch_order_item (id, order_id, promoter_id, event_id, product_id, product_name, quantity, unit_amount, commission_rate_bp, status, fulfillment, seat_label, ticket_linked, delivered_at) values ($1,$2,$3,$4,$5,'응원봉',1,10000,1000,'DELIVERED','DELIVERY','A-12',false,'2026-10-22T00:00:00Z')",
+        [id, orderId, A, EVENT_A, randomUUID()],
+      );
+    }
+    const r = await svc.http.inject({ method: 'GET', url: '/internal/v1/shop/product-settlement-items?from=2026-10-30&to=2026-10-30', headers: { 'x-peaket-internal-token': 'int-test-token' } });
+    expect(r.statusCode).toBe(200);
+    const items = JSON.parse(r.payload).items as Array<{ orderId: string; grossAmount: number }>;
+    const mine = items.filter((i) => i.orderId === orderId);
+    expect(mine).toHaveLength(2);
+    expect(mine.reduce((s, i) => s + i.grossAmount, 0)).toBe(23_000);
+  });
+
   test('merch 주문·내보내기 이력도 파트너 테넌트 RLS로 갈린다 [ASVS v5.0.0-8.4.1]', async () => {
     const orderId = randomUUID();
     await admin.pool.query(

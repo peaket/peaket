@@ -3,7 +3,7 @@ import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { MerchOrderStore } from '../../domain/merch-ports.js';
 import type { AttendeeRecord, MerchItemStatus, MerchOrderItemRecord, MerchOrderRecord, MerchPg, MerchPgStore, ProductSettlementItem } from '../../domain/merch.js';
-import { productSettlementItem } from '../../domain/merch.js';
+import { productSettlementItems } from '../../domain/merch.js';
 import { merchOrder, merchOrderItem } from './schema.js';
 
 const toOrder = (row: typeof merchOrder.$inferSelect): MerchOrderRecord => ({
@@ -116,10 +116,16 @@ export class DrizzleMerchOrderStore implements MerchOrderStore {
         .from(merchOrderItem)
         .innerJoin(merchOrder, eq(merchOrder.id, merchOrderItem.orderId)),
     );
-    const out: ProductSettlementItem[] = [];
+    const byOrder = new Map<string, { order: MerchOrderRecord; items: MerchOrderItemRecord[] }>();
     for (const { item: itemRow, order: orderRow } of rows) {
-      const row = productSettlementItem(toItem(itemRow), toOrder(orderRow));
-      if (row && row.basisDate >= from && row.basisDate <= to) out.push(row);
+      const order = toOrder(orderRow);
+      const group = byOrder.get(order.orderId) ?? { order, items: [] };
+      group.items.push(toItem(itemRow));
+      byOrder.set(order.orderId, group);
+    }
+    const out: ProductSettlementItem[] = [];
+    for (const { order, items } of byOrder.values()) {
+      for (const row of productSettlementItems(items, order)) if (row.basisDate >= from && row.basisDate <= to) out.push(row);
     }
     return out.sort((a, b) => a.basisDate.localeCompare(b.basisDate) || a.itemId.localeCompare(b.itemId));
   }

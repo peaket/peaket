@@ -117,6 +117,7 @@ describe('I-T53·J-T26 예매자 명단', () => {
     expect(ok.rawPayload.toString('utf8')).toContain('010-1234-5678');
     const history = JSON.parse((await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: headers() })).payload);
     expect(history.items[0]).toMatchObject({ actorDisplayName: '스텔라 관리자', actorRole: 'partner_admin', reason: '현장 명단 대조', count: 2, format: 'CSV', result: 'COMPLETED' });
+    expect(exportsStore.audits.at(-1)).toMatchObject({ reason: '현장 명단 대조', format: 'CSV', count: 2, actorRole: 'partner_admin' });
   });
 
   test('J-T26 ② XLSX는 ZIP 머리로 시작하고 파일 이름이 붙는다', async () => {

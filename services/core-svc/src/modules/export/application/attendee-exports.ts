@@ -78,7 +78,7 @@ export class AttendeeExports {
           buyerNameMasked: maskName(r.buyerName),
           buyerPhoneMasked: maskPhone(r.buyerPhone),
           eventId,
-          seats: (r.seatLabel ? r.seatLabel.split(', ') : ['']).map((seatLabel) => ({ seatLabel, tier: 'GOODS' })),
+          seats: r.seats ?? (r.seatLabel ? r.seatLabel.split(', ') : ['']).map((seatLabel) => ({ seatLabel, tier: 'GOODS' })),
           ticketCount: r.quantity,
         })),
         nextCursor: rows.length === q.limit ? Buffer.from(rows[rows.length - 1]!.orderId).toString('base64url') : null,
@@ -99,8 +99,18 @@ export class AttendeeExports {
       if (retentionEnded(found.endsAt, now)) throw retention();
       const { reason, format } = validateExportBody(body);
       if (format === 'PDF') throw new ExportProblem('export-format-unavailable', 503, 'PDF 형식은 아직 만들 수 없습니다');
-      const rows = await this.d.attendees.list(promoterId, eventId, MAX_EXPORT_ROWS + 1);
-      if (rows.length > MAX_EXPORT_ROWS) throw new ExportProblem('invalid-query', 422, '한 번에 내려받을 수 있는 행 수를 넘었습니다');
+      // A2-17: 한 번에 500만 행을 올리지 않고 1,000행 페이지를 커서로 이어 읽는다(상한은 MAX_EXPORT_ROWS).
+      const rows: Awaited<ReturnType<AttendeeSource['list']>> = [];
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await this.d.attendees.list(promoterId, eventId, 1_000, cursor);
+        rows.push(...page);
+        if (rows.length > MAX_EXPORT_ROWS) throw new ExportProblem('invalid-query', 422, '한 번에 내려받을 수 있는 행 수를 넘었습니다');
+        if (page.length < 1_000) break;
+        const next = Buffer.from(page[page.length - 1]!.orderId).toString('base64url');
+        if (next === cursor) break;
+        cursor = next;
+      }
       const label = safeLabel(found.title);
       const file = format === 'CSV' ? csvFile(rows, label) : xlsxFile(rows, label);
       const displayName = (await this.d.actors.displayName(actor.accountId).catch(() => undefined)) ?? (actor.role === 'partner_admin' ? '파트너 관리자' : actor.role);
@@ -119,6 +129,7 @@ export class AttendeeExports {
         expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
       };
       await this.d.store.insert(record);
+      await this.d.store.audit(record);
       return { file, record: exportView(record) };
     });
   }

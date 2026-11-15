@@ -6,5 +6,5 @@ export { DrizzleMerchOrderStore } from './adapters/db/drizzle-merch-store.js';
 export { DrizzlePartnerEventDirectory, MemoryPartnerEventDirectory } from './adapters/partner-event-directory.js';
 export { ShopModule, type DatabaseShopWiring, type MemoryShopWiring } from './shop.module.js';
 export { productEtag, statusOf, type Fulfillment, type ProductFilter, type ProductInput, type ProductPatch, type ProductRecord, type ProductStatus, type ProductView } from './domain/product.js';
-export { maskName, maskPhone, productSettlementItem, settlementBasisDate, type AttendeeRecord, type MerchItemStatus, type MerchOrderItemRecord, type MerchOrderRecord, type ProductSettlementItem } from './domain/merch.js';
+export { maskName, maskPhone, productSettlementItem, productSettlementItems, settlementBasisDate, type AttendeeRecord, type MerchItemStatus, type MerchOrderItemRecord, type MerchOrderRecord, type ProductSettlementItem } from './domain/merch.js';
 export type { MerchOrderStore } from './domain/merch-ports.js';

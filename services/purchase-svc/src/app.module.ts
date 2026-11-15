@@ -1,6 +1,7 @@
 // 뿌리 모듈: 컨텍스트 모듈을 모은다. inventory(좌석 홀드·1초 만료 반복·구매 세션)와, 조립 값을 넘겼을 때만 booking(주문 생성 POST /v1/orders, BUILD_ORDER PRF-161)이다.
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
-import type { HotPathMetrics, HotRedis } from '@peaket/platform';
+import type { Database, HotPathMetrics, HotRedis } from '@peaket/platform';
+import { AttendeeExportModule } from './modules/booking/attendee-export.module.js';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { RefundModule, type RefundModuleDeps } from './modules/refund/index.js';
@@ -73,6 +74,8 @@ export class AppModule implements NestModule {
       priority?: PriorityModuleDeps;
       /** 판매 중지·재개 사본(BAT-465 R-584). 운영은 purchase DB와 좌석 Redis가 있을 때만 넘긴다 */
       saleControl?: SaleControlModuleDeps;
+      /** 예매자 명단 내부 HTTP(A2-03). purchase DB가 있을 때만 연다 */
+      attendeeExport?: { database: Database };
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
     },
@@ -110,7 +113,14 @@ export class AppModule implements NestModule {
           });
     return {
       module: AppModule,
-      imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : []), ...(o.refund ? [RefundModule.register(o.refund)] : []), ...(o.priority ? [PriorityModule.register(o.priority)] : []), ...(o.saleControl ? [SaleControlModule.register(o.saleControl)] : [])],
+      imports: [
+        inventory,
+        ...(o.booking ? [BookingModule.register(o.booking)] : []),
+        ...(o.refund ? [RefundModule.register(o.refund)] : []),
+        ...(o.priority ? [PriorityModule.register(o.priority)] : []),
+        ...(o.saleControl ? [SaleControlModule.register(o.saleControl)] : []),
+        ...(o.attendeeExport ? [AttendeeExportModule.register(o.attendeeExport)] : []),
+      ],
     };
   }
 }

@@ -485,6 +485,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           }
         : {}),
       ...(saleControl ? { saleControl } : {}),
+      ...(database ? { attendeeExport: { database } } : {}),
       hotPath,
       admission: {
         store: sessionStore,

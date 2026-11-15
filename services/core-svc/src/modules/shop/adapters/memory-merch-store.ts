@@ -1,7 +1,7 @@
 // shop 주문·정산 원천 메모리 저장소(단위 시험·개발).
 import type { MerchOrderStore } from '../domain/merch-ports.js';
 import type { AttendeeRecord, MerchOrderItemRecord, MerchOrderRecord, ProductSettlementItem } from '../domain/merch.js';
-import { productSettlementItem } from '../domain/merch.js';
+import { productSettlementItems } from '../domain/merch.js';
 
 export class MemoryMerchOrderStore implements MerchOrderStore {
   readonly orders = new Map<string, MerchOrderRecord>();
@@ -43,12 +43,17 @@ export class MemoryMerchOrderStore implements MerchOrderStore {
   }
 
   async listSettlementItems(from: string, to: string): Promise<ProductSettlementItem[]> {
-    const out: ProductSettlementItem[] = [];
+    const byOrder = new Map<string, { order: MerchOrderRecord; items: MerchOrderItemRecord[] }>();
     for (const item of this.items.values()) {
       const order = this.orders.get(item.orderId);
       if (!order) continue;
-      const row = productSettlementItem(item, order);
-      if (row && row.basisDate >= from && row.basisDate <= to) out.push(row);
+      const group = byOrder.get(order.orderId) ?? { order, items: [] };
+      group.items.push(item);
+      byOrder.set(order.orderId, group);
+    }
+    const out: ProductSettlementItem[] = [];
+    for (const { order, items } of byOrder.values()) {
+      for (const row of productSettlementItems(items, order)) if (row.basisDate >= from && row.basisDate <= to) out.push(row);
     }
     return out.sort((a, b) => a.basisDate.localeCompare(b.basisDate) || a.itemId.localeCompare(b.itemId));
   }

@@ -710,6 +710,9 @@
 | R-607 | M1-F1·F2·F3(상계·배치 결속 비원자성, COMPENSATION_ADVANCE 결제사 가로막힘, confirmDue 미배선) | payment settlement store·settlements·worker·시험 | 원자적 배치 경계·결제사 무관 배상금 상계·자동 확정 워커/내부 경로 | 적용 |
 | R-609 | C1-01·02·11·13(OVERRIDE·재판정·기기 계정·SEV3) | ticket scanner gate/store/schema·migration 0007·시험 | OVERRIDE 권한/flag/note·재판정·기기 계정·SEV3 | 적용 |
 | R-610 | C1-03·04·05·06·07·08·09·10·12(동기화·앱)·M5-07(jkt 모양 시험) | ticket/scanner sync·app | 페이지 커서·재입장·중복/취소·DPoP 보정·만료/재로그인·키 재생성·assertJkt 단일화·변이 | 적용 |
+| R-602 | OPS-02·06·08(웹훅 임대 없음·응답 무제한·Lease create 권한 없음) | core webhook worker/transport, deploy chart RBAC | SKIP LOCKED·lease_until·응답 상한·Lease 권한을 넣고 시험 | 적용 |
+| R-615 | B2V-01·02·03(TTL 단언 약함·Redis eligibility 시험 없음·같은 판 TTL 미갱신) | queue test-int·booking-restriction-lua | 정확한 TTL 단언·Redis 시험·같은 판 TTL 갱신 | 적용 |
+| R-606 | A1-H4/A2-10·A2-03·A2-17·A2-19·SEC-06·SEC-07·TEST-06·COV2-02(배송비 중복·명단 원천/페이지/감사·내부 토큰/가짜 모드·재인증 시험·검색 판매 상태) | core export·shop store·migration/contracts·purchase attendee HTTP·payment compensation·시험 | 티켓 주문 원천·커서 페이지·감사 기록·401 가드·운영 fake 차단·실제 JWKS 시험·뷰 규칙 | 적용 |
 
 ## 4. 숫자 일치표
 

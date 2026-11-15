@@ -27,3 +27,27 @@ export const attendeeExport = pgTable(
     index('attendee_export_promoter_event_idx').on(t.promoterId, t.eventId, t.createdAt),
   ],
 );
+
+/** 다운로드 접속기록(2년 보존, A2-19). attendee_export(30일)와 별도로 행위자·사유·건수·형식을 남긴다 */
+export const attendeeExportAudit = pgTable(
+  'attendee_export_audit',
+  {
+    id: uuid('id').primaryKey(),
+    exportId: uuid('export_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    actorAccountId: uuid('actor_account_id').notNull(),
+    actorDisplayName: text('actor_display_name').notNull(),
+    actorRole: text('actor_role').notNull(),
+    reason: text('reason').notNull(),
+    format: text('format').notNull(),
+    count: integer('count').notNull(),
+    createdAt: at('created_at').notNull(),
+    retainUntil: at('retain_until').notNull(),
+  },
+  (t) => [
+    check('attendee_export_audit_format_check', sql`${t.format} in ('CSV', 'XLSX', 'PDF')`),
+    check('attendee_export_audit_count_check', sql`${t.count} >= 0`),
+    index('attendee_export_audit_promoter_event_idx').on(t.promoterId, t.eventId, t.createdAt),
+  ],
+);
