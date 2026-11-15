@@ -36,6 +36,7 @@ export const settlementStatement = pgTable(
     payoutDate: date('payout_date', { mode: 'string' }),
     payoutBankCode: text('payout_bank_code'),
     payoutAccountLast4: text('payout_account_last4'),
+    payoutBatchId: uuid('payout_batch_id').references(() => payoutBatch.id),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
@@ -47,9 +48,16 @@ export const settlementStatement = pgTable(
     check('settlement_statement_hold_reason_check', sql`${t.holdReason} is null or ${t.holdReason} in (${HOLD_REASON})`),
     check('settlement_statement_amounts_check', sql`${t.grossAmount} >= 0 and ${t.refundAmount} >= 0 and ${t.commissionAmount} >= 0 and ${t.commissionVat} >= 0 and ${t.offsetAmount} >= 0`),
     check('settlement_statement_revision_check', sql`${t.revision} >= 1`),
+    uniqueIndex('settlement_statement_event_key')
+      .on(t.promoterId, t.eventId, t.pg, t.pgStore)
+      .where(sql`${t.kind} = 'EVENT' and ${t.status} <> 'SUPERSEDED'`),
+    uniqueIndex('settlement_statement_product_key')
+      .on(t.promoterId, t.pg, t.pgStore, t.periodStart, t.periodEnd)
+      .where(sql`${t.kind} = 'PRODUCT' and ${t.status} <> 'SUPERSEDED'`),
     index('settlement_statement_partner_idx').on(t.promoterId, t.kind, t.createdAt, t.id),
     index('settlement_statement_event_idx').on(t.promoterId, t.eventId, t.createdAt),
     index('settlement_statement_payout_idx').on(t.pg, t.pgStore, t.payoutDate, t.status),
+    index('settlement_statement_batch_idx').on(t.payoutBatchId),
   ],
 );
 

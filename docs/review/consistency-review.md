@@ -699,6 +699,7 @@
 | R-591 | mTLS 선택지가 계약·판정 함수만 있고 실제 검증 경로가 없었고, SCR-036은 가짜 QR 무늬만 그렸다 | packages/platform ScannerGuard mTLS 신뢰 머리 경로·자체 서명 인증서 x5t#S256 시험, ticket-svc PEAKET_SCANNER_MTLS_SECRET, apps/scanner qrcode 동적 import·DeviceApprovalPanel qrDataUrl | 자체 서명 인증서 DER과 게이트웨이 머리로 가드 경로를 시험하고 실제 QR을 그렸다. 외부 관리형 기기·사설 CA는 막힘으로 기록 | 완료(heavy gate 통과) |
 | R-593 | BAT-465 잔여 2차(선택 배치 Q-T59 예매 제한 집행 쓰기 경로, 외부 불변 저장소·OpenTimestamps 앵커 포트/가짜 어댑터)가 정본과 어긋나지 않는다 | services/queue-svc, services/purchase-svc, services/ops-svc, docs/api/openapi.yaml, packages/contracts, packages/api-client, docs | 정본(docs/features/queue-admission.md §6·Q-T59, docs/features/payment.md §2, docs/features/transfer-refund.md §7.2 T14, docs/security/asvs/transfer-refund.md)과 대조했고, 외부 버킷·달력이 없어 S3 Object Lock·OpenTimestamps는 503 `anchor-unavailable`과 로컬 앵커 유지로 남겼다. rebase 뒤 cheap gate·Docker test-int(queue 4·purchase 35·ops 3)·변이 6/6·4관점 리뷰(높음 0·중간 1 고침·중간 4 문서화)·브라우저 SCR-030/SCR-048 보드를 통과했다 | 적용(잔여 일부, heavy gate 통과) |
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
+| R-599 | CONS 높음 2건(정산서 중복·승인 금액≠지급 금액) | payment settlement 0017·settlements.ts·drizzle store·ports·시험 | 부분 유일 인덱스와 배치-정산서 결속·합계 검증으로 고침 | 적용 |
 
 ## 4. 숫자 일치표
 

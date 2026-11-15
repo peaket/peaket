@@ -107,7 +107,12 @@ export class Settlements {
         now,
         statementId: uuidv7(this.d.clock),
       });
-      await this.d.store.insertStatement(record, sources);
+      const inserted = await this.d.store.insertStatement(record, sources);
+      if (!inserted) {
+        const raced = await this.d.store.findEventStatement(input.promoterId, input.eventId, input.pg, input.pgStore);
+        if (!raced) throw new SettlementProblem('settlement-statement-conflict', 409, '같은 회차 정산서가 이미 있습니다');
+        return statementView(raced);
+      }
       return statementView(record);
     });
   }
@@ -141,7 +146,8 @@ export class Settlements {
           statementId: uuidv7(this.d.clock),
         });
         void key;
-        await this.d.store.insertStatement(record, sources);
+        const inserted = await this.d.store.insertStatement(record, sources);
+        if (!inserted) continue;
         out.push(statementView(record));
       }
       return { created: out.length, items: out };
@@ -296,7 +302,7 @@ export class Settlements {
         createdAt: now,
         updatedAt: now,
       };
-      await this.d.store.insertPayoutBatch(batch);
+      await this.d.store.createPayoutBatchWithStatements(batch, includedAfterOffset.map((s) => s.statementId));
       return payoutBatchView(batch);
     });
   }
@@ -322,10 +328,13 @@ export class Settlements {
       const gateway = this.d.gateways.find((g) => g.pg === b.pg);
       if (!gateway) throw new SettlementProblem('payout-gateway-unavailable', 503, '지급대행을 아직 시작할 수 없습니다');
       const now = new Date(this.d.clock.now());
+      const boundStatements = await this.d.store.listStatementsByBatch(batchId);
+      if (boundStatements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
+      const boundTotal = boundStatements.reduce((sum, s) => sum + s.payoutAmount, 0);
+      if (boundTotal !== b.totalAmount) throw new SettlementProblem('payout-batch-amount-mismatch', 409, '승인한 지급 금액과 정산서 합계가 다릅니다');
       let payouts = await this.d.store.listPayouts(batchId);
       if (payouts.length === 0) {
-        const statements = await this.d.store.listConfirmed(b.pg, b.pgStore, b.payoutDate);
-        if (statements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
+        const statements = boundStatements;
         payouts = statements.map((s, i) => ({
           payoutId: uuidv7(this.d.clock),
           batchId,

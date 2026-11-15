@@ -31,7 +31,8 @@ export interface StatementPage {
 }
 
 export interface SettlementStore {
-  insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<void>;
+  /** 부분 유일 인덱스에 걸려 넣지 못하면 false(원본 목록도 쓰지 않는다). */
+  insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean>;
   findStatement(promoterId: string, statementId: string): Promise<StatementRecord | undefined>;
   findStatementById(statementId: string): Promise<StatementRecord | undefined>;
   findEventStatement(promoterId: string, eventId: string, pg: Pg, pgStore: PgStore): Promise<StatementRecord | undefined>;
@@ -41,10 +42,14 @@ export interface SettlementStore {
   insertDispute(record: DisputeRecord): Promise<void>;
   listDisputes(statementId: string): Promise<DisputeRecord[]>;
   insertPayoutBatch(record: PayoutBatchRecord): Promise<void>;
+  /** 배치와 정산서 결속을 한 트랜잭션으로 쓴다. 결속할 수 없는 정산서가 섞이면 롤백하고 409다. */
+  createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void>;
   findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined>;
   listPayoutBatches(filter: { pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchRecord[]>;
   savePayoutBatch(record: PayoutBatchRecord): Promise<void>;
+  /** 아직 어느 지급 묶음에도 붙지 않은 확정 정산서만. */
   listConfirmed(pg: Pg, pgStore: PgStore, payoutDate: string): Promise<StatementRecord[]>;
+  listStatementsByBatch(batchId: string): Promise<StatementRecord[]>;
   insertPayouts(records: readonly PayoutRecord[]): Promise<void>;
   listPayouts(batchId: string): Promise<PayoutRecord[]>;
   findPayout(payoutId: string): Promise<PayoutRecord | undefined>;

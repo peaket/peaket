@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
 const sql15 = read('migrations/0015_settlement.sql');
+const sql17 = read('migrations/0017_settlement_guards.sql');
 const journal = JSON.parse(read('migrations/meta/_journal.json')) as { entries: { idx: number; tag: string }[] };
 
 describe('정산·지급·KYC 마이그레이션', () => {
@@ -40,5 +41,19 @@ describe('정산·지급·KYC 마이그레이션', () => {
     expect(Object.keys(snap.tables)).toEqual(
       expect.arrayContaining(['public.settlement_statement', 'public.statement_source', 'public.statement_dispute', 'public.payout_batch', 'public.payout', 'public.seller_kyc', 'public.payout_account']),
     );
+  });
+
+  test('0017이 정산서 부분 유일 인덱스와 지급 묶음 결속 열을 더한다', () => {
+    expect(journal.entries.find((e) => e.idx === 17)?.tag).toBe('0017_settlement_guards');
+    expect(sql17).toContain('settlement_statement_event_key');
+    expect(sql17).toContain('settlement_statement_product_key');
+    expect(sql17).toContain(`WHERE "settlement_statement"."kind" = 'EVENT' and "settlement_statement"."status" <> 'SUPERSEDED'`);
+    expect(sql17).toContain(`WHERE "settlement_statement"."kind" = 'PRODUCT' and "settlement_statement"."status" <> 'SUPERSEDED'`);
+    expect(sql17).toContain('"payout_batch_id" uuid');
+    expect(sql17).toContain('settlement_statement_payout_batch_id_payout_batch_id_fk');
+    const snap = JSON.parse(read('migrations/meta/0017_snapshot.json')) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
+    expect(snap.tables['public.settlement_statement']!.columns).toHaveProperty('payout_batch_id');
+    expect(snap.tables['public.settlement_statement']!.indexes).toHaveProperty('settlement_statement_event_key');
+    expect(snap.tables['public.settlement_statement']!.indexes).toHaveProperty('settlement_statement_product_key');
   });
 });

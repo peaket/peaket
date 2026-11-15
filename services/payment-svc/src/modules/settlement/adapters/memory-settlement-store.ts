@@ -1,6 +1,6 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
 import type { StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
-import type { DisputeRecord, KycRecord, PayoutAccountRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, ReceivableMoveRecord, ReceivableRecord, StatementRecord, StatementSource } from '../domain/settlement.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -24,9 +24,18 @@ export class MemorySettlementStore implements SettlementStore {
   readonly receivables = new Map<string, ReceivableRecord>();
   readonly receivableMoves: ReceivableMoveRecord[] = [];
 
-  async insertStatement(record: StatementRecord, sources: readonly StatementSource[]) {
+  async insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean> {
+    const conflicts = [...this.statements.values()].some((s) => {
+      if (s.statementId === record.statementId) return true;
+      if (s.status === 'SUPERSEDED' || record.status === 'SUPERSEDED') return false;
+      if (s.kind !== record.kind || s.promoterId !== record.promoterId || s.pg !== record.pg || s.pgStore !== record.pgStore) return false;
+      if (record.kind === 'EVENT') return s.eventId === record.eventId;
+      return s.periodStart === record.periodStart && s.periodEnd === record.periodEnd;
+    });
+    if (conflicts) return false;
     this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
     this.sources.set(record.statementId, sources.map((s) => ({ ...s })));
+    return true;
   }
   async findStatement(promoterId: string, statementId: string) {
     const s = this.statements.get(statementId);
@@ -66,6 +75,18 @@ export class MemorySettlementStore implements SettlementStore {
   async insertPayoutBatch(record: PayoutBatchRecord) {
     this.batches.set(record.batchId, record);
   }
+  async createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]) {
+    const duplicate = [...this.batches.values()].some((b) => b.pg === record.pg && b.pgStore === record.pgStore && b.payoutDate === record.payoutDate && b.status !== 'COMPLETED' && b.status !== 'PARTIAL_FAILED');
+    if (duplicate) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
+    const bound: StatementRecord[] = [];
+    for (const id of statementIds) {
+      const s = this.statements.get(id);
+      if (!s || s.status !== 'CONFIRMED' || s.payoutBatchId !== null) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
+      bound.push(s);
+    }
+    this.batches.set(record.batchId, record);
+    for (const s of bound) this.statements.set(s.statementId, { ...s, status: 'SCHEDULED', payoutBatchId: record.batchId, updatedAt: record.updatedAt });
+  }
   async findPayoutBatch(batchId: string) {
     return this.batches.get(batchId);
   }
@@ -82,7 +103,10 @@ export class MemorySettlementStore implements SettlementStore {
     this.batches.set(record.batchId, record);
   }
   async listConfirmed(pg: Pg, pgStore: PgStore, payoutDate: string) {
-    return [...this.statements.values()].filter((s) => s.status === 'CONFIRMED' && s.pg === pg && s.pgStore === pgStore && s.payoutDate === payoutDate);
+    return [...this.statements.values()].filter((s) => s.status === 'CONFIRMED' && s.payoutBatchId === null && s.pg === pg && s.pgStore === pgStore && s.payoutDate === payoutDate);
+  }
+  async listStatementsByBatch(batchId: string) {
+    return [...this.statements.values()].filter((s) => s.payoutBatchId === batchId).sort((a, b) => a.promoterId.localeCompare(b.promoterId) || a.statementId.localeCompare(b.statementId));
   }
   async insertPayouts(records: readonly PayoutRecord[]) {
     for (const r of records) this.payouts.set(r.payoutId, r);
