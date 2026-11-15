@@ -186,10 +186,12 @@ describe('OPS-01 회차 취소 감사 체인', () => {
 });
 
 describe('SEC-02 회차 취소 확정 재인증', () => {
-  test('검증기가 없으면 503으로 닫고 환불을 시작하지 않는다', async () => {
+  test('검증기가 없으면 503 reauth-unavailable로 닫고 환불을 시작하지 않는다', async () => {
     const f = fixture({ reauth: null });
     const requestId = await createJudged(f);
-    await expect(approve(f, requestId)).rejects.toMatchObject({ type: 'dependency-unavailable', status: 503 });
+    // 정본 openapi x-peaket-problem-types: reauth-unavailable(503). 회차 취소 확정 경로 설명도
+    // "검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required"다.
+    await expect(approve(f, requestId)).rejects.toMatchObject({ type: 'reauth-unavailable', status: 503 });
     expect(f.calls).toEqual([]);
     expect(f.store.rows.get(requestId)).toMatchObject({ status: 'JUDGED', version: 2 });
   });

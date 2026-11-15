@@ -215,10 +215,11 @@ describe('OPS-01 지급 승인 감사 체인', () => {
     expect(done?.audit).toMatchObject({ recordType: 'PAYOUT_BATCH_DONE', recordId: created.approval.approvalId });
   });
 
-  test('수기 포트원 실행도 실행 ID·금액과 함께 감사 체인에 남는다', async () => {    const f = fixture();
+  test('수기 포트원 실행도 실행 ID·금액·행위자와 함께 감사 체인에 남는다', async () => {
+    const f = fixture();
     const created = await request(f.app);
     f.payments.batches[0]!.status = 'APPROVED';
-    await f.app.recordPortoneExecution(created.batch.batchId, 'bulk-9');
+    await f.app.recordPortoneExecution(created.batch.batchId, 'bulk-9', COMMANDER.accountId);
     const last = f.audit.entries.at(-1)!;
     expect(last).toMatchObject({ recordType: 'PAYOUT_PORTONE_EXECUTION', recordId: created.batch.batchId });
     expect(last.record.payload).toMatchObject({
@@ -228,6 +229,8 @@ describe('OPS-01 지급 승인 감사 체인', () => {
       status: 'SUBMITTED',
       amount: 24_920_000,
       statementCount: 3,
+      actorRef: COMMANDER.accountId,
+      basis: 'PORTONE_CONSOLE',
     });
   });
 });
