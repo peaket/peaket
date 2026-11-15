@@ -12,6 +12,12 @@ import { BoundaryPropagator, BoundarySpanProcessor, type InboundTrust, traceProp
 export { withoutTracePropagation } from './trace-boundary.js';
 export type { InboundTrust } from './trace-boundary.js';
 
+/**
+ * 게이트웨이(gw-fan·gw-partner)가 브라우저 traceparent를 옮겨 같은 출처 앱 서버 경로에만 넘기는 머리(docs/observability.md §6 '앱 서버가 브라우저 값을 받는 길').
+ * 앱 서버 모드(untrusted)는 이 머리를 먼저, 없으면 traceparent를 링크 후보로 읽는다(BUILD_ORDER HOT-400). 지금은 이름만 있다(뼈대, 읽기는 구현 몫)
+ */
+export const BROWSER_TRACEPARENT_HEADER = 'x-peaket-browser-traceparent';
+
 export interface TelemetryOptions {
   /** service.name(서비스 이름, 예: purchase-svc) */
   serviceName: string;

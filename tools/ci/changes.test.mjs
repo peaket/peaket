@@ -290,6 +290,13 @@ test('BSL050_문서·화면·이미지없는서비스·로컬도구만바꾸면_
   }
 });
 
+test('HOT-400 게이트웨이 정의(deploy/gateways/)와 그 정적 시험을 바꾸면 deploy·kind·tools를 고른다', () => {
+  for (const f of ['deploy/gateways/gw-fan.yaml', 'deploy/gateways/test/gateways.test.mjs']) {
+    const got = scopes({ [f]: '바꿈\n' });
+    for (const s of ['deploy', 'kind', 'tools']) assert.ok(got.includes(s), `${f}: ${s}`);
+  }
+});
+
 test('BSL050_v0이미지에드는서비스·로컬환경값·바인딩대조를바꾸면_kind를고른다', () => {
   for (const f of ['services/v0-monolith/x', 'services/pg-simulator/x', 'services/payment-svc/x', 'deploy/envs/local/x', 'deploy/envs/local/v0-gateway.yaml', 'tools/ci/verify-native-binding.mjs']) {
     assert.ok(scopes({ [f]: '바꿈\n' }).includes('kind'), f);

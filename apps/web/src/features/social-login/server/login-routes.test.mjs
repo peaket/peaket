@@ -892,3 +892,28 @@ test('I-T71_로그인 실패를 로그인 화면으로 돌려보낼 때 쿼리�
     op.mode.wrongIss = false;
   }
 });
+
+// 게이트웨이가 쓴 클라이언트 IP 하나를 CreateSession.client_ip로 싣는다(docs/features/identity.md §6 '출발지', BUILD_ORDER HOT-400, PRF-020이 넘긴 것).
+// 콜백 요청에 x-forwarded-for를 달아 처리기에 바로 넣는다(브라우저 흉내는 리디렉션을 따라갈 때 머리를 버린다).
+async function callbackWith(xff) {
+  const b = new Browser();
+  const cb = await stopAtCallback(b);
+  const headers = { cookie: b.cookieHeader(web.url) };
+  if (xff !== undefined) headers['x-forwarded-for'] = xff;
+  const res = await app.dispatch(new Request(cb, { headers }));
+  assert.equal(res.status, 303);
+  return lastCall('CreateSession');
+}
+
+test('HOT-400 PRF-020 웹 로그인은 게이트웨이가 쓴 x-forwarded-for 한 값을 CreateSession.client_ip로 싣는다(identity §6 출발지)', async () => {
+  assert.equal((await callbackWith('203.0.113.5')).client_ip, '203.0.113.5');
+  assert.equal((await callbackWith('2001:db8::5')).client_ip, '2001:db8::5');
+});
+
+test('HOT-400 PRF-020 x-forwarded-for가 여러 값·IP가 아닌 값·없음이면 CreateSession.client_ip를 비운다(identity §6 출발지)', async () => {
+  for (const xff of ['203.0.113.5, 198.51.100.7', '203.0.113.5,198.51.100.7', 'unknown', '', undefined]) {
+    const req = await callbackWith(xff);
+    assert.ok(req, `${xff}: CreateSession을 부르지 않았다`);
+    assert.equal(req.client_ip, '', String(xff));
+  }
+});

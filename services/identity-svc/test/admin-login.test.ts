@@ -9,6 +9,7 @@ import { MemoryLoginCounters } from '../src/modules/admin/adapters/memory-login-
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
 import { LoginPasswordStep, type LoginStepOutcome, sourceAddressOf } from '../src/modules/admin/application/login-password-step.js';
 import { RecordAdminLoginSuccess } from '../src/modules/admin/application/record-login-success.js';
+import { clientIpOf } from '../src/modules/admin/inbound/admin-login.controller.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
 import { type AdminLoginSignals, type BreachList, BreachListUnavailable, type HumanCheck, LoginCountersUnavailable } from '../src/modules/admin/domain/ports.js';
 
@@ -451,5 +452,53 @@ describe('1단계 통과(로그인 단계, 다시 저장, 유출 다시 보기)'
     // 막 본 뒤에는 다시 부르지 않는다
     expect(await t.attempt({ password: PW })).toMatchObject({ kind: 'PASSED' });
     expect(t.breaches.calls).toBe(2);
+  });
+});
+
+// 게이트웨이가 넘기는 꼴과 identity의 맞추기(docs/features/identity.md §6 '출발지', BUILD_ORDER HOT-400, BOT-111이 넘긴 것).
+// 기대 값은 정본 규칙에서 손으로 적는다(IPv4는 점 넷 꼴, 다른 IPv6는 앞 /64를 여덟 칸 중 넷으로 편 꼴).
+describe('HOT-400 BOT-111 출발지 맞추기(identity §6 출발지)', () => {
+  const V4 = '198.51.100.7';
+
+  test('HOT-400 BOT-111 ① 영역 표시(%eth0)는 떼고 센다', () => {
+    expect(sourceAddressOf('fe80::1%eth0')).toBe(sourceAddressOf('fe80::1'));
+    expect(sourceAddressOf('fe80::1%eth0')).toBe('fe80:0000:0000:0000::/64');
+    expect(sourceAddressOf('2001:db8:1:2::9%25')).toBe('2001:0db8:0001:0002::/64');
+    expect(sourceAddressOf(`::ffff:${V4}%eth1`)).toBe(V4);
+  });
+
+  test('HOT-400 BOT-111 ② IPv4를 담은 IPv6 넷(대응·번역·NAT64·옛 호환)은 그 IPv4로 센다', () => {
+    expect(sourceAddressOf(`::ffff:${V4}`)).toBe(V4);
+    expect(sourceAddressOf(`::ffff:0:${V4}`)).toBe(V4);
+    expect(sourceAddressOf('::ffff:0:c633:6407')).toBe(V4);
+    expect(sourceAddressOf(`64:ff9b::${V4}`)).toBe(V4);
+    expect(sourceAddressOf('64:ff9b::c633:6407')).toBe(V4);
+    expect(sourceAddressOf(`::${V4}`)).toBe(V4);
+    expect(sourceAddressOf('::1.0.0.0')).toBe('1.0.0.0');
+  });
+
+  test('HOT-400 BOT-111 ② 경계 밖은 IPv6 /64로 센다(::·::1·첫 바이트 0·다른 NAT64 앞부분·가운데 비트)', () => {
+    expect(sourceAddressOf('::')).toBe('0000:0000:0000:0000::/64');
+    expect(sourceAddressOf('::1')).toBe('0000:0000:0000:0000::/64');
+    expect(sourceAddressOf('::0.1.2.3')).toBe('0000:0000:0000:0000::/64');
+    // 지역용 NAT64 앞부분(64:ff9b:1::/48)은 잘 알려진 앞부분이 아니다
+    expect(sourceAddressOf(`64:ff9b:1::${V4}`)).toBe('0064:ff9b:0001:0000::/64');
+    // 96비트 앞부분의 가운데가 0이 아니면 담은 IPv4가 아니다
+    expect(sourceAddressOf('64:ff9b::1:c633:6407')).toBe('0064:ff9b:0000:0000::/64');
+    expect(sourceAddressOf('::1:ffff:0:c633:6407')).toBe('0000:0000:0000:0001::/64');
+    expect(sourceAddressOf('::ffff:1:c633:6407')).toBe('0000:0000:0000:0000::/64');
+    // 옛 호환과 ::1은 같은 /64가 아니라 서로 다른 출발지다
+    expect(sourceAddressOf(`::${V4}`)).not.toBe(sourceAddressOf('::1'));
+  });
+
+  test('HOT-400 BOT-111 ③ x-forwarded-for가 값 하나의 IP면 그 값, 쉼표로 이은 여러 값이나 IP가 아닌 값이면 연결 상대 주소를 쓴다', () => {
+    const req = (xff: string | undefined) => ({ headers: xff === undefined ? {} : { 'x-forwarded-for': xff }, socket: { remoteAddress: '10.0.0.9' } }) as unknown as Parameters<typeof clientIpOf>[0];
+    expect(clientIpOf(req('203.0.113.5'))).toBe('203.0.113.5');
+    expect(clientIpOf(req('2001:db8::5'))).toBe('2001:db8::5');
+    expect(clientIpOf(req('203.0.113.5, 198.51.100.7'))).toBe('10.0.0.9');
+    expect(clientIpOf(req('203.0.113.5,198.51.100.7'))).toBe('10.0.0.9');
+    expect(clientIpOf(req('unknown'))).toBe('10.0.0.9');
+    expect(clientIpOf(req(''))).toBe('10.0.0.9');
+    expect(clientIpOf(req(undefined))).toBe('10.0.0.9');
   });
 });

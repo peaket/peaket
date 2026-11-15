@@ -27,6 +27,10 @@ import {
   v0Secrets,
 } from './cluster.mjs';
 import { V1_PRELOAD_IMAGES } from './v1-objects.mjs';
+// 게이트웨이 명령(BUILD_ORDER HOT-400)의 새 이름은 아직 없을 수 있어 이름 공간으로 읽는다(없는 이름을 가져오면 파일 전체가 읽히지 않는다)
+import * as clusterModule from './cluster.mjs';
+
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -616,4 +620,27 @@ test('BSL090_D-T40_야간준비명령은_up --v0-only로올리고_발생기를�
     const total = KIND_SYSTEM_CPU_M + METRICS_SERVER_CPU_M + local + 2 * perVersion + gen;
     assert.ok(total <= RUNNER_CPU_M, `${f}: 시스템 ${KIND_SYSTEM_CPU_M + METRICS_SERVER_CPU_M}m + 로컬 ${local}m + 두 판 ${2 * perVersion}m + 발생기 ${gen}m = ${total}m > ${RUNNER_CPU_M}m`);
   }
+});
+
+// ---- 게이트웨이(BUILD_ORDER HOT-400, docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', 묶음 BAT-055 계획 §5) ----
+
+test('HOT-400 cluster.mjs에 gateways 명령이 있고 쓰는 법에 적혀 있다', () => {
+  const r = spawnSync(process.execPath, [join(HERE_DIR, 'cluster.mjs'), '--no-such-command'], { encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /\bgateways\b/, '쓰는 법에 gateways가 없다');
+  const head = readFileSync(join(HERE_DIR, 'cluster.mjs'), 'utf8').split('\n').slice(0, 40).join('\n');
+  assert.match(head, /node tools\/local\/cluster\.mjs gateways/, '파일 머리의 쓰는 법에 gateways가 없다');
+});
+
+test('HOT-400 Envoy Gateway 컨트롤러는 판과 다이제스트를 고정하고 README 판 표에 같은 판을 적는다', () => {
+  const pinned = clusterModule.PINNED ?? {};
+  const version = Object.entries(pinned).filter(([k]) => /^envoyGateway.*Version$/i.test(k));
+  assert.equal(version.length, 1, `PINNED에 Envoy Gateway 판이 없다: ${Object.keys(pinned)}`);
+  assert.match(String(version[0][1]), /^v?\d+\.\d+\.\d+$/, '판은 정확한 판 번호다(latest·범위 아님)');
+  const digests = Object.entries(pinned).filter(([k]) => /^envoyGateway.*(Digest|Sha256)$/i.test(k));
+  assert.ok(digests.length > 0, 'Envoy Gateway 설치 파일 해시나 이미지 다이제스트가 없다');
+  for (const [k, v] of digests) assert.match(String(v), /^(sha256:)?[0-9a-f]{64}$/, k);
+  const readme = readFileSync(join(HERE_DIR, 'README.md'), 'utf8');
+  assert.match(readme, /Envoy Gateway/);
+  assert.ok(readme.includes(String(version[0][1]).replace(/^v/, '')), `README 판 표에 ${version[0][1]}가 없다`);
 });
