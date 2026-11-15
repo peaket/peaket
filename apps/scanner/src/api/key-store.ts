@@ -72,6 +72,21 @@ export async function ensureDeviceKey(): Promise<DpopKey> {
   return created;
 }
 
+/**
+ * 기기 등록·재등록은 늘 새 키를 만든다. 폐기된 기기의 옛 키 지문은 다른 기기와 겹칠 수 없고,
+ * 등록이 실패하면 저장하지 않아 옛 키를 그대로 둔다(C1-12).
+ */
+export async function enrollWithNewDeviceKey(i: {
+  enroll: (key: DpopKey) => Promise<void>;
+  generate?: () => Promise<DpopKey>;
+  save?: (key: DpopKey) => Promise<void>;
+}): Promise<DpopKey> {
+  const key = await (i.generate ?? generateDpopKey)();
+  await i.enroll(key);
+  await (i.save ?? saveDeviceKey)(key);
+  return key;
+}
+
 /** 스태프 토큰과 만료 시각(ms). 토큰 응답의 expires_in을 저장한다 */
 export interface StaffSession {
   token: string;

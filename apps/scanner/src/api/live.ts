@@ -54,6 +54,24 @@ export function setupStateOf(shift: ScannerShiftResponse): LiveSetupState {
   return '준비 완료';
 }
 
+/** 401·기기 폐기·세션 종료는 저장 토큰을 지우고 재로그인으로 돌린다(C1-09) */
+export function reloginRequired(status: number, type: string): boolean {
+  return status === 401 || (status === 403 && (type === 'device-revoked' || type === 'invalid_token'));
+}
+
+/** 서버 시각과 기기 시각의 차이(ms). DPoP iat와 준비 보고를 서버 시계에 맞춘다(C1-07) */
+export function serverClockOffsetMs(serverTime: string, nowMs: number): number {
+  const server = Date.parse(serverTime);
+  if (!Number.isFinite(server)) return 0;
+  return Math.round(server - nowMs);
+}
+
+/** 세션이 끝날 때까지 남은 시간(ms). 이미 끝났으면 0, 만료를 모르면 undefined(C1-08) */
+export function sessionExpiryDelayMs(expiresAtMs: number, nowMs: number): number | undefined {
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs === Number.MAX_SAFE_INTEGER) return undefined;
+  return Math.max(0, expiresAtMs - nowMs);
+}
+
 /** 준비 보고에 실을 시계 오차. 화면은 +0.4초처럼 보인다 */
 export function formatClockOffset(ms: number | undefined): string {
   if (ms === undefined) return '—';
@@ -124,4 +142,32 @@ export function sessionTerminatedOf(changes: ScannerChangesResponse, deviceId: s
     return typeof c.payload.reason === 'string' ? { reason: c.payload.reason } : {};
   }
   return undefined;
+}
+
+/**
+ * 변경분을 페이지 끝까지 받는다. 서버 lastSeq는 페이지 끝 번호이므로 그 값을 다음 after로 쓴다(C1-05·C1-06).
+ * 세션 종료 변경분을 만나면 그때 멈추고 snapshot을 더 진행하지 않는다. 부르는 쪽이 재로그인으로 돌린다.
+ */
+export async function syncChangePages(i: {
+  snapshot: SyncSnapshot;
+  after: number;
+  deviceId: string;
+  fetchPage: (after: number) => Promise<ScannerChangesResponse>;
+  nowMs: number;
+  maxPages?: number;
+}): Promise<{ snapshot: SyncSnapshot; last?: ScannerChangesResponse; terminated?: { reason?: string }; pages: number }> {
+  let cursor = i.after;
+  let snapshot = i.snapshot;
+  let last: ScannerChangesResponse | undefined;
+  const maxPages = i.maxPages ?? 50;
+  for (let pages = 1; pages <= maxPages; pages++) {
+    const page = await i.fetchPage(cursor);
+    const terminated = sessionTerminatedOf(page, i.deviceId);
+    if (terminated) return { snapshot, last: page, terminated, pages };
+    snapshot = applyChanges({ ...snapshot, lastSeq: cursor, syncedAtMs: i.nowMs }, page, i.nowMs);
+    last = page;
+    if (!page.hasMore || page.lastSeq === cursor) return { snapshot, last, pages };
+    cursor = page.lastSeq;
+  }
+  return { snapshot, last, pages: maxPages };
 }

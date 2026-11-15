@@ -700,6 +700,7 @@
 | R-593 | BAT-465 잔여 2차(선택 배치 Q-T59 예매 제한 집행 쓰기 경로, 외부 불변 저장소·OpenTimestamps 앵커 포트/가짜 어댑터)가 정본과 어긋나지 않는다 | services/queue-svc, services/purchase-svc, services/ops-svc, docs/api/openapi.yaml, packages/contracts, packages/api-client, docs | 정본(docs/features/queue-admission.md §6·Q-T59, docs/features/payment.md §2, docs/features/transfer-refund.md §7.2 T14, docs/security/asvs/transfer-refund.md)과 대조했고, 외부 버킷·달력이 없어 S3 Object Lock·OpenTimestamps는 503 `anchor-unavailable`과 로컬 앵커 유지로 남겼다. rebase 뒤 cheap gate·Docker test-int(queue 4·purchase 35·ops 3)·변이 6/6·4관점 리뷰(높음 0·중간 1 고침·중간 4 문서화)·브라우저 SCR-030/SCR-048 보드를 통과했다 | 적용(잔여 일부, heavy gate 통과) |
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
 | R-609 | C1-01·02·11·13(OVERRIDE·재판정·기기 계정·SEV3) | ticket scanner gate/store/schema·migration 0007·시험 | OVERRIDE 권한/flag/note·재판정·기기 계정·SEV3 | 적용 |
+| R-610 | C1-03·04·05·06·07·08·09·10·12(동기화·앱)·M5-07(jkt 모양 시험) | ticket/scanner sync·app | 페이지 커서·재입장·중복/취소·DPoP 보정·만료/재로그인·키 재생성·assertJkt 단일화·변이 | 적용 |
 
 ## 4. 숫자 일치표
 

@@ -1,6 +1,6 @@
 // 시험·로컬용 스캐너 기기 원장. 운영은 DrizzleScannerDeviceStore다.
 import type { ScannerDeviceCommand, ScannerDeviceCommandStore, ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../domain/ports.js';
-import { type ScannerDeviceRecord, ScannerDeviceInputError, ScannerDeviceKeyConflict } from '../domain/scanner-device.js';
+import { assertJkt, type ScannerDeviceRecord, ScannerDeviceKeyConflict } from '../domain/scanner-device.js';
 
 export class MemoryScannerDeviceStore implements ScannerDeviceStore {
   readonly devices = new Map<string, ScannerDeviceRecord>();
@@ -52,8 +52,8 @@ export class MemoryScannerDeviceStore implements ScannerDeviceStore {
   }
 
   async byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null> {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(jkt)) throw new ScannerDeviceInputError('JKT');
-    for (const d of this.devices.values()) if (d.credentialThumbprint === jkt) return structuredClone(d);
+    const valid = assertJkt(jkt);
+    for (const d of this.devices.values()) if (d.credentialThumbprint === valid) return structuredClone(d);
     return null;
   }
 

@@ -2,7 +2,7 @@
 import type { Database } from '@peaket/platform';
 import { and, asc, eq, gt } from 'drizzle-orm';
 import type { ScannerDeviceCommand, ScannerDeviceCommandStore, ScannerDeviceListInput, ScannerDeviceListResult, ScannerDeviceStore } from '../../domain/ports.js';
-import { type ScannerCredentialType, type ScannerDeviceRecord, type ScannerDeviceStatus, ScannerDeviceInputError, ScannerDeviceKeyConflict } from '../../domain/scanner-device.js';
+import { assertJkt, type ScannerCredentialType, type ScannerDeviceRecord, type ScannerDeviceStatus, ScannerDeviceKeyConflict } from '../../domain/scanner-device.js';
 import { scannerDevice, scannerDeviceCommand } from './schema.js';
 
 type Row = typeof scannerDevice.$inferSelect;
@@ -94,8 +94,8 @@ export class DrizzleScannerDeviceStore implements ScannerDeviceStore {
   }
 
   async byThumbprint(jkt: string): Promise<ScannerDeviceRecord | null> {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(jkt)) throw new ScannerDeviceInputError('JKT');
-    const [row] = await this.database.db.select().from(scannerDevice).where(eq(scannerDevice.credentialThumbprint, Buffer.from(jkt, 'base64url'))).limit(1);
+    const valid = assertJkt(jkt);
+    const [row] = await this.database.db.select().from(scannerDevice).where(eq(scannerDevice.credentialThumbprint, Buffer.from(valid, 'base64url'))).limit(1);
     return row ? recordOf(row) : null;
   }
 
