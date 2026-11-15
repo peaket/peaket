@@ -192,3 +192,43 @@ test.describe('FE-T18 입력 부품의 이름·설명(d2 §3.1)', () => {
     await expect(page.getByRole('radio', { name: /계좌 이체/ })).toBeChecked();
   });
 });
+
+// BAT-170 웨이브 7 T6: 시험 담당(l2w7-BAT170-test)이 썼다(ADR-0270 결정 3). 기준 docs/design/d4-handoff-checklist.md #25,
+// docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부'의 붙여넣기(3.3.8): `123456`과 `123 456`을 한 번에 붙여넣어 값이 `123456`.
+/**
+ * 붙여넣기를 흉내 낸다: paste 사건(DataTransfer에 글)을 보내고, 부품이 막지 않았으면 브라우저 기본 동작처럼 글을 한 번에 넣는다.
+ * 부품이 paste 처리기로 값을 정하든 입력 사건으로 거르든 같은 결과를 본다.
+ */
+async function paste(page, locator, text) {
+  await locator.focus();
+  const prevented = await locator.evaluate((el, t) => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', t);
+    return !el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, text);
+  if (!prevented) await page.keyboard.insertText(text);
+}
+
+test.describe('FE-T18 접근 가능한 인증(3.3.8) 붙여넣기', () => {
+  for (const text of ['123456', '123 456']) {
+    test(`FE-T18 CMP-007 인증 앱 코드 여섯 자리를 한 번에 붙여넣으면 값이 여섯 숫자다(띄어 쓴 7글자 포함): '${text}'`, async ({ page }) => {
+      await openStory(page, 'cmp-007-otpfield--paste');
+      const input = page.getByRole('textbox', { name: '인증 앱 코드 6자리' });
+      await expect(input).toHaveAttribute('autocomplete', 'one-time-code');
+      await paste(page, input, text);
+      await expect(input).toHaveValue('123456');
+      // 부르는 쪽(onChange)이 받은 값도 같다
+      await expect(page.getByTestId('otp-value')).toHaveText('123456');
+    });
+  }
+
+  test('FE-T18 비밀번호 칸은 붙여넣기를 막지 않고 autocomplete가 current-password다', async ({ page }) => {
+    await openStory(page, 'cmp-006-passwordfield--paste');
+    const input = page.getByLabel('비밀번호', { exact: true });
+    await expect(input).toHaveAttribute('autocomplete', 'current-password');
+    const secret = 'Peaket-paste 2026!';
+    await paste(page, input, secret);
+    await expect(input).toHaveValue(secret);
+    await expect(page.getByTestId('pw-length')).toHaveText(String(secret.length));
+  });
+});

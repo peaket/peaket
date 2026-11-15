@@ -1,5 +1,6 @@
 // FE-T31 재배치·확대·글자 간격 시험 설정(docs/frontend.md §5.11·§5.17, BUILD_ORDER BAT-170).
-// 운영 빌드(seed-css/apps.mjs의 prod)를 띄우고 소비자 웹·파트너·관제의 대표 흐름을 ko·en, 320·640 폭에서 돈다.
+// 운영 빌드(seed-css/apps.mjs의 prod)를 띄우고 소비자 웹·파트너·관제의 대표 흐름을 ko·en(소비자 웹 /en 접두), 320·640·기본 폭에서 돈다.
+// 재배치(reflow.spec)·초점 가림(keyboard.spec)·인앱 브라우저 안내(in-app.spec)·월렛 워커(wallet-sw.spec)가 이 설정을 쓴다.
 // 브라우저 확인은 웨이브 끝 heavy gate에서 한다(갈래 1이 kind/Docker를 쓰는 동안은 돌리지 않는다).
 import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
@@ -27,23 +28,18 @@ const SERVERS = ['web', 'partner', 'console'].map((name) => {
   };
 });
 
-const project = (name, baseUse, locale, viewport) => ({
-  name,
-  use: { ...baseUse, locale, viewport },
-});
-
+// 화면 매트릭스(docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부', BAT-170 웨이브 7):
+// 세 엔진 × 320×256·640×400, 그리고 세 엔진의 기본 폭 프로젝트. 로케일은 주소 접두(/en)로 돌고 Playwright locale은 바꾸지 않는다.
+// 프로젝트마다 시험 이름의 폭 표시(' 320: '·' 640: '·' 640 글자 간격: '·' 기본 폭: ')로 고른다.
 const BROWSERS = [
   ['chromium', devices['Desktop Chrome']],
   ['webkit', devices['Desktop Safari']],
   ['firefox', firefoxUse()],
 ];
-const VIEWPORTS = [
-  ['320', { width: 320, height: 256 }],
-  ['640', { width: 640, height: 400 }],
-];
-const LOCALES = [
-  ['ko', 'ko-KR'],
-  ['en', 'en-US'],
+const SIZES = [
+  ['320', { width: 320, height: 256 }, / 320: /],
+  ['640', { width: 640, height: 400 }, / 640(?: 글자 간격)?: /],
+  ['default', undefined, / 기본 폭: /],
 ];
 
 export default defineConfig({
@@ -56,7 +52,7 @@ export default defineConfig({
   reporter: [['list'], ['junit', { outputFile: 'reports/reflow.junit.xml' }]],
   use: { timezoneId: 'Asia/Seoul', trace: 'off' },
   projects: BROWSERS.flatMap(([browser, baseUse]) =>
-    LOCALES.flatMap(([localeName, locale]) => VIEWPORTS.map(([size, viewport]) => project(`${browser}-${localeName}-${size}`, baseUse, locale, viewport))),
+    SIZES.map(([size, viewport, grep]) => ({ name: `${browser}-${size}`, grep, use: { ...baseUse, locale: 'ko-KR', ...(viewport ? { viewport } : {}) } })),
   ),
   webServer: EXTERNAL_SERVERS ? undefined : [mockApiServer(), ...SERVERS],
 });

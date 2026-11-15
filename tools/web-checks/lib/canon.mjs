@@ -94,3 +94,34 @@ export function rgb(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
   return `rgb(${r}, ${g}, ${b})`;
 }
+
+/**
+ * §5.14.2 외부 스크립트 결정 표(ASVS 3.6.1)의 '스크립트' 칸에 적힌 다른 출처 호스트들(BAT-170 웨이브 7 T9).
+ * 칸 글의 `https://호스트/…`나 백틱 안 `호스트/경로`를 읽는다. npm 판 이름(`@scope/pkg`)·함수 이름은 출처가 아니라 뺀다.
+ * @returns {Set<string>} 호스트 이름(소문자)
+ */
+export function parseExternalScriptHosts(md) {
+  const lines = md.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^#### 5\.14\.2 외부 스크립트 결정/.test(l));
+  if (start < 0) throw new Error('docs/frontend.md §5.14.2 외부 스크립트 결정 표를 찾지 못했다');
+  const hosts = new Set();
+  let header = null;
+  for (let i = start + 1; i < lines.length && !/^#{2,4} /.test(lines[i]); i++) {
+    if (!lines[i].startsWith('|')) continue;
+    const cells = lines[i].split('|').slice(1, -1).map((c) => c.trim());
+    if (header === null) {
+      header = cells;
+      continue;
+    }
+    if (cells.every((c) => /^-+$/.test(c))) continue;
+    const script = cells[header.indexOf('스크립트')] ?? '';
+    for (const m of script.matchAll(/`([^`]+)`/g)) {
+      const v = m[1].trim();
+      if (v.startsWith('@') || !/^(?:https:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\//i.test(v)) continue;
+      hosts.add(v.replace(/^https:\/\//i, '').split('/')[0].toLowerCase());
+    }
+  }
+  if (hosts.size === 0) throw new Error('§5.14.2 표에서 외부 스크립트 출처를 하나도 읽지 못했다');
+  return hosts;
+}
+export const loadExternalScriptHosts = () => parseExternalScriptHosts(frontendMd());

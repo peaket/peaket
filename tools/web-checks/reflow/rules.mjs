@@ -33,6 +33,35 @@ export function clippedTextFindings(items) {
   return (items ?? []).filter((x) => x && x.text === true && x.overflow !== 'visible' && (x.scrollWidth > x.clientWidth + 1 || x.scrollHeight > x.clientHeight + 1));
 }
 
+/**
+ * 닿기('모든 조작 요소에 닿는다', docs/frontend.md §5.17 화면 매트릭스 세부): 예외 상자 밖 조작 요소마다 scrollIntoView 뒤 잰 상자.
+ * 항목은 { id, left, right, width, height, hit }(hit: 상자 가운데 점의 맨 위 요소가 그 요소이거나 그 안쪽). 닿지 않는 항목을 돌려준다.
+ * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
+ */
+export function unreachableFindings(items, viewportWidth) {
+  void items, viewportWidth;
+  throw new Error('아직 없음');
+}
+
+/**
+ * 초점 가림(FE-T18, WCAG 2.4.11): Tab 한 번마다 { target: { id, left, top, width, height }, fixed: [{ id, left, top, width, height }] }.
+ * fixed는 position fixed·sticky인 다른 요소의 상자다. 초점 상자가 그 가운데 하나에 완전히 덮인 단계를 돌려준다.
+ * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
+ */
+export function obscuredFocusFindings(steps) {
+  void steps;
+  throw new Error('아직 없음');
+}
+
+/**
+ * 빈 결과: 요청한 경로와 도착 경로가 다르거나(로그인으로 넘어감 등) 잰 글자 상자·조작 요소가 0개면 실패 까닭 문자열, 아니면 null.
+ * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
+ */
+export function emptyMeasurement({ requestedPath, finalPath, textCount, controlCount }) {
+  void requestedPath, finalPath, textCount, controlCount;
+  throw new Error('아직 없음');
+}
+
 /** 시험할 주요 흐름. 소비자 웹·파트너·관제의 대표 화면만 돈다(전 화면은 출시 후보) */
 export const REFLOW_PAGES = [
   { app: 'web', path: '/' },

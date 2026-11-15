@@ -39,3 +39,26 @@ test('도구 의미 색을 별칭까지 풀고 브라우저 계산 스타일 꼴
   assert.match(semanticColor('light', 'primary'), /^#[0-9a-f]{6}$/);
   assert.equal(rgb('#0a10ff'), 'rgb(10, 16, 255)');
 });
+
+// BAT-170 웨이브 7 T9(ASVS 3.6.1): 외부 스크립트 결정 표에서 허용 출처를 읽는다. 단언 값은 docs/frontend.md §5.14.2 표의 세 출처다.
+test('도구 외부 스크립트 결정 표(§5.14.2)에서 다른 출처 호스트만 읽는다', async () => {
+  const { parseExternalScriptHosts, loadExternalScriptHosts } = await import('./canon.mjs');
+  const md = [
+    '#### 5.14.2 외부 스크립트 결정(ASVS 3.6.1)',
+    '',
+    '| 스크립트 | 싣는 화면 | 결정 |',
+    '| --- | --- | --- |',
+    '| 사람 확인 `https://challenges.example.com/v0/api.js` | 로비 | 늦게 싣는다 |',
+    '| 결제 SDK(`js.pay.example/v2/standard`) | 결제 | 적재기 `loadPay` |',
+    '| 다른 SDK(`cdn.other.example/v2/sdk.js`, npm `@other/sdk`) | 결제 | npm 판 |',
+    '',
+    '#### 5.14.3 다음 절',
+    '| 스크립트 | 결정 |',
+    '| --- | --- |',
+    '| `https://not-in-table.example/x.js` | 다음 표 |',
+  ].join('\n');
+  assert.deepEqual([...parseExternalScriptHosts(md)].sort(), ['cdn.other.example', 'challenges.example.com', 'js.pay.example']);
+  assert.throws(() => parseExternalScriptHosts('# 표 없음'), /5\.14\.2/);
+  // 정본 표(docs/frontend.md §5.14.2): Turnstile·토스페이먼츠·포트원
+  assert.deepEqual([...loadExternalScriptHosts()].sort(), ['cdn.portone.io', 'challenges.cloudflare.com', 'js.tosspayments.com']);
+});

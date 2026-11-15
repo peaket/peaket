@@ -1,0 +1,146 @@
+// 공유 캐시 처리기 통합 시험(BAT-170 웨이브 7 T14, docs/frontend.md §5.17 '공유 캐시 처리기 세부', docs/data.md 세션·캐시 클러스터 키 규칙).
+// 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 실제 Valkey 컨테이너(services/identity-svc/test-int/valkey.ts와 같은 방식:
+// 라이브러리 없이 docker 명령, 무작위 포트)에 처리기 인스턴스 둘(다른 파드 둘처럼 모듈을 따로 불러온다)을 붙인다.
+// 실행: apps/web에서 node --test test-int/ (Docker가 있어야 한다. 끝나면 컨테이너를 docker rm -f -v로 지운다)
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { after, before, test } from 'node:test';
+
+const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
+/** 정본: 모든 키 TTL 상한 30일 [가정] */
+const DAYS_30_S = 30 * 24 * 60 * 60;
+/** 정본: Redis가 100ms [가정] 안에 답하지 않으면 읽기는 없음. 실제 시계라 여유를 둔다 */
+const CANON_TIMEOUT_MS = 100;
+const SLACK_MS = 900;
+
+const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const NAME = `bat170-valkey-${process.pid}`;
+let cli;
+
+/** 처리기 모듈을 따로 불러온다(모듈 상태·연결을 나눠 다른 파드처럼) */
+const load = async (file, tag) => (await import(new URL(`../server/${file}?${tag}`, import.meta.url).href)).default;
+let useA;
+let useB;
+let IsrA;
+let IsrB;
+
+before(async () => {
+  docker(['run', '-d', '--name', NAME, '-p', '127.0.0.1::6379', VALKEY_IMAGE]);
+  cli = (...a) => docker(['exec', NAME, 'valkey-cli', ...a]);
+  for (let i = 0; i < 50; i++) {
+    try {
+      if (cli('PING') === 'PONG') break;
+    } catch {
+      // 아직 뜨는 중
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const mapped = docker(['port', NAME, '6379/tcp']).split('\n')[0];
+  process.env.PEAKET_WEB_CACHE_REDIS_URL = `redis://127.0.0.1:${mapped.slice(mapped.lastIndexOf(':') + 1)}`;
+  useA = await load('use-cache-handler.mjs', 'pod-a');
+  useB = await load('use-cache-handler.mjs', 'pod-b');
+  IsrA = await load('cache-handler.mjs', 'pod-a');
+  IsrB = await load('cache-handler.mjs', 'pod-b');
+});
+
+after(() => {
+  try {
+    docker(['rm', '-f', '-v', NAME]);
+  } catch {
+    // 이미 없다
+  }
+});
+
+const isrCtx = () => ({ revalidatedTags: [], _requestHeaders: {} });
+const entry = (body, tags, timestamp = Date.now() - 10) => ({ value: new Blob([body]).stream(), tags, stale: 30, timestamp, expire: 300, revalidate: 60 });
+const read = async (e) => (e ? await new Response(e.value).text() : undefined);
+const page = (html, tag) => ({
+  kind: 'APP_PAGE',
+  html,
+  rscData: Buffer.from(`rsc:${html}`),
+  headers: { 'x-next-cache-tags': tag },
+  postponed: undefined,
+  status: 200,
+  segmentData: new Map([['/_index', Buffer.from(`seg:${html}`)]]),
+});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('HOT-390 두 처리기 인스턴스가 같은 Valkey를 나눠 쓴다: A가 쓴 값을 B가 읽고, A의 태그 무효화 뒤 B의 refreshTags·getExpiration이 그 값을 없는 것으로 본다', async () => {
+  // 'use cache' 처리기
+  const e = entry('hello', ['events']);
+  await useA.set('data-key-1', Promise.resolve(e));
+  const got = await useB.get('data-key-1', []);
+  assert.equal(await read(got), 'hello');
+  assert.deepEqual(got.tags, ['events']);
+  assert.equal(got.timestamp, e.timestamp);
+  assert.equal(got.expire, 300);
+  assert.equal(got.revalidate, 60);
+  await sleep(5);
+  await useA.updateTags(['events']);
+  await useB.refreshTags();
+  const exp = await useB.getExpiration(['events']);
+  assert.ok(exp > e.timestamp, `태그 시각 ${exp}이 값을 만든 시각 ${e.timestamp}보다 늦어야 한다`);
+  assert.equal(await useB.get('data-key-1', []), undefined);
+
+  // 미리 그린 화면 처리기
+  const a = new IsrA(isrCtx());
+  const b = new IsrB(isrCtx());
+  await a.set('/events/evt-lumen-1025', page('<p>공연</p>', 'event-isr'), { cacheControl: { revalidate: 60, expire: 300 }, isFallback: false });
+  const hit = await b.get('/events/evt-lumen-1025', { kind: 'APP_PAGE', isFallback: false });
+  assert.ok(hit, 'B가 A의 값을 읽지 못했다');
+  assert.equal(hit.value.kind, 'APP_PAGE');
+  assert.equal(hit.value.html, '<p>공연</p>');
+  assert.equal(hit.value.status, 200);
+  assert.equal(Buffer.from(hit.value.rscData).toString('utf8'), 'rsc:<p>공연</p>');
+  assert.equal(Buffer.from(hit.value.segmentData.get('/_index')).toString('utf8'), 'seg:<p>공연</p>');
+  await sleep(5);
+  await a.revalidateTag('event-isr');
+  assert.equal((await b.get('/events/evt-lumen-1025', { kind: 'APP_PAGE', isFallback: false })) ?? null, null);
+  // 태그 시각은 두 처리기가 같은 키 꼴(web:data:tag:{태그})을 쓴다
+  assert.ok(Number(cli('GET', 'web:data:tag:event-isr')) > 0);
+  assert.ok(Number(cli('GET', 'web:data:tag:events')) > 0);
+});
+
+test('HOT-390 쓴 키를 모두 TTL과 함께 확인한다(TTL -1인 키 0)', async () => {
+  await useA.set('data-key-2', Promise.resolve(entry('ttl', ['ttl-tag'])));
+  await new IsrA(isrCtx()).set('/search', page('<p>검색</p>', 'search-isr'), { cacheControl: { revalidate: 60, expire: 120 }, isFallback: false });
+  const keys = cli('--scan').split('\n').filter(Boolean).sort();
+  assert.ok(keys.includes('web:data:data-key-2'), keys.join(', '));
+  assert.ok(keys.includes('web:isr:/search'), keys.join(', '));
+  for (const k of keys) {
+    assert.match(k, /^web:(isr|data):/, `정본 키 꼴 밖: ${k}`);
+    const ttl = Number(cli('TTL', k));
+    assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
+  }
+  // 값 TTL은 만료(expire)와 30일 가운데 짧은 쪽
+  assert.ok(Number(cli('TTL', 'web:isr:/search')) <= 120);
+  assert.ok(Number(cli('TTL', 'web:data:data-key-2')) <= 300);
+});
+
+test('HOT-390 Valkey를 멈추면 get은 없음을 돌려주고 set은 던지지 않는다', async () => {
+  await useA.set('data-key-3', Promise.resolve(entry('before', ['pause-tag'])));
+  const isr = new IsrA(isrCtx());
+  await isr.set('/help', page('<p>도움말</p>', 'help-isr'), { cacheControl: { revalidate: 60, expire: 300 }, isFallback: false });
+
+  // 답하지 않는 Redis(멈춤)
+  docker(['pause', NAME]);
+  try {
+    let t = Date.now();
+    assert.equal(await useA.get('data-key-3', []), undefined);
+    assert.ok(Date.now() - t < CANON_TIMEOUT_MS + SLACK_MS, `읽기가 ${Date.now() - t}ms 걸렸다`);
+    t = Date.now();
+    await useA.set('data-key-4', Promise.resolve(entry('during', ['pause-tag'])));
+    assert.ok(Date.now() - t < CANON_TIMEOUT_MS + SLACK_MS, `쓰기가 ${Date.now() - t}ms 걸렸다`);
+    assert.equal((await isr.get('/help', { kind: 'APP_PAGE', isFallback: false })) ?? null, null);
+    await isr.set('/help2', page('<p>x</p>', 'help-isr'), { cacheControl: { revalidate: 60, expire: 300 }, isFallback: false });
+  } finally {
+    docker(['unpause', NAME]);
+  }
+
+  // 끊긴 Redis(컨테이너 없음)
+  docker(['rm', '-f', '-v', NAME]);
+  assert.equal(await useB.get('data-key-3', []), undefined);
+  await useB.set('data-key-5', Promise.resolve(entry('gone', ['pause-tag'])));
+  await useB.updateTags(['pause-tag']);
+  assert.equal((await new IsrB(isrCtx()).get('/help', { kind: 'APP_PAGE', isFallback: false })) ?? null, null);
+});

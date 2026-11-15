@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { renderCsp } from '../../../packages/config/headers/security-headers.mjs';
 import { HOST, MOCK_API } from '../seed-css/apps.mjs';
 import { WEB_BASE, WEB_BUILD_DIR, stubFanApi } from './pages.mjs';
+import { loadExternalScriptHosts } from '../lib/canon.mjs';
 
 // 팬 API는 일시 장애(503)로 답한다(없는 주소로 요청을 내보내지 않는다, pages.mjs)
 test.beforeEach(({ page }) => stubFanApi(page));
@@ -306,6 +307,29 @@ test.describe('SRI 값과 소스 맵 링크(HOT-291 숨김 소스 맵)', () => {
         expect(`sha256-${createHash('sha256').update(body).digest('base64')}`, url).toBe(integrity);
         expect(body.toString('utf8'), url).not.toMatch(/sourceMappingURL=/);
       }
+    });
+  }
+});
+
+// BAT-170 웨이브 7 T9: 시험 담당(l2w7-BAT170-test)이 썼다(ADR-0270 결정 3). 허용 출처는 정본 표(docs/frontend.md §5.14.2 외부 스크립트 결정)에서 읽는다.
+test.describe('외부 스크립트 출처와 SRI(ASVS 3.6.1, docs/frontend.md §5.14.2)', () => {
+  const PAGES = [`/events/${DETAIL_EVENT}`, `/queue/${EVENT}/verify`, `/booking/${EVENT}/checkout`];
+  for (const path of PAGES) {
+    test(`[ASVS v5.0.0-3.6.1] ${path}: 다른 출처 스크립트는 외부 스크립트 결정 표의 출처뿐이고 같은 출처 외부 스크립트에는 integrity가 있다`, async ({ page }) => {
+      const allowed = loadExternalScriptHosts();
+      const requested = [];
+      page.on('request', (r) => {
+        if (r.resourceType() === 'script') requested.push(r.url());
+      });
+      const res = await page.goto(`${WEB_BASE}${path}`, { waitUntil: 'networkidle' });
+      expect(res?.status(), path).toBeLessThan(400);
+      const origin = new URL(WEB_BASE).origin;
+      const foreign = requested.filter((u) => new URL(u).origin !== origin);
+      expect(foreign.filter((u) => !allowed.has(new URL(u).hostname)), `${path} 표에 없는 다른 출처 스크립트`).toEqual([]);
+      const tags = await page.evaluate(() => [...document.querySelectorAll('script[src]')].map((s) => ({ src: s.src, integrity: s.getAttribute('integrity') ?? '' })));
+      const same = tags.filter((t) => new URL(t.src).origin === origin);
+      expect(same.length, `${path} 같은 출처 외부 스크립트가 없다(빈 결과)`).toBeGreaterThan(0);
+      expect(same.filter((t) => !/^sha(256|384|512)-[A-Za-z0-9+/=]+$/.test(t.integrity)).map((t) => t.src), `${path} integrity 없는 같은 출처 스크립트`).toEqual([]);
     });
   }
 });
