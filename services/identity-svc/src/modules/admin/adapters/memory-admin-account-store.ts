@@ -721,7 +721,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         patch(s, { prevRefreshHash: s.refreshHash, refreshHash: hash.toString('hex'), rotatedAt: now, refreshUsed: false, idleExpiresAt });
       },
       setRefreshHash: async (id, hash) => {
-        patch(this.#sessions.find((x) => x.id === id)!, { refreshHash: hash.toString('hex') });
+        patch(this.#sessions.find((x) => x.id === id)!, { refreshHash: hash.toString('hex'), prevRefreshHash: null, refreshUsed: true });
       },
       recordRefreshHash: async (r) => {
         const h = r.hash.toString('hex');

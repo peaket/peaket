@@ -637,6 +637,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-594: 2026-11-15 웨이브 5 마감. develop 42697cf7, CI 43660626765 초록. 다음은 웨이브 6 독립 감사.
 - R-596: jkt를 RFC 7638 고정 EC 벡터·jose 지문과 대조, htu 호스트/질의·typ·jwk d·valid:false+role 401, validFrom 미래/경계, decide OUTSIDE_STAFF_HOURS, jkt 43자 base64url, flagSeq만 달라도 diverged/needsResync 시험 추가
 - R-600: 탈퇴·병합된 계정의 staff_assignment를 REVOKED로 끝내고 scanner_session을 모두 끝내며 control.sessions-terminated(STAFF_REVOKED)를 세션마다 남긴다. CheckScannerSession은 계정이 ACTIVE가 아니면 valid:false다. scanner_session.staff_account_id(0033) 부분 유일 인덱스와 승인 트랜잭션의 계정 행 잠금으로 계정당 살아 있는 스캐너 세션 하나를 지킨다. identity 단위 554·test-int 171(실제 PostgreSQL 18·Valkey 8.1), typecheck·lint·doc-check·ledger BAT-450·trace I-T21/I-T22·records·contracts gen:check 통과.
+- R-601: InternalTokenGuard가 local·ci 밖에서 토큰이 없으면 시작을 막고(닫힘 실패), 토큰 비교를 timingSafeEqual로 한다. 리프레시 재시도는 앞 토큰을 prev_refresh_hash에 남기지 않고 refresh_used=true로 표시해 같은 앞 토큰을 유예 안에 다시 쓰면 재사용으로 끝낸다(팬·관리 갱신). 스태프 초대 수락은 STAFF_PHONE_VERIFICATION 포트로 휴대폰 본인확인 기록을 요구하고, 포트·저장소를 쓸 수 없으면 503 provider-down, 기록이 없으면 403 identity-verification-required다. 외부 본인확인기관 계약 전이라 운영 수락은 기록이 생기기 전까지 막힌다. identity 단위 556·test-int 172(실제 PostgreSQL 18·Valkey 8.1)·platform 550, typecheck·lint·doc-check·ledger BAT-450·trace I-T21/I-T22·records·contracts gen:check 통과.
 
 ## 5. [충돌] 결정 결과
 

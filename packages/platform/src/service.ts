@@ -7,7 +7,7 @@ import { type DynamicModule, Global, type LogLevel, Module, type Type } from '@n
 import { APP_GUARD, DiscoveryModule, NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { AUTH_STATE, AuthGuard, AuthState, RolesCheck, ScannerGuard, type AdminAuthzPort } from './auth.js';
+import { AUTH_STATE, AuthGuard, AuthState, INTERNAL_TOKEN_REQUIRED, RolesCheck, ScannerGuard, type AdminAuthzPort } from './auth.js';
 import { ScannerAuthState, type ScannerAuthWiring } from './scanner-auth.js';
 import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js';
 import { CLOCK, type Clock, systemClock } from './clock.js';
@@ -29,11 +29,12 @@ import { sampleKeep } from './sampling.js';
  * 사용자 모듈 위에 공용 제공자(시계·서비스 로거·인증 상태)를 전역으로 얹은 뿌리 모듈.
  * 모든 요청에 인증 가드를 걸고, 시작 때 모든 처리기의 허용 역할을 확인한다(add-service-structure-and-request-checks 결정 8, AZ-T1)
  */
-export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock, logger: PlatformLogger, auth: AuthState): Type<unknown> {
+export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock, logger: PlatformLogger, auth: AuthState, internalTokenRequired: boolean): Type<unknown> {
   const values = [
     { provide: CLOCK, useValue: clock },
     { provide: PLATFORM_LOGGER, useValue: logger },
     { provide: AUTH_STATE, useValue: auth },
+    { provide: INTERNAL_TOKEN_REQUIRED, useValue: internalTokenRequired },
   ];
   @Global()
   @Module({
@@ -174,7 +175,8 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     },
   });
   const nestLevels = o.nestLogLevels ?? ['error', 'warn'];
-  const app = await NestFactory.create<NestFastifyApplication>(platformRoot(o.module, clock, logger, auth), adapter, {
+  const internalTokenRequired = config.env !== 'local' && config.env !== 'ci';
+  const app = await NestFactory.create<NestFastifyApplication>(platformRoot(o.module, clock, logger, auth, internalTokenRequired), adapter, {
     abortOnError: false,
     // NestJS 기본 본문 해석기(JSON·폼)를 끈다. 폼 본문을 받지 않고(415, asvs/delivery.md 3.5.2) JSON은 Fastify 기본 해석기(원형 오염 키 거부)로 읽는다
     bodyParser: false,

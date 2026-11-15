@@ -67,6 +67,20 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(await t.isTerminated(s.sessionId)).toBe(false);
     });
 
+    test('I-T4_②_재시도는한번만받고_같은앞토큰을유예안에다시쓰면탈취다(C2-04·CONS-07)', async () => {
+      const t = await make();
+      const k = await kit(t.store);
+      const s = await login(k);
+      ok(await k.refresh.run({ refreshToken: s.refreshToken }));
+      k.clock.advance(5_000);
+      ok(await k.refresh.run({ refreshToken: s.refreshToken }));
+      k.clock.advance(5_000);
+      // 두 번째 재시도는 받아 주지 않는다. 앞 토큰은 prev에 남지 않고 history로만 남는다
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
+      expect(await t.isTerminated(s.sessionId)).toBe(true);
+      expect(await t.terminations(s.accountId)).toEqual([[s.sessionId, 'REFRESH_REUSE']]);
+    });
+
     test('I-T4_③_재시도로폐기된먼저준토큰을쓰면_탈취로보고세션을끝내며사건을남긴다 [ASVS v5.0.0-7.4.1]', async () => {
       const t = await make();
       const k = await kit(t.store);

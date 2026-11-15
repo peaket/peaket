@@ -10,11 +10,14 @@ import {
   Inject,
   Injectable,
   type OnApplicationBootstrap,
+  type OnModuleInit,
+  Optional,
   SetMetadata,
   type Type,
   UnauthorizedException,
   createParamDecorator,
 } from '@nestjs/common';
+import { timingSafeEqual } from 'node:crypto';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -77,21 +80,43 @@ export const PASSWORD_CHANGE_SCOPE = 'password:change';
 
 export const ROLES_METADATA = 'peaket:roles';
 
-/** 서비스 사이 내부 HTTP의 공유 토큰 주입 이름(환경 값 PEAKET_INTERNAL_TOKEN). 비어 있으면 local·ci처럼 검사를 끈다 */
+/** 서비스 사이 내부 HTTP의 공유 토큰 주입 이름(환경 값 PEAKET_INTERNAL_TOKEN) */
 export const INTERNAL_TOKEN = Symbol.for('peaket.platform.internal-token');
+/** 운영처럼 내부 토큰이 꼭 있어야 하는 환경인지(platformRoot가 PEAKET_ENV로 정한다) */
+export const INTERNAL_TOKEN_REQUIRED = Symbol.for('peaket.platform.internal-token-required');
+
+/** 길이가 같은 두 비밀 값을 타이밍에 기대지 않고 비교한다 */
+function sameSecret(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 /**
  * 서비스 사이 내부 HTTP 처리기의 공유 토큰 검사(BAT-425). 공개 게이트웨이에 노출하지 않는 경로에만 쓴다.
- * 토큰이 비어 있으면(로컬·CI) 통과시키고, 운영은 PEAKET_INTERNAL_TOKEN을 Secret에서 넣는다.
+ * local·ci에서만 토큰 없이 통과하고(시험·로컬 편의), 그 밖의 환경은 토큰이 없으면 시작을 막는다.
+ * 토큰 비교는 길이가 같을 때 `timingSafeEqual`로 한다.
  */
 @Injectable()
-export class InternalTokenGuard implements CanActivate {
-  constructor(@Inject(INTERNAL_TOKEN) private readonly expected?: string) {}
+export class InternalTokenGuard implements CanActivate, OnModuleInit {
+  constructor(
+    @Inject(INTERNAL_TOKEN) private readonly expected?: string,
+    @Optional() @Inject(INTERNAL_TOKEN_REQUIRED) private readonly required = false,
+  ) {}
+
+  onModuleInit(): void {
+    if (this.required && !this.expected) {
+      throw new Error('PEAKET_INTERNAL_TOKEN이 없다(운영에서는 내부 HTTP 공유 토큰이 꼭 필요하다)');
+    }
+  }
 
   canActivate(context: ExecutionContext): boolean {
-    if (!this.expected) return true;
+    if (!this.expected) return !this.required;
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    return request.headers['x-peaket-internal-token'] === this.expected;
+    const got = request.headers['x-peaket-internal-token'];
+    const value = Array.isArray(got) ? got[0] : got;
+    return typeof value === 'string' && sameSecret(value, this.expected);
   }
 }
 

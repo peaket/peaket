@@ -701,6 +701,7 @@
 | R-594 | 웨이브 5 마감 기록 누락 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/00-summary.md, docs/review/consistency-review.md, docs/review/audit/README.md | develop 42697cf7·CI 43660626765 초록, 세 갈래와 다음 웨이브 6 감사 기록 | 적용 |
 | R-596 | M5 변이 시험 공백 9건(jkt 자기 참조·htu 호스트·validFrom·valid:false+role 등) | scanner dpop.test, platform scanner-auth.test, identity check-scanner-session.test, ticket scanner-device.test, scanner version-vector.test | 회귀를 잡는 시험을 더하고 표적 시험으로 확인 | 적용 |
 | R-600 | C2-01·C2-05(탈퇴·병합 계정의 스태프 배정·스캐너 세션 잔존, 계정당 스캐너 세션 하나 미보장) | identity staff·withdraw·merge·check-scanner-session, migrations 0033 | 탈퇴·병합 시 배정·세션 종료와 STAFF_REVOKED 사건, 계정 ACTIVE 확인, staff_account_id 부분 유일 인덱스·계정 잠금 | 적용 |
+| R-601 | C2-02·C2-03·C2-04·CONS-07·OPS-05(스태프 초대 휴대폰 본인확인 없음·내부 토큰 fail-open·리프레시 재시도 반복) | platform auth·service, identity staff-invitations·refresh·admin, openapi | 휴대폰 본인확인 포트·503, 내부 토큰 닫힘 실패·상수 시간 비교, 재시도 1회·prev NULL | 적용 |
 
 ## 4. 숫자 일치표
 

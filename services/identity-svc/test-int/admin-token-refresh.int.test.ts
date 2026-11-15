@@ -50,9 +50,11 @@ test('PostgreSQL에서_회전하면유휴만료가늘고_동시에같은토큰�
   clock.advance(30 * M);
   const both = await Promise.all([uc.run({ aud: 'ops', refreshToken: rt0 }), uc.run({ aud: 'ops', refreshToken: rt0 })]);
   expect(both.map((r) => r.result).sort()).toEqual(['OK', 'OK']);
-  const [row] = await q<{ idle_expires_at: Date; rotated_at: Date; prev_refresh_hash: Buffer }>('select idle_expires_at, rotated_at, prev_refresh_hash from admin_session where id = $1', [sid]);
+  const [row] = await q<{ idle_expires_at: Date; rotated_at: Date; prev_refresh_hash: Buffer | null; refresh_used: boolean }>('select idle_expires_at, rotated_at, prev_refresh_hash, refresh_used from admin_session where id = $1', [sid]);
   expect(row!.idle_expires_at.getTime()).toBe(clock.now() + 60 * M);
-  expect(Buffer.from(row!.prev_refresh_hash).equals(sha(rt0))).toBe(true);
+  // 재시도는 앞 토큰을 prev에 남기지 않고 다시 받지 않는다(C2-04·CONS-07)
+  expect(row!.prev_refresh_hash).toBeNull();
+  expect(row!.refresh_used).toBe(true);
   // 마지막에 준 토큰만 지금 토큰이다(먼저 준 것은 재시도가 바꿨다)
   const rts = both.map((r) => (r.result === 'OK' ? r.refreshToken : ''));
   const [cur] = await q<{ refresh_hash: Buffer }>('select refresh_hash from admin_session where id = $1', [sid]);
@@ -103,9 +105,10 @@ test('PostgreSQL에서_세션행을쥔동안온같은토큰의갱신둘은잠금
   await holder.query('commit');
   holder.release();
   expect((await both).map((r) => r.result)).toEqual(['OK', 'OK']);
-  // 회전 한 번(앞 토큰 = 처음 토큰)과 재시도 한 번: 회전이 두 번이면 앞 토큰이 첫 회전의 토큰이 된다
-  const [row] = await q<{ prev_refresh_hash: Buffer }>('select prev_refresh_hash from admin_session where id = $1', [sid]);
-  expect(Buffer.from(row!.prev_refresh_hash).equals(sha(rt))).toBe(true);
+  // 회전 한 번과 재시도 한 번: 재시도는 앞 토큰을 prev에 남기지 않는다(C2-04·CONS-07)
+  const [row] = await q<{ prev_refresh_hash: Buffer | null; refresh_used: boolean }>('select prev_refresh_hash, refresh_used from admin_session where id = $1', [sid]);
+  expect(row!.prev_refresh_hash).toBeNull();
+  expect(row!.refresh_used).toBe(true);
   expect(await q('select 1 from admin_refresh_token_hash where admin_session_id = $1', [sid])).toHaveLength(3);
 });
 

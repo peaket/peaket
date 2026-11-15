@@ -19,6 +19,8 @@ function reject(e: unknown): never {
   if (e instanceof StaffInvitationError) {
     if (e.code === 'INVITATION_INVALID') throw new ProblemError({ type: 'invitation-invalid', status: 410, title: '초대가 만료되었습니다' });
     if (e.code === 'EMAIL_MISMATCH') throw new ProblemError({ type: 'staff-invitation-email-mismatch', status: 403, title: '초대 이메일과 검증된 계정 이메일이 다릅니다' });
+    if (e.code === 'PHONE_UNVERIFIED') throw new ProblemError({ type: 'identity-verification-required', status: 403, title: '휴대폰 본인확인을 먼저 해 주세요' });
+    if (e.code === 'PHONE_UNAVAILABLE') throw new ProblemError({ type: 'provider-down', status: 503, title: '지금은 본인확인을 할 수 없습니다', retryAfterSeconds: 1 });
     if (e.code === 'ASSIGNMENT_EXISTS') throw new ProblemError({ type: 'staff-assignment-exists', status: 409, title: '이미 이 회차에 배정된 계정입니다' });
     if (e.code === 'CONSENT_REQUIRED') throw new ProblemError({ type: 'consent-required', status: 422, title: '동의가 필요합니다' });
     if (e.code === 'CONSENT_OUTDATED') throw new ProblemError({ type: 'consent-version-outdated', status: 422, title: '동의 문안이 바뀌었습니다. 다시 확인해 주세요' });

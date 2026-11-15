@@ -569,7 +569,11 @@ export class MemorySessionStore implements SessionStore {
       },
       setRefreshHash: async (sessionId, hash) => {
         const x = s.sessions.get(sessionId);
-        if (x) x.refreshHash = hash;
+        if (x) {
+          x.refreshHash = hash;
+          x.prevRefreshHash = null;
+          x.refreshUsed = true;
+        }
       },
       rotateRefresh: async (sessionId, hash, now, idleExpiresAt) => {
         const x = s.sessions.get(sessionId);

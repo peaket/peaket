@@ -1,7 +1,8 @@
 // 모듈 조립 파일: 본인확인 포트에 어댑터를 묶는다. 세션 컨텍스트가 토큰에 실을 계정 값(ACCOUNT_CLAIMS)을 전역으로 내준다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClosure, FRAUD_HOLDS, REVERIFICATIONS } from '../session/index.js';
+import { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClosure, FRAUD_HOLDS, REVERIFICATIONS, STAFF_PHONE_VERIFICATION } from '../session/index.js';
+import { VerificationStaffPhone } from './adapters/verification-staff-phone.js';
 import { DrizzleVerificationStore } from './adapters/db/drizzle-verification-store.js';
 import { MemoryVerificationStore } from './adapters/memory-verification-store.js';
 import { VerificationClaims } from './adapters/verification-claims.js';
@@ -42,11 +43,12 @@ export class VerificationModule {
         // 추가 검증 제출의 본인확인 재통과 확인(gRPC, queue-svc만, BOT-090)
         CheckReverification,
         { provide: ACCOUNT_CLAIMS, useFactory: (store: VerificationStore, closure: AccountClosure, clock: Clock) => new VerificationClaims(store, closure, clock), inject: [VERIFICATION_STORE, ACCOUNT_CLOSURE, CLOCK] },
+        { provide: STAFF_PHONE_VERIFICATION, useFactory: (store: VerificationStore) => new VerificationStaffPhone(store), inject: [VERIFICATION_STORE] },
         { provide: FRAUD_HOLDS, useFactory: (store: VerificationStore) => new VerificationHolds(store), inject: [VERIFICATION_STORE] },
         { provide: ACCOUNT_ERASER, useFactory: (store: VerificationStore) => new VerificationEraser(store), inject: [VERIFICATION_STORE] },
         { provide: REVERIFICATIONS, useExisting: ACCOUNT_CLAIMS },
       ],
-      exports: [ACCOUNT_CLAIMS, REVERIFICATIONS, ACCOUNT_ERASER, FRAUD_HOLDS, SetRestrictedCiHold, CheckReverification],
+      exports: [ACCOUNT_CLAIMS, REVERIFICATIONS, ACCOUNT_ERASER, FRAUD_HOLDS, STAFF_PHONE_VERIFICATION, SetRestrictedCiHold, CheckReverification],
     };
   }
 }

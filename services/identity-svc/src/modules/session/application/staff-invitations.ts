@@ -1,9 +1,9 @@
 // 현장 스태프 초대 조회·수락·거절과 내 배정 목록(BUILD_ORDER GAT-210, identity §6.1, FR-046·POL-031).
 // 초대 토큰 원문은 저장하지 않고 SHA-256만 대조한다. 역할은 초대가 정하고 본문으로 받지 않는다.
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { createHash } from 'node:crypto';
-import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentRecord, type StaffAssignmentSelfView, type StaffAssignmentStore, type StaffRole } from '../domain/staff.js';
+import { STAFF_ASSIGNMENT_STORE, STAFF_PHONE_VERIFICATION, type StaffAssignmentRecord, type StaffAssignmentSelfView, type StaffAssignmentStore, type StaffPhoneVerification, type StaffRole } from '../domain/staff.js';
 
 export const STAFF_CONSENT_VERSION = 'staff-2026-11-13';
 export const STAFF_COLLECTION_NOTICE =
@@ -12,7 +12,7 @@ export const STAFF_PROVISION_NOTICE =
   '배정 파트너에게 위 항목을 제공합니다. 목적은 현장 입장 운영이며 보유 기간은 배정 종료 뒤 1년입니다. 동의를 거부하면 배정할 수 없습니다.';
 
 export class StaffInvitationError extends Error {
-  constructor(readonly code: 'INVITATION_INVALID' | 'EMAIL_MISMATCH' | 'ASSIGNMENT_EXISTS' | 'CONSENT_REQUIRED' | 'CONSENT_OUTDATED' | 'LIMIT') {
+  constructor(readonly code: 'INVITATION_INVALID' | 'EMAIL_MISMATCH' | 'PHONE_UNVERIFIED' | 'PHONE_UNAVAILABLE' | 'ASSIGNMENT_EXISTS' | 'CONSENT_REQUIRED' | 'CONSENT_OUTDATED' | 'LIMIT') {
     super(`스태프 초대 오류: ${code}`);
     this.name = 'StaffInvitationError';
   }
@@ -60,6 +60,8 @@ export class StaffInvitations {
   constructor(
     @Inject(STAFF_ASSIGNMENT_STORE) private readonly store: StaffAssignmentStore,
     @Inject(CLOCK) private readonly clock: Clock,
+    /** 휴대폰 본인확인 포트(없으면 수락을 503으로 닫는다) */
+    @Optional() @Inject(STAFF_PHONE_VERIFICATION) private readonly phone?: StaffPhoneVerification,
   ) {}
 
   async lookup(inviteToken: string): Promise<StaffInvitationView> {
@@ -80,6 +82,16 @@ export class StaffInvitations {
     if (!invitation.inviteEmail) throw new StaffInvitationError('EMAIL_MISMATCH');
     const me = await this.store.accountEmailOf(i.accountId);
     if (!me.verified || !me.email) throw new StaffInvitationError('EMAIL_MISMATCH');
+    // 이메일만 확인된 계정이 현장 배정을 받지 않게 휴대폰 본인확인을 함께 본다(C2-02).
+    if (!this.phone) throw new StaffInvitationError('PHONE_UNAVAILABLE');
+    let phone: 'VERIFIED' | 'UNVERIFIED' | 'UNAVAILABLE';
+    try {
+      phone = await this.phone.statusOf(i.accountId);
+    } catch {
+      throw new StaffInvitationError('PHONE_UNAVAILABLE');
+    }
+    if (phone === 'UNAVAILABLE') throw new StaffInvitationError('PHONE_UNAVAILABLE');
+    if (phone !== 'VERIFIED') throw new StaffInvitationError('PHONE_UNVERIFIED');
     if (i.consentCollection !== true || i.consentProvision !== true) throw new StaffInvitationError('CONSENT_REQUIRED');
     if (i.consentVersion !== STAFF_CONSENT_VERSION) throw new StaffInvitationError('CONSENT_OUTDATED');
     const r = await this.store.acceptInvitation({

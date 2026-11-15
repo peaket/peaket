@@ -68,7 +68,7 @@ test('서명이실패하면회전을적지않아_30초뒤같은토큰도탈취�
   expect(t.store.terminatedEvents()).toEqual([]);
 });
 
-test('메모리저장소도같은토큰의동시갱신을차례로세워하나는회전·하나는재시도이고_재시도는유휴만료를늘리지않는다', async () => {
+test('메모리저장소도같은토큰의동시갱신을차례로세워하나는회전·하나는재시도이고_재시도는다시받지않는다(C2-04·CONS-07)', async () => {
   const t = harness();
   const id = '0190f3a1-7c2e-7a00-8000-000000000cb5';
   const rt = await t.open(id);
@@ -79,10 +79,10 @@ test('메모리저장소도같은토큰의동시갱신을차례로세워하나�
   const idle = t.store.sessions(ACC).find((s) => s.id === id)!.idleExpiresAt;
   expect(idle).toBe(t.clock.now() + 60 * M);
   t.clock.advance(5_000);
-  const again = await t.uc.run({ aud: 'ops', refreshToken: rt });
-  expect(again.result).toBe('OK');
-  expect(t.seen.at(-1)).toBe('ops:retried');
-  expect(t.store.sessions(ACC).find((s) => s.id === id)!.idleExpiresAt).toBe(idle);
+  // 재시도로 폐기한 앞 토큰은 유예 안이어도 두 번 다시 받지 않는다(탈취로 본다)
+  expect(await t.uc.run({ aud: 'ops', refreshToken: rt })).toEqual({ result: 'REUSED' });
+  expect(t.seen.at(-1)).toBe('ops:reused');
+  expect(t.store.terminatedEvents()).toEqual([{ accountId: ACC, sessionId: id, reason: 'REFRESH_REUSE' }]);
 });
 
 test('관리지표는팬과같은갱신지표(aud partner·ops)로보낸다_재사용탐지SEV3경보에함께잡힌다(identity §10.1)', async () => {

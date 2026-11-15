@@ -70,7 +70,7 @@ beforeAll(async () => {
   database = createDatabase({ url: pg.url, applicationName: 'identity-staff-invitations-test', max: 8 });
   clock = fakeClock({ now: NOW });
   store = new DrizzleStaffAssignmentStore(database, clock);
-  invitations = new StaffInvitations(store, clock);
+  invitations = new StaffInvitations(store, clock, { statusOf: async () => 'VERIFIED' });
   await seedAccount(ACCOUNT, 'staff@example.com');
   await seedAccount(OTHER, 'other@example.com');
   await seedInvitation({ id: A1, token: TOKEN, eventId: EVENT, role: 'gate_staff', status: 'INVITED', email: 'staff@example.com' });

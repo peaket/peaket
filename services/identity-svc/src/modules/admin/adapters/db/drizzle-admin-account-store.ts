@@ -864,7 +864,8 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
             .where(eq(adminSession.id, id));
         },
         setRefreshHash: async (id, hash) => {
-          await tx.update(adminSession).set({ refreshHash: hash }).where(eq(adminSession.id, id));
+          // 재시도로 앞 토큰을 폐기한다: 앞 토큰을 prev에 남기지 않고 다시 재시도할 수 없게 표시한다(C2-04·CONS-07).
+          await tx.update(adminSession).set({ refreshHash: hash, prevRefreshHash: null, refreshUsed: true }).where(eq(adminSession.id, id));
         },
         recordRefreshHash: async (r) => {
           await tx.insert(adminRefreshTokenHash).values({ hash: r.hash, adminSessionId: r.sessionId, refreshFamily: r.refreshFamily, issuedAt: new Date(r.issuedAt), expiresAt: new Date(r.expiresAt) });

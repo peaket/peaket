@@ -32,6 +32,15 @@ export interface ScannerSessionAnswer {
   proxy?: boolean;
 }
 
+/**
+ * 초대 수락 전에 보는 휴대폰 본인확인 상태(C2-02). 본인확인 저장소·기관을 쓸 수 없으면 UNAVAILABLE이다.
+ * 외부 본인확인기관이 붙기 전에는 저장된 본인확인 기록만 본다(기록이 없으면 UNVERIFIED).
+ */
+export const STAFF_PHONE_VERIFICATION = Symbol.for('peaket.identity.staff-phone-verification');
+export interface StaffPhoneVerification {
+  statusOf(accountId: string): Promise<'VERIFIED' | 'UNVERIFIED' | 'UNAVAILABLE'>;
+}
+
 /** staff_assignment 한 행(초대·배정). 초대 이메일과 토큰 해시는 수락·거절 때 지운다. */
 export interface StaffAssignmentRecord {
   assignmentId: string;
