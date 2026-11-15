@@ -70,6 +70,8 @@ export interface SettlementStore {
   createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void>;
   /** 상계·보류·배치·정산서 결속을 한 트랜잭션으로 쓴다(M1-F1). 하나라도 실패하면 전부 롤백한다. */
   createPayoutBatchAtomically(input: PayoutBatchAtomicInput): Promise<void>;
+  /** 반려·취소한 배치를 풀어 정산서를 CONFIRMED로 되돌리고 같은 지급일의 새 배치를 가능하게 한다(CONS-V02). */
+  releasePayoutBatch(batchId: string): Promise<boolean>;
   findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined>;
   listPayoutBatches(filter: { pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchRecord[]>;
   savePayoutBatch(record: PayoutBatchRecord): Promise<void>;
@@ -114,9 +116,14 @@ export interface DueEventSettlementSource {
   listDue(through: string, limit: number): Promise<DueEvent[]>;
 }
 
+/** 회차 수수료율(core-svc 공연 설정·계약). 없으면 정산을 만들지 않는다(A1-H10). */
+export interface EventCommissionRateSource {
+  rateBp(eventId: string): Promise<number | undefined>;
+}
+
 export interface SettlementPaymentSource {
-  /** 회차·결제사 결제 원장. 입금 오류 되돌림(FAILED·DEPOSIT_CANCELED)은 뺀다. */
-  listEventPayments(eventId: string, pg: Pg): Promise<PaymentFact[]>;
+  /** 회차·결제사·결제 상점 결제 원장. 입금 오류 되돌림(FAILED·DEPOSIT_CANCELED)은 뺀다. */
+  listEventPayments(eventId: string, pg: Pg, pgStore: PgStore): Promise<PaymentFact[]>;
 }
 
 export interface PayoutSubmitInput {
@@ -152,5 +159,6 @@ export const SETTLEMENT_STORE = Symbol.for('peaket.settlement.store');
 export const SETTLEMENT_PAYMENT_SOURCE = Symbol.for('peaket.settlement.payment-source');
 export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-source');
 export const SETTLEMENT_EVENT_SOURCE = Symbol.for('peaket.settlement.event-source');
+export const SETTLEMENT_COMMISSION_SOURCE = Symbol.for('peaket.settlement.commission-source');
 export const PAYOUT_GATEWAY = Symbol.for('peaket.settlement.payout-gateway');
 export const REAUTH_VERIFIER = Symbol.for('peaket.settlement.reauth-verifier');

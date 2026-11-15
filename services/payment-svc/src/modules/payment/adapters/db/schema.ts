@@ -28,6 +28,8 @@ export const payment = pgTable(
     // 같은 주문의 결제 시도 순번(1부터). 결제 사건의 attemptNo
     attemptNo: integer('attempt_no').notNull(),
     pg: text('pg').notNull(),
+    /** 결제 상점(STANDARD·ESCROW). 회차 정산서가 상점별로 결제를 나눠 세게 한다(A1-H2, 마이그레이션 0018) */
+    pgStore: text('pg_store').notNull().default('STANDARD'),
     // 토스 paymentKey 또는 포트원 paymentId
     pgPaymentRef: text('pg_payment_ref').notNull(),
     // 포트원 paymentToken. 결과가 확정되면 지운다
@@ -85,6 +87,7 @@ export const payment = pgTable(
     check('payment_next_query_check', sql`${t.status} NOT IN ('UNKNOWN', 'AWAITING_DEPOSIT') OR ${t.nextQueryAt} IS NOT NULL`),
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
     check('payment_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+    check('payment_pg_store_check', sql`${t.pgStore} IN ('STANDARD', 'ESCROW')`),
     check('payment_amount_check', sql`${t.amount} > 0`),
     check('payment_cancelled_amount_check', sql`${t.cancelledAmount} >= 0 and ${t.cancelledAmount} <= ${t.amount}`),
     check('payment_attempt_no_check', sql`${t.attemptNo} >= 1`),

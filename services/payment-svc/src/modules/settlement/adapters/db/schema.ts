@@ -171,6 +171,8 @@ export const sellerKyc = pgTable(
     status: text('status').notNull(),
     businessVerified: boolean('business_verified').notNull().default(false),
     representativeVerified: boolean('representative_verified').notNull().default(false),
+    legalName: text('legal_name'),
+    representative: text('representative'),
     verifiedAt: at('verified_at'),
     source: text('source').notNull().default('MANUAL'),
     updatedAt: at('updated_at').notNull(),

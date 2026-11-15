@@ -56,6 +56,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
           attemptId: command.attemptId,
           attemptNo: command.attemptNo,
           pg: command.pg,
+          pgStore: command.pgStore ?? 'STANDARD',
           ...refColumnsOf(command.paymentRef),
           amount: command.amount,
           status: 'ACCEPTED',

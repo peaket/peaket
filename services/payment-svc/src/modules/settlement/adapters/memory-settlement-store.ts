@@ -111,6 +111,14 @@ export class MemorySettlementStore implements SettlementStore {
     this.batches.set(record.batchId, record);
     for (const s of bound) this.statements.set(s.statementId, { ...this.statements.get(s.statementId)!, status: 'SCHEDULED', payoutBatchId: record.batchId, updatedAt: record.updatedAt });
   }
+  async releasePayoutBatch(batchId: string): Promise<boolean> {
+    const batch = this.batches.get(batchId);
+    if (!batch || (batch.status !== 'PENDING_APPROVAL' && batch.status !== 'APPROVED')) return false;
+    if ([...this.payouts.values()].some((p) => p.batchId === batchId)) return false;
+    for (const s of this.statements.values()) if (s.payoutBatchId === batchId) this.statements.set(s.statementId, { ...s, payoutBatchId: null, status: 'CONFIRMED' });
+    this.batches.delete(batchId);
+    return true;
+  }
   async findPayoutBatch(batchId: string) {
     return this.batches.get(batchId);
   }

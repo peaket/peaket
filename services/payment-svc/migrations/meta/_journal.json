@@ -127,6 +127,20 @@
       "when": 1794706531718,
       "tag": "0017_settlement_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794709196197,
+      "tag": "0018_payment_pg_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794709360351,
+      "tag": "0019_settlement_kyc_holder_names",
+      "breakpoints": true
     }
   ]
 }

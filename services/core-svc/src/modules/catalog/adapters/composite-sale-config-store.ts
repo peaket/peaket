@@ -21,4 +21,8 @@ export class CompositeSaleConfigStore implements SaleConfigStore {
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]> {
     return this.db.listEndedBefore(through, limit);
   }
+
+  commissionRateBp(eventId: string): Promise<number | undefined> {
+    return this.db.commissionRateBp(eventId);
+  }
 }

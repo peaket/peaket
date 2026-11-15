@@ -116,6 +116,13 @@ export class InternalSettlementController {
     return this.settlements.approveBatch(batchId, approvalId as string);
   }
 
+  @Post('payout-batches/:batchId/release')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.object({ released: z.literal(true) }) } })
+  async release(@Param('batchId') batchId: string) {
+    return this.settlements.releasePayoutBatch(batchId);
+  }
+
   @Post('payout-batches/:batchId/execution')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: BatchView } })

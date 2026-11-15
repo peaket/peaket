@@ -44,6 +44,16 @@ const DueEventsResponse = z
 export class InternalSaleConfigController {
   constructor(@Inject(SALE_CONFIG_READER) private readonly configs: SaleConfigReader) {}
 
+  @Get(':eventId/commission-rate')
+  @ContractRouteSchema({ responses: { 200: z.object({ commissionRateBp: z.number() }).strict() } })
+  @Roles(['public'])
+  async commissionRate(@Param('eventId') eventId: string, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ commissionRateBp: number }> {
+    void reply.header('cache-control', 'no-store');
+    const rate = await this.configs.commissionRateBp(eventId);
+    if (rate === undefined) throw notFound();
+    return { commissionRateBp: rate };
+  }
+
   @Get('settlement-due')
   @ContractRouteSchema({ responses: { 200: DueEventsResponse } })
   @Roles(['public'])

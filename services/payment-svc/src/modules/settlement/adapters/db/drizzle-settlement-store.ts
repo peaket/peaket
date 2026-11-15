@@ -339,6 +339,19 @@ export class DrizzleSettlementStore implements SettlementStore {
     }
   }
 
+  async releasePayoutBatch(batchId: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.select({ status: payoutBatch.status }).from(payoutBatch).where(eq(payoutBatch.id, batchId)).limit(1);
+      const status = rows[0]?.status;
+      if (status !== 'PENDING_APPROVAL' && status !== 'APPROVED') return false;
+      const payouts = await tx.select({ id: payout.id }).from(payout).where(eq(payout.batchId, batchId)).limit(1);
+      if (payouts.length > 0) return false;
+      await tx.update(settlementStatement).set({ payoutBatchId: null, status: 'CONFIRMED' }).where(and(eq(settlementStatement.payoutBatchId, batchId), eq(settlementStatement.status, 'SCHEDULED')));
+      await tx.delete(payoutBatch).where(eq(payoutBatch.id, batchId));
+      return true;
+    });
+  }
+
   async findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined> {
     const rows = await this.db.db.select().from(payoutBatch).where(eq(payoutBatch.id, batchId)).limit(1);
     return rows[0] ? batchRecord(rows[0]) : undefined;
@@ -468,6 +481,8 @@ export class DrizzleSettlementStore implements SettlementStore {
           status: r.status as KycRecord['status'],
           businessVerified: r.businessVerified,
           representativeVerified: r.representativeVerified,
+          legalName: r.legalName,
+          representative: r.representative,
           verifiedAt: r.verifiedAt,
           source: r.source,
           updatedAt: r.updatedAt,
@@ -483,6 +498,8 @@ export class DrizzleSettlementStore implements SettlementStore {
         status: record.status,
         businessVerified: record.businessVerified,
         representativeVerified: record.representativeVerified,
+        legalName: record.legalName ?? null,
+        representative: record.representative ?? null,
         verifiedAt: record.verifiedAt,
         source: record.source,
         updatedAt: record.updatedAt,
@@ -493,6 +510,8 @@ export class DrizzleSettlementStore implements SettlementStore {
           status: record.status,
           businessVerified: record.businessVerified,
           representativeVerified: record.representativeVerified,
+          legalName: record.legalName ?? null,
+          representative: record.representative ?? null,
           verifiedAt: record.verifiedAt,
           source: record.source,
           updatedAt: record.updatedAt,

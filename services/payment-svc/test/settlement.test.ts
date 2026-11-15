@@ -61,6 +61,22 @@ describe('정산 금액 계산', () => {
     expect(sources).toHaveLength(2);
   });
 
+  test('A1-H3 CANCELED 전액 취소는 매출 0·환급 원금 전액·지급 0이다', () => {
+    const { record } = calculateEventStatement({
+      promoterId: A,
+      eventId: EVENT,
+      pg: 'TOSS',
+      pgStore: 'STANDARD',
+      commissionRateBp: 1000,
+      payments: [fact({ amount: 10_000, cancelledAmount: 0, status: 'CANCELED' })],
+      kyc: kyc(A, 'VERIFIED'),
+      account: undefined,
+      now: NOW,
+      statementId: randomUUID(),
+    });
+    expect(record).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CARRIED_OVER' });
+  });
+
   test('J-T18 지급액이 0이면 CARRIED_OVER이고, KYC 전이면 HELD/KYC다', () => {
     const zero = calculateEventStatement({
       promoterId: A,
@@ -113,7 +129,7 @@ describe('정산 HTTP·유스케이스', () => {
   let svc: Awaited<ReturnType<typeof createService>>;
   let settlements: Settlements;
 
-  @Module({ imports: [SettlementModule.register({ store, payments, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier() })] })
+  @Module({ imports: [SettlementModule.register({ store, payments, eventCommission: { rateBp: async () => 1000 }, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier() })] })
   class TestModule {}
 
   beforeEach(async () => {
@@ -230,6 +246,18 @@ describe('정산 HTTP·유스케이스', () => {
     expect(store.sources.size).toBe(1);
   });
 
+  test('A1-H2 같은 회차라도 STANDARD와 ESCROW 결제는 각 정산서에 한 번씩만 잡힌다', async () => {
+    const standard = fact({ amount: 10_000_000 });
+    const escrow = fact({ amount: 7_000_000 });
+    payments.set(EVENT, 'TOSS', [standard], 'STANDARD');
+    payments.set(EVENT, 'TOSS', [escrow], 'ESCROW');
+    const a = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    const b = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'ESCROW' });
+    expect(a.grossAmount).toBe(10_000_000);
+    expect(b.grossAmount).toBe(7_000_000);
+    expect(store.statements.size).toBe(2);
+  });
+
   test('CONS-02 승인 뒤 새로 확정된 정산서는 실행에 끼지 않고, 묶인 정산서만 지급한다', async () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
@@ -307,6 +335,29 @@ describe('정산 HTTP·유스케이스', () => {
     expect((await store.findStatementById(disputed.statementId))?.status).toBe('SCHEDULED');
   });
 
+  test('A1-H7 예금주를 KYC 상호·대표자와 대조하고 미확인 계좌는 지급을 막는다', async () => {
+    await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
+    const saved = await settlements.putPayoutAccount(A, 'sid', { bankCode: '004', accountNumber: '98765432101234', holderName: '㈜에이' }, '"0"', 'test-reauth');
+    expect(saved.holderVerified).toBe(true);
+    const mismatch = await settlements.putPayoutAccount(A, 'sid', { bankCode: '004', accountNumber: '98765432101234', holderName: '다른회사' }, '"1"', 'test-reauth');
+    expect(mismatch.holderVerified).toBe(false);
+
+    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
+    await store.savePayoutAccount({ ...(await store.findPayoutAccount(A))!, holdUntil: new Date(NOW.getTime() - 1), holderVerified: false });
+    await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-account-mismatch') });
+  });
+
+  test('A1-H10 회차 수수료율이 없으면 임의 10% 대신 503으로 닫는다', async () => {
+    const store2 = new MemorySettlementStore();
+    store2.kycs.set(A, kyc(A, 'VERIFIED'));
+    const payments2 = new MemorySettlementPaymentSource();
+    payments2.set(EVENT, 'TOSS', [fact({ amount: 10_000_000 })]);
+    const svc2 = new Settlements({ store: store2, payments: payments2, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
+    await expect(svc2.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' })).rejects.toMatchObject({ status: 503, type: expect.stringContaining('event-commission-rate-unavailable') });
+    expect(store2.statements.size).toBe(0);
+  });
+
   test('A2-06 내부 회차 정산 경로가 실제 정산서를 만든다', async () => {
     const res = await svc.http.inject({
       method: 'POST',
@@ -334,6 +385,7 @@ describe('정산 HTTP·유스케이스', () => {
           return [{ promoterId: A, eventId: EVENT, endsAt: '2026-11-08T00:00:00.000Z' }];
         },
       },
+      eventCommission: { rateBp: async () => 1000 },
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: NOW.getTime() }),
@@ -346,6 +398,17 @@ describe('정산 HTTP·유스케이스', () => {
     await worker.tick();
     expect(through).toBe('2026-11-09');
     expect(store2.statements.size).toBe(1);
+  });
+
+  test('CONS-V02 배치를 풀면 정산서가 CONFIRMED로 돌아가 같은 지급일 새 배치를 만들 수 있다', async () => {
+    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
+    await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
+    const input = { pg: 'PORTONE' as const, pgStore: 'STANDARD' as const, payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() };
+    const batch = await settlements.createPayoutBatch(input);
+    expect(await settlements.releasePayoutBatch(batch.batchId)).toEqual({ released: true });
+    expect((await store.findStatementById(s.statementId))?.status).toBe('CONFIRMED');
+    expect((await store.findStatementById(s.statementId))?.payoutBatchId).toBeNull();
+    expect((await settlements.createPayoutBatch(input)).batchId).not.toBe(batch.batchId);
   });
 
   test('KYC가 없으면 지급 묶음은 409 payout-kyc-required다', async () => {
@@ -364,7 +427,7 @@ describe('상품 정산·미수금 상계', () => {
       return this.rows.filter((r) => r.basisDate >= from && r.basisDate <= to);
     },
   };
-  const svc = new Settlements({ store, payments, products, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
+  const svc = new Settlements({ store, payments, products, eventCommission: { rateBp: async () => 1000 }, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
 
   const productItem = (o: Partial<import('../src/modules/settlement/index.js').ProductSettlementItem> = {}) => ({
     itemId: randomUUID(),

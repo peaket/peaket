@@ -65,6 +65,7 @@ describe('parseConfirmPaymentInput: 받는 값', () => {
       attemptNo: 1,
       eventId: EVENT_ID,
       pg: 'TOSS',
+      pgStore: 'STANDARD',
       paymentRef: { kind: 'toss', paymentKey: SECRET_PAYMENT_KEY },
       amount: 55_000,
       authenticatedAtMs: AUTHENTICATED_AT,

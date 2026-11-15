@@ -18,6 +18,8 @@ export interface SaleConfigStore {
   get(eventId: string): Promise<EventSaleConfig | undefined>;
   /** endsAt이 through 이하인 회차(회차 정산 스케줄러 원천). */
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
+  /** 공연 설정·계약의 회차 수수료율(bp). 없으면 undefined(A1-H10). */
+  commissionRateBp(eventId: string): Promise<number | undefined>;
 }
 
 export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
@@ -27,6 +29,8 @@ export interface SaleConfigReader {
   get(eventId: string): Promise<EventSaleConfig | undefined>;
   /** endsAt이 through 이하인 회차(회차 정산 스케줄러 원천). */
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
+  /** 공연 설정·계약의 회차 수수료율(bp). 없으면 undefined(A1-H10). */
+  commissionRateBp(eventId: string): Promise<number | undefined>;
 }
 
 export const SALE_CONFIG_READER = Symbol('SALE_CONFIG_READER');

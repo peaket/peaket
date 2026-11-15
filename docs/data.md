@@ -1041,6 +1041,7 @@ erDiagram
         uuid attempt_id
         int attempt_no "같은 주문의 결제 시도 순번(1부터). 승인 명령이 싣고 온 값이고 결제 사건 attemptNo가 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
         text pg "TOSS|PORTONE|SIMULATOR(결제 시도에서 고정)"
+        text pg_store "STANDARD|ESCROW. 회차 정산서가 상점별로 결제를 나눠 센다(마이그레이션 0018, A1-H2)"
         text pg_payment_ref "토스 paymentKey 또는 포트원 paymentId"
         text pg_confirm_token "포트원 paymentToken, 결과 확정 시 삭제"
         text pg_tx_id "포트원 결제 시도 ID(txId). 승인 본문의 검증값이자 조회 답 대조값, 토스·시뮬레이터는 비움(추천 적용 2026-11-09, BUILD_ORDER HOT-140, 코드 리뷰)"
@@ -1221,6 +1222,8 @@ erDiagram
         text status "PENDING|VERIFIED|REJECTED"
         bool business_verified "사업자등록번호 확인"
         bool representative_verified "대표자 확인"
+        text legal_name "사업자 상호. 정산 계좌 예금주 대조에만 쓴다(마이그레이션 0019, A1-H7)"
+        text representative "대표자 이름. 정산 계좌 예금주 대조에만 쓴다(마이그레이션 0019, A1-H7)"
         timestamptz verified_at
         text source "MANUAL|TOSS|PORTONE"
         timestamptz updated_at

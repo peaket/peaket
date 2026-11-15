@@ -145,6 +145,8 @@ export class PayoutApprovals {
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 반려할 수 있습니다');
       if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
       const now = new Date(this.d.clock.now());
+      // 반려하면 payment-svc의 배치·정산서 결속을 풀어 같은 지급일의 새 배치를 만들 수 있게 한다(CONS-V02).
+      await this.d.payments.releaseBatch(r.batchId);
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
       await this.d.store.save(next);
       await this.d.audit?.append({

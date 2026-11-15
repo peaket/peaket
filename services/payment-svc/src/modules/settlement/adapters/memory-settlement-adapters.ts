@@ -1,15 +1,15 @@
 // 시험·개발용 정산 어댑터. 실제 결제 원장·KYC·지급대행은 Drizzle/외부 어댑터가 맡는다.
 import type { PayoutGateway, PayoutSubmitResult, ReauthVerifier, SettlementPaymentSource, VerifiedReauth } from '../domain/ports.js';
-import type { PaymentFact, Pg } from '../domain/settlement.js';
+import type { PaymentFact, Pg, PgStore } from '../domain/settlement.js';
 import { SettlementProblem } from '../domain/settlement.js';
 
 export class MemorySettlementPaymentSource implements SettlementPaymentSource {
   readonly rows = new Map<string, PaymentFact[]>();
-  set(eventId: string, pg: Pg, rows: PaymentFact[]): void {
-    this.rows.set(`${eventId}:${pg}`, rows);
+  set(eventId: string, pg: Pg, rows: PaymentFact[], pgStore: PgStore = 'STANDARD'): void {
+    this.rows.set(`${eventId}:${pg}:${pgStore}`, rows);
   }
-  async listEventPayments(eventId: string, pg: Pg): Promise<PaymentFact[]> {
-    return this.rows.get(`${eventId}:${pg}`) ?? [];
+  async listEventPayments(eventId: string, pg: Pg, pgStore: PgStore): Promise<PaymentFact[]> {
+    return this.rows.get(`${eventId}:${pg}:${pgStore}`) ?? [];
   }
 }
 

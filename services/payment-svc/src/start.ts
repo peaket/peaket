@@ -92,6 +92,7 @@ import {
   DrizzleSettlementStore,
   GrpcAdminAuthz,
   HttpDueEventSettlementSource,
+  HttpEventCommissionRateSource,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
   SETTLEMENT_DUE_LEASE_NAME,
@@ -224,7 +225,7 @@ let circuitsRef: PgCircuits | undefined;
         store: new DrizzleSettlementStore(batchDatabase),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
-        ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
+        ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({

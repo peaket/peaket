@@ -65,6 +65,7 @@ describe('A2-01 상품 정산 원천 HTTP', () => {
       store,
       payments: { listEventPayments: async () => [] },
       products: new HttpProductSettlementSource(baseUrl, 'internal-test-token'),
+      eventCommission: { rateBp: async () => 1000 },
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: NOW.getTime() }),

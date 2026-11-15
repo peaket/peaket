@@ -45,6 +45,10 @@ class FakePayments implements PayoutPaymentClient {
     this.executedTotals.push(batch.totalAmount);
     return { ...batch, status: 'SUBMITTED' };
   }
+  async releaseBatch(batchId: string) {
+    this.calls.push('release');
+    this.batches = this.batches.filter((b) => b.batchId !== batchId);
+  }
   async recordPortoneExecution(batchId: string) {
     this.calls.push('portone');
     const b = this.batches.find((x) => x.batchId === batchId)!;
@@ -139,7 +143,15 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     const rejected = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/rejections`, headers: headers('commander'), payload: JSON.stringify({ reason: '금액 확인 필요' }) });
     expect(rejected.statusCode).toBe(200);
     expect(JSON.parse(rejected.payload)).toMatchObject({ status: 'REJECTED', closeReason: '금액 확인 필요' });
-    expect(payments.calls).toEqual(['create']);
+    expect(payments.calls).toEqual(['create', 'release']);
+  });
+
+  test('CONS-V02 반려하면 배치를 풀어 같은 지급일로 새 배치를 만들 수 있다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const rejected = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/rejections`, headers: headers('commander'), payload: JSON.stringify({ reason: '금액 확인 필요' }) });
+    expect(rejected.statusCode).toBe(200);
+    expect(payments.calls).toContain('release');
+    expect((await create()).statusCode).toBe(202);
   });
 
   test('J-T3 애플리케이션 승인·반려는 commander와 사유를 스스로 확인한다', async () => {

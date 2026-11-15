@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePayment } from '../scripts/migrate.mjs';
 import {
+  calculateEventStatement,
   DrizzleSettlementPaymentSource,
   DrizzleSettlementStore,
   ManualPortonePayoutGateway,
@@ -49,11 +50,11 @@ const productStatementRow = async (promoterId: string, status = 'NOTIFIED') => {
   return id;
 };
 
-const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE' }) => {
+const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE'; pgStore?: 'STANDARD' | 'ESCROW'; eventId?: string }) => {
   await db.pool.query(
-    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at)
-     values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $12)`,
-    [o.id, randomUUID(), EVENT, randomUUID(), o.pg ?? 'TOSS', `ref-${o.id}`, o.amount, o.cancelled, o.status, o.failure ?? null, `idem-${o.id}`, NOW],
+    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_store, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at)
+     values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+    [o.id, randomUUID(), o.eventId ?? EVENT, randomUUID(), o.pg ?? 'TOSS', o.pgStore ?? 'STANDARD', `ref-${o.id}`, o.amount, o.cancelled, o.status, o.failure ?? null, `idem-${o.id}`, NOW],
   );
 };
 
@@ -68,11 +69,12 @@ beforeAll(async () => {
     store,
     payments: new DrizzleSettlementPaymentSource(db),
     products: { listProductItems: async (from: string, to: string) => productRows.filter((r) => r.basisDate >= from && r.basisDate <= to) },
+    eventCommission: { rateBp: async () => 1000 },
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock,
   });
-  await settlements.recordKyc(A, 'VERIFIED');
+  await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
   await paymentRow({ id: randomUUID(), amount: 30_000_000, cancelled: 0, status: 'APPROVED' });
   await paymentRow({ id: randomUUID(), amount: 10_000_000, cancelled: 2_000_000, status: 'PARTIAL_CANCELED' });
   await paymentRow({ id: randomUUID(), amount: 5_000_000, cancelled: 5_000_000, status: 'CANCELED' });
@@ -95,16 +97,16 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
   test('실제 payment 원장으로 판매 대금·환급·수수료·부가세·지급액을 계산한다', async () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
     expect(s).toMatchObject({
-      grossAmount: 45_000_000,
+      grossAmount: 40_000_000,
       refundAmount: 7_000_000,
-      commissionAmount: 3_800_000,
-      commissionVat: 380_000,
-      payoutAmount: 33_820_000,
+      commissionAmount: 3_300_000,
+      commissionVat: 330_000,
+      payoutAmount: 29_370_000,
       status: 'NOTIFIED',
     });
     const sources = await db.pool.query('select kind, count(*)::int as n from statement_source where statement_id = $1 group by kind order by kind', [s.statementId]);
     expect(sources.rows).toEqual([
-      { kind: 'GROSS', n: 3 },
+      { kind: 'GROSS', n: 2 },
       { kind: 'REFUND', n: 2 },
     ]);
     const again = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
@@ -153,7 +155,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(saved).toMatchObject({ bankCode: '004', payoutAccountLast4: '1234', version: 1 });
     expect(saved.holdUntil).toBe('2026-11-18T00:00:00.000Z');
     const row = await db.pool.query('select bank_code, account_last4, holder_verified from payout_account where promoter_id = $1', [A]);
-    expect(row.rows[0]).toEqual({ bank_code: '004', account_last4: '1234', holder_verified: false });
+    expect(row.rows[0]).toEqual({ bank_code: '004', account_last4: '1234', holder_verified: true });
     const all = await db.pool.query('select * from payout_account where promoter_id = $1', [A]);
     expect(JSON.stringify(all.rows[0])).not.toContain('98765432101234');
     await expect(settlements.putPayoutAccount(A, 'sid', body, '"0"', 'test-reauth')).rejects.toMatchObject({ status: 412 });
@@ -300,6 +302,73 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(due.rows[0].status).toBe('CONFIRMED');
     const disputed = await db.pool.query('select status from settlement_statement where id = $1', [disputedId]);
     expect(disputed.rows[0].status).toBe('DISPUTED');
+  });
+
+  test('A1-H2 STANDARD와 ESCROW 결제는 각 상점 정산서에 한 번씩만 잡힌다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await paymentRow({ id: randomUUID(), amount: 10_000_000, cancelled: 0, status: 'APPROVED', eventId, pgStore: 'STANDARD' });
+    await paymentRow({ id: randomUUID(), amount: 7_000_000, cancelled: 0, status: 'APPROVED', eventId, pgStore: 'ESCROW' });
+    const standard = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    const escrow = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'ESCROW' });
+    expect(standard.grossAmount).toBe(10_000_000);
+    expect(escrow.grossAmount).toBe(7_000_000);
+  });
+
+  test('A1-H3 CANCELED 전액 취소 10,000원은 지급 0원이다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await paymentRow({ id: randomUUID(), amount: 10_000, cancelled: 0, status: 'CANCELED', eventId });
+    const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    expect(s).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CARRIED_OVER' });
+  });
+
+  test('A1-H8 대사가 끝나지 않은 결제는 정산서에서 빠지고 이유가 excludedPayments에 남는다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const paymentId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await paymentRow({ id: paymentId, amount: 10_000, cancelled: 0, status: 'APPROVED', eventId });
+    const runId = randomUUID();
+    await db.pool.query(
+      `insert into reconciliation_run (id, pg, recon_date, status, stage, owner, started_at)
+       values ($1, 'TOSS', '2026-11-14', 'RUNNING', 'LISTING', 'test', $2)`,
+      [runId, NOW],
+    );
+    await db.pool.query(
+      `insert into reconciliation_diff (id, run_id, pg, order_ref, payment_ref, kind, state, created_at)
+       values ($1, $2, 'TOSS', 'order', $3, 'LEDGER_APPROVED_NO_PG_RECORD', 'OPEN', $4)`,
+      [randomUUID(), runId, `ref-${paymentId}`, NOW],
+    );
+    const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    expect(s.grossAmount).toBe(0);
+    expect(s.excludedPayments).toEqual([`${paymentId}:RECONCILIATION_OPEN`]);
+  });
+
+  test('CONS-V01 동시에 같은 회차 정산서를 넣으면 하나만 남고 나머지는 false다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const recordOf = (statementId: string) =>
+      calculateEventStatement({
+        promoterId,
+        eventId,
+        pg: 'TOSS',
+        pgStore: 'STANDARD',
+        commissionRateBp: 1000,
+        payments: [],
+        kyc: undefined,
+        account: undefined,
+        now: NOW,
+        statementId,
+      }).record;
+    const first = recordOf(randomUUID());
+    const second = recordOf(randomUUID());
+    const results = await Promise.all([store.insertStatement(first, []), store.insertStatement(second, [])]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    const count = await db.pool.query("select count(*)::int as n from settlement_statement where promoter_id = $1 and event_id = $2 and status <> 'SUPERSEDED'", [promoterId, eventId]);
+    expect(count.rows[0].n).toBe(1);
   });
 
   test('미수금은 같은 결제사의 지급 묶음에서 상계되고 이동 기록이 남는다', async () => {
