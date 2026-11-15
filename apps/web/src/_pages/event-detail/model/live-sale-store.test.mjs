@@ -144,3 +144,45 @@ test('SCR-002 늦게 온 앞선 답은 버린다', async () => {
   await tick();
   assert.deepEqual(s.get(), { status: 'known', saleStatus: 'ON_SALE', soldOutTiers: ['tier-r'] });
 });
+
+test('SCR-002 다시 받기 30초는 보낸 시각부터: 보내고 20,000ms에 답이 와도 보낸 지 29,999ms면 받지 않고 30,000ms면 받는다', async () => {
+  // 계획 '시험 뒤 정한 것' S2, ADR-0272 결정 1 '읽는 때'(보낸 시각부터, 경계 30,000ms는 보낸다)
+  const time = fakeTime();
+  const f = deferredFetch();
+  const s = createLiveSaleStore({ fetchFile: f.fetchFile, now: time.now, setTimer: time.setTimer });
+  s.start();
+  await time.advance(20_000);
+  f.calls[0].resolve(ok('ON_SALE'));
+  await tick();
+  await time.advance(9_999);
+  s.onVisible();
+  await tick();
+  assert.equal(f.calls.length, 1, '보낸 지 29,999ms(답을 받은 지 9,999ms)는 받지 않는다');
+  await time.advance(1);
+  s.onVisible();
+  await tick();
+  assert.equal(f.calls.length, 2, '보낸 지 30,000ms는 받는다(답을 받은 시각부터 세면 여기서 보내지 않는다)');
+});
+
+test('SCR-002 답이 없는 채 보낸 지 30,000ms면 새로 보내고 앞선 답은 늦게 와도 버린다', async () => {
+  const time = fakeTime();
+  const f = deferredFetch();
+  const s = createLiveSaleStore({ fetchFile: f.fetchFile, now: time.now, setTimer: time.setTimer });
+  s.start();
+  await time.advance(29_999);
+  s.onVisible();
+  await tick();
+  assert.equal(f.calls.length, 1, '답이 없어도 보낸 지 29,999ms는 보내지 않는다');
+  await time.advance(1);
+  s.onVisible();
+  await tick();
+  assert.equal(f.calls.length, 2, '앞선 받기가 끝나지 않았어도 30,000ms면 새로 보낸다');
+  s.onVisible();
+  await tick();
+  assert.equal(f.calls.length, 2, '방금 보냈으면 다시 보내지 않는다(30초에 많아야 한 번)');
+  f.calls[1].resolve(ok('PAUSED', ['tier-s']));
+  await tick();
+  f.calls[0].resolve(ok('SOLD_OUT', []));
+  await tick();
+  assert.deepEqual(s.get(), { status: 'known', saleStatus: 'PAUSED', soldOutTiers: ['tier-s'] }, '늦게 온 앞선 답은 버린다');
+});

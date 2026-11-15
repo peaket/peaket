@@ -117,6 +117,19 @@ test('[FE-T18] 자격 없음 버튼: 로비가 있는 공연의 오픈 전은 \'
   assert.equal(cta({ eligibility: { reason: '이 회차의 선예매 대상이 아닙니다' } }).desc, '이 회차의 선예매 대상이 아닙니다');
 });
 
+test("[FE-T18] pending에서도 자격 없음은 '로비 입장' 비활성 + 이유 글 + 오픈 알림 토글(closed·notYet·lobby와 같은 모양)", () => {
+  // 계획 '시험 뒤 정한 것' S3, ADR-0272 결정 3 '자격 없음' 끝
+  const m = cta({ phase: 'pending', live: LOADING, eligibility: { reason: REASON } });
+  assert.deepEqual([m.primary, m.desc, Boolean(m.alert)], [{ type: 'disabled', label: '로비 입장' }, REASON, true]);
+  for (const phase of ['closed', 'notYet', 'lobby']) {
+    const o = cta({ phase, live: LOADING, eligibility: { reason: REASON } });
+    assert.deepEqual([o.primary, o.desc], [m.primary, m.desc], `${phase}와 같은 모양(깜빡이지 않는다)`);
+  }
+  // 자격을 받는 동안·모름의 pending은 지금처럼 뼈대
+  assert.deepEqual(cta({ phase: 'pending', live: LOADING, eligibility: 'loading' }), LOAD, '받는 중');
+  assert.deepEqual(cta({ phase: 'pending', live: LOADING, eligibility: null }), LOAD, '모름');
+});
+
 test('[FE-T18] 기존 상태(로비 닫힘·카운트다운·로비·선착순·오픈 뒤·판매 종료·취소·로그인·가입·본인확인·예매 제한)의 모양은 옮기기 전과 같다', () => {
   const pre = { live: LOADING };
   assert.deepEqual(cta({ phase: 'closed', ...pre }), { desc: '로비는 19:50에 열립니다', alert: {}, primary: { type: 'disabled', label: '로비 입장' }, minW: 200 });

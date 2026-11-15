@@ -135,6 +135,14 @@ test('SCR-002 자격 모름은 덮지 않는다: idle·none·조각 차례나 �
   for (const phase of ['ended', 'cancelled', undefined]) assert.equal(gate({ phase }), null, `판정 시각 없음 ${phase}`);
 });
 
+test('[FE-T18] SCR-002 pending(이 기기의 로비 입장 시각을 모름)도 자격 없음이면 이유 글이고, 자격 받는 중·모름은 덮지 않는다(gate null)', () => {
+  // 계획 '시험 뒤 정한 것' S3, ADR-0272 결정 3 '자격 없음' 끝: 판정 시각은 오픈 시각이라 열리는 시각과 상관없다
+  assert.deepEqual(gate({ phase: 'pending' }), { reason: REASON });
+  assert.equal(gate({ phase: 'pending', fan: { status: 'loading' } }), null, '받는 중');
+  assert.equal(gate({ phase: 'pending', fan: { status: 'none' } }), null, '모름');
+  assert.equal(gate({ phase: 'pending', fan: { status: 'idle' } }), null, '받기 전');
+});
+
 test('SCR-002 eligible true인 조각과 GENERAL 조각은 덮지 않는다', () => {
   assert.equal(gate({ fan: fan(true) }), null, '선예매 대상');
   // GENERAL 조각은 eligible false여도 덮지 않는다(선예매만 명단으로 막는다)
@@ -183,8 +191,8 @@ test('SCR-002 선예매 대상 안내: 명단 이름(\' · \'로 이음)·가장
   // 명단이 없으면 이름은 '판매 자격'
   const noList = presaleNotice({ fan: fan([true, true, true, true], phases, []), sellerName: '(주)피켓공연', nowMs: OPEN - h });
   assert.equal(noList.lead, '판매 자격 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다');
-  assert.ok(noList.notice.startsWith('판매자((주)피켓공연)가 보낸 판매 자격 명단에 회원님이 있습니다'), noList.notice);
-  assert.doesNotMatch(noList.notice, /undefined|NaN|Invalid/, '파기 날짜를 모를 때 빈 값이 글에 새지 않는다');
+  // 명단이 없으면 파기 날짜를 모르므로 괄호째 뺀다(d5 §5.2 글 그대로, ADR-0272 결정 3, 계획 '시험 뒤 정한 것' S1)
+  assert.equal(noList.notice, '판매자((주)피켓공연)가 보낸 판매 자격 명단에 회원님이 있습니다. 이 명단은 선예매 자격 확인에만 쓰고, 이 공연의 판매 기간이 끝나고 1일 뒤 지웁니다');
   // 안내가 없는 때: 대상 조각이 모두 끝남 · eligible false만 · GENERAL만 대상 · 모름·받는 중·받기 전
   assert.equal(presaleNotice({ fan: f, sellerName: '(주)피켓공연', nowMs: GEN }), null, '대상 조각이 모두 끝남');
   assert.equal(presaleNotice({ fan: fan(false), sellerName: '(주)피켓공연', nowMs: OPEN - h }), null, 'eligible false만');
