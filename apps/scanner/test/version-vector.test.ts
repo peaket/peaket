@@ -52,6 +52,11 @@ test('treats exactly maxOfflineMs as fresh and one ms over as stale', () => {
   assert.equal(isSnapshotStale(vector({ issuedAt: new Date(NOW - 25 * HOUR).toISOString() }), NOW, NOW), true);
 });
 
+test('flagSeq만 달라도 diverged이고 needsResync true다', () => {
+  assert.equal(compareVersionVectors(vector({ flagSeq: 4 }), vector({ ticketSeq: 5 })), 'diverged');
+  assert.equal(needsResync(vector({ flagSeq: 4 }), vector({ ticketSeq: 5 }), NOW, NOW), true);
+});
+
 test('requires full resync only when stale, behind, or diverged', () => {
   assert.equal(needsResync(vector(), vector({ seq: 11 }), NOW, NOW), false);
   assert.equal(needsResync(vector({ keySeq: 6 }), vector(), NOW, NOW), true);
