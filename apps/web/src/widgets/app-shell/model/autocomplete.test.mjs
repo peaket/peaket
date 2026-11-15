@@ -28,7 +28,7 @@ const items = ['LUMEN 콘서트 2026 서울', 'LUMEN', 'LUNA 공연'].map((label
 const hangul = ['루멘 팬미팅', '루멘 콘서트', '라멘 축제'].map((label) => ({ label }));
 const label = (t) => t.label;
 
-test('[SR-T11] 같은 검색은 같은 요청 값이다(대소문자·전각·겹친 공백), 정규화 뒤 50자를 넘으면 부르지 않는다', () => {
+test('SR-T11 ① 같은 검색은 같은 요청 값이다(대소문자·전각·겹친 공백), 정규화 뒤 50자를 넘으면 부르지 않는다', () => {
   const qs = ['LUMEN', 'Lumen', 'lumen', 'ＬＵＭＥＮ', ' lumen '].map(suggestRequestQuery);
   assert.deepEqual(new Set(qs), new Set(['lumen']));
   assert.equal(suggestRequestQuery('lu  men'), 'lu men');

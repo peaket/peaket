@@ -109,6 +109,8 @@ export interface SearchIndex {
   documents(): Promise<SearchDocument[]>;
   /** 사전을 다시 읽을지 판단하는 판(바뀌면 자동완성 사전을 다시 만든다) */
   version(): Promise<number>;
+  /** 한 번의 검색. 후보만 읽는다(ADR-0271 결정 4). 연결 묶음이 넘치면 SearchUnavailable을 던진다. BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
+  search(q: SearchQuery): Promise<SearchOutcome>;
 }
 
 export const SEARCH_INDEX = Symbol('SEARCH_INDEX');
@@ -376,6 +378,107 @@ export function documentOf(o: {
     ...(o.minPrice !== undefined ? { minPrice: o.minPrice } : {}),
     popularity: o.popularity ?? 0,
   };
+}
+
+// ---- BAT-165 웨이브 7 공개 인터페이스(계획 docs/review/plans/BAT-165.md '웨이브 7 계획' §5, ADR-0271). 시험 담당이 둔 빈 뼈대이고 구현 담당이 채운다 ----
+
+const notYet = (): never => {
+  throw new Error('아직 없음');
+};
+
+/** 검색 전용 연결 묶음이 넘쳤거나 질의 시간 상한을 넘었다(503, ADR-0271 결정 5) */
+export class SearchUnavailable extends Error {
+  constructor(readonly reason: 'pool-timeout' | 'statement-timeout') {
+    super(`검색을 쓸 수 없다: ${reason}`);
+  }
+}
+
+/** search_term 한 줄(docs/data.md search_term) */
+export interface SearchTermRow {
+  id: string;
+  kind: 'PRODUCTION' | 'ARTIST' | 'PLACE';
+  targetId: string;
+  displayName: string;
+  aliasOf: string | null;
+  norm: string;
+  normNospace: string;
+  jamo: string;
+  chosung: string;
+  updatedVersion: number;
+}
+
+/** 자동완성 사전이 한 번에 읽는 것(한 읽기 전용 트랜잭션, docs/features/search.md §2.3) */
+export interface DictionarySnapshot {
+  version: number;
+  /** 통째로 읽었는가 */
+  full: boolean;
+  /** updated_version > since(통째면 전부) */
+  documents: SearchDocument[];
+  /** 같은 조건 */
+  terms: SearchTermRow[];
+  removals: { version: number; kind: 'DOCUMENT' | 'TERM'; targetId: string }[];
+}
+
+export interface SearchDictionarySource {
+  /** 한 읽기 전용 REPEATABLE READ 트랜잭션에서 판을 먼저 읽는다. since가 null이면 통째로 */
+  read(since: number | null): Promise<DictionarySnapshot>;
+  version(): Promise<number>;
+}
+
+/** 자동완성 메모리 사전(docs/features/search.md §4.4, ADR-0271 결정 6). suggest·correct는 DB를 부르지 않는다 */
+/** 사전이 쓰는 시계(플랫폼 Clock과 같은 모양, 도메인은 플랫폼을 가져오지 않는다) */
+export interface DictionaryClock {
+  now(): number;
+}
+
+export class SuggestionDictionary {
+  constructor(
+    readonly source: SearchDictionarySource,
+    readonly clock: DictionaryClock,
+  ) {}
+
+  refresh(): Promise<{ version: number; full: boolean; applied: number; removed: number }> {
+    return notYet();
+  }
+
+  suggest(_input: string): SearchSuggestions {
+    return notYet();
+  }
+
+  /** didYouMean */
+  correct(_input: string): string | null {
+    return notYet();
+  }
+
+  get version(): number {
+    return notYet();
+  }
+
+  get entries(): number {
+    return notYet();
+  }
+}
+
+/** 쓰기 쪽 동기화(같은 트랜잭션, ADR-0271 결정 2·3). tx는 어댑터의 DB 트랜잭션(@peaket/platform DbTransaction)이다. 도메인은 그 모양을 모른다 */
+export interface SearchReadModelSync {
+  sync(tx: unknown, productionIds: readonly string[], at: Date): Promise<{ version: number; removed: string[] }>;
+  /** 1분 정리 */
+  syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number }>;
+  /** 1시간 */
+  recountInterest(at: Date): Promise<number>;
+  /** 하루 지난 지운 표시 */
+  purgeRemovals(at: Date): Promise<number>;
+}
+export const SEARCH_READ_MODEL_SYNC: unique symbol = Symbol('SEARCH_READ_MODEL_SYNC');
+
+/** search_query 줄에 남기기 전 검색어 가리기(docs/features/search.md §11) */
+export function maskSearchQuery(_normalized: string): string {
+  return notYet();
+}
+
+/** 한 주의 0건 검색어 목록(docs/features/search.md §11) */
+export function zeroResultQueries(_lines: readonly { query: string; results: number; at: string }[], _o: { weekStart: string }): { query: string; count: number }[] {
+  return notYet();
 }
 
 /** 오타 제안에 쓰는 이름 키(시험이 직접 부른다) */

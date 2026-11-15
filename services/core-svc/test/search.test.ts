@@ -1,4 +1,5 @@
-// 검색 순위·쪽·0건 제안·자동완성 몫 시험(ADR-0268, docs/features/search.md §4~§6, SR-T2·SR-T4·SR-T9·SR-T11).
+// 검색 순위·쪽·0건 제안·자동완성 몫 시험(ADR-0268, docs/features/search.md §4~§6, SR-T2·SR-T4·SR-T9).
+// SR-T11 ①(같은 검색이 같은 요청 주소)은 브라우저 시험(apps/web autocomplete.test.mjs)이 본다. 여기 순서·몫 시험은 그 ID를 달지 않는다(BAT-165 웨이브 7 T-24).
 import { describe, expect, test } from 'vitest';
 import { documentOf, searchDocuments, suggestDocuments, type SearchDocument } from '../src/modules/catalog/domain/search.js';
 
@@ -24,7 +25,7 @@ describe('검색 순위·쪽', () => {
     expect(() => searchDocuments(docs, q({ page: 51 }))).toThrow('page');
   });
 
-  test('SR-T11 q가 없으면 OPEN_SOON, POPULAR는 관심도 순이고 같은 값은 이름·ID로 깨진다', () => {
+  test('q가 없으면 OPEN_SOON, POPULAR는 관심도 순이고 같은 값은 이름·ID로 깨진다(§5.3)', () => {
     const docs = [
       doc('p2', '나 공연', { nextOpenAt: '2026-12-02T00:00:00Z', popularity: 5 }),
       doc('p1', '가 공연', { nextOpenAt: '2026-12-01T00:00:00Z', popularity: 5 }),
@@ -58,7 +59,7 @@ describe('검색 순위·쪽', () => {
 });
 
 describe('자동완성 몫', () => {
-  test('SR-T11 공연 5·아티스트 2·공연장 1을 먼저 채우고 빈 몫은 다른 종류로 채운다', () => {
+  test('자동완성은 공연 5·아티스트 2·공연장 1을 먼저 채우고 빈 몫은 다른 종류로 채운다(§4.1)', () => {
     const docs = Array.from({ length: 7 }, (_, i) => doc(`p${i}`, `피켓 공연 ${i}`, { artists: i < 3 ? [{ artistId: `a${i}`, name: `피켓 배우 ${i}` }] : [], ...(i < 2 ? { placeId: `pl${i}`, placeName: `피켓홀 ${i}` } : {}) }));
     const out = suggestDocuments(docs, '피켓');
     expect(out.items.filter((x) => x.kind === 'PRODUCTION')).toHaveLength(5);

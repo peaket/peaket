@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import type { Clock } from '@peaket/platform';
 import { imageBaseUrl } from '../domain/production-image.js';
 import { isPublic, saleEndsAt, type EventSaleState } from '../domain/production.js';
-import { documentOf, type SearchDocument, type SearchIndex } from '../domain/search.js';
+import { documentOf, type SearchDocument, type SearchIndex, type SearchOutcome, type SearchQuery } from '../domain/search.js';
 import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
 
 @Injectable()
@@ -47,6 +47,11 @@ export class MemorySearchIndex implements SearchIndex {
       if (doc) out.push(doc);
     }
     return out;
+  }
+
+  /** BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
+  async search(_q: SearchQuery): Promise<SearchOutcome> {
+    throw new Error('아직 없음');
   }
 
   async version(): Promise<number> {

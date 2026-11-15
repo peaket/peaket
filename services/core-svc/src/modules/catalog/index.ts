@@ -22,6 +22,19 @@ export { MemorySearchIndex } from './adapters/memory-search-index.js';
 export { DrizzleSearchIndex } from './adapters/db/drizzle-search-index.js';
 export { SearchCatalog } from './application/search.js';
 export { SEARCH_INDEX, type SearchDocument, type SearchIndex } from './domain/search.js';
+export { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.js';
+export { withSearchSync } from './application/search-maintenance.js';
+export {
+  maskSearchQuery,
+  SEARCH_READ_MODEL_SYNC,
+  SearchUnavailable,
+  SuggestionDictionary,
+  zeroResultQueries,
+  type DictionarySnapshot,
+  type SearchDictionarySource,
+  type SearchReadModelSync,
+  type SearchTermRow,
+} from './domain/search.js';
 export { cardSaleStatus, isPublic, opensAsScheduled, representativeEvent, sameVenue } from './domain/production.js';
 export { buildEventSaleConfigs, eligibleListKeys, type EventSaleConfig, type EventSaleConfigFacts, type SaleEligibilityGate } from './domain/event-sale-config.js';
 export { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_MAINTENANCE_STORE, SALE_CONFIG_READER, SALE_CONFIG_STORE, type ApprovedProduction, type SaleConfigFactsSource, type SaleConfigMaintenanceStore, type SaleConfigReader, type SaleConfigStore } from './domain/sale-config-ports.js';

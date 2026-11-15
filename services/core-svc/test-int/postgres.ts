@@ -18,10 +18,11 @@ export interface PostgresContainer {
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 /** name을 주거나 PEAKET_TEST_CONTAINER_PREFIX가 있으면 컨테이너에 이름을 붙인다(여러 작업 갈래가 한 PC에서 돌 때 누구의 컨테이너인지 보이게) */
-export async function startPostgres(o: { name?: string } = {}): Promise<PostgresContainer> {
+/** env는 컨테이너에 더 넘길 환경 값(예: 로케일을 바꾼 초기화 POSTGRES_INITDB_ARGS, BAT-165 SR-T7) */
+export async function startPostgres(o: { name?: string; env?: Record<string, string> } = {}): Promise<PostgresContainer> {
   const prefix = process.env.PEAKET_TEST_CONTAINER_PREFIX;
   const name = o.name ?? (prefix ? `${prefix}pg-${Math.random().toString(36).slice(2, 8)}` : undefined);
-  const id = docker(['run', '-d', '--rm', ...(name ? ['--name', name] : []), '-e', 'POSTGRES_PASSWORD=peaket-test', '-e', 'POSTGRES_DB=peaket', '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);
+  const id = docker(['run', '-d', '--rm', ...(name ? ['--name', name] : []), '-e', 'POSTGRES_PASSWORD=peaket-test', '-e', 'POSTGRES_DB=peaket', ...Object.entries(o.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]), '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);
   const mapped = docker(['port', id, '5432/tcp']).split('\n')[0]!;
   const port = Number(mapped.slice(mapped.lastIndexOf(':') + 1));
   const host = '127.0.0.1';

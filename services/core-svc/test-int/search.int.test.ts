@@ -1,4 +1,5 @@
-// 검색 읽기 모델 통합 시험(실제 PostgreSQL 18 컨테이너): 0009 search_document 뷰와 DrizzleSearchIndex를 읽는다(BAT-165, ADR-0268).
+// 검색 읽기 모델 통합 시험(실제 PostgreSQL 18 컨테이너): search_document 표(동기화가 채운다)와 DrizzleSearchIndex를 읽는다(BAT-165, ADR-0268, ADR-0271).
+// 2026-11-16 BAT-165 웨이브 7 시험 담당: 읽기 모델이 뷰에서 표로 바뀌어(ADR-0271 결정 1) 동기화를 부른 뒤 읽고, 문서 통째 읽기 대신 검색으로 본다.
 import 'reflect-metadata';
 import { createDatabase, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -7,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { artist, event, place, production, productionArtist, productionImage, promoter, searchAlias, wish } from '../src/modules/catalog/adapters/db/schema.js';
 import { DrizzleSearchIndex } from '../src/modules/catalog/adapters/db/drizzle-search-index.js';
+import { DrizzleSearchReadModel } from '../src/modules/catalog/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 let pg: PostgresContainer;
@@ -54,7 +56,7 @@ afterAll(async () => {
   pg?.stop();
 });
 
-describe('search_document 뷰', () => {
+describe('search_document 표', () => {
   test('공개 공연 한 줄에 제목·공연장·아티스트·다른 이름·포스터·관심도·KST 기간·판매 상태를 모은다', async () => {
     const s = await seed({ title: '루멘 콘서트' });
     const artistId = randomUUID();
@@ -75,6 +77,7 @@ describe('search_document 뷰', () => {
       updatedAt: new Date(now),
     });
     await database.db.insert(wish).values({ accountId: randomUUID(), productionId: s.productionId, createdAt: new Date(now) });
+    const synced = await database.transaction((tx) => new DrizzleSearchReadModel(database).sync(tx, [s.productionId], new Date(now)));
 
     const rows = (await database.db.execute(sql`select * from search_document where production_id = ${s.productionId}`)) as unknown as { rows?: Record<string, unknown>[] } | Record<string, unknown>[];
     const row = ((Array.isArray(rows) ? rows : rows.rows) ?? [])[0]!;
@@ -88,30 +91,24 @@ describe('search_document 뷰', () => {
       poster_alt: '포스터',
       interest: 1,
     });
-    expect(Number(row.updated_version)).toBe(1);
+    expect(Number(row.updated_version)).toBe(synced.version);
     expect(row.aliases).toContain('LUMEN');
     expect(JSON.stringify(row.artists)).toContain('루멘');
     expect(String(row.period_start)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     const index = new DrizzleSearchIndex(database, 'https://img.test');
-    const docs = await index.documents();
-    expect(docs.find((d) => d.productionId === s.productionId)).toMatchObject({
-      title: '루멘 콘서트',
-      placeName: '피켓홀',
-      aliases: ['LUMEN'],
-      saleStatus: 'ON_SALE',
-      popularity: 1,
-      posterAlt: '포스터',
-    });
-    expect(docs.find((d) => d.productionId === s.productionId)?.artists[0]?.name).toBe('루멘');
-    expect(docs.find((d) => d.productionId === s.productionId)?.saleEndsAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
-    expect(await index.version()).toBeGreaterThanOrEqual(1);
+    const out = await index.search({ q: 'LUMEN', includePast: false, noConvert: false, page: 1, now: new Date(now) });
+    const card = out.items.find((d) => d.productionId === s.productionId);
+    expect(card).toMatchObject({ eventId: s.eventId, title: '루멘 콘서트', placeName: '피켓홀', saleStatus: 'ON_SALE', posterAlt: '포스터' });
+    expect(card?.posterUrl).toMatch(/^https:\/\/img\.test\//);
+    expect(card?.saleEndsAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
   });
 
-  test('판매 승인 전·판매 중지·회차 없는 공연은 뷰에 없다', async () => {
+  test('판매 승인 전·판매 중지·회차 없는 공연은 동기화해도 표에 없다', async () => {
     const unapproved = await seed({ title: '미승인', saleReview: 'DRAFT', approved: false });
     const suspended = await seed({ title: '중지', saleReview: 'SUSPENDED' });
     const noEvent = await seed({ title: '회차 없음', withEvent: false });
+    await database.transaction((tx) => new DrizzleSearchReadModel(database).sync(tx, [unapproved.productionId, suspended.productionId, noEvent.productionId], new Date(now)));
     const rows = (await database.db.execute(sql`select production_id from search_document`)) as unknown as { rows?: { production_id: string }[] } | { production_id: string }[];
     const ids = ((Array.isArray(rows) ? rows : rows.rows) ?? []).map((r) => r.production_id);
     expect(ids).not.toContain(unapproved.productionId);

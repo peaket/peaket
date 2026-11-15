@@ -232,3 +232,41 @@ test.describe('FE-T18 접근 가능한 인증(3.3.8) 붙여넣기', () => {
     await expect(page.getByTestId('pw-length')).toHaveText(String(secret.length));
   });
 });
+
+// SR-T10 한글 조합 중 Enter(docs/features/search.md §3.4, :301 SR-T10, docs/frontend.md:1639. BAT-165 웨이브 7 T-20).
+// isComposing이 참이거나 keyCode가 229인 keydown Enter를 합성해 보내고, 조합 없는 Enter(대조군)는 처리되는지 먼저 본다.
+/** 입력 칸에 keydown Enter를 합성한다(keyCode는 사건 초기값으로 줄 수 없어 속성을 덮는다) */
+async function enter(input, o) {
+  await input.evaluate((el, opt) => {
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, isComposing: opt.isComposing });
+    if (opt.keyCode !== undefined) Object.defineProperty(ev, 'keyCode', { get: () => opt.keyCode });
+    el.dispatchEvent(ev);
+  }, o);
+}
+
+test.describe('SR-T10 검색창 한글 조합 중 키', () => {
+  test('SR-T10 isComposing이 참이거나 keyCode 229인 Enter는 SearchField·WebSearchBox에서 검색을 보내지 않는다', async ({ page }) => {
+    // SearchField: 창이 열리고 첫 후보를 고른 상태에서 Enter는 그 후보를 고른다
+    await openStory(page, 'cmp-004-searchfield--ime-guard');
+    const field = page.getByRole('combobox');
+    await field.focus();
+    await enter(field, { isComposing: true });
+    await enter(field, { isComposing: false, keyCode: 229 });
+    await expect(page.getByTestId('selects')).toHaveText('0');
+    await expect(page.getByTestId('submits')).toHaveText('0');
+    // 대조군: 조합 없는 Enter는 고른다
+    await enter(field, { isComposing: false, keyCode: 13 });
+    await expect(page.getByTestId('selects')).toHaveText('1');
+
+    // WebSearchBox: Enter는 검색 화면으로 이동한다
+    await openStory(page, 'cmp-004-websearchbox--ime-guard');
+    const box = page.getByRole('combobox');
+    await box.focus();
+    await enter(box, { isComposing: true });
+    await enter(box, { isComposing: false, keyCode: 229 });
+    await expect(page.getByTestId('navigations')).toHaveText('0');
+    await enter(box, { isComposing: false, keyCode: 13 });
+    await expect(page.getByTestId('navigations')).toHaveText('1');
+    await expect(page.getByTestId('last-href')).toHaveText(`/search?q=${encodeURIComponent('루멘')}`);
+  });
+});

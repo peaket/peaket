@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm';
 import { IMAGE_ORIGIN } from '../../domain/media-ports.js';
 import { imageBaseUrl } from '../../domain/production-image.js';
 import type { Genre } from '../../domain/production.js';
-import type { SearchDocument, SearchIndex } from '../../domain/search.js';
+import type { SearchDocument, SearchIndex, SearchOutcome, SearchQuery } from '../../domain/search.js';
 
 interface Row {
   production_id: string;
@@ -69,6 +69,11 @@ export class DrizzleSearchIndex implements SearchIndex {
         popularity: Number(r.interest ?? 0),
       };
     });
+  }
+
+  /** BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
+  async search(_q: SearchQuery): Promise<SearchOutcome> {
+    throw new Error('아직 없음');
   }
 
   async version(): Promise<number> {

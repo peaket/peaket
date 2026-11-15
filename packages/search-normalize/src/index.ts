@@ -167,3 +167,6 @@ export function searchIndexed<T extends NameItem>(index: ReadonlyArray<IndexedNa
 export function searchNames<T extends NameItem>(items: readonly T[], input: string): Array<NameMatch<T>> {
   return searchIndexed(indexNames(items), input);
 }
+
+/** 브라우저 거르기 함수(§4.5, ADR-0271 결정 11) */
+export { inputKind, refineLocally, type InputKind, type LastAnswer } from './refine.js';
