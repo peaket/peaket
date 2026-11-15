@@ -213,7 +213,7 @@ export const CreateOpsAuthReauthenticationResponse = zod.union([zod.object({
  * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
  */
 export const CreateOpsAuthPasskeyRegistrationHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsAuthPasskeyRegistrationResponseRegistrationIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
@@ -350,7 +350,7 @@ export const DeleteOpsAuthPasskeyParams = zod.object({
 })
 
 export const DeleteOpsAuthPasskeyHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteOpsAuthPasskeyResponse = zod.void()
@@ -404,7 +404,7 @@ export const ListOpsAdminAccountsResponse = zod.object({
  */
 export const CreateOpsAdminAccountHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsAdminAccountBodyEmailMax = 254;
@@ -494,7 +494,7 @@ export const PutOpsAdminAccountRoleParams = zod.object({
 
 export const PutOpsAdminAccountRoleHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const putOpsAdminAccountRoleBodyReasonMax = 500;
@@ -540,7 +540,7 @@ export const CreateOpsAdminAccountInvitationParams = zod.object({
 
 export const CreateOpsAdminAccountInvitationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsAdminAccountInvitationBodyReasonMax = 500;
@@ -585,7 +585,7 @@ export const CreateOpsAdminAccountRemovalParams = zod.object({
 })
 
 export const CreateOpsAdminAccountRemovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsAdminAccountRemovalBodyReasonMax = 500;
@@ -630,7 +630,7 @@ export const CreateOpsAdminAccountDesignationParams = zod.object({
 
 export const CreateOpsAdminAccountDesignationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsAdminAccountDesignationBodyBasisMax = 200;
@@ -659,7 +659,7 @@ export const DeleteOpsAdminAccountDesignationParams = zod.object({
 })
 
 export const DeleteOpsAdminAccountDesignationHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteOpsAdminAccountDesignationResponse = zod.void()
@@ -845,7 +845,7 @@ export const CreateOpsCommandApprovalParams = zod.object({
 })
 
 export const CreateOpsCommandApprovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const CreateOpsCommandApprovalResponse = zod.object({
@@ -1644,7 +1644,7 @@ export const CreateOpsComplianceDataRequestExtractionRequestParams = zod.object(
 })
 
 export const CreateOpsComplianceDataRequestExtractionRequestHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 
@@ -1726,7 +1726,7 @@ export const CreateOpsComplianceDataRequestApprovalParams = zod.object({
 })
 
 export const CreateOpsComplianceDataRequestApprovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsComplianceDataRequestApprovalResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
@@ -2354,6 +2354,44 @@ export const CreateOpsCaseReplyResponse = zod.object({
 }).describe('문의 기록 한 줄(ADR-0066)')
 
 /**
+ * FR-057, FR-070, POL-044, ADR-0066. CS 처리함 상세 패널(SCR-045)이 부른다. 후기 본문·평점·상태·공시 표시와 사유별 신고 수·신고 내용을 준다. 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다. cs_agent·cs_lead만.
+ * @summary 신고된 후기 상세(사유별 신고 수·내용, 작성자 계정·주문 참조는 싣지 않는다)
+ */
+export const GetOpsReviewParams = zod.object({
+  "reviewId": zod.string()
+})
+
+export const getOpsReviewResponseReviewRatingMax = 5;
+
+
+
+export const GetOpsReviewResponse = zod.object({
+  "review": zod.object({
+  "reviewId": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "rating": zod.int().min(1).max(getOpsReviewResponseReviewRatingMax).optional(),
+  "body": zod.string().optional(),
+  "status": zod.enum(['VISIBLE', 'HIDDEN', 'DELETED']).optional(),
+  "notice": zod.enum(['RIGHTS_TEMP', 'POLICY']).optional(),
+  "noticeUntil": zod.iso.datetime({"offset":true}).optional(),
+  "authorDisplay": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "edited": zod.boolean().optional()
+}).optional(),
+  "summary": zod.object({
+  "total": zod.int().optional(),
+  "byCategory": zod.record(zod.string(), zod.int()).optional(),
+  "reports": zod.array(zod.object({
+  "category": zod.enum(['SCALPING', 'MACRO', 'ABUSE', 'RIGHTS', 'ILLEGAL_FILMING', 'SPAM', 'OFF_TOPIC', 'OTHER']).optional(),
+  "detail": zod.string().optional(),
+  "rightsHolder": zod.boolean().optional(),
+  "notifyChannel": zod.enum(['APP', 'EMAIL']).optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+})).optional()
+}).optional()
+}).describe('CS 처리함의 신고된 후기 상세(GET /v1/ops/reviews/{reviewId}, FR-057·FR-070, POL-044, ADR-0066). 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다')
+
+/**
  * FR-070, POL-044, POL-042, 추천 적용 2026-10-19, ADR-0066. CS 담당자(cs_agent)가 태블릿·데스크톱 관제 콘솔에서 부른다(휴대폰은 보기만, docs/design/d5 §3.9, docs/planning/03 §3). NO_ACTION은 조치 없음, TEMP_BLOCK은 임시조치(endsAt 필수, 지금부터 30일 이내, 정보통신망법 §44의2④·§44의3), BLOCK은 운영정책 위반 노출 차단, RELEASE는 가린 후기를 다시 보이게 한다(불법 촬영물 신고로 가린 후기를 확인한 뒤 되돌릴 때 포함). ops-svc가 권한·사유·감사 로그를 처리한 뒤 core-svc review 모듈 내부 API로 반영하고 그 후기의 신고를 처리 완료로 바꾼다. 결과는 신고자에게 알리고(처리함·해당 없음), 임시조치·노출 차단은 글쓴이에게 조치 사실과 사유 종류(violation)만 알리며 신고자를 밝히지 않는다. 후기 자리에는 '권리 침해 신고로 임시조치된 후기입니다(끝 날짜까지)'·'운영정책에 따라 가려진 후기입니다'를 보인다(§44의2② 후단 공시). 불법 촬영물인지 판단하기 어려우면 방송미디어통신심의위원회에 심의를 요청할 수 있다(전기통신사업법 시행령 §30의5③). 법정 통보에 따른 노출 차단은 이 경로가 아니라 POST /v1/ops/compliance/notices/{noticeId}/takedown이다. 같은 조치를 다시 보내면 지금 상태를 그대로 돌려준다
  * @summary 신고된 후기 처리(조치 없음·임시조치·노출 차단·해제, 사유 필수)
  */
@@ -2692,7 +2730,7 @@ export const CreateOpsApprovalRequestApprovalParams = zod.object({
 })
 
 export const CreateOpsApprovalRequestApprovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createOpsApprovalRequestApprovalBodyReasonMax = 1000;
@@ -2961,7 +2999,7 @@ export const GetOpsResearchExportResponse = zod.unknown()
  */
 export const CreateOpsEventCancellationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const CreateOpsEventCancellationBody = zod.object({
@@ -3130,7 +3168,7 @@ export const CreateOpsEventCancellationJudgementResponse = zod.object({
 }).describe('회차 취소 요청(ADR-0046 결정 4)')
 
 /**
- * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음
+ * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음. X-Reauth-Token은 identity-svc 재인증(패스키 포함) 토큰이며 결제사 HTTP URL과 무관하다. 검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required다
  * @summary 회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작
  */
 export const CreateOpsEventCancellationApprovalParams = zod.object({
@@ -3138,7 +3176,7 @@ export const CreateOpsEventCancellationApprovalParams = zod.object({
 })
 
 export const CreateOpsEventCancellationApprovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const CreateOpsEventCancellationApprovalResponse = zod.unknown()
@@ -5261,7 +5299,7 @@ export const CreateOpsNoticeTemplateApprovalParams = zod.object({
 })
 
 export const CreateOpsNoticeTemplateApprovalHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다'),
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 

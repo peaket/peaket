@@ -81,7 +81,7 @@ const MAX_SAFE = '9007199254740991';
 /** 묶기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const PIN_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}${ENSURE_EPOCH}
-local n = #KEYS - 10
+local n = #KEYS - 11
 if n < 1 or #ARGV ~= 8 + 6 * n then
   return redis.error_reply('ERR PEAKET_PIN_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
@@ -212,6 +212,8 @@ end
 redis.call('ZREM', KEYS[2], unpack(idx))
 redis.call('ZREM', KEYS[9 + n], unpack(idx))
 redis.call('ZREM', KEYS[10 + n], unpack(idx))
+-- 결제 중에는 우선 구매 만료 반복이 이 보류를 풀지 않게 prio에서도 뺀다(B1-01)
+redis.call('ZREM', KEYS[11 + n], unpack(idx))
 
 if k > 0 then
   redis.call('INCRBY', KEYS[3], int(k))
@@ -410,7 +412,7 @@ return {'OK', k}
 /** 결제 실패 복귀 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const RESTORE_PRIORITY_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}${ENSURE_EPOCH}
-local n = #KEYS - 3
+local n = #KEYS - 4
 if n < 1 or #ARGV ~= 3 + n then return redis.error_reply('ERR PEAKET_RESTORE_PRIORITY_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV) end
 local t = redis.call('TIME')
 local nowSec = tonumber(t[1])
@@ -419,22 +421,25 @@ local ep = readEpoch(KEYS[3])
 if not ep then return {'NOT_READY'} end
 local keep = tonumber(ARGV[3])
 if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[3] .. ' now ' .. int(now)) end
-for _, kt in ipairs({{KEYS[1], 'zset'}, {KEYS[2], 'zset'}}) do
+for _, kt in ipairs({{KEYS[1], 'zset'}, {KEYS[2], 'zset'}, {KEYS[4], 'zset'}}) do
   if not typed(kt[1], kt[2]) then return corrupt(kt[1]) end
 end
 for i = 1, n do
-  if not typed(KEYS[3 + i], 'hash') then return corrupt(KEYS[3 + i]) end
+  if not typed(KEYS[4 + i], 'hash') then return corrupt(KEYS[4 + i]) end
 end
 local restored = 0
 for i = 1, n do
-  local h = redis.call('HMGET', KEYS[3 + i], 'holdId', 'owner', 'kind', 'priorityGrantId')
+  local h = redis.call('HMGET', KEYS[4 + i], 'holdId', 'owner', 'kind', 'priorityGrantId', 'exp')
   if h[1] == ARGV[2] and h[2] == ARGV[1] and h[3] == 'PRIORITY' and h[4] == ARGV[2] then
-    redis.call('HDEL', KEYS[3 + i], 'pin', 'ordAt', 'maxStay', 'rem', 'thawAt')
+    redis.call('HDEL', KEYS[4 + i], 'pin', 'ordAt', 'maxStay', 'rem', 'thawAt')
     redis.call('ZREM', KEYS[1], ARGV[3 + i])
     redis.call('ZREM', KEYS[2], ARGV[3 + i])
+    -- 결제 중 prio에서 뺐던 보류를 다시 만료 인덱스에 넣는다(결제 실패 복귀)
+    if h[5] then redis.call('ZADD', KEYS[4], h[5], ARGV[3 + i]) end
     restored = restored + 1
   end
 end
 ensureEpoch(ep, nowSec)
+extend(KEYS[4], keep)
 return {'OK', restored}
 `;

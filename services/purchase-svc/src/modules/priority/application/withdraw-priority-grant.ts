@@ -13,14 +13,16 @@ export class WithdrawPriorityGrant {
     private readonly holds?: { readonly seats: PrioritySeatHolds; readonly seatMap: Pick<SeatMap, 'resolve' | 'config'> },
   ) {}
 
-  async run(grantId: string): Promise<PriorityGrant> {
+  async run(grantId: string, actedBy: string): Promise<PriorityGrant> {
     const current = await this.grants.find(grantId);
     if (!current) throw new ProblemError({ type: 'priority-grant-not-found', status: 404, title: '쓸 수 있는 우선 구매 권리가 없습니다' });
     if (current.status === 'USED') throw new ProblemError({ type: 'priority-grant-already-used', status: 409, title: '이미 사용한 우선 구매 권리입니다' });
     if (current.status !== 'OFFERED') return current;
+    // 결제 중(진행 중 주문)에는 좌석을 풀지 않는다. 결제가 끝나면 USED, 실패하면 복귀가 푼다
+    if (current.activeOrderId !== undefined) throw new ProblemError({ type: 'priority-grant-in-use', status: 409, title: '지금 쓸 수 없는 우선 구매 권리입니다' });
     // 보류를 먼저 푼다. 풀지 못하면 권리를 WITHDRAWN으로 바꾸지 않는다(다시 부르면 풀린다)
     if (this.holds) await this.#release(current);
-    const withdrawn = await this.grants.withdraw(grantId, this.nowMs());
+    const withdrawn = await this.grants.withdraw(grantId, actedBy, this.nowMs());
     if (!withdrawn) throw new ProblemError({ type: 'priority-grant-not-found', status: 404, title: '쓸 수 있는 우선 구매 권리가 없습니다' });
     return withdrawn;
   }
@@ -32,5 +34,6 @@ export class WithdrawPriorityGrant {
     const keepUntilMs = Math.max(grant.expiresAtMs, (config?.saleEndsAtMs ?? grant.expiresAtMs) + KEEP_AFTER_SALE_END_MS);
     const r = await holds.seats.releasePriority({ eventId: grant.eventId, accountId: grant.accountId, grantId: grant.grantId, seat, keepUntilMs });
     if (r.kind === 'NOT_READY') throw new ProblemError({ type: 'seat-store-unavailable', status: 503, title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 });
+    if (r.kind === 'IN_USE') throw new ProblemError({ type: 'priority-grant-in-use', status: 409, title: '지금 쓸 수 없는 우선 구매 권리입니다' });
   }
 }

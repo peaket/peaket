@@ -1,6 +1,7 @@
 // 우선 구매 권리 모듈(GAT-135). AppModule이 purchase·queue 내부 HTTP 어댑터를 골라 넘긴다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/platform';
+import type { AuditChain } from '../audit/audit.js';
 import { GrantPriority } from './application/grant-priority.js';
 import { ResolveFraudObjection } from './application/resolve-fraud-objection.js';
 import { WithdrawPriority } from './application/withdraw-priority.js';
@@ -11,6 +12,8 @@ import { PriorityGrantsController } from './inbound/priority-grants.controller.j
 export interface PriorityModuleDeps {
   readonly purchase: PurchasePriorityGrants;
   readonly copies: QueuePriorityGrantCopies;
+  /** 우선 구매 권리 발급·회수를 감사 체인에 남긴다 */
+  readonly audit?: AuditChain;
 }
 
 @Module({})
@@ -20,8 +23,8 @@ export class PriorityModule {
       module: PriorityModule,
       controllers: [PriorityGrantsController, FraudObjectionsController],
       providers: [
-        { provide: GrantPriority, useFactory: () => new GrantPriority(deps.purchase, deps.copies) },
-        { provide: WithdrawPriority, useFactory: () => new WithdrawPriority(deps.purchase, deps.copies) },
+        { provide: GrantPriority, useFactory: () => new GrantPriority(deps.purchase, deps.copies, deps.audit) },
+        { provide: WithdrawPriority, useFactory: () => new WithdrawPriority(deps.purchase, deps.copies, deps.audit) },
         {
           provide: ResolveFraudObjection,
           useFactory: (grant: GrantPriority, withdraw: WithdrawPriority) => new ResolveFraudObjection(grant, withdraw),

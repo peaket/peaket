@@ -79,11 +79,13 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildM
   async holds(eventId: string): Promise<RebuildHold[]> {
     assertEvent(eventId);
     const r = await this.database.db.execute(sql`
-      select seat_id::text as seat_id, account_id::text as account_id, fencing_token::text as fencing_token, kind, held_at, expires_at,
-             hold_id::text as hold_id, purchase_session_id
-        from seat_hold
-       where event_id = ${eventId}::uuid and status = 'HELD' and expires_at > now()
-       order by seat_id, fencing_token`);
+      select h.seat_id::text as seat_id, h.account_id::text as account_id, h.fencing_token::text as fencing_token, h.kind, h.held_at, h.expires_at,
+             h.hold_id::text as hold_id, h.purchase_session_id
+        from seat_hold h
+       where h.event_id = ${eventId}::uuid and h.status = 'HELD' and h.expires_at > now()
+         -- 판매·환불·회수로 끝난 PRIORITY 권리의 옛 HELD 행은 되살리지 않는다(B1-07)
+         and (h.priority_grant_id is null or exists (select 1 from priority_grant g where g.id = h.priority_grant_id and g.status = 'OFFERED'))
+       order by h.seat_id, h.fencing_token`);
     return r.rows.map(holdOf);
   }
 

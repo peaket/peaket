@@ -202,7 +202,7 @@ export const CreatePartnerAuthReauthenticationResponse = zod.union([zod.object({
  * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
  */
 export const CreatePartnerAuthPasskeyRegistrationHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createPartnerAuthPasskeyRegistrationResponseRegistrationIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
@@ -339,7 +339,7 @@ export const DeletePartnerAuthPasskeyParams = zod.object({
 })
 
 export const DeletePartnerAuthPasskeyHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeletePartnerAuthPasskeyResponse = zod.void()
@@ -947,7 +947,7 @@ export const CreatePartnerSettlementDisputeResponse = zod.void()
  */
 export const PutPartnerPayoutAccountHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const PutPartnerPayoutAccountBody = zod.object({
@@ -3074,7 +3074,7 @@ export const CreatePartnerEventAttendeeExportParams = zod.object({
 })
 
 export const CreatePartnerEventAttendeeExportHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const CreatePartnerEventAttendeeExportBody = zod.object({
@@ -3604,7 +3604,7 @@ export const CreatePartnerMerchPickupResponse = zod.object({
  * @summary 배송 명단 내려받기(사유 필수, 건수·사유 접속기록, 동의 범위 항목만, 스트리밍)
  */
 export const CreatePartnerMerchDeliveryExportHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const createPartnerMerchDeliveryExportBodyReasonMax = 500;

@@ -10,21 +10,16 @@ const ReviewRecordSchema = z
   .object({
     reviewId: z.string(),
     eventId: z.string(),
-    productionId: z.string(),
-    accountId: z.string(),
-    basisOrderId: z.string(),
     rating: z.number(),
     body: z.string(),
     status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED']),
     notice: z.enum(['RIGHTS_TEMP', 'POLICY']).optional(),
-    noticeUntilMs: z.number().optional(),
-    contentFingerprint: z.string(),
+    noticeUntil: z.string().optional(),
     authorDisplay: z.string(),
-    createdAtMs: z.number(),
-    updatedAtMs: z.number(),
+    createdAt: z.string(),
     edited: z.boolean(),
   })
-  .passthrough();
+  .strict();
 const OpsReviewDetail = z.object({
   review: ReviewRecordSchema,
   summary: z.object({

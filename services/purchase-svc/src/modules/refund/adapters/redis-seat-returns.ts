@@ -6,7 +6,7 @@ import type { SeatReturnNotices } from '../domain/ports.js';
 const KEY_PART = /^[A-Za-z0-9_-]{1,64}$/;
 
 const RETURN_SOLD_LUA = `#!lua
--- KEYS: 1 bitmap, 2 epoch, 3 secver
+-- KEYS: 1 bitmap, 2 epoch, 3 secver, 4 prio, 5.. hold:{index} (좌석 차례)
 -- ARGV: 1 keepUntilMs, 2 channel prefix, 3.. seat triples (index, sectionIndex, seatOffset)
 local keep = ARGV[1]
 local prefix = ARGV[2]
@@ -23,6 +23,9 @@ for i = 3, #ARGV, 3 do
   local bit = redis.call('BITFIELD_RO', KEYS[1], 'GET', 'u1', idx)[1]
   if tonumber(bit) == 1 then
     redis.call('BITFIELD', KEYS[1], 'SET', 'u1', idx, 0)
+    -- 판매·환불된 좌석의 옛 PRIORITY 보류가 다시 만들기에서 되살아나지 않게 지운다(B1-07)
+    redis.call('DEL', KEYS[4 + (i - 3) / 3])
+    redis.call('ZREM', KEYS[4], idx)
     versions[sec] = redis.call('HINCRBY', KEYS[3], sec, 1)
     if not deltas[sec] then deltas[sec] = {} end
     table.insert(deltas[sec], off .. ':0')
@@ -35,6 +38,7 @@ end
 redis.call('PEXPIREAT', KEYS[1], keep)
 redis.call('PEXPIREAT', KEYS[2], keep)
 redis.call('PEXPIREAT', KEYS[3], keep)
+redis.call('PEXPIREAT', KEYS[4], keep)
 return {'OK', released}
 `;
 
@@ -46,7 +50,7 @@ export class RedisSeatReturnNotices implements SeatReturnNotices {
   async returnSold(q: Parameters<SeatReturnNotices['returnSold']>[0]): Promise<'OK' | 'NOT_READY'> {
     if (!KEY_PART.test(q.eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
     const base = `s:{event:${q.eventId}}`;
-    const keys = [`${base}:bitmap`, `${base}:epoch`, `${base}:secver`];
+    const keys = [`${base}:bitmap`, `${base}:epoch`, `${base}:secver`, `${base}:prio`, ...q.seats.map((s) => `${base}:hold:${s.index}`)];
     const args = [String(q.keepUntilMs), `${base}:sec:`, ...q.seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset)])];
     const r = (await this.redis.evalScript(SCRIPT, keys, args)) as unknown[];
     const kind = Array.isArray(r) && r[0] !== undefined ? String(r[0]) : '';

@@ -1,5 +1,5 @@
 // 회차 취소 일괄 환불의 메모리 저장소(단위 시험·로컬 대역).
-import type { EventCancellationRequest, EventRefundAttempt, EventRefundItem, EventRefundWindowStats, RefundPgProvider } from '../domain/event-refund.js';
+import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
 import type { EventRefundAttemptStore, EventRefundOutboxMessage, EventRefundStore } from '../domain/event-refund-ports.js';
 
 export class MemoryEventRefundStore implements EventRefundStore {
@@ -14,6 +14,10 @@ export class MemoryEventRefundStore implements EventRefundStore {
   async create(request: EventCancellationRequest, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<EventCancellationRequest> {
     const existing = this.requests.get(request.requestId);
     if (existing) return existing;
+    const active = [...this.requests.values()].find(
+      (r) => r.eventId === request.eventId && ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status),
+    );
+    if (active) throw new EventRefundActiveConflict(active.requestId, active.eventId);
     this.requests.set(request.requestId, request);
     this.byRequest.set(request.requestId, new Map(items.map((i) => [i.ticketId, i])));
     this.outbox.push(...outbox);
@@ -23,6 +27,13 @@ export class MemoryEventRefundStore implements EventRefundStore {
   async update(request: EventCancellationRequest): Promise<void> {
     if (!this.requests.has(request.requestId)) throw new Error(`회차 취소 요청이 없다: ${request.requestId}`);
     this.requests.set(request.requestId, request);
+  }
+
+  async updateActive(request: EventCancellationRequest): Promise<boolean> {
+    const current = this.requests.get(request.requestId);
+    if (!current || (current.status !== 'RUNNING' && current.status !== 'REFUND_WINDOW')) return false;
+    this.requests.set(request.requestId, request);
+    return true;
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {

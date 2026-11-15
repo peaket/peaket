@@ -40,6 +40,10 @@ export interface ReviewStore {
   reportsByTarget(targetId: string): Promise<readonly ReportRecord[]>;
   resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void>;
 
+  /** 법정 통보 하나를 후기들에 한 트랜잭션으로 적용한다. 같은 noticeId·reviewId는 다시 적용하지 않는다(멱등) */
+  applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }>;
+  /** 탈퇴·파기 계정의 후기에서 계정·주문 참조를 익명화한다. 법정 보존이 필요한 본문·평점은 남긴다 */
+  anonymizeByAccount(accountId: string, nowMs: number): Promise<number>;
   insertTakedown(t: TakedownRecord): Promise<void>;
   takedownsByReview(reviewId: string): Promise<readonly TakedownRecord[]>;
   restoreTakedowns(reviewId: string, nowMs: number): Promise<void>;

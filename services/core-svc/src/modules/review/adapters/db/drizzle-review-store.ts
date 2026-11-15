@@ -1,5 +1,6 @@
 // 운영 후기 저장소(BUILD_ORDER BAT-585). 후기 목록은 event를 조인해 공연 단위로 모으고,
 // 신고 저장·불법 촬영물 즉시 가림은 한 트랜잭션으로 한다(ASVS 2.3.3).
+import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../../domain/review.js';
@@ -224,6 +225,38 @@ export class DrizzleReviewStore implements ReviewStore {
 
   async resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void> {
     await this.database.db.update(contentReport).set({ status: 'RESOLVED', outcome: outcome ?? null, resolvedAt: new Date(nowMs) }).where(eq(contentReport.targetId, targetId));
+  }
+
+  async applyNoticeTakedown(i: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }> {
+    return this.database.transaction(async (tx) => {
+      let applied = 0;
+      for (const reviewId of i.reviewIds) {
+        const found = await tx.execute(sql`select id, content_fingerprint from review where id = ${reviewId}::uuid and status <> 'DELETED' for update`);
+        const r = found.rows[0] as { id: string; content_fingerprint: string } | undefined;
+        if (!r) continue;
+        const dup = await tx.execute(sql`select 1 from takedown_action where notice_id = ${i.noticeId}::uuid and review_id = ${reviewId}::uuid and restored_at is null limit 1`);
+        if (dup.rows[0]) continue;
+        await tx.execute(sql`update review set status = 'HIDDEN', notice = null, notice_until = null, updated_at = ${new Date(i.nowMs)}::timestamptz where id = ${reviewId}::uuid`);
+        const takedownId = randomUUID();
+        await tx.execute(sql`
+          insert into takedown_action (id, notice_id, review_id, reason, content_fingerprint, hidden_at)
+          values (${takedownId}::uuid, ${i.noticeId}::uuid, ${reviewId}::uuid, 'NOTICE', ${r.content_fingerprint}, ${new Date(i.nowMs)}::timestamptz)`);
+        await tx.execute(sql`
+          insert into review_hidden_fingerprint (fingerprint, notice_id, created_at)
+          values (${r.content_fingerprint}, ${i.noticeId}::uuid, ${new Date(i.nowMs)}::timestamptz)
+          on conflict do nothing`);
+        applied += 1;
+      }
+      return { applied };
+    });
+  }
+
+  async anonymizeByAccount(accountId: string, nowMs: number): Promise<number> {
+    const r = await this.database.db.execute(sql`
+      update review set account_id = id, basis_order_id = id, author_display = '탈퇴한 사용자', updated_at = ${new Date(nowMs)}::timestamptz
+       where account_id = ${accountId}::uuid
+       returning id`);
+    return r.rows.length;
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

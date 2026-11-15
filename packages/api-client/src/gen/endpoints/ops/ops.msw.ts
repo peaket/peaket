@@ -165,6 +165,7 @@ import type {
   OpsPromoterDetail,
   OpsPromoterPage,
   OpsReauthPasswordStep,
+  OpsReviewDetail,
   OpsSaleReviewPage,
   PartnerNotice,
   PartnerNoticeCreate,
@@ -301,6 +302,10 @@ export const getUpdateOpsCaseResponseMock = (overrideResponse: Partial<Extract<C
       }, undefined])}, undefined]), ...overrideResponse})
 
 export const getCreateOpsCaseReplyResponseMock = (overrideResponse: Partial<Extract<InquiryMessage, object>> = {}): InquiryMessage => ({messageId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), authorKind: faker.helpers.arrayElement([faker.helpers.arrayElement(['FAN','AGENT','SYSTEM'] as const), undefined]), authorDisplay: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['MESSAGE','PROGRESS','ANSWER'] as const), undefined]), body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
+
+export const getGetOpsReviewResponseMock = (overrideResponse: Partial<Extract<OpsReviewDetail, object>> = {}): OpsReviewDetail => ({review: faker.helpers.arrayElement([{reviewId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), rating: faker.helpers.arrayElement([faker.number.int({min: 1, max: 5}), undefined]), body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['VISIBLE','HIDDEN','DELETED'] as const), undefined]), notice: faker.helpers.arrayElement([faker.helpers.arrayElement(['RIGHTS_TEMP','POLICY'] as const), undefined]), noticeUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), authorDisplay: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), edited: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])}, undefined]), summary: faker.helpers.arrayElement([{total: faker.helpers.arrayElement([faker.number.int(), undefined]), byCategory: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.number.int()
+      }, undefined]), reports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({category: faker.helpers.arrayElement([faker.helpers.arrayElement(['SCALPING','MACRO','ABUSE','RIGHTS','ILLEGAL_FILMING','SPAM','OFF_TOPIC','OTHER'] as const), undefined]), detail: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), rightsHolder: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), notifyChannel: faker.helpers.arrayElement([faker.helpers.arrayElement(['APP','EMAIL'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined])}, undefined]), ...overrideResponse})
 
 export const getCreateOpsApprovalRequestResponseFraudCaseSummaryMock = (overrideResponse: Partial<FraudCaseSummary> = {}): FraudCaseSummary => ({...{caseId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reasonCategory: faker.helpers.arrayElement([faker.helpers.arrayElement(Object.values(FraudReasonCategory)), undefined]), accountCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), ticketCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), purchaseCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), limitPerPerson: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), sharedAttributes: faker.helpers.arrayElement([faker.helpers.arrayElements(Object.values(FraudLinkKind)), undefined]), signals: faker.helpers.arrayElement([faker.helpers.arrayElements(Object.values(FraudSignal)), undefined]), appealOutcome: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_REQUESTED','PENDING','ACCEPTED','REJECTED','PARTIAL'] as const), undefined]), investigatorOpinion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), cancelDeadlineAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), appealCounts: faker.helpers.arrayElement([{accepted: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), rejected: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), expired: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), submitted: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), pending: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined])}, undefined]), snapshotHash: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]{64}$"), undefined]), targets: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 100}) }, (_, i) => i + 1).map(() => ({accountId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketIds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), holderTicketIds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), appealOutcome: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_REQUESTED','PENDING','SUBMITTED','ACCEPTED','REJECTED','EXPIRED'] as const), undefined])})), undefined])}, ...overrideResponse});
 
@@ -1188,6 +1193,18 @@ export const getCreateOpsCaseReplyMockHandler = (overrideResponse?: InquiryMessa
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getCreateOpsCaseReplyResponseMock(),
       { status: 201
+      })
+  }, options)
+}
+
+export const getGetOpsReviewMockHandler = (overrideResponse?: OpsReviewDetail | ((info: Parameters<HttpResponseResolver<{ reviewId: string }>>[0]) => Promise<OpsReviewDetail> | OpsReviewDetail), options?: RequestHandlerOptions) => {
+  return http.get<{ reviewId: string }>('*/v1/ops/reviews/:reviewId', async (info: Parameters<HttpResponseResolver<{ reviewId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetOpsReviewResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -2252,6 +2269,7 @@ export const getOpsMock = () => [
   getGetOpsCaseMockHandler(),
   getUpdateOpsCaseMockHandler(),
   getCreateOpsCaseReplyMockHandler(),
+  getGetOpsReviewMockHandler(),
   getCreateOpsReviewModerationMockHandler(),
   getCreateOpsApprovalRequestMockHandler(),
   getListOpsApprovalRequestsMockHandler(),

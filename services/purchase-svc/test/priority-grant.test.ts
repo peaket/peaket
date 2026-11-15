@@ -106,13 +106,13 @@ describe('GrantPriorityPurchase', () => {
     const f = fixture();
     await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
     const r = await f.grant.run(input());
-    const w = await f.withdraw.run(r.grant!.grantId);
+    const w = await f.withdraw.run(r.grant!.grantId, 'commander-1');
     expect(w).toMatchObject({ status: 'WITHDRAWN', version: 2 });
     const ev = f.store.db.event(EVENT);
     expect(ev.bits.has(0)).toBe(false);
     expect(ev.holds.has(0)).toBe(false);
     expect(ev.prio.has(0)).toBe(false);
-    expect(await f.withdraw.run(r.grant!.grantId)).toMatchObject({ status: 'WITHDRAWN', version: 2 });
+    expect(await f.withdraw.run(r.grant!.grantId, 'commander-1')).toMatchObject({ status: 'WITHDRAWN', version: 2 });
   });
 
   test('S-T37_⑦_권리_만료_회수는_좌석을_풀고_권리를_EXPIRED로_끝낸다', async () => {
@@ -155,7 +155,7 @@ describe('GrantPriorityPurchase', () => {
     await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
     const r = await f.grant.run(input());
     await f.grants.markUsed(r.grant!.grantId, '01900000-0000-7000-8000-0000000000aa', NOW + 1);
-    await expect(f.withdraw.run(r.grant!.grantId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('priority-grant-already-used') });
+    await expect(f.withdraw.run(r.grant!.grantId, 'commander-1')).rejects.toMatchObject({ status: 409, type: expect.stringContaining('priority-grant-already-used') });
   });
 
   test('S-T37_입장_시작이_권리_TTL보다_이르면_만료를_입장_시작으로_당긴다', async () => {
@@ -214,5 +214,82 @@ describe('GrantPriorityPurchase', () => {
     expect(restored.pin).toBeUndefined();
     expect(f.store.db.event(EVENT).bits.has(0)).toBe(true);
     expect(f.store.db.event(EVENT).prio.has(0)).toBe(true);
+  });
+
+  test('B1-01_결제_중_권리는_만료되지_않고_결제가_끝나면_USED가_된다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    const orderId = '01900000-0000-7000-8000-0000000000bb';
+    expect(await f.grants.beginOrder(grantId, orderId, NOW)).toBe(true);
+    f.clock.advance(3 * DAY);
+    expect(await f.grants.expire(grantId, f.clock.now())).toMatchObject({ status: 'OFFERED', activeOrderId: orderId });
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(true);
+    expect(await f.grants.markUsed(grantId, orderId, f.clock.now())).toMatchObject({ status: 'USED', usedOrderId: orderId });
+    expect((await f.grants.find(grantId))?.activeOrderId).toBeUndefined();
+  });
+
+  test('B1-02_결제_중_권리는_회수하지_않고_좌석도_풀지_않는다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    const orderId = '01900000-0000-7000-8000-0000000000cc';
+    expect(await f.grants.beginOrder(grantId, orderId, NOW)).toBe(true);
+    await expect(f.withdraw.run(grantId, 'commander-1')).rejects.toMatchObject({ status: 409, type: expect.stringContaining('priority-grant-in-use') });
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(true);
+    expect((await f.grants.find(grantId))?.status).toBe('OFFERED');
+  });
+
+  test('B1-02_묶인_PRIORITY_보류는_회수가_IN_USE로_거절하고_좌석을_남긴다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    expect(await f.store.pin({ eventId: EVENT, accountId: ACCOUNT, purchaseSessionId: 'ps-in-use', holdId: grantId, seats: [SEATS[0]], limit: 4, orderGen: 1, keepUntilMs: NOW + 10 * DAY })).toMatchObject({ kind: 'OK' });
+    expect(await f.store.releasePriority({ eventId: EVENT, accountId: ACCOUNT, grantId, seat: SEATS[0], keepUntilMs: NOW + 10 * DAY })).toEqual({ kind: 'IN_USE' });
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(true);
+  });
+
+  test('B1-03_발급과_회수의_행위자를_권리에_남긴다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input({ actedBy: 'commander-7' }));
+    expect(r.grant?.actedBy).toBe('commander-7');
+    const w = await f.withdraw.run(r.grant!.grantId, 'operator-9');
+    expect(w).toMatchObject({ status: 'WITHDRAWN', withdrawnBy: 'operator-9', actedBy: 'commander-7' });
+  });
+
+  test('B1-06_권리_DB_쓰기가_실패하면_잡은_PRIORITY_보류를_푼다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const failing = new MemoryPriorityGrantStore();
+    failing.create = async () => {
+      throw new Error('db down');
+    };
+    const grant = new GrantPriorityPurchase({ grants: failing, cancelled: { find: async () => ({ eventId: EVENT, accountId: ACCOUNT, orderId: '01900000-0000-7000-8000-000000000005', seatId: 'A01', tierId: TIER, price: 110_000 }) }, seats: f.store, candidates: new SeatMapPriorityCandidates(f.map), seatMap: f.map, clock: f.clock });
+    await expect(grant.run(input())).rejects.toThrow('db down');
+    expect(f.store.db.event(EVENT).bits.has(0)).toBe(false);
+    expect(f.store.db.event(EVENT).prio.has(0)).toBe(false);
+  });
+
+  test('B1-06_보류를_풀지_못하면_재시도_표시를_남긴다', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const failing = new MemoryPriorityGrantStore();
+    failing.create = async () => {
+      throw new Error('db down');
+    };
+    const failed: string[] = [];
+    const seats = {
+      holdPriority: (i: Parameters<MemorySeatStore['holdPriority']>[0]) => f.store.holdPriority(i),
+      releasePriority: async () => {
+        throw new Error('redis down');
+      },
+    };
+    const grant = new GrantPriorityPurchase({ grants: failing, cancelled: { find: async () => ({ eventId: EVENT, accountId: ACCOUNT, orderId: '01900000-0000-7000-8000-000000000005', seatId: 'A01', tierId: TIER, price: 110_000 }) }, seats, candidates: new SeatMapPriorityCandidates(f.map), seatMap: f.map, clock: f.clock, logger: { grantFailed: (i) => void failed.push(i.reason) } });
+    await expect(grant.run(input())).rejects.toThrow('db down');
+    expect(failed).toEqual(['release-failed:Error']);
   });
 });

@@ -85,6 +85,7 @@ export const takedownAction = pgTable(
   },
   (t) => [
     check('takedown_action_reason_check', sql`${t.reason} in ('NOTICE', 'SAME_CONTENT', 'RIGHTS_TEMP', 'POLICY', 'FILMING_HOLD')`),
+    uniqueIndex('takedown_action_notice_review_uq').on(t.noticeId, t.reviewId).where(sql`${t.noticeId} is not null`),
     index('takedown_action_review_idx').on(t.reviewId),
     index('takedown_action_fingerprint_idx').on(t.contentFingerprint),
   ],

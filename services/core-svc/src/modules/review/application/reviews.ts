@@ -265,22 +265,18 @@ export class Reviews {
       if (input.reason.trim().length === 0) throw new ReviewProblem('notice-invalid', 422, '통보 사유를 적어 주세요');
       const now = this.d.clock.now();
       const deadline = noticeDeadlineMs(input.receivedAtMs, input.kind);
-      let applied = 0;
-      for (const reviewId of input.reviewIds) {
-        if (!UUID.test(reviewId)) throw new ReviewProblem('review-invalid', 422, '후기 ID가 올바르지 않습니다');
-        const r = await this.d.store.findReview(reviewId);
-        if (!r || r.status === 'DELETED') continue;
-        await this.d.store.updateReview(reviewId, { status: 'HIDDEN', notice: undefined, noticeUntilMs: undefined, updatedAtMs: now });
-        await this.d.store.insertTakedown({ ...this.#takedown(reviewId, 'NOTICE', r.contentFingerprint, now), noticeId: input.noticeId });
-        await this.d.store.addHiddenFingerprint(r.contentFingerprint, input.noticeId, now);
-        applied += 1;
-      }
+      for (const reviewId of input.reviewIds) if (!UUID.test(reviewId)) throw new ReviewProblem('review-invalid', 422, '후기 ID가 올바르지 않습니다');
+      // 후기 갱신·조치 기록·지문 등록을 저장소 한 트랜잭션으로 묶고, 같은 통보·후기는 다시 적용하지 않는다
+      const { applied } = await this.d.store.applyNoticeTakedown({ reviewIds: input.reviewIds, noticeId: input.noticeId, nowMs: now });
       return { applied, deadlineAt: new Date(deadline).toISOString() };
     });
   }
 
   /** CS 처리함 상세: 신고자 계정은 싣지 않고 사유별 수·신고 내용·후기 본문을 준다 */
-  async reportedReview(reviewId: string): Promise<{ review: ReviewRecord; summary: { total: number; byCategory: Record<string, number>; reports: readonly { category: string; detail: string; rightsHolder: boolean; notifyChannel?: string; createdAt: string }[] } }> {
+  async reportedReview(reviewId: string): Promise<{
+    review: { reviewId: string; eventId: string; rating: number; body: string; status: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntil?: string; authorDisplay: string; createdAt: string; edited: boolean };
+    summary: { total: number; byCategory: Record<string, number>; reports: readonly { category: string; detail: string; rightsHolder: boolean; notifyChannel?: string; createdAt: string }[] };
+  }> {
     return guard(async () => {
       if (!UUID.test(reviewId)) throw notFound();
       const r = await this.d.store.findReview(reviewId);
@@ -289,7 +285,18 @@ export class Reviews {
       const byCategory: Record<string, number> = {};
       for (const x of reports) byCategory[x.category] = (byCategory[x.category] ?? 0) + 1;
       return {
-        review: r,
+        review: {
+          reviewId: r.reviewId,
+          eventId: r.eventId,
+          rating: r.rating,
+          body: r.body,
+          status: r.status,
+          ...(r.notice !== undefined ? { notice: r.notice } : {}),
+          ...(r.noticeUntilMs !== undefined ? { noticeUntil: new Date(r.noticeUntilMs).toISOString() } : {}),
+          authorDisplay: r.authorDisplay,
+          createdAt: new Date(r.createdAtMs).toISOString(),
+          edited: r.edited,
+        },
         summary: {
           total: reports.length,
           byCategory,
@@ -297,6 +304,13 @@ export class Reviews {
         },
       };
     });
+  }
+
+  /** 탈퇴·파기 계정의 후기에서 계정·주문 참조를 익명화한다(법정 보존이 필요한 본문·평점은 남긴다) */
+  async anonymizeAccount(accountId: string): Promise<{ anonymized: number }> {
+    if (!UUID.test(accountId)) throw new ReviewProblem('review-invalid', 422, '계정 ID가 올바르지 않습니다');
+    const anonymized = await this.d.store.anonymizeByAccount(accountId, this.d.clock.now());
+    return { anonymized };
   }
 
   async #event(eventId: string): Promise<EventInfo> {

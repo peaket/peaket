@@ -362,6 +362,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           candidates: new SeatMapPriorityCandidates(seatMap),
           seatMap,
           sales: new DrizzlePrioritySeatSales(database),
+          logger: { grantFailed: (i) => log?.warn({ ...i }, '우선 구매 권리 보상(보류 해제)에 실패해 재시도가 필요하다') },
         }
       : undefined;
   // 우선 구매 권리 회수(팔린 좌석 대조·소명 인정 뒤). 주문 생성이 팔린 좌석의 권리를 거절할 때도 같은 길을 쓴다
@@ -445,7 +446,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         restrictions: bookingRestrictions,
         priorityGrants: priority!.grants,
         ...(priority?.sales ? { prioritySeatSales: priority.sales } : {}),
-        ...(priorityWithdraw ? { priorityWithdraw: (grantId: string) => priorityWithdraw.run(grantId) } : {}),
+        ...(priorityWithdraw ? { priorityWithdraw: (grantId: string) => priorityWithdraw.run(grantId, 'system:order-create') } : {}),
         signals: orderSignals,
         consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
         onAccepted: (orderId) => sagaRunner?.kick(orderId),

@@ -423,7 +423,7 @@ export const DeleteIdentitySessionParams = zod.object({
 })
 
 export const DeleteIdentitySessionHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteIdentitySessionResponse = zod.void()
@@ -507,7 +507,7 @@ export const GetIdentityMeResponse = zod.object({
  * @summary 탈퇴(모든 세션 종료, 계정 정보·연계정보 HMAC 파기, 거래 기록 분리 보관, 바로 재가입 가능)
  */
 export const DeleteIdentityAccountHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteIdentityAccountBody = zod.object({
@@ -543,7 +543,7 @@ export const DeleteIdentityProviderParams = zod.object({
 })
 
 export const DeleteIdentityProviderHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteIdentityProviderResponse = zod.void()
@@ -615,7 +615,7 @@ export const CreateIdentityMergeProposalConfirmationParams = zod.object({
 })
 
 export const CreateIdentityMergeProposalConfirmationHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const CreateIdentityMergeProposalConfirmationResponse = zod.void()
@@ -782,7 +782,7 @@ export const DeleteIdentityScannerSessionParams = zod.object({
 })
 
 export const DeleteIdentityScannerSessionHeader = zod.object({
-  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
 export const DeleteIdentityScannerSessionResponse = zod.void()

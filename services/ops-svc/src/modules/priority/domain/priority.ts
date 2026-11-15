@@ -32,7 +32,7 @@ export interface WithdrawPriorityView {
 /** purchase-svc 내부 HTTP(PriorityPurchaseService의 첫 내부 경로) */
 export interface PurchasePriorityGrants {
   grant(i: GrantPriorityInput): Promise<GrantPriorityView>;
-  withdraw(grantId: string): Promise<WithdrawPriorityView>;
+  withdraw(grantId: string, actedBy: string): Promise<WithdrawPriorityView>;
 }
 
 /** queue-svc 내부 HTTP(SetPriorityGrant 사본) */

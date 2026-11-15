@@ -264,6 +264,7 @@ export type OperationId =
   | 'getOpsLive'
   | 'getOpsPromoter'
   | 'getOpsResearchExport'
+  | 'getOpsReview'
   | 'getOpsWidget'
   | 'getOrder'
   | 'getOrderPaymentStatus'
@@ -658,6 +659,7 @@ export const OPERATIONS = {
   getOpsLive: {operationId: "getOpsLive",method: "GET",path: "/v1/ops/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["eventId"]},
   getOpsPromoter: {operationId: "getOpsPromoter",method: "GET",path: "/v1/ops/promoters/{promoterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsReview: {operationId: "getOpsReview",method: "GET",path: "/v1/ops/reviews/{reviewId}",host: "ops-api",kind: "read",cookie: true},
   getOpsWidget: {operationId: "getOpsWidget",method: "GET",path: "/v1/ops/widgets/{widgetKey}",host: "ops-api",kind: "read",cookie: true,query: ["eventId","from","to"]},
   getOrder: {operationId: "getOrder",method: "GET",path: "/v1/orders/{orderId}",host: "api",kind: "read",cookie: true},
   getOrderPaymentStatus: {operationId: "getOrderPaymentStatus",method: "GET",path: "/v1/orders/{orderId}/payment-status",host: "api",kind: "longpoll",cookie: true},

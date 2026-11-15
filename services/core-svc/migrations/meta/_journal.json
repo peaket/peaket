@@ -141,6 +141,13 @@
       "when": 1794700200000,
       "tag": "0019_attendee_export_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794750000000,
+      "tag": "0020_takedown_notice_review_uq",
+      "breakpoints": true
     }
   ]
 }

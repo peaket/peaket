@@ -193,6 +193,7 @@ import type {
   OpsPromoterDetail,
   OpsPromoterPage,
   OpsReauthPasswordStep,
+  OpsReviewDetail,
   OpsSaleReviewPage,
   PartnerNotice,
   PartnerNoticeCreate,
@@ -7650,7 +7651,130 @@ export const useCreateOpsCaseReply = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateOpsCaseReplyMutationOptions(options), queryClient);
     }
-    export type createOpsReviewModerationResponse200 = {
+    export type getOpsReviewResponse200 = {
+  data: OpsReviewDetail
+  status: 200
+}
+
+export type getOpsReviewResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsReviewResponseSuccess = (getOpsReviewResponse200) & {
+  headers: Headers;
+};
+export type getOpsReviewResponseError = (getOpsReviewResponse403 | getOpsReviewResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsReviewUrl = (reviewId: string,) => {
+
+
+
+
+  return `/v1/ops/reviews/${encodeURIComponent(String(reviewId))}`
+}
+
+/**
+ * FR-057, FR-070, POL-044, ADR-0066. CS 처리함 상세 패널(SCR-045)이 부른다. 후기 본문·평점·상태·공시 표시와 사유별 신고 수·신고 내용을 준다. 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다. cs_agent·cs_lead만.
+ * @summary 신고된 후기 상세(사유별 신고 수·내용, 작성자 계정·주문 참조는 싣지 않는다)
+ */
+export const getOpsReview = async (reviewId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsReviewResponseSuccess> => {
+
+  return orvalFetch<getOpsReviewResponseSuccess>(getGetOpsReviewUrl(reviewId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsReviewQueryKey = (reviewId: string,) => {
+    return [
+    `/v1/ops/reviews/${reviewId}`
+    ] as const;
+    }
+
+
+export const getGetOpsReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsReview>>, TError = ErrorType<ProblemResponse>>(reviewId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsReviewQueryKey(reviewId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsReview>>> = ({ signal }) => getOpsReview(reviewId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: reviewId !== null && reviewId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsReview>>>
+export type GetOpsReviewQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsReview<TData = Awaited<ReturnType<typeof getOpsReview>>, TError = ErrorType<ProblemResponse>>(
+ reviewId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsReview<TData = Awaited<ReturnType<typeof getOpsReview>>, TError = ErrorType<ProblemResponse>>(
+ reviewId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsReview<TData = Awaited<ReturnType<typeof getOpsReview>>, TError = ErrorType<ProblemResponse>>(
+ reviewId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 신고된 후기 상세(사유별 신고 수·내용, 작성자 계정·주문 참조는 싣지 않는다)
+ */
+
+export function useGetOpsReview<TData = Awaited<ReturnType<typeof getOpsReview>>, TError = ErrorType<ProblemResponse>>(
+ reviewId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsReviewQueryOptions(reviewId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsReviewModerationResponse200 = {
   data: void
   status: 200
 }
@@ -9067,10 +9191,15 @@ export type createOpsEventCancellationApprovalResponse409 = {
   status: 409
 }
 
+export type createOpsEventCancellationApprovalResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsEventCancellationApprovalResponseSuccess = (createOpsEventCancellationApprovalResponse200) & {
   headers: Headers;
 };
-export type createOpsEventCancellationApprovalResponseError = (createOpsEventCancellationApprovalResponse403 | createOpsEventCancellationApprovalResponse409) & {
+export type createOpsEventCancellationApprovalResponseError = (createOpsEventCancellationApprovalResponse403 | createOpsEventCancellationApprovalResponse409 | createOpsEventCancellationApprovalResponse503) & {
   headers: Headers;
 };
 
@@ -9083,7 +9212,7 @@ export const getCreateOpsEventCancellationApprovalUrl = (requestId: string,) => 
 }
 
 /**
- * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음
+ * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음. X-Reauth-Token은 identity-svc 재인증(패스키 포함) 토큰이며 결제사 HTTP URL과 무관하다. 검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required다
  * @summary 회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작
  */
 export const createOpsEventCancellationApproval = async (requestId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsEventCancellationApprovalResponseSuccess> => {

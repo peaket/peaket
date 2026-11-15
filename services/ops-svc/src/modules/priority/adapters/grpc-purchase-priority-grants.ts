@@ -86,8 +86,8 @@ export class GrpcPurchasePriorityGrants implements PurchasePriorityGrants {
     };
   }
 
-  async withdraw(grantId: string): Promise<WithdrawPriorityView> {
-    const res = await this.#call('WithdrawPriorityPurchase', { grant_id: grantId });
+  async withdraw(grantId: string, actedBy: string): Promise<WithdrawPriorityView> {
+    const res = await this.#call('WithdrawPriorityPurchase', { grant_id: grantId, acted_by: actedBy });
     const expiresAt = isoOf(msOf(res.expires_at));
     if (expiresAt === undefined) throw new PriorityDependencyUnavailable('purchase-svc', 503);
     return {

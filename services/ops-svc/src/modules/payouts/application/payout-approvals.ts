@@ -168,17 +168,22 @@ export class PayoutApprovals {
     });
   }
 
-  async recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView> {
+  async #audit(recordType: string, recordId: string, actorRef: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
+    await this.d.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
+  }
+
+  async recordPortoneExecution(batchId: string, bulkPayoutId: string, actor: string): Promise<PayoutBatchView> {
     const batch = await this.d.payments.recordPortoneExecution(batchId, bulkPayoutId);
-    // OPSV-03: ?�기 ?�트???�행??같�? 감사 체인???�긴?? 결제???�출�????�랜??��?????�어 ?�공 ?�에 append?�다.
-    await this.d.audit?.append(
-      auditRecord(
-        'PAYOUT_PORTONE_EXECUTION',
-        batch.batchId,
-        { batchId: batch.batchId, bulkPayoutId, pg: 'PORTONE', status: batch.status, amount: batch.totalAmount, statementCount: batch.statementCount },
-        this.d.clock.now(),
-      ),
-    );
+    // 수기 포트원 일괄 지급 실행은 돈이 나간 기록이다. 실행 배치·금액·행위자·근거를 감사에 남긴다(settlement §5.4)
+    await this.#audit('PAYOUT_PORTONE_EXECUTION', batch.batchId, actor, {
+      batchId: batch.batchId,
+      bulkPayoutId,
+      pg: 'PORTONE',
+      status: batch.status,
+      amount: batch.totalAmount,
+      statementCount: batch.statementCount,
+      basis: 'PORTONE_CONSOLE',
+    }, this.d.clock.now());
     return batch;
   }
 

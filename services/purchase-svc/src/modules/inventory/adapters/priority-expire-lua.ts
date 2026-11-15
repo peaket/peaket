@@ -60,9 +60,12 @@ for i = 1, n do
   if ty == 'none' then
     if scores[i] then kind = 'o' end
   else
-    local h = redis.call('HMGET', hk, 'holdId', 'owner', 'fence', 'exp', 'kind', 'priorityGrantId')
+    local h = redis.call('HMGET', hk, 'holdId', 'owner', 'fence', 'exp', 'kind', 'priorityGrantId', 'pin')
     if not h[1] or not h[2] or not h[3] or not h[4] or h[5] ~= 'PRIORITY' or not h[6] or not string.match(h[4], '^%d+$') then
       kind = 'c'
+    elseif h[7] == '1' then
+      -- 결제 중(pin)에는 만료가 좌석을 풀지 않는다(B1-01). 결제가 끝나면 USED, 실패하면 복귀가 푼다
+      kind = 's'
     elseif scores[i] and h[1] == at(i, 2) and h[3] == at(i, 3) and h[2] == at(i, 4) and h[6] == h[1] and tonumber(h[4]) <= now then
       kind = 'r'
       hashes[i] = h

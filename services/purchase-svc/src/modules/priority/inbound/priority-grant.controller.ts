@@ -23,6 +23,7 @@ const GrantView = z.object({
   expiresAt: z.string().optional(),
   version: z.number().int().optional(),
 });
+const WithdrawBody = z.object({ actedBy: z.string().min(1) }).strict();
 const WithdrawView = z.object({
   grantId: z.uuid(),
   eventId: z.uuid(),
@@ -70,10 +71,10 @@ export class PriorityGrantController {
   @Post(':grantId/withdrawals')
   @HttpCode(200)
   @Roles(['public'])
-  @ContractRouteSchema({ responses: { 200: WithdrawView } })
-  async revoke(@Param('grantId') grantId: string): Promise<z.output<typeof WithdrawView>> {
+  @ContractRouteSchema({ body: WithdrawBody, responses: { 200: WithdrawView } })
+  async revoke(@Param('grantId') grantId: string, @Body() body: z.output<typeof WithdrawBody>): Promise<z.output<typeof WithdrawView>> {
     try {
-      const g = await this.withdraw.run(grantId);
+      const g = await this.withdraw.run(grantId, body.actedBy);
       return { grantId: g.grantId, eventId: g.eventId, accountId: g.accountId, status: g.status, expiresAt: new Date(g.expiresAtMs).toISOString(), version: g.version };
     } catch (err) {
       return fail(err);

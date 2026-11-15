@@ -32,7 +32,7 @@ export class ResolveFraudObjection {
   async run(i: FraudObjectionDecisionInput): Promise<FraudObjectionDecisionView> {
     if (i.decision === 'REJECTED') {
       if (i.grantId === undefined) return { decision: 'REJECTED', grants: [] };
-      const w = await this.withdraw.run(i.grantId);
+      const w = await this.withdraw.run(i.grantId, i.actedBy);
       return { decision: 'REJECTED', grants: [], withdrawnGrantId: w.grantId };
     }
     const grants: GrantPriorityView[] = [];

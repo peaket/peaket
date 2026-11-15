@@ -96,6 +96,27 @@ describe('우선 구매 보류 Lua [GAT-135, S-T37 ①]', () => {
     expect(await store.releasePriority({ eventId, accountId, grantId, seat, keepUntilMs: NOW + 2 * DAY })).toEqual({ kind: 'OK' });
   });
 
+  test('B1-01_결제_중_pin이_있으면_만료_회수가_좌석을_풀지_않는다', async () => {
+    const eventId = randomUUID();
+    const accountId = randomUUID();
+    const grantId = randomUUID();
+    const seat = { seatId: randomUUID(), index: 9, sectionId: 'SEC-A', sectionIndex: 0, seatOffset: 9, tierId: 'R' };
+    const nowMs = Date.now();
+    const keepUntilMs = nowMs + 2 * DAY;
+    await store.openSale({ eventId, seatCount: 10, keepUntilMs: nowMs + 10 * DAY });
+    expect(await store.holdPriority({ eventId, accountId, grantId, seat, expiresAtMs: nowMs + 60_000, keepUntilMs })).toMatchObject({ kind: 'OK' });
+    expect(await store.pin({ eventId, accountId, purchaseSessionId: 'ps-priority-pay', holdId: grantId, seats: [seat], limit: 4, orderGen: 1, keepUntilMs })).toMatchObject({ kind: 'OK' });
+    expect(await redis.command(['ZSCORE', seatKeys.prio(eventId), String(seat.index)], { key: seatKeys.prio(eventId) })).toBeNull();
+    // 옛 코드나 경합으로 prio에 다시 들어간 경우에도 pin이 살아 있으면 만료가 풀지 않는다
+    await redis.command(['ZADD', seatKeys.prio(eventId), String(nowMs - 1), String(seat.index)], { key: seatKeys.prio(eventId) });
+    const due = await store.duePriorityExpiries({ eventId, nowMs, limit: 100 });
+    expect(due).toMatchObject([{ index: seat.index, hold: { grantId, owner: accountId } }]);
+    const out = await store.expirePriority({ eventId, keepUntilMs, seats: [{ index: seat.index, expected: due[0]!.hold, seat }] });
+    expect(out).toMatchObject({ kind: 'OK', released: 0, skipped: 1 });
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(eventId), String(seat.index)], { key: seatKeys.bitmap(eventId) }))).toBe(1);
+    expect(hash(await redis.command(['HGETALL', seatKeys.hold(eventId, seat.index)], { key: seatKeys.hold(eventId, seat.index) })).pin).toBe('1');
+  });
+
   test('S-T37 ⑦_prio_만료_회수는_지난_보류만_풀고_EXPIRED를_남긴다', async () => {
     const eventId = randomUUID();
     const accountId = randomUUID();

@@ -61,13 +61,15 @@ const priority =
         copies: new HttpQueuePriorityGrantCopies(queueClient, internalToken),
       }
     : undefined;
-// 지급 승인 업무(BAT-610 잔여). payment-svc 내부 경로가 없으면 503이고, 재인증 JWKS가 없으면 승인은 403이다.
+// 재인증 검증기는 결제사 HTTP URL과 분리한다(OPSV-05). identity JWKS만 있으면 회차 취소 확정의 패스키 재인증이 결제 URL 없이도 돈다.
+const reauth = process.env.PEAKET_IDENTITY_JWKS_URL
+  ? new JwksApprovalVerifier({ jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' })
+  : undefined;
+// 지급 승인 업무(BAT-610 잔여). payment-svc 내부 경로가 없으면 지급 실행은 503이고, 재인증 JWKS가 없으면 승인은 403이다.
 const payouts = paymentUrl
   ? {
       payments: new HttpPayoutPaymentClient(paymentUrl, internalToken),
-      ...(process.env.PEAKET_IDENTITY_JWKS_URL
-        ? { reauth: new JwksApprovalVerifier({ jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' }) }
-        : {}),
+      ...(reauth ? { reauth } : {}),
     }
   : undefined;
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
@@ -87,7 +89,7 @@ const service = await createService({
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
-    ...(refunds ? { eventCancellations: { refunds, ...(payouts?.reauth ? { reauth: payouts.reauth } : {}) } } : {}),
+    ...(refunds || reauth ? { eventCancellations: { ...(refunds ? { refunds } : {}), ...(reauth ? { reauth } : {}) } } : {}),
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });

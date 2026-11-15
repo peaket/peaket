@@ -562,6 +562,7 @@ export * from './opsPromoterDetail.zod.js';
 export * from './opsPromoterPage.zod.js';
 export * from './opsPromoterSummary.zod.js';
 export * from './opsReauthPasswordStep.zod.js';
+export * from './opsReviewDetail.zod.js';
 export * from './opsSaleReviewItem.zod.js';
 export * from './opsSaleReviewPage.zod.js';
 export * from './order.zod.js';

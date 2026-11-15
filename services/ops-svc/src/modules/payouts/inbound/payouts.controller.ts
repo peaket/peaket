@@ -97,8 +97,8 @@ export class PayoutsController {
   @HttpCode(200)
   @Roles(['operator'])
   @ContractRouteSchema({ params: BatchParams, body: PortoneBody, responses: { 200: BatchView } })
-  async portoneExecution(@ContractParams(BatchParams) params: z.output<typeof BatchParams>, @ContractBody(PortoneBody) body: z.output<typeof PortoneBody>) {
-    return this.approvals.recordPortoneExecution(params.batchId, body.bulkPayoutId);
+  async portoneExecution(@ContractParams(BatchParams) params: z.output<typeof BatchParams>, @ContractBody(PortoneBody) body: z.output<typeof PortoneBody>, @CurrentPrincipal() me: Principal) {
+    return this.approvals.recordPortoneExecution(params.batchId, body.bulkPayoutId, me.accountId);
   }
 
   @Get('approval-requests')

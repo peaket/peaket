@@ -215,6 +215,7 @@ export type ProblemType =
   | 'reauth-code-invalid'
   | 'reauth-required'
   | 'reauth-step-invalid'
+  | 'reauth-unavailable'
   | 'refresh-token-invalid'
   | 'refund-account-required'
   | 'report-limited'
@@ -516,6 +517,7 @@ export const PROBLEM_TYPES = {
   'reauth-code-invalid': { status: 422, title: "인증 앱 코드가 맞지 않습니다" },
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
+  'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },

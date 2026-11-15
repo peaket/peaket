@@ -21,6 +21,8 @@ export interface EventRefundStore {
   create(request: EventCancellationRequest, items: readonly EventRefundItem[], outbox?: readonly EventRefundOutboxMessage[]): Promise<EventCancellationRequest>;
   /** 진행률·상태·일시정지 표시를 바꾼다 */
   update(request: EventCancellationRequest): Promise<void>;
+  /** 실행 중(RUNNING·REFUND_WINDOW)일 때만 진행률을 바꾼다. 그 사이 PAUSED가 됐으면 덮지 않고 false */
+  updateActive(request: EventCancellationRequest): Promise<boolean>;
   items(requestId: string): Promise<readonly EventRefundItem[]>;
   /** 항목 상태를 바꾸고, 같은 트랜잭션에 팬 알림 Outbox를 남길 수 있다 */
   updateItem(item: EventRefundItem, outbox?: readonly EventRefundOutboxMessage[]): Promise<void>;

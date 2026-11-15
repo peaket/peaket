@@ -3,6 +3,17 @@
 // 자동 정지·재시도·백그라운드 실행기·팬 알림·배상 연결은 이 파일의 값으로만 판단한다.
 import { createHash } from 'node:crypto';
 
+/** 같은 회차에 진행 중인 회차 취소·연기 요청이 이미 있을 때(0016 event_cancellation_active_key) */
+export class EventRefundActiveConflict extends Error {
+  constructor(
+    readonly requestId: string,
+    readonly eventId: string,
+  ) {
+    super('같은 회차에 진행 중인 회차 취소 요청이 있습니다');
+    this.name = 'EventRefundActiveConflict';
+  }
+}
+
 export const EVENT_REFUND_KINDS = ['CANCEL', 'POSTPONE'] as const;
 export type EventRefundKind = (typeof EVENT_REFUND_KINDS)[number];
 

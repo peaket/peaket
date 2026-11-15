@@ -3,15 +3,16 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Clock, type Database, systemClock, writeOutbox } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type {
-  EventCancellationRequest,
-  EventRefundFault,
-  EventRefundItem,
-  EventRefundItemStatus,
-  EventRefundKind,
-  EventRefundProgress,
-  EventRefundStatus,
-  RefundPgProvider,
+import {
+  EventRefundActiveConflict,
+  type EventCancellationRequest,
+  type EventRefundFault,
+  type EventRefundItem,
+  type EventRefundItemStatus,
+  type EventRefundKind,
+  type EventRefundProgress,
+  type EventRefundStatus,
+  type RefundPgProvider,
 } from '../../domain/event-refund.js';
 import type { EventRefundOutboxMessage, EventRefundStore } from '../../domain/event-refund-ports.js';
 
@@ -114,11 +115,20 @@ export class DrizzleEventRefundStore implements EventRefundStore {
                 ${request.refundWindowClosesAtMs !== undefined ? new Date(request.refundWindowClosesAtMs) : null}::timestamptz,
                 ${request.ruledBy ?? null}, ${request.confirmedBy ?? null}, ${request.targetOrders}, ${request.refundTotal}, ${request.compensationTargets}, ${request.compensationTotal},
                 ${JSON.stringify(request.progress)}::jsonb, ${new Date(request.createdAtMs)}::timestamptz, ${new Date(request.updatedAtMs)}::timestamptz)
-        on conflict (id) do nothing
+        on conflict do nothing
         returning *`);
       if (!inserted.rows[0]) {
         const existing = await tx.execute(sql`select * from event_cancellation_request where id = ${request.requestId}::uuid`);
-        return toRequest(existing.rows[0] as unknown as RequestRow);
+        if (existing.rows[0]) return toRequest(existing.rows[0] as unknown as RequestRow);
+        // id가 아니라 event_cancellation_active_key(같은 회차의 진행 중 요청)와 부딪혔다. 500이 아니라 409 근거를 준다
+        const active = await tx.execute(sql`
+          select * from event_cancellation_request
+           where event_id = ${request.eventId}::uuid
+             and status in ('REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW')
+           order by created_at limit 1`);
+        const row = active.rows[0] as unknown as RequestRow | undefined;
+        if (row) throw new EventRefundActiveConflict(row.id, row.event_id);
+        throw new Error('event_cancellation_request를 쓰지 못했고 기존 요청도 없다');
       }
       for (const item of items) {
         await tx.execute(sql`
@@ -144,6 +154,20 @@ export class DrizzleEventRefundStore implements EventRefundStore {
              refund_total = ${request.refundTotal}, compensation_targets = ${request.compensationTargets}, compensation_total = ${request.compensationTotal},
              progress = ${JSON.stringify(request.progress)}::jsonb, updated_at = ${new Date(request.updatedAtMs)}::timestamptz
        where id = ${request.requestId}::uuid`);
+  }
+
+  async updateActive(request: EventCancellationRequest): Promise<boolean> {
+    const r = await this.database.db.execute(sql`
+      update event_cancellation_request
+         set status = ${request.status}, fault = ${request.fault ?? null}, fan_notice_reason = ${request.fanNoticeReason ?? null},
+             postponed_to = ${request.postponedToMs !== undefined ? new Date(request.postponedToMs) : null}::timestamptz,
+             refund_window_closes_at = ${request.refundWindowClosesAtMs !== undefined ? new Date(request.refundWindowClosesAtMs) : null}::timestamptz,
+             ruled_by = ${request.ruledBy ?? null}, confirmed_by = ${request.confirmedBy ?? null}, target_orders = ${request.targetOrders},
+             refund_total = ${request.refundTotal}, compensation_targets = ${request.compensationTargets}, compensation_total = ${request.compensationTotal},
+             progress = ${JSON.stringify(request.progress)}::jsonb, updated_at = ${new Date(request.updatedAtMs)}::timestamptz
+       where id = ${request.requestId}::uuid and status in ('RUNNING', 'REFUND_WINDOW')
+       returning id`);
+    return r.rows.length > 0;
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {

@@ -33,6 +33,10 @@ export interface PriorityGrant {
   readonly expiresAtMs: number;
   readonly activeOrderId?: string;
   readonly usedOrderId?: string;
+  /** 발급을 요청한 운영자 ID(account.proto acted_by). 감사·추적용 */
+  readonly actedBy?: string;
+  /** 회수를 요청한 운영자 ID(account.proto acted_by). 감사·추적용 */
+  readonly withdrawnBy?: string;
   /** queue-svc `q:prio` 사본의 판 번호. 만들 때 1, 회수할 때 1 올린다 */
   readonly version: number;
   readonly createdAtMs: number;
@@ -51,6 +55,8 @@ export interface NewPriorityGrant {
   readonly price: number;
   readonly expiresAtMs: number;
   readonly nowMs: number;
+  /** 발급을 요청한 운영자 ID(account.proto acted_by) */
+  readonly actedBy?: string;
 }
 
 /** 우선 구매 권리가 지금 주문에 쓸 수 있는가: OFFERED, 만료 전, 진행 중 주문 없음 */

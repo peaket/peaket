@@ -3,6 +3,7 @@
 // 연기는 환급 신청 창(REFUND_WINDOW)을 연 뒤 신청한 티켓만 환불한다.
 // 자동 정지(실패율·실패 금액·연속 실패·거절률·서킷), 재시도·멱등·중단/재개·진행률, 팬 알림 Outbox를 남긴다.
 import {
+  EventRefundActiveConflict,
   compensationAmount,
   eventRefundCancellationId,
   eventRefundRetryDelayMs,
@@ -124,7 +125,14 @@ export class EventRefundService {
       updatedAtMs: nowMs,
     };
     const confirmed = this.o.fanNotifier?.confirmed(request, targets, nowMs) ?? [];
-    const created = await this.o.store.create(request, items, confirmed);
+    let created: EventCancellationRequest;
+    try {
+      created = await this.o.store.create(request, items, confirmed);
+    } catch (err) {
+      // 같은 회차의 진행 중 요청(0016 active key)과 부딪히면 500이 아니라 409다
+      if (err instanceof EventRefundActiveConflict) throw new EventRefundError('CONFLICT', `같은 회차에 진행 중인 회차 취소 요청이 있습니다: ${err.requestId}`);
+      throw err;
+    }
     if (kind === 'CANCEL') await this.#run(created, targets, this.o.firstBatch ?? 200);
     return this.get(i.requestId);
   }
@@ -256,18 +264,19 @@ export class EventRefundService {
       .filter((i) => (i.status === 'PENDING' || i.status === 'UNKNOWN') && i.appliedAtMs !== undefined && (i.nextAttemptAtMs === undefined || i.nextAttemptAtMs <= nowMs) && !paused.has(i.pg))
       .slice(0, Math.max(0, limit));
     const newlyPaused: { pg: RefundPgProvider; reason: RefundPauseReason; detail: Record<string, unknown> }[] = [];
-    // 자동 정지 판정은 결제사 몫마다 5건에 한 번 다시 본다(건마다 DB를 묻지 않으면서 기준을 넘긴 뒤 새 호출을 4건 이내로 막는다).
-    const stopChecks = new Map<RefundPgProvider, StopReason>();
-    const seen = new Map<RefundPgProvider, number>();
     const worker = async (): Promise<void> => {
       for (;;) {
         const item = queue.shift();
         if (!item) return;
+        // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
+        const current = await this.o.store.find(request.requestId);
+        if (current) {
+          for (const p of pausedOf(current)) paused.set(p.pg, p.reason);
+          if (current.status === 'PAUSED' && !paused.has(item.pg)) paused.set(item.pg, 'MANUAL');
+        }
         if (paused.has(item.pg)) continue;
-        const n = (seen.get(item.pg) ?? 0) + 1;
-        seen.set(item.pg, n);
-        if (!stopChecks.has(item.pg) || n % 5 === 0) stopChecks.set(item.pg, await this.#stopReason(item.pg, nowMs));
-        const stop = stopChecks.get(item.pg);
+        // 기준을 넘긴 뒤 새 호출을 한 건도 더 보내지 않게 항목마다 판정한다
+        const stop = await this.#stopReason(item.pg, nowMs);
         if (stop) {
           const pgs = stop.all ? request.progress.perPg.map((p) => p.pg) : [item.pg];
           for (const pg of pgs) {
@@ -315,7 +324,8 @@ export class EventRefundService {
     const pausedAfter = [...paused.entries()].map(([pg, reason]) => ({ pg, reason }));
     const progress = progressOf(after, pausedAfter, this.#windowOpen(request));
     const updated: EventCancellationRequest = { ...request, status: statusAfterRun(request, progress, pausedAfter, this.#windowOpen(request)), progress, updatedAtMs: this.o.nowMs() };
-    await this.o.store.update(updated);
+    // 그 사이 사람이 멈췄으면 PAUSED를 RUNNING 진행률로 덮지 않는다
+    await this.o.store.updateActive(updated);
     for (const p of newlyPaused) {
       await this.o.alert?.raise({
         requestId: request.requestId,

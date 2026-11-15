@@ -28,6 +28,9 @@ export const priorityGrant = pgTable(
     activeOrderId: uuid('active_order_id'),
     // USED일 때 결제를 마친 주문
     usedOrderId: uuid('used_order_id'),
+    // 발급·회수를 요청한 운영자 ID(account.proto acted_by)
+    actedBy: text('acted_by'),
+    withdrawnBy: text('withdrawn_by'),
     // queue-svc q:prio 사본의 판 번호. 만들 때 1, 회수할 때 1 올린다
     version: bigint('version', { mode: 'number' }).notNull().default(1),
     createdAt: at('created_at').notNull(),
