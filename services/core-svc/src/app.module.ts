@@ -21,7 +21,7 @@ export class AppModule {
           media: MediaWiring;
           review?: Omit<DatabaseReviewWiring, 'database'>;
           shop?: Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>;
-          notify?: { notificationTransport?: NotificationTransport };
+          notify?: { notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
           exportJwks?: { url: string; issuer: string };
           identityGrpc?: string;
           /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다 */
@@ -36,7 +36,7 @@ export class AppModule {
           saleConfigs?: SaleConfigStore;
           review?: MemoryReviewWiring;
           shop?: MemoryShopWiring;
-          notify?: { store?: WebhookStore; notificationTransport?: NotificationTransport };
+          notify?: { store?: WebhookStore; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
           export?: MemoryExportWiring;
         },
   ): DynamicModule {
@@ -48,7 +48,7 @@ export class AppModule {
           CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), media: o.media }),
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
           ShopModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.shop?.commission ? { commission: o.shop.commission } : {}) }),
-          NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}) }),
+          NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
           ExportModule.register({
             storage: 'database',
             database: o.database,
@@ -66,7 +66,7 @@ export class AppModule {
         CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}) }),
         ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
-        NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}) }),
+        NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
         ExportModule.register({ storage: 'memory', ...(o.export ? { wiring: o.export } : {}) }),
       ],
     };

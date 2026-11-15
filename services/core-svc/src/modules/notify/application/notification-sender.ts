@@ -2,6 +2,8 @@
 // purchase-svc trade.orders Outbox의 회차 취소·연기·환급·환급 실패 사건을 받아 결제자·보유자 문안으로 보낸다.
 // 외부 푸시·이메일 대행 계정이 없어 실제 전송은 가짜 전송기(FakeNotificationTransport)로만 하고,
 // PEAKET_NOTIFY_SENDER_MODE=fake가 아니면 UNAVAILABLE(503)이다. 발송 원장·Kafka 소비자는 마이그레이션 허용 밖이라 후속이다.
+import { isProductionLikeEnv } from '@peaket/platform';
+
 export type FanNoticeType = 'EVENT_CANCELLATION_CONFIRMED' | 'EVENT_POSTPONED' | 'REFUNDED' | 'REFUND_FAILED';
 
 export interface FanNoticeEvent {
@@ -52,10 +54,10 @@ const messageOf = (e: FanNoticeEvent): { title: string; body: string } => {
   }
 };
 
-/** 운영(NODE_ENV·PEAKET_ENV=production)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
+/** 운영(NODE_ENV=production 또는 PEAKET_ENV=prod·staging, production은 옛 이름 호환)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
 export function assertNotifyFakeAllowed(env: Record<string, string | undefined>): void {
   if (env.PEAKET_NOTIFY_SENDER_MODE?.trim() !== 'fake') return;
-  if (env.NODE_ENV === 'production' || env.PEAKET_ENV === 'production') throw new Error('PEAKET_NOTIFY_SENDER_MODE=fake는 운영에서 쓸 수 없다');
+  if (isProductionLikeEnv(env)) throw new Error('PEAKET_NOTIFY_SENDER_MODE=fake는 운영(prod·staging)에서 쓸 수 없다');
 }
 
 export class NotificationSender {

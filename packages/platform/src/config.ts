@@ -4,6 +4,8 @@ import { DEFAULT_MAX_DEADLINE_MS } from './deadline.js';
 
 export const PEAKET_ENVS = ['local', 'ci', 'demo', 'staging', 'prod'] as const;
 export type PeaketEnv = (typeof PEAKET_ENVS)[number];
+/** 운영으로 보는 PEAKET_ENV 값. 정본은 prod·staging이고, production은 옛 이름 호환이다(새 배포는 prod를 쓴다) */
+export const PRODUCTION_PEAKET_ENVS = ['prod', 'staging', 'production'] as const;
 /** Problem의 debug 확장을 켤 수 있는 환경 */
 export const DEBUG_ERRORS_ALLOWED: readonly PeaketEnv[] = ['local', 'ci'];
 
@@ -45,6 +47,11 @@ export class PlatformConfigError extends Error {
 }
 
 type Env = Record<string, string | undefined>;
+
+/** NODE_ENV=production이거나 PEAKET_ENV가 운영(prod·staging·production)이면 참. fake·대역 어댑터를 켜면 안 되는 환경 판정(SEC-07) */
+export function isProductionLikeEnv(env: Env): boolean {
+  return env.NODE_ENV === 'production' || (env.PEAKET_ENV !== undefined && (PRODUCTION_PEAKET_ENVS as readonly string[]).includes(env.PEAKET_ENV));
+}
 
 function port(env: Env, name: string, fallback: number): number {
   const v = env[name];

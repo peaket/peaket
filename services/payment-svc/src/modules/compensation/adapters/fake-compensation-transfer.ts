@@ -2,12 +2,13 @@
 // PEAKET_COMPENSATION_TRANSFER_MODE=fake일 때만 REQUESTED를 돌려주고, 그 밖에는 UNAVAILABLE(503)이다.
 // 계좌 원문은 저장하지 않는다(POL-014). 메모리 기록은 시험·로컬에서만 쓴다.
 import { randomUUID } from 'node:crypto';
+import { isProductionLikeEnv } from '@peaket/platform';
 import type { CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest } from '../domain/ports.js';
 
-/** 운영(NODE_ENV·PEAKET_ENV=production)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
+/** 운영(NODE_ENV=production 또는 PEAKET_ENV=prod·staging, production은 옛 이름 호환)에서 fake 모드를 켜면 시작을 막는다(감사 SEC-07). */
 export function assertCompensationFakeAllowed(env: Record<string, string | undefined>): void {
   if (env.PEAKET_COMPENSATION_TRANSFER_MODE?.trim() !== 'fake') return;
-  if (env.NODE_ENV === 'production' || env.PEAKET_ENV === 'production') throw new Error('PEAKET_COMPENSATION_TRANSFER_MODE=fake는 운영에서 쓸 수 없다');
+  if (isProductionLikeEnv(env)) throw new Error('PEAKET_COMPENSATION_TRANSFER_MODE=fake는 운영(prod·staging)에서 쓸 수 없다');
 }
 
 export class FakeCompensationTransfer implements CompensationTransferPort {
