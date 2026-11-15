@@ -135,3 +135,37 @@ describe('CheckScannerSession(GAT-170)', () => {
     expect(answer).toMatchObject({ valid: true, role: 'STAFF_ROLE_GATE_STAFF', event_id: 'ev-1', assignment_id: 'a-1', proxy: false });
   });
 });
+
+describe('R-622 C1-11·M5-03 스캐너 세션 계약', () => {
+  test('끝난 세션도 계정·유효 창을 gRPC account_id로 돌려주어 기기 단독 업로드가 시각을 판정한다', async () => {
+    const { check, store } = world();
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, terminatedAt: NOW });
+    const handlers = scannerSessionCheckHandlers({ check, terminate: { run: async () => ({ terminated: 0 }) } }, () => {});
+    const call = { request: { scanner_session_id: 'ss-1', device_id: 'dev-1' } } as unknown as grpc.ServerUnaryCall<Record<string, unknown>, object>;
+    const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      (handlers.CheckScannerSession as (c: typeof call, cb: (err: unknown, value: Record<string, unknown>) => void) => void)(call, (err, value) => (err ? reject(err) : resolve(value)));
+    });
+    expect(answer).toMatchObject({
+      valid: false,
+      role: 'STAFF_ROLE_GATE_STAFF',
+      event_id: 'ev-1',
+      account_id: 'acc-1',
+      valid_from_ms: NOW - HOUR,
+      valid_until_ms: NOW + 2 * HOUR,
+    });
+  });
+
+  test('역할 유효 창 경계: 시작 전은 무효, 정확히 시작·끝은 유효하고 1ms 뒤는 무효다', async () => {
+    const { check, store, clock } = world();
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, validFrom: NOW + 1, validUntil: NOW + 2 * HOUR, expiresAt: NOW + 3 * HOUR });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, validFrom: NOW });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(true);
+
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, validUntil: NOW, expiresAt: NOW + 3 * HOUR });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(true);
+    clock.advance(1);
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+  });
+});

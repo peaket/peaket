@@ -205,4 +205,12 @@ describe('스캔·이상 표시 HTTP [GAT-180·GAT-190]', () => {
     clock.advance(6_000);
     expect((await get(`/v1/scanner/events/${EVENT}/flags`)).statusCode).toBe(403);
   });
+
+  test('R-622 C1-01 gate_staff의 OVERRIDE 거절은 scanner-override-forbidden 문제 유형이다', async () => {
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_staff', eventId: EVENT });
+    clock.advance(6_000);
+    const r = await post('/v1/scanner/scans', [scan({ ticketId: TICKET, method: 'OVERRIDE', overrideNote: '액정 파손', knownSeq: 0 })]);
+    expect(r.statusCode).toBe(403);
+    expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/scanner-override-forbidden', status: 403 });
+  });
 });
