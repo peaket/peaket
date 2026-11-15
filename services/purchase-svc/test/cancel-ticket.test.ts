@@ -255,4 +255,48 @@ describe('취소 Saga', () => {
     expect(writes.created[0]).toMatchObject({ status: 'REFUND_PENDING', deductionBp: 0, deductionAmount: 0, refundAmount: 33_333 });
     expect(writes.updates).toEqual([{ cancellationId: CANCEL, status: 'REFUNDED', nowMs: kst('2026-11-20T18:30:00') }]);
   });
+
+  test('GAT080_티켓이_REFUND_AFTER_CLOSE여도_공연_시작_뒤면_견적이_EVENT_STARTED로_먼저_거절한다', async () => {
+    // 티켓의 after-close 근거가 공연 시작 거절을 덮어쓰면 안 된다(키 폐기·좌석 반환도 하지 않는다)
+    const { svc, tickets, payments, writes, seats } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
+    expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: EVENT, deadlineMs: 2000 })).toEqual({ status: 'EVENT_STARTED' });
+    expect(tickets.calls).toHaveLength(0);
+    expect(seats.calls).toHaveLength(0);
+    expect(writes.created).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+  });
+
+  test('GAT080_입장_뒤로_미룬_REQUESTED의_재요청은_결제사를_부르지_않고_처음_결과를_돌려준다', async () => {
+    const existing: CancellationRecord = { cancellationId: CANCEL, orderId: ORDER, ticketId: TICKET, refundAmount: 30_000, state: 'REQUESTED', refundAttempts: 0 };
+    const payments = new Payments('CANCELLED');
+    const seats = new Seats();
+    const svc = new CancelTicket({ orders: new Orders(order(), existing), calendar, tickets: new Tickets('REFUND_NOW'), payments, writes: new Writes(), seats });
+    expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: 2000 })).toEqual({
+      status: 'REPLAYED',
+      cancellationId: CANCEL,
+      refundAmount: 30_000,
+      refundAfterEntryClose: true,
+    });
+    expect(payments.calls).toHaveLength(0);
+    expect(seats.calls).toHaveLength(0);
+  });
+
+  test('GAT080_입장_뒤로_미룬_취소도_좌석은_바로_돌려주고_상태는_REQUESTED로_남긴다', async () => {
+    const { svc, payments, writes, seats } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
+    expect(r).toMatchObject({ status: 'ACCEPTED', refundAfterEntryClose: true });
+    // 좌석 재고는 환급을 미루는 동안에도 다시 팔 수 있게 돌려준다
+    expect(seats.calls).toEqual([{ eventId: order().eventId, orderId: ORDER, seatId: order().seatId, accountId: ACCOUNT, saleEndsAtMs: SALE_ENDS }]);
+    expect(writes.created[0]).toMatchObject({ status: 'REQUESTED' });
+    expect(writes.updates).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+  });
+
+  test('회차 취소(EVENT_CANCELLED)는_티켓이_REFUND_NOW여도_견적의_입장_뒤_판정을_무시하고_바로_환급한다', async () => {
+    const { svc, payments, writes } = saga({ ticket: 'REFUND_NOW' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'EVENT_CANCELLED', nowMs: kst('2026-11-20T18:30:00'), deadlineMs: kst('2026-11-20T18:30:05') });
+    expect(r).toMatchObject({ status: 'ACCEPTED', refundAmount: 33_333, refundAfterEntryClose: false });
+    expect(payments.calls).toHaveLength(1);
+    expect(writes.created[0]).toMatchObject({ status: 'REFUND_PENDING', deductionBp: 0, refundAmount: 33_333 });
+  });
 });
