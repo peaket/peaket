@@ -729,6 +729,7 @@
 | R-630 | 웨이브 6 감사 기록(coverage·findings·wave6·영역/변이/검증 보고서) | docs/review/audit | 배치 67·구현 55 매핑, 고유 발견 높음 23·중간 61·낮음 20여, 수정 R-595..R-629, 독립 검증 보고서 보존 | 적용 |
 | R-631 | 웨이브 6 마감 기록(PROGRESS·CI 결과) | docs/PROGRESS.md | 감사 수정 R-595..R-629, 회귀 시험 R-621..R-627, 남은 위험과 Wave 7 파이프라인 | 적용 |
 | R-632 | 웨이브 6 CI 실패(Lease RBAC 시험 기대값·TIME_UNCERTAIN 계약 예외·payment 0020 표/마이그레이션 수·SIGTERM 종료) | tools/local/chart.test.mjs, docs/api/breaking/openapi-ignore.txt, payment start.ts·payment-grpc.int.test.ts | OPS-08 규칙 반영·TIME_UNCERTAIN 예외·표 24/마이그레이션 21·settlementDueElector 항상 stop | 적용 |
+| R-633 | R-608이 trust-svc prod 기동에 PEAKET_INTERNAL_GRPC_TOKEN을 요구하는데 test-int main-boot가 토큰 없이 prod로 띄워 3개 기동 시험이 Kafka 연결 전에 실패 | services/trust-svc/test-int/main-boot.ts | prod 시험 환경에 고정 시험 토큰 주입 | 적용 |
 
 ## 4. 숫자 일치표
 

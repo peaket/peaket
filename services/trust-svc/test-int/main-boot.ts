@@ -28,6 +28,7 @@ export async function bootMain(extraEnv: Record<string, string>): Promise<{ valk
   delete process.env.PEAKET_TELEMETRY_KAFKA_BROKERS;
   Object.assign(process.env, {
     PEAKET_ENV: 'prod',
+    PEAKET_INTERNAL_GRPC_TOKEN: 'test-internal-grpc-token',
     PEAKET_TRUST_REDIS_URL: valkey.url,
     PEAKET_TRUST_RULES_FILE: rulesFile,
     PEAKET_GRPC_PORT: String(grpcPort),
