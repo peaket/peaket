@@ -451,10 +451,15 @@ export type createStaffInvitationAcceptanceResponse422 = {
   status: 422
 }
 
+export type createStaffInvitationAcceptanceResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createStaffInvitationAcceptanceResponseSuccess = (createStaffInvitationAcceptanceResponse200) & {
   headers: Headers;
 };
-export type createStaffInvitationAcceptanceResponseError = (createStaffInvitationAcceptanceResponse403 | createStaffInvitationAcceptanceResponse409 | createStaffInvitationAcceptanceResponse410 | createStaffInvitationAcceptanceResponse422) & {
+export type createStaffInvitationAcceptanceResponseError = (createStaffInvitationAcceptanceResponse403 | createStaffInvitationAcceptanceResponse409 | createStaffInvitationAcceptanceResponse410 | createStaffInvitationAcceptanceResponse422 | createStaffInvitationAcceptanceResponse503) & {
   headers: Headers;
 };
 
@@ -501,7 +506,7 @@ return orvalFetch<createStaffInvitationAcceptanceResponseSuccess>(getCreateStaff
 
 export const getCreateStaffInvitationAcceptanceMutationKey = () => ['createStaffInvitationAcceptance'] as const;
 
-export const getCreateStaffInvitationAcceptanceMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateStaffInvitationAcceptanceMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationAcceptance>>, TError,CreateStaffInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationAcceptance>>, TError,CreateStaffInvitationAcceptanceMutationVariables, TContext> => {
 
@@ -530,13 +535,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateStaffInvitationAcceptanceMutationResult = NonNullable<Awaited<ReturnType<typeof createStaffInvitationAcceptance>>>
     export type CreateStaffInvitationAcceptanceMutationBody = BodyType<CreateStaffInvitationAcceptanceBody> | undefined
-    export type CreateStaffInvitationAcceptanceMutationError = ErrorType<ProblemResponse>
+    export type CreateStaffInvitationAcceptanceMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type CreateStaffInvitationAcceptanceMutationVariables = {data?: BodyType<CreateStaffInvitationAcceptanceBody>}
 
     /**
  * @summary 현장 스태프 초대 수락(본인확인 완료·검증 이메일 일치 계정, 동의 두 개, 24시간·1회용)
  */
-export const useCreateStaffInvitationAcceptance = <TError = ErrorType<ProblemResponse>,
+export const useCreateStaffInvitationAcceptance = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationAcceptance>>, TError,CreateStaffInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createStaffInvitationAcceptance>>,

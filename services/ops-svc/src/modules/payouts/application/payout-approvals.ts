@@ -1,6 +1,6 @@
-// 지급 묶음 2인 승인·실행 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039).
+// 지�?묶음 2???�인·?�행 ?�스케?�스(BUILD_ORDER BAT-610 ?�여, FR-062, POL-038·039).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { AuditChain } from '../../audit/audit.js';
+import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
 import { approvalDueAt, payoutApprovalView, PayoutApprovalProblem, type PayoutApprovalRecord, type PayoutApprovalView, type PayoutBatchView } from '../domain/payout-approval.js';
 
@@ -9,9 +9,21 @@ export interface PayoutApprovalDeps {
   readonly payments: PayoutPaymentClient;
   readonly reauth: ApprovalReauthVerifier;
   readonly clock: Clock;
-  /** 지급 승인 요청·승인·반려·실행·재시도를 감사 체인에 남긴다 */
+  /** ?�태 ?�?�과 같�? ?�랜??��???��? 못하??감사(?�기 ?�트???�행)???�다 */
   readonly audit?: AuditChain;
 }
+
+const auditRecord = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
+/** 지�??�인 감사???�본 ?�조용 고정 �?묶음·결제??�금?�·요�?��) */
+const payoutBase = (r: PayoutApprovalRecord): Record<string, unknown> => ({
+  batchId: r.batchId,
+  pg: r.pg,
+  pgStore: r.pgStore,
+  payoutDate: r.payoutDate,
+  amount: r.amount,
+  statementCount: r.statementCount,
+  requesterId: r.requesterId,
+});
 
 export interface OpsActor {
   accountId: string;
@@ -19,7 +31,7 @@ export interface OpsActor {
   role: string;
 }
 
-const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 ???�습?�다' });
 const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
@@ -58,7 +70,7 @@ export class PayoutApprovals {
         requesterId: actor.accountId,
         requesterRole: actor.role,
         approverId: null,
-        reasonText: input.reasonText?.trim() || '지급 묶음 확인 요청',
+        reasonText: input.reasonText?.trim() || '지�?묶음 ?�인 ?�청',
         failure: null,
         createdAt: now,
         updatedAt: now,
@@ -66,8 +78,15 @@ export class PayoutApprovals {
         executedAt: null,
         version: 1,
       };
-      await this.d.store.insert(record);
-      await this.#audit('PAYOUT_APPROVAL_REQUESTED', record.approvalId, actor.accountId, { batchId: record.batchId, amount: record.amount, payoutDate: record.payoutDate, status: record.status }, this.d.clock.now());
+      await this.d.store.insert(
+        record,
+        auditRecord(
+          'PAYOUT_APPROVAL_REQUESTED',
+          record.approvalId,
+          { ...payoutBase(record), reasonText: record.reasonText, status: record.status },
+          record.createdAt.getTime(),
+        ),
+      );
       return { batch: { ...batch, approvalId: record.approvalId }, approval: payoutApprovalView(record, actor) };
     });
   }
@@ -93,27 +112,40 @@ export class PayoutApprovals {
     return guard(async () => {
       const r = await this.d.store.find(approvalId);
       if (!r) throw notFound();
-      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
-      if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 승인할 수 없습니다');
+      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '?�인 ?��?중인 지�?묶음???�닙?�다');
+      if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '?�청?�는 ?�인?????�습?�다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 승인할 수 있습니다');
       const verified = await this.d.reauth.verify(reauthToken, { sessionId: actor.sessionId, act: 'APPROVAL' });
       if (verified.accountId !== actor.accountId) throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
-      const now = new Date(this.d.clock.now());
-      const retry = r.status === 'FAILED';
+      const nowMs = this.d.clock.now();
+      const now = new Date(nowMs);
       const executing: PayoutApprovalRecord = { ...r, status: 'EXECUTING', approverId: actor.accountId, approvedAt: now, updatedAt: now, version: r.version + 1 };
-      if (!(await this.d.store.save(executing))) throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
-      await this.#audit(retry ? 'PAYOUT_APPROVAL_RETRIED' : 'PAYOUT_APPROVAL_APPROVED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'EXECUTING' }, this.d.clock.now());
+      // EXECUTING ?�태?� 감사�?같�? ?�랜??��???�다. 감사 append가 ?�패?�면 ?�태??PENDING_APPROVAL�??�는??OPSV-01).
+      if (!(await this.d.store.save(executing, auditRecord('PAYOUT_BATCH_EXECUTING', executing.approvalId, { ...payoutBase(executing), status: executing.status }, nowMs))))
+        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '?�른 ?�람??먼�? 처리?�습?�다');
+      let executed = false;
       try {
         await this.d.payments.approveBatch(r.batchId, r.approvalId);
         await this.d.payments.executeBatch(r.batchId);
-        const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(this.d.clock.now()), updatedAt: new Date(this.d.clock.now()), version: executing.version + 1 };
-        await this.d.store.save(done);
-        await this.#audit('PAYOUT_APPROVAL_EXECUTED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'DONE' }, this.d.clock.now());
+        executed = true;
+        const doneMs = this.d.clock.now();
+        const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(doneMs), updatedAt: new Date(doneMs), version: executing.version + 1 };
+        // ?�공 ?�태?� 감사??같�? ?�랜??��???�다. ??append가 ?�패?�면 DONE?� 롤백?�고 EXECUTING???�는??
+        await this.d.store.save(
+          done,
+          auditRecord('PAYOUT_BATCH_DONE', done.approvalId, { ...payoutBase(done), status: done.status }, doneMs),
+        );
         return payoutApprovalView(done, actor);
       } catch (e) {
-        const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(this.d.clock.now()), version: executing.version + 1 };
-        await this.d.store.save(failed);
-        await this.#audit('PAYOUT_APPROVAL_FAILED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'FAILED' }, this.d.clock.now());
+        // 지급�??�이 ?��? ?�공???�의 감사 ?�패�?FAILED�?바꾸지 ?�는???�공???�패�?보고?��? ?�는??.
+        if (!executed) {
+          const failedMs = this.d.clock.now();
+          const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(failedMs), version: executing.version + 1 };
+          await this.d.store.save(
+            failed,
+            auditRecord('PAYOUT_BATCH_FAILED', failed.approvalId, { ...payoutBase(failed), status: failed.status, failure: failed.failure }, failedMs),
+          );
+        }
         throw e;
       }
     });
@@ -123,24 +155,31 @@ export class PayoutApprovals {
     return guard(async () => {
       const r = await this.d.store.find(approvalId);
       if (!r) throw notFound();
-      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
+      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '?�인 ?��?중인 지�?묶음???�닙?�다');
       if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 반려할 수 없습니다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 반려할 수 있습니다');
       if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
-      const now = new Date(this.d.clock.now());
+      const nowMs = this.d.clock.now();
+      const now = new Date(nowMs);
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
-      if (!(await this.d.store.save(next))) throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
-      await this.#audit('PAYOUT_APPROVAL_REJECTED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, reason: reason.trim(), status: 'REJECTED' }, this.d.clock.now());
+      if (!(await this.d.store.save(next, auditRecord('PAYOUT_APPROVAL_REJECTED', next.approvalId, { ...payoutBase(next), status: next.status, reason: next.reasonText }, nowMs))))
+        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '?�른 ?�람??먼�? 처리?�습?�다');
       return payoutApprovalView(next, actor);
     });
   }
 
-  async #audit(recordType: string, recordId: string, actorRef: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
-    await this.d.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
-  }
-
   async recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView> {
-    return this.d.payments.recordPortoneExecution(batchId, bulkPayoutId);
+    const batch = await this.d.payments.recordPortoneExecution(batchId, bulkPayoutId);
+    // OPSV-03: ?�기 ?�트???�행??같�? 감사 체인???�긴?? 결제???�출�????�랜??��?????�어 ?�공 ?�에 append?�다.
+    await this.d.audit?.append(
+      auditRecord(
+        'PAYOUT_PORTONE_EXECUTION',
+        batch.batchId,
+        { batchId: batch.batchId, bulkPayoutId, pg: 'PORTONE', status: batch.status, amount: batch.totalAmount, statementCount: batch.statementCount },
+        this.d.clock.now(),
+      ),
+    );
+    return batch;
   }
 
   listBatches(filter: { payoutDate?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchView[]> {

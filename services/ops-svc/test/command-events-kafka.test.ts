@@ -33,7 +33,7 @@ const requested = (eventKey: string, over: Record<string, unknown> = {}) => ({
   reason: '판매자 신원 확인',
   params: { eventId: randomUUID(), reasonCode: 'SELLER_IDENTITY' },
   requestedBy: randomUUID(),
-  requestedRole: 'operator',
+  requestedRole: 'commander',
   ...over,
 });
 

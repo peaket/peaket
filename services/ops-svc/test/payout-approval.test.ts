@@ -12,7 +12,8 @@ import { FakeIdentity, quiet } from './support.js';
 
 const NOW = Date.parse('2026-11-15T00:00:00.000Z');
 const identity = new FakeIdentity();
-const store = new MemoryPayoutApprovalStore();
+const audit = new MemoryAuditChain();
+const store = new MemoryPayoutApprovalStore(audit);
 
 class FakePayments implements PayoutPaymentClient {
   batches: PayoutBatchView[] = [];
@@ -68,7 +69,6 @@ class TestReauth implements ApprovalReauthVerifier {
 }
 const tokenAccount = new Map<string, string>();
 const payments = new FakePayments();
-const audit = new MemoryAuditChain();
 let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
@@ -162,7 +162,7 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     const created = JSON.parse((await create()).payload);
     const ok = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: noBody('commander', 'approval-token') });
     expect(ok.statusCode).toBe(200);
-    expect(audit.entries.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_APPROVAL_APPROVED', 'PAYOUT_APPROVAL_EXECUTED']);
+    expect(audit.entries.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_BATCH_EXECUTING', 'PAYOUT_BATCH_DONE']);
   });
 
   test('J-T3 요청자와 같은 사람은 승인할 수 없고, 반려는 사유가 필요하다', async () => {
@@ -218,7 +218,7 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     expect(ok.statusCode).toBe(200);
     expect(payments.executedTotals).toEqual([2_500_000_000]);
     const records = audit.entries.filter((e) => e.recordId === created.approvalId);
-    expect(records.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_APPROVAL_APPROVED', 'PAYOUT_APPROVAL_EXECUTED']);
+    expect(records.map((e) => e.recordType)).toEqual(['PAYOUT_APPROVAL_REQUESTED', 'PAYOUT_BATCH_EXECUTING', 'PAYOUT_BATCH_DONE']);
   });
 
   test('TEST-05 같은 pg·pgStore·payoutDate 두 번째 배치는 409 payout-batch-exists다', async () => {

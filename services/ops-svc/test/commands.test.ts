@@ -9,8 +9,12 @@ import {
   ListCommands,
   MemoryCommandStore,
   approvalModeOf,
+  approverRolesOf,
+  requesterRolesOf,
   stateAfterCreate,
+  viewOf,
   type CommandExecutor,
+  type CommandType,
 } from '../src/modules/commands/index.js';
 
 const NOW = Date.parse('2026-11-14T01:00:00.000Z');
@@ -24,12 +28,13 @@ const fixture = (executor?: CommandExecutor) => {
   return { audit, store, create: new CreateCommand(store, execution), list: new ListCommands(store), decide: new DecideCommand(store, execution) };
 };
 
-const input = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'KILL_SWITCH' | 'AUTOMATION_STOP' | 'EVENT_CANCEL', over: Record<string, unknown> = {}) => ({
+const COMMANDER_TYPES = ['BOT_LEVEL', 'KILL_SWITCH', 'AUTOMATION_STOP', 'SALE_STOP', 'SALE_RESUME', 'DEGRADED_MODE'];
+const input = (type: CommandType, over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
   params: { level: 'DEBUG' },
   requestedBy: REQUESTER,
-  requestedRole: 'operator',
+  requestedRole: COMMANDER_TYPES.includes(type) ? 'commander' : 'operator',
   nowMs: NOW,
   ...over,
 });
@@ -62,6 +67,25 @@ describe('운영 명령 접수·승인', () => {
     expect(stop.state).toBe('APPROVED');
     expect(approvalModeOf('KILL_SWITCH')).toBe('NONE');
     expect(approvalModeOf('AUTOMATION_STOP')).toBe('NONE');
+  });
+
+  test('B3H01_commander_전용_명령은_operator가_요청·승인할_수_없고_canApprove가_역할을_따른다', async () => {
+    const f = fixture();
+    await expect(f.create.execute(input('SALE_STOP', { requestedRole: 'operator', params: { eventId: randomUUID() } }))).rejects.toMatchObject({ status: 403 });
+    await expect(f.create.execute(input('KILL_SWITCH', { requestedRole: 'operator' }))).rejects.toMatchObject({ status: 403 });
+    expect(requesterRolesOf('SALE_STOP')).toEqual(['commander']);
+    expect(approverRolesOf('KILL_SWITCH')).toEqual(['commander']);
+    expect(requesterRolesOf('EVENT_CANCEL')).toEqual(['operator', 'commander']);
+    expect(approverRolesOf('EVENT_CANCEL')).toEqual(['operator', 'commander']);
+
+    const c = await f.create.execute(input('SALE_STOP', { params: { eventId: randomUUID() } }));
+    expect(c.state).toBe('PENDING_APPROVAL');
+    await expect(f.decide.approve({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'operator', nowMs: NOW + 1 })).rejects.toMatchObject({ status: 403 });
+    const principal = (accountId: string, role: string) => ({ accountId, sessionId: '', aud: 'ops' as const, scopes: [], role });
+    expect(viewOf(c, principal(APPROVER, 'operator')).canApprove).toBe(false);
+    expect(viewOf(c, principal(APPROVER, 'commander')).canApprove).toBe(true);
+    const approved = await f.decide.approve({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 });
+    expect(approved.state).toBe('APPROVED');
   });
 
   test('GAT110_회차_ID가_UUID가_아니면_422다', async () => {
@@ -121,7 +145,7 @@ describe('운영 명령 접수·승인', () => {
   test('GAT110_거부는_REJECTED와_사유를_남긴다', async () => {
     const f = fixture();
     const c = await f.create.execute(input('BOT_LEVEL'));
-    const rejected = await f.decide.reject({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'operator', reason: '근거 부족', nowMs: NOW + 1 });
+    const rejected = await f.decide.reject({ commandId: c.commandId, approverRef: APPROVER, approverRole: 'commander', reason: '근거 부족', nowMs: NOW + 1 });
     expect(rejected.state).toBe('REJECTED');
     expect(f.audit.entries.at(-1)).toMatchObject({ recordType: 'COMMAND_REJECTED' });
   });

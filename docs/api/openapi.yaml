@@ -69,6 +69,7 @@ x-peaket-problem-types:
     commander-required: { status: 403, title: "간격 예외는 commander만 쓸 수 있습니다" }
     command-not-pending: { status: 409, title: "승인 대기 중인 명령이 아닙니다" }
     command-requester-cannot-approve: { status: 403, title: "요청한 분은 승인할 수 없습니다" }
+    command-role-forbidden: { status: 403, title: "이 명령을 할 수 있는 역할이 아닙니다" }
     command-not-executable: { status: 409, title: "실행할 수 있는 명령이 아닙니다" }
     command-not-failed: { status: 409, title: "실패한 명령만 다시 시도할 수 있습니다" }
     checkpoint-empty: { status: 409, title: "묶을 감사 기록이 없습니다" }
@@ -197,6 +198,7 @@ x-peaket-problem-types:
     payout-batch-empty: { status: 409, title: "지급할 확정 정산서가 없습니다" }
     payout-batch-exists: { status: 409, title: "이미 지급 묶음이 있습니다" }
     payout-batch-not-approved: { status: 409, title: "승인된 지급 묶음이 아닙니다" }
+    version-conflict: { status: 409, title: "다른 요청이 먼저 처리되었습니다" }
     payout-gateway-unavailable: { status: 503, title: "지급대행을 아직 시작할 수 없습니다" }
     payout-batch-not-portone: { status: 409, title: "포트원 지급 묶음이 아닙니다" }
     payout-dependency-unavailable: { status: 503, title: "지급 서비스에 연결하지 못했습니다" }
@@ -1720,8 +1722,8 @@ components:
       type: object
       properties:
         checkpointId: { type: string, format: uuid }
-        valid: { type: boolean, description: "루트·직전 사슬·서명·앵커가 모두 맞는가" }
-        rootValid: { type: boolean, description: "구간 기록을 다시 모은 루트가 저장값과 같은가" }
+        valid: { type: boolean, description: "루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가" }
+        rootValid: { type: boolean, description: "구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)" }
         prevValid: { type: boolean, description: "직전 체크포인트 루트와 이어지는가" }
         signatureValid: { type: boolean, description: "Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)" }
         anchorValid: { type: boolean, description: "공개 앵커 참조가 남았는가" }
@@ -5588,11 +5590,11 @@ paths:
   /v1/ops/audit-checkpoints/{checkpointId}:
     get: { operationId: getOpsAuditCheckpoint, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 상세", description: "BAT-465 GAT-310. viewer 이상. 없는 ID는 404. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "체크포인트", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpoint' } } } }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/audit-checkpoints/{checkpointId}/verification:
-    get: { operationId: getOpsAuditCheckpointVerification, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 검증(루트 재계산·직전 사슬)", description: "BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
+    get: { operationId: getOpsAuditCheckpointVerification, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 검증(루트·기록·연쇄·직전 사슬)", description: "BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 ops_command·command_event 원본 행을 대조하고 직전 체크포인트 루트와 잇는지 본다(B3-H03, R-614). viewer 이상. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/audit-anchors/{checkpointId}:
     get: { operationId: getOpsAuditAnchor, tags: [ops], x-peaket-roles: [public], summary: "감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)", description: "BAT-465 R-584, ADR-0075. 세션 없이 읽는다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트이고, publicKey(SPKI PEM)로 확인한다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 외부 불변 저장소 앵커(S3 Object Lock)·OpenTimestamps는 후속이다. Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "공개 앵커", content: { application/json: { schema: { $ref: '#/components/schemas/AuditAnchor' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/audit-anchors/{checkpointId}/verification:
-    get: { operationId: getOpsAuditAnchorVerification, tags: [ops], x-peaket-roles: [public], summary: "공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)", description: "BAT-465 R-584. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다. Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
+    get: { operationId: getOpsAuditAnchorVerification, tags: [ops], x-peaket-roles: [public], summary: "공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)", description: "BAT-465 R-584·R-614. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다(B3-H03). Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/live:
     get: { operationId: getOpsLive, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)", description: "FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live", security: [{ opsCookie: [] }], parameters: [{ name: eventId, in: query, required: false, description: 접속자를 보일 회차, schema: { type: string } }, { name: Last-Event-ID, in: header, required: false, schema: { type: string } }], responses: { '200': { description: SSE 스트림, content: { text/event-stream: {} } }, '401': { $ref: '#/components/responses/Problem', description: 세션 없음·만료 } } }
   /v1/ops/events/{eventId}/live:

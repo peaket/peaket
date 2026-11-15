@@ -1,7 +1,7 @@
 // 운영 명령의 응답 모양(openapi Command·CommandState). 목록·상세·SSE(live)가 같은 함수를 쓴다.
 import type { Principal } from '@peaket/platform';
 import { z } from 'zod';
-import { COMMAND_STATES, COMMAND_TYPES, type Command } from '../domain/command.js';
+import { COMMAND_STATES, COMMAND_TYPES, approverRolesOf, type Command } from '../domain/command.js';
 
 export const CommandIdParams = z.object({ commandId: z.uuid() }).strict();
 export const CommandBody = z
@@ -50,6 +50,11 @@ export const baseViewOf = (c: Command, me?: Principal): z.output<typeof CommandB
   ...(c.lastError !== undefined ? { lastError: c.lastError } : {}),
   ...(c.executedAtMs !== undefined ? { executedAt: new Date(c.executedAtMs).toISOString() } : {}),
   ...(c.result !== undefined ? { result: c.result } : {}),
-  canApprove: c.state === 'PENDING_APPROVAL' && me !== undefined && c.requestedBy !== me.accountId,
+  canApprove:
+    c.state === 'PENDING_APPROVAL' &&
+    me !== undefined &&
+    c.requestedBy !== me.accountId &&
+    me.role !== undefined &&
+    approverRolesOf(c.type).includes(me.role),
 });
 export const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView> => ({ ...baseViewOf(c, me), params: c.params });

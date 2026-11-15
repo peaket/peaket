@@ -21,17 +21,34 @@ const post = (url: string, headers: Record<string, string>, body: unknown) => sv
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 describe('/v1/ops/commands', () => {
-  test('GAT110_operator가_2인_명령을_접수하면_PENDING_APPROVAL이다', async () => {
-    const op = identity.ops('operator');
-    const r = await post('/v1/ops/commands', op, { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
+  test('GAT110_commander가_2인_명령을_접수하면_PENDING_APPROVAL이다', async () => {
+    const commander = identity.ops('commander');
+    const r = await post('/v1/ops/commands', commander, { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
     expect(r.statusCode).toBe(201);
     expect(JSON.parse(r.payload)).toMatchObject({
       type: 'BOT_LEVEL',
       state: 'PENDING_APPROVAL',
       reason: '봇 급증',
       approvals: [],
-      requestedBy: { adminAccountId: op['x-user-id'], displayName: null, role: 'operator' },
+      requestedBy: { adminAccountId: commander['x-user-id'], displayName: null, role: 'commander' },
     });
+  });
+
+  test('B3H01_operator는_commander_전용_명령을_요청하거나_승인할_수_없다', async () => {
+    const operator = identity.ops('operator');
+    const commander = identity.ops('commander');
+    expect((await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } })).statusCode).toBe(403);
+    expect((await post('/v1/ops/commands', operator, { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} })).statusCode).toBe(403);
+    const created = await post('/v1/ops/commands', commander, { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
+    expect(created.statusCode).toBe(201);
+    const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
+    expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, operator, {})).statusCode).toBe(403);
+    const detail = await get(`/v1/ops/commands/${commandId}`, operator);
+    expect(JSON.parse(detail.payload)).toMatchObject({ canApprove: false });
+    const approver = identity.ops('commander');
+    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, approver, {});
+    expect(approved.statusCode).toBe(200);
   });
 
   test('GAT110_상세는_params를_싣고_목록에는_싣지_않으며_viewer는_상세를_못_본다', async () => {
@@ -56,13 +73,13 @@ describe('/v1/ops/commands', () => {
     expect((await get('/v1/ops/commands', viewer)).statusCode).toBe(200);
     expect((await get('/v1/ops/commands?limit=101', viewer)).statusCode).toBe(400);
     expect((await post('/v1/ops/commands', viewer, { type: 'LOG_LEVEL', reason: 'x' })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', identity.ops('operator'), { type: 'BOT_LEVEL', reason: '권한 확인' });
+    const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'BOT_LEVEL', reason: '권한 확인' });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     expect((await post(`/v1/ops/commands/${commandId}/approvals`, viewer, {})).statusCode).toBe(403);
   });
 
-  test('GAT110_다른_operator가_승인하면_APPROVED이고_요청자는_승인할_수_없다', async () => {
-    const requester = identity.ops('operator');
+  test('GAT110_다른_commander가_승인하면_APPROVED이고_요청자는_승인할_수_없다', async () => {
+    const requester = identity.ops('commander');
     const created = await post('/v1/ops/commands', requester, { type: 'DEGRADED_MODE', reason: '결제사 장애', params: { mode: 'PAYMENT' } });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     const same = await post(`/v1/ops/commands/${commandId}/approvals`, requester, {});

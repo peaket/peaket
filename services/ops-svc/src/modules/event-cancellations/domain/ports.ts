@@ -1,12 +1,14 @@
 // 회차 취소 요청 저장·purchase-svc 일괄 환불 시작 포트.
+import type { AuditRecord } from '../../audit/audit.js';
 import type { EventCancellationFault, EventCancellationKind, EventCancellationPg, EventCancellationRecord, EventCancellationStatus } from './event-cancellation.js';
 
 export interface EventCancellationStore {
-  insert(record: EventCancellationRecord): Promise<void>;
+  /** 상태 행과 감사 기록을 같은 트랜잭션에 쓴다(감사 기록이 있으면) */
+  insert(record: EventCancellationRecord, audit?: AuditRecord): Promise<void>;
   find(requestId: string): Promise<EventCancellationRecord | undefined>;
   findActiveByEvent(eventId: string): Promise<EventCancellationRecord | undefined>;
-  /** 낙관적 판 번호(version) 조건으로 저장한다. 다른 실행이 먼저 바꿨으면 false */
-  save(record: EventCancellationRecord): Promise<boolean>;
+  /** version 조건부 갱신과 감사 기록을 같은 트랜잭션에 쓴다. 다른 요청이 먼저 갱신했으면 false */
+  save(record: EventCancellationRecord, audit?: AuditRecord): Promise<boolean>;
   list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]>;
 }
 

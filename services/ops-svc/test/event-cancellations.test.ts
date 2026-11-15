@@ -22,8 +22,8 @@ const reauth: EventCancellationReauth = {
 };
 
 const fixture = (withRefunds = true) => {
-  const store = new MemoryEventCancellationStore();
   const audit = new MemoryAuditChain();
+  const store = new MemoryEventCancellationStore(audit);
   const calls: string[] = [];
   const refunds: EventRefundStarter = {
     start: async (i) => {
@@ -92,8 +92,9 @@ describe('회차 취소 요청 [BAT-425]', () => {
 
   test('M4-05 COMPLETED·REFUND_WINDOW를 RUNNING으로 뭉개지 않는다', async () => {
     for (const [jobState, status] of [['COMPLETED', 'COMPLETED'], ['REFUND_WINDOW', 'REFUND_WINDOW']] as const) {
-      const store = new MemoryEventCancellationStore();
-      const app = new EventCancellations(store, { start: async (i) => ({ jobId: i.requestId, state: jobState }), pause: async () => ({ jobId: '', state: 'PAUSED' }), resume: async () => ({ jobId: '', state: 'RUNNING' }) }, () => NOW, new MemoryAuditChain(), reauth);
+      const audit = new MemoryAuditChain();
+      const store = new MemoryEventCancellationStore(audit);
+      const app = new EventCancellations(store, { start: async (i) => ({ jobId: i.requestId, state: jobState }), pause: async () => ({ jobId: '', state: 'PAUSED' }), resume: async () => ({ jobId: '', state: 'RUNNING' }) }, () => NOW, audit, reauth);
       const r = await app.request({ eventId: EVENT, reason: '공연 취소' }, COMMANDER);
       await app.judge(r.requestId, { fault: 'ORGANIZER', reason: 'x', fanNoticeReason: '공연이 취소되었습니다' }, COMMANDER);
       expect(await approve({ app } as never, r.requestId)).toMatchObject({ status });

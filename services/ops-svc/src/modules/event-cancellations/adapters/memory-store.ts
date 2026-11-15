@@ -1,4 +1,5 @@
 // 회차 취소 요청 메모리 저장소(단위 시험·로컬).
+import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { EventCancellationRecord, EventCancellationStatus } from '../domain/event-cancellation.js';
 import type { EventCancellationStore } from '../domain/ports.js';
 
@@ -7,8 +8,11 @@ const ACTIVE: ReadonlySet<EventCancellationStatus> = new Set(['REQUESTED', 'JUDG
 export class MemoryEventCancellationStore implements EventCancellationStore {
   readonly rows = new Map<string, EventCancellationRecord>();
 
-  async insert(record: EventCancellationRecord): Promise<void> {
+  constructor(private readonly audit?: AuditChain) {}
+
+  async insert(record: EventCancellationRecord, audit?: AuditRecord): Promise<void> {
     this.rows.set(record.requestId, record);
+    if (audit) await this.audit?.append(audit);
   }
 
   async find(requestId: string): Promise<EventCancellationRecord | undefined> {
@@ -19,10 +23,11 @@ export class MemoryEventCancellationStore implements EventCancellationStore {
     return [...this.rows.values()].find((r) => r.eventId === eventId && ACTIVE.has(r.status));
   }
 
-  async save(record: EventCancellationRecord): Promise<boolean> {
+  async save(record: EventCancellationRecord, audit?: AuditRecord): Promise<boolean> {
     const current = this.rows.get(record.requestId);
     if (!current || current.version !== record.version - 1) return false;
     this.rows.set(record.requestId, record);
+    if (audit) await this.audit?.append(audit);
     return true;
   }
 

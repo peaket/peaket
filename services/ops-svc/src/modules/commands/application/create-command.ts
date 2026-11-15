@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import { z } from 'zod';
-import { COMMAND_TYPES, type Command, type CommandExecutionActor, type CommandType } from '../domain/command.js';
+import { COMMAND_TYPES, requesterRolesOf, type Command, type CommandExecutionActor, type CommandType } from '../domain/command.js';
 import type { CommandStore } from '../domain/ports.js';
 import type { ExecuteCommand } from './execute-command.js';
 
@@ -36,6 +36,10 @@ export class CreateCommand {
 
   async execute(input: CreateCommandInput): Promise<Command> {
     if (!COMMAND_TYPES.includes(input.type)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
+    // 유형별 역할을 접수 층이 아니라 여기서도 검사한다. 내부 사건 수신·직접 호출도 같은 규칙을 지킨다(B3-H01).
+    if (!requesterRolesOf(input.type).includes(input.requestedRole)) {
+      throw new ProblemError({ type: 'command-role-forbidden', status: 403, title: '이 명령을 요청할 수 있는 역할이 아닙니다' });
+    }
     const reason = input.reason.trim();
     if (reason.length === 0 || reason.length > 2000 || CONTROL.test(reason)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
     if (typeof input.params !== 'object' || input.params === null || Array.isArray(input.params)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });

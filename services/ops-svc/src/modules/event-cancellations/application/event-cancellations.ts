@@ -3,9 +3,13 @@
 // 확정은 외부 호출 전에 RUNNING으로 조건부 저장하고, 외부가 실패하면 JUDGED로 되돌려 다시 시도할 수 있게 한다.
 // 모든 상태 변화는 ops 감사 체인에도 남긴다(transfer-refund §8, settlement §5.1).
 import { randomUUID } from 'node:crypto';
-import type { AuditChain } from '../../audit/audit.js';
+import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import { EventCancellationProblem, eventCancellationView, type EventCancellationFault, type EventCancellationKind, type EventCancellationPg, type EventCancellationRecord, type EventCancellationStatus, type EventCancellationView } from '../domain/event-cancellation.js';
 import type { EventCancellationStore, EventRefundStarter } from '../domain/ports.js';
+
+const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
+/** 모든 회차 취소 감사에 싣는 원본 대조용 고정 값(사유·회차·종류·요청자) */
+const eventBase = (r: EventCancellationRecord): Record<string, unknown> => ({ eventId: r.eventId, kind: r.kind, requestReason: r.reason, requestedBy: r.requestedBy });
 
 export interface OpsActor {
   readonly accountId: string;
@@ -40,7 +44,8 @@ export class EventCancellations {
     if (input.reason.trim() === '') throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
     if (input.kind !== undefined && input.kind !== 'CANCEL') throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
     if (await this.store.findActiveByEvent(input.eventId)) throw new EventCancellationProblem('sale-not-suspended', 409, '이미 진행 중인 회차 취소 요청이 있습니다');
-    const now = new Date(this.now());
+    const nowMs = this.now();
+    const now = new Date(nowMs);
     const record: EventCancellationRecord = {
       requestId: randomUUID(),
       eventId: input.eventId,
@@ -60,8 +65,10 @@ export class EventCancellations {
       version: 1,
       updatedAt: now,
     };
-    await this.store.insert(record);
-    await this.#audit('EVENT_CANCELLATION_REQUESTED', record.requestId, actor.accountId, { eventId: record.eventId, reason: record.reason, status: record.status }, this.now());
+    await this.store.insert(
+      record,
+      audit('EVENT_CANCELLATION_REQUESTED', record.requestId, { ...eventBase(record), reason: record.reason, status: record.status }, nowMs),
+    );
     return eventCancellationView(record);
   }
 
@@ -77,10 +84,12 @@ export class EventCancellations {
     const r = await this.#find(requestId);
     if (r.status !== 'REQUESTED' && r.status !== 'JUDGED') throw new EventCancellationProblem('judgement-not-allowed', 409, '지금은 판정할 수 없습니다');
     if (input.fanNoticeReason.length > 200) throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
-    const now = new Date(this.now());
-    const next: EventCancellationRecord = { ...r, status: 'JUDGED', fault: input.fault, judgementReason: input.reason, fanNoticeReason: input.fanNoticeReason, judgedBy: actor.accountId, judgedAt: now, version: r.version + 1, updatedAt: now };
-    if (!(await this.store.save(next))) throw conflict();
-    await this.#audit('EVENT_CANCELLATION_JUDGED', next.requestId, actor.accountId, { eventId: next.eventId, fault: next.fault, reason: input.reason, fanNoticeReason: input.fanNoticeReason }, this.now());
+    const nowMs = this.now();
+    const next: EventCancellationRecord = { ...r, status: 'JUDGED', fault: input.fault, judgementReason: input.reason, fanNoticeReason: input.fanNoticeReason, judgedBy: actor.accountId, judgedAt: new Date(nowMs), version: r.version + 1, updatedAt: new Date(nowMs) };
+    await this.store.save(
+      next,
+      audit('EVENT_CANCELLATION_JUDGED', next.requestId, { ...eventBase(next), status: next.status, fault: next.fault, reason: next.judgementReason, fanNoticeReason: next.fanNoticeReason }, nowMs),
+    );
     return eventCancellationView(next);
   }
 
@@ -93,25 +102,23 @@ export class EventCancellations {
     const verified = await this.reauth.verify(reauthToken, { sessionId: actor.sessionId ?? '', act: 'APPROVAL' });
     if (verified.accountId !== actor.accountId) throw new EventCancellationProblem('reauth-required', 403, '다시 인증해 주세요');
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
-    const fault = r.fault;
-    if (fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
-    const now = new Date(this.now());
-    // 외부 호출 전에 RUNNING으로 조건부 저장한다. 두 승인자가 동시에 와도 하나만 통과한다(OPS-07).
-    const running: EventCancellationRecord = { ...r, status: 'RUNNING', approvedBy: actor.accountId, approvedAt: now, version: r.version + 1, updatedAt: now };
-    if (!(await this.store.save(running))) throw conflict();
-    await this.#audit('EVENT_CANCELLATION_APPROVED', running.requestId, actor.accountId, { eventId: running.eventId, judgedBy: running.judgedBy, fault: running.fault }, this.now());
+    if (r.fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
+    const nowMs = this.now();
+    // 외부 호출 전에 RUNNING으로 조건부 저장해, 확정 중복과 외부 실패 뒤 재시도를 함께 다룬다(OPS-07).
+    const running: EventCancellationRecord = { ...r, status: 'RUNNING', approvedBy: actor.accountId, approvedAt: new Date(nowMs), version: r.version + 1, updatedAt: new Date(nowMs) };
+    if (!(await this.store.save(running, audit('EVENT_CANCELLATION_APPROVED', running.requestId, { ...eventBase(running), status: running.status, fault: running.fault }, nowMs)))) throw conflict();
     try {
-      const job = await this.refunds.start({ eventId: running.eventId, requestId: running.requestId, fault, ruledBy: running.judgedBy ?? '', confirmedBy: actor.accountId, kind: running.kind, ...(running.fanNoticeReason !== null ? { fanNoticeReason: running.fanNoticeReason } : {}) });
+      const job = await this.refunds.start({ eventId: running.eventId, requestId: running.requestId, fault: r.fault, ruledBy: running.judgedBy ?? '', confirmedBy: actor.accountId, kind: running.kind, ...(running.fanNoticeReason !== null ? { fanNoticeReason: running.fanNoticeReason } : {}) });
       const status = job.state === 'COMPLETED' ? 'COMPLETED' : job.state === 'REFUND_WINDOW' ? 'REFUND_WINDOW' : 'RUNNING';
-      const next: EventCancellationRecord = { ...running, status, refundJobState: job.state, version: running.version + 1, updatedAt: new Date(this.now()) };
-      if (!(await this.store.save(next))) throw conflict();
-      await this.#audit('EVENT_CANCELLATION_STARTED', next.requestId, actor.accountId, { eventId: next.eventId, status: next.status, jobState: job.state }, this.now());
+      const doneMs = this.now();
+      const next: EventCancellationRecord = { ...running, status, refundJobState: job.state, version: running.version + 1, updatedAt: new Date(doneMs) };
+      if (!(await this.store.save(next, audit('EVENT_CANCELLATION_STARTED', next.requestId, { ...eventBase(next), status: next.status, jobState: job.state }, doneMs)))) throw conflict();
       return eventCancellationView(next);
     } catch (err) {
-      // 외부 호출이 실패하면 다시 시도할 수 있게 JUDGED로 되돌린다(이미 시작됐을 수 있으므로 purchase-svc 멱등 키가 받친다).
-      const back: EventCancellationRecord = { ...running, status: 'JUDGED', approvedBy: null, approvedAt: null, version: running.version + 1, updatedAt: new Date(this.now()) };
-      await this.store.save(back).catch(() => false);
-      await this.#audit('EVENT_CANCELLATION_APPROVAL_FAILED', running.requestId, actor.accountId, { eventId: running.eventId, error: err instanceof Error ? err.name : 'unknown' }, this.now());
+      // 외부 호출이 실패하면 다시 시도할 수 있게 JUDGED로 되돌린다(외부 시작은 요청 ID 멱등에 기댄다).
+      const backMs = this.now();
+      const back: EventCancellationRecord = { ...running, status: 'JUDGED', approvedBy: null, approvedAt: null, version: running.version + 1, updatedAt: new Date(backMs) };
+      await this.store.save(back, audit('EVENT_CANCELLATION_APPROVAL_FAILED', back.requestId, { ...eventBase(back), error: err instanceof Error ? err.name : 'unknown' }, backMs)).catch(() => false);
       throw err;
     }
   }
@@ -120,12 +127,15 @@ export class EventCancellations {
     const r = await this.#find(requestId);
     if (r.status === 'APPROVED' || r.status === 'RUNNING' || r.status === 'PAUSED' || r.status === 'COMPLETED' || r.status === 'REFUND_WINDOW') throw new EventCancellationProblem('already-approved', 409, '이미 확정된 요청입니다');
     if (r.status === 'JUDGED' && r.judgedBy === actor.accountId) throw new EventCancellationProblem('approver-ineligible', 403, '판정자는 반려할 수 없습니다');
-    const now = new Date(this.now());
+    const nowMs = this.now();
+    const now = new Date(nowMs);
     const next: EventCancellationRecord = r.status === 'JUDGED'
       ? { ...r, status: 'REQUESTED', fault: null, judgementReason: null, fanNoticeReason: null, judgedBy: null, judgedAt: null, version: r.version + 1, updatedAt: now }
       : { ...r, status: 'REJECTED', reason: r.reason, version: r.version + 1, updatedAt: now };
-    if (!(await this.store.save(next))) throw conflict();
-    await this.#audit('EVENT_CANCELLATION_REJECTED', next.requestId, actor.accountId, { eventId: next.eventId, reason, status: next.status }, this.now());
+    await this.store.save(
+      next,
+      audit('EVENT_CANCELLATION_REJECTED', next.requestId, { ...eventBase(next), status: next.status, reason }, nowMs),
+    );
     return eventCancellationView(next);
   }
 
@@ -134,9 +144,12 @@ export class EventCancellations {
     if (r.status !== 'RUNNING' && r.status !== 'PAUSED') throw new EventCancellationProblem('not-running', 409, '진행 중인 요청이 아닙니다');
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
     const job = await this.refunds.pause({ requestId, ...(input.pg ? { pg: input.pg } : {}), reason: input.reason });
-    const next: EventCancellationRecord = { ...r, status: 'PAUSED', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(this.now()) };
-    if (!(await this.store.save(next))) throw conflict();
-    await this.#audit('EVENT_CANCELLATION_PAUSED', next.requestId, actor.accountId, { eventId: next.eventId, pg: input.pg ?? null, reason: input.reason }, this.now());
+    const nowMs = this.now();
+    const next: EventCancellationRecord = { ...r, status: 'PAUSED', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(nowMs) };
+    await this.store.save(
+      next,
+      audit('EVENT_CANCELLATION_PAUSED', next.requestId, { ...eventBase(next), status: next.status, pg: input.pg ?? 'ALL', reason: input.reason, refundJobState: next.refundJobState }, nowMs),
+    );
     return eventCancellationView(next);
   }
 
@@ -145,9 +158,12 @@ export class EventCancellations {
     if (r.status !== 'PAUSED' && r.status !== 'RUNNING') throw new EventCancellationProblem('not-running', 409, '멈춘 요청이 아닙니다');
     if (!this.refunds) throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
     const job = await this.refunds.resume({ requestId, ...(input.pg ? { pg: input.pg } : {}), reason: input.reason });
-    const next: EventCancellationRecord = { ...r, status: 'RUNNING', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(this.now()) };
-    if (!(await this.store.save(next))) throw conflict();
-    await this.#audit('EVENT_CANCELLATION_RESUMED', next.requestId, actor.accountId, { eventId: next.eventId, pg: input.pg ?? null, reason: input.reason }, this.now());
+    const nowMs = this.now();
+    const next: EventCancellationRecord = { ...r, status: 'RUNNING', refundJobState: job.state, version: r.version + 1, updatedAt: new Date(nowMs) };
+    await this.store.save(
+      next,
+      audit('EVENT_CANCELLATION_RESUMED', next.requestId, { ...eventBase(next), status: next.status, pg: input.pg ?? 'ALL', reason: input.reason, refundJobState: next.refundJobState }, nowMs),
+    );
     return eventCancellationView(next);
   }
 
@@ -157,7 +173,4 @@ export class EventCancellations {
     return r;
   }
 
-  async #audit(recordType: string, recordId: string, actorRef: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
-    await this.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
-  }
 }

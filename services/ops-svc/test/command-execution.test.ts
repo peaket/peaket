@@ -21,7 +21,7 @@ const REQUESTER = '0193a000-0000-7000-8000-000000000001';
 const APPROVER = '0193a000-0000-7000-8000-000000000002';
 const SESSION = '0193a000-0000-7000-8000-000000000003';
 
-const actor = (accountId: string = REQUESTER): CommandExecutionActor => ({ accountId, sessionId: SESSION, role: 'operator' });
+const actor = (accountId: string = REQUESTER, role = 'operator'): CommandExecutionActor => ({ accountId, sessionId: SESSION, role });
 
 const fixture = (executor?: CommandExecutor) => {
   const audit = new MemoryAuditChain();
@@ -41,7 +41,7 @@ const fixture = (executor?: CommandExecutor) => {
   };
 };
 
-const input = (type: 'SCALE_CHANGE' | 'EVENT_CANCEL' | 'LOG_LEVEL' | 'BOT_LEVEL', over: Record<string, unknown> = {}) => ({
+const input = (type: 'SCALE_CHANGE' | 'EVENT_CANCEL' | 'LOG_LEVEL' | 'BOT_LEVEL' | 'KILL_SWITCH', over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
   params: { eventId: randomUUID(), scale: 'LARGE', fault: 'ORGANIZER' },
@@ -117,6 +117,16 @@ describe('운영 명령 실행·재시도', () => {
     expect(retried.attempts).toBe(2);
     expect(retried.lastError).toBeUndefined();
     expect(executor.calls).toHaveLength(2);
+  });
+
+  test('B3H01_operator는_실패한_KILL_SWITCH를_재시도할_수_없고_commander는_할_수_있다', async () => {
+    const f = fixture(executorOf([{ status: 'FAILED', error: 'admission down' }, { status: 'SUCCEEDED' }]));
+    const c = await f.create.execute(input('KILL_SWITCH', { requestedRole: 'commander', params: {}, actor: actor(REQUESTER, 'commander') }));
+    expect(c.state).toBe('FAILED');
+    await expect(f.retry.execute({ commandId: c.commandId, actor: actor(APPROVER, 'operator'), nowMs: NOW + 1 })).rejects.toMatchObject({ status: 403 });
+    const retried = await f.retry.execute({ commandId: c.commandId, actor: actor(APPROVER, 'commander'), nowMs: NOW + 2 });
+    expect(retried.state).toBe('SUCCEEDED');
+    expect(retried.attempts).toBe(2);
   });
 
   test('GAT300_FAILED가_아니면_재시도는_409다', async () => {

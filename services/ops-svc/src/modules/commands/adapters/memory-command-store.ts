@@ -1,5 +1,5 @@
 // 시험용 메모리 명령 저장소. 감사 체인은 MemoryAuditChain을 쓴다.
-import { APPROVAL_TTL_MS, approvalModeOf, stateAfterCreate, type Command, type CommandState, type CommandType, type NewCommand } from '../domain/command.js';
+import { APPROVAL_TTL_MS, approvalModeOf, approverRolesOf, requesterRolesOf, stateAfterCreate, type Command, type CommandState, type CommandType, type NewCommand } from '../domain/command.js';
 import type { CommandDecision, CommandListQuery, CommandPage, CommandStore } from '../domain/ports.js';
 import type { AuditChain } from '../../audit/audit.js';
 
@@ -106,6 +106,9 @@ export class MemoryCommandStore implements CommandStore {
     const current = this.#byId.get(commandId);
     if (!current) return { status: 'NOT_FOUND' };
     if (current.state !== 'PENDING_APPROVAL') return { status: 'NOT_PENDING' };
+    if (!requesterRolesOf(current.type).includes(current.requestedRole) || !approverRolesOf(current.type).includes(approverRole)) {
+      return { status: 'ROLE_FORBIDDEN' };
+    }
     if (current.requestedBy === approverRef) return { status: 'SAME_ACTOR' };
     const command: Command = {
       ...current,

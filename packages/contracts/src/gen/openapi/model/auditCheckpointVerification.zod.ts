@@ -13,8 +13,8 @@ import * as zod from 'zod';
 
 export const AuditCheckpointVerification = zod.object({
   "checkpointId": zod.uuid().optional(),
-  "valid": zod.boolean().optional().describe('루트·직전 사슬·서명·앵커가 모두 맞는가'),
-  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
+  "valid": zod.boolean().optional().describe('루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)'),
   "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
   "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
   "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),

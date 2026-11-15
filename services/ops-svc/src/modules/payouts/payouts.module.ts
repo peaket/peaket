@@ -14,13 +14,17 @@ export interface PayoutsModuleDeps {
   readonly store?: PayoutApprovalStore;
   readonly payments: PayoutPaymentClient;
   readonly reauth?: ApprovalReauthVerifier;
-  /** 지급 승인 요청·승인·반려·실행·재시도를 감사 체인에 남긴다 */
+  /** 수기 포트원 실행 감사(OPSV-03). 상태 저장 감사는 저장소가 같은 트랜잭션에 쓴다 */
   readonly audit?: AuditChain;
 }
 
 @Module({})
 export class PayoutsModule {
-  static register(o: { storage: 'memory'; deps?: Partial<PayoutsModuleDeps> } | ({ storage: 'database'; database: Database } & PayoutsModuleDeps)): DynamicModule {
+  static register(
+    o:
+      | { storage: 'memory'; deps?: Partial<PayoutsModuleDeps>; audit?: AuditChain }
+      | ({ storage: 'database'; database: Database } & PayoutsModuleDeps),
+  ): DynamicModule {
     const providers: Provider[] = [
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       {
@@ -47,7 +51,7 @@ export class PayoutsModule {
       controllers: [PayoutsController],
       providers: [
         ...providers,
-        { provide: PAYOUT_APPROVAL_STORE, useValue: o.deps?.store ?? new MemoryPayoutApprovalStore() },
+        { provide: PAYOUT_APPROVAL_STORE, useValue: o.deps?.store ?? new MemoryPayoutApprovalStore(o.audit) },
         { provide: PAYOUT_PAYMENT_CLIENT, useValue: o.deps?.payments ?? new UnavailablePayoutPaymentClient() },
         { provide: APPROVAL_REAUTH_VERIFIER, useValue: o.deps?.reauth ?? new UnavailableApprovalVerifier() },
       ],
