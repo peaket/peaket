@@ -143,6 +143,20 @@ describe('GAT-130 자동 정지', () => {
     expect(resumed.status).toBe('PAUSED');
     expect(f.calls).toHaveLength(0);
   });
+
+  test('GAT130_결과_모름이_5번째에_닿으면_FAILED와_CS_알림으로_끝내고_더_부르지_않는다', async () => {
+    const f = fixture({ outcomes: ['REFUND_PENDING', 'REFUND_PENDING', 'REFUND_PENDING', 'REFUND_PENDING', 'REFUND_PENDING', 'REFUNDED'] });
+    let r = await start(f.service);
+    for (let i = 0; i < 4; i++) r = await f.service.resume({ requestId: REQUEST });
+    expect(r).toMatchObject({ status: 'COMPLETED', progress: { total: 1, done: 0, failed: 1 } });
+    const item = (await f.store.items(REQUEST))[0]!;
+    expect(item).toMatchObject({ status: 'FAILED', attempts: 5, lastError: 'refund-pending' });
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0]).toMatchObject({ requestId: REQUEST, ticketId: T1, attempts: 5, lastError: 'refund-pending' });
+    expect(f.calls).toHaveLength(5);
+    await expect(f.service.resume({ requestId: REQUEST })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.calls).toHaveLength(5);
+  });
 });
 
 describe('GAT-130 연기 신청 창', () => {
@@ -159,7 +173,7 @@ describe('GAT-130 연기 신청 창', () => {
     const closed = await f.service.closeWindow({ requestId: REQUEST, closedBy: 'commander-1', reason: '신청 기한 종료' });
     expect(closed.status).toBe('COMPLETED');
     expect(closed.progress).toMatchObject({ total: 2, done: 1, notApplied: 1 });
-    expect(closed.progress.perPg[0]).toMatchObject({ notApplied: 1 });
+    expect(closed.progress.perPg[0]).toMatchObject({ state: 'COMPLETED', notApplied: 1 });
     await expect(f.service.apply({ requestId: REQUEST, ticketId: T2 })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
@@ -173,6 +187,19 @@ describe('GAT-130 연기 신청 창', () => {
     const after = await f.service.get(REQUEST);
     expect(after.status).toBe('COMPLETED');
     expect(after.progress).toMatchObject({ total: 2, done: 1, notApplied: 1 });
+  });
+
+  test('GAT130_창이_닫히는_같은_밀리초에는_신청을_받지_않고_실행기가_닫는다', async () => {
+    const f = fixture({ targets: [target(T1), target(T2)] });
+    await start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    f.setNow(NOW + 3 * DAY);
+    await expect(f.service.apply({ requestId: REQUEST, ticketId: T2 })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.calls).toHaveLength(0);
+    expect(await f.service.runDue()).toMatchObject({ closedWindows: 1 });
+    const after = await f.service.get(REQUEST);
+    expect(after.status).toBe('COMPLETED');
+    expect(after.progress).toMatchObject({ total: 2, done: 0, notApplied: 2 });
+    expect(after.progress.perPg[0]).toMatchObject({ state: 'COMPLETED', notApplied: 2 });
   });
 
   test('GAT130_같은_요청_ID로_종류를_바꾸면_409다', async () => {

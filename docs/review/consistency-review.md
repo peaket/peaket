@@ -706,6 +706,7 @@
 | R-600 | C2-01·C2-05(탈퇴·병합 계정의 스태프 배정·스캐너 세션 잔존, 계정당 스캐너 세션 하나 미보장) | identity staff·withdraw·merge·check-scanner-session, migrations 0033 | 탈퇴·병합 시 배정·세션 종료와 STAFF_REVOKED 사건, 계정 ACTIVE 확인, staff_account_id 부분 유일 인덱스·계정 잠금 | 적용 |
 | R-599 | CONS 높음 2건(정산서 중복·승인 금액≠지급 금액) | payment settlement 0017·settlements.ts·drizzle store·ports·시험 | 부분 유일 인덱스와 배치-정산서 결속·합계 검증으로 고침 | 적용 |
 | R-605 | A2-01·05·06(상품 원천 쿼리 누락·HELD/DISPUTED 복구 없음·회차 정산 미배선) | payment settlement http source·settlements·controller·worker·시험 | 쿼리 전달·재확정 경로·내부 계산 경로/스케줄러 | 적용 |
+| R-598 | purchase 감사 M2 중간(변이 생존: 입장 시작 만료 상한·REFUND_AFTER_CLOSE·연기 공제·결제 실패 복귀·재시도 5회·창 경계·보류 소유자·만료 경계) | services/purchase-svc 시험·inventory index | 경계·권한·재시도·복귀 시험 추가 | 적용 |
 
 ## 4. 숫자 일치표
 

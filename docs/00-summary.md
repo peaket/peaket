@@ -642,6 +642,8 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-600: 탈퇴·병합된 계정의 staff_assignment를 REVOKED로 끝내고 scanner_session을 모두 끝내며 control.sessions-terminated(STAFF_REVOKED)를 세션마다 남긴다. CheckScannerSession은 계정이 ACTIVE가 아니면 valid:false다. scanner_session.staff_account_id(0033) 부분 유일 인덱스와 승인 트랜잭션의 계정 행 잠금으로 계정당 살아 있는 스캐너 세션 하나를 지킨다. identity 단위 554·test-int 171(실제 PostgreSQL 18·Valkey 8.1), typecheck·lint·doc-check·ledger BAT-450·trace I-T21/I-T22·records·contracts gen:check 통과.
 - R-599: 회차·상품 정산서에 SUPERSEDED 제외 부분 유일 인덱스를 두고 insertStatement가 삽입 여부를 돌려주게 했다. 충돌하면 calculateEvent는 기존 정산서를 다시 읽고 calculateProduct는 그 그룹을 건너뛴다. settlement_statement.payout_batch_id를 더해 지급 묶음 승인 시점에 정산서를 한 트랜잭션으로 결속하고, listConfirmed는 미결속 확정만, executeBatch는 그 묶음의 정산서만 지급하며 합계가 다르면 409 payout-batch-amount-mismatch로 멈춘다.
 - R-605: 상품 정산 원천 HTTP가 from·to를 query로 보내고 가짜 core HTTP 200으로 상품 정산서 계산을 시험한다. HELD(KYC·계좌)·DISPUTED를 CONFIRMED로 되돌리는 내부 재확정 경로, POST /internal/v1/settlements/event-calculations, Lease 리더 회차 정산 스케줄러와 core settlement-due 원천을 더했다. ops 지급 승인은 25억 금액·감사 체인·결제사 요청 합계·같은 날짜 두 번째 배치 409를 시험한다.
+- R-598: purchase-svc 우선 구매·취소·일괄 환불의 경계와 권한, 결제 실패 복귀 시험을 보강한다.
+
 ## 5. [충돌] 결정 결과
 
 2026-10-08 프로젝트 소유자의 의사결정에 따라 제안안을 최종 확정했다(질문 2). 새 문서 체계 내에 미해결된 `[충돌 C-n]` 표시는 0곳이다(문서 점검 도구 전수 검사 완료).
