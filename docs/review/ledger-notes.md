@@ -93,10 +93,8 @@
 | catalog-review:v5.0.0-16.2.5 | 다른 단계 |  | BAT-165 후속 | 검색어를 로그에 남기지 않으므로 가리기 규칙을 아직 쓰지 않는다. 로그를 붙일 때 정규화·50자·계정 비연결 규칙을 함께 넣는다 |
 | catalog-review:v5.0.0-16.3.3 | 다른 단계 |  | BAT-165 heavy gate | 검색·자동완성 레이트 리밋 초과와 검색 전용 연결 묶음 포화(503) 기록은 게이트웨이·검색 연결 묶음 배포 몫이다 |
 | catalog-review:v5.0.0-2.4.1 | 다른 단계 |  | BAT-165 heavy gate | 검색·자동완성 IP별 레이트 리밋과 검색 전용 연결 묶음(파드마다 10개 [가정])은 gw-fan·CDN·배포 설정 몫이다. 1차 검색은 공개 읽기와 쪽 상한만 둔다 |
-| frontend:v5.0.0-3.5.4 | 다른 단계 |  | BAT-170 후속 | 지갑 서비스 워커(범위 `/my/tickets/`)와 원격 위젯 호스트 분리는 월렛 SW PoC(wbs 5.1.4)·관제 MF 호스트(OPS-350) 뒤에 본다. 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다 |
-| frontend:v5.0.0-3.6.1 | 다른 단계 |  | OPS-350 | `remotes.json`의 sha384 무결성·계약 주판 검사는 `@peaket/console-contract`가 OPS-350으로 넘겼다. BAT-170은 정적 배포·standalone·정적 자산 보존까지만 본다 |
-| frontend:v5.0.0-14.3.2 | 다른 단계 |  | BAT-170 후속 | 월렛 서비스 워커가 아직 없다(Serwist PoC wbs 5.1.4). SW가 `no-store` 응답을 Cache Storage에 넣지 않는 시험은 그 뒤에 본다 |
-| frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 서비스 워커·`remoteEntry.js`의 `nosniff`는 CloudFront 응답 헤더 정책 몫이다. BAT-170은 앱 코드와 정적 업로드 목록까지만 본다 |
+| frontend:v5.0.0-3.5.4 | 다른 단계 |  | GAT-040 | 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다(ADR-0065 결정 1). 남은 몫은 같은 `www`에 둔 월렛 서비스 워커 범위다: 정본은 `/my/tickets/sw.js`·범위 `/my/tickets/`(docs/frontend.md §5.4)인데 BAT-350(R-554)은 `/serwist/sw.js`·`Service-Worker-Allowed: /my/tickets`(끝 `/` 없음)로 냈다. 범위·위치 PoC는 GAT-040(wbs 5.1.4) 몫이고, 관제 원격 위젯 출처는 OPS-350이다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
+| frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 
 ## 사람 확인
 
