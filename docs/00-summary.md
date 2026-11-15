@@ -677,6 +677,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-634: 웨이브 6 마감 뒤 도착한 독립 검증 보고서를 보존한다. L1V2는 R-608/618/619 잔여 네 건의 통과를 확인했고, R628V는 R-628의 prod 무토큰 시작 차단·401·상수시간 비교 동작을 확인하되 onModuleInit·timingSafeEqual 회귀 시험 공백을 남겼다. A2-17/A2-19 재현 시험은 `test/audit-core-gaps` 가지에, BOT_LEVEL·DEGRADED_MODE 문서-코드 차이는 Wave 7 소유자 결정 목록에 남긴다.
 - R-635: R-608이 trust-svc prod 기동에 내부 gRPC 토큰을 요구한다. R-633은 이를 모든 main-boot에 넣었지만 main-label은 `PEAKET_ENV=ci`로 서버를 띄우고 토큰 없이 ApplyLabel을 부른다. main-boot가 최종 env의 PEAKET_ENV를 보고 prod/staging일 때만 시험 토큰을 넣게 해 prod 기동 시험과 ci 무토큰 시험을 모두 만족한다.
 - R-636: R-604가 PIN_LUA KEYS 끝에 `s:{event:E}:prio`를 더하면서 실패 표시 키의 위치가 PIN은 -4, RELEASE_FAILED는 -3으로 갈렸다. 시험이 고정 위치 대신 끝 네 키 안에 실패 표시 키가 있는지와 모든 KEYS가 한 해시 슬롯인지를 본다. production 코드는 바꾸지 않는다.
+- R-637: 웨이브 6 마감 기록의 CI 자리표시자를 실제 초록 실행 43688939738로 바꾸고, 감사 수정 R-595..R-629와 CI·시험 정합 R-632..R-636을 구분해 적는다. wave6.md의 전체 CI 종료 조건을 체크한다. 이 커밋은 기록만 바꾸며 코드·계약·시험은 바꾸지 않는다.
 
 ## 5. [충돌] 결정 결과
 

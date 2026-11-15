@@ -112,9 +112,9 @@
 
 ## 7. 웨이브 6 종료 조건
 
-- [ ] 높은 결함 전부 수정·검증(A1V-01/02/03, COV2-01 포함)
-- [ ] 독립 시험 작성자가 쓴 회귀 시험 병합(R-621..R-626)
-- [ ] 수정별 독립 검증자 재확인
-- [ ] 전체 CI(web 포함) 통과
-- [ ] `coverage.md`·`findings.md`·`wave6.md`·`PROGRESS.md`·`BUILD_ORDER.md` 기록
-- [ ] Wave 7 착수 전 `develop` 푸시
+- [x] 높은 결함 전부 수정·검증(A1V-01/02/03, COV2-01 포함)
+- [x] 독립 시험 작성자가 쓴 회귀 시험 병합(R-621..R-627)
+- [x] 수정별 독립 검증자 재확인
+- [x] 전체 CI(web 포함) 통과 — 43688939738
+- [x] `coverage.md`·`findings.md`·`wave6.md`·`PROGRESS.md`·`BUILD_ORDER.md` 기록
+- [x] Wave 7 착수 전 `develop` 푸시

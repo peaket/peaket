@@ -733,6 +733,7 @@
 | R-634 | 웨이브 6 최종 검증(R628V·L1V2)과 잔여 위험 | docs/review/audit | R628V·L1V2 보고서 보존, R-628 회귀 시험 공백·A2-17/A2-19 gaps branch·BOT_LEVEL 문서 차이 기록 | 적용 |
 | R-635 | R-633이 모든 trust-svc main-boot에 내부 gRPC 토큰을 넣어 ci 시험(main-label)의 무토큰 gRPC 호출이 UNAUTHENTICATED로 실패 | services/trust-svc/test-int/main-boot.ts | prod/staging에서만 시험 토큰 주입, ci/local은 무토큰 유지 | 적용 |
 | R-636 | R-604 B1-01이 pin KEYS 끝에 prio를 더해 pin-failed-mark 시험의 keys.at(-3)이 실패 표시 키가 아닌 ordered를 가리킴 | services/purchase-svc/test-int/pin-failed-mark.int.test.ts | 실패 표시 키를 끝 묶음(-4..)에서 찾도록 의미 단언으로 바꿈 | 적용 |
+| R-637 | 웨이브 6 최종 CI 43688939738 초록·마감 해시 확정 | docs/PROGRESS.md, docs/review/audit/wave6.md | CI 초록, develop c548c762, 종료 조건 체크 | 적용 |
 
 ## 4. 숫자 일치표
 
