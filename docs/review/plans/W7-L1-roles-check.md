@@ -246,3 +246,4 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | --- | --- | --- | --- | --- |
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T07:54+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T08:33+09:00 |
+| impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T08:59+09:00 |
