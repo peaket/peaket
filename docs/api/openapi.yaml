@@ -134,6 +134,8 @@ x-peaket-problem-types:
     judgement-required: { status: 409, title: "판정 전에는 확정할 수 없습니다" }
     approver-ineligible: { status: 403, title: "판정자는 확정할 수 없습니다" }
     already-approved: { status: 409, title: "이미 확정된 요청입니다" }
+    event-cancellation-conflict: { status: 409, title: "다른 사람이 먼저 처리했습니다" }
+    payout-approval-conflict: { status: 409, title: "다른 사람이 먼저 처리했습니다" }
     not-running: { status: 409, title: "진행 중인 요청이 아닙니다" }
     event-refund-unavailable: { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" }
     notify-sender-unavailable: { status: 503, title: "알림 발송기를 쓸 수 없습니다" }

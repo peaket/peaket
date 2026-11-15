@@ -1,5 +1,6 @@
 // 지급 묶음 2인 승인·실행 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
+import type { AuditChain } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
 import { approvalDueAt, payoutApprovalView, PayoutApprovalProblem, type PayoutApprovalRecord, type PayoutApprovalView, type PayoutBatchView } from '../domain/payout-approval.js';
 
@@ -8,6 +9,8 @@ export interface PayoutApprovalDeps {
   readonly payments: PayoutPaymentClient;
   readonly reauth: ApprovalReauthVerifier;
   readonly clock: Clock;
+  /** 지급 승인 요청·승인·반려·실행·재시도를 감사 체인에 남긴다 */
+  readonly audit?: AuditChain;
 }
 
 export interface OpsActor {
@@ -64,6 +67,7 @@ export class PayoutApprovals {
         version: 1,
       };
       await this.d.store.insert(record);
+      await this.#audit('PAYOUT_APPROVAL_REQUESTED', record.approvalId, actor.accountId, { batchId: record.batchId, amount: record.amount, payoutDate: record.payoutDate, status: record.status }, this.d.clock.now());
       return { batch: { ...batch, approvalId: record.approvalId }, approval: payoutApprovalView(record, actor) };
     });
   }
@@ -95,17 +99,21 @@ export class PayoutApprovals {
       const verified = await this.d.reauth.verify(reauthToken, { sessionId: actor.sessionId, act: 'APPROVAL' });
       if (verified.accountId !== actor.accountId) throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
       const now = new Date(this.d.clock.now());
+      const retry = r.status === 'FAILED';
       const executing: PayoutApprovalRecord = { ...r, status: 'EXECUTING', approverId: actor.accountId, approvedAt: now, updatedAt: now, version: r.version + 1 };
-      await this.d.store.save(executing);
+      if (!(await this.d.store.save(executing))) throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
+      await this.#audit(retry ? 'PAYOUT_APPROVAL_RETRIED' : 'PAYOUT_APPROVAL_APPROVED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'EXECUTING' }, this.d.clock.now());
       try {
         await this.d.payments.approveBatch(r.batchId, r.approvalId);
         await this.d.payments.executeBatch(r.batchId);
-        const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(this.d.clock.now()), updatedAt: new Date(this.d.clock.now()) };
+        const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(this.d.clock.now()), updatedAt: new Date(this.d.clock.now()), version: executing.version + 1 };
         await this.d.store.save(done);
+        await this.#audit('PAYOUT_APPROVAL_EXECUTED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'DONE' }, this.d.clock.now());
         return payoutApprovalView(done, actor);
       } catch (e) {
-        const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(this.d.clock.now()) };
+        const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(this.d.clock.now()), version: executing.version + 1 };
         await this.d.store.save(failed);
+        await this.#audit('PAYOUT_APPROVAL_FAILED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, status: 'FAILED' }, this.d.clock.now());
         throw e;
       }
     });
@@ -121,9 +129,14 @@ export class PayoutApprovals {
       if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
       const now = new Date(this.d.clock.now());
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
-      await this.d.store.save(next);
+      if (!(await this.d.store.save(next))) throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
+      await this.#audit('PAYOUT_APPROVAL_REJECTED', r.approvalId, actor.accountId, { batchId: r.batchId, amount: r.amount, reason: reason.trim(), status: 'REJECTED' }, this.d.clock.now());
       return payoutApprovalView(next, actor);
     });
+  }
+
+  async #audit(recordType: string, recordId: string, actorRef: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
+    await this.d.audit?.append({ recordType, recordId, payload: { ...payload, actorRef }, nowMs });
   }
 
   async recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView> {

@@ -7,6 +7,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
+import type { EventCancellationReauth } from '../src/modules/event-cancellations/index.js';
 import type { EventRefundStarter } from '../src/modules/event-cancellations/domain/ports.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -19,6 +20,12 @@ let admin: pg.Client;
 let svc: Awaited<ReturnType<typeof createService>>;
 const calls: string[] = [];
 
+const reauth: EventCancellationReauth = {
+  verify: async (token, o) => {
+    if (token === undefined || !token.startsWith('APPROVAL:')) throw new Error('reauth');
+    return { accountId: token.slice('APPROVAL:'.length), factors: ['password'] };
+  },
+};
 const refunds: EventRefundStarter = {
   start: async (i) => {
     calls.push(`start:${i.requestId}:${i.fault}`);
@@ -43,7 +50,7 @@ beforeAll(async () => {
   await admin.connect();
   svc = await createService({
     name: 'ops-svc-event-cancellations',
-    module: AppModule.register({ database: db, nowMs: NOW, eventCancellations: { refunds } }),
+    module: AppModule.register({ database: db, nowMs: NOW, eventCancellations: { refunds, reauth } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -79,7 +86,7 @@ describe('회차 취소 요청 실제 DB·HTTP [BAT-425]', () => {
 
     expect((await post(`/v1/ops/event-cancellations/${r.requestId}/judgement`, commander, { fault: 'ORGANIZER', reason: '주최 측', fanNoticeReason: '공연이 취소되었습니다' })).statusCode).toBe(200);
     expect((await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, commander, {})).statusCode).toBe(403);
-    const approved = await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, operator, {});
+    const approved = await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, { ...operator, 'x-reauth-token': `APPROVAL:${operator['x-user-id']}` }, {});
     expect(approved.statusCode).toBe(200);
     expect(JSON.parse(approved.payload)).toMatchObject({ requestId: r.requestId, status: 'RUNNING' });
     expect(calls).toEqual([`start:${r.requestId}:ORGANIZER`]);
@@ -87,6 +94,8 @@ describe('회차 취소 요청 실제 DB·HTTP [BAT-425]', () => {
     const row = await admin.query('select status, judged_by, approved_by, refund_job_state from event_cancellation_request where request_id = $1', [r.requestId]);
     expect(row.rows[0]).toMatchObject({ status: 'RUNNING', refund_job_state: 'RUNNING' });
     expect(row.rows[0].judged_by).not.toBe(row.rows[0].approved_by);
+    const audited = await admin.query('select record_type from audit_chain where record_id = $1 order by seq', [r.requestId]);
+    expect(audited.rows.map((x: { record_type: string }) => x.record_type)).toEqual(['EVENT_CANCELLATION_REQUESTED', 'EVENT_CANCELLATION_JUDGED', 'EVENT_CANCELLATION_APPROVED', 'EVENT_CANCELLATION_STARTED']);
   });
 
   test('판정 전 확정은 409이고, 정지·재개는 일괄 환불 실행기에 잇는다', async () => {
@@ -97,7 +106,7 @@ describe('회차 취소 요청 실제 DB·HTTP [BAT-425]', () => {
     const r = JSON.parse(created.payload) as { requestId: string };
     expect((await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, operator, {})).statusCode).toBe(409);
     await post(`/v1/ops/event-cancellations/${r.requestId}/judgement`, commander, { fault: 'CONTENT_CHANGE', reason: '내용 변경', fanNoticeReason: '공연 내용이 바뀌었습니다' });
-    await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, operator, {});
+    await post(`/v1/ops/event-cancellations/${r.requestId}/approvals`, { ...operator, 'x-reauth-token': `APPROVAL:${operator['x-user-id']}` }, {});
     expect((await post(`/v1/ops/event-cancellations/${r.requestId}/pauses`, commander, { pg: 'TOSS', reason: '수동' })).statusCode).toBe(200);
     expect((await post(`/v1/ops/event-cancellations/${r.requestId}/resumptions`, commander, { pg: 'TOSS', reason: '재개' })).statusCode).toBe(200);
     expect(calls).toContain(`pause:${r.requestId}:TOSS`);

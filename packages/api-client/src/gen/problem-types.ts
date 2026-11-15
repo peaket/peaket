@@ -61,6 +61,7 @@ export type ProblemType =
   | 'enrollment-rate-limited'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
+  | 'event-cancellation-conflict'
   | 'event-refund-unavailable'
   | 'event-schedule-invalid'
   | 'event-suspended'
@@ -157,6 +158,7 @@ export type ProblemType =
   | 'payment-attempts-exceeded'
   | 'payment-not-accepted'
   | 'payout-account-change-hold'
+  | 'payout-approval-conflict'
   | 'payout-balance-insufficient'
   | 'payout-batch-empty'
   | 'payout-batch-exists'
@@ -356,6 +358,7 @@ export const PROBLEM_TYPES = {
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
+  'event-cancellation-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'event-refund-unavailable': { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
@@ -452,6 +455,7 @@ export const PROBLEM_TYPES = {
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'payment-not-accepted': { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" },
   'payout-account-change-hold': { status: 409, title: "정산 계좌 변경 보류 중이라 지급할 수 없습니다" },
+  'payout-approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'payout-balance-insufficient': { status: 409, title: "결제사 잔액이 모자라 지급일을 미룹니다" },
   'payout-batch-empty': { status: 409, title: "지급할 확정 정산서가 없습니다" },
   'payout-batch-exists': { status: 409, title: "이미 지급 묶음이 있습니다" },

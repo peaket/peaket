@@ -5,7 +5,8 @@ export interface EventCancellationStore {
   insert(record: EventCancellationRecord): Promise<void>;
   find(requestId: string): Promise<EventCancellationRecord | undefined>;
   findActiveByEvent(eventId: string): Promise<EventCancellationRecord | undefined>;
-  save(record: EventCancellationRecord): Promise<void>;
+  /** 낙관적 판 번호(version) 조건으로 저장한다. 다른 실행이 먼저 바꿨으면 false */
+  save(record: EventCancellationRecord): Promise<boolean>;
   list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]>;
 }
 

@@ -49,6 +49,43 @@ describe('BAT-465 감사 체크포인트 공개 앵커·서명', () => {
     expect(auditAnchorMessage(tampered).toString('utf8')).toContain(tampered.rootHash);
   });
 
+  test('OPS-04 createWithAudit는 같은 구간을 한 번만 만들고 AUDIT_CHECKPOINT_CREATED를 함께 남긴다', async () => {
+    const chain = new MemoryAuditChain();
+    class AtomicStore extends MemoryAuditCheckpointStore {
+      async createWithAudit(input: Parameters<MemoryAuditCheckpointStore['create']>[0], record: Parameters<MemoryAuditChain['append']>[0]) {
+        const existing = this.entries.find((c) => c.fromSeq === input.fromSeq);
+        if (existing) return existing;
+        const cp = await this.create(input);
+        await chain.append(record);
+        return cp;
+      }
+    }
+    const store = new AtomicStore();
+    const service = new AuditCheckpointService(store, chain, () => NOW, ephemeralAuditAnchorSigner('k'));
+    await chain.append({ recordType: 'COMMAND_CREATED', recordId: crypto.randomUUID(), payload: { a: 1 }, nowMs: NOW });
+    const [a, b] = await Promise.all([service.create({ reason: 'x', actorRef: 'ops-1' }), service.create({ reason: 'y', actorRef: 'ops-2' })]);
+    expect(a.checkpointId).toBe(b.checkpointId);
+    expect(store.entries.filter((c) => c.fromSeq === a.fromSeq)).toHaveLength(1);
+    expect(chain.entries.filter((e) => e.recordType === 'AUDIT_CHECKPOINT_CREATED')).toHaveLength(1);
+  });
+
+  test('M4-02 서명 1바이트가 바뀌면 service.verify가 signatureValid:false로 거절한다', async () => {
+    const f = fixture();
+    await f.chain.append({ recordType: 'COMMAND_CREATED', recordId: crypto.randomUUID(), payload: { a: 1 }, nowMs: NOW });
+    const cp = await f.service.create({ reason: '점검', actorRef: 'ops-1' });
+    const sig = Buffer.from(cp.signature!, 'base64');
+    sig[0] = sig[0]! ^ 1;
+    f.store.entries[0] = { ...cp, signature: sig.toString('base64') };
+    expect(await f.service.verify(cp.checkpointId)).toMatchObject({ valid: false, rootValid: true, prevValid: true, signatureValid: false, anchorValid: true });
+  });
+
+  test('M4-03 체크포인트 ID만 바꿔도 서명 검증이 실패한다', async () => {
+    const f = fixture();
+    await f.chain.append({ recordType: 'COMMAND_CREATED', recordId: crypto.randomUUID(), payload: { a: 1 }, nowMs: NOW });
+    const cp = await f.service.create({ reason: '점검', actorRef: 'ops-1' });
+    expect(f.signer.verify({ ...cp, checkpointId: crypto.randomUUID() }, cp.signature!)).toBe(false);
+  });
+
   test('R584_환경_값_서명기는_운영에서_키가_없으면_시작하지_않고_local은_임시_키를_쓴다', () => {
     expect(() => auditAnchorSignerFromEnv({ PEAKET_ENV: 'prod' })).toThrow(/PEAKET_AUDIT_ANCHOR_PRIVATE_KEY/);
     const local = auditAnchorSignerFromEnv({ PEAKET_ENV: 'local' });

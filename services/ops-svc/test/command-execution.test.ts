@@ -34,6 +34,7 @@ const fixture = (executor?: CommandExecutor) => {
     checkpoints,
     store,
     create: new CreateCommand(store, execute),
+    execute,
     decide: new DecideCommand(store, execute),
     retry: new RetryCommand(store, execute),
     list: new ListCommands(store),
@@ -63,6 +64,14 @@ const executorOf = (results: CommandExecutionResult[]): CommandExecutor & { call
 };
 
 describe('운영 명령 실행·재시도', () => {
+  test('M4-07 승인 대기(PENDING_APPROVAL) 명령은 직접 실행할 수 없다', async () => {
+    const executor = executorOf([]);
+    const f = fixture(executor);
+    const c = await f.create.execute(input('EVENT_CANCEL'));
+    expect(c.state).toBe('PENDING_APPROVAL');
+    await expect(f.execute.run(c, actor(APPROVER), NOW + 1)).rejects.toMatchObject({ status: 409, slug: 'command-not-executable' });
+    expect(executor.calls).toHaveLength(0);
+  });
   test('GAT300_1인_SCALE_CHANGE는_접수_뒤_바로_실행하고_SUCCEEDED다', async () => {
     const executor = executorOf([{ status: 'SUCCEEDED', detail: { applied: true } }]);
     const f = fixture(executor);

@@ -19,8 +19,11 @@ export class MemoryEventCancellationStore implements EventCancellationStore {
     return [...this.rows.values()].find((r) => r.eventId === eventId && ACTIVE.has(r.status));
   }
 
-  async save(record: EventCancellationRecord): Promise<void> {
+  async save(record: EventCancellationRecord): Promise<boolean> {
+    const current = this.rows.get(record.requestId);
+    if (!current || current.version !== record.version - 1) return false;
     this.rows.set(record.requestId, record);
+    return true;
   }
 
   async list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]> {

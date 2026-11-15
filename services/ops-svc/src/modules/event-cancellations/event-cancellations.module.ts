@@ -1,6 +1,7 @@
 // 회차 취소 요청 모듈 조립. AppModule이 저장소와 purchase-svc 일괄 환불 시작기를 골라 넘긴다.
 import { type DynamicModule, Module } from '@nestjs/common';
-import { EventCancellations } from './application/event-cancellations.js';
+import type { AuditChain } from '../audit/audit.js';
+import { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
 import type { EventCancellationStore, EventRefundStarter } from './domain/ports.js';
 import { EventCancellationsController } from './inbound/event-cancellations.controller.js';
 
@@ -8,6 +9,10 @@ export interface EventCancellationsModuleDeps {
   readonly store: EventCancellationStore;
   /** 없으면 확정·정지·재개가 503이다 */
   readonly refunds?: EventRefundStarter;
+  /** 요청·판정·확정·반려·정지·재개를 감사 체인에 남긴다 */
+  readonly audit?: AuditChain;
+  /** 확정의 X-Reauth-Token 검증기. 없으면 확정이 503이다 */
+  readonly reauth?: EventCancellationReauth;
 }
 
 @Module({})
@@ -16,7 +21,7 @@ export class EventCancellationsModule {
     return {
       module: EventCancellationsModule,
       controllers: [EventCancellationsController],
-      providers: [{ provide: EventCancellations, useFactory: () => new EventCancellations(deps.store, deps.refunds) }],
+      providers: [{ provide: EventCancellations, useFactory: () => new EventCancellations(deps.store, deps.refunds, Date.now, deps.audit, deps.reauth) }],
     };
   }
 }

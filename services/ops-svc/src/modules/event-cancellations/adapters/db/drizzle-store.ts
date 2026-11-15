@@ -70,13 +70,14 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
     return row ? recordOf(row) : undefined;
   }
 
-  async save(rec: EventCancellationRecord): Promise<void> {
-    await this.database.db.execute(sql`
+  async save(rec: EventCancellationRecord): Promise<boolean> {
+    const r = await this.database.db.execute(sql`
       update event_cancellation_request set status = ${rec.status}, fault = ${rec.fault}, judgement_reason = ${rec.judgementReason},
         fan_notice_reason = ${rec.fanNoticeReason}, judged_by = ${rec.judgedBy}, judged_at = ${rec.judgedAt}::timestamptz,
         approved_by = ${rec.approvedBy}, approved_at = ${rec.approvedAt}::timestamptz, refund_job_state = ${rec.refundJobState},
         version = ${rec.version}::bigint, updated_at = ${rec.updatedAt}::timestamptz
-      where request_id = ${rec.requestId}::uuid`);
+      where request_id = ${rec.requestId}::uuid and version = ${rec.version - 1}::bigint`);
+    return (r.rowCount ?? 0) === 1;
   }
 
   async list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]> {
