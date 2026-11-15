@@ -4,13 +4,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, ProblemError } from '@peaket/platform';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { AuditAnchorSigner } from './anchor.js';
-import { appendAuditIn, type AuditChain, type AuditRecord } from './audit.js';
+import { appendAuditIn, auditHash, type AuditChain, type AuditRecord } from './audit.js';
 
 export interface AuditChainEntry {
   readonly seq: number;
   readonly hash: string;
+  /** 직전 기록 해시(첫 기록은 빈 글자). 저장된 연쇄를 검증한다(B3-H03) */
+  readonly prevHash?: string;
+  /** 정규화 기록. 없으면(0012 이전 행) 기록 재계산 검증이 실패한다 */
+  readonly record?: AuditRecord;
 }
 
 /** 감사 체인의 읽기 면. 체크포인트가 구간의 해시를 다시 모으는 데 쓴다 */
@@ -18,6 +22,30 @@ export interface AuditChainReader {
   headSeq(): Promise<number>;
   headHash(): Promise<string>;
   entriesBetween(fromSeq: number, toSeq: number): Promise<readonly AuditChainEntry[]>;
+  /** 구간 첫 기록의 직전 해시를 경계에서 대조하기 위해 읽는다(seq 0은 빈 글자) */
+  hashAt(seq: number): Promise<string | undefined>;
+  /** 기록 종류·ID가 가리키는 원본 행이 아직 같은 내용인가. 저장소가 없으면 해당 없음(참) */
+  sourceMatches?(entry: AuditChainEntry): Promise<boolean>;
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** record_json(정규화 기록)을 해시 재계산용 AuditRecord로 되돌린다. 모양이 깨졌으면 undefined */
+export function auditRecordFromJson(raw: unknown): AuditRecord | undefined {
+  let value: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!isObject(value)) return undefined;
+  const { recordType, recordId, payload, at } = value;
+  if (typeof recordType !== 'string' || typeof recordId !== 'string' || typeof at !== 'string' || !isObject(payload)) return undefined;
+  const nowMs = Date.parse(at);
+  if (!Number.isFinite(nowMs)) return undefined;
+  return { recordType, recordId, payload, nowMs };
 }
 
 export interface AuditCheckpoint {
@@ -188,7 +216,17 @@ export class AuditCheckpointService {
   async verify(checkpointId: string): Promise<AuditCheckpointVerification> {
     const checkpoint = await this.get(checkpointId);
     const entries = await this.chain.entriesBetween(checkpoint.fromSeq, checkpoint.toSeq);
-    const rootValid = entries.length === checkpoint.toSeq - checkpoint.fromSeq + 1 && auditCheckpointRoot(entries) === checkpoint.rootHash;
+    const lengthValid = entries.length === checkpoint.toSeq - checkpoint.fromSeq + 1;
+    const rootMatches = lengthValid && auditCheckpointRoot(entries) === checkpoint.rootHash;
+    // 저장된 해시만 모으는 것으로는 원본 행 변조를 잡지 못한다. record_json으로 해시를 다시 계산하고
+    // prev_hash 연쇄를 경계까지 확인하며, 가능하면 ops_command·command_event 원본과도 대조한다(B3-H03).
+    const recordsValid = entries.every((e) => e.record !== undefined && auditHash(e.prevHash ?? '', e.record) === e.hash);
+    const boundaryHash = checkpoint.fromSeq > 1 ? await this.chain.hashAt(checkpoint.fromSeq - 1) : '';
+    const boundaryValid = checkpoint.fromSeq === 1 ? true : boundaryHash !== undefined;
+    const linksValid =
+      boundaryValid && entries.every((e, i) => e.prevHash === (i === 0 ? (checkpoint.fromSeq === 1 ? '' : boundaryHash!) : entries[i - 1]!.hash));
+    const sourceValid = this.chain.sourceMatches ? (await Promise.all(entries.map((e) => this.chain.sourceMatches!(e)))).every(Boolean) : true;
+    const rootValid = rootMatches && recordsValid && linksValid && sourceValid;
     const previous = await this.store.findPrevious(checkpoint.fromSeq);
     const prevValid = checkpoint.prevCheckpointHash === (previous?.rootHash ?? '');
     const signatureValid =
@@ -274,9 +312,153 @@ export class DrizzleAuditChain implements AuditChain, AuditChainReader {
   async entriesBetween(fromSeq: number, toSeq: number): Promise<readonly AuditChainEntry[]> {
     if (toSeq < fromSeq) return [];
     const rows = (await this.database.db.execute(sql`
-      select seq, encode(record_sha256, 'hex') as hash from audit_chain
-      where seq between ${fromSeq}::bigint and ${toSeq}::bigint order by seq`)).rows as { seq: number | string; hash: string }[];
-    return rows.map((r) => ({ seq: Number(r.seq), hash: r.hash }));
+      select seq, encode(record_sha256, 'hex') as hash, encode(prev_hash, 'hex') as prev_hash, record_json from audit_chain
+      where seq between ${fromSeq}::bigint and ${toSeq}::bigint order by seq`)).rows as {
+      seq: number | string;
+      hash: string;
+      prev_hash: string | null;
+      record_json: unknown;
+    }[];
+    return rows.map((r) => {
+      const record = r.record_json === null ? undefined : auditRecordFromJson(r.record_json);
+      return { seq: Number(r.seq), hash: r.hash, prevHash: r.prev_hash ?? '', ...(record !== undefined ? { record } : {}) };
+    });
+  }
+
+  async hashAt(seq: number): Promise<string | undefined> {
+    if (seq <= 0) return '';
+    const [row] = (await this.database.db.execute(sql`select encode(record_sha256, 'hex') as hash from audit_chain where seq = ${seq}::bigint`)).rows as { hash: string }[];
+    return row?.hash;
+  }
+
+  /**
+   * record_json과 원본 행을 대조한다(B3-H03). 명령 기록은 ops_command·command_event·command_approval,
+   * 체크포인트 기록은 audit_checkpoint를 다시 읽는다. 그 밖의 기록 종류는 원본 대조 대상이 아니다.
+   */
+  async sourceMatches(entry: AuditChainEntry): Promise<boolean> {
+    const record = entry.record;
+    if (!record) return false;
+    const p = record.payload;
+    const id = record.recordId;
+    const exists = async (query: SQL): Promise<boolean> => (await this.database.db.execute(query)).rows.length > 0;
+    switch (record.recordType) {
+      case 'COMMAND_CREATED': {
+        const [row] = (await this.database.db.execute(sql`
+          select type, reason, requested_by, requested_role from ops_command where id = ${id}::uuid`)).rows as {
+          type: string;
+          reason: string;
+          requested_by: string;
+          requested_role: string;
+        }[];
+        if (!row || row.type !== p.type || row.reason !== p.reason || row.requested_by !== p.requestedBy) return false;
+        return (
+          (await exists(sql`
+            select 1 from command_event where command_id = ${id}::uuid and seq = 1 and type = 'CREATED'
+              and actor_ref = ${row.requested_by} and actor_role = ${row.requested_role} and reason = ${row.reason}`)) &&
+          (await exists(sql`
+            select 1 from command_event where command_id = ${id}::uuid and seq = 2 and type = ${String(p.state)}
+              and actor_ref = ${row.requested_by} and actor_role = ${row.requested_role} and reason = ${row.reason}`))
+        );
+      }
+      case 'COMMAND_APPROVED':
+      case 'COMMAND_REJECTED': {
+        const decision = record.recordType === 'COMMAND_APPROVED' ? 'APPROVED' : 'REJECTED';
+        const [row] = (await this.database.db.execute(sql`
+          select decision, approver_role, reason from command_approval where command_id = ${id}::uuid and approver_ref = ${String(p.approverRef)}`)).rows as {
+          decision: string;
+          approver_role: string;
+          reason: string | null;
+        }[];
+        if (!row || row.decision !== decision || row.approver_role !== p.approverRole) return false;
+        if ((row.reason ?? undefined) !== p.reason) return false;
+        return exists(sql`
+          select 1 from command_event where command_id = ${id}::uuid and type = ${decision}
+            and actor_ref = ${String(p.approverRef)} and actor_role = ${String(p.approverRole)}`);
+      }
+      case 'COMMAND_EXECUTION_STARTED': {
+        const [row] = (await this.database.db.execute(sql`select attempts from ops_command where id = ${id}::uuid`)).rows as { attempts: number | string }[];
+        if (!row || Number(row.attempts) < Number(p.attempt)) return false;
+        return exists(sql`
+          select 1 from command_event where command_id = ${id}::uuid and type = 'DISPATCHED' and actor_ref = 'system' and actor_role = 'system'`);
+      }
+      case 'COMMAND_EXECUTION_FAILED':
+        return exists(sql`
+          select 1 from command_event where command_id = ${id}::uuid and type = 'FAILED' and actor_ref = 'system' and reason = ${String(p.reason)}`);
+      case 'COMMAND_SUCCEEDED':
+        return exists(sql`
+          select 1 from command_event where command_id = ${id}::uuid and type = 'SUCCEEDED' and actor_ref = 'system' and actor_role = 'system'`);
+      case 'EVENT_CANCELLATION_REQUESTED':
+      case 'EVENT_CANCELLATION_JUDGED':
+      case 'EVENT_CANCELLATION_APPROVED':
+      case 'EVENT_CANCELLATION_REJECTED':
+      case 'EVENT_CANCELLATION_PAUSED':
+      case 'EVENT_CANCELLATION_RESUMED': {
+        const [row] = (await this.database.db.execute(sql`
+          select event_id, kind, reason, requested_by from event_cancellation_request where request_id = ${id}::uuid`)).rows as {
+          event_id: string;
+          kind: string;
+          reason: string;
+          requested_by: string;
+        }[];
+        if (!row) return false;
+        return row.event_id === p.eventId && row.kind === p.kind && row.reason === p.requestReason && row.requested_by === p.requestedBy;
+      }
+      case 'PAYOUT_APPROVAL_REQUESTED':
+      case 'PAYOUT_BATCH_EXECUTING':
+      case 'PAYOUT_BATCH_DONE':
+      case 'PAYOUT_BATCH_FAILED':
+      case 'PAYOUT_APPROVAL_REJECTED': {
+        const [row] = (await this.database.db.execute(sql`
+          select batch_id, pg, pg_store, payout_date, amount, statement_count, requester_id from payout_approval where id = ${id}::uuid`)).rows as {
+          batch_id: string;
+          pg: string;
+          pg_store: string;
+          payout_date: string;
+          amount: number | string;
+          statement_count: number | string;
+          requester_id: string;
+        }[];
+        if (!row) return false;
+        return (
+          row.batch_id === p.batchId &&
+          row.pg === p.pg &&
+          row.pg_store === p.pgStore &&
+          row.payout_date === p.payoutDate &&
+          Number(row.amount) === Number(p.amount) &&
+          Number(row.statement_count) === Number(p.statementCount) &&
+          row.requester_id === p.requesterId
+        );
+      }
+      case 'PAYOUT_PORTONE_EXECUTION': {
+        const [row] = (await this.database.db.execute(sql`
+          select amount from payout_approval where batch_id = ${String(p.batchId)}::uuid limit 1`)).rows as { amount: number | string }[];
+        return !row || Number(row.amount) === Number(p.amount);
+      }
+      case 'AUDIT_CHECKPOINT_CREATED': {
+        const [row] = (await this.database.db.execute(sql`
+          select from_seq, to_seq, encode(root_hash, 'hex') as root_hash, encode(prev_hash, 'hex') as prev_hash,
+                 anchor_ref, signature
+          from audit_checkpoint where id = ${id}::uuid`)).rows as {
+          from_seq: number | string;
+          to_seq: number | string;
+          root_hash: string;
+          prev_hash: string;
+          anchor_ref: string | null;
+          signature: string | null;
+        }[];
+        if (!row) return false;
+        return (
+          Number(row.from_seq) === Number(p.fromSeq) &&
+          Number(row.to_seq) === Number(p.toSeq) &&
+          row.root_hash === p.rootHash &&
+          row.prev_hash === p.prevCheckpointHash &&
+          (row.anchor_ref ?? undefined) === p.anchorRef &&
+          (row.signature ?? undefined) === p.signature
+        );
+      }
+      default:
+        return true;
+    }
   }
 }
 

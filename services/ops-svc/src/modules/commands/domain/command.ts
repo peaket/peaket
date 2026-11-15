@@ -42,6 +42,53 @@ export type CommandState = (typeof COMMAND_STATES)[number];
 /** 승인 방식. NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인 승인, TWO는 요청자 아닌 두 번째 승인 */
 export type ApprovalMode = 'NONE' | 'ONE' | 'TWO';
 
+/** 명령 유형별 요청·승인·재시도 역할. operator는 commander 전용 명령을 요청·승인·재시도할 수 없다 */
+export interface CommandRolePolicy {
+  readonly requesterRoles: readonly string[];
+  readonly approverRoles: readonly string[];
+}
+
+const ALL_ROLES = ['operator', 'commander'] as const;
+const COMMANDER_ONLY = ['commander'] as const;
+
+/**
+ * 명령 유형별 역할(B3-H01, docs/features/control-tower.md §3·§4, POL-021·POL-038).
+ * 멈춤·재개·킬스위치·자동화 정지는 commander만 요청·승인·재시도한다. 봇 강도·Degraded Mode도 commander가 요청하고
+ * 다른 commander가 승인한다. 회차 취소(EVENT_CANCEL)는 2인 승인을 유지하되 문서처럼 operator 이상이 승인한다.
+ */
+const COMMAND_ROLE_POLICY: Readonly<Record<CommandType, CommandRolePolicy>> = {
+  ADMISSION_TARGET: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  ADMISSION_PAUSE: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  KILL_SWITCH: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  BLOCK_ASN_IP: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  BOT_LEVEL: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  DEGRADED_MODE: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  LOBBY_BANNER: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  LOG_LEVEL: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  FEATURE_OFF: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  TAKEDOWN: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  AUTOMATION_STOP: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  PG_ASSIGN: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  EVENT_CANCEL: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  EVENT_REFUND_PAUSE: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  EVENT_REFUND_RESUME: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  SCALE_CHANGE: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
+  SALE_STOP: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  SALE_RESUME: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+};
+
+export function rolePolicyOf(type: CommandType): CommandRolePolicy {
+  return COMMAND_ROLE_POLICY[type];
+}
+
+export function requesterRolesOf(type: CommandType): readonly string[] {
+  return COMMAND_ROLE_POLICY[type].requesterRoles;
+}
+
+export function approverRolesOf(type: CommandType): readonly string[] {
+  return COMMAND_ROLE_POLICY[type].approverRoles;
+}
+
 /**
  * 명령 유형별 승인 방식(docs/features/control-tower.md §3의 승인 요건).
  * BLOCK_ASN_IP는 ASN·넓은 대역·보호 대역이면 2인이지만, 이 골격은 안전하게 늘 2인으로 둔다.

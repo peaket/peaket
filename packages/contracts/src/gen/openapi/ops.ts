@@ -4262,8 +4262,8 @@ export const GetOpsAuditCheckpointResponse = zod.object({
 }).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')
 
 /**
- * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store
- * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 ops_command·command_event 원본 행을 대조하고 직전 체크포인트 루트와 잇는지 본다(B3-H03, R-614). viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 검증(루트·기록·연쇄·직전 사슬)
  */
 export const GetOpsAuditCheckpointVerificationParams = zod.object({
   "checkpointId": zod.uuid()
@@ -4271,8 +4271,8 @@ export const GetOpsAuditCheckpointVerificationParams = zod.object({
 
 export const GetOpsAuditCheckpointVerificationResponse = zod.object({
   "checkpointId": zod.uuid().optional(),
-  "valid": zod.boolean().optional().describe('루트·직전 사슬·서명·앵커가 모두 맞는가'),
-  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
+  "valid": zod.boolean().optional().describe('루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)'),
   "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
   "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
   "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),
@@ -4305,8 +4305,8 @@ export const GetOpsAuditAnchorResponse = zod.object({
 }).describe('공개 앵커(BAT-465 R-584, ADR-0075). 세션 없이 읽어 Ed25519 공개키로 검증한다. 서명 대상은 \'audit-checkpoint-v1\' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트다.')
 
 /**
- * BAT-465 R-584. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다. Cache-Control: no-store
- * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ * BAT-465 R-584·R-614. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다(B3-H03). Cache-Control: no-store
+ * @summary 공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)
  */
 export const GetOpsAuditAnchorVerificationParams = zod.object({
   "checkpointId": zod.uuid()
@@ -4314,8 +4314,8 @@ export const GetOpsAuditAnchorVerificationParams = zod.object({
 
 export const GetOpsAuditAnchorVerificationResponse = zod.object({
   "checkpointId": zod.uuid().optional(),
-  "valid": zod.boolean().optional().describe('루트·직전 사슬·서명·앵커가 모두 맞는가'),
-  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같은가'),
+  "valid": zod.boolean().optional().describe('루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)'),
   "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
   "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
   "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),

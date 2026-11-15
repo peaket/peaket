@@ -41,6 +41,7 @@ export type ProblemType =
   | 'command-not-failed'
   | 'command-not-pending'
   | 'command-requester-cannot-approve'
+  | 'command-role-forbidden'
   | 'commander-removal-needs-role-change'
   | 'commander-required'
   | 'consent-required'
@@ -157,6 +158,7 @@ export type ProblemType =
   | 'payment-attempts-exceeded'
   | 'payment-not-accepted'
   | 'payout-account-change-hold'
+  | 'payout-approval-conflict'
   | 'payout-balance-insufficient'
   | 'payout-batch-empty'
   | 'payout-batch-exists'
@@ -288,6 +290,7 @@ export type ProblemType =
   | 'unlock-link-resend-limit'
   | 'verification-not-found'
   | 'verification-submit-limited'
+  | 'version-conflict'
   | 'webhook-delivery-not-redeliverable'
   | 'webhook-url-not-allowed'
   | 'wish-limit'
@@ -336,6 +339,7 @@ export const PROBLEM_TYPES = {
   'command-not-failed': { status: 409, title: "실패한 명령만 다시 시도할 수 있습니다" },
   'command-not-pending': { status: 409, title: "승인 대기 중인 명령이 아닙니다" },
   'command-requester-cannot-approve': { status: 403, title: "요청한 분은 승인할 수 없습니다" },
+  'command-role-forbidden': { status: 403, title: "이 명령을 할 수 있는 역할이 아닙니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
   'commander-required': { status: 403, title: "간격 예외는 commander만 쓸 수 있습니다" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
@@ -452,6 +456,7 @@ export const PROBLEM_TYPES = {
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'payment-not-accepted': { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" },
   'payout-account-change-hold': { status: 409, title: "정산 계좌 변경 보류 중이라 지급할 수 없습니다" },
+  'payout-approval-conflict': { status: 409, title: "다른 승인이 먼저 처리되었습니다" },
   'payout-balance-insufficient': { status: 409, title: "결제사 잔액이 모자라 지급일을 미룹니다" },
   'payout-batch-empty': { status: 409, title: "지급할 확정 정산서가 없습니다" },
   'payout-batch-exists': { status: 409, title: "이미 지급 묶음이 있습니다" },
@@ -583,6 +588,7 @@ export const PROBLEM_TYPES = {
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },
   'verification-not-found': { status: 404, title: "본인확인 건을 찾을 수 없습니다" },
   'verification-submit-limited': { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" },
+  'version-conflict': { status: 409, title: "다른 요청이 먼저 처리되었습니다" },
   'webhook-delivery-not-redeliverable': { status: 409, title: "지금은 다시 보낼 수 없습니다" },
   'webhook-url-not-allowed': { status: 400, title: "받지 않는 웹훅 주소입니다" },
   'wish-limit': { status: 422, title: "찜 수를 넘었습니다" },

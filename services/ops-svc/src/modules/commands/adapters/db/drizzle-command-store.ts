@@ -2,7 +2,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import { APPROVAL_TTL_MS, approvalModeOf, stateAfterCreate, type Command, type CommandState, type CommandType, type NewCommand } from '../../domain/command.js';
+import { APPROVAL_TTL_MS, approvalModeOf, approverRolesOf, requesterRolesOf, stateAfterCreate, type Command, type CommandState, type CommandType, type NewCommand } from '../../domain/command.js';
 import type { CommandDecision, CommandListQuery, CommandPage, CommandStore } from '../../domain/ports.js';
 import { appendAuditIn } from '../../../audit/audit.js';
 
@@ -164,6 +164,11 @@ export class DrizzleCommandStore implements CommandStore {
       const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
       if (!row) return { status: 'NOT_FOUND' } as const;
       if (row.state !== 'PENDING_APPROVAL') return { status: 'NOT_PENDING' } as const;
+      // 기존 행이 commander 전용 유형을 operator가 요청한 경우도 승인 단계에서 닫는다(B3-H01).
+      const type = row.type as CommandType;
+      if (!requesterRolesOf(type).includes(row.requested_role) || !approverRolesOf(type).includes(approverRole)) {
+        return { status: 'ROLE_FORBIDDEN' } as const;
+      }
       if (row.requested_by === approverRef) return { status: 'SAME_ACTOR' } as const;
       await tx.execute(sql`
         insert into command_approval (command_id, approver_ref, approver_role, decision, reason, decided_at)

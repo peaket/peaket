@@ -13153,8 +13153,8 @@ export const getGetOpsAuditCheckpointVerificationUrl = (checkpointId: string,) =
 }
 
 /**
- * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고 직전 체크포인트 루트와 잇는지 본다. viewer 이상. Cache-Control: no-store
- * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ * BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 ops_command·command_event 원본 행을 대조하고 직전 체크포인트 루트와 잇는지 본다(B3-H03, R-614). viewer 이상. Cache-Control: no-store
+ * @summary 감사 체크포인트 검증(루트·기록·연쇄·직전 사슬)
  */
 export const getOpsAuditCheckpointVerification = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditCheckpointVerificationResponseSuccess> => {
 
@@ -13225,7 +13225,7 @@ export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 감사 체크포인트 검증(루트 재계산·직전 사슬)
+ * @summary 감사 체크포인트 검증(루트·기록·연쇄·직전 사슬)
  */
 
 export function useGetOpsAuditCheckpointVerification<TData = Awaited<ReturnType<typeof getOpsAuditCheckpointVerification>>, TError = ErrorType<ProblemResponse>>(
@@ -13389,8 +13389,8 @@ export const getGetOpsAuditAnchorVerificationUrl = (checkpointId: string,) => {
 }
 
 /**
- * BAT-465 R-584. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다. Cache-Control: no-store
- * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ * BAT-465 R-584·R-614. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다(B3-H03). Cache-Control: no-store
+ * @summary 공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)
  */
 export const getOpsAuditAnchorVerification = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditAnchorVerificationResponseSuccess> => {
 
@@ -13461,7 +13461,7 @@ export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<type
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 공개 앵커 검증(루트 재계산·직전 사슬·서명·앵커)
+ * @summary 공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)
  */
 
 export function useGetOpsAuditAnchorVerification<TData = Awaited<ReturnType<typeof getOpsAuditAnchorVerification>>, TError = ErrorType<ProblemResponse>>(

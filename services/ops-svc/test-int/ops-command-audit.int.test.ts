@@ -6,7 +6,7 @@ import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
-import { auditHash } from '../src/modules/audit/index.js';
+import { AuditCheckpointService, DrizzleAuditChain, DrizzleAuditCheckpointStore, auditHash } from '../src/modules/audit/index.js';
 import { DrizzleCsCaseStore, ReceiveCaseRequested } from '../src/modules/cases/index.js';
 import {
   APPROVAL_TTL_MS,
@@ -33,6 +33,7 @@ let get: GetCommand;
 let list: ListCommands;
 let cases: DrizzleCsCaseStore;
 let receiveCase: ReceiveCaseRequested;
+let auditService: AuditCheckpointService;
 
 beforeAll(async () => {
   container = await startPostgres();
@@ -48,6 +49,7 @@ beforeAll(async () => {
   list = new ListCommands(store);
   cases = new DrizzleCsCaseStore(db);
   receiveCase = new ReceiveCaseRequested(cases);
+  auditService = new AuditCheckpointService(new DrizzleAuditCheckpointStore(db), new DrizzleAuditChain(db), () => NOW);
 });
 
 afterAll(async () => {
@@ -58,12 +60,13 @@ afterAll(async () => {
 
 const q = <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: unknown[]) => admin.query<R>(text, params);
 const count = async (text: string, params: unknown[] = []): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
+const COMMANDER_TYPES = ['BOT_LEVEL', 'DEGRADED_MODE', 'KILL_SWITCH', 'SALE_STOP', 'SALE_RESUME', 'AUTOMATION_STOP'];
 const commandInput = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'DEGRADED_MODE' | 'KILL_SWITCH', over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
   params: {},
   requestedBy: REQUESTER,
-  requestedRole: 'operator',
+  requestedRole: COMMANDER_TYPES.includes(type) ? 'commander' : 'operator',
   nowMs: NOW,
   ...over,
 });
@@ -74,11 +77,13 @@ describe('0000 마이그레이션과 표 모양', () => {
       (await q<{ relname: string }>("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' order by relname")).rows.map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(expect.arrayContaining(['ops_command', 'command_event', 'command_approval', 'audit_chain', 'audit_chain_head', 'audit_checkpoint', 'cs_case']));
+    const auditColumns = await q<{ column_name: string }>("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'audit_chain'");
+    expect(auditColumns.rows.map((r) => r.column_name)).toEqual(expect.arrayContaining(['record_json', 'prev_hash']));
 
     await migrateOps(url);
     await migrateOps(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from ops_migration')).toBe(10);
+    expect(await count('select count(*) as n from ops_migration')).toBe(11);
     const typeCheck = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
     expect(typeCheck.rows[0]?.def).toContain("'EVENT_CANCEL'");
     expect(typeCheck.rows[0]?.def).toContain("'SCALE_CHANGE'");
@@ -193,7 +198,7 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
 
   test('GAT110_거부는_REJECTED와_사유를_남기고_다시_승인할_수_없다', async () => {
     const command = await create.execute(commandInput('DEGRADED_MODE'));
-    const rejected = await decide.reject({ commandId: command.commandId, approverRef: APPROVER, approverRole: 'operator', reason: '근거 부족', nowMs: NOW + 2 });
+    const rejected = await decide.reject({ commandId: command.commandId, approverRef: APPROVER, approverRole: 'commander', reason: '근거 부족', nowMs: NOW + 2 });
     expect(rejected.state).toBe('REJECTED');
 
     const approval = await q<{ decision: string; reason: string | null }>('select decision, reason from command_approval where command_id = $1', [command.commandId]);
@@ -247,6 +252,46 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
 
     const head = await q<{ last_seq: string; hash: string }>("select last_seq, encode(last_hash, 'hex') as hash from audit_chain_head where id = 1");
     expect(head.rows[0]).toEqual({ last_seq: String(rows.rows.length), hash: rows.rows.at(-1)!.hash });
+  });
+});
+
+describe('감사 체인 원본·연쇄 검증(B3-H03)', () => {
+  test('B3H03_정상_체크포인트는_record_json과_prev_hash를_다시_계산해_valid_true다', async () => {
+    const command = await create.execute(commandInput('LOG_LEVEL', { reason: '정상 기록', nowMs: NOW + 100 }));
+    const cp = await auditService.create({ reason: '정상 검증', actorRef: APPROVER });
+    expect(await auditService.verify(cp.checkpointId)).toMatchObject({ valid: true, rootValid: true, prevValid: true });
+    const row = await q<{ record_json: unknown; prev_hash: string }>("select record_json, encode(prev_hash, 'hex') as prev_hash from audit_chain where record_id = $1", [command.commandId]);
+    expect(row.rows[0]!.record_json).toMatchObject({ recordType: 'COMMAND_CREATED', recordId: command.commandId });
+    expect(row.rows[0]!.prev_hash).toHaveLength(64);
+  });
+
+  test('B3H03_record_json을_바꾸면_해시_재계산이_실패해_valid_false다', async () => {
+    const command = await create.execute(commandInput('LOG_LEVEL', { reason: 'record_json 변조', nowMs: NOW + 110 }));
+    const cp = await auditService.create({ reason: 'record_json 변조 검증', actorRef: APPROVER });
+    await q("update audit_chain set record_json = jsonb_set(record_json, '{payload,reason}', '\"tampered\"') where record_id = $1", [command.commandId]);
+    expect(await auditService.verify(cp.checkpointId)).toMatchObject({ valid: false, rootValid: false });
+  });
+
+  test('B3H03_ops_command_reason을_바꾸면_원본_대조가_실패해_valid_false다', async () => {
+    const command = await create.execute(commandInput('LOG_LEVEL', { reason: '원본 사유', nowMs: NOW + 120 }));
+    const cp = await auditService.create({ reason: '원본 변조 검증', actorRef: APPROVER });
+    await q('update ops_command set reason = $2 where id = $1', [command.commandId, '바뀐 사유']);
+    expect(await auditService.verify(cp.checkpointId)).toMatchObject({ valid: false, rootValid: false });
+  });
+
+  test('B3H03_command_event_actor_ref를_바꾸면_원본_대조가_실패해_valid_false다', async () => {
+    const command = await create.execute(commandInput('LOG_LEVEL', { reason: '사건 행위자 변조', nowMs: NOW + 125 }));
+    const cp = await auditService.create({ reason: '사건 행위자 변조 검증', actorRef: APPROVER });
+    await q("update command_event set actor_ref = 'tampered' where command_id = $1 and seq = 1", [command.commandId]);
+    expect(await auditService.verify(cp.checkpointId)).toMatchObject({ valid: false, rootValid: false });
+  });
+
+  test('B3H03_prev_hash_연쇄를_끊으면_valid_false다', async () => {
+    const command = await create.execute(commandInput('LOG_LEVEL', { reason: '연쇄 변조', nowMs: NOW + 130 }));
+    const cp = await auditService.create({ reason: '연쇄 변조 검증', actorRef: APPROVER });
+    const [row] = (await q<{ seq: string }>('select seq from audit_chain where record_id = $1', [command.commandId])).rows;
+    await q("update audit_chain set prev_hash = decode(repeat('00', 32), 'hex') where seq = $1", [row!.seq]);
+    expect(await auditService.verify(cp.checkpointId)).toMatchObject({ valid: false, rootValid: false });
   });
 });
 

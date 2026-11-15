@@ -44,18 +44,19 @@ describe('/v1/ops/commands 실제 DB HTTP', () => {
     const viewer = identity.ops('viewer');
     expect((await get('/v1/ops/commands', viewer)).statusCode).toBe(200);
     expect((await post('/v1/ops/commands', viewer, { type: 'LOG_LEVEL', reason: 'x' })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', identity.ops('operator'), { type: 'BOT_LEVEL', reason: '권한 확인' });
+    const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'BOT_LEVEL', reason: '권한 확인' });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     expect((await get(`/v1/ops/commands/${commandId}`, viewer)).statusCode).toBe(403);
     expect((await post(`/v1/ops/commands/${commandId}/approvals`, viewer, {})).statusCode).toBe(403);
   });
 
-  test('GAT110_operator_접수와_commander_승인은_실제_DB에_남고_목록에는_params가_없다', async () => {
+  test('GAT110_commander_접수와_다른_commander_승인은_실제_DB에_남고_목록에는_params가_없다', async () => {
+    const requester = identity.ops('commander');
     const operator = identity.ops('operator');
-    const created = await post('/v1/ops/commands', operator, { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
+    const created = await post('/v1/ops/commands', requester, { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
     expect(created.statusCode).toBe(201);
     const body = JSON.parse(created.payload) as { commandId: string; state: string; requestedBy: { adminAccountId: string; displayName: null; role: string } };
-    expect(body).toMatchObject({ state: 'PENDING_APPROVAL', requestedBy: { adminAccountId: operator['x-user-id'], displayName: null, role: 'operator' } });
+    expect(body).toMatchObject({ state: 'PENDING_APPROVAL', requestedBy: { adminAccountId: requester['x-user-id'], displayName: null, role: 'commander' } });
 
     const detail = await get(`/v1/ops/commands/${body.commandId}`, operator);
     expect(detail.statusCode).toBe(200);

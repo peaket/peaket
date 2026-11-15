@@ -1917,6 +1917,8 @@ erDiagram
         text record_type
         uuid record_id
         bytea record_sha256 "기록 정규화 값의 SHA-256"
+        jsonb record_json "정규화 기록(recordType·recordId·payload·at). 검증이 해시를 다시 계산하고 원본 행과 대조한다(R-614 B3-H03). 0012 이전 행은 null"
+        bytea prev_hash "직전 기록 해시(첫 행은 빈 bytea). 저장된 해시 연쇄를 검증한다(R-614 B3-H03)"
         bytea mac "HMAC(감사 체인 키, PEAKET-audit-v1, seq, 직전 mac, 기록 해시). 커밋 때는 비우고 체인 작업자가 seq 순서로 채운다. 빈 행은 부분 인덱스 WHERE mac IS NULL(ADR-0102)"
         bytea leaf_salt "잎 솔트 32바이트 난수, 비공개, 기록 파기 때 함께 파기(ADR-0075)"
         timestamptz created_at

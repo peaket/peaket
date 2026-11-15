@@ -94,15 +94,18 @@ describe('BAT-465 판매 중지·재개 집행 실제 DB', () => {
     purchaseCalls.length = 0;
     queueCalls.length = 0;
     callOrder.length = 0;
-    const operator = identity.ops('operator');
+    const requester = identity.ops('commander');
     const commander = identity.ops('commander');
+    const operator = identity.ops('operator');
     const eventId = randomUUID();
-    const created = await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } });
+    expect((await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } })).statusCode).toBe(403);
+    const created = await post('/v1/ops/commands', requester, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } });
     expect(created.statusCode).toBe(201);
     const command = JSON.parse(created.payload) as { commandId: string; state: string; approvalExpiresAt: string | null };
     expect(command).toMatchObject({ state: 'PENDING_APPROVAL' });
     expect(command.approvalExpiresAt).toBeTruthy();
     expect(purchaseCalls).toHaveLength(0);
+    expect((await post(`/v1/ops/commands/${command.commandId}/approvals`, operator, {})).statusCode).toBe(403);
 
     const approved = await post(`/v1/ops/commands/${command.commandId}/approvals`, commander, {});
     expect(approved.statusCode).toBe(200);
@@ -118,10 +121,10 @@ describe('BAT-465 판매 중지·재개 집행 실제 DB', () => {
     purchaseCalls.length = 0;
     queueCalls.length = 0;
     callOrder.length = 0;
-    const operator = identity.ops('operator');
+    const requester = identity.ops('commander');
     const commander = identity.ops('commander');
     const eventId = randomUUID();
-    const created = await post('/v1/ops/commands', operator, { type: 'SALE_RESUME', reason: '확인 끝', params: { eventId } });
+    const created = await post('/v1/ops/commands', requester, { type: 'SALE_RESUME', reason: '확인 끝', params: { eventId } });
     const { commandId } = JSON.parse(created.payload) as { commandId: string };
     const approved = await post(`/v1/ops/commands/${commandId}/approvals`, commander, {});
     expect(JSON.parse(approved.payload)).toMatchObject({ state: 'SUCCEEDED' });
@@ -134,9 +137,9 @@ describe('BAT-465 판매 중지·재개 집행 실제 DB', () => {
   });
 
   test('R584_대상이_실패하면_FAILED이고_재시도가_SUCCEEDED다', async () => {
-    const operator = identity.ops('operator');
+    const requester = identity.ops('commander');
     const commander = identity.ops('commander');
-    const created = await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '법적 요청', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
+    const created = await post('/v1/ops/commands', requester, { type: 'SALE_STOP', reason: '법적 요청', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
     const { commandId } = JSON.parse(created.payload) as { commandId: string };
     purchaseFail = true;
     const failed = await post(`/v1/ops/commands/${commandId}/approvals`, commander, {});

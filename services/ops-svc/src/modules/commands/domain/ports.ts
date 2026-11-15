@@ -20,7 +20,8 @@ export type CommandDecision =
   | { readonly status: 'APPLIED'; readonly command: Command }
   | { readonly status: 'NOT_FOUND' }
   | { readonly status: 'NOT_PENDING' }
-  | { readonly status: 'SAME_ACTOR' };
+  | { readonly status: 'SAME_ACTOR' }
+  | { readonly status: 'ROLE_FORBIDDEN' };
 
 export interface CommandStore {
   /** 명령과 첫 사건(들), 감사 기록을 한 트랜잭션에 쓴다 */

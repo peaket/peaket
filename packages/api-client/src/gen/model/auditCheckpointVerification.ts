@@ -12,9 +12,9 @@
 
 export interface AuditCheckpointVerification {
   checkpointId?: string;
-  /** 루트·직전 사슬·서명·앵커가 모두 맞는가 */
+  /** 루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가 */
   valid?: boolean;
-  /** 구간 기록을 다시 모은 루트가 저장값과 같은가 */
+  /** 구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03) */
   rootValid?: boolean;
   /** 직전 체크포인트 루트와 이어지는가 */
   prevValid?: boolean;

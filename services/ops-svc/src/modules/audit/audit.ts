@@ -19,6 +19,8 @@ export interface AuditEntry {
   readonly hash: string;
   readonly prevHash: string;
   readonly createdAtMs: number;
+  /** 정규화 기록 원문. 검증이 해시를 다시 계산하고 원본 행과 대조하는 데 쓴다(B3-H03) */
+  readonly record: AuditRecord;
 }
 
 /** 해시 체인에 한 기록을 더한다. 구현은 DB 트랜잭션 안(운영) 또는 메모리(시험)다 */
@@ -33,11 +35,13 @@ const sortValue = (v: unknown): unknown => {
   if (v !== null && typeof v === 'object') return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, sortValue((v as Record<string, unknown>)[k])]));
   return v;
 };
-const canonical = (r: AuditRecord): string => JSON.stringify(sortValue({ recordType: r.recordType, recordId: r.recordId, payload: r.payload, at: new Date(r.nowMs).toISOString() }));
+/** 정규화 기록 JSON. record_json에 그대로 저장하고 검증이 같은 값으로 해시를 다시 계산한다 */
+export const canonicalAuditRecord = (r: AuditRecord): string =>
+  JSON.stringify(sortValue({ recordType: r.recordType, recordId: r.recordId, payload: r.payload, at: new Date(r.nowMs).toISOString() }));
 
 /** prevHash(16진)와 기록을 이어 붙인 SHA-256(16진) */
 export function auditHash(prevHash: string, record: AuditRecord): string {
-  return createHash('sha256').update(prevHash).update(canonical(record)).digest('hex');
+  return createHash('sha256').update(prevHash).update(canonicalAuditRecord(record)).digest('hex');
 }
 
 /** 시험용 메모리 체인. append와 같은 규칙으로 해시를 이어 붙인다 */
@@ -52,7 +56,14 @@ export class MemoryAuditChain implements AuditChain {
       hash: auditHash(prevHash, record),
       prevHash,
       createdAtMs: record.nowMs,
+      record,
     });
+  }
+
+  /** 구간 경계의 직전 해시(seq가 1보다 작으면 빈 글자) */
+  async hashAt(seq: number): Promise<string | undefined> {
+    if (seq <= 0) return '';
+    return this.entries.find((e) => e.seq === seq)?.hash;
   }
 
   /** 체크포인트가 읽는 머리 seq(비어 있으면 0) */
@@ -83,7 +94,8 @@ export async function appendAuditIn(tx: DbTransaction, record: AuditRecord): Pro
   const prevHash = row.last_hash;
   const hash = auditHash(prevHash, record);
   await tx.execute(sql`
-    insert into audit_chain (seq, record_type, record_id, record_sha256, leaf_salt, created_at)
-    values (${seq}::bigint, ${record.recordType}, ${record.recordId}::uuid, decode(${hash}, 'hex'), ${randomBytes(32)}, ${new Date(record.nowMs)}::timestamptz)`);
+    insert into audit_chain (seq, record_type, record_id, record_sha256, prev_hash, record_json, leaf_salt, created_at)
+    values (${seq}::bigint, ${record.recordType}, ${record.recordId}::uuid, decode(${hash}, 'hex'), decode(${prevHash}, 'hex'),
+            ${canonicalAuditRecord(record)}::jsonb, ${randomBytes(32)}, ${new Date(record.nowMs)}::timestamptz)`);
   await tx.execute(sql`update audit_chain_head set last_seq = ${seq}::bigint, last_hash = decode(${hash}, 'hex') where id = 1`);
 }

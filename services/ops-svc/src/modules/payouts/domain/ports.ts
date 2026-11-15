@@ -1,11 +1,14 @@
 // 지급 승인 업무 저장·payment-svc 호출·재인증 포트.
+import type { AuditRecord } from '../../audit/audit.js';
 import type { PayoutApprovalRecord, PayoutBatchView } from './payout-approval.js';
 
 export interface PayoutApprovalStore {
-  insert(record: PayoutApprovalRecord): Promise<void>;
+  /** 상태 행과 감사 기록을 같은 트랜잭션에 쓴다(감사 기록이 있으면) */
+  insert(record: PayoutApprovalRecord, audit?: AuditRecord): Promise<void>;
   find(approvalId: string): Promise<PayoutApprovalRecord | undefined>;
   findActiveByBatch(batchId: string): Promise<PayoutApprovalRecord | undefined>;
-  save(record: PayoutApprovalRecord): Promise<void>;
+  /** version 조건부 갱신과 감사 기록을 같은 트랜잭션에 쓴다. 다른 승인이 먼저 갱신했으면 payout-approval-conflict다 */
+  save(record: PayoutApprovalRecord, audit?: AuditRecord): Promise<void>;
   list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }): Promise<PayoutApprovalRecord[]>;
 }
 

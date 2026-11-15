@@ -1,7 +1,8 @@
 // 회차 취소 요청 PostgreSQL 저장소(ops 0011). 칸 이름은 migrations/0011_event_cancellation_request.sql과 같다.
 import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { EventCancellationFault, EventCancellationKind, EventCancellationRecord, EventCancellationStatus } from '../../domain/event-cancellation.js';
+import { appendAuditIn, type AuditRecord } from '../../../audit/audit.js';
+import { EventCancellationProblem, type EventCancellationFault, type EventCancellationKind, type EventCancellationRecord, type EventCancellationStatus } from '../../domain/event-cancellation.js';
 import type { EventCancellationStore } from '../../domain/ports.js';
 
 interface Row {
@@ -50,12 +51,15 @@ const ACTIVE = sql`status in ('REQUESTED','JUDGED','PENDING_APPROVAL','APPROVED'
 export class DrizzleEventCancellationStore implements EventCancellationStore {
   constructor(private readonly database: Database) {}
 
-  async insert(r: EventCancellationRecord): Promise<void> {
-    await this.database.db.execute(sql`
-      insert into event_cancellation_request (${COLUMNS})
-      values (${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
-              ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
-              ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz)`);
+  async insert(r: EventCancellationRecord, audit?: AuditRecord): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      await tx.execute(sql`
+        insert into event_cancellation_request (${COLUMNS})
+        values (${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
+                ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
+                ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz)`);
+      if (audit) await appendAuditIn(tx, audit);
+    });
   }
 
   async find(requestId: string): Promise<EventCancellationRecord | undefined> {
@@ -70,13 +74,18 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
     return row ? recordOf(row) : undefined;
   }
 
-  async save(rec: EventCancellationRecord): Promise<void> {
-    await this.database.db.execute(sql`
-      update event_cancellation_request set status = ${rec.status}, fault = ${rec.fault}, judgement_reason = ${rec.judgementReason},
-        fan_notice_reason = ${rec.fanNoticeReason}, judged_by = ${rec.judgedBy}, judged_at = ${rec.judgedAt}::timestamptz,
-        approved_by = ${rec.approvedBy}, approved_at = ${rec.approvedAt}::timestamptz, refund_job_state = ${rec.refundJobState},
-        version = ${rec.version}::bigint, updated_at = ${rec.updatedAt}::timestamptz
-      where request_id = ${rec.requestId}::uuid`);
+  async save(rec: EventCancellationRecord, audit?: AuditRecord): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const updated = await tx.execute(sql`
+        update event_cancellation_request set status = ${rec.status}, fault = ${rec.fault}, judgement_reason = ${rec.judgementReason},
+          fan_notice_reason = ${rec.fanNoticeReason}, judged_by = ${rec.judgedBy}, judged_at = ${rec.judgedAt}::timestamptz,
+          approved_by = ${rec.approvedBy}, approved_at = ${rec.approvedAt}::timestamptz, refund_job_state = ${rec.refundJobState},
+          version = ${rec.version}::bigint, updated_at = ${rec.updatedAt}::timestamptz
+        where request_id = ${rec.requestId}::uuid and version = ${rec.version - 1}::bigint
+        returning request_id`);
+      if (updated.rows.length === 0) throw new EventCancellationProblem('version-conflict', 409, '다른 요청이 먼저 처리되었습니다');
+      if (audit) await appendAuditIn(tx, audit);
+    });
   }
 
   async list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]> {
