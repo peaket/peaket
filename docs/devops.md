@@ -407,6 +407,7 @@ deploy/
   envs/<환경>/<서비스>.yaml    환경 값(이미지 다이제스트, 복제본, 자원)
   envs/<환경>/flags/          릴리스 플래그 정의(§5.4)
   platform/                   클러스터 애드온(ArgoCD, Argo Rollouts, Kyverno, KEDA, Karpenter, External Secrets, cert-manager, OTel 수집기 3종과 exporter(ADR-0076), 메시(Istio 앰비언트, ADR-0082))
+  gateways/                   게이트웨이 다섯의 Gateway·HTTPRoute·Envoy Gateway 정책(ADR-0008, docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', 추천 적용 2026-11-16, BUILD_ORDER HOT-400)
   policies/                   Kyverno 정책
   projects/                   ArgoCD AppProject(가상 팀별)와 ApplicationSet
   calendar/freeze.json        변경 동결 달력이 쓴 창 목록(§8.2, 봇이 갱신)
