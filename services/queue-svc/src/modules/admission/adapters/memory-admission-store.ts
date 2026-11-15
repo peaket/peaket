@@ -206,6 +206,11 @@ export class MemoryAdmissionStore implements AdmissionStore {
     return { kind: 'SOON', retryAfterSeconds: Math.max(SOON_RETRY_MIN_SEC, Math.min(SOON_RETRY_MAX_SEC, retry)), ...delay };
   }
 
+  async eligibilityLists(i: { eventId: string; accountId: string; listKeys: readonly string[] }): Promise<string[]> {
+    const elig = this.db.elig(i.eventId);
+    return [...new Set(i.listKeys.filter((listKey) => elig.get(listKey)?.has(i.accountId)))].sort();
+  }
+
   async settle(i: { pid: string; eventId: string; ticketHash: string; outcome: 'ADMITTED' | 'RELEASE'; nonce: string; expireAtMs: number }): Promise<void> {
     const key = `${i.pid}|${i.eventId}`;
     const v = this.db.adm.get(key);

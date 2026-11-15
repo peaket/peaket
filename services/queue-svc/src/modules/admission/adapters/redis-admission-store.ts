@@ -5,7 +5,7 @@ import { type HotRedis, redisScript } from '@peaket/platform';
 import { guard, keys, QUEUE_REDIS } from '../../entry/index.js';
 import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, type AdmitResult, type Claim, type LobbySeat, type Precheck } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
-import { ADMIT_LUA, CLAIM_LUA, EXPIRE_LUA, LOBBY_STATE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
+import { ADMIT_LUA, CLAIM_LUA, ELIGIBILITY_LISTS_LUA, EXPIRE_LUA, LOBBY_STATE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
 
 export const admissionKeys = {
   ...keys,
@@ -33,6 +33,7 @@ const SETTLE = redisScript(SETTLE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
 const LOBBY_STATE = redisScript(LOBBY_STATE_LUA);
 const MARK_REMOVED = redisScript(MARK_REMOVED_LUA);
+const ELIGIBILITY_LISTS = redisScript(ELIGIBILITY_LISTS_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 /** Lua의 -1(없음)을 undefined로 */
@@ -136,6 +137,14 @@ export class RedisAdmissionStore implements AdmissionStore {
     if (kind === 'REMOVED') return removed(r[1]);
     if (kind === 'NOT_YET' || kind === 'EXPIRED') return { kind };
     throw new Error(`입장 Lua가 모르는 값을 돌려줬다: ${kind}`);
+  }
+
+  async eligibilityLists(i: { eventId: string; accountId: string; listKeys: readonly string[] }): Promise<string[]> {
+    const listKeys = [...new Set(i.listKeys)];
+    if (listKeys.length === 0) return [];
+    const ks = listKeys.map((listKey) => k.elig(i.eventId, listKey));
+    const r = (await guard(this.redis.evalScript(ELIGIBILITY_LISTS, ks, [i.accountId, ...listKeys]))) as unknown[];
+    return r.map(str);
   }
 
   async settle(i: { pid: string; eventId: string; ticketHash: string; outcome: 'ADMITTED' | 'RELEASE'; nonce: string; expireAtMs: number }): Promise<void> {

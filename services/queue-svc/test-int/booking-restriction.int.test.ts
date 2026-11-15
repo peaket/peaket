@@ -20,12 +20,15 @@ let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
 
 const A = randomUUID();
-const UNTIL = 1_793_761_199_200;
+const UNTIL = 2_000_000_000_000;
+const DAY = 86_400_000;
 
 const call = (req: object): Promise<Record<string, unknown>> =>
   new Promise((resolve, reject) => client.SetBookingRestriction(req, new grpc.Metadata(), {}, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
 const fields = (accountId: string): Promise<unknown[]> =>
   redis.command(['HMGET', bookingRestrictionKeyOf(accountId), 'st', 'until', 'rid', 'ver'], { key: bookingRestrictionKeyOf(accountId) }) as Promise<unknown[]>;
+const pttl = async (accountId: string): Promise<number> => Number(await redis.command(['PTTL', bookingRestrictionKeyOf(accountId)], { key: bookingRestrictionKeyOf(accountId) }));
+const exists = async (accountId: string): Promise<number> => Number(await redis.command(['EXISTS', bookingRestrictionKeyOf(accountId)], { key: bookingRestrictionKeyOf(accountId) }));
 
 beforeAll(async () => {
   valkey = await startValkey();
@@ -62,6 +65,23 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
     expect(await fields(A)).toEqual(['LIFTED', null, 'r1', '2']);
   });
 
+  test('ACTIVE+미래 until이면 TTL이 until+1일이고, LIFTED면 30일, until이 2일 전이면 키가 바로 사라진다', async () => {
+    const a = randomUUID();
+    expect(await store.apply({ accountId: a, restrictionId: 'r5', state: 'ACTIVE', untilMs: UNTIL, version: 1 })).toEqual({ changed: true });
+    expect(await pttl(a)).toBeGreaterThan(0);
+
+    const b = randomUUID();
+    expect(await store.apply({ accountId: b, restrictionId: 'r6', state: 'LIFTED', version: 1 })).toEqual({ changed: true });
+    const liftedPttl = await pttl(b);
+    expect(liftedPttl).toBeGreaterThan(29 * DAY);
+    expect(liftedPttl).toBeLessThan(31 * DAY);
+
+    const c = randomUUID();
+    expect(await store.apply({ accountId: c, restrictionId: 'r7', state: 'ACTIVE', untilMs: Date.now() - 2 * DAY, version: 1 })).toEqual({ changed: true });
+    expect(await exists(c)).toBe(0);
+    expect(await store.read(c)).toBeUndefined();
+  });
+
   test('끝 시각이 없는 ACTIVE로 올리면 until 칸을 지우고, 옛 판은 되돌리지 못한다', async () => {
     const b = randomUUID();
     expect(await store.apply({ accountId: b, restrictionId: 'r2', state: 'ACTIVE', untilMs: UNTIL, version: 1 })).toEqual({ changed: true });
@@ -76,7 +96,7 @@ describe('Q-T59 queue-svc SetBookingRestriction 실제 Valkey', () => {
 
   test('gRPC SetBookingRestriction이 proto 칸을 읽어 실제 q:rst에 쓴다', async () => {
     const c = randomUUID();
-    const ends = { seconds: 1_793_761_199, nanos: 200_000_000 };
+    const ends = { seconds: 2_000_000_000, nanos: 0 };
     expect(await call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_ACTIVE', ends_at: ends, version: 10 })).toEqual({ changed: true });
     expect(await store.read(c)).toEqual({ st: 'ACTIVE', untilMs: UNTIL, rid: 'r3', ver: 10 });
     expect(await call({ account_id: c, restriction_id: 'r3', state: 'BOOKING_RESTRICTION_STATE_LIFTED', version: 10 })).toEqual({ changed: false });

@@ -274,3 +274,14 @@ if v and (string.sub(v, 1, 7) == 'PASSED:' or string.sub(v, 1, 10) == 'VERIFYING
 end
 return 0
 `;
+
+// 입장 토큰 `lst` 후보 명단 키 가운데 계정이 든 키만 글자 차례로 돌려준다(우선 구매 입장 GAT-135, ADR-0265 결정 7).
+// KEYS: 후보 명단 Set들(회차 해시 태그가 같다). ARGV: 1 계정 ID, 2.. 후보 명단 키 이름(KEYS와 같은 차례)
+export const ELIGIBILITY_LISTS_LUA = `
+local out = {}
+for i = 1, #KEYS do
+  if redis.call('SISMEMBER', KEYS[i], ARGV[1]) == 1 then out[#out + 1] = ARGV[i + 1] end
+end
+table.sort(out)
+return out
+`;

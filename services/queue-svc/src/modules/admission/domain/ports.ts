@@ -35,6 +35,11 @@ export interface AdmissionStore {
     /** 입장 토큰 `lst`의 후보 명단 키와 계정 ID(설정이 틀리면 넘기지 않는다). ADMITTED일 때 그 계정이 든 키만 돌려준다 */
     eligibility?: { accountId: string; listKeys: readonly string[] };
   }): Promise<AdmitResult>;
+  /**
+   * 입장 토큰 `lst`의 후보 명단 키 가운데 이 계정이 든 키만 글자 차례·중복 없이 돌려준다(우선 구매 입장 GAT-135, ADR-0265 결정 7).
+   * 후보는 candidateEligibilityLists가 만든 회차 해시 태그가 같은 키들이다. 없으면 빈 배열이다.
+   */
+  eligibilityLists(i: { eventId: string; accountId: string; listKeys: readonly string[] }): Promise<string[]>;
   /** ④ ADMITTED: q:adm이 없거나 같은 대기표면 이 요청의 표지로 다시 쓰고(없으면 수명 = 판매 종료) q:dup을 지운다. RELEASE: 값이 이 요청이 채운 그대로일 때만 지운다 */
   settle(i: { pid: string; eventId: string; ticketHash: string; outcome: 'ADMITTED' | 'RELEASE'; nonce: string; expireAtMs: number }): Promise<void>;
   /** 15분 만료: q:dup 값이 이 대기표의 {번호}:{세대}:로 시작하면 지운다(참가 토큰이면 dupPrefix로 준 LOBBY:{토큰 해시}:로). 이 회차에 입장한 적이 있는지(q:adm이 있는지)를 준다 */

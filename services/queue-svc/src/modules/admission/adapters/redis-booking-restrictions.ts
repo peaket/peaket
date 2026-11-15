@@ -27,7 +27,7 @@ export class RedisBookingRestrictions implements BookingRestrictions {
 
   async apply(i: BookingRestrictionApply): Promise<{ changed: boolean }> {
     validate(i);
-    const r = await guard(this.redis.evalScript(SET, [bookingRestrictionKeyOf(i.accountId)], [i.state, i.restrictionId, i.untilMs === undefined ? '' : String(i.untilMs), String(i.version)]));
+    const r = await guard(this.redis.evalScript(SET, [bookingRestrictionKeyOf(i.accountId)], [i.state, i.restrictionId, i.untilMs === undefined ? '' : String(i.untilMs), String(i.version), String(Date.now())]));
     return { changed: Number(str(r)) === 1 };
   }
 

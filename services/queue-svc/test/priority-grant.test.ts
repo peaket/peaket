@@ -97,6 +97,38 @@ describe('우선 구매 입장 [GAT-135, Q-T62]', () => {
     expect(store.db.ev(eventId).get('admitted') ?? 0).toBe(0);
   });
 
+  test('GATED 일정에서 계정이 든 명단 키만 글자 차례로 lst에 싣고 남의 키는 뺀다', async () => {
+    const gated = newEvent();
+    await schedules.set(
+      gated,
+      openSchedule(NOW, {
+        eligibility: {
+          kind: 'GATED',
+          lists: ['vip', 'member'],
+          gates: [{ fromMs: NOW - HOUR, toMs: NOW + HOUR, lists: ['member', 'staff'] }],
+        },
+      }),
+    );
+    store.db.elig(gated).set('member', new Set([ACCOUNT]));
+    store.db.elig(gated).set('vip', new Set([OTHER_ACCOUNT]));
+    store.db.elig(gated).set('staff', new Set([ACCOUNT]));
+    const i = offered({ eventId: gated });
+    await set.run(i);
+    const r = await app.run({ accountId: ACCOUNT, pid: PID, sessionId: 'sess-1', eventId: gated, body: { priorityGrantId: i.grantId } });
+    expect(r.status).toBe('ADMITTED');
+    if (r.status !== 'ADMITTED') return;
+    const claims = readAdmissionToken(r.admissionToken).claims;
+    expect(claims.lst).toEqual(['member', 'staff']);
+    expect(claims.lst).not.toContain('vip');
+
+    store.db.elig(gated).set('member', new Set());
+    store.db.elig(gated).set('staff', new Set());
+    const none = await app.run({ accountId: ACCOUNT, pid: PID, sessionId: 'sess-1', eventId: gated, body: { priorityGrantId: i.grantId } });
+    expect(none.status).toBe('ADMITTED');
+    if (none.status !== 'ADMITTED') return;
+    expect(readAdmissionToken(none.admissionToken).claims).not.toHaveProperty('lst');
+  });
+
   test('결제 실패로 다시 입장하면 같은 prio·다른 새 여정을 준다', async () => {
     const i = offered();
     await set.run(i);

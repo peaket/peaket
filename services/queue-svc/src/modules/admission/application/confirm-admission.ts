@@ -197,6 +197,10 @@ export class ConfirmAdmission {
   async #priority(i: ConfirmInput, grantId: string, now: number): Promise<ConfirmResult> {
     const copy = this.priorityGrants ? await this.priorityGrants.get({ accountId: i.accountId, eventId: i.eventId, grantId }) : undefined;
     if (!priorityGrantUsable(copy, grantId, now)) throw new AdmissionError('PRIORITY_GRANT_NOT_FOUND', '쓸 수 있는 우선 구매 권리 사본이 없다');
+    const schedule = await this.schedules.get(i.eventId);
+    // 우선 구매 입장도 일반 입장과 같은 `lst` 규칙이다(GAT-135, ADR-0265 결정 7): 후보 키 가운데 이 계정이 든 키만 싣는다
+    const candidates = schedule ? candidateEligibilityLists(schedule) : undefined;
+    const lists = candidates && candidates.length > 0 ? await this.store.eligibilityLists({ eventId: i.eventId, accountId: i.accountId, listKeys: candidates }) : [];
     const jny = randomUUID();
     const { token, expiresAtMs } = this.signer.sign({
       jti: randomUUID(),
@@ -205,9 +209,9 @@ export class ConfirmAdmission {
       eventId: i.eventId,
       jny,
       nowMs: now,
+      ...(lists.length >= 1 && lists.length <= 10 ? { lists } : {}),
       priorityGrantId: grantId,
     });
-    const schedule = await this.schedules.get(i.eventId);
     const seatmapLayoutPath = schedule ? seatmapLayoutPathOf(i.eventId, schedule) : undefined;
     return {
       status: 'ADMITTED',
