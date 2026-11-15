@@ -8,7 +8,7 @@ import { ScannerShell, ScannerStatusStrip } from "@peaket/ds/ScannerShell";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { liveRequested, SCANNER_API_ORIGIN } from "../api/config";
 import { DeviceLoginError, enrollDevice } from "../api/device-login";
-import { clearStaffToken, ensureDeviceKey } from "../api/key-store";
+import { clearStaffToken, enrollWithNewDeviceKey } from "../api/key-store";
 import { useScannerLayout, type ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { Link, navigate, useLocation } from "../app/router";
@@ -778,8 +778,8 @@ function LiveEnrollScreen() {
     setBusy(true);
     setError(undefined);
     try {
-      const key = await ensureDeviceKey();
-      await enrollDevice({ origin: SCANNER_API_ORIGIN, key, code });
+      // 재등록은 새 키를 만든다. 등록이 실패하면 옛 키를 그대로 두고 저장하지 않는다(C1-12).
+      await enrollWithNewDeviceKey({ enroll: async (key) => { await enrollDevice({ origin: SCANNER_API_ORIGIN, key, code }); } });
       navigate("/login?live=1");
     } catch (e) {
       setError(e instanceof DeviceLoginError ? e.message : e instanceof Error ? e.message : "기기 등록에 닿지 못했습니다");

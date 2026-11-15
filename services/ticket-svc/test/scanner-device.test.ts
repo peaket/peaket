@@ -8,6 +8,7 @@ import { RedisEnrollmentAttemptLimiter } from '../src/modules/scanner/adapters/r
 import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { EnrollmentCodeRejected, ScannerDeviceNotFound, ScannerDevices } from '../src/modules/scanner/application/scanner-devices.js';
 import {
+  assertJkt,
   ENROLLMENT_CODE_TTL_MS,
   enrollmentCodeHash,
   newEnrollmentCode,
@@ -28,6 +29,26 @@ function world() {
   const devices = new ScannerDevices({ store, codes, clock, newId: () => DEVICE });
   return { clock, store, codes, devices };
 }
+
+describe('M5-07 jkt 모양 검사', () => {
+  test('assertJkt는 43자 base64url만 받고 short·42자·+·= 값은 JKT 오류다', () => {
+    expect(assertJkt('A'.repeat(43))).toBe('A'.repeat(43));
+    for (const bad of ['short', 'A'.repeat(42), 'A'.repeat(44), `${'A'.repeat(42)}+`, `${'A'.repeat(42)}=`, '', undefined, 43]) {
+      try {
+        assertJkt(bad);
+        throw new Error(`통과하면 안 되는 jkt: ${String(bad)}`);
+      } catch (e) {
+        expect(e).toBeInstanceOf(ScannerDeviceInputError);
+        expect((e as ScannerDeviceInputError).code).toBe('JKT');
+      }
+    }
+  });
+
+  test('기기 저장소의 byThumbprint도 같은 assertJkt를 쓴다', async () => {
+    const store = new MemoryScannerDeviceStore();
+    await expect(store.byThumbprint('short')).rejects.toMatchObject({ code: 'JKT' });
+  });
+});
 
 describe('스캐너 등록 코드 [GAT-170]', () => {
   test('RFC 8628 문자 집합 12자를 4-4-4로 만들고, 대소문자·하이픈·공백을 무시해 정규화한다', () => {

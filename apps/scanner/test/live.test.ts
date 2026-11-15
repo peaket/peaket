@@ -1,7 +1,7 @@
 // SCR-033·SCR-035 actual-data mapping and freshness (GAT-170).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyChanges, formatAge, formatClockOffset, freshnessOf, loadSyncSnapshot, saveSyncSnapshot, sessionTerminatedOf, setupStateOf, syncStateOf, type SyncSnapshot } from '../src/api/live.ts';
+import { applyChanges, formatAge, formatClockOffset, freshnessOf, loadSyncSnapshot, reloginRequired, saveSyncSnapshot, serverClockOffsetMs, sessionExpiryDelayMs, sessionTerminatedOf, setupStateOf, syncChangePages, syncStateOf, type SyncSnapshot } from '../src/api/live.ts';
 import type { ScannerShiftResponse, ScannerVersionVector } from '../src/api/client.ts';
 
 const NOW = Date.parse('2026-11-15T00:00:00Z');
@@ -90,6 +90,59 @@ test('동기화 스냅샷과 변경분 반영은 마지막 번호를 서버 값�
   const next = applyChanges(s, { changes: [], lastSeq: 12, hasMore: false, versionVector: vector({ seq: 12 }) }, NOW + 500);
   assert.equal(next.lastSeq, 12);
   assert.equal(next.syncedAtMs, NOW + 500);
+});
+
+test('라이브 401·기기 폐기·세션 종료는 재로그인으로 돌린다(C1-09)', () => {
+  assert.equal(reloginRequired(401, 'invalid_token'), true);
+  assert.equal(reloginRequired(403, 'device-revoked'), true);
+  assert.equal(reloginRequired(403, 'invalid_token'), true);
+  assert.equal(reloginRequired(403, 'scanner-override-forbidden'), false);
+  assert.equal(reloginRequired(503, 'scanner-auth-unavailable'), false);
+});
+
+test('DPoP 시계 보정과 세션 만료 타이머는 서버 시각·만료 경계를 쓴다(C1-07·C1-08)', () => {
+  assert.equal(serverClockOffsetMs(new Date(NOW + 4_000).toISOString(), NOW), 4_000);
+  assert.equal(serverClockOffsetMs('깨진 시각', NOW), 0);
+  assert.equal(sessionExpiryDelayMs(NOW + 10_000, NOW), 10_000);
+  assert.equal(sessionExpiryDelayMs(NOW, NOW), 0);
+  assert.equal(sessionExpiryDelayMs(Number.MAX_SAFE_INTEGER, NOW), undefined);
+});
+
+test('변경분 페이지는 페이지 끝 번호를 다음 커서로 쓰고, 세션 종료에서 멈춘다(C1-05·C1-06)', async () => {
+  const seen: number[] = [];
+  const pages = [
+    { changes: [{ seq: 1, kind: 'TICKET_STATUS', payload: {} }], lastSeq: 1, hasMore: true, versionVector: vector({ seq: 3 }) },
+    { changes: [{ seq: 2, kind: 'SCAN_STATE', payload: {} }], lastSeq: 2, hasMore: true, versionVector: vector({ seq: 3 }) },
+    { changes: [{ seq: 3, kind: 'FLAG', payload: {} }], lastSeq: 3, hasMore: false, versionVector: vector({ seq: 3 }) },
+  ];
+  const result = await syncChangePages({
+    snapshot: { eventId: 'ev-1', lastSeq: 0, syncedAtMs: 0 },
+    after: 0,
+    deviceId: 'dev-1',
+    nowMs: NOW,
+    fetchPage: async (after) => {
+      seen.push(after);
+      return pages[after]!;
+    },
+  });
+  assert.deepEqual(seen, [0, 1, 2]);
+  assert.equal(result.snapshot.lastSeq, 3);
+  assert.equal(result.last?.lastSeq, 3);
+
+  const terminated = await syncChangePages({
+    snapshot: { eventId: 'ev-1', lastSeq: 1, syncedAtMs: NOW },
+    after: 1,
+    deviceId: 'dev-1',
+    nowMs: NOW,
+    fetchPage: async () => ({
+      changes: [{ seq: 2, kind: 'SESSION_TERMINATED', payload: { v: 1, deviceId: 'dev-1', reason: 'DEVICE_REVOKED' } }],
+      lastSeq: 2,
+      hasMore: true,
+      versionVector: vector({ seq: 2 }),
+    }),
+  });
+  assert.deepEqual(terminated.terminated, { reason: 'DEVICE_REVOKED' });
+  assert.equal(terminated.snapshot.lastSeq, 1);
 });
 
 test('SESSION_TERMINATED 변경분은 그 기기의 세션 종료만 골라 읽는다', () => {
