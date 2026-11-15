@@ -3,7 +3,7 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 import 'reflect-metadata';
-import { createDatabase, createExternalHttpClient, createHotRedis, createService, RedisReauthJtiStore } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, reauthJtiStoreFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -17,6 +17,7 @@ import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 
 const SERVICE = 'ops-svc';
+assertInternalGrpcToken(process.env);
 const url = process.env.PEAKET_DATABASE_URL;
 if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
 const identityUrl = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -72,7 +73,7 @@ const payouts = paymentUrl
             reauth: new JwksApprovalVerifier({
               jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL,
               issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
-              ...(reauthRedis ? { jti: new RedisReauthJtiStore(reauthRedis) } : {}),
+              jti: reauthJtiStoreFromEnv(process.env, reauthRedis),
             }),
           }
         : {}),

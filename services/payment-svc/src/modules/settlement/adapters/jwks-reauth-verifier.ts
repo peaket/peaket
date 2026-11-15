@@ -35,7 +35,14 @@ export class JwksReauthVerifier implements ReauthVerifier {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'partner', sessionId: o.sessionId, act: o.act });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw reauthRequired();
-      if (this.#jti && !(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+      if (this.#jti) {
+        try {
+          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+        } catch (e) {
+          if (e instanceof SettlementProblem) throw e;
+          throw reauthRequired();
+        }
+      }
       return { jti: v.jti, accountId: v.accountId, sessionId: v.sessionId, act: v.act, factors };
     } catch (e) {
       if (e instanceof TokenRejected) throw reauthRequired();

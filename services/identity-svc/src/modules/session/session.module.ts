@@ -97,6 +97,9 @@ export interface SessionModuleOptions {
 export class SessionModule {
   /** 저장소를 고른다. database면 DATABASE(databaseModule)가 함께 있어야 한다 */
   static register(o: SessionModuleOptions): DynamicModule {
+    // memory 조립에서도 스태프 저장소가 세션 저장소의 계정 상태를 읽어 비ACTIVE 계정을 닫게 한다.
+    const memorySessions = o.storage === 'memory' ? new MemorySessionStore() : undefined;
+    const memoryStaff = memorySessions ? new MemoryStaffAssignmentStore((accountId) => memorySessions.accountOf(accountId)?.status) : undefined;
     return {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
@@ -108,7 +111,7 @@ export class SessionModule {
         CheckNickname,
         CancelSignup,
         o.nicknameCheckLimits ? { provide: NICKNAME_CHECK_LIMITS, useValue: o.nicknameCheckLimits } : { provide: NICKNAME_CHECK_LIMITS, useFactory: (clock: Clock) => new MemoryNicknameCheckLimits(clock), inject: [CLOCK] },
-        o.storage === 'database' ? { provide: STAFF_ASSIGNMENT_STORE, useClass: DrizzleStaffAssignmentStore } : { provide: STAFF_ASSIGNMENT_STORE, useValue: new MemoryStaffAssignmentStore() },
+        o.storage === 'database' ? { provide: STAFF_ASSIGNMENT_STORE, useClass: DrizzleStaffAssignmentStore } : { provide: STAFF_ASSIGNMENT_STORE, useValue: memoryStaff },
         { provide: STAFF_ASSIGNMENTS, useFactory: (store: StaffAssignmentStore) => o.staffAssignments ?? store, inject: [STAFF_ASSIGNMENT_STORE] },
         CheckScannerSession,
         TerminateScannerSessions,
@@ -155,7 +158,7 @@ export class SessionModule {
         { provide: CONTACT_REF_RPS, useValue: o.contactRefRps ?? DEFAULT_CONTACT_REF_RPS },
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },
-        o.storage === 'database' ? { provide: SESSION_STORE, useClass: DrizzleSessionStore } : { provide: SESSION_STORE, useValue: new MemorySessionStore() },
+        o.storage === 'database' ? { provide: SESSION_STORE, useClass: DrizzleSessionStore } : { provide: SESSION_STORE, useValue: memorySessions },
         o.linkProposals ? { provide: LINK_PROPOSALS, useValue: o.linkProposals } : { provide: LINK_PROPOSALS, useFactory: (clock: Clock) => new MemoryLinkProposals(clock), inject: [CLOCK] },
         o.mergeProposals ? { provide: MERGE_PROPOSALS, useValue: o.mergeProposals } : { provide: MERGE_PROPOSALS, useFactory: (clock: Clock) => new MemoryMergeProposals(clock), inject: [CLOCK] },
         { provide: MERGE_CHECKERS, useValue: o.mergeCheckers ?? (['purchase', 'ticket', 'core'] as const).map(noBlockChecker) },

@@ -25,7 +25,14 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'ops', sessionId: o.sessionId, act: o.act });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw reauthRequired();
-      if (this.#jti && !(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+      if (this.#jti) {
+        try {
+          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+        } catch (e) {
+          if (e instanceof ProblemError) throw e;
+          throw reauthRequired();
+        }
+      }
       return { accountId: v.accountId, factors };
     } catch (e) {
       if (e instanceof ProblemError) throw e;

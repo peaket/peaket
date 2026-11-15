@@ -71,10 +71,10 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
   }
 
   async accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null> {
-    // to_jsonb로 읽어 status 칸이 없는 시험용 최소 account 표에서도 ACTIVE로 본다(운영 표에는 status가 늘 있다).
-    const r = await this.database.db.execute(sql`select coalesce(to_jsonb(a)->>'status', 'ACTIVE') as status from account a where a.id = ${accountId} limit 1`);
-    const row = (r.rows as { status?: string }[])[0];
-    return (row?.status as 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined) ?? null;
+    // status 칸이 없거나 NULL이면 ACTIVE로 보지 않는다(없음·NULL은 비ACTIVE로 닫는다).
+    const r = await this.database.db.execute(sql`select to_jsonb(a)->>'status' as status from account a where a.id = ${accountId} limit 1`);
+    const status = (r.rows as { status?: string | null }[])[0]?.status;
+    return status === 'ACTIVE' || status === 'WITHDRAWAL_PENDING' || status === 'MERGED' || status === 'DELETED' ? status : null;
   }
 
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {

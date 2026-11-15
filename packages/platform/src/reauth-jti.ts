@@ -34,9 +34,22 @@ export class RedisReauthJtiStore implements ReauthJtiStore {
   }
 }
 
-/** Redis가 없을 때. 재인증이 필요한 작업을 닫는다 */
+/** Redis가 없을 때. 재인증이 필요한 작업을 닫는다(이미 쓴 것으로 답해 403) */
 export class UnavailableReauthJtiStore implements ReauthJtiStore {
   async claim(): Promise<boolean> {
-    throw new Error('재인증 jti 저장소(Redis)가 없다');
+    return false;
   }
+}
+
+/**
+ * 운영 조립: Redis가 있으면 Redis, local·ci는 메모리, 그 밖에 Redis가 없으면 닫힌 저장소.
+ * 부르는 쪽이 이 함수를 거치면 `PEAKET_REAUTH_REDIS_URL` 미설정이 1회용 검사를 끄지 않는다.
+ */
+export function reauthJtiStoreFromEnv(
+  env: Record<string, string | undefined>,
+  redis?: Pick<HotRedis, 'command'>,
+): ReauthJtiStore {
+  if (redis) return new RedisReauthJtiStore(redis);
+  const peaketEnv = env.PEAKET_ENV ?? 'prod';
+  return peaketEnv === 'local' || peaketEnv === 'ci' ? new MemoryReauthJtiStore() : new UnavailableReauthJtiStore();
 }

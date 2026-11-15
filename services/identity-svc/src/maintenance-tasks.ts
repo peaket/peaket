@@ -26,12 +26,23 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
       name: 'withdrawal-finish',
       when: 'daily',
       run: async (signal) => {
-        const r = await finish.run(signal);
-        // 탈퇴·병합 정리가 실패하거나 크래시로 빠졌으면 같은 정비 일에서 다시 훑어 배정 REVOKED·세션 종료·Outbox를 남긴다(C2V-04)
-        for (const accountId of await staff.inactiveAccountIdsWithStaff(100)) {
-          await staff.terminateByAccount({ accountId, reason: 'STAFF_REVOKED', nowMs: clock.now() });
+        try {
+          return await finish.run(signal);
+        } finally {
+          // 탈퇴·병합 정리가 실패하거나 크래시로 빠졌어도 같은 정비 일에서 다시 훑는다(C2V-04).
+          // 한 계정이 실패해도 나머지를 계속하고, 남은 행은 다음 정비 일에 다시 잡힌다.
+          try {
+            for (const accountId of await staff.inactiveAccountIdsWithStaff(100)) {
+              try {
+                await staff.terminateByAccount({ accountId, reason: 'STAFF_REVOKED', nowMs: clock.now() });
+              } catch {
+                // 다음 정비 일에 다시 시도한다
+              }
+            }
+          } catch {
+            // 목록 조회가 실패해도 finish의 원래 오류를 가리지 않는다
+          }
         }
-        return r;
       },
     },
     // 가입을 마치지 않고 30일 [가정] 지난 계정을 지운다(identity §8 '팬 계정 요약·세션 종료 사유·가입 마무리의 첫 구현', ADR-0235 결정 7, BOT-047)

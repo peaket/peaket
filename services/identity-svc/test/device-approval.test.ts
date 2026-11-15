@@ -51,6 +51,7 @@ class FakeReplay implements DpopReplayStore {
 function world() {
   const clock = fakeClock({ now: NOW });
   const assignments = new MemoryStaffAssignmentStore();
+  assignments.accounts.set(ACCOUNT, { verified: true, status: 'ACTIVE' });
   assignments.assignments.set('a-1', {
     id: 'a-1',
     accountId: ACCOUNT,

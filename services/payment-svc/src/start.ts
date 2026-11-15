@@ -8,7 +8,7 @@
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
-import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, RedisReauthJtiStore, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
@@ -228,7 +228,7 @@ let circuitsRef: PgCircuits | undefined;
               jwksUrl: env.PEAKET_IDENTITY_JWKS_URL,
               issuer: env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example',
               clock: systemClock,
-              ...(reauthRedis ? { jti: new RedisReauthJtiStore(reauthRedis) } : {}),
+              jti: reauthJtiStoreFromEnv(env, reauthRedis),
             })
           : new UnavailableReauthVerifier(),
       },

@@ -19,9 +19,16 @@ type Props = PageProps<{ slug: string }>;
 const STATE_SLUG: Record<Exclude<Scr057State, '없는 문서'>, string> = { '개인정보 처리방침': 'privacy', 이용약관: 'terms' };
 const DOC_OPTIONS = POLICY_DOCS.map((d) => ({ slug: d.slug, title: d.title }));
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
-  return { title: getPolicyDoc(slug)?.title ?? '약관·정책 문서' };
+  const sp = await searchParams;
+  const picked = firstParam(sp, 'state') !== undefined ? resolvePreviewState(sp, SCR057_STATES, '개인정보 처리방침') : null;
+  const doc = picked === '없는 문서' ? undefined : getPolicyDoc(picked ? STATE_SLUG[picked] : slug);
+  return {
+    title: doc?.title ?? '약관·정책 문서',
+    // 법무 검토 전 초안은 전역 noindex가 풀려도 검색에 실리지 않게 경로 자체에 robots를 건다.
+    ...(doc?.draft === true ? { robots: { index: false, follow: false } } : {}),
+  };
 }
 
 export async function PolicyPage({ params, searchParams }: Props) {

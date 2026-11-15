@@ -37,7 +37,14 @@ export class JwksBookersReauth implements BookersReauth {
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
       // 같은 재인증 토큰의 jti를 두 번 쓰지 못한다(SEC-03). 저장소를 쓸 수 없으면 닫는다.
-      if (this.#jti && !(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+      if (this.#jti) {
+        try {
+          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+        } catch (e) {
+          if (e instanceof ExportProblem) throw e;
+          throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
+        }
+      }
       return { accountId: v.accountId, factors };
     } catch (e) {
       if (e instanceof ExportProblem) throw e;

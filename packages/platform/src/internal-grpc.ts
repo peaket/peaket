@@ -11,6 +11,11 @@ export const INTERNAL_GRPC_ACTOR_PROOF_HEADER = 'x-peaket-internal-grpc-actor-pr
 
 type Env = Record<string, string | undefined>;
 
+/** 내부 gRPC 클라이언트만 여는 서비스도 시작 때 토큰 미설정을 막는다(core·ops) */
+export function assertInternalGrpcToken(env: Env): void {
+  internalGrpcTokenFromEnv(env);
+}
+
 /** 환경 값에서 내부 gRPC 토큰을 읽는다. local·ci는 없어도 되고, 그 밖은 없으면 시작을 막는다 */
 export function internalGrpcTokenFromEnv(env: Env): string | undefined {
   const token = env.PEAKET_INTERNAL_GRPC_TOKEN;
