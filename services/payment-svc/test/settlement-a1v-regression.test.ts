@@ -353,32 +353,87 @@ describe('A1V-10 회차 정산 스케줄러', () => {
     expect(ticked).toHaveBeenCalledWith({ through: '2026-11-13', calculated: 1 });
   });
 
-  test('정기 실행은 06:00 KST에만 하루 한 번 돈다', async () => {
+  test('정기 실행은 KST 평일 06:00에만 하고, force tick과 실패는 그날 정기 실행을 소비하지 않는다', async () => {
+    // ① force tick은 즉시 돌지만 같은 날 정기 06:00 tick을 소비하지 않고, 주말 06:00에는 돌지 않는다.
     const timer = new ManualTimer();
-    const clock = fakeClock({ now: Date.parse('2026-11-14T20:30:00.000Z') }); // 2026-11-15 05:30 KST
+    const clock = fakeClock({ now: Date.parse('2026-11-15T20:30:00.000Z') }); // 2026-11-16(월) 05:30 KST
     const calculate = vi.fn(async () => ({ calculated: 0, items: [] }));
     const confirm = vi.fn(async () => ({ confirmed: 0, items: [] }));
+    const ticked = vi.fn();
     const worker = new SettlementDueWorker({
       settlements: { calculateDueEvents: calculate, confirmDueStatements: confirm } as unknown as Settlements,
       leader: { isLeader: () => true },
       clock,
       timer,
+      log: { ticked },
     });
 
     worker.start();
-    timer.fire();
-    await flush();
-    expect(calculate).not.toHaveBeenCalled();
-
-    clock.advance(30 * 60 * 1_000); // 06:00 KST
-    timer.fire();
-    await until(() => calculate.mock.calls.length === 1);
-    expect(calculate).toHaveBeenCalledWith('2026-11-14', 100);
-
-    timer.fire();
-    await flush();
+    await worker.tick(true);
     expect(calculate).toHaveBeenCalledTimes(1);
+    expect(calculate).toHaveBeenLastCalledWith('2026-11-15', 100);
+
+    clock.advance(30 * 60 * 1_000); // 월요일 06:00 KST
+    timer.fire();
+    await until(() => ticked.mock.calls.length === 2);
+    expect(calculate).toHaveBeenCalledTimes(2);
+    expect(confirm).toHaveBeenCalledTimes(2);
+
+    timer.fire();
+    await flush();
+    expect(calculate).toHaveBeenCalledTimes(2);
+
+    clock.advance(5 * 24 * 60 * 60 * 1_000); // 토요일 06:00 KST
+    timer.fire();
+    await flush();
+    expect(calculate).toHaveBeenCalledTimes(2);
+
+    clock.advance(2 * 24 * 60 * 60 * 1_000); // 다음 월요일 06:00 KST
+    timer.fire();
+    await until(() => ticked.mock.calls.length === 3);
+    expect(calculate).toHaveBeenLastCalledWith('2026-11-22', 100);
     await worker.stop();
+
+    // ② 두 작업 중 하나가 실패한 정기 tick은 그날 실행을 소비하지 않아 06:30에 다시 돈다.
+    for (const failing of ['calculate', 'confirm'] as const) {
+      const retryTimer = new ManualTimer();
+      const retryClock = fakeClock({ now: Date.parse('2026-11-15T21:00:00.000Z') }); // 2026-11-16(월) 06:00 KST
+      const retryCalculate =
+        failing === 'calculate'
+          ? vi.fn().mockRejectedValueOnce(new Error('core-svc 503')).mockResolvedValue({ calculated: 0, items: [] })
+          : vi.fn(async () => ({ calculated: 0, items: [] }));
+      const retryConfirm =
+        failing === 'confirm'
+          ? vi.fn().mockRejectedValueOnce(new Error('db down')).mockResolvedValue({ confirmed: 0, items: [] })
+          : vi.fn(async () => ({ confirmed: 0, items: [] }));
+      const retryTicked = vi.fn();
+      const retryWorker = new SettlementDueWorker({
+        settlements: { calculateDueEvents: retryCalculate, confirmDueStatements: retryConfirm } as unknown as Settlements,
+        leader: { isLeader: () => true },
+        clock: retryClock,
+        timer: retryTimer,
+        log: { ticked: retryTicked },
+      });
+
+      retryWorker.start();
+      retryTimer.fire();
+      await until(() => retryTicked.mock.calls.length === 1);
+      expect(retryCalculate).toHaveBeenCalledTimes(1);
+      expect(retryConfirm).toHaveBeenCalledTimes(1);
+
+      retryClock.advance(30 * 60 * 1_000); // 같은 날 06:30 KST
+      retryTimer.fire();
+      await until(() => retryTicked.mock.calls.length === 2);
+      expect(retryCalculate).toHaveBeenCalledTimes(2);
+      expect(retryConfirm).toHaveBeenCalledTimes(2);
+
+      retryClock.advance(30 * 60 * 1_000); // 07:00 KST부터는 그날 정기 실행이 끝났다
+      retryTimer.fire();
+      await flush();
+      expect(retryCalculate).toHaveBeenCalledTimes(2);
+      expect(retryConfirm).toHaveBeenCalledTimes(2);
+      await retryWorker.stop();
+    }
   });
 });
 
