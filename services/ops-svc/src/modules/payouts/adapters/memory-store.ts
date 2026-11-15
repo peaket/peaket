@@ -1,4 +1,4 @@
-// 지�??�인 ?�무 메모�??�?�소(?�위 ?�험·개발).
+// 지급 승인 업무 메모리 저장소(단위 시험·개발).
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { PayoutApprovalStore } from '../domain/ports.js';
 import { PayoutApprovalProblem, type PayoutApprovalRecord } from '../domain/payout-approval.js';

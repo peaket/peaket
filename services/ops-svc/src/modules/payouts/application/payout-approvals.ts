@@ -1,4 +1,4 @@
-// 지�?묶음 2???�인·?�행 ?�스케?�스(BUILD_ORDER BAT-610 ?�여, FR-062, POL-038·039).
+// 지급 묶음 2인 승인·실행 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
@@ -9,12 +9,12 @@ export interface PayoutApprovalDeps {
   readonly payments: PayoutPaymentClient;
   readonly reauth: ApprovalReauthVerifier;
   readonly clock: Clock;
-  /** ?�태 ?�?�과 같�? ?�랜??��???��? 못하??감사(?�기 ?�트???�행)???�다 */
+  /** 상태 저장과 같은 트랜잭션에 쓰지 못하는 감사(수기 포트원 실행)에 쓴다 */
   readonly audit?: AuditChain;
 }
 
 const auditRecord = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
-/** 지�??�인 감사???�본 ?�조용 고정 �?묶음·결제??�금?�·요�?��) */
+/** 지급 승인 감사에 원본 대조용 고정 값(묶음·결제사·금액·요청자) */
 const payoutBase = (r: PayoutApprovalRecord): Record<string, unknown> => ({
   batchId: r.batchId,
   pg: r.pg,
@@ -31,7 +31,7 @@ export interface OpsActor {
   role: string;
 }
 
-const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 ???�습?�다' });
+const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
 const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
@@ -70,7 +70,7 @@ export class PayoutApprovals {
         requesterId: actor.accountId,
         requesterRole: actor.role,
         approverId: null,
-        reasonText: input.reasonText?.trim() || '지�?묶음 ?�인 ?�청',
+        reasonText: input.reasonText?.trim() || '지급 묶음 승인 요청',
         failure: null,
         createdAt: now,
         updatedAt: now,
@@ -112,17 +112,17 @@ export class PayoutApprovals {
     return guard(async () => {
       const r = await this.d.store.find(approvalId);
       if (!r) throw notFound();
-      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '?�인 ?��?중인 지�?묶음???�닙?�다');
-      if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '?�청?�는 ?�인?????�습?�다');
+      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
+      if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 승인할 수 없습니다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 승인할 수 있습니다');
       const verified = await this.d.reauth.verify(reauthToken, { sessionId: actor.sessionId, act: 'APPROVAL' });
       if (verified.accountId !== actor.accountId) throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
       const nowMs = this.d.clock.now();
       const now = new Date(nowMs);
       const executing: PayoutApprovalRecord = { ...r, status: 'EXECUTING', approverId: actor.accountId, approvedAt: now, updatedAt: now, version: r.version + 1 };
-      // EXECUTING ?�태?� 감사�?같�? ?�랜??��???�다. 감사 append가 ?�패?�면 ?�태??PENDING_APPROVAL�??�는??OPSV-01).
+      // EXECUTING 상태와 감사를 같은 트랜잭션에 쓴다. 감사 append가 실패하면 상태도 PENDING_APPROVAL로 남는다(OPSV-01).
       if (!(await this.d.store.save(executing, auditRecord('PAYOUT_BATCH_EXECUTING', executing.approvalId, { ...payoutBase(executing), status: executing.status }, nowMs))))
-        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '?�른 ?�람??먼�? 처리?�습?�다');
+        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
       let executed = false;
       try {
         await this.d.payments.approveBatch(r.batchId, r.approvalId);
@@ -130,14 +130,14 @@ export class PayoutApprovals {
         executed = true;
         const doneMs = this.d.clock.now();
         const done: PayoutApprovalRecord = { ...executing, status: 'DONE', executedAt: new Date(doneMs), updatedAt: new Date(doneMs), version: executing.version + 1 };
-        // ?�공 ?�태?� 감사??같�? ?�랜??��???�다. ??append가 ?�패?�면 DONE?� 롤백?�고 EXECUTING???�는??
+        // 성공 상태와 감사도 같은 트랜잭션에 쓴다. 이 append가 실패하면 DONE은 롤백되고 EXECUTING이 남는다.
         await this.d.store.save(
           done,
           auditRecord('PAYOUT_BATCH_DONE', done.approvalId, { ...payoutBase(done), status: done.status }, doneMs),
         );
         return payoutApprovalView(done, actor);
       } catch (e) {
-        // 지급�??�이 ?��? ?�공???�의 감사 ?�패�?FAILED�?바꾸지 ?�는???�공???�패�?보고?��? ?�는??.
+        // 지급대행이 이미 성공한 뒤의 감사 실패를 FAILED로 바꾸지 않는다(성공을 실패로 보고하지 않는다).
         if (!executed) {
           const failedMs = this.d.clock.now();
           const failed: PayoutApprovalRecord = { ...executing, status: 'FAILED', failure: e instanceof Error ? e.message.slice(0, 500) : 'execute-failed', updatedAt: new Date(failedMs), version: executing.version + 1 };
@@ -155,7 +155,7 @@ export class PayoutApprovals {
     return guard(async () => {
       const r = await this.d.store.find(approvalId);
       if (!r) throw notFound();
-      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '?�인 ?��?중인 지�?묶음???�닙?�다');
+      if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
       if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 반려할 수 없습니다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 반려할 수 있습니다');
       if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
@@ -163,7 +163,7 @@ export class PayoutApprovals {
       const now = new Date(nowMs);
       const next: PayoutApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, reasonText: reason.trim(), updatedAt: now, version: r.version + 1 };
       if (!(await this.d.store.save(next, auditRecord('PAYOUT_APPROVAL_REJECTED', next.approvalId, { ...payoutBase(next), status: next.status, reason: next.reasonText }, nowMs))))
-        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '?�른 ?�람??먼�? 처리?�습?�다');
+        throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
       return payoutApprovalView(next, actor);
     });
   }

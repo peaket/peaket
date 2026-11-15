@@ -9,7 +9,7 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 const fail = (d: Exclude<CommandDecision, { status: 'APPLIED' }>): never => {
   if (d.status === 'NOT_FOUND') throw new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
   if (d.status === 'NOT_PENDING') throw new ProblemError({ type: 'command-not-pending', status: 409, title: '승인 대기 중인 명령이 아닙니다' });
-  if (d.status === 'ROLE_FORBIDDEN') throw new ProblemError({ type: 'command-role-forbidden', status: 403, title: '이 명령을 승인·거부할 수 있는 역할이 아닙니다' });
+  if (d.status === 'ROLE_FORBIDDEN') throw new ProblemError({ type: 'command-role-forbidden', status: 403, title: '이 명령을 할 수 있는 역할이 아닙니다' });
   throw new ProblemError({ type: 'command-requester-cannot-approve', status: 403, title: '요청한 분은 승인할 수 없습니다' });
 };
 
