@@ -20,7 +20,7 @@ import { VerificationEraser } from '../src/modules/verification/adapters/verific
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { VerificationError } from '../src/modules/verification/application/verification-error.js';
-import { AccountWithdrawn } from '@peaket/contracts/asyncapi';
+import { AccountWithdrawn, SessionTerminated } from '@peaket/contracts/asyncapi';
 import { agencyResult, ISSUER, kit, newKey, noClaims, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 const DAY = 86_400_000;
@@ -105,6 +105,55 @@ describe('탈퇴(I-T16·I-T27)', () => {
     expect(t.staff.assignments.get('a-staff')?.status).toBe('REVOKED');
     expect(t.staff.sessions.get('ss-staff')?.terminatedAt).toBe(t.clock.now());
     expect(t.staff.terminatedEvents).toEqual([{ accountId: a.accountId, sessionId: 'ss-staff', reason: 'STAFF_REVOKED', terminatedAt: new Date(t.clock.now()).toISOString() }]);
+  });
+
+  test('탈퇴는 그 계정의 살아 있는 스캐너 세션을 모두 끝내고 STAFF_REVOKED 사건을 계약대로 남기며 다른 계정은 건드리지 않는다(C2-01)', async () => {
+    const t = await setup();
+    const a = await t.login('w-staff-multi');
+    await t.verify(a.accountId, 'staff-person');
+    const HOUR = 60 * 60_000;
+    const now = t.clock.now();
+    const assignment = (id: string, accountId: string) => ({
+      id,
+      accountId,
+      status: 'ASSIGNED' as const,
+      eventId: `ev-${id}`,
+      validFromMs: now - HOUR,
+      validUntilMs: now + HOUR,
+      inviteExpiresAtMs: now + HOUR,
+      invitedBy: 'admin',
+    });
+    const session = (id: string, assignmentId: string, accountId: string) => ({
+      scannerSessionId: id,
+      assignmentId,
+      accountId,
+      deviceId: `dev-${id}`,
+      role: 'gate_staff' as const,
+      proxy: false,
+      expiresAt: now + HOUR,
+      terminatedAt: null,
+      assignmentStatus: 'ASSIGNED' as const,
+      validFrom: now - HOUR,
+      validUntil: now + HOUR,
+      eventId: `ev-${assignmentId}`,
+    });
+    t.staff.assignments.set('a-1', assignment('a-1', a.accountId));
+    t.staff.assignments.set('a-2', assignment('a-2', a.accountId));
+    t.staff.assignments.set('a-other', assignment('a-other', 'other-account'));
+    t.staff.sessions.set('ss-1', session('ss-1', 'a-1', a.accountId));
+    t.staff.sessions.set('ss-2', session('ss-2', 'a-2', a.accountId));
+    t.staff.sessions.set('ss-other', session('ss-other', 'a-other', 'other-account'));
+
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+
+    expect(t.staff.assignments.get('a-1')?.status).toBe('REVOKED');
+    expect(t.staff.assignments.get('a-2')?.status).toBe('REVOKED');
+    expect(t.staff.assignments.get('a-other')?.status).toBe('ASSIGNED');
+    expect(t.staff.sessions.get('ss-1')?.terminatedAt).toBe(now);
+    expect(t.staff.sessions.get('ss-2')?.terminatedAt).toBe(now);
+    expect(t.staff.sessions.get('ss-other')?.terminatedAt).toBeNull();
+    expect(t.staff.terminatedEvents.map((e) => e.sessionId).sort()).toEqual(['ss-1', 'ss-2']);
+    for (const e of t.staff.terminatedEvents) expect(SessionTerminated.safeParse(e).success).toBe(true);
   });
 
   test('I-T16_재인증토큰이없거나·다른세션·다른작업묶음·다른계정·만료면403이고_한번쓴토큰은다시못쓴다', async () => {

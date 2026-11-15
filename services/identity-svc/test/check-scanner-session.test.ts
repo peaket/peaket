@@ -6,7 +6,7 @@ import { fakeClock } from '@peaket/platform';
 import { CheckScannerSession } from '../src/modules/session/application/check-scanner-session.js';
 import { MemoryStaffAssignmentStore } from '../src/modules/session/adapters/memory-staff-assignment-store.js';
 import { scannerSessionCheckHandlers } from '../src/modules/session/inbound/scanner-session-check.grpc.js';
-import type { ScannerSessionRecord } from '../src/modules/session/domain/staff.js';
+import type { ScannerSessionRecord, StaffAssignmentStore } from '../src/modules/session/domain/staff.js';
 
 const NOW = Date.parse('2026-11-01T00:00:00.000Z');
 const HOUR = 60 * 60_000;
@@ -68,6 +68,27 @@ describe('CheckScannerSession(GAT-170)', () => {
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
     store.accounts.set('acc-1', { verified: true, status: 'ACTIVE' });
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(true);
+  });
+
+  test('탈퇴 유예 중인 계정의 세션도 무효다(스캐너 세션은 ACTIVE 계정만 유효하다, C2-01)', async () => {
+    const { check, store } = world();
+    store.accounts.set('acc-1', { verified: true, status: 'WITHDRAWAL_PENDING' });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+  });
+
+  test('계정 행이 없는 고아 세션은 무효이고 touch하지 않는다(C2-01)', async () => {
+    const { clock, session } = world();
+    const check = new CheckScannerSession(
+      {
+        findScannerSession: async () => session,
+        accountStatusOf: async () => null,
+        touchScannerSession: async () => {
+          throw new Error('무효 세션을 touch하면 안 된다');
+        },
+      } as unknown as StaffAssignmentStore,
+      clock,
+    );
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
   });
 
   test('validFrom이 미래인 세션은 무효이고, 정확히 같은 시각은 유효하다', async () => {
