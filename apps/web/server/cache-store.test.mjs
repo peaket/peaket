@@ -1,6 +1,6 @@
 // 공유 캐시 저장소·처리기 단위 시험(BAT-170 웨이브 7 T13, docs/frontend.md §5.17 '공유 캐시 처리기 세부', docs/data.md 세션·캐시 클러스터 키 이름).
 // 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 가짜 Redis(아래 fakeRedis)와 가짜 시계(node:test mock.timers)로 돈다.
-// 단언 값은 정본의 값이다: 키 꼴 web:isr:{캐시 키}·web:data:{캐시 키}·web:data:tag:{태그}, TTL 상한 30일, Redis 시간 한도 100ms.
+// 단언 값은 정본의 값이다: 키 꼴 web:isr:<캐시 키>·web:data:<캐시 키>·web:{tag}:<태그>(docs/frontend.md §5.17, 계획 §11 1), TTL 상한 30일, Redis 시간 한도 100ms.
 // 주입하는 한도·상한은 일부러 정본 값과 다르게 골라(250ms, 3600초) 주입 값을 무시하는 결함도 잡는다.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -24,6 +24,8 @@ function fakeRedis() {
   /** @type {Map<string, { value: unknown, ttlMs: number | null }>} */
   const data = new Map();
   const ctl = { delayMs: 0, fail: false };
+  /** 받은 명령 기록: { cmd, keys } */
+  const calls = [];
   const respond = (fn) =>
     new Promise((ok, no) => {
       const run = () => (ctl.fail ? no(new Error('연결이 끊겼다')) : ok(fn()));
@@ -65,19 +67,26 @@ function fakeRedis() {
         throw new Error(`가짜 Redis가 모르는 명령: ${cmd}`);
     }
   };
+  const log = (cmd, keys) => calls.push({ cmd, keys });
   const client = {
-    get: (k) => respond(() => data.get(k)?.value ?? null),
-    mGet: (keys) => respond(() => keys.map((k) => data.get(k)?.value ?? null)),
-    set: (k, v, o) =>
+    get: (k) => (log('GET', [k]), respond(() => data.get(k)?.value ?? null)),
+    mGet: (keys) => (log('MGET', [...keys]), respond(() => keys.map((k) => data.get(k)?.value ?? null))),
+    set: (k, v, o) => (
+      log('SET', [k]),
       respond(() => {
         data.set(k, { value: v, ttlMs: ttlOf(o) });
         return 'OK';
-      }),
-    expire: (k, s) => respond(() => raw(['EXPIRE', k, s])),
-    pExpire: (k, ms) => respond(() => raw(['PEXPIRE', k, ms])),
-    sendCommand: (args) => respond(() => raw(args)),
+      })
+    ),
+    expire: (k, s) => (log('EXPIRE', [k]), respond(() => raw(['EXPIRE', k, s]))),
+    pExpire: (k, ms) => (log('PEXPIRE', [k]), respond(() => raw(['PEXPIRE', k, ms]))),
+    sendCommand: (args) => {
+      const cmd = String(args[0]).toUpperCase();
+      log(cmd, cmd === 'MGET' ? args.slice(1).map(String) : [String(args[1])]);
+      return respond(() => raw(args));
+    },
   };
-  return { client, data, ctl };
+  return { client, data, ctl, calls };
 }
 
 const text = (v) => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
@@ -104,12 +113,12 @@ test('HOT-390 공유 캐시 키 꼴과 모든 키의 TTL', async () => {
   await store.setEntry('data', 'edge', 'edge-value', 3_600); // 상한과 같다
   await store.markTags(['events', 'event:evt-lumen-1025'], 5_000);
 
-  assert.deepEqual([...data.keys()].sort(), ['web:data:abc123', 'web:data:edge', 'web:data:tag:event:evt-lumen-1025', 'web:data:tag:events', 'web:isr:/events/evt-lumen-1025']);
+  assert.deepEqual([...data.keys()].sort(), ['web:data:abc123', 'web:data:edge', 'web:isr:/events/evt-lumen-1025', 'web:{tag}:event:evt-lumen-1025', 'web:{tag}:events']);
   assert.equal(data.get('web:isr:/events/evt-lumen-1025').ttlMs, 60_000, '값 TTL은 만료(60초)');
   assert.equal(data.get('web:data:abc123').ttlMs, 3_600_000, '만료가 상한보다 길면 상한');
   assert.equal(data.get('web:data:edge').ttlMs, 3_600_000);
-  assert.equal(data.get('web:data:tag:events').ttlMs, 3_600_000, '태그 시각 TTL은 상한');
-  assert.equal(data.get('web:data:tag:event:evt-lumen-1025').ttlMs, 3_600_000);
+  assert.equal(data.get('web:{tag}:events').ttlMs, 3_600_000, '태그 시각 TTL은 상한');
+  assert.equal(data.get('web:{tag}:event:evt-lumen-1025').ttlMs, 3_600_000);
   for (const [k, e] of data) assert.ok(e.ttlMs !== null && e.ttlMs > 0, `TTL 없는 키: ${k}`);
 
   // 저장소 응답은 정확한 값까지
@@ -117,8 +126,45 @@ test('HOT-390 공유 캐시 키 꼴과 모든 키의 TTL', async () => {
   assert.equal(text(await store.getEntry('data', 'abc123')), 'data-value');
   assert.equal(await store.getEntry('isr', 'abc123') ?? null, null, '종류가 다르면 다른 키다');
   assert.equal(await store.getEntry('data', 'never') ?? null, null);
-  assert.equal(Number(text(data.get('web:data:tag:events').value)), 5_000);
+  assert.equal(Number(text(data.get('web:{tag}:events').value)), 5_000);
   assert.deepEqual(timesOf(await store.tagTimes(['events', 'event:evt-lumen-1025', 'never']), ['events', 'event:evt-lumen-1025', 'never']), [5_000, 5_000, 0]);
+});
+
+// BAT-170 시험 뒤 정한 것(계획 §11 1): 값 키와 태그 키는 둘째 칸(isr·data·{tag})이 달라 겹치지 않는다
+test('HOT-390 값 키와 태그 키는 겹치지 않는다', async () => {
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, maxTtlSeconds: 3_600 });
+  // 'tag:'로 시작하는 캐시 키와, 그 뒤 글자와 같은 이름의 태그를 함께 쓴다
+  await store.setEntry('data', 'tag:events', 'data-value', 60);
+  await store.setEntry('isr', 'tag:events', 'isr-value', 60);
+  await store.markTags(['events', 'tag:events'], 7_000);
+  assert.deepEqual([...data.keys()].sort(), ['web:data:tag:events', 'web:isr:tag:events', 'web:{tag}:events', 'web:{tag}:tag:events']);
+  assert.equal(text(await store.getEntry('data', 'tag:events')), 'data-value');
+  assert.equal(text(await store.getEntry('isr', 'tag:events')), 'isr-value');
+  assert.deepEqual(timesOf(await store.tagTimes(['events', 'tag:events']), ['events', 'tag:events']), [7_000, 7_000]);
+  // 값 쓰기가 태그 시각을 덮지 않고, 태그 쓰기가 값을 덮지 않는다
+  await store.setEntry('data', '{tag}:events', 'brace-value', 60);
+  assert.deepEqual(timesOf(await store.tagTimes(['events']), ['events']), [7_000]);
+  assert.equal(text(await store.getEntry('data', 'tag:events')), 'data-value');
+});
+
+// BAT-170 시험 뒤 정한 것(계획 §11 1): 태그 키는 한 해시 태그 슬롯에 모여 MGET 한 번으로 읽는다(클러스터 모드 CROSSSLOT 막기)
+test('HOT-390 여러 태그는 한 번에 읽는다(같은 해시 태그 슬롯)', async () => {
+  const { client, calls } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, maxTtlSeconds: 3_600 });
+  await store.markTags(['a', 'b'], 9_000);
+  calls.length = 0;
+  const tags = ['a', 'b', 'never'];
+  assert.deepEqual(timesOf(await store.tagTimes(tags), tags), [9_000, 9_000, 0]);
+  assert.equal(calls.length, 1, `태그 읽기 명령 ${calls.length}번: ${JSON.stringify(calls)}`);
+  assert.equal(calls[0].cmd, 'MGET');
+  assert.deepEqual([...calls[0].keys].sort(), ['web:{tag}:a', 'web:{tag}:b', 'web:{tag}:never']);
+  // 태그 쓰기 키도 모두 같은 해시 태그다
+  calls.length = 0;
+  await store.markTags(['c', 'd'], 9_500);
+  const written = calls.flatMap((c) => c.keys);
+  assert.ok(written.length > 0);
+  for (const k of written) assert.match(k, /^web:\{tag\}:/, k);
 });
 
 test('HOT-390 공유 캐시 TTL 상한을 주지 않으면 정본의 30일이다', async () => {
@@ -129,7 +175,7 @@ test('HOT-390 공유 캐시 TTL 상한을 주지 않으면 정본의 30일이다
   await store.markTags(['events'], 1_000);
   assert.equal(data.get('web:data:long').ttlMs, DAYS_30_S * 1000);
   assert.equal(data.get('web:data:short').ttlMs, 29 * 24 * 60 * 60 * 1000);
-  assert.equal(data.get('web:data:tag:events').ttlMs, DAYS_30_S * 1000);
+  assert.equal(data.get('web:{tag}:events').ttlMs, DAYS_30_S * 1000);
 });
 
 test('HOT-390 태그 시각보다 먼저 만든 값은 없는 것으로 본다', async () => {
@@ -260,6 +306,14 @@ test('HOT-390 운영·스테이징에서 주소가 없으면 시작하지 않는
   }
   // local·ci·demo는 주소 없이 시작한다(Next.js 기본 처리기)
   for (const PEAKET_ENV of ['local', 'ci', 'demo']) assert.doesNotThrow(() => assertCacheEnv({ PEAKET_ENV }), PEAKET_ENV);
+});
+
+// BAT-170 시험 뒤 정한 것(계획 §11 5, docs/frontend.md §5.17 공유 캐시 처리기 세부): 닫힌 규칙. local·ci·demo만 주소 없이 뜬다
+test('HOT-390 PEAKET_ENV가 local·ci·demo가 아니면(없음·빈 값·오타·대소문자 다름) 주소 없이 시작하지 않는다', () => {
+  const cases = [{}, { PEAKET_ENV: '' }, { PEAKET_ENV: '   ' }, { PEAKET_ENV: 'production' }, { PEAKET_ENV: 'dev' }, { PEAKET_ENV: 'PROD' }, { PEAKET_ENV: 'Local' }, { PEAKET_ENV: 'CI' }, { PEAKET_ENV: 'test' }];
+  for (const env of cases) assert.throws(() => assertCacheEnv(env), /PEAKET_WEB_CACHE_REDIS_URL/, JSON.stringify(env));
+  for (const env of cases) assert.doesNotThrow(() => assertCacheEnv({ ...env, PEAKET_WEB_CACHE_REDIS_URL: 'rediss://cache.internal:6379' }), `${JSON.stringify(env)} + 주소`);
+  for (const PEAKET_ENV of ['local', 'ci', 'demo']) assert.doesNotThrow(() => assertCacheEnv({ PEAKET_ENV, PEAKET_WEB_CACHE_REDIS_URL: '' }), `${PEAKET_ENV} 빈 주소`);
 });
 
 test('HOT-390 server/start.mjs는 운영에서 캐시 주소가 없으면 Next.js를 띄우기 전에 멈춘다', async () => {

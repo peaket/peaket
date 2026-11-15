@@ -102,3 +102,61 @@ test('SCR-058 기본 폭: 안내 화면의 next가 다른 출처면 그 출처�
     expect(targets.filter((v) => v.includes('evil.example')), next).toEqual([]);
   }
 });
+
+// BAT-170 시험 뒤 정한 것(계획 §11 3, docs/design/d5-screen-blueprint.md §5.32 '열 주소'): 시험 담당(l2w7-BAT170-test)이 구현 전에 더했다.
+// [주소 복사]가 복사한 값(navigator.clipboard.writeText 대역)과 Android의 [다른 브라우저로 열기]가 요청한 이동(intent 주소, CDP Page.frameRequestedNavigation)을 읽는다.
+/** Android 인앱 브라우저(Instagram): [다른 브라우저로 열기]가 intent 주소로 바로 연다 */
+const ANDROID_IN_APP = IN_APP.Instagram;
+
+/** intent://host/path?q#Intent;scheme=http;end → http://host/path?q */
+const fromIntent = (u) => {
+  const m = /^intent:\/\/([^#]*)#Intent;(?:.*;)?scheme=([a-z]+);/.exec(u);
+  return m ? `${m[2]}://${m[1]}` : u;
+};
+
+async function guideAddresses(browser, next) {
+  const context = await browser.newContext({ userAgent: ANDROID_IN_APP, locale: 'ko-KR' });
+  try {
+    const page = await context.newPage();
+    await stubFanApi(page);
+    await page.addInitScript(() => {
+      window.__copied = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => void window.__copied.push(String(t)) } });
+    });
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Page.enable');
+    const opened = [];
+    cdp.on('Page.frameRequestedNavigation', (e) => opened.push(e.url));
+    const res = await page.goto(`${WEB}/open-in-browser?next=${encodeURIComponent(next)}`, { waitUntil: 'networkidle' });
+    expect(res?.status(), next).toBeLessThan(400);
+    await page.getByRole('button', { name: '주소 복사' }).first().click();
+    await expect.poll(() => page.evaluate(() => window.__copied.length), { message: `${next} 복사한 값이 없다(빈 결과)` }).toBeGreaterThan(0);
+    const copied = await page.evaluate(() => window.__copied);
+    await page.getByRole('button', { name: '다른 브라우저로 열기' }).click();
+    await expect.poll(() => opened.filter((u) => u.startsWith('intent:')).length, { message: `${next} 바로 열기 이동이 없다(빈 결과)` }).toBeGreaterThan(0);
+    const text = await page.locator('body').innerText();
+    return { copied, opened: opened.filter((u) => u.startsWith('intent:')).map(fromIntent), text };
+  } finally {
+    await context.close();
+  }
+}
+
+test('SCR-058 기본 폭: 다른 출처·두 꼴 밖 next면 [다른 브라우저로 열기]·[주소 복사]의 주소는 첫 화면(/)이다', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'CDP 이동 요청 사건은 Chromium만 된다');
+  for (const next of ['https://evil.example/queue/x', '//evil.example/queue/x', '/my/settings']) {
+    const { copied, opened, text } = await guideAddresses(browser, next);
+    expect(copied, next).toEqual([`${WEB}/`]);
+    expect(opened, next).toEqual([`${WEB}/`]);
+    expect(text.includes('evil.example'), `${next} 받은 주소가 화면 글에 있다`).toBe(false);
+  }
+});
+
+test('SCR-058 기본 폭: 고정 자료에 없는 실제 공연 ID의 대기실 경로는 그 주소 그대로 연다(데모 공연으로 바꾸지 않는다)', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'CDP 이동 요청 사건은 Chromium만 된다');
+  for (const path of [queuePath, '/my/tickets/tkt-bat170-not-in-fixture']) {
+    const { copied, opened } = await guideAddresses(browser, path);
+    expect(copied, path).toEqual([`${WEB}${path}`]);
+    expect(opened, path).toEqual([`${WEB}${path}`]);
+    for (const v of [...copied, ...opened]) expect(v.includes('evt-lumen-1025'), `${path} 데모 공연으로 바뀌었다: ${v}`).toBe(false);
+  }
+});

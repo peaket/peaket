@@ -40,6 +40,16 @@ const focusStep = (page) =>
 for (const p of REFLOW_PAGES) {
   for (const size of ['320', '기본 폭']) {
     test(`FE-T18 ${p.app} ${p.locale} ${p.path} ${size}: Tab으로 옮긴 초점이 고정 머리·하단 바에 다 가려지지 않는다`, async ({ page }) => {
+      // 입장이 있어야 그리는 화면(좌석)은 항목의 탭 저장소 값을 먼저 넣는다(계획 §11 2, reflow.spec과 같다)
+      if (p.sessionStorage) {
+        await page.addInitScript((entries) => {
+          try {
+            for (const [k, v] of Object.entries(entries)) if (sessionStorage.getItem(k) === null) sessionStorage.setItem(k, v);
+          } catch {
+            /* about:blank에는 저장소가 없다 */
+          }
+        }, p.sessionStorage);
+      }
       const res = await page.goto(`${BASE[p.app]}${p.path}`, { waitUntil: 'networkidle' });
       expect(res?.status(), `${p.app}${p.path}`).toBeLessThan(400);
       const u = new URL(page.url());

@@ -96,9 +96,10 @@ test('HOT-390 두 처리기 인스턴스가 같은 Valkey를 나눠 쓴다: A가
   await sleep(5);
   await a.revalidateTag('event-isr');
   assert.equal((await b.get('/events/evt-lumen-1025', { kind: 'APP_PAGE', isFallback: false })) ?? null, null);
-  // 태그 시각은 두 처리기가 같은 키 꼴(web:data:tag:{태그})을 쓴다
-  assert.ok(Number(cli('GET', 'web:data:tag:event-isr')) > 0);
-  assert.ok(Number(cli('GET', 'web:data:tag:events')) > 0);
+  // 태그 시각은 두 처리기가 같은 키 꼴(web:{tag}:<태그>, 계획 §11 1)을 쓴다. valkey-cli에는 셸 없이 인자로 넘겨 {·}가 그대로 간다
+  assert.ok(Number(cli('GET', 'web:{tag}:event-isr')) > 0);
+  assert.ok(Number(cli('GET', 'web:{tag}:events')) > 0);
+  assert.equal(cli('EXISTS', 'web:data:tag:events'), '0', '옛 키 꼴(web:data:tag:)로 썼다');
 });
 
 test('HOT-390 쓴 키를 모두 TTL과 함께 확인한다(TTL -1인 키 0)', async () => {
@@ -108,7 +109,7 @@ test('HOT-390 쓴 키를 모두 TTL과 함께 확인한다(TTL -1인 키 0)', as
   assert.ok(keys.includes('web:data:data-key-2'), keys.join(', '));
   assert.ok(keys.includes('web:isr:/search'), keys.join(', '));
   for (const k of keys) {
-    assert.match(k, /^web:(isr|data):/, `정본 키 꼴 밖: ${k}`);
+    assert.match(k, /^web:(isr|data|\{tag\}):/, `정본 키 꼴 밖: ${k}`);
     const ttl = Number(cli('TTL', k));
     assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
   }

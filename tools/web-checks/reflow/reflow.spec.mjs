@@ -2,7 +2,8 @@
 // docs/design/d4-handoff-checklist.md #18~#20). 운영 빌드의 주요 흐름을 연다.
 // - 320×256(400% 확대): 예외 상자 밖 문서 가로 스크롤(scrollWidth > clientWidth + 1)과 닿기(모든 조작 요소에 닿는다)
 // - 640×400(200% 확대): 글자 간격 없이 한 번, 글자 간격을 CSSOM으로 덮어쓴 뒤 한 번 잘림·겹침을 센다(CSP를 끄지 않는다)
-// - 빈 결과(도착 경로가 다름·잰 글자 상자 0·조작 요소 0)는 실패다
+// - 빈 결과(도착 경로가 다름·잰 글자 상자 0·조작 요소 0, 좌석 화면은 좌석맵 예외 상자 없음)는 실패다
+// - 로그인·입장이 있어야 그리는 화면은 ?state= 미리보기 대신 항목의 탭 저장소 값을 먼저 넣고 연다(계획 §11 2)
 // BAT-170 웨이브 7: 시험 담당(l2w7-BAT170-test)이 판정 구현 전에 고쳐 썼다(ADR-0270 결정 3). 실행은 웨이브 끝 무거운 게이트(계획 §7).
 import { test, expect } from '@playwright/test';
 import { APPS, HOST, portOf } from '../seed-css/apps.mjs';
@@ -19,12 +20,33 @@ test.beforeEach(async ({ page }) => {
   await stubFanApi(page);
 });
 
-/** 화면을 열고 도착 경로를 돌려준다 */
+/** 좌석 화면(좌석맵 예외 상자가 있어야 잰 것으로 친다, docs/frontend.md §5.17 '빈 결과') */
+const SEATS = /^\/booking\/[^/]+\/seats(\?|$)/;
+
+/**
+ * 화면을 열고 도착 경로를 돌려준다. 항목의 탭 저장소 값(좌석 화면의 입장 저장값)은 페이지 스크립트보다 먼저 넣는다
+ * (BAT-170 시험 뒤 정한 것, 계획 §11 2. 성능 예산 검사 budgets/lighthouse.spec.mjs의 tabWithSessionStorage와 같은 방법)
+ */
 async function open(page, p) {
+  if (p.sessionStorage) {
+    await page.addInitScript((entries) => {
+      try {
+        for (const [k, v] of Object.entries(entries)) if (sessionStorage.getItem(k) === null) sessionStorage.setItem(k, v);
+      } catch {
+        /* about:blank에는 저장소가 없다 */
+      }
+    }, p.sessionStorage);
+  }
   const res = await page.goto(`${BASE[p.app]}${p.path}`, { waitUntil: 'networkidle' });
   expect(res?.status(), `${p.app}${p.path}`).toBeLessThan(400);
   const u = new URL(page.url());
-  return `${u.pathname}${u.search}`;
+  const finalPath = `${u.pathname}${u.search}`;
+  if (SEATS.test(p.path)) {
+    // 좌석 화면은 좌석 경로에 남고 좌석맵 예외 상자가 보여야 한다. 아니면 빈 결과다(대기실로 옮겨 가거나 지도를 그리지 않음)
+    expect(finalPath, `${p.path} 도착 경로가 좌석 경로가 아니다(빈 결과)`).toBe(p.path);
+    await expect(page.locator('[data-reflow-exception]').first(), `${p.path} 좌석맵 예외 상자가 보이지 않는다(빈 결과)`).toBeVisible({ timeout: 15_000 });
+  }
+  return finalPath;
 }
 
 /** 글자를 바로 담은 상자의 방향별 overflow·크기와 조작 요소 수(예외 상자 밖) */

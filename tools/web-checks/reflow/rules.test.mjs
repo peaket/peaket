@@ -13,6 +13,7 @@ import {
   obscuredFocusFindings,
   unreachableFindings,
 } from './rules.mjs';
+import { lighthousePages } from '../budgets/pages.mjs';
 
 test('FE-T31 뷰포트 둘은 320×256(400% 확대)과 640×400(200% 확대)이다', () => {
   assert.deepEqual(REFLOW_VIEWPORTS, [
@@ -29,8 +30,10 @@ test('FE-T31 글자 간격 값은 WCAG 1.4.12의 1.5·2·0.12·0.16배다', () =
   assert.match(TEXT_SPACING_CSS, /margin-block-end:2em/);
 });
 
-test('FE-T31 두 방향 스크롤 예외는 표·좌석맵·에디터·그래프다', () => {
-  for (const selector of ['table', '.seatmap', '.seatmap-editor', '.graph']) assert.ok(EXCEPTION_SELECTORS.includes(selector), selector);
+// BAT-170 시험 뒤 정한 것(계획 §11 4, docs/frontend.md §5.17 '예외 상자'): 예외는 셋뿐이고 pre·code·클래스 이름으로 넓히지 않는다
+test('FE-T31 두 방향 스크롤 예외는 table·.table-wrap·[data-reflow-exception] 셋뿐이다', () => {
+  assert.deepEqual([...EXCEPTION_SELECTORS].sort(), ['.table-wrap', '[data-reflow-exception]', 'table']);
+  for (const wide of ['pre', 'code', '.seatmap', '.seatmap-editor', '.graph', '.chart']) assert.equal(EXCEPTION_SELECTORS.includes(wide), false, wide);
 });
 
 test('FE-T31 문서 가로 스크롤은 1px 여유를 두고 판정한다', () => {
@@ -138,9 +141,31 @@ test('FE-T31 화면 목록은 en을 /en 접두 경로로 싣고 파트너·관�
   for (const app of ['partner', 'console']) assert.deepEqual([...new Set(REFLOW_PAGES.filter((p) => p.app === app).map((p) => p.locale))], ['ko'], app);
   // 좌석 화면(예외 상자 좌석맵)을 싣는다
   assert.ok(REFLOW_PAGES.some((p) => p.app === 'web' && /^\/booking\/[^/]+\/seats(\?|$)/.test(p.path)), '좌석 화면이 없다');
+  // 운영 빌드는 ?state=를 무시하므로 미리보기로 열지 않는다(계획 §11 2, docs/frontend.md §5.17 '빈 결과')
+  for (const p of REFLOW_PAGES) assert.doesNotMatch(p.path, /[?&]state=/, `${p.app} ${p.path}`);
   // 같은 앱·경로·로케일이 두 번 들지 않는다
   const keys = REFLOW_PAGES.map((p) => `${p.app} ${p.locale} ${p.path}`);
   assert.equal(new Set(keys).size, keys.length);
+});
+
+// BAT-170 시험 뒤 정한 것(계획 §11 2): 좌석 화면은 운영 빌드 그대로, 성능 예산 검사의 좌석 화면 데모와 같은 입장 저장값을 탭 저장소에 먼저 넣고 연다.
+// 항목 모양: { app, path, locale, sessionStorage?: Record<키, 문자열> }. reflow.spec이 sessionStorage를 페이지 스크립트보다 먼저 넣는다
+test('FE-T31 좌석 화면 항목은 ?state= 없이 성능 예산 좌석 데모와 같은 입장 저장값(sessionStorage)을 싣는다', () => {
+  const demo = lighthousePages('127.0.0.1').find((x) => x.name === '좌석 화면 데모');
+  assert.ok(demo?.sessionStorage, '성능 예산 좌석 화면 데모를 찾지 못했다');
+  const seats = REFLOW_PAGES.filter((p) => p.app === 'web' && /^\/booking\/[^/]+\/seats(\?|$)/.test(p.path));
+  assert.ok(seats.length > 0, '좌석 화면이 없다');
+  for (const p of seats) {
+    assert.equal(p.path, new URL(demo.url).pathname, '좌석 데모와 같은 회차 경로여야 입장 저장값이 맞는다');
+    assert.deepEqual(p.sessionStorage, demo.sessionStorage, `${p.path} 입장 저장값`);
+    for (const v of Object.values(p.sessionStorage)) assert.equal(typeof v, 'string');
+  }
+  // 저장값은 객체(키 → 문자열)이고, 다른 항목은 저장값이 없거나 같은 모양이다
+  for (const p of REFLOW_PAGES) {
+    if (p.sessionStorage === undefined) continue;
+    assert.equal(typeof p.sessionStorage, 'object', `${p.app} ${p.path}`);
+    for (const v of Object.values(p.sessionStorage)) assert.equal(typeof v, 'string', `${p.app} ${p.path}`);
+  }
 });
 
 test('FE-T31 주요 흐름은 소비자 웹·파트너·관제의 대표 화면이다', () => {
