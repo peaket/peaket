@@ -728,6 +728,7 @@
 | R-629 | SEC-07 fake 가드가 정본 prod·staging을 보지 않아 운영에서 가짜 알림·배상 송금이 시작될 수 있음 | core notify·payment compensation·platform config | isProductionLikeEnv(prod·staging·production)와 NotifyModule env 주입 | 적용 |
 | R-630 | 웨이브 6 감사 기록(coverage·findings·wave6·영역/변이/검증 보고서) | docs/review/audit | 배치 67·구현 55 매핑, 고유 발견 높음 23·중간 61·낮음 20여, 수정 R-595..R-629, 독립 검증 보고서 보존 | 적용 |
 | R-631 | 웨이브 6 마감 기록(PROGRESS·CI 결과) | docs/PROGRESS.md | 감사 수정 R-595..R-629, 회귀 시험 R-621..R-627, 남은 위험과 Wave 7 파이프라인 | 적용 |
+| R-632 | 웨이브 6 CI 실패(Lease RBAC 시험 기대값·TIME_UNCERTAIN 계약 예외·payment 0020 표/마이그레이션 수·SIGTERM 종료) | tools/local/chart.test.mjs, docs/api/breaking/openapi-ignore.txt, payment start.ts·payment-grpc.int.test.ts | OPS-08 규칙 반영·TIME_UNCERTAIN 예외·표 24/마이그레이션 21·settlementDueElector 항상 stop | 적용 |
 
 ## 4. 숫자 일치표
 

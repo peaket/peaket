@@ -360,8 +360,10 @@ let circuitsRef: PgCircuits | undefined;
         },
       })
     : undefined;
-  settlementDueElector.start();
-  settlementDueWorker?.start();
+  if (settlementDueWorker) {
+    settlementDueElector.start();
+    settlementDueWorker.start();
+  }
 
   let closing: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
@@ -369,7 +371,7 @@ let circuitsRef: PgCircuits | undefined;
     // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 그 뒤에 표 맞추기와 관측기를 멈추고(마무리 중의 낮춤도 표에 쓴다, BUILD_ORDER PRF-203 코드 리뷰 F5),
     // 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
     return shutdownInOrder({
-      stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), settlementDueWorker?.stop().then(() => settlementDueElector.stop()) ?? Promise.resolve()],
+      stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
       closeService: () => service.close(),
       closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), reauthRedis?.close()],

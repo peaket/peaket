@@ -74,8 +74,11 @@ test('FND110_릴레이_서비스-outbox-relay_복제2·같은이미지·다른�
   assert.notDeepEqual(dep.spec.selector.matchLabels, svc.spec.selector.matchLabels);
 
   const role = find(objects, 'Role', 'example-svc-outbox-relay-lease');
-  // 만들기는 RBAC가 이름으로 좁히지 못해(다른 서비스의 Lease를 먼저 만들어 막을 수 있다) 주지 않고, 차트가 그 Lease를 미리 만든다(코드 리뷰 2026-11-01)
-  assert.deepEqual(role.rules, [{ apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['example-svc-outbox-relay'], verbs: ['get', 'update'] }]);
+  // create는 resourceNames로 좁힐 수 없어 이름 없는 별도 규칙으로 주고, 읽기·고치기·패치는 미리 만든 Lease 이름으로 좁힌다(OPS-08)
+  assert.deepEqual(role.rules, [
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], verbs: ['create'] },
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['example-svc-outbox-relay'], verbs: ['get', 'update', 'patch'] },
+  ]);
   const lease = find(objects, 'Lease', 'example-svc-outbox-relay');
   assert.equal(lease.apiVersion, 'coordination.k8s.io/v1');
   assert.equal(lease.spec?.holderIdentity, undefined);
@@ -429,7 +432,10 @@ test('PRF202_leaderLease를주면_그Lease하나의권한과토큰만_서비스�
   // spec을 차트에 적지 않아 배포가 보유자를 지우지 않는다(릴레이와 같다)
   assert.deepEqual(lease.spec, {});
   const role = find(objects, 'Role', 'example-svc-leader-lease');
-  assert.deepEqual(role.rules, [{ apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['payment-entry-pause'], verbs: ['get', 'update'] }]);
+  assert.deepEqual(role.rules, [
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], verbs: ['create'] },
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['payment-entry-pause'], verbs: ['get', 'update', 'patch'] },
+  ]);
   const binding = find(objects, 'RoleBinding', 'example-svc-leader-lease');
   assert.deepEqual(binding.subjects, [{ kind: 'ServiceAccount', name: 'example-svc', namespace: 'payment' }]);
   const dep = find(objects, 'Deployment', 'example-svc');
@@ -576,7 +582,10 @@ test('PRF215_leaderLease에_목록을주면_Lease마다_만들고_Role이_그이
   assert.deepEqual(all(objects, 'Lease').map((l) => l.metadata.name).sort(), ['admission-ctrl', 'payment-entry-pause']);
   for (const l of all(objects, 'Lease')) assert.deepEqual(l.spec, {});
   assert.equal(all(objects, 'Role').length, 1);
-  assert.deepEqual(find(objects, 'Role', 'example-svc-leader-lease').rules, [{ apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['admission-ctrl', 'payment-entry-pause'], verbs: ['get', 'update'] }]);
+  assert.deepEqual(find(objects, 'Role', 'example-svc-leader-lease').rules, [
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], verbs: ['create'] },
+    { apiGroups: ['coordination.k8s.io'], resources: ['leases'], resourceNames: ['admission-ctrl', 'payment-entry-pause'], verbs: ['get', 'update', 'patch'] },
+  ]);
   assert.equal(find(objects, 'Deployment', 'example-svc').spec.template.spec.automountServiceAccountToken, true);
 });
 

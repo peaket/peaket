@@ -672,6 +672,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-629(2026-11-15, 커밋 0b7575bc): SEC-07 fake 가드가 정본 prod·staging을 보지 않아 운영에서 가짜 알림·배상 송금이 시작될 수 있음 → isProductionLikeEnv(prod·staging·production)와 NotifyModule env 주입
 - R-630(2026-11-15, 커밋 0b7575bc): 웨이브 6 감사 기록(coverage·findings·wave6·영역/변이/검증 보고서) → 배치 67·구현 55 매핑, 고유 발견 높음 23·중간 61·낮음 20여, 수정 R-595..R-629, 독립 검증 보고서 보존
 - R-631: 웨이브 6 독립 감사(영역 7·관점 4·변이 5·커버리지 2, 17개 에이전트)를 마감한다. BUILD_ORDER 배치 67개 중 구현 55개를 모두 감사에 매핑했고, 높은 결함 23건을 포함해 R-595..R-629에서 수정·독립 검증했다. 회귀 시험은 수정자와 분리된 시험 작성자가 썼고, 남은 중간·낮은 위험은 findings.md·wave6.md에 남겼다. Wave 7은 계획·시험·구현·리뷰를 각각 다른 에이전트가 맡는 파이프라인으로 시작한다.
+- R-632: CI 43680392600의 contract-check·node·kind 실패를 고친다. (1) 차트 RBAC 시험이 OPS-08의 create 규칙과 get/update/patch를 함께 기대한다. (2) C1-13 TIME_UNCERTAIN enum 추가를 깨짐 예외로 기록한다. (3) payment 마이그레이션 0020의 settlement_statement_audit 표·pg_store 칸·적용 21건을 시험 기대값에 반영한다. (4) PEAKET_CORE_HTTP_URL이 없을 때 settlementDueElector를 시작하지 않고, 종료 때는 worker 유무와 무관하게 항상 stop해 SIGTERM 뒤 프로세스가 남지 않게 한다.
 
 ## 5. [충돌] 결정 결과
 

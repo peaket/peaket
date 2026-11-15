@@ -79,6 +79,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     attempt_id: ['uuid', 'NO'],
     attempt_no: ['integer', 'NO'],
     pg: ['text', 'NO'],
+    pg_store: ['text', 'NO'],
     pg_payment_ref: ['text', 'NO'],
     pg_confirm_token: ['text', 'YES'],
     pg_tx_id: ['text', 'YES'],
@@ -163,14 +164,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0016)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 17개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0020)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 21개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(['event_pg_config', 'outbox', 'partner_receivable', 'payment', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'statement_dispute', 'statement_source', 'webhook_receipt']);
+    expect(before).toEqual(['event_pg_config', 'outbox', 'partner_receivable', 'payment', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'statement_dispute', 'statement_source', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('17');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('21');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -188,6 +189,7 @@ describe('마이그레이션과 표 모양', () => {
     expect(rows).toEqual([
       { table_name: 'payment', column_name: 'cancelled_amount', column_default: '0' },
       { table_name: 'payment', column_name: 'created_at', column_default: 'now()' },
+      { table_name: 'payment', column_name: 'pg_store', column_default: "'STANDARD'::text" },
       { table_name: 'payment', column_name: 'query_attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'created_at', column_default: 'now()' },
