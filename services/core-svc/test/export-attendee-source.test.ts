@@ -93,4 +93,41 @@ describe('A2-03 예매자 명단 원천', () => {
       globalThis.fetch = original;
     }
   });
+
+  test('HttpAttendeeSource는 seats[].tier를 원천 값으로 보존하고 내부 토큰 헤더를 보낸다', async () => {
+    const seats = [
+      { seatLabel: 'VIP-1', tier: 'VIP' },
+      { seatLabel: 'R-2', tier: 'R' },
+    ];
+    let seen: RequestInit | undefined;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      seen = init;
+      return new Response(JSON.stringify({ items: [{ orderId: randomUUID(), eventId: EVENT, buyerName: '김민수', buyerPhone: '010-1234-5678', seats, ticketCount: 2 }], nextCursor: null, bookingCount: 1, ticketCount: 2 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const source = new HttpAttendeeSource({ url: 'https://purchase.test', token: 'secret-internal-token' });
+      const rows = await source.list(TENANT, EVENT, 500);
+      expect(rows[0]?.seats).toEqual(seats);
+      expect(rows[0]?.seatLabel).toBe('VIP-1, R-2');
+      expect(rows[0]?.quantity).toBe(2);
+      expect(new Headers(seen?.headers).get('x-peaket-internal-token')).toBe('secret-internal-token');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test('토큰 없이 부른 원천이 503이면 HttpAttendeeSource가 실패를 숨기지 않는다', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('unavailable', { status: 503 })) as typeof fetch;
+    try {
+      const source = new HttpAttendeeSource({ url: 'https://purchase.test' });
+      await expect(source.list(TENANT, EVENT, 100)).rejects.toThrow(/503/);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
