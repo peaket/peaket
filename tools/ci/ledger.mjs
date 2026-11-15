@@ -19,13 +19,14 @@
 //   항목 칸: 'S-T23 ⑥'(세부 하나. '①~③'·'⑤⑥'처럼 여럿도), 'S-T23'(그 ID의 세부 전부), 'NFR-007', 'v5.0.0-1.2.4'(그 ID의 ASVS 행 모두), 'payment:v5.0.0-1.2.4'(한 문서의 행)
 //   상태 칸을 비우면 등급만 바꾼다. 칸마다 세부 행이 ID 행보다 앞선다. 사유 없는 미검증, 모르는 상태·등급·항목, 같은 항목 두 번은 오류다. 자동 시험은 notes로 적지 못한다
 // 등급: A(돈·좌석·대기 순번·권한·개인정보·법정 의무·장애 복구) / B(일반 기능·화면·운영) / C(문구·배치·문서). 원천 문서로 정하고(GRADE_BY_DOC) notes의 등급 칸으로 바꾼다
-// 쓰는 법: node tools/ci/ledger.mjs [--check] [--scope "<토큰>, <토큰>" | --batch <묶음 ID>] [--require] [--root <저장소>]
+// 쓰는 법: node tools/ci/ledger.mjs [--check] [--scope "<토큰>, <토큰>" | --batch <묶음 ID>] [--require] [--allow-unverified] [--root <저장소>]
 //   (인자 없음) docs/review/ledger/README.md(분야 × 등급 × 상태 개수, 완성 판정, 한계)와 분야별 docs/review/ledger/<분야>.md를 다시 쓴다. 폴더의 다른 .md는 지운다
 //   --check     고칠 것이 있으면 알리고 1로 끝난다(파일은 고치지 않는다)
 //   --scope     범위 안 항목의 상태를 센다(파일은 쓰지 않는다). 토큰: 정본 문서 경로(그 문서의 항목 전부), 시험 ID(S-T23), 세부(S-T23 ⑥),
 //               ID 머리(P-T), ID 묶음(P-T1~P-T20), 요구사항 ID(FR-042: 그것을 가리키는 시나리오 행 포함), ASVS 문서 경로·ID. 쉼표로 나눈다
 //   --batch     docs/BUILD_ORDER.md '기능 묶음' 표(| 묶음 | 갈래 | 구간 | 등급 | 단계 | WBS 일 | 장부 범위 | 비고 |)에서 그 묶음 행의 '장부 범위' 칸을 범위로 쓴다
-//   --require   범위(없으면 장부 전체)에 빈칸이나 ID만이 있으면 목록을 찍고 1로 끝난다. 미검증은 사유가 있으면 통과지만 따로 센다
+//   --require   범위(없으면 장부 전체)에 빈칸·ID만·미검증·다른 단계가 있으면 목록을 찍고 1로 끝난다. 옛 묶음은 --allow-unverified로 미검증·다른 단계를 통과시킨다
+//   --allow-unverified  --require에서 미검증·다른 단계를 통과로 본다(옛 기록 호환). 빈칸·ID만은 그래도 실패다
 // 끝 코드: 0 맞음(또는 고침, 범위 통과), 1 --check에서 고칠 것 있음·--require에서 빈칸이나 ID만 있음, 2 읽기·notes·범위·인자 오류(아무것도 고치지 않는다)
 // 한계: 시험이 통과했는지는 보지 않는다(tools/ci/trace-check.mjs가 시험 보고서로 본다). 이름만 보므로 시험이 판정 기준을 실제로 검사하는지는 모른다
 //   (ADR-0256 결정 3의 기준 대조와 틀린 구현 검사 몫). 이름은 원본의 글자로 읽는다: 변수로 만든 이름은 읽지 못하고, describe 이름도 따로 하나의 이름으로 센다
@@ -872,7 +873,7 @@ export function render(ledger, warnings = []) {
     '## 완성 판정',
     '',
     `- 항목 ${items.length}개: 시험 시나리오(세부 단위) ${kinds.get('scenario') ?? 0}, 시나리오가 가리키지 않는 요구사항·정책 ${kinds.get('requirement') ?? 0}, ASVS 추적 표의 행 ${kinds.get('asvs') ?? 0}`,
-    `- 빈칸 ${n(items, '빈칸')}, ID만 ${n(items, 'ID만')}: 완성본은 둘 다 0이다(묶음은 \`node tools/ci/ledger.mjs --batch <묶음> --require\`로 그 범위만 본다)`,
+    `- 빈칸 ${n(items, '빈칸')}, ID만 ${n(items, 'ID만')}: 완성본은 둘 다 0이다(묶음은 \`node tools/ci/ledger.mjs --batch <묶음> --require\`로 그 범위만 본다. \`--require\`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 \`--allow-unverified\`로 미검증·다른 단계를 통과시킨다)`,
     '- ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)',
     `- 미검증 ${n(items, '미검증')}(모두 사유가 있다): 완료로 세지 않고 따로 센다`,
     `- 다시 볼 notes ${ledger.conflicts.length}: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다`,
@@ -941,11 +942,12 @@ function scopeReport(sel, label, grade) {
 }
 
 function main(argv) {
-  const opt = { check: false, require: false, scope: null, batch: null, root: process.cwd() };
+  const opt = { check: false, require: false, allowUnverified: false, scope: null, batch: null, root: process.cwd() };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--check') opt.check = true;
     else if (a === '--require') opt.require = true;
+    else if (a === '--allow-unverified') opt.allowUnverified = true;
     else if (a === '--scope' || a === '--batch' || a === '--root') {
       const v = argv[++i];
       if (v === undefined || v.startsWith('--')) throw new UsageError(`${a}에 값이 없다`);
@@ -992,8 +994,10 @@ function main(argv) {
       code = 1;
     }
     if (opt.require) {
-      const bad = sel.items.filter((i) => i.status === '빈칸' || i.status === 'ID만').length;
-      process.stdout.write(bad ? `장부 확인 실패: 빈칸 ${n(sel.items, '빈칸')}, ID만 ${n(sel.items, 'ID만')}\n` : `장부 확인 통과(미검증 ${n(sel.items, '미검증')}은 따로 센다)\n`);
+      const bad = sel.items.filter((i) => i.status === '빈칸' || i.status === 'ID만' || (!opt.allowUnverified && (i.status === '미검증' || i.status === '다른 단계'))).length;
+      process.stdout.write(bad
+        ? `장부 확인 실패: 빈칸 ${n(sel.items, '빈칸')}, ID만 ${n(sel.items, 'ID만')}, 미검증 ${n(sel.items, '미검증')}, 다른 단계 ${n(sel.items, '다른 단계')}\n`
+        : `장부 확인 통과(미검증 ${n(sel.items, '미검증')}, 다른 단계 ${n(sel.items, '다른 단계')}${opt.allowUnverified ? ', 허용' : ''})\n`);
       if (bad) code = 1;
     }
     return code;

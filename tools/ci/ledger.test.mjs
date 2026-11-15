@@ -480,7 +480,7 @@ test('--check는 고칠 것이 있으면 1로 끝나고 파일을 고치지 않�
   assert.equal(run(dir, '--check').status, 0);
 });
 
-test('--scope --require: 범위에 빈칸이나 ID만이 있으면 목록을 찍고 1, 없으면 0. 범위만 보고 파일은 쓰지 않는다', () => {
+test('--scope --require: 빈칸·ID만·미검증이 있으면 1, --allow-unverified면 미검증을 통과시킨다. 범위만 보고 파일은 쓰지 않는다', () => {
   const dir = fixtureRepo();
   const bad = run(dir, '--scope', 'P-T1, P-T4', '--require');
   assert.equal(bad.status, 1);
@@ -489,14 +489,20 @@ test('--scope --require: 범위에 빈칸이나 ID만이 있으면 목록을 찍
   assert.ok(!bad.stdout.includes('P-T4 ④ '), '측정 항목은 목록에 없다');
   assert.ok(!existsSync(join(dir, 'docs/review/ledger/README.md')));
   assert.equal(run(dir, '--scope', 'P-T1, P-T4').status, 0);
-  const ok = run(dir, '--scope', 'P-T2, NFR-002', '--require');
+  const strict = run(dir, '--scope', 'P-T2, NFR-002', '--require');
+  assert.equal(strict.status, 1, strict.stdout);
+  assert.match(strict.stdout, /미검증 1/);
+  const ok = run(dir, '--scope', 'P-T2, NFR-002', '--require', '--allow-unverified');
   assert.equal(ok.status, 0, ok.stdout);
   assert.match(ok.stdout, /미검증 1/);
 });
 
 test('--batch는 묶음 표의 장부 범위로 판정한다', () => {
   const dir = fixtureRepo();
-  const ok = run(dir, '--batch', 'BAT-010', '--require');
+  const strict = run(dir, '--batch', 'BAT-010', '--require');
+  assert.equal(strict.status, 1, strict.stdout + strict.stderr);
+  assert.match(strict.stdout, /다른 단계 1/);
+  const ok = run(dir, '--batch', 'BAT-010', '--require', '--allow-unverified');
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   const bad = run(dir, '--batch', 'BAT-020', '--require');
   assert.equal(bad.status, 1);
