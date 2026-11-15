@@ -232,6 +232,13 @@
       "when": 1794723600000,
       "tag": "0032_staff_promoter_and_scanner_session_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794810000000,
+      "tag": "0033_scanner_session_account_unique",
+      "breakpoints": true
     }
   ]
 }

@@ -280,6 +280,8 @@ export const scannerSession = pgTable(
     staffAssignmentId: uuid('staff_assignment_id')
       .notNull()
       .references(() => staffAssignment.id),
+    /** 계정당 살아 있는 스캐너 세션 하나(부분 유일 인덱스, C2-05) */
+    staffAccountId: uuid('staff_account_id').notNull(),
     scannerDeviceId: uuid('scanner_device_id').notNull(),
     // 승인한 휴대폰 세션(identity session). 세션이 지워져도 스캐너 세션의 감사 값은 남긴다
     approvedBySession: uuid('approved_by_session'),
@@ -293,6 +295,7 @@ export const scannerSession = pgTable(
   (t) => [
     index('scanner_session_assignment_idx').on(t.staffAssignmentId),
     uniqueIndex('scanner_session_device_active_key').on(t.scannerDeviceId).where(sql`${t.terminatedAt} is null`),
+    uniqueIndex('scanner_session_account_active_key').on(t.staffAccountId).where(sql`${t.terminatedAt} is null`),
     check('scanner_session_role_check', sql`${t.role} in ('gate_staff', 'gate_lead')`),
     check('scanner_session_proxy_role_check', sql`not ${t.proxy} or ${t.role} = 'gate_staff'`),
   ],

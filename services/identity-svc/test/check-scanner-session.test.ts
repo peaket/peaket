@@ -18,6 +18,7 @@ function world() {
   const session: ScannerSessionRecord = {
     scannerSessionId: 'ss-1',
     assignmentId: 'a-1',
+    accountId: 'acc-1',
     deviceId: 'dev-1',
     role: 'gate_staff',
     proxy: false,
@@ -57,6 +58,16 @@ describe('CheckScannerSession(GAT-170)', () => {
     store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, assignmentStatus: 'ASSIGNED' });
     clock.advance(3 * HOUR);
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+  });
+
+  test('탈퇴·병합된 계정의 세션은 배정 유효 시간이 남아도 무효다', async () => {
+    const { check, store } = world();
+    store.accounts.set('acc-1', { verified: true, status: 'DELETED' });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+    store.accounts.set('acc-1', { verified: true, status: 'MERGED' });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+    store.accounts.set('acc-1', { verified: true, status: 'ACTIVE' });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(true);
   });
 
   test('validFrom이 미래인 세션은 무효이고, 정확히 같은 시각은 유효하다', async () => {

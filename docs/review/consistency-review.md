@@ -703,6 +703,7 @@
 | R-596 | M5 변이 시험 공백 9건(jkt 자기 참조·htu 호스트·validFrom·valid:false+role 등) | scanner dpop.test, platform scanner-auth.test, identity check-scanner-session.test, ticket scanner-device.test, scanner version-vector.test | 회귀를 잡는 시험을 더하고 표적 시험으로 확인 | 적용 |
 | R-612 | TEST-01·02: ledger --require가 미검증·다른 단계를 통과로 세고, --batch 보고를 통과로 적었다 | tools/ci/ledger.mjs·ledger.test.mjs, docs/review/ledger/README.md | --require 기본을 엄격하게 하고 --allow-unverified를 더한다 | 적용 |
 | R-597 | ops 감사 M4 중간 8건·OPS 4건·SEC-02 | ops-svc payouts·event-cancellations·audit | 영업일 기한·서명/ID 검증·낙관 버전·조건부 RUNNING·감사 체인·재인증 | 적용 |
+| R-600 | C2-01·C2-05(탈퇴·병합 계정의 스태프 배정·스캐너 세션 잔존, 계정당 스캐너 세션 하나 미보장) | identity staff·withdraw·merge·check-scanner-session, migrations 0033 | 탈퇴·병합 시 배정·세션 종료와 STAFF_REVOKED 사건, 계정 ACTIVE 확인, staff_account_id 부분 유일 인덱스·계정 잠금 | 적용 |
 
 ## 4. 숫자 일치표
 

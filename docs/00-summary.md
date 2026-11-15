@@ -639,6 +639,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-596: jkt를 RFC 7638 고정 EC 벡터·jose 지문과 대조, htu 호스트/질의·typ·jwk d·valid:false+role 401, validFrom 미래/경계, decide OUTSIDE_STAFF_HOURS, jkt 43자 base64url, flagSeq만 달라도 diverged/needsResync 시험 추가
 - R-612: ledger --require가 미검증·다른 단계를 실패로 세고 옛 묶음용 --allow-unverified를 더한다.
 - R-597: ops-svc 지급 승인 기한·감사 체크포인트 무결성·동시 승인·회차 취소 상태/판정/확정 재인증·감사 기록을 보강한다.
+- R-600: 탈퇴·병합된 계정의 staff_assignment를 REVOKED로 끝내고 scanner_session을 모두 끝내며 control.sessions-terminated(STAFF_REVOKED)를 세션마다 남긴다. CheckScannerSession은 계정이 ACTIVE가 아니면 valid:false다. scanner_session.staff_account_id(0033) 부분 유일 인덱스와 승인 트랜잭션의 계정 행 잠금으로 계정당 살아 있는 스캐너 세션 하나를 지킨다. identity 단위 554·test-int 171(실제 PostgreSQL 18·Valkey 8.1), typecheck·lint·doc-check·ledger BAT-450·trace I-T21/I-T22·records·contracts gen:check 통과.
 
 ## 5. [충돌] 결정 결과
 

@@ -69,6 +69,11 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     return row ? { ...(row.email ? { email: row.email } : {}), verified: row.verified } : { verified: false };
   }
 
+  async accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null> {
+    const [row] = await this.database.db.select({ status: account.status }).from(account).where(eq(account.id, accountId)).limit(1);
+    return (row?.status as 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined) ?? null;
+  }
+
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
     return this.database.transaction(async (tx) => {
       const [row] = await tx.select().from(staffAssignment).where(eq(staffAssignment.inviteTokenHash, Buffer.from(i.tokenHash, 'hex'))).limit(1).for('update');
@@ -130,6 +135,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       .select({
         scannerSessionId: scannerSession.id,
         assignmentId: scannerSession.staffAssignmentId,
+        accountId: staffAssignment.accountId,
         deviceId: scannerSession.scannerDeviceId,
         role: scannerSession.role,
         proxy: scannerSession.proxy,
@@ -145,10 +151,11 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       .innerJoin(staffAssignment, eq(scannerSession.staffAssignmentId, staffAssignment.id))
       .where(eq(scannerSession.id, scannerSessionId))
       .limit(1);
-    if (!row) return null;
+    if (!row || row.accountId === null) return null;
     return {
       scannerSessionId: row.scannerSessionId,
       assignmentId: row.assignmentId,
+      accountId: row.accountId,
       deviceId: row.deviceId,
       role: row.role as StaffRole,
       proxy: row.proxy,
@@ -184,6 +191,9 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     expiresAtMs: number;
   }): Promise<void> {
     await this.database.transaction(async (tx) => {
+      // 계정 행을 잠가 같은 계정의 동시 승인을 한 번에 하나만 처리한다(부분 유일 인덱스의 백스톱, C2-05).
+      const [acc] = await tx.select({ id: account.id }).from(account).where(eq(account.id, i.accountId)).limit(1).for('update');
+      if (!acc) throw new Error('계정을 찾을 수 없다');
       const [assignment] = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
       if (!assignment) throw new Error('배정을 찾을 수 없다');
       const mine = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.accountId, i.accountId));
@@ -194,12 +204,17 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         .where(
           and(
             isNull(scannerSession.terminatedAt),
-            or(eq(scannerSession.scannerDeviceId, i.deviceId), assignmentIds.length > 0 ? inArray(scannerSession.staffAssignmentId, assignmentIds) : undefined),
+            or(
+              eq(scannerSession.scannerDeviceId, i.deviceId),
+              eq(scannerSession.staffAccountId, i.accountId),
+              assignmentIds.length > 0 ? inArray(scannerSession.staffAssignmentId, assignmentIds) : undefined,
+            ),
           ),
         );
       await tx.insert(scannerSession).values({
         id: i.scannerSessionId,
         staffAssignmentId: i.assignmentId,
+        staffAccountId: i.accountId,
         scannerDeviceId: i.deviceId,
         approvedBySession: i.approvedBySession,
         role: i.role,
@@ -260,6 +275,36 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
       if (messages.length > 0) await writeOutbox(tx, this.clock, messages);
       return sessions.length;
+    });
+  }
+
+  async terminateByAccount(i: { accountId: string; reason: 'STAFF_REVOKED'; nowMs: number }): Promise<{ assignments: number; sessions: number }> {
+    return this.database.transaction(async (tx) => {
+      const sessions = await tx
+        .select({ id: scannerSession.id })
+        .from(scannerSession)
+        .where(and(eq(scannerSession.staffAccountId, i.accountId), isNull(scannerSession.terminatedAt)))
+        .for('update');
+      const at = new Date(i.nowMs);
+      if (sessions.length > 0) {
+        await tx
+          .update(scannerSession)
+          .set({ terminatedAt: at })
+          .where(inArray(scannerSession.id, sessions.map((s) => s.id)));
+      }
+      const endedAssignments = await tx
+        .update(staffAssignment)
+        .set({ status: 'REVOKED' })
+        .where(and(eq(staffAssignment.accountId, i.accountId), inArray(staffAssignment.status, ['ASSIGNED', 'INVITED'])))
+        .returning({ id: staffAssignment.id });
+      const terminatedAt = at.toISOString();
+      const messages = sessions.map((s) => ({
+        topic: CONTROL_TOPICS.sessionsTerminated,
+        key: i.accountId,
+        payload: Buffer.from(JSON.stringify({ accountId: i.accountId, sessionId: s.id, reason: i.reason, terminatedAt })),
+      }));
+      if (messages.length > 0) await writeOutbox(tx, this.clock, messages);
+      return { assignments: endedAssignments.length, sessions: sessions.length };
     });
   }
 }
