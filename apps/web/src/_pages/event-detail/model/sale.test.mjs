@@ -315,6 +315,21 @@ test('[V040-34] 이유 글은 지금이 아니라 판정 시각으로 고른다:
   assert.deepEqual(gate({ phase: 'queue', fan: fan(true), denied: { untilMs: SALE_END }, nowMs: GEN + h }), { reason: NOT_TARGET });
 });
 
+test('[V040-57][Q-T36 ⑧] 명단 밖 알림의 이유 글도 지금이 아니라 판정 시각으로 고른다: 오픈 3시간 전에 켠 알림은 오픈 시각 뒤 첫 GENERAL이다', () => {
+  // 웨이브 끝 재검증 V040-57, ADR-0272 결정 3('판정 시각과 같거나 뒤인 첫 GENERAL, 지금이 아니라 판정 시각으로')·결정 4(명단 밖 알림의 이유 글은 결정 3과 같다)
+  const h = 60 * 60_000;
+  const mixed = [
+    { kind: 'GENERAL', startsAtMs: OPEN - 2 * h, endsAtMs: OPEN - h, limit: 4 },
+    { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: GEN, limit: 2 },
+    { kind: 'GENERAL', startsAtMs: GEN, endsAtMs: SALE_END, limit: 3 },
+  ];
+  const now = OPEN - 3 * h;
+  const win = deniedWindow(mixed, OPEN, now);
+  assert.deepEqual(win, { untilMs: GEN }, '판정 시각(오픈)이 든 PRESALE의 끝');
+  // 팬 자격은 모름(idle): 명단 밖 알림 갈래만 이유 글을 낸다. 지금 뒤 첫 GENERAL(11/20(금) 18:00)이 아니라 오픈 뒤 G(11/21(토) 00:30)
+  assert.deepEqual(gate({ phase: 'closed', phases: mixed, fan: { status: 'idle' }, denied: win, nowMs: now }), { reason: REASON });
+});
+
 test('[V040-28][Q-T36 ⑧] 명단 밖 조각을 지운 주소는 경로와 쿼리를 남기고 조각만 뺀다(다른 조각·대소문자·뒤 글자·빈 조각은 null)', () => {
   const H = '#sale-eligibility-required';
   assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '?ref=a', hash: H }), '/events/e1?ref=a');
