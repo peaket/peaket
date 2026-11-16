@@ -74,7 +74,7 @@ function openapiOf(spec, { version = '9.8.10-test', rules = RULES, description =
       methods = v.methods;
     }
     const entries = typeof methods === 'string' ? methods.split(/\s+/).filter(Boolean).map((m) => [m, {}]) : Object.entries(methods);
-    for (const [m, o] of entries) item[lc(m)] = op({ ...(o?.cdn ? { 'x-peaket-cdn-cache': true } : {}), ...(o?.security ? { security: o.security } : {}) });
+    for (const [m, o] of entries) item[lc(m)] = op({ ...(o?.cdn ? { 'x-peaket-cdn-cache': true } : {}), ...(o?.security ? { security: o.security } : {}), ...(o?.scopes ? { 'x-peaket-scopes': o.scopes } : {}) });
     paths[p] = item;
   }
   return {
@@ -489,6 +489,8 @@ const BUY = [{ fanCookie: [], admissionToken: [] }];
 /** 입장 토큰이 없는 갈래가 하나 있다: token이다(token-buy가 아니다) */
 const BUY_OR_PLAIN = [{ fanCookie: [] }, { fanCookie: [], admissionToken: [] }];
 const OPTIONAL = [{}, { fanCookie: [] }];
+/** 게이트웨이가 요구하는 스코프(openapi 확장 x-peaket-scopes, infra §4.1 '인증 종류 대조' ①, BAT-060 '판단: 인증 종류 대조의 시험 이의 둘' 1) */
+const TICKET_BUY = ['ticket:buy'];
 
 test('W7-WIR-01 원천에서 security가 deviceDpop|deviceMtls인 작업(POST /v1/scanner/token)을 토큰 라우트(peaket.io/auth: token)에 두면 생성기가 2로 멈추고 그 작업을 보인다', () => {
   const openapi = openapiOf({ '/v1/scanner/token': { POST: { security: DPOP_OR_MTLS } }, '/v1/scanner/events/{eventId}/package': { GET: { security: [{ staffToken: [] }] } } });
@@ -501,8 +503,8 @@ test("W7-WIR-05 W7-COR-04 RV-04 infra §4.1 '인증 종류 대조' security로 p
     '/v1/scanner/token': { POST: { security: DPOP_OR_MTLS } }, // public: 액세스 토큰 방식이 없는 갈래뿐
     '/v1/partner/auth/invitation-acceptances': { POST: { security: [] } }, // public: security: []
     '/v1/events/{eventId}/reviews': { GET: { security: OPTIONAL } }, // optional: 빈 갈래와 토큰 갈래
-    '/v1/holds/{holdId}': { GET: { security: BUY } }, // token-buy: 모든 갈래에 입장 토큰
-    '/v1/orders/{orderId}/payment-status': { GET: { security: BUY_OR_PLAIN } }, // token: 입장 토큰 없는 갈래가 있다
+    '/v1/holds/{holdId}': { GET: { security: BUY, scopes: TICKET_BUY } }, // token-buy: x-peaket-scopes에 ticket:buy(구매 경로라 칸이 꼭 있다)
+    '/v1/orders/{orderId}/payment-status': { GET: { security: BUY_OR_PLAIN } }, // token: 칸이 없고 입장 토큰 없는 갈래가 있다
     '/v1/orders/{orderId}': 'GET', // token: 기본 security
   });
   const sources = {
@@ -516,8 +518,8 @@ test("W7-WIR-05 W7-COR-04 RV-04 infra §4.1 '인증 종류 대조' security로 p
   };
   generated(openapi, sources);
   // 종류가 다르면 멈춘다(라우트 하나, 작업 하나씩)
-  for (const [path, security, gw, auth] of [
-    ['/v1/holds/{holdId}', BUY, 'gw-fan', 'token'],
+  for (const [path, security, gw, auth, scopes] of [
+    ['/v1/holds/{holdId}', BUY, 'gw-fan', 'token', TICKET_BUY],
     ['/v1/events/{eventId}/reviews', OPTIONAL, 'gw-fan', 'public'],
     ['/v1/events/{eventId}/reviews', OPTIONAL, 'gw-fan', 'token'],
     ['/v1/orders/{orderId}/payment-status', BUY_OR_PLAIN, 'gw-fan', 'token-buy'],
@@ -525,7 +527,7 @@ test("W7-WIR-05 W7-COR-04 RV-04 infra §4.1 '인증 종류 대조' security로 p
     ['/v1/partner/auth/invitation-acceptances', [], 'gw-partner', 'token'],
     ['/v1/partner/auth/invitation-acceptances', [], 'gw-partner', 'optional'],
   ]) {
-    const spec = { [path]: { GET: security === undefined ? {} : { security } } };
+    const spec = { [path]: { GET: { ...(security === undefined ? {} : { security }), ...(scopes ? { scopes } : {}) } } };
     assertStops(openapiOf(spec), { [gw]: [sourceRoute(gw, `${gw}-x`, [{ prefixes: [path.replace(/\/\{[^}]+\}.*$/, '')], backend: 'core-svc' }], { auth })] }, path);
   }
 });
@@ -535,6 +537,68 @@ test("W7-WIR-05 infra §4.1 '인증 종류 대조' 원천 라우트에 이름표
   const src = sourceRoute('gw-fan', 'gw-fan-unlabelled', [{ prefixes: ['/v1/events'], backend: 'core-svc' }]);
   delete src.metadata.labels;
   assertStops(openapi, { 'gw-fan': [src] }, 'gw-fan-unlabelled');
+});
+
+test("W7-COR-04 infra §4.1 '인증 종류 대조' ① 겹친 가드: 구매 경로(모든 갈래에 admissionToken) 작업에서 x-peaket-scopes를 지운 openapi면 token-buy 라우트에 두어도 생성기가 2로 멈추고 그 작업을 보인다", () => {
+  const withScope = openapiOf({ '/v1/holds/{holdId}': { GET: { security: BUY, scopes: TICKET_BUY } } });
+  const sources = { 'gw-fan': [sourceRoute('gw-fan', 'gw-fan-buy', [{ prefixes: ['/v1/holds'], backend: 'purchase-svc' }], { auth: 'token-buy' })] };
+  generated(withScope, sources);
+  const without = openapiOf({ '/v1/holds/{holdId}': { GET: { security: BUY } } });
+  assertStops(without, sources, '/v1/holds/{holdId}');
+  // token 라우트로 옮겨도 멈춘다(칸이 없다고 token으로 읽지 않는다)
+  assertStops(without, { 'gw-fan': [sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/holds'], backend: 'purchase-svc' }], { auth: 'token' })] }, '/v1/holds/{holdId}');
+});
+
+test("W7-COR-04 infra §4.1 '인증 종류 대조' ① fanCookie만인 작업(대기열 진입)에 x-peaket-scopes: [ticket:buy]가 있으면 token-buy 라우트로 가야 하고 token 라우트면 2로 멈춘다", () => {
+  const openapi = openapiOf({ '/v1/queues/{eventId}/entries': { POST: { security: [{ fanCookie: [] }], scopes: TICKET_BUY } } });
+  const route = (auth) => ({ 'gw-queue': [exactSource(sourceRoute('gw-queue', `gw-queue-${auth}`, [{ prefixes: ['/v1/queues/{eventId}/entries'], backend: 'queue-svc' }], { auth }))] });
+  generated(openapi, route('token-buy'));
+  assertStops(openapi, route('token'), '/v1/queues/{eventId}/entries');
+  // 칸이 없으면 같은 작업은 token이다(token-buy 라우트면 멈춘다)
+  assertStops(openapiOf({ '/v1/queues/{eventId}/entries': { POST: { security: [{ fanCookie: [] }] } } }), route('token-buy'), '/v1/queues/{eventId}/entries');
+});
+
+/** 원천 맞춤 하나(경로 Exact와 메서드) */
+const methodSource = (gw, name, path, method, backend, auth) => {
+  const r = sourceRoute(gw, name, [{ prefixes: [path], backend }], { auth });
+  r.spec.rules[0].matches = [{ path: { type: 'Exact', value: path }, method }];
+  return r;
+};
+
+test("W7-COR-04 infra §4.1 '경로별 메서드 생성기' 원천 맞춤에 method가 있으면 그 메서드의 작업만 맡는다(GET /v1/orders는 token 라우트, POST /v1/orders는 token-buy 라우트)", () => {
+  const openapi = openapiOf({ '/v1/orders': { GET: {}, POST: { security: BUY, scopes: TICKET_BUY } } });
+  const sources = {
+    'gw-fan': [methodSource('gw-fan', 'gw-fan-api', '/v1/orders', 'GET', 'purchase-svc', 'token'), methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy')],
+  };
+  const routes = apiRoutes(routesByGateway(generated(openapi, sources).files)['gw-fan'], 'gw-fan');
+  const from = (name) => routes.filter((r) => r.metadata?.labels?.[ROUTE_LABEL] === name);
+  const host = 'api.peaket.example';
+  const api = allowedByRoutes(from('gw-fan-api'), host, '/v1/orders');
+  const buy = allowedByRoutes(from('gw-fan-buy'), host, '/v1/orders');
+  assert.ok(api.has('GET') && !api.has('POST'), `gw-fan-api가 받는 메서드: ${fmt(api)}`);
+  assert.ok(buy.has('POST') && !buy.has('GET'), `gw-fan-buy가 받는 메서드: ${fmt(buy)}`);
+  // 한 경로를 두 라우트가 나눠도 OPTIONS는 그 경로에 있다(사전 요청이 CORS 정책에 닿는다)
+  assert.ok(allowedByRoutes(routes, host, '/v1/orders').has('OPTIONS'), 'OPTIONS가 없다');
+  assertMethodsExact(openapi, routesByGateway(generated(openapi, sources).files)['gw-fan'], 'gw-fan');
+});
+
+test("W7-COR-04 infra §4.1 '생성기가 멈추는 경우' 같은 경로·메서드 짝을 두 원천 규칙이 맡으면 2로 멈추고 그 작업을 보인다(method 맞춤과 경로만 맞춤의 겹침 포함)", () => {
+  const openapi = openapiOf({ '/v1/orders': { GET: {}, POST: { security: BUY, scopes: TICKET_BUY } } });
+  // 바탕: 짝마다 규칙 하나면 멈추지 않는다(method 맞춤 자체를 거부해서 아래 멈춤이 통과로 새지 않게)
+  generated(openapi, { 'gw-fan': [methodSource('gw-fan', 'gw-fan-api', '/v1/orders', 'GET', 'purchase-svc', 'token'), methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy')] });
+  // 같은 짝(POST /v1/orders)을 method 맞춤 둘이 맡는다
+  assertStops(openapi, { 'gw-fan': [methodSource('gw-fan', 'gw-fan-api', '/v1/orders', 'GET', 'purchase-svc', 'token'), methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy'), methodSource('gw-fan', 'gw-fan-buy-2', '/v1/orders', 'POST', 'purchase-svc', 'token-buy')] }, '/v1/orders');
+  // 경로만 맞춤(모든 메서드)과 method 맞춤이 POST /v1/orders를 함께 맡는다
+  const pathOnly = exactSource(sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/orders'], backend: 'purchase-svc' }], { auth: 'token' }));
+  assertStops(openapi, { 'gw-fan': [pathOnly, methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy')] }, '/v1/orders');
+});
+
+test("W7-COR-04 infra §4.1 '경로별 메서드 생성기' 같은 경로의 다른 메서드를 다른 라우트가 맡아도 멈추지 않고, method 맞춤이 계약에 없는 메서드면 2로 멈춘다", () => {
+  const openapi = openapiOf({ '/v1/orders': { GET: {}, POST: { security: BUY, scopes: TICKET_BUY } } });
+  const r = generateRoutes({ openapi, sources: { 'gw-fan': [methodSource('gw-fan', 'gw-fan-api', '/v1/orders', 'GET', 'purchase-svc', 'token'), methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy')] } });
+  assert.deepEqual(r.problems, [], `같은 경로의 다른 메서드인데 멈췄다: ${r.problems.join(' / ')}`);
+  // 원천 맞춤이 맡는 작업이 없다(DELETE /v1/orders는 계약에 없다) → '원천 앞부분이 계약 경로를 하나도 맡지 않는다'
+  assertStops(openapi, { 'gw-fan': [methodSource('gw-fan', 'gw-fan-api', '/v1/orders', 'GET', 'purchase-svc', 'token'), methodSource('gw-fan', 'gw-fan-buy', '/v1/orders', 'POST', 'purchase-svc', 'token-buy'), methodSource('gw-fan', 'gw-fan-x', '/v1/orders', 'DELETE', 'purchase-svc', 'token')] }, '/v1/orders');
 });
 
 test("W7-CON-02 infra §4.1 '경로별 시간 상한' 원천 규칙의 timeouts를 그 규칙에서 나온 생성 규칙마다 그대로 옮기고 다른 규칙에는 두지 않는다", () => {

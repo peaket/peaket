@@ -38,12 +38,6 @@ const BACKEND_EXCEPTIONS = new Map([
   ['POST /v1/ops/scanner-devices/{deviceId}/revocation', 'ops-svc'],
   ['POST /v1/ops/scanner-devices/{deviceId}/enrollment-code', 'ops-svc'],
 ]);
-/**
- * 인증 종류는 token이지만 ticket:buy를 요구하는 작업: 대기열 진입·입장 확정(docs/infra.md §4.1 '토큰 확인과 인가', authz-matrix §5.1, BAT-055 정적 시험
- * 'authz-matrix §5.1 … ticket:buy를 요구한다'). 같은 절 '인증 종류 대조'의 'ticket:buy는 입장 토큰을 받는 작업에만'과 부딪혀 계획 담당이 정할 일로 적었다
- * (계획 파일 '실패 확인', 시험 이의 후보). 정해질 때까지 이 둘은 token-buy로 본다
- */
-const BUY_WITHOUT_ADMISSION = new Set(['POST /v1/queues/{eventId}/entries', 'POST /v1/queues/{eventId}/admission']);
 const TITLES = { 403: 'Forbidden', 405: 'Method Not Allowed' };
 
 // ---- 읽기 ----
@@ -126,16 +120,23 @@ const opByKey = (key) => {
   return o;
 };
 
-/** security로 정한 인증 종류(infra §4.1 '인증 종류 대조') */
+/** 게이트웨이가 요구하는 스코프에 ticket:buy가 있는가(openapi 확장 x-peaket-scopes, infra §4.1 '인증 종류 대조' ①) */
+const wantsBuy = (op) => (op['x-peaket-scopes'] ?? []).includes('ticket:buy');
+/** 모든 갈래에 입장 토큰이 있는 구매 경로인가(이 작업은 x-peaket-scopes가 꼭 있어야 한다) */
+const isPurchase = (op) => {
+  const sec = op.security ?? OPENAPI.security ?? [];
+  return sec.length > 0 && sec.every((alt) => 'admissionToken' in alt);
+};
+/** security와 x-peaket-scopes로 정한 인증 종류(infra §4.1 '인증 종류 대조') */
 function authKind(op) {
   const sec = op.security ?? OPENAPI.security ?? [];
   if (!sec.length) return 'public';
   const has = sec.map((alt) => ACCESS.some((a) => a in alt));
-  if (has.every(Boolean)) return sec.every((alt) => 'admissionToken' in alt) ? 'token-buy' : 'token';
+  if (has.every(Boolean)) return wantsBuy(op) ? 'token-buy' : 'token';
   if (!has.some(Boolean)) return 'public';
   return 'optional';
 }
-const expectedKind = (o) => (BUY_WITHOUT_ADMISSION.has(o.key) ? 'token-buy' : authKind(o.op));
+const expectedKind = (o) => authKind(o.op);
 
 /** 작업을 받는 백엔드 규칙(백엔드가 없는 not-found·trace는 '받는 라우트 없음'으로 본다) */
 function opRoute(o) {
@@ -376,6 +377,16 @@ test('W7-COR-04 openapi에서 admissionToken이 없는 갈래가 있는 gw-fan·
     const hit = opRoute(o);
     assert.ok(hit && requiresBuy(hit.route), `${o.key}: ticket:buy를 요구하지 않는다`);
   }
+});
+
+test('W7-COR-04 저장소 openapi: 구매 경로(모든 갈래에 admissionToken) 작업은 모두 x-peaket-scopes에 ticket:buy가 있고, 대기열 진입·입장 확정에도 있으며 로비 참가·POST /v1/shop/orders에는 없다', () => {
+  const purchase = apiOps().filter((o) => isPurchase(o.op));
+  assert.ok(purchase.length >= 9, `구매 경로 작업이 적다(${purchase.length})`);
+  for (const o of purchase) assert.ok(wantsBuy(o.op), `${o.key}: 구매 경로인데 x-peaket-scopes에 ticket:buy가 없다`);
+  for (const key of ['POST /v1/queues/{eventId}/entries', 'POST /v1/queues/{eventId}/admission']) assert.ok(wantsBuy(opByKey(key).op), `${key}: x-peaket-scopes에 ticket:buy가 없다`);
+  for (const key of ['POST /v1/queues/{eventId}/lobby-participants', 'POST /v1/shop/orders', 'GET /v1/orders', 'GET /v1/orders/{orderId}', 'GET /v1/orders/{orderId}/payment-status']) assert.ok(!wantsBuy(opByKey(key).op), `${key}: x-peaket-scopes에 ticket:buy가 있다`);
+  // ticket:buy 밖의 스코프 값은 아직 없다(모르는 값을 게이트웨이가 요구하지 않게)
+  for (const o of OPS) for (const s of o.op['x-peaket-scopes'] ?? []) assert.equal(s, 'ticket:buy', `${o.key}: 모르는 스코프 ${s}`);
 });
 
 // ===================== 경로별 시간 상한(W7-CON-02) =====================
