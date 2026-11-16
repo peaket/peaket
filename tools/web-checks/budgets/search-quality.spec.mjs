@@ -3,7 +3,7 @@
 // 정본: docs/features/search.md §11(search_suggest_selected_total{kind, position}, search_requery_total: 결과를 누르지 않고 10초 [가정] 안에 다시 찾음),
 // catalog-review.md:157(14.2.3: 검색어 없이 수만 같은 출처로). 웨이브 끝 budgets 게이트에서 돈다(운영 빌드 필요).
 import { test, expect } from '@playwright/test';
-import { APPS, HOST, portOf } from '../seed-css/apps.mjs';
+import { APPS, HOST, portOf, scriptSrcs } from '../seed-css/apps.mjs';
 
 const web = APPS.find((a) => a.name === 'web');
 const origin = () => `http://${HOST}:${portOf(web, 'prod')}`;
@@ -131,4 +131,30 @@ test('검색 품질 사건은 쿠키·Referer 쿼리 없이 RumSample 꼴로 숨
   // /search 셸의 리퍼러 정책
   const html = await (await request.get(`${origin()}/search`)).text();
   expect(html).toMatch(/<meta[^>]+name="referrer"[^>]+content="strict-origin"/);
+});
+
+// 자동완성 모듈(model/autocomplete)에만 있는 글자 조각. 덩어리 이름이 해시라 이것으로 찾는다(계획 BAT-165 '### 18')
+const AUTOCOMPLETE_MARK = '/search?artistId=';
+
+test('첫 화면 HTML의 스크립트에 자동완성 덩어리가 없고, 머리 검색창에 포커스하면 받는다(BAT-165 첫 JS)', async ({ page, request }) => {
+  // 정본: docs/frontend.md §5.8 '머리 검색창 자동완성은 늦게 싣는다'
+  const home = `${origin()}/`;
+  const srcs = scriptSrcs(await (await request.get(home)).text());
+  expect(srcs.length).toBeGreaterThan(0);
+  for (const src of srcs) {
+    const js = await (await request.get(new URL(src, home).href)).text();
+    expect({ src, has: js.includes(AUTOCOMPLETE_MARK) }).toEqual({ src, has: false });
+  }
+  // 화면에서: 포커스 전에는 그 덩어리 요청이 없고, 포커스 뒤 한 번 있다
+  const marked = [];
+  page.on('response', async (r) => {
+    if (r.request().resourceType() !== 'script') return;
+    const body = await r.text().catch(() => '');
+    if (body.includes(AUTOCOMPLETE_MARK)) marked.push(r.url());
+  });
+  await page.goto(home);
+  await page.waitForLoadState('networkidle');
+  expect(marked).toEqual([]);
+  await page.getByRole('combobox').first().focus();
+  await expect.poll(() => marked.length, { timeout: 5_000 }).toBe(1);
 });
