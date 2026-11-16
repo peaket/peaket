@@ -417,6 +417,20 @@ test('HOT-400 RV-25 앱 서버 시작 확인이 읽는 packages/platform 파일(
   }
 });
 
+// 가져오기 사슬의 나머지 모듈 다섯과 내보내기 표(package.json exports)도 각각 web을 고른다(검증 VF-14: 하나를 뺀 규칙을 잡는다)
+test('HOT-400 RV-25 VF-14 앱 서버 시작 확인의 가져오기 사슬 모듈(trace-boundary·client-family·pseudonym·config·deadline)과 packages/platform/package.json도 각각 web을 고른다', () => {
+  for (const f of [
+    'packages/platform/src/trace-boundary.ts',
+    'packages/platform/src/client-family.ts',
+    'packages/platform/src/pseudonym.ts',
+    'packages/platform/src/config.ts',
+    'packages/platform/src/deadline.ts',
+    'packages/platform/package.json',
+  ]) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+});
+
 test('BAS170_서비스·플랫폼·다른문서·다른도구만바꾸면_web을고르지않는다', () => {
   for (const f of ['services/queue-svc/src/main.ts', 'packages/platform/x.ts', 'docs/design/d5-screen-blueprint.md', 'docs/a.md', 'tools/ci/x.mjs', 'tools/poc/login-compare/x.mjs']) {
     assert.ok(!scopes({ [f]: '바꿈\n' }).includes('web'), f);
