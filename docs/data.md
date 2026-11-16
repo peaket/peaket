@@ -1533,15 +1533,20 @@ erDiagram
         uuid event_id FK "회차. 작성 자격을 회차로 판정한다"
         uuid account_id "작성 계정(identity 논리 DB라 외래키 없음). DELETED가 아닌 행에서 (event_id, account_id) 유일"
         uuid basis_order_id "작성 자격 근거 주문(그 회차 티켓의 결제자 주문, purchase 논리 DB라 외래키 없음)"
-        smallint rating "별점 1~5, 필수"
+        smallint rating "별점 1~5. 살아 있는 행은 필수, 파기한 행(DELETED)은 NULL(소유자 결정 2026-11-16 OPEN[42], ADR-0278)"
         text body "NFC 정규화 뒤 grapheme 10~1,000자 [가정]"
-        text status "VISIBLE|HIDDEN|DELETED. DELETED면 본문·별점·사진 키·계정 ID를 바로 비운다(ADR-0086). HIDDEN 사유는 takedown_action(통보·같은 내용·권리 침해 임시조치·신고 처리 노출 차단·불법 촬영물 신고 가림, ADR-0066)"
-        text content_fingerprint "NFKC 뒤 공백·문장부호·제어 문자를 지운 본문의 SHA-256. 통보로 차단한 같은 내용을 새 후기 저장 때 바로 가리는 데 쓴다(POL-024 2호 마목, BAT-585)"
+        text status "VISIBLE|HIDDEN|DELETED. DELETED면 본문·별점·사진 키·계정 ID를 바로 비운다(ADR-0086, 칸은 §2 '후기 파기'). HIDDEN 사유는 takedown_action(통보·같은 내용·권리 침해 임시조치·신고 처리 노출 차단·불법 촬영물 신고 가림, ADR-0066)"
+        text content_fingerprint "NFKC 뒤 공백·문장부호·제어 문자를 지운 본문의 SHA-256. 통보로 차단한 같은 내용을 새 후기 저장 때 바로 가리는 데 쓴다(POL-024 2호 마목, BAT-585). 파기한 행은 NULL"
         text author_display "닉네임 첫 grapheme + '**'. identity 팬 프로필 조회가 생기기 전에는 '***'다(BAT-585)"
         bool edited "팬이 고친 적이 있으면 true. 운영자 조치와 구분한다(BAT-585)"
         timestamptz created_at
         timestamptz updated_at
         timestamptz deleted_at
+    }
+    review_withdrawal_recheck {
+        uuid account_id PK "탈퇴한 계정. 탈퇴 15분 뒤 후기를 한 번 더 파기할 예약(소유자 결정 2026-11-16 OPEN[44], ADR-0278). 처리하면 지운다"
+        timestamptz due_at "예약 시각 = min(withdrawnAt, 처리 시각) + 16분(추천 적용 2026-11-16, W8-audit2a)"
+        timestamptz created_at
     }
     review_image {
         uuid id PK
@@ -2026,15 +2031,19 @@ erDiagram
         uuid id PK "관리 계정의 개인정보 열람·내려받기 기록(ops-svc 감사 저장소, docs/features/control-tower.md §7). 이름은 [가정](추천 적용 2026-10-30, docs/security/internal-management-plan.md §4.5)"
         uuid admin_account_id "관리 계정(관리자 접속기록, 2년 이상)"
         text actor_role "그때의 역할"
-        text action "VIEW_UNMASKED|DOWNLOAD|DATA_EXPORT(가린 값 열기·명단 내려받기·법정 자료 추출)"
-        text target_kind "ATTENDEE_LIST|SHIPPING_LIST|FAN_PROFILE|DATA_REQUEST 등"
+        uuid promoter_id "파트너 계정이면 그 파트너(ATTENDEE_LIST는 필수, 추천 적용 2026-11-16, W8-audit2b)"
+        text action "LIST|DOWNLOAD|VIEW_UNMASKED|DATA_EXPORT(명단 보기 한 페이지·명단 내려받기·가린 값 열기·법정 자료 추출. LIST는 소유자 결정 2026-11-16 OPEN[43](ADR-0278)으로 더함)"
+        text target_kind "ATTENDEE_LIST|SHIPPING_LIST|FAN_PROFILE|DATA_REQUEST"
         uuid event_id "명단 재현 조건 ①: 회차(명단일 때)"
-        jsonb filter "명단 재현 조건 ②: 거른 조건(상태·구역·등급 등). 개인정보 원문은 넣지 않는다"
+        jsonb filter "명단 재현 조건 ②: 거른 조건(상태·구역·등급 등, 파트너 명단 보기는 limit·cursor). 개인정보 원문은 넣지 않는다"
         timestamptz occurred_at "명단 재현 조건 ③: 시각. 세 조건과 주문 상태 이력으로 그때의 명단을 다시 만든다(계획 §4.5)"
-        text reason "사유(먼저 적어야 연다)"
+        text reason "사유(먼저 적어야 연다. LIST는 NULL)"
         int target_count "대상 건수"
-        text format "CSV|XLSX|PDF"
-        text source_ip "접속지 정보"
+        text format "CSV|XLSX|PDF(LIST는 NULL)"
+        inet source_ip "접속지 정보(요청의 클라이언트 IP 원문)"
+        text source_service "기록을 낸 서비스(사건으로 받은 행은 core-svc 등, ops 안에서 쓴 행은 ops-svc)"
+        timestamptz recorded_at "ops-svc가 쓴 시각"
+        timestamptz retain_until "occurred_at + 2년(UTC 달력, 2월 29일이면 3월 1일)"
     }
     verification_case {
         uuid id PK
@@ -2406,10 +2415,18 @@ erDiagram
 
 관람 후기(`review`)에는 기대평 종류를 두지 않는다(소유자 결정 2026-10-14, ADR-0063). 작성 자격은 그 회차의 `event.ends_at`이 지났고, 그 회차 티켓의 결제자이며, 취소·환불·무효가 아닌 티켓이 하나 이상 남은 계정이다. 양도받은 보유자는 쓰지 않는다. 한 계정은 한 회차에 후기 하나이고, 고치거나 지울 수 있다. 별점이 낮다는 이유로 숨기지 않는다(ADR-0063). core-svc review 모듈은 후기를 쓸 때마다 ticket-svc에 결제자 티켓을 물어 확인하고(논리 DB 간 조인 금지), 확인한 주문을 `basis_order_id`로 남긴다. 취소된 회차(`status` CANCELLED)에는 쓸 수 없고, 연기된 회차는 바뀐 `ends_at`을 따른다. 공개 응답의 작성자 표시는 닉네임 첫 글자와 '**'(예: '김**'), 관람 회차 일시뿐이다. 이메일·전화번호·실명·계정 ID는 싣지 않고, 본인 후기인지는 `mine` 불리언으로만 알린다. 계정 병합 때 흡수 계정에 후기가 있으면 병합을 막는다(불변식 위반, POL-034, §4의 9. 2026-10-14의 '흡수 계정 후기는 DELETED로 바꾼다'(ADR-0063)를 고쳤다, 2026-11-02 정합 점검, ADR-0148 결정 3). 후기 목록과 요약(평균 별점·후기 수)은 그 회차가 속한 공연의 모든 회차 후기를 모아 보이고, 후기마다 관람 회차 일시를 보인다. 쓰기 자격과 '한 계정 한 회차 하나'는 회차 단위 그대로다(추천 적용 2026-10-27, ADR-0093).
 
-후기 표의 DB 권한(ADR-0241 결정 4 '권한은 코드가 쓰는 만큼만', 칸 목록은 추천 적용 2026-11-16, W7-audit COV2-06): 0013이 표만 만들고 쓰기 권한을 주지 않아, 운영 역할로는 후기를 쓰지도 고치지도 못했다. 0022가 다음만 준다(0022는 탈퇴 익명화가 계정으로 후기를 찾는 색인 `review (account_id)`도 만든다, §5.1 '탈퇴 익명화').
+후기 표의 DB 권한(ADR-0241 결정 4 '권한은 코드가 쓰는 만큼만', 칸 목록은 추천 적용 2026-11-16, W7-audit COV2-06): 0013이 표만 만들고 쓰기 권한을 주지 않아, 운영 역할로는 후기를 쓰지도 고치지도 못했다. 0022가 다음만 준다(0022는 탈퇴 파기가 계정으로 후기를 찾는 색인 `review (account_id)`도 만든다, §5.1 '탈퇴 파기').
 
-- 팬·관제 경로 `core_app`: 네 표와 `held_event`의 읽기(0004의 기본 권한과 같은 것을 다시 적는다). `review`는 넣기와 칸 고치기 `rating`·`body`·`status`·`notice`·`notice_until`·`content_fingerprint`·`author_display`·`edited`·`updated_at`·`deleted_at`·`account_id`·`basis_order_id`(뒤의 둘은 탈퇴 익명화). `id`·`event_id`·`created_at`은 고치지 못한다. `content_report`는 넣기와 `status`·`outcome`·`resolved_at` 고치기, `takedown_action`은 넣기와 `restored_at` 고치기, `review_hidden_fingerprint`는 넣기·지우기다. `review`·`content_report`·`takedown_action`의 행 지우기는 주지 않는다. Kafka 소비자의 보류 표 `held_event`에는 넣기를 준다(§4의 15).
+- 팬·관제 경로 `core_app`: 네 표와 `held_event`의 읽기(0004의 기본 권한과 같은 것을 다시 적는다). `review`는 넣기와 칸 고치기 `rating`·`body`·`status`·`notice`·`notice_until`·`content_fingerprint`·`author_display`·`edited`·`updated_at`·`deleted_at`·`account_id`·`basis_order_id`(뒤의 둘은 파기 때 참조 끊기). `id`·`event_id`·`created_at`은 고치지 못한다. `content_report`는 넣기와 `status`·`outcome`·`resolved_at` 고치기, `takedown_action`은 넣기와 `restored_at` 고치기, `review_hidden_fingerprint`는 넣기·지우기다. `review`·`content_report`·`takedown_action`의 행 지우기는 주지 않는다. Kafka 소비자의 보류 표 `held_event`에는 넣기를 준다(§4의 15). 다시 정리 예약 `review_withdrawal_recheck`(아래 '후기 파기')에는 읽기·넣기·지우기와 `due_at` 고치기만 준다(추천 적용 2026-11-16, W8-audit2a. 다른 역할에는 주지 않는다).
 - 정비 역할 `core_maintenance`(임시조치 끝내기 `review-temp-block-expire`): `review`의 `id`·`status`·`notice`·`notice_until` 읽기와 `status`·`notice`·`notice_until`·`updated_at` 고치기, `takedown_action`의 `reason`·`restored_at`·`ends_at` 읽기와 `restored_at` 고치기. 보류 표 정리(`held-events-delete`)를 위해 `held_event`의 `reprocessed_at` 읽기와 행 지우기.
+
+후기 파기(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, 칸과 마이그레이션 나눔은 추천 적용 2026-11-16, W8-audit2a): 작성자가 후기를 지우거나 회원이 탈퇴하면 그 행을 파기한다(§6 '관람 후기', ADR-0086 ⑧, docs/features/identity.md §8 '후기 파기').
+
+- 비우는 칸: `status` DELETED, `body` 빈 글자, `rating` NULL, `content_fingerprint` NULL, `author_display` 빈 글자, `notice`·`notice_until` NULL, `account_id`·`basis_order_id`는 그 후기 ID(NOT NULL과 회차·계정 부분 유일 색인을 그대로 두고 참조를 끊는다), `deleted_at`은 처음 지운 시각(이미 있으면 그대로), `updated_at`은 지금. 남는 칸은 `id`·`event_id`·`status`·`edited`·`created_at`·`updated_at`·`deleted_at`이고, 신고 기록이 가리키는 후기 ID·회차·상태·시각이 이것이다. 후기 사진(`review_image`)이 생기면 그 단계가 사진 파일과 행을 함께 지운다(아래 '후기 사진').
+- 탈퇴 파기의 대상은 그 계정의 모든 행(보이는 것, 가린 것, 작성자가 이미 지운 것)이다. 이미 지운 행도 별점·지문이 남아 있을 수 있어서다(2026-11-16 전의 작성자 지우기).
+- 건드리지 않는 것: 법정 차단 조치 증적 `takedown_action`(3년, 내용 지문 포함)과 같은 내용 차단 목록 `review_hidden_fingerprint`는 후기와 따로 남는다. 신고 기록 `content_report`는 자기 보존(처리 뒤 1년 [가정])을 따른다.
+- 마이그레이션 나눔: 이번 출시는 `rating`·`content_fingerprint`의 NOT NULL을 풀고(넓히기), 살아 있는 행에 별점·지문을 강제하는 CHECK(`status = 'DELETED' OR (rating IS NOT NULL AND content_fingerprint IS NOT NULL)`)를 `NOT VALID`로 더한다. 파기한 행의 모양을 강제하는 CHECK(`status <> 'DELETED' OR (body = '' AND rating IS NULL AND content_fingerprint IS NULL AND account_id = id AND basis_order_id = id)`)와 두 CHECK의 `VALIDATE CONSTRAINT`는 다음 출시 마이그레이션이 정비 시간에 한다. 이전 판(N-1)의 작성자 지우기가 별점을 남겨 배포 창 동안 실패하기 때문이다(docs/devops.md §7.1 원칙 2·3, §7.2).
+- 다시 정리 예약 `review_withdrawal_recheck`(소유자 결정 2026-11-16 OPEN[44], ADR-0278): `account_id`(기본 키), `due_at`, `created_at`만 둔다(pid·후기 내용 없음). 탈퇴 사건을 처리하는 트랜잭션이 파기와 함께 넣고(같은 계정이 있으면 늦은 `due_at`을 남긴다), 때가 되면 core-svc 소비자 파드의 반복이 `FOR UPDATE SKIP LOCKED`로 잠가 그 계정을 다시 파기하고 행을 지운다(한 트랜잭션, docs/streaming.md §2.6 'core-svc 소비자'). 색인은 `(due_at)`이다.
 
 후기 사진(`review_image`, 소유자 요청 2026-10-19, 세부는 추천 적용 2026-10-19, ADR-0066): 한 후기에 사진은 최대 3장 [가정]이다. 형식·크기는 공연 이미지와 같은 기준(JPEG·PNG·WebP, 한 장 10MB, 긴 변 20,000px·4,000만 화소 상한, ADR-0062 결정 38)에 짧은 변 320px 이상 [가정]을 더한다. 팬이 사진을 먼저 올리면(`review_id` NULL), 후기를 쓰거나 고치는 본문에서 자기 사진만 붙인다. core-svc review 모듈은 원본을 디코딩하지 않고 비공개 격리 위치에 받아, 이미지 처리 작업 `image-worker`(DB 자격 증명이 없는 별도 배포, docs/security/asvs/catalog-review.md 5.4.3, 추천 적용 2026-10-28, 기술 검토 중간-068)에 맡긴다. `image-worker`가 확장자·매직 바이트·디코딩·악성 코드 검사 결과를 확인한다. QR 코드·바코드는 자동으로 거르지 않는다(거절 사유 `CODE_DETECTED`는 2026-10-28에 뺐다, 기술 검토 낮음-158, POL-042). 검사를 통과하면 다시 인코딩해 메타데이터(촬영 위치 포함)를 지운 파생본 2종(목록 240px, 보기 긴 변 1,280px [가정])만 공개 정적 객체로 내고, 원본은 바로 지운다. 후기에 붙이지 않은 사진은 24시간 [가정] 뒤 지운다. 후기를 지우면 사진도 지우고, 후기를 가리면 사진도 가린다. QR·바코드가 든 사진은 신고로만 처리한다(POL-042).
 
@@ -2433,12 +2450,17 @@ erDiagram
 **예매자 명단 내려받기 이력과 접속기록(2026-11-15 R-588·R-606에서 만들었고, 칸 세부는 추천 적용 2026-11-16, W7-audit A2-19)**: core 논리 DB의 두 표다. 둘 다 파트너 DB 역할 `core_partner`가 `promoter_id` 행 보안(RLS)으로 자기 파트너 행만 읽고 쓴다.
 
 - `attendee_export`(0016): 화면의 [다운로드 이력]이 읽는 사본이다. 내려받기 한 번이 한 행이고 `id`(= 내보내기 ID), 회차, 행위자(계정 ID·표시 이름·역할), 사유, 형식(`CSV`·`XLSX`·`PDF`), 건수, 결과, 만든 때, 화면에서 사라지는 때(`expires_at` = 만든 때 + 30일)를 둔다.
-- `attendee_export_audit`(0019, 0021): 개인정보 접속기록이다. 명단 보기 한 페이지와 내려받기 한 번이 각각 한 행이다. 칸은 `id`, 종류 `action`(`LIST`·`DOWNLOAD`), `export_id`, 회차, 행위자(계정 ID·표시 이름·역할), `reason`, `format`, 건수 `count`(보기는 그 페이지에 보인 행 수, 내려받기는 파일의 행 수), 명단을 다시 만들 조건 `filter`(jsonb. 보기는 `limit`과 받은 `cursor`, 내려받기는 빈 객체. 개인정보 원문은 넣지 않는다), 접속지 `source_ip`(inet), `created_at`, `retain_until`이다.
-  - `source_ip`(추천 적용 2026-11-16, W7-audit 리뷰 R2): 그 요청의 클라이언트 IP 원문이다(`admin_data_access.source_ip`와 같은 뜻. 읽는 규칙은 docs/features/settlement.md §9 '접속지'). 0021은 칸만 더한다(NULL 허용, 넓히기). 새 행에 접속지를 강제하는 것은 지금은 앱이다(접속지를 정하지 못하면 기록 전에 실패, docs/features/settlement.md §9). DB의 `CHECK (source_ip IS NOT NULL) NOT VALID`(좁히기)는 이 칸을 모르는 이전 판(N-1) 코드가 모두 내려간 뒤의 다음 출시 마이그레이션이 더한다. 같은 배포에 넣으면 배포 창과 되돌리기 동안 이전 판의 내려받기가 접속기록 넣기에서 실패하기 때문이다(docs/devops.md §7.1 원칙 2·3, 추천 적용 2026-11-16, W7-audit 리뷰 K1). `inet`이라 IP 모양이 아닌 값은 들어가지 않는다. 보존은 행의 `retain_until`(2년)과 같다. 이 칸은 다운로드 이력 응답에 싣지 않는다.
-  - `DOWNLOAD` 행은 `id`와 `export_id`가 그 `attendee_export.id`와 같고, 사유·형식이 꼭 있다. `LIST` 행은 `id`가 새 UUIDv7이고 `export_id`·`reason`·`format`이 NULL이다. 두 모양을 CHECK 하나로 강제한다. 0021은 이 CHECK와 `action` CHECK를 `NOT VALID`로 더해 표 전체를 잠그고 검사하지 않는다(새 행에는 바로 걸린다). 0019 때 들어간 행은 `action` 기본값 `DOWNLOAD`와 NOT NULL이던 세 칸으로 두 CHECK를 이미 만족하므로, `VALIDATE CONSTRAINT`는 위 `source_ip` CHECK와 함께 다음 출시 마이그레이션이 정비 시간에 한다(docs/devops.md §7.2 '무거운 변경은 정비 시간에', 추천 적용 2026-11-16, W7-audit 리뷰 K6).
-  - `retain_until`은 `created_at` + 2년(UTC 달력 기준으로 같은 월·일. 2월 29일이면 3월 1일)이다. 법정 최소(2년 이상)를 밑돌지 않게 날짜 수(730일)로 세지 않는다. 이 시각을 쓰는 파기 작업은 아직 없어 그동안 행은 지워지지 않는다.
-  - `core_partner`에는 `SELECT`·`INSERT`만 준다(고치거나 지우지 못한다). 내려받기의 `attendee_export` 행과 `DOWNLOAD` 행은 한 트랜잭션에 넣는다(docs/features/settlement.md §9 '예매자 명단 보기·내려받기의 원천 페이지와 접속기록').
-  - 관리 계정 접속기록의 정본 저장소는 ops-svc 감사 저장소의 `admin_data_access`(§2 ⑦)다. 파트너 명단 접속기록을 그쪽으로 옮기는 일(해시 체인·매일 이상 점검 FR-064)은 정해지지 않았고(대기: OPEN[43]), 그때까지 이 표에 둔다. 접속지 정보는 이 표가 `source_ip`로 이미 갖는다.
+- `attendee_export_audit`(0019, 0021): 2026-11-16 W7-audit A2-19에서 명단 보기·내려받기 접속기록으로 넓혔던 표다(칸은 두 마이그레이션 원문과 git 기록이 말한다). 소유자 결정 2026-11-16 OPEN[43](ADR-0278)으로 접속기록을 ops-svc 감사 저장소 `admin_data_access`로 옮겨, 이 표에는 더 쓰지 않는다. 표와 `core_partner` 권한(`SELECT`·`INSERT`)은 이전 판(N-1) 코드가 배포 창 동안 쓰도록 남기고, 다음 출시 마이그레이션이 표를 지운다. 그러면 0021의 `NOT VALID` CHECK를 `VALIDATE`하고 `source_ip` CHECK를 더할 일도 없어진다. 운영 전이라 옮길 행이 없다. 운영 뒤에 이런 이동을 하면 표를 지우기 전에 남은 행을 사건으로 다시 내는 일회 작업이 먼저다(추천 적용 2026-11-16, W8-audit2b).
+- 접속기록(소유자 결정 2026-11-16 OPEN[43], ADR-0278, 세부는 추천 적용 2026-11-16, W8-audit2b): 명단 보기 한 페이지와 내려받기 한 번마다 core-svc export 모듈이 사건 `DataAccessed`(docs/api/asyncapi.yaml `audit.data-accessed`)를 core Outbox에 쓴다. 보기는 Outbox 한 줄의 트랜잭션, 내려받기는 `attendee_export` 행과 Outbox 행을 한 트랜잭션에 넣는다(Outbox가 마지막 문장, ADR-0116 결정 3). 사건을 만들 칸(행위자·역할·회차·건수·접속지 등)이 빠지거나 계약에 맞지 않으면 트랜잭션을 열기 전에 실패하고, 어느 쪽이든 실패하면 명단·파일을 주지 않는다(docs/features/settlement.md §9). 보기 사건의 `eventKey`는 새 UUIDv7, 내려받기 사건은 `attendee_export.id`다. 행위자의 표시 이름은 사건에 싣지 않는다(식별자는 계정 ID). `core_partner`에는 `outbox` 넣기와 시퀀스 `outbox_seq` 사용만 더 준다(읽기·고치기·지우기 없음). ops-svc가 사건을 받아 아래 '관리 계정 개인정보 열람·내려받기 기록'에 쓴다.
+
+**관리 계정 개인정보 열람·내려받기 기록(`admin_data_access`, ops 논리 DB, 칸은 위 ⑦ 그림. 소유자 결정 2026-11-16 OPEN[43](ADR-0278)으로 처음 만들고 세부는 추천 적용 2026-11-16, W8-audit2b)**: 관리 계정(운영자·CS·파트너)의 개인정보 접속기록이다. 고시의 접속기록 항목(계정·접속일시·접속지 정보·처리한 정보주체 정보·수행업무, docs/security/internal-management-plan.md §4.5)을 `admin_account_id`, `occurred_at`, `source_ip`, 회차·`filter`·`target_count`, `action`과 `reason`으로 채운다.
+
+- 들어오는 길: 다른 서비스의 기록은 사건 `audit.data-accessed`로 받는다(지금은 core-svc의 파트너 명단 보기·내려받기). ops-svc 안에서 생기는 기록(가린 값 열기 등)은 그 트랜잭션에서 같은 함수로 쓴다. `id`는 사건의 `eventKey`라 같은 사건을 다시 받아도 한 행이다. 같은 `id`에 내용이 다른 사건이 오면 쓰지 않고 보류한다(docs/streaming.md §2.6 'ops-svc 소비자').
+- 같은 트랜잭션: 행 넣기와 감사 체인 기록(`audit_chain`, `record_type` `ADMIN_DATA_ACCESS_RECORDED`, `record_id` = 행 ID)을 한 트랜잭션에 쓴다. 체인 기록의 내용(`record_json`의 payload)은 행의 정규화 JSON SHA-256 하나뿐이고, 접속지·커서 원문을 체인에 복사하지 않는다. 체인 검증의 원본 대조가 지금 행으로 해시를 다시 계산해 고친 행을 찾는다(docs/features/control-tower.md §7).
+- 모양: `action`은 `LIST`·`DOWNLOAD`·`VIEW_UNMASKED`·`DATA_EXPORT`, `target_kind`는 `ATTENDEE_LIST`·`SHIPPING_LIST`·`FAN_PROFILE`·`DATA_REQUEST`다. `LIST`는 사유·형식이 NULL이고 `DOWNLOAD`는 둘 다 있다. `ATTENDEE_LIST`는 회차와 파트너가 있다. `source_ip`는 `inet`이고 NOT NULL이다. 이 넷과 건수(0 이상)·형식 목록을 CHECK로 강제한다. 색인은 `(occurred_at, id)`(점검 기간 읽기)와 `(admin_account_id, occurred_at)`(같은 계정의 반복 내려받기)이다.
+- 보존: `retain_until` = `occurred_at` + 2년(UTC 달력, 2월 29일이면 3월 1일. 730일로 세지 않는다)이다. 이 시각을 쓰는 파기 작업은 아직 없다.
+- 점검이 읽는 면: FR-064 매일 이상 탐지와 월 정기 점검은 기간 [시작, 끝)의 행을 `occurred_at`·`id` 순으로 읽는다(빈틈 없는 대상 기간, docs/security/internal-management-plan.md §4.1).
+- DB 역할: ops 논리 DB는 아직 역할을 나누지 않는다. 표 주인이 행을 고칠 수 있는 것은 위 체인 검증이 찾는다. 역할 나누기와 체인의 키 건 해시(mac)는 BUILD_ORDER OPS-270이다.
 
 **부정 예매 사후 조사의 표(추천 적용 2026-10-31, ADR-0171 결정 2·4·5)**: 판매가 끝난 뒤 실제 기록으로 부정 예매(약관이 정하는 매크로·대기열 우회·보안문자 우회·명의 대여·매수 제한 회피, POL-046)를 묶어 찾고 사람이 소명·2인 승인을 거쳐 조치하는 데 쓰는 표다. 조사 갈래(실명 계정·주문·결제·접속)와 연구 갈래(분석 저장소의 회차 가명 사건)를 잇는 키, 한 화면에서 같이 보는 동선, 서로 옮기는 파일을 두지 않는다(결정 2).
 
@@ -2831,7 +2853,7 @@ erDiagram
 | 미수금 상계(payment) | `WHERE promoter_id = $1 AND status = 'OPEN' AND (pg = $2 OR pg IS NULL) ORDER BY id FOR UPDATE`(결제사에서 빠진 돈의 미수금은 같은 결제사 정산서에서만, 기술 검토 중간-043) | 새로 `partner_receivable (promoter_id, id) WHERE status = 'OPEN'` | `LockRows → Index Scan`(파트너 한 명의 열린 미수금은 적어 결제사 조건은 거르기로 충분하다) | 잠금 대기 |
 | CS 처리함(ops) | `WHERE status <> 'RESOLVED' AND next_due_at < … AND (next_due_at, id) > ($1, $2) ORDER BY next_due_at, id LIMIT 50`(종류 필터는 문장을 따로 만든다). `next_due_at`은 `NOT NULL DEFAULT 'infinity'`라 기한이 없는 건도 목록 끝에 든다(소유자 결정 2026-11-11, open-items 93번) | 새로 `cs_case (next_due_at, id) WHERE status <> 'RESOLVED'`, 다형 참조 유일(§2) | `Limit → Index Scan`, 종류는 Filter | `Rows Removed by Filter`가 결과의 10배를 넘으면 `(kind, next_due_at, id)`를 더한다 |
 | 후기 목록·요약(core) | 회차의 후기 커서 목록, 평균 별점·후기 수 | 새로 `review (event_id, created_at, id) WHERE status <> 'DELETED'`, `review (event_id) INCLUDE (rating) WHERE status = 'VISIBLE'` | 목록은 `Limit → Index Scan Backward`, 요약은 `Aggregate → Index Only Scan`. 별점 순은 정렬을 받아들인다 | Heap Fetches, CDN 캐시 적중률 |
-| 탈퇴 익명화(core, 추천 적용 2026-11-16, W7-audit 리뷰 K2) | 탈퇴 사건마다 한 번 `UPDATE review SET account_id = id, basis_order_id = id, author_display = '탈퇴한 사용자', updated_at = $2 WHERE account_id = $1 RETURNING id` | 새로 `review (account_id)`(0022. 운영 전이라 트랜잭션 안에서 만든다. 운영 뒤라면 `CONCURRENTLY` 파일로 따로 만든다) | `Update → Index Scan using review_account_idx`(계정당 후기 몇 건). 색인이 없으면 사건마다 후기 표 전체를 읽는다 | 실행 시간, core 소비자 처리 지연 |
+| 탈퇴 파기(core, 추천 적용 2026-11-16, W7-audit 리뷰 K2. 익명화에서 파기로 바꿈: 소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278) | 탈퇴 사건마다 한 번, 그리고 다시 정리 예약마다 한 번 `UPDATE review SET <§2 '후기 파기'의 칸> WHERE account_id = $1 RETURNING id`. 다시 정리 반복은 `SELECT account_id FROM review_withdrawal_recheck WHERE due_at <= $1 ORDER BY due_at LIMIT 100 FOR UPDATE SKIP LOCKED` | `review (account_id)`(0022. 운영 전이라 트랜잭션 안에서 만든다. 운영 뒤라면 `CONCURRENTLY` 파일로 따로 만든다), 새로 `review_withdrawal_recheck (due_at)` | `Update → Index Scan using review_account_idx`(계정당 후기 몇 건). 예약은 `Limit → LockRows → Index Scan`. 색인이 없으면 사건마다 후기 표 전체를 읽는다 | 실행 시간, core 소비자 처리 지연, 밀린 예약 시간 |
 | 내 문의(core) | `WHERE account_id = $1 ORDER BY created_at DESC LIMIT 20 OFFSET $2` | 새로 `inquiry (account_id, created_at)` | `Limit → Index Scan Backward`(계정당 행이 적어 OFFSET 비용이 작다) | 실행 시간 |
 | 공연 검색(core, 읽기 전용 복제본) | `search_term`에서 이름(공연명·아티스트·공연장·다른 이름)의 앞부분(`LIKE '…%'`, 이스케이프)·중간 일치를 찾아 공연으로 묶고, `search_document`에서 장르·일정·상태·공연장·아티스트로 거른 뒤 정확도·오픈 임박·인기 순과 공연 ID로 정렬, `LIMIT 20 OFFSET` | `search_term (norm_nospace·jamo·chosung text_pattern_ops)` B-tree, 중간 일치는 훑기(NFR-028을 넘으면 pg_bigm GIN), `search_document` 정렬 열 | 앞부분은 `Index Scan`(범위 조건), 중간 일치는 `Seq Scan`(행 수만 개), 공연 묶기는 `HashAggregate`, 정렬은 `Sort`(top-N) | 쪽당 시간, 중간 일치 비율, `Rows Removed by Filter`, 두 글자 검색어 시간(ADR-0094) |
 | 자동완성 사전 증분 갱신(core, 읽기 전용 복제본, 10초 [가정]마다) | 한 읽기 전용 트랜잭션(`REPEATABLE READ`)에서 `search_version`을 먼저 읽고, `search_term`·`search_document`의 `updated_version > $지난판`과 `search_removal`의 `version > $지난판`을 읽는다(docs/features/search.md §2.3, 추천 적용 2026-10-28, 기술 검토 중간-089) | 두 표의 `(updated_version)` B-tree, `search_removal` 기본 키(판이 앞) | 세 쿼리 모두 `Index Scan`(범위 조건). 바뀐 줄이 없으면 빈 결과 | 갱신 한 번의 시간, 읽은 줄 수, `search_dictionary_drift_entries` |
@@ -2888,7 +2910,7 @@ erDiagram
 | 가명정보 처리 기록 (`pseudonymization_log`) | ops-svc 감사 저장소, 스토리지 암호화와 WORM 사본. 개인정보 원문은 넣지 않고 목적·항목·회차·키 버전·이용 내역만 남긴다. 목적은 통계작성(`STATISTICS`)과 과학적 연구(`SCIENTIFIC_RESEARCH`, 연구 갈래)를 다른 줄로 남긴다(추천 적용 2026-10-31, ADR-0173) | 가명정보를 파기한 날부터 3년 이상(개인정보 보호법 §28의4③, 시행령 §29의5②) |
 | 결정 기록 (`decision_record`) | ops-svc 논리 DB, 스토리지 레벨 암호화. 분석 요약에 개인정보를 쓰지 않는다 | 결정이 유효한 동안 유지하고, 철회·대체된 기록은 5년 [가정] 뒤 파기한다(자체 기준, POL-040) |
 | 수사기관 제공 대장 및 통신자료 요청서 | 감사 로그 전용 저장소(WORM 사본과 키 건 해시 체인으로 변조를 찾는다, ADR-0053) | 통신사실확인자료 제공 대장은 7년 보존, 통신이용자정보 제공 대장은 1년 보존 |
-| 관리자 계정 접속 로그 및 시스템 권한 변경 이력 | 감사 로그 전용 저장소. 개인정보 열람·내려받기 기록(`admin_data_access`, §2 ⑦)에는 사유·대상 건수와 함께 명단을 다시 만들 수 있는 조건(회차 ID, 거른 조건, 시각)을 남긴다. 여러 사람이 든 명단에서 '처리한 정보주체 정보'를 사람마다 적어야 하는지 정해지기 전까지의 방법이다(고시 제2조 제3호, [확인 필요], 추천 적용 2026-10-30, docs/security/internal-management-plan.md §4.5). 접속기록 점검자·가명정보 취급자의 지정·해제(`admin_designation`)도 권한 변경 이력이다. 파트너의 예매자 명단 보기·내려받기 기록은 그 저장소로 옮기기 전까지 core 논리 DB `attendee_export_audit`(§2 '예매자 명단 내려받기 이력과 접속기록')에 같은 조건(회차, `filter`, 시각)과 함께 남긴다(추천 적용 2026-11-16, W7-audit A2-19) | 관리자 접속 기록은 최소 2년 이상, 관리자 권한 부여·회수 이력(지정·해제 포함)은 3년 이상 보존 |
+| 관리자 계정 접속 로그 및 시스템 권한 변경 이력 | 감사 로그 전용 저장소. 개인정보 열람·내려받기 기록(`admin_data_access`, §2 ⑦)에는 사유·대상 건수와 함께 명단을 다시 만들 수 있는 조건(회차 ID, 거른 조건, 시각)을 남긴다. 여러 사람이 든 명단에서 '처리한 정보주체 정보'를 사람마다 적어야 하는지 정해지기 전까지의 방법이다(고시 제2조 제3호, [확인 필요], 추천 적용 2026-10-30, docs/security/internal-management-plan.md §4.5). 접속기록 점검자·가명정보 취급자의 지정·해제(`admin_designation`)도 권한 변경 이력이다. 파트너의 예매자 명단 보기·내려받기 기록도 같은 저장소(`admin_data_access`)에 같은 조건(회차, `filter`, 시각)과 접속지와 함께 남긴다. core-svc가 Outbox 사건 `audit.data-accessed`로 보내고 ops-svc가 감사 체인과 한 트랜잭션에 쓴다(소유자 결정 2026-11-16 OPEN[43], ADR-0278, §2 '관리 계정 개인정보 열람·내려받기 기록'. 2026-11-16 W7-audit의 core `attendee_export_audit`은 더 쓰지 않는다) | 관리자 접속 기록은 최소 2년 이상, 관리자 권한 부여·회수 이력(지정·해제 포함)은 3년 이상 보존 |
 | 운영 명령 감사 기록 (`command_event`·`command_approval`: 명령 ID, 종류, 요청자·승인자의 가명 참조와 역할 이름(관리 계정 ID는 대응 표 `command_actor`에만, ADR-0149. 2026-10-30에 이 칸의 '관리 계정 ID'를 맞췄다, docs/features/control-tower.md §13), 사유, 재인증·서명, 시각, 자동 제어 조치·Degraded 전환) | ops 전용 Aurora의 불변 감사 저장소(키 건 해시 체인, 감사 앵커 버킷 S3 Object Lock 사본, ADR-0053·0075), 스토리지 레벨 암호화(P2) | 영구 보존한다(운영 제어 감사 로그, NFR-017). 기록의 요청자·승인자 칸은 처음부터 가명 참조와 역할 이름이고, 관리 계정 ID는 대응 표 `command_actor`에만 둔다. 대응 행은 3년 [가정] 뒤 지우고(삭제 보류가 걸린 행은 그 건이 끝날 때까지 둔다), 기록·체인·체크포인트는 고치지 않는다(추천 적용 2026-10-29, ADR-0149). 3년이 법에 맞는지는 확인 필요다(POL-027, 법률 검토 wbs 7.4.1) |
 | 감사 기록 잎 솔트(`audit_chain.leaf_salt`)와 공개 감사 체크포인트(`audit_checkpoint`) | 잎 솔트는 감사 저장소(스토리지 암호화)에만 둔다. 체크포인트에는 해시·번호·건수·시각·서명·공개 타임스탬프 증명만 담고, 공개 게시 버킷(S3 Object Lock 컴플라이언스 7년)에 게시한다(ADR-0075) | 잎 솔트는 그 감사 기록과 같은 보존 기간이 지나면 기록과 함께 파기한다. 체크포인트는 7년 보존한다 |
 | 주민등록번호, 신용카드 번호, 은행 계좌번호, 생체 인식 정보 | 주민등록번호·신용카드 번호·생체 인식 정보는 받지 않는다. 은행 계좌번호는 환불·배상·정산 때 받아 결제사·송금 요청에 바로 넘기고 저장하지 않는다(아래 '환불·배상·정산 계좌' 행). 결제사가 입금용으로 발급한 가상계좌 번호는 이용자의 계좌가 아니다. 이 번호는 아래 '가상계좌 입금 안내' 행을 따른다 | 일체 저장하지 않는다 |
@@ -2907,7 +2929,8 @@ erDiagram
 | 오픈 알림·취소표 알림 신청 (`notification_subscription`: 계정 ID, 회차, 종류, 밤 웹 푸시 여부, 보낸 횟수, 상태) | 스토리지 레벨 암호화(P2). 받는 주소는 두지 않는다. 수요 예측에는 회차별 구독 수만 넘긴다(계정 없음, ADR-0078) | 끄면 바로 지운다. 오픈 알림 신청은 그 회차의 오픈 시각(`open_at`)이 지나면 지우고, 끝난 취소표 알림 신청과 남은 신청은 그 회차의 공연 종료 예정 시각(`ends_at`)이 지나면 지운다. 회원이 탈퇴하면 바로 파기한다(추천 적용 2026-10-26, ADR-0089) |
 | 홀드 원장 (`seat_hold`: 회차, 좌석, 계정 ID, 펜싱 토큰, 상태, 만료 시각) | 스토리지 레벨 암호화(P2) | 회차 판매 종료 + 90일 [가정] 뒤 회차 범위 파티션째 지운다. 홀드 사건은 분석 브론즈에도 가명으로 90일 있다(자체 기준, 추천 적용 2026-10-22, ADR-0086). docs/security/data-classification.md '홀드 원장'·'좌석 홀드와 구매 세션의 Redis 키' 행에 법적 근거와 함께 더했다(추천 적용 2026-10-30, docs/security/internal-management-plan.md §2 제13호) |
 | 정산서(옛 판 포함)·지급 묶음·지급 건·미수금·미수금 이동 기록 | 스토리지 레벨 암호화(P2) | 전자상거래법 시행령 §6①3호의 대금결제 기록으로 5년 보존한다(ADR-0047) |
-| 관람 후기 (`review`: 작성 계정, 회차, 자격 근거 주문, 별점, 본문) | 스토리지 레벨 암호화(P2). 공개 응답에는 닉네임 첫 글자와 '**', 관람 회차 일시, 별점, 본문만 싣는다(추천 적용 2026-10-14, ADR-0063) | 작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비우고, 신고 기록이 가리키는 후기 ID·회차·상태·시각만 남긴다. 그 행도 신고 기록 보존이 끝나면 지운다(추천 적용 2026-10-22, ADR-0086). 통보에 따라 숨긴 후기의 법정 차단 조치 증적(`takedown_action`)은 3년 보존한다 |
+| 관람 후기 (`review`: 작성 계정, 회차, 자격 근거 주문, 별점, 본문) | 스토리지 레벨 암호화(P2). 공개 응답에는 닉네임 첫 글자와 '**', 관람 회차 일시, 별점, 본문만 싣는다(추천 적용 2026-10-14, ADR-0063) | 작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비우고, 신고 기록이 가리키는 후기 ID·회차·상태·시각만 남긴다(칸은 §2 '후기 파기'). 그 행도 신고 기록 보존이 끝나면 지운다(추천 적용 2026-10-22, ADR-0086). 회원 탈퇴는 탈퇴 사건을 받자마자 파기하고, 탈퇴 시각 + 15분 뒤 한 번 더 파기한다(탈퇴 전 토큰으로 그사이 쓴 후기, 소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, docs/features/identity.md §8 '후기 파기'). 통보에 따라 숨긴 후기의 법정 차단 조치 증적(`takedown_action`)은 3년 보존한다 |
+| 탈퇴 후기 다시 정리 예약 (`review_withdrawal_recheck`: 계정 ID, 예약 시각) | 스토리지 레벨 암호화(P2). pid·후기 내용은 두지 않는다 | 예약 시각(탈퇴 + 16분)에 다시 파기하면서 바로 지운다. 밀리면 `maintenance_retention_overdue_seconds{table="review_withdrawal_recheck"}`가 보이고 5일 [가정]을 넘으면 SEV2(docs/observability.md 운영 확인 '정비 잡' 행, 추천 적용 2026-11-16, W8-audit2a) |
 | 후기 사진 (`review_image`: 파생본 2종, 사진 설명) | 공개 데이터. 원본은 비공개 격리 위치에서 검사하고 다시 인코딩한 뒤 바로 지우며, 원본 키를 두지 않는다. 파생본은 메타데이터(촬영 위치 포함)를 지운 공개 정적 객체다(추천 적용 2026-10-19, ADR-0066). QR·바코드 자동 거르기는 두지 않는다(기술 검토 낮음-158) | 후기와 수명이 같다(후기를 지우면 함께 지우고, 가리면 함께 가린다). 붙이지 않은 사진은 24시간 [가정] 뒤 삭제한다 |
 | 게시물 신고 (`content_report`: 신고 계정, 사유, 자세한 내용, 권리 침해 본인 여부, 결과 받을 곳) | 스토리지 레벨 암호화(P2)를 쓰고, 로그에 내용 출력을 금지한다. 신고자는 글쓴이·다른 팬·파트너에게 보이지 않는다. 신고 처리 조치(`takedown_action`)에는 신고자 정보를 넣지 않는다 | 처리가 끝나고 1년 [가정] 뒤 파기한다(자체 기준, 추천 적용 2026-10-19, ADR-0066) |
 | 고객 문의 (`inquiry`·`inquiry_message`: 문의한 계정, 유형, 관련 주문, 제목, 내용, 추가 문의, 답변·진행 경과) | 스토리지 레벨 암호화(P2)를 쓰고, 로그에 내용 출력을 금지한다. 첨부 파일은 받지 않고, 민감한 내용과 계좌번호는 적지 않아도 된다고 화면에서 안내한다. 담당자 개인 식별자는 ops-svc 감사 기록에만 둔다 | 닫힌 뒤 3년이 지나면 자동 파기한다(전자상거래법 시행령 §6①4호의 소비자 불만·분쟁 처리 기록. 일반 문의까지 이 기록으로 보는 것은 해석, POL-027, 추천 적용 2026-10-19, ADR-0066) |

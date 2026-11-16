@@ -87,7 +87,7 @@ channels:
   identity.accounts-withdrawn:
     address: identity.accounts-withdrawn
     servers: [{ $ref: '#/servers/kafka-trade' }]
-    description: "탈퇴 사건(identity 발행, 키 = accountId). 계정을 탈퇴 처리하는 트랜잭션(docs/features/identity.md §8 '탈퇴의 첫 구현'의 첫 트랜잭션)이 계정을 잠근 뒤 읽은 본인확인 기록의 pid(pid 키 전환 기간이면 옛 pid도)를 실어, 세션 종료 사건 뒤 identity DB Outbox에 적는다. 본인확인을 하지 않은 계정은 pid가 없어 내지 않는다. 본인확인 기록을 지우는 둘째 트랜잭션이 실패해도 사건은 탈퇴 시각에 나간다. queue-svc가 서비스 소비자 그룹 하나로 받아, 진행 중인 회차(`q:{admission}:events`)마다 그 pid의 1인 1순번 키 `q:dup:{pid}:E`·`q:adm:{pid}:E`의 만료를 purgeBy(탈퇴 + 5일)로 당긴다(`PEXPIREAT … LT`라 이미 더 이른 키는 그대로, 다시 받아도 같다. docs/data.md §3, 표준 개인정보 보호지침 §10①). 값에 pid가 있어 보존을 짧게 둔다: retention.ms 3일·segment.ms 1일 [가정](한 레코드가 늦어도 약 4일 안에 지워진다). 소비가 3일 넘게 멈추면 그 사이 사건을 잃고 그 키는 판매 종료 TTL로만 지워진다(남는 한계. 소비 지연 경보가 막는다). 추천 적용 2026-11-04, BUILD_ORDER BOT-037. core-svc도 자기 소비자 그룹(`peaket.core-svc.<환경>`)으로 받아 accountId의 후기를 정리한다. pid·purgeBy는 읽지 않고 보류 기록에도 남기지 않는다(docs/features/identity.md §8 '후기 익명화', 추천 적용 2026-11-16, W7-audit COV2-06)"
+    description: "탈퇴 사건(identity 발행, 키 = accountId). 계정을 탈퇴 처리하는 트랜잭션(docs/features/identity.md §8 '탈퇴의 첫 구현'의 첫 트랜잭션)이 계정을 잠근 뒤 읽은 본인확인 기록의 pid(pid 키 전환 기간이면 옛 pid도)를 실어, 세션 종료 사건 뒤 identity DB Outbox에 적는다. 본인확인을 하지 않은 계정은 pid가 없어 내지 않는다. 본인확인 기록을 지우는 둘째 트랜잭션이 실패해도 사건은 탈퇴 시각에 나간다. queue-svc가 서비스 소비자 그룹 하나로 받아, 진행 중인 회차(`q:{admission}:events`)마다 그 pid의 1인 1순번 키 `q:dup:{pid}:E`·`q:adm:{pid}:E`의 만료를 purgeBy(탈퇴 + 5일)로 당긴다(`PEXPIREAT … LT`라 이미 더 이른 키는 그대로, 다시 받아도 같다. docs/data.md §3, 표준 개인정보 보호지침 §10①). 값에 pid가 있어 보존을 짧게 둔다: retention.ms 3일·segment.ms 1일 [가정](한 레코드가 늦어도 약 4일 안에 지워진다). 소비가 3일 넘게 멈추면 그 사이 사건을 잃고 그 키는 판매 종료 TTL로만 지워진다(남는 한계. 소비 지연 경보가 막는다). 추천 적용 2026-11-04, BUILD_ORDER BOT-037. core-svc도 자기 소비자 그룹(`peaket.core-svc.<환경>`)으로 받아 accountId의 후기를 파기하고, withdrawnAt + 16분에 한 번 더 파기한다(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278). pid·purgeBy는 읽지 않고 보류 기록에도 남기지 않는다(docs/features/identity.md §8 '후기 파기', 추천 적용 2026-11-16, W7-audit COV2-06·W8-audit2a)"
     messages:
       AccountWithdrawn: { $ref: '#/components/messages/AccountWithdrawn' }
   identity.login-methods-changed:
@@ -102,6 +102,12 @@ channels:
     description: CS 처리함 건 요청(core-svc support·review 모듈 Outbox와 queue-svc의 봇 판정 이의 제기, 키 = sourceId). 팬의 문의 접수·추가 문의와 게시물 신고, 추가 검증 화면(SCR-009)의 이의 제기를 ops-svc가 받아 CS 처리함 건을 만들거나 기존 건에 더한다. 본문·신고 상세·이의 글 같은 개인정보는 싣지 않고 ops-svc가 내부 API로 읽는다(이의 글은 queue-svc VerificationAppealService.GetVerificationAppeal, docs/api/proto/README.md §3). ops-svc는 팬 트래픽을 받지 않는다(추천 적용 2026-10-19, ADR-0066. 이의 제기는 추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)
     messages:
       CaseRequested: { $ref: '#/components/messages/CaseRequested' }
+  audit.data-accessed:
+    address: audit.data-accessed
+    servers: [{ $ref: '#/servers/kafka-trade' }]
+    description: "관리 계정(운영자·CS·파트너)의 개인정보 접근 기록 사건(키 = actorAccountId). 지금은 core-svc export 모듈이 파트너 예매자 명단 보기 한 페이지(LIST)와 내려받기 한 번(DOWNLOAD)마다, 명단·파일을 주기 전에 같은 트랜잭션의 core DB Outbox에 적는다(Outbox를 쓰지 못하면 명단·파일을 주지 않는다, docs/features/settlement.md §9). ops-svc가 서비스 소비자 그룹 peaket.ops-svc-data-access.<환경>으로 받아 감사 저장소 admin_data_access와 감사 체인에 한 트랜잭션으로 쓴다(docs/data.md §2 '관리 계정 개인정보 열람·내려받기 기록'). eventKey가 admin_data_access.id라 다시 받아도 한 행이다. 값에 접속지 IP 원문과 계정 ID가 있다(보존은 토픽 7일, docs/security/data-classification.md '관리자 시스템 접속기록'). BAS-030 전까지 값은 JSON 대역이다. 소유자 결정 2026-11-16 OPEN[43], ADR-0278, 세부는 추천 적용 2026-11-16, W8-audit2b"
+    messages:
+      DataAccessed: { $ref: '#/components/messages/DataAccessed' }
   ops.command-events:
     address: ops.command-events
     servers: [{ $ref: '#/servers/kafka-trade' }]
@@ -209,11 +215,13 @@ operations:
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
   consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(지금의 소유·상태 값만 대표 계정으로 바꾸고 사건·원장·법정 보존 기록은 고치지 않고 merged_account 대응표를 채움, mergeId로 멱등, docs/data.md §4의 9번, POL-034)" }
   publishAccountWithdrawn: { action: send, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "identity-svc Outbox(계정을 탈퇴 처리하는 트랜잭션, 세션 종료 사건 뒤) → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
-  consumeAccountWithdrawn: { action: receive, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "queue-svc(서비스 소비자 그룹 하나. 진행 중인 회차의 q:dup·q:adm 만료를 purgeBy로 당긴다, docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키'), core-svc review(그룹 peaket.core-svc.<환경>, 업무 키 accountId. 그 계정의 후기에서 계정·주문 참조를 끊는다. eventKey·accountId·withdrawnAt만 읽는다, docs/features/identity.md §8 '후기 익명화', 추천 적용 2026-11-16, W7-audit COV2-06)" }
+  consumeAccountWithdrawn: { action: receive, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "queue-svc(서비스 소비자 그룹 하나. 진행 중인 회차의 q:dup·q:adm 만료를 purgeBy로 당긴다, docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키'), core-svc review(그룹 peaket.core-svc.<환경>, 업무 키 accountId. 그 계정의 후기를 파기하고 같은 트랜잭션에 withdrawnAt + 16분의 다시 정리 예약을 쓴다. eventKey·accountId·withdrawnAt만 읽는다, docs/features/identity.md §8 '후기 파기', 소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, 추천 적용 2026-11-16, W7-audit COV2-06·W8-audit2a)" }
   publishLoginMethodChanged: { action: send, channel: { $ref: '#/channels/identity.login-methods-changed' }, summary: "identity-svc Outbox(로그인 수단을 잇거나 지운 트랜잭션) → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
   consumeLoginMethodChanged: { action: receive, channel: { $ref: '#/channels/identity.login-methods-changed' }, summary: "core-svc notify(그 계정의 알림 채널로 연결·해제 안내 한 번, I-T34)" }
   publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의, 소명 APPEAL. 소명은 추천 적용 2026-10-30)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
   consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
+  publishDataAccessed: { action: send, channel: { $ref: '#/channels/audit.data-accessed' }, summary: "core-svc export(파트너 예매자 명단 보기·내려받기와 같은 트랜잭션의 Outbox) → Outbox 릴레이(core-outbox-relay, 폴링, ADR-0116). 소유자 결정 2026-11-16 OPEN[43], ADR-0278" }
+  consumeDataAccessed: { action: receive, channel: { $ref: '#/channels/audit.data-accessed' }, summary: "ops-svc 감사(그룹 peaket.ops-svc-data-access.<환경>, 업무 키 eventKey. admin_data_access 행과 감사 체인 기록을 한 트랜잭션에, 같은 eventKey는 한 번만, 같은 eventKey에 다른 내용이나 칸이 빠진 사건은 보류, docs/streaming.md §2.6 'ops-svc 접근 기록 소비자')" }
   streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker(델타 묶음, 하트비트, 묶음 간격 변경)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }, { $ref: '#/channels/ws.seat-delta/messages/Heartbeat' }, { $ref: '#/channels/ws.seat-delta/messages/BatchInterval' }] }
   receiveSeatSubscription: { action: receive, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw(브라우저 Worker의 섹션 구독·해제)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SubscribeSections' }] }
   receiveSeatTimeSync: { action: receive, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw(브라우저 Worker의 시계 맞추기 요청. 바로 하트비트로 답한다, ADR-0110)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/TimeSync' }] }
@@ -454,6 +462,26 @@ components:
           followUp: { type: boolean, default: false, description: "추가 문의면 true(기존 건을 다시 처리 중으로)" }
           hold: { type: boolean, default: false, description: "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)" }
           createdAt: { type: string, format: date-time }
+    DataAccessed:
+      payload:
+        type: object
+        required: [eventKey, sourceService, actorAccountId, actorRole, action, targetKind, targetCount, sourceIp, occurredAt]
+        properties:
+          eventKey: { type: string, format: uuid, description: "중복 제거 키이자 ops admin_data_access.id. 명단 보기는 새 UUIDv7, 내려받기는 그 내보내기 ID(core attendee_export.id)" }
+          sourceService: { type: string, description: "기록을 낸 서비스 이름(지금은 core-svc)" }
+          actorAccountId: { type: string, format: uuid, description: "접근한 관리 계정(파트너 계정 포함). 표시 이름은 싣지 않는다" }
+          actorRole: { type: string, description: "그때의 역할(예 partner_admin)" }
+          action: { type: string, enum: [LIST, DOWNLOAD], description: "LIST는 명단 보기 한 페이지, DOWNLOAD는 명단 내려받기 한 번" }
+          targetKind: { type: string, enum: [ATTENDEE_LIST], description: "접근한 개인정보의 종류. ATTENDEE_LIST는 파트너 예매자 명단" }
+          promoterId: { x-present-when: [{ targetKind: [ATTENDEE_LIST] }], type: string, format: uuid, description: "명단의 파트너" }
+          eventId: { x-present-when: [{ targetKind: [ATTENDEE_LIST] }], type: string, format: uuid, description: "명단의 회차(명단 재현 조건 ①)" }
+          pageLimit: { x-present-when: [{ action: [LIST] }], type: integer, minimum: 1, description: "명단 보기 요청의 limit(명단 재현 조건 ②)" }
+          cursor: { type: string, description: "명단 보기 요청이 받은 cursor 원문. 받은 커서가 있을 때만 싣는다(명단 재현 조건 ②)" }
+          reason: { x-present-when: [{ action: [DOWNLOAD] }], type: string, minLength: 1, description: "내려받기 사유(먼저 적어야 내려받는다)" }
+          format: { x-present-when: [{ action: [DOWNLOAD] }], type: string, enum: [CSV, XLSX, PDF], description: "내려받은 파일 형식" }
+          targetCount: { type: integer, minimum: 0, description: "보기는 그 페이지에 보인 행 수, 내려받기는 파일의 행 수" }
+          sourceIp: { type: string, minLength: 2, maxLength: 45, description: "접속지 정보: 요청의 클라이언트 IP 원문(IPv4 또는 IPv6, docs/features/settlement.md §9 '접속지'). 받는 쪽이 IP 모양인지 다시 본다" }
+          occurredAt: { type: string, format: date-time, description: "접근한 시각(명단 재현 조건 ③)" }
     OpsCommandRequested:
       payload:
         type: object
