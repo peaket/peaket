@@ -150,14 +150,15 @@ export class CancelFraudTickets {
       }
     }
 
-    if (fresh.size > 0) {
-      await this.o.store.saveResults(
-        i.approvalId,
-        i.targets.filter((t) => fresh.has(t.ticketId)).map((t) => ({ ...fresh.get(t.ticketId)!, expectedHolderAccountId: t.expectedHolderAccountId })),
-        i.nowMs,
-      );
-    }
-    return i.targets.map((t) => fresh.get(t.ticketId) ?? stored.get(t.ticketId) ?? failed(t.ticketId, 'INTERNAL'));
+    if (fresh.size === 0) return i.targets.map((t) => stored.get(t.ticketId) ?? failed(t.ticketId, 'INTERNAL'));
+    // 저장소는 행이 없거나 FAILED일 때만 쓴다(겹친 호출의 늦은 실패가 먼저 끝난 결과를 덮지 못한다). 답은 저장한 뒤 다시 읽은 결과다(리뷰 B5)
+    await this.o.store.saveResults(
+      i.approvalId,
+      i.targets.filter((t) => fresh.has(t.ticketId)).map((t) => ({ ...fresh.get(t.ticketId)!, expectedHolderAccountId: t.expectedHolderAccountId })),
+      i.nowMs,
+    );
+    const saved = new Map((await this.o.store.results(i.approvalId)).map((r) => [r.ticketId, r]));
+    return i.targets.map((t) => saved.get(t.ticketId) ?? fresh.get(t.ticketId) ?? stored.get(t.ticketId) ?? failed(t.ticketId, 'INTERNAL'));
   }
 
   /** ticket-svc 답 하나의 나머지 단계: 건너뜀은 그대로, 취소한 표는 좌석 되돌리기 → 공제 없는 취소 행(REFUND_PENDING) */

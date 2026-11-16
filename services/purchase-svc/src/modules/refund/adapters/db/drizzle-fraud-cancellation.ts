@@ -1,5 +1,5 @@
 // 부정 예매 운영자 취소의 purchase DB 저장소(0022 fraud_cancellation_request·fraud_cancellation_ticket, docs/data.md, BUILD_ORDER GAT-080).
-// 요청 기록은 승인 ID 기본 키의 INSERT 경합으로 한 번만 만들고(겹친 호출은 EXISTS와 먼저 쓴 기록), 표별 결과는 (승인, 표)로 덮어 쓴다.
+// 요청 기록은 승인 ID 기본 키의 INSERT 경합으로 한 번만 만들고(겹친 호출은 EXISTS와 먼저 쓴 기록), 표별 결과는 (승인, 표)로 쓰되 행이 없거나 FAILED일 때만 바꾼다.
 // 환급 진행은 받은 표의 order_cancellation 상태를 읽는다(REFUNDED → REFUNDED·status_changed_at, refund_failed_at 있음·VOIDED → NEEDS_CS, 그 밖 PENDING).
 import type { Database } from '@peaket/platform';
 import { asc, eq, sql } from 'drizzle-orm';
@@ -82,6 +82,7 @@ export class DrizzleFraudCancellationStore implements FraudCancellationStore {
     return rows.map(resultOf);
   }
 
+  /** (승인, 표)마다 쓴다. 이미 있는 행은 FAILED일 때만 바꾼다(늦게 온 실패가 끝난 결과를 덮지 못한다) */
   async saveResults(approvalId: string, results: readonly (FraudTicketResult & { readonly expectedHolderAccountId: string })[], nowMs: number): Promise<void> {
     if (results.length === 0) return;
     const now = new Date(nowMs);
@@ -110,6 +111,8 @@ export class DrizzleFraudCancellationStore implements FraudCancellationStore {
           failureCode: sql`excluded.failure_code`,
           updatedAt: sql`excluded.updated_at`,
         },
+        // 끝난 결과(ACCEPTED·SKIPPED_*)는 덮어 쓰지 않는다. FAILED 행만 바꾼다(리뷰 B5, docs/features/transfer-refund.md §7.4 '결과 저장')
+        setWhere: sql`${fraudCancellationTicket.outcome} = 'FAILED'`,
       });
   }
 
