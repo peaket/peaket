@@ -162,6 +162,13 @@
       "when": 1794796493332,
       "tag": "0022_fraud_cancellation",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794805260837,
+      "tag": "0023_entry_recorded_at",
+      "breakpoints": true
     }
   ]
 }

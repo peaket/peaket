@@ -112,6 +112,11 @@ export const orderCancellation = pgTable(
     refundLastError: text('refund_last_error'),
     createdAt: at('created_at').notNull(),
     statusChangedAt: at('status_changed_at').notNull(),
+    /**
+     * 마감 뒤 환급 전 입장 기록 대조에서 들어감·통과 스캔이 나온 가장 이른 시각(REQUESTED만, 0023, BAT-420 GAT-090, P-T19 ①).
+     * 쓸 때 refund_due_at을 비워 실행기가 더 집지 않는다. 그 건은 CS 처리함 '이상 표시'가 처리한다
+     */
+    entryRecordedAt: at('entry_recorded_at'),
   },
   (t) => [
     uniqueIndex('order_cancellation_active_key')
