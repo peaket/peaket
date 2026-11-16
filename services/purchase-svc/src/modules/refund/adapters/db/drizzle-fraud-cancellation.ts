@@ -82,7 +82,7 @@ export class DrizzleFraudCancellationStore implements FraudCancellationStore {
     return rows.map(resultOf);
   }
 
-  /** (승인, 표)마다 쓴다. 이미 있는 행은 FAILED일 때만 바꾼다(늦게 온 실패가 끝난 결과를 덮지 못한다) */
+  /** (승인, 표)마다 쓴다. 이미 있는 행은 FAILED일 때만 바꾸고, 티켓 단계 뒤 까닭은 모르는 까닭(TICKET_UNAVAILABLE·INTERNAL)이 덮지 못한다 */
   async saveResults(approvalId: string, results: readonly (FraudTicketResult & { readonly expectedHolderAccountId: string })[], nowMs: number): Promise<void> {
     if (results.length === 0) return;
     const now = new Date(nowMs);
@@ -111,8 +111,11 @@ export class DrizzleFraudCancellationStore implements FraudCancellationStore {
           failureCode: sql`excluded.failure_code`,
           updatedAt: sql`excluded.updated_at`,
         },
-        // 끝난 결과(ACCEPTED·SKIPPED_*)는 덮어 쓰지 않는다. FAILED 행만 바꾼다(리뷰 B5, docs/features/transfer-refund.md §7.4 '결과 저장')
-        setWhere: sql`${fraudCancellationTicket.outcome} = 'FAILED'`,
+        // 끝난 결과(ACCEPTED·SKIPPED_*)는 덮어 쓰지 않는다. FAILED 행만 바꾼다(리뷰 B5, docs/features/transfer-refund.md §7.4 '결과 저장').
+        // FAILED끼리는 티켓 단계 뒤 까닭(키는 이미 폐기됨)을 티켓 단계가 됐는지 모르는 까닭으로 바꾸지 않는다(다시 보기 R2)
+        setWhere: sql`${fraudCancellationTicket.outcome} = 'FAILED' and not (
+          ${fraudCancellationTicket.failureCode} in ('SEAT_RETURN_FAILED', 'CANCELLATION_CONFLICT', 'ORDER_STATE')
+          and excluded.outcome = 'FAILED' and excluded.failure_code in ('TICKET_UNAVAILABLE', 'INTERNAL'))`,
       });
   }
 

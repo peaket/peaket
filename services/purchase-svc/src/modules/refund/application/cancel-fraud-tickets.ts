@@ -150,6 +150,11 @@ export class CancelFraudTickets {
       }
     }
 
+    // FAILED끼리는 티켓 단계 뒤 까닭을 티켓 단계가 됐는지 모르는 까닭(TICKET_UNAVAILABLE·INTERNAL)으로 바꾸지 않는다(다시 보기 R2, 저장소 문장도 같은 조건)
+    for (const [ticketId, r] of fresh) {
+      const kept = afterTicketFailure(ticketId);
+      if (kept !== undefined && r.outcome === 'FAILED' && (r.failureCode === 'TICKET_UNAVAILABLE' || r.failureCode === 'INTERNAL')) fresh.set(ticketId, stored.get(ticketId)!);
+    }
     if (fresh.size === 0) return i.targets.map((t) => stored.get(t.ticketId) ?? failed(t.ticketId, 'INTERNAL'));
     // 저장소는 행이 없거나 FAILED일 때만 쓴다(겹친 호출의 늦은 실패가 먼저 끝난 결과를 덮지 못한다). 답은 저장한 뒤 다시 읽은 결과다(리뷰 B5)
     await this.o.store.saveResults(
