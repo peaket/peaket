@@ -164,9 +164,11 @@ export function presaleNotice(i: { fan: FanEligibilityState; sellerName: string;
   if (!first) return null;
   const lists = i.fan.lists;
   const names = lists.map((l) => l.name).join(' · ') || '판매 자격';
+  // 첫 글의 '{명단} 선예매 대상입니다': 이름에 '선예매'가 이미 있으면 그대로, 없으면 ' 선예매'를 붙인다(d5 §5.2 '선예매 대상' 예, 브라우저 확인 BC040-1 뒤)
+  const leadNames = (lists.length ? lists.map((l) => l.name) : ['판매 자격']).map((n) => (n.includes('선예매') ? n : `${n} 선예매`)).join(' · ');
   const from = i.sellerName ? `판매자(${i.sellerName})가` : '판매자가';
   return {
-    lead: `${names} 선예매 대상입니다. ${dateTimeText(first.startsAtMs)}부터 1인 ${first.limit}매까지 예매할 수 있습니다`,
+    lead: `${leadNames} 대상입니다. ${dateTimeText(first.startsAtMs)}부터 1인 ${first.limit}매까지 예매할 수 있습니다`,
     notice: `${from} 보낸 ${names} 명단에 회원님이 있습니다. 이 명단은 선예매 자격 확인에만 쓰고, 이 공연의 판매 기간이 끝나고 1일 뒤${destroyDateText(lists)} 지웁니다`,
   };
 }
