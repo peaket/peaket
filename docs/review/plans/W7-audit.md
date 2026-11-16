@@ -595,3 +595,109 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 | N1 | 낮음(확인 필요) | `services/core-svc/src/modules/export/inbound/client-ip.ts` 8~13줄 | 한 값짜리 `x-forwarded-for`를 그대로 믿는다. 정본 입구 규칙(infra.md §3 규칙 2: 입구가 받은 `x-forwarded-` 머리를 지우고 클라이언트 IP 하나로 다시 쓴다)과 identity-svc 관리 계정 로그인 규칙에 맞으므로 결함은 아니다. 다만 입구를 거치지 않고 core-svc 앱 포트에 닿는 클러스터 안 호출이 있다면 접속지를 꾸밀 수 있다. 또 머리가 없거나 틀리면 연결 상대 주소(운영에서는 입구 파드 주소)가 조용히 남는다. 정본이 정한 대체 동작이지만 접속기록 값으로는 클라이언트 IP가 아니다 | settlement.md §9 '접속지', infra.md §3 규칙 2 | plan | 정리 목록 후보. core-svc 앱 포트 NetworkPolicy가 입구만 받는지 확인하고, 운영에서 대체 주소가 쓰이면 경고를 남길지 정한다 |
 
 - **결론**: 다시 볼 지적 넷(R2·R3·R5·R6)은 모두 고쳐졌다. 새 지적은 낮음 1(N1, 확인 필요)이고, 이번에 고칠 것(높음·보안·통과 기준)은 없다. R1·R4·R7은 처음 리뷰대로 정리 목록 후보로 남는다.
+
+## 검증
+
+- **누가·언제**: 검증 담당(세션 `l3w7-audit-verify`, 모델 claude-opus-5-5), 2026-11-16. 계획·시험·구현·리뷰에 관여하지 않았다. 본 것: 지시서, 이 파일의 `## 계획`·`## 실패 확인`, `git diff 853758eb..3087ad85`(drizzle 스냅숏 제외), 정본 판정 기준(settlement.md §13 J-T26, architecture.md §3.2 'REST' 행, asvs/settlement 11.2.4). 그 뒤 커밋(`2ed48686`·`5fc9d56f`)은 리뷰 문서만 바꿔 제품 코드는 `3087ad85`와 같다.
+- **방법**: 제품 코드(또는 마이그레이션)를 한 군데 틀리게 바꾸고, 닿는 단위 시험 파일을 돌리고(패키지 폴더에서 `npx vitest run <파일들>`), 실패 여부를 적고, `git checkout -- <파일>`로 되돌렸다. 시험 파일은 바꾸지 않았다. 돌린 묶음은 셋이다.
+  - 명단 묶음(core-svc, 시험 53개): `test/export-paging-limit.test.ts test/export-paging.test.ts test/http-attendee-source.test.ts test/export-attendee-source.test.ts test/export-audit.test.ts test/export.test.ts test/client-ip.test.ts test/export-reauth.test.ts test/export-reauth-cases.test.ts`
+  - 후기 묶음(core-svc, 시험 31개): `test/review-withdrawn.test.ts test/core-consumers.test.ts test/review-grants.test.ts test/review.test.ts test/review.http.test.ts`
+  - 토큰 묶음: core-svc `test/internal-sale-config-token-boot.test.ts`(4개). 플랫폼 변이는 packages/platform `test/internal-token-constant-time.test.ts test/internal-token.test.ts test/internal-token-boot.test.ts`(7개)도 돌렸다.
+- 변이를 넣기 전 같은 묶음은 모두 통과했다. 끝난 뒤 `git status --short`·`git diff`에 제품 코드 변경이 없다(다른 리뷰 담당의 미추적 문서 하나만 있다).
+
+### 넣은 틀린 구현(Docker 없음)
+
+| 번호 | 파일:줄 | 바꾼 것 | 돌린 시험 | 결과(잡은 시험) |
+| --- | --- | --- | --- | --- |
+| M01 | core `export/application/attendee-exports.ts:184` | 내려받기가 짧은 페이지(`items < 1,000`)에서 멈춘다(계획 A2-17 표본 1) | 명단 묶음 | 잡힘(J-T26 ④ 999건 짧은 페이지, ④ 0건 페이지) |
+| M02 | core `export/adapters/http-attendee-source.ts:63` | 원천 `nextCursor`를 버리고 늘 null(표본 2) | 명단 묶음 | 잡힘(A2-17 HttpAttendeeSource는 원천의 nextCursor를 넘기고…) |
+| M03 | `attendee-exports.ts:122` | 보기 응답 커서를 `items.length === limit`일 때만 준다(표본 3) | 명단 묶음 | 잡힘(J-T26 ④ 보기 커서 단위·HTTP 둘) |
+| M04 | `attendee-exports.ts:186` | 같은 커서면 조용히 끝내고 COMPLETED(표본 4) | 명단 묶음 | 잡힘(J-T26 ④ 같은 커서 503) |
+| M05 | `http-attendee-source.ts:22` | 원천 `nextCursor` 모양이 틀리면 null로 본다(`.catch(null)`, fail-open) | 명단 묶음 | 잡힘(A2-17 응답 모양이 틀리면 실패한다) |
+| M06 | core `shop/adapters/memory-merch-store.ts:38` | 메모리 원천이 남은 수가 정확히 `limit`이어도 커서를 준다(`>`를 `>=`로) | 명단 묶음 | 잡힘(A2-17 메모리 명단 원천은 다음 주문이 있을 때만…) |
+| M07 | `attendee-exports.ts:100` | 명단 보기가 `recordView`를 부르지 않는다(A2-19 표본 1a) | 명단 묶음 | 잡힘(⑤ 시험 다섯) |
+| M08 | `attendee-exports.ts:100` | `recordView` 오류를 삼키고 명단을 준다(표본 1b) | 명단 묶음 | 잡힘(⑤ 접속기록을 남기지 못하면…) |
+| M09 | `attendee-exports.ts:106` | LIST `count`에 합계 `totals.bookings`(표본 3b) | 명단 묶음 | 잡힘(⑤ 행위자·보인 건수·조건) |
+| M10 | `attendee-exports.ts:108` | 커서가 없어도 `filter.cursor` 키(undefined)를 둔다 | 명단 묶음 | 잡힘(⑤ 단위·HTTP) |
+| M11 | `attendee-exports.ts:58` | 행위자 `accountId`가 빈 문자열이어도 통과 | 명단 묶음 | 잡힘(⑤ 행위자 없이 부르면…) |
+| M12 | core `export/inbound/partner-attendee-export.controller.ts:43` | 보기 행위자로 `tenantOf(me)`(파트너 ID)를 넘긴다(표본 3a) | 명단 묶음 | 잡힘(⑤ GET …/attendees는 로그인 주체를…) |
+| M13 | core `export/domain/export.ts:77` | 접속기록 보존 끝 `+ 730일`(표본 4) | 명단 묶음 | 잡힘(⑤ 보존 끝은 만든 때 + 2년) |
+| M14 | core `export/adapters/db/drizzle-export-store.ts:31·43` | 이력을 따로 트랜잭션으로 먼저 커밋(트랜잭션 둘, 표본 2) | 명단 묶음 | 잡힘(⑥ Drizzle recordExport는 두 행을 한 트랜잭션에) |
+| M15 | core `migrations/0021_attendee_access_audit_list.sql:11` | LIST 모양 CHECK에서 `reason is null`을 뺀다 | 명단 묶음 | 잡힘(A2-19 0021 원문 시험) |
+| M16 | `partner-attendee-export.controller.ts:43` | 보기 접속지를 `x-forwarded-for` 없이 연결 주소로만(R2 표본 1) | 명단 묶음 | 잡힘(R2 ⑤ HTTP 접속지) |
+| M17 | `attendee-exports.ts:61` | 접속지가 IP 모양이 아니어도(빈 문자열 포함) 통과(R2 표본 2) | 명단 묶음 | 잡힘(R2 ⑤ 접속지를 정하지 못하면…) |
+| M18 | `drizzle-export-store.ts:60` | DOWNLOAD 넣기 값에서 `sourceIp`를 뺀다(R2 표본 3) | 명단 묶음 | 잡힘(R2 Drizzle 넣기 값에 source_ip) |
+| M19 | core `export/adapters/memory-export-store.ts:15`, `export.ts:46` | 이력 행에 접속지를 붙이고 `exportView`가 행 전체를 펼친다(R2 표본 4) | 명단 묶음 | 잡힘(R2 ⑥ 단위·HTTP) |
+| M20 | core `export/inbound/client-ip.ts:11` | IP 모양 검사 없이 `x-forwarded-for`를 믿는다 | 명단 묶음 | 잡힘(R2 clientIpOf, R2 ⑤ HTTP) |
+| M21 | core `catalog/inbound/internal-sale-config.controller.ts:57` | `InternalToken401Guard`에 빈 `onModuleInit()`(R628V M1, 표본 1) | 토큰 묶음 | 잡힘(SEC-06R ①) |
+| M22 | platform `src/auth.ts:93` | `sameSecret`을 `a === b`로(R628V M3, 표본 2) | 토큰 묶음, 플랫폼 | 잡힘(SEC-06R ④⑤) |
+| M23 | `internal-sale-config.controller.ts:58` | 하위 가드가 `super` 없이 `!==`로 직접 비교(표본 3) | 토큰 묶음 | 잡힘(SEC-06R ④) |
+| M24 | `internal-sale-config.controller.ts:52` | 하위 가드 생성자에서 `@Inject(INTERNAL_TOKEN_REQUIRED)`만 뺀다(표본 4 글 그대로) | 토큰 묶음 | 살아남음. **동등 변이**(아래) |
+| M24b | `internal-sale-config.controller.ts:54` | 받은 `required`를 버리고 `super(expected, false)`(표본 4의 뜻) | 토큰 묶음 | 잡힘(SEC-06R ①) |
+| M25 | platform `src/auth.ts:92` | `sameSecret`의 길이 검사를 뺀다 | 토큰 묶음, 플랫폼 | 잡힘(SEC-06R ③④⑤와 기존 플랫폼 시험 넷) |
+| M40 | `internal-sale-config.controller.ts:57` | 하위 가드가 local·ci에서도 토큰이 없으면 시작을 막는다 | 토큰 묶음 | 잡힘(SEC-06R ②) |
+| M26 | core `review/inbound/account-withdrawn.handler.ts:76` | `handle`이 `eventKey`를 계정 ID 자리에 넘긴다(COV2-06 표본 1) | 후기 묶음 | 잡힘(COV2-06 ①②) |
+| M27 | core `consumers/index.ts:10` | `CORE_TOPICS`에서 탈퇴 토픽을 뺀다(표본 2a) | 후기 묶음 | 잡힘(COV2-06 ⑧) |
+| M28 | core `main.ts:117` | 소비자를 실제로 켜지 않는다(`consumers = undefined && startCoreConsumers({…})`, 부르는 글은 남김, 표본 2b) | 후기 묶음 | **살아남음** |
+| M29 | `consumers/index.ts:65` | 보류 감싸기 `hold`가 값을 그대로 넘긴다(표본 3) | 후기 묶음 | 잡힘(COV2-06 ⑥) |
+| M30 | `consumers/index.ts:15` | `demo`에서도 브로커 없이 꺼진 설정으로 뜬다(표본 4, fail-open) | 후기 묶음 | 잡힘(COV2-06 ⑦) |
+| M31 | `consumers/index.ts:49` | 해독 못 한 보류 값을 원래 바이트로 남긴다 | 후기 묶음 | 잡힘(COV2-06 ⑥) |
+| M32 | `main.ts:122` | 소비자에 `partnerDatabase`(core_partner)를 넘긴다(리뷰 R5) | 후기 묶음 | 잡힘(COV2-06 ⑩ R5) |
+| M33 | `main.ts:143` | SIGTERM에서 소비자 멈춤을 기다리지 않는다(`await`를 `void`로) | 후기 묶음 | **살아남음** |
+| M34 | core `migrations/0022_review_role_grants.sql:7` | `review`에 칸 없는 `UPDATE`와 `DELETE`(표본 5) | 후기 묶음 | 잡힘(COV2-06 ⑬) |
+| M35 | `0022_review_role_grants.sql:27` | `core_maintenance`의 `held_event` 줄을 뺀다(표본 6) | 후기 묶음 | 잡힘(COV2-06 ⑬) |
+| M36 | `attendee-exports.ts:92` | 명단을 보이지 않은 요청(404·410)도 LIST 접속기록을 남긴다 | 명단 묶음 | 잡힘(⑤ 명단을 보이지 않은 요청은…) |
+| M37 | core `review/inbound/internal-review.controller.ts:12` | 내부 익명화 경로에서 토큰 가드를 뺀다 | 후기 묶음 | 잡힘(COV2-06 ⑨) |
+| M38 | `internal-review.controller.ts:21` | 바꾼 건수 대신 늘 `{ anonymized: 1 }` | 후기 묶음 | 잡힘(COV2-06 ⑨) |
+| M39 | core `review/adapters/memory-review-store.ts:150` | 익명화가 주문 참조(`basisOrderId`)를 남긴다 | 후기 묶음 | 잡힘(COV2-06 ①) |
+
+- **합계**: 넣은 수 41. 계획 표본 22개를 모두 넣었고, 꼭 넣을 항목은 개인정보 접속기록(M07~M13·M16~M20·M36), 탈퇴 익명화(M26~M39), 내부 토큰 인증(M21~M25·M24b·M40: 시작 차단·상수 시간 비교), 최소 권한(M34·M35), 정확한 커서(M01~M06)다. 동등 변이 1(M24)을 뺀 40개 가운데 **잡힘 38, 살아남음 2(M28, M33)**. 목표 20~30개보다 많은 것은 '처음부터 통과' 시험마다 실패를 한 번 보려고 M36~M40을 더했기 때문이다.
+- **M24를 동등 변이로 본 까닭**: `@Inject(INTERNAL_TOKEN_REQUIRED)`만 빼도 가드에 `required`가 `true`로 들어왔다. 시험 ①을 돌리면서 `required !== true`이면 던지게 한 확인용 변이를 같이 넣었는데 던지지 않았다. Nest가 부모 `InternalTokenGuard`의 주입 정보를 이어 쓰는 것으로 보인다. 행동이 같으므로 시험 공백이 아니다. 표본 4의 뜻(`required`가 늘 false)은 M24b로 넣었고 ①이 잡았다.
+- **'처음부터 통과' 시험이 실패를 본 곳**: A2-19 ⑤ 404·410(M36), COV2-06 ⑨(M37·M38), SEC-06R ①(M21·M24b)·②(M40)·③(M25)·④(M22·M23·M25)·⑤(M22·M25), COV2-06 ⑩ R5(M32), ⑬ R6(M34·M35). 남은 하나는 purchase 통합 시험 `A2-17 J-T26 ④ purchase 명단 원천은 SOLD 좌석이 없는 주문을 걸러도…`이고, 아래 D12로 본다.
+
+### 살아남은 것: 시험 담당에게 넘김
+
+| 번호 | 무엇이 새나 | 시험 담당에게 넘김: 무엇을 단언해야 하나 |
+| --- | --- | --- |
+| M28 | `COV2-06 ⑩`은 `main.ts` 글에서 `startCoreConsumers(`가 `service.listen()` 뒤에 있는지만 본다. 부르는 줄이 실제로 돌지 않아도(조건으로 막은 꼴) 통과하고, ⑫는 시험이 스스로 `startCoreConsumers`를 불러 `main.ts` 조립을 보지 않는다. 운영에서 탈퇴 사건이 조용히 익명화되지 않는 결함이다(계획 표본 2b, '자주 놓친 결함'의 시작 파일 조립) | `main.ts`를 시험 조립과 따로 띄워서 본다. 예: `PEAKET_ENV=ci`, 닿지 않는 브로커 `PEAKET_KAFKA_BROKERS=127.0.0.1:1`로 `main.ts`(또는 빌드한 `dist/main.js`)를 띄우면 소비자를 켜려다 실패해 'Kafka 소비자를 켜지 못해 core-svc를 끝낸다' 한 줄과 종료 코드 1로 끝나는지 단언한다(소비자를 켜지 않으면 계속 떠 있어 실패한다). 원문 대조로 남긴다면 적어도 `startCoreConsumers({`가 조건 없이 `consumers =`에 바로 대입되는 문장인지(앞에 `&&`·`?`·`if`가 없는지) 본다 |
+| M33 | SIGTERM 차례 검사는 `consumers?.stop(`이 `service.close(`보다 글에서 앞에 있는지만 본다. `await`가 빠져 소비자가 처리 중인 키를 마치고 커밋하기 전에 DB 연결이 닫혀도 통과한다(계획 §4 '소비자를 먼저 멈춘 뒤 서비스를 닫는다') | 종료 함수가 소비자 `stop()`이 **끝난 뒤에** `service.close()`와 DB 닫기를 부르는지 본다. 원문 대조라면 `await consumers?.stop(`(또는 `stop()`의 약속을 기다리는 꼴)을 단언한다. 동작 시험이라면 늦게 끝나는 `stop()`을 가진 가짜 소비자를 넣고 그 사이 `database.close`가 불리지 않음을 단언한다(지금 `main.ts`는 바로 실행되는 파일이라 종료 함수를 떼어 내보내야 할 수 있고, 그러면 구현 담당 몫이 생긴다) |
+
+### Docker 대기 목록(돌리지 않음)
+
+DB·Kafka가 있어야 잡히거나, 단위 원문 시험과 따로 실제 DB가 잡는지 볼 변이다. 감독이 도커 잠금을 잡은 뒤 돌린다. 먼저 바꾸지 않은 상태로 아래 명령을 한 번 돌려 구현 뒤 기준선 통과(리뷰 '검증 담당에게 넘길 것')를 본 다음 변이를 하나씩 넣는다. 변이 목록과 실행 도구는 검증 담당 작업 폴더(저장소 밖)의 `mut/docker-mutants.mjs`·`mut/run-docker.mjs`에 있다.
+
+| 번호 | 파일:줄 | 바꾼 것 | 돌릴 통합 시험(패키지 폴더) |
+| --- | --- | --- | --- |
+| D01 | core `migrations/0021_attendee_access_audit_list.sql:11` | LIST 모양 CHECK에서 `reason is null`을 뺀다(단위 M15와 같음) | core-svc `test-int/export-audit.int.test.ts`(⑤⑥ 23514) |
+| D02 | `0021_attendee_access_audit_list.sql:13` | `source_ip` NOT NULL CHECK 줄을 뺀다 | 같은 파일(R2 접속지 없는 새 행 23514) |
+| D03 | core `export/adapters/db/schema.ts:53` | `inet('source_ip')`를 `inet('client_ip')`로(가짜 db는 칸 이름을 못 본다) | 같은 파일 |
+| D04 | core `export/adapters/db/drizzle-export-store.ts:31·43` | 이력을 따로 트랜잭션으로 먼저 커밋(단위 M14와 같음) | 같은 파일(⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다) |
+| D05 | core `migrations/0022_review_role_grants.sql:7` | `core_app`의 review UPDATE 칸에서 `account_id`·`basis_order_id`를 뺀다 | core-svc `test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(⑪⑫) |
+| D06 | `0022_review_role_grants.sql:22` | `core_maintenance`의 review UPDATE 칸에서 `updated_at`을 뺀다 | core-svc `test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts`(⑯) |
+| D07 | `0022_review_role_grants.sql:19` | `core_app`의 `held_event` INSERT를 뺀다 | core-svc `test-int/review-withdrawn-consumer.int.test.ts`(⑫ 보류) |
+| D08 | `0022_review_role_grants.sql:7` | `review`에 칸 없는 UPDATE·DELETE(단위 M34와 같음) | D06과 같은 셋(⑮) |
+| D09 | core `review/adapters/db/drizzle-review-store.ts:257` | 익명화 `where`가 계정 조건 없이 모든 계정 행을 바꾼다 | D06과 같은 셋(⑪ B 행 그대로) |
+| D10 | core `consumers/start.ts:43` | 보류 저장소를 `pidFreeHeldEventStore` 없이 건다 | core-svc `test-int/review-withdrawn-consumer.int.test.ts`(⑫ pid 없음) |
+| D11 | `consumers/start.ts:40` | 소비자 그룹을 `core-svc.<환경>`으로 | 같은 파일(⑫ 그룹 커밋) |
+| D12 | purchase `booking/adapters/db/drizzle-attendee-reader.ts:69` | 걸러 낸 뒤 남은 행 기준으로 커서를 만든다(SOLD 없는 주문만 든 페이지는 커서 null) | purchase-svc `test-int/attendee-reader.int.test.ts`('처음부터 통과' 시험의 실패 보기) |
+
+- 돌릴 통합 시험(각 패키지 폴더): core-svc `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`, purchase-svc `npx vitest run --config vitest.integration.config.mjs test-int/attendee-reader.int.test.ts`. 변이마다 돌릴 때는 표의 파일만 준다. 끝나면 자기가 띄운 시험 컨테이너를 `docker rm -f -v`로 지운다.
+
+### 판정 기준 대조(이름만 달린 시험 찾기)
+
+| 시험 ID | 정본 판정 기준(요지) | 그 ID를 단 시험의 단언 | 판정 |
+| --- | --- | --- | --- |
+| J-T26 ① | 사유가 없으면 거절, 사유를 넣으면 건수와 함께 접속기록에 남는다 | `J-T26 ①`: 사유 없음 400·빈칸 422, 성공 뒤 이력의 `reason`·`count 2`, `audits.at(-1)`의 사유·건수 | 맞음 |
+| J-T26 ② | 스트리밍으로 보내고, 내려받는 동안 RSS 증가 100MB 이하, 첫 바이트 2초 안 | `J-T26 ② XLSX는 ZIP 머리로 시작하고 파일 이름이 붙는다`: 형식·파일 이름만 본다. RSS·첫 바이트 단언이 없다 | **이름만 달린 시험(기존, BAT-610)**. 계획 §1이 '② 스트리밍은 그대로'로 범위 밖에 둔 것과 같다. 장부가 ②를 이 시험으로 채운 것으로 읽지 않게 기록 담당이 notes를 확인한다 |
+| J-T26 ③ | 410과 보유 기간 끝 안내 | `J-T26 ③`: 410과 `retention-ended` 형식 | 맞음(안내 문구는 화면 몫) |
+| J-T26 ④ | 2,000건을 모두 싣고 `nextCursor` null에서만 멈춤, 보기 커서는 원천 값 그대로(짧은 페이지에서 null 아님, 정확히 `limit`건인 마지막에서 null), 같은 커서면 503·이력 없음 | export-paging-limit 다섯, export.test HTTP 하나, http-attendee-source 둘, 메모리 원천 하나, purchase 통합 하나가 문장마다 정확한 값(커서 배열 `[undefined, 'c1', 'c2']`, 2,000, 503 `dependency-unavailable`, 이력·접속기록 0)을 단언 | 맞음. M01~M06이 모두 잡혔다 |
+| J-T26 ⑤ | 보인 건수·행위자(계정 ID·역할·표시 이름)·조건·접속지가 LIST에 남고, 보존 끝은 만든 때 + 2년(달력). 기록 실패·접속지 미정이면 명단을 주지 않음 | export-audit 단위 여덟, export.test HTTP 둘, 통합 셋이 칸마다 정확한 값(`count 2`, `filter`는 `toStrictEqual`, UUIDv7, `2028-11-15`·`2030-03-01`, `'203.0.113.7'`)과 거절·호출 0을 단언 | 맞음. M07~M13·M16~M18·M20·M36이 잡혔다 |
+| J-T26 ⑥ | 파일을 주지 않고 내려받기 이력도 남지 않음(이력과 접속기록이 한 트랜잭션) | 단위: `recordExport` 한 번, 실패 시 오류 그대로, 가짜 db의 같은 `tx`. HTTP: 5xx·`content-disposition` 없음. 통합: 실제 롤백 뒤 `attendee_export` 0행 | 맞음(통합 쪽 실패 보기는 D04 대기) |
+| SEC-06R ①~⑤ | 401(403이 아님), local·ci 밖 무토큰 시작 거절, 상수 시간 비교(길이가 다르면 비교 없이 거절)(architecture.md §3.2, ASVS 11.2.4) | ① prod·staging × undefined·'' 넷 모두 시작 실패, ② local·ci 200·404, ③ 401 셋과 `settlement-due` 401, ④⑤ `timingSafeEqual` 호출 1·1·0과 Buffer 길이 | 맞음. 다섯 모두 변이로 실패를 봤다 |
+| COV2-06 ⑨ | 토큰 없음·틀림 403, UUID 아님 400, 맞으면 `{ anonymized: 2 }`, 다시 부르면 0 | 그대로 `toEqual`로 정확한 값 | 맞음(M37·M38로 실패 봄) |
+| COV2-06 ⑩ | `main.ts`가 시작 전에 설정을 읽고, 듣기 뒤 소비자를 켜고, SIGTERM에서 소비자를 먼저 멈춘다. 소비자 DB는 core_app | 원문의 글 차례와 DB 이름만 본다 | **부분**. '켠다'와 '먼저 멈춘 뒤 닫는다'를 실제로 보지 않는다(M28·M33 살아남음, 위에서 넘김) |
+| COV2-06 ⑪~⑯ | 계획 §4 표(그 계정 행만 바꾸고 다시 0건, 실제 Kafka·pid 없는 보류, 0022 칸 단위, core_app 허용·거부, 정비 역할 ±1ms·8일/6일) | 통합 시험 원문이 값마다 정확히 단언(`account_id = id`, B 행 그대로, 보류 `value` null·pid 글자 없음, 42501 일곱과 허용 대조군 둘, `notice_until` ±1ms, 8일 된 행만 지움). ⑬은 GRANT를 (역할, 표, 권한, 칸)으로 풀어 표와 같은지, REVOKE·다른 문이 없는지 본다 | 맞음(⑬은 M34·M35로 실패 봄, 통합 쪽은 D05~D11 대기) |
+| A2-17·A2-19·R2(결함 ID) | 계획 §1·§2·R2 보충의 시험 목록 | 목록의 이름이 모두 시험 파일에 있고, 단언이 목록의 값과 같다 | 맞음 |
+
+- **이름만 달린 시험**: 이 묶음이 쓴 시험에는 없다. 기존 `J-T26 ②`(위)가 판정 기준을 단언하지 않는다. 기존 `J-T26 명단 보기는 가린 값만…`·`J-T26 실무자는…`·`J-T26 CSV는 수식…`은 세부 번호 없이 ID만 단 시험이다(계획 §6이 적은 장부 'ID만'과 같다).
+- **처리**: 살아남은 둘(M28·M33)은 시험 담당이 위 단언으로 시험을 더한다. 높음·보안·통과 기준 지적은 아니지만 '자주 놓친 결함'의 시작 파일 조립이라 이 웨이브 안에서 다루기를 권한다(감독이 정한다). Docker 대기 12개는 잠금 아래 돌린 뒤 이 절에 결과를 더한다.
