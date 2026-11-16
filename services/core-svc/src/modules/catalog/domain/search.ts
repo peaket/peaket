@@ -742,6 +742,11 @@ export interface SearchReadModelSync {
   recountInterest(at: Date): Promise<number>;
   /** 하루 지난 지운 표시를 지운다. 지운 줄 수 */
   purgeRemovals(at: Date): Promise<number>;
+  /**
+   * 서버가 뜰 때 한 번: 1분 정리와 같은 권고 잠금 안에서 원천과 표의 모든 공연을 500개 [가정]씩 끊어 동기화하고, 원천에 없는 표 줄은 지운다.
+   * 잠금을 못 잡으면 건너뛴다(ran: false). ADR-0271 결정 12, 리뷰 R165-1. BAT-165 시험 담당이 둔 빈 뼈대
+   */
+  reconcileAll(at: Date): Promise<{ ran: boolean; productions: number; version: number | null }>;
 }
 export const SEARCH_READ_MODEL_SYNC: unique symbol = Symbol('SEARCH_READ_MODEL_SYNC');
 

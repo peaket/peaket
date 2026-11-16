@@ -75,3 +75,12 @@ test('최근 검색어 저장 값 읽기: 모양이 틀리면 빈 목록, 10개�
   assert.equal(parseRecent(JSON.stringify(Array.from({ length: 20 }, (_, i) => `q${i}`))).length, 10);
   assert.deepEqual(parseRecent(JSON.stringify(['가'.repeat(51), 'ok'])), ['ok']);
 });
+
+test('SR-T12 웹 머리 검색창의 거르기 함수는 @peaket/search-normalize의 것과 같은 함수다(R165-4)', async () => {
+  // 웹은 사본을 두지 않고 패키지의 함수를 다시 내보낸다(ADR-0271 결정 11). 패키지는 빌드한 진입점을 읽는다(웹이 의존을 더하면 같은 파일로 풀린다)
+  const pkg = await import(new URL('../../../../../../packages/search-normalize/dist/index.js', import.meta.url).href);
+  assert.equal(typeof pkg.refineLocally, 'function');
+  assert.equal(typeof pkg.inputKind, 'function');
+  assert.equal(refineLocally, pkg.refineLocally);
+  assert.equal(inputKind, pkg.inputKind);
+});

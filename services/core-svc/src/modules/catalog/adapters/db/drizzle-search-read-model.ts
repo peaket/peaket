@@ -148,6 +148,11 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     });
   }
 
+  /** 리뷰 R165-1(ADR-0271 결정 12). BAT-165 시험 담당이 둔 빈 뼈대 */
+  async reconcileAll(_at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> {
+    throw new Error('아직 없음');
+  }
+
   async purgeRemovals(at: Date): Promise<number> {
     const before = new Date(at.getTime() - SEARCH_REMOVAL_KEEP_MS).toISOString();
     const r = (await this.db.db.execute(sql`delete from search_removal where removed_at < ${before}::timestamptz`)) as unknown as { rowCount?: number | null };

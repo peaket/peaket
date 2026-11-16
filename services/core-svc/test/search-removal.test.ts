@@ -2,7 +2,7 @@
 // 정본: docs/features/search.md §2.3(57줄: 승인 취소·회차 전부 취소로 공연이 빠지면 그 트랜잭션이 끝난 뒤 CDN 검색 경로 `/v1/search*`를 비운다),
 // §10(270줄: 정규 로그 줄 `search_removed`(공연 ID, 이유, 판, CDN 무효화 요청 ID), CDN 무효화 실패는 경보), ADR-0271 결정 2·7·8.
 // SR-T8 ③(판매 중지·회차 전부 취소 처리가 이것을 부르는지)은 BAT-620·BAT-420 몫이라 이름에 달지 않는다.
-// 무효화 요청 ID(계획 '### 12. 시험 뒤 정한 것' 2): invalidatePaths가 { requestId }를 돌려주고, search_removed 줄마다 invalidationRequestId로 싣는다(실패면 null).
+// 로그 칸 이름 searchVersion(계획 '### 13' R165-6, ADR-0271 결정 15). 무효화 요청 ID(계획 '### 12. 시험 뒤 정한 것' 2): invalidatePaths가 { requestId }를 돌려주고, search_removed 줄마다 invalidationRequestId로 싣는다(실패면 null).
 // 바깥 경계: withSearchSync(트랜잭션 안에서 동기화를 부르고, 커밋 뒤 무효화·기록). 가짜 DB가 커밋·되돌림 차례를 남긴다.
 import type { DbTransaction } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
@@ -42,6 +42,7 @@ function harness(o: { removed: string[]; version: number; cdnFails?: boolean; re
     syncTimed: () => Promise.reject(new Error('부르지 않는다')),
     recountInterest: () => Promise.reject(new Error('부르지 않는다')),
     purgeRemovals: () => Promise.reject(new Error('부르지 않는다')),
+    reconcileAll: () => Promise.reject(new Error('부르지 않는다')),
   };
   const cdn: CdnInvalidation = {
     async invalidate() {
@@ -83,7 +84,9 @@ describe('검색에서 빠진 공연', () => {
     expect(h.paths).toEqual([['/v1/search*']]);
     // 빠진 공연마다 한 줄: 공연 ID·이유·판
     const removed = h.info.filter((l) => l.event === 'search_removed');
-    expect(removed.map((l) => [l.productionId, l.reason, l.version])).toEqual([
+    // 판은 searchVersion에 싣는다. version은 로그 바탕 칸(서비스 판)이라 이 줄이 따로 싣지 않는다(ADR-0271 결정 15, R165-6)
+    expect(removed.every((l) => !('version' in l))).toBe(true);
+    expect(removed.map((l) => [l.productionId, l.reason, l.searchVersion])).toEqual([
       ['p1', 'SALE_SUSPENDED', 10],
       ['p2', 'SALE_SUSPENDED', 10],
     ]);
@@ -125,7 +128,7 @@ describe('검색에서 빠진 공연', () => {
     await expect(withSearchSync(failing.deps, async () => ({ result: 'ok', productionIds: ['p9'] }))).resolves.toBe('ok');
     expect(failing.paths).toEqual([['/v1/search*']]);
     expect(failing.warn.filter((l) => l.event === 'cdn_invalidation_failed')).toHaveLength(1);
-    expect(failing.info.filter((l) => l.event === 'search_removed').map((l) => [l.productionId, l.reason, l.version])).toEqual([['p9', 'SALE_SUSPENDED', 14]]);
+    expect(failing.info.filter((l) => l.event === 'search_removed').map((l) => [l.productionId, l.reason, l.searchVersion])).toEqual([['p9', 'SALE_SUSPENDED', 14]]);
   });
 
   test('검색에서 빠진 공연의 search_removed 줄은 경로 무효화가 돌려준 요청 ID를 싣고, 무효화가 실패하면 null이다 [ASVS v5.0.0-16.1.1]', async () => {
@@ -134,9 +137,9 @@ describe('검색에서 빠진 공연', () => {
     await expect(withSearchSync(h.deps, async () => ({ result: 'ok', productionIds: ['p1', 'p2'] }))).resolves.toBe('ok');
     expect(h.paths).toEqual([['/v1/search*']]);
     const lines = h.info.filter((l) => l.event === 'search_removed');
-    expect(lines.map((l) => ({ productionId: l.productionId, reason: l.reason, version: l.version, invalidationRequestId: l.invalidationRequestId }))).toEqual([
-      { productionId: 'p1', reason: 'SALE_SUSPENDED', version: 21, invalidationRequestId: 'inv-7' },
-      { productionId: 'p2', reason: 'SALE_SUSPENDED', version: 21, invalidationRequestId: 'inv-7' },
+    expect(lines.map((l) => ({ productionId: l.productionId, reason: l.reason, searchVersion: l.searchVersion, invalidationRequestId: l.invalidationRequestId, hasVersion: 'version' in l }))).toEqual([
+      { productionId: 'p1', reason: 'SALE_SUSPENDED', searchVersion: 21, invalidationRequestId: 'inv-7', hasVersion: false },
+      { productionId: 'p2', reason: 'SALE_SUSPENDED', searchVersion: 21, invalidationRequestId: 'inv-7', hasVersion: false },
     ]);
     // 줄은 무효화를 부른 뒤에 남긴다
     expect(h.timeline.filter((t) => t === 'invalidate-paths' || t === 'info:search_removed')).toEqual(['invalidate-paths', 'info:search_removed', 'info:search_removed']);

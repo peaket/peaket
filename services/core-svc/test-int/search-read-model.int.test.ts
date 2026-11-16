@@ -4,13 +4,23 @@
 // 이 시험은 운영과 같은 DB 역할(core_app·core_partner·core_ops)로 서비스를 띄우고, 동기화는 DrizzleSearchReadModel(슈퍼유저 연결)로 부른다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { type Clock, createDatabase, createService, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { nameKeys } from '@peaket/search-normalize';
+import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
+import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
+import pgLib from 'pg';
+import { type Clock, createDatabase, createService, type Database, ensureOutboxPartitions, fakeClock, systemClock } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { DrizzleSearchIndex, DrizzleSearchReadModel, SearchUnavailable, SuggestionDictionary, type DictionarySnapshot, type SearchDictionarySource } from '../src/modules/catalog/index.js';
+import { DrizzleSearchIndex, DrizzleSearchReadModel, MemoryCatalogRepository, MemorySearchIndex, SEARCH_DICTIONARY_SOURCE, SearchCatalog, SearchUnavailable, SuggestionDictionary, type DictionarySnapshot, type SearchDictionarySource } from '../src/modules/catalog/index.js';
+import { SearchReadModelTimers } from '../src/modules/catalog/application/search-maintenance.js';
+import { fillDatabase, fillMemory, type Golden } from '../test/search-golden-fixture.js';
 import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from '../src/modules/catalog/adapters/db/schema.js';
 import { PARTNER_PRODUCTION_MEDIA, type PartnerProductionMedia } from '../src/modules/catalog/domain/media-ports.js';
 import type { SearchQuery } from '../src/modules/catalog/domain/search.js';
@@ -279,8 +289,7 @@ describe('검색 질의(PostgreSQL)', () => {
     });
     try {
       const index = new DrizzleSearchIndex(searchDb, 'https://img.test');
-      await index.search(query('오로라후보'));
-      docRows = 0;
+      // 첫 검색부터 센다(데우는 요청을 빼지 않는다, R165-2)
       const out = await index.search(query('오로라후보'));
       expect(out.items.map((x) => x.productionId).sort()).toEqual([...aurora].sort());
       // 공연 303개 가운데 후보 3개: 읽은 공연 줄은 3개 이하(전체를 읽지 않는다). 0이면 세는 자리가 틀렸다
@@ -436,3 +445,330 @@ describe('HOT-270 동기화 부르는 자리', () => {
     expect(await rows(admin, 'select 1 from search_document_source_at($1) where production_id = $2', [new Date(now), productionId])).toHaveLength(1);
   });
 });
+
+// ---- 리뷰 지적 재현(계획 docs/review/plans/BAT-165.md '### 13', ADR-0271 결정 12~14). T-25가 바꾼 시계 뒤에 돌도록 파일 끝에 둔다 ----
+
+/** 이 연결 묶음이 돌려준 search_document 줄 수를 센다(질의 글에 search_document가 든 것, T-19와 같은 장치) */
+function countingDatabase(url: string, name: string, o: { max?: number } = {}) {
+  const d = createDatabase({ url, applicationName: name, max: o.max ?? 4 });
+  const seen = { rows: 0 };
+  const count = (text: unknown, res: { rows?: unknown[] }) => {
+    const t = typeof text === 'string' ? text : String((text as { text?: string })?.text ?? '');
+    if (/search_document\b/.test(t) && !/search_document_source/.test(t)) seen.rows += res.rows?.length ?? 0;
+  };
+  const poolQuery = d.pool.query.bind(d.pool) as (...a: unknown[]) => Promise<{ rows?: unknown[] }>;
+  (d.pool as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+    const r = await poolQuery(...a);
+    count(a[0], r);
+    return r;
+  };
+  d.pool.on('connect', (client) => {
+    const q = client.query.bind(client) as (...a: unknown[]) => Promise<{ rows?: unknown[] }>;
+    (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+      const r = await q(...a);
+      count(a[0], r);
+      return r;
+    };
+  });
+  return { db: d, seen };
+}
+
+/** 어느 DB든 원천과 표의 어긋난 공연 수 */
+const driftOn = async (d: Database, at: number) =>
+  Number(
+    (
+      await rows(
+        d,
+        `select count(distinct production_id)::int as n from ((select ${COLS} from search_document_source_at($1) except select ${COLS} from search_document)
+         union all (select ${COLS} from search_document except select ${COLS} from search_document_source_at($1))) d`,
+        [new Date(at)],
+      )
+    )[0]!.n,
+  );
+
+/** 시계 하나(앞으로만 간다) */
+const movingClock = (start: number) => {
+  const c = { t: start };
+  const clock: Clock & { set(t: number): void } = { now: () => c.t, monotonicMs: () => c.t, set: (t: number) => void (c.t = t) };
+  return clock;
+};
+
+describe('R165-1 서버가 뜰 때 따라잡기', () => {
+  test('HOT-270 표 마이그레이션 전부터 승인돼 있던 공연은 서버가 뜰 때의 따라잡기 한 번으로 검색·자동완성에 나오고 어긋난 줄이 0이다(R165-1)', async () => {
+    const c = await startPostgres();
+    const d = createDatabase({ url: c.url, applicationName: 'core-svc-search-backfill', max: 4 });
+    const tmp = mkdtempSync(join(tmpdir(), 'bat165-migrations-'));
+    try {
+      // 검색 표 마이그레이션 바로 앞까지만 올린다(저널을 그 앞에서 자른 사본)
+      const src = fileURLToPath(new URL('../migrations/', import.meta.url));
+      cpSync(src, tmp, { recursive: true });
+      const journal = JSON.parse(readFileSync(join(tmp, 'meta/_journal.json'), 'utf8')) as { entries: { tag: string }[] };
+      const cut = journal.entries.findIndex((e) => e.tag.endsWith('_search_read_model_tables'));
+      expect(cut).toBeGreaterThan(0);
+      journal.entries = journal.entries.slice(0, cut);
+      writeFileSync(join(tmp, 'meta/_journal.json'), JSON.stringify(journal));
+      const client = new pgLib.Client({ connectionString: c.url });
+      await client.connect();
+      try {
+        await drizzleMigrate(drizzleNodePg({ client }), { migrationsFolder: tmp });
+      } finally {
+        await client.end();
+      }
+      const at = Date.parse('2026-11-16T00:00:00.000Z');
+      const promoterId = randomUUID();
+      const placeId = randomUUID();
+      await d.db.insert(promoter).values({ id: promoterId, legalName: '(주)옛공연' });
+      await d.db.insert(place).values({ id: placeId, name: '옛날홀', address: '서울', region: '서울', createdBy: ACTOR });
+      const made: string[] = [];
+      for (const [title, review, artistName, alias] of [
+        ['옛승인 첫공연', 'APPROVED', '옛승인 배우', 'OLD FIRST'],
+        ['옛승인 둘째공연', 'APPROVED', '옛승인 가수', 'OLD SECOND'],
+        ['옛승인 초안공연', 'DRAFT', null, null],
+      ] as const) {
+        const id = randomUUID();
+        made.push(id);
+        await d.db.insert(production).values({ id, promoterId, placeId, title, genre: '콘서트', saleReview: review, saleApprovedAt: review === 'APPROVED' ? new Date(at - 10 * D) : null });
+        await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId, venueId: null, openAt: new Date(at - D), startsAt: new Date(at + 20 * D), endsAt: new Date(at + 20 * D + 2 * H) });
+        if (artistName) {
+          const artistId = randomUUID();
+          await d.db.insert(artist).values({ id: artistId, name: artistName, createdBy: ACTOR });
+          await d.db.insert(productionArtist).values({ productionId: id, artistId, sortOrder: 0 });
+        }
+        if (alias) await d.db.insert(searchAlias).values({ id: randomUUID(), targetKind: 'PRODUCTION', targetId: id, alias, source: 'PARTNER', createdBy: ACTOR });
+      }
+      // 이제 검색 표 마이그레이션을 올린다(빈 표만 만든다)
+      await migrateCore(c.url);
+      const index = new DrizzleSearchIndex(d, 'https://img.test');
+      const q = (text: string): SearchQuery => ({ q: text, includePast: false, noConvert: false, page: 1, now: new Date(at) });
+      // 대조군: 띄우기 전에는 검색에 없다
+      expect((await index.search(q('옛승인'))).items).toEqual([]);
+
+      const clock2 = movingClock(at);
+      const model = new DrizzleSearchReadModel(d, 'https://img.test');
+      const dictionary = new SuggestionDictionary(model, clock2);
+      const t = new SearchReadModelTimers({ sync: model, dictionary, clock: clock2 });
+      try {
+        await t.start();
+      } finally {
+        t.stop();
+      }
+      await dictionary.refresh();
+      const [first, second, draft] = made as [string, string, string];
+      expect((await index.search(q('옛승인'))).items.map((x) => x.productionId).sort()).toEqual([first, second].sort());
+      expect(dictionary.suggest('옛승인').items.filter((x) => x.kind === 'PRODUCTION').map((x) => x.productionId).sort()).toEqual([first, second].sort());
+      expect(await rows(d, 'select 1 from search_term where target_id = $1', [draft])).toEqual([]);
+      const terms = await rows(d, 'select display_name, norm, norm_nospace, jamo, chosung from search_term where target_id = any($1::uuid[])', [[first, second]]);
+      expect(terms.map((x) => x.display_name).sort()).toEqual(['OLD FIRST', 'OLD SECOND', '옛승인 둘째공연', '옛승인 첫공연'].sort());
+      for (const x of terms) {
+        const k = nameKeys(x.display_name as string);
+        expect([x.norm, x.norm_nospace, x.jamo, x.chosung]).toEqual([k.norm, k.nospace, k.jamo, k.chosung]);
+      }
+      expect(await driftOn(d, at)).toBe(0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+      await d.close();
+      c.stop();
+    }
+  });
+});
+
+describe('R165-2 검색이 쪽 크기만큼만 읽는다', () => {
+  test('HOT-280 판이 바뀐 뒤의 검색도 후보 공연만 읽는다(COV2-07, R165-2)', async () => {
+    const ids = [await seed({ title: '은하후보 콘서트' }), await seed({ title: '은하후보 뮤지컬' }), await seed({ title: '은하후보 투어' })].map((x) => x.productionId);
+    await admin.transaction((tx) => sync.sync(tx, ids, new Date(now)));
+    const counted = countingDatabase(pg.url, 'core-svc-search-count-2');
+    try {
+      const index = new DrizzleSearchIndex(counted.db, 'https://img.test');
+      await index.search(query('은하후보'));
+      // 다른 공연 하나를 동기화해 판을 올린다
+      const other = await seed({ title: '판올림 공연' });
+      await admin.transaction((tx) => sync.sync(tx, [other.productionId], new Date(now)));
+      counted.seen.rows = 0;
+      const out = await index.search(query('은하후보'));
+      expect(out.items.map((x) => x.productionId).sort()).toEqual([...ids].sort());
+      expect(counted.seen.rows).toBeGreaterThanOrEqual(1);
+      expect(counted.seen.rows).toBeLessThanOrEqual(3);
+      // 같은 검색 5개를 함께 보내도 읽은 줄 합은 15 이하
+      counted.seen.rows = 0;
+      const many = await Promise.all(Array.from({ length: 5 }, () => index.search(query('은하후보'))));
+      expect(many.every((m) => m.items.length === 3)).toBe(true);
+      expect(counted.seen.rows).toBeGreaterThanOrEqual(5);
+      expect(counted.seen.rows).toBeLessThanOrEqual(15);
+    } finally {
+      await counted.db.close();
+    }
+  });
+
+  test('HOT-280 검색어 없는 목록·관련 공연·0건 제안은 쪽 크기만큼만 읽는다(R165-2)', async () => {
+    // 따로 띄운 DB에 같은 고정 카탈로그(공연 300개)를 메모리 저장소와 함께 채운다
+    const g = catalog300();
+    const c = await startPostgres();
+    await migrateCore(c.url);
+    const fill = createDatabase({ url: c.url, applicationName: 'core-svc-search-300', max: 4 });
+    const counted = countingDatabase(c.url, 'core-svc-search-300-count');
+    try {
+      const all = await fillDatabase(fill, g);
+      const model = new DrizzleSearchReadModel(fill, 'https://img.test');
+      await fill.transaction((tx) => model.sync(tx, all, new Date(Date.parse(g.now))));
+      const repo = new MemoryCatalogRepository();
+      fillMemory(repo, g);
+      const memory = new MemorySearchIndex(repo, 'https://img.test', fakeClock({ now: Date.parse(g.now) }));
+      const pgIndex = new DrizzleSearchIndex(counted.db, 'https://img.test');
+      const q = (text: string, o: Partial<SearchQuery> = {}): SearchQuery => ({ q: text, includePast: false, noConvert: false, page: 1, now: new Date(Date.parse(g.now)), ...o });
+      const same = async (name: string, sq: SearchQuery, maxRows: number) => {
+        counted.seen.rows = 0;
+        const a = await pgIndex.search(sq);
+        const read = counted.seen.rows;
+        const b = await memory.search(sq);
+        expect({ name, ids: a.items.map((x) => x.productionId), related: a.related?.items.map((x) => x.productionId) ?? null, total: a.total }).toEqual({
+          name,
+          ids: b.items.map((x) => x.productionId),
+          related: b.related?.items.map((x) => x.productionId) ?? null,
+          total: b.total,
+        });
+        expect({ name, readOk: read <= maxRows, read }).toEqual({ name, readOk: true, read });
+        return a;
+      };
+      // 검색어 없는 오픈 임박 1쪽: 20개 + 다음 쪽이 있는지 1줄
+      const list = await same('오픈 임박 1쪽', q(''), 21);
+      expect(list.items).toHaveLength(20);
+      await same('인기 1쪽', q('', { sort: 'POPULAR' }), 21);
+      // 이름이 같은 공연 둘과 한글·영문 이름이 섞인 후보: 이름 차례가 메모리와 같다. 후보 7 + 공연장 근거 관련 6
+      const mixed = await same('이름 섞임', q('혼합'), 7 + 6);
+      expect(mixed.items).toHaveLength(7);
+      // 아티스트가 맞은 검색: 후보 3 + 아티스트 근거 관련 6
+      await same('아티스트 근거', q('오로라 밴드'), 3 + 6);
+      // 0건: 제안은 사전에서 오고 읽은 줄은 관련 공연 몫(6)뿐
+      const zero = await same('0건', q('없는검색어하나'), 6);
+      expect(zero.items).toEqual([]);
+    } finally {
+      await counted.db.close();
+      await fill.close();
+      c.stop();
+    }
+  });
+});
+
+describe('R165-3 자동완성은 원천을 부르지 않는다', () => {
+  test('자동완성은 검색 전용 연결 묶음이 다 찬 동안에도 원천을 부르지 않고 답한다(R165-3)', async () => {
+    const catalog = svc.app.get(SearchCatalog);
+    await catalog.dictionary.refresh();
+    const source = svc.app.get<SearchDictionarySource>(SEARCH_DICTIONARY_SOURCE);
+    const read = source.read.bind(source);
+    const version = source.version.bind(source);
+    let calls = 0;
+    source.read = async (since) => {
+      calls += 1;
+      return read(since);
+    };
+    source.version = async () => {
+      calls += 1;
+      return version();
+    };
+    // 서비스의 검색 연결(core_app 로그인, 4개)을 모두 잡는다(T-07의 묶음 포화와 같은 장치)
+    const held = await Promise.all(Array.from({ length: 4 }, () => appDb.pool.connect()));
+    try {
+      now += 10_001;
+      const r = await svc.http.inject({ method: 'GET', url: '/v1/search/suggestions?q=' + encodeURIComponent('부르는자리') });
+      expect(r.statusCode).toBe(200);
+      expect(calls).toBe(0);
+    } finally {
+      for (const h of held) h.release();
+      source.read = read;
+      source.version = version;
+    }
+  });
+});
+
+describe('R165-1 내려가 있던 동안의 시각 경계와 동시 시작', () => {
+  test('HOT-270 모든 파드가 내려가 있던 동안 오픈 시각이 지난 공연은 다시 뜰 때 판매 중으로 바뀐다(R165-1)', async () => {
+    const B = Date.parse('2026-11-25T00:00:00.000Z');
+    const opens = randomUUID();
+    const ends = randomUUID();
+    for (const [id, title, open, start] of [
+      [opens, '내려간동안 오픈공연', B + H, B + 10 * D],
+      [ends, '내려간동안 종료공연', B - 5 * D, B + D + H],
+    ] as const) {
+      await admin.db.insert(production).values({ id, promoterId: A, placeId: PLACE, title, genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
+      await admin.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: A, venueId: null, openAt: new Date(open), startsAt: new Date(start), endsAt: new Date(start + 2 * H) });
+    }
+    await admin.transaction((tx) => sync.sync(tx, [opens, ends], new Date(B)));
+    const status = async (id: string) => (await rows(admin, 'select sale_status from search_document where production_id = $1', [id]))[0]!.sale_status;
+    expect([await status(opens), await status(ends)]).toEqual(['UPCOMING', 'ON_SALE']);
+
+    const clock2 = movingClock(B);
+    const first = new SearchReadModelTimers({ sync, clock: clock2 });
+    await first.start();
+    first.stop();
+    // 모든 파드가 2시간 내려가 있다가 다시 뜬다(그동안 정리가 한 번도 돌지 않았다)
+    const v0 = await version();
+    clock2.set(B + 2 * H);
+    const second = new SearchReadModelTimers({ sync, clock: clock2 });
+    try {
+      await second.start();
+    } finally {
+      second.stop();
+    }
+    // 첫 정리 전에 이미 바뀌었다
+    expect([await status(opens), await status(ends)]).toEqual(['ON_SALE', 'ENDED']);
+    expect(await version()).toBeGreaterThanOrEqual(v0 + 1);
+  });
+
+  test('HOT-270 두 파드가 함께 떠도 시작 따라잡기는 한 번만 돈다(R165-1)', async () => {
+    const d1 = createDatabase({ url: pg.url, applicationName: 'core-svc-reconcile-1', max: 2 });
+    const d2 = createDatabase({ url: pg.url, applicationName: 'core-svc-reconcile-2', max: 2 });
+    // 장벽: 두 쪽이 권고 잠금을 잡으려는 질의 앞에서 서로를 기다린다(3초 뒤에는 그냥 간다)
+    let arrived = 0;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const timer = setTimeout(() => open(), 3_000);
+    for (const d of [d1, d2]) {
+      d.pool.on('connect', (client) => {
+        const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+        (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+          const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+          if (/advisory/i.test(t)) {
+            arrived += 1;
+            if (arrived >= 2) open();
+            await gate;
+          }
+          return q(...a);
+        };
+      });
+    }
+    try {
+      const v0 = await version();
+      const at = new Date(Date.parse('2026-11-25T03:00:00.000Z'));
+      const out = await Promise.all([new DrizzleSearchReadModel(d1, 'https://img.test').reconcileAll(at), new DrizzleSearchReadModel(d2, 'https://img.test').reconcileAll(at)]);
+      expect(arrived).toBeGreaterThanOrEqual(2);
+      expect(out.map((o) => o.ran).sort()).toEqual([false, true]);
+      const ran = out.find((o) => o.ran)!;
+      expect(ran.productions).toBeGreaterThanOrEqual(300);
+      // 판은 끊음 수(500개 [가정]씩, ADR-0271 결정 12)만큼만 올랐다
+      expect((await version()) - v0).toBe(Math.ceil(ran.productions / 500));
+      expect(out.find((o) => !o.ran)).toMatchObject({ ran: false, productions: 0, version: null });
+    } finally {
+      clearTimeout(timer);
+      await d1.close();
+      await d2.close();
+    }
+  });
+});
+
+/** 공연 300개 고정 카탈로그(R165-2): 이름 섞인 후보 7(같은 이름 둘, 한글·영문), 아티스트 근거 3, 나머지 290 */
+function catalog300(): Golden {
+  const uid = (p: string, n: number) => `${p}-0000-4000-8000-a${String(n).padStart(11, '0')}`;
+  const places = [1, 2, 3].map((n) => ({ id: uid('21000000', n), name: `시험홀 ${n}` }));
+  const artists = [{ id: uid('11000000', 1), name: '오로라 밴드' }];
+  const ev = (n: number, state: 'ON_SALE' | 'UPCOMING') =>
+    state === 'ON_SALE' ? [{ id: uid('31000000', n), openMin: -10 * 1440 - n, startMin: 20 * 1440 + n, endMin: 20 * 1440 + n + 120 }] : [{ id: uid('31000000', n), openMin: 2 * 1440 + (n % 37) * 30, startMin: 40 * 1440 + n, endMin: 40 * 1440 + n + 120 }];
+  const productions: Golden['productions'] = [];
+  const mixed = ['혼합 Alpha', '혼합 beta', '혼합 가나', '혼합 Zeta', '혼합 하늘', '혼합 같은이름', '혼합 같은이름'];
+  mixed.forEach((title, i) => productions.push({ id: uid('01000000', i + 1), title, genre: '콘서트', placeId: places[0]!.id, artistIds: [], aliases: [], state: 'ON_SALE', wishes: 0, events: ev(i + 1, 'ON_SALE') }));
+  for (let i = 0; i < 3; i++) productions.push({ id: uid('01000000', 100 + i), title: `오로라 밴드 투어 ${i + 1}`, genre: '콘서트', placeId: places[1]!.id, artistIds: [artists[0]!.id], aliases: [], state: 'UPCOMING', wishes: i, events: ev(100 + i, 'UPCOMING') });
+  for (let i = 0; i < 290; i++) {
+    const state = i % 3 === 0 ? 'ON_SALE' : 'UPCOMING';
+    productions.push({ id: uid('01000000', 1000 + i), title: `일반 공연 ${i}`, genre: '콘서트', placeId: places[(i % 2) + 1]!.id, artistIds: [], aliases: [], state, wishes: i % 17, events: ev(1000 + i, state) });
+  }
+  return { now: '2026-11-16T00:00:00.000Z', places, artists, productions, cases: [] };
+}

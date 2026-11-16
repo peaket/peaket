@@ -20,6 +20,8 @@ export default defineConfig({
     { name: 'lighthouse', testMatch: /lighthouse\.spec\.mjs$/ },
     // SR-T14 검색 화면 색인 제외(BAT-165 웨이브 7 T-21)
     { name: 'seo', testMatch: /seo\.spec\.mjs$/ },
+    // 검색 품질 사건을 부르는 자리(BAT-165 리뷰 R165-5)
+    { name: 'search-quality', testMatch: /search-quality\.spec\.mjs$/ },
   ],
   // 앱마다 운영 빌드 서버 하나(4101~4105)와 대기실 경량 페이지 정적 서버(4106). 밖에서 띄웠으면(lib/docker.mjs) 여기서 띄우지 않는다
   webServer: EXTERNAL_SERVERS

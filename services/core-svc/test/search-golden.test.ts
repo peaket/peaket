@@ -7,7 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { MemoryCatalogRepository } from '../src/modules/catalog/index.js';
+import { MemoryCatalogRepository, SearchCatalog } from '../src/modules/catalog/index.js';
 import { fillMemory, loadGolden, runSequence, searchUrl, type GoldenCase, type SuggestItem } from './search-golden-fixture.js';
 import { FakeIdentity, quiet } from './support.js';
 
@@ -32,6 +32,8 @@ beforeAll(async () => {
     logDestination: quiet(),
     adminAuthz: new FakeIdentity(),
   });
+  // 자동완성 사전은 주기 일만 갱신한다(R165-3). 순서 경우 전에 첫 갱신을 직접 부른다
+  await svc.app.get(SearchCatalog).dictionary.refresh();
 });
 afterAll(async () => {
   await svc?.close();

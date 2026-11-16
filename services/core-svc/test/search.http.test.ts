@@ -6,7 +6,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { MemoryCatalogRepository, SEARCH_INDEX, SearchUnavailable, type SearchIndex } from '../src/modules/catalog/index.js';
+import { MemoryCatalogRepository, SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SearchCatalog, SearchUnavailable, type SearchDictionarySource, type SearchIndex } from '../src/modules/catalog/index.js';
 import * as searchDomain from '../src/modules/catalog/domain/search.js';
 import * as normalizePkg from '@peaket/search-normalize';
 import type { ProductionImageRow } from '../src/modules/catalog/domain/production-image.js';
@@ -68,6 +68,8 @@ beforeAll(async () => {
     clock: fakeClock({ now: NOW }),
     adminAuthz: new FakeIdentity(),
   });
+  // 자동완성 사전은 주기 일만 갱신한다(R165-3, ADR-0271 결정 14). 시험은 그 첫 갱신을 직접 부른다
+  await svc.app.get(SearchCatalog).dictionary.refresh();
 });
 afterAll(async () => {
   await svc?.close();
@@ -141,7 +143,7 @@ describe('검색(메모리)', () => {
 // §11(286줄: 가리기, 검색은 가리기 전 값으로), catalog-review.md:172(검색어는 정규화한 값 50자 이하로 로그에), :175(검색 전용 연결 묶음 포화 기록), :191(14.2.5),
 // openapi.yaml ServiceUnavailable(Retry-After), ADR-0271 결정 4·5·7·10.
 // 시험이 정한 줄 칸 이름(구현이 다르면 '시험 이의'): search_query = { query, results(전체 결과 수), filters(건 필터 매개변수 이름 목록), page, durationMs },
-// search_suggest = { inputLength, candidates, version }, search_pool_saturated = { kind: 'security', reason }. 공통 바탕 칸(level·ts·service·env·version·az·pod·msg·traceId·spanId)과 kind·event 밖의 칸은 없다.
+// search_suggest = { inputLength, candidates, dictionaryVersion }(R165-6, ADR-0271 결정 15: version은 바탕 칸 서비스 판이다), search_pool_saturated = { kind: 'security', reason }. 공통 바탕 칸(level·ts·service·env·version·az·pod·msg·traceId·spanId)과 kind·event 밖의 칸은 없다.
 describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () => {
   const N = 300;
   const repo2 = new MemoryCatalogRepository();
@@ -173,6 +175,8 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
       logDestination: logs.stream,
       adminAuthz: new FakeIdentity(),
     });
+    // 자동완성 사전의 첫 갱신(주기 일 몫, R165-3)
+    await svc2.app.get(SearchCatalog).dictionary.refresh();
   });
   afterAll(async () => {
     await svc2?.close();
@@ -287,8 +291,17 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
       expect(sl).toHaveLength(1);
       expect(items.length).toBeGreaterThanOrEqual(3);
       expect(sl[0]).toMatchObject({ inputLength: 2, candidates: items.length });
-      expect(typeof sl[0]!.version).toBe('number');
-      expect(Object.keys(sl[0]!).filter((k) => !BASE_KEYS.has(k) && !['inputLength', 'candidates', 'version'].includes(k))).toEqual([]);
+      // 사전 판은 dictionaryVersion, version은 로그 바탕 칸(서비스 판)으로 search_query 줄과 같다(R165-6)
+      expect(typeof sl[0]!.dictionaryVersion).toBe('number');
+      expect(typeof got[0]!.version).toBe('string');
+      expect(sl[0]!.version).toBe(got[0]!.version);
+      expect(Object.keys(sl[0]!).filter((k) => !BASE_KEYS.has(k) && !['inputLength', 'candidates', 'dictionaryVersion'].includes(k))).toEqual([]);
+      // 날 줄에서 바탕 칸 이름이 두 번 나오지 않는다(JSON 읽는 쪽에 따라 값 하나를 잃지 않게)
+      for (const event of ['search_suggest', 'search_query']) {
+        const raw = logs.text().split('\n').filter((t) => t.includes(`"event":"${event}"`));
+        expect(raw.length).toBeGreaterThanOrEqual(1);
+        for (const t of raw) for (const k of BASE_KEYS) expect({ event, k, n: t.split(`"${k}":`).length - 1 }).toEqual({ event, k, n: t.includes(`"${k}":`) ? 1 : 0 });
+      }
       // 자동완성 줄에는 입력 자체가 없다(길이만)
       expect(JSON.stringify(sl[0])).not.toContain('오로');
       // 검색 처리기는 바깥을 부르지 않는다(외부 분석·추적 도구로 보내지 않는다)
@@ -335,5 +348,68 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
     expect(counters.map((c) => c.mock.calls.length)).toEqual([0, 0]);
     // 이름 비교 값도 카탈로그 전체(이름 수백 개)를 다시 계산하지 않는다
     expect(nameKeys.mock.calls.length).toBeLessThan(N);
+  });
+});
+
+// ---- 리뷰 R165-3(ADR-0271 결정 14): 자동완성 요청은 사전을 갱신하지 않는다. 갱신은 10초 주기 일만, 첫 통째로 읽기 전에는 빈 후보·no-store·준비 확인 실패 ----
+describe('자동완성 사전 갱신은 주기 일만(메모리, R165-3)', () => {
+  const repo3 = new MemoryCatalogRepository();
+  const P = '66666666-6666-4666-8666-666666666661';
+  repo3.productions.set(P, { id: P, promoterId: TENANT, placeId: PLACE, title: '은하수 콘서트', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: at('2026-11-01T00:00:00Z') });
+  const E = randomUUID();
+  repo3.events.set(E, { id: E, productionId: P, venueId: null, openAt: at('2026-11-01T00:00:00Z'), startsAt: at('2026-12-20T10:00:00Z'), status: 'SCHEDULED' });
+  repo3.details.set(E, { event: { endsAt: at('2026-12-20T12:00:00Z') }, place: { id: PLACE, name: '피켓홀', address: '서울' }, artists: [] } as never);
+  const clock3 = fakeClock({ now: NOW });
+  let svc3: Awaited<ReturnType<typeof createService>>;
+  // 원천 호출 수(판 읽기 포함)
+  let calls = 0;
+
+  beforeAll(async () => {
+    svc3 = await createService({ name: 'core-svc', module: AppModule.register({ memory: true, catalog: repo3, media: testMedia() }), env: { PEAKET_ENV: 'ci' }, clock: clock3, adminAuthz: new FakeIdentity() });
+    const source = svc3.app.get<SearchDictionarySource>(SEARCH_DICTIONARY_SOURCE);
+    const read = source.read.bind(source);
+    const version = source.version.bind(source);
+    source.read = async (since) => {
+      calls += 1;
+      return read(since);
+    };
+    source.version = async () => {
+      calls += 1;
+      return version();
+    };
+  });
+  afterAll(async () => {
+    await svc3?.close();
+  });
+
+  const suggest3 = () => svc3.http.inject({ method: 'GET', url: '/v1/search/suggestions?q=' + encodeURIComponent('은하') });
+
+  test('자동완성은 사전을 처음 읽기 전에 빈 후보와 no-store로 답하고 준비 확인이 실패한다(R165-3)', async () => {
+    const before = await suggest3();
+    expect(before.statusCode).toBe(200);
+    expect((JSON.parse(before.payload) as { items: unknown[] }).items).toEqual([]);
+    expect(before.headers['cache-control']).toBe('no-store');
+    // 요청이 사전을 읽게 만들지 않는다
+    expect(calls).toBe(0);
+    expect((await svc3.management.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+    // 대조군: 주기 일이 처음 읽은 뒤에는 공개 캐시 머리와 후보, 준비 확인 200
+    await svc3.app.get(SearchCatalog).dictionary.refresh();
+    const after = await suggest3();
+    expect(after.headers['cache-control']).toBe('public, max-age=60, stale-while-revalidate=60, stale-if-error=600');
+    expect((JSON.parse(after.payload) as { items: { productionId?: string }[] }).items.map((x) => x.productionId)).toContain(P);
+    expect((await svc3.management.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+  });
+
+  test('SR-T15 ① 자동완성 요청은 사전을 갱신하지 않아 10초가 지나도 원천을 부르지 않는다 [ASVS v5.0.0-2.4.1](R165-3)', async () => {
+    const dictionary = svc3.app.get(SearchCatalog).dictionary;
+    await dictionary.refresh();
+    calls = 0;
+    // 정본 10초 [가정](search.md:56) + 1ms
+    clock3.advance(10_001);
+    for (let i = 0; i < 100; i++) expect((await suggest3()).statusCode).toBe(200);
+    expect(calls).toBe(0);
+    // 대조군: 주기 일을 한 번 돌리면 원천을 부른다
+    await dictionary.refresh();
+    expect(calls).toBeGreaterThanOrEqual(1);
   });
 });
