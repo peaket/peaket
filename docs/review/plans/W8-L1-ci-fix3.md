@@ -112,6 +112,23 @@
   1. v0 입구(`v0-forward`)와 v0 e2e도 같은 포트 전달 위험이 있는지 훑고, 있으면 같은 길로 옮기기.
   2. `bash -e` 한 블록에 e2e 넷을 묶어 앞 파일이 실패하면 뒤 파일이 돌지 않는 것을 단계 넷으로 나눌지(실패 때도 뒤를 돌려 한 번에 더 많이 보기).
 
+### 구현 kind 확인(구현 담당, 2026-11-16)
+
+- **무엇**: 구현 커밋 `18fd1cc6`의 트리에서 감독이 잡은 Docker 잠금 안에 kind 한 바퀴를 돌렸다. 구현이 실제 클러스터에서 도는지 보는 확인이고, 시험 담당의 '시험 결과'나 위 5의 '다 되었다고 보는 기준'(두 바퀴)을 대신하지 않는다. CF3-06은 아직 시험 파일에 없어서 돌지 않았다.
+- **차례**: 구현 전 재현과 같은 꼴로 `PEAKET_CLUSTER=lane1-cf3`에서 `up --v0-only`(클러스터 새로 만듦, 68초) → `gateways`(86초) → e2e 넷을 ci-kind.yml과 같은 차례·`--test-timeout=300000`으로 돌렸다. 브라우저는 `tools/web-checks`의 `pnpm install --offline --frozen-lockfile`로 받았다. 이 PC에 Playwright 1.64.1이 쓰는 판(chromium 1248·firefox 1555·webkit 2370)이 이미 있어 `playwright install`은 하지 않았다.
+- **포트 매핑**: `.cache/peaket-tools/kind-lane1-cf3.yaml`에 매핑 다섯(30441~30445 → 127.0.0.1:18441~18445, TCP)이 들어갔다. `docker port lane1-cf3-control-plane`에도 그대로 나왔다(`30441/tcp -> 127.0.0.1:18441` … `30445/tcp -> 127.0.0.1:18445`). `gateways`는 포트를 이 공개에서 읽었고, Service `peaket-local-gw-*` 다섯(NodePort, 443 → targetPort 10443, 노드 포트 30441~30445)을 만들었다. 각 Service의 EndpointSlice는 그 게이트웨이의 프록시 파드 하나를 가리켰다. '준비됨' 전에 다섯 포트가 모두 'TLS 됨'이었고, 컨트롤러가 받지 않은 정의는 '없음'이었다.
+
+| 파일 | 합계 | 통과 | 실패 | 걸린 시간 |
+| --- | --- | --- | --- | --- |
+| `gateways.e2e.mjs` | 43 | 43 | 0 | 379초 |
+| `queue-cors.e2e.mjs` | 18 | 18 | 0 | 184초 |
+| `gateway-limits.e2e.mjs` | 13 | 13 | 0 | 30초 |
+| `gateway-routes.e2e.mjs` | 10 | 10 | 0 | 103초 |
+
+- **네트워크 오류**: 네 파일의 출력 어디에도 `ECONNREFUSED`·`ECONNRESET`·`socket hang up`·`lost connection`이 없었다(건너뜀·취소 0). 포트 전달 프로세스는 띄우지 않았다. 구현 전 CI에서 처음 무너졌던 V-T31 ①(1,000건)과 SR-T13 ②(몰아 보내기), 그 뒤 시험 열일곱도 이번에는 통과했다.
+- **정리**: `cluster.mjs down`으로 클러스터를 지웠고, `docker ps -a`에 `lane1-cf3` 컨테이너가 남지 않았다. 잠금 폴더(`D:/ticketpass-locks/docker`)는 감독이 쥐고 있어 건드리지 않았다.
+- **구현 담당이 고친 것**: 없음(실패 0).
+
 ## 시험 이의
 
 ## 실패 확인
@@ -148,4 +165,4 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w8l1-cifix3-plan-5e19a3d7 | claude-opus-5-5 | 2026-11-16T22:14+09:00 | 2026-11-16T22:24+09:00 |
-| impl | w8l1-cifix3-impl-3c81f0a2 | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:34+09:00 |
+| impl | w8l1-cifix3-impl-3c81f0a2 | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:55+09:00 |
