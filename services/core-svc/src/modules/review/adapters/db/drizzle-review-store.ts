@@ -60,8 +60,16 @@ const purgeSet = (nowMs: number) => sql`
   status = 'DELETED', body = '', rating = null, content_fingerprint = null, author_display = '', notice = null, notice_until = null,
   account_id = id, basis_order_id = id, deleted_at = coalesce(deleted_at, ${new Date(nowMs)}::timestamptz), updated_at = ${new Date(nowMs)}::timestamptz`;
 
+/**
+ * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기'): 작성자가 지웠는데 별점·지문·계정 ID가 남은 행, 옛 익명화로 참조만 끊긴 살아 있는 후기.
+ * 고치기(purgeLegacyRows)와 세기(countLegacyRows)가 같은 글을 쓴다(웨이브 끝 정확성 리뷰 C2)
+ */
+const LEGACY_ROWS = sql`((status = 'DELETED' and (rating is not null or content_fingerprint is not null or account_id <> id)) or (status <> 'DELETED' and account_id = id))`;
+
 /** 이전 판 행 고치기 한 묶음의 잠금 대기 한도 2초 [가정](docs/data.md §2 '이전 판이 남긴 행 고치기') */
 const LEGACY_LOCK_TIMEOUT_MS = 2_000;
+
+const ACCOUNTS_WITHDRAWN = 'identity.accounts-withdrawn';
 
 /** 그 계정의 후기를 상태와 관계없이 모두 파기한다(색인 review_account_idx). 바꾼 행 수 */
 async function purgeAccountRows(db: Db, accountId: string, nowMs: number): Promise<number> {
@@ -273,10 +281,6 @@ export class DrizzleReviewStore implements ReviewStore {
     });
   }
 
-  async purgeByAccount(accountId: string, nowMs: number): Promise<number> {
-    return purgeAccountRows(this.database.db, accountId, nowMs);
-  }
-
   async purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number> {
     // 파기와 다시 정리 예약을 한 트랜잭션에 쓴다: 예약 쓰기가 실패하면 파기도 되돌려 사건을 다시 받게 한다(docs/features/identity.md §8 '다시 정리')
     return this.database.transaction(async (tx) => {
@@ -316,14 +320,33 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
-  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채운다 */
-  async purgeHeldWithdrawal(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
-    throw new Error('아직 없음');
+  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+    // 손으로 처리(웨이브 끝 보안 리뷰 S1, docs/features/identity.md §8 '손으로 처리'). 한 트랜잭션: 보류 행 잠금 → 예약(늦은 쪽) → 파기 → 보류 행 다시 처리 표시.
+    // 예약을 파기보다 먼저 쓰는 것은 다시 정리 반복과 잠금 차례(예약 행 → 후기)를 맞추려는 것이다. 보류 행이 없으면 아무것도 쓰지 않는다
+    return this.database.transaction(async (tx) => {
+      const found = await tx.execute(sql`
+        select id::text as id, event_key from held_event
+         where topic = ${ACCOUNTS_WITHDRAWN}
+           and reprocessed_at is null
+           and (lower(business_key) = ${accountId} or lower(msg_key) = ${accountId})
+         order by id
+         for update`);
+      const held = found.rows as { id: string; event_key: string | null }[];
+      if (held.length === 0) return undefined;
+      await tx.execute(sql`
+        insert into review_withdrawal_recheck (account_id, due_at, created_at)
+        values (${accountId}::uuid, ${new Date(o.recheckAtMs)}::timestamptz, ${new Date(o.nowMs)}::timestamptz)
+        on conflict (account_id) do update set due_at = greatest(review_withdrawal_recheck.due_at, excluded.due_at)`);
+      const purged = await purgeAccountRows(tx, accountId, o.nowMs);
+      await tx.execute(sql`update held_event set reprocessed_at = ${new Date(o.nowMs)}::timestamptz where id = any(${sql.param(held.map((h) => h.id))}::uuid[])`);
+      return { purged, heldEventKeys: held.flatMap((h) => (h.event_key === null ? [] : [h.event_key])) };
+    });
   }
 
-  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 C2 시험 단계): 구현 담당이 채운다 */
   async countLegacyRows(): Promise<number> {
-    throw new Error('아직 없음');
+    // 잠그지 않고 센다(다른 트랜잭션이 잡은 행도 남은 대상이다). 정비 역할이 읽는 칸만 쓴다
+    const r = await this.database.db.execute(sql`select count(*)::int as n from review where ${LEGACY_ROWS}`);
+    return Number((r.rows[0] as { n: number | string } | undefined)?.n ?? 0);
   }
 
   async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
@@ -333,8 +356,7 @@ export class DrizzleReviewStore implements ReviewStore {
       await tx.execute(sql`select set_config('lock_timeout', ${`${LEGACY_LOCK_TIMEOUT_MS}ms`}, true)`);
       const found = await tx.execute(sql`
         select id::text as id from review
-         where ((status = 'DELETED' and (rating is not null or content_fingerprint is not null or account_id <> id))
-                or (status <> 'DELETED' and account_id = id))
+         where ${LEGACY_ROWS}
            ${o.after === undefined ? sql`` : sql`and id > ${o.after}::uuid`}
          order by id
          limit ${o.limit}::int

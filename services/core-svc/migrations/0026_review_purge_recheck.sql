@@ -32,3 +32,6 @@ GRANT SELECT ("rating", "content_fingerprint", "account_id", "deleted_at") ON "r
 --> statement-breakpoint
 -- 파기 칸 고치기(지운 행·옛 익명화 행을 지금 파기 칸으로). 넣기·지우기·표 전체 고치기는 주지 않는다
 GRANT UPDATE ("body", "rating", "content_fingerprint", "author_display", "account_id", "basis_order_id", "deleted_at") ON "review" TO core_maintenance;
+--> statement-breakpoint
+-- 손으로 처리(내부 경로 /purge, 웨이브 끝 보안 리뷰 S1): 보류된 탈퇴 사건을 다시 처리로 표시한다. core_app의 held_event 읽기·넣기는 0022 그대로이고, 다른 칸 고치기·지우기는 주지 않는다
+GRANT UPDATE ("reprocessed_at") ON "held_event" TO core_app;

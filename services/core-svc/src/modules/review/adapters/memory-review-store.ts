@@ -29,6 +29,8 @@ const decodeCursor = (raw: string | undefined): Cursor | undefined => {
  * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기'): 작성자가 지웠는데 별점·지문·계정 ID가 남은 행,
  * 옛 익명화로 참조만 끊긴 살아 있는 후기(account_id = id). Drizzle 저장소의 WHERE와 같은 뜻이다
  */
+const ACCOUNTS_WITHDRAWN = 'identity.accounts-withdrawn';
+
 const isLegacyRow = (r: ReviewRecord): boolean =>
   r.status === 'DELETED' ? r.rating !== null || r.contentFingerprint !== null || r.accountId !== r.reviewId : r.accountId === r.reviewId;
 
@@ -71,7 +73,7 @@ export class MemoryReviewStore implements ReviewStore {
   readonly hiddenFingerprints = new Set<string>();
   /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각(docs/data.md §2 '다시 정리 예약') */
   readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
-  /** 시험용 보류 사건(core DB held_event의 대역). 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 칸만 더했다 */
+  /** 시험용 보류 사건(core DB held_event의 대역). 손으로 처리(purgeHeldWithdrawal)가 읽고 다시 처리로 표시한다 */
   readonly heldEvents: MemoryHeldEvent[] = [];
 
   async insertReview(r: ReviewRecord): Promise<void> {
@@ -167,7 +169,8 @@ export class MemoryReviewStore implements ReviewStore {
     return { applied };
   }
 
-  async purgeByAccount(accountId: string, nowMs: number): Promise<number> {
+  /** 그 계정의 후기를 상태와 관계없이 모두 파기 칸대로(바꾼 행 수) */
+  #purgeAccount(accountId: string, nowMs: number): number {
     let purged = 0;
     for (const [id, r] of this.reviews) {
       if (r.accountId !== accountId) continue;
@@ -178,7 +181,7 @@ export class MemoryReviewStore implements ReviewStore {
   }
 
   async purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number> {
-    const purged = await this.purgeByAccount(accountId, o.nowMs);
+    const purged = this.#purgeAccount(accountId, o.nowMs);
     // 같은 계정 예약이 있으면 늦은 예약 시각을 남긴다(만든 시각은 처음 값)
     const before = this.rechecks.get(accountId);
     this.rechecks.set(accountId, before ? { ...before, dueAtMs: Math.max(before.dueAtMs, o.recheckAtMs) } : { dueAtMs: o.recheckAtMs, createdAtMs: o.nowMs });
@@ -193,7 +196,7 @@ export class MemoryReviewStore implements ReviewStore {
       .slice(0, limit);
     let purged = 0;
     for (const [accountId] of due) {
-      purged += await this.purgeByAccount(accountId, nowMs);
+      purged += this.#purgeAccount(accountId, nowMs);
       this.rechecks.delete(accountId);
     }
     return { accounts: due.length, purged };
@@ -205,14 +208,22 @@ export class MemoryReviewStore implements ReviewStore {
     return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
   }
 
-  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채운다 */
-  async purgeHeldWithdrawal(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
-    throw new Error('아직 없음');
+  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+    // 그 계정의 처리 안 한 탈퇴 보류 사건(업무 키 또는 Kafka 키가 그 계정, 글자 크기 무시)
+    const held = this.heldEvents.filter(
+      (h) => h.topic === ACCOUNTS_WITHDRAWN && h.reprocessedAtMs === undefined && (h.businessKey.toLowerCase() === accountId || h.msgKey?.toLowerCase() === accountId),
+    );
+    if (held.length === 0) return undefined;
+    // 예약 먼저(늦은 쪽), 파기, 보류 행 다시 처리 표시(Drizzle은 한 트랜잭션)
+    const before = this.rechecks.get(accountId);
+    this.rechecks.set(accountId, before ? { ...before, dueAtMs: Math.max(before.dueAtMs, o.recheckAtMs) } : { dueAtMs: o.recheckAtMs, createdAtMs: o.nowMs });
+    const purged = this.#purgeAccount(accountId, o.nowMs);
+    for (const h of held) h.reprocessedAtMs = o.nowMs;
+    return { purged, heldEventKeys: held.flatMap((h) => (h.eventKey === null ? [] : [h.eventKey])) };
   }
 
-  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 C2 시험 단계): 구현 담당이 채운다 */
   async countLegacyRows(): Promise<number> {
-    throw new Error('아직 없음');
+    return [...this.reviews.values()].filter(isLegacyRow).length;
   }
 
   async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {

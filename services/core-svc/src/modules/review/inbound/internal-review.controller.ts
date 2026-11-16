@@ -1,13 +1,17 @@
-// 내부 HTTP: 탈퇴 계정 후기 파기를 손으로 다시 하는 길(소유자 결정 2026-11-16 OPEN[42], ADR-0278, docs/features/identity.md §8 '후기 파기').
-// 탈퇴 사건(identity.accounts-withdrawn)을 잃었거나 보류됐을 때 운영자가 부른다. 파기 칸은 docs/data.md §2 '후기 파기'이고 다시 정리 예약은 만들지 않는다.
-// 옛 경로 /anonymize(계정·주문 참조만 끊음)는 없앴다(부르는 곳이 없다, 추천 적용 2026-11-16).
-import { Controller, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
-import { ContractRouteSchema, InternalTokenGuard, Roles } from '@peaket/platform';
+// 내부 HTTP: 보류된 탈퇴 사건을 손으로 처리하는 길(소유자 결정 2026-11-16 OPEN[42], ADR-0278, docs/features/identity.md §8 '손으로 처리', 웨이브 끝 보안 리뷰 S1).
+// 탈퇴 사건(identity.accounts-withdrawn)이 core held_event에 보류됐을 때 운영자가 부른다. 그 계정의 처리 안 한 탈퇴 보류 사건이 있을 때만 파기하고(없으면 409 withdrawal-not-held),
+// 같은 트랜잭션에서 다시 정리 예약(지금 + 16분)을 쓰고 보류 행을 다시 처리로 표시한다. 요청자·사유는 필수이고 운영 줄 review-purge-manual에 남는다(계정 ID 없음).
+// 옛 경로 /anonymize(계정·주문 참조만 끊음)는 없앴다.
+import { Body, Controller, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import { ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { Reviews } from '../application/reviews.js';
+import { ReviewProblem } from '../domain/review.js';
 
 const AccountParams = z.object({ accountId: z.uuid() }).strict();
-const View = z.object({ purged: z.number().int().nonnegative() });
+/** 누가·왜(사유 10~500자, 요청자 1~64자). 모르는 칸은 받지 않는다 */
+const PurgeBody = z.object({ reason: z.string().min(10).max(500), requestedBy: z.string().min(1).max(64) }).strict();
+const View = z.object({ purged: z.number().int().nonnegative(), heldEvents: z.number().int().positive() });
 
 @Controller('internal/v1/reviews')
 @UseGuards(InternalTokenGuard)
@@ -17,8 +21,13 @@ export class InternalReviewController {
   @Post('accounts/:accountId/purge')
   @HttpCode(200)
   @Roles(['public'])
-  @ContractRouteSchema({ params: AccountParams, responses: { 200: View } })
-  async purge(@Param('accountId') accountId: string): Promise<z.output<typeof View>> {
-    return this.reviews.purgeAccount(accountId);
+  @ContractRouteSchema({ params: AccountParams, body: PurgeBody, responses: { 200: View } })
+  async purge(@Param('accountId') accountId: string, @Body() body: z.output<typeof PurgeBody>): Promise<z.output<typeof View>> {
+    try {
+      return await this.reviews.purgeHeldWithdrawal(accountId, body);
+    } catch (e) {
+      if (e instanceof ReviewProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title, extensions: e.extensions });
+      throw e;
+    }
   }
 }

@@ -42,7 +42,7 @@ export class ReviewAccountWithdrawnHandler implements KeyedHandler<ReviewWithdra
   constructor(
     private readonly reviews: Pick<Reviews, 'purgeWithdrawn'>,
     private readonly codec: AccountWithdrawnCodec = jsonAccountWithdrawnCodec,
-    private readonly o: { logger?: { info(o: object, msg?: string): void } } = {},
+    private readonly o: { logger?: { info(o: object, msg?: string): void; warn?(o: object, msg?: string): void } } = {},
   ) {}
 
   /** @throws Error 값이 null, 또는 계약 Zod AccountWithdrawn.pick({ eventKey, accountId, withdrawnAt })에 맞지 않음 → 플랫폼이 5회 뒤 보류 */
@@ -76,7 +76,9 @@ export class ReviewAccountWithdrawnHandler implements KeyedHandler<ReviewWithdra
    * 저장소 일시 장애는 그대로 던져 파티션을 멈춘다(조용히 넘기면 플랫폼이 처리한 것으로 커밋한다)
    */
   async handle(e: ReviewWithdrawnEvent): Promise<void> {
-    const { purged } = await this.reviews.purgeWithdrawn({ accountId: e.accountId, withdrawnAt: e.withdrawnAt });
-    this.o.logger?.info({ kind: 'review-withdrawn-purge', eventKey: e.eventKey, purged }, '탈퇴 계정 후기를 파기하고 다시 정리를 예약했다');
+    const r = await this.reviews.purgeWithdrawn({ accountId: e.accountId, withdrawnAt: e.withdrawnAt });
+    // 예약 셈이 탈퇴 시각을 읽지 못해 처리 시각 + 16분으로 대체했으면 경고 한 줄(그 값·계정 ID는 싣지 않는다, 웨이브 끝 정확성 리뷰 C1)
+    if (r.recheckFallback) this.o.logger?.warn?.({ kind: 'review-withdrawn-purge', eventKey: e.eventKey }, '탈퇴 시각을 읽지 못해 다시 정리 예약을 처리 시각 + 16분으로 했다');
+    this.o.logger?.info({ kind: 'review-withdrawn-purge', eventKey: e.eventKey, purged: r.purged }, '탈퇴 계정 후기를 파기하고 다시 정리를 예약했다');
   }
 }

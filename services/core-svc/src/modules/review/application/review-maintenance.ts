@@ -2,7 +2,7 @@
 // - review-temp-block-expire(매일): 끝 시각이 지난 임시조치(RIGHTS_TEMP)를 풀고 조치 기록을 복원한다(정보통신망법 §44의2④, POL-044 ③).
 // - review-purge-legacy(정비 시간 04:00~06:00 KST): 이전 판이 남긴 후기 행(작성자가 지웠는데 별점·지문·계정 ID가 남은 행, 옛 익명화로 참조만 끊긴 살아 있는 후기)을
 //   지금 파기 칸으로 고친다(소유자 결정 2026-11-16 OPEN[42], ADR-0278, docs/data.md §2 '이전 판이 남긴 행 고치기', W8-audit2a 리뷰 A2).
-//   id 차례 커서로 1,000행 [가정]씩 묶음마다 커밋하고, 멈춤 신호는 묶음 사이에 본다. 다음 출시의 파기 행 CHECK·VALIDATE 전에 0행을 보고해야 한다.
+//   id 차례 커서로 1,000행 [가정]씩 묶음마다 커밋하고, 멈춤 신호는 묶음 사이에 본다. 결과는 { purged, remaining }이고 다음 출시의 파기 행 CHECK·VALIDATE 전에 remaining 0이어야 한다.
 import type { Clock, MaintenanceTask } from '@peaket/platform';
 import type { ReviewStore } from '../domain/ports.js';
 
@@ -33,7 +33,9 @@ export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { ba
           if (r.last === undefined) break;
           after = r.last;
         }
-        return { purged };
+        // 남은 대상 수를 잠그지 않고 센다(멈춤 신호로 끝났어도). 잠긴 행을 건너뛴 묶음이 '0행'으로 보이지 않게, 다음 출시의 조건은 remaining 0이다(웨이브 끝 정확성 리뷰 C2)
+        const remaining = await store.countLegacyRows();
+        return { purged, remaining };
       },
     },
   ];

@@ -24,6 +24,7 @@ import {
   type TakedownRecord,
   validateReport,
   validateReviewWrite,
+  WITHDRAWAL_RECHECK_DELAY_MS,
   withdrawalRecheckAt,
 } from '../domain/review.js';
 import type { FanProfile, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewNotifier, ReviewStore } from '../domain/ports.js';
@@ -42,6 +43,8 @@ export interface ReviewServiceDeps {
   readonly notifier: ReviewNotifier;
   readonly cases: ReviewCaseSink;
   readonly clock: Clock;
+  /** 손으로 처리의 운영 줄(review-purge-manual). 없으면 남기지 않는다(소비자 조립·단위 시험) */
+  readonly logger?: { info(o: object, msg?: string): void };
 }
 
 const problem = (e: ReviewProblem): ProblemError => new ProblemError({ type: e.type, status: e.status, title: e.title, extensions: e.extensions });
@@ -323,37 +326,41 @@ export class Reviews {
   // 파기 칸은 docs/data.md §2 '후기 파기'다(본문·별점·내용 지문을 비우고 DELETED, 계정·주문 참조는 후기 ID로). 상태가 DELETED라 목록·요약·상세에서 빠진다.
 
   /**
-   * 손으로 다시 하는 길(내부 경로 POST /internal/v1/reviews/accounts/{accountId}/purge). 다시 정리 예약은 만들지 않는다(사건을 잃었을 때 나중에 하는 길이다).
+   * 손으로 처리(내부 경로 POST /internal/v1/reviews/accounts/{accountId}/purge, 웨이브 끝 보안 리뷰 S1, docs/features/identity.md §8 '손으로 처리').
+   * 그 계정의 처리 안 한 탈퇴 보류 사건(held_event)이 있을 때만, 한 트랜잭션에서 보류 행 잠금 → 다시 정리 예약(지금 + 16분) → 파기 → 보류 행 다시 처리 표시를 한다.
+   * 커밋한 뒤 운영 줄 review-purge-manual에 요청자·사유·보류 사건 eventKey·파기 수를 남긴다(계정 ID 없음).
    * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
+   * @throws ReviewProblem('withdrawal-not-held', 409) 그 계정의 보류된 탈퇴 사건이 없음(아무것도 바꾸지 않는다)
    */
-  /**
-   * 손으로 처리(보류된 탈퇴 사건이 있는 계정만). recheckAtMs = 지금 + 16분.
-   * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
-   * @throws ReviewProblem('withdrawal-not-held', 409) 그 계정의 보류된 탈퇴 사건이 없음
-   * 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채우고 purgeAccount를 뺀다
-   */
-  async purgeHeldWithdrawal(_accountId: string, _by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number }> {
-    throw new Error('아직 없음');
-  }
-
-  async purgeAccount(accountId: string): Promise<{ purged: number }> {
+  async purgeHeldWithdrawal(accountId: string, by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number }> {
     if (!UUID.test(accountId)) throw invalidAccount();
-    const purged = await this.d.store.purgeByAccount(accountId.toLowerCase(), this.d.clock.now());
-    return { purged };
+    const nowMs = this.d.clock.now();
+    const r = await this.d.store.purgeHeldWithdrawal(accountId.toLowerCase(), { nowMs, recheckAtMs: nowMs + WITHDRAWAL_RECHECK_DELAY_MS });
+    if (!r) throw new ReviewProblem('withdrawal-not-held', 409, '이 계정에는 처리하지 않은 탈퇴 보류 사건이 없습니다');
+    this.d.logger?.info({ kind: 'review-purge-manual', requestedBy: by.requestedBy, reason: by.reason, heldEventKeys: r.heldEventKeys, purged: r.purged }, '보류된 탈퇴 사건을 손으로 처리했다');
+    return { purged: r.purged, heldEvents: r.heldEventKeys.length };
   }
 
   /**
    * 탈퇴 사건 처리: 그 계정 후기를 파기하고, 같은 트랜잭션에 다시 정리 예약(min(withdrawnAt, 지금) + 16분)을 쓴다.
    * 탈퇴 전에 받은 액세스 토큰(최대 15분)으로 그 뒤에 쓴 후기를 예약 시각에 다시 파기하려는 것이다.
+   * 예약 셈이 탈퇴 시각을 읽지 못하면 예약을 처리 시각 + 16분으로 하고 파기는 그대로 한다(법정 파기가 빠지지 않게, 웨이브 끝 정확성 리뷰 C1).
+   * 그때 결과에 recheckFallback: true를 실어 처리기가 경고 한 줄(값 없음)을 남기게 한다.
    * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
-   * @throws Error 탈퇴 시각을 읽지 못함(파기도 예약도 하지 않는다)
    */
-  async purgeWithdrawn(e: { accountId: string; withdrawnAt: string }): Promise<{ purged: number }> {
+  async purgeWithdrawn(e: { accountId: string; withdrawnAt: string }): Promise<{ purged: number; recheckFallback?: true }> {
     if (!UUID.test(e.accountId)) throw invalidAccount();
     const nowMs = this.d.clock.now();
-    const recheckAtMs = withdrawalRecheckAt(e.withdrawnAt, nowMs);
+    let recheckAtMs: number;
+    let fallback = false;
+    try {
+      recheckAtMs = withdrawalRecheckAt(e.withdrawnAt, nowMs);
+    } catch {
+      recheckAtMs = nowMs + WITHDRAWAL_RECHECK_DELAY_MS;
+      fallback = true;
+    }
     const purged = await this.d.store.purgeWithdrawnAccount(e.accountId.toLowerCase(), { nowMs, recheckAtMs });
-    return { purged };
+    return fallback ? { purged, recheckFallback: true } : { purged };
   }
 
   /** 다시 정리 반복 한 번의 몸통: 때가 된 예약을 limit개(기본 100 [가정])까지 잡아 그 계정을 다시 파기하고 예약을 지운다 */

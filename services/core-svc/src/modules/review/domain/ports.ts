@@ -57,9 +57,7 @@ export interface ReviewStore {
   moderate(reviewId: string, o: { status?: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntilMs?: number; takedown?: TakedownRecord; restoreTakedowns: boolean; removeFingerprint?: string; outcome: ReportRecord['outcome']; nowMs: number }): Promise<void>;
 
   // 탈퇴 후기 파기와 다시 정리(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, docs/features/identity.md §8 '후기 파기'·'다시 정리')
-  /** 그 계정의 후기를 상태와 관계없이 모두 파기 칸대로 비운다(docs/data.md §2 '후기 파기'). 바꾼 행 수. 이미 바꾼 행은 그 계정 ID로 더 찾히지 않아 다시 하면 0 */
-  purgeByAccount(accountId: string, nowMs: number): Promise<number>;
-  /** 파기(purgeByAccount와 같은 칸)와 다시 정리 예약 쓰기를 한 트랜잭션에. 예약이 있으면 늦은 시각을 남긴다. 둘 중 하나라도 실패하면 둘 다 없다 */
+  /** 파기(docs/data.md §2 '후기 파기'의 칸)와 다시 정리 예약 쓰기를 한 트랜잭션에. 예약이 있으면 늦은 시각을 남긴다. 둘 중 하나라도 실패하면 둘 다 없다 */
   purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number>;
   /** due_at <= nowMs인 예약을 limit개까지 SKIP LOCKED로 잠가 그 계정들을 파기하고 예약을 지운다(한 트랜잭션) */
   runDueRechecks(nowMs: number, limit: number): Promise<{ accounts: number; purged: number }>;
@@ -71,7 +69,7 @@ export interface ReviewStore {
    */
   purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }>;
 
-  // 뼈대(W8-audit2a 웨이브 끝 리뷰 S1·C2 시험 단계): 아래 둘은 구현 담당이 채운다
+  // 웨이브 끝 리뷰 S1(손으로 처리)·C2(남은 대상 수)
   /**
    * 그 계정의 보류된 탈퇴 사건(held_event, 토픽 identity.accounts-withdrawn, lower(business_key) 또는 lower(msg_key)가 그 계정, reprocessed_at IS NULL)이 있으면
    * 한 트랜잭션에서: 보류 행 잠금 → 다시 정리 예약(recheckAtMs) → 파기 → 보류 행 reprocessed_at = nowMs. 보류된 사건이 없으면 아무것도 바꾸지 않고 undefined

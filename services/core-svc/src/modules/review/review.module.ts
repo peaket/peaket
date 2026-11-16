@@ -1,6 +1,6 @@
 // review 모듈 조립. 메모리(단위 시험)와 Drizzle(운영) 저장소를 고른다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { MemoryCatalogRepository, type CatalogRepository } from '../catalog/index.js';
 import { DrizzleReviewEventDirectory } from './adapters/db/drizzle-review-event-directory.js';
 import { DrizzleReviewStore } from './adapters/db/drizzle-review-store.js';
@@ -47,9 +47,10 @@ export class ReviewModule {
       { provide: REVIEW_CASE_SINK, useValue: (o.storage === 'memory' ? o.wiring?.cases : o.cases) ?? new LogReviewCaseSink() },
       {
         provide: Reviews,
-        useFactory: (store: ReviewStore, events: ReviewEventDirectory, eligibility: ReviewEligibility, fanProfile: FanProfile, notifier: ReviewNotifier, cases: ReviewCaseSink, clock: Clock) =>
-          new Reviews({ store, events, eligibility, fanProfile, notifier, cases, clock }),
-        inject: [REVIEW_STORE, REVIEW_EVENT_DIRECTORY, REVIEW_ELIGIBILITY, FAN_PROFILE, REVIEW_NOTIFIER, REVIEW_CASE_SINK, CLOCK],
+        // 운영 로거는 손으로 처리의 운영 줄(review-purge-manual)에 쓴다
+        useFactory: (store: ReviewStore, events: ReviewEventDirectory, eligibility: ReviewEligibility, fanProfile: FanProfile, notifier: ReviewNotifier, cases: ReviewCaseSink, clock: Clock, logger?: PlatformLogger) =>
+          new Reviews({ store, events, eligibility, fanProfile, notifier, cases, clock, ...(logger ? { logger } : {}) }),
+        inject: [REVIEW_STORE, REVIEW_EVENT_DIRECTORY, REVIEW_ELIGIBILITY, FAN_PROFILE, REVIEW_NOTIFIER, REVIEW_CASE_SINK, CLOCK, { token: PLATFORM_LOGGER, optional: true }],
       },
     ];
     if (o.storage === 'database') {
