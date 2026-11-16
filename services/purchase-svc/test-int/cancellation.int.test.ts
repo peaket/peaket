@@ -915,7 +915,11 @@ describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-sv
     const lines: { level: 'warn' | 'error'; o: object; msg: string }[] = [];
     return { lines, log: { warn: (o: object, msg: string) => void lines.push({ level: 'warn', o, msg }), error: (o: object, msg: string) => void lines.push({ level: 'error', o, msg }) } };
   };
-  const expiredLines = (lines: { o: object; msg: string }[]) => lines.filter((l) => JSON.stringify(l).includes('event-refund-hold-expired'));
+  /** SEV2 event-refund-hold-expired 줄. eventId를 주면 그 회차 줄만 센다(앞 시험이 남긴 미룸의 기한이 이 시험의 틱과 겹칠 수 있다, 다시 보기 R3) */
+  const expiredLines = (lines: { o: object; msg: string }[], eventId?: string) =>
+    lines.filter((l) => JSON.stringify(l).includes('event-refund-hold-expired') && (eventId === undefined || JSON.stringify(l).includes(eventId)));
+  /** 뒤 시험의 틱에 기한이 걸리지 않게 이 시험이 건 미룸을 푼다 */
+  const releaseHold = (eventId: string) => admin.pool.query('update event_refund_hold set released_at = now() where event_id = $1 and released_at is null', [eventId]);
 
   test('R-T38 ① 회차 취소 요청이 판정 중인 회차의 보류 취소는 마감이 지나도 환급되지 않고(입장 조회·결제사 0, held 1) 다른 회차의 보류 취소는 같은 틱에 환급된다', async () => {
     const held = await heldCancellation();
@@ -937,6 +941,7 @@ describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-sv
       expect(await cancellationRow(other.cancellationId)).toMatchObject({ status: 'REFUNDED' });
     } finally {
       await settle(held.cancellationId);
+      await releaseHold(held.w.eventId);
     }
   });
 
@@ -976,21 +981,21 @@ describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-sv
       await expect(runner.run()).resolves.toMatchObject({ refunded: 0, held: 1 });
       expect(gatewayCalls).toHaveLength(0);
       expect((await holdRow(w.eventId))?.released_at).toBeNull();
-      expect(expiredLines(sink.lines)).toHaveLength(0);
+      expect(expiredLines(sink.lines, w.eventId)).toHaveLength(0);
 
       now = heldAtMs + HOLD_MS;
       await expect(runner.run()).resolves.toMatchObject({ refunded: 1, held: 0 });
       expect((await holdRow(w.eventId))?.released_at?.getTime()).toBe(now);
       expect(gatewayCalls).toHaveLength(1);
       expect(gatewayCalls[0]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
-      const expired = expiredLines(sink.lines);
+      const expired = expiredLines(sink.lines, w.eventId);
       expect(expired).toHaveLength(1);
       expect(JSON.stringify(expired[0])).toContain(w.eventId);
       expect(JSON.stringify(expired[0])).toContain(requestId);
 
       now += 60_000;
       await runner.run();
-      expect(expiredLines(sink.lines)).toHaveLength(1);
+      expect(expiredLines(sink.lines, w.eventId)).toHaveLength(1);
       expect(gatewayCalls).toHaveLength(1);
     } finally {
       await settle(cancellationId);
@@ -1044,6 +1049,7 @@ describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-sv
       await expect(writes.claimDue(cancellationId, dueMs)).resolves.toBe(false);
     } finally {
       await settle(cancellationId);
+      await releaseHold(w.eventId);
     }
   });
 
