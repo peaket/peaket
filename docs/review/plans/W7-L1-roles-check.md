@@ -171,7 +171,53 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 ### 7. 기계로 보지 않는 것
 
 - 시험이 실제로 먼저 실패했는지(‘실패 확인’ 절의 내용), 리뷰·검증의 내용, 리뷰·검증 담당을 웨이브마다 새로 띄웠는지(지난 웨이브 세션은 범위 밖이다), 다른 모델을 썼는지, 세션 ID를 지어냈는지. 감독이 웨이브 보고서에 적는다.
-- `loadtest/`·`specs/`는 ADR-0270 결정 8의 코드 경로에 없어 ⑥에서 보지 않는다. 그 아래 시험 파일은 ⑤가 본다.
+- ~~`loadtest/`·`specs/`는 ⑥에서 보지 않는다~~: 아래 8의 2(RV-02)로 바꿨다. 이제 ⑥은 허용 목록으로 보므로 `loadtest/`·`specs/`의 `.md`가 아닌 파일도 막는다.
+- 시험 설정(RV-04)과, 리뷰·검증 커밋이 계획 파일을 고쳤는지(RV-05)는 아직 보지 않는다(아래 8의 4).
+
+### 8. 리뷰 지적 RV-01~RV-03과 감독 결정의 보탬(2026-11-16)
+
+리뷰 절의 RV-01~RV-03(중간, 통과 기준)을 이 묶음 안에서 고친다. 아래가 위 3의 ③·⑤·⑥과 ①을 바꾸고, 다르면 이것이 이긴다. 방향을 바꾸는 결정은 아니다. 결정 5의 검사 항목('구현이 시험 파일을 바꾸지 않는다', '시험 먼저', 결정 1 표의 '코드를 쓰지 않는다')을 저장소의 실제 파일과 리뷰 반영 차례에 맞게 좁혔을 뿐이다. 정본 문장은 docs/architecture.md §8.6 4 '합치기 전 역할 확인'의 세부에 적었다.
+
+1. **RV-01 시험 파일 패턴 넓히기 (추천 적용, 2026-11-16)**: 2026-11-16 `git ls-files`로 세어 보니 지금 패턴 밖의 시험은 파이썬 시험 `tools/doc-check/test_*.py` 5개와 폴더 `services/*/test-sim/` 9개(도우미 `cluster.ts`·`record.ts`·`pollers.mjs` 포함)다. 나머지(`fixtures/` 18개)는 모두 `test/`·`test-int/` 아래라 이미 잡힌다. 그래서 ⑤의 시험 파일에 둘을 더한다.
+   - 파일 이름이 `test_<1자 이상>.py`(파이썬 시험 꼴).
+   - 폴더 마디가 정확히 `test-sim`.
+   - 넓히지 않는 것: `test-*` 폴더를 통째로(`test-ints/`가 시험 폴더가 되어 RC-23과 어긋나고 지금 쓰는 곳이 없다), 제품 폴더 안의 시험 도우미(`apps/web/src/shared/lib/test-ts-resolve.mjs`·`packages/platform/src/testing.ts`처럼 이름에 test가 든 소스. 제품 빌드에 드는 파일이라 시험 파일로 묶으면 구현 담당이 못 고친다).
+   - 새 시험 폴더 꼴이 생기면 이 목록(§8.6 세부)부터 고친다.
+2. **RV-02 코드를 쓰지 않는 역할이 바꿔도 되는 경로를 허용 목록으로 (추천 적용, 2026-11-16)**: 막는 목록(맨 위 폴더 일곱)으로는 `deploy/`(Helm 차트 28개)·`loadtest/`·`specs/`·뿌리 설정(`package.json`·`pnpm-lock.yaml`·`eslint.config.mjs`·`turbo.json`·`renovate.json`·`.gitignore` 등)이 빠진다. 앞으로 생길 폴더도 빠진다. 그래서 ⑥을 허용 목록으로 바꾼다.
+   - `plan`·`review`·`verify`·`record`·`doc` 커밋이 바꿔도 되는 경로: `docs/`로 시작하는 경로, 그리고 코드 경로(맨 위 폴더 일곱) 밖에 있고 이름이 `.md`로 끝나는 파일(뿌리 `README.md`·`CLAUDE.md`, `.claude/skills/*/SKILL.md`, `specs/README.md` 등). 대소문자는 그대로 본다.
+   - 그 밖의 경로는 모두 실패다. 코드 경로 안의 `.md`(예 `tools/ci/README.md`)는 지금처럼 막는다. 그 파일은 구현 담당이 고친다(결정 8은 코드 경로를 바꾸는 묶음을 코드 묶음으로 본다).
+   - 감독 결정 '구현 뒤 plan 커밋은 정본·계획 문서만 바꿀 때 허용'은 이 규칙이 그대로 지킨다. plan 커밋은 언제나 이 허용 목록 안만 바꿀 수 있다.
+   - 검사 이름은 그대로 `코드 경로`다. 까닭에는 '문서 밖 경로'와 그 경로를 적는다.
+3. **RV-03 리뷰 반영도 시험 먼저 (추천 적용, 2026-11-16)**: 리뷰 반영 커밋은 꼬리말 `Finding: <지적 번호>`를 하나 이상 단다. 지적 하나에 한 줄이고, 여럿이면 줄을 되풀이한다. 값 꼴은 `Batch`와 같다(예 `RV-01`, `A2-17`). `Finding`은 `review-fix` 밖의 커밋에 달면 실패다(①).
+   - 차례(③): 묶음 안에서 `Fix-By: impl` 커밋의 `Finding` 값마다, 그 커밋보다 앞에 같은 값을 단 `Fix-By: test` 커밋이 있어야 한다. 같은 지적의 첫 `Fix-By: impl`이 첫 `Fix-By: test`보다 먼저 오거나, 시험 쪽 커밋이 없으면 실패다. 지적마다 따로 보므로, 둘째 바퀴의 새 지적도 시험이 먼저다.
+   - 재현 시험이 없어도 되는 고침: `Fix-By: impl` 커밋이 바꾼 파일이 모두 `.md`이면(예 `tools/ci/README.md` 문구) 시험 쪽 커밋을 요구하지 않는다. 설정·워크플로·코드는 예외가 아니다. 시험 없이 고칠 만한 문서 지적은 plan 커밋(허용 목록 안)이 고쳐도 된다.
+   - 실패 줄은 `[차례] <묶음> <그 Fix-By: impl 커밋 해시>`이고, 까닭에 지적 번호를 적는다.
+4. **감독 결정: 첫 구현 전 plan·test 섞기 (2026-11-16, 갈래 3 사례)**: 첫 `Role: impl` 커밋 전에는 plan과 test 커밋이 섞여도 된다(예 plan → test → plan → test → plan → impl). 위 3의 ③ '역할별 처음 나온 커밋끼리 견줌'과 맞는다. 견주는 것은 첫 plan < 첫 test < 첫 impl뿐이라 그 사이의 섞임은 막지 않는다.
+   - 지키는 것: 첫 test가 첫 impl보다 앞이다. 첫 plan이 첫 test보다 앞이다(ADR-0270 결정 2. 계획 없이 쓴 시험은 실패). 구현 쪽(impl·`Fix-By: impl`) 커밋은 시험 파일을 바꾸지 않는다(⑤). 역할마다 세션이 다르다(⑦).
+   - 구현 뒤의 plan 커밋은 허용 목록 안만 바꿀 때 통과한다(위 2).
+5. **구간 끝 정리 목록 후보**: RV-04(구현 커밋이 시험 설정 `vitest*.config.mjs`의 include·exclude나 패키지 시험 스크립트를 바꿔 시험을 빼는 것)와 RV-05(리뷰·검증 커밋이 그 묶음의 계획 파일을 고쳤는지)는 이 묶음에서 고치지 않는다. 감독이 갈래 1의 구간 끝 정리 목록에 올린다.
+6. **바뀌는 기존 시험(시험 담당 몫, `Fix-By: test`)**:
+   - RC-26의 통과 사례 가운데 `.md`가 아닌 `notes/services/`·`toolbox/`·`.githubx/`·`loadtest/`·`specs/`는 이제 실패다. 통과 사례는 `docs/apps/`와 코드 경로 밖의 `.md`로 바꾼다.
+   - 좋은 묶음 BAT-901의 리뷰 반영 두 커밋에 같은 `Finding: RV-901`을 단다(시험 쪽이 먼저).
+   - 리뷰 반영을 쓰는 다른 사건(RC-09·RC-16·RC-25·RC-27 등)에도 `Finding`을 단다. 없으면 ①에서 새 실패가 나온다.
+
+**더하는 시험**(이름 꼴은 위 4와 같다)
+
+| 시험 | 사건(좋은 묶음에서 바꾼 곳) | 단언 |
+| --- | --- | --- |
+| RC-36 ⑤ 파이썬 시험과 test-sim 폴더도 시험 파일이다 | impl 커밋이 `tools/doc-check/test_public.py` / `services/q/test-sim/cluster.ts`(시험 이름 꼴이 아닌 도우미) / `services/q/test-sim/a.sim.test.ts`를 각각 더함·고침·지움 | 1, `[시험 파일] BAT-901 <impl 해시>` |
+| RC-37 ⑤ 파이썬·test-sim과 비슷한 경로는 시험 파일이 아니다 | impl이 `services/q/py/test_.py`(뒤가 빔)·`services/q/py/contest_a.py`·`services/q/py/test_a.pyc`·`services/q/py/test_a.py.txt`·`services/q/test-sims/a.ts`·`services/q/Test-sim/a.ts`·`apps/web/src/shared/lib/test-ts-resolve.mjs`를 고침 | 0 |
+| RC-38 ⑥ 코드를 쓰지 않는 역할은 문서 밖 경로를 못 바꾼다 | review→`deploy/charts/a/templates/deployment.yaml` / plan→`loadtest/a.mjs` / verify→`specs/a.tla` / record→`package.json`·`pnpm-lock.yaml`·`eslint.config.mjs`·`turbo.json`·`.gitignore`(사례마다) / doc→`.claude/settings.json` / 기록만 묶음 record→`notes/a.txt` / plan→`tools/ci/README.md`(코드 경로 안의 `.md`) / 지우기(record가 `deploy/a.yaml`을 지움) | 1, `[코드 경로]` 사례마다, 까닭에 그 경로 |
+| RC-39 ⑥ 허용 목록 안은 통과한다 | plan→`docs/api/openapi.yaml`·`docs/wbs/wbs.csv` / doc→`README.md`·`CLAUDE.md` / review→`.claude/skills/x/SKILL.md` / record→`specs/README.md`·`deploy/README.md` | 0 |
+| RC-40 ③ 구현 뒤의 plan 커밋 | 첫 impl 뒤 plan 커밋이 `docs/PROGRESS.md`만 고침 → 통과 / 같은 자리의 plan 커밋이 `services/a/src/x.ts`도 고침 → 실패 | 0·1(`[코드 경로]`) |
+| RC-41 ③ 첫 구현 전에는 plan과 test가 섞여도 된다 | plan → test → plan → test → plan → impl … / plan → plan → test → test → impl … | 0 |
+| RC-42 ③ 첫 구현 전 섞기의 경계 | test → plan → test → impl(첫 test가 첫 plan보다 앞) / plan → plan → impl → test(첫 impl 앞에 test가 없음) | 1, `[차례]` 사례마다 |
+| RC-43 ① Finding 꼬리말 | review-fix에 Finding 없음 / 값이 `RV 01`·`../x`·빈 값 / impl·test·review 커밋에 Finding / review-fix에 `Finding` 두 줄(`RV-01`·`RV-02`)은 통과 / `finding: RV-01`은 없는 것 | 1·0, `[꼬리말]` |
+| RC-44 ③ 리뷰 반영은 지적마다 시험 쪽이 먼저다 | `Fix-By: impl`(RV-01)만 있음 / `Fix-By: impl`(RV-01) → `Fix-By: test`(RV-01) / test(RV-01) → impl(RV-01) → impl(RV-02, 시험 쪽 없음) / test(RV-01)이 다른 묶음 BAT-903에만 있음 | 1, `[차례] BAT-901 <그 Fix-By: impl 해시>`, 까닭에 지적 번호 |
+| RC-45 ③ 리뷰 반영 차례의 통과 꼴 | test(RV-01·RV-02 두 줄) → impl(RV-01) → impl(RV-02) / test(RV-01) → test(RV-01) → impl(RV-01) / impl(RV-03)이 `tools/ci/README.md`·`docs/PROGRESS.md`만 고침(시험 쪽 없음) | 0 |
+| RC-46 ③ 문서 예외의 경계 | 시험 쪽 없는 `Fix-By: impl`(RV-03)이 `tools/ci/README.md`와 `tools/ci/roles-check.mjs`를 함께 고침 / `.github/workflows/a.yml`만 고침 / `tools/ci/README.md.bak`만 고침 | 1, `[차례]` |
+
+틀린 구현 표본에 M-34~M-42를 더했다('틀린 구현 목록' 표 끝).
 
 ## 실패 확인
 
@@ -259,6 +305,15 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | M-31 | ⑨ | 커밋 세션이 표에 있는지만 보고 역할은 보지 않는다 | RC-34 |
 | M-32 | ⑩ | 실패를 찍기만 하고 0으로 끝낸다 | RC-04 등 모든 실패 시험 |
 | M-33 | ⑩ | 첫 실패에서 멈춘다 | RC-35 |
+| M-34 | ⑤ | 시험 파일 패턴에서 폴더 `test-sim`을 뺀다 | RC-36 |
+| M-35 | ⑤ | 시험 파일 패턴에서 `test_*.py`를 뺀다 | RC-36 |
+| M-36 | ⑤ | `test_*.py`를 이름 앞부분만 본다(`test_a.pyc`도 시험 파일) | RC-37 |
+| M-37 | ⑥ | 허용 목록 대신 옛 막는 목록(맨 위 폴더 일곱)으로 본다 | RC-38 |
+| M-38 | ⑥ | 코드 경로 안의 `.md`도 허용한다 | RC-38 |
+| M-39 | ③ | 리뷰 반영 차례를 묶음의 첫 `Fix-By: test` < 첫 `Fix-By: impl`로만 본다(지적마다 보지 않음) | RC-44 |
+| M-40 | ③ | 시험 쪽 커밋을 다른 묶음에서도 찾는다 | RC-44 |
+| M-41 | ③ | 문서 예외를 '바꾼 파일 가운데 `.md`가 하나라도 있으면'으로 본다 | RC-46 |
+| M-42 | ① | `Finding` 꼬리말이 없어도 리뷰 반영을 받는다 | RC-43 |
 
 ## 검증
 
@@ -266,7 +321,7 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T07:54+09:00 |
+| plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T09:24+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T08:33+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T08:59+09:00 |
 | review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T09:17+09:00 |
