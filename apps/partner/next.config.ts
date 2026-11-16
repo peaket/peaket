@@ -11,6 +11,9 @@ const config: NextConfig = {
   poweredByHeader: false,
   // 퍼블리싱 중 여러 사람이 같은 앱을 동시에 빌드할 때만 산출 폴더를 나눈다(기본은 .next)
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
+  // 운영 이미지는 standalone 산출물만 담는다(docs/frontend.md §5.18 'Next.js 앱 서버 실행', ADR-0079 결정 27, 검증 VF-11).
+  // 로컬·검사의 `next start`는 경고를 내고 그대로 돈다(정적 자산은 <distDir>/static에서 읽는다)
+  output: 'standalone',
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap', '@peaket/validation'],
   // 앱 서버 텔레메트리(instrumentation.ts, BUILD_ORDER HOT-400)는 묶지 않고 Node가 그대로 읽는다(OTel SDK가 모듈 읽기를 가로채 계측한다)
   serverExternalPackages: ['@peaket/platform'],

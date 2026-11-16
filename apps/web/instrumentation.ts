@@ -18,7 +18,8 @@ export async function register(): Promise<void> {
     const { startAppServerTelemetry } = await import('@peaket/platform/telemetry/app-server');
     startAppServerTelemetry({ defaultServiceName: 'web' });
   } catch (e) {
-    // Next.js 16은 register가 던져도 프로세스를 끝내지 않는다. 그래서 0이 아닌 코드로 끝내는 일을 맡기고 오류는 그대로 다시 던진다(리뷰 RV-08)
+    // Next.js 16은 register가 던져도 프로세스를 끝내지 않는다. Next.js 서버 안이면 오류 줄을 쓰고 그 자리에서 끝낸다(리뷰 RV-08·검증 VF-11).
+    // 그 밖(계측 진입점을 바로 부르는 단위 시험)에서는 돌아오고 오류를 그대로 다시 던진다
     const { exitAfterStartupFailure } = await import('@peaket/platform/telemetry/app-server');
     exitAfterStartupFailure(e);
     throw e;

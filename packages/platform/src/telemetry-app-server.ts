@@ -28,11 +28,16 @@ export function startAppServerTelemetry(o: AppServerTelemetryOptions): Telemetry
 }
 
 /**
- * 같은 출처 앱 서버의 시작 확인(서버 액션 키·추적 모드)이 실패했을 때 프로세스를 끝낸다(리뷰 RV-08, docs/devops.md §6.6 '틀리면 서버를 띄우지 않는다').
- * Next.js 16은 계측 진입점(register)이 던져도 프로세스를 끝내지 않고 모든 요청에 500으로 답하며 남는다(2026-11-16 운영 빌드로 확인).
- * 오류를 적고, 지금 도는 마이크로태스크(던진 오류를 받는 쪽)가 먼저 끝나도록 다음 차례에 0이 아닌 코드로 끝낸다
+ * 같은 출처 앱 서버의 시작 확인(서버 액션 키·추적 모드)이 실패했을 때, Next.js 서버 안이면 그 자리에서 프로세스를 끝낸다
+ * (리뷰 RV-08·검증 VF-11, docs/devops.md §6.6 '틀리면 서버를 띄우지 않는다'). Next.js 16은 계측 진입점(register)이 던져도 프로세스를
+ * 끝내지 않고 모든 요청에 500으로 답하며 남는다. 끝내기를 미루면(타이머) 그 사이 첫 요청에 답해 '떴다'가 된다(2026-11-16 열 번 중 아홉 번).
+ * 그래서 오류 줄을 표준 오류에 동기로 쓰고 바로 0이 아닌 코드로 끝낸다. Next.js 서버인지는 서버가 듣기 시작할 때 다는 환경 값
+ * `__NEXT_PRIVATE_ORIGIN`으로 본다(next start·standalone server.js 모두, next/dist/server/lib/start-server.js). 그 밖(계측 진입점을 바로 부르는
+ * 단위 시험 등)에서는 아무것도 하지 않고 돌아가며, 부르는 쪽이 오류를 다시 던진다
  */
-export function exitAfterStartupFailure(error: unknown): void {
-  console.error(`서버를 띄우지 않는다: ${error instanceof Error ? error.message : String(error)}`);
-  setTimeout(() => process.exit(1), 0);
+export function exitAfterStartupFailure(error: unknown, env: Record<string, string | undefined> = process.env): void {
+  if (env.__NEXT_PRIVATE_ORIGIN === undefined) return;
+  process.stderr.write(`서버를 띄우지 않는다: ${error instanceof Error ? error.message : String(error)}
+`);
+  process.exit(1);
 }
