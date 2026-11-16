@@ -1,0 +1,1107 @@
+# 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-partner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
+# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-trace
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-partner-trace
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/partner/artists(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/access-tokens(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-acceptances(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-completions(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-passkey-registrations(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-passkeys(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-passwords(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-totp-confirmations(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/invitation-totp-enrollments(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/passkey-registrations(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/passkeys(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/password-changes(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/reauthentications(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/sessions(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/sessions/me(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/unlock-links(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/unlocks(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendee-exports(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendees(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/device-placements(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/entry-policy(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/flags(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/fraud-report(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/gate-status(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/live-snapshot(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/report(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlement-exports(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlements(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff-invitations(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-delivery-exports(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-stats(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-orders(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-pickups(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-shipment-imports(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/payout-account(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/places(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/product-settlements(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/products(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/seatmap-templates(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/seller-profile(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/settlements(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/team-accounts(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/todo-summary(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhook-deliveries(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/webhooks(/.*)?
+          method: TRACE
+        - path:
+            type: PathPrefix
+            value: /
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /.*
+          method: TRACE
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-trace-not-allowed
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-public
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-partner-public
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/partner/auth/access-tokens
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/access-tokens
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/sessions
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/sessions
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/unlock-links
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/unlock-links
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/unlocks
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/unlocks
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-webhooks
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-partner-webhooks
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/webhooks/portone
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/webhooks/portone
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/webhooks/toss
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/webhooks/toss
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: payment-svc
+          namespace: purchase
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-api
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-partner-api
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-acceptances
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-acceptances
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-completions
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-completions
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkey-registrations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkey-registrations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkeys
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkeys
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passwords
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passwords
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-confirmations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-confirmations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-enrollments
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-enrollments
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/passkey-registrations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/passkey-registrations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/passkeys
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/auth/passkeys
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/passkeys
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/passkeys/[^/]+
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/auth/passkeys/[^/]+
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/password-changes
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/password-changes
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/reauthentications
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/reauthentications
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/sessions/me
+          method: DELETE
+        - path:
+            type: Exact
+            value: /v1/partner/auth/sessions/me
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/team-accounts
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/team-accounts
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlements
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlements
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/payout-account
+          method: PUT
+        - path:
+            type: Exact
+            value: /v1/partner/payout-account
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/product-settlements
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/product-settlements
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/settlements/[^/]+/disputes
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/settlements/[^/]+/disputes
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: payment-svc
+          namespace: purchase
+          port: 8080
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/device-placements/[^/]+
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/device-placements/[^/]+
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/partner/artists
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/artists
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+
+          method: PATCH
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendee-exports
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendee-exports
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendee-exports
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendees
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/attendees
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/entry-policy
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/entry-policy
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/flags
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/flags
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/fraud-report
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/fraud-report
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/gate-status
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/gate-status
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/live-snapshot
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/live-snapshot
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/report
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/report
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlement-exports
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/settlement-exports
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff-invitations
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff-invitations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/merch-delivery-exports
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/merch-delivery-exports
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/merch-order-items
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/merch-order-items
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/arrival-confirmation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/arrival-confirmation
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/arrival-rejection
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/arrival-rejection
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/shipment
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-order-items/[^/]+/shipment
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/merch-order-stats
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/merch-order-stats
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-orders/[^/]+/delivery
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/merch-orders/[^/]+/delivery
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/merch-pickups
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/merch-pickups
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/merch-shipment-imports
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/merch-shipment-imports
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/places
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/places
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/productions
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/productions
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/productions
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+
+          method: PATCH
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/events
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/events
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/images
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/images
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/images/[^/]+
+          method: PATCH
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/images/[^/]+
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/images/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
+          method: GET
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-api-2
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-partner-api
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-review
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-review
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-review
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap-imports
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/seatmap-imports
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/products
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/products
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/products
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/products/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/products/[^/]+
+          method: PATCH
+        - path:
+            type: RegularExpression
+            value: /v1/partner/products/[^/]+
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/seatmap-templates
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/seatmap-templates
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/seatmap-templates/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/seatmap-templates/[^/]+
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/seller-profile
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/seller-profile
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/seller-profile/change-requests
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/seller-profile/change-requests
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+/invitation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+/invitation
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/todo-summary
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/todo-summary
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhook-deliveries/[^/]+/redeliveries
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhook-deliveries/[^/]+/redeliveries
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/webhooks
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/partner/webhooks
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/webhooks
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+
+          method: PATCH
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+/deliveries
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+/deliveries
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+/secret-rotations
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/webhooks/[^/]+/secret-rotations
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080

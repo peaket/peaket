@@ -1,0 +1,121 @@
+# gw-queue 라우트 원천(BUILD_ORDER HOT-410, docs/infra.md §4.1 '경로별 메서드 생성기'). 적용 대상이 아니다: node tools/ci/gateway-routes.mjs --write가
+# 이 파일과 docs/api/openapi.yaml로 deploy/gateways/gw-queue.routes.yaml을 만든다.
+# 규칙의 맞춤에는 '이 경로 아래의 계약 경로를 맡는다'는 경로만 적는다(메서드는 계약이 정한다). 값은 openapi의 꼴(틀 {이름})이다.
+# PathPrefix는 그 경로와 그 아래, Exact는 그 계약 경로 하나다(같은 앞부분 아래를 다른 라우트·백엔드로 나눌 때).
+# queue.peaket.example의 계약 경로는 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 경로를 더하면 여기에 맡을 규칙을 정한다.
+# 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-queue.yaml에 손으로 두고 라우트 이름으로 고른다.
+# 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
+---
+# gw-queue-buy: 대기열 진입·입장 확정(ticket:buy, docs/security/authz-matrix.md §5.1)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-buy
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/queues/{eventId}/entries
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/admission
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080
+---
+# gw-queue-api: 로비·사전 검증·대기 취소·추가 검증 조회와 제출(유효한 팬 토큰)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-api
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/entries/me
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/lobby-participants
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/pre-verifications
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/verification
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080
+---
+# gw-queue-public: 토큰 없는 대기열 경로(셔플 증명)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-public
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/queues/{eventId}/shuffle-proof
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080

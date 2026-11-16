@@ -1,0 +1,50 @@
+# Envoy Gateway 컨트롤러 설정(EnvoyGateway 객체 하나, BUILD_ORDER HOT-410, docs/infra.md §4.1 '전역 레이트 리밋 걸기').
+# 적용 대상 폴더(deploy/gateways/*.yaml)가 아니다. 설치 파일의 ConfigMap envoy-gateway-config 키 envoy-gateway.yaml 자리에 이 객체를 그대로 넣는다
+# (로컬 kind는 tools/local/cluster.mjs gateways가 gatewayInstall로 넣는다). 설치 파일 기본값(v1.10.0)에 더한 것:
+# - extensionApis.enableLua: 공통 Lua(원본 확인·끝단 머리 지우기·typ 확인)를 쓴다(기본 꺼짐, docs/infra.md §4.1 '자리')
+# - rateLimit.backend: 전역 레이트 리밋의 카운터 저장소. Redis에 TLS로만 붙는다(D-T50 ④). 주소는 같은 네임스페이스의 Service
+#   peaket-ratelimit-redis(운영은 세션·캐시 클러스터를 가리키는 이름, 로컬 kind는 TLS만 받는 Valkey), 인증서 Secret peaket-ratelimit-redis-tls
+#   (tls.crt·tls.key·ca.crt. 레이트 리밋 서비스가 /redis-certs에 붙인다). 판정 시간 상한(timeout)과 실패 때 동작(failClosed)은 기본값(20ms, 통과)이다(D-T50 ③)
+# - rateLimitDeployment: 레이트 리밋 서비스 복제 2, 카운터 키 앞에 rl:(CACHE_KEY_PREFIX, docs/data.md §3 '세션·캐시 클러스터의 키 이름'),
+#   자체 서명 CA를 믿게 REDIS_TLS_CACERT(Envoy Gateway는 클라이언트 인증서만 넘기고 CA 칸이 없다, internal/infrastructure/kubernetes/ratelimit/resource.go v1.10.0).
+#   이미지는 이 판의 기본값 그대로이고 다이제스트는 tools/local/cluster.mjs PINNED(envoyGatewayRatelimitDigest)에 둔다
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyGateway
+extensionApis:
+  enableLua: true
+gateway:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+logging:
+  level:
+    default: info
+rateLimit:
+  backend:
+    type: Redis
+    redis:
+      url: peaket-ratelimit-redis.envoy-gateway-system.svc.cluster.local:6379
+      tls:
+        certificateRef:
+          name: peaket-ratelimit-redis-tls
+provider:
+  type: Kubernetes
+  kubernetes:
+    rateLimitDeployment:
+      replicas: 2
+      container:
+        image: docker.io/envoyproxy/ratelimit:5ae0682e
+        env:
+          - name: CACHE_KEY_PREFIX
+            value: "rl:"
+          - name: REDIS_TLS_CACERT
+            value: /redis-certs/ca.crt
+      patch:
+        type: StrategicMerge
+        value:
+          spec:
+            template:
+              spec:
+                containers:
+                  - imagePullPolicy: IfNotPresent
+                    name: envoy-ratelimit
+    shutdownManager:
+      image: envoyproxy/gateway:v1.10.0

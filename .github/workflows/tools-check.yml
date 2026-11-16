@@ -29,6 +29,9 @@ jobs:
       - run: node --test "tools/ci/*.test.mjs"
       # 게이트웨이 다섯의 정의 정적 시험(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400)
       - run: node --test "deploy/gateways/test/*.test.mjs"
+      # 게이트웨이 라우트 생성 대조(D-T42 ①②, docs/infra.md §4.1 '생성 대조', BUILD_ORDER HOT-410): openapi·라우트 원천으로 다시 만든 결과가 생성 파일과 다르면 실패.
+      # gitops-check(docs/devops.md §3, BAS-150)가 생기기 전에는 이 잡이 돈다
+      - run: node tools/ci/gateway-routes.mjs --check
       # 엣지 저장소 맞추기 도구(ADR-0223 결정 10)
       - run: node --test "tools/edge/*.test.mjs"
       # 결제사 스모크 도구(BUILD_ORDER HOT-145. 실제 결제사를 부르지 않는다)

@@ -66,6 +66,9 @@ jobs:
           done
           node --test --test-timeout=300000 tools/local/e2e/gateways.e2e.mjs
           node --test --test-timeout=300000 tools/local/e2e/queue-cors.e2e.mjs
+          # 경로별 메서드·전역 한도·웹훅 IP 한도·게이트웨이 오류(BUILD_ORDER HOT-410, D-T42·D-T43·D-T50). 레이트 리밋 서비스 복제를 0으로 줄였다 되돌리는
+          # 시험(D-T50 ③)이 맨 끝이라 같은 클러스터의 다른 시험 뒤에 돈다
+          node --test --test-timeout=300000 tools/local/e2e/gateway-limits.e2e.mjs
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true
@@ -79,6 +82,7 @@ jobs:
           # 게이트웨이: 정의의 조건, 컨트롤러·프록시 로그, 포트 전달 기록
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system get gateways,httproutes,securitypolicies,clienttrafficpolicies,backendtrafficpolicies,envoyextensionpolicies,pods -o wide || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system logs deploy/envoy-gateway --tail=200 || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system logs deploy/envoy-ratelimit --tail=100 || true
           cat gateways-forward.log || true
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true

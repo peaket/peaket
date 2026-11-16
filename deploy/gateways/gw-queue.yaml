@@ -1,6 +1,8 @@
 # gw-queue 게이트웨이(BUILD_ORDER HOT-400, 묶음 BAT-055). 정본: docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현'·§9 '응답 보안 헤더', docs/architecture.md §4 'CSRF 확인 규칙',
 # docs/features/identity.md §3 '발급자와 검증 규칙', docs/security/authz-matrix.md §5.1, docs/observability.md §6 '신뢰 경계의 추적 문맥'.
 # Envoy Gateway v1.10.0의 API(gateway.envoyproxy.io/v1alpha1)와 Gateway API v1로 쓴다. 값은 정본 값 그대로이고 바꾸면 정본을 먼저 고친다.
+# API 호스트의 HTTPRoute는 생성 파일 gw-queue.routes.yaml에 있다(원천 routes/gw-queue.yaml, node tools/ci/gateway-routes.mjs --write, BUILD_ORDER HOT-410). 여기 남은 HTTPRoute는
+# openapi 밖 경로(앱 서버·queue-files·남은 경로 404·앱 서버 호스트의 TRACE)이고, 정책은 생성 라우트를 이름으로 고른다(상한으로 나뉜 <이름>-2 …도 모두, --check가 본다).
 # 정적 시험: node --test "deploy/gateways/test/*.test.mjs"
 ---
 # gw-queue: 듣는 호스트(docs/infra.md §4.1 '호스트와 내부 경로'). 리스너마다 호스트 하나, HTTPS만. 인증서 Secret은 운영에서 cert-manager가, 로컬은 cluster.mjs가 만든다
@@ -130,7 +132,10 @@ spec:
 ---
 # gw-queue: 토큰 확인이 대상(aud)으로 거절한 응답(Envoy는 403과 WWW-Authenticate error="invalid_token")을 401로 바꾼다
 # (docs/features/identity.md §3 발급자와 검증 규칙, I-T36: 다른 대상의 토큰은 역할과 상관없이 401. 2026-11-16 kind 확인). 출처 확인·인가의 403은 그 머리가 없어 그대로다.
-# 라우트에 따로 건 BackendTrafficPolicy(검색 한도)가 있으면 그 라우트는 이 정책을 받지 않는다(그 라우트는 토큰 확인이 없다).
+# 게이트웨이가 스스로 만든 404(없는 경로·맞지 않는 메서드)·413·429·503은 고정 Problem 본문(type about:blank, title은 HTTP 상태 문구, detail·instance 없음)으로 바꾼다
+# (docs/infra.md §4.1 '게이트웨이 오류의 Problem', docs/api/guidelines.md §2, D-T43 ①, ASVS 16.5.1). source: Local이라 서비스가 낸 응답(본문 그대로)은 건드리지 않는다.
+# 바꾼 응답에는 lateResponseHeaders가 닿지 않아 응답 보안 머리와 X-Trace-Id를 그 응답에 다시 단다(X-Trace-Id 치환이 되는지는 kind 확인 대상).
+# 라우트에 따로 건 BackendTrafficPolicy(한도)는 mergeType: StrategicMerge로 이 정책에 합쳐 그 라우트에도 이 응답 고치기가 닿는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -168,72 +173,86 @@ spec:
               value: nosniff
             - name: Content-Security-Policy
               value: default-src 'none'; frame-ancestors 'none'
----
-# gw-queue queue: TRACE는 405(docs/security/asvs/delivery.md 13.4.4). 토큰 확인이 없는 라우트라 401보다 먼저 답한다. 이 호스트 라우트의 경로를 모두 TRACE로 다시 적는다
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: gw-queue-trace
-  namespace: envoy-gateway-system
-spec:
-  parentRefs:
-    - name: gw-queue
-      sectionName: queue
-  hostnames:
-    - queue.peaket.example
-  rules:
-    - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/admission
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants/me
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/pre-verifications
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries/me
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/verification
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/shuffle-proof
-          method: TRACE
-        - path:
-            type: PathPrefix
-            value: /
-          method: TRACE
-        - path:
-            type: RegularExpression
-            value: /.*
-          method: TRACE
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-        - type: ExtensionRef
-          extensionRef:
-            group: gateway.envoyproxy.io
-            kind: HTTPRouteFilter
-            name: peaket-trace-not-allowed
+    - match:
+        statusCodes:
+          - type: Value
+            value: 404
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Not Found","status":404}'
+        header:
+          set:
+            - name: X-Trace-Id
+              value: "%TRACE_ID%"
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 413
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Content Too Large","status":413}'
+        header:
+          set:
+            - name: X-Trace-Id
+              value: "%TRACE_ID%"
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 429
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Too Many Requests","status":429}'
+        header:
+          set:
+            - name: X-Trace-Id
+              value: "%TRACE_ID%"
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 503
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Service Unavailable","status":503}'
+        header:
+          set:
+            - name: X-Trace-Id
+              value: "%TRACE_ID%"
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
 ---
 # gw-queue-trace: 교차 출처 응답만(토큰 확인 없음)
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -328,53 +347,6 @@ spec:
     exposeHeaders:
       - Retry-After
     maxAge: 7200s
----
-# gw-queue-buy: 대기열 진입·입장 확정(쿠키 토큰, ticket:buy, docs/security/authz-matrix.md §5.1). 게이트웨이는 Content-Type을 막지 않는다(text/plain 수용, 415는 queue-svc). 진입은 __Host-peaket_arr 쿠키와 원본 확인이 맞을 때의 x-peaket-arrival을 넘긴다(ADR-0223)
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: gw-queue-buy
-  namespace: envoy-gateway-system
-spec:
-  parentRefs:
-    - name: gw-queue
-      sectionName: queue
-  hostnames:
-    - queue.peaket.example
-  rules:
-    - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/admission
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/admission
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: queue-svc
-          namespace: queue
-          port: 8080
 ---
 # gw-queue-buy: 교차 출처·출처 확인·토큰 확인·인가(ticket:buy)
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -473,77 +445,6 @@ spec:
         checkTyp: true
         tokenCookie: __Secure-peaket_at
         tokenScheme: Bearer
----
-# gw-queue-api: 로그인한 팬의 대기열 경로(로비 참가·사전 검증·대기 취소·추가 검증 상태)
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: gw-queue-api
-  namespace: envoy-gateway-system
-spec:
-  parentRefs:
-    - name: gw-queue
-      sectionName: queue
-  hostnames:
-    - queue.peaket.example
-  rules:
-    - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants/me
-          method: DELETE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/pre-verifications
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries/me
-          method: DELETE
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/verification
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/lobby-participants/me
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/pre-verifications
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/entries/me
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/verification
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: queue-svc
-          namespace: queue
-          port: 8080
 ---
 # gw-queue-api: 교차 출처·출처 확인·토큰 확인·인가(유효한 토큰)
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -644,45 +545,6 @@ spec:
         checkTyp: true
         tokenCookie: __Secure-peaket_at
         tokenScheme: Bearer
----
-# gw-queue-public: 로그인 없이 부르는 대기열 경로(openapi security: [])
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: gw-queue-public
-  namespace: envoy-gateway-system
-spec:
-  parentRefs:
-    - name: gw-queue
-      sectionName: queue
-  hostnames:
-    - queue.peaket.example
-  rules:
-    - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/shuffle-proof
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/queues/[^/]+/shuffle-proof
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: queue-svc
-          namespace: queue
-          port: 8080
 ---
 # gw-queue-public: 교차 출처·출처 확인(토큰 확인 없음, 공개 경로)
 apiVersion: gateway.envoyproxy.io/v1alpha1

@@ -1,0 +1,369 @@
+# gw-fan 라우트 원천(BUILD_ORDER HOT-410, docs/infra.md §4.1 '경로별 메서드 생성기'). 적용 대상이 아니다: node tools/ci/gateway-routes.mjs --write가
+# 이 파일과 docs/api/openapi.yaml로 deploy/gateways/gw-fan.routes.yaml을 만든다.
+# 규칙의 맞춤에는 '이 경로 아래의 계약 경로를 맡는다'는 경로만 적는다(메서드는 계약이 정한다). 값은 openapi의 꼴(틀 {이름})이다.
+# PathPrefix는 그 경로와 그 아래, Exact는 그 계약 경로 하나다(같은 앞부분 아래를 다른 라우트·백엔드로 나눌 때).
+# api.peaket.example의 계약 경로는 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 경로를 더하면 여기에 맡을 규칙을 정한다.
+# 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-fan.yaml에 손으로 두고 라우트 이름으로 고른다.
+# 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
+---
+# gw-fan-public: 토큰 없이 부르는 팬 경로(토큰 갱신은 리프레시 쿠키. core-svc 규칙은 openapi security: []인 홈·굿즈 상품·알림 수신 거부)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-public
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/identity/access-tokens
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/home
+        - path:
+            type: PathPrefix
+            value: /v1/shop/products
+        - path:
+            type: PathPrefix
+            value: /v1/subscription-opt-outs
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+---
+# gw-fan-search: 검색·자동완성(토큰 없음, IP 한도 SR-T13 ②)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-search
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/search
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+---
+# gw-fan-identity: identity-svc 경로(유효한 팬 토큰, 전역 한도 계정당 60회/분 D-T50 ①)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-identity
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/identity/account
+        - path:
+            type: PathPrefix
+            value: /v1/identity/booth-reverifications
+        - path:
+            type: PathPrefix
+            value: /v1/identity/consents
+        - path:
+            type: PathPrefix
+            value: /v1/identity/me
+        - path:
+            type: PathPrefix
+            value: /v1/identity/merge-proposals
+        - path:
+            type: PathPrefix
+            value: /v1/identity/minor-contract-checks
+        - path:
+            type: PathPrefix
+            value: /v1/identity/nickname-checks
+        - path:
+            type: PathPrefix
+            value: /v1/identity/profile
+        - path:
+            type: PathPrefix
+            value: /v1/identity/providers
+        - path:
+            type: PathPrefix
+            value: /v1/identity/scanner-sessions
+        - path:
+            type: PathPrefix
+            value: /v1/identity/sessions
+        - path:
+            type: PathPrefix
+            value: /v1/identity/signup-cancellations
+        - path:
+            type: PathPrefix
+            value: /v1/identity/signup-completions
+        - path:
+            type: PathPrefix
+            value: /v1/identity/verifications
+        - path:
+            type: PathPrefix
+            value: /v1/device-approval-lookups
+        - path:
+            type: PathPrefix
+            value: /v1/device-approvals
+        - path:
+            type: PathPrefix
+            value: /v1/staff-assignments
+        - path:
+            type: PathPrefix
+            value: /v1/staff-invitation-acceptances
+        - path:
+            type: PathPrefix
+            value: /v1/staff-invitation-lookups
+        - path:
+            type: PathPrefix
+            value: /v1/staff-invitation-rejections
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+---
+# gw-fan-buy: 구매 경로(입장 토큰을 함께 받는 작업과 그 주문·홀드, ticket:buy, BAT-055 리뷰 RV-03)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-buy
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/holds
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/purchase-session
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/seatmap-snapshot
+        - path:
+            type: PathPrefix
+            value: /v1/holds
+        - path:
+            type: PathPrefix
+            value: /v1/orders
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: purchase-svc
+          namespace: purchase
+          port: 8080
+---
+# gw-fan-api: 핫패스 밖 일반 API(유효한 팬 토큰, 전역 한도 계정당 60회/분 D-T50 ①)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-api
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/events/{eventId}
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/review-eligibility
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/review-summary
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/reviews
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/sale-eligibility
+        - path:
+            type: PathPrefix
+            value: /v1/events/{eventId}/subscriptions
+        - path:
+            type: PathPrefix
+            value: /v1/productions
+        - path:
+            type: PathPrefix
+            value: /v1/appeals
+        - path:
+            type: PathPrefix
+            value: /v1/booking-restrictions
+        - path:
+            type: PathPrefix
+            value: /v1/fraud-appeal-requests
+        - path:
+            type: PathPrefix
+            value: /v1/inquiries
+        - path:
+            type: PathPrefix
+            value: /v1/push-subscriptions
+        - path:
+            type: PathPrefix
+            value: /v1/review-images
+        - path:
+            type: PathPrefix
+            value: /v1/reviews
+        - path:
+            type: PathPrefix
+            value: /v1/shop/orders
+        - path:
+            type: PathPrefix
+            value: /v1/subscriptions
+        - path:
+            type: PathPrefix
+            value: /v1/wishes
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/tickets
+        - path:
+            type: PathPrefix
+            value: /v1/transfer-recipient-lookups
+        - path:
+            type: PathPrefix
+            value: /v1/transfers
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/cancellations
+        - path:
+            type: PathPrefix
+            value: /v1/compensations
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: payment-svc
+          namespace: purchase
+          port: 8080

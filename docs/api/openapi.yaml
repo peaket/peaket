@@ -4257,6 +4257,7 @@ paths:
     get:
       operationId: getEventSeatmapLayout
       tags: [seats]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "회차 좌석맵 파일(공연장 캔버스·무대·구역 도형·라벨 위치·좌석 좌표·등급). 인증 없음, CDN 장기 캐시"
@@ -4550,6 +4551,7 @@ paths:
     get:
       operationId: getHome
       tags: [catalog]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "홈 피드(배너·오픈 예정·지금 판매 중·테마·공연장). 인증 없음, CDN 캐시"
@@ -4560,6 +4562,7 @@ paths:
     get:
       operationId: getHomeRankings
       tags: [catalog]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "장르별 랭킹 파일(어제 확정 판매 매수 순, 매일 10:00 [가정] 게시, 인증 없음)"
@@ -4569,6 +4572,7 @@ paths:
     get:
       operationId: listSearchResults
       tags: [catalog]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "공연 검색(필터·정렬·페이지 번호, 결과 0건 제안, 관련 공연). 인증 없음, CDN 캐시"
@@ -4579,6 +4583,7 @@ paths:
     get:
       operationId: getSearchSuggestions
       tags: [catalog]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "자동완성(공연·아티스트·공연장 후보, 최대 8개 [가정]). 인증 없음, CDN 캐시, 서버 메모리 사전"
@@ -4589,6 +4594,7 @@ paths:
     get:
       operationId: getEvent
       tags: [catalog]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시"
@@ -4619,6 +4625,7 @@ paths:
     get:
       operationId: getEventReviewSummary
       tags: [reviews]
+      x-peaket-cdn-cache: true
       x-peaket-roles: [public]
       security: []
       summary: "후기 요약(평균 별점·후기 수·최근 2개). 인증 없음, CDN 캐시"

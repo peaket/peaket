@@ -1,0 +1,307 @@
+# gw-partner 라우트 원천(BUILD_ORDER HOT-410, docs/infra.md §4.1 '경로별 메서드 생성기'). 적용 대상이 아니다: node tools/ci/gateway-routes.mjs --write가
+# 이 파일과 docs/api/openapi.yaml로 deploy/gateways/gw-partner.routes.yaml을 만든다.
+# 규칙의 맞춤에는 '이 경로 아래의 계약 경로를 맡는다'는 경로만 적는다(메서드는 계약이 정한다). 값은 openapi의 꼴(틀 {이름})이다.
+# PathPrefix는 그 경로와 그 아래, Exact는 그 계약 경로 하나다(같은 앞부분 아래를 다른 라우트·백엔드로 나눌 때).
+# partner-api.peaket.example의 계약 경로는 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 경로를 더하면 여기에 맡을 규칙을 정한다.
+# 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-partner.yaml에 손으로 두고 라우트 이름으로 고른다.
+# 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
+---
+# gw-partner-public: 토큰 없이 부르는 파트너 경로(로그인·토큰 갱신·잠금 해제)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-public
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/partner/auth/sessions
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/access-tokens
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/unlock-links
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/unlocks
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+---
+# gw-partner-webhooks: 결제사 웹훅(토큰·출처 확인·CORS 없음, 출발지 IP 한도와 본문 상한, docs/infra.md §4.1 '웹훅 경로')
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-webhooks
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/webhooks
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: payment-svc
+          namespace: purchase
+          port: 8080
+---
+# gw-partner-api: 파트너 콘솔 API(유효한 파트너 토큰, 전역 한도 계정당 600회/분·리포트 조회 30회/분 D-T50 ①)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-api
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-acceptances
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-completions
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-passkey-registrations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-passkeys
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-passwords
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-totp-confirmations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/invitation-totp-enrollments
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/passkey-registrations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/passkeys
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/password-changes
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/reauthentications
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/sessions/me
+        - path:
+            type: PathPrefix
+            value: /v1/partner/team-accounts
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/settlements
+        - path:
+            type: PathPrefix
+            value: /v1/partner/payout-account
+        - path:
+            type: PathPrefix
+            value: /v1/partner/product-settlements
+        - path:
+            type: PathPrefix
+            value: /v1/partner/settlements
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: payment-svc
+          namespace: purchase
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/device-placements
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/partner/events/{eventId}
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/attendee-exports
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/attendees
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/cancellation
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/entry-policy
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/flags
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/fraud-report
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/gate-status
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/live-snapshot
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/report
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/settlement-exports
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/staff
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/staff-invitations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/artists
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-delivery-exports
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-order-items
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-order-stats
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-orders
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-pickups
+        - path:
+            type: PathPrefix
+            value: /v1/partner/merch-shipment-imports
+        - path:
+            type: PathPrefix
+            value: /v1/partner/places
+        - path:
+            type: PathPrefix
+            value: /v1/partner/productions
+        - path:
+            type: PathPrefix
+            value: /v1/partner/products
+        - path:
+            type: PathPrefix
+            value: /v1/partner/seatmap-templates
+        - path:
+            type: PathPrefix
+            value: /v1/partner/seller-profile
+        - path:
+            type: PathPrefix
+            value: /v1/partner/staff
+        - path:
+            type: PathPrefix
+            value: /v1/partner/todo-summary
+        - path:
+            type: PathPrefix
+            value: /v1/partner/webhook-deliveries
+        - path:
+            type: PathPrefix
+            value: /v1/partner/webhooks
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080

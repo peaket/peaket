@@ -1,0 +1,244 @@
+# 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-queue.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
+# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-trace
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-queue-trace
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/admission(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries/me(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/lobby-participants(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/pre-verifications(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/shuffle-proof(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/verification(/.*)?
+          method: TRACE
+        - path:
+            type: PathPrefix
+            value: /
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /.*
+          method: TRACE
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-trace-not-allowed
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-buy
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-queue-buy
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/admission
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/admission
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-api
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-queue-api
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries/me
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/entries/me
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/lobby-participants
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/lobby-participants
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/lobby-participants/me
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/lobby-participants/me
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/pre-verifications
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/pre-verifications
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/verification
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/verification
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/verification
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-public
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/route: gw-queue-public
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/shuffle-proof
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/queues/[^/]+/shuffle-proof
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: queue-svc
+          namespace: queue
+          port: 8080

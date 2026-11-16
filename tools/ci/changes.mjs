@@ -65,6 +65,9 @@ const RULES = [
   ],
   // 신뢰 정책 예외 검사(tools-check, check-trust-exceptions.mjs, ADR-0191)가 보는 작업 공간 파일과 그 예외 표가 바뀌어도 돌린다
   [/^tools\/|(^|\/)pnpm-workspace\.yaml$|^docs\/devops\.md$/, ['tools']],
+  // 게이트웨이 라우트 생성 대조(node tools/ci/gateway-routes.mjs --check, docs/infra.md §4.1 '생성 대조', BUILD_ORDER HOT-410)가 계약 원본을 읽는다.
+  // gitops-check(docs/devops.md §3, BAS-150)가 생기기 전에는 tools-check가 그 명령을 돈다
+  [/^docs\/api\/openapi\.yaml$/, ['tools']],
   [/^\.github\//, ['ci']],
 ];
 // 넓게 쓰이는 것: 기대는 배포 단위 전부를 돌린다(§3.1 2번)

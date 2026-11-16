@@ -1,0 +1,270 @@
+# gw-ops 라우트 원천(BUILD_ORDER HOT-410, docs/infra.md §4.1 '경로별 메서드 생성기'). 적용 대상이 아니다: node tools/ci/gateway-routes.mjs --write가
+# 이 파일과 docs/api/openapi.yaml로 deploy/gateways/gw-ops.routes.yaml을 만든다.
+# 규칙의 맞춤에는 '이 경로 아래의 계약 경로를 맡는다'는 경로만 적는다(메서드는 계약이 정한다). 값은 openapi의 꼴(틀 {이름})이다.
+# PathPrefix는 그 경로와 그 아래, Exact는 그 계약 경로 하나다(같은 앞부분 아래를 다른 라우트·백엔드로 나눌 때).
+# ops-api.peaket.example의 계약 경로는 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 경로를 더하면 여기에 맡을 규칙을 정한다.
+# 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-ops.yaml에 손으로 두고 라우트 이름으로 고른다.
+# 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
+---
+# gw-ops-public: 토큰 없이 부르는 관제 경로(로그인·토큰 갱신·잠금 해제)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-ops-public
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-ops
+      sectionName: ops-api
+  hostnames:
+    - ops-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/ops/auth/sessions
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/access-tokens
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/unlock-links
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/unlocks
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+---
+# gw-ops-api: 관제 API(유효한 운영자 토큰)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-ops-api
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-ops
+      sectionName: ops-api
+  hostnames:
+    - ops-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-acceptances
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-completions
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-passkey-registrations
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-passkeys
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-passwords
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-totp-confirmations
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/invitation-totp-enrollments
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/passkey-registrations
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/passkeys
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/password-changes
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/reauthentications
+        - path:
+            type: PathPrefix
+            value: /v1/ops/auth/sessions/me
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ops/events
+        - path:
+            type: PathPrefix
+            value: /v1/ops/reviews
+        - path:
+            type: PathPrefix
+            value: /v1/ops/sale-reviews
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ops/scanner-devices
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ops/admin-accounts
+        - path:
+            type: PathPrefix
+            value: /v1/ops/approval-requests
+        - path:
+            type: PathPrefix
+            value: /v1/ops/artists
+        - path:
+            type: PathPrefix
+            value: /v1/ops/audit-anchors
+        - path:
+            type: PathPrefix
+            value: /v1/ops/audit-checkpoints
+        - path:
+            type: PathPrefix
+            value: /v1/ops/bot-review-samples
+        - path:
+            type: PathPrefix
+            value: /v1/ops/cases
+        - path:
+            type: PathPrefix
+            value: /v1/ops/commands
+        - path:
+            type: PathPrefix
+            value: /v1/ops/compliance
+        - path:
+            type: PathPrefix
+            value: /v1/ops/decisions
+        - path:
+            type: PathPrefix
+            value: /v1/ops/event-cancellations
+        - path:
+            type: PathPrefix
+            value: /v1/ops/evidence-bundles
+        - path:
+            type: PathPrefix
+            value: /v1/ops/external-posts
+        - path:
+            type: PathPrefix
+            value: /v1/ops/fan-lookups
+        - path:
+            type: PathPrefix
+            value: /v1/ops/fans
+        - path:
+            type: PathPrefix
+            value: /v1/ops/fraud-cases
+        - path:
+            type: PathPrefix
+            value: /v1/ops/fraud-clusters
+        - path:
+            type: PathPrefix
+            value: /v1/ops/home-layout
+        - path:
+            type: PathPrefix
+            value: /v1/ops/live
+        - path:
+            type: PathPrefix
+            value: /v1/ops/notice-templates
+        - path:
+            type: PathPrefix
+            value: /v1/ops/partner-notices
+        - path:
+            type: PathPrefix
+            value: /v1/ops/payout-batches
+        - path:
+            type: PathPrefix
+            value: /v1/ops/pg-circuits
+        - path:
+            type: PathPrefix
+            value: /v1/ops/places
+        - path:
+            type: PathPrefix
+            value: /v1/ops/productions
+        - path:
+            type: PathPrefix
+            value: /v1/ops/promoters
+        - path:
+            type: PathPrefix
+            value: /v1/ops/receivables
+        - path:
+            type: PathPrefix
+            value: /v1/ops/research-exports
+        - path:
+            type: PathPrefix
+            value: /v1/ops/settlements
+        - path:
+            type: PathPrefix
+            value: /v1/ops/widgets
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
