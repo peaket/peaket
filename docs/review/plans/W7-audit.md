@@ -635,6 +635,7 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 | K9 | COV2-06 ⑫ …(고침: 지표 저장소를 넘기고 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다) | `test-int/review-withdrawn-consumer.int.test.ts` | **처음부터 통과(이미 있는 동작)** | 보류 수 세기는 core_app으로 `held_event`를 읽는다(0022의 SELECT). 검증 담당이 틀린 구현(예: `registry`를 넘기지 않거나 보류 수 세기에 다른 DB)으로 한 번 실패를 본다 |
 
 - **통합 시험 결과(11:49 KST 도커 잠금 아래, 구현 전 트리)**: 시험 커밋 `eec8779c`만 꺼낸 작업 폴더 `D:/ticketpass-lane3-t`의 core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`를 돌렸다. 시험 9개 가운데 실패 4(K1 둘·K6·K2 색인), 통과 5(⑥ 롤백, ⑤⑥ CHECK, core_partner 권한, ⑪, ⑫·K9). 처음 돌릴 때 그 폴더에 공용 패키지 빌드(`@peaket/search-normalize` 등 dist)가 없어 후기 두 파일이 읽히지 않았으므로(실패로 세지 않는다) `packages/platform`·`contracts`·`search-normalize`·`validation`을 빌드한 뒤 두 파일을 다시 돌렸다. 그 폴더의 추적 파일은 바꾸지 않았다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
+- **검증 2단계 살아남음 N07(시험 추가)**: `test/core-consumers.test.ts`에 `COV2-06 K2 N07 소비자의 익명화 저장소도 소비자 전용 풀을 쓴다`를 더했다(main.ts 원문: 처리기에 넘기는 `Reviews`의 `store: new DrizzleReviewStore(풀)`의 풀이 `startCoreConsumers`의 `database` 칸과 같고 `database`·`partnerDatabase`·`opsDatabase`가 아니다). core-svc 폴더 `npx vitest run test/core-consumers.test.ts`: 지금 코드에서 통과(9/9). 손 확인: 그 저장소를 `new DrizzleReviewStore(database)`(N07 꼴)로 바꾸면 이 시험만 실패하고, 되돌린 뒤 `git diff`로 `main.ts`가 깨끗한 것을 봤다. typecheck 오류 0.
 
 ## 시험 이의
 

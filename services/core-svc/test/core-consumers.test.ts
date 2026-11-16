@@ -315,4 +315,23 @@ describe('COV2-06 시작 파일 조립', () => {
     const dbClose = shutdown.search(/\bdatabase\.close\(/);
     expect(dbClose).toBeGreaterThan(close);
   });
+
+  test('COV2-06 K2 N07 소비자의 익명화 저장소도 소비자 전용 풀을 쓴다', () => {
+    // 검증 2단계 살아남음 N07: 처리기에 넘기는 Reviews의 저장소를 API 풀(new DrizzleReviewStore(database))로 만들면 사건이 몰릴 때 익명화 UPDATE가
+    // 팬·관제 HTTP 경로의 연결을 쓴다(docs/streaming.md §2.6 'core-svc 소비자': 따로 둔 풀). 보류 표만 소비자 풀로 가는 꼴을 잡는다
+    const main = mainText();
+    const { args, db } = consumerArgs(main);
+    expect(db, 'startCoreConsumers 인자의 database 칸').toBeDefined();
+    // 처리기는 이름 붙은 Reviews를 받는다(service.app.get(Reviews) 같은 서비스 조립의 것이 아니다)
+    const reviewsName = /handler:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
+    expect(reviewsName, '처리기에 넘기는 Reviews 이름').toBeDefined();
+    const declAt = main.search(new RegExp(String.raw`(?:const|let)\s+${reviewsName}\s*=\s*new\s+Reviews\(\s*\{`));
+    expect(declAt, `${reviewsName} = new Reviews({ … })`).toBeGreaterThanOrEqual(0);
+    const open = main.indexOf('{', declAt);
+    const deps = main.slice(open, matchingClose(main, open) + 1);
+    const store = /store:\s*new\s+DrizzleReviewStore\(\s*([A-Za-z_$][\w$]*)\s*\)/.exec(deps)?.[1];
+    expect(store, 'Reviews의 store: new DrizzleReviewStore(풀)').toBeDefined();
+    expect(store).toBe(db);
+    for (const other of ['database', 'partnerDatabase', 'opsDatabase']) expect(store).not.toBe(other);
+  });
 });
