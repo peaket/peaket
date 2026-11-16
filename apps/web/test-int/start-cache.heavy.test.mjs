@@ -3,9 +3,12 @@
 // (tools/web-checks에서 `node seed-css/build.mjs web`이 공유 캐시 주소 없이 만든 apps/web/.next, standalone 포함)가 있어야 하고 Docker(Valkey)를 쓴다.
 // 산출물이 없으면 건너뛰지 않고 실패한다(빈 결과 막기).
 // 파일 이름 꼴(계획 §14 W7L2-W1, docs/devops.md §3.1): *.heavy.test.mjs는 운영 빌드와 Valkey를 둘 다 써 로컬 무거운 게이트에서만 돈다(start-cache.int.test.mjs에서 나눔).
+// BAT-170 게이트 뒤(계획 §17 G-2): 정본 §5.18 '로컬·시험도 노드 하나짜리 클러스터 모드'에 맞춰 Valkey를 노드 하나짜리 클러스터 모드
+// (--cluster-enabled yes, 모든 슬롯 배정)로 띄운다(cache-handler.int.test.mjs K-3와 같은 방식, 같은 포트를 열고 127.0.0.1을 알린다). 단언은 그대로다.
 // 실행: apps/web에서 node --test test-int/start-cache.heavy.test.mjs (끝나면 컨테이너를 docker rm -f -v로 지운다)
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -19,14 +22,30 @@ const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 const DAYS_30_S = 30 * 24 * 60 * 60;
 /** 정본(W7L2-S10, docs/frontend.md §5.18 TTL 문장): 값 TTL 상한 기본 1시간 [가정], 태그 시각은 30일 */
 const HOUR_S = 3_600;
-const NAME = `bat170-start-valkey-${process.pid}`;
+const NAME = `lane2-bat170t-start-valkey-${process.pid}`;
+/** 노드 하나짜리 클러스터의 포트(before에서 정한다). 클러스터 버스(+10000)가 65535를 넘지 않게 20000~39999에서 고른다 */
+let VALKEY_PORT = 0;
 const PORT = 39500 + (process.pid % 200) * 3;
 const MOCK_PORT = PORT + 2;
 /** 공연 상세는 가짜 API 고정 자료의 회차(seed-css/apps.mjs와 같다) */
 const DETAIL = '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 
 const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-const cli = (...a) => docker(['exec', NAME, 'valkey-cli', ...a]);
+const cli = (...a) => docker(['exec', NAME, 'valkey-cli', '-p', String(VALKEY_PORT), ...a]);
+/** 이 PC에서 그 포트가 비었는지 */
+const isFree = (port) =>
+  new Promise((ok) => {
+    const srv = createServer();
+    srv.once('error', () => ok(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => ok(true)));
+  });
+const freePort = async () => {
+  for (let i = 0; i < 50; i++) {
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    if ((await isFree(port)) && (await isFree(port + 10_000))) return port;
+  }
+  throw new Error('빈 포트를 찾지 못했다');
+};
 const children = [];
 let out = '';
 
@@ -56,7 +75,10 @@ before(async () => {
   // 운영 빌드 산출물(standalone 포함)이 없으면 실패한다
   assert.ok(existsSync(join(appDir, DIST, 'standalone', 'apps', 'web', 'server.js')), `운영 빌드 standalone 산출물이 없다: apps/web/${DIST}/standalone (tools/web-checks에서 node seed-css/build.mjs web)`);
   assert.ok(existsSync(join(appDir, DIST, 'required-server-files.json')), '운영 빌드 required-server-files.json이 없다');
-  docker(['run', '-d', '--name', NAME, '-p', '127.0.0.1::6379', VALKEY_IMAGE]);
+  VALKEY_PORT = await freePort();
+  docker(['run', '-d', '--name', NAME, '-p', `127.0.0.1:${VALKEY_PORT}:${VALKEY_PORT}`, VALKEY_IMAGE, 'valkey-server', '--port', String(VALKEY_PORT),
+    '--cluster-enabled', 'yes', '--cluster-config-file', 'nodes.conf', '--cluster-announce-ip', '127.0.0.1',
+    '--appendonly', 'no', '--save', '', '--protected-mode', 'no']);
   for (let i = 0; i < 50; i++) {
     try {
       if (cli('PING') === 'PONG') break;
@@ -65,8 +87,10 @@ before(async () => {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  const mapped = docker(['port', NAME, '6379/tcp']).split('\n')[0];
-  const url = `redis://127.0.0.1:${mapped.slice(mapped.lastIndexOf(':') + 1)}`;
+  cli('CLUSTER', 'ADDSLOTSRANGE', '0', '16383');
+  for (let i = 0; i < 100 && !/cluster_state:ok/.test(cli('CLUSTER', 'INFO')); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.match(cli('CLUSTER', 'INFO'), /cluster_state:ok/, '노드 하나짜리 클러스터가 ok가 되지 않았다');
+  const url = `redis://127.0.0.1:${VALKEY_PORT}`;
   const mock = spawn(process.execPath, ['scripts/mock-api.mjs', String(MOCK_PORT)], { cwd: appDir, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(mock);
   const mockOrigin = `http://127.0.0.1:${MOCK_PORT}`;
