@@ -789,7 +789,7 @@ const cf3Bindings = (hostPorts, hostIp = '127.0.0.1') => ({
 });
 const cf3Mapping = (containerPort, hostPort) => ({ containerPort, hostPort, listenAddress: '127.0.0.1', protocol: 'TCP' });
 
-test('CF3-01 HOT-400 kind 클러스터 설정은 게이트웨이 다섯을 127.0.0.1의 시작 포트부터 노드 포트로 잇는다', async () => {
+test('CF3-01 HOT-400 kind 클러스터 설정은 게이트웨이 다섯을 127.0.0.1의 시작 포트부터 노드 포트로 잇는다 [ASVS v5.0.0-13.4.5]', async () => {
   assert.equal(typeof clusterModule.kindClusterConfig, 'function', 'cluster.mjs가 kindClusterConfig를 내놓지 않는다');
   const repoKind = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'local', 'kind.yaml'), 'utf8'))[0].toJS();
   for (const base of [18441, 20001]) {
@@ -854,7 +854,7 @@ test('CF3-04 HOT-400 접속 정보의 포트는 노드 컨테이너의 실제 �
   assert.deepEqual(gatewayHostPorts(cf3Bindings([20005, 20001, 20004, 20002, 20003])), { 'gw-queue': 20005, 'gw-fan': 20001, 'gw-partner': 20004, 'gw-ops': 20002, 'gw-scanner': 20003 });
 });
 
-test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개면 gateways가 멈춘다', async () => {
+test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개면 gateways가 멈춘다 [ASVS v5.0.0-13.4.5]', async () => {
   const { gatewayHostPorts } = await import('./gateway-objects.mjs');
   assert.equal(typeof gatewayHostPorts, 'function', 'gateway-objects.mjs가 gatewayHostPorts를 내놓지 않는다');
   const ok = [18441, 18442, 18443, 18444, 18445];
@@ -884,4 +884,18 @@ test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개�
     assert.match(err.message, /\bup\b/, `${what}: 메시지에 up이 없다: ${err.message}`);
     if (mentionsLoopback) assert.ok(err.message.includes('127.0.0.1'), `${what}: 메시지에 127.0.0.1이 없다: ${err.message}`);
   }
+});
+
+// 리뷰 RV-3(계획 docs/review/plans/W8-L1-ci-fix3.md '리뷰'): CF3-04는 gatewayHostPorts만 보아, 접속 정보를 만드는 gatewayContract가
+// 받은 ports 대신 시작 값 + 차례를 계산하도록 틀려도 잡지 못했다. 단언 값은 계획 §3 '접속 정보의 ports는 실제 공개 포트에서 온다'에서 가져왔다
+test('CF3-07 HOT-400 접속 정보(gatewayContract)의 ports는 받은 공개 포트 그대로다', async () => {
+  const { gatewayContract, gatewayHostPorts, hostsOf, readGatewayObjects } = await import('./gateway-objects.mjs');
+  const hosts = hostsOf(readGatewayObjects(join(REPO, 'deploy', 'gateways')));
+  const base = { hosts, originVerify: 'cf3-07-origin-verify', keys: { fan: {}, admin: {}, staff: {}, admission: {} }, caPem: '-----BEGIN CERTIFICATE-----\nCF3-07\n-----END CERTIFICATE-----\n' };
+  // 시작 값(18441)으로도, 다른 시작 값으로도 계산할 수 없는 포트 다섯
+  const ports = { 'gw-queue': 20005, 'gw-fan': 25000, 'gw-partner': 18449, 'gw-ops': 31001, 'gw-scanner': 20001 };
+  assert.deepEqual(gatewayContract({ ...base, ports }).ports, ports, '접속 정보의 ports가 받은 값과 다르다');
+  // gateways가 실제로 잇는 길: 노드 컨테이너의 공개 → gatewayHostPorts → gatewayContract
+  const published = gatewayHostPorts(cf3Bindings([20005, 25000, 18449, 31001, 20001]));
+  assert.deepEqual(gatewayContract({ ...base, ports: published }).ports, ports, '공개에서 읽은 포트가 접속 정보에 그대로 실리지 않는다');
 });
