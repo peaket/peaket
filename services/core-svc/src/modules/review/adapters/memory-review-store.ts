@@ -25,6 +25,13 @@ const decodeCursor = (raw: string | undefined): Cursor | undefined => {
   }
 };
 
+/**
+ * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기'): 작성자가 지웠는데 별점·지문·계정 ID가 남은 행,
+ * 옛 익명화로 참조만 끊긴 살아 있는 후기(account_id = id). Drizzle 저장소의 WHERE와 같은 뜻이다
+ */
+const isLegacyRow = (r: ReviewRecord): boolean =>
+  r.status === 'DELETED' ? r.rating !== null || r.contentFingerprint !== null || r.accountId !== r.reviewId : r.accountId === r.reviewId;
+
 const visibleTo = (r: ReviewRecord, viewer: string | undefined): boolean => {
   if (r.status === 'DELETED') return false;
   if (r.status === 'HIDDEN' && r.notice === undefined && r.accountId !== viewer) return false;
@@ -187,9 +194,15 @@ export class MemoryReviewStore implements ReviewStore {
     return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
   }
 
-  /** 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다 */
-  async purgeLegacyRows(_o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
-    throw new Error('아직 없음');
+  async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
+    // id 차례(PostgreSQL uuid 차례는 소문자 16진 글자 차례와 같다)로 after보다 큰 이전 판 행을 limit개
+    const rows = [...this.reviews.values()]
+      .filter((r) => isLegacyRow(r) && (o.after === undefined || r.reviewId > o.after))
+      .sort((a, b) => (a.reviewId < b.reviewId ? -1 : a.reviewId > b.reviewId ? 1 : 0))
+      .slice(0, o.limit);
+    for (const r of rows) this.reviews.set(r.reviewId, purgedReview(r, o.nowMs));
+    const last = rows[rows.length - 1];
+    return last ? { purged: rows.length, last: last.reviewId } : { purged: 0 };
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

@@ -18,7 +18,8 @@ import {
 } from './modules/catalog/index.js';
 import { DrizzleReviewStore, reviewMaintenanceTasks } from './modules/review/index.js';
 
-export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire'] as const;
+/** 후기 정비 일은 임시조치 끝내기(review-temp-block-expire, 매일)와 이전 판이 남긴 후기 행 고치기(review-purge-legacy, 정비 시간, ADR-0278·W8-audit2a 리뷰 A2)다 */
+export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire', 'review-purge-legacy'] as const;
 
 export function coreMaintenanceTasks(
   database: Database,

@@ -60,6 +60,9 @@ const purgeSet = (nowMs: number) => sql`
   status = 'DELETED', body = '', rating = null, content_fingerprint = null, author_display = '', notice = null, notice_until = null,
   account_id = id, basis_order_id = id, deleted_at = coalesce(deleted_at, ${new Date(nowMs)}::timestamptz), updated_at = ${new Date(nowMs)}::timestamptz`;
 
+/** 이전 판 행 고치기 한 묶음의 잠금 대기 한도 2초 [가정](docs/data.md §2 '이전 판이 남긴 행 고치기') */
+const LEGACY_LOCK_TIMEOUT_MS = 2_000;
+
 /** 그 계정의 후기를 상태와 관계없이 모두 파기한다(색인 review_account_idx). 바꾼 행 수 */
 async function purgeAccountRows(db: Db, accountId: string, nowMs: number): Promise<number> {
   const r = await db.execute(sql`update review set ${purgeSet(nowMs)} where account_id = ${accountId}::uuid returning id`);
@@ -313,9 +316,25 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
-  /** 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다(purgeSet을 같이 쓴다, docs/data.md §2 '이전 판이 남긴 행 고치기') */
-  async purgeLegacyRows(_o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
-    throw new Error('아직 없음');
+  async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
+    // 정비 일 review-purge-legacy(정비 역할 core_maintenance, W8-audit2a 리뷰 A2): 묶음 하나를 한 트랜잭션으로. 잠긴 행은 건너뛰고(SKIP LOCKED) 잠금 대기는 2초 [가정]까지.
+    // 찾기는 0022·0026이 정비 역할에 준 칸(id·status·rating·content_fingerprint·account_id)만 읽고, 고치기(purgeSet)가 읽는 칸은 id·deleted_at뿐이다(본문은 읽지 않는다)
+    return this.database.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('lock_timeout', ${`${LEGACY_LOCK_TIMEOUT_MS}ms`}, true)`);
+      const found = await tx.execute(sql`
+        select id::text as id from review
+         where ((status = 'DELETED' and (rating is not null or content_fingerprint is not null or account_id <> id))
+                or (status <> 'DELETED' and account_id = id))
+           ${o.after === undefined ? sql`` : sql`and id > ${o.after}::uuid`}
+         order by id
+         limit ${o.limit}::int
+         for update skip locked`);
+      const ids = (found.rows as { id: string }[]).map((r) => r.id);
+      const last = ids[ids.length - 1];
+      if (last === undefined) return { purged: 0 };
+      const purged = await tx.execute(sql`update review set ${purgeSet(o.nowMs)} where id = any(${sql.param(ids)}::uuid[]) returning id`);
+      return { purged: purged.rows.length, last };
+    });
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

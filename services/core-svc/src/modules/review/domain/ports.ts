@@ -67,8 +67,7 @@ export interface ReviewStore {
   oldestOverdueRecheckMs(nowMs: number): Promise<number>;
   /**
    * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기')을 id가 after보다 큰 것부터 limit개 잡아 파기 칸으로 고친다(한 트랜잭션, SKIP LOCKED).
-   * 고친 행 수와 마지막으로 본 id(다음 묶음의 커서, 없으면 undefined).
-   * 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다
+   * 고친 행 수와 그 묶음에서 고친 마지막 id(다음 묶음의 커서). 0건이면 커서가 없다(정비 일은 커서가 없을 때까지 이어 부른다)
    */
   purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }>;
 }

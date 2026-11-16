@@ -1,19 +1,39 @@
-// review 정비 일: 끝 시각이 지난 임시조치(RIGHTS_TEMP)를 풀고 조치 기록을 복원한다(정보통신망법 §44의2④, POL-044 ③).
-// core-svc relay 프로세스의 정비 리더가 하루 한 번 돈다(platform MaintenanceRunner).
+// review 정비 일(core-svc relay 프로세스의 정비 리더, platform MaintenanceRunner).
+// - review-temp-block-expire(매일): 끝 시각이 지난 임시조치(RIGHTS_TEMP)를 풀고 조치 기록을 복원한다(정보통신망법 §44의2④, POL-044 ③).
+// - review-purge-legacy(정비 시간 04:00~06:00 KST): 이전 판이 남긴 후기 행(작성자가 지웠는데 별점·지문·계정 ID가 남은 행, 옛 익명화로 참조만 끊긴 살아 있는 후기)을
+//   지금 파기 칸으로 고친다(소유자 결정 2026-11-16 OPEN[42], ADR-0278, docs/data.md §2 '이전 판이 남긴 행 고치기', W8-audit2a 리뷰 A2).
+//   id 차례 커서로 1,000행 [가정]씩 묶음마다 커밋하고, 멈춤 신호는 묶음 사이에 본다. 다음 출시의 파기 행 CHECK·VALIDATE 전에 0행을 보고해야 한다.
 import type { Clock, MaintenanceTask } from '@peaket/platform';
 import type { ReviewStore } from '../domain/ports.js';
 
-/**
- * o.batch: 이전 판 행 고치기(review-purge-legacy)의 한 묶음 행 수(기본 1,000 [가정]).
- * 뼈대(W8-audit2a 리뷰 A2 시험 단계): 인자만 더했다. 정비 일 review-purge-legacy(when 'window')는 구현 담당이 더한다
- */
-export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, _o: { batch?: number } = {}): MaintenanceTask[] {
+/** 이전 판 행 고치기 한 묶음 1,000행 [가정](docs/data.md §2 '이전 판이 남긴 행 고치기') */
+export const REVIEW_PURGE_LEGACY_BATCH = 1_000;
+
+/** o.batch: 이전 판 행 고치기(review-purge-legacy)의 한 묶음 행 수(기본 1,000 [가정]) */
+export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { batch?: number } = {}): MaintenanceTask[] {
+  const batch = o.batch ?? REVIEW_PURGE_LEGACY_BATCH;
   return [
     {
       name: 'review-temp-block-expire',
       when: 'daily',
       run: async () => {
         await store.expireTemporaryBlocks(clock.now());
+      },
+    },
+    {
+      name: 'review-purge-legacy',
+      when: 'window',
+      run: async (signal) => {
+        let purged = 0;
+        let after: string | undefined;
+        // 커서가 없을 때(0건)까지 이어 부른다. 고친 수가 묶음보다 적어도 끝으로 보지 않는다(SKIP LOCKED로 덜 잡혔을 수 있다)
+        while (!signal?.aborted) {
+          const r = await store.purgeLegacyRows({ nowMs: clock.now(), limit: batch, ...(after === undefined ? {} : { after }) });
+          purged += r.purged;
+          if (r.last === undefined) break;
+          after = r.last;
+        }
+        return { purged };
       },
     },
   ];
