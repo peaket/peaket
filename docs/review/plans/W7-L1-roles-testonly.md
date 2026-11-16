@@ -148,6 +148,38 @@
 
 ## 리뷰
 
+- 누가: 리뷰 담당 `w7l1-roles-review-2c7ed993`(같은 갈래·웨이브의 리뷰 역할 세션을 이어 씀), 2026-11-16. 받은 것은 `git diff origin/develop...HEAD`, `git log origin/develop..HEAD`, 이 계획 파일, docs/architecture.md §8.6 '합치기 전 역할 확인' 세부뿐이다. 구현 담당의 설명은 받지 않았다.
+- 모델: 구현 담당과 같은 claude-opus-5-5의 새 맥락이다. 다른 모델을 쓸 수 없었다(ADR-0270 결정 6).
+- 돌린 것:
+  - `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`(머리 `f45d70a4`): 끝 코드 1. 실패는 아직 없는 review·verify 커밋(`[구성]`)과 빈 '리뷰'·'검증' 절(`[계획 파일]`)뿐이다. 묶음 줄은 `코드 커밋 6개(plan 2·test 2·impl 2·…)`다.
+  - `node --test --test-reporter=tap tools/ci/roles-check.test.mjs`: 66개 가운데 66개 통과, 실패 0(약 18분).
+  - 의심 가는 곳은 작업 폴더 밖 임시 저장소(scratchpad `review-rc/mk2.sh <폴더> <변형>`)로 재현했다. 변형은 시험만 묶음 BAT-950과 코드 묶음 BAT-901을 만든다. 돌린 명령은 `node D:/ticketpass-lane1-v/tools/ci/roles-check.mjs --root <폴더> --base base --head HEAD`다.
+- 계획 항목 대조:
+  - 계획 1의 1~9(밝히는 법, 종류 가르기, 구성, 차례, 바꾸는 파일, 계획 파일·담당 표)가 구현에 있다.
+  - 계획 7의 1~6(마지막 verify가 마지막 고침보다 뒤, 고침으로 세는 커밋과 `.md` 예외, 첫 verify는 첫 impl 뒤, review·verify 사이 차례 없음, 시험만 묶음의 고침은 시험 파일을 바꾼 시험 쪽 커밋, 문서 묶음 제외)도 구현에 있다.
+  - 시험 RC-52~RC-66은 이름 15개가 표와 같다.
+  - 정본(§8.6 세부 '차례'·'시험만 묶음' 줄)과 구현이 어긋나는 곳은 없다.
+- 구현 커밋 `1695049f`·`f45d70a4`의 `git show --stat`: 둘 다 계획 파일, `tools/ci/README.md`, `tools/ci/roles-check.mjs` 셋뿐이다. 시험 파일은 건드리지 않았다.
+- 구멍이 아니라고 본 것(임시 저장소로 확인):
+  - Batch-Kind를 단 묶음이 코드를 바꾸는 길은 막혀 있다. 시험 쪽 커밋(`test`·`Fix-By: test`)은 시험 파일·문서만 바꿀 수 있고, 나머지 역할은 문서만 바꿀 수 있다. `impl`·`Fix-By: impl`·`doc`이 섞이면 `[구성]`이다. 꼬리말 꼴이 틀린 커밋은 묶음에 들지 않아도 `[꼬리말]`로 실패한다.
+  - `batch-kind:`(소문자 키)나 plan 밖 역할에 단 Batch-Kind는 시험만 묶음이 되지 않는다. 그 묶음은 코드 묶음으로 남아 구현이 없으면 `[구성]`이다.
+  - `.md`만 바꾼 고침을 세지 않는 틈은 없다. 코드 묶음에서 빼는 것은 바꾼 파일이 모두 `.md`인 구현 쪽 커밋뿐이다. `.md`는 행동을 바꾸지 않는다(변형 `code-implmdafterverify`, `services/a/src/x.md`만 바꿈, 끝 코드 0). 설정·코드가 하나라도 섞이면 고침으로 센다(RC-63).
+  - 시험만 묶음에서는 시험 폴더 안의 `.md`도 시험 파일로 센다(변형 `to-mdtest`, verify 뒤 `services/a/test/README.md`만 고침 → `[차례]`). 그래서 이쪽 틈도 없다.
+  - Batch-Kind를 verify 뒤의 늦은 plan 커밋에만 달면(변형 `to-latekind`) 시험만 묶음으로 통과한다. 계획 1의 1이 '하나 이상의 plan 커밋'으로 정했고(RC-52), 그때도 시험 쪽 커밋이 시험 파일·문서 밖을 바꿨으면 `[코드 경로]`로 막힌다. 그래서 코드가 새는 길은 아니다(지적 아님).
+
+| 번호 | 심각도 | 파일:줄 | 무엇이 틀렸나 | 재현 | 고칠 쪽 | 처리 |
+| --- | --- | --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `tools/ci/roles-check.mjs:409-416`, 계획 7의 1, §8.6 세부 '차례'·'시험만 묶음' | 이 묶음이 새로 넣은 '마지막 verify는 마지막 고침 뒤' 규칙을 빈 verify 커밋 하나로 비켜 간다. 검사는 verify 커밋이 그 자리에 있는지만 보고 무엇을 바꿨는지는 보지 않는다. 그래서 고침 뒤에 다시 검증하지 않고 빈 커밋(`--allow-empty`)이나 계획 파일과 무관한 문서 하나를 바꾼 verify 커밋을 덧붙여도 통과한다. '검증' 절은 첫 검증이 이미 채웠으므로 절 검사(⑧)도 걸리지 않는다. 지난 묶음 W7-L1-roles-check의 RV-05(리뷰·검증 커밋이 계획 파일을 고쳤는지 안 봄)와 같은 뿌리이고, 이 규칙이 생겨 영향이 커졌다 | 변형 `code-emptyverify`(… verify → `Fix-By: test` → `Fix-By: impl`(코드) → 빈 verify 커밋), `code-verifynotes`(verify → impl(코드) → verify가 `notes/v.md`만 고침), `to-emptyverify`(시험만 묶음, verify → `Fix-By: test`(시험 파일) → 빈 verify): 셋 다 끝 코드 0 | 계획(마지막 고침 뒤의 verify 커밋이 그 묶음의 계획 파일을 바꿔야 한다는 줄을 넣을지. 더 조이려면 '검증' 절이나 담당 표 verify 줄 끝 시각이 바뀌었는지까지) → 시험 → 구현 | 이 묶음 안에서 고친다(통과 기준: 새 규칙이 빈 커밋으로 통과한다). 감독이 구간 끝으로 미룰 수도 있다 |
+| RV-02 | 중간 | `tools/ci/roles-check.mjs:34`(시험 파일 정의)·`443-447`, 계획 1의 5 | 시험 파일 정의 밖에 시험의 기댓값이 있다. `tools/web-checks/`의 시각 비교 기준 그림 `visual/__screenshots__/{chromium,webkit}/*.png` 332개, 성능 예산 기준선 `budgets/js-baseline.json`·`lighthouse-baseline.json`, 시험 도우미(`visual/queue-room-states.mjs`, `budgets/pages.mjs`, `lib/*.mjs` 등)가 그렇다. 결과가 두 쪽으로 어긋난다. (가) 지나친 막음: 시험만 묶음의 대표 일인 기준 그림 다시 찍기나 시험 도우미의 날짜 고치기가 `[코드 경로]`로 막혀, 구현 담당을 띄우는 코드 묶음으로 해야 한다. (나) 구멍: 코드 묶음의 구현 커밋은 기준 그림·예산 기준선을 바꿔도 ⑤에 걸리지 않는다. 구현이 자기 결과에 맞춰 기대값을 고치는 길이다. 지난 묶음 계획 8의 1은 '패턴 밖 시험은 `test_*.py`와 `test-sim/`뿐'이라고 셌는데, 이 폴더를 놓쳤다 | 변형 `to-snap`(시험만 묶음 test가 기준 그림 하나를 고침)·`to-helper`(`queue-room-states.mjs`를 고침): 끝 코드 1, `[코드 경로]`. 변형 `code-implbaseline`(impl이 `budgets/js-baseline.json`과 기준 그림을 함께 고침): 끝 코드 0 | 계획(정본 빈칸: `__screenshots__` 폴더 마디, `*-baseline.json`, `tools/web-checks/` 아래를 시험 쪽으로 볼지. ADR-0270 결정 3이 기준 그림은 구현 뒤에 만들어도 된다고 했으므로, 누가 만드는지도 함께 정한다) → 시험 → 구현 | 구간 끝 정리 목록 후보. (나)는 지난 묶음 규칙의 빈틈이라 감독이 이 묶음 안으로 당길지 정한다 |
+| RV-03 | 낮음 | `tools/ci/roles-check.mjs:409-411`, 계획 7의 2 | 코드 묶음에서는 시험 쪽 커밋을 고침으로 세지 않는다. 그래서 마지막 verify 뒤에 `test` 커밋이 기존 시험의 단언을 바꿔도(느슨하게 해도) 다시 검증하지 않고 통과한다. 시험만 묶음에서는 같은 변경을 '검증받을 대상'으로 세므로 두 묶음의 선이 다르다. 계획 7의 2가 '살아남은 틀린 구현을 잡는 시험은 검증이 본 코드를 바꾸지 않는다'로 정한 것이라 구현 잘못은 아니다. 다만 그 시험이 정말 틀린 구현을 잡는지는 아무도 다시 보지 않는다 | 변형 `code-testafterverify`(… verify → test가 `services/a/test/x.test.ts`를 고침): 끝 코드 0 | 계획(코드 묶음에서도 시험 파일을 바꾼 시험 쪽 커밋 뒤에 verify를 요구할지) | 구간 끝 정리 목록 후보 |
+
+- '자주 놓친 결함' 대조:
+  - 목록 밖 값마다 거부: Batch-Kind의 틀린 값 여럿, plan 밖 역할마다, 키 대소문자(RC-56).
+  - 경계 양쪽: `.md`만 바꾼 고침과 섞인 고침(RC-63), 첫 verify와 첫 impl(RC-64).
+  - 차례를 바꾼 경우: verify ↔ review(RC-60), 여러 바퀴(RC-61).
+  - 빈 결과가 통과로 새지 않음: verify가 없으면 `[구성]`.
+  - 걸리는 것: '판정만 보지 말고 실제로 쓰였는지'의 꼴이 RV-01이다. verify 커밋의 존재만 보고 검증이 실제로 다시 돌았는지는 보지 않는다.
+
 ## 틀린 구현 목록
 
 검증 담당이 하나씩 넣고 `node --test tools/ci/roles-check.test.mjs`가 실패하는지 본다(B등급 표본). 번호는 이 묶음의 것이다.
@@ -189,3 +221,4 @@
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T13:08+09:00 | 2026-11-16T13:57+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T13:20+09:00 | 2026-11-16T14:20+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T13:32+09:00 | 2026-11-16T14:45+09:00 |
+| review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T14:46+09:00 | 2026-11-16T15:10+09:00 |
