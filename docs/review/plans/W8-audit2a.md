@@ -318,3 +318,34 @@ export interface CoreConsumersOptions { /* … 지금 칸 … */ recheck: Review
 - §1 ⓐ 별점·지문 남김 → 단위 ①·⑥, 통합 ①⑥·⑥. ⓑ 상태 그대로 → 단위 ①·②. ⓒ `where` 빠짐·`id`로 찾음 → 단위 ①(B 행 그대로), 통합 ①⑥. ⓓ DELETED 건너뜀 → 단위 ①·통합 ①⑥의 이미 지운 행. ⓔ 지운 시각 덮음 → 같은 행의 `deletedAtMs`·`deleted_at`. ⓕ 작성자 지우기 옛 칸 → 단위·통합 ⑥. ⓖ 옛 익명화 호출 → 단위 ①.
 - §2 ⓐ 처리 시각 기준 → 단위 ④(03:16 대 03:19). ⓑ 15분·`<` → 단위 ④ 경계 정각, 통합 ⑤ 정각 예약. ⓒ 다른 트랜잭션 → 통합 ④ 한 트랜잭션(반복이 가리는 겹친 가드를 이것만 따로 잡는다). ⓓ 이른 시각으로 덮음 → 단위 ④·통합 ④ 늦은 쪽. ⓔ 예약 안 지움 → 단위 ④·⑤, 통합 ⑤. ⓕ SKIP LOCKED 빠짐 → 통합 ⑤ 잠근 행 건너뛰기. ⓖ 실패하면 멈춤 → 단위 ⑤ 반복. ⓗ 반복 안 켬 → 단위 ⑤ 시작과 멈춤, Kafka 통합 ④.
 - §4 ⓘ notice 남김 → 단위 ①·⑥. ⓙ `/anonymize` 남음·가드 없음 → 단위 ③ 내부 경로. ⓚ 로그에 계정 ID → 단위 ①·④ 처리기. ⓛ min 없음 → 단위 ④ 미래 탈퇴 시각. ⓜ 100개 채워도 쉼 → 단위 ⑤ 반복. ⓝ 다른 역할 권한·넓은 UPDATE → 단위 ⑦ 원문, 통합 ⑦.
+
+## 시험 이의
+
+- **누가·언제**: 구현 담당(세션 `l3w8-a2a-impl`), 2026-11-16. 시험 파일은 고치지 않았다.
+
+### 이의 1. 시험 두 파일이 `contentFingerprint: string | null`에서 컴파일되지 않는다(typecheck 오류 4, 실행은 통과)
+
+- 계획 '공개 인터페이스'대로 `ReviewRecord.rating`을 `number | null`, `contentFingerprint`를 `string | null`로 바꾸자 `pnpm --dir services/core-svc typecheck`가 **시험 파일에서만** 오류 4건을 낸다(제품 코드 오류 0). 실패 확인 절의 '시험은 두 꼴 모두에서 컴파일된다'는 별점에만 맞고 내용 지문에는 맞지 않다. vitest는 타입을 보지 않아 단위 시험 458개는 모두 통과한다.
+  - `test/review-withdrawn.test.ts:135` `TakedownRecord.contentFingerprint`(string)에 `a2.contentFingerprint`(string | null)를 넣는다.
+  - `test/review-withdrawn.test.ts:137` `store.addHiddenFingerprint(a1.contentFingerprint, …)`
+  - `test/review-withdrawn.test.ts:162` `store.hasHiddenFingerprint(a1.contentFingerprint)`
+  - `test/review.test.ts:84`(이 묶음 전부터 있던 시험) `TakedownRecord.contentFingerprint`에 `r.contentFingerprint`를 넣는다.
+- 제품 쪽에서 맞추지 않은 까닭: 조치 증적 `takedown_action.content_fingerprint`와 차단 목록 `review_hidden_fingerprint.fingerprint`는 DB에서 NOT NULL이라 `TakedownRecord`·지문 포트를 null 허용으로 넓히면 틀린 모양이 된다. `ReviewRecord.contentFingerprint`를 `string`으로 두면 파기 행의 런타임 null과 타입이 어긋난다.
+- 고칠 길(시험 담당 몫): 네 자리에서 살아 있는 후기의 지문임을 밝힌다(예 `a2.contentFingerprint!`, 또는 시험 도움 함수 `review()`·`record()`가 만든 값을 지문 변수로 따로 둔다). 단언 값은 바뀌지 않는다.
+
+### 구현 담당이 정한 것(계획에 없던 세부, 검증·리뷰 참고)
+
+1. **잠금 차례**: Drizzle `purgeWithdrawnAccount`는 계획 §2의 '파기 update → 예약 insert' 대신 **예약 upsert → 파기 update** 차례로 쓴다. 다시 정리 반복(`runDueRechecks`)도 예약 행(`FOR UPDATE SKIP LOCKED`) → 후기 차례로 잠가, 같은 계정의 사건 다시 받기와 예약 처리가 겹쳐도 교착(40P01)이 나지 않게 했다. 한 트랜잭션이라는 성질과 REVOKE INSERT 시험(④)의 결과는 같다.
+2. **0026 journal**: `idx` 26, `when` 1794811994338(drizzle-kit이 만든 값, 2026-11-16T06:53Z, develop 마지막 0022의 1794789168699보다 크다). 스냅숏 `meta/0026_snapshot.json`의 `prevId`는 0022 스냅숏 ID다. drizzle-kit이 만든 SQL을 0026으로 옮기고 CHECK에 `NOT VALID`, 예약 표 GRANT, 주석을 손으로 더했다. 다시 `db:generate`하면 '바뀐 것 없음'이다. 갈래 2의 0023 등과 합칠 때 journal 차례는 감독이 맞춘다(`when`이 뒤 번호보다 작아지지 않게).
+3. **밀린 시간 지표**: 반복은 정비 보존 지표 이름 `maintenance_retention_overdue_seconds`를 받은 지표 저장소에 이미 있으면 다시 쓰고, 없으면 platform `maintenanceMetrics`와 같은 이름·도움말·칸으로 만든다. main.ts에서는 API 파드의 `/metrics`(소비자 지표와 같은 저장소)에 실린다. 다른 표의 같은 지표는 relay 프로세스가 낸다(경보 규칙은 이름·`table` 칸으로 걸리므로 그대로 잡힌다고 보았다).
+4. **반복 실패 경고**: 오류는 platform `errorSummary`로 요약한다(Drizzle 쿼리 오류는 쿼리 틀과 DB 오류 코드만, 매개변수의 계정 ID 없음). 한 번 돌 때 경고는 한 줄이다(지표 읽기 실패도 같은 줄). 잡은 예약이 있으면 info 한 줄(`accounts`·`purged` 수만)을 낸다.
+5. **`withdrawalRecheckAt`**: 계약 date-time 모양(시간대 표기 필수)을 먼저 보고 `Date.parse`한다(날짜만 있는 글을 받지 않는다). 오류 글에 값을 싣지 않는다.
+6. **살아 있는 후기의 지문·별점**: 신고·조치·CS 상세(`report`·`moderate`·`reportedReview`)는 별점·지문이 null이면 없는 후기(404)로 본다(살아 있는 행은 `review_live_complete_check`가 막아 실제로는 오지 않는다). 공개 모양(`reviewView`)은 null 별점을 싣지 않는다.
+
+### 정본 빈칸
+
+- 없다(위 세부는 코드 몫이다). 3의 지표가 API 파드에서 나는 것은 docs/observability.md 운영 확인 '정비 잡' 행이 relay 프로세스만 적었다면 한 줄 보탤 거리다(이 묶음에서는 고치지 않았다, 기록 담당 판단).
+
+### 돌릴 통합 시험(감독이 Docker 차례를 알린 뒤, core-svc 폴더)
+
+- `npx vitest run --config vitest.integration.config.mjs test-int/review-purge.int.test.ts test-int/review-recheck.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 파일은 Kafka 컨테이너. 네이티브 Kafka 모듈이 이 PC에서 막히면 CI에서만 돈다)
