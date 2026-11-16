@@ -11,6 +11,8 @@ export const seatKeys = {
   bitmap: (e) => `s:{event:${e}}:bitmap`,
   hold: (e, index) => `s:{event:${e}}:hold:${index}`,
   expiry: (e) => `s:{event:${e}}:expiry`,
+  /** 우선 구매 보류 만료 인덱스(GAT-135, docs/data.md §3 s:{event:E}:prio). 측정 도구는 우선 구매 보류를 만들지 않아 이름만 운영과 맞춘다 */
+  prio: (e) => `s:{event:${e}}:prio`,
   quota: (e, account) => `s:{event:${e}}:quota:${account}`,
   stream: (e) => `s:{event:${e}}:stream`,
   idem: (e, account, key) => `s:{event:${e}}:idem:${account}:${key}`,
