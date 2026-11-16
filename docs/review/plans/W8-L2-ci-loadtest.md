@@ -106,7 +106,25 @@
 
 ## 리뷰
 
-아직 없음.
+**판정: 합쳐도 됨.** 막는 지적은 없다. 지적 넷은 모두 낮음이고 이 묶음 밖(정리 목록)으로 넘긴다. 리뷰 담당 l2w8ci-review, 2026-11-16, 구현 커밋 `db6dc130` 기준.
+
+### 확인한 것
+
+- **바뀐 범위.** `git diff --stat 033bb26d..db6dc130`은 이 계획 파일과 `loadtest/poc/bench/src/seat-contract.mjs`(+2, -0)뿐이다. `loadtest/test/**`·`services/**`는 바뀌지 않았다.
+- **(1) 사본 `seatKeys`가 운영과 이름·결과가 같은가.** 운영 `services/purchase-svc/src/modules/inventory/adapters/redis-seat-store.ts` 189~235행과 사본 8~32행을 이름 하나씩 맞대 봤다. 둘 다 23개(bitmap·hold·expiry·prio·quota·stream·idem·epoch·ctl·rel·secver·ordered·paused·fence·autoCur·section·ctlEvents·rebuild·failed·sweep·sessions·saleSweep·sessionSweep)이고, 키 글도 23개 모두 글자까지 같다. 더한 줄 `prio: (e) => \`s:{event:${e}}:prio\``는 운영 195행과 같고, docs/data.md 2520행 `s:{event:E}:prio`(Sorted Set, 우선 구매 보류 만료 인덱스)와도 맞다. BAT-430(`16b60af1`)이 운영 `seatKeys`에 더한 것은 `prio` 한 줄뿐이고(`git show 16b60af1 -- …/redis-seat-store.ts`), 그 뒤 운영 파일을 바꾼 `7a076b5c`(R-587)·`f79a5855`(R-604)는 `seatKeys` 표에 이름을 더하지 않고 `seatKeys.prio`를 쓰는 연산만 더했다. 빠진 키는 없다.
+- **운영 `hold`·`expire`·`dueExpiries`·`replay`가 `prio`를 쓰지 않는가.** 운영 파일에서 `seatKeys.prio`가 나오는 곳은 `holdPriority`(334행)·`releasePriority`(364행)·`pin`(525행, R-604 B1-01)·`restorePriority`(602행)·`duePriorityExpiries`(854행)·`expirePriority`(894행)뿐이다. 측정 도구가 운영과 견주는 `hold`(271행)·`replay`(474행)·`dueExpiries`(759행)·`expire`(792행)에는 없다. 그래서 사본 `holdCall`·`expireCall`·`replayCommand`·`dueRangeCommand`·`dueHoldCommand`에 `prio`를 넣지 않은 것이 맞다.
+- **(2) `prio`를 더한 것이 측정 도구의 다른 동작에 주는 영향.** `grep -rn seatKeys loadtest`로 쓰는 곳을 모두 봤다. `seatKeys`를 돌며(`Object.keys`·`Object.entries`) 키를 만드는 곳은 대조 시험(`loadtest/test/poc-seat.test.mjs` 114~115행)과 운영 쪽을 부르는 `loadtest/test/fixtures/seat-store-probe.mjs` 103행뿐이다. 측정 본체 `loadtest/poc/bench/src/seat-shard.mjs`는 `bitmap`·`expiry`·`stream`·`epoch`·`secver`·`ctl`·`ctlEvents`·`section`을 이름으로 골라 쓸 뿐(94·132·155~158·192·199·460~465행) 표를 돌지 않는다. 사본 안 함수도 이름으로만 부른다. 오버셀 검사기(460~463행, 비트 수 = `expiry` 멤버 수)는 `prio`를 읽지 않으며 측정이 우선 구매 보류를 만들지 않으므로 결과가 달라지지 않는다. 뜻하지 않은 영향은 없다.
+- **(3) '이번에 안 함' 판단.** 타당하다. 측정 도구는 일반 홀드·만료만 만들고, 시험 통과에 우선 구매 연산 대조가 필요 없다. `tools/ci/changes.mjs` 48행의 `loadtest` 규칙 정규식에 `services/purchase-svc/`가 없는 것도 확인했다(그래서 BAT-430 때 이 잡이 건너뛰어졌다). 대조 시험의 probe는 `redis-seat-store.ts`를 불러 그 안에서 `inventory/adapters/`·`inventory/domain/`을 줄줄이 가져오고(바깥 `@nestjs/common`·`@peaket/platform`은 가짜로 바꾼다, probe 4·34행), `sweep-rules.mjs`는 `application/expiry-sweeper.ts`와 견주므로, 계획이 권한 경로(adapters·domain·expiry-sweeper)가 이 시험이 기대는 운영 파일을 다 덮는다. 범위 규칙과 그 시험(`tools/ci/changes.test.mjs` BSL060)을 함께 바꾸는 다른 성격의 일이라 따로 하는 것도 맞다.
+- **(4) 같은 꼴로 어긋난 사본.** 계획 3절 표 밖에서 `services/`를 가리키는 loadtest 파일도 봤다. `loadtest/lib/users.mjs`(토큰 쿠키 이름, `changes.mjs` 규칙에 원문 `token.ts`가 있다), `loadtest/e2e/v0-rehearsal.e2e.mjs`(검사기 빌드를 읽는다, 사본 아님), `loadtest/poc/bench/lua/entry-number-batch.lua`(`loadtest/poc/run.mjs` 38행이 측정 전에 쓰는 생성물이고 `.gitignore` 36행으로 커밋되지 않는다, `git ls-files`로도 확인), `loadtest/run.mjs`·`loadtest/scenarios/v1-search.js`(설명 주석에서 가리킬 뿐). 커밋된 PoC Lua는 `hold.lua`·`release.lua`·`snapshot.lua` 셋뿐이고 운영 사본이 아니다. 같은 꼴로 어긋난 사본은 더 없다.
+- **머리 주석.** 사본 1~5행·7행 주석은 고친 뒤에도 사실과 맞다.
+- **시험.** `cd D:/ticketpass-lane2 && node --test "loadtest/test/*.test.mjs"`(Node 24.18.0): tests 468, pass 468, fail 0.
+
+### 지적
+
+- **RVL-1(낮음) 계획 4절의 우선 구매 연산 목록에 `pin`이 빠졌다.** 무엇: 4절은 `prio`를 쓰는 운영 연산을 `holdPriority`·`releasePriority`·`restorePriority`·`duePriorityExpiries`·`expirePriority`로 적었지만, R-604(`f79a5855`, B1-01)부터 일반 묶기 `pin`도 KEYS에 `prio`를 넣는다. 근거: `services/purchase-svc/src/modules/inventory/adapters/redis-seat-store.ts` 512~526행(KEYS 마지막이 `seatKeys.prio(e)`). 지금은 측정 도구가 `pin`을 부르지도 대조하지도 않아(`loadtest/poc/bench/src/seat-contract.mjs`에 묶기 호출 함수가 없다) 이번 고침에는 영향이 없다. 권하는 처리: 고치지 않는다. 뒤에 측정 도구에 묶기 대조를 더할 때 `prio`가 KEYS에 들어간다는 점을 정리 목록 문구에 함께 적는다.
+- **RVL-2(낮음) 대조 시험이 입력 한 벌로만 불러 본다.** 무엇: 계획 4절 마지막·7절 M4와 같은 내용이다. `seatKeys` 23개를 모두 `('E1', 'X2', 'Y3')` 한 번으로만 견주므로, 인자를 보지 않고 고정 글을 돌려주는 틀린 사본도 통과한다(`prio`만이 아니라 23개 모두). 근거: `loadtest/test/poc-seat.test.mjs` 95·115행. 권하는 처리: 이 묶음에서는 고치지 않는다. 정리 목록에 "seatKeys 대조를 회차·계정·색인이 다른 입력 두 벌로 부른다"로 올린다.
+- **RVL-3(낮음) `changes.mjs` 정리 목록 문구를 조금 넓힌다.** 무엇: 계획이 권한 문구("purchase-svc 좌석 저장소 경로")는 맞지만, 이 시험은 운영 Lua 원문(`hold-lua.ts`·`expire-lua.ts`)과 상수(`domain/expiry.ts`·`domain/hold.ts`)도 견준다. 근거: `tools/ci/changes.mjs` 48행 정규식에 `services/purchase-svc/`가 없다. `loadtest/poc/seat-lua.mjs`가 `inventory/adapters/`의 Lua를, `loadtest/poc/bench/src/sweep-rules.mjs`가 `application/expiry-sweeper.ts`를 원문으로 삼는다. 권하는 처리: 정리 목록 문구를 "loadtest-check 범위에 `services/purchase-svc/src/modules/inventory/`(adapters·domain)와 `…/application/expiry-sweeper.ts`를 더하고 BSL060 시험에 그 경로를 넣는다(W8-L2-ci-loadtest에서 드러남)"로 적는다.
+- **RVL-4(낮음, 이 묶음 밖) docs/data.md의 `s:{event:E}:prio` 행이 뒤처졌다.** 무엇: 그 행은 "만료 작업이 이 집합의 지난 것을 푸는 연결은 후속"이라고 적었지만, R-587(`7a076b5c`)이 `duePriorityExpiries`·`expirePriority`를 넣었고 만료 반복이 이를 부르며 시작 코드가 잇는다. 근거: `docs/data.md` 2520행, `services/purchase-svc/src/modules/inventory/adapters/redis-seat-store.ts` 851·891행, `services/purchase-svc/src/modules/inventory/application/expiry-sweeper.ts` 401~403행, `services/purchase-svc/src/start.ts` 483행. 계획 4절은 이 문장을 판단 근거로 쓰지 않아 이번 판단에는 영향이 없다. 권하는 처리: 이 묶음에서는 정본을 고치지 않고, 감독이 정리 목록에 "data.md §3 prio 행의 '연결은 후속'을 R-587 반영으로 고친다"로 올린다.
 
 ## 검증
 
