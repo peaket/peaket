@@ -66,7 +66,7 @@ export interface AttendeeSource {
 
 **차례**: 시험 담당이 위 단위 시험과 기존 시험 고치기를 한 커밋에 쓰고(포트 모양 바뀜으로 typecheck가 깨지면 빈 뼈대 타입만 더한다), 구현 담당이 포트 → `HttpAttendeeSource` → 메모리 원천 → `create`·`listAttendees` 순으로 고친다. A2-19와 같은 파일을 건드리므로 A2-17을 먼저 끝낸다.
 
-**돌릴 통합 시험**: `pnpm --dir D:/ticketpass-lane3/services/purchase-svc test:integration -- test-int/attendee-reader.int.test.ts`
+**돌릴 통합 시험**(보충으로 고침, 파일 거르기가 먹는 명령): purchase-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/attendee-reader.int.test.ts`
 
 **정본 빈칸과 정한 것(이 커밋에 씀)**
 - 짧은 페이지·0건 페이지도 끝이 아니고 `nextCursor` null일 때만 끝이다. 마지막 페이지가 정확히 `limit`건이어도 null이다. 같은 커서가 다시 오면 끝까지 읽는 쪽은 실패로 끝낸다(guidelines §3, 추천 적용).
@@ -149,7 +149,7 @@ export function accessLogRetainUntil(createdAt: Date): Date;
 
 **차례**: A2-17 구현이 끝난 뒤 시작한다(같은 파일). 시험 담당 → 구현 담당(포트·메모리 → 유스케이스·컨트롤러 → 보존 끝 함수 → 0021·스키마·Drizzle).
 
-**돌릴 통합 시험**: `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/export-audit.int.test.ts`
+**돌릴 통합 시험**(보충으로 고침, 파일 거르기가 먹는 명령): core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts`
 
 **정본 빈칸과 정한 것(이 커밋에 씀)**
 - 보기 접속기록 단위는 '돌려준 페이지 하나'이고 건수는 그 페이지에 보인 행 수, 조건은 `limit`·`cursor`다. 404·410·403은 남기지 않는다. 행위자는 로그인 주체, 표시 이름 대체는 역할 이름(settlement.md §9, 추천 적용).
@@ -207,14 +207,19 @@ export function accessLogRetainUntil(createdAt: Date): Date;
 
 **무엇이 틀렸나(코드 확인)**: R-617이 후기 익명화(`Reviews.anonymizeAccount` → `account_id`·`basis_order_id`를 후기 ID로, 작성자 표시 '탈퇴한 사용자')와 내부 경로 `POST /internal/v1/reviews/accounts/{accountId}/anonymize`를 만들었지만, 아무도 그 경로를 부르지 않는다. core-svc에는 Kafka 소비자가 하나도 없고, `identity.accounts-withdrawn`의 소비자는 queue-svc뿐이다. R-617은 익명화 시험도 남기지 않았다. 병합은 정본상 흡수 계정이 후기를 가질 수 없어(identity.md §2.1 병합 불변식) 익명화 대상이 아니다.
 
+**보충(2026-11-16, 시험 담당이 실패 확인 중 찾은 계획 빈칸)**: 운영 역할에 후기 표 쓰기 권한이 없다. 0004는 `core_app`에 모든 표 읽기(기본 권한)와 `wish` 넣기·지우기만 주고, 0013(review·content_report·takedown_action·review_hidden_fingerprint)과 그 뒤 마이그레이션은 `core_app`·`core_maintenance`에 이 표들의 쓰기를 주지 않았다(`grep -n GRANT services/core-svc/migrations/*.sql`로 확인). ADR-0241 결정 4('`core_app`은 … 쓰기가 생기면 그 단계의 마이그레이션이 더한다')를 BAT-585가 빠뜨린 것이다. 그래서 ⑪이 운영과 같은 `core_app` 로그인에서 42501로 실패했고, 다음도 운영에서 모두 실패한다(기존 `test-int/review.int.test.ts`는 슈퍼유저로 붙어 드러나지 않았다).
+- `core_app`(main.ts의 `PEAKET_DATABASE_URL`, 팬·관제 경로): 후기 쓰기·고치기·지우기, 신고, 통보 가림, CS 조치, 탈퇴 익명화(⑪), Kafka 보류 넣기(⑫ `held_event` INSERT).
+- `core_maintenance`(relay.ts의 정비 연결): 정비 일 `review-temp-block-expire`(`review`·`takedown_action` 읽기·고치기 권한 없음)와 플랫폼 정비 일 `held-events-delete`(`held_event` 지우기 권한 없음).
+- **이번 범위에 넣는다.** COV2-06의 익명화·보류가 같은 권한에 막히고, 고칠 곳이 마이그레이션 하나다. 권한은 코드가 실제로 쓰는 칸·동작만 준다(아래 0022, 정본 docs/data.md §2 '후기 표의 DB 권한'·§4의 15 'DB 권한'에 먼저 적었다).
+
 **손댈 파일**
 
 | 나눔 | 파일 |
 | --- | --- |
 | 제품 코드 | 새 `services/core-svc/src/modules/review/inbound/account-withdrawn.handler.ts`, `…/review/index.ts`(내보내기), 새 `services/core-svc/src/consumers/index.ts`·`src/consumers/start.ts`, `services/core-svc/src/main.ts`(설정 읽기·시작·멈춤) |
-| 마이그레이션 | 없음(`held_event`는 0000에 있다) |
-| 시험 | 새로: `services/core-svc/test/review-withdrawn.test.ts`, `test/core-consumers.test.ts`, `test-int/review-withdrawn.int.test.ts`(PostgreSQL), `test-int/review-withdrawn-consumer.int.test.ts`(Kafka + PostgreSQL), `test-int/kafka.ts`(queue-svc `test-int/kafka.ts`를 본뜬 시험 도우미) |
-| 정본(이 커밋) | `docs/api/asyncapi.yaml`(채널 설명·`consumeAccountWithdrawn`), `docs/streaming.md` §2.4 업무 키·§2.6 'core-svc 소비자', `docs/features/identity.md` §8 '후기 익명화' 아래 넷, `docs/security/data-classification.md` '탈퇴 사건의 pid 사본' 행, `docs/security/asvs/catalog-review.md` v5.0.0-14.2.7 행 |
+| 마이그레이션 | (보충) 새 `services/core-svc/migrations/0022_review_role_grants.sql`과 `migrations/meta/_journal.json`의 idx 22 항목. 권한만 바꾸므로 Drizzle 스키마·스냅숏은 바꾸지 않는다(0012·0013처럼). `held_event` 표는 0000에 있다 |
+| 시험 | 새로: `services/core-svc/test/review-withdrawn.test.ts`, `test/core-consumers.test.ts`, `test-int/review-withdrawn.int.test.ts`(PostgreSQL), `test-int/review-withdrawn-consumer.int.test.ts`(Kafka + PostgreSQL), `test-int/kafka.ts`(queue-svc `test-int/kafka.ts`를 본뜬 시험 도우미). (보충) 고침: `test-int/review.int.test.ts`(서비스를 `core_app` 로그인으로 띄운다). 새로: `test/review-grants.test.ts`(0022 SQL 원문), `test-int/review-grants.int.test.ts`(역할별 허용·거절) |
+| 정본 | 계획 커밋: `docs/api/asyncapi.yaml`(채널 설명·`consumeAccountWithdrawn`), `docs/streaming.md` §2.4 업무 키·§2.6 'core-svc 소비자', `docs/features/identity.md` §8 '후기 익명화' 아래 넷, `docs/security/data-classification.md` '탈퇴 사건의 pid 사본' 행, `docs/security/asvs/catalog-review.md` v5.0.0-14.2.7 행. 보충 커밋: `docs/data.md` §2 '후기 표의 DB 권한'·§4의 15 'DB 권한' |
 
 **공개 인터페이스**
 
@@ -260,6 +265,21 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 
 - `main.ts`: `createService` 전에 `kafkaConsumersFromEnv(process.env)`를 읽어 운영에서 브로커가 없으면 시작하지 않는다. `service.listen()` 뒤에 켜져 있으면 `startCoreConsumers({ …, clientId: \`core-svc-${env}-${파드}\`, auth: kafkaAuthFromEnv('core-svc', process.env), handler: new ReviewAccountWithdrawnHandler(service.app.get(Reviews), undefined, { logger }) })`. `started`가 실패하면 오류 한 줄 뒤 종료 코드 1. SIGTERM에서는 소비자를 먼저 멈춘 뒤 서비스를 닫는다. 꺼진 설정(local·ci)은 경고 한 줄.
 - 내부 경로와 `Reviews.anonymizeAccount`·`ReviewStore.anonymizeByAccount`의 동작은 바꾸지 않는다(아래 OPEN 후보 1).
+- (보충) 0022 권한. 표 쓰기 SQL을 하나씩 대조해 정했다(`review/adapters/db/drizzle-review-store.ts`, 플랫폼 `held-events.ts`). 여기 없는 권한(표 전체 UPDATE, `review`·`content_report`·`takedown_action` DELETE, TRUNCATE)은 주지 않는다. `SELECT … FOR UPDATE`(통보 가림)는 아래 UPDATE 칸 권한으로 된다.
+
+  | 역할 | 표 | 줄 권한 | 쓰는 곳 |
+  | --- | --- | --- | --- |
+  | `core_app` | `review` | `SELECT`, `INSERT`, `UPDATE (rating, body, status, notice, notice_until, content_fingerprint, author_display, edited, updated_at, deleted_at, account_id, basis_order_id)` | 쓰기, 고치기, 지우기(소프트), 신고 가림, 통보 가림, CS 조치, 탈퇴 익명화. `id`·`event_id`·`created_at`은 고치지 못한다 |
+  | `core_app` | `content_report` | `SELECT`, `INSERT`, `UPDATE (status, outcome, resolved_at)` | 신고, 신고 처리 완료 |
+  | `core_app` | `takedown_action` | `SELECT`, `INSERT`, `UPDATE (restored_at)` | 가림 조치 기록, 해제 |
+  | `core_app` | `review_hidden_fingerprint` | `SELECT`, `INSERT`, `DELETE` | 같은 내용 지문 등록(`ON CONFLICT DO NOTHING`)·해제 |
+  | `core_app` | `held_event` | `SELECT`, `INSERT` | 탈퇴 사건 보류(⑫). 다시 처리(RB-11)의 `UPDATE (reprocessed_at)`은 주지 않는다(범위 밖) |
+  | `core_maintenance` | `review` | `SELECT (id, status, notice, notice_until)`, `UPDATE (status, notice, notice_until, updated_at)` | 임시조치 끝내기 `review-temp-block-expire` |
+  | `core_maintenance` | `takedown_action` | `SELECT (reason, restored_at, ends_at)`, `UPDATE (restored_at)` | 〃 |
+  | `core_maintenance` | `held_event` | `SELECT (reprocessed_at)`, `DELETE` | 플랫폼 정비 일 `held-events-delete` |
+
+  - `core_app`의 `SELECT`는 0004의 기본 권한과 같은 것을 다시 적는 것이다(이미 있는 권한이 사라지지 않게, 0006 `production_image`와 같은 방식).
+  - 실행 순서: 0021(A2-19) 다음이다. 다른 갈래가 core-svc 0021·0022를 먼저 합치면 감독이 번호를 조정한다.
 
 **시험 목록**
 
@@ -275,12 +295,16 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 | `COV2-06 ⑧ 소비자 그룹은 peaket.core-svc.<환경>이고 탈퇴 토픽 하나만 읽는다` | 단위 | `CORE_GROUP('prod') === 'peaket.core-svc.prod'`, `CORE_TOPICS`가 정확히 `['identity.accounts-withdrawn']` | |
 | `COV2-06 ⑨ 내부 익명화 경로는 토큰이 없거나 틀리면 403이고 맞으면 바꾼 건수를 준다` | HTTP | `PEAKET_ENV=ci`, 토큰 설정. 없음·틀림 403(공용 가드), UUID 아닌 계정 400(요청 검사), 맞으면 200 `{ anonymized: 2 }`(정확한 수), 다시 부르면 `{ anonymized: 0 }` | R-617이 남긴 시험 공백 |
 | `COV2-06 ⑩ main.ts는 시작 전에 Kafka 설정을 읽고 듣기 뒤에 후기 탈퇴 소비자를 켠다` | 단위(원문 대조) | `main.ts` 글에서 `kafkaConsumersFromEnv(`가 `createService(`보다 앞, `startCoreConsumers(`와 `ReviewAccountWithdrawnHandler`가 `service.listen()` 뒤, SIGTERM 처리에 소비자 `stop` | 시작 파일 조립(자주 놓친 결함). 약한 검사라 ⑫가 실제 동작을 본다 |
-| `COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다` | 통합(core PostgreSQL) | A의 두 회차 후기·B의 후기. 첫 호출 2, A 행 `account_id = id`·`basis_order_id = id`·`author_display` '탈퇴한 사용자'·`updated_at` = 넘긴 시각, B 행 그대로, 회차·계정 부분 유일 인덱스 위반 없음. 둘째 호출 0 | 처음부터 통과 예상(R-617 동작) |
-| `COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다` | 통합(core Kafka + PostgreSQL) | 맞는 JSON 사건 → 기다리면 A 후기 익명화. pid가 들고 accountId가 틀린 사건 → 보류 행 1, `topic` 탈퇴 토픽, 값 null, 값·머리 어디에도 pid 글자 없음. 그룹 `peaket.core-svc.<시험 환경>` | 네이티브 Kafka 모듈이 이 PC의 응용 프로그램 제어에 막히면 CI에서만 돈다 |
+| `COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다` | 통합(core PostgreSQL) | A의 두 회차 후기·B의 후기. 첫 호출 2, A 행 `account_id = id`·`basis_order_id = id`·`author_display` '탈퇴한 사용자'·`updated_at` = 넘긴 시각, B 행 그대로, 회차·계정 부분 유일 인덱스 위반 없음. 둘째 호출 0 | (보충으로 바뀜) '처음부터 통과 예상'이 아니다. `core_app` 로그인에서 42501로 실패했다(권한 결함 재현). 0022 뒤 통과해야 한다 |
+| `COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다` | 통합(core Kafka + PostgreSQL) | 맞는 JSON 사건 → 기다리면 A 후기 익명화. pid가 들고 accountId가 틀린 사건 → 보류 행 1, `topic` 탈퇴 토픽, 값 null, 값·머리 어디에도 pid 글자 없음. 그룹 `peaket.core-svc.<시험 환경>` | 네이티브 Kafka 모듈이 이 PC의 응용 프로그램 제어에 막히면 CI에서만 돈다. 소비자의 DB는 `core_app` 로그인이다(보류 넣기 권한도 본다) |
+| (보충) `COV2-06 ⑬ 0022는 후기 표와 보류 표에 코드가 쓰는 칸·동작만 준다` | 단위(SQL 원문) | 위 0022 표의 GRANT 줄이 모두 있고, `review`·`content_report`·`takedown_action`에 대한 `DELETE`·`TRUNCATE`·칸 없는 `UPDATE`가 없으며, `review` UPDATE 칸 목록에 `id`·`event_id`·`created_at`이 없다. `held_event`의 `core_app` 권한은 `SELECT, INSERT`뿐. journal idx 22의 tag가 `0022_review_role_grants` | 0019 시험과 같은 방식 |
+| (보충) `COV2-06 ⑭ 운영 역할 core_app으로 후기 쓰기·신고·통보 가림·조치가 된다` | 통합(core PostgreSQL) | 기존 `test-int/review.int.test.ts`의 시험 넷(동시 쓰기 409, 신고 하루 10건 429, 동시 신고 409, 지문 가림·조치·신고 처리 한 트랜잭션)을 마이그레이션은 관리자로, 서비스는 `loginFor(admin, pg, …, 'core_app', 8)` 로그인으로 띄워 돌린다. 단언은 그대로 | 기존 시험 고침. 0022 전에는 42501로 실패해야 한다 |
+| (보충) `COV2-06 ⑮ core_app은 후기의 id·event_id·created_at을 고치지 못하고 후기·신고·조치 행을 지우지 못한다` | 통합(core PostgreSQL) | `core_app` 로그인으로 `UPDATE review SET event_id = …`·`SET id = …`·`SET created_at = …`, `DELETE FROM review`·`content_report`·`takedown_action` 각각 42501. `UPDATE held_event SET reprocessed_at = now()`도 42501 | 최소 권한의 거부 쪽 |
+| (보충) `COV2-06 ⑯ 정비 역할로 임시조치 끝내기와 보류 표 정리가 되고, 후기를 새로 쓰지는 못한다` | 통합(core PostgreSQL) | `core_maintenance` 로그인: `notice_until`이 지난 RIGHTS_TEMP 가림 후기와 그 조치를 둔 뒤 정비 일 `review-temp-block-expire`를 한 번 돌리면 후기 `status` VISIBLE·`notice` null, 조치 `restored_at` = 돌린 시각. 지나지 않은 것(경계: `notice_until` = 지금 + 1ms)은 그대로. `deleteReprocessedHeldEvents`가 다시 처리한 지 8일 된 행만 지우고 6일 된 행·다시 처리 안 한 행은 남긴다. `INSERT INTO review`는 42501 | 정비 연결은 relay.ts와 같은 역할 |
 
-**차례**: A2-17·A2-19와 파일이 겹치지 않아 나란히 해도 된다. 시험 담당은 처리기·설정·보류 감싸기의 빈 뼈대(동작 없이 '아직 없음'을 던짐)를 더해 실패를 본다. 구현 담당은 처리기 → `consumers/index.ts` → `consumers/start.ts` → `main.ts` 순으로 한다.
+**차례**: A2-17·A2-19와 파일이 겹치지 않아 나란히 해도 된다. 시험 담당은 처리기·설정·보류 감싸기의 빈 뼈대(동작 없이 '아직 없음'을 던짐)를 더해 실패를 본다. 구현 담당은 처리기 → `consumers/index.ts` → `consumers/start.ts` → `main.ts` 순으로 한다. (보충) 시험 담당이 ⑬~⑯과 `review.int.test.ts` 고침을 먼저 쓰고 실패를 본 뒤(⑬은 파일 없음, ⑭⑯은 42501), 구현 담당이 0022를 쓴다. 0022는 0021(A2-19) 뒤이므로 A2-19 마이그레이션과 같은 구현 차례에서 이어 쓴다.
 
-**돌릴 통합 시험**: `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(뒤의 것은 Kafka 컨테이너가 필요하다)
+**돌릴 통합 시험**(보충으로 고침: `pnpm … test:integration -- <파일>`은 파일 거르기가 먹지 않아 통합 시험 전체가 돈다. 실패 확인 절 참고): core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 것은 Kafka 컨테이너가 필요하다)
 
 **정본 빈칸과 정한 것(이 커밋에 씀)**
 - 부르는 길: identity가 내부 경로를 부르지 않고, core-svc가 `peaket.core-svc.<환경>` 그룹으로 탈퇴 사건을 받아 익명화한다. 업무 키는 계정 ID, 커밋이 없으면 EARLIEST. 내부 경로는 손으로 다시 하는 길로 남긴다(identity.md §8, streaming.md §2.6, asyncapi, 추천 적용).
@@ -288,13 +312,16 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 - 운영 환경에서 브로커 설정이 없으면 core-svc가 시작하지 않는다(queue-svc·purchase-svc와 같은 규칙, 법정 파기 의무를 소리 없이 놓치지 않으려는 것, 추천 적용).
 - 사건이 없는 계정(본인확인 안 한 계정)은 후기를 쓸 수 없고, 병합 흡수 계정도 후기가 없다(정본 확인, 새로 정한 것 아님).
 - 남는 한계: 탈퇴 전 액세스 토큰(최대 15분)으로 사건 처리 뒤 쓴 후기는 계정 ID가 남는다. HOT-400(끝난 세션 토큰 막기)이 막는다(identity.md §8에 적음).
-- 범위 밖(후속): 탈퇴 계정이 낸 신고(`content_report.reporter_account_id`) 정리, core-svc `AccountMergeCheckService`(지금 없어 병합 확정은 503으로 닫힌다), 서비스별 MSK 권한(그룹·토픽 읽기) 배포 설정.
+- (보충, 정본에 씀) 후기 표·보류 표의 역할별 권한: 위 0022 표(docs/data.md §2 '후기 표의 DB 권한', §4의 15 'DB 권한', 추천 적용). 규칙 자체(코드가 쓰는 만큼만)는 ADR-0241 결정 4이고 새 결정이 아니다.
+- 범위 밖(후속): 탈퇴 계정이 낸 신고(`content_report.reporter_account_id`) 정리, core-svc `AccountMergeCheckService`(지금 없어 병합 확정은 503으로 닫힌다), 서비스별 MSK 권한(그룹·토픽 읽기) 배포 설정, 보류 사건 다시 처리(RB-11)를 core-svc에 붙일 때의 역할과 `reprocessed_at` 고치기 권한, 신고 기록 파기(`content_report.purge_at`) 정비 일과 그 지우기 권한(정비 일이 아직 없다). 다른 core 모듈의 운영 역할 권한은 이번에 전수로 보지 않았다(눈에 띈 것은 후기·보류 표뿐).
 
 **틀린 구현 표본 후보**(탈퇴 익명화는 꼭 넣는다)
 1. `handle`이 `anonymizeAccount`를 부르지 않거나 `eventKey`를 계정 ID 자리에 넘긴다.
 2. `CORE_TOPICS`에서 탈퇴 토픽을 빼거나 `main.ts`에서 소비자 시작 줄을 뺀다.
 3. `pidFreeHeldEventStore`가 값을 그대로 넘긴다(pid가 core DB에 남는다).
 4. `kafkaConsumersFromEnv`가 prod에서 브로커가 없어도 `enabled: false`로 뜬다(fail-open).
+5. (보충) 0022가 `review`에 칸 없는 `UPDATE`(또는 `DELETE`)를 준다(⑬⑮가 잡는다).
+6. (보충) 0022가 `core_maintenance` 줄이나 `core_app`의 `held_event` INSERT를 빠뜨린다(⑯·⑫가 잡는다).
 
 ### 5. OPEN 후보(방향을 바꾸는 결정이라 정본에 쓰지 않았다)
 
@@ -306,6 +333,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 ### 6. 막힌 것·확인할 것
 
 - 막힌 것은 없다. 위 OPEN 후보 1은 COV2-06 배선을 막지 않는다.
+- (보충 2026-11-16) 실패 확인 절 '확인할 것 1'(운영 역할의 후기·보류 표 쓰기 권한)은 §4 보충(0022, 시험 ⑬~⑯)으로 받았다. 기존 후기 쓰기 경로도 같은 결함이라 이번 범위에 넣었다. '확인할 것 2'(0021 CHECK 글)는 §2의 글을 그대로 쓴다. 같은 뜻의 다른 글로 쓰려면 구현 담당이 '시험 이의'로 적는다.
 - 장부: `node tools/ci/ledger.mjs --batch BAT-610`은 이 커밋 뒤 J-T26 ④⑤⑥을 'ID만'으로 보인다(기존 파트너 화면 시험 이름이 세부 번호 없이 `J-T26`을 단다). 이 묶음의 시험이 들어오면 채워진다. 기록 담당이 장부를 다시 쓸 때 확인한다.
 - 정본 점검: `python -I -X utf8 tools/doc-check/check_all.py` 오류 0, `pnpm --dir packages/contracts gen:check`(asyncapi는 설명만 바꿔 생성물이 같다).
 
