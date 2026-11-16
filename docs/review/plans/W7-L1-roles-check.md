@@ -248,6 +248,8 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 
 ## 시험 이의
 
+- 2026-11-16, 구현 담당 `w7l1-roles-impl-db02969f`(리뷰 반영 RV-01~03): **RC-38의 사례 'plan → Docs/a.yaml'** 하나가 이 PC(Windows)에서 실패한다(끝 코드 0). 까닭은 시험 사건이다. 가짜 저장소에 이미 `docs/` 폴더(BAT-901의 계획 파일)가 있고, git이 `core.ignorecase=true`(Windows 기본)라 `Docs/a.yaml`을 써서 `git add -A`하면 색인에 소문자 docs 폴더의 a.yaml로 들어간다. 그래서 그 커밋이 실제로 바꾼 경로는 허용 목록 안(소문자 docs 폴더 아래)이고, 계획 8의 2대로 통과가 맞다. 작업 폴더 밖 임시 저장소에서 `docs/`가 없는 채로 `Docs/a.yaml`을 커밋하면 색인에 `Docs/a.yaml`로 남고, 구현은 `[코드 경로] … 문서 밖 경로 Docs/a.yaml` 실패와 끝 코드 1을 낸다(대소문자를 그대로 본다). 고칠 쪽은 시험 담당이다(예: 이 사례만 `docs/`와 부딪히지 않는 이름, 이를테면 `Specs/a.yaml`로 바꾸거나 사건 저장소에 `core.ignorecase=false`를 둔다). 구현은 이 사례 때문에 바꾸지 않았다. RC-38에서 이 사례 앞의 열한 사례는 통과했고, 뒤의 뿌리 설정 다섯(`package.json` 등)은 이 사례에서 시험이 멈춰 돌지 않았다(같은 규칙이고, 리뷰 반영 전 구현에서 실패하던 `record → package.json` 꼴이다).
+
 ## 리뷰
 
 - 누가: 리뷰 담당 `w7l1-roles-review-2c7ed993`, 2026-11-16. 받은 것은 `git diff origin/develop...HEAD`, `git log origin/develop..HEAD`, 이 계획 파일, ADR-0270, docs/architecture.md §8.6 4 '역할 나누기'(1132~1151줄)와 '자주 놓친 결함'(1153~1167줄)뿐이다. 구현 담당의 설명은 받지 않았다.
@@ -329,5 +331,5 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | --- | --- | --- | --- | --- |
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T09:24+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T09:38+09:00 |
-| impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T08:59+09:00 |
+| impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T09:59+09:00 |
 | review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T09:17+09:00 |

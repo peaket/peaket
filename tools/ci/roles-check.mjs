@@ -24,11 +24,15 @@ const ROLES = ['plan', 'test', 'impl', 'review', 'review-fix', 'verify', 'record
 const TABLE_ROLES = ['plan', 'test', 'impl', 'review', 'verify', 'doc'];
 const FIX_BY = ['test', 'impl'];
 const BATCH = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Batch·Finding 값 꼴(파일 이름으로도 쓰므로 '..'를 막는다)
+const idOk = (v) => BATCH.test(v) && !v.includes('..');
 // 코드 경로: ADR-0270 결정 8의 맨 위 폴더 일곱
 const CODE_DIRS = ['apps/', 'services/', 'packages/', 'data/', 'infra/', 'tools/', '.github/'];
+// 코드를 쓰지 않는 역할. 이 역할의 커밋은 허용 목록(docs/ 아래, 코드 경로 밖의 .md)만 바꾼다(계획 8의 2, 리뷰 RV-02)
 const NO_CODE = new Set(['plan', 'review', 'verify', 'record', 'doc']);
-const TEST_DIRS = new Set(['test', 'test-int', '__tests__', 'e2e']);
-const TEST_NAME = /^.+\.(test|spec)\..+$/;
+// 시험 파일: 이름이 *.test.*·*.spec.*·test_*.py이거나 폴더 마디가 아래 하나(계획 8의 1, 리뷰 RV-01)
+const TEST_DIRS = new Set(['test', 'test-int', 'test-sim', '__tests__', 'e2e']);
+const TEST_NAME = /^(?:.+\.(test|spec)\..+|test_.+\.py)$/;
 const CODE_ORDER = ['plan', 'test', 'impl', 'review', 'verify'];
 const DOC_ORDER = ['plan', 'doc', 'review'];
 const CODE_SECTIONS = ['실패 확인', '리뷰', '검증', '담당 표'];
@@ -161,7 +165,7 @@ function readTrailers(c) {
     return v.length === 1 ? v[0] : null;
   };
   let batch = one('Batch');
-  if (batch !== null && !(BATCH.test(batch) && !batch.includes('..'))) {
+  if (batch !== null && !idOk(batch)) {
     problems.push(`Batch 값 '${batch}'의 꼴이 틀렸다(영문·숫자로 시작하고 영문·숫자·. _ -만, '..' 없음)`);
     batch = null;
   }
@@ -182,9 +186,19 @@ function readTrailers(c) {
     else if (!FIX_BY.includes(fix[0])) problems.push(`Fix-By 값 '${fix[0]}'은 test·impl이 아니다`);
     else fixBy = fix[0];
   } else if (fix.length) problems.push(`Fix-By는 review-fix 커밋에만 단다(이 커밋은 ${role ?? '역할 모름'})`);
+  // Finding: 리뷰 반영이 고치는 지적마다 한 줄(계획 8의 3, 리뷰 RV-03)
+  const found = values('Finding');
+  const findings = [];
+  if (role === 'review-fix') {
+    if (found.length === 0) problems.push('review-fix 커밋에 Finding(고치는 지적 번호)이 없다');
+    for (const f of found) {
+      if (idOk(f)) findings.push(f);
+      else problems.push(`Finding 값 '${f}'의 꼴이 틀렸다(Batch와 같은 꼴)`);
+    }
+  } else if (found.length) problems.push(`Finding은 review-fix 커밋에만 단다(이 커밋은 ${role ?? '역할 모름'})`);
   // 세션·담당 표에서 세는 역할: 리뷰 반영은 Fix-By 쪽 역할이다(모르면 세지 않는다)
   const acting = role === 'review-fix' ? fixBy : role;
-  return { batch, role, session, fixBy, acting, problems };
+  return { batch, role, session, fixBy, acting, findings, problems };
 }
 
 // ---- 경로 ----
@@ -195,6 +209,8 @@ function isTestPath(p) {
   return TEST_NAME.test(name) || parts.slice(0, -1).some((d) => TEST_DIRS.has(d));
 }
 const isCodePath = (p) => CODE_DIRS.some((d) => p.startsWith(d));
+// 코드를 쓰지 않는 역할이 바꿔도 되는 경로(허용 목록, 대소문자 그대로)
+const isDocPath = (p) => p.startsWith('docs/') || (!isCodePath(p) && p.endsWith('.md'));
 
 // ---- 계획 파일 ----
 
@@ -322,7 +338,7 @@ function check(opt) {
       for (const p of c.files.filter(isTestPath)) fail('시험 파일', c.batch, c.sha, `${c.role === 'review-fix' ? '구현 쪽 리뷰 반영' : '구현'} 커밋이 시험 파일 ${p}를 바꿨다`);
     }
     if (NO_CODE.has(c.role)) {
-      for (const p of c.files.filter(isCodePath)) fail('코드 경로', c.batch, c.sha, `${c.role} 커밋이 코드 경로 ${p}를 바꿨다`);
+      for (const p of c.files.filter((f) => !isDocPath(f))) fail('코드 경로', c.batch, c.sha, `${c.role} 커밋이 문서 밖 경로 ${p}를 바꿨다(docs/ 아래와 코드 경로 밖의 .md만 된다)`);
     }
   }
 
@@ -370,6 +386,16 @@ function check(opt) {
       if (gate.length && fix.index < Math.min(...gate.map((c) => c.index))) {
         fail('차례', id, fix.sha, `첫 review-fix 커밋이 첫 ${gate.map((c) => c.role).join('·')} 커밋보다 먼저 왔다`);
       }
+    }
+
+    // 리뷰 반영은 지적마다 시험 먼저: Fix-By: impl 커밋의 Finding마다 앞에 같은 값의 Fix-By: test 커밋이 같은 묶음에 있다.
+    // 바꾼 파일이 모두 .md인 Fix-By: impl 커밋만 예외다
+    const tested = new Set();
+    for (const c of list) {
+      if (c.acting === 'test' && c.role === 'review-fix') for (const f of c.findings) tested.add(f);
+      if (c.acting !== 'impl' || c.role !== 'review-fix' || c.files.every((p) => p.endsWith('.md'))) continue;
+      const untested = c.findings.filter((f) => !tested.has(f));
+      if (untested.length) fail('차례', id, c.sha, `지적 ${untested.join('·')}의 Fix-By: impl 커밋 앞에 같은 묶음의 Fix-By: test 커밋이 없다(리뷰 반영도 시험 먼저)`);
     }
 
     // 구성
