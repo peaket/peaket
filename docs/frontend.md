@@ -1538,10 +1538,11 @@ allowBuilds:
 | `longTasks` | `{count, totalMs}` | Chromium에서만 |
 | `errors` | `{count}` | 화면 오류 수 |
 | `apiFail` | `{network, http4xx, http5xx, timeout}` | 실패 분류별 수(409 경합·423 제외) |
+| `counters` | `[{name, labels, value}]` | 검색 품질 수(docs/features/search.md §11의 `search_*` 다섯 이름과 그 라벨만, 검색어 없음). 있을 때만 싣는다(선택 칸, 판 2 그대로, 추천 적용 2026-11-16, ADR-0271 결정 20) |
 | `marks` | `{queue_reflect_ms, seat_delta_e2e_ms, seatmap_ready_ms, payment_confirm_ms, ws_reconnects, scan_judge_ms}` | 흐름 표시값(있는 것만) |
 | `attribution` | 객체 | 정본(원인 요소, 선택자 수준) |
 
-- **보내기**: `fetch(…, {method: "POST", keepalive: true, credentials: "omit"})`로 보낸다. 묶음은 64KiB 이하다. 화면이 보이는 동안 60초 [가정]마다 보내고, `visibilitychange`로 화면이 숨김 상태가 될 때도 보낸다. keepalive를 지원하지 않으면 `sendBeacon`을 쓴다(observability §11).
+- **보내기**: `fetch(…, {method: "POST", keepalive: true, credentials: "omit", referrerPolicy: "no-referrer"})`로 보낸다(`referrerPolicy`는 주소의 쿼리가 `Referer`로 수집 경로에 가지 않게, 추천 적용 2026-11-16, ADR-0271 결정 20). 묶음은 64KiB 이하다. 화면이 보이는 동안 60초 [가정]마다 보내고, `visibilitychange`로 화면이 숨김 상태가 될 때도 보낸다. keepalive를 지원하지 않으면 `sendBeacon`을 쓴다(observability §11).
 - **Prometheus 이름**(게이트웨이 수집기가 만든다): `rum_lcp_seconds`, `rum_inp_seconds`, `rum_cls`, `rum_fcp_seconds`, `rum_ttfb_seconds`, `rum_long_task_total`, `rum_js_error_total`, `rum_api_fail_total`, `queue_reflect_seconds`, `seat_delta_e2e_seconds`, `seatmap_ready_seconds`, `payment_confirm_seconds`, `ws_reconnect_total`, `scanner_judge_seconds`, `remote_load_failed_total`. 라벨은 `app`, `route`, `device_class`와 값의 가짓수가 정해진 분류 라벨(`rum_api_fail_total`의 `class`, `remote_load_failed_total`의 `remote`·`reason`, `csp_violation_total`의 `directive`)만 쓴다(카디널리티 규칙: 지표에 붙는 이름표 값의 가짓수가 많으면 저장 비용이 커진다, observability §8). 히스토그램(값을 구간별로 나눠 센 분포 지표)의 구간 경계에는 SLO(팀이 정한 목표) 기준값을 넣는다(ADR-0077).
 - **오류 도구**: Sentry 브라우저 SDK는 대기실 경량 페이지를 뺀 앱에 싣는다. 오류는 같은 출처의 터널 `/_t/err` [가정]로 보내므로 `connect-src`에 Sentry 출처를 넣지 않는다. 수집 설정 잠금(IP 끔, 본문 끔, 쿠키·헤더·쿼리 거름, `beforeSend` 마스킹, `accountRef`만)의 정본은 observability §11이다. 화면 녹화는 운영에서 쓰지 않는다. 릴리스 이름은 `dpl`이다.
 - **추적**: 브라우저 span(요청 하나가 지난 구간의 기록)은 내보내지 않고, OpenTelemetry(지표·로그·요청 기록을 모으는 공통 표준과 도구) 브라우저 SDK도 싣지 않는다. `@peaket/telemetry` 전체 판의 작은 함수가 같은 출처 요청(앱 서버)에만 무작위 `traceparent`(표본 표시 `00`)를 붙이고, 그 요청이 실패하면 같은 trace-id를 Sentry 사건 태그 `browserTraceId`에 싣는다. Sentry는 `tracePropagationTargets: []`로 자기 추적 헤더를 붙이지 않는다(§4.1, observability §11, 추천 적용 2026-10-28, 기술 검토 낮음-053).
