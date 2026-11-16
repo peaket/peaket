@@ -465,6 +465,17 @@ export interface ReviewStore {
 
 - `npx vitest run --config vitest.integration.config.mjs test-int/review-purge.int.test.ts test-int/review-recheck.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 파일은 Kafka 컨테이너. 네이티브 Kafka 모듈이 이 PC에서 막히면 CI에서만 돈다)
 
+### 이의 2(리뷰 반영 A2, 2026-11-16). 기존 통합 시험 하나가 정비 일 목록 전체를 그대로 단언한다
+
+- `services/core-svc/test-int/sale-eligibility.int.test.ts:736`이 `coreMaintenanceTasks(…)`의 정비 일 목록을 `toMatchObject({ tasks: [['sale-eligibility-purge', 'daily'], ['sale-eligibility-copy', 'daily'], ['review-temp-block-expire', 'daily']], … })`로 단언한다. `toMatchObject`는 배열 길이까지 같아야 해서, A2의 새 정비 일 `review-purge-legacy`(정비 시간)가 넷째로 들어가면 이 시험이 실패한다(통합이라 이번에 돌리지 않았다. 빌드한 `dist/maintenance-tasks.js`를 띄우는 시험이다).
+- 고칠 길(시험 담당 몫): 기대 목록 끝에 `['review-purge-legacy', 'window']`를 더한다(`coreMaintenanceTasks`는 후기 정비 일을 `review-temp-block-expire` → `review-purge-legacy` 차례로 넣는다). 계획 §8.4의 돌릴 통합 시험에도 이 파일을 더하면 좋다.
+
+### 구현 담당이 정한 것(리뷰 반영 A1·A2)
+
+1. **A1 경고 줄**: 한 번 돌 때 경고는 한 줄까지다. 다시 정리가 실패하면 그 줄 하나(밀린 시간 읽기가 함께 실패해도 줄을 더하지 않는다). 다시 정리가 성공하고 밀린 시간 읽기만 실패하면 그 읽기 실패로 한 줄을 남긴다(실패 수는 늘리지 않고, 마지막 성공 시각은 고친다). 마지막 성공 시각은 `Math.floor(clock.now() / 1000)`(platform 정비 지표와 같다). 세 지표는 같은 이름이 등록부에 있으면 그것을 쓴다.
+2. **A2 잠금 대기**: 한 묶음 트랜잭션의 첫 문장에서 `set_config('lock_timeout', '2000ms', true)`로 잠금 대기 한도 2초 [가정]를 건다(행 잠금은 SKIP LOCKED로 기다리지 않는다). 찾기는 `id::text`로 읽어 `order by id`의 마지막 값을 커서로 준다(그 묶음에서 고친 마지막 id). 고치기는 탈퇴 파기와 같은 `purgeSet` 문장을 `id = any(…)`로 쓴다.
+3. **A2 권한**: 0026 끝에 계획 §8.2의 GRANT 두 줄만 더했다(새 번호·스냅숏 바뀜 없음).
+
 ## 시험 이의 답
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 구현 커밋 `7f32f584`·이의 커밋 `a450164a` 위.
