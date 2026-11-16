@@ -17,7 +17,7 @@ function fixture() {
   return appDir;
 }
 
-test('[ASVS v5.0.0-13.4.1] standalone 폴더에 .next/static과 public을 복사한다', () => {
+test('HOT-390 standalone 폴더에 .next/static과 public을 복사한다', () => {
   const appDir = fixture();
   try {
     assert.equal(standaloneAppDir(appDir, '.next'), join(appDir, '.next', 'standalone', 'apps', 'web'));
@@ -49,6 +49,28 @@ test('standalone server.js가 없으면 false이고 아무것도 만들지 않�
   try {
     assert.equal(prepareStandalone(appDir, '.next'), false);
     assert.equal(existsSync(join(appDir, '.next', 'standalone')), false);
+  } finally {
+    rmSync(appDir, { recursive: true, force: true });
+  }
+});
+
+// BAT-170 검증 뒤 정한 것(계획 §13 V13-5, docs/security/asvs/frontend.md 13.4.1, docs/frontend.md §5.18 '앱 서버 실행'):
+// public을 standalone으로 복사할 때 점으로 시작하는 파일·폴더(.git·.env·.DS_Store 등)는 빼낸다. 시험 담당(l2w7-BAT170-test)이 썼다.
+test('[ASVS v5.0.0-13.4.1] public을 standalone으로 복사할 때 점으로 시작하는 파일·폴더는 빼낸다', () => {
+  const appDir = fixture();
+  try {
+    const pub = join(appDir, 'public');
+    mkdirSync(join(pub, '.git'), { recursive: true });
+    mkdirSync(join(pub, 'icons'), { recursive: true });
+    writeFileSync(join(pub, '.git', 'config'), '[core]');
+    writeFileSync(join(pub, '.env'), 'SECRET=1');
+    writeFileSync(join(pub, 'icons', '.DS_Store'), 'x');
+    writeFileSync(join(pub, 'favicon.ico'), 'ico');
+    writeFileSync(join(pub, 'icons', 'a.png'), 'png');
+    assert.equal(prepareStandalone(appDir, '.next'), true);
+    const out = join(standaloneAppDir(appDir, '.next'), 'public');
+    for (const p of ['.git', join('.git', 'config'), '.env', join('icons', '.DS_Store')]) assert.equal(existsSync(join(out, p)), false, `${p}가 복사됐다`);
+    for (const p of ['favicon.ico', join('icons', 'a.png'), 'robots.txt']) assert.equal(existsSync(join(out, p)), true, `${p}가 복사되지 않았다`);
   } finally {
     rmSync(appDir, { recursive: true, force: true });
   }

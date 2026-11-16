@@ -82,6 +82,16 @@ export function emptyMeasurement({ requestedPath, finalPath, textCount, controlC
   return null;
 }
 
+/**
+ * 겹침(FE-T31, docs/frontend.md §5.17 '판정'): 예외 상자 밖에서 보이는 글자 노드 둘의 줄 사각형(문서 좌표)이 가로·세로 모두 1px 넘게 포개진 짝.
+ * 항목은 { node, left, top, width, height, hidden?, exception? }(node: 글자 노드 번호). 같은 노드의 줄끼리, 숨긴 글, 예외 상자 안의 글은 세지 않는다.
+ * 돌려주는 것은 [{ a, b }](a·b는 포개진 두 항목). 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 계획 §13 V13-1). 판정은 구현 담당이 쓴다.
+ */
+export function overlapFindings(rects) {
+  void rects;
+  throw new Error('아직 없음');
+}
+
 /** 좌석 화면은 운영 빌드 그대로, 성능 예산 검사의 좌석 화면 데모와 같은 경로·입장 저장값으로 연다(docs/frontend.md §5.17 '빈 결과') */
 const seatDemo = lighthousePages('127.0.0.1').find((x) => x.name === '좌석 화면 데모');
 if (!seatDemo?.sessionStorage) throw new Error('budgets/pages.mjs에 좌석 화면 데모(입장 저장값)가 없다');

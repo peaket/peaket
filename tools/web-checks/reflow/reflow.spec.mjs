@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { APPS, HOST, portOf } from '../seed-css/apps.mjs';
 import { stubFanApi } from '../csp/pages.mjs';
-import { EXCEPTION_SELECTORS, REFLOW_PAGES, TEXT_SPACING_CSS, clippedTextFindings, emptyMeasurement, hasPageOverflow, unreachableFindings } from './rules.mjs';
+import { EXCEPTION_SELECTORS, REFLOW_PAGES, TEXT_SPACING_CSS, clippedTextFindings, emptyMeasurement, hasPageOverflow, overlapFindings, unreachableFindings } from './rules.mjs';
 
 const BASE = Object.fromEntries(APPS.map((a) => [a.name, `http://${HOST}:${portOf(a, 'prod')}`]));
 /** 화면 읽기용 숨김 글·장식은 재지 않는다 */
@@ -112,6 +112,35 @@ const measureReach = (page) =>
     { exceptions: EXCEPTION_SELECTORS, ignore: IGNORE, controls: CONTROLS },
   );
 
+/**
+ * 겹침 재기(계획 §13 V13-2, docs/frontend.md §5.17 '판정'): 예외 상자 밖에서 보이는 글자 노드마다 줄 사각형(Range.getClientRects, 문서 좌표).
+ * 맨 위 스크롤에서 잰다(고정·sticky 글이 스크롤하며 포개지는 것은 초점 가림이 본다)
+ */
+const measureTextRects = (page) =>
+  page.evaluate(
+    ({ exceptions, ignore }) => {
+      window.scrollTo(0, 0);
+      const out = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let i = 0;
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const el = n.parentElement;
+        if (!el || !(n.textContent ?? '').trim()) continue;
+        if (exceptions.some((sel) => el.closest(sel)) || el.closest(ignore)) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || (typeof el.checkVisibility === 'function' && !el.checkVisibility())) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        const node = i++;
+        for (const r of range.getClientRects()) {
+          if (r.width > 0 && r.height > 0) out.push({ node, left: r.left + window.scrollX, top: r.top + window.scrollY, width: r.width, height: r.height });
+        }
+      }
+      return out;
+    },
+    { exceptions: EXCEPTION_SELECTORS, ignore: IGNORE },
+  );
+
 /** WCAG 1.4.12 글자 간격을 CSSOM으로 더한다(CSP를 끄지 않는다) */
 const applyTextSpacing = (page) =>
   page.evaluate((css) => {
@@ -143,6 +172,9 @@ for (const p of REFLOW_PAGES) {
     const text = await measureText(page);
     expect(emptyMeasurement({ requestedPath: p.path, finalPath, textCount: text.items.length, controlCount: text.controlCount }), `${name} 빈 결과`).toBeNull();
     expect(clippedTextFindings(text.items), `${name} 글자 잘림`).toEqual([]);
+    const rects = await measureTextRects(page);
+    expect(rects.length, `${name} 잰 글자 노드가 없다(빈 결과)`).toBeGreaterThan(0);
+    expect(overlapFindings(rects), `${name} 글자 겹침`).toEqual([]);
   });
 
   test(`FE-T31 ${name} 640 글자 간격: 글자 잘림·겹침 0`, async ({ page }) => {
@@ -153,5 +185,8 @@ for (const p of REFLOW_PAGES) {
     const text = await measureText(page);
     expect(emptyMeasurement({ requestedPath: p.path, finalPath, textCount: text.items.length, controlCount: text.controlCount }), `${name} 빈 결과`).toBeNull();
     expect(clippedTextFindings(text.items), `${name} 글자 잘림(글자 간격)`).toEqual([]);
+    const rects = await measureTextRects(page);
+    expect(rects.length, `${name} 잰 글자 노드가 없다(빈 결과)`).toBeGreaterThan(0);
+    expect(overlapFindings(rects), `${name} 글자 겹침(글자 간격)`).toEqual([]);
   });
 }

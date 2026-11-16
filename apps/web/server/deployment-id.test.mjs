@@ -16,7 +16,7 @@ test('빈 값·공백은 배포 식별자로 쓰지 않고, 둘 다 없으면 un
   assert.equal(deploymentIdOf({ PEAKET_DEPLOYMENT_ID: 123, GITHUB_SHA: 'def456' }), 'def456');
 });
 
-test('[ASVS v5.0.0-13.4.1] 운영 이미지는 standalone 산출물만 쓰고, 배포 식별자를 next.config.ts에 건다(HOT-390)', () => {
+test('HOT-390 운영 이미지는 standalone 산출물만 쓰고, 배포 식별자를 next.config.ts에 건다', () => {
   const src = readFileSync(new URL('../next.config.ts', import.meta.url), 'utf8');
   assert.match(src, /output:\s*'standalone'/);
   assert.match(src, /deploymentId:\s*deploymentIdOf\(\)/);

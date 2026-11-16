@@ -11,6 +11,7 @@ import {
   emptyMeasurement,
   hasPageOverflow,
   obscuredFocusFindings,
+  overlapFindings,
   unreachableFindings,
 } from './rules.mjs';
 import { lighthousePages } from '../budgets/pages.mjs';
@@ -172,4 +173,28 @@ test('FE-T31 주요 흐름은 소비자 웹·파트너·관제의 대표 화면�
   assert.ok(REFLOW_PAGES.some((p) => p.app === 'web' && p.path === '/my/tickets'));
   assert.ok(REFLOW_PAGES.some((p) => p.app === 'partner'));
   assert.ok(REFLOW_PAGES.some((p) => p.app === 'console'));
+});
+
+// BAT-170 검증 뒤 정한 것(계획 §13 V13-1, docs/frontend.md §5.17 '판정'의 겹침): 시험 담당(l2w7-BAT170-test)이 판정 구현 전에 썼다.
+// 겹침은 예외 상자 밖에서 보이는 글자 노드 둘의 줄 사각형이 가로·세로 모두 1px 넘게 포개지는 것이다.
+test('FE-T31 겹침: 예외 밖 보이는 글자 노드 둘의 줄 사각형이 가로·세로 모두 1px 넘게 포개지면 찾는다', () => {
+  const pairs = (rects) => overlapFindings(rects).map(({ a, b }) => [a.node, b.node].sort().join('|'));
+  const base = { node: 'a', left: 0, top: 0, width: 100, height: 20 };
+  // 가로 경계: 정확히 1px 포갬은 통과, 1.5px는 찾는다(세로는 다 포개짐)
+  assert.deepEqual(pairs([base, { node: 'b', left: 99, top: 0, width: 50, height: 20 }]), []);
+  assert.deepEqual(pairs([base, { node: 'b', left: 98.5, top: 0, width: 50, height: 20 }]), ['a|b']);
+  // 세로 경계: 정확히 1px 포갬은 통과, 1.5px는 찾는다(가로는 다 포개짐)
+  assert.deepEqual(pairs([base, { node: 'b', left: 0, top: 19, width: 100, height: 20 }]), []);
+  assert.deepEqual(pairs([base, { node: 'b', left: 0, top: 18.5, width: 100, height: 20 }]), ['a|b']);
+  // 가로만·세로만 포개진 것은 통과
+  assert.deepEqual(pairs([base, { node: 'b', left: 50, top: 100, width: 100, height: 20 }]), [], '가로만');
+  assert.deepEqual(pairs([base, { node: 'b', left: 300, top: 5, width: 100, height: 20 }]), [], '세로만');
+  // 같은 노드의 두 줄, 숨긴 글, 한쪽이 예외 상자 안이면 세지 않는다
+  assert.deepEqual(pairs([base, { node: 'a', left: 10, top: 5, width: 100, height: 20 }]), [], '같은 노드');
+  assert.deepEqual(pairs([base, { node: 'b', left: 10, top: 5, width: 100, height: 20, hidden: true }]), [], '숨긴 글');
+  assert.deepEqual(pairs([base, { node: 'b', left: 10, top: 5, width: 100, height: 20, exception: true }]), [], '예외 상자 안');
+  assert.deepEqual(pairs([{ ...base, exception: true }, { node: 'b', left: 10, top: 5, width: 100, height: 20 }]), [], '앞쪽이 예외 상자 안');
+  // 셋 가운데 포개진 짝만
+  assert.deepEqual(pairs([base, { node: 'b', left: 50, top: 5, width: 100, height: 20 }, { node: 'c', left: 500, top: 0, width: 10, height: 10 }]), ['a|b']);
+  assert.deepEqual(overlapFindings([]), []);
 });

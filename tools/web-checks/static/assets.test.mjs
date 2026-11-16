@@ -24,7 +24,7 @@ test('[ASVS v5.0.0-13.4.7] 허용 확장자 목록이 정본 §5.18과 같다', 
   assert.deepEqual(ALLOWED_EXTENSIONS, canon);
 });
 
-test('[ASVS v5.0.0-13.4.1] 앱마다 제3자 고지 파일은 .txt여도 올리고, 같은 이름이 아닌 .txt는 계속 뺀다(ADR-0040 결정 7, HOT-390)', () => {
+test('[ASVS v5.0.0-13.4.7] 앱마다 제3자 고지 파일은 .txt여도 올리고, 같은 이름이 아닌 .txt는 계속 뺀다(ADR-0040 결정 7, HOT-390)', () => {
   const dir = fixture({
     'index.html': '<p>ok</p>',
     [NOTICE_FILE]: 'THIRD-PARTY NOTICES',
@@ -137,7 +137,7 @@ test('[ASVS v5.0.0-15.1.2] --package로 더한 것은 출처를 declared로, 소
 
 // BAT-170 검증 뒤 시험(d02b8d19). 시험 담당(l2w7-BAT170-test)이 썼다. 정본 docs/frontend.md §5.18 '정적 업로드 허용 확장자'(허용 확장자 밖과
 // 숨은 파일·폴더는 뺀다), 고지 파일 이름은 BUILD_ORDER HOT-390의 `THIRD-PARTY-NOTICES.txt`(ADR-0040 결정 7) 하나뿐이다.
-test('[ASVS v5.0.0-13.4.1] V170-47 고지 파일 예외는 THIRD-PARTY-NOTICES.txt라는 이름 하나뿐이다(비슷한 이름의 .txt는 뺀다)', () => {
+test('[ASVS v5.0.0-13.4.7] V170-47 고지 파일 예외는 THIRD-PARTY-NOTICES.txt라는 이름 하나뿐이다(비슷한 이름의 .txt는 뺀다)', () => {
   const dir = fixture({
     'index.html': '<p>ok</p>',
     [NOTICE_FILE]: 'THIRD-PARTY NOTICES',
@@ -171,6 +171,26 @@ test('[ASVS v5.0.0-13.4.1] V170-48 깊은 곳의 숨은 파일·폴더도 허용
     assert.deepEqual(plan.upload.map((f) => f.path).sort(), ['assets/a.js', 'index.html']);
     const hidden = plan.excluded.filter((f) => /숨은/.test(f.reason)).map((f) => f.path).sort();
     assert.deepEqual(hidden, ['_next/.cache/a.js', 'a/b/.hidden/c.css', 'assets/.git/config.json', 'assets/.secret.json']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// BAT-170 검증 뒤 정한 것(계획 §13 V13-4, docs/security/asvs/frontend.md 13.4.1 소스 관리 메타데이터, docs/frontend.md §5.18):
+// 경로의 어느 칸이든 점으로 시작하면(.git·.svn·.hg·.cache·.env 등) 허용 확장자여도 올리지 않는다. 시험 담당(l2w7-BAT170-test)이 썼다.
+test('[ASVS v5.0.0-13.4.1] 경로의 어느 칸이든 점으로 시작하면 허용 확장자여도 올리지 않는다', () => {
+  const hidden = ['assets/.git/config.json', '_next/.cache/a.js', 'assets/.secret.json', 'a/b/.svn/entries.js', 'x/.hg/store.json'];
+  const dir = fixture({ 'index.html': '<p>ok</p>', 'assets/a.b.json': '{}', ...Object.fromEntries(hidden.map((p) => [p, '{}'])) });
+  try {
+    const plan = planUpload(dir);
+    for (const p of hidden) {
+      const ex = plan.excluded.find((f) => f.path === p);
+      assert.ok(ex, `${p}가 빠지지 않았다`);
+      assert.match(ex.reason, /숨은 파일·폴더/, p);
+      assert.equal(plan.upload.some((f) => f.path === p), false, `${p}를 올렸다`);
+    }
+    // 대조군: 이름 가운데의 점은 숨은 파일이 아니다
+    assert.deepEqual(plan.upload.map((f) => f.path).sort(), ['assets/a.b.json', 'index.html']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
