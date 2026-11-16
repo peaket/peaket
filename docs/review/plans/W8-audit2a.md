@@ -508,4 +508,4 @@ export interface ReviewStore {
 ### 이의 2에 대한 답: 맞다. 시험 쪽만 고쳤다(리뷰 반영 A2)
 
 - `test-int/sale-eligibility.int.test.ts`의 정비 일 조립 단언은 `toMatchObject`의 배열이 길이까지 같아야 해서, A2의 새 정비 일이 넷째로 들어가면 실패한다. 이 단언은 relay가 실제로 띄우는 정비 일 전체를 정본대로 묶어 두는 뜻이라(빠지거나 더해진 일을 잡는다) '들어 있는지만' 보게 느슨하게 하지 않고, 기대 목록 끝에 `['review-purge-legacy', 'window']`를 더했다(`coreMaintenanceTasks`가 `review-temp-block-expire` → `review-purge-legacy` 차례로 넣는다). 나머지 단언(`purge` 결과)은 그대로다.
-- 통합이라 돌리지 않았다(도커 대기). 리뷰 반영 통합 명령에 이 파일을 더한다: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/sale-eligibility.int.test.ts`(이 파일은 빌드한 `dist/maintenance-tasks.js`를 띄우므로 먼저 `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc build`).
+- 통합이라 돌리지 않았다(도커 대기). 리뷰 반영 통합 명령에 이 파일을 더한다: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/sale-eligibility.int.test.ts`(이 파일은 시험 안에서 `buildDist()`로 빌드한 `dist/maintenance-tasks.js`를 띄운다. 따로 빌드할 것은 없다).
