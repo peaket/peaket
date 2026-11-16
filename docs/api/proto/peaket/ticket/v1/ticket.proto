@@ -120,6 +120,10 @@ message CancelTicketsRequest {
   repeated string ticket_ids = 2;
   string requested_by_account_id = 3;
   string cancellation_id = 4;
+  // 참이면 아무 행도 바꾸지 않는 확인이다(purchase-svc가 공연 시작 뒤 다시 누른 팬 취소에만 쓴다). 그 표에 팬 취소 기록이 있으면 ALREADY_CANCELLED와
+  // CancelTicketOutcome의 첫 칸 셋(같은 cancellation_id여도), 다른 길로 끝난 표면 첫 칸 없는 ALREADY_CANCELLED, 아직 유효한 표면 EVENT_STARTED다
+  // (docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우', 추천 적용 2026-11-16, BUILD_ORDER GAT-080)
+  bool replay_only = 5;
 }
 
 enum CancelTicketResult {
