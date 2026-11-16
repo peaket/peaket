@@ -301,6 +301,8 @@ message OrderPaymentState {
 message CancelPaymentRequest {
   string payment_id = 1;
   // 취소 건마다 하나. 결제사 멱등키 cancel-{cancellation_id}의 재료다.
+  // 영문자·숫자·`_`·`-` 9~64자다(포트원 멱등키는 16자 이상이라 `cancel-` 7자를 붙여 16자가 되게 한다). 어기면 INVALID_ARGUMENT다.
+  // 부르는 쪽 purchase-svc는 늘 UUID(36자)를 보낸다(docs/features/payment.md §4.1 '취소 ID의 길이', 추천 적용 2026-11-16, BUILD_ORDER GAT-080)
   string cancellation_id = 2;
   // 비우면 전액 취소다.
   peaket.common.v1.Money amount = 3;
