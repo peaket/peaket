@@ -410,8 +410,8 @@ export function normalizeCancelInput(i: CancelTicketsInput): CancelTicketsInput 
   };
 }
 
-/** CancelTickets 사유(purchase-svc order_cancellation.reason과 같은 값, ticket.proto CancelTicketsRequest.reason) */
-const CANCEL_REASONS: ReadonlySet<string> = new Set(['USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL']);
+/** CancelTickets 사유: purchase-svc CANCELLATION_REASONS(order_cancellation.reason)와 같은 일곱(FRAUD 포함, ticket.proto CancelTicketsRequest.reason) */
+const CANCEL_REASONS: ReadonlySet<string> = new Set(['USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD']);
 /** 다른 취소 ID의 ALREADY_CANCELLED에 첫 팬 취소로 이어 줄 수 있는 기록의 사유(다시 보기 R1: 일괄 환불 항목·사유 없는 기록은 잇지 않는다) */
 export const FAN_CANCEL_REASON = 'USER';
 

@@ -4,4 +4,4 @@
 
 ALTER TABLE ticket_cancellation ADD COLUMN IF NOT EXISTS reason text;
 ALTER TABLE ticket_cancellation DROP CONSTRAINT IF EXISTS ticket_cancellation_reason_check;
-ALTER TABLE ticket_cancellation ADD CONSTRAINT ticket_cancellation_reason_check CHECK (reason IS NULL OR reason IN ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL'));
+ALTER TABLE ticket_cancellation ADD CONSTRAINT ticket_cancellation_reason_check CHECK (reason IS NULL OR reason IN ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD'));

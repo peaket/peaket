@@ -96,7 +96,7 @@ export const ticketCancellation = pgTable(
   (t) => [
     primaryKey({ columns: [t.cancellationId, t.ticketId] }),
     index('ticket_cancellation_ticket_idx').on(t.ticketId),
-    check('ticket_cancellation_reason_check', sql`${t.reason} IS NULL OR ${t.reason} IN ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL')`),
+    check('ticket_cancellation_reason_check', sql`${t.reason} IS NULL OR ${t.reason} IN ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD')`),
   ],
 );
 
