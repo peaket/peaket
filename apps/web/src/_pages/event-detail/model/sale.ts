@@ -196,9 +196,28 @@ export function deniedHashCleanUrl(loc: { pathname: string; search: string; hash
   return isDeniedHash(loc.hash) ? `${loc.pathname}${loc.search}` : null;
 }
 
+/** 대기실 출처 표시의 나이 한도 [가정]: 지금 − 60초 이상 · 지금 + 5초 이하(기기 시계, ADR-0272 결정 4 '출처 확인') */
+const DENIED_MARKER_MAX_AGE_MS = 60_000;
+const DENIED_MARKER_MAX_AHEAD_MS = 5_000;
+
+/** 표시 값 {"v":1,"at":<정수 밀리초>}가 맞고 나이가 한도 안인가 */
+function freshMarker(raw: string | null, deviceNowMs: number): boolean {
+  if (raw === null) return false;
+  let m: unknown;
+  try {
+    m = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (typeof m !== 'object' || m === null) return false;
+  const { v, at } = m as { v?: unknown; at?: unknown };
+  return v === 1 && typeof at === 'number' && Number.isInteger(at) && at >= deviceNowMs - DENIED_MARKER_MAX_AGE_MS && at <= deviceNowMs + DENIED_MARKER_MAX_AHEAD_MS;
+}
+
 /**
  * 명단 밖 알림을 켤지(ADR-0272 결정 4 '출처 확인', 보안 리뷰 W7L2-S2 뒤): 대기실이 같은 탭 저장소에 쓴 표시와 주소 조각의 짝이 맞을 때만 켠다.
- * 표시는 늘 읽고 지우며, 조각은 어느 경우든 지운 주소(cleanUrl)를 돌려준다. 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ * 표시(peaket.queue.{eventId}.eligDenied)는 늘 한 번 읽고 지우며(읽기·지우기가 던지면 켜지 않는다), 조각은 어느 경우든 지운 주소(cleanUrl)를 돌려준다.
+ * 표시의 나이는 기기 시계(deviceNowMs)로, 알림의 창은 보정한 시계(readAtMs, 없으면 deviceNowMs)로 잰다
  */
 export function takeDeniedMarker(i: {
   kv: { getItem(k: string): string | null; removeItem(k: string): void } | null;
@@ -209,6 +228,23 @@ export function takeDeniedMarker(i: {
   openAtMs: number;
   readAtMs?: number;
 }): { cleanUrl: string | null; denied: { untilMs?: number } | null } {
-  void i;
-  throw new Error('아직 없음');
+  const cleanUrl = deniedHashCleanUrl(i.loc);
+  const key = `peaket.queue.${i.eventId}.eligDenied`;
+  let raw: string | null = null;
+  let taken = false;
+  if (i.kv) {
+    try {
+      raw = i.kv.getItem(key);
+    } catch {
+      raw = null;
+    }
+    try {
+      i.kv.removeItem(key);
+      taken = true;
+    } catch {
+      // 지우지 못하면 같은 표시로 다시 켜질 수 있으므로 켜지 않는다
+    }
+  }
+  const denied = cleanUrl !== null && taken && freshMarker(raw, i.deviceNowMs) ? deniedWindow(i.phases, i.openAtMs, i.readAtMs ?? i.deviceNowMs) : null;
+  return { cleanUrl, denied };
 }

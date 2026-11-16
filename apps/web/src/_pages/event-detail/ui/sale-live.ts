@@ -4,14 +4,15 @@
 // - useLiveSale: 예매 버튼 상태를 받기 운전자(model/live-sale-store.ts createLiveSaleDriver)에 넘기기만 한다. 운전자가 정한 때(문서가 처음 고른 상태가
 //   queue일 때 한 번, queue인 동안 다시 보일 때)에만 대기 상태 파일 구간 0을 받는다. 오픈 전에 연 화면은 오픈 순간에 받지 않는다(리뷰 R040-1)
 // - useSaleEligibility: 회원 팬이고 끝나지 않은 PRESALE 조각이 있을 때만 팬별 판매 자격을 문서마다 한 번 받는다(페이지 보관에서 돌아오면 다시)
-// - useDeniedMarker: 대기실이 명단 밖으로 돌려보낸 주소 조각(#sale-eligibility-required)을 읽어 알림의 창을 한 번 정하고 조각만 지운다(리뷰 R040-2)
+// - useDeniedMarker: 대기실이 명단 밖으로 돌려보낸 주소 조각(#sale-eligibility-required)과 같은 탭 저장소의 출처 표시가 짝이 맞을 때만 알림의 창을 한 번 정하고,
+//   조각은 늘 지운다(리뷰 R040-2, 보안 리뷰 W7L2-S2)
 // 시계는 효과 안에서만 읽는다(그리는 중에 읽으면 ISR 항목이 저장되지 않는다, ui/no-render-clock.test.mjs).
 import { useEffect, useRef, useState } from 'react';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 import type { BookingPhase } from '../model/detail';
 import type { LiveSale } from '../model/live-sale';
-import { deniedHashCleanUrl, deniedWindow, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
+import { takeDeniedMarker, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
 
 type LiveDriver = { phase(p: BookingPhase | undefined): void; visible(): void; view(): LiveSale; listen(l: () => void): () => void };
 type EligibilityStore = { get(): FanEligibilityState; subscribe(l: () => void): () => void; refreshIfStarted(): Promise<void> };
@@ -140,18 +141,24 @@ export function useSaleEligibility(eventId: string, needed: boolean): FanEligibi
 }
 
 /**
- * 명단 밖 알림(ADR-0272 결정 4, 리뷰 R040-2 뒤). 처음 그린 뒤 주소 조각이 정확히 #sale-eligibility-required이면 history.replaceState로 조각만 지우고
- * 그 시각으로 알림의 창(deniedWindow)을 한 번 정해 돌려준다(새로고침하면 다시 팬 자격으로 고른다). 끄는 타이머는 두지 않는다:
- * 창 끝은 늘 조각 경계라 예매 버튼의 다음 고르기 시각(saleBoundaryAfter)이 이미 잡는다(숨긴 탭의 늦은 타이머에 기대지 않는다)
+ * 명단 밖 알림(ADR-0272 결정 4, 리뷰 R040-2·보안 리뷰 W7L2-S2 뒤). 처음 그린 뒤 한 번, 같은 탭 저장소의 대기실 출처 표시를 읽고 지우며(takeDeniedMarker)
+ * 조각과 짝이 맞을 때만 그 시각으로 알림의 창을 정한다(조각만 붙인 바깥 링크로는 켜지지 않는다). 조각은 어느 경우든 history.replaceState로 지운다.
+ * 끄는 타이머는 두지 않는다: 창 끝은 늘 조각 경계라 예매 버튼의 다음 고르기 시각(saleBoundaryAfter)이 이미 잡는다
  */
-export function useDeniedMarker(phases: DetailSalePhase[], openAtMs: number): { untilMs?: number } | null {
+export function useDeniedMarker(eventId: string, phases: DetailSalePhase[], openAtMs: number): { untilMs?: number } | null {
   const [denied, setDenied] = useState<{ untilMs?: number } | null>(null);
-  // 처음 그린 뒤 한 번만 읽는다(조각은 지우므로 다시 읽어도 없다)
   useEffect(() => {
-    const cleanUrl = deniedHashCleanUrl(window.location);
-    if (cleanUrl === null) return;
-    window.history.replaceState(window.history.state, '', cleanUrl);
-    setDenied(deniedWindow(phases, openAtMs, browserClock().now()));
+    let kv: Storage | null = null;
+    try {
+      kv = window.sessionStorage;
+    } catch {
+      kv = null;
+    }
+    const marker = takeDeniedMarker({ kv, eventId, loc: window.location, deviceNowMs: Date.now(), readAtMs: browserClock().now(), phases, openAtMs });
+    if (marker.cleanUrl !== null) window.history.replaceState(window.history.state, '', marker.cleanUrl);
+    // 개발 모드의 효과 두 번 실행에서 두 번째(표시가 이미 없음)가 켠 값을 덮지 않게 켤 때만 둔다
+    if (marker.denied) setDenied(marker.denied);
+    // 처음 그린 뒤 한 번만 읽는다(표시와 조각은 지우므로 다시 읽어도 없다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return denied;

@@ -350,7 +350,10 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         clearEntryMine();
         // 사전 검증 토큰이 맞지 않으면 그 토큰도 지운다. 남기면 공연 상세가 그 토큰으로 다시 보내 두 화면을 오간다(ADR-0211 결정 4)
         if (reply.problem === 'preverify-invalid') store.write({ preverifyToken: undefined, preverifyIssuedAt: undefined, preverifyExpiresAt: undefined });
-        return leave(isSaleDenied(reply) ? deniedEvent() : urls.event, sig);
+        if (!isSaleDenied(reply)) return leave(urls.event, sig);
+        // 공연 상세가 조각만 붙인 바깥 링크와 구별하도록 같은 탭 저장소에 출처 표시를 쓴 뒤 간다(쓰기가 실패해도 간다, ADR-0272 결정 4 '출처 확인')
+        store.markEligibilityDenied();
+        return leave(deniedEvent(), sig);
       }
       failures++;
       if (!env.online()) show({ state: 'offline' });
@@ -439,7 +442,10 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         return end('login-expired');
       }
       if (reply?.status === 403 && reply.problem === 'identity-verification-required') return leave(urls.event, sig);
-      if (isSaleDenied(reply)) return leave(deniedEvent(), sig);
+      if (isSaleDenied(reply)) {
+        store.markEligibilityDenied();
+        return leave(deniedEvent(), sig);
+      }
       if (reply?.status === 403 || reply?.status === 428) return show(joinView('failed'));
       if (reply?.status === 409) {
         const again = store.read();

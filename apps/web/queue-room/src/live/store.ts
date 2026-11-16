@@ -3,6 +3,8 @@
 //   대기표(또는 참가 토큰과 셔플 순번)·순번·구간, 처음 예상 대기, 차례가 온 시각(브라우저 추정), 저장 시각
 // - sessionStorage peaket.queue.{eventId}.firstAhead: 처음 앞 인원
 // - sessionStorage peaket.admission.{eventId}: 입장 토큰·서버 ECDH 공개키·좌석맵 경로·구매 세션 만료·받은 시각
+// - sessionStorage peaket.queue.{eventId}.eligDenied: 명단 밖 403으로 공연 상세에 돌려보내기 직전의 출처 표시 {"v":1,"at":<기기 시각>}
+//   (공연 상세가 한 번 읽고 지운다, ADR-0272 결정 4 '출처 확인')
 // - localStorage peaket.device: deviceId(CSPRNG 128비트, base64url 22자)
 
 export interface Batching {
@@ -120,7 +122,7 @@ export interface Store {
   deviceId(): string | undefined;
   /** 이 회차의 희망 조건(peaket.autoassign.{eventId})을 지운다(판매 종료) */
   clearAutoAssign(): void;
-  /** 명단 밖 403의 출처 표시 sessionStorage peaket.queue.{eventId}.eligDenied(ADR-0272 결정 4 '출처 확인'). 시험 담당의 빈 뼈대이고 구현 담당이 채운다 */
+  /** 명단 밖 403의 출처 표시 sessionStorage peaket.queue.{eventId}.eligDenied를 쓴다(ADR-0272 결정 4 '출처 확인'). 저장소가 없거나 던지면 넘어간다 */
   markEligibilityDenied(): void;
 }
 
@@ -187,7 +189,7 @@ export function createStore(eventId: string, local: KV | null, session: KV | nul
       safe(() => local?.removeItem(`peaket.autoassign.${eventId}`), undefined);
     },
     markEligibilityDenied() {
-      throw new Error('아직 없음');
+      safe(() => session?.setItem(`${key}.eligDenied`, JSON.stringify({ v: 1, at: now() })), undefined);
     },
     deviceId() {
       const v = safe(() => local?.getItem('peaket.device') ?? null, null);
