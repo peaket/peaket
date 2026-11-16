@@ -128,9 +128,10 @@ function drop(seq, ...labels) {
 }
 const pick = (seq, labels) => labels.map((l) => find(seq, l));
 
-const REST = ['review', 'verify', 'rfTest', 'rfImpl', 'record'];
+const REST = ['review', 'rfTest', 'rfImpl', 'verify', 'record'];
 
-// 좋은 코드 묶음(계획 §4): plan → test → impl → review → verify → review-fix(test) → review-fix(impl) → record
+// 좋은 코드 묶음(계획 §4): plan → test → impl → review → review-fix(test) → review-fix(impl) → verify → record
+// (검증은 마지막 코드 고침 뒤다. 계획 W7-L1-roles-testonly 7의 7로 verify를 리뷰 반영 뒤로 옮겼다)
 function codeBatch(id = 'BAT-901', o = {}) {
   const area = o.area ?? (id === 'BAT-901' ? 'a' : 'b');
   const src = `services/${area}/src/x.ts`;
@@ -143,9 +144,9 @@ function codeBatch(id = 'BAT-901', o = {}) {
     spec(`${p}test`, 'test', id, s.test, { [src]: "export const x = () => { throw new Error('아직 없음'); };\n", [tst]: '시험 1\n', ...o.testFiles }),
     spec(`${p}impl`, 'impl', id, s.impl, { [src]: 'export const x = () => 1;\n' }),
     spec(`${p}review`, 'review', id, s.review, { [`docs/review/notes/${id}-review.md`]: '높음 0\n' }),
-    spec(`${p}verify`, 'verify', id, s.verify, { [`docs/review/notes/${id}-verify.md`]: '다 잡았다\n' }),
     spec(`${p}rfTest`, 'review-fix', id, s.test, { [tst]: '시험 1\n시험 2\n' }, { fixBy: 'test', findings: ['RV-901'] }),
     spec(`${p}rfImpl`, 'review-fix', id, s.impl, { [src]: 'export const x = () => 2;\n' }, { fixBy: 'impl', findings: ['RV-901'] }),
+    spec(`${p}verify`, 'verify', id, s.verify, { [`docs/review/notes/${id}-verify.md`]: '다 잡았다\n' }),
     spec(`${p}record`, 'record', id, s.record, { 'docs/PROGRESS.md': `${id} 끝\n` }),
   ];
 }
@@ -161,7 +162,7 @@ function docBatch(id = 'BAT-902') {
 }
 
 // BAT-903: BAT-901과 섞어 넣는 두 번째 코드 묶음(plan·test·impl·review·verify)
-const bat903 = (o = {}) => codeBatch('BAT-903', { prefix: 'b3.', ...o }).slice(0, 5);
+const bat903 = (o = {}) => pick(codeBatch('BAT-903', { prefix: 'b3.', ...o }), ['b3.plan', 'b3.test', 'b3.impl', 'b3.review', 'b3.verify']);
 
 // 좋은 코드 묶음 끝에 계획 파일만 고치는 plan 커밋을 하나 더 단다(계획 파일 사건용, 앞 8커밋은 다시 쓴다)
 const withPlan = (text, id = 'BAT-901') => [...codeBatch(id), spec('planFix', 'plan', id, S.plan, { [`docs/review/plans/${id}.md`]: text })];
@@ -496,21 +497,20 @@ test('RC-15 ③ 늦은 계획 고침과 구현 뒤 시험 커밋은 통과한다
   expectPass(one.r, 'RC-15 plan → test → plan → impl → test', 1, 10);
   assert.equal(batchLine(one.r, 'BAT-901'), summary('BAT-901', '코드', 10, [2, 2, 1, 1, 2, 1, 1, 0]), one.r.all);
   // record는 차례를 보지 않는다(맨 앞에 와도 된다)
-  const two = check(pick(codeBatch(), ['record', 'plan', 'test', 'impl', 'review', 'verify', 'rfTest', 'rfImpl']));
+  const two = check(pick(codeBatch(), ['record', 'plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify']));
   expectPass(two.r, 'RC-15 record가 맨 앞', 1, 8);
 });
 
 test('RC-16 ③ 리뷰·검증·리뷰 반영의 차례', () => {
   for (const [name, order, first] of [
-    ['review가 첫 impl 앞', ['plan', 'test', 'review', 'impl', 'verify', 'rfTest', 'rfImpl', 'record'], 'review'],
-    ['verify가 첫 review 앞', ['plan', 'test', 'impl', 'verify', 'review', 'rfTest', 'rfImpl', 'record'], 'verify'],
-    ['review-fix가 review·verify 앞(impl 뒤)', ['plan', 'test', 'impl', 'rfTest', 'review', 'verify', 'rfImpl', 'record'], 'rfTest'],
+    ['review가 첫 impl 앞', ['plan', 'test', 'review', 'impl', 'rfTest', 'rfImpl', 'verify', 'record'], 'review'],
+    ['review-fix가 review·verify 앞(impl 뒤)', ['plan', 'test', 'impl', 'rfTest', 'review', 'rfImpl', 'verify', 'record'], 'rfTest'],
   ]) {
     const { r, sha } = check(pick(codeBatch(), order));
     expectFail(r, `RC-16 ${name}`, '차례', 'BAT-901', sha[first]);
   }
   // 경계: review-fix가 첫 review 뒤·첫 verify 앞이면 통과(둘 가운데 이른 것보다 뒤)
-  const { r } = check(pick(codeBatch(), ['plan', 'test', 'impl', 'review', 'rfTest', 'verify', 'rfImpl', 'record']));
+  const { r } = check(pick(codeBatch(), ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'record']));
   expectPass(r, 'RC-16 review → review-fix → verify', 1, 8);
 });
 
@@ -836,7 +836,7 @@ test('RC-35 ⑩ 실패를 모두 찍고 Actions 꼴을 쓴다', () => {
 // 리뷰 반영 사양: 지적 번호와 바꾼 파일을 준다(시험 쪽은 s-test, 구현 쪽은 s-impl)
 const rfTestOf = (label, findings, files = { 'services/a/test/x.test.ts': `시험 ${label}\n` }) => spec(label, 'review-fix', 'BAT-901', S.test, files, { fixBy: 'test', findings });
 const rfImplOf = (label, findings, files = { 'services/a/src/x.ts': `export const x = () => '${label}';\n` }) => spec(label, 'review-fix', 'BAT-901', S.impl, files, { fixBy: 'impl', findings });
-const BEFORE_RF = ['plan', 'test', 'impl', 'review', 'verify'];
+const BEFORE_RF = ['plan', 'test', 'impl', 'review'];
 
 test('RC-36 ⑤ 파이썬 시험과 test-sim 폴더도 시험 파일이다', () => {
   const cases = [];
@@ -953,34 +953,34 @@ test('RC-43 ① Finding 꼬리말', () => {
   const doc = check(retrail(docBatch(), 'doc', (t) => [...t, 'Finding: RV-902']));
   expectFail(doc.r, 'RC-43 doc 커밋에 Finding', '꼬리말', 'BAT-902', doc.sha.doc);
   // 지적 둘은 Finding 두 줄(값 꼴은 Batch와 같다: RV-01, A2-17)
-  const two = check(pick([...codeBatch(), rfTestOf('rfT', ['RV-01', 'A2-17']), rfImplOf('rfI', ['RV-01', 'A2-17'])], [...BEFORE_RF, 'rfT', 'rfI', 'record']));
+  const two = check(pick([...codeBatch(), rfTestOf('rfT', ['RV-01', 'A2-17']), rfImplOf('rfI', ['RV-01', 'A2-17'])], [...BEFORE_RF, 'rfT', 'rfI', 'verify', 'record']));
   expectPass(two.r, 'RC-43 Finding 두 줄', 1, 8);
 });
 
 test('RC-44 ③ 리뷰 반영은 지적마다 시험 쪽이 먼저다', () => {
   const base901 = codeBatch();
   const expectOrder = (r, label, sha, finding) => expectFail(r, label, '차례', 'BAT-901', sha, [finding]);
-  const one = check(pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'record']));
+  const one = check(pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'verify', 'record']));
   expectOrder(one.r, 'RC-44 Fix-By: impl(RV-01)만', one.sha.i1, 'RV-01');
-  const two = check(pick([...base901, rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'record']));
+  const two = check(pick([...base901, rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'verify', 'record']));
   expectOrder(two.r, 'RC-44 impl(RV-01) → test(RV-01)', two.sha.i1, 'RV-01');
-  const three = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'record']));
+  const three = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'verify', 'record']));
   expectOrder(three.r, 'RC-44 test(RV-01) → impl(RV-01) → impl(RV-02)', three.sha.i2, 'RV-02');
   assert.deepEqual(failures(three.r.out).filter((f) => f.check === '차례' && three.sha.i1.startsWith(f.hash)), [], `RC-44: 시험 쪽이 먼저인 impl(RV-01)에 차례 실패를 찍었다\n${three.r.all}`);
   // 시험 쪽 커밋이 다른 묶음(BAT-903)에만 있다
   const t903 = spec('b3.t1', 'review-fix', 'BAT-903', S.test, { 'services/b/test/x.test.ts': '시험 903\n' }, { fixBy: 'test', findings: ['RV-01'] });
-  const four = check([...pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'record']), ...bat903(), t903]);
+  const four = check([...pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'verify', 'record']), ...bat903(), t903]);
   expectOrder(four.r, 'RC-44 test(RV-01)이 BAT-903에만', four.sha.i1, 'RV-01');
 });
 
 test('RC-45 ③ 리뷰 반영 차례의 통과 꼴', () => {
   const base901 = codeBatch();
-  const one = check(pick([...base901, rfTestOf('t1', ['RV-01', 'RV-02']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'record']));
+  const one = check(pick([...base901, rfTestOf('t1', ['RV-01', 'RV-02']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'verify', 'record']));
   expectPass(one.r, 'RC-45 test(RV-01·RV-02) → impl(RV-01) → impl(RV-02)', 1, 9);
-  const two = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfTestOf('t2', ['RV-01']), rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 't1', 't2', 'i1', 'record']));
+  const two = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfTestOf('t2', ['RV-01']), rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 't1', 't2', 'i1', 'verify', 'record']));
   expectPass(two.r, 'RC-45 test(RV-01) → test(RV-01) → impl(RV-01)', 1, 9);
   const docOnly = rfImplOf('i3', ['RV-03'], { 'tools/ci/README.md': '# 표 고침\n', 'docs/PROGRESS.md': '문구 고침\n' });
-  const three = check(pick([...base901, docOnly], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'record']));
+  const three = check(pick([...base901, docOnly], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'verify', 'record']));
   expectPass(three.r, 'RC-45 .md만 고친 impl(RV-03)', 1, 9);
 });
 
@@ -990,7 +990,7 @@ test('RC-46 ③ 문서 예외의 경계', () => {
     ['.github/workflows/a.yml만', { '.github/workflows/a.yml': 'name: a\n' }],
     ['tools/ci/README.md.bak만', { 'tools/ci/README.md.bak': '옛 표\n' }],
   ]) {
-    const { r, sha } = check(pick([...codeBatch(), rfImplOf('i3', ['RV-03'], files)], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'record']));
+    const { r, sha } = check(pick([...codeBatch(), rfImplOf('i3', ['RV-03'], files)], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'verify', 'record']));
     expectFail(r, `RC-46 ${name}`, '차례', 'BAT-901', sha.i3, ['RV-03']);
   }
 });
@@ -1023,17 +1023,17 @@ test('RC-48 ⑧⑨ 문서 묶음의 계획 파일 절과 담당 표', () => {
 
 // 시험 먼저의 뜻(계획 9의 2): 첫 시험 쪽이 첫 구현 쪽보다 앞이면 된다. 구현 뒤의 시험 쪽 커밋은 막지 않는다
 test('RC-49 ③ 구현 뒤의 시험 커밋은 통과한다', () => {
-  const one = check(pick(mixed(), ['plan', 'test', 'impl', 'test2', 'review', 'verify', 'rfTest', 'rfImpl', 'record']));
+  const one = check(pick(mixed(), ['plan', 'test', 'impl', 'test2', 'review', 'rfTest', 'rfImpl', 'verify', 'record']));
   expectPass(one.r, 'RC-49 impl 뒤 test(시험 이의에 답한 고침)', 1, 9);
-  const two = check(pick(mixed(), ['plan', 'test', 'impl', 'review', 'verify', 'test2', 'rfTest', 'rfImpl', 'record']));
+  const two = check(pick(mixed(), ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'test2', 'record']));
   expectPass(two.r, 'RC-49 verify 뒤 test(살아남은 틀린 구현을 잡는 시험)', 1, 9);
 });
 
 test('RC-50 ③ 같은 지적에서 구현 쪽 뒤의 시험 쪽 커밋은 통과한다', () => {
-  const one = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-01'])], [...BEFORE_RF, 't1', 'i1', 't2', 'record']));
+  const one = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-01'])], [...BEFORE_RF, 't1', 'i1', 't2', 'verify', 'record']));
   expectPass(one.r, 'RC-50 test(RV-01) → impl(RV-01) → test(RV-01)', 1, 9);
   const seq = [...codeBatch(), rfTestOf('t1', ['RV-01']), rfTestOf('t2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfTestOf('t3', ['RV-01']), rfTestOf('t4', ['RV-02'])];
-  const two = check(pick(seq, [...BEFORE_RF, 't1', 't2', 'i1', 'i2', 't3', 't4', 'record']));
+  const two = check(pick(seq, [...BEFORE_RF, 't1', 't2', 'i1', 'i2', 't3', 't4', 'verify', 'record']));
   expectPass(two.r, 'RC-50 지적 둘을 엇갈려', 1, 12);
 });
 
@@ -1043,9 +1043,9 @@ test('RC-51 ③ 같은 지적에서 구현 쪽이 첫 시험 쪽보다 앞서면
     const lines_ = failures(r.out).filter((f) => f.check === '차례');
     assert.equal(lines_.length, 1, `${label}: [차례] 줄이 하나가 아니다(뒤의 구현 쪽이나 시험이 먼저인 지적에도 찍었다)\n${r.all}`);
   };
-  const one = check(pick([...codeBatch(), rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'i2', 'record']));
+  const one = check(pick([...codeBatch(), rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'i2', 'verify', 'record']));
   only(one.r, 'RC-51 impl(RV-01) → test(RV-01) → impl(RV-01)', one.sha.i1, 'RV-01');
-  const two = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02'])], [...BEFORE_RF, 't1', 'i2', 'i1', 't2', 'record']));
+  const two = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02'])], [...BEFORE_RF, 't1', 'i2', 'i1', 't2', 'verify', 'record']));
   only(two.r, 'RC-51 RV-02만 구현 쪽이 앞섬', two.sha.i2, 'RV-02');
 });
 
@@ -1187,7 +1187,6 @@ test('RC-57 ③ 시험만 묶음의 차례', () => {
   for (const [name, order, first] of [
     ['test가 첫 plan 앞', ['test', 'plan', 'review', 'verify', 'record'], 'test'],
     ['review가 첫 test 앞', ['plan', 'review', 'test', 'verify', 'record'], 'review'],
-    ['verify가 첫 review 앞', ['plan', 'test', 'verify', 'review', 'record'], 'verify'],
     ['Fix-By: test 리뷰 반영이 첫 review·verify 앞', ['plan', 'test', 'rf', 'review', 'verify', 'record'], 'rf'],
   ]) {
     const { r, sha } = onPre(pick(g, order));
@@ -1199,8 +1198,8 @@ test('RC-57 ③ 시험만 묶음의 차례', () => {
     extra950('test2', 'test', S.test, { 'services/a/test/y.test.ts': '시험 2\n' }),
     extra950('test3', 'test', S.test, { 'services/a/test/z.test.ts': '시험 3\n' }),
   ];
-  const { r } = onPre(pick(more, ['plan', 'test', 'plan2', 'test2', 'review', 'verify', 'test3', 'record']));
-  expectPass(r, 'RC-57 plan → test → plan → test → review → verify → test', 1, 8);
+  const { r } = onPre(pick(more, ['plan', 'test', 'plan2', 'test2', 'review', 'test3', 'verify', 'record']));
+  expectPass(r, 'RC-57 plan → test → plan → test → review → test → verify', 1, 8);
 });
 
 test('RC-58 ⑧⑨ 시험만 묶음의 계획 파일', () => {
@@ -1235,4 +1234,92 @@ test('RC-59 ④⑥ 시험만 묶음의 규칙은 그 묶음에만 걸린다', ()
   expectFail(three.r, 'RC-59 BAT-950 구현 없음', '구성', 'BAT-950', null);
   assert.equal(batchLine(three.r, 'BAT-901'), summary('BAT-901', '시험만', 8, [1, 1, 1, 1, 2, 1, 1, 0]), three.r.all);
   assert.equal(batchLine(three.r, 'BAT-950'), summary('BAT-950', '코드', 5, [1, 1, 0, 1, 0, 1, 1, 0]), three.r.all);
+});
+
+// ---- 검증은 마지막 코드 고침 뒤(계획 W7-L1-roles-testonly 7, 2026-11-16) ----
+
+const LAST_FIX = '마지막 코드 고침 커밋 뒤에 verify 커밋이 없다';
+const v901 = (label) => spec(label, 'verify', 'BAT-901', S.verify, { [`docs/review/notes/BAT-901-${label}.md`]: `${label} 다 잡았다\n` });
+const r901 = (label) => spec(label, 'review', 'BAT-901', S.review, { [`docs/review/notes/BAT-901-${label}.md`]: `${label} 높음 0\n` });
+const v950 = (label) => extra950(label, 'verify', S.verify, { [`docs/review/notes/BAT-950-${label}.md`]: `${label} 다 잡았다\n` });
+const onlyOrder = (r, label, batch, sha, reason = []) => {
+  expectFail(r, label, '차례', batch, sha, reason);
+  assert.equal(failures(r.out).filter((f) => f.check === '차례').length, 1, `${label}: [차례] 줄이 하나가 아니다\n${r.all}`);
+};
+
+test('RC-60 ③ 리뷰와 검증의 차례는 보지 않는다', () => {
+  const g = [...codeBatch(), v901('verify2'), r901('review2')];
+  const one = check(pick(g, ['plan', 'test', 'impl', 'verify', 'review', 'record']));
+  expectPass(one.r, 'RC-60 코드 plan → test → impl → verify → review', 1, 6);
+  const two = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 'review2']));
+  expectPass(two.r, 'RC-60 코드 review → verify → review', 1, 6);
+  // 옛 RC-16 'verify가 첫 review 앞'(리뷰 반영 뒤에 다시 검증)
+  const three = check(pick(g, ['plan', 'test', 'impl', 'verify', 'review', 'rfTest', 'rfImpl', 'verify2', 'record']));
+  expectPass(three.r, 'RC-60 코드 verify → review → 리뷰 반영 → verify', 1, 9);
+  // 시험만 묶음(옛 RC-57 'verify가 첫 review 앞')
+  const four = onPre(pick(bat950(), ['plan', 'test', 'verify', 'review']));
+  expectPass(four.r, 'RC-60 시험만 plan → test → verify → review', 1, 4);
+  const five = onPre(pick(bat950(), ['plan', 'test', 'verify', 'review', 'record']));
+  expectPass(five.r, 'RC-60 시험만 plan → test → verify → review → record', 1, 5);
+});
+
+test('RC-61 ③ 검증 → 고침 → 다시 검증은 통과한다', () => {
+  const g = [...codeBatch(), v901('verify2'), v901('verify3'), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02']), rfImplOf('i2', ['RV-02'])];
+  const one = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 't1', 'i1', 'verify2', 'record']));
+  expectPass(one.r, 'RC-61 verify → 고침 → verify', 1, 9);
+  const two = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 't1', 'i1', 'verify2', 't2', 'i2', 'verify3', 'record']));
+  expectPass(two.r, 'RC-61 세 바퀴', 1, 12);
+  // 마지막 verify 뒤에 시험 쪽 커밋(시험 파일)만 온다: 코드 묶음에서는 코드 고침이 아니다
+  const three = check(pick(g, ['plan', 'test', 'impl', 'review', 't1', 'i1', 'verify', 't2', 'record']));
+  expectPass(three.r, 'RC-61 마지막 verify 뒤 Fix-By: test만', 1, 9);
+});
+
+test('RC-62 ③ 마지막 코드 고침 뒤에 검증이 없으면 실패한다', () => {
+  const impl2 = spec('impl2', 'impl', 'BAT-901', S.impl, { 'services/a/src/x.ts': 'export const x = () => 3;\n' });
+  const g = [...codeBatch(), v901('verify2'), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02']), rfImplOf('i2', ['RV-02']), impl2];
+  const one = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 't1', 'i1', 'record']));
+  onlyOrder(one.r, 'RC-62 verify → Fix-By: test → Fix-By: impl', 'BAT-901', one.sha.i1, [LAST_FIX]);
+  const two = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 'impl2', 'record']));
+  onlyOrder(two.r, 'RC-62 유일한 verify 뒤 impl', 'BAT-901', two.sha.impl2, [LAST_FIX]);
+  const three = check(pick(g, ['plan', 'test', 'impl', 'review', 'verify', 't1', 'i1', 'verify2', 't2', 'i2', 'record']));
+  onlyOrder(three.r, 'RC-62 verify → 고침 → verify → 고침', 'BAT-901', three.sha.i2, [LAST_FIX]);
+});
+
+test('RC-63 ③ .md만 바꾼 구현 쪽 커밋은 코드 고침이 아니다', () => {
+  const iDoc = rfImplOf('iDoc', ['RV-03'], { 'tools/ci/README.md': '# 표 고침\n' });
+  const implDoc = spec('implDoc', 'impl', 'BAT-901', S.impl, { 'tools/ci/README.md': '# 표 고침\n', 'docs/PROGRESS.md': '문구 고침\n' });
+  const iMix = rfImplOf('iMix', ['RV-03'], { 'tools/ci/README.md': '# 표 고침\n', 'tools/ci/roles-check.mjs': '// 고침\n' });
+  const g = [...codeBatch(), iDoc, implDoc, iMix];
+  const one = check(pick(g, ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'iDoc', 'record']));
+  expectPass(one.r, 'RC-63 verify 뒤 Fix-By: impl이 tools/ci/README.md만', 1, 9);
+  const two = check(pick(g, ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'implDoc', 'record']));
+  expectPass(two.r, 'RC-63 verify 뒤 impl이 .md만', 1, 9);
+  const three = check(pick(g, ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'iMix', 'record']));
+  expectFail(three.r, 'RC-63 verify 뒤 Fix-By: impl이 .md와 코드를 함께', '차례', 'BAT-901', three.sha.iMix, [LAST_FIX]);
+});
+
+test('RC-64 ③ 첫 검증은 첫 구현 뒤다', () => {
+  const { r, sha } = check(pick([...codeBatch(), v901('verify2')], ['plan', 'test', 'verify', 'impl', 'review', 'verify2']));
+  onlyOrder(r, 'RC-64 plan → test → verify → impl → review → verify', 'BAT-901', sha.verify);
+});
+
+test('RC-65 ③ 시험만 묶음의 검증 차례', () => {
+  const g = [...bat950(), rf950('rf'), rf950('rfDoc', { 'docs/PROGRESS.md': '시험 이름을 고쳤다\n' }), v950('verify2'), extra950('test2', 'test', S.test, { 'services/a/test/y.test.ts': '시험 2\n' })];
+  const one = onPre(pick(g, ['plan', 'test', 'review', 'verify', 'rf', 'record']));
+  onlyOrder(one.r, 'RC-65 verify 뒤 Fix-By: test(시험 파일), 다시 verify 없음', 'BAT-950', one.sha.rf);
+  const two = onPre(pick(g, ['plan', 'test', 'review', 'verify', 'test2', 'record']));
+  onlyOrder(two.r, 'RC-65 verify 뒤 test(시험 파일), 다시 verify 없음', 'BAT-950', two.sha.test2);
+  const three = onPre(pick(g, ['plan', 'test', 'review', 'verify', 'rf', 'verify2', 'record']));
+  expectPass(three.r, 'RC-65 verify → Fix-By: test → verify', 1, 7);
+  const four = onPre(pick(g, ['plan', 'test', 'review', 'verify', 'rfDoc', 'record']));
+  expectPass(four.r, 'RC-65 verify 뒤 Fix-By: test가 docs/PROGRESS.md만', 1, 6);
+  const five = onPre(pick(g, ['plan', 'verify', 'test', 'review', 'verify2', 'record']));
+  expectFail(five.r, 'RC-65 verify가 첫 test 앞', '차례', 'BAT-950', five.sha.verify);
+});
+
+test('RC-66 ③ 문서 묶음에는 검증 차례가 걸리지 않는다', () => {
+  expectPass(check(docBatch()).r, 'RC-66 좋은 문서 묶음', 1, 4);
+  const d = [...docBatch(), spec('doc2', 'doc', 'BAT-902', S.doc, { 'notes/a.md': '글 고침\n' })];
+  const { r } = check(pick(d, ['plan', 'doc', 'review', 'doc2', 'record']));
+  expectPass(r, 'RC-66 review 뒤 doc 커밋', 1, 5);
 });
