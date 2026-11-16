@@ -69,4 +69,13 @@
     padding: 0;
     border: 0;
   }
+
+  /* 검색 입력칸(SearchField·WebSearchBox, type="search")의 브라우저 기본 지우기 단추를 숨긴다. 입력이 있을 때 지우기 단추는
+     화면의 [검색어 지우기] 하나다(d5 §5.3 ①, 브라우저 확인 BC165-1). Chrome·Safari 계열만 이 의사 요소를 그리고 Firefox에는 없다.
+     다른 브라우저가 모르는 의사 요소라 규칙 하나에 이 선택자만 둔다(섞으면 규칙째 버려진다) */
+  .input-group input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+  }
 }
