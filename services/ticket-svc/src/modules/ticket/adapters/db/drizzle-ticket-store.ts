@@ -1,7 +1,7 @@
 // 운영 티켓 저장소(BUILD_ORDER HOT-160). 발권은 (order_id, issue_generation) PK의 INSERT 경합으로 한 번만 만들고,
 // 취소는 티켓 행 FOR UPDATE 안에서 조건을 보고 (cancellation_id, ticket_id) 취소표를 남긴다.
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
   type CancelTicketOutcome,
@@ -150,11 +150,27 @@ export class DrizzleTicketStore implements TicketStore {
           out.push({ ticketId, result: afterLock[0].result as CancelTicketOutcome['result'] });
           continue;
         }
-        const result = this.#cancelOne(tx, input, rows[0], ticketId);
-        out.push({ ticketId, result: await result });
+        const result = await this.#cancelOne(tx, input, rows[0], ticketId);
+        const first = result === 'ALREADY_CANCELLED' ? await this.#firstFanCancel(tx, ticketId) : undefined;
+        out.push({ ticketId, result, ...(first ? { first } : {}) });
       }
       return out;
     });
+  }
+
+  /**
+   * 그 표의 키를 폐기한 팬 취소(ticket_cancellation의 REFUND_NOW·REFUND_AFTER_CLOSE, 가장 이른 것). 운영자 취소·무효로 끝난 표는 없다(리뷰 B2,
+   * docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'). ALREADY_CANCELLED는 ticket_cancellation에 남기지 않으므로 첫 취소가 아니다
+   */
+  async #firstFanCancel(tx: DbTransaction, ticketId: string): Promise<CancelTicketOutcome['first']> {
+    const [row] = await tx
+      .select({ cancellationId: ticketCancellation.cancellationId, result: ticketCancellation.result, cancelledAt: ticketCancellation.cancelledAt })
+      .from(ticketCancellation)
+      .where(and(eq(ticketCancellation.ticketId, ticketId), inArray(ticketCancellation.result, ['REFUND_NOW', 'REFUND_AFTER_CLOSE'])))
+      .orderBy(asc(ticketCancellation.cancelledAt), asc(ticketCancellation.cancellationId))
+      .limit(1);
+    if (!row || (row.result !== 'REFUND_NOW' && row.result !== 'REFUND_AFTER_CLOSE')) return undefined;
+    return { cancellationId: row.cancellationId, result: row.result, cancelledAtMs: row.cancelledAt.getTime() };
   }
 
   async #cancelOne(tx: DbTransaction, input: CancelTicketsInput, row: Row | undefined, ticketId: string): Promise<CancelTicketOutcome['result']> {

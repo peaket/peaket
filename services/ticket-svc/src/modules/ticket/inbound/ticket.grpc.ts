@@ -92,7 +92,16 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           nowMs: useCases.nowMs?.() ?? Date.now(),
         })
         .then((outcomes) => {
-          cb(null, { outcomes: outcomes.map((o) => ({ ticket_id: o.ticketId, result: `CANCEL_TICKET_RESULT_${o.result}` })) });
+          cb(null, {
+            outcomes: outcomes.map((x) => ({
+              ticket_id: x.ticketId,
+              result: `CANCEL_TICKET_RESULT_${x.result}`,
+              // ALREADY_CANCELLED에 먼저 키를 폐기한 팬 취소(리뷰 B2). 없으면 세 칸을 비운다
+              ...(x.first
+                ? { first_cancellation_id: x.first.cancellationId, first_result: `CANCEL_TICKET_RESULT_${x.first.result}`, first_cancelled_at: timestampOf(x.first.cancelledAtMs) }
+                : {}),
+            })),
+          });
         })
         .catch((err: unknown) => fail('CancelTickets', err, orderId, cb, onError));
     },

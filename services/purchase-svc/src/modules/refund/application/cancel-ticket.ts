@@ -75,11 +75,40 @@ export class CancelTicket {
       cancellationId: i.cancellationId,
       deadlineMs: i.deadlineMs,
     });
-    if (ticket === 'NOT_PAYER_HOLDER') return { status: 'TICKET_NOT_HELD' };
-    if (ticket === 'TRANSFER_PENDING') return { status: 'TRANSFER_PENDING' };
-    if (ticket === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
-    // 다른 취소(팬·운영자)가 먼저 끝냈다: 좌석 되돌리기·취소 행·결제사 호출을 하지 않는다(같은 취소 ID의 재요청은 ticket-svc가 처음 결과를 준다)
-    if (ticket === 'ALREADY_CANCELLED') return { status: 'ALREADY_ENDED' };
+    // 이어 갈 취소(run)·견적·티켓 단계 결과. 앞 시도가 티켓 단계만 마친 팬 취소를 새 키로 다시 누른 것이면 첫 취소 ID로 잇는다(아래)
+    let run: CancelTicketInput = i;
+    let quote = q.quote;
+    let ticketResult: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE';
+    if (typeof ticket === 'object') {
+      // 리뷰 B2(docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'): ticket-svc가 그 표의 키를 폐기한 팬 취소(K1)를 알려 왔다.
+      // 결제자 확인은 위에서 했다. K2가 아니라 K1로 좌석·취소 행·환급을 마치고, 공제 기준 시각은 K1이 키를 폐기한 시각이다
+      run = { ...i, cancellationId: ticket.firstCancellationId };
+      const before = await this.o.orders.findCancellation(run.cancellationId);
+      if (before) {
+        if (before.orderId !== order.orderId || before.ticketId !== i.ticketId) return { status: 'CONFLICT' };
+        return this.#replay(before.state, before.refundAmount, before.refundAttempts, order.orderId, run);
+      }
+      const atFirst = quoteRefund({
+        ticketPrice: order.ticketPrice,
+        eventStartsAtMs: eventStartsAtOf(order.saleEndsAtMs),
+        bookedAtMs: order.bookedAtMs,
+        nowMs: ticket.firstCancelledAtMs,
+        calendar: this.o.calendar,
+        zeroDeduction: zeroDeductionFor(i.reason),
+        ...(order.entryOpensAtMs !== undefined ? { entryOpensAtMs: order.entryOpensAtMs } : {}),
+      });
+      if (atFirst.status === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
+      if (atFirst.status === 'INVALID_AMOUNT') return { status: 'ALREADY_ENDED' };
+      quote = atFirst.quote;
+      ticketResult = ticket.firstResult;
+    } else {
+      if (ticket === 'NOT_PAYER_HOLDER') return { status: 'TICKET_NOT_HELD' };
+      if (ticket === 'TRANSFER_PENDING') return { status: 'TRANSFER_PENDING' };
+      if (ticket === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
+      // 팬 취소가 아닌 길(운영자 취소·무효)이 먼저 끝냈다: 좌석 되돌리기·취소 행·결제사 호출을 하지 않는다(같은 취소 ID의 재요청은 ticket-svc가 처음 결과를 준다)
+      if (ticket === 'ALREADY_CANCELLED') return { status: 'ALREADY_ENDED' };
+      ticketResult = ticket;
+    }
 
     // 취소표: 티켓 키를 폐기한 뒤 좌석을 RETURNED로 되돌린다. 이 단계가 실패하면 취소 행을 만들지 않아
     // 같은 취소 ID의 재시도가 티켓 취소(멱등)와 좌석 되돌리기를 다시 한다
@@ -88,17 +117,17 @@ export class CancelTicket {
     // ticket-svc는 공연 시작으로 REFUND_AFTER_CLOSE를 가르고, 견적은 입장 시작(entryOpensAt)으로 가른다.
     // 입장이 시작됐지만 공연 시작 전인 취소도 키만 폐기하고 환급은 입장 기록 마감 뒤로 미룬다(ADR-0051 결정 13)
     // 회차 취소·연기는 입장 여부와 관계없이 바로 환급한다(transfer-refund §5). 팬 취소만 입장 기록 마감을 기다린다.
-    const afterClose = i.reason !== 'EVENT_CANCELLED' && i.reason !== 'EVENT_POSTPONED' && (ticket === 'REFUND_AFTER_CLOSE' || q.quote.refundAfterEntryClose);
+    const afterClose = i.reason !== 'EVENT_CANCELLED' && i.reason !== 'EVENT_POSTPONED' && (ticketResult === 'REFUND_AFTER_CLOSE' || quote.refundAfterEntryClose);
     const write = await this.o.writes.create({
-      cancellationId: i.cancellationId,
+      cancellationId: run.cancellationId,
       orderId: order.orderId,
       ticketId: i.ticketId,
       reason: i.reason,
-      daysBefore: q.quote.daysBefore,
-      within24h: q.quote.within24h,
-      deductionBp: q.quote.deductionBp,
-      deductionAmount: q.quote.deductionAmount,
-      refundAmount: q.quote.refundAmount,
+      daysBefore: quote.daysBefore,
+      within24h: quote.within24h,
+      deductionBp: quote.deductionBp,
+      deductionAmount: quote.deductionAmount,
+      refundAmount: quote.refundAmount,
       status: afterClose ? 'REQUESTED' : 'REFUND_PENDING',
       nowMs: i.nowMs,
       ...(afterClose ? { refundDueAtMs: eventStartsAtOf(order.saleEndsAtMs) + ENTRY_CLOSE_SAFE_MS } : {}),
@@ -106,35 +135,35 @@ export class CancelTicket {
       ...(i.eventCancellationRequestId !== undefined ? { eventCancellationRequestId: i.eventCancellationRequestId } : {}),
     });
     if (write.status === 'CONFLICT') return { status: 'CONFLICT' };
-    if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, order.orderId, i);
+    if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, order.orderId, run);
 
     // 입장 시작 뒤 취소는 키만 폐기하고 환급은 입장 기록 마감 뒤에 한다(ADR-0051 결정 13).
-    if (afterClose) return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: q.quote.refundAmount, refundAfterEntryClose: true };
+    if (afterClose) return { status: 'ACCEPTED', cancellationId: run.cancellationId, refundAmount: quote.refundAmount, refundAfterEntryClose: true };
 
     const payment = await this.o.payments.cancel({
-      cancellationId: i.cancellationId,
+      cancellationId: run.cancellationId,
       orderId: order.orderId,
-      amount: q.quote.refundAmount,
+      amount: quote.refundAmount,
       reason: i.reason,
       ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
       deadlineMs: i.deadlineMs,
     });
     if (payment === 'CANCELLED') {
-      await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
-      return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount: q.quote.refundAmount, refundAfterEntryClose: false };
+      await this.o.writes.updateStatus({ cancellationId: run.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
+      return { status: 'ACCEPTED', cancellationId: run.cancellationId, refundAmount: quote.refundAmount, refundAfterEntryClose: false };
     }
     // 결과 모름·재시도 대기·업무 거절은 모두 환급 대기다. 업무 거절은 바로, 결과 모름은 재시도 뒤
     // 다 쓰면 CS 처리함 '환급 실패'로 넘긴다(refund_failed_at, transfer-refund §7.1)
     const attempts = 1;
     if (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
-      await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
+      await this.o.writes.markRefundFailed({ cancellationId: run.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
     } else {
-      await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
+      await this.o.writes.scheduleRefundRetry({ cancellationId: run.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
     }
     return {
       status: 'REFUND_PENDING',
-      cancellationId: i.cancellationId,
-      refundAmount: q.quote.refundAmount,
+      cancellationId: run.cancellationId,
+      refundAmount: quote.refundAmount,
       payment: payment === 'REJECTED' ? 'REJECTED' : payment,
     };
   }

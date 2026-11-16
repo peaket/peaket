@@ -4,7 +4,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
-import type { TicketCancelOutcome } from '../domain/cancellation.js';
+import type { TicketCancelAnswer, TicketCancelOutcome } from '../domain/cancellation.js';
 import type { OperatorTicketCancellations, OperatorTicketOutcome, OperatorTicketResult, TicketCancellations } from '../domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -49,7 +49,7 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
     }) as unknown as grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary };
   }
 
-  async cancel(q: Parameters<TicketCancellations['cancel']>[0]): Promise<TicketCancelOutcome> {
+  async cancel(q: Parameters<TicketCancellations['cancel']>[0]): Promise<TicketCancelAnswer> {
     const ms = Math.min(2_000, Math.max(1, Math.floor(Number.isFinite(q.deadlineMs) ? q.deadlineMs : 2_000)));
     const once = (): Promise<Record<string, unknown>> =>
       new Promise((resolve, reject) => {
@@ -61,9 +61,19 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
         );
       });
     const v = await once();
-    const first = Array.isArray(v.outcomes) ? (v.outcomes[0] as { result?: unknown } | undefined) : undefined;
-    const raw = typeof first?.result === 'string' ? first.result.replace(/^CANCEL_TICKET_RESULT_/, '') : '';
+    const out = Array.isArray(v.outcomes) ? (v.outcomes[0] as Record<string, unknown> | undefined) : undefined;
+    const raw = typeof out?.result === 'string' ? out.result.replace(/^CANCEL_TICKET_RESULT_/, '') : '';
     if (!OUTCOMES.has(raw as TicketCancelOutcome)) throw new Error('ticket-svc CancelTickets 답의 결과를 알 수 없다');
+    // ALREADY_CANCELLED에 먼저 키를 폐기한 팬 취소가 실려 오면 그 취소로 잇는다(리뷰 B2). 칸이 비었거나 모양이 틀리면 첫 칸 없는 답이다
+    if (raw === 'ALREADY_CANCELLED') {
+      const firstId = typeof out?.first_cancellation_id === 'string' ? out.first_cancellation_id : '';
+      const firstResult = typeof out?.first_result === 'string' ? out.first_result.replace(/^CANCEL_TICKET_RESULT_/, '') : '';
+      const at = out?.first_cancelled_at as { seconds?: unknown; nanos?: unknown } | null | undefined;
+      const atMs = at ? Number(at.seconds) * 1000 + Math.floor(Number(at.nanos ?? 0) / 1_000_000) : Number.NaN;
+      if (firstId !== '' && (firstResult === 'REFUND_NOW' || firstResult === 'REFUND_AFTER_CLOSE') && Number.isFinite(atMs)) {
+        return { result: 'ALREADY_CANCELLED', firstCancellationId: firstId, firstResult, firstCancelledAtMs: atMs };
+      }
+    }
     return raw as TicketCancelOutcome;
   }
 

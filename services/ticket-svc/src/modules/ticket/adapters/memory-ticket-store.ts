@@ -38,6 +38,8 @@ export class MemoryTicketStore implements TicketStore {
   readonly cancellations = new Map<string, CancelTicketOutcome>();
   /** (approval_id, ticket_id) → 운영자 취소 결과(ticket_operator_cancellation) */
   readonly operatorCancellations = new Map<string, OperatorCancelOutcome>();
+  /** 표마다 키를 폐기한 팬 취소(ticket_cancellation의 REFUND_NOW·REFUND_AFTER_CLOSE 대역). ALREADY_CANCELLED 답의 첫 칸이다(리뷰 B2) */
+  readonly fanCancels = new Map<string, NonNullable<CancelTicketOutcome['first']>>();
   /** 들어감·통과 스캔 기록이 있는 표(scan_event IN·PASS의 대역) */
   readonly entries = new Set<string>();
 
@@ -64,7 +66,8 @@ export class MemoryTicketStore implements TicketStore {
       }
       const t = this.tickets.get(ticketId);
       const result = this.#cancelOne(input, t);
-      const outcome = { ticketId, result } as const;
+      const first = result === 'ALREADY_CANCELLED' ? this.fanCancels.get(ticketId) : undefined;
+      const outcome: CancelTicketOutcome = { ticketId, result, ...(first ? { first } : {}) };
       this.cancellations.set(cancelKey(input.cancellationId, ticketId), outcome);
       out.push(outcome);
     }
@@ -84,7 +87,9 @@ export class MemoryTicketStore implements TicketStore {
       version: t.version + 1,
     };
     this.#put(next);
-    return started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
+    const result = started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
+    this.fanCancels.set(t.ticketId, { cancellationId: input.cancellationId, result, cancelledAtMs: input.nowMs });
+    return result;
   }
 
   /** 티켓 행과 발권 기록의 사본을 함께 바꾼다 */
