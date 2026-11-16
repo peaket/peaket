@@ -128,7 +128,34 @@
 
 ## 검증
 
-아직 없음.
+**판정: 통과.** 틀린 구현 여섯 가운데 다섯(M1·M2·M3·M5·M6)을 대조 시험이 잡았다. 계획이 미리 살아남는다고 본 M4 하나만 살아남았고, 이것은 고친 코드의 결함이 아니라 시험이 입력 한 벌로만 불러 보는 약한 곳(리뷰 RVL-2와 같은 것)이다. 검증 담당 l2w8ci-verify, 2026-11-16, 구현 커밋 `db6dc130` 기준, Node 24.18.0.
+
+### 기준선
+
+- 고친 상태: `cd D:/ticketpass-lane2 && node --test "loadtest/test/*.test.mjs"` → tests 468, pass 468, fail 0.
+- 고치기 전 상태: `git show 81d9f4e3:loadtest/poc/bench/src/seat-contract.mjs`를 잠깐 그 자리에 쓰고 `node --test loadtest/test/poc-seat.test.mjs` → tests 39, pass 38, fail 1. 실패한 것은 'ST27_NFR003_seatKeys는 운영 seatKeys와 이름과 결과가 같다' 하나이고, 이름 목록 비교(114행)에서 운영에만 있는 `'prio'`가 차이로 나왔다. CI가 낸 실패와 같다. 바로 되돌렸다.
+
+### 틀린 구현
+
+각 틀린 구현은 사본 `loadtest/poc/bench/src/seat-contract.mjs`에만 잠깐 넣고 `node --test loadtest/test/poc-seat.test.mjs`(39개)를 돌린 뒤 `git checkout -- loadtest/poc/bench/src/seat-contract.mjs`로 되돌렸다. 되돌릴 때마다 `git status --short`가 비어 있는 것을 확인했다. M5·M6은 검증 담당이 더한 것이다.
+
+| 번호 | 무엇 | 결과 | 실패한 시험 |
+|---|---|---|---|
+| M1 | `prio` 줄(설명 주석 포함)을 다시 뺀다(고치기 전으로) | 잡힘(38/39) | 'ST27_NFR003_seatKeys는 운영 seatKeys와 이름과 결과가 같다'(114행 이름 목록, 차이 `'prio'`) |
+| M2 | 키 글을 틀리게: `prio: (e) => \`s:event:${e}:prio\``(해시 태그 `{}` 빠짐, 다른 Redis 칸으로 간다) | 잡힘(38/39) | 같은 시험(115행 값 비교, `'s:event:E1:prio'` 대 `'s:{event:E1}:prio'`) |
+| M3 | 이름만 틀리게: `priority: (e) => \`s:{event:${e}}:prio\`` | 잡힘(38/39) | 같은 시험(114행 이름 목록, `'priority'` 대 `'prio'`) |
+| M4 | 회차를 보지 않음: `prio: () => 's:{event:E1}:prio'` | **살아남음**(39/39) | 없음 |
+| M5 | 옆 줄을 베끼다 꼬리를 안 고침: `prio: (e) => \`s:{event:${e}}:expiry\`` | 잡힘(38/39) | 같은 시험(115행 값 비교, `…:expiry` 대 `…:prio`) |
+| M6 | `expiry`와 `prio`의 키 글을 서로 바꿔 적음(이름은 둘 다 있음) | 잡힘(33/39) | 같은 시험과 함께 `expiry`를 쓰는 대조 다섯: holdCall 운영 대조, expireCall 계약 차례, expireCall 운영 대조, 만료 1단계 운영 대조, 만료 1단계·릴레이 흉내 명령 모양 |
+
+- M1·M2·M3·M5는 계획 7절 기대대로 seatKeys 대조 시험 하나만 깼고 홀드·만료 대조 등 다른 시험은 깨지 않았다. M6이 다른 시험 다섯도 깬 것은 `expiry` 키를 홀드·만료 호출이 실제로 쓰기 때문이며(`holdCall`·`expireCall`·만료 1단계 명령), 측정 도구가 쓰는 키가 틀리면 여러 겹으로 잡힌다는 뜻이다.
+- **M4(살아남음)는 시험의 약한 곳이다.** 대조 시험이 `seatKeys` 23개를 모두 `fn('E1', 'X2', 'Y3')` 한 번으로만 견주므로(`loadtest/test/poc-seat.test.mjs` 115행), 인자를 보지 않고 `E1` 글을 그대로 돌려주는 틀린 사본도 통과한다. 리뷰 RVL-2와 같은 것이다. 이 묶음의 고친 줄(`prio: (e) => \`s:{event:${e}}:prio\``)은 인자를 쓰므로 막는 결함은 아니다. 정리 목록 후보: "seatKeys 대조를 회차·계정·색인이 다른 입력 두 벌로 부른다(W8-L2-ci-loadtest 검증 M4, 리뷰 RVL-2)".
+
+### 함께 본 것
+
+- **운영과 사본 직접 견줌.** 운영 `services/purchase-svc/src/modules/inventory/adapters/redis-seat-store.ts` 189행 `seatKeys`와 사본 `seatKeys`에서 '이름 => 키 글'을 뽑아 정렬해 `diff`로 견줬다. 둘 다 23개이고 글자까지 차이가 없다.
+- **코드가 구현 커밋 그대로인가.** 틀린 구현을 모두 되돌린 뒤 `git status --short`가 비어 있고 `git diff --stat db6dc130 -- loadtest services`도 비어 있다.
+- **마지막 전체 시험.** `node --test "loadtest/test/*.test.mjs"` → tests 468, pass 468, fail 0.
 
 ## 담당 표
 
