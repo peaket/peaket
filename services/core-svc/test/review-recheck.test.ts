@@ -158,6 +158,32 @@ describe('I-T83 다시 정리 예약', () => {
     for (const bad of ['어제', '', '2026-13-45T99:00:00Z']) expect(() => withdrawalRecheckAt(bad, NOW), bad).toThrow(Error);
   });
 
+  test('I-T83 ④ 예약 시각은 날짜만 있거나 시간대가 없는 탈퇴 시각을 받지 않는다', () => {
+    // 검증 살아남음 M49: 계약 withdrawnAt은 시간대를 단 date-time이다(asyncapi AccountWithdrawn). 시간대 없는 글을 Date.parse가 지역 시각으로 읽으면
+    // 예약이 서버 시간대만큼 어긋나고, 날짜만 있는 글은 그날 00:00Z로 읽힌다. 직접 부르는 길(내부·시험)에서도 받지 않는다
+    const NOW = at('2026-11-16T03:03:00.000Z');
+    for (const bad of ['2026-11-16', '2026-11-16T03:00:00', '2026-11-16T03:00:00.000', '2026-11-16T03:00']) expect(() => withdrawalRecheckAt(bad, NOW), bad).toThrow(Error);
+    // 대조군: 시간대를 단 같은 순간은 받는다
+    expect(withdrawalRecheckAt('2026-11-16T03:00:00Z', NOW)).toBe(at('2026-11-16T03:16:00.000Z'));
+    expect(withdrawalRecheckAt('2026-11-16T12:00:00+09:00', NOW)).toBe(at('2026-11-16T03:16:00.000Z'));
+  });
+
+  test('I-T83 ④ 같은 계정 예약을 고쳐도 만든 시각은 처음 값이다', async () => {
+    // 검증 살아남음 M58: 정본 docs/data.md §2 '다시 정리 예약'(같은 계정이 있으면 늦은 due_at을 남긴다)·0026(core_app은 due_at만 고친다).
+    // 메모리 대역도 같은 규칙을 지켜야 단위 시험이 정본과 어긋난 대역을 믿지 않는다(실제 저장소 쪽은 통합 '같은 계정 예약은 늦은 쪽을 남긴다'가 본다)
+    const { clock, store, reviews } = setup('2026-11-16T03:03:00.000Z');
+    await reviews.purgeWithdrawn({ accountId: A, withdrawnAt: '2026-11-16T03:00:00.000Z' });
+    expect(store.rechecks.get(A)).toEqual({ dueAtMs: at('2026-11-16T03:16:00.000Z'), createdAtMs: at('2026-11-16T03:03:00.000Z') });
+    // 7분 뒤 더 늦은 예약(03:21)으로 고친다: 예약 시각만 바뀐다
+    clock.advance(7 * MIN);
+    await reviews.purgeWithdrawn({ accountId: A, withdrawnAt: '2026-11-16T03:05:00.000Z' });
+    expect(store.rechecks.get(A)).toEqual({ dueAtMs: at('2026-11-16T03:21:00.000Z'), createdAtMs: at('2026-11-16T03:03:00.000Z') });
+    // 더 이른 예약이 와도 둘 다 그대로
+    clock.advance(4 * MIN);
+    await reviews.purgeWithdrawn({ accountId: A, withdrawnAt: '2026-11-16T02:50:00.000Z' });
+    expect(store.rechecks.get(A)).toEqual({ dueAtMs: at('2026-11-16T03:21:00.000Z'), createdAtMs: at('2026-11-16T03:03:00.000Z') });
+  });
+
   test('I-T83 ④ 탈퇴 사건 처리는 파기와 탈퇴 시각 + 16분 예약을 함께 쓴다', async () => {
     const { clock, store, deliver } = setup('2026-11-16T03:03:00.000Z');
     const a1 = review(A, at('2026-11-15T10:00:00.000Z'));
