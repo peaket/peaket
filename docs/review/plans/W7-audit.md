@@ -167,7 +167,7 @@ export function accessLogRetainUntil(createdAt: Date): Date;
 
 **무엇이 빠졌나**: 개인정보의 안전성 확보조치 기준의 접속기록 항목은 계정·접속일시·접속지 정보·처리한 정보주체 정보·수행업무다(고시 제2조 제3호, docs/security/internal-management-plan.md §4.5). 명단 보기·내려받기 접속기록은 접속지만 없다. 저장소에 이미 있는 같은 꼴은 관리 계정 접속기록 `admin_data_access.source_ip`('접속지 정보', data.md §2 ⑦)와 identity-svc 관리 계정 로그인의 클라이언트 IP 읽기(`clientIpOf`: 입구가 하나로 다시 쓴 `x-forwarded-for`가 IP 모양이면 그것, 아니면 연결 상대 주소, docs/infra.md §3 입구 규칙 2)다. 둘을 그대로 따른다. 기기 식별값은 `admin_data_access`에도 없어 남기지 않는다. 보존은 그 행의 2년, 가림은 '응답·화면에 싣지 않음, 로그는 플랫폼의 원문 식별값 가림 키 `clientIp`'다(정본에 먼저 씀: settlement.md §9 '접속지'·J-T26 ⑤, data.md §2 `source_ip`, data-classification '관리자 시스템 접속기록' 행, internal-management-plan §4.5, asvs/settlement 16.2.1).
 
-**마이그레이션**: 새 번호를 쓰지 않는다. 아직 develop에 없는 **0021**(`0021_attendee_access_audit_list.sql`)에 더한다: `ALTER TABLE "attendee_export_audit" ADD COLUMN "source_ip" inet;`와 `ADD CONSTRAINT "attendee_export_audit_source_ip_check" CHECK ("source_ip" IS NOT NULL) NOT VALID;`(0019로 이미 들어간 행은 그대로, 새 행은 반드시 접속지가 있다). 권한은 바꾸지 않는다. Drizzle 스키마 `attendeeExportAudit`에 `sourceIp: inet('source_ip')`를 더하고 0021 스냅숏을 다시 만든다(`NOT VALID`는 손으로 쓴 SQL에만 있다).
+**마이그레이션**(웨이브 끝 리뷰 K1로 바뀜: `source_ip` CHECK는 0021에서 빼고 다음 출시로 미룬다, §7): 새 번호를 쓰지 않는다. 아직 develop에 없는 **0021**(`0021_attendee_access_audit_list.sql`)에 더한다: `ALTER TABLE "attendee_export_audit" ADD COLUMN "source_ip" inet;`와 `ADD CONSTRAINT "attendee_export_audit_source_ip_check" CHECK ("source_ip" IS NOT NULL) NOT VALID;`(0019로 이미 들어간 행은 그대로, 새 행은 반드시 접속지가 있다). 권한은 바꾸지 않는다. Drizzle 스키마 `attendeeExportAudit`에 `sourceIp: inet('source_ip')`를 더하고 0021 스냅숏을 다시 만든다(`NOT VALID`는 손으로 쓴 SQL에만 있다).
 
 **손댈 파일**
 
@@ -396,7 +396,12 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 1. **탈퇴한 계정의 후기를 익명화해 남길지, 파기할지.** 정본끼리 어긋난다. R-617(2026-11-15)이 쓴 docs/features/identity.md §8 '후기 익명화'는 "본문·평점은 법정 보존·분쟁 대응을 위해 남기고 계정·주문 참조만 끊는다"이다. 그런데 docs/data.md §6 '관람 후기' 행은 "작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비운다"이고, docs/security/data-classification.md '관람 후기' 행("후기 삭제 또는 회원 탈퇴 시 파기")과 docs/planning/03-policies-glossary.md 권한표 '관람 후기' 행("탈퇴 때 삭제"), ADR-0086 ⑧(소프트 삭제 때 비우는 칸)도 같은 쪽이다. 후기 본문을 남길 법정 근거는 정본에 없다(법정 차단 조치 증적 3년은 `takedown_action`이 따로 둔다).
    - 추천: (가) 파기 쪽으로 맞춘다. 정본 넷이 같은 쪽이고 개인정보를 덜 남긴다. 하려면 `review.rating` NOT NULL 풀기(마이그레이션), `review_image` 파일·행 지우기, `content_fingerprint` 비우기, 공개 목록·요약에서 빠지는 것을 함께 정해야 한다. (나) R-617대로 두고 data.md·data-classification·planning/03을 고친다.
    - 이번 묶음: 결정 전까지 배선(사건 → 기존 `anonymizeAccount`)만 한다. 어느 쪽이든 '계정·주문 참조를 끊는다'는 같으므로 시험 ①⑪의 그 단언은 남고, 본문·별점·작성자 표시 단언만 바뀐다. identity.md에 결정 대기를 한 줄 적었다.
+   - 웨이브 끝 보안 리뷰 S2(=대조 리뷰 R1)의 근거 보탬: 남는 칸은 본문·별점만이 아니라 사진 키·내용 지문(`content_fingerprint`)도 있다. 후기 본문에는 작성자나 다른 사람의 개인정보가 섞여 들 수 있다. 결정 전까지 asvs/catalog-review.md v5.0.0-14.2.7 행을 '부분 적용'으로 낮추고 빠진 몫을 적었다(§7). (가)로 정하면 0022의 `review` 칸 권한(별점을 비우려면 `rating` NOT NULL 풀기)과 `review_image` 지우기 권한도 함께 바뀐다.
 2. **파트너 명단 접속기록을 어디에 둘지.** 정본의 관리 계정 접속기록 저장소는 ops-svc 감사 저장소의 `admin_data_access`(해시 체인, 접속지 정보 `source_ip`, FR-064 매일 이상 점검이 읽는 곳)인데, 구현은 core DB `attendee_export_audit`이다(R-606). 지금은 FR-064 점검(같은 명단 24시간 3회, 1만 건 이상, 근무 일정 밖 조회)이 파트너 명단 기록을 읽지 못한다. 이번 묶음은 core 표를 넓혀 쓰고 data.md에 '옮기는 일은 정해지지 않았다'고 적었다. 접속지 칸(`source_ip`)은 리뷰 R2 보충으로 core 표에도 더했으므로, 남는 차이는 해시 체인과 FR-064 점검이 읽는 곳이다. 옮길지, 옮긴다면 core가 사건으로 보낼지 ops가 읽을지는 소유자 결정이다.
+   - 웨이브 끝 보안 리뷰 S1의 근거 보탬: 고시 제8조는 접속기록의 월 1회 이상 점검과 위·변조·도난·분실 방지 조치를 요구한다. core 표는 앱 역할 `core_partner`만 고치거나 지우지 못하고, 표 주인(마이그레이션 역할)과 DB 관리자는 고칠 수 있으며 고친 것을 찾아낼 해시 체인이 없다. data-classification '관리자 시스템 접속기록' 행의 보호 방법(변조를 찾아내는 불변 감사 저장소)과 다르다. 결정 전까지 asvs/settlement.md v5.0.0-16.4.2·16.2.1 행을 '부분 적용'으로 낮추고 빠진 몫을 적었다(§7). 고를 길: (가) ops 감사 저장소로 사건을 보내 옮긴다 (나) core 표를 두고 해시 체인·월 점검 읽기를 core에 붙인다 (다) 위험 수용과 그 기한.
+3. **탈퇴 직후 15분 창(웨이브 끝 동시 실행 리뷰 K3).** 탈퇴 사건을 받자마자 익명화하므로, 탈퇴 전에 받은 액세스 토큰(최대 15분)으로 사건 처리 뒤에 쓴 후기는 계정·주문 참조를 가진 채 남는다(그 계정의 사건은 다시 오지 않는다). 지금 정본은 이것을 docs/features/identity.md §8 '남는 한계'로 두고 HOT-400(끝난 세션 토큰 막기)을 기다린다. 같은 사건을 읽는 queue-svc는 바로 이 15분 때문에 `withdrawnAt + 15분` 뒤에 처리한다(docs/streaming.md §2.6, ADR-0214 결정 7).
+   - 고를 길: (가) core도 `withdrawnAt + 15분` 뒤에 한 번 더 익명화한다(사건 처리는 지금처럼 바로 하고 15분 뒤 같은 계정을 다시 부른다. 익명화는 다시 해도 결과가 같다) (나) HOT-400 전까지 지금 한계를 받아들인다. 추천은 (가)다(같은 저장소의 queue-svc가 이미 같은 까닭으로 늦춘다).
+   - 확인할 것: 후기 쓰기 경로가 탈퇴한 계정의 세션을 따로 막는지(ticket-svc 후기 자격 확인이 탈퇴 계정을 거절하면 이 창은 없다).
 
 ### 6. 막힌 것·확인할 것
 
@@ -404,6 +409,85 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 - (보충 2026-11-16) 실패 확인 절 '확인할 것 1'(운영 역할의 후기·보류 표 쓰기 권한)은 §4 보충(0022, 시험 ⑬~⑯)으로 받았다. 기존 후기 쓰기 경로도 같은 결함이라 이번 범위에 넣었다. '확인할 것 2'(0021 CHECK 글)는 §2의 글을 그대로 쓴다. 같은 뜻의 다른 글로 쓰려면 구현 담당이 '시험 이의'로 적는다.
 - 장부: `node tools/ci/ledger.mjs --batch BAT-610`은 이 커밋 뒤 J-T26 ④⑤⑥을 'ID만'으로 보인다(기존 파트너 화면 시험 이름이 세부 번호 없이 `J-T26`을 단다). 이 묶음의 시험이 들어오면 채워진다. 기록 담당이 장부를 다시 쓸 때 확인한다.
 - 정본 점검: `python -I -X utf8 tools/doc-check/check_all.py` 오류 0, `pnpm --dir packages/contracts gen:check`(asyncapi는 설명만 바꿔 생성물이 같다).
+
+### 7. 웨이브 끝 리뷰 반영(2026-11-16)
+
+웨이브 끝 관점 리뷰 셋(`docs/review/measurements/W7-lane3-review-correctness.md`·`-concurrency.md`·`-security.md`)과 이 파일 `## 검증` 절 가운데 감독이 이번에 고치기로 정한 것이다: C1, C4, K1, K6, K2, S1·S2(정본 상태 고침만), 검증 살아남음 M28·M33(시험 몫). R1=S2, S1(OPEN 후보 2), K3은 §5 OPEN 후보에 근거만 보탰다. 차례는 리뷰 반영이다: 시험 담당이 아래 시험을 먼저 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`) → 구현 담당(`Fix-By: impl`). 새 마이그레이션 번호는 쓰지 않는다(이번 웨이브 core 번호는 0021·0022뿐).
+
+**정본(이 커밋에 씀, 추천 적용 2026-11-16)**
+
+| 지적 | 정본 |
+| --- | --- |
+| C1 | docs/features/settlement.md §9 '원천 오류의 응답 계약', docs/api/openapi.yaml `listPartnerEventAttendees`·`createPartnerEventAttendeeExport`의 `'503'`(ServiceUnavailable). 이 바뀜으로 api-client 생성물이 달라진다(아래 '손댈 파일'의 생성물 줄, 구현 담당 몫). contracts 생성물은 같다 |
+| C4 | docs/api/guidelines.md §3(빈 문자열 `nextCursor`는 계약 위반), settlement.md §9 '원천 페이지' |
+| K1 | docs/data.md §2 `source_ip`(0021은 칸만, NULL 허용. CHECK는 다음 출시) |
+| K6 | docs/data.md §2 `DOWNLOAD`·`LIST` 모양 항목(0021의 CHECK 둘은 `NOT VALID`, `VALIDATE`는 다음 출시의 정비 시간) |
+| K2 | docs/data.md §5.1 '탈퇴 익명화' 행·§2 '후기 표의 DB 권한'(0022가 `review (account_id)` 색인), docs/streaming.md §2.6 'core-svc 소비자'(따로 둔 풀 최대 2, 파티션 1·키 2) |
+| S1 | docs/security/asvs/settlement.md v5.0.0-16.2.1·16.4.2 → '부분 적용'과 빠진 몫 |
+| S2 | docs/security/asvs/catalog-review.md v5.0.0-14.2.7 → '부분 적용'과 빠진 몫 |
+
+**손댈 파일**
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | C1: `services/core-svc/src/modules/export/domain/export.ts`(`ExportProblem`), `…/export/application/attendee-exports.ts`(`guard`, 되풀이 503), `…/export/export.module.ts`(`UnavailableAttendeeSource`), `…/export/adapters/http-attendee-source.ts`(모양 틀림을 503으로). C4: `http-attendee-source.ts`. K2: `services/core-svc/src/consumers/start.ts`, `services/core-svc/src/main.ts`(소비자 전용 풀), `…/review/adapters/db/schema.ts`(색인) |
+| 생성물(구현 담당) | C1: api-client 생성물 다시 만들기 — `packages/api-client` 폴더에서 `node scripts/generate.mjs`(또는 `pnpm --filter @peaket/api-client gen`)로 `src/gen/endpoints/partner/partner.ts`를 다시 만들고 `node scripts/check-generated.mjs`로 확인한다(503 응답 타입만 늘어난다. 계획 커밋은 코드 폴더를 바꾸지 않아 이 커밋 뒤 api-client `gen:check`는 구현 커밋 전까지 '다르다'로 나온다). contracts `gen:check`는 지금도 같다 |
+| 마이그레이션 | K1·K6: `services/core-svc/migrations/0021_attendee_access_audit_list.sql`(`source_ip` CHECK 줄을 뺀다, CHECK 둘 끝에 `NOT VALID`), `migrations/meta/0021_snapshot.json`(같은 뜻으로). K2: `migrations/0022_review_role_grants.sql` 끝에 `CREATE INDEX "review_account_idx" ON "review" USING btree ("account_id");`(운영 전이라 트랜잭션 안. purchase 0011과 같은 까닭), `migrations/meta/0022_snapshot.json`(새로, 색인 때문에 스키마가 바뀐다), `_journal.json` 그대로 |
+| 시험(시험 담당이 고침) | `test/export-audit.test.ts`(0021 원문 시험), `test-int/export-audit.int.test.ts`(R2 통합 시험), `test/export-attendee-source.test.ts`·`test/http-attendee-source.test.ts`(C1·C4), `test/export-paging-limit.test.ts`(C1 되풀이 503 단언), `test/export.test.ts`(C1 HTTP), `test/review-grants.test.ts`(0022 원문), `test-int/review-withdrawn.int.test.ts`(K2 색인), `test/core-consumers.test.ts`(K2·M28·M33, 원문 대조 ⑩ 고침) |
+| 다음 출시 후속(이번에 하지 않음) | 새 마이그레이션 하나: `ADD CONSTRAINT "attendee_export_audit_source_ip_check" CHECK ("source_ip" IS NOT NULL) NOT VALID`, 정비 시간에 `VALIDATE CONSTRAINT` 셋(`action`·모양·`source_ip`). 번호는 그 웨이브가 정한다. 기록 담당이 후속 목록에 올린다 |
+
+**공개 인터페이스(바뀌는 곳만)**
+
+```ts
+// services/core-svc/src/modules/export/domain/export.ts
+export class ExportProblem extends Error {
+  constructor(type: string, status: number, title: string, o?: { detail?: string; retryAfterSeconds?: number });
+  readonly detail?: string;
+  readonly retryAfterSeconds?: number;
+}
+/** 원천을 쓸 수 없음: 503 dependency-unavailable, 제목은 오류 목록 값, 사정은 detail, Retry-After 30초 [가정] */
+export function attendeeSourceUnavailable(detail: string): ExportProblem;
+// 쓰는 곳과 detail: 같은 커서 되풀이 '예매자 명단 원천이 같은 페이지를 되풀이했습니다', 조립 없음 '예매자 명단 원천을 쓸 수 없습니다',
+// 응답 모양 틀림(빈 nextCursor 포함) '예매자 명단 원천의 응답 모양이 틀렸습니다'. guard는 detail·retryAfterSeconds를 ProblemError로 넘긴다.
+// 원천의 2xx 아닌 답·시간 초과는 이번에 바꾸지 않는다(K7 후속, 지금은 500)
+
+// services/core-svc/src/modules/export/adapters/http-attendee-source.ts
+// 응답 nextCursor: z.string().min(1).nullable() — ''는 attendeeSourceUnavailable(…모양…)
+
+// services/core-svc/src/consumers/start.ts
+// CoreConsumersOptions.database는 소비자 전용 풀이다. runKeyedConsumer에 maxKeys: 2, partitionsConcurrently: 1을 넘긴다
+// services/core-svc/src/main.ts
+// const consumerDatabase = createDatabase({ url, applicationName: 'core-svc-consumer', max: 2 }); await assertDatabaseRole(consumerDatabase, 'core_app');
+// startCoreConsumers({ …, database: consumerDatabase }). SIGTERM: await consumers?.stop() → service.close() → 연결 닫기(consumerDatabase 포함)
+```
+
+**시험 목록**
+
+| 지적 | 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- | --- |
+| C1 | `A2-17 C1 J-T26 ④ 같은 커서를 되풀이하면 503 dependency-unavailable의 목록 제목·detail·Retry-After 30을 싣는다` | 단위 + HTTP | 단위: `ProblemError` `status` 503, `title` '의존 서비스를 잠시 쓸 수 없습니다', `detail` '예매자 명단 원천이 같은 페이지를 되풀이했습니다', `retryAfterSeconds` 30, 이력·접속기록 0. HTTP `POST …/attendee-exports`: 503, 머리 `retry-after: 30`, 본문 `type` `…/dependency-unavailable`·같은 제목·`detail`, `content-disposition` 없음 | 기존 'A2-17 J-T26 ④ 원천이 같은 커서를 되풀이하면 503이고 …' 시험에 단언을 더한다 |
+| C1 | `A2-17 C1 원천이 조립되지 않았을 때도 같은 503 계약이다` | 단위 | 운영 조립(`purchaseHttp` 없음)의 원천이 던진 오류가 `guard`를 거쳐 503·목록 제목·`detail` '예매자 명단 원천을 쓸 수 없습니다'·`retryAfterSeconds` 30 | `export-attendee-source.test.ts`의 기존 503 시험 고침 |
+| C1·C4 | `A2-17 C4 HttpAttendeeSource는 빈 문자열 nextCursor와 틀린 응답 모양을 503으로 거절한다` | 단위 | `nextCursor: ''`, `nextCursor` 없음, `nextCursor: 5`, `items: {}` 각각 `ExportProblem`(503, `detail` '예매자 명단 원천의 응답 모양이 틀렸습니다'). `nextCursor: 'a'`(한 글자)는 받는다(경계 반대쪽) | 기존 '응답 모양이 틀리면 실패한다' 시험의 단언을 503으로 좁힌다 |
+| C1 | `A2-17 C1 GET …/attendees는 원천을 쓸 수 없으면 503과 Retry-After 30이고 접속기록이 없다` | HTTP | 원천이 `attendeeSourceUnavailable`을 던지면 503·`retry-after: 30`, `views` 0 | |
+| K1·K6 | `A2-19 0021은 action·filter를 더하고 LIST·DOWNLOAD 모양을 CHECK로 강제하며 UPDATE·DELETE를 주지 않는다`(고침) | 단위(SQL 원문) | R2 보충 때 더한 `CHECK ("source_ip" IS NOT NULL) NOT VALID` 단언을 **반대로** 바꾼다: `source_ip` 칸 추가(`inet`)는 있고, `source_ip`에 대한 CHECK·`SET NOT NULL`·`VALIDATE`가 0021에 없다. (K6) `action`·모양 CHECK 둘은 끝에 `NOT VALID`가 붙고, `VALIDATE CONSTRAINT`가 없다 | **K1·K6 때문에 바뀌는 0021 원문 시험** |
+| K1 | `A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다`(고침, 이름을 `A2-19 R2 K1 0021 뒤 접속지 없는 새 행도 DB는 받고(이전 판 호환), IP 모양이 아닌 값은 inet이 거절한다`로 바꾼다) | 통합(core PostgreSQL) | `source_ip` 없이 넣기는 **성공**(지금 단언 23514를 뒤집는다), `'abc'` 22P02, `'2001:db8::1'` 그대로 읽힘. `recordView`·`recordExport`로 넣은 행은 `source_ip`가 넘긴 IP(앱이 강제) | **K1 때문에 바뀌는 R2 통합 시험** |
+| K1 | `A2-19 K1 0021 뒤에도 이전 판(N-1) 코드의 내려받기 기록 모양이 들어간다` | 통합(core PostgreSQL) | `core_partner` 로그인으로 853758eb 판이 쓰던 문장(`action`·`filter`·`source_ip` 없이 `id, export_id, promoter_id, event_id, actor_account_id, actor_display_name, actor_role, reason, format, count, created_at, retain_until`)을 넣으면 성공하고 `action` 'DOWNLOAD'·`filter` `{}`·`source_ip` NULL로 읽힌다 | docs/devops.md §7.3 적용 시험 ③의 작은 꼴 |
+| K1·K6 | `A2-19 K6 0019 행이 있는 DB에 0021·0022를 적용해도 실패하지 않고 옛 행은 그대로다` | 통합(core PostgreSQL) | 0020까지 적용 → 0019 모양 행 하나 → 0021·0022 적용 성공. 옛 행 `action` 'DOWNLOAD'·`filter` `{}`·`source_ip` NULL. `pg_constraint.convalidated`가 `action`·모양 CHECK 둘 모두 false(NOT VALID) | 정확성 리뷰 C3과 같은 시험 |
+| K2 | `COV2-06 K2 0022는 review(account_id) 색인을 만든다` | 단위(SQL 원문) | `CREATE INDEX "review_account_idx" ON "review" USING btree ("account_id")`가 있다. ⑬의 기존 단언(GRANT·REVOKE 없음)은 그대로 | `review-grants.test.ts` |
+| K2 | `COV2-06 K2 탈퇴 익명화는 review_account_idx로 찾는다` | 통합(core PostgreSQL) | `SET enable_seqscan = off` 뒤 익명화 문장의 `EXPLAIN (FORMAT JSON)`이 `review_account_idx`를 쓴다. 색인이 없으면(이름이 다르면) 실패 | docs/devops.md §7.3 실행 계획 검사의 작은 꼴 |
+| K2 | `COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다` | 단위(가짜 `runKeyedConsumer`) + 원문 대조 | `startCoreConsumers`가 `runKeyedConsumer`에 `maxKeys: 2`·`partitionsConcurrently: 1`과 받은 풀로 만든 보류 저장소를 넘긴다(값은 정본 숫자로 적는다). `main.ts` 글: 소비자 풀이 `max: 2`로 만들어지고 `assertDatabaseRole(그 풀, 'core_app')`을 거치며 `startCoreConsumers({ … database: 그 풀 })`에 넘겨지고, API의 `database`는 넘겨지지 않는다 | 기존 ⑩(R5에서 `database`가 core_app인지 본 단언)을 이 풀 이름으로 고친다 |
+| M28 | `COV2-06 ⑰ main.ts의 소비자 시작은 조건 없이 돈다` | 단위(원문 대조) + 통합(선택) | 원문: `consumers = startCoreConsumers({`가 `kafka.enabled`(또는 같은 뜻의 설정) 분기 안에서 앞에 `&&`·`?`·`if (false`·주석 없이 대입되는 문장이다. 통합(선택, 검증 담당 제안): `PEAKET_ENV=ci`·`PEAKET_KAFKA_BROKERS=127.0.0.1:1`로 빌드한 `dist/main.js`를 띄우면 'Kafka 소비자를 켜지 못해' 한 줄과 종료 코드 1로 끝난다(닿지 않는 브로커에서 `connect()`가 거부하는지는 동시 실행 리뷰 K4의 확인 필요라, 거부하지 않으면 이 통합 시험은 시험 이의로 넘긴다) | 검증 살아남음 M28 |
+| M33 | `COV2-06 ⑱ SIGTERM은 소비자 stop()이 끝난 뒤에 서비스와 연결을 닫는다` | 단위(원문 대조) | SIGTERM 처리 글에서 `await consumers?.stop(`(또는 그 약속을 `.then`으로 기다린 뒤)가 `service.close(`보다 앞이고, 연결 닫기(`database.close`·소비자 풀 닫기)가 그 뒤다. `void consumers?.stop(`이나 기다리지 않는 꼴이면 실패 | 검증 살아남음 M33 |
+
+**틀린 구현 표본 후보(웨이브 끝 반영)**
+1. (C1) 되풀이 503의 제목을 지금 문구('예매자 명단 원천이 같은 페이지를 되풀이했습니다')로 둔다, 또는 `retryAfterSeconds`를 빠뜨린다.
+2. (C4) 응답 검사를 `z.string().nullable()`로 되돌린다.
+3. (K1) 0021에 `source_ip` CHECK를 남긴다(이전 판 호환 시험이 잡는다).
+4. (K6) CHECK 둘에서 `NOT VALID`를 뺀다.
+5. (K2) `maxKeys`를 넘기지 않거나 소비자에 API의 `database`를 넘긴다.
+6. (M33) SIGTERM에서 `await`를 `void`로 바꾼다.
+
+**이번에 하지 않는 것(후속·OPEN)**: K3(§5 OPEN 후보 3), K4(Kafka 장애 때 API 새 파드가 못 뜨는 문제), K5·S7(값 없는 보류 행을 닫는 절차와 보류 기한·경보), K7(긴 내려받기 전체 한도·취소, 원천 2xx 아닌 답의 503), K8(purchase 합계 쿼리), K9, C2·R4(보류 감싸기 해독기, BAS-030 때), S3(접속지 대체 지표), S4(커서 길이 상한), S5(토큰 길이 비교), S6(`restored_at` 한 번 쓰기, 익명화 역할 분리), S8(CSV 널 문자), S9(원천에 파트너 ID). 기록 담당이 구간 끝 정리 목록에 올린다.
 
 ## 실패 확인
 
