@@ -99,6 +99,7 @@ function defaultTrailers(s) {
     `Role: ${s.role}`,
     ...(s.fixBy ? [`Fix-By: ${s.fixBy}`] : []),
     ...(s.findings ?? []).map((f) => `Finding: ${f}`),
+    ...(s.kind ? [`Batch-Kind: ${s.kind}`] : []),
     `Agent-Session: ${s.session}`,
     'Agent-Model: fixture-model',
   ];
@@ -1046,4 +1047,192 @@ test('RC-51 ③ 같은 지적에서 구현 쪽이 첫 시험 쪽보다 앞서면
   only(one.r, 'RC-51 impl(RV-01) → test(RV-01) → impl(RV-01)', one.sha.i1, 'RV-01');
   const two = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02'])], [...BEFORE_RF, 't1', 'i2', 'i1', 't2', 'record']));
   only(two.r, 'RC-51 RV-02만 구현 쪽이 앞섬', two.sha.i2, 'RV-02');
+});
+
+// ---- 시험만 묶음(계획 docs/review/plans/W7-L1-roles-testonly.md, 2026-11-16) ----
+
+// 시험만 묶음 앞에 이미 있는 제품 코드·설정(범위 밖). 시험 쪽 커밋이 이것을 고치거나 지우는 사례에 쓴다
+const PRE_FILES = {
+  'services/a/src/x.ts': 'export const x = () => 1;\n',
+  'services/a/test/x.test.ts': '처음 시험\n',
+  'services/a/vitest.config.mjs': 'export default {};\n',
+  'package.json': '{}\n',
+  'pnpm-lock.yaml': 'lockfileVersion: 9\n',
+  'deploy/a.yaml': 'a: 1\n',
+  'loadtest/a.mjs': '\n',
+  'specs/a.tla': '\n',
+  'tools/ci/x.mjs': '\n',
+  'services/contest/a.ts': '\n',
+  'src/testing.ts': '\n',
+};
+let pre950;
+function preStart() {
+  if (pre950) return pre950;
+  checkout(base);
+  pre950 = commit(dir, PRE_FILES, '시험만 묶음 앞의 제품 코드');
+  current = pre950;
+  return pre950;
+}
+
+const rows950 = () => ['plan', 'test', 'review', 'verify'].map((r) => row(r, S[r]));
+const plan950 = (rows = rows950()) => codePlan('BAT-950', { rows });
+
+// 좋은 시험만 묶음 BAT-950(계획 4): plan(Batch-Kind: test-only) → test(시험 파일 고침) → review → verify → record
+function bat950(o = {}) {
+  const id = 'BAT-950';
+  const p = o.prefix ?? '';
+  const planPath = o.planPath === undefined ? `docs/review/plans/${id}.md` : o.planPath;
+  return [
+    spec(`${p}plan`, 'plan', id, S.plan, planPath ? { [planPath]: o.plan ?? plan950() } : {}, o.kind === null ? {} : { kind: o.kind ?? 'test-only' }),
+    spec(`${p}test`, 'test', id, S.test, { 'services/a/test/x.test.ts': '고친 시험\n', ...o.testFiles }),
+    spec(`${p}review`, 'review', id, S.review, { [`docs/review/notes/${id}-review.md`]: '높음 0\n' }),
+    spec(`${p}verify`, 'verify', id, S.verify, { [`docs/review/notes/${id}-verify.md`]: '다 잡았다\n' }),
+    spec(`${p}record`, 'record', id, S.record, { 'docs/PROGRESS.md': `${id} 끝\n` }),
+  ];
+}
+const onPre = (seq) => check(seq, { start: preStart(), base: preStart() });
+const rf950 = (label, files = { 'services/a/test/x.test.ts': `시험 ${label}\n` }) => spec(label, 'review-fix', 'BAT-950', S.test, files, { fixBy: 'test', findings: ['RV-950'] });
+const extra950 = (label, role, session, files, more = {}) => spec(label, role, 'BAT-950', session, files, more);
+
+test('RC-52 ④ 시험만 묶음은 구현 없이 통과한다', () => {
+  const one = onPre(bat950());
+  expectPass(one.r, 'RC-52 BAT-950 그대로', 1, 5);
+  assert.equal(batchLine(one.r, 'BAT-950'), summary('BAT-950', '시험만', 5, [1, 1, 0, 1, 0, 1, 1, 0]), one.r.all);
+  const two = onPre(pick([...bat950(), rf950('rf')], ['plan', 'test', 'review', 'rf', 'verify', 'record']));
+  expectPass(two.r, 'RC-52 review 뒤 Fix-By: test 리뷰 반영', 1, 6);
+  assert.equal(batchLine(two.r, 'BAT-950'), summary('BAT-950', '시험만', 6, [1, 1, 0, 1, 1, 1, 1, 0]), two.r.all);
+  const three = onPre(addFiles(bat950(), 'test', { 'docs/PROGRESS.md': '시험을 고쳤다\n' }));
+  expectPass(three.r, 'RC-52 test 커밋이 시험 파일과 docs/PROGRESS.md를 함께 고침', 1, 5);
+  for (const p of ['services/a/src/a.spec.tsx', 'services/a/x/test-int/a.ts', 'services/a/x/test-sim/a.ts', 'services/a/x/__tests__/a.ts', 'apps/web/e2e/a.ts', 'loadtest/test/a.mjs', 'services/q/py/test_a.py']) {
+    const { r } = onPre(bat950({ testFiles: { [p]: '시험\n' } }));
+    expectPass(r, `RC-52 시험 파일 꼴 ${p}`, 1, 5);
+    assert.equal(batchLine(r, 'BAT-950'), summary('BAT-950', '시험만', 5, [1, 1, 0, 1, 0, 1, 1, 0]), `RC-52 ${p}\n${r.all}`);
+  }
+  // 첫 plan에는 없고 둘째 plan 커밋에만 Batch-Kind
+  const plan2 = extra950('plan2', 'plan', S.plan, { 'docs/review/plans/BAT-950.md': `${plan950()}\n시험만 묶음으로 밝힌다.\n` }, { kind: 'test-only' });
+  const four = onPre(pick([...bat950({ kind: null }), plan2], ['plan', 'test', 'plan2', 'review', 'verify', 'record']));
+  expectPass(four.r, 'RC-52 둘째 plan 커밋에만 Batch-Kind', 1, 6);
+  assert.equal(batchLine(four.r, 'BAT-950'), summary('BAT-950', '시험만', 6, [2, 1, 0, 1, 0, 1, 1, 0]), four.r.all);
+});
+
+test('RC-53 ④ 밝히지 않은 구현 없는 묶음은 여전히 실패한다', () => {
+  const { r } = onPre(bat950({ kind: null }));
+  expectFail(r, 'RC-53', '구성', 'BAT-950', null, ['impl']);
+});
+
+test('RC-54 ⑥ 시험만 묶음의 시험 쪽 커밋은 시험 파일과 문서 밖을 못 바꾼다', () => {
+  const WHY = '시험 파일·문서 밖 경로';
+  for (const p of ['services/a/src/x.ts', 'services/a/vitest.config.mjs', 'package.json', 'pnpm-lock.yaml', 'deploy/a.yaml', 'loadtest/a.mjs', 'specs/a.tla']) {
+    // 더함은 그 파일이 없는 기준에서, 고침·지움은 그 파일이 있는 기준(preStart)에서
+    const add = check(bat950({ testFiles: { [p]: '더함\n' } }));
+    expectFail(add.r, `RC-54 ${p} 더함`, '코드 경로', 'BAT-950', add.sha.test, [WHY, p]);
+    const mod = onPre(bat950({ testFiles: { [p]: '고침\n' } }));
+    expectFail(mod.r, `RC-54 ${p} 고침`, '코드 경로', 'BAT-950', mod.sha.test, [WHY, p]);
+    const del = onPre(set(bat950(), 'test', { del: [p] }));
+    expectFail(del.r, `RC-54 ${p} 지움`, '코드 경로', 'BAT-950', del.sha.test, [WHY, p]);
+  }
+  const rf = onPre(pick([...bat950(), rf950('rf', { 'tools/ci/x.mjs': '// 시험 담당이 고침\n' })], ['plan', 'test', 'review', 'rf', 'verify', 'record']));
+  expectFail(rf.r, 'RC-54 Fix-By: test 리뷰 반영이 tools/ci/x.mjs를 고침', '코드 경로', 'BAT-950', rf.sha.rf, [WHY, 'tools/ci/x.mjs']);
+  for (const p of ['services/contest/a.ts', 'src/testing.ts']) {
+    const { r, sha } = onPre(bat950({ testFiles: { [p]: '고침\n' } }));
+    expectFail(r, `RC-54 시험 파일과 비슷한 경로 ${p}`, '코드 경로', 'BAT-950', sha.test, [WHY, p]);
+  }
+});
+
+test('RC-55 ④ 시험만 묶음의 구성', () => {
+  const g = bat950();
+  const impl = extra950('impl', 'impl', S.impl, { 'services/a/src/x.ts': 'export const x = () => 9;\n' });
+  const rfImpl = extra950('rfImpl', 'review-fix', S.impl, { 'services/a/src/x.ts': 'export const x = () => 8;\n' }, { fixBy: 'impl', findings: ['RV-950'] });
+  const doc = extra950('doc', 'doc', S.doc, { 'notes/a.md': '글\n' });
+  for (const [name, seq] of [
+    ['impl 커밋 섞임', pick([...g, impl], ['plan', 'test', 'impl', 'review', 'verify', 'record'])],
+    ['Fix-By: impl 리뷰 반영 섞임', pick([...g, rf950('rfT'), rfImpl], ['plan', 'test', 'review', 'rfT', 'rfImpl', 'verify', 'record'])],
+    ['doc 커밋 섞임', pick([...g, doc], ['plan', 'test', 'doc', 'review', 'verify', 'record'])],
+    ['review 없음', drop(g, 'review')],
+    ['verify 없음', drop(g, 'verify')],
+    ['test 없음', drop(g, 'test')],
+    ['plan 대신 test 커밋이 Batch-Kind를 닮', set(bat950({ kind: null }), 'test', { kind: 'test-only' })],
+  ]) {
+    const { r } = onPre(seq);
+    expectFail(r, `RC-55 ${name}`, '구성', 'BAT-950', null);
+  }
+});
+
+test('RC-56 ① Batch-Kind 꼬리말', () => {
+  for (const label of ['test', 'review', 'verify', 'record']) {
+    const { r, sha } = onPre(set(bat950(), label, { kind: 'test-only' }));
+    expectFail(r, `RC-56 ${label} 커밋에 Batch-Kind`, '꼬리말', 'BAT-950', sha[label]);
+  }
+  const rf = onPre(pick([...bat950(), { ...rf950('rf'), kind: 'test-only' }], ['plan', 'test', 'review', 'rf', 'verify', 'record']));
+  expectFail(rf.r, 'RC-56 review-fix 커밋에 Batch-Kind', '꼬리말', 'BAT-950', rf.sha.rf);
+  const doc = check(set(docBatch(), 'doc', { kind: 'test-only' }));
+  expectFail(doc.r, 'RC-56 doc 커밋에 Batch-Kind', '꼬리말', 'BAT-902', doc.sha.doc);
+  const value = (v) => (t) => t.map((x) => (x === 'Batch-Kind: test-only' ? `Batch-Kind: ${v}` : x));
+  for (const v of ['testonly', 'Test-only', 'test_only', 'test-only-x', '']) {
+    const { r, sha } = onPre(retrail(bat950(), 'plan', value(v)));
+    expectFail(r, `RC-56 값 '${v}'`, '꼬리말', 'BAT-950', sha.plan);
+  }
+  const two = onPre(retrail(bat950(), 'plan', (t) => [...t, 'Batch-Kind: test-only']));
+  expectFail(two.r, 'RC-56 plan 커밋에 Batch-Kind 둘', '꼬리말', 'BAT-950', two.sha.plan);
+  // 키 대소문자가 다르면 없는 것: 구현 없는 코드 묶음이라 [구성]
+  const lower = onPre(retrail(bat950(), 'plan', (t) => t.map((x) => (x === 'Batch-Kind: test-only' ? 'batch-kind: test-only' : x))));
+  expectFail(lower.r, 'RC-56 batch-kind: test-only', '구성', 'BAT-950', null, ['impl']);
+  const spaced = onPre(retrail(bat950(), 'plan', value(' test-only ')));
+  expectPass(spaced.r, "RC-56 'Batch-Kind:  test-only '", 1, 5);
+  assert.equal(batchLine(spaced.r, 'BAT-950'), summary('BAT-950', '시험만', 5, [1, 1, 0, 1, 0, 1, 1, 0]), spaced.r.all);
+});
+
+test('RC-57 ③ 시험만 묶음의 차례', () => {
+  const g = [...bat950(), rf950('rf')];
+  for (const [name, order, first] of [
+    ['test가 첫 plan 앞', ['test', 'plan', 'review', 'verify', 'record'], 'test'],
+    ['review가 첫 test 앞', ['plan', 'review', 'test', 'verify', 'record'], 'review'],
+    ['verify가 첫 review 앞', ['plan', 'test', 'verify', 'review', 'record'], 'verify'],
+    ['Fix-By: test 리뷰 반영이 첫 review·verify 앞', ['plan', 'test', 'rf', 'review', 'verify', 'record'], 'rf'],
+  ]) {
+    const { r, sha } = onPre(pick(g, order));
+    expectFail(r, `RC-57 ${name}`, '차례', 'BAT-950', sha[first]);
+  }
+  const more = [
+    ...bat950(),
+    extra950('plan2', 'plan', S.plan, { 'docs/review/plans/BAT-950.md': `${plan950()}\n둘째 계획 고침.\n` }),
+    extra950('test2', 'test', S.test, { 'services/a/test/y.test.ts': '시험 2\n' }),
+    extra950('test3', 'test', S.test, { 'services/a/test/z.test.ts': '시험 3\n' }),
+  ];
+  const { r } = onPre(pick(more, ['plan', 'test', 'plan2', 'test2', 'review', 'verify', 'test3', 'record']));
+  expectPass(r, 'RC-57 plan → test → plan → test → review → verify → test', 1, 8);
+});
+
+test('RC-58 ⑧⑨ 시험만 묶음의 계획 파일', () => {
+  const p = plan950();
+  const late = (text) => [...bat950(), extra950('planFix', 'plan', S.plan, { 'docs/review/plans/BAT-950.md': text })];
+  for (const [name, seq, name2] of [
+    ["'실패 확인' 절 없음", late(swap(p, '## 실패 확인\n\n`node --test` 시험 3개 가운데 3개가 실패했다(아직 없음).\n\n', '')), '계획 파일'],
+    ["'검증' 절이 빔", late(swap(p, '## 검증\n\n틀린 구현 1개를 모두 잡았다.\n\n', '## 검증\n\n\n')), '계획 파일'],
+    ['담당 표에 s-verify 줄 없음', late(plan950(rows950().filter((l) => !l.includes(S.verify)))), '담당 표'],
+    ['계획 파일 없음', bat950({ planPath: null }), '계획 파일'],
+  ]) {
+    const { r } = onPre(seq);
+    expectFail(r, `RC-58 ${name}`, name2, 'BAT-950', null);
+  }
+});
+
+test('RC-59 ④⑥ 시험만 묶음의 규칙은 그 묶음에만 걸린다', () => {
+  // BAT-901(코드)의 test 커밋은 services/a/src/x.ts에 빈 뼈대를 더한다
+  const q = bat950({ prefix: 'q.' });
+  const one = onPre([...q.slice(0, 2), ...codeBatch(), ...q.slice(2)]);
+  expectPass(one.r, 'RC-59 시험만 묶음과 코드 묶음이 섞임', 2, 13);
+  assert.equal(batchLine(one.r, 'BAT-950'), summary('BAT-950', '시험만', 5, [1, 1, 0, 1, 0, 1, 1, 0]), one.r.all);
+  assert.equal(batchLine(one.r, 'BAT-901'), summary('BAT-901', '코드', 8, [1, 1, 1, 1, 2, 1, 1, 0]), one.r.all);
+  const two = onPre([...q.slice(0, 2), ...drop(codeBatch(), 'impl'), ...q.slice(2)]);
+  expectFail(two.r, 'RC-59 BAT-901에 impl 없음', '구성', 'BAT-901', null);
+  assert.deepEqual(failures(two.r.out).filter((f) => f.batch === 'BAT-950'), [], `RC-59: BAT-950에 실패 줄이 있다\n${two.r.all}`);
+  // Batch-Kind가 BAT-901 plan 커밋에 달림: BAT-901이 시험만 묶음이 되고, BAT-950은 구현 없는 코드 묶음이 된다
+  const q2 = bat950({ prefix: 'q.', kind: null });
+  const three = onPre([...q2.slice(0, 2), ...set(codeBatch(), 'plan', { kind: 'test-only' }), ...q2.slice(2)]);
+  expectFail(three.r, 'RC-59 BAT-901 test 커밋의 빈 뼈대', '코드 경로', 'BAT-901', three.sha.test, ['services/a/src/x.ts']);
+  expectFail(three.r, 'RC-59 BAT-901 impl', '구성', 'BAT-901', null);
+  expectFail(three.r, 'RC-59 BAT-950 구현 없음', '구성', 'BAT-950', null);
+  assert.equal(batchLine(three.r, 'BAT-901'), summary('BAT-901', '시험만', 8, [1, 1, 1, 1, 2, 1, 1, 0]), three.r.all);
+  assert.equal(batchLine(three.r, 'BAT-950'), summary('BAT-950', '코드', 5, [1, 1, 0, 1, 0, 1, 1, 0]), three.r.all);
 });
