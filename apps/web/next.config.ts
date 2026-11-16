@@ -32,13 +32,14 @@ const config: NextConfig = {
   // (BAT-170 리뷰 R170-1). 저장소는 처리기가 실행 때 고른다: PEAKET_WEB_CACHE_REDIS_URL이 있으면 Redis, 없으면 프로세스 메모리(local·ci·demo).
   // server/start.mjs가 산출물의 required-server-files.json을 보고 두 처리기·메모리 0이 아니면 뜨지 않는다. 두 처리기 파일과 redis는 Next.js가 standalone에 추적해 싣는다
   ...cacheConfig(),
-  // 공유 캐시 처리기의 redis와 하위 패키지 다섯은 서버 묶음에 넣지 않고 실행 때 node_modules에서 불러온다(docs/frontend.md §5.18 '앱 서버 실행',
-  // BAT-170 첫 JS 예산). 묶음에 넣으면 서버 모듈 수가 늘어 모듈 번호가 길어지고, 그 번호가 브라우저 묶음에도 실려 첫 JS가 경로마다 약 0.35~0.43kB 커진다.
-  // 밖에 둔 패키지는 Next.js 추적으로 standalone node_modules에 실린다(test-int/standalone-scm.build.test.mjs가 본다)
-  serverExternalPackages: ['redis', '@redis/client', '@redis/bloom', '@redis/json', '@redis/search', '@redis/time-series'],
+  // 서버 묶음에 넣지 않고 실행 때 node_modules에서 불러오는 패키지(docs/frontend.md §5.18 '앱 서버 실행'). 까닭은 둘이다.
+  // - 공유 캐시 처리기의 redis와 하위 패키지 다섯(BAT-170 첫 JS 예산): 묶음에 넣으면 서버 모듈 수가 늘어 모듈 번호가 길어지고, 그 번호가
+  //   브라우저 묶음에도 실려 첫 JS가 경로마다 약 0.35~0.43kB 커진다. 밖에 둔 패키지는 Next.js 추적으로 standalone node_modules에 실린다
+  //   (test-int/standalone-scm.build.test.mjs가 본다)
+  // - 앱 서버 텔레메트리 @peaket/platform(instrumentation.ts, BUILD_ORDER HOT-400): Node가 그대로 읽는다(OTel SDK가 모듈 읽기를 가로채 계측한다)
+  // 이 키는 하나만 둔다. 같은 키를 두 번 쓰면 뒤의 값이 앞을 조용히 덮는다(2026-11-16 develop CI, 계획 docs/review/plans/W8-L1-ci-fix2.md)
+  serverExternalPackages: ['redis', '@redis/client', '@redis/bloom', '@redis/json', '@redis/search', '@redis/time-series', '@peaket/platform'],
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
-  // 앱 서버 텔레메트리(instrumentation.ts, BUILD_ORDER HOT-400)는 묶지 않고 Node가 그대로 읽는다(OTel SDK가 모듈 읽기를 가로채 계측한다)
-  serverExternalPackages: ['@peaket/platform'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: { ...seedLayeredAlias(import.meta.dirname), 'peaket-pg-simulator-window': simulatorWindowModule } },
   pageExtensions: seedCssPoc ? ['poc.tsx', 'tsx', 'ts', 'jsx', 'js'] : ['tsx', 'ts', 'jsx', 'js'],

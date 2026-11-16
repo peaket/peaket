@@ -45,9 +45,9 @@ const RULES = [
     ['image'],
   ],
   // 부하 시험 점검(loadtest-check.yml, docs/verification.md §3.9, BSL-060): 시나리오와 실행 도구, 그리고 그 시험이 견주는 것
-  // (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구, v1 무대 도구·구매 요청 서명 벡터)과 이 워크플로
+  // (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구(클러스터 도구가 가져오는 게이트웨이 객체 도구 포함), v1 무대 도구·구매 요청 서명 벡터)과 이 워크플로
   [
-    /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|tools|v0-token|v1-stage|v1-objects)\.mjs$|docs\/api\/vectors\/purchase-request-mac\.v1\.json$|\.github\/workflows\/loadtest-check\.yml$)/,
+    /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|gateway-objects|tools|v0-token|v1-stage|v1-objects)\.mjs$|docs\/api\/vectors\/purchase-request-mac\.v1\.json$|\.github\/workflows\/loadtest-check\.yml$)/,
     ['loadtest'],
   ],
   // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2).

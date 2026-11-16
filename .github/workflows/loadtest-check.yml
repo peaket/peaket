@@ -20,5 +20,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      # 실행 도구가 로컬 클러스터 도구(tools/local/cluster.mjs → gateway-objects.mjs)를 거쳐 뿌리 개발 의존성 yaml을 쓴다.
+      # 설치는 잠금 파일대로만 한다(docs/devops.md §3 loadtest-check.yml 행·§4.4). pnpm은 package.json의 packageManager 판으로 받는다(tools-check.yml과 같다)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
       # 서버의 조회 간격·좌석 ID·검사기 기록 형식과 대조하는 시험과 시나리오 형식 검사(Docker로 k6 이미지를 돌린다)
       - run: node --test "loadtest/test/*.test.mjs"
