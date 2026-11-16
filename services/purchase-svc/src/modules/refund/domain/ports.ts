@@ -96,7 +96,7 @@ export interface RefundFailureNotice {
 }
 
 /**
- * BAT-420 리뷰 D5(빈 뼈대): 그 회차의 회차 취소(CANCEL)가 확정됐는가(event_cancellation_request kind CANCEL·status RUNNING·PAUSED·COMPLETED가 있다).
+ * BAT-420 리뷰 D5: 그 회차의 회차 취소(CANCEL)가 확정됐는가(event_cancellation_request kind CANCEL·status RUNNING·PAUSED·COMPLETED가 있다).
  * 참이면 팬 취소·견적은 티켓 단계 앞에서 409 event-cancelled다(transfer-refund §5 '확정 뒤 팬 취소'). 연기(POSTPONE)·판정 중 요청은 거짓이다
  */
 export interface EventCancellationLookup {
@@ -138,7 +138,7 @@ export interface CancellationClaims {
   /** REQUESTED 행에 entry_recorded_at을 쓰고 refund_due_at을 비운다. 바꿨으면 true */
   markEntryRecorded(cancellationId: string, enteredAtMs: number, nowMs: number): Promise<boolean>;
 }
-/** ops CS 처리함 FLAGGED(category ENTRY_AFTER_CANCEL, sourceId = 취소 ID, eventKey = `entry-after-cancel:${cancellationId}`). best effort */
+/** ops CS 처리함 FLAGGED(category ENTRY_AFTER_CANCEL, sourceId = 취소 ID, eventKey = `entry-after-cancel:${cancellationId}`의 SHA-256 앞 16바이트 UUID, caseEventKey). best effort */
 export interface EntryFlagNotice {
   open(q: { readonly cancellationId: string; readonly orderId: string; readonly ticketId: string; readonly enteredAtMs: number; readonly nowMs: number }): Promise<void>;
 }
@@ -170,7 +170,7 @@ export interface RefundDeps {
   readonly seats?: SeatReturns;
   /** 없으면 재인증 토큰을 확인하지 못해 취소를 403으로 닫는다 */
   readonly reauth?: ReauthGate;
-  /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차의 팬 취소·견적은 409 event-cancelled */
+  /** 확정된 회차의 팬 취소·견적은 409 event-cancelled(BAT-420 리뷰 D5). 없으면 확인하지 않는다(시작 조립은 DB가 있으면 꽂는다) */
   readonly eventCancellations?: EventCancellationLookup;
 }
 

@@ -8,9 +8,19 @@ import type { DeductionGapCancellations } from '../../domain/event-refund-ports.
 export class DrizzleDeductionGapCancellations implements DeductionGapCancellations {
   constructor(private readonly database: Database) {}
 
-  /** BAT-420 리뷰 D5(빈 뼈대) */
-  async forTicket(_ticketId: string): Promise<{ cancellationId: string; orderId: string; ticketId: string; deductionAmount: number } | undefined> {
-    throw new Error('아직 없음');
+  /**
+   * 그 표의 결제사로 보낸(REFUND_PENDING·REFUNDED) 사용자 취소(USER) 하나(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소').
+   * 표마다 무효가 아닌 취소는 하나뿐이다(order_cancellation_active_key). 공제 > 0인지는 부르는 쪽이 본다
+   */
+  async forTicket(ticketId: string): Promise<{ cancellationId: string; orderId: string; ticketId: string; deductionAmount: number } | undefined> {
+    const r = await this.database.db.execute(sql`
+      select id, order_id, ticket_id, deduction_amount
+        from order_cancellation
+       where ticket_id = ${ticketId}::uuid and reason = 'USER' and status in ('REFUND_PENDING', 'REFUNDED')
+       order by created_at desc, id
+       limit 1`);
+    const row = r.rows[0] as { id: string; order_id: string; ticket_id: string; deduction_amount: number | string } | undefined;
+    return row ? { cancellationId: row.id, orderId: row.order_id, ticketId: row.ticket_id, deductionAmount: Number(row.deduction_amount) } : undefined;
   }
 
   async list(eventId: string, entryOpensAtMs: number): ReturnType<DeductionGapCancellations['list']> {

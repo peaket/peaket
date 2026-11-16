@@ -23,7 +23,7 @@ export type QuoteCancellationResult =
   | { readonly status: 'ALREADY_ENDED' }
   | { readonly status: 'EVENT_STARTED' }
   | { readonly status: 'INVALID_AMOUNT' }
-  /** BAT-420 리뷰 D5(빈 뼈대): 그 회차의 회차 취소가 확정됐다(409 event-cancelled) */
+  /** 그 회차의 회차 취소가 확정됐다(409 event-cancelled, BAT-420 리뷰 D5). 공제 견적을 보여 주지 않는다(일괄 환불이 공제 없이 돌려준다) */
   | { readonly status: 'EVENT_CANCELLED' };
 
 const EVENT_START_OFFSET_MS = 24 * 60 * 60 * 1000;
@@ -38,7 +38,7 @@ export class QuoteCancellation {
     private readonly o: {
       readonly orders: CancellationOrders;
       readonly calendar: BusinessCalendar;
-      /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차면 EVENT_CANCELLED */
+      /** 확정된 회차면 EVENT_CANCELLED(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소'). 없으면 확인하지 않는다 */
       readonly eventCancellations?: EventCancellationLookup;
     },
   ) {}
@@ -47,6 +47,8 @@ export class QuoteCancellation {
     const order = await this.o.orders.findByTicket(i.ticketId);
     if (!order) return { status: 'NOT_FOUND' };
     if (order.payerAccountId !== i.accountId) return { status: 'NOT_PAYER' };
+    // 결제자 확인 뒤에 본다(남의 표로 회차 상태를 알아내지 못한다)
+    if (this.o.eventCancellations && (await this.o.eventCancellations.confirmed(order.eventId))) return { status: 'EVENT_CANCELLED' };
     if (order.orderStatus !== 'CONFIRMED' && order.orderStatus !== 'PARTIALLY_REFUNDED') return { status: 'ALREADY_ENDED' };
     const q = quoteRefund({
       ticketPrice: order.ticketPrice,

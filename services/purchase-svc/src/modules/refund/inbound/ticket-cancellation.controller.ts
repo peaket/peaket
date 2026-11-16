@@ -43,6 +43,8 @@ const entryStarted = () => new ProblemError({ type: 'entry-started', status: 409
 /** 양도 요청 중이거나 남이 가진 티켓(R-T3, docs/features/transfer-refund.md §9 1번, 돌려받은 뒤 취소한다) */
 const transferPending = () => new ProblemError({ type: 'transfer-pending', status: 409, title: '양도 요청을 철회한 뒤 취소할 수 있습니다' });
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
+/** 회차 취소 일괄 환불이 확정된 회차(공제 없이 일괄 환불이 돌려준다, BAT-420 리뷰 D5, openapi 팬 취소·견적 409) */
+const eventCancelled = () => new ProblemError({ type: 'event-cancelled', status: 409, title: '취소가 확정된 회차입니다' });
 
 @Controller('v1/tickets')
 export class TicketCancellationController {
@@ -62,6 +64,7 @@ export class TicketCancellationController {
     if (r.status === 'NOT_FOUND') throw notFound();
     if (r.status === 'NOT_PAYER') throw notPayer();
     if (r.status === 'EVENT_STARTED') throw entryStarted();
+    if (r.status === 'EVENT_CANCELLED') throw eventCancelled();
     throw conflict();
   }
 
@@ -98,6 +101,7 @@ export class TicketCancellationController {
     if (r.status === 'NOT_PAYER') throw notPayer();
     if (r.status === 'EVENT_STARTED') throw entryStarted();
     if (r.status === 'TRANSFER_PENDING' || r.status === 'TICKET_NOT_HELD') throw transferPending();
+    if (r.status === 'EVENT_CANCELLED') throw eventCancelled();
     throw conflict();
   }
 }

@@ -189,6 +189,24 @@ export class EventRefundService {
     return (await this.o.configs.config(eventId))?.entryOpensAtMs;
   }
 
+  /**
+   * 확정 뒤 그 표를 처리하기 전에 팬 취소가 끼어들어 표를 끝낸 항목(ticket-already-ended·cancellation-conflict)이면, 그 표의 결제사로 보낸 USER 취소 가운데
+   * 공제 > 0인 것을 준다(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소'). 그 밖·찾기 실패는 undefined(일반 실패 알림)
+   */
+  async #overlapGapOf(request: EventCancellationRequest, item: EventRefundItem, error: string): Promise<{ cancellationId: string; orderId: string; deductionAmount: number } | undefined> {
+    if (error !== 'ticket-already-ended' && error !== 'cancellation-conflict') return undefined;
+    const forTicket = this.o.gaps?.forTicket?.bind(this.o.gaps);
+    if (!forTicket || !this.o.gapNotice) return undefined;
+    try {
+      const fan = await forTicket(item.ticketId);
+      if (!fan || fan.cancellationId === item.cancellationId || !(fan.deductionAmount > 0)) return undefined;
+      return fan;
+    } catch (err) {
+      this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId, err: err instanceof Error ? err.message : 'unknown' }, 'event-refund-deduction-gap-failed');
+      return undefined;
+    }
+  }
+
   /** 전환에서 진 항목(cancellation-in-progress)의 그 보류 취소가 차액 대상이면 그 행을 준다(BAT-420 몫 D, GAT-110 D7). 못 찾거나 실패하면 undefined */
   async #gapOf(request: EventCancellationRequest, item: EventRefundItem): Promise<{ cancellationId: string; orderId: string; deductionAmount: number } | undefined> {
     if (!this.o.gaps || !this.o.gapNotice) return undefined;
@@ -417,8 +435,9 @@ export class EventRefundService {
         // 결제사로 보내기 전에 끝난 즉시 실패는 기록하지 않고 바로 FAILED다(GAT-110 E1·E2)
         if (result.status === 'FAILED' && result.error !== undefined && IMMEDIATE_FAILURES.has(result.error)) {
           // 전환에서 진 항목: 마감 뒤 환급이 먼저 공제하고 보냈으면 일반 실패 알림 대신 그 행 공제액의 차액 건 하나만 연다(BAT-420 몫 D, GAT-110 D7).
+          // 확정과 겹쳐 팬 취소가 먼저 그 표를 끝냈으면(ticket-already-ended·cancellation-conflict) 그 표의 공제 > 0인 USER 취소로 차액 건을 연다(BAT-420 리뷰 D5).
           // 차액 대상이 아니면(입장 시작 전 접수·공제 0·아직 보내지 않음) 전과 같이 일반 실패 알림이다
-          const gap = result.error === 'cancellation-in-progress' ? await this.#gapOf(request, item) : undefined;
+          const gap = result.error === 'cancellation-in-progress' ? await this.#gapOf(request, item) : await this.#overlapGapOf(request, item, result.error);
           await this.#finishItem(request, item, 'FAILED', result.error, target, undefined, gap === undefined);
           if (gap) await this.o.gapNotice?.open({ cancellationId: gap.cancellationId, orderId: gap.orderId, deductionAmount: gap.deductionAmount, requestId: request.requestId, nowMs: this.o.nowMs() });
           return true;

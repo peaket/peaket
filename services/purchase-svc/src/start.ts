@@ -54,6 +54,7 @@ import {
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
   DrizzleDeductionGapCancellations,
+  DrizzleEventCancellationLookup,
   DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
   DrizzleEventRefundHolds,
@@ -322,6 +323,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       tickets: refundTickets,
       payments: refundPayments,
       calendar,
+      // 회차 취소가 확정된 회차의 팬 취소·견적은 키 폐기 전에 409 event-cancelled(BAT-420 리뷰 D5)
+      eventCancellations: new DrizzleEventCancellationLookup(database),
     };
   }
   if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {

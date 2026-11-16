@@ -19,7 +19,7 @@ export interface RefundModuleDeps {
   reauth?: ReauthGate;
   /** 회차 취소 일괄 환불(BAT-425). 없으면 내부 HTTP 경로를 열지 않는다 */
   eventRefund?: EventRefundService;
-  /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차의 팬 취소·견적은 409 event-cancelled */
+  /** 확정된 회차의 팬 취소·견적은 409 event-cancelled(BAT-420 리뷰 D5). 없으면 확인하지 않는다 */
   eventCancellations?: EventCancellationLookup;
 }
 
@@ -27,7 +27,10 @@ export interface RefundModuleDeps {
 export class RefundModule {
   static register(deps: RefundModuleDeps): DynamicModule {
     const providers: Provider[] = [
-      { provide: QuoteCancellation, useFactory: () => new QuoteCancellation({ orders: deps.orders, calendar: deps.calendar }) },
+      {
+        provide: QuoteCancellation,
+        useFactory: () => new QuoteCancellation({ orders: deps.orders, calendar: deps.calendar, ...(deps.eventCancellations ? { eventCancellations: deps.eventCancellations } : {}) }),
+      },
       {
         provide: CancelTicket,
         useFactory: () =>
@@ -38,6 +41,7 @@ export class RefundModule {
             payments: deps.payments,
             writes: deps.writes,
             ...(deps.seats ? { seats: deps.seats } : {}),
+            ...(deps.eventCancellations ? { eventCancellations: deps.eventCancellations } : {}),
           }),
       },
       { provide: REAUTH_GATE, useValue: deps.reauth ?? unavailableReauth },

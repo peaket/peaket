@@ -41,7 +41,7 @@ export class CancelTicket {
       readonly payments: PaymentCancellations;
       readonly writes: CancellationWrites;
       readonly seats?: SeatReturns;
-      /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 주문을 찾은 뒤·티켓 단계 앞에서 확정된 회차면 EVENT_CANCELLED */
+      /** 팬 취소(USER)는 주문을 찾은 뒤·티켓 단계 앞에서 확정된 회차면 EVENT_CANCELLED(BAT-420 리뷰 D5). 없으면 확인하지 않는다 */
       readonly eventCancellations?: EventCancellationLookup;
     },
   ) {}
@@ -56,6 +56,10 @@ export class CancelTicket {
       if (existing.orderId !== order.orderId || existing.ticketId !== i.ticketId) return { status: 'CONFLICT' };
       return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, order.orderId, i);
     }
+    // 회차 취소 일괄 환불이 확정된 회차(CANCEL RUNNING·PAUSED·COMPLETED)의 팬 취소는 키를 폐기하기 전에 막는다. 일괄 환불이 공제 없이 돌려주고,
+    // 티켓을 끝낸 뒤에 거절하면 키는 폐기됐는데 환급할 행이 없는 표가 생긴다(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소').
+    // 같은 취소 ID의 다시 보냄은 위에서 처음 결과를 준다. 연기 신청 환급 등 팬 취소가 아닌 사유는 막지 않는다
+    if (i.reason === 'USER' && this.o.eventCancellations && (await this.o.eventCancellations.confirmed(order.eventId))) return { status: 'EVENT_CANCELLED' };
     if (order.orderStatus !== 'CONFIRMED' && order.orderStatus !== 'PARTIALLY_REFUNDED') return { status: 'ALREADY_ENDED' };
     const q = quoteRefund({
       ticketPrice: order.ticketPrice,

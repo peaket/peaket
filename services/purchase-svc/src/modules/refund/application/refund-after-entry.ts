@@ -28,8 +28,9 @@ export interface RefundAfterEntryDeps {
   /** 기한이 지난 미룸 풀기(BAT-420 몫 D). 틱 맨 앞에 부르고 풀린 줄마다 SEV2 로그를 남긴다. 없으면 풀기를 건너뛴다(기한 판단은 집기 SQL이 한다) */
   holds?: Pick<EventRefundHolds, 'releaseExpired'>;
   /**
-   * BAT-420 리뷰 D1(빈 뼈대, 아직 쓰지 않는다): 결제사 CANCELLED 뒤 REFUNDED 쓰기가 0행이면 그 행을 다시 읽는다.
-   * VOIDED일 때만 SEV1 cancellation-refunded-after-void, REFUNDED면 환급으로 센다, 그 밖은 경고 cancellation-refund-state-unexpected
+   * 결제사 CANCELLED 뒤 REFUNDED 쓰기가 0행이면 그 행을 다시 읽는다(BAT-420 리뷰 D1, transfer-refund §3.1 ⑤).
+   * VOIDED일 때만 SEV1 cancellation-refunded-after-void, REFUNDED면(다른 길이 먼저 끝냄) 환급으로 센다, 그 밖은 경고 cancellation-refund-state-unexpected.
+   * 없으면 다시 읽지 못하므로 전처럼 SEV1이다(시작 조립은 늘 꽂는다)
    */
   orders?: Pick<CancellationOrders, 'findCancellation'>;
 }
@@ -102,8 +103,7 @@ export class RefundAfterEntry {
       if (r === 'CANCELLED') {
         const applied = await this.deps.writes.updateStatus({ cancellationId: c.cancellationId, status: 'REFUNDED', nowMs: this.deps.nowMs() });
         if (applied === false) {
-          // 결제사는 환급했는데 그사이 취소가 무효로 끝났다(CS가 확인해야 하는 이중 처리 위험, SEV1). 취소 ID만 남긴다
-          this.deps.log?.error({ event: 'cancellation-refunded-after-void', cancellationId: c.cancellationId }, 'cancellation-refunded-after-void: 무효로 끝난 취소가 결제사에서 환급됐다');
+          if (await this.#refundedElsewhere(c)) refunded++;
           continue;
         }
         refunded++;
@@ -149,6 +149,35 @@ export class RefundAfterEntry {
         'event-refund-hold-expired: 회차 취소 요청의 환급 미룸이 72시간 동안 늘려지지 않아 저절로 풀렸다(SEV2)',
       );
     }
+  }
+
+  /**
+   * 결제사가 환급했는데 REFUNDED 쓰기가 0행이었다. 그 행을 다시 읽어 다른 길(같은 요청 안에서 결제사를 부른 예매 취소·회차 취소 표 취소·
+   * 보류 취소 전환)이 먼저 REFUNDED로 끝냈으면 환급으로 센다(true). VOIDED면 이중 처리 위험 SEV1, 그 밖(읽기 실패 포함)은 경고다. 취소 ID만 남긴다
+   */
+  async #refundedElsewhere(c: DueRefund): Promise<boolean> {
+    const sev1 = () =>
+      this.deps.log?.error({ event: 'cancellation-refunded-after-void', cancellationId: c.cancellationId }, 'cancellation-refunded-after-void: 무효로 끝난 취소가 결제사에서 환급됐다');
+    if (!this.deps.orders) {
+      sev1();
+      return false;
+    }
+    let state: string | undefined;
+    try {
+      state = (await this.deps.orders.findCancellation(c.cancellationId))?.state;
+    } catch {
+      state = undefined;
+    }
+    if (state === 'REFUNDED') return true;
+    if (state === 'VOIDED') {
+      sev1();
+      return false;
+    }
+    this.deps.log?.warn(
+      { event: 'cancellation-refund-state-unexpected', cancellationId: c.cancellationId, state: state ?? 'unknown' },
+      'cancellation-refund-state-unexpected: 결제사는 환급했는데 환급 상태를 쓰지 못했고 행이 환급·무효가 아니다(다음 틱에 다시 본다)',
+    );
+    return false;
   }
 
   /** 보류 취소의 표를 한 틱에 한 번(100장씩) 묻는다. 실패하면 undefined(그 행들을 모두 건너뛴다) */

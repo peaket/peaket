@@ -19,6 +19,7 @@ import {
   type PlatformLogger,
   platformMaintenanceTasks,
   createExternalHttpClient,
+  internalGrpcTokenFromEnv,
   startOutboxRelayProcess,
   systemClock,
 } from '@peaket/platform';
@@ -194,26 +195,31 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       };
   // ticket-svc는 마감 뒤 환급 전 입장 기록 대조(GAT-090)와 회차 취소 일괄 환불(GAT-130·GAT-110)이 함께 쓴다
   const ticketGrpcAddr = o.env?.PEAKET_TICKET_GRPC_ADDR;
-  const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr }) : undefined;
+  // EventCancelTickets·GetEntryRecords는 내부 토큰·호출자 purchase-svc로 묶인다(BAT-420 리뷰 D4). 운영에서 토큰이 없으면 시작 실패다(local·ci는 없음)
+  const ticketGrpcToken = ticketGrpcAddr ? internalGrpcTokenFromEnv(o.env ?? {}) : undefined;
+  const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
   const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
   const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock }));
+  // 입장 기록이 나온 취소의 CS '이상 표시'. ops-svc 주소가 없으면 로그 대역이다
+  const entryFlagNotice = opsClient
+    ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
+    : {
+        open: async (q: { cancellationId: string; enteredAtMs: number }) =>
+          taskLogger.warn({ event: 'cancellation_entry_recorded', cancellationId: q.cancellationId, enteredAtMs: q.enteredAtMs }, '취소한 표에 입장 기록이 있다(CS 처리함 주소 없음)'),
+      };
   // 마감 뒤 환급 전 입장 기록 대조(BAT-420 GAT-090 A6): ticket-svc 주소가 없으면 local·ci만 대역이고 그 밖은 시작 실패다
   const refundAfterEntry = paymentCancels
     ? new RefundAfterEntry({
         writes: refundWrites,
         payments: paymentCancels,
         nowMs: () => clock.now(),
-        // 회차 취소 요청 중 보류 취소의 환급 미룸: 틱 맨 앞에 기한 지난 미룸을 풀고 SEV2를 남긴다(BAT-420 몫 D)
-        holds: new DrizzleEventRefundHolds(o.serviceDatabase),
         failureNotice: refundFailureNotice,
         entries: entryRecordsFromEnv({ env: o.env ?? {}, ...(refundTicketCancels ? { tickets: refundTicketCancels } : {}) }),
         claims: refundWrites,
-        flags: opsClient
-          ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
-          : {
-              open: async (q: { cancellationId: string; enteredAtMs: number }) =>
-                taskLogger.warn({ event: 'cancellation_entry_recorded', cancellationId: q.cancellationId, enteredAtMs: q.enteredAtMs }, '취소한 표에 입장 기록이 있다(CS 처리함 주소 없음)'),
-            },
+        flags: entryFlagNotice,
+        // 기한 지난 환급 미룸 풀기와 SEV2(BAT-420 몫 D), 0행 쓰기 뒤 다시 읽기(VOIDED만 SEV1, BAT-420 리뷰 D1)
+        holds: new DrizzleEventRefundHolds(o.serviceDatabase),
+        orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
         log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg), error: (obj: object, msg: string) => bound().logger.error(obj, msg) },
       })
     : undefined;
