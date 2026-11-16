@@ -974,7 +974,7 @@ erDiagram
         uuid approval_id PK "FK fraud_cancellation_request"
         uuid ticket_id PK "대상 표. 기본 키 (approval_id, ticket_id)가 표 단위 멱등이다"
         uuid expected_holder_account_id "ops가 정한 기대 보유자"
-        text outcome "ACCEPTED|SKIPPED_ALREADY_ENDED|SKIPPED_ENTRY_STARTED|SKIPPED_HOLDER_CHANGED|FAILED. FAILED만 같은 승인의 다시 부르기에서 다시 한다(취소 마감 전). 끝난 결과(ACCEPTED·SKIPPED)는 덮어 쓰지 않고 FAILED 행만 바꾼다(리뷰 B5)"
+        text outcome "ACCEPTED|SKIPPED_ALREADY_ENDED|SKIPPED_ENTRY_STARTED|SKIPPED_HOLDER_CHANGED|FAILED. FAILED만 같은 승인의 다시 부르기에서 다시 한다(취소 마감 전). 끝난 결과(ACCEPTED·SKIPPED)는 덮어 쓰지 않고 FAILED 행만 바꾼다(리뷰 B5). FAILED끼리는 티켓 단계 뒤 까닭(SEAT_RETURN_FAILED·CANCELLATION_CONFLICT·ORDER_STATE)을 TICKET_UNAVAILABLE·INTERNAL로 바꾸지 않는다(다시 보기 R2)"
         uuid cancellation_id "ACCEPTED일 때 order_cancellation.id. 승인 ID와 표 ID에서 정해지는 UUID"
         int refund_amount "ACCEPTED일 때 공제 없는 환급액(그 표의 권면 금액)"
         text withdrawn_transfer_offer_id "시스템이 거둔 양도 요청 ID. transfer_offer 표가 생기기 전에는 비운다"
@@ -1367,6 +1367,7 @@ erDiagram
     event ||--|| scanner_seq : "회차별 변경 일련번호 카운터(ADR-0086)"
     gate_flag ||--o{ gate_flag_scan : "이상 표시에 든 스캔(ADR-0086)"
     ticket ||--o{ ticket_operator_cancellation : "부정 예매 운영자 취소의 표별 결과(추천 적용 2026-11-16, GAT-080)"
+    ticket ||--o{ ticket_cancellation : "팬 취소·일괄 환불의 티켓 단계 기록(HOT-160, 사유 칸은 GAT-080 다시 보기 R1)"
     ticket {
         uuid id PK "UUIDv7(시간순). 표는 나누지 않는다(ADR-0114)"
         uuid account_id "보유자"
@@ -1406,6 +1407,14 @@ erDiagram
         text result "CANCELED|SKIPPED_ALREADY_ENDED|SKIPPED_ENTRY_RECORDED|SKIPPED_HOLDER_CHANGED. 건너뜀도 남겨 다시 부르면 같은 결과를 준다"
         text withdrawn_transfer_offer_id "거둔 양도 요청 ID. transfer_offer 표가 생기기 전에는 비운다"
         timestamptz cancelled_at
+    }
+    ticket_cancellation {
+        uuid cancellation_id PK "부른 쪽의 취소 ID. 기본 키 (cancellation_id, ticket_id)가 CancelTickets·EventCancelTickets의 멱등이다(마이그레이션 0000, HOT-160)"
+        uuid ticket_id PK "FK ticket"
+        uuid order_id
+        text result "REFUND_NOW|REFUND_AFTER_CLOSE(CancelTickets)|EVENT_CANCELED(EventCancelTickets, GAT-110)"
+        text reason "CancelTickets 요청의 사유(USER|EVENT_CANCELLED|EVENT_POSTPONED|ACCOUNT_WITHDRAWAL|EXCEPTION|MINOR_CONTRACT_CANCEL), 널 허용. USER인 기록만 다른 취소 ID의 ALREADY_CANCELLED에 첫 팬 취소로 싣는다(추천 적용 2026-11-16, BUILD_ORDER GAT-080 다시 보기 R1, ticket-svc 마이그레이션 0009)"
+        timestamptz cancelled_at "키를 폐기한 시각. 이어 가는 팬 취소의 공제율 기준 시각"
     }
     fraud_transfer_lock {
         uuid case_id PK "부정 예매 사건(ops 논리 DB라 외래키 없음)"
@@ -2841,7 +2850,7 @@ erDiagram
 | 동일 티켓에 대한 취소, 양도, 게이트 스캔이 동시 경합 | 비관적 행 잠금으로 데이터베이스에서 처리 순서를 정한다(버전 칸은 사람이 화면에서 읽고 저장하는 흐름용, 기술 검토 낮음-071). 입장 시작부터 마감까지는 돌려주기·양도 수락·회수를 금지한다(ADR-0051). 오프라인 스캔이 늦게 올라오면 '취소 뒤 입장' 이상 표시를 남긴다 | E2E, 현장 오프라인 테스트 (O-T16, O-T22) |
 | 취소 처리 중복 및 이중 환불 발생 | `cancel-{cancellationId}` 멱등키를 쓴다. 포트원은 남은 취소 가능 금액이 맞는지 미리 확인한다. 응답이 시간 초과되면 3시간 안에는 같은 멱등키로 다시 보낸다. 3시간이 지난 뒤 다시 보낼 때는 결제 상태를 먼저 단건 조회해 그전 상태를 확인한다(docs/api/guidelines.md §4). 결제 후 일반 취소는 취소 건마다 `payment_cancel` 행을 첫 전송 직전에 결제 행 잠금 안에서 만들고 금액·사유·전액 여부·기대 잔액을 저장해 재시도에도 같은 본문을 보낸다. 끝남은 그 행의 `CANCELED`로만 가르고, 성공 반영은 행마다 한 번이다. 같은 결제의 일반 취소는 한 번에 하나씩 보낸다(진행 중 행이 10분 [가정] 안이면 결과 모름으로 답하고 보내지 않는다). 그래서 3시간 뒤 조회의 잔액으로 이번 취소의 반영을 가른다. 다만 10분이 지난 진행 중 건은 막지 않으므로, 가르기는 결제 행 잠금 안에서 지금 원장의 '결제 금액 − 누적 취소액'이 그 행의 기대 잔액과 같고 같은 결제에 다른 진행 중 행이 없을 때만 한다. 아니면 결과 모름으로 두어 다른 취소의 반영을 이 취소의 반영으로 읽지 않는다(리뷰 B1). 거절(`FAILED`)은 그 건의 끝이라 같은 취소 ID로 다시 보내지 않는다(리뷰 B3)(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액') | 결제 단위 테스트 (P-T21), 실제 PostgreSQL·포트원 모양 시뮬레이터의 겹친 재시도·응답 유실 시험(GAT-080 P2~P6·P11·P12) |
 | 같은 주문의 표 둘을 동시에 취소(일괄 환불 작업자 여럿, 팬의 연속 취소) | payment-svc가 같은 결제의 일반 취소를 하나씩 보낸다(위 행). purchase-svc 일괄 환불은 같은 주문의 표를 한 작업자에 모아 차례로 처리해, 결과 모름이 자동 정지의 실패율에 섞이지 않게 한다. 같은 주문의 앞 표가 환급으로 끝나지 않으면(결과 모름·재시도 대기) 그 주문의 나머지 표는 앞 표가 끝날 때까지 보내지 않고 미루며, 미룬 표는 시도로 기록하지 않는다(리뷰 B4). 팬의 연속 취소는 뒤 취소가 결과 모름 → 환급 재시도(1분 [가정])로 이어진다(추천 적용 2026-11-16, BUILD_ORDER GAT-080) | 일괄 환불 단위 시험(GAT-080 E1·E2), 결제 통합 시험(GAT-080 P3) |
-| 부정 예매 운영자 취소가 팬 취소·양도·스캔·같은 승인의 겹친 호출과 겹침 | ticket-svc `OperatorCancelTickets`가 팬 취소와 같은 티켓 행 잠금 안에서 상태·입장 기록·보유자를 다시 보고, (승인 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. 대상 행은 표 ID 차례로 한 트랜잭션에서 잠가, 대상이 겹치는 운영자 취소 둘이 서로 다른 차례로 잠가 교착하지 않게 한다. purchase-svc는 승인 ID와 표 ID에서 정해지는 취소 ID로 `order_cancellation`을 만들어(진행 중 취소 1건 유일) 겹친 호출에도 취소 행·환급이 표마다 하나다. 결과는 (승인 ID, 표) 기본 키로 쓰되 행이 없거나 `FAILED`일 때만 바꾸고, 끝난 결과(`ACCEPTED`·`SKIPPED_*`)는 늦게 온 실패가 덮지 못한다. 답은 저장 뒤 다시 읽은 결과다(리뷰 B5). 팬 취소의 첫 시도가 티켓 단계만 마친 뒤 새 키로 다시 누른 요청은 ticket-svc가 준 첫 취소 ID로 Saga를 이어, 같은 표에 취소 행이 둘 생기지 않는다(리뷰 B2, docs/features/payment.md §4.1)(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4) | ticket·purchase 통합 시험(GAT-080 F4·F5·F16·F21·S2) |
+| 부정 예매 운영자 취소가 팬 취소·양도·스캔·같은 승인의 겹친 호출과 겹침 | ticket-svc `OperatorCancelTickets`가 팬 취소와 같은 티켓 행 잠금 안에서 상태·입장 기록·보유자를 다시 보고, (승인 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. 대상 행은 표 ID 차례로 한 트랜잭션에서 잠가, 대상이 겹치는 운영자 취소 둘이 서로 다른 차례로 잠가 교착하지 않게 한다. purchase-svc는 승인 ID와 표 ID에서 정해지는 취소 ID로 `order_cancellation`을 만들어(진행 중 취소 1건 유일) 겹친 호출에도 취소 행·환급이 표마다 하나다. 결과는 (승인 ID, 표) 기본 키로 쓰되 행이 없거나 `FAILED`일 때만 바꾸고, 끝난 결과(`ACCEPTED`·`SKIPPED_*`)는 늦게 온 실패가 덮지 못한다. 답은 저장 뒤 다시 읽은 결과다(리뷰 B5). `FAILED`끼리는 티켓 단계 뒤 까닭을 모르는 까닭으로 덮지 않는다(다시 보기 R2). 팬 취소의 첫 시도가 티켓 단계만 마친 뒤 새 키로 다시 누른 요청은 ticket-svc가 준 첫 취소 ID로 Saga를 이어, 같은 표에 취소 행이 둘 생기지 않는다(리뷰 B2). 첫 기록의 사유가 `USER`일 때만 잇고, 일괄 환불 항목(`EVENT_CANCELLED`·`EVENT_POSTPONED`)의 기록이면 팬 요청은 아무것도 쓰지 않아 그 항목의 재시도가 공제 0원으로 마친다(다시 보기 R1, docs/features/payment.md §4.1)(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4) | ticket·purchase 통합 시험(GAT-080 F4·F5·F16·F21·S2·S3·S5) |
 | 입장 시작 뒤 보류 취소(`REQUESTED`)를 환급 실행기와 회차 취소 전환이 동시에 집음, 실행기가 CS 무효(`VOIDED`)를 덮음 | 둘 다 조건부 갱신(`status = 'REQUESTED'`)으로 바꾼 쪽만 이어 간다. 실행기는 바꾼 행만 결제사로 보내고, 전환은 바꾼 행만 공제 0의 일괄 환불 항목으로 쓴다(진 쪽은 건너뛰거나 항목 `FAILED`). 실행기의 환급 성공·재시도 예약·실패 표시도 `REFUND_PENDING`일 때만 써서 무효 행을 바꾸지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §3.1 '입장 기록 대조'·§5 '대상 선택과 보류 취소 전환') | purchase 통합 시험(GAT-090 A·R-T24) |
 | 회차 취소 표 취소가 팬 취소·양도·스캔·부정 예매 취소와 같은 표에 겹침 | ticket-svc `EventCancelTickets`가 같은 티켓 행 잠금 안에서 상태만 다시 보고 이미 환급·무효인 표는 그대로 둔다. (취소 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. purchase는 진행 중 취소 1건 유일(§2)로 같은 표의 둘째 취소 행을 막는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110) | ticket·purchase 통합 시험(R-T24, GAT-110 E) |
 | 회차 취소 확정과 진행 중 결제(대상을 고른 뒤에 결제가 끝난 주문) | 확정이 일괄 환불 시작 전에 판매를 멈춰(새 홀드·결제 접수 423) 새 주문을 막고, 실행기가 틱마다 대상을 다시 골라 늦게 끝난 주문의 표를 더하며(요청·표에서 정해지는 취소 ID라 하나만), 그 회차에 끝나지 않은 주문이 남아 있으면 COMPLETED로 가지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, ADR-0280) | purchase·ops 통합 시험(R-T37 ④⑥) |
