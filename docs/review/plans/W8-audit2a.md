@@ -239,6 +239,92 @@ export interface CoreConsumersOptions { /* … 지금 칸 … */ recheck: Review
 - `node tools/ci/avro-schema.mjs`: 통과(22개 파일).
 - `pnpm --dir packages/contracts gen:check`: 2건 다르다(§0.1). 2a 구현 담당이 다시 만든다.
 
+### 8. 리뷰 반영(2026-11-16, 대조 리뷰 `737f3960`의 A1·A2·A3)
+
+- **차례**: 리뷰 반영이다. 지적마다 시험 담당이 먼저 시험을 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`, `Finding: A1`·`A2`·`A3`). 그다음 구현 담당이 고친다(`Fix-By: impl`, 같은 `Finding`). A3은 시험만이다. 새 마이그레이션 번호는 쓰지 않는다. A2의 권한은 아직 develop에 없는 **0026**에 더한다.
+- **정본(이 계획 커밋에 먼저 씀, 추천 적용 2026-11-16)**: docs/observability.md 운영 확인 표의 '탈퇴 후기 다시 정리' 새 행과 '정비 잡' 행의 한 줄(A1), docs/features/identity.md §10.1 운영 확인 '탈퇴 후기 파기와 다시 정리' 새 행(A1·A2), §8 '이전 판이 남긴 행'(A2), §12 I-T83 ⑤ 보탬(A1)·⑧ 새로(A2), docs/data.md §2 '후기 표의 DB 권한'의 `core_maintenance` 권한과 '후기 파기'의 '이전 판이 남긴 행 고치기'(A2), §6 '탈퇴 후기 다시 정리 예약' 행(A1), docs/streaming.md §2.6(A1), docs/security/data-classification.md '탈퇴 후기 다시 정리 예약' 행(A1), ADR-0278 결정 1·2에 한 줄씩.
+
+#### 8.1 A1 다시 정리 반복이 실패해도 밀린 시간이 보이고 실패가 세진다
+
+**무엇이 틀렸나(리뷰)**: `startReviewRecheckLoop`가 밀린 시간 지표를 `runWithdrawalRechecks`가 성공했을 때만 고친다. 반복이 계속 실패하면 지표가 마지막 값(보통 0)에 머물러 'SEV2 legal'이 울리지 않고, 실패 수·마지막 성공 시각 지표도 없다.
+
+**정한 것(정본 docs/observability.md 운영 확인 '탈퇴 후기 다시 정리' 행)**: 한 번 돌 때마다 성공·실패와 관계없이 `oldestOverdueRecheckMs`를 따로 읽어 `maintenance_retention_overdue_seconds{service="core-svc",table="review_withdrawal_recheck"}`를 고친다(그 읽기도 실패하면 그대로). 실패한 한 번마다 `review_withdrawal_recheck_failures_total{service}`가 1 는다. 성공한 한 번마다 `review_withdrawal_recheck_last_success_timestamp_seconds{service}`를 그때 시각(초)으로 둔다. 경보는 밀린 시간 5일 [가정] 넘음 SEV2, 모든 파드의 마지막 성공이 30분 [가정] 넘게 없음 SEV3(둘 다 `kind` legal).
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/consumers/review-recheck.ts`(실패 경로의 지표, 새 지표 둘, `clock` 옵션) |
+| 시험 | 고침: `services/core-svc/test/review-recheck.test.ts`(I-T83 ⑤ 반복 시험에 더함) |
+
+```ts
+// services/core-svc/src/consumers/review-recheck.ts(바뀌는 곳만)
+export interface ReviewRecheckLoopOptions {
+  // … 지금 칸 …
+  /** 마지막 성공 시각에 쓴다. 기본 systemClock */
+  clock?: { now(): number };
+}
+// registry가 있으면: maintenance_retention_overdue_seconds{service,table}(지금 것), review_withdrawal_recheck_failures_total{service}(카운터),
+// review_withdrawal_recheck_last_success_timestamp_seconds{service}(게이지, 유닉스 초). 같은 이름이 이미 등록부에 있으면 그것을 쓴다
+```
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ⑤ 반복이 실패해도 밀린 시간 지표를 새 값으로 고치고 실패 수를 센다` | 단위 | 대역 `reviews`: 첫 호출 성공(`oldestOverdueRecheckMs` 0) → 지표 0, 마지막 성공 = 가짜 시계 `1_794_000_000_000`ms → `1794000000`. 둘째 `runWithdrawalRechecks`가 던지고 `oldestOverdueRecheckMs`는 `432_000_001`(5일 + 1ms) → 밀린 시간 지표 `432000.001`, 실패 수 1, 마지막 성공은 그대로 `1794000000`. 셋째는 둘 다 던짐 → 밀린 시간 그대로 `432000.001`, 실패 수 2. 경고 줄 글에 계정 ID 모양(UUID) 글자가 없다 | 시간 값은 상수(60초·100개)와 다르게 |
+| `I-T83 ⑤ 같은 등록부에 반복을 두 번 켜도 지표를 새로 만들다 실패하지 않는다` | 단위 | 같은 `Registry`로 `startReviewRecheckLoop`를 두 번 → 던지지 않고, 지표 이름마다 등록이 하나 | 지금 밀린 시간 지표가 하는 것과 같게 |
+
+**틀린 구현 표본(A1)**: ⓐ 실패 경로에서 밀린 시간을 고치지 않음(지금 결함) ⓑ 실패 경로에서 밀린 시간을 0으로 둠 ⓒ 실패 수를 성공 때도 올림 ⓓ 실패 때 마지막 성공 시각을 고침 ⓔ 밀린 시간 읽기가 던지면 반복이 멈춤.
+
+#### 8.2 A2 이전 판이 남긴 행을 파기 칸으로 고친다
+
+**무엇이 빠졌나(리뷰)**: 이 출시 전과 배포 창 동안 이전 판의 작성자 지우기가 남긴 DELETED 행(별점·지문·계정 ID가 남음)과, 이전 판 소비자의 옛 익명화가 처리한 탈퇴 계정 후기(`account_id = id`, '탈퇴한 사용자', VISIBLE)를 파기 칸으로 고치는 길이 없다. 새 코드는 둘째 꼴을 계정 ID로 찾지 못하고, 다음 출시의 파기 행 CHECK `VALIDATE`는 첫째 꼴 하나만 있어도 실패한다.
+
+**정한 것(정본 docs/data.md §2 '후기 파기'의 '이전 판이 남긴 행 고치기')**: 0026 안의 한 번짜리 UPDATE가 아니라 core-svc 정비 일 **`review-purge-legacy`**(정비 시간, `when: 'window'`, 정비 역할 `core_maintenance`)로 한다. 마이그레이션은 배포를 시작할 때 한 번 돌아 배포 창·되돌리기 동안 생긴 행을 놓치고, 한 트랜잭션에서 표 전체를 고치면 지운 행을 오래 잠근다. 대상은 `(status = 'DELETED' AND (rating IS NOT NULL OR content_fingerprint IS NOT NULL OR account_id <> id)) OR (status <> 'DELETED' AND account_id = id)`이고, `id` 순 커서로 1,000행 [가정]씩 `FOR UPDATE SKIP LOCKED`로 잡아 지금 파기 칸(`purgeSet`)으로 고치며 묶음마다 커밋한다(잠금 대기 2초 [가정], 멈춤 신호는 묶음 사이). 차례는 0026 → 배포 창 뒤 첫 정비 시간의 정비 일 → 정비 일이 0행을 보고한 뒤 다음 출시 마이그레이션(파기 행 CHECK → 두 CHECK `VALIDATE`) → 정비 일 지우기다.
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/modules/review/domain/ports.ts`(`purgeLegacyRows`), `…/review/adapters/db/drizzle-review-store.ts`(같은 `purgeSet`을 쓴다), `…/review/adapters/memory-review-store.ts`, `…/review/application/review-maintenance.ts`(새 정비 일), `services/core-svc/src/maintenance-tasks.ts`(`CORE_MAINTENANCE_TASK_NAMES`에 `review-purge-legacy`) |
+| 마이그레이션 | **0026에 더함**(새 번호 없음): `GRANT SELECT ("rating", "content_fingerprint", "account_id", "deleted_at") ON "review" TO core_maintenance;`, `GRANT UPDATE ("body", "rating", "content_fingerprint", "author_display", "account_id", "basis_order_id", "deleted_at") ON "review" TO core_maintenance;`(지금의 `id`·`status`·`notice`·`notice_until` 읽기와 `status`·`notice`·`notice_until`·`updated_at` 고치기는 0022 그대로). `body` 읽기는 주지 않는다. 권한만이라 스냅숏은 바뀌지 않는다 |
+| 시험 | 새로: `services/core-svc/test/review-purge-legacy.test.ts`(단위), `test-int/review-purge-legacy.int.test.ts`(PostgreSQL). 고침: `test/review-purge-migration.test.ts`(0026 원문), `test-int/review-grants.int.test.ts`(정비 역할 거부 쪽) |
+
+```ts
+// services/core-svc/src/modules/review/domain/ports.ts
+export interface ReviewStore {
+  /**
+   * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기')을 id가 after보다 큰 것부터 limit개 잡아 파기 칸으로 고친다(한 트랜잭션, SKIP LOCKED).
+   * 고친 행 수와 마지막으로 본 id(다음 묶음의 커서, 없으면 undefined)
+   */
+  purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }>;
+}
+
+// services/core-svc/src/modules/review/application/review-maintenance.ts
+/** reviewMaintenanceTasks(store, clock, o?: { batch?: number })(batch 기본 1,000 [가정])에 { name: 'review-purge-legacy', when: 'window', run(signal) } 를 더한다.
+ *  run: last가 없을 때까지(또는 signal 끊김) purgeLegacyRows를 이어 부르고 { purged: 합 }을 돌려준다. 묶음 사이에 signal을 본다 */
+```
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ⑧ 정비 일은 이전 판이 남긴 두 꼴만 파기 칸으로 고친다` | 단위(메모리) | 행 다섯: ⓐ DELETED·별점 4·지문·계정 A(옛 작성자 지우기) ⓑ VISIBLE·`accountId` = 후기 ID·'탈퇴한 사용자'(옛 익명화) ⓒ HIDDEN·`accountId` = 후기 ID(옛 익명화) ⓓ 제대로 파기된 DELETED ⓔ 계정 B의 VISIBLE. 정비 일 한 번 → `{ purged: 3 }`, ⓐⓑⓒ가 ①의 칸(ⓐ의 지운 시각은 처음 값), ⓓⓔ는 갱신 시각까지 그대로 | 집계: ⓑ가 요약에서 빠진다 |
+| `I-T83 ⑧ 정비 일을 다시 돌리면 0행이고 묶음 경계에서 빠지는 행이 없다` | 단위 | `batch` 2, 이전 판 행 다섯(id 차례가 섞이게) → 묶음 셋으로 `{ purged: 5 }`. 둘째 실행 `{ purged: 0 }`. 첫 묶음 뒤 signal을 끊으면 `{ purged: 2 }`에서 멈추고 다음 실행이 나머지 3을 고친다 | 다시 해도 같음·경계 |
+| `I-T83 ⑧ 정비 일은 정비 시간 일이고 정비 일 목록에 있다` | 단위 | `when` `'window'`, `CORE_MAINTENANCE_TASK_NAMES`에 `'review-purge-legacy'` | |
+| `I-T83 ⑧ 정비 역할로 이전 판 행을 고치고 그 뒤 파기 행 CHECK를 VALIDATE할 수 있다` | 통합(core PostgreSQL, `core_maintenance` 로그인) | 관리자 연결로 0026 전 모양의 행(DELETED에 별점·지문·계정, VISIBLE에 `account_id = id`)을 넣고 정비 일 실행 → 행 칸이 ①과 같다. 그다음 관리자 연결의 트랜잭션에서 파기 행 CHECK(docs/data.md §2 '마이그레이션 나눔'의 글)를 `NOT VALID`로 더하고 `VALIDATE CONSTRAINT` 두 개가 성공한 뒤 되돌린다. 정비 일 전에 같은 VALIDATE는 23514로 실패한다 | 다음 출시의 전제 |
+| `I-T83 ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다` | 단위(SQL 원문) + 통합 | 원문: 위 두 GRANT 줄이 있고 `core_maintenance`에 `"body"` SELECT·표 전체 SELECT·INSERT·DELETE가 없다. 통합: `core_maintenance`로 `SELECT body FROM review` 42501, `INSERT INTO review` 42501 | 최소 권한 |
+
+**틀린 구현 표본(A2)**: ⓐ 정비 일이 둘째 꼴(`account_id = id`인 살아 있는 후기)을 빠뜨림 ⓑ 첫째 꼴을 `rating IS NOT NULL`만으로 찾음(지문·계정만 남은 행을 놓침) ⓒ 커서를 `>=`로 둬 같은 행을 다시 잡거나 `limit`만 보고 커서 없이 처음부터 다시 읽음(끝나지 않음) ⓓ 제대로 파기된 행의 `updated_at`도 고침 ⓔ `deleted_at`을 지금으로 덮음 ⓕ `when: 'daily'`로 둠(정비 시간 밖에 큰 표를 훑는다) ⓖ 0026이 정비 역할에 표 전체 UPDATE를 줌.
+
+#### 8.3 A3 한 트랜잭션 시험의 반대 방향(시험만)
+
+**무엇이 빠졌나(리뷰)**: 구현이 차례를 '예약 upsert → 파기'로 바꿔(교착을 피하려는 것, 맞다), 지금 `I-T83 ④ 파기와 예약은 한 트랜잭션이다`는 첫 문장(예약)을 막는 쪽만 본다. 두 문장을 따로 자동 커밋하는 틀린 구현(예약 먼저)이 통과한다.
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ④ 파기가 실패하면 다시 정리 예약도 남지 않는다` | 통합(core PostgreSQL, `core_app`) | 관리자 연결로 `REVOKE UPDATE ("rating") ON review FROM core_app`을 잠시 건다 → `purgeWithdrawnAccount` 거절(42501) 1건, 그 계정의 `review_withdrawal_recheck` 행 0, 후기는 VISIBLE 그대로. 권한을 돌린 뒤 다시 하면 파기와 예약이 둘 다 있다 | 고침: `test-int/review-recheck.int.test.ts`. 제품 코드는 바꾸지 않는다(처음부터 통과 예상) |
+
+**검증 담당 참고**: §2 ⓒ(파기와 예약이 다른 트랜잭션)를 두 차례(파기 먼저 따로 커밋, 예약 먼저 따로 커밋) 모두로 만들어 위 두 시험이 각각 하나씩 잡는지 본다.
+
+#### 8.4 돌릴 통합 시험(리뷰 반영)
+
+- core-svc 폴더에서: `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts`
+- 싼 게이트: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`·`typecheck`, 닿는 경로 `npx eslint`, 문서 점검.
+
 ## 실패 확인
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 계획 커밋 `7901c762` 위. Docker 없이 돌렸다.
