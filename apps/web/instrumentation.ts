@@ -7,12 +7,20 @@
 import { assertServerActionsKey, isProductionNodeServer } from '@peaket/config/next/server-actions-key.mjs';
 
 export async function register(): Promise<void> {
+  // Edge 실행기는 둘 다 하지 않는다. 이 비교를 이 자리에 그대로 둬야 Edge 묶음이 아래(SDK)를 읽지 않는다(Next.js가 빌드 때 가지를 지운다)
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   // Next.js는 묶을 때 `process.env.NEXT_RUNTIME`을 글자 값으로 바꾸고, 운영 standalone 서버의 환경에는 이 값이 없다.
   // 그래서 환경 객체에 그 글자 값을 다시 넣어 넘긴다(넣지 않으면 standalone에서 키 확인·텔레메트리가 조용히 건너뛰어진다, 2026-11-16 확인)
   const env = { ...process.env, NEXT_RUNTIME: process.env.NEXT_RUNTIME };
-  assertServerActionsKey(env);
-  // NEXT_RUNTIME 비교를 이 자리에 그대로 둬야 Edge 묶음이 SDK를 읽지 않는다(Next.js가 빌드 때 이 조건으로 가지를 지운다)
-  if (process.env.NEXT_RUNTIME !== 'nodejs' || !isProductionNodeServer(env)) return;
-  const { startAppServerTelemetry } = await import('@peaket/platform/telemetry/app-server');
-  startAppServerTelemetry({ defaultServiceName: 'web' });
+  try {
+    assertServerActionsKey(env);
+    if (!isProductionNodeServer(env)) return;
+    const { startAppServerTelemetry } = await import('@peaket/platform/telemetry/app-server');
+    startAppServerTelemetry({ defaultServiceName: 'web' });
+  } catch (e) {
+    // Next.js 16은 register가 던져도 프로세스를 끝내지 않는다. 그래서 0이 아닌 코드로 끝내는 일을 맡기고 오류는 그대로 다시 던진다(리뷰 RV-08)
+    const { exitAfterStartupFailure } = await import('@peaket/platform/telemetry/app-server');
+    exitAfterStartupFailure(e);
+    throw e;
+  }
 }

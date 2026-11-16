@@ -107,6 +107,7 @@ spec:
         name: peaket-gateway-edge-lua
       filterContext:
         originVerify: true
+        checkTyp: false
         tokenCookie: __Host-peaket_ops_at
         tokenScheme: Bearer
 ---
@@ -524,3 +525,86 @@ spec:
               - name: aud
                 values:
                   - ops
+---
+# gw-ops-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-ops-api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-ops-api
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Host-peaket_ops_at
+        tokenScheme: Bearer
+---
+# gw-ops ops-api: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-ops-not-found
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-ops
+      sectionName: ops-api
+  hostnames:
+    - ops-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-not-found
+---
+# gw-ops-not-found: 교차 출처 응답만(토큰 확인 없음)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-ops-not-found-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-ops-not-found
+  cors:
+    allowOrigins:
+      - https://console.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - X-Reauth-Token
+    exposeHeaders:
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+    allowCredentials: true

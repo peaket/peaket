@@ -306,6 +306,10 @@ jobs:
         working-directory: tools/web-checks
         env:
           HOME: /root
+      # 운영 빌드 산출물의 시작 확인(리뷰 RV-08, BUILD_ORDER BAS-220·HOT-400): NEXT_RUNTIME 환경 값 없이 띄워도 서버 액션 키가 틀리거나
+      # PEAKET_TRACE_INBOUND가 untrusted가 아니면 web(standalone)·partner(next start) 서버가 0이 아닌 코드로 끝난다
+      - run: node --test "boot/*.test.mjs"
+        working-directory: tools/web-checks
       # 소비자 웹 CSP(HOT-290): 같은 운영 빌드를 캐시 화면 응답 때 해시 서버 앞으로 띄워 세 엔진에서 FE-T35·FE-T30·캐시 화면 해시를 본다(ADR-0193)
       - run: pnpm run csp
         working-directory: tools/web-checks

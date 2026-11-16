@@ -123,6 +123,7 @@ spec:
         name: peaket-gateway-edge-lua
       filterContext:
         originVerify: true
+        checkTyp: false
         tokenCookie: __Secure-peaket_partner_at
         tokenScheme: Bearer
 ---
@@ -585,6 +586,29 @@ spec:
                 values:
                   - partner
 ---
+# gw-partner-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-partner-api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-partner-api
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_partner_at
+        tokenScheme: Bearer
+---
 # gw-partner-app: 파트너 콘솔 앱 서버(같은 출처 화면). x-peaket-browser-traceparent를 이 라우트에서만 넘긴다(docs/observability.md §6)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -617,17 +641,62 @@ spec:
           namespace: web
           port: 3001
 ---
-# gw-partner-app: 출처 확인(같은 출처 앱 서버, 토큰은 앱 서버가 본다)
+# gw-partner partner-api: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-partner-not-found
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-partner
+      sectionName: partner-api
+  hostnames:
+    - partner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-not-found
+---
+# gw-partner-not-found: 교차 출처 응답만(토큰 확인 없음)
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
-  name: gw-partner-app-security
+  name: gw-partner-not-found-security
   namespace: envoy-gateway-system
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      name: gw-partner-app
-  csrf:
-    additionalOrigins:
+      name: gw-partner-not-found
+  cors:
+    allowOrigins:
       - https://partner.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - X-Reauth-Token
+    exposeHeaders:
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+    allowCredentials: true

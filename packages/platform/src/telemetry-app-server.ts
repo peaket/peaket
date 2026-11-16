@@ -26,3 +26,13 @@ export function startAppServerTelemetry(o: AppServerTelemetryOptions): Telemetry
   }
   return startSdk({ serviceName: env.OTEL_SERVICE_NAME || o.defaultServiceName, version: env.PEAKET_VERSION, env: env.PEAKET_ENV, inbound: 'untrusted' }, []);
 }
+
+/**
+ * 같은 출처 앱 서버의 시작 확인(서버 액션 키·추적 모드)이 실패했을 때 프로세스를 끝낸다(리뷰 RV-08, docs/devops.md §6.6 '틀리면 서버를 띄우지 않는다').
+ * Next.js 16은 계측 진입점(register)이 던져도 프로세스를 끝내지 않고 모든 요청에 500으로 답하며 남는다(2026-11-16 운영 빌드로 확인).
+ * 오류를 적고, 지금 도는 마이크로태스크(던진 오류를 받는 쪽)가 먼저 끝나도록 다음 차례에 0이 아닌 코드로 끝낸다
+ */
+export function exitAfterStartupFailure(error: unknown): void {
+  console.error(`서버를 띄우지 않는다: ${error instanceof Error ? error.message : String(error)}`);
+  setTimeout(() => process.exit(1), 0);
+}

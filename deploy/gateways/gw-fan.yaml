@@ -123,6 +123,7 @@ spec:
         name: peaket-gateway-edge-lua
       filterContext:
         originVerify: true
+        checkTyp: false
         tokenCookie: __Secure-peaket_at
         tokenScheme: Bearer
 ---
@@ -186,36 +187,52 @@ spec:
             value: /v1/identity/access-tokens
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/search
+            type: RegularExpression
+            value: /v1/search(/.*)?
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/identity
+            type: RegularExpression
+            value: /v1/identity(/.*)?
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/holds
+            type: RegularExpression
+            value: /v1/events/[^/]+/seatmap-snapshot
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/orders
+            type: RegularExpression
+            value: /v1/events/[^/]+/holds
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/events
+            type: RegularExpression
+            value: /v1/events/[^/]+/purchase-session
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/productions
+            type: RegularExpression
+            value: /v1/holds(/.*)?
           method: TRACE
         - path:
-            type: PathPrefix
-            value: /v1/tickets
+            type: RegularExpression
+            value: /v1/orders(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/events(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/productions(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets(/.*)?
           method: TRACE
         - path:
             type: PathPrefix
             value: /
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /.*
           method: TRACE
       filters:
         - type: RequestHeaderModifier
@@ -380,12 +397,12 @@ spec:
   rules:
     - matches:
         - path:
-            type: PathPrefix
-            value: /v1/search
+            type: RegularExpression
+            value: /v1/search(/.*)?
           method: GET
         - path:
-            type: PathPrefix
-            value: /v1/search
+            type: RegularExpression
+            value: /v1/search(/.*)?
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier
@@ -485,8 +502,8 @@ spec:
   rules:
     - matches:
         - path:
-            type: PathPrefix
-            value: /v1/identity
+            type: RegularExpression
+            value: /v1/identity(/.*)?
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -585,7 +602,30 @@ spec:
                 values:
                   - fan
 ---
-# gw-fan-buy: 구매 경로(좌석 홀드·주문, ticket:buy, docs/security/authz-matrix.md §5.1)
+# gw-fan-identity: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-fan-identity-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-identity
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer
+---
+# gw-fan-buy: 구매 경로(openapi에서 팬 쿠키와 입장 토큰을 함께 요구하는 작업: 좌석 스냅샷, 홀드 잡기·조회·해제·연장, 구매 세션 끝내기, 주문·결제. purchase-svc, ticket:buy, docs/security/authz-matrix.md §5.1, 리뷰 RV-03). /v1/events 아래 셋은 정규식이라 gw-fan-api의 /v1/events 정규식보다 앞에 둔다(같은 정규식 꼴이면 긴 쪽이 앞선다)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -600,11 +640,35 @@ spec:
   rules:
     - matches:
         - path:
-            type: PathPrefix
-            value: /v1/holds
+            type: RegularExpression
+            value: /v1/events/[^/]+/seatmap-snapshot
+          method: GET
         - path:
-            type: PathPrefix
-            value: /v1/orders
+            type: RegularExpression
+            value: /v1/events/[^/]+/holds
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/purchase-session
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/holds(/.*)?
+        - path:
+            type: RegularExpression
+            value: /v1/orders(/.*)?
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/seatmap-snapshot
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/holds
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/purchase-session
+          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -701,7 +765,30 @@ spec:
             scopes:
               - ticket:buy
 ---
-# gw-fan-api: 그 밖의 팬 API(경로 앞부분 단위의 첫 몫. 작업마다의 메서드·서비스 나눔은 openapi 생성기 HOT-410)
+# gw-fan-buy: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-fan-buy-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-buy
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer
+---
+# gw-fan-api: 그 밖의 팬 API(경로 앞부분 단위의 첫 몫. 작업마다의 메서드·서비스 나눔은 openapi 생성기 HOT-410). /v1/events는 구매 경로(gw-fan-buy)와 가르려고 정규식으로 적는다
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -716,11 +803,11 @@ spec:
   rules:
     - matches:
         - path:
-            type: PathPrefix
-            value: /v1/events
+            type: RegularExpression
+            value: /v1/events(/.*)?
         - path:
-            type: PathPrefix
-            value: /v1/productions
+            type: RegularExpression
+            value: /v1/productions(/.*)?
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -739,8 +826,8 @@ spec:
           port: 8080
     - matches:
         - path:
-            type: PathPrefix
-            value: /v1/tickets
+            type: RegularExpression
+            value: /v1/tickets(/.*)?
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -839,6 +926,29 @@ spec:
                 values:
                   - fan
 ---
+# gw-fan-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-fan-api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-api
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer
+---
 # gw-fan-app: 소비자 웹 앱 서버(같은 출처 화면). 브라우저 traceparent를 옮긴 x-peaket-browser-traceparent를 이 라우트에서만 넘긴다(docs/observability.md §6). CSP·Referrer-Policy·COOP는 앱 값을 그대로 둔다
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -871,17 +981,63 @@ spec:
           namespace: web
           port: 3000
 ---
-# gw-fan-app: 출처 확인(같은 출처 앱 서버, 토큰은 앱 서버가 본다)
+# gw-fan api: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-not-found
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /.*
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-not-found
+---
+# gw-fan-not-found: 교차 출처 응답만(토큰 확인 없음)
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
-  name: gw-fan-app-security
+  name: gw-fan-not-found-security
   namespace: envoy-gateway-system
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      name: gw-fan-app
-  csrf:
-    additionalOrigins:
+      name: gw-fan-not-found
+  cors:
+    allowOrigins:
       - https://www.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - X-Reauth-Token
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+    allowCredentials: true

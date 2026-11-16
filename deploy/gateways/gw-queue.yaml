@@ -119,6 +119,7 @@ spec:
         name: peaket-gateway-edge-lua
       filterContext:
         originVerify: true
+        checkTyp: false
         tokenCookie: __Secure-peaket_at
         tokenScheme: Bearer
 ---
@@ -213,6 +214,10 @@ spec:
             type: PathPrefix
             value: /
           method: TRACE
+        - path:
+            type: RegularExpression
+            value: /.*
+          method: TRACE
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -282,6 +287,10 @@ spec:
         - path:
             type: PathPrefix
             value: /
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /.*
           method: TRACE
       filters:
         - type: RequestHeaderModifier
@@ -437,6 +446,29 @@ spec:
             scopes:
               - ticket:buy
 ---
+# gw-queue-buy: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-queue-buy-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-queue-buy
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer
+---
 # gw-queue-api: 로그인한 팬의 대기열 경로(로비 참가·사전 검증·대기 취소·추가 검증 상태)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -585,6 +617,29 @@ spec:
                 values:
                   - fan
 ---
+# gw-queue-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-queue-api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-queue-api
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer
+---
 # gw-queue-public: 로그인 없이 부르는 대기열 경로(openapi security: [])
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -721,6 +776,112 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: gw-queue-files
+  cors:
+    allowOrigins:
+      - https://www.peaket.example
+    allowMethods:
+      - GET
+    exposeHeaders:
+      - Retry-After
+    maxAge: 7200s
+---
+# gw-queue queue: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-not-found
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue
+  hostnames:
+    - queue.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /.*
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-not-found
+---
+# gw-queue-not-found: 교차 출처 응답만(토큰 확인 없음)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-queue-not-found-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-queue-not-found
+  cors:
+    allowOrigins:
+      - https://www.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+    exposeHeaders:
+      - Retry-After
+      - Date
+      - X-Trace-Id
+    maxAge: 7200s
+    allowCredentials: true
+---
+# gw-queue queue-files: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-queue-files-not-found
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-queue
+      sectionName: queue-files
+  hostnames:
+    - queue-files.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /.*
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-not-found
+---
+# gw-queue-files-not-found: 교차 출처 응답만(토큰 확인 없음)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-queue-files-not-found-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-queue-files-not-found
   cors:
     allowOrigins:
       - https://www.peaket.example
