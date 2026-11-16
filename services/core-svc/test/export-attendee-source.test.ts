@@ -48,7 +48,7 @@ describe('A2-03 예매자 명단 원천', () => {
       clock,
     });
 
-    const page = await app.listAttendees(TENANT, EVENT, { limit: 50 }, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' });
+    const page = await app.listAttendees(TENANT, EVENT, { limit: 50 }, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' });
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({ seats, ticketCount: 2, buyerNameMasked: '김*수', buyerPhoneMasked: '010-****-5678' });
     expect(JSON.stringify(page)).not.toContain('GOODS');

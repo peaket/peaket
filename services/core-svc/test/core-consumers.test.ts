@@ -157,4 +157,34 @@ describe('COV2-06 시작 파일 조립', () => {
     expect(stop, `${name}.stop()`).toBeGreaterThanOrEqual(0);
     expect(stop).toBeLessThan(sigterm.search(/service\s*\.close\(/));
   });
+
+  test('COV2-06 ⑩ R5 main.ts는 후기 탈퇴 소비자에 core_app으로 확인한 DB를 넘긴다', () => {
+    // 리뷰 R5: core_partner(후기 표 권한 없음) 같은 다른 DB를 넘기는 틀린 조립을 잡는다. ⑫는 자기 DB를 따로 만들어 이것을 보지 못한다
+    const main = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+    const call = main.indexOf('startCoreConsumers({');
+    expect(call, 'startCoreConsumers({').toBeGreaterThanOrEqual(0);
+    // 균형 괄호로 인자 객체를 잘라 낸다
+    const open = main.indexOf('{', call);
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < main.length; i += 1) {
+      if (main[i] === '{') depth += 1;
+      else if (main[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+    }
+    expect(close, '인자 객체의 끝').toBeGreaterThan(open);
+    const args = main.slice(open, close + 1);
+    // 맨 위 칸 database(줄임 꼴 `database,` 또는 `database: 이름`)
+    const m = /[{,]\s*database\s*(?::\s*([A-Za-z_$][\w$]*))?\s*[,}]/.exec(args);
+    expect(m, 'startCoreConsumers 인자의 database 칸').not.toBeNull();
+    const db = m![1] ?? 'database';
+    const role = (r: string): RegExp => new RegExp(String.raw`assertDatabaseRole\(\s*${db}\s*,\s*'${r}'`);
+    expect(main).toMatch(role('core_app'));
+    for (const other of ['core_partner', 'core_ops']) expect(main).not.toMatch(role(other));
+  });
 });

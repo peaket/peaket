@@ -5,13 +5,13 @@ import type { AttendeeExportRecord } from '../domain/export.js';
 export class MemoryAttendeeExportStore implements AttendeeExportStore {
   /** 내려받기 이력 */
   readonly rows: AttendeeExportRecord[] = [];
-  /** DOWNLOAD 접속기록 */
-  readonly audits: AttendeeExportRecord[] = [];
+  /** DOWNLOAD 접속기록(받은 접속지를 붙인다, 리뷰 R2. 뼈대: 구현 담당이 clientIp를 채운다) */
+  readonly audits: (AttendeeExportRecord & { clientIp?: string })[] = [];
   /** 명단 보기 LIST 접속기록(W7-audit A2-19) */
   readonly views: AttendeeViewRecord[] = [];
 
   /** 이력과 DOWNLOAD 접속기록을 함께 남긴다(Drizzle은 한 트랜잭션) */
-  async recordExport(record: AttendeeExportRecord): Promise<void> {
+  async recordExport(record: AttendeeExportRecord, _access?: { clientIp: string }): Promise<void> {
     this.rows.push({ ...record });
     this.audits.push({ ...record });
   }

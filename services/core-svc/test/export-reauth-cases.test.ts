@@ -93,7 +93,7 @@ describe('TEST-06 BOOKER_EXPORT 재인증 부정 경로', () => {
     const attendees: AttendeeSource = { list: async () => ({ items: [], nextCursor: null }), count: async () => ({ bookings: 0, tickets: 0 }) };
     const app = new AttendeeExports({ store: new MemoryAttendeeExportStore(), attendees, events, reauth, actors: new MemoryActorNames(), clock });
     await expect(
-      app.create(TENANT, EVENT, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' }, await sign(admin, { factors: ['password'] }), { reason: '확인', format: 'CSV' }),
+      app.create(TENANT, EVENT, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' }, await sign(admin, { factors: ['password'] }), { reason: '확인', format: 'CSV' }),
     ).rejects.toMatchObject({ status: 403, type: 'https://peaket.example/problems/reauth-required' });
   });
 });

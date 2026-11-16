@@ -46,7 +46,7 @@ describe('A2-17 내보내기 페이지 경계', () => {
     const events = new MemoryPartnerEventLookup();
     events.add(TENANT, EVENT, 'LUMEN', new Date('2026-12-01T00:00:00Z'));
     const app = new AttendeeExports({ store: new MemoryAttendeeExportStore(), attendees: s, events, reauth, actors: new MemoryActorNames(), clock });
-    const out = await app.create(TENANT, EVENT, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' }, 'token', { reason: '페이지 경계', format: 'CSV' });
+    const out = await app.create(TENANT, EVENT, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' }, 'token', { reason: '페이지 경계', format: 'CSV' });
     expect(s.calls).toEqual([undefined, Buffer.from(rows[999]!.orderId).toString('base64url')]);
     expect(out.record.count).toBe(1_500);
     expect(out.file.body.byteLength).toBeGreaterThan(0);

@@ -78,6 +78,6 @@ describe('TEST-06 BOOKER_EXPORT 실제 재인증', () => {
     events.add(TENANT, EVENT, 'LUMEN', new Date('2026-12-01T00:00:00Z'));
     const attendees: AttendeeSource = { list: async () => ({ items: [], nextCursor: null }), count: async () => ({ bookings: 0, tickets: 0 }) };
     const app = new AttendeeExports({ store, attendees, events, reauth, actors: new MemoryActorNames(), clock });
-    await expect(app.create(TENANT, EVENT, { accountId: OTHER, sessionId: 's-1', role: 'partner_admin' }, await sign(admin), { reason: '확인', format: 'CSV' })).rejects.toMatchObject({ status: 403 });
+    await expect(app.create(TENANT, EVENT, { accountId: OTHER, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' }, await sign(admin), { reason: '확인', format: 'CSV' })).rejects.toMatchObject({ status: 403 });
   });
 });

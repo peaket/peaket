@@ -24,7 +24,8 @@ export class DrizzleAttendeeExportStore implements AttendeeExportStore {
   constructor(private readonly db: Database) {}
 
   /** 내려받기 이력과 DOWNLOAD 접속기록을 한 트랜잭션에 넣는다. 하나라도 실패하면 둘 다 되돌리고 오류를 던진다(W7-audit A2-19) */
-  async recordExport(record: AttendeeExportRecord): Promise<void> {
+  // 뼈대(W7-audit 리뷰 반영 시험 단계): 둘째 인자(접속지)를 source_ip로 싣는 일은 구현 담당 몫(리뷰 R2)
+  async recordExport(record: AttendeeExportRecord, _access?: { clientIp: string }): Promise<void> {
     await this.db.transaction(
       async (tx) => {
         await tx.insert(attendeeExport).values({

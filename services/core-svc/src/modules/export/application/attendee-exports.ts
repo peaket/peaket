@@ -31,6 +31,8 @@ export interface ExportActor {
   accountId: string;
   sessionId: string;
   role: string;
+  /** 접속지 정보: 요청의 클라이언트 IP 원문(리뷰 R2). 이름이 clientIp라 플랫폼 로그가 가린다. 뼈대(W7-audit 리뷰 반영 시험 단계): 구현 담당이 필수로 바꾸고 검사한다 */
+  clientIp?: string;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });

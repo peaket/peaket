@@ -52,6 +52,8 @@ function twoRows(): AttendeeSource & { listed: number } {
 class RecordingStore implements AttendeeExportStore {
   readonly calls: string[] = [];
   readonly exported: AttendeeExportRecord[] = [];
+  /** recordExport 둘째 인자(접속지, 리뷰 R2) */
+  readonly access: ({ clientIp: string } | undefined)[] = [];
   readonly viewed: AttendeeViewRecord[] = [];
   failExport = false;
   failView = false;
@@ -63,8 +65,9 @@ class RecordingStore implements AttendeeExportStore {
   async audit(): Promise<void> {
     this.calls.push('audit');
   }
-  async recordExport(record: AttendeeExportRecord): Promise<void> {
+  async recordExport(record: AttendeeExportRecord, access?: { clientIp: string }): Promise<void> {
     this.calls.push('recordExport');
+    this.access.push(access);
     if (this.failExport) throw new Error('audit-down');
     this.exported.push(record);
   }
@@ -86,7 +89,7 @@ const events = (): MemoryPartnerEventLookup => {
   return e;
 };
 
-const admin: ExportActor = { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' };
+const admin: ExportActor = { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' };
 
 const record = (o: Partial<AttendeeExportRecord> = {}): AttendeeExportRecord => ({
   exportId: randomUUID(),
@@ -114,6 +117,7 @@ const view = (o: Partial<AttendeeViewRecord> = {}): AttendeeViewRecord => ({
   count: 2,
   filter: { limit: 50, cursor: 'c1' },
   createdAt,
+  clientIp: '203.0.113.9',
   ...o,
 });
 
@@ -157,6 +161,7 @@ describe('A2-19 명단 보기 접속기록', () => {
       actorDisplayName: '파트너 관리자',
       count: 2,
       createdAt,
+      clientIp: '198.51.100.20',
     });
     // 합계(7건)가 아니라 이 페이지에 보인 행 수다. 받은 cursor가 없으면 키를 두지 않는다
     expect(v.count).not.toBe(7);
@@ -181,7 +186,7 @@ describe('A2-19 명단 보기 접속기록', () => {
   });
 
   test('A2-19 J-T26 ⑤ 행위자 없이 부르면 원천을 읽지 않고 실패한다', async () => {
-    for (const actor of [undefined as unknown as ExportActor, { accountId: '', sessionId: 's-1', role: 'partner_admin' }]) {
+    for (const actor of [undefined as unknown as ExportActor, { accountId: '', sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' }]) {
       const source = twoRows();
       const store = new MemoryAttendeeExportStore();
       const app = new AttendeeExports({ store, attendees: source, events: events(), reauth, actors: new MemoryActorNames(), clock });
@@ -197,6 +202,35 @@ describe('A2-19 명단 보기 접속기록', () => {
     await expect(app.listAttendees(OTHER_TENANT, EVENT, { limit: 50 }, admin)).rejects.toMatchObject({ status: 404 });
     await expect(app.listAttendees(TENANT, OLD_EVENT, { limit: 50 }, admin)).rejects.toMatchObject({ status: 410 });
     expect(store.views).toHaveLength(0);
+  });
+
+  test('A2-19 R2 J-T26 ⑤ 명단 보기 접속기록에 요청의 접속지를 남긴다', async () => {
+    const store = new MemoryAttendeeExportStore();
+    const app = new AttendeeExports({ store, attendees: twoRows(), events: events(), reauth, actors: new MemoryActorNames(), clock });
+    await app.listAttendees(TENANT, EVENT, { limit: 50 }, { ...admin, clientIp: '203.0.113.7' });
+    await app.listAttendees(TENANT, EVENT, { limit: 50 }, { ...admin, clientIp: '2001:db8::1' });
+    expect(store.views.map((v) => v.clientIp)).toEqual(['203.0.113.7', '2001:db8::1']);
+  });
+
+  test('A2-19 R2 J-T26 ⑤ 접속지를 정하지 못하면 원천을 읽지 않고 실패한다', async () => {
+    for (const clientIp of ['', 'abc', '300.1.1.1']) {
+      const actor: ExportActor = { ...admin, clientIp };
+      const source = twoRows();
+      const store = new RecordingStore();
+      const app = new AttendeeExports({ store, attendees: source, events: events(), reauth, actors: new MemoryActorNames(), clock });
+      await expect(app.listAttendees(TENANT, EVENT, { limit: 50 }, actor), `보기 ${JSON.stringify(clientIp)}`).rejects.toThrow();
+      await expect(app.create(TENANT, EVENT, actor, 'token', { reason: '접속지 없음', format: 'CSV' }), `내려받기 ${JSON.stringify(clientIp)}`).rejects.toThrow();
+      expect(source.listed, clientIp).toBe(0);
+      expect(store.calls, clientIp).toEqual([]);
+    }
+    // 접속지 칸이 아예 없는 행위자도 같다
+    const { clientIp: _drop, ...noIp } = admin;
+    const source = twoRows();
+    const store = new RecordingStore();
+    const app = new AttendeeExports({ store, attendees: source, events: events(), reauth, actors: new MemoryActorNames(), clock });
+    await expect(app.listAttendees(TENANT, EVENT, { limit: 50 }, noIp as ExportActor)).rejects.toThrow();
+    expect(source.listed).toBe(0);
+    expect(store.calls).toEqual([]);
   });
 });
 
@@ -221,6 +255,24 @@ describe('A2-19 내려받기 접속기록', () => {
       createdAt,
     });
     expect(out.record).toMatchObject({ reason: '현장 명단 대조', format: 'CSV', count: 2, actorDisplayName: '파트너 관리자', actorRole: 'partner_admin' });
+    expect(store.access).toEqual([{ clientIp: '198.51.100.20' }]);
+  });
+
+  test('A2-19 R2 J-T26 ⑥ 내려받기 접속기록에도 접속지를 남기고 이력 응답에는 싣지 않는다', async () => {
+    const recording = new RecordingStore();
+    const viaRecording = new AttendeeExports({ store: recording, attendees: twoRows(), events: events(), reauth, actors: new MemoryActorNames(), clock });
+    const out = await viaRecording.create(TENANT, EVENT, { ...admin, clientIp: '203.0.113.7' }, 'token', { reason: '현장 명단 대조', format: 'CSV' });
+    expect(recording.access).toEqual([{ clientIp: '203.0.113.7' }]);
+    // 이력 기록(attendee_export)과 응답에는 접속지가 없다
+    expect(Object.keys(recording.exported[0]!)).not.toContain('clientIp');
+    expect(JSON.stringify(out.record)).not.toContain('203.0.113.7');
+
+    const memory = new MemoryAttendeeExportStore();
+    const viaMemory = new AttendeeExports({ store: memory, attendees: twoRows(), events: events(), reauth, actors: new MemoryActorNames(), clock });
+    await viaMemory.create(TENANT, EVENT, { ...admin, clientIp: '203.0.113.7' }, 'token', { reason: '현장 명단 대조', format: 'CSV' });
+    expect(memory.audits.at(-1)?.clientIp).toBe('203.0.113.7');
+    expect(Object.keys(memory.rows.at(-1)!)).not.toContain('clientIp');
+    expect(JSON.stringify(await viaMemory.history(TENANT, EVENT, 50))).not.toContain('203.0.113.7');
   });
 
   test('A2-19 J-T26 ⑥ 접속기록 저장이 실패하면 내려받기 성공으로 답하지 않는다', async () => {
@@ -243,7 +295,7 @@ describe('A2-19 Drizzle 접속기록 저장', () => {
   test('A2-19 J-T26 ⑥ Drizzle recordExport는 두 행을 한 트랜잭션에 넣는다', async () => {
     const { db, transactions, inserts } = fakeDb();
     const r = record();
-    await new DrizzleAttendeeExportStore(db).recordExport(r);
+    await new DrizzleAttendeeExportStore(db).recordExport(r, { clientIp: '203.0.113.9' });
 
     expect(transactions).toHaveLength(1);
     expect(transactions[0]!.options).toEqual({ tenantId: TENANT, accessMode: 'read write' });
@@ -281,7 +333,7 @@ describe('A2-19 Drizzle 접속기록 저장', () => {
 
     // 둘째 넣기(접속기록)가 던지면 recordExport가 거절된다(트랜잭션이 함께 되돌린다)
     const failing = fakeDb(2);
-    await expect(new DrizzleAttendeeExportStore(failing.db).recordExport(record())).rejects.toThrow('insert-down');
+    await expect(new DrizzleAttendeeExportStore(failing.db).recordExport(record(), { clientIp: '203.0.113.9' })).rejects.toThrow('insert-down');
     expect(failing.transactions).toHaveLength(1);
   });
 
@@ -320,11 +372,27 @@ describe('A2-19 Drizzle 접속기록 저장', () => {
     // Drizzle 넣기 값의 retain_until도 같은 규칙이다(내려받기·보기 모두)
     const leap = new Date('2028-02-29T12:00:00Z');
     const a = fakeDb();
-    await new DrizzleAttendeeExportStore(a.db).recordExport(record({ createdAt: leap }));
+    await new DrizzleAttendeeExportStore(a.db).recordExport(record({ createdAt: leap }), { clientIp: '203.0.113.9' });
     expect((a.inserts[1]!.values.retainUntil as Date).toISOString()).toBe('2030-03-01T12:00:00.000Z');
     const b = fakeDb();
     await new DrizzleAttendeeExportStore(b.db).recordView(view({ createdAt: createdAt }));
     expect((b.inserts[0]!.values.retainUntil as Date).toISOString()).toBe('2028-11-15T00:00:00.000Z');
+  });
+});
+
+describe('A2-19 R2 Drizzle 접속지', () => {
+  test('A2-19 R2 Drizzle 접속기록 넣기 값에 source_ip가 있다', async () => {
+    const a = fakeDb();
+    await new DrizzleAttendeeExportStore(a.db).recordView(view({ clientIp: '203.0.113.7' }));
+    expect(a.inserts).toHaveLength(1);
+    expect(a.inserts[0]!.values.sourceIp).toBe('203.0.113.7');
+
+    const b = fakeDb();
+    await new DrizzleAttendeeExportStore(b.db).recordExport(record(), { clientIp: '2001:db8::1' });
+    expect(b.inserts.map((i) => i.table)).toEqual([attendeeExport, attendeeExportAudit]);
+    expect(b.inserts[1]!.values.sourceIp).toBe('2001:db8::1');
+    // 이력(attendee_export)에는 접속지를 싣지 않는다
+    expect(Object.keys(b.inserts[0]!.values)).not.toContain('sourceIp');
   });
 });
 
@@ -360,12 +428,15 @@ describe('A2-19 접속기록 마이그레이션', () => {
     expect(filter).toContain(`DEFAULT '{}'::jsonb`);
     expect(filter).toContain('NOT NULL');
     for (const col of ['export_id', 'reason', 'format']) one(new RegExp(`ALTER COLUMN "${col}" DROP NOT NULL`));
+    // 리뷰 R2: 접속지 칸(inet)과, 0019로 들어간 옛 행은 두고 새 행에만 접속지를 강제하는 CHECK(NOT VALID)
+    expect(one(/ADD COLUMN "source_ip"/)).toMatch(/"source_ip" inet/);
 
     // CHECK 둘(표 이름 접두·따옴표·공백을 지우고 견준다)
     const norm = sql.replace(/"attendee_export_audit"\./g, '').replace(/"/g, '').replace(/\s+/g, ' ').toLowerCase();
     expect(norm).toMatch(/check \(action in \('list', 'download'\)\)/);
     expect(norm).toContain(`action = 'download' and export_id is not null and reason is not null and format is not null`);
     expect(norm).toContain(`action = 'list' and export_id is null and reason is null and format is null`);
+    expect(norm).toMatch(/check \(source_ip is not null\) not valid/);
 
     // 권한·행 보안은 건드리지 않는다
     const grants = sql.match(/GRANT[^;]*attendee_export_audit[^;]*/g) ?? [];

@@ -232,6 +232,36 @@ describe('I-T53·J-T26 예매자 명단', () => {
       exportsStore.failExport = false;
     }
   });
+
+  test('A2-19 R2 J-T26 ⑤ 명단 보기 접속기록에 요청의 접속지를 남긴다 — GET …/attendees', async () => {
+    const before = exportsStore.views.length;
+    // 입구가 다시 쓴 x-forwarded-for가 IP 모양이면 그것, 없거나 IP 모양이 아니면 연결 주소(주입 요청은 127.0.0.1)
+    const cases: [Record<string, string>, string][] = [
+      [{ 'x-forwarded-for': '203.0.113.7' }, '203.0.113.7'],
+      [{}, '127.0.0.1'],
+      [{ 'x-forwarded-for': 'not-an-ip' }, '127.0.0.1'],
+      [{ 'x-forwarded-for': '2001:db8::1' }, '2001:db8::1'],
+    ];
+    for (const [extra] of cases) {
+      const r = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50`, headers: { ...headers(), ...extra } });
+      expect(r.statusCode, JSON.stringify(extra)).toBe(200);
+      // 응답에는 접속지를 싣지 않는다
+      expect(r.payload).not.toContain('203.0.113.7');
+    }
+    expect(exportsStore.views.slice(before).map((v) => v.clientIp)).toEqual(cases.map(([, ip]) => ip));
+  });
+
+  test('A2-19 R2 J-T26 ⑥ 내려받기 접속기록에도 접속지를 남기고 이력 응답에는 싣지 않는다 — POST·GET …/attendee-exports', async () => {
+    const h = { ...headers(), 'x-forwarded-for': '203.0.113.7' };
+    const r = await svc.http.inject({ method: 'POST', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: h, payload: JSON.stringify({ reason: '접속지 확인', format: 'CSV' }) });
+    expect(r.statusCode).toBe(200);
+    expect(exportsStore.audits.at(-1)).toMatchObject({ reason: '접속지 확인', clientIp: '203.0.113.7' });
+    expect(Object.keys(exportsStore.rows.at(-1)!)).not.toContain('clientIp');
+    const history = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: h });
+    expect(history.statusCode).toBe(200);
+    expect(JSON.parse(history.payload).items.some((i: { reason: string }) => i.reason === '접속지 확인')).toBe(true);
+    expect(history.payload).not.toContain('203.0.113.7');
+  });
 });
 
 describe('J-T18 상품 정산 기준일', () => {

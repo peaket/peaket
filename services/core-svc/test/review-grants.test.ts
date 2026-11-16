@@ -91,8 +91,9 @@ describe('COV2-06 보충 운영 역할 권한 마이그레이션', () => {
     const sql = read('migrations/0022_review_role_grants.sql');
     const { grants, others } = grantsOf(sql);
     expect(grants).toEqual(EXPECTED);
-    // 권한만 바꾼다(표·칸·스키마를 바꾸지 않는다)
-    expect(others.filter((s) => !/^REVOKE /i.test(s))).toEqual([]);
+    // 권한을 더하기만 한다: 표·칸·스키마를 바꾸지 않고, 정본 0022 표에 없는 REVOKE로 권한을 거두지도 않는다(리뷰 R6)
+    expect(others.filter((s) => /^REVOKE /i.test(s))).toEqual([]);
+    expect(others).toEqual([]);
 
     // 거부 쪽을 따로 한 번 더: 후기·신고·조치 표에 지우기·비우기·칸 없는 고치기가 없고, 후기의 id·event_id·created_at은 고치지 못한다
     for (const t of ['review', 'content_report', 'takedown_action']) {

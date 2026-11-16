@@ -506,6 +506,27 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 1. **core_app에는 review·held_event 쓰기 권한이 없다(통합 시험 ⑪이 42501로 확인, 2026-11-16).** 0004가 `GRANT SELECT ON ALL TABLES … TO core_app`만 주고, 0013(review)·0000(held_event)과 그 뒤 마이그레이션에 core_app 쓰기 권한이 없다(`grep -n GRANT services/core-svc/migrations/*.sql`). 계획 §4의 `CoreConsumersOptions.database`는 core_app이고 `main.ts`도 core_app으로 붙으므로, ⑪(계획은 '처음부터 통과 예상')과 ⑫는 운영과 같은 core_app 로그인으로 써 두었다. 그대로면 `UPDATE review`와 `INSERT held_event`가 42501로 실패할 것이다. 계획 §4는 '마이그레이션 없음'이라 구현 담당이 막힌다. 권한 마이그레이션(예: core_app에 review의 익명화 칸 UPDATE, held_event 넣기·다시 처리 권한)을 계획에 더할지 정해야 한다. 같은 까닭으로 지금의 후기 쓰기 경로(`POST /v1/events/{id}/reviews`)도 운영 역할에서는 실패할 수 있다(기존 `test-int/review.int.test.ts`는 슈퍼유저로 붙어 드러나지 않았다). 이 묶음 범위 밖이면 따로 적어 둔다.
 2. 0021 시험은 CHECK 글을 표 이름 접두·따옴표·공백을 지운 뒤 계획의 글(`action in ('LIST','DOWNLOAD')`, `(action = 'DOWNLOAD' and export_id is not null and reason is not null and format is not null) or (action = 'LIST' and export_id is null and reason is null and format is null)`)로 견준다. 뜻이 같은 다른 글로 쓰면 '시험 이의'로 알려 달라.
 
+### 리뷰 반영(시험 쪽, 리뷰 R2·R5·R6, 2026-11-16)
+
+- **뼈대**: 새 공개 인터페이스만 더했다. `ExportActor.clientIp`·`AttendeeViewRecord.clientIp`는 선택 칸, `recordExport`의 둘째 인자 `access`는 선택 인자로 두어 지금 코드가 컴파일되게 했다(구현 담당이 필수로 바꾸고 검사한다). 메모리 저장소 `audits`의 타입에 `clientIp`를 더했다. 새 `export/inbound/client-ip.ts`의 `clientIpOf`는 '아직 없음'을 던진다. 컨트롤러·0021·스키마는 손대지 않았다.
+- **전체 단위**: core-svc 폴더에서 `npx vitest run` 시험 436개 가운데 실패 10, 통과 426. 실패 10개는 모두 R2 시험이고 그 밖은 모두 통과한다. typecheck 오류 0, 닿은 경로 eslint 오류 0.
+
+| 지적 | 시험 | 파일 | 결과 | 까닭 |
+| --- | --- | --- | --- | --- |
+| R2 | A2-19 R2 J-T26 ⑤ 명단 보기 접속기록에 요청의 접속지를 남긴다 | `test/export-audit.test.ts`(단위), `test/export.test.ts`(— GET …/attendees, 머리 넷: IP, 없음, IP 아님, IPv6) | 실패 2 | 단언: 접속지가 `undefined`다 |
+| R2 | A2-19 R2 J-T26 ⑤ 접속지를 정하지 못하면 원천을 읽지 않고 실패한다 | `test/export-audit.test.ts` | 실패 | 단언: `''`·`'abc'`·`'300.1.1.1'`에도 명단을 돌려준다(칸이 아예 없는 행위자도 본다) |
+| R2 | A2-19 R2 J-T26 ⑥ 내려받기 접속기록에도 접속지를 남기고 이력 응답에는 싣지 않는다 | `test/export-audit.test.ts`(단위), `test/export.test.ts`(— POST·GET …/attendee-exports) | 실패 2 | 단언: `recordExport` 둘째 인자·DOWNLOAD 접속기록에 접속지가 없다 |
+| R2 | A2-19 R2 Drizzle 접속기록 넣기 값에 source_ip가 있다 | `test/export-audit.test.ts` | 실패 | 단언: `sourceIp`가 없다 |
+| R2 | A2-19 R2 클라이언트 IP는 다시 쓴 x-forwarded-for가 IP일 때만 그것이고 아니면 연결 주소다 | 새 `test/client-ip.test.ts` | 실패 | 뼈대 '아직 없음' |
+| R2 | A2-19 0021은 action·filter를 더하고 …(고침: `ADD COLUMN "source_ip" inet`, `CHECK (source_ip is not null) NOT VALID`) | `test/export-audit.test.ts` | 실패 | 단언: 0021에 `source_ip` 칸이 아직 없다 |
+| R2 | 기존 둘에 접속지 단언을 더함: A2-19 J-T26 ⑤ 명단 보기는 행위자·보인 건수·조건을 …, A2-19 J-T26 ⑥ 내려받기는 … recordExport 한 번으로 쓴다 | `test/export-audit.test.ts` | 실패 2 | 단언: 접속지가 없다 |
+| R2 | 행위자 객체에 `clientIp`를 더함(export 시험 여섯 파일) | `test/export-paging-limit.test.ts` 등 | 통과 | 모양만 고침 |
+| R2 | A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 같은 파일의 준비(직접 넣는 접속기록 행 둘)에 `source_ip`를 넣고, `recordView`·`recordExport` 부르기에 접속지를 실었다 |
+| R5 | COV2-06 ⑩ R5 main.ts는 후기 탈퇴 소비자에 core_app으로 확인한 DB를 넘긴다 | `test/core-consumers.test.ts` | 지금 코드에서 통과 | 손 확인: `main.ts`의 소비자 인자를 `database: partnerDatabase`로 바꾸면 이 시험이 실패하고(기존 ⑩은 그래도 통과), 되돌린 뒤 통과. `git diff`로 `main.ts`가 깨끗한 것을 봤다 |
+| R6 | COV2-06 ⑬ 0022는 …(고침: REVOKE도 비교해 없어야 한다) | `test/review-grants.test.ts` | 지금 코드에서 통과 | 손 확인: 0022 끝에 `REVOKE UPDATE (account_id, basis_order_id) ON review FROM core_app`을 더하면 실패하고, 되돌린 뒤 통과. `git diff`로 0022가 깨끗한 것을 봤다 |
+
+- **돌릴 통합 시험(도커 잠금 대기)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts`. 0021의 `source_ip`가 생기기 전에는 준비의 직접 넣기가 칸 없음(42703)으로 실패할 것이다.
+
 ## 리뷰
 
 - **누가·언제**: 리뷰 담당(세션 `l3w7-audit-review`), 2026-11-16. 짧은 대조 리뷰(docs/architecture.md §8.6 4의 5). 본 것: 지시서, 이 파일의 `## 계획`·`## 실패 확인`, `git diff 853758eb..e727395a`(drizzle 스냅숏 제외), 커밋 꼬리말, 계획이 가리킨 정본 줄(settlement.md §9·J-T26, data.md §2·§6, guidelines.md §3, streaming.md §2.6, identity.md §8, asvs 두 표, data-classification). 구현 담당의 설명은 받지 않았다. 시험은 돌리지 않았다(통합 시험 결과는 검증 담당 몫).

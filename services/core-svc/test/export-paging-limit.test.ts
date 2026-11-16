@@ -74,7 +74,7 @@ const app = (s: AttendeeSource, store = new MemoryAttendeeExportStore()): Attend
   return new AttendeeExports({ store, attendees: s, events, reauth, actors: new MemoryActorNames(), clock });
 };
 
-const actor = { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin' };
+const actor = { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' };
 const csvText = (body: Uint8Array): string => new TextDecoder().decode(body);
 
 describe('A2-17 내보내기 페이지 상한', () => {
