@@ -4,7 +4,7 @@
 // 시뮬레이터가 저장한 첫 답을 돌려주고(같은 멱등키·다른 본문이면 422 IDEMPOTENCY_KEY_REUSED), 돈은 한 번만 나간다.
 // 결제 원장 행은 시험이 넣는다(승인 경로는 portone-gateway.int.test.ts가 본다). 시뮬레이터 쪽 결제는 인증·승인 HTTP를 직접 불러 만든다.
 import 'reflect-metadata';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { buildSimulatorApp, type SimulatorApp } from '@peaket/pg-simulator';
 import { createDatabase, type Database, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -121,10 +121,12 @@ beforeEach(async () => {
 
 describe('GAT-080 P6 포트원 취소 응답이 끊긴 뒤의 재시도', () => {
   test('GAT-080 P6 결제사가 취소를 커밋한 뒤 응답을 끊어도 재시도는 같은 본문(기대 잔액 포함)이라 한 번만 환급된다', async () => {
+    // 취소 ID는 운영처럼 UUID다(포트원 멱등키 cancel-{취소 ID}는 보이는 ASCII 16~256자여야 한다)
+    const drop = randomUUID();
     const p = await paid(50_000);
     expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'drop', applied: true })).status).toBe(204);
 
-    const first = await uc.execute({ paymentId: p.paymentId, cancellationId: 'p6_drop', reason: '관객 취소', amount: 20_000 });
+    const first = await uc.execute({ paymentId: p.paymentId, cancellationId: drop, reason: '관객 취소', amount: 20_000 });
     expect(first).toEqual({ result: 'UNKNOWN', cancelledAmount: 0 });
     // 끊김이 실제로 있었고, 끊긴 자리는 시뮬레이터의 커밋 뒤였다(잔액이 이미 줄었다)
     expect(cancelHttp(p.portonePaymentId)).toEqual([
@@ -133,7 +135,7 @@ describe('GAT-080 P6 포트원 취소 응답이 끊긴 뒤의 재시도', () => 
     expect(await simPayment(p.portonePaymentId)).toMatchObject({ balanceAmount: 30_000 });
     expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
 
-    const second = await uc.execute({ paymentId: p.paymentId, cancellationId: 'p6_drop', reason: '관객 취소', amount: 20_000 });
+    const second = await uc.execute({ paymentId: p.paymentId, cancellationId: drop, reason: '관객 취소', amount: 20_000 });
     expect(second).toEqual({ result: 'CANCELLED', cancelledAmount: 20_000 });
     const http = cancelHttp(p.portonePaymentId);
     expect(http).toHaveLength(2);
@@ -146,13 +148,14 @@ describe('GAT-080 P6 포트원 취소 응답이 끊긴 뒤의 재시도', () => 
     expect(sim.cancels).toHaveLength(1);
     expect(sim.cancels![0]!.cancelAmount).toBe(20_000);
     expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
-    expect(await cancelRows(p.paymentId)).toEqual([{ idempotency_key: 'cancel-p6_drop', amount: 20_000, expected_balance: 50_000, status: 'CANCELED' }]);
+    expect(await cancelRows(p.paymentId)).toEqual([{ idempotency_key: `cancel-${drop}`, amount: 20_000, expected_balance: 50_000, status: 'CANCELED' }]);
   });
 
   test('GAT-080 P6 대조: 두 취소를 차례로 하면 둘째의 currentCancellableAmount는 첫째 반영 뒤 잔액(50,000 − 10,000 = 40,000)이다', async () => {
+    const [seq1, seq2] = [randomUUID(), randomUUID()];
     const p = await paid(50_000);
-    await expect(uc.execute({ paymentId: p.paymentId, cancellationId: 'p6_seq1', reason: '관객 취소', amount: 10_000 })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 10_000 });
-    await expect(uc.execute({ paymentId: p.paymentId, cancellationId: 'p6_seq2', reason: '관객 취소', amount: 15_000 })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 25_000 });
+    await expect(uc.execute({ paymentId: p.paymentId, cancellationId: seq1, reason: '관객 취소', amount: 10_000 })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 10_000 });
+    await expect(uc.execute({ paymentId: p.paymentId, cancellationId: seq2, reason: '관객 취소', amount: 15_000 })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 25_000 });
     expect(cancelHttp(p.portonePaymentId).map((s) => [s.body, s.status])).toEqual([
       [{ storeId: 'store-sim', reason: '관객 취소', amount: 10_000, currentCancellableAmount: 50_000 }, 200],
       [{ storeId: 'store-sim', reason: '관객 취소', amount: 15_000, currentCancellableAmount: 40_000 }, 200],

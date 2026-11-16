@@ -2,6 +2,8 @@
 // 0016 마이그레이션 적용·재적용, event_cancellation_request·event_refund_item, 미리보기·시작·진행률·일시정지·재개,
 // 결정적 취소 ID, 같은 요청·티켓 멱등, 부분 실패 CS 통지를 본다.
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -36,6 +38,9 @@ afterAll(async () => {
 
 const q = <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: unknown[]) => admin.query<R>(text, params);
 const count = async (text: string, params: unknown[] = []): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
+/** 마이그레이션 기록(migrations/meta/_journal.json). 적용 건수와 마지막 적용을 이 기록과 견준다(새 마이그레이션마다 숫자를 고치지 않게) */
+const journal = JSON.parse(readFileSync(fileURLToPath(new URL('../migrations/meta/_journal.json', import.meta.url)), 'utf8')) as { entries: { idx: number; tag: string; when: number }[] };
+const lastApplied = async (): Promise<number> => Number((await q<{ n: string }>('select max(created_at)::bigint as n from drizzle.__drizzle_migrations')).rows[0]!.n);
 
 async function seedOrder(o: { eventId: string; accountId: string; amount: number; pg: 'TOSS' | 'PORTONE'; cancelled?: boolean }): Promise<{ orderId: string; ticketId: string }> {
   const orderId = randomUUID();
@@ -109,7 +114,8 @@ describe('0016 회차 취소 일괄 환불', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(22);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(journal.entries.length);
+    expect(await lastApplied()).toBe(journal.entries.at(-1)!.when);
     const idx = await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'event_refund_item' and indexname = 'event_refund_item_cancellation_key'");
     expect(idx.rows[0]?.indexdef).toContain('UNIQUE INDEX');
   });
@@ -211,7 +217,8 @@ describe('0016 회차 취소 일괄 환불', () => {
     expect(await cols('event_refund_item')).toEqual(expect.arrayContaining(['applied_at', 'next_attempt_at']));
     expect(await cols('event_refund_attempt')).toEqual(expect.arrayContaining(['request_id', 'ticket_id', 'pg', 'amount', 'outcome', 'attempted_at']));
     await migratePurchase(url);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(22);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations')).toBe(journal.entries.length);
+    expect(await lastApplied()).toBe(journal.entries.at(-1)!.when);
   });
 
   test('BAT425_자동_정지는_1분_창_실패율로_멈추고_경보를_남긴다', async () => {

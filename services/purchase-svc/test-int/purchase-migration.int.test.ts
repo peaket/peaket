@@ -6,6 +6,8 @@
 // 0022(BUILD_ORDER GAT-080, BAT-415 몫 F)의 부정 예매 운영자 취소 표 둘의 제약도 맨 아래 묶음에서 본다.
 // 컨테이너는 이 파일이 끝나면 afterAll에서 지운다.
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { fakeClock, systemClock, uuidv7, uuidv7Time } from '@peaket/platform';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import pg from 'pg';
@@ -60,6 +62,9 @@ const putHold = (e: string, s: string, token: number, status: string, kind?: str
 const putQuota = (account: string, event: string, used: number, limit: number) =>
   q('insert into purchase_quota (account_id, event_id, used, limit_count) values ($1, $2, $3, $4)', [account, event, used, limit]);
 const count = async (text: string, params: unknown[]): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
+/** 마이그레이션 기록(migrations/meta/_journal.json). 적용 건수와 마지막 적용을 이 기록과 견준다(새 마이그레이션마다 숫자를 고치지 않게) */
+const journal = JSON.parse(readFileSync(fileURLToPath(new URL('../migrations/meta/_journal.json', import.meta.url)), 'utf8')) as { entries: { idx: number; tag: string; when: number }[] };
+const lastApplied = async (): Promise<number> => Number((await q<{ n: string }>('select max(created_at)::bigint as n from drizzle.__drizzle_migrations')).rows[0]!.n);
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
@@ -68,12 +73,15 @@ describe('마이그레이션과 표 모양', () => {
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
     expect(before).toEqual(
-      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job', 'event_sale', 'order_cancellation', 'event_cancellation_request', 'event_refund_item']),
+      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job', 'event_sale', 'order_cancellation', 'event_cancellation_request', 'event_refund_item', 'fraud_cancellation_request', 'fraud_cancellation_ticket']),
     );
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(22);
+    // 적용 기록은 마이그레이션 기록의 항목 수와 같고, 마지막으로 적용한 것은 기록의 마지막(지금은 0022 부정 예매 취소 표)이다
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(journal.entries.length);
+    expect(await lastApplied()).toBe(journal.entries.at(-1)!.when);
+    expect(journal.entries.map((e) => e.tag)).toContain('0022_fraud_cancellation');
   });
 
   test('GAT080_0014(예매 취소): order_cancellation은 refund_due_at·진행 중 취소 1건 유일 색인·상태/사유/금액 CHECK를 만든다', async () => {
