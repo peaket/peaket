@@ -37,6 +37,10 @@ const CODE_ORDER = ['plan', 'test', 'impl', 'review', 'verify'];
 // 시험만 묶음(plan 커밋의 Batch-Kind: test-only로 밝힘, 계획 W7-L1-roles-testonly 1): 구현 없이 계획 < 시험 < 리뷰 < 검증
 const TEST_ONLY_ORDER = ['plan', 'test', 'review', 'verify'];
 const TEST_ONLY = 'test-only';
+// 차례: 역할마다 첫 커밋보다 앞서야 할 역할들(리뷰·검증 사이는 없다)
+const CODE_BEFORE = { test: ['plan'], impl: ['plan', 'test'], review: ['plan', 'test', 'impl'], verify: ['plan', 'test', 'impl'] };
+const TEST_ONLY_BEFORE = { test: ['plan'], review: ['plan', 'test'], verify: ['plan', 'test'] };
+const DOC_BEFORE = { doc: ['plan'], review: ['plan', 'doc'] };
 const DOC_ORDER = ['plan', 'doc', 'review'];
 const CODE_SECTIONS = ['실패 확인', '리뷰', '검증', '담당 표'];
 const DOC_SECTIONS = ['리뷰', '담당 표'];
@@ -389,14 +393,28 @@ function check(opt) {
 
     const first = new Map();
     for (const c of list) if (c.role && !first.has(c.role)) first.set(c.role, c);
-    // 차례: 뒤에 와야 할 역할이 앞 역할보다 먼저 나오면 그 먼저 나온 커밋의 실패다
+    // 차례: 역할마다 처음 나온 커밋이 그보다 앞서야 할 역할의 첫 커밋보다 먼저 오면 그 먼저 나온 커밋의 실패다.
+    // 리뷰와 검증 사이의 차례는 보지 않는다(계획 W7-L1-roles-testonly 7의 4)
     const order = kind === '코드' ? CODE_ORDER : kind === '시험만' ? TEST_ONLY_ORDER : DOC_ORDER;
-    order.forEach((r, j) => {
+    const before = kind === '문서' ? DOC_BEFORE : kind === '시험만' ? TEST_ONLY_BEFORE : CODE_BEFORE;
+    for (const r of order) {
       const c = first.get(r);
-      if (!c) return;
-      const later = order.slice(0, j).filter((q) => first.has(q) && first.get(q).index > c.index);
+      if (!c) continue;
+      const later = (before[r] ?? []).filter((q) => first.has(q) && first.get(q).index > c.index);
       if (later.length) fail('차례', id, c.sha, `첫 ${r} 커밋이 첫 ${later.join('·')} 커밋보다 먼저 왔다`);
-    });
+    }
+    // 마지막 verify는 마지막 고침보다 뒤다(계획 W7-L1-roles-testonly 7의 1·2·5). 코드 묶음은 .md만 바꾸지 않은 구현 쪽 커밋,
+    // 시험만 묶음은 시험 파일을 바꾼 시험 쪽 커밋이 고침이다. verify가 아예 없으면 [구성]이 잡는다
+    if (kind !== '문서') {
+      const fixes = kind === '코드'
+        ? list.filter((c) => c.acting === 'impl' && !c.files.every((p) => p.endsWith('.md')))
+        : list.filter((c) => c.acting === 'test' && c.files.some(isTestPath));
+      const verifies = list.filter((c) => c.role === 'verify');
+      const lastFix = fixes.at(-1);
+      if (lastFix && verifies.length && verifies.at(-1).index < lastFix.index) {
+        fail('차례', id, lastFix.sha, kind === '코드' ? '마지막 코드 고침 커밋 뒤에 verify 커밋이 없다' : '시험 파일을 고친 마지막 시험 쪽 커밋 뒤에 verify 커밋이 없다');
+      }
+    }
     if (kind !== '문서' && first.has('review-fix')) {
       const fix = first.get('review-fix');
       const gate = ['review', 'verify'].filter((q) => first.has(q)).map((q) => first.get(q));
