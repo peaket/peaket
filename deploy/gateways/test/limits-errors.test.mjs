@@ -111,7 +111,8 @@ function pathScore(match, method, path) {
   const p = match.path ?? { type: 'PathPrefix', value: '/' };
   const v = p.value ?? '/';
   if (p.type === 'Exact') return v === path ? 100000 : -1;
-  if (p.type === 'RegularExpression') return new RegExp(`^(?:${v})$`).test(path) ? 1 : -1;
+  // 정규식은 앞부분 맞춤보다 앞서고 긴 정규식이 먼저다(Envoy Gateway 차례. merged 정규식이 남은 경로 '/.*'보다 앞선다)
+  if (p.type === 'RegularExpression') return new RegExp(`^(?:${v})$`).test(path) ? 1000 + v.length : -1;
   const pre = v.endsWith('/') ? v : `${v}/`;
   return path === v || path.startsWith(pre) || v === '/' ? 10 + v.length : -1;
 }
@@ -387,11 +388,11 @@ test("HOT-410 infra §4.1 '전역 레이트 리밋 걸기' 컨트롤러 설정�
 
 // ===================== 웹훅 경로(D-T50 ⑥) =====================
 
-test("HOT-410 infra §4.1 '웹훅 경로' 웹훅 두 경로는 gw-partner partner-api의 gw-partner-webhooks에서 payment-svc 앱 포트(8080)로 가고 Exact·POST 맞춤이며, 토큰 확인은 /v1/partner/… 라우트에 그대로다", () => {
+test("HOT-410 infra §4.1 '웹훅 경로' 웹훅 두 경로는 gw-partner partner-api의 gw-partner-webhooks에서 payment-svc 앱 포트(8080)로 가고 POST 맞춤(두 경로를 묶은 맞춤 하나)이며, 토큰 확인은 /v1/partner/… 라우트에 그대로다", () => {
   requireDefinitions();
   for (const path of WEBHOOK_PATHS) {
     const hit = routeOf('gw-partner', 'POST', path, WEBHOOK_ROUTE);
-    assert.deepEqual(hit.match.path, { type: 'Exact', value: path }, `${path}: Exact 맞춤이 아니다`);
+    assert.ok(['Exact', 'RegularExpression'].includes(hit.match.path?.type), `${path}: 맞춤 꼴 ${JSON.stringify(hit.match.path)}`);
     assert.equal(hit.match.method, 'POST', `${path}: 메서드`);
     assert.deepEqual((hit.rule.backendRefs ?? []).map((b) => [b.name, b.port]), [['payment-svc', 8080]], `${path}: 백엔드`);
     assert.deepEqual(hit.route.spec?.hostnames, ['partner-api.peaket.example'], `${path}: 호스트`);
@@ -411,11 +412,46 @@ test("HOT-410 infra §4.1 '웹훅 경로' 웹훅 두 경로는 gw-partner partne
   }
   // 웹훅 라우트는 웹훅 두 경로만 받는다
   for (const r of routesFrom(WEBHOOK_ROUTE))
-    for (const rule of r.spec?.rules ?? []) for (const m of rule.matches ?? [{}]) assert.ok(WEBHOOK_PATHS.includes(m.path?.value), `${r.metadata?.name}: 웹훅 밖 경로 ${JSON.stringify(m.path)}`);
+    for (const rule of r.spec?.rules ?? [])
+      for (const m of rule.matches ?? [{}]) {
+        assert.ok(WEBHOOK_PATHS.some((w) => pathScore({ ...m, method: undefined }, 'POST', w) >= 0), `${r.metadata?.name}: 웹훅 경로를 맞추지 않는 맞춤 ${JSON.stringify(m.path)}`);
+        for (const bad of ['/v1/webhooks/other', '/v1/webhooks/toss/x', '/v1/webhooksx/toss', '/v1/webhooks/', '/v1/partner/webhooks/toss']) assert.ok(pathScore({ ...m, method: undefined }, 'POST', bad) < 0, `${r.metadata?.name}: 웹훅 밖 경로 ${bad}를 맞춘다 ${JSON.stringify(m.path)}`);
+      }
   // 파트너 API의 토큰 확인은 그대로다(웹훅 앞부분까지 넓히거나 /v1/partner/…를 열지 않는다)
   const partner = routeOf('gw-partner', 'POST', '/v1/partner/productions/p1/events', 'gw-partner-api');
   const sp = effective('SecurityPolicy', partner.route);
   assert.ok(sp.some((p) => (p.spec?.jwt?.providers ?? []).length > 0), 'gw-partner-api에 토큰 확인이 없다');
+});
+
+// ===================== IP별 로컬 한도의 버킷 하나(RV-14, '판단: 구현 kind 확인 둘째' 1) =====================
+
+const MATCH_LABEL = 'peaket.io/match';
+/** 원천 라우트들에서 그 메서드의 맞춤 조건 전부 */
+const matchesFrom = (name, method) => routesFrom(name).flatMap((r) => (r.spec?.rules ?? []).flatMap((rule) => (rule.matches ?? []).filter((m) => m.method === method)));
+
+test('RV-14 SR-T13 ② gw-fan-search 생성 규칙은 GET 맞춤 하나가 /v1/search·/v1/search/suggestions를 함께 맞춘다(버킷 하나)', () => {
+  requireDefinitions();
+  const gets = matchesFrom('gw-fan-search', 'GET');
+  assert.equal(gets.length, 1, `gw-fan-search의 GET 맞춤이 하나가 아니다(${gets.length}): ${JSON.stringify(gets.map((m) => m.path))}`);
+  assert.equal(gets[0].path?.type, 'RegularExpression', '묶은 맞춤은 정규식이다');
+  for (const p of ['/v1/search', '/v1/search/suggestions']) assert.ok(pathScore(gets[0], 'GET', p) >= 0, `${p}를 맞추지 않는다`);
+  for (const p of ['/v1/searchx', '/v1/search/a/b', '/v1/search/', '/v1/search/suggestionsx']) assert.ok(pathScore(gets[0], 'GET', p) < 0, `${p}를 맞춘다`);
+});
+
+test('RV-14 D-T50 ⑥ gw-partner-webhooks 생성 규칙은 POST 맞춤 하나가 두 웹훅 경로를 함께 맞춘다(버킷 하나)', () => {
+  requireDefinitions();
+  const posts = matchesFrom(WEBHOOK_ROUTE, 'POST');
+  assert.equal(posts.length, 1, `${WEBHOOK_ROUTE}의 POST 맞춤이 하나가 아니다(${posts.length}): ${JSON.stringify(posts.map((m) => m.path))}`);
+  for (const p of WEBHOOK_PATHS) assert.ok(pathScore(posts[0], 'POST', p) >= 0, `${p}를 맞추지 않는다`);
+  for (const p of ['/v1/webhooks/tossx', '/v1/webhooks/toss/x', '/v1/webhooks/other']) assert.ok(pathScore(posts[0], 'POST', p) < 0, `${p}를 맞춘다`);
+});
+
+test("RV-14 infra §4.1 '경로별 메서드 생성기' IP별 로컬 한도(sourceCIDR Distinct)가 걸린 라우트마다 이름표 peaket.io/match: merged가 있다(라우트 각각, 겹친 가드)", () => {
+  requireDefinitions();
+  const limited = byKind('HTTPRoute').filter((r) => localRules(effective('BackendTrafficPolicy', r)).some((g) => selectors(g.rule).some((s) => s.sourceCIDR?.type === 'Distinct')));
+  const names = new Set(limited.map(sourceName));
+  for (const want of ['gw-fan-search', WEBHOOK_ROUTE]) assert.ok(names.has(want), `IP별 로컬 한도 라우트에 ${want}가 없다(${[...names]})`);
+  for (const r of limited) assert.equal(r.metadata?.labels?.[MATCH_LABEL], 'merged', `${r.metadata?.name}: IP별 로컬 한도가 걸렸는데 ${MATCH_LABEL}: merged가 없다(경로마다 버킷이 따로 생긴다)`);
 });
 
 test('RV-03 웹훅 두 경로의 GET·PUT·PATCH·DELETE·OPTIONS는 맞는 규칙이 없거나 404 Problem 직접 응답 규칙에만 맞는다(메서드 다섯 각각)', () => {

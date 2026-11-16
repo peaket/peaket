@@ -482,8 +482,9 @@ test('HOT-400 PRF-030·BOT-047 gw-fan 토큰 갱신 응답의 Set-Cookie와 401 
 
 // ===================== 검색 IP 한도 =====================
 
-test('SR-T13 ② gw-fan /v1/search*는 한 IP(IPv4·IPv6 각각)가 초당 50건(모아 두기 50건)을 넘으면 429와 Retry-After이고 다른 IP는 막지 않는다', async () => {
-  // 로컬 한도는 프록시 파드마다 센다(docs/api/guidelines.md §6). 로컬 덧씌우기의 gw-fan 프록시 복제 수를 곱한다
+test('SR-T13 ② gw-fan /v1/search*는 한 IP(IPv4·IPv6 각각)가 두 경로(/v1/search·/v1/search/suggestions)를 섞어 초당 50건(모아 두기 50건)을 넘으면 429와 Retry-After이고 다른 IP는 막지 않는다(두 경로가 한 버킷)', async () => {
+  // 로컬 한도는 프록시 파드마다 센다(docs/api/guidelines.md §6). 로컬 덧씌우기의 gw-fan 프록시 복제 수를 곱한다.
+  // 두 경로를 번갈아 보내고 합친 통과 수를 한 버킷의 한도(50 × (1 + ceil(초)) × 복제 수)로 본다(docs/features/search.md §8 '버킷 하나로 센다', RV-14)
   const replicas = Number(c.replicas?.['gw-fan'] ?? 1);
   for (const [ip, other] of [
     ['198.51.100.77', '198.51.100.78'],

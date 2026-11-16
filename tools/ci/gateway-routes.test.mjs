@@ -656,6 +656,40 @@ test('RV-03 외부 수신 작업(태그 webhooks·security: [])의 경로에는 
   assertMethodsExact(openapi, routesByGateway(generated(openapi, sources).files)['gw-partner'], 'gw-partner');
 });
 
+// ===================== 묶은 맞춤(RV-14, '판단: 구현 kind 확인 둘째' 1) =====================
+
+/** 검색 셋(틀 있는 경로 하나 포함)과 그 원천. merged면 이름표 peaket.io/match: merged */
+function searchSpec(merged) {
+  const openapi = openapiOf({ '/v1/search': { GET: { security: [] } }, '/v1/search/suggestions': { GET: { security: [] } }, '/v1/search/tags/{tagId}': { GET: { security: [] } } });
+  const src = sourceRoute('gw-fan', 'gw-fan-search', [{ prefixes: ['/v1/search'], backend: 'core-svc' }], { auth: 'public' });
+  if (merged) src.metadata.labels['peaket.io/match'] = 'merged';
+  return { openapi, sources: { 'gw-fan': [src] } };
+}
+
+test("RV-14 infra §4.1 '경로별 메서드 생성기' merged 이름표가 있는 원천 규칙은 메서드마다 정규식 맞춤 하나를 쓰고, 그 정규식은 맡은 경로만 맞는다(경계 /v1/searchx·/v1/search/a/b·틀 경로의 두 마디)", () => {
+  const { openapi, sources } = searchSpec(true);
+  const by = routesByGateway(generated(openapi, sources).files);
+  const routes = apiRoutes(by['gw-fan'], 'gw-fan');
+  const ms = allMatches(routes).map(({ m }) => m);
+  for (const method of ['GET', 'OPTIONS']) {
+    const one = ms.filter((m) => m.method === method);
+    assert.equal(one.length, 1, `${method} 맞춤이 하나가 아니다(${one.length}): ${JSON.stringify(one.map((m) => m.path))}`);
+    assert.equal(one[0].path?.type, 'RegularExpression', `${method}: 묶은 맞춤은 정규식이다`);
+  }
+  const get = ms.find((m) => m.method === 'GET');
+  for (const p of ['/v1/search', '/v1/search/suggestions', '/v1/search/tags/a1']) assert.ok(pathMatches(get, p), `묶은 맞춤이 ${p}를 맞추지 않는다`);
+  for (const p of ['/v1/searchx', '/v1/search/a/b', '/v1/search/', '/v1/search/tags/a1/b2', '/v1/search/tags/', '/v1/search/suggestionsx']) assert.ok(!pathMatches(get, p), `묶은 맞춤이 ${p}를 맞춘다`);
+  for (const r of routes) assert.equal(r.metadata?.labels?.['peaket.io/match'], 'merged', `${r.metadata?.name}: 생성 라우트에 merged 이름표가 없다`);
+  assertMethodsExact(openapi, by['gw-fan'], 'gw-fan');
+});
+
+test("RV-14 infra §4.1 '경로별 메서드 생성기' merged 이름표가 없으면 지금처럼 경로·메서드 짝마다 맞춤이다", () => {
+  const { openapi, sources } = searchSpec(false);
+  const ms = allMatches(apiRoutes(routesByGateway(generated(openapi, sources).files)['gw-fan'], 'gw-fan')).map(({ m }) => m);
+  assert.equal(ms.filter((m) => m.method === 'GET').length, 3, 'GET 맞춤은 경로마다 하나(셋)다');
+  assert.equal(ms.filter((m) => m.method === 'OPTIONS').length, 3, 'OPTIONS 맞춤은 경로마다 하나(셋)다');
+});
+
 test("HOT-410 infra §4.1 '생성기가 멈추는 경우' /internal/로 시작하는 경로를 맡으면 2로 끝난다", () => {
   const openapi = openapiOf({ '/v1/partner/events/{eventId}': 'PATCH', '/internal/jwks/admin.json': { methods: 'GET', servers: ['https://partner-api.peaket.example'] } });
   const sources = {

@@ -195,7 +195,7 @@ test('D-T43 ③ CDN 캐시 공개 읽기(홈·검색·자동완성)를 두 번 �
 async function inClusterFlood(o) {
   const https = require('node:https');
   const agent = new https.Agent({ keepAlive: true, maxSockets: o.width });
-  const one = (ip) =>
+  const one = (ip, path) =>
     new Promise((resolve) => {
       const req = https.request(
         {
@@ -203,7 +203,7 @@ async function inClusterFlood(o) {
           port: o.port,
           servername: o.host,
           method: 'POST',
-          path: o.path,
+          path,
           agent,
           ...(o.ca ? { ca: o.ca } : { rejectUnauthorized: false }),
           timeout: 10000,
@@ -229,7 +229,9 @@ async function inClusterFlood(o) {
       req.end('{}');
     });
   const out = [];
-  for (const { ip, count } of o.batches) {
+  for (const { ip, count, paths } of o.batches) {
+    // paths가 있으면 요청마다 차례로 돌려 섞는다(두 웹훅 경로를 한 버킷으로 세는지, RV-14)
+    const pathOf = (i) => (paths && paths.length ? paths[i % paths.length] : o.path);
     const rs = new Array(count);
     let next = 0;
     const t0 = Date.now();
@@ -237,7 +239,7 @@ async function inClusterFlood(o) {
       Array.from({ length: Math.min(o.width, count) }, async () => {
         while (next < count) {
           const i = next++;
-          rs[i] = await one(ip);
+          rs[i] = await one(ip, pathOf(i));
         }
       }),
     );
@@ -304,6 +306,22 @@ test('D-T50 ⑥ 한 IP로 /v1/webhooks/toss에 초당 100건을 넘기면 429이
     assert.ok(flood.echo >= WEBHOOK_PER_SECOND, `${ip}: 초당 100건보다 적게 통과했다(${flood.echo})`);
     assert.equal(o.errors, 0, `${other}: 시험 바탕 모자람(연결 오류)`);
     assert.equal(o.echo, 1, `${other}: 다른 IP까지 막았다 ${JSON.stringify(o.statuses)}`);
+  }
+});
+
+test('RV-14 D-T50 ⑥ 한 IP로 두 웹훅 경로(/v1/webhooks/toss·/portone)를 섞어 보내도 대역이 받은 수는 100 × (1 + ceil(초)) × 복제 수 이하다(두 경로가 한 버킷, 클러스터 안에서 보냄)', async () => {
+  const replicas = Number(c.replicas?.['gw-partner'] ?? 1);
+  for (const ip of ['198.51.100.89', '2001:db8:89::1']) {
+    const [flood] = await floodInCluster([{ ip, count: 400, paths: ['/v1/webhooks/toss', '/v1/webhooks/portone'] }]);
+    const seconds = flood.ms / 1000;
+    const rate = flood.sent / Math.max(seconds, 0.001);
+    assert.equal(flood.errors, 0, `${ip}: 시험 바탕 모자람(연결 오류 ${flood.errors}건, ${JSON.stringify(flood.statuses)})`);
+    assert.ok(rate > WEBHOOK_PER_SECOND, `${ip}: 시험 바탕 모자람(보낸 속도 초당 ${rate.toFixed(0)}건, ${flood.sent}건 ${seconds.toFixed(2)}초)`);
+    assert.ok(flood.s429 > 0, `${ip}: 섞어 보낸 ${flood.sent}건에 429가 없다 ${JSON.stringify(flood.statuses)}`);
+    assert.equal(flood.s429 + flood.echo, flood.sent, `${ip}: 429도 대역 응답도 아닌 것이 있다 ${JSON.stringify(flood.statuses)}`);
+    // 경로마다 버킷이 따로면 통과가 두 배(경로당 100 × …)까지 늘어 이 단언에 걸린다
+    assert.ok(flood.echo <= WEBHOOK_PER_SECOND * (1 + Math.ceil(seconds)) * replicas, `${ip}: 두 경로를 섞어 대역이 받은 ${flood.echo}건 > 100 × (1 + ${Math.ceil(seconds)}) × ${replicas}(경로마다 센다)`);
+    assert.ok(flood.echo >= WEBHOOK_PER_SECOND, `${ip}: 초당 100건보다 적게 통과했다(${flood.echo})`);
   }
 });
 
