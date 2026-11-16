@@ -49,7 +49,7 @@ const row = (id: string, status: Row['status'], attempts = 0, amount = 10_000): 
 describe('환급 실행기', () => {
   test('GAT080_환급시각이_지난_REQUESTED를_결제사취소하고_모름은_다음재시도를_적는다', async () => {
     const f = fixture([row('c1', 'REQUESTED'), row('c2', 'REQUESTED', 0, 20_000)], { c1: 'CANCELLED', c2: 'UNKNOWN' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 1, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 1, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.calls).toEqual([
       { cancellationId: 'c1', amount: 10_000 },
       { cancellationId: 'c2', amount: 20_000 },
@@ -61,13 +61,13 @@ describe('환급 실행기', () => {
 
   test('GAT090_REFUND_PENDING은_재시도하고_시도횟수에_맞는_간격으로_미룬다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', 2)], { c1: 'PENDING' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 1, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 1, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.retries[0]).toMatchObject({ cancellationId: 'c1', attempts: 3, nextRetryAtMs: NOW + refundRetryDelayMs(3), lastError: 'PENDING' });
   });
 
   test('GAT090_업무거절은_바로_CS처리함_대상으로_남긴다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', 1)], { c1: 'REJECTED' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.failures[0]).toMatchObject({ cancellationId: 'c1', attempts: 2, lastError: 'REJECTED' });
     expect(f.notices[0]).toMatchObject({ cancellationId: 'c1', attempts: 2, lastError: 'REJECTED' });
     expect(f.retries).toHaveLength(0);
@@ -75,7 +75,7 @@ describe('환급 실행기', () => {
 
   test('GAT090_재시도_상한을_넘으면_CS처리함_대상으로_남긴다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', REFUND_RETRY_MAX_ATTEMPTS - 1)], { c1: 'UNKNOWN' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.failures[0]).toMatchObject({ cancellationId: 'c1', attempts: REFUND_RETRY_MAX_ATTEMPTS, lastError: 'UNKNOWN' });
     expect(f.notices).toHaveLength(1);
   });

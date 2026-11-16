@@ -7,6 +7,7 @@
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
+import type { EventRefundHolds } from '../domain/event-refund-ports.js';
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 
 export interface RefundAfterEntryDeps {
@@ -22,6 +23,8 @@ export interface RefundAfterEntryDeps {
   /** 입장 기록이 나온 취소의 CS '이상 표시'(FLAGGED). 없으면 행에만 남긴다 */
   flags?: EntryFlagNotice;
   log?: { warn(o: object, msg: string): void; error(o: object, msg: string): void };
+  /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 기한이 지난 미룸 풀기. 틱 맨 앞에 부르고 풀린 줄마다 SEV2 로그를 남긴다 */
+  holds?: Pick<EventRefundHolds, 'releaseExpired'>;
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */

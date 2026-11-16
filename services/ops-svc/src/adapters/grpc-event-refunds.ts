@@ -5,7 +5,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { EventCancellationDryRun, EventCancellationFault, EventCancellationPg } from '../modules/event-cancellations/domain/event-cancellation.js';
-import type { EventRefundJobProgress, EventRefundReader } from '../modules/event-cancellations/domain/ports.js';
+import type { EventRefundJobProgress, EventRefundReader, EventRefundHolds } from '../modules/event-cancellations/domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
@@ -77,7 +77,7 @@ export interface GrpcEventRefundsOptions {
   readonly profile?: GrpcLbProfile;
 }
 
-export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
+export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, EventRefundHolds {
   readonly #client: RefundClient;
 
   constructor(o: GrpcEventRefundsOptions) {
@@ -148,6 +148,11 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
   }
 
   /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘 */
+  /** SetEventRefundHold(BAT-420 몫 D, 빈 뼈대). 실패는 던진다 */
+  async hold(_q: { eventId: string; requestId: string; held: boolean; expiresAtMs?: number }): Promise<{ held: boolean }> {
+    throw new Error('아직 없음');
+  }
+
   async job(q: { requestId: string }): Promise<EventRefundJobProgress> {
     const a = await this.#call('GetEventRefundJob', { job_id: q.requestId });
     const closesAtMs = msOf(a.refund_window_closes_at);

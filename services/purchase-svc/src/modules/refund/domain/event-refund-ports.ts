@@ -1,4 +1,5 @@
 // 회차 취소 일괄 환불의 포트(BAT-425 GAT-120·GAT-130). 도메인은 DB·HTTP·gRPC를 모른다.
+import type { EventRefundHoldInput, EventRefundHoldState } from './event-refund-hold.js';
 import type {
   EventCancellationRequest,
   EventRefundAttempt,
@@ -138,6 +139,32 @@ export interface EventRefundServiceDeps {
   readonly items?: EventRefundItemAdder;
   /** 끝나지 않은 주문이 있으면 COMPLETED로 가지 않는다(ADR-0280 결정 5). 없으면 완료를 미루지 않는다 */
   readonly openOrders?: EventOpenOrders;
+  // BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 회차 취소 요청 중 보류 취소의 환급 미룸과 남는 차액 CS 건
+  readonly holds?: EventRefundHolds;
+  readonly gaps?: DeductionGapCancellations;
+  readonly gapNotice?: DeductionGapNotice;
+}
+
+// ---- BAT-420 몫 D(OPEN[45] 결정, 빈 뼈대): 미룸·차액 건 ----
+
+export interface EventRefundHolds {
+  /**
+   * 걸기: 같은 회차에 다른 요청 ID의 풀리지 않고 기한 안인 미룸이 있으면 EventRefundHoldError('ALREADY_EXISTS'). 같은 요청 ID면 expires_at만 바꾼다(늘리기·같은 값 멱등).
+   * 풀기: 같은 요청 ID일 때만 released_at을 쓴다(다르면 아무것도 하지 않고 지금 상태를 준다)
+   */
+  set(i: EventRefundHoldInput): Promise<EventRefundHoldState>;
+  /** 기한이 지났는데 풀리지 않은 미룸을 released_at으로 풀고 그 (회차, 요청) 목록을 준다(조건부 갱신, 한 번만) */
+  releaseExpired(nowMs: number, limit: number): Promise<readonly { eventId: string; cancellationRequestId: string }[]>;
+}
+
+export interface DeductionGapCancellations {
+  /** 그 회차에서 입장 시작 뒤에 접수돼 공제하고 결제사로 보낸 취소: reason USER, deduction_amount > 0, created_at ≥ entryOpensAt, status REFUND_PENDING·REFUNDED */
+  list(eventId: string, entryOpensAtMs: number): Promise<readonly { cancellationId: string; orderId: string; ticketId: string; deductionAmount: number }[]>;
+}
+
+export interface DeductionGapNotice {
+  /** ops CS REFUND_FAILED(category DEDUCTION_GAP, sourceId = 취소 ID, eventKey = sha256(`deduction-gap:${id}`) 앞 16바이트 UUID). best effort */
+  open(q: { readonly cancellationId: string; readonly orderId: string; readonly deductionAmount: number; readonly requestId: string; readonly nowMs: number }): Promise<void>;
 }
 
 // ---- BAT-420 GAT-110 E·H: 회차 취소 전용 표 취소·보류 취소 전환·쓸어 담기·끝나지 않은 주문 ----

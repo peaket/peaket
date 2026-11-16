@@ -36,6 +36,10 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "CloseEventRefundWindow": {
                       "requestType": "CloseEventRefundWindowRequest",
                       "responseType": "CloseEventRefundWindowResponse"
+                    },
+                    "SetEventRefundHold": {
+                      "requestType": "SetEventRefundHoldRequest",
+                      "responseType": "SetEventRefundHoldResponse"
                     }
                   }
                 },
@@ -400,6 +404,38 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     },
                     "not_applied_orders": {
                       "type": "int32",
+                      "id": 2
+                    }
+                  }
+                },
+                "SetEventRefundHoldRequest": {
+                  "fields": {
+                    "event_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "cancellation_request_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "held": {
+                      "type": "bool",
+                      "id": 3
+                    },
+                    "expires_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 4
+                    }
+                  }
+                },
+                "SetEventRefundHoldResponse": {
+                  "fields": {
+                    "held": {
+                      "type": "bool",
+                      "id": 1
+                    },
+                    "expires_at": {
+                      "type": "google.protobuf.Timestamp",
                       "id": 2
                     }
                   }

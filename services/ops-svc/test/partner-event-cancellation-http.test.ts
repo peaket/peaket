@@ -6,7 +6,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import type { EventOwnerLookup, EventRefundReader, EventRefundStarter, EventSaleStopper } from '../src/modules/event-cancellations/index.js';
-import { DRY_RUN, JOB, NOW, OTHER_TENANT, TENANT, fakeReauth } from './event-cancellation-fixtures.js';
+import { DRY_RUN, JOB, NOW, OTHER_TENANT, TENANT, fakeReauth, okHolds } from './event-cancellation-fixtures.js';
 import { FakeIdentity, quiet } from './support.js';
 
 const identity = new FakeIdentity();
@@ -32,7 +32,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners } }),
+    module: AppModule.register({ memory: true, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners, holds: okHolds() } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),

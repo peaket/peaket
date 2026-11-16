@@ -97,5 +97,15 @@ export interface EventCancellationCases {
   judgementPending(requestId: string, nowMs: number): Promise<void>;
 }
 
+// ---- BAT-420 몫 D(OPEN[45] 결정, 빈 뼈대): 회차 취소 요청 중 보류 취소의 환급 미룸(purchase-svc SetEventRefundHold) ----
+
+/** 미룸 기한: 걸거나 늘릴 때 지금 + 72시간 [가정] */
+export const EVENT_REFUND_HOLD_MS = 259_200_000;
+
+/** purchase-svc SetEventRefundHold. 실패(UNAVAILABLE·시간 초과·거절)는 던진다 */
+export interface EventRefundHolds {
+  hold(q: { eventId: string; requestId: string; held: boolean; expiresAtMs?: number }): Promise<{ held: boolean }>;
+}
+
 export const EVENT_CANCELLATION_STORE = Symbol.for('peaket.ops.event-cancellation-store');
 export const EVENT_REFUND_STARTER = Symbol.for('peaket.ops.event-refund-starter');

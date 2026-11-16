@@ -4,6 +4,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { INTERNAL_GRPC_CALLER_HEADER } from '@peaket/platform';
 import { GrpcEventRefunds } from '../src/adapters/grpc-event-refunds.js';
 
 const NOW = Date.parse('2026-11-15T01:00:00.000Z');
@@ -28,6 +29,9 @@ const PREVIEW_ANSWER = {
   ],
 };
 
+/** BAT-420 몫 D: SetEventRefundHold 대역의 다음 답·실패와 받은 호출자 머리 */
+const holdServer = { fail: false, callers: [] as unknown[] };
+
 let server: grpc.Server;
 let client: GrpcEventRefunds;
 
@@ -48,6 +52,16 @@ beforeAll(async () => {
     ResumeEventRefundJob: handler('ResumeEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_RUNNING' })),
     PreviewEventRefund: handler('PreviewEventRefund', () => PREVIEW_ANSWER),
     ApplyEventRefund: handler('ApplyEventRefund', () => ({ accepted: true, state: 'REFUND_JOB_STATE_RUNNING' })),
+    SetEventRefundHold: (call: grpc.ServerUnaryCall<Record<string, unknown>, Record<string, unknown>>, cb: grpc.sendUnaryData<Record<string, unknown>>) => {
+      received.push({ method: 'SetEventRefundHold', req: call.request });
+      holdServer.callers.push(call.metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0]);
+      if (holdServer.fail) {
+        cb({ code: grpc.status.UNAVAILABLE, details: 'purchase-svc down' });
+        return;
+      }
+      const held = call.request.held === true;
+      cb(null, held ? { held: true, expires_at: call.request.expires_at } : { held: false });
+    },
     CloseEventRefundWindow: handler('CloseEventRefundWindow', () => ({ state: 'REFUND_JOB_STATE_COMPLETED' })),
   });
   const port = await new Promise<number>((resolve, reject) => server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? reject(e) : resolve(p))));
@@ -148,5 +162,38 @@ describe('BAT425 ops-svc 환불 gRPC 클라이언트', () => {
     expect(r.perPg[0]).toMatchObject({ pg: 'TOSS', state: 'RUNNING', done: 5, failed: 1, unknown: 2 });
     expect(r.perPg[0]!.pauseReason).toBeUndefined();
     expect(r.perPg[1]).toEqual({ pg: 'PORTONE', state: 'PAUSED', pauseReason: 'AUTO_CIRCUIT_OPEN', done: 3, failed: 4, unknown: 6 });
+  });
+
+  // BAT-420 몫 D(OPEN[45] 결정): 회차 취소 요청 중 보류 취소의 환급 미룸. 시험 담당이 구현 전에 썼다(Docker 없이 도는 gRPC 시험).
+  test('R-T38 ⑥ 미룸 걸기는 SetEventRefundHold에 회차·요청 ID·held 참·기한 Timestamp를 호출자 머리 ops-svc로 보내고 답의 held를 읽는다', async () => {
+    const expiresAtMs = NOW + 259_200_000 + 250;
+    holdServer.fail = false;
+    holdServer.callers.length = 0;
+    expect(await client.hold({ eventId: EVENT, requestId: REQUEST, held: true, expiresAtMs })).toEqual({ held: true });
+    expect(received.at(-1)).toMatchObject({
+      method: 'SetEventRefundHold',
+      req: { event_id: EVENT, cancellation_request_id: REQUEST, held: true, expires_at: { seconds: Math.floor(expiresAtMs / 1000), nanos: (expiresAtMs % 1000) * 1_000_000 } },
+    });
+    expect(holdServer.callers).toEqual(['ops-svc']);
+  });
+
+  test('R-T38 ② 미룸 풀기는 held 거짓만 보내고 기한을 싣지 않는다', async () => {
+    holdServer.fail = false;
+    expect(await client.hold({ eventId: EVENT, requestId: REQUEST, held: false })).toEqual({ held: false });
+    const req = received.at(-1)!.req;
+    expect(req).toMatchObject({ event_id: EVENT, cancellation_request_id: REQUEST, held: false });
+    expect(req.expires_at ?? null).toBeNull();
+  });
+
+  test('R-T38 ⑥ purchase-svc가 UNAVAILABLE이면 미룸 호출은 던진다(부른 쪽이 요청을 저장하지 않고 503을 준다)', async () => {
+    // 대조: 서버가 받으면 답을 읽는다
+    holdServer.fail = false;
+    expect(await client.hold({ eventId: EVENT, requestId: REQUEST, held: true, expiresAtMs: NOW + 259_200_000 })).toEqual({ held: true });
+    holdServer.fail = true;
+    try {
+      await expect(client.hold({ eventId: EVENT, requestId: REQUEST, held: true, expiresAtMs: NOW + 259_200_000 })).rejects.toBeDefined();
+    } finally {
+      holdServer.fail = false;
+    }
   });
 });

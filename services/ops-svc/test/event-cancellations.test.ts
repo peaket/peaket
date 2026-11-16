@@ -9,6 +9,7 @@ import { EventCancellationProblem } from '../src/modules/event-cancellations/dom
 import { MemoryEventCancellationStore } from '../src/modules/event-cancellations/adapters/memory-store.js';
 import type { EventCancellationDryRun } from '../src/modules/event-cancellations/domain/event-cancellation.js';
 import type { EventRefundReader, EventRefundStarter, EventSaleStopper, SaleSuspensionLookup } from '../src/modules/event-cancellations/domain/ports.js';
+import { okHolds } from './event-cancellation-fixtures.js';
 
 const EVENT = '01900000-0000-7000-8000-000000000001';
 const COMMANDER = { accountId: '01900000-0000-7000-8000-000000000002', sessionId: 's-c', role: 'commander' };
@@ -48,7 +49,7 @@ const fixture = (withRefunds = true) => {
       return { jobId: i.requestId, state: 'RUNNING' };
     },
   };
-  const app = new EventCancellations(store, withRefunds ? refunds : undefined, () => NOW, audit, reauth, { suspension, reader, stopper });
+  const app = new EventCancellations(store, withRefunds ? refunds : undefined, () => NOW, audit, reauth, { suspension, reader, stopper, holds: okHolds() });
   return { store, calls, app, audit };
 };
 
@@ -104,7 +105,7 @@ describe('회차 취소 요청 [BAT-425]', () => {
     for (const [jobState, status] of [['COMPLETED', 'COMPLETED'], ['REFUND_WINDOW', 'REFUND_WINDOW']] as const) {
       const audit = new MemoryAuditChain();
       const store = new MemoryEventCancellationStore(audit);
-      const app = new EventCancellations(store, { start: async (i) => ({ jobId: i.requestId, state: jobState }), pause: async () => ({ jobId: '', state: 'PAUSED' }), resume: async () => ({ jobId: '', state: 'RUNNING' }) }, () => NOW, audit, reauth, { suspension, reader, stopper });
+      const app = new EventCancellations(store, { start: async (i) => ({ jobId: i.requestId, state: jobState }), pause: async () => ({ jobId: '', state: 'PAUSED' }), resume: async () => ({ jobId: '', state: 'RUNNING' }) }, () => NOW, audit, reauth, { suspension, reader, stopper, holds: okHolds() });
       const r = await app.request({ eventId: EVENT, reason: '공연 취소' }, COMMANDER, tokenFor(COMMANDER.accountId), idem(COMMANDER.accountId));
       await app.judge(r.requestId, { fault: 'ORGANIZER', reason: 'x', fanNoticeReason: '공연이 취소되었습니다' }, COMMANDER);
       expect(await approve({ app } as never, r.requestId)).toMatchObject({ status });

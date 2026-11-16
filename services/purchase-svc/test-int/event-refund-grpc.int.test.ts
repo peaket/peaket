@@ -1,11 +1,13 @@
 // purchase-svc 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130) 통합 시험.
 // 실제 gRPC 서버·클라이언트로 Start·Get·Pause·Apply·CloseWindow의 칸 매핑과 상태 코드를 본다(DB 없이 메모리 저장소).
 import * as grpc from '@grpc/grpc-js';
+import { INTERNAL_GRPC_CALLER_HEADER, INTERNAL_GRPC_TOKEN_HEADER } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { MemoryEventRefundStore } from '../src/modules/refund/adapters/memory-event-refund-store.js';
 import { EventRefundService } from '../src/modules/refund/application/event-refund-service.js';
 import { EventRefundGrpcController, eventRefundPackage } from '../src/modules/refund/inbound/event-refund.grpc.js';
 import type { EventRefundCanceller, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
+import { EventRefundHoldError, type EventRefundHoldInput } from '../src/modules/refund/domain/event-refund-hold.js';
 import { startPurchaseGrpcServer } from '../src/grpc-server.js';
 
 const NOW = Date.parse('2026-11-15T01:00:00.000Z');
@@ -105,5 +107,86 @@ describe('BAT425 refund.proto gRPC', () => {
     await expect(call('StartEventRefund', { event_id: EVENT, cancellation_request_id: 'not-a-uuid', ruling: 'CANCELLATION_RULING_ORGANIZER', ruled_by: 'a', confirmed_by: 'b' })).rejects.toMatchObject({
       code: grpc.status.INVALID_ARGUMENT,
     });
+  });
+});
+
+// ---- BAT-420 몫 D(시험 담당, 구현 전에 씀): SetEventRefundHold 끝에서 끝까지(gRPC → 검사 → 미룸 저장소, OPEN[45], GAT-110 D3) ----
+describe('SetEventRefundHold gRPC 끝에서 끝까지 [BAT-420 몫 D]', () => {
+  const TOKEN = 'it-internal-grpc-token';
+  const SEVEN_DAYS = 604_800_000;
+  const OTHER = '0193a000-0000-7000-8000-000000000099';
+  /** 회차마다 한 줄인 미룸 대역(같은 회차에 다른 요청의 열린 미룸이 있으면 ALREADY_EXISTS) — 실제 SQL은 event-refund.int가 본다 */
+  const rows = new Map<string, { requestId: string; expiresAtMs: number; released: boolean }>();
+  const holds = {
+    set: async (i: EventRefundHoldInput) => {
+      const cur = rows.get(i.eventId);
+      if (i.held) {
+        if (cur && !cur.released && cur.expiresAtMs > i.nowMs && cur.requestId !== i.cancellationRequestId) throw new EventRefundHoldError('ALREADY_EXISTS', '다른 요청의 미룸이 있다');
+        rows.set(i.eventId, { requestId: i.cancellationRequestId, expiresAtMs: i.expiresAtMs!, released: false });
+        return { held: true, expiresAtMs: i.expiresAtMs! };
+      }
+      if (cur && cur.requestId === i.cancellationRequestId) cur.released = true;
+      const now = rows.get(i.eventId);
+      return now && !now.released ? { held: true, expiresAtMs: now.expiresAtMs } : { held: false };
+    },
+    releaseExpired: async () => [],
+  };
+  let holdServer: Awaited<ReturnType<typeof startPurchaseGrpcServer>>;
+  let holdClient: grpc.Client & { SetEventRefundHold: Unary };
+  const md = (caller = 'ops-svc') => {
+    const m = new grpc.Metadata();
+    m.set(INTERNAL_GRPC_TOKEN_HEADER, TOKEN);
+    m.set(INTERNAL_GRPC_CALLER_HEADER, caller);
+    return m;
+  };
+  const setHold = (req: object, m = md()): Promise<Record<string, unknown>> =>
+    new Promise((resolve, reject) => holdClient.SetEventRefundHold(req, m, {}, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
+
+  beforeAll(async () => {
+    const svc = new EventRefundService({
+      store: new MemoryEventRefundStore(),
+      targets: { list: async () => [] },
+      canceller: { cancel: async () => ({ status: 'REFUNDED' }) },
+      holds,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    holdServer = await startPurchaseGrpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      services: [{ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(svc, { internalToken: TOKEN, nowMs: () => NOW }).handlers() }],
+    });
+    holdClient = new (eventRefundPackage().EventRefundService as unknown as new (address: string, credentials: grpc.ChannelCredentials) => grpc.Client & { SetEventRefundHold: Unary })(
+      `127.0.0.1:${holdServer.port}`,
+      grpc.credentials.createInsecure(),
+    );
+  });
+  afterAll(async () => {
+    holdClient?.close();
+    await holdServer?.close();
+  });
+
+  test('GAT-110 D3 기한 = 지금은 INVALID_ARGUMENT, 지금 + 604,800,000ms는 받고, + 604,800,001ms는 INVALID_ARGUMENT다(경계)', async () => {
+    const eventId = '0193a000-0000-7000-8000-000000000041';
+    await expect(setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: true, expires_at: ts(NOW) })).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    await expect(setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: true, expires_at: { seconds: Math.floor((NOW + SEVEN_DAYS) / 1000), nanos: 1_000_000 } })).rejects.toMatchObject({
+      code: grpc.status.INVALID_ARGUMENT,
+    });
+    expect(rows.has(eventId)).toBe(false);
+    await expect(setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: true, expires_at: ts(NOW + SEVEN_DAYS) })).resolves.toMatchObject({ held: true });
+    expect(rows.get(eventId)).toEqual({ requestId: REQUEST, expiresAtMs: NOW + SEVEN_DAYS, released: false });
+  });
+
+  test('GAT-110 D3 같은 회차에 다른 요청의 열린 미룸이면 ALREADY_EXISTS, 다른 요청 ID로 풀기는 그대로 걸림, 같은 요청 다시 걸기는 기한만 바뀌고, 다른 호출자는 PERMISSION_DENIED다', async () => {
+    const eventId = '0193a000-0000-7000-8000-000000000042';
+    await setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: true, expires_at: ts(NOW + 259_200_000) });
+    await expect(setHold({ event_id: eventId, cancellation_request_id: OTHER, held: true, expires_at: ts(NOW + 259_200_000) })).rejects.toMatchObject({ code: grpc.status.ALREADY_EXISTS });
+    await expect(setHold({ event_id: eventId, cancellation_request_id: OTHER, held: false })).resolves.toMatchObject({ held: true });
+    const extended = await setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: true, expires_at: ts(NOW + 2 * 259_200_000) });
+    expect(extended).toMatchObject({ held: true, expires_at: { seconds: Math.floor((NOW + 2 * 259_200_000) / 1000) } });
+    await expect(setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: false }, md('trust-svc'))).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+    expect(rows.get(eventId)).toMatchObject({ released: false });
+    await expect(setHold({ event_id: eventId, cancellation_request_id: REQUEST, held: false })).resolves.toMatchObject({ held: false });
+    expect(rows.get(eventId)).toMatchObject({ requestId: REQUEST, released: true });
   });
 });

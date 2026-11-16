@@ -32,6 +32,7 @@ import type {
   EventRefundStarter,
   EventSaleStopper,
   SaleSuspensionLookup,
+  EventRefundHolds,
 } from '../domain/ports.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -86,6 +87,8 @@ export interface EventCancellationExtra {
   readonly reader?: EventRefundReader;
   readonly owners?: EventOwnerLookup;
   readonly cases?: EventCancellationCases;
+  /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 요청 전 미룸 걸기·판정·확정 때 늘리기·판정 전 반려 때 풀기. 없으면 CANCEL 요청이 503이다 */
+  readonly holds?: EventRefundHolds;
   /** 판정 대기 건을 못 연 것처럼 요청은 받되 남길 경고 */
   readonly log?: { warn(obj: object, msg: string): void };
 }

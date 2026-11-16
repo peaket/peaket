@@ -36,6 +36,7 @@ import {
   CancelTicket,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventRefundHolds,
   DrizzleSeatReturns,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
@@ -454,7 +455,7 @@ describe('견적·취소 Saga', () => {
     expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
 
     const later = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => w.eventStartsAtMs + 50 * HOUR + 1 });
-    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 10_000 });
     expect(gatewayCalls).toHaveLength(1);
     expect(gatewayCalls[0]).toMatchObject({ amount: 10_000, idemKey: `cancel-${cancellationId}` });
@@ -494,10 +495,10 @@ describe('견적·취소 Saga', () => {
     // 다음 재시도 시각(두 번째 실패 뒤 5분)이 지나면 실행기가 같은 멱등키로 다시 부른다
     gatewayOutcome = 'CANCELLED';
     const early = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 5 * 60_000 - 1 });
-    await expect(early.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(early.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(2);
     const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 5 * 60_000 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(3);
     expect(gatewayCalls[2]).toMatchObject({ amount: 90_000, idemKey: `cancel-${cancellationId}` });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 2, next_refund_at: null, refund_failed_at: null });
@@ -520,7 +521,7 @@ describe('견적·취소 Saga', () => {
 
     gatewayOutcome = 'CANCELLED';
     const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 24 * HOUR });
-    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(1);
   });
 
@@ -532,7 +533,7 @@ describe('견적·취소 Saga', () => {
     await cancelOf(w, cancellationId);
     await admin.pool.query('update order_cancellation set refund_attempts = 4, next_refund_at = $2 where id = $1', [cancellationId, new Date(NOW + 60_000)]);
     const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 60_001 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0, held: 0 });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 5, next_refund_at: null, refund_last_error: 'UNKNOWN' });
     expect((await cancellationRow(cancellationId))!.refund_failed_at).not.toBeNull();
     expect(gatewayCalls).toHaveLength(2);
@@ -686,7 +687,7 @@ describe('BAT-420 마감 뒤 환급의 입장 기록 대조 [실제 ticket-svc·
     const flags: Record<string, unknown>[] = [];
     const c = counting();
     const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: c.entries, claims: writes, flags: { open: async (q) => void flags.push({ ...q }) }, nowMs: () => dueMs });
-    await expect(runner.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 1, unverified: 0 });
+    await expect(runner.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 1, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(0);
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED', refund_attempts: 0, refund_failed_at: null });
     const recorded = await entryRecordedAt(cancellationId);
@@ -705,7 +706,7 @@ describe('BAT-420 마감 뒤 환급의 입장 기록 대조 [실제 ticket-svc·
     await scan(w, 'IN', 'REJECT', w.eventStartsAtMs + 60_000);
     await scan(w, 'OUT', 'PASS', w.eventStartsAtMs + 2 * 60_000);
     const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => dueMs });
-    await expect(runner.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(runner.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(1);
     expect(gatewayCalls[0]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 3_334 });
@@ -882,5 +883,185 @@ describe('GAT-080 S5 일괄 환불 항목이 티켓 단계만 마친 표 [실제
     expect(gatewayCalls[0]).toMatchObject({ paymentRef: `ref-${w.orderId}`, idemKey: `cancel-${itemCancellationId}` });
     const tc = await ticketDb.pool.query('select cancellation_id, result, reason from ticket_cancellation where ticket_id = $1', [w.ticketId]);
     expect(tc.rows).toEqual([{ cancellation_id: itemCancellationId, result: 'REFUND_NOW', reason: 'EVENT_POSTPONED' }]);
+  });
+});
+
+// ---- BAT-420 몫 D(시험 담당, 구현 전에 씀): 회차 취소 요청 중 보류 취소의 환급 미룸(OPEN[45], R-T38 ①②⑤, GAT-090 D4·D5,
+// docs/features/transfer-refund.md §5 '회차 취소 요청 중 보류 취소의 환급 미룸', docs/data.md event_refund_hold) ----
+describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-svc·payment-svc]', () => {
+  const HOLD_MS = 259_200_000;
+  /** 입장 시작 뒤 팬 취소로 REQUESTED(마감 뒤 환급, 공제 29,999·환급 3,334)를 만든다 */
+  const heldCancellation = async () => {
+    const w = await world({ eventStartsAtMs: NOW + 2 * HOUR, entryOpensAtMs: NOW - HOUR, ticketPrice: 33_333 });
+    gatewayOutcome = 'CANCELLED';
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'ACCEPTED', cancellationId, refundAmount: 3_334, refundAfterEntryClose: true });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED', reason: 'USER', deduction_amount: 29_999, refund_amount: 3_334 });
+    return { w, cancellationId, dueMs: w.eventStartsAtMs + 180_000_000 };
+  };
+  /** 그 회차에 미룸을 직접 건다(저장소 SQL은 event-refund.int D3가 본다) */
+  const putHold = (eventId: string, requestId: string, heldAtMs: number, expiresAtMs: number) =>
+    admin.pool.query('insert into event_refund_hold (event_id, cancellation_request_id, held_at, expires_at) values ($1, $2, $3, $4)', [eventId, requestId, new Date(heldAtMs), new Date(expiresAtMs)]);
+  const holdRow = async (eventId: string) =>
+    (await admin.pool.query<{ released_at: Date | null; expires_at: Date }>('select released_at, expires_at from event_refund_hold where event_id = $1', [eventId])).rows[0];
+  const dueAt = async (cancellationId: string) => (await admin.pool.query<{ refund_due_at: Date | null }>('select refund_due_at from order_cancellation where id = $1', [cancellationId])).rows[0]!.refund_due_at;
+  /** 뒤 시험의 실행기가 남은 보류 취소를 환급하지 않게 끝낸다 */
+  const settle = (cancellationId: string) => admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = $1 and status = 'REQUESTED'", [cancellationId]);
+  const looking = () => {
+    const seen: string[][] = [];
+    return { seen, entries: { lookup: (ids: readonly string[], deadlineMs: number) => (seen.push([...ids]), ticketCancels!.lookup(ids, deadlineMs)) } };
+  };
+  const logSink = () => {
+    const lines: { level: 'warn' | 'error'; o: object; msg: string }[] = [];
+    return { lines, log: { warn: (o: object, msg: string) => void lines.push({ level: 'warn', o, msg }), error: (o: object, msg: string) => void lines.push({ level: 'error', o, msg }) } };
+  };
+  const expiredLines = (lines: { o: object; msg: string }[]) => lines.filter((l) => JSON.stringify(l).includes('event-refund-hold-expired'));
+
+  test('R-T38 ① 회차 취소 요청이 판정 중인 회차의 보류 취소는 마감이 지나도 환급되지 않고(입장 조회·결제사 0, held 1) 다른 회차의 보류 취소는 같은 틱에 환급된다', async () => {
+    const held = await heldCancellation();
+    const other = await heldCancellation();
+    gatewayCalls = [];
+    const requestId = randomUUID();
+    await putHold(held.w.eventId, requestId, NOW, held.dueMs + HOLD_MS);
+    const dueBefore = await dueAt(held.cancellationId);
+    const c = looking();
+    const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: c.entries, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => held.dueMs });
+    try {
+      await expect(runner.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 1 });
+      expect(c.seen.flat()).not.toContain(held.w.ticketId);
+      expect(c.seen.flat()).toContain(other.w.ticketId);
+      expect(gatewayCalls).toHaveLength(1);
+      expect(gatewayCalls[0]).toMatchObject({ idemKey: `cancel-${other.cancellationId}`, amount: 3_334 });
+      expect(await cancellationRow(held.cancellationId)).toMatchObject({ status: 'REQUESTED', refund_attempts: 0, refund_failed_at: null });
+      expect((await dueAt(held.cancellationId))?.getTime()).toBe(dueBefore?.getTime());
+      expect(await cancellationRow(other.cancellationId)).toMatchObject({ status: 'REFUNDED' });
+    } finally {
+      await settle(held.cancellationId);
+    }
+  });
+
+  test('R-T38 ② 판정 전 반려로 미룸이 풀리면(같은 요청 ID) 다음 틱에 공제한 금액 3,334원으로 한 번 환급되고 다시 돌려도 한 번이다', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    gatewayCalls = [];
+    const requestId = randomUUID();
+    const holds = new DrizzleEventRefundHolds(purchaseDb);
+    await putHold(w.eventId, requestId, NOW, dueMs + HOLD_MS);
+    const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, holds, nowMs: () => dueMs });
+    try {
+      await expect(runner.run()).resolves.toMatchObject({ refunded: 0, held: 1 });
+      expect(gatewayCalls).toHaveLength(0);
+      await expect(holds.set({ eventId: w.eventId, cancellationRequestId: requestId, held: false, nowMs: dueMs })).resolves.toMatchObject({ held: false });
+      expect((await holdRow(w.eventId))?.released_at?.getTime()).toBe(dueMs);
+      await expect(runner.run()).resolves.toMatchObject({ refunded: 1, held: 0 });
+      expect(gatewayCalls).toHaveLength(1);
+      expect(gatewayCalls[0]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
+      expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 3_334 });
+      await runner.run();
+      expect(gatewayCalls).toHaveLength(1);
+    } finally {
+      await settle(cancellationId);
+    }
+  });
+
+  test('R-T38 ⑤ 72시간 동안 늘리지 않은 미룸은 건 시각 + 259,199,999ms에는 건너뛰고 + 259,200,000ms에 저절로 풀려(released_at) 그 틱에 환급되며 SEV2가 한 번 남는다(다음 틱 0)', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    gatewayCalls = [];
+    const requestId = randomUUID();
+    const heldAtMs = dueMs - 60_000;
+    await putHold(w.eventId, requestId, heldAtMs, heldAtMs + HOLD_MS);
+    const sink = logSink();
+    let now = heldAtMs + HOLD_MS - 1;
+    const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), log: sink.log, nowMs: () => now });
+    try {
+      await expect(runner.run()).resolves.toMatchObject({ refunded: 0, held: 1 });
+      expect(gatewayCalls).toHaveLength(0);
+      expect((await holdRow(w.eventId))?.released_at).toBeNull();
+      expect(expiredLines(sink.lines)).toHaveLength(0);
+
+      now = heldAtMs + HOLD_MS;
+      await expect(runner.run()).resolves.toMatchObject({ refunded: 1, held: 0 });
+      expect((await holdRow(w.eventId))?.released_at?.getTime()).toBe(now);
+      expect(gatewayCalls).toHaveLength(1);
+      expect(gatewayCalls[0]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
+      const expired = expiredLines(sink.lines);
+      expect(expired).toHaveLength(1);
+      expect(JSON.stringify(expired[0])).toContain(w.eventId);
+      expect(JSON.stringify(expired[0])).toContain(requestId);
+
+      now += 60_000;
+      await runner.run();
+      expect(expiredLines(sink.lines)).toHaveLength(1);
+      expect(gatewayCalls).toHaveLength(1);
+    } finally {
+      await settle(cancellationId);
+    }
+  });
+
+  test('R-T38 ③ 진행 중(RUNNING) 회차 취소 일괄 환불이 있는 회차의 보류 취소는 미룸이 없어도 마감 뒤 환급되지 않는다(M-RT38-1c)', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    gatewayCalls = [];
+    const requestId = randomUUID();
+    await admin.pool.query(
+      `insert into event_cancellation_request (id, event_id, kind, status, fault, ruled_by, confirmed_by, created_at, updated_at)
+       values ($1, $2, 'CANCEL', 'RUNNING', 'ORGANIZER', 'commander-1', 'operator-2', now(), now())`,
+      [requestId, w.eventId],
+    );
+    const c = looking();
+    try {
+      await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: c.entries, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => dueMs }).run();
+      expect(c.seen.flat()).not.toContain(w.ticketId);
+      expect(gatewayCalls).toHaveLength(0);
+      expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED' });
+      // 대조: 일괄 환불이 끝나면(COMPLETED) 그 조건이 풀린다
+      await admin.pool.query("update event_cancellation_request set status = 'COMPLETED' where id = $1", [requestId]);
+      await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => dueMs }).run();
+      expect(gatewayCalls).toHaveLength(1);
+    } finally {
+      await settle(cancellationId);
+    }
+  });
+
+  test('GAT-090 D4 입장 조회 뒤·집기 전에 걸린 미룸도 조건부 집기가 막는다(끼어든 사례를 확인한 뒤 결제사 0, 행 REQUESTED)', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    gatewayCalls = [];
+    let lookups = 0;
+    const entries = {
+      lookup: async (ids: readonly string[], deadlineMs: number) => {
+        lookups++;
+        const answer = await ticketCancels!.lookup(ids, deadlineMs);
+        // 조회와 집기 사이에 ops가 회차 취소를 요청해 미룸이 걸렸다
+        await putHold(w.eventId, randomUUID(), dueMs, dueMs + HOLD_MS);
+        return answer;
+      },
+    };
+    try {
+      await new RefundAfterEntry({ writes, payments: paymentCancels!, entries, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => dueMs }).run();
+      expect(lookups).toBe(1);
+      expect(await holdRow(w.eventId)).toMatchObject({ released_at: null });
+      expect(gatewayCalls).toHaveLength(0);
+      expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED', refund_attempts: 0 });
+      // 직접 집어 보아도 미룸이 막는다(겹친 가드 하나만 빼는 틀린 구현을 따로 잡는다)
+      await expect(writes.claimDue(cancellationId, dueMs)).resolves.toBe(false);
+    } finally {
+      await settle(cancellationId);
+    }
+  });
+
+  test('GAT-090 D5 결제사 결과 모름(REFUND_PENDING)의 재시도는 미룸이 걸린 회차여도 미루지 않는다(결제사 1)', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    gatewayCalls = [];
+    gatewayOutcome = 'UNKNOWN';
+    try {
+      await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => dueMs }).run();
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+    }
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 1 });
+    expect(gatewayCalls).toHaveLength(1);
+    await putHold(w.eventId, randomUUID(), dueMs, dueMs + 2 * DAY);
+    await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => dueMs + HOUR }).run();
+    expect(gatewayCalls).toHaveLength(2);
+    expect(gatewayCalls[1]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED' });
   });
 });

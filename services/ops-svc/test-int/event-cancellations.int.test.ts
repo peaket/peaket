@@ -18,6 +18,7 @@ import { AppModule } from '../src/app.module.js';
 import type { CommandExecutor } from '../src/modules/commands/index.js';
 import type { EventOwnerLookup, EventRefundReader, EventRefundStartInput, EventRefundStarter } from '../src/modules/event-cancellations/index.js';
 import { DRY_RUN, JOB, fakeReauth, tokenFor } from '../test/event-cancellation-fixtures.js';
+import type { EventRefundHolds } from '../src/modules/event-cancellations/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -59,6 +60,15 @@ const refunds: EventRefundStarter = {
 };
 const reader: EventRefundReader = { preview: async () => DRY_RUN, job: async () => JOB };
 const ownerLookup: EventOwnerLookup = { find: async (eventId) => owners.get(eventId) };
+/** BAT-420 몫 D: purchase-svc SetEventRefundHold 대역. holdFails면 걸기가 UNAVAILABLE로 던진다 */
+const holdState = { holdFails: false, calls: [] as Array<{ eventId: string; requestId: string; held: boolean; expiresAtMs?: number }> };
+const intHolds: EventRefundHolds = {
+  hold: async (q) => {
+    holdState.calls.push({ ...q });
+    if (q.held && holdState.holdFails) throw Object.assign(new Error('14 UNAVAILABLE: purchase-svc'), { code: 14 });
+    return { held: q.held };
+  },
+};
 
 /** purchase-svc·queue-svc 판매 중지 경로를 받는 작은 HTTP 서버 */
 const listen = (target: 'purchase-svc' | 'queue-svc') =>
@@ -102,7 +112,7 @@ beforeAll(async () => {
   );
   svc = await createService({
     name: 'ops-svc-event-cancellations',
-    module: AppModule.register({ database: db, nowMs: NOW, executor: commandExecutor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners: ownerLookup } }),
+    module: AppModule.register({ database: db, nowMs: NOW, executor: commandExecutor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners: ownerLookup, holds: intHolds } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
@@ -538,5 +548,42 @@ describe('0013·0014 마이그레이션 실제 PostgreSQL 18 [BAT-420 GAT-110 P3
     }
     const applied = await admin.query("select name from ops_migration where name like '0013_%' or name like '0014_%'");
     expect(applied.rowCount).toBe(2);
+  });
+});
+
+// ---- BAT-420 몫 D(OPEN[45] 결정, 시험 담당이 구현 전에 씀): 미룸을 걸지 못하면 회차 취소 요청을 저장하지 않는다(실제 DB) ----
+describe('회차 취소 요청 전 미룸 [BAT-420 몫 D]', () => {
+  test('R-T38 ⑥ 미룸을 걸지 못하면 commander·파트너 취소 요청은 503 event-refund-unavailable이고 요청 행·감사·CS 건·멱등 기록이 0이며 연기 요청은 받는다', async () => {
+    const eventId = randomUUID();
+    await suspend(eventId);
+    const commander = identity.ops('commander');
+    const key = randomUUID();
+    holdState.holdFails = true;
+    try {
+      const r = await post('/v1/ops/event-cancellations', signed(commander, key), { eventId, reason: '공연 취소' });
+      expect(r.statusCode).toBe(503);
+      expect(json(r).type).toMatch(/event-refund-unavailable$/);
+      const partnerEvent = randomUUID();
+      owners.set(partnerEvent, { promoterId: TENANT, startsAtMs: FAR_STARTS_AT, endsAtMs: FAR_STARTS_AT + 3 * 3_600_000 });
+      const p = await post(`/v1/partner/events/${partnerEvent}/cancellation`, { ...identity.partner(TENANT), 'idempotency-key': randomUUID() }, { kind: 'CANCEL', reason: '대관 취소' });
+      expect(p.statusCode).toBe(503);
+      for (const id of [eventId, partnerEvent]) expect(await count('select count(*) as n from event_cancellation_request where event_id = $1', [id])).toBe(0);
+      expect(await count("select count(*) as n from idempotency_record where account_ref = $1 and idempotency_key = $2", [commander['x-user-id'], key])).toBe(0);
+      expect(await count("select count(*) as n from audit_chain where record_type = 'EVENT_CANCELLATION_REQUESTED' and record_json->'payload'->>'eventId' in ($1, $2)", [eventId, partnerEvent])).toBe(0);
+      const postponeEvent = randomUUID();
+      owners.set(postponeEvent, { promoterId: TENANT, startsAtMs: FAR_STARTS_AT, endsAtMs: FAR_STARTS_AT + 3 * 3_600_000 });
+      const before = holdState.calls.length;
+      const pp = await post(`/v1/partner/events/${postponeEvent}/cancellation`, { ...identity.partner(TENANT), 'idempotency-key': randomUUID() }, { kind: 'POSTPONE', reason: '연기', newStartsAt: new Date(FAR_STARTS_AT + 86_400_000).toISOString() });
+      expect(pp.statusCode).toBe(202);
+      expect(holdState.calls.length).toBe(before);
+    } finally {
+      holdState.holdFails = false;
+    }
+    // 같은 키로 다시 보내면 새 요청으로 받는다(실패한 시도는 멱등 기록을 남기지 않았다)
+    const again = await post('/v1/ops/event-cancellations', signed(commander, key), { eventId, reason: '공연 취소' });
+    expect(again.statusCode).toBe(201);
+    const requestId = json(again).requestId as string;
+    expect(holdState.calls.filter((c) => c.requestId === requestId && c.held)).toHaveLength(1);
+    expect(await count("select count(*) as n from cs_case where kind = 'JUDGEMENT_PENDING' and target_ref = $1", [requestId])).toBe(1);
   });
 });

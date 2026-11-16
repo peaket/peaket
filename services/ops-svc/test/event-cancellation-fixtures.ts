@@ -12,6 +12,7 @@ import {
   type EventCancellationReauth,
   type EventCancellationRecord,
   type EventOwnerLookup,
+  type EventRefundHolds,
   type EventRefundJobProgress,
   type EventRefundReader,
   type EventRefundStartInput,
@@ -111,7 +112,7 @@ export const recordOf = (over: Partial<EventCancellationRecord> = {}): EventCanc
   ...over,
 });
 
-type Dep = 'refunds' | 'reader' | 'stopper' | 'owners' | 'cases' | 'suspension';
+type Dep = 'refunds' | 'reader' | 'stopper' | 'owners' | 'cases' | 'suspension' | 'holds';
 
 export interface FixtureOptions {
   /** null이면 재인증 검증기를 조립하지 않는다 */
@@ -136,7 +137,13 @@ export function fixture(o: FixtureOptions = {}) {
   const caseCalls: Array<{ requestId: string; nowMs: number }> = [];
   const suspensionCalls: string[] = [];
   const ownerCalls: string[] = [];
+  /** BAT-420 몫 D: purchase-svc SetEventRefundHold 호출(차례대로) */
+  const holdCalls: Array<{ eventId: string; requestId: string; held: boolean; expiresAtMs?: number }> = [];
   const behaviour = {
+    holdFails: false,
+    releaseFails: false,
+    /** 미룸을 거는 순간 그 회차의 요청 행이 저장소에 있었는가(요청 저장 전에 거는지 본다) */
+    rowsWhenHeld: [] as number[],
     previewFails: false,
     stopFails: false,
     startFails: false,
@@ -204,6 +211,16 @@ export function fixture(o: FixtureOptions = {}) {
       if (behaviour.casesFail) throw new Error('cs down');
     },
   };
+  const holds: EventRefundHolds = {
+    hold: async (q) => {
+      log.push(`hold:${q.held ? 'on' : 'off'}:${q.requestId}`);
+      holdCalls.push({ ...q });
+      if (q.held) behaviour.rowsWhenHeld.push([...store.rows.values()].filter((r) => r.eventId === q.eventId && r.requestId === q.requestId).length);
+      if (q.held && behaviour.holdFails) throw new Error('purchase-svc 14 UNAVAILABLE');
+      if (!q.held && behaviour.releaseFails) throw new Error('purchase-svc 4 DEADLINE_EXCEEDED');
+      return { held: q.held };
+    },
+  };
   const without = new Set(o.without ?? []);
   const reauth = o.reauth === null ? undefined : (o.reauth ?? fakeReauth(log));
   const app = new EventCancellations(store, without.has('refunds') ? undefined : refunds, () => clock.now, audit, reauth, {
@@ -212,8 +229,9 @@ export function fixture(o: FixtureOptions = {}) {
     ...(without.has('reader') ? {} : { reader }),
     ...(without.has('owners') ? {} : { owners }),
     ...(without.has('cases') ? {} : { cases }),
+    ...(without.has('holds') ? {} : { holds }),
   });
-  return { app, store, audit, log, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, behaviour, clock };
+  return { app, store, audit, log, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, holdCalls, behaviour, clock };
 }
 
 export type Fixture = ReturnType<typeof fixture>;
@@ -242,3 +260,11 @@ export function ownEvent(f: Fixture, o: { eventId?: string; promoterId?: string;
   f.behaviour.owners.set(eventId, { promoterId: o.promoterId ?? TENANT, startsAtMs, ...(o.endsAtMs !== undefined ? { endsAtMs: o.endsAtMs } : { endsAtMs: startsAtMs + 3 * 3_600_000 }) });
   return eventId;
 }
+
+/** BAT-420 몫 D: 늘 받는 SetEventRefundHold 대역(미룸을 보지 않는 다른 시험용). 호출은 calls에 남긴다 */
+export const okHolds = (calls: string[] = []): EventRefundHolds => ({
+  hold: async (q) => {
+    calls.push(`hold:${q.held ? 'on' : 'off'}:${q.requestId}`);
+    return { held: q.held };
+  },
+});

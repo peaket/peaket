@@ -148,3 +148,10 @@ export { EventRefundCancellerRouter } from './application/event-refund-canceller
 export { HttpEntryFlagNotice } from './adapters/http-entry-flag-notice.js';
 export { DrizzlePendingCancellationConversions } from './adapters/db/drizzle-pending-cancellation-conversions.js';
 export { DrizzleEventOpenOrders } from './adapters/db/drizzle-event-open-orders.js';
+// BAT-420 몫 D(OPEN[45] 결정, 빈 뼈대)
+export { EVENT_REFUND_HOLD_MAX_MS, EventRefundHoldError, parseEventRefundHold, type EventRefundHoldInput, type EventRefundHoldState } from './domain/event-refund-hold.js';
+export type { DeductionGapCancellations, DeductionGapNotice, EventRefundHolds } from './domain/event-refund-ports.js';
+export { DrizzleEventRefundHolds } from './adapters/db/drizzle-event-refund-holds.js';
+export { DrizzleDeductionGapCancellations } from './adapters/db/drizzle-deduction-gap-cancellations.js';
+export { HttpDeductionGapNotice } from './adapters/http-deduction-gap-notice.js';
+export type { EventRefundGrpcOptions } from './inbound/event-refund.grpc.js';

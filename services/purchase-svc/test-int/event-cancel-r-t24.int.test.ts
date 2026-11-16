@@ -4,8 +4,8 @@
 // 좌석 Redis 비트맵은 회차 취소 전용 취소기에 좌석 포트가 아예 없어 바뀔 길이 없으므로 이 파일은 DB(seat_sale·purchase_quota)만 본다(남은 한계, 실패 확인 절).
 // 시험 담당이 구현 전에 썼다(ADR-0270).
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
-import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
+import { createHash, randomUUID } from 'node:crypto';
+import { createDatabase, ensureOutboxPartitions, fakeClock, type Database, type ExternalRequest } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../../ticket-svc/src/grpc-server.js';
@@ -19,13 +19,17 @@ import { DrizzleSeatSales } from '../src/modules/inventory/index.js';
 import {
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleDeductionGapCancellations,
   DrizzleEventOpenOrders,
+  DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
   DrizzlePendingCancellationConversions,
   EventRefundService,
   EventTicketCanceller,
   GrpcTicketCancellations,
+  HttpDeductionGapNotice,
+  RefundAfterEntry,
   WeekendBusinessCalendar,
   eventRefundCancellationId,
   type PaymentCancellations,
@@ -291,13 +295,14 @@ describe('GAT-110 E1 보류 취소 전환 경합 [PostgreSQL]', () => {
     expect(row).toMatchObject({ id: claimedId, reason: 'USER', deduction_amount: 29_999, refund_amount: 3_334, status: 'REFUND_PENDING' });
   });
 
-  test('GAT-110 E1 대상을 고른 뒤 환급 실행기가 먼저 집으면 전환하지 않고 FAILED cancellation-in-progress와 CS 일괄 환불 실패 한 건이다', async () => {
+  test('GAT-110 E1 대상을 고른 뒤 환급 실행기가 먼저 집으면 전환하지 않고 FAILED cancellation-in-progress이며, OPEN[45] 결정대로 일반 일괄 환불 실패 대신 그 행 공제액의 차액 건(DEDUCTION_GAP) 하나다(GAT-110 D7)', async () => {
     const eventId = randomUUID();
     const requestId = randomUUID();
     const held = await seat(eventId);
     const heldId = await heldFanCancel(eventId, held, 'REQUESTED');
     pays.length = 0;
     notices.length = 0;
+    const gap = gapNoticeOf();
     // 대상 고르기와 전환 사이에 환급 실행기가 집은 것처럼, 대상 목록을 읽은 뒤 행을 REFUND_PENDING으로 바꾼다
     const targets = new DrizzleEventRefundTargets(purchaseDb, configs);
     const racing = {
@@ -319,14 +324,167 @@ describe('GAT-110 E1 보류 취소 전환 경합 [PostgreSQL]', () => {
         calendar: new WeekendBusinessCalendar(),
       }),
       notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+      gaps: new DrizzleDeductionGapCancellations(purchaseDb),
+      gapNotice: gap.notice,
       nowMs: () => NOW,
       deadlineMs: () => NOW + 30_000,
     });
     await s.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
     expect(pays).toEqual([]);
-    expect(notices).toEqual([`${held.ticketId}:cancellation-in-progress`]);
+    expect(notices).toEqual([]);
+    // CS 건 하나 = 그 취소 하나(eventKey가 취소 ID로 정해진다). 확정 때 차액 찾기와 진 항목이 같은 행을 둘 다 볼 수 있어 보낸 횟수는 1 이상을 받는다
+    const bodies = gap.bodies();
+    expect(bodies.length).toBeGreaterThanOrEqual(1);
+    for (const b of bodies) expect(b).toEqual({ eventKey: gapKey(heldId), kind: 'REFUND_FAILED', sourceId: heldId, category: 'DEDUCTION_GAP', createdAt: new Date(NOW).toISOString() });
     const item = await purchaseDb.pool.query<{ status: string; last_error: string; cancellation_id: string }>('select status, last_error, cancellation_id from event_refund_item where request_id = $1', [requestId]);
     expect(item.rows).toEqual([{ status: 'FAILED', last_error: 'cancellation-in-progress', cancellation_id: heldId }]);
     expect((await cancellationsOf([held.orderId]))[0]).toMatchObject({ id: heldId, reason: 'USER', deduction_amount: 29_999, refund_amount: 3_334, status: 'REFUND_PENDING' });
+  });
+});
+
+// ---- BAT-420 몫 D(시험 담당, 구현 전에 씀): 확정 때 미룸 풀기와 남는 공제 차액 CS 건(OPEN[45], R-T38 ③④,
+// docs/features/transfer-refund.md §5 '회차 취소 요청 중 보류 취소의 환급 미룸', docs/data.md event_refund_hold) ----
+/** sha256(`deduction-gap:${id}`) 앞 16바이트를 8-4-4-4-12로(시험이 직접 계산한다) */
+const gapKey = (id: string) => {
+  const h = createHash('sha256').update(`deduction-gap:${id}`).digest('hex').slice(0, 32);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+};
+const putHold = (eventId: string, requestId: string) =>
+  purchaseDb.pool.query('insert into event_refund_hold (event_id, cancellation_request_id, held_at, expires_at) values ($1, $2, $3, $4)', [eventId, requestId, new Date(NOW - HOUR), new Date(NOW - HOUR + 259_200_000)]);
+const holdOf = async (eventId: string) => (await purchaseDb.pool.query<{ released_at: Date | null }>('select released_at from event_refund_hold where event_id = $1', [eventId])).rows[0];
+const requestRows = async (requestId: string) => Number((await purchaseDb.pool.query<{ n: string }>('select count(*) as n from event_cancellation_request where id = $1', [requestId])).rows[0]!.n);
+/** 그 회차의 끝난 팬·운영자 취소 행(차액 대상 고르기 재료). 표는 대상에서 빠진다(취소 행이 VOIDED·REQUESTED가 아니다) */
+async function doneCancel(s: Seat, o: { reason: 'USER' | 'FRAUD'; deduction: number; status: 'REFUND_PENDING' | 'REFUNDED'; createdAtMs: number }): Promise<string> {
+  const id = randomUUID();
+  await purchaseDb.pool.query(
+    `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+     values ($1, $2, $3, $4, 0, false, $5, $6, $7, $8, $9, $9)`,
+    [id, s.orderId, s.ticketId, o.reason, o.deduction === 0 ? 0 : Math.round((o.deduction / PRICE) * 10_000), o.deduction, PRICE - o.deduction, o.status, new Date(o.createdAtMs)],
+  );
+  return id;
+}
+const gapNoticeOf = () => {
+  const sent: ExternalRequest[] = [];
+  const notice = new HttpDeductionGapNotice({ request: async (r: ExternalRequest) => (sent.push(r), new Response('{"accepted":true}', { status: 202 })) }, 'it-token');
+  const bodies = () => sent.map((r) => JSON.parse(String(r.body)) as { eventKey: string; kind: string; sourceId: string; category: string; createdAt: string });
+  return { notice, sent, bodies };
+};
+const gapService = (gap: ReturnType<typeof gapNoticeOf>, over: { canceller?: ConstructorParameters<typeof EventRefundService>[0]['canceller'] } = {}) =>
+  new EventRefundService({
+    store: new DrizzleEventRefundStore(purchaseDb, clock),
+    targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+    canceller:
+      over.canceller ??
+      new EventTicketCanceller({
+        tickets: ticketCancels!,
+        conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+        orders: new DrizzleCancellationOrders(purchaseDb, configs),
+        writes,
+        payments,
+        calendar: new WeekendBusinessCalendar(),
+      }),
+    items: new DrizzleEventRefundStore(purchaseDb, clock),
+    openOrders: new DrizzleEventOpenOrders(purchaseDb),
+    notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+    gaps: new DrizzleDeductionGapCancellations(purchaseDb),
+    gapNotice: gap.notice,
+    nowMs: () => NOW,
+    deadlineMs: () => NOW + 30_000,
+    concurrency: 2,
+  });
+
+describe('R-T38 확정 때 미룸 풀기와 남는 공제 차액 [PostgreSQL·실제 ticket-svc gRPC, BAT-420 몫 D]', () => {
+  test('R-T38 ③ 확정하면 미룸이 요청 행과 같은 트랜잭션에서 풀리고(저장이 실패하면 둘 다 없다) 보류 취소는 권면 전액 33,333원으로 한 번 환급된다(시작 뒤 실행기가 먼저 돌아도)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const held = await seat(eventId);
+    const heldId = await heldFanCancel(eventId, held, 'REQUESTED');
+    // 확정은 그 회차의 열린 미룸을 요청 ID와 관계없이 푼다(계획 §11). 건 요청 ID를 일부러 다르게 둔다
+    await putHold(eventId, randomUUID());
+    pays.length = 0;
+    const fail = (name: string, table: string, cond: string) =>
+      purchaseDb.pool.query(
+        `create or replace function ${name}() returns trigger language plpgsql as $$ begin raise exception 'injected ${name}'; end $$;
+         create trigger ${name} before ${table} for each row when (${cond}) execute function ${name}();`,
+      );
+    const drop = (name: string, table: string) => purchaseDb.pool.query(`drop trigger if exists ${name} on ${table}; drop function if exists ${name}();`);
+    // ⓐ 항목 저장이 실패하면 요청 행도 없고 미룸도 그대로 걸려 있다(풀기를 트랜잭션 앞에서 따로 하면 여기서 풀린다)
+    await fail('rt38_item_fail', 'insert on event_refund_item', `new.request_id = '${requestId}'`);
+    try {
+      await expect(gapService(gapNoticeOf()).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' })).rejects.toThrow();
+    } finally {
+      await drop('rt38_item_fail', 'event_refund_item');
+    }
+    expect(await requestRows(requestId)).toBe(0);
+    expect(await holdOf(eventId)).toEqual({ released_at: null });
+    // ⓑ 미룸 풀기가 실패하면 요청 행도 없다(풀기를 커밋 뒤에 따로 하면 요청 행이 남는다)
+    await fail('rt38_hold_fail', `update on event_refund_hold`, `old.event_id = '${eventId}'`);
+    try {
+      await expect(gapService(gapNoticeOf()).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' })).rejects.toThrow();
+    } finally {
+      await drop('rt38_hold_fail', 'event_refund_hold');
+    }
+    expect(await requestRows(requestId)).toBe(0);
+    expect(await holdOf(eventId)).toEqual({ released_at: null });
+    expect(pays.filter((p) => p.orderId === held.orderId)).toEqual([]);
+
+    // 성공: 요청 행을 만든 뒤 항목을 처리하기 직전에 마감 뒤 환급 실행기가 먼저 돈다(미룸은 풀렸지만 RUNNING 일괄 환불이 막는다)
+    const inner = new EventTicketCanceller({
+      tickets: ticketCancels!,
+      conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+      orders: new DrizzleCancellationOrders(purchaseDb, configs),
+      writes,
+      payments,
+      calendar: new WeekendBusinessCalendar(),
+    });
+    let ranRunner = false;
+    const runnerFirst: ConstructorParameters<typeof EventRefundService>[0]['canceller'] = {
+      cancel: async (t, q) => {
+        if (!ranRunner) {
+          ranRunner = true;
+          expect((await holdOf(eventId))?.released_at).not.toBeNull();
+          await new RefundAfterEntry({ writes, payments, entries: ticketCancels!, claims: writes, holds: new DrizzleEventRefundHolds(purchaseDb), nowMs: () => STARTS + 50 * HOUR }).run();
+          expect(pays.filter((p) => p.cancellationId === heldId)).toEqual([]);
+        }
+        return inner.cancel(t, q);
+      },
+    };
+    const started = await gapService(gapNoticeOf(), { canceller: runnerFirst }).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(ranRunner).toBe(true);
+    expect(started.progress).toMatchObject({ total: 1, done: 1, failed: 0 });
+    expect(await requestRows(requestId)).toBe(1);
+    expect((await holdOf(eventId))?.released_at).not.toBeNull();
+    const mine = pays.filter((p) => p.orderId === held.orderId);
+    expect(mine).toEqual([{ cancellationId: heldId, orderId: held.orderId, amount: 33_333, reason: 'EVENT_CANCELLED' }]);
+    expect((await cancellationsOf([held.orderId]))[0]).toMatchObject({ id: heldId, reason: 'EVENT_CANCELLED', deduction_amount: 0, refund_amount: 33_333, status: 'REFUNDED' });
+  });
+
+  test('R-T38 ④ 확정 때 입장 시작 뒤(정각 포함) 접수돼 공제하고 나간 USER 취소마다 차액 건이 한 번 생기고(1ms 앞·FRAUD 0원·다른 회차는 아님) 결제사 추가 호출은 0, 다시 시작하면 0이다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const normal = await seat(eventId);
+    const after = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 29_999, status: 'REFUNDED', createdAtMs: NOW - 10 * MINUTE });
+    const onTheDot = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 29_999, status: 'REFUND_PENDING', createdAtMs: ENTRY_OPENS });
+    const before = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 3_333, status: 'REFUNDED', createdAtMs: ENTRY_OPENS - 1 });
+    const fraud = await doneCancel(await seat(eventId), { reason: 'FRAUD', deduction: 0, status: 'REFUNDED', createdAtMs: NOW - 5 * MINUTE });
+    const otherEvent = randomUUID();
+    const elsewhere = await doneCancel(await seat(otherEvent), { reason: 'USER', deduction: 29_999, status: 'REFUNDED', createdAtMs: NOW - 10 * MINUTE });
+    pays.length = 0;
+    notices.length = 0;
+    const gap = gapNoticeOf();
+    await gapService(gap).start({ eventId, requestId, fault: 'FORCE_MAJEURE', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    // 결제사는 대상 표 한 장(normal)만: 차액 건은 결제사 호출이 아니다
+    expect(pays).toEqual([{ cancellationId: eventRefundCancellationId(requestId, normal.ticketId), orderId: normal.orderId, amount: 33_333, reason: 'EVENT_CANCELLED' }]);
+    const bodies = gap.bodies();
+    expect(bodies.map((b) => b.sourceId).sort()).toEqual([after, onTheDot].sort());
+    for (const b of bodies) expect(b).toEqual({ eventKey: gapKey(b.sourceId), kind: 'REFUND_FAILED', sourceId: b.sourceId, category: 'DEDUCTION_GAP', createdAt: new Date(NOW).toISOString() });
+    for (const id of [before, fraud, elsewhere]) expect(bodies.map((b) => b.sourceId)).not.toContain(id);
+    expect(gap.sent.every((r) => r.method === 'POST' && r.path === '/internal/v1/cs-cases')).toBe(true);
+    expect(notices).toEqual([]);
+    // 같은 요청으로 다시 시작하면 차액 건을 다시 열지 않는다
+    const again = gapNoticeOf();
+    await gapService(again).start({ eventId, requestId, fault: 'FORCE_MAJEURE', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(again.sent).toEqual([]);
+    expect(pays).toHaveLength(1);
   });
 });

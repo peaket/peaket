@@ -57,6 +57,8 @@ interface CommonWiring {
     readonly owners?: EventOwnerLookup;
     readonly suspension?: SaleSuspensionLookup;
     readonly cases?: EventCancellationCases;
+    /** BAT-420 몫 D(빈 뼈대, 아직 조립하지 않음): purchase-svc SetEventRefundHold */
+    readonly holds?: import('./modules/event-cancellations/index.js').EventRefundHolds;
   };
 }
 

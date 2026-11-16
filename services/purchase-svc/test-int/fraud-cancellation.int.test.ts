@@ -329,7 +329,7 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소 [실제 DB·ticket-svc·p
     expect(await orderStatus(w.orderId)).toBe('PARTIALLY_REFUNDED');
 
     const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 60_001 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(gatewayCalls).toHaveLength(2);
     expect(gatewayCalls.map((c) => c.idemKey).sort()).toEqual(w.tickets.map((t) => `cancel-${fraudCancellationId(approvalId, t.ticketId)}`).sort());
     expect(gatewayCalls.every((c) => c.paymentRef === `ref-${w.orderId}` && c.reason === 'FRAUD')).toBe(true);

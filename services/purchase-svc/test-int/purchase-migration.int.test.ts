@@ -769,3 +769,38 @@ describe('0023 입장 기록 대조 칸 [BAT-420]', () => {
     expect(again.rows).toHaveLength(1);
   });
 });
+
+// ---- BAT-420 몫 D(시험 담당, 구현 전에 씀): 0024 event_refund_hold(OPEN[45], GAT-110 D6, docs/data.md event_refund_hold) ----
+describe('0024 회차 취소 요청 중 환급 미룸 표 [BAT-420 몫 D]', () => {
+  test('GAT-110 D6 event_refund_hold 마이그레이션은 회차 하나에 한 줄과 기한 검사를 건다(기본 키 event_id, expires_at <= held_at 거절, 다시 돌려도 같다)', async () => {
+    expect(journal.entries.map((e) => e.tag)).toContain('0024_event_refund_hold');
+    const cols = await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
+      "select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'event_refund_hold' order by ordinal_position",
+    );
+    expect(cols.rows).toEqual([
+      { column_name: 'event_id', data_type: 'uuid', is_nullable: 'NO', column_default: null },
+      { column_name: 'cancellation_request_id', data_type: 'uuid', is_nullable: 'NO', column_default: null },
+      { column_name: 'held_at', data_type: 'timestamp with time zone', is_nullable: 'NO', column_default: null },
+      { column_name: 'expires_at', data_type: 'timestamp with time zone', is_nullable: 'NO', column_default: null },
+      { column_name: 'released_at', data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null },
+    ]);
+    const pk = await q<{ cols: string[] }>(
+      `select array_agg(a.attname order by a.attnum)::text[] as cols from pg_constraint c join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+        where c.conrelid = 'public.event_refund_hold'::regclass and c.contype = 'p' group by c.oid`,
+    );
+    expect(pk.rows).toEqual([{ cols: ['event_id'] }]);
+    const eventId = id();
+    const put = (e: string, heldAt: string, expiresAt: string) =>
+      q('insert into event_refund_hold (event_id, cancellation_request_id, held_at, expires_at) values ($1, $2, $3, $4)', [e, id(), heldAt, expiresAt]);
+    // 기한 검사: 같은 시각·이른 시각은 23514, 1ms 늦은 기한은 들어간다(경계)
+    await expect(put(id(), '2026-11-20T01:00:00.000Z', '2026-11-20T01:00:00.000Z')).rejects.toMatchObject({ code: '23514' });
+    await expect(put(id(), '2026-11-20T01:00:00.000Z', '2026-11-20T00:59:59.999Z')).rejects.toMatchObject({ code: '23514' });
+    await put(eventId, '2026-11-20T01:00:00.000Z', '2026-11-20T01:00:00.001Z');
+    // 회차 하나에 한 줄: 같은 회차를 다른 요청으로 또 넣으면 23505이고 처음 줄만 남는다
+    await expect(put(eventId, '2026-11-20T02:00:00.000Z', '2026-11-23T02:00:00.000Z')).rejects.toMatchObject({ code: '23505' });
+    expect(await count('select count(*) as n from event_refund_hold where event_id = $1', [eventId])).toBe(1);
+    await migratePurchase(url);
+    expect(await count('select count(*) as n from event_refund_hold where event_id = $1', [eventId])).toBe(1);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(journal.entries.length);
+  });
+});

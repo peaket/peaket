@@ -96,7 +96,7 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
   test('P-T19 ① 들어감·통과 기록이 있으면 결제사를 부르지 않고 가장 이른 입장 시각을 남겨 이상 표시를 한 번 연다(단위)', async () => {
     const f = fixture([requested('a')]);
     f.entryAnswers.set('t-a', { found: true, entered: true, firstEnteredAtMs: ENTERED_AT });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 1, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 1, unverified: 0, held: 0 });
     expect(f.pays).toEqual([]);
     expect(f.claims).toEqual([]);
     expect(f.marks).toEqual([{ cancellationId: 'c-a', enteredAtMs: ENTERED_AT, nowMs: NOW }]);
@@ -107,7 +107,7 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
 
   test('P-T19 ③ 입장 기록이 없으면 조건부로 집은 뒤에만 결제사를 한 번 불러 환급한다(단위)', async () => {
     const f = fixture([requested('a')]);
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.claims).toEqual([{ cancellationId: 'c-a', nowMs: NOW }]);
     expect(f.pays).toEqual([{ cancellationId: 'c-a', orderId: 'o-a', amount: 3_334 }]);
     expect(f.writes).toEqual(['status:c-a:REFUNDED']);
@@ -127,7 +127,7 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
   test('GAT-090 A1 입장 조회가 실패하면 보류 취소를 환급하지 않고 재시도 횟수·환급 시각을 그대로 두며 다음 틱에 다시 묻는다(실패 뒤 성공)', async () => {
     const f = fixture([requested('a'), requested('b'), pending('p')]);
     f.behaviour.lookupFails = true;
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 2 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 2, held: 0 });
     expect(f.pays.map((p) => p.cancellationId)).toEqual(['c-p']);
     expect(f.claims).toEqual([]);
     expect(f.marks).toEqual([]);
@@ -138,7 +138,7 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
     expect(f.errors).toEqual([]);
 
     f.behaviour.lookupFails = false;
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.lookups).toHaveLength(2);
     expect(f.pays.map((p) => p.cancellationId)).toEqual(['c-p', 'c-a', 'c-b']);
   });
@@ -146,7 +146,7 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
   test('GAT-090 A1 ticket-svc가 표를 모르면(found 거짓) 그 행만 환급하지 않고 경고를 남긴다(있음·없음·모름의 가운데 값)', async () => {
     const f = fixture([requested('unknown'), requested('known')]);
     f.entryAnswers.set('t-unknown', { found: false, entered: false });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 1 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 1, held: 0 });
     expect(f.pays.map((p) => p.cancellationId)).toEqual(['c-known']);
     expect(f.claims.map((c) => c.cancellationId)).toEqual(['c-known']);
     expect(f.rows.get('c-unknown')).toMatchObject({ status: 'REQUESTED', attempts: 0, dueAtMs: DUE });

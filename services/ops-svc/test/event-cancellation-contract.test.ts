@@ -19,6 +19,7 @@ import {
   type EventSaleStopper,
   type SaleSuspensionLookup,
 } from '../src/modules/event-cancellations/index.js';
+import { okHolds } from './event-cancellation-fixtures.js';
 
 const NOW = Date.parse('2026-11-15T08:00:00.000Z');
 const EVENT1 = '0193d000-0000-7000-8000-000000000001';
@@ -81,7 +82,7 @@ const fixture = (
   const suspension: SaleSuspensionLookup = { isSuspended: async () => true };
   const reader: EventRefundReader = { preview: async () => DRY_RUN, job: async () => ({ state: 'RUNNING', total: 1, done: 0, failed: 0, perPg: [] }) };
   const reauth = o.reauth === null ? undefined : (o.reauth ?? reauthOf());
-  const app = new EventCancellations(store, refunds, () => NOW, audit, reauth, { suspension, reader, stopper });
+  const app = new EventCancellations(store, refunds, () => NOW, audit, reauth, { suspension, reader, stopper, holds: okHolds() });
   return { audit, store, calls, app };
 };
 

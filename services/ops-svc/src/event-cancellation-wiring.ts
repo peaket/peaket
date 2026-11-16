@@ -5,7 +5,7 @@ import { createExternalHttpClient } from '@peaket/platform';
 import { HttpCoreEventOwners } from './adapters/http-core-event-owners.js';
 import { HttpEventSaleStopper } from './adapters/event-sale-stopper.js';
 import type { CommandExecutor } from './modules/commands/domain/ports.js';
-import type { EventOwnerLookup, EventRefundReader, EventSaleStopper } from './modules/event-cancellations/domain/ports.js';
+import type { EventOwnerLookup, EventRefundHolds, EventRefundReader, EventSaleStopper } from './modules/event-cancellations/domain/ports.js';
 
 export interface EventCancellationDepsInput {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -20,6 +20,8 @@ export interface EventCancellationDeps {
   readonly stopper?: EventSaleStopper;
   readonly reader?: EventRefundReader;
   readonly owners?: EventOwnerLookup;
+  /** BAT-420 몫 D(빈 뼈대, 아직 조립하지 않음): purchase gRPC 클라이언트가 미룸(hold)도 하면 그것. 없으면 CANCEL 요청이 503이다 */
+  readonly holds?: EventRefundHolds;
 }
 
 const has = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';

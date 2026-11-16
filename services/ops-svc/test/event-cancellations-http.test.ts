@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import type { Command, CommandExecutor } from '../src/modules/commands/index.js';
 import type { EventRefundReader, EventRefundStarter, EventSaleStopper } from '../src/modules/event-cancellations/index.js';
-import { DRY_RUN, JOB, NOW, fakeReauth, tokenFor } from './event-cancellation-fixtures.js';
+import { DRY_RUN, JOB, NOW, fakeReauth, okHolds, tokenFor } from './event-cancellation-fixtures.js';
 import { FakeIdentity, quiet } from './support.js';
 
 const identity = new FakeIdentity();
@@ -40,7 +40,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, executor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper } }),
+    module: AppModule.register({ memory: true, executor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, holds: okHolds() } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),

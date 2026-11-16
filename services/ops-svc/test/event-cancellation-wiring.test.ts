@@ -40,3 +40,17 @@ describe('ops 시작 조립의 회차 취소 의존 [BAT-420 GAT-110 P4]', () =>
     expect(main).toMatch(/from '\.\/event-cancellation-wiring\.js'/);
   });
 });
+
+// BAT-420 몫 D(OPEN[45] 결정): purchase gRPC 클라이언트(GrpcEventRefunds)가 SetEventRefundHold도 하므로 미룸 대역으로도 넣는다. 시험 담당이 구현 전에 썼다.
+describe('ops 시작 조립의 미룸 [BAT-420 몫 D]', () => {
+  test('GAT-110 P4 purchase gRPC 클라이언트가 있으면 미룸(holds)으로도 넣고 없으면 비운다', () => {
+    const client = { ...reader, hold: async (q: { held: boolean }) => ({ held: q.held }) };
+    expect(eventCancellationDepsFromEnv({ env: {}, executor, refunds: client }).holds).toBe(client);
+    expect(eventCancellationDepsFromEnv({ env: {}, executor }).holds).toBeUndefined();
+  });
+
+  test('GAT-110 P4 main.ts는 조립한 미룸을 회차 취소 모듈에 넘긴다', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    expect(main).toMatch(/holds/);
+  });
+});

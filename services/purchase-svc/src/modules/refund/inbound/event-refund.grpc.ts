@@ -90,7 +90,14 @@ const statusStateOf = (r: EventCancellationRequest): RefundJobState => {
   return 'RUNNING';
 };
 
-export type EventRefundGrpcUseCases = Pick<EventRefundService, 'preview' | 'start' | 'get' | 'pause' | 'resume' | 'apply' | 'closeWindow'>;
+// BAT-420 몫 D: SetEventRefundHold는 setHold를 부른다(처리기는 아직 없다, 빈 뼈대). 시험 대역은 setHold 없이 만들 수 있게 선택으로 둔다
+export type EventRefundGrpcUseCases = Pick<EventRefundService, 'preview' | 'start' | 'get' | 'pause' | 'resume' | 'apply' | 'closeWindow'> & Partial<Pick<EventRefundService, 'setHold'>>;
+
+/** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 내부 토큰이 있으면 SetEventRefundHold는 호출자 ops-svc만 받는다. nowMs는 기한 검사의 지금 */
+export interface EventRefundGrpcOptions {
+  readonly internalToken?: string;
+  readonly nowMs?: () => number;
+}
 
 const statusOf = (err: unknown): grpc.ServiceError => {
   if (err instanceof EventRefundError) {
@@ -100,7 +107,7 @@ const statusOf = (err: unknown): grpc.ServiceError => {
   return { code: grpc.status.UNAVAILABLE, details: '지금 처리할 수 없다' } as grpc.ServiceError;
 };
 
-export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases): grpc.UntypedServiceImplementation {
+export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, _o?: EventRefundGrpcOptions): grpc.UntypedServiceImplementation {
   const unary =
     (fn: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
     (call, cb) => {
@@ -176,7 +183,11 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases): g
 
 /** Nest에 올리지 않고 start.ts가 직접 gRPC 서버에 붙이는 처리기 묶음. 시험도 같은 함수를 쓴다 */
 export class EventRefundGrpcController {
-  constructor(readonly useCases: EventRefundGrpcUseCases) {}
+  constructor(
+    readonly useCases: EventRefundGrpcUseCases,
+    /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다) */
+    readonly options?: EventRefundGrpcOptions,
+  ) {}
 
   handlers(): grpc.UntypedServiceImplementation {
     return eventRefundServiceHandlers(this.useCases);

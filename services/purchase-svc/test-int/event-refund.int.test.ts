@@ -8,7 +8,7 @@ import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
+import { DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundHolds, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -413,5 +413,70 @@ describe('BAT-420 대상 고르기·쓸어 담기 [PostgreSQL]', () => {
     const mixed = randomUUID();
     for (const status of [...open, ...ended]) await seedRawOrder(mixed, status);
     expect(await counter.count(mixed)).toBe(7);
+  });
+});
+
+// ---- BAT-420 몫 D(시험 담당, 구현 전에 씀): 환급 미룸 저장소 DrizzleEventRefundHolds(OPEN[45], GAT-110 D3, R-T38 ⑤, docs/data.md event_refund_hold) ----
+describe('환급 미룸 저장소 [BAT-420 몫 D]', () => {
+  const EXPIRES = NOW + 259_200_000;
+  const holdOf = async (eventId: string) =>
+    (await q<{ cancellation_request_id: string; held_at: Date; expires_at: Date; released_at: Date | null }>('select cancellation_request_id, held_at, expires_at, released_at from event_refund_hold where event_id = $1', [eventId])).rows;
+
+  test('GAT-110 D3 걸기는 회차마다 한 줄이고, 같은 요청 ID로 다시 걸면 기한만 바뀌며(늘리기·같은 값 멱등), 다른 요청 ID는 ALREADY_EXISTS이고 줄이 그대로다', async () => {
+    const holds = new DrizzleEventRefundHolds(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES });
+    expect(await holdOf(eventId)).toEqual([{ cancellation_request_id: requestId, held_at: new Date(NOW), expires_at: new Date(EXPIRES), released_at: null }]);
+    // 같은 값 다시 걸기는 그대로, 늘리기는 기한만 바뀐다(건 시각은 처음 값)
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW + 1_000 })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES });
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES + DAY, nowMs: NOW + DAY })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES + DAY });
+    expect(await holdOf(eventId)).toEqual([{ cancellation_request_id: requestId, held_at: new Date(NOW), expires_at: new Date(EXPIRES + DAY), released_at: null }]);
+    // 같은 회차에 다른 요청의 열린 미룸이 있으면 ALREADY_EXISTS
+    await expect(holds.set({ eventId, cancellationRequestId: randomUUID(), held: true, expiresAtMs: EXPIRES, nowMs: NOW + DAY })).rejects.toMatchObject({ code: 'ALREADY_EXISTS' });
+    expect(await holdOf(eventId)).toEqual([{ cancellation_request_id: requestId, held_at: new Date(NOW), expires_at: new Date(EXPIRES + DAY), released_at: null }]);
+  });
+
+  test('GAT-110 D3 풀기는 같은 요청 ID일 때만 released_at을 쓰고(다른 요청 ID는 그대로 걸림), 두 번 풀어도 오류 없이 처음 푼 시각이며, 풀린 회차는 새 요청이 다시 걸 수 있다', async () => {
+    const holds = new DrizzleEventRefundHolds(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    await holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW });
+    await expect(holds.set({ eventId, cancellationRequestId: randomUUID(), held: false, nowMs: NOW + 1_000 })).resolves.toMatchObject({ held: true });
+    expect((await holdOf(eventId))[0]!.released_at).toBeNull();
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: false, nowMs: NOW + 2_000 })).resolves.toMatchObject({ held: false });
+    expect((await holdOf(eventId))[0]!.released_at).toEqual(new Date(NOW + 2_000));
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: false, nowMs: NOW + 3_000 })).resolves.toMatchObject({ held: false });
+    expect((await holdOf(eventId))[0]!.released_at).toEqual(new Date(NOW + 2_000));
+    // 없는 회차 풀기도 오류가 아니다(ops 반려가 늦게 와도)
+    await expect(holds.set({ eventId: randomUUID(), cancellationRequestId: requestId, held: false, nowMs: NOW })).resolves.toMatchObject({ held: false });
+    // 풀린 회차에 새 요청이 걸면 그 요청의 줄이 된다(회차 하나에 한 줄)
+    const next = randomUUID();
+    await expect(holds.set({ eventId, cancellationRequestId: next, held: true, expiresAtMs: EXPIRES + DAY, nowMs: NOW + DAY })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES + DAY });
+    expect(await holdOf(eventId)).toEqual([{ cancellation_request_id: next, held_at: new Date(NOW + DAY), expires_at: new Date(EXPIRES + DAY), released_at: null }]);
+  });
+
+  test('R-T38 ⑤ 기한 지난 미룸 풀기는 기한 = 지금인 줄부터 풀고(1ms 앞은 아님) 한 번만 돌려주며, 기한이 지난 미룸은 다른 요청이 걸 수 있다', async () => {
+    const holds = new DrizzleEventRefundHolds(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    await holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW });
+    const mine = (rows: readonly { eventId: string; cancellationRequestId: string }[]) => rows.filter((r) => r.eventId === eventId);
+    expect(mine(await holds.releaseExpired(EXPIRES - 1, 100))).toEqual([]);
+    expect((await holdOf(eventId))[0]!.released_at).toBeNull();
+    expect(mine(await holds.releaseExpired(EXPIRES, 100))).toEqual([{ eventId, cancellationRequestId: requestId }]);
+    expect((await holdOf(eventId))[0]!.released_at).toEqual(new Date(EXPIRES));
+    expect(mine(await holds.releaseExpired(EXPIRES + 1, 100))).toEqual([]);
+    // 둘이 같이 돌아도 한 번만 돌려준다(조건부 갱신)
+    const other = randomUUID();
+    await holds.set({ eventId: other, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW });
+    const [a, b] = await Promise.all([holds.releaseExpired(EXPIRES, 100), holds.releaseExpired(EXPIRES, 100)]);
+    expect([...a, ...b].filter((r) => r.eventId === other)).toHaveLength(1);
+    // 기한이 지나 풀리지 않은 미룸(아직 releaseExpired 전)도 걸린 것이 아니다: 새 요청이 걸 수 있다
+    const stale = randomUUID();
+    await holds.set({ eventId: stale, cancellationRequestId: randomUUID(), held: true, expiresAtMs: NOW + 1_000, nowMs: NOW });
+    const fresh = randomUUID();
+    await expect(holds.set({ eventId: stale, cancellationRequestId: fresh, held: true, expiresAtMs: EXPIRES, nowMs: NOW + 1_000 })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES });
+    expect((await holdOf(stale))[0]).toMatchObject({ cancellation_request_id: fresh, released_at: null });
   });
 });

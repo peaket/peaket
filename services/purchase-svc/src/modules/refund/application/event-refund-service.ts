@@ -30,8 +30,9 @@ import type {
   EventRefundServiceDeps,
   EventRefundStartInput,
 } from '../domain/event-refund-ports.js';
+import type { EventRefundHoldInput, EventRefundHoldState } from '../domain/event-refund-hold.js';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type EventRefundErrorCode = 'INVALID' | 'NOT_FOUND' | 'CONFLICT';
 
@@ -92,6 +93,11 @@ function outcomeOf(status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED', error: stri
 
 export class EventRefundService {
   constructor(private readonly o: EventRefundServiceDeps) {}
+
+  /** 회차 취소 요청 중 보류 취소의 환급 미룸 걸기·늘리기·풀기(BAT-420 몫 D, gRPC SetEventRefundHold, 빈 뼈대). @throws EventRefundHoldError */
+  async setHold(_i: EventRefundHoldInput): Promise<EventRefundHoldState> {
+    throw new Error('아직 없음');
+  }
 
   async preview(i: EventRefundPreviewInput): Promise<EventRefundPreview> {
     const targets = await this.#targets(i.eventId);
