@@ -131,9 +131,50 @@
 
 ## 시험 이의
 
+- **CF3-06 ⓑ에 게이트웨이 쪽 RST(ⓑ′)를 더했다(시험 담당, 2026-11-16. 판정 값과 단언은 그대로)**:
+  - **까닭(실측)**: 구현 전 트리(`624b8f8f`, 클러스터 `lane1-cf3pre`, `gateways-forward`를 뒤에서 띄움)에서 계획대로 쓴 CF3-06(ⓐ 200건 동시 50, ⓑ 요청 머리 일부 뒤 손님 쪽 RST 게이트웨이마다 20개, ⓒ 다섯 확인 경로)만 돌렸더니 **통과**했다(23:08:56, 0.6초). 포트 전달 기록에는 손님 쪽 끊김(`portforward.go:404 … wsarecv: An existing connection was forcibly closed by the remote host`) 100줄만 있고 'lost connection to pod'는 0이었다. 손님 쪽 RST는 kubectl의 이 PC 쪽 연결만 끝내고 파드 쪽 전달은 살린다. CI와 구현 전 재현에서 전달을 죽인 것은 파드 쪽(Envoy)에서 온 RST(`read tcp4 …->127.0.0.1:10443: read: connection reset by peer`)였다(위 1의 1). 그래서 계획대로의 ⓑ는 구현 전 트리에서 실패를 보지 못해 CF3-06이 무엇을 막는지 증명하지 못한다.
+  - **더한 것(ⓑ′)**: 게이트웨이마다 TLS 연결 20개에서 `Connection: close` 요청을 보낸 뒤에도 512바이트씩 5ms마다(최대 40번, 닫히면 멈춤) 더 보낸다. 게이트웨이가 응답하고 연결을 닫은 뒤에 닿은 바이트에 게이트웨이 쪽 커널이 RST로 답한다(Envoy가 연결을 RST로 닫는 정상 동작의 한 꼴, 위 1의 2). 연결·TLS를 맺지 못하면 네트워크 오류로 센다. 닫힌 뒤의 쓰기 오류는 노린 결과라 세지 않는다. 계획의 ⓑ(손님 쪽 RST)는 그대로 둔다. 차례는 ⓐ → ⓑ → ⓑ′ → ⓒ다.
+  - **확인**: 같은 구현 전 트리에서 ⓑ′를 더한 CF3-06은 두 번 다 실패했다(아래 '실패 확인' 2의 ③). ⓑ′ 실험 한 번(게이트웨이마다 20개)에 포트 전달 다섯이 모두 'lost connection to pod'로 끝났다.
+  - **계획 담당이 가릴 것**: ⓑ′를 CF3-06의 단언 목록(위 5의 표)에 넣을지. 넣지 않으면 CF3-06의 구현 전 실패는 CI 로그로만 센다(위 5 '실패 확인' 2).
+
 ## 실패 확인
 
+1. **CI 실패 로그**(develop 실행 43865738562, `kind / kind` job ID 133,294,220,765, 커밋 `3256c93f`, `gh run view 43865738562 --repo peaket/peaket --job <잡 ID> --log`에서 시험 담당이 골라 옮김. 시각은 UTC):
+   - 12:37:35.368~.667: kubectl 포트 전달 다섯(18441~18445)이 모두 `portforward.go:424 … error forwarding port 10443 to pod …: read: connection reset by peer` 뒤 `error: lost connection to pod`로 끝났다(가장 이른 줄은 18442 gw-fan 12:37:35.368028).
+   - 12:37:35.374: 첫 실패 V-T31 ①(672ms) `Error: Client network socket disconnected before secure TLS connection was established`, `code: 'ECONNRESET'`.
+   - 12:40:38.180~.208: 다섯 전달이 다시 모두 'lost connection to pod'(SR-T13 ② 때). SR-T13 ②는 `Error: socket hang up`.
+   - 12:40:38.287: `gateways.e2e.mjs` 합계 43개, 통과 22, 실패 21. 'lost connection to pod' 줄은 모두 10개다. `bash -e`라 `queue-cors`·`gateway-limits`·`gateway-routes`는 돌지 않았다.
+2. **로컬 재현**(시험 담당, 2026-11-16, 시각은 +09:00, 결과 기록은 시험 담당 scratchpad의 `cf3-repro.md`·`cf3-*.log`):
+   1. **바퀴 1(구현 전 트리 `3256c93f`, 기존 시험 43개만)**: `D:/ticketpass-lane1-pre`(분리 HEAD, `pnpm install --frozen-lockfile`만 함)에서 `PEAKET_CLUSTER=lane1-cf3pre`로 `up --v0-only`(22:27:31→22:28:55) → `gateways`(22:29:09→22:30:46, '컨트롤러가 받지 않은 정의: 없음') → `gateways-forward`를 뒤에서(PID 70664, 22:30:59) → CI처럼 다섯 포트가 열리기를 기다림 → `node --test --test-timeout=300000 tools/local/e2e/gateways.e2e.mjs`(22:31:12→22:34:24, 192초).
+      - **합계 43개, 통과 22, 실패 21**(CI와 같은 수, 같은 시험). 첫 실패는 V-T31 ①(975ms) `ECONNRESET`(TLS 맺기 전 끊김), 이어 V-T31 ②·identity §3 신원 머리가 `connect ECONNREFUSED 127.0.0.1:18442`. B-T18 ①부터 PRF-030·BOT-047까지 22개 통과. SR-T13 ②가 `read ECONNRESET`, 그 뒤 17개가 1~3ms 만에 `ECONNREFUSED`.
+      - 포트 전달 기록의 'lost connection to pod'는 9줄: 22:31:14.176~.196에 넷(18442~18445), 22:34:24.412~.478에 다섯. 꼴은 CI와 같다(`… read tcp4 127.0.0.1:51660->127.0.0.1:10443: read: connection reset by peer`).
+      - 두 번째 바퀴는 첫 바퀴에서 재현되어 돌리지 않았다.
+   2. **새 시험의 구현 전 실패(트리 `624b8f8f`, 시험 파일 셋만 복사해 돌리고 되돌림, 그 폴더는 커밋하지 않음)**:
+      - ① 단위 CF3-01·02·04·05(`node --test --test-name-pattern="CF3-0[1245]" tools/local/cluster.test.mjs`): **넷 모두 실패**. 까닭은 모두 '내놓는 이름이 없다'(`cluster.mjs가 kindClusterConfig를 내놓지 않는다`, `GATEWAY_NODE_PORTS` 값 다름(undefined), `gateway-objects.mjs가 gatewayHostPorts를 내놓지 않는다` 둘)라서 위 5의 말대로 '실행이 안 되는 실패'로 보고 세지 않는다. 검증 담당의 M-01~M-12로 실패를 본다.
+      - ② CF3-03(`node --test --test-name-pattern="CF3-03" tools/ci/check-workflows.test.mjs`): **실패**, 단언 실패 `ci-kind.yml에 gateways-forward가 있다`. 센다.
+      - ③ CF3-06(kind, `lane1-cf3pre`를 새로 만들어 `up --v0-only`(23:06:03→23:07:02) → `gateways`(→23:08:40) → `gateways-forward` PID 78640(23:08:47) → `--test-name-pattern="CF3-06"`으로 CF3-06만): 계획대로의 ⓐⓑⓒ만으로는 **통과**(23:08:56, 위 '시험 이의'). ⓑ′를 더한 뒤 두 번 돌려 **두 번 다 실패**(23:11:23·23:11:53, 각 약 3.8초): `네트워크 오류 2건(ⓐ 상태별 수: {"200":200})`, `ⓒ gw-partner: ECONNREFUSED connect ECONNREFUSED 127.0.0.1:18443`, `ⓒ gw-ops: ECONNREFUSED connect ECONNREFUSED 127.0.0.1:18444`. 한 번에 'lost connection to pod'가 다섯씩 늘었다(5→10→15). ⓐ의 200건은 네트워크 오류 0이었고, 무너진 것은 ⓑ′ 뒤의 ⓒ다. 센다(ⓑ′가 단언 목록에 드는지는 '시험 이의'에서 계획 담당이 가린다).
+   - 뒤처리: 띄운 PID 70664·78640(과 그 자식 kubectl)만 끝냈고, `lane1-cf3pre`는 두 번 다 `down`으로 지웠다. `D:/ticketpass-lane1-pre`는 복사한 시험 파일 셋을 `git checkout`으로 되돌려 `git status`가 비었다.
+
 ## 시험 결과
+
+- **단위(시험 담당, 고친 가지 `3573fafe` + 시험)**: `node --test "tools/local/*.test.mjs"` 139개 가운데 통과 138, 실패 0, 건너뜀 1(Windows 파일 권한). CF3-01·02·04·05 넷 모두 통과. `node --test tools/ci/check-workflows.test.mjs` 47개 가운데 통과 46, 실패 0, 건너뜀 1(CI에서만 도는 yaml 시험), CF3-03 통과. `node tools/ci/check-workflows.mjs` 통과. eslint(바꾼 시험 파일 여섯) 통과. doc-check 오류 0(경고 넷은 이 묶음과 상관없는 openapi·mermaid).
+- **kind 두 바퀴(위 5 '다 되었다고 보는 기준' 1)**: 클러스터 `lane1-cf3`, 바퀴마다 `down` → `up --v0-only`(새로 만듦) → `gateways` → e2e 넷을 ci-kind.yml 차례와 `--test-timeout=300000`으로. 포트 전달은 띄우지 않았다. 두 바퀴 모두 `docker port lane1-cf3-control-plane`이 `30441/tcp -> 127.0.0.1:18441` … `30445/tcp -> 127.0.0.1:18445`였고 `gateways`가 다섯 포트 모두 'TLS 됨'을 찍었다. 컨트롤러가 받지 않은 정의는 '없음'.
+
+| 바퀴(+09:00) | 파일 | 합계 | 통과 | 실패 | 걸린 시간 |
+| --- | --- | --- | --- | --- | --- |
+| 1(23:13:01~23:26:56) | `gateways.e2e.mjs`(43 + CF3-06) | 44 | 44 | 0 | 379초 |
+| 1 | `queue-cors.e2e.mjs` | 18 | 18 | 0 | 182초 |
+| 1 | `gateway-limits.e2e.mjs` | 13 | 13 | 0 | 36초 |
+| 1 | `gateway-routes.e2e.mjs` | 10 | 10 | 0 | 103초 |
+| 2(23:27:24~23:41:57) | `gateways.e2e.mjs`(43 + CF3-06) | 44 | 44 | 0 | 379초 |
+| 2 | `queue-cors.e2e.mjs` | 18 | 18 | 0 | 211초 |
+| 2 | `gateway-limits.e2e.mjs` | 13 | 13 | 0 | 29초 |
+| 2 | `gateway-routes.e2e.mjs` | 10 | 10 | 0 | 103초 |
+
+- **끊김**: 두 바퀴 여덟 파일의 출력 어디에도 `ECONNREFUSED`·`ECONNRESET`·`socket hang up`·`lost connection`이 없다(건너뜀·취소 0). CF3-06은 바퀴 1에서 3.6초, 바퀴 2에서 3.6초에 통과했다(구현 전 트리에서는 같은 시험이 ⓒ에서 ECONNREFUSED로 실패).
+- **기존 시험**: 단언·판정 값·동시 수는 바꾸지 않았다. 바꾼 것은 e2e 머리 주석(gateways·queue-cors·gateway-limits·gateway-routes의 '포트 전달' 글을 새 잇는 법으로)뿐이다.
+- **구현에서 실패한 새 시험**: 없음.
+- **뒤처리**: `lane1-cf3`는 `down`으로 지웠고 `docker ps -a`에 `lane1-` 컨테이너가 없다. 고친 가지 바퀴에서는 뒤에서 띄운 프로세스가 없다. 잠금 폴더는 감독이 쥐고 있어 그대로 둔다.
 
 ## 리뷰
 
@@ -166,3 +207,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w8l1-cifix3-plan-5e19a3d7 | claude-opus-5-5 | 2026-11-16T22:14+09:00 | 2026-11-16T22:24+09:00 |
 | impl | w8l1-cifix3-impl-3c81f0a2 | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:55+09:00 |
+| test | w8l1-cifix3-test-9d4e27b5 | claude-opus-5-5 | 2026-11-16T22:25+09:00 | 2026-11-16T23:45+09:00 |
