@@ -51,6 +51,7 @@ const MAX_RULES = 16;
 const MAX_MATCHES_PER_RULE = 64;
 const MAX_MATCHES_PER_ROUTE = 128;
 const ROUTE_LABEL = 'peaket.io/route';
+const AUTH_LABEL = 'peaket.io/auth';
 
 const lc = (s) => String(s).toLowerCase();
 
@@ -73,7 +74,7 @@ function openapiOf(spec, { version = '9.8.10-test', rules = RULES, description =
       methods = v.methods;
     }
     const entries = typeof methods === 'string' ? methods.split(/\s+/).filter(Boolean).map((m) => [m, {}]) : Object.entries(methods);
-    for (const [m, o] of entries) item[lc(m)] = op(o?.cdn ? { 'x-peaket-cdn-cache': true } : {});
+    for (const [m, o] of entries) item[lc(m)] = op({ ...(o?.cdn ? { 'x-peaket-cdn-cache': true } : {}), ...(o?.security ? { security: o.security } : {}) });
     paths[p] = item;
   }
   return {
@@ -81,6 +82,8 @@ function openapiOf(spec, { version = '9.8.10-test', rules = RULES, description =
     info: { title: 'gateway-routes 시험', version, description },
     servers: [...new Set(Object.values(API_HOST))].map((h) => ({ url: `https://${h}` })),
     'x-peaket-gateways': { description: '시험 규칙', rules },
+    // 작업에 security가 없으면 이 기본값(팬 쿠키)이다. 그래서 시험 원천의 이름표 기본은 token이다(infra §4.1 '인증 종류 대조')
+    security: [{ fanCookie: [] }],
     paths,
   };
 }
@@ -89,14 +92,14 @@ function openapiOf(spec, { version = '9.8.10-test', rules = RULES, description =
 const appFilter = (app) => ({ type: 'RequestHeaderModifier', requestHeaderModifier: { set: [{ name: 'x-peaket-app', value: app }], remove: ['x-peaket-browser-traceparent'] } });
 
 /**
- * 라우트 원천 하나(HTTPRoute, 규칙마다 PathPrefix만)
- * @param {string} gw @param {string} name @param {Array<{ prefixes: string[], backend: string, app?: string }>} rules
+ * 라우트 원천 하나(HTTPRoute, 규칙마다 PathPrefix만). 이름표 peaket.io/auth는 인증 종류(기본 token, infra §4.1 '인증 종류 대조')
+ * @param {string} gw @param {string} name @param {Array<{ prefixes: string[], backend: string, app?: string, timeouts?: Record<string, string> }>} rules
  */
-function sourceRoute(gw, name, rules) {
+function sourceRoute(gw, name, rules, { auth = 'token' } = {}) {
   return {
     apiVersion: 'gateway.networking.k8s.io/v1',
     kind: 'HTTPRoute',
-    metadata: { name, namespace: 'envoy-gateway-system' },
+    metadata: { name, namespace: 'envoy-gateway-system', labels: { [AUTH_LABEL]: auth } },
     spec: {
       parentRefs: [{ name: gw }],
       hostnames: [API_HOST[gw]],
@@ -104,6 +107,7 @@ function sourceRoute(gw, name, rules) {
         matches: r.prefixes.map((value) => ({ path: { type: 'PathPrefix', value } })),
         filters: [appFilter(r.app ?? 'web')],
         backendRefs: [{ name: r.backend, port: 8080 }],
+        ...(r.timeouts ? { timeouts: r.timeouts } : {}),
       })),
     },
   };
@@ -476,6 +480,84 @@ test("HOT-410 infra §4.1 '생성기가 멈추는 경우' Exact 원천 맞춤이
     ],
   };
   assertStops(openapi, sources, '/v1/events/{eventId}/no-such');
+});
+
+// ===================== 인증 종류 대조·시간 상한(BAT-060 계획 15절, BAT-055 웨이브 끝 리뷰) =====================
+
+const DPOP_OR_MTLS = [{ deviceDpop: [] }, { deviceMtls: [] }];
+const BUY = [{ fanCookie: [], admissionToken: [] }];
+/** 입장 토큰이 없는 갈래가 하나 있다: token이다(token-buy가 아니다) */
+const BUY_OR_PLAIN = [{ fanCookie: [] }, { fanCookie: [], admissionToken: [] }];
+const OPTIONAL = [{}, { fanCookie: [] }];
+
+test('W7-WIR-01 원천에서 security가 deviceDpop|deviceMtls인 작업(POST /v1/scanner/token)을 토큰 라우트(peaket.io/auth: token)에 두면 생성기가 2로 멈추고 그 작업을 보인다', () => {
+  const openapi = openapiOf({ '/v1/scanner/token': { POST: { security: DPOP_OR_MTLS } }, '/v1/scanner/events/{eventId}/package': { GET: { security: [{ staffToken: [] }] } } });
+  const sources = { 'gw-scanner': [sourceRoute('gw-scanner', 'gw-scanner-api', [{ prefixes: ['/v1/scanner'], backend: 'ticket-svc', app: 'scanner' }], { auth: 'token' })] };
+  assertStops(openapi, sources, '/v1/scanner/token');
+});
+
+test("W7-WIR-05 W7-COR-04 RV-04 infra §4.1 '인증 종류 대조' security로 public·optional·token·token-buy를 정하고 원천 이름표가 같으면 멈추지 않으며, 다르면 종류마다 2로 멈춘다", () => {
+  const openapi = openapiOf({
+    '/v1/scanner/token': { POST: { security: DPOP_OR_MTLS } }, // public: 액세스 토큰 방식이 없는 갈래뿐
+    '/v1/partner/auth/invitation-acceptances': { POST: { security: [] } }, // public: security: []
+    '/v1/events/{eventId}/reviews': { GET: { security: OPTIONAL } }, // optional: 빈 갈래와 토큰 갈래
+    '/v1/holds/{holdId}': { GET: { security: BUY } }, // token-buy: 모든 갈래에 입장 토큰
+    '/v1/orders/{orderId}/payment-status': { GET: { security: BUY_OR_PLAIN } }, // token: 입장 토큰 없는 갈래가 있다
+    '/v1/orders/{orderId}': 'GET', // token: 기본 security
+  });
+  const sources = {
+    'gw-scanner': [sourceRoute('gw-scanner', 'gw-scanner-public', [{ prefixes: ['/v1/scanner/token'], backend: 'identity-svc', app: 'scanner' }], { auth: 'public' })],
+    'gw-partner': [sourceRoute('gw-partner', 'gw-partner-public', [{ prefixes: ['/v1/partner/auth/invitation-acceptances'], backend: 'identity-svc', app: 'partner' }], { auth: 'public' })],
+    'gw-fan': [
+      sourceRoute('gw-fan', 'gw-fan-optional', [{ prefixes: ['/v1/events'], backend: 'core-svc' }], { auth: 'optional' }),
+      sourceRoute('gw-fan', 'gw-fan-buy', [{ prefixes: ['/v1/holds'], backend: 'purchase-svc' }], { auth: 'token-buy' }),
+      sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/orders'], backend: 'purchase-svc' }], { auth: 'token' }),
+    ],
+  };
+  generated(openapi, sources);
+  // 종류가 다르면 멈춘다(라우트 하나, 작업 하나씩)
+  for (const [path, security, gw, auth] of [
+    ['/v1/holds/{holdId}', BUY, 'gw-fan', 'token'],
+    ['/v1/events/{eventId}/reviews', OPTIONAL, 'gw-fan', 'public'],
+    ['/v1/events/{eventId}/reviews', OPTIONAL, 'gw-fan', 'token'],
+    ['/v1/orders/{orderId}/payment-status', BUY_OR_PLAIN, 'gw-fan', 'token-buy'],
+    ['/v1/orders/{orderId}', undefined, 'gw-fan', 'public'],
+    ['/v1/partner/auth/invitation-acceptances', [], 'gw-partner', 'token'],
+    ['/v1/partner/auth/invitation-acceptances', [], 'gw-partner', 'optional'],
+  ]) {
+    const spec = { [path]: { GET: security === undefined ? {} : { security } } };
+    assertStops(openapiOf(spec), { [gw]: [sourceRoute(gw, `${gw}-x`, [{ prefixes: [path.replace(/\/\{[^}]+\}.*$/, '')], backend: 'core-svc' }], { auth })] }, path);
+  }
+});
+
+test("W7-WIR-05 infra §4.1 '인증 종류 대조' 원천 라우트에 이름표 peaket.io/auth가 없으면 생성기가 2로 멈추고 그 라우트 이름을 보인다", () => {
+  const openapi = openapiOf({ '/v1/events/{eventId}': 'GET' });
+  const src = sourceRoute('gw-fan', 'gw-fan-unlabelled', [{ prefixes: ['/v1/events'], backend: 'core-svc' }]);
+  delete src.metadata.labels;
+  assertStops(openapi, { 'gw-fan': [src] }, 'gw-fan-unlabelled');
+});
+
+test("W7-CON-02 infra §4.1 '경로별 시간 상한' 원천 규칙의 timeouts를 그 규칙에서 나온 생성 규칙마다 그대로 옮기고 다른 규칙에는 두지 않는다", () => {
+  const openapi = openapiOf({ '/v1/orders/{orderId}/payment-status': 'GET', '/v1/orders/{orderId}': 'GET', '/v1/ops/live': 'GET' });
+  const fan = exactSource(
+    sourceRoute('gw-fan', 'gw-fan-api', [
+      { prefixes: ['/v1/orders/{orderId}/payment-status'], backend: 'purchase-svc', timeouts: { request: '27s' } },
+      { prefixes: ['/v1/orders/{orderId}'], backend: 'purchase-svc' },
+    ]),
+  );
+  fan.spec.rules[1].matches = [{ path: { type: 'Exact', value: '/v1/orders/{orderId}' } }];
+  const ops = sourceRoute('gw-ops', 'gw-ops-api', [{ prefixes: ['/v1/ops/live'], backend: 'ops-svc', app: 'console', timeouts: { request: '0s' } }]);
+  const by = routesByGateway(generated(openapi, { 'gw-fan': [fan], 'gw-ops': [ops] }).files);
+  const rulesFor = (gw, path) => apiRoutes(by[gw], gw).flatMap(rulesOf).filter((rule) => matchesOf(rule).some((m) => m.method === 'GET' && pathMatches(m, path)));
+  const pay = rulesFor('gw-fan', '/v1/orders/o1/payment-status');
+  assert.ok(pay.length > 0, 'payment-status 규칙이 없다');
+  for (const rule of pay) assert.deepEqual(rule.timeouts, { request: '27s' }, 'payment-status 규칙의 시간 상한');
+  const order = rulesFor('gw-fan', '/v1/orders/o1');
+  assert.ok(order.length > 0, '주문 규칙이 없다');
+  for (const rule of order) assert.equal(rule.timeouts, undefined, '시간 상한이 없는 원천 규칙에서 나온 규칙에 시간 상한이 있다');
+  const live = rulesFor('gw-ops', '/v1/ops/live');
+  assert.ok(live.length > 0, '관제 SSE 규칙이 없다');
+  for (const rule of live) assert.deepEqual(rule.timeouts, { request: '0s' }, '관제 SSE 규칙의 시간 상한');
 });
 
 test("HOT-410 infra §4.1 '생성기가 멈추는 경우' /internal/로 시작하는 경로를 맡으면 2로 끝난다", () => {
