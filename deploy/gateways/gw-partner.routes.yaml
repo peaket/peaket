@@ -392,16 +392,8 @@ spec:
           method: POST
         - path:
             type: Exact
-            value: /v1/webhooks/portone
-          method: OPTIONS
-        - path:
-            type: Exact
             value: /v1/webhooks/toss
           method: POST
-        - path:
-            type: Exact
-            value: /v1/webhooks/toss
-          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:

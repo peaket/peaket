@@ -24,6 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments, stringify } from 'yaml';
 import { runIfMain } from './entry.mjs';
 
+/** 외부 수신 작업인가: openapi 태그 webhooks이고 security가 빈 목록(결제사 서버가 부른다, 브라우저 사전 요청이 없다) */
+const serverToServer = (op) => Array.isArray(op?.tags) && op.tags.includes('webhooks') && Array.isArray(op?.security) && op.security.length === 0;
 /** 계약 작업의 메서드 차례(맞춤 조건의 차례도 이것을 따른다). OPTIONS는 경로마다 생성기가 더한다 */
 const METHOD_ORDER = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 /** Gateway API v1(Envoy Gateway v1.10.0 설치 파일의 HTTPRoute CRD, 2026-11-16 확인): 라우트의 규칙 16, 규칙의 맞춤 64, 라우트의 맞춤 합 128 */
@@ -316,8 +318,9 @@ export function generateRoutes(input) {
           const ops = operationsOf(openapi.paths[p]).filter((o) => byPath.get(p).has(o.method));
           const pm = pathMatchOf(p);
           for (const o of ops) (o.cdn ? cdn : other).push({ path: { ...pm }, method: o.method });
-          // 사전 요청(OPTIONS)은 이 규칙이 맡은 경로마다 하나. 캐시하지 않는 작업이 있으면 그 규칙에 둔다
-          (ops.some((o) => !o.cdn) ? other : cdn).push({ path: { ...pm }, method: 'OPTIONS' });
+          // 사전 요청(OPTIONS)은 이 규칙이 맡은 경로마다 하나. 캐시하지 않는 작업이 있으면 그 규칙에 둔다.
+          // 외부 수신 작업(태그 webhooks·security: [], 서버끼리 부름)만 있는 경로에는 두지 않는다(docs/infra.md §4.1 '경로별 메서드 생성기', 대조 리뷰 RV-03)
+          if (ops.some((o) => !serverToServer(openapi.paths[p][o.method.toLowerCase()]))) (ops.some((o) => !o.cdn) ? other : cdn).push({ path: { ...pm }, method: 'OPTIONS' });
         }
         if (other.length) generated.push(...rulesFrom(c.rule, sortMatches(other), true, ''));
         if (cdn.length) generated.push(...rulesFrom(c.rule, sortMatches(cdn), false, '-cdn'));

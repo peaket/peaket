@@ -933,7 +933,7 @@ spec:
     allowCredentials: true
 ---
 # gw-fan: 핫패스 밖 일반 API의 계정 단위 전역 한도(docs/infra.md §4.1 '전역 레이트 리밋 걸기', docs/api/guidelines.md §6, D-T50 ①②⑤).
-# gw-fan-api·gw-fan-identity(나뉜 생성 라우트 포함)를 한 버킷(shared)으로 묶어 계정(X-User-Id, 토큰 확인이 넣는다)마다 분당 60회다.
+# 이름표 peaket.io/auth가 token·optional인 라우트(gw-fan-api·gw-fan-identity·gw-fan-optional, 나뉜 생성 라우트 포함, 대조 리뷰 RV-04)를 한 버킷(shared)으로 묶어 계정(X-User-Id, 토큰 확인이 넣는다)마다 분당 60회다.
 # 토큰이 없는 요청은 머리가 없어 세지 않는다. 판정은 레이트 리밋 서비스(컨트롤러 설정 deploy/gateways/controller/envoy-gateway.yaml)가 하고,
 # 그 서비스가 답하지 못하면 통과시킨다(failClosed를 켜지 않는다, D-T50 ③). 게이트웨이의 응답 고치기(gw-fan-responses)와 합친다(mergeType).
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -949,6 +949,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: gw-fan-identity
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-optional
   mergeType: StrategicMerge
   rateLimit:
     global:
