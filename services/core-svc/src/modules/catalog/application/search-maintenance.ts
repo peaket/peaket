@@ -122,8 +122,8 @@ export class SearchReadModelTimers {
     if (!this.#reconciled) await this.#catchUp(at);
     const timed = await this.o.sync.syncTimed(at, this.#since);
     const purged = await this.o.sync.purgeRemovals(at);
-    // 정리가 다 성공했을 때만 창을 앞으로 옮긴다(실패하면 다음 정리가 같은 창부터 다시 본다, ADR-0271 결정 12)
-    this.#since = at;
+    // 정리가 다 성공했을 때만 창을 앞으로 옮긴다. 실패하거나 잠금을 못 잡아 건너뛰었으면 다음 정리가 같은 창부터 다시 본다(ADR-0271 결정 12, 리뷰 R165-23)
+    if (!timed.skipped) this.#since = at;
     if (this.o.termCount && this.o.dictionary) this.#drift = Math.abs((await this.o.termCount()) - this.o.dictionary.entries);
     return { ...timed, purged };
   }

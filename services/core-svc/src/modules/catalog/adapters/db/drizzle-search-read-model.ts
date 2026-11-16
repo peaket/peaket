@@ -161,10 +161,11 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     return { version, changed: true, removed: removedDocs };
   }
 
-  async syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number }> {
+  /** 같은 열쇠의 잠금을 못 잡으면 이 차례를 건너뛰고 skipped: true(부르는 쪽은 시각 창을 옮기지 않는다, 리뷰 R165-23) */
+  async syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number; skipped?: boolean }> {
     if (!(at.getTime() > since.getTime())) return { version: null, productions: 0 };
     return this.db.transaction(async (tx) => {
-      if (!(await tryTidyLock(tx))) return { version: null, productions: 0 };
+      if (!(await tryTidyLock(tx))) return { version: null, productions: 0, skipped: true };
       const s = since.toISOString();
       const a = at.toISOString();
       // 오픈 시각·판매 종료(공연 시작 − 24시간)·공연 시작(대표 회차의 '가장 최근 공연') 시각이 (since, at]에 든 회차의 공연
