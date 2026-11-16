@@ -299,20 +299,23 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소: CancelFraudTickets', () 
     expect(at.writes.created).toHaveLength(0);
   });
 
-  test('GAT-080 F10 마감 전 첫 호출에 FAILED가 남으면 마감 뒤 다시 부르기는 ticket-svc를 부르지 않고 저장한 결과(FAILED 포함)를 그대로 준다', async () => {
+  test('GAT-080 F10 마감 전 첫 호출이 ticket-svc 실패(TICKET_UNAVAILABLE)로 FAILED를 남기면 마감 뒤 다시 부르기는 ticket-svc를 부르지 않고 저장한 결과(FAILED 포함)를 그대로 준다', async () => {
+    // BAT-415 계획 §10 ⑤(감독 승인): 마감 뒤에 버리는 것은 티켓 단계가 됐는지 모르는 실패(TICKET_UNAVAILABLE·INTERNAL)뿐이다. 티켓 단계 뒤 실패는 F20이 본다
     const [a, b] = [seat(), seat()];
     const f = fixture([a!, b!]);
-    f.seats.failFor.set(b!.seatId, 1);
+    f.tickets.failNext = 1;
     const first = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T16:00:00') }));
     expect(first).toEqual([
-      { ticketId: a!.ticketId, outcome: 'ACCEPTED', cancellationId: expectedCancellationId(APPROVAL, a!.ticketId), refundAmount: PRICE },
-      { ticketId: b!.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' },
+      { ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE' },
+      { ticketId: b!.ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE' },
     ]);
     const calls = f.tickets.calls.length;
+    expect(calls).toBe(1);
     const again = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00') }));
     expect(again).toEqual(first);
     expect(f.tickets.calls).toHaveLength(calls);
-    expect(f.writes.created).toHaveLength(1);
+    expect(f.seats.calls).toHaveLength(0);
+    expect(f.writes.created).toHaveLength(0);
   });
 
   test('GAT-080 F10 마감 전 다시 부르기는 FAILED 표만 ticket-svc에 다시 보낸다', async () => {
@@ -434,6 +437,103 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소: CancelFraudTickets', () 
     expect(r).toHaveLength(500);
     expect(r.every((x) => x.outcome === 'ACCEPTED' && x.refundAmount === PRICE)).toBe(true);
     expect(r.map((x) => x.ticketId)).toEqual(many.map((s) => s.ticketId));
+  });
+});
+
+/** 앞 호출이 요청 기록만 남기고 도중에 멈춘 상태(표 결과 없음)를 만든다 */
+const seedRequest = (store: Store, targets: readonly FraudCancelTarget[]) =>
+  store.create({
+    approvalId: APPROVAL,
+    fraudCaseId: FRAUD_CASE,
+    eventId: EVENT,
+    fingerprint: fraudTargetsFingerprint(FRAUD_CASE, EVENT, targets),
+    requestedBy: 'investigator-1',
+    approvedBy: 'commander-2',
+    approvedAtMs: NOW - 60_000,
+    createdAtMs: NOW - 30_000,
+  });
+const accepted = (s: Seat): FraudTicketResult => ({ ticketId: s.ticketId, outcome: 'ACCEPTED', cancellationId: expectedCancellationId(APPROVAL, s.ticketId), refundAmount: PRICE });
+
+describe('GAT-080 몫 F 부정 예매 운영자 취소: 다시 부르기 보충(BAT-415 계획 §10)', () => {
+  test('GAT-080 F16 마감 전 다시 부르기는 저장 결과가 없는 표도 다시 한다(앞 호출이 도중에 멈춤)', async () => {
+    const [a, b] = [seat(), seat()];
+    const f = fixture([a!, b!]);
+    await seedRequest(f.store, [t(a!), t(b!)]);
+    const r = await f.uc.execute(input([t(a!), t(b!)], { nowMs: NOW + 60_000 }));
+    expect(f.tickets.calls).toHaveLength(1);
+    expect(f.tickets.calls[0]!.targets).toEqual([t(a!), t(b!)]);
+    expect(r).toEqual([accepted(a!), accepted(b!)]);
+    expect(await f.store.results(APPROVAL)).toEqual(r);
+    expect(f.writes.created.map((c) => c.ticketId)).toEqual([a!.ticketId, b!.ticketId]);
+    // 한 번 더 불러도 받은 표는 다시 하지 않는다(표마다 취소 행 한 번)
+    await f.uc.execute(input([t(a!), t(b!)], { nowMs: NOW + 120_000 }));
+    expect(f.tickets.calls).toHaveLength(1);
+    expect(f.writes.created).toHaveLength(2);
+
+    // 일부만 저장된 상태: 받은 표(a)는 그대로 두고 결과 없는 표(b)만 보낸다
+    const g = fixture([a!, b!]);
+    await seedRequest(g.store, [t(a!), t(b!)]);
+    await g.store.saveResults(APPROVAL, [{ ...accepted(a!), expectedHolderAccountId: PAYER }]);
+    const again = await g.uc.execute(input([t(a!), t(b!)], { nowMs: NOW + 60_000 }));
+    expect(g.tickets.calls.map((c) => c.targets)).toEqual([[t(b!)]]);
+    expect(again).toEqual([accepted(a!), accepted(b!)]);
+    expect(g.writes.created.map((c) => c.ticketId)).toEqual([b!.ticketId]);
+  });
+
+  test.each(['SEAT_RETURN_FAILED', 'CANCELLATION_CONFLICT', 'ORDER_STATE'] as const)(
+    'GAT-080 F20 마감 뒤(17:00:00.000) 다시 부르기는 티켓 단계 뒤 실패(%s)한 표의 나머지 단계를 마쳐 ACCEPTED로 하고 다른 표는 다시 하지 않는다',
+    async (reason) => {
+      const [a, b] = [seat(), seat()];
+      const f = fixture([a!, b!]);
+      if (reason === 'SEAT_RETURN_FAILED') f.seats.failFor.set(a!.seatId, 1);
+      if (reason === 'CANCELLATION_CONFLICT') f.writes.answers.set(a!.ticketId, { status: 'CONFLICT' });
+      if (reason === 'ORDER_STATE') f.writes.answers.set(a!.ticketId, 'THROW');
+      const first = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T16:00:00') }));
+      expect(first).toEqual([{ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: reason }, accepted(b!)]);
+      // 장애가 풀린 뒤 마감 정각에 다시 부른다
+      f.writes.answers.delete(a!.ticketId);
+      const ticketCalls = f.tickets.calls.length;
+      const again = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00.000') }));
+      expect(again).toEqual([accepted(a!), accepted(b!)]);
+      expect(await f.store.results(APPROVAL)).toEqual(again);
+      // 새 취소가 아니다: ticket-svc를 다시 불렀다면 대상은 a뿐이고, b의 좌석·취소 행은 다시 만들지 않는다
+      for (const c of f.tickets.calls.slice(ticketCalls)) expect(c.targets).toEqual([t(a!)]);
+      expect(f.seats.calls.filter((c) => c.seatId === b!.seatId)).toHaveLength(1);
+      expect(f.writes.created.filter((c) => c.ticketId === b!.ticketId)).toHaveLength(1);
+      const lastForA = f.writes.created.filter((c) => c.ticketId === a!.ticketId).at(-1);
+      expect(lastForA).toMatchObject({ cancellationId: expectedCancellationId(APPROVAL, a!.ticketId), reason: 'FRAUD', fraudCaseId: FRAUD_CASE, approvalId: APPROVAL, deductionBp: 0, refundAmount: PRICE, status: 'REFUND_PENDING' });
+      if (reason === 'SEAT_RETURN_FAILED') {
+        expect(f.seats.calls.filter((c) => c.seatId === a!.seatId)).toHaveLength(2);
+        expect(f.writes.created.map((c) => c.ticketId)).toEqual([b!.ticketId, a!.ticketId]);
+      }
+    },
+  );
+
+  test('GAT-080 F20 마감 뒤 다시 부르기는 TICKET_UNAVAILABLE 표와 결과 없는 표를 다시 하지 않고, 결과 없는 표는 FAILED·INTERNAL로 저장해 준다', async () => {
+    // (나) 첫 호출이 모두 TICKET_UNAVAILABLE
+    const [a, b] = [seat(), seat()];
+    const f = fixture([a!, b!]);
+    f.tickets.failNext = 1;
+    const first = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T16:00:00') }));
+    expect(first.map((x) => x.failureCode)).toEqual(['TICKET_UNAVAILABLE', 'TICKET_UNAVAILABLE']);
+    const again = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00.000') }));
+    expect(again).toEqual(first);
+    expect(f.tickets.calls).toHaveLength(1);
+    expect(f.writes.created).toHaveLength(0);
+
+    // (다) 요청 기록만 있고 결과 없는 표, (나)와 섞인 경우: a는 TICKET_UNAVAILABLE로 저장, b는 결과 없음
+    const g = fixture([a!, b!]);
+    await seedRequest(g.store, [t(a!), t(b!)]);
+    await g.store.saveResults(APPROVAL, [{ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE', expectedHolderAccountId: PAYER }]);
+    const late = await g.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00.000') }));
+    expect(g.tickets.calls).toHaveLength(0);
+    expect(g.seats.calls).toHaveLength(0);
+    expect(g.writes.created).toHaveLength(0);
+    expect(late).toEqual([
+      { ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE' },
+      { ticketId: b!.ticketId, outcome: 'FAILED', failureCode: 'INTERNAL' },
+    ]);
+    expect(await g.store.results(APPROVAL)).toEqual(late);
   });
 });
 

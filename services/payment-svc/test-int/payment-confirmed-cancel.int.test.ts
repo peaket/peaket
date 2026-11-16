@@ -475,3 +475,50 @@ describe('P-T21 3시간 지난 재시도의 조회 대조(실제 저장소)', ()
     expect(gatewayCalls[1]).toEqual(gatewayCalls[0]);
   });
 });
+
+describe('GAT-080 P10 금액을 비운 요청과 진행 중인 다른 취소(BAT-415 계획 §10 ①, 실제 저장소)', () => {
+  test('GAT-080 P10 금액을 비운 요청은 10분 지난 진행 중 취소를 빼고 금액을 적어 보내며 0 이하면 FAILED_PRECONDITION이다', async () => {
+    // 결제 100,000·누적 20,000·같은 결제의 진행 중 다른 건 30,000(10분 지남) → 금액 비움은 50,000을 적어 보낸다
+    const p = await partial();
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p10_other', 30_000);
+    clock.advance(600_000);
+    gatewayCalls = [];
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p10_omit')).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 70_000 } });
+    expect(gatewayCalls).toEqual([body(p.orderId, 'p10_omit', 50_000, 80_000)]);
+    expect((await cancelRows(p.paymentId)).find((r) => r.idempotency_key === 'cancel-p10_omit')).toEqual({
+      idempotency_key: 'cancel-p10_omit',
+      amount: 50_000,
+      reason: '관객 취소',
+      full_cancel: false,
+      expected_balance: 80_000,
+      status: 'CANCELED',
+    });
+  });
+
+  test('GAT-080 P10 진행 중 다른 건이 10분 안(599,999ms)이면 금액을 비운 요청도 결과 모름이 먼저다(결제사 0, 새 행 0)', async () => {
+    const p = await partial();
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p10_busy_other', 30_000);
+    clock.advance(599_999);
+    gatewayCalls = [];
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p10_busy_omit')).resolves.toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN', cancelled_amount: { krw: 20_000 } });
+    expect(gatewayCalls).toHaveLength(0);
+    expect((await cancelRows(p.paymentId)).map((r) => r.idempotency_key)).toEqual(['cancel-p10_busy_other']);
+  });
+
+  test('GAT-080 P10 진행 중 다른 건이 남은 전부(80,000, 10분 지남)면 금액을 비운 요청은 FAILED_PRECONDITION이고 결제사·새 행이 없다', async () => {
+    const p = await partial();
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p10_all_other', 80_000);
+    clock.advance(600_000);
+    gatewayCalls = [];
+    gatewayOutcome = 'CANCELLED';
+    expect((await failure(cancel(p.paymentId, 'p10_zero'))).code).toBe(grpc.status.FAILED_PRECONDITION);
+    expect(gatewayCalls).toHaveLength(0);
+    expect((await cancelRows(p.paymentId)).map((r) => r.idempotency_key)).toEqual(['cancel-p10_all_other']);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
+  });
+});

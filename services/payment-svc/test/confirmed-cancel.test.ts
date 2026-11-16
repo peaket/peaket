@@ -207,6 +207,24 @@ describe('결제 후 일반 취소: 저장한 취소 건으로 보낸다', () =>
   });
 });
 
+describe('GAT-080 P10 금액을 비운 요청과 진행 중인 다른 취소(BAT-415 계획 §10 ①)', () => {
+  test('GAT-080 P10 금액을 비운 요청에 저장소가 진행 중 합을 뺀 50,000을 금액으로 적었으면 ALL이 아니라 50,000·기대 잔액 80,000으로 보낸다', async () => {
+    const f = fixture({ begin: begun({ amount: 50_000, fullCancel: false, expectedBalance: 80_000 }) });
+    await f.uc.execute(input());
+    expect(f.begins).toEqual([{ cancellationId: CANCEL, reason: '관객 취소' }]);
+    expect(f.cancels).toEqual([{ paymentRef: 'pay_ref_1', amount: 50_000, reason: '관객 취소', idemKey: `cancel-${CANCEL}`, expectedBalance: 80_000 }]);
+  });
+
+  test('GAT-080 P10 금액을 비운 요청에 진행 중 합을 빼면 0 이하(NO_BALANCE)이면 결제사를 부르지 않고 상태 오류이며, 10분 안의 진행 중 건(BUSY)이면 결과 모름이다', async () => {
+    const none = fixture({ begin: { status: 'NO_BALANCE' } });
+    await expect(none.uc.execute(input())).rejects.toThrow(PaymentCancelStateError);
+    expect(none.cancels).toHaveLength(0);
+    const busy = fixture({ begin: { status: 'BUSY' } });
+    await expect(busy.uc.execute(input())).resolves.toEqual({ result: 'UNKNOWN', cancelledAmount: 20_000 });
+    expect(busy.cancels).toHaveLength(0);
+  });
+});
+
 describe('P-T21 3시간 지난 재시도의 조회 대조', () => {
   const THREE_HOURS = 10_800_000;
 
