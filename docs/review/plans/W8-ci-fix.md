@@ -162,3 +162,31 @@ const serverMs = Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
 | cancellation `NOW = Date.parse('2026-11-05T10:00:00+09:00')`(M3 꼴, 고친 파일에서) | 13개 중 1개 실패. 위와 같은 반납 시험(고친 파일 기준 359행) |
 
 셋 다 확인 뒤 고친 값으로 되돌렸다. 시험이 서버 시각과의 관계를 실제로 본다는 뜻이다.
+
+## 검증
+
+검증 담당(`l3w8-ci-verify`)이 2026-11-16 13:32~13:34(한국 시각, 04:32~04:34Z) 개인 PC Docker Desktop에서 돌렸다. 바탕은 가지 `fix/lane3-w8-ci-date`의 `4df40392`(시험 담당이 고친 뒤)다. 모든 명령은 `services/purchase-svc` 폴더에서 `npx vitest run --config vitest.integration.config.mjs <파일>`이고, 두 파일은 한 번에 하나씩 따로 돌렸다(함께 돌리면 부하로 100ms 마감을 넘긴 기록이 있다). 틀린 구현은 시험 파일의 기준 시각 한 줄만 잠깐 바꿨고, 돌린 뒤마다 `git checkout -- <파일>`로 되돌렸다.
+
+### 기준선(바꾸지 않은 상태)
+
+| 파일 | 결과 |
+|---|---|
+| `test-int/priority-hold.int.test.ts` | 7개 모두 통과 |
+| `test-int/cancellation.int.test.ts` | 13개 모두 통과 |
+
+### 틀린 구현
+
+| 번호 | 바꾼 것 | 돌린 시험 | 결과 |
+|---|---|---|---|
+| M1 | priority-hold `NOW = serverMs` → `NOW = Date.parse('2026-11-14T08:00:00.000Z')`(고정 날짜로 되돌림) | `test-int/priority-hold.int.test.ts` | **잡힘**. 7개 중 4개 실패: S-T37 ①·④·⑦ 회수 해제·⑦ 다른 계정·권리 ID, 넷 다 `expected { kind: 'EXPIRED' } to match object { kind: 'OK', … }`. 돌린 때가 08:00Z 전이라 다섯째('⑦ prio 만료 회수')는 아직 통과했다(계획 5절 기대와 같다) |
+| M2 | priority-hold `NOW = serverMs` → `NOW = serverMs - 2 * DAY`(서버 시각을 읽되 지난 쪽으로 어긋남) | `test-int/priority-hold.int.test.ts` | **잡힘**. 7개 중 5개 실패: M1의 넷과 '⑦ prio 만료 회수'. 보관 시한 `NOW + 2 * DAY`가 서버 지금과 같아져 `keep <= now`이기 때문이다(실패 확인 절과 같다) |
+| M3 | cancellation `NOW = dayStart - 3 * DAY + 10 * HOUR` → `NOW = Date.parse('2026-11-05T10:00:00+09:00')`(지난 고정 날짜) | `test-int/cancellation.int.test.ts` | **잡힘**. 13개 중 1개 실패: GAT080_취소는_티켓키폐기·좌석RETURNED·Redis비트해제·결제사부분취소를_한번에_한다, 359행 `GETBIT … toBe(0)`에서 `expected 1 to be +0`(4절 2에서 기록한 반납 시험과 같다) |
+
+**합계: 넣은 틀린 구현 3개, 잡힘 3개, 살아남음 0개.**
+
+### 함께 본 것
+
+- **diff 범위**: `git diff 92448f1d 4df40392`는 두 시험 파일과 이 계획 파일만 바꾼다. `services/purchase-svc/src`는 바뀌지 않았다. 시험 파일 diff에 `expect(` 줄은 없다(0줄).
+- **남은 고정 날짜**: 두 시험 파일에서 `Date.parse`·`Date.UTC`·`new Date('…')`·`20xx-xx` 꼴 날짜·숫자로 박은 시각을 찾았다. 기준 시각을 쓰지 않는 고정 날짜는 남아 있지 않다. 두 파일이 불러오는 도우미(`test-int/valkey.ts`·`postgres.ts`)에도 없다.
+- **참고(날짜가 아닌 시계 어긋남)**: priority-hold의 'B1-01_결제_중_pin이_있으면_만료_회수가_좌석을_풀지_않는다'(108행)와 '⑦ prio 만료 회수'(130·133행)는 기준을 서버 시각이 아니라 PC 시계 `Date.now()`에서 잡는다. 계획 3절 ①-4대로 그대로 둔 것이고 날짜가 지나도 깨지지 않는다. 다만 Lua는 Redis `TIME`과 견주므로, 컨테이너 시계가 PC 시계와 크게 어긋나면(⑦은 200ms, B1-01은 60초 넘게) 흔들릴 수 있다. 이번 실행에서는 통과했다. 고칠 일은 아니고 흔들림이 보이면 볼 자리로 남긴다.
+- **정리**: 실행 전후 `docker ps -a` 목록이 같다(이 실행이 남긴 컨테이너 없음). 되돌린 뒤 `git status`는 이 계획 파일 밖에 깨끗하다.
