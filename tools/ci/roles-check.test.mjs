@@ -4,7 +4,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -184,8 +184,57 @@ function write(files) {
   }
 }
 
+// review·verify 커밋은 그 묶음 계획 파일의 자기 절('리뷰'·'검증')을 바꿔야 센다(계획 W7-L1-roles-testonly 8).
+// 사건의 review·verify 커밋은 기본으로 자기 절 끝에 줄 하나를 더한다. touch: false면 손대지 않고,
+// touch: '<절>' 또는 { section, batch, mode }로 다른 절·다른 묶음·다른 꼴(blank·trail·edit·sub·same)을 고른다
+function sectionRange(lines, name) {
+  let fence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('```')) {
+      fence = !fence;
+      continue;
+    }
+    const m = !fence && lines[i].match(/^(#{2,3}) (?:\d+(?:\.\d+)*\.? )?(.+?)\s*$/);
+    if (!m || m[2] !== name) continue;
+    let j = i + 1;
+    let inner = false;
+    for (; j < lines.length; j++) {
+      if (lines[j].startsWith('```')) {
+        inner = !inner;
+        continue;
+      }
+      const h = !inner && lines[j].match(/^(#{1,6}) /);
+      if (h && h[1].length <= m[1].length) break;
+    }
+    return [i, j];
+  }
+  return null;
+}
+
+function touchPlan(s) {
+  const t = typeof s.touch === 'object' ? s.touch : { section: s.touch ?? (s.role === 'review' ? '리뷰' : '검증') };
+  const path = join(dir, `docs/review/plans/${t.batch ?? s.batch}.md`);
+  if (!existsSync(path)) return;
+  const lines = readFileSync(path, 'utf8').split('\n');
+  const range = sectionRange(lines, t.section);
+  if (!range) return;
+  const [i] = range;
+  let [, j] = range;
+  while (j - 1 > i && lines[j - 1].trim() === '') j--;
+  const first = lines.findIndex((l, n) => n > i && n < j && l.trim() !== '');
+  const mode = t.mode ?? 'line';
+  if (mode === 'line') lines.splice(j, 0, `- ${s.label} 커밋이 적었다.`);
+  else if (mode === 'sub') lines.splice(j, 0, '', '### 둘째 바퀴', '', `- ${s.label} 커밋이 다시 잡았다.`);
+  else if (mode === 'blank') lines.splice(j, 0, '', '');
+  else if (mode === 'trail') lines[first] = `${lines[first]}   `;
+  else if (mode === 'edit') lines[first] = `${lines[first]} ${s.label} 커밋이 고쳤다.`;
+  else assert.equal(mode, 'same', `시험 사건이 틀렸다: 모르는 touch 꼴 ${mode}`);
+  writeFileSync(path, lines.join('\n'));
+}
+
 function makeCommit(s) {
   write(s.files ?? {});
+  if (s.touch !== false && (s.touch !== undefined || s.role === 'review' || s.role === 'verify')) touchPlan(s);
   for (const p of s.del ?? []) rmSync(join(dir, p));
   for (const [from, to] of s.mv ?? []) {
     mkdirSync(dirname(join(dir, to)), { recursive: true });
@@ -1322,4 +1371,90 @@ test('RC-66 ③ 문서 묶음에는 검증 차례가 걸리지 않는다', () =>
   const d = [...docBatch(), spec('doc2', 'doc', 'BAT-902', S.doc, { 'notes/a.md': '글 고침\n' })];
   const { r } = check(pick(d, ['plan', 'doc', 'review', 'doc2', 'record']));
   expectPass(r, 'RC-66 review 뒤 doc 커밋', 1, 5);
+});
+
+// ---- review·verify 커밋은 자기 절을 바꿔야 센다(계획 W7-L1-roles-testonly 8, 리뷰 지적 RV-01) ----
+
+const NOT_VERIFY = '검증';
+const count = (r, name) => failures(r.out).filter((f) => f.check === name).length;
+// 고침 뒤의 마지막 verify(vX)만 바꿔 보는 사건: plan → test → impl → review → verify → Fix-By: test → Fix-By: impl → vX → record
+const lastVerify = (vx) => {
+  const g = [...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), { ...v901('vX'), ...vx }];
+  return pick(g, ['plan', 'test', 'impl', 'review', 'verify', 't1', 'i1', 'vX', 'record']);
+};
+
+test('RC-67 ③④ 빈 verify로 마지막 검증을 비켜 갈 수 없다', () => {
+  for (const [name, vx] of [
+    ['빈 커밋', { touch: false, files: {} }],
+    ['docs/PROGRESS.md만 고침', { touch: false, files: { 'docs/PROGRESS.md': '검증했다\n' } }],
+    ["계획 파일의 '리뷰' 절만 고침", { touch: '리뷰', files: {} }],
+    ["'검증' 절에 빈 줄만 더함", { touch: { section: '검증', mode: 'blank' }, files: {} }],
+    ["'검증' 절 줄 끝 공백만 바꿈", { touch: { section: '검증', mode: 'trail' }, files: {} }],
+  ]) {
+    const { r, sha } = check(lastVerify(vx));
+    expectFail(r, `RC-67 ${name}: 세지 않는 verify`, '구성', 'BAT-901', sha.vX, [NOT_VERIFY]);
+    expectFail(r, `RC-67 ${name}: 마지막 코드 고침 뒤 검증 없음`, '차례', 'BAT-901', sha.i1, [LAST_FIX]);
+    assert.equal(count(r, '구성'), 1, `RC-67 ${name}: [구성] 줄이 하나가 아니다\n${r.all}`);
+    assert.equal(count(r, '차례'), 1, `RC-67 ${name}: [차례] 줄이 하나가 아니다\n${r.all}`);
+  }
+});
+
+test("RC-68 ③④ '검증' 절을 바꾼 다시 검증은 센다", () => {
+  for (const [name, vx] of [
+    ['줄 하나를 더함', {}],
+    ['### 둘째 바퀴 하위 제목과 줄을 더함', { touch: { section: '검증', mode: 'sub' }, files: {} }],
+    ["'검증' 절과 docs/PROGRESS.md를 함께 고침", { files: { 'docs/PROGRESS.md': '다시 검증했다\n' } }],
+    ["'검증' 절의 기존 줄 하나를 고침", { touch: { section: '검증', mode: 'edit' }, files: {} }],
+  ]) {
+    const { r } = check(lastVerify(vx));
+    expectPass(r, `RC-68 ${name}`, 1, 9);
+  }
+});
+
+test('RC-69 ④ 유일한 verify가 세지 않으면 구성 실패다', () => {
+  const one = check(set(drop(codeBatch(), 'rfTest', 'rfImpl'), 'verify', { touch: false, files: {} }));
+  expectFail(one.r, 'RC-69 코드 묶음 verify가 빈 커밋', '구성', 'BAT-901', one.sha.verify, [NOT_VERIFY]);
+  expectFail(one.r, 'RC-69 코드 묶음 verify 없음', '구성', 'BAT-901', null);
+  const two = onPre(set(bat950(), 'verify', { touch: false }));
+  expectFail(two.r, 'RC-69 시험만 묶음 verify가 다른 파일만', '구성', 'BAT-950', two.sha.verify, [NOT_VERIFY]);
+  expectFail(two.r, 'RC-69 시험만 묶음 verify 없음', '구성', 'BAT-950', null);
+});
+
+test("RC-70 ③④ review 커밋도 '리뷰' 절을 바꿔야 센다", () => {
+  const one = check(set(codeBatch(), 'review', { touch: false, files: {} }));
+  expectFail(one.r, 'RC-70 유일한 review가 빈 커밋', '구성', 'BAT-901', one.sha.review, ['리뷰']);
+  expectFail(one.r, 'RC-70 유일한 review가 빈 커밋: review 없음', '구성', 'BAT-901', null);
+  const two = check(set(codeBatch(), 'review', { touch: '검증' }));
+  expectFail(two.r, "RC-70 review가 '검증' 절만 고침", '구성', 'BAT-901', two.sha.review, ['리뷰']);
+  // 빈 review 뒤, 첫 verify 앞의 Fix-By: test 리뷰 반영: 앞 역할(첫 review·첫 verify)이 없다
+  const three = check(set(codeBatch(), 'review', { touch: false, files: {} }));
+  expectFail(three.r, 'RC-70 빈 review 뒤 첫 verify 앞의 리뷰 반영', '차례', 'BAT-901', three.sha.rfTest);
+  const four = check(set(docBatch(), 'review', { touch: false, files: { 'notes/a.md': '리뷰가 고침\n' } }));
+  expectFail(four.r, 'RC-70 문서 묶음 review가 notes/a.md만', '구성', 'BAT-902', four.sha.review, ['리뷰']);
+});
+
+test('RC-71 ③ 절 비교는 그 커밋의 첫 부모와 한다', () => {
+  const g = [...codeBatch(), v901('verify2')];
+  const order = ['plan', 'test', 'impl', 'review', 'rfTest', 'rfImpl', 'verify', 'verify2', 'record'];
+  const one = check(pick(g, order));
+  expectPass(one.r, 'RC-71 둘째 verify가 줄 하나를 더함', 1, 9);
+  const two = check(pick(set(g, 'verify2', { touch: { section: '검증', mode: 'same' }, files: {} }), order));
+  expectFail(two.r, 'RC-71 둘째 verify가 첫째와 같은 내용을 그대로 둠', '구성', 'BAT-901', two.sha.verify2, [NOT_VERIFY]);
+  // verify 커밋이 다른 묶음 BAT-903의 계획 파일 '검증' 절만 고침
+  const three = check([...bat903(), ...set(codeBatch(), 'verify', { touch: { section: '검증', batch: 'BAT-903' }, files: {} })]);
+  expectFail(three.r, 'RC-71 다른 묶음 계획 파일의 검증 절', '구성', 'BAT-901', three.sha.verify, [NOT_VERIFY]);
+  // 범위 시작 전에 이미 '검증' 절이 차 있던 계획 파일에 줄 하나를 더한다
+  checkout(base);
+  const start = commit(dir, { 'docs/review/plans/BAT-901.md': codePlan('BAT-901') }, '범위 앞의 계획 파일');
+  current = start;
+  const four = check(codeBatch(), { start, base: start });
+  expectPass(four.r, 'RC-71 범위 앞에 차 있던 검증 절에 줄을 더함', 1, 8);
+});
+
+test('RC-72 ④ 내용 검사는 review·verify에만 걸린다', () => {
+  expectPass(check(set(codeBatch(), 'record', { files: {} })).r, 'RC-72 record 빈 커밋', 1, 8);
+  const planLate = spec('planLate', 'plan', 'BAT-901', S.plan, {}, { touch: '계획' });
+  expectPass(check([...codeBatch(), planLate]).r, "RC-72 plan 커밋이 '계획' 절만 고침", 1, 9);
+  expectPass(check(docBatch()).r, "RC-72 doc 커밋이 '리뷰' 절을 안 바꿈", 1, 4);
+  expectPass(check([spec('w7', 'record', 'W7-L1', S.record, { 'notes/wave7.md': '웨이브 7 보고\n' })]).r, 'RC-72 기록만 묶음 record', 1, 1);
 });
