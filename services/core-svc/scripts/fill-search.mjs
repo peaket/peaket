@@ -24,18 +24,24 @@ if (env !== 'local' && env !== 'ci') {
   console.error(`PEAKET_ENV가 local·ci가 아니라(${JSON.stringify(env)}) 채우지 않는다. 측정용 채우기는 로컬·CI에서만 돈다`);
   process.exit(2);
 }
-/** @type {string} */
-let host;
+// 호스트는 실제로 붙을 값으로 본다: pg가 연결 문자열을 해석한 결과(pg-connection-string parse, 쿼리 ?host=가 주소의 호스트를 덮어쓴 값까지)다.
+// 여럿(쉼표)·빈 값·소켓 경로(/로 시작)는 멈춘다. 연결은 이 해석 결과로만 만든다(ADR-0271 결정 21 보탬, 리뷰 W7L2-S12)
+/** @type {{ host: string; port: number; user: string; password: string; database: string }} */
+let target;
 try {
-  host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const probe = new pg.Client({ connectionString: url });
+  target = { host: String(probe.host ?? ''), port: Number(probe.port), user: String(probe.user ?? ''), password: String(probe.password ?? ''), database: String(probe.database ?? '') };
 } catch {
-  console.error('PEAKET_DATABASE_URL을 주소로 읽지 못해 채우지 않는다');
+  console.error('PEAKET_DATABASE_URL에서 DB 호스트를 해석하지 못해 채우지 않는다');
   process.exit(2);
 }
+const host = target.host;
 if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
-  console.error(`DB 호스트 ${host}가 로컬(localhost·127.0.0.1·::1)이 아니라 채우지 않는다`);
+  console.error(`DB 호스트 ${JSON.stringify(host)}가 로컬(localhost·127.0.0.1·::1)이 아니라 채우지 않는다(여럿·빈 값·소켓 경로도 멈춘다)`);
   process.exit(2);
 }
+/** 해석 결과로 다시 만든 주소(쿼리 없음). 아래 두 연결 모두 이것만 쓴다 */
+const checkedUrl = `postgres://${encodeURIComponent(target.user)}:${encodeURIComponent(target.password)}@${host.includes(':') ? `[${host}]` : host}:${target.port}/${encodeURIComponent(target.database)}`;
 
 const MIN = 60_000;
 const DAY = 1440 * MIN;
@@ -53,7 +59,7 @@ const id = (prefix, n) => `${prefix}-0000-4000-8000-${String(n).padStart(12, '0'
 const PROMOTER = id('4f000000', 1);
 const ACTOR = id('4f000000', 2);
 
-const client = new pg.Client({ connectionString: url });
+const client = new pg.Client({ host: target.host, port: target.port, user: target.user, password: target.password, database: target.database });
 await client.connect();
 try {
   await client.query('begin');
@@ -109,7 +115,7 @@ const { createDatabase } = await import('@peaket/platform');
 // 빌드 결과(dist)는 이 스크립트를 돌리기 직전에 만든다. 타입 검사가 빌드 전 dist를 읽지 않게 경로를 값으로 넘긴다
 const catalogModule = '../dist/modules/catalog/index.js';
 const { DrizzleSearchReadModel } = /** @type {{ DrizzleSearchReadModel: new (db: unknown) => { reconcileAll(at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> } }} */ (await import(catalogModule));
-const database = createDatabase({ url, applicationName: 'core-svc-fill-search', max: 2 });
+const database = createDatabase({ url: checkedUrl, applicationName: 'core-svc-fill-search', max: 2 });
 try {
   const started = Date.now();
   const r = await new DrizzleSearchReadModel(database).reconcileAll(new Date(NOW));

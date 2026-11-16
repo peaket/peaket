@@ -8,6 +8,7 @@
 // 쓰는 법: PEAKET_ENV=local PEAKET_DATABASE_URL=postgres://…@127.0.0.1:…/peaket node scripts/measure-search-reconcile.mjs [--out 결과.json]
 import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import pg from 'pg';
 
 const { values } = parseArgs({ options: { out: { type: 'string' }, chunk: { type: 'string', default: '500' } } });
 const url = process.env.PEAKET_DATABASE_URL;
@@ -20,9 +21,16 @@ if (env !== 'local' && env !== 'ci') {
   console.error(`PEAKET_ENV가 local·ci가 아니라(${JSON.stringify(env)}) 재지 않는다`);
   process.exit(2);
 }
-const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+// 호스트는 pg가 연결 문자열을 해석한 값(쿼리 ?host= 포함)으로 본다. 여럿·빈 값·소켓 경로는 멈춘다(fill-search.mjs와 같다, 리뷰 W7L2-S12)
+/** @type {string} */
+let host = '';
+try {
+  host = String(new pg.Client({ connectionString: url }).host ?? '');
+} catch {
+  host = '';
+}
 if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
-  console.error(`DB 호스트 ${host}가 로컬이 아니라 재지 않는다`);
+  console.error(`DB 호스트 ${JSON.stringify(host)}가 로컬이 아니라 재지 않는다`);
   process.exit(2);
 }
 
