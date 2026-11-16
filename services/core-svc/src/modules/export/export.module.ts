@@ -2,7 +2,7 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, DATABASE, type ReauthJtiStore } from '@peaket/platform';
 import { AttendeeExports } from './application/attendee-exports.js';
-import { ExportProblem } from './domain/export.js';
+import { attendeeSourceUnavailable } from './domain/export.js';
 import type { ActorNameResolver, AttendeeExportStore, AttendeeSource, BookersReauth, PartnerEventLookup } from './domain/ports.js';
 import { ATTENDEE_EXPORT_STORE, ATTENDEE_SOURCE, BOOKERS_REAUTH, PARTNER_EVENT_LOOKUP } from './domain/ports.js';
 import { DrizzleAttendeeExportStore } from './adapters/db/drizzle-export-store.js';
@@ -50,10 +50,10 @@ class MerchAttendeeSource implements AttendeeSource {
 /** 운영에서 purchase-svc 내부 HTTP 주소가 없을 때. 굿즈 주문으로 잘못 읽지 않고 503으로 닫는다(A2-03) */
 class UnavailableAttendeeSource implements AttendeeSource {
   list(): Promise<never> {
-    throw new ExportProblem('dependency-unavailable', 503, '예매자 명단 원천을 쓸 수 없습니다');
+    throw attendeeSourceUnavailable('예매자 명단 원천을 쓸 수 없습니다');
   }
   count(): Promise<never> {
-    throw new ExportProblem('dependency-unavailable', 503, '예매자 명단 원천을 쓸 수 없습니다');
+    throw attendeeSourceUnavailable('예매자 명단 원천을 쓸 수 없습니다');
   }
 }
 

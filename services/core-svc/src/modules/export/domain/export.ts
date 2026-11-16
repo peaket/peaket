@@ -6,28 +6,33 @@ export type ExportFormat = 'CSV' | 'XLSX' | 'PDF';
 export type ExportResult = 'COMPLETED' | 'FAILED';
 
 export class ExportProblem extends Error {
-  /** 사정(Problem detail). 뼈대(W7-audit 웨이브 끝 리뷰 반영 시험 단계, C1): 구현 담당이 넷째 인자에서 채운다 */
+  /** 사정(Problem detail). 제목은 오류 목록 값으로 두고 사정은 여기 적는다(guidelines §2, W7-audit 리뷰 C1) */
   readonly detail?: string;
-  /** Retry-After 초. 뼈대(C1): 구현 담당이 넷째 인자에서 채운다 */
+  /** Retry-After 초 */
   readonly retryAfterSeconds?: number;
 
   constructor(
     readonly type: string,
     readonly status: number,
     readonly title: string,
-    _o?: { detail?: string; retryAfterSeconds?: number },
+    o: { detail?: string; retryAfterSeconds?: number } = {},
   ) {
-    super(title);
+    super(o.detail ?? title);
     this.name = 'ExportProblem';
+    if (o.detail !== undefined) this.detail = o.detail;
+    if (o.retryAfterSeconds !== undefined) this.retryAfterSeconds = o.retryAfterSeconds;
   }
 }
 
+/** 원천을 쓸 수 없을 때 다시 해 보라는 시각 [가정](docs/features/settlement.md §9 '원천 오류의 응답 계약', openapi ServiceUnavailable) */
+const ATTENDEE_SOURCE_RETRY_AFTER_SECONDS = 30;
+
 /**
  * 원천을 쓸 수 없음: 503 dependency-unavailable, 제목은 오류 목록 값, 사정은 detail, Retry-After 30초 [가정](docs/features/settlement.md §9 '원천 오류의 응답 계약').
- * 뼈대(W7-audit 웨이브 끝 리뷰 반영 시험 단계, C1): 구현 담당이 채운다
+ * 조립 없음·응답 모양 틀림·같은 커서 되풀이가 쓴다(W7-audit 리뷰 C1)
  */
-export function attendeeSourceUnavailable(_detail: string): ExportProblem {
-  throw new Error('아직 없음');
+export function attendeeSourceUnavailable(detail: string): ExportProblem {
+  return new ExportProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다', { detail, retryAfterSeconds: ATTENDEE_SOURCE_RETRY_AFTER_SECONDS });
 }
 
 export interface AttendeeExportRecord {

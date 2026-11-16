@@ -7544,10 +7544,15 @@ export type createPartnerEventAttendeeExportResponse410 = {
   status: 410
 }
 
+export type createPartnerEventAttendeeExportResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createPartnerEventAttendeeExportResponseSuccess = (createPartnerEventAttendeeExportResponse200) & {
   headers: Headers;
 };
-export type createPartnerEventAttendeeExportResponseError = (createPartnerEventAttendeeExportResponse403 | createPartnerEventAttendeeExportResponse410) & {
+export type createPartnerEventAttendeeExportResponseError = (createPartnerEventAttendeeExportResponse403 | createPartnerEventAttendeeExportResponse410 | createPartnerEventAttendeeExportResponse503) & {
   headers: Headers;
 };
 
@@ -7595,7 +7600,7 @@ return orvalFetch<createPartnerEventAttendeeExportResponseSuccess>(getCreatePart
 
 export const getCreatePartnerEventAttendeeExportMutationKey = () => ['createPartnerEventAttendeeExport'] as const;
 
-export const getCreatePartnerEventAttendeeExportMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreatePartnerEventAttendeeExportMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventAttendeeExport>>, TError,CreatePartnerEventAttendeeExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventAttendeeExport>>, TError,CreatePartnerEventAttendeeExportMutationVariables, TContext> => {
 
@@ -7624,13 +7629,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerEventAttendeeExportMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerEventAttendeeExport>>>
     export type CreatePartnerEventAttendeeExportMutationBody = BodyType<CreatePartnerEventAttendeeExportBody> | undefined
-    export type CreatePartnerEventAttendeeExportMutationError = ErrorType<ProblemResponse>
+    export type CreatePartnerEventAttendeeExportMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type CreatePartnerEventAttendeeExportMutationVariables = {eventId: string;data?: BodyType<CreatePartnerEventAttendeeExportBody>}
 
     /**
  * @summary 예매자 명단 내보내기(사유 필수, 건수·사유 접속기록, 동의 범위 항목만, 스트리밍)
  */
-export const useCreatePartnerEventAttendeeExport = <TError = ErrorType<ProblemResponse>,
+export const useCreatePartnerEventAttendeeExport = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventAttendeeExport>>, TError,CreatePartnerEventAttendeeExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerEventAttendeeExport>>,
@@ -9400,10 +9405,15 @@ export type listPartnerEventAttendeesResponse410 = {
   status: 410
 }
 
+export type listPartnerEventAttendeesResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type listPartnerEventAttendeesResponseSuccess = (listPartnerEventAttendeesResponse200) & {
   headers: Headers;
 };
-export type listPartnerEventAttendeesResponseError = (listPartnerEventAttendeesResponse401 | listPartnerEventAttendeesResponse403 | listPartnerEventAttendeesResponse404 | listPartnerEventAttendeesResponse410) & {
+export type listPartnerEventAttendeesResponseError = (listPartnerEventAttendeesResponse401 | listPartnerEventAttendeesResponse403 | listPartnerEventAttendeesResponse404 | listPartnerEventAttendeesResponse410 | listPartnerEventAttendeesResponse503) & {
   headers: Headers;
 };
 
@@ -9451,7 +9461,7 @@ export const getListPartnerEventAttendeesQueryKey = (eventId: string,
     }
 
 
-export const getListPartnerEventAttendeesQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string,
+export const getListPartnerEventAttendeesQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(eventId: string,
     params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
@@ -9471,10 +9481,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPartnerEventAttendeesQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerEventAttendees>>>
-export type ListPartnerEventAttendeesQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+export type ListPartnerEventAttendeesQueryError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
 
 
-export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params: undefined |  ListPartnerEventAttendeesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9485,7 +9495,7 @@ export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof l
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9496,7 +9506,7 @@ export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof l
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -9505,7 +9515,7 @@ export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof l
  * @summary 예매자 명단 보기(SCR-027, 가린 값, 동의 범위 항목만)
  */
 
-export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient

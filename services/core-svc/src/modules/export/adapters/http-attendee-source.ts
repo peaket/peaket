@@ -2,11 +2,13 @@
 import { createExternalHttpClient } from '@peaket/platform';
 import { z } from 'zod';
 import type { AttendeeRecord } from '../../shop/index.js';
+import { attendeeSourceUnavailable } from '../domain/export.js';
 import type { AttendeeSource, AttendeeSourcePage } from '../domain/ports.js';
 
 /**
  * purchase-svc 내부 응답 모양(services/purchase-svc booking attendee-export.controller.ts의 Page와 같다).
- * 모양이 틀리면(nextCursor 없음·형이 다름, items가 배열이 아님) 조용히 끝으로 보지 않고 실패한다(W7-audit A2-17, docs/api/guidelines.md §3)
+ * 모양이 틀리면(nextCursor 없음·형이 다름·빈 문자열, items가 배열이 아님) 조용히 끝으로 보지 않고 503으로 실패한다
+ * (W7-audit A2-17·리뷰 C1·C4, docs/api/guidelines.md §3 빈 nextCursor는 계약 위반, docs/features/settlement.md §9 '원천 오류의 응답 계약')
  */
 const Page = z.object({
   items: z.array(
@@ -19,7 +21,7 @@ const Page = z.object({
       ticketCount: z.number().int(),
     }),
   ),
-  nextCursor: z.string().nullable(),
+  nextCursor: z.string().min(1).nullable(),
   bookingCount: z.number().int(),
   ticketCount: z.number().int(),
 });
@@ -44,7 +46,7 @@ export class HttpAttendeeSource implements AttendeeSource {
     });
     if (!res.ok) throw new Error(`예매자 명단 원천이 ${res.status}로 답했다`);
     const parsed = Page.safeParse(await res.json());
-    if (!parsed.success) throw new Error('예매자 명단 원천 응답 모양이 틀렸다');
+    if (!parsed.success) throw attendeeSourceUnavailable('예매자 명단 원천의 응답 모양이 틀렸습니다');
     return parsed.data;
   }
 

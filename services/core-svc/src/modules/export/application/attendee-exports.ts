@@ -5,6 +5,7 @@ import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { ActorNameResolver } from '../domain/ports.js';
 import type { AttendeeSource, AttendeeSourcePage, AttendeeExportStore, BookersReauth, PartnerEventLookup } from '../domain/ports.js';
 import {
+  attendeeSourceUnavailable,
   csvFile,
   ExportProblem,
   exportView,
@@ -42,7 +43,15 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof ExportProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title });
+    if (e instanceof ExportProblem) {
+      throw new ProblemError({
+        type: e.type,
+        status: e.status,
+        title: e.title,
+        ...(e.detail !== undefined ? { detail: e.detail } : {}),
+        ...(e.retryAfterSeconds !== undefined ? { retryAfterSeconds: e.retryAfterSeconds } : {}),
+      });
+    }
     throw e;
   }
 };
@@ -183,7 +192,7 @@ export class AttendeeExports {
       if (rows.length > MAX_EXPORT_ROWS) throw new ExportProblem('invalid-query', 422, '한 번에 내려받을 수 있는 행 수를 넘었습니다');
       if (page.nextCursor === null) return rows;
       if (cursor !== undefined) sent.add(cursor);
-      if (sent.has(page.nextCursor)) throw new ExportProblem('dependency-unavailable', 503, '예매자 명단 원천이 같은 페이지를 되풀이했습니다');
+      if (sent.has(page.nextCursor)) throw attendeeSourceUnavailable('예매자 명단 원천이 같은 페이지를 되풀이했습니다');
       cursor = page.nextCursor;
     }
   }
