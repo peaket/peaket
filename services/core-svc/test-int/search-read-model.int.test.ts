@@ -14,7 +14,7 @@ import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
 import pgLib from 'pg';
 import { type Clock, createDatabase, createService, type Database, ensureOutboxPartitions, fakeClock, systemClock } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
@@ -796,14 +796,14 @@ async function changedChunkCount(d: Database, at: number, size: number): Promise
  * 따라잡기 연결 묶음: n번째 커밋이 끝난 뒤의 다음 질의를 장벽에서 세운다. release()로 푼다(10초 뒤에는 저절로 풀린다).
  * 커밋 수와 이 묶음의 서버 세션 pid를 알 수 있다
  */
-function pausingDatabase(url: string, name: string, pauseAfterCommit: number) {
+function pausingDatabase(url: string, name: string, pauseAfterCommit: number, autoMs = 10_000) {
   const d = createDatabase({ url, applicationName: name, max: 2 });
   const state = { commits: 0, paused: false, released: false };
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   let reached!: () => void;
   const atGate = new Promise<void>((r) => (reached = r));
-  const auto = setTimeout(() => release(), 10_000);
+  const auto = setTimeout(() => release(), autoMs);
   d.pool.on('connect', (client) => {
     const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
     (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
@@ -867,10 +867,10 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
     const late = randomUUID();
     await d.db.insert(production).values({ id: late, promoterId: P, placeId: L, title: '끊음 늦은승인 공연', genre: '콘서트', saleReview: 'SUBMITTED' });
     await d.db.insert(event).values({ id: randomUUID(), productionId: late, promoterId: P, venueId: null, openAt: new Date(B - D), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
-    // 1분 정리에 할 일이 있게: 창 (B, B + 1분] 안에 오픈하는 공연
+    // 1분 정리에 할 일이 있게: 창 (B − 1분, B] 안에 오픈하는 공연
     const tidyTarget = randomUUID();
     await d.db.insert(production).values({ id: tidyTarget, promoterId: P, placeId: L, title: '끊음 정리대상 공연', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
-    await d.db.insert(event).values({ id: randomUUID(), productionId: tidyTarget, promoterId: P, venueId: null, openAt: new Date(B + 30_000), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+    await d.db.insert(event).values({ id: randomUUID(), productionId: tidyTarget, promoterId: P, venueId: null, openAt: new Date(B - 30_000), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
 
     const v0 = await v();
     const p = pausingDatabase(c.url, 'core-svc-reconcile-pausing', 2);
@@ -888,8 +888,10 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
         return model.sync(tx, [late], at);
       });
       const approved = await Promise.race([approval.then(() => Date.now()), new Promise<number>((_, rej) => setTimeout(() => rej(new Error('판매 승인 동기화가 따라잡기를 기다렸다')), 5_000))]);
-      // 대조군: 같은 열쇠의 1분 정리는 따라잡기 동안 돌지 않는다(할 일이 있어도 0)
-      expect(await model.syncTimed(new Date(B + 60_000), at)).toEqual({ version: null, productions: 0 });
+      // 끊음 사이(커밋 뒤 다음 끊음 전)에는 1분 정리가 돈다(트랜잭션 잠금이라 끊음 사이에는 아무도 쥐지 않는다, R165-19).
+      // 끊음 안에서 건너뛰는 경우는 '### 15' R165-19 시험이 본다. 창은 (B − 1분, B]로 따라잡기와 같은 시각이라 둘이 서로 되돌리지 않는다
+      const between = await model.syncTimed(at, new Date(B - 60_000));
+      expect(between.productions).toBeGreaterThanOrEqual(1);
       const releasedAt = Date.now();
       p.release();
       const out = await running;
@@ -899,10 +901,9 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
       // 끊음 6개(시작 때 원천의 공연 51개 ÷ 10, 늦은 승인 공연은 목록에 없다) 모두 바뀌어 끊음마다 판 1, 승인 동기화 1
       expect(out).toMatchObject({ ran: true, chunks: Math.ceil(out.productions / 10) });
       expect(out.productions).toBeGreaterThanOrEqual(51);
-      expect((await v()) - v0).toBe(out.chunks + 1);
+      // 끊음마다 판 1, 승인 동기화 1, 끊음 사이 1분 정리가 바꿨으면 1
+      expect((await v()) - v0).toBe(out.chunks + 1 + (between.version === null ? 0 : 1));
       expect(await driftOn(d, at.getTime())).toBe(0);
-      // 따라잡기가 끝났으니 1분 정리는 이제 돈다
-      expect((await model.syncTimed(new Date(B + 60_000), at)).productions).toBeGreaterThanOrEqual(1);
     } finally {
       p.release();
       await p.db.close();
@@ -928,11 +929,12 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
     expect(await driftOn(d, at.getTime())).toBe(0);
   });
 
+  // 트랜잭션 풀링에서는 연결이 파드에 묶이지 않아 pg_terminate_backend로 '파드가 죽음'을 흉내 내지 못한다. A가 임대를 쥔 채 멈추는 장치로 바꿨다(R165-19)
   test('HOT-270 따라잡기를 맡은 파드가 도중에 죽으면 다른 파드가 다음 정리 주기에 이어 마치고 reconciled_at을 적는다(R165-14)', async () => {
     const at = B + 2 * 60_000;
     // 모든 공연 이름을 바꿔 끊음마다 할 일이 있게 한다
     for (const [i, id] of ids.entries()) await d.db.update(production).set({ title: `끊음 공연 다시 ${i}` }).where(eq(production.id, id));
-    const a = pausingDatabase(c.url, 'core-svc-reconcile-pod-a', 1);
+    const a = pausingDatabase(c.url, 'core-svc-reconcile-pod-a', 1, 60_000);
     const clockB = movingClock(at);
     const recorded: { ran: boolean }[] = [];
     const bModel = new DrizzleSearchReadModel(d, 'https://img.test');
@@ -943,39 +945,303 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
       purgeRemovals: (t) => bModel.purgeRemovals(t),
       lastReconciledAt: () => bModel.lastReconciledAt(),
       reconcileAll: async (t, o) => {
-        const r = await bModel.reconcileAll(t, { ...o, chunkSize: 10 });
+        const r = await bModel.reconcileAll(t, { ...o, chunkSize: 10, owner: 'b' });
         recorded.push({ ran: r.ran });
         return r;
       },
     };
     const podB = new SearchReadModelTimers({ sync: bSync, clock: clockB });
+    let runningA: Promise<unknown> = Promise.resolve();
     try {
       // 파드 A가 따라잡기를 시작해 첫 끊음을 커밋하고 섰다
-      const runningA = new DrizzleSearchReadModel(a.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10 }).catch((e: unknown) => e);
+      runningA = new DrizzleSearchReadModel(a.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10, owner: 'a', leaseMs: 1_500 }).catch((e: unknown) => e);
       await Promise.race([a.atGate, new Promise((_, rej) => setTimeout(() => rej(new Error('첫 끊음 커밋 뒤 장벽에 닿지 않았다')), 5_000))]);
-      // 파드 B가 뜬다: A가 잠금을 쥐고 있어 B의 시작 따라잡기는 건너뛴다
-      const startedB = clockB.now();
+      // 파드 B가 뜬다: A가 임대를 쥐고 있어 B의 시작 따라잡기는 건너뛴다. A는 멈춘 채 돌아오지 않는다(죽은 파드)
       await podB.start();
       expect(recorded).toEqual([{ ran: false }]);
-      // A가 죽는다
-      await rows(d, "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'core-svc-reconcile-pod-a'");
-      a.release();
-      expect(await runningA).toBeInstanceOf(Error);
       expect(await reconciledAt()).toBeNull();
       expect(await driftOn(d, at)).toBeGreaterThanOrEqual(1);
-      // B의 다음 정리 주기가 따라잡기를 다시 돌아 마친다
+      // 만료 전 정리 주기: 다시 해 보지만 임대가 살아 있어 건너뛴다
       clockB.set(at + 60_000);
       await podB.tidy();
-      expect(recorded).toEqual([{ ran: false }, { ran: true }]);
+      expect(recorded).toEqual([{ ran: false }, { ran: false }]);
+      // 임대가 만료된 뒤(DB now() 기준) 다음 정리 주기의 다시 하기가 넘겨받아 마친다
+      await rows(d, "update search_version set reconcile_lease_until = now() - interval '1 second' where id = 1");
+      clockB.set(at + 2 * 60_000);
+      await podB.tidy();
+      expect(recorded).toEqual([{ ran: false }, { ran: false }, { ran: true }]);
       const done = await reconciledAt();
       expect(done).not.toBeNull();
-      expect(new Date(done!).getTime()).toBeGreaterThanOrEqual(startedB);
       expect((await bModel.lastReconciledAt())?.getTime()).toBe(new Date(done!).getTime());
       expect(await driftOn(d, at)).toBe(0);
     } finally {
       podB.stop();
       a.release();
+      await within(runningA, 10_000, 'A가 끝나지 않았다').catch(() => undefined);
       await a.db.close().catch(() => {});
+    }
+  });
+});
+
+// ---- 리뷰 R165-19(계획 docs/review/plans/BAT-165.md '### 15', ADR-0271 결정 12 '잠금과 임대', docs/data.md search_version 임대 칸 넷) ----
+
+/**
+ * 트랜잭션 풀링(PgBouncer) 대역: 연결 하나씩만 가진 Database 둘을 번갈아 내준다. 트랜잭션마다 다른 서버 세션이 될 수 있다.
+ * 트랜잭션마다 그 세션의 pg_backend_pid()를 모은다
+ */
+function alternatingDatabase(url: string, name: string) {
+  const inner = [createDatabase({ url, applicationName: `${name}-1`, max: 1 }), createDatabase({ url, applicationName: `${name}-2`, max: 1 })];
+  let i = 0;
+  const pids = new Set<number>();
+  const stat = { transactions: 0 };
+  const next = () => inner[i++ % inner.length]!;
+  const db = {
+    get db() {
+      return next().db;
+    },
+    get pool() {
+      return next().pool;
+    },
+    async transaction<T>(fn: (tx: Parameters<Parameters<Database['transaction']>[0]>[0]) => Promise<T>, o?: Parameters<Database['transaction']>[1]): Promise<T> {
+      return next().transaction(async (tx) => {
+        const r = (await tx.execute(sql`select pg_backend_pid() as pid`)) as unknown as { rows: { pid: number }[] };
+        pids.add(Number(r.rows[0]!.pid));
+        stat.transactions += 1;
+        return fn(tx);
+      }, o);
+    },
+    async close() {
+      for (const x of inner) await x.close();
+    },
+  } as unknown as Database;
+  return { db, pids, stat };
+}
+
+/** 따라잡기 연결 묶음의 두 단계 장벽: 권고 잠금 질의 뒤(끊음 트랜잭션 안)에서 한 번, 그다음 커밋 뒤(끊음 사이)에서 한 번 선다 */
+function stagedDatabase(url: string, name: string) {
+  const d = createDatabase({ url, applicationName: name, max: 2 });
+  const s = { stage: 'afterLock' as 'afterLock' | 'afterCommit' | 'done', armed: false };
+  const mk = () => {
+    let open!: () => void;
+    let hit!: () => void;
+    return { gate: new Promise<void>((r) => (open = r)), reached: new Promise<void>((r) => (hit = r)), open: () => open(), hit: () => hit() };
+  };
+  const g1 = mk();
+  const g2 = mk();
+  const auto = setTimeout(() => {
+    g1.open();
+    g2.open();
+  }, 20_000);
+  d.pool.on('connect', (client) => {
+    const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+    (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+      if (s.armed) {
+        s.armed = false;
+        const g = s.stage === 'afterLock' ? g1 : g2;
+        g.hit();
+        await g.gate;
+      }
+      const r = await q(...a);
+      const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+      if (s.stage === 'afterLock' && /advisory/i.test(t)) s.armed = true;
+      else if (s.stage === 'afterCommit' && /^\s*commit\b/i.test(t)) s.armed = true;
+      return r;
+    };
+  });
+  return {
+    db: d,
+    inChunk: g1.reached,
+    betweenChunks: g2.reached,
+    releaseInChunk() {
+      s.stage = 'afterCommit';
+      g1.open();
+    },
+    releaseBetween() {
+      s.stage = 'done';
+      g2.open();
+    },
+    close: async () => {
+      clearTimeout(auto);
+      g1.open();
+      g2.open();
+      await d.close();
+    },
+  };
+}
+
+const within = <T>(p: Promise<T>, ms: number, what: string) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(what)), ms))]);
+
+describe('R165-19 트랜잭션 잠금과 따라잡기 임대', () => {
+  let c: PostgresContainer;
+  let d: Database;
+  let model: DrizzleSearchReadModel;
+  const B = Date.parse('2026-12-05T00:00:00.000Z');
+  const ids: string[] = [];
+  const P = randomUUID();
+  const L = randomUUID();
+  const lease = async () => (await rows(d, 'select reconcile_owner, reconcile_lease_until, reconcile_started_at, reconcile_cursor, reconciled_at from search_version where id = 1'))[0]!;
+  const allIds = async (at: number) => (await rows(d, 'select production_id from search_document_source_at($1) union select production_id from search_document order by production_id', [new Date(at)])).map((r) => r.production_id as string);
+  /** 창 (at, at + 1분] 안에 오픈하는 공연(1분 정리에 할 일이 있게) */
+  const tidyWork = async (at: number) => {
+    const id = randomUUID();
+    await d.db.insert(production).values({ id, promoterId: P, placeId: L, title: `임대 정리대상 ${id.slice(0, 6)}`, genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
+    await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: P, venueId: null, openAt: new Date(at + 30_000), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+    return id;
+  };
+  const renameAll = async (tag: string) => {
+    for (const [i, id] of ids.entries()) await d.db.update(production).set({ title: `임대 공연 ${tag} ${i}` }).where(eq(production.id, id));
+  };
+
+  beforeAll(async () => {
+    c = await startPostgres();
+    await migrateCore(c.url);
+    d = createDatabase({ url: c.url, applicationName: 'core-svc-r165-19', max: 4 });
+    model = new DrizzleSearchReadModel(d, 'https://img.test');
+    await d.db.insert(promoter).values({ id: P, legalName: '(주)임대' });
+    await d.db.insert(place).values({ id: L, name: '임대홀', address: '서울', region: '서울', createdBy: ACTOR });
+    for (let i = 0; i < 30; i++) {
+      const id = randomUUID();
+      ids.push(id);
+      await d.db.insert(production).values({ id, promoterId: P, placeId: L, title: `임대 공연 ${i}`, genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
+      await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: P, venueId: null, openAt: new Date(B - D), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+    }
+  }, 180_000);
+  afterAll(async () => {
+    await d?.close();
+    c?.stop();
+  });
+
+  test('HOT-270 트랜잭션마다 DB 연결이 바뀌어도 따라잡기는 끝까지 마치고 권고 잠금을 남기지 않는다(R165-19)', async () => {
+    const at = B;
+    const pooled = alternatingDatabase(c.url, 'core-svc-r165-19-pooled');
+    try {
+      const out = await new DrizzleSearchReadModel(pooled.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10, owner: 'pooled' });
+      // 끊음 트랜잭션들이 실제로 서로 다른 서버 세션에서 돌았다(먼저 본다)
+      expect(pooled.stat.transactions).toBeGreaterThanOrEqual(3);
+      expect(pooled.pids.size).toBeGreaterThanOrEqual(2);
+      expect(out).toMatchObject({ ran: true, chunks: 3 });
+      expect(Number((await rows(d, "select count(*)::int as n from pg_locks where locktype = 'advisory'"))[0]!.n)).toBe(0);
+      const l = await lease();
+      expect([l.reconcile_owner, l.reconcile_lease_until, l.reconcile_started_at, l.reconcile_cursor]).toEqual([null, null, null, null]);
+      expect(l.reconciled_at).not.toBeNull();
+      expect(await driftOn(d, at)).toBe(0);
+      // 바로 뒤 1분 정리가 돈다(잠금이 남지 않았다)
+      await tidyWork(at);
+      expect((await model.syncTimed(new Date(at + 60_000), new Date(at))).productions).toBeGreaterThanOrEqual(1);
+    } finally {
+      await pooled.db.close();
+    }
+  });
+
+  test('HOT-270 임대가 살아 있으면 다른 파드는 따라잡기를 하지 않고, 만료되면 넘겨받아 커서 뒤부터 잇는다(R165-19)', async () => {
+    for (const [scenario, at] of [
+      ['SQL로 만료', B + 2 * 60_000],
+      ['실제로 기다려 만료', B + 3 * 60_000],
+    ] as const) {
+      await renameAll(scenario);
+      const order = await allIds(at);
+      expect(order.length).toBeGreaterThanOrEqual(30);
+      // 파드 A가 첫 끊음을 커밋한 뒤 멈춘 채 돌아오지 않는다(죽은 파드)
+      const a = pausingDatabase(c.url, `core-svc-r165-19-a-${scenario.length}`, 1, 60_000);
+      const runningA = new DrizzleSearchReadModel(a.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10, owner: 'a', leaseMs: 1_500 }).catch((e: unknown) => e);
+      try {
+        await within(a.atGate, 5_000, '첫 끊음 커밋 뒤 장벽에 닿지 않았다');
+        const held = await lease();
+        expect({ scenario, owner: held.reconcile_owner, cursor: held.reconcile_cursor }).toEqual({ scenario, owner: 'a', cursor: order[9] });
+        expect(held.reconcile_started_at).not.toBeNull();
+        // 만료 전(1,499ms 안): B는 따라잡기를 하지 않고 임대·커서가 그대로다
+        const early = await model.reconcileAll(new Date(at), { chunkSize: 10, owner: 'b' });
+        expect({ scenario, ran: early.ran }).toEqual({ scenario, ran: false });
+        const still = await lease();
+        expect([still.reconcile_owner, still.reconcile_cursor, String(still.reconcile_lease_until)]).toEqual([held.reconcile_owner, held.reconcile_cursor, String(held.reconcile_lease_until)]);
+        // 만료(DB now() 기준)
+        if (scenario === 'SQL로 만료') await rows(d, "update search_version set reconcile_lease_until = now() - interval '1 second' where id = 1");
+        else
+          await within(
+            (async () => {
+              for (;;) {
+                if ((await rows(d, 'select now() > reconcile_lease_until as gone from search_version where id = 1'))[0]!.gone === true) return;
+                await new Promise((r) => setTimeout(r, 100));
+              }
+            })(),
+            5_000,
+            '임대가 만료되지 않았다',
+          );
+        const late = await model.reconcileAll(new Date(at), { chunkSize: 10, owner: 'b' });
+        expect({ scenario, ran: late.ran, resumedFrom: late.resumedFrom, productions: late.productions }).toEqual({ scenario, ran: true, resumedFrom: held.reconcile_cursor, productions: order.length - 10 });
+        const after = await lease();
+        expect([after.reconcile_owner, after.reconcile_lease_until, after.reconcile_started_at, after.reconcile_cursor]).toEqual([null, null, null, null]);
+        expect(new Date(after.reconciled_at as string | Date).getTime()).toBe(new Date(held.reconcile_started_at as string | Date).getTime());
+        expect(await driftOn(d, at)).toBe(0);
+      } finally {
+        a.release();
+        await within(runningA, 10_000, 'A가 끝나지 않았다').catch(() => undefined);
+        await a.db.close().catch(() => {});
+      }
+    }
+  });
+
+  test('HOT-270 따라잡기 끊음 트랜잭션이 도는 동안 1분 정리·관심도·지운 표시 정리는 그 차례를 건너뛰고, 끊음 사이에는 돈다(R165-19)', async () => {
+    const at = B + 4 * 60_000;
+    await renameAll('정리');
+    // 셋 다 할 일이 있게: 창 안에 오픈하는 공연, 관심도가 바뀐 공연(찜 하나), 하루 지난 지운 표시
+    await tidyWork(at);
+    await d.db.insert(wish).values({ accountId: randomUUID(), productionId: ids[0]!, createdAt: new Date(at) });
+    const oldMark = randomUUID();
+    await rows(d, "insert into search_removal (version, kind, target_id, removed_at) values (1, 'DOCUMENT', $1, $2)", [oldMark, new Date(at - 2 * D)]);
+    const staged = stagedDatabase(c.url, 'core-svc-r165-19-staged');
+    const running = new DrizzleSearchReadModel(staged.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10, owner: 'staged' });
+    try {
+      await within(staged.inChunk, 5_000, '끊음 트랜잭션 안(잠금 뒤)에서 서지 않았다');
+      const interestBefore = (await rows(d, 'select interest from search_document where production_id = $1', [ids[0]]))[0]?.interest;
+      const timed = await model.syncTimed(new Date(at + 60_000), new Date(at));
+      const recounted = await model.recountInterest(new Date(at));
+      const purged = await model.purgeRemovals(new Date(at));
+      expect({ timed: timed.productions, recounted, purged }).toEqual({ timed: 0, recounted: 0, purged: 0 });
+      // 표가 그대로다
+      expect((await rows(d, 'select interest from search_document where production_id = $1', [ids[0]]))[0]?.interest).toEqual(interestBefore);
+      expect(await rows(d, 'select 1 from search_removal where target_id = $1', [oldMark])).toHaveLength(1);
+      // 끊음 사이(커밋 뒤 다음 끊음 전)에는 1분 정리가 돈다
+      staged.releaseInChunk();
+      await within(staged.betweenChunks, 5_000, '끊음 사이에서 서지 않았다');
+      expect((await model.syncTimed(new Date(at + 60_000), new Date(at))).productions).toBeGreaterThanOrEqual(1);
+      staged.releaseBetween();
+      await within(running, 10_000, '따라잡기가 끝나지 않았다');
+    } finally {
+      await staged.close();
+    }
+
+    // 연결 둘로 관심도 다시 세기를 함께 부르면 하나만 일한다(같은 열쇠의 트랜잭션 잠금, R165-9 ①)
+    await d.db.insert(wish).values({ accountId: randomUUID(), productionId: ids[1]!, createdAt: new Date(at) });
+    const d1 = createDatabase({ url: c.url, applicationName: 'core-svc-r165-19-recount-1', max: 1 });
+    const d2 = createDatabase({ url: c.url, applicationName: 'core-svc-r165-19-recount-2', max: 1 });
+    let arrived = 0;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const timer = setTimeout(() => open(), 3_000);
+    for (const x of [d1, d2]) {
+      x.pool.on('connect', (client) => {
+        const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+        (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+          const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+          if (/advisory/i.test(t)) {
+            arrived += 1;
+            if (arrived >= 2) open();
+            await gate;
+          }
+          return q(...a);
+        };
+      });
+    }
+    try {
+      const both = await Promise.all([new DrizzleSearchReadModel(d1, 'https://img.test').recountInterest(new Date(at)), new DrizzleSearchReadModel(d2, 'https://img.test').recountInterest(new Date(at))]);
+      expect(arrived).toBeGreaterThanOrEqual(2);
+      expect(both.filter((n) => n > 0)).toHaveLength(1);
+      expect(both.filter((n) => n === 0)).toHaveLength(1);
+    } finally {
+      clearTimeout(timer);
+      await d1.close();
+      await d2.close();
     }
   });
 });

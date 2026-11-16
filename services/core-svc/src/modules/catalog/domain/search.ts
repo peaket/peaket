@@ -843,7 +843,8 @@ export interface SearchReadModelSync {
    * 서버가 뜰 때 한 번: 1분 정리와 같은 권고 잠금 안에서 원천과 표의 모든 공연을 500개 [가정]씩 끊어 동기화하고, 원천에 없는 표 줄은 지운다.
    * 잠금을 못 잡으면 건너뛴다(ran: false). ADR-0271 결정 12, 리뷰 R165-1. BAT-165 시험 담당이 둔 빈 뼈대
    */
-  reconcileAll(at: Date, o?: { chunkSize?: number }): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number }>;
+  // owner·leaseMs·resumedFrom: 리뷰 R165-19(ADR-0271 결정 12 '잠금과 임대', 계획 BAT-165 '### 15'). BAT-165 시험 담당이 모양만 더했다
+  reconcileAll(at: Date, o?: { chunkSize?: number; owner?: string; leaseMs?: number }): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number; resumedFrom: string | null }>;
   /**
    * 마지막으로 끝까지 마친 따라잡기의 시작 시각(search_version.reconciled_at, docs/data.md). 없으면 null.
    * 리뷰 R165-14(ADR-0271 결정 12 보탬, 계획 BAT-165 '### 14'). BAT-165 시험 담당이 둔 빈 뼈대

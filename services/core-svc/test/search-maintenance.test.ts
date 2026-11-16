@@ -37,7 +37,7 @@ function fakeSync() {
       calls.push({ kind: 'reconcile', at: at.getTime() });
       if (fail.reconcile) throw new Error('따라잡기 실패');
       if (state.ran) state.last = at.getTime();
-      return { ran: state.ran, productions: 0, version: null, chunks: 0 };
+      return { ran: state.ran, productions: 0, version: null, chunks: 0, resumedFrom: null };
     },
     async lastReconciledAt() {
       calls.push({ kind: 'last', at: 0 });
@@ -124,6 +124,22 @@ describe('검색 읽기 모델 주기 일', () => {
       clock.advance(STEP);
       await timers.tidy();
       expect({ offset, reconciles: reconciles(f) }).toEqual({ offset, reconciles: expected });
+      timers.stop();
+    }
+
+    // 임대가 살아 있어 따라잡기가 곧 ran: false로 돌아오면(다른 파드가 하는 중, R165-19) 주기마다 1번씩 다시 부른다
+    {
+      const clock = fakeClock({ now: T0 });
+      const f = fakeSync();
+      f.state.ran = false;
+      timers = new SearchReadModelTimers({ sync: f.sync, clock });
+      await timers.start();
+      for (let i = 0; i < 2; i++) {
+        f.calls.length = 0;
+        clock.advance(STEP);
+        await timers.tidy();
+        expect({ round: i, reconciles: reconciles(f) }).toEqual({ round: i, reconciles: 1 });
+      }
       timers.stop();
     }
   });

@@ -165,7 +165,8 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
    * 첫 끊음에서 search_version.reconciled_at을 비우고, 끝까지 마치면 마지막 끊음에서 시작 시각(at)을 적는다(도중에 죽으면 빈 채로 남아 다른 파드가 다시 한다).
    * 잠금을 못 잡으면 건너뛴다(ran: false)
    */
-  async reconcileAll(at: Date, o: { chunkSize?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number }> {
+  // owner·leaseMs·resumedFrom은 리뷰 R165-19의 새 모양이다. BAT-165 시험 담당이 모양만 맞췄고(owner·leaseMs는 아직 쓰지 않고 resumedFrom은 늘 null) 구현 담당이 채운다
+  async reconcileAll(at: Date, o: { chunkSize?: number; owner?: string; leaseMs?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number; resumedFrom: string | null }> {
     const size = o.chunkSize ?? RECONCILE_CHUNK;
     if (!Number.isInteger(size) || size < 1) throw new RangeError(`chunkSize는 1 이상의 정수다: ${size}`);
     const client = await this.db.pool.connect();
@@ -178,7 +179,7 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     client.on('error', onError);
     try {
       const lock = await client.query<{ ok: boolean }>('select pg_try_advisory_lock($1) as ok', [TIDY_LOCK]);
-      if (!lock.rows[0]?.ok) return { ran: false, productions: 0, version: null, chunks: 0 };
+      if (!lock.rows[0]?.ok) return { ran: false, productions: 0, version: null, chunks: 0, resumedFrom: null };
       locked = true;
       const atIso = at.toISOString();
       const ids = (
@@ -199,7 +200,7 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
           return r.version;
         });
       }
-      return { ran: true, productions: ids.length, version, chunks: ids.length === 0 ? 0 : chunks };
+      return { ran: true, productions: ids.length, version, chunks: ids.length === 0 ? 0 : chunks, resumedFrom: null };
     } catch (e) {
       broken = e;
       throw e;

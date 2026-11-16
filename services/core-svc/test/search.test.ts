@@ -92,3 +92,19 @@ describe('documentOf', () => {
     expect(d.nextOpenEventId).toBe('e2');
   });
 });
+
+describe('관련 공연(§6)', () => {
+  test('검색어 없이 필터로 0건인 목록의 관련 공연은 오픈 예정 인기 공연이고, 결과가 있는 목록에는 관련 공연이 없다(§6, R165-22)', () => {
+    const docs = [
+      doc('p1', '가 공연', { genre: '콘서트', saleStatus: 'UPCOMING', popularity: 3 }),
+      doc('p2', '나 공연', { genre: '콘서트', saleStatus: 'ON_SALE', popularity: 9, artists: [{ artistId: 'a1', name: '루멘' }], placeId: 'pl1', placeName: '피켓홀' }),
+    ];
+    const zero = searchDocuments(docs, q({ genre: '뮤지컬' }));
+    expect(zero.items).toEqual([]);
+    expect(zero.related?.basis?.kind).toBe('UPCOMING_POPULAR');
+    expect(zero.related?.items.length).toBeGreaterThanOrEqual(1);
+    const some = searchDocuments(docs, q({ genre: '콘서트' }));
+    expect(some.items.length).toBe(2);
+    expect(some.related ?? null).toBeNull();
+  });
+});
