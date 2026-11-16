@@ -454,18 +454,24 @@ test('HOT-400 PRF-030·BOT-047 gw-fan 토큰 갱신 응답의 Set-Cookie와 401 
 
 // ===================== 검색 IP 한도 =====================
 
-test('SR-T13 ② gw-fan /v1/search*는 한 IP가 초당 50건·모아 두기 100건을 넘으면 429와 Retry-After이고 다른 IP는 막지 않는다', async () => {
-  const ip = '198.51.100.77';
-  const t0 = Date.now();
-  const results = await pool(300, 50, (i) => send(c, 'api', { path: i % 2 ? `/v1/search/suggestions?q=e2e${i}` : `/v1/search?q=e2e${i}`, headers: edge(c, ip) }));
-  const seconds = (Date.now() - t0) / 1000;
-  const passed = results.filter((r) => r.status !== 429).length;
-  const limited = results.filter((r) => r.status === 429);
-  assert.ok(limited.length > 0, `300건(${seconds.toFixed(1)}초)에 429가 없다`);
-  for (const r of limited) assert.match(String(r.headers['retry-after'] ?? ''), /^\d+$/, '429의 Retry-After');
-  // 모아 둔 100건 + 지난 시간만큼 채운 초당 50건(올림)을 넘겨 통과하지 않는다
-  assert.ok(passed <= 100 + 50 * Math.ceil(seconds), `통과 ${passed}건 > 100 + 50 × ${Math.ceil(seconds)}`);
-  assert.ok(passed >= 100, `모아 두기 100건보다 적게 통과했다(${passed})`);
-  const other = await send(c, 'api', { path: '/v1/search?q=e2e-other', headers: edge(c, '198.51.100.78') });
-  assert.notEqual(other.status, 429, '다른 IP까지 막았다(IP마다 따로 세지 않는다)');
+test('SR-T13 ② gw-fan /v1/search*는 한 IP(IPv4·IPv6 각각)가 초당 50건(모아 두기 50건)을 넘으면 429와 Retry-After이고 다른 IP는 막지 않는다', async () => {
+  // 로컬 한도는 프록시 파드마다 센다(docs/api/guidelines.md §6). 로컬 덧씌우기의 gw-fan 프록시 복제 수를 곱한다
+  const replicas = Number(c.replicas?.['gw-fan'] ?? 1);
+  for (const [ip, other] of [
+    ['198.51.100.77', '198.51.100.78'],
+    ['2001:db8:77::1', '2001:db8:78::1'],
+  ]) {
+    const t0 = Date.now();
+    const results = await pool(300, 50, (i) => send(c, 'api', { path: i % 2 ? `/v1/search/suggestions?q=e2e${i}` : `/v1/search?q=e2e${i}`, headers: edge(c, ip) }));
+    const seconds = (Date.now() - t0) / 1000;
+    const passed = results.filter((r) => r.status !== 429).length;
+    const limited = results.filter((r) => r.status === 429);
+    assert.ok(limited.length > 0, `${ip}: 300건(${seconds.toFixed(1)}초)에 429가 없다`);
+    for (const r of limited) assert.match(String(r.headers['retry-after'] ?? ''), /^\d+$/, `${ip}: 429의 Retry-After`);
+    // 처음 모아 둔 50건 + 지난 시간만큼 채운 초당 50건(올림)을 파드마다 넘겨 통과하지 않는다
+    assert.ok(passed <= 50 * (1 + Math.ceil(seconds)) * replicas, `${ip}: 통과 ${passed}건 > 50 × (1 + ${Math.ceil(seconds)}) × ${replicas}`);
+    assert.ok(passed >= 50, `${ip}: 초당 50건보다 적게 통과했다(${passed})`);
+    const o = await send(c, 'api', { path: '/v1/search?q=e2e-other', headers: edge(c, other) });
+    assert.notEqual(o.status, 429, `${other}: 다른 IP까지 막았다(IP마다 따로 세지 않는다)`);
+  }
 });

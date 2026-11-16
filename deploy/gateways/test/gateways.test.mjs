@@ -664,7 +664,7 @@ test('HOT-400 BOT-010 접근 로그의 경로 칸은 쿼리를 뗀 %REQ_WITHOUT_
 
 // ===================== 검색 IP 한도 =====================
 
-test('SR-T13 ② gw-fan /v1/search* 라우트에 IP마다 초당 50건·모아 두기 100건 한도가 붙는다', () => {
+test('SR-T13 ② gw-fan /v1/search* 라우트에 IP마다(IPv4 0.0.0.0/0·IPv6 ::/0 각각) 초당 50건 한도가 붙고 모아 두기 칸을 따로 두지 않는다', () => {
   requireDefinitions();
   for (const path of ['/v1/search', '/v1/search/suggestions']) {
     const hit = routeFor('gw-fan', 'api.peaket.example', 'GET', path);
@@ -674,11 +674,16 @@ test('SR-T13 ② gw-fan /v1/search* 라우트에 IP마다 초당 50건·모아 �
     const rules = ps.flatMap((p) => p.spec.rateLimit.local?.rules ?? []);
     assert.ok(rules.length > 0, `${path}: 로컬 한도 규칙이 없다`);
     const perIp = rules.filter((r) => (r.clientSelectors ?? []).some((s) => s.sourceCIDR?.type === 'Distinct'));
-    assert.equal(perIp.length, 1, `${path}: IP마다 따로 세는 규칙(sourceCIDR Distinct) 하나`);
-    assert.equal(perIp[0].limit?.requests, 50, `${path}: 초당 건수`);
-    assert.equal(perIp[0].limit?.unit, 'Second', `${path}: 단위`);
-    const bucket = [...findKey(ps.map((p) => p.spec), 'maxTokens'), ...findKey(ps.map((p) => p.spec), 'burst')].map(Number);
-    assert.deepEqual(bucket, [100], `${path}: 모아 두기 건수`);
+    // IPv4·IPv6 규칙을 하나씩 두고 각각 주소마다 센다(docs/features/search.md §8 '첫 값')
+    assert.equal(perIp.length, 2, `${path}: IP마다 따로 세는 규칙(sourceCIDR Distinct)은 IPv4·IPv6 둘`);
+    const cidrs = perIp.map((r) => r.clientSelectors.find((s) => s.sourceCIDR?.type === 'Distinct').sourceCIDR.value).sort();
+    assert.deepEqual(cidrs, ['0.0.0.0/0', '::/0'], `${path}: 덮는 주소`);
+    for (const r of perIp) {
+      assert.equal(r.limit?.requests, 50, `${path} ${JSON.stringify(r.clientSelectors)}: 초당 건수`);
+      assert.equal(r.limit?.unit, 'Second', `${path}: 단위`);
+    }
+    // 모아 두기는 초당 건수와 같다(이 판의 CRD에 없는 칸을 적지 않는다)
+    for (const k of ['maxTokens', 'burst', 'bucketSize']) assert.deepEqual(findKey(ps.map((p) => p.spec), k), [], `${path}: BackendTrafficPolicy에 ${k} 칸`);
   }
   // 두 경로는 한 한도를 함께 쓴다(같은 정책)
   const a = routeFor('gw-fan', 'api.peaket.example', 'GET', '/v1/search');

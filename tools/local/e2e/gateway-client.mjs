@@ -15,6 +15,7 @@
 //      "logs":    { "namespace": Envoy 프록시 네임스페이스(기본 envoy-gateway-system), "container": 기본 envoy,
 //                   "selector": 라벨 고르개 틀(기본 gateway.envoyproxy.io/owning-gateway-name={gateway}) },
 //      "caPem":   게이트웨이 인증서의 PEM(없으면 인증서를 확인하지 않는다, 로컬 자체 서명)
+//      "replicas": { "gw-fan": 로컬 덧씌우기의 프록시 복제 수 }  // 없으면 1(로컬 한도는 파드마다 센다, SR-T13 ②)
 //    }
 // 2. 대역 백엔드(echo): 받은 요청을 JSON `{ "method", "path", "headers": { 소문자 이름: 값 } }`으로 돌려준다(같은 이름이 여럿이면 쉼표로 이은 값).
 //    응답을 고르는 법(시험만 쓴다): 요청 머리 `x-e2e-status`(상태), `x-e2e-response-headers`(JSON 객체, 값은 글이나 글 배열), `x-e2e-body`(본문 글).
