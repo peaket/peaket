@@ -390,6 +390,30 @@ export interface ReviewStore {
 | `test-int/review-withdrawn-consumer.int.test.ts`(고침) | I-T83 ① 실제 Kafka의 탈퇴 사건이 core 후기를 파기하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다 (COV2-06 ⑫) | 실패 | 뼈대 '아직 없음'(`handle`) → 다섯 번 뒤 보류, 파기 기다림이 60초에 끝난다. 예약 행 due_at = 탈퇴 시각 + 16분도 본다 |
 | 〃 | I-T83 ④ 실제 Kafka 탈퇴 사건 뒤 예약 행이 생기고 반복이 그 시각에 다시 파기한다 | 실패 | 〃. 소비자는 `recheck: reviews`·`recheckEveryMs: 200`으로 켠다. 기준 시각은 소비자·반복이 쓰는 실제 시계(`Date.now()`)이고, 예약을 지금 + 20초로 두어 사건 처리가 먼저 끝나게 했다(계획의 + 2초보다 여유를 둠). 예약 전 1초 동안 새 후기가 남고, 예약 뒤 3초 안에 파기·예약 지움, 다시 파기한 시각 ≥ 예약 시각 |
 
+#### 통합 실행 결과(구현 전, 도커 잠금 아래 2026-11-16 17:13~17:22 KST)
+
+- 따로 폴더 `D:/ticketpass-lane3-w8b-t`(감독 준비, 공용 패키지 dist는 시험 담당이 빌드)에서 core-svc 폴더의 `npx vitest run --config vitest.integration.config.mjs <파일>`로 파일 하나씩 돌렸다(`PEAKET_TEST_CONTAINER_PREFIX=lane3-`). 같은 때 다른 담당의 purchase·ops·kind 시험이 겹쳤지만 **시간 초과(환경)로 난 실패는 없었다.** 파일마다 끝난 뒤 `lane3-` 컨테이너와 Kafka 컨테이너가 남지 않은 것을 `docker ps -a`로 봤다.
+- **첫째 판 `69899e30`(첫 시험 커밋, 구현 전)**:
+
+| 파일 | 결과 | 실패 까닭(예상과 같은지) |
+| --- | --- | --- |
+| `test-int/review-purge.int.test.ts` | 2개 모두 실패 | ⑥ 단언: 지운 행에 별점·지문·계정이 남는다(`toMatchObject` 불일치). ⑦ 단언: `VISIBLE·별점 없음`이 `23502`(NOT NULL)이라 `23514`가 아니다. 예상대로 |
+| `test-int/review-recheck.int.test.ts` | 6개 모두 실패 | `relation "review_withdrawal_recheck" does not exist`(0026 없음, `beforeEach`). 예상대로 |
+| `test-int/review-withdrawn.int.test.ts` | 1 실패, 1 통과 | ①⑥ 뼈대 '아직 없음'(`purgeByAccount`). K2 실행 계획은 **처음부터 통과(이미 있는 동작)**. 예상대로 |
+| `test-int/review-grants.int.test.ts` | 1 실패, 2 통과 | I-T83 ⑥ 단언: 파기 문장이 `23502`. COV2-06 ⑮⑯은 처음부터 통과. 예상대로 |
+| `test-int/review.int.test.ts` | 5개 모두 통과 | 바꾸지 않은 기존 시험. 처음부터 통과 |
+| `test-int/review-withdrawn-consumer.int.test.ts`(Kafka) | 2개 모두 실패 | 둘 다 '탈퇴 사건 뒤 후기 파기'를 60초 기다리다 끝났다(처리기 뼈대 '아직 없음' → 처리 실패·보류). **환경 시간 초과가 아님을 보려고 이 파일만 한 번 더 돌렸고 같은 자리에서 같게 실패했다**(17:15~17:17, 17:19~17:22). 이 PC에서 네이티브 Kafka 모듈은 막히지 않았다(컨테이너·생산자 연결까지 됐다) |
+
+- **둘째 판 `51a34b49`(리뷰 반영 시험, A1·A2 구현 전. 첫 구현 `7f32f584`는 들어 있다)**:
+
+| 파일 | 결과 | 실패 까닭(예상과 같은지) |
+| --- | --- | --- |
+| `test-int/review-purge-legacy.int.test.ts` | 2개 모두 실패 | 정비 일 `review-purge-legacy`가 없다(`expected undefined to be defined`). 첫 시험은 그 앞의 대조군(정비 일 전 VALIDATE가 `23514`)을 통과한 뒤 실패했다. 예상대로 |
+| `test-int/review-recheck.int.test.ts` | 7개 모두 통과 | A3 '④ 파기가 실패하면 다시 정리 예약도 남지 않는다'는 **처음부터 통과(이미 있는 동작)**(구현이 이미 한 트랜잭션이다. 검증의 '예약 먼저 따로 커밋' 틀린 구현으로 실패를 본다). 나머지 여섯은 첫 구현으로 통과 |
+| `test-int/review-grants.int.test.ts` | 1 실패, 3 통과 | I-T83 ⑦⑧ 단언: 허용 쪽 대조군 '찾기 칸 읽기'가 `42501`(0026에 정비 역할 GRANT 없음). 예상대로. I-T83 ⑥은 첫 구현으로 통과 |
+
+- `D:/ticketpass-lane3-w8b-t`는 `51a34b49`(분리된 HEAD)에 그대로 두었다.
+
 ### 시험 담당이 정한 것(계획에 없던 세부, 구현 담당·검증 담당 참고)
 
 1. `ReviewRecord.deletedAtMs?`를 더했다. 단위 ①의 '이미 지운 행의 지운 시각은 처음 값 그대로'를 메모리 저장소에서 보려면 필요하다.
