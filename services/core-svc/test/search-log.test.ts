@@ -39,6 +39,23 @@ describe('검색어 가리기', () => {
   });
 });
 
+describe('검색어 가리기(넓힌 규칙)', () => {
+  test('SR-T17 검색어 가리기는 국제 꼴 전화·여러 글자 구분자·괄호·네 자리씩 띄운 카드 번호·띄운 이메일도 가린다(W7L2-S4)', () => {
+    // 정본: docs/features/search.md §11 가리기 문장(ADR-0271 결정 19: 이메일 @ 앞뒤 공백, 전화 +82 뒤 8~10자리, 숫자 사이 구분자 0~3글자,
+    // 구분자로 이어진 숫자 합 5자리 이상이면 [숫자], 떨어진 4자리 이하는 남김)
+    expect(maskSearchQuery('+82 10-1234-5678')).toBe('[전화]');
+    expect(maskSearchQuery('010 - 1234 - 5678')).toBe('[전화]');
+    expect(maskSearchQuery('(010)1234-5678')).toBe('[전화]');
+    expect(maskSearchQuery('1234 5678 9012 3456')).toBe('[숫자]');
+    expect(maskSearchQuery('hong @ example.com')).toBe('[이메일]');
+    // 경계: 구분자 3글자는 이어진 것으로 보고 가린다, 4글자는 떨어진 두 묶음(4자리씩)이라 남긴다
+    expect(maskSearchQuery('010   1234')).toBe('[숫자]');
+    expect(maskSearchQuery('010    1234')).toBe('010    1234');
+    // 남는 것(대조군)
+    for (const keep of ['2026 루멘', '루멘 2회', '2026 루멘 2회']) expect(maskSearchQuery(keep)).toBe(keep);
+  });
+});
+
 describe('0건 검색어 목록', () => {
   // 2026-11-16(월) 0시 KST = 2026-11-15T15:00:00Z
   const WEEK_START = '2026-11-15T15:00:00.000Z';

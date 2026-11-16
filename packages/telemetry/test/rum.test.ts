@@ -67,6 +67,13 @@ describe('보내기', () => {
     await sendBatch('/_t/rum', '[]', { fetch: vi.fn(), sendBeacon: beacon, keepaliveSupported: false });
     expect(beacon).toHaveBeenCalledWith('/_t/rum', '[]');
   });
+  it('sendBatch의 fetch는 referrerPolicy no-referrer를 단다(W7L2-S5)', async () => {
+    // 보내는 쪽 화면 주소(검색어가 든 쿼리)가 Referer로 새지 않게(ADR-0271 결정 20, catalog-review 14.2.3)
+    const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));
+    await sendBatch('/_t/rum', '[]', { fetch: fetchFn, keepaliveSupported: true });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith('/_t/rum', expect.objectContaining({ referrerPolicy: 'no-referrer', credentials: 'omit', keepalive: true }));
+  });
 });
 
 describe('추적 머리', () => {

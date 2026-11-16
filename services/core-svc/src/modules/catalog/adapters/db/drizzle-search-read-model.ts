@@ -287,6 +287,11 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
   }
 
   /** 마지막으로 끝까지 마친 따라잡기의 시작 시각(search_version.reconciled_at). 없으면 null */
+  /** 리뷰 W7L2-S3. BAT-165 시험 담당이 둔 빈 뼈대 */
+  async syncPoster(_tx: unknown, _productionId: string): Promise<{ version: number | null }> {
+    throw new Error('아직 없음');
+  }
+
   async lastReconciledAt(): Promise<Date | null> {
     const [r] = rowsOf<{ reconciled_at: string | Date | null }>(await this.db.db.execute(sql`select reconciled_at from search_version where id = 1`));
     const v = r?.reconciled_at ?? null;

@@ -26,7 +26,8 @@ import { PARTNER_PRODUCTION_MEDIA, type PartnerProductionMedia } from '../src/mo
 import type { SearchQuery } from '../src/modules/catalog/domain/search.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { loginFor } from './roles.js';
+import { ensureSearchLogin, loginFor } from './roles.js';
+import { assertDatabaseRole } from '../src/modules/catalog/adapters/db/database-role.js';
 
 type Svc = Awaited<ReturnType<typeof createService>>;
 
@@ -945,6 +946,7 @@ describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을
       recountInterest: (t) => bModel.recountInterest(t),
       purgeRemovals: (t) => bModel.purgeRemovals(t),
       lastReconciledAt: () => bModel.lastReconciledAt(),
+      syncPoster: (tx, id) => bModel.syncPoster(tx, id),
       reconcileAll: async (t, o) => {
         const r = await bModel.reconcileAll(t, { ...o, chunkSize: 10, owner: 'b' });
         recorded.push({ ran: r.ran });
@@ -1385,6 +1387,114 @@ describe('검증 V165 PostgreSQL 경로', () => {
       expect(dictionary.entries).toBe(Number((await rows(d, 'select count(*)::int as n from search_term'))[0]!.n));
     } finally {
       await src.close();
+    }
+  });
+});
+
+// ---- 웨이브 끝 리뷰 W7L2-S3·S6(계획 docs/review/plans/BAT-165.md '### 17', ADR-0271 결정 17·18, docs/security/authz-matrix.md) ----
+const pgCode = (e: unknown): string | undefined => {
+  const x = e as { code?: string; cause?: { code?: string } } | undefined;
+  return x?.code ?? x?.cause?.code;
+};
+
+describe('W7L2 검색 표 권한', () => {
+  // 공유 DB: 테넌트 A(파일 머리의 A)와 B. B 공연 하나를 공개해 둔다
+  const B = randomUUID();
+  let bProduction = '';
+  const searchRow = async (id: string) => (await rows(admin, 'select poster_image_id, interest, title from search_document where production_id = $1', [id]))[0];
+  const driftFor = async (id: string, at: number) =>
+    Number(
+      (
+        await rows(
+          admin,
+          `select count(*)::int as n from ((select ${COLS} from search_document_source_at($1) where production_id = $2 except select ${COLS} from search_document where production_id = $2)
+           union all (select ${COLS} from search_document where production_id = $2 except select ${COLS} from search_document_source_at($1) where production_id = $2)) d`,
+          [new Date(at), id],
+        )
+      )[0]!.n,
+    );
+
+  beforeAll(async () => {
+    await admin.db.insert(promoter).values({ id: B, legalName: '(주)비' });
+    bProduction = randomUUID();
+    await admin.db.insert(production).values({ id: bProduction, promoterId: B, placeId: PLACE, title: '권한시험 비공연', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(now - 10 * D) });
+    await admin.db.insert(event).values({ id: randomUUID(), productionId: bProduction, promoterId: B, venueId: null, openAt: new Date(now - D), startsAt: new Date(now + 20 * D), endsAt: new Date(now + 20 * D + 2 * H) });
+    await admin.transaction((tx) => sync.sync(tx, [bProduction], new Date(now)));
+  });
+
+  test('[ASVS v5.0.0-8.4.1] 파트너 역할은 검색 표 넷을 직접 읽거나 쓰지 못하고 원천 함수도 부르지 못한다(W7L2-S3)', async () => {
+    const before = { row: await searchRow(bProduction), version: await version(), terms: await termCount(bProduction), marks: Number((await rows(admin, 'select count(*)::int as n from search_removal'))[0]!.n) };
+    expect(before.row).toBeDefined();
+    const statements: [string, ReturnType<typeof sql>][] = [
+      ['DELETE search_document', sql`delete from search_document where production_id = ${bProduction}::uuid`],
+      ['UPDATE search_term', sql`update search_term set display_name = '바꿈' where target_id = ${bProduction}::uuid`],
+      ['SELECT search_document', sql`select interest from search_document where production_id = ${bProduction}::uuid`],
+      ['UPDATE search_version', sql`update search_version set version = version + 1 where id = 1`],
+      ['INSERT search_removal', sql`insert into search_removal (version, kind, target_id) values (999999, 'DOCUMENT', ${bProduction}::uuid)`],
+      ['search_document_source_at', sql`select * from search_document_source_at(now())`],
+    ];
+    for (const [name, stmt] of statements) {
+      const err = await partnerDb.transaction((tx) => tx.execute(stmt), { tenantId: A }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect({ name, code: pgCode(err) }).toEqual({ name, code: '42501' });
+    }
+    // 표가 그대로다
+    expect({ row: await searchRow(bProduction), version: await version(), terms: await termCount(bProduction), marks: Number((await rows(admin, 'select count(*)::int as n from search_removal'))[0]!.n) }).toEqual(before);
+  });
+
+  test('[ASVS v5.0.0-8.4.1] 파트너 포스터 게시는 정의자 함수로 자기 공연의 검색 줄만 고치고 남의 공연은 권한 오류다(W7L2-S3)', async () => {
+    const mine = await seed({ title: '권한시험 에이공연' });
+    await admin.transaction((tx) => sync.sync(tx, [mine.productionId], new Date(now)));
+    const media = svc.app.get<PartnerProductionMedia>(PARTNER_PRODUCTION_MEDIA);
+    const imageId = randomUUID();
+    const t = new Date(now);
+    // 자기 공연 포스터 게시: 포스터 칸이 새 그림, 판 +1(정확히 1), 원천과 어긋남 0
+    const v0 = await version();
+    await media.withLockedProduction(mine.productionId, A, (tx) => tx.insert({ id: imageId, productionId: mine.productionId, promoterId: A, kind: 'POSTER', alt: '포스터', order: 0, width: 1000, height: 1400, version: 1, createdAt: t, updatedAt: t }));
+    expect((await searchRow(mine.productionId))?.poster_image_id).toBe(imageId);
+    expect(await version()).toBe(v0 + 1);
+    expect(await driftFor(mine.productionId, now)).toBe(0);
+    // 남의 공연(B)을 같은 파트너 연결로 부르면 권한 오류이고 B 줄·판이 그대로다
+    const bBefore = await searchRow(bProduction);
+    const v1 = await version();
+    const err = await partnerDb.transaction((tx) => tx.execute(sql`select search_sync_poster(${bProduction}::uuid)`), { tenantId: A }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(pgCode(err)).toBe('42501');
+    expect([await searchRow(bProduction), await version()]).toEqual([bBefore, v1]);
+    // 포스터가 그대로인 호출은 판이 그대로다
+    await partnerDb.transaction((tx) => tx.execute(sql`select search_sync_poster(${mine.productionId}::uuid)`), { tenantId: A });
+    expect(await version()).toBe(v1);
+    // 공개 전(검색 줄 없는) 공연은 아무것도 하지 않는다
+    const draft = await seed({ title: '권한시험 공개전공연', saleReview: 'SUBMITTED' });
+    await media.withLockedProduction(draft.productionId, A, (tx) => tx.insert({ id: randomUUID(), productionId: draft.productionId, promoterId: A, kind: 'POSTER', alt: '포스터', order: 0, width: 1000, height: 1400, version: 1, createdAt: t, updatedAt: t }));
+    expect(await searchRow(draft.productionId)).toBeUndefined();
+    expect(await version()).toBe(v1);
+  });
+
+  test('[ASVS v5.0.0-8.1.1] 검색 전용 연결은 검색 표 넷만 읽고 다른 core 표와 쓰기는 권한 오류다(W7L2-S6)', async () => {
+    const url = await ensureSearchLogin(admin, pg);
+    const searchDb = createDatabase({ url, applicationName: 'core-svc-core-search', max: 1 });
+    try {
+      const attempt = async (text: string) =>
+        searchDb.pool.query(text).then(
+          () => 'ok',
+          (e: unknown) => pgCode(e),
+        );
+      // 대조군: 검색 표 넷은 읽는다
+      for (const table of ['search_document', 'search_term', 'search_removal', 'search_version']) expect({ table, r: await attempt(`select count(*) from ${table}`) }).toEqual({ table, r: 'ok' });
+      // 다른 core 표는 읽지 못한다
+      for (const table of ['wish', 'production', 'review']) expect({ table, r: await attempt(`select count(*) from ${table}`) }).toEqual({ table, r: '42501' });
+      // 쓰기는 권한 오류다
+      expect(await attempt('update search_version set version = version where id = 1')).toBe('42501');
+      // 시작 확인: core_search 사용자는 통과, 앱 사용자(core_app)는 검색 연결로 쓰면 멈춘다
+      await expect(assertDatabaseRole(searchDb, 'core_search' as never)).resolves.toBeUndefined();
+      await expect(assertDatabaseRole(appDb, 'core_search' as never)).rejects.toThrow();
+    } finally {
+      await searchDb.close();
     }
   });
 });

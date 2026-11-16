@@ -25,6 +25,8 @@ describe('자격 증명 금지 이름(넓은 꼴)', () => {
       'PEAKET_V0_DATABASE_URL',
       'PEAKET_DATABASE_URL',
       'PEAKET_PARTNER_DATABASE_URL',
+      // 검색 전용 연결(W7L2-S6, ADR-0271 결정 18)
+      'PEAKET_SEARCH_DATABASE_URL',
       'PEAKET_TELEMETRY_KAFKA_BROKERS',
       'PEAKET_PG_TOSS_SECRET_KEY',
       'PEAKET_FAN_TOKEN_KEY',

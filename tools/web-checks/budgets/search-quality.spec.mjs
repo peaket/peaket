@@ -105,3 +105,30 @@ test('검색 품질: 결과 항목을 누른 뒤 다시 찾으면 바로 다시 
   expect(w.bodies.length).toBeGreaterThanOrEqual(1);
   expect(w.counters().search_requery_total ?? 0).toBe(0);
 });
+
+test('검색 품질 사건은 쿠키·Referer 쿼리 없이 RumSample 꼴로 숨김 때 보낸다 [ASVS v5.0.0-14.2.3] [ASVS v5.0.0-3.4.5](W7L2-W2, W7L2-S5)', async ({ page, context, request }) => {
+  // 정본: ADR-0271 결정 20, docs/features/search.md §11, asyncapi RumSample 판 2(선택 칸 counters)
+  const w = await wire(page);
+  const seen = [];
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === '/_t/rum') seen.push(r);
+  });
+  await context.addCookies([{ name: 'pk_session', value: 'SECRET-COOKIE', url: origin() }]);
+  await page.goto(`${origin()}/search?q=01012345678`);
+  await expect(page.locator('a[href^="/events/"]').first()).toBeVisible();
+  await w.leave();
+  expect(seen.length).toBeGreaterThanOrEqual(1);
+  for (const r of seen) {
+    const h = await r.allHeaders();
+    expect(h.cookie).toBeUndefined();
+    expect(h.referer === undefined || !h.referer.includes('q=')).toBe(true);
+    const parsed = JSON.parse(r.postData() ?? 'null');
+    const sample = Array.isArray(parsed) ? parsed.find((x) => x && x.counters) : parsed;
+    expect(sample).toMatchObject({ schemaVersion: 2 });
+    expect(Array.isArray(sample.counters)).toBe(true);
+    expect(r.postData() ?? '').not.toContain('01012345678');
+  }
+  // /search 셸의 리퍼러 정책
+  const html = await (await request.get(`${origin()}/search`)).text();
+  expect(html).toMatch(/<meta[^>]+name="referrer"[^>]+content="strict-origin"/);
+});

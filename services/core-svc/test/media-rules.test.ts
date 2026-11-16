@@ -188,13 +188,14 @@ describe('seatmap-worker 자격 증명 거절', () => {
       forbiddenCredentialNames({
         PEAKET_DATABASE_URL: 'postgres://u:secret@h/db',
         PEAKET_PARTNER_DATABASE_URL: '',
+        PEAKET_SEARCH_DATABASE_URL: 'postgres://s:secret@h/db',
         PEAKET_KAFKA_BROKERS: 'b:9092',
         PEAKET_REDIS_SEAT_URL: 'redis://h',
         AWS_ACCESS_KEY_ID: 'AKIA',
         AWS_REGION: 'ap-northeast-2',
         PEAKET_GRPC_PORT: '50051',
       }),
-    ).toEqual(['AWS_ACCESS_KEY_ID', 'AWS_REGION', 'PEAKET_DATABASE_URL', 'PEAKET_KAFKA_BROKERS', 'PEAKET_PARTNER_DATABASE_URL', 'PEAKET_REDIS_SEAT_URL']);
+    ).toEqual(['AWS_ACCESS_KEY_ID', 'AWS_REGION', 'PEAKET_DATABASE_URL', 'PEAKET_KAFKA_BROKERS', 'PEAKET_PARTNER_DATABASE_URL', 'PEAKET_REDIS_SEAT_URL', 'PEAKET_SEARCH_DATABASE_URL']);
     expect(forbiddenCredentialNames({ AWS_PROFILE: undefined })).toEqual([]);
   });
 });

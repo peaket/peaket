@@ -851,6 +851,11 @@ export interface SearchReadModelSync {
    * 리뷰 R165-14(ADR-0271 결정 12 보탬, 계획 BAT-165 '### 14'). BAT-165 시험 담당이 둔 빈 뼈대
    */
   lastReconciledAt(): Promise<Date | null>;
+  /**
+   * 파트너 포스터 게시·지우기 트랜잭션에서 그 공연 검색 줄의 포스터 칸만 고친다(정의자 권한 함수 search_sync_poster, 바뀌었을 때만 판 1).
+   * 리뷰 W7L2-S3(ADR-0271 결정 17, 계획 BAT-165 '### 17'). BAT-165 시험 담당이 둔 빈 뼈대
+   */
+  syncPoster(tx: unknown, productionId: string): Promise<{ version: number | null }>;
 }
 export const SEARCH_READ_MODEL_SYNC: unique symbol = Symbol('SEARCH_READ_MODEL_SYNC');
 

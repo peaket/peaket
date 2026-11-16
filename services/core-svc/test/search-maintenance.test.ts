@@ -41,6 +41,7 @@ function fakeSync() {
       if (state.ran) state.last = at.getTime();
       return { ran: state.ran, productions: 0, version: null, chunks: 0, resumedFrom: null };
     },
+    syncPoster: () => Promise.reject(new Error('부르지 않는다')),
     async lastReconciledAt() {
       calls.push({ kind: 'last', at: 0 });
       return state.last === null ? null : new Date(state.last);

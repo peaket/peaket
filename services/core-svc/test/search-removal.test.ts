@@ -44,6 +44,7 @@ function harness(o: { removed: string[]; version: number; cdnFails?: boolean; re
     purgeRemovals: () => Promise.reject(new Error('부르지 않는다')),
     reconcileAll: () => Promise.reject(new Error('부르지 않는다')),
     lastReconciledAt: () => Promise.reject(new Error('부르지 않는다')),
+    syncPoster: () => Promise.reject(new Error('부르지 않는다')),
   };
   const cdn: CdnInvalidation = {
     async invalidate() {

@@ -416,14 +416,27 @@ describe('자동완성 사전 갱신은 주기 일만(메모리, R165-3)', () =>
 
   const suggest3 = () => svc3.http.inject({ method: 'GET', url: '/v1/search/suggestions?q=' + encodeURIComponent('은하') });
 
-  test('자동완성은 사전을 처음 읽기 전에 빈 후보와 no-store로 답하고 준비 확인이 실패한다(R165-3)', async () => {
+  test('사전을 처음 읽기 전의 0건 검색은 didYouMean이 null이고 이름 줄을 통째로 읽지 않는다(W7L2-K4)', async () => {
+    const before = calls;
+    // '은하수 콘서드'는 '은하수 콘서트'의 오타라 사전이 있으면 제안이 나올 것이다
+    const r = await svc3.http.inject({ method: 'GET', url: '/v1/search?q=' + encodeURIComponent('은하수 콘서드') });
+    expect(r.statusCode).toBe(200);
+    const out = JSON.parse(r.payload) as { items: unknown[]; didYouMean: string | null };
+    expect(out.items).toEqual([]);
+    expect(out.didYouMean).toBeNull();
+    // 원천(이름 줄 통째로 읽기 포함)을 부르지 않았다
+    expect(calls - before).toBe(0);
+  });
+
+  // 준비 확인은 공유 의존성을 보지 않는다(docs/architecture.md §8 '프로브 규칙', ADR-0271 결정 14 바로잡음). 사전은 준비 확인에 넣지 않는다(W7L2-K4)
+  test('자동완성은 사전을 처음 읽기 전에 빈 후보와 no-store로 답하고, 준비 확인은 사전과 상관없이 통과한다(W7L2-K4)', async () => {
     const before = await suggest3();
     expect(before.statusCode).toBe(200);
     expect((JSON.parse(before.payload) as { items: unknown[] }).items).toEqual([]);
     expect(before.headers['cache-control']).toBe('no-store');
     // 요청이 사전을 읽게 만들지 않는다
     expect(calls).toBe(0);
-    expect((await svc3.management.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+    expect((await svc3.management.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
     // 대조군: 주기 일이 처음 읽은 뒤에는 공개 캐시 머리와 후보, 준비 확인 200
     await svc3.app.get(SearchCatalog).dictionary.refresh();
     const after = await suggest3();
