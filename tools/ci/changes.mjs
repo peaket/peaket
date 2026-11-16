@@ -33,6 +33,8 @@ const RULES = [
     /^(deploy\/(local|charts)\/|tools\/local\/|\.dockerignore$|\.github\/workflows\/ci-kind\.yml$|packages\/(platform|config)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)/,
     ['kind'],
   ],
+  // 게이트웨이 다섯의 정의(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400): 정적 시험(deploy/gateways/test)은 tools-check, 올려 보는 시험은 kind가 돈다(잡에 잇기는 BAT-055 구현 ⑤)
+  [/^deploy\/gateways\//, ['kind', 'tools']],
   // v0 배포(docs/infra.md §3 'v0 배포', BUILD_ORDER BSL-050): v0 이미지에 드는 배포 단위와 로컬 환경 값, 이미지 빌드 단계의 바인딩 대조
   [/^(services\/(v0-monolith|pg-simulator|payment-svc)\/|deploy\/envs\/local\/|tools\/ci\/verify-native-binding\.mjs$)/, ['kind']],
   // 이미지 빌드 시험(build-image.yml, docs/devops.md §3.2 '이미지 빌드 시험(푸시 없이)'): 이미지가 있는 배포 단위와 그 Dockerfile이 담는

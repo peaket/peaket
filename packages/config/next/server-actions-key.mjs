@@ -22,12 +22,21 @@ export function checkServerActionsKey(value) {
 }
 
 /**
+ * Node 실행 환경의 운영 서버인가(next start·standalone server.js). 빌드 작업자(NEXT_PHASE=phase-production-build), 개발 서버(NODE_ENV≠production),
+ * Edge 실행기는 아니다. 서버 액션 키 확인과 앱 서버 텔레메트리 시작(BUILD_ORDER HOT-400)이 같은 조건을 쓴다
+ * @param {Record<string, string | undefined>} [env]
+ */
+export function isProductionNodeServer(env = process.env) {
+  return env.NEXT_RUNTIME === 'nodejs' && env.NODE_ENV === 'production' && env.NEXT_PHASE !== 'phase-production-build';
+}
+
+/**
  * 앱의 instrumentation.ts register()에서 부른다(서버가 뜰 때 한 번). Node 실행 환경의 운영 서버에서만 보고, 틀리면 던져 서버를 띄우지 않는다.
  * 빌드(NEXT_PHASE=phase-production-build, 정적 생성 작업자)와 개발 서버(NODE_ENV≠production)에서는 보지 않는다(CI 빌드에는 비밀이 없다).
  * @param {Record<string, string | undefined>} [env]
  */
 export function assertServerActionsKey(env = process.env) {
-  if (env.NEXT_RUNTIME !== 'nodejs' || env.NODE_ENV !== 'production' || env.NEXT_PHASE === 'phase-production-build') return;
+  if (!isProductionNodeServer(env)) return;
   const r = checkServerActionsKey(env[KEY_ENV]);
   if (!r.ok) throw new Error(`서버 액션 암호화 키가 틀렸다: ${r.reason}(docs/security/secrets-and-keys.md)`);
 }

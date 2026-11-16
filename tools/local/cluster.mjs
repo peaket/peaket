@@ -39,6 +39,15 @@ export const PINNED = {
   strimziInstallUrl: 'https://github.com/strimzi/strimzi-kafka-operator/releases/download/0.47.0/strimzi-cluster-operator-0.47.0.yaml',
   strimziInstallSha256: '1eb1e72f3c20b94c8f4d54d255a5570006bd91ec5dc5d954a8a6318e9c392fa6',
   strimziOperatorDigest: 'sha256:a602b696a060a0bbb5618c3adfcb2d9021d5bb6d47d5cf01876ed0588292b84a',
+  // 게이트웨이 다섯의 컨트롤러(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400). 2026-11-16에 공식 릴리스의 최신 안정판을 골랐다.
+  // 설치 파일 해시는 GitHub 릴리스 자산의 sha256, 이미지 다이제스트는 docker.io/envoyproxy 레지스트리의 목록(index) 다이제스트다(받지 않고 조회).
+  // 프록시 Envoy 이미지는 이 판의 기본값(api/v1alpha1/shared_types.go DefaultEnvoyProxyImage)을 그대로 쓴다
+  envoyGatewayVersion: 'v1.10.0',
+  envoyGatewayInstallUrl: 'https://github.com/envoyproxy/gateway/releases/download/v1.10.0/install.yaml',
+  envoyGatewayInstallSha256: 'f87f4d59b983aa760da52a2a0002c612028106fe69beefdf3d30cfb03905944e',
+  envoyGatewayControllerDigest: 'sha256:c2243d43518bed91d3ed8c2db849a4b7a14ac9b96eb019f2ab104bb1ca8572b1',
+  envoyGatewayProxyImage: 'docker.io/envoyproxy/envoy:distroless-v1.40.2',
+  envoyGatewayProxyDigest: 'sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded',
 };
 
 /**

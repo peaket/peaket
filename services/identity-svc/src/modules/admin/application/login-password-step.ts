@@ -69,22 +69,39 @@ function expandV6(canon: string): string[] {
   const fill = tail !== undefined ? 8 - a.length - b.length : 0;
   return [...a, ...Array<string>(Math.max(0, fill)).fill('0'), ...b].map((x) => x.padStart(4, '0'));
 }
+/** 여덟 칸 가운데 i번째부터 n칸이 모두 0인가 */
+const zeros = (parts: readonly string[], from: number, n: number): boolean => parts.slice(from, from + n).every((x) => x === '0000');
+/** 마지막 두 칸(32비트)을 점 넷 꼴 IPv4로 */
+function v4Of(parts: readonly string[]): string {
+  const hi = parseInt(parts[6]!, 16);
+  const lo = parseInt(parts[7]!, 16);
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+}
 /**
- * 셈에 쓰는 출발지 주소: IPv4를 적은 IPv6(::ffff:a.b.c.d, 어느 꼴이든)는 그 IPv4로, 다른 IPv6는 앞 /64로 센다(한 사람이 흔히 /64 하나를 받는다, 재리뷰 2026-11-05).
+ * IPv4를 담은 IPv6 넷이면 그 IPv4(docs/features/identity.md §6 '출발지' ②): IPv4 대응(::ffff:a.b.c.d), IPv4 번역(::ffff:0:a.b.c.d),
+ * NAT64 잘 알려진 앞부분(64:ff9b::a.b.c.d), 옛 IPv4 호환(::a.b.c.d, 앞 96비트가 0이고 첫 바이트가 0이 아닐 때만. ::·::1은 IPv6). 아니면 null
+ */
+function embeddedV4(parts: readonly string[]): string | null {
+  if (zeros(parts, 0, 5) && parts[5] === 'ffff') return v4Of(parts);
+  if (zeros(parts, 0, 4) && parts[4] === 'ffff' && parts[5] === '0000') return v4Of(parts);
+  if (parts[0] === '0064' && parts[1] === 'ff9b' && zeros(parts, 2, 4)) return v4Of(parts);
+  if (zeros(parts, 0, 6) && parseInt(parts[6]!, 16) >> 8 !== 0) return v4Of(parts);
+  return null;
+}
+/**
+ * 셈에 쓰는 출발지 주소(docs/features/identity.md §6 '출발지', BUILD_ORDER HOT-400·BOT-111): 영역 표시(%eth0)는 떼고,
+ * IPv4를 담은 IPv6 넷은 그 IPv4로, 다른 IPv6는 앞 /64로 센다(한 사람이 흔히 /64 하나를 받는다, 재리뷰 2026-11-05).
  * IP가 아니면 그대로(묶음 값만 달라진다)
  */
 export function sourceAddressOf(ip: string): string {
-  if (isIP(ip) !== 6) return ip;
-  const canon = canonicalV6(ip);
-  if (!canon) return ip;
+  const zone = ip.includes(':') ? ip.indexOf('%') : -1;
+  const bare = zone >= 0 ? ip.slice(0, zone) : ip;
+  if (isIP(bare) !== 6) return zone >= 0 ? bare : ip;
+  const canon = canonicalV6(bare);
+  if (!canon) return bare;
   const parts = expandV6(canon);
-  if (parts.length !== 8) return ip;
-  if (parts.slice(0, 5).every((x) => x === '0000') && parts[5] === 'ffff') {
-    const hi = parseInt(parts[6]!, 16);
-    const lo = parseInt(parts[7]!, 16);
-    return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
-  }
-  return `${parts.slice(0, 4).join(':')}::/64`;
+  if (parts.length !== 8) return bare;
+  return embeddedV4(parts) ?? `${parts.slice(0, 4).join(':')}::/64`;
 }
 
 const NOTICE_ALERT: Partial<Record<NoticeKind, 'password_failure_notice' | 'protect_lock'>> = { PASSWORD_FAILURE_NOTICE: 'password_failure_notice', PROTECT_LOCK: 'protect_lock' };

@@ -21,6 +21,7 @@
     "@peaket/api-client": "workspace:*",
     "@peaket/contracts": "workspace:*",
     "@peaket/ds": "workspace:*",
+    "@peaket/platform": "workspace:*",
     "@peaket/search-normalize": "workspace:*",
     "@peaket/seatmap": "workspace:*",
     "@peaket/telemetry": "workspace:*",

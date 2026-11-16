@@ -37,8 +37,9 @@ type LoginBodyT = z.output<typeof LoginBody>;
 
 /** 게이트웨이가 쓴 클라이언트 IP 하나. 없거나 IP가 아니면 연결 상대 주소 */
 export function clientIpOf(req: Pick<FastifyRequest, 'headers' | 'socket'>): string {
+  // 게이트웨이가 다시 쓴 값 하나만 받는다(docs/features/identity.md §6 '출발지' ③). 머리가 여럿이거나 쉼표로 이은 값은 IP가 아니므로 연결 상대 주소다
   const h = req.headers['x-forwarded-for'];
-  const v = (Array.isArray(h) ? h[0] : h)?.trim();
+  const v = (Array.isArray(h) ? (h.length === 1 ? h[0] : undefined) : h)?.trim();
   if (v && isIP(v)) return v;
   return req.socket?.remoteAddress ?? '';
 }

@@ -83,6 +83,7 @@ node --test "tools/local/*.test.mjs"
 | Grafana | 13.2.5(다이제스트, 2026-11-02 확인) | 로컬 관측 최소의 대시보드. 13.2 줄의 최신 고침 판입니다 |
 | metrics-server | v0.9.1(설치 파일 해시·이미지 다이제스트, 2026-11-03 확인) | v0 배포의 CPU HPA 지표. kind 노드의 kubelet 인증서가 자체 서명이라 `--kubelet-insecure-tls`를 더합니다 |
 | Valkey | 8.1(`valkey/valkey:8.1-alpine` 다이제스트) | v0 배포의 대기열 Redis. 통합 시험과 같은 이미지입니다 |
+| Envoy Gateway | 1.10.0(설치 파일 해시·컨트롤러 이미지 다이제스트, 프록시는 이 판의 기본 Envoy 1.40.2 다이제스트, 2026-11-16 확인) | 게이트웨이 다섯의 컨트롤러(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400). 공식 릴리스(envoyproxy)의 최신 안정판이고, 게이트웨이가 쓰는 출처 확인(`SecurityPolicy.csrf`)·응답 머리 `addIfAbsent`·Lua 환경 값 허용이 이 판에 있습니다. 올리는 명령은 아직 없습니다(BAT-055 구현 ③) |
 
 ## AWS 흉내 서버의 한계(2026-11-01 확인)
 

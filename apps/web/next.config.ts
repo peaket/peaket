@@ -37,6 +37,8 @@ const config: NextConfig = {
   // 밖에 둔 패키지는 Next.js 추적으로 standalone node_modules에 실린다(test-int/standalone-scm.build.test.mjs가 본다)
   serverExternalPackages: ['redis', '@redis/client', '@redis/bloom', '@redis/json', '@redis/search', '@redis/time-series'],
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
+  // 앱 서버 텔레메트리(instrumentation.ts, BUILD_ORDER HOT-400)는 묶지 않고 Node가 그대로 읽는다(OTel SDK가 모듈 읽기를 가로채 계측한다)
+  serverExternalPackages: ['@peaket/platform'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: { ...seedLayeredAlias(import.meta.dirname), 'peaket-pg-simulator-window': simulatorWindowModule } },
   pageExtensions: seedCssPoc ? ['poc.tsx', 'tsx', 'ts', 'jsx', 'js'] : ['tsx', 'ts', 'jsx', 'js'],

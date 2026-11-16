@@ -131,7 +131,7 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 
 | 경로 | 하는 일 |
 | --- | --- |
-| `@peaket/platform/telemetry` | `startTelemetry`·`shutdownTelemetry`. OTel Node SDK를 시작하는 유일한 곳(docs/devops.md §4.4). NestJS를 읽지 않아 앱 서버도 쓸 수 있다 |
+| `@peaket/platform/telemetry` | `startTelemetry`·`shutdownTelemetry`. OTel Node SDK를 시작하는 유일한 곳(docs/devops.md §4.4). NestJS를 읽지 않아 앱 서버도 쓸 수 있다. 같은 출처 앱 서버(web·partner의 `instrumentation.ts`)는 `@peaket/platform/telemetry/app-server`의 `startAppServerTelemetry`로 자동 계측 없이(Next.js가 요청 span을 만든다) 앱 서버 모드(`untrusted`)만 시작하고 `PEAKET_TRACE_INBOUND`가 다른 값이면 던진다. 앱 서버 모드는 게이트웨이가 옮긴 브라우저 값 `x-peaket-browser-traceparent`(`BROWSER_TRACEPARENT_HEADER`)를 먼저, 없으면 `traceparent`를 링크 후보로 읽는다(docs/observability.md §6, V-T31 ②, BUILD_ORDER HOT-400) |
 | `@peaket/platform/telemetry/register` | `--import`로 읽는 등록 파일. 환경 변수로 `startTelemetry`를 부른다 |
 | `@peaket/platform/stream-worker` | Kafka 클라이언트(`@confluentinc/kafka-javascript`)를 쓰는 유일한 곳: `createKafkaProducer`·`createKafkaConsumer`·`createKafkaAdmin`(필수 설정으로만), Outbox 보내기 어댑터 `kafkaOutboxPublisher`(생산 span이 쓴 요청에 링크), 키 단위 소비자 실행기 `runKeyedConsumer`(소비 span, 1초 커밋, 넘기기 전 마치기), 방송형 읽기 `kafkaBroadcastSource`, `withTraceHeaders`·`withConsumerSpan` |
 | `@peaket/platform/testing` | V-T31 ③ 탐침 `probeTraceHeaders`. 외부 어댑터의 시험이 모의 서버가 받은 헤더에 추적 헤더가 없는지 본다. 텔레메트리를 시작하지 않은 채 부르면 실패한다. 제어 사건 JSON 대역 `jsonControlCodec`(Avro 디코더는 BAS-030) |

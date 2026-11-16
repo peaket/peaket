@@ -13,6 +13,10 @@
       "types": "./dist/telemetry.d.ts",
       "default": "./dist/telemetry.js"
     },
+    "./telemetry/app-server": {
+      "types": "./dist/telemetry-app-server.d.ts",
+      "default": "./dist/telemetry-app-server.js"
+    },
     "./telemetry/register": {
       "types": "./dist/telemetry-register.d.ts",
       "default": "./dist/telemetry-register.js"

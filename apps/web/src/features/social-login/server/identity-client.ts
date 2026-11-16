@@ -2,6 +2,7 @@
 // 앱 코드는 다시 보내지 않는다(남는 다시 보내기는 grpc-js 투명 재시도와 메시 재시도 예산, docs/api/proto/README.md §2 '재시도').
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
+import { isIP } from 'node:net';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import { PROTO_PROVIDER, type Provider } from './providers.ts';
 
@@ -60,6 +61,15 @@ function sessionOf(r: Record<string, any>): CreatedSession {
   };
 }
 
+/**
+ * 게이트웨이가 다시 쓴 x-forwarded-for 값 하나(docs/features/identity.md §6 '출발지', docs/infra.md §4.1 '클라이언트 IP', BUILD_ORDER HOT-400·PRF-020).
+ * 여러 값(쉼표로 이음, 머리 여럿)·IP가 아닌 값·없음이면 ''(identity는 빈 값을 '모름'으로 본다). 앱 포트는 게이트웨이만 닿는다
+ */
+export function clientIpOf(req: Request): string {
+  const v = (req.headers.get('x-forwarded-for') ?? '').trim();
+  return isIP(v) ? v : '';
+}
+
 export type ReauthIssue = { result: 'ISSUED'; token: string; expiresAt: number } | { result: 'ACCOUNT_MISMATCH' } | { result: 'REVERIFY_REQUIRED' };
 
 export class IdentityClient {
@@ -85,6 +95,8 @@ export class IdentityClient {
     email: string | null;
     emailVerified: boolean;
     deviceId: string | null;
+    /** 게이트웨이가 쓴 클라이언트 IP 하나(clientIpOf). 모르면 '' */
+    clientIp?: string;
     userAgent: string;
     authMethods: string[];
     link?: { proposalId: string; binding: string };
@@ -96,8 +108,8 @@ export class IdentityClient {
       email: i.email ?? '',
       email_verified: i.emailVerified,
       device_id: i.deviceId ?? '',
-      // 원문 IP는 신뢰할 수 있는 끝단 머리가 정해진 뒤(wbs 2.11.1) 싣는다. 지금은 비운다
-      client_ip: '',
+      // 게이트웨이(gw-fan)가 클라이언트 IP 하나로 다시 쓴 x-forwarded-for(docs/features/identity.md §6 '출발지', BUILD_ORDER HOT-400·PRF-020)
+      client_ip: i.clientIp ?? '',
       user_agent: i.userAgent,
       auth_methods: i.authMethods,
       ...(i.link ? { link_proposal_id: i.link.proposalId, link_binding: i.link.binding } : {}),
@@ -149,14 +161,14 @@ export class IdentityClient {
     return { ended: Boolean(r.ended) };
   }
 
-  async issueReauthToken(i: { sessionId: string; accountId: string; provider: Provider; providerUserId: string; strength: 'verified' | 'requested'; purpose: 'sensitive' | 'high-risk'; userAgent: string }): Promise<ReauthIssue> {
+  async issueReauthToken(i: { sessionId: string; accountId: string; provider: Provider; providerUserId: string; strength: 'verified' | 'requested'; purpose: 'sensitive' | 'high-risk'; clientIp?: string; userAgent: string }): Promise<ReauthIssue> {
     const r = await this.#call('IssueReauthToken', {
       session_id: i.sessionId,
       account_id: i.accountId,
       provider: PROTO_PROVIDER[i.provider],
       provider_user_id: i.providerUserId,
       strength: i.strength === 'verified' ? 'REAUTH_STRENGTH_VERIFIED' : 'REAUTH_STRENGTH_REQUESTED',
-      client_ip: '',
+      client_ip: i.clientIp ?? '',
       user_agent: i.userAgent,
       purpose: i.purpose === 'high-risk' ? 'REAUTH_PURPOSE_HIGH_RISK' : 'REAUTH_PURPOSE_SENSITIVE',
     });

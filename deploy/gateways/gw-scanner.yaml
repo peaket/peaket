@@ -1,0 +1,373 @@
+# gw-scanner 게이트웨이(BUILD_ORDER HOT-400, 묶음 BAT-055). 정본: docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현'·§9 '응답 보안 헤더', docs/architecture.md §4 'CSRF 확인 규칙',
+# docs/features/identity.md §3 '발급자와 검증 규칙', docs/security/authz-matrix.md §5.1, docs/observability.md §6 '신뢰 경계의 추적 문맥'.
+# Envoy Gateway v1.10.0의 API(gateway.envoyproxy.io/v1alpha1)와 Gateway API v1로 쓴다. 값은 정본 값 그대로이고 바꾸면 정본을 먼저 고친다.
+# 정적 시험: node --test "deploy/gateways/test/*.test.mjs"
+---
+# gw-scanner: 듣는 호스트(docs/infra.md §4.1 '호스트와 내부 경로'). 리스너마다 호스트 하나, HTTPS만. 인증서 Secret은 운영에서 cert-manager가, 로컬은 cluster.mjs가 만든다
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-scanner
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: peaket
+  listeners:
+    - name: scanner-api
+      hostname: scanner-api.peaket.example
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-scanner-scanner-api-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# gw-scanner: 연결·들어올 때 머리·응답 머리(docs/infra.md §4.1 '들어올 때 지우고 넣는 머리'·'클라이언트 IP'·'응답 머리', §9 '응답 보안 헤더')
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: gw-scanner-client
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-scanner
+  tls:
+    minVersion: "1.2"
+    maxVersion: "1.3"
+    ciphers:
+      - ECDHE-ECDSA-AES128-GCM-SHA256
+      - ECDHE-RSA-AES128-GCM-SHA256
+      - ECDHE-ECDSA-AES256-GCM-SHA384
+      - ECDHE-RSA-AES256-GCM-SHA384
+      - ECDHE-ECDSA-CHACHA20-POLY1305
+      - ECDHE-RSA-CHACHA20-POLY1305
+  headers:
+    withUnderscoresAction: DropHeader
+    earlyRequestHeaders:
+      remove:
+        - traceparent
+        - tracestate
+        - baggage
+        - x-peaket-app
+        - x-peaket-browser-traceparent
+        - x-user-id
+        - x-session-id
+        - x-user-aud
+        - x-user-scope
+        - x-user-pid
+        - x-user-pid-prev
+        - x-user-role
+        - x-tenant-id
+        - forwarded
+        - x-real-ip
+        - x-forwarded-host
+        - x-forwarded-port
+        - x-forwarded-prefix
+        - x-forwarded-proto
+      removeOnMatch:
+        - type: Prefix
+          value: x-user-
+    lateResponseHeaders:
+      set:
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains
+        - name: X-Content-Type-Options
+          value: nosniff
+      addIfAbsent:
+        - name: Content-Security-Policy
+          value: default-src 'none'; frame-ancestors 'none'
+---
+# gw-scanner: 원본 확인·끝단 신호 머리 지우기와 토큰 유형(typ) 확인(공통 Lua, JWT 확인 뒤에 돈다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-scanner-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-scanner
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: false
+        tokenCookie: ""
+        tokenScheme: DPoP
+---
+# gw-scanner scanner-api: TRACE는 405(docs/security/asvs/delivery.md 13.4.4). 토큰 확인이 없는 라우트라 401보다 먼저 답한다. 이 호스트 라우트의 경로를 모두 TRACE로 다시 적는다
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-scanner-trace
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-scanner
+      sectionName: scanner-api
+  hostnames:
+    - scanner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/scanner/device-enrollments
+          method: TRACE
+        - path:
+            type: Exact
+            value: /v1/scanner/device-authorizations
+          method: TRACE
+        - path:
+            type: PathPrefix
+            value: /v1/scanner
+          method: TRACE
+        - path:
+            type: PathPrefix
+            value: /
+          method: TRACE
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: scanner
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-trace-not-allowed
+---
+# gw-scanner-trace: 교차 출처 응답만(토큰 확인 없음)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-scanner-trace-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-scanner-trace
+  cors:
+    allowOrigins:
+      - https://scanner.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - Authorization
+      - DPoP
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+---
+# gw-scanner-public: 토큰 없이 부르는 스캐너 경로(기기 등록·기기 인가. 기기 증명 DPoP는 서비스가 본다, authz-matrix §5.2)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-scanner-public
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-scanner
+      sectionName: scanner-api
+  hostnames:
+    - scanner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/scanner/device-enrollments
+          method: POST
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: scanner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/scanner/device-authorizations
+          method: POST
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: scanner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+---
+# gw-scanner-public: 교차 출처·출처 확인(토큰 확인 없음, 공개 경로)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-scanner-public-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-scanner-public
+  cors:
+    allowOrigins:
+      - https://scanner.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - Authorization
+      - DPoP
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+---
+# gw-scanner-api: 현장 스태프 경로(토큰 Authorization: DPoP, 기기 증명은 ScannerGuard가 본다)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-scanner-api
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-scanner
+      sectionName: scanner-api
+  hostnames:
+    - scanner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/scanner
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: scanner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+---
+# gw-scanner-api: 교차 출처·출처 확인·토큰 확인·인가(유효한 토큰)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-scanner-api-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-scanner-api
+  cors:
+    allowOrigins:
+      - https://scanner.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - Authorization
+      - DPoP
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+  jwt:
+    providers:
+      - name: staff-scanner
+        issuer: https://identity.peaket.example
+        audiences:
+          - scanner
+        remoteJWKS:
+          uri: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/staff.json
+          backendRefs:
+            - group: ""
+              kind: Service
+              name: identity-svc
+              namespace: core
+              port: 8080
+          cacheDuration: 300s
+        extractFrom:
+          headers:
+            - name: Authorization
+              valuePrefix: "DPoP "
+        claimToHeaders:
+          - header: X-User-Id
+            claim: sub
+          - header: X-Session-Id
+            claim: sid
+          - header: X-User-Aud
+            claim: aud
+          - header: X-User-Scope
+            claim: scope
+          - header: X-User-Jkt
+            claimPath:
+              - cnf
+              - jkt
+  authorization:
+    defaultAction: Deny
+    rules:
+      - name: valid-token
+        action: Allow
+        principal:
+          jwt:
+            provider: staff-scanner

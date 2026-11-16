@@ -21,6 +21,12 @@ import { ipPrefix } from './pseudonym.js';
 
 export type InboundTrust = 'mesh' | 'untrusted';
 
+/**
+ * 게이트웨이(gw-fan·gw-partner)가 브라우저 traceparent를 옮겨 같은 출처 앱 서버 경로에만 넘기는 머리(docs/observability.md §6 '앱 서버가 브라우저 값을 받는 길').
+ * 게이트웨이는 바깥 traceparent를 지우므로 앱 서버 모드는 이 머리를 먼저 읽고, 없을 때만(게이트웨이 없이 띄운 로컬) traceparent를 링크 후보로 읽는다
+ */
+export const BROWSER_TRACEPARENT_HEADER = 'x-peaket-browser-traceparent';
+
 const NO_PROPAGATION = createContextKey('peaket.trace.no-propagation');
 const UNTRUSTED_PARENT = createContextKey('peaket.trace.untrusted-parent');
 
@@ -47,8 +53,11 @@ export class BoundaryPropagator implements TextMapPropagator {
 
   extract(ctx: Context, carrier: unknown, getter: TextMapGetter): Context {
     if (this.inbound === 'mesh') return this.w3c.extract(ctx, carrier, getter);
-    // 앱 서버: 부모로 쓰지 않는다. 형식이 맞는 traceparent만 링크 후보로 맥락에 둔다. tracestate·baggage는 버린다
-    const parsed = trace.getSpanContext(this.traceContext.extract(ROOT_CONTEXT, carrier, getter));
+    // 앱 서버: 부모로 쓰지 않는다. 형식이 맞는 traceparent만 링크 후보로 맥락에 둔다. tracestate·baggage는 버린다.
+    // 게이트웨이가 옮긴 브라우저 값(x-peaket-browser-traceparent)이 오면 그것만 본다(형식이 틀리면 링크 없음, traceparent로 물러나지 않는다)
+    const browser = getter.get(carrier, BROWSER_TRACEPARENT_HEADER);
+    const source: TextMapGetter = browser === undefined ? getter : { keys: () => ['traceparent'], get: (_c, key) => (key === 'traceparent' ? browser : undefined) };
+    const parsed = trace.getSpanContext(this.traceContext.extract(ROOT_CONTEXT, carrier, source));
     return parsed && isSpanContextValid(parsed) ? ctx.setValue(UNTRUSTED_PARENT, parsed) : ctx;
   }
 

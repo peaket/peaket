@@ -12,6 +12,8 @@ const config: NextConfig = {
   // 퍼블리싱 중 여러 사람이 같은 앱을 동시에 빌드할 때만 산출 폴더를 나눈다(기본은 .next)
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap', '@peaket/validation'],
+  // 앱 서버 텔레메트리(instrumentation.ts, BUILD_ORDER HOT-400)는 묶지 않고 Node가 그대로 읽는다(OTel SDK가 모듈 읽기를 가로채 계측한다)
+  serverExternalPackages: ['@peaket/platform'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: seedLayeredAlias(import.meta.dirname) },
   pageExtensions: [...(seedCssPoc ? ['poc.tsx'] : []), 'tsx', 'ts', 'jsx', 'js'],
