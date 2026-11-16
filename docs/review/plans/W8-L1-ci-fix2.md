@@ -292,3 +292,44 @@
 | verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:06+09:00 | 2026-11-16T22:13+09:00 |
 | review | w8l1-cifix2-review-7a7b511f | claude-opus-5-5 | 2026-11-16T22:07+09:00 | 2026-11-16T22:24+09:00 |
 | verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:31+09:00 |
+
+위 표는 `roles-check`가 읽는 표라 정본 꼴(머리 다섯 칸, 감독·기록은 적지 않음)을 그대로 둔다. 실제 하위 에이전트 ID와 기록 담당은 아래 보탬 표에 적는다(검사는 절 안의 첫 표만 읽는다).
+
+| 역할 | 세션 ID | 하위 에이전트 ID | 모델 | 시작 | 끝 |
+| --- | --- | --- | --- | --- | --- |
+| plan | w8l1-cifix2-plan-d3f0cd33 | a9b2028a538f3ccd8 | claude-opus-5-5 | 2026-11-16T21:15+09:00 | 2026-11-16T21:44+09:00 |
+| impl | w8l1-cifix2-impl-a624bfe3 | add9029ea358f9112 | claude-opus-5-5 | 2026-11-16T21:44+09:00 | 2026-11-16T21:53+09:00 |
+| test | w8l1-cifix2-test-6b66f6f0 | a5bddc1408f57d943 | claude-opus-5-5 | 2026-11-16T21:54+09:00 | 2026-11-16T22:07+09:00 |
+| verify | w8l1-cifix2-verify-6e13c0cb | abc94778b29adf007 | claude-opus-5-5 | 2026-11-16T22:06+09:00 | 2026-11-16T22:13+09:00 |
+| review | w8l1-cifix2-review-7a7b511f | a0bef2863a2cf8fec | claude-opus-5-5 | 2026-11-16T22:07+09:00 | 2026-11-16T22:24+09:00 |
+| verify | w8l1-cifix2-verify-6e13c0cb | abc94778b29adf007 | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:31+09:00 |
+| record | w8l1-cifix2-record-c3d27824 | (이 기록 담당 세션) | claude-opus-5-5 | 2026-11-16T22:32+09:00 | 2026-11-16T22:45+09:00 |
+
+- 모델: 모두 claude-opus-5-5다. 리뷰·검증은 구현 담당과 같은 모델의 새 맥락이다(소유자 결정 OPEN[40], ADR-0270 결정 6). 시험 담당은 독립 시험(`720830f6`)과 리뷰 반영(`67a0fe4a`)을 둘 다 했고, 검증 담당은 두 번(`dab0671e`, 리뷰 반영 뒤 `ac5e84b7`) 했다.
+- 감독(갈래 1 감독 세션)은 코드·시험을 쓰지 않았다.
+
+## 기록
+
+- 누가: 기록 담당 `w8l1-cifix2-record-c3d27824`, 2026-11-16. 받은 것은 `git log origin/develop..HEAD`, 이 계획 파일, 감독이 준 사실(담당 표의 하위 에이전트 ID, 이 묶음을 고른 까닭, 웨이브 8 멈춤과의 관계)뿐이다.
+- 왜 이 묶음인가: BAT-055·060을 합친 뒤의 develop CI 실행 43865738562(`3256c93f`)에서 `web / budgets`(`serverExternalPackages` 키 둘), `loadtest-check / loadtest`(의존성 설치 없음), `node / node`(W7-WIR-06 parity 시험이 생성 라우트 파일을 읽지 않음)가 실패해 이를 고쳤다. 같은 실행의 `kind / kind` 실패는 kubectl 포트 전달 끊김 때문이고, 감독 결정으로 별도 묶음 W8-L1-ci-fix3로 나눴다.
+- 웨이브 8 멈춤과의 관계: 웨이브 8로 넘어가지 않는다는 소유자 결정(R-657)과 어긋나지 않는다. 웨이브 7 합치기가 빨갛게 만든 develop을 초록으로 되돌리는 마무리이기 때문이다(감독 세션 판단).
+- 무엇을 고쳤나: `apps/web/next.config.ts`의 `serverExternalPackages`를 키 하나·일곱 패키지 한 배열로 합쳤고(정본 docs/frontend.md §5.18), `.github/workflows/loadtest-check.yml`이 pnpm을 받아 잠금 파일대로 설치한 뒤 시험을 돌며(정본 docs/devops.md §3), `tools/ci/changes.mjs`의 `loadtest` 범위가 `tools/local/gateway-objects.mjs`를 본다. parity 시험은 `gw-fan.yaml`과 생성 파일 `gw-fan.routes.yaml` 둘을 읽는다(구현 커밋 없음, 시험 쪽 고침).
+- 커밋(차례대로. 가지를 다시 올리지 않아 위 절들의 해시와 같다):
+
+| 해시 | 역할 | 제목 |
+| --- | --- | --- |
+| f35d8d2f | plan(`Batch-Order: impl-first`) | W8-L1-ci-fix2 develop CI 두 잡을 고치는 계획과 정본 줄을 정한다 |
+| 8b26b842 | plan | W8-L1-ci-fix2에 node 잡의 W7-WIR-06 실패를 넣는다 |
+| c3811a03 | impl | web 서버 묶음 밖 패키지를 한 키로 합치고 부하 시험 점검이 의존성을 설치한 뒤 돈다 |
+| 720830f6 | test | 서버 묶음 밖 패키지 키 하나·부하 시험 점검 설치·범위·게이트웨이 생성 라우트 파일을 시험한다 |
+| dab0671e | verify | W8-L1-ci-fix2 틀린 구현 표본 검증을 적는다 |
+| 79fa3a6e | review | W8-L1-ci-fix2 리뷰를 적는다 |
+| 67a0fe4a | review-fix(`Fix-By: test`, RV-1·RV-2·M-33) | 서버 묶음 밖 패키지 키를 줄 주석만 버리고 따옴표 꼴까지 세고, 부하 시험 점검 단계의 if·continue-on-error를 막는다 |
+| ac5e84b7 | verify | W8-L1-ci-fix2 리뷰 반영 뒤 마지막 검증을 적는다 |
+
+- 역할별 커밋 수: plan 2, impl 1, test 1, review 1, verify 2, 리뷰 반영 1(시험 쪽), 합 8개. 이 기록 커밋을 더하면 9개다.
+- 시험: 구현 전 트리(제품 파일이 `3256c93f`과 같음)에서 새 시험 CF2-01~04는 4개 모두 실패했고, 고치기 전 parity 시험은 4개 가운데 3개 실패, 고친 parity 시험 CF2-05~07은 통과(처음부터 통과가 맞는 시험, 실패는 검증의 M-21~M-26·M-32로 봄), R-1(설치 없는 폴더의 `loadtest/test`)은 443개 가운데 3개 실패였다. 구현 위에서는 `server-external`·parity 6개, CF2-03·04와 기존 tools-check 시험 3개, `check-workflows`·`changes` 전체 86개(건너뜀 1, CI 전용), web 서버 단위 66개, R-1 443개가 모두 통과했다. 리뷰 반영 뒤 `server-external` 2개와 `check-workflows` 46개(건너뜀 1)가 통과했다. 운영 빌드가 필요한 R-2('HOT-390 첫 JS 예산: redis는 서버 묶음 밖에 …')는 이 PC에서 돌리지 않았고, 합친 뒤 develop CI `web / budgets`가 최종 근거다. `loadtest-check / loadtest`와 `node / node`도 합친 뒤 CI에서 다시 본다.
+- 틀린 구현 검사: 첫 검증(`dab0671e`) 넣은 수 34, 잡은 수 31, 놓친 수 3(M-30·M-31·M-33, 셋 다 검증 담당이 목록 밖에서 더한 보탬). 계획 목록 M-01~M-26은 모두 잡았다. 리뷰 반영 뒤 마지막 검증(`ac5e84b7`) 넣은 수 21, 잡은 수 21, 놓친 수 0(지난번 놓친 셋, RV-1 재현, 보탬 M-34·M-35, CF2-01~04에 닿는 지난번 표본 열다섯. 검증 커밋 본문은 '열넷'이라 적었으나 '검증' 절의 목록은 열다섯이고 합 21과 맞는다). 이 묶음에 놓친 것은 남지 않는다.
+- 리뷰 지적 처리: 높음·보안 지적은 없다. RV-1(중간, 통과 기준: 블록 주석 지우기가 줄 주석 안의 `/*`부터 코드를 지워 둘째 키를 놓칠 수 있음)·RV-2(낮음: CF2-03이 설치 단계의 `if`·`continue-on-error`를 보지 않음, 검증 M-30·M-31과 같음)와 검증의 M-33(따옴표 붙은 같은 키)은 리뷰 반영 커밋 `67a0fe4a`(`Fix-By: test`)에서 고쳤다. RV-3(낮음: `loadtest` 범위가 `package.json`·`pnpm-lock.yaml`·`.nvmrc`를 보지 않음)은 이 묶음에서 고치지 않고 계획 6의 후보 넷과 함께 `docs/PROGRESS.md` '구간 끝 정리 목록(갈래 1)'에 올렸다.
+- 예외: 없다. `roles-check --base origin/develop --head HEAD`가 이 기록 커밋 전(`ac5e84b7`)에 '묶음 W8-L1-ci-fix2: 코드(정방향) 커밋 8개', '통과'를 냈고 감독 예외 줄도 없다. BUILD_ORDER에는 이 묶음의 단계 줄이 없어 고치지 않았다.
+- 정방향 차례가 실제로 흐른 꼴: 계획 담당이 `Batch-Order: impl-first`를 단 계획 커밋(`f35d8d2f`)을 낸 뒤 감독 결정으로 `node / node` 실패를 범위에 넣는 계획 커밋(`8b26b842`)을 더했다. 구현 담당이 계획만 보고 먼저 고쳤고(`c3811a03`, 기존 V170-R11이 일곱으로 바뀐 정본 때문에 실패하는 것은 계획대로 남김), 시험 담당이 구현 차이를 보지 않고 정본·계획에서 단언을 정해 시험을 쓴 뒤 감독이 꺼낸 구현 전 트리(`D:/ticketpass-lane1-pre`)에서 실패를 봤다(`720830f6`). 시험이 모두 통과한 뒤 검증(22:06)과 리뷰(22:07)가 따로 시작했고, 리뷰는 도중에 올라온 검증 절을 읽었다. 리뷰 반영은 시험 쪽 한 커밋이고, 마지막 검증(`ac5e84b7`)은 마지막 고침(`67a0fe4a`) 뒤다.
