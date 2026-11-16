@@ -110,9 +110,41 @@
 
 ## 시험 이의
 
+- (고치지 않음, 계획 담당 몫) 5의 CF4-04 단언 칸은 'Node 해석(`createRequire`)으로 여섯을 찾는다'고 적었지만, 구현 뒤 운영 빌드의 standalone에는 `core`·`exporter-trace-otlp-proto`·`resources`·`sdk-trace`의 import 조건 파일(`dist/index.mjs`)만 실리고 require 조건 파일(`dist/index.cjs`)은 실리지 않아 `createRequire`만으로는 넷이 풀리지 않는다(Turbopack 밖 모듈 `.y(…)`는 `import()`로 부른다). 시험은 require와 ESM(import 조건) 해석을 둘 다 해 보고 어느 하나라도 standalone 안이면 실린 것으로 센다(아래 '시험 결과' 2). 계획 문장을 'Node 해석(require 또는 import 조건)'으로 고칠지는 계획 담당·리뷰가 정한다.
+- (기록 담당 몫, 고치지 않음) 담당 표 impl 줄의 끝 시각 00:25는 실제 구현 커밋 시각(`148cd5e3`, 2026-11-17T00:21:32+09:00, 감독 확인 00:22)보다 3분 늦게 적혔다.
+
 ## 실패 확인
 
+- **구현 전 트리**: `D:/ticketpass-lane1-cf4base`(분리 HEAD `3a66b368` = `108f029a` + 이 계획 문서, 제품 파일은 `108f029a`와 같다). 시험 담당이 그 폴더에서 `pnpm install --offline --frozen-lockfile` 뒤 `tools/web-checks`에서 `PEAKET_BUILDS=prod node seed-css/build.mjs web`로 운영 빌드를 새로 했다(2026-11-17T00:28, 그 전 `.next`는 2026-11-16T23:48의 다른 빌드라 쓰지 않았다). 텔레메트리 서버 덩어리는 `[root-of-the-server]__1_1qtb_4dz47o._.js` 606,251바이트, standalone에 `apps/web/.next/node_modules/@opentelemetry` 없음.
+- 시험 파일 둘(`apps/web/server/server-external.test.mjs`, `apps/web/test-int/otel-external.build.test.mjs`)을 그 폴더에 복사해 `apps/web`에서 `node --test server/server-external.test.mjs test-int/otel-external.build.test.mjs`: **통과 1(CF2-01), 실패 4(CF4-01~04)**. 끝난 뒤 복사한 시험 파일을 되돌려 그 폴더의 git status를 비웠다.
+
+  | 시험 | 결과 | 메시지(줄임) |
+  | --- | --- | --- |
+  | CF2-01 | 통과(바꾸지 않은 시험) | |
+  | CF4-01 | 실패 | 배열 값이 일곱(`@peaket/platform`·redis 여섯)이고 OTel 여섯 `@opentelemetry/api`·`core`·`exporter-trace-otlp-proto`·`resources`·`sdk-node`·`sdk-trace`가 빠졌다(deepEqual 차이) |
+  | CF4-02 | 실패 | `serverExternalPackages에 @opentelemetry/ 이름이 하나도 없다`(빈 통과 막기) |
+  | CF4-03 | 실패 | `.next\server\chunks\[root-of-the-server]__1_1qtb_4dz47o._.js이 밖 모듈로 부르지 않는 OTel 패키지가 있다(서버 묶음에 들어갔다)`, 여섯 모두 |
+  | CF4-04 | 실패 | `standalone 안에서 풀리지 않는 OTel 패키지가 있다(운영 서버가 텔레메트리를 띄우지 못한다)`, 여섯 모두 |
+
+- R-1(같은 구현 전 빌드, scratchpad `cf4\measure.mjs`, js.spec 꼴): `web /` 176.1 > 175.7, `web /my/tickets` 161.9 > 161.6로 한도를 넘는다(`/events/0b8f…4e01` 193.5, `/search` 167.6, `/login` 159.8). 계획 1의 `108f029a` 값과 같다.
+- 감독 요청 확인(CF4-02가 판 글자를 견주는지): 구현 위 폴더에서 `packages/platform/package.json`의 `@opentelemetry/sdk-node`만 `0.300.0` → `0.300.1`로 잠깐 바꾸자 CF4-02가 `@opentelemetry/sdk-node 판 적기가 다르다: web 0.300.0, platform 0.300.1`로 실패했다(CF2-01·CF4-01은 통과). `git checkout --`로 되돌렸다.
+- 그 밖에 구현 위 standalone의 `.next/node_modules/@opentelemetry/sdk-node-<해시>` 연결 이름을 잠깐 바꾸자 CF4-04가 `@opentelemetry/sdk-node` 하나로 실패했다(이름 그대로의 해석은 standalone 밖 개발 설치로 풀려 세지 않는다). 이름을 되돌렸다(M-13 꼴, 검증 담당은 따로 넣는다).
+
 ## 시험 결과
+
+- **시험 파일**: CF4-01·02는 `apps/web/server/server-external.test.mjs`(CF2-02를 CF4-01로 바꾸고 배열 읽기를 `externalNames()`로 묶었다. CF2-01은 그대로). CF4-03·04는 새 파일 `apps/web/test-int/otel-external.build.test.mjs`(산출물을 읽기만 해 `standalone-scm.build`의 복사와 겹치지 않게 따로 두었다. `test:build` 글롭에 들어간다).
+- **계획과 다르게 고른 꼴(이유)**:
+  1. CF4-03 '`startAppServerTelemetry`를 정의한 덩어리'는 Turbopack 내보내기 등록 꼴 `"startAppServerTelemetry",()=>…`(구현 뒤, 다시 내보내기) 또는 `"startAppServerTelemetry",0,function(…)`(구현 전, 그 자리 정의)로 찾는다. 이름 글자만 찾으면 부르기만 하는 instrumentation 덩어리(`{startAppServerTelemetry:s}=await …`, 1.4kB)도 걸려 묶인 덩어리를 놓친 채 통과할 수 있다. 밖 모듈 부르기 꼴과 크기 한도(100kB [가정])는 계획대로다.
+  2. CF4-04는 require 해석(`createRequire`)과 ESM 해석(import 조건, 서버 덩어리 폴더를 현재 폴더로 둔 자식 Node의 `import.meta.resolve`)을 둘 다 해 보고, 풀린 실제 경로가 standalone 폴더 안이고 그 패키지 이름일 때만 센다. standalone은 `apps/web/.next` 아래라 위로 올라가면 개발 설치까지 닿아(이름 그대로 풀면 `D:/ticketpass-lane1-cf4/node_modules/.pnpm/…`) 아무 빌드에서나 통과하기 때문이다. import 조건을 더한 까닭은 위 '시험 이의' 첫 줄이다.
+- **구현 위(`D:/ticketpass-lane1-cf4`, `148cd5e3`, 구현 담당의 운영 빌드 2026-11-17T00:16)**:
+  - CF2-01·CF4-01·CF4-02: `node --test server/server-external.test.mjs` 통과 3, 실패 0.
+  - CF4-03·CF4-04: 통과 2. 텔레메트리 서버 덩어리 `[root-of-the-server]__0r8xl9k644kau._.js` 18,203바이트, 여섯을 `await t.y("@opentelemetry/<이름>-<해시>")`로 부른다.
+  - web 서버 단위 시험 전체 `node --test "server/**/*.test.mjs"`: 67 통과, 실패 0.
+  - `apps/web`의 `node --test "test-int/*.build.test.mjs"`(R-3): 5 통과, 실패 0(CF4-03·04, ASVS 13.4.1 소스 관리 폴더, HOT-390 redis 밖, R170-8).
+  - R-1 첫 JS(scratchpad `cf4\measure.mjs`, js.spec 꼴): `web /` **175.6** ≤ 175.7, `web /my/tickets` **161.5** ≤ 161.6(그 밖 `/events/0b8f…4e01` 193.0, `/search` 167.2, `/login` 159.4).
+  - R-1 budgets js 프로젝트: 다른 네 앱을 빌드하지 않아 CI 명령 그대로(`pnpm run budgets`, 앱 다섯 서버)는 못 돌렸다. 대신 `tools/web-checks`에서 `pnpm install --offline --frozen-lockfile` 뒤, 가짜 API와 web 운영 서버만 `seed-css/apps.mjs`의 `mockApiServer()`·`serverCommand(web, 'prod')` 그대로 띄우고 `PEAKET_WEB_CHECKS_SERVERS=external npx playwright test -c playwright.budgets.config.mjs --project js --grep "첫 JS web "`: **8 통과**(`reports/sizes-js`: `web /` 175.6 한도 175.7, `web /my/tickets` 161.5 한도 161.6). 띄운 서버는 자기 PID만 끝냈다. 최종 근거는 CI `web / budgets` 잡이다.
+  - R-2 `tools/web-checks`의 `node --test --test-name-pattern="web 운영" boot/production-start.test.mjs`: 통과 2(BAS-220 RV-08, V-T31 ② RV-08).
+  - eslint(바꾼 시험 파일 둘) 오류 0. doc-check(`python -I -X utf8 tools/doc-check/check_all.py`) 오류 0, 경고 4(openapi 설명 셋·mermaid 건너뜀, 이 묶음과 관계없이 이미 있던 것).
 
 ## 리뷰
 
@@ -146,3 +178,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w8l1-cifix4-plan-71c0e94b | claude-opus-5-5 | 2026-11-16T23:25+09:00 | 2026-11-17T00:15+09:00 |
 | impl | w8l1-cifix4-impl-d61b0a37 | claude-opus-5-5 | 2026-11-17T00:15+09:00 | 2026-11-17T00:25+09:00 |
+| test | w8l1-cifix4-test-0e7c93a4 | claude-opus-5-5 | 2026-11-17T00:25+09:00 | 2026-11-17T00:40+09:00 |
