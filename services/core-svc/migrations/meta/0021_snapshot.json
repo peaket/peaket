@@ -2683,10 +2683,6 @@
         "attendee_export_audit_shape_check": {
           "name": "attendee_export_audit_shape_check",
           "value": "(\"attendee_export_audit\".\"action\" = 'DOWNLOAD' and \"attendee_export_audit\".\"export_id\" is not null and \"attendee_export_audit\".\"reason\" is not null and \"attendee_export_audit\".\"format\" is not null) or (\"attendee_export_audit\".\"action\" = 'LIST' and \"attendee_export_audit\".\"export_id\" is null and \"attendee_export_audit\".\"reason\" is null and \"attendee_export_audit\".\"format\" is null)"
-        },
-        "attendee_export_audit_source_ip_check": {
-          "name": "attendee_export_audit_source_ip_check",
-          "value": "\"attendee_export_audit\".\"source_ip\" is not null"
         }
       },
       "isRLSEnabled": false
