@@ -92,4 +92,21 @@ describe('COV2-06 후기 익명화(실제 DB)', () => {
     expect(await store.anonymizeByAccount(A, NOW + 60_000)).toBe(0);
     expect(await rowsOf([a1, a2, b1])).toEqual(once);
   });
+
+  test('COV2-06 K2 탈퇴 익명화는 review_account_idx로 찾는다', async () => {
+    // 웨이브 끝 리뷰 K2: 익명화 문장(drizzle-review-store.ts anonymizeByAccount와 같은 꼴)이 계정 색인을 쓰는지 실행 계획으로 본다(docs/devops.md §7.3 실행 계획 검사의 작은 꼴)
+    for (let i = 0; i < 5; i += 1) await seedReview(randomUUID(), randomUUID());
+    const client = await admin.pool.connect();
+    try {
+      await client.query('set enable_seqscan = off');
+      const plan = await client.query(
+        `explain (format json) update review set account_id = id, basis_order_id = id, author_display = '탈퇴한 사용자', updated_at = $2::timestamptz where account_id = $1::uuid returning id`,
+        [randomUUID(), new Date(NOW)],
+      );
+      expect(JSON.stringify(plan.rows[0])).toContain('"Index Name":"review_account_idx"');
+    } finally {
+      await client.query('reset enable_seqscan').catch(() => undefined);
+      client.release();
+    }
+  });
 });

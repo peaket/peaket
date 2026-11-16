@@ -138,7 +138,7 @@ describe('A2-17 내보내기 페이지 상한', () => {
     ]);
   });
 
-  test('A2-17 J-T26 ④ 원천이 같은 커서를 되풀이하면 503이고 이력·접속기록이 없다', async () => {
+  test('A2-17 C1 J-T26 ④ 같은 커서를 되풀이하면 503 dependency-unavailable의 목록 제목·detail·Retry-After 30을 싣는다', async () => {
     const rows = makeRowsFrom(0, 1_000);
     const s = scriptedSource([
       { items: rows, nextCursor: 'c1' },
@@ -153,6 +153,8 @@ describe('A2-17 내보내기 페이지 상한', () => {
       );
     expect(err).toBeInstanceOf(ProblemError);
     expect(err).toMatchObject({ status: 503, slug: 'dependency-unavailable' });
+    // 리뷰 C1: 제목은 오류 목록 값(guidelines §2 '한 type은 늘 같은 상태 코드와 제목'), 사정은 detail, Retry-After 30초(settlement.md §9 '원천 오류의 응답 계약')
+    expect(err).toMatchObject({ title: '의존 서비스를 잠시 쓸 수 없습니다', detail: '예매자 명단 원천이 같은 페이지를 되풀이했습니다', retryAfterSeconds: 30 });
     expect(s.calls.map((c) => c.cursor)).toEqual([undefined, 'c1']);
     expect(store.rows).toHaveLength(0);
     expect(store.audits).toHaveLength(0);

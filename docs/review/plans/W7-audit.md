@@ -611,6 +611,31 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 
 - **통합 시험 결과(10:22 KST 도커 잠금 아래)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts` 시험 4개 가운데 실패 3, 통과 1. 위 R2 시험 말고도 둘이 실패한다. 'A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 …'은 준비의 직접 넣기가 `source_ip` 칸 없음(42703)이다. 'A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD …'는 저장소로 넣은 두 행은 맞게 읽혔지만, 틀린 모양 넣기에서 23514 대신 42703이 난다. 셋 다 0021에 `source_ip`가 생기면 풀려야 한다. 'A2-19 core_partner는 …'은 통과했다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
 
+### 웨이브 끝 리뷰 반영(시험 쪽, 계획 §7의 C1·C4·K1·K2·K6·K9, 검증 살아남음 M28·M33, 2026-11-16)
+
+- **뼈대**: `ExportProblem` 생성자의 넷째 인자 `{ detail?, retryAfterSeconds? }`(받기만 하고 채우지 않는다)와 같은 이름의 칸, 새 `attendeeSourceUnavailable(detail)`('아직 없음'을 던진다, export `index.ts`로도 내보낸다). 그 밖의 제품 코드·마이그레이션은 손대지 않았다.
+- **전체 단위**: core-svc 폴더에서 `npx vitest run` 시험 442개 가운데 실패 8, 통과 434. 실패 8개는 모두 아래 표의 새·고친 시험이고 그 밖은 모두 통과한다. `pnpm typecheck` 오류 0, 닿은 경로 eslint 오류 0.
+
+| 지적 | 시험 | 파일 | 결과 | 까닭 |
+| --- | --- | --- | --- | --- |
+| C1 | A2-17 C1 J-T26 ④ 같은 커서를 되풀이하면 503 dependency-unavailable의 목록 제목·detail·Retry-After 30을 싣는다 | `test/export-paging-limit.test.ts`(기존 되풀이 시험의 이름을 바꾸고 단언을 더함) | 실패 | 단언: 제목이 사정 글('…되풀이했습니다')이고 `detail`·`retryAfterSeconds`가 없다 |
+| C1 | 같은 이름 — POST …/attendee-exports | `test/export.test.ts` | 실패 | 단언: `retry-after` 머리가 없다 |
+| C1 | A2-17 C1 원천이 조립되지 않았을 때도 같은 503 계약이다 | `test/export-attendee-source.test.ts`(기존 503 시험 고침) | 실패 | 단언: 제목이 '예매자 명단 원천을 쓸 수 없습니다'이고 `detail`·`retryAfterSeconds`가 없다 |
+| C1 | A2-17 C1 GET …/attendees는 원천을 쓸 수 없으면 503과 Retry-After 30이고 접속기록이 없다 | `test/export.test.ts` | 실패 | 뼈대 '아직 없음'(`attendeeSourceUnavailable`)이 던져져 500 |
+| C1·C4 | A2-17 C4 HttpAttendeeSource는 빈 문자열 nextCursor와 틀린 응답 모양을 503으로 거절한다 | `test/http-attendee-source.test.ts`(기존 '응답 모양이 틀리면 실패한다'를 좁힘) | 실패 | 단언: 빈 문자열 `nextCursor`를 받는다, 틀린 모양은 503 `ExportProblem`이 아니다. 경계 반대쪽(한 글자 커서 받기)도 둔다 |
+| K1·K6 | A2-19 0021은 action·filter를 더하고 …(고침: `source_ip` 칸은 있고 NOT NULL·CHECK·SET NOT NULL·VALIDATE가 없다, action·모양 CHECK 둘은 `NOT VALID`) | `test/export-audit.test.ts` | 실패 | 단언: 0021에 `source_ip` CHECK가 있다(K6 쪽 `NOT VALID` 단언은 그 다음이라 아직 보이지 않는다). 검사는 주석 줄을 뺀 SQL 문장으로 한다 |
+| K2 | COV2-06 K2 0022는 review(account_id) 색인을 만든다 | `test/review-grants.test.ts` | 실패 | 단언: 색인 문장이 없다. ⑬은 GRANT 밖의 문으로 이 색인 하나만 허락하게 고쳤다(REVOKE 없음은 그대로) |
+| K2 | COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다 | `test/core-consumers.test.ts`(가짜 `runKeyedConsumer` + main.ts 원문) | 실패 | 단언: `maxKeys`·`partitionsConcurrently`를 넘기지 않는다(main.ts는 API의 `database`를 넘긴다) |
+| M28 | COV2-06 ⑰ main.ts의 소비자 시작은 조건 없이 돈다 | `test/core-consumers.test.ts` | **처음부터 통과(이미 있는 동작)** | 손 확인: `consumers = undefined && startCoreConsumers({`(검증 M28)로 바꾸면 실패하고(기존 ⑩은 그래도 통과), 되돌린 뒤 통과. 계획의 통합(선택: 빌드한 `dist/main.js`를 닿지 않는 브로커로 띄우기)은 DB 주소 등 시작 필수 값이 많아 이번에 쓰지 않았다 |
+| M33 | COV2-06 ⑱ SIGTERM은 소비자 stop()이 끝난 뒤에 서비스와 연결을 닫는다 | `test/core-consumers.test.ts` | **처음부터 통과(이미 있는 동작)** | 손 확인: `await consumers?.stop()`을 `void consumers?.stop()`(검증 M33)으로 바꾸면 실패하고, 되돌린 뒤 통과. 두 손 확인 뒤 `git diff`로 `main.ts`가 깨끗한 것을 봤다 |
+| K1 | A2-19 R2 K1 0021 뒤 접속지 없는 새 행도 DB는 받고(이전 판 호환), IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts`(R2 통합 시험의 이름과 첫 단언을 뒤집음) | 아직 안 돌림(도커 잠금 대기) | 지금 0021에서는 접속지 없는 넣기가 23514라 실패해야 한다 |
+| K1 | A2-19 K1 0021 뒤에도 이전 판(N-1) 코드의 내려받기 기록 모양이 들어간다 | 〃 | 아직 안 돌림(도커 잠금 대기) | core_partner로 853758eb 판의 넣기 문장. 지금은 23514로 실패해야 한다 |
+| K1·K6 | A2-19 K6 0019 행이 있는 DB에 0021·0022를 적용해도 실패하지 않고 옛 행은 그대로다 | 〃 | 아직 안 돌림(도커 잠금 대기) | 같은 컨테이너에 새 DB를 만들어 0020까지(임시 폴더의 잘린 journal)만 적용하고 0019 모양 행을 넣은 뒤 `migrateCore`로 나머지를 적용한다. 지금은 CHECK 둘이 검증된 상태(`convalidated` true)라 실패해야 한다 |
+| K2 | COV2-06 K2 탈퇴 익명화는 review_account_idx로 찾는다 | `test-int/review-withdrawn.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | `enable_seqscan = off` 뒤 익명화 문장의 `EXPLAIN (FORMAT JSON)`에 `review_account_idx`. 지금은 색인이 없어 실패해야 한다 |
+| K9 | COV2-06 ⑫ …(고침: 지표 저장소를 넘기고 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다) | `test-int/review-withdrawn-consumer.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 보류 수 세기는 core_app으로 `held_event`를 읽는다(0022의 SELECT). 지금 코드에서 통과할 것으로 보인다(처음부터 통과 예상) |
+
+- **돌릴 통합 시험(도커 잠금 대기)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 것은 Kafka 컨테이너가 필요하다).
+
 ## 시험 이의
 
 - **누가·언제**: 구현 담당(세션 `l3w7-audit-impl`), 2026-11-16. 리뷰 반영 R2(계획 §2 'R2 보충')를 구현하다 찾았다.

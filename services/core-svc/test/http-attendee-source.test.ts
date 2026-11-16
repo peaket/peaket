@@ -2,6 +2,7 @@
 // W7-audit A2-17: 원천의 nextCursor를 그대로 넘기고, 응답 모양이 틀리면 조용히 끝으로 보지 않고 실패한다(docs/api/guidelines.md §3).
 import { describe, expect, test } from 'vitest';
 import { HttpAttendeeSource } from '../src/modules/export/adapters/http-attendee-source.js';
+import { ExportProblem } from '../src/modules/export/domain/export.js';
 
 const page = {
   items: [
@@ -77,14 +78,25 @@ describe('A2-17 원천 커서 넘기기', () => {
     });
   });
 
-  test('A2-17 HttpAttendeeSource는 응답 모양이 틀리면 실패한다', async () => {
+  test('A2-17 C4 HttpAttendeeSource는 빈 문자열 nextCursor와 틀린 응답 모양을 503으로 거절한다', async () => {
+    // 리뷰 C1·C4: 빈 문자열 nextCursor는 계약 위반이다(guidelines §3). 틀린 모양은 모두 503 dependency-unavailable(settlement.md §9 '원천 오류의 응답 계약')
     const { nextCursor: _drop, ...noCursor } = page;
-    const bad: unknown[] = [noCursor, { ...page, nextCursor: 5 }, { ...page, items: {} }];
+    const bad: unknown[] = [{ ...page, nextCursor: '' }, noCursor, { ...page, nextCursor: 5 }, { ...page, items: {} }];
     for (const body of bad) {
       await withFetch(body, async () => {
         const source = new HttpAttendeeSource({ url: 'https://purchase.test', token: 'int-token' });
-        await expect(source.list('tenant', EVENT, 100), JSON.stringify(body)).rejects.toThrow('예매자 명단 원천 응답 모양이 틀렸다');
+        const err = await source.list('tenant', EVENT, 100).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(err, JSON.stringify(body)).toBeInstanceOf(ExportProblem);
+        expect(err, JSON.stringify(body)).toMatchObject({ status: 503, type: 'dependency-unavailable', detail: '예매자 명단 원천의 응답 모양이 틀렸습니다', retryAfterSeconds: 30 });
       });
     }
+    // 경계 반대쪽: 한 글자 커서는 받는다
+    await withFetch({ ...page, nextCursor: 'a' }, async () => {
+      const source = new HttpAttendeeSource({ url: 'https://purchase.test', token: 'int-token' });
+      expect((await source.list('tenant', EVENT, 100)).nextCursor).toBe('a');
+    });
   });
 });

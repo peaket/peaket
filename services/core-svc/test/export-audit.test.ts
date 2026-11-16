@@ -428,15 +428,36 @@ describe('A2-19 접속기록 마이그레이션', () => {
     expect(filter).toContain(`DEFAULT '{}'::jsonb`);
     expect(filter).toContain('NOT NULL');
     for (const col of ['export_id', 'reason', 'format']) one(new RegExp(`ALTER COLUMN "${col}" DROP NOT NULL`));
-    // 리뷰 R2: 접속지 칸(inet)과, 0019로 들어간 옛 행은 두고 새 행에만 접속지를 강제하는 CHECK(NOT VALID)
-    expect(one(/ADD COLUMN "source_ip"/)).toMatch(/"source_ip" inet/);
+    // 리뷰 R2: 접속지 칸(inet). 웨이브 끝 리뷰 K1: 0021은 칸만 더하고(NULL 허용) 접속지 CHECK는 다음 출시다(이전 판 코드가 쓰는 동안 넣기가 깨지지 않게, docs/data.md §2 source_ip).
+    // 접속지 빠짐 거절은 앱 쪽 시험(A2-19 R2 J-T26 ⑤ 접속지를 정하지 못하면 …)이 지킨다
+    const sourceIp = one(/ADD COLUMN "source_ip"/);
+    expect(sourceIp).toMatch(/"source_ip" inet/);
+    expect(sourceIp).not.toContain('NOT NULL');
 
     // CHECK 둘(표 이름 접두·따옴표·공백을 지우고 견준다)
     const norm = sql.replace(/"attendee_export_audit"\./g, '').replace(/"/g, '').replace(/\s+/g, ' ').toLowerCase();
     expect(norm).toMatch(/check \(action in \('list', 'download'\)\)/);
     expect(norm).toContain(`action = 'download' and export_id is not null and reason is not null and format is not null`);
     expect(norm).toContain(`action = 'list' and export_id is null and reason is null and format is null`);
-    expect(norm).toMatch(/check \(source_ip is not null\) not valid/);
+    // 아래 K1·K6 검사는 주석 줄을 뺀 SQL 문장으로 본다(설명 주석에 '다음 출시의 CHECK' 같은 글이 있어도 걸리지 않게)
+    const codeStatements = sql
+      .split('\n')
+      .filter((l) => !/^\s*--(?!>)/.test(l))
+      .join('\n')
+      .split(/;|--> statement-breakpoint/)
+      .map((s) => s.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    const bareOf = (s: string): string => s.replace(/"attendee_export_audit"\./g, '').replace(/"/g, '').toLowerCase();
+    // K1: source_ip에 대한 CHECK·SET NOT NULL이 0021에 없다
+    for (const st of codeStatements.map(bareOf)) {
+      expect(st, st).not.toMatch(/check \(.*source_ip/);
+      expect(st, st).not.toMatch(/alter column source_ip set not null/);
+    }
+    // K6: action·모양 CHECK 둘은 NOT VALID로 더하고(옛 행을 훑지 않는다), VALIDATE는 다음 출시의 정비 시간이다
+    const checks = codeStatements.filter((s) => /ADD CONSTRAINT/i.test(s) && /CHECK/i.test(s) && /"action"/.test(s));
+    expect(checks).toHaveLength(2);
+    for (const c of checks) expect(c, c).toMatch(/\)\s*NOT VALID$/i);
+    for (const st of codeStatements) expect(st, st).not.toMatch(/VALIDATE CONSTRAINT/i);
 
     // 권한·행 보안은 건드리지 않는다
     const grants = sql.match(/GRANT[^;]*attendee_export_audit[^;]*/g) ?? [];

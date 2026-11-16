@@ -3,7 +3,7 @@
 // docs/security/data-classification.md '탈퇴 사건의 pid 사본'). 값은 JSON 대역이다(Avro는 BAS-030). DB는 운영과 같은 역할(core_app)로 붙는다.
 // 네이티브 Kafka 모듈이 이 PC의 응용 프로그램 제어에 막히면 CI에서만 돈다.
 import 'reflect-metadata';
-import { createDatabase, systemClock, type Database } from '@peaket/platform';
+import { createDatabase, PlatformMetrics, systemClock, type Database } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -39,6 +39,8 @@ let app: Database;
 let producer: KafkaProducer;
 let reviews: Reviews;
 let consumers: CoreConsumers | undefined;
+/** 소비자 지표 저장소(main.ts의 service.metrics.registry 자리) */
+const metrics = new PlatformMetrics('core-svc');
 
 beforeAll(async () => {
   [kafka, pg] = await Promise.all([startKafka(), startPostgres()]);
@@ -100,6 +102,8 @@ describe('COV2-06 core 탈퇴 소비자(실제 Kafka)', () => {
         clientId: 'core-svc-ci-it',
         database: app,
         handler: new ReviewAccountWithdrawnHandler(reviews),
+        // 웨이브 끝 리뷰 K9: main.ts처럼 지표 저장소를 넘겨 보류 수 세기(heldEventCounts, core_app으로 held_event 읽기)도 거친다
+        registry: metrics.registry,
         commitEveryMs: 200,
         measureHeldEveryMs: 200,
       });
@@ -133,6 +137,13 @@ describe('COV2-06 core 탈퇴 소비자(실제 Kafka)', () => {
         expect(held[0].headers).not.toContain(secret);
         expect(held[0].whole).not.toContain(secret);
       }
+
+      // K9: 보류 수 지표(consumer_held_events)가 탈퇴 토픽에서 1이 된다
+      await until(
+        async () => /consumer_held_events\{[^}]*topic="identity\.accounts-withdrawn"[^}]*\} 1\b/.test(await metrics.registry.getSingleMetricAsString('consumer_held_events')),
+        'consumer_held_events 1',
+        30_000,
+      );
 
       // 소비자 그룹은 peaket.core-svc.<환경>이고 두 사건 뒤까지 커밋한다
       await until(async () => ((await kafka.groupOffsets(GROUP, TOPIC)).get(0) ?? 0) >= 2, `${GROUP} 커밋`, 60_000);

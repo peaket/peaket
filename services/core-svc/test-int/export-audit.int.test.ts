@@ -5,7 +5,14 @@
 import 'reflect-metadata';
 import { createDatabase, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { randomUUID } from 'node:crypto';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import pgLib from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { DrizzleAttendeeExportStore } from '../src/modules/export/adapters/db/drizzle-export-store.js';
@@ -173,15 +180,15 @@ describe('A2-19 접속기록 표(실제 DB)', () => {
     expect(seenByA.rows).toHaveLength(1);
   });
 
-  test('A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다', async () => {
-    // 접속지 칸 없이 넣기(새 행)는 CHECK가 거절한다
-    await expect(
-      admin.pool.query(
-        `insert into attendee_export_audit (id, action, export_id, promoter_id, event_id, actor_account_id, actor_display_name, actor_role, reason, format, count, filter, created_at, retain_until)
-         values ($1, 'LIST', null, $2, $3, $4, '관리자', 'partner_admin', null, null, 1, '{}'::jsonb, $5, $6)`,
-        [randomUUID(), A, EVENT, ACCOUNT, createdAt, new Date('2028-11-15T00:00:00Z')],
-      ),
-    ).rejects.toMatchObject({ code: '23514' });
+  test('A2-19 R2 K1 0021 뒤 접속지 없는 새 행도 DB는 받고(이전 판 호환), IP 모양이 아닌 값은 inet이 거절한다', async () => {
+    // 웨이브 끝 리뷰 K1: 0021은 칸만 더한다(NULL 허용). 접속지 칸 없이 넣기도 DB는 받는다(접속지 빠짐 거절은 앱이 한다. CHECK는 다음 출시, docs/data.md §2 source_ip)
+    const noIp = randomUUID();
+    await admin.pool.query(
+      `insert into attendee_export_audit (id, action, export_id, promoter_id, event_id, actor_account_id, actor_display_name, actor_role, reason, format, count, filter, created_at, retain_until)
+       values ($1, 'LIST', null, $2, $3, $4, '관리자', 'partner_admin', null, null, 1, '{}'::jsonb, $5, $6)`,
+      [noIp, A, EVENT, ACCOUNT, createdAt, new Date('2028-11-15T00:00:00Z')],
+    );
+    expect(await sourceIpOf(noIp)).toBeNull();
     // IP 모양이 아닌 값은 inet이 거절한다
     await expect(rawAudit({ action: 'LIST', exportId: null, reason: null, format: null, sourceIp: 'abc' })).rejects.toMatchObject({ code: '22P02' });
     // IPv6는 들어가고 같은 값으로 읽힌다
@@ -197,4 +204,73 @@ describe('A2-19 접속기록 표(실제 DB)', () => {
     await store.recordExport(r, { clientIp: '2001:db8::5' });
     expect(await sourceIpOf(r.exportId)).toBe('2001:db8::5');
   });
+
+  test('A2-19 K1 0021 뒤에도 이전 판(N-1) 코드의 내려받기 기록 모양이 들어간다', async () => {
+    // 853758eb 판의 DrizzleAttendeeExportStore.audit가 쓰던 칸만(action·filter·source_ip 없이), 운영과 같은 core_partner·테넌트로 넣는다(docs/devops.md §7.3 적용 시험 ③의 작은 꼴)
+    const id = randomUUID();
+    await partner.transaction(
+      async (tx) =>
+        tx.execute(sql`insert into attendee_export_audit (id, export_id, promoter_id, event_id, actor_account_id, actor_display_name, actor_role, reason, format, count, created_at, retain_until)
+          values (${id}, ${id}, ${A}, ${EVENT}, ${ACCOUNT}, '이전 판', 'partner_admin', '이전 판 내려받기', 'CSV', 3, ${createdAt}, ${new Date('2028-11-15T00:00:00Z')})`),
+      { tenantId: A, accessMode: 'read write' },
+    );
+    const row = (await admin.pool.query('select action, filter, host(source_ip) as ip from attendee_export_audit where id = $1', [id])).rows[0];
+    expect(row).toEqual({ action: 'DOWNLOAD', filter: {}, ip: null });
+  });
+
+  test('A2-19 K6 0019 행이 있는 DB에 0021·0022를 적용해도 실패하지 않고 옛 행은 그대로다', async () => {
+    // 새 DB에 0020까지 적용 → 0019 모양 행 하나 → 나머지(0021·0022) 적용(정확성 리뷰 C3과 같은 시험)
+    const dbName = `k6_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await admin.pool.query(`create database ${dbName}`);
+    const url = `postgres://postgres:peaket-test@${pg.host}:${pg.port}/${dbName}`;
+    const folder = mkdtempSync(join(tmpdir(), 'core-mig-0020-'));
+    try {
+      const all = fileURLToPath(new URL('../migrations', import.meta.url));
+      const journal = JSON.parse(readFileSync(join(all, 'meta', '_journal.json'), 'utf8')) as { entries: { idx: number; tag: string }[] };
+      const upTo20 = { ...journal, entries: journal.entries.filter((e) => e.idx <= 20) };
+      expect(upTo20.entries.map((e) => e.idx).at(-1)).toBe(20);
+      mkdirSync(join(folder, 'meta'));
+      writeFileSync(join(folder, 'meta', '_journal.json'), JSON.stringify(upTo20));
+      for (const e of upTo20.entries) copyFileSync(join(all, `${e.tag}.sql`), join(folder, `${e.tag}.sql`));
+      await migrateFolder(url, folder);
+
+      const old = new pgLib.Client({ connectionString: url });
+      await old.connect();
+      const id = randomUUID();
+      try {
+        await old.query(
+          `insert into attendee_export_audit (id, export_id, promoter_id, event_id, actor_account_id, actor_display_name, actor_role, reason, format, count, created_at, retain_until)
+           values ($1, $1, $2, $3, $4, '0019 행', 'partner_admin', '옛 내려받기', 'XLSX', 5, $5, $6)`,
+          [id, A, EVENT, ACCOUNT, createdAt, new Date('2028-11-15T00:00:00Z')],
+        );
+        // 0021·0022 적용(실패하지 않는다)
+        await migrateCore(url);
+        const row = (await old.query('select action, filter, host(source_ip) as ip, reason, format, count from attendee_export_audit where id = $1', [id])).rows[0];
+        expect(row).toEqual({ action: 'DOWNLOAD', filter: {}, ip: null, reason: '옛 내려받기', format: 'XLSX', count: 5 });
+        // action·모양 CHECK 둘은 NOT VALID로 더해져 아직 검증되지 않았다
+        const checks = (
+          await old.query(
+            `select conname, convalidated from pg_constraint where conrelid = 'attendee_export_audit'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%action%'`,
+          )
+        ).rows as { conname: string; convalidated: boolean }[];
+        expect(checks).toHaveLength(2);
+        for (const c of checks) expect(c.convalidated, c.conname).toBe(false);
+      } finally {
+        await old.end();
+      }
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
 });
+
+/** 지정한 마이그레이션 폴더를 적용한다(scripts/migrate.mjs의 migrateCore와 같은 방식, 폴더만 다르다) */
+async function migrateFolder(url: string, folder: string): Promise<void> {
+  const client = new pgLib.Client({ connectionString: url });
+  await client.connect();
+  try {
+    await migrate(drizzle({ client }), { migrationsFolder: folder });
+  } finally {
+    await client.end();
+  }
+}

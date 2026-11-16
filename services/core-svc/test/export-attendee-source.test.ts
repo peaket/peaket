@@ -1,7 +1,7 @@
 // A2-03 회귀: 예매자 명단은 굿즈 주문이 아니라 purchase-svc 원천을 쓰고, 좌석 등급을 원천 값으로 옮긴다.
 // 운영(database) 조립에서 purchaseHttp가 없으면 굿즈 대역으로 되돌아가지 않고 503으로 닫힌다.
 // W7-audit A2-17: 원천은 { items, nextCursor } 페이지이고, 메모리 조립의 명단 원천도 다음 주문이 있을 때만 nextCursor를 준다.
-import { fakeClock } from '@peaket/platform';
+import { fakeClock, ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { AttendeeExports } from '../src/modules/export/application/attendee-exports.js';
@@ -54,7 +54,8 @@ describe('A2-03 예매자 명단 원천', () => {
     expect(JSON.stringify(page)).not.toContain('GOODS');
   });
 
-  test('운영 조립에서 purchaseHttp가 없으면 굿즈 대역이 아니라 503 dependency-unavailable로 닫힌다', async () => {
+  test('A2-17 C1 원천이 조립되지 않았을 때도 같은 503 계약이다', async () => {
+    // 운영 조립에서 purchaseHttp가 없으면 굿즈 대역이 아니라 503 dependency-unavailable로 닫힌다(A2-03)
     const mod = ExportModule.register({ storage: 'database', database: {} as never, partnerDatabase: {} as never });
     const closed = sourceFactory(mod);
     const closedStatus = async (p: () => Promise<unknown>): Promise<unknown> => {
@@ -67,6 +68,20 @@ describe('A2-03 예매자 명단 원천', () => {
     };
     expect(await closedStatus(() => closed.list(TENANT, EVENT, 10))).toMatchObject({ status: 503, type: 'dependency-unavailable' });
     expect(await closedStatus(() => closed.count(TENANT, EVENT))).toMatchObject({ status: 503, type: 'dependency-unavailable' });
+
+    // 리뷰 C1: 유스케이스(guard)를 거친 오류도 목록 제목·detail·Retry-After 30을 싣는다(settlement.md §9 '원천 오류의 응답 계약')
+    const events = new MemoryPartnerEventLookup();
+    events.add(TENANT, EVENT, 'LUMEN', new Date('2026-12-01T00:00:00Z'));
+    const app = new AttendeeExports({ store: new MemoryAttendeeExportStore(), attendees: closed, events, reauth, actors: new MemoryActorNames(), clock });
+    const err = await closedStatus(() => app.listAttendees(TENANT, EVENT, { limit: 50 }, { accountId: ACCOUNT, sessionId: 's-1', role: 'partner_admin', clientIp: '198.51.100.20' }));
+    expect(err).toBeInstanceOf(ProblemError);
+    expect(err).toMatchObject({
+      status: 503,
+      slug: 'dependency-unavailable',
+      title: '의존 서비스를 잠시 쓸 수 없습니다',
+      detail: '예매자 명단 원천을 쓸 수 없습니다',
+      retryAfterSeconds: 30,
+    });
   });
 
   test('purchaseHttp가 있으면 HttpAttendeeSource를 쓰고, limit은 1,000으로 자른다', async () => {

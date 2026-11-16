@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryActorNames, MemoryAttendeeExportStore, MemoryPartnerEventLookup } from '../src/modules/export/index.js';
-import { ExportProblem } from '../src/modules/export/domain/export.js';
+import { attendeeSourceUnavailable, ExportProblem } from '../src/modules/export/domain/export.js';
 import { MemoryMerchOrderStore, maskName, maskPhone, settlementBasisDate, type MerchOrderItemRecord, type MerchOrderRecord } from '../src/modules/shop/index.js';
 import type { AttendeeExportRecord } from '../src/modules/export/domain/export.js';
 import type { AttendeeSource, BookersReauth } from '../src/modules/export/domain/ports.js';
@@ -261,6 +261,49 @@ describe('I-T53·J-T26 예매자 명단', () => {
     expect(history.statusCode).toBe(200);
     expect(JSON.parse(history.payload).items.some((i: { reason: string }) => i.reason === '접속지 확인')).toBe(true);
     expect(history.payload).not.toContain('203.0.113.7');
+  });
+
+  test('A2-17 C1 J-T26 ④ 같은 커서를 되풀이하면 503 dependency-unavailable의 목록 제목·detail·Retry-After 30을 싣는다 — POST …/attendee-exports', async () => {
+    const rows = Array.from({ length: 1_000 }, (_, i) => ({ orderId: `c1-order-${String(i).padStart(4, '0')}`, eventId: EVENT, buyerName: '김민수', buyerPhone: '010-1234-5678', seatLabel: `R-${i}`, quantity: 1 }));
+    const before = { rows: exportsStore.rows.length, audits: exportsStore.audits.length };
+    source.override = { list: async () => ({ items: rows, nextCursor: 'same-cursor' }), count: async () => ({ bookings: 1_000, tickets: 1_000 }) };
+    try {
+      const r = await svc.http.inject({ method: 'POST', url: `/v1/partner/events/${EVENT}/attendee-exports`, headers: headers(), payload: JSON.stringify({ reason: '되풀이 커서', format: 'CSV' }) });
+      expect(r.statusCode).toBe(503);
+      expect(r.headers['retry-after']).toBe('30');
+      expect(r.headers['content-disposition']).toBeUndefined();
+      expect(JSON.parse(r.payload)).toMatchObject({
+        type: 'https://peaket.example/problems/dependency-unavailable',
+        title: '의존 서비스를 잠시 쓸 수 없습니다',
+        detail: '예매자 명단 원천이 같은 페이지를 되풀이했습니다',
+      });
+      expect({ rows: exportsStore.rows.length, audits: exportsStore.audits.length }).toEqual(before);
+    } finally {
+      delete source.override;
+    }
+  });
+
+  test('A2-17 C1 GET …/attendees는 원천을 쓸 수 없으면 503과 Retry-After 30이고 접속기록이 없다', async () => {
+    const before = exportsStore.views.length;
+    source.override = {
+      list: async () => {
+        throw attendeeSourceUnavailable('예매자 명단 원천을 쓸 수 없습니다');
+      },
+      count: async () => ({ bookings: 0, tickets: 0 }),
+    };
+    try {
+      const r = await svc.http.inject({ method: 'GET', url: `/v1/partner/events/${EVENT}/attendees?limit=50`, headers: headers() });
+      expect(r.statusCode).toBe(503);
+      expect(r.headers['retry-after']).toBe('30');
+      expect(JSON.parse(r.payload)).toMatchObject({
+        type: 'https://peaket.example/problems/dependency-unavailable',
+        title: '의존 서비스를 잠시 쓸 수 없습니다',
+        detail: '예매자 명단 원천을 쓸 수 없습니다',
+      });
+      expect(exportsStore.views.length).toBe(before);
+    } finally {
+      delete source.override;
+    }
   });
 });
 

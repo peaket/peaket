@@ -86,6 +86,9 @@ const EXPECTED = [
   'core_maintenance held_event DELETE',
 ].sort();
 
+/** 정본(docs/data.md §5.1, 계획 §7 K2)의 색인 문장. GRANT 풀이와 같이 공백을 하나로 줄인 글이다 */
+const ACCOUNT_INDEX = 'CREATE INDEX "review_account_idx" ON "review" USING btree ("account_id")';
+
 describe('COV2-06 보충 운영 역할 권한 마이그레이션', () => {
   test('COV2-06 ⑬ 0022는 후기 표와 보류 표에 코드가 쓰는 칸·동작만 준다', () => {
     const sql = read('migrations/0022_review_role_grants.sql');
@@ -93,7 +96,8 @@ describe('COV2-06 보충 운영 역할 권한 마이그레이션', () => {
     expect(grants).toEqual(EXPECTED);
     // 권한을 더하기만 한다: 표·칸·스키마를 바꾸지 않고, 정본 0022 표에 없는 REVOKE로 권한을 거두지도 않는다(리뷰 R6)
     expect(others.filter((s) => /^REVOKE /i.test(s))).toEqual([]);
-    expect(others).toEqual([]);
+    // GRANT 밖의 문은 탈퇴 익명화 색인 하나뿐이다(웨이브 끝 리뷰 K2, 아래 'COV2-06 K2' 시험이 그 글을 본다)
+    expect(others.filter((s) => s !== ACCOUNT_INDEX)).toEqual([]);
 
     // 거부 쪽을 따로 한 번 더: 후기·신고·조치 표에 지우기·비우기·칸 없는 고치기가 없고, 후기의 id·event_id·created_at은 고치지 못한다
     for (const t of ['review', 'content_report', 'takedown_action']) {
@@ -109,5 +113,11 @@ describe('COV2-06 보충 운영 역할 권한 마이그레이션', () => {
 
     const journal = JSON.parse(read('migrations/meta/_journal.json')) as { entries: { idx: number; tag: string }[] };
     expect(journal.entries.find((e) => e.idx === 22)?.tag).toBe('0022_review_role_grants');
+  });
+
+  test('COV2-06 K2 0022는 review(account_id) 색인을 만든다', () => {
+    // 탈퇴 익명화(update review … where account_id = …)가 표 전체를 훑지 않게(docs/data.md §5.1 '탈퇴 익명화' 행·§2 '후기 표의 DB 권한')
+    const { others } = grantsOf(read('migrations/0022_review_role_grants.sql'));
+    expect(others).toContain(ACCOUNT_INDEX);
   });
 });

@@ -6,14 +6,28 @@ export type ExportFormat = 'CSV' | 'XLSX' | 'PDF';
 export type ExportResult = 'COMPLETED' | 'FAILED';
 
 export class ExportProblem extends Error {
+  /** 사정(Problem detail). 뼈대(W7-audit 웨이브 끝 리뷰 반영 시험 단계, C1): 구현 담당이 넷째 인자에서 채운다 */
+  readonly detail?: string;
+  /** Retry-After 초. 뼈대(C1): 구현 담당이 넷째 인자에서 채운다 */
+  readonly retryAfterSeconds?: number;
+
   constructor(
     readonly type: string,
     readonly status: number,
     readonly title: string,
+    _o?: { detail?: string; retryAfterSeconds?: number },
   ) {
     super(title);
     this.name = 'ExportProblem';
   }
+}
+
+/**
+ * 원천을 쓸 수 없음: 503 dependency-unavailable, 제목은 오류 목록 값, 사정은 detail, Retry-After 30초 [가정](docs/features/settlement.md §9 '원천 오류의 응답 계약').
+ * 뼈대(W7-audit 웨이브 끝 리뷰 반영 시험 단계, C1): 구현 담당이 채운다
+ */
+export function attendeeSourceUnavailable(_detail: string): ExportProblem {
+  throw new Error('아직 없음');
 }
 
 export interface AttendeeExportRecord {

@@ -2,12 +2,46 @@
 // 정본: docs/streaming.md §2.6 'core-svc 소비자'(그룹 peaket.core-svc.<환경>, 탈퇴 토픽 하나), docs/features/identity.md §8 '후기 익명화'
 // (운영 환경에서 브로커 설정이 없으면 시작하지 않는다), docs/security/data-classification.md '탈퇴 사건의 pid 사본'(보류 기록에도 pid를 남기지 않는다).
 // 시작 파일(main.ts) 조립은 원문 대조로 본다(약한 검사다. 실제 동작은 test-int/review-withdrawn-consumer.int.test.ts가 본다).
-import type { HeldEventInput, HeldEventStore } from '@peaket/platform';
-import { PlatformConfigError } from '@peaket/platform';
+import type { Database, HeldEventInput, HeldEventStore } from '@peaket/platform';
+import { PlatformConfigError, PlatformMetrics } from '@peaket/platform';
+import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { CORE_GROUP, CORE_TOPICS, kafkaConsumersFromEnv, pidFreeHeldEventStore } from '../src/consumers/index.js';
+import { startCoreConsumers } from '../src/consumers/start.js';
+import { ReviewAccountWithdrawnHandler } from '../src/modules/review/index.js';
+
+// 네이티브 Kafka 모듈 없이 startCoreConsumers가 runKeyedConsumer에 넘기는 값만 본다(웨이브 끝 리뷰 K2). 이 파일에만 둔다
+vi.mock('@peaket/platform/stream-worker', () => ({
+  runKeyedConsumer: vi.fn(() => ({ started: Promise.resolve(), stop: async () => undefined })),
+}));
+
+/** main.ts 원문 */
+const mainText = (): string => readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+
+/** open 자리의 여는 괄호와 짝인 닫는 괄호 자리 */
+function matchingClose(text: string, open: number, pair: [string, string] = ['{', '}']): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === pair[0]) depth += 1;
+    else if (text[i] === pair[1]) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** startCoreConsumers({ … }) 인자 객체 글과 그 database 칸의 이름 */
+function consumerArgs(main: string): { args: string; db: string | undefined } {
+  const call = main.indexOf('startCoreConsumers({');
+  if (call < 0) return { args: '', db: undefined };
+  const open = main.indexOf('{', call);
+  const args = main.slice(open, matchingClose(main, open) + 1);
+  const m = /[{,]\s*database\s*(?::\s*([A-Za-z_$][\w$]*))?\s*[,}]/.exec(args);
+  return { args, db: m ? (m[1] ?? 'database') : undefined };
+}
 
 const TOPIC = 'identity.accounts-withdrawn';
 const A = '0190f3a1-7c2e-7a00-8000-00000000a001';
@@ -186,5 +220,99 @@ describe('COV2-06 시작 파일 조립', () => {
     const role = (r: string): RegExp => new RegExp(String.raw`assertDatabaseRole\(\s*${db}\s*,\s*'${r}'`);
     expect(main).toMatch(role('core_app'));
     for (const other of ['core_partner', 'core_ops']) expect(main).not.toMatch(role(other));
+  });
+
+  test('COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다', async () => {
+    // 웨이브 끝 리뷰 K2(docs/streaming.md §2.6 'core-svc 소비자': 따로 둔 풀 최대 2, 파티션 1·키 2). 값은 정본 숫자로 적는다
+    const executed: unknown[] = [];
+    const pool = {
+      db: {
+        execute: async (q: unknown) => {
+          executed.push(q);
+          return { rows: [] };
+        },
+      },
+      transaction: async () => {
+        throw new Error('이 시험에서는 부르지 않는다');
+      },
+    } as unknown as Database;
+    const handler = new ReviewAccountWithdrawnHandler({ anonymizeAccount: async () => ({ anonymized: 0 }) });
+    vi.mocked(runKeyedConsumer).mockClear();
+    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry: new PlatformMetrics('core-svc').registry });
+    expect(vi.mocked(runKeyedConsumer)).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(runKeyedConsumer).mock.calls[0]![0];
+    expect(opts).toMatchObject({ service: 'core-svc', groupId: 'peaket.core-svc.ci', topics: ['identity.accounts-withdrawn'], maxKeys: 2, partitionsConcurrently: 1 });
+    expect(opts.handler).toBe(handler);
+    // 보류 저장소와 보류 수 세기가 받은 풀을 쓴다
+    await opts.held.isHeld('identity.accounts-withdrawn', 'k');
+    expect(executed).toHaveLength(1);
+    await opts.heldCounts!();
+    expect(executed).toHaveLength(2);
+    await run.stop();
+
+    // main.ts: 소비자 풀은 따로(최대 2) 만들고 core_app으로 확인하며, API의 database는 소비자에 넘기지 않고, 종료 때 닫는다
+    const main = mainText();
+    const { db } = consumerArgs(main);
+    expect(db, 'startCoreConsumers 인자의 database 칸').toBeDefined();
+    expect(db).not.toBe('database');
+    const declAt = main.search(new RegExp(String.raw`(?:const|let)\s+${db}\s*=\s*createDatabase\(`));
+    expect(declAt, `${db} = createDatabase(…)`).toBeGreaterThanOrEqual(0);
+    const paren = main.indexOf('(', main.indexOf('createDatabase', declAt));
+    const declArgs = main.slice(paren, matchingClose(main, paren, ['(', ')']) + 1);
+    expect(declArgs, declArgs).toMatch(/\bmax:\s*2\b/);
+    expect(main).toMatch(new RegExp(String.raw`assertDatabaseRole\(\s*${db}\s*,\s*'core_app'\s*\)`));
+    const shutdown = main.slice(main.indexOf("process.once('SIGTERM'"));
+    expect(shutdown).toMatch(new RegExp(String.raw`\b${db}\.close\(`));
+  });
+
+  test('COV2-06 ⑰ main.ts의 소비자 시작은 조건 없이 돈다', () => {
+    // 검증 살아남음 M28: '부르는 글은 남기고 조건으로 막은 꼴'(consumers = undefined && startCoreConsumers({…}))을 잡는다
+    const main = mainText();
+    const call = main.indexOf('startCoreConsumers({');
+    expect(call, 'startCoreConsumers({').toBeGreaterThanOrEqual(0);
+    const lineStart = main.lastIndexOf('\n', call) + 1;
+    const line = main.slice(lineStart, main.indexOf('\n', call));
+    // 줄 전체가 '이름 = startCoreConsumers({' 대입이다(&&·?·주석·다른 식 없이)
+    expect(line, line).toMatch(/^\s*(?:(?:const|let)\s+)?[A-Za-z_$][\w$]*\s*=\s*startCoreConsumers\(\{\s*$/);
+    // 그 문장을 감싼 블록은 맨 위(모듈 수준)의 Kafka 설정 분기 하나다
+    let depth = 0;
+    let open = -1;
+    for (let i = lineStart - 1; i >= 0; i -= 1) {
+      if (main[i] === '}') depth += 1;
+      else if (main[i] === '{') {
+        if (depth === 0) {
+          open = i;
+          break;
+        }
+        depth -= 1;
+      }
+    }
+    expect(open, '감싼 블록').toBeGreaterThanOrEqual(0);
+    const before = main.slice(0, open);
+    const opens = (before.match(/\{/g) ?? []).length;
+    const closes = (before.match(/\}/g) ?? []).length;
+    expect(opens - closes, '감싼 블록이 모듈 수준이다').toBe(0);
+    const header = before.slice(before.lastIndexOf('\n') + 1);
+    const cfg = /const\s+(\w+)\s*=\s*kafkaConsumersFromEnv\(/.exec(main)?.[1];
+    expect(cfg, 'kafkaConsumersFromEnv 결과 이름').toBeDefined();
+    const positive = new RegExp(String.raw`^\s*(?:\}\s*)?(?:else\s+)?if\s*\(\s*${cfg}\.enabled\s*\)\s*$`);
+    const negativeElse = new RegExp(String.raw`if\s*\(\s*!\s*${cfg}\.enabled\s*\)[^\n]*\n\s*else\s*$`);
+    expect(positive.test(header) || negativeElse.test(before), header).toBe(true);
+  });
+
+  test('COV2-06 ⑱ SIGTERM은 소비자 stop()이 끝난 뒤에 서비스와 연결을 닫는다', () => {
+    // 검증 살아남음 M33: stop()을 기다리지 않는 꼴(void consumers?.stop())을 잡는다
+    const main = mainText();
+    const name = /(?:(?:const|let)\s+)?(\w+)\s*(?::[^=;]+)?=(?!=)[^;]*?startCoreConsumers\(/.exec(main)?.[1];
+    expect(name, '소비자를 담는 이름').toBeDefined();
+    const shutdown = main.slice(main.indexOf("process.once('SIGTERM'"));
+    expect(shutdown).not.toMatch(new RegExp(String.raw`void\s+${name}\??\.stop\(`));
+    const stop = shutdown.search(new RegExp(String.raw`await\s+${name}\??\.stop\(`));
+    expect(stop, `await ${name}.stop()`).toBeGreaterThanOrEqual(0);
+    const close = shutdown.search(/service\s*\.close\(/);
+    expect(close).toBeGreaterThan(stop);
+    // 연결 닫기는 서비스 닫기 뒤다
+    const dbClose = shutdown.search(/\bdatabase\.close\(/);
+    expect(dbClose).toBeGreaterThan(close);
   });
 });
