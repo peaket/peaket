@@ -1,7 +1,7 @@
 // 공연 상세 앞 거르기(ADR-0201 결정 3, BUILD_ORDER HOT-311): 없는 회차는 화면을 그리기 전에 404로 거른다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalEventPath, createEventGate, eventCacheTags, eventIdFromPath } from './event-gate.ts';
+import { canonicalEventPath, createEventGate, eventCacheTags, eventIdFromPath, gatedEventIdFromPath } from './event-gate.ts';
 
 const ID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 const PROD = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4d01';
@@ -114,4 +114,15 @@ test('대문자가 섞인 회차 주소는 소문자 주소로 옮기고, 태그
   assert.equal(canonicalEventPath(`/events/${ID.toUpperCase()}/shuffle-proof`), undefined);
   assert.equal(eventCacheTags(ID.toUpperCase(), PROD), `event:${ID},production:${PROD}`);
   assert.equal(eventCacheTags(ID, undefined), `event:${ID}`);
+});
+
+// BAT-170 웨이브 끝 재검증 V170-R17(2bf0a549, docs/frontend.md §5.18 '정규 주소 하나로 모은다' ⓑ 끝): 없는 회차 거르기는 로케일 상세에도
+// /events/{id}와 똑같이 건다. 로케일은 en·ja·zh 소문자만. 시험 담당(l2w7-BAT170-test)이 썼다.
+test('HOT-390 V170-R17 없는 회차 거르기는 로케일 상세(en·ja·zh)에도 걸고 그 밖의 로케일·더 깊은 경로는 걸지 않는다', () => {
+  const id = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
+  assert.equal(gatedEventIdFromPath(`/events/${id}`), id);
+  for (const l of ['en', 'ja', 'zh']) assert.equal(gatedEventIdFromPath(`/${l}/events/${id}`), id, l);
+  for (const p of [`/ko/events/${id}`, `/EN/events/${id}`, `/fr/events/${id}`, `/en/events/${id}/shuffle-proof`, `/events/${id}/shuffle-proof`, `/en/events/`, '/en/events']) {
+    assert.equal(gatedEventIdFromPath(p), undefined, p);
+  }
 });

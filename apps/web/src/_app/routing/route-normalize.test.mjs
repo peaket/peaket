@@ -3,7 +3,7 @@
 // 닫힌 목록 칸은 글자 그대로다. 대소문자만 다르거나 퍼센트로 감싼 정본 글자는 정본 주소로 308(쿼리 보존), 꼴 밖은 404다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeRoute } from './route-normalize.ts';
+import { isCanonicalSegment, normalizeRoute } from './route-normalize.ts';
 
 const ID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 const ONE_UPPER = '0B8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
@@ -55,4 +55,28 @@ test('HOT-390 W7L2-S10 정규화 표: 칸마다 정본 꼴은 그대로, 대소�
   gone('/events/EVT-LUMEN-1025/shuffle-proof', '');
   // 표 밖의 경로는 건드리지 않는다
   for (const p of ['/', '/search', '/help']) ok(p, '');
+});
+
+// BAT-170 웨이브 끝 재검증(2bf0a549). 시험 담당(l2w7-BAT170-test)이 썼다. 정본 docs/frontend.md §5.18 '정규 주소 하나로 모은다' ⓑⓒ.
+test('HOT-390 V170-R15 공연 상세·로케일 상세 칸은 UUID만 받고 고정 자료 ID는 받지 않는다', () => {
+  gone('/events/evt-lumen-1025', '');
+  gone('/en/events/evt-lumen-1025', '');
+  gone('/ja/events/evt-lumen-1025', '');
+  // 대조군: 같은 고정 자료 ID도 shuffle-proof·checkout/return 칸은 받는다
+  ok('/events/evt-lumen-1025/shuffle-proof', '');
+  ok('/booking/evt-lumen-1025/checkout/return', '');
+});
+
+test('HOT-390 V170-R16 화면의 겹친 가드(isCanonicalSegment)는 정본 꼴과 글자까지 같을 때만 참이다', () => {
+  // 정본 꼴은 참
+  assert.equal(isCanonicalSegment('event-detail', ID), true);
+  for (const l of ['en', 'ja', 'zh']) assert.equal(isCanonicalSegment('locale', l), true, l);
+  assert.equal(isCanonicalSegment('policy', 'privacy'), true);
+  assert.equal(isCanonicalSegment('event', 'evt-lumen-1025'), true, 'shuffle-proof 칸은 고정 자료 ID를 받는다');
+  // 대소문자만 다르거나 꼴 밖이면 거짓(정규화 표가 308로 옮길 값이어도 화면은 받지 않는다)
+  for (const v of [ONE_UPPER, ALL_UPPER, 'evt-lumen-1025', ID.slice(0, -1), `%30${ID.slice(1)}`]) assert.equal(isCanonicalSegment('event-detail', v), false, `event-detail ${v}`);
+  for (const v of ['EN', 'En', 'ko', '']) assert.equal(isCanonicalSegment('locale', v), false, `locale ${v}`);
+  for (const v of ['Privacy', 'PRIVACY', 'no-such-policy']) assert.equal(isCanonicalSegment('policy', v), false, `policy ${v}`);
+  assert.equal(isCanonicalSegment('event', 'EVT-LUMEN-1025'), false);
+  assert.equal(isCanonicalSegment('event', ALL_UPPER), false);
 });

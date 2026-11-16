@@ -1082,3 +1082,19 @@ test('HOT-390 W7L2-S10 값 TTL 상한 기본은 1시간, 태그는 30일이다',
   assert.equal(data.get('web:data:none').ttlMs, 3_600_000, '간격 없음·만료 무한 항목');
   assert.equal(data.get('web:{tag}:events').ttlMs, 2_592_000_000, '태그 TTL');
 });
+
+// BAT-170 웨이브 끝 재검증 V170-R9(2bf0a549, docs/frontend.md §5.18 '키 수 막기' ③): 몫은 새 값 키 쓰기만 센다. 태그 무효화 쓰기를 몫에 넣으면
+// 몫을 넘었을 때 무효화가 버려져 옛 화면이 남는다. 시험 담당(l2w7-BAT170-test)이 썼다.
+test('HOT-390 V170-R9 태그 무효화 쓰기는 새 키 몫에 걸리지 않는다', async () => {
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, maxTtlSeconds: 3_600, writeRate: { perSecond: 1, burst: 1, knownKeys: 10 } });
+  await store.setEntry('data', 'n1', 'v', 60);
+  await store.setEntry('data', 'n2', 'v', 60);
+  assert.equal(data.has('web:data:n2'), false, '몫을 다 쓰지 않았다(대조군이 뜻이 없다)');
+  const dropped = store.stats().droppedWrites;
+  assert.equal(dropped, 1);
+  await store.markTags(['t', 'u'], 1_000);
+  assert.equal(Number(text(data.get('web:{tag}:t')?.value ?? 0)), 1_000, '몫을 다 쓴 뒤 태그 무효화가 쓰이지 않았다');
+  assert.equal(Number(text(data.get('web:{tag}:u')?.value ?? 0)), 1_000);
+  assert.equal(store.stats().droppedWrites, dropped, '태그 무효화를 버린 쓰기로 셌다');
+});
