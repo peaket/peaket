@@ -420,18 +420,18 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 
 - 시험 도우미: 새 `services/core-svc/test-int/kafka.ts`(queue-svc의 것에서 `startKafka`·`until`만 옮김).
 
-### 보충 시험(시험 3단계, 계획 보충 `337a191c`의 ⑬~⑯)
+### 보충 시험(시험 3단계, 계획 보충 `337a191c`의 ⑬~⑯. 통합은 도커 잠금 아래 2026-11-16 09:20 KST부터 돌림)
 
 제품 코드·마이그레이션은 쓰지 않았다(0022는 구현 담당 몫). core-svc typecheck 오류 0.
 
 | 시험 | 파일 | 단계 | 명령(core-svc 폴더) | 결과 | 까닭 |
 | --- | --- | --- | --- | --- | --- |
 | COV2-06 ⑬ 0022는 후기 표와 보류 표에 코드가 쓰는 칸·동작만 준다 | 새 `test/review-grants.test.ts` | 단위(SQL 원문) | `npx vitest run test/review-grants.test.ts` | 실패 1 | 마이그레이션 파일이 아직 없다(ENOENT). GRANT 문을 (역할, 표, 권한, 칸)으로 풀어 계획 §4 보충 0022 표와 정확히 같은지 본다(줄 나눔·순서·따옴표·`public.`이 달라도 같은 뜻이면 통과). GRANT·REVOKE 밖의 문이 있으면 실패 |
-| COV2-06 ⑭(기존 넷: 동시 쓰기 409, 신고 하루 10건 429, 동시 신고 409, 지문 가림·조치·신고 처리 한 트랜잭션) | 고침 `test-int/review.int.test.ts` | 통합(PostgreSQL) | `npx vitest run --config vitest.integration.config.mjs test-int/review.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 서비스를 `loginFor(admin, pg, 'core_app_review_int', 'core_app', 8)`로 띄우고, 마이그레이션·시험 자료·확인은 관리자 연결로 바꿨다. 단언은 그대로이고 네 시험 이름 앞에 `COV2-06 ⑭`를 달았다. 0022 전에는 후기 쓰기가 42501이라 실패해야 한다. 0013 표 확인 시험(첫째)은 관리자로 읽어 그대로 통과해야 한다 |
-| COV2-06 ⑮ core_app은 후기의 id·event_id·created_at을 고치지 못하고 후기·신고·조치 행을 지우지 못한다 | 새 `test-int/review-grants.int.test.ts` | 통합(PostgreSQL) | `npx vitest run --config vitest.integration.config.mjs test-int/review-grants.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 거부 일곱(42501)에 더해 경계의 허용 쪽 대조군 둘(`review.updated_at` 고치기, 지문 지우기)을 두었다. 그래서 0022 전에는 대조군에서 실패하고, 0022 뒤에는 거부·허용이 모두 맞아야 통과한다 |
-| COV2-06 ⑯ 정비 역할로 임시조치 끝내기와 보류 표 정리가 되고, 후기를 새로 쓰지는 못한다 | 〃 | 통합(PostgreSQL) | 〃 | 아직 안 돌림(도커 잠금 대기) | `core_maintenance` 로그인으로 실제 정비 일(`reviewMaintenanceTasks`의 `review-temp-block-expire`, `platformMaintenanceTasks`의 `held-events-delete`)을 돌린다. 끝 시각 지금 − 1ms는 풀리고 지금 + 1ms는 그대로, 다시 처리한 지 8일 행만 지우고 6일·다시 처리 안 한 행은 남는다. 0022 전에는 42501로 실패해야 한다 |
+| COV2-06 ⑭(기존 넷: 동시 쓰기 409, 신고 하루 10건 429, 동시 신고 409, 지문 가림·조치·신고 처리 한 트랜잭션) | 고침 `test-int/review.int.test.ts` | 통합(PostgreSQL) | `npx vitest run --config vitest.integration.config.mjs test-int/review.int.test.ts` | 실패 4(⑭ 넷), 0013 표 확인 1 통과 | 후기 쓰기·신고가 500이다(서비스 로그는 시험에서 숨긴다. core_app 로그인으로 바꾼 것 말고는 전과 같아 권한 거부로 본다). 뒤 둘(동시 신고 404, 통보 가림의 '후기 ID가 올바르지 않습니다')은 앞 단계의 후기 쓰기가 실패해 이어진 것이다. 서비스를 `loginFor(admin, pg, 'core_app_review_int', 'core_app', 8)`로 띄우고, 마이그레이션·시험 자료·확인은 관리자 연결로 바꿨다. 단언은 그대로이고 네 시험 이름 앞에 `COV2-06 ⑭`를 달았다. 0022 전에는 후기 쓰기가 42501이라 실패해야 한다. 0013 표 확인 시험(첫째)은 관리자로 읽어 그대로 통과해야 한다 |
+| COV2-06 ⑮ core_app은 후기의 id·event_id·created_at을 고치지 못하고 후기·신고·조치 행을 지우지 못한다 | 새 `test-int/review-grants.int.test.ts` | 통합(PostgreSQL) | `npx vitest run --config vitest.integration.config.mjs test-int/review-grants.int.test.ts` | 실패 | 허용 쪽 대조군(`review.updated_at` 고치기)이 42501이다. 거부 일곱(42501)에 더해 경계의 허용 쪽 대조군 둘(`review.updated_at` 고치기, 지문 지우기)을 두었다. 그래서 0022 전에는 대조군에서 실패하고, 0022 뒤에는 거부·허용이 모두 맞아야 통과한다 |
+| COV2-06 ⑯ 정비 역할로 임시조치 끝내기와 보류 표 정리가 되고, 후기를 새로 쓰지는 못한다 | 〃 | 통합(PostgreSQL) | 〃 | 실패 | 정비 일의 `update review …`가 42501(`permission denied for table review`)이다. `core_maintenance` 로그인으로 실제 정비 일(`reviewMaintenanceTasks`의 `review-temp-block-expire`, `platformMaintenanceTasks`의 `held-events-delete`)을 돌린다. 끝 시각 지금 − 1ms는 풀리고 지금 + 1ms는 그대로, 다시 처리한 지 8일 행만 지우고 6일·다시 처리 안 한 행은 남는다. 0022 전에는 42501로 실패해야 한다 |
 
-- 보충으로 돌릴 통합 시험을 한 번에: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 것은 Kafka 컨테이너가 필요하다). ⑪⑫는 0022와 소비자 구현 뒤 통과해야 한다.
+- 보충 통합 시험을 한 번에 돌렸다: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 것은 Kafka 컨테이너). 시험 9개 가운데 실패 8, 통과 1(0013 표 확인). 다시 돈 ⑪은 전과 같이 42501, ⑫는 전과 같이 뼈대 '아직 없음'(`startCoreConsumers`)이다. ⑪⑫는 0022와 소비자 구현 뒤 통과해야 한다. 돌린 뒤 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
 
 ### 확인할 것(계획 담당·감독에게)
 
