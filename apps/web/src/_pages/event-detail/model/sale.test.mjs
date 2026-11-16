@@ -203,6 +203,27 @@ test('SCR-002 선예매 대상 안내: 명단 이름(\' · \'로 이음)·가장
   for (const status of ['none', 'loading', 'idle']) assert.equal(presaleNotice({ fan: { status }, sellerName: '(주)피켓공연', nowMs: OPEN - h }), null, status);
 });
 
+// 브라우저 확인(2bd73888) 뒤 정한 것 BV1·BV2(ADR-0272 결정 3 '선예매 대상 안내', d5 §5.2 '선예매 대상' 예와 같은 꼴)
+const notice1 = (name) => `판매자((주)피켓공연)가 보낸 ${name} 명단에 회원님이 있습니다. 이 명단은 선예매 자격 확인에만 쓰고, 이 공연의 판매 기간이 끝나고 1일 뒤(12/24) 지웁니다`;
+const listOf = (...names) => names.map((name) => ({ name, destroyAtMs: T('2026-12-24T10:00:00Z') }));
+
+test("[브라우저 확인] 선예매 안내 첫 글은 명단 이름에 '선예매'가 들어 있으면 붙이지 않는다", () => {
+  assert.deepEqual(presaleNotice({ fan: fan(true, PHASES, listOf('팬클럽 선예매')), sellerName: '(주)피켓공연', nowMs: OPEN - 60 * 60_000 }), {
+    lead: '팬클럽 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다',
+    notice: notice1('팬클럽 선예매'),
+  });
+});
+
+test("[브라우저 확인] 선예매 안내 첫 글은 명단 이름에 '선예매'가 들어 있지 않으면 ' 선예매'를 붙인다", () => {
+  const at = (lists) => presaleNotice({ fan: fan(true, PHASES, lists), sellerName: '(주)피켓공연', nowMs: OPEN - 60 * 60_000 });
+  assert.deepEqual(at(listOf('멤버십')), { lead: '멤버십 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다', notice: notice1('멤버십') });
+  assert.deepEqual(at(listOf('팬클럽 선예매', '멤버십')), {
+    lead: '팬클럽 선예매 · 멤버십 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다',
+    notice: notice1('팬클럽 선예매 · 멤버십'),
+  });
+  assert.equal(at([]).lead, '판매 자격 선예매 대상입니다. 11/20(금) 20:00부터 1인 2매까지 예매할 수 있습니다', '명단 없음');
+});
+
 // ── T8 ──
 test('[Q-T36 ⑧] 공연 상세: 주소 조각은 정확히 #sale-eligibility-required만 명단 밖 알림을 켠다(#Sale-…·뒤 글자·빈 조각은 끈다)', () => {
   assert.equal(isDeniedHash('#sale-eligibility-required'), true);
