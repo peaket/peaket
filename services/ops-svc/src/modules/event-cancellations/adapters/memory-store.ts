@@ -35,6 +35,14 @@ export class MemoryEventCancellationStore implements EventCancellationStore {
     return { status: 'INSERTED' };
   }
 
+  async replayOf(idem: EventCancellationIdempotency): Promise<EventCancellationView | undefined> {
+    const seen = this.#once.get(`${idem.accountRef}\n${idem.operation}\n${idem.key}`);
+    if (!seen) return undefined;
+    const hash = Buffer.from(idem.requestHash);
+    if (seen.hash.length !== hash.length || !timingSafeEqual(seen.hash, hash)) throw idempotencyKeyReused();
+    return seen.view;
+  }
+
   async find(requestId: string): Promise<EventCancellationRecord | undefined> {
     return this.rows.get(requestId);
   }

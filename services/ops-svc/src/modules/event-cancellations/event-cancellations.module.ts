@@ -4,7 +4,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
 import { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
-import type { EventCancellationCases, EventCancellationStore, EventOwnerLookup, EventRefundReader, EventRefundStarter, EventSaleStopper, SaleSuspensionLookup } from './domain/ports.js';
+import type { EventCancellationCases, EventCancellationStore, EventOwnerLookup, EventRefundHolds, EventRefundReader, EventRefundStarter, EventSaleStopper, SaleSuspensionLookup } from './domain/ports.js';
 import { EventCancellationsController } from './inbound/event-cancellations.controller.js';
 import { PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
 
@@ -26,6 +26,8 @@ export interface EventCancellationsModuleDeps {
   readonly owners?: EventOwnerLookup;
   /** CS 처리함 '판정 대기' 건 */
   readonly cases?: EventCancellationCases;
+  /** purchase-svc 환급 미룸(SetEventRefundHold, BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503 event-refund-unavailable이다 */
+  readonly holds?: EventRefundHolds;
 }
 
 @Module({})
@@ -45,6 +47,7 @@ export class EventCancellationsModule {
               ...(deps.reader ? { reader: deps.reader } : {}),
               ...(deps.owners ? { owners: deps.owners } : {}),
               ...(deps.cases ? { cases: deps.cases } : {}),
+              ...(deps.holds ? { holds: deps.holds } : {}),
               log: { warn: (obj, msg) => logger.warn(obj, msg) },
             }),
         },

@@ -28,6 +28,11 @@ export interface EventCancellationStore {
   insert(record: EventCancellationRecord, audit?: AuditRecord, idem?: EventCancellationIdempotency): Promise<EventCancellationInsert>;
   find(requestId: string): Promise<EventCancellationRecord | undefined>;
   findActiveByEvent(eventId: string): Promise<EventCancellationRecord | undefined>;
+  /**
+   * 같은 멱등 키의 처음 응답(보관 기간 안, 커밋된 것만). 없으면 undefined, 다른 지문이면 422 idempotency-key-reused를 던진다.
+   * 회차 취소(CANCEL) 요청이 미룸을 걸기 전에 다시 온 요청을 가린다(BAT-420 몫 D). 없는 저장소는 넣기의 멱등 규칙만 쓴다
+   */
+  replayOf?(idem: EventCancellationIdempotency): Promise<EventCancellationView | undefined>;
   /** version 조건부 갱신과 감사 기록을 같은 트랜잭션에 쓴다. 다른 요청이 먼저 갱신했으면 false */
   save(record: EventCancellationRecord, audit?: AuditRecord): Promise<boolean>;
   list(filter: { eventId?: string | undefined; status?: readonly EventCancellationStatus[] | undefined; limit: number }): Promise<EventCancellationRecord[]>;

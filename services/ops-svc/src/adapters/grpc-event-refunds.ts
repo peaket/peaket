@@ -1,15 +1,16 @@
 // ops-svc → purchase-svc 회차 취소 일괄 환불 gRPC 클라이언트(BAT-425 GAT-130).
 // refund.proto EventRefundService가 정본이고, 주소가 없으면 ops-svc는 내부 HTTP 호환 경로로 물러난다.
+// 호출자 머리는 ops-svc다(purchase-svc SetEventRefundHold는 내부 토큰이 있으면 호출자 ops-svc만 받는다, BAT-420 몫 D).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { EventCancellationDryRun, EventCancellationFault, EventCancellationPg } from '../modules/event-cancellations/domain/event-cancellation.js';
-import type { EventRefundJobProgress, EventRefundReader, EventRefundHolds } from '../modules/event-cancellations/domain/ports.js';
+import { EventRefundHoldConflict, type EventRefundJobProgress, type EventRefundReader, type EventRefundHolds } from '../modules/event-cancellations/domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
-type Method = 'StartEventRefund' | 'GetEventRefundJob' | 'PauseEventRefundJob' | 'ResumeEventRefundJob' | 'PreviewEventRefund';
+type Method = 'StartEventRefund' | 'GetEventRefundJob' | 'PauseEventRefundJob' | 'ResumeEventRefundJob' | 'PreviewEventRefund' | 'SetEventRefundHold';
 type RefundClient = grpc.Client & Record<Method, Unary>;
 type RefundPackage = { EventRefundService: grpc.ServiceClientConstructor };
 
@@ -90,6 +91,7 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
       profile: o.profile ?? 'service',
       dependency: 'purchase-svc',
       timeoutCapMs: 30_000,
+      caller: 'ops-svc',
     }) as unknown as RefundClient;
   }
 
@@ -147,12 +149,26 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
     };
   }
 
-  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘 */
-  /** SetEventRefundHold(BAT-420 몫 D, 빈 뼈대). 실패는 던진다 */
-  async hold(_q: { eventId: string; requestId: string; held: boolean; expiresAtMs?: number }): Promise<{ held: boolean }> {
-    throw new Error('아직 없음');
+  /**
+   * SetEventRefundHold(BAT-420 몫 D): 걸기·늘리기는 held 참과 기한 Timestamp, 풀기는 held 거짓만 보낸다(기한 없음).
+   * ALREADY_EXISTS(그 회차에 다른 요청의 열린 미룸)는 EventRefundHoldConflict로, 그 밖의 실패(UNAVAILABLE·시간 초과 등)는 그대로 던진다
+   */
+  async hold(q: { eventId: string; requestId: string; held: boolean; expiresAtMs?: number }): Promise<{ held: boolean }> {
+    try {
+      const answer = await this.#call('SetEventRefundHold', {
+        event_id: q.eventId,
+        cancellation_request_id: q.requestId,
+        held: q.held,
+        ...(q.held && q.expiresAtMs !== undefined ? { expires_at: timestampOf(q.expiresAtMs) } : {}),
+      });
+      return { held: answer.held === true };
+    } catch (err) {
+      if ((err as Partial<grpc.ServiceError> | undefined)?.code === grpc.status.ALREADY_EXISTS) throw new EventRefundHoldConflict();
+      throw err;
+    }
   }
 
+  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘 */
   async job(q: { requestId: string }): Promise<EventRefundJobProgress> {
     const a = await this.#call('GetEventRefundJob', { job_id: q.requestId });
     const closesAtMs = msOf(a.refund_window_closes_at);

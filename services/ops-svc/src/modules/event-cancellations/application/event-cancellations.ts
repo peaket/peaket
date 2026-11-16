@@ -4,6 +4,8 @@
 // 확정은 PENDING_APPROVAL에서만, 판정자가 아닌 operator·commander가 재인증 뒤 한다. 외부 호출 전에 RUNNING으로 조건부 저장하고,
 // 회차 취소(CANCEL)는 일괄 환불을 시작하기 전에 판매를 멈춘다(ADR-0280 결정 1). 멈춤·시작이 실패하면 PENDING_APPROVAL로 되돌린다.
 // 모든 상태 변화는 ops 감사 체인에도 남긴다(transfer-refund §8, settlement §5.1).
+// 회차 취소(CANCEL)는 요청 전에 purchase-svc에 환급 미룸을 걸고(지금 + 72시간), 판정·확정 시도 때 늘리며, 판정 전 반려 때 푼다(BAT-420 몫 D, OPEN[45],
+// transfer-refund §5 '회차 취소 요청 중 보류 취소의 환급 미룸'). 걸거나 늘리지 못하면 503 event-refund-unavailable이고 상태를 바꾸지 않는다.
 import { randomUUID } from 'node:crypto';
 import type { IdempotencyRequest } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
@@ -23,16 +25,18 @@ import {
   type EventCancellationView,
   type PartnerEventCancellationStatusView,
 } from '../domain/event-cancellation.js';
-import type {
-  EventCancellationCases,
-  EventCancellationStore,
-  EventOwnerLookup,
-  EventRefundJobProgress,
-  EventRefundReader,
-  EventRefundStarter,
-  EventSaleStopper,
-  SaleSuspensionLookup,
-  EventRefundHolds,
+import {
+  EVENT_REFUND_HOLD_MS,
+  EventRefundHoldConflict,
+  type EventCancellationCases,
+  type EventCancellationStore,
+  type EventOwnerLookup,
+  type EventRefundJobProgress,
+  type EventRefundReader,
+  type EventRefundStarter,
+  type EventSaleStopper,
+  type SaleSuspensionLookup,
+  type EventRefundHolds,
 } from '../domain/ports.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -87,7 +91,7 @@ export interface EventCancellationExtra {
   readonly reader?: EventRefundReader;
   readonly owners?: EventOwnerLookup;
   readonly cases?: EventCancellationCases;
-  /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 요청 전 미룸 걸기·판정·확정 때 늘리기·판정 전 반려 때 풀기. 없으면 CANCEL 요청이 503이다 */
+  /** 요청 전 미룸 걸기·판정·확정 때 늘리기·판정 전 반려 때 풀기(BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503이다 */
   readonly holds?: EventRefundHolds;
   /** 판정 대기 건을 못 연 것처럼 요청은 받되 남길 경고 */
   readonly log?: { warn(obj: object, msg: string): void };
@@ -113,7 +117,7 @@ export class EventCancellations {
   ) {}
 
   /**
-   * commander 회차 취소 요청(R-T23 ⑤⑥, openapi createOpsEventCancellation). 차례: 본문 → 재인증 → 판매 중지 확인 → (멱등 키 →) 진행 중 확인 → 넣기 → 판정 대기 건.
+   * commander 회차 취소 요청(R-T23 ⑤⑥, openapi createOpsEventCancellation). 차례: 본문 → 재인증 → 판매 중지 확인 → (멱등 키 →) 진행 중 확인 → 미룸 걸기 → 넣기 → 판정 대기 건.
    * 재인증·판매 중지 확인을 진행 중 확인보다 먼저 해, 판매 중지가 아닌 회차에 다른 사람의 요청 ID를 알려 주지 않는다.
    */
   async request(input: EventCancellationRequestInput, actor: OpsActor, reauthToken?: string, idem?: IdempotencyRequest): Promise<EventCancellationView> {
@@ -132,7 +136,7 @@ export class EventCancellations {
 
   /**
    * 파트너 회차 취소·연기 요청(R-T36, openapi createPartnerEventCancellation). 소속은 세션 테넌트와 core 판매 설정의 promoterId로만 본다.
-   * 차례: 본문 → 소속(없는 회차·다른 파트너는 같은 404, core 무응답 503) → 공연 종료 409 → 연기 일시 422 → (멱등 키 →) 진행 중 409 → 넣기 → 판정 대기 건.
+   * 차례: 본문 → 소속(없는 회차·다른 파트너는 같은 404, core 무응답 503) → 공연 종료 409 → 연기 일시 422 → (멱등 키 →) 진행 중 409 → (CANCEL이면) 미룸 걸기 → 넣기 → 판정 대기 건.
    */
   async requestByPartner(eventId: string, input: PartnerEventCancellationInput, actor: PartnerActor, idem: IdempotencyRequest): Promise<EventCancellationView> {
     if (!UUID.test(eventId)) throw notFound();
@@ -221,13 +225,15 @@ export class EventCancellations {
 
   /**
    * 귀책 판정(R-T37 ①②). REQUESTED·JUDGED·PENDING_APPROVAL에서 할 수 있고 그때마다 미리보기를 새로 계산한다.
-   * JUDGED 저장(미리보기 지움) → 미리보기 → PENDING_APPROVAL 저장. 미리보기를 못 하면 JUDGED에 남고 503이다.
+   * (CANCEL이면) 미룸 늘리기 → JUDGED 저장(미리보기 지움) → 미리보기 → PENDING_APPROVAL 저장. 늘리지 못하면 아무것도 저장하지 않고 503,
+   * 미리보기를 못 하면 JUDGED에 남고 503이다.
    */
   async judge(requestId: string, input: { fault: EventCancellationFault; reason: string; fanNoticeReason: string }, actor: OpsActor): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
     if (r.status !== 'REQUESTED' && r.status !== 'JUDGED' && r.status !== 'PENDING_APPROVAL') throw new EventCancellationProblem('judgement-not-allowed', 409, '지금은 판정할 수 없습니다');
     if (input.fanNoticeReason.length > 200) throw invalidBody();
     const nowMs = this.now();
+    if (r.kind === 'CANCEL') await this.#extendHold(r, nowMs);
     const judged: EventCancellationRecord = {
       ...r,
       status: 'JUDGED',
@@ -254,7 +260,8 @@ export class EventCancellations {
 
   /**
    * 확정(R-T37 ②④, R-T23 ⑥). PENDING_APPROVAL에서만, 판정자 외 1인이 재인증 뒤 한다.
-   * RUNNING 조건부 저장 → (CANCEL이면) 판매 멈춤 → 일괄 환불 시작. 멈춤·시작이 실패하면 PENDING_APPROVAL로 되돌린다(미리보기는 남는다).
+   * (CANCEL이면) 미룸 늘리기 → RUNNING 조건부 저장 → (CANCEL이면) 판매 멈춤 → 일괄 환불 시작. 늘리지 못하면 PENDING_APPROVAL 그대로 503,
+   * 멈춤·시작이 실패하면 PENDING_APPROVAL로 되돌린다(미리보기는 남는다). 확정은 purchase-svc가 요청 행과 같은 트랜잭션에서 미룸을 푼다.
    */
   async approve(requestId: string, actor: OpsActor, reauthToken?: string): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
@@ -268,6 +275,8 @@ export class EventCancellations {
     if (r.kind === 'CANCEL' && !stopper) throw saleStopUnavailable();
     if (r.fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
     const nowMs = this.now();
+    // 판정이 끝나기 전(확정 시작 전)까지 보류 취소의 환급 미룸이 풀리지 않게 기한을 늘린다(BAT-420 몫 D, GAT-110 D2)
+    if (r.kind === 'CANCEL') await this.#extendHold(r, nowMs);
     // 외부 호출 전에 RUNNING으로 조건부 저장해, 확정 중복과 외부 실패 뒤 재시도를 함께 다룬다(OPS-07).
     const running: EventCancellationRecord = { ...r, status: 'RUNNING', approvedBy: actor.accountId, approvedAt: new Date(nowMs), version: r.version + 1, updatedAt: new Date(nowMs) };
     if (!(await this.store.save(running, audit('EVENT_CANCELLATION_APPROVED', running.requestId, { ...eventBase(running), status: running.status, fault: running.fault }, nowMs)))) throw conflict();
@@ -306,6 +315,7 @@ export class EventCancellations {
   /**
    * 반려(R-T37 ③). 판정 전(REQUESTED)은 commander만 하고 REJECTED·반려 사유를 남긴다.
    * 판정 뒤(JUDGED·PENDING_APPROVAL)는 판정자 외 operator 이상이 하고 JUDGED(재판정 대기, T7)로 돌려 미리보기를 지운다.
+   * 판정 전 반려(CANCEL)는 판정이 끝났으므로 미룸을 푼다(실패는 경고만, 기한에 저절로 풀린다). 판정 뒤 반려는 판정이 끝나지 않아 풀지 않는다(R-T38 ②).
    */
   async reject(requestId: string, actor: OpsActor, reason: string): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
@@ -322,6 +332,7 @@ export class EventCancellations {
       next = { ...r, status: 'JUDGED', dryRun: null, version: r.version + 1, updatedAt: now };
     }
     if (!(await this.store.save(next, audit('EVENT_CANCELLATION_REJECTED', next.requestId, { ...eventBase(next), status: next.status, reason }, nowMs)))) throw conflict();
+    if (next.status === 'REJECTED' && next.kind === 'CANCEL') await this.#releaseHold(next);
     return eventCancellationDetailView(next);
   }
 
@@ -409,7 +420,12 @@ export class EventCancellations {
     };
   }
 
-  /** 멱등 키와 함께 넣고, 새로 넣었으면 CS 처리함 '판정 대기' 건을 연다(실패해도 요청은 접수된다) */
+  /**
+   * 멱등 키와 함께 넣고, 새로 넣었으면 CS 처리함 '판정 대기' 건을 연다(실패해도 요청은 접수된다).
+   * 회차 취소(CANCEL)는 넣기 전에 미룸을 건다(BAT-420 몫 D 보충 2 ①): 같은 키의 처음 응답이 있으면 그것을 주고(걸지 않음), 진행 중 요청이 있으면 걸지 않고 409,
+   * 없으면 새 요청 ID로 지금 + 72시간까지 건다. 걸기가 ALREADY_EXISTS면 진행 중 요청을 다시 보아 있으면 409, 없으면 경고와 503이다.
+   * 걸기가 그 밖으로 실패하면 503이고 행·감사·CS 건·멱등 기록을 남기지 않는다. 건 뒤 넣기가 진행 중(유일 색인)·다시 온 요청·오류로 끝나면 자기 요청 ID로 푼다
+   */
   async #insert(record: EventCancellationRecord, nowMs: number, idem?: IdempotencyRequest): Promise<EventCancellationView> {
     const requested = audit(
       'EVENT_CANCELLATION_REQUESTED',
@@ -417,7 +433,24 @@ export class EventCancellations {
       { ...eventBase(record), reason: record.reason, status: record.status, requestedVia: record.requestedVia, ...(record.promoterId ? { promoterId: record.promoterId } : {}) },
       nowMs,
     );
-    const result = await this.store.insert(record, requested, idem);
+    const holding = record.kind === 'CANCEL';
+    if (holding) {
+      if (idem && this.store.replayOf) {
+        const replay = await this.store.replayOf(idem);
+        if (replay) return replay;
+      }
+      const existing = await this.store.findActiveByEvent(record.eventId);
+      if (existing) throw active(existing.requestId);
+      await this.#placeHold(record, nowMs);
+    }
+    let result: Awaited<ReturnType<EventCancellationStore['insert']>>;
+    try {
+      result = await this.store.insert(record, requested, idem);
+    } catch (err) {
+      if (holding) await this.#releaseHold(record);
+      throw err;
+    }
+    if (holding && result.status !== 'INSERTED') await this.#releaseHold(record);
     if (result.status === 'REPLAYED') return result.view;
     if (result.status === 'ACTIVE') throw active(result.requestId);
     if (this.extra.cases) {
@@ -428,6 +461,44 @@ export class EventCancellations {
       }
     }
     return eventCancellationView(record);
+  }
+
+  /** 새 요청의 미룸 걸기(지금 + 72시간). 실패는 503(ALREADY_EXISTS면 진행 중 요청을 다시 본다) */
+  async #placeHold(record: EventCancellationRecord, nowMs: number): Promise<void> {
+    const holds = this.extra.holds;
+    if (!holds) throw refundUnavailable();
+    try {
+      await holds.hold({ eventId: record.eventId, requestId: record.requestId, held: true, expiresAtMs: nowMs + EVENT_REFUND_HOLD_MS });
+    } catch (err) {
+      if (err instanceof EventRefundHoldConflict) {
+        // 걸기와 진행 중 확인 사이에 다른 요청이 들어왔거나(그 요청을 알린다), 풀기를 놓친 옛 미룸이 기한 전이다(경고, 기한에 저절로 풀린다)
+        const again = await this.store.findActiveByEvent(record.eventId);
+        if (again) throw active(again.requestId);
+        this.extra.log?.warn({ eventId: record.eventId, requestId: record.requestId }, 'event-refund-hold-conflict: 진행 중 요청이 없는데 그 회차에 다른 요청의 환급 미룸이 걸려 있다');
+      }
+      throw refundUnavailable();
+    }
+  }
+
+  /** 판정·확정 시도 때 같은 요청 ID로 기한을 그 시각 + 72시간으로 늘린다. 늘리지 못하면 503(부른 쪽은 아무것도 저장하지 않는다) */
+  async #extendHold(r: EventCancellationRecord, nowMs: number): Promise<void> {
+    const holds = this.extra.holds;
+    if (!holds) throw refundUnavailable();
+    try {
+      await holds.hold({ eventId: r.eventId, requestId: r.requestId, held: true, expiresAtMs: nowMs + EVENT_REFUND_HOLD_MS });
+    } catch {
+      throw refundUnavailable();
+    }
+  }
+
+  /** 같은 요청 ID로 미룸을 푼다. 실패는 경고만 남긴다(기한에 저절로 풀리고 purchase-svc가 SEV2를 남긴다) */
+  async #releaseHold(r: EventCancellationRecord): Promise<void> {
+    if (!this.extra.holds) return;
+    try {
+      await this.extra.holds.hold({ eventId: r.eventId, requestId: r.requestId, held: false });
+    } catch (err) {
+      this.extra.log?.warn({ eventId: r.eventId, requestId: r.requestId, err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-hold-release-failed');
+    }
   }
 
   /** 일괄 환불 진행률(읽기 실패·조립 없음은 undefined) */

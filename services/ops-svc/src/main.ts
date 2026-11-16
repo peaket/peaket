@@ -82,11 +82,13 @@ const payouts = paymentUrl
   : undefined;
 // 회차 취소 요청(BAT-420 GAT-110): 파트너 소속 확인(core 판매 설정)·확정 때 판매 멈춤(판매 중지 집행)·판정 미리보기와 진행률(purchase gRPC).
 // 판매 중지 확인과 CS '판정 대기' 건은 AppModule이 같은 DB로 기본을 채운다.
-const cancellationDeps = eventCancellationDepsFromEnv({ env: process.env, executor, ...(refunds ? { refunds } : {}), ...(internalToken ? { internalToken } : {}) });
+// 환급 미룸(holds, BAT-420 몫 D)은 같은 purchase gRPC 클라이언트의 SetEventRefundHold다. 없으면 CANCEL 요청·판정·확정이 503이다.
+const { holds, ...cancellationDeps } = eventCancellationDepsFromEnv({ env: process.env, executor, ...(refunds ? { refunds } : {}), ...(internalToken ? { internalToken } : {}) });
 const eventCancellations = {
   ...(refunds ? { refunds } : {}),
   ...(reauth ? { reauth } : {}),
   ...cancellationDeps,
+  ...(holds ? { holds } : {}),
 };
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;

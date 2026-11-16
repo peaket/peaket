@@ -1,7 +1,8 @@
 // 회차 취소 요청 PostgreSQL 저장소(ops 0011·0013·0014). 칸 이름은 migrations/0011_event_cancellation_request.sql·0013과 같다.
 // 요청 넣기는 한 트랜잭션에서 멱등 키 행(0014, 첫 쓰기) → 같은 회차의 진행 중 요청 확인 → 행·감사 기록 순서로 쓴다.
 // 진행 중이면 트랜잭션째 되돌려 키 행도 남기지 않는다(같은 키로 뒤에 다시 보내면 다시 판정한다).
-import { IdempotencyStore, systemClock, type Clock, type Database, type DbTransaction } from '@peaket/platform';
+import { timingSafeEqual } from 'node:crypto';
+import { IDEMPOTENCY_RECORD_TABLE, IDEMPOTENCY_RETENTION_MS, IdempotencyStore, idempotencyKeyReused, systemClock, type Clock, type Database, type DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import { appendAuditIn, type AuditRecord } from '../../../audit/audit.js';
 import {
@@ -97,12 +98,28 @@ const constraintOf = (e: unknown): string | undefined => {
 
 export class DrizzleEventCancellationStore implements EventCancellationStore {
   readonly #idempotency: IdempotencyStore;
+  readonly #clock: Clock;
 
   constructor(
     private readonly database: Database,
     clock: Clock = systemClock,
   ) {
     this.#idempotency = new IdempotencyStore({ clock });
+    this.#clock = clock;
+  }
+
+  /** 같은 멱등 키의 커밋된 처음 응답(보관 기간 안). 넣기의 멱등 규칙(platform IdempotencyStore)과 같은 표·범위·지문 비교다 */
+  async replayOf(idem: EventCancellationIdempotency): Promise<EventCancellationView | undefined> {
+    const since = new Date(this.#clock.now() - IDEMPOTENCY_RETENTION_MS);
+    const r = await this.database.db.execute(sql`
+      select request_hash, result_ref from ${sql.identifier(IDEMPOTENCY_RECORD_TABLE)}
+       where account_ref = ${idem.accountRef} and operation = ${idem.operation} and idempotency_key = ${idem.key} and created_at > ${since}`);
+    const row = r.rows[0] as { request_hash: Buffer; result_ref: string | null } | undefined;
+    if (!row || row.result_ref === null) return undefined;
+    const stored = Buffer.from(row.request_hash);
+    const hash = Buffer.from(idem.requestHash);
+    if (stored.length !== hash.length || !timingSafeEqual(stored, hash)) throw idempotencyKeyReused();
+    return JSON.parse(row.result_ref) as EventCancellationView;
   }
 
   async insert(r: EventCancellationRecord, audit?: AuditRecord, idem?: EventCancellationIdempotency): Promise<EventCancellationInsert> {

@@ -57,7 +57,7 @@ interface CommonWiring {
     readonly owners?: EventOwnerLookup;
     readonly suspension?: SaleSuspensionLookup;
     readonly cases?: EventCancellationCases;
-    /** BAT-420 몫 D(빈 뼈대, 아직 조립하지 않음): purchase-svc SetEventRefundHold */
+    /** purchase-svc SetEventRefundHold(BAT-420 몫 D, 시작 조립이 purchase gRPC 클라이언트로 채운다). 없으면 CANCEL 요청·판정·확정이 503이다 */
     readonly holds?: import('./modules/event-cancellations/index.js').EventRefundHolds;
   };
 }
@@ -80,6 +80,7 @@ function eventCancellationDeps(
     ...(e.reader ? { reader: e.reader } : {}),
     ...(e.stopper ? { stopper: e.stopper } : {}),
     ...(e.owners ? { owners: e.owners } : {}),
+    ...(e.holds ? { holds: e.holds } : {}),
   };
 }
 
