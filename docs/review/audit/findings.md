@@ -230,11 +230,11 @@
 | COV2-03 | 중간 | core 후기 | 법정 통보 takedown 비멱등·비트랜잭션 | R-617 수정 |
 | COV2-04 | 중간 | core 후기 | `GET /v1/ops/reviews/{reviewId}`가 OpenAPI에 없음 | R-617 수정 |
 | COV2-05 | 중간 | web 정책 | 처리방침이 미확정 업체·담당자를 공개 | R-618 수정 |
-| COV2-06 | 중간 | core 후기 | 탈퇴 계정 후기가 계정 ID·주문 ID와 함께 남음 | R-617 부분(내부 경로만) |
+| COV2-06 | 중간 | core 후기 | 탈퇴 계정 후기가 계정 ID·주문 ID와 함께 남음 | R-617 부분(내부 경로만) → W7 갈래 3 W7-audit 배선·0022 권한(파기 vs 익명화 OPEN[42]) |
 | COV2-07..11 | 낮음 | core/web | 검색 성능·인앱 브라우저·알림·배치 설명·문서 불일치 | 후속 |
-| A2-17R | 중간 | core export | 명단 페이지가 `limit*10`·`slice`·`nextCursor` 폐기로 1,000행 뒤를 놓칠 수 있음 | 후속 |
-| A2-19R | 중간 | core export | `attendee_export` insert와 접속기록 audit가 별도 트랜잭션 | 후속 |
-| SEC-06R | 높음 | core 내부 | `InternalToken401Guard`가 토큰 미설정 시 통과(fail-open) | R-628 수정 |
+| A2-17R | 중간 | core export | 명단 페이지가 `limit*10`·`slice`·`nextCursor` 폐기로 1,000행 뒤를 놓칠 수 있음 | W7 갈래 3 W7-audit 고침 |
+| A2-19R | 중간 | core export | `attendee_export` insert와 접속기록 audit가 별도 트랜잭션 | W7 갈래 3 W7-audit 고침(보기 접속기록·접속지 포함, 저장소 OPEN[43]) |
+| SEC-06R | 높음 | core 내부 | `InternalToken401Guard`가 토큰 미설정 시 통과(fail-open) | R-628 수정, W7 갈래 3 W7-audit 회귀 시험 |
 | SEC-07R | 중간 | core notify | `NotifyModule`이 `process.env`를 읽어 bundle 배포에서 운영 fake 가능 | R-629 수정(env 주입구) |
 | L1V2 | 중간 | platform/identity/web | jti 저장소 fail-open·초안 noindex 미결속·정비 재시도 skip·계정 상태 NULL→ACTIVE | R-608·R-618·R-619 수정 |
 

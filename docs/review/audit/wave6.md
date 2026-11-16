@@ -96,19 +96,19 @@
 
 ## 6. 남은 위험
 
-1. **COV2-06 배선**: core에 후기 익명화 내부 경로는 생겼지만 identity 탈퇴·병합이 그 경로를 호출하지 않는다. core가 `identity.accounts-withdrawn`을 소비하는 후속이 필요하다.
+1. **COV2-06 배선**: core에 후기 익명화 내부 경로는 생겼지만 identity 탈퇴·병합이 그 경로를 호출하지 않는다. core가 `identity.accounts-withdrawn`을 소비하는 후속이 필요하다. **→ 2026-11-16 웨이브 7 갈래 3 W7-audit에서 고침**: core-svc가 그 사건을 `peaket.core-svc.<환경>` 그룹으로 받아 계정·주문 참조를 끊고(pid는 남기지 않음), 운영 역할 `core_app`의 후기·보류 표 권한 결함을 core 0022로 고쳤다. 남은 결정: 파기 vs 익명화 OPEN[42], 탈퇴 직후 15분 창 OPEN[44]([W7-lane3-wave.md](../measurements/W7-lane3-wave.md)).
 2. **A1V-11 메모리 저장소**: 운영은 Drizzle 트랜잭션이지만 단위 시험은 메모리 저장소라 상계 원자성을 검증하지 못한다. test-int가 덮는다.
 3. **B2V-03 무기한 제한 TTL**: ops 작업 워커가 아직 없어 현재는 드러나지 않는다. R-615가 같은 판 재전송으로 30일 TTL을 다시 세우는 동작을 넣었고 R-621 시험이 고정했다. 워커를 붙일 때 이 계약을 지켜야 한다.
 4. **OPSV-05 identity JWKS**: `PEAKET_IDENTITY_JWKS_URL`이 없으면 재인증이 503이다. 배포 환경에서 필수 값으로 고정해야 한다.
 5. **K7 공식 목표**: `BAT-033`의 K7 공식 목표는 여전히 known gap이다. 감사는 코드·시험을 대상으로 했고 목표 수치를 재측정하지 않았다.
 6. **BAT-052·BAT-197**: realtime-gw 보류와 trust 표시·라벨 미착수는 이번 웨이브의 구현 대상이 아니다.
 7. **운영 배포 형상**: trust-svc가 아직 `deploy/workloads`에 없어 COV2-01의 실제 노출 범위는 제한적이다. 배포 전 mTLS·L7 허용 목록이 필요하다.
-8. **A2-17 paging 잔여(확인됨)**: `DrizzleMerchOrderStore.listAttendees`의 `limit*10`·`slice`, `HttpAttendeeSource`의 `nextCursor` 폐기, `page.length < 1000` 정지 조건 때문에 짧은 페이지에서 명단이 조용히 잘린다. R-625 보강 시험이 999/2,000건 절단을 재현했고 `test/audit-core-gaps` 가지에 남겼다. Wave 7에서 `AttendeeSource` 페이지 포트·`nextCursor` 전달·정확한 커서를 고친다.
-9. **A2-19 조회 감사(확인됨)**: `attendee_export` insert와 접속기록 audit가 별도 트랜잭션이고, 명단 **조회**는 접속기록을 남기지 않는다. 조회 감사 포트·행위자 전달·`LIST` 형식·fail-closed가 필요하다. 재현 시험은 `test/audit-core-gaps`에 있다.
+8. **A2-17 paging 잔여(확인됨)**: `DrizzleMerchOrderStore.listAttendees`의 `limit*10`·`slice`, `HttpAttendeeSource`의 `nextCursor` 폐기, `page.length < 1000` 정지 조건 때문에 짧은 페이지에서 명단이 조용히 잘린다. R-625 보강 시험이 999/2,000건 절단을 재현했고 `test/audit-core-gaps` 가지에 남겼다. Wave 7에서 `AttendeeSource` 페이지 포트·`nextCursor` 전달·정확한 커서를 고친다. **→ 2026-11-16 웨이브 7 갈래 3 W7-audit에서 고침**: 원천 포트를 `{items, nextCursor}` 페이지로 바꾸고 `nextCursor`가 null일 때만 끝으로 본다. 같은 커서 되풀이·빈 커서는 503 `dependency-unavailable`.
+9. **A2-19 조회 감사(확인됨)**: `attendee_export` insert와 접속기록 audit가 별도 트랜잭션이고, 명단 **조회**는 접속기록을 남기지 않는다. 조회 감사 포트·행위자 전달·`LIST` 형식·fail-closed가 필요하다. 재현 시험은 `test/audit-core-gaps`에 있다. **→ 2026-11-16 웨이브 7 갈래 3 W7-audit에서 고침**: 명단 보기 접속기록(`action LIST`, 행위자 없거나 기록 실패면 명단을 주지 않음), 내려받기 이력·접속기록 한 트랜잭션, 접속지 `source_ip`(core 0021). 저장소·해시 체인·FR-064 점검은 OPEN[43].
 10. **SEC-07 process.env**: R-629가 `prod`·`staging`·`NODE_ENV=production` fake 가드를 정본화했고 `NotifyModule`에 env 주입구를 열었다. 다만 `NotifyModule`의 `PEAKET_INTERNAL_TOKEN` 직접 읽기와 `main.ts`의 env 주입은 후속이다.
 11. **C2-06..C2-11·COV2-07..11·CONS-03..06**: 낮음·중간 잔여는 `findings.md`에 후속으로 남겼다.
 12. **BOT_LEVEL·DEGRADED_MODE 승인 요건 문서 차이**: `docs/features/control-tower.md` §3 표는 "commander 요청 + 요청자 아닌 operator 이상 1인 승인"인데, R-614 코드는 요청·승인 모두 commander로 강제한다(감사 B3-H01의 보안 판단). 코드가 더 엄격해 급한 보안 위험은 없지만 운영자가 승인할 수 없어 정본 결정이 필요하다. Wave 7에서 소유자 결정을 받아 문서·코드 중 하나로 맞춘다.
-13. **R-628 회귀 시험 공백**: `InternalToken401Guard`의 `onModuleInit` 시작 차단과 `timingSafeEqual` 비교를 고정하는 시험이 없다. R628V는 임시 탐침으로 동작을 확인했고, Wave 7에서 최소 모듈 부트·상수시간 비교 시험을 더한다.
+13. **R-628 회귀 시험 공백**: `InternalToken401Guard`의 `onModuleInit` 시작 차단과 `timingSafeEqual` 비교를 고정하는 시험이 없다. R628V는 임시 탐침으로 동작을 확인했고, Wave 7에서 최소 모듈 부트·상수시간 비교 시험을 더한다. **→ 2026-11-16 웨이브 7 갈래 3 W7-audit에서 고침**: SEC-06R ①~⑤ 시험(운영 무토큰 시작 차단·상수시간 비교), 검증 담당의 틀린 구현으로 실패를 봤다.
 
 ## 7. 웨이브 6 종료 조건
 

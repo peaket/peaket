@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 7 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 41 |
+| A | 10 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 44 |
 | B | 0 | 102 | 0 | 0 | 0 | 0 | 0 | 23 | 28 | 153 |
-| 합계 | 7 | 110 | 0 | 0 | 0 | 0 | 0 | 23 | 54 | 194 |
+| 합계 | 10 | 110 | 0 | 0 | 0 | 0 | 0 | 23 | 54 | 197 |
 
 ## docs/features/settlement.md
 
@@ -44,7 +44,10 @@
 | J-T22 | ③ | 포트원 잔액 대조와 대사 멈춤(추천 적용 2026-10-28… | ③ 녹화한 원장 응답의 칸 이름을 바꿔 어댑터 계약 시험에 넣는다. … 은 계약 시험(payment P-T16)이 실패한다 | 빈칸 | A | — |
 | J-T26 | ① | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ① 사유가 없으면 거절되고, 사유를 넣으면 내려받은 건수와 함께 접속기록에 남는다(control-tower C-T19). | 자동 시험 | A | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/core-svc/test/export.test.ts |
 | J-T26 | ② | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ② 스트리밍으로 보내 내려받는 동안 서버 RSS 증가가 100MB 이하 [가정]이고 첫 바이트가 2초 [가정] 안에 온다. | 자동 시험 | A | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/core-svc/test/export.test.ts |
-| J-T26 | ③ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ③ 410과 보유 기간 끝 안내가 나온다. 연결: FR-027 | 자동 시험 | A | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/core-svc/test/export.test.ts |
+| J-T26 | ③ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ③ 410과 보유 기간 끝 안내가 나온다. | 자동 시험 | A | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/core-svc/test/export.test.ts |
+| J-T26 | ④ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ④ 내려받기는 2,000건을 모두 싣고 원천이 `nextCursor` null을 줄 때만 멈춘다. 보기 응답의 `nextCursor`는 원천 값 그대로다(짧은… | 자동 시험 | A | 시험: services/core-svc/test/export-paging-limit.test.ts, services/core-svc/test/export.test.ts 외 1곳 |
+| J-T26 | ⑤ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ⑤ 보인 건수·행위자(계정 ID·역할·표시 이름)·조건·접속지(요청의 클라이언트 IP)가 `LIST` 접속기록에 남고, 보존 끝은 만든 때 + 2년(달력)이다… | 자동 시험 | A | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test/export-audit.test.ts 외 1곳 |
+| J-T26 | ⑥ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ⑥ 파일을 주지 않고 내려받기 이력도 남지 않는다(이력과 접속기록이 한 트랜잭션). 연결: FR-027 | 자동 시험 | A | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test/export-audit.test.ts 외 1곳 |
 | J-T23 | ① | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ① NOTIFIED·DISPUTED·CONFIRMED 정산서마다 회차 취소를 확정한다 … 판본 2인 새 판이 CALCULATED로 생기고 옛 판은 금액 그대로… | 빈칸 | A | — |
 | J-T23 | ② | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ② 토스페이먼츠 예약지급이 REQUESTED인 정산서와 IN_PROGRESS인 정산서에서 회차 취소를 확정한다 … REQUESTED는 예약 취소 → HELD →… | 빈칸 | A | — |
 | J-T23 | ③ | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ③ 대사 불일치 결제 1건이 남은 회차를 계산한 뒤, 지급 전과 지급 뒤에 각각 불일치를 푼다. 결과: … 그 결제만 빠진 정산서와 뺀 목록이 나오고, 풀린 뒤… | 빈칸 | A | — |
@@ -131,7 +134,7 @@
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 39곳 (영역:… |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: 아직 코드가 없다) |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 5곳 (영역:… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: 아직 코드가 없다 |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: 아직 코드가 없다 |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 1곳… |
