@@ -76,15 +76,24 @@ test('검색 품질: 머리 검색창 자동완성의 셋째 공연을 고르면
   await box.fill('루멘');
   await expect(page.getByRole('option').nth(2)).toBeVisible();
   await page.getByRole('option').nth(2).click();
+  // 고른 후보의 회차 상세로 가는 이동이 끝나기를 기다린다(가짜 API에 없는 회차라 RSC 404 뒤 전체 페이지 이동이 된다).
+  // 기다리지 않고 다음 goto를 부르면 두 이동이 겹쳐 흔들린다(구현 담당 '시험 이의' 3)
+  await page.waitForURL(/\/events\//, { waitUntil: 'load' });
+  await page.waitForLoadState('networkidle');
   // 검색 결과를 보인 뒤 누르지 않고 다른 검색어로 다시 찾기(10초 안)
   await page.goto(`${origin()}/search?q=${encodeURIComponent('루멘')}`);
   await expect(page.locator('a[href^="/events/"]').first()).toBeVisible();
   const again = page.getByRole('combobox').first();
   await again.fill('루멘 앙코르');
+  // 새 검색어의 결과를 받을 때까지 기다린다(지금 주소도 /search?q=라 주소 꼴만 보면 옛 결과에서 바로 지나간다)
+  const requeried = page.waitForResponse((r) => /\/v1\/search(\?|$)/.test(new URL(r.url()).pathname + new URL(r.url()).search.slice(0, 1)) && new URL(r.url()).searchParams.get('q') === '루멘 앙코르');
   await again.press('Enter');
-  await page.waitForURL(/\/search\?q=/);
+  await page.waitForURL((u) => u.searchParams.get('q') === '루멘 앙코르');
+  await requeried;
   await expect(page.locator('a[href^="/events/"]').first()).toBeVisible();
   await w.leave();
+  // 결과 표시 사건은 결과를 그린 뒤에 센다. 그려질 때까지 보내기를 다시 불러 모은다(단언 값은 그대로)
+  await expect.poll(async () => (await w.leave(), w.counters().search_requery_total), { timeout: 5_000 }).toBe(1);
   const c = w.counters();
   expect(w.bodies.length).toBeGreaterThanOrEqual(1);
   expect(c['search_suggest_selected_total{kind=PRODUCTION,position=3}']).toBe(1);
@@ -99,6 +108,9 @@ test('검색 품질: 결과 항목을 누른 뒤 다시 찾으면 바로 다시 
   const first = page.locator('a[href^="/events/"]').first();
   await expect(first).toBeVisible();
   await first.click();
+  // 누른 결과의 회차 상세로 가는 이동이 끝나기를 기다린다(위 시험과 같은 까닭, 구현 담당 '시험 이의' 3)
+  await page.waitForURL(/\/events\//, { waitUntil: 'load' });
+  await page.waitForLoadState('networkidle');
   await page.goto(`${origin()}/search?q=${encodeURIComponent('루멘 앙코르')}`);
   await expect(page.locator('a[href^="/events/"]').first()).toBeVisible();
   await w.leave();
