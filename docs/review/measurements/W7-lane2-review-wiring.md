@@ -37,3 +37,48 @@
 
 - **본 범위**: 위 diff 가운데 화면·서버 경계에 닿는 파일 — 웹 `_pages/event-detail`(model·ui), `features/open-alert/failure.ts`, `queue-room/src/live/controller.ts`, 가짜 API 둘, `_pages/search/ui/SearchResults.tsx`, `widgets/app-shell`(`search-source.tsx`·`AppShell.tsx`·`model/search-quality*.ts`·`autocomplete.ts`), `_pages/open-in-browser`, `server/start.mjs`·`standalone.mjs`, `next.config.ts`, `package.json`, `test-int/` 셋의 머리와 준비 부분; core-svc `search.controller.ts`·`application/search.ts`·`search-maintenance.ts`의 CDN 경로·`cdn-invalidation.ts`·`main.ts`·`app.module.ts`, `event-summary.controller.ts`(판매 자격 경로 있음만); queue-svc의 문제 유형 이름·CORS 한 줄씩; `packages/ds` `WebSearchBox.tsx`의 보임·고름 흐름; `packages/telemetry/src/lite.ts` 머리; CI `ci-node.yml`·`ci-web.yml`의 새 단계와 `turbo.json`; `loadtest/scenarios/v1-search.js`의 경로·판정; openapi의 `/v1/search`·`/v1/search/suggestions`·`/v1/events/{eventId}/sale-eligibility`·`segment-states`·`SalePhase`·`FanSaleEligibility`·`QueueState`, asyncapi `RumSample`.
 - **못 본 범위**: core-svc 검색 읽기 모델의 SQL·잠금·사전 알고리즘(마이그레이션 0023, `drizzle-search-*`, `domain/search.ts` 본문)과 그 시험 — 묶음 리뷰(R165-1~23)가 본 몫이라 다시 보지 않았다. 웹 공유 캐시 처리기 본문(`cache-store.mjs`·두 처리기)과 월렛 워커(`app/sw.ts`·`update-hold.ts`·토스트)의 내부 동작, 재배치 판정 규칙(`reflow/rules.mjs`), ds 부품 변경(OTPField 등), console-host 변경 두 줄. 시험·빌드·브라우저는 돌리지 않았으므로 첫 JS 크기·운영 빌드 200 여부는 코드로만 판단했고 실제 값은 웨이브 끝 `budgets` 게이트 몫이다. 게이트웨이 수집기(`/_t/rum`)와 CDN 설정은 저장소에 아직 없어 W7L2-W2·W4의 영향은 정본 문장으로만 판단했다.
+
+## 고친 곳 다시 보기(2026-11-16)
+
+- **누가·본 것**: 같은 리뷰 담당 `l2w7-rev-wiring`. 고친 곳의 변경만 커밋에서 읽었다. 시험·빌드는 돌리지 않았다.
+  - BAT-170(W1·W5·W6): 계획 `e96153ad` §14, 시험 `d1683c3c`, 구현 `f4b6b735`.
+  - BAT-165(W2·W7): 계획 `60cd4d62` §17, 시험 `40067b31`, 구현 `73406d3a`(계약 생성물 포함).
+  - 첫 JS 예산 고침(통과 기준): BAT-170 §15 `654f79ae`·`bc418dbc`·`36f62fbc`, BAT-165 §18 `7a456356`·`5b9d418c`·`fd3903fa`.
+  - 줄 번호는 지금 가지 머리(`63adc226`)의 것이다.
+- **구현 커밋과 시험 파일**: 구현 커밋 넷(`f4b6b735`·`73406d3a`·`36f62fbc`·`fd3903fa`)은 시험 파일(`*.test.*`·`*.spec.*`·`test-int/`·`test/`)을 건드리지 않았다. 시험 커밋이 시험 밖에서 바꾼 것은 계획이 정한 빈 뼈대뿐이다(`d1683c3c`의 `server/cache-store.mjs`·`load-event.ts`, `5b9d418c`의 `model/suggestion-source.ts`, `40067b31`의 core-svc 두 파일).
+
+| 지적 | 판정 | 근거 |
+| --- | --- | --- |
+| W7L2-W1(높음) | **고침 확인** | 웹 컨테이너 시험을 파일 이름 셋으로 나눴다.<br>- `*.int`(`cache-handler`·`cache-cluster`)는 Valkey만 쓰고 `.next`·`standalone`·`BUILD_ID`를 읽지 않는다.<br>- `*.build`(`standalone-scm`·`start-cache`)는 운영 빌드만 쓰고 `docker`를 부르지 않는다.<br>- `*.heavy`(`start-cache`·`cache-keys`)는 둘 다 쓴다.<br>스크립트 셋은 `apps/web/package.json:12~14`다. `ci-node`는 `test:integration`만 돌고(`ci-node.yml:144`), `ci-web` `reflow` 잡이 운영 빌드 바로 뒤에 `test:build`를 돈다(`ci-web.yml:401`). 그 빌드는 `PEAKET_BUILDS=prod`(산출 폴더 `.next`, `seed-css/apps.mjs:75`)라 `*.build` 시험이 기대하는 폴더와 같다. `heavy`는 CI 어디에도 없다.<br>나누기 규칙은 새 `tools/ci/web-test-split.test.mjs`가 파일 내용·스크립트·두 워크플로를 읽어 지킨다. 그 시험은 `tools-check.yml:29`(`node --test "tools/ci/*.test.mjs"`)가 돈다. 운영 빌드 없는 PR에서 `ci-node`가 산출물 없음으로 실패하는 길은 없어졌다 |
+| W7L2-W5(낮음) | **고침 확인**(웹 통합 단계 몫) | `ci-node.yml:145~146`이 JUnit `NODE_OPTIONS`(`test-report-int.xml`)를 준다. 패키지 폴더에 남아 ASVS 리포트의 `find … test-report*.xml`에 걸린다. 다만 `[ASVS v5.0.0-13.4.1]` 시험(`standalone-scm.build`)은 이번 나누기로 `ci-web`으로 옮겨 가 다시 리포트 밖이다(아래 W7L2-W9) |
+| W7L2-W6(낮음) | **고침 확인** | `ci-web.yml:373~375` 주석이 '두 처리기는 늘 걸리고 주소가 없어 프로세스 메모리 저장소'로 R170-1 뒤 동작과 같다 |
+| W7L2-W2(중간) | **고침 확인**(겉모양 하나 남음, 아래 W7L2-W10) | 보내기는 `@peaket/telemetry/lite`의 `sendBatch`다(`search-quality-client.ts:4·13`).<br>- 그 함수는 `credentials: 'omit'`·`keepalive`·`referrerPolicy: 'no-referrer'`이고 keepalive가 없으면 `sendBeacon`이다(`packages/telemetry/src/lite.ts:196~211`). docs/frontend.md §5.16 보내기 줄(고친 판)과 같다.<br>- `visibilitychange`(숨김)와 `pagehide` 둘 다에서 보낸다(`search-quality-client.ts:15~18`).<br>- 본문은 RumSample 판 2의 필수 칸(`schemaVersion` 2·`eventKey`·`app` `web`·`route`)과 선택 칸 `counters`다(`search-quality.ts:51~58`).<br>**수집 쪽 계약과 맞는가**: asyncapi `RumSample.counters`(이름 다섯, 라벨 넷의 열거, `additionalProperties: false`, 64개 상한, `value ≥ 1`)와 생성물 `packages/contracts/src/gen/asyncapi/model/rumSample.zod.ts:53~62`(`.strict()`)가 같다. 화면이 내는 이름·라벨 값은 모두 그 열거 안이다(`zero` `true`/`false`, `kind` 셋, `position` 1~8, `position_bucket` 셋). 라벨이 없는 수는 `labels`를 빼고 보낸다. 가능한 라벨 조합은 31개라 64개 상한 안이다. 시험(T-22)이 계약 zod로 본문을 검사한다(`search-quality.test.mjs:86~90`) |
+| W7L2-W7(낮음) | **고침 확인** | openapi `/v1/search` 503 설명이 `dependency-unavailable`, 연결 묶음 포화·질의 시간 상한 초과 두 경우, `Retry-After` 1초, `no-store`를 적는다(60cd4d62). 응답 설명은 생성물에 닿지 않는다. 옛 글('검색 전용 연결 묶음이 넘침')은 `packages/` 어디에도 남지 않았다. `73406d3a` 글은 `gen:check`가 같다고 적었다 |
+| W7L2-W3·W4·W8 | 이번 범위 밖 | 감독이 고칠 목록에 넣지 않았다. W3은 `fd3903fa`가 출처를 순수 모듈로 옮긴 뒤에도 그대로다: `suggestShown`은 네트워크로 받은 때만 센다(`model/suggestion-source.ts` `load`의 `fetchSuggestions` 뒤). `peek`로 거른 창과 `load` 안의 `quick` 길은 세지 않는다 |
+
+**첫 JS 예산 고침(통과 기준)**
+
+- **BAT-170 §15(redis를 서버 묶음 밖에)**: `next.config.ts`의 `serverExternalPackages`에 `redis`와 하위 다섯을 넣었다. 정본 docs/frontend.md §5.18 '앱 서버 실행'(654f79ae)과 같다.
+  - 밖에 둔 패키지가 standalone `node_modules`에 실려 실행 때 불리는지는 J-1(`standalone-scm.build.test.mjs`)이 본다. 이 시험은 위 나누기대로 `ci-web` `reflow` 잡이 운영 빌드 뒤 돈다. 화면 쪽 잇기 문제는 없다.
+- **BAT-165 §18(머리 검색창 자동완성을 늦게)**: 자동완성 모듈(거르기·후보 바꾸기)과 api-client·품질 모듈이 모두 `import()`로만 닿는다(`search-source.tsx:19·48·51`).
+  - ds `WebSearchBox`의 `onActivate`(초점·첫 입력)는 `WebShell`의 `onSearchActivate`로 이어진다. `WebShell`이 그리는 검색창은 하나뿐(`WebShell.tsx:232~239`)이라 휴대폰·데스크톱이 같은 길이다. `peek`도 `warm()`을 부르므로 `onActivate`를 놓쳐도 첫 입력에서 가져온다.
+  - 모듈이 오기 전 `peek`는 `undefined`라 ds가 `load`로 넘긴다. `load`는 모듈을 기다린 뒤 최소 길이·거르기를 지금 규칙대로 본다. 그래서 늦게 싣기 때문에 최소 길이 미만 입력이 서버로 가는 길은 없다. 모듈을 못 받으면 `null`(창 없음)이고 던지지 않는다.
+  - 셸 쪽에서 자동완성 모듈을 정적으로 가져오는 곳은 없다. 남은 정적 가져오기는 `/search` 화면의 `SearchResults.tsx:14` 하나다(`/search` 한도 200kB 안).
+  - 바깥 경계 시험(`search-quality.spec`의 '첫 화면 HTML 스크립트에 자동완성 덩어리 없음·포커스 뒤 한 번')은 `budgets` 잡이 돈다.
+- **통과 기준 판정: 코드로는 맞다. 값은 아직 게이트로 확인되지 않았다.**
+  - `fd3903fa` 글의 값은 구현 담당이 따로 만든 산출 폴더(`.next-bat165`)에서 같은 셈으로 잰 것이다. 홈 175.6kB(한도 175.7), `/my/tickets` 161.5kB(한도 161.6)로 둘 다 여유가 0.1kB다. 공연 상세는 193.0kB(한도 203.3)다.
+  - 두 몫을 따로 재지는 않았다. `36f62fbc`만 넣은 판에서는 줄어듦이 보이지 않았다(그 커밋 글).
+  - 여유가 이만큼 작아서, 웨이브 끝 `node lib/docker.mjs budgets`(CI `web / budgets`) 값으로 다시 보아야 통과라 할 수 있다.
+- **CI 상태 메모(새 지적 아님)**: 나누기는 맞다. 다만 지금 가지에서 각 잡이 고른 시험 가운데 BAT-170 '시험 이의'에 열려 있는 것이 있다.
+  - `*.int`의 `cache-cluster` 셋(O-1)은 `ci-node`가 돈다.
+  - `*.build`의 `start-cache` R170-8 하나(O-2)는 `ci-web` `reflow`가 돈다.
+  - 그 둘이 풀리기 전에 합치면 두 잡이 빨간불이다. 이미 '시험 이의'에 적혀 있어 다시 지적하지 않는다.
+
+**새 지적**(높음·보안이 아니므로 정리 목록 후보)
+
+| 번호 | 심각도 | 묶음 | 위치(63adc226) | 무엇이 · 정본 어디와 | 재현 시험 아이디어 |
+| --- | --- | --- | --- | --- | --- |
+| W7L2-W9 | 낮음 | BAT-170 | `.github/workflows/ci-web.yml:401`, `apps/web/test-int/standalone-scm.build.test.mjs:32` | `[ASVS v5.0.0-13.4.1]` 시험이 이제 `ci-web` `reflow` 잡에서만 돈다. 그 단계에는 JUnit 보고서 환경 값이 없고, `ci-web`에는 ASVS 리포트 단계도 없다. 그래서 ASVS 태그 요약(`ci-node`의 `asvs-report.mjs`)에서는 이 행이 다시 '미실행'이다(W5가 막으려던 것, docs/architecture.md §8.2 4번) | `reflow` 잡의 `test:build` 단계에 JUnit `NODE_OPTIONS`를 주고 그 보고서를 올리거나 요약에 합친다. 또는 정본에 'ASVS 리포트는 ci-node 보고서만'이라고 적는다. `tools/ci/web-test-split.test.mjs`에 '`test:build` 단계에도 JUnit 환경 값'을 더할 수 있다 |
+| W7L2-W10 | 낮음 | BAT-165 | `apps/web/src/widgets/app-shell/model/search-quality.ts:51~60`, `apps/web/src/widgets/app-shell/model/search-quality-client.ts:13` | **`/_t/rum` 본문의 겉모양과 `route`가 같은 경로의 다른 보내는 쪽과 다르다.** ① 품질 묶음은 RumSample 표본 **하나**(객체)를 보낸다. 같은 경로의 유일한 다른 보내는 쪽인 `@peaket/telemetry` lite 묶음기는 표본 **배열**을 보낸다(`lite.ts:118~158`, 시험 `'[]'`). ADR-0271 결정 20은 '따로 본문 꼴을 두지 않는다'인데, 코드 주석과 T-22 머리(:7)가 적은 '수집기는 표본 하나 또는 배열을 받는다'는 정본(asyncapi·frontend.md §5.16·observability §11)에 없다. 수집기를 정본대로 배열로 만들면 이 묶음을 버릴 수 있다. ② 머리 검색창의 사건(자동완성 보임·선택)은 모든 화면에서 같은 모듈로 모이는데, `route`가 늘 `/search`다(`createSearchQuality`에 `route`를 주지 않음). RumSample의 `route`는 보낸 화면의 경로 템플릿(frontend.md §5.16 표)이라, 공연 상세에서 모은 수도 `/search`로 실린다 | 본문을 `JSON.stringify([sample])`로 하거나, 정본(frontend.md §5.16)에 '본문은 표본 하나 또는 배열'을 적는다. `route`는 lite의 `routeTemplate`로 보낼 때의 경로 템플릿을 넣는다. 시험: T-22에서 `JSON.parse(body)`가 배열이고 원소마다 RumSample 검사를 통과하는지, 머리 검색창 사건만 있는 묶음을 `/events/[id]`에서 보내면 `route`가 그 템플릿인지 |
+
+- **판정**: W1·W5·W6·W2·W7 고침 확인. 새 지적은 낮음 2(W9·W10)이고 높음·보안은 없다. 첫 JS 고침은 코드상 정본대로이고 값의 통과는 `budgets` 게이트 확인이 남았다.
