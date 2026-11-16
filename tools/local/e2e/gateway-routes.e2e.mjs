@@ -43,6 +43,45 @@ test('W7-WIR-01 Authorization 없이 DPoP 머리만 단 POST /v1/scanner/token�
   assert.equal(h['x-user-id'], undefined, '토큰 없는 요청에 신원 머리가 실렸다');
 });
 
+// ===================== 대조 리뷰 RV-03·RV-04(W7-WIR-01 바로 다음) =====================
+
+test('RV-03 OPTIONS /v1/webhooks/toss(화면 출처의 사전 요청 꼴)는 게이트웨이 404 Problem이고 대역에 닿지 않으며 CORS 허용 머리가 없다', async () => {
+  const r = await send(c, 'partner-api', { method: 'OPTIONS', path: '/v1/webhooks/toss', headers: edge(c, nextIp(), { origin: c.origins.partner, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' }) });
+  assertGatewayProblem(r, 404, 'Not Found', 'OPTIONS /v1/webhooks/toss');
+  assert.equal(r.headers['access-control-allow-origin'], undefined, '외부 수신 경로가 CORS 허용을 낸다');
+});
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const minuteOf = (t = Date.now()) => Math.floor(t / 60_000);
+/** 분의 50초가 지났으면 다음 분까지 기다린다(계정당 60회/분 창, BAT-060 계획 §6) */
+async function windowStart() {
+  const s = new Date().getUTCSeconds() + new Date().getUTCMilliseconds() / 1000;
+  if (s > 50) await sleep((60 - s) * 1000 + 300);
+  return minuteOf();
+}
+
+test('RV-04 D-T50 ① 한 계정의 후기 읽기(GET /v1/reviews/{reviewId}, optional 라우트)도 같은 버킷에 세어 gw-fan-api(GET /v1/tickets)와 섞은 61번째가 429다', async () => {
+  const minute = await windowStart();
+  const sub = nextSub();
+  const ip = '198.51.100.97';
+  const rs = [];
+  for (let i = 0; i <= 60; i++) rs.push(await send(c, 'api', { path: i % 2 ? `/v1/reviews/r-${RUN}` : '/v1/tickets', headers: edge(c, ip, { authorization: `Bearer ${accessToken(c, 'gw-fan', sub)}` }) }));
+  assert.equal(minuteOf(), minute, '분 창 경계를 넘었다(다시 하지 않고 실패로 본다)');
+  rs.slice(0, 60).forEach((r, i) => assert.ok(r.status < 400, `${i + 1}번째: ${r.status} ${r.text.slice(0, 200)}`));
+  assertGatewayProblem(rs[60], 429, 'Too Many Requests', '61번째');
+});
+
+test('RV-04 토큰 없는 후기 읽기(GET /v1/reviews/{reviewId}) 61번은 모두 통과한다(X-User-Id가 없어 세지 않는다)', async () => {
+  const minute = await windowStart();
+  const rs = [];
+  for (let i = 0; i <= 60; i++) rs.push(await send(c, 'api', { path: `/v1/reviews/r-${RUN}-${i}`, headers: edge(c, '198.51.100.98') }));
+  assert.equal(minuteOf(), minute, '분 창 경계를 넘었다(다시 하지 않고 실패로 본다)');
+  rs.forEach((r, i) => {
+    assert.ok(r.status < 400, `${i + 1}번째: ${r.status} ${r.text.slice(0, 200)}`);
+    assert.equal(echoed(r)['x-user-id'], undefined, `${i + 1}번째: 신원 머리가 실렸다`);
+  });
+});
+
 // ===================== 인증 종류(W7-COR-04 · W7-WIR-05 · RV-04) =====================
 
 test('W7-COR-04 ticket:buy 없는 토큰의 GET /v1/orders·GET /v1/orders/{orderId}·GET …/payment-status는 대역에 닿고, 같은 토큰의 POST /v1/orders는 403이다', async () => {

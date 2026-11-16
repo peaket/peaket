@@ -74,7 +74,7 @@ function openapiOf(spec, { version = '9.8.10-test', rules = RULES, description =
       methods = v.methods;
     }
     const entries = typeof methods === 'string' ? methods.split(/\s+/).filter(Boolean).map((m) => [m, {}]) : Object.entries(methods);
-    for (const [m, o] of entries) item[lc(m)] = op({ ...(o?.cdn ? { 'x-peaket-cdn-cache': true } : {}), ...(o?.security ? { security: o.security } : {}), ...(o?.scopes ? { 'x-peaket-scopes': o.scopes } : {}) });
+    for (const [m, o] of entries) item[lc(m)] = op({ ...(o?.cdn ? { 'x-peaket-cdn-cache': true } : {}), ...(o?.security ? { security: o.security } : {}), ...(o?.scopes ? { 'x-peaket-scopes': o.scopes } : {}), ...(o?.tags ? { tags: o.tags } : {}) });
     paths[p] = item;
   }
   return {
@@ -218,6 +218,17 @@ function samplePaths(openapi, host) {
   return [...out].sort();
 }
 const fmt = (s) => [...s].sort().join(',') || '(없음)';
+/**
+ * 외부 수신 작업(서버끼리 부름): openapi 태그 webhooks이고 security: [](infra §4.1 '경로별 메서드 생성기'의 OPTIONS 문장, 대조 리뷰 RV-03).
+ * 이 작업만 있는 경로에는 OPTIONS를 만들지 않는다
+ */
+const isServerToServer = (op) => (op?.tags ?? []).includes('webhooks') && Array.isArray(op?.security) && op.security.length === 0;
+/** 그 호스트·경로에 브라우저가 부를 계약 작업(외부 수신이 아닌 작업)이 있는가 */
+function browserFacing(openapi, host, path) {
+  for (const [p, item] of Object.entries(openapi.paths))
+    if (hostOf(openapi, p) === host && templateRe(p).test(path)) for (const m of opMethods(item)) if (!isServerToServer(item[lc(m)])) return true;
+  return false;
+}
 
 /** 경로마다 받는 메서드가 정확히 계약의 메서드 + OPTIONS(계약이 받는 경로일 때)인지 본다 */
 function assertMethodsExact(openapi, routes, gw, label = '') {
@@ -227,7 +238,7 @@ function assertMethodsExact(openapi, routes, gw, label = '') {
   assert.ok(samples.length > 0, `${label}${gw}: 흉내 볼 계약 경로가 없다`);
   for (const path of samples) {
     const want = allowedByContract(openapi, host, path);
-    if (want.size) want.add('OPTIONS');
+    if (want.size && browserFacing(openapi, host, path)) want.add('OPTIONS');
     const got = allowedByRoutes(api, host, path);
     for (const m of [...METHODS, 'TRACE']) {
       assert.equal(got.has(m), want.has(m), `${label}${gw} ${m} ${path}: 라우트 ${got.has(m) ? '받음' : '안 받음'}, 계약 ${want.has(m) ? '받음' : '안 받음'}(라우트 ${fmt(got)} / 계약+OPTIONS ${fmt(want)})`);
@@ -624,6 +635,27 @@ test("W7-CON-02 infra §4.1 '경로별 시간 상한' 원천 규칙의 timeouts�
   for (const rule of live) assert.deepEqual(rule.timeouts, { request: '0s' }, '관제 SSE 규칙의 시간 상한');
 });
 
+test('RV-03 외부 수신 작업(태그 webhooks·security: [])의 경로에는 OPTIONS 맞춤을 만들지 않고, security: []인 다른 공개 작업과 태그만 webhooks이고 인증이 있는 작업에는 만든다', () => {
+  const openapi = openapiOf({
+    '/v1/webhooks/toss': { POST: { tags: ['webhooks'], security: [] } },
+    '/v1/webhooks/signed': { POST: { tags: ['webhooks'], security: [{ partnerCookie: [] }] } },
+    '/v1/partner/auth/invitation-acceptances': { POST: { security: [] } },
+  });
+  const sources = {
+    'gw-partner': [
+      sourceRoute('gw-partner', 'gw-partner-webhooks', [{ prefixes: ['/v1/webhooks/toss'], backend: 'payment-svc', app: 'partner' }], { auth: 'public' }),
+      sourceRoute('gw-partner', 'gw-partner-api', [{ prefixes: ['/v1/webhooks/signed'], backend: 'payment-svc', app: 'partner' }], { auth: 'token' }),
+      sourceRoute('gw-partner', 'gw-partner-public', [{ prefixes: ['/v1/partner/auth/invitation-acceptances'], backend: 'identity-svc', app: 'partner' }], { auth: 'public' }),
+    ],
+  };
+  const routes = apiRoutes(routesByGateway(generated(openapi, sources).files)['gw-partner'], 'gw-partner');
+  const host = 'partner-api.peaket.example';
+  assert.deepEqual([...allowedByRoutes(routes, host, '/v1/webhooks/toss')].sort(), ['POST'], '외부 수신 경로에 OPTIONS가 있다');
+  assert.deepEqual([...allowedByRoutes(routes, host, '/v1/webhooks/signed')].sort(), ['OPTIONS', 'POST'], '인증 있는 webhooks 태그 작업에 OPTIONS가 없다');
+  assert.deepEqual([...allowedByRoutes(routes, host, '/v1/partner/auth/invitation-acceptances')].sort(), ['OPTIONS', 'POST'], '공개 작업에 OPTIONS가 없다');
+  assertMethodsExact(openapi, routesByGateway(generated(openapi, sources).files)['gw-partner'], 'gw-partner');
+});
+
 test("HOT-410 infra §4.1 '생성기가 멈추는 경우' /internal/로 시작하는 경로를 맡으면 2로 끝난다", () => {
   const openapi = openapiOf({ '/v1/partner/events/{eventId}': 'PATCH', '/internal/jwks/admin.json': { methods: 'GET', servers: ['https://partner-api.peaket.example'] } });
   const sources = {
@@ -922,17 +954,29 @@ test('[ASVS v5.0.0-3.5.3] 저장소의 생성 라우트에서 계약에 없는 �
   }
 });
 
-test('D-T42 ③ 저장소의 생성 라우트(다섯 게이트웨이 각각)에 계약 경로마다 OPTIONS 조건이 있다', () => {
+test('D-T42 ③ 저장소의 생성 라우트(다섯 게이트웨이 각각)에 계약 경로마다 OPTIONS 조건이 있다(외부 수신만 있는 경로는 빼고, RV-03)', () => {
   const by = routesByGateway(repoGenerated());
   const openapi = repoOpenapi();
   for (const gw of GATEWAYS) {
     const host = API_HOST[gw];
-    const paths = Object.keys(openapi.paths).filter((p) => hostOf(openapi, p) === host);
+    const paths = Object.keys(openapi.paths).filter((p) => hostOf(openapi, p) === host && browserFacing(openapi, host, p.replace(/\{[^}]+\}/g, 'a1')));
     assert.ok(paths.length > 0, `${gw}: 계약 경로가 없다`);
     for (const p of paths) {
       const got = allowedByRoutes(apiRoutes(by[gw], gw), host, p.replace(/\{[^}]+\}/g, 'a1'));
       assert.ok(got.has('OPTIONS'), `${gw} ${p}: OPTIONS 조건이 없다(${fmt(got)})`);
     }
+  }
+});
+
+test('RV-03 저장소: 외부 수신 작업(태그 webhooks·security: [])만 있는 경로(웹훅 둘)의 생성 라우트에는 OPTIONS 맞춤이 없다', () => {
+  const openapi = repoOpenapi();
+  const by = routesByGateway(repoGenerated());
+  const s2s = Object.keys(openapi.paths).filter((p) => opMethods(openapi.paths[p]).length && opMethods(openapi.paths[p]).every((m) => isServerToServer(openapi.paths[p][lc(m)])));
+  assert.deepEqual(s2s.sort(), ['/v1/webhooks/portone', '/v1/webhooks/toss'], '외부 수신만 있는 경로');
+  for (const p of s2s) {
+    const gw = GATEWAYS.find((g) => API_HOST[g] === hostOf(openapi, p));
+    const got = allowedByRoutes(apiRoutes(by[gw], gw), API_HOST[gw], p);
+    assert.deepEqual([...got].sort(), ['POST'], `${gw} ${p}: 받는 메서드 ${fmt(got)}`);
   }
 });
 

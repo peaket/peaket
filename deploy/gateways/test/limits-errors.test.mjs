@@ -26,7 +26,17 @@ const API_HOST = { 'gw-queue': 'queue.peaket.example', 'gw-fan': 'api.peaket.exa
 /** 게이트웨이가 만든 응답의 상태와 HTTP 상태 문구(docs/infra.md §4.1 '게이트웨이 오류의 Problem') */
 const PROBLEM_TITLES = { 404: 'Not Found', 413: 'Content Too Large', 429: 'Too Many Requests', 503: 'Service Unavailable' };
 /** 전역 한도를 거는 원천 라우트(그 밖의 라우트에는 걸지 않는다, infra §4.1 '전역 레이트 리밋 걸기') */
-const GLOBAL_ROUTES = ['gw-fan-api', 'gw-fan-identity', 'gw-partner-api'];
+/**
+ * 전역 한도를 거는 라우트(infra §4.1 '전역 레이트 리밋 걸기', 대조 리뷰 RV-04): gw-fan은 이름표 peaket.io/auth가 token·optional인 라우트
+ * (라우트 이름 목록이 아니라 이름표로 고른다. 새로 나눈 라우트가 빠지지 않게), gw-partner는 gw-partner-api(나뉜 라우트 포함). 그 밖에는 걸지 않는다
+ */
+const AUTH_LABEL = 'peaket.io/auth';
+const globalTarget = (r) => {
+  const parents = (r.spec?.parentRefs ?? []).map((p) => p.name);
+  if (parents.includes('gw-fan')) return ['token', 'optional'].includes(r.metadata?.labels?.[AUTH_LABEL]);
+  if (parents.includes('gw-partner')) return sourceName(r) === 'gw-partner-api';
+  return false;
+};
 const WEBHOOK_ROUTE = 'gw-partner-webhooks';
 const WEBHOOK_PATHS = ['/v1/webhooks/toss', '/v1/webhooks/portone'];
 const WEBHOOK_BODY_BYTES = 65536;
@@ -278,12 +288,32 @@ test('D-T50 ⑤ gw-queue·gw-fan-buy·gw-fan-search·gw-ops·gw-scanner·gw-part
   }
   let checked = 0;
   for (const r of routes()) {
-    if (GLOBAL_ROUTES.includes(sourceName(r))) continue;
+    if (globalTarget(r)) continue;
     const gs = globalRules(effective('BackendTrafficPolicy', r));
-    assert.deepEqual(gs, [], `${r.metadata?.name}(원천 ${sourceName(r)}): 전역 한도가 닿는다`);
+    assert.deepEqual(gs, [], `${r.metadata?.name}(원천 ${sourceName(r)}, 이름표 ${r.metadata?.labels?.[AUTH_LABEL]}): 전역 한도가 닿는다`);
     checked++;
   }
   assert.ok(checked > 0, '본 라우트가 없다');
+});
+
+test('RV-04 D-T50 ⑤ gw-fan에서 이름표가 token·optional인 라우트마다 계정당 60회/분 정책의 대상이고, token-buy·public 라우트는 대상이 아니다(생성 라우트의 이름표로 고름)', () => {
+  requireDefinitions();
+  const fan = routesOf('gw-fan').filter((r) => r.metadata?.labels?.[AUTH_LABEL]);
+  const want = fan.filter((r) => ['token', 'optional'].includes(r.metadata.labels[AUTH_LABEL]));
+  const not = fan.filter((r) => ['token-buy', 'public'].includes(r.metadata.labels[AUTH_LABEL]));
+  for (const label of ['token', 'optional']) assert.ok(want.some((r) => r.metadata.labels[AUTH_LABEL] === label), `gw-fan에 이름표 ${label}인 라우트가 없다`);
+  for (const label of ['token-buy', 'public']) assert.ok(not.some((r) => r.metadata.labels[AUTH_LABEL] === label), `gw-fan에 이름표 ${label}인 라우트가 없다`);
+  const ids = new Set();
+  for (const r of want) {
+    const sixty = globalRules(effective('BackendTrafficPolicy', r)).filter((g) => g.rule.limit?.requests === 60 && g.rule.limit?.unit === 'Minute' && g.rule.shared === true && byUser(g.rule));
+    assert.equal(sixty.length, 1, `${r.metadata?.name}(${r.metadata.labels[AUTH_LABEL]}): 계정당 60회/분 shared 규칙이 하나가 아니다(${sixty.length})`);
+    ids.add(ruleId(sixty[0]));
+  }
+  assert.equal(ids.size, 1, `token·optional 라우트가 한 버킷을 쓰지 않는다: ${[...ids]}`);
+  for (const r of not) assert.deepEqual(globalRules(effective('BackendTrafficPolicy', r)), [], `${r.metadata?.name}(${r.metadata.labels[AUTH_LABEL]}): 전역 한도가 닿는다`);
+  // 후기 읽기(optional, GET /v1/reviews/{reviewId})도 그 버킷에 센다
+  const review = applyingGlobal('gw-fan', 'GET', '/v1/reviews/r1', 'gw-fan-optional');
+  assert.ok(review.some((g) => ids.has(ruleId(g))), 'GET /v1/reviews/{reviewId}에 계정당 60회/분이 닿지 않는다');
 });
 
 test('D-T50 ⑤ 전역 한도 규칙은 모두 X-User-Id Distinct로 골라 토큰 없는 요청(머리 없음)은 세지 않는다', () => {
@@ -386,6 +416,23 @@ test("HOT-410 infra §4.1 '웹훅 경로' 웹훅 두 경로는 gw-partner partne
   const partner = routeOf('gw-partner', 'POST', '/v1/partner/productions/p1/events', 'gw-partner-api');
   const sp = effective('SecurityPolicy', partner.route);
   assert.ok(sp.some((p) => (p.spec?.jwt?.providers ?? []).length > 0), 'gw-partner-api에 토큰 확인이 없다');
+});
+
+test('RV-03 웹훅 두 경로의 GET·PUT·PATCH·DELETE·OPTIONS는 맞는 규칙이 없거나 404 Problem 직접 응답 규칙에만 맞는다(메서드 다섯 각각)', () => {
+  requireDefinitions();
+  for (const path of WEBHOOK_PATHS) {
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+      const hit = routeFor('gw-partner', 'partner-api.peaket.example', method, path);
+      if (!hit) continue;
+      const where = `${method} ${path}(${hit.route.metadata?.name})`;
+      assert.deepEqual(hit.rule.backendRefs ?? [], [], `${where}: 서비스로 넘긴다(외부 수신 경로에는 계약 메서드 밖을 받지 않는다)`);
+      const direct = (hit.rule.filters ?? []).filter((f) => f.type === 'ExtensionRef' && f.extensionRef?.kind === 'HTTPRouteFilter').map((f) => named('HTTPRouteFilter', f.extensionRef.name)?.spec?.directResponse);
+      assert.equal(direct.length, 1, `${where}: 직접 응답 필터가 하나가 아니다`);
+      assert.equal(Number(direct[0]?.statusCode), 404, `${where}: 직접 응답 상태`);
+      assert.equal(direct[0]?.contentType, 'application/problem+json', `${where}: 직접 응답 형식`);
+      assert.deepEqual(JSON.parse(findKey(direct[0]?.body ?? {}, 'inline')[0] ?? 'null'), { type: 'about:blank', title: 'Not Found', status: 404 }, `${where}: 직접 응답 본문`);
+    }
+  }
 });
 
 test('D-T50 ⑥ 웹훅 라우트의 로컬 한도는 sourceCIDR Distinct IPv4·IPv6 두 규칙이고 둘 다 100·Second, 전역 한도·토큰 확인·출처 확인·CORS가 없다', () => {
