@@ -882,6 +882,9 @@ test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개�
     ['ⓒ 다섯 모두 0.0.0.0', cf3Bindings(ok, '0.0.0.0'), true],
     ['ⓔ 30442/tcp 공개 둘(127.0.0.1, 0.0.0.0)', secondOutside('0.0.0.0'), true],
     ['ⓔ 30442/tcp 공개 둘(127.0.0.1, 빈 값)', secondOutside(''), true],
+    // 공개의 이 PC 포트가 수가 아닌 꼴(검증 V-12): 접속 정보에 NaN·0이 실리지 않고 멈춘다
+    ['ⓕ 30442/tcp HostPort 빈 값', { ...cf3Bindings(ok), '30442/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }] }, false],
+    ['ⓕ 30442/tcp HostPort 수가 아님(abc)', { ...cf3Bindings(ok), '30442/tcp': [{ HostIp: '127.0.0.1', HostPort: 'abc' }] }, false],
   ];
   for (const [what, bindings, mentionsLoopback] of cases) {
     let err;
@@ -909,4 +912,35 @@ test('CF3-07 HOT-400 접속 정보(gatewayContract)의 ports는 받은 공개 �
   // gateways가 실제로 잇는 길: 노드 컨테이너의 공개 → gatewayHostPorts → gatewayContract
   const published = gatewayHostPorts(cf3Bindings([20005, 25000, 18449, 31001, 20001]));
   assert.deepEqual(gatewayContract({ ...base, ports: published }).ports, ports, '공개에서 읽은 포트가 접속 정보에 그대로 실리지 않는다');
+});
+
+// 검증 V-17(계획 docs/review/plans/W8-L1-ci-fix3.md '검증'): gateways가 접속 정보 포트를 시작 값 + 차례로 계산해도 단위 시험이 못 잡았다.
+// 계획 §2 '나'의 5: gateways는 포트를 kind 노드 컨테이너의 실제 공개에서 읽고, 매핑이 없거나 밖에 열렸으면 멈춘다(클러스터에 무엇을 올리기 전에).
+// docker가 필요한 흐름이라 cluster.mjs 글자를 읽는다(함수·변수 이름이 바뀌어도 뜻이 같으면 통과하게, 위 'HOT-400 cluster.mjs에 gateways 명령' 시험과 같은 꼴)
+test('CF3-08 HOT-400 gateways는 접속 정보 포트를 노드 공개에서 읽고 클러스터에 올리기 전에 확인한다 [ASVS v5.0.0-13.4.5]', () => {
+  const src = readFileSync(join(HERE_DIR, 'cluster.mjs'), 'utf8');
+  const start = src.search(/^async function gateways\(\)\s*\{/m);
+  assert.ok(start >= 0, 'cluster.mjs에 async function gateways()가 없다');
+  const end = src.indexOf('\n}\n', start);
+  assert.ok(end > start, 'gateways() 본문의 끝을 찾지 못했다');
+  const body = src.slice(start, end);
+  // ⓐ 공개를 읽는 함수의 결과를 gatewayHostPorts에 넘긴다. 그 함수는 docker inspect로 노드 컨테이너의 PortBindings를 읽는다
+  const call = /(?:const|let)\s+(\w+)\s*=\s*gatewayHostPorts\(\s*(?:await\s+)?(\w+)\(\s*\)\s*\)/.exec(body);
+  assert.ok(call, 'gateways()가 gatewayHostPorts(<공개 읽기>())의 결과를 변수에 받지 않는다');
+  const [, portsVar, readerName] = call;
+  const reader = new RegExp(String.raw`(?:async\s+)?function\s+${readerName}\s*\(\s*\)\s*\{[\s\S]*?\n\}`).exec(src);
+  assert.ok(reader, `공개 읽기 함수 ${readerName}()을 cluster.mjs에서 찾지 못했다`);
+  assert.match(reader[0], /'inspect'/, `${readerName}()이 docker inspect를 부르지 않는다`);
+  assert.match(reader[0], /PortBindings/, `${readerName}()이 노드 컨테이너의 PortBindings를 읽지 않는다`);
+  assert.match(reader[0], /-control-plane/, `${readerName}()이 kind 노드 컨테이너(<클러스터>-control-plane)를 보지 않는다`);
+  // ⓑ 그 결과가 그대로 접속 정보의 ports가 된다
+  const contract = /gatewayContract\(\s*\{([\s\S]*?)\}\s*\)\s*;/.exec(body);
+  assert.ok(contract, 'gateways()가 gatewayContract({ … })를 부르지 않는다');
+  const portsField = portsVar === 'ports' ? /(?:^|[\s,{])ports\s*(?:[,}]|$|:\s*ports\b)/ : new RegExp(String.raw`(?:^|[\s,{])ports\s*:\s*${portsVar}\b`);
+  assert.match(contract[1], portsField, `gatewayContract의 ports가 gatewayHostPorts 결과(${portsVar})가 아니다`);
+  // ⓒ 공개 확인(멈춤)은 클러스터에 처음 무엇을 올리기(첫 kubectl) 전이다
+  const firstKubectl = body.search(/\bkubectl\(/);
+  assert.ok(firstKubectl < 0 || call.index < firstKubectl, '공개 확인이 첫 kubectl 부르기보다 뒤다(매핑 없는 클러스터에 게이트웨이를 다 올린 뒤에야 멈춘다)');
+  // ⓓ 시작 값으로 계산하지 않는다
+  for (const re of [/\bgatewayBasePort\(/, /\bGATEWAY_BASE_PORT\b/, /PEAKET_GATEWAY_BASE_PORT/]) assert.doesNotMatch(body, re, `gateways() 본문이 시작 값(${re.source})을 쓴다`);
 });

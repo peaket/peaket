@@ -809,6 +809,13 @@ test('CF3-03 HOT-400 ci-kind는 포트 전달 없이 게이트웨이 시험 넷�
     return found[0];
   });
   for (const [i, x] of at.entries()) assert.ok(x.step > gateways, `${FILES[i]}.e2e.mjs가 cluster.mjs gateways 단계보다 앞이다`);
+  // gateways 단계와 e2e 줄이 든 단계는 늘 돌고 실패하면 잡을 멈춘다(검증 V-20, W8-L1-ci-fix2 CF2-03과 같은 꼴)
+  for (const i of new Set([gateways, ...at.map((x) => x.step)])) {
+    const what = i === gateways ? 'cluster.mjs gateways 단계' : 'e2e 단계';
+    for (const key of ['if', 'continue-on-error']) assert.ok(!steps[i].keys.has(key), `${what}에 ${key}가 있다(건너뛰거나 실패를 넘길 수 있다)`);
+    assert.doesNotMatch(steps[i].run ?? '', /\bset\s+\+e\b/, `${what}의 run에 set +e가 있다`);
+    assert.doesNotMatch(steps[i].run ?? '', /\|\|\s*true\b/, `${what}의 run에 || true가 있다`);
+  }
   for (let i = 1; i < at.length; i++) {
     const [a, b] = [at[i - 1], at[i]];
     assert.ok(a.step < b.step || (a.step === b.step && a.line < b.line), `${FILES[i - 1]} → ${FILES[i]} 차례가 아니다`);
