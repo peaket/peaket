@@ -839,3 +839,44 @@ DB·Kafka가 있어야 잡히거나, 단위 원문 시험과 따로 실제 DB가
 
 - **이름만 달린 시험**: 이 묶음이 쓴 시험에는 없다. 기존 `J-T26 ②`(위)가 판정 기준을 단언하지 않는다. 기존 `J-T26 명단 보기는 가린 값만…`·`J-T26 실무자는…`·`J-T26 CSV는 수식…`은 세부 번호 없이 ID만 단 시험이다(계획 §6이 적은 장부 'ID만'과 같다).
 - **처리**: 살아남은 둘(M28·M33)은 시험 담당이 위 단언으로 시험을 더한다. 높음·보안·통과 기준 지적은 아니지만 '자주 놓친 결함'의 시작 파일 조립이라 이 웨이브 안에서 다루기를 권한다(감독이 정한다). Docker 대기 12개는 잠금 아래 돌린 뒤 이 절에 결과를 더한다.
+
+### 2단계(Docker·고친 곳)
+
+- **누가·언제·바탕**: 검증 담당(세션 `l3w7-audit-verify`), 2026-11-16 12:00~12:12 KST, 감독이 잡은 도커 잠금 아래. HEAD `a311e5c1`(가지를 origin/develop 위로 올린 뒤, 웨이브 끝 리뷰 반영 C1·C4·K1·K2·K6·K9와 검증 M28·M33 시험이 들어온 상태). 방법은 1단계와 같다(하나 넣고 돌리고 `git checkout -- <파일>`로 되돌림, 시험 파일은 안 건드림).
+- **기준선(바꾸지 않은 상태)**: core-svc `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts` 파일 5개·시험 16개 모두 통과(29초), purchase-svc `npx vitest run --config vitest.integration.config.mjs test-int/attendee-reader.int.test.ts` 1개 통과.
+- **D02는 해당 없음**: 겨누던 `source_ip` NOT NULL CHECK가 0021에서 빠졌다(리뷰 K1: 칸만 더하고 새 행의 접속지는 앱이 강제한다). 앱 쪽 검사를 빼는 변이는 아래 N05로 대신 넣었다. D01은 모양 CHECK가 `NOT VALID`가 된 뒤에도 새 행에는 검사가 걸리므로 그대로 넣었다.
+- 단위 변이(N)는 1단계의 명단 묶음(지금 시험 55개)·후기 묶음(35개)으로 돌렸다.
+
+| 번호 | 파일:줄 | 바꾼 것 | 돌린 시험 | 결과(잡은 시험) |
+| --- | --- | --- | --- | --- |
+| D01 | core `migrations/0021_attendee_access_audit_list.sql:14` | LIST 모양 CHECK에서 `reason is null`을 뺀다 | 통합 `test-int/export-audit.int.test.ts` | 잡힘(⑤⑥ 모양이 틀리면 CHECK가 거절한다) |
+| D02 | — | (`source_ip` CHECK가 없어져 해당 없음) | — | 해당 없음 |
+| D03 | core `export/adapters/db/schema.ts:53` | `inet('source_ip')`를 `inet('client_ip')`로 | 통합 `export-audit.int` | 잡힘(시험 넷: ⑥ 롤백, ⑤⑥ CHECK, core_partner 권한, R2 K1 접속지) |
+| D04 | core `export/adapters/db/drizzle-export-store.ts:31·43` | 이력을 따로 트랜잭션으로 먼저 커밋 | 통합 `export-audit.int` | 잡힘(⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다) |
+| D05 | core `migrations/0022_review_role_grants.sql:7` | core_app review UPDATE 칸에서 `account_id`·`basis_order_id`를 뺀다 | 통합 후기 넷(`review-withdrawn`·`review-grants`·`review`·`review-withdrawn-consumer`) | 잡힘(COV2-06 ⑪, ⑫) |
+| D06 | `0022_review_role_grants.sql:22` | core_maintenance review UPDATE 칸에서 `updated_at`을 뺀다 | 통합 후기 셋 | 잡힘(COV2-06 ⑯) |
+| D07 | `0022_review_role_grants.sql:19` | core_app `held_event` INSERT를 뺀다 | 통합 `review-withdrawn-consumer` | 잡힘(COV2-06 ⑫) |
+| D08 | `0022_review_role_grants.sql:7` | review에 칸 없는 UPDATE·DELETE | 통합 후기 셋 | 잡힘(COV2-06 ⑮) |
+| D09 | core `review/adapters/db/drizzle-review-store.ts:257` | 익명화 `where`가 계정 조건 없이 모든 행을 바꾼다 | 통합 후기 셋 | 잡힘(COV2-06 ⑪) |
+| D10 | core `consumers/start.ts:47` | 보류 저장소를 `pidFreeHeldEventStore` 없이 건다 | 통합 `review-withdrawn-consumer`(실제 Kafka) | 잡힘(COV2-06 ⑫) |
+| D11 | `consumers/start.ts:44` | 소비자 그룹을 `core-svc.<환경>`으로 | 통합 `review-withdrawn-consumer` | 잡힘(COV2-06 ⑫) |
+| D12 | purchase `booking/adapters/db/drizzle-attendee-reader.ts:69` | 걸러 낸 뒤 남은 행 기준으로 커서를 만든다 | 통합 purchase `attendee-reader.int` | 잡힘('처음부터 통과'였던 A2-17 J-T26 ④ purchase 시험이 실패를 봤다) |
+| D13 | `0022_review_role_grants.sql:30` | `review_account_idx` 색인을 뺀다(K2) | 단위 `test/review-grants.test.ts` + 통합 `review-withdrawn.int` | 잡힘(⑬, K2 색인 원문, K2 실행 계획 `review_account_idx`) |
+| N01 | core `export/domain/export.ts:35` | 원천 503에서 Retry-After를 뺀다(C1) | 명단 묶음 | 잡힘(C4·C1 시험 넷) |
+| N02 | `export.ts:35` | 503 제목에 목록 값 대신 사정(detail)을 쓴다(C1) | 명단 묶음 | 잡힘(C1 시험 셋) |
+| N03 | core `export/application/attendee-exports.ts:52` | 유스케이스가 `retryAfterSeconds`를 넘기지 않는다(C1) | 명단 묶음 | 잡힘(C1 시험 셋) |
+| N04 | core `export/adapters/http-attendee-source.ts:24` | 원천의 빈 문자열 `nextCursor`를 받는다(`.min(1)` 뺌, C4) | 명단 묶음 | 잡힘(A2-17 C4 빈 문자열 nextCursor…) |
+| N05 | `attendee-exports.ts:70` | 앱 쪽 접속지 검사를 통째로 뺀다(K1, 이제 DB 검사가 없어 앱만 지킨다) | 명단 묶음 | 잡힘(R2 ⑤ 접속지를 정하지 못하면…) |
+| N06 | core `main.ts:147` | 소비자에 API 풀(`database`)을 넘긴다(K2) | 후기 묶음 | 잡힘(COV2-06 K2 소비자는 따로 둔 core_app 풀…) |
+| N07 | `main.ts:134` | 소비자용 익명화 저장소를 API 풀로 만든다(`new DrizzleReviewStore(database)`, K2) | 후기 묶음 | **살아남음** |
+| N08 | core `consumers/start.ts:35` | 소비자 동시 처리 키 수를 2에서 16으로(K2) | 후기 묶음 | 잡힘(COV2-06 K2 … 파티션 1·키 2) |
+| N09 | `main.ts:142` | 1단계 M28 다시: 소비자를 조건으로 막아 켜지 않는다 | 후기 묶음 | 잡힘(COV2-06 ⑰ 새 시험) |
+| N10 | `main.ts:168` | 1단계 M33 다시: SIGTERM에서 `stop()`을 기다리지 않는다 | 후기 묶음 | 잡힘(COV2-06 ⑱ 새 시험) |
+
+- **합계(2단계)**: 넣은 수 22(Docker 12, 단위 10), 해당 없음 1(D02). **잡힘 21, 살아남음 1(N07)**. 1단계에서 살아남았던 M28·M33은 시험 담당이 더한 ⑰⑱이 잡는다(N09·N10). 1단계 Docker 대기 목록은 D02를 빼고 모두 실패를 봤다.
+- **1·2단계 합계**: 넣은 수 63(동등 변이 1·해당 없음 1 포함), 잡힘 59, 살아남음 1(N07, M28·M33은 고쳐짐).
+- **컨테이너 정리**: 전후 `docker ps -a`가 같다(이 갈래 시험 컨테이너가 남지 않았고, 다른 갈래 컨테이너는 건드리지 않았다). 끝난 뒤 `git status --short`·`git diff`가 비어 있다.
+
+| 번호 | 무엇이 새나 | 시험 담당에게 넘김: 무엇을 단언해야 하나 |
+| --- | --- | --- |
+| N07 | K2 시험은 `startCoreConsumers({ database: … })`가 소비자 풀인지만 본다. 처리기에 넘기는 `consumerReviews`의 저장소(`new DrizzleReviewStore(…)`)가 API 풀(`database`)이어도 통과한다. 그러면 사건이 몰릴 때 익명화 UPDATE가 팬·관제 HTTP 경로의 연결을 쓴다(리뷰 K2가 막으려던 것). 보류 표만 소비자 풀로 간다 | `main.ts`에서 `ReviewAccountWithdrawnHandler`에 넘기는 `Reviews`의 `store: new DrizzleReviewStore(<이름>)`의 이름이 `startCoreConsumers`의 `database` 칸과 같은 소비자 풀 이름(지금 `consumerDatabase`)인지, `database`·`partnerDatabase`·`opsDatabase`가 아닌지 단언한다 |
