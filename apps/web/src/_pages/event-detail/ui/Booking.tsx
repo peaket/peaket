@@ -76,10 +76,11 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
   const prev = useRef<BookingPhase | undefined>(undefined);
   const { eventId, status, openAtMs, lobbyOpensAtMs, saleEndsAtMs, salePhases } = data;
   const session = useFanSession();
-  const live = useLiveSale(eventId, state.phase === 'queue');
+  // 상태 파일을 받을 때는 받기 운전자가 정한다(오픈 순간에는 받지 않는다, ADR-0272 결정 1)
+  const live = useLiveSale(eventId, state.phase);
   // 부를지는 첫 효과 뒤의 시각으로 본다(그리는 중에 시계를 읽지 않는다)
   const fan = useSaleEligibility(eventId, state.now !== undefined && needsEligibility(salePhases, session, state.now));
-  const denied = useDeniedMarker(salePhases);
+  const denied = useDeniedMarker(salePhases, openAtMs);
   const eligibility = state.now === undefined ? null : eligibilityGate({ phase: state.phase, session, phases: salePhases, fan, denied, openAtMs, nowMs: state.now });
 
   // 인앱 브라우저 감지는 클라이언트가 붙은 뒤에만 한다(서버 첫 그리기와 하이드레이션을 맞춘다, SCR-058)

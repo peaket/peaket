@@ -1,27 +1,29 @@
 'use client';
 // SCR-002 공연 상세의 판매 상태·판매 자격·명단 밖 알림 훅(ADR-0272 결정 1·3·4, BUILD_ORDER HOT-346).
 // 판정은 model/의 순수 함수가 하고, 이 파일은 받기만 한다. 받기·가게 코드와 api-client는 늦게 가져온다(첫 JS 예산, 결정 6).
-// - useLiveSale: 예매 버튼 상태가 오픈 뒤 진입(queue)일 때만 대기 상태 파일 구간 0을 문서마다 한 번 받고, 다시 보일 때 보낸 지 30초가 지났으면 한 번 더 받는다
+// - useLiveSale: 예매 버튼 상태를 받기 운전자(model/live-sale-store.ts createLiveSaleDriver)에 넘기기만 한다. 운전자가 정한 때(문서가 처음 고른 상태가
+//   queue일 때 한 번, queue인 동안 다시 보일 때)에만 대기 상태 파일 구간 0을 받는다. 오픈 전에 연 화면은 오픈 순간에 받지 않는다(리뷰 R040-1)
 // - useSaleEligibility: 회원 팬이고 끝나지 않은 PRESALE 조각이 있을 때만 팬별 판매 자격을 문서마다 한 번 받는다(페이지 보관에서 돌아오면 다시)
-// - useDeniedMarker: 대기실이 명단 밖으로 돌려보낸 주소 조각(#sale-eligibility-required)을 읽어 알림을 켜고 조각만 지운다
+// - useDeniedMarker: 대기실이 명단 밖으로 돌려보낸 주소 조각(#sale-eligibility-required)을 읽어 알림의 창을 한 번 정하고 조각만 지운다(리뷰 R040-2)
 // 시계는 효과 안에서만 읽는다(그리는 중에 읽으면 ISR 항목이 저장되지 않는다, ui/no-render-clock.test.mjs).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
+import type { BookingPhase } from '../model/detail';
 import type { LiveSale } from '../model/live-sale';
-import { deniedUntilMs, isDeniedHash, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
+import { deniedWindow, isDeniedHash, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
 
-type LiveStore = { get(): LiveSale; listen(l: () => void): () => void; start(): void; onVisible(): void };
+type LiveDriver = { phase(p: BookingPhase | undefined): void; visible(): void; view(): LiveSale; listen(l: () => void): () => void };
 type EligibilityStore = { get(): FanEligibilityState; subscribe(l: () => void): () => void; refreshIfStarted(): Promise<void> };
 
 /** 회차마다 문서에 하나(여러 부품이 같은 값을 본다) */
-const liveStores = new Map<string, Promise<LiveStore>>();
+const liveDrivers = new Map<string, Promise<LiveDriver>>();
 const eligibilityStores = new Map<string, Promise<EligibilityStore>>();
 
-function liveStore(eventId: string): Promise<LiveStore> {
-  let p = liveStores.get(eventId);
+function liveDriver(eventId: string): Promise<LiveDriver> {
+  let p = liveDrivers.get(eventId);
   if (!p) {
-    p = Promise.all([import('../model/live-sale-store'), import('../model/live-sale')]).then(([{ createLiveSaleStore }, { liveSaleUrl, LIVE_SALE_FETCH_INIT }]) => {
+    p = Promise.all([import('../model/live-sale-store'), import('../model/live-sale')]).then(([{ createLiveSaleStore, createLiveSaleDriver }, { liveSaleUrl, LIVE_SALE_FETCH_INIT }]) => {
       const store = createLiveSaleStore({
         // 쿠키·사용자 머리·캐시 버스터 없이 브라우저 HTTP 캐시만 건너뛴다(docs/frontend.md §5.9). 본문을 읽지 못하면 모양 틀림(unknown)
         fetchFile: async () => {
@@ -31,12 +33,9 @@ function liveStore(eventId: string): Promise<LiveStore> {
         },
         now: () => browserClock().now(),
       });
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') store.onVisible();
-      });
-      return store;
+      return createLiveSaleDriver(store);
     });
-    liveStores.set(eventId, p);
+    liveDrivers.set(eventId, p);
   }
   return p;
 }
@@ -63,19 +62,25 @@ function eligibilityStore(eventId: string): Promise<EligibilityStore> {
   return p;
 }
 
-/** 등급별 실시간 판매 상태. active(오픈 뒤 진입)가 아니면 받지 않고 뼈대 값이다(오픈 전 배지는 상태 파일을 쓰지 않는다) */
-export function useLiveSale(eventId: string, active: boolean): LiveSale {
+/**
+ * 등급별 실시간 판매 상태. 예매 버튼 상태를 받기 운전자에 넘기기만 하고, 받을 때는 운전자가 정한다.
+ * 다시 보임(visibilitychange) 듣기는 이 효과 안에서 달고 정리한다(판매 종료 뒤·화면을 떠난 뒤에는 받지 않는다, 리뷰 R040-4)
+ */
+export function useLiveSale(eventId: string, phase: BookingPhase | undefined): LiveSale {
   const [live, setLive] = useState<LiveSale>({ status: 'loading' });
+  const [driver, setDriver] = useState<LiveDriver | null>(null);
+  /** 문서가 처음 고른 상태(운전자 코드를 가져오기 전에 상태가 바뀌어도 첫 상태를 잃지 않게) */
+  const first = useRef<BookingPhase | undefined>(undefined);
+  if (first.current === undefined && phase !== undefined) first.current = phase;
+  const known = phase !== undefined;
+
+  // 운전자 코드는 처음 상태를 안 뒤에 늦게 가져온다
   useEffect(() => {
-    if (!active) return;
+    if (!known) return;
     let alive = true;
-    let off: (() => void) | undefined;
-    liveStore(eventId).then(
-      (s) => {
-        if (!alive) return;
-        off = s.listen(() => setLive(s.get()));
-        s.start();
-        setLive(s.get());
+    liveDriver(eventId).then(
+      (d) => {
+        if (alive) setDriver(d);
       },
       // 받기 코드를 가져오지 못하면 실패와 같다(고정 글 '판매 중')
       () => {
@@ -84,9 +89,28 @@ export function useLiveSale(eventId: string, active: boolean): LiveSale {
     );
     return () => {
       alive = false;
-      off?.();
     };
-  }, [eventId, active]);
+  }, [eventId, known]);
+
+  useEffect(() => {
+    if (!driver) return;
+    const off = driver.listen(() => setLive(driver.view()));
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') driver.visible();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      off();
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [driver]);
+
+  useEffect(() => {
+    if (!driver) return;
+    if (first.current !== undefined) driver.phase(first.current);
+    driver.phase(phase);
+    setLive(driver.view());
+  }, [driver, phase]);
   return live;
 }
 
@@ -115,29 +139,20 @@ export function useSaleEligibility(eventId: string, needed: boolean): FanEligibi
   return needed && fan.status === 'idle' ? { status: 'loading' } : needed ? fan : { status: 'idle' };
 }
 
-/** setTimeout이 받는 가장 긴 기다림(약 24.8일). 그보다 멀면 문서 동안 켜 둔다 */
-const MAX_TIMER_MS = 2 ** 31 - 1;
-
 /**
- * 명단 밖 알림(ADR-0272 결정 4). 처음 그린 뒤 주소 조각이 정확히 #sale-eligibility-required이면 켜고 history.replaceState로 조각만 지운다
- * (새로고침하면 다시 팬 자격으로 고른다). 지금이 든 공개 조각이 끝나면 끄고, 조각을 모르면 문서 동안 켜 둔다
+ * 명단 밖 알림(ADR-0272 결정 4, 리뷰 R040-2 뒤). 처음 그린 뒤 주소 조각이 정확히 #sale-eligibility-required이면 history.replaceState로 조각만 지우고
+ * 그 시각으로 알림의 창(deniedWindow)을 한 번 정해 돌려준다(새로고침하면 다시 팬 자격으로 고른다). 끄는 타이머는 두지 않는다:
+ * 창 끝은 늘 조각 경계라 예매 버튼의 다음 고르기 시각(saleBoundaryAfter)이 이미 잡는다(숨긴 탭의 늦은 타이머에 기대지 않는다)
  */
-export function useDeniedMarker(phases: DetailSalePhase[]): boolean {
-  const [denied, setDenied] = useState(false);
+export function useDeniedMarker(phases: DetailSalePhase[], openAtMs: number): { untilMs?: number } | null {
+  const [denied, setDenied] = useState<{ untilMs?: number } | null>(null);
   // 처음 그린 뒤 한 번만 읽는다(조각은 지우므로 다시 읽어도 없다)
   useEffect(() => {
     if (!isDeniedHash(window.location.hash)) return;
     const { pathname, search } = window.location;
     window.history.replaceState(window.history.state, '', `${pathname}${search}`);
-    setDenied(true);
+    setDenied(deniedWindow(phases, openAtMs, browserClock().now()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => {
-    if (!denied) return;
-    const now = browserClock().now();
-    const until = deniedUntilMs(phases, now);
-    if (until === undefined || until - now > MAX_TIMER_MS) return;
-    const t = setTimeout(() => setDenied(false), Math.max(until - now, 0));
-    return () => clearTimeout(t);
-  }, [denied, phases]);
   return denied;
 }

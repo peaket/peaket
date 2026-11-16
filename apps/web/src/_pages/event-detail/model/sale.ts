@@ -117,14 +117,15 @@ export function eligibilityGate(i: {
   session: { status: string };
   phases: DetailSalePhase[];
   fan: FanEligibilityState;
-  denied: boolean;
+  /** 명단 밖 알림의 창(deniedWindow). 없으면 null */
+  denied: { untilMs?: number } | null;
   openAtMs: number;
   nowMs: number;
 }): EligibilityGate {
   const at = eligibilityJudgeAt(i.phase, i.openAtMs, i.nowMs);
   if (at === undefined) return null;
-  // 대기실이 명단 밖으로 막아 돌려보냈다: 팬 자격과 상관없이 자격 없음(판정 시각은 지금, 결정 4)
-  if (i.denied) return { reason: deniedReason(i.phases, i.nowMs) };
+  // 대기실이 명단 밖으로 막아 돌려보냈다: 켤 때 정한 창 안에서만 팬 자격과 상관없이 자격 없음(결정 4). 창 끝은 조각 경계라 그 시각에 버튼이 돌아온다
+  if (i.denied && (i.denied.untilMs === undefined || i.nowMs < i.denied.untilMs)) return { reason: deniedReason(i.phases, at) };
   if (i.session.status !== 'member') return null;
   const idx = phaseIndexAt(i.phases, at);
   if (idx < 0 || i.phases[idx]!.kind !== 'PRESALE') return null;
@@ -172,19 +173,14 @@ export function isDeniedHash(hash: string): boolean {
   return hash === SALE_ELIGIBILITY_DENIED_HASH;
 }
 
-/** 명단 밖 알림이 꺼지는 시각: 지금이 든 조각의 끝. 없으면 undefined(문서 동안) */
-export function deniedUntilMs(phases: DetailSalePhase[], nowMs: number): number | undefined {
-  const idx = phaseIndexAt(phases, nowMs);
-  return idx < 0 ? undefined : phases[idx]!.endsAtMs;
-}
-
 /**
- * 명단 밖 알림의 창(ADR-0272 결정 4, 리뷰 R040-2 뒤). 켠 시각의 판정 시각이 든 조각이 PRESALE이면 그 끝, 아니면 켠 시각 뒤 첫 조각 경계,
- * 경계도 없으면 문서 동안(untilMs 없음). 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ * 명단 밖 알림의 창(ADR-0272 결정 4, 리뷰 R040-2 뒤). 켤 때 한 번 정한다: 켠 시각의 판정 시각(오픈 전이면 오픈 시각, 아니면 켠 시각)이 든
+ * 조각이 PRESALE이면 그 끝까지, GENERAL이거나 든 조각이 없으면 켠 시각 뒤 첫 조각 경계까지, 경계도 없으면 문서 동안(untilMs 없음)
  */
 export function deniedWindow(phases: DetailSalePhase[], openAtMs: number, readAtMs: number): { untilMs?: number } {
-  void phases;
-  void openAtMs;
-  void readAtMs;
-  throw new Error('아직 없음');
+  const at = readAtMs < openAtMs ? openAtMs : readAtMs;
+  const idx = phaseIndexAt(phases, at);
+  if (idx >= 0 && phases[idx]!.kind === 'PRESALE') return { untilMs: phases[idx]!.endsAtMs };
+  const next = saleBoundaryAfter(phases, readAtMs);
+  return next === undefined ? {} : { untilMs: next };
 }
