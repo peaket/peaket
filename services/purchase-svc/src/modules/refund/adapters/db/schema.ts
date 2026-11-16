@@ -88,3 +88,54 @@ export const eventRefundAttempt = pgTable(
     check('event_refund_attempt_amount_check', sql`${t.amount} >= 0`),
   ],
 );
+
+/**
+ * 부정 예매 운영자 취소의 승인 단위 요청(0022, BUILD_ORDER GAT-080, docs/data.md fraud_cancellation_request, docs/features/transfer-refund.md §7.4).
+ * approval_id가 CancelFraudTickets의 멱등키다. 같은 승인 ID에 다른 지문(targets_hash)이면 ALREADY_EXISTS다
+ */
+export const fraudCancellationRequest = pgTable(
+  'fraud_cancellation_request',
+  {
+    approvalId: uuid('approval_id').primaryKey(),
+    // ops 사건 ID(다른 논리 DB라 외래키 없음)
+    fraudCaseId: uuid('fraud_case_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    // 사건 ID·회차·(표 ID, 기대 보유자)를 표 ID 순으로 늘어놓은 SHA-256 hex
+    targetsHash: text('targets_hash').notNull(),
+    requestedBy: text('requested_by').notNull(),
+    approvedBy: text('approved_by').notNull(),
+    approvedAt: at('approved_at'),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [check('fraud_cancellation_request_actors_check', sql`${t.requestedBy} <> ${t.approvedBy}`)],
+);
+
+/** 부정 예매 운영자 취소의 표별 결과(0022). 기본 키 (approval_id, ticket_id)가 표 단위 멱등이다. FAILED만 다시 부르기에서 다시 한다 */
+export const fraudCancellationTicket = pgTable(
+  'fraud_cancellation_ticket',
+  {
+    approvalId: uuid('approval_id')
+      .notNull()
+      .references(() => fraudCancellationRequest.approvalId),
+    ticketId: uuid('ticket_id').notNull(),
+    expectedHolderAccountId: uuid('expected_holder_account_id').notNull(),
+    outcome: text('outcome').notNull(),
+    // ACCEPTED일 때 order_cancellation.id(승인·표에서 정해지는 UUID)
+    cancellationId: uuid('cancellation_id'),
+    // ACCEPTED일 때 공제 없는 환급액(권면 금액)
+    refundAmount: integer('refund_amount'),
+    // 시스템이 거둔 양도 요청 ID(transfer_offer 표가 생기기 전에는 비운다)
+    withdrawnTransferOfferId: text('withdrawn_transfer_offer_id'),
+    // FAILED일 때의 까닭(개인정보 없음)
+    failureCode: text('failure_code'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.approvalId, t.ticketId] }),
+    check('fraud_cancellation_ticket_outcome_check', sql`${t.outcome} in ('ACCEPTED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_STARTED', 'SKIPPED_HOLDER_CHANGED', 'FAILED')`),
+    check('fraud_cancellation_ticket_failure_code_check', sql`${t.failureCode} in ('TICKET_UNAVAILABLE', 'SEAT_RETURN_FAILED', 'CANCELLATION_CONFLICT', 'ORDER_STATE', 'INTERNAL')`),
+    check('fraud_cancellation_ticket_refund_amount_check', sql`${t.refundAmount} >= 0`),
+    check('fraud_cancellation_ticket_accepted_check', sql`(${t.outcome} = 'ACCEPTED') = (${t.cancellationId} is not null)`),
+    check('fraud_cancellation_ticket_failed_check', sql`(${t.outcome} = 'FAILED') = (${t.failureCode} is not null)`),
+  ],
+);

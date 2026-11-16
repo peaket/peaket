@@ -109,6 +109,9 @@ export class DrizzleCancellationWrites implements CancellationWrites {
         refundAmount: q.refundAmount,
         status: q.status,
         ...(q.eventCancellationRequestId !== undefined ? { eventCancellationRequestId: q.eventCancellationRequestId } : {}),
+        // 부정 예매 운영자 취소(사유 FRAUD)의 사건·승인(BAT-415 몫 F, ADR-0171)
+        ...(q.fraudCaseId !== undefined ? { fraudCaseId: q.fraudCaseId } : {}),
+        ...(q.approvalId !== undefined ? { approvalId: q.approvalId } : {}),
         ...(q.refundDueAtMs !== undefined ? { refundDueAt: new Date(q.refundDueAtMs) } : {}),
         createdAt: now,
         statusChangedAt: now,

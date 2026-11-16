@@ -155,6 +155,13 @@
       "when": 1794747000000,
       "tag": "0021_priority_grant_acted_by",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794796493332,
+      "tag": "0022_fraud_cancellation",
+      "breakpoints": true
     }
   ]
 }

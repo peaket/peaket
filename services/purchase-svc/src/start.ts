@@ -48,6 +48,7 @@ import {
 import { DrizzleSaleControlStore, RedisSaleControlCopies, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import { startControlServer } from './control/control-server.js';
 import {
+  CancelFraudTickets,
   CancelTicket,
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
@@ -55,10 +56,14 @@ import {
   DrizzleEventRefundAttempts,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
+  DrizzleFraudCancellationStore,
   DrizzleSeatReturns,
   EventRefundGrpcController,
   EventRefundService,
   eventRefundPackage,
+  fraudCancellationHandlers,
+  fraudCancellationPackage,
+  GetFraudCancellation,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
   HttpEventRefundAlert,
@@ -349,6 +354,24 @@ export async function start(o: StartOptions): Promise<StartedService> {
       concurrency: 8,
     });
     refund.eventRefund = eventRefundService;
+  }
+  // 부정 예매 운영자 취소(BUILD_ORDER GAT-080, fraud_cancellation.proto, docs/features/transfer-refund.md §7.4, ADR-0171·ADR-0197).
+  // 부르는 쪽은 ops-svc뿐이다(내부 토큰 + 호출자 ops-svc + 처리자 approved_by 증명). 결제사는 부르지 않고 환급 재시도 실행기가 REFUND_PENDING을 집는다.
+  let fraudCancellation: { cancel: CancelFraudTickets; get: GetFraudCancellation } | undefined;
+  if (database && refund && refundTickets) {
+    const fraudStore = new DrizzleFraudCancellationStore(database);
+    fraudCancellation = {
+      cancel: new CancelFraudTickets({
+        store: fraudStore,
+        tickets: refundTickets,
+        orders: refund.orders,
+        configs: new SeatMapSaleConfigs(seatMap),
+        writes: refund.writes,
+        calendar: refund.calendar,
+        ...(refund.seats ? { seats: refund.seats } : {}),
+      }),
+      get: new GetFraudCancellation(fraudStore),
+    };
   }
 
   // 우선 구매 권리 발급·회수(GAT-135, POL-046 ⑦, ADR-0171). purchase DB가 있을 때만 연다.
@@ -757,6 +780,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
   if (eventRefundService) {
     grpcServices.push({ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(eventRefundService).handlers() });
   }
+  if (fraudCancellation) {
+    grpcServices.push({
+      definition: fraudCancellationPackage().FraudCancellationService.service,
+      handlers: fraudCancellationHandlers(fraudCancellation, {
+        ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}),
+        onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'FraudCancellationService 처리 실패'),
+      }),
+    });
+  }
   if (priority) {
     grpcServices.push({
       definition: priorityPurchasePackage().PriorityPurchaseService.service,
@@ -775,7 +807,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
       port,
       services: grpcServices,
-      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService'] },
+      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService', 'peaket.purchase.v1.FraudCancellationService'] },
     });
     service.logger.info({ port: refundGrpc.port }, 'purchase-svc gRPC 포트를 열었다');
   } else if (grpcServices.length > 0) {
