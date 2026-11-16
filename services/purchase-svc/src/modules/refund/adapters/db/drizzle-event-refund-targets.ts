@@ -1,5 +1,7 @@
-// 회차 취소 일괄 환불의 대상 조회(BAT-425). purchase DB에서 결제 완료·부분 환불 주문의 발권된 티켓을 고르고,
-// 이미 진행 중인 예매 취소가 있는 티켓은 뺀다. 결제사는 주문의 마지막 결제 시도에서 읽는다.
+// 회차 취소 일괄 환불의 대상 조회(BAT-425, BAT-420 GAT-110 E). purchase DB에서 결제 완료·부분 환불 주문의 발권된 티켓을 고르고,
+// 이미 진행 중인 예매 취소가 있는 티켓은 뺀다. 다만 입장 시작 뒤 보류(REQUESTED)된 취소의 표는 넣고 그 행 ID를 싣는다(보류 취소 전환,
+// docs/features/transfer-refund.md §5 '대상 선택과 보류 취소 전환'). 진행 중(실행·멈춤·신청 창) 회차 취소 요청이 남긴 환급 대기 행의 표도 넣는다
+// (그 요청의 결과 모름 항목을 다시 부를 때 대상이 사라지지 않게). 무효(VOIDED)만 있는 표는 진행 중 취소가 없는 표다. 결제사는 주문의 마지막 결제 시도에서 읽는다.
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -16,6 +18,7 @@ interface Row {
   seat_id: string;
   unit_price: number;
   pg: string | null;
+  pending_cancellation_id: string | null;
 }
 
 @Injectable()
@@ -30,7 +33,9 @@ export class DrizzleEventRefundTargets implements EventRefundTargets {
     if (!config) throw new Error(`회차 판매 설정이 없다: ${eventId}`);
     const r = await this.database.db.execute(sql`
       select o.id as order_id, o.event_id, o.account_id, o.created_at, i.ticket_id, i.seat_id, i.unit_price,
-             (select pa.pg from payment_attempt pa where pa.order_id = o.id order by pa.created_at desc limit 1) as pg
+             (select pa.pg from payment_attempt pa where pa.order_id = o.id order by pa.created_at desc limit 1) as pg,
+             (select c.id from order_cancellation c
+               where c.order_id = o.id and c.ticket_id = i.ticket_id and c.status = 'REQUESTED' limit 1) as pending_cancellation_id
         from purchase_order o
         join order_item i on i.order_id = o.id
        where o.event_id = ${eventId}::uuid
@@ -38,7 +43,12 @@ export class DrizzleEventRefundTargets implements EventRefundTargets {
          and i.ticket_id is not null
          and not exists (
            select 1 from order_cancellation c
-            where c.order_id = o.id and c.ticket_id = i.ticket_id and c.status <> 'VOIDED')
+            where c.order_id = o.id and c.ticket_id = i.ticket_id and c.status not in ('VOIDED', 'REQUESTED')
+              and not (
+                c.status = 'REFUND_PENDING'
+                and exists (
+                  select 1 from event_cancellation_request r
+                   where r.id = c.event_cancellation_request_id and r.event_id = o.event_id and r.status in ('RUNNING', 'PAUSED', 'REFUND_WINDOW'))))
        order by o.id, i.line_no`);
     return (r.rows as unknown as Row[]).map((row) => ({
       orderId: row.order_id,
@@ -50,6 +60,7 @@ export class DrizzleEventRefundTargets implements EventRefundTargets {
       saleEndsAtMs: config.saleEndsAtMs,
       ...(config.entryOpensAtMs !== undefined ? { entryOpensAtMs: config.entryOpensAtMs } : {}),
       pg: (row.pg ?? 'SIMULATOR') as RefundPgProvider,
+      ...(row.pending_cancellation_id !== null ? { pendingCancellationId: row.pending_cancellation_id } : {}),
     }));
   }
 }

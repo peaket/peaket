@@ -2,13 +2,13 @@
 // `next_refund_at`(1분→5분→15분→1시간→6시간)이 지난 REFUND_PENDING과 입장 기록 마감 뒤 REQUESTED를 처리한다.
 // 정비 일(하루 한 번)로 돌리면 간격이 하루로 늘어나므로 리더 반복으로 돈다. 리더가 아닌 틱은 아무것도 부르지 않는다.
 import type { LeaderLoop } from '@peaket/platform';
-import type { RefundAfterEntry } from './refund-after-entry.js';
 
 /** 반복 틱 1분 [가정]. 재시도 간격의 가장 짧은 값과 같다 */
 export const REFUND_RETRY_TICK_MS = 60_000;
 
 export interface RefundRetryLoopDeps {
-  refund: Pick<RefundAfterEntry, 'run'>;
+  /** RefundAfterEntry.run. 입장 기록 대조의 셈(entryRecorded·unverified, BAT-420)도 그대로 넘긴다 */
+  refund: { run(): Promise<{ refunded: number; pending: number; failed: number }> };
   leader: { isLeader(): boolean };
   logger?: { warn(o: object, msg: string): void; info?(o: object, msg: string): void };
   tickMs?: number;

@@ -170,9 +170,28 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
     return r.rows.length > 0;
   }
 
-  /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, 빈 뼈대). 없는 (요청, 표)만 PENDING으로 더한다(cancellation_id 유일) */
-  async addItems(_requestId: string, _items: readonly EventRefundItem[], _outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]> {
-    throw new Error('아직 없음');
+  /**
+   * 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, ADR-0280 결정 4). 없는 (요청, 표)만 PENDING으로 더한다((request_id, ticket_id)·cancellation_id 유일).
+   * 팬 확정 알림 Outbox는 같은 트랜잭션에, 실제로 더한 항목이 있을 때만 남긴다. 더한 항목을 돌려준다
+   */
+  async addItems(requestId: string, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<readonly EventRefundItem[]> {
+    return this.database.transaction(async (tx) => {
+      const added: EventRefundItem[] = [];
+      const nowMs = this.clock.now();
+      for (const item of items) {
+        const r = await tx.execute(sql`
+          insert into event_refund_item (request_id, ticket_id, order_id, cancellation_id, pg, status, attempts, last_error, applied_at, next_attempt_at, updated_at)
+          values (${requestId}::uuid, ${item.ticketId}::uuid, ${item.orderId}::uuid, ${item.cancellationId}::uuid, ${item.pg}, ${item.status}, ${item.attempts}, ${item.lastError ?? null},
+                  ${item.appliedAtMs !== undefined ? new Date(item.appliedAtMs) : null}::timestamptz,
+                  ${item.nextAttemptAtMs !== undefined ? new Date(item.nextAttemptAtMs) : null}::timestamptz,
+                  ${new Date(nowMs)}::timestamptz)
+          on conflict do nothing
+          returning ticket_id`);
+        if (r.rows.length > 0) added.push({ ...item, requestId });
+      }
+      if (added.length > 0 && outbox.length > 0) await writeOutbox(tx, this.clock, outbox.map((m) => ({ topic: m.topic, key: m.key, payload: m.payload })));
+      return added;
+    });
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {
@@ -227,7 +246,7 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
   async activeRequests(limit: number): Promise<readonly EventCancellationRequest[]> {
     const r = await this.database.db.execute(sql`
       select * from event_cancellation_request
-       where status in ('RUNNING', 'REFUND_WINDOW')
+       where status in ('RUNNING', 'PAUSED', 'REFUND_WINDOW')
        order by updated_at, id
        limit ${limit}`);
     return (r.rows as unknown as RequestRow[]).map(toRequest);

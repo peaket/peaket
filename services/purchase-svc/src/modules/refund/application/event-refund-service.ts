@@ -4,15 +4,14 @@
 // 자동 정지(실패율·실패 금액·연속 실패·거절률·서킷), 재시도·멱등·중단/재개·진행률, 팬 알림 Outbox를 남긴다.
 import {
   EventRefundActiveConflict,
-  compensationAmount,
   eventRefundCancellationId,
+  eventRefundPreviewOf,
   eventRefundRetryDelayMs,
   EVENT_REFUND_AUTO_STOP,
   progressOf,
   rateBp,
   type EventCancellationRequest,
   type EventRefundAttemptOutcome,
-  type EventRefundFault,
   type EventRefundItem,
   type EventRefundKind,
   type EventRefundPreview,
@@ -61,6 +60,26 @@ const statusAfterRun = (
 };
 
 const FAILURE_ERRORS = new Set(['REJECTED', 'TICKET_NOT_HELD', 'TRANSFER_PENDING', 'ALREADY_ENDED', 'EVENT_STARTED', 'NOT_PAYER', 'CONFLICT']);
+/**
+ * 결제사로 보내지 않고 끝난 즉시 실패(BAT-420 GAT-110 E1·E2): 보류 취소를 그사이 환급 실행기가 집음, 끝난 표의 취소 행이 없음, 같은 표의 다른 진행 중 취소.
+ * 재시도해도 같은 답이라 바로 FAILED로 끝내 CS '일괄 환불 실패'로 넘긴다. 결제사 호출이 아니므로 자동 정지 기록에 넣지 않는다
+ */
+const IMMEDIATE_FAILURES = new Set(['cancellation-in-progress', 'ticket-already-ended', 'cancellation-conflict']);
+
+/** 대상 표 한 장의 일괄 환불 항목. 보류 취소가 있으면 그 행 ID를, 아니면 요청·표로 정해진 취소 ID를 쓴다(BAT-420 GAT-110 E1) */
+function itemOf(requestId: string, t: EventRefundTarget, kind: EventRefundKind, nowMs: number): EventRefundItem {
+  return {
+    requestId,
+    orderId: t.orderId,
+    ticketId: t.ticketId,
+    cancellationId: t.pendingCancellationId ?? eventRefundCancellationId(requestId, t.ticketId),
+    pg: t.pg,
+    status: 'PENDING',
+    attempts: 0,
+    ...(kind === 'CANCEL' ? { appliedAtMs: nowMs } : {}),
+    ...(kind === 'CANCEL' ? { nextAttemptAtMs: nowMs } : {}),
+  };
+}
 
 type StopReason = { reason: RefundPauseReason; all: boolean; detail: Record<string, unknown> } | undefined;
 
@@ -76,7 +95,7 @@ export class EventRefundService {
 
   async preview(i: EventRefundPreviewInput): Promise<EventRefundPreview> {
     const targets = await this.#targets(i.eventId);
-    return this.#previewOf(targets, i.fault);
+    return eventRefundPreviewOf(targets, i.fault);
   }
 
   async start(i: EventRefundStartInput): Promise<EventCancellationRequest> {
@@ -92,19 +111,11 @@ export class EventRefundService {
     }
     const nowMs = this.o.nowMs();
     const window = this.#windowOf(kind, i, nowMs);
-    const targets = await this.#targets(i.eventId);
-    const preview = this.#previewOf(targets, i.fault);
-    const items: EventRefundItem[] = targets.map((t) => ({
-      requestId: i.requestId,
-      orderId: t.orderId,
-      ticketId: t.ticketId,
-      cancellationId: eventRefundCancellationId(i.requestId, t.ticketId),
-      pg: t.pg,
-      status: 'PENDING',
-      attempts: 0,
-      ...(kind === 'CANCEL' ? { appliedAtMs: nowMs } : {}),
-      ...(kind === 'CANCEL' ? { nextAttemptAtMs: nowMs } : {}),
-    }));
+    const listed = await this.#targets(i.eventId);
+    // 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 하므로 보류 취소(REQUESTED) 표를 넣지 않는다(그 표는 마감 뒤 환급으로 끝난다, GAT-110 E5)
+    const targets = kind === 'POSTPONE' ? listed.filter((t) => t.pendingCancellationId === undefined) : listed;
+    const preview = eventRefundPreviewOf(targets, i.fault);
+    const items: EventRefundItem[] = targets.map((t) => itemOf(i.requestId, t, kind, nowMs));
     const progress = progressOf(items, [], kind === 'POSTPONE');
     const request: EventCancellationRequest = {
       requestId: i.requestId,
@@ -213,7 +224,11 @@ export class EventRefundService {
     return this.get(i.requestId);
   }
 
-  /** 백그라운드 실행기 한 바퀴: 닫을 창을 닫고, 실행 중 요청의 due 항목을 조금씩 처리한다 */
+  /**
+   * 백그라운드 실행기 한 바퀴: 닫을 창을 닫고, 실행 중 요청의 due 항목을 조금씩 처리한다.
+   * 회차 취소(CANCEL)는 실행 중·멈춤 요청마다 대상을 다시 골라 항목이 없는 표를 더하고(확정 뒤 결제가 끝난 주문, ADR-0280 결정 4),
+   * 실행 중이면 할 항목이 없어도 완료 여부를 다시 본다(끝나지 않은 주문이 남으면 RUNNING, 결정 5). 멈춘 요청은 더하기만 하고 부르지 않는다
+   */
   async runDue(): Promise<{ closedWindows: number; processed: number }> {
     const nowMs = this.o.nowMs();
     let closedWindows = 0;
@@ -223,14 +238,38 @@ export class EventRefundService {
     }
     let processed = 0;
     for (const request of await this.o.store.activeRequests(20)) {
-      if (request.status === 'PAUSED' || request.status === 'COMPLETED' || request.status === 'REJECTED') continue;
+      if (request.status === 'COMPLETED' || request.status === 'REJECTED') continue;
+      const sweeping = request.kind === 'CANCEL' && this.o.items !== undefined && this.o.openOrders !== undefined;
+      let targets: readonly EventRefundTarget[] | undefined;
+      if (sweeping && (request.status === 'RUNNING' || request.status === 'PAUSED')) {
+        targets = await this.#targets(request.eventId);
+        await this.#sweep(request, targets);
+      }
+      if (request.status === 'PAUSED') continue;
       const items = await this.o.store.dueItems(request.requestId, nowMs, this.o.batchSize ?? 200);
-      if (items.length === 0) continue;
-      const targets = await this.#targets(request.eventId);
+      if (items.length === 0 && !sweeping) continue;
+      targets ??= await this.#targets(request.eventId);
       await this.#run(request, targets, items.length);
       processed += items.length;
     }
     return { closedWindows, processed };
+  }
+
+  /** 대상을 다시 골라 그 요청에 항목이 없는 표를 PENDING으로 더하고, 새 주문마다 확정 알림을 한 번 남긴다(같은 트랜잭션) */
+  async #sweep(request: EventCancellationRequest, targets: readonly EventRefundTarget[]): Promise<void> {
+    const existing = await this.o.store.items(request.requestId);
+    const tickets = new Set(existing.map((i) => i.ticketId));
+    const fresh = targets.filter((t) => !tickets.has(t.ticketId));
+    if (fresh.length === 0 || !this.o.items) return;
+    const nowMs = this.o.nowMs();
+    const knownOrders = new Set(existing.map((i) => i.orderId));
+    const newOrderTargets = fresh.filter((t) => !knownOrders.has(t.orderId));
+    const outbox = newOrderTargets.length > 0 ? (this.o.fanNotifier?.confirmed(request, newOrderTargets, nowMs) ?? []) : [];
+    await this.o.items.addItems(
+      request.requestId,
+      fresh.map((t) => itemOf(request.requestId, t, 'CANCEL', nowMs)),
+      outbox,
+    );
   }
 
   async #closeWindowNow(request: EventCancellationRequest, closedBy: string): Promise<void> {
@@ -313,11 +352,19 @@ export class EventRefundService {
       try {
         const result = await this.o.canceller.cancel(target, {
           requestId: request.requestId,
+          eventId: request.eventId,
           cancellationId: item.cancellationId,
           reason: request.kind === 'POSTPONE' ? 'EVENT_POSTPONED' : 'EVENT_CANCELLED',
           nowMs: this.o.nowMs(),
           deadlineMs: this.o.deadlineMs(),
         });
+        // 결제사로 보내지 않은 실패(티켓 단계)는 결제사 호출로 세지 않고 재시도한다(GAT-110 E7)
+        if (result.status === 'NOT_SENT') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error, target)) !== 'UNKNOWN';
+        // 결제사로 보내기 전에 끝난 즉시 실패는 기록하지 않고 바로 FAILED다(GAT-110 E1·E2)
+        if (result.status === 'FAILED' && result.error !== undefined && IMMEDIATE_FAILURES.has(result.error)) {
+          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
+          return true;
+        }
         const outcome = outcomeOf(result.status, result.error);
         await this.#recordAttempt(request, item, target, outcome);
         if (result.status === 'REFUNDED') {
@@ -349,7 +396,10 @@ export class EventRefundService {
     const after = await this.o.store.items(request.requestId);
     const pausedAfter = [...paused.entries()].map(([pg, reason]) => ({ pg, reason }));
     const progress = progressOf(after, pausedAfter, this.#windowOpen(request));
-    const updated: EventCancellationRequest = { ...request, status: statusAfterRun(request, progress, pausedAfter, this.#windowOpen(request)), progress, updatedAtMs: this.o.nowMs() };
+    let status = statusAfterRun(request, progress, pausedAfter, this.#windowOpen(request));
+    // 회차 취소는 그 회차에 끝나지 않은 주문이 있으면 항목이 다 끝나도 COMPLETED로 가지 않는다(늦게 끝난 주문을 쓸어 담는다, ADR-0280 결정 5)
+    if (status === 'COMPLETED' && request.kind === 'CANCEL' && this.o.openOrders && (await this.o.openOrders.count(request.eventId)) > 0) status = 'RUNNING';
+    const updated: EventCancellationRequest = { ...request, status, progress, updatedAtMs: this.o.nowMs() };
     // 그 사이 사람이 멈췄으면 PAUSED를 RUNNING 진행률로 덮지 않는다
     await this.o.store.updateActive(updated);
     for (const p of newlyPaused) {
@@ -455,26 +505,5 @@ export class EventRefundService {
   async #targets(eventId: string): Promise<readonly EventRefundTarget[]> {
     if (!UUID.test(eventId)) throw new EventRefundError('INVALID', 'eventId가 UUID가 아닙니다');
     return this.o.targets.list(eventId);
-  }
-
-  #previewOf(targets: readonly EventRefundTarget[], fault: EventRefundFault): EventRefundPreview {
-    const byPg = new Map<RefundPgProvider, number>();
-    let refundTotal = 0;
-    let compensationTargets = 0;
-    let compensationTotal = 0;
-    for (const t of targets) {
-      refundTotal += t.ticketPrice;
-      const compensation = compensationAmount(t.ticketPrice, fault);
-      if (compensation > 0) compensationTargets++;
-      compensationTotal += compensation;
-      byPg.set(t.pg, (byPg.get(t.pg) ?? 0) + 1);
-    }
-    return {
-      targetOrders: targets.length,
-      refundTotal,
-      compensationTargets,
-      compensationTotal,
-      perPg: [...byPg.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([pg, orders]) => ({ pg, orders, estimatedSeconds: Math.ceil(orders / 300) })),
-    };
   }
 }

@@ -40,14 +40,19 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
+  DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
+  EventRefundCancellerRouter,
   EventRefundLoop,
   EventRefundService,
+  EventTicketCanceller,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpEntryFlagNotice,
   HttpEventRefundAlert,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
@@ -56,6 +61,7 @@ import {
   RefundRetryLoop,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
+import { entryRecordsFromEnv } from './refund-wiring.js';
 import {
   DrizzleSeatRebuildSource,
   DrizzleSeatSales,
@@ -183,34 +189,59 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         open: async (q: { cancellationId: string; attempts: number; lastError: string }) =>
           taskLogger.warn({ event: 'cancellation_refund_failed', cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError }, '환급 재시도 소진·업무 거절(CS 처리함 주소 없음)'),
       };
-  const refundAfterEntry = paymentCancels
-    ? new RefundAfterEntry({
-        writes: new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock })),
-        payments: paymentCancels,
-        nowMs: () => clock.now(),
-        failureNotice: refundFailureNotice,
-      })
-    : undefined;
-  // 회차 취소 일괄 환불 실행기(BAT-425 GAT-130). ticket-svc·payment-svc 주소가 있을 때만 만든다.
-  // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기를 이 릴레이 리더가 이어 간다.
+  // ticket-svc는 마감 뒤 환급 전 입장 기록 대조(GAT-090)와 회차 취소 일괄 환불(GAT-130·GAT-110)이 함께 쓴다
   const ticketGrpcAddr = o.env?.PEAKET_TICKET_GRPC_ADDR;
   const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr }) : undefined;
   const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
+  const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock }));
+  // 마감 뒤 환급 전 입장 기록 대조(BAT-420 GAT-090 A6): ticket-svc 주소가 없으면 local·ci만 대역이고 그 밖은 시작 실패다
+  const refundAfterEntry = paymentCancels
+    ? new RefundAfterEntry({
+        writes: refundWrites,
+        payments: paymentCancels,
+        nowMs: () => clock.now(),
+        failureNotice: refundFailureNotice,
+        entries: entryRecordsFromEnv({ env: o.env ?? {}, ...(refundTicketCancels ? { tickets: refundTicketCancels } : {}) }),
+        claims: refundWrites,
+        flags: opsClient
+          ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
+          : {
+              open: async (q: { cancellationId: string; enteredAtMs: number }) =>
+                taskLogger.warn({ event: 'cancellation_entry_recorded', cancellationId: q.cancellationId, enteredAtMs: q.enteredAtMs }, '취소한 표에 입장 기록이 있다(CS 처리함 주소 없음)'),
+            },
+        log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg), error: (obj: object, msg: string) => bound().logger.error(obj, msg) },
+      })
+    : undefined;
+  // 회차 취소 일괄 환불 실행기(BAT-425 GAT-130, BAT-420 GAT-110). ticket-svc·payment-svc 주소가 있을 때만 만든다.
+  // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기·확정 뒤 끝난 주문 쓸어 담기를 이 릴레이 리더가 이어 간다.
+  // 회차 취소(CANCEL)는 전용 취소기(견적·좌석 되돌림 없음, 보류 취소 전환), 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 간다(ADR-0280 결정 3).
   const eventRefund =
     refundTicketCancels && paymentCancels
       ? new EventRefundService({
           store: new DrizzleEventRefundStore(o.serviceDatabase, clock),
           targets: new DrizzleEventRefundTargets(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
-          canceller: new CancelTicketEventRefund(
-            new CancelTicket({
-              orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
-              writes: new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock })),
+          canceller: new EventRefundCancellerRouter({
+            cancel: new EventTicketCanceller({
               tickets: refundTicketCancels,
+              conversions: new DrizzlePendingCancellationConversions(o.serviceDatabase),
+              orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
+              writes: refundWrites,
               payments: paymentCancels,
-              seats: new DrizzleSeatReturns(new DrizzleSeatSales(o.serviceDatabase), o.seatMap, new RedisSeatReturnNotices(o.redis)),
               calendar: new WeekendBusinessCalendar(),
             }),
-          ),
+            postpone: new CancelTicketEventRefund(
+              new CancelTicket({
+                orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
+                writes: refundWrites,
+                tickets: refundTicketCancels,
+                payments: paymentCancels,
+                seats: new DrizzleSeatReturns(new DrizzleSeatSales(o.serviceDatabase), o.seatMap, new RedisSeatReturnNotices(o.redis)),
+                calendar: new WeekendBusinessCalendar(),
+              }),
+            ),
+          }),
+          items: new DrizzleEventRefundStore(o.serviceDatabase, clock),
+          openOrders: new DrizzleEventOpenOrders(o.serviceDatabase),
           attempts: new DrizzleEventRefundAttempts(o.serviceDatabase),
           fanNotifier: new OutboxEventRefundFanNotifier(),
           ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient), alert: new HttpEventRefundAlert(opsClient) } : {}),

@@ -77,12 +77,15 @@ export interface CancellationWrites {
   }): Promise<CancellationWriteOutcome>;
   /** 입장 기록 마감 뒤 환급할 REQUESTED와 재시도할 REFUND_PENDING(환급 시각이 지난 것) */
   dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]>;
-  /** 환급 상태 바꾸기(REFUNDED·VOIDED). 없으면 조용히 넘어간다 */
-  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<void>;
-  /** 결제사 결과 모름·일시 실패: REFUND_PENDING으로 두고 다음 재시도 시각을 적는다 */
-  scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
-  /** 재시도 소진·업무 거절: REFUND_PENDING을 유지하고 CS 처리함 대상 표시(refund_failed_at)를 남긴다 */
-  markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
+  /**
+   * 환급 상태 바꾸기(REFUNDED·VOIDED). 없으면 조용히 넘어간다. REFUNDED는 REFUND_PENDING 행만 바꾼다(그사이 CS가 무효로 끝낸 취소를 덮지 않는다,
+   * BAT-420 GAT-090 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다(대역은 돌려주지 않아도 된다)
+   */
+  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<boolean | void>;
+  /** 결제사 결과 모름·일시 실패: REFUND_PENDING 행에만 다음 재시도 시각을 적는다(BAT-420 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다 */
+  scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
+  /** 재시도 소진·업무 거절: REFUND_PENDING 행에만 CS 처리함 대상 표시(refund_failed_at)를 남긴다(BAT-420 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다 */
+  markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
 }
 
 /** 환급 재시도 소진·업무 거절을 CS 처리함에 잇는 포트(ops-svc 계약이 생기기 전에는 기록 대역) */
@@ -106,7 +109,7 @@ export interface SeatReturns {
   }): Promise<number>;
 }
 
-// ---- 입장 기록 대조와 환급 집기(BAT-420 GAT-090 A, docs/features/transfer-refund.md §3.1 '입장 기록 대조와 환급 집기'). 빈 뼈대 ----
+// ---- 입장 기록 대조와 환급 집기(BAT-420 GAT-090 A, docs/features/transfer-refund.md §3.1 '입장 기록 대조와 환급 집기') ----
 
 /** ticket-svc GetEntryRecords 한 번의 데드라인 2초 [가정] */
 export const ENTRY_LOOKUP_DEADLINE_MS = 2_000;

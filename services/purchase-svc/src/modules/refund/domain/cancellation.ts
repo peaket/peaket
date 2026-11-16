@@ -88,7 +88,7 @@ export interface DueRefund {
   readonly status: 'REQUESTED' | 'REFUND_PENDING';
   /** 지금까지 실패한 횟수(REQUESTED는 0) */
   readonly attempts: number;
-  /** 그 취소의 표(입장 기록 대조, BAT-420 GAT-090 A). 빈 뼈대라 선택 칸으로 두었다(구현이 필수로 바꿔도 된다) */
+  /** 그 취소의 표(입장 기록 대조, BAT-420 GAT-090 A). 운영 저장소는 늘 싣는다. 없으면 실행기는 표를 모르는 것으로 보고 환급하지 않는다 */
   readonly ticketId?: string;
 }
 

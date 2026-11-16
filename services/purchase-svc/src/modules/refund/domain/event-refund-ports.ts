@@ -11,7 +11,11 @@ import type {
 } from './event-refund.js';
 
 export interface EventRefundTargets {
-  /** 그 회차의 환불 대상(결제 완료·부분 환불 주문의 발권된 티켓). 이미 진행 중인 취소는 뺀다 */
+  /**
+   * 그 회차의 환불 대상(결제 완료·부분 환불 주문의 발권된 티켓). 이미 진행 중인 취소는 뺀다. 다만 입장 시작 뒤 보류(REQUESTED)된 취소의 표는
+   * 넣고 그 행 ID를 pendingCancellationId로 싣는다(BAT-420 GAT-110 E, 보류 취소 전환). 진행 중 회차 취소 요청이 남긴 환급 대기(REFUND_PENDING) 행의
+   * 표도 넣는다(그 요청의 결과 모름 항목을 다시 부를 수 있게)
+   */
   list(eventId: string): Promise<readonly EventRefundTarget[]>;
 }
 
@@ -30,7 +34,7 @@ export interface EventRefundStore {
   markApplied(requestId: string, ticketId: string, appliedAtMs: number): Promise<boolean>;
   /** 신청하지 않은 항목만 NOT_APPLIED로 끝낸다. 그 사이 신청이 들어왔으면 false다 */
   markNotApplied(requestId: string, ticketId: string): Promise<boolean>;
-  /** 아직 끝나지 않은 요청(실행·신청 창)을 오래된 순서로 준다. 백그라운드 실행기가 쓴다 */
+  /** 아직 끝나지 않은 요청(실행·멈춤·신청 창)을 오래된 순서로 준다. 백그라운드 실행기가 쓴다(멈춘 요청은 쓸어 담기만 한다, BAT-420) */
   activeRequests(limit: number): Promise<readonly EventCancellationRequest[]>;
   /** 그 요청에서 지금 처리할 수 있는 항목(신청됨·PENDING/UNKNOWN·next_attempt_at <= now)을 준다 */
   dueItems(requestId: string, nowMs: number, limit: number): Promise<readonly EventRefundItem[]>;
@@ -47,12 +51,23 @@ export interface EventRefundAttemptStore {
   consecutiveFailures(pg: RefundPgProvider): Promise<number>;
 }
 
-/** 기존 예매 취소 Saga(CancelTicket)를 한 장씩 부르는 포트. 성공·재시도·실패만 돌려준다 */
+/**
+ * 표 한 장을 환불하는 포트(회차 취소 전용 취소기, 연기는 예매 취소 Saga). 성공·재시도·실패를 돌려준다.
+ * NOT_SENT는 결제사로 보내기 전의 실패(티켓 단계 등, BAT-420 GAT-110 E7)라 결제사 호출 기록·자동 정지에 넣지 않고 재시도한다
+ */
 export interface EventRefundCanceller {
   cancel(
     target: EventRefundTarget,
-    q: { readonly requestId: string; readonly cancellationId: string; readonly reason: 'EVENT_CANCELLED' | 'EVENT_POSTPONED'; readonly nowMs: number; readonly deadlineMs: number },
-  ): Promise<{ readonly status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED'; readonly error?: string }>;
+    q: {
+      readonly requestId: string;
+      /** 그 요청의 회차(ticket-svc 표 끝내기가 다른 회차 표를 막는 데 쓴다, BAT-420) */
+      readonly eventId?: string;
+      readonly cancellationId: string;
+      readonly reason: 'EVENT_CANCELLED' | 'EVENT_POSTPONED';
+      readonly nowMs: number;
+      readonly deadlineMs: number;
+    },
+  ): Promise<{ readonly status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED'; readonly error?: string } | { readonly status: 'NOT_SENT'; readonly error: string }>;
 }
 
 /** 실패 건을 CS 처리함 '환급 실패'로 잇는 포트 */
@@ -119,12 +134,13 @@ export interface EventRefundServiceDeps {
   readonly firstBatch?: number;
   /** 백그라운드 실행기가 한 요청에서 한 번에 처리하는 최대 건수. 기본 200 [가정] */
   readonly batchSize?: number;
-  // BAT-420 GAT-110 H(빈 뼈대, 아직 쓰지 않는다): 확정 뒤 끝난 주문 쓸어 담기와 완료 보류
+  /** 확정 뒤 끝난 주문 쓸어 담기(BAT-420 GAT-110 H, ADR-0280 결정 4). 없으면(옛 조립) 쓸어 담지 않는다. 운영 조립은 꼭 넣는다 */
   readonly items?: EventRefundItemAdder;
+  /** 끝나지 않은 주문이 있으면 COMPLETED로 가지 않는다(ADR-0280 결정 5). 없으면 완료를 미루지 않는다 */
   readonly openOrders?: EventOpenOrders;
 }
 
-// ---- BAT-420 GAT-110 E·H(빈 뼈대): 회차 취소 전용 표 취소·보류 취소 전환·쓸어 담기·끝나지 않은 주문 ----
+// ---- BAT-420 GAT-110 E·H: 회차 취소 전용 표 취소·보류 취소 전환·쓸어 담기·끝나지 않은 주문 ----
 
 /** ticket-svc EventCancelTickets. 실패·시간 초과는 던진다 */
 export interface EventTicketCancellations {

@@ -134,22 +134,32 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     });
   }
 
-  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number }): Promise<void> {
-    await this.database.transaction(async (tx) => {
+  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number }): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
       const [row] = await tx
         .select({ orderId: orderCancellation.orderId })
         .from(orderCancellation)
         .where(eq(orderCancellation.id, q.cancellationId))
         .limit(1);
-      if (!row) return;
+      if (!row) return false;
       // 잠금 차례는 create와 같게 주문 행을 먼저 잡는다(취소 행 → 주문 행으로 잡으면 create와 엇갈려 교착이 날 수 있다)
       const [order] = await tx.select({ id: purchaseOrder.id, status: purchaseOrder.status }).from(purchaseOrder).where(eq(purchaseOrder.id, row.orderId)).for('no key update');
-      if (!order) return;
-      await tx
+      if (!order) return false;
+      // REFUNDED는 결제사 취소를 보낸 REFUND_PENDING만 바꾼다. 그사이 CS가 무효(VOIDED)로 끝낸 취소를 덮지 않고, 주문 전이(T23·T24)도 하지 않는다(BAT-420 A3).
+      // REFUND_PENDING·REQUESTED로는 끝난(환급·무효) 행을 되돌리지 않는다. VOIDED는 CS 몫이라 조건 없이 쓴다
+      const guard =
+        q.status === 'REFUNDED'
+          ? eq(orderCancellation.status, 'REFUND_PENDING')
+          : q.status === 'VOIDED'
+            ? undefined
+            : and(ne(orderCancellation.status, 'REFUNDED'), ne(orderCancellation.status, 'VOIDED'));
+      const updated = await tx
         .update(orderCancellation)
         .set({ status: q.status, statusChangedAt: new Date(q.nowMs), nextRefundAt: null })
-        .where(eq(orderCancellation.id, q.cancellationId));
-      if (q.status !== 'REFUNDED') return;
+        .where(guard ? and(eq(orderCancellation.id, q.cancellationId), guard) : eq(orderCancellation.id, q.cancellationId))
+        .returning({ id: orderCancellation.id });
+      if (updated.length === 0) return false;
+      if (q.status !== 'REFUNDED') return true;
       // 모든 항목의 취소가 환급으로 끝났으면 주문을 REFUNDED(T23·T24)로 마무리한다
       const counts = await tx.execute(sql`
         select (select count(*)::int from order_item where order_id = ${row.orderId}::uuid) as total,
@@ -163,11 +173,13 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         const applied = await this.orders.transition(tx, { orderId: row.orderId, transition, actor: 'system:cancellation-refund' });
         if (applied.status !== 'APPLIED') throw new Error(`주문 상태 전이에 실패했다: ${transition} ${applied.reason}`);
       }
+      return true;
     });
   }
 
-  async scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<void> {
-    await this.database.db
+  /** REFUND_PENDING 행에만 다음 재시도를 적는다(그사이 무효·환급으로 끝난 행을 되돌리지 않는다, BAT-420 A3) */
+  async scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
+    const updated = await this.database.db
       .update(orderCancellation)
       .set({
         status: 'REFUND_PENDING',
@@ -176,11 +188,14 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         refundLastError: q.lastError,
         statusChangedAt: new Date(q.nowMs),
       })
-      .where(eq(orderCancellation.id, q.cancellationId));
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')))
+      .returning({ id: orderCancellation.id });
+    return updated.length > 0;
   }
 
-  async markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<void> {
-    await this.database.db
+  /** REFUND_PENDING 행에만 CS 처리함 대상 표시를 남긴다(BAT-420 A3) */
+  async markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
+    const updated = await this.database.db
       .update(orderCancellation)
       .set({
         status: 'REFUND_PENDING',
@@ -190,7 +205,9 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         refundLastError: q.lastError,
         statusChangedAt: new Date(q.nowMs),
       })
-      .where(eq(orderCancellation.id, q.cancellationId));
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')))
+      .returning({ id: orderCancellation.id });
+    return updated.length > 0;
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]> {
@@ -199,6 +216,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .select({
         cancellationId: orderCancellation.id,
         orderId: orderCancellation.orderId,
+        ticketId: orderCancellation.ticketId,
         amount: orderCancellation.refundAmount,
         reason: orderCancellation.reason,
         status: orderCancellation.status,
@@ -212,7 +230,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         and(
           isNull(orderCancellation.refundFailedAt),
           or(
-            and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, now)),
+            // 입장 기록이 나온 보류 취소(entry_recorded_at)는 CS 처리함 '이상 표시'가 처리하므로 더 집지 않는다(BAT-420 P-T19 ①)
+            and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, now), isNull(orderCancellation.entryRecordedAt)),
             and(eq(orderCancellation.status, 'REFUND_PENDING'), or(isNull(orderCancellation.nextRefundAt), lte(orderCancellation.nextRefundAt, now))),
           ),
         ),
@@ -222,6 +241,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     return rows.map((r) => ({
       cancellationId: r.cancellationId,
       orderId: r.orderId,
+      ticketId: r.ticketId,
       amount: r.amount,
       reason: r.reason as CancellationReason,
       status: r.status as 'REQUESTED' | 'REFUND_PENDING',
@@ -229,14 +249,27 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     }));
   }
 
-  /** 보류 취소 조건부 집기(BAT-420 GAT-090 A2, 빈 뼈대) */
-  async claimDue(_cancellationId: string, _nowMs: number): Promise<boolean> {
-    throw new Error('아직 없음');
+  /**
+   * 보류 취소 조건부 집기(BAT-420 GAT-090 A2, docs/data.md §5): REQUESTED이고 입장 기록이 없는 행만 REFUND_PENDING(다음 재시도 시각 빔)으로 바꾼다.
+   * 실행기 둘이 겹쳐도 한쪽만 true라 결제사 호출은 한 번이다
+   */
+  async claimDue(cancellationId: string, nowMs: number): Promise<boolean> {
+    const updated = await this.database.db
+      .update(orderCancellation)
+      .set({ status: 'REFUND_PENDING', nextRefundAt: null, statusChangedAt: new Date(nowMs) })
+      .where(and(eq(orderCancellation.id, cancellationId), eq(orderCancellation.status, 'REQUESTED'), isNull(orderCancellation.entryRecordedAt)))
+      .returning({ id: orderCancellation.id });
+    return updated.length > 0;
   }
 
-  /** 입장 기록이 나온 보류 취소에 entry_recorded_at을 쓰고 refund_due_at을 비운다(BAT-420 P-T19 ①, 빈 뼈대) */
-  async markEntryRecorded(_cancellationId: string, _enteredAtMs: number, _nowMs: number): Promise<boolean> {
-    throw new Error('아직 없음');
+  /** 입장 기록이 나온 보류 취소(REQUESTED)에 가장 이른 입장 시각을 쓰고 refund_due_at을 비운다(BAT-420 P-T19 ①). 상태는 그대로다 */
+  async markEntryRecorded(cancellationId: string, enteredAtMs: number, _nowMs: number): Promise<boolean> {
+    const updated = await this.database.db
+      .update(orderCancellation)
+      .set({ entryRecordedAt: new Date(enteredAtMs), refundDueAt: null })
+      .where(and(eq(orderCancellation.id, cancellationId), eq(orderCancellation.status, 'REQUESTED'), isNull(orderCancellation.entryRecordedAt)))
+      .returning({ id: orderCancellation.id });
+    return updated.length > 0;
   }
 }
 

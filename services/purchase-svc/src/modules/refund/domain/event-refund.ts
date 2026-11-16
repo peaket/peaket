@@ -79,19 +79,47 @@ export interface EventRefundTarget {
 export const EVENT_REFUND_ESTIMATE_TPS = 300;
 
 /**
- * 주문 단위 미리보기(BAT-420 GAT-110 W, R-T37 ①, 빈 뼈대): 대상 주문 수 = 주문 수, 배상 = 주문마다 대상 표 권면 합의 compensationAmount,
- * 결제사별 주문 수·예상 시간 ceil(표 수 / 300)
+ * 주문 단위 미리보기(BAT-420 GAT-110 W, R-T37 ①, docs/features/transfer-refund.md §5 '판정·미리보기·확정의 차례'):
+ * 대상 주문 수 = 주문 수, 환급 총액 = 대상 표 권면 합, 배상 = 주문마다 그 주문의 대상 표 권면 합에 compensationAmount(원 미만 올림 한 번),
+ * 결제사별 주문 수(그 결제사의 대상 표가 있는 주문)·예상 시간 ceil(그 결제사의 대상 표 수 / 초당 300건)
  */
-export function eventRefundPreviewOf(_targets: readonly EventRefundTarget[], _fault: EventRefundFault): EventRefundPreview {
-  throw new Error('아직 없음');
+export function eventRefundPreviewOf(targets: readonly EventRefundTarget[], fault: EventRefundFault): EventRefundPreview {
+  const orderTotals = new Map<string, number>();
+  const byPg = new Map<RefundPgProvider, { orders: Set<string>; tickets: number }>();
+  let refundTotal = 0;
+  for (const t of targets) {
+    refundTotal += t.ticketPrice;
+    orderTotals.set(t.orderId, (orderTotals.get(t.orderId) ?? 0) + t.ticketPrice);
+    const p = byPg.get(t.pg) ?? { orders: new Set<string>(), tickets: 0 };
+    p.orders.add(t.orderId);
+    p.tickets++;
+    byPg.set(t.pg, p);
+  }
+  let compensationTargets = 0;
+  let compensationTotal = 0;
+  for (const total of orderTotals.values()) {
+    const compensation = compensationAmount(total, fault);
+    if (compensation > 0) compensationTargets++;
+    compensationTotal += compensation;
+  }
+  return {
+    targetOrders: orderTotals.size,
+    refundTotal,
+    compensationTargets,
+    compensationTotal,
+    perPg: [...byPg.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([pg, p]) => ({ pg, orders: p.orders.size, estimatedSeconds: Math.ceil(p.tickets / EVENT_REFUND_ESTIMATE_TPS) })),
+  };
 }
 
-/**
- * 회차 취소 요청을 끝내지 못하게 막는 '끝나지 않은 주문' 상태인가(BAT-420 GAT-110 H, R-T37 ⑥, ADR-0280 결정 5, 빈 뼈대).
- * 정본: CREATED·AUTHENTICATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·UNKNOWN
- */
-export function isEventOrderOpen(_status: string): boolean {
-  throw new Error('아직 없음');
+/** 회차 취소 요청을 끝내지 못하게 막는 '끝나지 않은 주문' 상태(BAT-420 GAT-110 H, R-T37 ⑥, ADR-0280 결정 5). 드리즐 SQL도 이 목록을 쓴다 */
+export const EVENT_OPEN_ORDER_STATUSES = ['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN'] as const;
+const OPEN_ORDER_SET: ReadonlySet<string> = new Set(EVENT_OPEN_ORDER_STATUSES);
+
+/** 회차 취소 요청을 끝내지 못하게 막는 '끝나지 않은 주문' 상태인가. 목록 밖 값은 거짓이다 */
+export function isEventOrderOpen(status: string): boolean {
+  return OPEN_ORDER_SET.has(status);
 }
 
 export interface EventRefundItem {

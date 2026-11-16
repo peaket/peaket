@@ -53,13 +53,17 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
   DrizzleFraudCancellationStore,
+  DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
+  EventRefundCancellerRouter,
   EventRefundGrpcController,
   EventRefundService,
+  EventTicketCanceller,
   eventRefundPackage,
   fraudCancellationHandlers,
   fraudCancellationPackage,
@@ -324,13 +328,27 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
   // CS 처리함·경보 연결은 ops-svc 내부 HTTP다. 주소가 없으면 로그 대역이다.
   let eventRefundService: EventRefundService | undefined;
-  if (database && refund) {
+  if (database && refund && refundTickets) {
     const opsUrl = env.PEAKET_OPS_HTTP_URL;
     const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
+    // 회차 취소(CANCEL)는 전용 취소기(견적·좌석 되돌림 없음, 보류 취소 전환), 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 간다(BAT-420 GAT-110, ADR-0280 결정 3).
+    // 확정 뒤 끝난 주문은 쓸어 담고, 끝나지 않은 주문이 있으면 COMPLETED로 가지 않는다(결정 4·5)
     eventRefundService = new EventRefundService({
       store: new DrizzleEventRefundStore(database),
       targets: new DrizzleEventRefundTargets(database, new SeatMapSaleConfigs(seatMap)),
-      canceller: new CancelTicketEventRefund(new CancelTicket(refund)),
+      canceller: new EventRefundCancellerRouter({
+        cancel: new EventTicketCanceller({
+          tickets: refundTickets,
+          conversions: new DrizzlePendingCancellationConversions(database),
+          orders: refund.orders,
+          writes: refund.writes,
+          payments: refund.payments,
+          calendar: refund.calendar,
+        }),
+        postpone: new CancelTicketEventRefund(new CancelTicket(refund)),
+      }),
+      items: new DrizzleEventRefundStore(database),
+      openOrders: new DrizzleEventOpenOrders(database),
       attempts: new DrizzleEventRefundAttempts(database),
       fanNotifier: new OutboxEventRefundFanNotifier(),
       notice: opsClient

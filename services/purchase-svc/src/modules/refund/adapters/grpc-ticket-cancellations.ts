@@ -1,11 +1,11 @@
-// ticket-svc CancelTickets·OperatorCancelTickets gRPC 어댑터(GAT-080, docs/api/proto/peaket/ticket/v1/ticket.proto).
+// ticket-svc CancelTickets·OperatorCancelTickets·GetEntryRecords·EventCancelTickets gRPC 어댑터(GAT-080·GAT-090·GAT-110, docs/api/proto/peaket/ticket/v1/ticket.proto).
 // ticket-svc가 티켓 행 잠금 안에서 결제자·보유자·진행 중 양도·공연 시작을 다시 보고 키를 폐기한다.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { TicketCancelAnswer, TicketCancelOutcome } from '../domain/cancellation.js';
-import type { EntryRecords, EntryRecordView, OperatorTicketCancellations, OperatorTicketOutcome, OperatorTicketResult, TicketCancellations } from '../domain/ports.js';
+import { ENTRY_LOOKUP_DEADLINE_MS, type EntryRecords, type EntryRecordView, type OperatorTicketCancellations, type OperatorTicketOutcome, type OperatorTicketResult, type TicketCancellations } from '../domain/ports.js';
 import type { EventTicketCancellations } from '../domain/event-refund-ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -25,6 +25,9 @@ const OUTCOMES: ReadonlySet<TicketCancelOutcome> = new Set(['REFUND_NOW', 'REFUN
 const OPERATOR_RESULTS: ReadonlySet<OperatorTicketResult> = new Set(['CANCELED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_RECORDED', 'SKIPPED_HOLDER_CHANGED']);
 /** 운영자 취소 한 번의 데드라인 5초 [가정](대상 500장을 한 트랜잭션에서 잠그고 가른다, docs/api/guidelines.md §8.1) */
 const OPERATOR_CANCEL_DEADLINE_MS = 5_000;
+/** 회차 취소 표 끝내기 한 번의 데드라인 5초 [가정](대상 200장을 한 트랜잭션에서 잠근다, 운영자 취소와 같다) */
+const EVENT_CANCEL_DEADLINE_MS = 5_000;
+const EVENT_CANCEL_RESULTS: ReadonlySet<string> = new Set(['CANCELED', 'ALREADY_ENDED']);
 /** ticket-svc에 싣는 호출자 머리(내부 gRPC) */
 const TICKET_CALLER = 'purchase-svc';
 
@@ -40,7 +43,7 @@ export interface GrpcTicketCancellationsOptions {
 }
 
 export class GrpcTicketCancellations implements TicketCancellations, OperatorTicketCancellations, EntryRecords, EventTicketCancellations {
-  readonly #client: grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary };
+  readonly #client: grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary; GetEntryRecords: Unary; EventCancelTickets: Unary };
 
   constructor(o: GrpcTicketCancellationsOptions) {
     const at = o.address.lastIndexOf(':');
@@ -54,7 +57,7 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
       timeoutCapMs: OPERATOR_CANCEL_DEADLINE_MS,
       caller: TICKET_CALLER,
       ...(o.internalToken ? { internalToken: o.internalToken } : {}),
-    }) as unknown as grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary };
+    }) as unknown as grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary; GetEntryRecords: Unary; EventCancelTickets: Unary };
   }
 
   async cancel(q: Parameters<TicketCancellations['cancel']>[0]): Promise<TicketCancelAnswer> {
@@ -128,14 +131,69 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
     });
   }
 
-  /** ticket-svc GetEntryRecords(BAT-420 GAT-090 A, 데드라인 2초 [가정], 빈 뼈대). 실패·시간 초과는 던진다 */
-  async lookup(_ticketIds: readonly string[], _deadlineMs: number): Promise<ReadonlyMap<string, EntryRecordView>> {
-    throw new Error('아직 없음');
+  /**
+   * ticket-svc GetEntryRecords(BAT-420 GAT-090 A, P-T19). 데드라인은 부른 쪽 값과 2초 [가정] 가운데 짧은 것이다.
+   * 전송 실패·시간 초과와 답에 빠진 표는 던진다(모르는 것을 입장 없음으로 보지 않는다, 부른 쪽은 환급하지 않는다)
+   */
+  async lookup(ticketIds: readonly string[], deadlineMs: number): Promise<ReadonlyMap<string, EntryRecordView>> {
+    const ms = Math.min(ENTRY_LOOKUP_DEADLINE_MS, Math.max(1, Math.floor(Number.isFinite(deadlineMs) ? deadlineMs : ENTRY_LOOKUP_DEADLINE_MS)));
+    const v = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.#client.GetEntryRecords({ ticket_ids: [...ticketIds] }, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, r) => (e ? reject(e) : resolve(r ?? {})));
+    });
+    const raw = Array.isArray(v.records) ? (v.records as Record<string, unknown>[]) : [];
+    const byTicket = new Map<string, EntryRecordView>();
+    for (const r of raw) {
+      const ticketId = typeof r.ticket_id === 'string' ? r.ticket_id : '';
+      if (ticketId === '') throw new Error('ticket-svc GetEntryRecords 답의 표 ID가 비었다');
+      const found = r.found === true;
+      const entered = found && r.entered === true;
+      const at = r.first_entered_at as { seconds?: unknown; nanos?: unknown } | null | undefined;
+      const atMs = at ? Number(at.seconds) * 1000 + Math.floor(Number(at.nanos ?? 0) / 1_000_000) : Number.NaN;
+      byTicket.set(ticketId, { found, entered, ...(entered && Number.isFinite(atMs) ? { firstEnteredAtMs: atMs } : {}) });
+    }
+    const out = new Map<string, EntryRecordView>();
+    for (const id of ticketIds) {
+      const r = byTicket.get(id);
+      if (!r) throw new Error('ticket-svc GetEntryRecords 답에 빠진 표가 있다');
+      out.set(id, r);
+    }
+    return out;
   }
 
-  /** ticket-svc EventCancelTickets(BAT-420 GAT-110 E, 빈 뼈대). 답은 요청 차례, 실패·시간 초과는 던진다 */
-  async eventCancel(_q: Parameters<EventTicketCancellations['eventCancel']>[0]): ReturnType<EventTicketCancellations['eventCancel']> {
-    throw new Error('아직 없음');
+  /**
+   * ticket-svc EventCancelTickets(BAT-420 GAT-110 E, R-T24, 데드라인 5초 [가정]). 답은 요청 차례다.
+   * 전송 실패·데드라인 초과·알 수 없는 결과·빠진 표는 던진다(부른 쪽은 결제사로 보내지 않은 실패로 다시 시도한다)
+   */
+  async eventCancel(q: Parameters<EventTicketCancellations['eventCancel']>[0]): ReturnType<EventTicketCancellations['eventCancel']> {
+    const ms = Math.min(EVENT_CANCEL_DEADLINE_MS, Math.max(1, Math.floor(Number.isFinite(q.deadlineMs) ? q.deadlineMs : EVENT_CANCEL_DEADLINE_MS)));
+    const v = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.#client.EventCancelTickets(
+        {
+          cancellation_request_id: q.cancellationRequestId,
+          event_id: q.eventId,
+          targets: q.targets.map((t) => ({ ticket_id: t.ticketId, cancellation_id: t.cancellationId })),
+        },
+        new grpc.Metadata(),
+        { deadline: new Date(Date.now() + ms) },
+        (e, r) => (e ? reject(e) : resolve(r ?? {})),
+      );
+    });
+    const raw = Array.isArray(v.outcomes) ? (v.outcomes as Record<string, unknown>[]) : [];
+    type Outcome = Awaited<ReturnType<EventTicketCancellations['eventCancel']>>[number];
+    const byTicket = new Map<string, Outcome>();
+    for (const o of raw) {
+      const ticketId = typeof o.ticket_id === 'string' ? o.ticket_id : '';
+      const result = typeof o.result === 'string' ? o.result.replace(/^EVENT_CANCEL_RESULT_/, '') : '';
+      const orderId = typeof o.order_id === 'string' ? o.order_id : '';
+      const holderAccountId = typeof o.holder_account_id === 'string' ? o.holder_account_id : '';
+      if (!EVENT_CANCEL_RESULTS.has(result) || ticketId === '' || orderId === '') throw new Error('ticket-svc EventCancelTickets 답의 결과를 알 수 없다');
+      byTicket.set(ticketId, { ticketId, result: result as Outcome['result'], orderId, holderAccountId, transferWithdrawn: o.transfer_withdrawn === true });
+    }
+    return q.targets.map((t) => {
+      const o = byTicket.get(t.ticketId);
+      if (!o) throw new Error('ticket-svc EventCancelTickets 답에 빠진 표가 있다');
+      return o;
+    });
   }
 
   close(): void {

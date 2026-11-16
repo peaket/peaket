@@ -40,9 +40,15 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     return [...(this.byRequest.get(requestId)?.values() ?? [])];
   }
 
-  /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, 빈 뼈대). 없는 (요청, 표)만 더한다 */
-  async addItems(_requestId: string, _items: readonly EventRefundItem[], _outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]> {
-    throw new Error('아직 없음');
+  /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H). 없는 (요청, 표)만 더하고, 더한 것이 있을 때만 Outbox를 남긴다 */
+  async addItems(requestId: string, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<readonly EventRefundItem[]> {
+    const existing = this.byRequest.get(requestId);
+    if (!existing) throw new Error(`회차 취소 요청이 없다: ${requestId}`);
+    const cancellationIds = new Set([...existing.values()].map((i) => i.cancellationId));
+    const added = items.filter((i) => !existing.has(i.ticketId) && !cancellationIds.has(i.cancellationId));
+    for (const i of added) existing.set(i.ticketId, i);
+    if (added.length > 0) this.outbox.push(...outbox);
+    return added;
   }
 
   async updateItem(item: EventRefundItem, outbox: readonly EventRefundOutboxMessage[] = []): Promise<void> {
@@ -69,7 +75,7 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   }
 
   async activeRequests(limit: number): Promise<readonly EventCancellationRequest[]> {
-    return [...this.requests.values()].filter((r) => r.status === 'RUNNING' || r.status === 'REFUND_WINDOW').slice(0, limit);
+    return [...this.requests.values()].filter((r) => r.status === 'RUNNING' || r.status === 'PAUSED' || r.status === 'REFUND_WINDOW').slice(0, limit);
   }
 
   async dueItems(requestId: string, nowMs: number, limit: number): Promise<readonly EventRefundItem[]> {
