@@ -1,6 +1,7 @@
 // 대기열 교차 출처 브라우저 시험 Q-T41 ①②④⑦(docs/features/queue-admission.md §3 '요청 형식'·'응답 헤더', §11 Q-T41, BUILD_ORDER HOT-400, 묶음 BAT-055 계획 §6의 'B' 층).
 // kind의 gw-queue(대역 백엔드)에 실제 브라우저 셋(Chromium·Firefox·WebKit, tools/web-checks의 Playwright)으로 닿는다.
 // - 페이지는 시험이 그 출처 주소로 바로 채워 준다(page.route). 그래서 페이지의 출처는 접속 정보의 www 출처(허용) 또는 목록 밖 출처다.
+//   페이지를 연 뒤 가로채기를 끈다(page.unroute). 그 뒤의 fetch·사전 요청은 모두 실제 네트워크(CONNECT 프록시 → 게이트웨이)로 간다.
 // - 브라우저의 HTTPS 요청은 시험 안의 CONNECT 프록시가 호스트 이름으로 게이트웨이 포트 전달(127.0.0.1)에 잇는다(로컬 이름을 OS에 등록하지 않는다).
 // - 사전 요청(OPTIONS)이 나갔는지는 브라우저 밖에서 본다: gw-queue 접근 로그에 그 회차 경로의 OPTIONS 줄이 있는지(브라우저 개발 도구는 사전 요청을 늘 보이지 않는다).
 // 접속 정보·대역 백엔드의 약속은 gateway-client.mjs 머리에 있다. ⑤(Origin 없이 Sec-Fetch-Site: cross-site)는 브라우저가 Origin을 빼게 할 수 없어 gateways.e2e.mjs가 본다.
@@ -75,6 +76,10 @@ async function openPage(name, origin) {
   const url = `${origin}/__e2e__/queue-cors.html`;
   await page.route(url, (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>e2e</title>' }));
   await page.goto(url);
+  // 가로채기를 끈다. 가로채기가 켜져 있으면 Playwright(1.64)가 Chromium의 CORS 사전 요청을 네트워크로 보내지 않고 스스로 채운다
+  // (playwright-core coreBundle.js isInterceptedOptionsPreflight, 요청 Origin을 그대로 허용). 그러면 게이트웨이의 CORS와 'OPTIONS가 나갔는가'를
+  // 볼 수 없다. 끈 뒤에는 세 브라우저 모두 실제 네트워크로 사전 요청을 보낸다(계획 '시험 이의' 시험 담당 판단, 2026-11-16)
+  await page.unroute(url);
   return { browser, page };
 }
 
