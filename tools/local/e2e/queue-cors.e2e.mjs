@@ -71,7 +71,8 @@ async function openPage(name, origin) {
   const sub = `acc-${RUN}-${name}-${randomBytes(2).toString('hex')}`;
   const at = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}` });
   // 쿠키 이름과 꼴은 정본(identity §3) 그대로. 이 시험은 교차 출처 형식을 보므로 같은 사이트 판정에 기대지 않게 SameSite=None으로 싣는다
-  await context.addCookies([{ name: '__Secure-peaket_at', value: at, domain: c.hosts.queue, path: '/', secure: true, httpOnly: true, sameSite: 'None' }]);
+  // 대기열(queue)과 팬 API(api) 두 호스트에 싣는다(api 쪽은 웨이브 끝 리뷰 W7-COR-01·W7-WIR-04 시험이 쓴다)
+  await context.addCookies([c.hosts.queue, c.hosts.api].map((domain) => ({ name: '__Secure-peaket_at', value: at, domain, path: '/', secure: true, httpOnly: true, sameSite: 'None' })));
   const page = await context.newPage();
   const url = `${origin}/__e2e__/queue-cors.html`;
   await page.route(url, (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>e2e</title>' }));
@@ -98,6 +99,7 @@ const pageFetch = (page, url, init) =>
   );
 
 const queueUrl = (path) => `https://${c.hosts.queue}${path}`;
+const apiUrl = (path) => `https://${c.hosts.api}${path}`;
 const filesUrl = (path) => `https://${c.hosts['queue-files']}${path}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -176,6 +178,45 @@ for (const name of BROWSERS) {
       // 쿠키를 실은 요청은 Allow-Credentials가 없어 브라우저가 응답을 막는다
       const withCookies = await pageFetch(page, url, { credentials: 'include', cache: 'no-store' });
       assert.ok(withCookies.error, `${name}: credentials include 응답을 읽었다(Allow-Credentials가 있다)`);
+    } finally {
+      await browser.close();
+    }
+  });
+}
+
+// ===================== 웨이브 끝 리뷰 반영(계획 §15): 구매 경로의 사전 요청과 api의 Retry-After =====================
+
+for (const name of BROWSERS) {
+  test(`W7-COR-01 www 페이지에서 X-Admission-Token·X-Purchase-Seq·X-Purchase-Mac·Idempotency-Key를 단 POST /v1/events/{id}/holds와 X-Client-Ephemeral-Key를 단 GET …/seatmap-snapshot은 사전 요청 뒤 응답을 읽는다(${name})`, async () => {
+    const event = `e2e-${RUN}-${name}-w7`;
+    const { browser, page } = await openPage(name, c.origins.www);
+    try {
+      const hold = await pageFetch(page, apiUrl(`/v1/events/${event}/holds`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', 'x-purchase-seq': '1', 'x-purchase-mac': 'e2e-mac', 'idempotency-key': `idem-${RUN}-${name}` },
+        body: '{}',
+      });
+      assert.equal(hold.error, undefined, `${name} 홀드: 사전 요청 뒤 응답을 읽지 못했다 ${hold.error}`);
+      assert.ok(hold.status < 400, `${name} 홀드: ${hold.status}`);
+      assert.equal(JSON.parse(hold.text).method, 'POST');
+      const snap = await pageFetch(page, apiUrl(`/v1/events/${event}/seatmap-snapshot`), { credentials: 'include', headers: { 'x-admission-token': 'e2e-admission', 'x-client-ephemeral-key': 'e2e-key' } });
+      assert.equal(snap.error, undefined, `${name} 스냅샷: 사전 요청 뒤 응답을 읽지 못했다 ${snap.error}`);
+      assert.ok(snap.status < 400, `${name} 스냅샷: ${snap.status}`);
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test(`W7-WIR-04 www 페이지가 api의 429 응답의 Retry-After를 읽는다(${name})`, async () => {
+    const event = `e2e-${RUN}-${name}-w7r`;
+    const { browser, page } = await openPage(name, c.origins.www);
+    try {
+      const path = c.probes['gw-fan'].path.replaceAll('{event}', event);
+      const r = await pageFetch(page, apiUrl(`${path}?e2e-status=429&e2e-header=retry-after:7`), { credentials: 'include', cache: 'no-store' });
+      assert.equal(r.error, undefined, `${name}: 응답을 읽지 못했다 ${r.error}`);
+      assert.equal(r.status, 429);
+      assert.equal(r.retryAfter, '7', `${name}: Retry-After를 스크립트가 읽지 못한다`);
     } finally {
       await browser.close();
     }

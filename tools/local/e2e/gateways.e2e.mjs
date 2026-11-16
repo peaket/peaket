@@ -13,6 +13,7 @@ import {
   BEHIND_CLOUDFRONT,
   GATEWAYS,
   HSTS,
+  KEYSET_OF,
   SCREEN_OF,
   accessLog,
   accessToken,
@@ -710,5 +711,130 @@ test('B-T18 ④ VF-13 원본 확인 없이 보낸 위조 끝단 머리는 CloudF
     const r = await send(c, g.host, { method: g.method, path: g.path, body: g.body, headers: { 'x-forwarded-for': nextIp(), ...forgedEdge(), ...(g.headers ?? {}) } });
     assert.ok(r.status < 400, `${gw} ${g.method} ${g.path}: ${r.status}`);
     assertNoEdge(echoed(r), `${gw} ${g.method} ${g.path}`);
+  }
+});
+
+// ===================== 웨이브 끝 리뷰 반영(계획 §15) =====================
+
+/** 재인증 토큰(typ reauth+jwt)을 Envoy JWT 필터가 꺼낼 수 있는 다른 꼴 넷으로 싣는다(W7-SEC-01). scheme은 Authorization 접두어, cookie는 액세스 쿠키 이름 */
+function oddForms(tv, { scheme = 'Bearer', cookie } = {}) {
+  const forms = [
+    ['접두어 뒤 빈칸 둘', { authorization: `${scheme}  ${tv}` }],
+    ['값 앞에 다른 글', { authorization: `x ${scheme} ${tv}` }],
+  ];
+  if (cookie) {
+    forms.push(['따옴표 쿠키', { cookie: `${cookie}="${tv}"` }]);
+    forms.push(['Cookie 머리 둘', { cookie: ['a=b', `${cookie}=${tv}`] }]);
+  }
+  return forms;
+}
+/** 꼴마다 401이고 대역에 닿지 않는다 */
+async function assertOddForms401(host, method, path, tv, o, label) {
+  for (const [m, headers] of oddForms(tv, o)) {
+    const r = await send(c, host, { method, path, headers: edge(c, nextIp(), headers) });
+    assert.equal(r.status, 401, `${label} ${m}: ${r.status}`);
+    assert.throws(() => echoed(r), `${label} ${m}: 대역에 닿았다`);
+  }
+}
+
+test('I-T36 W7-SEC-01 팬 키로 서명한 재인증 토큰(typ reauth+jwt)을 Envoy가 꺼내는 다른 꼴(Bearer 뒤 빈칸 둘, 값 앞에 다른 글, 따옴표 쿠키, Cookie 머리 둘)로 넣어도 401이고 대역에 닿지 않는다', async () => {
+  const sub = nextSub();
+  const reauth = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}`, act: 'FAN_SENSITIVE' }, { typ: 'reauth+jwt' });
+  const o = { scheme: 'Bearer', cookie: '__Secure-peaket_at' };
+  // gw-fan의 identity 라우트·api 라우트, gw-queue api 라우트
+  await assertOddForms401('api', 'GET', '/v1/identity/me', reauth, o, 'gw-fan identity');
+  await assertOddForms401('api', c.probes['gw-fan'].method ?? 'GET', c.probes['gw-fan'].path.replaceAll('{event}', EVENT), reauth, o, 'gw-fan api');
+  await assertOddForms401('queue', c.probes['gw-queue'].method ?? 'GET', c.probes['gw-queue'].path.replaceAll('{event}', EVENT), reauth, o, 'gw-queue api');
+});
+
+test('I-T36 W7-SEC-01 관리 키로 서명한 재인증 토큰을 같은 꼴 넷으로 넣어도 gw-partner·gw-ops에서 401이다', async () => {
+  for (const [gw, cookie] of [
+    ['gw-partner', '__Secure-peaket_partner_at'],
+    ['gw-ops', '__Host-peaket_ops_at'],
+  ]) {
+    const sub = nextSub();
+    const reauth = token(c, 'admin', { sub, sid: `s-${sub}`, aud: AUD_OF[gw], scope: c.probes[gw].scope ?? '', act: 'OPS_COMMAND' }, { typ: 'reauth+jwt' });
+    const p = c.probes[gw];
+    await assertOddForms401(p.host, p.method ?? 'GET', p.path.replaceAll('{event}', EVENT), reauth, { scheme: 'Bearer', cookie }, gw);
+  }
+});
+
+test('I-T36 W7-SEC-01 gw-scanner도 DPoP 접두어의 같은 꼴에서 typ이 at+jwt가 아니면 401이다', async () => {
+  const sub = nextSub();
+  const p = c.probes['gw-scanner'];
+  for (const typ of ['reauth+jwt', 'admission+jwt']) {
+    const tv = token(c, 'staff', { sub, sid: `s-${sub}`, aud: 'scanner', scope: p.scope ?? '' }, { typ });
+    await assertOddForms401(p.host, p.method ?? 'GET', p.path.replaceAll('{event}', EVENT), tv, { scheme: p.scheme ?? 'DPoP' }, `gw-scanner ${typ}`);
+  }
+});
+
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+};
+
+test('W7-CON-01 값 안 빈칸이 19,000개인 액세스 쿠키의 POST /v1/queues/{id}/entries는 401이고, 그 요청 10건의 중앙 지연이 정상 쿠키 요청 10건의 중앙값 + 200ms 안이다', async () => {
+  const sub = nextSub();
+  const good = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}` });
+  const spaced = `a${' '.repeat(19_000)}b`;
+  assert.equal(spaced.length - 2, 19_000);
+  const post = (cookie) => send(c, 'queue', { method: 'POST', path: `/v1/queues/${EVENT}/entries`, body: '{}', headers: edge(c, nextIp(), { origin: c.origins.www, 'content-type': 'text/plain;charset=UTF-8', cookie }) });
+  const timed = async (cookie) => {
+    const t0 = performance.now();
+    const r = await post(cookie);
+    return { r, ms: performance.now() - t0 };
+  };
+  const normal = [];
+  const slow = [];
+  for (let i = 0; i < 10; i++) {
+    normal.push(await timed(`__Secure-peaket_at=${good}`));
+    slow.push(await timed(`__Secure-peaket_at=${spaced}`));
+  }
+  for (const { r } of normal) assert.ok(r.status < 400, `정상 쿠키: ${r.status}`);
+  for (const { r } of slow) {
+    assert.equal(r.status, 401, `빈칸 쿠키: ${r.status}`);
+    assert.throws(() => echoed(r), '빈칸 쿠키가 대역에 닿았다');
+  }
+  const base = median(normal.map((x) => x.ms));
+  const worst = median(slow.map((x) => x.ms));
+  assert.ok(worst <= base + 200, `빈칸 쿠키 중앙 ${worst.toFixed(0)}ms > 정상 ${base.toFixed(0)}ms + 200ms`);
+});
+
+/** 응답 보안 머리 셋(정본 값 그대로) */
+function assertSecurityHeaders(r, m) {
+  assert.equal(r.headers['strict-transport-security'], HSTS, `${m}: HSTS`);
+  assert.equal(r.headers['x-content-type-options'], 'nosniff', `${m}: nosniff`);
+  assert.equal(r.headers['content-security-policy'], API_CSP, `${m}: 기본 CSP`);
+}
+
+test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] W7-SEC-04 게이트웨이가 직접 낸 응답(Lua의 typ 401·/internal/ 404, 출처 확인 403, 사전 요청 응답, TRACE 405, 없는 경로 404)에도 HSTS·nosniff·기본 CSP가 붙는다', async () => {
+  // 쿠키로 인증하는 쓰기(출처 확인이 붙는 곳)와 그 쿠키 이름(gw-scanner는 쿠키를 받지 않아 출처 확인 사례가 없다)
+  const WRITE = {
+    'gw-queue': { host: 'queue', path: `/v1/queues/${EVENT}/entries`, cookie: '__Secure-peaket_at', type: 'text/plain;charset=UTF-8' },
+    'gw-fan': { host: 'api', path: '/v1/orders', cookie: '__Secure-peaket_at', type: 'application/json' },
+    'gw-partner': { host: 'partner-api', path: '/v1/partner/productions', cookie: '__Secure-peaket_partner_at', type: 'application/json' },
+    'gw-ops': { host: 'ops-api', path: '/v1/ops/admin-accounts', cookie: '__Host-peaket_ops_at', type: 'application/json' },
+  };
+  for (const gw of GATEWAYS) {
+    const p = c.probes[gw];
+    const probePath = p.path.replaceAll('{event}', EVENT);
+    const sub = nextSub();
+    const set = KEYSET_OF[gw];
+    const reauth = token(c, set, { sub, sid: `s-${sub}`, aud: AUD_OF[gw], scope: p.scope ?? '' }, { typ: 'reauth+jwt' });
+    const cases = [
+      ['Lua typ 401', p.host, { method: p.method ?? 'GET', path: probePath, headers: edge(c, nextIp(), { authorization: `${p.scheme ?? 'Bearer'} ${reauth}` }) }, 401],
+      ['/internal/ 404', p.host, { path: `/internal/jwks/e2e-${RUN}.json`, headers: edge(c, nextIp()) }, 404],
+      ['사전 요청', p.host, { method: 'OPTIONS', path: probePath, headers: edge(c, nextIp(), { origin: c.origins[SCREEN_OF[gw]], 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' }) }, undefined],
+      ['TRACE 405', p.host, { method: 'TRACE', path: probePath, headers: edge(c, nextIp()) }, 405],
+      ['없는 경로 404', p.host, { path: `/v1/e2e-no-such-${RUN}`, headers: edge(c, nextIp()) }, 404],
+    ];
+    const w = WRITE[gw];
+    if (w) cases.push(['출처 확인 403', w.host, { method: 'POST', path: w.path, body: '{}', headers: edge(c, nextIp(), { origin: 'https://evil.example', 'content-type': w.type, cookie: `${w.cookie}=${accessToken(c, gw, nextSub())}` }) }, 403]);
+    for (const [m, host, req, status] of cases) {
+      const r = await send(c, host, req);
+      if (status) assert.equal(r.status, status, `${gw} ${m}: ${r.status}`);
+      assert.throws(() => echoed(r), `${gw} ${m}: 대역이 답했다(게이트웨이가 직접 낸 응답이 아니다)`);
+      assertSecurityHeaders(r, `${gw} ${m}`);
+    }
   }
 });

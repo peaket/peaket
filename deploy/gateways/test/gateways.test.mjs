@@ -908,3 +908,153 @@ test('B-T18 ④ VF-13 gw-scanner Gateway와 그 HTTPRoute를 겨눈 EnvoyExtensi
   assert.ok(atRoutes.length > 0, 'gw-scanner 라우트를 겨눈 공통 Lua가 없다');
   for (const [name, x] of atRoutes) assert.equal(x.originVerify, false, `${name} 라우트 수준 originVerify`);
 });
+
+// ===================== 웨이브 끝 리뷰 반영(계획 §15) =====================
+
+test('W7-CON-01 공통 Lua 원문에 되짚기 패턴(.- 나 .* 뒤에 다른 반복이 오고 $로 끝나는 꼴)이 없다', () => {
+  requireDefinitions();
+  const cm = named('ConfigMap', 'peaket-gateway-edge-lua');
+  assert.ok(cm, '공통 Lua ConfigMap이 없다');
+  const lua = Object.values(cm.data ?? {}).join('\n');
+  // Lua 글자열(큰따옴표·작은따옴표)마다 본다. %로 벗긴 글자(%s·%-·%.)는 반복 기호가 아니다
+  const strings = [...lua.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1] ?? m[2]);
+  assert.ok(strings.length > 0, 'Lua 원문에 글자열이 없다');
+  const backtracking = strings.filter((s) => {
+    const m = /(?<!%)\.[-*]/.exec(s);
+    if (!m || !s.endsWith('$')) return false;
+    return /[*+?-]/.test(s.slice(m.index + 2).replace(/%./g, ''));
+  });
+  assert.deepEqual(backtracking, [], `되짚기 패턴: ${backtracking.join(' | ')}`);
+});
+
+/** openapi(정본)를 한 번 읽는다 */
+let OPENAPI;
+const openapi = () => (OPENAPI ??= parseAllDocuments(readFileSync(join(REPO, 'docs', 'api', 'openapi.yaml'), 'utf8'))[0].toJS());
+/** '#/components/…' 참조를 푼다 */
+const deref = (o) => {
+  if (!o?.$ref) return o;
+  return o.$ref
+    .replace(/^#\//, '')
+    .split('/')
+    .reduce((x, k) => x?.[k], openapi());
+};
+/** 화면이 교차 출처로 부르는 API 호스트(app 화면 호스트와 CDN 파일 호스트는 뺀다) */
+const API_HOSTS = { 'gw-queue': ['queue.peaket.example'], 'gw-fan': ['api.peaket.example'], 'gw-partner': ['partner-api.peaket.example'], 'gw-ops': ['ops-api.peaket.example'], 'gw-scanner': ['scanner-api.peaket.example'] };
+/** 사전 요청 없이 늘 허용되는 요청 머리(Fetch 표준 CORS-safelisted). 이것만으로는 사전 요청이 생기지 않는다 */
+const SAFELISTED_REQUEST = new Set(['accept', 'accept-language', 'content-language']);
+/** 스크립트가 늘 읽을 수 있는 응답 머리(Fetch 표준 CORS-safelisted response-header). Set-Cookie는 노출할 수 없다 */
+const SAFELISTED_RESPONSE = new Set(['cache-control', 'content-language', 'content-length', 'content-type', 'expires', 'last-modified', 'pragma', 'set-cookie']);
+
+/** openapi 작업마다 (그 작업이 닿는 게이트웨이 라우트, 요청 머리, 응답 머리). 라우트에 맞지 않는 작업은 뺀다(라우트 빠짐은 BAT-060 몫) */
+function operationsOnRoutes() {
+  const out = [];
+  const doc = openapi();
+  const schemes = doc.components?.securitySchemes ?? {};
+  for (const [path, item] of Object.entries(doc.paths ?? {})) {
+    for (const [method, op] of Object.entries(item ?? {})) {
+      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method) || !op) continue;
+      const servers = op.servers ?? item.servers;
+      // 화면 호스트(www, 같은 출처)와 CDN 파일 호스트(queue-files)로 가는 작업은 교차 출처 API가 아니다
+      if (servers?.some((s) => /\/\/(www|queue-files)\./.test(s.url))) continue;
+      const sample = path.replace(/\{[^}]+\}/g, 'e2e-id-10');
+      const M = method.toUpperCase();
+      const hits = Object.entries(API_HOSTS)
+        .flatMap(([gw, hosts]) => hosts.map((h) => ({ gw, host: h, hit: routeFor(gw, h, M, sample) })))
+        .filter((x) => x.hit && (x.hit.rule.backendRefs ?? []).length > 0);
+      if (hits.length === 0) continue;
+      // 여러 호스트에 맞으면 경로 앞부분으로 고른다(openapi servers의 호스트 나눔)
+      const prefer = /^\/v1\/queues\//.test(path) ? 'queue.' : /^\/v1\/(partner|webhooks)\//.test(path) ? 'partner-api.' : /^\/v1\/ops\//.test(path) ? 'ops-api.' : /^\/v1\/scanner\//.test(path) ? 'scanner-api.' : 'api.';
+      const chosen = hits.find((x) => x.host.startsWith(prefer)) ?? hits[0];
+      const params = [...(item.parameters ?? []), ...(op.parameters ?? [])].map(deref).filter((p) => p?.in === 'header').map((p) => lc(p.name));
+      const security = (op.security ?? doc.security ?? []).flatMap((req) => Object.keys(req));
+      const secHeaders = security.map((n) => schemes[n]).flatMap((s) => (s?.type === 'apiKey' && s.in === 'header' ? [lc(s.name)] : s?.type === 'http' ? ['authorization'] : []));
+      const responseHeaders = Object.values(op.responses ?? {})
+        .map(deref)
+        .flatMap((r) => Object.keys(r?.headers ?? {}))
+        .map(lc);
+      out.push({ method: M, path, ...chosen, requestHeaders: [...new Set([...params, ...secHeaders])].filter((h) => !SAFELISTED_REQUEST.has(h)), responseHeaders: [...new Set(responseHeaders)].filter((h) => !SAFELISTED_RESPONSE.has(h)) });
+    }
+  }
+  return out;
+}
+const corsOf = (route) => {
+  const cs = corsFor(route);
+  assert.equal(cs.length, 1, `${route.metadata?.name}: 그 라우트에 닿는 CORS 설정 하나`);
+  return cs[0];
+};
+
+test('W7-COR-01 API 호스트 라우트마다, openapi에서 그 라우트로 가는 작업의 머리 매개변수와 in: header 보안 머리가 모두 그 라우트를 겨눈 CORS allowHeaders에 있다', () => {
+  requireDefinitions();
+  const ops = operationsOnRoutes();
+  assert.ok(ops.length > 100, `라우트에 맞는 openapi 작업이 ${ops.length}개뿐이다`);
+  const missing = [];
+  for (const o of ops) {
+    const allow = new Set((corsOf(o.hit.route).allowHeaders ?? []).map(lc));
+    for (const h of o.requestHeaders) if (!allow.has(h)) missing.push(`${o.gw}/${o.hit.route.metadata?.name} ${o.method} ${o.path}: ${h}`);
+  }
+  assert.deepEqual([...new Set(missing)], [], '사전 요청에서 허용하지 않는 머리');
+});
+
+test('W7-COR-01 W7-WIR-09 api는 구매 경로 머리와 X-Requested-With를, ops-api는 X-Requested-With와 Last-Event-ID를 사전 요청에서 허용한다(guidelines §9)', () => {
+  requireDefinitions();
+  const allowAt = (gw, host, method, path) => {
+    const hit = routeFor(gw, host, method, path);
+    assert.ok(hit, `${gw} ${method} ${path}를 받는 라우트가 없다`);
+    return new Set((corsOf(hit.route).allowHeaders ?? []).map(lc));
+  };
+  const holds = allowAt('gw-fan', 'api.peaket.example', 'POST', '/v1/events/e2e-id-10/holds');
+  for (const h of ['x-admission-token', 'x-purchase-seq', 'x-purchase-mac', 'idempotency-key']) assert.ok(holds.has(h), `api 홀드: ${h}`);
+  assert.ok(allowAt('gw-fan', 'api.peaket.example', 'GET', '/v1/events/e2e-id-10/seatmap-snapshot').has('x-client-ephemeral-key'), 'api 스냅샷: x-client-ephemeral-key');
+  assert.ok(allowAt('gw-fan', 'api.peaket.example', 'POST', '/v1/review-images').has('x-requested-with'), 'api 후기 사진: x-requested-with');
+  const ops = allowAt('gw-ops', 'ops-api.peaket.example', 'POST', '/v1/ops/home-layout/banner-images');
+  assert.ok(ops.has('x-requested-with'), 'ops-api 배너 이미지: x-requested-with');
+  assert.ok(allowAt('gw-ops', 'ops-api.peaket.example', 'GET', '/v1/ops/live').has('last-event-id'), 'ops-api 관제 SSE: last-event-id');
+});
+
+test('W7-WIR-04 API 호스트 라우트마다 작업 응답 머리 가운데 CORS 기본 노출이 아닌 것(Set-Cookie 빼고)이 그 라우트를 겨눈 exposeHeaders에 있고, api·ops-api·scanner-api는 Retry-After를 노출한다', () => {
+  requireDefinitions();
+  const ops = operationsOnRoutes();
+  const missing = [];
+  for (const o of ops) {
+    const expose = new Set((corsOf(o.hit.route).exposeHeaders ?? []).map(lc));
+    for (const h of o.responseHeaders) if (!expose.has(h)) missing.push(`${o.gw}/${o.hit.route.metadata?.name} ${o.method} ${o.path}: ${h}`);
+    if (['gw-fan', 'gw-ops', 'gw-scanner'].includes(o.gw) && !expose.has('retry-after')) missing.push(`${o.gw}/${o.hit.route.metadata?.name}: retry-after`);
+  }
+  assert.deepEqual([...new Set(missing)], [], '노출하지 않는 응답 머리');
+});
+
+/** EnvoyProxy의 추적 설정 */
+const tracingOf = (name) => named('EnvoyProxy', name)?.spec?.telemetry?.tracing;
+/** 게이트웨이가 받는 EnvoyProxy 이름: Gateway의 infrastructure.parametersRef가 있으면 그것, 없으면 GatewayClass의 것 */
+function proxyNameOf(gw) {
+  const g = gatewayOf(gw);
+  const own = g?.spec?.infrastructure?.parametersRef;
+  if (own?.kind === 'EnvoyProxy') return own.name;
+  return named('GatewayClass', g?.spec?.gatewayClassName)?.spec?.parametersRef?.name;
+}
+/** 고정 태그 값(customTags의 Literal이나 tags 표) */
+const literalTag = (t, key) => t?.customTags?.[key]?.literal?.value ?? t?.tags?.[key];
+
+test('W7-COR-02 gw-queue Gateway는 자기 EnvoyProxy를 받고 추적 비율이 1/1000이며 고정 태그 peaket.sample.mode=head가 있다', () => {
+  requireDefinitions();
+  const ref = gatewayOf('gw-queue')?.spec?.infrastructure?.parametersRef;
+  assert.equal(ref?.kind, 'EnvoyProxy', 'gw-queue Gateway의 infrastructure.parametersRef');
+  const classProxy = named('GatewayClass', gatewayOf('gw-queue')?.spec?.gatewayClassName)?.spec?.parametersRef?.name;
+  assert.notEqual(ref?.name, classProxy, 'gw-queue가 공통 EnvoyProxy를 그대로 받는다');
+  const t = tracingOf(ref?.name);
+  assert.ok(t, `EnvoyProxy ${ref?.name}에 추적 설정이 없다`);
+  assert.deepEqual({ numerator: Number(t.samplingFraction?.numerator), denominator: Number(t.samplingFraction?.denominator) }, { numerator: 1, denominator: 1000 }, '추적 비율');
+  assert.equal(t.samplingRate, undefined, 'samplingRate와 samplingFraction을 함께 두지 않는다');
+  assert.equal(literalTag(t, 'peaket.sample.mode'), 'head', '고정 태그 peaket.sample.mode');
+});
+
+test('W7-COR-02 나머지 넷은 공통 EnvoyProxy의 samplingRate 100이다', () => {
+  requireDefinitions();
+  for (const gw of GATEWAYS.filter((g) => g !== 'gw-queue')) {
+    const name = proxyNameOf(gw);
+    const t = tracingOf(name);
+    assert.ok(t, `${gw}: EnvoyProxy ${name}에 추적 설정이 없다`);
+    assert.equal(t.samplingRate, 100, `${gw}: samplingRate`);
+    assert.equal(t.samplingFraction, undefined, `${gw}: samplingFraction`);
+  }
+});
