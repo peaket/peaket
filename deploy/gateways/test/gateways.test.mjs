@@ -897,3 +897,14 @@ test('SR-T13 ② VF-09 어떤 EnvoyPatchPolicy도 local_ratelimit을 고치지 �
   requireDefinitions();
   for (const p of byKind('EnvoyPatchPolicy')) assert.doesNotMatch(JSON.stringify(p.spec ?? {}), /local_?rate_?limit/i, `${p.metadata?.name}: 로컬 한도를 고친다`);
 });
+
+test('B-T18 ④ VF-13 gw-scanner Gateway와 그 HTTPRoute를 겨눈 EnvoyExtensionPolicy는 모두 originVerify: false다', () => {
+  requireDefinitions();
+  // 게이트웨이 수준과 라우트 수준을 따로 센다(라우트 정책이 있으면 게이트웨이 정책을 덮으므로 한쪽만 보면 빈틈이 숨는다)
+  const atGateway = commonLuaContexts(gatewayPolicies('EnvoyExtensionPolicy', 'gw-scanner'));
+  const atRoutes = routesOf('gw-scanner').flatMap((r) => commonLuaContexts(byKind('EnvoyExtensionPolicy').filter((p) => targetsRoute(p, r))).map((x) => [r.metadata?.name, x]));
+  assert.ok(atGateway.length > 0, 'gw-scanner Gateway를 겨눈 공통 Lua가 없다');
+  for (const x of atGateway) assert.equal(x.originVerify, false, 'gw-scanner Gateway 수준 originVerify');
+  assert.ok(atRoutes.length > 0, 'gw-scanner 라우트를 겨눈 공통 Lua가 없다');
+  for (const [name, x] of atRoutes) assert.equal(x.originVerify, false, `${name} 라우트 수준 originVerify`);
+});

@@ -665,3 +665,50 @@ test('[ASVS v5.0.0-15.3.4] VF-03 바깥에서 x-forwarded-for 여러 값을 보�
     assert.equal(h['x-forwarded-for'], want, sent);
   }
 });
+
+test('[ASVS v5.0.0-13.4.4] VF-12 다섯 게이트웨이의 리스너 호스트마다(queue·queue-files·api·www·partner-api·partner·ops-api·scanner-api) TRACE는 405이고 대역에 닿지 않는다', async () => {
+  const hosts = ['queue', 'queue-files', 'api', 'www', 'partner-api', 'partner', 'ops-api', 'scanner-api'];
+  for (const host of hosts) assert.ok(c.hosts[host], `접속 정보에 ${host} 호스트가 없다`);
+  for (const host of hosts) {
+    // 앱 서버 호스트(www·partner)는 앱 서버 경로(/)에서, API 호스트는 API 경로에서 부른다
+    for (const path of host === 'www' || host === 'partner' ? ['/', `/e2e-trace-${RUN}`] : [`/v1/e2e-trace-${RUN}`]) {
+      const r = await send(c, host, { method: 'TRACE', path, headers: edge(c, nextIp()) });
+      assert.equal(r.status, 405, `${host} TRACE ${path}: ${r.status}`);
+      assert.throws(() => echoed(r), `${host} TRACE ${path}: 대역에 닿았다`);
+    }
+  }
+});
+
+/** 끝단 신호 위조 머리(원본 확인 없이 보낸다) */
+const forgedEdge = () => ({ 'cloudfront-viewer-ja4-fingerprint': JA4(), 'cloudfront-viewer-asn': '64496', 'x-amzn-waf-bot-labels': 'awswaf:managed:aws:bot-control:bot:verified', 'x-peaket-arrival': 'forged-arrival' });
+const assertNoEdge = (h, m) => {
+  for (const k of ['cloudfront-viewer-ja4-fingerprint', 'cloudfront-viewer-asn', 'x-amzn-waf-bot-labels', 'x-peaket-arrival', 'x-peaket-origin-verify']) assert.equal(h[k], undefined, `${m}: 대역에 ${k}`);
+};
+
+test('B-T18 ④ VF-13 원본 확인 값이 맞아도 gw-scanner의 자기 Lua 정책이 없는 라우트(공개 경로)에서 끝단 머리가 대역에 닿지 않는다', async () => {
+  // gw-scanner 공개 경로: 기기 등록(POST /v1/scanner/device-enrollments, 토큰 없이 받는다)
+  const r = await send(c, 'scanner-api', { method: 'POST', path: '/v1/scanner/device-enrollments', body: '{}', headers: { 'content-type': 'application/json', 'x-peaket-origin-verify': c.originVerify, 'x-forwarded-for': nextIp(), ...forgedEdge() } });
+  assert.ok(r.status < 400, `gw-scanner 공개 경로: ${r.status}`);
+  assertNoEdge(echoed(r), 'gw-scanner 공개 경로(원본 확인 맞음)');
+});
+
+test('B-T18 ④ VF-13 원본 확인 없이 보낸 위조 끝단 머리는 CloudFront 뒤 넷마다 자기 Lua 정책이 있는 라우트와 게이트웨이 정책에만 기대는 라우트 둘 다에서 대역에 닿지 않는다', async () => {
+  // 게이트웨이 정책에만 기대는 라우트: 공개 경로나 앱 서버 경로(정의 deploy/gateways의 gw-*-public·gw-*-app)
+  const gatewayOnly = {
+    'gw-queue': { host: 'queue', method: 'GET', path: `/v1/queues/${EVENT}/shuffle-proof` },
+    'gw-fan': { host: 'www', method: 'GET', path: c.appPaths['gw-fan'] },
+    'gw-partner': { host: 'partner', method: 'GET', path: c.appPaths['gw-partner'] },
+    'gw-ops': { host: 'ops-api', method: 'POST', path: '/v1/ops/auth/sessions', body: '{}', headers: { origin: c.origins.console, 'content-type': 'application/json' } },
+  };
+  for (const gw of BEHIND_CLOUDFRONT) {
+    // ① 자기 Lua 정책이 있는 라우트(확인 경로)
+    const own = await probe(c, gw, { tokenValue: accessToken(c, gw, nextSub()), event: EVENT, headers: { 'x-forwarded-for': nextIp(), ...forgedEdge() } });
+    assert.ok(own.status < 400, `${gw} 확인 경로: ${own.status}`);
+    assertNoEdge(echoed(own), `${gw} 확인 경로`);
+    // ② 게이트웨이 정책에만 기대는 라우트
+    const g = gatewayOnly[gw];
+    const r = await send(c, g.host, { method: g.method, path: g.path, body: g.body, headers: { 'x-forwarded-for': nextIp(), ...forgedEdge(), ...(g.headers ?? {}) } });
+    assert.ok(r.status < 400, `${gw} ${g.method} ${g.path}: ${r.status}`);
+    assertNoEdge(echoed(r), `${gw} ${g.method} ${g.path}`);
+  }
+});
