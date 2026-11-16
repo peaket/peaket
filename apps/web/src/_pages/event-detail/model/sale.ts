@@ -99,9 +99,12 @@ function phaseIndexAt(phases: DetailSalePhase[], atMs: number): number {
   return phases.findIndex((p) => p.startsAtMs <= atMs && atMs < p.endsAtMs);
 }
 
-/** 자격 없음 이유 글: 판정 시각 뒤 첫 GENERAL 조각의 시작(한국 시각). 없으면 첫 문장만 */
+/**
+ * 자격 없음 이유 글: 시작 시각이 판정 시각과 같거나 뒤인 첫 GENERAL 조각의 시작(한국 시각). 없으면 첫 문장만.
+ * 오픈 전에 켠 명단 밖 알림에서 일반 예매가 오픈 시각에 바로 열리면 그 오픈 시각을 알린다(ADR-0272 결정 3·4, 검증 V040-34 뒤)
+ */
 function deniedReason(phases: DetailSalePhase[], atMs: number): string {
-  const general = phases.find((p) => p.kind === 'GENERAL' && p.startsAtMs > atMs);
+  const general = phases.find((p) => p.kind === 'GENERAL' && p.startsAtMs >= atMs);
   const lead = '이 회차의 선예매 대상이 아닙니다';
   return general ? `${lead}. 일반 예매는 ${dateTimeText(general.startsAtMs)}에 시작합니다` : lead;
 }
@@ -186,10 +189,9 @@ export function deniedWindow(phases: DetailSalePhase[], openAtMs: number, readAt
 }
 
 /**
- * 명단 밖 주소 조각을 지운 주소(ADR-0272 결정 4 '주소 조각만 지운다', 검증 V040-28 뒤): 조각이 정확히 #sale-eligibility-required이면 경로 + 쿼리, 아니면 null.
- * 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ * 명단 밖 주소 조각을 지운 주소(ADR-0272 결정 4 '주소 조각만 지운다', 검증 V040-28 뒤): 조각이 정확히 #sale-eligibility-required이면
+ * 경로 + 쿼리(쿼리는 남기고 조각만 뺀다), 아니면 null(알림을 켜지 않고 주소도 바꾸지 않는다)
  */
 export function deniedHashCleanUrl(loc: { pathname: string; search: string; hash: string }): string | null {
-  void loc;
-  throw new Error('아직 없음');
+  return isDeniedHash(loc.hash) ? `${loc.pathname}${loc.search}` : null;
 }

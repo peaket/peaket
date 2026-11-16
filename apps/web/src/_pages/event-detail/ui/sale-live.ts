@@ -11,7 +11,7 @@ import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 import type { BookingPhase } from '../model/detail';
 import type { LiveSale } from '../model/live-sale';
-import { deniedWindow, isDeniedHash, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
+import { deniedHashCleanUrl, deniedWindow, type DetailSalePhase, type FanEligibilityState } from '../model/sale';
 
 type LiveDriver = { phase(p: BookingPhase | undefined): void; visible(): void; view(): LiveSale; listen(l: () => void): () => void };
 type EligibilityStore = { get(): FanEligibilityState; subscribe(l: () => void): () => void; refreshIfStarted(): Promise<void> };
@@ -148,9 +148,9 @@ export function useDeniedMarker(phases: DetailSalePhase[], openAtMs: number): { 
   const [denied, setDenied] = useState<{ untilMs?: number } | null>(null);
   // 처음 그린 뒤 한 번만 읽는다(조각은 지우므로 다시 읽어도 없다)
   useEffect(() => {
-    if (!isDeniedHash(window.location.hash)) return;
-    const { pathname, search } = window.location;
-    window.history.replaceState(window.history.state, '', `${pathname}${search}`);
+    const cleanUrl = deniedHashCleanUrl(window.location);
+    if (cleanUrl === null) return;
+    window.history.replaceState(window.history.state, '', cleanUrl);
     setDenied(deniedWindow(phases, openAtMs, browserClock().now()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
