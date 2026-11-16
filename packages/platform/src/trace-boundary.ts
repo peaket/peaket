@@ -74,6 +74,30 @@ const originOf = (url: string): string => {
   }
 };
 
+/** 쿼리·조각을 뗀 경로 */
+const pathOnly = (target: string): string => target.split(/[?#]/, 1)[0] ?? '';
+
+/** 옛 이름 속성: 서버 span의 http.target은 쿼리를 떼고, http.url은 출처만 남긴다(W7-SEC-02) */
+function cleanLegacyUrl(span: Span): void {
+  const a = span.attributes;
+  const target = a['http.target'];
+  if (typeof target === 'string' && /[?#]/.test(target)) span.setAttribute('http.target', pathOnly(target));
+  const url = a['http.url'];
+  if (typeof url === 'string') span.setAttribute('http.url', originOf(url));
+}
+
+/**
+ * 내보낼 서버 span 이름: 경로 틀 속성(http.route·next.route)이 있으면 '메서드 경로 틀', 없는데 이름에 주소(/·?)가 들어 있으면 '메서드'만.
+ * 그 밖(이미 '메서드 경로 틀'이거나 'GET unmatched' 같은 이름)은 그대로 둔다. 메서드를 모르면 바꾸지 않는다
+ */
+export function serverSpanName(name: string, a: Record<string, unknown>): string {
+  const method = [a['http.request.method'], a['http.method']].find((v) => typeof v === 'string' && v !== '') as string | undefined;
+  if (!method) return name;
+  const route = [a['http.route'], a['next.route']].find((v) => typeof v === 'string' && v !== '') as string | undefined;
+  if (route) return `${method} ${route}`;
+  return /[/?]/.test(name) ? method : name;
+}
+
 /**
  * span 시작 때 고친다(수집기 2차 처리 앞의 1차):
  * - client.address·network.peer.address는 IP 앞부분(IPv4 /24, IPv6 /48, ADR-0053 결정 1). 형식이 틀리면 지운 값('')
@@ -95,8 +119,23 @@ export class BoundarySpanProcessor implements SpanProcessor {
     if (typeof full === 'string') span.setAttribute('url.full', originOf(full));
     const ua = a['user_agent.original'];
     if (typeof ua === 'string') span.setAttribute('user_agent.original', clientFamily(ua) ?? '');
+    cleanLegacyUrl(span);
     const untrusted = parentContext.getValue(UNTRUSTED_PARENT) as SpanContext | undefined;
     if (untrusted && span.kind === SpanKind.SERVER && !span.parentSpanContext) span.addLink({ context: untrusted });
+  }
+
+  /**
+   * 끝나기 직전(아직 고칠 수 있는 때, 내보내기 앞)에 한 번 더 고친다(웨이브 끝 리뷰 W7-SEC-02, docs/observability.md §7 '서버 span'):
+   * 시작 뒤에 실린 옛 이름 속성(http.target·http.url)과 url.full, 그리고 끝날 때 원래 주소로 바뀐 서버 span 이름(Next.js)
+   */
+  onEnding(span: Span): void {
+    cleanLegacyUrl(span);
+    const full = span.attributes['url.full'];
+    if (typeof full === 'string') span.setAttribute('url.full', originOf(full));
+    if (span.kind === SpanKind.SERVER) {
+      const name = serverSpanName(span.name, span.attributes);
+      if (name !== span.name) span.updateName(name);
+    }
   }
 
   onEnd(_span: ReadableSpan): void {}
