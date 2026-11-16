@@ -208,6 +208,50 @@ describe('기한 지난 미룸 풀기 [BAT-420 몫 D]', () => {
   });
 });
 
+describe('기한 지난 미룸 풀기 실패 [BAT-420 몫 D 보충 2]', () => {
+  test('R-T38 ⑤ 기한 지난 미룸 풀기가 실패해도 그 틱의 환급은 이어 가고(경고 event-refund-hold-release-failed 한 번) 다음 틱에 풀리면 SEV2가 한 번이다', async () => {
+    const lines: { level: string; o: object; msg: string }[] = [];
+    let releaseFails = true;
+    let served = false;
+    const pays: string[] = [];
+    const runner = new RefundAfterEntry({
+      nowMs: () => NOW,
+      // 기한 판단은 집기 SQL이 하므로(기한 지난 미룸은 걸림이 아니다) 마감 지난 보류 취소 하나가 나온다
+      writes: {
+        dueRefunds: async () => {
+          if (served) return [];
+          served = true;
+          return [{ cancellationId: 'c-1', orderId: 'o-1', ticketId: 't-1', amount: 3_334, reason: 'USER', status: 'REQUESTED', attempts: 0 }];
+        },
+        updateStatus: async () => true,
+        scheduleRefundRetry: async () => true,
+        markRefundFailed: async () => true,
+      } as never,
+      payments: { cancel: async (q) => (pays.push(q.cancellationId), 'CANCELLED') },
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: { claimDue: async () => true, markEntryRecorded: async () => true },
+      holds: {
+        releaseExpired: async () => {
+          if (releaseFails) throw new Error('pg 57P01 terminating connection');
+          return [{ eventId: EVENT, cancellationRequestId: REQUEST }];
+        },
+      },
+      log: { warn: (o, msg) => void lines.push({ level: 'warn', o, msg }), error: (o, msg) => void lines.push({ level: 'error', o, msg }) },
+    });
+    const named = (name: string) => lines.filter((l) => JSON.stringify(l).includes(name));
+    await expect(runner.run()).resolves.toMatchObject({ refunded: 1 });
+    expect(pays).toEqual(['c-1']);
+    expect(named('event-refund-hold-release-failed')).toHaveLength(1);
+    expect(named('event-refund-hold-expired')).toHaveLength(0);
+    releaseFails = false;
+    await runner.run();
+    expect(named('event-refund-hold-release-failed')).toHaveLength(1);
+    const expired = named('event-refund-hold-expired');
+    expect(expired).toHaveLength(1);
+    expect(JSON.stringify(expired[0])).toMatch(/SEV2/);
+  });
+});
+
 describe('남는 차액 CS 건 어댑터 [BAT-420 몫 D]', () => {
   /** sha256(`deduction-gap:${id}`) 앞 16바이트를 8-4-4-4-12로(시험이 직접 계산한다) */
   const gapKey = (id: string) => {

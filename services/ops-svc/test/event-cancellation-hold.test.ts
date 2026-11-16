@@ -79,27 +79,69 @@ describe('요청 전 미룸 걸기 [BAT-420 몫 D]', () => {
 });
 
 describe('미룸 되돌림 [BAT-420 몫 D]', () => {
-  test('GAT-110 D1 진행 중 요청과 부딪히면 건 미룸을 같은 요청 ID로 풀고 409 event-cancellation-active와 기존 요청 ID를 준다', async () => {
+  // 보충 2(af7bde64): 검사 뒤 진행 중 요청을 먼저 보고, 있으면 걸지 않고 409다. 걸기가 ALREADY_EXISTS면 진행 중 요청을 다시 본다
+  test('GAT-110 D1 진행 중 요청이 있는 회차의 새 요청은 미룸을 걸지 않고(0회) 409 event-cancellation-active와 기존 요청 ID를 준다(commander·파트너)', async () => {
     const f = fixture();
     f.behaviour.suspended.add(EVENT);
     const existing = recordOf({ status: 'JUDGED' });
     await f.store.insert(existing);
     await expect(commanderAsk(f)).rejects.toMatchObject(problem('event-cancellation-active', 409, { requestId: existing.requestId }));
-    expect(f.holdCalls).toHaveLength(2);
-    const [on, off] = f.holdCalls;
-    expect(on).toMatchObject({ eventId: EVENT, held: true });
-    expect(on!.requestId).not.toBe(existing.requestId);
-    expect(off).toEqual({ eventId: EVENT, requestId: on!.requestId, held: false });
+    expect(f.holdCalls).toEqual([]);
+
+    const own = ownEvent(f);
+    const first = await partnerAsk(f, own);
+    const calls = f.holdCalls.length;
+    await expect(partnerAsk(f, own, { ...CANCEL, reason: '다시 요청' })).rejects.toMatchObject(problem('event-cancellation-active', 409, { requestId: first.requestId }));
+    expect(f.holdCalls).toHaveLength(calls);
   });
 
-  test('GAT-110 D1 풀기가 실패해도 원래 409를 그대로 준다', async () => {
+  test('GAT-110 D1 걸기가 ALREADY_EXISTS인데 다시 보니 그사이 진행 중 요청이 생겼으면 409(그 요청 ID)이고 행을 더 쓰지 않는다', async () => {
     const f = fixture();
     f.behaviour.suspended.add(EVENT);
-    f.behaviour.releaseFails = true;
-    const existing = recordOf({ status: 'PENDING_APPROVAL' });
-    await f.store.insert(existing);
-    await expect(commanderAsk(f)).rejects.toMatchObject(problem('event-cancellation-active', 409, { requestId: existing.requestId }));
-    expect(f.holdCalls.map((c) => c.held)).toEqual([true, false]);
+    const racer = recordOf({ status: 'REQUESTED' });
+    f.behaviour.holdConflict = true;
+    f.behaviour.onHold = async (q) => {
+      if (q.held && !f.store.rows.has(racer.requestId)) await f.store.insert(racer);
+    };
+    await expect(commanderAsk(f)).rejects.toMatchObject(problem('event-cancellation-active', 409, { requestId: racer.requestId }));
+    expect([...f.store.rows.keys()]).toEqual([racer.requestId]);
+    expect(f.holdCalls.filter((c) => c.held)).toHaveLength(1);
+    expect(f.warns.filter((w) => JSON.stringify(w).includes('event-refund-hold-conflict'))).toEqual([]);
+  });
+
+  test('GAT-110 D1 걸기가 ALREADY_EXISTS이고 다시 봐도 진행 중 요청이 없으면(풀기를 놓친 옛 미룸) 503 event-refund-unavailable과 경고 event-refund-hold-conflict 한 번이고 아무것도 쓰지 않는다', async () => {
+    const f = fixture();
+    f.behaviour.suspended.add(EVENT);
+    f.behaviour.holdConflict = true;
+    await expect(commanderAsk(f)).rejects.toMatchObject(problem('event-refund-unavailable', 503));
+    expect(f.store.rows.size).toBe(0);
+    expect(f.audit.entries).toEqual([]);
+    expect(f.caseCalls).toEqual([]);
+    const conflicts = f.warns.filter((w) => JSON.stringify(w).includes('event-refund-hold-conflict'));
+    expect(conflicts).toHaveLength(1);
+    expect(JSON.stringify(conflicts[0])).toContain(EVENT);
+    // 대조: 옛 미룸이 풀리면(기한) 같은 요청을 받는다
+    f.behaviour.holdConflict = false;
+    expect(await commanderAsk(f)).toMatchObject({ status: 'REQUESTED' });
+  });
+
+  test('GAT-110 D1 걸기 뒤 저장이 진행 중 유일 색인에 걸리면(동시에 들어온 두 요청) 자기 요청 ID로 한 번 풀고 409이며, 풀기가 실패해도 409다', async () => {
+    for (const releaseFails of [false, true]) {
+      const f = fixture();
+      f.behaviour.suspended.add(EVENT);
+      f.behaviour.releaseFails = releaseFails;
+      const racer = recordOf({ status: 'REQUESTED' });
+      // 진행 중 확인은 지났고, 걸기와 저장 사이에 다른 요청이 먼저 저장됐다
+      f.behaviour.onHold = async (q) => {
+        if (q.held && !f.store.rows.has(racer.requestId)) await f.store.insert(racer);
+      };
+      await expect(commanderAsk(f), String(releaseFails)).rejects.toMatchObject(problem('event-cancellation-active', 409, { requestId: racer.requestId }));
+      const [on, ...rest] = f.holdCalls;
+      expect(on, String(releaseFails)).toMatchObject({ eventId: EVENT, held: true });
+      expect(on!.requestId).not.toBe(racer.requestId);
+      expect(rest, String(releaseFails)).toEqual([{ eventId: EVENT, requestId: on!.requestId, held: false }]);
+      expect([...f.store.rows.keys()]).toEqual([racer.requestId]);
+    }
   });
 
   test('GAT-110 D1 요청 저장이 실패하면 건 미룸을 같은 요청 ID로 풀고 그 오류를 그대로 올린다(풀기가 실패해도 같다)', async () => {

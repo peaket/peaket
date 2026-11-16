@@ -107,5 +107,16 @@ export interface EventRefundHolds {
   hold(q: { eventId: string; requestId: string; held: boolean; expiresAtMs?: number }): Promise<{ held: boolean }>;
 }
 
+/**
+ * 걸기가 purchase-svc에서 ALREADY_EXISTS(그 회차에 다른 요청 ID의 열린 미룸)로 끝났다(BAT-420 몫 D 보충 2, transfer-refund §5 '미룸 걸기').
+ * 부른 쪽은 진행 중 요청을 다시 보아 있으면 409, 없으면 503과 경고 event-refund-hold-conflict다. 어댑터가 다른 실패와 갈라 던진다
+ */
+export class EventRefundHoldConflict extends Error {
+  constructor(message = '그 회차에 다른 요청의 미룸이 걸려 있다') {
+    super(message);
+    this.name = 'EventRefundHoldConflict';
+  }
+}
+
 export const EVENT_CANCELLATION_STORE = Symbol.for('peaket.ops.event-cancellation-store');
 export const EVENT_REFUND_STARTER = Symbol.for('peaket.ops.event-refund-starter');

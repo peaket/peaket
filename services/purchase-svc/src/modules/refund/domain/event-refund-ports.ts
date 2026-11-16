@@ -1,5 +1,6 @@
 // 회차 취소 일괄 환불의 포트(BAT-425 GAT-120·GAT-130). 도메인은 DB·HTTP·gRPC를 모른다.
 import type { EventRefundHoldInput, EventRefundHoldState } from './event-refund-hold.js';
+import type { CancellationConfigs } from './ports.js';
 import type {
   EventCancellationRequest,
   EventRefundAttempt,
@@ -143,6 +144,10 @@ export interface EventRefundServiceDeps {
   readonly holds?: EventRefundHolds;
   readonly gaps?: DeductionGapCancellations;
   readonly gapNotice?: DeductionGapNotice;
+  /** 보충 2: 차액 대상의 입장 시작 시각은 대상 표가 아니라 회차 판매 설정(entryOpensAtMs)에서 읽는다(대상 0이어도 찾는다). 없으면 차액을 찾지 않는다 */
+  readonly configs?: CancellationConfigs;
+  /** 보충 2: 설정에 입장 시작이 없어 차액을 찾지 않을 때의 경고 등. 없으면 남기지 않는다 */
+  readonly log?: { warn(o: object, msg: string): void };
 }
 
 // ---- BAT-420 몫 D(OPEN[45] 결정, 빈 뼈대): 미룸·차액 건 ----

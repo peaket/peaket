@@ -326,6 +326,7 @@ describe('GAT-110 E1 보류 취소 전환 경합 [PostgreSQL]', () => {
       notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
       gaps: new DrizzleDeductionGapCancellations(purchaseDb),
       gapNotice: gap.notice,
+      configs,
       nowMs: () => NOW,
       deadlineMs: () => NOW + 30_000,
     });
@@ -388,6 +389,7 @@ const gapService = (gap: ReturnType<typeof gapNoticeOf>, over: { canceller?: Con
     notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
     gaps: new DrizzleDeductionGapCancellations(purchaseDb),
     gapNotice: gap.notice,
+    configs,
     nowMs: () => NOW,
     deadlineMs: () => NOW + 30_000,
     concurrency: 2,

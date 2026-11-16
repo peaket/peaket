@@ -55,18 +55,20 @@ describe('환급 시작 조립 [BAT-420]', () => {
     const relay = source('relay-app.ts');
     expect(relay).toContain('new DrizzleEventRefundHolds(');
     const block = relay.slice(relay.indexOf('new RefundAfterEntry('), relay.indexOf('new RefundAfterEntry(') + 800);
-    expect(block).toMatch(/\bholds\s*:/);
+    expect(block).toMatch(/\bholds\s*[:,}]/);
   });
 
-  test('R-T38 ④ start.ts·relay-app.ts의 일괄 환불은 차액 대상 찾기(gaps)·차액 건(gapNotice)을 꽂고, start.ts는 미룸(holds)도 꽂는다', () => {
+  test('R-T38 ④ start.ts·relay-app.ts의 일괄 환불은 차액 대상 찾기(gaps)·차액 건(gapNotice)·판매 설정(configs, 입장 시작)을 꽂고, start.ts는 미룸(holds)도 꽂는다', () => {
     for (const file of ['start.ts', 'relay-app.ts']) {
       const text = source(file);
       expect(text, file).toContain('new DrizzleDeductionGapCancellations(');
       expect(text, file).toContain('new HttpDeductionGapNotice(');
       const block = text.slice(text.indexOf('new EventRefundService('), text.indexOf('new EventRefundService(') + 1_800);
-      expect(block, file).toMatch(/\bgaps\s*:/);
-      expect(block, file).toMatch(/\bgapNotice\s*:/);
-      if (file === 'start.ts') expect(block, file).toMatch(/\bholds\s*:/);
+      // 이름: 값 꼴과 줄임 꼴(gaps,) 둘 다 받는다
+      expect(block, file).toMatch(/\bgaps\s*[:,}]/);
+      expect(block, file).toMatch(/\bgapNotice\s*[:,}]/);
+      expect(block, file).toMatch(/\bconfigs\s*[:,}]/);
+      if (file === 'start.ts') expect(block, file).toMatch(/\bholds\s*[:,}]/);
     }
   });
 

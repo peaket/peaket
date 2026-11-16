@@ -6,6 +6,7 @@ import { MemoryAuditChain } from '../src/modules/audit/index.js';
 import {
   EventCancellationProblem,
   EventCancellations,
+  EventRefundHoldConflict,
   MemoryEventCancellationStore,
   type EventCancellationCases,
   type EventCancellationDryRun,
@@ -139,9 +140,15 @@ export function fixture(o: FixtureOptions = {}) {
   const ownerCalls: string[] = [];
   /** BAT-420 몫 D: purchase-svc SetEventRefundHold 호출(차례대로) */
   const holdCalls: Array<{ eventId: string; requestId: string; held: boolean; expiresAtMs?: number }> = [];
+  /** 회차 취소 모듈이 남긴 경고 로그(BAT-420 몫 D 보충 2: event-refund-hold-conflict 등) */
+  const warns: Array<{ obj: object; msg: string }> = [];
   const behaviour = {
     holdFails: false,
     releaseFails: false,
+    /** 걸기가 ALREADY_EXISTS(어댑터가 EventRefundHoldConflict로 던짐)로 끝난다 */
+    holdConflict: false,
+    /** 걸기 직전에 부른다(그사이 다른 요청이 저장된 차례를 만든다) */
+    onHold: undefined as ((q: { eventId: string; requestId: string; held: boolean }) => Promise<void>) | undefined,
     /** 미룸을 거는 순간 그 회차의 요청 행이 저장소에 있었는가(요청 저장 전에 거는지 본다) */
     rowsWhenHeld: [] as number[],
     previewFails: false,
@@ -216,7 +223,9 @@ export function fixture(o: FixtureOptions = {}) {
       log.push(`hold:${q.held ? 'on' : 'off'}:${q.requestId}`);
       holdCalls.push({ ...q });
       if (q.held) behaviour.rowsWhenHeld.push([...store.rows.values()].filter((r) => r.eventId === q.eventId && r.requestId === q.requestId).length);
+      if (behaviour.onHold) await behaviour.onHold(q);
       if (q.held && behaviour.holdFails) throw new Error('purchase-svc 14 UNAVAILABLE');
+      if (q.held && behaviour.holdConflict) throw new EventRefundHoldConflict();
       if (!q.held && behaviour.releaseFails) throw new Error('purchase-svc 4 DEADLINE_EXCEEDED');
       return { held: q.held };
     },
@@ -230,8 +239,9 @@ export function fixture(o: FixtureOptions = {}) {
     ...(without.has('owners') ? {} : { owners }),
     ...(without.has('cases') ? {} : { cases }),
     ...(without.has('holds') ? {} : { holds }),
+    log: { warn: (obj: object, msg: string) => void warns.push({ obj, msg }) },
   });
-  return { app, store, audit, log, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, holdCalls, behaviour, clock };
+  return { app, store, audit, log, warns, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, holdCalls, behaviour, clock };
 }
 
 export type Fixture = ReturnType<typeof fixture>;

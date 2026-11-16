@@ -322,23 +322,29 @@ describe('회차 취소 확정 때 남는 공제 차액 CS 건 [BAT-420 몫 D, O
   const ENTRY_OPENS = NOW - 3_600_000;
   const GAP = { cancellationId: '0194c600-0000-7000-8000-0000000000d1', orderId: '0194c600-0000-7000-8000-0000000000d2', ticketId: '0194c600-0000-7000-8000-0000000000d3', deductionAmount: 29_999 };
   type GapOpen = Parameters<NonNullable<ConstructorParameters<typeof EventRefundService>[0]['gapNotice']>['open']>[0];
-  const gapFixture = (opts: { entryOpensAtMs?: number; rows?: () => readonly (typeof GAP)[] } = {}) => {
+  // 보충 2(af7bde64): 입장 시작 시각은 대상 표가 아니라 회차 판매 설정(configs)에서 읽는다. 대상 표에는 일부러 입장 시작을 싣지 않는다
+  const gapFixture = (opts: { entryOpensAtMs?: number; rows?: () => readonly (typeof GAP)[]; targets?: readonly EventRefundTarget[] } = {}) => {
     const store = new MemoryEventRefundStore();
     const lists: [string, number][] = [];
     const gapOpens: GapOpen[] = [];
     const notices: Parameters<EventRefundFailureNotice['open']>[0][] = [];
+    const warns: { o: object; msg: string }[] = [];
+    const configCalls: string[] = [];
     let payCalls = 0;
+    const entryOpensAtMs = 'entryOpensAtMs' in opts ? opts.entryOpensAtMs : ENTRY_OPENS;
     const service = new EventRefundService({
       store,
-      targets: { list: async () => [target({ ...('entryOpensAtMs' in opts ? { entryOpensAtMs: opts.entryOpensAtMs } : { entryOpensAtMs: ENTRY_OPENS }) })] },
+      targets: { list: async () => opts.targets ?? [target()] },
       canceller: { cancel: async () => (payCalls++, { status: 'REFUNDED' }) },
       notice: { open: async (q) => void notices.push(q) },
-      gaps: { list: async (eventId, entryOpensAtMs) => (lists.push([eventId, entryOpensAtMs]), opts.rows ? opts.rows() : [GAP]) },
+      gaps: { list: async (eventId, at) => (lists.push([eventId, at]), opts.rows ? opts.rows() : [GAP]) },
       gapNotice: { open: async (q) => void gapOpens.push(q) },
+      configs: { config: async (eventId) => (configCalls.push(eventId), { saleEndsAtMs: NOW + 7 * 86_400_000, ...(entryOpensAtMs !== undefined ? { entryOpensAtMs } : {}) }) },
+      log: { warn: (o, msg) => void warns.push({ o, msg }) },
       nowMs: () => NOW,
       deadlineMs: () => NOW + 5_000,
     });
-    return { store, service, lists, gapOpens, notices, payCalls: () => payCalls };
+    return { store, service, lists, gapOpens, notices, warns, configCalls, payCalls: () => payCalls };
   };
 
   test('R-T38 ④ 확정(CANCEL 시작)은 입장 시작 뒤 공제하고 나간 취소마다 차액 건을 한 번 열고 결제사를 더 부르지 않는다', async () => {
@@ -373,6 +379,25 @@ describe('회차 취소 확정 때 남는 공제 차액 CS 건 [BAT-420 몫 D, O
     expect(control.lists).toHaveLength(1);
   });
 
+  test('R-T38 ④ 대상 표가 없어도(남은 표가 모두 이미 공제 환급됨) 판매 설정의 입장 시작으로 차액을 찾고, 설정에 입장 시작이 없으면 찾지 않고 경고 한 번이다(보충 2)', async () => {
+    const empty = gapFixture({ targets: [] });
+    await start(empty.service);
+    expect(empty.configCalls).toContain(EVENT);
+    expect(empty.lists).toEqual([[EVENT, ENTRY_OPENS]]);
+    expect(empty.gapOpens).toEqual([{ cancellationId: GAP.cancellationId, orderId: GAP.orderId, deductionAmount: 29_999, requestId: REQUEST, nowMs: NOW }]);
+    expect(empty.payCalls()).toBe(0);
+    const noEntry = gapFixture({ targets: [], entryOpensAtMs: undefined });
+    await start(noEntry.service);
+    expect(noEntry.lists).toEqual([]);
+    expect(noEntry.gapOpens).toEqual([]);
+    expect(noEntry.warns).toHaveLength(1);
+    expect(JSON.stringify(noEntry.warns[0])).toContain(EVENT);
+    // 대상 표에 입장 시작이 실려 있어도 설정에 없으면 찾지 않는다(설정이 정본)
+    const targetOnly = gapFixture({ targets: [target({ entryOpensAtMs: ENTRY_OPENS })], entryOpensAtMs: undefined });
+    await start(targetOnly.service);
+    expect(targetOnly.lists).toEqual([]);
+  });
+
   test('GAT-110 D7 전환에서 진 항목(cancellation-in-progress)은 그 행 공제액으로 차액 건(그 취소 하나)만 열고 일반 일괄 환불 실패 알림은 열지 않는다', async () => {
     const pendingId = '0194c600-0000-7000-8000-0000000000e1';
     const store = new MemoryEventRefundStore();
@@ -382,7 +407,8 @@ describe('회차 취소 확정 때 남는 공제 차액 CS 건 [BAT-420 몫 D, O
     let calls = 0;
     const service = new EventRefundService({
       store,
-      targets: { list: async () => [target({ pendingCancellationId: pendingId, entryOpensAtMs: ENTRY_OPENS })] },
+      targets: { list: async () => [target({ pendingCancellationId: pendingId })] },
+      configs: { config: async () => ({ saleEndsAtMs: NOW + 7 * 86_400_000, entryOpensAtMs: ENTRY_OPENS }) },
       // 시작 도중 마감 뒤 환급 실행기가 그 보류 취소를 먼저 집었다(공제 29,999로 결제사에 보냄)
       canceller: { cancel: async () => (calls++, (claimed = true), { status: 'FAILED', error: 'cancellation-in-progress' }) },
       notice: { open: async (q) => void notices.push(q) },

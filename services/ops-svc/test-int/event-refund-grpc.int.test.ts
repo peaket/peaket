@@ -6,6 +6,7 @@ import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { INTERNAL_GRPC_CALLER_HEADER } from '@peaket/platform';
 import { GrpcEventRefunds } from '../src/adapters/grpc-event-refunds.js';
+import { EventRefundHoldConflict } from '../src/modules/event-cancellations/index.js';
 
 const NOW = Date.parse('2026-11-15T01:00:00.000Z');
 const EVENT = '0193a000-0000-7000-8000-000000000004';
@@ -30,7 +31,7 @@ const PREVIEW_ANSWER = {
 };
 
 /** BAT-420 몫 D: SetEventRefundHold 대역의 다음 답·실패와 받은 호출자 머리 */
-const holdServer = { fail: false, callers: [] as unknown[] };
+const holdServer = { fail: false, code: grpc.status.UNAVAILABLE as grpc.status, callers: [] as unknown[] };
 
 let server: grpc.Server;
 let client: GrpcEventRefunds;
@@ -56,7 +57,7 @@ beforeAll(async () => {
       received.push({ method: 'SetEventRefundHold', req: call.request });
       holdServer.callers.push(call.metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0]);
       if (holdServer.fail) {
-        cb({ code: grpc.status.UNAVAILABLE, details: 'purchase-svc down' });
+        cb({ code: holdServer.code, details: 'purchase-svc down' });
         return;
       }
       const held = call.request.held === true;
@@ -194,6 +195,28 @@ describe('BAT425 ops-svc 환불 gRPC 클라이언트', () => {
       await expect(client.hold({ eventId: EVENT, requestId: REQUEST, held: true, expiresAtMs: NOW + 259_200_000 })).rejects.toBeDefined();
     } finally {
       holdServer.fail = false;
+    }
+  });
+
+  test('GAT-110 D3 ops 어댑터는 ALREADY_EXISTS만 EventRefundHoldConflict로 알리고 UNAVAILABLE·INTERNAL은 다른 오류로 던진다(보충 2)', async () => {
+    const outcome = async (code: grpc.status) => {
+      holdServer.fail = true;
+      holdServer.code = code;
+      try {
+        return await client.hold({ eventId: EVENT, requestId: REQUEST, held: true, expiresAtMs: NOW + 259_200_000 }).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        );
+      } finally {
+        holdServer.fail = false;
+        holdServer.code = grpc.status.UNAVAILABLE;
+      }
+    };
+    expect(await outcome(grpc.status.ALREADY_EXISTS)).toBeInstanceOf(EventRefundHoldConflict);
+    for (const code of [grpc.status.UNAVAILABLE, grpc.status.INTERNAL]) {
+      const e = await outcome(code);
+      expect(e, String(code)).toBeInstanceOf(Error);
+      expect(e, String(code)).not.toBeInstanceOf(EventRefundHoldConflict);
     }
   });
 });

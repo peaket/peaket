@@ -43,4 +43,4 @@ export type {
 export { EventCancellationsController } from './inbound/event-cancellations.controller.js';
 export { PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
 export { EventCancellationsModule, type EventCancellationsModuleDeps } from './event-cancellations.module.js';
-export { EVENT_REFUND_HOLD_MS } from './domain/ports.js';
+export { EVENT_REFUND_HOLD_MS, EventRefundHoldConflict } from './domain/ports.js';
