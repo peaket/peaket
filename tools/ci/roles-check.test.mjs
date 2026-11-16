@@ -1019,3 +1019,31 @@ test('RC-48 ⑧⑨ 문서 묶음의 계획 파일 절과 담당 표', () => {
     expectFail(r, `RC-48 ${name}`, check_, 'BAT-902', null);
   }
 });
+
+// 시험 먼저의 뜻(계획 9의 2): 첫 시험 쪽이 첫 구현 쪽보다 앞이면 된다. 구현 뒤의 시험 쪽 커밋은 막지 않는다
+test('RC-49 ③ 구현 뒤의 시험 커밋은 통과한다', () => {
+  const one = check(pick(mixed(), ['plan', 'test', 'impl', 'test2', 'review', 'verify', 'rfTest', 'rfImpl', 'record']));
+  expectPass(one.r, 'RC-49 impl 뒤 test(시험 이의에 답한 고침)', 1, 9);
+  const two = check(pick(mixed(), ['plan', 'test', 'impl', 'review', 'verify', 'test2', 'rfTest', 'rfImpl', 'record']));
+  expectPass(two.r, 'RC-49 verify 뒤 test(살아남은 틀린 구현을 잡는 시험)', 1, 9);
+});
+
+test('RC-50 ③ 같은 지적에서 구현 쪽 뒤의 시험 쪽 커밋은 통과한다', () => {
+  const one = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-01'])], [...BEFORE_RF, 't1', 'i1', 't2', 'record']));
+  expectPass(one.r, 'RC-50 test(RV-01) → impl(RV-01) → test(RV-01)', 1, 9);
+  const seq = [...codeBatch(), rfTestOf('t1', ['RV-01']), rfTestOf('t2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfTestOf('t3', ['RV-01']), rfTestOf('t4', ['RV-02'])];
+  const two = check(pick(seq, [...BEFORE_RF, 't1', 't2', 'i1', 'i2', 't3', 't4', 'record']));
+  expectPass(two.r, 'RC-50 지적 둘을 엇갈려', 1, 12);
+});
+
+test('RC-51 ③ 같은 지적에서 구현 쪽이 첫 시험 쪽보다 앞서면 실패한다', () => {
+  const only = (r, label, sha, finding) => {
+    expectFail(r, label, '차례', 'BAT-901', sha, [finding]);
+    const lines_ = failures(r.out).filter((f) => f.check === '차례');
+    assert.equal(lines_.length, 1, `${label}: [차례] 줄이 하나가 아니다(뒤의 구현 쪽이나 시험이 먼저인 지적에도 찍었다)\n${r.all}`);
+  };
+  const one = check(pick([...codeBatch(), rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'i2', 'record']));
+  only(one.r, 'RC-51 impl(RV-01) → test(RV-01) → impl(RV-01)', one.sha.i1, 'RV-01');
+  const two = check(pick([...codeBatch(), rfTestOf('t1', ['RV-01']), rfImplOf('i2', ['RV-02']), rfImplOf('i1', ['RV-01']), rfTestOf('t2', ['RV-02'])], [...BEFORE_RF, 't1', 'i2', 'i1', 't2', 'record']));
+  only(two.r, 'RC-51 RV-02만 구현 쪽이 앞섬', two.sha.i2, 'RV-02');
+});

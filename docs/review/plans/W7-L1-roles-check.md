@@ -266,6 +266,7 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
   - 처음부터 통과(이미 있는 동작): RC-37·39·41·42·45·47과 통과 사례를 바꾼 RC-26(통과 쪽 단언이거나 지금 구현의 '첫 plan < 첫 test < 첫 impl', '코드 경로 일곱'이 이미 지킴), RC-40(구현 뒤 plan 커밋의 `services/` 고침은 지금 ⑥도 막음). 검증 담당이 틀린 구현(M-34~M-42)으로 한 번은 실패를 봐야 한다. `Finding`을 단 기존 RC-01~35도 모두 통과한다(지금 구현은 `Finding`을 읽지 않는다).
   - 단언만 비운 사본으로 새·바뀐 시험(RC-09·16·20·25·26·27·36~47)의 사건 만들기가 오류 없이 끝나는 것을 봤다.
 - 검증 지적 VF-01(위 9의 1, `Fix-By: test`·`Finding: VF-01` 커밋): RC-48을 더했다(문서 묶음 BAT-902 끝에 계획 파일만 고치는 plan 커밋을 달아 '리뷰' 절 없음·빈 줄만·'담당 표' 절 없음 → `[계획 파일] BAT-902 -`, 담당 표 머리 차례 바뀜·s-doc 줄 없음 → `[담당 표] BAT-902 -`). `node --test --test-name-pattern=RC-48 tools/ci/roles-check.test.mjs`(구현 `28d7780a`): 1개 통과, **처음부터 통과(이미 있는 동작)**. 검증 담당이 M-46·M-47로 실패를 본다.
+- 감독 결정의 차례 뜻(위 9의 2, `Role: test` 커밋): RC-49(구현 뒤·검증 뒤의 test 커밋 → 0), RC-50(같은 지적에서 `Fix-By: impl` 뒤의 `Fix-By: test`, 지적 둘을 엇갈림 → 0), RC-51(같은 지적에서 첫 `Fix-By: impl`이 첫 `Fix-By: test`보다 앞섬, 지적 둘 가운데 RV-02만 앞섬 → 1, 그 첫 구현 쪽 커밋의 `[차례] BAT-901` 줄 하나만, 까닭에 지적 번호)를 더했다. `node --test --test-name-pattern="RC-(49|50|51)" tools/ci/roles-check.test.mjs`(구현 `28d7780a`): 3개 모두 통과, **처음부터 통과(이미 있는 동작)**. 검증 담당이 M-43~M-45로 실패를 본다. 전체 `node --test tools/ci/roles-check.test.mjs`: 51개 가운데 51개 통과(약 8분 40초).
 
 ## 시험 이의
 
@@ -443,7 +444,7 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T10:47+09:00 |
-| test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T10:48+09:00 |
+| test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T10:58+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T09:59+09:00 |
 | review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T10:22+09:00 |
 | verify | w7l1-roles-verify-ceb94bc9 | claude-opus-5-5 | 2026-11-16T10:23+09:00 | 2026-11-16T10:45+09:00 |
