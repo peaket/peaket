@@ -740,6 +740,10 @@
 | R-641 | 갈래가 동시에 같은 서비스 마이그레이션·ADR 번호를 써서 합칠 때 겹치거나 Drizzle이 마이그레이션을 건너뛸 수 있었다 | docs/PROGRESS.md 턴 규칙 | 번호·when 규칙과 웨이브별 번호 나누기 | 적용 |
 | R-642 | 잠금 중 이름으로 프로세스를 모두 끝내면 다른 갈래의 포트 전달까지 끊을 수 있었다 | docs/PROGRESS.md 턴 규칙 | 자기 PID만 끝내기·클러스터 이름 머리 규칙 | 적용 |
 | R-643 | 합치기 전 역할 확인 스크립트의 기록이 없었다 | docs/PROGRESS.md 진행 로그·구간 끝 정리 목록(갈래 1), docs/review/plans/W7-L1-roles-check.md | 기록 커밋 하나(doc-check 오류 0, roles-check 통과) | 적용 |
+| R-644 | 포트 전달 컨테이너를 부하 중 restart하자 Docker 엔진이 내려가 모든 갈래의 Docker 작업이 멈췄다 | docs/PROGRESS.md 턴 규칙 | restart 금지·엔진 복구는 감독 몫 | 적용 |
+| R-645 | 파트너 테넌트당 한도를 셀 곳이 정본에 없었다 | docs/PROGRESS.md 미해결 | OPEN[41]로 소유자에게 물음 | 적용 |
+| R-646 | 정본 충돌·법정 의무·돈 규칙·외부 이미지 허락이 소유자 결정 없이 남아 있었다 | docs/PROGRESS.md 미해결 | OPEN[42]~[46]으로 물음 | 적용 |
+| R-647 | 웨이브 6 남은 결함 코드 몫 넷(A2-17·A2-19·R-628 시험·COV2-06)과 운영 역할 후기 권한 결함 | services/core-svc(export·review·consumers·main.ts, 마이그레이션 0021·0022), packages/platform 시험, 정본 settlement·data·streaming·identity·asvs, 계획·보고서 | 역할 다섯 분리, 시험 먼저, 변이 67 | 고침, 결정 대기 OPEN[42]~[44] |
 
 ## 4. 숫자 일치표
 
