@@ -2,7 +2,7 @@
 // kind의 gw-queue(대역 백엔드)에 실제 브라우저 셋(Chromium·Firefox·WebKit, tools/web-checks의 Playwright)으로 닿는다.
 // - 페이지는 시험이 그 출처 주소로 바로 채워 준다(page.route). 그래서 페이지의 출처는 접속 정보의 www 출처(허용) 또는 목록 밖 출처다.
 //   페이지를 연 뒤 가로채기를 끈다(page.unroute). 그 뒤의 fetch·사전 요청은 모두 실제 네트워크(CONNECT 프록시 → 게이트웨이)로 간다.
-// - 브라우저의 HTTPS 요청은 시험 안의 CONNECT 프록시가 호스트 이름으로 게이트웨이 포트 전달(127.0.0.1)에 잇는다(로컬 이름을 OS에 등록하지 않는다).
+// - 브라우저의 HTTPS 요청은 시험 안의 CONNECT 프록시가 호스트 이름으로 게이트웨이의 127.0.0.1 포트(kind 포트 매핑, docs/infra.md §4.1)에 잇는다(로컬 이름을 OS에 등록하지 않는다).
 // - 사전 요청(OPTIONS)이 나갔는지는 브라우저 밖에서 본다: gw-queue 접근 로그에 그 회차 경로의 OPTIONS 줄이 있는지(브라우저 개발 도구는 사전 요청을 늘 보이지 않는다).
 // 접속 정보·대역 백엔드의 약속은 gateway-client.mjs 머리에 있다. ⑤(Origin 없이 Sec-Fetch-Site: cross-site)는 브라우저가 Origin을 빼게 할 수 없어 gateways.e2e.mjs가 본다.
 // 실행(저장소 뿌리, Docker 차례 잠금을 잡고): node tools/local/cluster.mjs up && node tools/local/cluster.mjs gateways
@@ -33,7 +33,7 @@ before(async () => {
   // CJS 꾸러미라 ESM으로 읽으면 chromium·firefox·webkit이 default 아래에 있다(2026-11-16 kind 실패 확인에서 드러남)
   const mod = await import(pathToFileURL(req.resolve('@playwright/test')).href);
   pw = mod.default ?? mod;
-  // 호스트 이름 → 게이트웨이 포트 전달
+  // 호스트 이름 → 게이트웨이의 127.0.0.1 포트
   const portOf = new Map(Object.entries(c.hosts).map(([key, host]) => [host, c.ports[GATEWAY_OF_HOST[key]]]));
   proxy = http.createServer((_q, s) => s.writeHead(405).end());
   proxy.on('connect', (q, socket, head) => {

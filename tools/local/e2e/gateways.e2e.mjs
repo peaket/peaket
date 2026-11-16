@@ -1,5 +1,6 @@
 // 게이트웨이 다섯의 kind 통합 시험(BUILD_ORDER HOT-400, 묶음 BAT-055 계획 §6의 'K' 층, docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현').
-// 실제 kind에 올린 Envoy Gateway와 대역 백엔드(echo·공개키 묶음)에 이 PC에서 포트 전달로 닿아, 시험 클라이언트가 CloudFront 몫(원본 확인 머리·끝단 머리·
+// 실제 kind에 올린 Envoy Gateway와 대역 백엔드(echo·공개키 묶음)에 이 PC의 127.0.0.1 포트(kind 포트 매핑과 로컬 전용 NodePort Service, docs/infra.md §4.1
+// '로컬 kind에서 이 PC로 잇는 법')로 닿아, 시험 클라이언트가 CloudFront 몫(원본 확인 머리·끝단 머리·
 // x-forwarded-for)을 대신 붙인다. 접속 정보·대역 백엔드의 약속은 gateway-client.mjs 머리에 적었다.
 // 시험 값(HSTS·Max-Age 7200·한도 50/100·화면 출처 규칙)은 정본 값을 그대로 적는다. 같은 규칙은 다섯 게이트웨이 각각을 단언한다.
 // 실행(저장소 뿌리, Docker 차례 잠금을 잡고): node tools/local/cluster.mjs up && node tools/local/cluster.mjs gateways && node --test tools/local/e2e/gateways.e2e.mjs
@@ -7,6 +8,8 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import net from 'node:net';
+import tls from 'node:tls';
 import {
   API_CSP,
   AUD_OF,
@@ -838,4 +841,105 @@ test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] W7-SEC-04 게이트웨이가 직�
       assertSecurityHeaders(r, `${gw} ${m}`);
     }
   }
+});
+
+// ===================== 이 PC로 잇는 통로(계획 docs/review/plans/W8-L1-ci-fix3.md §5 CF3-06) =====================
+
+/** 네트워크 오류(HTTP 응답을 받지 못함)를 글로 남긴다. send는 HTTP 응답이면 상태와 상관없이 풀리고, 연결·TLS·시간 넘김이면 던진다 */
+const netError = (what, e) => `${what}: ${e?.code ?? ''} ${e?.message ?? e}`.trim();
+
+/**
+ * 게이트웨이 하나에 TLS 연결을 열고 요청 머리 일부만 보낸 뒤 RST(연결을 바로 끊는 신호)로 끊는다.
+ * TLS 소켓은 resetAndDestroy를 받지 않아(ERR_INVALID_HANDLE_TYPE, Node 24 실측) 밑의 TCP 소켓을 먼저 열어 그 위에 TLS를 얹고, 끊을 때는 밑 소켓의 resetAndDestroy를 부른다
+ */
+async function resetMidRequest(gw) {
+  const p = c.probes[gw];
+  const host = c.hosts[p.host];
+  const raw = net.connect({ host: '127.0.0.1', port: c.ports[gw] });
+  await new Promise((resolve, reject) => {
+    raw.once('connect', resolve);
+    raw.once('error', reject);
+  });
+  const s = tls.connect({ socket: raw, servername: host, ...(c.caPem ? { ca: c.caPem } : { rejectUnauthorized: false }) });
+  try {
+    await new Promise((resolve, reject) => {
+      s.once('secureConnect', resolve);
+      s.once('error', reject);
+    });
+    // 끝나지 않은 요청 머리(빈 줄 없음): 게이트웨이는 나머지를 기다리는 중에 RST를 받는다
+    await new Promise((resolve) => s.write(`${p.method ?? 'GET'} ${p.path.replaceAll('{event}', EVENT)} HTTP/1.1\r\nHost: ${host}\r\nx-e2e-partial: ${RUN}`, resolve));
+  } finally {
+    s.on('error', () => {});
+    raw.on('error', () => {});
+    raw.resetAndDestroy();
+  }
+}
+
+/**
+ * 게이트웨이 쪽에서 RST가 나게 한다: Connection: close 요청을 보낸 뒤에도 바이트를 계속 보내, 게이트웨이가 응답하고 연결을 닫은 뒤에 닿은 바이트에
+ * 게이트웨이 쪽 커널이 RST로 답하게 한다(Envoy가 연결을 RST로 닫는 정상 동작의 한 꼴, 계획 §1의 2). 연결·TLS를 맺지 못하면 던진다.
+ * 닫힌 뒤의 쓰기 오류(EPIPE·ECONNRESET)는 이 자극이 노린 결과라 버린다
+ */
+async function resetByGateway(gw) {
+  const p = c.probes[gw];
+  const host = c.hosts[p.host];
+  const s = tls.connect({ host: '127.0.0.1', port: c.ports[gw], servername: host, ...(c.caPem ? { ca: c.caPem } : { rejectUnauthorized: false }) });
+  let closed = false;
+  try {
+    await new Promise((resolve, reject) => {
+      s.once('secureConnect', resolve);
+      s.once('error', reject);
+    });
+    s.on('error', () => {});
+    s.on('close', () => {
+      closed = true;
+    });
+    s.resume();
+    s.write(`${p.method ?? 'GET'} ${p.path.replaceAll('{event}', EVENT)} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
+    for (let i = 0; i < 40 && !closed; i++) {
+      s.write('x'.repeat(512));
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  } finally {
+    s.on('error', () => {});
+    s.destroy();
+  }
+}
+
+test('CF3-06 HOT-400 몰아 보내기와 끊긴 연결 뒤에도 게이트웨이 다섯 포트가 곧바로 답한다', async () => {
+  const errors = [];
+  // ⓐ gw-fan 확인 경로에 200건을 동시 50으로(판정 값이 아닌 통로 시험이라 동시 수는 계획이 정했다). 429 등 HTTP 상태는 상관없다. 다시 보내지 않는다
+  const fanToken = accessToken(c, 'gw-fan', nextSub());
+  const flood = await pool(200, 50, async (i) => {
+    try {
+      return (await probe(c, 'gw-fan', { tokenValue: fanToken, event: EVENT, headers: edge(c, uniqueIp()) })).status;
+    } catch (e) {
+      errors.push(netError(`ⓐ gw-fan ${i}번째`, e));
+      return undefined;
+    }
+  });
+  // ⓑ 게이트웨이마다 TLS 연결 20개를 열어 요청 머리 일부만 보낸 뒤 RST로 끊는다
+  for (const gw of GATEWAYS) {
+    const opened = await Promise.allSettled(Array.from({ length: 20 }, () => resetMidRequest(gw)));
+    for (const [i, r] of opened.entries()) if (r.status === 'rejected') errors.push(netError(`ⓑ ${gw} ${i}번째 연결`, r.reason));
+  }
+  // ⓑ′ 게이트웨이마다 연결 20개에서 게이트웨이 쪽 RST를 끌어낸다(ⓑ의 손님 쪽 RST만으로는 구현 전 트리의 포트 전달이 끊기지 않았다, 계획 '시험 이의' CF3-06)
+  for (const gw of GATEWAYS) {
+    const reset = await Promise.allSettled(Array.from({ length: 20 }, () => resetByGateway(gw)));
+    for (const [i, r] of reset.entries()) if (r.status === 'rejected') errors.push(netError(`ⓑ′ ${gw} ${i}번째 연결`, r.reason));
+  }
+  // ⓒ 기다리지 않고 바로 다섯 게이트웨이 확인 경로에 하나씩 보낸다
+  const after = {};
+  for (const gw of GATEWAYS) {
+    try {
+      after[gw] = (await probe(c, gw, { tokenValue: accessToken(c, gw, nextSub()), event: EVENT, headers: edge(c, uniqueIp()) })).status;
+    } catch (e) {
+      errors.push(netError(`ⓒ ${gw}`, e));
+    }
+  }
+  const statusCount = {};
+  for (const s of flood) if (s !== undefined) statusCount[s] = (statusCount[s] ?? 0) + 1;
+  assert.deepEqual(errors, [], `네트워크 오류 ${errors.length}건(ⓐ 상태별 수: ${JSON.stringify(statusCount)})`);
+  assert.equal(flood.filter((s) => typeof s === 'number' && s >= 100).length, 200, 'ⓐ 200건 모두 HTTP 응답을 받지 못했다');
+  for (const gw of GATEWAYS) assert.ok(typeof after[gw] === 'number' && after[gw] >= 100, `ⓒ ${gw}: HTTP 응답이 없다`);
 });

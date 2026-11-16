@@ -4,8 +4,9 @@
 // 대역 백엔드(gateway-echo.mjs)에 더하는 응답 고르기(시험이 정한 약속, 바꾸려면 계획 파일 '시험 이의'): 요청 머리 `x-e2e-delay-ms: <밀리초>`가 있으면
 //   그만큼 기다린 뒤 답한다(W7-CON-02 경로별 시간 상한. 없으면 구현 담당이 더한다).
 // 차례: W7-WIR-01(합치기 조건, 높음)이 맨 앞이다. 시간 상한 시험(W7-CON-02)은 요청 하나에 20~28초가 걸려 맨 끝이다.
-// 실행(저장소 뿌리, Docker 차례 잠금을 잡고): PEAKET_CLUSTER=lane1-<이름> node tools/local/cluster.mjs gateways, 같은 환경 값으로 gateways-forward를 띄운 채
-//   node --test tools/local/e2e/gateway-routes.e2e.mjs(Windows에서는 --test-name-pattern으로 하나씩, BAT-055 시험 이의 (라))
+// 실행(저장소 뿌리, Docker 차례 잠금을 잡고): PEAKET_CLUSTER=lane1-<이름> node tools/local/cluster.mjs up(포트 매핑을 거는 새 클러스터) 뒤 같은 환경 값으로
+//   node tools/local/cluster.mjs gateways, 그다음 node --test tools/local/e2e/gateway-routes.e2e.mjs. 포트 전달은 띄우지 않고 Windows에서도 파일을 통째로 돈다
+//   (kind 포트 매핑과 로컬 전용 NodePort Service로 127.0.0.1에 잇는다, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';

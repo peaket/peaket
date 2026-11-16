@@ -19,8 +19,9 @@
 //
 // 차례: 파일의 시험 차례대로 돈다. 1분 창 시험(D-T50 ①②④)은 분의 50초가 지났으면 다음 분까지 기다렸다 시작하고, 창 경계를 넘으면 다시 하지 않고 실패로 본다.
 // 레이트 리밋 서비스 복제 0(D-T50 ③)은 맨 끝이고 끝나면 복제를 되돌린다. PoC(D-T43 ④)는 정책을 잠깐 바꿨다 되돌린다.
-// 실행(저장소 뿌리, Docker 차례 잠금을 잡고): PEAKET_CLUSTER=lane1-<이름> node tools/local/cluster.mjs gateways, 같은 환경 값으로 gateways-forward를 띄운 채
-//   node --test tools/local/e2e/gateway-limits.e2e.mjs
+// 실행(저장소 뿌리, Docker 차례 잠금을 잡고): PEAKET_CLUSTER=lane1-<이름> node tools/local/cluster.mjs up(포트 매핑을 거는 새 클러스터) 뒤 같은 환경 값으로
+//   node tools/local/cluster.mjs gateways, 그다음 node --test tools/local/e2e/gateway-limits.e2e.mjs. 포트 전달은 띄우지 않는다(kind 포트 매핑과 로컬 전용
+//   NodePort Service로 127.0.0.1에 잇는다, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
 // 끝나면 클러스터를 지우고(kind delete cluster), 시험이 만든 컨테이너는 docker rm -f -v로 지우고 잠금 폴더를 지운다(PROGRESS 턴 규칙 'Docker 차례', R-644).
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';

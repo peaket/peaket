@@ -784,3 +784,33 @@ test('BAS011_규칙10 실제 ci.yml이 부르는 워크플로는 모두 부르�
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /security-scan\.yml.*잡 scorecard.*actions: read/);
 });
+
+// 2026-11-16 develop CI kind 잡에서 찾음: kubectl 포트 전달이 Envoy의 RST 하나에 통째로 끝나 게이트웨이 시험 43개 가운데 21개가 연결 거절로 실패했다.
+// 단언 값은 docs/devops.md §3 ci-kind.yml 행, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법', 계획 docs/review/plans/W8-L1-ci-fix3.md §2 '나'의 8에서 가져왔다(W8-L1-ci-fix3 시험 담당)
+test('CF3-03 HOT-400 ci-kind는 포트 전달 없이 게이트웨이 시험 넷을 그 차례로 돈다', () => {
+  const text = readFileSync(join(REPO, '.github', 'workflows', 'ci-kind.yml'), 'utf8');
+  // 주석까지 포함해 글자가 없다(포트 전달 명령·로그 파일로 돌아가지 않는다)
+  assert.ok(!text.includes('gateways-forward'), 'ci-kind.yml에 gateways-forward가 있다');
+  assert.ok(!text.includes('port-forward'), 'ci-kind.yml에 port-forward가 있다');
+  const steps = workflowSteps(text);
+  const gateways = steps.findIndex((s) => (s.run ?? '').trim() === 'node tools/local/cluster.mjs gateways');
+  assert.ok(gateways >= 0, '`node tools/local/cluster.mjs gateways` 단계가 없다');
+  const FILES = ['gateways', 'queue-cors', 'gateway-limits', 'gateway-routes'];
+  const at = FILES.map((f) => {
+    const re = new RegExp(String.raw`^node --test\b[^\n]*\stools/local/e2e/${f}\.e2e\.mjs\s*$`);
+    const found = [];
+    steps.forEach((s, i) =>
+      (s.run ?? '').split('\n').forEach((line, j) => {
+        if (re.test(line.trim())) found.push({ step: i, line: j, text: line.trim() });
+      }),
+    );
+    assert.equal(found.length, 1, `${f}.e2e.mjs를 도는 줄이 하나가 아니다: ${found.map((x) => x.text).join(' | ') || '없음'}`);
+    assert.match(found[0].text, /\s--test-timeout=300000\s/, `${f}.e2e.mjs에 --test-timeout=300000이 없다`);
+    return found[0];
+  });
+  for (const [i, x] of at.entries()) assert.ok(x.step > gateways, `${FILES[i]}.e2e.mjs가 cluster.mjs gateways 단계보다 앞이다`);
+  for (let i = 1; i < at.length; i++) {
+    const [a, b] = [at[i - 1], at[i]];
+    assert.ok(a.step < b.step || (a.step === b.step && a.line < b.line), `${FILES[i - 1]} → ${FILES[i]} 차례가 아니다`);
+  }
+});

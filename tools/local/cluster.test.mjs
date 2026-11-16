@@ -774,3 +774,114 @@ test('HOT-410 레이트 리밋 서비스 이미지는 Envoy Gateway v1.10.0 기�
   const infra = readFileSync(join(REPO, 'docs', 'infra.md'), 'utf8');
   assert.ok(infra.includes('ratelimit:5ae0682e'), "docs/infra.md §4.1 '자리'에 레이트 리밋 서비스 판이 없다");
 });
+
+// ---- 게이트웨이를 이 PC로 잇는 법(BUILD_ORDER HOT-400, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법', 계획 docs/review/plans/W8-L1-ci-fix3.md §2 '나'·§3·§5) ----
+// 단언 값(노드 포트 30441~30445, 시작 값 18441, 127.0.0.1, Service 이름·고르개·종류, 오류 메시지의 down·up)은 계획 §2의 2~5·§3과 정본 줄에서 가져왔다(W8-L1-ci-fix3 시험 담당).
+// 새 이름은 구현 전 트리에 없어서 이름 공간과 늦은 가져오기로 읽는다(없는 이름을 가져오면 파일 전체가 읽히지 않는다)
+
+/** 계획 §2 '나'의 3: 게이트웨이 → 노드 포트(GATEWAY_NAMES 차례) */
+const CF3_NODE_PORTS = { 'gw-queue': 30441, 'gw-fan': 30442, 'gw-partner': 30443, 'gw-ops': 30444, 'gw-scanner': 30445 };
+const CF3_GATEWAYS = Object.keys(CF3_NODE_PORTS);
+/** docker inspect의 HostConfig.PortBindings 꼴. kind control-plane 노드는 API 서버(6443)도 127.0.0.1의 아무 포트로 낸다 */
+const cf3Bindings = (hostPorts, hostIp = '127.0.0.1') => ({
+  '6443/tcp': [{ HostIp: '127.0.0.1', HostPort: '53211' }],
+  ...Object.fromEntries(CF3_GATEWAYS.map((gw, i) => [`${CF3_NODE_PORTS[gw]}/tcp`, [{ HostIp: hostIp, HostPort: String(hostPorts[i]) }]])),
+});
+const cf3Mapping = (containerPort, hostPort) => ({ containerPort, hostPort, listenAddress: '127.0.0.1', protocol: 'TCP' });
+
+test('CF3-01 HOT-400 kind 클러스터 설정은 게이트웨이 다섯을 127.0.0.1의 시작 포트부터 노드 포트로 잇는다', async () => {
+  assert.equal(typeof clusterModule.kindClusterConfig, 'function', 'cluster.mjs가 kindClusterConfig를 내놓지 않는다');
+  const repoKind = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'local', 'kind.yaml'), 'utf8'))[0].toJS();
+  for (const base of [18441, 20001]) {
+    const cfg = await clusterModule.kindClusterConfig(base);
+    // 저장소의 kind 설정의 다른 칸은 그대로다(노드 이미지 다이제스트 고정 포함)
+    assert.equal(cfg.kind, repoKind.kind, `${base}: kind`);
+    assert.equal(cfg.apiVersion, repoKind.apiVersion, `${base}: apiVersion`);
+    assert.equal(cfg.nodes?.length, repoKind.nodes.length, `${base}: 노드 수`);
+    const cp = cfg.nodes.filter((n) => n.role === 'control-plane');
+    assert.equal(cp.length, 1, `${base}: control-plane 노드가 하나가 아니다`);
+    assert.equal(cp[0].image, repoKind.nodes.find((n) => n.role === 'control-plane').image, `${base}: 노드 이미지가 deploy/local/kind.yaml과 다르다`);
+    const maps = [...(cp[0].extraPortMappings ?? [])].sort((a, b) => a.containerPort - b.containerPort);
+    assert.deepEqual(
+      maps,
+      CF3_GATEWAYS.map((gw, i) => cf3Mapping(CF3_NODE_PORTS[gw], base + i)),
+      `${base}: 매핑이 노드 포트 30441~30445 → 127.0.0.1:${base}~${base + 4}(TCP) 다섯이 아니다`,
+    );
+  }
+  // 매핑 목록 자체도 GATEWAY_NAMES 차례다(계획 §3 gatewayPortMappings)
+  const { gatewayPortMappings, GATEWAY_NAMES } = await import('./gateway-objects.mjs');
+  assert.deepEqual(GATEWAY_NAMES, CF3_GATEWAYS);
+  assert.equal(typeof gatewayPortMappings, 'function', 'gateway-objects.mjs가 gatewayPortMappings를 내놓지 않는다');
+  assert.deepEqual(gatewayPortMappings(18441), CF3_GATEWAYS.map((gw, i) => cf3Mapping(CF3_NODE_PORTS[gw], 18441 + i)));
+  assert.deepEqual(gatewayPortMappings(20001), CF3_GATEWAYS.map((gw, i) => cf3Mapping(CF3_NODE_PORTS[gw], 20001 + i)));
+});
+
+test('CF3-02 HOT-400 로컬 전용 NodePort Service는 게이트웨이마다 고정 노드 포트로 그 게이트웨이 프록시만 고른다', async () => {
+  const { GATEWAY_NODE_PORTS, gatewayNodePortService } = await import('./gateway-objects.mjs');
+  assert.deepEqual(GATEWAY_NODE_PORTS, CF3_NODE_PORTS, 'GATEWAY_NODE_PORTS');
+  assert.ok(Object.isFrozen(GATEWAY_NODE_PORTS), 'GATEWAY_NODE_PORTS가 얼린 객체가 아니다');
+  assert.equal(typeof gatewayNodePortService, 'function', 'gateway-objects.mjs가 gatewayNodePortService를 내놓지 않는다');
+  const nodePorts = [];
+  for (const gw of CF3_GATEWAYS) {
+    for (const targetPort of [10443, 8443]) {
+      const svc = gatewayNodePortService(gw, targetPort);
+      assert.equal(svc.apiVersion, 'v1', gw);
+      assert.equal(svc.kind, 'Service', gw);
+      assert.equal(svc.metadata?.name, `peaket-local-${gw}`, `${gw}: 이름`);
+      assert.equal(svc.metadata?.namespace, 'envoy-gateway-system', `${gw}: 네임스페이스`);
+      assert.equal(svc.spec?.type, 'NodePort', `${gw}: 종류`);
+      // 고르개는 그 게이트웨이의 프록시 파드 라벨 하나뿐이다(접속 정보 logs.selector와 같은 라벨)
+      assert.deepEqual(svc.spec?.selector, { 'gateway.envoyproxy.io/owning-gateway-name': gw }, `${gw}: 고르개`);
+      assert.equal(svc.spec?.ports?.length, 1, `${gw}: 포트 수`);
+      const [p] = svc.spec.ports;
+      assert.equal(p.port, 443, `${gw}: Service 포트`);
+      assert.equal(p.targetPort, targetPort, `${gw}: targetPort는 받은 값이다`);
+      assert.equal(p.nodePort, CF3_NODE_PORTS[gw], `${gw}: 노드 포트`);
+      if (p.protocol !== undefined) assert.equal(p.protocol, 'TCP', `${gw}: 프로토콜`);
+      if (targetPort === 10443) nodePorts.push(p.nodePort);
+    }
+  }
+  assert.equal(new Set(nodePorts).size, CF3_GATEWAYS.length, '노드 포트가 겹친다');
+  for (const n of nodePorts) assert.ok(n >= 30000 && n <= 32767, `노드 포트 ${n}가 쿠버네티스 NodePort 범위(30000~32767) 밖이다`);
+});
+
+test('CF3-04 HOT-400 접속 정보의 포트는 노드 컨테이너의 실제 공개 포트다', async () => {
+  const { gatewayHostPorts } = await import('./gateway-objects.mjs');
+  assert.equal(typeof gatewayHostPorts, 'function', 'gateway-objects.mjs가 gatewayHostPorts를 내놓지 않는다');
+  assert.deepEqual(gatewayHostPorts(cf3Bindings([18441, 18442, 18443, 18444, 18445])), { 'gw-queue': 18441, 'gw-fan': 18442, 'gw-partner': 18443, 'gw-ops': 18444, 'gw-scanner': 18445 });
+  // 공개 포트가 차례와 달라도 그 값을 그대로 돌려준다(시작 값 + 차례로 계산하지 않는다)
+  assert.deepEqual(gatewayHostPorts(cf3Bindings([18441, 25000, 18443, 18444, 18445])), { 'gw-queue': 18441, 'gw-fan': 25000, 'gw-partner': 18443, 'gw-ops': 18444, 'gw-scanner': 18445 });
+  assert.deepEqual(gatewayHostPorts(cf3Bindings([20005, 20001, 20004, 20002, 20003])), { 'gw-queue': 20005, 'gw-fan': 20001, 'gw-partner': 20004, 'gw-ops': 20002, 'gw-scanner': 20003 });
+});
+
+test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개면 gateways가 멈춘다', async () => {
+  const { gatewayHostPorts } = await import('./gateway-objects.mjs');
+  assert.equal(typeof gatewayHostPorts, 'function', 'gateway-objects.mjs가 gatewayHostPorts를 내놓지 않는다');
+  const ok = [18441, 18442, 18443, 18444, 18445];
+  const noScanner = cf3Bindings(ok);
+  delete noScanner['30445/tcp'];
+  const oneHost = (ip) => {
+    const b = cf3Bindings(ok);
+    b['30442/tcp'] = [{ HostIp: ip, HostPort: '18442' }];
+    return b;
+  };
+  const cases = [
+    ['ⓐ 빈 객체(매핑 없이 만든 클러스터)', {}, false],
+    ['ⓑ gw-scanner(30445/tcp)만 없음', noScanner, false],
+    ['ⓒ HostIp 0.0.0.0', oneHost('0.0.0.0'), true],
+    ['ⓓ HostIp 빈 값(모든 주소)', oneHost(''), true],
+    ['ⓒ 다섯 모두 0.0.0.0', cf3Bindings(ok, '0.0.0.0'), true],
+  ];
+  for (const [what, bindings, mentionsLoopback] of cases) {
+    let err;
+    try {
+      gatewayHostPorts(bindings);
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof Error, `${what}: 던지지 않았다`);
+    assert.match(err.message, /\bdown\b/, `${what}: 메시지에 down이 없다: ${err.message}`);
+    assert.match(err.message, /\bup\b/, `${what}: 메시지에 up이 없다: ${err.message}`);
+    if (mentionsLoopback) assert.ok(err.message.includes('127.0.0.1'), `${what}: 메시지에 127.0.0.1이 없다: ${err.message}`);
+  }
+});
