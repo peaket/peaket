@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SEARCH_QUERY_SYNC_EVENT } from '@peaket/ds/WebShell';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
+import { normalizeInput } from '@/widgets/app-shell/model/autocomplete';
 import { searchQuality } from '@/widgets/app-shell/model/search-quality-client';
 import { hasFilters, josa, NO_FILTERS, pageNumbers, readQuery, searchUrl, toApiParams, toResultView, type CardStatus, type ResultCard, type ResultView, type SearchQuery } from '../model/search';
 import { FilterChips, FilterPanel } from './Filters';
@@ -164,9 +165,8 @@ export function ResultsSkeleton() {
 }
 
 function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQuery; heading: React.RefObject<HTMLHeadingElement | null>; onPage: (href: string) => void }) {
-  // 검색 품질 사건(검색어 없이 수만, docs/features/search.md §11)
-  useEffect(() => searchQuality().resultsShown(v.total === 0), [v]);
-  const requery = () => searchQuality().requery();
+  // 검색 품질 사건(검색어는 모듈 안에서 견주기만 하고 보내지 않는다, docs/features/search.md §11). 바로 다시 찾음은 모듈이 센다
+  useEffect(() => searchQuality().resultsShown(v.total === 0, normalizeInput(query.q)), [v, query.q]);
   if (v.total === 0) {
     return (
       <>
@@ -182,7 +182,7 @@ function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQu
               검색 결과가 없습니다
             </p>
             {v.didYouMean ? (
-              <Link className="link t-md" href={searchUrl(query, { q: v.didYouMean, filters: query.filters })} onClick={requery}>
+              <Link className="link t-md" href={searchUrl(query, { q: v.didYouMean, filters: query.filters })}>
                 혹시 &apos;{v.didYouMean}&apos;{josa(v.didYouMean, '을')} 찾으셨나요?
               </Link>
             ) : null}
@@ -222,7 +222,7 @@ function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQu
             <span className="muted" aria-hidden="true">
               ·
             </span>
-            <Link className="link" href={searchUrl(query, { q: v.converted.from, filters: query.filters, noConvert: true })} onClick={requery}>
+            <Link className="link" href={searchUrl(query, { q: v.converted.from, filters: query.filters, noConvert: true })}>
               &apos;{v.converted.from}&apos;{josa(v.converted.from, '으로')} 찾기
             </Link>
           </p>

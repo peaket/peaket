@@ -438,6 +438,9 @@ importers:
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
+      '@peaket/search-normalize':
+        specifier: workspace:*
+        version: link:../../packages/search-normalize
       '@peaket/seatmap':
         specifier: workspace:*
         version: link:../../packages/seatmap

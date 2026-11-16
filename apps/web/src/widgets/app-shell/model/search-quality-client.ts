@@ -24,6 +24,5 @@ const NOOP: SearchQuality = {
   suggestShown: () => {},
   suggestSelected: () => {},
   resultClick: () => {},
-  requery: () => {},
   flush: async () => {},
 };

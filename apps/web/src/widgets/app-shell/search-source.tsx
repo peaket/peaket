@@ -34,18 +34,33 @@ const LAST_TTL_MS = 60_000;
 /** 자동완성 한 번의 시간 상한 [가정]. 일반 읽기의 10초·재시도 대신 짧게 끊어 '자동완성 실패'로 창을 닫는다 */
 const SUGGEST_TIMEOUT_MS = 3_000;
 
-/** 자동완성 출처(ds WebShell loadSearchSuggestions·peekSearchSuggestions) */
+const QUALITY_KIND = { production: 'PRODUCTION', artist: 'ARTIST', venue: 'PLACE' } as const;
+
+/** 검색 품질 사건(머리 검색창은 모든 화면의 첫 JS라 그 모듈을 늦게 가져온다, docs/features/search.md §11) */
+const quality = (fn: (q: import('./model/search-quality').SearchQuality) => void) => {
+  void import('./model/search-quality-client').then((m) => fn(m.searchQuality()));
+};
+
+/**
+ * 자동완성 출처(ds WebShell loadSearchSuggestions·peekSearchSuggestions).
+ * selected(href): 셸이 어느 주소로 가려 할 때 부른다. 그 주소가 마지막으로 보인 후보 가운데 하나면 자동완성 선택 사건(종류, 보인 목록의 1부터 위치)을 센다
+ */
 export function useSuggestionSource(): {
   load: (query: string, signal: AbortSignal) => Promise<readonly WebSearchSuggestion[] | null>;
   peek: (query: string) => readonly WebSearchSuggestion[] | null | undefined;
+  selected: (href: string) => void;
 } {
   const last = useRef<(LastAnswer<ShellSuggestion> & { at: number }) | undefined>(undefined);
+  /** 마지막으로 보인 후보(보인 차례 그대로) */
+  const shown = useRef<readonly ShellSuggestion[]>([]);
   /** 기다리지 않고 바로 답할 수 있으면 그 답: 요청 최소 길이 미만이면 null(창 없음), 받은 후보 안에서 거르면 그 후보, 아니면 undefined(요청) */
   const peek = useCallback((query: string) => {
     if (!minLengthOk(query) || !suggestRequestQuery(query)) return null;
     const fresh = last.current && Date.now() - last.current.at <= LAST_TTL_MS ? last.current : undefined;
     const local = refineLocally(fresh, query, (s) => s.label);
-    return local ? local.map(toWeb) : undefined;
+    if (!local) return undefined;
+    shown.current = local;
+    return local.map(toWeb);
   }, []);
   const load = useCallback(
     async (query: string, signal: AbortSignal) => {
@@ -64,9 +79,9 @@ export function useSuggestionSource(): {
         const raw = r.data.items ?? [];
         const items = raw.flatMap((it) => toShellSuggestion(it) ?? []);
         last.current = { query: normalizeInput(query), items, rawCount: raw.length, at: Date.now() };
-        // 검색 품질 사건: 자동완성 창을 보였다(검색어는 싣지 않는다, docs/features/search.md §11)
-        // 머리 검색창은 모든 화면의 첫 JS라 늦게 가져온다
-        if (items.length > 0) void import('./model/search-quality-client').then((m) => m.searchQuality().suggestShown());
+        shown.current = items;
+        // 검색 품질 사건: 자동완성 창을 보였다(검색어는 싣지 않는다)
+        if (items.length > 0) quality((q) => q.suggestShown());
         return items.map(toWeb);
       } finally {
         clearTimeout(timer);
@@ -75,7 +90,14 @@ export function useSuggestionSource(): {
     },
     [peek],
   );
-  return { load, peek };
+  const selected = useCallback((href: string) => {
+    const i = shown.current.findIndex((s) => s.href === href);
+    if (i < 0) return;
+    const s = shown.current[i]!;
+    shown.current = [];
+    quality((q) => q.suggestSelected(QUALITY_KIND[s.kind], i + 1));
+  }, []);
+  return { load, peek, selected };
 }
 
 /** 최근 검색어(이 기기). 처음 그리기는 빈 목록이고 붙은 뒤 저장소에서 읽는다(서버 그림과 어긋나지 않게) */

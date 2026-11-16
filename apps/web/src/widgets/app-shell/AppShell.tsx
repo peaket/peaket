@@ -126,7 +126,11 @@ export function AppShell({
         defaultOpen={defaultOpen}
         bottomBar={bottomBar}
         updateAvailable={updateAvailable}
-        onNavigate={(href) => router.push(href)}
+        onNavigate={(href) => {
+          // 자동완성 항목을 골랐으면 선택 사건을 센다(검색 품질, docs/features/search.md §11)
+          suggestSource.selected(href);
+          router.push(href);
+        }}
         onLogout={logout}
         renderLink={(p) => <Link {...p} />}
       >
