@@ -1,17 +1,22 @@
 # gw-queue 라우트 원천(BUILD_ORDER HOT-410, docs/infra.md §4.1 '경로별 메서드 생성기'). 적용 대상이 아니다: node tools/ci/gateway-routes.mjs --write가
 # 이 파일과 docs/api/openapi.yaml로 deploy/gateways/gw-queue.routes.yaml을 만든다.
-# 규칙의 맞춤에는 '이 경로 아래의 계약 경로를 맡는다'는 경로만 적는다(메서드는 계약이 정한다). 값은 openapi의 꼴(틀 {이름})이다.
+# 규칙의 맞춤에는 '이 경로 아래의 계약 작업을 맡는다'는 경로를 적고, 한 경로의 작업이 인증 종류가 달라 다른 라우트로 갈 때만 method도 적는다. 값은 openapi의 꼴(틀 {이름})이다.
 # PathPrefix는 그 경로와 그 아래, Exact는 그 계약 경로 하나다(같은 앞부분 아래를 다른 라우트·백엔드로 나눌 때).
-# queue.peaket.example의 계약 경로는 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 경로를 더하면 여기에 맡을 규칙을 정한다.
+# queue.peaket.example의 계약 작업(경로·메서드 짝)은 정확히 한 규칙이 맡아야 한다(맡는 규칙이 없거나 둘이면 생성기가 멈춘다). 계약에 작업을 더하면 여기에 맡을 규칙을 정한다.
+# 라우트마다 이름표 peaket.io/auth(public·optional·token·token-buy)를 단다. 맡은 작업의 openapi security·x-peaket-scopes로 정한 인증 종류와 다르면 생성기가 멈춘다
+# (docs/infra.md §4.1 '인증 종류 대조'). 백엔드는 그 작업의 처리기가 있는 서비스다('백엔드 대조', 정적 시험 deploy/gateways/test/route-contract.test.mjs).
+# 규칙의 timeouts는 생성 규칙에 그대로 옮긴다('경로별 시간 상한').
 # 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-queue.yaml에 손으로 두고 라우트 이름으로 고른다.
 # 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
 ---
-# gw-queue-buy: 대기열 진입·입장 확정(ticket:buy, docs/security/authz-matrix.md §5.1)
+# gw-queue-buy: 대기열 진입·입장 확정(ticket:buy, openapi x-peaket-scopes, docs/security/authz-matrix.md §5.1)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: gw-queue-buy
   namespace: envoy-gateway-system
+  labels:
+    peaket.io/auth: token-buy
 spec:
   parentRefs:
     - name: gw-queue
@@ -49,6 +54,8 @@ kind: HTTPRoute
 metadata:
   name: gw-queue-api
   namespace: envoy-gateway-system
+  labels:
+    peaket.io/auth: token
 spec:
   parentRefs:
     - name: gw-queue
@@ -92,6 +99,8 @@ kind: HTTPRoute
 metadata:
   name: gw-queue-public
   namespace: envoy-gateway-system
+  labels:
+    peaket.io/auth: public
 spec:
   parentRefs:
     - name: gw-queue

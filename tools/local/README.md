@@ -48,6 +48,7 @@ PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways
 PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways-forward   # 다른 창에서, 시험 동안 켜 둔다
 PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateways.e2e.mjs
 PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateway-limits.e2e.mjs   # 경로별 메서드·한도·게이트웨이 오류(HOT-410). 1분 창 시험이 있어 몇 분 걸린다
+PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateway-routes.e2e.mjs   # 생성 라우트의 인증 종류·백엔드·시간 상한(BAT-055 웨이브 끝 리뷰 지적)
 node --test tools/local/e2e/queue-cors.e2e.mjs   # 먼저 tools/web-checks에서 pnpm install --frozen-lockfile(Playwright 브라우저 셋)
 ```
 
@@ -57,6 +58,7 @@ node --test tools/local/e2e/queue-cors.e2e.mjs   # 먼저 tools/web-checks에서
 - **라우트**: API 호스트 다섯의 HTTPRoute는 생성 파일 `deploy/gateways/<게이트웨이>.routes.yaml`입니다(`node tools/ci/gateway-routes.mjs --write`, 원천 `deploy/gateways/routes/`). 생성 파일도 다른 정의처럼 대역 백엔드로 바꿔 올립니다.
 - **접속 정보의 새 칸**(BAT-060, `tools/local/e2e/gateway-limits.e2e.mjs` 머리의 약속): `rateLimit`(`namespace`, `deployment`: `envoy-ratelimit`), `rateLimitRedis`(`namespace`, `target`: `deploy/peaket-ratelimit-redis`, `container`: `valkey`, `cli`: TLS로 붙는 `valkey-cli --tls --cacert /tls/ca.crt -h localhost -p 6379`, `plainCli`: 같은 포트에 평문으로 붙는 `valkey-cli -h localhost -p 6379`), `replicas`의 `gw-partner`(1), `stats`(프록시 통계 `19001`·`/stats/prometheus`).
 - **확인 경로**(`probes`): 생성 라우트는 계약의 (경로, 메서드)만 넘기므로 계약의 GET 경로입니다. gw-fan은 전역 한도(계정당 60회/분)가 없는 구매 경로의 좌석 스냅샷, gw-partner는 회차 관객 목록, gw-ops는 회차 실시간 현황입니다.
+- **대역 백엔드의 늦은 응답**: 요청 머리 `x-e2e-delay-ms: <밀리초>`(60,000까지)를 달면 그만큼 기다린 뒤 답합니다(W7-CON-02 경로별 시간 상한).
 - **대역 백엔드의 Problem 흉내**: 요청 머리 `x-e2e-problem-status: <상태>`를 달면 그 상태와 `application/problem+json` 본문(`traceId`는 받은 `traceparent`의 trace-id)을 돌려줍니다(D-T43 ②).
 
 **Windows에서 하나씩 돌리는 법**: Windows의 kubectl 포트 전달은 동시 연결이 몰리면 끊깁니다(2026-11-16 실측). 끊기면 그 뒤 시험이 모두 ECONNREFUSED가 됩니다. 시험은 끊김을 감추지 않고 실패하므로, 이때는 시험마다 포트 전달을 새로 띄우고 이름으로 하나씩 돌립니다.

@@ -134,6 +134,7 @@ spec:
 # 게이트웨이가 스스로 만든 404(없는 경로·맞지 않는 메서드)·413·429·503은 고정 Problem 본문(type about:blank, title은 HTTP 상태 문구, detail·instance 없음)으로 바꾼다
 # (docs/infra.md §4.1 '게이트웨이 오류의 Problem', docs/api/guidelines.md §2, D-T43 ①, ASVS 16.5.1). source: Local이라 서비스가 낸 응답(본문 그대로)은 건드리지 않는다.
 # 바꾼 응답에는 lateResponseHeaders가 닿지 않아 응답 보안 머리와 X-Trace-Id를 그 응답에 다시 단다(X-Trace-Id 치환이 되는지는 kind 확인 대상).
+# 403(인가·출처 확인 거절, W7-WIR-08)·405(TRACE, W7-SEC-04)도 같은 고정 본문으로 바꾼다. 403은 대상 거절을 401로 바꾸는 첫 고치기 뒤에 둔다(그 고치기가 먼저 맞는다).
 # 라우트에 따로 건 BackendTrafficPolicy(한도)는 mergeType: StrategicMerge로 이 정책에 합쳐 그 라우트에도 이 응답 고치기가 닿는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
@@ -263,6 +264,42 @@ spec:
         body:
           type: Inline
           inline: '{"type":"about:blank","title":"Service Unavailable","status":503}'
+        header:
+          set:
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 403
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Forbidden","status":403}'
+        header:
+          set:
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 405
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Method Not Allowed","status":405}'
         header:
           set:
             - name: Strict-Transport-Security
@@ -924,3 +961,105 @@ spec:
             requests: 60
             unit: Minute
           shared: true
+---
+# gw-fan-optional: 토큰이 있으면 확인하고 없으면 넘기는 팬 경로(후기 목록·후기 읽기, RV-04 ①)
+# 교차 출처는 gw-fan-api와 같다. 토큰 확인은 optional(토큰이 없으면 그대로 넘기고, 오면 확인해 틀리면 401), 인가 규칙은 두지 않는다(docs/infra.md §4.1 '인증 종류 대조' ③)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-fan-optional-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-optional
+  cors:
+    allowOrigins:
+      - https://www.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
+    maxAge: 7200s
+    allowCredentials: true
+  csrf:
+    additionalOrigins:
+      - https://www.peaket.example
+  jwt:
+    optional: true
+    providers:
+      - name: fan-fan
+        issuer: https://identity.peaket.example
+        audiences:
+          - fan
+        remoteJWKS:
+          uri: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/fan.json
+          backendRefs:
+            - group: ""
+              kind: Service
+              name: identity-svc
+              namespace: core
+              port: 8080
+          cacheDuration: 300s
+        extractFrom:
+          headers:
+            - name: Authorization
+              valuePrefix: "Bearer "
+          cookies:
+            - __Secure-peaket_at
+        claimToHeaders:
+          - header: X-User-Id
+            claim: sub
+          - header: X-Session-Id
+            claim: sid
+          - header: X-User-Aud
+            claim: aud
+          - header: X-User-Scope
+            claim: scope
+          - header: X-User-Pid
+            claim: pid
+          - header: X-User-Pid-Prev
+            claim: pid_prev
+---
+# gw-fan-optional: 공통 Lua + 토큰 유형(typ) 확인(실린 토큰이 있을 때만 본다)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-fan-optional-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-optional
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: true
+        tokenCookie: __Secure-peaket_at
+        tokenScheme: Bearer

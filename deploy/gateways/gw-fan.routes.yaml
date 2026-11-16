@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-fan.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+# openapi info.version 1.0.0-draft · 계약 sha256 31544966c530d709b10a2747a73e015c34317b4cd8b73afa3873dee33fcedb39
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -158,6 +158,22 @@ spec:
           method: TRACE
         - path:
             type: RegularExpression
+            value: /v1/orders/[^/]+(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+/payment-acceptance(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+/payment-status(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+/payments(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
             value: /v1/productions(/.*)?
           method: TRACE
         - path:
@@ -171,6 +187,14 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/reviews(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/reviews/[^/]+(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/reviews/[^/]+/reports(/.*)?
           method: TRACE
         - path:
             type: RegularExpression
@@ -214,8 +238,52 @@ spec:
           method: TRACE
         - path:
             type: RegularExpression
+            value: /v1/tickets/[^/]+(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/booth-requests(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation-quote(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/device-keys(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/returns(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/transfers(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
             value: /v1/transfer-recipient-lookups(/.*)?
           method: TRACE
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: peaket-trace-not-allowed
+    - matches:
         - path:
             type: RegularExpression
             value: /v1/transfers(/.*)?
@@ -250,6 +318,7 @@ metadata:
   name: gw-fan-public
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-fan-public
 spec:
   parentRefs:
@@ -336,6 +405,22 @@ spec:
           port: 8080
     - matches:
         - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/review-summary
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/review-summary
+          method: OPTIONS
+        - path:
             type: Exact
             value: /v1/home
           method: GET
@@ -363,9 +448,64 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: gw-fan-optional
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/auth: optional
+    peaket.io/route: gw-fan-optional
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/reviews
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/events/[^/]+/reviews
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/reviews/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/reviews/[^/]+
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: gw-fan-search
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-fan-search
 spec:
   parentRefs:
@@ -414,6 +554,7 @@ metadata:
   name: gw-fan-identity
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-fan-identity
 spec:
   parentRefs:
@@ -663,6 +804,7 @@ metadata:
   name: gw-fan-buy
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token-buy
     peaket.io/route: gw-fan-buy
 spec:
   parentRefs:
@@ -719,22 +861,10 @@ spec:
         - path:
             type: Exact
             value: /v1/orders
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/orders
           method: POST
         - path:
             type: Exact
             value: /v1/orders
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/orders/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/orders/[^/]+
           method: OPTIONS
         - path:
             type: RegularExpression
@@ -743,14 +873,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/orders/[^/]+/payment-acceptance
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/orders/[^/]+/payment-status
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/orders/[^/]+/payment-status
           method: OPTIONS
         - path:
             type: RegularExpression
@@ -788,6 +910,7 @@ metadata:
   name: gw-fan-api
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-fan-api
 spec:
   parentRefs:
@@ -833,10 +956,6 @@ spec:
             type: RegularExpression
             value: /v1/events/[^/]+/review-eligibility
           method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/events/[^/]+/reviews
-          method: GET
         - path:
             type: RegularExpression
             value: /v1/events/[^/]+/reviews
@@ -945,10 +1064,6 @@ spec:
             type: Exact
             value: /v1/reviews
           method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/reviews/[^/]+
-          method: GET
         - path:
             type: RegularExpression
             value: /v1/reviews/[^/]+
@@ -1068,39 +1183,6 @@ spec:
           port: 8080
     - matches:
         - path:
-            type: RegularExpression
-            value: /v1/events/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/events/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/events/[^/]+/review-summary
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/events/[^/]+/review-summary
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: core-svc
-          namespace: core
-          port: 8080
-    - matches:
-        - path:
             type: Exact
             value: /v1/tickets
           method: GET
@@ -1135,22 +1217,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/tickets/[^/]+/booth-requests
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/cancellation
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/cancellation
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/cancellation-quote
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/cancellation-quote
           method: OPTIONS
         - path:
             type: RegularExpression
@@ -1245,6 +1311,92 @@ spec:
           name: ticket-svc
           namespace: ticket
           port: 8080
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/orders
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/orders
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation-quote
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/cancellation-quote
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: purchase-svc
+          namespace: purchase
+          port: 8080
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+/payment-status
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/orders/[^/]+/payment-status
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: purchase-svc
+          namespace: purchase
+          port: 8080
+      timeouts:
+        request: 27s
     - matches:
         - path:
             type: RegularExpression

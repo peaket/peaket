@@ -4,6 +4,7 @@
 // - 응답 고르기(시험만 쓴다): 요청 머리 x-e2e-status(상태)·x-e2e-response-headers(JSON 객체, 값은 글이나 글 배열)·x-e2e-body(본문 글)·
 //   x-e2e-body-b64(UTF-8 본문을 base64로, 한글 본문용. 있으면 x-e2e-body보다 먼저 쓴다),
 //   머리를 달 수 없는 브라우저 요청은 쿼리 e2e-status·e2e-header=이름:값(여럿)
+// - 늦은 응답 흉내(BAT-060, W7-CON-02 경로별 시간 상한): 요청 머리 x-e2e-delay-ms: <밀리초>(0~60000)가 있으면 그만큼 기다린 뒤 답한다
 // - 서비스가 낸 Problem 흉내(BAT-060, D-T43 ②): 요청 머리 x-e2e-problem-status: <상태>가 있으면 그 상태와 application/problem+json 본문
 //   {type: https://peaket.example/problems/e2e-backend, title: E2E Backend, status, traceId: 받은 traceparent의 trace-id}를 돌려준다
 //   (서비스 템플릿 Problem의 traceId와 같은 규칙, docs/api/guidelines.md §2). 경로는 가리지 않는다
@@ -29,6 +30,15 @@ createServer((req, res) => {
   const chunks = [];
   req.on('data', (d) => chunks.push(d));
   req.on('end', () => {
+    const delay = Number(req.headers['x-e2e-delay-ms']);
+    if (Number.isInteger(delay) && delay > 0 && delay <= 60000) setTimeout(() => answer(req, res, chunks), delay);
+    else answer(req, res, chunks);
+  });
+}).listen(PORT, '0.0.0.0', () => console.log(JSON.stringify({ msg: 'gateway-echo listening', port: PORT })));
+
+/** 받은 요청에 답한다(위 응답 고르기) */
+function answer(req, res, chunks) {
+  {
     const url = new URL(req.url ?? '/', 'http://echo.local');
     const jwks = /^\/internal\/jwks\/([a-z]+)\.json$/.exec(url.pathname);
     if (req.method === 'GET' && jwks) {
@@ -62,5 +72,5 @@ createServer((req, res) => {
     const body = b64 !== undefined ? Buffer.from(b64, 'base64') : headers['x-e2e-body'] ?? JSON.stringify({ method: req.method, path: req.url, headers, bodyBytes: Buffer.concat(chunks).length });
     res.writeHead(status, out);
     res.end(status === 204 || status === 304 || req.method === 'HEAD' ? undefined : body);
-  });
-}).listen(PORT, '0.0.0.0', () => console.log(JSON.stringify({ msg: 'gateway-echo listening', port: PORT })));
+  }
+}

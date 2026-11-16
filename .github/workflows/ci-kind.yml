@@ -69,6 +69,8 @@ jobs:
           # 경로별 메서드·전역 한도·웹훅 IP 한도·게이트웨이 오류(BUILD_ORDER HOT-410, D-T42·D-T43·D-T50). 레이트 리밋 서비스 복제를 0으로 줄였다 되돌리는
           # 시험(D-T50 ③)이 맨 끝이라 같은 클러스터의 다른 시험 뒤에 돈다
           node --test --test-timeout=300000 tools/local/e2e/gateway-limits.e2e.mjs
+          # 생성 라우트의 인증 종류·백엔드·시간 상한·게이트웨이 오류 403·405(BAT-060 계획 15절, BAT-055 웨이브 끝 리뷰 지적의 K 재현). 시간 상한 시험이 요청 하나에 20~28초다
+          node --test --test-timeout=300000 tools/local/e2e/gateway-routes.e2e.mjs
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true

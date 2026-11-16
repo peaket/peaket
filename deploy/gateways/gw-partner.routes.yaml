@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-partner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+# openapi info.version 1.0.0-draft · 계약 sha256 31544966c530d709b10a2747a73e015c34317b4cd8b73afa3873dee33fcedb39
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -250,6 +250,7 @@ metadata:
   name: gw-partner-public
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-partner-public
 spec:
   parentRefs:
@@ -266,6 +267,62 @@ spec:
         - path:
             type: Exact
             value: /v1/partner/auth/access-tokens
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-acceptances
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-acceptances
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-completions
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-completions
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkey-registrations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkey-registrations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkeys
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passkeys
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passwords
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-passwords
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-confirmations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-confirmations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-enrollments
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/partner/auth/invitation-totp-enrollments
           method: OPTIONS
         - path:
             type: Exact
@@ -319,6 +376,7 @@ metadata:
   name: gw-partner-webhooks
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-partner-webhooks
 spec:
   parentRefs:
@@ -372,6 +430,7 @@ metadata:
   name: gw-partner-api
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-partner-api
 spec:
   parentRefs:
@@ -381,62 +440,6 @@ spec:
     - partner-api.peaket.example
   rules:
     - matches:
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-acceptances
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-acceptances
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-completions
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-completions
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passkey-registrations
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passkey-registrations
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passkeys
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passkeys
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passwords
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-passwords
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-totp-confirmations
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-totp-confirmations
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-totp-enrollments
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/partner/auth/invitation-totp-enrollments
-          method: OPTIONS
         - path:
             type: Exact
             value: /v1/partner/auth/passkey-registrations
@@ -887,6 +890,7 @@ metadata:
   name: gw-partner-api-2
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-partner-api
 spec:
   parentRefs:

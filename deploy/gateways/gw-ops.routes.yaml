@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+# openapi info.version 1.0.0-draft · 계약 sha256 31544966c530d709b10a2747a73e015c34317b4cd8b73afa3873dee33fcedb39
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -126,7 +126,35 @@ spec:
           method: TRACE
         - path:
             type: RegularExpression
-            value: /v1/ops/events(/.*)?
+            value: /v1/ops/events/[^/]+/bot-review(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/bot-review-samples(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/demand-forecast(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/fraud-cluster-runs(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/fraud-overview(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/live(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/reports(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/scale-changes(/.*)?
           method: TRACE
         - path:
             type: RegularExpression
@@ -242,6 +270,7 @@ metadata:
   name: gw-ops-public
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-ops-public
 spec:
   parentRefs:
@@ -261,6 +290,62 @@ spec:
           method: OPTIONS
         - path:
             type: Exact
+            value: /v1/ops/auth/invitation-acceptances
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-acceptances
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-completions
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-completions
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passkey-registrations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passkey-registrations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passkeys
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passkeys
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passwords
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-passwords
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-totp-confirmations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-totp-confirmations
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-totp-enrollments
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/auth/invitation-totp-enrollments
+          method: OPTIONS
+        - path:
+            type: Exact
             value: /v1/ops/auth/sessions
           method: POST
         - path:
@@ -304,6 +389,44 @@ spec:
           name: identity-svc
           namespace: core
           port: 8080
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/ops/audit-anchors/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/audit-anchors/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/audit-anchors/[^/]+/verification
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/audit-anchors/[^/]+/verification
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -311,6 +434,7 @@ metadata:
   name: gw-ops-api
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-ops-api
 spec:
   parentRefs:
@@ -322,62 +446,6 @@ spec:
     - matches:
         - path:
             type: Exact
-            value: /v1/ops/auth/invitation-acceptances
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-acceptances
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-completions
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-completions
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passkey-registrations
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passkey-registrations
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passkeys
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passkeys
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passwords
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-passwords
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-totp-confirmations
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-totp-confirmations
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-totp-enrollments
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/auth/invitation-totp-enrollments
-          method: OPTIONS
-        - path:
-            type: Exact
             value: /v1/ops/auth/passkey-registrations
           method: POST
         - path:
@@ -493,14 +561,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/events/[^/]+/fraud-overview
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/events/[^/]+/live
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/events/[^/]+/live
           method: OPTIONS
         - path:
             type: RegularExpression
@@ -589,32 +649,12 @@ spec:
           port: 8080
     - matches:
         - path:
-            type: Exact
-            value: /v1/ops/scanner-devices
+            type: RegularExpression
+            value: /v1/ops/events/[^/]+/live
           method: GET
         - path:
-            type: Exact
-            value: /v1/ops/scanner-devices
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/scanner-devices
-          method: OPTIONS
-        - path:
             type: RegularExpression
-            value: /v1/ops/scanner-devices/[^/]+/enrollment-code
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/scanner-devices/[^/]+/enrollment-code
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/scanner-devices/[^/]+/revocation
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/scanner-devices/[^/]+/revocation
+            value: /v1/ops/events/[^/]+/live
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier
@@ -634,9 +674,43 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: ticket-svc
-          namespace: ticket
+          name: core-svc
+          namespace: core
           port: 8080
+      timeouts:
+        request: 0s
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/ops/live
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/live
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
+      timeouts:
+        request: 0s
     - matches:
         - path:
             type: Exact
@@ -787,22 +861,6 @@ spec:
             value: /v1/ops/artists/[^/]+/aliases
           method: OPTIONS
         - path:
-            type: RegularExpression
-            value: /v1/ops/audit-anchors/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/audit-anchors/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/audit-anchors/[^/]+/verification
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/audit-anchors/[^/]+/verification
-          method: OPTIONS
-        - path:
             type: Exact
             value: /v1/ops/audit-checkpoints
           method: GET
@@ -893,6 +951,22 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/commands/[^/]+/approvals
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/commands/[^/]+/extensions
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/commands/[^/]+/extensions
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/commands/[^/]+/post-review
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/commands/[^/]+/post-review
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier
@@ -922,6 +996,7 @@ metadata:
   name: gw-ops-api-2
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-ops-api
 spec:
   parentRefs:
@@ -931,22 +1006,6 @@ spec:
     - ops-api.peaket.example
   rules:
     - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/extensions
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/extensions
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/post-review
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/post-review
-          method: OPTIONS
         - path:
             type: RegularExpression
             value: /v1/ops/commands/[^/]+/post-review-confirmation
@@ -1186,6 +1245,22 @@ spec:
         - path:
             type: Exact
             value: /v1/ops/event-cancellations
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/event-cancellations
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/event-cancellations/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/event-cancellations/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/event-cancellations/[^/]+/approvals
           method: POST
       filters:
         - type: RequestHeaderModifier
@@ -1210,22 +1285,6 @@ spec:
           port: 8080
     - matches:
         - path:
-            type: Exact
-            value: /v1/ops/event-cancellations
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/event-cancellations/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/event-cancellations/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/event-cancellations/[^/]+/approvals
-          method: POST
-        - path:
             type: RegularExpression
             value: /v1/ops/event-cancellations/[^/]+/approvals
           method: OPTIONS
@@ -1465,6 +1524,22 @@ spec:
             type: RegularExpression
             value: /v1/ops/fraud-clusters/[^/]+
           method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout
+          method: PUT
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout/banner-images
+          method: POST
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1493,6 +1568,7 @@ metadata:
   name: gw-ops-api-3
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-ops-api
 spec:
   parentRefs:
@@ -1504,31 +1580,7 @@ spec:
     - matches:
         - path:
             type: Exact
-            value: /v1/ops/home-layout
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/home-layout
-          method: PUT
-        - path:
-            type: Exact
-            value: /v1/ops/home-layout
-          method: OPTIONS
-        - path:
-            type: Exact
             value: /v1/ops/home-layout/banner-images
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/home-layout/banner-images
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/live
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/live
           method: OPTIONS
         - path:
             type: Exact
@@ -1693,6 +1745,34 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/research-exports/[^/]+
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/scanner-devices
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/scanner-devices
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/scanner-devices
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/scanner-devices/[^/]+/enrollment-code
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/scanner-devices/[^/]+/enrollment-code
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/scanner-devices/[^/]+/revocation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/scanner-devices/[^/]+/revocation
           method: OPTIONS
         - path:
             type: Exact

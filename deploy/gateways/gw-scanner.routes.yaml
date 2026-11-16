@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-scanner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 bf7bb7a20d1bfc3299f79fd41b12d7ac6877129c1089d907c2b40b8b42556519
+# openapi info.version 1.0.0-draft · 계약 sha256 31544966c530d709b10a2747a73e015c34317b4cd8b73afa3873dee33fcedb39
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -74,6 +74,7 @@ metadata:
   name: gw-scanner-public
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: public
     peaket.io/route: gw-scanner-public
 spec:
   parentRefs:
@@ -121,6 +122,14 @@ spec:
             type: Exact
             value: /v1/scanner/device-authorizations
           method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/scanner/token
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/scanner/token
+          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -146,9 +155,56 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: gw-scanner-optional
+  namespace: envoy-gateway-system
+  labels:
+    peaket.io/auth: optional
+    peaket.io/route: gw-scanner-optional
+spec:
+  parentRefs:
+    - name: gw-scanner
+      sectionName: scanner-api
+  hostnames:
+    - scanner-api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/scanner/scans
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/scanner/scans
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: scanner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ticket-svc
+          namespace: ticket
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: gw-scanner-api
   namespace: envoy-gateway-system
   labels:
+    peaket.io/auth: token
     peaket.io/route: gw-scanner-api
 spec:
   parentRefs:
@@ -216,14 +272,6 @@ spec:
           method: OPTIONS
         - path:
             type: Exact
-            value: /v1/scanner/scans
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/scanner/scans
-          method: OPTIONS
-        - path:
-            type: Exact
             value: /v1/scanner/shift
           method: GET
         - path:
@@ -237,14 +285,6 @@ spec:
         - path:
             type: Exact
             value: /v1/scanner/shift/readiness
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/scanner/token
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/scanner/token
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier
