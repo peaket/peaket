@@ -134,6 +134,8 @@ spec:
 # 게이트웨이가 스스로 만든 404(없는 경로·맞지 않는 메서드)·413·429·503은 고정 Problem 본문(type about:blank, title은 HTTP 상태 문구, detail·instance 없음)으로 바꾼다
 # (docs/infra.md §4.1 '게이트웨이 오류의 Problem', docs/api/guidelines.md §2, D-T43 ①, ASVS 16.5.1). source: Local이라 서비스가 낸 응답(본문 그대로)은 건드리지 않는다.
 # 바꾼 응답에는 lateResponseHeaders가 닿지 않아 응답 보안 머리와 X-Trace-Id를 그 응답에 다시 단다(X-Trace-Id 치환이 되는지는 kind 확인 대상).
+# 404는 여기서 고치지 않는다: 고친 응답은 머리를 새로 써 X-Trace-Id가 빠진다(2026-11-16 kind). API 호스트의 남은 경로·맞지 않는 메서드 404는
+# 직접 응답 필터 peaket-api-not-found가 같은 Problem 본문과 X-Trace-Id를 낸다(00-common.yaml, docs/infra.md §4.1 '추적 머리', 계획 '판단: 구현 kind 확인의 남은 것' 1 (가)②).
 # 403(인가·출처 확인 거절, W7-WIR-08)·405(TRACE, W7-SEC-04)도 같은 고정 본문으로 바꾼다. 403은 대상 거절을 401로 바꾸는 첫 고치기 뒤에 둔다(그 고치기가 먼저 맞는다).
 # 라우트에 따로 건 BackendTrafficPolicy(한도)는 mergeType: StrategicMerge로 이 정책에 합쳐 그 라우트에도 이 응답 고치기가 닿는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -167,24 +169,6 @@ spec:
           set:
             - name: WWW-Authenticate
               value: Bearer error="invalid_token"
-            - name: Strict-Transport-Security
-              value: max-age=31536000; includeSubDomains
-            - name: X-Content-Type-Options
-              value: nosniff
-            - name: Content-Security-Policy
-              value: default-src 'none'; frame-ancestors 'none'
-    - match:
-        statusCodes:
-          - type: Value
-            value: 404
-      source: Local
-      response:
-        contentType: application/problem+json
-        body:
-          type: Inline
-          inline: '{"type":"about:blank","title":"Not Found","status":404}'
-        header:
-          set:
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options
@@ -598,7 +582,7 @@ spec:
           extensionRef:
             group: gateway.envoyproxy.io
             kind: HTTPRouteFilter
-            name: peaket-not-found
+            name: peaket-api-not-found
 ---
 # gw-partner-not-found: 교차 출처 응답만(토큰 확인 없음)
 apiVersion: gateway.envoyproxy.io/v1alpha1

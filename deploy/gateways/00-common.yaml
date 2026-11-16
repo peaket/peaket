@@ -408,6 +408,26 @@ spec:
         - name: Content-Security-Policy
           value: default-src 'none'; frame-ancestors 'none'
 ---
+# API 호스트 다섯의 남은 경로·맞지 않는 메서드 404 직접 응답(<게이트웨이>-not-found 라우트). 위 peaket-not-found와 같은 Problem 본문에
+# 그 요청의 trace-id를 X-Trace-Id로 단다(docs/infra.md §4.1 '추적 머리', D-T42 ④·D-T43 ①). 404는 응답 고치기에서 뺐다: 고친 응답은 머리를 새로 써서
+# 이 머리가 빠진다(2026-11-16 kind lane1-b060k 확인). CDN이 캐시하는 queue-files와 앱 서버 호스트는 위 peaket-not-found를 그대로 쓴다
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: peaket-api-not-found
+  namespace: envoy-gateway-system
+spec:
+  directResponse:
+    statusCode: 404
+    contentType: application/problem+json
+    body:
+      type: Inline
+      inline: '{"type":"about:blank","title":"Not Found","status":404}'
+    header:
+      set:
+        - name: X-Trace-Id
+          value: "%TRACE_ID%"
+---
 # TRACE를 405로 답하는 직접 응답(docs/security/asvs/delivery.md 13.4.4)
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: HTTPRouteFilter
