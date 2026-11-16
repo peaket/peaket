@@ -576,6 +576,7 @@ erDiagram
         integer id PK "1만 둔다(한 줄 보장)"
         bigint version "검색 읽기 모델(search_document·search_term·search_removal)을 바꾸는 트랜잭션마다 UPDATE … RETURNING으로 1 올린다. 시퀀스 금지(ADR-0086). 자동완성 사전이 10초 [가정]마다 판·바뀐 줄·지운 표시를 한 읽기 전용 트랜잭션에서 읽는다(ADR-0094, search §2.3)"
         timestamptz updated_at
+        timestamptz reconciled_at "서버 시작 따라잡기(전체 동기화)를 끝까지 마친 시작 시각. 판은 올리지 않는다. 파드는 자기 시작 시각 뒤에 적혔으면 따라잡기가 끝났다고 본다(추천 적용, 2026-11-16, ADR-0271 결정 12)"
     }
     venue {
         uuid id PK "LAYOUT은 공연 ID에서 정한 UUIDv5(첫 저장이 회차에 잇기 전에 실패해도 다음 저장이 같은 행의 판 차례를 잇는다, ADR-0260 결정 15)"
