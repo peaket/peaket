@@ -51,6 +51,8 @@ export class MemoryReviewStore implements ReviewStore {
   readonly reports = new Map<string, ReportRecord>();
   readonly takedowns = new Map<string, TakedownRecord>();
   readonly hiddenFingerprints = new Set<string>();
+  /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각. 뼈대(W8-audit2a 시험 단계): 칸만 더했다 */
+  readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
 
   async insertReview(r: ReviewRecord): Promise<void> {
     this.reviews.set(r.reviewId, { ...r });
@@ -151,6 +153,23 @@ export class MemoryReviewStore implements ReviewStore {
       anonymized += 1;
     }
     return anonymized;
+  }
+
+  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 구현 담당이 채운다
+  async purgeByAccount(_accountId: string, _nowMs: number): Promise<number> {
+    throw new Error('아직 없음');
+  }
+
+  async purgeWithdrawnAccount(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<number> {
+    throw new Error('아직 없음');
+  }
+
+  async runDueRechecks(_nowMs: number, _limit: number): Promise<{ accounts: number; purged: number }> {
+    throw new Error('아직 없음');
+  }
+
+  async oldestOverdueRecheckMs(_nowMs: number): Promise<number> {
+    throw new Error('아직 없음');
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

@@ -6,6 +6,7 @@ import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import type { ReviewAccountWithdrawnHandler } from '../modules/review/index.js';
 import { CORE_GROUP, CORE_TOPICS, pidFreeHeldEventStore } from './index.js';
+import type { ReviewRecheckLoopOptions } from './review-recheck.js';
 
 export interface CoreConsumersOptions {
   env: string;
@@ -24,6 +25,13 @@ export interface CoreConsumersOptions {
   commitEveryMs?: number;
   /** 보류 수 재는 주기(기본 30초, 시험이 줄인다) */
   measureHeldEveryMs?: number;
+  /**
+   * 탈퇴 후기 다시 정리 반복이 쓰는 유스케이스(소비자 전용 풀의 Reviews, docs/streaming.md §2.6).
+   * 뼈대(W8-audit2a 시험 단계): main.ts가 아직 넘기지 않아 선택 칸으로 두었다. 구현 담당이 필수로 바꾸고 반복을 켠다
+   */
+  recheck?: ReviewRecheckLoopOptions['reviews'];
+  /** 다시 정리 반복 간격(기본 60초 [가정], 시험이 줄인다) */
+  recheckEveryMs?: number;
 }
 
 export interface CoreConsumers {

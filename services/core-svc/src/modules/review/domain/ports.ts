@@ -56,6 +56,16 @@ export interface ReviewStore {
   expireTemporaryBlocks(nowMs: number): Promise<number>;
   /** 후기 조치·조치 기록·신고 처리 완료를 한 트랜잭션으로 반영한다(ASVS 2.3.3) */
   moderate(reviewId: string, o: { status?: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntilMs?: number; takedown?: TakedownRecord; restoreTakedowns: boolean; removeFingerprint?: string; outcome: ReportRecord['outcome']; nowMs: number }): Promise<void>;
+
+  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 이름과 모양만 더했다. 구현 담당이 채우고, 부르는 곳이 없어지면 anonymizeByAccount를 뺀다.
+  /** 그 계정의 후기를 상태와 관계없이 모두 파기 칸대로 비운다(docs/data.md §2 '후기 파기'). 바꾼 행 수. 이미 바꾼 행은 그 계정 ID로 더 찾히지 않아 다시 하면 0 */
+  purgeByAccount(accountId: string, nowMs: number): Promise<number>;
+  /** 파기(purgeByAccount와 같은 칸)와 다시 정리 예약 쓰기를 한 트랜잭션에. 예약이 있으면 늦은 시각을 남긴다. 둘 중 하나라도 실패하면 둘 다 없다 */
+  purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number>;
+  /** due_at <= nowMs인 예약을 limit개까지 SKIP LOCKED로 잠가 그 계정들을 파기하고 예약을 지운다(한 트랜잭션) */
+  runDueRechecks(nowMs: number, limit: number): Promise<{ accounts: number; purged: number }>;
+  /** 가장 오래 밀린 예약이 예약 시각을 넘긴 시간(ms). 없거나 밀리지 않았으면 0 */
+  oldestOverdueRecheckMs(nowMs: number): Promise<number>;
 }
 
 export const REVIEW_STORE = Symbol('REVIEW_STORE');

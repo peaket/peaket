@@ -40,7 +40,7 @@ export function readReviewWithdrawn(value: unknown): ReviewWithdrawnEvent | unde
 
 export class ReviewAccountWithdrawnHandler implements KeyedHandler<ReviewWithdrawnEvent> {
   constructor(
-    private readonly reviews: Pick<Reviews, 'anonymizeAccount'>,
+    private readonly reviews: Pick<Reviews, 'purgeWithdrawn'>,
     private readonly codec: AccountWithdrawnCodec = jsonAccountWithdrawnCodec,
     private readonly o: { logger?: { info(o: object, msg?: string): void } } = {},
   ) {}
@@ -71,9 +71,13 @@ export class ReviewAccountWithdrawnHandler implements KeyedHandler<ReviewWithdra
     return e.eventKey;
   }
 
-  /** reviews.anonymizeAccount(accountId)를 기다린다. 로그에는 eventKey와 바꾼 건수만(계정 ID 없음). 저장소 일시 장애는 그대로 던져 파티션을 멈춘다 */
-  async handle(e: ReviewWithdrawnEvent): Promise<void> {
-    const { anonymized } = await this.reviews.anonymizeAccount(e.accountId);
-    this.o.logger?.info({ kind: 'review-withdrawn', eventKey: e.eventKey, anonymized }, '탈퇴한 계정의 후기에서 계정·주문 참조를 끊었다');
+  /**
+   * reviews.purgeWithdrawn({ accountId, withdrawnAt })를 기다린다. 로그에는 eventKey와 purged 수만(계정 ID 없음). 저장소 일시 장애는 그대로 던져 파티션을 멈춘다.
+   * 뼈대(W8-audit2a 시험 단계): 구현 담당이 채운다(docs/features/identity.md §8 '후기 파기'·'다시 정리')
+   */
+  async handle(_e: ReviewWithdrawnEvent): Promise<void> {
+    void this.reviews;
+    void this.o;
+    throw new Error('아직 없음');
   }
 }

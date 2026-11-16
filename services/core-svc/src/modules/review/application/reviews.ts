@@ -313,6 +313,27 @@ export class Reviews {
     return { anonymized };
   }
 
+  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 이름과 모양만 더했다. 구현 담당이 채우고 anonymizeAccount를 뺀다(docs/features/identity.md §8 '후기 파기').
+  /** 손으로 다시 하는 길(내부 경로). UUID가 아니면 ReviewProblem('review-invalid', 422). 다시 정리 예약은 만들지 않는다 */
+  async purgeAccount(_accountId: string): Promise<{ purged: number }> {
+    throw new Error('아직 없음');
+  }
+
+  /** 탈퇴 사건 처리: UUID 확인 → purgeWithdrawnAccount(accountId, { nowMs, recheckAtMs: withdrawalRecheckAt(withdrawnAt, nowMs) }) */
+  async purgeWithdrawn(_e: { accountId: string; withdrawnAt: string }): Promise<{ purged: number }> {
+    throw new Error('아직 없음');
+  }
+
+  /** 다시 정리 반복 한 번의 몸통(기본 100개 [가정]) */
+  async runWithdrawalRechecks(_limit?: number): Promise<{ accounts: number; purged: number }> {
+    throw new Error('아직 없음');
+  }
+
+  /** 가장 오래 밀린 다시 정리 예약의 지난 시간(ms) */
+  async oldestOverdueRecheckMs(): Promise<number> {
+    throw new Error('아직 없음');
+  }
+
   async #event(eventId: string): Promise<EventInfo> {
     if (!UUID.test(eventId)) throw eventNotFound();
     const row = await this.d.events.find(eventId.toLowerCase());

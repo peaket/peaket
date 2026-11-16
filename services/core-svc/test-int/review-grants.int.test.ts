@@ -1,6 +1,7 @@
 // COV2-06 ⑮⑯(W7-audit 보충): 후기 표·보류 표의 운영 역할 권한을 실제 PostgreSQL 18에서 본다(docs/data.md §2 '후기 표의 DB 권한'·§4의 15 'DB 권한',
 // ADR-0241 결정 4: 코드가 쓰는 만큼만). core_app(팬·관제 경로)은 쓰는 칸만 고치고 후기·신고·조치 행을 지우지 못한다.
 // core_maintenance(relay의 정비 연결)는 임시조치 끝내기와 보류 표 정리만 하고 후기를 새로 쓰지 못한다.
+// I-T83 ⑥(W8-audit2a, ADR-0278): 0026 뒤 core_app은 파기 칸(docs/data.md §2 '후기 파기', 별점·지문 NULL 포함)을 한 문장으로 비울 수 있다(0022 칸 목록이 덮는다).
 // 시험 자료 넣기와 확인은 관리자(슈퍼유저) 연결로 한다.
 import 'reflect-metadata';
 import { createDatabase, fakeClock, platformMaintenanceTasks, type Database } from '@peaket/platform';
@@ -106,6 +107,22 @@ describe('COV2-06 보충 후기·보류 표 운영 역할 권한(실제 DB)', ()
 
     const left = await admin.pool.query('select (select count(*)::int from review where id = $1) as r, (select count(*)::int from content_report where id = $2) as c, (select count(*)::int from takedown_action where id = $3) as t', [reviewId, reportId, takedownId]);
     expect(left.rows[0]).toEqual({ r: 1, c: 1, t: 1 });
+  });
+
+  test('I-T83 ⑥ core_app은 파기 칸(별점·지문 NULL 포함)을 한 문장으로 비울 수 있다', async () => {
+    const reviewId = await seedReview({ status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntil: new Date(NOW + DAY) });
+    // 파기 문장(계획 §1 Drizzle softDeleteReview·purgeByAccount와 같은 칸). 0026 전에는 별점·지문 NOT NULL(23502)로 실패한다
+    expect(
+      await codeOf(
+        app,
+        `update review set status = 'DELETED', body = '', rating = null, content_fingerprint = null, author_display = '', notice = null, notice_until = null,
+           account_id = id, basis_order_id = id, deleted_at = coalesce(deleted_at, $2), updated_at = $2
+         where id = $1`,
+        [reviewId, new Date(NOW)],
+      ),
+    ).toBe('OK');
+    const row = (await admin.pool.query('select status, body, rating, content_fingerprint, author_display, notice, notice_until, account_id, basis_order_id, deleted_at from review where id = $1', [reviewId])).rows[0];
+    expect(row).toEqual({ status: 'DELETED', body: '', rating: null, content_fingerprint: null, author_display: '', notice: null, notice_until: null, account_id: reviewId, basis_order_id: reviewId, deleted_at: new Date(NOW) });
   });
 
   test('COV2-06 ⑯ 정비 역할로 임시조치 끝내기와 보류 표 정리가 되고, 후기를 새로 쓰지는 못한다', async () => {

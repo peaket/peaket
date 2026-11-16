@@ -37,6 +37,12 @@ export interface ReviewRecord {
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
   readonly edited: boolean;
+  /**
+   * 처음 지운 시각(DELETED에서만). 파기는 이미 있으면 그대로 둔다(docs/data.md §2 '후기 파기').
+   * 뼈대(W8-audit2a 시험 단계): 칸만 더했다. 메모리·Drizzle 저장소가 채우는 것은 구현 담당 몫이다.
+   * `rating`·`contentFingerprint`의 null 허용(파기한 행에서만 null)도 구현 담당이 바꾼다(제품 코드 여러 곳이 함께 바뀐다)
+   */
+  readonly deletedAtMs?: number;
 }
 
 export interface ReportRecord {
@@ -179,6 +185,15 @@ export function maskAuthor(nickname: string | undefined): string {
   if (!nickname) return '***';
   const first = graphemes(normalizeText(nickname))[0];
   return first ? `${first}**` : '***';
+}
+
+/**
+ * 탈퇴 후기 다시 정리 예약 시각: min(withdrawnAt, nowMs) + 16분(액세스 토큰 최대 15분 + 처리 중이던 쓰기 요청의 여유 1분 [가정],
+ * docs/features/identity.md §8 '다시 정리'). withdrawnAt을 읽지 못하면 Error.
+ * 뼈대(W8-audit2a 시험 단계): 구현 담당이 채운다(상수 WITHDRAWAL_RECHECK_DELAY_MS도 그때 더한다)
+ */
+export function withdrawalRecheckAt(_withdrawnAtIso: string, _nowMs: number): number {
+  throw new Error('아직 없음');
 }
 
 export function noticeDeadlineMs(receivedAtMs: number, kind: NoticeKind): number {

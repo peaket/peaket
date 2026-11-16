@@ -2,6 +2,8 @@
 // 정본: docs/streaming.md §2.6 'core-svc 소비자'(그룹 peaket.core-svc.<환경>, 탈퇴 토픽 하나), docs/features/identity.md §8 '후기 익명화'
 // (운영 환경에서 브로커 설정이 없으면 시작하지 않는다), docs/security/data-classification.md '탈퇴 사건의 pid 사본'(보류 기록에도 pid를 남기지 않는다).
 // 시작 파일(main.ts) 조립은 원문 대조로 본다(약한 검사다. 실제 동작은 test-int/review-withdrawn-consumer.int.test.ts가 본다).
+// I-T83 ⑤(W8-audit2a, 소유자 결정 2026-11-16 OPEN[44], ADR-0278): 소비자와 함께 탈퇴 후기 다시 정리 반복을 켜고, 멈출 때 반복을 먼저 멈춘다(docs/streaming.md §2.6).
+// 처리기는 익명화(anonymizeAccount) 대신 파기(purgeWithdrawn)를 부른다(docs/features/identity.md §8 '후기 파기').
 import type { Database, HeldEventInput, HeldEventStore } from '@peaket/platform';
 import { PlatformConfigError, PlatformMetrics } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
@@ -236,10 +238,12 @@ describe('COV2-06 시작 파일 조립', () => {
         throw new Error('이 시험에서는 부르지 않는다');
       },
     } as unknown as Database;
-    const handler = new ReviewAccountWithdrawnHandler({ anonymizeAccount: async () => ({ anonymized: 0 }) });
+    const handler = new ReviewAccountWithdrawnHandler({ purgeWithdrawn: async () => ({ purged: 0 }) });
     vi.mocked(runKeyedConsumer).mockClear();
     const registry = new PlatformMetrics('core-svc').registry;
-    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry });
+    // I-T83 ⑤: 다시 정리 반복은 받은 유스케이스를 쓴다(이 시험에서는 아무것도 하지 않는 대역)
+    const recheck = { runWithdrawalRechecks: async () => ({ accounts: 0, purged: 0 }), oldestOverdueRecheckMs: async () => 0 };
+    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry, recheck });
     expect(vi.mocked(runKeyedConsumer)).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(runKeyedConsumer).mock.calls[0]![0];
     expect(opts).toMatchObject({ service: 'core-svc', groupId: 'peaket.core-svc.ci', topics: ['identity.accounts-withdrawn'], maxKeys: 2, partitionsConcurrently: 1 });
@@ -336,5 +340,59 @@ describe('COV2-06 시작 파일 조립', () => {
     expect(store, 'Reviews의 store: new DrizzleReviewStore(풀)').toBeDefined();
     expect(store).toBe(db);
     for (const other of ['database', 'partnerDatabase', 'opsDatabase']) expect(store).not.toBe(other);
+  });
+});
+
+describe('I-T83 다시 정리 반복의 시작과 멈춤', () => {
+  /** 조건이 맞을 때까지 기다린다(실제 시간 2초까지) */
+  async function until(cond: () => boolean, what: string): Promise<void> {
+    const end = Date.now() + 2_000;
+    while (!cond()) {
+      if (Date.now() > end) throw new Error(`기다리다 끝남: ${what}`);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+
+  test('I-T83 ⑤ 소비자를 켜면 반복도 켜지고 멈출 때 반복을 먼저 멈춘다', async () => {
+    // 동작: 소비자를 켜면 받은 유스케이스로 반복이 돌고, stop()은 반복을 멈춘 뒤 소비자를 멈춘다(소비자가 멈추는 동안 반복이 돌지 않는다)
+    const order: string[] = [];
+    let runs = 0;
+    const recheck = {
+      runWithdrawalRechecks: async () => {
+        runs += 1;
+        order.push('recheck');
+        return { accounts: 0, purged: 0 };
+      },
+      oldestOverdueRecheckMs: async () => 0,
+    };
+    const consumerStop = async () => {
+      order.push('consumer-stop');
+      const seen = runs;
+      await new Promise((r) => setTimeout(r, 60));
+      if (runs !== seen) throw new Error(`소비자를 멈추는 동안 반복이 ${runs - seen}번 더 돌았다`);
+    };
+    vi.mocked(runKeyedConsumer).mockClear();
+    vi.mocked(runKeyedConsumer).mockImplementationOnce(() => ({ started: Promise.resolve(), stop: consumerStop }) as unknown as ReturnType<typeof runKeyedConsumer>);
+    const handler = new ReviewAccountWithdrawnHandler({ purgeWithdrawn: async () => ({ purged: 0 }) });
+    const pool = { db: { execute: async () => ({ rows: [] }) } } as unknown as Database;
+    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-recheck', database: pool, handler, recheck, recheckEveryMs: 5 });
+    await until(() => runs >= 2, '반복이 두 번 돈다');
+    await run.stop();
+    expect(order).toContain('consumer-stop');
+    expect(order.lastIndexOf('recheck')).toBeLessThan(order.indexOf('consumer-stop'));
+    const after = runs;
+    await new Promise((r) => setTimeout(r, 40));
+    expect(runs).toBe(after);
+
+    // 원문: start.ts가 반복을 켜고, 반복 파일은 Kafka 모듈을 싣지 않으며, main.ts는 처리기와 같은 소비자 풀 Reviews를 반복에 넘긴다
+    const startText = readFileSync(fileURLToPath(new URL('../src/consumers/start.ts', import.meta.url)), 'utf8');
+    expect(startText).toContain('startReviewRecheckLoop(');
+    const loopText = readFileSync(fileURLToPath(new URL('../src/consumers/review-recheck.ts', import.meta.url)), 'utf8');
+    expect(loopText).not.toMatch(/stream-worker/);
+    const { args } = consumerArgs(mainText());
+    const recheckName = /[{,]\s*recheck\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(args)?.[1] ?? (/[{,]\s*recheck\s*[,}]/.test(args) ? 'recheck' : undefined);
+    expect(recheckName, 'startCoreConsumers 인자의 recheck 칸').toBeDefined();
+    const handlerReviews = /handler:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
+    expect(recheckName).toBe(handlerReviews);
   });
 });

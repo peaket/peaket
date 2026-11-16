@@ -238,3 +238,83 @@ export interface CoreConsumersOptions { /* … 지금 칸 … */ recheck: Review
 - `python -I -X utf8 tools/doc-check/check_all.py`: 오류 0. 경고는 이 커밋 전부터 있던 openapi 셋과 mermaid 건너뜀(이 폴더에 의존성이 없다)이다. 바꾼 `docs/data.md` ER 그림 둘은 메인 폴더 `tools/doc-check/mermaid`의 같은 `parse.mjs`로 따로 읽어 통과했다(한도 50,000자 안).
 - `node tools/ci/avro-schema.mjs`: 통과(22개 파일).
 - `pnpm --dir packages/contracts gen:check`: 2건 다르다(§0.1). 2a 구현 담당이 다시 만든다.
+
+## 실패 확인
+
+- **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 계획 커밋 `7901c762` 위. Docker 없이 돌렸다.
+- **준비**: 이 작업 폴더에는 공용 패키지의 `dist`가 없어 core-svc 시험·typecheck가 `@peaket/search-normalize`·`@peaket/platform/stream-worker`를 찾지 못했다. `pnpm --dir D:/ticketpass-lane3-w8b/packages/<contracts·search-normalize·validation·platform> build`를 한 번씩 돌렸다(git이 무시하는 `dist`만 생긴다). 다른 담당도 그대로 쓰면 된다.
+
+### 뼈대와 모양만 바꾼 제품 코드(동작은 그대로이거나 '아직 없음')
+
+| 파일 | 한 것 | 구현 담당이 할 것 |
+| --- | --- | --- |
+| `review/domain/review.ts` | `withdrawalRecheckAt` 뼈대('아직 없음'). `ReviewRecord`에 선택 칸 `deletedAtMs?`(처음 지운 시각)를 더함 | 채운다. 상수 `WITHDRAWAL_RECHECK_DELAY_MS`를 더한다. `rating`·`contentFingerprint`를 `number \| null`·`string \| null`로 바꾼다(제품 코드 열다섯 곳 남짓이 함께 바뀌어 시험 담당이 손대지 않았다. 시험은 두 꼴 모두에서 컴파일된다). 메모리·Drizzle 저장소가 `deletedAtMs`를 채운다 |
+| `review/domain/ports.ts` | `purgeByAccount`·`purgeWithdrawnAccount`·`runDueRechecks`·`oldestOverdueRecheckMs` 더함 | `anonymizeByAccount`를 뺀다. `softDeleteReview`의 뜻(파기 칸)을 주석에 맞춘다 |
+| `review/adapters/memory-review-store.ts` | 예약 칸 `rechecks: Map<계정 ID, { dueAtMs, createdAtMs }>`, 네 메서드 뼈대 | 채운다. `softDeleteReview`를 파기 칸으로(지금 `rating: 0`·`'***'`), `runDueRechecks`는 예약 시각 차례(docs/data.md §5.1 `ORDER BY due_at`) |
+| `review/adapters/db/drizzle-review-store.ts` | 네 메서드 뼈대 | 채운다(계획 §1·§2 SQL). `softDeleteReview` 파기 칸, `recordOf`가 `deleted_at`을 옮긴다 |
+| `review/application/reviews.ts` | `purgeAccount`·`purgeWithdrawn`·`runWithdrawalRechecks`·`oldestOverdueRecheckMs` 뼈대 | 채우고 `anonymizeAccount`를 뺀다 |
+| `review/inbound/account-withdrawn.handler.ts` | 생성자가 `Pick<Reviews, 'purgeWithdrawn'>`를 받음. `handle`은 '아직 없음'(옛 익명화 호출을 뺐다) | 채운다 |
+| 새 `src/consumers/review-recheck.ts` | `ReviewRecheckLoopOptions`·`startReviewRecheckLoop` 뼈대(Kafka 모듈을 싣지 않는다) | 채운다 |
+| `src/consumers/start.ts` | `CoreConsumersOptions`에 `recheck?`·`recheckEveryMs?`(main.ts가 아직 넘기지 않아 선택 칸) | `recheck`를 필수로 바꾸고 반복을 켠다. `main.ts`가 `recheck: consumerReviews`를 넘긴다 |
+| 손대지 않음 | `internal-review.controller.ts`(경로 `/purge`), `schema.ts`, `main.ts`, 마이그레이션 0026·journal | 계획대로 |
+
+### 단위 시험(Docker 없음)
+
+명령: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`(= core-svc 폴더에서 `npx vitest run`). **시험 458개 가운데 18개 실패, 440개 통과**(파일 69개 가운데 5개 실패). 실패 18개는 모두 이 묶음이 새로 쓰거나 고쳐 쓴 I-T83 시험이고, 그 밖의 기존 시험은 모두 통과했다. `pnpm --dir … typecheck` 오류 0. 닿은 `src` 경로 `npx eslint` 오류 0(시험 파일은 eslint 설정이 보지 않는다).
+
+| 파일 | 시험 | 결과 | 실패 까닭 |
+| --- | --- | --- | --- |
+| `test/review-withdrawn.test.ts`(고침) | I-T83 ① 탈퇴 사건을 받으면 그 계정 후기를 모두 파기 칸대로 비운다 (COV2-06 ①) | 실패 | 뼈대 '아직 없음'(`handle`). 보이는 것·통보로 가린 것(RIGHTS_TEMP)·2026-11-16 전 작성자가 지운 것(별점·지문이 남은 꼴)·다른 계정 행, 조치 증적·차단 지문을 두고 칸 전부를 정본 값으로 단언한다 |
+| 〃 | I-T83 ③ 같은 사건을 다시 받아도 0건이고 행이 그대로다 (COV2-06 ②) | 실패 | 〃 |
+| 〃 | I-T83 ③ 내부 파기 경로는 토큰이 없거나 틀리면 403이고 맞으면 파기한 건수를 주며 다시 불러도 0건이다 (COV2-06 ⑨) | 실패 | 단언: `/purge`가 404(경로가 아직 없다). 옛 `/anonymize` 404, 내부 경로가 예약을 만들지 않음도 본다 |
+| 〃 | COV2-06 ③④⑤(decode·keyOf, 그대로) | **처음부터 통과(이미 있는 동작)** 3 | 바꾸지 않았다 |
+| 새 `test/review-purge.test.ts` | I-T83 ② 파기한 후기는 공연 후기 목록·요약·상세에서 빠진다 | 실패 | 뼈대 '아직 없음'(`purgeWithdrawn`). 처리 전 요약 3건·3.3을 먼저 단언해 대조군을 둔다 |
+| 〃 | I-T83 ⑥ 작성자가 지운 후기도 같은 칸을 비운다 | 실패 | 단언: 지금 메모리 `softDeleteReview`가 `rating: 0`·`'***'`를 남기고 지운 시각이 없다 |
+| 〃 | I-T83 ③ purgeAccount는 계정 ID가 UUID가 아니면 거절하고 다시 정리 예약을 만들지 않는다 | 실패 | 뼈대 '아직 없음'(422 `review-invalid`가 아님) |
+| 새 `test/review-recheck.test.ts` | I-T83 ④ 예약 시각은 min(탈퇴 시각, 처리 시각) + 16분이고 탈퇴 시각을 읽지 못하면 실패한다 | 실패 | 뼈대 '아직 없음'(`withdrawalRecheckAt`) |
+| 〃 | I-T83 ④ 탈퇴 사건 처리는 파기와 탈퇴 시각 + 16분 예약을 함께 쓴다 | 실패 | 뼈대 '아직 없음'(`handle`) |
+| 〃 | I-T83 ④ 예약 시각 전에는 다시 정리하지 않고 그 시각에 파기한다 | 실패 | 〃 |
+| 〃 | I-T83 ④ 탈퇴 시각을 읽지 못하거나 계정 ID가 틀리면 파기도 예약도 하지 않는다 | 실패 | 뼈대 '아직 없음'(대조군 `purgeWithdrawn`). 거절 쪽은 뼈대도 던져 대조군에서 실패한다 |
+| 〃 | I-T83 ④ 처리기는 탈퇴 시각을 그대로 넘기고 저장소가 실패하면 함께 실패한다 | 실패 | 뼈대 '아직 없음'(`handle`) |
+| 〃 | I-T83 ⑤ 다시 정리 한 번은 기본 100개씩 예약 시각 차례로 처리하고 가장 오래 밀린 시간을 ms로 준다 | 실패 | 뼈대 '아직 없음'(101개 예약, 넘긴 묶음 크기 7) |
+| 〃 | I-T83 ⑤ 밀린 시간은 예약 시각 정각에 0이고 1ms 뒤부터 센다 | 실패 | 뼈대 '아직 없음'(`oldestOverdueRecheckMs`) |
+| 〃 | I-T83 ⑤ 반복은 밀린 것을 비울 때까지 돌고 실패해도 멈추지 않으며 밀린 시간을 낸다 | 실패 | 뼈대 '아직 없음'(`startReviewRecheckLoop`). 가짜 sleep으로 간격 60,000ms, 묶음 100, 실패 경고 한 줄(Drizzle 오류의 매개변수에 든 계정 ID가 실리지 않음), 지표 90.5초, `stop()` 뒤 호출 없음을 본다 |
+| 〃 | I-T83 ⑤ 반복은 받은 간격·묶음 크기를 쓰고 stop은 돌던 한 번이 끝난 뒤에 풀린다 | 실패 | 〃(간격 1,234ms·묶음 7, 상수와 다른 값) |
+| 새 `test/review-purge-migration.test.ts` | I-T83 ⑦ 마이그레이션은 별점·지문 NULL을 허용하고 살아 있는 행 CHECK를 NOT VALID로 더하며 권한을 넓히지 않는다 | 실패 | `migrations/0026_*.sql`이 아직 없다 |
+| 〃 | I-T83 ⑦ 예약 표 권한은 core_app의 읽기·넣기·지우기·예약 시각 고치기뿐이다 | 실패 | 〃 |
+| `test/core-consumers.test.ts`(고침) | I-T83 ⑤ 소비자를 켜면 반복도 켜지고 멈출 때 반복을 먼저 멈춘다 | 실패 | 단언: 2초 안에 반복이 돌지 않는다(`start.ts`가 아직 켜지 않는다). 동작(소비자가 멈추는 동안 반복이 돌지 않음)과 원문(`start.ts`의 `startReviewRecheckLoop(`, 반복 파일에 `stream-worker` 없음, `main.ts`의 `recheck` 값이 처리기의 Reviews와 같은 이름)을 함께 본다 |
+| 〃 | COV2-06 K2(처리기 대역을 `purgeWithdrawn`으로, `recheck` 대역을 더함), 나머지 COV2-06 | **처음부터 통과(이미 있는 동작)** | 대역 모양만 바꿨다 |
+
+- 요약: 새로 쓰거나 고쳐 쓴 I-T83 단위 시험 18개 모두 실패(뼈대 '아직 없음' 13, 단언 3, 마이그레이션 파일 없음 2). 처음부터 통과는 손대지 않거나 대역 모양만 바꾼 기존 COV2-06 시험뿐이다.
+- `test/review.test.ts`는 고치지 않았다: 계획 §0.2의 '작성자 지우기 뒤 `'***'` 단언'은 이 파일에 없다(`maskAuthor(undefined)`의 `'***'`는 쓰기 때의 작성자 표시라 그대로다). `test/review.http.test.ts`의 '지운 뒤 같은 회차에 다시 쓸 수 있다'도 파기 뒤에 그대로 맞다.
+
+### 통합 시험(도커 대기 — 돌리지 않았다)
+
+돌릴 통합 시험(core-svc 폴더, 감독이 Docker 차례를 알린 뒤): `npx vitest run --config vitest.integration.config.mjs test-int/review-purge.int.test.ts test-int/review-recheck.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 파일은 Kafka 컨테이너. 네이티브 Kafka 모듈이 이 PC에서 막히면 CI에서만 돈다). 파일 하나만은 `npx vitest run --config vitest.integration.config.mjs <파일>`.
+
+| 파일 | 시험 | 지금(구현 전) 예상 | 까닭 |
+| --- | --- | --- | --- |
+| `test-int/review-withdrawn.int.test.ts`(고침) | I-T83 ①⑥ Drizzle 파기는 그 계정 행만 바꾸고 다시 해도 0건이다 (COV2-06 ⑪) | 실패 | 뼈대 '아직 없음'(`purgeByAccount`). A 행 셋(보이는 것·통보로 가린 것·이미 지운 것 — 계획의 2건에 이미 지운 행을 더해 3건)·B 행, `takedown_action`·`review_hidden_fingerprint` 행 그대로, 지운 시각 그대로, 같은 회차 새 후기 넣기 |
+| 〃 | I-T83 ① 탈퇴 파기는 review_account_idx로 찾는다 (COV2-06 K2) | 처음부터 통과 예상 | 실행 계획만 본다(파기 문장으로 바꿈) |
+| 새 `test-int/review-purge.int.test.ts` | I-T83 ⑥ 작성자가 지운 후기도 같은 칸을 비우고 같은 회차에 다시 쓸 수 있다 | 실패 | 단언: 지금 Drizzle 지우기가 별점·지문·계정을 남긴다. 서비스는 `core_app` 로그인·실제 시계라 지운 시각은 요청 앞뒤의 실제 시각과 견준다(고정 날짜 없음) |
+| 〃 | I-T83 ⑦ 살아 있는 후기는 별점·지문 없이 넣을 수 없다 | 실패 | 0026 전에는 NOT NULL 위반(23502)이라 23514가 아니다. `convalidated = false`(NOT VALID)도 본다 |
+| 새 `test-int/review-recheck.int.test.ts` | I-T83 ④ 파기와 예약은 한 트랜잭션이다 / ④ 같은 계정 예약은 늦은 쪽을 남긴다 / ⑤ 다른 연결이 잠근 예약은 건너뛰고 기다리지 않는다 / ⑤ 두 반복이 겹쳐도 한 예약은 한 번만 잡고 처리한 예약은 지운다 / ⑤ 가장 오래 밀린 예약의 지난 시간을 ms로 준다 / ⑦ 예약 표 권한은 core_app의 읽기·넣기·지우기·예약 시각 고치기뿐이다 | 실패 6 | `beforeEach`의 예약 표 비우기가 42P01(표 없음). ④는 `REVOKE INSERT` 동안 거절 1건(42501)과 후기 VISIBLE을 단언한다(끊긴 사례가 실제로 있었는지). ⑤ 겹침은 두 풀 동시 실행(합 3)에 더해, 관리자 연결이 한 행을 `FOR UPDATE`로 쥔 채 3초 안에 나머지 둘만 처리하는지로 SKIP LOCKED를 따로 잡는다(동시 실행만으로는 차례에 따라 빠짐이 숨는다). 예약 경계는 정각(때가 됨)·+1ms(아직). ⑦은 `core_partner`·`core_maintenance`·`core_ops` 각각의 거부와 `core_app`의 `account_id`·`created_at` 고치기·비우기 거부를 본다 |
+| `test-int/review-grants.int.test.ts`(더함) | I-T83 ⑥ core_app은 파기 칸(별점·지문 NULL 포함)을 한 문장으로 비울 수 있다 | 실패 | 0026 전 23502. COV2-06 ⑮⑯은 처음부터 통과 예상 |
+| `test-int/review.int.test.ts` | 기존 다섯 | 처음부터 통과 예상 | 바꾸지 않았다 |
+| `test-int/review-withdrawn-consumer.int.test.ts`(고침) | I-T83 ① 실제 Kafka의 탈퇴 사건이 core 후기를 파기하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다 (COV2-06 ⑫) | 실패 | 뼈대 '아직 없음'(`handle`) → 다섯 번 뒤 보류, 파기 기다림이 60초에 끝난다. 예약 행 due_at = 탈퇴 시각 + 16분도 본다 |
+| 〃 | I-T83 ④ 실제 Kafka 탈퇴 사건 뒤 예약 행이 생기고 반복이 그 시각에 다시 파기한다 | 실패 | 〃. 소비자는 `recheck: reviews`·`recheckEveryMs: 200`으로 켠다. 기준 시각은 소비자·반복이 쓰는 실제 시계(`Date.now()`)이고, 예약을 지금 + 20초로 두어 사건 처리가 먼저 끝나게 했다(계획의 + 2초보다 여유를 둠). 예약 전 1초 동안 새 후기가 남고, 예약 뒤 3초 안에 파기·예약 지움, 다시 파기한 시각 ≥ 예약 시각 |
+
+### 시험 담당이 정한 것(계획에 없던 세부, 구현 담당·검증 담당 참고)
+
+1. `ReviewRecord.deletedAtMs?`를 더했다. 단위 ①의 '이미 지운 행의 지운 시각은 처음 값 그대로'를 메모리 저장소에서 보려면 필요하다.
+2. 메모리 저장소 예약 칸의 모양은 `rechecks: Map<계정 ID, { dueAtMs, createdAtMs }>`이고, 첫 예약의 `createdAtMs`는 처리 시각이다(같은 계정 예약을 고칠 때 `createdAtMs`는 단언하지 않는다).
+3. 처리기는 `purgeWithdrawn`에 `{ accountId, withdrawnAt }` 두 칸만 넘기고(사건의 탈퇴 시각 그대로), 로그 객체에 `eventKey`와 `purged` 수를 싣는다(계정 ID 없음).
+4. 반복: 시작하자마자 한 번 돈다(첫 쉼 없음). `runWithdrawalRechecks(limit)`에 묶음 크기를 넘긴다. 곧바로 다시 도는 자리의 `sleep(0)`은 세지 않는다. 지표 값은 `oldestOverdueRecheckMs / 1000`(초)이다. `stop()`은 돌던 한 번이 끝난 뒤에 풀린다(소비자 멈춤·풀 닫기 전에 반복이 끝나야 한다).
+5. 마이그레이션 원문 시험은 0026의 문을 계획의 여섯 꼴(별점·지문 NOT NULL 풀기, 살아 있는 행 CHECK, 예약 표, 예약 시각 색인, GRANT)로만 허락한다. CHECK 식은 괄호·공백·표 이름 접두를 지우고 견준다(괄호 위치의 뜻은 통합 ⑦이 본다). 뜻이 같은 다른 글로 쓰면 '시험 이의'로 알려 달라.
+6. 시험 위치: '⑤ 소비자를 켜면 반복도 켜지고…'는 Kafka 모듈 대역(`vi.mock`)이 있는 `test/core-consumers.test.ts`에 두었다. 옛 COV2-06 ①②⑨·⑪·⑫는 I-T83 시험으로 바꾸면서 이름 끝에 `(COV2-06 ①)`처럼 옛 번호를 남겼다(장부의 옛 세부가 이어지게).
+
+### 틀린 구현 표본과 잡을 시험(예상, 검증 담당 참고)
+
+- §1 ⓐ 별점·지문 남김 → 단위 ①·⑥, 통합 ①⑥·⑥. ⓑ 상태 그대로 → 단위 ①·②. ⓒ `where` 빠짐·`id`로 찾음 → 단위 ①(B 행 그대로), 통합 ①⑥. ⓓ DELETED 건너뜀 → 단위 ①·통합 ①⑥의 이미 지운 행. ⓔ 지운 시각 덮음 → 같은 행의 `deletedAtMs`·`deleted_at`. ⓕ 작성자 지우기 옛 칸 → 단위·통합 ⑥. ⓖ 옛 익명화 호출 → 단위 ①.
+- §2 ⓐ 처리 시각 기준 → 단위 ④(03:16 대 03:19). ⓑ 15분·`<` → 단위 ④ 경계 정각, 통합 ⑤ 정각 예약. ⓒ 다른 트랜잭션 → 통합 ④ 한 트랜잭션(반복이 가리는 겹친 가드를 이것만 따로 잡는다). ⓓ 이른 시각으로 덮음 → 단위 ④·통합 ④ 늦은 쪽. ⓔ 예약 안 지움 → 단위 ④·⑤, 통합 ⑤. ⓕ SKIP LOCKED 빠짐 → 통합 ⑤ 잠근 행 건너뛰기. ⓖ 실패하면 멈춤 → 단위 ⑤ 반복. ⓗ 반복 안 켬 → 단위 ⑤ 시작과 멈춤, Kafka 통합 ④.
+- §4 ⓘ notice 남김 → 단위 ①·⑥. ⓙ `/anonymize` 남음·가드 없음 → 단위 ③ 내부 경로. ⓚ 로그에 계정 ID → 단위 ①·④ 처리기. ⓛ min 없음 → 단위 ④ 미래 탈퇴 시각. ⓜ 100개 채워도 쉼 → 단위 ⑤ 반복. ⓝ 다른 역할 권한·넓은 UPDATE → 단위 ⑦ 원문, 통합 ⑦.
