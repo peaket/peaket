@@ -577,6 +577,10 @@ erDiagram
         bigint version "검색 읽기 모델(search_document·search_term·search_removal)을 바꾸는 트랜잭션마다 UPDATE … RETURNING으로 1 올린다. 시퀀스 금지(ADR-0086). 자동완성 사전이 10초 [가정]마다 판·바뀐 줄·지운 표시를 한 읽기 전용 트랜잭션에서 읽는다(ADR-0094, search §2.3)"
         timestamptz updated_at
         timestamptz reconciled_at "서버 시작 따라잡기(전체 동기화)를 끝까지 마친 시작 시각. 판은 올리지 않는다. 파드는 자기 시작 시각 뒤에 적혔으면 따라잡기가 끝났다고 본다(추천 적용, 2026-11-16, ADR-0271 결정 12)"
+        text reconcile_owner "따라잡기 임대 주인(파드마다 겹치지 않는 이름). 비면 아무도 따라잡기를 하지 않는다(추천 적용, 2026-11-16, ADR-0271 결정 12 '잠금과 임대')"
+        timestamptz reconcile_lease_until "임대 만료 시각(DB now() 기준, 끊음마다 60초 [가정] 늘린다). 지나면 다른 파드가 넘겨받는다"
+        timestamptz reconcile_started_at "지금 따라잡기의 시작 시각. 마치면 reconciled_at으로 옮긴다"
+        uuid reconcile_cursor "마지막으로 마친 끊음의 마지막 공연 ID. 넘겨받은 파드는 이 뒤부터 잇는다"
     }
     venue {
         uuid id PK "LAYOUT은 공연 ID에서 정한 UUIDv5(첫 저장이 회차에 잇기 전에 실패해도 다음 저장이 같은 행의 판 차례를 잇는다, ADR-0260 결정 15)"
