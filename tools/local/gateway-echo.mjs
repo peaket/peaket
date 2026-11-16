@@ -1,7 +1,8 @@
 // 게이트웨이 kind 시험의 대역 백엔드(BUILD_ORDER HOT-400, 묶음 BAT-055 계획 §5 '시험 대역 백엔드'). 의존 없는 Node 파일 하나다.
 // cluster.mjs gateways가 ConfigMap으로 실어 고정 Node 이미지에서 띄운다. 시험 약속은 tools/local/e2e/gateway-client.mjs 머리 주석이다.
 // - 아무 경로·메서드: 받은 요청을 JSON { method, path, headers }로 돌려준다(머리 이름은 소문자, 같은 이름이 여럿이면 쉼표로 이음)
-// - 응답 고르기(시험만 쓴다): 요청 머리 x-e2e-status(상태)·x-e2e-response-headers(JSON 객체, 값은 글이나 글 배열)·x-e2e-body(본문 글),
+// - 응답 고르기(시험만 쓴다): 요청 머리 x-e2e-status(상태)·x-e2e-response-headers(JSON 객체, 값은 글이나 글 배열)·x-e2e-body(본문 글)·
+//   x-e2e-body-b64(UTF-8 본문을 base64로, 한글 본문용. 있으면 x-e2e-body보다 먼저 쓴다),
 //   머리를 달 수 없는 브라우저 요청은 쿼리 e2e-status·e2e-header=이름:값(여럿)
 // - GET /internal/jwks/{fan|admin|staff|admission}.json: 환경 값 PEAKET_E2E_JWKS(JSON { 이름: 공개키 묶음 })의 그 묶음(identity 공개키 배포의 대역)
 // 게이트웨이의 라우트는 /internal/을 내지 않으므로 이 경로는 프록시의 공개키 묶음 읽기만 닿는다.
@@ -47,7 +48,8 @@ createServer((req, res) => {
       const i = h.indexOf(':');
       if (i > 0) out[h.slice(0, i).trim().toLowerCase()] = h.slice(i + 1).trim();
     }
-    const body = headers['x-e2e-body'] ?? JSON.stringify({ method: req.method, path: req.url, headers, bodyBytes: Buffer.concat(chunks).length });
+    const b64 = headers['x-e2e-body-b64'];
+    const body = b64 !== undefined ? Buffer.from(b64, 'base64') : headers['x-e2e-body'] ?? JSON.stringify({ method: req.method, path: req.url, headers, bodyBytes: Buffer.concat(chunks).length });
     res.writeHead(status, out);
     res.end(status === 204 || status === 304 || req.method === 'HEAD' ? undefined : body);
   });

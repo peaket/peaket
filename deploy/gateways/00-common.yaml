@@ -100,6 +100,8 @@ data:
     --    맞든 틀리든 원본 확인 머리 자체는 지운 뒤 안쪽으로 넘긴다.
     -- 2. 토큰 유형(docs/features/identity.md §3 '발급자와 검증 규칙', I-T36): Envoy의 JWT 확인은 typ을 보지 않는다. JWT 확인을 지난 요청
     --    (토큰 클레임으로 넣은 x-user-id가 있다)은 실린 토큰마다 머리의 typ이 액세스 토큰 값(at+jwt)이어야 하고, 아니면 401이다.
+    -- 3. 내부 경로(docs/infra.md §4.1 '호스트와 내부 경로'): /internal/로 시작하는 경로는 어느 라우트든 404로 바로 답한다. 라우트는 /internal/을 내지 않지만
+    --    앱 서버로 / 전체를 넘기는 라우트(www·partner)는 경로가 남으므로, 그 앞에서 막는다(대소문자를 가리지 않고 견준다).
     -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말)
 
     local ORIGIN_VERIFY = "x-peaket-origin-verify"
@@ -181,16 +183,33 @@ data:
       return nil
     end
 
+    -- 설정 값 하나(filterContext는 표가 아니라 get으로 읽는 값이다, 2026-11-16 kind 확인)
+    local function setting(ctx, key)
+      if ctx == nil then return nil end
+      local ok, v = pcall(function() return ctx:get(key) end)
+      if ok then return v end
+      return nil
+    end
+
     local function tokens_of(headers, ctx)
       local out = {}
       local auth = headers:get("authorization")
-      local scheme = ctx.tokenScheme or "Bearer"
+      local scheme = setting(ctx, "tokenScheme") or "Bearer"
       if auth ~= nil and string.lower(string.sub(auth, 1, #scheme + 1)) == string.lower(scheme) .. " " then
         out[#out + 1] = string.sub(auth, #scheme + 2)
       end
-      local c = cookie_value(headers:get("cookie"), ctx.tokenCookie)
+      local c = cookie_value(headers:get("cookie"), setting(ctx, "tokenCookie"))
       if c ~= nil and c ~= "" then out[#out + 1] = c end
       return out
+    end
+
+    local NOT_FOUND = '{"type":"about:blank","title":"Not Found","status":404}'
+
+    -- 쿼리를 뗀 경로가 /internal이거나 /internal/로 시작하는가
+    local function is_internal(path)
+      if path == nil then return false end
+      local p = string.lower(string.match(path, "^[^?#]*") or path)
+      return p == "/internal" or string.sub(p, 1, 10) == "/internal/"
     end
 
     local function reject(handle)
@@ -198,9 +217,12 @@ data:
     end
 
     function envoy_on_request(handle)
-      local ctx = handle:filterContext() or {}
+      local ctx = handle:filterContext()
       local headers = handle:headers()
-      if not (ctx.originVerify == true and origin_ok(headers:get(ORIGIN_VERIFY))) then strip_edge(headers) end
+      if is_internal(headers:get(":path")) then
+        return handle:respond({ [":status"] = "404", ["content-type"] = "application/problem+json" }, NOT_FOUND)
+      end
+      if not (setting(ctx, "originVerify") == true and origin_ok(headers:get(ORIGIN_VERIFY))) then strip_edge(headers) end
       headers:remove(ORIGIN_VERIFY)
       if headers:get("x-user-id") == nil then return end
       local tokens = tokens_of(headers, ctx)

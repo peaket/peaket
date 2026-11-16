@@ -44,6 +44,22 @@ v0 배포(K6·K9의 비교 기준, docs/infra.md §3 'v0 배포')를 네임스�
 `v1`은 증명 핵심 측정의 무대(docs/verification.md §3.8 '합본의 v1 무대')를 네임스페이스 `v1`에 올리고, `v1-down`은 그 네임스페이스와 kind 노드 폴더를 지웁니다(클러스터는 그대로). 전제: 대기 상태 파일 앞 캐시의 고정 판 nginx(`nginxinc/nginx-unprivileged:1.29.3-alpine@sha256:5aea7cc5…`, `v1-objects.mjs`의 `V1_NGINX_IMAGE`)가 이 PC의 Docker에 미리 받아져 있어야 합니다(`docker pull <그 판>`. `v1`은 이미지를 받지 않고, 태그의 이미지 ID가 고정 다이제스트와 같고 Docker 엔진 아키텍처의 매니페스트가 있는지 본 뒤 그 플랫폼 하나만 싣습니다). 같은 클러스터에 다시 올리면 합본·릴레이를 먼저 0개로 줄이고 전용 PostgreSQL·Valkey·시험 키를 새로 만듭니다. 확인: `node --test --test-concurrency=1 loadtest/e2e/v1-rehearsal.e2e.mjs`(무대를 `--replicas 2`로 올린 뒤).
 
 ```bash
+PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways
+PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways-forward   # 다른 창에서, 시험 동안 켜 둔다
+PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateways.e2e.mjs
+node --test tools/local/e2e/queue-cors.e2e.mjs   # 먼저 tools/web-checks에서 pnpm install --frozen-lockfile(Playwright 브라우저 셋)
+```
+
+게이트웨이 다섯(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현')을 올리고 kind·브라우저 시험을 돌립니다. 접속 정보는 `.cache/peaket-tools/gateways-e2e.json`(개인키가 들어 있어 이 PC에만)입니다.
+
+**Windows에서 하나씩 돌리는 법**: Windows의 kubectl 포트 전달은 동시 연결이 몰리면 끊깁니다(2026-11-16 실측). 끊기면 그 뒤 시험이 모두 ECONNREFUSED가 됩니다. 시험은 끊김을 감추지 않고 실패하므로, 이때는 시험마다 포트 전달을 새로 띄우고 이름으로 하나씩 돌립니다.
+
+```bash
+PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways-forward &   # 띄운 PID만 끝에 끈다(kubectl을 모두 끄는 taskkill /IM은 쓰지 않는다)
+PEAKET_CLUSTER=peaket-gw node --test --test-timeout=300000 --test-name-pattern="^V-T31 ①" tools/local/e2e/gateways.e2e.mjs
+```
+
+```bash
 node tools/local/cluster.mjs down
 ```
 
@@ -58,7 +74,7 @@ node --test "tools/local/*.test.mjs"
 | 파일 | 하는 일 |
 | --- | --- |
 | `tools.mjs` | kind·kubectl·helm을 공식 주소에서 받아 표의 SHA-256과 견주고, 맞을 때만 `.cache/peaket-tools`(커밋하지 않음)에 둡니다. 압축으로 받는 helm은 푼 실행 파일의 해시도 표에 있습니다. 받아 둔 것도 쓸 때마다 표의 해시와 다시 견줍니다 |
-| `cluster.mjs` | `up [--v0-only]`·`image`·`observability`·`grafana`·`prometheus`·`v0`·`v0-forward`·`v1`·`v1-down`·`gateways`·`gateways-forward`·`status`·`down`. 클러스터 이름은 환경 값 `PEAKET_CLUSTER`(기본 `peaket`, kubeconfig는 `.cache/peaket-tools/kubeconfig-<이름>`)로 바꾼다(여러 작업 폴더가 한 PC에서 따로 띄울 때). `gateways`는 게이트웨이 다섯의 바탕이다(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400): 클러스터가 없으면 만들고, Envoy Gateway 설치 파일(해시 고정, Lua 확장 켬)을 올리고, 이 PC에서 새로 만든 리스너 인증서(자체 서명 하나)·원본 확인 값 Secret·시험 키 넷(fan·admin·staff·admission)을 두고, 대역 백엔드 `gateway-echo`(`gateway-echo.mjs`: 받은 요청을 JSON으로 돌려주고 시험 공개키 묶음을 낸다)와 `deploy/gateways`의 로컬 덧씌우기(`gateway-objects.mjs`: 백엔드는 대역으로, 프록시 Service는 ClusterIP, ReferenceGrant 뺌, 호스트·출처는 그대로)를 올려 다섯이 Programmed가 될 때까지 기다린다. 끝에 컨트롤러가 받지 않은 정의(조건이 참이 아닌 것)를 적고 시험 접속 정보 `.cache/peaket-tools/gateways-e2e.json`(개인키 포함, 이 PC에만)을 쓴다. `gateways-forward`는 다섯을 127.0.0.1:18441~18445(`PEAKET_GATEWAY_BASE_PORT`로 바꿈, `gateways` 전에 정한다)로 잇고 끝날 때까지 돈다. 시험은 `tools/local/e2e/gateways.e2e.mjs`·`queue-cors.e2e.mjs`다. `v1`은 증명 핵심 측정의 무대(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215)다: 합본 이미지(`services/bundle/Dockerfile`)·시뮬레이터를 싣고, 네임스페이스 `v1`에 대기열·좌석 Valkey(TLS 켬이 기본)·전용 PostgreSQL(연결 한도 600, DB `v1_purchase`·`v1_payment`, 새로 만듦)·시험 키 Secret(이 PC에서 새로 만듦)·무대 공개 값 ConfigMap `v1-stage-public`·마이그레이션 잡·Kafka 토픽·합본(복제 3)과 릴레이 둘·대기 상태 파일 앞 nginx 캐시를 올린다. 객체는 `v1-objects.mjs`, 키와 서비스별 환경 파일은 `v1-stage.mjs`가 만든다(시험 `v1-stage.test.mjs`). Strimzi 설치 파일은 받아 해시를 본 뒤 네임스페이스·운영자 메모리(512Mi)·운영자 이미지 다이제스트(운영자와 엔티티 운영자·초기화 컨테이너)를 고쳐 올립니다. 설치 파일의 이미지 표 가운데 쓰지 않는 것(Kafka Connect 빌드·브리지 등)은 태그로 남고, 쓰는 Kafka 이미지는 `deploy/local/kafka.yaml`에서 다이제스트로 고정합니다 |
+| `cluster.mjs` | `up [--v0-only]`·`image`·`observability`·`grafana`·`prometheus`·`v0`·`v0-forward`·`v1`·`v1-down`·`gateways`·`gateways-forward`·`status`·`down`. 클러스터 이름은 환경 값 `PEAKET_CLUSTER`(기본 `peaket`, kubeconfig는 `.cache/peaket-tools/kubeconfig-<이름>`)로 바꾼다(여러 작업 폴더가 한 PC에서 따로 띄울 때). `gateways`는 게이트웨이 다섯의 바탕이다(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400): 클러스터가 없으면 만들고, Envoy Gateway 설치 파일(해시 고정, Lua 확장 켬)을 올리고, 이 PC에서 새로 만든 리스너 인증서(자체 서명 하나)·원본 확인 값 Secret·시험 키 넷(fan·admin·staff·admission)을 두고, 대역 백엔드 `gateway-echo`(`gateway-echo.mjs`: 받은 요청을 JSON으로 돌려주고 시험 공개키 묶음을 낸다)와 `deploy/gateways`의 로컬 덧씌우기(`gateway-objects.mjs`: 백엔드는 대역으로, 프록시 Service는 ClusterIP, ReferenceGrant 뺌, 호스트·출처는 그대로)를 올려 다섯이 Programmed가 될 때까지 기다린다. 끝에 컨트롤러가 받지 않은 정의(조건이 참이 아닌 것)를 적고 시험 접속 정보 `.cache/peaket-tools/gateways-e2e.json`(개인키 포함, 이 PC에만)을 쓴다. `gateways-forward`는 다섯을 127.0.0.1:18441~18445(`PEAKET_GATEWAY_BASE_PORT`로 바꿈, `gateways` 전에 정한다)로 잇고 끝날 때까지 돈다. 포트 전달 하나가 끊기면 그 하나만 1초 뒤 다시 띄운다(끊긴 순간의 요청은 실패한다). 시험은 `tools/local/e2e/gateways.e2e.mjs`·`queue-cors.e2e.mjs`다. `v1`은 증명 핵심 측정의 무대(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215)다: 합본 이미지(`services/bundle/Dockerfile`)·시뮬레이터를 싣고, 네임스페이스 `v1`에 대기열·좌석 Valkey(TLS 켬이 기본)·전용 PostgreSQL(연결 한도 600, DB `v1_purchase`·`v1_payment`, 새로 만듦)·시험 키 Secret(이 PC에서 새로 만듦)·무대 공개 값 ConfigMap `v1-stage-public`·마이그레이션 잡·Kafka 토픽·합본(복제 3)과 릴레이 둘·대기 상태 파일 앞 nginx 캐시를 올린다. 객체는 `v1-objects.mjs`, 키와 서비스별 환경 파일은 `v1-stage.mjs`가 만든다(시험 `v1-stage.test.mjs`). Strimzi 설치 파일은 받아 해시를 본 뒤 네임스페이스·운영자 메모리(512Mi)·운영자 이미지 다이제스트(운영자와 엔티티 운영자·초기화 컨테이너)를 고쳐 올립니다. 설치 파일의 이미지 표 가운데 쓰지 않는 것(Kafka Connect 빌드·브리지 등)은 태그로 남고, 쓰는 Kafka 이미지는 `deploy/local/kafka.yaml`에서 다이제스트로 고정합니다 |
 | `chart.test.mjs` | 공용 차트(`deploy/charts/peaket-service`) 렌더 시험 |
 | `dashboards.mjs` | 서비스마다 템플릿 대시보드 JSON을 만든다(첫 행 네 신호). `--check`는 커밋된 파일과 견준다 |
 | `observability.test.mjs` | 대시보드 생성기, Prometheus·Grafana 매니페스트(다이제스트·권한·익명 보기·클러스터 안 주소), 차트의 수집 주석 시험 |

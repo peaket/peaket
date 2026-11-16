@@ -806,16 +806,37 @@ async function gatewayService(gw) {
   return names[0];
 }
 
+/**
+ * 게이트웨이 다섯을 이 PC 포트로 잇는다. kubectl 포트 전달 하나가 끊기면(Windows에서 브라우저가 연결을 거칠게 닫을 때 'lost connection to pod',
+ * 2026-11-16 실측) 그 하나만 1초 뒤 다시 띄우고 표준 오류에 적는다. 끊긴 동안의 요청은 실패한다(시험이 끊김을 그대로 본다)
+ */
 async function gatewaysForward() {
   if (!existsSync(GATEWAYS_CONTRACT_FILE)) throw new Error(`접속 정보가 없다: ${GATEWAYS_CONTRACT_FILE}. 먼저 node tools/local/cluster.mjs gateways`);
   const { ports } = JSON.parse(readFileSync(GATEWAYS_CONTRACT_FILE, 'utf8'));
   const k = await ensureTool('kubectl');
-  const children = [];
-  for (const gw of GATEWAY_NAMES) children.push(spawn(k, ['--kubeconfig', KUBECONFIG, ...gatewayForwardArgs(await gatewayService(gw), ports[gw])], { stdio: 'inherit' }));
+  const services = Object.fromEntries(await Promise.all(GATEWAY_NAMES.map(async (gw) => [gw, await gatewayService(gw)])));
+  const children = new Set();
+  let stopping = false;
+  const start = (gw) => {
+    const child = spawn(k, ['--kubeconfig', KUBECONFIG, ...gatewayForwardArgs(services[gw], ports[gw])], { stdio: 'inherit' });
+    children.add(child);
+    child.on('exit', (code) => {
+      children.delete(child);
+      if (stopping) return;
+      console.error(`${gw} 포트 전달이 끝났다(종료 ${code}). 1초 뒤 다시 띄운다`);
+      setTimeout(() => start(gw), 1000);
+    });
+  };
+  for (const gw of GATEWAY_NAMES) start(gw);
+  const stop = () => {
+    stopping = true;
+    for (const c of children) c.kill();
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
   console.log(`게이트웨이 다섯을 127.0.0.1:${GATEWAY_NAMES.map((g) => ports[g]).join(',')}로 연다(끝내려면 Ctrl+C)`);
-  await Promise.race(children.map((c) => new Promise((r) => c.on('exit', r))));
-  for (const c of children) c.kill();
-  throw new Error('포트 전달 하나가 끝났다(다시 돌린다)');
+  await new Promise(() => {});
 }
 
 async function down() {

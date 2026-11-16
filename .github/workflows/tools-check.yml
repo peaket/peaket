@@ -27,6 +27,8 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 게이트웨이 다섯의 정의 정적 시험(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400)
+      - run: node --test "deploy/gateways/test/*.test.mjs"
       # 엣지 저장소 맞추기 도구(ADR-0223 결정 10)
       - run: node --test "tools/edge/*.test.mjs"
       # 결제사 스모크 도구(BUILD_ORDER HOT-145. 실제 결제사를 부르지 않는다)
