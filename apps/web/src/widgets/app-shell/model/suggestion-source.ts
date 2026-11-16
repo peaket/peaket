@@ -3,7 +3,7 @@
 // - peek: 모듈이 오기 전에는 답을 정하지 않는다(undefined → ds가 load로 넘긴다). 모듈이 온 뒤에는 요청 최소 길이 미만이면 null(창 없음),
 //   받은 후보 안에서 거를 수 있으면 그 후보(요청 없음), 아니면 undefined.
 // - load: 모듈을 받은 뒤 지금 규칙대로 답한다. 모듈을 못 받으면 null(창 없음)이고 던지지 않는다(catalog-review 16.5.2와 같은 결).
-// - selected: 셸이 가려는 주소가 마지막으로 보인 후보면 자동완성 선택 사건(종류, 보인 목록의 1부터 위치)을 센다.
+// - selected: 셸이 가려는 주소가 마지막으로 보인 후보면 자동완성 선택 사건(종류, 보인 목록의 1부터 위치)을 세고 바로 보낸다.
 // 이 파일은 순수 함수만 둔다(node --test가 바로 불러 본다). 화면 조각(포스터 그림)은 부르는 쪽이 thumbnail로 넘긴다.
 import type { SuggestResultItemsItem } from '@peaket/api-client/model';
 import type { WebSearchSuggestion } from '@peaket/ds/WebShell';
@@ -102,7 +102,11 @@ export function createSuggestionSource(o: {
       if (i < 0) return;
       const s = shown[i]!;
       shown = [];
-      o.quality?.((qy) => qy.suggestSelected(QUALITY_KIND[s.kind], i + 1));
+      // 고르면 곧 화면을 옮기므로 모은 수를 바로 보낸다(떠날 때 보내기가 이동에 묻히지 않게, ADR-0271 결정 16·20)
+      o.quality?.((qy) => {
+        qy.suggestSelected(QUALITY_KIND[s.kind], i + 1);
+        void qy.flush();
+      });
     },
   };
 }

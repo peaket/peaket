@@ -11,7 +11,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SEARCH_QUERY_SYNC_EVENT } from '@peaket/ds/WebShell';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
-import { normalizeInput } from '@/widgets/app-shell/model/autocomplete';
+// 정규화만 쓴다. 자동완성 모듈(후보 바꾸기)을 이 화면 덩어리에 끌어들이지 않게 패키지의 거르기 경로에서 바로 가져온다(첫 JS, docs/frontend.md §5.8)
+import { normalizeInput } from '@peaket/search-normalize/refine';
 import { searchQuality } from '@/widgets/app-shell/model/search-quality-client';
 import { hasFilters, josa, NO_FILTERS, pageNumbers, readQuery, searchUrl, toApiParams, toResultView, type CardStatus, type ResultCard, type ResultView, type SearchQuery } from '../model/search';
 import { FilterChips, FilterPanel } from './Filters';
