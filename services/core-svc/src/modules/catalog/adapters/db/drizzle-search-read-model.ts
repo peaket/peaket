@@ -3,11 +3,14 @@
 //   빠진 공연과 없어진 이름 줄은 지우고 search_removal에 적는다. 바뀐 것이 있을 때만 search_version을 한 번 1 올리고(UPDATE … RETURNING) 바뀐 줄에 그 판을 적는다.
 //   관심도(interest)는 새로 넣을 때만 원천 값이고, 그 뒤에는 1시간 정리(recountInterest)가 센다(찜 쓰기마다 판을 올리지 않는다).
 //   이름 줄의 정규화·낱자·초성은 앱이 @peaket/search-normalize로 계산한다(termRowsOf, SQL로 다시 짜지 않는다).
-// - syncTimed·recountInterest·purgeRemovals: 정리 주기(쓰기 연결, 운영은 core_ops). 여러 파드가 함께 돌면 권고 잠금으로 하나만 한다.
+// - syncTimed·recountInterest·purgeRemovals: 정리 주기(쓰기 연결, 운영은 core_ops). 저마다 자기 트랜잭션 첫 문장에서 같은 열쇠의 트랜잭션 권고 잠금을 잡고(pg_try_advisory_xact_lock),
+//   못 잡으면 그 차례를 건너뛴다. reconcileAll(시작 따라잡기)은 끊음 트랜잭션마다 같은 잠금과 search_version의 임대로 한 파드만 돌게 한다.
+//   세션 잠금은 쓰지 않는다(PgBouncer 트랜잭션 풀링에서는 트랜잭션마다 연결이 바뀐다, ADR-0083 결정 4·ADR-0271 결정 12 '잠금과 임대').
 // - read·version: 사전 원천(운영은 읽기 전용 복제본 연결). 한 읽기 전용 REPEATABLE READ 트랜잭션에서 판을 먼저 읽는다.
 import type { Database, DbTransaction } from '@peaket/platform';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { termRowsOf, type DictionarySnapshot, type SearchDictionarySource, type SearchReadModelSync, type SearchTermRow } from '../../domain/search.js';
 import { documentOfRow, rowsOf, termOfRow, type DocumentRow, type TermRow } from './search-rows.js';
 
@@ -18,8 +21,36 @@ export const SEARCH_REMOVAL_KEEP_MS = 86_400_000;
 export const RECONCILE_CHUNK = 500;
 /** 이름 줄을 한 문장에 넣는 줄 수(줄마다 매개변수 10개, PostgreSQL 매개변수 상한 65,535 안) */
 const TERM_BATCH = 500;
-/** 정리 작업 권고 잠금 키(여러 파드 중 하나만 돈다) */
+/** 정리 작업·따라잡기 끊음의 트랜잭션 권고 잠금 열쇠(여러 파드 중 하나만 돈다, ADR-0271 결정 12 '잠금과 임대') */
 const TIDY_LOCK = 2_710_165;
+/** 따라잡기 임대 길이(ADR-0271 결정 12, 60초 [가정]). 끊음마다 연장한다 */
+export const RECONCILE_LEASE_MS = 60_000;
+/** 따라잡기 끊음이 잠금을 기다리는 상한(SET LOCAL lock_timeout, 2초 [가정]) */
+export const RECONCILE_LOCK_TIMEOUT_MS = 2_000;
+/** 따라잡기 임대 주인 이름의 기본값: 호스트 이름 + 새 UUID(어댑터를 만들 때마다 새로 짓는다. 파드마다 겹치지 않는다) */
+export const reconcileOwnerName = (): string => `${hostname()}-${randomUUID()}`;
+
+interface LeaseRow {
+  reconcile_owner: string | null;
+  reconcile_cursor: string | null;
+  reconcile_started_at: string | Date | null;
+  expired: boolean;
+}
+
+/** 같은 열쇠의 트랜잭션 권고 잠금을 기다리지 않고 잡는다(못 잡으면 false). 트랜잭션이 끝나면 저절로 풀린다(PgBouncer 트랜잭션 풀링과 맞는다) */
+async function tryTidyLock(tx: Pick<DbTransaction, 'execute'>): Promise<boolean> {
+  const [lock] = rowsOf<{ ok: boolean }>(await tx.execute(sql`select pg_try_advisory_xact_lock(${TIDY_LOCK}) as ok`));
+  return lock?.ok === true;
+}
+
+/** 드라이버 오류의 SQLSTATE(Drizzle은 cause에 싸서 줄 수 있다) */
+function codeOf(e: unknown): string | undefined {
+  for (let cur: unknown = e, depth = 0; cur && depth < 5; cur = (cur as { cause?: unknown }).cause, depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return undefined;
+}
 /** 표와 원천을 견주는 칸(관심도·판 제외). 고정 글이다(sql.raw에는 값을 넣지 않는다) */
 const COLS = sql.raw('representative_event_id, title, genre, place_id, place_name, artist_ids, artists, aliases, period_start, period_end, next_open_at, next_open_event_id, sale_status, sale_ends_at, min_price, poster_image_id, poster_alt');
 const S_COLS = sql.raw('s.representative_event_id, s.title, s.genre, s.place_id, s.place_name, s.artist_ids, s.artists, s.aliases, s.period_start, s.period_end, s.next_open_at, s.next_open_event_id, s.sale_status, s.sale_ends_at, s.min_price, s.poster_image_id, s.poster_alt');
@@ -41,6 +72,9 @@ const uuidArray = (ids: readonly string[]) => {
 };
 
 export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictionarySource {
+  /** 따라잡기 임대의 주인 이름(이 어댑터가 쥐는 임대를 다음 부름에서 이어 간다) */
+  readonly #owner = reconcileOwnerName();
+
   /** origin: 사전 문서의 포스터 주소 출처(IMAGE_ORIGIN). 없으면 포스터 주소를 싣지 않는다 */
   constructor(
     readonly db: Database,
@@ -130,8 +164,7 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
   async syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number }> {
     if (!(at.getTime() > since.getTime())) return { version: null, productions: 0 };
     return this.db.transaction(async (tx) => {
-      const [lock] = rowsOf<{ ok: boolean }>(await tx.execute(sql`select pg_try_advisory_xact_lock(${TIDY_LOCK}) as ok`));
-      if (!lock?.ok) return { version: null, productions: 0 };
+      if (!(await tryTidyLock(tx))) return { version: null, productions: 0 };
       const s = since.toISOString();
       const a = at.toISOString();
       // 오픈 시각·판매 종료(공연 시작 − 24시간)·공연 시작(대표 회차의 '가장 최근 공연') 시각이 (since, at]에 든 회차의 공연
@@ -150,6 +183,8 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
 
   async recountInterest(at: Date): Promise<number> {
     return this.db.transaction(async (tx) => {
+      // 같은 열쇠의 트랜잭션 권고 잠금. 따라잡기 끊음·1분 정리·다른 파드의 다시 세기가 쥐고 있으면 이 차례는 건너뛴다(R165-19, R165-9 ①)
+      if (!(await tryTidyLock(tx))) return 0;
       const r = (await tx.execute(sql`
         update search_document d set interest = s.interest
         from search_document_source_at(${at.toISOString()}::timestamptz) s
@@ -159,56 +194,94 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
   }
 
   /**
-   * 시작 따라잡기(ADR-0271 결정 12와 보탬, 리뷰 R165-1·R165-14): 따라잡기 전용 연결 하나에서 세션 권고 잠금(1분 정리와 같은 열쇠)을 잡고,
-   * 원천에 있는 공연과 표에 있는 공연을 합친 모든 공연을 chunkSize(기본 500 [가정])개씩 끊어 끊음마다 트랜잭션 하나로 동기화하고 커밋한다.
-   * 그래서 그동안 판매 승인·포스터 동기화는 따라잡기 끝을 기다리지 않는다. 원천과 표가 같은 끊음은 판·지운 표시를 건드리지 않는다.
-   * 첫 끊음에서 search_version.reconciled_at을 비우고, 끝까지 마치면 마지막 끊음에서 시작 시각(at)을 적는다(도중에 죽으면 빈 채로 남아 다른 파드가 다시 한다).
-   * 잠금을 못 잡으면 건너뛴다(ran: false)
+   * 시작 따라잡기(ADR-0271 결정 12 '잠금과 임대', 리뷰 R165-1·R165-14·R165-19). PgBouncer 트랜잭션 풀링에서도 맞게, 끊음 하나가 트랜잭션 하나이고
+   * 그 트랜잭션 첫 문장들에서 같은 열쇠의 트랜잭션 권고 잠금을 잡는다(세션 잠금은 쓰지 않는다). 이어 가는 끊음은 lock_timeout(2초 [가정]) 안에서 기다리고,
+   * 이번 부름의 첫 끊음은 기다리지 않고 시도만 한다(지금 다른 파드가 끊음·정리를 하고 있으면 건너뛴다. 함께 뜬 두 파드가 차례로 둘 다 시작하지 않게).
+   * 잠금 뒤 search_version의 임대를 본다: 주인이 없거나 내가 주인이거나 만료(DB now() 기준)됐을 때만 주인을 나로·만료를 now() + leaseMs로 적고 그 끊음을 한다.
+   * 아니면 멈추고 ran: false. 끊음은 원천과 표를 합친 공연 ID 차례이고 커서(끊음의 마지막 공연 ID)를 같은 트랜잭션에 적는다. 만료된 임대를 넘겨받으면 커서 뒤부터 잇는다.
+   * 새로 시작할 때 reconciled_at을 비우고 시작 시각(reconcile_started_at)을 적는다. 마지막 끊음이 reconciled_at에 그 시작 시각을 적고 임대 칸 넷을 비운다.
+   * 원천과 표가 같은 끊음은 판·지운 표시를 건드리지 않는다
    */
-  // owner·leaseMs·resumedFrom은 리뷰 R165-19의 새 모양이다. BAT-165 시험 담당이 모양만 맞췄고(owner·leaseMs는 아직 쓰지 않고 resumedFrom은 늘 null) 구현 담당이 채운다
-  async reconcileAll(at: Date, o: { chunkSize?: number; owner?: string; leaseMs?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number; resumedFrom: string | null }> {
+  async reconcileAll(
+    at: Date,
+    o: { chunkSize?: number; owner?: string; leaseMs?: number } = {},
+  ): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number; resumedFrom: string | null }> {
     const size = o.chunkSize ?? RECONCILE_CHUNK;
     if (!Number.isInteger(size) || size < 1) throw new RangeError(`chunkSize는 1 이상의 정수다: ${size}`);
-    const client = await this.db.pool.connect();
-    let broken: unknown;
-    let locked = false;
-    // 빌려 쓰는 동안 연결이 서버 쪽에서 끊기면(파드 종료·관리자 명령) 그 오류는 연결의 error 사건으로 온다. 받지 않으면 프로세스를 죽이므로 받아 두고, 다음 질의가 실패하게 둔다
-    const onError = (e: unknown) => {
-      broken ??= e;
-    };
-    client.on('error', onError);
-    try {
-      const lock = await client.query<{ ok: boolean }>('select pg_try_advisory_lock($1) as ok', [TIDY_LOCK]);
-      if (!lock.rows[0]?.ok) return { ran: false, productions: 0, version: null, chunks: 0, resumedFrom: null };
-      locked = true;
-      const atIso = at.toISOString();
-      const ids = (
-        await client.query<{ production_id: string }>(
-          'select production_id from search_document_source_at($1::timestamptz) union select production_id from search_document order by production_id',
-          [atIso],
-        )
-      ).rows.map((r) => r.production_id);
-      const own = drizzle({ client });
-      const chunks = Math.max(1, Math.ceil(ids.length / size));
-      let version: number | null = null;
-      for (let c = 0; c < chunks; c++) {
-        const part = ids.slice(c * size, (c + 1) * size);
-        version = await own.transaction(async (tx) => {
-          if (c === 0 && chunks > 1) await tx.execute(sql`update search_version set reconciled_at = null where id = 1`);
-          const r = await this.#apply(tx, part, at);
-          if (c === chunks - 1) await tx.execute(sql`update search_version set reconciled_at = ${atIso}::timestamptz where id = 1`);
-          return r.version;
+    const leaseMs = o.leaseMs ?? RECONCILE_LEASE_MS;
+    if (!Number.isInteger(leaseMs) || leaseMs < 1) throw new RangeError(`leaseMs는 1 이상의 정수(ms)다: ${leaseMs}`);
+    const owner = o.owner ?? this.#owner;
+    const atIso = at.toISOString();
+    let productions = 0;
+    let chunks = 0;
+    let version: number | null = null;
+    let resumedFrom: string | null = null;
+    for (let first = true; ; first = false) {
+      let step: 'stop' | 'more' | 'done';
+      try {
+        step = await this.db.transaction(async (tx) => {
+          if (first) {
+            // 이번 부름의 첫 끊음: 다른 파드의 끊음·정리가 지금 쥐고 있으면 기다리지 않고 이번 차례를 건너뛴다(함께 뜬 파드 가운데 하나만 시작한다)
+            if (!(await tryTidyLock(tx))) return 'stop';
+          } else {
+            // 이어 가는 끊음: 끊음 사이에 끼어든 1분 정리 등이 끝나기를 잠깐(2초 [가정]) 기다린다
+            await tx.execute(sql`select set_config('lock_timeout', ${String(RECONCILE_LOCK_TIMEOUT_MS)}, true)`);
+            await tx.execute(sql`select pg_advisory_xact_lock(${TIDY_LOCK})`);
+          }
+          const [l] = rowsOf<LeaseRow>(
+            await tx.execute(sql`
+              select reconcile_owner, reconcile_cursor::text as reconcile_cursor, reconcile_started_at,
+                (reconcile_lease_until is null or reconcile_lease_until <= now()) as expired
+              from search_version where id = 1 for update`),
+          );
+          if (!l) throw new Error('search_version 줄이 없다');
+          const mine = l.reconcile_owner === owner;
+          if (l.reconcile_owner !== null && !mine && !l.expired) return 'stop';
+          let cursor: string | null;
+          if (l.reconcile_owner === null || l.reconcile_started_at === null) {
+            // 새로 시작한다
+            cursor = null;
+            await tx.execute(sql`update search_version set reconciled_at = null, reconcile_started_at = ${atIso}::timestamptz, reconcile_cursor = null where id = 1`);
+          } else {
+            cursor = l.reconcile_cursor;
+            // 다른 파드의 만료된 임대를 넘겨받았다(이번 호출에서 처음 잡을 때만 적는다)
+            if (!mine && first) resumedFrom = cursor;
+          }
+          const next = rowsOf<{ production_id: string }>(
+            await tx.execute(sql`
+              select production_id from (
+                select production_id from search_document_source_at(${atIso}::timestamptz)
+                union select production_id from search_document) u
+              where ${cursor === null ? sql`true` : sql`production_id > ${cursor}::uuid`}
+              order by production_id limit ${size + 1}`),
+          ).map((r) => r.production_id);
+          const part = next.slice(0, size);
+          const last = next.length <= size;
+          if (part.length > 0) {
+            version = (await this.#apply(tx, part, at)).version;
+            productions += part.length;
+            chunks += 1;
+          }
+          if (last) {
+            await tx.execute(sql`
+              update search_version set reconciled_at = reconcile_started_at,
+                reconcile_owner = null, reconcile_lease_until = null, reconcile_started_at = null, reconcile_cursor = null
+              where id = 1`);
+            return 'done';
+          }
+          await tx.execute(sql`
+            update search_version set reconcile_owner = ${owner}, reconcile_lease_until = now() + ${`${leaseMs} milliseconds`}::interval,
+              reconcile_cursor = ${part[part.length - 1]!}::uuid
+            where id = 1`);
+          return 'more';
         });
+      } catch (e) {
+        // 잠금을 2초 안에 못 잡았다(다른 끊음·정리가 길다). 이번 차례는 멈춘다. 임대가 내 것이면 다음 부름이나 만료 뒤 다른 파드가 잇는다
+        if (codeOf(e) === '55P03') step = 'stop';
+        else throw e;
       }
-      return { ran: true, productions: ids.length, version, chunks: ids.length === 0 ? 0 : chunks, resumedFrom: null };
-    } catch (e) {
-      broken = e;
-      throw e;
-    } finally {
-      if (locked && broken === undefined) await client.query('select pg_advisory_unlock($1)', [TIDY_LOCK]).catch(() => undefined);
-      client.off('error', onError);
-      // 연결이 끊겼거나 도중에 실패했으면 그 연결을 버린다(세션 잠금도 함께 풀린다)
-      client.release(broken === undefined ? undefined : true);
+      if (step === 'stop') return { ran: false, productions, version, chunks, resumedFrom };
+      if (step === 'done') return { ran: true, productions, version, chunks, resumedFrom };
     }
   }
 
@@ -221,8 +294,11 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
 
   async purgeRemovals(at: Date): Promise<number> {
     const before = new Date(at.getTime() - SEARCH_REMOVAL_KEEP_MS).toISOString();
-    const r = (await this.db.db.execute(sql`delete from search_removal where removed_at < ${before}::timestamptz`)) as unknown as { rowCount?: number | null };
-    return r.rowCount ?? 0;
+    return this.db.transaction(async (tx) => {
+      if (!(await tryTidyLock(tx))) return 0;
+      const r = (await tx.execute(sql`delete from search_removal where removed_at < ${before}::timestamptz`)) as unknown as { rowCount?: number | null };
+      return r.rowCount ?? 0;
+    });
   }
 
   async read(since: number | null): Promise<DictionarySnapshot> {

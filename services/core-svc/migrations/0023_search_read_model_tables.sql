@@ -5,7 +5,7 @@
 --    ④ 공연한 회차 가운데 가장 최근 것 → 그 밖은 시작이 가장 이른 것, 같으면 회차 ID가 작은 것)로 고친다(메모리 representativeEvent와 같다).
 -- 3. search_document는 표다. 같은 트랜잭션의 동기화(앱의 DrizzleSearchReadModel.sync)가 원천 함수로 다시 계산해 고치고,
 --    바뀐 줄의 판(updated_version)을 적는다. search_term·search_removal·search_version은 0009 그대로다.
--- 4. search_version에 따라잡기를 마친 시각 칸(reconciled_at)을 더한다.
+-- 4. search_version에 따라잡기를 마친 시각 칸(reconciled_at)과 따라잡기 임대 칸 넷을 더한다.
 -- 5. 판매 승인(core_ops)·포스터 게시(core_partner) 트랜잭션이 동기화를 부르므로 그 역할에 검색 표 쓰기 권한을 준다.
 --    원천 함수는 소유자 권한으로 돈다(파트너 연결의 행 보안·칸 권한과 상관없이 공개 공연만 계산한다).
 DO $$
@@ -148,6 +148,9 @@ CREATE INDEX "search_removal_removed_at_idx" ON "search_removal" USING btree ("r
 --> statement-breakpoint
 -- 마지막으로 끝까지 마친 시작 따라잡기의 시작 시각(ADR-0271 결정 12 보탬, docs/data.md search_version.reconciled_at). 따라잡기 첫 끊음에서 비우고 마지막 끊음에서 적는다
 ALTER TABLE "search_version" ADD COLUMN "reconciled_at" timestamp with time zone;
+--> statement-breakpoint
+-- 따라잡기 임대(ADR-0271 결정 12 '잠금과 임대', docs/data.md search_version): 주인·만료(DB now() 기준)·시작 시각·커서(마지막으로 마친 끊음의 마지막 공연 ID)
+ALTER TABLE "search_version" ADD COLUMN "reconcile_owner" text, ADD COLUMN "reconcile_lease_until" timestamp with time zone, ADD COLUMN "reconcile_started_at" timestamp with time zone, ADD COLUMN "reconcile_cursor" uuid;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON "search_document", "search_term" TO core_ops, core_partner;
 --> statement-breakpoint
