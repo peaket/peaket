@@ -84,6 +84,8 @@
 | catalog-review:v5.0.0-1.3.9 | 해당 없음 |  | — | memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
 | frontend:v5.0.0-3.5.4 | 다른 단계 |  | GAT-040 | 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다(ADR-0065 결정 1). 남은 몫은 같은 `www`에 둔 월렛 서비스 워커 범위다: 정본은 `/my/tickets/sw.js`·범위 `/my/tickets/`(docs/frontend.md §5.4)인데 BAT-350(R-554)은 `/serwist/sw.js`·`Service-Worker-Allowed: /my/tickets`(끝 `/` 없음)로 냈다. 범위·위치 PoC는 GAT-040(wbs 5.1.4) 몫이고, 관제 원격 위젯 출처는 OPS-350이다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
+| FE-T31 | 다른 단계 |  | BAT-171 | 재배치·글자 확대·글자 간격 시험의 첫 실제 실행(BAT-170 웨이브 끝 게이트, 2026-11-16)이 세 엔진에서 실패해(관제 도착 경로, 좌석맵 예외 상자, 320 폭 닿기, 가린 초점) HOT-381(묶음 BAT-171)로 넘겼다(메인 감독 결정). 이름을 단 시험은 있고 판정 함수 단위 시험은 통과한다. BAT-171이 실패를 고치면 이 줄을 지운다 |
+| frontend:v5.0.0-3.6.1 | 다른 단계 |  | BAT-171 | CSP 시험이 같은 출처 외부 스크립트 26건에서 `integrity` 없음으로 실패했다(BAT-170 웨이브 끝 게이트, 2026-11-16). HOT-391(묶음 BAT-171)로 넘겼고, 시험은 지우지 않고 까닭 `BAT-171`을 단 건너뛰기다(메인 감독 결정). BAT-171이 고치면 이 줄을 지운다 |
 
 ## 사람 확인
 
