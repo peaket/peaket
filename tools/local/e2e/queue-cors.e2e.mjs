@@ -29,7 +29,9 @@ before(async () => {
   c = loadContract();
   // Playwright는 tools/web-checks 작업 공간의 것을 쓴다(뿌리 작업 공간에 넣지 않는다)
   const req = createRequire(join(REPO, 'tools', 'web-checks', 'package.json'));
-  pw = await import(pathToFileURL(req.resolve('@playwright/test')).href);
+  // CJS 꾸러미라 ESM으로 읽으면 chromium·firefox·webkit이 default 아래에 있다(2026-11-16 kind 실패 확인에서 드러남)
+  const mod = await import(pathToFileURL(req.resolve('@playwright/test')).href);
+  pw = mod.default ?? mod;
   // 호스트 이름 → 게이트웨이 포트 전달
   const portOf = new Map(Object.entries(c.hosts).map(([key, host]) => [host, c.ports[GATEWAY_OF_HOST[key]]]));
   proxy = http.createServer((_q, s) => s.writeHead(405).end());
