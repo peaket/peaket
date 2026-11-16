@@ -834,7 +834,8 @@ export class SuggestionDictionary {
 export interface SearchReadModelSync {
   sync(tx: unknown, productionIds: readonly string[], at: Date): Promise<{ version: number; removed: string[] }>;
   /** 1분 정리: since 뒤 at까지 오픈·판매 종료 시각이 지난 회차의 공연을 다시 동기화한다. 고칠 것이 없었으면 version은 null */
-  syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number }>;
+  // skipped: 같은 열쇠의 잠금을 못 잡아 이 차례를 건너뛰었으면 true(그때 부르는 쪽은 시각 창을 옮기지 않는다, 리뷰 R165-23·ADR-0271 결정 12). BAT-165 시험 담당이 모양만 더했다
+  syncTimed(at: Date, since: Date): Promise<{ version: number | null; productions: number; skipped?: boolean }>;
   /** 1시간: 관심도(찜 수)를 다시 센다. 바뀐 공연 수 */
   recountInterest(at: Date): Promise<number>;
   /** 하루 지난 지운 표시를 지운다. 지운 줄 수 */

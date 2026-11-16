@@ -1245,3 +1245,56 @@ describe('R165-19 트랜잭션 잠금과 따라잡기 임대', () => {
     }
   });
 });
+
+// ---- 리뷰 R165-23(계획 '#### R165-19·22 다시 보기', ADR-0271 결정 12 '못 잡으면 건너뛰어 다음 주기에 한다'·'성공했을 때만 옮긴다') ----
+describe('R165-23 건너뛴 1분 정리는 시각 창을 잃지 않는다', () => {
+  test('HOT-270 관심도 다시 세기가 잠금을 쥔 동안 건너뛴 1분 정리는 창을 옮기지 않아, 그 사이 오픈 시각이 지난 공연이 다음 정리에서 판매 중이 된다(R165-23)', async () => {
+    const c = await startPostgres();
+    await migrateCore(c.url);
+    const d = createDatabase({ url: c.url, applicationName: 'core-svc-r165-23', max: 4 });
+    const staged = stagedDatabase(c.url, 'core-svc-r165-23-recount');
+    try {
+      const T = Date.parse('2026-12-10T00:00:00.000Z');
+      const p = randomUUID();
+      const l = randomUUID();
+      const id = randomUUID();
+      await d.db.insert(promoter).values({ id: p, legalName: '(주)창' });
+      await d.db.insert(place).values({ id: l, name: '창홀', address: '서울', region: '서울', createdBy: ACTOR });
+      await d.db.insert(production).values({ id, promoterId: p, placeId: l, title: '창 오픈공연', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(T - 10 * D) });
+      // 첫 정리 창 (T, T + 1분] 안에 오픈한다
+      await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: p, venueId: null, openAt: new Date(T + 30_000), startsAt: new Date(T + 20 * D), endsAt: new Date(T + 20 * D + 2 * H) });
+      const model = new DrizzleSearchReadModel(d, 'https://img.test');
+      const clock2 = movingClock(T);
+      const timers = new SearchReadModelTimers({ sync: model, clock: clock2 });
+      const status = async () => (await rows(d, 'select sale_status from search_document where production_id = $1', [id]))[0]?.sale_status;
+      try {
+        // 서버가 뜬다(따라잡기로 표가 찬다). 아직 오픈 전이다
+        await timers.start();
+        expect(await status()).toBe('UPCOMING');
+        // 같은 파드의 관심도 다시 세기가 같은 열쇠의 잠금을 쥔 채 멈춘다
+        const recount = new DrizzleSearchReadModel(staged.db, 'https://img.test').recountInterest(new Date(T + 60_000));
+        await within(staged.inChunk, 5_000, '관심도 다시 세기가 잠금 뒤에서 서지 않았다');
+        // 그동안 1분 정리: 잠금을 못 잡아 건너뛴다(바깥에서 보면 아직 오픈 전 그대로)
+        clock2.set(T + 60_000);
+        await timers.tidy();
+        expect(await status()).toBe('UPCOMING');
+        // 건너뜀을 돌려주는 모양(시험이 정함): 같은 순간 직접 부르면 skipped: true(단언은 끝에서 한다)
+        const direct = await model.syncTimed(new Date(T + 60_000), new Date(T));
+        staged.releaseInChunk();
+        await within(recount, 5_000, '관심도 다시 세기가 끝나지 않았다');
+        // 다음 정리: 건너뛴 창부터 다시 보므로 T + 30초의 오픈 경계를 잃지 않는다
+        clock2.set(T + 2 * 60_000);
+        await timers.tidy();
+        expect(await status()).toBe('ON_SALE');
+        expect(await driftOn(d, T + 2 * 60_000)).toBe(0);
+        expect(direct).toMatchObject({ version: null, productions: 0, skipped: true });
+      } finally {
+        timers.stop();
+      }
+    } finally {
+      await staged.close();
+      await d.close();
+      c.stop();
+    }
+  });
+});

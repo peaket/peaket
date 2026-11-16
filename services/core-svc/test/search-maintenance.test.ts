@@ -15,7 +15,7 @@ afterEach(() => timers?.stop());
 
 function fakeSync() {
   const calls: { kind: string; at: number; since?: number }[] = [];
-  const fail = { timed: false, purge: false, reconcile: false };
+  const fail = { timed: false, purge: false, reconcile: false, skip: false };
   // 따라잡기 결과(ran)와 마지막으로 끝난 따라잡기 시각(다른 파드가 마친 것까지 DB가 아는 값)
   const state = { ran: true, last: null as number | null };
   const sync: SearchReadModelSync = {
@@ -23,6 +23,8 @@ function fakeSync() {
     async syncTimed(at, since) {
       calls.push({ kind: 'timed', at: at.getTime(), since: since.getTime() });
       if (fail.timed) throw new Error('정리 실패');
+      // 잠금을 못 잡아 건너뜀(R165-23): 시험이 정한 모양 skipped: true
+      if (fail.skip) return { version: null, productions: 0, skipped: true };
       return { version: null, productions: 0 };
     },
     async recountInterest() {
@@ -142,5 +144,23 @@ describe('검색 읽기 모델 주기 일', () => {
       }
       timers.stop();
     }
+  });
+
+  test('HOT-270 1분 정리가 잠금을 못 잡아 건너뛰면 시각 창을 옮기지 않고 다음 주기에 같은 창을 다시 본다(R165-23)', async () => {
+    const clock = fakeClock({ now: T0 });
+    const f = fakeSync();
+    timers = new SearchReadModelTimers({ sync: f.sync, clock });
+    await timers.start();
+    // 건너뛴 정리: 창 (T0, T0 + STEP]
+    clock.advance(STEP);
+    f.fail.skip = true;
+    await timers.tidy();
+    // 다음 주기는 같은 시작점(T0)에서 다시 본다. 성공한 뒤에야 옮긴다
+    f.fail.skip = false;
+    clock.advance(STEP);
+    await timers.tidy();
+    clock.advance(STEP);
+    await timers.tidy();
+    expect(f.calls.filter((c) => c.kind === 'timed').map((c) => c.since)).toEqual([T0, T0, T0 + 2 * STEP]);
   });
 });
