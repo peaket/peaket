@@ -83,8 +83,8 @@
 | --- | --- | --- | --- |
 | CF4-01 HOT-390·HOT-400 serverExternalPackages는 정본의 redis 여섯, @peaket/platform, OTel SDK 여섯이다 | `apps/web/server/server-external.test.mjs`(CF2-02를 고친다. CF2-01의 '키 하나'는 그대로 둔다) | 그 배열의 값(정렬)이 열셋과 같다(겹침·빠짐 없음) | 실패(일곱) |
 | CF4-02 HOT-400 밖에 두는 OTel 패키지는 web의 직접 의존성이고 판 적기가 platform과 같다 | 같은 파일 | `serverExternalPackages`의 `@opentelemetry/` 이름마다 `apps/web/package.json` `dependencies`에 있고 값이 `packages/platform/package.json` `dependencies`의 값과 글자까지 같다. `@opentelemetry/` 이름이 하나도 없으면 실패한다(빈 통과 막기) | 실패(없음) |
-| CF4-03 HOT-400·BAS-220 운영 빌드의 텔레메트리 서버 덩어리는 OTel SDK를 묶지 않고 밖 모듈로 부른다 | `apps/web/test-int/*.build.test.mjs` | `.next/server` 아래에서 `startAppServerTelemetry`를 정의한 덩어리를 찾는다(없으면 실패). 그 덩어리 글자에 여섯 이름이 Turbopack 밖 모듈 부르기 꼴(`require("@opentelemetry/<이름>` 또는 `.y("@opentelemetry/<이름>`·`.x("@opentelemetry/<이름>`, 뒤에 `-<해시>`가 붙을 수 있다)로 나오고, 그 덩어리 크기가 100kB [가정] 미만이다(묶였을 때 606kB, 밖에 두면 18kB). 시험 담당이 다른 꼴을 고르면 이유를 '시험 결과'에 적는다 | 실패(SDK를 묶음) |
-| CF4-04 HOT-400 standalone에 밖에 둔 OTel 패키지가 실린다 | 같은 파일 | standalone `apps/web` 폴더에서 Node 해석(`createRequire`)으로 여섯을 모두 찾을 수 있다(`.next/node_modules/@opentelemetry/<이름>-<해시>` 연결이나 `node_modules` 어느 꼴이든). 하나라도 못 찾으면 실패 | 실패(없음) |
+| CF4-03 HOT-400·BAS-220 운영 빌드의 텔레메트리 서버 덩어리는 OTel SDK를 묶지 않고 밖 모듈로 부른다 | `apps/web/test-int/*.build.test.mjs` | `.next/server` 아래에서 `startAppServerTelemetry`를 정의한 덩어리를 Turbopack 내보내기 등록 꼴(`"startAppServerTelemetry",()=>…` 다시 내보내기 또는 `"startAppServerTelemetry",0,function(…)` 그 자리 정의)로 찾는다(없으면 실패). 이름 글자만으로 찾지 않는다. 부르기만 하는 instrumentation 덩어리(`{startAppServerTelemetry:s}=await …`)가 걸려 묶인 덩어리를 놓친 채 통과할 수 있어서다(시험 이의 2, 받음 2026-11-17). 그 덩어리 글자에 여섯 이름이 Turbopack 밖 모듈 부르기 꼴(`require("@opentelemetry/<이름>` 또는 `.y("@opentelemetry/<이름>`·`.x("@opentelemetry/<이름>`, 뒤에 `-<해시>`가 붙을 수 있다)로 나오고, 그 덩어리 크기가 100kB [가정] 미만이다(묶였을 때 606kB, 밖에 두면 18kB). 시험 담당이 다른 꼴을 고르면 이유를 '시험 결과'에 적는다 | 실패(SDK를 묶음) |
+| CF4-04 HOT-400 standalone에 밖에 둔 OTel 패키지가 실린다 | 같은 파일 | standalone `apps/web` 폴더(서버 덩어리 폴더)에서 Node 해석으로 여섯을 모두 찾을 수 있다(`.next/node_modules/@opentelemetry/<이름>-<해시>` 연결이나 `node_modules` 어느 꼴이든). 해석은 require 조건(`createRequire`)과 import 조건(ESM, `import.meta.resolve`) 둘 다 해 보고 어느 하나로 풀리면 된다(Turbopack 밖 모듈 `.y(…)`는 `import()`로 부르고, standalone에는 넷의 import 조건 파일만 실린다). 풀린 실제 경로가 standalone 폴더 안이고 그 패키지일 때만 센다(위로 올라가 개발 설치에 닿은 것은 세지 않는다). 하나라도 못 찾으면 실패(시험 이의 1, 받음 2026-11-17) | 실패(없음) |
 
 - **커밋하지 않는 재현과 되돌림(시험 담당이 '실패 확인'·'시험 결과'에 적는다)**:
   - R-1 첫 JS 측정: 운영 빌드 뒤 `tools/web-checks`에서 `pnpm run budgets --project js`(또는 위 1의 측정과 같은 방법). `108f029a`에서 `web /` 176.1·`web /my/tickets` 161.9로 실패, 구현 뒤 175.7·161.6 이하로 통과해야 한다(이 계획 담당이 본 값은 175.6·161.5). 최종 근거는 CI `web / budgets` 잡이다.
@@ -109,6 +109,14 @@
 - 덧붙여 확인한 것: `033bb26d` budgets 잡의 `pnpm run budgets` 단계는 `Running 29 tests using 1 worker` 뒤 `29 passed (3.2m)`이고, 그 안에서 `[js] › budgets/js.spec.mjs:21:5 › §5.8 첫 JS web /`(1번)와 `… web /my/tickets`(5번)가 `✓`로 실제로 돌았다. `108f029a`에서는 같은 1번·5번이 `✘`이고 `2 failed`·`27 passed (3.1m)`다.
 
 ## 시험 이의
+
+**계획 담당 판정(w8l1-cifix4-plan-71c0e94b, 2026-11-17)**: 아래 두 이의를 받고 5의 CF4-03·04 단언 칸을 시험이 고른 꼴대로 고쳤다. 셋째(impl 끝 시각)는 기록 담당 몫이라 판정하지 않는다.
+
+1. **CF4-04 해석 조건(받음)**: 구현 뒤 운영 빌드의 standalone을 다시 봤다. `@opentelemetry/core`·`resources`·`sdk-trace`의 `dist`에는 `.mjs`만 있고 `.cjs`가 없다(`api`·`sdk-node`는 둘 다 있다). 텔레메트리 서버 덩어리는 여섯을 `await t.y("@opentelemetry/<이름>-<해시>")`로, 곧 import 조건으로 부르므로 운영 서버가 실제로 쓰는 해석은 import 조건이다. 그래서 `createRequire`만 적은 계획 문장이 틀렸고, require·import 조건 가운데 하나로 풀리면 실린 것으로 보는 것이 맞다. standalone 안 경로만 세는 것도 받는다. standalone이 `apps/web/.next` 아래라 위로 올라가면 개발 설치에 닿아 아무 빌드에서나 통과하는 구멍을 막는다. 계획이 적은 '어느 꼴이든'은 연결 꼴(`.next/node_modules`·`node_modules`)을 가리킨 것이고 standalone 밖까지 넓힌 뜻은 아니었다.
+2. **CF4-03 덩어리 찾기(받음)**: 구현 뒤 덩어리에 `"startAppServerTelemetry",()=>n.Y]`(다시 내보내기 등록)가 있음을 봤다. 이름 글자만 찾으면 instrumentation 덩어리(구현 전에도 있는 1.4kB)가 먼저 걸려 크기 한도와 밖 모듈 꼴을 엉뚱한 덩어리에 대고 보게 된다. 등록 꼴로 찾는 것이 계획의 '정의한 덩어리'의 뜻과 같다. 밖 모듈 부르기 꼴과 크기 한도 100kB [가정]는 그대로다.
+- 대안은 두지 않는다. 정본(docs/frontend.md §5.18)은 바꿀 것이 없다('Next.js 추적이 standalone에 싣는다'는 해석 조건을 정하지 않는다).
+
+시험 담당이 적은 이의(원문):
 
 - (고치지 않음, 계획 담당 몫) 5의 CF4-04 단언 칸은 'Node 해석(`createRequire`)으로 여섯을 찾는다'고 적었지만, 구현 뒤 운영 빌드의 standalone에는 `core`·`exporter-trace-otlp-proto`·`resources`·`sdk-trace`의 import 조건 파일(`dist/index.mjs`)만 실리고 require 조건 파일(`dist/index.cjs`)은 실리지 않아 `createRequire`만으로는 넷이 풀리지 않는다(Turbopack 밖 모듈 `.y(…)`는 `import()`로 부른다). 시험은 require와 ESM(import 조건) 해석을 둘 다 해 보고 어느 하나라도 standalone 안이면 실린 것으로 센다(아래 '시험 결과' 2). 계획 문장을 'Node 해석(require 또는 import 조건)'으로 고칠지는 계획 담당·리뷰가 정한다.
 - (기록 담당 몫, 고치지 않음) 담당 표 impl 줄의 끝 시각 00:25는 실제 구현 커밋 시각(`148cd5e3`, 2026-11-17T00:21:32+09:00, 감독 확인 00:22)보다 3분 늦게 적혔다.
