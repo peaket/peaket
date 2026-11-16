@@ -690,6 +690,26 @@ test("RV-14 infra §4.1 '경로별 메서드 생성기' merged 이름표가 없�
   assert.equal(ms.filter((m) => m.method === 'OPTIONS').length, 3, 'OPTIONS 맞춤은 경로마다 하나(셋)다');
 });
 
+test('RV-14 VF-N12 merged 묶음 정규식은 Exact 경로(틀 없는 경로)의 점 같은 정규식 글자를 글자 그대로 맞춘다(/v1/files/a.json은 맞고 /v1/files/aXjson은 안 맞는다)', () => {
+  const openapi = openapiOf({
+    '/v1/files/a.json': { GET: { security: [] } },
+    '/v1/files/b+c.txt': { GET: { security: [] } },
+    '/v1/files/{fileId}.csv': { GET: { security: [] } },
+  });
+  const src = sourceRoute('gw-fan', 'gw-fan-files', [{ prefixes: ['/v1/files'], backend: 'core-svc' }], { auth: 'public' });
+  src.metadata.labels['peaket.io/match'] = 'merged';
+  const routes = apiRoutes(routesByGateway(generated(openapi, { 'gw-fan': [src] }).files)['gw-fan'], 'gw-fan');
+  const gets = allMatches(routes)
+    .map(({ m }) => m)
+    .filter((m) => m.method === 'GET');
+  assert.equal(gets.length, 1, `GET 맞춤이 하나가 아니다(${gets.length})`);
+  const get = gets[0];
+  for (const p of ['/v1/files/a.json', '/v1/files/b+c.txt', '/v1/files/x1.csv']) assert.ok(pathMatches(get, p), `묶은 맞춤이 ${p}를 맞추지 않는다`);
+  // 점·더하기를 정규식 뜻으로 읽으면 맞는 경로(버킷 밖 경로가 한도 맞춤에 들어온다)
+  for (const p of ['/v1/files/aXjson', '/v1/files/a.jsonx', '/v1/files/bbc.txt', '/v1/files/bc.txt', '/v1/files/b+cXtxt', '/v1/files/x1Xcsv', '/v1/files/x1/y.csv']) assert.ok(!pathMatches(get, p), `묶은 맞춤이 ${p}를 맞춘다(정규식 글자를 이스케이프하지 않았다)`);
+  assertMethodsExact(openapi, routesByGateway(generated(openapi, { 'gw-fan': [src] }).files)['gw-fan'], 'gw-fan');
+});
+
 test("HOT-410 infra §4.1 '생성기가 멈추는 경우' /internal/로 시작하는 경로를 맡으면 2로 끝난다", () => {
   const openapi = openapiOf({ '/v1/partner/events/{eventId}': 'PATCH', '/internal/jwks/admin.json': { methods: 'GET', servers: ['https://partner-api.peaket.example'] } });
   const sources = {

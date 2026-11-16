@@ -157,8 +157,10 @@ test('W7-CON-02 대역이 20초 뒤 답하는 GET /v1/orders/{orderId}/payment-s
   const hdr = (ms) => edge(c, nextIp(), { authorization: `Bearer ${accessToken(c, 'gw-fan', sub)}`, 'x-e2e-delay-ms': String(ms) });
   const t0 = Date.now();
   const slow = await send(c, 'api', { path, headers: hdr(20_000), timeoutMs: LONG_WAIT_MS });
-  assert.ok(Date.now() - t0 >= 19_000, `대역 지연 고르기(x-e2e-delay-ms)가 듣지 않는다(${Date.now() - t0}ms)`);
-  assert.equal(slow.status, 200, `20초: ${slow.status} ${slow.text.slice(0, 200)}`);
+  const took = Date.now() - t0;
+  // 상태를 먼저 본다: 504면 시간 상한 탓이고(실패 글이 바탕 탓으로 읽히지 않게, 검증 VF-D17), 200인데 19초 전에 끝났으면 대역 지연 고르기 탓이다
+  assert.equal(slow.status, 200, `20초 지연: 상태 ${slow.status}(${took}ms 만에 끝남, 27초 상한이 걸리지 않았다) ${slow.text.slice(0, 200)}`);
+  assert.ok(took >= 19_000, `대역 지연 고르기(x-e2e-delay-ms)가 듣지 않는다(상태 ${slow.status}, ${took}ms 만에 끝남)`);
   echoed(slow);
   const over = await send(c, 'api', { path, headers: hdr(28_000), timeoutMs: LONG_WAIT_MS });
   assert.equal(over.status, 504, `28초: ${over.status}(27초 상한이 걸리지 않았다)`);
