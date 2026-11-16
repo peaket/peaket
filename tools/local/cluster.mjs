@@ -10,26 +10,30 @@
 //   node tools/local/cluster.mjs v0-forward  v0 입구를 127.0.0.1:8443으로 연다(포트 전달)
 //   node tools/local/cluster.mjs v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]  v1 측정 무대(한 프로세스 합본·릴레이·Valkey 둘·전용 PostgreSQL·DB 마이그레이션·Kafka 토픽·nginx 캐시, docs/verification.md §3.8 '합본의 v1 무대')
 //   node tools/local/cluster.mjs v1-down   v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더. 클러스터는 그대로)
+//   node tools/local/cluster.mjs gateways  게이트웨이 다섯(Envoy Gateway 고정 판·deploy/gateways 로컬 덧씌우기·대역 백엔드·시험 키, docs/infra.md §4.1)과 시험 접속 정보 .cache/peaket-tools/gateways-e2e.json
+//   node tools/local/cluster.mjs gateways-forward  게이트웨이 다섯을 127.0.0.1의 접속 정보 포트로 연다(포트 전달, 끝날 때까지 돈다)
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
+// - 클러스터 이름은 PEAKET_CLUSTER(기본 peaket)다. 여러 작업 폴더가 한 PC에서 따로 띄울 때 바꾼다(kubeconfig 기본 이름도 따라 바뀐다)
 // - 도구(kind·kubectl·helm)는 tools.mjs가 고정 판으로 받는다. 사용자의 ~/.kube/config는 건드리지 않고 전용 kubeconfig를 쓴다
 // - 운영·CI 공급망은 다이제스트로 고정한다. 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드는 태그로 찾는다(BAT-028).
 //   관측(Prometheus·Grafana) 매니페스트는 한 플랫폼(amd64) 매니페스트 다이제스트까지 고정하고, 같은 태그 이미지를 미리 실어 IfNotPresent로 찾게 한다
 //   (여러 플랫폼 목록 다이제스트는 한 플랫폼만 실은 노드와 맞지 않아 Pulling에 머문다). 계정·인증 토큰이 필요한 것은 없다
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
-import { loadOrCreateV0TokenKey } from './v0-token.mjs';
+import { echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, gatewayCertArgs, gatewayContract, gatewayForwardArgs, gatewayInstall, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, readGatewayObjects } from './gateway-objects.mjs';
+import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-export const CLUSTER = 'peaket';
-export const KUBECONFIG = process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, 'kubeconfig-peaket');
+export const CLUSTER = process.env.PEAKET_CLUSTER || 'peaket';
+export const KUBECONFIG = process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${CLUSTER}`);
 export const IMAGE = 'peaket/example-svc:local';
 
 /** 고정 판(2026-11-01 확인). 바꾸면 tools/local/README.md의 판 표도 고친다 */
@@ -106,13 +110,7 @@ async function up(argv = []) {
   run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
   step('도구(kind·kubectl·helm, 고정 판)');
   for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
-  step(`kind 클러스터 ${CLUSTER}`);
-  const clusters = (await kind(['get', 'clusters'], { quiet: true })).split(/\s+/);
-  if (!clusters.includes(CLUSTER)) {
-    await kind(['create', 'cluster', '--config', join(REPO, 'deploy', 'local', 'kind.yaml'), '--kubeconfig', KUBECONFIG, '--wait', '180s']);
-  } else if (!existsSync(KUBECONFIG)) {
-    await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
-  }
+  await ensureCluster();
   await kubectl(['apply', '-f', '-'], { input: `${plan.v0Only ? '' : 'apiVersion: v1\nkind: Namespace\nmetadata: { name: kafka }\n---\n'}apiVersion: v1\nkind: Namespace\nmetadata: { name: peaket-local }\n` });
   await preloadLocalImages(plan.v0Only ? ['postgres:18-alpine'] : ['quay.io/strimzi/operator:0.47.0', 'quay.io/strimzi/kafka:0.47.0-kafka-3.9.1', 'postgres:18-alpine', 'motoserver/moto:5.2.5']);
   if (!plan.v0Only) {
@@ -129,6 +127,17 @@ async function up(argv = []) {
   }
   step('준비됨');
   console.log(`kubeconfig: ${KUBECONFIG}`);
+}
+
+/** kind 클러스터가 없으면 만들고, kubeconfig가 없으면 내보낸다 */
+async function ensureCluster() {
+  step(`kind 클러스터 ${CLUSTER}`);
+  const clusters = (await kind(['get', 'clusters'], { quiet: true })).split(/\s+/);
+  if (!clusters.includes(CLUSTER)) {
+    await kind(['create', 'cluster', '--config', join(REPO, 'deploy', 'local', 'kind.yaml'), '--name', CLUSTER, '--kubeconfig', KUBECONFIG, '--wait', '180s']);
+  } else if (!existsSync(KUBECONFIG)) {
+    await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
+  }
 }
 
 async function image() {
@@ -693,15 +702,131 @@ async function v1Down() {
   console.log(`v1 무대를 내렸다(네임스페이스 ${V1_NAMESPACE})`);
 }
 
+// --- 게이트웨이 다섯(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400, 묶음 BAT-055) ---
+
+/** 시험 접속 정보 파일(개인키가 들어 있어 이 PC에만 둔다) */
+export const GATEWAYS_CONTRACT_FILE = process.env.PEAKET_GATEWAYS_E2E || join(DEFAULT_ROOT, 'gateways-e2e.json');
+
+async function gatewayInstallFile() {
+  const file = join(DEFAULT_ROOT, `envoy-gateway-install-${PINNED.envoyGatewayVersion}.yaml`);
+  if (existsSync(file) && createHash('sha256').update(readFileSync(file)).digest('hex') === PINNED.envoyGatewayInstallSha256) return readFileSync(file, 'utf8');
+  const bytes = await httpsDownload(PINNED.envoyGatewayInstallUrl);
+  if (createHash('sha256').update(bytes).digest('hex') !== PINNED.envoyGatewayInstallSha256) throw new Error('Envoy Gateway 설치 파일 해시가 맞지 않는다');
+  mkdirSync(DEFAULT_ROOT, { recursive: true });
+  writeFileSync(file, bytes);
+  return bytes.toString('utf8');
+}
+
+/** 리스너 인증서 하나(자체 서명, 게이트웨이 호스트 전부). 키 파일은 임시 폴더에만 두고 바로 지운다 */
+function gatewayTls(hosts) {
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-gateways-tls-'));
+  try {
+    const keyFile = join(dir, 'tls.key');
+    const certFile = join(dir, 'tls.crt');
+    execFileSync('openssl', gatewayCertArgs(keyFile, certFile, hosts), { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, MSYS_NO_PATHCONV: '1' } });
+    return { cert: readFileSync(certFile, 'utf8'), key: readFileSync(keyFile, 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** 정책·라우트·게이트웨이의 조건 가운데 참이 아닌 것(Accepted·Programmed·ResolvedRefs 등). 컨트롤러가 정의를 받았는지 본다 */
+async function gatewayConditionProblems() {
+  const kinds = ['gateways.gateway.networking.k8s.io', 'httproutes.gateway.networking.k8s.io', 'securitypolicies.gateway.envoyproxy.io', 'clienttrafficpolicies.gateway.envoyproxy.io', 'backendtrafficpolicies.gateway.envoyproxy.io', 'envoyextensionpolicies.gateway.envoyproxy.io'];
+  const out = [];
+  for (const k of kinds) {
+    const items = JSON.parse(await kubectl(['-n', GATEWAY_NAMESPACE, 'get', k, '-o', 'json'], { quiet: true, maxBuffer: 64 * 1024 * 1024 })).items ?? [];
+    for (const o of items) {
+      const conds = [...(o.status?.conditions ?? []), ...(o.status?.parents ?? []).flatMap((p) => p.conditions ?? []), ...(o.status?.ancestors ?? []).flatMap((a) => a.conditions ?? [])];
+      for (const c of conds) if (c.status !== 'True') out.push(`${o.kind}/${o.metadata.name}: ${c.type}=${c.status} ${c.reason}: ${c.message}`);
+      if (conds.length === 0) out.push(`${o.kind}/${o.metadata.name}: 조건이 아직 없다`);
+    }
+  }
+  return out;
+}
+
+async function gateways() {
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl']) await ensureTool(t);
+  await ensureCluster();
+  await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, GATEWAY_ECHO_IMAGE]);
+  step(`Envoy Gateway ${PINNED.envoyGatewayVersion}(설치 파일 해시 고정, Lua 확장 켬)`);
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: gatewayInstall(await gatewayInstallFile()), maxBuffer: 64 * 1024 * 1024 });
+  // 설정 ConfigMap(Lua 확장)을 다시 읽게 한다
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', 'deploy/envoy-gateway']);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', 'deploy/envoy-gateway', '--timeout=300s']);
+
+  step('시험 키·원본 확인 값·인증서(이 PC에서 새로 만든다)');
+  const defs = readGatewayObjects(join(REPO, 'deploy', 'gateways'));
+  const certs = listenerCertificates(defs);
+  const hosts = hostsOf(defs);
+  const tls = gatewayTls([...new Set(certs.map((c) => c.host))]);
+  const keys = Object.fromEntries(['fan', 'admin', 'staff', 'admission'].map((k) => [k, generateV0TokenKey()]));
+  const originVerify = randomBytes(32).toString('base64url');
+  for (const o of gatewaySecrets(certs, tls, originVerify)) {
+    await kubectl(['-n', GATEWAY_NAMESPACE, 'delete', 'secret', o.metadata.name, '--ignore-not-found']);
+    await kubectl(['create', '-f', '-'], { input: JSON.stringify(o) });
+  }
+  step(`대역 백엔드 ${GATEWAY_ECHO.name}(받은 요청을 돌려주고 시험 공개키 묶음을 낸다)`);
+  const script = readFileSync(join(REPO, 'tools', 'local', 'gateway-echo.mjs'), 'utf8');
+  const jwks = Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.jwks]));
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: echoObjects({ script, jwks }) }) });
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', `deploy/${GATEWAY_ECHO.name}`]);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', `deploy/${GATEWAY_ECHO.name}`, '--timeout=300s']);
+
+  step('게이트웨이 정의(deploy/gateways + 로컬 덧씌우기: 백엔드·프록시 Service·이미지만 바꿈)');
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: localGatewayObjects(defs) }) });
+  for (const gw of GATEWAY_NAMES) await kubectl(['-n', GATEWAY_NAMESPACE, 'wait', `gateway/${gw}`, '--for=condition=Programmed', '--timeout=300s']);
+  // 원본 확인 값·공개키 묶음이 새로 생겼으므로 프록시를 다시 띄워 환경 값과 묶음을 새로 읽게 한다
+  const proxies = (await kubectl(['-n', GATEWAY_NAMESPACE, 'get', 'deploy', '-l', 'app.kubernetes.io/managed-by=envoy-gateway', '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
+  if (proxies.length) {
+    await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', ...proxies]);
+    for (const d of proxies) await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', d, '--timeout=300s']);
+  }
+
+  const basePort = Number(process.env.PEAKET_GATEWAY_BASE_PORT || GATEWAY_BASE_PORT);
+  const contract = gatewayContract({ basePort, hosts, originVerify, keys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.privateJwk])), caPem: tls.cert });
+  mkdirSync(dirname(GATEWAYS_CONTRACT_FILE), { recursive: true });
+  writeFileSync(GATEWAYS_CONTRACT_FILE, `${JSON.stringify(contract, null, 2)}\n`, { mode: 0o600 });
+
+  step('컨트롤러가 받지 않은 정의(조건이 참이 아닌 것)');
+  const problems = await gatewayConditionProblems();
+  console.log(problems.length ? problems.join('\n') : '없음');
+  step('준비됨');
+  console.log(`접속 정보: ${GATEWAYS_CONTRACT_FILE}`);
+  console.log('이 PC로 잇기: node tools/local/cluster.mjs gateways-forward');
+}
+
+/** 게이트웨이 프록시 Service 이름(Envoy Gateway가 만든다) */
+async function gatewayService(gw) {
+  const out = await kubectl(['-n', GATEWAY_NAMESPACE, 'get', 'svc', '-l', `gateway.envoyproxy.io/owning-gateway-name=${gw}`, '-o', 'jsonpath={.items[*].metadata.name}'], { quiet: true });
+  const names = out.trim().split(/\s+/).filter(Boolean);
+  if (names.length !== 1) throw new Error(`${gw}의 프록시 Service를 하나로 찾지 못했다: ${names.join(', ') || '없음'}`);
+  return names[0];
+}
+
+async function gatewaysForward() {
+  if (!existsSync(GATEWAYS_CONTRACT_FILE)) throw new Error(`접속 정보가 없다: ${GATEWAYS_CONTRACT_FILE}. 먼저 node tools/local/cluster.mjs gateways`);
+  const { ports } = JSON.parse(readFileSync(GATEWAYS_CONTRACT_FILE, 'utf8'));
+  const k = await ensureTool('kubectl');
+  const children = [];
+  for (const gw of GATEWAY_NAMES) children.push(spawn(k, ['--kubeconfig', KUBECONFIG, ...gatewayForwardArgs(await gatewayService(gw), ports[gw])], { stdio: 'inherit' }));
+  console.log(`게이트웨이 다섯을 127.0.0.1:${GATEWAY_NAMES.map((g) => ports[g]).join(',')}로 연다(끝내려면 Ctrl+C)`);
+  await Promise.race(children.map((c) => new Promise((r) => c.on('exit', r))));
+  for (const c of children) c.kill();
+  throw new Error('포트 전달 하나가 끝났다(다시 돌린다)');
+}
+
 async function down() {
   await kind(['delete', 'cluster', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-forward': gatewaysForward, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-forward|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();

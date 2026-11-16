@@ -247,7 +247,7 @@ spec:
             kind: HTTPRouteFilter
             name: peaket-trace-not-allowed
 ---
-# gw-fan-public: 로그인 없이 부르는 팬 경로: 토큰 갱신(리프레시 쿠키만 읽는다, 응답의 Set-Cookie와 401 본문을 그대로 돌려준다, identity §3 PRF-030·ADR-0235)과 검색
+# gw-fan-public: 로그인 없이 부르는 팬 경로: 토큰 갱신(리프레시 쿠키만 읽는다, 응답의 Set-Cookie와 401 본문을 그대로 돌려준다, identity §3 PRF-030·ADR-0235)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -279,27 +279,6 @@ spec:
         - group: ""
           kind: Service
           name: identity-svc
-          namespace: core
-          port: 8080
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/search
-          method: GET
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: web
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: core-svc
           namespace: core
           port: 8080
 ---
@@ -337,6 +316,107 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
+---
+# gw-fan-search: 검색·자동완성(로그인 없이, /v1/search*). 클라이언트 IP마다 초당 50건 한도를 함께 쓴다(docs/features/search.md §8 첫 값, SR-T13 ②)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gw-fan-search
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: gw-fan
+      sectionName: api
+  hostnames:
+    - api.peaket.example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/search
+          method: GET
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: web
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
+---
+# gw-fan-search: 교차 출처·출처 확인(토큰 확인 없음, 공개 경로)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-fan-search-security
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-search
+  cors:
+    allowOrigins:
+      - https://www.peaket.example
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allowHeaders:
+      - Content-Type
+      - Idempotency-Key
+      - If-Match
+      - X-Reauth-Token
+    exposeHeaders:
+      - Date
+      - X-Trace-Id
+      - ETag
+    maxAge: 7200s
+    allowCredentials: true
+  csrf:
+    additionalOrigins:
+      - https://www.peaket.example
+---
+# gw-fan-search: 클라이언트 IP(게이트웨이가 정한 값)마다 초당 50건(docs/features/search.md §8 '무작위 입력' 줄의 '첫 값', SR-T13 ②).
+# - 로컬 한도(프록시 파드마다 센다)라 실제 상한은 파드 수 × 이 값이다. 이 판은 모아 두기(버킷 크기)를 초당 건수와 같게 만든다(따로 적는 칸이 없다).
+# - IPv4·IPv6를 규칙 하나씩으로 덮는다(sourceCIDR Distinct는 CIDR 하나만 받는다). 넘으면 429이고 Envoy Gateway가 Retry-After를 붙인다(ClientTrafficPolicy disableRetryAfterHeader를 켜지 않는다).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: gw-fan-search-rate-limit
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-fan-search
+  rateLimit:
+    local:
+      rules:
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 50
+            unit: Second
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: ::/0
+          limit:
+            requests: 50
+            unit: Second
 ---
 # gw-fan-identity: 팬 계정 경로(identity-svc 앱 포트): 로그인한 기기(X-Reauth-Token을 넘긴다, BOT-044), 계정 요약·가입 마무리(BOT-047) 등. /internal/은 내지 않는다
 apiVersion: gateway.networking.k8s.io/v1
@@ -448,6 +528,10 @@ spec:
         principal:
           jwt:
             provider: fan-fan
+            claims:
+              - name: aud
+                values:
+                  - fan
 ---
 # gw-fan-buy: 구매 경로(좌석 홀드·주문, ticket:buy, docs/security/authz-matrix.md §5.1)
 apiVersion: gateway.networking.k8s.io/v1
@@ -698,6 +782,10 @@ spec:
         principal:
           jwt:
             provider: fan-fan
+            claims:
+              - name: aud
+                values:
+                  - fan
 ---
 # gw-fan-app: 소비자 웹 앱 서버(같은 출처 화면). 브라우저 traceparent를 옮긴 x-peaket-browser-traceparent를 이 라우트에서만 넘긴다(docs/observability.md §6). CSP·Referrer-Policy·COOP는 앱 값을 그대로 둔다
 apiVersion: gateway.networking.k8s.io/v1

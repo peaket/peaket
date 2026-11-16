@@ -371,3 +371,7 @@ spec:
         principal:
           jwt:
             provider: staff-scanner
+            claims:
+              - name: aud
+                values:
+                  - scanner

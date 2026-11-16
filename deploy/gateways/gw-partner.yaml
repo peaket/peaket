@@ -520,6 +520,10 @@ spec:
         principal:
           jwt:
             provider: admin-partner
+            claims:
+              - name: aud
+                values:
+                  - partner
 ---
 # gw-partner-app: 파트너 콘솔 앱 서버(같은 출처 화면). x-peaket-browser-traceparent를 이 라우트에서만 넘긴다(docs/observability.md §6)
 apiVersion: gateway.networking.k8s.io/v1

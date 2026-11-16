@@ -508,6 +508,10 @@ spec:
         principal:
           jwt:
             provider: fan-fan
+            claims:
+              - name: aud
+                values:
+                  - fan
 ---
 # gw-queue-public: 로그인 없이 부르는 대기열 경로(openapi security: [])
 apiVersion: gateway.networking.k8s.io/v1

@@ -460,3 +460,7 @@ spec:
         principal:
           jwt:
             provider: admin-ops
+            claims:
+              - name: aud
+                values:
+                  - ops
