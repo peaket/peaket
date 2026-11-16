@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { MemoryTicketStore } from '../src/modules/ticket/adapters/memory-ticket-store.js';
 import { TicketService } from '../src/modules/ticket/application/ticket-service.js';
+import { TicketInputError } from '../src/modules/ticket/domain/ticket.js';
 import { ticketPackage, ticketServiceHandlers } from '../src/modules/ticket/inbound/ticket.grpc.js';
 
 const NOW = Date.parse('2026-11-16T03:00:00.000Z');
@@ -58,7 +59,7 @@ const issued = async (eventStartsAtMs?: number) => {
   return { orderId, ticketId: r.tickets[0]!.ticketId };
 };
 const fanCancel = (t: { orderId: string; ticketId: string }, cancellationId: string, c: Client = openClient) =>
-  call(c, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: cancellationId });
+  call(c, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: cancellationId, reason: 'USER' });
 
 describe('GAT-080 S3 CancelTickets의 첫 팬 취소 칸(리뷰 B2)', () => {
   test('GAT-080 S3 CancelTickets는 ALREADY_CANCELLED에 먼저 취소한 팬 취소의 ID·결과·시각을 싣는다(가장 이른 것, 앞선 ALREADY_CANCELLED는 첫 취소가 아니다)', async () => {
@@ -83,7 +84,7 @@ describe('GAT-080 S3 CancelTickets의 첫 팬 취소 칸(리뷰 B2)', () => {
   test('GAT-080 S3 입장 뒤 첫 팬 취소(REFUND_AFTER_CLOSE)는 그 결과를 첫 결과로 싣고, 서비스 답에도 first가 있다', async () => {
     const t = await issued(NOW - 1);
     const k1 = randomUUID();
-    const out1 = await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: k1, nowMs: NOW });
+    const out1 = await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: k1, nowMs: NOW, reason: 'USER' });
     expect(out1.map((o) => o.result)).toEqual(['REFUND_AFTER_CLOSE']);
     const out2 = await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: randomUUID(), nowMs: NOW + 5_000 });
     expect(out2).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first: { cancellationId: k1, result: 'REFUND_AFTER_CLOSE', cancelledAtMs: NOW } }]);
@@ -166,7 +167,7 @@ describe('GAT-080 S4 CancelTickets의 replayOnly 확인', () => {
   test('GAT-080 S4 replayOnly면 팬 취소 기록이 있는 표는 새 키든 같은 키든 ALREADY_CANCELLED와 첫 칸 셋이고, 운영자 취소 표는 첫 칸이 없다', async () => {
     const t = await issued();
     const k1 = randomUUID();
-    expect((await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: k1, nowMs: NOW })).map((o) => o.result)).toEqual(['REFUND_NOW']);
+    expect((await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: k1, nowMs: NOW, reason: 'USER' })).map((o) => o.result)).toEqual(['REFUND_NOW']);
     const first = { cancellationId: k1, result: 'REFUND_NOW', cancelledAtMs: NOW };
     expect(await replay(t, randomUUID())).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first }]);
     expect(await replay(t, k1)).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first }]);
@@ -184,5 +185,49 @@ describe('GAT-080 S4 CancelTickets의 replayOnly 확인', () => {
     const out = (await call(openClient, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), replay_only: true })).outcomes as Reply[];
     expect(out[0]).toMatchObject({ ticket_id: t.ticketId, result: 'CANCEL_TICKET_RESULT_EVENT_STARTED' });
     expect(store.tickets.get(t.ticketId)).toEqual(before);
+  });
+});
+
+// ---- 다시 보기 R1(계획 §11 보충 3, 78d8dbd8): 첫 칸은 사유가 USER인 취소 기록만 싣는다 ----
+describe('GAT-080 S3 첫 칸은 사유 USER 기록만(다시 보기 R1)', () => {
+  const cancelWith = (t: { orderId: string; ticketId: string }, cancellationId: string, o: { reason?: string; replayOnly?: boolean; nowMs?: number } = {}) =>
+    ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId, nowMs: o.nowMs ?? NOW, ...(o.reason === undefined ? {} : { reason: o.reason }), ...(o.replayOnly ? { replayOnly: true } : {}) });
+
+  test('GAT-080 S3 첫 칸은 사유가 USER인 취소 기록만 싣는다: EVENT_POSTPONED·사유 없는 기록은 비우고 USER는 싣는다(replay_only도 같다)', async () => {
+    const postponed = await issued();
+    const k1 = randomUUID();
+    expect((await cancelWith(postponed, k1, { reason: 'EVENT_POSTPONED' })).map((o) => o.result)).toEqual(['REFUND_NOW']);
+    expect(await cancelWith(postponed, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: postponed.ticketId, result: 'ALREADY_CANCELLED' }]);
+    expect(await cancelWith(postponed, randomUUID(), { reason: 'USER', replayOnly: true, nowMs: NOW + 2_000 })).toEqual([{ ticketId: postponed.ticketId, result: 'ALREADY_CANCELLED' }]);
+
+    const noReason = await issued();
+    await cancelWith(noReason, randomUUID());
+    expect(await cancelWith(noReason, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: noReason.ticketId, result: 'ALREADY_CANCELLED' }]);
+
+    const fan = await issued();
+    const kf = randomUUID();
+    await cancelWith(fan, kf, { reason: 'USER' });
+    const first = { cancellationId: kf, result: 'REFUND_NOW', cancelledAtMs: NOW };
+    expect(await cancelWith(fan, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: fan.ticketId, result: 'ALREADY_CANCELLED', first }]);
+    expect(await cancelWith(fan, randomUUID(), { reason: 'USER', replayOnly: true, nowMs: NOW + 2_000 })).toEqual([{ ticketId: fan.ticketId, result: 'ALREADY_CANCELLED', first }]);
+  });
+
+  test('GAT-080 S3 목록 밖 사유(REFUND)는 TicketInputError이고 표를 바꾸지 않는다', async () => {
+    const t = await issued();
+    const before = { ...store.tickets.get(t.ticketId)! };
+    await expect(cancelWith(t, randomUUID(), { reason: 'REFUND' })).rejects.toBeInstanceOf(TicketInputError);
+    expect(store.tickets.get(t.ticketId)).toEqual(before);
+  });
+
+  test('GAT-080 S3 gRPC reason을 읽는다: EVENT_POSTPONED로 끝난 표에 다른 취소 ID는 첫 칸이 비고, 목록 밖 사유는 INVALID_ARGUMENT다', async () => {
+    const t = await issued();
+    await call(openClient, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), reason: 'EVENT_POSTPONED' });
+    const out = (await call(openClient, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), reason: 'USER' })).outcomes as Reply[];
+    expect(out[0]).toMatchObject({ result: 'CANCEL_TICKET_RESULT_ALREADY_CANCELLED', first_cancellation_id: '', first_cancelled_at: null });
+    const u = await issued();
+    await expect(call(openClient, 'CancelTickets', { order_id: u.orderId, ticket_ids: [u.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), reason: 'REFUND' })).rejects.toMatchObject({
+      code: grpc.status.INVALID_ARGUMENT,
+    });
+    expect(store.tickets.get(u.ticketId)!.status).toBe('ISSUED');
   });
 });

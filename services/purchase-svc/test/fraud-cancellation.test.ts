@@ -603,3 +603,18 @@ describe('GAT-080 F21 늦은 실패가 끝난 결과를 덮지 않는다(리뷰 
     expect(writes.created).toHaveLength(0);
   });
 });
+
+describe('GAT-080 F21 FAILED끼리의 차례(다시 보기 R2, 단위)', () => {
+  test('GAT-080 F21 다시 부르기에서 ticket-svc가 실패해도 앞 호출의 티켓 단계 뒤 까닭(SEAT_RETURN_FAILED)을 TICKET_UNAVAILABLE로 바꾸지 않는다', async () => {
+    const a = seat();
+    const f = fixture([a]);
+    f.seats.failFor.set(a.seatId, 1);
+    expect((await f.uc.execute(input([t(a)]))).map((r) => r.failureCode)).toEqual(['SEAT_RETURN_FAILED']);
+    f.tickets.failNext = 1;
+    const again = await f.uc.execute(input([t(a)], { nowMs: NOW + 60_000 }));
+    // 장애 주입이 실제로 있었다: 두 번째 ticket-svc 호출이 실패했다
+    expect(f.tickets.calls).toHaveLength(2);
+    expect(again).toEqual([{ ticketId: a.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' }]);
+    expect(await f.store.results(APPROVAL)).toEqual(again);
+  });
+});

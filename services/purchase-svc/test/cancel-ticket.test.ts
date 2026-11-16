@@ -451,3 +451,23 @@ describe('GAT-080 S4 공연 시작 뒤 다시 누른 팬 취소', () => {
     expect(f.tickets.calls[0]!.replayOnly ?? false).toBe(false);
   });
 });
+
+// ---- 다시 보기 R1(계획 §11 보충 3, 78d8dbd8): 사유를 ticket-svc에 싣고, 팬 취소가 아닌 기록은 잇지 않는다 ----
+describe('GAT-080 S5 일괄 환불 항목과 팬 취소의 사유(다시 보기 R1)', () => {
+  test('GAT-080 S5 같은 취소 Saga가 ticket 포트에 넘긴 입력의 reason이 그 사유다(팬 USER, 일괄 환불 EVENT_POSTPONED·EVENT_CANCELLED)', async () => {
+    for (const reason of ['USER', 'EVENT_POSTPONED', 'EVENT_CANCELLED'] as const) {
+      const { svc, tickets } = saga();
+      await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason, nowMs: kst('2026-11-16T10:00:00'), deadlineMs: 2000, ...(reason === 'USER' ? {} : { eventCancellationRequestId: '01900000-0000-7000-8000-0000000000c1' }) });
+      expect(tickets.calls[0]!.reason, reason).toBe(reason);
+    }
+  });
+
+  test('GAT-080 S5 일괄 환불 항목이 티켓 단계만 마친 표(첫 칸 없는 ALREADY_CANCELLED)에 팬이 새 키로 누르면 아무것도 쓰지 않는다', async () => {
+    const { svc, tickets, seats, writes, payments } = saga({ ticket: 'ALREADY_CANCELLED' });
+    expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-16T10:00:00'), deadlineMs: 2000 })).toEqual({ status: 'ALREADY_ENDED' });
+    expect(tickets.calls[0]!.reason).toBe('USER');
+    expect(seats.calls).toHaveLength(0);
+    expect(writes.created).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+  });
+});

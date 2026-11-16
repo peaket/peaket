@@ -59,7 +59,8 @@ describe('TicketService [HOT-160] [P-T15]', () => {
     const w = world();
     const { tickets } = await w.service.issue(issue());
     const id = tickets[0]!.ticketId;
-    const out = await w.service.cancel(cancel({ ticketIds: [id] }));
+    // 팬 취소는 사유 USER를 싣는다(다시 보기 R1: 첫 팬 취소 칸은 사유 USER인 기록만 싣는다)
+    const out = await w.service.cancel(cancel({ ticketIds: [id], reason: 'USER' }));
     expect(out).toEqual([{ ticketId: id, result: 'REFUND_NOW' }]);
     expect(w.store.tickets.get(id)).toMatchObject({ status: 'REFUNDED', keyRevokedAtMs: NOW, version: 1 });
     expect(w.store.cancellations.size).toBe(1);

@@ -44,6 +44,7 @@ import {
   GrpcTicketCancellations,
   RedisSeatReturnNotices,
   RefundAfterEntry,
+  type SeatReturns,
   WeekendBusinessCalendar,
 } from '../src/modules/refund/index.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
@@ -426,5 +427,75 @@ describe('GAT-080 F21 늦은 실패의 저장 [실제 DB]', () => {
     expect((await admin.pool.query('select outcome, failure_code from fraud_cancellation_ticket where approval_id = $1 and ticket_id = $2', [approvalId, other])).rows).toEqual([
       { outcome: 'SKIPPED_HOLDER_CHANGED', failure_code: null },
     ]);
+  });
+});
+
+// ---- 다시 보기 R2(계획 §11 보충 3, 78d8dbd8, docs/features/transfer-refund.md §7.4 '결과 저장'): FAILED끼리 덮어쓰기 차례 ----
+describe('GAT-080 F21 FAILED끼리의 저장 차례 [실제 DB]', () => {
+  test('GAT-080 F21 FAILED끼리는 티켓 단계 뒤 까닭을 모르는 까닭으로 덮지 않는다(TICKET_UNAVAILABLE·INTERNAL은 못 덮고, ORDER_STATE는 덮고, 반대 차례는 바뀐다)', async () => {
+    const w = await world(1);
+    const approvalId = randomUUID();
+    await unary('CancelFraudTickets', requestOf(w, approvalId, randomUUID(), []));
+    const outcomeOf = async (ticketId: string) =>
+      (await admin.pool.query('select outcome, failure_code from fraud_cancellation_ticket where approval_id = $1 and ticket_id = $2', [approvalId, ticketId])).rows[0] as { outcome: string; failure_code: string | null };
+    const save = (ticketId: string, failureCode: string, atMs: number) =>
+      fraudStore.saveResults(approvalId, [{ ticketId, outcome: 'FAILED', failureCode: failureCode as never, expectedHolderAccountId: w.payerId }], atMs);
+
+    const t = randomUUID();
+    await save(t, 'SEAT_RETURN_FAILED', NOW + 1_000);
+    await save(t, 'TICKET_UNAVAILABLE', NOW + 2_000);
+    expect(await outcomeOf(t)).toEqual({ outcome: 'FAILED', failure_code: 'SEAT_RETURN_FAILED' });
+    await save(t, 'INTERNAL', NOW + 3_000);
+    expect(await outcomeOf(t)).toEqual({ outcome: 'FAILED', failure_code: 'SEAT_RETURN_FAILED' });
+    await save(t, 'ORDER_STATE', NOW + 4_000);
+    expect(await outcomeOf(t)).toEqual({ outcome: 'FAILED', failure_code: 'ORDER_STATE' });
+
+    const u = randomUUID();
+    await save(u, 'TICKET_UNAVAILABLE', NOW + 1_000);
+    await save(u, 'SEAT_RETURN_FAILED', NOW + 2_000);
+    expect(await outcomeOf(u)).toEqual({ outcome: 'FAILED', failure_code: 'SEAT_RETURN_FAILED' });
+    await save(u, 'INTERNAL', NOW + 3_000);
+    expect(await outcomeOf(u)).toEqual({ outcome: 'FAILED', failure_code: 'SEAT_RETURN_FAILED' });
+
+    const v = randomUUID();
+    await save(v, 'TICKET_UNAVAILABLE', NOW + 1_000);
+    await save(v, 'INTERNAL', NOW + 2_000);
+    expect(await outcomeOf(v)).toEqual({ outcome: 'FAILED', failure_code: 'INTERNAL' });
+  });
+
+  test('GAT-080 F21 좌석 되돌리기가 실패한 표에 늦은 TICKET_UNAVAILABLE 저장이 와도 까닭이 남아, 마감 뒤 다시 부르기가 그 표의 나머지를 마친다', async () => {
+    const w = await world(1);
+    const approvalId = randomUUID();
+    const real = new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis));
+    let failures = 0;
+    const seats: SeatReturns = {
+      returnSold: async (q) => {
+        if (failures === 0) {
+          failures++;
+          throw new Error('좌석 되돌리기 실패(시험의 장애 주입)');
+        }
+        return real.returnSold(q);
+      },
+    };
+    const flaky = new CancelFraudTickets({ store: fraudStore, tickets: ticketCancels!, orders: new DrizzleCancellationOrders(purchaseDb, seatMap), configs: seatMap, writes, calendar, seats });
+    const input = (nowMs: number) => ({
+      approvalId,
+      fraudCaseId: '0193a000-0000-7000-8000-0000000000d1',
+      eventId: w.eventId,
+      targets: [{ ticketId: w.tickets[0]!.ticketId, expectedHolderAccountId: w.payerId }],
+      requestedBy: 'investigator-1',
+      approvedBy: APPROVED_BY,
+      nowMs,
+      deadlineMs: 5_000,
+    });
+    const ticketId = w.tickets[0]!.ticketId;
+    expect((await flaky.execute(input(NOW))).map((r) => [r.outcome, r.failureCode])).toEqual([['FAILED', 'SEAT_RETURN_FAILED']]);
+    expect(failures).toBe(1);
+    // 겹친 호출이 그 표를 ticket-svc 실패로 늦게 저장하려 한다
+    await fraudStore.saveResults(approvalId, [{ ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE', expectedHolderAccountId: w.payerId }], NOW + 1_000);
+    // 마감(판매 종료 − 2시간 = 2026-11-19 17:00) 정각에 다시 부르면 티켓 단계 뒤 실패의 나머지를 마친다(F20 (가)와 같은 끝)
+    const late = await flaky.execute(input(kst('2026-11-19T17:00:00')));
+    expect(late).toEqual([{ ticketId, outcome: 'ACCEPTED', cancellationId: fraudCancellationId(approvalId, ticketId), refundAmount: PRICE }]);
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [ticketId])).rows[0].n).toBe(1);
   });
 });

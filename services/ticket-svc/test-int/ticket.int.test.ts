@@ -90,7 +90,7 @@ describe('ticket-svc PostgreSQL [HOT-160] [P-T15]', () => {
     const orderId = '0190f3a1-7c2e-7a00-8000-000000000013';
     const { tickets } = await service.issue(issue({ orderId }));
     const id = tickets[0]!.ticketId;
-    expect(await service.cancel(cancel({ orderId, ticketIds: [id] }))).toEqual([{ ticketId: id, result: 'REFUND_NOW' }]);
+    expect(await service.cancel(cancel({ orderId, ticketIds: [id], reason: 'USER' }))).toEqual([{ ticketId: id, result: 'REFUND_NOW' }]);
     const row = (await database.pool.query('select status, key_revoked_at, version from ticket where id = $1', [id])).rows[0];
     expect(row.status).toBe('REFUNDED');
     expect(row.key_revoked_at).not.toBeNull();
@@ -390,7 +390,7 @@ describe('GAT-080 S3 첫 팬 취소 칸 [PostgreSQL]', () => {
     return { orderId, eventId: r.tickets[0]!.eventId, ticketId: r.tickets[0]!.ticketId };
   };
   const fan = (t: { orderId: string; ticketId: string }, cancellationId: string, nowMs: number) =>
-    service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId, nowMs });
+    service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId, nowMs, reason: 'USER' });
 
   test('GAT-080 S3 K1 REFUND_NOW 뒤 K2는 ALREADY_CANCELLED와 첫 취소(K1·REFUND_NOW·K1 시각)를 받고, K3도 K1을 받는다', async () => {
     const t = await fresh();
@@ -582,5 +582,61 @@ describe('BAT-420 입장 기록 대조·회차 취소 [PostgreSQL]', () => {
     }
     expect(fanFirst, '팬 취소가 먼저 잡은 경우').toBeGreaterThan(0);
     expect(eventFirst, '회차 취소가 먼저 잡은 경우').toBeGreaterThan(0);
+  });
+});
+
+// ---- 다시 보기 R1(계획 §11 보충 3, 78d8dbd8): ticket_cancellation.reason(0009)과 첫 칸은 USER 기록만 ----
+describe('GAT-080 S3 첫 칸은 사유 USER 기록만 [PostgreSQL]', () => {
+  const fresh = async () => {
+    const orderId = randomUUID();
+    const r = await service.issue({ orderId, eventId: randomUUID(), payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 0 });
+    return { orderId, ticketId: r.tickets[0]!.ticketId };
+  };
+  const cancelWith = (t: { orderId: string; ticketId: string }, cancellationId: string, o: { reason?: string; replayOnly?: boolean; nowMs?: number } = {}) =>
+    service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId, nowMs: o.nowMs ?? NOW, ...(o.reason === undefined ? {} : { reason: o.reason }), ...(o.replayOnly ? { replayOnly: true } : {}) });
+  const reasonOf = async (cancellationId: string, ticketId: string) =>
+    (await database.pool.query('select reason from ticket_cancellation where cancellation_id = $1 and ticket_id = $2', [cancellationId, ticketId])).rows[0]?.reason as string | null | undefined;
+
+  test('GAT-080 S3 첫 칸은 사유가 USER인 취소 기록만 싣고 ticket_cancellation.reason에 요청 사유가 남는다(EVENT_POSTPONED·사유 없음은 비움, replay_only도 같다)', async () => {
+    const postponed = await fresh();
+    const kp = randomUUID();
+    await cancelWith(postponed, kp, { reason: 'EVENT_POSTPONED' });
+    expect(await reasonOf(kp, postponed.ticketId)).toBe('EVENT_POSTPONED');
+    expect(await cancelWith(postponed, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: postponed.ticketId, result: 'ALREADY_CANCELLED' }]);
+    expect(await cancelWith(postponed, randomUUID(), { reason: 'USER', replayOnly: true, nowMs: NOW + 2_000 })).toEqual([{ ticketId: postponed.ticketId, result: 'ALREADY_CANCELLED' }]);
+
+    const none = await fresh();
+    const kn = randomUUID();
+    await cancelWith(none, kn);
+    expect(await reasonOf(kn, none.ticketId)).toBeNull();
+    expect(await cancelWith(none, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: none.ticketId, result: 'ALREADY_CANCELLED' }]);
+
+    const fan = await fresh();
+    const kf = randomUUID();
+    await cancelWith(fan, kf, { reason: 'USER' });
+    expect(await reasonOf(kf, fan.ticketId)).toBe('USER');
+    const first = { cancellationId: kf, result: 'REFUND_NOW', cancelledAtMs: NOW };
+    expect(await cancelWith(fan, randomUUID(), { reason: 'USER', nowMs: NOW + 1_000 })).toEqual([{ ticketId: fan.ticketId, result: 'ALREADY_CANCELLED', first }]);
+    expect(await cancelWith(fan, randomUUID(), { reason: 'USER', replayOnly: true, nowMs: NOW + 2_000 })).toEqual([{ ticketId: fan.ticketId, result: 'ALREADY_CANCELLED', first }]);
+  });
+
+  test('GAT-080 S3 목록 밖 사유(REFUND)는 TicketInputError이고 행·취소 기록이 그대로다', async () => {
+    const t = await fresh();
+    const k = randomUUID();
+    await expect(cancelWith(t, k, { reason: 'REFUND' })).rejects.toBeInstanceOf(TicketInputError);
+    expect((await database.pool.query('select status, version from ticket where id = $1', [t.ticketId])).rows[0]).toMatchObject({ status: 'ISSUED', version: 0 });
+    expect((await database.pool.query('select count(*)::int as n from ticket_cancellation where ticket_id = $1', [t.ticketId])).rows[0].n).toBe(0);
+  });
+
+  test('GAT-080 S3 0009는 ticket_cancellation에 사유 칸 하나(널 허용)와 목록 CHECK만 더한다', async () => {
+    const cols = await database.pool.query<{ column_name: string; data_type: string; is_nullable: string }>(
+      "select column_name, data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'ticket_cancellation' and column_name = 'reason'",
+    );
+    expect(cols.rows).toEqual([{ column_name: 'reason', data_type: 'text', is_nullable: 'YES' }]);
+    const t = await fresh();
+    const put = (reason: string | null) =>
+      database.pool.query("insert into ticket_cancellation (cancellation_id, ticket_id, order_id, result, cancelled_at, reason) values ($1, $2, $3, 'REFUND_NOW', now(), $4)", [randomUUID(), t.ticketId, t.orderId, reason]);
+    for (const reason of ['USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', null]) await put(reason);
+    await expect(put('REFUND')).rejects.toMatchObject({ code: '23514' });
   });
 });

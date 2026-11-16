@@ -178,6 +178,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "replay_only": {
                       "type": "bool",
                       "id": 5
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 6
                     }
                   }
                 },

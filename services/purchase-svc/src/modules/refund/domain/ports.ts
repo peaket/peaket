@@ -31,6 +31,8 @@ export interface TicketCancellations {
     readonly deadlineMs: number;
     /** 아무 행도 바꾸지 않는 확인(ticket.proto replay_only, 리뷰 B2 보충). 공연 시작 뒤 다시 누른 팬 취소를 첫 취소로 잇는 데만 쓴다 */
     readonly replayOnly?: boolean;
+    /** 취소 사유(ticket.proto reason, 다시 보기 R1). ticket-svc가 기록에 남기고 첫 팬 취소 칸은 USER 기록만 싣는다 */
+    readonly reason?: CancellationReason;
   }): Promise<TicketCancelAnswer>;
 }
 

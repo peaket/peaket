@@ -67,6 +67,11 @@ export interface CancelTicketsInput {
    * 참이면 티켓 행·취소 기록을 바꾸지 않고, 끝난 표는 ALREADY_CANCELLED(팬 취소 기록이 있으면 첫 칸), 유효한 표는 EVENT_STARTED다
    */
   readonly replayOnly?: boolean;
+  /**
+   * 취소 사유(ticket.proto CancelTicketsRequest.reason, 다시 보기 R1). 처음 커밋하는 기록에 남기고, 첫 팬 취소 칸은 사유 USER인 기록만 싣는다.
+   * 비면 사유 없는 기록, 목록 밖이면 TicketInputError. BAT-415 리뷰 반영 빈 뼈대: 구현 담당이 채운다
+   */
+  readonly reason?: string;
 }
 
 export interface CancelTicketOutcome {
