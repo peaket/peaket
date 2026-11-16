@@ -48,14 +48,24 @@ export interface TicketGrpcErrorLog {
 }
 
 /** gRPC 처리기 묶음. 테스트는 startGrpcServer에 그대로 넘긴다. */
-/** 운영자 취소를 부를 수 있는 호출자(내부 gRPC 호출자 머리, docs/features/transfer-refund.md §7.4 '호출자') */
+/**
+ * 운영자 취소·회차 취소 표 끝내기·입장 기록 대조를 부를 수 있는 호출자(내부 gRPC 호출자 머리, docs/features/transfer-refund.md §7.4 '호출자'·§5 ⑴·§3.1 ①)
+ */
 const OPERATOR_CANCEL_CALLER = 'purchase-svc';
 
 /**
- * o.internalToken: 있으면 OperatorCancelTickets는 내부 토큰과 호출자 purchase-svc를 요구한다. 틀리면(토큰 없음·틀림·다른 호출자) PERMISSION_DENIED이고
- * 쓰임새를 부르지 않는다(리뷰 B6, ASVS v5.0.0-8.2.1). 다른 메서드의 부르는 쪽 검사는 이번에 바꾸지 않는다. 토큰이 없는 local·ci 조립은 지금처럼 받는다
+ * o.internalToken: 있으면 OperatorCancelTickets·EventCancelTickets·GetEntryRecords는 내부 토큰과 호출자 purchase-svc를 요구한다. 틀리면(토큰 없음·틀림·다른 호출자)
+ * PERMISSION_DENIED이고 쓰임새를 부르지 않는다(리뷰 B6, BAT-420 리뷰 D4, ASVS v5.0.0-8.2.1). 다른 메서드의 부르는 쪽 검사는 바꾸지 않는다. 토큰이 없는 local·ci 조립은 지금처럼 받는다
  */
 export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog, o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
+  /** 내부 토큰이 있으면 호출자 purchase-svc만 받는다. 거절했으면 cb로 PERMISSION_DENIED를 보내고 false */
+  const purchaseOnly = (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>): boolean => {
+    if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: OPERATOR_CANCEL_CALLER }).ok) {
+      cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+      return false;
+    }
+    return true;
+  };
   return {
     IssueTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;
@@ -117,10 +127,7 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
 
     // 부정 예매 운영자 취소(BAT-415 몫 F, docs/features/transfer-refund.md §7.4). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다
     OperatorCancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
-      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: OPERATOR_CANCEL_CALLER }).ok) {
-        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
-        return;
-      }
+      if (!purchaseOnly(call, cb)) return;
       const req = call.request;
       const targets = Array.isArray(req.targets) ? (req.targets as Req[]) : [];
       useCases.ticket
@@ -144,8 +151,10 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('OperatorCancelTickets', err, undefined, cb, onError));
     },
 
-    // 회차 취소 일괄 환불의 티켓 단계(BAT-420 GAT-110 E, R-T24). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다
+    // 회차 취소 일괄 환불의 티켓 단계(BAT-420 GAT-110 E, R-T24). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다.
+    // 결제자·보유자 검사를 건너뛰는 호출이라 호출자 purchase-svc만 받는다(BAT-420 리뷰 D4)
     EventCancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (!purchaseOnly(call, cb)) return;
       const req = call.request;
       const targets = Array.isArray(req.targets) ? (req.targets as Req[]) : [];
       useCases.ticket
@@ -169,8 +178,9 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('EventCancelTickets', err, undefined, cb, onError));
     },
 
-    // 입장 기록 대조(BAT-420 GAT-090 A, P-T19). 읽기만 한다. 답은 요청 차례이고 입장이 없으면 first_entered_at을 비운다
+    // 입장 기록 대조(BAT-420 GAT-090 A, P-T19). 읽기만 한다. 답은 요청 차례이고 입장이 없으면 first_entered_at을 비운다. 호출자 purchase-svc만 받는다(BAT-420 리뷰 D4)
     GetEntryRecords: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (!purchaseOnly(call, cb)) return;
       const req = call.request;
       useCases.ticket
         .entryRecords(Array.isArray(req.ticket_ids) ? req.ticket_ids.map(text) : [])

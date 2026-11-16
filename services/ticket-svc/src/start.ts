@@ -174,7 +174,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             (method, err, orderId) => {
               service!.logger.error({ method, ...(orderId ? { orderId } : {}), err }, 'TicketService 처리 실패');
             },
-            // 운영자 취소(OperatorCancelTickets)는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
+            // 운영자 취소·회차 취소 표 끝내기·입장 기록 대조는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6, BAT-420 리뷰 D4)
             { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) },
           ),
         },
