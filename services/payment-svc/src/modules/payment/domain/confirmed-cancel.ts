@@ -70,8 +70,10 @@ export type ConfirmedCancelBegin =
   | { readonly status: 'AMOUNT_MISMATCH' };
 
 /** 3시간 지난 재시도의 조회 대조. 잔액 = 기대 잔액 − 금액이면 APPLIED, = 기대 잔액이면 NOT_APPLIED, 그 밖 UNKNOWN(P-T21) */
-export function settleByBalance(_record: Pick<ConfirmedCancelRecord, 'amount' | 'expectedBalance'>, _balanceAmount: number): 'APPLIED' | 'NOT_APPLIED' | 'UNKNOWN' {
-  throw new Error('아직 없음');
+export function settleByBalance(record: Pick<ConfirmedCancelRecord, 'amount' | 'expectedBalance'>, balanceAmount: number): 'APPLIED' | 'NOT_APPLIED' | 'UNKNOWN' {
+  if (balanceAmount === record.expectedBalance - record.amount) return 'APPLIED';
+  if (balanceAmount === record.expectedBalance) return 'NOT_APPLIED';
+  return 'UNKNOWN';
 }
 
 /** CancelPaymentResponse.result의 앞머리를 뗀 값 */

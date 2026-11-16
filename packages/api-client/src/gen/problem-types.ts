@@ -62,7 +62,10 @@ export type ProblemType =
   | 'enrollment-rate-limited'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
+  | 'event-cancellation-active'
   | 'event-cancellation-conflict'
+  | 'event-cancelled'
+  | 'event-ended'
   | 'event-refund-unavailable'
   | 'event-schedule-invalid'
   | 'event-settlement-source-unavailable'
@@ -175,9 +178,11 @@ export type ProblemType =
   | 'pickup-slot-unavailable'
   | 'place-exists'
   | 'poster-not-deletable'
+  | 'postponement-date-invalid'
   | 'precondition-failed'
   | 'precondition-required'
   | 'preverify-invalid'
+  | 'preview-required'
   | 'priority-grant-already-used'
   | 'priority-grant-in-use'
   | 'priority-grant-not-found'
@@ -218,6 +223,7 @@ export type ProblemType =
   | 'reauth-unavailable'
   | 'refresh-token-invalid'
   | 'refund-account-required'
+  | 'rejection-not-allowed'
   | 'report-limited'
   | 'research-export-not-ready'
   | 'restriction-too-long'
@@ -248,6 +254,7 @@ export type ProblemType =
   | 'sale-review-not-submitted'
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
+  | 'sale-stop-unavailable'
   | 'scale-change-closed'
   | 'scale-change-not-approved'
   | 'scale-change-not-up'
@@ -287,6 +294,7 @@ export type ProblemType =
   | 'too-many-requests'
   | 'transfer-locked'
   | 'transfer-not-allowed'
+  | 'transfer-pending'
   | 'trigger-deferred'
   | 'under-14'
   | 'unknown-promoter'
@@ -365,7 +373,10 @@ export const PROBLEM_TYPES = {
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
+  'event-cancellation-active': { status: 409, title: "이미 진행 중인 회차 취소 요청이 있습니다" },
   'event-cancellation-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
+  'event-cancelled': { status: 409, title: "취소가 확정된 회차입니다" },
+  'event-ended': { status: 409, title: "공연이 끝나 요청할 수 없습니다" },
   'event-refund-unavailable': { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-settlement-source-unavailable': { status: 503, title: "회차 정산 원천을 읽을 수 없습니다" },
@@ -478,9 +489,11 @@ export const PROBLEM_TYPES = {
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },
   'poster-not-deletable': { status: 409, title: "포스터는 지우지 않고 바꿉니다" },
+  'postponement-date-invalid': { status: 422, title: "바뀐 공연 시작 시각이 올바르지 않습니다" },
   'precondition-failed': { status: 412, title: "다른 사람이 먼저 고쳤습니다" },
   'precondition-required': { status: 428, title: "고칠 판(If-Match)을 보내 주세요" },
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
+  'preview-required': { status: 409, title: "미리보기를 계산한 뒤 확정할 수 있습니다" },
   'priority-grant-already-used': { status: 409, title: "이미 사용한 우선 구매 권리입니다" },
   'priority-grant-in-use': { status: 409, title: "지금 쓸 수 없는 우선 구매 권리입니다" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
@@ -521,6 +534,7 @@ export const PROBLEM_TYPES = {
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
+  'rejection-not-allowed': { status: 403, title: "판정 전 반려는 commander만 할 수 있습니다" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },
   'restriction-too-long': { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" },
@@ -551,6 +565,7 @@ export const PROBLEM_TYPES = {
   'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
+  'sale-stop-unavailable': { status: 503, title: "판매를 멈추지 못해 확정하지 않았습니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
   'scale-change-not-approved': { status: 422, title: "판매 승인된 공연만 규모를 올릴 수 있습니다" },
   'scale-change-not-up': { status: 422, title: "지금보다 큰 규모로만 올릴 수 있습니다" },
@@ -590,6 +605,7 @@ export const PROBLEM_TYPES = {
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },
   'transfer-not-allowed': { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" },
+  'transfer-pending': { status: 409, title: "양도 요청을 철회한 뒤 취소할 수 있습니다" },
   'trigger-deferred': { status: 409, title: "판정 보류 중인 지표입니다" },
   'under-14': { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" },
   'unknown-promoter': { status: 422, title: "등록되지 않은 파트너사입니다" },

@@ -1,6 +1,6 @@
 // payment DB의 표(docs/data.md §2 ERD payment·payment_event·payment_confirm_job과 §4 '결제 표 마이그레이션', docs/features/payment.md §2 '승인 명령 접수의 첫 구현',
 // BUILD_ORDER PRF-180, ADR-0114). 마이그레이션은 0000_payment.sql이고, Outbox 부모 표는 Drizzle 0.45가 나타내지 못해 그 SQL에 손으로 덧붙였다.
-// 다른 표(payment_entry_pause·payment_cancel 등)는 그 표를 쓰는 단계가 더한다.
+// 다른 표(payment_entry_pause·payment_cancel 등)는 그 표를 쓰는 단계가 더한다(payment_cancel은 0021, GAT-080).
 // drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다. 상태 목록은 도메인 상수와 같은 차례로 글로 적는다.
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, customType, date, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -137,6 +137,43 @@ export const paymentConfirmJob = pgTable(
     index('payment_confirm_job_claim_idx').on(t.pg, t.nextAttemptAt, t.paymentId),
     check('payment_confirm_job_attempts_check', sql`${t.attempts} >= 0`),
     check('payment_confirm_job_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+  ],
+);
+
+/**
+ * 결제 후 일반 취소 한 건(docs/data.md payment_cancel, docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액', BUILD_ORDER GAT-080, 마이그레이션 0021).
+ * 첫 전송 직전에 결제 행 잠금 안에서 만들고, 재시도는 이 행의 금액·사유·전액 여부·기대 잔액을 그대로 보낸다. 끝남은 CANCELED만이다
+ */
+export const paymentCancel = pgTable(
+  'payment_cancel',
+  {
+    // UUIDv7(앱이 만든다)
+    id: uuid('id').primaryKey(),
+    paymentId: uuid('payment_id')
+      .notNull()
+      .references(() => payment.id),
+    // cancel-{cancellationId}(결제사 멱등키)
+    idempotencyKey: text('idempotency_key').notNull(),
+    // 이번 취소 금액(원). 첫 전송 때 정하고 재시도에도 그대로 보낸다
+    amount: integer('amount').notNull(),
+    // 결제사에 보낸 취소 사유(같은 멱등키의 본문)
+    reason: text('reason').notNull(),
+    // 금액을 생략한 전액 취소로 보냈는가(진행 중인 다른 취소가 없고 금액이 남은 전부일 때만 참)
+    fullCancel: boolean('full_cancel').notNull(),
+    // 첫 전송 직전의 결제 금액 − 누적 취소액(포트원 currentCancellableAmount, 3시간 지난 재시도의 조회 대조)
+    expectedBalance: integer('expected_balance').notNull(),
+    // REQUESTED·CANCEL_PENDING이 진행 중, CANCELED만 끝남, FAILED는 업무 거절
+    status: text('status').notNull(),
+    createdAt: at('created_at').notNull(),
+    canceledAt: at('canceled_at'),
+  },
+  (t) => [
+    uniqueIndex('payment_cancel_payment_idempotency_key').on(t.paymentId, t.idempotencyKey),
+    // 같은 결제의 진행 중 취소 찾기(한 번에 하나씩 보낸다)
+    index('payment_cancel_in_progress_idx').on(t.paymentId).where(sql`${t.status} IN ('REQUESTED', 'CANCEL_PENDING')`),
+    check('payment_cancel_amount_check', sql`${t.amount} > 0`),
+    check('payment_cancel_expected_balance_check', sql`${t.expectedBalance} >= ${t.amount}`),
+    check('payment_cancel_status_check', sql`${t.status} IN ('REQUESTED', 'CANCEL_PENDING', 'CANCELED', 'FAILED')`),
   ],
 );
 
