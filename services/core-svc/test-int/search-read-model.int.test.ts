@@ -72,12 +72,14 @@ const rows = async (d: Database, text: string, values: unknown[] = []) => (await
 const version = async () => Number((await rows(admin, 'select version from search_version where id = 1'))[0]!.version);
 const docIds = async (d: Database = admin) => (await rows(d, 'select production_id from search_document')).map((r) => r.production_id as string);
 const termCount = async (targetId: string) => Number((await rows(admin, 'select count(*)::int as n from search_term where target_id = $1', [targetId]))[0]!.n);
+// 어긋난 줄 수(ADR-0271 결정 2 '어긋난 줄 0'): 원천과 표의 값이 다른 공연 수. 두 방향 차이를 공연 ID로 묶어 센다
+// (값이 하나 다른 공연은 두 방향에 한 줄씩 나오지만 어긋난 줄은 하나다. 시험 이의 1, 2026-11-16)
 const drift = async (at: number) =>
   Number(
     (
       await rows(
         admin,
-        `select count(*)::int as n from ((select ${COLS} from search_document_source_at($1) except select ${COLS} from search_document)
+        `select count(distinct production_id)::int as n from ((select ${COLS} from search_document_source_at($1) except select ${COLS} from search_document)
          union all (select ${COLS} from search_document except select ${COLS} from search_document_source_at($1))) d`,
         [new Date(at)],
       )
