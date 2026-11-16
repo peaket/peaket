@@ -467,3 +467,47 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T09:59+09:00 |
 | review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T10:22+09:00 |
 | verify | w7l1-roles-verify-ceb94bc9 | claude-opus-5-5 | 2026-11-16T10:23+09:00 | 2026-11-16T11:01+09:00 |
+
+위 표는 `roles-check`가 읽는 표라 정본 꼴(머리 다섯 칸, 감독·기록은 적지 않음, 계획 6의 10)을 그대로 둔다. 실제 하위 에이전트 ID와 기록 담당은 아래 보탬 표에 적는다(검사는 절 안의 첫 표만 읽는다).
+
+| 역할 | 세션 ID | 하위 에이전트 ID | 모델 | 시작 | 끝 |
+| --- | --- | --- | --- | --- | --- |
+| plan | w7l1-roles-plan-680fac67 | a0e4bc8b6f5f85dad | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T10:47+09:00 |
+| test | w7l1-roles-test-659fff14 | a3ac1db0ca6c534ce | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T10:58+09:00 |
+| impl | w7l1-roles-impl-db02969f | a4e7eada62dc4b8e4 | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T09:59+09:00 |
+| review | w7l1-roles-review-2c7ed993 | aca0b8513b3340304 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T10:22+09:00 |
+| verify | w7l1-roles-verify-ceb94bc9 | a44bc338390aaf250 | claude-opus-5-5 | 2026-11-16T10:23+09:00 | 2026-11-16T11:01+09:00 |
+| record | w7l1-roles-record-488fb1b7 | (이 기록 담당 세션) | claude-opus-5-5 | 2026-11-16T11:03+09:00 | 2026-11-16T11:24+09:00 |
+
+- 모델: 모두 claude-opus-5-5다. 리뷰·검증은 구현 담당과 같은 모델의 새 맥락이다. 다른 모델을 쓸 수 없었다(ADR-0270 결정 6).
+- 감독(갈래 1 감독 세션)은 코드·시험을 쓰지 않았다.
+
+## 기록
+
+- 누가: 기록 담당 `w7l1-roles-record-488fb1b7`, 2026-11-16. 받은 것은 `git log origin/develop..HEAD`, 이 계획 파일, 감독이 준 사실(담당 표의 하위 에이전트 ID, 먼저 합치는 까닭, 시험 담당의 amend)뿐이다.
+- 커밋(차례대로, 가지를 `develop` `2c20b915` 위로 올린 뒤의 해시. 위 '리뷰'·'검증' 절의 해시는 올리기 전 것이다):
+
+| 해시 | 역할 | 제목 |
+| --- | --- | --- |
+| 4241e167 | plan | roles-check 계획과 정본 빈칸을 정한다 |
+| 119ac9e1 | test | roles-check 시험을 먼저 쓰고 실패를 본다 |
+| 5d0bf044 | plan | roles-check 출력 세부를 정하고 ADR 보탬을 상태 줄로 옮긴다 |
+| 644b3639 | test | roles-check 출력 세부 단언을 조인다 |
+| 357ab8dc | impl | 합치기 전 역할 확인 스크립트를 만든다 |
+| c419360a | review | roles-check 대조 리뷰를 적는다 |
+| ebba3233 | plan | roles-check 리뷰 지적 RV-01~03의 정본 빈칸을 정한다 |
+| dc7ab7ab | review-fix(Fix-By: test, RV-01~03) | roles-check 리뷰 지적 RV-01~03의 재현 시험을 먼저 쓴다 |
+| f1aaa439 | review-fix(Fix-By: impl, RV-01~03) | roles-check에 리뷰 지적 RV-01~03을 반영한다 |
+| b8a90029 | test | roles-check RC-38의 Docs/ 사례를 대소문자 부딪힘 없는 범위로 옮긴다 |
+| d6f7bb7d | review | roles-check 리뷰 반영을 다시 보고 둘째 보기를 적는다 |
+| 9aca7c5e | verify | roles-check 틀린 구현 검사를 적는다 |
+| 08e1fe4f | plan | roles-check 검증 지적 VF-01과 시험 먼저의 뜻을 계획에 적는다 |
+| 6f7acba9 | review-fix(Fix-By: test, VF-01) | roles-check 문서 묶음의 계획 파일 절·담당 표 시험을 더한다 |
+| 6110ebe0 | test | roles-check 구현 뒤 시험 쪽 커밋의 차례 시험을 더한다 |
+| ca6a0b4c | verify | roles-check 둘째 틀린 구현 검사를 적는다 |
+
+- 역할별 커밋 수: plan 4, test 4(+ 리뷰 반영 시험 쪽 2), impl 1(+ 리뷰 반영 구현 쪽 1), review 2, verify 2, 합 16개. 이 기록 커밋을 더하면 17개다. 시험 담당의 커밋 하나(`6110ebe0`, RC-49~51)는 푸시 전에 자기 커밋을 amend로 한 번 고쳤다.
+- 시험: `tools/ci/roles-check.test.mjs` 51개(RC-01~51) 모두 통과.
+- 틀린 구현 검사: 첫 검사와 둘째 검사를 합쳐 넣은 수 37, 잡은 수 35, 놓친 수 2(V-07·V-08). 놓친 둘은 RC-48(VF-01)이 잡게 되어 닫혔다.
+- 리뷰 지적 처리: RV-01~03(중간)은 이 묶음에서 시험 먼저 → 구현 차례로 고쳤다. VF-01은 RC-48로 닫혔다. RV-04·05·06(낮음)은 `docs/PROGRESS.md` '구간 끝 정리 목록(갈래 1)'에 올렸다.
+- 먼저 합치는 까닭: 감독 결정으로 웨이브 끝을 기다리지 않고 먼저 `develop`에 합친다. 뒤 묶음의 합치기 전 검사에 이 스크립트를 쓰기 때문이다(도구 선행, ADR-0267 '웨이브 끝 푸시'의 예외).
