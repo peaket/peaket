@@ -259,6 +259,14 @@ function sections(lines, hs, name) {
     });
 }
 
+// 절 내용(같은 이름의 절 모두, 하위 제목과 그 아래 줄 포함). 빈 줄은 빼고 줄 끝 공백은 지운다. 절이 없으면 null
+function sectionText(text, name) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const found = sections(lines, headings(lines), name);
+  if (found.length === 0) return null;
+  return found.flatMap((r) => lines.slice(r.from, r.to)).map((l) => l.trimEnd()).filter((l) => l !== '').join('\n');
+}
+
 function sectionFilled(lines, hs, range) {
   const isHeading = new Set(hs.map((h) => h.line));
   for (let i = range.from; i < range.to; i++) if (lines[i].trim() !== '' && !isHeading.has(i)) return true;
@@ -391,8 +399,34 @@ function check(opt) {
     summaries.push(`묶음 ${id}: ${kind} 커밋 ${list.length}개(${ROLES.map((r) => `${r} ${count(r)}`).join('·')})`);
     if (kind === '기록만') continue;
 
+    // review·verify 커밋은 그 묶음 계획 파일의 자기 절('리뷰'·'검증')을 첫 부모보다 바꿔야 센다(계획 W7-L1-roles-testonly 8).
+    // 세지 않는 커밋은 구성·차례에서 없는 것으로 보고, 세션·담당 표에서는 그 역할로 센다
+    const planPath = `docs/review/plans/${id}.md`;
+    const own = { review: '리뷰', verify: '검증' };
+    const blobAt = (rev) => {
+      const r = run(['cat-file', 'blob', `${rev}:${planPath}`]);
+      return r.status === 0 ? r.out.toString('utf8') : null;
+    };
+    for (const c of list) {
+      const name = own[c.role];
+      if (!name || (kind === '문서' && c.role !== 'review')) continue;
+      let changed = false;
+      if (c.files.includes(planPath)) {
+        const now = blobAt(c.sha);
+        const mine = now === null ? null : sectionText(now, name);
+        const old = c.parents.length ? blobAt(c.parents[0]) : null;
+        const theirs = old === null ? null : sectionText(old, name);
+        changed = mine !== null && (theirs === null ? mine !== '' : mine !== theirs);
+      }
+      if (!changed) {
+        c.uncounted = true;
+        fail('구성', id, c.sha, `${c.role} 커밋이 계획 파일 '${name}' 절을 바꾸지 않았다(${planPath}, 첫 부모와 견줌)`);
+      }
+    }
+    const counted = list.filter((c) => !c.uncounted);
+
     const first = new Map();
-    for (const c of list) if (c.role && !first.has(c.role)) first.set(c.role, c);
+    for (const c of counted) if (c.role && !first.has(c.role)) first.set(c.role, c);
     // 차례: 역할마다 처음 나온 커밋이 그보다 앞서야 할 역할의 첫 커밋보다 먼저 오면 그 먼저 나온 커밋의 실패다.
     // 리뷰와 검증 사이의 차례는 보지 않는다(계획 W7-L1-roles-testonly 7의 4)
     const order = kind === '코드' ? CODE_ORDER : kind === '시험만' ? TEST_ONLY_ORDER : DOC_ORDER;
@@ -409,7 +443,7 @@ function check(opt) {
       const fixes = kind === '코드'
         ? list.filter((c) => c.acting === 'impl' && !c.files.every((p) => p.endsWith('.md')))
         : list.filter((c) => c.acting === 'test' && c.files.some(isTestPath));
-      const verifies = list.filter((c) => c.role === 'verify');
+      const verifies = counted.filter((c) => c.role === 'verify');
       const lastFix = fixes.at(-1);
       if (lastFix && verifies.length && verifies.at(-1).index < lastFix.index) {
         fail('차례', id, lastFix.sha, kind === '코드' ? '마지막 코드 고침 커밋 뒤에 verify 커밋이 없다' : '시험 파일을 고친 마지막 시험 쪽 커밋 뒤에 verify 커밋이 없다');
