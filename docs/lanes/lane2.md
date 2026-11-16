@@ -155,6 +155,10 @@
 - BAT-165 R-663 흔들림 후보: core-svc `test/internal-notify.test.ts`('fake 모드는 202로 보내고 …', BAT-425)·`internal-sale-config-token.http.test.ts`가 PC가 바쁠 때 시간 초과로 실패했다. 다시 돌려 통과
 - BAT-165 R-663 게이트: budgets `search-quality` 3개가 Docker 모드에서만 실패한다(컨테이너 웹 출처가 보안 맥락이 아님). b99ef759로 Chromium에 출처 예외를 줬고 CI·이 PC 모드는 통과한다. Docker 모드 결과를 한 번 더 본다
 - BAT-165 R-663 측정 M-1: `loadtest/scenarios/v1-search.js`의 `handleSummary`가 자동완성만 성공해도 `measured`라 적고 문턱이 모두 `>=0`이라 k6가 늘 끝 코드 0이다. 검색 성공 수를 따로 단언한다. `scripts/measure-search-reconcile.mjs`는 표를 비우지 않아 판이 바뀌지 않으니 머리 주석 '처음 채우기와 같은 일'을 고치거나 동작을 맞춘다(docs/review/measurements/BAT-165-sr-t13-search.md §5·§7)
+- W8-L2-ci-loadtest R-667 리뷰 RVL-3: `tools/ci/changes.mjs` 48행 loadtest 범위에 `services/purchase-svc/src/modules/inventory/`(adapters·domain)와 `application/expiry-sweeper.ts`가 없어, 운영 좌석 저장소만 바뀐 커밋(BAT-430 16b60af1)에서 loadtest-check가 돌지 않았다. 대조 시험(`loadtest/test/poc-seat.test.mjs`)은 키 이름·Lua 원문·상수를 모두 견주므로 그 경로를 범위에 더하고 BSL060 시험에 넣는다
+- W8-L2-ci-loadtest R-667 리뷰 RVL-2·검증 M4: seatKeys 대조가 키 함수 23개를 입력 한 벌(`'E1','X2','Y3'`)로만 불러, 인자를 보지 않는 틀린 사본도 통과한다. 회차·계정·색인이 다른 입력 두 벌로 부른다(`loadtest/test/poc-seat.test.mjs` 95·115행)
+- W8-L2-ci-loadtest R-667 리뷰 RVL-1: 계획 4절의 우선 구매 연산 목록에 `pin`(좌석 묶기, R-604부터 KEYS에 `prio`)이 빠졌다. 측정 도구가 묶기를 대조하게 될 때 함께 적는다(redis-seat-store.ts 512~526행)
+- W8-L2-ci-loadtest R-667 리뷰 RVL-4: docs/data.md 2520행 `s:{event:E}:prio` 행이 만료 연결을 '후속'이라 적었으나 R-587이 이미 이었다(expiry-sweeper.ts 401~403행, start.ts 483행). 문장을 고친다
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -241,3 +245,4 @@
 - 2026-11-16 웨이브 7 BAT-040(HOT-346, R-659): 공연 상세 예매 버튼에 선예매 대상 안내·판매 자격 없음의 이유 있는 비활성·매진·등급 매진·취소표 알림과 대기실 403 `sale-eligibility-required` 왕복을 이었다(ADR-0272). 리뷰 높음 2·웨이브 끝 S2·브라우저 BC040-1을 고치고, 틀린 구현 73개 중 살아남은 3개는 시험으로 잡았다. 자세한 것은 커밋 본문.
 - 2026-11-16 웨이브 7 BAT-170(HOT-380 ①·HOT-390 ①, R-660): 월렛 워커 갱신 보류·`no-store` 거르기, 공유 캐시 처리기(Valkey 클러스터·키 수 막기·정규 주소), 인앱 안내, FE-T31 판정 보강을 넣었다. 재배치 실패·SRI 26건은 BAT-171로 떼고 `web / reflow` 잡은 BAT-171에서 켠다(소유자 결정 (나)). 틀린 구현 71개 중 20개 살아남음, 17개는 시험으로 잡음. 자세한 것은 커밋 본문.
 - 2026-11-16 웨이브 7 BAT-165(HOT-270·HOT-280, R-663): 검색 읽기 모델을 표·증분 사전·후보 검색으로 바꾸고(ADR-0271) 리뷰 높음 둘(R165-1·R165-19)과 웨이브 끝 리뷰 지적(S3~S8·W2·W7·K4)을 고쳤다. 틀린 구현 62개 중 살아남은 20개는 시험이나 정리 목록으로 처리. SR-T13 ① 측정 M-1이 미달이라 두 단계는 체크하지 않고 BAT-166으로 넘겼다. 자세한 것은 커밋 본문.
+- 2026-11-16 W8-L2-ci-loadtest(R-667): develop CI 43856980576(033bb26d)의 `loadtest-check / loadtest` 실패를 고쳤다. BAT-430(16b60af1, R-575)이 운영 좌석 키 표에 `prio`를 더할 때 측정 도구 사본 `loadtest/poc/bench/src/seat-contract.mjs`를 고치지 않았고, loadtest-check는 `loadtest/`가 바뀔 때만 돌아 웨이브 7에서 `v1-search.js`가 바뀌며 드러났다. 사본에 `prio` 한 줄을 더했다. 계획 → 구현 → 리뷰(합쳐도 됨, 낮음 넷) → 검증(틀린 구현 여섯 중 다섯 잡힘, M4는 정리 목록). 시험 담당 없음(기존 시험이 재현, 감독 예외). 자세한 것은 커밋 본문
