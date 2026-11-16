@@ -501,4 +501,14 @@ describe('HOT-400 BOT-111 출발지 맞추기(identity §6 출발지)', () => {
     expect(clientIpOf(req(''))).toBe('10.0.0.9');
     expect(clientIpOf(req(undefined))).toBe('10.0.0.9');
   });
+
+  test('HOT-400 BOT-111 ③ RV-14 x-forwarded-for 머리가 배열로 여럿 오면 연결 상대 주소를 쓴다', () => {
+    const req = (xff: string[]) => ({ headers: { 'x-forwarded-for': xff }, socket: { remoteAddress: '10.0.0.9' } }) as unknown as Parameters<typeof clientIpOf>[0];
+    expect(clientIpOf(req(['203.0.113.5', '198.51.100.7']))).toBe('10.0.0.9');
+    expect(clientIpOf(req(['203.0.113.5', '203.0.113.5']))).toBe('10.0.0.9');
+    // 경계: 하나뿐인 배열은 그 값(IP일 때), 빈 배열은 연결 상대 주소
+    expect(clientIpOf(req(['203.0.113.5']))).toBe('203.0.113.5');
+    expect(clientIpOf(req(['unknown']))).toBe('10.0.0.9');
+    expect(clientIpOf(req([]))).toBe('10.0.0.9');
+  });
 });
