@@ -202,7 +202,8 @@ export async function sendBatch(url: string, body: string, deps: SendDeps = {}):
   }
   const f = deps.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   try {
-    await f(url, { method: 'POST', body, keepalive: true, credentials: 'omit', headers: { 'content-type': 'application/json' } });
+    // 보내는 화면 주소(검색어가 든 쿼리 등)가 Referer로 새지 않게 한다(ADR-0271 결정 20, catalog-review 14.2.3)
+    await f(url, { method: 'POST', body, keepalive: true, credentials: 'omit', referrerPolicy: 'no-referrer', headers: { 'content-type': 'application/json' } });
   } catch {
     // 지표는 잃어도 된다(다시 보내지 않는다)
   }

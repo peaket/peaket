@@ -444,6 +444,9 @@ importers:
       '@peaket/seatmap':
         specifier: workspace:*
         version: link:../../packages/seatmap
+      '@peaket/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@portone/browser-sdk':
         specifier: 0.1.13
         version: 0.1.13

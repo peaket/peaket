@@ -1,5 +1,7 @@
-// 브라우저의 검색 품질 사건 묶음 하나(docs/features/search.md §11). 같은 출처 `/_t/rum`으로만 보내고 검색어·주소·쿼리 문자열을 싣지 않는다(catalog-review 14.2.3).
-// 화면을 떠날 때(pagehide) 모은 것을 보낸다. 수집기는 게이트웨이 단계 몫이라 그 전에는 보내기가 실패해도 화면은 그대로다.
+// 브라우저의 검색 품질 사건 묶음 하나(docs/features/search.md §11, ADR-0271 결정 20). 같은 출처 `/_t/rum`으로만 보내고 검색어·주소·쿼리 문자열을 싣지 않는다(catalog-review 14.2.3).
+// 보내기는 @peaket/telemetry lite의 sendBatch다(credentials: omit, keepalive, referrerPolicy: no-referrer, keepalive를 모르면 sendBeacon).
+// 60초 [가정]마다(사건을 부를 때 모듈이 본다), 화면을 숨길 때(visibilitychange), 떠날 때(pagehide) 보낸다. 수집기가 없어 보내기가 실패해도 화면은 그대로다.
+import { sendBatch } from '@peaket/telemetry/lite';
 import { createSearchQuality, type SearchQuality } from './search-quality.ts';
 
 let quality: SearchQuality | undefined;
@@ -8,13 +10,11 @@ let quality: SearchQuality | undefined;
 export function searchQuality(): SearchQuality {
   if (quality) return quality;
   if (typeof window === 'undefined') return NOOP;
-  quality = createSearchQuality({
-    send: async (path, body) => {
-      await fetch(path, { method: 'POST', body, keepalive: true, credentials: 'same-origin', headers: { 'content-type': 'application/json' } });
-    },
-    now: () => Date.now(),
+  const q = createSearchQuality({ send: (path, body) => sendBatch(path, body), now: () => Date.now() });
+  quality = q;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void q.flush();
   });
-  const q = quality;
   window.addEventListener('pagehide', () => void q.flush());
   return q;
 }

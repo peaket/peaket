@@ -11,8 +11,11 @@ import { Suspense } from 'react';
 import { AppShell } from '@/widgets/app-shell';
 import { SearchResults, SearchShellSkeleton } from './SearchResults';
 
-/** 검색 화면은 검색 엔진 색인에서 뺀다(noindex, follow, d5 §5.3) */
-export const searchMetadata: Metadata = { title: '검색', robots: { index: false, follow: true } };
+/**
+ * 검색 화면은 검색 엔진 색인에서 뺀다(noindex, follow, d5 §5.3).
+ * 리퍼러 정책 strict-origin: 이 화면에서 나가는 요청(품질 사건 sendBeacon 등)에 ?q=가 든 주소가 Referer로 가지 않게 한다(ADR-0271 결정 20, catalog-review 3.4.5·14.2.3)
+ */
+export const searchMetadata: Metadata = { title: '검색', robots: { index: false, follow: true }, referrer: 'strict-origin' };
 
 export function SearchPage() {
   return (
