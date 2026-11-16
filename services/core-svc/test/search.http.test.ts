@@ -4,6 +4,8 @@ import 'reflect-metadata';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryCatalogRepository, SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SearchCatalog, SearchUnavailable, type SearchDictionarySource, type SearchIndex } from '../src/modules/catalog/index.js';
@@ -91,7 +93,8 @@ describe('검색(메모리)', () => {
     expect(out.total).toBe(2);
   });
 
-  test('SR-T4·SR-T9 로마자 입력은 한/영 변환으로 찾고 noConvert면 변환하지 않으며, 쪽 상한을 넘으면 400이다 [ASVS v5.0.0-2.1.3] [ASVS v5.0.0-16.5.2]', async () => {
+  // [ASVS v5.0.0-16.5.2](바깥 자원 실패)는 이 시험이 보지 않아 뗐다. 그 태그는 묶음 포화 503 시험이 본다(BAT-165 검증 기준 대조 3)
+  test('SR-T4·SR-T9 로마자 입력은 한/영 변환으로 찾고 noConvert면 변환하지 않으며, 쪽 상한을 넘으면 400이다 [ASVS v5.0.0-2.1.3]', async () => {
     const converted = await get('/v1/search?q=fnaps');
     expect(converted.statusCode).toBe(200);
     const out = ListSearchResultsResponse.parse(json(converted));
@@ -101,7 +104,8 @@ describe('검색(메모리)', () => {
     expect((await get('/v1/search?page=51')).statusCode).toBe(400);
   });
 
-  test('SR-T6·필터: 장르·공연장·아티스트·기간·상태로 거르고 filterNames를 채운다 [ASVS v5.0.0-1.2.4] [ASVS v5.0.0-1.2.9] [ASVS v5.0.0-2.1.1]', async () => {
+  // SR-T6(`%`·`_`·`\` 입력)은 이 시험이 보지 않아 ID를 뗐다. 아래 'SR-T6 …' 시험이 본다(BAT-165 검증 기준 대조 1)
+  test('필터: 장르·공연장·아티스트·기간·상태로 거르고 filterNames를 채운다 [ASVS v5.0.0-1.2.4] [ASVS v5.0.0-2.1.1]', async () => {
     const byGenre = await get('/v1/search?genre=' + encodeURIComponent('뮤지컬') + '&includePast=true');
     expect(ListSearchResultsResponse.parse(json(byGenre)).items?.map((x) => x.productionId)).toEqual([P3]);
     const byPlace = await get(`/v1/search?placeId=${PLACE}`);
@@ -161,6 +165,13 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
     repo2.details.set(e, { event: { endsAt: at('2026-12-20T12:00:00Z') }, place: { id: PLACE2, name: '은하홀', address: '서울' }, artists: [] } as never);
   }
   add(STAR, '별빛 12345 투어', '콘서트');
+  // SR-T6: 이름에 LIKE 메타 문자가 든 공연(글자 그대로만 맞아야 한다)
+  const PCT = '66666666-6666-4666-8666-666666666671';
+  const UND = '66666666-6666-4666-8666-666666666672';
+  const BSL = '66666666-6666-4666-8666-666666666673';
+  add(PCT, '%할인 쇼', '콘서트');
+  add(UND, '_밑줄 쇼', '콘서트');
+  add(BSL, '\\역빗금 쇼', '콘서트');
   add(AURORA[0]!, '오로라 콘서트', '콘서트');
   add(AURORA[1]!, '오로라 뮤지컬', '뮤지컬');
   add(AURORA[2]!, '오로라 투어', '콘서트');
@@ -185,7 +196,8 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
   const get2 = (url: string, headers: Record<string, string> = {}) => svc2.http.inject({ method: 'GET', url, headers });
   const lines = (event: string) => logs.lines().filter((l) => l.event === event);
 
-  test('SR-T13 ① 검색 전용 연결 묶음이 넘치면 503·Retry-After·no-store이고 search_pool_saturated를 남기며 자동완성은 그대로다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.3.3] [ASVS v5.0.0-16.5.2]', async () => {
+  // SR-T13 ①의 기준은 원본 p95·묶음 대기 측정이라 ID를 뗐다(측정 M-1이 닫는다, BAT-165 검증 기준 대조 4)
+  test('검색 전용 연결 묶음이 넘치면 503·Retry-After·no-store이고 search_pool_saturated를 남기며 자동완성은 그대로다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.3.3] [ASVS v5.0.0-16.5.2]', async () => {
     const index = svc2.app.get<SearchIndex>(SEARCH_INDEX);
     const real = index.search.bind(index);
     let saturated = 0;
@@ -203,6 +215,11 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
       expect(r.headers['cache-control']).toBe('no-store');
       expect(r.headers['set-cookie']).toBeUndefined();
       expect(r.headers['content-type']).toContain('application/problem+json');
+      // problem 이름은 openapi 목록의 503 이름이다(docs/api/openapi.yaml problem 목록, V165-15). 값은 openapi에서 읽는다
+      const listed503 = [...readFileSync(fileURLToPath(new URL('../../../docs/api/openapi.yaml', import.meta.url)), 'utf8').matchAll(/^ {4}([a-z][a-z0-9-]+): \{ status: 503,/gm)].map((m) => m[1]);
+      expect(listed503).toContain('dependency-unavailable');
+      const problemType = String((JSON.parse(r.payload) as { type?: string }).type ?? '');
+      expect(listed503.filter((name) => problemType === name || problemType.endsWith(`/${name}`))).toEqual(['dependency-unavailable']);
       const sat = lines('search_pool_saturated').slice(before);
       expect(sat).toHaveLength(1);
       expect(sat[0]).toMatchObject({ event: 'search_pool_saturated', kind: 'security', reason: 'pool-timeout' });
@@ -309,6 +326,21 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  test('SR-T6 `%`·`_`·`\\` 입력은 글자 그대로 비교되어 그 글자가 든 공연만 맞고 전체 일치나 오류가 없다 [ASVS v5.0.0-1.2.9]', async () => {
+    const ids = async (text: string) => {
+      const r = await get2('/v1/search?q=' + encodeURIComponent(text));
+      expect({ text, status: r.statusCode }).toEqual({ text, status: 200 });
+      return ListSearchResultsResponse.parse(json(r)).items?.map((x) => x.productionId) ?? [];
+    };
+    expect(await ids('%')).toEqual([PCT]);
+    expect(await ids('_')).toEqual([UND]);
+    expect(await ids('\\')).toEqual([BSL]);
+    expect(await ids('%할')).toEqual([PCT]);
+    // 메타 문자로 읽히면 다른 공연에도 맞을 꼴: '%쇼'(아무 글자 + 쇼), '_줄'(한 글자 + 줄)
+    expect(await ids('%쇼')).toEqual([]);
+    expect(await ids('_줄')).toEqual([]);
   });
 
   test('SR-T17 검색 결과는 가리기 전 값으로 찾은 것과 같고 search_query 줄에는 가린 값만 남는다', async () => {

@@ -238,7 +238,8 @@ describe('SR-T8 읽기 모델에 들어가는 공연', () => {
 });
 
 describe('검색 질의(PostgreSQL)', () => {
-  test('SR-T13 ① 검색 전용 연결 묶음(크기 2·대기 250ms로 주입)이 다 차면 SearchUnavailable(pool-timeout)을 던지고 대기 시간을 지킨다 [ASVS v5.0.0-2.4.1]', async () => {
+  // SR-T13 ①의 기준은 원본 p95·묶음 대기 측정이라 ID를 뗐다(BAT-165 검증 기준 대조 4)
+  test('검색 전용 연결 묶음(크기 2·대기 250ms로 주입)이 다 차면 SearchUnavailable(pool-timeout)을 던지고 대기 시간을 지킨다 [ASVS v5.0.0-2.4.1]', async () => {
     const searchDb = createDatabase({ url: pg.url, applicationName: 'core-svc-search-pool', max: 2, connectionTimeoutMillis: 250 });
     const index = new DrizzleSearchIndex(searchDb, 'https://img.test');
     const held = [await searchDb.pool.connect(), await searchDb.pool.connect()];
@@ -1295,6 +1296,95 @@ describe('R165-23 건너뛴 1분 정리는 시각 창을 잃지 않는다', () =
       await staged.close();
       await d.close();
       c.stop();
+    }
+  });
+});
+
+// ---- BAT-165 검증에서 살아남은 틀린 구현(V165-33·34)을 잡는 시험 ----
+describe('검증 V165 PostgreSQL 경로', () => {
+  let c: PostgresContainer;
+  let d: Database;
+  let model: DrizzleSearchReadModel;
+  const T = Date.parse('2026-12-15T00:00:00.000Z');
+  const P = randomUUID();
+  const L = randomUUID();
+  const add = async (title: string) => {
+    const id = randomUUID();
+    await d.db.insert(production).values({ id, promoterId: P, placeId: L, title, genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(T - 10 * D) });
+    await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: P, venueId: null, openAt: new Date(T - D), startsAt: new Date(T + 20 * D), endsAt: new Date(T + 20 * D + 2 * H) });
+    return id;
+  };
+
+  beforeAll(async () => {
+    c = await startPostgres();
+    await migrateCore(c.url);
+    d = createDatabase({ url: c.url, applicationName: 'core-svc-v165', max: 4 });
+    model = new DrizzleSearchReadModel(d, 'https://img.test');
+    await d.db.insert(promoter).values({ id: P, legalName: '(주)검증' });
+    await d.db.insert(place).values({ id: L, name: '검증홀', address: '서울', region: '서울', createdBy: ACTOR });
+  }, 180_000);
+  afterAll(async () => {
+    await d?.close();
+    c?.stop();
+  });
+
+  test('SR-T6 PostgreSQL 어댑터에서 `%`·`_`·`\\` 입력은 글자 그대로 비교되어 그 글자가 든 공연만 맞는다 [ASVS v5.0.0-1.2.9](V165-34)', async () => {
+    const pct = await add('%할인 쇼');
+    const und = await add('_밑줄 쇼');
+    const bsl = await add('\\역빗금 쇼');
+    const others = [await add('일반 쇼 하나'), await add('일반 쇼 둘'), await add('밑줄 없는 쇼')];
+    await d.transaction((tx) => model.sync(tx, [pct, und, bsl, ...others], new Date(T)));
+    const index = new DrizzleSearchIndex(d, 'https://img.test');
+    const ids = async (text: string) => (await index.search({ q: text, includePast: false, noConvert: false, page: 1, now: new Date(T) })).items.map((x) => x.productionId);
+    // 대조군: 보통 검색어는 맞는다(빈 결과로 통과하지 않게)
+    expect((await ids('일반 쇼')).sort()).toEqual([others[0], others[1]].sort());
+    expect(await ids('%')).toEqual([pct]);
+    expect(await ids('_')).toEqual([und]);
+    expect(await ids('\\')).toEqual([bsl]);
+    expect(await ids('%할')).toEqual([pct]);
+    // 메타 문자로 읽히면 다른 공연에도 맞을 꼴
+    expect(await ids('%쇼')).toEqual([]);
+    expect(await ids('_줄')).toEqual([]);
+  });
+
+  test('SR-T15 ② 진짜 사전 원천은 줄을 읽은 뒤 다른 연결의 커밋이 끼어도 다음 증분에서 빠진 줄이 없다(V165-33)', async () => {
+    const first = await add('끼어듦 처음공연');
+    await d.transaction((tx) => model.sync(tx, [first], new Date(T)));
+    // 사전 원천 연결: 이름 줄(search_term)을 읽은 바로 뒤에, 한 번만 다른 연결로 새 공연을 동기화해 커밋한다
+    const src = createDatabase({ url: c.url, applicationName: 'core-svc-v165-source', max: 2 });
+    const inject = { armed: false, done: false, id: '' };
+    src.pool.on('connect', (client) => {
+      const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+      (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+        const r = await q(...a);
+        const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+        if (inject.armed && !inject.done && /from\s+"?search_term"?/i.test(t)) {
+          inject.done = true;
+          inject.id = await add('끼어듦 늦은공연');
+          await d.transaction((tx) => model.sync(tx, [inject.id], new Date(T)));
+        }
+        return r;
+      };
+    });
+    try {
+      const clock2 = movingClock(T);
+      const dictionary = new SuggestionDictionary(new DrizzleSearchReadModel(src, 'https://img.test'), clock2);
+      await dictionary.refresh();
+      // 판을 올려 다음 증분이 줄을 읽게 하고, 그 증분 안에서 줄을 읽은 뒤 끼어든다
+      const bump = await add('끼어듦 판올림공연');
+      await d.transaction((tx) => model.sync(tx, [bump], new Date(T)));
+      inject.armed = true;
+      clock2.set(T + 10_000);
+      await dictionary.refresh();
+      expect(inject.done).toBe(true);
+      // 다음 증분(끼어듦 없음)
+      clock2.set(T + 20_000);
+      await dictionary.refresh();
+      const has = dictionary.suggest('끼어듦 늦은').items.some((x) => x.productionId === inject.id);
+      expect(has).toBe(true);
+      expect(dictionary.entries).toBe(Number((await rows(d, 'select count(*)::int as n from search_term'))[0]!.n));
+    } finally {
+      await src.close();
     }
   });
 });
