@@ -945,6 +945,18 @@ const SAFELISTED_REQUEST = new Set(['accept', 'accept-language', 'content-langua
 /** 스크립트가 늘 읽을 수 있는 응답 머리(Fetch 표준 CORS-safelisted response-header). Set-Cookie는 노출할 수 없다 */
 const SAFELISTED_RESPONSE = new Set(['cache-control', 'content-language', 'content-length', 'content-type', 'expires', 'last-modified', 'pragma', 'set-cookie']);
 
+/** 서버끼리 부르는 외부 수신 작업인가: openapi 태그 webhooks('외부 수신')이고 인증이 없다(security: [], 브라우저 쿠키를 받지 않는다) */
+const isServerToServer = (op) => (op.tags ?? []).includes('webhooks') && Array.isArray(op.security) && op.security.length === 0;
+/** 교차 출처 대상에서 뺀 작업 목록(빈 결과·뜻밖의 작업이 소리 없이 빠지지 않게 시험이 본다) */
+function serverToServerOps() {
+  const doc = openapi();
+  return Object.entries(doc.paths ?? {}).flatMap(([path, item]) =>
+    Object.entries(item ?? {})
+      .filter(([m, op]) => ['get', 'post', 'put', 'patch', 'delete'].includes(m) && op && isServerToServer(op))
+      .map(([m]) => `${m.toUpperCase()} ${path}`),
+  );
+}
+
 /** openapi 작업마다 (그 작업이 닿는 게이트웨이 라우트, 요청 머리, 응답 머리). 라우트에 맞지 않는 작업은 뺀다(라우트 빠짐은 BAT-060 몫) */
 function operationsOnRoutes() {
   const out = [];
@@ -956,6 +968,9 @@ function operationsOnRoutes() {
       const servers = op.servers ?? item.servers;
       // 화면 호스트(www, 같은 출처)와 CDN 파일 호스트(queue-files)로 가는 작업은 교차 출처 API가 아니다
       if (servers?.some((s) => /\/\/(www|queue-files)\./.test(s.url))) continue;
+      // 외부 수신(openapi 태그 webhooks, 태그 설명 '외부 수신')은 결제사 서버가 부르는 서버 사이 경로라 교차 출처 API가 아니다. 그 라우트에는
+      // CORS를 걸지 않는다(docs/infra.md §4.1 '웹훅 경로', BAT-060 D-T50 ⑥, BAT-060 계획 '시험 이의'의 시험 담당 판단). 빠지는 작업은 serverToServerOps가 따로 본다
+      if (isServerToServer(op)) continue;
       const sample = path.replace(/\{[^}]+\}/g, 'e2e-id-10');
       const M = method.toUpperCase();
       const hits = Object.entries(API_HOSTS)
@@ -1021,6 +1036,23 @@ test('W7-WIR-04 API 호스트 라우트마다 작업 응답 머리 가운데 COR
     if (['gw-fan', 'gw-ops', 'gw-scanner'].includes(o.gw) && !expose.has('retry-after')) missing.push(`${o.gw}/${o.hit.route.metadata?.name}: retry-after`);
   }
   assert.deepEqual([...new Set(missing)], [], '노출하지 않는 응답 머리');
+});
+
+test("W7-COR-01 W7-WIR-04 infra §4.1 '웹훅 경로' 교차 출처 대상에서 빠지는 것은 외부 수신 작업(태그 webhooks·security: [])뿐이고 그 작업이 닿는 라우트에는 CORS가 없다", () => {
+  requireDefinitions();
+  const skipped = serverToServerOps();
+  assert.ok(skipped.length > 0, '빠지는 외부 수신 작업이 없다(규칙이 아무것도 고르지 못한다)');
+  for (const key of skipped) {
+    const [method, path] = key.split(' ');
+    assert.ok(path.startsWith('/v1/webhooks/'), `${key}: 외부 수신 앞부분 밖의 작업이 교차 출처 대상에서 빠진다`);
+    const hit = routeFor('gw-partner', 'partner-api.peaket.example', method, path);
+    assert.ok(hit && (hit.rule.backendRefs ?? []).length > 0, `${key}: 받는 라우트가 없다`);
+    assert.deepEqual(corsFor(hit.route), [], `${key}: ${hit.route.metadata?.name}에 CORS가 있다(외부 수신에는 걸지 않는다)`);
+  }
+  // 교차 출처 대상(operationsOnRoutes)에는 외부 수신 작업이 없고, 나머지 작업은 그대로 남는다
+  const ops = operationsOnRoutes();
+  assert.ok(!ops.some((o) => skipped.includes(`${o.method} ${o.path}`)), '외부 수신 작업이 교차 출처 대상에 남았다');
+  assert.ok(ops.length > 100, `교차 출처 대상이 ${ops.length}개뿐이다`);
 });
 
 /** EnvoyProxy의 추적 설정 */
