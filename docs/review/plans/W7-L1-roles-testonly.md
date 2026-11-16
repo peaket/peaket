@@ -93,6 +93,37 @@
 - 시험만 묶음이라고 밝힌 까닭이 맞는지(정말 제품 코드를 고칠 일이 아닌지)는 리뷰 담당이 본다.
 - 고친 시험이 정본의 판정 기준과 맞는지(날짜를 고치며 단언을 느슨하게 하지 않았는지)는 리뷰·검증 담당이 본다. 시험만 묶음의 '검증' 절에는 고친 시험마다 틀린 구현으로 실패를 본 결과를 적는다.
 
+### 7. 검증 차례 바꾸기(감독 결정, 2026-11-16)
+
+감독 결정: 차례 규칙의 '검증은 리뷰 뒤'를 '검증은 마지막 코드 고침 뒤'로 바꾼다. 리뷰와 검증은 서로의 결과를 보지 않고 같은 때 따로 돌 수 있다. 지킬 것은 검증이 고친 코드 위에서 돌았는가다(갈래 3 W8-ci-fix 사례). 정본 문장은 §8.6 '합치기 전 역할 확인' 세부의 '차례'와 '시험만 묶음' 줄이다. 아래가 위 1의 4와 지난 계획 3의 ③을 바꾼다.
+
+1. **마지막 검증이 마지막 코드 고침보다 뒤 (추천 적용, 2026-11-16)**: 묶음의 마지막 verify 커밋이 마지막 코드 고침 커밋보다 뒤여야 한다.
+   - '첫 verify'로 보지 않는 까닭: 첫 verify로 견주면 검증 → 고침 → 다시 검증(BAT-055처럼 여러 바퀴)이 첫 검증 뒤의 고침 때문에 실패한다. 마지막 verify로 견주면 여러 바퀴는 되고, 고침 뒤에 다시 검증하지 않은 경우만 막힌다.
+   - 실패 줄: `[차례] <묶음> <마지막 코드 고침 커밋 해시> 마지막 코드 고침 커밋 뒤에 verify 커밋이 없다`.
+2. **코드 고침으로 세는 커밋 (추천 적용, 2026-11-16)**: 코드 묶음에서는 `impl` 커밋과 `review-fix`+`Fix-By: impl` 커밋이다. 바꾼 파일이 모두 `.md`인 것은 세지 않는다(행동이 바뀌지 않아 검증 결과가 그대로다. 지난 계획 8의 3의 문서 예외와 같은 선).
+   - 시험 쪽 커밋(`test`, `Fix-By: test`)은 코드 묶음에서 세지 않는다. 검증 뒤에 더한 시험(살아남은 틀린 구현을 잡는 시험)은 검증이 본 코드를 바꾸지 않는다.
+3. **첫 verify는 첫 impl 뒤 (추천 적용, 2026-11-16)**: 지금 꼴(첫 plan < 첫 test < 첫 impl < 첫 verify)에서 verify를 review 뒤에 두던 것만 뺀다. 코드가 없는데 검증한 커밋은 그대로 막는다. 첫 review도 지금처럼 첫 impl 뒤다.
+4. **review와 verify가 섞인 차례 (추천 적용, 2026-11-16)**: 둘 사이의 차례는 보지 않는다(review → verify, verify → review, review → verify → review 모두 된다). 리뷰 반영은 지금처럼 첫 review나 첫 verify 가운데 이른 것보다 뒤다.
+5. **시험만 묶음 (추천 적용, 2026-11-16)**: 코드 고침이 없으므로 고친 시험이 검증받을 대상이다. 마지막 verify가 시험 파일을 바꾼 마지막 시험 쪽 커밋(`test`, `Fix-By: test`)보다 뒤여야 한다. 문서 경로만 바꾼 시험 쪽 커밋은 세지 않는다. 첫 review·첫 verify는 첫 test 뒤이고, 둘 사이의 차례는 보지 않는다.
+6. **문서 묶음**: verify가 없으므로 이 규칙이 걸리지 않는다(계획 < 작성 < 리뷰 그대로).
+7. **바뀌는 기존 시험(시험 담당 몫, `Fix-By: test`)**:
+   - 좋은 코드 묶음 BAT-901은 지금 review → verify → `Fix-By: test` → `Fix-By: impl`(`services/a/src/x.ts`) 차례라 새 규칙에서는 실패한다. 마지막 `Fix-By: impl` 뒤에 verify를 옮기거나 하나 더 둔다. 이 사건을 쓰는 다른 시험도 같이 맞춘다.
+   - RC-16의 'verify가 첫 review 앞'과 RC-57의 'verify가 첫 review 앞'은 이제 통과다. 실패 사례에서 빼고 아래 RC-60의 통과 사례로 옮긴다.
+
+**더하는 시험**(이름 꼴은 위 4와 같다)
+
+| 시험 | 사건 | 단언 |
+| --- | --- | --- |
+| RC-60 ③ 리뷰와 검증의 차례는 보지 않는다 | 코드: plan → test → impl → verify → review → record / plan → test → impl → review → verify → review. 시험만: plan → test → verify → review | 0 |
+| RC-61 ③ 검증 → 고침 → 다시 검증은 통과한다 | … impl → review → verify → `Fix-By: test`(RV-01) → `Fix-By: impl`(RV-01, 코드) → verify → record / 세 바퀴(verify → 고침 → verify → 고침 → verify) / 마지막 verify 뒤에 `Fix-By: test` 커밋(시험 파일)만 옴 | 0 |
+| RC-62 ③ 마지막 코드 고침 뒤에 검증이 없으면 실패한다 | … verify → `Fix-By: test` → `Fix-By: impl`(코드) → record / 유일한 verify 뒤에 impl 커밋(코드) / verify → 고침 → verify → 고침(마지막 고침 뒤 verify 없음) | 1, `[차례] BAT-901 <마지막 코드 고침 해시>` 한 줄 |
+| RC-63 ③ `.md`만 바꾼 구현 쪽 커밋은 코드 고침이 아니다 | verify 뒤 `Fix-By: impl`이 `tools/ci/README.md`만 고침 / verify 뒤 impl 커밋이 `tools/ci/README.md`·`docs/PROGRESS.md`만 고침 → 통과. verify 뒤 `Fix-By: impl`이 `tools/ci/README.md`와 `tools/ci/roles-check.mjs`를 함께 고침 → 실패 | 0·1(`[차례]`) |
+| RC-64 ③ 첫 검증은 첫 구현 뒤다 | plan → test → verify → impl → review → verify | 1, `[차례] BAT-901 <첫 verify 해시>` |
+| RC-65 ③ 시험만 묶음의 검증 차례 | verify 뒤 `Fix-By: test`가 시험 파일을 고치고 다시 verify 없음 → 실패(그 커밋 해시) / verify → `Fix-By: test`(시험 파일) → verify → 통과 / verify 뒤 `Fix-By: test`가 `docs/PROGRESS.md`만 고침 → 통과 / verify가 첫 test 앞 → 실패 | 1·0, `[차례] BAT-950` |
+| RC-66 ③ 문서 묶음에는 검증 차례가 걸리지 않는다 | 좋은 문서 묶음 BAT-902(verify 없음) / 문서 묶음의 review 뒤 doc 커밋 | 0 |
+
+틀린 구현 표본에 M-18~M-25를 더했다('틀린 구현 목록' 표 끝).
+
 ## 실패 확인
 
 - 누가: 시험 담당 `w7l1-roles-test-659fff14`, 2026-11-16. 작업 폴더 `D:/ticketpass-lane1-v`, 구현은 `origin/develop`의 `tools/ci/roles-check.mjs` 그대로(이 가지에서 바뀌지 않음).
@@ -132,6 +163,14 @@
 | M-15 | ③ | 시험만 묶음의 차례를 보지 않는다 | RC-57 |
 | M-16 | ⑧ | 시험만 묶음의 계획 파일 절로 문서 묶음의 것('리뷰'·'담당 표')을 쓴다 | RC-58 |
 | M-17 | ⑩ | 묶음 줄의 종류를 `코드`로 찍는다 | RC-52, RC-59 |
+| M-18 | ③ | 마지막 verify 대신 첫 verify를 마지막 코드 고침과 견준다(여러 바퀴 검증을 막음) | RC-61 |
+| M-19 | ③ | 옛 규칙(첫 review < 첫 verify)을 남긴다 | RC-60 |
+| M-20 | ③ | `.md`만 바꾼 구현 쪽 커밋도 코드 고침으로 센다 | RC-63 |
+| M-21 | ③ | 코드 고침으로 `Fix-By: impl`만 세고 impl 커밋은 세지 않는다 | RC-62 |
+| M-22 | ③ | 코드 묶음에서 `Fix-By: test` 커밋도 코드 고침으로 센다 | RC-61 |
+| M-23 | ③ | 시험만 묶음에서 검증 뒤의 시험 고침을 보지 않는다 | RC-65 |
+| M-24 | ③ | 첫 verify < 첫 impl 검사를 뺀다 | RC-64 |
+| M-25 | ③ | 문서 묶음에도 verify를 요구하거나 검증 차례를 건다 | RC-66 |
 
 ## 검증
 
@@ -139,6 +178,6 @@
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T13:08+09:00 | 2026-11-16T13:20+09:00 |
+| plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T13:08+09:00 | 2026-11-16T13:57+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T13:20+09:00 | 2026-11-16T13:32+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T13:32+09:00 | 2026-11-16T13:52+09:00 |
