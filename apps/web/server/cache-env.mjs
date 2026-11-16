@@ -31,3 +31,21 @@ export function assertCacheEnv(env = process.env) {
     `${CACHE_URL_ENV}가 없다: PEAKET_ENV=${JSON.stringify(env.PEAKET_ENV ?? '')}는 운영으로 보므로 공유 캐시 주소가 있어야 시작한다(local·ci·demo만 주소 없이 뜬다, docs/frontend.md §5.18)`,
   );
 }
+
+// BAT-170 리뷰 R170-1·R170-2(계획 §12, docs/frontend.md §5.18 '공유 캐시 처리기 세부'): 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3).
+// 동작과 환경 값 이름은 구현 담당이 쓴다.
+
+/** start.mjs가 읽은 빌드 칸을 Next.js 프로세스에 넘기는 환경 값 이름(정본 값은 계획 §12) */
+export const CACHE_BUILD_ENV = '아직 없음';
+
+/** 산출 폴더의 required-server-files.json config가 두 처리기·메모리 캐시 0인지. 어긋나면 그 칸 이름을 실어 던진다 */
+export function assertBuiltCacheConfig(distDir) {
+  void distDir;
+  throw new Error('아직 없음');
+}
+
+/** 빌드 칸: config.deploymentId, 없으면 BUILD_ID. [A-Za-z0-9_-] 1~64자가 아니거나 못 읽으면 던진다 */
+export function readBuildTag(distDir) {
+  void distDir;
+  throw new Error('아직 없음');
+}

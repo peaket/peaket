@@ -15,6 +15,8 @@ const SLACK_MS = 900;
 
 const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const NAME = `bat170-valkey-${process.pid}`;
+/** 이 시험의 빌드 칸(정본 꼴 [A-Za-z0-9_-] 1~64자) */
+const BUILD = 'bat170int';
 let cli;
 
 /** 처리기 모듈을 따로 불러온다(모듈 상태·연결을 나눠 다른 파드처럼) */
@@ -37,6 +39,8 @@ before(async () => {
   }
   const mapped = docker(['port', NAME, '6379/tcp']).split('\n')[0];
   process.env.PEAKET_WEB_CACHE_REDIS_URL = `redis://127.0.0.1:${mapped.slice(mapped.lastIndexOf(':') + 1)}`;
+  // 주소가 있으면 빌드 칸(PEAKET_WEB_CACHE_BUILD)이 있어야 처리기를 불러온다(BAT-170 리뷰 R170-2, 계획 §12). 같은 판의 두 파드
+  process.env.PEAKET_WEB_CACHE_BUILD = BUILD;
   useA = await load('use-cache-handler.mjs', 'pod-a');
   useB = await load('use-cache-handler.mjs', 'pod-b');
   IsrA = await load('cache-handler.mjs', 'pod-a');
@@ -107,15 +111,33 @@ test('HOT-390 쓴 키를 모두 TTL과 함께 확인한다(TTL -1인 키 0)', as
   await new IsrA(isrCtx()).set('/search', page('<p>검색</p>', 'search-isr'), { cacheControl: { revalidate: 60, expire: 120 }, isFallback: false });
   const keys = cli('--scan').split('\n').filter(Boolean).sort();
   assert.ok(keys.includes('web:data:data-key-2'), keys.join(', '));
-  assert.ok(keys.includes('web:isr:/search'), keys.join(', '));
+  assert.ok(keys.includes(`web:isr:${BUILD}:/search`), keys.join(', '));
   for (const k of keys) {
     assert.match(k, /^web:(isr|data|\{tag\}):/, `정본 키 꼴 밖: ${k}`);
     const ttl = Number(cli('TTL', k));
     assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
   }
   // 값 TTL은 만료(expire)와 30일 가운데 짧은 쪽
-  assert.ok(Number(cli('TTL', 'web:isr:/search')) <= 120);
+  assert.ok(Number(cli('TTL', `web:isr:${BUILD}:/search`)) <= 120);
   assert.ok(Number(cli('TTL', 'web:data:data-key-2')) <= 300);
+});
+
+// BAT-170 리뷰 R170-2(계획 §12 R2-4): 미리 그린 화면 키 web:isr:<빌드 칸>:<캐시 키>. 시험 담당(l2w7-BAT170-test)이 구현 전에 더했다
+test('HOT-390 R170-2 실제 Valkey에서 빌드가 다른 두 처리기는 같은 경로의 미리 그린 화면을 나눠 쓰지 않는다', async () => {
+  process.env.PEAKET_WEB_CACHE_BUILD = 'a1b2c3d4';
+  const IsrOld = await load('cache-handler.mjs', 'build-a');
+  process.env.PEAKET_WEB_CACHE_BUILD = 'a1b2c3d5';
+  const IsrNew = await load('cache-handler.mjs', 'build-b');
+  process.env.PEAKET_WEB_CACHE_BUILD = BUILD;
+  const oldPod = new IsrOld(isrCtx());
+  const newPod = new IsrNew(isrCtx());
+  await oldPod.set('/events/evt-bat170', page('<p>옛 판</p>', 'event-bat170'), { cacheControl: { revalidate: 60, expire: 300 }, isFallback: false });
+  assert.equal((await oldPod.get('/events/evt-bat170', { kind: 'APP_PAGE', isFallback: false }))?.value?.html, '<p>옛 판</p>');
+  assert.equal((await newPod.get('/events/evt-bat170', { kind: 'APP_PAGE', isFallback: false })) ?? null, null, '새 판이 옛 판의 화면을 읽었다');
+  // 키 꼴은 GET으로 확인한다(빌드 칸이 키에 그대로 있다)
+  assert.notEqual(cli('GET', 'web:isr:a1b2c3d4:/events/evt-bat170'), '', '옛 판 키가 없다');
+  assert.equal(cli('EXISTS', 'web:isr:a1b2c3d5:/events/evt-bat170'), '0');
+  assert.equal(cli('EXISTS', 'web:isr:/events/evt-bat170'), '0', '빌드 칸 없는 키로 썼다');
 });
 
 test('HOT-390 Valkey를 멈추면 get은 없음을 돌려주고 set은 던지지 않는다', async () => {

@@ -37,6 +37,16 @@ function tagsOfValue(data) {
 const url = process.env[CACHE_URL_ENV]?.trim();
 const store = url ? createCacheStore({ client: createLazyRedis(url) }) : null;
 
+/**
+ * 미리 그린 화면 처리기(BAT-170 리뷰 R170-1·R170-2, 계획 §12): get·set·revalidateTag·resetRequestCache를 가진 객체. isr 값 키 칸은 `<build>:<캐시 키>`다.
+ * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 기본 내보내기 클래스가 이것을 쓰게 하는 일은 구현 담당이 한다.
+ * @param {{ store: object, build: string, now?: () => number }} o
+ */
+export function createCacheHandler(o) {
+  void o;
+  throw new Error('아직 없음');
+}
+
 export default class CacheHandler {
   /** @param {{ revalidatedTags?: string[] }} ctx */
   constructor(ctx) {

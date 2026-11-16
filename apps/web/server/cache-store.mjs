@@ -132,3 +132,13 @@ export function createLazyRedis(url) {
     mGet: async (keys) => (await ready()).mGet(keys),
   };
 }
+
+/**
+ * 프로세스 메모리 저장소(BAT-170 리뷰 R170-1, 계획 §12): createCacheStore와 같은 네 메서드, 같은 키 꼴·TTL 규칙, 상한을 넘으면 먼저 넣은 것부터 지운다.
+ * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 동작은 구현 담당이 쓴다.
+ * @param {{ now?: () => number, maxTtlSeconds?: number, maxEntries?: number }} [o]
+ */
+export function createMemoryStore(o) {
+  void o;
+  throw new Error('아직 없음');
+}
