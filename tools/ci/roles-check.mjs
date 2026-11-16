@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // 합치기 전 역할 확인(ADR-0270 결정 5, docs/architecture.md §8.6의 4 '역할 나누기', 계획 docs/review/plans/W7-L1-roles-check.md).
-// 작업 가지의 커밋 꼬리말(Batch·Role·Agent-Session·Fix-By)과 바뀐 파일, 머리 커밋의 계획 파일을 읽어
+// 작업 가지의 커밋 꼬리말(Batch·Role·Agent-Session·Fix-By·Batch-Kind·Batch-Order)과 바뀐 파일, 머리 커밋의 계획 파일을 읽어
 // 역할을 서로 다른 담당이 차례대로 맡았는지 본다. 시험은 tools/ci/roles-check.test.mjs.
+// 정방향 묶음(ADR-0281 결정 5, 계획 docs/review/plans/W8-L1-roles-implfirst.md): plan 커밋의 꼬리말
+// Batch-Order: impl-first로 밝힌 코드 묶음은 첫 test와 첫 impl 사이 차례를 보지 않고, 시험 쪽 커밋이 시험 파일·문서만 바꾸는지 본다.
 //
 // 공개 인터페이스(계획 §1, 내놓는 함수는 없다):
 //   node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root <저장소>]
@@ -11,7 +13,7 @@
 //   끝 코드: 0 모든 검사 통과, 1 검사 하나라도 실패(실패를 모두 찍은 뒤), 2 실행할 수 없음(인자·리비전·git 오류, 빈 범위)
 //   표준 출력(한 줄에 하나):
 //     실패: [<검사 이름>] <묶음 ID 또는 -> <짧은 해시 또는 -> <까닭>
-//     묶음 <ID>: <코드|문서|기록만> 커밋 <k>개(plan a·test b·impl c·review d·review-fix e·verify f·record g·doc h)
+//     묶음 <ID>: <코드|코드(정방향)|시험만|문서|기록만> 커밋 <k>개(plan a·test b·impl c·review d·review-fix e·verify f·record g·doc h)
 //     통과: 묶음 <N>개, 커밋 <M>개
 //     오류: <까닭>
 //   GITHUB_ACTIONS=true이면 앞머리 대신 ::error::를 쓰고 값의 %·줄바꿈을 바꿔 쓴다.
@@ -37,8 +39,12 @@ const CODE_ORDER = ['plan', 'test', 'impl', 'review', 'verify'];
 // 시험만 묶음(plan 커밋의 Batch-Kind: test-only로 밝힘, 계획 W7-L1-roles-testonly 1): 구현 없이 계획 < 시험 < 리뷰 < 검증
 const TEST_ONLY_ORDER = ['plan', 'test', 'review', 'verify'];
 const TEST_ONLY = 'test-only';
+// 정방향 묶음(plan 커밋의 Batch-Order: impl-first로 밝힘, 계획 W8-L1-roles-implfirst 1의 1)
+const IMPL_FIRST = 'impl-first';
 // 차례: 역할마다 첫 커밋보다 앞서야 할 역할들(리뷰·검증 사이는 없다)
 const CODE_BEFORE = { test: ['plan'], impl: ['plan', 'test'], review: ['plan', 'test', 'impl'], verify: ['plan', 'test', 'impl'] };
+// 정방향 묶음: 첫 test와 첫 impl 사이만 보지 않는다(첫 review·verify는 여전히 첫 test·impl 뒤, 계획 W8-L1-roles-implfirst 1의 3)
+const FORWARD_BEFORE = { test: ['plan'], impl: ['plan'], review: ['plan', 'test', 'impl'], verify: ['plan', 'test', 'impl'] };
 const TEST_ONLY_BEFORE = { test: ['plan'], review: ['plan', 'test'], verify: ['plan', 'test'] };
 const DOC_BEFORE = { doc: ['plan'], review: ['plan', 'doc'] };
 const DOC_ORDER = ['plan', 'doc', 'review'];
@@ -210,9 +216,18 @@ function readTrailers(c) {
   else if (kinds.length > 1) problems.push(`꼬리말 Batch-Kind가 ${kinds.length}개다`);
   else if (kinds.length === 1 && kinds[0] !== TEST_ONLY) problems.push(`Batch-Kind 값 '${kinds[0]}'은 ${TEST_ONLY}가 아니다`);
   else testOnly = kinds.length === 1;
+  // Batch-Order: plan 커밋에만 하나, 값은 그대로 impl-first(정방향 묶음을 밝힌다). 시험 먼저는 꼬리말이 없는 것으로 나타낸다.
+  // hasOrder는 값과 상관없이 꼬리말이 있는지(시험만·문서 묶음의 [구성]에 쓴다), implFirst는 바르게 밝혔는지다
+  const orders = values('Batch-Order');
+  const hasOrder = orders.length > 0;
+  let implFirst = false;
+  if (hasOrder && role !== 'plan') problems.push(`Batch-Order는 plan 커밋에만 단다(이 커밋은 ${role ?? '역할 모름'})`);
+  else if (orders.length > 1) problems.push(`꼬리말 Batch-Order가 ${orders.length}개다`);
+  else if (orders.length === 1 && orders[0] !== IMPL_FIRST) problems.push(`Batch-Order 값 '${orders[0]}'은 ${IMPL_FIRST}가 아니다(시험 먼저는 꼬리말을 달지 않는다)`);
+  else implFirst = orders.length === 1;
   // 세션·담당 표에서 세는 역할: 리뷰 반영은 Fix-By 쪽 역할이다(모르면 세지 않는다)
   const acting = role === 'review-fix' ? fixBy : role;
-  return { batch, role, session, fixBy, acting, findings, testOnly, problems };
+  return { batch, role, session, fixBy, acting, findings, testOnly, hasOrder, implFirst, problems };
 }
 
 // ---- 경로 ----
@@ -395,8 +410,11 @@ function check(opt) {
         : roles.length > 0 && roles.every((r) => r === 'record')
           ? '기록만'
           : '코드';
+    // 정방향: 코드 묶음의 plan 커밋 가운데 하나라도 Batch-Order: impl-first를 바르게 달았다(종류는 그대로 코드, 줄에만 '(정방향)')
+    const forward = kind === '코드' && list.some((c) => c.role === 'plan' && c.implFirst);
+    const label = forward ? '코드(정방향)' : kind;
     const count = (r) => list.filter((c) => c.role === r).length;
-    summaries.push(`묶음 ${id}: ${kind} 커밋 ${list.length}개(${ROLES.map((r) => `${r} ${count(r)}`).join('·')})`);
+    summaries.push(`묶음 ${id}: ${label} 커밋 ${list.length}개(${ROLES.map((r) => `${r} ${count(r)}`).join('·')})`);
     if (kind === '기록만') continue;
 
     // review·verify 커밋은 그 묶음 계획 파일의 자기 절('리뷰'·'검증')을 첫 부모보다 바꿔야 센다(계획 W7-L1-roles-testonly 8).
@@ -430,12 +448,19 @@ function check(opt) {
     // 차례: 역할마다 처음 나온 커밋이 그보다 앞서야 할 역할의 첫 커밋보다 먼저 오면 그 먼저 나온 커밋의 실패다.
     // 리뷰와 검증 사이의 차례는 보지 않는다(계획 W7-L1-roles-testonly 7의 4)
     const order = kind === '코드' ? CODE_ORDER : kind === '시험만' ? TEST_ONLY_ORDER : DOC_ORDER;
-    const before = kind === '문서' ? DOC_BEFORE : kind === '시험만' ? TEST_ONLY_BEFORE : CODE_BEFORE;
+    const before = kind === '문서' ? DOC_BEFORE : kind === '시험만' ? TEST_ONLY_BEFORE : forward ? FORWARD_BEFORE : CODE_BEFORE;
     for (const r of order) {
       const c = first.get(r);
       if (!c) continue;
       const later = (before[r] ?? []).filter((q) => first.has(q) && first.get(q).index > c.index);
       if (later.length) fail('차례', id, c.sha, `첫 ${r} 커밋이 첫 ${later.join('·')} 커밋보다 먼저 왔다`);
+    }
+    // 정방향을 밝히는 때: Batch-Order를 단 plan 커밋 가운데 가장 이른 것이 첫 impl·첫 test보다 앞이다(계획 W8-L1-roles-implfirst 1의 1).
+    // 늦게 밝혀도 정방향으로 보고 나머지 검사를 한다
+    if (forward) {
+      const declared = list.find((c) => c.role === 'plan' && c.implFirst);
+      const passed = ['impl', 'test'].filter((q) => first.has(q) && first.get(q).index < declared.index);
+      if (passed.length) fail('차례', id, declared.sha, `Batch-Order를 단 plan 커밋이 첫 ${passed.join('·')} 커밋보다 늦다(일이 시작된 뒤에는 정방향으로 바꾸지 못한다)`);
     }
     // 마지막 verify는 마지막 고침보다 뒤다(계획 W7-L1-roles-testonly 7의 1·2·5). 코드 묶음은 .md만 바꾸지 않은 구현 쪽 커밋,
     // 시험만 묶음은 시험 파일을 바꾼 시험 쪽 커밋이 고침이다. verify가 아예 없으면 [구성]이 잡는다
@@ -469,7 +494,7 @@ function check(opt) {
 
     // 구성
     const missing = order.filter((r) => !first.has(r));
-    if (missing.length) fail('구성', id, null, `${kind} 묶음에 ${missing.join('·')} 커밋이 없다`);
+    if (missing.length) fail('구성', id, null, `${label} 묶음에 ${missing.join('·')} 커밋이 없다`);
     if (kind === '시험만') {
       const extra = [...new Set(list.filter((c) => c.role === 'impl' || c.role === 'doc' || (c.role === 'review-fix' && c.fixBy === 'impl')).map((c) => (c.role === 'review-fix' ? 'Fix-By: impl' : c.role)))];
       if (extra.length) fail('구성', id, null, `시험만 묶음에 ${extra.join('·')} 커밋이 섞였다(구현이 있으면 Batch-Kind를 빼고 코드 묶음으로 한다)`);
@@ -477,6 +502,18 @@ function check(opt) {
       for (const c of list.filter((x) => x.acting === 'test')) {
         for (const p of c.files.filter((f) => !isTestPath(f) && !isDocPath(f))) {
           fail('코드 경로', id, c.sha, `시험만 묶음의 시험 쪽 커밋이 시험 파일·문서 밖 경로 ${p}를 바꿨다`);
+        }
+      }
+    }
+    // Batch-Order는 코드 묶음에만 단다(계획 W8-L1-roles-implfirst 1의 2). 값과 상관없이 plan 커밋에 있으면 실패다
+    if ((kind === '시험만' || kind === '문서') && list.some((c) => c.role === 'plan' && c.hasOrder)) {
+      fail('구성', id, null, `${kind} 묶음에는 Batch-Order를 달지 않는다`);
+    }
+    // 정방향 묶음의 시험 쪽 커밋(test, Fix-By: test)은 시험 파일과 문서 경로만 바꾼다(빈 뼈대가 필요 없다, 계획 W8-L1-roles-implfirst 1의 5)
+    if (forward) {
+      for (const c of list.filter((x) => x.acting === 'test')) {
+        for (const p of c.files.filter((f) => !isTestPath(f) && !isDocPath(f))) {
+          fail('코드 경로', id, c.sha, `정방향 묶음의 시험 쪽 커밋이 시험 파일·문서 밖 경로 ${p}를 바꿨다`);
         }
       }
     }
