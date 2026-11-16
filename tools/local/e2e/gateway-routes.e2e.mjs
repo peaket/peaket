@@ -99,7 +99,10 @@ test('W7-COR-04 ticket:buy 없는 토큰의 GET /v1/orders·GET /v1/orders/{orde
 test('W7-WIR-05 토큰 없이 POST /v1/partner/auth/invitation-acceptances는 대역에 닿는다', async () => {
   const r = await send(c, 'partner-api', { method: 'POST', path: '/v1/partner/auth/invitation-acceptances', headers: edge(c, nextIp(), { origin: c.origins.partner, 'content-type': 'application/json' }), body: '{}' });
   assert.ok(r.status < 400, `토큰 없는 초대 수락: ${r.status} ${r.text.slice(0, 200)}`);
-  assert.equal(echoed(r).path, '/v1/partner/auth/invitation-acceptances');
+  // echoed()는 대역이 받은 머리만 돌려준다. 경로는 대역 응답 본문(JSON)의 path로 본다(BAT-060 '판단: 구현 kind 확인 둘째' 2 (가))
+  echoed(r);
+  assert.equal(JSON.parse(r.text).path, '/v1/partner/auth/invitation-acceptances');
+  assert.equal(echoed(r)['x-user-id'], undefined, '토큰 없는 요청에 신원 머리가 실렸다');
 });
 
 test('RV-04 토큰 없는 GET /v1/events/{event}·review-summary는 401이 아니고 대역에 닿으며, GET …/reviews는 토큰이 없으면 닿고 틀린 토큰이면 401이다', async () => {
@@ -145,18 +148,28 @@ test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] W7-SEC-04 다섯 게이트웨이�
 
 // ===================== 경로별 시간 상한(W7-CON-02, 맨 끝) =====================
 
-test('W7-CON-02 대역이 20초 뒤 답하는 GET /v1/orders/{orderId}/payment-status는 504 없이 200이고, 28초 뒤면 504다(27초 경계 양쪽)', async () => {
+/** 손님 쪽 시간 한도: 게이트웨이 상한(27초)보다 긴 응답을 기다린다(BAT-060 '판단: 구현 kind 확인 둘째' 2 (나), 60초 [가정]) */
+const LONG_WAIT_MS = 60_000;
+
+test('W7-CON-02 대역이 20초 뒤 답하는 GET /v1/orders/{orderId}/payment-status는 504 없이 200이고, 28초 뒤면 504다(27초 경계 양쪽). 관제 SSE 둘은 20초에도 200, 상한을 바꾸지 않은 경로는 15초 기본으로 504다', async () => {
   const sub = nextSub();
   const path = `/v1/orders/o-${RUN}/payment-status`;
   const hdr = (ms) => edge(c, nextIp(), { authorization: `Bearer ${accessToken(c, 'gw-fan', sub)}`, 'x-e2e-delay-ms': String(ms) });
   const t0 = Date.now();
-  const slow = await send(c, 'api', { path, headers: hdr(20_000) });
+  const slow = await send(c, 'api', { path, headers: hdr(20_000), timeoutMs: LONG_WAIT_MS });
   assert.ok(Date.now() - t0 >= 19_000, `대역 지연 고르기(x-e2e-delay-ms)가 듣지 않는다(${Date.now() - t0}ms)`);
   assert.equal(slow.status, 200, `20초: ${slow.status} ${slow.text.slice(0, 200)}`);
   echoed(slow);
-  const over = await send(c, 'api', { path, headers: hdr(28_000) });
+  const over = await send(c, 'api', { path, headers: hdr(28_000), timeoutMs: LONG_WAIT_MS });
   assert.equal(over.status, 504, `28초: ${over.status}(27초 상한이 걸리지 않았다)`);
   // 시간 상한을 바꾸지 않은 경로는 Envoy 기본(15초)이다: 같은 20초 지연이 504다(상한을 모든 규칙에 넓힌 결함을 잡는다)
-  const other = await send(c, 'api', { path: `/v1/orders/o-${RUN}`, headers: hdr(20_000) });
+  const other = await send(c, 'api', { path: `/v1/orders/o-${RUN}`, headers: hdr(20_000), timeoutMs: LONG_WAIT_MS });
   assert.equal(other.status, 504, `GET /v1/orders/{orderId} 20초: ${other.status}(기본 상한 15초가 아니다)`);
+  // 관제 SSE 두 흐름(getOpsLive·getOpsEventLive)은 상한을 끈다(0s): 20초 지연도 200이다(구현 담당이 kind에서 본 결과를 사례로 둔다)
+  const ops = (ms) => edge(c, nextIp(), { authorization: `Bearer ${accessToken(c, 'gw-ops', nextSub())}`, 'x-e2e-delay-ms': String(ms) });
+  for (const p of ['/v1/ops/live', `/v1/ops/events/${EVENT}/live`]) {
+    const r = await send(c, 'ops-api', { path: p, headers: ops(20_000), timeoutMs: LONG_WAIT_MS });
+    assert.equal(r.status, 200, `${p} 20초: ${r.status} ${r.text.slice(0, 200)}(SSE 상한이 꺼지지 않았다)`);
+    echoed(r);
+  }
 });

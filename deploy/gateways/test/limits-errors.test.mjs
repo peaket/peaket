@@ -24,7 +24,8 @@ const CONTROLLER_FILE = join(DIR, 'controller', 'envoy-gateway.yaml');
 const GATEWAYS = ['gw-queue', 'gw-fan', 'gw-partner', 'gw-ops', 'gw-scanner'];
 const API_HOST = { 'gw-queue': 'queue.peaket.example', 'gw-fan': 'api.peaket.example', 'gw-partner': 'partner-api.peaket.example', 'gw-ops': 'ops-api.peaket.example', 'gw-scanner': 'scanner-api.peaket.example' };
 /** 게이트웨이가 만든 응답의 상태와 HTTP 상태 문구(docs/infra.md §4.1 '게이트웨이 오류의 Problem') */
-const PROBLEM_TITLES = { 404: 'Not Found', 413: 'Content Too Large', 429: 'Too Many Requests', 503: 'Service Unavailable' };
+/** 응답 고치기로 내는 상태(404는 뺀다: API 호스트는 직접 응답 필터 peaket-api-not-found, infra §4.1 '게이트웨이 오류의 Problem', 판단: 구현 kind 확인 둘째 2 (다)) */
+const PROBLEM_TITLES = { 413: 'Content Too Large', 429: 'Too Many Requests', 503: 'Service Unavailable' };
 /** 전역 한도를 거는 원천 라우트(그 밖의 라우트에는 걸지 않는다, infra §4.1 '전역 레이트 리밋 걸기') */
 /**
  * 전역 한도를 거는 라우트(infra §4.1 '전역 레이트 리밋 걸기', 대조 리뷰 RV-04): gw-fan은 이름표 peaket.io/auth가 token·optional인 라우트
@@ -204,7 +205,7 @@ function assertProblemOverrides(policies, where) {
   }
 }
 
-test('D-T43 ① 다섯 게이트웨이 모두 404·413·429·503에 같은 고정 본문의 responseOverride가 있고 source가 게이트웨이가 만든 응답만(Local)이다(게이트웨이 각각, 라우트 각각)', () => {
+test('D-T43 ① 다섯 게이트웨이 모두 413·429·503에 같은 고정 본문의 responseOverride가 있고 source가 게이트웨이가 만든 응답만(Local)이며, 404는 응답 고치기에 없다(게이트웨이 각각, 라우트 각각)', () => {
   requireDefinitions();
   for (const gw of GATEWAYS) {
     // 라우트에 맞지 않은 요청(없는 경로)에도 닿도록 게이트웨이에 건다
@@ -213,7 +214,51 @@ test('D-T43 ① 다섯 게이트웨이 모두 404·413·429·503에 같은 고�
     assert.ok(rs.length > 0, `${gw}: 라우트가 없다`);
     // 라우트에 따로 건 BackendTrafficPolicy(한도 등)가 게이트웨이 정책을 가리면 그 라우트에서 빠진다
     for (const r of rs) assertProblemOverrides(effective('BackendTrafficPolicy', r), `${gw}/${r.metadata?.name}`);
+    // 404를 응답 고치기에 두면 머리를 새로 써 직접 응답의 X-Trace-Id가 빠진다(2026-11-16 kind 확인)
+    const plain404 = overrides(gatewayPolicies('BackendTrafficPolicy', gw)).filter(({ o }) => codesOf(o).includes(404));
+    assert.deepEqual(plain404.map(({ policy }) => policy), [], `${gw}: 404가 응답 고치기에 있다`);
   }
+});
+
+/** HTTPRouteFilter 직접 응답 */
+const directOf = (rule) => (rule.filters ?? []).filter((f) => f.type === 'ExtensionRef' && f.extensionRef?.kind === 'HTTPRouteFilter').map((f) => ({ name: f.extensionRef.name, d: named('HTTPRouteFilter', f.extensionRef.name)?.spec?.directResponse }));
+const traceIdSet = (d) => [...(d?.header?.set ?? []), ...(d?.header?.add ?? [])].filter((h) => lc(h.name) === 'x-trace-id');
+
+test("D-T43 ① API 호스트 다섯의 남은 경로·맞지 않는 메서드 404는 직접 응답 필터 peaket-api-not-found(about:blank Problem, X-Trace-Id: %TRACE_ID%)이고, queue-files·앱 서버 호스트의 404는 X-Trace-Id가 없다(infra §4.1 '게이트웨이 오류의 Problem')", () => {
+  requireDefinitions();
+  const cases = [
+    ['gw-queue', 'GET', '/v1/zz-no-such'],
+    ['gw-fan', 'GET', '/v1/zz-no-such'],
+    ['gw-partner', 'GET', '/v1/zz-no-such'],
+    ['gw-ops', 'GET', '/v1/zz-no-such'],
+    ['gw-scanner', 'GET', '/v1/zz-no-such'],
+    // 맞지 않는 메서드(계약은 POST만)
+    ['gw-partner', 'GET', '/v1/partner/productions/p1/events'],
+    ['gw-fan', 'PUT', '/v1/events/e1/holds'],
+  ];
+  for (const [gw, method, path] of cases) {
+    const hit = routeFor(gw, API_HOST[gw], method, path);
+    const where = `${gw} ${method} ${path}`;
+    assert.ok(hit, `${where}: 맞는 라우트가 없다`);
+    assert.deepEqual(hit.rule.backendRefs ?? [], [], `${where}(${hit.route.metadata?.name}): 백엔드로 넘긴다`);
+    const ds = directOf(hit.rule);
+    assert.equal(ds.length, 1, `${where}(${hit.route.metadata?.name}): 직접 응답 필터가 하나가 아니다`);
+    assert.equal(ds[0].name, 'peaket-api-not-found', `${where}: 직접 응답 필터 이름`);
+    assert.equal(Number(ds[0].d?.statusCode), 404);
+    assert.equal(ds[0].d?.contentType, 'application/problem+json');
+    assert.deepEqual(JSON.parse(findKey(ds[0].d?.body ?? {}, 'inline')[0] ?? 'null'), { type: 'about:blank', title: 'Not Found', status: 404 }, `${where}: 본문`);
+    assert.deepEqual(traceIdSet(ds[0].d).map((h) => h.value), ['%TRACE_ID%'], `${where}: X-Trace-Id 머리`);
+  }
+  // CDN이 캐시하는 queue-files의 404에는 X-Trace-Id가 없다(캐시된 응답이 다른 사람에게 간다, guidelines §9)
+  const files = routeFor('gw-queue', 'queue-files.peaket.example', 'GET', '/zz-no-such');
+  assert.ok(files, 'queue-files 남은 경로를 받는 라우트가 없다');
+  const fd = directOf(files.rule);
+  assert.equal(fd.length, 1, 'queue-files 남은 경로의 직접 응답 필터가 하나가 아니다');
+  assert.equal(Number(fd[0].d?.statusCode), 404);
+  assert.deepEqual(traceIdSet(fd[0].d), [], 'queue-files 404에 X-Trace-Id가 있다');
+  // 앱 서버 호스트(www·partner)와 queue-files의 직접 응답 404(/internal/ 등)에도 X-Trace-Id가 없다
+  for (const r of byKind('HTTPRoute').filter((x) => (x.spec?.hostnames ?? []).some((h) => ['www.peaket.example', 'partner.peaket.example', 'queue-files.peaket.example'].includes(h))))
+    for (const rule of r.spec?.rules ?? []) for (const { name, d } of directOf(rule)) if (Number(d?.statusCode) === 404) assert.deepEqual(traceIdSet(d), [], `${r.metadata?.name}(${name}): CDN 호스트 404에 X-Trace-Id가 있다`);
 });
 
 test('[ASVS v5.0.0-16.5.1] 게이트웨이가 만든 Problem 본문에 detail·instance·경로·서비스 이름·치환 명령이 없고 type·title·status만 있다', () => {

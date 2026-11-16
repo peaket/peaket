@@ -56,9 +56,10 @@ export function loadContract() {
 
 /**
  * 게이트웨이에 요청 하나. host는 hosts의 키(queue·api…)다. 응답 머리는 소문자 이름 → 값(여럿이면 배열)
+ * timeoutMs는 이 손님 쪽 시간 한도다(기본 15초). 게이트웨이의 시간 상한보다 긴 응답을 보는 시험(W7-CON-02)만 늘린다(BAT-060 '판단: 구현 kind 확인 둘째' 2 (나))
  * @returns {Promise<{ status: number, headers: Record<string, string | string[] | undefined>, text: string }>}
  */
-export function send(c, hostKey, { method = 'GET', path = '/', headers = {}, body } = {}) {
+export function send(c, hostKey, { method = 'GET', path = '/', headers = {}, body, timeoutMs = 15_000 } = {}) {
   const gw = GATEWAY_OF_HOST[hostKey];
   const host = c.hosts[hostKey];
   return new Promise((resolve, reject) => {
@@ -72,7 +73,7 @@ export function send(c, hostKey, { method = 'GET', path = '/', headers = {}, bod
         headers: { host, ...headers },
         ...(c.caPem ? { ca: c.caPem } : { rejectUnauthorized: false }),
         agent: false,
-        timeout: 15_000,
+        timeout: timeoutMs,
       },
       (res) => {
         const chunks = [];
