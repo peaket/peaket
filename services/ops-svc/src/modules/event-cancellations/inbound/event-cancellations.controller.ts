@@ -1,36 +1,22 @@
-// 받는 층: 회차 취소 요청·판정·2인 확정(openapi /v1/ops/event-cancellations, BAT-425 GAT-130 잔여).
-import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
-import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
+// 받는 층: 회차 취소 요청·판정·2인 확정(openapi /v1/ops/event-cancellations, BAT-425 GAT-130 잔여, BAT-420 GAT-110).
+// commander 요청은 Idempotency-Key(작업 CREATE_EVENT_CANCELLATION)와 X-Reauth-Token(act APPROVAL·패스키)을 받는다.
+import { Controller, Get, Header, HttpCode, Post, Query, Req } from '@nestjs/common';
+import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, Idempotent, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { EventCancellationProblem } from '../domain/event-cancellation.js';
 import { EventCancellations, type OpsActor } from '../application/event-cancellations.js';
+import { FAULTS, Page, View, fail } from './views.js';
 
 const RequestBody = z.object({ eventId: z.uuid(), kind: z.literal('CANCEL').optional(), reason: z.string().min(1) }).strict();
-const JudgeBody = z.object({ fault: z.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']), reason: z.string().min(1), fanNoticeReason: z.string().min(1).max(200) }).strict();
+const JudgeBody = z.object({ fault: z.enum(FAULTS), reason: z.string().min(1), fanNoticeReason: z.string().min(1).max(200) }).strict();
 const RejectBody = z.object({ reason: z.string().min(1) }).strict();
 const PauseBody = z.object({ pg: z.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(), reason: z.string().min(1) }).strict();
 const Params = z.object({ requestId: z.string().min(1) });
-const View = z
-  .object({
-    requestId: z.string(),
-    eventId: z.string(),
-    kind: z.enum(['CANCEL', 'POSTPONE']),
-    status: z.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']),
-    reason: z.string(),
-    fault: z.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-    fanNoticeReason: z.string().optional(),
-    requestedAt: z.string(),
-    judgedBy: z.string().optional(),
-    progress: z.object({ state: z.string() }).optional(),
-  })
-  .passthrough();
-const Page = z.object({ items: z.array(View), nextCursor: z.string().nullable() });
 
 const actorOf = (me: Principal): OpsActor => ({ accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' });
-const fail = (err: unknown): never => {
-  if (err instanceof EventCancellationProblem) throw new ProblemError({ type: err.type, status: err.status, title: err.title });
-  throw err;
+const reauthTokenOf = (request: FastifyRequest): string | undefined => {
+  const token = request.headers['x-reauth-token'];
+  return typeof token === 'string' ? token : undefined;
 };
 const num = (v: string | undefined, fallback: number): number => {
   const n = Number(v ?? fallback);
@@ -45,10 +31,16 @@ export class EventCancellationsController {
   @Post()
   @HttpCode(201)
   @Roles(['commander'])
+  @Idempotent({ operation: 'CREATE_EVENT_CANCELLATION' })
   @ContractRouteSchema({ body: RequestBody, responses: { 201: View } })
-  async request(@ContractBody(RequestBody) body: z.output<typeof RequestBody>, @CurrentPrincipal() me: Principal) {
+  async request(
+    @ContractBody(RequestBody) body: z.output<typeof RequestBody>,
+    @CurrentPrincipal() me: Principal,
+    @Req() request: FastifyRequest,
+    @IdempotencyRequest() idem: IdempotencyRequest,
+  ) {
     try {
-      return await this.cancellations.request(body, actorOf(me));
+      return await this.cancellations.request(body, actorOf(me), reauthTokenOf(request), idem);
     } catch (err) {
       return fail(err);
     }
@@ -92,8 +84,7 @@ export class EventCancellationsController {
   @ContractRouteSchema({ params: Params, responses: { 200: View } })
   async approve(@ContractParams(Params) params: z.output<typeof Params>, @CurrentPrincipal() me: Principal, @Req() request: FastifyRequest) {
     try {
-      const token = request.headers['x-reauth-token'];
-      return await this.cancellations.approve(params.requestId, actorOf(me), typeof token === 'string' ? token : undefined);
+      return await this.cancellations.approve(params.requestId, actorOf(me), reauthTokenOf(request));
     } catch (err) {
       return fail(err);
     }

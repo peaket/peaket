@@ -1,10 +1,31 @@
 // 회차 취소 요청 저장·purchase-svc 일괄 환불 시작 포트.
 import type { AuditRecord } from '../../audit/audit.js';
-import type { EventCancellationDryRun, EventCancellationFault, EventCancellationKind, EventCancellationPg, EventCancellationRecord, EventCancellationStatus } from './event-cancellation.js';
+import type { EventCancellationDryRun, EventCancellationFault, EventCancellationKind, EventCancellationPg, EventCancellationRecord, EventCancellationStatus, EventCancellationView } from './event-cancellation.js';
+
+/** 멱등 요청 값(guidelines §4, platform IdempotencyRequest와 같은 모양). 범위는 계정 × 작업 × 키, 지문은 SHA-256 */
+export interface EventCancellationIdempotency {
+  readonly accountRef: string;
+  readonly operation: string;
+  readonly key: string;
+  readonly requestHash: Uint8Array;
+}
+
+/**
+ * 요청 넣기의 결과(BAT-420 GAT-110).
+ * INSERTED: 새로 넣음. REPLAYED: 같은 멱등 키·같은 본문의 다시 보냄이라 처음 응답을 돌려줌(행·감사는 그대로).
+ * ACTIVE: 같은 회차에 진행 중 요청이 있어 넣지 않음(멱등 기록도 남기지 않는다)
+ */
+export type EventCancellationInsert =
+  | { readonly status: 'INSERTED' }
+  | { readonly status: 'REPLAYED'; readonly view: EventCancellationView }
+  | { readonly status: 'ACTIVE'; readonly requestId: string };
 
 export interface EventCancellationStore {
-  /** 상태 행과 감사 기록을 같은 트랜잭션에 쓴다(감사 기록이 있으면) */
-  insert(record: EventCancellationRecord, audit?: AuditRecord): Promise<void>;
+  /**
+   * 상태 행과 감사 기록을 같은 트랜잭션에 쓴다(감사 기록이 있으면). 진행 중 요청 확인도 같은 트랜잭션에서 한다.
+   * 멱등 요청을 주면 그 키 행을 트랜잭션의 첫 쓰기로 잡는다: 같은 키·같은 지문이면 REPLAYED, 다른 지문이면 422 idempotency-key-reused를 던진다
+   */
+  insert(record: EventCancellationRecord, audit?: AuditRecord, idem?: EventCancellationIdempotency): Promise<EventCancellationInsert>;
   find(requestId: string): Promise<EventCancellationRecord | undefined>;
   findActiveByEvent(eventId: string): Promise<EventCancellationRecord | undefined>;
   /** version 조건부 갱신과 감사 기록을 같은 트랜잭션에 쓴다. 다른 요청이 먼저 갱신했으면 false */

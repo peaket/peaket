@@ -4,11 +4,13 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
-import type { EventCancellationDryRun, EventCancellationFault } from '../modules/event-cancellations/domain/event-cancellation.js';
+import type { EventCancellationDryRun, EventCancellationFault, EventCancellationPg } from '../modules/event-cancellations/domain/event-cancellation.js';
 import type { EventRefundJobProgress, EventRefundReader } from '../modules/event-cancellations/domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
+type Method = 'StartEventRefund' | 'GetEventRefundJob' | 'PauseEventRefundJob' | 'ResumeEventRefundJob' | 'PreviewEventRefund';
+type RefundClient = grpc.Client & Record<Method, Unary>;
 type RefundPackage = { EventRefundService: grpc.ServiceClientConstructor };
 
 let loaded: RefundPackage | undefined;
@@ -57,6 +59,13 @@ const FAULT: Record<RefundFault, string> = {
 };
 const KIND: Record<RefundKind, string> = { CANCEL: 'EVENT_REFUND_KIND_CANCEL', POSTPONE: 'EVENT_REFUND_KIND_POSTPONE' };
 const PG: Record<RefundPg, string> = { TOSS: 'PG_PROVIDER_TOSS', PORTONE: 'PG_PROVIDER_PORTONE', SIMULATOR: 'PG_PROVIDER_SIMULATOR' };
+const PG_OF: Readonly<Record<string, EventCancellationPg>> = { PG_PROVIDER_TOSS: 'TOSS', PG_PROVIDER_PORTONE: 'PORTONE', PG_PROVIDER_SIMULATOR: 'SIMULATOR' };
+/** proto enum 이름에서 앞머리를 뗀다(UNSPECIFIED·모르는 값은 undefined) */
+const enumOf = (v: unknown, prefix: string): string | undefined => (typeof v === 'string' && v.startsWith(prefix) && v !== `${prefix}UNSPECIFIED` ? v.slice(prefix.length) : undefined);
+const intOf = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0) || 0);
+/** peaket.common.v1.Money(krw)를 원으로 */
+const krwOf = (v: unknown): number => intOf(typeof v === 'object' && v !== null ? (v as { krw?: unknown }).krw : undefined);
+const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
 const timestampOf = (ms: number): { seconds: number; nanos: number } => ({ seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1_000_000 });
 const msOf = (v: unknown): number | undefined => {
   const t = typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
@@ -69,7 +78,7 @@ export interface GrpcEventRefundsOptions {
 }
 
 export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
-  readonly #client: grpc.Client & { StartEventRefund: Unary; GetEventRefundJob: Unary; PauseEventRefundJob: Unary; ResumeEventRefundJob: Unary };
+  readonly #client: RefundClient;
 
   constructor(o: GrpcEventRefundsOptions) {
     const at = o.address.lastIndexOf(':');
@@ -81,7 +90,7 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
       profile: o.profile ?? 'service',
       dependency: 'purchase-svc',
       timeoutCapMs: 30_000,
-    }) as unknown as grpc.Client & { StartEventRefund: Unary; GetEventRefundJob: Unary; PauseEventRefundJob: Unary; ResumeEventRefundJob: Unary };
+    }) as unknown as RefundClient;
   }
 
   async start(q: StartEventRefundCommand): Promise<EventRefundJobView> {
@@ -123,17 +132,42 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
     return viewOf({ job_id: q.requestId, ...answer });
   }
 
-  /** PreviewEventRefund(BAT-420 GAT-110 W, 빈 뼈대) */
-  async preview(_q: { eventId: string; requestId: string; fault: EventCancellationFault }): Promise<EventCancellationDryRun> {
-    throw new Error('아직 없음');
+  /** PreviewEventRefund(BAT-420 GAT-110 W): 판정 미리보기. 금액(Money)은 원으로, 결제사별 주문 수·예상 시간(초)을 읽는다 */
+  async preview(q: { eventId: string; requestId: string; fault: EventCancellationFault }): Promise<EventCancellationDryRun> {
+    const a = await this.#call('PreviewEventRefund', { event_id: q.eventId, cancellation_request_id: q.requestId, ruling: FAULT[q.fault] });
+    return {
+      targetOrders: intOf(a.target_orders),
+      refundTotal: krwOf(a.refund_total),
+      compensationTargets: intOf(a.compensation_targets),
+      compensationTotal: krwOf(a.compensation_total),
+      perPg: rows(a.per_pg).flatMap((p) => {
+        const pg = typeof p.pg === 'string' ? PG_OF[p.pg] : undefined;
+        return pg ? [{ pg, orders: intOf(p.orders), estimatedSeconds: intOf(p.estimated_seconds) }] : [];
+      }),
+    };
   }
 
-  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W, 빈 뼈대) */
-  async job(_q: { requestId: string }): Promise<EventRefundJobProgress> {
-    throw new Error('아직 없음');
+  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘 */
+  async job(q: { requestId: string }): Promise<EventRefundJobProgress> {
+    const a = await this.#call('GetEventRefundJob', { job_id: q.requestId });
+    const closesAtMs = msOf(a.refund_window_closes_at);
+    return {
+      state: enumOf(a.state, 'REFUND_JOB_STATE_') ?? 'UNKNOWN',
+      total: intOf(a.total_orders),
+      done: intOf(a.done_orders),
+      failed: intOf(a.failed_orders),
+      perPg: rows(a.per_pg).flatMap((p) => {
+        const pg = typeof p.pg === 'string' ? PG_OF[p.pg] : undefined;
+        if (!pg) return [];
+        const pauseReason = enumOf(p.pause_reason, 'REFUND_PAUSE_REASON_');
+        return [{ pg, state: enumOf(p.state, 'REFUND_JOB_STATE_') ?? 'UNKNOWN', ...(pauseReason !== undefined ? { pauseReason } : {}), done: intOf(p.done_orders), failed: intOf(p.failed_orders), unknown: intOf(p.unknown_orders) }];
+      }),
+      ...(a.kind === 'EVENT_REFUND_KIND_POSTPONE' ? { appliedOrders: intOf(a.applied_orders) } : {}),
+      ...(closesAtMs !== undefined && closesAtMs > 0 ? { refundWindowClosesAt: new Date(closesAtMs).toISOString() } : {}),
+    };
   }
 
-  async #call(method: 'StartEventRefund' | 'GetEventRefundJob' | 'PauseEventRefundJob' | 'ResumeEventRefundJob', req: object): Promise<Record<string, unknown>> {
+  async #call(method: Method, req: object): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       this.#client[method](req, new grpc.Metadata(), {}, (e, v) => (e ? reject(e) : resolve(v ?? {})));
     });

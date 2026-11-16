@@ -9,6 +9,7 @@ import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
+import { eventCancellationDepsFromEnv } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
@@ -79,6 +80,14 @@ const payouts = paymentUrl
       ...(reauth ? { reauth } : {}),
     }
   : undefined;
+// 회차 취소 요청(BAT-420 GAT-110): 파트너 소속 확인(core 판매 설정)·확정 때 판매 멈춤(판매 중지 집행)·판정 미리보기와 진행률(purchase gRPC).
+// 판매 중지 확인과 CS '판정 대기' 건은 AppModule이 같은 DB로 기본을 채운다.
+const cancellationDeps = eventCancellationDepsFromEnv({ env: process.env, executor, ...(refunds ? { refunds } : {}), ...(internalToken ? { internalToken } : {}) });
+const eventCancellations = {
+  ...(refunds ? { refunds } : {}),
+  ...(reauth ? { reauth } : {}),
+  ...cancellationDeps,
+};
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;
 // 관제 스캐너 기기 경계(BAT-450): ops-svc가 권한·감사를 맡고 ticket-svc ScannerDeviceService gRPC가 원장을 쓴다.
@@ -96,7 +105,7 @@ const service = await createService({
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
-    ...(refunds || reauth ? { eventCancellations: { ...(refunds ? { refunds } : {}), ...(reauth ? { reauth } : {}) } } : {}),
+    eventCancellations,
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });
@@ -107,6 +116,10 @@ if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHAN
 if (!purchaseUrl || !queueUrl) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 SALE_STOP·SALE_RESUME 실행을 하지 않는다');
 if (!priority) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 우선 구매 권리 발급·회수를 열지 않는다');
 if (!scannerDevices) service.logger.warn({}, 'PEAKET_TICKET_GRPC_URL이 없어 관제 스캐너 기기 경로(/v1/ops/scanner-devices)를 열지 않는다');
+if (!cancellationDeps.owners) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 파트너 회차 취소 요청·상태가 503 authz-unavailable이다');
+if (!cancellationDeps.stopper) service.logger.warn({}, '판매 중지 집행 길(purchase·queue HTTP 또는 제어 gRPC)이 없어 회차 취소 확정이 503 sale-stop-unavailable이다');
+if (!cancellationDeps.reader) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 판정 미리보기가 503 event-refund-unavailable이다');
+if (!reauth) service.logger.warn({}, 'PEAKET_IDENTITY_JWKS_URL이 없어 회차 취소 요청·확정이 503 reauth-unavailable이다');
 await service.listen();
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.

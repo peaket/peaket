@@ -5,11 +5,14 @@ export { MemoryEventCancellationStore } from './adapters/memory-store.js';
 export { DrizzleSaleSuspensionLookup } from './adapters/db/drizzle-sale-suspension-lookup.js';
 export { MemorySaleSuspensionLookup } from './adapters/memory-sale-suspension-lookup.js';
 export { StoreCancelledEventGuard } from './adapters/cancelled-event-guard.js';
+export { CsCaseEventCancellationCases } from './adapters/cs-judgement-pending.js';
 export {
+  ACTIVE_EVENT_CANCELLATION_STATUSES,
   EVENT_END_FALLBACK_MS,
   EVIDENCE_REF_MAX,
   EventCancellationProblem,
   PARTNER_REASON_MAX,
+  eventCancellationDetailView,
   eventCancellationView,
   type EventCancellationDryRun,
   type EventCancellationFault,
@@ -24,6 +27,8 @@ export {
 } from './domain/event-cancellation.js';
 export type {
   EventCancellationCases,
+  EventCancellationIdempotency,
+  EventCancellationInsert,
   EventCancellationStore,
   EventOwnerLookup,
   EventRefundJobProgress,
@@ -35,4 +40,5 @@ export type {
   SaleSuspensionLookup,
 } from './domain/ports.js';
 export { EventCancellationsController } from './inbound/event-cancellations.controller.js';
+export { PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
 export { EventCancellationsModule, type EventCancellationsModuleDeps } from './event-cancellations.module.js';

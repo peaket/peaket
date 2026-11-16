@@ -64,7 +64,8 @@ export interface EventCancellationRecord {
   refundJobState: string | null;
   version: number;
   updatedAt: Date;
-  // BAT-420(ops 0013): 아래 칸은 마이그레이션 0013이 더한다. 빈 뼈대라 선택 칸으로 두었다(구현이 필수로 바꿔도 된다).
+  // BAT-420(ops 0013): 아래 칸은 마이그레이션 0013이 더한다. 0013 전에 만든 기록(시험 씨앗 포함)과 맞추려고 선택 칸으로 두고,
+  // 비어 있으면 COMMANDER·null로 읽는다(DB 기본값과 같다).
   requestedVia?: EventCancellationVia;
   promoterId?: string | null;
   faultOpinion?: EventCancellationFault | null;
@@ -121,3 +122,16 @@ export const eventCancellationView = (r: EventCancellationRecord): EventCancella
   ...(r.judgedBy !== null ? { judgedBy: r.judgedBy } : {}),
   ...(r.refundJobState !== null ? { progress: { state: r.refundJobState } } : {}),
 });
+
+/** 판정·확정·반려 응답과 관제 상세: 목록 항목에 미리보기(dryRun)를 더한다. progress를 주면 그 값으로 바꾼다 */
+export const eventCancellationDetailView = (r: EventCancellationRecord, progress?: EventCancellationProgress): EventCancellationView => {
+  const base = eventCancellationView(r);
+  return {
+    ...base,
+    ...(r.dryRun ? { dryRun: r.dryRun } : {}),
+    ...(progress !== undefined ? { progress } : {}),
+  };
+};
+
+/** 진행 중으로 보는 상태(같은 회차에 하나만, ops 0011 event_cancellation_request_active_key와 같다) */
+export const ACTIVE_EVENT_CANCELLATION_STATUSES: readonly EventCancellationStatus[] = ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW'];

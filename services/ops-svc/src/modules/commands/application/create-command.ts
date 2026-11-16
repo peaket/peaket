@@ -32,7 +32,7 @@ export class CreateCommand {
   constructor(
     private readonly store: CommandStore,
     private readonly execution?: ExecuteCommand,
-    /** BAT-420 GAT-110 H(빈 뼈대): SALE_RESUME을 회차 취소 확정 회차에 만들지 않는다. 아직 쓰지 않는다 */
+    /** 회차 취소가 확정된 회차에는 판매 재개(SALE_RESUME)를 만들지 않는다(BAT-420 GAT-110 H, ADR-0280 결정 2) */
     readonly guard?: CancelledEventGuard,
   ) {}
 
@@ -47,6 +47,10 @@ export class CreateCommand {
     if (typeof input.params !== 'object' || input.params === null || Array.isArray(input.params)) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
     const eventId = eventIdOf(input.params);
     if (eventId !== undefined && !z.uuid().safeParse(eventId).success) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
+    // 회차 취소가 확정된 회차는 판매를 다시 열지 않는다(환급 중·끝난 회차를 다시 팔지 않게, ADR-0280 결정 2). 실행 때도 다시 본다
+    if (input.type === 'SALE_RESUME' && eventId !== undefined && this.guard && (await this.guard.isCancelled(eventId))) {
+      throw new ProblemError({ type: 'event-cancelled', status: 409, title: '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다' });
+    }
     const commandId = input.commandId ?? randomUUID();
     const command = await this.store.create({
       commandId,

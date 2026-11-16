@@ -9,7 +9,7 @@ import { GetCommand } from './application/get-command.js';
 import { HandleCommandEvent } from './application/handle-command-event.js';
 import { ListCommands } from './application/list-commands.js';
 import { RetryCommand } from './application/retry-command.js';
-import type { CommandExecutor, CommandStore } from './domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandStore } from './domain/ports.js';
 import { CommandsController } from './inbound/commands.controller.js';
 import { InternalCommandEventsController } from './inbound/internal-command-events.controller.js';
 import { COMMAND_EXECUTOR, COMMAND_STORE } from './tokens.js';
@@ -18,10 +18,17 @@ export { COMMAND_STORE, COMMAND_EXECUTOR } from './tokens.js';
 
 @Module({})
 export class CommandsModule {
-  static register(store: CommandStore, executor?: CommandExecutor, checkpoints?: AuditCheckpointService, onCommandEvent?: (h: HandleCommandEvent) => void): DynamicModule {
-    const execution = new ExecuteCommand(store, executor, checkpoints);
+  static register(
+    store: CommandStore,
+    executor?: CommandExecutor,
+    checkpoints?: AuditCheckpointService,
+    onCommandEvent?: (h: HandleCommandEvent) => void,
+    /** 회차 취소 확정 회차의 판매 재개 막기(BAT-420 GAT-110 H). 만들 때·실행 때 함께 본다 */
+    guard?: CancelledEventGuard,
+  ): DynamicModule {
+    const execution = new ExecuteCommand(store, executor, checkpoints, guard);
     const wired = executor ? execution : undefined;
-    const createCommand = new CreateCommand(store, wired);
+    const createCommand = new CreateCommand(store, wired, guard);
     // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
     onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));
     const providers: Provider[] = [

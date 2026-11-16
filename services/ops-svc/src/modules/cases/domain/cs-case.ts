@@ -1,5 +1,5 @@
 // CS 처리함 건 계약(GAT-110 첫 몫, asyncapi support.cases-requested, docs/features/transfer-refund.md §7.1).
-// 이 골격은 환급 실패(REFUND_FAILED) 건만 받는다. Kafka 소비자 조립은 후속이고, 계약·저장·멱등은 여기서 시험한다.
+// 이 골격은 환급 실패(REFUND_FAILED)·이상 표시(FLAGGED)·판정 대기(JUDGEMENT_PENDING) 건만 받는다(BAT-420). Kafka 소비자 조립은 후속이고, 계약·저장·멱등은 여기서 시험한다.
 import { randomUUID } from 'node:crypto';
 
 export const CS_CASE_KINDS = [

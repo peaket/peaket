@@ -1,9 +1,21 @@
-// 회차 취소 요청 PostgreSQL 저장소(ops 0011). 칸 이름은 migrations/0011_event_cancellation_request.sql과 같다.
-import type { Database } from '@peaket/platform';
+// 회차 취소 요청 PostgreSQL 저장소(ops 0011·0013·0014). 칸 이름은 migrations/0011_event_cancellation_request.sql·0013과 같다.
+// 요청 넣기는 한 트랜잭션에서 멱등 키 행(0014, 첫 쓰기) → 같은 회차의 진행 중 요청 확인 → 행·감사 기록 순서로 쓴다.
+// 진행 중이면 트랜잭션째 되돌려 키 행도 남기지 않는다(같은 키로 뒤에 다시 보내면 다시 판정한다).
+import { IdempotencyStore, systemClock, type Clock, type Database, type DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import { appendAuditIn, type AuditRecord } from '../../../audit/audit.js';
-import { EventCancellationProblem, type EventCancellationFault, type EventCancellationKind, type EventCancellationRecord, type EventCancellationStatus } from '../../domain/event-cancellation.js';
-import type { EventCancellationStore } from '../../domain/ports.js';
+import {
+  ACTIVE_EVENT_CANCELLATION_STATUSES,
+  eventCancellationView,
+  type EventCancellationDryRun,
+  type EventCancellationFault,
+  type EventCancellationKind,
+  type EventCancellationRecord,
+  type EventCancellationStatus,
+  type EventCancellationVia,
+  type EventCancellationView,
+} from '../../domain/event-cancellation.js';
+import type { EventCancellationIdempotency, EventCancellationInsert, EventCancellationStore } from '../../domain/ports.js';
 
 interface Row {
   request_id: string;
@@ -23,9 +35,16 @@ interface Row {
   refund_job_state: string | null;
   version: number | string;
   updated_at: Date | string;
+  requested_via: string;
+  promoter_id: string | null;
+  fault_opinion: string | null;
+  evidence_ref: string | null;
+  new_starts_at: Date | string | null;
+  dry_run: EventCancellationDryRun | string | null;
+  rejection_reason: string | null;
 }
 
-const ms = (v: Date | string): number => new Date(v).getTime();
+const dryRunOf = (v: Row['dry_run']): EventCancellationDryRun | null => (v === null ? null : typeof v === 'string' ? (JSON.parse(v) as EventCancellationDryRun) : v);
 const recordOf = (r: Row): EventCancellationRecord => ({
   requestId: r.request_id,
   eventId: r.event_id,
@@ -44,22 +63,92 @@ const recordOf = (r: Row): EventCancellationRecord => ({
   refundJobState: r.refund_job_state,
   version: Number(r.version),
   updatedAt: new Date(r.updated_at),
+  requestedVia: r.requested_via as EventCancellationVia,
+  promoterId: r.promoter_id,
+  faultOpinion: r.fault_opinion as EventCancellationFault | null,
+  evidenceRef: r.evidence_ref,
+  newStartsAt: r.new_starts_at === null ? null : new Date(r.new_starts_at),
+  dryRun: dryRunOf(r.dry_run),
+  rejectionReason: r.rejection_reason,
 });
-const COLUMNS = sql`request_id, event_id, kind, status, reason, requested_by, requested_at, fault, judgement_reason, fan_notice_reason, judged_by, judged_at, approved_by, approved_at, refund_job_state, version, updated_at`;
+const COLUMNS = sql`request_id, event_id, kind, status, reason, requested_by, requested_at, fault, judgement_reason, fan_notice_reason, judged_by, judged_at, approved_by, approved_at, refund_job_state, version, updated_at,
+  requested_via, promoter_id, fault_opinion, evidence_ref, new_starts_at, dry_run, rejection_reason`;
+const ACTIVE_STATUSES: ReadonlySet<EventCancellationStatus> = new Set(ACTIVE_EVENT_CANCELLATION_STATUSES);
 const ACTIVE = sql`status in ('REQUESTED','JUDGED','PENDING_APPROVAL','APPROVED','RUNNING','PAUSED','REFUND_WINDOW')`;
+const jsonOf = (v: EventCancellationDryRun | null | undefined): string | null => (v ? JSON.stringify(v) : null);
+
+/** 같은 회차에 진행 중 요청이 있어 넣지 않는다(트랜잭션을 되돌리려고 던진다) */
+class ActiveRequest extends Error {
+  constructor(readonly requestId: string) {
+    super('event-cancellation-active');
+  }
+}
+
+const pgCode = (e: unknown): string | undefined => {
+  const any = e as { code?: unknown; cause?: { code?: unknown } } | undefined;
+  const c = any?.code ?? any?.cause?.code;
+  return typeof c === 'string' ? c : undefined;
+};
+const constraintOf = (e: unknown): string | undefined => {
+  const any = e as { constraint?: unknown; cause?: { constraint?: unknown } } | undefined;
+  const c = any?.constraint ?? any?.cause?.constraint;
+  return typeof c === 'string' ? c : undefined;
+};
 
 export class DrizzleEventCancellationStore implements EventCancellationStore {
-  constructor(private readonly database: Database) {}
+  readonly #idempotency: IdempotencyStore;
 
-  async insert(r: EventCancellationRecord, audit?: AuditRecord): Promise<void> {
-    await this.database.transaction(async (tx) => {
-      await tx.execute(sql`
-        insert into event_cancellation_request (${COLUMNS})
-        values (${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
-                ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
-                ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz)`);
-      if (audit) await appendAuditIn(tx, audit);
-    });
+  constructor(
+    private readonly database: Database,
+    clock: Clock = systemClock,
+  ) {
+    this.#idempotency = new IdempotencyStore({ clock });
+  }
+
+  async insert(r: EventCancellationRecord, audit?: AuditRecord, idem?: EventCancellationIdempotency): Promise<EventCancellationInsert> {
+    try {
+      return await this.database.transaction(async (tx): Promise<EventCancellationInsert> => {
+        if (!idem) {
+          await this.#insertIn(tx, r, audit);
+          return { status: 'INSERTED' };
+        }
+        let inserted = false;
+        const view = await this.#idempotency.run<EventCancellationView>(tx, idem, {
+          execute: async () => {
+            await this.#insertIn(tx, r, audit);
+            inserted = true;
+            const first = eventCancellationView(r);
+            return { resultRef: JSON.stringify(first), value: first };
+          },
+          replay: async (ref) => JSON.parse(ref) as EventCancellationView,
+        });
+        return inserted ? { status: 'INSERTED' } : { status: 'REPLAYED', view };
+      });
+    } catch (err) {
+      if (err instanceof ActiveRequest) return { status: 'ACTIVE', requestId: err.requestId };
+      // 확인과 넣기 사이에 다른 요청이 먼저 커밋했다(부분 유일 인덱스가 막음): 그 요청을 진행 중으로 알린다
+      if (pgCode(err) === '23505' && constraintOf(err) === 'event_cancellation_request_active_key') {
+        const active = await this.findActiveByEvent(r.eventId);
+        if (active) return { status: 'ACTIVE', requestId: active.requestId };
+      }
+      throw err;
+    }
+  }
+
+  async #insertIn(tx: DbTransaction, r: EventCancellationRecord, audit?: AuditRecord): Promise<void> {
+    if (ACTIVE_STATUSES.has(r.status)) {
+      const active = await tx.execute(sql`select request_id from event_cancellation_request where event_id = ${r.eventId}::uuid and ${ACTIVE} limit 1`);
+      const existing = (active.rows[0] as { request_id: string } | undefined)?.request_id;
+      if (existing !== undefined) throw new ActiveRequest(existing);
+    }
+    await tx.execute(sql`
+      insert into event_cancellation_request (${COLUMNS})
+      values (${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
+              ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
+              ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz,
+              ${r.requestedVia ?? 'COMMANDER'}, ${r.promoterId ?? null}::uuid, ${r.faultOpinion ?? null}, ${r.evidenceRef ?? null}, ${r.newStartsAt ?? null}::timestamptz,
+              ${jsonOf(r.dryRun)}::jsonb, ${r.rejectionReason ?? null})`);
+    if (audit) await appendAuditIn(tx, audit);
   }
 
   async find(requestId: string): Promise<EventCancellationRecord | undefined> {
@@ -80,6 +169,7 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
         update event_cancellation_request set status = ${rec.status}, fault = ${rec.fault}, judgement_reason = ${rec.judgementReason},
           fan_notice_reason = ${rec.fanNoticeReason}, judged_by = ${rec.judgedBy}, judged_at = ${rec.judgedAt}::timestamptz,
           approved_by = ${rec.approvedBy}, approved_at = ${rec.approvedAt}::timestamptz, refund_job_state = ${rec.refundJobState},
+          dry_run = ${jsonOf(rec.dryRun)}::jsonb, rejection_reason = ${rec.rejectionReason ?? null},
           version = ${rec.version}::bigint, updated_at = ${rec.updatedAt}::timestamptz
         where request_id = ${rec.requestId}::uuid and version = ${rec.version - 1}::bigint
         returning request_id`);
@@ -96,5 +186,3 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
     return (r.rows as unknown as Row[]).map(recordOf);
   }
 }
-
-export const __test = { ms };

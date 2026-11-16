@@ -10,7 +10,23 @@ import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, type PayoutsModuleDeps } from './modules/payouts/index.js';
-import { DrizzleEventCancellationStore, EventCancellationsModule, MemoryEventCancellationStore, type EventRefundStarter } from './modules/event-cancellations/index.js';
+import {
+  CsCaseEventCancellationCases,
+  DrizzleEventCancellationStore,
+  DrizzleSaleSuspensionLookup,
+  EventCancellationsModule,
+  MemoryEventCancellationStore,
+  MemorySaleSuspensionLookup,
+  StoreCancelledEventGuard,
+  type EventCancellationCases,
+  type EventCancellationReauth,
+  type EventCancellationStore,
+  type EventOwnerLookup,
+  type EventRefundReader,
+  type EventRefundStarter,
+  type EventSaleStopper,
+  type SaleSuspensionLookup,
+} from './modules/event-cancellations/index.js';
 
 interface CommonWiring {
   readonly executor?: CommandExecutor;
@@ -29,18 +45,39 @@ interface CommonWiring {
   /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
   readonly payouts?: PayoutsModuleDeps;
   /**
-   * 회차 취소 요청(BAT-425 GAT-130 잔여). refunds·reauth가 없으면 확정이 503이다.
-   * BAT-420 GAT-110(빈 뼈대, 아직 조립하지 않음): reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속).
-   * suspension(판매 중지 확인)·cases(판정 대기 건)는 주지 않으면 DB/메모리 기본을 쓴다(구현 담당 몫).
+   * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
+   * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
+   * suspension(판매 중지 확인, ops 명령 기록)·cases(CS '판정 대기' 건)는 주지 않으면 같은 DB/메모리 저장소의 기본을 쓴다.
    */
   readonly eventCancellations?: {
     readonly refunds?: EventRefundStarter;
-    readonly reauth?: import('./modules/event-cancellations/index.js').EventCancellationReauth;
-    readonly reader?: import('./modules/event-cancellations/index.js').EventRefundReader;
-    readonly stopper?: import('./modules/event-cancellations/index.js').EventSaleStopper;
-    readonly owners?: import('./modules/event-cancellations/index.js').EventOwnerLookup;
-    readonly suspension?: import('./modules/event-cancellations/index.js').SaleSuspensionLookup;
-    readonly cases?: import('./modules/event-cancellations/index.js').EventCancellationCases;
+    readonly reauth?: EventCancellationReauth;
+    readonly reader?: EventRefundReader;
+    readonly stopper?: EventSaleStopper;
+    readonly owners?: EventOwnerLookup;
+    readonly suspension?: SaleSuspensionLookup;
+    readonly cases?: EventCancellationCases;
+  };
+}
+
+/** 회차 취소 모듈의 의존(넘긴 것만 싣고, 판매 중지 확인·판정 대기 건은 기본을 채운다) */
+function eventCancellationDeps(
+  o: CommonWiring,
+  store: EventCancellationStore,
+  defaults: { suspension: SaleSuspensionLookup; cases: EventCancellationCases },
+  audit: AuditChain,
+) {
+  const e = o.eventCancellations ?? {};
+  return {
+    store,
+    audit,
+    suspension: e.suspension ?? defaults.suspension,
+    cases: e.cases ?? defaults.cases,
+    ...(e.refunds ? { refunds: e.refunds } : {}),
+    ...(e.reauth ? { reauth: e.reauth } : {}),
+    ...(e.reader ? { reader: e.reader } : {}),
+    ...(e.stopper ? { stopper: e.stopper } : {}),
+    ...(e.owners ? { owners: e.owners } : {}),
   };
 }
 
@@ -52,37 +89,41 @@ export class AppModule {
       const chain = o.auditChain ?? new DrizzleAuditChain(o.database);
       const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now(), signer);
       const store = new DrizzleCommandStore(o.database);
+      const cancellations = new DrizzleEventCancellationStore(o.database);
+      const csCases = new DrizzleCsCaseStore(o.database);
       return {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent),
+          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations)),
           AuditModule.register(checkpoints, signer),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
-          CasesModule.register(new DrizzleCsCaseStore(o.database)),
+          CasesModule.register(csCases),
           AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
           PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
-          EventCancellationsModule.register({ store: new DrizzleEventCancellationStore(o.database), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}), ...(o.eventCancellations?.reauth ? { reauth: o.eventCancellations.reauth } : {}), audit: chain }),
+          EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new DrizzleSaleSuspensionLookup(o.database), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
         ],
       };
     }
     const chain = o.auditChain ?? new MemoryAuditChain();
     const checkpoints = new AuditCheckpointService(new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now(), signer);
     const store = new MemoryCommandStore(chain);
+    const cancellations = new MemoryEventCancellationStore(chain);
+    const csCases = new MemoryCsCaseStore();
     return {
       module: AppModule,
       imports: [
-        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent),
+        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations)),
         AuditModule.register(checkpoints, signer),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
-        CasesModule.register(new MemoryCsCaseStore()),
+        CasesModule.register(csCases),
         AlertsModule.register(new MemoryOpsAlertStore()),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
         PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),
-        EventCancellationsModule.register({ store: new MemoryEventCancellationStore(), ...(o.eventCancellations?.refunds ? { refunds: o.eventCancellations.refunds } : {}), ...(o.eventCancellations?.reauth ? { reauth: o.eventCancellations.reauth } : {}), audit: chain }),
+        EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
       ],
     };
   }
