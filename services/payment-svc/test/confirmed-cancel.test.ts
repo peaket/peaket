@@ -57,6 +57,8 @@ function fixture(
     query?: QueryResult;
     /** 3시간 지난 재시도의 저장소 판정(리뷰 B1). 없으면 원장이 기대 잔액 그대로이고 다른 진행 중 건이 없을 때의 판정을 흉내 낸다 */
     settle?: { status: 'APPLIED'; cancelledAmount: number } | { status: 'RESEND' } | { status: 'UNDECIDABLE' };
+    /** 결제사 취소 호출의 첫 번째가 던진다(연결 끊김 흉내, 검증 M-REC-pay1) */
+    cancelThrowsOnce?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -71,6 +73,7 @@ function fixture(
     cancel: async (c: CancelBody) => {
       calls.push('cancel');
       cancels.push(c);
+      if (o.cancelThrowsOnce && cancels.length === 1) throw new Error('결제사 연결이 끊겼다(시험의 장애 주입)');
       return o.cancel ?? { outcome: 'CANCELLED' };
     },
     query: async (paymentRef: string, options?: QueryOptions) => {
@@ -367,5 +370,20 @@ describe('GAT-080 P13 취소 ID의 길이(9~64자, 계획 §11 보충 2, docs/fe
     const over = fixture();
     await expect(over.uc.execute({ paymentId: PAYMENT, cancellationId: 'a'.repeat(65), reason: '관객 취소', amount: 30_000 })).rejects.toThrow(PaymentInputError);
     expect(over.calls).toEqual([]);
+  });
+});
+
+describe('BAT-415 검증 살아남음 M-REC-pay1(결제사 취소 호출의 예외)', () => {
+  test('GAT-080 P9 결제사 취소 호출이 던지면 결과 모름(UNKNOWN)이고 행·원장을 바꾸지 않으며, 같은 취소 ID 재호출은 같은 본문으로 한 번 더 보내 CANCELLED다', async () => {
+    const f = fixture({ cancelThrowsOnce: true });
+    await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'UNKNOWN', cancelledAmount: 20_000 });
+    expect(f.finishes).toHaveLength(0);
+    expect(f.marks).toHaveLength(0);
+    await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 50_000 });
+    // 장애 주입이 실제로 있었다: 결제사 호출은 두 번이고 본문(멱등키·금액·기대 잔액)이 같다
+    expect(f.cancels).toHaveLength(2);
+    expect(f.cancels[1]).toEqual(f.cancels[0]);
+    expect(f.cancels[0]).toEqual({ paymentRef: 'pay_ref_1', amount: 30_000, reason: '관객 취소', idemKey: `cancel-${CANCEL}`, expectedBalance: 80_000 });
+    expect(f.finishes).toEqual([CANCEL]);
   });
 });

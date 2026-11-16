@@ -471,3 +471,70 @@ describe('GAT-080 S5 일괄 환불 항목과 팬 취소의 사유(다시 보기 
     expect(payments.calls).toHaveLength(0);
   });
 });
+
+// ---- BAT-415 검증 살아남음(계획 '검증' 2): M-R-T4c·M-REC-pur1·M-REC-pur2 ----
+describe('BAT-415 검증 살아남음: 팬 취소 Saga', () => {
+  const AT = kst('2026-11-13T10:00:00');
+  const input = (cancellationId = CANCEL) => ({ accountId: ACCOUNT, ticketId: TICKET, cancellationId, reason: 'USER' as const, nowMs: AT, deadlineMs: 2000 });
+
+  test('R-T4 공제율대로(공연 7일 전 10%, 30,000원) 처음 결제한 수단으로 환급하고 카드 결제 취소에 환불 계좌를 싣지 않는다', async () => {
+    const { svc, payments } = saga();
+    await expect(svc.execute(input())).resolves.toEqual({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000, refundAfterEntryClose: false });
+    expect(payments.calls).toHaveLength(1);
+    expect(payments.calls[0]).toMatchObject({ cancellationId: CANCEL, orderId: ORDER, amount: 30_000, reason: 'USER' });
+    expect(payments.calls[0]).not.toHaveProperty('refundAccount');
+  });
+
+  test('GAT-080 팬 취소에서 ticket-svc가 멈추면(던짐) 좌석·취소 행·결제사를 건드리지 않고, 같은 취소 ID 재호출은 ticket-svc를 다시 불러 끝까지 간다', async () => {
+    let throws = 1;
+    const calls: Parameters<TicketCancellations['cancel']>[0][] = [];
+    const tickets: TicketCancellations = {
+      cancel: async (q) => {
+        calls.push(q);
+        if (throws-- > 0) throw new Error('ticket-svc UNAVAILABLE(시험의 장애 주입)');
+        return 'REFUND_NOW';
+      },
+    };
+    const payments = new Payments('CANCELLED');
+    const writes = new Writes();
+    const seats = new Seats();
+    const svc = new CancelTicket({ orders: new Orders(order()), calendar, tickets, payments, writes, seats });
+    await expect(svc.execute(input())).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    expect(seats.calls).toHaveLength(0);
+    expect(writes.created).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+    await expect(svc.execute(input())).resolves.toMatchObject({ status: 'ACCEPTED', cancellationId: CANCEL, refundAmount: 30_000 });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({ cancellationId: CANCEL, ticketIds: [TICKET] });
+    expect(seats.calls).toHaveLength(1);
+    expect(writes.created).toHaveLength(1);
+    expect(payments.calls).toHaveLength(1);
+  });
+
+  test('GAT-080 좌석 되돌리기가 한 번 던지면 첫 호출은 던지고 취소 행·결제사 0이며, 같은 취소 ID 재호출은 좌석을 한 번 더 되돌리고 취소 행 1·결제사 1로 마친다', async () => {
+    let throws = 1;
+    const seatCalls: Parameters<SeatReturns['returnSold']>[0][] = [];
+    const seats: SeatReturns = {
+      returnSold: async (q) => {
+        seatCalls.push(q);
+        if (throws-- > 0) throw new Error('좌석 되돌리기 실패(시험의 장애 주입)');
+        return 1;
+      },
+    };
+    const tickets = new Tickets('REFUND_NOW');
+    const payments = new Payments('CANCELLED');
+    const writes = new Writes();
+    const svc = new CancelTicket({ orders: new Orders(order()), calendar, tickets, payments, writes, seats });
+    await expect(svc.execute(input())).rejects.toThrow();
+    expect(seatCalls).toHaveLength(1);
+    expect(writes.created).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+    await expect(svc.execute(input())).resolves.toMatchObject({ status: 'ACCEPTED', cancellationId: CANCEL });
+    expect(tickets.calls).toHaveLength(2);
+    expect(seatCalls).toHaveLength(2);
+    expect(writes.created).toHaveLength(1);
+    expect(writes.created[0]).toMatchObject({ cancellationId: CANCEL, deductionBp: 1_000, refundAmount: 30_000 });
+    expect(payments.calls).toHaveLength(1);
+  });
+});

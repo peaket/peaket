@@ -141,3 +141,84 @@ describe('GAT-080 E2 같은 주문의 앞 표가 끝나지 않으면 나머지�
     expect((await f.store.items(REQUEST2)).find((i) => i.ticketId === A1)!.status).toBe('REFUNDED');
   });
 });
+
+// ---- BAT-415 검증 살아남음(계획 '검증' 2): M-E3·M-REC-pur4 ----
+describe('BAT-415 검증 살아남음: 일괄 환불', () => {
+  const T1 = ticketOf(2, 0);
+  const T2 = ticketOf(2, 1);
+  const REQ = '0193a000-0000-7000-8000-0000000000e4';
+  /** 한 주문(주문 셋째)에 표 둘. 취소기 답은 표마다 차례로 정한다 */
+  const make = (answers: Record<string, Array<'REFUNDED' | 'REFUND_PENDING' | 'THROW'>>) => {
+    let now = NOW;
+    const calls: { ticketId: string; cancellationId: string }[] = [];
+    const used = new Map<string, number>();
+    const canceller: EventRefundCanceller = {
+      cancel: async (t, q) => {
+        calls.push({ ticketId: t.ticketId, cancellationId: q.cancellationId });
+        const i = used.get(t.ticketId) ?? 0;
+        used.set(t.ticketId, i + 1);
+        const a = answers[t.ticketId]?.[i] ?? 'REFUNDED';
+        if (a === 'THROW') throw new Error('일괄 환불 취소기 연결 끊김(시험의 장애 주입)');
+        return { status: a };
+      },
+    };
+    const store = new MemoryEventRefundStore();
+    const attempts = new MemoryEventRefundAttemptStore();
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [targetOf(2, 0), targetOf(2, 1)] },
+      canceller,
+      attempts,
+      notice: { open: async () => {} },
+      nowMs: () => now,
+      deadlineMs: () => now + 5_000,
+      concurrency: 8,
+    });
+    return { service, store, attempts, calls, setNow: (ms: number) => (now = ms) };
+  };
+  const start = (service: EventRefundService) => service.start({ eventId: EVENT, requestId: REQ, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+
+  test('GAT-080 E3 같은 주문 묶음에서 재시도할 UNKNOWN 표를 처음 보내는 PENDING 표보다 먼저 하고, UNKNOWN이 다시 결과 모름이면 PENDING 표는 부르지도 기록하지도 않는다', async () => {
+    for (const second of ['REFUNDED', 'REFUND_PENDING'] as const) {
+      // 시작: T1(큐 앞)이 결과 모름이라 T2는 미룬다. 그 뒤 상태를 바꿔 T1은 처음 보내는 PENDING, T2는 재시도할 UNKNOWN으로 둔다
+      const f = make({ [T1]: ['REFUND_PENDING'], [T2]: [second] });
+      await start(f.service);
+      const items = await f.store.items(REQ);
+      const i1 = items.find((i) => i.ticketId === T1)!;
+      const i2 = items.find((i) => i.ticketId === T2)!;
+      const due = i1.nextAttemptAtMs!;
+      await f.store.updateItem({ ...i1, status: 'PENDING', attempts: 0, nextAttemptAtMs: due });
+      await f.store.updateItem({ ...i2, status: 'UNKNOWN', attempts: 1, nextAttemptAtMs: due });
+      f.calls.length = 0;
+      f.attempts.attempts.length = 0;
+      f.setNow(due);
+      await f.service.runDue();
+      if (second === 'REFUNDED') {
+        expect(f.calls.map((c) => c.ticketId), second).toEqual([T2, T1]);
+      } else {
+        expect(f.calls.map((c) => c.ticketId), second).toEqual([T2]);
+        expect(f.attempts.attempts.filter((a) => a.ticketId === T1), second).toHaveLength(0);
+      }
+    }
+  });
+
+  test('GAT-080 E4 일괄 환불 취소기가 던지면 항목은 UNKNOWN·시도 1·다음 시도 지금 + 1분이고 시도 기록은 UNKNOWN 1건이며, 다음 시각 실행이 같은 취소 ID로 다시 부른다', async () => {
+    const f = make({ [T1]: ['THROW', 'REFUNDED'] });
+    await start(f.service);
+    const i1 = (await f.store.items(REQ)).find((i) => i.ticketId === T1)!;
+    expect(i1).toMatchObject({ status: 'UNKNOWN', attempts: 1, nextAttemptAtMs: NOW + 60_000 });
+    expect(f.attempts.attempts.filter((a) => a.ticketId === T1).map((a) => a.outcome)).toEqual(['UNKNOWN']);
+    // 같은 주문의 T2는 앞 표가 끝나지 않아 미룬다(B4)
+    expect(f.calls.map((c) => c.ticketId)).toEqual([T1]);
+    const firstId = f.calls[0]!.cancellationId;
+
+    f.setNow(NOW + 60_000 - 1);
+    await f.service.runDue();
+    expect(f.calls).toHaveLength(1);
+    f.setNow(NOW + 60_000);
+    await f.service.runDue();
+    expect(f.calls.map((c) => c.ticketId)).toEqual([T1, T1, T2]);
+    expect(f.calls[1]!.cancellationId).toBe(firstId);
+    expect((await f.store.items(REQ)).map((i) => i.status)).toEqual(['REFUNDED', 'REFUNDED']);
+  });
+});

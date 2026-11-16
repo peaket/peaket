@@ -618,3 +618,23 @@ describe('GAT-080 F21 FAILED끼리의 차례(다시 보기 R2, 단위)', () => {
     expect(await f.store.results(APPROVAL)).toEqual(again);
   });
 });
+
+describe('BAT-415 검증 살아남음 M-F20d(마감 전 다시 부르기의 ticket-svc 실패)', () => {
+  test('GAT-080 F20 마감 전 다시 부르기에서 ticket-svc가 던져도 앞 호출의 티켓 단계 뒤 까닭(SEAT_RETURN_FAILED)이 남아 마감 뒤 다시 부르기가 그 표를 마친다', async () => {
+    const [a, b] = [seat(), seat()];
+    const f = fixture([a!, b!]);
+    f.seats.failFor.set(a!.seatId, 1);
+    const first = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T15:00:00') }));
+    expect(first).toEqual([{ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' }, accepted(b!)]);
+    // 마감 전 다시 부르기: ticket-svc가 던진다(장애 주입이 실제로 있었는지 호출 수로 본다)
+    f.tickets.failNext = 1;
+    const mid = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T16:00:00') }));
+    expect(f.tickets.calls).toHaveLength(2);
+    expect(mid[0]).toEqual({ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' });
+    expect((await f.store.results(APPROVAL)).find((r) => r.ticketId === a!.ticketId)).toEqual({ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' });
+    // 마감(판매 종료 − 2시간) 정각의 다시 부르기가 a의 나머지를 마친다
+    const late = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00') }));
+    expect(late).toEqual([accepted(a!), accepted(b!)]);
+    expect(f.writes.created.filter((c) => c.ticketId === a!.ticketId).at(-1)).toMatchObject({ cancellationId: expectedCancellationId(APPROVAL, a!.ticketId), reason: 'FRAUD', deductionBp: 0, refundAmount: PRICE });
+  });
+});
