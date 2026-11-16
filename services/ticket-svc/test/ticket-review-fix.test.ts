@@ -12,6 +12,9 @@ import { startGrpcServer } from '../src/grpc-server.js';
 import { MemoryTicketStore } from '../src/modules/ticket/adapters/memory-ticket-store.js';
 import { TicketService } from '../src/modules/ticket/application/ticket-service.js';
 import { TicketInputError } from '../src/modules/ticket/domain/ticket.js';
+import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core';
+import { ticketCancellation } from '../src/modules/ticket/adapters/db/schema.js';
+import { CANCELLATION_REASONS as PURCHASE_REASONS } from '../../purchase-svc/src/modules/refund/domain/cancellation.js';
 import { ticketPackage, ticketServiceHandlers } from '../src/modules/ticket/inbound/ticket.grpc.js';
 
 const NOW = Date.parse('2026-11-16T03:00:00.000Z');
@@ -229,5 +232,39 @@ describe('GAT-080 S3 첫 칸은 사유 USER 기록만(다시 보기 R1)', () => 
       code: grpc.status.INVALID_ARGUMENT,
     });
     expect(store.tickets.get(u.ticketId)!.status).toBe('ISSUED');
+  });
+});
+
+// ---- 계획 §11 보충 4(02efc5b2): ticket-svc 취소 사유 목록 = purchase order_cancellation.reason 일곱(FRAUD 포함) ----
+describe('GAT-080 S3 사유 목록 일곱(보충 4)', () => {
+  /** 정본 값(purchase CANCELLATION_REASONS, docs/data.md order_cancellation.reason·ticket_cancellation.reason) */
+  const SEVEN = ['USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL', 'FRAUD'];
+  const literals = (s: string): string[] => [...s.matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]!);
+
+  test('GAT-080 S3 사유 목록은 purchase 일곱과 같다: 일곱 값 모두 받고(FRAUD 포함) 목록 밖 값(REFUND)은 TicketInputError다', async () => {
+    expect([...PURCHASE_REASONS]).toEqual(SEVEN);
+    for (const reason of SEVEN) {
+      const t = await issued();
+      expect(await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: randomUUID(), nowMs: NOW, reason }), reason).toEqual([{ ticketId: t.ticketId, result: 'REFUND_NOW' }]);
+    }
+    const u = await issued();
+    await expect(ticket.cancel({ orderId: u.orderId, ticketIds: [u.ticketId], requestedByAccountId: PAYER, cancellationId: randomUUID(), nowMs: NOW, reason: 'REFUND' })).rejects.toBeInstanceOf(TicketInputError);
+    expect(store.tickets.get(u.ticketId)!.status).toBe('ISSUED');
+  });
+
+  test('GAT-080 S3 gRPC도 FRAUD 사유를 받는다', async () => {
+    const t = await issued();
+    const out = (await call(openClient, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), reason: 'FRAUD' })).outcomes as Reply[];
+    expect(out[0]).toMatchObject({ ticket_id: t.ticketId, result: 'CANCEL_TICKET_RESULT_REFUND_NOW' });
+  });
+
+  test('GAT-080 S3 0009 SQL과 schema.ts의 ticket_cancellation_reason_check 원문에 사유 일곱이 있다', () => {
+    const sqlOf = readFileSync(fileURLToPath(new URL('../migrations/0009_ticket_cancellation_reason.sql', import.meta.url)), 'utf8');
+    const checkLine = sqlOf.split('\n').find((l) => l.includes('ADD CONSTRAINT ticket_cancellation_reason_check'));
+    expect(checkLine, '0009 CHECK 줄').toBeDefined();
+    expect(literals(checkLine!)).toEqual(SEVEN);
+    const check = getTableConfig(ticketCancellation).checks.find((k) => k.name === 'ticket_cancellation_reason_check');
+    expect(check, 'schema.ts CHECK').toBeDefined();
+    expect(literals(new PgDialect().sqlToQuery(check!.value).sql)).toEqual(SEVEN);
   });
 });
