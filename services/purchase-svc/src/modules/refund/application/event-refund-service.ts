@@ -260,27 +260,39 @@ export class EventRefundService {
     const byTicket = new Map(targets.map((t) => [t.ticketId, t]));
     const nowMs = this.o.nowMs();
     const all = await this.o.store.items(request.requestId);
+    // 같은 주문의 앞 표가 재시도를 기다리면(결과 모름, 다음 시도 시각 전) 그 주문의 나머지 표는 이번 실행에 넣지 않는다(리뷰 B4).
+    // 넣지 않은 표는 부르지도 시도로 기록하지도 않아 자동 정지의 실패율·연속 실패·실패 금액에 들지 않는다
+    const waitingOrders = new Set(all.filter((i) => i.status === 'UNKNOWN' && i.nextAttemptAtMs !== undefined && i.nextAttemptAtMs > nowMs).map((i) => i.orderId));
     const queue = all
-      .filter((i) => (i.status === 'PENDING' || i.status === 'UNKNOWN') && i.appliedAtMs !== undefined && (i.nextAttemptAtMs === undefined || i.nextAttemptAtMs <= nowMs) && !paused.has(i.pg))
+      .filter(
+        (i) =>
+          (i.status === 'PENDING' || i.status === 'UNKNOWN') &&
+          i.appliedAtMs !== undefined &&
+          (i.nextAttemptAtMs === undefined || i.nextAttemptAtMs <= nowMs) &&
+          !paused.has(i.pg) &&
+          !waitingOrders.has(i.orderId),
+      )
       .slice(0, Math.max(0, limit));
     // 같은 주문의 표는 한 작업자가 큐 차례대로 처리한다. payment-svc가 같은 결제의 일반 취소를 한 번에 하나씩 보내므로(10분 안의 진행 중 건이 있으면 결과 모름),
-    // 같은 주문의 표를 동시에 보내면 결과 모름이 자동 정지 실패율에 섞인다(docs/data.md §5 '같은 주문의 표 둘을 동시에 취소', BUILD_ORDER GAT-080)
+    // 같은 주문의 표를 동시에 보내면 결과 모름이 자동 정지 실패율에 섞인다(docs/data.md §5 '같은 주문의 표 둘을 동시에 취소', BUILD_ORDER GAT-080).
+    // 묶음 안에서는 재시도할 결과 모름을 처음 보내는 표보다 먼저 한다(앞 건이 끝나야 뒤 건을 보낼 수 있다)
     const groups = new Map<string, EventRefundItem[]>();
     for (const item of queue) {
       const group = groups.get(item.orderId);
       if (group) group.push(item);
       else groups.set(item.orderId, [item]);
     }
-    const orderQueue = [...groups.values()];
+    const orderQueue = [...groups.values()].map((g) => [...g.filter((i) => i.status === 'UNKNOWN'), ...g.filter((i) => i.status !== 'UNKNOWN')]);
     const newlyPaused: { pg: RefundPgProvider; reason: RefundPauseReason; detail: Record<string, unknown> }[] = [];
-    const processItem = async (item: EventRefundItem): Promise<void> => {
+    /** 항목 하나를 처리하고, 그 항목이 끝났는지(환급·실패) 돌려준다. 멈춤·자동 정지로 보내지 않았거나 재시도를 기다리면 false다 */
+    const processItem = async (item: EventRefundItem): Promise<boolean> => {
       // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
       const current = await this.o.store.find(request.requestId);
       if (current) {
         for (const p of pausedOf(current)) paused.set(p.pg, p.reason);
         if (current.status === 'PAUSED' && !paused.has(item.pg)) paused.set(item.pg, 'MANUAL');
       }
-      if (paused.has(item.pg)) return;
+      if (paused.has(item.pg)) return false;
       // 기준을 넘긴 뒤 새 호출을 한 건도 더 보내지 않게 항목마다 판정한다
       const stop = await this.#stopReason(item.pg, nowMs);
       if (stop) {
@@ -291,12 +303,12 @@ export class EventRefundService {
             newlyPaused.push({ pg, reason: stop.reason, detail: stop.detail });
           }
         }
-        return;
+        return false;
       }
       const target = byTicket.get(item.ticketId);
       if (!target) {
         await this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, undefined);
-        return;
+        return true;
       }
       try {
         const result = await this.o.canceller.cancel(target, {
@@ -310,24 +322,26 @@ export class EventRefundService {
         await this.#recordAttempt(request, item, target, outcome);
         if (result.status === 'REFUNDED') {
           await this.#finishItem(request, item, 'REFUNDED', undefined, target, undefined);
-        } else if (result.status === 'REFUND_PENDING') {
-          await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target);
-        } else if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
-          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
-        } else {
-          await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target);
+          return true;
         }
+        if (result.status === 'REFUND_PENDING') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target)) !== 'UNKNOWN';
+        if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
+          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
+          return true;
+        }
+        return (await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target)) !== 'UNKNOWN';
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown';
         await this.#recordAttempt(request, item, target, 'UNKNOWN');
-        await this.#retryOrFail(request, item, 'UNKNOWN', message, target);
+        return (await this.#retryOrFail(request, item, 'UNKNOWN', message, target)) !== 'UNKNOWN';
       }
     };
     const worker = async (): Promise<void> => {
       for (;;) {
         const group = orderQueue.shift();
         if (!group) return;
-        for (const item of group) await processItem(item);
+        // 앞 항목이 끝나지 않으면(결과 모름·멈춤) 그 묶음의 나머지는 이번 실행에서 부르지 않는다(리뷰 B4)
+        for (const item of group) if (!(await processItem(item))) break;
       }
     };
     await Promise.all(Array.from({ length: Math.max(1, Math.min(this.o.concurrency ?? 8, orderQueue.length || 1)) }, worker));
@@ -355,14 +369,16 @@ export class EventRefundService {
     await this.o.attempts?.record({ requestId: request.requestId, ticketId: item.ticketId, pg: item.pg, amount: target.ticketPrice, outcome, atMs: this.o.nowMs() });
   }
 
-  async #retryOrFail(request: EventCancellationRequest, item: EventRefundItem, status: 'UNKNOWN' | 'FAILED', error: string, target: EventRefundTarget | undefined): Promise<void> {
+  /** 재시도를 적거나(시도 상한이면 실패로 끝낸다) 그 뒤의 항목 상태를 돌려준다. UNKNOWN만 다음 실행에서 다시 집는다 */
+  async #retryOrFail(request: EventCancellationRequest, item: EventRefundItem, status: 'UNKNOWN' | 'FAILED', error: string, target: EventRefundTarget | undefined): Promise<'UNKNOWN' | 'FAILED'> {
     const attempts = item.attempts + 1;
     if (attempts >= EVENT_REFUND_AUTO_STOP.maxAttempts) {
       await this.#finishItem(request, item, 'FAILED', error, target, attempts);
-      return;
+      return 'FAILED';
     }
     const nextAttemptAtMs = this.o.nowMs() + eventRefundRetryDelayMs(attempts);
     await this.o.store.updateItem({ ...item, status, attempts, lastError: error, nextAttemptAtMs });
+    return status;
   }
 
   async #finishItem(
