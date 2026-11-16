@@ -332,7 +332,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 ```
 
 - `main.ts`: `createService` 전에 `kafkaConsumersFromEnv(process.env)`를 읽어 운영에서 브로커가 없으면 시작하지 않는다. `service.listen()` 뒤에 켜져 있으면 `startCoreConsumers({ …, clientId: \`core-svc-${env}-${파드}\`, auth: kafkaAuthFromEnv('core-svc', process.env), handler: new ReviewAccountWithdrawnHandler(service.app.get(Reviews), undefined, { logger }) })`. `started`가 실패하면 오류 한 줄 뒤 종료 코드 1. SIGTERM에서는 소비자를 먼저 멈춘 뒤 서비스를 닫는다. 꺼진 설정(local·ci)은 경고 한 줄.
-- 내부 경로와 `Reviews.anonymizeAccount`·`ReviewStore.anonymizeByAccount`의 동작은 바꾸지 않는다(아래 OPEN 후보 1).
+- 내부 경로와 `Reviews.anonymizeAccount`·`ReviewStore.anonymizeByAccount`의 동작은 바꾸지 않는다(아래 OPEN[42]).
 - (보충) 0022 권한. 표 쓰기 SQL을 하나씩 대조해 정했다(`review/adapters/db/drizzle-review-store.ts`, 플랫폼 `held-events.ts`). 여기 없는 권한(표 전체 UPDATE, `review`·`content_report`·`takedown_action` DELETE, TRUNCATE)은 주지 않는다. `SELECT … FOR UPDATE`(통보 가림)는 아래 UPDATE 칸 권한으로 된다.
 
   | 역할 | 표 | 줄 권한 | 쓰는 곳 |
@@ -353,7 +353,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 
 | 시험 이름 | 단계 | 단언(정본 값) | 비고 |
 | --- | --- | --- | --- |
-| `COV2-06 ① 탈퇴 사건을 받으면 그 계정 후기의 계정·주문 참조를 후기 ID로 바꾼다` | 단위 | 메모리 저장소: 계정 A 후기 둘(VISIBLE·DELETED), 계정 B 후기 하나. A의 사건 뒤 A의 두 행 `accountId`·`basisOrderId` = 각자의 후기 ID, `authorDisplay` '탈퇴한 사용자', `updatedAtMs` = 가짜 시계. B 행은 모든 칸이 그대로 | 본문·별점 단언은 OPEN 후보 1에 따라 바뀔 수 있어 지금은 '그대로'만 본다 |
+| `COV2-06 ① 탈퇴 사건을 받으면 그 계정 후기의 계정·주문 참조를 후기 ID로 바꾼다` | 단위 | 메모리 저장소: 계정 A 후기 둘(VISIBLE·DELETED), 계정 B 후기 하나. A의 사건 뒤 A의 두 행 `accountId`·`basisOrderId` = 각자의 후기 ID, `authorDisplay` '탈퇴한 사용자', `updatedAtMs` = 가짜 시계. B 행은 모든 칸이 그대로 | 본문·별점 단언은 OPEN[42]에 따라 바뀔 수 있어 지금은 '그대로'만 본다 |
 | `COV2-06 ② 같은 사건을 다시 받아도 결과가 같다` | 단위 | 둘째 처리 뒤 바꾼 건수 0, 행(갱신 시각 포함)이 첫 처리 뒤와 같다 | |
 | `COV2-06 ③ decode는 eventKey·accountId·withdrawnAt만 읽고 pid 없이도 읽는다` | 단위 | 계약 전체 JSON과 pid를 뺀 JSON 모두 읽힌다. 결과에 `pids`·`purgeBy` 키가 없다. 대문자 accountId는 소문자가 된다 | 보류 뒤 다시 처리를 위해 |
 | `COV2-06 ④ 값이 없거나 모양이 틀리면 decode가 실패한다` | 단위 | 값 null, UUID 아닌 accountId, eventKey 없음, 날짜 아닌 withdrawnAt 각각 throw | |
@@ -391,28 +391,28 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 5. (보충) 0022가 `review`에 칸 없는 `UPDATE`(또는 `DELETE`)를 준다(⑬⑮가 잡는다).
 6. (보충) 0022가 `core_maintenance` 줄이나 `core_app`의 `held_event` INSERT를 빠뜨린다(⑯·⑫가 잡는다).
 
-### 5. OPEN 후보(방향을 바꾸는 결정이라 정본에 쓰지 않았다)
+### 5. OPEN 항목(방향을 바꾸는 결정이라 정본에 쓰지 않았다. develop 48faf8a8에서 번호를 받았다: 후보 1 → OPEN[42], 후보 2 → OPEN[43], 후보 3 → OPEN[44])
 
-1. **탈퇴한 계정의 후기를 익명화해 남길지, 파기할지.** 정본끼리 어긋난다. R-617(2026-11-15)이 쓴 docs/features/identity.md §8 '후기 익명화'는 "본문·평점은 법정 보존·분쟁 대응을 위해 남기고 계정·주문 참조만 끊는다"이다. 그런데 docs/data.md §6 '관람 후기' 행은 "작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비운다"이고, docs/security/data-classification.md '관람 후기' 행("후기 삭제 또는 회원 탈퇴 시 파기")과 docs/planning/03-policies-glossary.md 권한표 '관람 후기' 행("탈퇴 때 삭제"), ADR-0086 ⑧(소프트 삭제 때 비우는 칸)도 같은 쪽이다. 후기 본문을 남길 법정 근거는 정본에 없다(법정 차단 조치 증적 3년은 `takedown_action`이 따로 둔다).
+1. **OPEN[42] 탈퇴한 계정의 후기를 익명화해 남길지, 파기할지(대기: OPEN[42]).** 정본끼리 어긋난다. R-617(2026-11-15)이 쓴 docs/features/identity.md §8 '후기 익명화'는 "본문·평점은 법정 보존·분쟁 대응을 위해 남기고 계정·주문 참조만 끊는다"이다. 그런데 docs/data.md §6 '관람 후기' 행은 "작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비운다"이고, docs/security/data-classification.md '관람 후기' 행("후기 삭제 또는 회원 탈퇴 시 파기")과 docs/planning/03-policies-glossary.md 권한표 '관람 후기' 행("탈퇴 때 삭제"), ADR-0086 ⑧(소프트 삭제 때 비우는 칸)도 같은 쪽이다. 후기 본문을 남길 법정 근거는 정본에 없다(법정 차단 조치 증적 3년은 `takedown_action`이 따로 둔다).
    - 추천: (가) 파기 쪽으로 맞춘다. 정본 넷이 같은 쪽이고 개인정보를 덜 남긴다. 하려면 `review.rating` NOT NULL 풀기(마이그레이션), `review_image` 파일·행 지우기, `content_fingerprint` 비우기, 공개 목록·요약에서 빠지는 것을 함께 정해야 한다. (나) R-617대로 두고 data.md·data-classification·planning/03을 고친다.
    - 이번 묶음: 결정 전까지 배선(사건 → 기존 `anonymizeAccount`)만 한다. 어느 쪽이든 '계정·주문 참조를 끊는다'는 같으므로 시험 ①⑪의 그 단언은 남고, 본문·별점·작성자 표시 단언만 바뀐다. identity.md에 결정 대기를 한 줄 적었다.
    - 웨이브 끝 보안 리뷰 S2(=대조 리뷰 R1)의 근거 보탬: 남는 칸은 본문·별점만이 아니라 사진 키·내용 지문(`content_fingerprint`)도 있다. 후기 본문에는 작성자나 다른 사람의 개인정보가 섞여 들 수 있다. 결정 전까지 asvs/catalog-review.md v5.0.0-14.2.7 행을 '부분 적용'으로 낮추고 빠진 몫을 적었다(§7). (가)로 정하면 0022의 `review` 칸 권한(별점을 비우려면 `rating` NOT NULL 풀기)과 `review_image` 지우기 권한도 함께 바뀐다.
-2. **파트너 명단 접속기록을 어디에 둘지.** 정본의 관리 계정 접속기록 저장소는 ops-svc 감사 저장소의 `admin_data_access`(해시 체인, 접속지 정보 `source_ip`, FR-064 매일 이상 점검이 읽는 곳)인데, 구현은 core DB `attendee_export_audit`이다(R-606). 지금은 FR-064 점검(같은 명단 24시간 3회, 1만 건 이상, 근무 일정 밖 조회)이 파트너 명단 기록을 읽지 못한다. 이번 묶음은 core 표를 넓혀 쓰고 data.md에 '옮기는 일은 정해지지 않았다'고 적었다. 접속지 칸(`source_ip`)은 리뷰 R2 보충으로 core 표에도 더했으므로, 남는 차이는 해시 체인과 FR-064 점검이 읽는 곳이다. 옮길지, 옮긴다면 core가 사건으로 보낼지 ops가 읽을지는 소유자 결정이다.
+2. **OPEN[43] 파트너 명단 접속기록을 어디에 둘지(대기: OPEN[43]).** 정본의 관리 계정 접속기록 저장소는 ops-svc 감사 저장소의 `admin_data_access`(해시 체인, 접속지 정보 `source_ip`, FR-064 매일 이상 점검이 읽는 곳)인데, 구현은 core DB `attendee_export_audit`이다(R-606). 지금은 FR-064 점검(같은 명단 24시간 3회, 1만 건 이상, 근무 일정 밖 조회)이 파트너 명단 기록을 읽지 못한다. 이번 묶음은 core 표를 넓혀 쓰고 data.md에 '옮기는 일은 정해지지 않았다'고 적었다. 접속지 칸(`source_ip`)은 리뷰 R2 보충으로 core 표에도 더했으므로, 남는 차이는 해시 체인과 FR-064 점검이 읽는 곳이다. 옮길지, 옮긴다면 core가 사건으로 보낼지 ops가 읽을지는 소유자 결정이다.
    - 웨이브 끝 보안 리뷰 S1의 근거 보탬: 고시 제8조는 접속기록의 월 1회 이상 점검과 위·변조·도난·분실 방지 조치를 요구한다. core 표는 앱 역할 `core_partner`만 고치거나 지우지 못하고, 표 주인(마이그레이션 역할)과 DB 관리자는 고칠 수 있으며 고친 것을 찾아낼 해시 체인이 없다. data-classification '관리자 시스템 접속기록' 행의 보호 방법(변조를 찾아내는 불변 감사 저장소)과 다르다. 결정 전까지 asvs/settlement.md v5.0.0-16.4.2·16.2.1 행을 '부분 적용'으로 낮추고 빠진 몫을 적었다(§7). 고를 길: (가) ops 감사 저장소로 사건을 보내 옮긴다 (나) core 표를 두고 해시 체인·월 점검 읽기를 core에 붙인다 (다) 위험 수용과 그 기한.
-3. **탈퇴 직후 15분 창(웨이브 끝 동시 실행 리뷰 K3).** 탈퇴 사건을 받자마자 익명화하므로, 탈퇴 전에 받은 액세스 토큰(최대 15분)으로 사건 처리 뒤에 쓴 후기는 계정·주문 참조를 가진 채 남는다(그 계정의 사건은 다시 오지 않는다). 지금 정본은 이것을 docs/features/identity.md §8 '남는 한계'로 두고 HOT-400(끝난 세션 토큰 막기)을 기다린다. 같은 사건을 읽는 queue-svc는 바로 이 15분 때문에 `withdrawnAt + 15분` 뒤에 처리한다(docs/streaming.md §2.6, ADR-0214 결정 7).
+3. **OPEN[44] 탈퇴 직후 15분 창(웨이브 끝 동시 실행 리뷰 K3, 대기: OPEN[44]).** 탈퇴 사건을 받자마자 익명화하므로, 탈퇴 전에 받은 액세스 토큰(최대 15분)으로 사건 처리 뒤에 쓴 후기는 계정·주문 참조를 가진 채 남는다(그 계정의 사건은 다시 오지 않는다). 지금 정본은 이것을 docs/features/identity.md §8 '남는 한계'로 두고 HOT-400(끝난 세션 토큰 막기)을 기다린다. 같은 사건을 읽는 queue-svc는 바로 이 15분 때문에 `withdrawnAt + 15분` 뒤에 처리한다(docs/streaming.md §2.6, ADR-0214 결정 7).
    - 고를 길: (가) core도 `withdrawnAt + 15분` 뒤에 한 번 더 익명화한다(사건 처리는 지금처럼 바로 하고 15분 뒤 같은 계정을 다시 부른다. 익명화는 다시 해도 결과가 같다) (나) HOT-400 전까지 지금 한계를 받아들인다. 추천은 (가)다(같은 저장소의 queue-svc가 이미 같은 까닭으로 늦춘다).
    - 확인할 것: 후기 쓰기 경로가 탈퇴한 계정의 세션을 따로 막는지(ticket-svc 후기 자격 확인이 탈퇴 계정을 거절하면 이 창은 없다).
 
 ### 6. 막힌 것·확인할 것
 
-- 막힌 것은 없다. 위 OPEN 후보 1은 COV2-06 배선을 막지 않는다.
+- 막힌 것은 없다. 위 OPEN[42]는 COV2-06 배선을 막지 않는다.
 - (보충 2026-11-16) 실패 확인 절 '확인할 것 1'(운영 역할의 후기·보류 표 쓰기 권한)은 §4 보충(0022, 시험 ⑬~⑯)으로 받았다. 기존 후기 쓰기 경로도 같은 결함이라 이번 범위에 넣었다. '확인할 것 2'(0021 CHECK 글)는 §2의 글을 그대로 쓴다. 같은 뜻의 다른 글로 쓰려면 구현 담당이 '시험 이의'로 적는다.
 - 장부: `node tools/ci/ledger.mjs --batch BAT-610`은 이 커밋 뒤 J-T26 ④⑤⑥을 'ID만'으로 보인다(기존 파트너 화면 시험 이름이 세부 번호 없이 `J-T26`을 단다). 이 묶음의 시험이 들어오면 채워진다. 기록 담당이 장부를 다시 쓸 때 확인한다.
 - 정본 점검: `python -I -X utf8 tools/doc-check/check_all.py` 오류 0, `pnpm --dir packages/contracts gen:check`(asyncapi는 설명만 바꿔 생성물이 같다).
 
 ### 7. 웨이브 끝 리뷰 반영(2026-11-16)
 
-웨이브 끝 관점 리뷰 셋(`docs/review/measurements/W7-lane3-review-correctness.md`·`-concurrency.md`·`-security.md`)과 이 파일 `## 검증` 절 가운데 감독이 이번에 고치기로 정한 것이다: C1, C4, K1, K6, K2, S1·S2(정본 상태 고침만), 검증 살아남음 M28·M33(시험 몫). R1=S2, S1(OPEN 후보 2), K3은 §5 OPEN 후보에 근거만 보탰다. 차례는 리뷰 반영이다: 시험 담당이 아래 시험을 먼저 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`) → 구현 담당(`Fix-By: impl`). 새 마이그레이션 번호는 쓰지 않는다(이번 웨이브 core 번호는 0021·0022뿐).
+웨이브 끝 관점 리뷰 셋(`docs/review/measurements/W7-lane3-review-correctness.md`·`-concurrency.md`·`-security.md`)과 이 파일 `## 검증` 절 가운데 감독이 이번에 고치기로 정한 것이다: C1, C4, K1, K6, K2, S1·S2(정본 상태 고침만), 검증 살아남음 M28·M33(시험 몫). R1=S2(OPEN[42]), S1(OPEN[43]), K3(OPEN[44])은 §5 OPEN 항목에 근거만 보탰다. 차례는 리뷰 반영이다: 시험 담당이 아래 시험을 먼저 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`) → 구현 담당(`Fix-By: impl`). 새 마이그레이션 번호는 쓰지 않는다(이번 웨이브 core 번호는 0021·0022뿐).
 
 **정본(이 커밋에 씀, 추천 적용 2026-11-16)**
 
@@ -487,7 +487,7 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 5. (K2) `maxKeys`를 넘기지 않거나 소비자에 API의 `database`를 넘긴다.
 6. (M33) SIGTERM에서 `await`를 `void`로 바꾼다.
 
-**이번에 하지 않는 것(후속·OPEN)**: K3(§5 OPEN 후보 3), K4(Kafka 장애 때 API 새 파드가 못 뜨는 문제), K5·S7(값 없는 보류 행을 닫는 절차와 보류 기한·경보), K7(긴 내려받기 전체 한도·취소, 원천 2xx 아닌 답의 503), K8(purchase 합계 쿼리), K9, C2·R4(보류 감싸기 해독기, BAS-030 때), S3(접속지 대체 지표), S4(커서 길이 상한), S5(토큰 길이 비교), S6(`restored_at` 한 번 쓰기, 익명화 역할 분리), S8(CSV 널 문자), S9(원천에 파트너 ID). 기록 담당이 구간 끝 정리 목록에 올린다.
+**이번에 하지 않는 것(후속·OPEN)**: K3(§5, 대기: OPEN[44]), K4(Kafka 장애 때 API 새 파드가 못 뜨는 문제), K5·S7(값 없는 보류 행을 닫는 절차와 보류 기한·경보), K7(긴 내려받기 전체 한도·취소, 원천 2xx 아닌 답의 503), K8(purchase 합계 쿼리), K9, C2·R4(보류 감싸기 해독기, BAS-030 때), S3(접속지 대체 지표), S4(커서 길이 상한), S5(토큰 길이 비교), S6(`restored_at` 한 번 쓰기, 익명화 역할 분리), S8(CSV 널 문자), S9(원천에 파트너 ID). 기록 담당이 구간 끝 정리 목록에 올린다.
 
 ## 실패 확인
 
