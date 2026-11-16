@@ -124,7 +124,8 @@ message CancelTicketsRequest {
   // CancelTicketOutcome의 첫 칸 셋(같은 cancellation_id여도), 다른 길로 끝난 표면 첫 칸 없는 ALREADY_CANCELLED, 아직 유효한 표면 EVENT_STARTED다
   // (docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우', 추천 적용 2026-11-16, BUILD_ORDER GAT-080)
   bool replay_only = 5;
-  // 이 취소의 사유(purchase-svc order_cancellation.reason과 같은 값: USER·EVENT_CANCELLED·EVENT_POSTPONED·ACCOUNT_WITHDRAWAL·EXCEPTION·MINOR_CONTRACT_CANCEL).
+  // 이 취소의 사유(purchase-svc order_cancellation.reason과 같은 목록 일곱: USER·EVENT_CANCELLED·EVENT_POSTPONED·ACCOUNT_WITHDRAWAL·EXCEPTION·MINOR_CONTRACT_CANCEL·FRAUD.
+  // 두 목록은 늘 같게 둔다. FRAUD를 빠뜨려 사유 FRAUD 취소 Saga가 막힌 결함을 고침, 추천 적용 2026-11-16).
   // ticket-svc는 처음 커밋하는 취소 기록(ticket_cancellation.reason)에 남기고, 첫 칸 셋은 그 사유가 USER인 기록만 싣는다. 목록 밖의 값이면 INVALID_ARGUMENT, 비우면 사유 없는 기록이라 첫 칸에 들지 않는다
   // (docs/features/payment.md §4.1 '이어 갈 수 있는 앞 기록은 팬 취소뿐이다', 추천 적용 2026-11-16, BUILD_ORDER GAT-080 다시 보기 R1)
   string reason = 6;

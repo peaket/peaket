@@ -1420,7 +1420,7 @@ erDiagram
         uuid ticket_id PK "FK ticket"
         uuid order_id
         text result "REFUND_NOW|REFUND_AFTER_CLOSE(CancelTickets)|EVENT_CANCELED(EventCancelTickets, GAT-110)"
-        text reason "CancelTickets 요청의 사유(USER|EVENT_CANCELLED|EVENT_POSTPONED|ACCOUNT_WITHDRAWAL|EXCEPTION|MINOR_CONTRACT_CANCEL), 널 허용. USER인 기록만 다른 취소 ID의 ALREADY_CANCELLED에 첫 팬 취소로 싣는다(추천 적용 2026-11-16, BUILD_ORDER GAT-080 다시 보기 R1, ticket-svc 마이그레이션 0009)"
+        text reason "CancelTickets 요청의 사유(USER|EVENT_CANCELLED|EVENT_POSTPONED|ACCOUNT_WITHDRAWAL|EXCEPTION|MINOR_CONTRACT_CANCEL|FRAUD, purchase order_cancellation.reason과 같은 목록이고 CHECK도 같게 둔다. FRAUD는 2026-11-16 더함), 널 허용. USER인 기록만 다른 취소 ID의 ALREADY_CANCELLED에 첫 팬 취소로 싣는다(추천 적용 2026-11-16, BUILD_ORDER GAT-080 다시 보기 R1, ticket-svc 마이그레이션 0009)"
         timestamptz cancelled_at "키를 폐기한 시각. 이어 가는 팬 취소의 공제율 기준 시각"
     }
     fraud_transfer_lock {
