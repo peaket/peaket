@@ -877,13 +877,17 @@ test('RC-38 ⑥ 코드를 쓰지 않는 역할은 문서 밖 경로를 못 바�
     ['plan → toolbox/a.mjs', addFiles(codeBatch(), 'plan', { 'toolbox/a.mjs': '\n' }), 'plan', 'BAT-901', 'toolbox/a.mjs'],
     ['plan → .githubx/a.yml', addFiles(codeBatch(), 'plan', { '.githubx/a.yml': '\n' }), 'plan', 'BAT-901', '.githubx/a.yml'],
     ['plan → notes/a.MD', addFiles(codeBatch(), 'plan', { 'notes/a.MD': '\n' }), 'plan', 'BAT-901', 'notes/a.MD'],
-    ['plan → Docs/a.yaml', addFiles(codeBatch(), 'plan', { 'Docs/a.yaml': '\n' }), 'plan', 'BAT-901', 'Docs/a.yaml'],
+    // Docs/는 docs/가 없는 범위(기록만 묶음 하나)에서 만든다. 대소문자를 가리지 않는 파일 체계(Windows)에서는 docs/가 이미 있으면
+    // Docs/a.yaml이 docs/a.yaml로 커밋되어 사건이 바뀐다(시험 이의 2026-11-16). 아래에서 커밋된 경로가 정말 Docs/a.yaml인지 본다
+    ['기록만 묶음 record → Docs/a.yaml', [w7({ 'Docs/a.yaml': '\n' })], 'w7', 'W7-L1', 'Docs/a.yaml'],
   ];
   for (const f of ['package.json', 'pnpm-lock.yaml', 'eslint.config.mjs', 'turbo.json', '.gitignore']) {
     cases.push([`record → ${f}`, addFiles(codeBatch(), 'record', { [f]: f === '.gitignore' ? 'node_modules/\n' : '{}\n' }), 'record', 'BAT-901', f]);
   }
   for (const [name, seq, label, batch, p] of cases) {
     const { r, sha } = check(seq);
+    const tree = git(dir, 'show', '--no-renames', '--name-only', '--format=', sha[label]).split(/\r?\n/);
+    assert.ok(tree.includes(p), `RC-38 ${name}: 시험 사건이 틀렸다(커밋이 바꾼 경로에 ${p}가 없다: ${tree.join(', ')})`);
     expectFail(r, `RC-38 ${name}`, '코드 경로', batch, sha[label], ['문서 밖 경로', p]);
   }
 });
