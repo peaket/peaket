@@ -1,7 +1,7 @@
 // 운영 티켓 저장소(BUILD_ORDER HOT-160). 발권은 (order_id, issue_generation) PK의 INSERT 경합으로 한 번만 만들고,
 // 취소는 티켓 행 FOR UPDATE 안에서 조건을 보고 (cancellation_id, ticket_id) 취소표를 남긴다.
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
   type CancelTicketOutcome,
@@ -11,14 +11,17 @@ import {
   type ListTicketsResult,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
+  type OperatorCancelResult,
+  operatorCancelResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
+  TicketInputError,
   type TicketStatus,
   walletCursorOf,
   walletTicketOf,
 } from '../../domain/ticket.js';
-import { ticket, ticketCancellation, ticketIssue } from './schema.js';
+import { ticket, ticketCancellation, ticketIssue, ticketOperatorCancellation } from './schema.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -181,9 +184,69 @@ export class DrizzleTicketStore implements TicketStore {
     return result;
   }
 
-  /** 부정 예매 운영자 취소(BAT-415 몫 F, 0008 ticket_operator_cancellation). 구현 담당이 채운다 */
-  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /**
+   * 부정 예매 운영자 취소(BAT-415 몫 F, 0008 ticket_operator_cancellation, docs/features/transfer-refund.md §7.4).
+   * 한 트랜잭션에서 대상 표의 행을 모두 잠그고(FOR UPDATE, 표 ID 차례) 요청 차례로 가른다. 없는 표·다른 회차 표를 만나면 TicketInputError를 던져
+   * 앞 표의 변경까지 트랜잭션째 되돌린다. (approval_id, ticket_id) 기록이 있으면 처음 결과를 그대로 준다(잠금 뒤 다시 본다).
+   * 팬 취소(cancel)와 같은 행 잠금을 잡으므로 같은 표를 동시에 노려도 하나만 키를 폐기한다
+   */
+  async operatorCancel(input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    return this.o.database.transaction(async (tx) => {
+      // 잠금은 표 ID 차례로 한 번에 잡는다(다른 차례로 겹친 요청과 교착하지 않게). 결과는 요청 차례다
+      const locked = await tx
+        .select()
+        .from(ticket)
+        .where(inArray(ticket.id, input.targets.map((t) => t.ticketId)))
+        .orderBy(ticket.id)
+        .for('update');
+      const byId = new Map(locked.map((r) => [r.id, r]));
+      const out: OperatorCancelOutcome[] = [];
+      for (const target of input.targets) {
+        const row = byId.get(target.ticketId);
+        if (!row || row.eventId !== input.eventId) throw new TicketInputError('없는 표이거나 다른 회차의 표다');
+        const recorded = await tx
+          .select({ result: ticketOperatorCancellation.result, orderId: ticketOperatorCancellation.orderId, withdrawn: ticketOperatorCancellation.withdrawnTransferOfferId })
+          .from(ticketOperatorCancellation)
+          .where(and(eq(ticketOperatorCancellation.approvalId, input.approvalId), eq(ticketOperatorCancellation.ticketId, target.ticketId)))
+          .limit(1);
+        if (recorded[0]) {
+          out.push({ ticketId: target.ticketId, result: recorded[0].result as OperatorCancelResult, orderId: recorded[0].orderId, ...(recorded[0].withdrawn ? { withdrawnTransferOfferId: recorded[0].withdrawn } : {}) });
+          continue;
+        }
+        const result = operatorCancelResultOf({ status: statusOf(row.status), accountId: row.accountId }, await this.#entryRecorded(tx, row.eventId, row.id), target.expectedHolderAccountId);
+        if (result === 'CANCELED') await this.#operatorCancelOne(tx, row, input.nowMs);
+        await tx.insert(ticketOperatorCancellation).values({
+          approvalId: input.approvalId,
+          ticketId: row.id,
+          orderId: row.orderId,
+          fraudCaseId: input.fraudCaseId,
+          result,
+          cancelledAt: new Date(input.nowMs),
+        });
+        out.push({ ticketId: row.id, result, orderId: row.orderId });
+      }
+      return out;
+    });
+  }
+
+  /** 그 표에 들어감(IN)·통과(PASS) 스캔이 있는가(거절·확인·나감은 입장이 아니다) */
+  async #entryRecorded(tx: DbTransaction, eventId: string, ticketId: string): Promise<boolean> {
+    const r = await tx.execute(sql`select 1 from scan_event where event_id = ${eventId}::uuid and ticket_id = ${ticketId}::uuid and direction = 'IN' and result = 'PASS' limit 1`);
+    return r.rows.length > 0;
+  }
+
+  /** 행 잠금 안: 진행 중 양도 표시를 끄고, 키를 폐기하고, 환급 상태로 바꾼다(스캐너 변경분 TICKET_STATUS·KEY_REVOKED) */
+  async #operatorCancelOne(tx: DbTransaction, row: Row, nowMs: number): Promise<void> {
+    const status: TicketStatus = 'REFUNDED';
+    const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, nowMs);
+    await tx
+      .update(ticket)
+      .set({ status, transferPending: false, keyRevokedAt: new Date(nowMs), version: row.version + 1 })
+      .where(eq(ticket.id, row.id));
+    if (this.o.changes) {
+      await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status, version: row.version + 1 });
+      await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
+    }
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

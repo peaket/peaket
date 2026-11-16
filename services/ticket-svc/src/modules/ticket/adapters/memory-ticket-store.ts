@@ -9,9 +9,11 @@ import {
   type ListTicketsResult,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
+  operatorCancelResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
+  TicketInputError,
   walletCursorOf,
   walletTicketOf,
 } from '../domain/ticket.js';
@@ -23,6 +25,7 @@ interface IssueRecord {
 
 const issueKey = (orderId: string, generation: number): string => `${orderId}:${generation}`;
 const cancelKey = (cancellationId: string, ticketId: string): string => `${cancellationId}:${ticketId}`;
+const operatorKey = (approvalId: string, ticketId: string): string => `${approvalId}:${ticketId}`;
 const withoutKey = (t: TicketRecord): TicketRecord => {
   const { ticketKey: _key, ...rest } = t;
   return rest;
@@ -33,6 +36,10 @@ export class MemoryTicketStore implements TicketStore {
   readonly issues = new Map<string, IssueRecord>();
   readonly tickets = new Map<string, TicketRecord>();
   readonly cancellations = new Map<string, CancelTicketOutcome>();
+  /** (approval_id, ticket_id) → 운영자 취소 결과(ticket_operator_cancellation) */
+  readonly operatorCancellations = new Map<string, OperatorCancelOutcome>();
+  /** 들어감·통과 스캔 기록이 있는 표(scan_event IN·PASS의 대역) */
+  readonly entries = new Set<string>();
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     const key = issueKey(input.orderId, input.issueGeneration);
@@ -76,22 +83,43 @@ export class MemoryTicketStore implements TicketStore {
       keyRevokedAtMs: input.nowMs,
       version: t.version + 1,
     };
-    this.tickets.set(t.ticketId, next);
-    const issue = this.issues.get(issueKey(t.orderId, t.issueGeneration));
-    if (issue) {
-      this.issues.set(issueKey(t.orderId, t.issueGeneration), { ...issue, tickets: issue.tickets.map((x) => (x.ticketId === t.ticketId ? next : x)) });
-    }
+    this.#put(next);
     return started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
   }
 
-  /** 부정 예매 운영자 취소(BAT-415 몫 F). 구현 담당이 채운다 */
-  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /** 티켓 행과 발권 기록의 사본을 함께 바꾼다 */
+  #put(next: TicketRecord): void {
+    this.tickets.set(next.ticketId, next);
+    const issue = this.issues.get(issueKey(next.orderId, next.issueGeneration));
+    if (issue) {
+      this.issues.set(issueKey(next.orderId, next.issueGeneration), { ...issue, tickets: issue.tickets.map((x) => (x.ticketId === next.ticketId ? next : x)) });
+    }
+  }
+
+  /**
+   * 부정 예매 운영자 취소(BAT-415 몫 F). 없는 표·다른 회차 표가 하나라도 있으면 아무것도 바꾸지 않고 던진다(DB 트랜잭션째 되돌림과 같다).
+   * (approval_id, ticket_id) 기록이 있으면 그 결과를 준다. 건너뜀도 기록한다
+   */
+  async operatorCancel(input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    for (const target of input.targets) {
+      const t = this.tickets.get(target.ticketId);
+      if (!t || t.eventId !== input.eventId) throw new TicketInputError('없는 표이거나 다른 회차의 표다');
+    }
+    return input.targets.map((target) => {
+      const recorded = this.operatorCancellations.get(operatorKey(input.approvalId, target.ticketId));
+      if (recorded) return recorded;
+      const t = this.tickets.get(target.ticketId)!;
+      const result = operatorCancelResultOf(t, this.entries.has(t.ticketId), target.expectedHolderAccountId);
+      if (result === 'CANCELED') this.#put({ ...t, status: 'REFUNDED', transferPending: false, keyRevokedAtMs: input.nowMs, version: t.version + 1 });
+      const outcome: OperatorCancelOutcome = { ticketId: t.ticketId, result, orderId: t.orderId };
+      this.operatorCancellations.set(operatorKey(input.approvalId, target.ticketId), outcome);
+      return outcome;
+    });
   }
 
   /** 시험 씨앗: 그 표에 들어감(IN)·통과(PASS) 스캔 기록이 있는 것으로 둔다(운영자 취소의 SKIPPED_ENTRY_RECORDED) */
-  recordEntry(_ticketId: string): void {
-    throw new Error('아직 없음');
+  recordEntry(ticketId: string): void {
+    this.entries.add(ticketId);
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

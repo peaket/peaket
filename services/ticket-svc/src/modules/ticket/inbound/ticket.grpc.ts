@@ -94,9 +94,29 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('CancelTickets', err, orderId, cb, onError));
     },
 
-    // 부정 예매 운영자 취소(BAT-415 몫 F). 구현 담당이 채운다(오류는 TicketInputError → INVALID_ARGUMENT)
-    OperatorCancelTickets: (_call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
-      cb({ code: grpc.status.UNIMPLEMENTED, details: '아직 없음' });
+    // 부정 예매 운영자 취소(BAT-415 몫 F, docs/features/transfer-refund.md §7.4). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다
+    OperatorCancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      const req = call.request;
+      const targets = Array.isArray(req.targets) ? (req.targets as Req[]) : [];
+      useCases.ticket
+        .operatorCancel({
+          approvalId: text(req.approval_id),
+          fraudCaseId: text(req.fraud_case_id),
+          eventId: text(req.event_id),
+          targets: targets.map((t) => ({ ticketId: text(t.ticket_id), expectedHolderAccountId: text(t.expected_holder_account_id) })),
+          nowMs: useCases.nowMs?.() ?? Date.now(),
+        })
+        .then((outcomes) => {
+          cb(null, {
+            outcomes: outcomes.map((o) => ({
+              ticket_id: o.ticketId,
+              result: `OPERATOR_CANCEL_RESULT_${o.result}`,
+              order_id: o.orderId,
+              withdrawn_transfer_offer_id: o.withdrawnTransferOfferId ?? '',
+            })),
+          });
+        })
+        .catch((err: unknown) => fail('OperatorCancelTickets', err, undefined, cb, onError));
     },
 
     CheckReviewEligibility: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {

@@ -16,6 +16,7 @@ import {
   normalizeCancelInput,
   normalizeIssueInput,
   normalizeListInput,
+  normalizeOperatorCancelInput,
   normalizeReviewEligibilityInput,
   qrPayloadOf,
   type ReviewEligibilityInput,
@@ -69,9 +70,9 @@ export class TicketService {
     return this.deps.store.cancel(normalizeCancelInput(input));
   }
 
-  /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. 구현 담당이 채운다 */
-  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. @throws TicketInputError */
+  async operatorCancel(input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    return this.deps.store.operatorCancel(normalizeOperatorCancelInput(input));
   }
 
   /** 계정의 월렛 목록(최신 발권순). */

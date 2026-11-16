@@ -94,3 +94,23 @@ export const ticketCancellation = pgTable(
   (t) => [primaryKey({ columns: [t.cancellationId, t.ticketId] }), index('ticket_cancellation_ticket_idx').on(t.ticketId)],
 );
 
+/** 부정 예매 운영자 취소의 표별 결과(0008, BUILD_ORDER GAT-080, docs/data.md ticket_operator_cancellation). (approval_id, ticket_id)로 멱등하다. 건너뜀도 남긴다 */
+export const ticketOperatorCancellation = pgTable(
+  'ticket_operator_cancellation',
+  {
+    approvalId: uuid('approval_id').notNull(),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => ticket.id),
+    orderId: uuid('order_id').notNull(),
+    fraudCaseId: uuid('fraud_case_id').notNull(),
+    result: text('result').notNull(),
+    /** 거둔 양도 요청 ID. transfer_offer 표가 생기기 전에는 비운다 */
+    withdrawnTransferOfferId: text('withdrawn_transfer_offer_id'),
+    cancelledAt: at('cancelled_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.approvalId, t.ticketId] }),
+    check('ticket_operator_cancellation_result_check', sql`${t.result} IN ('CANCELED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_RECORDED', 'SKIPPED_HOLDER_CHANGED')`),
+  ],
+);

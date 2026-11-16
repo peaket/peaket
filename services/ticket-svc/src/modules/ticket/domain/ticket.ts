@@ -93,9 +93,44 @@ export interface OperatorCancelOutcome {
   readonly withdrawnTransferOfferId?: string;
 }
 
+/** 운영자 취소가 건너뛰는 이미 끝난 상태(docs/features/transfer-refund.md §7.4: 환급·무효·취소 접수·부정 표시) */
+export const OPERATOR_CANCEL_ENDED_STATUSES: ReadonlySet<TicketStatus> = new Set(['REFUNDED', 'VOIDED', 'CANCEL_REQUESTED', 'FLAGGED']);
+
+const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** 소문자 UUID만 받는다(대문자·앞뒤 공백을 고쳐 받지 않고 거절한다, 정본 '소문자 UUID') */
+function requireLowerUuid(name: string, v: unknown): string {
+  if (typeof v !== 'string' || !LOWER_UUID.test(v)) throw new TicketInputError(`${name}는 소문자 UUID여야 한다`);
+  return v;
+}
+
 /** 소문자 UUID·대상 1~500·같은 표 두 번 금지. @throws TicketInputError */
-export function normalizeOperatorCancelInput(_i: OperatorCancelInput): OperatorCancelInput {
-  throw new Error('아직 없음');
+export function normalizeOperatorCancelInput(i: OperatorCancelInput): OperatorCancelInput {
+  const approvalId = requireLowerUuid('approvalId', i.approvalId);
+  const fraudCaseId = requireLowerUuid('fraudCaseId', i.fraudCaseId);
+  const eventId = requireLowerUuid('eventId', i.eventId);
+  if (i.targets.length < 1 || i.targets.length > OPERATOR_CANCEL_MAX_TARGETS) throw new TicketInputError(`targets는 1~${OPERATOR_CANCEL_MAX_TARGETS}장이어야 한다`);
+  const seen = new Set<string>();
+  const targets = i.targets.map((t) => {
+    const ticketId = requireLowerUuid('ticketId', t.ticketId);
+    const expectedHolderAccountId = requireLowerUuid('expectedHolderAccountId', t.expectedHolderAccountId);
+    if (seen.has(ticketId)) throw new TicketInputError('같은 표를 두 번 줄 수 없다');
+    seen.add(ticketId);
+    return { ticketId, expectedHolderAccountId };
+  });
+  if (!Number.isFinite(i.nowMs) || i.nowMs < 0) throw new TicketInputError('nowMs가 올바르지 않다');
+  return { approvalId, fraudCaseId, eventId, targets, nowMs: i.nowMs };
+}
+
+/**
+ * 운영자 취소에서 표 하나를 가른다(행 잠금 안, 차례: 이미 끝남 → 입장 기록 → 보유자). CANCELED면 부른 쪽이 키를 폐기하고 환급 상태로 바꾼다.
+ * 결제자 = 보유자 검사는 하지 않는다(받은 사람이 가진 표도 취소한다)
+ */
+export function operatorCancelResultOf(t: Pick<TicketRecord, 'status' | 'accountId'>, entryRecorded: boolean, expectedHolderAccountId: string): OperatorCancelResult {
+  if (OPERATOR_CANCEL_ENDED_STATUSES.has(t.status)) return 'SKIPPED_ALREADY_ENDED';
+  if (entryRecorded) return 'SKIPPED_ENTRY_RECORDED';
+  if (t.accountId !== expectedHolderAccountId) return 'SKIPPED_HOLDER_CHANGED';
+  return 'CANCELED';
 }
 
 export interface ListTicketsInput {
