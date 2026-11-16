@@ -1498,3 +1498,52 @@ describe('W7L2 검색 표 권한', () => {
     }
   });
 });
+
+// ---- 웨이브 끝 재검증 V165-R15(ADR-0271 결정 14 바로잡음: 사전 준비 전 0건 제안은 null이고 이름 줄을 통째로 읽어 대신하지 않는다) ----
+describe('V165-R15 사전 준비 전 0건 검색', () => {
+  test('사전을 처음 읽기 전의 0건 검색은 PostgreSQL 어댑터에서도 didYouMean이 null이고 이름 줄을 읽지 않는다(W7L2-K4, V165-R15)', async () => {
+    // 이 연결 묶음이 search_term 질의로 돌려받은 줄 수를 센다(T-19와 같은 장치)
+    const counted = createDatabase({ url: pg.url, applicationName: 'core-svc-v165-r15', max: 2 });
+    const seen = { termRows: 0, termQueries: 0 };
+    counted.pool.on('connect', (client) => {
+      const q = client.query.bind(client) as (...a: unknown[]) => Promise<{ rows?: unknown[] }>;
+      (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+        const r = await q(...a);
+        const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+        if (/\bsearch_term\b/.test(t)) {
+          seen.termQueries += 1;
+          seen.termRows += r.rows?.length ?? 0;
+        }
+        return r;
+      };
+    });
+    // 이 시험만 돌려도 이름 줄이 있게 공연 열둘을 공개한다(오타 '부르는자리 콘서드'의 짝 '부르는자리 콘서트' 포함)
+    const made = [(await seed({ title: '부르는자리 콘서트' })).productionId];
+    for (let i = 0; i < 11; i++) made.push((await seed({ title: `재검증 공연 ${i}` })).productionId);
+    await admin.transaction((tx) => sync.sync(tx, made, new Date(now)));
+    // 운영과 같은 조립: 검색 전용 연결만 세는 묶음으로 준다. 사전은 주기 일을 걸지 않아 아직 읽지 않았다
+    const s = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, searchDatabase: counted, media: testMedia() }),
+      env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
+      clock,
+      logDestination: quiet(),
+      adminAuthz: identity,
+    });
+    try {
+      // 대조군: 이름 줄이 실제로 있다(통째로 읽으면 0이 아니다)
+      expect(Number((await rows(admin, "select count(*)::int as n from search_term where kind = 'PRODUCTION'"))[0]!.n)).toBeGreaterThanOrEqual(10);
+      expect(s.app.get(SearchCatalog).dictionary.ready).toBe(false);
+      const r = await s.http.inject({ method: 'GET', url: '/v1/search?q=' + encodeURIComponent('부르는자리 콘서드') });
+      expect(r.statusCode).toBe(200);
+      const out = JSON.parse(r.payload) as { items: unknown[]; didYouMean: string | null };
+      expect(out.items).toEqual([]);
+      expect(out.didYouMean).toBeNull();
+      // 후보 질의는 search_term을 볼 수 있지만(검색어에 맞는 줄만) 0건 검색어라 돌려받은 줄이 없어야 한다. 통째로 읽으면 수백 줄이다
+      expect(seen.termRows).toBe(0);
+    } finally {
+      await s.close();
+      await counted.close();
+    }
+  });
+});
