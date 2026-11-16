@@ -37,6 +37,8 @@ export const review = pgTable(
     index('review_event_idx').on(t.eventId),
     index('review_fingerprint_idx').on(t.contentFingerprint),
     index('review_created_idx').on(t.createdAt, t.id),
+    // 탈퇴 익명화(update … where account_id = …)가 표 전체를 훑지 않게(0022, docs/data.md §5.1 '탈퇴 익명화', W7-audit 리뷰 K2)
+    index('review_account_idx').on(t.accountId),
   ],
 );
 

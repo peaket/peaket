@@ -8,7 +8,19 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
-import { GrpcReviewEligibility, ReviewAccountWithdrawnHandler, Reviews, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
+import {
+  DrizzleReviewStore,
+  FAN_PROFILE,
+  GrpcReviewEligibility,
+  REVIEW_CASE_SINK,
+  REVIEW_ELIGIBILITY,
+  REVIEW_EVENT_DIRECTORY,
+  REVIEW_NOTIFIER,
+  ReviewAccountWithdrawnHandler,
+  Reviews,
+  UnavailableReviewEligibility,
+  UnavailableFanProfile,
+} from './modules/review/index.js';
 import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 
 const SERVICE = 'core-svc';
@@ -71,10 +83,13 @@ if (!ticketGrpc) console.warn(JSON.stringify({ level: 'warn', kind: 'review-elig
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
+// Kafka 소비자(탈퇴 익명화·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
+const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-consumer`, max: 2 });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
 await assertDatabaseRole(opsDatabase, 'core_ops');
+await assertDatabaseRole(consumerDatabase, 'core_app');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
@@ -106,7 +121,7 @@ const webhookWorker =
     : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(database), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
 webhookWorker?.start();
 
-// 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>). DB는 서비스와 같은 core_app 연결이다(후기 익명화와 보류 표 held_event)
+// 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>). DB는 소비자 전용 core_app 풀이다(후기 익명화와 보류 표 held_event, 리뷰 K2)
 let consumers: CoreConsumers | undefined;
 let closing: Promise<void> | undefined;
 if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
@@ -114,13 +129,23 @@ else {
   // 네이티브 Kafka 모듈은 켤 때만 싣는다(local·ci에서 브로커 없이 뜰 때는 싣지 않는다)
   const { startCoreConsumers } = await import('./consumers/start.js');
   const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
+  // 익명화 UPDATE도 소비자 풀로 쓴다. 후기 유스케이스의 나머지 의존은 서비스 조립의 것을 그대로 쓴다
+  const consumerReviews = new Reviews({
+    store: new DrizzleReviewStore(consumerDatabase),
+    events: service.app.get(REVIEW_EVENT_DIRECTORY),
+    eligibility: service.app.get(REVIEW_ELIGIBILITY),
+    fanProfile: service.app.get(FAN_PROFILE),
+    notifier: service.app.get(REVIEW_NOTIFIER),
+    cases: service.app.get(REVIEW_CASE_SINK),
+    clock: systemClock,
+  });
   consumers = startCoreConsumers({
     env: kafka.env,
     brokers: kafka.brokers,
     clientId: `${SERVICE}-${kafka.env}-${pod}`,
     auth: kafka.auth,
-    database,
-    handler: new ReviewAccountWithdrawnHandler(service.app.get(Reviews), undefined, { logger: service.logger }),
+    database: consumerDatabase,
+    handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
     registry: service.metrics.registry,
     logger: service.logger,
   });
@@ -152,7 +177,7 @@ function shutdown(): Promise<void> {
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
         void queueRedis?.close();
-        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close()]);
+        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close()]);
       });
   })();
   return closing;

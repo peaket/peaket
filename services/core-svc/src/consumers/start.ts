@@ -13,7 +13,7 @@ export interface CoreConsumersOptions {
   /** `core-svc-<환경>-<파드>` */
   clientId: string;
   auth?: KafkaAuth;
-  /** core_app(held_event·review) */
+  /** 소비자 전용 core_app 풀(held_event 보류·보류 수 세기). API 경로의 풀과 따로 둔다(docs/streaming.md §2.6, 리뷰 K2) */
   database: Database;
   handler: ReviewAccountWithdrawnHandler;
   registry?: Registry;
@@ -31,6 +31,10 @@ export interface CoreConsumers {
   stop(): Promise<void>;
 }
 
+/** 동시 처리: 파티션 1개·업무 키 2개 [가정](docs/streaming.md §2.6 'core-svc 소비자'). 사건이 몰려도 API 요청의 DB 연결을 빼앗지 않게 작게 둔다 */
+const CORE_CONSUMER_MAX_KEYS = 2;
+const CORE_CONSUMER_PARTITIONS = 1;
+
 export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
   const run = runKeyedConsumer({
     service: 'core-svc',
@@ -44,6 +48,8 @@ export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
     registry: o.registry,
     ...(o.registry ? { heldCounts: () => heldEventCounts(o.database) } : {}),
     logger: o.logger,
+    maxKeys: CORE_CONSUMER_MAX_KEYS,
+    partitionsConcurrently: CORE_CONSUMER_PARTITIONS,
     startAt: o.startAt,
     ...(o.commitEveryMs !== undefined ? { commitEveryMs: o.commitEveryMs } : {}),
     ...(o.measureHeldEveryMs !== undefined ? { measureHeldEveryMs: o.measureHeldEveryMs } : {}),
