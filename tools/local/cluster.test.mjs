@@ -644,3 +644,133 @@ test('HOT-400 Envoy Gateway 컨트롤러는 판과 다이제스트를 고정하�
   assert.match(readme, /Envoy Gateway/);
   assert.ok(readme.includes(String(version[0][1]).replace(/^v/, '')), `README 판 표에 ${version[0][1]}가 없다`);
 });
+
+// ---- 경로별 메서드·한도(BUILD_ORDER HOT-410, docs/infra.md §4.1 '전역 레이트 리밋 걸기', 묶음 BAT-060 계획 §4·§5) ----
+
+/** Envoy Gateway v1.10.0 설치 파일의 컨트롤러 설정 ConfigMap과 컨트롤러 Deployment를 줄인 표본(실제 파일은 6만 줄, 2026-11-16 시험 담당이 읽음) */
+const EG_INSTALL_SAMPLE = `---
+# Source: gateway-helm/templates/envoy-gateway-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-gateway-config
+  namespace: envoy-gateway-system
+data:
+  envoy-gateway.yaml: |
+    apiVersion: gateway.envoyproxy.io/v1alpha1
+    kind: EnvoyGateway
+    extensionApis: {}
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    logging:
+      level:
+        default: info
+    provider:
+      kubernetes:
+        rateLimitDeployment:
+          container:
+            image: docker.io/envoyproxy/ratelimit:5ae0682e
+          patch:
+            type: StrategicMerge
+            value:
+              spec:
+                template:
+                  spec:
+                    containers:
+                    - imagePullPolicy: IfNotPresent
+                      name: envoy-ratelimit
+        shutdownManager:
+          image: envoyproxy/gateway:v1.10.0
+      type: Kubernetes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: envoy-gateway
+          image: envoyproxy/gateway:v1.10.0
+`;
+/** 넣을 컨트롤러 설정 표본(저장소 파일과 다른 값을 골라, 설치 파일의 기본값이 아니라 받은 설정이 들어가는지 본다) */
+const EG_CONTROLLER_SAMPLE = `apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyGateway
+extensionApis:
+  enableLua: true
+gateway:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+rateLimit:
+  backend:
+    type: Redis
+    redis:
+      url: sample-redis.example.svc.cluster.local:16379
+      tls:
+        certificateRef:
+          name: sample-redis-ca
+provider:
+  type: Kubernetes
+  kubernetes:
+    rateLimitDeployment:
+      replicas: 3
+      container:
+        image: docker.io/envoyproxy/ratelimit:5ae0682e
+        env:
+          - name: CACHE_KEY_PREFIX
+            value: "sample:"
+`;
+/** 설치 파일 글에서 컨트롤러 설정 ConfigMap 안의 EnvoyGateway 객체 */
+function installedController(text) {
+  const cm = parseAllDocuments(text)
+    .map((d) => d.toJS())
+    .find((o) => o?.kind === 'ConfigMap' && o.metadata?.name === 'envoy-gateway-config');
+  assert.ok(cm, '설치 파일에 envoy-gateway-config가 없다');
+  const raw = cm.data?.['envoy-gateway.yaml'];
+  assert.equal(typeof raw, 'string', 'envoy-gateway-config에 envoy-gateway.yaml이 없다');
+  return parseAllDocuments(raw)[0].toJS();
+}
+
+test("HOT-410 infra §4.1 '전역 레이트 리밋 걸기' gatewayInstall은 설치 파일의 컨트롤러 설정 자리(envoy-gateway-config의 envoy-gateway.yaml)에 받은 EnvoyGateway 객체를 그대로 넣고 나머지 문서는 그대로 둔다", async () => {
+  const { gatewayInstall } = await import('./gateway-objects.mjs');
+  const out = gatewayInstall(EG_INSTALL_SAMPLE, EG_CONTROLLER_SAMPLE);
+  assert.deepEqual(installedController(out), parseAllDocuments(EG_CONTROLLER_SAMPLE)[0].toJS(), '넣은 컨트롤러 설정이 받은 객체와 다르다');
+  // 설치 파일의 기본 설정(Lua 꺼짐 extensionApis: {})은 남지 않는다
+  assert.doesNotMatch(out, /^\s*extensionApis: \{\}\s*$/m);
+  // 컨트롤러 Deployment는 그대로다
+  const dep = parseAllDocuments(out)
+    .map((d) => d.toJS())
+    .find((o) => o?.kind === 'Deployment' && o.metadata?.name === 'envoy-gateway');
+  assert.equal(dep?.spec?.template?.spec?.containers?.[0]?.image, 'envoyproxy/gateway:v1.10.0');
+  // 저장소의 컨트롤러 설정 파일도 같은 법으로 들어간다
+  const repoFile = join(REPO, 'deploy', 'gateways', 'controller', 'envoy-gateway.yaml');
+  assert.ok(existsSync(repoFile), `컨트롤러 설정 파일이 없다: ${repoFile}`);
+  const repoText = readFileSync(repoFile, 'utf8');
+  assert.deepEqual(installedController(gatewayInstall(EG_INSTALL_SAMPLE, repoText)), parseAllDocuments(repoText)[0].toJS());
+});
+
+test("HOT-410 infra §4.1 '전역 레이트 리밋 걸기' gatewayInstall은 컨트롤러 설정 자리나 컨트롤러 이미지를 찾지 못하면(판이 바뀜) 조용히 넘어가지 않고 던진다", async () => {
+  const { gatewayInstall } = await import('./gateway-objects.mjs');
+  assert.throws(() => gatewayInstall(EG_INSTALL_SAMPLE.replace('name: envoy-gateway-config', 'name: other-config'), EG_CONTROLLER_SAMPLE), Error, 'ConfigMap 이름이 다르다');
+  assert.throws(() => gatewayInstall(EG_INSTALL_SAMPLE.replace('  envoy-gateway.yaml: |', '  other.yaml: |'), EG_CONTROLLER_SAMPLE), Error, '설정 키가 다르다');
+  assert.throws(() => gatewayInstall(EG_INSTALL_SAMPLE.replaceAll('envoyproxy/gateway:v1.10.0', 'envoyproxy/gateway:v1.11.0'), EG_CONTROLLER_SAMPLE), Error, '컨트롤러 판이 다르다');
+  // 넣을 설정이 EnvoyGateway가 아니면 던진다
+  assert.throws(() => gatewayInstall(EG_INSTALL_SAMPLE, 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n'), Error, 'EnvoyGateway가 아닌 설정');
+});
+
+test('HOT-410 레이트 리밋 서비스 이미지는 Envoy Gateway v1.10.0 기본 판(5ae0682e)을 다이제스트로 고정하고 README 판 표와 docs/infra.md에 같은 판을 적는다', () => {
+  const pinned = clusterModule.PINNED ?? {};
+  const images = Object.entries(pinned).filter(([k]) => /ratelimit/i.test(k) && /Image$/.test(k));
+  const digests = Object.entries(pinned).filter(([k]) => /ratelimit/i.test(k) && /Digest$/.test(k));
+  assert.equal(images.length, 1, `PINNED에 레이트 리밋 서비스 이미지가 하나가 아니다: ${Object.keys(pinned)}`);
+  assert.equal(digests.length, 1, `PINNED에 레이트 리밋 서비스 다이제스트가 하나가 아니다: ${Object.keys(pinned)}`);
+  // 판은 따로 고르지 않고 이 판 설치 파일의 기본값이다(latest·master 같은 움직이는 태그가 아니다)
+  assert.equal(images[0][1], 'docker.io/envoyproxy/ratelimit:5ae0682e', '레이트 리밋 서비스 이미지');
+  assert.match(String(digests[0][1]), /^sha256:[0-9a-f]{64}$/, '레이트 리밋 서비스 다이제스트');
+  const readme = readFileSync(join(HERE_DIR, 'README.md'), 'utf8');
+  assert.match(readme, /ratelimit/i, 'README 판 표에 레이트 리밋 서비스가 없다');
+  assert.ok(readme.includes('5ae0682e'), 'README 판 표에 레이트 리밋 서비스 판(5ae0682e)이 없다');
+  const infra = readFileSync(join(REPO, 'docs', 'infra.md'), 'utf8');
+  assert.ok(infra.includes('ratelimit:5ae0682e'), "docs/infra.md §4.1 '자리'에 레이트 리밋 서비스 판이 없다");
+});

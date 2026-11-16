@@ -50,8 +50,8 @@ test('ci.yml을 바꾸면 전체를 고른다', () => {
   assert.ok(scopes({ '.github/workflows/ci.yml': 'name: ci\n' }).includes('js_all'));
 });
 
-test('계약 원본을 바꾸면 계약·문서와 화면·서비스 전부를 고른다', () => {
-  assert.deepEqual(scopes({ 'docs/api/openapi.yaml': 'openapi: 3.1.0\n' }), ['docs', 'contracts', 'js', 'js_all']);
+test('계약 원본을 바꾸면 계약·문서와 화면·서비스 전부를, 게이트웨이 라우트 생성 대조(HOT-410)가 그것을 읽으므로 tools도 고른다', () => {
+  assert.deepEqual(scopes({ 'docs/api/openapi.yaml': 'openapi: 3.1.0\n' }), ['docs', 'contracts', 'js', 'js_all', 'tools']);
 });
 
 test('배포 상태·부하 시험·도구·워크플로 밖 .github은 각 범위로 간다', () => {
@@ -295,6 +295,18 @@ test('HOT-400 게이트웨이 정의(deploy/gateways/)와 그 정적 시험을 �
     const got = scopes({ [f]: '바꿈\n' });
     for (const s of ['deploy', 'kind', 'tools']) assert.ok(got.includes(s), `${f}: ${s}`);
   }
+});
+
+test("HOT-410 infra §4.1 '생성 대조' docs/api/openapi.yaml·deploy/gateways/routes/·컨트롤러 설정·생성기를 바꾸면 tools 범위가 돈다(gitops-check 전에는 tools-check가 --check를 돈다)", () => {
+  for (const f of ['docs/api/openapi.yaml', 'deploy/gateways/routes/gw-fan.yaml', 'deploy/gateways/gw-fan.routes.yaml', 'deploy/gateways/controller/envoy-gateway.yaml', 'tools/ci/gateway-routes.mjs']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('tools'), f);
+  }
+  // 라우트 원천·생성 파일·컨트롤러 설정은 kind에 올라가므로 kind도 고른다
+  for (const f of ['deploy/gateways/routes/gw-fan.yaml', 'deploy/gateways/gw-fan.routes.yaml', 'deploy/gateways/controller/envoy-gateway.yaml']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('kind'), f);
+  }
+  // 다른 계약 파일(asyncapi)은 생성기가 읽지 않는다
+  assert.ok(!scopes({ 'docs/api/asyncapi.yaml': 'asyncapi: 3.0.0\n' }).includes('tools'), 'docs/api/asyncapi.yaml');
 });
 
 test('BSL050_v0이미지에드는서비스·로컬환경값·바인딩대조를바꾸면_kind를고른다', () => {
