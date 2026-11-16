@@ -531,3 +531,77 @@ test('HOT-390 server/start.mjs는 운영에서 캐시 주소가 없으면 Next.j
   assert.match(out, /PEAKET_WEB_CACHE_REDIS_URL/);
   assert.doesNotMatch(out, /production build|next start/i, 'Next.js를 띄우려 했다');
 });
+
+// BAT-170 리뷰 다시 보기 R170-8(docs/frontend.md §5.18 '공유 캐시 처리기 세부' ② 메모리 저장소는 local·ci·demo 전용, ⑤ 닫힌 규칙):
+// start.mjs를 거치지 않고 떠도(standalone 기본 진입점 node server.js, next start) 주소 없는 운영에서 처리기가 메모리 저장소로 조용히 돌지 않는다.
+// 정본에 던지는 때(불러올 때·첫 호출)가 정해져 있지 않아, 불러오기나 첫 get·set 가운데 어느 쪽에서 던져도 통과로 본다.
+/**
+ * 처리기 모듈 하나를 그 환경으로 새 프로세스에서 불러 쓰고 읽는다.
+ * @returns {Promise<{ out: string, result?: { threw: 'import' | 'call' | null, error?: string, value?: string | null } }>}
+ */
+async function probeOne(file, env) {
+  const dir = mkdtempSync(join(tmpdir(), 'bat170-r8-'));
+  const href = pathToFileURL(join(appDir, 'server', file)).href;
+  writeFileSync(
+    join(dir, 'probe.mjs'),
+    `const done = (r) => { console.log('BAT170-R8 ' + JSON.stringify(r)); process.exit(0); };
+let mod;
+try { mod = (await import(${JSON.stringify(href)})).default; } catch (e) { done({ threw: 'import', error: String(e && e.message || e) }); }
+try {
+  if (${JSON.stringify(file)} === 'use-cache-handler.mjs') {
+    await mod.set('r8-key', Promise.resolve({ value: new Blob(['r8-body']).stream(), tags: [], stale: 30, timestamp: Date.now() - 10, expire: 300, revalidate: 60 }));
+    const got = await mod.get('r8-key', []);
+    done({ threw: null, value: got ? await new Response(got.value).text() : null });
+  } else {
+    const h = new mod({ revalidatedTags: [], _requestHeaders: {} });
+    await h.set('/r8', { kind: 'APP_PAGE', html: '<p>r8</p>', rscData: Buffer.from('rsc'), headers: {}, postponed: undefined, status: 200, segmentData: new Map() }, { cacheControl: { revalidate: 60, expire: 300 }, isFallback: false });
+    const hit = await h.get('/r8', { kind: 'APP_PAGE', isFallback: false });
+    done({ threw: null, value: hit?.value?.html ?? null });
+  }
+} catch (e) { done({ threw: 'call', error: String(e && e.message || e) }); }
+`,
+  );
+  const clean = { ...process.env };
+  for (const k of ['PEAKET_WEB_CACHE_REDIS_URL', 'PEAKET_WEB_CACHE_BUILD', 'PEAKET_ENV']) delete clean[k];
+  const child = spawn(process.execPath, [join(dir, 'probe.mjs')], { cwd: appDir, env: { ...clean, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  await new Promise((ok) => {
+    const t = setTimeout(() => {
+      child.kill();
+      ok(undefined);
+    }, 15_000);
+    child.on('exit', () => {
+      clearTimeout(t);
+      ok(undefined);
+    });
+  });
+  rmSync(dir, { recursive: true, force: true });
+  const line = out.split('\n').find((l) => l.startsWith('BAT170-R8 '));
+  return { out, result: line ? JSON.parse(line.slice('BAT170-R8 '.length)) : undefined };
+}
+
+test('HOT-390 R170-8 주소 없는 운영(PEAKET_ENV가 local·ci·demo 밖)에서는 두 처리기가 메모리 저장소로 조용히 돌지 않는다', async () => {
+  const modules = [
+    ['use-cache-handler.mjs', 'r8-body'],
+    ['cache-handler.mjs', '<p>r8</p>'],
+  ];
+  // 운영으로 보는 환경: 주소가 없으면 불러오기나 첫 get·set이 던진다
+  for (const env of [{ PEAKET_ENV: 'prod' }, {}, { PEAKET_ENV: '' }, { PEAKET_ENV: 'production' }, { PEAKET_ENV: 'PROD' }]) {
+    for (const [file] of modules) {
+      const r = await probeOne(file, env);
+      assert.ok(r.result, `${file} ${JSON.stringify(env)}: 결과 없음\n${r.out}`);
+      assert.ok(r.result.threw === 'import' || r.result.threw === 'call', `${file} ${JSON.stringify(env)}: 던지지 않고 돌았다(값 ${JSON.stringify(r.result.value)})`);
+    }
+  }
+  // 대조군: local·ci·demo는 메모리 저장소로 쓰고 읽는다
+  for (const PEAKET_ENV of ['local', 'ci', 'demo']) {
+    for (const [file, want] of modules) {
+      const r = await probeOne(file, { PEAKET_ENV });
+      assert.ok(r.result, `${file} ${PEAKET_ENV}: 결과 없음\n${r.out}`);
+      assert.equal(r.result.threw, null, `${file} ${PEAKET_ENV}: ${r.result.error}`);
+      assert.equal(r.result.value, want, `${file} ${PEAKET_ENV}: 메모리 저장소로 쓰고 읽지 않았다`);
+    }
+  }
+});
