@@ -31,4 +31,21 @@ describe('채우기 스크립트 환경 확인', () => {
       expect({ env, stopped: ok.code !== 0, reachedConnect: connectionError.test(ok.text) }).toEqual({ env, stopped: true, reachedConnect: true });
     }
   });
+
+  test('채우기 스크립트는 쿼리 ?host=로 덮어쓴 원격 호스트도 멈춘다(W7L2-S12)', () => {
+    // 호스트는 연결 문자열 해석기(pg-connection-string parse)가 낸 값으로 본다(ADR-0271 결정 21 보탬). 쿼리 ?host=가 주소의 호스트를 덮어쓴다
+    const attempted = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENOENT|ETIMEDOUT|connect /;
+    for (const url of [
+      'postgres://u:p@127.0.0.1:1/peaket?host=db.internal',
+      'postgres://u:p@127.0.0.1:1/peaket?host=10.0.0.5',
+      'postgres://u:p@127.0.0.1:1/peaket?host=/var/run/postgresql',
+      'postgres://u:p@:1/peaket',
+    ]) {
+      const r = run({ PEAKET_ENV: 'local', PEAKET_DATABASE_URL: url });
+      expect({ url, stopped: r.code !== 0, why: /호스트|host/i.test(r.text), attempted: attempted.test(r.text) }).toEqual({ url, stopped: true, why: true, attempted: false });
+    }
+    // 대조군: ?host=127.0.0.1은 확인을 지나 연결 단계로 간다(닫힌 포트라 연결 오류)
+    const ok = run({ PEAKET_ENV: 'local', PEAKET_DATABASE_URL: 'postgres://u:p@127.0.0.1:1/peaket?host=127.0.0.1' });
+    expect({ stopped: ok.code !== 0, reachedConnect: /ECONNREFUSED/.test(ok.text) }).toEqual({ stopped: true, reachedConnect: true });
+  });
 });
