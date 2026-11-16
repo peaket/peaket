@@ -418,8 +418,10 @@ const clean = (o) => {
   return x;
 };
 /**
- * gw-fan 게이트웨이에 건 응답 고치기 정책(PoC는 이 하나만 잠깐 바꾼다). 대상은 토큰 없는 요청의 429 갈래(요청 머리 X-User-Id 조건이 없는 429 항목,
- * 검색 IP 한도가 낸다). 404는 직접 응답 필터로 옮겨 응답 고치기를 지나지 않는다(계획 '판단: 둘째 보기의 RV-15·RV-17·RV-18')
+ * gw-fan 게이트웨이에 건 응답 고치기 정책(PoC는 이 하나만 잠깐 바꾼다). 대상은 토큰으로 센 429 갈래(요청 머리 X-User-Id 조건이 있는 429 항목,
+ * 계정당 60회/분 전역 한도가 낸다). 404는 직접 응답 필터로 옮겨 응답 고치기를 지나지 않는다(계획 '판단: 둘째 보기의 RV-15·RV-17·RV-18').
+ * 토큰 없는 쪽 429(검색 IP 한도)는 쓰지 않는다: 검색은 CDN 캐시 작업이라 라우트가 X-Trace-Id를 붙이지 않아(D-T43 ③) 견줄 머리가 없다
+ * (2026-11-16 kind lane1-b060p 실측: 검색 429·200 모두 X-Trace-Id 없음, 전역 한도 429는 있음)
  */
 async function fanOverridePolicy() {
   const list = JSON.parse(await kubectl(['-n', NS(), 'get', 'backendtrafficpolicies', '-o', 'json'], { quiet: true, timeout: 30_000 }));
@@ -427,36 +429,31 @@ async function fanOverridePolicy() {
   assert.equal(hits.length, 1, `gw-fan에 건 responseOverride 정책이 하나가 아니다(${hits.length})`);
   return hits[0];
 }
-/** 토큰 없는 쪽 429 항목(요청 머리 조건이 없는 429) */
-const anonymous429 = (policy) => {
-  const es = (policy.spec?.responseOverride ?? []).filter((o) => (o.match?.statusCodes ?? []).some((s) => Number(s.value) === 429) && !(o.match?.requestHeaders ?? []).length);
-  assert.equal(es.length, 1, `토큰 없는 쪽 429 응답 고치기 항목이 하나가 아니다(${es.length})`);
+/** 토큰으로 센 쪽 429 항목(요청 머리 X-User-Id 조건이 있는 429) */
+const account429 = (policy) => {
+  const es = (policy.spec?.responseOverride ?? []).filter((o) => (o.match?.statusCodes ?? []).some((s) => Number(s.value) === 429) && (o.match?.requestHeaders ?? []).some((h) => String(h.name).toLowerCase() === 'x-user-id'));
+  assert.equal(es.length, 1, `토큰으로 센 쪽 429 응답 고치기 항목이 하나가 아니다(${es.length})`);
   return es[0];
 };
 /**
- * 한 IP로 검색 한도(초당 50건)를 넘겨 첫 429를 받는다. 정책을 바꾸면 Windows kubectl 포트 전달이 끊길 수 있어(2026-11-16 kind 실측)
- * 연결 오류는 '아직'으로 보고 기다린다. 연결 오류는 결과가 되지 않는다(429 응답이 와야 한다)
+ * 새 계정 하나로 gw-fan-api를 61번 불러 61번째 429를 받는다(계정당 60회/분). accept가 참인 429가 올 때까지 계정을 바꿔 되풀이한다.
+ * 정책을 바꾸면 Windows kubectl 포트 전달이 끊길 수 있어(2026-11-16 kind 실측) 연결 오류는 '아직'으로 보고 기다린다. 연결 오류는 결과가 되지 않는다
  */
-async function anonymous429Response(ip, accept, timeoutMs = 45_000) {
+async function account429Response(accept, timeoutMs = 60_000) {
   const until = Date.now() + timeoutMs;
   let last = null;
-  let n = 0;
   for (;;) {
-    const rs = [];
-    let next = 0;
-    const count = 80;
-    await Promise.all(
-      Array.from({ length: 10 }, async () => {
-        while (next < count) {
-          next++;
-          rs.push(await sendOrConnError('api', { path: `/v1/search?q=poc${RUN}${n++}`, headers: edge(c, ip) }));
-        }
-      }),
-    );
-    const limited = rs.filter((r) => !r.connError && r.status === 429);
-    if (limited.length) last = limited[0];
-    const hit = limited.find(accept);
-    if (hit) return { ok: true, last: hit };
+    await windowStart();
+    const sub = nextSub();
+    let r = null;
+    for (let i = 0; i <= FAN_LIMIT_PER_MINUTE; i++) {
+      r = await sendOrConnError('api', { path: FAN_API_PATH, headers: fanHeaders(sub, '198.51.100.84') });
+      if (r.connError) break;
+    }
+    if (r && !r.connError && r.status === 429) {
+      last = r;
+      if (accept(r)) return { ok: true, last: r };
+    }
     if (Date.now() > until) return { ok: false, last };
     await sleep(2000);
   }
@@ -469,30 +466,31 @@ const bodyTraceId = (r) => {
   }
 };
 
-test('D-T43 ④ RV-15 PoC: 토큰 없는 검색 IP 한도 429의 응답 고치기 본문에 %TRACE_ID%를 넣은 사본을 걸면 본문 traceId가 32자리 16진수이고 같은 응답의 X-Trace-Id와 같다(끝에 되돌린다)', async (t) => {
+test('D-T43 ④ RV-15 PoC: 계정당 전역 한도 429의 응답 고치기 본문에 %TRACE_ID%를 넣은 사본을 걸면 본문 traceId가 32자리 16진수이고 같은 응답의 X-Trace-Id와 같다(끝에 되돌린다)', async (t) => {
   const original = clean(await fanOverridePolicy());
-  const originalInline = anonymous429(original).response?.body?.inline;
+  const originalInline = account429(original).response?.body?.inline;
   assert.ok(typeof originalInline === 'string', '429 항목에 고정 본문이 없다');
-  // 바탕: 지금 정책에서 토큰 없는 429에 X-Trace-Id 머리가 붙는다(없으면 견줄 값이 없어 PoC 바탕 모자람)
-  const base = await anonymous429Response('198.51.100.81', () => true);
-  assert.ok(base.ok, `PoC 바탕 모자람: 검색 IP 한도 429를 받지 못했다(${base.last?.status ?? '응답 없음'})`);
+  // 바탕: 지금 정책에서 계정당 한도 429에 X-Trace-Id 머리가 붙는다(없으면 견줄 값이 없어 PoC 바탕 모자람)
+  const base = await account429Response(() => true);
+  assert.ok(base.ok, `PoC 바탕 모자람: 계정당 한도 429를 받지 못했다(${base.last?.status ?? '응답 없음'})`);
   assert.match(String(base.last.headers['x-trace-id'] ?? ''), HEX32, `PoC 바탕 모자람: 429에 X-Trace-Id 머리가 없다(${base.last.headers['x-trace-id']})`);
   assert.equal(bodyTraceId(base.last), undefined, '바꾸기 전 429 본문에 이미 traceId가 있다');
   const poc = structuredClone(original);
-  const entry = anonymous429(poc);
+  const entry = account429(poc);
   entry.response.body.inline = JSON.stringify({ ...JSON.parse(entry.response.body.inline), traceId: '%TRACE_ID%' });
   let result;
   try {
     await applyObject(poc);
-    result = await anonymous429Response('198.51.100.82', (r) => bodyTraceId(r) !== undefined);
+    result = await account429Response((r) => bodyTraceId(r) !== undefined);
     t.diagnostic(`PoC 429: 본문 ${result.last?.text?.slice(0, 200) ?? '(없음)'} / X-Trace-Id ${result.last?.headers?.['x-trace-id']}`);
   } finally {
     await applyObject(original);
   }
   // 되돌린 것을 단언한다: 정책의 429 본문이 원래 글이고, 받은 429 본문에 traceId가 다시 없다
-  assert.equal(anonymous429(clean(await fanOverridePolicy())).response?.body?.inline, originalInline, '정책을 되돌리지 못했다');
-  const back = await anonymous429Response('198.51.100.83', (r) => bodyTraceId(r) === undefined);
+  assert.equal(account429(clean(await fanOverridePolicy())).response?.body?.inline, originalInline, '정책을 되돌리지 못했다');
+  const back = await account429Response((r) => bodyTraceId(r) === undefined);
   assert.ok(back.ok, `되돌린 뒤에도 429 본문에 traceId가 남았다: ${back.last?.text?.slice(0, 200)}`);
+  t.diagnostic(`되돌린 뒤 429: 본문 ${back.last?.text?.slice(0, 200)} / X-Trace-Id ${back.last?.headers?.['x-trace-id']}`);
   // 판정(마지막에 둬 되돌리기가 먼저 끝나게 한다)
   assert.ok(result?.ok, `PoC 사본의 429 본문에 traceId가 실리지 않았다: ${result?.last?.text?.slice(0, 200)}`);
   const traceId = bodyTraceId(result.last);
