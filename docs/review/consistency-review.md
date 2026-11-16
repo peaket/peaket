@@ -756,6 +756,11 @@
 | R-657 | 소유자가 웨이브 7 뒤 잠시 멈추라고 했는데 턴 규칙은 묻지 않고 잇게 되어 있었다 | docs/PROGRESS.md 턴 규칙 | 멈춤 줄을 앞에 두고 갈래별 멈출 자리를 적음 | 적용 |
 | R-658 | 소유자 멈춤 결정으로 웨이브 8 진행 중 멈춤 | docs/lanes/lane3.md 다음 할 일 | 멈춘 자리·다음 단계·가지 해시 기록 | 기록 |
 | R-662 | 역할 확인이 구현을 먼저 하고 독립 시험 담당이 뒤에 시험을 쓰는 정방향 묶음을 모두 차례 위반으로 막았다 | tools/ci/roles-check.mjs·roles-check.test.mjs, docs/architecture.md §8.6 세부, ADR-0281 상태 줄, 계획 W8-L1-roles-implfirst | `Batch-Order: impl-first`로 밝힌 정방향 묶음, 첫 리뷰는 첫 시험 뒤, 시험 쪽 커밋은 시험 파일·문서만(시험 84개, 틀린 구현 30개 가운데 28개 잡음) | 적용 |
+| R-659 | BAT-040 웨이브 7 기록 | BUILD_ORDER·lane2·ledger-notes·계획 담당 표 | 기록 커밋 | 끝 |
+| R-660 | BAT-170 웨이브 7 기록 | BUILD_ORDER·lane2·계획 담당 표 | 기록 커밋 | 끝 |
+| R-663 | BAT-165 웨이브 7 기록·갈래 2 웨이브 보고서 | BUILD_ORDER·lane2·ledger-notes·coverage·장부·계획 담당 표·W7-lane2-wave | 기록 커밋 | 끝 |
+| R-664 | 계획 파일 밖 리뷰·검증 문서 잇기 | plans/BAT-165·170·040 | 감독 기록 | 끝 |
+| R-665 | 게이트웨이(HOT-400)가 저장소에 없어 머리 지우기·토큰 확인·경로 인가·CORS·출처 확인·응답 보안 머리·접근 로그 칸·앱 서버 추적 입구를 볼 곳이 없었다 | deploy/gateways/(게이트웨이 다섯), packages/platform 추적 경계, apps/web·partner 계측, tools/local·ci-kind, 정본 infra §4.1·observability §7·guidelines §9, 계획 BAT-055 | 역할 분리·시험 먼저, 정적 47·kind 42/43·브라우저 18, 틀린 구현 169개 넣어 그 층에서 127 잡음, SR-T13 ② kind는 BAT-060 kind 셋째 통과·CI에서 다시 | 적용, BAT-060과 함께 합침 |
 
 ## 4. 숫자 일치표
 

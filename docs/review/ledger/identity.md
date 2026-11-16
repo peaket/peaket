@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 224 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 88 | 380 |
-| 합계 | 224 | 54 | 0 | 0 | 0 | 7 | 0 | 7 | 88 | 380 |
+| B | 230 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 380 |
+| 합계 | 230 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 380 |
 
 ## docs/features/identity.md
 
@@ -60,7 +60,7 @@
 | I-T33 | — | 로그인 수단 해제 안전성 | 마지막 남은 하나뿐인 로그인 수단의 해제 시도는 409 Conflict로 막힌다. 해제는 재인증을 통과했을 때만 끝난다. | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, services/identity-svc/test-int/login-methods.int.test.ts 외 2곳 |
 | I-T34 | — | 계정 변경 감사 이력 및 알림 | 연결·병합·해제가 일어나면 두 계정에 등록된 알림 채널로 통지가 1회 나간다. `account_merge` 감사 이력은 대표 계정이 탈퇴할 때까지 온전하게… | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | I-T35 | — | 연계정보 키 교체 뒤 중복 계정 방어 | 연계정보 HMAC 키 새 버전을 만든 뒤, 옛 버전으로 본인확인한 사람이 새 계정에서 본인확인을 시도하면 옛 버전 값과 일치해 409(이미 다른 계정에서… | 빈칸 | B | — |
-| I-T36 | — | 토큰 서명 키 분리 | 팬 토큰 키로 서명한 `aud` ops 토큰과, 입장 토큰을 액세스 토큰 자리에 넣은 요청을 gw-ops·gw-fan에 보내면 둘 다 401로 거부된다(키… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
+| I-T36 | — | 토큰 서명 키 분리 | 팬 토큰 키로 서명한 `aud` ops 토큰과, 입장 토큰을 액세스 토큰 자리에 넣은 요청을 gw-ops·gw-fan에 보내면 둘 다 401로 거부된다(키… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, packages/platform/test/token-verify.test.ts 외 1곳 |
 | I-T37 | — | 확인 코드 무차별 대입 제한 | 한 계정으로 10분 안에 확인 코드 승인을 5번 틀리면 6번째 시도부터 거부되고, 계정은 잠기지 않는다. 한 기기가 1시간에 코드를 10번 발급받은 뒤 11번째… | 빈칸 | B | — |
 | I-T38 | — | 스캐너 세션 수 | 같은 계정으로 두 번째 기기를 승인하면 첫 기기 세션이 끝나고, 같은 기기에서 다른 스태프가 승인하면 이전 스태프 세션이 끝난다(교대). | 빈칸 | B | — |
 | I-T39 | — | 토큰과 기기 결속 | 기기 A의 스태프 토큰을 기기 B의 키로 만든 DPoP 증명과 함께 보낸 요청은 스캐너 경로에서 거부된다(`cnf.jkt` 불일치. mTLS 선택지는 기기 B의… | 빈칸 | B | — |
@@ -269,16 +269,16 @@
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/console-host, apps/partner, apps/web… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/identity-svc/test/http.test.ts |
-| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
-| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: services/queue-svc/test/state-http.test.ts (영역: apps/console-host, apps/partner, apps/web… |
+| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
+| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/server/csp-hash-server.test.mjs 외 2곳 |
-| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
+| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 3곳 (영역:… |
-| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 4곳 (영역:… |
+| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음: 로그인은 창을 열지 않고 리디렉션(브라우저를 다른 주소로 보내는 응답)으로 이동하므로 받는 창 메시지가 없다(docs/features/identity.md §2). 로그인에 팝업 창을 쓰게 되면 다시… |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 5곳 |
@@ -351,7 +351,7 @@
 | v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
-| v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | B | 다른 곳 시험: packages/platform/test/token-verify.test.ts (영역: services/identity-svc) |
+| v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-10.1.1 | — | L2 | 토큰은 꼭 필요한 구성요소에만 보낸다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-10.1.2 | — | L2 | 클라이언트는 같은 사용자 에이전트 세션에서 시작한 바로 그 인가 흐름의 값(인가 코드·ID 토큰)만 받고, 이를 위해… | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-10.2.1 | — | L2 | 코드 흐름을 쓰면 PKCE나 `state`로 CSRF를 막는다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -376,7 +376,7 @@
 | v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | B | 해당 없음: 비밀번호로부터 암호화 키를 파생하지 않는다 |
 | v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | ID만 | B | 다른 곳 시험: services/payment-svc/test/pg-selection.test.ts, services/payment-svc/test/simulator-gateway.test.ts 외 5곳 (영역:… |
 | v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test-int/kms-seed.int.test.ts 외 4곳… |
-| v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-server.test.ts (영역: apps/console-host, apps/partner, apps/web… |
+| v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
 | v5.0.0-12.2.1 | — | L1 | 클라이언트와 외부에 노출된 HTTP 서비스 사이의 모든 연결에 TLS를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-config.test.ts, services/v0-monolith/test/gateway-server.test.ts 외 1곳 (영역:… |

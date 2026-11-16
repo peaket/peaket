@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 112 | 20 | 0 | 0 | 0 | 6 | 0 | 0 | 14 | 152 |
-| 합계 | 112 | 20 | 0 | 0 | 0 | 6 | 0 | 0 | 14 | 152 |
+| B | 117 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 8 | 152 |
+| 합계 | 117 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 8 | 152 |
 
 ## docs/features/bot-defense.md
 
@@ -57,11 +57,11 @@
 | B-T17 | ② | 여정 ID(추천 적용 2026-10-31, §3.1·§4.1): ①… | ② `journey_id`만 다르고 나머지가 같은 요청 둘의 판정·사유 범주가 같다(점수에 쓰지 않음) | 자동 시험 | B | 시험: services/trust-svc/test/score-risk.test.ts |
 | B-T17 | ③ | 여정 ID(추천 적용 2026-10-31, §3.1·§4.1): ①… | ③로그인·추가 검증 제출 판정은 `journey_id`가 비어도 판정한다 | 자동 시험 | B | 시험: services/trust-svc/test/score-risk.test.ts |
 | B-T17 | ④ | 여정 ID(추천 적용 2026-10-31, §3.1·§4.1): ①… | ④로비 입장의 `BehaviorSignal`은 screen `LOBBY`, 사전 검증은 `EVENT_DETAIL`이다. 연결: FR-072 | 자동 시험 | B | 시험: services/trust-svc/test/score-risk.test.ts |
-| B-T18 | ① | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ① HTTPS로 대기열 API 배포를 지난 요청은 조사용 요청 기록에 `ja4`(36자)가 있다 | 빈칸 | B | — |
-| B-T18 | ② | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ② 헤더가 빠진 요청은 `ja4`가 비고 나머지 칸은 그대로다 | 빈칸 | B | — |
-| B-T18 | ③ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ③ 대기열 경로 요청은 `edgeBotLabels`가 빈다(Bot Control 없음) | 빈칸 | B | — |
-| B-T18 | ④ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ④ 원본 확인 헤더 없이 위조 `CloudFront-Viewer-JA4-Fingerprint`·`CloudFront-Viewer-ASN`·x-amzn-waf-b… | 빈칸 | B | — |
-| B-T18 | ⑤ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ⑤ `ScoreRiskRequest`에 JA4·끝단 라벨 칸이 없고, WAF 토큰 지문 라벨은 어디에도 남지 않는다. 연결: FR-072 | 빈칸 | B | — |
+| B-T18 | ① | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ① HTTPS로 대기열 API 배포를 지난 요청은 조사용 요청 기록에 `ja4`(36자)가 있다 | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs |
+| B-T18 | ② | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ② 헤더가 빠진 요청은 `ja4`가 비고 나머지 칸은 그대로다 | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs |
+| B-T18 | ③ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ③ 대기열 경로 요청은 `edgeBotLabels`가 빈다(Bot Control 없음) | 자동 시험 | B | 시험: tools/local/e2e/gateways.e2e.mjs |
+| B-T18 | ④ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ④ 원본 확인 헤더 없이 위조 `CloudFront-Viewer-JA4-Fingerprint`·`CloudFront-Viewer-ASN`·x-amzn-waf-b… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs |
+| B-T18 | ⑤ | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로… | ⑤ `ScoreRiskRequest`에 JA4·끝단 라벨 칸이 없고, WAF 토큰 지문 라벨은 어디에도 남지 않는다. 연결: FR-072 | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | B-T19 | ① | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ① 직접 선택 공연에서 구매 세션의 첫 홀드에 `behavior`를 실으면 purchase-svc가 screen `SEAT`인… | ID만 | B | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
 | B-T19 | ② | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ② 결제 시도 시작의 `behavior`는 screen `PAYMENT` 한 건이다 | ID만 | B | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
 | B-T19 | ③ | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ①… | ③ 좌석 자동 배정 공연의 홀드에는 `SEAT` 신호가 없다 | ID만 | B | 시험: apps/web/src/_pages/seats/model/booking-machine.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs 외… |
@@ -150,16 +150,16 @@
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: services/trust-svc) |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts, services/queue-svc/test/first-visit-cookie.test.ts |
-| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: services/v0-monolith/test/gateway-http-rules.test.ts, services/v0-monolith/test/gateway-server.test.ts (영역:… |
-| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: services/queue-svc/test/state-http.test.ts (영역: services/trust-svc) |
+| v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
+| v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/state-http.test.ts 외 1곳 (영역:… |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 1곳 |
-| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: services/v0-monolith/test-int/seat.int.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
+| v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test-int/seat.int.test.ts 외 4곳 (영역:… |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 2곳 |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
-| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 빈칸 | B | 영역: services/trust-svc |
+| v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs (영역: services/trust-svc) |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs… |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: services/trust-svc |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 5곳 |
