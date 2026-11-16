@@ -1,15 +1,23 @@
 // 회차 취소 계약 회귀 시험(R-597·R-614): 외부 환불 전 RUNNING 선저장, 실패 롤백, 동시 확정 1회,
 // 전이별 감사, 재인증 강제. 되돌릴 수 없는 전액 환불이라 상태·순서·감사·승인자 결속을 함께 고정한다.
+// BAT-420(2026-11-16, 시험 담당): 판정이 미리보기 저장(PENDING_APPROVAL, 감사 PREVIEWED)까지 하고, 확정은 PENDING_APPROVAL에서만
+// 판매를 멈춘 뒤 시작하며, 시작이 실패하면 PENDING_APPROVAL로 돌아가고, 판정 뒤 반려는 JUDGED로 돌아간다(transfer-refund §5).
+// 그래서 판 번호가 하나씩 밀리고 감사 차례에 PREVIEWED가 들어간다.
+import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { MemoryAuditChain, type AuditRecord } from '../src/modules/audit/index.js';
 import {
   EventCancellations,
   EventCancellationProblem,
   MemoryEventCancellationStore,
+  type EventCancellationDryRun,
   type EventCancellationReauth,
   type EventCancellationRecord,
   type EventRefundJobView,
+  type EventRefundReader,
   type EventRefundStarter,
+  type EventSaleStopper,
+  type SaleSuspensionLookup,
 } from '../src/modules/event-cancellations/index.js';
 
 const NOW = Date.parse('2026-11-15T08:00:00.000Z');
@@ -19,6 +27,7 @@ const COMMANDER = { accountId: '0193d000-0000-7000-8000-000000000011', sessionId
 const OPERATOR = { accountId: '0193d000-0000-7000-8000-000000000012', sessionId: 's-o', role: 'operator' };
 const OTHER = { accountId: '0193d000-0000-7000-8000-000000000013', sessionId: 's-o2', role: 'commander' };
 const tokenFor = (accountId: string, act = 'APPROVAL') => `${act}:${accountId}`;
+const DRY_RUN: EventCancellationDryRun = { targetOrders: 1, refundTotal: 33_333, compensationTargets: 1, compensationTotal: 3_334, perPg: [{ pg: 'PORTONE', orders: 1, estimatedSeconds: 1 }] };
 
 class SpyStore extends MemoryEventCancellationStore {
   readonly saves: Array<{ record: EventCancellationRecord; audit: AuditRecord | undefined }> = [];
@@ -38,7 +47,13 @@ const reauthOf = (): EventCancellationReauth => ({
 });
 
 const fixture = (
-  o: { start?: EventRefundStarter['start']; pause?: EventRefundStarter['pause']; resume?: EventRefundStarter['resume']; reauth?: EventCancellationReauth | null } = {},
+  o: {
+    start?: EventRefundStarter['start'];
+    pause?: EventRefundStarter['pause'];
+    resume?: EventRefundStarter['resume'];
+    stop?: EventSaleStopper['stop'];
+    reauth?: EventCancellationReauth | null;
+  } = {},
 ) => {
   const audit = new MemoryAuditChain();
   const store = new SpyStore(audit);
@@ -57,15 +72,54 @@ const fixture = (
       return o.resume ? o.resume(i) : { jobId: i.requestId, state: 'RUNNING' };
     },
   };
+  const stopper: EventSaleStopper = {
+    stop: async (q) => {
+      calls.push(`stop:${q.requestId}`);
+      if (o.stop) await o.stop(q);
+    },
+  };
+  const suspension: SaleSuspensionLookup = { isSuspended: async () => true };
+  const reader: EventRefundReader = { preview: async () => DRY_RUN, job: async () => ({ state: 'RUNNING', total: 1, done: 0, failed: 0, perPg: [] }) };
   const reauth = o.reauth === null ? undefined : (o.reauth ?? reauthOf());
-  const app = new EventCancellations(store, refunds, () => NOW, audit, reauth);
+  const app = new EventCancellations(store, refunds, () => NOW, audit, reauth, { suspension, reader, stopper });
   return { audit, store, calls, app };
 };
 
+const idem = () => ({ accountRef: COMMANDER.accountId, operation: 'CREATE_EVENT_CANCELLATION', key: randomUUID(), requestHash: new Uint8Array(createHash('sha256').update(randomUUID()).digest()) });
+
+/** 요청(v1) → 판정(JUDGED v2) → 미리보기 저장(PENDING_APPROVAL v3) */
 const createJudged = async (f: ReturnType<typeof fixture>, eventId = EVENT1) => {
-  const r = await f.app.request({ eventId, reason: '공연 취소' }, COMMANDER);
+  const r = await f.app.request({ eventId, reason: '공연 취소' }, COMMANDER, tokenFor(COMMANDER.accountId), idem());
   await f.app.judge(r.requestId, { fault: 'ORGANIZER', reason: '주최 귀책', fanNoticeReason: '공연이 취소되었습니다' }, COMMANDER);
   return r.requestId;
+};
+
+/** 재인증 대역을 바꾼 시험용: 판정까지 끝난 요청(PENDING_APPROVAL v3)을 저장소에 바로 둔다 */
+const seedPendingApproval = async (f: ReturnType<typeof fixture>, eventId = EVENT1) => {
+  const requestId = randomUUID();
+  await f.store.insert({
+    requestId,
+    eventId,
+    kind: 'CANCEL',
+    status: 'PENDING_APPROVAL',
+    reason: '공연 취소',
+    requestedBy: COMMANDER.accountId,
+    requestedAt: new Date(NOW - 60_000),
+    fault: 'ORGANIZER',
+    judgementReason: '주최 귀책',
+    fanNoticeReason: '공연이 취소되었습니다',
+    judgedBy: COMMANDER.accountId,
+    judgedAt: new Date(NOW - 30_000),
+    approvedBy: null,
+    approvedAt: null,
+    refundJobState: null,
+    version: 3,
+    updatedAt: new Date(NOW - 30_000),
+    requestedVia: 'COMMANDER',
+    promoterId: null,
+    dryRun: DRY_RUN,
+  });
+  return requestId;
 };
 
 const approve = (f: ReturnType<typeof fixture>, requestId: string, actor = OPERATOR, token = tokenFor(OPERATOR.accountId)) => f.app.approve(requestId, actor, token);
@@ -81,13 +135,14 @@ describe('OPS-07 회차 취소 확정 순서·동시성', () => {
       },
     });
     const requestId = await createJudged(f);
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'PENDING_APPROVAL', version: 3 });
     const view = await approve(f, requestId);
     expect(view).toMatchObject({ status: 'RUNNING', progress: { state: 'RUNNING' } });
-    expect(observed).toEqual({ status: 'RUNNING', version: 3, approvedBy: OPERATOR.accountId });
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', approvedBy: OPERATOR.accountId, version: 4 });
+    expect(observed).toEqual({ status: 'RUNNING', version: 4, approvedBy: OPERATOR.accountId });
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', approvedBy: OPERATOR.accountId, version: 5 });
   });
 
-  test('외부 환불 시작이 실패하면 JUDGED로 되돌려 다시 시도할 수 있고 실패 감사를 남긴다', async () => {
+  test('외부 환불 시작이 실패하면 PENDING_APPROVAL로 되돌려 다시 시도할 수 있고 실패 감사를 남긴다', async () => {
     let fail = true;
     const f = fixture({
       start: async (i) => {
@@ -97,10 +152,11 @@ describe('OPS-07 회차 취소 확정 순서·동시성', () => {
     });
     const requestId = await createJudged(f);
     await expect(approve(f, requestId)).rejects.toThrow('purchase down');
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'JUDGED', approvedBy: null, approvedAt: null, version: 4 });
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, version: 5, dryRun: DRY_RUN });
     expect(f.audit.entries.map((e) => e.recordType)).toEqual([
       'EVENT_CANCELLATION_REQUESTED',
       'EVENT_CANCELLATION_JUDGED',
+      'EVENT_CANCELLATION_PREVIEWED',
       'EVENT_CANCELLATION_APPROVED',
       'EVENT_CANCELLATION_APPROVAL_FAILED',
     ]);
@@ -108,10 +164,10 @@ describe('OPS-07 회차 취소 확정 순서·동시성', () => {
     fail = false;
     const retried = await approve(f, requestId);
     expect(retried).toMatchObject({ status: 'RUNNING', progress: { state: 'RUNNING' } });
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', approvedBy: OPERATOR.accountId, version: 6 });
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', approvedBy: OPERATOR.accountId, version: 7 });
   });
 
-  test('동시 확정은 하나만 성공하고 환불 시작은 한 번만 부른다', async () => {
+  test('동시 확정은 하나만 성공하고 판매 멈춤·환불 시작은 한 번만 부른다', async () => {
     const f = fixture();
     const requestId = await createJudged(f);
     const results = await Promise.allSettled([
@@ -121,7 +177,8 @@ describe('OPS-07 회차 취소 확정 순서·동시성', () => {
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.find((r) => r.status === 'rejected')).toMatchObject({ reason: { type: 'event-cancellation-conflict', status: 409 } });
     expect(f.calls.filter((c) => c.startsWith('start:'))).toHaveLength(1);
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', version: 4 });
+    expect(f.calls.filter((c) => c.startsWith('stop:'))).toHaveLength(1);
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'RUNNING', version: 5 });
   });
 
   test('저장소는 이전 version이 아니면 갱신을 거절한다', async () => {
@@ -153,7 +210,7 @@ describe('OPS-07 회차 취소 확정 순서·동시성', () => {
 });
 
 describe('OPS-01 회차 취소 감사 체인', () => {
-  test('요청·판정·확정·시작·정지·재개가 전이마다 감사에 남는다', async () => {
+  test('요청·판정·미리보기·확정·시작·정지·재개가 전이마다 감사에 남는다', async () => {
     const f = fixture();
     const requestId = await createJudged(f);
     await approve(f, requestId);
@@ -164,47 +221,48 @@ describe('OPS-01 회차 취소 감사 체인', () => {
     expect(entries.map((e) => e.recordType)).toEqual([
       'EVENT_CANCELLATION_REQUESTED',
       'EVENT_CANCELLATION_JUDGED',
+      'EVENT_CANCELLATION_PREVIEWED',
       'EVENT_CANCELLATION_APPROVED',
       'EVENT_CANCELLATION_STARTED',
       'EVENT_CANCELLATION_PAUSED',
       'EVENT_CANCELLATION_RESUMED',
     ]);
-    expect(entries[2]!.record.payload).toMatchObject({ status: 'RUNNING', fault: 'ORGANIZER', eventId: EVENT1, requestReason: '공연 취소', requestedBy: COMMANDER.accountId });
-    expect(entries[4]!.record.payload).toMatchObject({ status: 'PAUSED', pg: 'TOSS', reason: '자동 정지', refundJobState: 'PAUSED' });
-    expect(entries[5]!.record.payload).toMatchObject({ status: 'RUNNING', pg: 'TOSS', reason: '재개', refundJobState: 'RUNNING' });
+    expect(entries[3]!.record.payload).toMatchObject({ status: 'RUNNING', fault: 'ORGANIZER', eventId: EVENT1, requestReason: '공연 취소', requestedBy: COMMANDER.accountId });
+    expect(entries[5]!.record.payload).toMatchObject({ status: 'PAUSED', pg: 'TOSS', reason: '자동 정지', refundJobState: 'PAUSED' });
+    expect(entries[6]!.record.payload).toMatchObject({ status: 'RUNNING', pg: 'TOSS', reason: '재개', refundJobState: 'RUNNING' });
   });
 
   test('판정 뒤 반려도 사유·상태와 함께 감사에 남는다', async () => {
     const f = fixture();
     const requestId = await createJudged(f, EVENT2);
     const rejected = await f.app.reject(requestId, OPERATOR, '증빙 부족');
-    expect(rejected).toMatchObject({ status: 'REQUESTED' });
+    expect(rejected).toMatchObject({ status: 'JUDGED' });
     const entries = f.audit.entries.filter((e) => e.recordId === requestId);
-    expect(entries.map((e) => e.recordType)).toEqual(['EVENT_CANCELLATION_REQUESTED', 'EVENT_CANCELLATION_JUDGED', 'EVENT_CANCELLATION_REJECTED']);
-    expect(entries.at(-1)!.record.payload).toMatchObject({ status: 'REQUESTED', reason: '증빙 부족' });
+    expect(entries.map((e) => e.recordType)).toEqual(['EVENT_CANCELLATION_REQUESTED', 'EVENT_CANCELLATION_JUDGED', 'EVENT_CANCELLATION_PREVIEWED', 'EVENT_CANCELLATION_REJECTED']);
+    expect(entries.at(-1)!.record.payload).toMatchObject({ status: 'JUDGED', reason: '증빙 부족' });
   });
 });
 
 describe('SEC-02 회차 취소 확정 재인증', () => {
-  test('검증기가 없으면 503 reauth-unavailable로 닫고 환불을 시작하지 않는다', async () => {
+  test('검증기가 없으면 503 reauth-unavailable로 닫고 판매 멈춤·환불을 시작하지 않는다', async () => {
     const f = fixture({ reauth: null });
-    const requestId = await createJudged(f);
+    const requestId = await seedPendingApproval(f);
     // 정본 openapi x-peaket-problem-types: reauth-unavailable(503). 회차 취소 확정 경로 설명도
     // "검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required"다.
     await expect(approve(f, requestId)).rejects.toMatchObject({ type: 'reauth-unavailable', status: 503 });
     expect(f.calls).toEqual([]);
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'JUDGED', version: 2 });
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'PENDING_APPROVAL', version: 3 });
   });
 
-  test('다른 계정의 토큰은 403이고 환불을 시작하지 않는다', async () => {
+  test('다른 계정의 토큰은 403이고 판매 멈춤·환불을 시작하지 않는다', async () => {
     const f = fixture();
     const requestId = await createJudged(f);
     await expect(approve(f, requestId, OPERATOR, tokenFor(OTHER.accountId))).rejects.toMatchObject({ type: 'reauth-required', status: 403 });
     expect(f.calls).toEqual([]);
-    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'JUDGED', version: 2 });
+    expect(f.store.rows.get(requestId)).toMatchObject({ status: 'PENDING_APPROVAL', version: 3 });
   });
 
-  test('재인증 검증이 환불 시작보다 먼저, 세션과 act APPROVAL로 호출된다', async () => {
+  test('재인증 검증이 판매 멈춤·환불 시작보다 먼저, 세션과 act APPROVAL로 호출된다', async () => {
     const order: string[] = [];
     const reauth: EventCancellationReauth = {
       verify: async (_token, o) => {
@@ -214,14 +272,15 @@ describe('SEC-02 회차 취소 확정 재인증', () => {
     };
     const f = fixture({
       reauth,
+      stop: async () => void order.push('stop'),
       start: async (i) => {
         order.push('start');
         return { jobId: i.requestId, state: 'RUNNING' } satisfies EventRefundJobView;
       },
     });
-    const requestId = await createJudged(f);
+    const requestId = await seedPendingApproval(f);
     await approve(f, requestId);
-    expect(order).toEqual([`verify:APPROVAL:${OPERATOR.sessionId}`, 'start']);
+    expect(order).toEqual([`verify:APPROVAL:${OPERATOR.sessionId}`, 'stop', 'start']);
   });
 });
 
@@ -231,10 +290,19 @@ describe('OPSV-01 확정 상태와 감사 기록의 원자성 포트', () => {
     const requestId = await createJudged(f);
     await approve(f, requestId);
     const runningSave = f.store.saves.find((s) => s.record.status === 'RUNNING');
-    expect(runningSave?.record.version).toBe(3);
+    expect(runningSave?.record.version).toBe(4);
     expect(runningSave?.audit).toMatchObject({ recordType: 'EVENT_CANCELLATION_APPROVED', recordId: requestId });
     const startedSave = f.store.saves.find((s) => s.audit?.recordType === 'EVENT_CANCELLATION_STARTED');
     expect(startedSave?.record.status).toBe('RUNNING');
-    expect(startedSave?.record.version).toBe(4);
+    expect(startedSave?.record.version).toBe(5);
+  });
+
+  test('GAT-110 W5 판정의 JUDGED 저장과 미리보기 저장은 각각 자기 감사 기록과 같은 저장 호출로 간다', async () => {
+    const f = fixture();
+    const requestId = await createJudged(f);
+    const judged = f.store.saves.find((s) => s.audit?.recordType === 'EVENT_CANCELLATION_JUDGED');
+    expect(judged?.record).toMatchObject({ requestId, status: 'JUDGED', version: 2 });
+    const previewed = f.store.saves.find((s) => s.audit?.recordType === 'EVENT_CANCELLATION_PREVIEWED');
+    expect(previewed?.record).toMatchObject({ requestId, status: 'PENDING_APPROVAL', version: 3, dryRun: DRY_RUN });
   });
 });

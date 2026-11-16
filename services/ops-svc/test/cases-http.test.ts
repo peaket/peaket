@@ -34,4 +34,16 @@ describe('/internal/v1/cs-cases', () => {
     expect(JSON.parse((await post(body)).payload)).toEqual({ accepted: false });
     expect(JSON.parse((await post({ kind: 'REFUND_FAILED' })).payload)).toEqual({ accepted: false });
   });
+
+  // BAT-420 GAT-090 A: purchase-svc 환급 실행기의 입장 기록 대조가 여는 이상 표시 건. 시험 담당이 구현 전에 썼다.
+  test('GAT-090 A4 이상 표시 통지는 HTTP로 FLAGGED 건 하나를 열고 같은 취소의 다시 보냄은 같은 건이다', async () => {
+    const cancellationId = '0194b000-0000-7000-8000-0000000a0003';
+    const body = { eventKey: `entry-after-cancel:${cancellationId}`, kind: 'FLAGGED', sourceId: cancellationId, category: 'ENTRY_AFTER_CANCEL', createdAt: new Date(NOW).toISOString() };
+    const a = await post(body);
+    expect(a.statusCode).toBe(202);
+    const first = JSON.parse(a.payload) as { accepted: boolean; caseId?: string };
+    expect(first.accepted).toBe(true);
+    expect(first.caseId).toEqual(expect.any(String));
+    expect(JSON.parse((await post(body)).payload)).toEqual({ accepted: true, caseId: first.caseId });
+  });
 });

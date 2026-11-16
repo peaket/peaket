@@ -14,6 +14,19 @@ const OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: Str
 type Unary = grpc.handleUnaryCall<Record<string, unknown>, Record<string, unknown>>;
 type Pkg = { EventRefundService: grpc.ServiceClientConstructor };
 const received: Array<{ method: string; req: Record<string, unknown> }> = [];
+/** GetEventRefundJob의 다음 답(BAT-420 W4가 진행률 칸을 바꿔 넣는다) */
+let jobAnswer: Record<string, unknown> = { state: 'REFUND_JOB_STATE_RUNNING', total_orders: 1, done_orders: 0, failed_orders: 0, not_applied_orders: 0, applied_orders: 1 };
+/** BAT-420 W4: 미리보기 답(칸마다 값을 다르게 골라 칸이 바뀌면 드러나게 한다) */
+const PREVIEW_ANSWER = {
+  target_orders: 3,
+  refund_total: { krw: 133_332 },
+  compensation_targets: 2,
+  compensation_total: { krw: 13_335 },
+  per_pg: [
+    { pg: 'PG_PROVIDER_TOSS', orders: 1, estimated_seconds: 4 },
+    { pg: 'PG_PROVIDER_PORTONE', orders: 2, estimated_seconds: 7 },
+  ],
+};
 
 let server: grpc.Server;
 let client: GrpcEventRefunds;
@@ -30,10 +43,10 @@ beforeAll(async () => {
   server = new grpc.Server();
   server.addService(pkg.EventRefundService.service, {
     StartEventRefund: handler('StartEventRefund', (r) => ({ job_id: r.cancellation_request_id, state: 'REFUND_JOB_STATE_RUNNING' })),
-    GetEventRefundJob: handler('GetEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_RUNNING', total_orders: 1, done_orders: 0, failed_orders: 0, not_applied_orders: 0, applied_orders: 1 })),
+    GetEventRefundJob: handler('GetEventRefundJob', () => jobAnswer),
     PauseEventRefundJob: handler('PauseEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_PAUSED' })),
     ResumeEventRefundJob: handler('ResumeEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_RUNNING' })),
-    PreviewEventRefund: handler('PreviewEventRefund', () => ({ target_orders: 1 })),
+    PreviewEventRefund: handler('PreviewEventRefund', () => PREVIEW_ANSWER),
     ApplyEventRefund: handler('ApplyEventRefund', () => ({ accepted: true, state: 'REFUND_JOB_STATE_RUNNING' })),
     CloseEventRefundWindow: handler('CloseEventRefundWindow', () => ({ state: 'REFUND_JOB_STATE_COMPLETED' })),
   });
@@ -92,5 +105,48 @@ describe('BAT425 ops-svc 환불 gRPC 클라이언트', () => {
     const r = await client.get({ requestId: REQUEST });
     expect(r).toMatchObject({ jobId: REQUEST, state: 'RUNNING' });
     expect(received.at(-1)).toMatchObject({ method: 'GetEventRefundJob', req: { job_id: REQUEST } });
+  });
+
+  // BAT-420 GAT-110 W4: 판정 미리보기와 상세 진행률. 시험 담당이 구현 전에 썼다(Docker 없이 도는 gRPC 통합 시험).
+  test('GAT-110 W4 Preview는 회차·요청·판정 enum을 보내고 답의 Money를 원으로, 결제사별 주문 수·예상 시간을 읽는다', async () => {
+    const r = await client.preview({ eventId: EVENT, requestId: REQUEST, fault: 'ORGANIZER' });
+    expect(received.at(-1)).toMatchObject({ method: 'PreviewEventRefund', req: { event_id: EVENT, cancellation_request_id: REQUEST, ruling: 'CANCELLATION_RULING_ORGANIZER' } });
+    expect(r).toEqual({
+      targetOrders: 3,
+      refundTotal: 133_332,
+      compensationTargets: 2,
+      compensationTotal: 13_335,
+      perPg: [
+        { pg: 'TOSS', orders: 1, estimatedSeconds: 4 },
+        { pg: 'PORTONE', orders: 2, estimatedSeconds: 7 },
+      ],
+    });
+    await client.preview({ eventId: EVENT, requestId: REQUEST, fault: 'FORCE_MAJEURE' });
+    expect(received.at(-1)!.req).toMatchObject({ ruling: 'CANCELLATION_RULING_FORCE_MAJEURE' });
+  });
+
+  test('GAT-110 W4 진행률 읽기는 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름과 연기 신청 수·신청 창 닫힘을 읽는다', async () => {
+    const closesAtMs = NOW + 7 * 86_400_000 + 250;
+    jobAnswer = {
+      state: 'REFUND_JOB_STATE_PAUSED',
+      total_orders: 30,
+      done_orders: 8,
+      failed_orders: 5,
+      per_pg: [
+        { pg: 'PG_PROVIDER_TOSS', state: 'REFUND_JOB_STATE_RUNNING', pause_reason: 'REFUND_PAUSE_REASON_UNSPECIFIED', done_orders: 5, failed_orders: 1, unknown_orders: 2, not_applied_orders: 0 },
+        { pg: 'PG_PROVIDER_PORTONE', state: 'REFUND_JOB_STATE_PAUSED', pause_reason: 'REFUND_PAUSE_REASON_AUTO_CIRCUIT_OPEN', done_orders: 3, failed_orders: 4, unknown_orders: 6, not_applied_orders: 0 },
+      ],
+      kind: 'EVENT_REFUND_KIND_POSTPONE',
+      refund_window_closes_at: { seconds: Math.floor(closesAtMs / 1000), nanos: (closesAtMs % 1000) * 1_000_000 },
+      not_applied_orders: 0,
+      applied_orders: 9,
+    };
+    const r = await client.job({ requestId: REQUEST });
+    expect(received.at(-1)).toMatchObject({ method: 'GetEventRefundJob', req: { job_id: REQUEST } });
+    expect(r).toMatchObject({ state: 'PAUSED', total: 30, done: 8, failed: 5, appliedOrders: 9, refundWindowClosesAt: new Date(closesAtMs).toISOString() });
+    expect(r.perPg).toHaveLength(2);
+    expect(r.perPg[0]).toMatchObject({ pg: 'TOSS', state: 'RUNNING', done: 5, failed: 1, unknown: 2 });
+    expect(r.perPg[0]!.pauseReason).toBeUndefined();
+    expect(r.perPg[1]).toEqual({ pg: 'PORTONE', state: 'PAUSED', pauseReason: 'AUTO_CIRCUIT_OPEN', done: 3, failed: 4, unknown: 6 });
   });
 });

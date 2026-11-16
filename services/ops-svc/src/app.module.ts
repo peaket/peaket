@@ -28,8 +28,20 @@ interface CommonWiring {
   readonly auditChain?: AuditChain & AuditChainReader;
   /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
   readonly payouts?: PayoutsModuleDeps;
-  /** 회차 취소 요청(BAT-425 GAT-130 잔여). refunds·reauth가 없으면 확정이 503이다 */
-  readonly eventCancellations?: { readonly refunds?: EventRefundStarter; readonly reauth?: import('./modules/event-cancellations/index.js').EventCancellationReauth };
+  /**
+   * 회차 취소 요청(BAT-425 GAT-130 잔여). refunds·reauth가 없으면 확정이 503이다.
+   * BAT-420 GAT-110(빈 뼈대, 아직 조립하지 않음): reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속).
+   * suspension(판매 중지 확인)·cases(판정 대기 건)는 주지 않으면 DB/메모리 기본을 쓴다(구현 담당 몫).
+   */
+  readonly eventCancellations?: {
+    readonly refunds?: EventRefundStarter;
+    readonly reauth?: import('./modules/event-cancellations/index.js').EventCancellationReauth;
+    readonly reader?: import('./modules/event-cancellations/index.js').EventRefundReader;
+    readonly stopper?: import('./modules/event-cancellations/index.js').EventSaleStopper;
+    readonly owners?: import('./modules/event-cancellations/index.js').EventOwnerLookup;
+    readonly suspension?: import('./modules/event-cancellations/index.js').SaleSuspensionLookup;
+    readonly cases?: import('./modules/event-cancellations/index.js').EventCancellationCases;
+  };
 }
 
 @Module({})

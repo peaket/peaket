@@ -3,9 +3,10 @@
 // 확정은 외부 호출 전에 RUNNING으로 조건부 저장하고, 외부가 실패하면 JUDGED로 되돌려 다시 시도할 수 있게 한다.
 // 모든 상태 변화는 ops 감사 체인에도 남긴다(transfer-refund §8, settlement §5.1).
 import { randomUUID } from 'node:crypto';
+import type { IdempotencyRequest } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
-import { EventCancellationProblem, eventCancellationView, type EventCancellationFault, type EventCancellationKind, type EventCancellationPg, type EventCancellationRecord, type EventCancellationStatus, type EventCancellationView } from '../domain/event-cancellation.js';
-import type { EventCancellationStore, EventRefundStarter } from '../domain/ports.js';
+import { EventCancellationProblem, eventCancellationView, type EventCancellationFault, type EventCancellationKind, type EventCancellationPg, type EventCancellationRecord, type EventCancellationStatus, type EventCancellationView, type PartnerEventCancellationStatusView } from '../domain/event-cancellation.js';
+import type { EventCancellationCases, EventCancellationStore, EventOwnerLookup, EventRefundReader, EventRefundStarter, EventSaleStopper, SaleSuspensionLookup } from '../domain/ports.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
 /** 모든 회차 취소 감사에 싣는 원본 대조용 고정 값(사유·회차·종류·요청자) */
@@ -28,6 +29,28 @@ export interface EventCancellationRequestInput {
   readonly reason: string;
 }
 
+/** 파트너 회차 취소·연기 요청 본문(openapi createPartnerEventCancellation, BAT-420) */
+export interface PartnerEventCancellationInput {
+  readonly kind: EventCancellationKind;
+  readonly reason: string;
+  readonly faultOpinion?: EventCancellationFault;
+  readonly evidenceRef?: string;
+  /** ISO 8601. POSTPONE은 필수, CANCEL은 보내면 400 */
+  readonly newStartsAt?: string;
+}
+
+/** 파트너 요청자: 세션의 테넌트(authz-matrix §3.3) */
+export type PartnerActor = OpsActor & { readonly tenantId: string };
+
+/** BAT-420 GAT-110 선택 의존(없으면 그 경로를 503으로 닫는다, transfer-refund §5) */
+export interface EventCancellationExtra {
+  readonly suspension?: SaleSuspensionLookup;
+  readonly stopper?: EventSaleStopper;
+  readonly reader?: EventRefundReader;
+  readonly owners?: EventOwnerLookup;
+  readonly cases?: EventCancellationCases;
+}
+
 const conflict = () => new EventCancellationProblem('event-cancellation-conflict', 409, '다른 사람이 먼저 처리했습니다');
 
 export class EventCancellations {
@@ -37,9 +60,22 @@ export class EventCancellations {
     private readonly now: () => number = Date.now,
     private readonly audit?: AuditChain,
     private readonly reauth?: EventCancellationReauth,
+    private readonly extra: EventCancellationExtra = {},
   ) {}
 
-  async request(input: EventCancellationRequestInput, actor: OpsActor): Promise<EventCancellationView> {
+  /** 파트너 회차 취소·연기 요청(BAT-420 GAT-110 P, 빈 뼈대) */
+  async requestByPartner(_eventId: string, _input: PartnerEventCancellationInput, _actor: PartnerActor, _idem: IdempotencyRequest): Promise<EventCancellationView> {
+    void this.extra;
+    throw new Error('아직 없음');
+  }
+
+  /** 파트너가 보는 그 회차의 가장 최근 요청 상태(BAT-420 GAT-110 P, 빈 뼈대) */
+  async partnerStatus(_eventId: string, _tenantId: string): Promise<PartnerEventCancellationStatusView> {
+    throw new Error('아직 없음');
+  }
+
+  // BAT-420 GAT-110 Q: reauthToken·idem은 빈 뼈대라 아직 쓰지 않는다(구현 담당 몫)
+  async request(input: EventCancellationRequestInput, actor: OpsActor, _reauthToken?: string, _idem?: IdempotencyRequest): Promise<EventCancellationView> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.eventId)) throw new EventCancellationProblem('invalid-query', 400, '회차 ID가 올바르지 않습니다');
     if (input.reason.trim() === '') throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
     if (input.kind !== undefined && input.kind !== 'CANCEL') throw new EventCancellationProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');

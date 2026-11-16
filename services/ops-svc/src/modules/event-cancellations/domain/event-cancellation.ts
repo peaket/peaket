@@ -5,11 +5,41 @@ export type EventCancellationStatus = 'REQUESTED' | 'JUDGED' | 'PENDING_APPROVAL
 export type EventCancellationFault = 'ORGANIZER' | 'FORCE_MAJEURE' | 'CONTENT_CHANGE';
 export type EventCancellationPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
 
+/** 요청이 들어온 길(BAT-420 GAT-110, transfer-refund §5 '요청 두 길') */
+export type EventCancellationVia = 'PARTNER' | 'COMMANDER';
+
+/** 판정 때 purchase-svc PreviewEventRefund로 계산한 미리보기(주문 단위, transfer-refund §5 '판정·미리보기·확정의 차례') */
+export interface EventCancellationDryRun {
+  readonly targetOrders: number;
+  readonly refundTotal: number;
+  readonly compensationTargets: number;
+  readonly compensationTotal: number;
+  readonly perPg: readonly { readonly pg: EventCancellationPg; readonly orders: number; readonly estimatedSeconds: number }[];
+}
+
+/** 관제 상세의 일괄 환불 진행률. 읽기가 실패하면 state만 싣는다 */
+export interface EventCancellationProgress {
+  readonly state: string;
+  readonly total?: number;
+  readonly done?: number;
+  readonly failed?: number;
+  readonly perPg?: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string | null; readonly done: number; readonly failed: number; readonly unknown: number }[];
+}
+
+/** 파트너 사유 상한 1,000자 [가정] */
+export const PARTNER_REASON_MAX = 1_000;
+/** 증빙 참조 상한 200자 [가정] */
+export const EVIDENCE_REF_MAX = 200;
+/** 판매 설정에 끝 시각이 없으면 공연 시작 + 24시간 [가정] */
+export const EVENT_END_FALLBACK_MS = 86_400_000;
+
 export class EventCancellationProblem extends Error {
   constructor(
     readonly type: string,
     readonly status: number,
     readonly title: string,
+    /** Problem 확장 칸(예: event-cancellation-active의 requestId) */
+    readonly extensions?: Readonly<Record<string, unknown>>,
   ) {
     super(title);
     this.name = 'EventCancellationProblem';
@@ -34,6 +64,35 @@ export interface EventCancellationRecord {
   refundJobState: string | null;
   version: number;
   updatedAt: Date;
+  // BAT-420(ops 0013): 아래 칸은 마이그레이션 0013이 더한다. 빈 뼈대라 선택 칸으로 두었다(구현이 필수로 바꿔도 된다).
+  requestedVia?: EventCancellationVia;
+  promoterId?: string | null;
+  faultOpinion?: EventCancellationFault | null;
+  evidenceRef?: string | null;
+  newStartsAt?: Date | null;
+  dryRun?: EventCancellationDryRun | null;
+  rejectionReason?: string | null;
+}
+
+/** 파트너가 보는 상태(openapi PartnerEventCancellationStatus). 미리보기·결제사별 몫·판정자·내부 판정 사유는 없다 */
+export interface PartnerEventCancellationStatusView {
+  requestId: string;
+  eventId: string;
+  kind: EventCancellationKind;
+  status: EventCancellationStatus;
+  requestedAt: string;
+  reason: string | null;
+  evidenceRef: string | null;
+  faultOpinion: EventCancellationFault | null;
+  newStartsAt: string | null;
+  judgementDueAt: string | null;
+  fault: EventCancellationFault | null;
+  judgementSummary: string | null;
+  rejectionReason: string | null;
+  refundProgress: { total: number; done: number; failed: number } | null;
+  pausedBy: 'AUTOMATIC' | 'OPERATOR' | null;
+  postponement: { refundApplicationCount: number; refundDeadlineAt: string } | null;
+  compensation?: { targetCount: number; totalAmount: number } | null;
 }
 
 export interface EventCancellationView {
@@ -46,7 +105,8 @@ export interface EventCancellationView {
   fanNoticeReason?: string;
   requestedAt: string;
   judgedBy?: string;
-  progress?: { state: string };
+  dryRun?: EventCancellationDryRun;
+  progress?: EventCancellationProgress;
 }
 
 export const eventCancellationView = (r: EventCancellationRecord): EventCancellationView => ({

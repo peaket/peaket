@@ -4,6 +4,8 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
+import type { EventCancellationDryRun, EventCancellationFault } from '../modules/event-cancellations/domain/event-cancellation.js';
+import type { EventRefundJobProgress, EventRefundReader } from '../modules/event-cancellations/domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
@@ -66,7 +68,7 @@ export interface GrpcEventRefundsOptions {
   readonly profile?: GrpcLbProfile;
 }
 
-export class GrpcEventRefunds implements EventRefundStarter {
+export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader {
   readonly #client: grpc.Client & { StartEventRefund: Unary; GetEventRefundJob: Unary; PauseEventRefundJob: Unary; ResumeEventRefundJob: Unary };
 
   constructor(o: GrpcEventRefundsOptions) {
@@ -119,6 +121,16 @@ export class GrpcEventRefunds implements EventRefundStarter {
   async get(q: { requestId: string }): Promise<EventRefundJobView> {
     const answer = await this.#call('GetEventRefundJob', { job_id: q.requestId });
     return viewOf({ job_id: q.requestId, ...answer });
+  }
+
+  /** PreviewEventRefund(BAT-420 GAT-110 W, 빈 뼈대) */
+  async preview(_q: { eventId: string; requestId: string; fault: EventCancellationFault }): Promise<EventCancellationDryRun> {
+    throw new Error('아직 없음');
+  }
+
+  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W, 빈 뼈대) */
+  async job(_q: { requestId: string }): Promise<EventRefundJobProgress> {
+    throw new Error('아직 없음');
   }
 
   async #call(method: 'StartEventRefund' | 'GetEventRefundJob' | 'PauseEventRefundJob' | 'ResumeEventRefundJob', req: object): Promise<Record<string, unknown>> {

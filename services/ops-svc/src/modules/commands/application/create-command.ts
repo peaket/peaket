@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import { z } from 'zod';
 import { COMMAND_TYPES, requesterRolesOf, type Command, type CommandExecutionActor, type CommandType } from '../domain/command.js';
-import type { CommandStore } from '../domain/ports.js';
+import type { CancelledEventGuard, CommandStore } from '../domain/ports.js';
 import type { ExecuteCommand } from './execute-command.js';
 
 export interface CreateCommandInput {
@@ -32,6 +32,8 @@ export class CreateCommand {
   constructor(
     private readonly store: CommandStore,
     private readonly execution?: ExecuteCommand,
+    /** BAT-420 GAT-110 H(빈 뼈대): SALE_RESUME을 회차 취소 확정 회차에 만들지 않는다. 아직 쓰지 않는다 */
+    readonly guard?: CancelledEventGuard,
   ) {}
 
   async execute(input: CreateCommandInput): Promise<Command> {

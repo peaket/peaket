@@ -3,13 +3,15 @@
 import { ProblemError } from '@peaket/platform';
 import type { AuditCheckpointService } from '../../audit/index.js';
 import type { Command, CommandExecutionActor } from '../domain/command.js';
-import type { CommandExecutor, CommandStore } from '../domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandStore } from '../domain/ports.js';
 
 export class ExecuteCommand {
   constructor(
     private readonly store: CommandStore,
     private readonly executor?: CommandExecutor,
     private readonly checkpoints?: AuditCheckpointService,
+    /** BAT-420 GAT-110 H(빈 뼈대): 회차 취소 확정 회차의 SALE_RESUME을 실행하지 않는다. 아직 쓰지 않는다 */
+    readonly guard?: CancelledEventGuard,
   ) {}
 
   async run(command: Command, actor: CommandExecutionActor, nowMs: number): Promise<Command> {

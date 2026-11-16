@@ -32,7 +32,7 @@ export {
   type CommandType,
   type NewCommand,
 } from './domain/command.js';
-export type { CommandDecision, CommandExecutor, CommandListQuery, CommandPage, CommandStore } from './domain/ports.js';
+export type { CancelledEventGuard, CommandDecision, CommandExecutor, CommandListQuery, CommandPage, CommandStore } from './domain/ports.js';
 export { MemoryCommandStore } from './adapters/memory-command-store.js';
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';
 export { CommandsController } from './inbound/commands.controller.js';

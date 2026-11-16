@@ -40,6 +40,11 @@ export interface CommandStore {
   markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command>;
 }
 
+/** 판매 재개 막기(BAT-420 GAT-110, ADR-0280 결정 2): 그 회차에 CANCEL 요청이 APPROVED·RUNNING·PAUSED·COMPLETED인가 */
+export interface CancelledEventGuard {
+  isCancelled(eventId: string): Promise<boolean>;
+}
+
 /** 승인된 명령을 실제 대상에 실행하는 포트. 첫 몫은 EVENT_CANCEL·SCALE_CHANGE만 잇는다 */
 export interface CommandExecutor {
   execute(command: Command, actor: CommandExecutionActor): Promise<CommandExecutionResult>;

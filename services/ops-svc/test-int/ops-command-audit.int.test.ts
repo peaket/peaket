@@ -83,7 +83,8 @@ describe('0000 마이그레이션과 표 모양', () => {
     await migrateOps(url);
     await migrateOps(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from ops_migration')).toBe(11);
+    // BAT-420(2026-11-16): 0013(회차 취소 요청 칸)·0014(멱등 기록)가 더해져 13개다
+    expect(await count('select count(*) as n from ops_migration')).toBe(13);
     const typeCheck = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
     expect(typeCheck.rows[0]?.def).toContain("'EVENT_CANCEL'");
     expect(typeCheck.rows[0]?.def).toContain("'SCALE_CHANGE'");

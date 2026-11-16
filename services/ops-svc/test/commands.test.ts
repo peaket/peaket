@@ -16,6 +16,7 @@ import {
   type CommandExecutor,
   type CommandType,
 } from '../src/modules/commands/index.js';
+import { MemoryEventCancellationStore, StoreCancelledEventGuard, type EventCancellationStatus } from '../src/modules/event-cancellations/index.js';
 
 const NOW = Date.parse('2026-11-14T01:00:00.000Z');
 const REQUESTER = '0193a000-0000-7000-8000-000000000001';
@@ -168,6 +169,101 @@ describe('운영 명령 접수·승인', () => {
     expect(second.items[0]!.commandId).not.toBe(first.items[0]!.commandId);
     expect((await f.list.execute({ limit: 10, type: 'BOT_LEVEL' })).items.map((c) => c.commandId)).toEqual([b.commandId]);
     expect((await f.list.execute({ limit: 10, states: ['APPROVED'] })).items.map((c) => c.commandId)).toEqual([a.commandId]);
+  });
+});
+
+// BAT-420 GAT-110 H(ADR-0280 결정 2): 회차 취소가 확정된 회차의 판매 재개를 만들 때·실행 때 막는다. 시험 담당이 구현 전에 썼다.
+describe('회차 취소 확정 회차의 판매 재개 막기 [BAT-420]', () => {
+  const guarded = async (records: Array<{ status: EventCancellationStatus; kind?: 'CANCEL' | 'POSTPONE'; eventId: string }>, executor?: CommandExecutor) => {
+    const audit = new MemoryAuditChain();
+    const store = new MemoryCommandStore(audit);
+    const cancellations = new MemoryEventCancellationStore();
+    for (const r of records) {
+      await cancellations.insert({
+        requestId: randomUUID(),
+        eventId: r.eventId,
+        kind: r.kind ?? 'CANCEL',
+        status: r.status,
+        reason: '공연 취소',
+        requestedBy: REQUESTER,
+        requestedAt: new Date(NOW - 60_000),
+        fault: null,
+        judgementReason: null,
+        fanNoticeReason: null,
+        judgedBy: null,
+        judgedAt: null,
+        approvedBy: null,
+        approvedAt: null,
+        refundJobState: null,
+        version: 1,
+        updatedAt: new Date(NOW - 60_000),
+      });
+    }
+    const guard = new StoreCancelledEventGuard(cancellations);
+    const execution = executor ? new ExecuteCommand(store, executor, undefined, guard) : undefined;
+    return { store, cancellations, create: new CreateCommand(store, execution, guard), decide: new DecideCommand(store, execution) };
+  };
+  const resume = (eventId: string) => input('SALE_RESUME', { params: { eventId } });
+
+  test('R-T37 ⑤ 회차 취소가 APPROVED·RUNNING·PAUSED·COMPLETED인 회차의 판매 재개 명령은 만들 때 409 event-cancelled다', async () => {
+    for (const status of ['APPROVED', 'RUNNING', 'PAUSED', 'COMPLETED'] as const) {
+      const eventId = randomUUID();
+      const f = await guarded([{ status, eventId }]);
+      await expect(f.create.execute(resume(eventId))).rejects.toMatchObject({ status: 409, slug: 'event-cancelled' });
+      expect((await f.store.list({ limit: 10 })).items).toEqual([]);
+    }
+  });
+
+  test('R-T37 ⑤ 확정 전·반려된 회차 취소, 연기, 다른 회차와 판매 중지는 판매 재개를 막지 않는다(목록 밖 값마다)', async () => {
+    for (const status of ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'REJECTED'] as const) {
+      const eventId = randomUUID();
+      const f = await guarded([{ status, eventId }]);
+      expect((await f.create.execute(resume(eventId))).state).toBe('PENDING_APPROVAL');
+    }
+    for (const status of ['RUNNING', 'REFUND_WINDOW', 'COMPLETED'] as const) {
+      const eventId = randomUUID();
+      const f = await guarded([{ status, kind: 'POSTPONE', eventId }]);
+      expect((await f.create.execute(resume(eventId))).state).toBe('PENDING_APPROVAL');
+    }
+    const cancelled = randomUUID();
+    const f = await guarded([{ status: 'RUNNING', eventId: cancelled }]);
+    expect((await f.create.execute(resume(randomUUID()))).state).toBe('PENDING_APPROVAL');
+    expect((await f.create.execute(input('SALE_STOP', { params: { eventId: cancelled } }))).state).toBe('PENDING_APPROVAL');
+  });
+
+  test('R-T37 ⑤ 확정 전에 만든 판매 재개를 확정 뒤 실행하면 FAILED event-cancelled이고 실행기를 부르지 않는다', async () => {
+    const calls: string[] = [];
+    const eventId = randomUUID();
+    const f = await guarded([], { execute: async (c) => (calls.push(`${c.type}:${c.commandId}`), { status: 'SUCCEEDED' as const }) });
+    const early = await f.create.execute(resume(eventId));
+    expect(early.state).toBe('PENDING_APPROVAL');
+    const stop = await f.create.execute(input('SALE_STOP', { params: { eventId } }));
+    await f.cancellations.insert({
+      requestId: randomUUID(),
+      eventId,
+      kind: 'CANCEL',
+      status: 'RUNNING',
+      reason: '공연 취소',
+      requestedBy: REQUESTER,
+      requestedAt: new Date(NOW),
+      fault: 'ORGANIZER',
+      judgementReason: '주최 측 귀책',
+      fanNoticeReason: '공연이 취소되었습니다',
+      judgedBy: REQUESTER,
+      judgedAt: new Date(NOW),
+      approvedBy: APPROVER,
+      approvedAt: new Date(NOW),
+      refundJobState: 'RUNNING',
+      version: 4,
+      updatedAt: new Date(NOW),
+    });
+    const ran = await f.decide.approve({ commandId: early.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 });
+    expect(ran).toMatchObject({ state: 'FAILED', lastError: 'event-cancelled' });
+    expect(calls).toEqual([]);
+    // 판매 중지는 그대로 실행한다(재개만 막는다)
+    const stopped = await f.decide.approve({ commandId: stop.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 2 });
+    expect(stopped.state).toBe('SUCCEEDED');
+    expect(calls).toEqual([`SALE_STOP:${stop.commandId}`]);
   });
 });
 

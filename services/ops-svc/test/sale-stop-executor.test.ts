@@ -1,7 +1,9 @@
 // 판매 중지·재개 명령 집행(BAT-465 R-584, ADR-0123) 단위 시험.
 // 2인 승인, purchase-svc → queue-svc 차례(중지)와 반대 차례(재개), 실패 시 FAILED와 재시도 가능을 본다.
 import { randomUUID } from 'node:crypto';
+import type { ExternalRequest } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
+import { HttpEventSaleStopper } from '../src/adapters/event-sale-stopper.js';
 import { HttpCommandExecutor } from '../src/adapters/http-command-executor.js';
 import { approvalModeOf, type Command } from '../src/modules/commands/index.js';
 
@@ -97,5 +99,66 @@ describe('BAT-465 판매 중지·재개 집행', () => {
 
     const stale = new HttpCommandExecutor({ control: { purchase: sender('purchase-svc', 1), queue: sender('queue-svc') } });
     expect(await stale.execute(command('SALE_STOP'), actor)).toMatchObject({ status: 'FAILED', error: 'ack-pending:purchase-svc:1' });
+  });
+});
+
+// BAT-420 GAT-110 H(ADR-0280 결정 1): 회차 취소 확정 때 판매 멈춤 어댑터. 시험 담당이 구현 전에 썼다.
+describe('회차 취소 확정 때 판매 멈춤 [BAT-420]', () => {
+  interface Sent {
+    provider: string;
+    path: string;
+    params: ExternalRequest['params'];
+    headers: ExternalRequest['headers'];
+    body: Record<string, unknown>;
+  }
+  const http = (provider: string, sent: Sent[], status = 200) => ({
+    request: async (r: ExternalRequest) => {
+      sent.push({ provider, path: r.path, params: r.params, headers: r.headers, body: JSON.parse(typeof r.body === 'string' ? r.body : '{}') as Record<string, unknown> });
+      return new Response(JSON.stringify({ suspended: true, revision: 3 }), { status, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const resolved = (s: Sent) => s.path.replace('{eventId}', String(s.params?.eventId ?? '{eventId}'));
+
+  test('R-T37 ④ 판매 멈춤 어댑터는 회차 취소 요청 ID를 명령 ID·중지 참조로 purchase 뒤 queue에 SUSPEND를 보낸다', async () => {
+    const sent: Sent[] = [];
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const stopper = new HttpEventSaleStopper(new HttpCommandExecutor({ purchase: http('purchase-svc', sent), queue: http('queue-svc', sent), internalToken: 'it-token' }), () => NOW);
+    await stopper.stop({ eventId, requestId });
+    expect(sent.map((s) => s.provider)).toEqual(['purchase-svc', 'queue-svc']);
+    expect(sent.map(resolved)).toEqual([`/internal/v1/event-sales/${eventId}/suspensions`, `/internal/v1/event-sales/${eventId}/suspensions`]);
+    expect(sent[0]!.body).toEqual({ action: 'SUSPEND', commandId: requestId, reason: 'EVENT_CANCELLATION', suspensionRef: requestId });
+    expect(sent[1]!.body).toMatchObject({ action: 'SUSPEND', commandId: requestId });
+    expect(sent[0]!.headers).toMatchObject({ 'x-peaket-internal-token': 'it-token' });
+  });
+
+  test('R-T37 ④ 판매 멈춤 어댑터는 한 곳이라도 실패하거나 길이 없으면 던지고 뒤 대상을 부르지 않는다', async () => {
+    const sent: Sent[] = [];
+    const failing = new HttpEventSaleStopper(new HttpCommandExecutor({ purchase: http('purchase-svc', sent, 503), queue: http('queue-svc', sent) }), () => NOW);
+    await expect(failing.stop({ eventId: randomUUID(), requestId: randomUUID() })).rejects.toThrow();
+    expect(sent.map((s) => s.provider)).toEqual(['purchase-svc']);
+    const queueDown = new HttpEventSaleStopper(new HttpCommandExecutor({ purchase: http('purchase-svc', sent), queue: http('queue-svc', sent, 500) }), () => NOW);
+    await expect(queueDown.stop({ eventId: randomUUID(), requestId: randomUUID() })).rejects.toThrow();
+    const unwired = new HttpEventSaleStopper(new HttpCommandExecutor({}), () => NOW);
+    await expect(unwired.stop({ eventId: randomUUID(), requestId: randomUUID() })).rejects.toThrow();
+  });
+
+  test('R-T37 ④ 판매 멈춤 어댑터는 제어 gRPC가 있으면 그 길로 같은 명령 ID를 보낸다', async () => {
+    const sent: Array<{ target: string; commandId: string; scope: string; desiredStateJson: string }> = [];
+    const sender = (target: string) => ({
+      apply: async (req: { commandId: string; scope: string; version: number; desiredStateJson: string }) => {
+        sent.push({ target, commandId: req.commandId, scope: req.scope, desiredStateJson: req.desiredStateJson });
+        return { appliedVersion: req.version, podName: `${target}-1` };
+      },
+      close: () => undefined,
+    });
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const stopper = new HttpEventSaleStopper(new HttpCommandExecutor({ control: { purchase: sender('purchase-svc'), queue: sender('queue-svc') } }), () => NOW);
+    await stopper.stop({ eventId, requestId });
+    expect(sent).toEqual([
+      { target: 'purchase-svc', commandId: requestId, scope: eventId, desiredStateJson: '{"suspended":true}' },
+      { target: 'queue-svc', commandId: requestId, scope: eventId, desiredStateJson: '{"suspended":true}' },
+    ]);
   });
 });
