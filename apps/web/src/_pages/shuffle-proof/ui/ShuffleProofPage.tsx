@@ -75,8 +75,11 @@ const decoded = (s: string): string => {
   }
 };
 
-/** 실제 회차 ID 꼴(UUID). 목업 회차(고정 자료)가 아니면서 이 꼴도 아니면 그리기 전에 404다(키 수 막기, docs/frontend.md §5.18, BAT-170 W7L2-S1) */
-const EVENT_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * 실제 회차 ID 정본 꼴(소문자 UUID). 목업 회차(고정 자료, 글자 그대로)가 아니면서 이 꼴도 아니면 그리기 전에 404다
+ * (키 수 막기·정규 주소 하나로 모은다, docs/frontend.md §5.18, BAT-170 W7L2-S1·S10. 대소문자 변형은 요청 가로채기가 308로 옮기고 여기서 겹쳐 막는다)
+ */
+const EVENT_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function ShuffleProofPage({ params, searchParams }: Props) {
   const { id } = await params;

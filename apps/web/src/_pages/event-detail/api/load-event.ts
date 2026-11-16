@@ -15,7 +15,8 @@ import { toEventDetail, type EventDetail } from '../model/detail';
 /** fetchedAtMs: 이 캐시 항목을 만든 시각. 캐시 화면 안의 시각 판정(JSON-LD 판매 상태)은 이 값을 쓴다(캐시 밖 Date.now()는 Cache Components의 미리 그리기를 깬다) */
 export type LoadedEvent = { kind: 'found'; detail: EventDetail; fetchedAtMs: number } | { kind: 'missing' } | { kind: 'suspended' };
 
-const ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 회차 ID 정본 꼴: 소문자 UUID만(대소문자 변형은 요청 가로채기가 소문자 주소로 308, 화면은 겹쳐 404, docs/frontend.md §5.18 '정규 주소 하나로 모은다') */
+const ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function statusOf(e: unknown): number | undefined {
   const s = typeof e === 'object' && e !== null ? (e as { status?: unknown }).status : undefined;
@@ -25,7 +26,7 @@ function statusOf(e: unknown): number | undefined {
 /** 공유하지 않을 결과의 태그. apps/web/server/cache-store.mjs의 TRANSIENT_TAG와 같은 값이다(서버 묶음에 redis를 끌어오지 않게 글자로 둔다) */
 const TRANSIENT_TAG = 'web-transient';
 
-/** 회차 ID 꼴 확인(UUID, W7L2-S1 ①). 화면이 loadEvent보다 먼저 부르고, 꼴 밖이면 캐시 함수를 부르지 않고 404다 */
+/** 회차 ID 꼴 확인(소문자 UUID, W7L2-S1 ①·W7L2-S10). 화면이 loadEvent보다 먼저 부르고, 꼴 밖이면 캐시 함수를 부르지 않고 404다 */
 export function isEventId(id: string): boolean {
   return typeof id === 'string' && ID_SHAPE.test(id);
 }

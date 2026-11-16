@@ -3,7 +3,8 @@
 // - 키: 미리 그린 화면 `web:isr:<빌드 칸>:<캐시 키>`, 'use cache' 값 `web:data:<캐시 키>`, 태그를 마지막으로 무효화한 시각(ms) `web:{tag}:<태그>`.
 //   둘째 칸(isr·data·{tag})이 달라 어떤 캐시 키·태그도 겹치지 않는다. `{tag}`는 글자 그대로 쓰는 클러스터 해시 태그라 모든 태그 키가
 //   한 슬롯에 모여 여러 태그를 MGET 한 번으로 읽는다(클러스터 모드의 CROSSSLOT 막기). 값 키는 하나씩만 읽고 쓴다.
-// - 모든 키에 TTL: 값은 그 항목의 만료, 다시 만들기 간격의 12배 [가정], 상한(30일 [가정]) 가운데 가장 짧은 쪽, 태그 시각은 상한(ADR-0109 '모든 키에 TTL').
+// - 모든 키에 TTL: 값은 그 항목의 만료, 다시 만들기 간격의 12배 [가정], 상한(1시간 [가정]) 가운데 가장 짧은 쪽, 태그 시각은 30일 [가정](ADR-0109 '모든 키에 TTL').
+// - 파드마다 공유 캐시에 새 키를 쓰는 몫(초당 2·몫 100 [가정])을 두고, 아는 키(최근 키 목록 2만 [가정])를 다시 쓰는 것은 몫을 쓰지 않는다(W7L2-S10).
 // - 세션·캐시 클러스터는 클러스터 모드라 createCluster로 붙고, 끊김·장애 조치에서 스스로 회복한다(docs/frontend.md §5.18 '클러스터 연결과 회복').
 // - 없는·중지 결과(태그 web-transient)와 200이 아닌 미리 그린 화면은 공유하지 않고 파드 메모리에만 둔다(처리기가 고른다, '키 수 막기').
 // - Redis가 시간 한도(100ms [가정]) 안에 답하지 않거나 끊기면 읽기는 없음(null), 쓰기는 버린다. 던지지 않는다(키 등급 A, docs/data.md).
@@ -23,8 +24,10 @@ import {
 export { assertCacheEnv, cacheConfig, CACHE_URL_ENV } from './cache-env.mjs';
 import { assertBuildTag, assertCacheEnv, CACHE_BUILD_ENV, CACHE_URL_ENV } from './cache-env.mjs';
 
-/** 값·태그 시각 TTL 상한: 30일 [가정](docs/frontend.md §5.18) */
-export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60;
+/** 값 TTL 상한: 1시간 [가정](docs/frontend.md §5.18 TTL 문장. 처음 30일에서 '키 수 막기' ③의 식에 맞춰 줄였다, BAT-170 W7L2-S10) */
+export const DEFAULT_MAX_TTL_SECONDS = 60 * 60;
+/** 태그 시각 TTL: 30일 [가정](값의 상한보다 길어 태그 시각이 값보다 먼저 사라지지 않는다, ADR-0109) */
+export const TAG_TTL_SECONDS = 30 * 24 * 60 * 60;
 /** Redis 시간 한도: 100ms [가정](docs/frontend.md §5.18) */
 export const DEFAULT_TIMEOUT_MS = 100;
 /** 값 하나의 크기 상한: 1MB [가정](docs/data.md 세션·캐시 클러스터 메모리 규칙 'ISR 항목 1MB'). 넘으면 쓰지 않는다 */
@@ -37,8 +40,11 @@ const valueKey = (kind, key) => {
 };
 const tagKey = (tag) => `web:{tag}:${tag}`;
 
-/** 쓰기 몫 기본값: 파드마다 초당 50개 [가정], 모아 둘 수 있는 몫 100개 [가정](docs/frontend.md §5.18 '키 수 막기' ③) */
-export const DEFAULT_WRITE_RATE = Object.freeze({ perSecond: 50, burst: 100 });
+/**
+ * 새 키 몫 기본값(docs/frontend.md §5.18 '키 수 막기' ③, BAT-170 W7L2-S10): 파드마다 새 키 초당 2개 [가정], 모아 둘 수 있는 몫 100개 [가정],
+ * 아는 키를 세는 최근 키 목록 2만 개 [가정]. 식 P × (r × T + b) × S ≤ W(CACHE_KEY_BUDGET)를 지키게 고른 값이다
+ */
+export const DEFAULT_WRITE_RATE = Object.freeze({ perSecond: 2, burst: 100, knownKeys: 20_000 });
 /** 값 TTL에 쓰는 다시 만들기 간격의 배수: 12배 [가정](docs/frontend.md §5.18 TTL 문장) */
 export const REVALIDATE_TTL_FACTOR = 12;
 /** 연결 시간 한도: 1초 [가정](docs/frontend.md §5.18 '클러스터 연결과 회복' ⓒ) */
@@ -157,8 +163,11 @@ export function createCacheStore({
   logger = console,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   now = () => Date.now(),
-  maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS,
+  maxTtlSeconds: maxTtlGiven,
 }) {
+  /** 값 TTL 상한. 태그 시각 TTL은 상한을 주입하면 그 값, 주지 않으면 30일이다(시험이 짧은 상한을 주입한다) */
+  const maxTtlSeconds = maxTtlGiven ?? DEFAULT_MAX_TTL_SECONDS;
+  const tagTtlSeconds = maxTtlGiven ?? TAG_TTL_SECONDS;
   const managed = urls !== undefined || connect !== undefined;
   if (!managed && !client) throw new Error('공유 캐시 저장소에 연결(client)이나 시작 주소(urls)가 없다');
   if (managed && connect === undefined && (!Array.isArray(urls) || urls.length === 0)) throw new Error('공유 캐시 시작 주소(urls)가 비었다');
@@ -261,10 +270,23 @@ export function createCacheStore({
     return fallback;
   };
 
-  // ---- 쓰기 몫(키 수 막기 ③): 천분의 일 단위 토큰 ----
+  // ---- 새 키 몫(키 수 막기 ③): 천분의 일 단위 토큰. 아는 키(이 파드가 TTL 안에 읽어 맞았거나 직접 쓴 키)는 몫을 쓰지 않는다 ----
   const bucket = writeRate ? { tokens: writeRate.burst * 1000, at: now() } : null;
-  const takeWrite = () => {
+  const knownLimit = writeRate ? (writeRate.knownKeys ?? DEFAULT_WRITE_RATE.knownKeys) : 0;
+  /** 최근 키 목록(넘으면 먼저 넣은 것부터 지운다). 다시 보면 맨 뒤로 간다 */
+  const known = new Set();
+  const remember = (k) => {
+    if (!bucket) return;
+    known.delete(k);
+    known.add(k);
+    while (known.size > knownLimit) known.delete(known.values().next().value);
+  };
+  const takeWrite = (k) => {
     if (!bucket) return true;
+    if (known.has(k)) {
+      remember(k);
+      return true;
+    }
     const t = now();
     if (t > bucket.at) {
       bucket.tokens = Math.min(writeRate.burst * 1000, bucket.tokens + (t - bucket.at) * writeRate.perSecond);
@@ -272,10 +294,11 @@ export function createCacheStore({
     }
     if (bucket.tokens >= 1000) {
       bucket.tokens -= 1000;
+      remember(k);
       return true;
     }
     stats.droppedWrites += 1;
-    log('dropped', `공유 캐시 쓰기 몫(초당 ${writeRate.perSecond}·몫 ${writeRate.burst})을 넘어 쓰기를 버렸다: 버린 쓰기 ${stats.droppedWrites}`);
+    log('dropped', `공유 캐시 새 키 몫(초당 ${writeRate.perSecond}·몫 ${writeRate.burst})을 넘어 쓰기를 버렸다: 버린 쓰기 ${stats.droppedWrites}`);
     return false;
   };
 
@@ -293,13 +316,16 @@ export function createCacheStore({
     /** 값 하나를 읽는다. 없거나 한도 안에 답하지 않으면 null */
     async getEntry(kind, key) {
       const k = valueKey(kind, key);
-      return (await exec((c) => c.get(k), null)) ?? null;
+      const v = (await exec((c) => c.get(k), null)) ?? null;
+      // 읽어 맞은 키는 아는 키다(다시 만들어 쓸 때 새 키 몫을 쓰지 않는다)
+      if (v !== null) remember(k);
+      return v;
     },
     /** 값 하나를 TTL과 함께 쓴다. 쓰기 몫을 넘거나 한도 안에 답하지 않거나 끊기면 버린다 */
     async setEntry(kind, key, value, expireSeconds, revalidateSeconds) {
       const k = valueKey(kind, key);
       if (typeof value === 'string' && Buffer.byteLength(value) > MAX_ENTRY_BYTES) return;
-      if (!takeWrite()) return;
+      if (!takeWrite(k)) return;
       await exec((c) => c.set(k, value, { expiration: { type: 'EX', value: ttlOf(expireSeconds, revalidateSeconds) } }), undefined);
     },
     /** 태그마다 마지막 무효화 시각(ms, 기록 없으면 0)을 MGET 한 번으로 읽는다. 읽지 못하면 null */
@@ -315,10 +341,10 @@ export function createCacheStore({
       });
       return out;
     },
-    /** 태그 무효화 시각을 쓴다(TTL은 상한). 쓰기 몫에 넣지 않는다(무효화를 버리면 옛 값이 남는다) */
+    /** 태그 무효화 시각을 쓴다(TTL은 태그 시각 TTL). 새 키 몫에 넣지 않는다(무효화를 버리면 옛 값이 남는다) */
     async markTags(tags, at = now()) {
       const list = [...new Set(tags)];
-      await Promise.all(list.map((t) => exec((c) => c.set(tagKey(t), String(at), { expiration: { type: 'EX', value: maxTtlSeconds } }), undefined)));
+      await Promise.all(list.map((t) => exec((c) => c.set(tagKey(t), String(at), { expiration: { type: 'EX', value: tagTtlSeconds } }), undefined)));
     },
     /** 회복 상태(ⓕ): { consecutiveTimeouts, resets, connectAttempts, pending, droppedWrites } */
     stats() {
@@ -351,7 +377,7 @@ export const DEFAULT_MEMORY_MAX_ENTRIES = 1_000;
  * 항목(값·태그 시각 모두)이 상한을 넘으면 먼저 넣은 것부터 지운다(같은 키를 다시 쓰면 맨 뒤로 간다)
  * @param {{ now?: () => number, maxTtlSeconds?: number, maxEntries?: number }} [o]
  */
-export function createMemoryStore({ now = () => Date.now(), maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS, maxEntries = DEFAULT_MEMORY_MAX_ENTRIES } = {}) {
+export function createMemoryStore({ now = () => Date.now(), maxTtlSeconds, maxEntries = DEFAULT_MEMORY_MAX_ENTRIES } = {}) {
   /** @type {Map<string, { value: string, expiresAt: number }>} */
   const data = new Map();
   const read = (k) => {
@@ -367,7 +393,7 @@ export function createMemoryStore({ now = () => Date.now(), maxTtlSeconds = DEFA
     get: async (k) => read(k),
     mGet: async (keys) => keys.map(read),
     set: async (k, v, o) => {
-      const seconds = Number(o?.expiration?.value ?? maxTtlSeconds);
+      const seconds = Number(o?.expiration?.value ?? maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS);
       data.delete(k);
       data.set(k, { value: String(v), expiresAt: now() + seconds * 1000 });
       while (data.size > maxEntries) data.delete(data.keys().next().value);
@@ -429,7 +455,8 @@ export function parseCacheUrls(env = process.env) {
 }
 
 /**
- * 새 키 몫 식 P × (r × T + b) × S ≤ W의 상수(W7L2-S10, docs/frontend.md §5.18 '키 수 막기' ③, 계획 §16): { pods: P, entryBytes: S, budgetBytes: W }.
- * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 값은 구현 담당이 쓴다
+ * 새 키 몫 식 P × (r × T + b) × S ≤ W의 상수(W7L2-S10, docs/frontend.md §5.18 '키 수 막기' ③, 계획 §16, 단위 1,000):
+ * P 웹 앱 서버 파드 수 상한 10 [가정], S 항목 평균 크기 60kB [가정], W 웹 몫 약 6GB(주 메모리의 15% [가정], 소유자 결정 OPEN[47] (가)).
+ * r·b는 DEFAULT_WRITE_RATE, T는 DEFAULT_MAX_TTL_SECONDS다. 파드 수 상한이나 TTL을 바꾸면 이 식을 다시 맞춘다
  */
-export const CACHE_KEY_BUDGET = '아직 없음';
+export const CACHE_KEY_BUDGET = Object.freeze({ pods: 10, entryBytes: 60_000, budgetBytes: 6_000_000_000 });

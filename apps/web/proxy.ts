@@ -9,8 +9,12 @@
 // ③ 공연 상세(`/events/{id}`)의 없는 회차를 그리기 전에 거른다(ADR-0201 결정 3, BUILD_ORDER HOT-311, src/_app/routing/event-gate.ts):
 //    어느 경로에도 맞지 않는 내부 주소로 재작성해 Next.js의 404 화면을 낸다. 회차 주소마다 ISR 항목이 생기지 않는다.
 //    판매 중지(410)는 화면이 안내와 상태 표시를 그리고 앞 서버가 상태를 맞춘다(server/csp-hash-server.mjs).
+// ④ 캐시 화면의 경로 조각을 정규 주소 하나로 모은다(docs/frontend.md §5.18 '정규 주소 하나로 모은다', BAT-170 W7L2-S10,
+//    src/_app/routing/route-normalize.ts): 경로 일곱의 조각이 대소문자·퍼센트 감싸기만 다르면 정본 주소로 308(쿼리 그대로), 꼴 밖이면 404.
+//    같은 자료를 가리키는 여러 글자가 저마다 공유 캐시 키를 만들지 않게 한다. 화면도 같은 규칙을 겹쳐 지킨다.
 import { NextResponse, type NextRequest } from 'next/server';
-import { canonicalEventPath, createEventGate, eventCacheTags, eventIdFromPath } from './src/_app/routing/event-gate.ts';
+import { createEventGate, eventCacheTags, eventIdFromPath } from './src/_app/routing/event-gate.ts';
+import { normalizeRoute } from './src/_app/routing/route-normalize.ts';
 import { NONCE_HEADER, cachedCsp, cspOriginsFromEnv, matchRoute, newNonce, pageHeaders } from './src/_app/security/page-headers.ts';
 import { verifyReturnProxy } from './src/features/identity-verify/server/return-post.ts';
 
@@ -71,15 +75,26 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   if (!rule || rule.group === 'cached') {
     const requestHeaders = stripSpoofed(new Headers(req.headers));
     const headers: Record<string, string> = { ...pageHeaders(pathname, { origins })!, ...cachedCsp(pathname, { origins }) };
-    const eventId = req.method === 'GET' || req.method === 'HEAD' ? eventIdFromPath(pathname) : undefined;
-    if (eventId !== undefined) {
-      // 대소문자 변형마다 CDN·ISR 항목과 원본 호출이 생기지 않게 소문자 주소 하나로 모은다
-      const canonical = canonicalEventPath(pathname);
-      if (canonical) {
+    const readOnly = req.method === 'GET' || req.method === 'HEAD';
+    if (readOnly) {
+      // 정규 주소 표(④): 변형은 정본 주소로 308, 꼴 밖은 404 화면으로 재작성(캐시 함수·원본을 부르지 않는다)
+      const decision = normalizeRoute(pathname, req.nextUrl.search);
+      if (decision.kind === 'redirect') {
         const url = req.nextUrl.clone();
-        url.pathname = canonical;
+        const q = decision.location.indexOf('?');
+        url.pathname = q < 0 ? decision.location : decision.location.slice(0, q);
+        url.search = q < 0 ? '' : decision.location.slice(q);
         return applyHeaders(NextResponse.redirect(url, 308), headers);
       }
+      if (decision.kind === 'not-found') {
+        const url = req.nextUrl.clone();
+        url.pathname = NOT_FOUND_PATH;
+        url.search = '';
+        return applyHeaders(NextResponse.rewrite(url, { request: { headers: requestHeaders } }), headers);
+      }
+    }
+    const eventId = readOnly ? eventIdFromPath(pathname) : undefined;
+    if (eventId !== undefined) {
       const gate = await eventGate.check(eventId);
       if (gate.kind === 'missing') {
         const url = req.nextUrl.clone();
