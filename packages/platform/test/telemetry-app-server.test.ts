@@ -110,6 +110,12 @@ beforeAll(async () => {
   // ③ 나가는 HTTP 클라이언트 span: http.url은 출처만
   tracer.startSpan('fetch POST https://api.tosspayments.com/v1/payments/confirm', { kind: SpanKind.CLIENT, attributes: { 'e2e.case': 'client', 'http.method': 'POST', 'http.url': 'https://api.tosspayments.com/v1/payments/confirm?paymentKey=pk-client' } }).end();
 
+  // ④ Next.js 서버 쪽 fetch 계측의 클라이언트 span: 이름과 next.span_name이 'fetch <메서드> <전체 주소>'다(리뷰 RV-29, next/dist/server/lib/patch-fetch.js)
+  const fetchName = 'fetch GET https://core.example/v1/search?q=비밀검색어';
+  tracer.startSpan(fetchName, { kind: SpanKind.CLIENT, attributes: { 'e2e.case': 'fetch-name', 'next.span_name': fetchName, 'next.span_type': 'AppRender.fetch', 'http.method': 'GET', 'http.url': 'https://core.example/v1/search?q=비밀검색어', 'net.peer.name': 'core.example' } }).end();
+  // ⑤ 서버 span의 next.span_name에 쿼리가 실린 경우(지금 Next.js는 서버 span을 '메서드'나 '메서드 경로 틀'로 짓지만 속성 규칙은 같다)
+  tracer.startSpan('GET /booking/[eventId]/checkout/return', { kind: SpanKind.SERVER, attributes: { 'e2e.case': 'server-span-name', 'http.method': 'GET', 'next.route': '/booking/[eventId]/checkout/return', 'next.span_name': 'GET /booking/e1/checkout/return?orderToken=ot-span-name' } }).end();
+
   await telemetry.shutdown();
   spans = bodies.flatMap(decodeSpans);
 });
@@ -121,7 +127,7 @@ afterAll(async () => {
 describe('앱 서버 모드에서 내보낸 span의 주소(W7-SEC-02)', () => {
   test('V-T31 ② W7-SEC-02 내보낸 몸통이 있고 네 span이 모두 실렸다(빈 결과가 통과로 새지 않게)', () => {
     expect(bodies.length).toBeGreaterThan(0);
-    for (const c of ['target', 'renamed-route', 'renamed-plain', 'client']) byCase(c);
+    for (const c of ['target', 'renamed-route', 'renamed-plain', 'client', 'fetch-name', 'server-span-name']) byCase(c);
   });
 
   test('V-T31 ② W7-SEC-02 앱 서버 모드에서 내보낸 서버 span의 http.target에 쿼리가 없다', () => {
@@ -140,5 +146,29 @@ describe('앱 서버 모드에서 내보낸 span의 주소(W7-SEC-02)', () => {
   test('V-T31 ② W7-SEC-02 내보낸 몸통 어디에도 결제 키·본인확인 쿼리 값이 없다', () => {
     const all = bodies.map((b) => Buffer.from(b).toString('latin1')).join('\n');
     for (const secret of ['paymentKey=pk', 'pk-client', 'secret-verify']) expect(all.includes(secret), secret).toBe(false);
+  });
+});
+
+describe('앱 서버 모드에서 내보낸 fetch 클라이언트 span의 이름과 속성(리뷰 RV-29)', () => {
+  test('V-T31 ② RV-29 Next.js fetch 클라이언트 span의 이름과 next.span_name은 쿼리 없이 출처까지만 나간다', () => {
+    const s = byCase('fetch-name');
+    expect(s.name).toBe('fetch GET https://core.example');
+    expect(s.attributes['next.span_name']).toBe('fetch GET https://core.example');
+  });
+
+  test('V-T31 ② RV-29 fetch 클라이언트 span과 서버 span의 다른 문자열 속성 어디에도 쿼리 값이 없다', () => {
+    for (const c of ['fetch-name', 'server-span-name']) {
+      const s = byCase(c);
+      for (const [k, v] of Object.entries(s.attributes)) {
+        if (typeof v !== 'string') continue;
+        for (const secret of ['비밀검색어', 'q=', 'orderToken', 'ot-span-name']) expect(v.includes(secret), `${c} ${k}=${v}`).toBe(false);
+      }
+      for (const secret of ['비밀검색어', 'orderToken']) expect(s.name.includes(secret), `${c} 이름 ${s.name}`).toBe(false);
+    }
+  });
+
+  test('V-T31 ② RV-29 내보낸 몸통 어디에도 fetch 쿼리 값과 서버 span 이름 속성의 쿼리 값이 없다', () => {
+    const all = bodies.map((b) => Buffer.from(b).toString('utf8')).join('\n');
+    for (const secret of ['비밀검색어', 'ot-span-name']) expect(all.includes(secret), secret).toBe(false);
   });
 });
