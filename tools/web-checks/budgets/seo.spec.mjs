@@ -18,9 +18,13 @@ test('SR-T14 /search 셸에 noindex, follow가 있고 sitemap에 없다', async 
     expect(robots, `${path} robots 메타`).toHaveLength(1);
     expect(robots[0]).toContain('content="noindex, follow"');
   }
-  // 대조: 공연 상세·홈은 색인 제외가 아니다
+  // 대조: 홈의 robots는 출시 전 전역 값(noindex, nofollow)이고 /search가 경로로 정한 값(noindex, follow)과 다르다(/search 값이 전역 값을 물려받은 것이 아니다).
+  // 출시 때 전역 색인 제외를 풀면 원래 대조('홈은 색인 제외가 아니다': expect(home).not.toMatch(/<meta[^>]+name="robots"[^>]+noindex/))를 되살린다(docs/frontend.md '출시 전 전역 색인 제외', 계획 BAT-165 '### 19' (a))
   const home = await (await request.get(origin + '/')).text();
-  expect(home).not.toMatch(/<meta[^>]+name="robots"[^>]+noindex/);
+  const homeRobots = [...home.matchAll(/<meta[^>]+name="robots"[^>]*>/g)].map((m) => m[0]);
+  expect(homeRobots).toHaveLength(1);
+  expect(homeRobots[0]).toContain('content="noindex, nofollow"');
+  expect(homeRobots[0]).not.toContain('content="noindex, follow"');
   // sitemap이 없으면 없음(404)을 단언하고, 있으면 /search 주소가 없다
   const sm = await request.get(origin + '/sitemap.xml', { maxRedirects: 0 });
   expect([200, 404], `/sitemap.xml ${sm.status()}`).toContain(sm.status());
