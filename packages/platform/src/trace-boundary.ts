@@ -77,13 +77,33 @@ const originOf = (url: string): string => {
 /** 쿼리·조각을 뗀 경로 */
 const pathOnly = (target: string): string => target.split(/[?#]/, 1)[0] ?? '';
 
-/** 옛 이름 속성: 서버 span의 http.target은 쿼리를 떼고, http.url은 출처만 남긴다(W7-SEC-02) */
+const ABSOLUTE_URL = /\bhttps?:\/\/[^\s"'<>]+/gi;
+const PATH_WITH_QUERY = /(^|[\s"'(])(\/[^\s?#"']*)[?#][^\s"')]*/g;
+
+/**
+ * 글자 속에 든 주소의 쿼리를 지운다(리뷰 RV-29, docs/observability.md §7 '서버 span'과 같은 뜻): 절대 주소는 출처(scheme://host:port)만,
+ * '/'로 시작하는 경로는 쿼리·조각을 뗀다. Next.js fetch 계측은 span 이름과 next.span_name에 'fetch 메서드 전체 주소'를 싣는다
+ */
+export function scrubUrls(text: string): string {
+  if (!/[?#]|:\/\//.test(text)) return text;
+  return text.replace(ABSOLUTE_URL, (u) => originOf(u) || u.split(/[?#]/, 1)[0]!).replace(PATH_WITH_QUERY, (_m, lead: string, path: string) => `${lead}${path}`);
+}
+
+/**
+ * 옛 이름 속성과 그 밖의 글자 속성: 서버 span의 http.target은 쿼리를 떼고, http.url은 출처만 남긴다(W7-SEC-02).
+ * 다른 글자 속성(next.span_name 등)에 든 주소도 쿼리를 지운다(RV-29). 경로 틀 속성(url.path·http.route·next.route)은 쿼리가 없어 그대로다
+ */
 function cleanLegacyUrl(span: Span): void {
   const a = span.attributes;
   const target = a['http.target'];
   if (typeof target === 'string' && /[?#]/.test(target)) span.setAttribute('http.target', pathOnly(target));
   const url = a['http.url'];
   if (typeof url === 'string') span.setAttribute('http.url', originOf(url));
+  for (const [k, v] of Object.entries(a)) {
+    if (typeof v !== 'string' || k === 'http.url' || k === 'url.full') continue;
+    const clean = scrubUrls(v);
+    if (clean !== v) span.setAttribute(k, clean);
+  }
 }
 
 /**
@@ -132,6 +152,9 @@ export class BoundarySpanProcessor implements SpanProcessor {
     cleanLegacyUrl(span);
     const full = span.attributes['url.full'];
     if (typeof full === 'string') span.setAttribute('url.full', originOf(full));
+    // 이름에 든 주소도 쿼리를 지운다(fetch 클라이언트 span 'fetch 메서드 전체 주소', RV-29)
+    const scrubbed = scrubUrls(span.name);
+    if (scrubbed !== span.name) span.updateName(scrubbed);
     if (span.kind === SpanKind.SERVER) {
       const name = serverSpanName(span.name, span.attributes);
       if (name !== span.name) span.updateName(name);
