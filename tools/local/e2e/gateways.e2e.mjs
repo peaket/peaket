@@ -489,3 +489,104 @@ test('SR-T13 ② gw-fan /v1/search*는 한 IP(IPv4·IPv6 각각)가 초당 50건
     assert.notEqual(o.status, 429, `${other}: 다른 IP까지 막았다(IP마다 따로 세지 않는다)`);
   }
 });
+
+// ===================== 리뷰 반영(계획 §13) =====================
+
+/** 시험마다 다른 시청자 IP(벤치마크 대역 198.18.0.0/15). numTrustedHops 1이라 접근 로그의 클라이언트 IP 칸이 이 값이 된다 */
+const uniqueIp = () => {
+  const b = randomBytes(3);
+  return `198.${18 + (b[0] & 1)}.${b[1]}.${1 + (b[2] % 254)}`;
+};
+/** 클라이언트 IP 칸이 그 값과 같은 접근 로그 줄을 기다려 찾는다(위조 값 자체를 표시로 쓰지 않는다) */
+async function waitIpLine(gw, ip, timeoutMs = 20_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const lines = (await accessLog(c, gw)).filter((l) => Object.values(l).some((v) => v === ip));
+    if (lines.length) return lines;
+    if (Date.now() > until) throw new Error(`${gw}: 클라이언트 IP ${ip}인 접근 로그 줄이 ${timeoutMs}ms 안에 없다`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+test('B-T18 ④ RV-01 원본 확인 없이 보낸 위조 끝단 머리는 거절된 요청(토큰 없음 401·허용 밖 Origin 403·사전 요청 OPTIONS·/internal/ 404·TRACE 405)의 접근 로그 줄에도 없다', async () => {
+  for (const gw of BEHIND_CLOUDFRONT) {
+    const p = c.probes[gw];
+    const probePath = p.path.replaceAll('{event}', EVENT);
+    const screen = c.origins[SCREEN_OF[gw]];
+    const cases = [
+      { m: '토큰 없음', host: p.host, method: p.method ?? 'GET', path: probePath, headers: {}, status: 401 },
+      { m: '사전 요청', host: p.host, method: 'OPTIONS', path: probePath, headers: { origin: screen, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' } },
+      { m: '/internal/', host: p.host, method: 'GET', path: `/internal/jwks/e2e-${RUN}.json`, headers: {}, status: 404 },
+      { m: 'TRACE', host: p.host, method: 'TRACE', path: probePath, headers: {}, status: 405 },
+    ];
+    // 쿠키로 인증하는 쓰기의 허용 밖 Origin(정본 경로를 아는 두 게이트웨이)
+    if (gw === 'gw-queue') cases.push({ m: '허용 밖 Origin', host: 'queue', method: 'POST', path: `/v1/queues/${EVENT}/entries`, headers: { origin: 'https://evil.example', 'content-type': 'text/plain;charset=UTF-8', cookie: `__Secure-peaket_at=${accessToken(c, gw, nextSub())}` }, body: '{}', status: 403 });
+    if (gw === 'gw-fan') cases.push({ m: '허용 밖 Origin', host: 'api', method: 'POST', path: '/v1/identity/access-tokens', headers: { origin: 'https://evil.example', cookie: '__Secure-peaket_rt=rt-e2e' }, status: 403 });
+    for (const k of cases) {
+      const ip = uniqueIp();
+      const ja4 = JA4();
+      const forged = { 'cloudfront-viewer-ja4-fingerprint': ja4, 'cloudfront-viewer-asn': '64496', 'x-amzn-waf-bot-labels': 'awswaf:managed:aws:bot-control:bot:verified' };
+      const r = await send(c, k.host, { method: k.method, path: k.path, body: k.body, headers: { 'x-forwarded-for': ip, ...forged, ...k.headers } });
+      const m = `${gw} ${k.m}(${r.status})`;
+      if (k.status) assert.equal(r.status, k.status, m);
+      else assert.ok(r.status < 500, m);
+      const lines = await waitIpLine(gw, ip);
+      for (const line of lines) {
+        assert.ok(blank(line.ja4) && blank(line.asn) && blank(line.edgeBotLabels), `${m}: 로그 ${JSON.stringify(line)}`);
+        assert.ok(!JSON.stringify(line).includes(ja4), `${m}: 로그에 위조 JA4`);
+      }
+    }
+  }
+});
+
+test('B-T18 ① RV-01 원본 확인이 맞는 토큰 없음 401 요청의 접근 로그 줄에도 ja4에 36자 값이 실린다', async () => {
+  const p = c.probes['gw-queue'];
+  const ip = uniqueIp();
+  const ja4 = JA4();
+  const r = await send(c, p.host, { method: p.method ?? 'GET', path: p.path.replaceAll('{event}', EVENT), headers: edge(c, ip, { 'cloudfront-viewer-ja4-fingerprint': ja4 }) });
+  assert.equal(r.status, 401);
+  const [line] = await waitIpLine('gw-queue', ip);
+  assert.equal(line.ja4, ja4);
+  assert.equal(String(line.ja4).length, 36);
+});
+
+test('HOT-400 RV-02 기관 출처의 교차 출처 POST /verify/return(application/x-www-form-urlencoded, 쿠키 없음)은 gw-fan을 지나 www 앱 서버 대역에 닿는다', async () => {
+  const r = await send(c, 'www', {
+    method: 'POST',
+    path: '/verify/return',
+    body: new URLSearchParams({ result: `r-${RUN}`, tx: `t-${RUN}` }).toString(),
+    headers: edge(c, nextIp(), { origin: 'https://cert.idv-provider.example', 'sec-fetch-site': 'cross-site', 'content-type': 'application/x-www-form-urlencoded' }),
+  });
+  assert.ok(r.status < 400, `${r.status}: ${r.text.slice(0, 120)}`);
+  const e = JSON.parse(r.text);
+  assert.equal(e.method, 'POST');
+  assert.ok(String(e.path).startsWith('/verify/return'), e.path);
+  echoed(r);
+});
+
+test('HOT-400 RV-02 www 앱 서버 경로의 Origin: null·Sec-Fetch-Site: same-origin 양식 POST는 게이트웨이가 막지 않고 앱 서버 대역에 닿는다', async () => {
+  const r = await send(c, 'www', {
+    method: 'POST',
+    path: '/login/kakao',
+    body: 'returnTo=%2F',
+    headers: edge(c, nextIp(), { origin: 'null', 'sec-fetch-site': 'same-origin', 'content-type': 'application/x-www-form-urlencoded', cookie: `__Secure-peaket_at=${accessToken(c, 'gw-fan', nextSub())}` }),
+  });
+  assert.ok(r.status < 400, `${r.status}: ${r.text.slice(0, 120)}`);
+  assert.equal(JSON.parse(r.text).method, 'POST');
+  echoed(r);
+});
+
+test('HOT-400 authz-matrix §5.1 RV-03 ticket:buy 없는 토큰의 POST /v1/events/{id}/holds·POST /v1/orders는 403이고, 있으면 대역에 닿는다(백엔드 이름은 정적 시험이 본다)', async () => {
+  const sub = nextSub();
+  const without = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'profile', pid: `p-${sub}` });
+  const withBuy = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'profile ticket:buy', pid: `p-${sub}` });
+  for (const path of [`/v1/events/${EVENT}/holds`, '/v1/orders']) {
+    const hdr = (tv) => edge(c, nextIp(), { origin: c.origins.www, 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', cookie: `__Secure-peaket_at=${tv}` });
+    const denied = await send(c, 'api', { method: 'POST', path, body: '{}', headers: hdr(without) });
+    assert.equal(denied.status, 403, `${path}: ticket:buy 없음`);
+    assert.throws(() => echoed(denied), `${path}: ticket:buy 없이 백엔드에 닿았다`);
+    const ok = await send(c, 'api', { method: 'POST', path, body: '{}', headers: hdr(withBuy) });
+    assert.ok(ok.status < 400, `${path}: ticket:buy 있음 ${ok.status}`);
+    assert.ok(echoed(ok)['x-user-scope'].split(' ').includes('ticket:buy'));
+  }
+});

@@ -690,3 +690,52 @@ test('SR-T13 ② gw-fan /v1/search* 라우트에 IP마다(IPv4 0.0.0.0/0·IPv6 :
   const b = routeFor('gw-fan', 'api.peaket.example', 'GET', '/v1/search/suggestions');
   assert.deepEqual(routePolicies('BackendTrafficPolicy', a.route).map((p) => p.metadata?.name), routePolicies('BackendTrafficPolicy', b.route).map((p) => p.metadata?.name));
 });
+
+// ===================== 리뷰 반영(계획 §13) =====================
+
+/** openapi에서 모든 보안 요구가 fanCookie와 admissionToken을 함께 요구하는 작업(구매 경로, 계획 §13 RV-03). 손으로 적은 목록을 쓰지 않는다 */
+function purchaseOperations() {
+  const doc = parseAllDocuments(readFileSync(join(REPO, 'docs', 'api', 'openapi.yaml'), 'utf8'))[0].toJS();
+  const out = [];
+  for (const [path, item] of Object.entries(doc.paths ?? {}))
+    for (const [method, op] of Object.entries(item ?? {})) {
+      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method) || !Array.isArray(op?.security) || op.security.length === 0) continue;
+      if (op.security.every((r) => 'fanCookie' in r && 'admissionToken' in r)) out.push({ method: method.toUpperCase(), path, sample: path.replace(/\{[^}]+\}/g, 'e2e-id-10') });
+    }
+  return out;
+}
+
+test('HOT-400 authz-matrix §5.1 RV-03 openapi에서 admissionToken을 요구하는 gw-fan 작업마다 라우트가 purchase-svc로 가고 ticket:buy를 요구한다', () => {
+  requireDefinitions();
+  const ops = purchaseOperations();
+  // 좌석 스냅샷, 홀드 잡기·조회·해제·연장, 구매 세션 끝내기, 주문 생성, 결제 시작, 결제 접수(2026-11-16 openapi). 비면 시험이 뜻을 잃는다
+  assert.ok(ops.length >= 9, `구매 작업이 ${ops.length}개뿐이다`);
+  for (const { method, path, sample } of ops) {
+    const hit = routeFor('gw-fan', 'api.peaket.example', method, sample);
+    assert.ok(hit, `gw-fan ${method} ${path}를 받는 라우트가 없다`);
+    assert.ok(backendNames(hit.rule).length > 0 && backendNames(hit.rule).every((b) => /^purchase-svc$/.test(b)), `${method} ${path}: 백엔드 ${backendNames(hit.rule)}`);
+    const a = routePolicies('SecurityPolicy', hit.route)
+      .map((p) => p.spec?.authorization)
+      .filter(Boolean);
+    assert.equal(a.length, 1, `${method} ${path}: 인가 규칙`);
+    assert.equal(a[0].defaultAction, 'Deny', `${method} ${path}: defaultAction`);
+    const allow = (a[0].rules ?? []).filter((r) => r.action === 'Allow');
+    assert.ok(allow.length > 0 && allow.every((r) => findKey(r.principal ?? {}, 'scopes').flat().includes('ticket:buy')), `${method} ${path}: Allow 규칙마다 ticket:buy`);
+  }
+});
+
+test('[ASVS v5.0.0-3.5.1] RV-02 출처 확인(csrf)은 API 호스트 라우트에만 붙고 gw-fan-app·gw-partner-app에는 없다', () => {
+  requireDefinitions();
+  for (const gw of Object.keys(APP_SERVER)) {
+    const app = named('HTTPRoute', `${gw}-app`);
+    assert.ok(app, `${gw}-app 라우트가 없다`);
+    // 앱 서버 라우트에 닿는 정책(라우트에 건 것, 없으면 게이트웨이에 건 것)에 csrf가 없다. 앱 서버가 Origin을 본다(docs/architecture.md §4)
+    const onApp = [...routePolicies('SecurityPolicy', app), ...OBJECTS.filter((o) => o.kind === 'EnvoyPatchPolicy' && targetsRoute(o, app))];
+    assert.deepEqual(onApp.flatMap((p) => findKey(p.spec ?? {}, 'csrf')), [], `${gw}-app: 출처 확인이 붙었다`);
+    // API 호스트 라우트는 그대로 출처 확인을 받는다
+    const apiHost = HOSTS[gw].find((h) => h !== APP_SERVER[gw]);
+    const apiRoutes = routesOnHost(gw, apiHost).filter((r) => routeRules(r).some((x) => (x.backendRefs ?? []).length > 0));
+    assert.ok(apiRoutes.length > 0, `${gw}: ${apiHost} 라우트가 없다`);
+    assert.ok(apiRoutes.some((r) => routePolicies('SecurityPolicy', r).some((p) => findKey(p.spec ?? {}, 'csrf').length > 0)), `${gw}: ${apiHost}의 출처 확인이 없다`);
+  }
+});
