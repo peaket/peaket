@@ -42,6 +42,22 @@ export const eventCancellationRequest = pgTable(
   ],
 );
 
+/**
+ * 회차 취소 요청 중 보류 취소의 환급 미룸(BAT-420 몫 D, OPEN[45], docs/data.md event_refund_hold). 회차 하나에 한 줄이다.
+ * 풀리지 않았고(released_at 빔) 기한 안(expires_at > 지금)이면 그 회차의 마감 뒤 환급(REQUESTED)을 집지 않는다
+ */
+export const eventRefundHold = pgTable(
+  'event_refund_hold',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    cancellationRequestId: uuid('cancellation_request_id').notNull(),
+    heldAt: at('held_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+    releasedAt: at('released_at'),
+  },
+  (t) => [check('event_refund_hold_expires_check', sql`${t.expiresAt} > ${t.heldAt}`)],
+);
+
 export const eventRefundItem = pgTable(
   'event_refund_item',
   {

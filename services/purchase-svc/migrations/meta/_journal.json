@@ -169,6 +169,13 @@
       "when": 1794805260837,
       "tag": "0023_entry_recorded_at",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794810948537,
+      "tag": "0024_event_refund_hold",
+      "breakpoints": true
     }
   ]
 }
