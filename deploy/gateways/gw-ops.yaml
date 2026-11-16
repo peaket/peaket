@@ -168,8 +168,6 @@ spec:
           inline: '{"type":"about:blank","title":"Not Found","status":404}'
         header:
           set:
-            - name: X-Trace-Id
-              value: "%TRACE_ID%"
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options
@@ -188,8 +186,31 @@ spec:
           inline: '{"type":"about:blank","title":"Content Too Large","status":413}'
         header:
           set:
-            - name: X-Trace-Id
-              value: "%TRACE_ID%"
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 429
+        requestHeaders:
+          - name: X-User-Id
+            value:
+              type: RegularExpression
+              value: .+
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Too Many Requests","status":429}'
+        header:
+          set:
+            - name: Retry-After
+              value: "60"
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options
@@ -208,8 +229,8 @@ spec:
           inline: '{"type":"about:blank","title":"Too Many Requests","status":429}'
         header:
           set:
-            - name: X-Trace-Id
-              value: "%TRACE_ID%"
+            - name: Retry-After
+              value: "1"
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options
@@ -228,8 +249,6 @@ spec:
           inline: '{"type":"about:blank","title":"Service Unavailable","status":503}'
         header:
           set:
-            - name: X-Trace-Id
-              value: "%TRACE_ID%"
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options

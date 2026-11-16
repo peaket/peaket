@@ -37,6 +37,9 @@ provider:
             value: "rl:"
           - name: REDIS_TLS_CACERT
             value: /redis-certs/ca.crt
+          # 카운터 키 수명을 창의 길이로(docs/data.md §3). 기본은 창 + 0~300초 흩뿌림이다(EXPIRATION_JITTER_MAX_SECONDS 기본 300, 2026-11-16 kind에서 TTL 251초를 봄)
+          - name: EXPIRATION_JITTER_MAX_SECONDS
+            value: "0"
       patch:
         type: StrategicMerge
         value:
