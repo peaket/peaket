@@ -549,11 +549,28 @@ describe('BAT-420 입장 기록 대조·회차 취소 [PostgreSQL]', () => {
       await expect(ec(fresh2.eventId, [t(ok), t(bad)])).rejects.toBeInstanceOf(TicketInputError);
       expect(await row(ok)).toMatchObject({ status: 'ISSUED', key_revoked_at: null, version: 0 });
     }
-    const many = await fresh(200);
-    expect(await ec(many.eventId, many.tickets.map((x) => t(x)))).toHaveLength(200);
+    // 상한 200장(EVENT_CANCEL_MAX_TARGETS): 발권은 한 번에 10좌석(MAX_TICKETS_PER_ISSUE)까지라 같은 회차에 주문 스물로 만든다
+    const manyEvent = randomUUID();
+    const many: string[] = [];
+    for (let i = 0; i < 20; i++) many.push(...(await fresh(10, manyEvent)).tickets);
+    expect(many).toHaveLength(200);
+    const all = await ec(manyEvent, many.map((x) => t(x)));
+    expect(all).toHaveLength(200);
+    expect(all.every((o) => o.result === 'CANCELED')).toBe(true);
   });
 
-  test('GAT-110 E4 팬 취소와 회차 취소가 같은 표를 동시에 노리면(50회) 매번 하나만 키를 폐기하고 두 차례가 모두 나온다', async () => {
+  test('GAT-110 E4 팬 취소와 회차 취소가 같은 표를 동시에 노리면(50회) 매번 하나만 키를 폐기하고 두 차례가 모두 나온다(잠금 줄로 먼저 닿는 쪽을 번갈아 정한다)', async () => {
+    // 그냥 함께 부르면 회차 취소가 먼저 행을 잠그는 일이 거의 늘 이겨 팬 취소가 먼저인 차례가 안 나온다(팬 취소는 잠그기 전에 취소 기록을 한 번 더 읽는다).
+    // 그래서 셋째 연결이 표 행을 잠근 채로 먼저 보낼 쪽이 잠금을 기다리는 것을 보고 나서 다른 쪽을 보내고, 둘 다 기다릴 때 잠금을 푼다.
+    // 둘은 실제로 같은 행을 두고 함께 기다리고, PostgreSQL 행 잠금 줄은 먼저 온 쪽부터 준다
+    const waiting = async (n: number) => {
+      for (let tries = 0; tries < 1_000; tries++) {
+        const r = await database.pool.query<{ n: number }>("select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'");
+        if (r.rows[0]!.n >= n) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      throw new Error(`잠금을 기다리는 연결이 ${n}개가 되지 않았다`);
+    };
     let fanFirst = 0;
     let eventFirst = 0;
     for (let i = 0; i < 50; i++) {
@@ -561,15 +578,24 @@ describe('BAT-420 입장 기록 대조·회차 취소 [PostgreSQL]', () => {
       const [ticketId] = w.tickets as [string];
       const fan = () => ecService.cancel({ orderId: w.orderId, ticketIds: [ticketId], requestedByAccountId: ACCOUNT, cancellationId: randomUUID(), nowMs: NOW });
       const evt = () => ec(w.eventId, [t(ticketId)]);
-      const [fanOut, evtOut] =
-        i % 2 === 0
-          ? await Promise.all([fan(), evt()])
-          : await (async () => {
-              const e = evt();
-              const f = fan();
-              const [re, rf] = await Promise.all([e, f]);
-              return [rf, re] as const;
-            })();
+      const fanGoesFirst = i % 2 === 0;
+      const locker = await database.pool.connect();
+      let fanP: ReturnType<typeof fan> | undefined;
+      let evtP: ReturnType<typeof evt> | undefined;
+      try {
+        await locker.query('begin');
+        await locker.query('select id from ticket where id = $1 for update', [ticketId]);
+        if (fanGoesFirst) fanP = fan();
+        else evtP = evt();
+        await waiting(1);
+        if (fanGoesFirst) evtP = evt();
+        else fanP = fan();
+        await waiting(2);
+      } finally {
+        await locker.query('commit').catch(() => undefined);
+        locker.release();
+      }
+      const [fanOut, evtOut] = await Promise.all([fanP!, evtP!]);
       if (fanOut[0]!.result === 'REFUND_NOW') {
         expect(evtOut[0]!.result, `회차 ${i}`).toBe('ALREADY_ENDED');
         fanFirst++;
@@ -578,10 +604,14 @@ describe('BAT-420 입장 기록 대조·회차 취소 [PostgreSQL]', () => {
         expect(evtOut[0]!.result, `회차 ${i}`).toBe('CANCELED');
         eventFirst++;
       }
+      // 먼저 잠금에 닿은 쪽이 이긴다
+      expect(fanOut[0]!.result === 'REFUND_NOW', `회차 ${i} 먼저 보낸 쪽`).toBe(fanGoesFirst);
       expect(await row(ticketId), `회차 ${i}`).toMatchObject({ status: 'REFUNDED', version: 1 });
+      const ended = await database.pool.query<{ result: string }>('select result from ticket_cancellation where ticket_id = $1', [ticketId]);
+      expect(ended.rows.map((r) => r.result), `회차 ${i}`).toEqual([fanGoesFirst ? 'REFUND_NOW' : 'EVENT_CANCELED']);
     }
-    expect(fanFirst, '팬 취소가 먼저 잡은 경우').toBeGreaterThan(0);
-    expect(eventFirst, '회차 취소가 먼저 잡은 경우').toBeGreaterThan(0);
+    expect(fanFirst, '팬 취소가 먼저 잡은 경우').toBe(25);
+    expect(eventFirst, '회차 취소가 먼저 잡은 경우').toBe(25);
   });
 });
 
