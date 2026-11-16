@@ -258,6 +258,19 @@ describe('입금 전 취소의 입력·결과', () => {
     expect(() => parseDepositCancel({ ...INPUT, ...over })).toThrow(PaymentInputError);
   });
 
+  test('GAT-080 P13 입금 전 취소도 취소 ID가 8자면 INVALID_ARGUMENT이고 9자는 받아 멱등키가 16자다', () => {
+    expect(() => parseDepositCancel({ ...INPUT, cancellationId: 'abcdefgh' })).toThrow(PaymentInputError);
+    expect(() => parseDepositCancel({ ...INPUT, cancellationId: 'abcdefgh' })).toThrow(expect.objectContaining({ field: 'cancellation_id' }));
+    expect(parseDepositCancel({ ...INPUT, cancellationId: 'abcdefghi' })).toEqual({ ...INPUT, cancellationId: 'abcdefghi' });
+    expect(depositCancelIdemKey('abcdefghi')).toBe('cancel-abcdefghi');
+    expect(depositCancelIdemKey('abcdefghi')).toHaveLength(16);
+  });
+
+  test('GAT-080 P13 입금 전 취소도 취소 ID 64자는 받고 65자는 INVALID_ARGUMENT다(상한 경계)', () => {
+    expect(parseDepositCancel({ ...INPUT, cancellationId: 'a'.repeat(64) })).toEqual({ ...INPUT, cancellationId: 'a'.repeat(64) });
+    expect(() => parseDepositCancel({ ...INPUT, cancellationId: 'a'.repeat(65) })).toThrow(PaymentInputError);
+  });
+
   test('P-T36 ⑤_멱등키는 cancel-{취소 ID}이고 event_key는 정해진 값이다', () => {
     expect(depositCancelIdemKey(CANCELLATION)).toBe(`cancel-${CANCELLATION}`);
     const k = depositCancelEventKey(PAYMENT, CANCELLATION);

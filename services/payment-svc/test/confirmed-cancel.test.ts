@@ -345,3 +345,27 @@ describe('BAT-415 리뷰 반영 B1·B3(단위)', () => {
     expect(f.finishes).toHaveLength(0);
   });
 });
+
+describe('GAT-080 P13 취소 ID의 길이(9~64자, 계획 §11 보충 2, docs/features/payment.md §4.1 \'취소 ID의 길이\')', () => {
+  test('GAT-080 P13 취소 ID가 8자면 INVALID_ARGUMENT이고 9자는 받아 포트원 멱등키가 16자다', async () => {
+    const short = fixture();
+    await expect(short.uc.execute({ paymentId: PAYMENT, cancellationId: 'abcdefgh', reason: '관객 취소', amount: 30_000 })).rejects.toThrow(PaymentInputError);
+    await expect(short.uc.execute({ paymentId: PAYMENT, cancellationId: 'abcdefgh', reason: '관객 취소', amount: 30_000 })).rejects.toMatchObject({ field: 'cancellation_id' });
+    expect(short.calls).toEqual([]);
+
+    const nine = fixture({ begin: begun({ idemKey: 'cancel-abcdefghi' }) });
+    await nine.uc.execute({ paymentId: PAYMENT, cancellationId: 'abcdefghi', reason: '관객 취소', amount: 30_000 });
+    expect(nine.begins[0]).toMatchObject({ cancellationId: 'abcdefghi' });
+    expect(nine.cancels[0]!.idemKey).toBe('cancel-abcdefghi');
+    expect(nine.cancels[0]!.idemKey).toHaveLength(16);
+  });
+
+  test('GAT-080 P13 취소 ID 64자는 받고 65자는 결제사·저장소를 부르지 않고 INVALID_ARGUMENT다(상한 경계)', async () => {
+    const max = 'a'.repeat(64);
+    const ok = fixture({ begin: begun({ idemKey: `cancel-${max}` }) });
+    await expect(ok.uc.execute({ paymentId: PAYMENT, cancellationId: max, reason: '관객 취소', amount: 30_000 })).resolves.toMatchObject({ result: 'CANCELLED' });
+    const over = fixture();
+    await expect(over.uc.execute({ paymentId: PAYMENT, cancellationId: 'a'.repeat(65), reason: '관객 취소', amount: 30_000 })).rejects.toThrow(PaymentInputError);
+    expect(over.calls).toEqual([]);
+  });
+});

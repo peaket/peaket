@@ -828,7 +828,7 @@ describe('P-T43: 입금 전 취소와 서킷', () => {
     });
     return { uc, calls };
   };
-  const input = { paymentId: PAYMENT, cancellationId: 'cancel1', reason: '고객 요청' };
+  const input = { paymentId: PAYMENT, cancellationId: 'cancel_0001', reason: '고객 요청' };
 
   test('P-T43_서킷이 열리면 취소를 부르지 않고 결과 모름으로 답한다(부른 쪽이 같은 취소 ID로 다시 보낸다) [ASVS v5.0.0-16.5.2]', async () => {
     const circuit = new FakeCircuit();
