@@ -11,7 +11,7 @@ export class LogCdnInvalidation implements CdnInvalidation {
     this.logger?.info({ event: 'cdn_invalidate', tags }, 'CDN 태그를 무효화한다(개발: 기록만)');
   }
   /** BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
-  async invalidatePaths(_paths: string[]): Promise<void> {
+  async invalidatePaths(_paths: string[]): Promise<{ requestId: string }> {
     throw new Error('아직 없음');
   }
 }
@@ -23,7 +23,7 @@ export class MemoryCdnInvalidation implements CdnInvalidation {
     this.calls.push([...tags]);
   }
   /** BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
-  async invalidatePaths(_paths: string[]): Promise<void> {
+  async invalidatePaths(_paths: string[]): Promise<{ requestId: string }> {
     throw new Error('아직 없음');
   }
 }

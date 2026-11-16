@@ -34,8 +34,8 @@ export interface ImageObjectStore {
 /** CDN 무효화(태그 단위, 실제 CDN 어댑터는 배포 단계) */
 export interface CdnInvalidation {
   invalidate(tags: string[]): Promise<void>;
-  /** 경로 무효화(검색 경로 `/v1/search*`, ADR-0271 결정 8). BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
-  invalidatePaths(paths: string[]): Promise<void>;
+  /** 경로 무효화(검색 경로 `/v1/search*`, ADR-0271 결정 8). 무효화 요청 ID를 돌려준다(운영은 CloudFront Invalidation.Id, 계획 BAT-165 §12). BAT-165 웨이브 7 시험 담당이 둔 빈 뼈대 */
+  invalidatePaths(paths: string[]): Promise<{ requestId: string }>;
 }
 
 /** 공연 이미지 저장소(파트너 경로, 행 보안 대상 사용자로 접속하고 트랜잭션에 테넌트를 건다) */
