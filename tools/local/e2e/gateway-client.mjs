@@ -19,6 +19,7 @@
 //    }
 // 2. 대역 백엔드(echo): 받은 요청을 JSON `{ "method", "path", "headers": { 소문자 이름: 값 } }`으로 돌려준다(같은 이름이 여럿이면 쉼표로 이은 값).
 //    응답을 고르는 법(시험만 쓴다): 요청 머리 `x-e2e-status`(상태), `x-e2e-response-headers`(JSON 객체, 값은 글이나 글 배열), `x-e2e-body`(본문 글).
+//    `x-e2e-body-b64`(UTF-8 본문을 base64로. 머리에 실을 수 없는 한글 본문용이고, 있으면 `x-e2e-body`보다 먼저 쓴다).
 //    머리를 달 수 없는 브라우저 요청(사전 요청 없는 형식)은 같은 뜻의 쿼리 `e2e-status`·`e2e-header=이름:값`(여럿)을 쓴다.
 // 3. 접근 로그: Envoy 프록시 컨테이너 표준 출력의 JSON 한 줄(docs/infra.md §4.1 '접근 로그'). 시험은 토큰 `sub`나 보낸 고유 값이 든 줄을 찾는다.
 import { existsSync, readFileSync } from 'node:fs';
@@ -94,8 +95,10 @@ export function echoed(res) {
   } catch {
     throw new Error(`대역 백엔드 응답이 아니다(${res.status}): ${res.text.slice(0, 200)}`);
   }
-  const h = o?.headers ?? o;
-  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(', ') : String(v)]));
+  // 대역 응답의 꼴(method·path가 글, headers가 객체)일 때만 받는다. 게이트웨이가 직접 낸 Problem JSON(type·title·status)은 대역 응답이 아니다
+  const isEcho = o !== null && typeof o === 'object' && !Array.isArray(o) && typeof o.method === 'string' && typeof o.path === 'string' && o.headers !== null && typeof o.headers === 'object' && !Array.isArray(o.headers);
+  if (!isEcho) throw new Error(`대역 백엔드 응답이 아니다(${res.status}): ${res.text.slice(0, 200)}`);
+  return Object.fromEntries(Object.entries(o.headers).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(', ') : String(v)]));
 }
 
 /** 시험 키로 토큰을 만든다(set: fan·admin·staff·admission). 클레임·머리는 덮어쓸 수 있다 */

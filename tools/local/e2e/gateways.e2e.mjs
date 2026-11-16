@@ -79,7 +79,8 @@ test('V-T31 ① 같은 traceparent·baggage로 보낸 1,000건이 gw-fan·gw-que
   for (const gw of ['gw-fan', 'gw-queue']) {
     const sub = nextSub();
     const tv = accessToken(c, gw, sub);
-    const seen = await pool(1000, 16, async () => {
+    // 동시 수는 4다(Windows kubectl 포트 전달이 동시 연결에 약하다, 계획 '시험 이의' 판단 (라)). 1,000건은 정본 판정 값이라 그대로다
+    const seen = await pool(1000, 4, async () => {
       const r = await probe(c, gw, { tokenValue: tv, event: EVENT, headers: edge(c, '198.51.100.20', { traceparent: SENT_TRACEPARENT, tracestate: 'peaket=e2e', baggage: 'queue.seq=999,session.id=forged' }) });
       assert.ok(r.status < 400, `${gw}: ${r.status}`);
       return echoed(r);
@@ -158,12 +159,25 @@ test('B-T18 ① 원본 확인이 맞는 대기열 요청은 접근 로그 줄의
   assert.equal(String(line.asn), '4766');
 });
 
+/** 시험마다 다른 ASN 값(사설 ASN 대역 4200000000~4294967294 안, 계획 '시험 이의' 판단 (마)) */
+const nextAsn = () => String(4200000000 + (randomBytes(4).readUInt32BE(0) % 94967294));
+/** asn 칸이 그 값인 접근 로그 줄을 기다려 찾는다(토큰 확인 없이도 찾도록 sub를 표시로 쓰지 않는다) */
+async function waitAsnLine(gw, asn, timeoutMs = 20_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const lines = (await accessLog(c, gw)).filter((l) => String(l.asn) === asn);
+    if (lines.length) return lines;
+    if (Date.now() > until) throw new Error(`${gw}: asn ${asn}인 접근 로그 줄이 ${timeoutMs}ms 안에 없다`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
 test('B-T18 ② JA4 머리가 없으면 접근 로그의 ja4만 비고 나머지 칸은 그대로다', async () => {
-  const sub = nextSub();
-  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', sub), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-asn': '9318' }) });
-  const [line] = await waitLogLine(c, 'gw-queue', sub);
+  const asn = nextAsn();
+  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', nextSub()), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-asn': asn }) });
+  const [line] = await waitAsnLine('gw-queue', asn);
   assert.ok(blank(line.ja4), `ja4: ${line.ja4}`);
-  assert.equal(String(line.asn), '9318');
+  assert.equal(String(line.asn), asn);
   // 경로·메서드·상태 칸이 그대로 있다
   const values = Object.values(line).map(String);
   assert.ok(values.includes('GET') || values.includes(c.probes['gw-queue'].method ?? 'GET'), '메서드 칸');
@@ -171,9 +185,9 @@ test('B-T18 ② JA4 머리가 없으면 접근 로그의 ja4만 비고 나머지
 });
 
 test('B-T18 ③ 대기열 경로 요청의 접근 로그 edgeBotLabels는 빈다(Bot Control 없음)', async () => {
-  const sub = nextSub();
-  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', sub), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-ja4-fingerprint': JA4() }) });
-  const [line] = await waitLogLine(c, 'gw-queue', sub);
+  const asn = nextAsn();
+  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', nextSub()), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-ja4-fingerprint': JA4(), 'cloudfront-viewer-asn': asn }) });
+  const [line] = await waitAsnLine('gw-queue', asn);
   assert.ok('edgeBotLabels' in line, 'edgeBotLabels 칸이 없다');
   assert.ok(blank(line.edgeBotLabels), `edgeBotLabels: ${line.edgeBotLabels}`);
 });
@@ -436,7 +450,7 @@ test('HOT-400 PRF-030·BOT-047 gw-fan 토큰 갱신 응답의 Set-Cookie와 401 
   const r = await send(c, 'api', {
     method: 'POST',
     path: '/v1/identity/access-tokens',
-    headers: edge(c, nextIp(), { origin: c.origins.www, cookie: '__Secure-peaket_rt=rt-e2e', 'x-e2e-status': '401', 'x-e2e-body': problem, 'x-e2e-response-headers': JSON.stringify({ 'set-cookie': cookies, 'content-type': 'application/problem+json', 'www-authenticate': 'Cookie realm="peaket"' }) }),
+    headers: edge(c, nextIp(), { origin: c.origins.www, cookie: '__Secure-peaket_rt=rt-e2e', 'x-e2e-status': '401', 'x-e2e-body-b64': Buffer.from(problem, 'utf8').toString('base64'), 'x-e2e-response-headers': JSON.stringify({ 'set-cookie': cookies, 'content-type': 'application/problem+json', 'www-authenticate': 'Cookie realm="peaket"' }) }),
   });
   assert.equal(r.status, 401);
   assert.equal(r.text, problem);
