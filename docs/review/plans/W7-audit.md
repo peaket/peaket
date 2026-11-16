@@ -705,6 +705,35 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 
 - **결론**: 다시 볼 지적 넷(R2·R3·R5·R6)은 모두 고쳐졌다. 새 지적은 낮음 1(N1, 확인 필요)이고, 이번에 고칠 것(높음·보안·통과 기준)은 없다. R1·R4·R7은 처음 리뷰대로 정리 목록 후보로 남는다.
 
+### 다시 보기(웨이브 끝 지적)
+
+- **누가·언제·범위**: 리뷰 담당(세션 `l3w7-audit-review`), 2026-11-16. `git diff ce1438cd..1ac417bd`만 봤다. 커밋은 계획 `b4fc3d6e`, 시험 `eec8779c`, 구현 `cc47938f`·`37e98447`·`1ac417bd`이다. 파일은 `1ac417bd` 기준으로 읽었고, 시험은 돌리지 않았다.
+- **역할 경계**: 구현 커밋 셋은 시험 파일을 건드리지 않았다. 바꾼 것은 `src/`, 마이그레이션 0021·0022와 그 스냅숏, api-client 생성물(`packages/api-client/src/gen/endpoints/partner/partner.ts`)이다. 시험 커밋 `eec8779c`의 제품 코드는 `attendeeSourceUnavailable`의 '아직 없음' 뼈대와 `ExportProblem`의 선택 인자 타입, 내보내기 한 줄뿐이다.
+
+| 지적 | 판정 | 근거 |
+| --- | --- | --- |
+| C1 503 계약 | 고쳐짐 | 원천을 쓸 수 없는 세 경우(조립 없음, 응답 모양 틀림, 같은 커서 되풀이)가 `attendeeSourceUnavailable` 하나로 모였다. 그 값은 `dependency-unavailable` 503, 제목은 오류 목록 값 '의존 서비스를 잠시 쓸 수 없습니다'(openapi 82줄과 같다), 사정은 `detail`, `retryAfterSeconds` 30이다. `guard`가 `detail`·`retryAfterSeconds`를 `ProblemError`로 넘기고, 플랫폼 오류 처리기가 `retry-after` 머리를 붙인다. openapi `listPartnerEventAttendees`(6383줄)·`createPartnerEventAttendeeExport` 두 연산 모두 `'503'` `ServiceUnavailable`을 적었고 api-client를 다시 만들었다. 원천의 2xx 아닌 답이 여전히 500인 것은 계획 §7이 K7 후속으로 남겼다 |
+| C4 빈 커서 | 고쳐짐 | 응답 검사가 `z.string().min(1).nullable()`이 되어 `''`는 503(모양 틀림)이다. guidelines §3·settlement.md §9에도 적었다 |
+| K1 N-1 호환 | 고쳐짐 | 0021은 `source_ip inet` 칸만 더한다(NULL 허용). `source_ip` CHECK는 Drizzle 스키마에서도 빠졌다. 이전 판(853758eb) 코드는 접속기록 표에 넣기만 하고 읽지 않는다. 그래서 이전 판의 넣기 문장도 기본값(`action` 'DOWNLOAD', `filter` `{}`)과 NOT NULL이던 세 칸으로 두 CHECK를 만족한다. 되돌려도 이전 판이 새 LIST 행(`export_id` NULL)을 읽는 곳이 없다. 통합 시험 'K1 이전 판(N-1) 코드의 내려받기 기록 모양'이 `core_partner`·테넌트로 이것을 본다 |
+| K1 쪽: 앱이 접속지 빠짐을 막는가 | 막는다 | `requireActor`(`attendee-exports.ts` 66~70줄)가 보기(99줄)·내려받기(140줄) 모두에서 `isIP`가 0이면 원천·회차를 읽기 전에 거절한다. R2 때의 단위 시험('접속지를 정하지 못하면 원천을 읽지 않고 실패한다')이 그대로 있다. Drizzle 넣기는 보기·내려받기 모두 `sourceIp`를 싣는다 |
+| K6 NOT VALID | 고쳐짐 | `action`·모양 CHECK 둘 끝에 `NOT VALID`가 붙었다. 새 행에는 바로 걸린다. 통합 시험 'K6'이 0020까지 적용한 DB에 0019 모양 행을 넣고 0021·0022를 적용한 뒤 옛 행과 `convalidated = false` 둘을 본다. `VALIDATE`는 다음 출시 후속이다(data.md §2) |
+| K2 색인·전용 풀 | 고쳐짐 | 0022 끝에 `review_account_idx (account_id)`가 생겼고, Drizzle 스키마·0022 스냅숏·data.md §5.1 행이 함께 있다. 소비자는 `runKeyedConsumer`에 `maxKeys: 2`·`partitionsConcurrently: 1`을 넘긴다. main.ts는 소비자 전용 풀 `consumerDatabase`(`max: 2`)를 만들어 `assertDatabaseRole(consumerDatabase, 'core_app')`로 확인하고, 보류 저장소·보류 수 세기·익명화 저장소(`new Reviews({ store: new DrizzleReviewStore(consumerDatabase), … })`)에 쓴다. 종료 때는 `await consumers?.stop()` → `service.close()` → `consumerDatabase.close()` 차례다. 단위 시험이 가짜 `runKeyedConsumer`로 넘기는 값과 받은 풀을 보고, 원문 대조로 `max: 2`·역할 확인·닫기를 본다 |
+| K9 운영 조립 경로 | 고쳐짐 | ⑫가 `registry`를 넘겨 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다(보류 수 세기를 `core_app`으로) |
+| S1 ASVS 16.2.1·16.4.2 | 고쳐짐 | 두 행 모두 '부분 적용'이고 빠진 몫을 적었다(보통 표, 해시 체인 없음, 월 점검이 안 읽음, 입구 설정에 기댄 접속지와 연결 주소 대체, OPEN 후보 2). 코드 사실과 맞는다 |
+| S2 ASVS 14.2.7 | 고쳐짐(문구 일부는 N2) | '부분 적용'과 탈퇴 때 남는 칸(본문·별점·사진 키·내용 지문)·보류 때 손 정리가 맞게 적혔다. 같은 행의 다른 문장은 아래 N2 |
+| M28 | 고쳐짐 | ⑰이 `consumers = startCoreConsumers({` 줄이 조건식 없이 대입되고, 그 블록이 모듈 수준의 `if (kafka.enabled)`(또는 `if (!kafka.enabled) … else`)인지 본다 |
+| M33 | 고쳐짐 | ⑱이 SIGTERM 쪽 글에서 `void consumers?.stop(`이 없고 `await consumers?.stop(`이 `service.close(`보다 앞인지 본다 |
+
+- **새 결함을 찾아본 곳**: 0021의 이전 판·되돌림 호환, 앱의 접속지 거절, 소비자 풀의 역할 확인·닫기, 503 계약과 오류 목록·openapi의 일치, ASVS 행과 코드 사실. 앞의 넷에서는 결함을 찾지 못했다. 아래 N2·N3은 이번 묶음 전부터 있던 것이 이번 고침으로 드러났다.
+
+| 번호 | 심각도 | 파일:줄 | 무엇이 문제인가 | 근거 | 고칠 쪽 | 처리 |
+| --- | --- | --- | --- | --- | --- | --- |
+| N2 | 낮음 | `docs/security/asvs/catalog-review.md` v5.0.0-14.2.7 행 | 행이 '신고 기록(`content_report.purge_at`, 처리 뒤 1년)과 붙이지 않은 후기 사진(24시간)을 정기 파기 작업이 자동으로 지운다'고 적는데, 지금 core-svc에는 그 정비 일이 없다. 정비 일은 `review-temp-block-expire` 하나뿐이고, `core_maintenance`에는 `content_report` 지우기 권한도 없다. `review_image` 표도 아직 없다. 또 `purge_at`은 넣을 때 '지금 + 365일'이라 '처리 뒤 1년'이 아니다(`reviews.ts` 220줄). S2 고침이 '빠진 몫'에 구현 사실을 적기 시작했으므로, 이것도 같은 자리에 적어야 사실과 맞는다 | 계획 §4 '범위 밖(후속)'의 신고 기록 파기 정비 일, 0022 표 | plan | 정리 목록 후보. 14.2.7 빠진 몫에 '신고 기록·후기 사진 파기 작업 없음, `purge_at` 기준이 넣은 때'를 더한다 |
+| N3 | 낮음 | `services/core-svc/src/modules/export/application/attendee-exports.ts`(PDF 503 `export-format-unavailable`), `docs/api/openapi.yaml` 5153줄 | 내려받기 연산의 503은 이제 openapi에 `dependency-unavailable` 하나로만 적혀 있다. 그런데 같은 연산이 PDF 형식에서 `export-format-unavailable` 503을 낸다. 그 제목은 'PDF 형식은 아직 만들 수 없습니다'로, 목록 225줄의 '이 파일 형식은 아직 만들 수 없습니다'와 다르고 `Retry-After`도 없다. C1과 같은 계약 어긋남이 다른 오류 길에 남아 있다(이번 묶음 전부터) | guidelines §2, openapi 225줄 `export-format-unavailable` | impl + plan | 정리 목록 후보. 제목을 목록 값으로 바꾸고, openapi 503 설명에 그 type을 더한다(Retry-After를 줄지는 계획이 정한다) |
+| N4 | 낮음(확인 필요) | `services/core-svc/src/main.ts`(`consumerDatabase` `max: 2`), `services/core-svc/src/consumers/start.ts`(`maxKeys: 2`) | 소비자 풀 연결 2개를 동시 키 2개, 보류 확인·넣기, 30초마다의 보류 수 세기가 함께 쓴다. 몰릴 때 셋째가 연결을 기다린다(플랫폼 풀 기다림 한도 1초, 동시 실행 리뷰 K2 근거). 늦으면 처리 실패 → 재시도 → 5회 뒤 보류로 갈 수 있다. 사건을 잃지는 않는다 | streaming.md §2.6 '풀 최대 2, 파티션 1·키 2 [가정]' | plan | 정리 목록 후보. [가정] 값을 잴 때 '풀 = 키 수 + 1'을 같이 본다 |
+
+- **결론**: 이번 범위의 지적 열(C1·C4·K1·K2·K6·K9·S1·S2·M28·M33)은 모두 고쳐졌다. 새 지적은 낮음 3(N2·N3, N4 확인 필요)이고, 이번에 고칠 것(높음·보안·통과 기준)은 없다.
+
 ## 검증
 
 - **누가·언제**: 검증 담당(세션 `l3w7-audit-verify`, 모델 claude-opus-5-5), 2026-11-16. 계획·시험·구현·리뷰에 관여하지 않았다. 본 것: 지시서, 이 파일의 `## 계획`·`## 실패 확인`, `git diff 853758eb..3087ad85`(drizzle 스냅숏 제외), 정본 판정 기준(settlement.md §13 J-T26, architecture.md §3.2 'REST' 행, asvs/settlement 11.2.4). 그 뒤 커밋(`2ed48686`·`5fc9d56f`)은 리뷰 문서만 바꿔 제품 코드는 `3087ad85`와 같다.
