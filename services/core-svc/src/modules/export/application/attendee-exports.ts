@@ -1,5 +1,6 @@
 // 예매자 명단 내려받기·이력 유스케이스(FR-027·064, POL-020·023, I-T53·J-T26).
 // 권한은 컨트롤러 @Roles(partner_admin)가 보고, 여기서는 재인증·보유 기간·사유·파일 생성을 본다.
+import { isIP } from 'node:net';
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { ActorNameResolver } from '../domain/ports.js';
 import type { AttendeeSource, AttendeeSourcePage, AttendeeExportStore, BookersReauth, PartnerEventLookup } from '../domain/ports.js';
@@ -31,8 +32,8 @@ export interface ExportActor {
   accountId: string;
   sessionId: string;
   role: string;
-  /** 접속지 정보: 요청의 클라이언트 IP 원문(리뷰 R2). 이름이 clientIp라 플랫폼 로그가 가린다. 뼈대(W7-audit 리뷰 반영 시험 단계): 구현 담당이 필수로 바꾸고 검사한다 */
-  clientIp?: string;
+  /** 접속지 정보: 요청의 클라이언트 IP 원문(리뷰 R2, docs/features/settlement.md §9 '접속지'). 이름이 clientIp라 플랫폼 로그가 가린다. 접속기록에만 쓰고 이력·응답에는 싣지 않는다 */
+  clientIp: string;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
@@ -49,11 +50,15 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
 /** 내려받기 원천 한 페이지 행 수(docs/features/settlement.md §9) */
 const EXPORT_PAGE_ROWS = 1_000;
 
-/** 접속기록 행위자가 빠진 호출은 원천을 읽기 전에 거절한다(빠진 행위자 거절, W7-audit A2-19) */
+/**
+ * 접속기록 행위자가 빠진 호출은 원천·회차를 읽기 전에 거절한다(빠진 행위자 거절, W7-audit A2-19).
+ * 접속지(clientIp)가 IP 모양이 아니면(빈 문자열 포함) 같은 자리에서 거절한다(리뷰 R2). 오류 글에는 값을 싣지 않는다
+ */
 function requireActor(actor: ExportActor | undefined): asserts actor is ExportActor {
   if (!actor || typeof actor.accountId !== 'string' || actor.accountId === '' || typeof actor.role !== 'string' || actor.role === '') {
     throw new Error('예매자 명단 접속기록의 행위자가 없다');
   }
+  if (typeof actor.clientIp !== 'string' || isIP(actor.clientIp) === 0) throw new Error('예매자 명단 접속기록의 접속지를 정하지 못했다');
 }
 
 const safeLabel = (title: string): string => title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || '공연';
@@ -102,6 +107,7 @@ export class AttendeeExports {
         count: rows.length,
         filter: { limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) },
         createdAt: now,
+        clientIp: actor.clientIp,
       });
       return {
         items: rows.map((r) => ({
@@ -151,7 +157,8 @@ export class AttendeeExports {
         expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
       };
       // 이력과 DOWNLOAD 접속기록은 한 번에(한 트랜잭션) 쓴다. 실패하면 그 오류로 끝나고 파일을 주지 않는다(W7-audit A2-19)
-      await this.d.store.recordExport(record);
+      // 접속지는 DOWNLOAD 접속기록에만 쓴다(이력 행·응답의 record에는 없다, 리뷰 R2)
+      await this.d.store.recordExport(record, { clientIp: actor.clientIp });
       return { file, record: exportView(record) };
     });
   }

@@ -15,6 +15,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AttendeeExports } from '../application/attendee-exports.js';
 import { tenantOf } from '../../catalog/index.js';
+import { clientIpOf } from './client-ip.js';
 
 /** 파일 스트림 응답(본문은 처리기가 직접 보낸다). */
 const AttendeeExportFileResponse = z.object({});
@@ -30,15 +31,16 @@ export class PartnerAttendeeExportController {
     @ContractParams(ListPartnerEventAttendeesParams) params: z.output<typeof ListPartnerEventAttendeesParams>,
     @ContractQuery(ListPartnerEventAttendeesQueryParams) q: z.output<typeof ListPartnerEventAttendeesQueryParams>,
     @CurrentPrincipal() me: Principal,
+    @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     void reply.header('cache-control', 'no-store');
-    // 접속기록 행위자는 이 요청의 로그인 주체다(파트너 ID가 아니다, W7-audit A2-19)
+    // 접속기록 행위자는 이 요청의 로그인 주체(파트너 ID가 아니다, W7-audit A2-19)와 그 요청의 접속지다(리뷰 R2)
     return this.exports.listAttendees(
       tenantOf(me),
       params.eventId,
       { limit: q.limit ?? 50, ...(q.cursor ? { cursor: q.cursor } : {}) },
-      { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'partner_admin' },
+      { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'partner_admin', clientIp: clientIpOf(request) },
     );
   }
 
@@ -57,7 +59,7 @@ export class PartnerAttendeeExportController {
     const { file } = await this.exports.create(
       tenantOf(me),
       params.eventId,
-      { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'partner_admin' },
+      { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'partner_admin', clientIp: clientIpOf(request) },
       typeof token === 'string' ? token : undefined,
       body,
     );

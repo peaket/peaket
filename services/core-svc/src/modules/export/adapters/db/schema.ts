@@ -1,5 +1,5 @@
 // export Drizzle 스키마(attendee_export, docs/data.md 예매자 명단 내려받기 이력).
-import { check, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { check, index, inet, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -49,6 +49,8 @@ export const attendeeExportAudit = pgTable(
     filter: jsonb('filter').$type<{ limit?: number; cursor?: string }>().notNull().default({}),
     createdAt: at('created_at').notNull(),
     retainUntil: at('retain_until').notNull(),
+    /** 접속지 정보(클라이언트 IP, 리뷰 R2). 0019 때 들어간 옛 행은 비어 있고 새 행은 CHECK(0021에서 NOT VALID)가 강제한다 */
+    sourceIp: inet('source_ip'),
   },
   (t) => [
     check('attendee_export_audit_format_check', sql`${t.format} in ('CSV', 'XLSX', 'PDF')`),
@@ -58,6 +60,7 @@ export const attendeeExportAudit = pgTable(
       'attendee_export_audit_shape_check',
       sql`(${t.action} = 'DOWNLOAD' and ${t.exportId} is not null and ${t.reason} is not null and ${t.format} is not null) or (${t.action} = 'LIST' and ${t.exportId} is null and ${t.reason} is null and ${t.format} is null)`,
     ),
+    check('attendee_export_audit_source_ip_check', sql`${t.sourceIp} is not null`),
     index('attendee_export_audit_promoter_event_idx').on(t.promoterId, t.eventId, t.createdAt),
   ],
 );

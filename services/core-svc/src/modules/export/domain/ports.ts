@@ -16,15 +16,15 @@ export interface AttendeeViewRecord {
   /** 받은 cursor가 없으면 키를 두지 않는다 */
   filter: { limit: number; cursor?: string };
   createdAt: Date;
-  /** 접속지 정보(요청의 클라이언트 IP 원문, 리뷰 R2). 뼈대(W7-audit 리뷰 반영 시험 단계): 구현 담당이 필수로 바꾼다 */
-  clientIp?: string;
+  /** 접속지 정보(요청의 클라이언트 IP 원문, 리뷰 R2) → source_ip */
+  clientIp: string;
 }
 
 /** 이력과 접속기록을 따로 쓰는 길은 두지 않는다(W7-audit A2-19: 접속기록이 실패하면 이력도 남지 않아야 한다) */
 export interface AttendeeExportStore {
   /** 내려받기 이력(attendee_export)과 DOWNLOAD 접속기록을 한 트랜잭션에 쓴다. 하나라도 실패하면 둘 다 남지 않고 오류를 던진다 */
-  // 뼈대(W7-audit 리뷰 반영 시험 단계): 둘째 인자의 접속지는 DOWNLOAD 접속기록에만 쓴다(리뷰 R2). 구현 담당이 필수로 바꾼다
-  recordExport(record: AttendeeExportRecord, access?: { clientIp: string }): Promise<void>;
+  /** 둘째 인자의 접속지는 DOWNLOAD 접속기록에만 쓴다(attendee_export 이력·exportView에는 싣지 않는다, 리뷰 R2) */
+  recordExport(record: AttendeeExportRecord, access: { clientIp: string }): Promise<void>;
   /** 명단 보기 LIST 접속기록. 실패하면 오류를 던진다 */
   recordView(view: AttendeeViewRecord): Promise<void>;
   list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]>;
