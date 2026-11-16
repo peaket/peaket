@@ -521,11 +521,11 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 | R2 | A2-19 0021은 action·filter를 더하고 …(고침: `ADD COLUMN "source_ip" inet`, `CHECK (source_ip is not null) NOT VALID`) | `test/export-audit.test.ts` | 실패 | 단언: 0021에 `source_ip` 칸이 아직 없다 |
 | R2 | 기존 둘에 접속지 단언을 더함: A2-19 J-T26 ⑤ 명단 보기는 행위자·보인 건수·조건을 …, A2-19 J-T26 ⑥ 내려받기는 … recordExport 한 번으로 쓴다 | `test/export-audit.test.ts` | 실패 2 | 단언: 접속지가 없다 |
 | R2 | 행위자 객체에 `clientIp`를 더함(export 시험 여섯 파일) | `test/export-paging-limit.test.ts` 등 | 통과 | 모양만 고침 |
-| R2 | A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 같은 파일의 준비(직접 넣는 접속기록 행 둘)에 `source_ip`를 넣고, `recordView`·`recordExport` 부르기에 접속지를 실었다 |
+| R2 | A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts` | 실패(10:22 KST 도커 잠금 아래 돌림) | 단언: 접속지 칸 없이 넣은 새 행이 거절되지 않고 들어간다(0021에 CHECK가 아직 없다). 같은 파일의 준비(직접 넣는 접속기록 행 둘)에 `source_ip`를 넣고, `recordView`·`recordExport` 부르기에 접속지를 실었다 |
 | R5 | COV2-06 ⑩ R5 main.ts는 후기 탈퇴 소비자에 core_app으로 확인한 DB를 넘긴다 | `test/core-consumers.test.ts` | 지금 코드에서 통과 | 손 확인: `main.ts`의 소비자 인자를 `database: partnerDatabase`로 바꾸면 이 시험이 실패하고(기존 ⑩은 그래도 통과), 되돌린 뒤 통과. `git diff`로 `main.ts`가 깨끗한 것을 봤다 |
 | R6 | COV2-06 ⑬ 0022는 …(고침: REVOKE도 비교해 없어야 한다) | `test/review-grants.test.ts` | 지금 코드에서 통과 | 손 확인: 0022 끝에 `REVOKE UPDATE (account_id, basis_order_id) ON review FROM core_app`을 더하면 실패하고, 되돌린 뒤 통과. `git diff`로 0022가 깨끗한 것을 봤다 |
 
-- **돌릴 통합 시험(도커 잠금 대기)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts`. 0021의 `source_ip`가 생기기 전에는 준비의 직접 넣기가 칸 없음(42703)으로 실패할 것이다.
+- **통합 시험 결과(10:22 KST 도커 잠금 아래)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts` 시험 4개 가운데 실패 3, 통과 1. 위 R2 시험 말고도 둘이 실패한다. 'A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 …'은 준비의 직접 넣기가 `source_ip` 칸 없음(42703)이다. 'A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD …'는 저장소로 넣은 두 행은 맞게 읽혔지만, 틀린 모양 넣기에서 23514 대신 42703이 난다. 셋 다 0021에 `source_ip`가 생기면 풀려야 한다. 'A2-19 core_partner는 …'은 통과했다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
 
 ## 리뷰
 
