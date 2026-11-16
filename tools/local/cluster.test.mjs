@@ -865,12 +865,23 @@ test('CF3-05 HOT-400 매핑 없이 만든 클러스터나 127.0.0.1 밖 공개�
     b['30442/tcp'] = [{ HostIp: ip, HostPort: '18442' }];
     return b;
   };
+  // 같은 노드 포트가 여럿 공개된 꼴(첫째는 127.0.0.1, 둘째가 밖): 첫째만 보면 놓친다(검증 V-09)
+  const secondOutside = (ip) => {
+    const b = cf3Bindings(ok);
+    b['30442/tcp'] = [
+      { HostIp: '127.0.0.1', HostPort: '18442' },
+      { HostIp: ip, HostPort: '18442' },
+    ];
+    return b;
+  };
   const cases = [
     ['ⓐ 빈 객체(매핑 없이 만든 클러스터)', {}, false],
     ['ⓑ gw-scanner(30445/tcp)만 없음', noScanner, false],
     ['ⓒ HostIp 0.0.0.0', oneHost('0.0.0.0'), true],
     ['ⓓ HostIp 빈 값(모든 주소)', oneHost(''), true],
     ['ⓒ 다섯 모두 0.0.0.0', cf3Bindings(ok, '0.0.0.0'), true],
+    ['ⓔ 30442/tcp 공개 둘(127.0.0.1, 0.0.0.0)', secondOutside('0.0.0.0'), true],
+    ['ⓔ 30442/tcp 공개 둘(127.0.0.1, 빈 값)', secondOutside(''), true],
   ];
   for (const [what, bindings, mentionsLoopback] of cases) {
     let err;
