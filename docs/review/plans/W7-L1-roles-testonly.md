@@ -410,3 +410,45 @@
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T13:32+09:00 | 2026-11-16T15:55+09:00 |
 | review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T14:46+09:00 | 2026-11-16T16:17+09:00 |
 | verify | w7l1-roles-verify-ceb94bc9 | claude-opus-5-5 | 2026-11-16T14:46+09:00 | 2026-11-16T16:19+09:00 |
+
+위 표는 `roles-check`가 읽는 표라 정본 꼴(머리 다섯 칸, 감독·기록은 적지 않음)을 그대로 둔다. 실제 하위 에이전트 ID와 기록 담당은 아래 보탬 표에 적는다(검사는 절 안의 첫 표만 읽는다).
+
+| 역할 | 세션 ID | 하위 에이전트 ID | 모델 | 시작 | 끝 |
+| --- | --- | --- | --- | --- | --- |
+| plan | w7l1-roles-plan-680fac67 | a0e4bc8b6f5f85dad | claude-opus-5-5 | 2026-11-16T13:08+09:00 | 2026-11-16T13:57+09:00 |
+| test | w7l1-roles-test-659fff14 | a3ac1db0ca6c534ce | claude-opus-5-5 | 2026-11-16T13:20+09:00 | 2026-11-16T15:35+09:00 |
+| impl | w7l1-roles-impl-db02969f | a4e7eada62dc4b8e4 | claude-opus-5-5 | 2026-11-16T13:32+09:00 | 2026-11-16T15:55+09:00 |
+| review | w7l1-roles-review-2c7ed993 | aca0b8513b3340304 | claude-opus-5-5 | 2026-11-16T14:46+09:00 | 2026-11-16T16:17+09:00 |
+| verify | w7l1-roles-verify-ceb94bc9 | a44bc338390aaf250 | claude-opus-5-5 | 2026-11-16T14:46+09:00 | 2026-11-16T16:19+09:00 |
+| record | w7l1-roles-record-488fb1b7 | (이 기록 담당 세션) | claude-opus-5-5 | 2026-11-16T16:20+09:00 | 2026-11-16T16:40+09:00 |
+
+- 모델: 모두 claude-opus-5-5다. 리뷰·검증은 구현 담당과 같은 모델의 새 맥락이다(소유자 결정 OPEN[40], ADR-0270 결정 6).
+- 감독(갈래 1 감독 세션)은 코드·시험을 쓰지 않았다.
+
+## 기록
+
+- 누가: 기록 담당 `w7l1-roles-record-488fb1b7`, 2026-11-16. 받은 것은 `git log origin/develop..HEAD`, 이 계획 파일, 감독이 준 사실(담당 표의 하위 에이전트 ID, 먼저 합치는 까닭)뿐이다.
+- 무엇을 넣었나: 감독 세션의 보탬 셋이다. (1) 시험만 묶음(구현 없이 계획·시험·리뷰·검증, `Batch-Kind: test-only`), (2) 검증은 마지막 코드 고침 뒤, (3) 리뷰·검증 커밋은 자기 절('리뷰'·'검증')을 바꿔야 센다(지난 묶음 W7-L1-roles-check의 RV-05도 함께 닫음).
+- 커밋(차례대로, 가지를 최신 `develop` 위로 올린 뒤의 해시. 위 절들의 해시는 올리기 전 것이다. 차례로 보면 '마지막 코드 고침 `13292b32`'는 `5ca12d8d`, 둘째 보기 리뷰 `6f8ec352`는 `ee3dc8bf`다):
+
+| 해시 | 역할 | 제목 |
+| --- | --- | --- |
+| 9ee34e12 | plan | roles-check가 시험만 묶음을 받는 계획과 정본 줄을 정한다 |
+| 852e1275 | test | roles-check 시험만 묶음 시험을 먼저 쓴다 |
+| 657c5121 | impl | roles-check가 시험만 묶음을 받는다 |
+| 5c871a29 | plan | roles-check 검증 차례를 마지막 코드 고침 뒤로 바꾸는 계획을 적는다 |
+| 1bac6fdd | test | roles-check 검증은 마지막 코드 고침 뒤라는 시험을 쓴다 |
+| 2777781a | impl | roles-check의 검증 차례를 마지막 코드 고침 뒤로 바꾼다 |
+| e6fcd5ca | review | roles-testonly 대조 리뷰를 적는다 |
+| 1d1b02b5 | plan | roles-check 리뷰·검증 커밋은 자기 절을 바꿔야 센다는 계획을 적는다 |
+| f5e64991 | verify | roles-testonly 틀린 구현 검사를 적는다 |
+| 1208a851 | review-fix(Fix-By: test, RV-01) | roles-check 리뷰·검증 커밋은 자기 절을 바꿔야 센다는 시험을 쓴다 |
+| 5ca12d8d | review-fix(Fix-By: impl, RV-01) | roles-check는 자기 절을 바꾼 review·verify 커밋만 센다 |
+| ee3dc8bf | review | roles-testonly 리뷰 반영을 다시 보고 둘째 보기를 적는다 |
+| cab14126 | verify | roles-testonly 마지막 바퀴 틀린 구현 검사를 적는다 |
+
+- 역할별 커밋 수: plan 3, test 2(+ 리뷰 반영 시험 쪽 1), impl 2(+ 리뷰 반영 구현 쪽 1), review 2, verify 2, 합 13개. 이 기록 커밋을 더하면 14개다.
+- 시험: `tools/ci/roles-check.test.mjs` 72개(RC-01~72) 모두 통과.
+- 틀린 구현 검사: 첫 검사와 마지막 바퀴를 합쳐 넣은 수 37, 잡은 수 36, 놓친 수 1(M-09). M-09(종류를 가를 때 doc을 `Batch-Kind`보다 먼저 봐도 시험이 못 잡음)는 감독 결정으로 구간 끝 정리 목록에 둔다.
+- 리뷰 지적 처리: RV-01(빈 verify로 '마지막 verify는 마지막 고침 뒤'를 비켜 감)은 이 묶음에서 시험 먼저 → 구현 차례로 고쳤다. RV-02·03·04(중간 1, 낮음 2)와 M-09, RC-71이 '첫 부모와 견줌'을 따로 가르지 못하는 것(마지막 바퀴 판정 기준 대조 1)은 `docs/PROGRESS.md` '구간 끝 정리 목록(갈래 1)'에 올렸다. W7-L1-roles-check의 RV-05 줄은 이 묶음에서 닫혀 그 목록에서 지웠다.
+- 먼저 합치는 까닭: roles-check 도구라 뒤 묶음의 합치기 전 검사에 바로 쓴다. 감독 승인으로 웨이브 끝을 기다리지 않고 먼저 `develop`에 합친다(도구 선행, ADR-0267 '웨이브 끝 푸시'의 예외).

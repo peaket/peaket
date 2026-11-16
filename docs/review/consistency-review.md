@@ -744,6 +744,12 @@
 | R-645 | 파트너 테넌트당 한도를 셀 곳이 정본에 없었다 | docs/PROGRESS.md 미해결 | OPEN[41]로 소유자에게 물음 | 적용 |
 | R-646 | 정본 충돌·법정 의무·돈 규칙·외부 이미지 허락이 소유자 결정 없이 남아 있었다 | docs/PROGRESS.md 미해결 | OPEN[42]~[46]으로 물음 | 적용 |
 | R-647 | 웨이브 6 남은 결함 코드 몫 넷(A2-17·A2-19·R-628 시험·COV2-06)과 운영 역할 후기 권한 결함 | services/core-svc(export·review·consumers·main.ts, 마이그레이션 0021·0022), packages/platform 시험, 정본 settlement·data·streaming·identity·asvs, 계획·보고서 | 역할 다섯 분리, 시험 먼저, 변이 67 | 고침, 결정 대기 OPEN[42]~[44] |
+| R-648 | 웨이브 게이트 높음 셋이 나온 갈래의 진행 방식과 갈래 사이 옮기기 절차가 정해져 있지 않았다 | docs/PROGRESS.md 턴 규칙 | ADR-0267 되돌릴 조건 적용, 옮기기·OPEN 번호는 감독 거침 | 적용 |
+| R-649 | 웹 공유 캐시와 로그인 세션이 같은 noeviction 클러스터를 나눠 써 메모리가 차면 로그인이 실패할 수 있었다 | docs/PROGRESS.md 미해결 | OPEN[47]로 물음, 이번 웨이브는 입력 막기·메모리 경보 | 적용 |
+| R-650 | develop CI 실패(고정 날짜 test-int가 서버 실제 시각과 견줌) | services/purchase-svc/test-int/priority-hold.int.test.ts·cancellation.int.test.ts, 계획 W8-ci-fix | 기준 시각을 Valkey TIME에서 잡음, 시험만 | 고침, 남은 넷은 정리 목록 |
+| R-651 | 소유자 결정을 기다리던 미해결 열두 줄이 남아 갈래 항목이 대기 중이었다 | docs/PROGRESS.md 미해결·턴 규칙·진행 로그, docs/architecture.md §8.6, ADR-0270 상태 줄 | 소유자 결정 기록, OPEN 줄 지움, 정본 반영은 갈래 몫으로 넘김 | 적용 |
+| R-652 | 갈래 1 웨이브 게이트에서 높음 셋이 나왔는데 진행 방식이 정해져 있지 않았다 | docs/PROGRESS.md 턴 규칙 | ADR-0267 되돌릴 조건 적용, 높음이 남은 묶음 합치기 금지 | 적용 |
+| R-653 | 역할 확인이 시험만 고치는 묶음을 받지 못했고, 검증 차례와 리뷰·검증 커밋의 내용을 보지 않았다 | tools/ci/roles-check.mjs·roles-check.test.mjs, docs/architecture.md §8.6 세부, 계획 W7-L1-roles-testonly | 시험만 묶음, 검증은 마지막 코드 고침 뒤, 리뷰·검증 커밋은 자기 절을 바꿔야 셈(시험 72개, 틀린 구현 37개 가운데 36개 잡음) | 적용 |
 
 ## 4. 숫자 일치표
 
