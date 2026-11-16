@@ -734,6 +734,12 @@
 | R-635 | R-633이 모든 trust-svc main-boot에 내부 gRPC 토큰을 넣어 ci 시험(main-label)의 무토큰 gRPC 호출이 UNAUTHENTICATED로 실패 | services/trust-svc/test-int/main-boot.ts | prod/staging에서만 시험 토큰 주입, ci/local은 무토큰 유지 | 적용 |
 | R-636 | R-604 B1-01이 pin KEYS 끝에 prio를 더해 pin-failed-mark 시험의 keys.at(-3)이 실패 표시 키가 아닌 ordered를 가리킴 | services/purchase-svc/test-int/pin-failed-mark.int.test.ts | 실패 표시 키를 끝 묶음(-4..)에서 찾도록 의미 단언으로 바꿈 | 적용 |
 | R-637 | 웨이브 6 최종 CI 43688939738 초록·마감 해시 확정 | docs/PROGRESS.md, docs/review/audit/wave6.md | CI 초록, develop c548c762, 종료 조건 체크 | 적용 |
+| R-638 | 문서 절차는 시험을 구현 담당이 함께 쓰게 했고 실제로는 갈래 에이전트 하나가 모든 역할을 했으며 TDD가 필수가 아니었다 | docs/adr/0270, docs/architecture.md §8.6, docs/PROGRESS.md 턴 규칙·다음 할 일·미해결 | 역할 다섯 분리·시험 먼저·역할별 커밋과 역할 확인을 정하고 웨이브 7을 세 갈래로 시작 | 적용 |
+| R-639 | 웨이브가 끝날 때마다 다음 웨이브를 소유자에게 물을지 정해져 있지 않았다 | docs/PROGRESS.md 턴 규칙·진행 로그 | 소유자 결정대로 묻지 않고 끝까지 잇는 규칙을 적음 | 적용 |
+| R-640 | 리뷰 담당 커밋의 역할 값이 없었고 갈래 사이 Docker 차례를 정하는 법이 없었다 | ADR-0270 상태 줄, docs/architecture.md §8.6, docs/PROGRESS.md 턴 규칙 | review 값 추가, 잠금 폴더로 한 번에 한 갈래 | 적용 |
+| R-641 | 갈래가 동시에 같은 서비스 마이그레이션·ADR 번호를 써서 합칠 때 겹치거나 Drizzle이 마이그레이션을 건너뛸 수 있었다 | docs/PROGRESS.md 턴 규칙 | 번호·when 규칙과 웨이브별 번호 나누기 | 적용 |
+| R-642 | 잠금 중 이름으로 프로세스를 모두 끝내면 다른 갈래의 포트 전달까지 끊을 수 있었다 | docs/PROGRESS.md 턴 규칙 | 자기 PID만 끝내기·클러스터 이름 머리 규칙 | 적용 |
+| R-643 | 합치기 전 역할 확인 스크립트의 기록이 없었다 | docs/PROGRESS.md 진행 로그·구간 끝 정리 목록(갈래 1), docs/review/plans/W7-L1-roles-check.md | 기록 커밋 하나(doc-check 오류 0, roles-check 통과) | 적용 |
 
 ## 4. 숫자 일치표
 
