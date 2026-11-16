@@ -262,6 +262,26 @@
 
 - **같은 모델 새 맥락 사실**: 이 검증은 계획·구현·시험·리뷰 담당과 같은 모델(claude-opus-5-5)이 그들의 대화 맥락 없이 새 세션에서 했다(ADR-0270 결정 6, 다른 모델을 쓸 수 없음). 받은 것은 감독이 준 공통 규칙, 이 계획 파일, `git diff origin/develop...HEAD --stat`뿐이고 다른 담당의 보고는 받지 않았다. '리뷰' 절은 이 검증을 적을 때 비어 있었다.
 
+### 리뷰 반영 뒤 마지막 검증
+
+같은 검증 담당(w8l1-cifix2-verify-6e13c0cb)이 리뷰 반영 커밋 `67a0fe4a`(`Fix-By: test`, RV-1·RV-2·M-33) 뒤에 2026-11-16 다시 봤다. 감독 지시로 `D:/ticketpass-lane1`(HEAD `67a0fe4a`)만 썼다(`-pre`는 다른 묶음이 쓰므로 건드리지 않음). 틀린 구현은 위와 같은 문자열 바꾸기로 제품 파일(`apps/web/next.config.ts`, `.github/workflows/loadtest-check.yml`, `tools/ci/changes.mjs`)에만 넣고, 하나 끝날 때마다 `git -C D:/ticketpass-lane1 checkout -- .` 뒤 `git status --short`가 빈 것을 봤다(넣기 전과 매번 뒤 모두 빔). 시험 파일은 고치지 않았다.
+
+- **구현 위 통과**: `node --test apps/web/server/server-external.test.mjs` → 시험 2, 통과 2. `node --test tools/ci/check-workflows.test.mjs` → 시험 46, 통과 45, 건너뜀 1(CI에서만 도는 'CI에서는_yaml패키지가있어_…'), 실패 0. `--test-name-pattern="CF2-0[34]|tools-check는"`로 두 파일 → 시험 3, 통과 3.
+- **지난번 놓친 것과 리뷰 재현**(이제 모두 실패):
+
+| 번호 | 넣은 틀린 구현 | 결과 | 처음 실패한 단언 |
+| --- | --- | --- | --- |
+| RV-1 재현 | 67줄 줄 주석(`` `/_q/*` ``) 두 줄 뒤에 `serverExternalPackages: ['@peaket/platform'],`와 `// 예: 'src/**/*.tsx'` | 잡음(CF2-01·02) | '키가 2번 나온다', CF2-02 '키가 하나가 아니라 첫 배열을 실제 값으로 볼 수 없다' |
+| M-33 | 일곱 뒤에 `'serverExternalPackages': []` | 잡음(CF2-01·02) | 같음 |
+| M-30 | 설치 단계에 `if: false` | 잡음(CF2-03) | '설치 단계에 if가 있다' |
+| M-31 | 설치 단계에 `continue-on-error: true` | 잡음(CF2-03) | '설치 단계에 continue-on-error가 있다' |
+| M-34 | (보탬) pnpm 받기 단계에 `if: false` | 잡음(CF2-03) | 'pnpm 받기 단계에 if가 있다' |
+| M-35 | (보탬) 시험 단계에 `continue-on-error: true` | 잡음(CF2-03) | '시험 단계에 continue-on-error가 있다' |
+
+- **CF2-01~04에 닿는 지난번 표본 다시 넣기**(여전히 모두 실패): M-01·M-09·M-27·M-28(CF2-01과 CF2-02 둘 다. CF2-02가 키 하나를 먼저 보게 바뀌어 지난번 CF2-01만 잡던 M-09·M-28, CF2-02만 잡던 M-27도 이제 둘 다 실패), M-02·M-03·M-07(CF2-02), M-10·M-10b·M-11·M-13·M-15·M-18·M-29(CF2-03), M-19(CF2-04).
+- **과잉 검사 확인**: X-01(주석 줄 안의 `serverExternalPackages:` 글자)은 여전히 통과한다(줄 주석은 버리므로 맞다).
+- **합계**: 넣은 21개, 잡은 21개, 놓친 0개. 지난번 놓친 셋(M-30·M-31·M-33)과 리뷰 RV-1 재현이 모두 잡혀 이 묶음의 놓친 것은 남지 않는다. CF2-05~07은 `67a0fe4a`가 바꾸지 않아 다시 넣지 않았다(위 표의 M-21~M-26·M-32가 근거로 남는다).
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -271,3 +291,4 @@
 | test | w8l1-cifix2-test-6b66f6f0 | claude-opus-5-5 | 2026-11-16T21:54+09:00 | 2026-11-16T22:07+09:00 |
 | verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:06+09:00 | 2026-11-16T22:13+09:00 |
 | review | w8l1-cifix2-review-7a7b511f | claude-opus-5-5 | 2026-11-16T22:07+09:00 | 2026-11-16T22:24+09:00 |
+| verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:31+09:00 |
