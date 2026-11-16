@@ -107,6 +107,22 @@
 - BAT-040 R-659 브라우저 확인 B6: [취소표 알림 받기]를 처음 켤 때 뜨는 알림 권한 안내 시트의 제목·설명이 오픈 알림 글("오픈 알림을 이 기기로 보냅니다" 등) 그대로다. 정본(d5 CMP-068, ADR-0272 결정 2)이 취소표 알림 시트 글을 따로 정하지 않아 정본 글을 먼저 정한다(구현 보고 B6과 같은 것)
 - BAT-040 R-659 브라우저 확인 못 함: 휴대폰 375 폭(Chrome 창이 538보다 좁아지지 않음)과 실제 탭 배경 보내기(B8은 흉내), B5 '오픈 전 로비 403 뒤 일반 예매 시작까지 60분 머묾'(RV6 단위 시험이 덮음)은 보지 못했다. 다음 브라우저 확인이나 세 엔진 시험(BAT-171 재배치 잡)에서 다시 본다(docs/review/browser-check/HOT-346.md)
 - BAT-040 R-659 기록: docs/security/asvs/frontend.md:218(16.5.2)의 결과 칸에 아직 대기실·사전 검증만 적혀 있다. 공연 상세 상태 파일·판매 자격 실패 시험(T12 `model/live-sale.test.mjs`, T16 `model/eligibility-store.test.mjs`)을 더한다(검증 담당 참고, 장부 다시 쓰기 때 함께)
+- BAT-170 R-660 리뷰 R170-4 낮음: 'use cache' 처리기의 `get`은 태그 시각을 못 읽으면 값을 없는 것으로 보는데 `getExpiration`은 못 읽으면 `0`(무효화한 적 없음)을 돌려준다. Redis가 100ms를 넘긴 요청에서 `revalidatePath`로 무효화한 값이 나갈 수 있다(정본 docs/frontend.md §5.18 '늦거나 끊기면 읽기는 없는 것으로', apps/web/server/use-cache-handler.mjs)
+- BAT-170 R-660 리뷰 R170-5 낮음: 월렛 워커 `activate`가 늘 `clients.claim()`을 불러 첫 설치 때도 열린 월렛 화면을 바로 맡는다. 정본 갱신 ①(`SKIP_WAITING`을 받은 뒤에만 `clientsClaim`)·코드 주석과 어긋난다. `wallet-sw.spec`으로 첫 설치 뒤 `controller`가 `null`인지 보거나 정본·주석 가운데 하나를 고친다(apps/web/app/sw.ts)
+- BAT-170 R-660 리뷰 R170-6 낮음: 예외 상자를 정본 셋으로 좁혀 관제 화면 `svg.chart` 20여 곳(dashboard·audit·bot-review)이 예외가 아니고, `LinkGraph`는 바깥 상자가 아니라 `svg`에 속성을 달았다. 웨이브 끝 게이트의 재배치 실패(그래프 바깥 상자의 예외 표시)와 함께 HOT-381(BAT-171)에서 고친다
+- BAT-170 R-660 리뷰 R170-7 낮음: G-6 (나)로 `tools/ci/brief.mjs`의 `JOBS`·`CI_AREAS`와 '잡 아홉' 글을 웨이브 전 꼴로 되돌렸다. BAT-171이 `web / reflow` 잡을 켤 때 잡 표·영역 표·잡 수 글을 함께 고치고, 지시서 잡 칸 시험을 더한다
+- BAT-170 R-660 동시 실행 다시 보기 W7L2-K12 중간(K2 미완·장애 몫, 웨이브 8 첫 계획에서 먼저): 연결을 버린 뒤 첫 다시 붙기를 바로 하고 붙으면 실패 셈을 0으로 되돌려, `CLUSTERDOWN`·`READONLY`·`LOADING`이 이어지는 동안 다시 붙기 간격이 늘지 않고 성한 샤드 연결도 함께 닫힌다(정본 §5.18 ⓔ, apps/web/server/cache-store.mjs)
+- BAT-170 R-660 동시 실행 다시 보기 W7L2-K14 중간(K2 미완·장애 몫): 연속 시간 초과를 클러스터 연결 하나에서 세어, 주 노드 하나만 멈추면 다른 샤드의 성공이 셈을 0으로 돌리고 멈춘 노드에 쓰인 명령이 쌓인다(`@redis/client` 6.3.0 명령 한도는 쓰기 전까지만). 섞인 요청의 멈춘 노드 시험을 더한다(정본 §5.18 ⓑ·ⓔ, cache-store.mjs, test-int/cache-cluster.int.test.mjs)
+- BAT-170 R-660 동시 실행 다시 보기: 두 처리기 모듈이 저마다 `selectRuntime()`으로 저장소를 만들어 파드 하나에 클러스터 연결이 둘이고 다시 붙기도 동시에 둘까지 나간다(정본 ⓓ '파드 안에서 한 번에 하나만'). 모듈 사이에 저장소 하나를 나눠 쓴다(cache-handler.mjs·use-cache-handler.mjs)
+- BAT-170 R-660 보안 다시 보기 W7L2-S13 낮음: 새 키 몫의 '아는 키' 목록(2만 개)에 시각이 없어 공유 캐시에서 TTL로 사라진 키도 아는 키로 남는다(정본 ③ 'TTL 안에 읽었거나 쓴 키'보다 넓음). 넣은 시각을 두고 1시간이 지난 키는 새 키로 센다. 가짜 시계 시험 3,599,999ms·3,600,000ms(cache-store.mjs)
+- BAT-170 R-660 잇기 다시 보기 W7L2-W9 낮음: `[ASVS v5.0.0-13.4.1]` 시험(`test-int/standalone-scm.build.test.mjs`)은 G-6 뒤 `budgets` 잡의 `test:build`에서 JUnit(`test-report-build.xml`)을 남기지만 `ci-web`에 ASVS 리포트 단계가 없어 ASVS 태그 요약에서 '미실행'으로 남을 수 있다. 확인하고 리포트에 잇는다
+- BAT-170 R-660 보안 다시 보기 참고: 요청 가로채기 `matcher`(apps/web/proxy.ts)는 확장자로 끝나는 경로를 빼서, `/events/` 밖 로케일 경로에 자산 확장자를 붙인 요청은 정규화를 거치지 않는다. 지금은 화면이 404라 공유 캐시 키가 늘지 않지만, 겹친 가드 한 겹만 남는 빈틈이라 matcher와 정규화 표를 함께 본다
+- BAT-170 R-660 구현 확인: 소비자 웹 standalone 산출물에 `server/*.test.mjs`가 함께 실린다. 배포물에서 시험 파일을 거르는 것은 HOT-450(`nosniff`·S3 지우기와 함께)에서 한다
+- BAT-170 R-660 정본 빈 경계(지금 구현 동작을 시험이 묶음): V170-23 ISR 항목 1MB [가정]의 단위가 없고 구현은 1,048,576바이트(③ 식은 1,000 단위로 정함, 어긋남), Buffer 값은 재지 않는다. V170-34 막 쥐려는 탭(pending)도 갱신 보류로 본다(정본은 held만). V170-39 인앱 안내의 닫기 주소(`closeHref`)를 정본이 정하지 않았다(docs/data.md, frontend.md §5.4, d5 §5.32)
+- BAT-170 R-660 구현이 정한 것(정본 확인): `shuffle-proof`·`checkout/return`이 아무 ID에 그리던 것이 정규화 표 밖이면 404로 바뀌었고, 새 키 몫은 값 쓰기만 센다(태그 쓰기 `markTags`는 뺀다). 정본 §5.18 ③·정규화 표 문장과 맞는지 본다
+- BAT-170 R-660 게이트: 게이트 ② 다시(18:10~18:28)에서 `test:build`가 한 번 흔들렸다(동시 복사, 다시 돌려 통과). 빌드 산출물 복사를 잠그거나 시험마다 따로 복사한다
+- BAT-170 R-660 틀린 구현 검사: V170-31(월렛 워커 다른 메시지 다섯, `wallet-sw.spec`)·V170-53(셸 `scroll-padding`, `keyboard.spec` T5)은 재배치 잡 몫이라 BAT-171에서, V170-52(OTP `maxLength`)는 ds 게이트에서 변이를 넣어 실패를 한 번 본다
+- BAT-170 R-660 브라우저 확인: 인앱 User-Agent 두 시나리오는 Claude in Chrome으로 못 봐 Playwright로 대신 봤다(정식 판정은 T10 `in-app.spec`, BAT-171 재배치 잡). `/en/events/…`와 `/en/…` 404 화면의 글·`lang`이 한국어다. 개발 서버가 `/open-in-browser`·`/my/tickets`에서 `searchParams`를 Suspense 밖에서 읽는다는 경고를 낸다(운영 서버엔 없음, docs/review/browser-check/HOT-380-390.md)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -191,3 +207,4 @@
 - 2026-11-14 화면 후속 R-550: SCR-016 후기 모달을 core-svc 후기 API(목록·요약·자격·쓰기/고치기/지우기·신고)에 연결하고 목업 `REVIEW_ITEMS`를 걷어 냈다. 운영자 조치(임시조치·노출 차단·해제) 컴포넌트도 더했다. SCR-053은 ticket-svc 기기 API(목록·등록·등록 코드·폐기)에 연결하고 실제 QR·코드 복사·필터·권한 가드를 붙였다. 후기 사진 올리기, 운영자 화면에 조치 컴포넌트 붙이기, 기기 키 등록일·파트너 상호 보완은 후속이다. 계획 `docs/review/plans/R-550-ui-followups.md`. 브라우저 확인은 BAT-420 heavy gate 뒤에 한다.
 - 2026-11-14 화면 후속 R-550 heavy gate: Docker 없이 로컬 웹 3000·관제 3002·가짜 API 4020으로 SCR-016(목록·요약·정렬·더 보기·쓰기·고치기·지우기·신고·운영자 조치·오류 상태)과 SCR-053(목록·필터·등록 코드·실제 QR·복사·등록·폐기·권한)을 눌러 봤다. 변이 30/30, 4관점 리뷰 높음 0·중간 2(신고 오류 배너·대화상자 초점) 모두 고침, 낮음 4. 웹 822·콘솔 46 통과, typecheck·build·doc-check·ledger/trace·records 통과. 기록 `docs/review/browser-check/BAT-550.md`·`docs/review/measurements/BAT-550-wave.md`.
 - 2026-11-16 웨이브 7 BAT-040(HOT-346, R-659): 공연 상세 예매 버튼에 선예매 대상 안내·판매 자격 없음의 이유 있는 비활성·매진·등급 매진·취소표 알림과 대기실 403 `sale-eligibility-required` 왕복을 이었다(ADR-0272). 리뷰 높음 2·웨이브 끝 S2·브라우저 BC040-1을 고치고, 틀린 구현 73개 중 살아남은 3개는 시험으로 잡았다. 자세한 것은 커밋 본문.
+- 2026-11-16 웨이브 7 BAT-170(HOT-380 ①·HOT-390 ①, R-660): 월렛 워커 갱신 보류·`no-store` 거르기, 공유 캐시 처리기(Valkey 클러스터·키 수 막기·정규 주소), 인앱 안내, FE-T31 판정 보강을 넣었다. 재배치 실패·SRI 26건은 BAT-171로 떼고 `web / reflow` 잡은 BAT-171에서 켠다(소유자 결정 (나)). 틀린 구현 71개 중 20개 살아남음, 17개는 시험으로 잡음. 자세한 것은 커밋 본문.
