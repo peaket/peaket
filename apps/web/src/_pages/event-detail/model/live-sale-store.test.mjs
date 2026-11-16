@@ -1,5 +1,6 @@
 // 공연 상세의 상태 파일 가게: 읽는 때(문서마다 한 번, 다시 보일 때 30초)·시간 한도(3초)·늦은 답(SCR-002, ADR-0272 결정 1 '읽는 때'·'요청', BUILD_ORDER HOT-346)
 // 시간은 가짜 시계로 한도 − 1ms와 한도를 잰다. 단언 값은 정본 값(30초·3초)을 적는다(코드 상수를 가져오지 않는다).
+// 끝나지 않는 받기 대역을 기다리는 틀린 구현이 실행기 한도(300초)까지 매달리지 않게 시험마다 시간 한도 5초를 둔다(코드 상수 3초·30초와 다른 값, 계획 '검증 뒤 정한 것' VV5, V040-42)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createLiveSaleStore } from './live-sale-store.ts';
@@ -41,7 +42,7 @@ function deferredFetch() {
   };
 }
 
-test('SCR-002 상태 파일은 start 때 한 번만 받는다(두 번 불러도 한 번)', async () => {
+test('SCR-002 상태 파일은 start 때 한 번만 받는다(두 번 불러도 한 번)', { timeout: 5_000 }, async () => {
   const time = fakeTime();
   let calls = 0;
   const s = createLiveSaleStore({ fetchFile: async () => (calls++, ok('ON_SALE', ['tier-r'])), now: time.now, setTimer: time.setTimer });
@@ -59,7 +60,7 @@ test('SCR-002 상태 파일은 start 때 한 번만 받는다(두 번 불러도 
   assert.equal(calls, 1, '주기 조회는 하지 않는다');
 });
 
-test('SCR-002 다시 보일 때 마지막으로 받은 지 29,999ms면 받지 않고 30,000ms면 한 번 더 받는다(시작 전 onVisible은 받지 않는다)', async () => {
+test('SCR-002 다시 보일 때 마지막으로 받은 지 29,999ms면 받지 않고 30,000ms면 한 번 더 받는다(시작 전 onVisible은 받지 않는다)', { timeout: 5_000 }, async () => {
   const time = fakeTime();
   const answers = [ok('ON_SALE'), ok('SOLD_OUT', []), ok('ON_SALE', ['tier-s'])];
   let calls = 0;
@@ -89,7 +90,7 @@ test('SCR-002 다시 보일 때 마지막으로 받은 지 29,999ms면 받지 �
   assert.equal(calls, 3, '그 뒤에도 30초마다 많아야 한 번');
 });
 
-test('SCR-002 3초 한도: 2,999ms에 온 답은 그대로, 3,000ms까지 답이 없으면 unknown이고 늦은 답이 오면 그때 바꾼다', async () => {
+test('SCR-002 3초 한도: 2,999ms에 온 답은 그대로, 3,000ms까지 답이 없으면 unknown이고 늦은 답이 오면 그때 바꾼다', { timeout: 5_000 }, async () => {
   // 2,999ms에 온 답
   let time = fakeTime();
   let f = deferredFetch();
@@ -127,7 +128,7 @@ test('SCR-002 3초 한도: 2,999ms에 온 답은 그대로, 3,000ms까지 답이
   assert.deepEqual(s.get(), { status: 'unknown' });
 });
 
-test('SCR-002 늦게 온 앞선 답은 버린다', async () => {
+test('SCR-002 늦게 온 앞선 답은 버린다', { timeout: 5_000 }, async () => {
   const time = fakeTime();
   const f = deferredFetch();
   const s = createLiveSaleStore({ fetchFile: f.fetchFile, now: time.now, setTimer: time.setTimer });
@@ -145,7 +146,7 @@ test('SCR-002 늦게 온 앞선 답은 버린다', async () => {
   assert.deepEqual(s.get(), { status: 'known', saleStatus: 'ON_SALE', soldOutTiers: ['tier-r'] });
 });
 
-test('SCR-002 다시 받기 30초는 보낸 시각부터: 보내고 20,000ms에 답이 와도 보낸 지 29,999ms면 받지 않고 30,000ms면 받는다', async () => {
+test('SCR-002 다시 받기 30초는 보낸 시각부터: 보내고 20,000ms에 답이 와도 보낸 지 29,999ms면 받지 않고 30,000ms면 받는다', { timeout: 5_000 }, async () => {
   // 계획 '시험 뒤 정한 것' S2, ADR-0272 결정 1 '읽는 때'(보낸 시각부터, 경계 30,000ms는 보낸다)
   const time = fakeTime();
   const f = deferredFetch();
@@ -164,7 +165,7 @@ test('SCR-002 다시 받기 30초는 보낸 시각부터: 보내고 20,000ms에 
   assert.equal(f.calls.length, 2, '보낸 지 30,000ms는 받는다(답을 받은 시각부터 세면 여기서 보내지 않는다)');
 });
 
-test('SCR-002 답이 없는 채 보낸 지 30,000ms면 새로 보내고 앞선 답은 늦게 와도 버린다', async () => {
+test('SCR-002 답이 없는 채 보낸 지 30,000ms면 새로 보내고 앞선 답은 늦게 와도 버린다', { timeout: 5_000 }, async () => {
   const time = fakeTime();
   const f = deferredFetch();
   const s = createLiveSaleStore({ fetchFile: f.fetchFile, now: time.now, setTimer: time.setTimer });

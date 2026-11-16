@@ -184,3 +184,12 @@ export function deniedWindow(phases: DetailSalePhase[], openAtMs: number, readAt
   const next = saleBoundaryAfter(phases, readAtMs);
   return next === undefined ? {} : { untilMs: next };
 }
+
+/**
+ * 명단 밖 주소 조각을 지운 주소(ADR-0272 결정 4 '주소 조각만 지운다', 검증 V040-28 뒤): 조각이 정확히 #sale-eligibility-required이면 경로 + 쿼리, 아니면 null.
+ * 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ */
+export function deniedHashCleanUrl(loc: { pathname: string; search: string; hash: string }): string | null {
+  void loc;
+  throw new Error('아직 없음');
+}

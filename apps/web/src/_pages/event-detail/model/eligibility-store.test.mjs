@@ -1,5 +1,6 @@
 // 팬별 판매 자격 가게: 문서마다 한 번, 실패·시간 한도(3초)는 자격 모름, 늦은 답(SCR-002, ADR-0272 결정 3 '부르는 때'·'실패', BUILD_ORDER HOT-346)
 // 시간은 가짜 타이머로 한도 − 1ms와 한도를 잰다. 단언 값은 정본 값(3초)을 적는다.
+// 끝나지 않는 받기 대역을 기다리는 틀린 구현이 실행기 한도(300초)까지 매달리지 않게 시험마다 시간 한도 5초를 둔다(코드 상수 3초·30초와 다른 값, 계획 '검증 뒤 정한 것' VV5, V040-42)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEligibilityStore } from './eligibility-store.ts';
@@ -47,7 +48,7 @@ function fakeTimers() {
   };
 }
 
-test('[ASVS v5.0.0-16.5.2] SCR-002 판매 자격 가게: 시작 전 idle, 한 번만 받고, 던짐·모양 틀림은 none', async () => {
+test('[ASVS v5.0.0-16.5.2] SCR-002 판매 자격 가게: 시작 전 idle, 한 번만 받고, 던짐·모양 틀림은 none', { timeout: 5_000 }, async () => {
   let calls = 0;
   const s = createEligibilityStore({ fetchEligibility: async () => (calls++, body(false)) });
   assert.deepEqual(s.get(), { status: 'idle' });
@@ -82,7 +83,7 @@ test('[ASVS v5.0.0-16.5.2] SCR-002 판매 자격 가게: 시작 전 idle, 한 �
   }
 });
 
-test('[ASVS v5.0.0-16.5.2] SCR-002 3초 안에 답이 없으면 none(2,999ms는 loading), 늦은 답이 오면 바꾼다', async () => {
+test('[ASVS v5.0.0-16.5.2] SCR-002 3초 안에 답이 없으면 none(2,999ms는 loading), 늦은 답이 오면 바꾼다', { timeout: 5_000 }, async () => {
   const t = fakeTimers();
   let answer;
   const s = createEligibilityStore({ fetchEligibility: () => new Promise((r) => (answer = r)), setTimer: t.setTimer });
@@ -106,7 +107,7 @@ test('[ASVS v5.0.0-16.5.2] SCR-002 3초 안에 답이 없으면 none(2,999ms는 
   assert.deepEqual(y.get(), known(false));
 });
 
-test('SCR-002 다시 받기는 시작했을 때만, 늦게 온 앞선 답은 버린다', async () => {
+test('SCR-002 다시 받기는 시작했을 때만, 늦게 온 앞선 답은 버린다', { timeout: 5_000 }, async () => {
   const answers = [];
   const s = createEligibilityStore({ fetchEligibility: () => new Promise((r) => answers.push(r)) });
   await s.refreshIfStarted();

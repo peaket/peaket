@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { bookingCta } from './cta.ts';
 import { toEventDetail } from './detail.ts';
 import {
+  deniedHashCleanUrl,
   deniedWindow,
   eligibilityGate,
   eligibilityJudgeAt,
@@ -280,6 +281,46 @@ test('[R040-2] 판정 시각의 조각이 GENERAL이거나 없을 때 창은 켠
   assert.deepEqual(gate({ phase: 'queue', phases: [], fan: { status: 'none' }, denied: none, nowMs: OPEN + 30 * 24 * 60 * 60_000 }), { reason: NOT_TARGET });
   // 판매 종료면 판정 시각이 없어 덮지 않는다
   assert.equal(gate({ phase: 'ended', fan: fan(true), denied: { untilMs: GEN }, nowMs: OPEN + 60_000 }), null);
+});
+
+// ── 검증에서 살아남은 틀린 구현을 잡는 시험(계획 '검증 뒤 정한 것' VV1~VV3, ADR-0272 결정 3·4 바로잡음) ──
+test('[V040-34][Q-T36 ⑧] 오픈 전에 켠 명단 밖 알림이고 일반 예매가 오픈 시각에 바로 시작하면 이유 글은 "이 회차의 선예매 대상이 아닙니다. 일반 예매는 {오픈 시각 M/D(요일) HH:MM}에 시작합니다"다', () => {
+  const h = 60 * 60_000;
+  const early = [
+    { kind: 'PRESALE', startsAtMs: OPEN - h, endsAtMs: OPEN, limit: 2 },
+    { kind: 'GENERAL', startsAtMs: OPEN, endsAtMs: SALE_END, limit: 3 },
+  ];
+  const win = deniedWindow(early, OPEN, OPEN - 10 * 60_000);
+  assert.deepEqual(win, { untilMs: OPEN }, '창은 오픈 시각(판정 시각의 GENERAL이라 켠 시각 뒤 첫 경계)');
+  // 판정 시각(오픈)과 같은 시각에 시작하는 GENERAL을 고른다: 오픈 11/20(금) 20:00 KST
+  assert.deepEqual(gate({ phase: 'lobby', phases: early, fan: fan(true, early), denied: win, nowMs: OPEN - 60_000 }), {
+    reason: '이 회차의 선예매 대상이 아닙니다. 일반 예매는 11/20(금) 20:00에 시작합니다',
+  });
+  // 창 끝(지금 = 오픈)이면 덮지 않는다
+  for (const phase of ['queue', 'lobby']) assert.equal(gate({ phase, phases: early, fan: fan(true, early), denied: win, nowMs: OPEN }), null, phase);
+});
+
+test('[V040-34] 이유 글은 지금이 아니라 판정 시각으로 고른다: 오픈 전에는 오픈 시각 뒤 첫 GENERAL이다', () => {
+  const h = 60 * 60_000;
+  // 오픈 전 조각이 섞인 공개 조각(계약 밖이지만 toSalePhases가 받는 모양)
+  const mixed = [
+    { kind: 'GENERAL', startsAtMs: OPEN - 2 * h, endsAtMs: OPEN - h, limit: 4 },
+    { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: GEN, limit: 2 },
+    { kind: 'GENERAL', startsAtMs: GEN, endsAtMs: SALE_END, limit: 3 },
+  ];
+  // 지금 = 오픈 − 3시간이고 판정 시각 = 오픈. 지금 뒤 첫 GENERAL(오픈 − 2시간 = 11/20(금) 18:00)이 아니라 G(11/21(토) 00:30)
+  assert.deepEqual(gate({ phase: 'closed', phases: mixed, fan: fan([true, false, true], mixed), nowMs: OPEN - 3 * h }), { reason: REASON });
+  // 판정 시각이 이미 시작한 GENERAL 안이고 뒤 GENERAL이 없으면(명단 밖 알림, queue) 첫 문장만
+  assert.deepEqual(gate({ phase: 'queue', fan: fan(true), denied: { untilMs: SALE_END }, nowMs: GEN + h }), { reason: NOT_TARGET });
+});
+
+test('[V040-28][Q-T36 ⑧] 명단 밖 조각을 지운 주소는 경로와 쿼리를 남기고 조각만 뺀다(다른 조각·대소문자·뒤 글자·빈 조각은 null)', () => {
+  const H = '#sale-eligibility-required';
+  assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '?ref=a', hash: H }), '/events/e1?ref=a');
+  assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '', hash: H }), '/events/e1');
+  for (const hash of ['#Sale-eligibility-required', '#SALE-ELIGIBILITY-REQUIRED', '#sale-eligibility-required-x', '#sale-eligibility-required ', '#sale-eligibility-required&x=1', 'sale-eligibility-required', '#sale-eligibility', '#', '']) {
+    assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '?ref=a', hash }), null, JSON.stringify(hash));
+  }
 });
 
 // toFanEligibility는 T16(가게)에서 바깥 경계로 본다. 여기서는 모양 틀림이 none인지만

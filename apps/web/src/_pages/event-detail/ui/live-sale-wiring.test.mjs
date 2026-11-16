@@ -20,3 +20,19 @@ test('[R040-1] 공연 상세 화면 코드는 상태 파일 가게의 start()·o
   }
   assert.match(stripComments(readFileSync(join(dir, 'sale-live.ts'), 'utf8')), /\bcreateLiveSaleDriver\b/, 'sale-live.ts가 받기 운전자를 쓴다');
 });
+
+test('[V040-28] useDeniedMarker는 deniedHashCleanUrl의 값으로 history.replaceState를 부른다', () => {
+  // 계획 '검증 뒤 정한 것' VV4, ADR-0272 결정 4 'history.replaceState로 주소 조각만 지운다'. 실제 주소는 브라우저 확인 B5가 본다
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  const src = stripComments(readFileSync(join(dir, 'sale-live.ts'), 'utf8'));
+  const at = src.indexOf('export function useDeniedMarker');
+  assert.ok(at >= 0, 'useDeniedMarker가 있다');
+  const rest = src.slice(at + 1);
+  const next = rest.search(/\nexport /);
+  const body = next < 0 ? rest : rest.slice(0, next);
+  const made = /(?:const|let)\s+(\w+)\s*=\s*deniedHashCleanUrl\(/.exec(body);
+  assert.ok(made, 'deniedHashCleanUrl(의 결과를 이름에 담는다');
+  const call = /history\.replaceState\(\s*[^,()]+(?:\([^()]*\))?[^,()]*,\s*[^,()]+,\s*(\w+)\s*\)/.exec(body);
+  assert.ok(call, 'history.replaceState(를 부른다');
+  assert.equal(call[1], made[1], 'replaceState의 셋째 인자가 deniedHashCleanUrl의 결과다');
+});
