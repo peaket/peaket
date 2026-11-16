@@ -571,3 +571,27 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 
 - 통합 시험은 구현 뒤 아직 기록이 없다. core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`, purchase-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/attendee-reader.int.test.ts`(도커 잠금 아래).
 - 틀린 구현 표본에서 R5(⑩이 DB 인자를 안 봄)와 R6(REVOKE)을 함께 보면 놓침을 바로 확인할 수 있다.
+
+### 다시 보기(고친 곳)
+
+- **누가·언제·범위**: 리뷰 담당(세션 `l3w7-audit-review`), 2026-11-16. `git diff 4633d2b4..a388e0e9`만 봤다. 커밋은 계획 보충 `0cc5c2c9`, 시험 `11705bcf`·`cfed9694`·`a388e0e9`, 구현 `8a7586e8`, 시험 이의 `ba782a27`이다. 파일은 `a388e0e9` 기준으로 읽었고, 시험은 돌리지 않았다.
+- **역할 경계**: 구현 커밋 `8a7586e8`은 시험 파일을 건드리지 않았다(`client-ip.ts`는 `src/` 아래 제품 파일). 시험 커밋 `11705bcf`의 제품 코드는 '아직 없음'을 던지는 `clientIpOf` 뼈대와 선택 인자(`_access?`, `clientIp?`) 타입 고침뿐이다. `a388e0e9`은 시험 이의 `ba782a27`(시험 도우미 `FailableExportStore`가 접속지 인자를 버림)에 따른 시험 쪽 고침이다. 0021·0022는 아직 `origin/develop`(`2c20b915`)에 없어서, 이 가지에서 0021을 고쳐 써도 이미 적용된 마이그레이션과 어긋나지 않는다.
+
+| 지적 | 판정 | 근거 |
+| --- | --- | --- |
+| R2 접속지 | 고쳐짐 | 정본: settlement.md §9 '접속지', data.md §2 `source_ip`, ASVS 16.2.1 행, internal-management-plan §4.5. 0021이 `source_ip inet`과 `CHECK (source_ip IS NOT NULL) NOT VALID`를 더한다. 보기·내려받기 모두 행위자 확인 자리에서 접속지가 IP 모양이 아니면(빈 문자열, 칸 없음 포함) 원천을 읽기 전에 실패한다(fail-closed, 오류 글에 값이 없다). 접속지는 DOWNLOAD·LIST 접속기록에만 들어가고, `attendee_export` 이력 행·`exportView`·이력 응답·명단 응답에는 없다(단위·HTTP·Drizzle 가짜 db·실제 DB 시험이 각각 단언한다). 새 로그 줄은 없다 |
+| R3 J-T26 ④ 문구 | 고쳐짐 | settlement.md J-T26 ④가 '1,000건 페이지와 1건 페이지(원천은 `limit`보다 많이 주지 않는다)'로 바뀌어 시험과 맞는다 |
+| R5 소비자 DB | 고쳐짐 | 새 시험 `COV2-06 ⑩ R5`가 `startCoreConsumers({…})` 인자에서 `database` 칸의 이름을 뽑고, 그 이름이 `assertDatabaseRole(…, 'core_app')`로 확인된 DB인지, `core_partner`·`core_ops`가 아닌지를 본다. `partnerDatabase`를 넘기는 틀린 조립을 잡는다 |
+| R6 REVOKE | 고쳐짐 | `review-grants.test.ts`가 REVOKE 문이 없음과 GRANT 밖의 문이 없음을 함께 단언한다 |
+
+- **새 결함을 찾아본 곳**:
+  - fail-open: 접속지를 정하지 못하면 원천·회차·재인증보다 먼저 거절한다. 찾지 못했다.
+  - 접속지가 이력 응답·로그로 새는 곳: Drizzle `list`는 `attendee_export`만 읽고, `ExportActor`를 로그에 싣는 곳이 없다. 찾지 못했다.
+  - 0021 CHECK가 기존 행을 깨는 곳: `action`은 기본값 `DOWNLOAD`·NOT NULL로 먼저 더해지고, 0019 행은 `export_id`·`reason`·`format`이 NOT NULL이었다. 그래서 바로 검사되는 모양 CHECK를 통과하고, 접속지 CHECK는 NOT VALID라 옛 행에 걸리지 않는다. 시험은 빈 DB에 전체 마이그레이션을 돌려 옛 행 경우를 실제로 만들지는 않는다. `not valid` 글은 0021 원문 시험이 본다. 찾지 못했다.
+  - 믿을 수 없는 머리를 믿는 곳: 아래 N1 하나.
+
+| 번호 | 심각도 | 파일:줄 | 무엇이 문제인가 | 근거 | 고칠 쪽 | 처리 |
+| --- | --- | --- | --- | --- | --- | --- |
+| N1 | 낮음(확인 필요) | `services/core-svc/src/modules/export/inbound/client-ip.ts` 8~13줄 | 한 값짜리 `x-forwarded-for`를 그대로 믿는다. 정본 입구 규칙(infra.md §3 규칙 2: 입구가 받은 `x-forwarded-` 머리를 지우고 클라이언트 IP 하나로 다시 쓴다)과 identity-svc 관리 계정 로그인 규칙에 맞으므로 결함은 아니다. 다만 입구를 거치지 않고 core-svc 앱 포트에 닿는 클러스터 안 호출이 있다면 접속지를 꾸밀 수 있다. 또 머리가 없거나 틀리면 연결 상대 주소(운영에서는 입구 파드 주소)가 조용히 남는다. 정본이 정한 대체 동작이지만 접속기록 값으로는 클라이언트 IP가 아니다 | settlement.md §9 '접속지', infra.md §3 규칙 2 | plan | 정리 목록 후보. core-svc 앱 포트 NetworkPolicy가 입구만 받는지 확인하고, 운영에서 대체 주소가 쓰이면 경고를 남길지 정한다 |
+
+- **결론**: 다시 볼 지적 넷(R2·R3·R5·R6)은 모두 고쳐졌다. 새 지적은 낮음 1(N1, 확인 필요)이고, 이번에 고칠 것(높음·보안·통과 기준)은 없다. R1·R4·R7은 처음 리뷰대로 정리 목록 후보로 남는다.
