@@ -75,6 +75,8 @@ docs/api/proto/
 | purchase-svc → ticket-svc | `IssueTickets` | 발권(승인 뒤 실패하면 같은 주문 ID로 다시 보낸다, ADR-0106) | `order_id` | docs/features/payment.md §2·§3, docs/features/offline-gate.md §2 | 있음 |
 | purchase-svc → ticket-svc | `CancelTickets` | 예매 취소 때 티켓 키 폐기와 상태 변경 | `cancellation_id` | docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1 | 있음 |
 | purchase-svc → ticket-svc | `OperatorCancelTickets` | 부정 예매 운영자 취소의 티켓 단계(보유자와 무관, 양도 요청 FRAUD_LOCK 철회, 기대 보유자와 다르면 건너뜀, 2026-11-05 ADR-0197) | (`approval_id`, `ticket_id`) | docs/features/transfer-refund.md §7.4 | 있음 |
+| purchase-svc → ticket-svc | `EventCancelTickets` | 회차 취소 일괄 환불의 티켓 단계(결제자·보유자·진행 중 양도·입장 상태와 무관, 이미 환급·무효인 표는 그대로, 추천 적용 2026-11-16, BUILD_ORDER GAT-110) | (`cancellation_id`, `ticket_id`) | docs/features/transfer-refund.md §5 '대상 선택과 보류 취소 전환' | 있음 |
+| purchase-svc → ticket-svc | `GetEntryRecords` | 입장 기록 마감 뒤 환급 전에 들어감·통과 스캔이 있는지 읽기(추천 적용 2026-11-16, BUILD_ORDER GAT-090) | — | docs/features/transfer-refund.md §3.1 '입장 기록 대조' | 있음 |
 | core-svc review → ticket-svc | `CheckReviewEligibility` | 관람 후기 작성 자격 | — | docs/data.md(관람 후기), docs/architecture.md §3.1 | 있음(서비스 맵) |
 | core-svc shop → ticket-svc | `ListHeldTickets` | 티켓 연동 부가 상품의 보유 확인 | — | docs/architecture.md §3.2 | 있음 |
 | 팬 웹 앱 서버 → ticket-svc | `ListTickets` | 월렛 목록(openapi GET /v1/tickets). 계정의 티켓을 최신 발권순으로 커서 페이지로 준다. 티켓 키는 목록에 싣지 않고 QR 공개 포인터만 싣는다(2026-11-13, BUILD_ORDER HOT-160) | 읽기라 없음 | docs/features/payment.md §2, openapi `/v1/tickets` | 있음 |

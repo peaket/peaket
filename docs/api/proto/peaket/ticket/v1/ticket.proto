@@ -36,6 +36,16 @@ service TicketService {
   // ③ 나머지는 키를 바로 폐기하고(스캐너에는 1분 변경분으로 간다) 환급 상태로 둔다. (approval_id, ticket_id)로 멱등하다(docs/features/transfer-refund.md §7.4)
   rpc OperatorCancelTickets(OperatorCancelTicketsRequest) returns (OperatorCancelTicketsResponse);
 
+  // 회차 취소 일괄 환불의 티켓 단계(부르는 쪽: purchase-svc 일괄 환불 실행기, 추천 적용 2026-11-16, BUILD_ORDER GAT-110, R-T24).
+  // 결제자·보유자·진행 중 양도 요청·입장 상태·공연 시작과 무관하다(docs/features/transfer-refund.md §3.1 '회차 취소 일괄 환급' 행, §5 '대상 선택과 보류 취소 전환').
+  // 표마다 행 잠금 안에서 이미 환급·무효인 표는 그대로 두고, 나머지는 진행 중 양도 표시를 끄고 키를 바로 폐기해(스캐너에는 1분 변경분으로 간다) 환급 상태로 둔다.
+  // (cancellation_id, ticket_id)로 멱등하다. 없는 표·다른 회차 표가 하나라도 있으면 INVALID_ARGUMENT이고 아무것도 바꾸지 않는다.
+  rpc EventCancelTickets(EventCancelTicketsRequest) returns (EventCancelTicketsResponse);
+
+  // 입장 기록 대조(부르는 쪽: purchase-svc 환급 실행기, 추천 적용 2026-11-16, BUILD_ORDER GAT-090, P-T19). 읽기만 한다.
+  // 입장 시작 뒤 취소의 환급을 입장 기록 마감 뒤에 실행하기 전에, 그 표에 들어감·통과 스캔이 있는지 본다(docs/features/transfer-refund.md §3.1 '입장 기록 대조').
+  rpc GetEntryRecords(GetEntryRecordsRequest) returns (GetEntryRecordsResponse);
+
   // 관람 후기 작성 자격. core-svc review가 쓸 때마다 부른다(논리 DB 사이 조인을 하지 않는다).
   rpc CheckReviewEligibility(CheckReviewEligibilityRequest) returns (CheckReviewEligibilityResponse);
 
@@ -172,6 +182,63 @@ message OperatorCancelOutcome {
 
 message OperatorCancelTicketsResponse {
   repeated OperatorCancelOutcome outcomes = 1;
+}
+
+message EventCancelTarget {
+  string ticket_id = 1;
+  // purchase-svc가 정한 취소 ID(일괄 환불 항목의 cancellation_id). ticket_cancellation의 멱등 키다
+  string cancellation_id = 2;
+}
+
+message EventCancelTicketsRequest {
+  // 회차 취소 요청 ID(감사·로그용)
+  string cancellation_request_id = 1;
+  string event_id = 2;
+  // 1~200장 [가정], 같은 표 두 번 금지. 모든 ID는 소문자 UUID
+  repeated EventCancelTarget targets = 3;
+}
+
+enum EventCancelResult {
+  EVENT_CANCEL_RESULT_UNSPECIFIED = 0;
+  // 키를 폐기하고 환급 상태로 두었다(같은 cancellation_id의 다시 호출도 이 값)
+  EVENT_CANCEL_RESULT_CANCELED = 1;
+  // 이미 환급·무효인 표라 바꾸지 않았다
+  EVENT_CANCEL_RESULT_ALREADY_ENDED = 2;
+}
+
+message EventCancelOutcome {
+  string ticket_id = 1;
+  EventCancelResult result = 2;
+  string order_id = 3;
+  // 지금 보유자(결제자와 다를 수 있다. 알림용, 환급은 결제자에게 간다)
+  string holder_account_id = 4;
+  // 진행 중 양도 표시를 이번 호출이 껐는가
+  bool transfer_withdrawn = 5;
+}
+
+message EventCancelTicketsResponse {
+  // 요청 차례
+  repeated EventCancelOutcome outcomes = 1;
+}
+
+message GetEntryRecordsRequest {
+  // 1~100장 [가정], 소문자 UUID, 같은 표 두 번 금지. 아니면 INVALID_ARGUMENT
+  repeated string ticket_ids = 1;
+}
+
+message EntryRecord {
+  string ticket_id = 1;
+  // ticket-svc에 그 표가 있는가. 없으면 부르는 쪽은 환급하지 않는다(모르는 것은 입장한 것과 같게 다룬다)
+  bool found = 2;
+  // 들어감·통과 스캔(scan_event direction IN, result PASS)이 하나라도 있는가. 거절·나감 스캔만 있으면 거짓
+  bool entered = 3;
+  // entered가 참일 때 가장 이른 들어감·통과 시각
+  google.protobuf.Timestamp first_entered_at = 4;
+}
+
+message GetEntryRecordsResponse {
+  // 요청 차례
+  repeated EntryRecord records = 1;
 }
 
 message CheckReviewEligibilityRequest {

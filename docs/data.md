@@ -958,6 +958,7 @@ erDiagram
         timestamptz next_refund_at "다음 재시도 시각(REFUND_PENDING). 없으면 곧 시도한다. 1분→5분→15분→1시간→6시간 [가정](R-547)"
         timestamptz refund_failed_at "재시도를 다 썼거나 결제사 업무 거절로 CS 처리함 '환급 실패'에 넘길 시각. 있으면 실행기가 건너뛴다(R-547)"
         text refund_last_error "마지막 실패 결과 코드(CANCELLED·PENDING·UNKNOWN·REJECTED). 계좌·결제 참조는 싣지 않는다(R-547)"
+        timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
     fraud_cancellation_request {
         uuid approval_id PK "ops 승인 업무 ID(FRAUD_ACTION). CancelFraudTickets의 멱등키(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4)"
@@ -1959,6 +1960,24 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    event_cancellation_request {
+        uuid request_id PK "ops DB의 회차 취소 요청(접수·판정·2인 확정, 0011, R-592). purchase DB의 같은 이름 표는 확정 뒤 일괄 환불 작업이다. 칸 넷 이하는 추천 적용 2026-11-16, BUILD_ORDER GAT-110"
+        uuid event_id "진행 중 요청은 회차마다 하나(부분 유일 색인)"
+        text kind "CANCEL|POSTPONE. commander 요청은 CANCEL만"
+        text status "REQUESTED|JUDGED|PENDING_APPROVAL|APPROVED|RUNNING|PAUSED|REFUND_WINDOW|COMPLETED|REJECTED"
+        text requested_via "PARTNER|COMMANDER(docs/planning/03 §2.11 T1·T2)"
+        uuid promoter_id "파트너 요청의 테넌트(세션 값, 소속 확인 뒤). commander 요청은 NULL"
+        text reason "요청 사유(파트너 사유 또는 commander 사유)"
+        text fault_opinion "ORGANIZER|FORCE_MAJEURE|CONTENT_CHANGE, 파트너의 참고값"
+        text evidence_ref "증빙 문서 종류·번호·날짜 글(200자 [가정]). 파일은 받지 않는다"
+        timestamptz new_starts_at "연기의 바뀐 공연 시작(POSTPONE이면 필수, CANCEL이면 NULL)"
+        text fault "귀책 판정"
+        jsonb dry_run "판정 때 purchase-svc PreviewEventRefund 결과(대상 주문 수·환급 총액·배상 대상·총액·결제사별 주문 수와 예상 시간). 승인자 반려 때 지운다"
+        text rejection_reason "판정 전 반려(REJECTED)의 사유"
+        text judged_by
+        text approved_by "판정자와 다르다"
+        bigint version "조건부 갱신"
+    }
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"
         text event_key "멱등 키. kind와 함께 유니크(같은 경보는 한 건으로 모은다)"
@@ -2823,6 +2842,9 @@ erDiagram
 | 취소 처리 중복 및 이중 환불 발생 | `cancel-{cancellationId}` 멱등키를 쓴다. 포트원은 남은 취소 가능 금액이 맞는지 미리 확인한다. 응답이 시간 초과되면 3시간 안에는 같은 멱등키로 다시 보낸다. 3시간이 지난 뒤 다시 보낼 때는 결제 상태를 먼저 단건 조회해 그전 상태를 확인한다(docs/api/guidelines.md §4). 결제 후 일반 취소는 취소 건마다 `payment_cancel` 행을 첫 전송 직전에 결제 행 잠금 안에서 만들고 금액·사유·전액 여부·기대 잔액을 저장해 재시도에도 같은 본문을 보낸다. 끝남은 그 행의 `CANCELED`로만 가르고, 성공 반영은 행마다 한 번이다. 같은 결제의 일반 취소는 한 번에 하나씩 보낸다(진행 중 행이 10분 [가정] 안이면 결과 모름으로 답하고 보내지 않는다). 그래서 3시간 뒤 조회의 잔액으로 이번 취소의 반영을 가른다(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액') | 결제 단위 테스트 (P-T21), 실제 PostgreSQL·포트원 모양 시뮬레이터의 겹친 재시도·응답 유실 시험(GAT-080 P2~P6) |
 | 같은 주문의 표 둘을 동시에 취소(일괄 환불 작업자 여럿, 팬의 연속 취소) | payment-svc가 같은 결제의 일반 취소를 하나씩 보낸다(위 행). purchase-svc 일괄 환불은 같은 주문의 표를 한 작업자에 모아 차례로 처리해, 결과 모름이 자동 정지의 실패율에 섞이지 않게 한다. 팬의 연속 취소는 뒤 취소가 결과 모름 → 환급 재시도(1분 [가정])로 이어진다(추천 적용 2026-11-16, BUILD_ORDER GAT-080) | 일괄 환불 단위 시험(GAT-080 E1), 결제 통합 시험(GAT-080 P3) |
 | 부정 예매 운영자 취소가 팬 취소·양도·스캔·같은 승인의 겹친 호출과 겹침 | ticket-svc `OperatorCancelTickets`가 팬 취소와 같은 티켓 행 잠금 안에서 상태·입장 기록·보유자를 다시 보고, (승인 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. purchase-svc는 승인 ID와 표 ID에서 정해지는 취소 ID로 `order_cancellation`을 만들어(진행 중 취소 1건 유일) 겹친 호출에도 취소 행·환급이 표마다 하나다. 결과는 (승인 ID, 표) 기본 키로 덮어 쓴다(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4) | ticket·purchase 통합 시험(GAT-080 F4·F5·F16) |
+| 입장 시작 뒤 보류 취소(`REQUESTED`)를 환급 실행기와 회차 취소 전환이 동시에 집음, 실행기가 CS 무효(`VOIDED`)를 덮음 | 둘 다 조건부 갱신(`status = 'REQUESTED'`)으로 바꾼 쪽만 이어 간다. 실행기는 바꾼 행만 결제사로 보내고, 전환은 바꾼 행만 공제 0의 일괄 환불 항목으로 쓴다(진 쪽은 건너뛰거나 항목 `FAILED`). 실행기의 환급 성공·재시도 예약·실패 표시도 `REFUND_PENDING`일 때만 써서 무효 행을 바꾸지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §3.1 '입장 기록 대조'·§5 '대상 선택과 보류 취소 전환') | purchase 통합 시험(GAT-090 A·R-T24) |
+| 회차 취소 표 취소가 팬 취소·양도·스캔·부정 예매 취소와 같은 표에 겹침 | ticket-svc `EventCancelTickets`가 같은 티켓 행 잠금 안에서 상태만 다시 보고 이미 환급·무효인 표는 그대로 둔다. (취소 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. purchase는 진행 중 취소 1건 유일(§2)로 같은 표의 둘째 취소 행을 막는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110) | ticket·purchase 통합 시험(R-T24, GAT-110 E) |
+| 회차 취소 확정과 진행 중 결제(대상을 고른 뒤에 결제가 끝난 주문) | 확정이 일괄 환불 시작 전에 판매를 멈춰(새 홀드·결제 접수 423) 새 주문을 막고, 실행기가 틱마다 대상을 다시 골라 늦게 끝난 주문의 표를 더하며(요청·표에서 정해지는 취소 ID라 하나만), 그 회차에 끝나지 않은 주문이 남아 있으면 COMPLETED로 가지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, ADR-0280) | purchase·ops 통합 시험(R-T37 ④⑥) |
 | 같은 승인 업무에 승인 두 번, 요청자 본인 승인 | 자식 표 `approval_vote`의 `UNIQUE (request_id, approver_id)`와 `CHECK (approver_id <> requester_id)`(§2, ADR-0086), 상태 전이에 버전을 쓴다 | R-T7(요청자 본인 승인). 같은 승인자 두 번은 `approval_vote` 유일 제약 |
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
