@@ -101,6 +101,12 @@
 - HOT-250: 창 안의 조건 없는 거부 규칙(판매 휴지 시간 등)이 단계 요약에서 명단 없는 PRESALE 조각으로 보이고 배지가 붙는다. 판매 승인이 그 조각으로 진입 자격 창을 만들면 모두 막힌다. 정본(ADR-0261 결정 3)을 손볼지 LCH-080과 함께 정한다(packages/validation sale-policy phases.ts)
 - HOT-250: 파트너 화면이 평가 함수를 원본 TS로 쓰려면 파트너 앱 의존 목록과 `transpilePackages`에 `@peaket/validation`이 필요하다(Next 운영 빌드는 development 조건을 켜지 않는다). HOT-251을 시작할 때 본다(apps/partner next.config.ts)
 - HOT-250: 거절 기록(`partner_production_denied`·`sale_eligibility_locked_attempt`)의 계정은 플랫폼 로거가 가려, 누가 시도했는지는 추적 ID로 요청 로그의 `accountRef`와 이어야 한다. 좌석맵·이미지도 같은 꼴이라 기록 줄에 `accountRef`를 함께 실을지 정한다(ASVS 16.3.2, packages/platform log.ts)
+- BAT-040 R-659 리뷰 R040-3 중간: 명단 밖 알림이 켜져 ⑦이 "이 회차의 선예매 대상이 아닙니다"인데 팬 자격이 `eligible`이면(ADR-0272 결정 4의 경우) 같은 묶음의 '선예매' 줄은 "{명단} 선예매 대상입니다 …"를 그대로 보여 한 화면에 두 말이 함께 나온다. 정본(결정 3 '선예매 대상 안내'·결정 4) 문장을 먼저 정한다(apps/web/src/_pages/event-detail/ui/Booking.tsx)
+- BAT-040 R-659 리뷰 R040-5 낮음: 선착순 공연의 오픈 전에 판매 자격 없음인 팬에게도 사전 사람 확인 카드를 보인다. 예매 제한 팬은 같은 까닭(입장 확정이 막음)으로 숨기므로(ADR-0213 결정 2) 자격 없음 팬도 숨길지 정본(d5 §5.2 '사전 사람 확인'·ADR-0272 결정 3)을 먼저 정한다(ui/Booking.tsx)
+- BAT-040 R-659 다시 보기 R040-6 낮음(확인 거리): 탭을 숨긴 채 오픈 시각을 지나고 늦춰진 타이머가 아직 돌지 않았으면, 다시 보일 때 두 `visibilitychange` 듣기 가운데 `BookingProvider`의 것이 먼저 단계를 `queue`로 바꿔 운전자가 단계를 늦게 받는 차례가 생긴다. 브라우저 B8은 `visibilityState` 흉내로만 봤다(ui/sale-live.ts·ui/Booking.tsx)
+- BAT-040 R-659 브라우저 확인 B6: [취소표 알림 받기]를 처음 켤 때 뜨는 알림 권한 안내 시트의 제목·설명이 오픈 알림 글("오픈 알림을 이 기기로 보냅니다" 등) 그대로다. 정본(d5 CMP-068, ADR-0272 결정 2)이 취소표 알림 시트 글을 따로 정하지 않아 정본 글을 먼저 정한다(구현 보고 B6과 같은 것)
+- BAT-040 R-659 브라우저 확인 못 함: 휴대폰 375 폭(Chrome 창이 538보다 좁아지지 않음)과 실제 탭 배경 보내기(B8은 흉내), B5 '오픈 전 로비 403 뒤 일반 예매 시작까지 60분 머묾'(RV6 단위 시험이 덮음)은 보지 못했다. 다음 브라우저 확인이나 세 엔진 시험(BAT-171 재배치 잡)에서 다시 본다(docs/review/browser-check/HOT-346.md)
+- BAT-040 R-659 기록: docs/security/asvs/frontend.md:218(16.5.2)의 결과 칸에 아직 대기실·사전 검증만 적혀 있다. 공연 상세 상태 파일·판매 자격 실패 시험(T12 `model/live-sale.test.mjs`, T16 `model/eligibility-store.test.mjs`)을 더한다(검증 담당 참고, 장부 다시 쓰기 때 함께)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -184,3 +190,4 @@
 - 2026-11-13 웨이브 4 BAT-620 heavy gate(R-545): `origin/develop` `6ff2fab7` 위로 rebase(장부 README 충돌은 upstream을 받고 다시 써서 양쪽 살림). core-svc test-int 226 통과·1 건너뜀, 변이 30/30, 4관점 리뷰 높음 0·중간 2(재인증 토큰 미검증·감사 로그 없음, identity/ops-svc 몫), CI 로컬 등가(typecheck 41/41·lint 0·단위 301·doc-check 0·ledger/trace·records·contracts gen:check·api-client 113) 통과. 화면 변경이 없어 브라우저 확인은 생략했다. 보고서 `docs/review/measurements/BAT-620-wave.md`.
 - 2026-11-14 화면 후속 R-550: SCR-016 후기 모달을 core-svc 후기 API(목록·요약·자격·쓰기/고치기/지우기·신고)에 연결하고 목업 `REVIEW_ITEMS`를 걷어 냈다. 운영자 조치(임시조치·노출 차단·해제) 컴포넌트도 더했다. SCR-053은 ticket-svc 기기 API(목록·등록·등록 코드·폐기)에 연결하고 실제 QR·코드 복사·필터·권한 가드를 붙였다. 후기 사진 올리기, 운영자 화면에 조치 컴포넌트 붙이기, 기기 키 등록일·파트너 상호 보완은 후속이다. 계획 `docs/review/plans/R-550-ui-followups.md`. 브라우저 확인은 BAT-420 heavy gate 뒤에 한다.
 - 2026-11-14 화면 후속 R-550 heavy gate: Docker 없이 로컬 웹 3000·관제 3002·가짜 API 4020으로 SCR-016(목록·요약·정렬·더 보기·쓰기·고치기·지우기·신고·운영자 조치·오류 상태)과 SCR-053(목록·필터·등록 코드·실제 QR·복사·등록·폐기·권한)을 눌러 봤다. 변이 30/30, 4관점 리뷰 높음 0·중간 2(신고 오류 배너·대화상자 초점) 모두 고침, 낮음 4. 웹 822·콘솔 46 통과, typecheck·build·doc-check·ledger/trace·records 통과. 기록 `docs/review/browser-check/BAT-550.md`·`docs/review/measurements/BAT-550-wave.md`.
+- 2026-11-16 웨이브 7 BAT-040(HOT-346, R-659): 공연 상세 예매 버튼에 선예매 대상 안내·판매 자격 없음의 이유 있는 비활성·매진·등급 매진·취소표 알림과 대기실 403 `sale-eligibility-required` 왕복을 이었다(ADR-0272). 리뷰 높음 2·웨이브 끝 S2·브라우저 BC040-1을 고치고, 틀린 구현 73개 중 살아남은 3개는 시험으로 잡았다. 자세한 것은 커밋 본문.
