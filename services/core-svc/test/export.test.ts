@@ -18,12 +18,12 @@ const OTHER = randomUUID();
 const EVENT = randomUUID();
 const IDENTITY = new FakeIdentity();
 const merch = new MemoryMerchOrderStore();
-/** failExport를 켜면 내려받기 기록(recordExport)이 던진다 */
+/** failExport를 켜면 내려받기 기록(recordExport)이 던진다. 접속지(둘째 인자)는 받은 그대로 넘긴다(시험 이의 R2: 버리면 메모리 저장소가 접속지를 남길 수 없다) */
 class FailableExportStore extends MemoryAttendeeExportStore {
   failExport = false;
-  override async recordExport(record: AttendeeExportRecord): Promise<void> {
+  override async recordExport(record: AttendeeExportRecord, access: { clientIp: string }): Promise<void> {
     if (this.failExport) throw new Error('audit-down');
-    return super.recordExport(record);
+    return super.recordExport(record, access);
   }
 }
 const exportsStore = new FailableExportStore();
