@@ -667,3 +667,98 @@ test('HOT-390 R170-8 거절하는 저장소는 네 메서드 모두 거절하고
     assert.match(r.result.error, /PEAKET_WEB_CACHE_REDIS_URL/, file);
   }
 });
+
+// BAT-170 검증 뒤 시험(d02b8d19 '## 검증'에서 살아남은 틀린 구현을 잡는다). 시험 담당(l2w7-BAT170-test)이 썼다.
+// 정본: docs/frontend.md §5.18 '공유 캐시 처리기 세부'(닫힌 규칙, 태그 시각보다 먼저 만든 값은 없음, 늦거나 끊기면 읽기는 없음),
+// docs/data.md 세션·캐시 클러스터 키 규칙(ISR 항목 크기 상한 1MB [가정]).
+test('HOT-390 V170-7 PEAKET_ENV는 앞뒤 빈칸까지 그대로 본다(" local "·"ci "는 운영으로 본다)', async () => {
+  for (const PEAKET_ENV of [' local ', 'ci ', ' demo', 'local\n', '\tci']) {
+    assert.throws(() => assertCacheEnv({ PEAKET_ENV }), /PEAKET_WEB_CACHE_REDIS_URL/, JSON.stringify(PEAKET_ENV));
+    assert.equal(await storeServes(selectRuntime({ PEAKET_ENV }).store), false, JSON.stringify(PEAKET_ENV));
+  }
+});
+
+test('HOT-390 V170-13 미리 그린 화면도 태그 시각이 만든 시각과 같은 ms면 남고 +1ms면 없다', async () => {
+  for (const [tagAt, kept] of [
+    [1_000, true],
+    [1_001, false],
+  ]) {
+    let clock = 1_000;
+    const { client } = fakeRedis();
+    const store = createCacheStore({ client, timeoutMs: 250, now: () => clock, maxTtlSeconds: 3_600 });
+    const h = createCacheHandler({ store, build: 'v170b13', now: () => clock });
+    await h.set('/search', isrPage('<p>검색</p>', 'search'), isrSetCtx);
+    clock = tagAt;
+    await h.revalidateTag('search');
+    const hit = await h.get('/search', isrGetCtx);
+    assert.equal(hit?.value?.html ?? null, kept ? '<p>검색</p>' : null, `태그 시각 ${tagAt}, 만든 시각 1000`);
+  }
+});
+
+test('HOT-390 V170-23 값 크기 상한은 1MB(1,048,576바이트)이고 바이트로 센다', async () => {
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, maxTtlSeconds: 3_600 });
+  await store.setEntry('isr', 'at-cap', 'x'.repeat(1_048_576), 60);
+  await store.setEntry('isr', 'over-cap', 'x'.repeat(1_048_577), 60);
+  // 한글 한 글자는 3바이트: 글자 수는 상한 아래여도 바이트가 넘으면 쓰지 않는다
+  await store.setEntry('isr', 'ko-under', '가'.repeat(349_525), 60); // 1,048,575바이트
+  await store.setEntry('isr', 'ko-over', '가'.repeat(349_526), 60); // 1,048,578바이트
+  assert.equal(data.has('web:isr:at-cap'), true, '정확히 1MB가 쓰이지 않았다');
+  assert.equal(data.has('web:isr:over-cap'), false, '1MB + 1바이트가 쓰였다');
+  assert.equal(data.has('web:isr:ko-under'), true);
+  assert.equal(data.has('web:isr:ko-over'), false, '글자 수로 셌다');
+});
+
+test('HOT-390 V170-24 미리 그린 화면은 태그 시각을 못 읽으면(늦음·끊김) 값을 내지 않는다', async () => {
+  const { client } = fakeRedis();
+  const fast = createCacheStore({ client, timeoutMs: 30, now: () => 1_000, maxTtlSeconds: 3_600 });
+  await createCacheHandler({ store: fast, build: 'v170b24', now: () => 1_000 }).set('/search', isrPage('<p>검색</p>', 'search'), isrSetCtx);
+  // 대조군: 태그 시각을 읽으면 값을 낸다
+  assert.equal((await createCacheHandler({ store: fast, build: 'v170b24' }).get('/search', isrGetCtx))?.value?.html, '<p>검색</p>');
+  const isMget = (args) => String(args[0]).toUpperCase() === 'MGET';
+  for (const [label, tagRead] of [
+    ['늦음(답하지 않음)', () => new Promise(() => {})],
+    ['끊김(거절)', () => Promise.reject(new Error('연결이 끊겼다'))],
+  ]) {
+    // 값 읽기(GET)는 되고 태그 읽기(MGET)만 늦거나 끊긴다
+    const slow = { ...client, mGet: tagRead, sendCommand: (args) => (isMget(args) ? tagRead() : client.sendCommand(args)) };
+    const store = createCacheStore({ client: slow, timeoutMs: 30, now: () => 1_000, maxTtlSeconds: 3_600 });
+    const hit = await createCacheHandler({ store, build: 'v170b24' }).get('/search', isrGetCtx);
+    assert.equal(hit ?? null, null, `${label}: 태그 시각을 못 읽었는데 값을 냈다`);
+  }
+});
+
+test('HOT-390 V170-25 미리 그린 화면은 경로 무효화 태그(softTags)도 본다', async () => {
+  let clock = 1_000;
+  const { client } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => clock, maxTtlSeconds: 3_600 });
+  const h = createCacheHandler({ store, build: 'v170b25', now: () => clock });
+  await h.set('/search', isrPage('<p>검색</p>', 'search'), isrSetCtx);
+  clock = 2_000;
+  await store.markTags(['_N_T_/search'], 2_000);
+  assert.equal((await h.get('/search', { ...isrGetCtx, softTags: ['_N_T_/search'] })) ?? null, null, '경로 무효화 뒤에도 값을 냈다');
+  // 대조군: 무효화하지 않은 경로 태그나 softTags가 없으면 값이 남는다
+  assert.equal((await h.get('/search', { ...isrGetCtx, softTags: ['_N_T_/other'] }))?.value?.html, '<p>검색</p>');
+  assert.equal((await h.get('/search', isrGetCtx))?.value?.html, '<p>검색</p>');
+});
+
+test('HOT-390 V170-26 미리 그린 화면 처리기는 요청 안에서 무효화한 태그(revalidatedTags)를 없는 것으로 본다', async () => {
+  // 기본 내보내기 클래스(Next.js가 부르는 바깥 경계)를 메모리 저장소(local)로 불러온다
+  const saved = { PEAKET_ENV: process.env.PEAKET_ENV, URL: process.env.PEAKET_WEB_CACHE_REDIS_URL, BUILD: process.env.PEAKET_WEB_CACHE_BUILD };
+  process.env.PEAKET_ENV = 'local';
+  delete process.env.PEAKET_WEB_CACHE_REDIS_URL;
+  delete process.env.PEAKET_WEB_CACHE_BUILD;
+  let Handler;
+  try {
+    Handler = (await import('./cache-handler.mjs?v170-26')).default;
+  } finally {
+    for (const [k, v] of [['PEAKET_ENV', saved.PEAKET_ENV], ['PEAKET_WEB_CACHE_REDIS_URL', saved.URL], ['PEAKET_WEB_CACHE_BUILD', saved.BUILD]]) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  await new Handler({ revalidatedTags: [] }).set('/v170-26', isrPage('<p>요청 안</p>', 't'), isrSetCtx);
+  assert.equal((await new Handler({ revalidatedTags: [] }).get('/v170-26', isrGetCtx))?.value?.html, '<p>요청 안</p>', '대조군');
+  assert.equal((await new Handler({ revalidatedTags: ['u'] }).get('/v170-26', isrGetCtx))?.value?.html, '<p>요청 안</p>', '다른 태그 대조군');
+  assert.equal((await new Handler({ revalidatedTags: ['t'] }).get('/v170-26', isrGetCtx)) ?? null, null, '요청 안에서 무효화한 태그의 값을 냈다');
+});

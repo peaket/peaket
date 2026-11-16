@@ -134,3 +134,44 @@ test('[ASVS v5.0.0-15.1.2] --package로 더한 것은 출처를 declared로, 소
   assert.deepEqual(src, { react: 'source-map', 'chart.js': 'declared', '@peaket/ds': 'declared' });
   assert.equal(bom.components.find((c) => c.name === '@peaket/ds').purl, undefined);
 });
+
+// BAT-170 검증 뒤 시험(d02b8d19). 시험 담당(l2w7-BAT170-test)이 썼다. 정본 docs/frontend.md §5.18 '정적 업로드 허용 확장자'(허용 확장자 밖과
+// 숨은 파일·폴더는 뺀다), 고지 파일 이름은 BUILD_ORDER HOT-390의 `THIRD-PARTY-NOTICES.txt`(ADR-0040 결정 7) 하나뿐이다.
+test('[ASVS v5.0.0-13.4.1] V170-47 고지 파일 예외는 THIRD-PARTY-NOTICES.txt라는 이름 하나뿐이다(비슷한 이름의 .txt는 뺀다)', () => {
+  const dir = fixture({
+    'index.html': '<p>ok</p>',
+    [NOTICE_FILE]: 'THIRD-PARTY NOTICES',
+    'assets/NOTICES.txt': 'x',
+    'x-THIRD-PARTY-NOTICES.txt': 'x',
+    'THIRD-PARTY-NOTICES.txt.bak': 'x',
+    // 대소문자만 다른 이름(Windows 파일 시스템은 같은 폴더에 두 이름을 함께 두지 못해 다른 폴더에 둔다)
+    'assets/third-party-notices.txt': 'x',
+    'assets/NOTICE.txt': 'x',
+  });
+  try {
+    const plan = planUpload(dir);
+    assert.deepEqual(plan.upload.map((f) => f.path).sort(), [NOTICE_FILE, 'index.html'].sort());
+    assert.deepEqual(plan.excluded.map((f) => f.path).sort(), ['THIRD-PARTY-NOTICES.txt.bak', 'assets/NOTICE.txt', 'assets/NOTICES.txt', 'assets/third-party-notices.txt', 'x-THIRD-PARTY-NOTICES.txt'].sort());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('[ASVS v5.0.0-13.4.1] V170-48 깊은 곳의 숨은 파일·폴더도 허용 확장자여도 뺀다', () => {
+  const dir = fixture({
+    'index.html': '<p>ok</p>',
+    'assets/a.js': 'console.log(1)',
+    'assets/.git/config.json': '{}',
+    '_next/.cache/a.js': 'x',
+    'assets/.secret.json': '{}',
+    'a/b/.hidden/c.css': 'x',
+  });
+  try {
+    const plan = planUpload(dir);
+    assert.deepEqual(plan.upload.map((f) => f.path).sort(), ['assets/a.js', 'index.html']);
+    const hidden = plan.excluded.filter((f) => /숨은/.test(f.reason)).map((f) => f.path).sort();
+    assert.deepEqual(hidden, ['_next/.cache/a.js', 'a/b/.hidden/c.css', 'assets/.git/config.json', 'assets/.secret.json']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -133,3 +133,18 @@ test('HOT-390 R170-2 운영에서 빌드 칸을 읽지 못하면 시작하지 �
     assert.deepEqual(r.standalone, { build: 'dep_bat170-2' }, r.out);
   }
 });
+
+// BAT-170 검증 뒤 시험 V170-19(d02b8d19): 처리기 경로를 파일 이름만으로 맞추면 다른 폴더의 같은 이름 처리기가 지나간다.
+// 정본 docs/frontend.md §5.18 ③ 'cacheHandler·cacheHandlers.default가 이 두 처리기 파일'.
+test('HOT-390 V170-19 server/start.mjs는 처리기 파일 이름이 같아도 다른 폴더면 멈춘다', async () => {
+  const cases = [
+    ['cacheHandler 다른 앱 폴더의 같은 이름', (dist) => ({ ...goodConfig(dist), cacheHandler: relative(dist, join(appDir, '..', 'other', 'server', 'cache-handler.mjs')) }), /cacheHandler\b/],
+    ['cacheHandler 앞머리만 같은 폴더(server-old)', (dist) => ({ ...goodConfig(dist), cacheHandler: relative(dist, join(appDir, 'server-old', 'cache-handler.mjs')) }), /cacheHandler\b/],
+    ['cacheHandlers.default 다른 폴더의 같은 이름', (dist) => ({ ...goodConfig(dist), cacheHandlers: { default: relative(dist, join(appDir, 'server-old', 'use-cache-handler.mjs')) } }), /cacheHandlers\.default/],
+  ];
+  for (const [label, make, why] of cases) {
+    const { name, dist } = makeDist({ config: null });
+    writeFileSync(join(dist, 'required-server-files.json'), JSON.stringify({ version: 1, config: make(dist) }));
+    assertStopped(await start(name, ENVS.local), why, label);
+  }
+});

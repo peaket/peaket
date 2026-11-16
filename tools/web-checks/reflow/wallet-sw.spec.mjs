@@ -78,6 +78,15 @@ test('HOT-390 기본 폭: 새 워커는 waiting에 머물고 스스로 활성화
   expect(await page.evaluate(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.waiting, SCOPE), '새 워커가 waiting을 떠났다').toBe(true);
   expect(await page.evaluate(() => window.__controllerChanged), '스스로 제어를 넘겼다').toBe(0);
 
+  // BAT-170 검증 뒤 시험 V170-31(d02b8d19): SKIP_WAITING이 아닌 메시지(다른 type, 문자열, 빈 객체)는 활성화를 부르지 않는다(docs/frontend.md §5.4 '갱신' ①)
+  await page.evaluate(async (scope) => {
+    const w = (await navigator.serviceWorker.getRegistration(scope)).waiting;
+    for (const m of [{ type: 'PING' }, 'SKIP_WAITING', { type: 'skip_waiting' }, {}, { kind: 'SKIP_WAITING' }]) w.postMessage(m);
+  }, SCOPE);
+  await page.waitForTimeout(2_000);
+  expect(await page.evaluate(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.waiting, SCOPE), 'V170-31 다른 메시지로 waiting을 떠났다').toBe(true);
+  expect(await page.evaluate(() => window.__controllerChanged), 'V170-31 다른 메시지로 제어를 넘겼다').toBe(0);
+
   // 창이 SKIP_WAITING을 보내면 활성화되고 제어가 넘어간다
   await page.evaluate(async (scope) => (await navigator.serviceWorker.getRegistration(scope)).waiting.postMessage({ type: 'SKIP_WAITING' }), SCOPE);
   await page.waitForFunction(() => window.__controllerChanged > 0, undefined, { timeout: 15_000 });

@@ -120,3 +120,22 @@ test('HOT-390 잠금을 쥔 탭 둘 가운데 하나가 놓아도 보류한다',
   assert.equal(await applyWaitingUpdate({ registration: { waiting: worker }, locks: navigator.locks }), 'sent');
   assert.deepEqual(sent, [{ type: 'SKIP_WAITING' }]);
 });
+
+// BAT-170 검증 뒤 시험(d02b8d19). 시험 담당(l2w7-BAT170-test)이 썼다.
+// V170-34: 정본 docs/frontend.md §5.4 '갱신' ③은 'navigator.locks.query()의 쥔 목록'만 말한다. 막 쥐려는 탭(pending)도 보류로 보는 것은
+// 지금 구현의 동작이고 정본이 정하지 않은 경계다(안전한 쪽). 이 시험은 그 동작을 묶는다.
+test('HOT-390 V170-34 잠금을 막 쥐려는 탭(pending)이 있어도 SKIP_WAITING을 보내지 않는다', async () => {
+  const fakeLocks = (q) => ({ query: async () => q, request: async () => undefined });
+  const { sent, worker } = waitingWorker();
+  assert.equal(await applyWaitingUpdate({ registration: { waiting: worker }, locks: fakeLocks({ held: [], pending: [{ name: LOCK, mode: 'shared' }] }) }), 'held');
+  assert.deepEqual(sent, []);
+  // 대조군: 다른 이름의 pending은 보류하지 않는다
+  assert.equal(await applyWaitingUpdate({ registration: { waiting: worker }, locks: fakeLocks({ held: [], pending: [{ name: 'other.lock', mode: 'exclusive' }] }) }), 'sent');
+  assert.deepEqual(sent, [{ type: 'SKIP_WAITING' }]);
+});
+
+// V170-35: 소비자 웹 en 화면은 주소 접두 /en(docs/frontend.md §5.12)이라 보류 화면(docs/design/d5-screen-blueprint.md §3.1)도 접두를 뗀 경로로 본다
+test('HOT-390 V170-35 보류 화면 판정은 /en 접두를 떼고 본다', () => {
+  for (const p of ['/en/queue/evt-1', '/en/booking/x/seats', '/en/booking/x/checkout', '/en/my/tickets', '/en/my/tickets/tkt-1', '/en/shop/checkout']) assert.equal(isUpdateHoldScreen(p), true, p);
+  for (const p of ['/en', '/en/', '/en/events/x', '/en/search', '/enx/queue/evt-1', '/english/my/tickets']) assert.equal(isUpdateHoldScreen(p), false, p);
+});
