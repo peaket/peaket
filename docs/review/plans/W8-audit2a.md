@@ -502,6 +502,25 @@ export interface ReviewStore {
 2. **A2 잠금 대기**: 한 묶음 트랜잭션의 첫 문장에서 `set_config('lock_timeout', '2000ms', true)`로 잠금 대기 한도 2초 [가정]를 건다(행 잠금은 SKIP LOCKED로 기다리지 않는다). 찾기는 `id::text`로 읽어 `order by id`의 마지막 값을 커서로 준다(그 묶음에서 고친 마지막 id). 고치기는 탈퇴 파기와 같은 `purgeSet` 문장을 `id = any(…)`로 쓴다.
 3. **A2 권한**: 0026 끝에 계획 §8.2의 GRANT 두 줄만 더했다(새 번호·스냅숏 바뀜 없음).
 
+### 통합 통과 확인(2026-11-16 17:28~17:37, 감독 도커 잠금 아래)
+
+- **누가·어디서**: 구현 담당(세션 `l3w8-a2a-impl`). 따로 폴더 `D:/ticketpass-lane3-w8b-t`(`28397b3b`, W8-audit2a 구현·리뷰 반영·검증 뒤 시험 고침 전부)의 `services/core-svc`에서 돌렸다. 같은 때 ops·purchase Docker 시험이 겹쳐 돌았다.
+- **파일 하나씩**(`npx vitest run --config vitest.integration.config.mjs test-int/<파일>`): 여덟 파일 모두 통과, 실패·시간 초과 0, 다시 돌린 파일 없음.
+
+| 파일 | 결과 | 걸린 시간 |
+| --- | --- | --- |
+| `test-int/review-purge.int.test.ts` | 2 통과 | 21초 |
+| `test-int/review-recheck.int.test.ts` | 7 통과 | 20초 |
+| `test-int/review-withdrawn.int.test.ts` | 2 통과 | 20초 |
+| `test-int/review-grants.int.test.ts` | 4 통과 | 18초 |
+| `test-int/review.int.test.ts` | 5 통과 | 23초 |
+| `test-int/review-purge-legacy.int.test.ts` | 2 통과 | 18초 |
+| `test-int/sale-eligibility.int.test.ts` | 23 통과(정비 일 목록 단언에 `['review-purge-legacy', 'window']`가 든 판, 이의 2 반영) | 68초 |
+| `test-int/review-withdrawn-consumer.int.test.ts` | 2 통과(실제 Kafka 컨테이너, 이 PC에서 네이티브 Kafka 모듈이 막히지 않았다) | 48초 |
+
+- **core-svc 통합 전체**(0026을 더해서, `--maxWorkers=3`): 파일 29개 가운데 28 통과·1 건너뜀, 시험 272개 가운데 271 통과·1 건너뜀, 실패 0(17:32:47 시작, 276초). 건너뛴 하나는 `test-int/local-partner-stack.int.test.ts`(`PEAKET_LOCAL_STACK=1`일 때만 도는 로컬 스택 시험, 이 묶음 전부터 그렇다).
+- **제품 결함**: 없음. **컨테이너**: 시험 전후 `docker ps -a`를 견주어 이 실행이 남긴 컨테이너가 없다(testcontainers가 지웠다). 다른 갈래 컨테이너는 건드리지 않았고 restart하지 않았다.
+
 ## 시험 이의 답
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 구현 커밋 `7f32f584`·이의 커밋 `a450164a` 위.
