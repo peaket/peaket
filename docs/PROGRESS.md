@@ -315,6 +315,8 @@
 - W8-L1-ci-fix4(R-670, 계획 6의 1): 고친 뒤에도 첫 JS가 한도에 0.1kB 붙어 있다(`web /` 175.6 한도 175.7, `web /my/tickets` 161.5 한도 161.6, `033bb26d`와 같음). 서버 모듈이 다시 늘어 번호가 여섯 자리가 되면 첫 화면 코드와 상관없이 경로마다 약 0.4~0.5kB가 한꺼번에 늘어 다시 깨진다. Turbopack 번호 자리 수 문턱을 확인하고, 서버 모듈 수의 여유를 재는 검사나 기준선 규칙(§5.8 '첫 JS 열')을 wbs 7.5.2 전에 다시 볼지 정한다(docs/frontend.md §5.8, tools/web-checks/budgets/js-baseline.json).
 - W8-L1-ci-fix4(R-670, 계획 6의 2): 파트너 앱도 `serverExternalPackages`에 `@peaket/platform` 하나만 넣어 OTel SDK가 서버 묶음에 들어 있다(이번 CI에서 파트너 첫 JS는 통과). 같은 고침(SDK 여섯을 직접 의존성 + 밖 패키지)과 같은 시험(CF4-01~04 꼴)을 파트너에 넣는다(apps/partner/next.config.ts, apps/partner/package.json, docs/frontend.md §5.18).
 - W8-L1-ci-fix4(R-670, 계획 6의 3): `serverExternalPackages`에 적은 모든 이름이 실제로 밖 모듈이 됐는지(덩어리에 그 이름의 밖 부르기가 있는지) 산출물로 보는 일반 시험을 둔다. 지금은 redis를 `standalone-scm.build.test.mjs`가, OTel을 CF4-03이 따로 본다(apps/web/test-int/, apps/partner).
+- W8-L1-ci-fix4(R-670, 계획 7): web/budgets Lighthouse 단계에서 standalone 서버가 `…/.next/standalone/apps/web/app/sw.ts`를 해석하지 못한다는 빌드 오류가 27줄 난다(033bb26d·108f029a 같음, 시험은 통과). 운영 빌드에서 서비스 워커(sw.js)가 실제로 나가는지, 오류가 standalone 실행 방식(next start 경고 포함) 탓인지 확인한다. 낮음, 원인 미확인(apps/web/app/serwist/[path]/route.ts, apps/web/app/sw.ts, tools/web-checks/budgets/).
+- W8-L1-ci-fix4(R-670, CI 흔들림): develop CI 실행 43907749815 1차에서 `node / node`의 services/identity-svc `test/trust-login-risk.test.ts` `BOT-050_맥락은LOGIN이고_회차·pid·토큰을비우고_기기·IP·ASN·UA를싣는다`가 `expected { verdict: 'UNKNOWN' } to deeply equal { verdict: 'ALLOW' }`(525ms)로 실패했고, 실패 잡만 다시 돌려(2차) 통과했다. `108f029a..4105bd83`에서 services·packages/platform은 바뀌지 않았다. 원인은 첫 gRPC 호출이 데드라인 300ms에 걸려 UNKNOWN이 된 것이다(바쁜 CI에서 한 번 났고 다시 돌려 통과했다, 감독 확인). 연결을 미리 데울지, 데드라인을 시험 전용 값으로 둘지 정한다(services/identity-svc/test/trust-login-risk.test.ts).
 
 ## 미해결
 
