@@ -9,7 +9,7 @@ import { createClient } from 'redis';
 
 // 환경 확인·next.config 설정은 Redis 없이 읽는 cache-env.mjs에 두고 여기서 함께 내보낸다(server/start.mjs·next.config.ts가 가볍게 부른다)
 export { assertCacheEnv, cacheConfig, CACHE_URL_ENV } from './cache-env.mjs';
-import { assertBuildTag, CACHE_BUILD_ENV, CACHE_URL_ENV } from './cache-env.mjs';
+import { assertBuildTag, assertCacheEnv, CACHE_BUILD_ENV, CACHE_URL_ENV } from './cache-env.mjs';
 
 /** 값·태그 시각 TTL 상한: 30일 [가정](docs/frontend.md §5.18) */
 export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -172,7 +172,11 @@ export function createMemoryStore({ now = Date.now, maxTtlSeconds = DEFAULT_MAX_
 /**
  * 처리기 모듈이 불러올 때 저장소와 빌드 칸을 고른다(파드마다 하나, BAT-170 리뷰 R170-1·R170-2, docs/frontend.md §5.18).
  * 주소가 있으면 Redis이고 빌드 칸(PEAKET_WEB_CACHE_BUILD)이 꼴 밖이거나 없으면 던진다(조용히 빌드 칸 없이 쓰지 않는다).
- * 주소가 없으면 메모리 저장소이고 빌드 칸이 없으면 `dev`다(`next dev`는 start.mjs를 거치지 않는다)
+ * 주소가 없으면 메모리 저장소이고 빌드 칸이 없으면 `dev`다(`next dev`는 start.mjs를 거치지 않는다).
+ * 메모리 저장소는 local·ci·demo 전용이다(닫힌 규칙, BAT-170 리뷰 R170-8): 주소가 없는데 PEAKET_ENV가 그 밖이면(없음·빈 값·오타 포함)
+ * start.mjs를 거치지 않고 떴어도(standalone `node server.js`, `next start`) 처리기의 첫 읽기·쓰기부터 늘 던진다(저장소가 거절한다).
+ * 불러올 때 던지지 않는 까닭: 같은 모듈의 함수(createCacheHandler 등)를 가져다 쓰는 곳까지 막지 않게 한다. start.mjs의 assertCacheEnv와 같은 규칙을 겹쳐 지킨다.
+ * 운영 요청을 받지 않는 Next.js의 빌드(정적 화면 만들기, NEXT_PHASE=phase-production-build)와 개발 서버(__NEXT_DEV_SERVER)만 이 확인에서 뺀다
  */
 export function selectRuntime(env = process.env) {
   const url = env[CACHE_URL_ENV]?.trim();
@@ -181,5 +185,21 @@ export function selectRuntime(env = process.env) {
     const build = assertBuildTag(given, `${CACHE_BUILD_ENV}(공유 캐시 주소가 있을 때 빌드 칸)`);
     return { store: createCacheStore({ client: createLazyRedis(url) }), build };
   }
+  const notServing = env.NEXT_PHASE === 'phase-production-build' || Boolean(env.__NEXT_DEV_SERVER);
+  if (!notServing) {
+    try {
+      assertCacheEnv(env);
+    } catch (e) {
+      return { store: refusingStore(e), build: 'dev' };
+    }
+  }
   return { store: createMemoryStore(), build: given === undefined ? 'dev' : assertBuildTag(given, CACHE_BUILD_ENV) };
+}
+
+/** 모든 읽기·쓰기를 거절하는 저장소(주소 없는 운영, R170-8). 처리기가 조용히 메모리로 돌지 않고 요청마다 오류가 보인다 */
+function refusingStore(error) {
+  const refuse = async () => {
+    throw new Error(`공유 캐시를 쓰지 않는다: ${error instanceof Error ? error.message : String(error)}`);
+  };
+  return { getEntry: refuse, setEntry: refuse, tagTimes: refuse, markTags: refuse };
 }
