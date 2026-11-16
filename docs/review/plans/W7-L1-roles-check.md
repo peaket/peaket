@@ -198,6 +198,28 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 
 ## 리뷰
 
+- 누가: 리뷰 담당 `w7l1-roles-review-2c7ed993`, 2026-11-16. 받은 것은 `git diff origin/develop...HEAD`, `git log origin/develop..HEAD`, 이 계획 파일, ADR-0270, docs/architecture.md §8.6 4 '역할 나누기'(1132~1151줄)와 '자주 놓친 결함'(1153~1167줄)뿐이다. 구현 담당의 설명은 받지 않았다.
+- 모델: 구현 담당과 같은 claude-opus-5-5의 새 맥락이다. 다른 모델을 쓸 수 없었다(ADR-0270 결정 6).
+- 돌린 것:
+  - `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`: 끝 코드 1. 실패 셋은 아직 없는 review·verify 커밋(`[구성]`)과 빈 '리뷰'·'검증' 절(`[계획 파일]`)뿐이다. 묶음 줄은 `코드 커밋 5개(plan 2·test 2·impl 1·…)`다.
+  - `node --test --test-reporter=tap tools/ci/roles-check.test.mjs`: 35개 가운데 35개 통과, 실패 0(약 5분 25초).
+  - 구멍이 의심되는 곳은 작업 폴더 밖 임시 저장소(scratchpad `review-rc/mk.sh <폴더> <변형>`: 좋은 코드 묶음 BAT-901 다섯 커밋을 쌓고 한 군데만 바꾼다)를 만들어 `node D:/ticketpass-lane1/tools/ci/roles-check.mjs --root <폴더> --base base --head HEAD`로 봤다.
+- 계획 항목 대조: 검사 ①~⑩, 시험 RC-01~35(시험 이름 35개가 표와 같다), 정본 빈칸 10개(9의 CI·`package.json`은 바뀐 부분에 없다), 출력 세부 셋(세션 겹침은 새 역할로 처음 나온 커밋, 꼴이 틀린 Batch는 묶음 자리 `-`, 끝 코드 2는 표준 출력 한 줄)이 모두 구현과 시험에 있다. 정본(§8.6 '합치기 전 역할 확인'의 세부, ADR-0270 상태 줄 보탬)과 구현이 어긋나는 곳은 없다.
+- 구현 커밋 `dd8caac0`의 `git show --stat`: 계획 파일, `tools/ci/README.md`, `tools/ci/roles-check.mjs` 셋뿐이고 시험 파일 패턴에 드는 파일은 없다.
+- 구멍이 아니라고 본 것(임시 저장소나 코드로 확인): 꼬리말 키 대소문자(키를 그대로 견줌)와 값 앞뒤 공백(지움), `Role : impl`처럼 콜론 앞 공백(덩이 전체가 꼬리말이 아니게 되어 실패, git도 같음), 옮기기(`diff-tree --no-renames`), 지운 시험 파일(`--name-only`에 든다), 경로 구분자(git은 늘 `/`로 준다), 범위 안 합치기 커밋, 빈 `Agent-Session`, 묶음을 넘은 같은 세션의 다른 역할(범위 전체에서 셈), 꼴이 틀린 Batch로 묶음을 비켜 가기(커밋 하나로 보는 ⑤⑥⑦은 그대로 함), `record`·`doc`을 달아 코드 커밋 숨기기(⑥), 빈 담당 표(행이 없으면 커밋마다 `[담당 표]` 실패), 빈 범위(끝 코드 2).
+- 너무 엄격해 올바른 묶음을 막는 곳은 찾지 못했다. 꼬리말 덩이에 `BREAKING CHANGE: …`가 섞이면 덩이 전체가 꼬리말이 아니게 되지만, `git interpret-trailers --parse`도 같은 덩이를 꼬리말로 읽지 않고 `origin/develop` 기록에 그런 줄이 없다. 지난 기록 커밋(진행·장부)이 코드 경로를 바꾼 적도 없다.
+
+| 번호 | 심각도 | 파일:줄 | 무엇이 틀렸나 | 재현 | 고칠 쪽 | 처리 |
+| --- | --- | --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `tools/ci/roles-check.mjs:30-31`·`192-196`, 계획 3의 ⑤(82~85줄) | 시험 파일 패턴이 저장소에 지금 있는 시험을 못 잡는다. `tools/doc-check/test_*.py` 다섯 개(파이썬 시험, 이름 꼴 `test_*.py`)와 `services/queue-svc/test-sim/`의 도우미 `cluster.ts`·`record.ts`·`pollers.mjs`(폴더 `test-sim`)를 구현 커밋이 바꿔도 통과한다. 패턴은 정본(§8.6 1147줄, ADR-0270 결정 5)의 닫힌 목록을 그대로 옮긴 것이라 구현 잘못은 아니다 | 임시 저장소 변형 `py`(impl 커밋이 `tools/doc-check/test_public.py`도 고침)·`sim`(impl이 `services/q/test-sim/cluster.ts`도 고침): 둘 다 `통과: 묶음 1개, 커밋 5개`, 끝 코드 0 | 계획(정본 빈칸: 패턴에 `test_*.py`와 폴더 `test-sim` 등을 더할지) → 시험 → 구현 | 이 묶음 안에서 고친다(통과 기준: 규칙 위반이 통과한다) |
+| RV-02 | 중간 | `tools/ci/roles-check.mjs:28`, 계획 3의 ⑥(86줄)·7(174줄) | 코드를 쓰지 않는 역할(plan·review·verify·record·doc)이 코드 경로 밖의 실행 파일을 바꿔도 통과한다. `deploy/`(Helm 차트 `deployment.yaml`·`networkpolicy.yaml` 등 28개, 보안 설정 포함), `loadtest/`(86개), `specs/`, 뿌리의 `package.json`·`pnpm-lock.yaml`·`eslint.config.mjs`·`turbo.json`. 계획은 `loadtest/`·`specs/`만 적어 두었고 `deploy/`와 뿌리 설정은 언급이 없다. 목록은 ADR-0270 결정 8의 맨 위 폴더 일곱 그대로다 | 임시 저장소 변형 `rootcfg`(review 커밋이 `package.json`·`eslint.config.mjs`·`loadtest/a.mjs`·`specs/a.yml`도 고침): 끝 코드 0. `deploy/`도 같은 길(목록에 없음) | 계획(정본 빈칸: ADR-0270 결정 8의 코드 경로에 `deploy/`와 뿌리 설정을 더할지, 방향을 바꾸는 결정이면 소유자) → 시험 → 구현 | 이 묶음 안에서 고친다(통과 기준·보안 설정) |
+| RV-03 | 중간 | `tools/ci/roles-check.mjs:367-373`, 계획 3의 ③(75줄), §8.6 1145줄 | 리뷰 반영의 시험 먼저를 보지 않는다. ADR-0270 결정 2와 §8.6 4의 5는 시험 담당이 재현 시험을 먼저 쓰고 구현 담당이 고친다고 하고 계획 5의 5도 그 차례인데, `Fix-By: impl` 커밋이 `Fix-By: test` 없이 오거나 그보다 먼저 와도 통과한다. §8.6 세부 '차례'가 '첫 리뷰나 첫 검증 뒤'만 정해서 생긴 빈칸이다 | 임시 저장소 변형 `fiximplonly`(review 뒤 `Fix-By: impl` 커밋 하나만): 끝 코드 0. `fiximplfirst`(`Fix-By: impl` 다음에 `Fix-By: test`): 끝 코드 0 | 계획(정본 빈칸: 첫 `Fix-By: test` < 첫 `Fix-By: impl`을 넣을지, 재현 시험이 필요 없는 고침의 예외를 둘지) → 시험 → 구현 | 이 묶음 안에서 고친다(통과 기준: 시험 먼저 규칙 위반이 통과한다) |
+| RV-04 | 낮음 | `tools/ci/roles-check.mjs:321-323` | 구현 커밋이 시험 설정(`services/*/vitest*.config.mjs`의 `include`·`exclude`, 패키지 `package.json`의 시험 스크립트)을 바꿔 시험을 빼도 ⑤는 못 잡는다. 정본의 시험 파일 정의 밖이다 | 임시 저장소 변형 `cfg`(impl 커밋이 `services/a/vitest.config.mjs`도 고침): 끝 코드 0 | 계획(정본에 시험 설정 파일을 시험 쪽으로 볼지) | 구간 끝 정리 목록 후보 |
+| RV-05 | 낮음 | `tools/ci/roles-check.mjs:376-399`, 계획 7(173줄) | 리뷰·검증 커밋이 있는지와 계획 파일 절이 찼는지를 따로 볼 뿐, 리뷰·검증 커밋이 그 계획 파일을 고쳤는지는 보지 않는다. 다른 역할 커밋(구현 등)이 '리뷰'·'검증' 절을 채우고, 리뷰·검증 커밋은 다른 파일만 고쳐도 통과한다. 계획 7은 절의 내용을 기계로 보지 않는다고만 적었다 | 임시 저장소 변형 `verifynoplan`(verify 커밋이 `notes/v.md`만 고치고 '검증' 절은 plan 커밋이 채움): 끝 코드 0 | 계획(리뷰·검증 커밋이 `docs/review/plans/<Batch>.md`를 고쳐야 한다는 줄을 넣을지) | 구간 끝 정리 목록 후보 |
+
+- '자주 놓친 결함' 대조: 경계 양쪽(끝 = 시작 통과, 끝 < 시작 실패), 목록 밖 값마다 거부(Role 여덟·Fix-By 넷·Batch 꼴), 차례를 바꾼 경우(RC-14), 빈 결과가 통과로 새지 않음(빈 범위 2, 빈 담당 표), 부르는 쪽 경계(시험이 명령을 자식 프로세스로 돌림), 시작 파일 조립(`runIfMain`을 명령으로 거침)은 시험에 있다. 걸리는 것은 '허용·거부 목록은 목록 밖의 값마다 본다'의 목록 자체가 저장소의 실제 시험·코드 경로를 다 덮지 못한 RV-01·RV-02다.
+- 관찰(지적 아님): 결정 2의 겹쳐 돌리기로 묶음 N+1의 계획·시험 커밋이 같은 가지에 먼저 들어오면, N+1이 끝날 때까지 가지 전체가 `[구성]`으로 실패한다. 앞으로 감기로 가지 끝까지 합치므로 맞는 동작이지만, 감독은 N만 합치려면 N+1 커밋을 N 뒤에 두고 `--head`를 N의 마지막 커밋으로 줘야 한다.
+
 ## 틀린 구현 목록
 
 검증 담당이 하나씩 넣고 `node --test tools/ci/roles-check.test.mjs`가 실패하는지 본다(B등급 표본). 번호는 위 3의 검사 번호다.
@@ -247,3 +269,4 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T07:54+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T08:33+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T08:59+09:00 |
+| review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T09:17+09:00 |
