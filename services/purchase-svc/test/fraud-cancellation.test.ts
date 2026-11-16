@@ -65,7 +65,7 @@ const viewOf = (s: Seat): CancellationOrderView => ({
 class Store implements FraudCancellationStore {
   readonly requests = new Map<string, FraudCancellationRequestRecord>();
   readonly saved = new Map<string, Map<string, FraudTicketResult & { readonly expectedHolderAccountId: string }>>();
-  readonly saves: { approvalId: string; ticketIds: string[] }[] = [];
+  readonly saves: { approvalId: string; ticketIds: string[]; results: FraudTicketResult[] }[] = [];
   refundRows: FraudRefundProgress[] = [];
   async find(approvalId: string): Promise<FraudCancellationRequestRecord | undefined> {
     return this.requests.get(approvalId);
@@ -83,7 +83,7 @@ class Store implements FraudCancellationStore {
     const m = this.saved.get(approvalId) ?? new Map();
     for (const r of results) m.set(r.ticketId, r);
     this.saved.set(approvalId, m);
-    this.saves.push({ approvalId, ticketIds: results.map((r) => r.ticketId) });
+    this.saves.push({ approvalId, ticketIds: results.map((r) => r.ticketId), results: results.map(({ expectedHolderAccountId: _h, ...rest }) => rest) });
   }
   async refunds(): Promise<readonly FraudRefundProgress[]> {
     return this.refundRows;
@@ -96,13 +96,15 @@ class Tickets implements OperatorTicketCancellations {
   readonly results = new Map<string, OperatorTicketResult>();
   readonly recorded = new Map<string, OperatorTicketOutcome>();
   failNext = 0;
+  /** 답에서 빠뜨릴 표(ticket-svc가 그 표의 결과를 주지 않은 경우를 흉내) */
+  readonly omit = new Set<string>();
   async operatorCancel(q: Parameters<OperatorTicketCancellations['operatorCancel']>[0]): Promise<readonly OperatorTicketOutcome[]> {
     this.calls.push({ ...q, targets: q.targets.map((t) => ({ ...t })) });
     if (this.failNext > 0) {
       this.failNext -= 1;
       throw new Error('ticket-svc UNAVAILABLE');
     }
-    return q.targets.map((t) => {
+    return q.targets.filter((t) => !this.omit.has(t.ticketId)).map((t) => {
       const key = `${q.approvalId}:${t.ticketId}`;
       const seen = this.recorded.get(key);
       if (seen) return seen;
@@ -636,5 +638,41 @@ describe('BAT-415 검증 살아남음 M-F20d(마감 전 다시 부르기의 tick
     const late = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00') }));
     expect(late).toEqual([accepted(a!), accepted(b!)]);
     expect(f.writes.created.filter((c) => c.ticketId === a!.ticketId).at(-1)).toMatchObject({ cancellationId: expectedCancellationId(APPROVAL, a!.ticketId), reason: 'FRAUD', deductionBp: 0, refundAmount: PRICE });
+  });
+});
+
+// ---- BAT-415 검증 2단계 살아남음(계획 '검증' 8): 겹친 가드 U-R2a·U-R2b·M-F20d ----
+describe('BAT-415 검증 2단계: 티켓 단계 뒤 까닭을 지키는 고리', () => {
+  test('GAT-080 F21 다시 부르기에서 ticket-svc가 그 표의 답을 빠뜨리면(INTERNAL) 쓰임새가 저장소에 넘기는 값은 앞 까닭 SEAT_RETURN_FAILED이고 마감 뒤 다시 부르기가 그 표를 마친다', async () => {
+    const [a, b] = [seat(), seat()];
+    const f = fixture([a!, b!]);
+    f.seats.failFor.set(a!.seatId, 1);
+    await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T15:00:00') }));
+    expect((await f.store.results(APPROVAL)).find((r) => r.ticketId === a!.ticketId)).toMatchObject({ failureCode: 'SEAT_RETURN_FAILED' });
+    // 마감 전 다시 부르기: ticket-svc 답에 a가 없다(쓰임새는 a를 INTERNAL로 본다)
+    f.tickets.omit.add(a!.ticketId);
+    const saves = f.store.saves.length;
+    await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T16:00:00') }));
+    expect(f.tickets.calls.at(-1)!.targets).toEqual([t(a!)]);
+    // 저장소 가짜는 받은 값을 그대로 쓴다(DB 조건에 기대지 않는다): 쓰임새가 넘긴 a가 앞 까닭 그대로다
+    const passed = f.store.saves.slice(saves).flatMap((x) => x.results).filter((r) => r.ticketId === a!.ticketId);
+    expect(passed.every((r) => r.outcome === 'FAILED' && r.failureCode === 'SEAT_RETURN_FAILED')).toBe(true);
+    expect((await f.store.results(APPROVAL)).find((r) => r.ticketId === a!.ticketId)).toEqual({ ticketId: a!.ticketId, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED' });
+    f.tickets.omit.clear();
+    const late = await f.uc.execute(input([t(a!), t(b!)], { nowMs: kst('2026-11-19T17:00:00') }));
+    expect(late).toEqual([accepted(a!), accepted(b!)]);
+  });
+
+  test('GAT-080 F21 다시 부르기에서 ticket-svc가 던지면 쓰임새가 저장소에 넘기는 값도 앞 까닭 SEAT_RETURN_FAILED다(예외 경로와 고리 가운데 하나라도 있으면 맞다)', async () => {
+    const a = seat();
+    const f = fixture([a]);
+    f.seats.failFor.set(a.seatId, 1);
+    await f.uc.execute(input([t(a)], { nowMs: kst('2026-11-19T15:00:00') }));
+    f.tickets.failNext = 1;
+    const saves = f.store.saves.length;
+    await f.uc.execute(input([t(a)], { nowMs: kst('2026-11-19T16:00:00') }));
+    expect(f.tickets.calls).toHaveLength(2);
+    const passed = f.store.saves.slice(saves).flatMap((x) => x.results);
+    expect(passed.every((r) => r.outcome === 'FAILED' && r.failureCode === 'SEAT_RETURN_FAILED')).toBe(true);
   });
 });

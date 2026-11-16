@@ -19,6 +19,7 @@ import {
   paymentServiceHandlers,
 } from '../src/modules/payment/server.js';
 import type { CancelResult, PaymentGatewayPort, QueryResult } from '../src/modules/payment/domain/payment-gateway.js';
+import type { PaymentConfirmedCancels } from '../src/modules/payment/domain/ports.js';
 import { migratePayment } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { failure, newId, type PaymentClient, paymentClient, putPayment, unary } from './support.js';
@@ -609,5 +610,104 @@ describe('GAT-080 리뷰 반영 B1·B3 [실제 저장소]', () => {
       ['cancel-p12_rx_00000000', 'FAILED'],
       ['cancel-p12_v_00000000', 'REQUESTED'],
     ]);
+  });
+});
+
+// ---- BAT-415 검증 2단계 살아남음(계획 '검증' 8): D12·D13 ----
+describe('BAT-415 검증 2단계: 잠금 안의 판정과 끝난 행 지키기 [실제 저장소]', () => {
+  const guards = { of: () => ({ circuitClosed: () => true, tryTakeToken: () => true }) as never };
+
+  test('GAT-080 P11 3시간 지난 재시도의 잔액 판정은 결제 행 잠금 안의 값으로 한다: 조회와 판정 사이에 다른 취소가 반영되면 결과 모름이다', async () => {
+    const p = await partial();
+    const jobs = new DrizzleConfirmJobs({ database: hot, clock });
+    const sent: string[] = [];
+    let outcome: CancelResult['outcome'] = 'UNKNOWN';
+    const gateway = {
+      pg: 'TOSS',
+      cancel: async (c: Parameters<PaymentGatewayPort['cancel']>[0]) => {
+        sent.push(c.idemKey);
+        return { outcome };
+      },
+      query: async (): Promise<QueryResult> => ({ kind: 'FOUND', paymentRef: `ref-${p.orderId}`, orderRef: p.orderId, status: 'PARTIAL_CANCELED', amount: PRICE, balanceAmount: 50_000 }),
+    } as unknown as PaymentGatewayPort;
+    let between: (() => Promise<void>) | undefined;
+    const store: PaymentConfirmedCancels = {
+      readConfirmedCancelTarget: (id, b) => jobs.readConfirmedCancelTarget(id, b),
+      beginConfirmedCancel: (target, q, b) => jobs.beginConfirmedCancel(target, q, b),
+      finishConfirmedCancel: (target, id, b) => jobs.finishConfirmedCancel(target, id, b),
+      markConfirmedCancel: (target, id, status, b) => jobs.markConfirmedCancel(target, id, status, b),
+      settleConfirmedCancelByQuery: async (target, id, balance, b) => {
+        const step = between;
+        between = undefined;
+        if (step) await step();
+        return jobs.settleConfirmedCancelByQuery(target, id, balance, b);
+      },
+    };
+    const uc = new CancelConfirmedPayment({ store, gateways: { of: () => gateway }, guards, clock });
+    const exec = (cancellationId: string) => uc.execute({ paymentId: p.paymentId, cancellationId, reason: '관객 취소', amount: 30_000 });
+
+    // X(30,000, 기대 잔액 80,000) 결과 모름, 10분 뒤 같은 결제의 Z(30,000)도 결과 모름(진행 중)
+    await expect(exec('d12_lock_x_0001')).resolves.toMatchObject({ result: 'UNKNOWN' });
+    clock.advance(600_000);
+    await expect(exec('d12_lock_z_0001')).resolves.toMatchObject({ result: 'UNKNOWN' });
+    clock.advance(10_800_000);
+    // X의 3시간 재시도: 조회(잔액 50,000) 뒤, 판정 직전에 Z가 결제사 성공으로 원장에 반영된다(그 사이 다른 반영이 끼었다)
+    between = async () => {
+      const target = await jobs.readConfirmedCancelTarget(p.paymentId);
+      expect(await jobs.finishConfirmedCancel(target!, 'd12_lock_z_0001')).toMatchObject({ status: 'APPLIED', cancelledAmount: 50_000 });
+    };
+    outcome = 'CANCELLED';
+    await expect(exec('d12_lock_x_0001')).resolves.toMatchObject({ result: 'UNKNOWN' });
+    // 끼어든 반영이 실제로 있었다(between을 썼다)
+    expect(between).toBeUndefined();
+    expect(sent).toEqual(['cancel-d12_lock_x_0001', 'cancel-d12_lock_z_0001']);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 50_000 });
+    expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([
+      ['cancel-d12_lock_x_0001', 'REQUESTED'],
+      ['cancel-d12_lock_z_0001', 'CANCELED'],
+    ]);
+  });
+
+  test.each(['CANCEL_PENDING', 'REJECTED'] as const)('GAT-080 P9 같은 취소 ID의 겹친 시도 가운데 A가 CANCELED로 반영한 뒤 B가 결제사 %s를 받아도 행은 CANCELED 그대로이고 누적액은 한 번만이다', async (late) => {
+    const p = await putPayment(admin, { status: 'APPROVED', amount: PRICE });
+    const jobs = new DrizzleConfirmJobs({ database: hot, clock });
+    let calls = 0;
+    let aIn: () => void = () => {};
+    const aInGateway = new Promise<void>((r) => (aIn = r));
+    let bIn: () => void = () => {};
+    const bInGateway = new Promise<void>((r) => (bIn = r));
+    let releaseB: () => void = () => {};
+    const bGate = new Promise<void>((r) => (releaseB = r));
+    const gateway = {
+      pg: 'TOSS',
+      cancel: async () => {
+        calls += 1;
+        if (calls === 1) {
+          aIn();
+          await bInGateway;
+          return { outcome: 'CANCELLED' };
+        }
+        bIn();
+        await bGate;
+        return { outcome: late };
+      },
+      query: async (): Promise<QueryResult> => ({ kind: 'UNKNOWN' }),
+    } as unknown as PaymentGatewayPort;
+    const uc = new CancelConfirmedPayment({ store: jobs, gateways: { of: () => gateway }, guards, clock });
+    const id = `d13_overlap_${late.toLowerCase()}`;
+    const exec = () => uc.execute({ paymentId: p.paymentId, cancellationId: id, reason: '관객 취소', amount: 30_000 });
+    const a = exec();
+    await aInGateway;
+    const b = exec();
+    // A가 먼저 성공을 받아 반영을 마친 뒤에 B의 늦은 답을 놓는다
+    await expect(a).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 30_000 });
+    releaseB();
+    await b;
+    expect(calls).toBe(2);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 30_000 });
+    expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([[`cancel-${id}`, 'CANCELED']]);
+    // 같은 ID 재호출은 끝난 건이라 결제사를 부르지 않고 CANCELLED다
+    await expect(exec()).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 30_000 });
+    expect(calls).toBe(2);
   });
 });

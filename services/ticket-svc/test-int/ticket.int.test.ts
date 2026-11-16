@@ -670,3 +670,35 @@ describe('GAT-080 S3 첫 칸은 사유 USER 기록만 [PostgreSQL]', () => {
     await expect(put('REFUND')).rejects.toMatchObject({ code: '23514' });
   });
 });
+
+// ---- BAT-415 검증 2단계 살아남음(계획 '검증' 8): D17·M2-R1d-mig ----
+describe('BAT-415 검증 2단계: 첫 칸 조회의 결과 조건과 0009 사유 목록 [PostgreSQL]', () => {
+  const fresh = async () => {
+    const orderId = randomUUID();
+    const r = await service.issue({ orderId, eventId: randomUUID(), payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 0 });
+    return { orderId, ticketId: r.tickets[0]!.ticketId };
+  };
+
+  test('GAT-080 S3 첫 칸은 결과가 REFUND_NOW·REFUND_AFTER_CLOSE인 사유 USER 기록이다: 더 이른 USER 거절 기록이 있어도 그것이 아니다', async () => {
+    const t = await fresh();
+    // 더 이른 사유 USER 기록이지만 결과가 표를 끝내지 않은 기록을 SQL로 넣는다(결과 조건이 빠지면 이것이 첫 칸으로 나온다)
+    await database.pool.query("insert into ticket_cancellation (cancellation_id, ticket_id, order_id, result, cancelled_at, reason) values ($1, $2, $3, 'TRANSFER_PENDING', $4, 'USER')", [
+      randomUUID(),
+      t.ticketId,
+      t.orderId,
+      new Date(NOW - 60_000),
+    ]);
+    const k1 = randomUUID();
+    expect(await service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId: k1, nowMs: NOW, reason: 'USER' })).toEqual([{ ticketId: t.ticketId, result: 'REFUND_NOW' }]);
+    expect(await service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId: randomUUID(), nowMs: NOW + 60_000, reason: 'USER' })).toEqual([
+      { ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first: { cancellationId: k1, result: 'REFUND_NOW', cancelledAtMs: NOW } },
+    ]);
+  });
+
+  test('GAT-080 S3 사유 FRAUD로 CancelTickets를 부르면 받고 ticket_cancellation.reason이 FRAUD다(0009 DB CHECK에 FRAUD)', async () => {
+    const t = await fresh();
+    const k = randomUUID();
+    expect(await service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId: k, nowMs: NOW, reason: 'FRAUD' })).toEqual([{ ticketId: t.ticketId, result: 'REFUND_NOW' }]);
+    expect((await database.pool.query('select reason from ticket_cancellation where cancellation_id = $1 and ticket_id = $2', [k, t.ticketId])).rows).toEqual([{ reason: 'FRAUD' }]);
+  });
+});
