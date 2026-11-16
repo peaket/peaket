@@ -1,5 +1,7 @@
 // review 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-585, LCH-150·LCH-160).
 // 0013_review.sql 적용, 후기 한 회차 하나·신고 한도·같은 내용 지문·조치 트랜잭션·동시 신고를 실제 DB에서 본다.
+// W7-audit COV2-06 ⑭(보충): 서비스는 운영과 같은 DB 역할(core_app 로그인)로 띄운다. 마이그레이션·시험 자료 넣기·확인은 관리자(슈퍼유저) 연결로 한다.
+// 전에는 서비스를 슈퍼유저로 띄워 core_app에 후기 표 쓰기 권한이 없는 것(0004·0013)이 드러나지 않았다(docs/data.md §2 '후기 표의 DB 권한').
 import 'reflect-metadata';
 import { createDatabase, createService, ensureOutboxPartitions, systemClock, type Database } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -16,8 +18,12 @@ import {
 } from '../src/modules/review/index.js';
 import { FakeIdentity, fan, quiet, testMedia } from '../test/support.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
+import { loginFor } from './roles.js';
 
 let pg: PostgresContainer;
+/** 슈퍼유저(마이그레이션·시험 자료·확인) */
+let admin: Database;
+/** 서비스가 쓰는 운영 역할 core_app 로그인 */
 let database: Database;
 let svc: Awaited<ReturnType<typeof createService>>;
 let reviews: Reviews;
@@ -31,13 +37,15 @@ const ACTOR = randomUUID();
 beforeAll(async () => {
   pg = await startPostgres();
   await migrateCore(pg.url);
-  database = createDatabase({ url: pg.url, applicationName: 'core-svc-review-int', max: 8 });
-  await ensureOutboxPartitions(database, systemClock);
+  admin = createDatabase({ url: pg.url, applicationName: 'core-svc-review-int-admin', max: 4 });
+  await ensureOutboxPartitions(admin, systemClock);
+  database = await loginFor(admin, pg, 'core_app_review_int', 'core_app', 8);
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({
       database,
-      partnerDatabase: database,
+      // 후기 경로는 파트너 연결을 쓰지 않는다
+      partnerDatabase: admin,
       media: testMedia(),
       review: { eligibility, fanProfile: fanProfiles, notifier, cases },
     }),
@@ -50,6 +58,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await svc?.close();
   await database?.close();
+  await admin?.close();
   pg?.stop();
 });
 
@@ -58,10 +67,10 @@ async function seed(): Promise<{ productionId: string; eventId: string }> {
   const placeId = randomUUID();
   const productionId = randomUUID();
   const eventId = randomUUID();
-  await database.db.insert(promoter).values({ id: promoterId, legalName: '(주)피켓공연' });
-  await database.db.insert(place).values({ id: placeId, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: ACTOR });
-  await database.db.insert(production).values({ id: productionId, promoterId, placeId, title: '겨울 콘서트', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date('2026-11-01T00:00:00Z') });
-  await database.db.insert(event).values({ id: eventId, productionId, promoterId, venueId: null, openAt: new Date('2026-01-01T00:00:00Z'), startsAt: new Date('2026-01-01T10:00:00Z'), endsAt: new Date('2026-01-01T12:30:00Z') });
+  await admin.db.insert(promoter).values({ id: promoterId, legalName: '(주)피켓공연' });
+  await admin.db.insert(place).values({ id: placeId, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: ACTOR });
+  await admin.db.insert(production).values({ id: productionId, promoterId, placeId, title: '겨울 콘서트', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date('2026-11-01T00:00:00Z') });
+  await admin.db.insert(event).values({ id: eventId, productionId, promoterId, venueId: null, openAt: new Date('2026-01-01T00:00:00Z'), startsAt: new Date('2026-01-01T10:00:00Z'), endsAt: new Date('2026-01-01T12:30:00Z') });
   return { productionId, eventId };
 }
 
@@ -70,24 +79,24 @@ const report = (reviewId: string, account: string) => svc.http.inject({ method: 
 
 describe('review PostgreSQL [BAT-585]', () => {
   test('0013_review.sql이 네 표와 부분 유일 인덱스를 만든다', async () => {
-    const tables = await database.pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_name in ('review','content_report','takedown_action','review_hidden_fingerprint') order by table_name");
+    const tables = await admin.pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_name in ('review','content_report','takedown_action','review_hidden_fingerprint') order by table_name");
     expect(tables.rows.map((r) => r.table_name)).toEqual(['content_report', 'review', 'review_hidden_fingerprint', 'takedown_action']);
-    const idx = await database.pool.query("select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'review' and indexname = 'review_event_account_uq'");
+    const idx = await admin.pool.query("select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'review' and indexname = 'review_event_account_uq'");
     expect(idx.rows[0].indexdef).toContain("status");
   });
 
-  test('같은 계정이 같은 회차에 동시에 두 번 쓰면 하나만 저장되고 다른 하나는 409다', async () => {
+  test('COV2-06 ⑭ 같은 계정이 같은 회차에 동시에 두 번 쓰면 하나만 저장되고 다른 하나는 409다', async () => {
     const { eventId } = await seed();
     const me = randomUUID();
     eligibility.set(me, eventId, { eligible: true, basisOrderId: randomUUID() });
     const body = { rating: 5, body: '동시에 두 번 써도 한 번만 저장되는 후기 본문입니다.' };
     const results = await Promise.all([postReview(eventId, me, body), postReview(eventId, me, body)]);
     expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409]);
-    const rows = await database.pool.query('select count(*)::int as n from review where event_id = $1 and account_id = $2', [eventId, me]);
+    const rows = await admin.pool.query('select count(*)::int as n from review where event_id = $1 and account_id = $2', [eventId, me]);
     expect(rows.rows[0].n).toBe(1);
   });
 
-  test('신고는 한 계정 하루 10건까지이고 11번째는 429다', async () => {
+  test('COV2-06 ⑭ 신고는 한 계정 하루 10건까지이고 11번째는 429다', async () => {
     const { eventId } = await seed();
     const reporter = randomUUID();
     const reviewIds: string[] = [];
@@ -104,7 +113,7 @@ describe('review PostgreSQL [BAT-585]', () => {
     expect(JSON.parse(limited.payload).type).toBe('https://peaket.example/problems/report-limited');
   });
 
-  test('같은 신고를 동시에 보내면 하나만 저장되고 다른 하나는 409다', async () => {
+  test('COV2-06 ⑭ 같은 신고를 동시에 보내면 하나만 저장되고 다른 하나는 409다', async () => {
     const { eventId } = await seed();
     const author = randomUUID();
     const reporter = randomUUID();
@@ -112,11 +121,11 @@ describe('review PostgreSQL [BAT-585]', () => {
     const created = JSON.parse((await postReview(eventId, author, { rating: 5, body: '동시 신고 시험용 후기 본문입니다.' })).payload);
     const results = await Promise.all([report(created.reviewId, reporter), report(created.reviewId, reporter)]);
     expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409]);
-    const rows = await database.pool.query('select count(*)::int as n from content_report where target_id = $1 and reporter_account_id = $2', [created.reviewId, reporter]);
+    const rows = await admin.pool.query('select count(*)::int as n from content_report where target_id = $1 and reporter_account_id = $2', [created.reviewId, reporter]);
     expect(rows.rows[0].n).toBe(1);
   });
 
-  test('통보로 가린 같은 내용 지문은 새 후기를 바로 HIDDEN으로 만들고, 조치와 신고 처리는 한 트랜잭션으로 남는다', async () => {
+  test('COV2-06 ⑭ 통보로 가린 같은 내용 지문은 새 후기를 바로 HIDDEN으로 만들고, 조치와 신고 처리는 한 트랜잭션으로 남는다', async () => {
     const { eventId } = await seed();
     const first = randomUUID();
     const second = randomUUID();
@@ -128,7 +137,7 @@ describe('review PostgreSQL [BAT-585]', () => {
     await reviews.applyNoticeTakedown({ reviewIds: [created.reviewId], noticeId, receivedAtMs: Date.now(), kind: 'GENERAL', reason: '신고기관 통보' });
     const same = await postReview(eventId, second, { rating: 4, body: '정말 좋았습니다 다음에도 또 보고싶어요' });
     expect(JSON.parse(same.payload).status).toBe('HIDDEN');
-    const fp = await database.pool.query('select count(*)::int as n from review_hidden_fingerprint');
+    const fp = await admin.pool.query('select count(*)::int as n from review_hidden_fingerprint');
     expect(fp.rows[0].n).toBe(1);
 
     const reporter = randomUUID();
@@ -139,7 +148,7 @@ describe('review PostgreSQL [BAT-585]', () => {
     const cs = identity.ops('cs_agent');
     const moderated = await svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${targetReview.reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify({ action: 'BLOCK', reason: '운영정책 위반', violation: 'SPAM' }) });
     expect(moderated.statusCode).toBe(200);
-    const rows = await database.pool.query("select r.status, r.notice, c.status as report_status, c.outcome from review r join content_report c on c.target_id = r.id where r.id = $1", [targetReview.reviewId]);
+    const rows = await admin.pool.query("select r.status, r.notice, c.status as report_status, c.outcome from review r join content_report c on c.target_id = r.id where r.id = $1", [targetReview.reviewId]);
     expect(rows.rows[0]).toMatchObject({ status: 'HIDDEN', notice: 'POLICY', report_status: 'RESOLVED', outcome: 'BLOCKED' });
   });
 });
