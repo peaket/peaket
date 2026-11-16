@@ -1,5 +1,6 @@
 // 우선 구매 보류 Lua를 실제 Valkey 8.1로 본다(GAT-135, S-T37 ①, docs/features/seat-hold.md §5 '우선 구매 보류').
 // 비트·kind PRIORITY Hash·`s:{event:E}:prio`를 한 Lua가 쓰고, 7분 만료 인덱스에는 넣지 않는지 확인한다.
+// Lua가 만료·보관 시한을 Redis TIME과 견주므로, 기준 시각(NOW)은 고정 날짜가 아니라 Valkey 서버 시각에서 잡는다(W8-ci-fix).
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createHotRedis, fakeClock, type HotRedis } from '@peaket/platform';
@@ -7,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { MemorySeatMap, RedisOrderHolds, RedisSeatStore, seatKeys } from '../src/modules/inventory/index.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
-const NOW = Date.parse('2026-11-14T08:00:00.000Z');
+let NOW: number;
 const DAY = 86_400_000;
 let valkey: ValkeyContainer | undefined;
 let redis: HotRedis;
@@ -16,6 +17,9 @@ let store: RedisSeatStore;
 beforeAll(async () => {
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
+  const t = (await redis.command(['TIME'], {})) as unknown[];
+  const serverMs = Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
+  NOW = serverMs;
   store = new RedisSeatStore(redis, undefined, fakeClock({ now: NOW }));
 });
 afterAll(async () => {

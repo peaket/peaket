@@ -47,7 +47,9 @@ import { migratePurchase } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContainer } from './valkey.js';
 
-const NOW = Date.parse('2026-11-13T10:00:00+09:00');
+// 기준 시각(NOW)은 Valkey 서버 시각에서 잡는다(beforeAll). 판매 보관 시한(NOW + 7일)을 Lua가 PEXPIREAT·Redis TIME과 견주므로
+// 고정 날짜로 두면 그날이 지난 뒤 반납 단언이 깨진다(W8-ci-fix). 서버 기준 한국 날짜의 3일 전 10:00(한국 시각)으로 둔다
+let NOW: number;
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const PRICE = 100_000;
@@ -97,9 +99,14 @@ beforeAll(async () => {
   ticketDb = createDatabase({ url: ticketUrl, profile: 'general', max: 6, applicationName: 'cancellation-it-ticket' });
   paymentDb = createDatabase({ url: paymentUrl, profile: 'general', max: 6, applicationName: 'cancellation-it-payment' });
   admin = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'cancellation-it-admin' });
-  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }));
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
+  const t = (await redis.command(['TIME'], {})) as unknown[];
+  const serverMs = Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
+  const KST = 9 * HOUR;
+  const dayStart = Math.floor((serverMs + KST) / DAY) * DAY - KST; // 서버 기준 한국 날짜 0시(UTC 밀리초)
+  NOW = dayStart - 3 * DAY + 10 * HOUR;
+  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }));
   seatMap = new MemorySeatMap();
   sales = new DrizzleSeatSales(purchaseDb);
   store = new RedisSeatStore(redis);

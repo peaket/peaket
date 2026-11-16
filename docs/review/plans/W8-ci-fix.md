@@ -125,3 +125,40 @@ const serverMs = Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
 함께 본다.
 - 고친 diff에 `expect(` 줄이 없어야 한다. 단언 값이 바뀌지 않았다는 확인이다.
 - diff가 두 시험 파일과 이 계획·검토 기록 밖으로 나가지 않아야 한다. 제품 코드(`src/`)는 바뀌지 않아야 한다.
+
+## 실패 확인
+
+시험 담당(`l3w8-ci-test`)이 2026-11-16 13:25~13:40(한국 시각, 04:25~04:40Z) 개인 PC Docker Desktop에서 돌렸다. 모든 명령은 `services/purchase-svc` 폴더에서 `npx vitest run --config vitest.integration.config.mjs <파일>`이다. 공용 패키지는 설정의 별칭(alias)이 `src`를 바로 읽어 dist가 필요 없었다.
+
+### 고치기 전(출발점 `92448f1d`의 시험 그대로)
+
+| 파일 | 결과 | 실패한 시험과 줄 |
+|---|---|---|
+| `test-int/priority-hold.int.test.ts` | **7개 중 4개 실패**, 3개 통과 | S-T37 ①(41행)·④(61행)·⑦ 회수 해제(77행)·⑦ 다른 계정·권리 ID(91행). 넷 다 `expected { kind: 'EXPIRED' } to match object { kind: 'OK', … }`. CI 43799265031과 같은 시험·같은 줄이다 |
+| `test-int/cancellation.int.test.ts`(원래 날짜 11-13) | 13개 모두 통과 | 없음. 11-20 01:00Z 전이라 아직 안 터진다 |
+| 같은 파일, 날짜만 잠깐 `'2026-11-05T10:00:00+09:00'`로 당김 | **13개 중 1개 실패** | GAT080_취소는_티켓키폐기·좌석RETURNED·Redis비트해제·결제사부분취소를_한번에_한다, 352행 `GETBIT … toBe(0)`에서 `expected 1 to be +0` |
+
+- **까닭(priority-hold)**: 1절 그대로다. 우선 구매 보류 Lua가 `redis.call('TIME')`으로 실제 지금을 읽는데, 시험의 만료 시각 `NOW + DAY`(11-15 08:00Z)가 이미 지나 처음부터 `EXPIRED`가 났다. 돌린 때가 08:00Z 전이라 '⑦ prio 만료 회수'는 아직 통과했다(다섯째는 아님).
+- **까닭(cancellation)**: 2절 (가) 그대로다. 보관 시한 `NOW + 7 * DAY`가 지난 값이 되자 판매 열기 Lua의 `PEXPIREAT`가 세대 키를 바로 지웠고, 반납이 `NOT_READY`로 아무것도 쓰지 않아 좌석 비트가 1로 남았다. 날짜를 당겨 실패가 재현되었으므로 **cancellation은 (나)로 옮기지 않고 이번에 고친다.** 날짜는 재현 뒤 `git checkout`으로 되돌렸다.
+
+### 고친 뒤
+
+3절 방법대로 두 파일의 기준 시각만 Valkey `TIME`에서 잡았다. priority-hold는 `NOW = serverMs`, cancellation은 서버 기준 한국 날짜의 3일 전 10:00(한국 시각)이다(오늘 돌리면 원래 값 11-13 10:00과 같다). cancellation은 Valkey를 먼저 띄우고 그 뒤에 outbox 칸을 만든다. 고친 diff에 `expect(` 줄은 없다.
+
+| 파일 | 결과 |
+|---|---|
+| `test-int/priority-hold.int.test.ts` | **7개 모두 통과** |
+| `test-int/cancellation.int.test.ts` | **13개 모두 통과**(고치기 전과 같은 수) |
+
+- `npx tsc --noEmit -p services/purchase-svc/tsconfig.json`도 통과했다(`@peaket/shuffle` dist를 먼저 빌드). eslint 설정은 `test-int`를 보지 않는다.
+- 주의: 두 파일을 한 번의 vitest로 함께 돌렸을 때 cancellation의 시험 둘이 `RedisDeadlineError: Redis 호출이 마감 100ms를 넘겼다`(world()의 `openSale`)로 한 번 실패했다. 개인 PC에서 컨테이너 셋(PostgreSQL·Valkey 둘)이 겹친 부하 탓이고, 따로 돌리면 둘 다 통과했다. 날짜와는 상관없다.
+
+### 날짜 민감도(손으로 한 번 보고 되돌림)
+
+| 바꾼 기준 | 결과 |
+|---|---|
+| priority-hold `NOW = Date.parse('2026-11-14T08:00:00.000Z')`(M1 꼴) | 7개 중 4개 실패(고치기 전과 같은 넷) |
+| priority-hold `NOW = serverMs - 2 * DAY`(M2 꼴) | 7개 중 **5개** 실패. 같은 넷과 '⑦ prio 만료 회수'(131행). 보관 시한 `NOW + 2 * DAY`가 서버 지금과 같아져 `keep <= now`이기 때문이다. 5절 M2의 기대 '같은 넷'은 '넷 이상'으로 읽는다 |
+| cancellation `NOW = Date.parse('2026-11-05T10:00:00+09:00')`(M3 꼴, 고친 파일에서) | 13개 중 1개 실패. 위와 같은 반납 시험(고친 파일 기준 359행) |
+
+셋 다 확인 뒤 고친 값으로 되돌렸다. 시험이 서버 시각과의 관계를 실제로 본다는 뜻이다.
