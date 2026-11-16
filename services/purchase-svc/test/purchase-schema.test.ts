@@ -81,6 +81,8 @@ const PRIORITY_GUARD_TAG = '0020_priority_grant_guard';
 const PRIORITY_ACTED_TAG = '0021_priority_grant_acted_by';
 /** 부정 예매 운영자 취소의 요청·표별 결과 표 둘(BUILD_ORDER GAT-080, BAT-415 몫 F, docs/data.md fraud_cancellation_request·fraud_cancellation_ticket) */
 const FRAUD_TAG = '0022_fraud_cancellation';
+/** 마감 뒤 환급 전 입장 기록 대조 칸 order_cancellation.entry_recorded_at(BUILD_ORDER GAT-090, BAT-420 A7, docs/data.md order_cancellation) */
+const ENTRY_RECORDED_TAG = '0023_entry_recorded_at';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -437,6 +439,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [20, PRIORITY_GUARD_TAG],
       [21, PRIORITY_ACTED_TAG],
       [22, FRAUD_TAG],
+      [23, ENTRY_RECORDED_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -472,6 +475,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${PRIORITY_GUARD_TAG}.sql`,
       `${PRIORITY_ACTED_TAG}.sql`,
       `${FRAUD_TAG}.sql`,
+      `${ENTRY_RECORDED_TAG}.sql`,
     ]);
   });
 
@@ -592,8 +596,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  test('마지막 스냅샷(0022_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0022_snapshot.json');
+  test('마지막 스냅샷(0023_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0023_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes]) {
@@ -602,6 +606,21 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints ?? {}), `${s.name} check`).toEqual(s.checks.map((k) => k.name));
     }
+  });
+
+  test('GAT-090 A7 0023 SQL은 order_cancellation에 entry_recorded_at(timestamptz, 빈 값 허용, 기본값 없음) 한 칸만 더하고, 0023 스냅샷은 0022 뒤에서 그 칸 하나만 늘린다', () => {
+    const sqlText = canon(readFileSync(join(MIGRATIONS, `${ENTRY_RECORDED_TAG}.sql`), 'utf8'));
+    expect(sqlText).toContain('alter table order_cancellation add column entry_recorded_at timestamp with time zone');
+    expect(sqlText).not.toMatch(/entry_recorded_at timestamp with time zone (not null|default)/);
+    expect(sqlText.match(/alter table/gi)).toHaveLength(1);
+    expect(sqlText).not.toMatch(/create table|create index|create unique index|drop |add constraint/);
+    const before = snapshotOf('0022_snapshot.json');
+    const after = snapshotOf('0023_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    const added = Object.keys(after.tables['public.order_cancellation']!.columns).filter((c) => !Object.keys(before.tables['public.order_cancellation']!.columns).includes(c));
+    expect(added).toEqual(['entry_recorded_at']);
+    expect(after.tables['public.order_cancellation']!.columns.entry_recorded_at).toMatchObject({ type: 'timestamp with time zone', notNull: false, primaryKey: false });
   });
 
   test('GAT-080 F19 0022 스냅샷의 앞은 0021 스냅샷이고, 부정 예매 표 둘만 더하며 기본 키·외래 키 이름이 schema.ts와 같다', () => {
