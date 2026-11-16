@@ -1,14 +1,20 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
+// 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 익명화, W7-audit COV2-06, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
+// local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
-import { assertInternalGrpcToken, createDatabase, createHotRedis, createService, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
+import { kafkaConsumersFromEnv } from './consumers/index.js';
+import type { CoreConsumers } from './consumers/start.js';
 import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
-import { GrpcReviewEligibility, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
+import { GrpcReviewEligibility, ReviewAccountWithdrawnHandler, Reviews, UnavailableReviewEligibility, UnavailableFanProfile } from './modules/review/index.js';
 import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
+// Kafka 소비자 설정은 서비스를 만들기 전에 읽는다(운영에서 브로커 주소가 없거나 틀리면 여기서 시작에 실패한다. 탈퇴 사건을 조용히 놓치지 않는다)
+const kafka = kafkaConsumersFromEnv(process.env);
 /** 파트너 경로의 풀 크기 [가정](핫패스가 아니다, ADR-0241) */
 const PARTNER_POOL_MAX = 4;
 const url = process.env.PEAKET_DATABASE_URL;
@@ -100,19 +106,54 @@ const webhookWorker =
     : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(database), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
 webhookWorker?.start();
 
+// 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>). DB는 서비스와 같은 core_app 연결이다(후기 익명화와 보류 표 held_event)
+let consumers: CoreConsumers | undefined;
+let closing: Promise<void> | undefined;
+if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
+else {
+  // 네이티브 Kafka 모듈은 켤 때만 싣는다(local·ci에서 브로커 없이 뜰 때는 싣지 않는다)
+  const { startCoreConsumers } = await import('./consumers/start.js');
+  const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
+  consumers = startCoreConsumers({
+    env: kafka.env,
+    brokers: kafka.brokers,
+    clientId: `${SERVICE}-${kafka.env}-${pod}`,
+    auth: kafka.auth,
+    database,
+    handler: new ReviewAccountWithdrawnHandler(service.app.get(Reviews), undefined, { logger: service.logger }),
+    registry: service.metrics.registry,
+    logger: service.logger,
+  });
+  consumers.started.catch((err: unknown) => {
+    service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자를 켜지 못해 core-svc를 끝낸다');
+    process.exitCode = 1;
+    void shutdown();
+  });
+}
+
 process.once('SIGTERM', () => {
-  webhookWorker?.stop();
-  // 받는 요청을 먼저 마치고 identity 채널과 DB 연결을 닫는다
-  void service
-    .close()
-    .catch((err: unknown) => service.logger.error({ err }, 'core-svc 종료 실패'))
-    .finally(() => {
-      adminAuthz.close();
-      memberCodes.close();
-      imageProcessing.close();
-      seatmapParser.close();
-      if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
-      void queueRedis?.close();
-      return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close()]);
-    });
+  void shutdown();
 });
+
+/** 종료 차례(SIGTERM, 소비자 시작 실패). 두 번 불러도 한 번만 한다 */
+function shutdown(): Promise<void> {
+  closing ??= (async () => {
+    webhookWorker?.stop();
+    // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
+    await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));
+    // 받는 요청을 마치고 identity 채널과 DB 연결을 닫는다
+    await service
+      .close()
+      .catch((err: unknown) => service.logger.error({ err }, 'core-svc 종료 실패'))
+      .finally(() => {
+        adminAuthz.close();
+        memberCodes.close();
+        imageProcessing.close();
+        seatmapParser.close();
+        if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
+        void queueRedis?.close();
+        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close()]);
+      });
+  })();
+  return closing;
+}

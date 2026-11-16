@@ -10,6 +10,7 @@ export {
   ACCOUNTS_WITHDRAWN_TOPIC,
   type AccountWithdrawnCodec,
   jsonAccountWithdrawnCodec,
+  readReviewWithdrawn,
   ReviewAccountWithdrawnHandler,
   type ReviewWithdrawnEvent,
 } from './inbound/account-withdrawn.handler.js';
