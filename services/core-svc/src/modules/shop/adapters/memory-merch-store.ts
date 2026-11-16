@@ -32,11 +32,11 @@ export class MemoryMerchOrderStore implements MerchOrderStore {
 
   async listAttendees(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<{ items: AttendeeRecord[]; nextCursor: string | null }> {
     const after = cursor ? Buffer.from(cursor, 'base64url').toString('utf8') : '';
-    const items = this.#attendeeRows(promoterId, eventId)
-      .filter((r) => after === '' || r.orderId > after)
-      .slice(0, limit);
-    // 뼈대(W7-audit 시험 단계): 페이지 모양만 맞췄다. 다음 주문이 있을 때만 nextCursor를 주는 일은 구현 담당 몫(A2-17)
-    return { items, nextCursor: null };
+    const rest = this.#attendeeRows(promoterId, eventId).filter((r) => after === '' || r.orderId > after);
+    const items = rest.slice(0, limit);
+    // 뒤에 주문이 더 있을 때만 다음 커서를 준다. 남은 것이 정확히 limit건이면 null이다(W7-audit A2-17, docs/api/guidelines.md §3)
+    const nextCursor = rest.length > limit && items.length > 0 ? Buffer.from(items[items.length - 1]!.orderId).toString('base64url') : null;
+    return { items, nextCursor };
   }
 
   async countAttendees(promoterId: string, eventId: string): Promise<{ bookings: number; tickets: number }> {

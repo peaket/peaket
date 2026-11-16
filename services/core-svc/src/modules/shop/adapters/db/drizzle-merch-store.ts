@@ -1,8 +1,8 @@
-// shop 주문·정산 원천 Drizzle 저장소. 파트너 경로는 core_partner(RLS), 내부 정산 원천은 core_app으로 읽는다.
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+// shop 주문·정산 원천 Drizzle 저장소. 내부 정산 원천은 core_app으로 읽는다.
+import { eq } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { MerchOrderStore } from '../../domain/merch-ports.js';
-import type { AttendeeRecord, MerchItemStatus, MerchOrderItemRecord, MerchOrderRecord, MerchPg, MerchPgStore, ProductSettlementItem } from '../../domain/merch.js';
+import type { MerchItemStatus, MerchOrderItemRecord, MerchOrderRecord, MerchPg, MerchPgStore, ProductSettlementItem } from '../../domain/merch.js';
 import { productSettlementItems } from '../../domain/merch.js';
 import { merchOrder, merchOrderItem } from './schema.js';
 
@@ -44,66 +44,8 @@ const toItem = (row: typeof merchOrderItem.$inferSelect): MerchOrderItemRecord =
 });
 
 export class DrizzleMerchOrderStore implements MerchOrderStore {
-  constructor(
-    private readonly partnerDb: Database,
-    private readonly appDb: Database,
-  ) {}
-
-  async listAttendees(promoterId: string, eventId: string, limit: number, cursor?: string): Promise<AttendeeRecord[]> {
-    return this.partnerDb.transaction(
-      async (tx) => {
-        const after = cursor ? Buffer.from(cursor, 'base64url').toString('utf8') : undefined;
-        const rows = await tx
-          .select({ order: merchOrder, item: merchOrderItem })
-          .from(merchOrderItem)
-          .innerJoin(merchOrder, eq(merchOrder.id, merchOrderItem.orderId))
-          .where(
-            and(
-              eq(merchOrderItem.promoterId, promoterId),
-              eq(merchOrderItem.eventId, eventId),
-              inArray(merchOrder.status, ['PENDING', 'PAID']),
-              sql`${merchOrderItem.status} not in ('CANCELLED', 'REFUNDED')`,
-              ...(after ? [gt(merchOrderItem.orderId, after)] : []),
-            ),
-          )
-          .orderBy(asc(merchOrderItem.orderId), asc(merchOrderItem.id))
-          .limit(limit * 10);
-        const byOrder = new Map<string, AttendeeRecord>();
-        for (const { order, item } of rows) {
-          const current = byOrder.get(order.id);
-          if (current) {
-            current.quantity += item.quantity;
-            if (item.seatLabel) current.seatLabel = current.seatLabel ? `${current.seatLabel}, ${item.seatLabel}` : item.seatLabel;
-          } else {
-            byOrder.set(order.id, { orderId: order.id, eventId, buyerName: order.buyerName, buyerPhone: order.buyerPhone, seatLabel: item.seatLabel, quantity: item.quantity });
-          }
-        }
-        return [...byOrder.values()].slice(0, limit);
-      },
-      { tenantId: promoterId, accessMode: 'read only' },
-    );
-  }
-
-  async countAttendees(promoterId: string, eventId: string): Promise<{ bookings: number; tickets: number }> {
-    return this.partnerDb.transaction(
-      async (tx) => {
-        const rows = await tx
-          .select({ orderId: merchOrderItem.orderId, quantity: merchOrderItem.quantity })
-          .from(merchOrderItem)
-          .innerJoin(merchOrder, eq(merchOrder.id, merchOrderItem.orderId))
-          .where(
-            and(
-              eq(merchOrderItem.promoterId, promoterId),
-              eq(merchOrderItem.eventId, eventId),
-              inArray(merchOrder.status, ['PENDING', 'PAID']),
-              sql`${merchOrderItem.status} not in ('CANCELLED', 'REFUNDED')`,
-            ),
-          );
-        return { bookings: new Set(rows.map((r) => r.orderId)).size, tickets: rows.reduce((s, r) => s + r.quantity, 0) };
-      },
-      { tenantId: promoterId, accessMode: 'read only' },
-    );
-  }
+  // 예매자 명단 원천(listAttendees·countAttendees)은 여기 두지 않는다. 운영은 purchase-svc 내부 HTTP다(A2-03, W7-audit A2-17)
+  constructor(private readonly appDb: Database) {}
 
   async listSettlementItems(from: string, to: string): Promise<ProductSettlementItem[]> {
     // 상품 정산서는 주 단위로 계산하므로 기준일 후보를 넓게 읽고 도메인 함수로 거른다.

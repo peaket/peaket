@@ -1,4 +1,4 @@
-// export 모듈 조립. 명단 원천은 shop의 merch_order·merch_order_item이다.
+// export 모듈 조립. 명단 원천은 운영에서 purchase-svc 내부 HTTP(A2-03), 메모리 조립에서 굿즈 주문 메모리 저장소다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, DATABASE, type ReauthJtiStore } from '@peaket/platform';
 import { AttendeeExports } from './application/attendee-exports.js';

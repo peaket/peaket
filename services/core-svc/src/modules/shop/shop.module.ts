@@ -53,7 +53,7 @@ export class ShopModule {
           { provide: SHOP_PARTNER_DATABASE, useValue: o.partnerDatabase },
           { provide: PRODUCT_STORE, useFactory: (db: Database) => new DrizzleProductStore(db), inject: [SHOP_PARTNER_DATABASE] },
           { provide: PRODUCT_EVENT_DIRECTORY, useFactory: (db: Database) => new DrizzleProductEventDirectory(db), inject: [DATABASE] },
-          { provide: MERCH_ORDER_STORE, useFactory: (partner: Database, app: Database) => new DrizzleMerchOrderStore(partner, app), inject: [SHOP_PARTNER_DATABASE, DATABASE] },
+          { provide: MERCH_ORDER_STORE, useFactory: (app: Database) => new DrizzleMerchOrderStore(app), inject: [DATABASE] },
         ],
       };
     }
