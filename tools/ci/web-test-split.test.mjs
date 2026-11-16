@@ -1,7 +1,8 @@
 // 소비자 웹 컨테이너 시험의 파일 이름 나눔과 CI 잡 대조(BAT-170 웨이브 끝 리뷰 W7L2-W1·W5 재현, 계획 §14 W1-2, docs/devops.md §3.1 ci-node.yml 행).
 // 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 꼴:
 // - apps/web/test-int/*.int.test.mjs: Valkey만 쓴다(운영 빌드를 읽지 않는다). ci-node가 돈다(JUnit 보고서를 남긴다)
-// - *.build.test.mjs: 운영 빌드만 쓴다(Docker를 부르지 않는다). ci-web reflow 잡이 빌드 뒤 돈다
+// - *.build.test.mjs: 운영 빌드만 쓴다(Docker를 부르지 않는다). ci-web budgets 잡이 운영 빌드 뒤 돈다
+//   (계획 §17 G-6, 소유자 결정 (나): web / reflow 잡은 BAT-171에서 처음 켠다. 그때까지 ci-web.yml에 reflow 잡이 없다)
 // - *.heavy.test.mjs: 둘 다 쓴다. 로컬 무거운 게이트에서만 돈다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,6 +24,11 @@ function stepOf(yml, needle) {
   const lines = yml.split(/\r?\n/);
   const at = lines.findIndex((l) => l.includes(needle));
   if (at < 0) return null;
+  return stepAt(lines, at);
+}
+
+/** 줄 at을 품은 단계(`- ` 항목) 글 */
+function stepAt(lines, at) {
   let start = at;
   while (start > 0 && !/^\s*- /.test(lines[start])) start -= 1;
   const indent = lines[start].search(/\S/);
@@ -75,12 +81,15 @@ test('W7L2-W1 웹 컨테이너 시험의 파일 이름이 필요한 것과 맞�
   assert.match(webInt, /NODE_OPTIONS:.*--test-reporter=junit/, `웹 통합 단계에 JUnit 보고서 환경 값이 없다\n${webInt}`);
   assert.doesNotMatch(node, /@peaket\/web test:(build|heavy)/, 'ci-node가 운영 빌드가 필요한 묶음을 돈다');
 
-  // ci-web.yml reflow 잡은 빌드 뒤 test:build를 돈다
-  const reflow = jobOf(read('.github/workflows/ci-web.yml'), 'reflow');
-  assert.ok(reflow, 'ci-web.yml에 reflow 잡이 없다');
-  const buildAt = reflow.indexOf('node seed-css/build.mjs');
-  const testBuildAt = reflow.indexOf('pnpm --filter @peaket/web test:build');
-  assert.ok(buildAt >= 0, 'reflow 잡에 운영 빌드 단계가 없다');
-  assert.ok(testBuildAt > buildAt, 'reflow 잡에 빌드 뒤 test:build 단계가 없다');
-  assert.doesNotMatch(reflow, /test:heavy/, 'CI가 무거운 게이트 묶음을 돈다');
+  // ci-web.yml budgets 잡은 운영 빌드(node seed-css/build.mjs, PEAKET_BUILDS: prod) 뒤 test:build를 돈다(계획 §17 G-6)
+  const web = read('.github/workflows/ci-web.yml');
+  const budgets = jobOf(web, 'budgets');
+  assert.ok(budgets, 'ci-web.yml에 budgets 잡이 없다');
+  const lines = budgets.split(/\r?\n/);
+  const prodBuild = lines.findIndex((l, i) => l.includes('node seed-css/build.mjs') && /PEAKET_BUILDS:\s*prod\b/.test(stepAt(lines, i)));
+  assert.ok(prodBuild >= 0, 'budgets 잡에 운영 빌드 단계(node seed-css/build.mjs, PEAKET_BUILDS: prod)가 없다');
+  const testBuild = lines.findIndex((l) => l.includes('pnpm --filter @peaket/web test:build'));
+  assert.ok(testBuild > prodBuild, 'budgets 잡에 운영 빌드 뒤 test:build 단계가 없다');
+  assert.doesNotMatch(budgets, /test:heavy/, 'CI가 무거운 게이트 묶음을 돈다');
+  assert.equal(jobOf(web, 'reflow'), null, 'ci-web.yml에 reflow 잡이 있다(BAT-171에서 처음 켠다)');
 });
