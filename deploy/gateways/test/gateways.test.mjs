@@ -419,7 +419,8 @@ test('I-T36 게이트웨이마다 jwt 제공자가 자기 키 셋의 공개키 �
   }
 });
 
-test('I-T36 게이트웨이마다 issuer를 확인하고 Lua가 토큰 머리의 typ at+jwt만 받는다(reauth+jwt·admission+jwt 거부)', () => {
+// 이 시험은 Lua 원문의 글자만 본다(동작은 VF-01의 정적·kind 시험과 기존 kind I-T36이 본다, 계획 §14 VF-01 ③)
+test('I-T36 게이트웨이마다 issuer를 확인하고 공통 Lua 원문이 typ을 at+jwt와 견준다(reauth+jwt·admission+jwt 글자 없음)', () => {
   requireDefinitions();
   const issuers = new Set();
   for (const gw of GATEWAYS) {
@@ -574,6 +575,8 @@ test('HOT-400 gw-fan identity 경로(PRF-030·BOT-044·BOT-047): 토큰 갱신·
     const hit = routeFor('gw-fan', 'api.peaket.example', method, path);
     assert.ok(hit, `gw-fan ${method} ${path}를 받는 라우트가 없다`);
     assert.ok(backendNames(hit.rule).some((b) => /identity/.test(b)), `${method} ${path}: ${backendNames(hit.rule)}`);
+    // identity-svc 앱 포트는 8080이다(공용 차트 deploy/charts/peaket-service/values.yaml의 service.port, 계획 §14 VF-08)
+    for (const b of (hit.rule.backendRefs ?? []).filter((x) => /identity/.test(x.name))) assert.equal(b.port, 8080, `${method} ${path}: ${b.name} 포트`);
   }
 });
 
@@ -738,4 +741,159 @@ test('[ASVS v5.0.0-3.5.1] RV-02 출처 확인(csrf)은 API 호스트 라우트�
     assert.ok(apiRoutes.length > 0, `${gw}: ${apiHost} 라우트가 없다`);
     assert.ok(apiRoutes.some((r) => routePolicies('SecurityPolicy', r).some((p) => findKey(p.spec ?? {}, 'csrf').length > 0)), `${gw}: ${apiHost}의 출처 확인이 없다`);
   }
+});
+
+// ===================== 검증 반영(계획 §14): 라우트마다, 그 라우트나 그 Gateway를 겨눈 정책만 본다 =====================
+
+/** 그 라우트에 닿는 정책(라우트에 건 것이 있으면 그것, 없으면 부모 Gateway에 건 것). routePolicies와 같은 차례 */
+const effective = (kind, route) => routePolicies(kind, route);
+/** 그 라우트에 닿는 jwt 제공자 */
+const routeProviders = (route) => effective('SecurityPolicy', route).flatMap((p) => p.spec?.jwt?.providers ?? []);
+const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+/** 라우트에 쓰기 매치가 있는가(메서드를 적지 않은 매치는 모든 메서드다) */
+const hasWrite = (route) => routeRules(route).some((r) => (r.backendRefs ?? []).length > 0 && (r.matches ?? [{}]).some((m) => !m.method || WRITE.has(m.method)));
+/** 공통 Lua(ConfigMap peaket-gateway-edge-lua)를 쓰는 EnvoyExtensionPolicy의 filterContext들 */
+const commonLuaContexts = (policies) =>
+  policies.flatMap((p) => (p.spec?.lua ?? []).filter((l) => l.type === 'ValueRef' && l.valueRef?.kind === 'ConfigMap' && l.valueRef?.name === 'peaket-gateway-edge-lua').map((l) => l.filterContext ?? {}));
+
+test('I-T36 VF-01 jwt 제공자가 닿는 HTTPRoute마다 공통 Lua EnvoyExtensionPolicy가 checkTyp: true로 붙는다', () => {
+  requireDefinitions();
+  for (const gw of GATEWAYS) {
+    const routes = routesOf(gw).filter((r) => routeProviders(r).length > 0);
+    assert.ok(routes.length > 0, `${gw}: jwt가 닿는 라우트가 없다`);
+    for (const r of routes) {
+      const ctx = commonLuaContexts(effective('EnvoyExtensionPolicy', r));
+      assert.ok(ctx.length > 0, `${gw}/${r.metadata?.name}: 공통 Lua가 닿지 않는다`);
+      for (const x of ctx) assert.equal(x.checkTyp, true, `${gw}/${r.metadata?.name}: checkTyp`);
+    }
+  }
+});
+
+/** 정본이 정한 출처 확인 없는 쓰기 라우트(이름으로 적는다). 지금은 없다: 앱 서버 라우트(RV-02)는 API 호스트가 아니라 여기 들지 않는다 */
+const CSRF_EXCEPTIONS = [];
+
+test('[ASVS v5.0.0-3.5.1] VF-02 API 호스트의 쿠키 인증 쓰기 라우트마다 그 라우트를 겨눈 csrf가 있고 additionalOrigins가 그 게이트웨이의 화면 출처 하나다', () => {
+  requireDefinitions();
+  for (const gw of BEHIND_CLOUDFRONT) {
+    const apiHosts = HOSTS[gw].filter((h) => h !== APP_SERVER[gw] && h !== 'queue-files.peaket.example');
+    const routes = routesOf(gw).filter((r) => (r.spec?.hostnames ?? []).some((h) => apiHosts.includes(h)) && hasWrite(r) && routeProviders(r).some((p) => (p.extractFrom?.cookies ?? []).length > 0));
+    assert.ok(routes.length > 0, `${gw}: 쿠키로 인증하는 쓰기 라우트가 없다`);
+    for (const r of routes) {
+      if (CSRF_EXCEPTIONS.includes(r.metadata?.name)) continue;
+      const csrf = effective('SecurityPolicy', r).map((p) => p.spec?.csrf).filter(Boolean);
+      assert.equal(csrf.length, 1, `${gw}/${r.metadata?.name}: 그 라우트에 닿는 csrf`);
+      const origins = (csrf[0].additionalOrigins ?? []).map(matcherText);
+      assert.deepEqual(origins, [SCREEN[gw]], `${gw}/${r.metadata?.name}: additionalOrigins`);
+      for (const bad of outsideOrigins(gw)) assert.ok(!origins.includes(bad), `${gw}/${r.metadata?.name}: ${bad}를 허용한다`);
+    }
+  }
+});
+
+test('[ASVS v5.0.0-15.3.4] VF-03 CloudFront 뒤 넷의 백엔드로 넘기는 규칙마다 x-forwarded-for를 %DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% 하나로 set한다', () => {
+  requireDefinitions();
+  for (const gw of BEHIND_CLOUDFRONT) {
+    const rules = routesOf(gw).flatMap((r) => routeRules(r).filter((x) => (x.backendRefs ?? []).length > 0).map((x) => [r, x]));
+    assert.ok(rules.length > 0, `${gw}: 백엔드로 넘기는 규칙이 없다`);
+    for (const [r, rule] of rules) {
+      const mods = filtersOf(rule).filter((f) => f.type === 'RequestHeaderModifier').map((f) => f.requestHeaderModifier ?? {});
+      const sets = mods.flatMap((m) => m.set ?? []).filter((h) => lc(h.name) === 'x-forwarded-for');
+      assert.deepEqual(sets.map((h) => h.value), ['%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'], `${gw}/${r.metadata?.name}: x-forwarded-for 다시 쓰기`);
+      const adds = mods.flatMap((m) => m.add ?? []).filter((h) => lc(h.name) === 'x-forwarded-for');
+      assert.deepEqual(adds, [], `${gw}/${r.metadata?.name}: x-forwarded-for를 덧붙인다`);
+    }
+  }
+});
+
+test('HOT-400 identity §3 VF-04 다섯 게이트웨이의 earlyRequestHeaders에 x-user- 앞부분 지우기(removeOnMatch)가 있다', () => {
+  requireDefinitions();
+  for (const gw of GATEWAYS) {
+    const on = early(gw).removeOnMatch ?? [];
+    assert.ok(on.some((m) => m.type === 'Prefix' && lc(m.value) === 'x-user-'), `${gw}: removeOnMatch ${JSON.stringify(on)}`);
+  }
+});
+
+test('B-T18 ② VF-05 접근 로그 JSON 형식에 정본 칸(시각·메서드·경로·상태·지연·clientIp·app·ja4·asn·edgeBotLabels·sub·pid)이 모두 있다', () => {
+  requireDefinitions();
+  const formats = accessLogFormats();
+  assert.ok(formats.length > 0, 'EnvoyProxy JSON 접근 로그가 없다');
+  for (const f of formats) {
+    const j = f.json ?? {};
+    const values = Object.values(j).map((v) => String(v).toUpperCase());
+    // 이름이 정본에 없는 칸은 명령으로 본다(docs/infra.md §4.1 '접근 로그')
+    assert.ok(values.some((v) => v.startsWith('%START_TIME')), '시각 칸');
+    for (const op of ['%REQ(:METHOD)%', '%REQ_WITHOUT_QUERY(:PATH)%', '%RESPONSE_CODE%', '%DURATION%']) assert.ok(values.includes(op), `${op} 칸`);
+    // 이름이 정본에 있는 칸은 이름과 명령을 함께 본다
+    const named = {
+      clientIp: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%',
+      app: '%REQ(X-PEAKET-APP)%',
+      ja4: '%REQ(CLOUDFRONT-VIEWER-JA4-FINGERPRINT)%',
+      asn: '%REQ(CLOUDFRONT-VIEWER-ASN)%',
+      edgeBotLabels: '%REQ(X-AMZN-WAF-BOT-LABELS)%',
+      sub: '%REQ(X-USER-ID)%',
+      pid: '%REQ(X-USER-PID)%',
+    };
+    for (const [k, v] of Object.entries(named)) assert.equal(String(j[k] ?? '').toUpperCase(), v, `${k} 칸`);
+  }
+});
+
+/** 게이트웨이에 건 ClientTrafficPolicy의 응답 머리 */
+const late = (gw) => clientPolicy(gw).spec?.headers?.lateResponseHeaders ?? {};
+const headerValues = (list, name) => (list ?? []).filter((h) => lc(h.name) === lc(name)).map((h) => h.value);
+/** 게이트웨이에 건 BackendTrafficPolicy의 responseOverride 응답마다 */
+const overrides = (gw) => gatewayPolicies('BackendTrafficPolicy', gw).flatMap((p) => p.spec?.responseOverride ?? []);
+
+test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] VF-06 게이트웨이마다 lateResponseHeaders.set과 바꾼 응답(responseOverride)의 머리에 HSTS·nosniff가 따로 있다', () => {
+  requireDefinitions();
+  for (const gw of GATEWAYS) {
+    const set = late(gw).set;
+    assert.deepEqual(headerValues(set, 'Strict-Transport-Security'), [HSTS], `${gw}: lateResponseHeaders.set HSTS`);
+    assert.deepEqual(headerValues(set, 'X-Content-Type-Options'), ['nosniff'], `${gw}: lateResponseHeaders.set nosniff`);
+    const os = overrides(gw);
+    assert.ok(os.length > 0, `${gw}: responseOverride가 없다`);
+    for (const [i, o] of os.entries()) {
+      const hs = o.response?.header?.set;
+      assert.deepEqual(headerValues(hs, 'Strict-Transport-Security'), [HSTS], `${gw} responseOverride[${i}]: HSTS`);
+      assert.deepEqual(headerValues(hs, 'X-Content-Type-Options'), ['nosniff'], `${gw} responseOverride[${i}]: nosniff`);
+    }
+  }
+});
+
+test('[ASVS v5.0.0-3.4.3] [ASVS v5.0.0-3.4.6] VF-06 lateResponseHeaders는 CSP를 set하지 않고 addIfAbsent에만 기본 CSP를 두며, 바꾼 응답에도 기본 CSP가 있다', () => {
+  requireDefinitions();
+  for (const gw of GATEWAYS) {
+    const l = late(gw);
+    assert.deepEqual(headerValues(l.set, 'Content-Security-Policy'), [], `${gw}: CSP를 덮어쓴다(set)`);
+    assert.deepEqual(headerValues(l.add, 'Content-Security-Policy'), [], `${gw}: CSP를 덧붙인다(add)`);
+    assert.deepEqual(headerValues(l.addIfAbsent, 'Content-Security-Policy'), [API_CSP], `${gw}: addIfAbsent 기본 CSP`);
+    for (const [i, o] of overrides(gw).entries()) assert.deepEqual(headerValues(o.response?.header?.set, 'Content-Security-Policy'), [API_CSP], `${gw} responseOverride[${i}]: CSP`);
+  }
+});
+
+test('Q-T41 ② VF-07 queue 호스트의 POST 매치마다 같은 경로의 OPTIONS 매치가 같은 라우트에 있다', () => {
+  requireDefinitions();
+  let posts = 0;
+  for (const r of routesOnHost('gw-queue', 'queue.peaket.example')) {
+    const matches = routeRules(r).flatMap((x) => x.matches ?? []);
+    const key = (m) => `${m.path?.type ?? 'PathPrefix'} ${m.path?.value ?? '/'}`;
+    const options = new Set(matches.filter((m) => m.method === 'OPTIONS').map(key));
+    for (const m of matches.filter((x) => x.method === 'POST')) {
+      posts++;
+      assert.ok(options.has(key(m)), `${r.metadata?.name}: POST ${key(m)}에 OPTIONS가 없다`);
+    }
+  }
+  assert.ok(posts > 0, 'queue 호스트에 POST 매치가 없다');
+});
+
+test('B-T18 ④ VF-09 gw-scanner의 Lua 설정은 originVerify: false다', () => {
+  requireDefinitions();
+  const ctx = commonLuaContexts(policiesOf('EnvoyExtensionPolicy', 'gw-scanner'));
+  assert.ok(ctx.length > 0, 'gw-scanner에 공통 Lua가 없다');
+  for (const x of ctx) assert.equal(x.originVerify, false, 'gw-scanner originVerify');
+  // 나머지 넷은 originVerify: true(대조)
+  for (const gw of BEHIND_CLOUDFRONT) for (const x of commonLuaContexts(policiesOf('EnvoyExtensionPolicy', gw))) assert.equal(x.originVerify, true, `${gw} originVerify`);
+});
+
+test('SR-T13 ② VF-09 어떤 EnvoyPatchPolicy도 local_ratelimit을 고치지 않는다', () => {
+  requireDefinitions();
+  for (const p of byKind('EnvoyPatchPolicy')) assert.doesNotMatch(JSON.stringify(p.spec ?? {}), /local_?rate_?limit/i, `${p.metadata?.name}: 로컬 한도를 고친다`);
 });

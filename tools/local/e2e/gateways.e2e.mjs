@@ -129,13 +129,15 @@ test('HOT-400 identity §3 바깥에서 보낸 신원 머리(X-User-*·X-Session
       'x-user-role': 'commander',
       'x-tenant-id': 'forged-tenant',
       x_user_id: 'forged-underscore',
+      // 목록 밖 이름(앞부분 지우기 removeOnMatch가 막는다, 계획 §14 VF-04)
+      'x-user-tier': 'vip',
       'x-peaket-app': 'forged-app',
     };
     const h = echoed(await probe(c, gw, { tokenValue: accessToken(c, gw, sub), event: EVENT, headers: edge(c, nextIp(), forged) }));
     assert.equal(h['x-user-id'], sub, `${gw}: x-user-id`);
     assert.equal(h['x-session-id'], `s-${sub}`, `${gw}: x-session-id`);
     assert.equal(h['x-user-aud'], AUD_OF[gw], `${gw}: x-user-aud`);
-    for (const k of ['x-user-role', 'x-tenant-id', 'x_user_id']) assert.equal(h[k], undefined, `${gw}: ${k}`);
+    for (const k of ['x-user-role', 'x-tenant-id', 'x_user_id', 'x-user-tier']) assert.equal(h[k], undefined, `${gw}: ${k}`);
     assert.ok(!JSON.stringify(h).includes('forged-'), `${gw}: 위조 값이 닿았다 ${JSON.stringify(h)}`);
   }
   // 토큰 없이 보내면 신원 머리가 하나도 없다(공개 경로: gw-fan 토큰 갱신)
@@ -174,10 +176,15 @@ async function waitAsnLine(gw, asn, timeoutMs = 20_000) {
 
 test('B-T18 ② JA4 머리가 없으면 접근 로그의 ja4만 비고 나머지 칸은 그대로다', async () => {
   const asn = nextAsn();
-  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', nextSub()), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-asn': asn }) });
+  const ip = nextIp();
+  const r = await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', nextSub()), event: EVENT, headers: edge(c, `198.51.100.250, ${ip}`, { 'cloudfront-viewer-asn': asn }) });
   const [line] = await waitAsnLine('gw-queue', asn);
   assert.ok(blank(line.ja4), `ja4: ${line.ja4}`);
   assert.equal(String(line.asn), asn);
+  // 나머지 칸을 칸마다 본다(계획 §14 VF-05): 클라이언트 IP는 x-forwarded-for 맨 오른쪽 값, app은 web, 상태는 응답 상태
+  assert.equal(line.clientIp, ip, 'clientIp 칸');
+  assert.equal(line.app, 'web', 'app 칸');
+  assert.equal(String(line.status), String(r.status), 'status 칸');
   // 경로·메서드·상태 칸이 그대로 있다
   const values = Object.values(line).map(String);
   assert.ok(values.includes('GET') || values.includes(c.probes['gw-queue'].method ?? 'GET'), '메서드 칸');
@@ -190,6 +197,12 @@ test('B-T18 ③ 대기열 경로 요청의 접근 로그 edgeBotLabels는 빈다
   const [line] = await waitAsnLine('gw-queue', asn);
   assert.ok('edgeBotLabels' in line, 'edgeBotLabels 칸이 없다');
   assert.ok(blank(line.edgeBotLabels), `edgeBotLabels: ${line.edgeBotLabels}`);
+  // 원본 확인이 맞는 요청에 라벨 머리를 보내면 그 값이 실린다(칸이 라벨 머리를 싣는다, 계획 §14 VF-10. '빈다'는 WAF 규칙표 D-T37·HOT-450이 지킨다)
+  const asn2 = nextAsn();
+  const labels = 'awswaf:managed:aws:bot-control:signal:automated_browser';
+  await probe(c, 'gw-queue', { tokenValue: accessToken(c, 'gw-queue', nextSub()), event: EVENT, headers: edge(c, nextIp(), { 'cloudfront-viewer-asn': asn2, 'x-amzn-waf-bot-labels': labels }) });
+  const [line2] = await waitAsnLine('gw-queue', asn2);
+  assert.equal(line2.edgeBotLabels, labels, 'edgeBotLabels 칸이 라벨 머리를 싣지 않는다');
 });
 
 test('B-T18 ④ 원본 확인 머리 없이(또는 틀린 값으로) 보낸 위조 CloudFront-Viewer-JA4-Fingerprint·CloudFront-Viewer-ASN·x-amzn-waf-bot-labels는 접근 로그와 백엔드 머리 어디에도 없다(게이트웨이 넷 각각, gw-scanner는 맞는 값이어도 지운다)', async () => {
@@ -588,5 +601,67 @@ test('HOT-400 authz-matrix §5.1 RV-03 ticket:buy 없는 토큰의 POST /v1/even
     const ok = await send(c, 'api', { method: 'POST', path, body: '{}', headers: hdr(withBuy) });
     assert.ok(ok.status < 400, `${path}: ticket:buy 있음 ${ok.status}`);
     assert.ok(echoed(ok)['x-user-scope'].split(' ').includes('ticket:buy'));
+  }
+});
+
+// ===================== 검증 반영(계획 §14): 지적된 경로를 그 게이트웨이에서 직접 부른다 =====================
+
+test('I-T36 VF-01 팬 키로 서명한 typ admission+jwt를 액세스 쿠키 자리에 넣은 POST /v1/queues/{id}/entries·POST /v1/queues/{id}/admission은 401이고 대역에 닿지 않는다', async () => {
+  const sub = nextSub();
+  const tv = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}` }, { typ: 'admission+jwt' });
+  for (const path of [`/v1/queues/${EVENT}/entries`, `/v1/queues/${EVENT}/admission`]) {
+    const r = await send(c, 'queue', { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin: c.origins.www, 'content-type': 'text/plain;charset=UTF-8', cookie: `__Secure-peaket_at=${tv}` }) });
+    assert.equal(r.status, 401, `${path}: ${r.status}`);
+    assert.throws(() => echoed(r), `${path}: 대역에 닿았다`);
+  }
+});
+
+/** 그 게이트웨이의 액세스 쿠키 이름(openapi securitySchemes) */
+const COOKIE_OF = { 'gw-fan': '__Secure-peaket_at', 'gw-partner': '__Secure-peaket_partner_at', 'gw-ops': '__Host-peaket_ops_at' };
+
+test('[ASVS v5.0.0-3.5.1] VF-02 허용 밖 Origin 넷의 POST /v1/events/{id}/holds·POST /v1/orders(gw-fan)는 403이고 대역에 닿지 않는다', async () => {
+  const sub = nextSub();
+  const tv = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}` });
+  const outside = [...Object.entries(c.origins).filter(([k]) => k !== 'www').map(([, v]) => v), 'https://evil.example'];
+  assert.equal(outside.length, 4);
+  for (const path of [`/v1/events/${EVENT}/holds`, '/v1/orders']) {
+    for (const origin of outside) {
+      const r = await send(c, 'api', { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin, 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', cookie: `${COOKIE_OF['gw-fan']}=${tv}` }) });
+      assert.equal(r.status, 403, `${path} ${origin}: ${r.status}`);
+      assert.throws(() => echoed(r), `${path} ${origin}: 대역에 닿았다`);
+    }
+  }
+});
+
+test('[ASVS v5.0.0-3.5.1] VF-02 허용 밖 Origin 넷의 partner-api 쓰기(gw-partner)와 ops-api 쓰기(gw-ops)는 403이고 대역에 닿지 않는다', async () => {
+  // 정본 openapi의 쓰기 하나씩: POST /v1/partner/productions(partnerCookie), POST /v1/ops/admin-accounts(opsCookie)
+  for (const [gw, host, path] of [
+    ['gw-partner', 'partner-api', '/v1/partner/productions'],
+    ['gw-ops', 'ops-api', '/v1/ops/admin-accounts'],
+  ]) {
+    const tv = accessToken(c, gw, nextSub());
+    const outside = [...Object.entries(c.origins).filter(([k]) => k !== SCREEN_OF[gw]).map(([, v]) => v), 'https://evil.example'];
+    assert.equal(outside.length, 4);
+    for (const origin of outside) {
+      const r = await send(c, host, { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin, 'content-type': 'application/json', cookie: `${COOKIE_OF[gw]}=${tv}` }) });
+      assert.equal(r.status, 403, `${gw} ${path} ${origin}: ${r.status}`);
+      assert.throws(() => echoed(r), `${gw} ${path} ${origin}: 대역에 닿았다`);
+    }
+    // 대조: 화면 출처면 대역에 닿는다
+    const ok = await send(c, host, { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin: c.origins[SCREEN_OF[gw]], 'content-type': 'application/json', cookie: `${COOKIE_OF[gw]}=${tv}` }) });
+    assert.ok(ok.status < 400, `${gw} ${path} 화면 출처: ${ok.status}`);
+    echoed(ok);
+  }
+});
+
+test('[ASVS v5.0.0-15.3.4] VF-03 바깥에서 x-forwarded-for 여러 값을 보낸 POST /v1/queues/{id}/entries도 대역은 값 하나를 받는다', async () => {
+  const sub = nextSub();
+  const tv = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'ticket:buy', pid: `p-${sub}` });
+  for (const [sent, want] of [
+    ['198.51.100.1, 203.0.113.17', '203.0.113.17'],
+    ['10.0.0.1,198.51.100.2, 2001:db8::17', '2001:db8::17'],
+  ]) {
+    const h = echoed(await send(c, 'queue', { method: 'POST', path: `/v1/queues/${EVENT}/entries`, body: '{}', headers: { 'x-peaket-origin-verify': c.originVerify, 'x-forwarded-for': sent, origin: c.origins.www, 'content-type': 'text/plain;charset=UTF-8', cookie: `__Secure-peaket_at=${tv}` } }));
+    assert.equal(h['x-forwarded-for'], want, sent);
   }
 });
