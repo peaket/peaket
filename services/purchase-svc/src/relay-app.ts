@@ -40,8 +40,10 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleDeductionGapCancellations,
   DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
+  DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
   DrizzlePendingCancellationConversions,
@@ -52,6 +54,7 @@ import {
   EventTicketCanceller,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpDeductionGapNotice,
   HttpEntryFlagNotice,
   HttpEventRefundAlert,
   HttpRefundFailureNotice,
@@ -200,6 +203,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         writes: refundWrites,
         payments: paymentCancels,
         nowMs: () => clock.now(),
+        // 회차 취소 요청 중 보류 취소의 환급 미룸: 틱 맨 앞에 기한 지난 미룸을 풀고 SEV2를 남긴다(BAT-420 몫 D)
+        holds: new DrizzleEventRefundHolds(o.serviceDatabase),
         failureNotice: refundFailureNotice,
         entries: entryRecordsFromEnv({ env: o.env ?? {}, ...(refundTicketCancels ? { tickets: refundTicketCancels } : {}) }),
         claims: refundWrites,
@@ -212,6 +217,13 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg), error: (obj: object, msg: string) => bound().logger.error(obj, msg) },
       })
     : undefined;
+  // 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D). ops-svc 주소가 없으면 로그 대역이다
+  const deductionGapNotice = opsClient
+    ? new HttpDeductionGapNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
+    : {
+        open: async (q: { cancellationId: string; requestId: string }) =>
+          taskLogger.warn({ event: 'event_refund_deduction_gap', cancellationId: q.cancellationId, requestId: q.requestId }, '회차 취소 확정 때 남는 공제 차액(CS 처리함 주소 없음)'),
+      };
   // 회차 취소 일괄 환불 실행기(BAT-425 GAT-130, BAT-420 GAT-110). ticket-svc·payment-svc 주소가 있을 때만 만든다.
   // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기·확정 뒤 끝난 주문 쓸어 담기를 이 릴레이 리더가 이어 간다.
   // 회차 취소(CANCEL)는 전용 취소기(견적·좌석 되돌림 없음, 보류 취소 전환), 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 간다(ADR-0280 결정 3).
@@ -220,6 +232,13 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       ? new EventRefundService({
           store: new DrizzleEventRefundStore(o.serviceDatabase, clock),
           targets: new DrizzleEventRefundTargets(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
+          items: new DrizzleEventRefundStore(o.serviceDatabase, clock),
+          openOrders: new DrizzleEventOpenOrders(o.serviceDatabase),
+          // 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45]): 입장 시작은 회차 판매 설정에서 읽는다
+          gaps: new DrizzleDeductionGapCancellations(o.serviceDatabase),
+          gapNotice: deductionGapNotice,
+          configs: new SeatMapSaleConfigs(o.seatMap),
+          log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg) },
           canceller: new EventRefundCancellerRouter({
             cancel: new EventTicketCanceller({
               tickets: refundTicketCancels,
@@ -240,8 +259,6 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
               }),
             ),
           }),
-          items: new DrizzleEventRefundStore(o.serviceDatabase, clock),
-          openOrders: new DrizzleEventOpenOrders(o.serviceDatabase),
           attempts: new DrizzleEventRefundAttempts(o.serviceDatabase),
           fanNotifier: new OutboxEventRefundFanNotifier(),
           ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient), alert: new HttpEventRefundAlert(opsClient) } : {}),

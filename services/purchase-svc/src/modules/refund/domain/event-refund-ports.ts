@@ -140,9 +140,11 @@ export interface EventRefundServiceDeps {
   readonly items?: EventRefundItemAdder;
   /** 끝나지 않은 주문이 있으면 COMPLETED로 가지 않는다(ADR-0280 결정 5). 없으면 완료를 미루지 않는다 */
   readonly openOrders?: EventOpenOrders;
-  // BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 회차 취소 요청 중 보류 취소의 환급 미룸과 남는 차액 CS 건
+  /** 회차 취소 요청 중 보류 취소의 환급 미룸(BAT-420 몫 D, gRPC SetEventRefundHold). 없으면 setHold가 실패한다 */
   readonly holds?: EventRefundHolds;
+  /** 확정 때 남는 공제 차액 대상(입장 시작 뒤 공제하고 결제사로 보낸 사용자 취소). 없으면 찾지 않는다 */
   readonly gaps?: DeductionGapCancellations;
+  /** 남는 차액의 CS 처리함 건(REFUND_FAILED, category DEDUCTION_GAP) */
   readonly gapNotice?: DeductionGapNotice;
   /** 보충 2: 차액 대상의 입장 시작 시각은 대상 표가 아니라 회차 판매 설정(entryOpensAtMs)에서 읽는다(대상 0이어도 찾는다). 없으면 차액을 찾지 않는다 */
   readonly configs?: CancellationConfigs;
@@ -150,7 +152,7 @@ export interface EventRefundServiceDeps {
   readonly log?: { warn(o: object, msg: string): void };
 }
 
-// ---- BAT-420 몫 D(OPEN[45] 결정, 빈 뼈대): 미룸·차액 건 ----
+// ---- BAT-420 몫 D(OPEN[45] 결정): 미룸·차액 건 ----
 
 export interface EventRefundHolds {
   /**

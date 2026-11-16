@@ -53,8 +53,10 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleDeductionGapCancellations,
   DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
+  DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
   DrizzleFraudCancellationStore,
@@ -70,6 +72,7 @@ import {
   GetFraudCancellation,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpDeductionGapNotice,
   HttpEventRefundAlert,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
@@ -351,6 +354,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
       openOrders: new DrizzleEventOpenOrders(database),
       attempts: new DrizzleEventRefundAttempts(database),
       fanNotifier: new OutboxEventRefundFanNotifier(),
+      // 회차 취소 요청 중 보류 취소의 환급 미룸(gRPC SetEventRefundHold)과 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45])
+      holds: new DrizzleEventRefundHolds(database),
+      gaps: new DrizzleDeductionGapCancellations(database),
+      gapNotice: opsClient
+        ? new HttpDeductionGapNotice(opsClient, env.PEAKET_INTERNAL_TOKEN)
+        : {
+            open: async (q) => {
+              log?.warn({ event: 'event_refund_deduction_gap', cancellationId: q.cancellationId, requestId: q.requestId }, '회차 취소 확정 때 남는 공제 차액(CS 처리함 주소 없음)');
+            },
+          },
+      configs: new SeatMapSaleConfigs(seatMap),
+      log: { warn: (obj: object, msg: string) => log?.warn(obj, msg) },
       notice: opsClient
         ? new HttpRefundFailureNotice(opsClient)
         : {
@@ -797,7 +812,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let refundGrpc: Awaited<ReturnType<typeof startPurchaseGrpcServer>> | undefined;
   const grpcServices: Parameters<typeof startPurchaseGrpcServer>[0]['services'] = [];
   if (eventRefundService) {
-    grpcServices.push({ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(eventRefundService).handlers() });
+    // SetEventRefundHold는 내부 토큰이 있으면 호출자 ops-svc만 받는다(BAT-420 몫 D). 기한 검사의 지금은 서버 시계다
+    grpcServices.push({
+      definition: eventRefundPackage().EventRefundService.service,
+      handlers: new EventRefundGrpcController(eventRefundService, { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}), nowMs: () => systemClock.now() }).handlers(),
+    });
   }
   if (fraudCancellation) {
     grpcServices.push({

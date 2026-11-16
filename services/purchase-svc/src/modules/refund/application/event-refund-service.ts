@@ -30,9 +30,9 @@ import type {
   EventRefundServiceDeps,
   EventRefundStartInput,
 } from '../domain/event-refund-ports.js';
-import type { EventRefundHoldInput, EventRefundHoldState } from '../domain/event-refund-hold.js';
+import { parseEventRefundHold, type EventRefundHoldInput, type EventRefundHoldState } from '../domain/event-refund-hold.js';
 
-const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type EventRefundErrorCode = 'INVALID' | 'NOT_FOUND' | 'CONFLICT';
 
@@ -94,9 +94,14 @@ function outcomeOf(status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED', error: stri
 export class EventRefundService {
   constructor(private readonly o: EventRefundServiceDeps) {}
 
-  /** 회차 취소 요청 중 보류 취소의 환급 미룸 걸기·늘리기·풀기(BAT-420 몫 D, gRPC SetEventRefundHold, 빈 뼈대). @throws EventRefundHoldError */
-  async setHold(_i: EventRefundHoldInput): Promise<EventRefundHoldState> {
-    throw new Error('아직 없음');
+  /**
+   * 회차 취소 요청 중 보류 취소의 환급 미룸 걸기·늘리기·풀기(BAT-420 몫 D, gRPC SetEventRefundHold).
+   * 입력 검사(소문자 UUID·기한 지금 뒤 7일 안)를 지난 값만 미룸 저장소에 넘긴다. @throws EventRefundHoldError
+   */
+  async setHold(i: EventRefundHoldInput): Promise<EventRefundHoldState> {
+    const parsed = parseEventRefundHold(i);
+    if (!this.o.holds) throw new Error('환급 미룸 저장소가 조립되지 않았다');
+    return this.o.holds.set(parsed);
   }
 
   async preview(i: EventRefundPreviewInput): Promise<EventRefundPreview> {
@@ -150,8 +155,51 @@ export class EventRefundService {
       if (err instanceof EventRefundActiveConflict) throw new EventRefundError('CONFLICT', `같은 회차에 진행 중인 회차 취소 요청이 있습니다: ${err.requestId}`);
       throw err;
     }
-    if (kind === 'CANCEL') await this.#run(created, targets, this.o.firstBatch ?? 200);
+    if (kind === 'CANCEL') {
+      // 처음 만들 때만(다시 부르기는 위에서 돌아갔다) 남는 공제 차액을 CS 건으로 연다(BAT-420 몫 D, R-T38 ④). 결제사는 더 부르지 않는다
+      await this.#openDeductionGaps(created, nowMs);
+      await this.#run(created, targets, this.o.firstBatch ?? 200);
+    }
     return this.get(i.requestId);
+  }
+
+  /**
+   * 회차 취소 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45] 결정 ②, transfer-refund §5). 입장 시작 시각은 회차 판매 설정에서 읽는다(대상 표가 0이어도 찾는다, 보충 2).
+   * 설정에 입장 시작이 없으면 찾지 않고 경고를 남긴다. best effort: 찾기·열기가 실패해도 일괄 환불은 이어 간다
+   */
+  async #openDeductionGaps(request: EventCancellationRequest, nowMs: number): Promise<void> {
+    const { gaps, gapNotice } = this.o;
+    if (!gaps || !gapNotice) return;
+    try {
+      const entryOpensAtMs = await this.#entryOpensAt(request.eventId);
+      if (entryOpensAtMs === undefined) {
+        this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId }, 'event-refund-deduction-gap-skipped: 회차 판매 설정에 입장 시작 시각이 없어 차액 건을 찾지 않는다');
+        return;
+      }
+      for (const row of await gaps.list(request.eventId, entryOpensAtMs)) {
+        await gapNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, deductionAmount: row.deductionAmount, requestId: request.requestId, nowMs });
+      }
+    } catch (err) {
+      this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId, err: err instanceof Error ? err.message : 'unknown' }, 'event-refund-deduction-gap-failed');
+    }
+  }
+
+  async #entryOpensAt(eventId: string): Promise<number | undefined> {
+    if (!this.o.configs) return undefined;
+    return (await this.o.configs.config(eventId))?.entryOpensAtMs;
+  }
+
+  /** 전환에서 진 항목(cancellation-in-progress)의 그 보류 취소가 차액 대상이면 그 행을 준다(BAT-420 몫 D, GAT-110 D7). 못 찾거나 실패하면 undefined */
+  async #gapOf(request: EventCancellationRequest, item: EventRefundItem): Promise<{ cancellationId: string; orderId: string; deductionAmount: number } | undefined> {
+    if (!this.o.gaps || !this.o.gapNotice) return undefined;
+    try {
+      const entryOpensAtMs = await this.#entryOpensAt(request.eventId);
+      if (entryOpensAtMs === undefined) return undefined;
+      return (await this.o.gaps.list(request.eventId, entryOpensAtMs)).find((r) => r.cancellationId === item.cancellationId);
+    } catch (err) {
+      this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId, err: err instanceof Error ? err.message : 'unknown' }, 'event-refund-deduction-gap-failed');
+      return undefined;
+    }
   }
 
   async get(requestId: string): Promise<EventCancellationRequest> {
@@ -368,7 +416,11 @@ export class EventRefundService {
         if (result.status === 'NOT_SENT') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error, target)) !== 'UNKNOWN';
         // 결제사로 보내기 전에 끝난 즉시 실패는 기록하지 않고 바로 FAILED다(GAT-110 E1·E2)
         if (result.status === 'FAILED' && result.error !== undefined && IMMEDIATE_FAILURES.has(result.error)) {
-          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
+          // 전환에서 진 항목: 마감 뒤 환급이 먼저 공제하고 보냈으면 일반 실패 알림 대신 그 행 공제액의 차액 건 하나만 연다(BAT-420 몫 D, GAT-110 D7).
+          // 차액 대상이 아니면(입장 시작 전 접수·공제 0·아직 보내지 않음) 전과 같이 일반 실패 알림이다
+          const gap = result.error === 'cancellation-in-progress' ? await this.#gapOf(request, item) : undefined;
+          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined, gap === undefined);
+          if (gap) await this.o.gapNotice?.open({ cancellationId: gap.cancellationId, orderId: gap.orderId, deductionAmount: gap.deductionAmount, requestId: request.requestId, nowMs: this.o.nowMs() });
           return true;
         }
         const outcome = outcomeOf(result.status, result.error);
@@ -444,6 +496,7 @@ export class EventRefundService {
     error: string | undefined,
     target: EventRefundTarget | undefined,
     attempts?: number,
+    failureNotice = true,
   ): Promise<void> {
     const next: EventRefundItem = {
       ...item,
@@ -459,7 +512,7 @@ export class EventRefundService {
           ? [this.o.fanNotifier.failed(request, next, target, this.o.nowMs())]
           : [];
     await this.o.store.updateItem(next, outbox);
-    if (status === 'FAILED') {
+    if (status === 'FAILED' && failureNotice) {
       await this.o.notice?.open({
         requestId: request.requestId,
         orderId: item.orderId,

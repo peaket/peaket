@@ -90,6 +90,11 @@ export interface DueRefund {
   readonly attempts: number;
   /** 그 취소의 표(입장 기록 대조, BAT-420 GAT-090 A). 운영 저장소는 늘 싣는다. 없으면 실행기는 표를 모르는 것으로 보고 환급하지 않는다 */
   readonly ticketId?: string;
+  /**
+   * 그 회차에 회차 취소 요청의 미룸(event_refund_hold)이 걸려 집지 않는 보류 취소(BAT-420 몫 D). 실행기는 결제사를 부르지 않고 held로 센다.
+   * 진행 중 일괄 환불(RUNNING·PAUSED)이 있는 회차의 보류 취소는 아예 싣지 않는다
+   */
+  readonly held?: boolean;
 }
 
 /** order_cancellation 한 행을 만든 결과 */

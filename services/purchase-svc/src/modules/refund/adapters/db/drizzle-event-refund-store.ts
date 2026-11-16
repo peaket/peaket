@@ -140,6 +140,13 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
           on conflict (request_id, ticket_id) do nothing`);
       }
       if (outbox.length > 0) await writeOutbox(tx, this.clock, outbox.map((m) => ({ topic: m.topic, key: m.key, payload: m.payload })));
+      // 회차 취소(CANCEL) 확정은 그 회차의 열린 환급 미룸을 요청 ID와 관계없이 같은 트랜잭션에서 푼다(BAT-420 몫 D, R-T38 ③).
+      // 그 뒤로는 진행 중 일괄 환불(RUNNING·PAUSED)이 마감 뒤 환급을 막고, 보류 취소는 이 요청이 전환한다
+      if (request.kind === 'CANCEL') {
+        await tx.execute(sql`
+          update event_refund_hold set released_at = ${new Date(this.clock.now())}::timestamptz
+           where event_id = ${request.eventId}::uuid and released_at is null`);
+      }
       return toRequest(inserted.rows[0] as unknown as RequestRow);
     });
   }

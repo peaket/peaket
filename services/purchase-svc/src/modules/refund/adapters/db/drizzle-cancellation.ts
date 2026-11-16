@@ -212,6 +212,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
 
   async dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]> {
     const now = new Date(nowMs);
+    const held = holdOpenFor(now);
+    const running = eventRefundRunning();
     const rows = await this.database.db
       .select({
         cancellationId: orderCancellation.id,
@@ -231,14 +233,15 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
           isNull(orderCancellation.refundFailedAt),
           or(
             // 입장 기록이 나온 보류 취소(entry_recorded_at)는 CS 처리함 '이상 표시'가 처리하므로 더 집지 않는다(BAT-420 P-T19 ①)
-            and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, now), isNull(orderCancellation.entryRecordedAt)),
+            // 회차 취소 요청의 미룸이 걸렸거나(BAT-420 몫 D) 그 회차의 일괄 환불이 진행 중(RUNNING·PAUSED)이면 집지 않는다. 결과 모름 재시도(REFUND_PENDING)는 미루지 않는다
+            and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, now), isNull(orderCancellation.entryRecordedAt), sql`not ${held}`, sql`not ${running}`),
             and(eq(orderCancellation.status, 'REFUND_PENDING'), or(isNull(orderCancellation.nextRefundAt), lte(orderCancellation.nextRefundAt, now))),
           ),
         ),
       )
       .orderBy(sql`coalesce(${orderCancellation.nextRefundAt}, ${orderCancellation.refundDueAt}, ${orderCancellation.createdAt})`)
       .limit(limit);
-    return rows.map((r) => ({
+    const due: DueRefund[] = rows.map((r) => ({
       cancellationId: r.cancellationId,
       orderId: r.orderId,
       ticketId: r.ticketId,
@@ -247,6 +250,25 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       status: r.status as 'REQUESTED' | 'REFUND_PENDING',
       attempts: r.attempts,
     }));
+    // 미룸 때문에 집지 않은 마감 지난 보류 취소는 따로 읽어 held로 싣는다(실행기가 세기만 한다). 따로 읽어 위 묶음 자리를 차지하지 않는다
+    const heldRows = await this.database.db
+      .select({ cancellationId: orderCancellation.id, orderId: orderCancellation.orderId, ticketId: orderCancellation.ticketId, amount: orderCancellation.refundAmount, reason: orderCancellation.reason })
+      .from(orderCancellation)
+      .where(
+        and(
+          isNull(orderCancellation.refundFailedAt),
+          eq(orderCancellation.status, 'REQUESTED'),
+          lte(orderCancellation.refundDueAt, now),
+          isNull(orderCancellation.entryRecordedAt),
+          sql`${held}`,
+        ),
+      )
+      .orderBy(orderCancellation.refundDueAt)
+      .limit(limit);
+    for (const r of heldRows) {
+      due.push({ cancellationId: r.cancellationId, orderId: r.orderId, ticketId: r.ticketId, amount: r.amount, reason: r.reason as CancellationReason, status: 'REQUESTED', attempts: 0, held: true });
+    }
+    return due;
   }
 
   /**
@@ -254,10 +276,20 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
    * 실행기 둘이 겹쳐도 한쪽만 true라 결제사 호출은 한 번이다
    */
   async claimDue(cancellationId: string, nowMs: number): Promise<boolean> {
+    const now = new Date(nowMs);
+    // 조회와 집기 사이에 걸린 미룸·시작된 일괄 환불도 이 한 문장이 막는다(BAT-420 몫 D, GAT-090 D4)
     const updated = await this.database.db
       .update(orderCancellation)
-      .set({ status: 'REFUND_PENDING', nextRefundAt: null, statusChangedAt: new Date(nowMs) })
-      .where(and(eq(orderCancellation.id, cancellationId), eq(orderCancellation.status, 'REQUESTED'), isNull(orderCancellation.entryRecordedAt)))
+      .set({ status: 'REFUND_PENDING', nextRefundAt: null, statusChangedAt: now })
+      .where(
+        and(
+          eq(orderCancellation.id, cancellationId),
+          eq(orderCancellation.status, 'REQUESTED'),
+          isNull(orderCancellation.entryRecordedAt),
+          sql`not ${holdOpenFor(now)}`,
+          sql`not ${eventRefundRunning()}`,
+        ),
+      )
       .returning({ id: orderCancellation.id });
     return updated.length > 0;
   }
@@ -271,6 +303,20 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .returning({ id: orderCancellation.id });
     return updated.length > 0;
   }
+}
+
+/** 그 취소의 회차에 풀리지 않고 기한 안인 환급 미룸이 있는가(BAT-420 몫 D, event_refund_hold) */
+function holdOpenFor(now: Date) {
+  return sql`exists (
+    select 1 from purchase_order ho join event_refund_hold h on h.event_id = ho.event_id
+     where ho.id = ${orderCancellation.orderId} and h.released_at is null and h.expires_at > ${now}::timestamptz)`;
+}
+
+/** 그 취소의 회차에 진행 중(RUNNING·PAUSED)인 회차 취소 일괄 환불이 있는가(그 실행기가 보류 취소를 전환한다, BAT-420 몫 D) */
+function eventRefundRunning() {
+  return sql`exists (
+    select 1 from purchase_order ro join event_cancellation_request r on r.event_id = ro.event_id
+     where ro.id = ${orderCancellation.orderId} and r.kind = 'CANCEL' and r.status in ('RUNNING', 'PAUSED'))`;
 }
 
 /** 취소 뒤 주문 상태 전이. 모든 항목이 취소됐으면 REFUNDED, 아니면 PARTIALLY_REFUNDED */

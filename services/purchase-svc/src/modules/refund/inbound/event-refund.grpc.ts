@@ -1,10 +1,13 @@
 // 받는 층: gRPC EventRefundService(docs/api/proto/peaket/purchase/v1/refund.proto, BAT-425 GAT-130).
 // ops-svc가 EVENT_CANCEL·연기·진행률·일시정지·재개·신청·창 닫기를 부르는 정본 경로다.
 // 같은 쓰임새를 내부 HTTP(EventRefundController)도 열어 두었다. 두 길은 같은 EventRefundService와 멱등 키(cancellation_request_id)를 쓴다.
+// SetEventRefundHold(BAT-420 몫 D)는 회차 취소 요청 중 보류 취소의 환급 미룸을 걸고·늘리고·푼다. 내부 토큰이 있으면 호출자 ops-svc만 받는다.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Refund } from '@peaket/contracts/proto';
+import { verifyInternalGrpcActor } from '@peaket/platform';
 import { EventRefundError, type EventRefundService } from '../application/event-refund-service.js';
+import { EventRefundHoldError } from '../domain/event-refund-hold.js';
 import type { EventCancellationRequest, EventRefundFault, EventRefundKind, EventRefundProgress, RefundJobState, RefundPauseReason, RefundPgProvider } from '../domain/event-refund.js';
 
 export interface EventRefundPackage {
@@ -90,10 +93,10 @@ const statusStateOf = (r: EventCancellationRequest): RefundJobState => {
   return 'RUNNING';
 };
 
-// BAT-420 몫 D: SetEventRefundHold는 setHold를 부른다(처리기는 아직 없다, 빈 뼈대). 시험 대역은 setHold 없이 만들 수 있게 선택으로 둔다
+// BAT-420 몫 D: SetEventRefundHold는 setHold를 부른다. 시험 대역은 setHold 없이 만들 수 있게 선택으로 둔다(없으면 UNIMPLEMENTED)
 export type EventRefundGrpcUseCases = Pick<EventRefundService, 'preview' | 'start' | 'get' | 'pause' | 'resume' | 'apply' | 'closeWindow'> & Partial<Pick<EventRefundService, 'setHold'>>;
 
-/** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 내부 토큰이 있으면 SetEventRefundHold는 호출자 ops-svc만 받는다. nowMs는 기한 검사의 지금 */
+/** BAT-420 몫 D: 내부 토큰이 있으면 SetEventRefundHold는 호출자 ops-svc만 받는다(없으면 local·ci처럼 받는다). nowMs는 기한 검사의 지금(서버 시계) */
 export interface EventRefundGrpcOptions {
   readonly internalToken?: string;
   readonly nowMs?: () => number;
@@ -107,7 +110,18 @@ const statusOf = (err: unknown): grpc.ServiceError => {
   return { code: grpc.status.UNAVAILABLE, details: '지금 처리할 수 없다' } as grpc.ServiceError;
 };
 
-export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, _o?: EventRefundGrpcOptions): grpc.UntypedServiceImplementation {
+/** 미룸 오류: INVALID → INVALID_ARGUMENT, ALREADY_EXISTS → ALREADY_EXISTS, 그 밖은 원문 없는 INTERNAL(refund.proto SetEventRefundHold) */
+const holdStatusOf = (err: unknown): grpc.ServiceError => {
+  if (err instanceof EventRefundHoldError) {
+    return { code: err.code === 'INVALID' ? grpc.status.INVALID_ARGUMENT : grpc.status.ALREADY_EXISTS, details: err.message } as grpc.ServiceError;
+  }
+  return { code: grpc.status.INTERNAL, details: '환급 미룸을 처리하지 못했다' } as grpc.ServiceError;
+};
+
+/** SetEventRefundHold를 부를 수 있는 호출자. 내부 토큰이 있으면 토큰·호출자를 먼저 보고, 틀리면 setHold를 부르지 않는다 */
+const OPS_CALLER = 'ops-svc';
+
+export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, o?: EventRefundGrpcOptions): grpc.UntypedServiceImplementation {
   const unary =
     (fn: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
     (call, cb) => {
@@ -178,6 +192,30 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, _o
       const result = await useCases.closeWindow({ requestId: text(r.request_id), closedBy: text(r.closed_by), reason: text(r.reason) });
       return { ...requestView(result), not_applied_orders: result.progress.notApplied };
     }),
+    SetEventRefundHold: (call: grpc.ServerUnaryCall<Req, object>, cb: grpc.sendUnaryData<object>) => {
+      if (o?.internalToken !== undefined && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: OPS_CALLER }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '내부 호출자만 부를 수 있다' } as grpc.ServiceError);
+        return;
+      }
+      const setHold = useCases.setHold?.bind(useCases);
+      if (!setHold) {
+        cb({ code: grpc.status.UNIMPLEMENTED, details: '환급 미룸이 조립되지 않았다' } as grpc.ServiceError);
+        return;
+      }
+      const r = call.request;
+      const held = r.held === true;
+      const expiresAtMs = held ? msOf(r.expires_at) : undefined;
+      setHold({
+        eventId: text(r.event_id),
+        cancellationRequestId: text(r.cancellation_request_id),
+        held,
+        ...(expiresAtMs !== undefined ? { expiresAtMs } : {}),
+        nowMs: o?.nowMs?.() ?? Date.now(),
+      }).then(
+        (state) => cb(null, { held: state.held, ...(state.expiresAtMs !== undefined ? { expires_at: timestampOf(state.expiresAtMs) } : {}) }),
+        (err: unknown) => cb(holdStatusOf(err)),
+      );
+    },
   };
 }
 
@@ -185,11 +223,11 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, _o
 export class EventRefundGrpcController {
   constructor(
     readonly useCases: EventRefundGrpcUseCases,
-    /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다) */
+    /** BAT-420 몫 D: SetEventRefundHold의 내부 토큰·호출자 검사와 서버 시계 */
     readonly options?: EventRefundGrpcOptions,
   ) {}
 
   handlers(): grpc.UntypedServiceImplementation {
-    return eventRefundServiceHandlers(this.useCases);
+    return eventRefundServiceHandlers(this.useCases, this.options);
   }
 }

@@ -4,6 +4,8 @@
 // ①은 결제사로 보내기 전에 ticket-svc 입장 기록(GetEntryRecords)을 본다(BAT-420 GAT-090, '입장 기록 대조와 환급 집기'):
 //   들어감·통과 기록이 있으면 환급하지 않고 가장 이른 입장 시각을 남겨 CS '이상 표시'를 열고, 모르면(조회 실패·표 없음) 이번 틱은 건너뛰며,
 //   없으면 조건부로 집은(REQUESTED → REFUND_PENDING) 뒤에만 결제사를 부른다. 상태 쓰기는 REFUND_PENDING 행에만 해 그사이 무효를 덮지 않는다.
+// 회차 취소(CANCEL)가 요청된 회차의 보류 취소는 그 요청의 미룸(event_refund_hold)이 걸린 동안 집지 않는다(BAT-420 몫 D, transfer-refund §5). 틱 맨 앞에
+// 기한이 지난 미룸을 풀고 풀린 줄마다 SEV2 로그를 한 번 남긴다. 풀기가 실패해도 그 틱은 이어 간다(기한 판단은 집기 SQL이 한다, 보충 2).
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
@@ -23,12 +25,14 @@ export interface RefundAfterEntryDeps {
   /** 입장 기록이 나온 취소의 CS '이상 표시'(FLAGGED). 없으면 행에만 남긴다 */
   flags?: EntryFlagNotice;
   log?: { warn(o: object, msg: string): void; error(o: object, msg: string): void };
-  /** BAT-420 몫 D(빈 뼈대, 아직 쓰지 않는다): 기한이 지난 미룸 풀기. 틱 맨 앞에 부르고 풀린 줄마다 SEV2 로그를 남긴다 */
+  /** 기한이 지난 미룸 풀기(BAT-420 몫 D). 틱 맨 앞에 부르고 풀린 줄마다 SEV2 로그를 남긴다. 없으면 풀기를 건너뛴다(기한 판단은 집기 SQL이 한다) */
   holds?: Pick<EventRefundHolds, 'releaseExpired'>;
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */
 export const REFUND_AFTER_ENTRY_BATCH = 100;
+/** 한 틱에 푸는 기한 지난 미룸 수 [가정] */
+const HOLD_RELEASE_BATCH = 100;
 /** 입장 기록을 한 번에 묻는 표 상한(ticket.proto GetEntryRecords 100장 [가정]) */
 const ENTRY_LOOKUP_CHUNK = 100;
 
@@ -40,6 +44,8 @@ export interface RefundAfterEntryResult {
   readonly entryRecorded: number;
   /** 입장 기록을 확인하지 못해(조회 실패·표 모름) 이번 틱에 건너뛴 보류 취소 */
   readonly unverified: number;
+  /** 회차 취소 요청의 미룸 때문에 이번 틱에 집지 않은 마감 지난 보류 취소(BAT-420 몫 D). 진행 중 일괄 환불로 건너뛴 행은 세지 않는다 */
+  readonly held: number;
 }
 
 export class RefundAfterEntry {
@@ -53,14 +59,21 @@ export class RefundAfterEntry {
   }
 
   async run(limit = REFUND_AFTER_ENTRY_BATCH): Promise<RefundAfterEntryResult> {
+    await this.#releaseExpiredHolds();
     const due = await this.deps.writes.dueRefunds(this.deps.nowMs(), limit);
     let refunded = 0;
     let pending = 0;
     let failed = 0;
     let entryRecorded = 0;
     let unverified = 0;
-    const records = await this.#lookup(due.filter((c) => c.status === 'REQUESTED'));
+    let held = 0;
+    const records = await this.#lookup(due.filter((c) => c.status === 'REQUESTED' && c.held !== true));
     for (const c of due) {
+      if (c.held === true) {
+        // 미룸이 걸린 회차의 보류 취소는 입장 기록도 묻지 않고 결제사도 부르지 않는다(판정이 끝나면 풀리거나 확정이 전환한다)
+        held++;
+        continue;
+      }
       if (c.status === 'REQUESTED') {
         if (!records) {
           unverified++;
@@ -109,7 +122,28 @@ export class RefundAfterEntry {
       if (scheduled === false) continue;
       pending++;
     }
-    return { refunded, pending, failed, entryRecorded, unverified };
+    return { refunded, pending, failed, entryRecorded, unverified, held };
+  }
+
+  /** 기한이 지난 미룸을 풀고 풀린 줄마다 SEV2를 한 번 남긴다(조건부 갱신이라 같은 줄은 한 번만 나온다). 실패는 경고만 남기고 틱을 이어 간다 */
+  async #releaseExpiredHolds(): Promise<void> {
+    if (!this.deps.holds) return;
+    let released: readonly { eventId: string; cancellationRequestId: string }[];
+    try {
+      released = await this.deps.holds.releaseExpired(this.deps.nowMs(), HOLD_RELEASE_BATCH);
+    } catch (err) {
+      this.deps.log?.warn(
+        { event: 'event-refund-hold-release-failed', err: err instanceof Error ? err.name : 'unknown' },
+        'event-refund-hold-release-failed: 기한 지난 환급 미룸을 풀지 못했다(집기는 기한으로 판단한다, 다음 틱에 다시 푼다)',
+      );
+      return;
+    }
+    for (const r of released) {
+      this.deps.log?.error(
+        { event: 'event-refund-hold-expired', severity: 'SEV2', eventId: r.eventId, cancellationRequestId: r.cancellationRequestId },
+        'event-refund-hold-expired: 회차 취소 요청의 환급 미룸이 72시간 동안 늘려지지 않아 저절로 풀렸다(SEV2)',
+      );
+    }
   }
 
   /** 보류 취소의 표를 한 틱에 한 번(100장씩) 묻는다. 실패하면 undefined(그 행들을 모두 건너뛴다) */
