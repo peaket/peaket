@@ -958,6 +958,10 @@ erDiagram
         timestamptz next_refund_at "다음 재시도 시각(REFUND_PENDING). 없으면 곧 시도한다. 1분→5분→15분→1시간→6시간 [가정](R-547)"
         timestamptz refund_failed_at "재시도를 다 썼거나 결제사 업무 거절로 CS 처리함 '환급 실패'에 넘길 시각. 있으면 실행기가 건너뛴다(R-547)"
         text refund_last_error "마지막 실패 결과 코드(CANCELLED·PENDING·UNKNOWN·REJECTED). 계좌·결제 참조는 싣지 않는다(R-547)"
+        timestamptz entry_flag_opened_at "이상 표시(FLAGGED) CS 건을 ops-svc가 2xx로 받은 시각. entry_recorded_at이 있는데 비어 있으면 실행기가 다음 틱에 다시 연다(추천 적용 2026-11-16, 웨이브 끝 리뷰 S1)"
+        timestamptz deduction_gap_at "회차 취소 확정 때(또는 전환에서 지거나 겹친 항목을 끝낼 때) 공제 차액 대상으로 정한 시각. OPEN[45] ②(추천 적용 2026-11-16, 웨이브 끝 리뷰 C2·S1)"
+        uuid deduction_gap_request_id "차액 대상으로 정한 회차 취소 요청"
+        timestamptz deduction_gap_opened_at "차액 CS 건(REFUND_FAILED·DEDUCTION_GAP)을 ops-svc가 2xx로 받은 시각. deduction_gap_at이 있는데 비어 있으면 일괄 환불 실행기 틱이 다시 연다"
         timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
     fraud_cancellation_request {
@@ -1013,6 +1017,8 @@ erDiagram
         text status "PENDING|REFUNDED|FAILED|UNKNOWN"
         int attempts "환급 재시도 횟수"
         text last_error "마지막 실패 결과 코드. 계좌·결제 참조는 싣지 않는다"
+        uuid claim_token "주문 단위로 잡은 처리자의 무작위 값. 잡은 쪽만 처리하고 끝내기는 이 값이 같고 상태가 PENDING·UNKNOWN일 때만 쓴다(추천 적용 2026-11-16, 웨이브 끝 리뷰 K2)"
+        timestamptz claimed_until "잡기 기한(지금 + 60초 [가정]). 지나면 다른 처리자가 다시 잡는다"
         timestamptz updated_at
     }
     event_refund_hold {
@@ -1982,7 +1988,7 @@ erDiagram
         text kind "CANCEL|POSTPONE. commander 요청은 CANCEL만"
         text status "REQUESTED|JUDGED|PENDING_APPROVAL|APPROVED|RUNNING|PAUSED|REFUND_WINDOW|COMPLETED|REJECTED"
         text requested_via "PARTNER|COMMANDER(docs/planning/03 §2.11 T1·T2)"
-        uuid promoter_id "파트너 요청의 테넌트(세션 값, 소속 확인 뒤). commander 요청은 NULL"
+        uuid promoter_id "테넌트. 파트너 요청은 세션 값(소속 확인 뒤), commander 요청은 core 판매 설정의 promoterId(2026-11-16 바꿈, 웨이브 끝 리뷰 S2). 행 보안 정책의 기준(docs/security/authz-matrix.md §5.3 ops-svc 구현)"
         text reason "요청 사유(파트너 사유 또는 commander 사유)"
         text fault_opinion "ORGANIZER|FORCE_MAJEURE|CONTENT_CHANGE, 파트너의 참고값"
         text evidence_ref "증빙 문서 종류·번호·날짜 글(200자 [가정]). 파일은 받지 않는다"
@@ -2863,6 +2869,8 @@ erDiagram
 | 회차 취소 확정과 진행 중 결제(대상을 고른 뒤에 결제가 끝난 주문) | 확정이 일괄 환불 시작 전에 판매를 멈춰(새 홀드·결제 접수 423) 새 주문을 막고, 실행기가 틱마다 대상을 다시 골라 늦게 끝난 주문의 표를 더하며(요청·표에서 정해지는 취소 ID라 하나만), 그 회차에 끝나지 않은 주문이 남아 있으면 COMPLETED로 가지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, ADR-0280) | purchase·ops 통합 시험(R-T37 ④⑥) |
 | 회차 취소 요청이 판정 중인데 환급 실행기가 그 회차의 보류 취소를 공제한 금액으로 집음(소유자 결정 2026-11-16 OPEN[45]) | ops-svc가 요청을 저장하기 전에 purchase-svc `event_refund_hold`를 건다(걸지 못하면 요청을 받지 않는다). 실행기의 집기 조건부 갱신이 미룸·진행 중 일괄 환불이 없음을 같은 문장에서 보아, 확인과 집기 사이에 걸린 미룸도 지킨다. 미룸 전에 이미 나간 공제 환급과 전환에서 진 항목은 확정 때 CS 차액 건(`DEDUCTION_GAP`)으로 간다. 풀기를 놓친 미룸은 72시간 [가정]에 저절로 풀린다. 두 ops 요청이 같은 회차에 동시에 오면 먼저 건 쪽만 걸고(다른 쪽은 `ALREADY_EXISTS`), 저장도 진행 중 요청 유일 색인이 하나만 받는다(세부 추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §5) | purchase·ops 통합 시험(R-T38) |
 | 회차 취소 확정과 팬 예매 취소가 같은 회차에 겹침(확정 뒤 공제 환급) | 팬 예매 취소가 티켓 단계보다 먼저 그 회차의 CANCEL 일괄 환불 요청(RUNNING·PAUSED·COMPLETED)이 없는지 보아 있으면 409 `event-cancelled`다(아무것도 바꾸지 않음). 그 확인과 확정이 겹쳐 확인을 지난 팬 취소는 `REQUESTED`면 쓸어 담기가 전환하고, 이미 보낸 공제 환급은 그 표의 항목이 `ticket-already-ended`·`cancellation-conflict`로 끝날 때 차액 건(`DEDUCTION_GAP`)으로 간다(추천 적용 2026-11-16, BAT-420 리뷰 D5, docs/features/transfer-refund.md §5 '확정 뒤 팬 취소') | purchase 통합 시험(GAT-110 R5) |
+| 회차 취소가 만든·전환한 환급 행을 마감 뒤 환급 실행기와 일괄 환불 실행기가 함께 집음 | 회차 취소 요청 ID가 달린 행은 일괄 환불 실행기만 결제사로 보낸다(마감 뒤 환급 실행기의 `REFUND_PENDING` 갈래는 `event_cancellation_request_id IS NULL`만). 항목이 실패로 끝나면 같은 트랜잭션에서 행에 `refund_failed_at`을 써 주인 없는 행이 남지 않는다(추천 적용 2026-11-16, 웨이브 끝 리뷰 K1·C1, docs/features/transfer-refund.md §5 '일괄 환불 항목의 주인과 겹침 막기') | purchase 통합 시험(GAT-110 K1) |
+| 같은 요청의 항목을 API 파드(Start 첫 묶음·Resume·Apply·CloseWindow)와 릴레이 리더(runDue)가 겹쳐 처리 | 주문 단위 잡기(`claim_token`·`claimed_until`, 그 주문에 살아 있는 다른 잡기가 없을 때만 한 문장으로)와 잡기 값·진행 중 상태를 조건으로 한 끝내기 쓰기. 끝난 상태를 덮지 않고, 0행이면 알림·CS 건·시도 기록을 남기지 않는다. 전환은 같은 요청으로 이미 전환된 행이면 CONVERTED(추천 적용 2026-11-16, 웨이브 끝 리뷰 K2, 같은 곳) | purchase 통합 시험(GAT-110 K2) |
 | 같은 승인 업무에 승인 두 번, 요청자 본인 승인 | 자식 표 `approval_vote`의 `UNIQUE (request_id, approver_id)`와 `CHECK (approver_id <> requester_id)`(§2, ADR-0086), 상태 전이에 버전을 쓴다 | R-T7(요청자 본인 승인). 같은 승인자 두 번은 `approval_vote` 유일 제약 |
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
