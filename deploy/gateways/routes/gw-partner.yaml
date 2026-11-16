@@ -75,7 +75,7 @@ spec:
           namespace: core
           port: 8080
 ---
-# gw-partner-webhooks: 결제사 웹훅(토큰·출처 확인·CORS 없음, 출발지 IP 한도와 본문 상한, docs/infra.md §4.1 '웹훅 경로')
+# gw-partner-webhooks: 결제사 웹훅(토큰·출처 확인·CORS 없음, 출발지 IP 한도와 본문 상한, docs/infra.md §4.1 '웹훅 경로'). IP 한도를 두 경로 합쳐 버킷 하나로 세도록 peaket.io/match: merged(RV-14)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -83,6 +83,7 @@ metadata:
   namespace: envoy-gateway-system
   labels:
     peaket.io/auth: public
+    peaket.io/match: merged
 spec:
   parentRefs:
     - name: gw-partner

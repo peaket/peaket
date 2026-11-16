@@ -12,6 +12,7 @@
 // 겹침은 경로·메서드 짝으로 본다. 경로 값은 openapi의 꼴(틀 {이름} 그대로)이다.
 // 원천 라우트마다 이름표 peaket.io/auth(public·optional·token·token-buy)를 달고, 맡은 작업의 openapi security·x-peaket-scopes로 정한 인증 종류와
 // 다르면 멈춘다(docs/infra.md §4.1 '인증 종류 대조'). 원천 규칙의 timeouts 같은 칸은 생성 규칙에 그대로 옮긴다('경로별 시간 상한').
+// 원천 라우트에 이름표 peaket.io/match: merged가 있으면 규칙마다 경로들을 메서드마다 정규식 맞춤 하나로 묶는다(IP별 로컬 한도를 버킷 하나로 세려고, RV-14).
 //   PathPrefix: 그 경로와 그 아래(빗금으로 이어지는) 계약 경로를 맡는다. Exact: 그 계약 경로 하나만 맡는다
 //   (같은 앞부분 아래를 백엔드·정책이 다른 라우트로 나눌 때 쓴다. 예: /v1/events/{eventId}는 core-svc, 그 아래 holds는 purchase-svc).
 // 생성 규칙은 원천 규칙마다 '그 앞부분 아래이면서 그 호스트가 받는 계약 경로'의 (경로, 메서드) 짝과 경로마다의 OPTIONS다.
@@ -133,6 +134,27 @@ function operationsOf(item) {
 
 /** 맞춤 조건 목록을 경로 글자 차례 → 메서드 차례로 */
 const sortMatches = (ms) => ms.sort((a, b) => byText(a.path.value, b.path.value) || methodRank(a.method) - methodRank(b.method));
+
+/** 원천 이름표: 값 merged면 그 라우트의 규칙마다 경로들을 메서드마다 정규식 맞춤 하나로 묶는다(docs/infra.md §4.1 '경로별 메서드 생성기', 대조 리뷰 RV-14) */
+export const MATCH_LABEL = 'peaket.io/match';
+/**
+ * 맞춤 조건들을 메서드마다 하나로 묶는다(경로가 하나면 그대로). Envoy의 로컬 한도 버킷은 라우트 맞춤마다 하나라,
+ * 여러 경로를 합쳐 세는 IP별 로컬 한도(검색·웹훅)는 맞춤이 하나여야 한 버킷이 된다
+ */
+function mergeMatches(ms) {
+  const byMethod = new Map();
+  for (const m of ms) {
+    if (!byMethod.has(m.method)) byMethod.set(m.method, []);
+    byMethod.get(m.method).push(m.path.type === 'Exact' ? escapeRe(m.path.value) : m.path.value);
+  }
+  const out = [];
+  for (const [method, res] of byMethod) {
+    const uniq = [...new Set(res)].sort(byText);
+    const one = ms.find((m) => m.method === method);
+    out.push(uniq.length === 1 ? { path: { ...one.path }, method } : { path: { type: 'RegularExpression', value: `(?:${uniq.join('|')})` }, method });
+  }
+  return sortMatches(out);
+}
 
 /** 목록을 n개씩 */
 function chunks(list, n) {
@@ -322,8 +344,9 @@ export function generateRoutes(input) {
           // 외부 수신 작업(태그 webhooks·security: [], 서버끼리 부름)만 있는 경로에는 두지 않는다(docs/infra.md §4.1 '경로별 메서드 생성기', 대조 리뷰 RV-03)
           if (ops.some((o) => !serverToServer(openapi.paths[p][o.method.toLowerCase()]))) (ops.some((o) => !o.cdn) ? other : cdn).push({ path: { ...pm }, method: 'OPTIONS' });
         }
-        if (other.length) generated.push(...rulesFrom(c.rule, sortMatches(other), true, ''));
-        if (cdn.length) generated.push(...rulesFrom(c.rule, sortMatches(cdn), false, '-cdn'));
+        const finish = r.metadata?.labels?.[MATCH_LABEL] === 'merged' ? mergeMatches : sortMatches;
+        if (other.length) generated.push(...rulesFrom(c.rule, finish(other), true, ''));
+        if (cdn.length) generated.push(...rulesFrom(c.rule, finish(cdn), false, '-cdn'));
       }
       docs.push(...packRoutes(r, generated));
     }

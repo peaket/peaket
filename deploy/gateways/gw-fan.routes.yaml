@@ -506,6 +506,7 @@ metadata:
   namespace: envoy-gateway-system
   labels:
     peaket.io/auth: public
+    peaket.io/match: merged
     peaket.io/route: gw-fan-search
 spec:
   parentRefs:
@@ -516,20 +517,12 @@ spec:
   rules:
     - matches:
         - path:
-            type: Exact
-            value: /v1/search
+            type: RegularExpression
+            value: (?:/v1/search|/v1/search/suggestions)
           method: GET
         - path:
-            type: Exact
-            value: /v1/search
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/search/suggestions
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/search/suggestions
+            type: RegularExpression
+            value: (?:/v1/search|/v1/search/suggestions)
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier

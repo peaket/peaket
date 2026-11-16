@@ -377,6 +377,7 @@ metadata:
   namespace: envoy-gateway-system
   labels:
     peaket.io/auth: public
+    peaket.io/match: merged
     peaket.io/route: gw-partner-webhooks
 spec:
   parentRefs:
@@ -387,12 +388,8 @@ spec:
   rules:
     - matches:
         - path:
-            type: Exact
-            value: /v1/webhooks/portone
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/webhooks/toss
+            type: RegularExpression
+            value: (?:/v1/webhooks/portone|/v1/webhooks/toss)
           method: POST
       filters:
         - type: RequestHeaderModifier

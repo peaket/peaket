@@ -118,7 +118,7 @@ spec:
           namespace: core
           port: 8080
 ---
-# gw-fan-search: 검색·자동완성(토큰 없음, IP 한도 SR-T13 ②)
+# gw-fan-search: 검색·자동완성(토큰 없음, IP 한도 SR-T13 ②). IP별 로컬 한도를 두 경로 합쳐 버킷 하나로 세도록 peaket.io/match: merged(메서드마다 정규식 맞춤 하나, RV-14)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -126,6 +126,7 @@ metadata:
   namespace: envoy-gateway-system
   labels:
     peaket.io/auth: public
+    peaket.io/match: merged
 spec:
   parentRefs:
     - name: gw-fan
