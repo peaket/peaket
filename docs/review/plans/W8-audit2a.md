@@ -325,6 +325,114 @@ export interface ReviewStore {
 - core-svc 폴더에서: `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts`
 - 싼 게이트: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`·`typecheck`, 닿는 경로 `npx eslint`, 문서 점검.
 
+### 9. 웨이브 끝 리뷰 반영(2026-11-16, 보안 `aefcc434` S1, 정확성 `4ee414de` C1·C2)
+
+- **차례**: 리뷰 반영이다. 지적마다 시험 담당이 먼저 시험을 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`, `Finding: S1`·`C1`·`C2`). 그다음 구현 담당이 고친다(`Fix-By: impl`, 같은 `Finding`). 새 마이그레이션 번호는 쓰지 않는다. S1의 권한은 아직 develop에 없는 **0026**에 더한다.
+- **정본(이 계획 커밋에 먼저 씀, 추천 적용 2026-11-16)**: docs/features/identity.md §8 '부르는 길'·'손으로 처리'(S1)·'다시 정리'(C1)·§12 I-T83 ④(C1)·⑧(C2)·⑨ 새로(S1), docs/data.md §2 '후기 표의 DB 권한'(S1의 `held_event` 권한, S2 한계)·'이전 판이 남긴 행 고치기'(C2)·§4의 15 'DB 권한'(S1)·§6 '관람 후기'(16분), docs/security/asvs/catalog-review.md v5.0.0-8.2.1·16.2.1(S1), docs/security/data-classification.md '관람 후기'(보안 리뷰 S3의 15분 → 16분), ADR-0278 결정 1·2.
+- **이번에 넣지 않는 것(감독이 정리 목록에 적음)**: 동시 실행 K1·K2·K3, 보안 S2. **S2 판단**: 이번에 넣지 않는다. 0026은 정비 역할에 칸 일곱의 고치기만 주고 본문 읽기는 주지 않는다. 이 역할은 relay 프로세스의 정비 연결만 쓰는 사람 아닌 역할이고, 이미 후기 상태·통보 칸을 고칠 수 있다(임시조치 끝내기). 칸 권한이 값을 묶지 못하는 것은 최소 권한을 크게 어기는 것이 아니라 한계라고 본다. 다음 출시의 파기 행 CHECK가 지운 행의 모양을 묶으므로, 정의자 권한 함수로 좁히는 일은 그때 함께 다시 본다(docs/data.md §2에 한계를 적었다).
+
+#### 9.1 S1 손으로 하는 파기는 보류된 탈퇴 사건이 있는 계정만, 요청자·사유를 남기고
+
+**무엇이 틀렸나(리뷰)**: 내부 `POST /internal/v1/reviews/accounts/{accountId}/purge`는 내부 토큰만 맞으면 어떤 계정이든 후기를 되돌릴 수 없게 파기하고, 누가 왜 불렀는지 남기지 않는다. 내부 토큰은 여러 서비스가 같은 값을 쓴다. 이 경로를 부르는 운영 도구·런북은 아직 없다(저장소 전체를 찾아 확인).
+
+**정한 것(정본 docs/features/identity.md §8 '손으로 처리')**: 경로는 남기되(보류된 탈퇴 사건을 손으로 처리하는 유일한 길이다) 이렇게 좁힌다.
+- 본문 `{ reason: string(10~500자), requestedBy: string(1~64자) }`. 모양이 틀리면 400.
+- core DB `held_event`에 그 계정의 보류된 탈퇴 사건(토픽 `identity.accounts-withdrawn`, `lower(business_key)` 또는 `lower(msg_key)`가 그 계정 ID, `reprocessed_at IS NULL`)이 하나 이상 있을 때만 한다. 없으면 409 `withdrawal-not-held`이고 아무것도 바꾸지 않는다.
+- 한 `core_app` 트랜잭션: 그 보류 행들을 `FOR UPDATE`로 잠근다 → 다시 정리 예약을 쓴다(처리 시각 + 16분, 같은 계정이 있으면 늦은 쪽, 지금 차례처럼 예약 먼저) → 파기한다(`purgeSet`) → 보류 행에 `reprocessed_at = 지금`을 적는다.
+- 응답 200 `{ purged, heldEvents }`. 커밋한 뒤 운영 줄 `kind` `review-purge-manual`에 `requestedBy`·`reason`·처리한 보류 사건의 `eventKey` 목록·`purged`를 남긴다(계정 ID 없음).
+- 0026에 더함: `GRANT UPDATE ("reprocessed_at") ON "held_event" TO core_app;`(`core_app`의 `held_event` 읽기·넣기는 0022 그대로).
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/modules/review/inbound/internal-review.controller.ts`(본문·409), `…/review/application/reviews.ts`(`purgeAccount` → `purgeHeldWithdrawal`), `…/review/domain/ports.ts`, `…/review/adapters/db/drizzle-review-store.ts`, `…/review/adapters/memory-review-store.ts`(시험용 보류 사건 목록) |
+| 마이그레이션 | **0026에 더함**: 위 GRANT 한 줄(권한만이라 스냅숏은 그대로) |
+| 시험 | 고침: `services/core-svc/test/review-withdrawn.test.ts`(I-T83 ③의 내부 경로 시험), `test/review-purge-migration.test.ts`(0026 원문). 새로: `test-int/review-purge-manual.int.test.ts`(PostgreSQL, `core_app`) |
+
+```ts
+// services/core-svc/src/modules/review/domain/ports.ts
+export interface ReviewStore {
+  /**
+   * 그 계정의 보류된 탈퇴 사건이 있으면 한 트랜잭션에서: 보류 행 잠금 → 다시 정리 예약(recheckAtMs) → 파기 → 보류 행 reprocessed_at = nowMs.
+   * 보류된 사건이 없으면 아무것도 바꾸지 않고 undefined
+   */
+  purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined>;
+  // purgeByAccount는 지금 부르는 곳(내부 경로)이 없어지면 지운다
+}
+
+// services/core-svc/src/modules/review/application/reviews.ts
+class Reviews {
+  /**
+   * 손으로 처리. recheckAtMs = 지금 + 16분.
+   * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
+   * @throws ReviewProblem('withdrawal-not-held', 409) 그 계정의 보류된 탈퇴 사건이 없음
+   */
+  purgeHeldWithdrawal(accountId: string, by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number }>;
+}
+
+// services/core-svc/src/modules/review/inbound/internal-review.controller.ts
+// POST /internal/v1/reviews/accounts/:accountId/purge, 본문 z.object({ reason: z.string().min(10).max(500), requestedBy: z.string().min(1).max(64) }).strict()
+// → 200 { purged, heldEvents }, 409 withdrawal-not-held, 400, 403(InternalTokenGuard 그대로). 커밋 뒤 운영 줄 review-purge-manual
+```
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ⑨ 보류된 탈퇴 사건이 없는 계정은 손으로 파기할 수 없다` | 단위 + HTTP | 보류 사건 없음(탈퇴하지 않은 팬의 계정) → 409 `withdrawal-not-held`, 그 계정 후기 VISIBLE 그대로·예약 없음. 다른 계정의 보류 사건만 있을 때도 409. 이미 다시 처리한(`reprocessed_at` 있음) 보류 사건뿐이어도 409 | 탈퇴 여부 확인 |
+| `I-T83 ⑨ 보류된 탈퇴 사건이 있으면 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다` | 단위 + 통합(core PostgreSQL, `core_app`) | 보류 행 둘(업무 키가 그 계정, 하나는 값 없이 Kafka 키만 그 계정) → 200 `{ purged: 2, heldEvents: 2 }`, 후기가 ①의 칸, 두 보류 행의 `reprocessed_at` = 지금, 예약 시각 = 지금 + 16분. 대문자 계정 ID로 불러도 같다. 다시 부르면 409 | 한 트랜잭션: 관리자 연결로 `REVOKE UPDATE ("reprocessed_at") ON held_event FROM core_app`을 잠시 걸면 거절 1건이고 후기·예약·보류 행이 모두 그대로다 |
+| `I-T83 ⑨ 사유·요청자 없이는 부를 수 없고 처리하면 운영 줄에 남는다` | HTTP | 본문 없음·`reason` 9자·501자·`requestedBy` ''·65자·모르는 칸 각각 400(바뀐 것 없음). 맞으면 운영 줄 하나: `kind` `review-purge-manual`, `requestedBy`, `reason`, `heldEventKeys`(보류 행의 eventKey), `purged`. 줄 글에 그 계정 ID가 없다. 토큰 없음·틀림 403 | 빠진 칸 거절, 누가·왜 |
+| `I-T83 ⑦⑨ 0026은 core_app에 held_event의 reprocessed_at 고치기만 더 준다` | 단위(SQL 원문) + 통합 | 원문에 그 GRANT 한 줄, `held_event`에 대한 DELETE·다른 칸 UPDATE 없음. 통합: `core_app`으로 `UPDATE held_event SET error = 'x'` 42501, `DELETE FROM held_event` 42501 | 최소 권한 |
+
+**틀린 구현 표본(S1)**: ⓐ 보류 사건을 보지 않고 파기(지금 결함) ⓑ `reprocessed_at`이 이미 있는 보류 사건도 인정 ⓒ 다른 토픽의 보류 사건도 인정 ⓓ 업무 키만 보고 Kafka 키를 보지 않음(값 없는 보류를 놓침) ⓔ 보류 행 표시를 파기와 다른 트랜잭션에서 함 ⓕ 409에서도 예약을 씀 ⓖ 운영 줄에 계정 ID를 실음 ⓗ 본문 검사가 빠져 사유 없이 됨.
+
+#### 9.2 C1 예약 셈이 탈퇴 시각을 읽지 못해도 파기한다
+
+**무엇이 틀렸나(리뷰)**: 해독은 계약 Zod(`z.iso.datetime({ offset: true })`)로, 예약 셈(`withdrawalRecheckAt`)은 따로 만든 정규식으로 본다. 두 검사가 받는 글이 다르면 해독을 통과한 사건이 `purgeWithdrawn`에서 던져 파기까지 하지 않고 5회 뒤 보류로 빠진다. 지금 판 Zod 4.6.7은 정규식보다 좁아(초 없는 시각·소문자 `z`·`+0900`을 받지 않는다, 계획 담당이 확인) 실제 빈틈은 아직 없지만, Zod 판이 바뀌면 생긴다.
+
+**정한 것(정본 docs/features/identity.md §8 '다시 정리')**: `Reviews.purgeWithdrawn`은 `withdrawalRecheckAt`이 던지면 예약 시각을 처리 시각 + 16분으로 하고 파기를 그대로 한다(경고 줄 하나, 값 없음). `withdrawalRecheckAt` 자체의 엄격한 검사(검증 살아남음 M49 시험)는 그대로 둔다.
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/modules/review/application/reviews.ts`(`purgeWithdrawn`, 대체 예약 시각과 경고. `Reviews`에 경고를 남길 로거가 없으면 처리기의 로거를 쓰도록 결과에 `recheckFallback: true`를 싣는다) |
+| 시험 | 고침: `services/core-svc/test/review-recheck.test.ts`, `test/review-withdrawn.test.ts` |
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ④ 예약 셈이 읽지 못한 탈퇴 시각이어도 파기하고 처리 시각 + 16분으로 예약한다` | 단위 | 가짜 시계 `2026-11-16T03:03:00Z`, `purgeWithdrawn({ withdrawnAt: '2026-11-16T03:00Z' })`(초 없음)·`'2026-11-16T03:00:00'`(시간대 없음) 각각: 후기가 ①의 칸, 예약 시각 `2026-11-16T03:19:00Z`, 던지지 않음 | 법정 파기 누락 막기 |
+| `I-T83 ④ 계약이 받는 탈퇴 시각마다 예약 시각이 나온다` | 단위 | 계약 Zod `AccountWithdrawn`이 받는 글(`…T03:00:00Z`, `…T03:00:00.5Z`, `…T03:00:00.123456789+09:00`, `…T12:00:00+09:00`)을 처리기 `decode` → `handle`로 넣으면 예약 시각이 각자의 시각 + 16분(대체 시각이 아니다) | 두 검사가 어긋나지 않는지 |
+
+**틀린 구현 표본(C1)**: ⓐ 대체 시각 없이 던짐(지금 결함) ⓑ 대체 시각이 탈퇴 시각 기준이라 NaN이 저장됨 ⓒ 대체할 때 파기를 건너뜀 ⓓ 대체를 늘 써서 정상 시각을 무시함.
+
+#### 9.3 C2 이전 판 행 고치기는 남은 대상 수를 보고한다
+
+**무엇이 틀렸나(리뷰)**: `review-purge-legacy`는 `FOR UPDATE SKIP LOCKED`로 잠긴 행을 건너뛰고 `{ purged }`만 돌려준다. 남은 대상이 잠긴 행뿐이어도 `0`을 보고해, 정본의 '0행을 보고한 뒤 VALIDATE'가 너무 일찍 채워질 수 있다.
+
+**정한 것(정본 docs/data.md §2 '이전 판이 남긴 행 고치기')**: 정비 일은 끝에 같은 대상 조건으로 남은 행 수를 잠그지 않고 세어 `{ purged, remaining }`을 돌려준다(멈춤 신호로 끝났으면 센다). 다음 출시의 조건은 '남은 대상 수 0'이다.
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/modules/review/domain/ports.ts`(`countLegacyRows`), `…/review/adapters/db/drizzle-review-store.ts`(`purgeLegacyRows`와 같은 조건 글을 한 곳에 두고 함께 쓴다), `…/review/adapters/memory-review-store.ts`, `…/review/application/review-maintenance.ts` |
+| 시험 | 고침: `services/core-svc/test/review-purge-legacy.test.ts`, `test-int/review-purge-legacy.int.test.ts` |
+
+```ts
+// services/core-svc/src/modules/review/domain/ports.ts
+export interface ReviewStore {
+  /** 이전 판이 남긴 두 꼴(purgeLegacyRows와 같은 조건)의 행 수. 잠그지 않는다 */
+  countLegacyRows(): Promise<number>;
+}
+// review-purge-legacy의 run → { purged: number; remaining: number }
+```
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ⑧ 다른 트랜잭션이 잡은 이전 판 행은 남은 대상으로 센다` | 통합(core PostgreSQL) | 이전 판 행 셋 가운데 하나를 다른 연결이 `SELECT … FOR UPDATE`로 잡은 채 정비 일 실행 → `{ purged: 2, remaining: 1 }`. 잡은 연결을 풀고 다시 실행 → `{ purged: 1, remaining: 0 }` | 너무 이른 VALIDATE 막기 |
+| `I-T83 ⑧ 남은 대상 수는 고치기와 같은 조건으로 센다` | 단위(메모리) | 대상 두 꼴과 대상이 아닌 행(제대로 파기된 행, 계정 B의 살아 있는 후기)을 섞어 두고 실행 전 `countLegacyRows` = 대상 수 정확히, 실행 뒤 `{ remaining: 0 }`. 멈춤 신호로 첫 묶음 뒤 멈추면 `remaining` = 남은 수 | 결과가 '0행'만으로 통과로 새지 않는지 |
+
+**틀린 구현 표본(C2)**: ⓐ `remaining`을 싣지 않음(지금 결함) ⓑ `remaining`을 `purged`로 셈 ⓒ 셀 때 `SKIP LOCKED`를 써 잠긴 행을 빼고 셈 ⓓ 세는 조건이 고치는 조건과 다름(한 꼴만 셈).
+
+#### 9.4 돌릴 통합 시험(웨이브 끝 리뷰 반영)
+
+- core-svc 폴더에서: `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-manual.int.test.ts test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/review-withdrawn.int.test.ts`
+- 싼 게이트: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`·`typecheck`, 닿는 경로 `npx eslint`, 문서 점검.
+
 ## 실패 확인
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 계획 커밋 `7901c762` 위. Docker 없이 돌렸다.
