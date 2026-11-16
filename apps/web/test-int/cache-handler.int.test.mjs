@@ -1,9 +1,12 @@
 // 공유 캐시 처리기 통합 시험(BAT-170 웨이브 7 T14, docs/frontend.md §5.17 '공유 캐시 처리기 세부', docs/data.md 세션·캐시 클러스터 키 규칙).
 // 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 실제 Valkey 컨테이너(services/identity-svc/test-int/valkey.ts와 같은 방식:
 // 라이브러리 없이 docker 명령, 무작위 포트)에 처리기 인스턴스 둘(다른 파드 둘처럼 모듈을 따로 불러온다)을 붙인다.
-// 실행: apps/web에서 node --test test-int/ (Docker가 있어야 한다. 끝나면 컨테이너를 docker rm -f -v로 지운다)
+// BAT-170 웨이브 끝 리뷰 W7L2-K1(계획 §14 K-3): 공유 캐시는 단일 노드 모드가 없으므로 Valkey를 노드 하나짜리 클러스터 모드
+// (--cluster-enabled yes, 모든 슬롯 배정)로 띄운다. 노드가 알리는 주소가 이 PC에서 닿도록 같은 포트를 열고 127.0.0.1을 알린다. 단언은 그대로다.
+// 실행: apps/web에서 node --test test-int/cache-handler.int.test.mjs (Docker가 있어야 한다. 끝나면 컨테이너를 docker rm -f -v로 지운다)
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { after, before, test } from 'node:test';
 
 const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
@@ -14,7 +17,7 @@ const CANON_TIMEOUT_MS = 100;
 const SLACK_MS = 900;
 
 const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-const NAME = `bat170-valkey-${process.pid}`;
+const NAME = `lane2-bat170t-valkey-${process.pid}`;
 /** 이 시험의 빌드 칸(정본 꼴 [A-Za-z0-9_-] 1~64자) */
 const BUILD = 'bat170int';
 let cli;
@@ -26,9 +29,28 @@ let useB;
 let IsrA;
 let IsrB;
 
+/** 이 PC에서 그 포트가 비었는지 */
+const isFree = (port) =>
+  new Promise((ok) => {
+    const srv = createServer();
+    srv.once('error', () => ok(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => ok(true)));
+  });
+/** 빈 포트 하나. 클러스터 버스 포트(+10000)가 65535를 넘지 않게 20000~39999에서 고른다 */
+const freePort = async () => {
+  for (let i = 0; i < 50; i++) {
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    if ((await isFree(port)) && (await isFree(port + 10_000))) return port;
+  }
+  throw new Error('빈 포트를 찾지 못했다');
+};
+
 before(async () => {
-  docker(['run', '-d', '--name', NAME, '-p', '127.0.0.1::6379', VALKEY_IMAGE]);
-  cli = (...a) => docker(['exec', NAME, 'valkey-cli', ...a]);
+  const port = await freePort();
+  docker(['run', '-d', '--name', NAME, '-p', `127.0.0.1:${port}:${port}`, VALKEY_IMAGE, 'valkey-server', '--port', String(port),
+    '--cluster-enabled', 'yes', '--cluster-config-file', 'nodes.conf', '--cluster-announce-ip', '127.0.0.1',
+    '--appendonly', 'no', '--save', '', '--protected-mode', 'no']);
+  cli = (...a) => docker(['exec', NAME, 'valkey-cli', '-p', String(port), ...a]);
   for (let i = 0; i < 50; i++) {
     try {
       if (cli('PING') === 'PONG') break;
@@ -37,8 +59,10 @@ before(async () => {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  const mapped = docker(['port', NAME, '6379/tcp']).split('\n')[0];
-  process.env.PEAKET_WEB_CACHE_REDIS_URL = `redis://127.0.0.1:${mapped.slice(mapped.lastIndexOf(':') + 1)}`;
+  cli('CLUSTER', 'ADDSLOTSRANGE', '0', '16383');
+  for (let i = 0; i < 100 && !/cluster_state:ok/.test(cli('CLUSTER', 'INFO')); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.match(cli('CLUSTER', 'INFO'), /cluster_state:ok/, '노드 하나짜리 클러스터가 ok가 되지 않았다');
+  process.env.PEAKET_WEB_CACHE_REDIS_URL = `redis://127.0.0.1:${port}`;
   // 주소가 있으면 빌드 칸(PEAKET_WEB_CACHE_BUILD)이 있어야 처리기를 불러온다(BAT-170 리뷰 R170-2, 계획 §12). 같은 판의 두 파드
   process.env.PEAKET_WEB_CACHE_BUILD = BUILD;
   useA = await load('use-cache-handler.mjs', 'pod-a');

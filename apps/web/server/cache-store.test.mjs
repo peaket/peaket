@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, mock, test } from 'node:test';
-import { assertCacheEnv, cacheConfig, createCacheStore, createMemoryStore, selectRuntime } from './cache-store.mjs';
+import { assertCacheEnv, cacheConfig, createCacheStore, createMemoryStore, parseCacheUrls, selectRuntime, TRANSIENT_TAG } from './cache-store.mjs';
 import { CACHE_BUILD_ENV, readBuildTag } from './cache-env.mjs';
 import { createCacheHandler } from './cache-handler.mjs';
 import { createUseCacheHandler } from './use-cache-handler.mjs';
@@ -761,4 +761,239 @@ test('HOT-390 V170-26 미리 그린 화면 처리기는 요청 안에서 무효�
   assert.equal((await new Handler({ revalidatedTags: [] }).get('/v170-26', isrGetCtx))?.value?.html, '<p>요청 안</p>', '대조군');
   assert.equal((await new Handler({ revalidatedTags: ['u'] }).get('/v170-26', isrGetCtx))?.value?.html, '<p>요청 안</p>', '다른 태그 대조군');
   assert.equal((await new Handler({ revalidatedTags: ['t'] }).get('/v170-26', isrGetCtx)) ?? null, null, '요청 안에서 무효화한 태그의 값을 냈다');
+});
+
+// BAT-170 웨이브 끝 리뷰 재현(계획 §14, 보안 8fd2505c·동시 실행 c27a4620). 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3).
+// 정본: docs/frontend.md §5.18 '공유 캐시 처리기 세부'의 TTL 문장·'키 수 막기'·'클러스터 연결과 회복'.
+// 주입 값(상한·쓰기 몫·시간 한도)은 정본 값과 다르게 골라 주입을 무시하는 결함을 잡고, 기본값(12배·30일·초당 50·몫 100)은 따로 본다.
+test('HOT-390 W7L2-S1 값 TTL은 만료·간격의 12배·상한 가운데 가장 짧은 쪽이다', async () => {
+  const ttl = async (o, expire, revalidate) => {
+    const { client, data } = fakeRedis();
+    const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, ...o });
+    await store.setEntry('data', 'k', 'v', expire, revalidate);
+    return data.get('web:data:k').ttlMs / 1000;
+  };
+  const cap = { maxTtlSeconds: 7_200 };
+  assert.equal(await ttl(cap, 0xfffffffe, 300), 3_600, '간격 300 × 12');
+  assert.equal(await ttl(cap, 1_000, 300), 1_000, '만료가 더 짧다');
+  assert.equal(await ttl(cap, 5_000, undefined), 5_000, '간격 없음: 만료와 상한 가운데 짧은 쪽');
+  assert.equal(await ttl(cap, 0xfffffffe, undefined), 7_200, '간격 없음·만료 무한: 상한');
+  // 간격 × 12가 상한과 같을 때와 1초 클 때(경계 양쪽)
+  assert.equal(await ttl({ maxTtlSeconds: 7_200 }, 0xfffffffe, 600), 7_200);
+  assert.equal(await ttl({ maxTtlSeconds: 7_199 }, 0xfffffffe, 600), 7_199);
+  assert.equal(await ttl({ maxTtlSeconds: 7_201 }, 0xfffffffe, 600), 7_200);
+  // 기본 배수 12와 기본 상한 30일
+  assert.equal(await ttl({}, 0xfffffffe, 300), 3_600);
+  assert.equal(await ttl({}, 0xfffffffe, 300_000), DAYS_30_S, '간격 × 12가 30일보다 길면 30일');
+});
+
+test('HOT-390 W7L2-S1 web-transient 태그 항목은 공유 캐시에 쓰지 않고 파드 메모리에 60초만 둔다', async () => {
+  assert.equal(TRANSIENT_TAG, 'web-transient');
+  let clock = 10_000;
+  const { client, calls } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => clock, maxTtlSeconds: 3_600 });
+  const h = createUseCacheHandler({ store, now: () => clock });
+  const entry = (body, tags) => ({ value: new Blob([body]).stream(), tags, stale: 30, timestamp: clock, expire: 300, revalidate: 60 });
+  const read = async (e) => (e ? await new Response(e.value).text() : undefined);
+  await h.set('missing-event', Promise.resolve(entry('없음', ['web-transient', 'event:x'])));
+  assert.equal(calls.filter((c) => c.cmd === 'SET').length, 0, '공유하지 않을 항목을 Redis에 썼다');
+  clock = 10_000 + 59_999;
+  assert.equal(await read(await h.get('missing-event', [])), '없음', '60초 안인데 파드 메모리에 없다');
+  clock = 10_000 + 60_000;
+  assert.equal(await h.get('missing-event', []), undefined, '60초가 지났는데 남았다');
+  // 파드 메모리는 1,000개까지: 1,001개째를 넣으면 처음 것이 빠진다
+  clock = 100_000;
+  for (let i = 1; i <= 1_000; i++) await h.set(`t${i}`, Promise.resolve(entry(`v${i}`, ['web-transient'])));
+  assert.equal(await read(await h.get('t1', [])), 'v1', '1,000개째까지는 남아야 한다');
+  await h.set('t1001', Promise.resolve(entry('v1001', ['web-transient'])));
+  assert.equal(await h.get('t1', []), undefined, '1,001개째에 처음 것이 빠지지 않았다');
+  assert.equal(await read(await h.get('t1001', [])), 'v1001');
+  assert.equal(calls.filter((c) => c.cmd === 'SET').length, 0);
+  // 대조군: 태그가 없는 항목은 Redis에 쓴다
+  await h.set('found-event', Promise.resolve(entry('있음', [])));
+  assert.ok(calls.some((c) => c.cmd === 'SET' && c.keys.includes('web:data:found-event')), '보통 항목을 Redis에 쓰지 않았다');
+});
+
+test('HOT-390 W7L2-S1 상태가 200이 아닌 미리 그린 화면은 공유 캐시에 쓰지 않는다', async () => {
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000, maxTtlSeconds: 3_600 });
+  const h = createCacheHandler({ store, build: 'w7l2s1', now: () => 1_000 });
+  const pageWith = (status) => ({ ...isrPage(`<p>${status}</p>`, 'event'), status });
+  for (const status of [404, 410, 500]) {
+    await h.set(`/events/s${status}`, pageWith(status), isrSetCtx);
+    assert.equal(data.has(`web:isr:w7l2s1:/events/s${status}`), false, `${status} 화면을 Redis에 썼다`);
+    assert.equal((await h.get(`/events/s${status}`, isrGetCtx))?.value?.html, `<p>${status}</p>`, `${status} 화면이 파드 메모리에서 읽히지 않는다`);
+  }
+  // 대조군: 200과 상태 칸 없음은 Redis에 쓴다
+  await h.set('/events/s200', pageWith(200), isrSetCtx);
+  const noStatus = isrPage('<p>none</p>', 'event');
+  delete noStatus.status;
+  await h.set('/events/none', noStatus, isrSetCtx);
+  assert.equal(data.has('web:isr:w7l2s1:/events/s200'), true);
+  assert.equal(data.has('web:isr:w7l2s1:/events/none'), true);
+});
+
+test('HOT-390 W7L2-S1 파드마다 공유 캐시 쓰기는 초당 몫을 넘으면 버리고 센다', async () => {
+  let clock = 1_000;
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => clock, maxTtlSeconds: 3_600, writeRate: { perSecond: 5, burst: 10 } });
+  for (let i = 1; i <= 10; i++) await store.setEntry('data', `w${i}`, `v${i}`, 60);
+  assert.equal([...data.keys()].filter((k) => k.startsWith('web:data:w')).length, 10, '몫 10개가 다 가지 않았다');
+  await store.setEntry('data', 'w11', 'v11', 60);
+  assert.equal(data.has('web:data:w11'), false, '11번째가 갔다');
+  assert.equal(store.stats().droppedWrites, 1);
+  // 초당 5 = 200ms마다 하나: 199ms 뒤엔 버리고 200ms 뒤엔 간다
+  clock = 1_199;
+  await store.setEntry('data', 'w12', 'v12', 60);
+  assert.equal(data.has('web:data:w12'), false, '199ms 뒤에 갔다');
+  assert.equal(store.stats().droppedWrites, 2);
+  clock = 1_200;
+  await store.setEntry('data', 'w13', 'v13', 60);
+  assert.equal(data.has('web:data:w13'), true, '200ms 뒤에 가지 않았다');
+  // 버린 쓰기에도 읽기는 그대로다
+  assert.equal(text(await store.getEntry('data', 'w1')), 'v1');
+  assert.equal((await store.getEntry('data', 'w11')) ?? null, null);
+  // 기본값: 같은 시각에 100개는 가고 101번째는 버린다
+  const d = fakeRedis();
+  const def = createCacheStore({ client: d.client, timeoutMs: 250, now: () => 5_000, maxTtlSeconds: 3_600 });
+  for (let i = 1; i <= 101; i++) await def.setEntry('data', `d${i}`, 'v', 60);
+  assert.equal(d.data.has('web:data:d100'), true);
+  assert.equal(d.data.has('web:data:d101'), false);
+  assert.equal(def.stats().droppedWrites, 1);
+});
+
+/** 가짜 클러스터 연결: get의 동작을 바꿔 가며 쓴다 */
+function fakeCluster() {
+  const state = { mode: 'ok', error: null, attempts: [] };
+  const client = {
+    get: () => (state.mode === 'hang' ? new Promise(() => {}) : state.mode === 'error' ? Promise.reject(state.error) : Promise.resolve('v')),
+    set: () => Promise.resolve('OK'),
+    mGet: (keys) => Promise.resolve(keys.map(() => null)),
+    on: () => client,
+    close: async () => {},
+    destroy: () => {},
+    disconnect: async () => {},
+    quit: async () => {},
+  };
+  return { state, client };
+}
+const replyError = (message) => Object.assign(new Error(message), { name: 'ErrorReply' });
+const lines = () => {
+  const out = [];
+  const push = (...a) => void out.push(a.map(String).join(' '));
+  return { out, logger: Object.assign(push, { info: push, warn: push, error: push, log: push, debug: push }) };
+};
+const CRED_URL = 'redis://cacheuser:s3cr3t-pw@cache-0.internal:6379';
+
+test('HOT-390 W7L2-K2 다시 붙기 간격은 50ms에서 두 배씩 1초까지이고 한 번에 하나만 시도한다', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  // 붙지 못하는 클러스터: 1ms마다 요청을 보내 연결 시도 시각을 모은다
+  const attempts = [];
+  const down = createCacheStore({ urls: [CRED_URL], connect: () => (attempts.push(Date.now()), Promise.reject(new Error('ECONNREFUSED'))), timeoutMs: 250, maxTtlSeconds: 3_600 });
+  for (let t = 0; t <= 3_700; t++) {
+    void down.getEntry('data', 'k');
+    await flush();
+    mock.timers.tick(1);
+    await flush();
+  }
+  const gaps = attempts.slice(1, 8).map((x, i) => x - attempts[i]);
+  assert.deepEqual(gaps, [50, 100, 200, 400, 800, 1_000, 1_000], `연결 시도 시각 ${attempts.slice(0, 9).join(', ')}`);
+  // 붙는 동안 동시에 온 요청 둘: 연결 시도는 1번이고, 둘 다 기다리지 않고 없음이다
+  let calls = 0;
+  const pending = createCacheStore({ urls: [CRED_URL], connect: () => (calls++, new Promise(() => {})), timeoutMs: 250, maxTtlSeconds: 3_600 });
+  const a = settled(pending.getEntry('data', 'k'));
+  const b = settled(pending.getEntry('data', 'k'));
+  await flush();
+  await flush();
+  assert.equal(calls, 1, '동시에 연결을 둘 시도했다');
+  assert.equal(a.done && b.done, true, '붙는 동안 요청이 기다렸다(명령을 쌓았다)');
+  assert.equal(a.value ?? null, null);
+  assert.equal(b.value ?? null, null);
+});
+
+test('HOT-390 W7L2-K2 연속 시간 초과 5번이나 READONLY·CLUSTERDOWN·TRYAGAIN·LOADING이면 연결을 버린다', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  const timedOut = async (store) => {
+    const p = settled(store.getEntry('data', 'k'));
+    await flush();
+    mock.timers.tick(250);
+    await flush();
+    assert.equal(p.done, true);
+  };
+  {
+    const c = fakeCluster();
+    const store = createCacheStore({ urls: [CRED_URL], connect: () => Promise.resolve(c.client), timeoutMs: 250, maxTtlSeconds: 3_600 });
+    c.state.mode = 'hang';
+    for (let i = 0; i < 4; i++) await timedOut(store);
+    assert.equal(store.stats().consecutiveTimeouts, 4);
+    assert.equal(store.stats().resets, 0, '4번에 버렸다');
+    await timedOut(store);
+    assert.equal(store.stats().resets, 1, '5번째에 버리지 않았다');
+  }
+  {
+    // 사이에 성공이 끼면 다시 센다
+    const c = fakeCluster();
+    const store = createCacheStore({ urls: [CRED_URL], connect: () => Promise.resolve(c.client), timeoutMs: 250, maxTtlSeconds: 3_600 });
+    c.state.mode = 'hang';
+    for (let i = 0; i < 4; i++) await timedOut(store);
+    c.state.mode = 'ok';
+    assert.equal(await store.getEntry('data', 'k'), 'v');
+    assert.equal(store.stats().consecutiveTimeouts, 0, '성공 뒤 연속 수가 0이 아니다');
+    c.state.mode = 'hang';
+    for (let i = 0; i < 4; i++) await timedOut(store);
+    assert.equal(store.stats().resets, 0);
+    await timedOut(store);
+    assert.equal(store.stats().resets, 1);
+  }
+  // 네 응답 오류마다 1번씩 버리고, 그 밖의 응답 오류는 버리지 않는다
+  for (const [message, reset] of [
+    ["READONLY You can't write against a read only replica.", 1],
+    ['CLUSTERDOWN The cluster is down', 1],
+    ['TRYAGAIN Multiple keys request during rehashing of slot', 1],
+    ['LOADING Valkey is loading the dataset in memory', 1],
+    ['ERR unknown command', 0],
+    ['WRONGTYPE Operation against a key holding the wrong kind of value', 0],
+  ]) {
+    const c = fakeCluster();
+    const store = createCacheStore({ urls: [CRED_URL], connect: () => Promise.resolve(c.client), timeoutMs: 250, maxTtlSeconds: 3_600 });
+    c.state.mode = 'error';
+    c.state.error = replyError(message);
+    assert.equal((await store.getEntry('data', 'k')) ?? null, null, message);
+    assert.equal(store.stats().resets, reset, message);
+  }
+});
+
+test('HOT-390 W7L2-K2 회복 로그는 1분에 한 번이고 주소·비밀번호를 싣지 않는다', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  const c = fakeCluster();
+  c.state.mode = 'error';
+  c.state.error = replyError("READONLY You can't write against a read only replica.");
+  const { out, logger } = lines();
+  const store = createCacheStore({ urls: [CRED_URL], connect: () => Promise.resolve(c.client), logger, timeoutMs: 250, maxTtlSeconds: 3_600 });
+  /** 그 시각에 연결을 한 번 버리게 한다(다시 붙는 요청이 먼저 올 수 있어 몇 번 보낸다) */
+  const resetAt = async () => {
+    const before = store.stats().resets;
+    for (let i = 0; i < 5 && store.stats().resets === before; i++) {
+      await store.getEntry('data', 'k');
+      await flush();
+    }
+    assert.equal(store.stats().resets, before + 1, `${Date.now()}ms에 연결을 버리지 않았다`);
+  };
+  await resetAt();
+  mock.timers.tick(59_999);
+  await resetAt();
+  assert.equal(out.length, 1, `59,999ms 안의 두 번이 로그 ${out.length}줄`);
+  mock.timers.tick(1);
+  await resetAt();
+  assert.equal(out.length, 2, '60,000ms에 2줄째가 없다');
+  for (const l of out) {
+    assert.doesNotMatch(l, /cache-0\.internal/, '로그에 호스트가 있다');
+    assert.doesNotMatch(l, /s3cr3t-pw/, '로그에 비밀번호가 있다');
+  }
+});
+
+test('HOT-390 W7L2-K1 시작 주소는 쉼표로 나눈 하나 이상이고 빈칸은 뺀다', () => {
+  assert.deepEqual(parseCacheUrls({ PEAKET_WEB_CACHE_REDIS_URL: 'rediss://a:6379' }), ['rediss://a:6379']);
+  assert.deepEqual(parseCacheUrls({ PEAKET_WEB_CACHE_REDIS_URL: ' rediss://a:6379 , rediss://b:6379,,rediss://c:6379 ' }), ['rediss://a:6379', 'rediss://b:6379', 'rediss://c:6379']);
+  for (const v of [undefined, '', ' , ']) assert.deepEqual(parseCacheUrls(v === undefined ? {} : { PEAKET_WEB_CACHE_REDIS_URL: v }), [], String(v));
 });

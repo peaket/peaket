@@ -2,7 +2,8 @@
 // 시험 담당(l2w7-BAT170-test)이 썼다. 무거운 게이트 몫이다: 게이트의 운영 빌드(tools/web-checks에서 `node seed-css/build.mjs web`이 만든
 // apps/web/.next/standalone)가 있어야 한다. Docker는 쓰지 않는다. start.mjs가 하는 복사(prepareStandalone: .next/static·public)를 한 뒤 훑는다.
 // 산출물이 없으면 건너뛰지 않고 실패하고, 훑은 파일이 0개여도 실패한다(빈 결과 막기).
-// 실행: apps/web에서 node --test test-int/standalone-scm.int.test.mjs
+// 파일 이름 꼴(계획 §14 W7L2-W1, docs/devops.md §3.1): *.build.test.mjs는 운영 빌드만 써 ci-web reflow 잡이 빌드 뒤 돈다.
+// 실행: apps/web에서 node --test test-int/standalone-scm.build.test.mjs
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';

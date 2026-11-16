@@ -47,7 +47,11 @@ function within(promise, ms, fallback) {
  * @param {{ client: { get(k: string): Promise<unknown>, set(k: string, v: string, o: object): Promise<unknown>, mGet(keys: string[]): Promise<unknown[]> },
  *   timeoutMs?: number, now?: () => number, maxTtlSeconds?: number }} o
  */
-export function createCacheStore({ client, timeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now, maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS }) {
+export function createCacheStore({ client, urls, nodeAddressMap, connect, writeRate, logger, timeoutMs = DEFAULT_TIMEOUT_MS, now = Date.now, maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS }) {
+  // BAT-170 웨이브 끝 리뷰 W7L2-S1·K1·K2(계획 §14): 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 클러스터 연결(urls·nodeAddressMap),
+  // 연결 만들기 주입(connect, 시험이 가짜 클러스터 연결을 넣는 자리), 쓰기 몫(writeRate), 회복 로그(logger)는 구현 담당이 쓴다.
+  void nodeAddressMap, writeRate, logger;
+  if (urls !== undefined || connect !== undefined) throw new Error('아직 없음');
   /** 값 TTL(초): 항목의 만료와 상한 가운데 짧은 쪽. 만료가 없거나 숫자가 아니면 상한, 1초보다 짧으면 1초 */
   const ttlOf = (expireSeconds) => {
     const e = Number(expireSeconds);
@@ -87,6 +91,10 @@ export function createCacheStore({ client, timeoutMs = DEFAULT_TIMEOUT_MS, now =
         out.set(t, Number.isFinite(n) ? n : 0);
       });
       return out;
+    },
+    /** 회복 상태(W7L2-K2 ⓕ): { consecutiveTimeouts, resets, connectAttempts, pending, droppedWrites }. 시험 담당이 둔 빈 뼈대다 */
+    stats() {
+      throw new Error('아직 없음');
     },
     /** 태그 무효화 시각을 쓴다(TTL은 상한). 한도 안에 답하지 않으면 버린다 */
     async markTags(tags, at = now()) {
@@ -202,4 +210,14 @@ function refusingStore(error) {
     throw new Error(`공유 캐시를 쓰지 않는다: ${error instanceof Error ? error.message : String(error)}`);
   };
   return { getEntry: refuse, setEntry: refuse, tagTimes: refuse, markTags: refuse };
+}
+
+// BAT-170 웨이브 끝 리뷰 W7L2-S1·K1(계획 §14): 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 동작과 값은 구현 담당이 쓴다.
+/** 공유하지 않을 결과(없는·중지 회차)에 다는 태그(정본 값은 계획 §14, docs/frontend.md §5.18 '키 수 막기') */
+export const TRANSIENT_TAG = '아직 없음';
+
+/** 시작 주소 배열: PEAKET_WEB_CACHE_REDIS_URL을 쉼표로 나누고 빈칸은 뺀다 */
+export function parseCacheUrls(env = process.env) {
+  void env;
+  throw new Error('아직 없음');
 }

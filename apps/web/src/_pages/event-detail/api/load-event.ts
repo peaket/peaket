@@ -19,6 +19,12 @@ function statusOf(e: unknown): number | undefined {
   return typeof s === 'number' ? s : undefined;
 }
 
+/** 회차 ID 꼴 확인(W7L2-S1 ①, 계획 §14). 화면이 loadEvent보다 먼저 부른다. 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3) */
+export function isEventId(id: string): boolean {
+  void id;
+  throw new Error('아직 없음');
+}
+
 export async function loadEvent(id: string): Promise<LoadedEvent> {
   'use cache';
   cacheLife({ revalidate: 300 });
