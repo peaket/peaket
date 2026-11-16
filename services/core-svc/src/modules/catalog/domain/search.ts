@@ -131,7 +131,8 @@ export const SEARCH_INDEX = Symbol('SEARCH_INDEX');
 const SALE_RANK: Record<CardSaleStatus, number> = { ON_SALE: 0, UPCOMING: 1, SOLD_OUT: 2, ENDED: 3 };
 const collator = new Intl.Collator('ko');
 const byTitle = (a: { title: string; productionId: string }, b: { title: string; productionId: string }) => collator.compare(a.title, b.title) || (a.productionId < b.productionId ? -1 : a.productionId > b.productionId ? 1 : 0);
-const card = (d: SearchDocument): SearchCard => ({
+/** 문서 → 결과 카드 */
+export const card = (d: SearchDocument): SearchCard => ({
   productionId: d.productionId,
   ...(d.eventId !== undefined ? { eventId: d.eventId } : {}),
   title: d.title,
@@ -248,17 +249,20 @@ function distance(a: string, b: string): number {
   return dp[y.length]!;
 }
 
-function didYouMean(docs: readonly SearchDocument[], q: string): string | null {
+/** 오타 제안 하나(편집 거리 2 이하에서 가장 가까운 이름, 같으면 가나다 → ID). 이름 목록의 차례와 상관없이 늘 같은 답이다 */
+export function didYouMeanOf(titles: Iterable<{ title: string; productionId: string }>, q: string): string | null {
   const n = normalize(q);
   if (n === '') return null;
-  let best: { title: string; d: number } | null = null;
-  for (const d of docs) {
-    const v = distance(n, normalize(d.title));
-    if (v <= 2 && (best === null || v < best.d)) best = { title: d.title, d: v };
+  let best: { title: string; productionId: string; d: number } | null = null;
+  for (const t of titles) {
+    const v = distance(n, normalize(t.title));
+    if (v > 2) continue;
+    if (best === null || v < best.d || (v === best.d && byTitle(t, best) < 0)) best = { title: t.title, productionId: t.productionId, d: v };
   }
   return best?.title ?? null;
 }
 
+/** 인기 공연(관련 공연의 다가오는 인기 근거): 끝나지 않은 공연, 판매 차례 → 관심도 → 가나다 → ID */
 function popular(docs: readonly SearchDocument[], exclude?: string): SearchCard[] {
   return [...docs]
     .filter((d) => d.productionId !== exclude && d.saleStatus !== 'ENDED')
@@ -267,18 +271,66 @@ function popular(docs: readonly SearchDocument[], exclude?: string): SearchCard[
     .map(card);
 }
 
-function relatedOf(docs: readonly SearchDocument[], top: SearchDocument | undefined): SearchOutcome['related'] {
-  if (!top) return { basis: { kind: 'UPCOMING_POPULAR' }, items: popular(docs) };
+/** 관련 공연을 찾는 원천(메모리는 모든 문서, DB 어댑터는 근거마다 6개 [가정]의 정렬 질의, ADR-0271 결정 13) */
+export interface RelatedSource {
+  /** 그 아티스트의 다른 공연(가나다 → ID 차례, 6개까지) */
+  byArtist(artistId: string, exclude: string): Promise<SearchCard[]> | SearchCard[];
+  /** 그 공연장의 오픈 예정 공연(가나다 → ID 차례, 6개까지) */
+  byPlace(placeId: string, exclude: string): Promise<SearchCard[]> | SearchCard[];
+  /** 다가오는 인기 공연(6개까지) */
+  popular(exclude?: string): Promise<SearchCard[]> | SearchCard[];
+}
+
+export const memoryRelated = (docs: readonly SearchDocument[]): RelatedSource => ({
+  byArtist: (artistId, exclude) => docs.filter((d) => d.productionId !== exclude && d.artists.some((a) => a.artistId === artistId)).sort(byTitle).slice(0, RELATED_MAX).map(card),
+  byPlace: (placeId, exclude) => docs.filter((d) => d.productionId !== exclude && d.placeId === placeId && d.saleStatus === 'UPCOMING').sort(byTitle).slice(0, RELATED_MAX).map(card),
+  popular: (exclude) => popular(docs, exclude),
+});
+
+/**
+ * 관련 공연(docs/features/search.md §6): 결과가 0건이면 다가오는 인기 공연. 결과가 있으면 맨 위 결과의 아티스트의 다른 공연, 없으면 그 공연장의 오픈 예정 공연이고,
+ * 남는 공연이 없으면 자리를 숨긴다(null). 검색어 없는 목록은 맞은 이름이 없으므로 관련 공연이 없다(0건일 때만 인기 공연)
+ */
+export async function relatedOf(src: RelatedSource, ranked: RankedSearch): Promise<SearchOutcome['related']> {
+  const top = ranked.top;
+  if (!top) return { basis: { kind: 'UPCOMING_POPULAR' }, items: await src.popular() };
+  if (!ranked.hasQuery) return null;
   const artist = top.artists[0];
   if (artist) {
-    const items = docs.filter((d) => d.productionId !== top.productionId && d.artists.some((a) => a.artistId === artist.artistId)).sort(byTitle).slice(0, RELATED_MAX).map(card);
+    const items = await src.byArtist(artist.artistId, top.productionId);
     if (items.length > 0) return { basis: { kind: 'ARTIST', id: artist.artistId, name: artist.name }, items };
   }
   if (top.placeId && top.placeName) {
-    const items = docs.filter((d) => d.productionId !== top.productionId && d.placeId === top.placeId && d.saleStatus === 'UPCOMING').sort(byTitle).slice(0, RELATED_MAX).map(card);
+    const items = await src.byPlace(top.placeId, top.productionId);
     if (items.length > 0) return { basis: { kind: 'PLACE', id: top.placeId, name: top.placeName }, items };
   }
-  return { basis: { kind: 'UPCOMING_POPULAR' }, items: popular(docs, top.productionId) };
+  return null;
+}
+
+function relatedSync(src: RelatedSource, ranked: RankedSearch): SearchOutcome['related'] {
+  const top = ranked.top;
+  if (!top) return { basis: { kind: 'UPCOMING_POPULAR' }, items: src.popular() as SearchCard[] };
+  if (!ranked.hasQuery) return null;
+  const artist = top.artists[0];
+  if (artist) {
+    const items = src.byArtist(artist.artistId, top.productionId) as SearchCard[];
+    if (items.length > 0) return { basis: { kind: 'ARTIST', id: artist.artistId, name: artist.name }, items };
+  }
+  if (top.placeId && top.placeName) {
+    const items = src.byPlace(top.placeId, top.productionId) as SearchCard[];
+    if (items.length > 0) return { basis: { kind: 'PLACE', id: top.placeId, name: top.placeName }, items };
+  }
+  return null;
+}
+
+/** 순위를 매긴 결과(0건 제안·관련 공연·필터 이름은 어댑터가 채운다) */
+export interface RankedSearch {
+  outcome: Omit<SearchOutcome, 'didYouMean' | 'related' | 'filterNames'>;
+  /** 맨 위 결과(정확도 순). 결과가 없으면 undefined */
+  top: SearchDocument | undefined;
+  hasQuery: boolean;
+  /** 0건 제안이 필요하다(검색어가 있고 결과가 0건) */
+  needsDidYouMean: boolean;
 }
 
 /** 모든 문서에서 찾는다(메모리 어댑터·단위 시험). index를 주면 이름 색인을 다시 만들지 않는다 */
@@ -286,15 +338,36 @@ export function searchDocuments(docs: readonly SearchDocument[], q: SearchQuery,
   if (q.page > SEARCH_MAX_PAGE) throw new Error('page');
   const query = q.q.trim();
   const grades = query === '' ? new Map<string, Grade>() : matchGrades(index ?? indexDocuments(docs), query, q.noConvert);
-  return assembleSearch(docs, q, grades, docs);
+  const ranked = rankMatched(docs, q, grades);
+  const placeName = q.placeId !== undefined ? (docs.find((d) => d.placeId === q.placeId)?.placeName ?? null) : null;
+  const artistName = q.artistId !== undefined ? (docs.flatMap((d) => d.artists).find((a) => a.artistId === q.artistId)?.name ?? null) : null;
+  return finishSearch(ranked, q, {
+    didYouMean: ranked.needsDidYouMean ? didYouMeanOf(docs, query) : null,
+    related: relatedSync(memoryRelated(docs), ranked),
+    filterNames: { placeName, artistName },
+  });
+}
+
+/** 순위 결과에 0건 제안·관련 공연·필터 이름을 붙인다(필터 이름은 공연장·아티스트 필터를 건 때만) */
+export function finishSearch(
+  ranked: RankedSearch,
+  q: SearchQuery,
+  extra: { didYouMean: string | null; related: SearchOutcome['related']; filterNames: { placeName: string | null; artistName: string | null } },
+): SearchOutcome {
+  return {
+    ...ranked.outcome,
+    didYouMean: extra.didYouMean,
+    ...(q.placeId !== undefined || q.artistId !== undefined ? { filterNames: extra.filterNames } : {}),
+    related: extra.related,
+  };
 }
 
 /**
- * 순위·필터·쪽·0건 제안·관련 공연을 맞춘다(ADR-0268 결정 3·6). 두 어댑터가 이 함수 하나를 쓴다(ADR-0271 결정 4).
+ * 순위·필터·쪽(ADR-0268 결정 3·6). 두 어댑터가 이 함수 하나를 쓴다(ADR-0271 결정 4).
  * matched: 검색어가 있으면 그 후보 공연(등급이 있는 공연을 모두 담은 것), 없으면 모든 공연. grades: 후보의 일치 등급.
- * all: 0건 제안·관련 공연·필터 이름을 고를 모든 공연(DB 어댑터는 판마다 들고 있는 것)
+ * 필터를 푼 수(relaxedTotal)는 필터 없이 센 후보 수다
  */
-export function assembleSearch(matched: readonly SearchDocument[], q: SearchQuery, grades: Map<string, Grade>, all: readonly SearchDocument[]): SearchOutcome {
+export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): RankedSearch {
   if (q.page > SEARCH_MAX_PAGE) throw new Error('page');
   const query = q.q.trim();
   const docs = matched;
@@ -303,21 +376,21 @@ export function assembleSearch(matched: readonly SearchDocument[], q: SearchQuer
   const total = Math.min(sorted.length, SEARCH_TOTAL_CAP);
   const pageItems = sorted.slice((q.page - 1) * SEARCH_PAGE_SIZE, q.page * SEARCH_PAGE_SIZE).map(card);
   const relaxed = filtered.length === 0 && hasFilters(q) ? filterDocs(docs, { ...q, genre: undefined, placeId: undefined, artistId: undefined, dateFrom: undefined, dateTo: undefined, status: undefined }, query === '' ? null : grades).length : null;
-  const placeName = q.placeId !== undefined ? (all.find((d) => d.placeId === q.placeId)?.placeName ?? null) : null;
-  const artistName = q.artistId !== undefined ? (all.flatMap((d) => d.artists).find((a) => a.artistId === q.artistId)?.name ?? null) : null;
   const top = filtered.length > 0 ? sortDocs(filtered, { ...q, sort: 'RELEVANCE' }, grades)[0] : undefined;
   return {
-    items: pageItems,
-    page: q.page,
-    limit: SEARCH_PAGE_SIZE,
-    total,
-    totalCapped: sorted.length > SEARCH_TOTAL_CAP,
-    totalPages: Math.ceil(total / SEARCH_PAGE_SIZE),
-    query: { normalized: normalize(query), converted: convertedQuery(query, q.noConvert, filtered.length > 0) },
-    didYouMean: filtered.length === 0 && query !== '' ? didYouMean(all, query) : null,
-    relaxedTotal: relaxed,
-    ...(q.placeId !== undefined || q.artistId !== undefined ? { filterNames: { placeName, artistName } } : {}),
-    related: filtered.length === 0 || (top && (top.artists.length > 0 || top.placeId)) ? relatedOf(all, top) : null,
+    outcome: {
+      items: pageItems,
+      page: q.page,
+      limit: SEARCH_PAGE_SIZE,
+      total,
+      totalCapped: sorted.length > SEARCH_TOTAL_CAP,
+      totalPages: Math.ceil(total / SEARCH_PAGE_SIZE),
+      query: { normalized: normalize(query), converted: convertedQuery(query, q.noConvert, filtered.length > 0) },
+      relaxedTotal: relaxed,
+    },
+    top,
+    hasQuery: query !== '',
+    needsDidYouMean: filtered.length === 0 && query !== '',
   };
 }
 
@@ -471,6 +544,8 @@ export interface SearchDictionarySource {
 }
 
 export const SEARCH_DICTIONARY_SOURCE = Symbol('SEARCH_DICTIONARY_SOURCE');
+/** 파드의 자동완성 사전(SuggestionDictionary) 하나 */
+export const SEARCH_DICTIONARY = Symbol('SEARCH_DICTIONARY');
 
 /** 공연 하나의 이름 원천(동기화와 메모리 원천이 이름 줄을 만든다) */
 export interface TermSource {
@@ -568,6 +643,7 @@ export class SuggestionDictionary {
   #readAt = Number.NEGATIVE_INFINITY;
   #index: DictIndex | undefined;
   #running: Promise<{ version: number; full: boolean; applied: number; removed: number }> | undefined;
+  #onLoad: (() => void)[] = [];
 
   constructor(
     readonly source: SearchDictionarySource,
@@ -576,6 +652,17 @@ export class SuggestionDictionary {
 
   get version(): number {
     return this.#version;
+  }
+
+  /** 처음 통째로 읽기를 마쳤는가(그 전에는 자동완성이 빈 후보로 답하고 준비 확인이 실패한다, ADR-0271 결정 14) */
+  get ready(): boolean {
+    return this.#loaded;
+  }
+
+  /** 처음 통째로 읽기를 마치면 한 번 부른다(이미 마쳤으면 바로 부른다) */
+  onLoad(fn: () => void): void {
+    if (this.#loaded) fn();
+    else this.#onLoad.push(fn);
   }
 
   /** 이름 항목 수(search_term 줄 수와 같다) */
@@ -627,8 +714,18 @@ export class SuggestionDictionary {
       }
     }
     this.#version = snap.version;
+    const first = !this.#loaded;
     this.#loaded = true;
     this.#index = undefined;
+    if (first) {
+      for (const fn of this.#onLoad.splice(0)) {
+        try {
+          fn();
+        } catch {
+          // 알림 실패는 갱신을 바꾸지 않는다
+        }
+      }
+    }
     return { version: snap.version, full: snap.full, applied: snap.documents.length + snap.terms.length, removed: snap.full ? 0 : snap.removals.length };
   }
 
@@ -729,7 +826,7 @@ export class SuggestionDictionary {
 
   /** 오타 제안(didYouMean). 검색 결과가 0건일 때만 부른다 */
   correct(input: string): string | null {
-    return didYouMean([...this.#docs.values()], input);
+    return didYouMeanOf(this.#docs.values(), input);
   }
 }
 

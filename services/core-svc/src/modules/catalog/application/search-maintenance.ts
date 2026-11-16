@@ -31,7 +31,7 @@ export async function withSearchSync<T>(
     safe(() => o.logger.warn({ event: 'cdn_invalidation_failed', paths: [...SEARCH_CDN_PATHS], err: e instanceof Error ? e.name : 'unknown' }, '검색 경로 CDN 무효화에 실패했다(캐시 수명이 지나면 빠진다)'));
   }
   for (const productionId of synced.removed) {
-    safe(() => o.logger.info({ event: 'search_removed', productionId, reason: o.reason, version: synced!.version, invalidationRequestId }, '검색에서 공연이 빠졌다'));
+    safe(() => o.logger.info({ event: 'search_removed', productionId, reason: o.reason, searchVersion: synced!.version, invalidationRequestId }, '검색에서 공연이 빠졌다'));
   }
   return result;
 }
@@ -115,8 +115,9 @@ export class SearchReadModelTimers {
   async tidy(): Promise<{ version: number | null; productions: number; purged: number }> {
     const at = new Date(this.o.clock.now());
     const timed = await this.o.sync.syncTimed(at, this.#since);
-    this.#since = at;
     const purged = await this.o.sync.purgeRemovals(at);
+    // 정리가 다 성공했을 때만 창을 앞으로 옮긴다(실패하면 다음 정리가 같은 창부터 다시 본다, ADR-0271 결정 12)
+    this.#since = at;
     if (this.o.termCount && this.o.dictionary) this.#drift = Math.abs((await this.o.termCount()) - this.o.dictionary.entries);
     return { ...timed, purged };
   }
@@ -125,7 +126,31 @@ export class SearchReadModelTimers {
     return this.o.sync.recountInterest(new Date(this.o.clock.now()));
   }
 
-  start(): void {
+  /**
+   * 시작(ADR-0271 결정 12·14): 시작 따라잡기(reconcileAll)를 먼저 하고, 자동완성 사전을 처음 읽은 뒤 주기 일을 건다.
+   * 1분 정리의 시각 창은 따라잡기를 시작한 시각에서 잇는다. 따라잡기·첫 읽기가 실패해도 주기 일은 건다(사전은 10초 뒤 다시 읽는다)
+   */
+  async start(): Promise<void> {
+    const at = new Date(this.o.clock.now());
+    this.#since = at;
+    try {
+      const r = await this.o.sync.reconcileAll(at);
+      safe(() => this.o.logger?.info({ event: 'search_reconciled', ran: r.ran, productions: r.productions, searchVersion: r.version }, '검색 읽기 모델 시작 따라잡기'));
+    } catch (e) {
+      safe(() => this.o.logger?.warn({ event: 'search_maintenance_failed', task: 'search-reconcile', err: e instanceof Error ? e.name : 'unknown' }, '검색 읽기 모델 시작 따라잡기가 실패했다(1분 정리가 이어 간다)'));
+    }
+    if (this.o.dictionary) {
+      try {
+        await this.o.dictionary.refresh();
+      } catch (e) {
+        safe(() => this.o.logger?.warn({ event: 'search_dictionary_refresh_failed', err: e instanceof Error ? e.name : 'unknown' }, '자동완성 사전을 처음 읽지 못했다(10초 뒤 다시 읽는다)'));
+      }
+    }
+    this.#arm();
+  }
+
+  #arm(): void {
+    this.stop();
     const every = (name: string, ms: number, fn: () => Promise<unknown>) => {
       const t = setInterval(() => {
         if (this.#busy.has(name)) return;

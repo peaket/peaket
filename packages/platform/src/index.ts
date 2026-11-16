@@ -119,7 +119,7 @@ export {
   type KeyedPartitionOptions,
 } from './keyed-consumer.js';
 export { HELD_EVENT_KEEP_DAYS, HELD_EVENT_TABLE, deleteReprocessedHeldEvents, drizzleHeldEventStore, heldEventCounts, heldEventTable, reprocessHeldEvents, type ReprocessResult } from './held-events.js';
-export { Readiness } from './readiness.js';
+export { READINESS, Readiness } from './readiness.js';
 export {
   CONTROL_SYNC_DEFAULTS,
   ControlState,

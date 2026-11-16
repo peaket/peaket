@@ -60,7 +60,7 @@ import {
 import { LOG_PSEUDONYM, type LogPseudonym, MEMBER_CODE_DIRECTORY, type MemberCodeDirectory, SALE_ELIGIBILITY_COPY, SALE_ELIGIBILITY_METRICS, type SaleEligibilityCopy } from './domain/eligibility-ports.js';
 import { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
 import { CATALOG_REPOSITORY } from './domain/ports.js';
-import { SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SEARCH_READ_MODEL_SYNC } from './domain/search.js';
+import { SEARCH_DICTIONARY, SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SEARCH_READ_MODEL_SYNC, type SearchDictionarySource, SuggestionDictionary } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
@@ -202,10 +202,12 @@ export class CatalogModule implements NestModule {
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_DATABASE, useFactory: (db: Database) => o.searchDatabase ?? db, inject: [DATABASE] },
-          { provide: SEARCH_INDEX, useFactory: (db: Database, origin: string) => new DrizzleSearchIndex(db, origin), inject: [SEARCH_DATABASE, IMAGE_ORIGIN] },
+          // 0건 제안은 메모리 사전이 답한다(ADR-0271 결정 13). 사전이 아직 준비되지 않았으면 search_term으로 대신한다
+          { provide: SEARCH_INDEX, useFactory: (db: Database, origin: string, d: SuggestionDictionary) => new DrizzleSearchIndex(db, origin, { correct: (q) => (d.ready ? d.correct(q) : undefined) }), inject: [SEARCH_DATABASE, IMAGE_ORIGIN, SEARCH_DICTIONARY] },
           // 동기화는 부르는 트랜잭션(판매 승인·포스터)의 연결로 쓴다. 이 인스턴스의 연결은 사전 원천(읽기)이다
           { provide: SEARCH_READ_MODEL_SYNC, useFactory: (db: Database, origin: string) => new DrizzleSearchReadModel(db, origin), inject: [SEARCH_DATABASE, IMAGE_ORIGIN] },
           { provide: SEARCH_DICTIONARY_SOURCE, useExisting: SEARCH_READ_MODEL_SYNC },
+          { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },
           { provide: DEMAND_FORECAST_SOURCE, useValue: o.media.demandSource ?? new EmptyDemandForecastSource() },
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           ...mediaProviders(o.media, false),
@@ -229,6 +231,7 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         { provide: SEARCH_DICTIONARY_SOURCE, useFactory: (index: MemorySearchIndex) => new MemorySearchDictionarySource(index), inject: [SEARCH_INDEX] },
+        { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },
         { provide: DEMAND_FORECAST_SOURCE, useValue: o.media?.demandSource ?? new EmptyDemandForecastSource() },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         ...mediaProviders(o.media ?? {}, true),

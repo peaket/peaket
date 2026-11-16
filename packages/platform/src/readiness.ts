@@ -1,5 +1,8 @@
 // 준비 표시(openspec 변경 add-maintenance-control-and-consumers 결정 8, ADR-0103 결정 2, docs/architecture.md §5 '프로브 규칙', D-T29).
 // 시작 작업은 listen 전에 등록하고, 모두 끝나야 관리 포트 /ready가 200이다. /ready는 이 표시만 읽고 의존성을 부르지 않는다(D-T19).
+/** Nest 주입 이름. createService가 전역으로 넣는다(모듈이 시작 작업을 걸고 끝낼 때 @Inject(READINESS)로 받는다) */
+export const READINESS = Symbol.for('peaket.platform.readiness');
+
 export class Readiness {
   readonly #pending = new Set<string>();
 

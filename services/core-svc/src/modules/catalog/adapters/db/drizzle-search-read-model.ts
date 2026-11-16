@@ -13,6 +13,8 @@ import { documentOfRow, rowsOf, termOfRow, type DocumentRow, type TermRow } from
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 지운 표시를 두는 시간(docs/features/search.md:47, 하루 [가정]) */
 export const SEARCH_REMOVAL_KEEP_MS = 86_400_000;
+/** 시작 따라잡기의 끊음 크기(ADR-0271 결정 12, 500개 [가정]) */
+export const RECONCILE_CHUNK = 500;
 /** 정리 작업 권고 잠금 키(여러 파드 중 하나만 돈다) */
 const TIDY_LOCK = 2_710_165;
 /** 표와 원천을 견주는 칸(관심도·판 제외). 고정 글이다(sql.raw에는 값을 넣지 않는다) */
@@ -47,9 +49,10 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     return { version: r.version, removed: r.removed };
   }
 
-  async #apply(tx: DbTransaction, productionIds: readonly string[], at: Date): Promise<{ version: number; changed: boolean; removed: string[] }> {
+  /** bump: 바뀐 것이 없어도 판을 올린다(시작 따라잡기의 끊음마다 판 1, ADR-0271 결정 12) */
+  async #apply(tx: DbTransaction, productionIds: readonly string[], at: Date, bump = false): Promise<{ version: number; changed: boolean; removed: string[] }> {
     const ids = [...new Set(productionIds)];
-    if (ids.length === 0) return { version: await currentVersion(tx), changed: false, removed: [] };
+    if (ids.length === 0 && !bump) return { version: await currentVersion(tx), changed: false, removed: [] };
     const arr = uuidArray(ids);
     const atIso = at.toISOString();
     const source = rowsOf<SourceRow>(
@@ -84,7 +87,7 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
       return !c || c.kind !== t.kind || c.target_id !== t.targetId || c.display_name !== t.displayName || (c.alias_of ?? null) !== t.aliasOf;
     });
 
-    if (changedDocs.length === 0 && removedDocs.length === 0 && removedTerms.length === 0 && changedTerms.length === 0) {
+    if (!bump && changedDocs.length === 0 && removedDocs.length === 0 && removedTerms.length === 0 && changedTerms.length === 0) {
       return { version: await currentVersion(tx), changed: false, removed: [] };
     }
     // 판은 트랜잭션마다 한 번(이 트랜잭션이 끝날 때까지 이 줄을 잠근다, data.md search_version)
@@ -148,9 +151,24 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     });
   }
 
-  /** 리뷰 R165-1(ADR-0271 결정 12). BAT-165 시험 담당이 둔 빈 뼈대 */
-  async reconcileAll(_at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> {
-    throw new Error('아직 없음');
+  /**
+   * 시작 따라잡기(ADR-0271 결정 12, 리뷰 R165-1): 1분 정리와 같은 권고 잠금 안에서 원천에 있는 공연과 표에 있는 공연을 합친 모든 공연을
+   * 500개 [가정]씩 끊어 다시 동기화한다(끊음마다 판 1). 원천에 없는 표 줄은 지우고 지운 표시를 적는다. 잠금을 못 잡으면 건너뛴다
+   */
+  async reconcileAll(at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> {
+    return this.db.transaction(async (tx) => {
+      const [lock] = rowsOf<{ ok: boolean }>(await tx.execute(sql`select pg_try_advisory_xact_lock(${TIDY_LOCK}) as ok`));
+      if (!lock?.ok) return { ran: false, productions: 0, version: null };
+      const ids = rowsOf<{ production_id: string }>(
+        await tx.execute(sql`
+          select production_id from search_document_source_at(${at.toISOString()}::timestamptz)
+          union select production_id from search_document
+          order by production_id`),
+      ).map((r) => r.production_id);
+      let version: number | null = null;
+      for (let i = 0; i < ids.length; i += RECONCILE_CHUNK) version = (await this.#apply(tx, ids.slice(i, i + RECONCILE_CHUNK), at, true)).version;
+      return { ran: true, productions: ids.length, version };
+    });
   }
 
   async purgeRemovals(at: Date): Promise<number> {

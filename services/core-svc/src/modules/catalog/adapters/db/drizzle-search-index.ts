@@ -1,23 +1,44 @@
-// PostgreSQL 검색 어댑터: search_term에서 후보 이름 줄을 찾고 그 공연의 search_document 줄만 읽는다(ADR-0271 결정 4·5, docs/data.md '공연 검색' 줄, HOT-270·HOT-280).
-// - 후보: 이름(공연명·다른 이름·아티스트·공연장)의 낱자·초성에 입력이 든 줄(앞부분·낱말 앞부분·중간 일치를 모두 덮는다. 이스케이프한 LIKE, 중간 일치는 훑기).
-//   로마자만 친 입력은 한/영 변환 값도 함께 찾는다. 등급은 메모리 어댑터와 같은 TS 함수(matchGrades·assembleSearch)가 매긴다.
-// - 검색어 없는 목록·관련 공연·인기 대체·0건 제안·필터 이름은 판(search_version)마다 들고 있는 전체 문서에서 고른다(판이 같으면 다시 읽지 않는다, 60초 [가정]마다 새로).
+// PostgreSQL 검색 어댑터(ADR-0271 결정 4·5·13, docs/data.md '공연 검색' 줄, HOT-270·HOT-280). 파드에 search_document 전체 사본을 두지 않는다.
+// - 검색어가 있으면: search_term에서 후보 이름 줄을 찾고(낱자·초성에 입력이 든 줄, 이스케이프한 LIKE) 그 공연의 search_document 줄만 읽는다.
+//   로마자만 친 입력은 한/영 변환 값도 함께 찾는다. 등급·필터·순위·쪽은 메모리 어댑터와 같은 TS 함수(matchGrades·rankMatched)가 한다.
+// - 검색어가 없는 목록: 필터를 건 정렬 질의의 LIMIT 20 OFFSET, 전체 수는 1,001줄까지만 센다.
+// - 관련 공연: 근거(같은 아티스트 → 같은 공연장의 오픈 예정, 결과 0건이면 다가오는 인기)마다 6개 [가정]만 읽는 정렬 질의.
+// - 0건 제안: 메모리 사전의 correct(넘겨받았고 사전이 준비됐으면). 아니면 search_term의 공연명 줄로 같은 함수를 돌린다.
+// - 필터 이름: search_term의 공연장·아티스트 줄(원래 이름). 없으면 null.
+// - 이름 차례는 ICU 한국어 정렬(COLLATE "ko-x-icu")로 메모리의 Intl.Collator('ko')와 같게 견준다.
 // - 검색 전용 연결 묶음(운영은 읽기 전용 복제본): 연결 대기를 넘기면 SearchUnavailable('pool-timeout'), 질의 시간 상한을 넘기면 'statement-timeout'(503).
 import type { Database, DbTransaction } from '@peaket/platform';
-import { convertQwertyToHangul, queryKeys, type QueryKeys } from '@peaket/search-normalize';
+import { convertQwertyToHangul, normalize, queryKeys, type QueryKeys } from '@peaket/search-normalize';
 import { sql, type SQL } from 'drizzle-orm';
-import { assembleSearch, matchGrades, indexDocuments, SearchUnavailable, type SearchDocument, type SearchIndex, type SearchOutcome, type SearchQuery } from '../../domain/search.js';
+import {
+  card,
+  didYouMeanOf,
+  finishSearch,
+  indexDocuments,
+  matchGrades,
+  rankMatched,
+  relatedOf,
+  RELATED_MAX,
+  SEARCH_PAGE_SIZE,
+  SEARCH_TOTAL_CAP,
+  SearchUnavailable,
+  type RankedSearch,
+  type RelatedSource,
+  type SearchDocument,
+  type SearchIndex,
+  type SearchOutcome,
+  type SearchQuery,
+} from '../../domain/search.js';
 import { documentOfRow, rowsOf, type DocumentRow } from './search-rows.js';
 
 /** 검색 질의 시간 상한(docs/features/search.md:242, 300ms [가정]) */
 export const SEARCH_STATEMENT_TIMEOUT_MS = 300;
-/** 전체 문서 사본을 다시 읽는 간격(관심도는 판을 올리지 않고 바뀐다) [가정] */
-export const SEARCH_BROWSE_TTL_MS = 60_000;
 
 // 연결 대기 초과(pg-pool 3.x 메시지, @peaket/platform PlatformPool이 429 server-busy로 감싼다)
 const CONNECT_TIMEOUTS = new Set(['timeout exceeded when trying to connect', 'Connection terminated due to connection timeout']);
 // searchIndexed의 한/영 변환과 같은 입력 다듬기
 const INVISIBLE = /[​-‍⁠﻿ᅟᅠㅤ]/g;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 연결 묶음 포화·질의 시간 초과면 SearchUnavailable, 아니면 그대로 */
 export function unavailableOf(e: unknown): unknown {
@@ -42,47 +63,127 @@ function keySets(query: string, noConvert: boolean): QueryKeys[] {
   return out.filter((k) => k.nospace !== '');
 }
 
-interface Browse {
-  version: number;
-  at: number;
-  docs: SearchDocument[];
+// 정렬 키(ADR-0268 결정 3, 도메인 sortDocs와 같은 차례). 고정 글이다
+const BY_TITLE = sql.raw(`title collate "ko-x-icu", production_id`);
+const SALE_RANK = sql.raw(`case sale_status when 'ON_SALE' then 0 when 'UPCOMING' then 1 when 'SOLD_OUT' then 2 else 3 end`);
+// 도메인은 nextOpenAt(ISO 글) ?? periodStart(날짜 글) ?? '9999-12-31'을 글로 견준다. 같은 글을 만들어 바이트 차례로 견준다
+const OPEN_KEY = sql.raw(`coalesce(to_char(next_open_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), period_start::text, '9999-12-31') collate "C"`);
+
+const hasFilters = (q: SearchQuery): boolean => q.genre !== undefined || q.placeId !== undefined || q.artistId !== undefined || q.dateFrom !== undefined || q.dateTo !== undefined || q.status !== undefined;
+
+/** 도메인 filterDocs와 같은 필터(검색어 없는 목록). 날짜는 KST 달력 날짜이고 기간이 없는 공연은 날짜 필터에서 빠진다 */
+function filters(q: Pick<SearchQuery, 'includePast'> & Partial<SearchQuery>): SQL {
+  const parts: SQL[] = [sql`true`];
+  if (!q.includePast) parts.push(sql`sale_status <> 'ENDED'`);
+  if (q.genre !== undefined) parts.push(sql`genre = ${q.genre}`);
+  if (q.placeId !== undefined) parts.push(UUID.test(q.placeId) ? sql`place_id = ${q.placeId}::uuid` : sql`false`);
+  if (q.artistId !== undefined) parts.push(sql`artist_ids @> ${JSON.stringify([q.artistId])}::jsonb`);
+  if (q.status !== undefined) parts.push(sql`sale_status = ${q.status}`);
+  if (q.dateFrom !== undefined || q.dateTo !== undefined) parts.push(sql`period_start is not null and period_end is not null`);
+  if (q.dateFrom !== undefined) parts.push(sql`period_end >= ${q.dateFrom}::date`);
+  if (q.dateTo !== undefined) parts.push(sql`period_start <= ${q.dateTo}::date`);
+  return sql.join(parts, sql` and `);
 }
 
 export class DrizzleSearchIndex implements SearchIndex {
-  #browse: Browse | undefined;
-
+  /** o.correct: 메모리 사전의 오타 제안. 사전이 아직 준비되지 않았으면 undefined를 돌려 search_term으로 대신한다 */
   constructor(
     private readonly db: Database,
     private readonly origin: string,
-    private readonly o: { statementTimeoutMs?: number; browseTtlMs?: number } = {},
+    private readonly o: { statementTimeoutMs?: number; correct?: (q: string) => string | null | undefined } = {},
   ) {}
 
   async search(q: SearchQuery): Promise<SearchOutcome> {
     try {
-      return await this.db.transaction(
-        async (tx) => {
-          const all = await this.#all(tx, q.now.getTime());
-          const query = q.q.trim();
-          if (query === '') return assembleSearch(all, q, new Map(), all);
-          const candidates = await this.#candidates(tx, keySets(query, q.noConvert));
-          return assembleSearch(candidates, q, matchGrades(indexDocuments(candidates), query, q.noConvert), all);
-        },
-        { isolationLevel: 'repeatable read', accessMode: 'read only', statementTimeoutMs: this.o.statementTimeoutMs ?? SEARCH_STATEMENT_TIMEOUT_MS },
-      );
+      return await this.db.transaction((tx) => (q.q.trim() === '' ? this.#list(tx, q) : this.#query(tx, q)), {
+        isolationLevel: 'repeatable read',
+        accessMode: 'read only',
+        statementTimeoutMs: this.o.statementTimeoutMs ?? SEARCH_STATEMENT_TIMEOUT_MS,
+      });
     } catch (e) {
       throw unavailableOf(e);
     }
   }
 
-  /** 판이 같고 간격 안이면 들고 있는 전체 문서 */
-  async #all(tx: DbTransaction, now: number): Promise<SearchDocument[]> {
-    const [v] = rowsOf<{ version: string | number }>(await tx.execute(sql`select version from search_version where id = 1`));
-    const version = Number(v?.version ?? 0);
-    const b = this.#browse;
-    if (b && b.version === version && now >= b.at && now - b.at < (this.o.browseTtlMs ?? SEARCH_BROWSE_TTL_MS)) return b.docs;
-    const docs = rowsOf<DocumentRow>(await tx.execute(sql`select * from search_document`)).map((r) => documentOfRow(r, this.origin));
-    this.#browse = { version, at: now, docs };
-    return docs;
+  /** 검색어가 있을 때: 후보 공연만 읽는다 */
+  async #query(tx: DbTransaction, q: SearchQuery): Promise<SearchOutcome> {
+    const query = q.q.trim();
+    const candidates = await this.#candidates(tx, keySets(query, q.noConvert));
+    const ranked = rankMatched(candidates, q, matchGrades(indexDocuments(candidates), query, q.noConvert));
+    return this.#finish(tx, ranked, q);
+  }
+
+  /** 검색어가 없을 때: 필터를 건 정렬 질의의 한 쪽과 1,001줄까지 센 전체 수 */
+  async #list(tx: DbTransaction, q: SearchQuery): Promise<SearchOutcome> {
+    const where = filters(q);
+    const sort = q.sort ?? 'OPEN_SOON';
+    const order = sort === 'POPULAR' ? sql`interest desc, ${SALE_RANK}, ${BY_TITLE}` : sort === 'RELEVANCE' ? sql`${SALE_RANK}, interest desc, ${BY_TITLE}` : sql`${OPEN_KEY}, ${BY_TITLE}`;
+    const [counted] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from (select 1 from search_document where ${where} limit ${SEARCH_TOTAL_CAP + 1}) x`));
+    const n = Number(counted?.n ?? 0);
+    const rows = n === 0 ? [] : rowsOf<DocumentRow>(await tx.execute(sql`select * from search_document where ${where} order by ${order} limit ${SEARCH_PAGE_SIZE} offset ${(q.page - 1) * SEARCH_PAGE_SIZE}`));
+    const total = Math.min(n, SEARCH_TOTAL_CAP);
+    let relaxed: number | null = null;
+    if (n === 0 && hasFilters(q)) {
+      const [r] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from search_document where ${filters({ includePast: q.includePast })}`));
+      relaxed = Number(r?.n ?? 0);
+    }
+    const docs = rows.map((r) => documentOfRow(r, this.origin));
+    const ranked: RankedSearch = {
+      outcome: {
+        items: docs.map(card),
+        page: q.page,
+        limit: SEARCH_PAGE_SIZE,
+        total,
+        totalCapped: n > SEARCH_TOTAL_CAP,
+        totalPages: Math.ceil(total / SEARCH_PAGE_SIZE),
+        query: { normalized: normalize(''), converted: null },
+        relaxedTotal: relaxed,
+      },
+      // 검색어 없는 목록은 관련 공연을 고르지 않는다(0건이면 인기 공연)
+      top: n === 0 ? undefined : docs[0],
+      hasQuery: false,
+      needsDidYouMean: false,
+    };
+    return this.#finish(tx, ranked, q);
+  }
+
+  async #finish(tx: DbTransaction, ranked: RankedSearch, q: SearchQuery): Promise<SearchOutcome> {
+    const related = await relatedOf(this.#related(tx), ranked);
+    const didYouMean = ranked.needsDidYouMean ? await this.#didYouMean(tx, q.q.trim()) : null;
+    const filterNames = q.placeId !== undefined || q.artistId !== undefined ? await this.#filterNames(tx, q) : { placeName: null, artistName: null };
+    return finishSearch(ranked, q, { didYouMean, related, filterNames });
+  }
+
+  #related(tx: DbTransaction): RelatedSource {
+    const read = async (where: SQL, order: SQL) =>
+      rowsOf<DocumentRow>(await tx.execute(sql`select * from search_document where ${where} order by ${order} limit ${RELATED_MAX}`)).map((r) => card(documentOfRow(r, this.origin)));
+    return {
+      byArtist: (artistId, exclude) => read(sql`artist_ids @> ${JSON.stringify([artistId])}::jsonb and production_id <> ${exclude}::uuid`, BY_TITLE),
+      byPlace: (placeId, exclude) => read(sql`place_id = ${placeId}::uuid and sale_status = 'UPCOMING' and production_id <> ${exclude}::uuid`, BY_TITLE),
+      popular: (exclude) => read(exclude ? sql`sale_status <> 'ENDED' and production_id <> ${exclude}::uuid` : sql`sale_status <> 'ENDED'`, sql`${SALE_RANK}, interest desc, ${BY_TITLE}`),
+    };
+  }
+
+  async #didYouMean(tx: DbTransaction, query: string): Promise<string | null> {
+    const fromDictionary = this.o.correct?.(query);
+    if (fromDictionary !== undefined) return fromDictionary;
+    // 사전을 넘겨받지 않았거나 아직 준비되지 않았으면 공연명 줄(search_term)로 같은 함수를 돌린다
+    const titles = rowsOf<{ title: string; production_id: string }>(
+      await tx.execute(sql`select display_name as title, target_id::text as production_id from search_term where kind = 'PRODUCTION' and alias_of is null`),
+    );
+    return didYouMeanOf(
+      titles.map((t) => ({ title: t.title, productionId: t.production_id })),
+      query,
+    );
+  }
+
+  async #filterNames(tx: DbTransaction, q: SearchQuery): Promise<{ placeName: string | null; artistName: string | null }> {
+    const name = async (kind: 'PLACE' | 'ARTIST', id: string | undefined) => {
+      if (id === undefined || !UUID.test(id)) return null;
+      const [r] = rowsOf<{ display_name: string }>(await tx.execute(sql`select display_name from search_term where kind = ${kind} and id = ${id}::uuid`));
+      return r?.display_name ?? null;
+    };
+    return { placeName: await name('PLACE', q.placeId), artistName: await name('ARTIST', q.artistId) };
   }
 
   /** 입력이 낱자·초성에 든 이름 줄의 공연(공연명·다른 이름이면 그 공연, 아티스트·공연장이면 그 이름을 가진 공연) */

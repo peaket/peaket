@@ -26,6 +26,7 @@ export { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.
 export { SearchReadModelTimers, withSearchSync } from './application/search-maintenance.js';
 export {
   maskSearchQuery,
+  SEARCH_DICTIONARY,
   SEARCH_DICTIONARY_SOURCE,
   SEARCH_READ_MODEL_SYNC,
   SearchUnavailable,

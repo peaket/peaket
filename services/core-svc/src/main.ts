@@ -144,7 +144,8 @@ const searchTimers = new SearchReadModelTimers({
   logger: service.logger,
 }).register(service.metrics.registry);
 await service.listen();
-searchTimers.start();
+// 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기(그때까지 /ready 503, 결정 14) → 주기 일
+await searchTimers.start();
 
 // 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다.
 const webhookWorker =

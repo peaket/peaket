@@ -22,8 +22,9 @@ export class SearchController {
   @ContractRouteSchema({ responses: { 200: GetSearchSuggestionsResponse } })
   @Roles(['public'])
   async suggestions(@ContractQuery(GetSearchSuggestionsQueryParams) q: z.output<typeof GetSearchSuggestionsQueryParams>, @Res({ passthrough: true }) reply: FastifyReply): Promise<SearchSuggestions> {
-    const out = await this.search.suggestions(q.q);
-    void reply.header('cache-control', SUGGESTION_CACHE);
+    const { ready, ...out } = await this.search.suggestions(q.q);
+    // 사전을 처음 읽기 전의 빈 후보는 캐시하지 않는다(ADR-0271 결정 14)
+    void reply.header('cache-control', ready ? SUGGESTION_CACHE : 'no-store');
     return out;
   }
 
