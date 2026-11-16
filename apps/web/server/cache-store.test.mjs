@@ -9,7 +9,18 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, mock, test } from 'node:test';
-import { assertCacheEnv, cacheConfig, createCacheStore, createMemoryStore, parseCacheUrls, selectRuntime, TRANSIENT_TAG } from './cache-store.mjs';
+import {
+  assertCacheEnv,
+  CACHE_KEY_BUDGET,
+  cacheConfig,
+  createCacheStore,
+  createMemoryStore,
+  DEFAULT_MAX_TTL_SECONDS,
+  DEFAULT_WRITE_RATE,
+  parseCacheUrls,
+  selectRuntime,
+  TRANSIENT_TAG,
+} from './cache-store.mjs';
 import { CACHE_BUILD_ENV, readBuildTag } from './cache-env.mjs';
 import { createCacheHandler } from './cache-handler.mjs';
 import { createUseCacheHandler } from './use-cache-handler.mjs';
@@ -19,6 +30,8 @@ const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DAYS_30_S = 30 * 24 * 60 * 60;
 /** 정본: Redis가 이 안에 답하지 않으면 읽기는 없음·쓰기는 버림 100ms [가정] */
 const CANON_TIMEOUT_MS = 100;
+/** 정본(W7L2-S10): 값 TTL 상한 기본 1시간 [가정] */
+const HOUR_S = 3_600;
 
 /**
  * 가짜 Redis. node-redis(6.3.0)의 get·set·mGet·expire·pExpire와 sendCommand(GET·SET EX|PX·MGET·EXPIRE·PEXPIRE)를 받는다.
@@ -171,14 +184,17 @@ test('HOT-390 여러 태그는 한 번에 읽는다(같은 해시 태그 슬롯)
   for (const k of written) assert.match(k, /^web:\{tag\}:/, k);
 });
 
-test('HOT-390 공유 캐시 TTL 상한을 주지 않으면 정본의 30일이다', async () => {
+// BAT-170 W7L2-S10(계획 §16 S10-6, docs/frontend.md §5.18 TTL 문장): 값 TTL 상한 기본은 1시간 [가정]으로 줄었고 태그 시각은 30일 그대로다
+test('HOT-390 공유 캐시 TTL 상한을 주지 않으면 값은 정본의 1시간, 태그는 30일이다', async () => {
   const { client, data } = fakeRedis();
   const store = createCacheStore({ client, now: () => 1_000 });
   await store.setEntry('data', 'long', 'v', 40 * 24 * 60 * 60);
-  await store.setEntry('data', 'short', 'v', 29 * 24 * 60 * 60);
+  await store.setEntry('data', 'edge', 'v', HOUR_S);
+  await store.setEntry('data', 'short', 'v', HOUR_S - 1);
   await store.markTags(['events'], 1_000);
-  assert.equal(data.get('web:data:long').ttlMs, DAYS_30_S * 1000);
-  assert.equal(data.get('web:data:short').ttlMs, 29 * 24 * 60 * 60 * 1000);
+  assert.equal(data.get('web:data:long').ttlMs, HOUR_S * 1000);
+  assert.equal(data.get('web:data:edge').ttlMs, HOUR_S * 1000);
+  assert.equal(data.get('web:data:short').ttlMs, (HOUR_S - 1) * 1000);
   assert.equal(data.get('web:{tag}:events').ttlMs, DAYS_30_S * 1000);
 });
 
@@ -782,9 +798,10 @@ test('HOT-390 W7L2-S1 값 TTL은 만료·간격의 12배·상한 가운데 가�
   assert.equal(await ttl({ maxTtlSeconds: 7_200 }, 0xfffffffe, 600), 7_200);
   assert.equal(await ttl({ maxTtlSeconds: 7_199 }, 0xfffffffe, 600), 7_199);
   assert.equal(await ttl({ maxTtlSeconds: 7_201 }, 0xfffffffe, 600), 7_200);
-  // 기본 배수 12와 기본 상한 30일
+  // 기본 배수 12와 기본 상한(W7L2-S10부터 1시간 [가정])
   assert.equal(await ttl({}, 0xfffffffe, 300), 3_600);
-  assert.equal(await ttl({}, 0xfffffffe, 300_000), DAYS_30_S, '간격 × 12가 30일보다 길면 30일');
+  assert.equal(await ttl({}, 0xfffffffe, 300_000), HOUR_S, '간격 × 12가 기본 상한(1시간)보다 길면 1시간');
+  assert.equal(await ttl({}, 0xfffffffe, undefined), HOUR_S, '간격 없음·만료 무한: 기본 상한 1시간');
 });
 
 test('HOT-390 W7L2-S1 web-transient 태그 항목은 공유 캐시에 쓰지 않고 파드 메모리에 60초만 둔다', async () => {
@@ -853,7 +870,7 @@ test('HOT-390 W7L2-S1 파드마다 공유 캐시 쓰기는 초당 몫을 넘으�
   // 버린 쓰기에도 읽기는 그대로다
   assert.equal(text(await store.getEntry('data', 'w1')), 'v1');
   assert.equal((await store.getEntry('data', 'w11')) ?? null, null);
-  // 기본값: 같은 시각에 100개는 가고 101번째는 버린다
+  // 기본값(W7L2-S10부터 새 키 초당 2·몫 100 [가정]): 같은 시각에 새 키 100개는 가고 101번째는 버린다
   const d = fakeRedis();
   const def = createCacheStore({ client: d.client, timeoutMs: 250, now: () => 5_000, maxTtlSeconds: 3_600 });
   for (let i = 1; i <= 101; i++) await def.setEntry('data', `d${i}`, 'v', 60);
@@ -996,4 +1013,72 @@ test('HOT-390 W7L2-K1 시작 주소는 쉼표로 나눈 하나 이상이고 빈�
   assert.deepEqual(parseCacheUrls({ PEAKET_WEB_CACHE_REDIS_URL: 'rediss://a:6379' }), ['rediss://a:6379']);
   assert.deepEqual(parseCacheUrls({ PEAKET_WEB_CACHE_REDIS_URL: ' rediss://a:6379 , rediss://b:6379,,rediss://c:6379 ' }), ['rediss://a:6379', 'rediss://b:6379', 'rediss://c:6379']);
   for (const v of [undefined, '', ' , ']) assert.deepEqual(parseCacheUrls(v === undefined ? {} : { PEAKET_WEB_CACHE_REDIS_URL: v }), [], String(v));
+});
+
+// BAT-170 W7L2-S10 재현(계획 §16 S10-4·S10-5, 보안 다시 보기 0dc4054b, docs/frontend.md §5.18 '키 수 막기' ③·TTL 문장).
+// 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 몫은 새 키만 센다. 아는 키(그 파드가 TTL 안에 읽어 맞았거나 직접 쓴 키)를 다시 쓰는 것은 몫을 쓰지 않는다.
+// 주입: writeRate { perSecond, burst, knownKeys }(knownKeys는 최근 키 목록 크기). 주입 값은 정본 값과 다르게 고른다.
+test('HOT-390 W7L2-S10 새 키 몫: 아는 키 다시 쓰기는 몫을 쓰지 않고, 새 키는 초당 몫·모아 둘 몫을 넘으면 버린다', async () => {
+  let clock = 1_000;
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => clock, maxTtlSeconds: 3_600, writeRate: { perSecond: 1, burst: 3, knownKeys: 10 } });
+  for (const k of ['k1', 'k2', 'k3']) await store.setEntry('data', k, `${k}-v1`, 60);
+  await store.setEntry('data', 'k4', 'k4-v1', 60);
+  assert.equal(data.has('web:data:k4'), false, '몫(3)을 넘은 새 키가 갔다');
+  assert.equal(store.stats().droppedWrites, 1);
+  // 같은 시각에 이미 쓴 키를 다시 쓰면 간다
+  await store.setEntry('data', 'k1', 'k1-v2', 60);
+  assert.equal(text(data.get('web:data:k1').value), 'k1-v2', '직접 쓴 키를 다시 쓰는데 몫을 썼다');
+  // 다른 파드가 쓴 키를 읽어 맞았으면 그 키를 다시 쓰는 것도 몫을 쓰지 않는다
+  data.set('web:data:other', { value: 'other-v1', ttlMs: 60_000 });
+  assert.equal(text(await store.getEntry('data', 'other')), 'other-v1');
+  await store.setEntry('data', 'other', 'other-v2', 60);
+  assert.equal(text(data.get('web:data:other').value), 'other-v2', '읽어 맞은 키를 다시 쓰는데 몫을 썼다');
+  assert.equal(store.stats().droppedWrites, 1);
+  // 초당 1: 999ms 뒤 새 키는 버리고, 1,000ms 뒤 새 키는 간다
+  clock = 1_999;
+  await store.setEntry('data', 'k5', 'v', 60);
+  assert.equal(data.has('web:data:k5'), false, '999ms 뒤에 새 키가 갔다');
+  clock = 2_000;
+  await store.setEntry('data', 'k6', 'v', 60);
+  assert.equal(data.has('web:data:k6'), true, '1,000ms 뒤에 새 키가 가지 않았다');
+
+  // 최근 키 목록(주입 3): 넷째 키를 넣으면 처음 것이 빠지고, 그 키를 다시 쓰면 새 키로 센다
+  const d = fakeRedis();
+  const lim = createCacheStore({ client: d.client, timeoutMs: 250, now: () => 5_000, maxTtlSeconds: 3_600, writeRate: { perSecond: 1, burst: 4, knownKeys: 3 } });
+  for (const k of ['a', 'b', 'c', 'd']) await lim.setEntry('data', k, `${k}-1`, 60);
+  assert.equal(d.data.size, 4);
+  await lim.setEntry('data', 'd', 'd-2', 60);
+  assert.equal(text(d.data.get('web:data:d').value), 'd-2', '목록 안의 키(d)를 다시 쓰지 못했다');
+  await lim.setEntry('data', 'a', 'a-2', 60);
+  assert.equal(text(d.data.get('web:data:a').value), 'a-1', '목록에서 빠진 키(a)를 아는 키로 셌다');
+  assert.equal(lim.stats().droppedWrites, 1);
+});
+
+test('HOT-390 W7L2-S10 상한 식: 기본 몫은 P × (r × T + b) × S ≤ W를 지킨다', () => {
+  // 정본 값(docs/frontend.md §5.18 '키 수 막기' ③): P 10, T 1시간, S 60kB, W 약 6GB, r 초당 2, b 100, 최근 키 목록 2만 개 [가정]
+  const P = 10;
+  const T = 3_600;
+  const S = 60_000;
+  const W = 6_000_000_000;
+  assert.deepEqual(CACHE_KEY_BUDGET, { pods: P, entryBytes: S, budgetBytes: W }, '식의 상수가 정본 값과 다르다');
+  assert.equal(DEFAULT_MAX_TTL_SECONDS, T);
+  assert.equal(DEFAULT_WRITE_RATE.perSecond, 2);
+  assert.equal(DEFAULT_WRITE_RATE.burst, 100);
+  assert.equal(DEFAULT_WRITE_RATE.knownKeys, 20_000);
+  const left = (r) => P * (r * DEFAULT_MAX_TTL_SECONDS + DEFAULT_WRITE_RATE.burst) * S;
+  assert.ok(left(DEFAULT_WRITE_RATE.perSecond) <= W, `기본 몫의 왼쪽 ${left(DEFAULT_WRITE_RATE.perSecond)} > W ${W}`);
+  // 경계: r을 1 올리면 식이 깨진다
+  assert.ok(left(DEFAULT_WRITE_RATE.perSecond + 1) > W, 'r을 1 올려도 식이 깨지지 않는다(몫이 너무 낮게 잡혔거나 식이 틀렸다)');
+});
+
+test('HOT-390 W7L2-S10 값 TTL 상한 기본은 1시간, 태그는 30일이다', async () => {
+  const { client, data } = fakeRedis();
+  const store = createCacheStore({ client, timeoutMs: 250, now: () => 1_000 });
+  await store.setEntry('data', 'interval', 'v', 0xfffffffe, 300);
+  await store.setEntry('data', 'none', 'v', 0xfffffffe);
+  await store.markTags(['events'], 1_000);
+  assert.equal(data.get('web:data:interval').ttlMs, 3_600_000, '간격 300초 항목');
+  assert.equal(data.get('web:data:none').ttlMs, 3_600_000, '간격 없음·만료 무한 항목');
+  assert.equal(data.get('web:{tag}:events').ttlMs, 2_592_000_000, '태그 TTL');
 });

@@ -12,6 +12,8 @@ import { after, before, test } from 'node:test';
 const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 /** 정본: 모든 키 TTL 상한 30일 [가정] */
 const DAYS_30_S = 30 * 24 * 60 * 60;
+/** 정본(W7L2-S10, docs/frontend.md §5.18 TTL 문장): 값 TTL 상한 기본 1시간 [가정], 태그 시각은 30일 */
+const HOUR_S = 3_600;
 /** 정본: Redis가 100ms [가정] 안에 답하지 않으면 읽기는 없음. 실제 시계라 여유를 둔다 */
 const CANON_TIMEOUT_MS = 100;
 const SLACK_MS = 900;
@@ -139,7 +141,7 @@ test('HOT-390 쓴 키를 모두 TTL과 함께 확인한다(TTL -1인 키 0)', as
   for (const k of keys) {
     assert.match(k, /^web:(isr|data|\{tag\}):/, `정본 키 꼴 밖: ${k}`);
     const ttl = Number(cli('TTL', k));
-    assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
+    assert.ok(ttl > 0 && ttl <= (k.startsWith('web:{tag}:') ? DAYS_30_S : HOUR_S), `${k}의 TTL ${ttl}`);
   }
   // 값 TTL은 만료(expire)와 30일 가운데 짧은 쪽
   assert.ok(Number(cli('TTL', `web:isr:${BUILD}:/search`)) <= 120);

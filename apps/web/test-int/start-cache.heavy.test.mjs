@@ -17,6 +17,8 @@ const DIST = '.next';
 const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 /** 정본: 모든 키 TTL 상한 30일 [가정] */
 const DAYS_30_S = 30 * 24 * 60 * 60;
+/** 정본(W7L2-S10, docs/frontend.md §5.18 TTL 문장): 값 TTL 상한 기본 1시간 [가정], 태그 시각은 30일 */
+const HOUR_S = 3_600;
 const NAME = `bat170-start-valkey-${process.pid}`;
 const PORT = 39500 + (process.pid % 200) * 3;
 const MOCK_PORT = PORT + 2;
@@ -112,7 +114,7 @@ test('HOT-390 R170-1 주소 없이 만든 운영 빌드를 PEAKET_ENV=prod와 Va
   for (const k of keys) {
     assert.match(k, /^web:(isr|data|\{tag\}):/, `정본 키 꼴 밖: ${k}`);
     const ttl = Number(cli('TTL', k));
-    assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
+    assert.ok(ttl > 0 && ttl <= (k.startsWith('web:{tag}:') ? DAYS_30_S : HOUR_S), `${k}의 TTL ${ttl}`);
   }
   // 빌드 칸 없는 미리 그린 화면 키는 없다
   for (const k of keys.filter((x) => x.startsWith('web:isr:'))) assert.ok(k.startsWith(`web:isr:${build}:`), `빌드 칸이 다른 키: ${k}`);

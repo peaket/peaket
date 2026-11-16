@@ -427,3 +427,9 @@ export function parseCacheUrls(env = process.env) {
     .map((u) => u.trim())
     .filter((u) => u !== '');
 }
+
+/**
+ * 새 키 몫 식 P × (r × T + b) × S ≤ W의 상수(W7L2-S10, docs/frontend.md §5.18 '키 수 막기' ③, 계획 §16): { pods: P, entryBytes: S, budgetBytes: W }.
+ * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 값은 구현 담당이 쓴다
+ */
+export const CACHE_KEY_BUDGET = '아직 없음';

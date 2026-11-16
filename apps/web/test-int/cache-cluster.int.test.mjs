@@ -14,6 +14,8 @@ import { createUseCacheHandler } from '../server/use-cache-handler.mjs';
 const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 /** 정본: 모든 키 TTL 상한 30일 [가정] */
 const DAYS_30_S = 30 * 24 * 60 * 60;
+/** 정본(W7L2-S10, docs/frontend.md §5.18 TTL 문장): 값 TTL 상한 기본 1시간 [가정], 태그 시각은 30일 */
+const HOUR_S = 3_600;
 /** 정본: 명령 시간 한도 100ms, 실제 시계 여유 50ms(계획 §14 K-2) */
 const CMD_LIMIT_MS = 100 + 50;
 const NET = `lane2-bat170t-net-${process.pid}`;
@@ -74,7 +76,8 @@ function ownerOf(key, table = slotTable()) {
 // 요청을 버리므로, 처리기 모듈이 불러올 때 하듯 ready()로 처음 연결을 기다린 뒤 쓴다. 슬롯 주인은 이 프로세스에서 센 슬롯과 CLUSTER NODES 한 번으로 저장소를 만들기 전에 구해
 // 이벤트 루프를 막아 연결 시간 한도가 넘어가지 않게 한다.
 const newStore = async () => {
-  const s = createCacheStore({ urls, nodeAddressMap, maxTtlSeconds: DAYS_30_S });
+  // 값 TTL 상한은 주입하지 않고 기본값(정본 1시간)을 쓴다(W7L2-S10)
+  const s = createCacheStore({ urls, nodeAddressMap });
   stores.push(s);
   assert.equal(await s.ready(), true, '클러스터에 처음 연결하지 못했다');
   return s;
@@ -167,7 +170,7 @@ test('HOT-390 W7L2-K1 태그 무효화가 다른 처리기에 닿고 쓴 키는 
       seen += 1;
       assert.match(k, /^web:(isr|data|\{tag\}):/, k);
       const ttl = Number(cli(m, 'TTL', k));
-      assert.ok(ttl > 0 && ttl <= DAYS_30_S, `${k}의 TTL ${ttl}`);
+      assert.ok(ttl > 0 && ttl <= (k.startsWith('web:{tag}:') ? DAYS_30_S : HOUR_S), `${k}의 TTL ${ttl}`);
     }
   }
   assert.ok(seen > 100, `훑은 키 ${seen}개`);
