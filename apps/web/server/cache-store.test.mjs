@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, mock, test } from 'node:test';
-import { assertCacheEnv, cacheConfig, createCacheStore, createMemoryStore } from './cache-store.mjs';
+import { assertCacheEnv, cacheConfig, createCacheStore, createMemoryStore, selectRuntime } from './cache-store.mjs';
 import { CACHE_BUILD_ENV, readBuildTag } from './cache-env.mjs';
 import { createCacheHandler } from './cache-handler.mjs';
 import { createUseCacheHandler } from './use-cache-handler.mjs';
@@ -603,5 +603,67 @@ test('HOT-390 R170-8 주소 없는 운영(PEAKET_ENV가 local·ci·demo 밖)에�
       assert.equal(r.result.threw, null, `${file} ${PEAKET_ENV}: ${r.result.error}`);
       assert.equal(r.result.value, want, `${file} ${PEAKET_ENV}: 메모리 저장소로 쓰고 읽지 않았다`);
     }
+  }
+});
+
+// BAT-170 R170-8 고침의 예외 경계(계획 §12 'R170-8 고침의 예외 판정' R8-1~R8-3, docs/frontend.md §5.18 '공유 캐시 처리기 세부' ②′):
+// 주소가 없을 때 닫힌 규칙을 보지 않는 때는 Next.js 운영 빌드 단계(NEXT_PHASE가 정확히 phase-production-build)와 개발 서버(__NEXT_DEV_SERVER)뿐이다.
+// 시험 담당(l2w7-BAT170-test)이 구현 dbef5e1f 뒤에 썼다. 예외를 넓히거나 빼는 틀린 구현을 잡는다.
+/** 저장소가 메모리로 쓰고 읽는지(true), 거절하는지(false) */
+async function storeServes(store) {
+  try {
+    await store.setEntry('data', 'r8-probe', 'r8-value', 60);
+    return text(await store.getEntry('data', 'r8-probe')) === 'r8-value';
+  } catch {
+    return false;
+  }
+}
+
+test('HOT-390 R170-8 빌드 단계와 개발 서버만 닫힌 규칙에서 빠진다', async () => {
+  // 주소 없음·PEAKET_ENV 없음
+  assert.equal(await storeServes(selectRuntime({ NEXT_PHASE: 'phase-production-build' }).store), true, '빌드 단계가 메모리 저장소가 아니다');
+  assert.equal(await storeServes(selectRuntime({ __NEXT_DEV_SERVER: '1' }).store), true, '개발 서버가 메모리 저장소가 아니다');
+  // 목록 밖 값마다 거절하는 저장소다
+  for (const NEXT_PHASE of ['phase-production-server', 'phase-export', 'phase-development-server', 'PHASE-PRODUCTION-BUILD', 'phase-production-build ', ' phase-production-build', 'phase-production-build-x']) {
+    const { store } = selectRuntime({ NEXT_PHASE });
+    await assert.rejects(store.getEntry('data', 'x'), Error, `NEXT_PHASE ${JSON.stringify(NEXT_PHASE)}`);
+    assert.equal(await storeServes(store), false, `NEXT_PHASE ${JSON.stringify(NEXT_PHASE)}`);
+  }
+  // 운영으로 보는 PEAKET_ENV는 예외 표시가 없으면 거절, 대조군 local·ci·demo는 메모리
+  for (const env of [{}, { PEAKET_ENV: 'prod' }, { PEAKET_ENV: 'staging' }]) assert.equal(await storeServes(selectRuntime(env).store), false, JSON.stringify(env));
+  for (const PEAKET_ENV of ['local', 'ci', 'demo']) assert.equal(await storeServes(selectRuntime({ PEAKET_ENV }).store), true, PEAKET_ENV);
+});
+
+test('HOT-390 R170-8 주소가 있으면 빌드 단계·개발 서버 표시와 관계없이 Redis와 빌드 칸 규칙이다', () => {
+  const url = 'redis://127.0.0.1:1';
+  for (const mark of [{ NEXT_PHASE: 'phase-production-build' }, { __NEXT_DEV_SERVER: '1' }, { PEAKET_ENV: 'local' }, {}]) {
+    // 빌드 칸이 없거나 꼴 밖이면 던지고 메모리로 떨어지지 않는다
+    for (const build of [undefined, '', 'a:b']) {
+      const env = { PEAKET_WEB_CACHE_REDIS_URL: url, ...mark, ...(build === undefined ? {} : { PEAKET_WEB_CACHE_BUILD: build }) };
+      assert.throws(() => selectRuntime(env), Error, JSON.stringify(env));
+    }
+  }
+  // 빌드 칸이 맞으면 그 칸을 쓴다(메모리의 'dev'가 아니다)
+  const r = selectRuntime({ PEAKET_WEB_CACHE_REDIS_URL: url, PEAKET_WEB_CACHE_BUILD: 'bat170r8', NEXT_PHASE: 'phase-production-build' });
+  assert.equal(r.build, 'bat170r8');
+});
+
+test('HOT-390 R170-8 거절하는 저장소는 네 메서드 모두 거절하고 까닭을 싣는다', async () => {
+  const { store } = selectRuntime({});
+  for (const [name, call] of [
+    ['getEntry', () => store.getEntry('data', 'k')],
+    ['setEntry', () => store.setEntry('isr', 'k', 'v', 60)],
+    ['tagTimes', () => store.tagTimes(['t'])],
+    ['markTags', () => store.markTags(['t'], 1_000)],
+  ]) {
+    await assert.rejects(call, /PEAKET_WEB_CACHE_REDIS_URL/, name);
+  }
+  // 불러오기는 던지지 않는다(거절은 첫 읽기·쓰기 때). 두 처리기 모듈 모두
+  for (const file of ['use-cache-handler.mjs', 'cache-handler.mjs']) {
+    const r = await probeOne(file, {});
+    assert.ok(r.result, `${file}: 결과 없음\n${r.out}`);
+    assert.notEqual(r.result.threw, 'import', `${file}: 불러올 때 던졌다 ${r.result.error}`);
+    assert.equal(r.result.threw, 'call', `${file}: 첫 읽기·쓰기가 거절하지 않았다`);
+    assert.match(r.result.error, /PEAKET_WEB_CACHE_REDIS_URL/, file);
   }
 });
