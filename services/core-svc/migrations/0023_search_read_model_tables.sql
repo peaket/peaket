@@ -6,7 +6,9 @@
 -- 3. search_document는 표다. 같은 트랜잭션의 동기화(앱의 DrizzleSearchReadModel.sync)가 원천 함수로 다시 계산해 고치고,
 --    바뀐 줄의 판(updated_version)을 적는다. search_term·search_removal·search_version은 0009 그대로다.
 -- 4. search_version에 따라잡기를 마친 시각 칸(reconciled_at)과 따라잡기 임대 칸 넷을 더한다.
--- 5. 판매 승인(core_ops)·포스터 게시(core_partner) 트랜잭션이 동기화를 부르므로 그 역할에 검색 표 쓰기 권한을 준다.
+-- 5. 판매 승인·1분 정리(core_ops)가 동기화를 부르므로 그 역할에 검색 표 쓰기 권한을 준다. 파트너 역할(core_partner)에는 검색 표·원천 함수 권한을 주지 않는다.
+--    파트너의 포스터 게시·지우기는 정의자 권한 함수 search_sync_poster(공연)를 같은 트랜잭션에서 부른다. 함수는 테넌트를 직접 확인하고 포스터 칸 둘만 고친다(ADR-0271 결정 17).
+-- 6. 검색 전용 연결의 그룹 역할 core_search는 검색 표 넷을 읽기만 한다(ADR-0271 결정 18).
 --    원천 함수는 소유자 권한으로 돈다(파트너 연결의 행 보안·칸 권한과 상관없이 공개 공연만 계산한다).
 DO $$
 DECLARE
@@ -108,7 +110,7 @@ $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION search_document_source_at(timestamptz, uuid[]) FROM PUBLIC;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION search_document_source_at(timestamptz, uuid[]) TO core_app, core_partner, core_ops;
+GRANT EXECUTE ON FUNCTION search_document_source_at(timestamptz, uuid[]) TO core_app, core_ops;
 --> statement-breakpoint
 -- 동기화의 계산 원천(질의는 직접 읽지 않는다). 어긋남 점검이 표와 견준다
 CREATE VIEW "search_document_source" AS SELECT * FROM search_document_source_at(now());
@@ -152,10 +154,62 @@ ALTER TABLE "search_version" ADD COLUMN "reconciled_at" timestamp with time zone
 -- 따라잡기 임대(ADR-0271 결정 12 '잠금과 임대', docs/data.md search_version): 주인·만료(DB now() 기준)·시작 시각·커서(마지막으로 마친 끊음의 마지막 공연 ID)
 ALTER TABLE "search_version" ADD COLUMN "reconcile_owner" text, ADD COLUMN "reconcile_lease_until" timestamp with time zone, ADD COLUMN "reconcile_started_at" timestamp with time zone, ADD COLUMN "reconcile_cursor" uuid;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON "search_document", "search_term" TO core_ops, core_partner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "search_document", "search_term" TO core_ops;
 --> statement-breakpoint
-GRANT SELECT, INSERT, DELETE ON "search_removal" TO core_ops, core_partner;
+GRANT SELECT, INSERT, DELETE ON "search_removal" TO core_ops;
 --> statement-breakpoint
-GRANT SELECT, UPDATE ON "search_version" TO core_ops, core_partner;
+GRANT SELECT, UPDATE ON "search_version" TO core_ops;
+--> statement-breakpoint
+-- 파트너 포스터 동기화(ADR-0271 결정 17): 소유자 권한으로 돈다. 트랜잭션에 걸린 테넌트(app.tenant_id)가 그 공연의 판매자가 아니면 권한 오류(42501)다.
+-- 검색 줄이 있고 포스터 칸(그림 ID·대체 글)이 바뀌었을 때만 판을 1 올리고 그 줄의 판을 적는다. 검색 줄이 없으면(공개 전) 아무것도 하지 않는다. 올린 판을 돌려준다(아니면 NULL)
+CREATE FUNCTION search_sync_poster(p_production_id uuid)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_owner uuid;
+  v_tenant uuid;
+  v_image uuid;
+  v_alt text;
+  v_version bigint;
+BEGIN
+  SELECT p."promoter_id" INTO v_owner FROM "production" p WHERE p."id" = p_production_id;
+  v_tenant := nullif(current_setting('app.tenant_id', true), '')::uuid;
+  IF v_owner IS NULL OR v_tenant IS NULL OR v_owner <> v_tenant THEN
+    RAISE EXCEPTION '그 공연의 검색 포스터를 고칠 권한이 없다' USING ERRCODE = '42501';
+  END IF;
+  SELECT pi."id", pi."alt"::text INTO v_image, v_alt FROM "production_image" pi
+  WHERE pi."production_id" = p_production_id AND pi."kind" = 'POSTER'
+  ORDER BY pi."display_order", pi."id" LIMIT 1;
+  IF NOT EXISTS (SELECT 1 FROM "search_document" d WHERE d."production_id" = p_production_id
+      AND (d."poster_image_id", d."poster_alt") IS DISTINCT FROM (v_image, v_alt)) THEN
+    RETURN NULL;
+  END IF;
+  UPDATE "search_version" SET "version" = "version" + 1, "updated_at" = now() WHERE "id" = 1 RETURNING "version" INTO v_version;
+  UPDATE "search_document" SET "poster_image_id" = v_image, "poster_alt" = v_alt, "updated_version" = v_version WHERE "production_id" = p_production_id;
+  RETURN v_version;
+END
+$$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION search_sync_poster(uuid) FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION search_sync_poster(uuid) TO core_partner;
+--> statement-breakpoint
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'core_search') THEN
+    CREATE ROLE core_search NOLOGIN NOSUPERUSER NOBYPASSRLS;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'core_search' AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'core_search 역할은 SUPERUSER·BYPASSRLS가 없어야 한다';
+  END IF;
+END
+$$;
+--> statement-breakpoint
+GRANT USAGE ON SCHEMA public TO core_search;
+--> statement-breakpoint
+GRANT SELECT ON "search_document", "search_term", "search_removal", "search_version" TO core_search;
 --> statement-breakpoint
 GRANT SELECT ON "search_document", "search_document_source" TO core_app;

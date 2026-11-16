@@ -52,6 +52,9 @@ if (!partnerUrl) throw new Error('PEAKET_PARTNER_DATABASE_URL이 없다(비밀 �
 // 관제 판매 승인 경로의 DB 사용자(core_ops, 판매 승인 LCH-080). 없으면 승인·설정 사본을 쓸 수 없어 시작하지 않는다
 const opsUrl = process.env.PEAKET_OPS_DATABASE_URL;
 if (!opsUrl) throw new Error('PEAKET_OPS_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
+// 검색 전용 연결의 DB 사용자(core_search, 검색 표 넷 읽기만, ADR-0271 결정 18). 운영은 읽기 전용 복제본 주소다. 앱 주소로 대신하지 않는다
+const searchUrl = process.env.PEAKET_SEARCH_DATABASE_URL;
+if (!searchUrl) throw new Error('PEAKET_SEARCH_DATABASE_URL이 없다(검색 전용 core_search 사용자, 비밀 관리에서 넣는다)');
 
 // 파트너 경로의 역할·테넌트는 요청마다 identity에 묻는다(ADR-0172). 주소가 없으면 시작하지 않는다(대역으로 통과시키지 않는다, ADR-0198 결정 6)
 const identityGrpc = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -100,17 +103,17 @@ const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SE
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
 // Kafka 소비자(탈퇴 익명화·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
 const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-consumer`, max: 2 });
-// 검색 전용 연결 묶음(ADR-0271 결정 5, docs/features/search.md §7.2: 연결 10개·대기 100ms [가정]). 운영은 읽기 전용 복제본 주소(PEAKET_SEARCH_DATABASE_URL),
-// 없으면(로컬) 앱 주소를 쓴다. 다 차면 검색만 503이고 다른 경로의 연결을 빼앗지 않는다
+// 검색 전용 연결 묶음(ADR-0271 결정 5·18, docs/features/search.md §7.2: 연결 10개·대기 100ms [가정]). 운영은 읽기 전용 복제본 주소(PEAKET_SEARCH_DATABASE_URL).
+// 다 차면 검색만 503이고 다른 경로의 연결을 빼앗지 않는다
 const SEARCH_POOL_MAX = 10;
 const SEARCH_POOL_WAIT_MS = 100;
-const searchDatabase = createDatabase({ url: process.env.PEAKET_SEARCH_DATABASE_URL ?? url, applicationName: `${SERVICE}-search`, max: SEARCH_POOL_MAX, connectionTimeoutMillis: SEARCH_POOL_WAIT_MS });
+const searchDatabase = createDatabase({ url: searchUrl, applicationName: `${SERVICE}-search`, max: SEARCH_POOL_MAX, connectionTimeoutMillis: SEARCH_POOL_WAIT_MS });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
 await assertDatabaseRole(opsDatabase, 'core_ops');
 await assertDatabaseRole(consumerDatabase, 'core_app');
-await assertDatabaseRole(searchDatabase, 'core_app');
+await assertDatabaseRole(searchDatabase, 'core_search');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({

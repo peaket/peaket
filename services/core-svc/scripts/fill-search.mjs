@@ -3,7 +3,8 @@
 //   그래서 먼저 빌드해 둔다: pnpm --filter @peaket/core-svc build(dist를 읽는다).
 // - 이름은 loadtest/scenarios/v1-search.js의 몰림 키(루멘·오로라·은하 …)와 같은 말 조각으로 만들어, 몰림·무작위 입력이 실제 후보를 낸다.
 // - 오픈 예정·판매 중·지난 공연을 6:3:1 [가정]로 섞는다. 같은 값을 다시 돌리면 같은 ID라 이미 있는 줄은 건너뛴다.
-// 쓰는 법: PEAKET_DATABASE_URL=postgres://… node scripts/fill-search.mjs [--count 10000] [--now 2026-11-16T00:00:00Z]
+// - PEAKET_ENV가 local·ci이고 DB 호스트가 localhost·127.0.0.1·::1일 때만 돈다(ADR-0271 결정 21). 그 밖에는 DB에 붙기 전에 멈춘다.
+// 쓰는 법: PEAKET_ENV=local PEAKET_DATABASE_URL=postgres://…@127.0.0.1:…/peaket node scripts/fill-search.mjs [--count 10000] [--now 2026-11-16T00:00:00Z]
 import { parseArgs } from 'node:util';
 import pg from 'pg';
 
@@ -15,6 +16,24 @@ if (!Number.isFinite(NOW)) throw new Error(`--now가 시각이 아니다: ${valu
 const url = process.env.PEAKET_DATABASE_URL;
 if (!url) {
   console.error('PEAKET_DATABASE_URL이 없다');
+  process.exit(2);
+}
+// 환경 확인(ADR-0271 결정 21): 로컬·CI의 로컬 DB에서만 돈다. 덮어쓰는 깃발은 없다. DB에 붙기 전에 멈춘다
+const env = process.env.PEAKET_ENV ?? '';
+if (env !== 'local' && env !== 'ci') {
+  console.error(`PEAKET_ENV가 local·ci가 아니라(${JSON.stringify(env)}) 채우지 않는다. 측정용 채우기는 로컬·CI에서만 돈다`);
+  process.exit(2);
+}
+/** @type {string} */
+let host;
+try {
+  host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+} catch {
+  console.error('PEAKET_DATABASE_URL을 주소로 읽지 못해 채우지 않는다');
+  process.exit(2);
+}
+if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
+  console.error(`DB 호스트 ${host}가 로컬(localhost·127.0.0.1·::1)이 아니라 채우지 않는다`);
   process.exit(2);
 }
 

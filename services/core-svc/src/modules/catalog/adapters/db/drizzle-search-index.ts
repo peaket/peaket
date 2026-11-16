@@ -3,7 +3,8 @@
 //   로마자만 친 입력은 한/영 변환 값도 함께 찾는다. 등급·필터·순위·쪽은 메모리 어댑터와 같은 TS 함수(matchGrades·rankMatched)가 한다.
 // - 검색어가 없는 목록: 필터를 건 정렬 질의의 LIMIT 20 OFFSET, 전체 수는 1,001줄까지만 센다.
 // - 관련 공연: 근거(같은 아티스트 → 같은 공연장의 오픈 예정, 결과 0건이면 다가오는 인기)마다 6개 [가정]만 읽는 정렬 질의.
-// - 0건 제안: 메모리 사전의 correct(넘겨받았고 사전이 준비됐으면). 아니면 search_term의 공연명 줄로 같은 함수를 돌린다.
+// - 0건 제안: 메모리 사전의 correct(넘겨받은 때). 사전이 아직 준비되지 않았으면 null이다(이름 줄을 통째로 읽어 대신하지 않는다, ADR-0271 결정 14).
+//   correct를 넘겨받지 않은 어댑터(시험이 어댑터만 만든 때)는 search_term의 공연명 줄로 같은 함수를 돌린다.
 // - 필터 이름: search_term의 공연장·아티스트 줄(원래 이름). 없으면 null.
 // - 이름 차례는 ICU 한국어 정렬(COLLATE "ko-x-icu")로 메모리의 Intl.Collator('ko')와 같게 견준다.
 // - 검색 전용 연결 묶음(운영은 읽기 전용 복제본): 연결 대기를 넘기면 SearchUnavailable('pool-timeout'), 질의 시간 상한을 넘기면 'statement-timeout'(503).
@@ -86,7 +87,7 @@ function filters(q: Pick<SearchQuery, 'includePast'> & Partial<SearchQuery>): SQ
 }
 
 export class DrizzleSearchIndex implements SearchIndex {
-  /** o.correct: 메모리 사전의 오타 제안. 사전이 아직 준비되지 않았으면 undefined를 돌려 search_term으로 대신한다 */
+  /** o.correct: 메모리 사전의 오타 제안. 사전이 아직 준비되지 않았으면 undefined이고 그때 제안은 null이다 */
   constructor(
     private readonly db: Database,
     private readonly origin: string,
@@ -165,9 +166,8 @@ export class DrizzleSearchIndex implements SearchIndex {
   }
 
   async #didYouMean(tx: DbTransaction, query: string): Promise<string | null> {
-    const fromDictionary = this.o.correct?.(query);
-    if (fromDictionary !== undefined) return fromDictionary;
-    // 사전을 넘겨받지 않았거나 아직 준비되지 않았으면 공연명 줄(search_term)로 같은 함수를 돌린다
+    if (this.o.correct) return this.o.correct(query) ?? null;
+    // 사전을 넘겨받지 않은 어댑터만 공연명 줄(search_term)로 같은 함수를 돌린다
     const titles = rowsOf<{ title: string; production_id: string }>(
       await tx.execute(sql`select display_name as title, target_id::text as production_id from search_term where kind = 'PRODUCTION' and alias_of is null`),
     );

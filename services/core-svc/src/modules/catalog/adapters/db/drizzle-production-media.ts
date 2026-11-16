@@ -2,7 +2,7 @@
 // 파트너 전용 DB 사용자(core_partner)로 접속하고 트랜잭션마다 테넌트(app.tenant_id)를 건다. 조회에도 테넌트 조건을 넣는다(범위 인자, 행 보안은 2차 방어).
 // 장수·순서·포스터 바꾸기는 공연 행을 잠근 트랜잭션 안에서 한다. 잠금은 등록 경로와 같은 FOR NO KEY UPDATE다
 // (공연 행끼리는 FOR UPDATE처럼 줄을 세우고, 찜·회차 넣기의 외래키 잠금(KEY SHARE)은 막지 않는다).
-// 포스터를 게시·지우거나 고친 트랜잭션은 같은 트랜잭션에서 검색 읽기 모델을 고친다(ADR-0271 결정 2). 공개 전 공연이면 동기화가 바꿀 것이 없다.
+// 포스터를 게시·지우거나 고친 트랜잭션은 같은 트랜잭션에서 검색 읽기 모델의 포스터 칸을 고친다(ADR-0271 결정 2·17, search_sync_poster). 공개 전 공연이면 바꿀 것이 없다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, type Database, type DbTransaction } from '@peaket/platform';
 import { and, eq, sql } from 'drizzle-orm';
@@ -62,7 +62,8 @@ export class DrizzleProductionMedia implements PartnerProductionMedia {
       if (!p) return 'not-found' as const;
       let posterTouched = false;
       const out = await fn(this.#tx(tx, productionId, tenantId, () => (posterTouched = true)));
-      if (posterTouched && this.search) await this.search.sync(tx, [productionId], new Date(this.clock?.now() ?? Date.now()));
+      // 파트너 역할은 검색 표를 직접 쓰지 못한다. 정의자 함수가 테넌트를 확인하고 포스터 칸만 고친다(ADR-0271 결정 17)
+      if (posterTouched && this.search) await this.search.syncPoster(tx, productionId);
       return out;
     }, { tenantId });
   }

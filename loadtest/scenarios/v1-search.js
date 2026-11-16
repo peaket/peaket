@@ -7,6 +7,8 @@
 // 실행 예(웨이브 끝 게이트, 측정 중 다른 시험은 돌리지 않는다):
 //   k6 run -e BASE=http://127.0.0.1:3001 -e CROWD_RATE=200 -e RANDOM_RATE=200 -e DURATION_S=120 loadtest/scenarios/v1-search.js
 // 환경 값: BASE(core-svc 주소) CROWD_RATE RANDOM_RATE(초당 반복) DURATION_S PRE_VUS MAX_VUS
+// 따라잡기 계산량(리뷰 W7L2-K3)은 같은 채운 DB에서 services/core-svc/scripts/measure-search-reconcile.mjs가 core_ops와 같은 문장 상한(5초)을 건 채
+// 시작 따라잡기 전체·끊음마다 시간, 그동안 판매 승인 동기화의 대기·실패, 관심도 다시 세기 시간을 잰다(이 시나리오 전에 돌리고 결과를 같은 측정 파일에 적는다)
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Trend } from 'k6/metrics';

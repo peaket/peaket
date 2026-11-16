@@ -286,12 +286,17 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     }
   }
 
-  /** 마지막으로 끝까지 마친 따라잡기의 시작 시각(search_version.reconciled_at). 없으면 null */
-  /** 리뷰 W7L2-S3. BAT-165 시험 담당이 둔 빈 뼈대 */
-  async syncPoster(_tx: unknown, _productionId: string): Promise<{ version: number | null }> {
-    throw new Error('아직 없음');
+  /**
+   * 파트너 포스터 게시·지우기의 동기화(ADR-0271 결정 17, 리뷰 W7L2-S3). 부르는 쪽 트랜잭션(파트너 연결, app.tenant_id가 걸림)에서
+   * 정의자 권한 함수 search_sync_poster를 부른다. 함수가 테넌트를 확인하고 포스터 칸 둘만 고친다. 바뀌었으면 올린 판, 아니면 null
+   */
+  async syncPoster(tx: unknown, productionId: string): Promise<{ version: number | null }> {
+    if (!UUID.test(productionId)) throw new RangeError(`공연 ID가 UUID가 아니다: ${productionId}`);
+    const [r] = rowsOf<{ version: string | number | null }>(await (tx as DbTransaction).execute(sql`select search_sync_poster(${productionId}::uuid) as version`));
+    return { version: r?.version === null || r?.version === undefined ? null : Number(r.version) };
   }
 
+  /** 마지막으로 끝까지 마친 따라잡기의 시작 시각(search_version.reconciled_at). 없으면 null */
   async lastReconciledAt(): Promise<Date | null> {
     const [r] = rowsOf<{ reconciled_at: string | Date | null }>(await this.db.db.execute(sql`select reconciled_at from search_version where id = 1`));
     const v = r?.reconciled_at ?? null;

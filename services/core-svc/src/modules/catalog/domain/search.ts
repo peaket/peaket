@@ -233,9 +233,8 @@ function sortDocs(docs: SearchDocument[], q: SearchQuery, grades: Map<string, Gr
   });
 }
 
-function distance(a: string, b: string): number {
-  const x = [...a];
-  const y = [...b];
+/** 편집 거리(넣기·빼기·바꾸기의 최소 횟수) */
+function distance(x: readonly string[], y: readonly string[]): number {
   const dp = Array.from({ length: y.length + 1 }, (_, i) => i);
   for (let i = 1; i <= x.length; i++) {
     let prev = dp[0]!;
@@ -249,14 +248,23 @@ function distance(a: string, b: string): number {
   return dp[y.length]!;
 }
 
-/** 오타 제안 하나(편집 거리 2 이하에서 가장 가까운 이름, 같으면 가나다 → ID). 이름 목록의 차례와 상관없이 늘 같은 답이다 */
+/**
+ * 오타 제안 하나(docs/features/search.md §4.4·§5.5 2). 초성 첫 글자가 같고 낱자 길이가 ±2 안인 이름만 낱자 단위 편집 거리로 견주고,
+ * 거리 기준은 '입력의 낱자 길이 ÷ 4(몫), 최소 1' [가정]이다. 가장 가까운 이름 하나, 같으면 가나다 → 대상 ID(이름 목록의 차례와 상관없이 같은 답)
+ */
 export function didYouMeanOf(titles: Iterable<{ title: string; productionId: string }>, q: string): string | null {
-  const n = normalize(q);
-  if (n === '') return null;
+  const qk = nameKeys(q);
+  const qj = [...qk.jamo];
+  if (qj.length === 0) return null;
+  const limit = Math.max(1, Math.floor(qj.length / 4));
+  const head = qk.chosung[0];
   let best: { title: string; productionId: string; d: number } | null = null;
   for (const t of titles) {
-    const v = distance(n, normalize(t.title));
-    if (v > 2) continue;
+    const k = nameKeys(t.title);
+    const tj = [...k.jamo];
+    if (k.chosung[0] !== head || Math.abs(tj.length - qj.length) > 2) continue;
+    const v = distance(qj, tj);
+    if (v > limit) continue;
     if (best === null || v < best.d || (v === best.d && byTitle(t, best) < 0)) best = { title: t.title, productionId: t.productionId, d: v };
   }
   return best?.title ?? null;
@@ -859,15 +867,53 @@ export interface SearchReadModelSync {
 }
 export const SEARCH_READ_MODEL_SYNC: unique symbol = Symbol('SEARCH_READ_MODEL_SYNC');
 
-// 검색어 가리기(docs/features/search.md §11 286줄). 이메일 꼴 → [이메일], 0으로 시작하는 9~11자리 숫자(사이 하이픈·점·공백 허용) → [전화],
-// 그 밖의 이어진 숫자 5자리 이상 → [숫자]. 이메일 → 전화 → 숫자 차례로 바꾼다. 정규식은 겹치는 반복이 없다(ASVS 1.3.12)
-const MASK_EMAIL = /[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+/g;
-const MASK_PHONE = /(?<!\d)0\d(?:[-. ]?\d){7,9}(?!\d)/g;
-const MASK_NUMBER = /\d{5,}/g;
+// 검색어 가리기(docs/features/search.md §11, ADR-0271 결정 19). 이메일 꼴(`@` 앞뒤 공백 허용) → [이메일].
+// 숫자 사슬(숫자 묶음 사이에 하이픈·점·공백·괄호가 1~3글자씩 낀 것, 앞의 '(' 또는 '+' 포함)을 숫자만 세어:
+// 0으로 시작하는 9~11자리 또는 '+82' 뒤 8~10자리 → [전화], 그 밖에 5자리 이상 → [숫자]. 다른 글자로 떨어진 4자리 이하는 남는다.
+// 정규식은 이메일 하나뿐이고 겹치는 반복이 없다(ASVS 1.3.12). 숫자 사슬은 한 번 훑어 찾는다
+const MASK_EMAIL = /[^\s@]+\s*@\s*[^\s@.]+(?:\.[^\s@.]+)+/g;
+const isDigit = (c: string | undefined) => c !== undefined && c >= '0' && c <= '9';
+const isSep = (c: string | undefined) => c === '-' || c === '.' || c === ' ' || c === '(' || c === ')';
+/** 숫자 사슬 사이에 낄 수 있는 구분자 수 */
+const MASK_SEP_MAX = 3;
+
+function maskDigits(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    // 사슬의 시작: 숫자, 또는 숫자 바로 앞의 '(' / '+'
+    const lead = (text[i] === '(' || text[i] === '+') && isDigit(text[i + 1]) && !isDigit(text[i - 1]);
+    if (!isDigit(text[i]) && !lead) {
+      out += text[i];
+      i += 1;
+      continue;
+    }
+    const start = i;
+    const plus = text[i] === '+';
+    if (lead) i += 1;
+    let digits = '';
+    let end = i;
+    for (;;) {
+      while (isDigit(text[i])) digits += text[i++];
+      end = i;
+      // 구분자 1~3글자 뒤에 숫자가 오면 같은 사슬이다
+      let j = i;
+      while (j - i < MASK_SEP_MAX && isSep(text[j])) j += 1;
+      if (j > i && isDigit(text[j])) i = j;
+      else break;
+    }
+    const phone = plus ? digits.startsWith('82') && digits.length - 2 >= 8 && digits.length - 2 <= 10 : digits.startsWith('0') && digits.length >= 9 && digits.length <= 11;
+    if (phone) out += '[전화]';
+    else if (digits.length >= 5) out += plus ? `+[숫자]` : '[숫자]';
+    else out += text.slice(start, end);
+    i = end;
+  }
+  return out;
+}
 
 /** search_query 줄에 남기기 전 검색어 가리기(docs/features/search.md §11). 검색은 가리기 전 값으로 한다 */
 export function maskSearchQuery(normalized: string): string {
-  return normalized.replace(MASK_EMAIL, '[이메일]').replace(MASK_PHONE, '[전화]').replace(MASK_NUMBER, '[숫자]');
+  return maskDigits(normalized.replace(MASK_EMAIL, '[이메일]'));
 }
 
 /** 0건 목록에 넣는 최소 횟수(search.md:286, 5번 [가정])와 보이는 수(50개) */
