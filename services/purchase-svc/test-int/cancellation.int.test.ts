@@ -480,22 +480,29 @@ describe('견적·취소 Saga', () => {
     const outbox = await admin.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [w.eventId]);
     expect(outbox.rows.map((r) => (JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string }).type)).toContain('PARTIALLY_REFUNDED');
 
-    // 같은 티켓의 다른 취소 ID는 진행 중 취소와 겹쳐 CONFLICT다(결제사를 부르지 않는다)
-    await expect(cancelOf(w, randomUUID())).resolves.toEqual({ status: 'CONFLICT' });
-    expect(gatewayCalls).toHaveLength(1);
-
-    // 다음 재시도 시각이 지나면 실행기가 같은 멱등키로 다시 부른다
-    gatewayOutcome = 'CANCELLED';
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
+    // 같은 티켓의 다른 취소 ID(새 키)는 ticket-svc가 첫 팬 취소(이 취소 ID)를 알려 주므로 그 ID로 잇는다(리뷰 B2,
+    // docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'). 그 취소 행이 REFUND_PENDING이라 같은 멱등키로 결제사를 다시 부른다
+    await expect(cancelOf(w, randomUUID())).resolves.toEqual({ status: 'REFUND_PENDING', cancellationId, refundAmount: 90_000, payment: 'UNKNOWN' });
     expect(gatewayCalls).toHaveLength(2);
     expect(gatewayCalls[1]).toMatchObject({ amount: 90_000, idemKey: `cancel-${cancellationId}` });
-    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 1, next_refund_at: null, refund_failed_at: null });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 2, next_refund_at: new Date(NOW + 5 * 60_000), refund_failed_at: null });
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(1);
+
+    // 다음 재시도 시각(두 번째 실패 뒤 5분)이 지나면 실행기가 같은 멱등키로 다시 부른다
+    gatewayOutcome = 'CANCELLED';
+    const early = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 5 * 60_000 - 1 });
+    await expect(early.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0 });
+    expect(gatewayCalls).toHaveLength(2);
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 5 * 60_000 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
+    expect(gatewayCalls).toHaveLength(3);
+    expect(gatewayCalls[2]).toMatchObject({ amount: 90_000, idemKey: `cancel-${cancellationId}` });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 2, next_refund_at: null, refund_failed_at: null });
     expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'PARTIAL_CANCELED', cancelled_amount: 90_000 });
     const sent = await paymentDb.pool.query("select count(*)::int as n from payment_event where payment_id = $1 and type = 'CONFIRMED_CANCEL_SENT'", [w.paymentId]);
     expect(sent.rows[0].n).toBe(1);
     await expect(cancelOf(w, cancellationId)).resolves.toEqual({ status: 'REPLAYED', cancellationId, refundAmount: 90_000, refundAfterEntryClose: false });
-    expect(gatewayCalls).toHaveLength(2);
+    expect(gatewayCalls).toHaveLength(3);
   });
 
   test('GAT090_업무거절은_refund_failed_at을_남기고_실행기가_건너뛴다', async () => {
